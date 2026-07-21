@@ -197,6 +197,7 @@ mvn test
 - `test-agent-app` 只放启动、装配、profile、migration 和 health 等运行入口，不放 Controller 或业务服务。
 - HTTP/SSE/WebSocket 入口放在 `test-agent-api`，旧 `/api/...` URL 默认保留，明确作废的入口除外；新 URL 同步写入 `docs/api/http-api.md`。
 - Workspace、文件、git/diff、设置页初始版本工作区创建、应用版本工作区、个人工作区、应用引用资产库副本、agent、skill 管理业务放在 `test-agent-workspace-management`。
+- Workspace 与 Agent 配置的新文件上传统一走平台文件 WebSocket 的 begin/chunk/complete/abort 分片会话：应用层不限制文件总大小，单片默认 256 KiB。UTF-8 一次性读取和文本编辑默认阈值为 5 MiB，超出后使用约 512 KiB 分段的渐进只读预览，可按需读取到 EOF；上传完成前只写隐藏临时文件，连接关闭、取消或失败必须清理，不得新增 HTTP 文件代理或整文件内存缓冲。
 - 工作区 `workspace.move` 保持既有文件 WebSocket RPC 契约并整体移动普通文件或非空目录；Linux 通过 JNA 直接调用内核 `renameat2(RENAME_NOREPLACE)`（兼容 Alpine/musl 未导出包装函数），macOS 调用 `renameatx_np(RENAME_EXCL | RENAME_NOFOLLOW_ANY)`，Windows 使用源条目句柄与目标父目录句柄的 `SetFileInformationByHandle`。三者都执行一次不覆盖的原子重命名并阻断校验后的路径替换竞态，缺少等价原子能力的平台失败关闭。
 - 多 agent 运行时接口、`agentId` 选择、日志/指标包装和具体 agent 适配器放在 `test-agent-agent-runtime`。
 - Session、Run、RunEvent、夜间任务提交/投递/补偿、agent runtime 调用、Diff/revert、terminal 业务放在 `test-agent-opencode-runtime`。

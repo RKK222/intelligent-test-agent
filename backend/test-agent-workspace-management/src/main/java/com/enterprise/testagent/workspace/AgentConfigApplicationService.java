@@ -748,6 +748,22 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         return fileService.readContent(publicAgentRootForRead(worktreeId, userId).toString(), relativePath);
     }
 
+    /** 公共 Agent 大文件按 UTF-8 字节偏移渐进只读预览。 */
+    public FilePreviewChunkResponse readPublicAgentFilePreviewChunk(
+            String relativePath,
+            long offset,
+            Long expectedSize,
+            Long expectedLastModifiedMillis,
+            String worktreeId,
+            UserId userId) {
+        return fileService.readContentChunk(
+                publicAgentRootForRead(worktreeId, userId).toString(),
+                relativePath,
+                offset,
+                expectedSize,
+                expectedLastModifiedMillis);
+    }
+
     public void writePublicAgentFile(String relativePath, String content, String worktreeId, UserId userId) {
         Path agentRoot = publicAgentRootForWrite(worktreeId, userId);
         ensureDirectory(agentRoot);
@@ -759,6 +775,17 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         Path agentRoot = publicAgentRootForWrite(worktreeId, userId);
         ensureDirectory(agentRoot);
         fileService.uploadFile(agentRoot.toString(), relativePath, contentBase64);
+    }
+
+    /** 公共 Agent 分片上传绑定当前管理员个人 worktree，文件总大小不设应用级上限。 */
+    public WorkspaceFileUpload beginPublicAgentFileUpload(
+            String relativePath,
+            long expectedBytes,
+            String worktreeId,
+            UserId userId) {
+        Path agentRoot = publicAgentRootForWrite(worktreeId, userId);
+        ensureDirectory(agentRoot);
+        return fileService.beginUpload(agentRoot.toString(), relativePath, expectedBytes);
     }
 
     /** 公共 Agent 文件改名复用工作空间文件服务的同目录重命名与路径安全校验。 */
@@ -819,6 +846,22 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         return fileService.readContent(workspaceAgentRootForRead(workspaceId, worktreeId).toString(), relativePath);
     }
 
+    /** 应用 Agent 大文件按 UTF-8 字节偏移渐进只读预览。 */
+    public FilePreviewChunkResponse readWorkspaceAgentFilePreviewChunk(
+            String workspaceId,
+            String relativePath,
+            long offset,
+            Long expectedSize,
+            Long expectedLastModifiedMillis,
+            String worktreeId) {
+        return fileService.readContentChunk(
+                workspaceAgentRootForRead(workspaceId, worktreeId).toString(),
+                relativePath,
+                offset,
+                expectedSize,
+                expectedLastModifiedMillis);
+    }
+
     public void writeWorkspaceAgentFile(String workspaceId, String relativePath, String content, String worktreeId) {
         Path agentRoot = workspaceAgentRootForWrite(workspaceId, worktreeId);
         ensureDirectory(agentRoot);
@@ -827,14 +870,30 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
 
     /** 应用 Agent 上传固定在可发布的 opencode.jsonc、agents 和 skills 白名单内。 */
     public void uploadWorkspaceAgentFile(String workspaceId, String relativePath, String contentBase64, String worktreeId) {
+        requireWorkspaceAgentUploadPath(relativePath);
+        Path agentRoot = workspaceAgentRootForWrite(workspaceId, worktreeId);
+        ensureDirectory(agentRoot);
+        fileService.uploadFile(agentRoot.toString(), relativePath, contentBase64);
+    }
+
+    /** 应用 Agent 分片上传沿用发布白名单，并绑定当前应用个人 worktree。 */
+    public WorkspaceFileUpload beginWorkspaceAgentFileUpload(
+            String workspaceId,
+            String relativePath,
+            long expectedBytes,
+            String worktreeId) {
+        requireWorkspaceAgentUploadPath(relativePath);
+        Path agentRoot = workspaceAgentRootForWrite(workspaceId, worktreeId);
+        ensureDirectory(agentRoot);
+        return fileService.beginUpload(agentRoot.toString(), relativePath, expectedBytes);
+    }
+
+    private void requireWorkspaceAgentUploadPath(String relativePath) {
         if (workspaceAgentDisplayPath(workspaceAgentGitPath(relativePath)) == null) {
             throw new PlatformException(
                     ErrorCode.FORBIDDEN,
                     "应用 Agent 配置只允许上传 opencode.jsonc、agents 或 skills 下的文件");
         }
-        Path agentRoot = workspaceAgentRootForWrite(workspaceId, worktreeId);
-        ensureDirectory(agentRoot);
-        fileService.uploadFile(agentRoot.toString(), relativePath, contentBase64);
     }
 
     /** 应用 Agent 文件改名复用工作空间文件服务的同目录重命名与路径安全校验。 */

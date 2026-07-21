@@ -85,7 +85,7 @@
 
 1. 列表接口必须分页或设置明确上限，查询参数必须限制最大 page size。
 2. 大对象下载、日志、事件回放不得一次性全部加载到内存；同步 API 不执行不可控耗时任务，长任务应异步化或流式返回。
-3. Workspace 文件目录列表必须单层读取并设置上限，默认不超过 1000 项；文件内容读写默认上限 1MB。
+3. Workspace 文件目录列表必须单层读取并设置上限，默认不超过 1000 项；UTF-8 一次性读取和文本编辑默认阈值为 5 MiB。超过阈值的预览必须使用固定内存分段并允许按需读到 EOF，每段在 UTF-8 字符边界结束，后续请求携带文件大小和修改时间快照栅栏；禁止一次把完整大文件读入 JVM 内存。二进制上传必须使用同一文件 WebSocket 上的有界分片会话，不设置应用层文件总大小上限；完成前写入隐藏临时文件，校验声明大小后以不覆盖方式安全发布，取消、连接关闭和失败必须清理临时文件。
 
 ### 数据库
 
@@ -136,7 +136,7 @@
 - Opencode client facade：使用 mock opencode server 验证错误转换、超时、重试和事件映射；只有 `GeneratedOpencodeSdkGateway` 允许直接依赖 generated SDK。
 - Observability：验证 traceId 传播、日志字段、关键指标注册。
 - Application service：使用 fake repository/facade 验证 workspace、session、run、cancel 编排和错误映射。
-- File service：验证路径穿越拒绝、单层目录列表、UTF-8 读写和超大文件拒绝。
+- File service：验证路径穿越拒绝、单层目录列表、UTF-8 读写、跨字符边界渐进预览、预览快照变化拒绝和上传分片完整性。
 - Health/config：验证 local/prod properties binding、废弃 opencode 固定节点配置缺失、Redis disabled/enabled health。
 
 ### 模块测试命令

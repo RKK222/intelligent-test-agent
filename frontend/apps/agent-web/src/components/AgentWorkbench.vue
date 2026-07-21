@@ -20,7 +20,7 @@ import {
 import { DiffViewer, parseUnifiedPatch } from "@test-agent/diff-viewer";
 import { CodeEditor, languageFromPath, type EditorSelectionContext } from "@test-agent/editor";
 import { subscribeRunEvents, subscribeSessionRuntimeState, type RunEventRawMessage } from "@test-agent/event-stream-client";
-import { BookOpenText, Code2, MessageSquare, Monitor } from "lucide-vue-next";
+import { BookOpenText, Code2, FileWarning, MessageSquare, Monitor } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
@@ -28,6 +28,8 @@ import type {
   AiRunFeedbackPayload,
   ApplicationWorkspaceTemplate,
   ApplicationWorkspaceVersion,
+  FilePreviewChunk,
+  FilePreviewChunkRequest,
   FileSearchResult,
   FileTreeEntry,
   ManagedApplication,
@@ -81,6 +83,12 @@ import FigmaShell, { type RuntimeInventoryItem, type RuntimeInventorySummary } f
 import FirstLoginGuide from "./FirstLoginGuide.vue";
 import FigmaFileExplorer from "./FigmaFileExplorer.vue";
 import FigmaEditorArea from "./FigmaEditorArea.vue";
+import FileUploadOverlay from "./FileUploadOverlay.vue";
+import {
+  initialFileUploadOverlayState,
+  type FileUploadOverlayState
+} from "./fileUploadOverlayState";
+import { formatPreviewBytes, progressivePreviewRequired } from "./fileProgressivePreview";
 import {
   agentFileInfo,
   agentTabPath,
@@ -466,6 +474,7 @@ type WorkspaceUndoOperation =
   | { kind: "move"; sourcePath: string; targetPath: string; label: string };
 // 撤销历史只属于当前个人 worktree，切换工作区后立即清空，避免跨 worktree 写入。
 const workspaceUndoStack = ref<WorkspaceUndoOperation[]>([]);
+const workspaceUploadOverlay = ref<FileUploadOverlayState | null>(null);
 let retryingWorkspaceAfterOpencodeReady = false;
 let selectingAppId: string | undefined;
 let appSelectionSeq = 0;
@@ -4067,6 +4076,172 @@ function editorTabIsDirty(tab: EditorTab | undefined): boolean {
   return Boolean(tab && !tab.livePreview && tab.content !== tab.savedContent);
 }
 
+function progressivePreviewPatch(chunk: FilePreviewChunk) {
+  return {
+    content: chunk.content,
+    savedContent: chunk.content,
+    readonly: true as const,
+    loadState: "loaded" as const,
+    loadError: undefined,
+    hasLoadedSnapshot: true,
+    progressivePreview: {
+      size: chunk.size,
+      warningThresholdBytes: chunk.warningThresholdBytes,
+      loadedBytes: chunk.nextOffset,
+      nextOffset: chunk.nextOffset,
+      lastModifiedMillis: chunk.lastModifiedMillis,
+      eof: chunk.eof,
+      loading: false,
+      loadingAll: false,
+      loadError: undefined
+    }
+  };
+}
+
+function requireProgressivePreviewChunk(chunk: FilePreviewChunk, expectedOffset: number) {
+  if (chunk.offset !== expectedOffset
+    || chunk.nextOffset < chunk.offset
+    || (!chunk.eof && chunk.nextOffset === chunk.offset)
+    || chunk.nextOffset > chunk.size) {
+    throw new Error("大文件预览分段响应无效，请重新打开文件");
+  }
+}
+
+/** 按 tab 自带的稳定路由读取下一段，避免大文件预览退回物理路径或错误 scope。 */
+async function readProgressivePreviewChunk(
+  tab: EditorTab,
+  preview: FilePreviewChunkRequest
+): Promise<FilePreviewChunk> {
+  if (isAgentFilePath(tab.path)) {
+    const info = agentFileInfo(tab.path);
+    if (info.scope === "PUBLIC") {
+      return api.readPublicAgentFilePreviewChunk(
+        info.path,
+        preview,
+        info.worktreeId,
+        info.linuxServerId
+      );
+    }
+    if (!info.workspaceId) {
+      throw new Error("应用 Agent 大文件预览缺少工作区路由");
+    }
+    return api.readWorkspaceAgentFilePreviewChunk(
+      info.workspaceId,
+      info.path,
+      preview,
+      info.worktreeId
+    );
+  }
+  if (isReferenceFilePath(tab.path)) {
+    const info = referenceFileInfo(tab.path);
+    return api.readWorkspaceViewFilePreviewChunk(
+      info.workspaceId,
+      { kind: "REFERENCE", path: info.referencePath, referenceAlias: info.referenceAlias },
+      preview
+    );
+  }
+  const workspace = selectedWorkspace.value;
+  if (!workspace) {
+    throw new Error("大文件预览缺少当前工作区");
+  }
+  return api.readFilePreviewChunk(workspace.workspaceId, tab.path, preview);
+}
+
+async function startProgressivePreview(
+  tabPath: string,
+  isCurrent: () => boolean,
+  failureTitle: string
+) {
+  const tab = workbench.tabs.find((item: EditorTab) => item.path === tabPath);
+  if (!tab) return;
+  try {
+    const chunk = await readProgressivePreviewChunk(tab, { offset: 0 });
+    requireProgressivePreviewChunk(chunk, 0);
+    if (!isCurrent()) return;
+    workbench.updateTab(tabPath, progressivePreviewPatch(chunk));
+  } catch (error) {
+    if (!isCurrent()) return;
+    const failure = errorFeedback(failureTitle, error);
+    workbench.updateTab(tabPath, {
+      loadState: "error",
+      loadError: failure.description,
+      hasLoadedSnapshot: false,
+      progressivePreview: undefined
+    });
+  }
+}
+
+const progressivePreviewLoadSequenceByPath = new Map<string, number>();
+
+/** 加载一段或持续加载到 EOF；持续模式每段让出事件循环，页面仍能刷新进度。 */
+async function loadMoreActivePreview(loadAll: boolean) {
+  const initial = activeTab.value;
+  const state = initial?.progressivePreview;
+  if (!initial || !state || state.eof || state.loading) return;
+  const tabPath = initial.path;
+  const sequence = (progressivePreviewLoadSequenceByPath.get(tabPath) ?? 0) + 1;
+  progressivePreviewLoadSequenceByPath.set(tabPath, sequence);
+  workbench.updateTab(tabPath, {
+    progressivePreview: { ...state, loading: true, loadingAll: loadAll, loadError: undefined }
+  });
+  try {
+    while (true) {
+      const current = workbench.tabs.find((tab: EditorTab) => tab.path === tabPath);
+      const currentState = current?.progressivePreview;
+      if (!current || !currentState || progressivePreviewLoadSequenceByPath.get(tabPath) !== sequence) return;
+      const chunk = await readProgressivePreviewChunk(current, {
+        offset: currentState.nextOffset,
+        expectedSize: currentState.size,
+        expectedLastModifiedMillis: currentState.lastModifiedMillis
+      });
+      requireProgressivePreviewChunk(chunk, currentState.nextOffset);
+      const latest = workbench.tabs.find((tab: EditorTab) => tab.path === tabPath);
+      const latestState = latest?.progressivePreview;
+      if (!latest || !latestState || progressivePreviewLoadSequenceByPath.get(tabPath) !== sequence) return;
+      const content = latest.content + chunk.content;
+      workbench.updateTab(tabPath, {
+        content,
+        savedContent: content,
+        progressivePreview: {
+          ...latestState,
+          size: chunk.size,
+          warningThresholdBytes: chunk.warningThresholdBytes,
+          loadedBytes: chunk.nextOffset,
+          nextOffset: chunk.nextOffset,
+          lastModifiedMillis: chunk.lastModifiedMillis,
+          eof: chunk.eof,
+          loading: loadAll && !chunk.eof,
+          loadingAll: loadAll && !chunk.eof,
+          loadError: undefined
+        }
+      });
+      if (!loadAll || chunk.eof) return;
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    }
+  } catch (error) {
+    const current = workbench.tabs.find((tab: EditorTab) => tab.path === tabPath);
+    if (!current?.progressivePreview || progressivePreviewLoadSequenceByPath.get(tabPath) !== sequence) return;
+    const failure = errorFeedback("继续加载大文件失败", error);
+    workbench.updateTab(tabPath, {
+      progressivePreview: {
+        ...current.progressivePreview,
+        loading: false,
+        loadingAll: false,
+        loadError: failure.description
+      }
+    });
+  } finally {
+    if (progressivePreviewLoadSequenceByPath.get(tabPath) === sequence) {
+      progressivePreviewLoadSequenceByPath.delete(tabPath);
+    }
+  }
+}
+
+function progressivePreviewPercent(preview: NonNullable<EditorTab["progressivePreview"]>): number {
+  if (preview.size <= 0) return 100;
+  return Math.min(100, Math.max(0, Math.round((preview.loadedBytes / preview.size) * 100)));
+}
+
 async function loadWorkspaceFile(path: string, options: WorkspaceFileLoadOptions = {}) {
   const workspace = selectedWorkspace.value;
   const context = options.expectedContext ?? (workspace
@@ -4140,7 +4315,8 @@ async function loadWorkspaceFile(path: string, options: WorkspaceFileLoadOptions
       readonly: file.readonly,
       loadState: "loaded",
       loadError: undefined,
-      hasLoadedSnapshot: true
+      hasLoadedSnapshot: true,
+      progressivePreview: undefined
     });
   } catch (error) {
     if (!workspaceFileReadIsCurrent(workspaceId, path, workspaceGeneration, requestGeneration)) {
@@ -4154,6 +4330,15 @@ async function loadWorkspaceFile(path: string, options: WorkspaceFileLoadOptions
         loadError: undefined,
         hasLoadedSnapshot: true
       });
+      return;
+    }
+    const largePreview = progressivePreviewRequired(error);
+    if (largePreview) {
+      await startProgressivePreview(
+        path,
+        () => workspaceFileReadIsCurrent(workspaceId, path, workspaceGeneration, requestGeneration),
+        "读取大文件预览失败"
+      );
       return;
     }
     if (options.closeOnNotFound
@@ -4236,12 +4421,25 @@ async function openWorkspaceViewFile(entry: WorkspaceViewEntry) {
       readonly: true,
       loadState: "loaded",
       loadError: undefined,
-      hasLoadedSnapshot: true
+      hasLoadedSnapshot: true,
+      progressivePreview: undefined
     });
   } catch (error) {
     if (selectedWorkspaceIdRef.value !== workspace.workspaceId
       || workspaceLoadGeneration !== workspaceGeneration
       || latestWorkspaceFileReadByPath.get(tabPath) !== requestGeneration) return;
+    const largePreview = progressivePreviewRequired(error);
+    if (largePreview) {
+      await startProgressivePreview(
+        tabPath,
+        () => selectedWorkspaceIdRef.value === workspace.workspaceId
+          && workspaceLoadGeneration === workspaceGeneration
+          && latestWorkspaceFileReadByPath.get(tabPath) === requestGeneration
+          && workbench.tabs.some((tab: EditorTab) => tab.path === tabPath),
+        "读取引用大文件预览失败"
+      );
+      return;
+    }
     const failure = errorFeedback("读取引用文件失败", error);
     workbench.updateTab(tabPath, referenceReadFailurePatch(hadLoadedCache, failure.description));
   }
@@ -4386,7 +4584,8 @@ async function loadAgentFile(request: AgentFileLoadRequest) {
       readonly: request.readonly,
       loadState: "loaded",
       loadError: undefined,
-      hasLoadedSnapshot: true
+      hasLoadedSnapshot: true,
+      progressivePreview: undefined
     });
   } catch (error) {
     if (!agentFileReadIsCurrent(request, tabPath, contextGeneration, requestGeneration)) {
@@ -4399,6 +4598,15 @@ async function loadAgentFile(request: AgentFileLoadRequest) {
         loadError: undefined,
         hasLoadedSnapshot: true
       });
+      return;
+    }
+    const largePreview = progressivePreviewRequired(error);
+    if (largePreview) {
+      await startProgressivePreview(
+        tabPath,
+        () => agentFileReadIsCurrent(request, tabPath, contextGeneration, requestGeneration),
+        "读取 Agent 大文件预览失败"
+      );
       return;
     }
     if (request.closeOnNotFound
@@ -4532,16 +4740,6 @@ function workspacePathInDirectory(directory: string, name: string): string {
   return `${directory}${directory.includes("\\") ? "\\" : "/"}${name}`;
 }
 
-/** 使用分块转换避免一次展开整个 Uint8Array 导致调用栈溢出。 */
-async function workspaceUploadBase64(file: File): Promise<string> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const chunks: string[] = [];
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-    chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 0x8000)));
-  }
-  return btoa(chunks.join(""));
-}
-
 async function handleCopyEntry(sourcePath: string, targetDirectory: string) {
   if (!selectedWorkspace.value || !currentPersonalWorkspaceId.value) {
     feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再复制文件。" };
@@ -4604,36 +4802,60 @@ async function handleUploadFiles(directory: string, files: File[]) {
     feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再上传文件。" };
     return;
   }
+  if (workspaceUploadOverlay.value || files.length === 0) return;
   const workspaceId = selectedWorkspace.value.workspaceId;
   const failures: string[] = [];
   const uploadedPaths: string[] = [];
   let uploaded = 0;
-  for (const file of files) {
-    try {
-      // 浏览器通常只提供 basename；再次截断路径分隔符，避免构造 File 时夹带目录片段。
-      const targetPath = workspacePathInDirectory(directory, fileNameOf(file.name));
-      await api.uploadWorkspaceFile(workspaceId, targetPath, await workspaceUploadBase64(file));
-      uploaded += 1;
-      uploadedPaths.push(targetPath);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : "上传失败";
-      failures.push(`${file.name}：${reason}`);
+  let completedBytes = 0;
+  workspaceUploadOverlay.value = initialFileUploadOverlayState(files);
+  try {
+    for (const [index, file] of files.entries()) {
+      workspaceUploadOverlay.value = {
+        ...workspaceUploadOverlay.value!,
+        fileName: file.name,
+        fileIndex: index + 1,
+        fileUploadedBytes: 0,
+        fileBytes: file.size,
+        completedBytes
+      };
+      try {
+        // 浏览器通常只提供 basename；再次截断路径分隔符，避免构造 File 时夹带目录片段。
+        const targetPath = workspacePathInDirectory(directory, fileNameOf(file.name));
+        await api.uploadWorkspaceFile(workspaceId, targetPath, file, (progress) => {
+          if (!workspaceUploadOverlay.value) return;
+          workspaceUploadOverlay.value = {
+            ...workspaceUploadOverlay.value,
+            fileUploadedBytes: progress.uploadedBytes,
+            fileBytes: progress.totalBytes
+          };
+        });
+        uploaded += 1;
+        uploadedPaths.push(targetPath);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "上传失败";
+        failures.push(`${file.name}：${reason}`);
+      } finally {
+        completedBytes += file.size;
+      }
     }
+    if (uploaded > 0) {
+      await loadDirectory(directory, undefined, true);
+      workspaceUndoStack.value.push({ kind: "delete", paths: uploadedPaths, label: `上传 ${uploaded} 个文件` });
+      void refreshWorkspaceGitDiff();
+    }
+    if (failures.length > 0) {
+      feedback.value = {
+        kind: "error",
+        title: uploaded > 0 ? "部分文件上传失败" : "上传文件失败",
+        description: failures.join("；")
+      };
+      return;
+    }
+    feedback.value = { kind: "success", title: `已上传 ${uploaded} 个文件`, description: directory || "工作区根目录" };
+  } finally {
+    workspaceUploadOverlay.value = null;
   }
-  if (uploaded > 0) {
-    await loadDirectory(directory, undefined, true);
-    workspaceUndoStack.value.push({ kind: "delete", paths: uploadedPaths, label: `上传 ${uploaded} 个文件` });
-    void refreshWorkspaceGitDiff();
-  }
-  if (failures.length > 0) {
-    feedback.value = {
-      kind: "error",
-      title: uploaded > 0 ? "部分文件上传失败" : "上传文件失败",
-      description: failures.join("；")
-    };
-    return;
-  }
-  feedback.value = { kind: "success", title: `已上传 ${uploaded} 个文件`, description: directory || "工作区根目录" };
 }
 
 /** 撤销本页面最近一次复制、移动或上传；所有逆操作仍走当前个人 worktree 的平台文件 RPC。 */
@@ -7177,7 +7399,7 @@ async function handleLogout() {
           <div
             class="relative h-full min-h-0"
             data-testid="file-load-state"
-            :data-state="activeTab?.loadState ?? (activeTab ? 'loaded' : 'idle')"
+            :data-state="activeTab?.progressivePreview ? 'progressive-preview' : (activeTab?.loadState ?? (activeTab ? 'loaded' : 'idle'))"
           >
             <CodeEditor
               v-if="!activeTabInitialLoading"
@@ -7186,6 +7408,7 @@ async function handleLogout() {
               :content="activeTab?.content"
               :dirty="activeTab && !activeTab.livePreview ? activeTab.content !== activeTab.savedContent : false"
               :readonly="activeTab?.readonly"
+              :progressive-append="!!activeTab?.progressivePreview"
               :saving="saveMutation.isPending.value"
               :show-preview="markdownPreview"
               :preview-mode="markdownPreviewMode"
@@ -7212,6 +7435,61 @@ async function handleLogout() {
               role="status"
             >
               正在读取文件…
+            </div>
+            <div
+              v-else-if="activeTab?.progressivePreview"
+              class="absolute inset-x-3 top-3 z-10 rounded-lg border border-amber-200 bg-amber-50/95 px-3 py-2.5 shadow-sm backdrop-blur"
+              role="status"
+              aria-live="polite"
+              data-testid="file-progressive-preview"
+            >
+              <div class="flex items-start gap-2.5">
+                <FileWarning class="mt-0.5 shrink-0 text-amber-600" :size="17" :stroke-width="1.7" aria-hidden="true" />
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                    <div class="text-xs font-medium text-amber-900">大文件只读预览</div>
+                    <div class="font-mono text-[11px] text-amber-800/80">
+                      {{ formatPreviewBytes(activeTab.progressivePreview.loadedBytes) }} /
+                      {{ formatPreviewBytes(activeTab.progressivePreview.size) }}
+                      · {{ progressivePreviewPercent(activeTab.progressivePreview) }}%
+                    </div>
+                  </div>
+                  <p class="mt-1 text-[11px] leading-4 text-amber-800/80">
+                    文件超过 {{ formatPreviewBytes(activeTab.progressivePreview.warningThresholdBytes) }}，已分段加载。
+                    加载全部内容可能占用较多内存，并导致编辑器明显卡顿。
+                  </p>
+                  <div class="mt-2 h-1 overflow-hidden rounded-full bg-amber-200/70" aria-hidden="true">
+                    <div
+                      class="h-full rounded-full bg-amber-500 transition-[width] duration-200"
+                      :style="{ width: `${progressivePreviewPercent(activeTab.progressivePreview)}%` }"
+                    />
+                  </div>
+                  <div class="mt-2 flex flex-wrap items-center gap-2">
+                    <template v-if="!activeTab.progressivePreview.eof">
+                      <button
+                        type="button"
+                        class="rounded border border-amber-300 bg-white px-2.5 py-1 text-[11px] font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
+                        :disabled="activeTab.progressivePreview.loading"
+                        @click="loadMoreActivePreview(false)"
+                      >
+                        继续加载一段
+                      </button>
+                      <button
+                        type="button"
+                        class="rounded border border-amber-500 bg-amber-500 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-amber-600 disabled:cursor-wait disabled:opacity-60"
+                        :disabled="activeTab.progressivePreview.loading"
+                        @click="loadMoreActivePreview(true)"
+                      >
+                        {{ activeTab.progressivePreview.loadingAll ? "正在加载全部…" : "加载全部（可能卡顿）" }}
+                      </button>
+                    </template>
+                    <span v-else class="text-[11px] font-medium text-emerald-700">已加载全部内容</span>
+                    <span v-if="activeTab.progressivePreview.loadError" class="text-[11px] text-red-700">
+                      {{ activeTab.progressivePreview.loadError }}
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
             <div
               v-else-if="activeTab?.loadState === 'error'"
@@ -7452,6 +7730,8 @@ async function handleLogout() {
     :operation="processStartupOperation"
     @close="processStartupDialogOpen = false"
   />
+
+  <FileUploadOverlay v-if="workspaceUploadOverlay" v-bind="workspaceUploadOverlay" />
 
   <!-- 未保存二次确认弹窗 -->
   <div v-if="showUnsavedConfirm" class="ta-confirm-backdrop" role="presentation">

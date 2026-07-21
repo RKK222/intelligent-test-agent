@@ -7,10 +7,10 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Base64;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import java.nio.file.Path;
 
 class WorkspaceFileServiceTest {
 
@@ -59,11 +59,58 @@ class WorkspaceFileServiceTest {
         Files.writeString(root.resolve("large.txt"), "12345");
 
         assertThatThrownBy(() -> service.readContent(root.toString(), "large.txt"))
-                .isInstanceOfSatisfying(PlatformException.class, exception ->
-                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR);
+                    assertThat(exception.details()).containsEntry("reason", "PREVIEW_TOO_LARGE");
+                    assertThat(exception.details()).containsEntry("size", 5L);
+                    assertThat(exception.details()).containsEntry("maxPreviewBytes", 4L);
+                });
         assertThatThrownBy(() -> service.writeContent(root.toString(), "new.txt", "12345"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+    }
+
+    @Test
+    void serviceProgressivelyReadsEntireLargeUtf8FileAcrossCharacterBoundary() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(4, 1000);
+        String content = "a".repeat(Utf8FilePreviewReader.CHUNK_BYTES - 1) + "你" + "tail";
+        Files.writeString(root.resolve("large.txt"), content);
+
+        FilePreviewChunkResponse first = service.readContentChunk(
+                root.toString(), "large.txt", 0L, null, null);
+        FilePreviewChunkResponse second = service.readContentChunk(
+                root.toString(),
+                "large.txt",
+                first.nextOffset(),
+                first.size(),
+                first.lastModifiedMillis());
+
+        assertThat(first.eof()).isFalse();
+        assertThat(first.nextOffset()).isGreaterThan(Utf8FilePreviewReader.CHUNK_BYTES);
+        assertThat(second.eof()).isTrue();
+        assertThat(first.content() + second.content()).isEqualTo(content);
+        assertThat(second.nextOffset()).isEqualTo(first.size());
+        assertThat(first.warningThresholdBytes()).isEqualTo(4L);
+    }
+
+    @Test
+    void serviceRejectsContinuingProgressivePreviewAfterFileChanges() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(4, 1000);
+        Files.writeString(root.resolve("large.txt"), "a".repeat(Utf8FilePreviewReader.CHUNK_BYTES + 8));
+        FilePreviewChunkResponse first = service.readContentChunk(
+                root.toString(), "large.txt", 0L, null, null);
+        Files.writeString(root.resolve("large.txt"), "changed");
+
+        assertThatThrownBy(() -> service.readContentChunk(
+                root.toString(),
+                "large.txt",
+                first.nextOffset(),
+                first.size(),
+                first.lastModifiedMillis()))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.details()).containsEntry("reason", "PREVIEW_CHANGED");
+                });
     }
 
     @Test
@@ -93,6 +140,61 @@ class WorkspaceFileServiceTest {
         assertThatThrownBy(() -> service.uploadFile(root.toString(), "assets/bad.bin", "***"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+    }
+
+    @Test
+    void serviceStreamsFilePastPreviewLimitAndPublishesOnlyAfterComplete() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(4, 1000);
+        Files.createDirectories(root.resolve("assets"));
+        byte[] first = new byte[] {0, 1, 2, 3, 4};
+        byte[] second = new byte[] {5, 6, 7, 8, 9};
+
+        WorkspaceFileUpload upload = service.beginUpload(root.toString(), "assets/large.bin", 10L);
+        assertThat(upload.chunkBytes()).isPositive();
+
+        upload.append(0, Base64.getEncoder().encodeToString(first));
+        assertThat(upload.uploadedBytes()).isEqualTo(5L);
+        assertThat(Files.exists(root.resolve("assets/large.bin"))).isFalse();
+
+        upload.append(1, Base64.getEncoder().encodeToString(second));
+        assertThat(upload.complete()).isEqualTo(10L);
+
+        assertThat(Files.readAllBytes(root.resolve("assets/large.bin")))
+                .containsExactly(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+    }
+
+    @Test
+    void serviceRejectsOutOfOrderChunkAndAbortRemovesTemporaryFile() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(4, 1000);
+        WorkspaceFileUpload upload = service.beginUpload(root.toString(), "large.bin", 2L);
+
+        assertThatThrownBy(() -> upload.append(1, "AA=="))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+
+        upload.abort();
+
+        assertThat(Files.exists(root.resolve("large.bin"))).isFalse();
+        assertThat(service.listDirectory(root.toString(), ""))
+                .extracting(FileTreeEntryResponse::name)
+                .noneMatch(name -> name.startsWith(".test-agent-upload-"));
+        assertThat(service.searchFiles(root.toString(), ""))
+                .extracting(FileSearchResultResponse::name)
+                .noneMatch(name -> name.startsWith(".test-agent-upload-"));
+    }
+
+    @Test
+    void serviceRejectsCompletingUploadWhenDeclaredSizeDoesNotMatch() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(4, 1000);
+        WorkspaceFileUpload upload = service.beginUpload(root.toString(), "large.bin", 2L);
+        upload.append(0, "AA==");
+
+        assertThatThrownBy(upload::complete)
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+
+        upload.abort();
+        assertThat(Files.exists(root.resolve("large.bin"))).isFalse();
     }
 
     @Test

@@ -12,6 +12,7 @@ import com.enterprise.testagent.observability.TraceIdSupport;
 import com.enterprise.testagent.workspace.AgentConfigApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceDirectoryService;
+import com.enterprise.testagent.workspace.WorkspaceFileUpload;
 import com.enterprise.testagent.workspace.WorkspaceViewApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceViewLocator;
 import com.enterprise.testagent.workspace.WorkspaceViewLocatorKind;
@@ -21,6 +22,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
@@ -43,6 +46,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
     private static final String MODE_AGENT_CONFIG = "agent-config";
     private static final String SCOPE_PUBLIC = "PUBLIC";
     private static final String SCOPE_WORKSPACE = "WORKSPACE";
+    private static final int MAX_ACTIVE_UPLOADS = 4;
 
     private final WorkspaceFileSocketTicketService ticketService;
     private final WorkspaceApplicationService workspaceService;
@@ -123,19 +127,28 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         }
         Sinks.Many<String> outbound = Sinks.many().unicast().onBackpressureBuffer();
         WorkspaceFileSocketTicket activeTicket = ticket;
+        // 请求本身由 concatMap 串行执行；连接取消可能从另一线程触发清理，因此会话表仍使用并发容器。
+        Map<String, ActiveUpload> activeUploads = new ConcurrentHashMap<>();
         Mono<Void> inbound = session.receive()
                 .map(WebSocketMessage::getPayloadAsText)
-                .concatMap(payload -> Mono.fromCallable(() -> handleMessage(activeTicket, payload, traceId))
+                .concatMap(payload -> Mono.fromCallable(() -> handleMessage(activeTicket, payload, traceId, activeUploads))
                         .subscribeOn(Schedulers.boundedElastic())
                         .doOnNext(outbound::tryEmitNext)
                         .then())
-                .doFinally(ignored -> outbound.tryEmitComplete())
+                .doFinally(ignored -> {
+                    abortUploads(activeUploads);
+                    outbound.tryEmitComplete();
+                })
                 .then();
         Mono<Void> sender = session.send(outbound.asFlux().map(session::textMessage));
         return Mono.when(inbound, sender);
     }
 
-    private String handleMessage(WorkspaceFileSocketTicket ticket, String payload, String traceId) {
+    private String handleMessage(
+            WorkspaceFileSocketTicket ticket,
+            String payload,
+            String traceId,
+            Map<String, ActiveUpload> activeUploads) {
         String id = null;
         try {
             JsonNode root = objectMapper.readTree(payload);
@@ -149,6 +162,12 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 case "workspace.list" -> workspaceService.listFiles(workspaceId(ticket, params), text(params, "path"));
                 case "workspace.search" -> workspaceService.searchFiles(workspaceId(ticket, params), text(params, "query"));
                 case "workspace.read" -> workspaceService.readFile(workspaceId(ticket, params), requiredText(params, "path"));
+                case "workspace.read.chunk" -> workspaceService.readFilePreviewChunk(
+                        workspaceId(ticket, params),
+                        requiredText(params, "path"),
+                        requiredNonNegativeLong(params, "offset"),
+                        optionalNonNegativeLong(params, "expectedSize"),
+                        optionalNonNegativeLong(params, "expectedLastModifiedMillis"));
                 case "workspace.write" -> {
                     WorkspaceId workspaceId = workspaceId(ticket, params);
                     String path = requiredText(params, "path");
@@ -161,6 +180,13 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                     String path = requiredText(params, "path");
                     requireWorkspaceWrite(ticket, workspaceId, path);
                     workspaceService.uploadFile(workspaceId, path, text(params, "contentBase64"));
+                    yield null;
+                }
+                case "workspace.upload.begin" -> workspaceUploadBegin(ticket, params, activeUploads);
+                case "workspace.upload.chunk" -> workspaceUploadChunk(ticket, params, activeUploads);
+                case "workspace.upload.complete" -> workspaceUploadComplete(ticket, params, activeUploads);
+                case "workspace.upload.abort" -> {
+                    workspaceUploadAbort(ticket, params, activeUploads);
                     yield null;
                 }
                 case "workspace.copy" -> {
@@ -212,14 +238,28 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 case "workspace.view.read" -> workspaceViewService.read(
                         workspaceId(ticket, params),
                         viewLocator(params));
+                case "workspace.view.read.chunk" -> workspaceViewService.readChunk(
+                        workspaceId(ticket, params),
+                        viewLocator(params),
+                        requiredNonNegativeLong(params, "offset"),
+                        optionalNonNegativeLong(params, "expectedSize"),
+                        optionalNonNegativeLong(params, "expectedLastModifiedMillis"));
                 case "agent-config.list" -> agentConfigList(ticket, params);
                 case "agent-config.read" -> agentConfigRead(ticket, params);
+                case "agent-config.read.chunk" -> agentConfigReadChunk(ticket, params);
                 case "agent-config.write" -> {
                     agentConfigWrite(ticket, params);
                     yield null;
                 }
                 case "agent-config.upload" -> {
                     agentConfigUpload(ticket, params);
+                    yield null;
+                }
+                case "agent-config.upload.begin" -> agentConfigUploadBegin(ticket, params, activeUploads);
+                case "agent-config.upload.chunk" -> agentConfigUploadChunk(ticket, params, activeUploads);
+                case "agent-config.upload.complete" -> agentConfigUploadComplete(ticket, params, activeUploads);
+                case "agent-config.upload.abort" -> {
+                    agentConfigUploadAbort(ticket, params, activeUploads);
                     yield null;
                 }
                 case "agent-config.rename" -> {
@@ -240,6 +280,74 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         } catch (Exception exception) {
             return error(id, ErrorCode.VALIDATION_ERROR.name(), "文件 WebSocket 消息无效", traceId, Map.of());
         }
+    }
+
+    private Object workspaceUploadBegin(
+            WorkspaceFileSocketTicket ticket,
+            JsonNode params,
+            Map<String, ActiveUpload> activeUploads) {
+        requireUploadCapacity(activeUploads);
+        WorkspaceId workspaceId = workspaceId(ticket, params);
+        String path = requiredText(params, "path");
+        requireWorkspaceWrite(ticket, workspaceId, path);
+        WorkspaceFileUpload upload = workspaceService.beginFileUpload(
+                workspaceId,
+                path,
+                requiredNonNegativeLong(params, "size"));
+        return registerUpload(
+                activeUploads,
+                new ActiveUpload(UploadKind.WORKSPACE, upload, path, workspaceId.value(), null, null));
+    }
+
+    private Object workspaceUploadChunk(
+            WorkspaceFileSocketTicket ticket,
+            JsonNode params,
+            Map<String, ActiveUpload> activeUploads) {
+        String uploadId = requiredText(params, "uploadId");
+        ActiveUpload active = requireUpload(activeUploads, uploadId, UploadKind.WORKSPACE);
+        WorkspaceId workspaceId = workspaceId(ticket, params);
+        requireUploadContext(active, workspaceId.value(), null, null);
+        requireWorkspaceWrite(ticket, workspaceId, active.path());
+        try {
+            active.upload().append(requiredNonNegativeLong(params, "index"), text(params, "contentBase64"));
+            return Map.of(
+                    "uploadedBytes", active.upload().uploadedBytes(),
+                    "totalBytes", active.upload().expectedBytes());
+        } catch (RuntimeException exception) {
+            failUpload(activeUploads, uploadId, active);
+            throw exception;
+        }
+    }
+
+    private Object workspaceUploadComplete(
+            WorkspaceFileSocketTicket ticket,
+            JsonNode params,
+            Map<String, ActiveUpload> activeUploads) {
+        String uploadId = requiredText(params, "uploadId");
+        ActiveUpload active = requireUpload(activeUploads, uploadId, UploadKind.WORKSPACE);
+        WorkspaceId workspaceId = workspaceId(ticket, params);
+        requireUploadContext(active, workspaceId.value(), null, null);
+        requireWorkspaceWrite(ticket, workspaceId, active.path());
+        activeUploads.remove(uploadId);
+        try {
+            return Map.of("size", active.upload().complete());
+        } catch (RuntimeException exception) {
+            active.upload().abort();
+            throw exception;
+        }
+    }
+
+    private void workspaceUploadAbort(
+            WorkspaceFileSocketTicket ticket,
+            JsonNode params,
+            Map<String, ActiveUpload> activeUploads) {
+        String uploadId = requiredText(params, "uploadId");
+        ActiveUpload active = requireUpload(activeUploads, uploadId, UploadKind.WORKSPACE);
+        WorkspaceId workspaceId = workspaceId(ticket, params);
+        requireUploadContext(active, workspaceId.value(), null, null);
+        requireWorkspaceWrite(ticket, workspaceId, active.path());
+        activeUploads.remove(uploadId);
+        active.upload().abort();
     }
 
     private void authorizeWorkspaceRpc(WorkspaceFileSocketTicket ticket, JsonNode params) {
@@ -350,6 +458,31 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         return agentConfigService.readWorkspaceAgentFile(agentConfigWorkspaceId(ticket, params), requiredText(params, "path"), worktreeId);
     }
 
+    private Object agentConfigReadChunk(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        String scope = agentConfigScope(ticket, params);
+        String worktreeId = agentConfigWorktreeId(ticket, params);
+        String path = requiredText(params, "path");
+        long offset = requiredNonNegativeLong(params, "offset");
+        Long expectedSize = optionalNonNegativeLong(params, "expectedSize");
+        Long expectedLastModifiedMillis = optionalNonNegativeLong(params, "expectedLastModifiedMillis");
+        if (SCOPE_PUBLIC.equals(scope)) {
+            return agentConfigService.readPublicAgentFilePreviewChunk(
+                    path,
+                    offset,
+                    expectedSize,
+                    expectedLastModifiedMillis,
+                    worktreeId,
+                    ticketUserId(ticket));
+        }
+        return agentConfigService.readWorkspaceAgentFilePreviewChunk(
+                agentConfigWorkspaceId(ticket, params),
+                path,
+                offset,
+                expectedSize,
+                expectedLastModifiedMillis,
+                worktreeId);
+    }
+
     private void agentConfigWrite(WorkspaceFileSocketTicket ticket, JsonNode params) {
         String scope = agentConfigScope(ticket, params);
         if (SCOPE_PUBLIC.equals(scope)) {
@@ -394,6 +527,109 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 path,
                 contentBase64,
                 agentConfigWorktreeId(ticket, params));
+    }
+
+    private Object agentConfigUploadBegin(
+            WorkspaceFileSocketTicket ticket,
+            JsonNode params,
+            Map<String, ActiveUpload> activeUploads) {
+        requireUploadCapacity(activeUploads);
+        AgentUploadContext context = agentUploadContext(ticket, params, true);
+        WorkspaceFileUpload upload;
+        if (SCOPE_PUBLIC.equals(context.scope())) {
+            upload = agentConfigService.beginPublicAgentFileUpload(
+                    context.path(),
+                    requiredNonNegativeLong(params, "size"),
+                    context.worktreeId(),
+                    ticketUserId(ticket));
+        } else {
+            upload = agentConfigService.beginWorkspaceAgentFileUpload(
+                    context.workspaceId(),
+                    context.path(),
+                    requiredNonNegativeLong(params, "size"),
+                    context.worktreeId());
+        }
+        return registerUpload(
+                activeUploads,
+                new ActiveUpload(
+                        UploadKind.AGENT_CONFIG,
+                        upload,
+                        context.path(),
+                        context.workspaceId(),
+                        context.scope(),
+                        context.worktreeId()));
+    }
+
+    private Object agentConfigUploadChunk(
+            WorkspaceFileSocketTicket ticket,
+            JsonNode params,
+            Map<String, ActiveUpload> activeUploads) {
+        String uploadId = requiredText(params, "uploadId");
+        ActiveUpload active = requireUpload(activeUploads, uploadId, UploadKind.AGENT_CONFIG);
+        AgentUploadContext context = agentUploadContext(ticket, params, false);
+        requireUploadContext(active, context.workspaceId(), context.scope(), context.worktreeId());
+        try {
+            active.upload().append(requiredNonNegativeLong(params, "index"), text(params, "contentBase64"));
+            return Map.of(
+                    "uploadedBytes", active.upload().uploadedBytes(),
+                    "totalBytes", active.upload().expectedBytes());
+        } catch (RuntimeException exception) {
+            failUpload(activeUploads, uploadId, active);
+            throw exception;
+        }
+    }
+
+    private Object agentConfigUploadComplete(
+            WorkspaceFileSocketTicket ticket,
+            JsonNode params,
+            Map<String, ActiveUpload> activeUploads) {
+        String uploadId = requiredText(params, "uploadId");
+        ActiveUpload active = requireUpload(activeUploads, uploadId, UploadKind.AGENT_CONFIG);
+        AgentUploadContext context = agentUploadContext(ticket, params, false);
+        requireUploadContext(active, context.workspaceId(), context.scope(), context.worktreeId());
+        activeUploads.remove(uploadId);
+        try {
+            return Map.of("size", active.upload().complete());
+        } catch (RuntimeException exception) {
+            active.upload().abort();
+            throw exception;
+        }
+    }
+
+    private void agentConfigUploadAbort(
+            WorkspaceFileSocketTicket ticket,
+            JsonNode params,
+            Map<String, ActiveUpload> activeUploads) {
+        String uploadId = requiredText(params, "uploadId");
+        ActiveUpload active = requireUpload(activeUploads, uploadId, UploadKind.AGENT_CONFIG);
+        AgentUploadContext context = agentUploadContext(ticket, params, false);
+        requireUploadContext(active, context.workspaceId(), context.scope(), context.worktreeId());
+        activeUploads.remove(uploadId);
+        active.upload().abort();
+    }
+
+    /** 每个分片请求都重新核对 ticket 的 scope/workspace/worktree 与角色，不能只信 begin 阶段。 */
+    private AgentUploadContext agentUploadContext(
+            WorkspaceFileSocketTicket ticket,
+            JsonNode params,
+            boolean requirePath) {
+        String scope = agentConfigScope(ticket, params);
+        String worktreeId = agentConfigWorktreeId(ticket, params);
+        String path = requirePath ? requiredText(params, "path") : null;
+        if (SCOPE_PUBLIC.equals(scope)) {
+            if (!ticket.superAdmin()) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "无权限");
+            }
+            return new AgentUploadContext(scope, null, worktreeId, path);
+        }
+        if (!ticket.appAdmin()) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "应用 Agent 配置仅应用管理员可编辑");
+        }
+        return new AgentUploadContext(
+                scope,
+                agentConfigWorkspaceId(ticket, params),
+                worktreeId,
+                path);
     }
 
     private void agentConfigRename(WorkspaceFileSocketTicket ticket, JsonNode params) {
@@ -479,6 +715,66 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         throw new PlatformException(ErrorCode.FORBIDDEN, "Agent 配置 worktree 与文件 WebSocket ticket 不匹配");
     }
 
+    private void requireUploadCapacity(Map<String, ActiveUpload> activeUploads) {
+        if (activeUploads.size() >= MAX_ACTIVE_UPLOADS) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "同一文件连接的并发上传过多",
+                    Map.of("maxActiveUploads", MAX_ACTIVE_UPLOADS));
+        }
+    }
+
+    private Object registerUpload(Map<String, ActiveUpload> activeUploads, ActiveUpload active) {
+        String uploadId;
+        do {
+            uploadId = "upl_" + UUID.randomUUID().toString().replace("-", "");
+        } while (activeUploads.containsKey(uploadId));
+        activeUploads.put(uploadId, active);
+        return Map.of(
+                "uploadId", uploadId,
+                "chunkBytes", active.upload().chunkBytes(),
+                "totalBytes", active.upload().expectedBytes());
+    }
+
+    private ActiveUpload requireUpload(
+            Map<String, ActiveUpload> activeUploads,
+            String uploadId,
+            UploadKind expectedKind) {
+        ActiveUpload active = activeUploads.get(uploadId);
+        if (active == null || active.kind() != expectedKind) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "上传会话不存在或已结束",
+                    Map.of("uploadId", uploadId));
+        }
+        return active;
+    }
+
+    private void requireUploadContext(
+            ActiveUpload active,
+            String workspaceId,
+            String scope,
+            String worktreeId) {
+        if (!Objects.equals(active.workspaceId(), workspaceId)
+                || !Objects.equals(active.scope(), scope)
+                || !Objects.equals(active.worktreeId(), worktreeId)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "上传会话与文件 WebSocket 上下文不匹配");
+        }
+    }
+
+    private void failUpload(
+            Map<String, ActiveUpload> activeUploads,
+            String uploadId,
+            ActiveUpload active) {
+        activeUploads.remove(uploadId);
+        active.upload().abort();
+    }
+
+    private void abortUploads(Map<String, ActiveUpload> activeUploads) {
+        activeUploads.values().forEach(active -> active.upload().abort());
+        activeUploads.clear();
+    }
+
     private WorkspaceId workspaceId(WorkspaceFileSocketTicket ticket, JsonNode params) {
         if (!MODE_WORKSPACE.equals(ticket.mode())) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "当前 ticket 不允许操作工作区文件");
@@ -549,6 +845,25 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         return value == null || value.isNull() ? null : value.asText();
     }
 
+    private long requiredNonNegativeLong(JsonNode node, String field) {
+        JsonNode value = node == null ? null : node.get(field);
+        if (value == null || !value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, field + " 必须是非负整数");
+        }
+        return value.longValue();
+    }
+
+    private Long optionalNonNegativeLong(JsonNode node, String field) {
+        JsonNode value = node == null ? null : node.get(field);
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, field + " 必须是非负整数");
+        }
+        return value.longValue();
+    }
+
     private String query(URI uri, String key) {
         String query = uri.getRawQuery();
         if (query == null || query.isBlank()) {
@@ -566,4 +881,23 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
     private String traceId(HttpHeaders headers) {
         return TraceIdSupport.resolve(headers.getFirst(TraceConstants.TRACE_ID_HEADER));
     }
+
+    private enum UploadKind {
+        WORKSPACE,
+        AGENT_CONFIG
+    }
+
+    private record ActiveUpload(
+            UploadKind kind,
+            WorkspaceFileUpload upload,
+            String path,
+            String workspaceId,
+            String scope,
+            String worktreeId) {}
+
+    private record AgentUploadContext(
+            String scope,
+            String workspaceId,
+            String worktreeId,
+            String path) {}
 }

@@ -212,21 +212,32 @@ public class TestAgentRuntimeProperties {
      * 文件读取和目录遍历限制配置项。
      */
     public static class Files {
-        private long maxFileBytes = 1024 * 1024;
+        private long maxPreviewBytes = 5L * 1024L * 1024L;
+        private int uploadChunkBytes = 256 * 1024;
         private int maxDirectoryEntries = 1000;
 
         /**
-         * 返回单文件最大读取字节数。
+         * 返回 UTF-8 文件一次性读取和可编辑阈值；超过后仍可渐进只读预览到文件末尾。
          */
-        public long getMaxFileBytes() {
-            return maxFileBytes;
+        public long getMaxPreviewBytes() {
+            return maxPreviewBytes;
         }
 
         /**
-         * 绑定单文件最大读取字节数。
+         * 绑定 UTF-8 文件一次性读取和可编辑阈值。
          */
-        public void setMaxFileBytes(long maxFileBytes) {
-            this.maxFileBytes = maxFileBytes;
+        public void setMaxPreviewBytes(long maxPreviewBytes) {
+            this.maxPreviewBytes = maxPreviewBytes;
+        }
+
+        /** 返回分片上传每条消息的原始二进制字节数。 */
+        public int getUploadChunkBytes() {
+            return uploadChunkBytes;
+        }
+
+        /** 绑定分片上传每条消息的原始二进制字节数。 */
+        public void setUploadChunkBytes(int uploadChunkBytes) {
+            this.uploadChunkBytes = uploadChunkBytes;
         }
 
         /**

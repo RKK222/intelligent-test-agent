@@ -126,6 +126,24 @@ export type FileContent = {
   readonly?: boolean;
 };
 
+/** 大文件渐进只读预览分段；offset 使用 UTF-8 字节偏移。 */
+export type FilePreviewChunk = {
+  path: string;
+  content: string;
+  offset: number;
+  nextOffset: number;
+  size: number;
+  eof: boolean;
+  warningThresholdBytes: number;
+  lastModifiedMillis: number;
+};
+
+export type FilePreviewChunkRequest = {
+  offset: number;
+  expectedSize?: number;
+  expectedLastModifiedMillis?: number;
+};
+
 export type FileStatus = {
   path: string;
   exists?: boolean;

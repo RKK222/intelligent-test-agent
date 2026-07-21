@@ -48,6 +48,8 @@ import type {
   CurrentUser,
   DefaultPersonalWorkspaceResponse,
   FileContent,
+  FilePreviewChunk,
+  FilePreviewChunkRequest,
   FileSearchResult,
   FileStatus,
   FileTreeEntry,
@@ -163,6 +165,11 @@ type WorkspaceWebSocketLike = {
 
 export type WorkspaceWebSocketFactory = (url: string) => WorkspaceWebSocketLike;
 export type AgentConfigProgressHandler = (event: AgentConfigProgressEvent) => void;
+export type FileUploadProgress = {
+  uploadedBytes: number;
+  totalBytes: number;
+};
+export type FileUploadProgressHandler = (progress: FileUploadProgress) => void;
 
 const WEBSOCKET_OPEN_STATE = 1;
 const AGENT_CONFIG_PROGRESS_OPEN_TIMEOUT_MS = 3000;
@@ -890,6 +897,16 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         locator: data.locator
       };
     },
+    readWorkspaceViewFilePreviewChunk: async (
+      workspaceId: string,
+      locator: WorkspaceViewLocator,
+      preview: FilePreviewChunkRequest
+    ): Promise<FilePreviewChunk> => mapFilePreviewChunk(await workspaceFileRpc<BackendFilePreviewChunk>(
+      workspaceId,
+      "workspace.view.read.chunk",
+      { locator, ...preview },
+      true
+    )),
     readFile: async (workspaceId: string, path: string, readonly = false) => {
       // 工作区文件读取与列表、写入保持同一条平台 WebSocket 路由，避免旧 OpenCode
       // HTTP 代理在跨服务器或响应格式变化时把真实 Markdown 内容丢在前端之外。
@@ -902,10 +919,34 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         readonly
       } satisfies FileContent;
     },
+    readFilePreviewChunk: async (
+      workspaceId: string,
+      path: string,
+      preview: FilePreviewChunkRequest
+    ): Promise<FilePreviewChunk> => mapFilePreviewChunk(await workspaceFileRpc<BackendFilePreviewChunk>(
+      workspaceId,
+      "workspace.read.chunk",
+      { path, ...preview },
+      true
+    )),
     writeFile: (workspaceId: string, path: string, content: string) =>
       workspaceFileRpc<void>(workspaceId, "workspace.write", { path, content }),
-    uploadWorkspaceFile: (workspaceId: string, path: string, contentBase64: string) =>
-      workspaceFileRpc<void>(workspaceId, "workspace.upload", { path, contentBase64 }),
+    uploadWorkspaceFile: async (
+      workspaceId: string,
+      path: string,
+      file: Blob,
+      onProgress?: FileUploadProgressHandler
+    ) => {
+      // 上传会话绑定创建它的同一条 WebSocket，避免中途重连后把分片发给另一条连接。
+      const client = await ensureWorkspaceFileClient(workspaceId);
+      await uploadBlobInChunks(
+        file,
+        path,
+        (op, params) => client.request(op, { workspaceId, ...params }),
+        "workspace.upload",
+        onProgress
+      );
+    },
     copyWorkspaceFile: (workspaceId: string, sourcePath: string, targetPath: string) =>
       workspaceFileRpc<void>(workspaceId, "workspace.copy", { sourcePath, targetPath }),
     moveWorkspaceFile: (workspaceId: string, sourcePath: string, targetPath: string) =>
@@ -1046,6 +1087,18 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       );
       return { ...file, encoding: "utf-8", readonly: false } satisfies FileContent;
     },
+    readPublicAgentFilePreviewChunk: async (
+      path: string,
+      preview: FilePreviewChunkRequest,
+      worktreeId?: string | null,
+      linuxServerId?: string | null
+    ): Promise<FilePreviewChunk> => mapFilePreviewChunk(await agentConfigFileRpc<BackendFilePreviewChunk>(
+      "PUBLIC",
+      "agent-config.read.chunk",
+      { path, ...preview },
+      { worktreeId, linuxServerId },
+      true
+    )),
     writePublicAgentFile: (path: string, content: string, worktreeId?: string | null, linuxServerId?: string | null) =>
       agentConfigFileRpc<void>(
         "PUBLIC",
@@ -1053,13 +1106,27 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         { path, content },
         { worktreeId, linuxServerId }
       ),
-    uploadPublicAgentFile: (path: string, contentBase64: string, worktreeId?: string | null, linuxServerId?: string | null) =>
-      agentConfigFileRpc<void>(
-        "PUBLIC",
+    uploadPublicAgentFile: async (
+      path: string,
+      file: Blob,
+      worktreeId?: string | null,
+      linuxServerId?: string | null,
+      onProgress?: FileUploadProgressHandler
+    ) => {
+      const context = { worktreeId, linuxServerId };
+      const client = await ensureAgentConfigFileClient("PUBLIC", context);
+      await uploadBlobInChunks(
+        file,
+        path,
+        (op, params) => client.request(op, {
+          scope: "PUBLIC",
+          worktreeId: worktreeId ?? undefined,
+          ...params
+        }),
         "agent-config.upload",
-        { path, contentBase64 },
-        { worktreeId, linuxServerId }
-      ),
+        onProgress
+      );
+    },
     renamePublicAgentFile: (path: string, name: string, worktreeId?: string | null, linuxServerId?: string | null) =>
       agentConfigFileRpc<void>(
         "PUBLIC",
@@ -1118,6 +1185,18 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       );
       return { ...file, encoding: "utf-8", readonly: false } satisfies FileContent;
     },
+    readWorkspaceAgentFilePreviewChunk: async (
+      workspaceId: string,
+      path: string,
+      preview: FilePreviewChunkRequest,
+      worktreeId?: string | null
+    ): Promise<FilePreviewChunk> => mapFilePreviewChunk(await agentConfigFileRpc<BackendFilePreviewChunk>(
+      "WORKSPACE",
+      "agent-config.read.chunk",
+      { path, ...preview },
+      { workspaceId, worktreeId },
+      true
+    )),
     writeWorkspaceAgentFile: (workspaceId: string, path: string, content: string, worktreeId?: string | null) =>
       agentConfigFileRpc<void>(
         "WORKSPACE",
@@ -1125,13 +1204,28 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         { path, content },
         { workspaceId, worktreeId }
       ),
-    uploadWorkspaceAgentFile: (workspaceId: string, path: string, contentBase64: string, worktreeId?: string | null) =>
-      agentConfigFileRpc<void>(
-        "WORKSPACE",
+    uploadWorkspaceAgentFile: async (
+      workspaceId: string,
+      path: string,
+      file: Blob,
+      worktreeId?: string | null,
+      onProgress?: FileUploadProgressHandler
+    ) => {
+      const context = { workspaceId, worktreeId };
+      const client = await ensureAgentConfigFileClient("WORKSPACE", context);
+      await uploadBlobInChunks(
+        file,
+        path,
+        (op, params) => client.request(op, {
+          scope: "WORKSPACE",
+          workspaceId,
+          worktreeId: worktreeId ?? undefined,
+          ...params
+        }),
         "agent-config.upload",
-        { path, contentBase64 },
-        { workspaceId, worktreeId }
-      ),
+        onProgress
+      );
+    },
     renameWorkspaceAgentFile: (workspaceId: string, path: string, name: string, worktreeId?: string | null) =>
       agentConfigFileRpc<void>(
         "WORKSPACE",
@@ -1754,6 +1848,17 @@ type BackendFileContent = {
   size: number;
 };
 
+type BackendFilePreviewChunk = {
+  path: string;
+  content: string;
+  offset: number;
+  nextOffset: number;
+  size: number;
+  eof: boolean;
+  warningThresholdBytes: number;
+  lastModifiedMillis: number;
+};
+
 type BackendWorkspaceViewEntry = {
   id: string;
   path: string;
@@ -1810,6 +1915,150 @@ function toFileTreeEntry(entry: BackendFileTreeEntry): FileTreeEntry {
     size: entry.size,
     modifiedAt: entry.lastModifiedAt
   };
+}
+
+function mapFilePreviewChunk(chunk: BackendFilePreviewChunk): FilePreviewChunk {
+  return {
+    path: chunk.path,
+    content: typeof chunk.content === "string" ? chunk.content : "",
+    offset: chunk.offset,
+    nextOffset: chunk.nextOffset,
+    size: chunk.size,
+    eof: chunk.eof === true,
+    warningThresholdBytes: chunk.warningThresholdBytes,
+    lastModifiedMillis: chunk.lastModifiedMillis
+  };
+}
+
+type FileUploadRpc = (op: string, params: Record<string, unknown>) => Promise<unknown>;
+type FileUploadBeginResult = {
+  uploadId: string;
+  chunkBytes: number;
+  totalBytes: number;
+};
+type FileUploadChunkResult = FileUploadProgress;
+type FileUploadCompleteResult = { size: number };
+
+const MAX_CLIENT_UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024;
+
+/**
+ * 只把当前 Blob.slice 读进内存并编码，文件总大小不会决定单条消息或浏览器瞬时内存占用。
+ */
+async function uploadBlobInChunks(
+  file: Blob,
+  path: string,
+  rpc: FileUploadRpc,
+  operationPrefix: "workspace.upload" | "agent-config.upload",
+  onProgress?: FileUploadProgressHandler
+): Promise<void> {
+  const begin = requireUploadBeginResult(
+    await rpc(`${operationPrefix}.begin`, { path, size: file.size }),
+    file.size
+  );
+  notifyUploadProgress(onProgress, { uploadedBytes: 0, totalBytes: file.size });
+  try {
+    let offset = 0;
+    let index = 0;
+    while (offset < file.size) {
+      const end = Math.min(offset + begin.chunkBytes, file.size);
+      const chunk = file.slice(offset, end);
+      const contentBase64 = await blobToBase64(chunk);
+      const progress = requireUploadChunkResult(
+        await rpc(`${operationPrefix}.chunk`, {
+          uploadId: begin.uploadId,
+          index,
+          contentBase64
+        }),
+        end,
+        file.size
+      );
+      offset = end;
+      index += 1;
+      notifyUploadProgress(onProgress, progress);
+    }
+    requireUploadCompleteResult(
+      await rpc(`${operationPrefix}.complete`, { uploadId: begin.uploadId }),
+      file.size
+    );
+  } catch (error) {
+    // 传输关闭时服务端会随连接清理临时文件；此时不要重连并向新连接发送无效 abort。
+    if (!(error instanceof WorkspaceFileTransportError)) {
+      try {
+        await rpc(`${operationPrefix}.abort`, { uploadId: begin.uploadId });
+      } catch {
+        // 保留原始上传错误；服务端对失败分片和连接关闭都还有兜底清理。
+      }
+    }
+    throw error;
+  }
+}
+
+function requireUploadBeginResult(value: unknown, expectedBytes: number): FileUploadBeginResult {
+  const result = value as Partial<FileUploadBeginResult> | null;
+  if (!result
+    || typeof result.uploadId !== "string"
+    || !result.uploadId
+    || !Number.isInteger(result.chunkBytes)
+    || (result.chunkBytes ?? 0) < 1
+    || (result.chunkBytes ?? 0) > MAX_CLIENT_UPLOAD_CHUNK_BYTES
+    || result.totalBytes !== expectedBytes) {
+    throw uploadProtocolError("服务端返回的上传会话无效");
+  }
+  return result as FileUploadBeginResult;
+}
+
+function requireUploadChunkResult(
+  value: unknown,
+  expectedUploadedBytes: number,
+  expectedTotalBytes: number
+): FileUploadChunkResult {
+  const result = value as Partial<FileUploadChunkResult> | null;
+  if (!result
+    || result.uploadedBytes !== expectedUploadedBytes
+    || result.totalBytes !== expectedTotalBytes) {
+    throw uploadProtocolError("服务端返回的上传进度无效");
+  }
+  return result as FileUploadChunkResult;
+}
+
+function requireUploadCompleteResult(value: unknown, expectedBytes: number): FileUploadCompleteResult {
+  const result = value as Partial<FileUploadCompleteResult> | null;
+  if (!result || result.size !== expectedBytes) {
+    throw uploadProtocolError("服务端返回的上传完成结果无效");
+  }
+  return result as FileUploadCompleteResult;
+}
+
+function uploadProtocolError(message: string): BackendApiError {
+  return new BackendApiError(500, {
+    success: false,
+    code: "FILE_UPLOAD_PROTOCOL_ERROR",
+    message,
+    traceId: "",
+    retryable: false,
+    details: {}
+  });
+}
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  const stringChunkBytes = 32 * 1024;
+  for (let offset = 0; offset < bytes.length; offset += stringChunkBytes) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + stringChunkBytes));
+  }
+  return btoa(binary);
+}
+
+function notifyUploadProgress(
+  handler: FileUploadProgressHandler | undefined,
+  progress: FileUploadProgress
+) {
+  try {
+    handler?.(progress);
+  } catch {
+    // 进度展示是旁路能力，不能因为 UI 回调异常破坏已经开始的文件传输。
+  }
 }
 
 class WorkspaceFileTransportError extends Error {

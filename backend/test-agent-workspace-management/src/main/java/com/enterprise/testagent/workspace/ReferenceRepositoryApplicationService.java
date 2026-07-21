@@ -86,7 +86,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
     private final ReferenceRepositoryReplicaTaskDispatcher taskDispatcher;
     private final Clock clock;
     private final ReferenceRepositoryDirectoryMover directoryMover;
-    private final long maxFileBytes;
+    private final long maxPreviewBytes;
 
     @Autowired
     public ReferenceRepositoryApplicationService(
@@ -99,7 +99,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher,
             ReferenceRepositoryReplicaTaskDispatcher taskDispatcher,
-            @Value("${test-agent.files.max-file-bytes:1048576}") long maxFileBytes) {
+            @Value("${test-agent.files.max-preview-bytes:${test-agent.files.max-file-bytes:5242880}}") long maxPreviewBytes) {
         this(
                 configurationRepository,
                 referenceRepository,
@@ -113,7 +113,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                 taskDispatcher,
                 Clock.systemUTC(),
                 ReferenceRepositoryDirectoryMover.filesystem(),
-                maxFileBytes);
+                maxPreviewBytes);
     }
 
     /** 测试构造器允许固定时间，以验证 generation、租约和退避边界。 */
@@ -189,7 +189,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
             ReferenceRepositoryReplicaTaskDispatcher taskDispatcher,
             Clock clock,
             ReferenceRepositoryDirectoryMover directoryMover,
-            long maxFileBytes) {
+            long maxPreviewBytes) {
         this.configurationRepository = Objects.requireNonNull(configurationRepository);
         this.referenceRepository = Objects.requireNonNull(referenceRepository);
         this.userRepository = Objects.requireNonNull(userRepository);
@@ -202,10 +202,10 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         this.taskDispatcher = Objects.requireNonNull(taskDispatcher);
         this.clock = Objects.requireNonNull(clock);
         this.directoryMover = Objects.requireNonNull(directoryMover);
-        if (maxFileBytes < 1L) {
-            throw new IllegalArgumentException("maxFileBytes must be positive");
+        if (maxPreviewBytes < 1L) {
+            throw new IllegalArgumentException("maxPreviewBytes must be positive");
         }
-        this.maxFileBytes = maxFileBytes;
+        this.maxPreviewBytes = maxPreviewBytes;
     }
 
     /** 列表只读取当前应用已关联的应用资产库；其它仓库类型不会触发状态查询。 */
@@ -512,11 +512,15 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         }
         try {
             long size = Files.size(target);
-            if (size > maxFileBytes) {
+            if (size > maxPreviewBytes) {
                 throw new PlatformException(
                         ErrorCode.VALIDATION_ERROR,
-                        "引用资产文件超过读取大小限制",
-                        Map.of("maxFileBytes", maxFileBytes));
+                        "引用资产文件超过预览大小限制",
+                        Map.of(
+                                "path", normalizedPath,
+                                "size", size,
+                                "maxPreviewBytes", maxPreviewBytes,
+                                "reason", "PREVIEW_TOO_LARGE"));
             }
             return new ViewContent(normalizedPath, Files.readString(target, StandardCharsets.UTF_8), size);
         } catch (PlatformException exception) {
@@ -524,6 +528,30 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         } catch (IOException exception) {
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "读取引用资产文件失败", Map.of(), exception);
         }
+    }
+
+    /** 引用资产大文件渐进预览复用统一 UTF-8 分段读取器，不放宽引用根路径校验。 */
+    public FilePreviewChunkResponse readViewChunk(
+            String appId,
+            String repositoryEnglishName,
+            String folder,
+            String path,
+            long offset,
+            Long expectedSize,
+            Long expectedLastModifiedMillis) {
+        ViewRoot viewRoot = requireReadyViewRoot(appId, repositoryEnglishName, folder);
+        String normalizedPath = normalizeRelativePath(path);
+        if (normalizedPath.isEmpty()) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "引用资产文件路径不能为空");
+        }
+        Path target = resolveSafeEntry(viewRoot.folderRoot(), normalizedPath);
+        return Utf8FilePreviewReader.read(
+                target,
+                normalizedPath,
+                offset,
+                expectedSize,
+                expectedLastModifiedMillis,
+                maxPreviewBytes);
     }
 
     @Override

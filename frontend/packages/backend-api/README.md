@@ -14,7 +14,8 @@
 - 映射统一错误响应为 `BackendApiError`。
 - 暴露 Workspace、Session message、Run 与 Diff API；历史恢复优先使用 `getSessionTreeMessages`，`listSessionMessages(..., refresh=false)` 用于只读 transcript、Run ID 恢复和旧消息反馈兼容。新反馈不再依赖平台 assistant messageId。
 - 工作区原始文件列表、读取、写入、二进制上传、普通文件复制/移动、状态和删除，以及工作台使用的引用组合视图 `listWorkspaceView/readWorkspaceViewFile`，统一走“route 查询 + 目标后端 ticket + 文件 WebSocket RPC”，不再调用旧 HTTP 文件接口；client 负责 requestId 匹配、超时、断线错误和切换工作区关闭旧连接。组合视图只映射后端签发的稳定 `id/locator/source/readonly/workspacePath/warnings`，不在浏览器自行解析引用根目录。
-- 工作区与 Agent 配置文件连接分别按路由键复用 single-flight 建连过程，并对缓存连接做实例身份校验；连接在 open 前关闭、报错或同步发送失败时会立即结算 pending，同步发送失败还会安全关闭已失效的底层 socket。只有 `workspace.read` 与 `agent-config.read` 遇到明确 WebSocket 传输错误时自动重连并重试一次，业务错误、请求超时和写操作不重试。
+- 工作区与 Agent 配置文件连接分别按路由键复用 single-flight 建连过程，并对缓存连接做实例身份校验；连接在 open 前关闭、报错或同步发送失败时会立即结算 pending，同步发送失败还会安全关闭已失效的底层 socket。只有 `workspace.read`、`workspace.view.read`、三类 `*.read.chunk` 与 `agent-config.read` 等幂等只读操作遇到明确 WebSocket 传输错误时自动重连并重试一次，业务错误、请求超时和写操作不重试。
+- 工作区、组合引用视图和 Agent 配置文件超过一次性读取阈值后，分别通过 `readFilePreviewChunk`、`readWorkspaceViewFilePreviewChunk`、`readPublicAgentFilePreviewChunk`、`readWorkspaceAgentFilePreviewChunk` 读取约 512 KiB UTF-8 分段；client 透传 `offset/expectedSize/expectedLastModifiedMillis` 并返回 `nextOffset/eof`，调用方可加载到 EOF。上传方法直接接收 `Blob`，只把当前 `Blob.slice()` 分片读入内存并在同一 socket 上执行 begin/chunk/complete，进度回调使用已上传/总字节；读写会话都不把完整大文件打进单个 WebSocket frame。
 - 暴露 `listWorkspaceBackendServers()`、`listServerWorkspaceDirectories()`、`createServerWorkspace()` 等超级管理员服务器工作空间选择方法，目录浏览和创建也通过目标后端文件 WebSocket ticket 执行。
 - 暴露 `getActiveRun(sessionId)` 作为用户级 runtime-state SSE 不可用时的单次 fallback；返回 `null` 表示当前会话没有非终态 Run。调用方不得用它恢复固定间隔 active-run 轮询。
 - 暴露 `getSessionRuntimeState()` 兼容读取 `/api/internal/platform/opencode-runtime/sessions/runtime-state`；新工作台以 `event-stream-client` 的用户级 runtime-state SSE 为主入口，不在流连接期间并行调用该 HTTP 接口。

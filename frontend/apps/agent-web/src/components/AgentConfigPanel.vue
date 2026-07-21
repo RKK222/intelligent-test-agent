@@ -32,6 +32,11 @@ import { formatAgentConfigError } from "./agentConfigErrors";
 import { agentFileInfo, isAgentFilePath, type AgentFileLoadRequest } from "./agentFileLoad";
 import { notifyError, notifyInfo, notifySuccess } from "./notify";
 import AgentConfigTreeNode from "./AgentConfigTreeNode.vue";
+import FileUploadOverlay from "./FileUploadOverlay.vue";
+import {
+  initialFileUploadOverlayState,
+  type FileUploadOverlayState
+} from "./fileUploadOverlayState";
 
 type Scope = "PUBLIC" | "WORKSPACE";
 type AgentConfigMutation = {
@@ -92,6 +97,7 @@ const rootCreateEntryDialog = ref<InstanceType<typeof FileEntryCreateDialog> | n
 const createEntryScope = ref<Scope>("WORKSPACE");
 const uploadDirectory = ref("");
 const uploadInput = ref<HTMLInputElement | null>(null);
+const uploadOverlay = ref<FileUploadOverlayState | null>(null);
 const deleteEntryDialog = ref<InstanceType<typeof FileEntryDeleteDialog> | null>(null);
 const deleteEntryScope = ref<Scope>("WORKSPACE");
 const publicConflictPathHints = ref<string[]>([]);
@@ -1302,22 +1308,13 @@ async function createAgentTemplate(_directory: string, rawName: string, type: "a
   }
 }
 
-/** 上传入口与工作区一致，浏览器仅提交 basename，后端继续负责大小、重名和越界校验。 */
+/** 上传入口与工作区一致，浏览器仅提交 basename，后端继续负责重名和越界校验。 */
 function requestAgentUpload(directory: string) {
   uploadDirectory.value = directory;
   if (uploadInput.value) {
     uploadInput.value.value = "";
     uploadInput.value.click();
   }
-}
-
-async function fileToBase64(file: File): Promise<string> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const chunks: string[] = [];
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-    chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 0x8000)));
-  }
-  return btoa(chunks.join(""));
 }
 
 function uploadedFileName(name: string) {
@@ -1330,25 +1327,57 @@ async function uploadAgentFiles(files: File[]) {
   if (!canWriteScope(scope) || busy.value || files.length === 0) return;
   const failures: string[] = [];
   const uploadedPaths: string[] = [];
+  let completedBytes = 0;
   busy.value = true;
+  uploadOverlay.value = initialFileUploadOverlayState(files);
   errorMessage.value = "";
   try {
-    for (const file of files) {
+    for (const [index, file] of files.entries()) {
+      uploadOverlay.value = {
+        ...uploadOverlay.value!,
+        fileName: file.name,
+        fileIndex: index + 1,
+        fileUploadedBytes: 0,
+        fileBytes: file.size,
+        completedBytes
+      };
       const path = agentEntryPath(directory, uploadedFileName(file.name));
       if (scope === "WORKSPACE" && !isWorkspaceAgentDiffPath(path)) {
         failures.push(`${file.name}：应用根目录仅允许上传 opencode.jsonc，其他文件请上传到 agents 或 skills 目录`);
+        completedBytes += file.size;
         continue;
       }
       try {
-        const contentBase64 = await fileToBase64(file);
+        const onProgress = (progress: { uploadedBytes: number; totalBytes: number }) => {
+          if (!uploadOverlay.value) return;
+          uploadOverlay.value = {
+            ...uploadOverlay.value,
+            fileUploadedBytes: progress.uploadedBytes,
+            fileBytes: progress.totalBytes
+          };
+        };
         if (scope === "PUBLIC") {
-          await api.uploadPublicAgentFile(path, contentBase64, worktreeId(scope), await publicFileLinuxServerId());
+          await api.uploadPublicAgentFile(
+            path,
+            file,
+            worktreeId(scope),
+            await publicFileLinuxServerId(),
+            onProgress
+          );
         } else {
-          await api.uploadWorkspaceAgentFile(props.workspaceId!, path, contentBase64, worktreeId(scope));
+          await api.uploadWorkspaceAgentFile(
+            props.workspaceId!,
+            path,
+            file,
+            worktreeId(scope),
+            onProgress
+          );
         }
         uploadedPaths.push(path);
       } catch (error) {
         failures.push(`${file.name}：${formatAgentConfigError(error, "上传失败")}`);
+      } finally {
+        completedBytes += file.size;
       }
     }
     if (uploadedPaths.length > 0) {
@@ -1361,6 +1390,7 @@ async function uploadAgentFiles(files: File[]) {
       notifyError(uploadedPaths.length > 0 ? "部分文件上传失败" : "上传 Agent 配置文件失败", errorMessage.value);
     }
   } finally {
+    uploadOverlay.value = null;
     busy.value = false;
   }
 }
@@ -1635,6 +1665,7 @@ defineExpose({
 
 <template>
   <div class="agent-config-panel">
+    <FileUploadOverlay v-if="uploadOverlay" v-bind="uploadOverlay" />
     <div v-if="!hideHeader" class="agent-config-header">
       <span>Agent</span>
       <button type="button" class="agent-icon-btn" title="刷新" aria-label="刷新" :disabled="refreshing" @click="refreshAll()">

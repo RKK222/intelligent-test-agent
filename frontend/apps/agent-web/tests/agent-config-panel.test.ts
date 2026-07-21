@@ -562,6 +562,15 @@ describe("AgentConfigPanel", () => {
   });
 
   it("uploads application Agent configuration files from the shared create panel", async () => {
+    let resolveUpload!: () => void;
+    apiClientMock.uploadWorkspaceAgentFile.mockImplementationOnce(
+      (_workspaceId, _path, _file, _worktreeId, onProgress) => {
+        onProgress?.({ uploadedBytes: 1, totalBytes: 2 });
+        return new Promise<void>((resolve) => {
+          resolveUpload = resolve;
+        });
+      }
+    );
     const { view } = renderPanel();
 
     await waitFor(() => expect(apiClientMock.getWorkspaceAgentConfigStatus).toHaveBeenCalled());
@@ -572,9 +581,6 @@ describe("AgentConfigPanel", () => {
     await fireEvent.click(within(dialog).getByRole("button", { name: "选择文件" }));
 
     const file = new File(["{}"], "opencode.jsonc", { type: "application/json" });
-    Object.defineProperty(file, "arrayBuffer", {
-      value: async () => new TextEncoder().encode("{}").buffer
-    });
     const input = view.container.querySelector<HTMLInputElement>('input[type="file"]');
     expect(input).not.toBeNull();
     await fireEvent.change(input!, { target: { files: [file] } });
@@ -582,13 +588,21 @@ describe("AgentConfigPanel", () => {
     await waitFor(() => expect(apiClientMock.uploadWorkspaceAgentFile).toHaveBeenCalledWith(
       "wrk_1234567890abcdef",
       "opencode.jsonc",
-      "e30=",
-      undefined
+      file,
+      undefined,
+      expect.any(Function)
     ));
+    const overlay = view.getByTestId("file-upload-overlay");
+    expect(overlay.getAttribute("aria-busy")).toBe("true");
+    expect(overlay.textContent).toContain("opencode.jsonc");
+    expect(overlay.textContent).toContain("50%");
+
+    resolveUpload();
     await waitFor(() => expect((view.emitted("files-mutated")?.at(-1) as unknown[] | undefined)?.[0]).toEqual({
       scope: "WORKSPACE",
       paths: ["opencode.jsonc"]
     }));
+    await waitFor(() => expect(view.queryByTestId("file-upload-overlay")).toBeNull());
   });
 
   it("creates a public OpenCode Skill from the same root create dialog", async () => {

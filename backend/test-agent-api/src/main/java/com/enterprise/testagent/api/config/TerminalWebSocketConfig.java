@@ -36,18 +36,27 @@ public class TerminalWebSocketConfig {
      */
     @Bean
     WebSocketHandlerAdapter webSocketHandlerAdapter(
-            @Value("${test-agent.files.max-file-bytes:1048576}") long maxFileBytes) {
-        if (maxFileBytes < 1) {
-            throw new IllegalArgumentException("maxFileBytes must be positive");
+            @Value("${test-agent.files.max-preview-bytes:${test-agent.files.max-file-bytes:5242880}}") long maxPreviewBytes,
+            @Value("${test-agent.files.upload-chunk-bytes:262144}") int uploadChunkBytes) {
+        if (maxPreviewBytes < 1) {
+            throw new IllegalArgumentException("maxPreviewBytes must be positive");
+        }
+        if (uploadChunkBytes < 1 || uploadChunkBytes > 4 * 1024 * 1024) {
+            throw new IllegalArgumentException("uploadChunkBytes must be between 1 and 4194304");
         }
         // 文本写入经过 JSON.stringify 后，单个控制字符最坏会转义为 6 字节的 Unicode 转义形式；
-        // 因此按 6 倍业务文件上限预留，比 Base64 的 4/3 膨胀更严格，再附加 RPC envelope 余量。
-        // 业务处理层仍按 max-file-bytes 校验 UTF-8/解码后大小，传输层只负责让合法请求到达统一校验。
+        // 渐进预览单段固定小于该阈值；分片上传只需容纳一个 Base64 分片。
+        // 取两者较大值并附加 RPC envelope 余量。传输帧上限不是文件总大小或最终预览总量上限。
         long envelopeBytes = 64L * 1024L;
-        long maxScalableFileBytes = (Integer.MAX_VALUE - envelopeBytes) / 6L;
-        int maxFramePayloadLength = maxFileBytes > maxScalableFileBytes
+        long maxScalablePreviewBytes = (Integer.MAX_VALUE - envelopeBytes) / 6L;
+        long escapedPreviewBytes = maxPreviewBytes > maxScalablePreviewBytes
                 ? Integer.MAX_VALUE
-                : Math.toIntExact(maxFileBytes * 6L + envelopeBytes);
+                : maxPreviewBytes * 6L;
+        long encodedChunkBytes = 4L * ((uploadChunkBytes + 2L) / 3L);
+        long requiredPayloadBytes = Math.max(escapedPreviewBytes, encodedChunkBytes);
+        int maxFramePayloadLength = requiredPayloadBytes >= Integer.MAX_VALUE - envelopeBytes
+                ? Integer.MAX_VALUE
+                : Math.toIntExact(requiredPayloadBytes + envelopeBytes);
         ReactorNettyRequestUpgradeStrategy strategy = new ReactorNettyRequestUpgradeStrategy(
                 () -> WebsocketServerSpec.builder().maxFramePayloadLength(maxFramePayloadLength));
         return new WebSocketHandlerAdapter(new HandshakeWebSocketService(strategy));

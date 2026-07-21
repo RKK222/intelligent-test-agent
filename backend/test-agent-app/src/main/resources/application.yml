@@ -81,7 +81,8 @@ test-agent:
     rollout-percentage: ${TEST_AGENT_REDIS_SUMMARY_ROLLOUT_PERCENTAGE:0}
     legacy-run-without-context-enabled: ${TEST_AGENT_LEGACY_RUN_WITHOUT_CONTEXT_ENABLED:true}
   files:
-    max-file-bytes: ${TEST_AGENT_MAX_FILE_BYTES:1048576}
+    max-preview-bytes: ${TEST_AGENT_MAX_PREVIEW_BYTES:${TEST_AGENT_MAX_FILE_BYTES:5242880}}
+    upload-chunk-bytes: ${TEST_AGENT_UPLOAD_CHUNK_BYTES:262144}
     max-directory-entries: ${TEST_AGENT_MAX_DIRECTORY_ENTRIES:1000}
   managed-workspace:
     replica-reconciler:
