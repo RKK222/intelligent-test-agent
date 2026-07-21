@@ -5,6 +5,21 @@
 
 ## Entries
 
+### 2026-07-21 - 同步 main 并保留两侧功能
+
+- Why:
+  - 本地 `main` 相对 `origin/main` 领先 9 个、落后 44 个提交，直接推送会被拒绝；本地 XXL-JOB/夜间执行改造与远端 Git 发布恢复、Nginx 精确路由、内置 RSA、用户安全删除等改动存在交叉，冲突处理不能整文件取舍。
+- What:
+  - 将 9 个本地提交逐个 rebase 到远端 `0fb851e15`，逐段合并会话日志、模块图、部署与安全文档；保留远端 `TEST_AGENT_NGINX_SERVER_ROUTES`、JAR 内置 RSA、Git 企业邮箱及用户 Token 批量撤销，同时保留本地 XXL Admin/executor、地址派生、嵌入页样式和夜间 attempt/租约/补偿迁移。
+  - 合并 Redis Token 两侧能力时补齐批量撤销对应 SHA-256 session marker 的删除，并新增回归断言，避免删除用户后 XXL 会话 marker 残留。
+  - 同步保留 HTTP/RunEvent、数据库、部署、安全、模块与测试文档；未修改真实 `.env.local`，也未手改 generated SDK 或 XXL 上游源码。
+- How:
+  - 以 `git range-diff` 确认原 9 个提交与重写后的 9 个提交一一对应；全局检查无冲突标记，推送前再次 fetch 后确认远端未前进且当前历史可普通 fast-forward。
+  - 后端 19 模块跳过测试 clean package、XXL/真实 MySQL 31 项、夜间与 Run 96 项、内部路由 API 13 项、持久化 23 项、应用配置 14 项通过；前端 lint/typecheck、XXL 8 项、排除已记录 `DirectoryRows` 基线文件后的 1440 项（1 skipped）及生产构建通过；企业 Nginx、单后台和开发脚本校验通过。
+- Result:
+  - 远端与本地功能已在同一线性 `main` 历史中保留，无需 force push；已知 `DirectoryRows` 角色断言基线仍未扩大范围修改，XXL-JOB 3.4.2 vendored 上游源码/资源自带的空白格式继续原样保留。
+  - 工作树原有 `backend/${SYS_DATA_ROOT_DIR}/agent-opencode/.config` 删除始终保持未暂存，不纳入提交或推送。
+
 ### 2026-07-21 - 修复 Git 推送身份与提交进度终态
 
 - Why:
