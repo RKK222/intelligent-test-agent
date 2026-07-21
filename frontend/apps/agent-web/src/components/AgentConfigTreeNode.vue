@@ -2,6 +2,7 @@
 import { computed, nextTick, ref } from "vue";
 import { cn } from "@test-agent/ui-kit";
 import { FileIcon } from "@test-agent/file-explorer";
+import { Plus, Trash2 } from "lucide-vue-next";
 import type { FileTreeEntry } from "@test-agent/shared-types";
 
 /**
@@ -33,9 +34,13 @@ const props = defineProps<{
   activePath?: string;
   /** Git 冲突文件路径集合，用于在文件树中直接标识冲突文件。 */
   conflictPaths?: Set<string>;
-  /** 当前作用域是否可写；只读用户不能进入行内改名。 */
+  /** 当前作用域是否允许在目录下新建 Agent 配置条目。 */
   canWrite?: boolean;
-  /** 当前文件是否允许复用行内重命名交互。 */
+  /** 应用级只允许在 Git Diff 白名单目录内新增，公共级可直接返回 true。 */
+  canCreateInDirectory?: (path: string) => boolean;
+  /** 应用级只允许删除 Git Diff 白名单条目，公共级可直接返回 true。 */
+  canDeleteEntry?: (path: string) => boolean;
+  /** 当前节点是否允许复用行内重命名交互。 */
   canRenameEntry?: (path: string) => boolean;
 }>();
 
@@ -44,6 +49,10 @@ const emit = defineEmits<{
   toggle: [path: string];
   /** 用户点击文件行（父组件去拉内容并打开 tab） */
   openFile: [path: string];
+  /** 复用父组件的新建面板，以当前目录作为目标路径。 */
+  createEntry: [path: string];
+  /** 复用父组件的递归删除确认面板。 */
+  deleteEntry: [entry: FileTreeEntry];
   /** 复用父组件的 Agent 配置文件重命名链路。 */
   renameEntry: [path: string, name: string];
 }>();
@@ -112,7 +121,7 @@ function submitRename() {
 </script>
 
 <template>
-  <div>
+  <div class="agent-config-tree-node">
     <button
       type="button"
       :class="cn(
@@ -158,6 +167,28 @@ function submitRename() {
       <span v-if="isConflictFile" class="agent-tree-conflict-badge">冲突</span>
       <i v-if="isLoading" class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />
     </button>
+    <div v-if="canWrite" class="agent-tree-actions">
+      <button
+        v-if="isDirectory && (canCreateInDirectory?.(entry.path) ?? true)"
+        type="button"
+        class="agent-tree-action-btn"
+        :aria-label="`在 ${entry.name} 中新建文件或文件夹`"
+        title="新建文件或文件夹"
+        @click.stop="emit('createEntry', entry.path)"
+      >
+        <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
+      </button>
+      <button
+        v-if="canDeleteEntry?.(entry.path) ?? true"
+        type="button"
+        class="agent-tree-action-btn"
+        :aria-label="`删除 ${entry.name}`"
+        title="删除"
+        @click.stop="emit('deleteEntry', entry)"
+      >
+        <Trash2 class="h-3.5 w-3.5" :stroke-width="1.5" />
+      </button>
+    </div>
     <div v-if="isDirectory && isExpanded">
       <AgentConfigTreeNode
         v-for="child in children ?? []"
@@ -170,9 +201,13 @@ function submitRename() {
         :active-path="activePath"
         :conflict-paths="conflictPaths"
         :can-write="canWrite"
+        :can-create-in-directory="canCreateInDirectory"
+        :can-delete-entry="canDeleteEntry"
         :can-rename-entry="canRenameEntry"
         @toggle="(path: string) => emit('toggle', path)"
         @open-file="(path: string) => emit('openFile', path)"
+        @create-entry="(path: string) => emit('createEntry', path)"
+        @delete-entry="(child: FileTreeEntry) => emit('deleteEntry', child)"
         @rename-entry="(path: string, name: string) => emit('renameEntry', path, name)"
       />
     </div>
@@ -180,6 +215,46 @@ function submitRename() {
 </template>
 
 <style scoped>
+.agent-config-tree-node {
+  position: relative;
+}
+
+.agent-config-tree-node > .ta-file-tree-row {
+  padding-right: 48px;
+}
+
+.agent-tree-actions {
+  position: absolute;
+  top: 1px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  opacity: 0;
+}
+
+.agent-tree-action-btn {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ta-tree-muted);
+  cursor: pointer;
+}
+
+.agent-config-tree-node:hover > .agent-tree-actions,
+.agent-tree-actions:focus-within {
+  opacity: 1;
+}
+
+.agent-tree-action-btn:hover {
+  background: var(--ta-tree-hover);
+  color: var(--ta-tree-text);
+}
+
 .ta-file-tree-row.is-conflict {
   color: #b91c1c;
   background: #fff1f2;

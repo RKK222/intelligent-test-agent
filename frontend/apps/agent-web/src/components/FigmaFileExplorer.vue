@@ -83,7 +83,8 @@ const emit = defineEmits<{
   "agent-config-mutated": [payload: {
     scope: "PUBLIC" | "WORKSPACE";
     paths: string[];
-    renamed: { path: string; nextPath: string; type: "file" };
+    deleted?: { path: string; type: "file" | "directory" };
+    renamed?: { path: string; nextPath: string; type: "file" };
   }];
   "personal-runtime-reload": [payload: {
     scope: "PUBLIC" | "WORKSPACE";

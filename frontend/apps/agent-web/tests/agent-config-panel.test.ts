@@ -23,8 +23,11 @@ const apiClientMock = vi.hoisted(() => ({
   createPublicAgentWorktree: vi.fn(),
   readPublicAgentFile: vi.fn(),
   readWorkspaceAgentFile: vi.fn(),
+  writePublicAgentFile: vi.fn(),
   writeWorkspaceAgentFile: vi.fn(),
   renameWorkspaceAgentFile: vi.fn(),
+  deletePublicAgentFile: vi.fn(),
+  deleteWorkspaceAgentFile: vi.fn(),
   updatePublicAgentConfig: vi.fn(),
   updatePublicAgentConfigAndPush: vi.fn(),
   getPublicAgentGitConflictFiles: vi.fn(),
@@ -96,8 +99,11 @@ describe("AgentConfigPanel", () => {
     apiClientMock.createPublicAgentWorktree.mockResolvedValue(publicWorktreeOption());
     apiClientMock.readPublicAgentFile.mockResolvedValue({ path: "agent.md", content: "", encoding: "utf-8" });
     apiClientMock.readWorkspaceAgentFile.mockResolvedValue({ path: "agent.md", content: "", encoding: "utf-8" });
+    apiClientMock.writePublicAgentFile.mockResolvedValue(undefined);
     apiClientMock.writeWorkspaceAgentFile.mockResolvedValue(undefined);
     apiClientMock.renameWorkspaceAgentFile.mockResolvedValue(undefined);
+    apiClientMock.deletePublicAgentFile.mockResolvedValue(undefined);
+    apiClientMock.deleteWorkspaceAgentFile.mockResolvedValue(undefined);
     apiClientMock.updatePublicAgentConfig.mockResolvedValue({ status: "SUCCEEDED" });
     apiClientMock.updatePublicAgentConfigAndPush.mockResolvedValue({ status: "SUCCEEDED", commitHash: "newcommit123" });
     apiClientMock.getPublicAgentGitConflictFiles.mockResolvedValue({ files: [] });
@@ -207,10 +213,10 @@ describe("AgentConfigPanel", () => {
     expect(rootRows).toHaveLength(2);
     expect([...rootRows[0].querySelectorAll(".agent-root-actions > button, .agent-root-actions > .agent-more-menu-container > button")]
       .map((button) => button.getAttribute("aria-label")))
-      .toEqual(["更多操作", "Agent 配置更新（公共）"]);
+      .toEqual(["在公共级根目录新建文件或文件夹", "更多操作", "Agent 配置更新（公共）"]);
     expect([...rootRows[1].querySelectorAll(".agent-root-actions > button")]
       .map((button) => button.getAttribute("aria-label")))
-      .toEqual(["初始化应用 Agent/Skill 配置包", "Agent 配置更新（应用）"]);
+      .toEqual(["在应用级根目录新建文件或文件夹", "初始化应用 Agent/Skill 配置包", "Agent 配置更新（应用）"]);
     await fireEvent.click(view.getByRole("button", { name: "Agent 配置更新（公共）" }));
     await waitFor(() => {
       const events = (view.emitted("personal-runtime-reload") ?? []) as unknown[][];
@@ -544,6 +550,61 @@ describe("AgentConfigPanel", () => {
     await waitFor(() => expect(apiClientMock.listWorkspaceAgentFiles).toHaveBeenCalledWith("wrk_1234567890abcdef", "", undefined));
   });
 
+  it("creates a public Agent file in a selected directory and reports the Git mutation", async () => {
+    apiClientMock.listPublicAgentFiles.mockImplementation(async (path: string) => path === ""
+      ? [{ path: "agents", name: "agents", type: "directory" }]
+      : []);
+    const { view } = renderPanel();
+
+    const agentsRow = await view.findByRole("button", { name: "agents" });
+    await fireEvent.click(agentsRow);
+    await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalledWith(
+      "agents",
+      "agw_1234567890abcdef",
+      "linux-1"
+    ));
+    await fireEvent.click(view.getByRole("button", { name: "在 agents 中新建文件或文件夹" }));
+    const dialog = await view.findByRole("dialog", { name: "新建文件或文件夹" });
+    expect(dialog.textContent).toContain("agents");
+    await fireEvent.update(within(dialog).getByLabelText("文件名"), "review.md");
+    await fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
+
+    await waitFor(() => expect(apiClientMock.writePublicAgentFile).toHaveBeenCalledWith(
+      "agents/review.md",
+      "",
+      "agw_1234567890abcdef",
+      "linux-1"
+    ));
+    await waitFor(() => expect(view.emitted("files-mutated")).toEqual([[
+      { scope: "PUBLIC", paths: ["agents/review.md"] }
+    ]]));
+  });
+
+  it("creates a tracked application Agent folder with gitkeep and reports the Git mutation", async () => {
+    apiClientMock.listWorkspaceAgentFiles.mockImplementation(async (_workspaceId: string, path: string) => path === ""
+      ? [{ path: "skills", name: "skills", type: "directory" }]
+      : []);
+    const { view } = renderPanel();
+
+    await fireEvent.click(view.getByRole("button", { name: /^应用级/ }));
+    await fireEvent.click(await view.findByRole("button", { name: "在 skills 中新建文件或文件夹" }));
+    const dialog = await view.findByRole("dialog", { name: "新建文件或文件夹" });
+    expect(dialog.textContent).toContain("skills");
+    await fireEvent.click(within(dialog).getByRole("button", { name: "文件夹" }));
+    await fireEvent.update(within(dialog).getByLabelText("文件夹名"), "templates");
+    await fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
+
+    await waitFor(() => expect(apiClientMock.writeWorkspaceAgentFile).toHaveBeenCalledWith(
+      "wrk_1234567890abcdef",
+      "skills/templates/.gitkeep",
+      "",
+      undefined
+    ));
+    await waitFor(() => expect(view.emitted("files-mutated")).toEqual([[
+      { scope: "WORKSPACE", paths: ["skills/templates/.gitkeep"] }
+    ]]));
+  });
+
   it("renames an application Agent file on double click and reports both Git paths", async () => {
     apiClientMock.listWorkspaceAgentFiles.mockImplementation(async (_workspaceId: string, path: string) => path === ""
       ? [{ path: "agents", name: "agents", type: "directory" }]
@@ -599,11 +660,64 @@ describe("AgentConfigPanel", () => {
 
     expect(view.queryByLabelText("重命名应用 Agent 文件")).toBeNull();
     expect(apiClientMock.renameWorkspaceAgentFile).not.toHaveBeenCalled();
+    expect(view.queryByRole("button", { name: /新建文件或文件夹/ })).toBeNull();
+    expect(view.queryByRole("button", { name: /删除/ })).toBeNull();
     const openedFiles = ((view.emitted("openFile") ?? []) as unknown[][]).map((event) => event[0]);
     expect(openedFiles).toEqual(expect.arrayContaining([
       expect.objectContaining({ scope: "PUBLIC", path: "agents/public.md", readonly: true }),
       expect.objectContaining({ scope: "WORKSPACE", path: "agents/app.md", readonly: true })
     ]));
+  });
+
+  it("deletes a public Agent file through the shared workspace confirmation panel", async () => {
+    apiClientMock.listPublicAgentFiles.mockResolvedValue([
+      { path: "agents/review.md", name: "review.md", type: "file" }
+    ]);
+    const { view } = renderPanel();
+
+    await fireEvent.click(await view.findByRole("button", { name: "删除 review.md" }));
+    const dialog = await view.findByRole("dialog", { name: "删除文件" });
+    expect(dialog.textContent).toContain("agents/review.md");
+    await fireEvent.click(within(dialog).getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => expect(apiClientMock.deletePublicAgentFile).toHaveBeenCalledWith(
+      "agents/review.md",
+      "agw_1234567890abcdef",
+      "linux-1"
+    ));
+    await waitFor(() => expect(view.emitted("files-mutated")).toEqual([[
+      {
+        scope: "PUBLIC",
+        paths: ["agents/review.md"],
+        deleted: { path: "agents/review.md", type: "file" }
+      }
+    ]]));
+  });
+
+  it("recursively deletes an application Agent directory and reports the Diff mutation", async () => {
+    apiClientMock.listWorkspaceAgentFiles.mockResolvedValue([
+      { path: "skills/obsolete", name: "obsolete", type: "directory" }
+    ]);
+    const { view } = renderPanel();
+
+    await fireEvent.click(view.getByRole("button", { name: /^应用级/ }));
+    await fireEvent.click(await view.findByRole("button", { name: "删除 obsolete" }));
+    const dialog = await view.findByRole("dialog", { name: "删除文件夹" });
+    expect(dialog.textContent).toContain("文件夹及其中的全部内容都会被删除");
+    await fireEvent.click(within(dialog).getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => expect(apiClientMock.deleteWorkspaceAgentFile).toHaveBeenCalledWith(
+      "wrk_1234567890abcdef",
+      "skills/obsolete",
+      undefined
+    ));
+    await waitFor(() => expect(view.emitted("files-mutated")).toEqual([[
+      {
+        scope: "WORKSPACE",
+        paths: ["skills/obsolete"],
+        deleted: { path: "skills/obsolete", type: "directory" }
+      }
+    ]]));
   });
 
 });

@@ -2369,40 +2369,56 @@ function scheduleRuntimeReloadConflictRetry() {
 // Agent 文件落盘后递增，由左侧 GitChangesPanel 监听并刷新公共/应用 Agent diff。
 const agentConfigRevision = ref(0);
 
-/** Agents 树改名后同步已打开的虚拟 Agent tab，并复用保存动作的 revision 信号刷新 Git Diff。 */
+/** Agents 树创建或删除配置条目后复用保存动作的 revision 信号刷新 Git Diff。 */
 function handleAgentConfigMutation(payload: {
   scope: "PUBLIC" | "WORKSPACE";
   paths: string[];
-  renamed: { path: string; nextPath: string; type: "file" };
+  deleted?: { path: string; type: "file" | "directory" };
+  renamed?: { path: string; nextPath: string; type: "file" };
 }) {
-  for (const tab of [...workbench.tabs]) {
-    if (!isAgentFilePath(tab.path)) continue;
-    const file = agentFileInfo(tab.path);
-    if (file.scope !== payload.scope || file.path !== payload.renamed.path) continue;
-    const nextTabPath = agentTabPath(
-      file.scope,
-      payload.renamed.nextPath,
-      file.workspaceId,
-      file.worktreeId,
-      file.linuxServerId
-    );
-    const wasLoading = tab.loadState === "loading";
-    const canRestoreSnapshot = agentTabHasLoadedSnapshot(tab) || editorTabIsDirty(tab);
-    workbench.renameTab(tab.path, nextTabPath, payload.renamed.nextPath.split("/").at(-1) ?? payload.renamed.nextPath);
-    if (wasLoading && canRestoreSnapshot) {
-      workbench.updateTab(nextTabPath, {
-        loadState: "loaded",
-        loadError: undefined,
-        hasLoadedSnapshot: true
-      });
-    } else if (wasLoading) {
-      void openAgentFile({
-        ...file,
-        path: payload.renamed.nextPath,
-        readonly: tab.readonly ?? true,
-        activate: false,
-        closeOnNotFound: true
-      });
+  if (payload.deleted) {
+    const deletedPath = payload.deleted.path.replace(/\\/g, "/");
+    for (const tab of [...workbench.tabs]) {
+      if (!isAgentFilePath(tab.path)) continue;
+      const file = agentFileInfo(tab.path);
+      if (file.scope !== payload.scope) continue;
+      const filePath = file.path.replace(/\\/g, "/");
+      if (filePath === deletedPath
+          || (payload.deleted.type === "directory" && filePath.startsWith(`${deletedPath}/`))) {
+        workbench.closeTab(tab.path);
+      }
+    }
+  }
+  if (payload.renamed) {
+    for (const tab of [...workbench.tabs]) {
+      if (!isAgentFilePath(tab.path)) continue;
+      const file = agentFileInfo(tab.path);
+      if (file.scope !== payload.scope || file.path !== payload.renamed.path) continue;
+      const nextTabPath = agentTabPath(
+        file.scope,
+        payload.renamed.nextPath,
+        file.workspaceId,
+        file.worktreeId,
+        file.linuxServerId
+      );
+      const wasLoading = tab.loadState === "loading";
+      const canRestoreSnapshot = agentTabHasLoadedSnapshot(tab) || editorTabIsDirty(tab);
+      workbench.renameTab(tab.path, nextTabPath, payload.renamed.nextPath.split("/").at(-1) ?? payload.renamed.nextPath);
+      if (wasLoading && canRestoreSnapshot) {
+        workbench.updateTab(nextTabPath, {
+          loadState: "loaded",
+          loadError: undefined,
+          hasLoadedSnapshot: true
+        });
+      } else if (wasLoading) {
+        void openAgentFile({
+          ...file,
+          path: payload.renamed.nextPath,
+          readonly: tab.readonly ?? true,
+          activate: false,
+          closeOnNotFound: true
+        });
+      }
     }
   }
   agentConfigRevision.value += 1;

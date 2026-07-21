@@ -2694,6 +2694,11 @@ describe("backend-api", () => {
         modifiedAt: "2026-06-26T09:00:00Z"
       }
     ]);
+    await expect(client.deletePublicAgentFile(
+      "opencode/agents/obsolete.md",
+      "agw_1234567890abcdef",
+      "linux-2"
+    )).resolves.toBeNull();
 
     expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
       "http://api/api/internal/platform/workspace-management/agent-config/file-ws-route",
@@ -2714,6 +2719,14 @@ describe("backend-api", () => {
     expect(sockets[0]?.sentMessages[0]).toMatchObject({
       op: "agent-config.list",
       params: { scope: "PUBLIC", path: "opencode/agents", worktreeId: "agw_1234567890abcdef" }
+    });
+    expect(sockets[0]?.sentMessages[1]).toMatchObject({
+      op: "agent-config.delete",
+      params: {
+        scope: "PUBLIC",
+        path: "opencode/agents/obsolete.md",
+        worktreeId: "agw_1234567890abcdef"
+      }
     });
   });
 
@@ -2878,7 +2891,7 @@ describe("backend-api", () => {
     expect(sockets[1]?.sentMessages).toHaveLength(2);
   });
 
-  it("routes workspace agent config read, write and rename through one file websocket", async () => {
+  it("routes workspace agent config read, write, rename and delete through one file websocket", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
@@ -2929,6 +2942,7 @@ describe("backend-api", () => {
     await expect(
       client.renameWorkspaceAgentFile("wrk_1234567890abcdef", "review.md", "renamed.md")
     ).resolves.toBeNull();
+    await expect(client.deleteWorkspaceAgentFile("wrk_1234567890abcdef", "skills/obsolete")).resolves.toBeNull();
 
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body))).toEqual({
@@ -2941,7 +2955,8 @@ describe("backend-api", () => {
     expect(sockets[0]?.sentMessages.map((message) => message.op)).toEqual([
       "agent-config.read",
       "agent-config.write",
-      "agent-config.rename"
+      "agent-config.rename",
+      "agent-config.delete"
     ]);
   });
 

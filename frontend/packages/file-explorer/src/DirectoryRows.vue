@@ -30,8 +30,10 @@ export type WorkspaceClipboardEntry = {
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { AlertTriangle, FilePlus2, Plane, Plus, Trash2, Upload, X } from "lucide-vue-next";
+import { Plane, Plus, Trash2 } from "lucide-vue-next";
 import { cn } from "@test-agent/ui-kit";
+import FileEntryCreateDialog from "./FileEntryCreateDialog.vue";
+import FileEntryDeleteDialog from "./FileEntryDeleteDialog.vue";
 import FileIcon from "./FileIcon.vue";
 
 const props = withDefaults(defineProps<DirectoryRowsProps>(), { depth: 0, canWrite: true });
@@ -114,13 +116,8 @@ function showsWorkspaceChangeStats(entry: MaybeWorkspaceViewEntry): boolean {
 
 const entryContextMenu = ref<{ entry: FileTreeEntry; x: number; y: number } | null>(null);
 const dragOverDirectory = ref<string | null>(null);
-const showCreateDialog = ref(false);
-const createDialogParentDirectory = ref("");
-const createDialogType = ref<"file" | "directory" | "upload">("file");
-const createDialogName = ref("");
-const createDialogError = ref("");
-const showDeleteDialog = ref(false);
-const deleteDialogEntry = ref<{ path: string; name: string; type: "file" | "directory" } | null>(null);
+const createDialog = ref<InstanceType<typeof FileEntryCreateDialog> | null>(null);
+const deleteDialog = ref<InstanceType<typeof FileEntryDeleteDialog> | null>(null);
 const renamingPath = ref<string | null>(null);
 const renameName = ref("");
 const renameOriginalName = ref("");
@@ -312,59 +309,15 @@ function onRowClick(entry: FileTreeEntry) {
 
 function openCreateDialog(directory: string) {
   if (!props.canWrite) return;
-  createDialogParentDirectory.value = directory;
-  createDialogType.value = "file";
-  createDialogName.value = "";
-  createDialogError.value = "";
-  showCreateDialog.value = true;
+  createDialog.value?.open(directory);
 }
 
 /** 根目录标题与目录行的“+”共用同一个明确目标路径的操作面板。 */
 defineExpose({ openCreateDialog });
 
-function closeCreateDialog() {
-  showCreateDialog.value = false;
-  createDialogError.value = "";
-}
-
-function submitCreateDialog() {
-  if (!props.canWrite) return;
-  if (createDialogType.value === "upload") {
-    emit("requestUpload", createDialogParentDirectory.value);
-    closeCreateDialog();
-    return;
-  }
-  const name = createDialogName.value.trim();
-  if (!name) {
-    createDialogError.value = "请输入名称";
-    return;
-  }
-  if (name.includes("/") || name.includes("\\")) {
-    createDialogError.value = "名称不能包含路径分隔符";
-    return;
-  }
-  emit("createEntry", createDialogParentDirectory.value, name, createDialogType.value);
-  closeCreateDialog();
-}
-
 function openDeleteDialog(entry: FileTreeEntry) {
   if (!canMutateEntry(entry)) return;
-  deleteDialogEntry.value = { path: workspaceEntryPath(entry), name: entry.name, type: entry.type };
-  showDeleteDialog.value = true;
-}
-
-function closeDeleteDialog() {
-  showDeleteDialog.value = false;
-  deleteDialogEntry.value = null;
-}
-
-function submitDeleteDialog() {
-  if (!props.canWrite) return;
-  if (!deleteDialogEntry.value) {
-    return;
-  }
-  emit("deleteEntry", deleteDialogEntry.value.path, deleteDialogEntry.value.type);
-  closeDeleteDialog();
+  deleteDialog.value?.open({ path: workspaceEntryPath(entry), type: entry.type });
 }
 
 function startRename(entry: FileTreeEntry) {
@@ -610,147 +563,15 @@ function submitRename() {
         </button>
       </div>
     </Teleport>
-    <Teleport to="body">
-      <div
-        v-if="showCreateDialog"
-        class="ta-file-dialog-overlay"
-        @keydown.esc="closeCreateDialog"
-        @click.self="closeCreateDialog"
-      >
-        <section
-          role="dialog"
-          aria-modal="true"
-          aria-label="新建或上传文件"
-          class="ta-file-dialog"
-        >
-          <header class="ta-file-dialog-header">
-            <div class="ta-file-dialog-heading">
-              <span class="ta-file-dialog-icon"><FilePlus2 :size="16" :stroke-width="1.7" /></span>
-              <div>
-                <h2>新建或上传</h2>
-                <p>选择要在当前目录执行的操作</p>
-              </div>
-            </div>
-            <button type="button" class="ta-file-dialog-close" aria-label="关闭" @click="closeCreateDialog">
-              <X :size="15" :stroke-width="1.7" />
-            </button>
-          </header>
-          <div class="ta-file-dialog-body">
-            <div class="ta-file-dialog-path">
-              <span>目标目录</span>
-              <code>{{ createDialogParentDirectory || '工作区根目录' }}</code>
-            </div>
-            <div class="ta-file-dialog-field">
-              <label>操作类型</label>
-              <div class="ta-file-dialog-segments">
-                <button
-                  type="button"
-                  :class="{ 'is-active': createDialogType === 'file' }"
-                  @click="createDialogType = 'file'"
-                >
-                  文件
-                </button>
-                <button
-                  type="button"
-                  :class="{ 'is-active': createDialogType === 'directory' }"
-                  @click="createDialogType = 'directory'"
-                >
-                  文件夹
-                </button>
-                <button
-                  type="button"
-                  :class="{ 'is-active': createDialogType === 'upload' }"
-                  @click="createDialogType = 'upload'"
-                >
-                  上传
-                </button>
-              </div>
-            </div>
-            <div v-if="createDialogType !== 'upload'" class="ta-file-dialog-field">
-              <label>
-                {{ createDialogType === 'file' ? '文件名' : '文件夹名' }}
-              </label>
-              <input
-                v-model="createDialogName"
-                type="text"
-                :placeholder="createDialogType === 'file' ? '例如：README.md' : '例如：docs'"
-                class="ta-file-dialog-input"
-                @keydown.enter="submitCreateDialog"
-                autofocus
-              />
-              <span v-if="createDialogError" class="ta-file-dialog-error">
-                {{ createDialogError }}
-              </span>
-            </div>
-            <div v-else class="ta-file-dialog-upload-note">
-              <Upload :size="17" :stroke-width="1.6" />
-              <div>
-                <strong>从本机选择文件</strong>
-                <span>支持一次选择多个文件，上传时不会覆盖同名内容。</span>
-              </div>
-            </div>
-          </div>
-          <footer class="ta-file-dialog-footer">
-            <button type="button" class="ta-file-dialog-button" @click="closeCreateDialog">
-              取消
-            </button>
-            <button
-              type="button"
-              class="ta-file-dialog-button is-primary"
-              :disabled="createDialogType !== 'upload' && !createDialogName.trim()"
-              @click="submitCreateDialog"
-            >
-              {{ createDialogType === 'upload' ? '选择文件' : '创建' }}
-            </button>
-          </footer>
-        </section>
-      </div>
-    </Teleport>
-    <Teleport to="body">
-      <div
-        v-if="showDeleteDialog"
-        class="ta-file-dialog-overlay"
-        @keydown.esc="closeDeleteDialog"
-        @click.self="closeDeleteDialog"
-      >
-        <section
-          role="dialog"
-          aria-modal="true"
-          :aria-label="deleteDialogEntry?.type === 'directory' ? '删除文件夹' : '删除文件'"
-          class="ta-file-dialog ta-file-dialog--danger"
-        >
-          <header class="ta-file-dialog-header">
-            <div class="ta-file-dialog-heading">
-              <span class="ta-file-dialog-icon"><AlertTriangle :size="16" :stroke-width="1.8" /></span>
-              <div>
-                <h2>确认删除</h2>
-                <p>此操作会立即写入当前个人 worktree</p>
-              </div>
-            </div>
-            <button type="button" class="ta-file-dialog-close" aria-label="关闭" @click="closeDeleteDialog">
-              <X :size="15" :stroke-width="1.7" />
-            </button>
-          </header>
-          <div class="ta-file-dialog-body">
-            <div class="ta-file-dialog-danger-card">
-              <span>{{ deleteDialogEntry?.type === 'directory' ? '文件夹' : '文件' }}</span>
-              <strong>{{ deleteDialogEntry?.path }}</strong>
-            </div>
-            <p class="ta-file-dialog-warning">
-              {{ deleteDialogEntry?.type === 'directory' ? '文件夹及其中的全部内容都会被删除。' : '文件删除后无法恢复。' }}
-            </p>
-          </div>
-          <footer class="ta-file-dialog-footer">
-            <button type="button" class="ta-file-dialog-button" @click="closeDeleteDialog">
-              取消
-            </button>
-            <button type="button" class="ta-file-dialog-button is-danger" @click="submitDeleteDialog">
-              确认删除
-            </button>
-          </footer>
-        </section>
-      </div>
-    </Teleport>
+    <FileEntryCreateDialog
+      ref="createDialog"
+      @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
+      @request-upload="emit('requestUpload', $event)"
+    />
+    <FileEntryDeleteDialog
+      ref="deleteDialog"
+      @confirm="(path, type) => emit('deleteEntry', path, type)"
+    />
   </div>
 </template>
 

@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import {
   AlertTriangle,
   Check,
+  FilePlus2,
   FolderGit2,
   GitBranch,
   GitCompare,
@@ -14,6 +15,7 @@ import {
   MoreHorizontal
 } from "lucide-vue-next";
 import { createBackendApiClient } from "@test-agent/backend-api";
+import { FileEntryCreateDialog, FileEntryDeleteDialog } from "@test-agent/file-explorer";
 import { useWorkbenchStore } from "@test-agent/workbench-shell";
 import { Button, Input } from "@test-agent/ui-kit";
 import type {
@@ -36,7 +38,8 @@ type Scope = "PUBLIC" | "WORKSPACE";
 type AgentConfigMutation = {
   scope: Scope;
   paths: string[];
-  renamed: { path: string; nextPath: string; type: "file" };
+  deleted?: { path: string; type: "file" | "directory" };
+  renamed?: { path: string; nextPath: string; type: "file" };
 };
 
 const props = defineProps<{
@@ -80,6 +83,10 @@ const errorMessage = ref("");
 const activeScope = ref<Scope | null>(null);
 const activeFileByScope = ref<Record<Scope, string | null>>({ PUBLIC: null, WORKSPACE: null });
 const diffFiles = ref<AgentConfigDiffFile[]>([]);
+const createEntryDialog = ref<InstanceType<typeof FileEntryCreateDialog> | null>(null);
+const createEntryScope = ref<Scope>("WORKSPACE");
+const deleteEntryDialog = ref<InstanceType<typeof FileEntryDeleteDialog> | null>(null);
+const deleteEntryScope = ref<Scope>("WORKSPACE");
 const publicConflictPathHints = ref<string[]>([]);
 const selectedDiffPath = ref("");
 const commitMessage = ref("");
@@ -277,10 +284,97 @@ function canWriteScope(scope: Scope) {
   return scope === "PUBLIC" ? props.canWrite : workspaceCanWrite.value;
 }
 
+/** Agent 配置树复用工作空间的新建面板，作用域只负责补齐文件路由上下文。 */
+function openCreateEntryDialog(scope: Scope, directory: string) {
+  if (!canWriteScope(scope) || busy.value) return;
+  if (scope === "PUBLIC" && (!publicWorktree.value?.worktreeId || status.value.PUBLIC?.enabled === false)) return;
+  if (scope === "WORKSPACE" && !props.workspaceId) return;
+  createEntryScope.value = scope;
+  createEntryDialog.value?.open(directory);
+}
+
+function agentEntryPath(directory: string, name: string) {
+  return directory ? `${directory.replace(/\/+$/, "")}/${name}` : name;
+}
+
+function isWorkspaceAgentDiffPath(path: string) {
+  const normalized = path.replace(/^\/+/, "");
+  return normalized === "opencode.jsonc"
+    || normalized.startsWith("agents/")
+    || normalized.startsWith("skills/");
+}
+
+function canCreateInDirectory(scope: Scope, path: string) {
+  return scope === "PUBLIC"
+    || path === "agents"
+    || path.startsWith("agents/")
+    || path === "skills"
+    || path.startsWith("skills/");
+}
+
+function canDeleteEntry(scope: Scope, path: string) {
+  if (scope === "PUBLIC") return true;
+  const normalized = path.replace(/^\/+|\/+$/g, "");
+  return normalized === "opencode.jsonc"
+    || normalized === "agents"
+    || normalized.startsWith("agents/")
+    || normalized === "skills"
+    || normalized.startsWith("skills/");
+}
+
 function canRenameEntry(scope: Scope, path: string) {
   const normalized = path.replace(/^\/+|\/+$/g, "");
   return scope === "WORKSPACE"
     && (normalized.startsWith("agents/") || normalized.startsWith("skills/"));
+}
+
+/** 文件和目录沿用工作空间删除确认面板，作用域仅负责补齐 Agent 文件路由。 */
+function openDeleteEntryDialog(scope: Scope, entry: FileTreeEntry) {
+  if (!canWriteScope(scope) || busy.value || !canDeleteEntry(scope, entry.path)) return;
+  if (scope === "PUBLIC" && (!publicWorktree.value?.worktreeId || status.value.PUBLIC?.enabled === false)) return;
+  if (scope === "WORKSPACE" && !props.workspaceId) return;
+  deleteEntryScope.value = scope;
+  deleteEntryDialog.value?.open({ path: entry.path, type: entry.type });
+}
+
+/**
+ * 新文件沿用 Agent 配置 write RPC；Git 不记录空目录，因此文件夹用 `.gitkeep` 形成可提交变更。
+ * 创建完成后只刷新目标目录，并把真实 Git 路径交给既有 revision/diff 刷新链路。
+ */
+async function createAgentEntry(directory: string, name: string, type: "file" | "directory") {
+  const scope = createEntryScope.value;
+  if (!canWriteScope(scope) || busy.value) return;
+  if ((entriesByScope.value[scope][directory] ?? []).some((entry) => entry.name === name)) {
+    notifyError(`创建${type === "file" ? "文件" : "文件夹"}失败`, "同名条目已存在");
+    return;
+  }
+  const fullPath = agentEntryPath(directory, name);
+  const writtenPath = type === "directory" ? `${fullPath}/.gitkeep` : fullPath;
+  if (scope === "WORKSPACE" && !isWorkspaceAgentDiffPath(writtenPath)) {
+    notifyError("创建应用 Agent 配置失败", "请在 agents 或 skills 目录内新建；根目录仅支持 opencode.jsonc、agents 和 skills");
+    return;
+  }
+  busy.value = true;
+  errorMessage.value = "";
+  try {
+    if (scope === "PUBLIC") {
+      const linuxServerId = await publicFileLinuxServerId();
+      await api.writePublicAgentFile(writtenPath, "", worktreeId(scope), linuxServerId);
+    } else {
+      await api.writeWorkspaceAgentFile(props.workspaceId!, writtenPath, "", worktreeId(scope));
+    }
+    await loadDirectory(scope, directory, true);
+    emit("files-mutated", { scope, paths: [writtenPath] });
+    if (type === "file") {
+      await openFile(scope, fullPath);
+    }
+    notifySuccess(type === "file" ? "Agent 文件已创建" : "Agent 文件夹已创建", fullPath);
+  } catch (error) {
+    errorMessage.value = formatAgentConfigError(error, `创建 Agent ${type === "file" ? "文件" : "文件夹"}失败`);
+    notifyError(`创建 Agent ${type === "file" ? "文件" : "文件夹"}失败`, errorMessage.value);
+  } finally {
+    busy.value = false;
+  }
 }
 
 /** 应用 Agent 文件沿用普通文件树的双击行内改名交互，落盘仍走专用 Agent 配置 RPC。 */
@@ -288,7 +382,7 @@ async function renameAgentEntry(path: string, name: string) {
   const scope: Scope = "WORKSPACE";
   if (!props.workspaceId || !canWriteScope(scope) || busy.value || !canRenameEntry(scope, path)) return;
   const parent = parentDirectory(path);
-  const nextPath = parent ? `${parent}/${name}` : name;
+  const nextPath = agentEntryPath(parent, name);
   busy.value = true;
   errorMessage.value = "";
   try {
@@ -306,6 +400,53 @@ async function renameAgentEntry(path: string, name: string) {
   } catch (error) {
     errorMessage.value = formatAgentConfigError(error, "重命名应用 Agent 文件失败");
     notifyError("重命名应用 Agent 文件失败", errorMessage.value);
+  } finally {
+    busy.value = false;
+  }
+}
+
+/**
+ * Agent 文件与目录删除复用工作空间的递归删除语义；成功后清理子树缓存、关闭相关 tab 并刷新 Git Diff。
+ */
+async function deleteAgentEntry(path: string, type: "file" | "directory") {
+  const scope = deleteEntryScope.value;
+  if (!canWriteScope(scope) || busy.value || !canDeleteEntry(scope, path)) return;
+  busy.value = true;
+  errorMessage.value = "";
+  try {
+    if (scope === "PUBLIC") {
+      const linuxServerId = await publicFileLinuxServerId();
+      await api.deletePublicAgentFile(path, worktreeId(scope), linuxServerId);
+    } else {
+      await api.deleteWorkspaceAgentFile(props.workspaceId!, path, worktreeId(scope));
+    }
+    const parent = parentDirectory(path);
+    const normalizedPath = path.replace(/\\/g, "/");
+    if (type === "directory") {
+      const nextEntries = { ...entriesByScope.value[scope] };
+      for (const directory of Object.keys(nextEntries)) {
+        if (directory === normalizedPath || directory.startsWith(`${normalizedPath}/`)) {
+          delete nextEntries[directory];
+        }
+      }
+      entriesByScope.value = { ...entriesByScope.value, [scope]: nextEntries };
+      expandedByScope.value = {
+        ...expandedByScope.value,
+        [scope]: new Set([...expandedByScope.value[scope]].filter(
+          (directory) => directory !== normalizedPath && !directory.startsWith(`${normalizedPath}/`)
+        ))
+      };
+    }
+    const activePath = activeFileByScope.value[scope];
+    if (activePath === normalizedPath || (type === "directory" && activePath?.startsWith(`${normalizedPath}/`))) {
+      activeFileByScope.value = { ...activeFileByScope.value, [scope]: null };
+    }
+    await loadDirectory(scope, parent, true);
+    emit("files-mutated", { scope, paths: [path], deleted: { path, type } });
+    notifySuccess(type === "file" ? "Agent 文件已删除" : "Agent 文件夹已删除", path);
+  } catch (error) {
+    errorMessage.value = formatAgentConfigError(error, `删除 Agent ${type === "file" ? "文件" : "文件夹"}失败`);
+    notifyError(`删除 Agent ${type === "file" ? "文件" : "文件夹"}失败`, errorMessage.value);
   } finally {
     busy.value = false;
   }
@@ -1410,6 +1551,17 @@ defineExpose({
           </button>
         </el-tooltip>
         <div class="agent-root-actions">
+          <button
+            v-if="canWrite"
+            type="button"
+            class="agent-icon-btn"
+            title="在公共级根目录新建文件或文件夹"
+            aria-label="在公共级根目录新建文件或文件夹"
+            :disabled="busy || status.PUBLIC?.enabled === false || !publicWorktree?.worktreeId"
+            @click="openCreateEntryDialog('PUBLIC', '')"
+          >
+            <FilePlus2 class="h-3.5 w-3.5" :stroke-width="1.5" />
+          </button>
           <div v-if="canWrite" class="agent-more-menu-container">
             <button
               type="button"
@@ -1471,9 +1623,13 @@ defineExpose({
           :active-path="activeAgentFile?.scope === 'PUBLIC' ? activeAgentFile.path : undefined"
           :conflict-paths="publicConflictPathSet"
           :can-write="canWrite"
+          :can-create-in-directory="(path) => canCreateInDirectory('PUBLIC', path)"
+          :can-delete-entry="(path) => canDeleteEntry('PUBLIC', path)"
           :can-rename-entry="() => false"
           @toggle="(path) => toggleDirectory('PUBLIC', path)"
           @open-file="(path) => openFile('PUBLIC', path)"
+          @create-entry="(path) => openCreateEntryDialog('PUBLIC', path)"
+          @delete-entry="(entry) => openDeleteEntryDialog('PUBLIC', entry)"
         />
       </div>
 
@@ -1491,6 +1647,17 @@ defineExpose({
           </button>
         </el-tooltip>
         <div class="agent-root-actions">
+          <button
+            v-if="workspaceCanWrite"
+            type="button"
+            class="agent-icon-btn"
+            title="在应用级根目录新建文件或文件夹"
+            aria-label="在应用级根目录新建文件或文件夹"
+            :disabled="busy || !workspaceId"
+            @click="openCreateEntryDialog('WORKSPACE', '')"
+          >
+            <FilePlus2 class="h-3.5 w-3.5" :stroke-width="1.5" />
+          </button>
           <button
             v-if="workspaceCanWrite"
             type="button"
@@ -1532,13 +1699,25 @@ defineExpose({
           :active-path="activeAgentFile?.scope === 'WORKSPACE' ? activeAgentFile.path : undefined"
           :conflict-paths="new Set()"
           :can-write="workspaceCanWrite"
+          :can-create-in-directory="(path) => canCreateInDirectory('WORKSPACE', path)"
+          :can-delete-entry="(path) => canDeleteEntry('WORKSPACE', path)"
           :can-rename-entry="(path) => canRenameEntry('WORKSPACE', path)"
           @toggle="(path) => toggleDirectory('WORKSPACE', path)"
           @open-file="(path) => openFile('WORKSPACE', path)"
+          @create-entry="(path) => openCreateEntryDialog('WORKSPACE', path)"
+          @delete-entry="(entry) => openDeleteEntryDialog('WORKSPACE', entry)"
           @rename-entry="renameAgentEntry"
         />
       </div>
     </div>
+
+    <FileEntryCreateDialog
+      ref="createEntryDialog"
+      :allow-upload="false"
+      :root-label="createEntryScope === 'PUBLIC' ? '公共 Agent 根目录' : '应用 Agent 根目录'"
+      @create-entry="createAgentEntry"
+    />
+    <FileEntryDeleteDialog ref="deleteEntryDialog" @confirm="deleteAgentEntry" />
 
     <div v-if="activeScope === 'PUBLIC' && canWrite && !hideGitOps" class="agent-diff">
       <div class="agent-diff-toolbar">

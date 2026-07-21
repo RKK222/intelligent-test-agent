@@ -938,6 +938,8 @@ class AgentConfigApplicationServiceTest {
         assertThat(Files.readString(workspaceRoot.resolve(".opencode/agents/payment-review.md"))).isEqualTo("review");
         assertThat(Files.exists(workspaceRoot.resolve(".opencode/agents/review.md"))).isFalse();
         assertThat(Files.exists(workspaceRoot.resolve(".opencode/agent/new.md"))).isFalse();
+        service.deleteWorkspaceAgentFile("wrk_project", "agents/new.md", null);
+        assertThat(Files.exists(workspaceRoot.resolve(".opencode/agents/new.md"))).isFalse();
     }
 
     @Test
@@ -973,6 +975,8 @@ class AgentConfigApplicationServiceTest {
         assertThat(skillEntries).extracting(FileTreeEntryResponse::name).containsExactly("SKILL.md");
         assertThat(Files.readString(workspaceRoot.resolve(".opencode/skills/new-skill/SKILL.md"))).isEqualTo("new skill");
         assertThat(Files.exists(workspaceRoot.resolve(".opencode/agents/skills/new-skill/SKILL.md"))).isFalse();
+        service.deleteWorkspaceAgentFile("wrk_project", "skills/new-skill", null);
+        assertThat(Files.exists(workspaceRoot.resolve(".opencode/skills/new-skill"))).isFalse();
     }
 
     @Test

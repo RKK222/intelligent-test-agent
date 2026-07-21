@@ -72,7 +72,49 @@ class WorkspaceFileWebSocketHandlerTest {
     }
 
     @Test
-    void rejectsAgentConfigWriteWhenTicketIsNotSuperAdmin() {
+    void deletesPublicAgentDirectoryThroughWebSocketTicket() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
+        when(ticketService.consume("wft_public", "http://localhost:3000")).thenReturn(agentTicket(true, "PUBLIC", null, "agw_123"));
+        WebSocketHandler handler = handler(ticketService, agentConfigService);
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_public",
+                List.of("""
+                        {"id":"req_delete","op":"agent-config.delete","params":{"scope":"PUBLIC","worktreeId":"agw_123","path":"skills/obsolete"}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).hasSize(1).allSatisfy(message ->
+                assertThat(message).contains("\"id\":\"req_delete\"", "\"type\":\"result\""));
+        verify(agentConfigService).deletePublicAgentFile("skills/obsolete", "agw_123", new UserId("usr_admin"));
+    }
+
+    @Test
+    void deletesWorkspaceAgentFileWhenTicketHasAppAdminPermission() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
+        when(ticketService.consume("wft_workspace_agent", "http://localhost:3000"))
+                .thenReturn(workspaceAgentTicket(true));
+        WebSocketHandler handler = handler(ticketService, agentConfigService);
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace_agent",
+                List.of("""
+                        {"id":"req_delete","op":"agent-config.delete","params":{"scope":"WORKSPACE","workspaceId":"wrk_1234567890abcdef","path":"agents/obsolete.md"}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).hasSize(1).allSatisfy(message ->
+                assertThat(message).contains("\"id\":\"req_delete\"", "\"type\":\"result\""));
+        verify(agentConfigService).deleteWorkspaceAgentFile(
+                "wrk_1234567890abcdef",
+                "agents/obsolete.md",
+                null);
+    }
+
+    @Test
+    void rejectsAgentConfigMutationsWhenTicketIsNotSuperAdmin() {
         WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
         AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
         when(ticketService.consume("wft_public", "http://localhost:3000")).thenReturn(agentTicket(false, "PUBLIC", null, "agw_123"));
@@ -81,15 +123,18 @@ class WorkspaceFileWebSocketHandlerTest {
                 "/api/internal/platform/workspace-management/file/ws?ticket=wft_public",
                 List.of("""
                         {"id":"req_1","op":"agent-config.write","params":{"scope":"PUBLIC","worktreeId":"agw_123","path":"review.md","content":"changed"}}
+                        """, """
+                        {"id":"req_2","op":"agent-config.delete","params":{"scope":"PUBLIC","worktreeId":"agw_123","path":"review.md"}}
                         """));
 
         handler.handle(session).block();
 
-        assertThat(session.sentText()).hasSize(1).allSatisfy(message -> {
+        assertThat(session.sentText()).hasSize(2).allSatisfy(message -> {
             assertThat(message).contains("\"type\":\"error\"");
             assertThat(message).contains("\"code\":\"FORBIDDEN\"");
         });
         verify(agentConfigService, never()).writePublicAgentFile("review.md", "changed", "agw_123", new UserId("usr_admin"));
+        verify(agentConfigService, never()).deletePublicAgentFile("review.md", "agw_123", new UserId("usr_admin"));
     }
 
     @Test
@@ -506,6 +551,22 @@ class WorkspaceFileWebSocketHandlerTest {
                 "usr_1234567890abcdef",
                 "workspace",
                 null,
+                null,
+                TRACE_ID,
+                NOW.plusSeconds(60));
+    }
+
+    private static WorkspaceFileSocketTicket workspaceAgentTicket(boolean appAdmin) {
+        return new WorkspaceFileSocketTicket(
+                "wft_workspace_agent",
+                "wrk_1234567890abcdef",
+                "linux-1",
+                null,
+                false,
+                appAdmin,
+                "usr_app_admin",
+                "agent-config",
+                "WORKSPACE",
                 null,
                 TRACE_ID,
                 NOW.plusSeconds(60));

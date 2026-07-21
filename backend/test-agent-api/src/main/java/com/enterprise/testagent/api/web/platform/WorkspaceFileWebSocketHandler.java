@@ -222,6 +222,10 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                     agentConfigRename(ticket, params);
                     yield null;
                 }
+                case "agent-config.delete" -> {
+                    agentConfigDelete(ticket, params);
+                    yield null;
+                }
                 case "directory.list" -> directoryList(ticket, params);
                 case "workspace.create" -> createWorkspace(ticket, params, traceId);
                 default -> throw new PlatformException(ErrorCode.VALIDATION_ERROR, "不支持的文件 WebSocket 操作", Map.of("op", op));
@@ -375,6 +379,28 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 agentConfigWorkspaceId(ticket, params),
                 requiredText(params, "path"),
                 requiredText(params, "name"),
+                agentConfigWorktreeId(ticket, params));
+    }
+
+    private void agentConfigDelete(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        String scope = agentConfigScope(ticket, params);
+        String path = requiredText(params, "path");
+        if (SCOPE_PUBLIC.equals(scope)) {
+            if (!ticket.superAdmin()) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "无权限");
+            }
+            agentConfigService.deletePublicAgentFile(
+                    path,
+                    agentConfigWorktreeId(ticket, params),
+                    ticketUserId(ticket));
+            return;
+        }
+        if (!ticket.appAdmin()) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "应用 Agent 配置仅应用管理员可编辑");
+        }
+        agentConfigService.deleteWorkspaceAgentFile(
+                agentConfigWorkspaceId(ticket, params),
+                path,
                 agentConfigWorktreeId(ticket, params));
     }
 

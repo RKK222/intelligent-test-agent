@@ -2,6 +2,7 @@ import { shallowMount } from "@vue/test-utils";
 import { defineComponent, h } from "vue";
 import { describe, expect, it, vi } from "vitest";
 import FigmaFileExplorer from "../src/components/FigmaFileExplorer.vue";
+import AgentConfigPanel from "../src/components/AgentConfigPanel.vue";
 import GitChangesPanel from "../src/components/GitChangesPanel.vue";
 import WorkbenchFooter from "../src/components/WorkbenchFooter.vue";
 import { FileExplorer } from "@test-agent/file-explorer";
@@ -155,5 +156,26 @@ describe("FigmaFileExplorer", () => {
     expect(wrapper.text()).toContain("legacy：引用副本不可用");
     await wrapper.get('button[aria-label="刷新引用文件树"]').trigger("click");
     expect(wrapper.emitted("refresh")).toHaveLength(1);
+  });
+
+  it("forwards Agent tree mutations to the existing revision-based diff refresh owner", async () => {
+    const wrapper = shallowMount(FigmaFileExplorer, {
+      props: {
+        workspaceId: "wrk_personal",
+        entriesByDirectory: { "": [] },
+        expandedDirectories: new Set<string>(),
+        changedFiles: []
+      }
+    });
+    const mutation = {
+      scope: "WORKSPACE" as const,
+      paths: ["agents/obsolete"],
+      deleted: { path: "agents/obsolete", type: "directory" as const }
+    };
+
+    wrapper.findComponent(AgentConfigPanel).vm.$emit("files-mutated", mutation);
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.emitted("agent-config-mutated")).toEqual([[mutation]]);
   });
 });

@@ -754,6 +754,12 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         fileService.writeContent(agentRoot.toString(), relativePath, content);
     }
 
+    /** 公共 Agent 文件和目录删除复用工作空间文件服务的路径归一化与递归删除保护。 */
+    public void deletePublicAgentFile(String relativePath, String worktreeId, UserId userId) {
+        Path agentRoot = publicAgentRootForWrite(worktreeId, userId);
+        fileService.deleteFile(agentRoot.toString(), relativePath);
+    }
+
     /**
      * 把当前管理员公共个人 worktree 的完整 opencode 配置热加载到本人进程。
      *
@@ -810,6 +816,12 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     public void renameWorkspaceAgentFile(String workspaceId, String relativePath, String name, String worktreeId) {
         Path agentRoot = workspaceAgentRootForWrite(workspaceId, worktreeId);
         fileService.renameFile(agentRoot.toString(), relativePath, name);
+    }
+
+    /** 应用 Agent 文件和目录删除复用工作空间文件服务，并固定在当前个人 worktree 的 `.opencode` 根内。 */
+    public void deleteWorkspaceAgentFile(String workspaceId, String relativePath, String worktreeId) {
+        Path agentRoot = workspaceAgentRootForWrite(workspaceId, worktreeId);
+        fileService.deleteFile(agentRoot.toString(), relativePath);
     }
 
     public AgentConfigResponses.AgentConfigWorktreeResponse createPublicWorktree(

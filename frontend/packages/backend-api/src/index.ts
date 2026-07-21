@@ -1023,6 +1023,13 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         { path, content },
         { worktreeId, linuxServerId }
       ),
+    deletePublicAgentFile: (path: string, worktreeId?: string | null, linuxServerId?: string | null) =>
+      agentConfigFileRpc<void>(
+        "PUBLIC",
+        "agent-config.delete",
+        { path },
+        { worktreeId, linuxServerId }
+      ),
     createPublicAgentWorktree: (payload: AgentConfigWorktreePayload) =>
       request<AgentConfigWorktree>(`${agentConfigBase}/public/worktrees`, {
         method: "POST",
@@ -1079,6 +1086,13 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         "WORKSPACE",
         "agent-config.rename",
         { path, name },
+        { workspaceId, worktreeId }
+      ),
+    deleteWorkspaceAgentFile: (workspaceId: string, path: string, worktreeId?: string | null) =>
+      agentConfigFileRpc<void>(
+        "WORKSPACE",
+        "agent-config.delete",
+        { path },
         { workspaceId, worktreeId }
       ),
     createWorkspaceAgentWorktree: (workspaceId: string, payload: AgentConfigWorktreePayload) =>
