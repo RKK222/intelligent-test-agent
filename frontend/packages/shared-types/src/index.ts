@@ -2079,6 +2079,14 @@ export type ApplicationWorkspaceVersion = {
   updatedAt: string;
 };
 
+export type GitRepositoryAccess = {
+  accessible: boolean;
+  repositoryId: string;
+  repositoryName: string;
+  branch: string;
+  reason?: "REPOSITORY_PERMISSION_REQUIRED" | "SSH_KEY_MISSING" | string | null;
+};
+
 export type PersonalWorkspace = {
   personalWorkspaceId: string;
   versionId: string;

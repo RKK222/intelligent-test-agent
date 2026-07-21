@@ -54,6 +54,7 @@ import type {
   GeneralParameter,
   GeneralParameterListParams,
   GeneralParameterUpdatePayload,
+  GitRepositoryAccess,
   InternalModelProviderManagementResponse,
   InternalModelProviderRefreshStatus,
   InternalModelProviderUpdatePayload,
@@ -715,6 +716,11 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       routedRequest<ApplicationWorkspaceVersion>(
         `${workspaceManagementBase}/workspace-versions/${encodeURIComponent(versionId)}/git-pull`,
         { method: "POST" }
+      ),
+    /** 在版本选择产生任何本地 worktree 副作用前，以当前用户身份只读探测关联 Git 仓库。 */
+    checkWorkspaceVersionGitAccess: (versionId: string) =>
+      routedRequest<GitRepositoryAccess>(
+        `${workspaceManagementBase}/workspace-versions/${encodeURIComponent(versionId)}/git-access`
       ),
     listPersonalWorkspaces: (versionId: string) =>
       routedRequest<PersonalWorkspace[]>(`${workspaceManagementBase}/workspace-versions/${encodeURIComponent(versionId)}/personal-workspaces`),

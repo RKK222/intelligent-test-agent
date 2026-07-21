@@ -366,6 +366,52 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 .toList();
     }
 
+    /**
+     * 在创建或切换个人 worktree 前，以当前用户身份只读探测关联 Git 版本库。
+     * 认证失败和仓库不可访问被收敛为可展示的权限结果；网络、超时等基础设施故障继续抛出统一异常。
+     */
+    public ManagedWorkspaceResponses.GitRepositoryAccessResponse checkVersionGitAccess(
+            String versionId,
+            UserId userId) {
+        ApplicationWorkspaceVersion version = existingVersion(new ApplicationWorkspaceVersionId(versionId));
+        ensureMember(version.appId(), userId, loadingContextForVersion(
+                "check-version-git-access",
+                version,
+                "应用版本工作区",
+                version.version()));
+        CodeRepository repository = existingRepository(version.repositoryId());
+        try {
+            gitRemoteService.listBranches(
+                    effectiveGitUrl(repository, userId),
+                    privateKeyFor(repository, userId));
+            return gitRepositoryAccessResponse(version, repository, true, null);
+        } catch (PlatformException exception) {
+            if (exception.errorCode() == ErrorCode.FORBIDDEN) {
+                return gitRepositoryAccessResponse(version, repository, false, "SSH_KEY_MISSING");
+            }
+            Object failureType = exception.details().get("gitFailureType");
+            if (exception.errorCode() == ErrorCode.GIT_UNAVAILABLE
+                    && ("AUTHENTICATION_FAILED".equals(failureType)
+                    || "REPOSITORY_UNAVAILABLE".equals(failureType))) {
+                return gitRepositoryAccessResponse(version, repository, false, "REPOSITORY_PERMISSION_REQUIRED");
+            }
+            throw exception;
+        }
+    }
+
+    private ManagedWorkspaceResponses.GitRepositoryAccessResponse gitRepositoryAccessResponse(
+            ApplicationWorkspaceVersion version,
+            CodeRepository repository,
+            boolean accessible,
+            String reason) {
+        return new ManagedWorkspaceResponses.GitRepositoryAccessResponse(
+                accessible,
+                repository.repositoryId().value(),
+                repository.name(),
+                version.branch(),
+                reason);
+    }
+
     public ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse createVersion(
             String appId,
             String templateId,

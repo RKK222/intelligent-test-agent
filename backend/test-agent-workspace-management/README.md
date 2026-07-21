@@ -29,6 +29,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 - 与文件相关的 git 操作、差异比对、agent/skill 文件管理优先进入本模块。
 - 工作区 Git Diff 即使带工作区 pathspec，也使用 `git status --porcelain --untracked-files=all` 展开未跟踪目录中的每个文件，使接口文件数、前端数量角标和实际文件数一致；unmerged 状态保留 `rawStatus` 并返回 `status=conflict`。响应还返回 `mergeInProgress/applicationUpdatePending/applicationTargetCommit`，让个人 worktree 在 dirty 跳过、真实冲突或冲突已解决待完成 merge 时展示准确状态。普通文件通过真实 stage/unstage API 操作 index；冲突支持逐文件处理、全部采用个人/远程版本、取消 merge，并在全部解决后通过专用完成接口提交完整 merge index。个人发布要求允许发布的文件先在个人 worktree 本地提交，再投影到应用 feature worktree；应用 Agent/Skill 同样先进入个人 HEAD，再只投影 `.opencode/**` 白名单，成功后更新版本/副本 HEAD、广播并触发固定提交反向 merge。只有远端 push 完成才返回 `remotePushed=true`，响应和错误 details 会携带当前 Git 阶段与已执行命令；传入 `operationId` 时复用 Agent 配置进度端口。
 - 所有平台用户触发的 Git commit 以及可能产生 commit 的 merge 都必须显式传入当前用户身份，并注入命令级作者/提交者；提交与发布程序不再提供缺省身份兼容入口，也不依赖公共仓库或全局 Git 配置中的默认身份。平台没有邮箱字段时由 common Git 工具按统一认证号生成企业 SCM 已登记的 `mails.icbc` email，避免 invalid committer 拒绝。
+- `checkVersionGitAccess()` 在用户显式选择应用版本、创建或修复个人 worktree 前复用 `GitRemoteService.listBranches()`、当前用户唯一 SSH key 和内部仓库有效 URL 做只读预检。认证失败/仓库不可访问返回稳定的权限申请结果，缺少 SSH key 单独返回配置提示；网络和超时继续抛统一 Git 异常。
 
 ## 测试覆盖
 

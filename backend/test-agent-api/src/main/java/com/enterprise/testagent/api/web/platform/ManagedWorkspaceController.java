@@ -85,6 +85,16 @@ public class ManagedWorkspaceController {
                 RuntimeApiSupport.traceId(exchange)));
     }
 
+    /**
+     * 版本切换前只读校验当前用户是否可以访问关联 Git 版本库，不创建或修改本地工作区。
+     */
+    @GetMapping("/workspace-versions/{versionId}/git-access")
+    public ApiResponse<Object> checkVersionGitAccess(
+            @PathVariable String versionId,
+            ServerWebExchange exchange) {
+        return ok(exchange, service.checkVersionGitAccess(versionId, userId(exchange)));
+    }
+
     @GetMapping("/workspace-versions/{versionId}/personal-workspaces")
     public ApiResponse<Object> listPersonalWorkspaces(@PathVariable String versionId, ServerWebExchange exchange) {
         return ok(exchange, service.listPersonalWorkspaces(versionId, userId(exchange)));

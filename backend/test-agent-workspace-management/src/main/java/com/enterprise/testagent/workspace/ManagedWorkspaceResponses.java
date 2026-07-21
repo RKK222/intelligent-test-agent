@@ -95,6 +95,18 @@ public final class ManagedWorkspaceResponses {
         }
     }
 
+    /**
+     * 当前用户对应用版本所关联 Git 版本库的只读访问预检结果。
+     * reason 仅在不可访问时返回稳定枚举，前端据此区分申请仓库权限和补充 SSH key。
+     */
+    public record GitRepositoryAccessResponse(
+            boolean accessible,
+            String repositoryId,
+            String repositoryName,
+            String branch,
+            String reason) {
+    }
+
     public record ApplicationWorkspaceCreateResponse(
             String workspaceId,
             String appId,

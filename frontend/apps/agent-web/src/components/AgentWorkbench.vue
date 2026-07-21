@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, nextTick, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, shallowRef, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/vue-query";
@@ -3534,11 +3534,28 @@ function syncCurrentVersionFromWorkspace(workspace: Workspace) {
   // 没有匹配到时不主动清空：可能是用户刚切换应用、版本尚未加载完，避免菜单高亮闪烁。
 }
 
-// 切换到某个应用版本：通过 ensureDefaultPersonalWorkspace 确保用户拥有默认个人工作区，
-// 将返回的 runtimeWorkspace 作为当前工作区。同一用户同一版本复用 default 空间，避免重复创建。
+// 切换到某个应用版本：先只读校验当前用户对关联 Git 版本库的访问权限，再通过
+// ensureDefaultPersonalWorkspace 确保用户拥有默认个人工作区。同一用户同一版本复用 default 空间，避免重复创建。
 async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemplate; version: ApplicationWorkspaceVersion }) {
-  invalidateConversationInteraction();
   try {
+    const gitAccess = await api.checkWorkspaceVersionGitAccess(payload.version.versionId);
+    if (!gitAccess.accessible) {
+      if (gitAccess.reason === "SSH_KEY_MISSING") {
+        await ElMessageBox.alert(
+          `当前账号尚未配置 Git SSH key，暂时无法访问版本库「${gitAccess.repositoryName}」。请先在“设置 → 个人设置”中配置 SSH key，再重新选择该版本。`,
+          "需要配置 Git SSH key",
+          { type: "warning", confirmButtonText: "我知道了", autofocus: false }
+        ).catch(() => undefined);
+      } else {
+        await ElMessageBox.alert(
+          `当前账号没有版本库「${gitAccess.repositoryName}」的读取权限。请前往开发者门户申请该版本库权限，权限开通后再重新选择。`,
+          "需要申请版本库权限",
+          { type: "warning", confirmButtonText: "我知道了", autofocus: false }
+        ).catch(() => undefined);
+      }
+      return;
+    }
+    invalidateConversationInteraction();
     const defaultPw = await api.ensureDefaultPersonalWorkspace(payload.version.versionId);
     const runtimeWorkspaceId = defaultPw.runtimeWorkspace?.workspaceId;
     if (!runtimeWorkspaceId) {

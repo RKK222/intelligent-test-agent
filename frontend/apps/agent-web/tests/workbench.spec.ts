@@ -1881,6 +1881,64 @@ test("application without recent version does not fallback to first template ver
   expect(fileRequests).toEqual([]);
 });
 
+test("version selection checks git access and prompts for repository permission before creating worktree", async ({ page }) => {
+  const gitAccessRequests: string[] = [];
+  const defaultPersonalRequests: string[] = [];
+  await mockBackendApi(page, {
+    recentWorkspaces: { app_gcms: null },
+    gitAccessRequests,
+    defaultPersonalRequests,
+    gitAccessResults: {
+      awv_20260715: {
+        accessible: false,
+        repositoryId: "repo_1",
+        repositoryName: "F-GCMS 测试版本库",
+        branch: "feature_testagent_20260715",
+        reason: "REPOSITORY_PERMISSION_REQUIRED"
+      }
+    },
+    workspaceTemplates: {
+      app_gcms: [{
+        workspaceId: "awp_main",
+        workspaceName: "本地-测试",
+        appId: "app_gcms",
+        repositoryId: "repo_1",
+        branch: "main",
+        standard: true,
+        directoryPath: "F-GCMS/workspace",
+        createdAt: "2026-06-24T00:00:00Z",
+        updatedAt: "2026-06-24T00:00:00Z"
+      }]
+    },
+    workspaceVersions: {
+      "app_gcms:awp_main": [{
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_main",
+        appId: "app_gcms",
+        repositoryId: "repo_1",
+        version: "20260715",
+        branch: "feature_testagent_20260715",
+        repoRootPath: "/tmp/test-agent/appworkspace/awp_main/repo_1",
+        workspaceRootPath: "/tmp/test-agent/appworkspace/awp_main/repo_1/F-GCMS/workspace",
+        status: "ACTIVE",
+        createdAt: "2026-06-24T00:00:00Z",
+        updatedAt: "2026-06-24T00:00:00Z"
+      }]
+    }
+  });
+
+  await gotoWorkbench(page);
+  await page.locator(".ta-workbench-footer-branch").click();
+  await page.getByRole("menuitem", { name: /本地-测试/ }).hover();
+  await page.getByRole("menuitem", { name: /20260715/ }).click();
+
+  await expect(page.getByText("需要申请版本库权限")).toBeVisible();
+  await expect(page.getByText(/F-GCMS 测试版本库/)).toBeVisible();
+  await expect(page.getByText(/开发者门户/)).toBeVisible();
+  expect(gitAccessRequests).toEqual(["awv_20260715"]);
+  expect(defaultPersonalRequests).toEqual([]);
+});
+
 test("application recent version without default personal workspace stays empty", async ({ page }) => {
   const fileRequests: Array<{ workspaceId: string; path: string }> = [];
   const defaultPersonalRequests: string[] = [];
@@ -5540,6 +5598,9 @@ async function mockBackendApi(
     workspaceTemplates?: Record<string, Array<Record<string, unknown>>>;
     /** 自定义 /applications/{appId}/workspace-templates/{tid}/versions 返回；key 用 `{appId}:{templateId}`。 */
     workspaceVersions?: Record<string, Array<Record<string, unknown>>>;
+    /** 版本选择前的 Git 只读访问预检响应，以 versionId 为键。 */
+    gitAccessResults?: Record<string, Record<string, unknown>>;
+    gitAccessRequests?: string[];
     publicAgentRepositories?: Array<Record<string, unknown>>;
     publicAgentWorktreesByServer?: Record<string, Array<Record<string, unknown>>>;
     defaultPersonalRequests?: string[];
@@ -6281,6 +6342,18 @@ async function mockBackendApi(
           status: "ACTIVE",
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
+        }));
+        return;
+      }
+      if (method === "GET" && /\/api\/internal\/platform\/workspace-management\/workspace-versions\/[^/]+\/git-access$/.test(url.pathname)) {
+        const versionId = url.pathname.match(/\/workspace-versions\/([^/]+)\/git-access$/)?.[1] ?? "";
+        capture.gitAccessRequests?.push(versionId);
+        await route.fulfill(json(capture.gitAccessResults?.[versionId] ?? {
+          accessible: true,
+          repositoryId: "repo_1",
+          repositoryName: "F-GCMS 测试版本库",
+          branch: "feature_testagent_20260715",
+          reason: null
         }));
         return;
       }

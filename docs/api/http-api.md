@@ -1298,6 +1298,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `GET` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 查询模板下已创建的应用版本工作区。 |
 | `POST` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 创建或接管应用版本工作区，并创建运行态 Workspace。 |
 | `POST` | `/workspace-versions/{versionId}/git-pull` | 在当前用户 READY opencode agent 所在服务器对应用版本工作区执行 `git pull --ff-only`，成功后广播其他服务器同步到同一 commit。 |
+| `GET` | `/workspace-versions/{versionId}/git-access` | 版本选择前以当前用户身份只读探测关联 Git 版本库，不创建或修改本地工作区。 |
 | `GET` | `/workspace-versions/{versionId}/personal-workspaces` | 查询当前用户基于某版本派生的个人工作区。 |
 | `POST` | `/workspace-versions/{versionId}/personal-workspaces` | 基于应用版本工作区创建 git worktree 个人工作区。 |
 | `GET` | `/recent-workspace` | 查询当前用户全局最近使用的托管运行态 Workspace。 |
@@ -1374,6 +1375,20 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
   "updatedAt": "2026-06-23T00:00:00Z"
 }
 ```
+
+`GET /workspace-versions/{versionId}/git-access` 无请求体。后端复用当前登录用户唯一 SSH key、内部版本库统一认证号拼接和公共 Git 命令执行器，通过 `git ls-remote --heads` 做只读预检；不会 clone、fetch、创建 worktree 或写入最近使用偏好。成功响应示例：
+
+```json
+{
+  "accessible": false,
+  "repositoryId": "repo_123",
+  "repositoryName": "F-GCMS 测试版本库",
+  "branch": "feature_testagent_20260707",
+  "reason": "REPOSITORY_PERMISSION_REQUIRED"
+}
+```
+
+`accessible=true` 时 `reason=null`；缺少当前用户 SSH key 时返回 `accessible=false, reason=SSH_KEY_MISSING`；Git 认证失败或仓库不可访问时返回 `accessible=false, reason=REPOSITORY_PERMISSION_REQUIRED`，供前端展示对应版本库权限申请提示。网络、DNS、SSH 端口故障和超时仍返回统一 `GIT_UNAVAILABLE` / `GIT_TIMEOUT`，不得误报为用户没有版本库权限。应用成员校验与其它版本接口一致。
 
 `POST /workspace-versions/{versionId}/git-pull` 无请求体。后端先解析当前登录用户的 READY opencode agent 所在 `linuxServerId`，再在同服务器应用版本副本上执行 `git pull --ff-only origin {branch}`。工作树存在未提交变更、非 fast-forward、目标服务器副本缺失或 SSH key 不可用时返回统一错误；成功后更新 `targetCommitHash` 与本机副本 `replicaCommitHash`，并通过内部服务器广播要求其他服务器同步到同一 commit。
 
@@ -1544,7 +1559,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 - 工作台左下角的"应用工作空间"按钮按当前应用（`selectedAppId`）查询 `GET /applications/{appId}/workspace-templates`，渲染第一级菜单（只显示 `workspaceName`，不显示 `directoryPath` / `branch`）。
 - 鼠标 hover 第一级菜单项时按需触发 `GET /applications/{appId}/workspace-templates/{templateId}/versions` 加载该模板下的版本（懒加载，未展开的模板不发请求）。
-- 点击版本或创建新版本等用户显式动作会调用 `POST /workspace-versions/{versionId}/ensure-default-personal-workspace` 确保默认个人工作区存在（复用、接管或创建），再通过 `POST /workspaces/{workspaceId}/recent` 写入最近使用偏好，并触发工作台切换。登录/切换应用的自动默认加载只读取已有 default 私人工作区，不创建、不修复；当前用户当前应用没有 recent、recent 不能反查 `versionId`，或该版本没有 `workspaceName=default` 且带运行态 workspaceId 的个人工作区记录时，只选择应用，不自动加载工作区。普通工作区文件树、保存和左侧 Git 变更面板都基于已加载的 default 私人 worktree。
+- 点击版本时先调用 `GET /workspace-versions/{versionId}/git-access` 做只读权限预检；只有 `accessible=true` 才调用 `POST /workspace-versions/{versionId}/ensure-default-personal-workspace` 确保默认个人工作区存在（复用、接管或创建），再通过 `POST /workspaces/{workspaceId}/recent` 写入最近使用偏好并触发工作台切换。无仓库权限时前端展示对应版本库名称和申请指引，不创建 worktree。创建新版本等其它显式动作仍按其既有创建链路执行。登录/切换应用的自动默认加载只读取已有 default 私人工作区，不创建、不修复；当前用户当前应用没有 recent、recent 不能反查 `versionId`，或该版本没有 `workspaceName=default` 且带运行态 workspaceId 的个人工作区记录时，只选择应用，不自动加载工作区。普通工作区文件树、保存和左侧 Git 变更面板都基于已加载的 default 私人 worktree。
 - 当前版本匹配规则：优先按 `runtimeWorkspace.workspaceId` 精确匹配，其次按 `workspaceRootPath` 匹配 `selectedWorkspace.rootPath`。
 - 第二级菜单（版本列表）底部固定一行「+新增版本」：点击后弹 el-dialog，内嵌 `ElDatePicker`（`type=date`, `format=yyyyMMdd`），标准库直接选日期；非标准库先通过 `GET /repositories/{repoId}/branches` 加载分支列表，用户选择分支后再选日期。提交时调用 `POST /applications/{appId}/workspace-templates/{templateId}/versions`，请求体 `version` 字段为 `yyyyMMdd` 格式，非标准库同时传递 `branch`。成功后失效 `versionsByTemplateId` 缓存并把新建版本切到工作区。
 

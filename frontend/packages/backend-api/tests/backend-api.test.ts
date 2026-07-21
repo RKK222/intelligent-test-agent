@@ -1559,6 +1559,36 @@ describe("backend-api", () => {
     expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: "POST" }));
   });
 
+  it("checks version repository access before personal workspace creation", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: {
+          accessible: false,
+          repositoryId: "repo_1",
+          repositoryName: "GCMS 测试版本库",
+          branch: "feature_testagent_20260707",
+          reason: "REPOSITORY_PERMISSION_REQUIRED"
+        }
+      }), { status: 200 })
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.checkWorkspaceVersionGitAccess("awv_1")).resolves.toEqual({
+      accessible: false,
+      repositoryId: "repo_1",
+      repositoryName: "GCMS 测试版本库",
+      branch: "feature_testagent_20260707",
+      reason: "REPOSITORY_PERMISSION_REQUIRED"
+    });
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/workspace-management/workspace-versions/awv_1/git-access",
+      expect.objectContaining({ headers: expect.any(Headers) })
+    );
+    expect(fetcher.mock.calls[0]?.[1]?.method).toBeUndefined();
+  });
+
   it("does not expose SSH private key content from personal key responses", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

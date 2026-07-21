@@ -17,6 +17,7 @@ import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssi
 import com.enterprise.testagent.workspace.ManagedWorkspaceApplicationService;
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse;
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.BranchPreferenceResponse;
+import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.GitRepositoryAccessResponse;
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.ManagedApplicationResponse;
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.PersonalWorkspacePublishPreviewResponse;
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceRuntimeResponse;
@@ -124,6 +125,31 @@ class ManagedWorkspaceControllerTest {
                 .jsonPath("$.data.versionId").isEqualTo("awv_123");
 
         verify(service).gitPullVersion("awv_123", USER_ID, "10.8.0.12", TRACE_ID);
+    }
+
+    @Test
+    void versionGitAccessCheckPassesCurrentUserWithoutCreatingWorkspace() {
+        ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
+        when(service.checkVersionGitAccess("awv_123", USER_ID))
+                .thenReturn(new GitRepositoryAccessResponse(
+                        false,
+                        "repo_123",
+                        "GCMS 测试版本库",
+                        "feature_testagent_20260707",
+                        "REPOSITORY_PERMISSION_REQUIRED"));
+
+        client(service).get()
+                .uri("/api/internal/platform/workspace-management/workspace-versions/awv_123/git-access")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.accessible").isEqualTo(false)
+                .jsonPath("$.data.repositoryId").isEqualTo("repo_123")
+                .jsonPath("$.data.repositoryName").isEqualTo("GCMS 测试版本库")
+                .jsonPath("$.data.reason").isEqualTo("REPOSITORY_PERMISSION_REQUIRED");
+
+        verify(service).checkVersionGitAccess("awv_123", USER_ID);
     }
 
     @Test

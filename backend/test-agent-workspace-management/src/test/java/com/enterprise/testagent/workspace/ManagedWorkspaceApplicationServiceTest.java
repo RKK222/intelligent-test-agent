@@ -114,6 +114,119 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void versionGitAccessCheckReusesCurrentUserRepositoryIdentity() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version_access");
+
+        ManagedWorkspaceResponses.GitRepositoryAccessResponse response = service.checkVersionGitAccess(
+                version.versionId(), new UserId("usr_1"));
+
+        assertThat(response.accessible()).isTrue();
+        assertThat(response.repositoryId()).isEqualTo("repo_1");
+        assertThat(response.repositoryName()).isEqualTo("gcms/gcms");
+        assertThat(response.branch()).isEqualTo("feature_testagent_20260707");
+        assertThat(response.reason()).isNull();
+    }
+
+    @Test
+    void versionGitAccessCheckMapsAuthenticationFailureToPermissionApplication() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService creator = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = creator.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version_access_denied");
+        GitRemoteService deniedRemote = new GitRemoteService() {
+            @Override
+            public List<String> listBranches(String gitUrl, String privateKey) {
+                throw new PlatformException(
+                        ErrorCode.GIT_UNAVAILABLE,
+                        "Git 远端认证失败",
+                        Map.of("gitFailureType", "AUTHENTICATION_FAILED"));
+            }
+        };
+        ManagedWorkspaceApplicationService service = serviceWithGitRemote(
+                configuration, managed, workspaces, git, deniedRemote);
+
+        ManagedWorkspaceResponses.GitRepositoryAccessResponse response = service.checkVersionGitAccess(
+                version.versionId(), new UserId("usr_1"));
+
+        assertThat(response.accessible()).isFalse();
+        assertThat(response.reason()).isEqualTo("REPOSITORY_PERMISSION_REQUIRED");
+        assertThat(response.repositoryName()).isEqualTo("gcms/gcms");
+    }
+
+    @Test
+    void versionGitAccessCheckReportsMissingSshKeySeparately() {
+        FakeConfigurationRepository externalConfiguration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService creator = service(externalConfiguration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = creator.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version_access_no_key");
+        CodeRepository internalRepository = new CodeRepository(
+                new CodeRepositoryId("repo_1"),
+                "scm.example.com:29418/team/gcms.git",
+                "GCMS 内部版本库",
+                "gcms",
+                "APPLICATION_CODE_REPOSITORY",
+                CodeRepositoryDeploymentMode.INTERNAL.value(),
+                false,
+                Instant.now(),
+                Instant.now());
+        FakeConfigurationRepository internalConfiguration = new FakeConfigurationRepository(
+                true, internalRepository, List.of());
+        ManagedWorkspaceApplicationService service = serviceWithGitRemote(
+                internalConfiguration,
+                managed,
+                workspaces,
+                git,
+                new FakeGitRemoteService(List.of("feature_testagent_20260707")));
+
+        ManagedWorkspaceResponses.GitRepositoryAccessResponse response = service.checkVersionGitAccess(
+                version.versionId(), new UserId("usr_1"));
+
+        assertThat(response.accessible()).isFalse();
+        assertThat(response.reason()).isEqualTo("SSH_KEY_MISSING");
+        assertThat(response.repositoryName()).isEqualTo("GCMS 内部版本库");
+    }
+
+    @Test
+    void versionGitAccessCheckDoesNotMisreportNetworkFailuresAsPermissionProblems() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService creator = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = creator.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version_access_network");
+        GitRemoteService unavailableRemote = new GitRemoteService() {
+            @Override
+            public List<String> listBranches(String gitUrl, String privateKey) {
+                throw new PlatformException(
+                        ErrorCode.GIT_UNAVAILABLE,
+                        "Git 远端网络连接失败",
+                        Map.of("gitFailureType", "NETWORK_UNAVAILABLE"));
+            }
+        };
+        ManagedWorkspaceApplicationService service = serviceWithGitRemote(
+                configuration, managed, workspaces, git, unavailableRemote);
+
+        assertThatThrownBy(() -> service.checkVersionGitAccess(version.versionId(), new UserId("usr_1")))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.GIT_UNAVAILABLE);
+                    assertThat(exception.details()).containsEntry("gitFailureType", "NETWORK_UNAVAILABLE");
+                });
+    }
+
+    @Test
     void createVersionRejectsExistingApplicationRepoDirectoryWithoutGitMetadata() throws Exception {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
@@ -1956,6 +2069,25 @@ class ManagedWorkspaceApplicationServiceTest {
                 workspaces,
                 new FakeUserRepository(),
                 new FakeGitRemoteService(branches),
+                git,
+                sshKeyFixtures.encryptionService(),
+                new WorkspaceServerIdentity("127.0.0.1"),
+                new RecordingBroadcastPublisher());
+    }
+
+    private ManagedWorkspaceApplicationService serviceWithGitRemote(
+            FakeConfigurationRepository configuration,
+            FakeManagedWorkspaceRepository managed,
+            FakeWorkspaceRepository workspaces,
+            FakeGitWorkspaceService git,
+            GitRemoteService gitRemoteService) {
+        return new ManagedWorkspaceApplicationService(
+                configuration,
+                commonParameters(),
+                managed,
+                workspaces,
+                new FakeUserRepository(),
+                gitRemoteService,
                 git,
                 sshKeyFixtures.encryptionService(),
                 new WorkspaceServerIdentity("127.0.0.1"),
