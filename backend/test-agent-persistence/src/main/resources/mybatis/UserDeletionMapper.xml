@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.UserDeletionMapper">
+
+    <sql id="UserIdList">
+        <foreach collection="userIds" item="userId" open="(" separator="," close=")">
+            #{userId}
+        </foreach>
+    </sql>
+
+    <select id="lockExistingUserIds" resultType="string">
+        select user_id
+        from users
+        where user_id in <include refid="UserIdList"/>
+        order by user_id
+        for update
+    </select>
+
+    <!--
+      这些引用承载共享资产、运行态或需要保留的审计配置，用户管理入口不能静默级联删除。
+      账号角色、登录日志、成员关系、偏好和个人统计等可安全附属数据不在阻断集合中。
+    -->
+    <select id="findDeletionBlockedUserIds" resultType="string">
+        select distinct referenced_users.user_id
+        from (
+            select created_by_user_id as user_id from application_workspace_versions
+            union all select user_id from personal_workspaces
+            union all select user_id from opencode_server_processes
+            union all select user_id from user_opencode_process_bindings
+            union all select owner_user_id from scheduled_task_plans
+            union all select requested_by_user_id from scheduled_task_runs where requested_by_user_id is not null
+            union all select stop_requested_by_user_id from scheduled_task_runs where stop_requested_by_user_id is not null
+            union all select created_by_user_id from sessions where created_by_user_id is not null
+            union all select triggered_by_user_id from runs where triggered_by_user_id is not null
+            union all select sender_user_id from session_messages where sender_user_id is not null
+            union all select requested_by_user_id from workspace_create_operations
+            union all select created_by_user_id from agent_config_worktrees
+            union all select requested_by_user_id from opencode_process_start_operations
+            union all select credential_user_id from reference_repository_states where credential_user_id is not null
+            union all select owner_user_id from night_execution_tasks
+            union all select owner_user_id from night_execution_session_locks
+        ) referenced_users
+        where referenced_users.user_id in <include refid="UserIdList"/>
+        order by referenced_users.user_id
+    </select>
+
+    <delete id="deleteAnalyticsHourly">
+        delete from analytics_user_activity_hourly
+        where user_id in <include refid="UserIdList"/>
+    </delete>
+
+    <delete id="deleteAnalyticsDaily">
+        delete from analytics_user_activity_daily
+        where user_id in <include refid="UserIdList"/>
+    </delete>
+
+    <delete id="deleteAiMessageFeedbacks">
+        delete from ai_message_feedbacks
+        where user_id in <include refid="UserIdList"/>
+    </delete>
+
+    <delete id="deleteWorkspaceSyncRecords">
+        delete from workspace_sync_records
+        where user_id in <include refid="UserIdList"/>
+    </delete>
+
+    <delete id="deleteWorkspaceBranchPreferences">
+        delete from user_workspace_branch_preferences
+        where user_id in <include refid="UserIdList"/>
+    </delete>
+
+    <delete id="deleteApplicationWorkspacePreferences">
+        delete from user_application_workspace_preferences
+        where user_id in <include refid="UserIdList"/>
+    </delete>
+
+    <delete id="deleteGlobalWorkspacePreferences">
+        delete from user_global_workspace_preferences
+        where user_id in <include refid="UserIdList"/>
+    </delete>
+
+    <delete id="deleteUserSshKeys">
+        delete from user_ssh_keys
+        where user_id in <include refid="UserIdList"/>
+    </delete>
+
+    <delete id="deleteApplicationMembers">
+        delete from application_members
+        where user_id in <include refid="UserIdList"/>
+    </delete>
+
+    <delete id="deleteUserLoginLogs">
+        delete from user_login_logs
+        where user_id in <include refid="UserIdList"/>
+    </delete>
+
+    <delete id="deleteUserRoles">
+        delete from user_roles
+        where user_id in <include refid="UserIdList"/>
+    </delete>
+
+    <delete id="deleteUsers">
+        delete from users
+        where user_id in <include refid="UserIdList"/>
+    </delete>
+</mapper>

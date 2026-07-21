@@ -126,7 +126,10 @@ import type {
   ServerTerminalTicketRequest,
   TerminalTicketResponse,
   TodoItem,
+  DeleteUsersResult,
+  SyncUsersFromTcdsResult,
   UpdateUserRolePayload,
+  UserIdsPayload,
   UpdateRepositoryPayload,
   UserManagementUser,
   UserOpencodeProcess,
@@ -1617,6 +1620,29 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     updateUserRole: (userId: string, payload: UpdateUserRolePayload) =>
       request<UserManagementUser>(`${systemManagementBase}/users/${encodeURIComponent(userId)}/roles`, {
         method: "PUT",
+        body: JSON.stringify(payload)
+      }),
+    /** 删除单个未承载业务资产的用户（仅 SUPER_ADMIN）。 */
+    deleteUser: (userId: string) =>
+      request<DeleteUsersResult>(`${systemManagementBase}/users/${encodeURIComponent(userId)}`, {
+        method: "DELETE"
+      }),
+    /** 原子批量删除未承载业务资产的用户（仅 SUPER_ADMIN）。 */
+    deleteUsers: (payload: UserIdsPayload) =>
+      request<DeleteUsersResult>(`${systemManagementBase}/users/batch-delete`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
+    /** 从 TCDS 原位同步单个用户姓名和部门，保留既有业务关联。 */
+    syncUserFromTcds: (userId: string) =>
+      request<SyncUsersFromTcdsResult>(
+        `${systemManagementBase}/users/${encodeURIComponent(userId)}/tcds-sync`,
+        { method: "POST" }
+      ),
+    /** 从 TCDS 原位批量同步用户姓名和部门。 */
+    syncUsersFromTcds: (payload: UserIdsPayload) =>
+      request<SyncUsersFromTcdsResult>(`${systemManagementBase}/users/tcds-sync`, {
+        method: "POST",
         body: JSON.stringify(payload)
       }),
     /** 查询可选角色列表，供新增用户下拉选择。 */

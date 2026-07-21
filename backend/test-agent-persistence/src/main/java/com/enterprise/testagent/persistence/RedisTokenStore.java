@@ -2,12 +2,20 @@ package com.enterprise.testagent.persistence;
 
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.auth.TokenStore;
+import com.enterprise.testagent.domain.user.UserId;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 /**
@@ -67,6 +75,52 @@ public class RedisTokenStore implements TokenStore {
     @Override
     public void delete(String token) {
         redisTemplate.delete(redisKey(token));
+    }
+
+    /**
+     * 使用增量 SCAN 查找目标用户的历史 Token，避免管理员批量删除时执行阻塞式 KEYS。
+     *
+     * <p>Token 最长只保留一天，删除属于低频高权限操作；逐条解析现有 AuthPrincipal
+     * 能兼容上线前已经签发、尚未建立用户反向索引的 Token。
+     */
+    @Override
+    public void deleteByUserIds(Collection<UserId> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return;
+        }
+        Set<String> targetUserIds = new HashSet<>();
+        for (UserId userId : userIds) {
+            if (userId != null) {
+                targetUserIds.add(userId.value());
+            }
+        }
+        if (targetUserIds.isEmpty()) {
+            return;
+        }
+
+        List<String> matchedTokenKeys = new ArrayList<>();
+        ScanOptions options = ScanOptions.scanOptions().match(KEY_PREFIX + "*").count(256).build();
+        try (Cursor<String> cursor = redisTemplate.scan(options)) {
+            while (cursor.hasNext()) {
+                String key = cursor.next();
+                String value = redisTemplate.opsForValue().get(key);
+                if (value == null) {
+                    continue;
+                }
+                try {
+                    AuthPrincipal principal = objectMapper.readValue(value, AuthPrincipal.class);
+                    if (targetUserIds.contains(principal.userId().value())) {
+                        matchedTokenKeys.add(key);
+                    }
+                } catch (JsonProcessingException exception) {
+                    // 兼容历史损坏值：不输出包含 token 的 Redis key，只记录一次低级别诊断。
+                    LOGGER.debug("Ignored malformed auth principal while revoking deleted users");
+                }
+            }
+        }
+        if (!matchedTokenKeys.isEmpty()) {
+            redisTemplate.delete(matchedTokenKeys);
+        }
     }
 
     @Override

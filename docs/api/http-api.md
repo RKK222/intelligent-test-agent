@@ -2390,6 +2390,10 @@ Base URL：`/api/internal/platform/system-management`
 | `GET` | `/users` | 分页查询用户列表，可按关键字匹配用户名/统一认证号。 |
 | `POST` | `/users` | 创建测试用户，密码默认为 `123456`，并授予单个角色。 |
 | `PUT` | `/users/{userId}/roles` | 替换指定用户的全局角色，当前测试入口只保留单个角色。 |
+| `DELETE` | `/users/{userId}` | 删除单个未承载业务资产的用户，禁止删除当前登录用户。 |
+| `POST` | `/users/batch-delete` | 批量删除未承载业务资产的用户，整批全有或全无。 |
+| `POST` | `/users/{userId}/tcds-sync` | 从 TCDS 原位补全单个存量用户的姓名和部门。 |
+| `POST` | `/users/tcds-sync` | 批量从 TCDS 原位补全姓名和部门，全部查询成功后统一写库。 |
 | `GET` | `/roles` | 查询可选角色列表，供前端新增用户下拉选择。 |
 
 `GET /users` 查询参数：
@@ -2447,6 +2451,15 @@ Base URL：`/api/internal/platform/system-management`
 - `role` 必填，必须是 `ROLE` 字典中的有效角色 code。
 - 用户不存在时返回 `NOT_FOUND`；角色无效时返回 `VALIDATION_ERROR`。
 - 更新成功后返回更新后的用户响应字段，`roles` / `roleLabels` 反映最新角色。
+
+用户删除与存量信息补全：
+
+- 单个删除与批量删除共用相同安全规则。批量请求体为 `{ "userIds": ["usr_a", "usr_b"] }`，去重后单次最多 100 个；任一用户不存在、包含当前登录用户或仍有关联业务资产时整批不删除。
+- 会话、Run/消息、个人或应用版本工作区、opencode 进程/绑定、定时任务、夜间任务、工作区创建/Agent 配置操作及引用资产凭据等记录属于受保护业务资产，存在这些引用时返回 `CONFLICT`，`details.userIds` 给出被阻断的用户 ID。管理员应对这些用户改用 TCDS 同步，不能通过本接口级联清除历史数据。
+- 删除成功时，同一事务清理角色、应用成员、登录日志、SSH key、个人偏好、同步记录、反馈和用户统计等账号附属数据，并在事务前后撤销该用户尚未过期的登录 Token、失效用户级会话运行上下文。响应为 `{ "deletedUserIds": [...], "deletedCount": 2 }`。
+- TCDS 单个与批量同步分别使用上述两个 `tcds-sync` 入口；批量请求体同样为 `userIds`，去重后单次最多 20 个。后端使用用户现有 `unifiedAuthId` 查询 TCDS，把 `fullname`、`basement`、`departname` 分别写入 `username`、`rdDepartment`、`department`；任一用户不存在、TCDS 查询失败或姓名为空时不写入本批数据。
+- TCDS 同步保留原 `userId`、统一认证号、组织、密码、状态、全局角色、`application_members`、会话、工作区和运行记录，所以有历史数据的存量用户无需删除重建。TCDS 当前响应不包含平台应用成员关系，无法据此推断“属于哪个应用”；缺失的应用关系仍通过配置管理既有 `POST /api/internal/platform/configuration-management/applications/{appId}/members` 添加。
+- TCDS 同步响应为 `{ "syncedUserIds": [...], "syncedCount": 2 }`。
 
 `GET /roles` 响应：
 

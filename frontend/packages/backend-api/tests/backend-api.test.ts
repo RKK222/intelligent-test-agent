@@ -318,6 +318,49 @@ describe("backend-api", () => {
     );
   });
 
+  it("deletes and syncs managed users through single and batch endpoints", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const path = String(input);
+      const data = path.includes("tcds-sync")
+        ? { syncedUserIds: ["usr_a", "usr_b"], syncedCount: 2 }
+        : { deletedUserIds: ["usr_a", "usr_b"], deletedCount: 2 };
+      return new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data }), { status: 200 });
+    });
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await client.deleteUser("usr/a");
+    await client.deleteUsers({ userIds: ["usr_a", "usr_b"] });
+    await client.syncUserFromTcds("usr/a");
+    await client.syncUsersFromTcds({ userIds: ["usr_a", "usr_b"] });
+
+    expect(fetcher.mock.calls.map((call) => [call[0], call[1]?.method, call[1]?.body])).toEqual([
+      [
+        "http://api/api/internal/platform/system-management/users/usr%2Fa",
+        "DELETE",
+        undefined
+      ],
+      [
+        "http://api/api/internal/platform/system-management/users/batch-delete",
+        "POST",
+        JSON.stringify({ userIds: ["usr_a", "usr_b"] })
+      ],
+      [
+        "http://api/api/internal/platform/system-management/users/usr%2Fa/tcds-sync",
+        "POST",
+        undefined
+      ],
+      [
+        "http://api/api/internal/platform/system-management/users/tcds-sync",
+        "POST",
+        JSON.stringify({ userIds: ["usr_a", "usr_b"] })
+      ]
+    ]);
+  });
+
   it("reports raw backend exchanges without exposing sensitive request headers", async () => {
     const responseText = JSON.stringify({
       success: true,

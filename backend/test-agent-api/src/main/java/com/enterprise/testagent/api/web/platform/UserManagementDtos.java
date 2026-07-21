@@ -1,5 +1,7 @@
 package com.enterprise.testagent.api.web.platform;
 
+import java.util.List;
+
 /**
  * 用户管理 API 的请求 DTO。
  */
@@ -47,6 +49,25 @@ public final class UserManagementDtos {
             if (role == null || role.isBlank()) {
                 throw new IllegalArgumentException("角色不能为空");
             }
+        }
+    }
+
+    /**
+     * 批量用户操作请求。具体数量上限由业务服务按删除或 TCDS 同步场景分别校验。
+     */
+    public record UserIdsRequest(List<String> userIds) {
+
+        /**
+         * 拒绝空请求，并复制列表避免 Controller 调用后被外部修改。
+         */
+        public UserIdsRequest {
+            if (userIds == null || userIds.isEmpty()) {
+                throw new IllegalArgumentException("用户 ID 列表不能为空");
+            }
+            if (userIds.stream().anyMatch(userId -> userId == null || userId.isBlank())) {
+                throw new IllegalArgumentException("用户 ID 不能为空");
+            }
+            userIds = List.copyOf(userIds);
         }
     }
 }

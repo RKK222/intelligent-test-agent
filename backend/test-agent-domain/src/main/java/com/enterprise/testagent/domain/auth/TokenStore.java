@@ -1,5 +1,7 @@
 package com.enterprise.testagent.domain.auth;
 
+import com.enterprise.testagent.domain.user.UserId;
+import java.util.Collection;
 import java.util.Optional;
 
 /**
@@ -22,6 +24,11 @@ public interface TokenStore {
      * 删除 Token（登出时调用）。
      */
     void delete(String token);
+
+    /**
+     * 删除指定用户的全部有效 Token，用于管理员删除账号后立即收敛既有登录态。
+     */
+    void deleteByUserIds(Collection<UserId> userIds);
 
     /**
      * 检查 Token 是否存在且有效。

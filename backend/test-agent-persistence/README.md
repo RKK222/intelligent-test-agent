@@ -21,6 +21,7 @@
 - `RunMapper.xml` 提供精确 `SIDE_QUESTION + active + updated_at < cutoff` 孤儿查询；Session history 与用户 runtime-state 查询显式排除内部 `SIDE_QUESTION` Session，即使异常数据误为 ACTIVE 也不可见。
 - Flyway migration，包含 PostgreSQL 16 所需的 Flyway database support。
 - Repository 实现和数据库映射；新增或修改关系型 SQL 必须通过 MyBatis XML mapper。
+- `UserDeletionMapper.xml` / `MyBatisUserDeletionRepository` 以 MyBatis XML 锁定目标用户、汇总受保护业务引用，并按外键顺序清理账号附属数据；不级联删除会话、工作区、进程或调度历史。`RedisTokenStore` 使用增量 `SCAN` 撤销目标用户上线前已签发的 Token，不执行阻塞式 `KEYS`，也不记录 Token key/value。
 - Redis 会话运行上下文、Run 运行数据面、限流、幂等和运行心跳能力适配；用户进程运行管理与 manager 控制面在线状态依赖 Redis。用户级 OpenCode dispose 闸门与 `active:user`、`runtime-user` marker 使用同一 `{userId}` slot：新 Run 在一个 Lua 内先检查闸门再登记 active/marker，dispose 则先清理过期 active 成员再原子确认空闲并申请可续租 token，禁止跨 `{runId}`/`{userId}` slot 执行脚本。通用参数值不写入 Redis，运行态读取直接查询数据库。
 
 ## 建表规范
@@ -118,6 +119,7 @@
 
 - `JdbcRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖 Workspace（含 `linux_server_id`、历史脏 `updated_at < created_at` 归一化）、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision 的保存和读取。
 - `MyBatisCommonParameterRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖通用参数 MyBatis XML 查询、列表、按 ID 查询和仅更新 value。
+- `MyBatisUserDeletionRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式加载真实 MyBatis XML，覆盖无业务用户的角色、登录日志、应用成员清理和受保护业务引用阻断；`RedisTokenStoreTest` 覆盖增量扫描只删除目标用户 Token。
 - `JdbcRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖 Workspace（含 `linux_server_id`）、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision 的保存和读取。
 - `MyBatisCommonParameterRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖通用参数 MyBatis XML 查询、列表、按 ID 查询、`SYS_DATA_ROOT_DIR` 三平台种子和仅更新 value。
 - `MyBatisRunSessionScopeRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖 Run session scope 表、MyBatis XML upsert/query、按 root session 查询和 root/child session 映射；`PersistenceSqlConventionTest` 固化 Run session scope mapper 在 PostgreSQL `MERGE` 中必须显式 cast 时间参数。

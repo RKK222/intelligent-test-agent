@@ -18,6 +18,7 @@
 - `mybatis.MyBatisCommonParameterRepository`：通用参数领域端口的生产 Bean。
 - `mybatis.InternalModelProviderMapper` / `mybatis/InternalModelProviderMapper.xml`：内部模型供应商和代理 token 的 MyBatis SQL。
 - `mybatis.MyBatisInternalModelProviderRepository`：内部模型供应商领域端口的生产 Bean。
+- `mybatis.UserDeletionMapper` / `mybatis/UserDeletionMapper.xml` / `mybatis.MyBatisUserDeletionRepository`：用户安全删除领域端口的生产实现，锁定目标用户、识别会话/工作区/进程/调度等受保护引用，并按外键顺序清理可随账号删除的附属表。
 - `mybatis.RunMapper` / `mybatis/RunMapper.xml`：Run MyBatis SQL，包含保存、读取、最近非终态 Run 查询、只选择 `LEGACY_FULL` 的 stale active 查询和 `status` 条件更新。
 - `mybatis.MyBatisRunRepository`：Run 领域端口的生产 Bean，通过 `saveIfStatus` 原子条件写入避免终态竞态覆盖。
 - `mybatis.RunEventMapper` / `mybatis/RunEventMapper.xml`：RunEvent append-only MyBatis SQL，写入结构化 scope 列和可空 raw event id，并支持按 `root_session_id` 读取历史状态事件。
@@ -33,6 +34,7 @@
 - `mybatis.MyBatisReferenceRepositoryRepository`：引用资产仓储领域端口的生产 Bean，负责行模型映射、分页上限和多目标事务边界。
 - `RedisRunRuntimeStore` / `RunRuntimeStoreConfig`：Run 运行数据面领域端口的 Redis 唯一生产实现和装配；单 Run key 使用 `{runId}` hash tag，durable `events` Stream 使用 `${seq}-0`，durable/transient `runtime-events` Stream 使用 `${runtimeVersion}-0`，snapshot 使用 Hash + order ZSET 物化当前实体状态，外部 snapshot 同时 CAS seq/runtimeVersion，动态 key registry 统一滑动 TTL；跨 slot active/history 索引在单 Run Lua 前按“active TTL + pending TTL”安全窗保守登记并由读路径清脏，避免任一事件 Lua 提交后 Java 退出造成恢复失联；用户级 dispose 以 `{userId}` slot 原子清理过期 active 索引、确认用户空闲并申请/续租 token 闸门，新 Run 则在同一用户 slot 原子检查闸门、登记 `active:user` 并以随机 owner 创建 `runtime-user` marker，闸门拒绝时在 marker 与其他外部索引写入前返回；owner 条件接管原子校验活跃 manifest 快照并提升 token，事件、远端 Session 绑定和 scope/dedup/pending Lua 在副作用前校验 owner + token，pending 同时原子计入/扣减统一详情字节预算；生产 32 MiB 中为关键快照固定预留 4 MiB，durable/runtime 事件或 snapshot 投影项超过 20,000 或总详情超限时显式截断旧 Stream、递增 reset generation，并保留专用 USER 输入、JSON role 为 assistant 的最新 message、对应最新可见 text part 和 run-status，tool/reasoning/非 assistant 实体只作为可淘汰投影。
 - `RedisRunTerminalRetryStore` / `RunTerminalRetryStoreConfig`：终态关系型事务故障后的独立 Redis 安全重试实现和装配；record/due 固定使用 `{terminal-retry}` hash tag，保存 Lua 按终态 outbox generation、事件序号和重试代次单调覆盖，删除 Lua 对完整白名单 JSON 执行 compare-and-delete，防止旧 worker 覆盖或删除晚到纠正版；悬空 due 自愈只在 record 仍不存在时移除索引；due ZSET 只含 runId/时间，记录 TTL 不超过 24 小时。
+- `RedisTokenStore`：用户认证 Token 的 Redis 实现；用户删除时用 `SCAN test-agent:token:*` 兼容撤销历史已签发 Token，仅解析认证主体匹配 userId，不输出包含 Token 的 key 或 value。
 - `JdbcWorkspaceRepository`：实现 Workspace 持久化端口。
 - `JdbcSessionRepository`：实现 Session 持久化端口，并保存平台 session 到远端 opencode session/node 的内部映射。
 - `JdbcSessionRepository.findPage`：全局 ACTIVE session 查询按置顶、更新时间和自增 ID 排序；空搜索不绑定可空 query pattern，兼容 PostgreSQL 参数类型推断。
@@ -113,6 +115,7 @@
 - ScheduledTask 测试必须覆盖任务定义、用户计划、运行记录、分页筛选和来源字段读写。
 - NightExecution 测试必须覆盖幂等键、状态 CAS、单会话锁、容量上限/释放、过期占位清理和 owner 隔离。
 - CommonParameter 和 WorkspaceCreateOperation 测试必须覆盖平台优先级、默认路径 seed、进度步骤更新、成功/失败状态和按用户隔离查询。
+- UserDeletion 测试必须覆盖目标锁定、受保护业务引用阻断、账号附属表清理、批量原子边界和只撤销目标用户 Token。
 - ReferenceRepository 测试必须覆盖 Flyway 建表、MyBatis XML generation/CAS、同服务器租约互斥/续期、过期 worker fencing、离线 `DEFERRED`/恢复和稳定游标分页。
 - MyBatis 试点测试必须覆盖 XML mapper 查询和更新；源码约束测试必须阻止新增 JDBC SQL、MyBatis 注解 SQL，并固化 PostgreSQL 专有 SQL 兼容约束。
 - Druid 连接池配置测试；当前验证 `spring.datasource.druid.*` 可绑定为 Druid DataSource，且 Web 控制台默认关闭。

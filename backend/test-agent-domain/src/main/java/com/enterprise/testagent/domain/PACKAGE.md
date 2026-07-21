@@ -25,6 +25,7 @@
 - `event.RunEvent`、`event.RunEventDraft`、`event.RunEventId`、`event.RunEventType`、`event.RunEventRepository`：平台运行事件模型和 append-only 端口，支持按 Run 和按 root session 回放；RunEventType 覆盖基础 `run.*`（含 transient `run.snapshot.reset`）、`tool.*`、`diff.*` 事件以及 Web App 的 `message.*`、`permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`、`reference.updated`、`file.edited`、`file.watcher.updated` 等运行态事件。
 - `node.ExecutionNode`、`node.ExecutionNodeId`、`node.ExecutionNodeStatus`、`node.ExecutionNodeRepository`：执行节点模型和查询端口。
 - `routing.RoutingDecision`、`routing.RoutingReason`、`routing.ExecutionNodeRouter`、`routing.RoutingDecisionRepository`：路由决策值对象、纯路由策略和持久化端口。
+- `user.User`、`user.UserId`、`user.UserRepository`、`user.UserDeletionRepository`：用户聚合、常规持久化端口和安全删除端口；外部身份资料刷新保持用户业务 ID 与既有关系不变，删除端口负责锁定目标并区分可清理账号附属数据与受保护业务引用。
 - `opencodeprocess.*`：Linux 服务器、后端 Java 进程、opencode 容器、容器管理进程、管理进程连接、用户专属 opencode server 进程、查询筛选和用户绑定模型；`OpencodeProcessManagementRepository` 作为持久化端口。
 - `configuration.*`：应用定义、应用成员、代码库配置、应用仓库关联、应用工作空间模板、个人 SSH key、通用参数、显式 JVM 内存参数 SPI/状态和设置页工作空间创建进度；`CommonParameterMemoryEntry` 约束实现先完整查库校验再原子替换，未注册参数仍按需直读数据库；`ConfigurationManagementRepository`、`CommonParameterRepository`、`WorkspaceCreateOperationRepository` 作为持久化端口。
 - `scheduler.*`：定时任务定义、用户级计划、带服务器执行亲和的运行记录、触发来源和状态枚举；`ScheduledTaskRepository`、`ScheduledTaskRunRetentionRepository` 作为持久化端口。

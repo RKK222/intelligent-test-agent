@@ -4,6 +4,7 @@ import com.enterprise.testagent.domain.auth.TokenStore;
 import com.enterprise.testagent.domain.dictionary.DictionaryRepository;
 import com.enterprise.testagent.domain.dictionary.UserRoleRepository;
 import com.enterprise.testagent.domain.user.UserLoginLogRepository;
+import com.enterprise.testagent.domain.user.UserDeletionRepository;
 import com.enterprise.testagent.domain.user.UserRepository;
 import com.enterprise.testagent.system.management.auth.AuthApplicationService;
 import com.enterprise.testagent.system.management.user.ThirdPartyUserApiClient;
@@ -57,18 +58,24 @@ public class SystemManagementConfig {
     }
 
     /**
-     * 用户管理应用服务 Bean，用于查询用户、创建测试用户、调整角色和查询可选角色。
+     * 用户管理应用服务 Bean，用于查询、测试造号、角色调整、删除和 TCDS 信息同步。
      */
     @Bean
     public UserManagementApplicationService userManagementApplicationService(
             UserDomainService userDomainService,
             UserRepository userRepository,
+            UserDeletionRepository userDeletionRepository,
             UserRoleRepository userRoleRepository,
-            DictionaryRepository dictionaryRepository) {
+            DictionaryRepository dictionaryRepository,
+            TokenStore tokenStore,
+            ThirdPartyUserApiClient thirdPartyUserApiClient) {
         return new UserManagementApplicationService(
                 userDomainService,
                 userRepository,
+                userDeletionRepository,
                 userRoleRepository,
-                dictionaryRepository);
+                dictionaryRepository,
+                tokenStore,
+                thirdPartyUserApiClient);
     }
 }

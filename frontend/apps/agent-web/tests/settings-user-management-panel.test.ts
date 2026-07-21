@@ -1,6 +1,7 @@
 import { defineComponent, h, inject, provide } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/vue";
+import { ElMessageBox } from "element-plus";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type { CurrentUser, RoleOption, UserManagementUser } from "@test-agent/shared-types";
 import SettingsUserManagementPanel from "../src/components/settings/SettingsUserManagementPanel.vue";
@@ -31,7 +32,11 @@ function createApi(): Partial<BackendApiClient> {
     listUsers: vi.fn().mockResolvedValue({ items: users, page: 1, size: 20, total: users.length }),
     listRoles: vi.fn().mockResolvedValue(roles),
     createUser: vi.fn().mockResolvedValue(users[0]),
-    updateUserRole: vi.fn().mockResolvedValue({ ...users[0], roles: ["USER"], roleLabels: ["普通用户"] })
+    updateUserRole: vi.fn().mockResolvedValue({ ...users[0], roles: ["USER"], roleLabels: ["普通用户"] }),
+    deleteUser: vi.fn().mockResolvedValue({ deletedUserIds: ["usr_existing"], deletedCount: 1 }),
+    deleteUsers: vi.fn().mockResolvedValue({ deletedUserIds: ["usr_existing"], deletedCount: 1 }),
+    syncUserFromTcds: vi.fn().mockResolvedValue({ syncedUserIds: ["usr_existing"], syncedCount: 1 }),
+    syncUsersFromTcds: vi.fn().mockResolvedValue({ syncedUserIds: ["usr_existing"], syncedCount: 1 })
   };
 }
 
@@ -80,23 +85,57 @@ const ElInputStub = defineComponent({
 
 const ElTableStub = defineComponent({
   props: ["data"],
-  setup(props, { slots }) {
-    provide(tableRowsKey, props);
+  emits: ["selection-change"],
+  setup(props, { emit, slots }) {
+    const selected = new Set<string>();
+    const context = {
+      props,
+      toggle(row: UserManagementUser, checked: boolean) {
+        if (checked) {
+          selected.add(row.userId);
+        } else {
+          selected.delete(row.userId);
+        }
+        emit("selection-change", (props.data ?? []).filter((item: UserManagementUser) => selected.has(item.userId)));
+      }
+    };
+    provide(tableRowsKey, context);
     return () => h("div", { class: "ta-table-stub" }, slots.default?.());
   }
 });
 
 const ElTableColumnStub = defineComponent({
-  props: ["prop", "label"],
+  props: ["prop", "label", "type", "selectable"],
   setup(props, { slots }) {
-    const tableProps = inject<{ data?: UserManagementUser[] }>(tableRowsKey, {});
+    const tableContext = inject<{
+      props?: { data?: UserManagementUser[] };
+      toggle?: (row: UserManagementUser, checked: boolean) => void;
+    }>(tableRowsKey, {});
     return () =>
-      h(
-        "div",
-        { "data-prop": props.prop },
-        (tableProps.data ?? []).flatMap((row) => slots.default?.({ row }) ?? [h("span", String(props.prop ? row[props.prop as keyof UserManagementUser] ?? "" : props.label))]
-        )
-      );
+      props.type === "selection"
+        ? h(
+            "div",
+            { "data-type": "selection" },
+            (tableContext.props?.data ?? []).map((row) =>
+              h("input", {
+                type: "checkbox",
+                "aria-label": `选择 ${row.username}`,
+                disabled: typeof props.selectable === "function" && !props.selectable(row),
+                onChange: (event: Event) =>
+                  tableContext.toggle?.(row, (event.target as HTMLInputElement).checked)
+              })
+            )
+          )
+        : h(
+            "div",
+            { "data-prop": props.prop },
+            (tableContext.props?.data ?? []).flatMap(
+              (row) =>
+                slots.default?.({ row }) ?? [
+                  h("span", String(props.prop ? row[props.prop as keyof UserManagementUser] ?? "" : props.label))
+                ]
+            )
+          );
   }
 });
 
@@ -118,7 +157,7 @@ function renderPanel(api: Partial<BackendApiClient> = createApi(), currentUser: 
         },
         ElButton: {
           emits: ["click"],
-          props: ["disabled", "type"],
+          props: ["disabled", "type", "link", "plain"],
           template: `<button v-bind="$attrs" type="button" :disabled="disabled" @click="$emit('click')"><slot /></button>`
         },
         ElIcon: { template: `<span><slot /></span>` },
@@ -189,6 +228,48 @@ describe("SettingsUserManagementPanel", () => {
 
     await waitFor(() => expect(api.updateUserRole).toHaveBeenCalledWith("usr_existing", { role: "USER" }));
     await waitFor(() => expect((api.listUsers as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(2));
+  });
+
+  it("deletes one user after confirmation and refreshes the list", async () => {
+    const api = createApi();
+    vi.spyOn(ElMessageBox, "confirm").mockResolvedValue("confirm" as never);
+    const { findByText, getByRole } = renderPanel(api);
+
+    await findByText("alice");
+    await fireEvent.click(getByRole("button", { name: "删除" }));
+
+    await waitFor(() => expect(api.deleteUser).toHaveBeenCalledWith("usr_existing"));
+    await waitFor(() => expect((api.listUsers as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(2));
+  });
+
+  it("batch deletes selected users", async () => {
+    const api = createApi();
+    vi.spyOn(ElMessageBox, "confirm").mockResolvedValue("confirm" as never);
+    const { findByText, getByLabelText, getByRole } = renderPanel(api);
+
+    await findByText("alice");
+    await fireEvent.click(getByLabelText("选择 alice"));
+    await fireEvent.click(getByRole("button", { name: "批量删除（1）" }));
+
+    await waitFor(() =>
+      expect(api.deleteUsers).toHaveBeenCalledWith({ userIds: ["usr_existing"] })
+    );
+  });
+
+  it("syncs one user and selected users from TCDS while keeping the same ids", async () => {
+    const api = createApi();
+    vi.spyOn(ElMessageBox, "confirm").mockResolvedValue("confirm" as never);
+    const { findByText, getByLabelText, getByRole } = renderPanel(api);
+
+    await findByText("alice");
+    await fireEvent.click(getByRole("button", { name: "同步 TCDS" }));
+    await waitFor(() => expect(api.syncUserFromTcds).toHaveBeenCalledWith("usr_existing"));
+
+    await fireEvent.click(getByLabelText("选择 alice"));
+    await fireEvent.click(getByRole("button", { name: "批量同步 TCDS（1）" }));
+    await waitFor(() =>
+      expect(api.syncUsersFromTcds).toHaveBeenCalledWith({ userIds: ["usr_existing"] })
+    );
   });
 
   it("shows no-permission alert for non-super-admin and does not call api", async () => {

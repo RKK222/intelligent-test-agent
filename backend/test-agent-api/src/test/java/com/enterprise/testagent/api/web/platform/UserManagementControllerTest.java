@@ -15,7 +15,11 @@ import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.system.management.user.UserManagementApplicationService;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.CreateUserCommand;
+import com.enterprise.testagent.system.management.user.UserManagementResponses.DeleteUsersCommand;
+import com.enterprise.testagent.system.management.user.UserManagementResponses.DeleteUsersResponse;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.RoleOption;
+import com.enterprise.testagent.system.management.user.UserManagementResponses.SyncUsersFromTcdsCommand;
+import com.enterprise.testagent.system.management.user.UserManagementResponses.SyncUsersFromTcdsResponse;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRoleCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UserResponse;
 import java.time.Instant;
@@ -113,6 +117,81 @@ class UserManagementControllerTest {
 
         verify(service).updateUserRole(org.mockito.ArgumentMatchers.argThat((UpdateUserRoleCommand command) ->
                 "usr_target".equals(command.userId()) && "USER".equals(command.role())));
+    }
+
+    @Test
+    void superAdminCanDeleteSingleUser() {
+        UserManagementApplicationService service = org.mockito.Mockito.mock(UserManagementApplicationService.class);
+        when(service.deleteUsers(any(DeleteUsersCommand.class)))
+                .thenReturn(new DeleteUsersResponse(List.of("usr_target"), 1));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.delete()
+                .uri("/api/internal/platform/system-management/users/usr_target")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.deletedCount").isEqualTo(1)
+                .jsonPath("$.data.deletedUserIds[0]").isEqualTo("usr_target");
+
+        verify(service).deleteUsers(org.mockito.ArgumentMatchers.argThat((DeleteUsersCommand command) ->
+                USER_ID.value().equals(command.operatorUserId())
+                        && command.userIds().equals(List.of("usr_target"))));
+    }
+
+    @Test
+    void superAdminCanBatchDeleteUsers() {
+        UserManagementApplicationService service = org.mockito.Mockito.mock(UserManagementApplicationService.class);
+        when(service.deleteUsers(any(DeleteUsersCommand.class)))
+                .thenReturn(new DeleteUsersResponse(List.of("usr_a", "usr_b"), 2));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.post()
+                .uri("/api/internal/platform/system-management/users/batch-delete")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"userIds\":[\"usr_a\",\"usr_b\"]}")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.deletedCount").isEqualTo(2);
+
+        verify(service).deleteUsers(org.mockito.ArgumentMatchers.argThat((DeleteUsersCommand command) ->
+                USER_ID.value().equals(command.operatorUserId())
+                        && command.userIds().equals(List.of("usr_a", "usr_b"))));
+    }
+
+    @Test
+    void superAdminCanSyncSingleAndBatchUsersFromTcds() {
+        UserManagementApplicationService service = org.mockito.Mockito.mock(UserManagementApplicationService.class);
+        when(service.syncUsersFromTcds(any(SyncUsersFromTcdsCommand.class)))
+                .thenAnswer(invocation -> {
+                    SyncUsersFromTcdsCommand command = invocation.getArgument(0);
+                    return new SyncUsersFromTcdsResponse(command.userIds(), command.userIds().size());
+                });
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.post()
+                .uri("/api/internal/platform/system-management/users/usr_target/tcds-sync")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.syncedCount").isEqualTo(1);
+
+        client.post()
+                .uri("/api/internal/platform/system-management/users/tcds-sync")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"userIds\":[\"usr_a\",\"usr_b\"]}")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.syncedCount").isEqualTo(2);
+
+        verify(service).syncUsersFromTcds(new SyncUsersFromTcdsCommand(List.of("usr_target")));
+        verify(service).syncUsersFromTcds(new SyncUsersFromTcdsCommand(List.of("usr_a", "usr_b")));
     }
 
     @Test

@@ -30,9 +30,15 @@ const size = ref(20);
 const keyword = ref("");
 const roleDrafts = ref<Record<string, string>>({});
 const savingRoles = ref(false);
+const selectedUsers = ref<UserManagementUser[]>([]);
+const deleting = ref(false);
+const syncingTcds = ref(false);
 
 const loading = ref(false);
 const errorMessage = ref("");
+const operationBusy = computed(
+  () => loading.value || savingRoles.value || deleting.value || syncingTcds.value
+);
 
 // 新增用户表单
 const form = ref<CreateUserPayload>({
@@ -132,6 +138,7 @@ async function loadUsers() {
       nextDrafts[user.userId] = user.roles?.[0] ?? "";
     }
     roleDrafts.value = nextDrafts;
+    selectedUsers.value = [];
   });
 }
 
@@ -227,6 +234,120 @@ async function saveRoleChanges() {
   }
 }
 
+function canSelectUser(row: UserManagementUser) {
+  return row.userId !== props.currentUser?.userId;
+}
+
+function handleSelectionChange(selection: UserManagementUser[]) {
+  selectedUsers.value = selection;
+}
+
+function isMessageBoxCancellation(error: unknown) {
+  return error === "cancel" || error === "close";
+}
+
+async function reloadAfterDelete(deletedCount: number) {
+  const remaining = Math.max(0, total.value - deletedCount);
+  const lastPage = Math.max(1, Math.ceil(remaining / size.value));
+  page.value = Math.min(page.value, lastPage);
+  await loadUsers();
+}
+
+async function deleteUser(row: UserManagementUser) {
+  if (!canSelectUser(row)) {
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认删除用户“${row.username}”吗？账号角色、登录日志和个人附属数据会同步清理；如存在会话、工作区或运行进程，后端会拒绝删除。`,
+      "删除用户",
+      { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" }
+    );
+    deleting.value = true;
+    errorMessage.value = "";
+    const result = await api.deleteUser(row.userId);
+    ElMessage.success("用户已删除");
+    await reloadAfterDelete(result.deletedCount);
+  } catch (error) {
+    if (!isMessageBoxCancellation(error)) {
+      errorMessage.value = error instanceof Error ? error.message : "删除用户失败";
+    }
+  } finally {
+    deleting.value = false;
+  }
+}
+
+async function deleteSelectedUsers() {
+  const targets = selectedUsers.value.filter(canSelectUser);
+  if (targets.length === 0) {
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认删除选中的 ${targets.length} 个用户吗？批量操作为全有或全无，任一用户仍有关联业务数据时整批不会删除。`,
+      "批量删除用户",
+      { type: "warning", confirmButtonText: "批量删除", cancelButtonText: "取消" }
+    );
+    deleting.value = true;
+    errorMessage.value = "";
+    const result = await api.deleteUsers({ userIds: targets.map((user) => user.userId) });
+    ElMessage.success(`已删除 ${result.deletedCount} 个用户`);
+    await reloadAfterDelete(result.deletedCount);
+  } catch (error) {
+    if (!isMessageBoxCancellation(error)) {
+      errorMessage.value = error instanceof Error ? error.message : "批量删除用户失败";
+    }
+  } finally {
+    deleting.value = false;
+  }
+}
+
+async function syncUserFromTcds(row: UserManagementUser) {
+  try {
+    await ElMessageBox.confirm(
+      `将从 TCDS 刷新“${row.username}”的姓名、研发部门和部门；用户 ID、应用权限、会话和工作区保持不变。`,
+      "同步 TCDS 用户信息",
+      { type: "info", confirmButtonText: "同步", cancelButtonText: "取消" }
+    );
+    syncingTcds.value = true;
+    errorMessage.value = "";
+    await api.syncUserFromTcds(row.userId);
+    ElMessage.success("TCDS 用户信息已同步");
+    await loadUsers();
+  } catch (error) {
+    if (!isMessageBoxCancellation(error)) {
+      errorMessage.value = error instanceof Error ? error.message : "TCDS 用户信息同步失败";
+    }
+  } finally {
+    syncingTcds.value = false;
+  }
+}
+
+async function syncSelectedUsersFromTcds() {
+  const targets = selectedUsers.value;
+  if (targets.length === 0) {
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将从 TCDS 刷新选中 ${targets.length} 个用户的姓名和部门。全部查询成功后才会统一写库，已有应用和历史数据保持不变。`,
+      "批量同步 TCDS 用户信息",
+      { type: "info", confirmButtonText: "批量同步", cancelButtonText: "取消" }
+    );
+    syncingTcds.value = true;
+    errorMessage.value = "";
+    const result = await api.syncUsersFromTcds({ userIds: targets.map((user) => user.userId) });
+    ElMessage.success(`已同步 ${result.syncedCount} 个用户`);
+    await loadUsers();
+  } catch (error) {
+    if (!isMessageBoxCancellation(error)) {
+      errorMessage.value = error instanceof Error ? error.message : "批量同步 TCDS 用户信息失败";
+    }
+  } finally {
+    syncingTcds.value = false;
+  }
+}
+
 onMounted(() => {
   if (hasPermission.value) {
     loadUsers();
@@ -243,6 +364,13 @@ onMounted(() => {
 
       <!-- 用户列表 -->
       <section class="ta-section ta-section-primary">
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          title="存量用户处理说明"
+          description="有会话、工作区或运行进程的用户请同步 TCDS 信息，原 userId 不变，已有应用权限和历史数据会保留；未使用的脏账号可直接删除。"
+        />
         <div class="ta-list-header">
           <h4 class="ta-section-title">用户列表</h4>
           <div class="ta-list-actions">
@@ -254,18 +382,41 @@ onMounted(() => {
                 clearable
                 @keyup.enter="search"
               />
-              <el-button :disabled="loading || savingRoles" @click="search">查询</el-button>
+              <el-button :disabled="operationBusy" @click="search">查询</el-button>
             </div>
             <el-button
+              :disabled="operationBusy || selectedUsers.length === 0"
+              @click="syncSelectedUsersFromTcds"
+            >
+              {{ selectedUsers.length > 0 ? `批量同步 TCDS（${selectedUsers.length}）` : '批量同步 TCDS' }}
+            </el-button>
+            <el-button
+              type="danger"
+              plain
+              :disabled="operationBusy || selectedUsers.length === 0"
+              @click="deleteSelectedUsers"
+            >
+              {{ selectedUsers.length > 0 ? `批量删除（${selectedUsers.length}）` : '批量删除' }}
+            </el-button>
+            <el-button
               type="primary"
-              :disabled="savingRoles || changedRoleCount === 0"
+              :disabled="operationBusy || changedRoleCount === 0"
               @click="saveRoleChanges"
             >
               {{ changedRoleCount > 0 ? `保存角色修改（${changedRoleCount}）` : '保存角色修改' }}
             </el-button>
           </div>
         </div>
-        <el-table :data="users" v-loading="loading" size="small" border class="ta-user-table">
+        <el-table
+          :data="users"
+          row-key="userId"
+          v-loading="loading"
+          size="small"
+          border
+          class="ta-user-table"
+          @selection-change="handleSelectionChange"
+        >
+          <el-table-column type="selection" width="48" :selectable="canSelectUser" />
           <el-table-column prop="username" label="用户名" min-width="120" />
           <el-table-column prop="unifiedAuthId" label="统一认证号" min-width="140" />
           <el-table-column prop="organization" label="组织" min-width="120" />
@@ -278,6 +429,7 @@ onMounted(() => {
                   :aria-label="`调整 ${row.username} 的角色`"
                   size="small"
                   style="width: 160px"
+                  :disabled="operationBusy"
                 >
                   <el-option
                     v-for="role in roles"
@@ -293,6 +445,23 @@ onMounted(() => {
             </template>
           </el-table-column>
           <el-table-column prop="status" label="状态" width="90" />
+          <el-table-column label="操作" width="170" fixed="right">
+            <template #default="{ row }">
+              <div class="ta-row-actions">
+                <el-button link type="primary" :disabled="operationBusy" @click="syncUserFromTcds(row)">
+                  同步 TCDS
+                </el-button>
+                <el-button
+                  link
+                  type="danger"
+                  :disabled="operationBusy || !canSelectUser(row)"
+                  @click="deleteUser(row)"
+                >
+                  删除
+                </el-button>
+              </div>
+            </template>
+          </el-table-column>
         </el-table>
         <div class="ta-pagination">
           <el-pagination
@@ -461,6 +630,11 @@ onMounted(() => {
   flex: none;
   color: #d97706;
   font-size: 12px;
+}
+.ta-row-actions {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
 }
 .ta-create-button {
   min-width: 96px;

@@ -7,7 +7,11 @@ import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.system.management.user.UserManagementApplicationService;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.CreateUserCommand;
+import com.enterprise.testagent.system.management.user.UserManagementResponses.DeleteUsersCommand;
+import com.enterprise.testagent.system.management.user.UserManagementResponses.SyncUsersFromTcdsCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRoleCommand;
+import java.util.List;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -77,6 +81,54 @@ public class UserManagementController {
             ServerWebExchange exchange) {
         requireSuperAdmin(exchange);
         return ok(exchange, service.updateUserRole(new UpdateUserRoleCommand(userId, request.role())));
+    }
+
+    /**
+     * 删除单个未承载业务资产的存量用户，同时禁止删除当前登录账号。
+     */
+    @DeleteMapping("/users/{userId}")
+    public ApiResponse<Object> deleteUser(
+            @PathVariable("userId") String userId,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = requireSuperAdmin(exchange);
+        return ok(exchange, service.deleteUsers(new DeleteUsersCommand(
+                principal.userId().value(),
+                List.of(userId))));
+    }
+
+    /**
+     * 批量删除未承载业务资产的存量用户；任一目标不满足条件时整批不删除。
+     */
+    @PostMapping("/users/batch-delete")
+    public ApiResponse<Object> deleteUsers(
+            @RequestBody UserManagementDtos.UserIdsRequest request,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = requireSuperAdmin(exchange);
+        return ok(exchange, service.deleteUsers(new DeleteUsersCommand(
+                principal.userId().value(),
+                request.userIds())));
+    }
+
+    /**
+     * 从 TCDS 原位同步单个用户的姓名和部门，既有应用、会话和工作区关联保持不变。
+     */
+    @PostMapping("/users/{userId}/tcds-sync")
+    public ApiResponse<Object> syncUserFromTcds(
+            @PathVariable("userId") String userId,
+            ServerWebExchange exchange) {
+        requireSuperAdmin(exchange);
+        return ok(exchange, service.syncUsersFromTcds(new SyncUsersFromTcdsCommand(List.of(userId))));
+    }
+
+    /**
+     * 批量从 TCDS 原位同步姓名和部门；全部查询成功后才统一写库。
+     */
+    @PostMapping("/users/tcds-sync")
+    public ApiResponse<Object> syncUsersFromTcds(
+            @RequestBody UserManagementDtos.UserIdsRequest request,
+            ServerWebExchange exchange) {
+        requireSuperAdmin(exchange);
+        return ok(exchange, service.syncUsersFromTcds(new SyncUsersFromTcdsCommand(request.userIds())));
     }
 
     /**

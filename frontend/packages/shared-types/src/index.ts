@@ -1945,6 +1945,20 @@ export type UpdateUserRolePayload = {
   role: string;
 };
 
+export type UserIdsPayload = {
+  userIds: string[];
+};
+
+export type DeleteUsersResult = {
+  deletedUserIds: string[];
+  deletedCount: number;
+};
+
+export type SyncUsersFromTcdsResult = {
+  syncedUserIds: string[];
+  syncedCount: number;
+};
+
 export type RoleOption = {
   roleCode: string;
   roleLabel: string;
