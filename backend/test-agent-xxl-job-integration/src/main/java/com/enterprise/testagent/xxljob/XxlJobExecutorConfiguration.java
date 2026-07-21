@@ -1,6 +1,5 @@
 package com.enterprise.testagent.xxljob;
 
-import com.xxl.job.core.executor.impl.XxlJobSpringExecutor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -11,9 +10,9 @@ import org.springframework.context.annotation.Configuration;
 public class XxlJobExecutorConfiguration {
 
     @Bean
-    XxlJobSpringExecutor xxlJobSpringExecutor(XxlJobProperties properties) {
+    DeferredXxlJobSpringExecutor xxlJobSpringExecutor(XxlJobProperties properties) {
         XxlJobProperties.Executor executor = properties.getExecutor();
-        XxlJobSpringExecutor springExecutor = new XxlJobSpringExecutor();
+        DeferredXxlJobSpringExecutor springExecutor = new DeferredXxlJobSpringExecutor();
         springExecutor.setAdminAddresses(executor.getAdminAddresses());
         springExecutor.setAccessToken(properties.getAccessToken());
         springExecutor.setEnabled(true);
@@ -24,5 +23,18 @@ public class XxlJobExecutorConfiguration {
         springExecutor.setLogPath(executor.getLogPath());
         springExecutor.setLogRetentionDays(executor.getLogRetentionDays());
         return springExecutor;
+    }
+
+    @Bean
+    XxlJobAdminReadinessProbe xxlJobAdminReadinessProbe() {
+        return new HttpXxlJobAdminReadinessProbe();
+    }
+
+    @Bean
+    XxlJobExecutorLifecycle xxlJobExecutorLifecycle(
+            XxlJobProperties properties,
+            XxlJobAdminReadinessProbe readinessProbe,
+            DeferredXxlJobSpringExecutor executor) {
+        return new XxlJobExecutorLifecycle(properties, readinessProbe, executor);
     }
 }

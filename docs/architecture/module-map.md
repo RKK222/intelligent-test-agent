@@ -55,7 +55,7 @@ Browser
 | `test-agent-scheduler` | 保留 `ScheduledTaskHandler`/context/Redis 锁/运行记录契约；旧 runner 只同步、扫描和执行带服务器亲和的 `USER_PLAN`，周期任务由 XXL adapter 调用同一业务 handler。 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界（当前为空骨架）。 |
 | `test-agent-xxl-job-admin-upstream` | 未做业务修改的 XXL-JOB Admin 3.4.2 源码与资源普通 JAR；只允许整体上游升级。 |
-| `test-agent-xxl-job-integration` | 进程内独立 Servlet Admin、独立 MySQL/Flyway/MyBatis、executor、统一 handler adapter、一次性 SSO/JIT 用户、平台 session marker 校验和隔离 health。 |
+| `test-agent-xxl-job-integration` | 进程内独立 Servlet Admin、独立 MySQL/Flyway/MyBatis、由 Admin readiness 门控且不阻塞主服务的 executor、统一 handler adapter、一次性 SSO/JIT 用户、平台 session marker 校验和隔离 health。 |
 | `test-agent-api` | Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、含 `X-Test-Agent-Linux-Server-Id` 的 CORS 边界、RunEvent SSE 按生产 Java 流式转发入口、夜间时段/任务 HTTP 入口、用户级会话运行态 HTTP/fetch SSE 入口、平台文件 WebSocket route/ticket/RPC 入口（含 workspace 原始文件、引用组合视图与 Agent 配置文件）、应用引用资产库 7 个内部入口、工作空间创建进度轮询入口、manager 控制面入口、超级管理员运行管理 overview/指标历史、XXL 一次性 SSO 票据和显式 JVM 内存参数跨 Java 查询/刷新入口、trace Web 入口。 |
 | `test-agent-persistence` | 数据库、MyBatis XML mapper、Flyway、Repository 和 Redis 必需适配，包括 Run manifest/input/durable 与 runtime 双 Stream/Hash + order ZSET 物化 snapshot/scope/active 索引、会话上下文、workspace 服务器归属、用户级会话运行态只读查询、通用参数表、工作空间创建进度表、应用版本副本表、引用资产总体/服务器副本表、opencode 用户进程管理表、scheduler/夜间任务/会话锁/时段容量表与 Repository 映射。 |
 | `test-agent-event` | 按 RunStorageMode 分流的 RunEvent 追加、SSE、Redis 首帧物化 reset 与 `runtimeVersion` 有序尾流、legacy 数据库回放、全局事件触发流，以及 Redis/Noop 通用服务器广播适配。 |

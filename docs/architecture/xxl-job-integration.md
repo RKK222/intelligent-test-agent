@@ -25,6 +25,8 @@
 - Admin 使用 `WebApplicationType.SERVLET` 在独立子上下文启动，隔离 Tomcat、MySQL DataSource、MyBatis、Flyway 和安全自动配置。
 - 上游源码目录保留原始 `application.properties`，但依赖 JAR 将它重定位到 `META-INF/xxl-job-admin-upstream/`。Admin launcher 只向 Servlet 子上下文加载这份低优先级默认配置，再用平台 MySQL、端口、access token、SSO 和 Flyway 配置覆盖；WebFlux 主上下文不会加载其中的 Hikari/MySQL 默认值。
 - Admin 启动失败不会关闭平台主上下文。生命周期组件按 5、10、20、40、60 秒上限指数退避重试。
+- executor 覆盖上游 `SmartInitializingSingleton` 自动启动入口，Spring 单例初始化阶段不创建监听端口或注册线程。独立 daemon 生命周期在 Admin 生命周期之后启动，以 250 毫秒～5 秒退避探测配置列表中各 Admin 的 `/actuator/health/readiness`；任意一个返回 HTTP 200 后才启动 executor，且同一 Java 进程最多启动一次。
+- 全部 Admin 未就绪时 executor 端口保持关闭并持续等待，平台 Netty/8080、主 readiness 和其它业务不受影响；Admin/MySQL 恢复后无需重启平台进程即可启动 executor。该门控不使用固定 sleep，也不新增部署配置。
 - `xxlJobAdmin` health component 在 Admin/MySQL 不可用时返回 `DOWN`，但平台 readiness group 只包含平台必需依赖，不包含 XXL health。
 - 同机多 Java 进程必须配置不同的 Admin 端口和 executor 端口。生产入口通过 Nginx 对多个 Admin 子端口做同源代理。
 

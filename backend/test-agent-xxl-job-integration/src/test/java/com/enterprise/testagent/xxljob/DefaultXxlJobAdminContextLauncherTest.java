@@ -55,6 +55,15 @@ class DefaultXxlJobAdminContextLauncherTest {
             assertThat(context.getBean(PlatformXxlJobUserProvisioner.class).provision(identity()).username())
                     .isEqualTo("平台管理员");
 
+            HttpResponse<String> readiness = HttpClient.newHttpClient().send(
+                    HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + properties.getAdmin().getPort()
+                                    + "/xxl-job-admin/actuator/health/readiness"))
+                            .GET()
+                            .timeout(Duration.ofSeconds(10))
+                            .build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertThat(readiness.statusCode()).isEqualTo(200);
+
             HttpResponse<String> response = HttpClient.newHttpClient().send(
                     HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + properties.getAdmin().getPort()
                                     + "/xxl-job-admin/auth/login"))

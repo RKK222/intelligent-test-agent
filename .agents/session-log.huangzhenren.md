@@ -21,6 +21,22 @@
   - 使用 `.env.test` / `test` profile 重启 backend、opencode-manager、frontend；health/readiness 为 UP、前端 3000 与登录 CORS 正常、manager WebSocket 已连接。本次只改变 Git committer 邮箱规则和前端失败恢复状态，不新增或变更 HTTP/RunEvent/数据库/SQL/权限/generated SDK/环境配置。
 - Pitfalls:
   - 修复部署前已经失败的操作没有当前页面内存中的待推送快照，但个人 HEAD 中的本地提交仍在；应使用原 `personalWorkspaceId` 和原文件白名单直接调用平台 `POST /personal-workspaces/{id}/publish` 恢复，不能再次调用 commit，也不能手工 `git push` 绕过版本目标、广播与 rollout。
+### 2026-07-21 - 消除 XXL executor 启动注册竞态
+
+- Why:
+  - 同 JVM 中 executor 的 `SmartInitializingSingleton` 回调早于异步 Admin 子上下文完成监听，首次注册会立即请求尚未启动的 `127.0.0.1:18080`，产生一次 `Connection refused`；XXL 上游约 30 秒后可自愈，但启动日志存在可避免的错误。
+- What:
+  - integration 模块用最小上游扩展覆盖 executor 自动初始化入口，新增独立 `SmartLifecycle` daemon 协调器；以 250 毫秒～5 秒退避探测配置列表中各 Admin 的 `/actuator/health/readiness`，任意一个返回 HTTP 200 后才启动 9999 和注册线程，同一进程最多启动一次。
+  - 全部 Admin 不可用时平台 WebFlux/8080 和主 readiness 继续启动，executor 端口保持关闭并等待恢复；未修改 XXL 上游源码、现有环境变量、`.env.test`、API、事件、数据库或安全协议。
+  - 同步后端/集成模块 README、模块图、XXL 架构、部署和测试文档；新增多 Admin readiness、非法地址/重定向、延迟/幂等启动、关闭和真实 Spring 装配回归。
+- How:
+  - TDD 先以缺失 readiness probe、延迟 executor 和生命周期协调器的编译失败固化预期，再完成实现；`mvn -f backend/pom.xml -pl test-agent-xxl-job-integration -am test` 通过，integration 31 项全过（含 MySQL 8.4、真实 Admin Tomcat/readiness）。
+  - 无参数执行 `sh restart-dev-services.sh`，默认 `test` profile；日志顺序为平台 Netty 8080 → Admin Tomcat 18080/readiness → executor 9999/注册线程，最新启动区间无 `registry error`、`Connection refused` 或构造器错误，MySQL 注册行持续更新。
+- Result:
+  - 8080、18080、9999 与 MySQL 13306 均监听，平台/Admin readiness 均为 HTTP 200；executor 注册地址为 `http://127.0.0.1:9999`，不含 Linux 亲和信息。
+  - 后端跳过测试 clean package 和前端生产构建由重启脚本通过。后端全量测试仍仅在既有 persistence H2 基线被 `V20260717173000__create_public_agent_config_rollouts.sql` 的 `TIMESTAMPTZ` 阻断（165 tests、76 errors、17 skipped），XXL 模块已先通过。
+  - 工作树原有 `application.yml` 本地配置修改及 `backend/${SYS_DATA_ROOT_DIR}/agent-opencode/.config` 删除保持未暂存、未纳入本次提交；本次不拉取、不 rebase、不推送远端。
+
 ### 2026-07-21 - 修复 XXL-JOB 后端启动失败
 
 - Why:
