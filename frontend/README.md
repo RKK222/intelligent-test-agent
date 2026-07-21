@@ -158,6 +158,8 @@ tools/dev-phase11-real-e2e.sh --start-services
 
 `frontend-opencode` 独立联调见 `frontend-opencode/README.md`，默认通过 Vite proxy 把 `/api` 转发到 `test-agent-app`。
 
+应用 Agent 与公共 Agent 的 Git 未暂存分组提供“全部暂存”，分别复用既有批量 stage API，一次处理当前作用域的全部未暂存文件；无写权限、存在未解决冲突或 Git index 更新进行中时入口禁用。
+
 ## 访问边界
 
 - 前端不得直连 opencode server。

@@ -327,6 +327,8 @@ const updatingWorkspaceIndexPaths = ref<Set<string>>(new Set());
 const stagingAllWorkspaceFiles = ref(false);
 const unstagingAllWorkspaceFiles = ref(false);
 const discardingAllWorkspaceFiles = ref(false);
+const updatingAgentIndexPaths = ref<Set<string>>(new Set());
+const stagingAllAgentFiles = ref(false);
 const discardingAgentPaths = ref<Set<string>>(new Set());
 const discardingAllAgentFiles = ref(false);
 
@@ -362,7 +364,9 @@ function agentMutationKey(scope: "PUBLIC" | "WORKSPACE", path: string): string {
   return `${scope}:${path}`;
 }
 
-const agentGitMutationPending = computed(() => discardingAgentPaths.value.size > 0);
+const agentGitMutationPending = computed(() =>
+  updatingAgentIndexPaths.value.size > 0 || discardingAgentPaths.value.size > 0
+);
 
 // Agent diff lists (Public + Workspace)
 const publicAgentDiffs = ref<AgentConfigDiffFile[]>([]);
@@ -1041,30 +1045,60 @@ async function discardAllWorkspaceChanges() {
   }
 }
 
-// Stage agent file (real / mock)
-async function stageAgentFile(file: AgentConfigDiffFile & { scope: "PUBLIC" | "WORKSPACE" }) {
-  if (!canWriteAgentScope(file.scope)) return;
+// 单文件和批量暂存共用同一 Agent Git index 链路，批量操作只向后端发送一次请求。
+async function stageAgentFiles(files: AgentPanelDiffFile[]) {
+  const scope = files[0]?.scope;
+  if (!scope || !canWriteAgentScope(scope) || (scope === "WORKSPACE" && !effectiveAgentConfigWorkspaceId.value)) return;
+  const paths = [...new Set(files.filter((file) => file.scope === scope).map((file) => file.path))];
+  const pendingPaths = paths.filter((path) => !updatingAgentIndexPaths.value.has(agentMutationKey(scope, path)));
+  if (pendingPaths.length === 0) return;
   errorMessage.value = "";
+  updatingAgentIndexPaths.value = new Set([
+    ...updatingAgentIndexPaths.value,
+    ...pendingPaths.map((path) => agentMutationKey(scope, path))
+  ]);
   try {
     if (workbench.useMockTestData) {
-      if (file.scope === "PUBLIC") {
-        const found = publicAgentDiffs.value.find((f) => f.path === file.path);
-        if (found) found.staged = true;
+      if (scope === "PUBLIC") {
+        publicAgentDiffs.value.forEach((file) => {
+          if (pendingPaths.includes(file.path)) file.staged = true;
+        });
       } else {
-        const found = workspaceAgentDiffs.value.find((f) => f.path === file.path);
-        if (found) found.staged = true;
+        workspaceAgentDiffs.value.forEach((file) => {
+          if (pendingPaths.includes(file.path)) file.staged = true;
+        });
       }
       return;
     }
 
-    if (file.scope === "PUBLIC") {
-      await api.stagePublicAgentFiles([file.path], workbench.publicWorktree?.worktreeId);
+    if (scope === "PUBLIC") {
+      await api.stagePublicAgentFiles(pendingPaths, workbench.publicWorktree?.worktreeId);
     } else {
-      await api.stageWorkspaceAgentFiles(effectiveAgentConfigWorkspaceId.value!, [file.path]);
+      await api.stageWorkspaceAgentFiles(effectiveAgentConfigWorkspaceId.value!, pendingPaths);
     }
     await refreshChanges();
   } catch (error) {
     errorMessage.value = errorMessageFor(error, "暂存 Agent 文件失败");
+  } finally {
+    const next = new Set(updatingAgentIndexPaths.value);
+    pendingPaths.forEach((path) => next.delete(agentMutationKey(scope, path)));
+    updatingAgentIndexPaths.value = next;
+  }
+}
+
+async function stageAgentFile(file: AgentPanelDiffFile) {
+  await stageAgentFiles([file]);
+}
+
+async function stageAllAgentChanges() {
+  if (agentGitMutationPending.value || activeAgentConflicts.value.length > 0) return;
+  const files = [...activeAgentUnstaged.value];
+  if (files.length === 0) return;
+  stagingAllAgentFiles.value = true;
+  try {
+    await stageAgentFiles(files);
+  } finally {
+    stagingAllAgentFiles.value = false;
   }
 }
 
@@ -1621,19 +1655,32 @@ defineExpose({
                 <Plus v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
               </Button>
             </template>
-            <Button
-              v-else
-              size="icon"
-              variant="ghost"
-              class="git-bulk-action"
-              :aria-label="`丢弃全部${activeScopeItem.label}改动`"
-              :title="activeAgentConflicts.length > 0 ? '存在未解决冲突，请先处理或取消合并' : `丢弃全部${activeScopeItem.label}改动`"
-              :disabled="!canWriteAgentScope(activeDiffScope === 'PUBLIC' ? 'PUBLIC' : 'WORKSPACE') || activeAgentConflicts.length > 0 || (activeAgentUnstaged.length === 0 && activeAgentStaged.length === 0) || agentGitMutationPending"
-              @click.stop="discardAllAgentChanges"
-            >
-              <Loader2 v-if="discardingAllAgentFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
-              <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-            </Button>
+            <template v-else>
+              <Button
+                size="icon"
+                variant="ghost"
+                class="git-bulk-action"
+                :aria-label="`丢弃全部${activeScopeItem.label}改动`"
+                :title="activeAgentConflicts.length > 0 ? '存在未解决冲突，请先处理或取消合并' : `丢弃全部${activeScopeItem.label}改动`"
+                :disabled="!canWriteAgentScope(activeDiffScope === 'PUBLIC' ? 'PUBLIC' : 'WORKSPACE') || activeAgentConflicts.length > 0 || (activeAgentUnstaged.length === 0 && activeAgentStaged.length === 0) || agentGitMutationPending"
+                @click.stop="discardAllAgentChanges"
+              >
+                <Loader2 v-if="discardingAllAgentFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
+                <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                class="git-bulk-action"
+                :aria-label="`全部暂存${commitScopeLabel(activeDiffScope)} 变更`"
+                :title="activeAgentConflicts.length > 0 ? '存在未解决冲突，请先处理或取消合并' : `全部暂存${commitScopeLabel(activeDiffScope)} 变更`"
+                :disabled="!canWriteAgentScope(activeDiffScope === 'PUBLIC' ? 'PUBLIC' : 'WORKSPACE') || activeAgentConflicts.length > 0 || activeAgentUnstaged.length === 0 || agentGitMutationPending"
+                @click.stop="stageAllAgentChanges"
+              >
+                <Loader2 v-if="stagingAllAgentFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
+                <Plus v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+              </Button>
+            </template>
           </div>
         </div>
 
@@ -1896,9 +1943,11 @@ defineExpose({
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"
                   title="暂存文件"
+                  :disabled="updatingAgentIndexPaths.has(agentMutationKey(file.scope, file.path))"
                   @click.stop="stageAgentFile(file)"
                 >
-                  <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
+                  <Loader2 v-if="updatingAgentIndexPaths.has(agentMutationKey(file.scope, file.path))" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
+                  <Plus v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
                 </button>
               </div>
             </div>

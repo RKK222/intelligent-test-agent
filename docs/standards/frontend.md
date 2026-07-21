@@ -34,6 +34,7 @@
 4. 当前事件流应优先按 `eventId` 去重，兼容旧事件时才回退 `runId + seq`；`seq=0` transient 文本事件不能因为相同 seq 被错误丢弃。
 5. 普通工作区文件、工作区引用组合视图与公共级/应用级 Agent 配置文件的异步读取都必须显式建模 loading/loaded/error。普通文件以 workspace 上下文隔离；引用节点必须以服务端稳定 `id/locator` 隔离，展示 path 不能作为唯一缓存或 tab 身份，引用 tab 固定只读并保留内部打开定位；Agent 文件以 scope/workspace/worktree/server 上下文和合成 tab 路径隔离，应用级 tab 必须持久携带 feature workspace ID，重试与写入均从 tab 路由还原目标，不得回退当前个人 workspace；三者都必须校验同路径或同节点请求代次、tab 存在性和用户内容修订代次。后台响应只能更新所属 tab 且不得抢焦点，合法空文件不能与“尚未加载”混淆，读取期间发生过编辑的内容即使随后已保存/回退为 clean 也不得被旧磁盘响应覆盖。顶部 loaded tab 应使用缓存，loading 不重复发请求，error/旧版未标记 Agent tab 重新读取；重试必须按 tab 类型分发，Agent 合成路径不得传给 `workspace.read`，也不得作为页脚复制结果；复制路径必须使用服务端状态返回的真实配置根目录与 Agent 相对路径，引用 locator 不得退化为可写 workspace path。配置保存后的组合树刷新必须用 generation fence 丢弃迟到目录响应。Agent 上下文失效以及普通文件移动/改名导致旧路径失效时，必须把旧 loading 收敛为 loaded/error 或从新路径补读，禁止永久停留在 loading。切换 workspace 的批量循环必须固定起始上下文并在每个 `await` 边界中止旧任务。
 6. 公共级或应用级 Agent 配置文件保存、新建、改名或删除成功后必须主动刷新 Git Changes 统计，不得依赖用户手工点击刷新；刷新触发只传递修订信号并复用 Git Changes 既有查询方法，不在编辑器保存或文件树变更链路复制 diff 请求。Agent 空目录必须通过 `.gitkeep` 形成可追踪文件，否则 Git 无法感知；应用级新建和删除路径必须限制在既有 `opencode.jsonc`、`agents/**`、`skills/**` Diff 白名单内。Agent 删除复用工作空间确认面板，目录必须明确递归影响范围并关闭其下已打开标签。进入变更面板时必须立即核验，持续轮询只允许在面板可见期间复用同一刷新程序，离开面板必须停止，避免后台长期扫描 Git。
+7. 应用级与公共级 Agent 的单文件和“全部暂存”必须复用同一 Git index 更新程序；批量操作向对应既有 stage API 一次传入当前作用域全部未暂存路径，不得逐文件并发请求，也不得跨作用域混合路径。无写权限、存在未解决冲突或 index 更新进行中时必须禁用批量暂存。
 
 ## 包边界
 

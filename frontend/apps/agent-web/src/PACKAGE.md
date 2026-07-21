@@ -62,6 +62,8 @@
 - `../vite.config.ts`：Vite 应用配置（Vue 插件、Tailwind 插件、workspace alias、dev server）。
 - `AgentWorkbench.handleSend` 继续把完整 text/file parts 交给 Run 请求；本地乐观 user message 只接收经 `promptPartsForUserDisplay` 收敛后的文本和附件元数据。历史 session-tree 恢复会预先按 `sessionId + messageId` 建立首个非 synthetic text 索引，仅补齐同 Session、无正文的 OpenCode user envelope；`events` 与 `messagesBySessionId` 两次回放复用该索引后再交给原 reducer 归并 file part，避免后续用户文本落入上一条 assistant，且不改变 Timeline、实时事件投影和 OpenCode parts 协议。
 
+- `components/GitChangesPanel.vue` 的应用 Agent 与公共 Agent 未暂存分组均支持“全部暂存”；单文件与批量暂存共用同一状态和 API 链路，批量请求不逐文件发送，也不跨作用域混合路径。
+
 ## 允许依赖
 
 - `@test-agent/*` 前端 workspace packages。

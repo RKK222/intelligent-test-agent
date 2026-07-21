@@ -80,6 +80,8 @@ Browser
 | `packages/shared-types` | 跨包共享 TypeScript 类型和事件/DTO 模型，Session/SessionMessage/Run 来源、夜间时段/任务、用户级会话运行态、代码库英文名、版本库类型、工作空间创建进度、平台文件 WebSocket route/ticket 等新增契约字段必须保持可选或按请求/响应兼容策略处理。 |
 | `../frontend-opencode` | 独立 Vue/TypeScript/Vite opencode IDE App 复刻工程；不加入 `frontend/pnpm-workspace.yaml`，通过 alias 复用 `backend-api`、`event-stream-client`、`shared-types` 源码。 |
 
+`apps/agent-web` 的 Git Changes 负责应用 Agent 与公共 Agent 当前作用域的逐文件和批量暂存；批量入口复用 `packages/backend-api` 既有 Agent stage 方法，不新增 API 或跨作用域状态。
+
 ## 前端访问关系
 
 允许方向：

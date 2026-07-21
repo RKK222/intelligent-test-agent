@@ -667,6 +667,100 @@ describe("GitChangesPanel", () => {
     await waitFor(() => expect((stageAllButton as HTMLButtonElement).disabled).toBe(true));
   });
 
+  it("stages all unstaged application Agent files in one request", async () => {
+    apiClientMock.getWorkspaceAgentDiff
+      .mockResolvedValueOnce({
+        files: [
+          { path: "agents/payment-test.md", status: "modified", staged: false, patch: "first" },
+          { path: "skills/payment-case-design/SKILL.md", status: "untracked", staged: false, patch: "second" },
+          { path: "opencode.jsonc", status: "modified", staged: true, patch: "staged" }
+        ]
+      })
+      .mockResolvedValueOnce({
+        files: [
+          { path: "agents/payment-test.md", status: "modified", staged: true, patch: "first" },
+          { path: "skills/payment-case-design/SKILL.md", status: "added", staged: true, patch: "second" },
+          { path: "opencode.jsonc", status: "modified", staged: true, patch: "staged" }
+        ]
+      });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: fixture.application.personalRuntimeWorkspaceId,
+        agentConfigWorkspaceId: fixture.application.personalRuntimeWorkspaceId,
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManageAgentConfig: true
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    await fireEvent.click(await view.findByRole("tab", { name: /^应用Agent/ }));
+    const stageAllButton = await view.findByRole("button", { name: "全部暂存应用 Agent 变更" });
+    await fireEvent.click(stageAllButton);
+
+    await waitFor(() => expect(apiClientMock.stageWorkspaceAgentFiles).toHaveBeenCalledWith(
+      fixture.application.personalRuntimeWorkspaceId,
+      ["agents/payment-test.md", "skills/payment-case-design/SKILL.md"]
+    ));
+    expect(apiClientMock.stageWorkspaceAgentFiles).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect((stageAllButton as HTMLButtonElement).disabled).toBe(true));
+  });
+
+  it("stages all unstaged public Agent files in one request", async () => {
+    apiClientMock.getPublicAgentDiff
+      .mockResolvedValueOnce({
+        files: [
+          { path: "opencode/agents/public-review.md", status: "modified", staged: false, patch: "first" },
+          { path: "opencode/skills/public-case/SKILL.md", status: "untracked", staged: false, patch: "second" },
+          { path: "opencode/agents/already-staged.md", status: "modified", staged: true, patch: "staged" }
+        ]
+      })
+      .mockResolvedValueOnce({
+        files: [
+          { path: "opencode/agents/public-review.md", status: "modified", staged: true, patch: "first" },
+          { path: "opencode/skills/public-case/SKILL.md", status: "added", staged: true, patch: "second" },
+          { path: "opencode/agents/already-staged.md", status: "modified", staged: true, patch: "staged" }
+        ]
+      });
+    const pinia = createPinia();
+    const workbench = useWorkbenchStore(pinia);
+    workbench.publicWorktree = {
+      worktreeId: "agw_public",
+      scope: "PUBLIC",
+      workspaceId: null,
+      linuxServerId: "linux-1",
+      worktreeName: "public-usr_admin",
+      branch: "public-usr_admin",
+      rootPath: "/data/public-usr_admin",
+      agentDirectory: "/data/public-usr_admin/opencode",
+      status: "ACTIVE",
+      createdAt: "2026-07-17T00:00:00Z",
+      updatedAt: "2026-07-17T00:00:00Z"
+    };
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: fixture.application.personalRuntimeWorkspaceId,
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManagePublicConfig: true
+      },
+      global: { plugins: [pinia] }
+    });
+
+    await fireEvent.click(await view.findByRole("tab", { name: /^公共Agent/ }));
+    const stageAllButton = await view.findByRole("button", { name: "全部暂存公共 Agent 变更" });
+    await fireEvent.click(stageAllButton);
+
+    await waitFor(() => expect(apiClientMock.stagePublicAgentFiles).toHaveBeenCalledWith(
+      ["opencode/agents/public-review.md", "opencode/skills/public-case/SKILL.md"],
+      "agw_public"
+    ));
+    expect(apiClientMock.stagePublicAgentFiles).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect((stageAllButton as HTMLButtonElement).disabled).toBe(true));
+  });
+
   it("rolls all staged application workspace files back to unstaged in one request", async () => {
     apiClientMock.getWorkspaceGitDiff
       .mockResolvedValueOnce({
@@ -1033,6 +1127,7 @@ describe("GitChangesPanel", () => {
 
     const row = await view.findByLabelText(fixture.files.applicationAgent);
     expect(within(row).queryByTitle("暂存文件")).toBeNull();
+    expect((view.getByRole("button", { name: "全部暂存应用 Agent 变更" }) as HTMLButtonElement).disabled).toBe(true);
     expect((view.getByRole("button", { name: "提交" }) as HTMLButtonElement).disabled).toBe(true);
     expect(apiClientMock.stageWorkspaceAgentFiles).not.toHaveBeenCalled();
   });
@@ -1136,6 +1231,9 @@ describe("GitChangesPanel", () => {
 
     await fireEvent.click(view.getByRole("tab", { name: /^应用Agent/ }));
     const conflictRow = await view.findByLabelText(fixture.files.applicationAgent);
+    const stageAllButton = view.getByRole("button", { name: "全部暂存应用 Agent 变更" });
+    expect((stageAllButton as HTMLButtonElement).disabled).toBe(true);
+    expect(stageAllButton.getAttribute("title")).toBe("存在未解决冲突，请先处理或取消合并");
     await fireEvent.click(conflictRow);
 
     await waitFor(() => expect(apiClientMock.getWorkspaceGitConflict).toHaveBeenCalledWith(
