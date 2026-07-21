@@ -57,7 +57,10 @@ test-agent-two-backend-complete.zip
 test-agent-two-backend-complete.zip.sha256
 ```
 
-ZIP 内顶层目录同样固定为 `test-agent-two-backend-complete/`，包含内层标准发布 ZIP、三台节点包及各自 SHA。企业内部中转机只需接收上面这一个 ZIP 和配套 SHA 文件，后续 `scp` 命令不再随版本修改。
+ZIP 内顶层目录同样固定为 `test-agent-two-backend-complete/`，包含内层标准发布 ZIP、三台节点包及各自 SHA，
+并在顶层提供无需传 IP 参数的 `deploy-backend-node.sh`、`deploy-frontend-node.sh`。脚本从本机网卡取 IP，
+连续执行节点包校验、预校验、正式部署和部署后校验，完整输出保存在交付目录上一层的
+`deploy-<本机IP>.log`。企业内部中转机只需接收上面这一个 ZIP 和配套 SHA 文件，后续 `scp` 命令不再随版本修改。
 
 交付物：
 
@@ -182,6 +185,11 @@ test-agent-config-SENSITIVE-<role>-<node>-<timestamp>.tar.gz.sha256
 - 前端 Nginx：[nginx.env.example](nginx.env.example)、[configure-nginx.sh](configure-nginx.sh)
 - `.4 + .114` 逐机配置包：[deploy-multi-backend-node.sh](deploy-multi-backend-node.sh)，支持
   `--validate-only`、正式部署和 `--verify-only`，内部复用标准后台/前端部署脚本
+- 完整包一键入口：[deploy-backend-node.sh](deploy-backend-node.sh)、
+  [deploy-frontend-node.sh](deploy-frontend-node.sh)，本机 IP 自动识别且三阶段输出统一落盘
+- 新后台初始化：[init-backend-node-config.sh](init-backend-node-config.sh) 自动派生本机
+  `backend.env`、`docker.env`；[register-backend-on-frontend.sh](register-backend-on-frontend.sh)
+  在前端登记新后台并更新打包的 `nginx.env`
 - 公共模型配置：[opencode.jsonc.example](opencode.jsonc.example)
 
 单后台的 `configure-single-deployment.sh frontend` 会用临时 `.conf` 实测候选目录是否加载新文件，避免把“显式 include 某一个现有文件”的同级目录误判为通配目录。当前 `.2` 已确认显式加载专用 `/data/apps/nginx/conf/test-agent.conf`，检查并备份后应通过 `--gateway-conf` 明确复用该文件；只有它还承载其他系统、不能由本应用接管时，才由 Nginx 管理方增加专用通配目录。具体命令见 [单后台配置脚本执行单](SINGLE-BACKEND-CONFIGURATION.md)。

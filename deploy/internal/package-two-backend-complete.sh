@@ -123,6 +123,11 @@ require_command unzip
 require_command tar
 require_command awk
 require_file "${RELEASE_ARCHIVE}"
+require_file "${SCRIPT_DIR}/deploy-node-common.sh"
+require_file "${SCRIPT_DIR}/deploy-backend-node.sh"
+require_file "${SCRIPT_DIR}/deploy-frontend-node.sh"
+require_file "${SCRIPT_DIR}/init-backend-node-config.sh"
+require_file "${SCRIPT_DIR}/register-backend-on-frontend.sh"
 
 NODE_4="${NODES_DIR}/test-agent-two-backend-122.233.30.4-SENSITIVE.tar.gz"
 NODE_114="${NODES_DIR}/test-agent-two-backend-122.233.30.114-SENSITIVE.tar.gz"
@@ -176,6 +181,12 @@ validate_node_archive "${NODE_2}" test-agent-two-backend-122.233.30.2 nginx.env
 BUNDLE_ROOT="${TMP_ROOT}/${BUNDLE_NAME}"
 mkdir -p "${BUNDLE_ROOT}/nodes" "${OUTPUT_DIR}"
 install -m 0644 "${SCRIPT_DIR}/MULTI-BACKEND.md" "${BUNDLE_ROOT}/START-HERE.md"
+install -m 0644 "${SCRIPT_DIR}/deploy-node-common.sh" "${BUNDLE_ROOT}/deploy-node-common.sh"
+install -m 0755 "${SCRIPT_DIR}/deploy-backend-node.sh" "${BUNDLE_ROOT}/deploy-backend-node.sh"
+install -m 0755 "${SCRIPT_DIR}/deploy-frontend-node.sh" "${BUNDLE_ROOT}/deploy-frontend-node.sh"
+install -m 0755 "${SCRIPT_DIR}/init-backend-node-config.sh" "${BUNDLE_ROOT}/init-backend-node-config.sh"
+install -m 0755 "${SCRIPT_DIR}/register-backend-on-frontend.sh" \
+  "${BUNDLE_ROOT}/register-backend-on-frontend.sh"
 install -m 0600 "${RELEASE_ARCHIVE}" "${BUNDLE_ROOT}/test-agent-internal-release.zip"
 printf '%s  %s\n' \
   "$(sha256_digest "${BUNDLE_ROOT}/test-agent-internal-release.zip")" \

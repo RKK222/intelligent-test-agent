@@ -13,10 +13,13 @@ trap cleanup EXIT
 
 CONFIG_114="${TMP_ROOT}/config-114"
 CONFIG_4="${TMP_ROOT}/config-4"
+CONFIG_115="${TMP_ROOT}/config-115"
 CONFIG_FRONTEND="${TMP_ROOT}/config-frontend"
+CONFIG_FRONTEND_3="${TMP_ROOT}/config-frontend-3"
 RELEASE_ROOT="${TMP_ROOT}/release-root"
 RELEASE_ARCHIVE="${TMP_ROOT}/test-agent-internal-release.zip"
-mkdir -p "${CONFIG_114}" "${CONFIG_4}" "${CONFIG_FRONTEND}" \
+mkdir -p "${CONFIG_114}" "${CONFIG_4}" "${CONFIG_115}" "${CONFIG_FRONTEND}" \
+  "${CONFIG_FRONTEND_3}" \
   "${RELEASE_ROOT}/dist/backend/lib" "${RELEASE_ROOT}/deploy/internal"
 
 printf '%s\n' \
@@ -96,6 +99,24 @@ validate_without_secret_output() {
 validate_without_secret_output backend "${CONFIG_4}" --backend-host 122.233.30.4
 validate_without_secret_output backend "${CONFIG_114}" --backend-host 122.233.30.114
 validate_without_secret_output frontend "${CONFIG_FRONTEND}"
+
+# 新后台沿用同一配置字段，只替换本机 advertised host 和稳定 server ID。
+cp "${CONFIG_4}/backend.env" "${CONFIG_115}/backend.env"
+cp "${CONFIG_4}/docker.env" "${CONFIG_115}/docker.env"
+sed -i.bak \
+  -e 's/TEST_AGENT_SERVER_ADVERTISED_HOST=122\.233\.30\.4/TEST_AGENT_SERVER_ADVERTISED_HOST=122.233.30.115/' \
+  -e 's/TEST_AGENT_LINUX_SERVER_ID=test-agent-backend-122-233-30-4/TEST_AGENT_LINUX_SERVER_ID=test-agent-backend-122-233-30-115/' \
+  "${CONFIG_115}/backend.env"
+rm -f "${CONFIG_115}/backend.env.bak"
+validate_without_secret_output backend "${CONFIG_115}" --backend-host 122.233.30.115
+
+cp "${CONFIG_FRONTEND}/nginx.env" "${CONFIG_FRONTEND_3}/nginx.env"
+sed -i.bak \
+  -e 's#TEST_AGENT_NGINX_BACKENDS=.*#TEST_AGENT_NGINX_BACKENDS=122.233.30.4:8080,122.233.30.114:8080,122.233.30.115:8080#' \
+  -e 's#TEST_AGENT_NGINX_TERMINAL_ROUTES=.*#TEST_AGENT_NGINX_TERMINAL_ROUTES=test-agent-backend-122-233-30-4=122.233.30.4:8080,test-agent-backend-122-233-30-114=122.233.30.114:8080,test-agent-backend-122-233-30-115=122.233.30.115:8080#' \
+  "${CONFIG_FRONTEND_3}/nginx.env"
+rm -f "${CONFIG_FRONTEND_3}/nginx.env.bak"
+validate_without_secret_output frontend "${CONFIG_FRONTEND_3}"
 
 BAD_BACKEND="${TMP_ROOT}/bad-backend"
 mkdir -p "${BAD_BACKEND}"

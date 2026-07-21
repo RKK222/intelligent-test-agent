@@ -95,6 +95,11 @@ unzip -tq "${BUNDLE}" >/dev/null
 
 listing="$(unzip -Z1 "${BUNDLE}")"
 grep -Fxq 'test-agent-two-backend-complete/START-HERE.md' <<<"${listing}"
+grep -Fxq 'test-agent-two-backend-complete/deploy-node-common.sh' <<<"${listing}"
+grep -Fxq 'test-agent-two-backend-complete/deploy-backend-node.sh' <<<"${listing}"
+grep -Fxq 'test-agent-two-backend-complete/deploy-frontend-node.sh' <<<"${listing}"
+grep -Fxq 'test-agent-two-backend-complete/init-backend-node-config.sh' <<<"${listing}"
+grep -Fxq 'test-agent-two-backend-complete/register-backend-on-frontend.sh' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/test-agent-internal-release.zip' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.30.4-SENSITIVE.tar.gz' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.30.114-SENSITIVE.tar.gz' <<<"${listing}"

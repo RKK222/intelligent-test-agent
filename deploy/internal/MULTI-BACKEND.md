@@ -354,61 +354,85 @@ TEST_AGENT_NGINX_RELOAD_MODE=binary
 `test-agent-two-backend-complete/`，不再在文件名或目录名中添加日期、`v2`、`v3`。企业内部中转机和
 三台服务器可以长期复用同一组校验、解压和 `scp` 命令。
 
-如果已经根据三台服务器的轻量采集结果生成逐机配置包，优先使用包内的
-`deploy-multi-backend-node.sh`。它会校验完整发布 ZIP 的 SHA、JAR 内置 RSA、节点身份、端口池、
-manager token 一致性和 Nginx 双 upstream；正式执行前备份当前配置，然后复用标准部署脚本。
-
-三台服务器的 `/data/0709/` 都必须先有同一份：
-
-```text
-test-agent-internal-release.zip
-test-agent-internal-release.zip.sha256
-```
+三台服务器都上传并校验同一个外层 ZIP 后，用无参数入口执行。入口脚本从本机网卡识别 IP，自动选择并
+校验节点包、解压节点配置，然后连续完成 `--validate-only`、正式部署和 `--verify-only`。任一步失败都会
+返回非零；Java、Docker、Nginx 和最终校验输出统一写入 `/data/0709/deploy-<本机IP>.log`，不会再出现
+只执行了一个空 `bash`、但实际服务没有重启的情况。
 
 先在 `.4` 执行：
 
 ```bash
 cd /data/0709
-sha256sum -c test-agent-two-backend-122.233.30.4-SENSITIVE.tar.gz.sha256
-tar -xzf test-agent-two-backend-122.233.30.4-SENSITIVE.tar.gz
-cd test-agent-two-backend-122.233.30.4
-bash deploy-multi-backend-node.sh backend --backend-host 122.233.30.4 --validate-only
-bash deploy-multi-backend-node.sh backend --backend-host 122.233.30.4
-bash deploy-multi-backend-node.sh backend --backend-host 122.233.30.4 --verify-only
+sha256sum -c test-agent-two-backend-complete.zip.sha256
+unzip -oq test-agent-two-backend-complete.zip
+cd /data/0709/test-agent-two-backend-complete
+bash deploy-backend-node.sh
 ```
 
 再在 `.114` 执行：
 
 ```bash
 cd /data/0709
-sha256sum -c test-agent-two-backend-122.233.30.114-SENSITIVE.tar.gz.sha256
-tar -xzf test-agent-two-backend-122.233.30.114-SENSITIVE.tar.gz
-cd test-agent-two-backend-122.233.30.114
-bash deploy-multi-backend-node.sh backend --backend-host 122.233.30.114 --validate-only
-bash deploy-multi-backend-node.sh backend --backend-host 122.233.30.114
-bash deploy-multi-backend-node.sh backend --backend-host 122.233.30.114 --verify-only
+sha256sum -c test-agent-two-backend-complete.zip.sha256
+unzip -oq test-agent-two-backend-complete.zip
+cd /data/0709/test-agent-two-backend-complete
+bash deploy-backend-node.sh
 ```
 
 两台后台全部通过后，最后在 `.2` 执行：
 
 ```bash
 cd /data/0709
-sha256sum -c test-agent-two-backend-122.233.30.2.tar.gz.sha256
-tar -xzf test-agent-two-backend-122.233.30.2.tar.gz
-cd test-agent-two-backend-122.233.30.2
-bash deploy-multi-backend-node.sh frontend --validate-only
-bash deploy-multi-backend-node.sh frontend
-bash deploy-multi-backend-node.sh frontend --verify-only
+sha256sum -c test-agent-two-backend-complete.zip.sha256
+unzip -oq test-agent-two-backend-complete.zip
+cd /data/0709/test-agent-two-backend-complete
+bash deploy-frontend-node.sh
 ```
 
-正式部署必须由 `root` 执行；`--validate-only` 和 `--verify-only` 不修改配置。两个后台配置包包含真实
-数据库密码和 token，权限与传输方式按敏感交付物处理。完整发布 ZIP 仍单独传输，逐机配置包不包含
-JAR、RSA、worker 镜像、programs、日志或业务数据。
+正式部署必须由 `root` 执行。外层包内已有完整发布 ZIP，三台服务器不再另外复制内层 ZIP 或逐机包。
+后台节点包包含真实数据库密码和 token，权限与传输方式按敏感交付物处理；RSA 只使用发布 JAR 内的
+`BOOT-INF/classes/rsa-private.key`，不会生成 RSA env 或外置私钥路径。
 
 当前 manager 配置下发成功日志为 `event=manager_config_update status=applied`。逐机验证脚本同时兼容
 旧版 `manager config update applied`；不能只按旧文本判断当前结构化日志失败。
 
-### 7.2 使用完整发布包中的标准脚本
+### 7.2 后续增加一台全新后台
+
+把同一个外层 ZIP 和 SHA 上传到新后台并解压。初始化脚本从新服务器网卡自动取
+`122.233.30.x`，以包内 `.4` 的真实配置为基线，只替换本机 `TEST_AGENT_SERVER_ADVERTISED_HOST` 和
+`TEST_AGENT_LINUX_SERVER_ID`；`docker.env` 沿用集群相同 manager token，整个过程不打印密码或 token，
+生成的节点配置包仍强制不超过 `1 MiB`：
+
+```bash
+cd /data/0709
+sha256sum -c test-agent-two-backend-complete.zip.sha256
+unzip -oq test-agent-two-backend-complete.zip
+cd /data/0709/test-agent-two-backend-complete
+bash init-backend-node-config.sh
+bash deploy-backend-node.sh
+```
+
+这一步自动初始化新后台的两个文件：
+
+```text
+backend.env：复用数据库、Redis、CORS、manager token、内部代理 key，只改本机 IP 和稳定 server ID
+docker.env：复用数据目录、programs、worker 镜像、端口池及与 backend.env 相同的 manager token
+```
+
+新后台 readiness 通过后，在前端 `.2` 的已解压外层目录登记一次新后台 IP，再重新运行前端入口。
+远端后台 IP 不能从前端本机网卡推断，所以这是扩容中唯一需要手工填写的 IP；脚本会先访问新后台
+readiness，再把 backend 和 terminal route 同步追加到打包的 `nginx.env`，重复登记不会产生重复项：
+
+```bash
+cd /data/0709/test-agent-two-backend-complete
+bash register-backend-on-frontend.sh 122.233.30.新后台末段
+bash deploy-frontend-node.sh
+```
+
+如果以后再加后台，每台新后台重复上面的初始化和后台部署；最后在 `.2` 对每个新 IP 登记一次，再只
+执行一次 `deploy-frontend-node.sh`。
+
+### 7.3 使用完整发布包中的标准脚本
 
 先部署后台 A `.4`：
 

@@ -8,6 +8,7 @@ CONFIG_DIR_EXPLICIT=0
 RELEASE_ARCHIVE="/data/0709/test-agent-internal-release.zip"
 INSTALL_ROOT="/data/testagent"
 BACKEND_HOST=""
+PEER_HOST=""
 MODE="deploy"
 
 usage() {
@@ -15,13 +16,14 @@ usage() {
 Usage: deploy-multi-backend-node.sh <backend|frontend> [options]
 
 Apply one node's prepared configuration and reuse the standard enterprise release
-scripts to deploy the 122.233.30.4 + 122.233.30.114 two-backend topology.
+scripts to deploy the enterprise multi-backend topology.
 
 Options:
   --config-dir <path>       Prepared config directory. Default: <script-dir>/config.
   --release-archive <path>  Full release ZIP. Default: /data/0709/test-agent-internal-release.zip.
   --install-root <path>     Installation root. Default: /data/testagent.
-  --backend-host <host>     Backend role only; .4 or .114. Defaults to backend.env.
+  --backend-host <host>     Backend role only; defaults to backend.env.
+  --peer-host <host>        Backend health-check peer. Defaults to the other seed node.
   --validate-only           Validate configuration, release checksum and embedded RSA only.
   --verify-only             Verify an already deployed node without changing it.
   -h, --help                Show this help.
@@ -53,6 +55,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --backend-host)
       BACKEND_HOST="$2"
+      shift 2
+      ;;
+    --peer-host)
+      PEER_HOST="$2"
       shift 2
       ;;
     --validate-only)
@@ -174,6 +180,16 @@ server_id_from_host() {
   printf 'test-agent-backend-%s' "${1//./-}"
 }
 
+require_backend_site_ip() {
+  local value="$1"
+  local name="$2"
+  if [[ ! "${value}" =~ ^122\.233\.30\.([1-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-4])$ ]] \
+    || [[ "${value}" == "122.233.30.2" ]]; then
+    echo "${name} must be one backend IP in 122.233.30.0/24: ${value:-<empty>}" >&2
+    exit 1
+  fi
+}
+
 validate_backend_config() {
   local config_dir="$1"
   local backend_env="${config_dir}/backend.env"
@@ -185,10 +201,7 @@ validate_backend_config() {
   if [[ -z "${BACKEND_HOST}" ]]; then
     BACKEND_HOST="$(env_value "${backend_env}" TEST_AGENT_SERVER_ADVERTISED_HOST)"
   fi
-  if [[ "${BACKEND_HOST}" != "122.233.30.4" && "${BACKEND_HOST}" != "122.233.30.114" ]]; then
-    echo "Backend host must be 122.233.30.4 or 122.233.30.114: ${BACKEND_HOST:-<empty>}" >&2
-    exit 1
-  fi
+  require_backend_site_ip "${BACKEND_HOST}" BACKEND_HOST
   expected_server_id="$(server_id_from_host "${BACKEND_HOST}")"
 
   require_exact_value "${backend_env}" TEST_AGENT_SERVER_ADVERTISED_HOST "${BACKEND_HOST}"
@@ -242,6 +255,8 @@ validate_backend_config() {
 validate_frontend_config() {
   local config_dir="$1"
   local nginx_env="${config_dir}/nginx.env"
+  local backends routes entry host expected_route expected_routes=""
+  local -a backend_entries=()
 
   require_file "${nginx_env}"
   if grep -q 'REPLACE_' "${nginx_env}"; then
@@ -249,10 +264,34 @@ validate_frontend_config() {
     exit 1
   fi
   require_exact_value "${nginx_env}" TEST_AGENT_NGINX_MODE multi
-  require_exact_value "${nginx_env}" TEST_AGENT_NGINX_BACKENDS \
-    122.233.30.4:8080,122.233.30.114:8080
-  require_exact_value "${nginx_env}" TEST_AGENT_NGINX_TERMINAL_ROUTES \
-    test-agent-backend-122-233-30-4=122.233.30.4:8080,test-agent-backend-122-233-30-114=122.233.30.114:8080
+  require_one_key "${nginx_env}" TEST_AGENT_NGINX_BACKENDS
+  require_one_key "${nginx_env}" TEST_AGENT_NGINX_TERMINAL_ROUTES
+  backends="$(env_value "${nginx_env}" TEST_AGENT_NGINX_BACKENDS)"
+  routes="$(env_value "${nginx_env}" TEST_AGENT_NGINX_TERMINAL_ROUTES)"
+  IFS=',' read -r -a backend_entries <<<"${backends}"
+  [[ "${#backend_entries[@]}" -ge 2 ]] || {
+    echo "TEST_AGENT_NGINX_BACKENDS must contain at least two backends" >&2
+    exit 1
+  }
+  for entry in "${backend_entries[@]}"; do
+    [[ "${entry}" =~ ^(122\.233\.30\.[0-9]+):8080$ ]] || {
+      echo "Invalid backend entry in nginx.env: ${entry}" >&2
+      exit 1
+    }
+    host="${BASH_REMATCH[1]}"
+    require_backend_site_ip "${host}" TEST_AGENT_NGINX_BACKENDS
+    expected_route="$(server_id_from_host "${host}")=${entry}"
+    expected_routes="${expected_routes:+${expected_routes},}${expected_route}"
+  done
+  [[ ",${backends}," == *",122.233.30.4:8080,"* \
+    && ",${backends}," == *",122.233.30.114:8080,"* ]] || {
+    echo "nginx.env must retain seed backends 122.233.30.4 and 122.233.30.114" >&2
+    exit 1
+  }
+  [[ "${routes}" == "${expected_routes}" ]] || {
+    echo "TEST_AGENT_NGINX_TERMINAL_ROUTES must match TEST_AGENT_NGINX_BACKENDS in order" >&2
+    exit 1
+  }
   require_exact_value "${nginx_env}" TEST_AGENT_NGINX_LISTEN_PORT 80
   require_exact_value "${nginx_env}" TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS 9996
   require_exact_value "${nginx_env}" TEST_AGENT_NGINX_TLS_ENABLED false
@@ -368,8 +407,16 @@ verify_backend() {
 
   validate_backend_config "${installed_config}"
   expected_server_id="$(server_id_from_host "${BACKEND_HOST}")"
-  peer_host="122.233.30.114"
-  [[ "${BACKEND_HOST}" == "122.233.30.114" ]] && peer_host="122.233.30.4"
+  peer_host="${PEER_HOST}"
+  if [[ -z "${peer_host}" ]]; then
+    peer_host="122.233.30.4"
+    [[ "${BACKEND_HOST}" == "122.233.30.4" ]] && peer_host="122.233.30.114"
+  fi
+  require_backend_site_ip "${peer_host}" PEER_HOST
+  [[ "${peer_host}" != "${BACKEND_HOST}" ]] || {
+    echo "PEER_HOST must differ from BACKEND_HOST" >&2
+    exit 1
+  }
 
   require_command curl
   require_command systemctl
@@ -426,12 +473,16 @@ verify_backend() {
 verify_frontend() {
   local installed_config="${INSTALL_ROOT}/config"
   local nginx_env="${installed_config}/nginx.env"
-  local nginx_bin nginx_prefix nginx_main_conf nginx_dump
+  local nginx_bin nginx_prefix nginx_main_conf nginx_dump backends entry
+  local -a backend_entries=()
 
   validate_frontend_config "${installed_config}"
   require_command curl
-  curl -fsS http://122.233.30.4:8080/actuator/health/readiness >/dev/null
-  curl -fsS http://122.233.30.114:8080/actuator/health/readiness >/dev/null
+  backends="$(env_value "${nginx_env}" TEST_AGENT_NGINX_BACKENDS)"
+  IFS=',' read -r -a backend_entries <<<"${backends}"
+  for entry in "${backend_entries[@]}"; do
+    curl -fsS "http://${entry}/actuator/health/readiness" >/dev/null
+  done
 
   nginx_bin="$(env_value "${nginx_env}" TEST_AGENT_NGINX_BIN)"
   nginx_prefix="$(env_value "${nginx_env}" TEST_AGENT_NGINX_PREFIX)"
@@ -442,13 +493,15 @@ verify_frontend() {
   }
   "${nginx_bin}" -p "${nginx_prefix%/}/" -c "${nginx_main_conf}" -t
   nginx_dump="$("${nginx_bin}" -p "${nginx_prefix%/}/" -c "${nginx_main_conf}" -T 2>&1)"
-  grep -Fq 'server 122.233.30.4:8080 max_fails=3 fail_timeout=10s;' <<<"${nginx_dump}"
-  grep -Fq 'server 122.233.30.114:8080 max_fails=3 fail_timeout=10s;' <<<"${nginx_dump}"
+  for entry in "${backend_entries[@]}"; do
+    grep -Fq "server ${entry} max_fails=3 fail_timeout=10s;" <<<"${nginx_dump}"
+  done
   grep -Fq 'listen 80;' <<<"${nginx_dump}"
   grep -Fq 'listen 9996;' <<<"${nginx_dump}"
   curl -fsS http://127.0.0.1/health | grep -Fxq ok
   curl -fsS http://127.0.0.1:9996/health | grep -Fxq ok
-  printf 'Frontend verification passed: both backends ready; Nginx listens on 80 and 9996\n'
+  printf 'Frontend verification passed: %s backends ready; Nginx listens on 80 and 9996\n' \
+    "${#backend_entries[@]}"
 }
 
 require_absolute_path "${RELEASE_ARCHIVE}" RELEASE_ARCHIVE
@@ -487,8 +540,11 @@ fi
 if [[ "${ROLE}" == "frontend" ]]; then
   # 前端最后切流；任一后台未 ready 时先失败，不改 nginx.env 或静态资源。
   require_command curl
-  curl -fsS http://122.233.30.4:8080/actuator/health/readiness >/dev/null
-  curl -fsS http://122.233.30.114:8080/actuator/health/readiness >/dev/null
+  frontend_backends="$(env_value "${CONFIG_DIR}/nginx.env" TEST_AGENT_NGINX_BACKENDS)"
+  IFS=',' read -r -a frontend_backend_entries <<<"${frontend_backends}"
+  for frontend_backend in "${frontend_backend_entries[@]}"; do
+    curl -fsS "http://${frontend_backend}/actuator/health/readiness" >/dev/null
+  done
 fi
 
 install_prepared_config
