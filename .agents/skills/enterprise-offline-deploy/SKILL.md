@@ -46,6 +46,7 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 6. 区分“外层 U 盘完整包”“内层完整发布 ZIP”“节点专属配置包”，明确每台服务器需要哪一对文件及落盘路径。
 7. 不要求用户回传真实数据库密码、token、Cookie、RSA 私钥或其他密钥；诊断输出只展示状态、长度或哈希。
 8. 现场把已校验的明确文件复制到 `/data/0709` 时统一使用绝对命令 `/bin/cp -f <源文件> <目标目录>/`，绕过企业服务器常见的 `alias cp='cp -i'`，不再逐个询问覆盖。只对逐条列明的文件使用 `-f`，禁止扩大为 `cp -rf` 覆盖目录。
+9. 后续双后台 U 盘外层交付固定为 `test-agent-two-backend-complete.zip` 和 `test-agent-two-backend-complete.zip.sha256`，包内顶层固定为 `test-agent-two-backend-complete/`；不再添加日期、`v2`、`v3` 或临时目录名。一个 ZIP 内必须包含内层标准发布 ZIP 和三台节点包，SHA 文件只作为这个唯一完整包的传输校验。
 
 ## 标准目录
 
@@ -86,6 +87,8 @@ deploy/internal/package-release.sh --output-dir /path/to/dist
 ```
 
 以上命令只在外部联网 Mac 重新构建交付物时执行。包已通过 U 盘进入企业内部中转机后，现场步骤从中转机上的 SHA256 校验和 `scp` 开始。
+
+标准发布 ZIP 与三台节点包齐全后，使用 `deploy/internal/package-two-backend-complete.sh` 生成固定外层完整包。企业内部中转机每次只接收固定名 ZIP 和配套 SHA，不再按日期或版本改变命令。
 
 ## 打包产物
 

@@ -41,6 +41,24 @@ VITE_TEST_AGENT_API_BASE_URL="" \
 
 这样 `http://mimo.sdc.cs.icbc:9996` 和 `http://122.233.30.2:9996` 都请求各自同源 `/api`。入口策略变更后只修改服务器 `docker.env` 不会改变已经编译的静态文件，必须重新构建并替换前端产物。
 
+标准发布 ZIP 和三台已准备好的节点配置包齐全后，用固定外层封装脚本生成 U 盘交付物：
+
+```bash
+deploy/internal/package-two-backend-complete.sh \
+  --release-archive deploy/internal/dist/test-agent-internal-release.zip \
+  --nodes-dir /path/to/prepared-node-packages \
+  --output-dir /path/to/usb-output
+```
+
+以后外层只使用固定的一套名称，不添加日期、`v2`、`v3` 等后缀；重复打包会无交互覆盖旧文件：
+
+```text
+test-agent-two-backend-complete.zip
+test-agent-two-backend-complete.zip.sha256
+```
+
+ZIP 内顶层目录同样固定为 `test-agent-two-backend-complete/`，包含内层标准发布 ZIP、三台节点包及各自 SHA。企业内部中转机只需接收上面这一个 ZIP 和配套 SHA 文件，后续 `scp` 命令不再随版本修改。
+
 交付物：
 
 ```text

@@ -349,6 +349,11 @@ TEST_AGENT_NGINX_RELOAD_MODE=binary
 
 ### 7.1 使用逐机配置包
 
+后续 U 盘交付物固定为 `test-agent-two-backend-complete.zip` 和配套
+`test-agent-two-backend-complete.zip.sha256`，ZIP 内顶层目录固定为
+`test-agent-two-backend-complete/`，不再在文件名或目录名中添加日期、`v2`、`v3`。企业内部中转机和
+三台服务器可以长期复用同一组校验、解压和 `scp` 命令。
+
 如果已经根据三台服务器的轻量采集结果生成逐机配置包，优先使用包内的
 `deploy-multi-backend-node.sh`。它会校验完整发布 ZIP 的 SHA、JAR 内置 RSA、节点身份、端口池、
 manager token 一致性和 Nginx 双 upstream；正式执行前备份当前配置，然后复用标准部署脚本。
