@@ -22,6 +22,9 @@ const (
 func resolveUnifiedAuthID(explicit, sessionPath string) (string, error) {
 	explicit = strings.TrimSpace(explicit)
 	derived := unifiedAuthIDFromSessionPath(sessionPath)
+	if explicit != "" && derived == "" {
+		return "", fmt.Errorf("unifiedAuthId requires stable user session path")
+	}
 	if explicit != "" && derived != "" && explicit != derived {
 		return "", fmt.Errorf("unifiedAuthId does not match session path")
 	}

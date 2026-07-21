@@ -92,6 +92,8 @@ Token 校验流程：
 
 日志配置必须对可变 message、thread 和 traceId 做 CRLF 编码，避免换行注入伪造日志记录。opencode 节点 health、Redis health、scheduler/XXL 运行日志和 opencode-manager 控制面日志必须避免输出 ticket、token、完整 Authorization header、Cookie、session digest、MySQL 密码、用户输入、完整 prompt 或原始 executor 敏感 payload。前端 `rawExchangeObserver` 对 ticket/token/cookie/password/secret/sessionDigest 做递归、大小写不敏感脱敏后才允许展示。
 
+受管用户 opencode server 的日志文件名包含统一认证号的路径安全编码、UTC 启动时间和端口。`%HH` 编码或“有界前缀 + 完整 SHA-256”只用于避免路径穿越、冲突和文件名超限，不构成匿名化；日志目录必须限制为运维所需的最小访问权限。manager 生命周期日志、错误响应和普通业务日志不得记录原始统一认证号或完整用户日志文件名，身份与 session 路径不一致时只返回通用校验错误。对外工单、日志下载或排障报告必须遮蔽文件名中的身份部分，可保留启动时间、端口、traceId 等低敏关联字段；日志正文仍按上述 token、prompt 和用户输入规则脱敏。
+
 ## Web 安全
 
 1. CORS 必须明确允许来源，不使用无限制生产配置。本地默认允许主前端和 `frontend-opencode` 的 Vite dev/preview/real E2E 端口（`localhost`/`127.0.0.1` 的 `3000`、`4173`、`4177`、`4187`、`5173`、`5174`）；局域网 IP 调试必须通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 或根目录启动脚本追加实际前端 origin；生产环境必须通过配置显式声明允许来源。

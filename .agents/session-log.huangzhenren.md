@@ -19,6 +19,23 @@
   - 两个目标测试文件 84 项通过；前端 typecheck、lint、用户手册及生产 build、`git diff --check` 通过。前端全量 Vitest 为 1484 passed / 1 skipped / 1 failed；唯一失败仍是既有 `DirectoryRows` 用 `button` 查询实际 `radio` 角色的“上传”，本轮开始前已复现且相关文件未修改。
   - 不涉及后端、HTTP API、RunEvent/SSE、数据库/SQL、generated SDK、环境配置、性能或鉴权模型；权限变化仅写入当前个人 worktree 的 OpenCode JSONC。工作树中并行的 manager/后端日志功能改动和既有 `.config` 删除未纳入本次范围。
 
+### 2026-07-21 - 按用户和启动实例拆分 OpenCode 进程日志
+
+- Why:
+  - 用户 opencode server 日志原来只按端口写入 `{port}.log`；端口会变化、复用，同一端口的多次启动也会混写，难以按用户定位一次具体启动。
+- What:
+  - Java 公共启动链路新增可选 `unifiedAuthId`，优先读取用户仓储中的统一认证号，缺失时只允许从已校验的 `.../users/{unifiedAuthId}` session 路径派生；manager WebSocket `start` 透传该字段，协议版本保持 `opencode-manager.v1`。
+  - Go manager 将单次启动日志改为 `{safeUnifiedAuthId}-{yyyyMMddTHHmmss.nnnnnnnnnZ}-{port}.log`，UTC 启动时间与 state `startedAt` 使用同一时刻，stdout/stderr 共同写入该文件；restart 保留用户身份但生成新文件。
+  - 文件名对非安全 UTF-8 字节使用大写 `%HH`，超长身份使用有界前缀和完整 SHA-256；显式身份必须能由稳定 `users/{id}` session 路径验证，路径不稳定或身份不一致时都返回不含原始身份的通用错误。旧 state、旧 Java 和本地 CLI 继续兼容，无法派生身份时仍写 `{port}.log`，已有旧日志不迁移、不删除。
+  - 同步 manager/runtime README、后端部署说明和安全脱敏边界；同时把 `tools/verify-ai-docs.sh` 中已过时的外部服务断言更新为包含正文已有的 `XXL MySQL`。
+- How:
+  - 复用 `OpencodeProcessStartupService` 公共启动程序和既有 manager socket gateway；统一认证号写入 manager 本地 state 供 restart 恢复，不新增业务旁路、HTTP 文件代理或数据库持久化。
+  - Go 以 TDD 覆盖精确文件名、特殊字符、超长身份、session 路径校验、restart 新文件及旧 JSON；Java 覆盖仓储优先级、安全路径 fallback、assignment 下发、JSON 编解码和旧构造器兼容。
+- Result:
+  - `go test -count=1 ./...` 全量通过；Java 日志链路定向 64 项、runtime 全量 638 项和下游 `ManagerControlWebSocketHandlerTest` 5 项通过。runtime 全量首次在无关的 1 秒定时重试断言上瞬时失败，单测复跑 5 项和随后全量复跑均通过，未修改该无关测试或运行代码。
+  - `tools/verify-ai-docs.sh`、`git diff --check` 和目标目录冲突标记扫描通过。文档已明确企业纯 Docker 路径、最近日志定位、旧文件兼容与文件名身份脱敏。
+  - 不涉及 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、前端、generated SDK、环境变量或 `.env.local`；manager 自身 `manager.log/manager-error.log` 路径不变。真实企业 worker 仍需在部署新 Java/manager 后观察一次启动、同端口 restart 和日志采集/保留策略。
+
 ### 2026-07-21 - 同步 main 并保留两侧功能
 
 - Why:

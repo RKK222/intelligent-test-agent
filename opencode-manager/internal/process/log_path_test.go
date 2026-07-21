@@ -42,6 +42,21 @@ func TestBuildStartSpecRejectsMismatchedUnifiedAuthID(t *testing.T) {
 	}
 }
 
+func TestBuildStartSpecRejectsExplicitUnifiedAuthIDWithoutStableSessionPath(t *testing.T) {
+	_, err := buildStartSpec(testConfig(t), StartRequest{
+		Port:          4096,
+		UnifiedAuthID: "U001",
+		SessionPath:   "/tmp/sessions/4096",
+		TraceID:       "trace_1234567890abcdef",
+	}, time.Date(2026, 7, 21, 8, 15, 30, 0, time.UTC))
+	if err == nil || !strings.Contains(err.Error(), "requires stable user session path") {
+		t.Fatalf("expected stable session path validation, got %v", err)
+	}
+	if strings.Contains(err.Error(), "U001") {
+		t.Fatalf("stable session path error must not expose raw identity: %v", err)
+	}
+}
+
 func TestBuildStartSpecDerivesUnifiedAuthIDFromStableSessionPath(t *testing.T) {
 	cfg := testConfig(t)
 	startedAt := time.Date(2026, 7, 21, 8, 15, 30, 0, time.UTC)
