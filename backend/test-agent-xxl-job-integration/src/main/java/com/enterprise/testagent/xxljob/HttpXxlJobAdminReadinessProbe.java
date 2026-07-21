@@ -36,24 +36,12 @@ final class HttpXxlJobAdminReadinessProbe implements XxlJobAdminReadinessProbe {
     }
 
     @Override
-    public boolean isAnyReady(String adminAddresses) {
-        if (adminAddresses == null || adminAddresses.isBlank()) {
-            return false;
-        }
-        String[] addresses = adminAddresses.split(",");
-        for (String address : addresses) {
-            Optional<URI> readinessUri = readinessUri(address);
-            if (readinessUri.isPresent() && isReady(readinessUri.orElseThrow())) {
-                return true;
-            }
-            if (Thread.currentThread().isInterrupted()) {
-                return false;
-            }
-        }
-        return false;
+    public boolean isReady(String adminAddress) {
+        Optional<URI> readinessUri = readinessUri(adminAddress);
+        return readinessUri.isPresent() && requestReady(readinessUri.orElseThrow());
     }
 
-    private boolean isReady(URI uri) {
+    private boolean requestReady(URI uri) {
         HttpRequest request = HttpRequest.newBuilder(uri)
                 .timeout(requestTimeout)
                 .GET()

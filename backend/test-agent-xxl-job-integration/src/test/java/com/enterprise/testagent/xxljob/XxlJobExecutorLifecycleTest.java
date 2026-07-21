@@ -21,12 +21,13 @@ class XxlJobExecutorLifecycleTest {
     @Test
     void waitsForAdminReadinessAndStartsExecutorExactlyOnceAfterRecovery() {
         XxlJobProperties properties = enabledProperties();
+        XxlJobEndpointResolver.Endpoints endpoints = endpoints();
         AtomicBoolean ready = new AtomicBoolean();
-        XxlJobAdminReadinessProbe probe = addresses -> ready.get();
+        XxlJobAdminReadinessProbe probe = adminAddress -> ready.get();
         DeferredXxlJobSpringExecutor executor = mock(DeferredXxlJobSpringExecutor.class);
         ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
         XxlJobExecutorLifecycle lifecycle =
-                new XxlJobExecutorLifecycle(properties, probe, executor, scheduler);
+                new XxlJobExecutorLifecycle(properties, endpoints, probe, executor, scheduler);
 
         lifecycle.start();
 
@@ -52,11 +53,11 @@ class XxlJobExecutorLifecycleTest {
     @Test
     void stopBeforeAdminRecoveryNeverStartsOrDestroysUpstreamExecutor() {
         XxlJobProperties properties = enabledProperties();
-        XxlJobAdminReadinessProbe probe = addresses -> false;
+        XxlJobAdminReadinessProbe probe = adminAddress -> false;
         DeferredXxlJobSpringExecutor executor = mock(DeferredXxlJobSpringExecutor.class);
         ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
         XxlJobExecutorLifecycle lifecycle =
-                new XxlJobExecutorLifecycle(properties, probe, executor, scheduler);
+                new XxlJobExecutorLifecycle(properties, endpoints(), probe, executor, scheduler);
 
         lifecycle.start();
         lifecycle.stop();
@@ -81,7 +82,12 @@ class XxlJobExecutorLifecycleTest {
     private static XxlJobProperties enabledProperties() {
         XxlJobProperties properties = new XxlJobProperties();
         properties.setEnabled(true);
-        properties.getExecutor().setAdminAddresses("http://127.0.0.1:18080/xxl-job-admin");
         return properties;
+    }
+
+    private static XxlJobEndpointResolver.Endpoints endpoints() {
+        return new XxlJobEndpointResolver.Endpoints(
+                "http://127.0.0.1:18080/xxl-job-admin",
+                "http://backend-a.example.internal:9999");
     }
 }

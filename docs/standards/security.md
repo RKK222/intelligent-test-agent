@@ -65,7 +65,7 @@ Token 校验流程：
 
 ## 密钥与配置
 
-1. 禁止硬编码密钥、token、账号、生产地址；密钥只能来自环境变量、配置中心或本地安全配置；示例配置必须使用占位值。
+1. 除基础 `application.yml` 中经用户明确批准的 XXL 本地开发默认 access token 外，禁止硬编码密钥、token、账号、生产地址；该默认值不是生产凭据，生产必须通过环境变量或配置中心覆盖。其它密钥只能来自环境变量、配置中心或本地安全配置；示例配置必须使用占位值。
 2. 日志、错误响应、前端状态不得输出密钥。
 3. 后端生产容器只运行 Java 进程；数据库、Redis 和 opencode server 地址必须从外部配置注入，不能写入镜像或仓库。
 4. 前端不得把密钥写入源码、localStorage 或可公开构建产物。
@@ -104,7 +104,7 @@ Token 校验流程：
 9. 应用引用资产库状态中的 `repositoryPath` 只能由服务端使用当前平台 `OPENCODE_REFERENCES_DIR` 和已校验版本库英文名派生，并且只通过既有 `APP_ADMIN` 接口返回；参数缺失或历史名称非法时返回空。客户端输入不得控制该路径，日志、trace 和错误消息不得记录该物理路径。
 10. `X-Test-Agent-Linux-Server-Id` 只能作为 Nginx 首跳性能提示，不能作为鉴权、binding、Session 归属或运行上下文事实源。Nginx 必须通过静态 `linuxServerId -> Java endpoint` 白名单映射，禁止把头值直接拼成地址；缺失或未知值回退默认 upstream。代理给 Java 前必须删除该头，并清除外部传入的 `X-Test-Agent-Backend-Routed`，后者只允许公共 Java→Java 转发器产生。前端只在页面内存保存 binding ID，仅对用户 OpenCode、会话、Run、SSE 和本地工作区请求发送；登录和共享控制面不得被该提示固定到用户节点。CORS 可允许该头，但目标 Java 仍必须重新执行完整鉴权和归属校验。
 11. XXL Admin 只允许经同源 `/xxl-job-admin/` iframe 访问；响应必须包含 `Content-Security-Policy: frame-ancestors 'self'`、`X-Frame-Options: SAMEORIGIN`，会话 Cookie 必须为 `HttpOnly; Secure; SameSite=Lax` 并限制 Path。Nginx/Vite 必须保持同源和路径前缀，不能通过放宽 frame/Cookie 策略解决代理错误。
-12. XXL access token 与 MySQL 密码只能从外部配置注入，所有 Java/Admin/executor 使用同一 access token；executor 端口只对可信 Admin 网络开放。Admin/MySQL health 不进入平台 readiness，但必须独立告警。
+12. XXL MySQL 密码和生产 access token 必须从外部配置注入，所有 Java/Admin/executor 使用同一生产 access token；基础配置中的默认 token 仅供本地开发，生产漏配会继承该值并形成已接受但必须由部署检查阻断的风险。executor 端口只对可信 Admin 网络开放。Admin/MySQL health 不进入平台 readiness，但必须独立告警。
 
 ## 平台文件 WebSocket 安全例外
 

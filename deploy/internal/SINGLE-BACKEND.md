@@ -137,9 +137,7 @@ TEST_AGENT_XXL_JOB_MYSQL_USERNAME=xxl_job
 TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=REPLACE_XXL_JOB_MYSQL_PASSWORD
 TEST_AGENT_XXL_JOB_ACCESS_TOKEN=REPLACE_XXL_JOB_ACCESS_TOKEN
 TEST_AGENT_XXL_JOB_ADMIN_PORT=18080
-TEST_AGENT_XXL_JOB_ADMIN_ADDRESSES=http://122.233.30.114:18080/xxl-job-admin
 TEST_AGENT_XXL_JOB_EXECUTOR_PORT=9999
-TEST_AGENT_XXL_JOB_EXECUTOR_ADDRESS=http://122.233.30.114:9999
 
 TEST_AGENT_REDIS_HOST=122.233.30.20
 TEST_AGENT_REDIS_PORT=6379
@@ -369,7 +367,7 @@ TEST_AGENT_NGINX_RELOAD_MODE=binary
 
 从旧包升级时，把 `nginx.env` 中的 `TEST_AGENT_NGINX_TERMINAL_ROUTES` 原键名改为 `TEST_AGENT_NGINX_SERVER_ROUTES`，右侧值不变，不能同时保留两个键。先执行 `bash /data/testagent/deploy/internal/configure-nginx.sh --env-file /data/testagent/config/nginx.env --validate-only`，预期 `server route count: 1`，再按本节前端部署命令正式安装并 reload。
 
-`/xxl-job-admin/` 与静态前端必须保持同一浏览器 origin；Nginx 会保留表单 POST、重定向和安全 Cookie。后台 `backend.env` 还必须配置 XXL MySQL 凭据、共享 access token、`ADMIN_PORT=18080`、`EXECUTOR_PORT=9999`、Admin 地址与 executor 可达地址，具体模板以 `backend.env.example` 为准。
+`/xxl-job-admin/` 与静态前端必须保持同一浏览器 origin；Nginx 会保留表单 POST、重定向和安全 Cookie。后台 `backend.env` 还必须配置 XXL MySQL 凭据、共享生产 access token、`ADMIN_PORT=18080` 和 `EXECUTOR_PORT=9999`。Java 固定使用本机 loopback Admin，并从平台 advertised host 自动派生 executor 注册地址，具体模板以 `backend.env.example` 为准。
 
 也可从交付包生成同一份环境文件，但必须明确传入已经加载的文件，不能依赖自动目录探测：
 

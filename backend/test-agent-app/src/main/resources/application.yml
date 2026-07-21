@@ -117,7 +117,7 @@ test-agent:
     instance-id: ${TEST_AGENT_SCHEDULER_INSTANCE_ID:backend-${random.uuid}}
   xxl-job:
     enabled: ${TEST_AGENT_XXL_JOB_ENABLED:true}
-    access-token: ${TEST_AGENT_XXL_JOB_ACCESS_TOKEN:}
+    access-token: ${TEST_AGENT_XXL_JOB_ACCESS_TOKEN:10fd68f816007609067786ece7e8be0e8ec94d20bee733e4f500cf6f7598e502}
     admin:
       port: ${TEST_AGENT_XXL_JOB_ADMIN_PORT:18080}
       context-path: /xxl-job-admin
@@ -128,10 +128,7 @@ test-agent:
       username: ${TEST_AGENT_XXL_JOB_MYSQL_USERNAME:xxl_job}
       password: ${TEST_AGENT_XXL_JOB_MYSQL_PASSWORD:}
     executor:
-      admin-addresses: ${TEST_AGENT_XXL_JOB_ADMIN_ADDRESSES:http://127.0.0.1:18080/xxl-job-admin}
       app-name: test-agent-backend
-      address: ${TEST_AGENT_XXL_JOB_EXECUTOR_ADDRESS:}
-      ip: ${TEST_AGENT_XXL_JOB_EXECUTOR_IP:}
       port: ${TEST_AGENT_XXL_JOB_EXECUTOR_PORT:9999}
       log-path: ${TEST_AGENT_XXL_JOB_EXECUTOR_LOG_PATH:logs/xxl-job}
       log-retention-days: 30

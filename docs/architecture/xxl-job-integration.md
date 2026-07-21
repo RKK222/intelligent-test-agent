@@ -25,10 +25,12 @@
 - Admin 使用 `WebApplicationType.SERVLET` 在独立子上下文启动，隔离 Tomcat、MySQL DataSource、MyBatis、Flyway 和安全自动配置。
 - 上游源码目录保留原始 `application.properties`，但依赖 JAR 将它重定位到 `META-INF/xxl-job-admin-upstream/`。Admin launcher 只向 Servlet 子上下文加载这份低优先级默认配置，再用平台 MySQL、端口、access token、SSO 和 Flyway 配置覆盖；WebFlux 主上下文不会加载其中的 Hikari/MySQL 默认值。
 - Admin 启动失败不会关闭平台主上下文。生命周期组件按 5、10、20、40、60 秒上限指数退避重试。
-- executor 覆盖上游 `SmartInitializingSingleton` 自动启动入口，Spring 单例初始化阶段不创建监听端口或注册线程。独立 daemon 生命周期在 Admin 生命周期之后启动，以 250 毫秒～5 秒退避探测配置列表中各 Admin 的 `/actuator/health/readiness`；任意一个返回 HTTP 200 后才启动 executor，且同一 Java 进程最多启动一次。
-- 全部 Admin 未就绪时 executor 端口保持关闭并持续等待，平台 Netty/8080、主 readiness 和其它业务不受影响；Admin/MySQL 恢复后无需重启平台进程即可启动 executor。该门控不使用固定 sleep，也不新增部署配置。
+- executor 覆盖上游 `SmartInitializingSingleton` 自动启动入口，Spring 单例初始化阶段不创建监听端口或注册线程。独立 daemon 生命周期在 Admin 生命周期之后启动，以 250 毫秒～5 秒退避探测同 JVM 本机 Admin 的 `/actuator/health/readiness`；返回 HTTP 200 后才启动 executor，且同一 Java 进程最多启动一次。
+- 本机 Admin 未就绪时 executor 端口保持关闭并持续等待，平台 Netty/8080、主 readiness 和其它业务不受影响；Admin/MySQL 恢复后无需重启平台进程即可启动 executor。该门控不使用固定 sleep，也不新增部署配置。
 - `xxlJobAdmin` health component 在 Admin/MySQL 不可用时返回 `DOWN`，但平台 readiness group 只包含平台必需依赖，不包含 XXL health。
-- 同机多 Java 进程必须配置不同的 Admin 端口和 executor 端口。生产入口通过 Nginx 对多个 Admin 子端口做同源代理。
+- 每台 Linux 只运行一个 Java，Admin 与 executor 固定本机配对。Admin 地址始终派生为 loopback；executor 注册地址从 `BackendInstanceIdentity.listenUrl()` 提取 advertised host，并拼接 executor 端口。平台未配置 `TEST_AGENT_SERVER_ADVERTISED_HOST` 时，该监听地址沿用 `LinuxServerIpResolver` 的内网 IPv4 自动探测。
+- 所有 Admin 共享同一个 XXL MySQL，因此每个 Admin 都能看到全部 executor 注册；注册地址不携带 `linuxServerId`，调度不引入 Linux 服务器亲和。
+- 生产入口通过 Nginx 对多个 Admin 子端口做同源代理。Java 内部地址派生与 Nginx 的 `TEST_AGENT_NGINX_XXL_JOB_ADMINS` 是两套边界：新增节点只需启动新 Java、将其普通 backend/Admin 地址加入中央 Nginx upstream 并无停机 reload，不需要修改或重启旧 Java。
 
 ## 认证与账号
 
@@ -60,7 +62,7 @@ Admin 响应固定设置 `Content-Security-Policy: frame-ancestors 'self'` 和 `
 
 ## 执行器与任务契约
 
-所有 Java 进程注册同一个自动注册地址执行器组 `test-agent-backend`。executor 地址必须能被所有 Admin 节点访问，但注册和路由不携带 `linuxServerId`，不与稳定 Linux 服务器亲和。
+所有 Java 进程注册同一个自动注册地址执行器组 `test-agent-backend`。executor 地址由平台 advertised host 与 executor 端口自动生成，必须能被所有 Admin 节点访问；注册和路由不携带 `linuxServerId`，不与稳定 Linux 服务器亲和。
 
 所有平台周期任务使用统一 handler `testAgentScheduledTaskHandler`，参数固定为：
 
@@ -104,7 +106,7 @@ JVM 和 XXL 统一使用 `Asia/Shanghai`。运行记录清理在北京时间 08:
 - 本地 `deploy/local/docker-compose.yml` 提供 MySQL 8.4、`xxl_job` 库、健康检查和持久卷，默认主机端口 `13306`；表和首批任务由 Admin 子上下文 Flyway 初始化。
 - 只通过 `.env.local.example` 提供示例，禁止自动修改开发者的 `.env.local`。
 - 本地 Vite 和生产 Nginx 都把 `/xxl-job-admin/` 代理到 Admin 子端口，保持 iframe 同源。
-- 生产使用外部共享 MySQL。部署顺序：创建库与最小权限账号；配置凭据、XXL access token、每进程唯一端口和可达 executor 地址；部署 Java；开放 Admin 到 executor 网络；配置 Nginx。
+- 生产使用外部共享 MySQL。部署顺序：创建库与最小权限账号；配置凭据、生产 XXL access token 和端口；部署 Java；检查 `.serverid/.serverhost` 及派生 executor 地址；开放 Admin 到 executor 网络；启动 worker；更新并 reload Nginx。
 - 离线包仍只有一个平台应用 JAR，同时包含上游源码、LICENSE、UPSTREAM 元数据、版本文件和配置示例。
 
 完整变量和网络要求见 `docs/deployment/backend.md`，验证清单见 `docs/testing/xxl-job-integration.md`。

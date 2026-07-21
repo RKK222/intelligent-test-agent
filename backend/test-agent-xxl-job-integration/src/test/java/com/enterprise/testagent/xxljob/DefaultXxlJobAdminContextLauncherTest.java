@@ -3,7 +3,10 @@ package com.enterprise.testagent.xxljob;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
+import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
 import com.enterprise.testagent.xxljob.admin.PlatformXxlJobUserProvisioner;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.xxl.job.core.constant.Const;
 import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -11,9 +14,13 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.sql.DriverManager;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.util.TestPropertyValues;
@@ -105,7 +112,7 @@ class DefaultXxlJobAdminContextLauncherTest {
                     .contains("Path=/xxl-job-admin/");
             assertThat(bridge.consumed).isTrue();
 
-            try (var connection = java.sql.DriverManager.getConnection(
+            try (var connection = DriverManager.getConnection(
                     MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
                     var statement = connection.prepareStatement(
                             "SELECT username, role, platform_session_digest FROM xxl_job_user WHERE platform_user_id = ?")) {
@@ -117,6 +124,34 @@ class DefaultXxlJobAdminContextLauncherTest {
                     assertThat(result.getString("platform_session_digest")).isEqualTo("a".repeat(64));
                 }
             }
+        }
+    }
+
+    @Test
+    void sharedMysqlKeepsTwoRegistrationsWhenAnotherAdminAddsThirdNode() throws Exception {
+        XxlJobEndpointResolver resolver = new XxlJobEndpointResolver();
+        XxlJobProperties firstProperties = properties(freePort());
+        String first = resolver.resolve(firstProperties, backendIdentity("http://10.23.0.11:8080"))
+                .executorAddress();
+        String second = resolver.resolve(firstProperties, backendIdentity("http://backend-b.internal:8080"))
+                .executorAddress();
+        String third = resolver.resolve(firstProperties, backendIdentity("http://10.23.0.13:8080"))
+                .executorAddress();
+
+        try (ConfigurableApplicationContext ignored =
+                new DefaultXxlJobAdminContextLauncher(firstProperties).launch(new TicketBridge())) {
+            clearExecutorRegistrations();
+            registerExecutor(firstProperties, first);
+            registerExecutor(firstProperties, second);
+            awaitExecutorRegistrations(Set.of(first, second));
+        }
+
+        // 第二个真实 Admin 复用同一 MySQL；新增节点不要求前两个 executor 重新注册或重启。
+        XxlJobProperties secondProperties = properties(freePort());
+        try (ConfigurableApplicationContext ignored =
+                new DefaultXxlJobAdminContextLauncher(secondProperties).launch(new TicketBridge())) {
+            registerExecutor(secondProperties, third);
+            awaitExecutorRegistrations(Set.of(first, second, third));
         }
     }
 
@@ -134,6 +169,59 @@ class DefaultXxlJobAdminContextLauncherTest {
     private static int freePort() throws Exception {
         try (ServerSocket socket = new ServerSocket(0)) {
             return socket.getLocalPort();
+        }
+    }
+
+    private static void registerExecutor(XxlJobProperties properties, String executorAddress) throws Exception {
+        String body = new ObjectMapper().writeValueAsString(Map.of(
+                "registryGroup", "EXECUTOR",
+                "registryKey", "test-agent-backend",
+                "registryValue", executorAddress));
+        HttpResponse<String> response = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + properties.getAdmin().getPort()
+                                + "/xxl-job-admin/api/registry"))
+                        .header(Const.XXL_JOB_ACCESS_TOKEN, properties.getAccessToken())
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(body))
+                        .timeout(Duration.ofSeconds(10))
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertThat(response.statusCode()).isEqualTo(200);
+    }
+
+    private static void awaitExecutorRegistrations(Set<String> expected) throws Exception {
+        long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        Set<String> actual = Set.of();
+        while (System.nanoTime() < deadline) {
+            actual = executorRegistrations();
+            if (actual.containsAll(expected)) {
+                return;
+            }
+            Thread.sleep(50);
+        }
+        assertThat(actual).containsAll(expected);
+    }
+
+    private static Set<String> executorRegistrations() throws Exception {
+        Set<String> values = new LinkedHashSet<>();
+        try (var connection = DriverManager.getConnection(
+                        MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
+                var statement = connection.prepareStatement(
+                        "SELECT registry_value FROM xxl_job_registry WHERE registry_group='EXECUTOR' AND registry_key='test-agent-backend'");
+                var result = statement.executeQuery()) {
+            while (result.next()) {
+                values.add(result.getString(1));
+            }
+        }
+        return values;
+    }
+
+    private static void clearExecutorRegistrations() throws Exception {
+        try (var connection = DriverManager.getConnection(
+                        MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
+                var statement = connection.prepareStatement(
+                        "DELETE FROM xxl_job_registry WHERE registry_group='EXECUTOR' AND registry_key='test-agent-backend'")) {
+            statement.executeUpdate();
         }
     }
 
@@ -164,5 +252,29 @@ class DefaultXxlJobAdminContextLauncherTest {
                 "平台管理员",
                 "a".repeat(64),
                 Instant.now().plus(Duration.ofMinutes(10)));
+    }
+
+    private static BackendInstanceIdentity backendIdentity(String listenUrl) {
+        return new BackendInstanceIdentity() {
+            @Override
+            public String instanceId() {
+                return "instance-a";
+            }
+
+            @Override
+            public String linuxServerId() {
+                return "linux-a";
+            }
+
+            @Override
+            public String backendProcessId() {
+                return "bjp_a";
+            }
+
+            @Override
+            public String listenUrl() {
+                return listenUrl;
+            }
+        };
     }
 }

@@ -21,6 +21,23 @@
   - 使用 `.env.test` / `test` profile 重启 backend、opencode-manager、frontend；health/readiness 为 UP、前端 3000 与登录 CORS 正常、manager WebSocket 已连接。本次只改变 Git committer 邮箱规则和前端失败恢复状态，不新增或变更 HTTP/RunEvent/数据库/SQL/权限/generated SDK/环境配置。
 - Pitfalls:
   - 修复部署前已经失败的操作没有当前页面内存中的待推送快照，但个人 HEAD 中的本地提交仍在；应使用原 `personalWorkspaceId` 和原文件白名单直接调用平台 `POST /personal-workspaces/{id}/publish` 恢复，不能再次调用 commit，也不能手工 `git push` 绕过版本目标、广播与 rollout。
+
+### 2026-07-21 - 自动派生 XXL-JOB 多后端节点地址
+
+- Why:
+  - executor 依赖静态 Admin 列表和显式注册地址时，新增 Linux 节点会迫使旧 Java 同步修改配置并重启；当前部署约束为每台 Linux 仅一个 Java，Admin 与同 JVM executor 固定配对，可直接复用平台已具备的 advertised host 解析。
+- What:
+  - integration 模块新增内部端点解析器：本机 Admin 固定派生为 loopback 地址，executor 注册地址从 `BackendInstanceIdentity.listenUrl()` 的 host 与 executor 端口生成；非法监听地址拒绝启动且错误不回显原始 URL。
+  - executor 生命周期只探测本机 Admin readiness，恢复后只启动一次；删除 `adminAddresses`、`address`、`ip` 三个 executor 配置字段及对应三个环境变量，不保留预发布兼容入口。所有 Admin 继续共享 XXL MySQL，调度与注册地址均不引入 Linux 服务器亲和。
+  - 同步本地示例、企业单/多后台模板、后端与 integration README，以及架构、部署、安全和测试文档；按用户明确接受的风险把现有本地 access token 默认值纳入基础配置，生产模板仍强制要求通过外部环境变量覆盖，文档与日志不重复明文。
+- How:
+  - TDD 先以缺失端点解析器的编译失败固化 IPv4、内部 DNS、context path 规整、非法地址脱敏、Admin 恢复和 Spring 实际装配预期，再完成实现；`mvn -f backend/pom.xml -pl test-agent-xxl-job-integration -am test` 通过，integration 36 项全过，真实 MySQL/Admin 测试验证第三节点加入时前两个注册地址无需重新注册仍被共享保留。
+  - `mvn -f backend/pom.xml -pl test-agent-app -am -DskipTests package`、Compose 配置校验和无参数 `sh restart-dev-services.sh` 均通过；重启脚本使用默认 `test` profile，平台与 Admin readiness 均为 HTTP 200，同一 Java PID 监听 8080、18080、9999。
+- Result:
+  - 本地 MySQL 注册地址等于平台解析 host 加 executor 端口，当前启动区间无首次注册 `Connection refused` 或 `registry error`；新增 Linux 只需启动新 Java 并把普通 backend 与 XXL Admin 加入中央 Nginx upstream 后 reload，无需修改或重启旧 Java。
+  - 后端全量 `mvn test` 仍仅在既有 persistence H2 基线被 `V20260717173000__create_public_agent_config_rollouts.sql` 的 PostgreSQL `TIMESTAMPTZ` 阻断（165 tests、76 errors、17 skipped），本次未扩大范围修改。
+  - 未修改 `.env.local`、XXL 上游源码、HTTP API、RunEvent 或数据库结构；地址配置的破坏性删除为预发布阶段的明确收口。工作树原有 `backend/${SYS_DATA_ROOT_DIR}/agent-opencode/.config` 删除保持未暂存，不纳入本次提交。
+
 ### 2026-07-21 - 消除 XXL executor 启动注册竞态
 
 - Why:

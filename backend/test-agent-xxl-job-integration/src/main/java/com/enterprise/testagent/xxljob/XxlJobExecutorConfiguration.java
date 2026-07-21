@@ -1,5 +1,6 @@
 package com.enterprise.testagent.xxljob;
 
+import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -10,15 +11,29 @@ import org.springframework.context.annotation.Configuration;
 public class XxlJobExecutorConfiguration {
 
     @Bean
-    DeferredXxlJobSpringExecutor xxlJobSpringExecutor(XxlJobProperties properties) {
+    XxlJobEndpointResolver xxlJobEndpointResolver() {
+        return new XxlJobEndpointResolver();
+    }
+
+    @Bean
+    XxlJobEndpointResolver.Endpoints xxlJobEndpoints(
+            XxlJobProperties properties,
+            BackendInstanceIdentity backendIdentity,
+            XxlJobEndpointResolver endpointResolver) {
+        return endpointResolver.resolve(properties, backendIdentity);
+    }
+
+    @Bean
+    DeferredXxlJobSpringExecutor xxlJobSpringExecutor(
+            XxlJobProperties properties,
+            XxlJobEndpointResolver.Endpoints endpoints) {
         XxlJobProperties.Executor executor = properties.getExecutor();
         DeferredXxlJobSpringExecutor springExecutor = new DeferredXxlJobSpringExecutor();
-        springExecutor.setAdminAddresses(executor.getAdminAddresses());
+        springExecutor.setAdminAddresses(endpoints.adminAddress());
         springExecutor.setAccessToken(properties.getAccessToken());
         springExecutor.setEnabled(true);
         springExecutor.setAppname(executor.getAppName());
-        springExecutor.setAddress(executor.getAddress());
-        springExecutor.setIp(executor.getIp());
+        springExecutor.setAddress(endpoints.executorAddress());
         springExecutor.setPort(executor.getPort());
         springExecutor.setLogPath(executor.getLogPath());
         springExecutor.setLogRetentionDays(executor.getLogRetentionDays());
@@ -33,8 +48,9 @@ public class XxlJobExecutorConfiguration {
     @Bean
     XxlJobExecutorLifecycle xxlJobExecutorLifecycle(
             XxlJobProperties properties,
+            XxlJobEndpointResolver.Endpoints endpoints,
             XxlJobAdminReadinessProbe readinessProbe,
             DeferredXxlJobSpringExecutor executor) {
-        return new XxlJobExecutorLifecycle(properties, readinessProbe, executor);
+        return new XxlJobExecutorLifecycle(properties, endpoints, readinessProbe, executor);
     }
 }

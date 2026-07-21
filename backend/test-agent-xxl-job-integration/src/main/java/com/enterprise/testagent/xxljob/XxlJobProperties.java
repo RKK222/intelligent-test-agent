@@ -125,21 +125,10 @@ public class XxlJobProperties {
     }
 
     public static final class Executor {
-        private String adminAddresses = "http://127.0.0.1:18080/xxl-job-admin";
         private String appName = "test-agent-backend";
-        private String address = "";
-        private String ip = "";
         private int port = 9999;
         private String logPath = "logs/xxl-job";
         private int logRetentionDays = 30;
-
-        public String getAdminAddresses() {
-            return adminAddresses;
-        }
-
-        public void setAdminAddresses(String adminAddresses) {
-            this.adminAddresses = requireText(adminAddresses, "executor.adminAddresses");
-        }
 
         public String getAppName() {
             return appName;
@@ -147,22 +136,6 @@ public class XxlJobProperties {
 
         public void setAppName(String appName) {
             this.appName = requireText(appName, "executor.appName");
-        }
-
-        public String getAddress() {
-            return address;
-        }
-
-        public void setAddress(String address) {
-            this.address = address == null ? "" : address.trim();
-        }
-
-        public String getIp() {
-            return ip;
-        }
-
-        public void setIp(String ip) {
-            this.ip = ip == null ? "" : ip.trim();
         }
 
         public int getPort() {

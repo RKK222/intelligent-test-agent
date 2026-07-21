@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
 import com.enterprise.testagent.domain.auth.TokenSessionMarkerStore;
+import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
 import com.enterprise.testagent.scheduler.ScheduledTaskLock;
 import com.enterprise.testagent.scheduler.ScheduledTaskRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -24,13 +25,18 @@ class XxlJobSpringComponentWiringTest {
                 .withPropertyValues("test-agent.xxl-job.enabled=true")
                 .withUserConfiguration(XxlJobExecutorConfiguration.class)
                 .withBean(XxlJobProperties.class, XxlJobSpringComponentWiringTest::enabledUnreachableProperties)
+                .withBean(BackendInstanceIdentity.class, XxlJobSpringComponentWiringTest::backendIdentity)
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context).hasSingleBean(XxlJobSpringExecutor.class);
                     assertThat(context).hasSingleBean(XxlJobExecutorLifecycle.class);
                     DeferredXxlJobSpringExecutor executor = context.getBean(DeferredXxlJobSpringExecutor.class);
+                    XxlJobEndpointResolver.Endpoints endpoints =
+                            context.getBean(XxlJobEndpointResolver.Endpoints.class);
                     assertThat(executor.isStarted()).isFalse();
                     assertThat(executor.getExecutorRegistryThreadHelper()).isNull();
+                    assertThat(executor.getAddress()).isEqualTo("http://backend-a.example.internal:9999");
+                    assertThat(endpoints.adminAddress()).isEqualTo("http://127.0.0.1:1/xxl-job-admin");
                 });
     }
 
@@ -76,7 +82,31 @@ class XxlJobSpringComponentWiringTest {
     private static XxlJobProperties enabledUnreachableProperties() {
         XxlJobProperties properties = new XxlJobProperties();
         properties.setEnabled(true);
-        properties.getExecutor().setAdminAddresses("http://127.0.0.1:1/xxl-job-admin");
+        properties.getAdmin().setPort(1);
         return properties;
+    }
+
+    private static BackendInstanceIdentity backendIdentity() {
+        return new BackendInstanceIdentity() {
+            @Override
+            public String instanceId() {
+                return "instance-a";
+            }
+
+            @Override
+            public String linuxServerId() {
+                return "linux-a";
+            }
+
+            @Override
+            public String backendProcessId() {
+                return "bjp_a";
+            }
+
+            @Override
+            public String listenUrl() {
+                return "http://backend-a.example.internal:8080";
+            }
+        };
     }
 }

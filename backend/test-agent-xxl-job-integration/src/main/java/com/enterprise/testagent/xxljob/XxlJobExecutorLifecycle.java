@@ -11,7 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
 
 /**
- * 异步等待任一 XXL Admin readiness 就绪后再启动 executor，消除同 JVM Admin/executor 的启动注册竞态。
+ * 异步等待本机 XXL Admin readiness 就绪后再启动 executor，消除同 JVM Admin/executor 的启动注册竞态。
  * 等待过程不阻塞平台 WebFlux 启动，也不改变平台 readiness 判定。
  */
 class XxlJobExecutorLifecycle implements SmartLifecycle {
@@ -22,6 +22,7 @@ class XxlJobExecutorLifecycle implements SmartLifecycle {
     private static final int PHASE_AFTER_ADMIN_LIFECYCLE = 100;
 
     private final XxlJobProperties properties;
+    private final XxlJobEndpointResolver.Endpoints endpoints;
     private final XxlJobAdminReadinessProbe readinessProbe;
     private final DeferredXxlJobSpringExecutor executor;
     private final ScheduledExecutorService retryExecutor;
@@ -34,18 +35,21 @@ class XxlJobExecutorLifecycle implements SmartLifecycle {
 
     XxlJobExecutorLifecycle(
             XxlJobProperties properties,
+            XxlJobEndpointResolver.Endpoints endpoints,
             XxlJobAdminReadinessProbe readinessProbe,
             DeferredXxlJobSpringExecutor executor) {
-        this(properties, readinessProbe, executor, newRetryExecutor());
+        this(properties, endpoints, readinessProbe, executor, newRetryExecutor());
     }
 
     /** 包级调度器注入只用于确定性单测，生产始终使用独立 daemon 线程。 */
     XxlJobExecutorLifecycle(
             XxlJobProperties properties,
+            XxlJobEndpointResolver.Endpoints endpoints,
             XxlJobAdminReadinessProbe readinessProbe,
             DeferredXxlJobSpringExecutor executor,
             ScheduledExecutorService retryExecutor) {
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
+        this.endpoints = Objects.requireNonNull(endpoints, "endpoints must not be null");
         this.readinessProbe = Objects.requireNonNull(readinessProbe, "readinessProbe must not be null");
         this.executor = Objects.requireNonNull(executor, "executor must not be null");
         this.retryExecutor = Objects.requireNonNull(retryExecutor, "retryExecutor must not be null");
@@ -59,7 +63,7 @@ class XxlJobExecutorLifecycle implements SmartLifecycle {
             }
             running = true;
         }
-        LOGGER.info("XXL-JOB executor 等待任一 Admin readiness 就绪后启动");
+        LOGGER.info("XXL-JOB executor 等待本机 Admin readiness 就绪后启动");
         try {
             retryExecutor.execute(this::runAttempt);
         } catch (RejectedExecutionException exception) {
@@ -73,7 +77,7 @@ class XxlJobExecutorLifecycle implements SmartLifecycle {
         if (!running || executorStarted || terminalStartFailure) {
             return;
         }
-        if (readinessProbe.isAnyReady(properties.getExecutor().getAdminAddresses())) {
+        if (readinessProbe.isReady(endpoints.adminAddress())) {
             startExecutor();
             return;
         }

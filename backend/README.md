@@ -118,12 +118,11 @@ cp .env.local.example .env.local
 | `TEST_AGENT_XXL_JOB_ENABLED` | 是否启动进程内 XXL Admin 与 executor；生产默认开启。 |
 | `TEST_AGENT_XXL_JOB_MYSQL_*` | 独立 XXL MySQL JDBC URL、账号和密码；不得指向平台 PostgreSQL。 |
 | `TEST_AGENT_XXL_JOB_ACCESS_TOKEN` | Admin 与所有 executor 共用的独立 access token。 |
-| `TEST_AGENT_XXL_JOB_ADMIN_PORT` / `TEST_AGENT_XXL_JOB_EXECUTOR_PORT` | 当前 Java 的 Admin/executor 端口；同机多进程必须各不相同。 |
-| `TEST_AGENT_XXL_JOB_EXECUTOR_ADDRESS` | 所有 Admin 节点都可访问的当前 executor 地址；不包含 `linuxServerId` 亲和语义。 |
+| `TEST_AGENT_XXL_JOB_ADMIN_PORT` / `TEST_AGENT_XXL_JOB_EXECUTOR_PORT` | 当前 Java 的本机 Admin/executor 端口；每台 Linux 只部署一个 Java。 |
 | `TEST_AGENT_OPENCODE_BASE_URL` | 本地脚本判断是否启动 opencode-manager 和端口池的地址，不再作为 Java 固定 opencode node 配置。 |
 | `TEST_AGENT_LINUX_SERVER_ID` | 稳定 Linux 服务器身份，可使用 `server-a`、`prod_01`、`10.1.2.3` 等 1-128 位标识；缺失时使用 Java 主机名。 |
 | `TEST_AGENT_DEPLOYMENT_MODE` | 部署模式：`external`（外部部署，默认）或 `internal`（企业内部部署）。 |
-| `TEST_AGENT_SERVER_ADVERTISED_HOST` | 当前 Java/用户 opencode server 对其它后端和浏览器可访问的主机地址；缺失时复用现有内网 IPv4 探测。 |
+| `TEST_AGENT_SERVER_ADVERTISED_HOST` | 当前 Java、XXL executor 和用户 opencode server 对其它节点可访问的主机地址；缺失时统一复用现有内网 IPv4 探测。 |
 | `TEST_AGENT_MODEL_CATALOG_SOURCE` | 历史兼容项。前端对话框模型/供应商目录已统一走 opencode 原生 `/api/model`、`/api/provider`，不再从数据库模型目录读取。 |
 | `EXTERNAL_API_KEY` | 外部 OpenAI-compatible API Key；变量名可通过 `TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV` 改为其他环境变量名。 |
 | `MODELSTUDIO_API_KEY` | `TEST_AGENT_MODEL_CATALOG_SOURCE=bailian` 时使用的 Model Studio API Key；该模式使用代码内置 `modelstudio` provider 和 qwen/kimi 模型清单。 |

@@ -44,7 +44,7 @@ Java A <---------------- 互访 8080 ----------------> Java B
 6. Nginx 能访问全部后台 `:8080`；每台 Java 宿主机都能访问 PostgreSQL、Redis 和 `ai-code.sdc.enterprise:9070`。
 7. 所有后台启用相同的服务器广播 channel。
 8. 每台后台都要初始化本服务器公共 OpenCode 配置。
-9. 每个 Java 的 Admin/executor 端口在本机唯一；所有 Admin 地址写入所有 executor 配置，所有 executor 地址可从两个 Admin 节点访问。XXL 路由不携带 `linuxServerId`。
+9. 每台 Linux 只运行一个 Java，Admin 固定与同 JVM executor 配对；executor 注册地址复用平台 advertised host，必须可从全部 Admin 节点访问。XXL 路由不携带 `linuxServerId`。
 
 不要照搬旧双后台文档中的 RunEvent Redis bus 开关；当前代码已经删除该参数。运行态和跨 Java 路由使用已有的 Redis 存储、服务器快照及公共转发程序。
 
@@ -164,9 +164,7 @@ TEST_AGENT_XXL_JOB_MYSQL_USERNAME=xxl_job
 TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=REPLACE_XXL_JOB_MYSQL_PASSWORD
 TEST_AGENT_XXL_JOB_ACCESS_TOKEN=REPLACE_XXL_JOB_ACCESS_TOKEN
 TEST_AGENT_XXL_JOB_ADMIN_PORT=18080
-TEST_AGENT_XXL_JOB_ADMIN_ADDRESSES=http://122.233.30.4:18080/xxl-job-admin,http://122.233.30.114:18080/xxl-job-admin
 TEST_AGENT_XXL_JOB_EXECUTOR_PORT=9999
-TEST_AGENT_XXL_JOB_EXECUTOR_ADDRESS=http://122.233.30.4:9999
 
 TEST_AGENT_REDIS_HOST=122.233.30.20
 TEST_AGENT_REDIS_PORT=6379
@@ -235,9 +233,7 @@ TEST_AGENT_XXL_JOB_MYSQL_USERNAME=xxl_job
 TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=REPLACE_XXL_JOB_MYSQL_PASSWORD
 TEST_AGENT_XXL_JOB_ACCESS_TOKEN=REPLACE_XXL_JOB_ACCESS_TOKEN
 TEST_AGENT_XXL_JOB_ADMIN_PORT=18080
-TEST_AGENT_XXL_JOB_ADMIN_ADDRESSES=http://122.233.30.4:18080/xxl-job-admin,http://122.233.30.114:18080/xxl-job-admin
 TEST_AGENT_XXL_JOB_EXECUTOR_PORT=9999
-TEST_AGENT_XXL_JOB_EXECUTOR_ADDRESS=http://122.233.30.114:9999
 
 TEST_AGENT_REDIS_HOST=122.233.30.20
 TEST_AGENT_REDIS_PORT=6379
@@ -369,7 +365,9 @@ TEST_AGENT_NGINX_RELOAD_MODE=binary
 
 `TEST_AGENT_NGINX_CONF_PATH` 必须是当前 Nginx 主配置实际 include 的 `.conf` 文件。前端部署脚本统一调用 [configure-nginx.sh](configure-nginx.sh)，由同一个 [gateway.conf.template](nginx/gateway.conf.template) 生成平台与 XXL 两组 `least_conn` upstream、逐节点故障参数、WebSocket Upgrade、SSE 禁缓冲和 `/xxl-job-admin/` 同源代理；配置失败自动恢复旧文件。
 
-两台 `backend.env` 必须使用相同 MySQL URL/账号密码/access token 和 Admin 地址列表；各自 executor address 使用本机可达 IP（`.4:9999`、`.114:9999`）。Admin/MySQL 故障不影响平台 readiness，但必须在部署验收中单独检查 `xxlJobAdmin` health 和六条初始化任务。
+两台 `backend.env` 必须使用相同 MySQL URL/账号密码/access token。Java 自动用本机 loopback Admin 做启动门控，并从 `TEST_AGENT_SERVER_ADVERTISED_HOST`（缺失时自动探测内网 IPv4）派生 executor 注册地址（`.4:9999`、`.114:9999`）。Admin/MySQL 故障不影响平台 readiness，但必须在部署验收中单独检查 `xxlJobAdmin` health 和六条初始化任务。
+
+`TEST_AGENT_NGINX_XXL_JOB_ADMINS` 只维护中央 Nginx upstream，不会进入 Java。新增第三台 Linux 时，启动新 Java/worker，把它同时加入 `TEST_AGENT_NGINX_BACKENDS` 和 `TEST_AGENT_NGINX_XXL_JOB_ADMINS`，再无停机 reload Nginx；已有两台 Java 不修改配置、不重启。
 
 `TEST_AGENT_NGINX_CONF_PATH` 使用已经由主配置显式 include 的 `/data/apps/nginx/conf/test-agent.conf`，不要另建一个未加载的同级文件。前端部署脚本统一调用 [configure-nginx.sh](configure-nginx.sh)，由同一个 [gateway.conf.template](nginx/gateway.conf.template) 生成：
 

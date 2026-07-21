@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
+import java.util.Arrays;
 import org.junit.jupiter.api.Test;
 
 class XxlJobPropertiesTest {
@@ -32,5 +33,12 @@ class XxlJobPropertiesTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> properties.getMysql().setUrl("jdbc:postgresql://localhost/xxl_job"))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void executorPropertiesDoNotExposeManuallyConfiguredAddresses() {
+        assertThat(Arrays.stream(XxlJobProperties.Executor.class.getDeclaredFields())
+                        .map(java.lang.reflect.Field::getName))
+                .doesNotContain("adminAddresses", "address", "ip");
     }
 }

@@ -13,21 +13,16 @@ import org.junit.jupiter.api.Test;
 class HttpXxlJobAdminReadinessProbeTest {
 
     @Test
-    void reportsReadyWhenAnyConfiguredAdminReturnsHttp200() throws Exception {
-        AtomicInteger unavailableRequests = new AtomicInteger();
+    void reportsReadyWhenLocalAdminReturnsHttp200() throws Exception {
         AtomicInteger readyRequests = new AtomicInteger();
-        HttpServer unavailable = server(503, unavailableRequests);
         HttpServer ready = server(200, readyRequests);
         try {
             HttpXxlJobAdminReadinessProbe probe =
                     new HttpXxlJobAdminReadinessProbe(Duration.ofMillis(500));
-            String addresses = adminAddress(unavailable) + ", " + adminAddress(ready) + "/";
 
-            assertThat(probe.isAnyReady(addresses)).isTrue();
-            assertThat(unavailableRequests).hasValue(1);
+            assertThat(probe.isReady(adminAddress(ready) + "/")).isTrue();
             assertThat(readyRequests).hasValue(1);
         } finally {
-            unavailable.stop(0);
             ready.stop(0);
         }
     }
@@ -40,7 +35,7 @@ class HttpXxlJobAdminReadinessProbeTest {
             HttpXxlJobAdminReadinessProbe probe =
                     new HttpXxlJobAdminReadinessProbe(Duration.ofMillis(500));
 
-            assertThat(probe.isAnyReady("not-a-http-address," + adminAddress(unavailable))).isFalse();
+            assertThat(probe.isReady(adminAddress(unavailable))).isFalse();
             assertThat(requests).hasValue(1);
         } finally {
             unavailable.stop(0);

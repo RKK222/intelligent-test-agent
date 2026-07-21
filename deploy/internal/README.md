@@ -18,7 +18,7 @@
 - Java 读取 `/data/testagent/config/backend.env`。
 - Java 固定读取交付 JAR 内置的 `classpath:rsa-private.key`；`backend.env` 不再接受外置 RSA 路径，多后台必须部署同一 JAR。
 - 所有 Java 连接同一个外部 XXL MySQL，并使用同一个强随机 XXL access token；平台 PostgreSQL 与 XXL MySQL 必须分开。
-- 同机多 Java 的 Admin/executor 端口必须唯一，所有 Admin 必须能访问所有 executor；前端 Nginx 把 `/xxl-job-admin/` 同源代理到 Admin 子端口。
+- 每个 Java 的 Admin 固定与同 JVM executor 配对，executor 注册地址复用平台 advertised host；同机多 Java 的 Admin/executor 端口必须唯一，所有 Admin 必须能访问所有 executor。前端 Nginx 把 `/xxl-job-admin/` 同源代理到各 Admin 子端口。
 - worker 读取 `/data/testagent/config/docker.env`。
 - Java 的 `SYS_DATA_ROOT_DIR` 必须与本机 worker 的 `TEST_AGENT_DATA_ROOT` 一致。
 - 每个稳定 `TEST_AGENT_LINUX_SERVER_ID` 只运行一个 worker，不配置人工 `containerId/managerId`。
@@ -181,6 +181,8 @@ test-agent-config-SENSITIVE-<role>-<node>-<timestamp>.tar.gz.sha256
 5. 导入 worker 镜像、解压 programs。
 6. 启动本机唯一 worker，等待当前结构化日志 `event=manager_config_update status=applied`；部署脚本同时兼容旧版 `manager config update applied`。
 7. 配置/重载 Nginx 同源 `/xxl-job-admin/` 代理，初始化公共 OpenCode 并完成 iframe SSO/executor 验收。
+
+扩容时只在新 Linux 启动一套 Java/worker，将新节点同时加入 `TEST_AGENT_NGINX_BACKENDS` 和 `TEST_AGENT_NGINX_XXL_JOB_ADMINS` 后执行 Nginx 无停机 reload；这两个 Nginx upstream 变量不是 Java 配置，旧 Java 不需要修改环境或重启。manager 异常时优先核对数据根目录、manager token、`.serverid/.serverhost` 和 `4096-4105` 端口池。
 
 不要先启动 worker 再修 Java 身份文件。
 
