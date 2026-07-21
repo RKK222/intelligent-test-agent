@@ -294,18 +294,7 @@ public class GitWorkspaceService {
     }
 
     /**
-     * stage 指定文件并提交；没有变更时 Git 会返回冲突错误，由业务层决定如何提示。
-     */
-    public void commitFiles(Path repoRoot, List<String> files, String message, String privateKey) {
-        if (files == null || files.isEmpty()) {
-            return;
-        }
-        executor.execute(addCommand(repoRoot, files), privateKey, DEFAULT_TIMEOUT);
-        executor.execute(List.of("git", "-C", repoRoot.toString(), "commit", "-m", message), privateKey, DEFAULT_TIMEOUT);
-    }
-
-    /**
-     * 暂存指定文件并使用当前操作人的身份提交；身份仅对本次 commit 命令生效。
+     * 暂存指定文件并使用当前操作人的身份提交；身份必填且仅对本次 commit 命令生效。
      */
     public void commitFiles(
             Path repoRoot,
@@ -313,11 +302,8 @@ public class GitWorkspaceService {
             String message,
             String privateKey,
             GitCommitIdentity identity) {
+        Objects.requireNonNull(identity, "identity must not be null");
         if (files == null || files.isEmpty()) {
-            return;
-        }
-        if (identity == null) {
-            commitFiles(repoRoot, files, message, privateKey);
             return;
         }
         executor.execute(addCommand(repoRoot, files), privateKey, DEFAULT_TIMEOUT);
@@ -418,23 +404,10 @@ public class GitWorkspaceService {
     }
 
     /**
-     * 将指定本地分支合并进当前分支，调用方负责提前 pull、clean 校验和冲突处理。
-     */
-    public void mergeBranch(Path repoRoot, String branch, String privateKey) {
-        executor.execute(
-                List.of("git", "-C", repoRoot.toString(), "merge", "--no-ff", branch),
-                privateKey,
-                DEFAULT_TIMEOUT);
-    }
-
-    /**
-     * 合并分支并为可能产生的 merge commit 注入当前操作人身份。
+     * 合并分支并为可能产生的 merge commit 注入必填的当前操作人身份。
      */
     public void mergeBranch(Path repoRoot, String branch, String privateKey, GitCommitIdentity identity) {
-        if (identity == null) {
-            mergeBranch(repoRoot, branch, privateKey);
-            return;
-        }
+        Objects.requireNonNull(identity, "identity must not be null");
         executor.execute(
                 withCommitIdentity(List.of("git", "-C", repoRoot.toString(), "merge", "--no-ff", branch), identity),
                 privateKey,
@@ -453,10 +426,11 @@ public class GitWorkspaceService {
             String targetCommit,
             String privateKey,
             GitCommitIdentity identity) {
+        Objects.requireNonNull(identity, "identity must not be null");
         List<String> command = List.of(
                 "git", "-C", repoRoot.toString(), "merge", "--no-edit", targetCommit);
         executor.execute(
-                identity == null ? command : withCommitIdentity(command, identity),
+                withCommitIdentity(command, identity),
                 privateKey,
                 DEFAULT_TIMEOUT);
     }
@@ -1102,20 +1076,10 @@ public class GitWorkspaceService {
     }
 
     /**
-     * 提交当前暂存区；调用方负责先 stage 和校验 message。
-     */
-    public void commitStaged(Path repoRoot, String message, String privateKey) {
-        executor.execute(List.of("git", "-C", repoRoot.toString(), "commit", "-m", message), privateKey, DEFAULT_TIMEOUT);
-    }
-
-    /**
-     * 使用当前操作人的身份提交暂存区；身份仅对本次命令生效，不污染共享仓库配置。
+     * 使用当前操作人的必填身份提交暂存区；身份仅对本次命令生效，不污染共享仓库配置。
      */
     public void commitStaged(Path repoRoot, String message, String privateKey, GitCommitIdentity identity) {
-        if (identity == null) {
-            commitStaged(repoRoot, message, privateKey);
-            return;
-        }
+        Objects.requireNonNull(identity, "identity must not be null");
         executor.execute(
                 withCommitIdentity(List.of("git", "-C", repoRoot.toString(), "commit", "-m", message), identity),
                 privateKey,
@@ -1348,9 +1312,7 @@ public class GitWorkspaceService {
      * 将提交身份转换为 Git 命令级配置，避免修改共享仓库的 config 文件或后端进程全局环境。
      */
     private List<String> withCommitIdentity(List<String> command, GitCommitIdentity identity) {
-        if (identity == null) {
-            return List.copyOf(command);
-        }
+        Objects.requireNonNull(identity, "identity must not be null");
         if (command.isEmpty() || !"git".equals(command.get(0))) {
             throw new IllegalArgumentException("Git command must start with git");
         }

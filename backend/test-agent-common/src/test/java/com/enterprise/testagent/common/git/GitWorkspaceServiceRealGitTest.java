@@ -20,6 +20,9 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class GitWorkspaceServiceRealGitTest {
 
+    private static final GitCommitIdentity TEST_IDENTITY =
+            GitCommitIdentity.forPlatformUser("test-user", "AUTH_TEST");
+
     @TempDir
     Path tempDir;
 
@@ -37,7 +40,7 @@ class GitWorkspaceServiceRealGitTest {
         GitWorkspaceService service = new GitWorkspaceService();
         service.resetIndexToHead(repo, null);
         service.stageFiles(repo, List.of("selected.txt"), null);
-        service.commitStaged(repo, "selected only", null);
+        service.commitStaged(repo, "selected only", null, TEST_IDENTITY);
 
         assertThat(git(repo, "show", "--name-only", "--pretty=format:", "HEAD").stdoutText().trim())
                 .isEqualTo("selected.txt");
@@ -102,8 +105,8 @@ class GitWorkspaceServiceRealGitTest {
                 null,
                 GitCommitIdentity.forPlatformUser("alice", "AUTH_ALICE"));
 
-        assertThat(git(repo, "show", "-s", "--format=%an <%ae>", "HEAD").stdoutText().trim())
-                .isEqualTo("alice <AUTH_ALICE@mails.icbc>");
+        assertThat(git(repo, "show", "-s", "--format=%an <%ae>|%cn <%ce>", "HEAD").stdoutText().trim())
+                .isEqualTo("alice <AUTH_ALICE@mails.icbc>|alice <AUTH_ALICE@mails.icbc>");
     }
 
     @Test

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.common.git.GitCommitIdentity;
 import com.enterprise.testagent.common.git.GitWorkspaceService;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -16,6 +17,8 @@ class GitPublishWorkflowTest {
 
     private static final Path REPO_ROOT = Path.of("/tmp/repo");
     private static final String PRIVATE_KEY = "PRIVATE KEY";
+    private static final GitCommitIdentity COMMIT_IDENTITY =
+            GitCommitIdentity.forPlatformUser("test-user", "AUTH_TEST");
 
     @Test
     void directPublishPullsFastForwardBeforePushAndReturnsHeadCommit() {
@@ -44,10 +47,12 @@ class GitPublishWorkflowTest {
                 "main",
                 "feature/review",
                 false,
-                PRIVATE_KEY);
+                PRIVATE_KEY,
+                COMMIT_IDENTITY);
 
         assertThat(result.hasConflicts()).isFalse();
         assertThat(result.headCommit()).isEqualTo("commit_after_push");
+        assertThat(git.mergeIdentity).isEqualTo(COMMIT_IDENTITY);
         assertThat(git.calls).containsExactly(
                 "clean:/tmp/repo",
                 "fetch:/tmp/repo",
@@ -69,7 +74,8 @@ class GitPublishWorkflowTest {
                 "main",
                 "feature/review",
                 false,
-                PRIVATE_KEY);
+                PRIVATE_KEY,
+                COMMIT_IDENTITY);
 
         assertThat(result.hasConflicts()).isTrue();
         assertThat(result.conflictFiles()).containsExactly("src/Main.java", "README.md");
@@ -96,7 +102,8 @@ class GitPublishWorkflowTest {
                 "main",
                 "feature/review",
                 false,
-                PRIVATE_KEY))
+                PRIVATE_KEY,
+                COMMIT_IDENTITY))
                 .isInstanceOfSatisfying(PlatformException.class, exception -> {
                     assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
                     assertThat(exception.details()).containsEntry("abortFailed", true);
@@ -117,10 +124,12 @@ class GitPublishWorkflowTest {
                 "sync files",
                 true,
                 PRIVATE_KEY,
+                COMMIT_IDENTITY,
                 () -> copied.add("copied"));
 
         assertThat(result.headCommit()).isEqualTo("commit_after_push");
         assertThat(copied).containsExactly("copied");
+        assertThat(git.commitIdentity).isEqualTo(COMMIT_IDENTITY);
         assertThat(git.calls).containsExactly(
                 "clean:/tmp/repo",
                 "fetch:/tmp/repo",
@@ -144,6 +153,7 @@ class GitPublishWorkflowTest {
                 "sync files",
                 false,
                 PRIVATE_KEY,
+                COMMIT_IDENTITY,
                 () -> copied.add("copied")))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
@@ -158,6 +168,8 @@ class GitPublishWorkflowTest {
         private boolean failMerge;
         private boolean failAbort;
         private List<String> conflictFiles = List.of();
+        private GitCommitIdentity mergeIdentity;
+        private GitCommitIdentity commitIdentity;
 
         @Override
         public boolean isWorktreeClean(Path repoRoot) {
@@ -176,7 +188,12 @@ class GitPublishWorkflowTest {
         }
 
         @Override
-        public void mergeBranch(Path repoRoot, String branch, String privateKey) {
+        public void mergeBranch(
+                Path repoRoot,
+                String branch,
+                String privateKey,
+                GitCommitIdentity identity) {
+            this.mergeIdentity = identity;
             calls.add("merge:" + repoRoot + ":" + branch);
             if (failMerge) {
                 throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "合并冲突", Map.of());
@@ -198,7 +215,13 @@ class GitPublishWorkflowTest {
         }
 
         @Override
-        public void commitFiles(Path repoRoot, List<String> files, String message, String privateKey) {
+        public void commitFiles(
+                Path repoRoot,
+                List<String> files,
+                String message,
+                String privateKey,
+                GitCommitIdentity identity) {
+            this.commitIdentity = identity;
             calls.add("commit:" + repoRoot + ":" + String.join(",", files) + ":" + message);
         }
 

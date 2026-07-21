@@ -19,6 +19,26 @@ class GitWorkspaceServiceTest {
     Path tempDir;
 
     @Test
+    void commitCreatingOperationsRejectMissingIdentityBeforeExecutingGit() {
+        RecordingExecutor executor = new RecordingExecutor("");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        assertThatThrownBy(() -> service.commitFiles(tempDir, List.of("README.md"), "message", null, null))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("identity must not be null");
+        assertThatThrownBy(() -> service.commitStaged(tempDir, "message", null, null))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("identity must not be null");
+        assertThatThrownBy(() -> service.mergeBranch(tempDir, "feature", null, null))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("identity must not be null");
+        assertThatThrownBy(() -> service.mergeCommit(tempDir, "abc123", null, null))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("identity must not be null");
+        assertThat(executor.calls).isEmpty();
+    }
+
+    @Test
     void cloneBranchUsesCurrentUserPrivateKeyAndTargetDirectory() {
         RecordingExecutor executor = new RecordingExecutor("feature_testagent_20260707\n");
         GitWorkspaceService service = new GitWorkspaceService(executor);

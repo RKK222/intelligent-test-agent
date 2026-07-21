@@ -32,19 +32,7 @@ public class GitPublishWorkflow {
     }
 
     /**
-     * 将 sourceBranch 合并进 targetBranch 并发布；合并冲突会收集文件列表并执行 merge --abort。
-     */
-    public PublishResult publishMergedBranch(
-            Path repoRoot,
-            String targetBranch,
-            String sourceBranch,
-            boolean force,
-            String privateKey) {
-        return publishMergedBranch(repoRoot, targetBranch, sourceBranch, force, privateKey, null);
-    }
-
-    /**
-     * 合并并发布当前操作人的分支；merge 产生提交时使用传入的 Git 身份。
+     * 合并并发布当前操作人的分支；merge 产生提交时使用必填的 Git 身份。
      */
     public PublishResult publishMergedBranch(
             Path repoRoot,
@@ -53,6 +41,7 @@ public class GitPublishWorkflow {
             boolean force,
             String privateKey,
             GitCommitIdentity identity) {
+        Objects.requireNonNull(identity, "identity must not be null");
         ensureClean(repoRoot);
         gitWorkspaceService.fetch(repoRoot, privateKey);
         gitWorkspaceService.pullFastForward(repoRoot, targetBranch, privateKey);
@@ -66,21 +55,7 @@ public class GitPublishWorkflow {
     }
 
     /**
-     * 同步文件到目标仓库后提交并发布；fileCopy 只会在目标仓库干净且完成快进拉取后执行。
-     */
-    public PublishResult syncFilesThenPush(
-            Path repoRoot,
-            String branch,
-            List<String> files,
-            String message,
-            boolean force,
-            String privateKey,
-            FileCopyAction fileCopy) {
-        return syncFilesThenPush(repoRoot, branch, files, message, force, privateKey, null, fileCopy);
-    }
-
-    /**
-     * 同步文件、提交并发布；提交使用当前操作人的 Git 身份。
+     * 同步文件、提交并发布；提交使用必填的当前操作人 Git 身份。
      */
     public PublishResult syncFilesThenPush(
             Path repoRoot,
@@ -91,6 +66,7 @@ public class GitPublishWorkflow {
             String privateKey,
             GitCommitIdentity identity,
             FileCopyAction fileCopy) {
+        Objects.requireNonNull(identity, "identity must not be null");
         ensureClean(repoRoot);
         gitWorkspaceService.fetch(repoRoot, privateKey);
         gitWorkspaceService.pullFastForward(repoRoot, branch, privateKey);

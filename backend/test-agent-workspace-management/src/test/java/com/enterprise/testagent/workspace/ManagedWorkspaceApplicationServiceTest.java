@@ -2221,13 +2221,6 @@ class ManagedWorkspaceApplicationServiceTest {
         }
 
         @Override
-        public void commitFiles(Path repoRoot, List<String> files, String message, String privateKey) {
-            calls.add("commit:" + repoRoot + ":" + String.join(",", files));
-            this.committedFiles = List.copyOf(files);
-            this.nextHeadCommit = "commit_after_push";
-        }
-
-        @Override
         public void stageAll(Path repoRoot, String privateKey) {
             this.stagedRepoRoot = repoRoot;
         }
@@ -2266,7 +2259,8 @@ class ManagedWorkspaceApplicationServiceTest {
         }
 
         @Override
-        public void commitStaged(Path repoRoot, String message, String privateKey) {
+        public void commitStaged(Path repoRoot, String message, String privateKey, GitCommitIdentity identity) {
+            this.committedStagedIdentity = identity;
             if (nextStatusPorcelain.isBlank() && !commitStagedUpdatesHead) {
                 throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "nothing to commit", Map.of());
             }
@@ -2284,12 +2278,6 @@ class ManagedWorkspaceApplicationServiceTest {
         }
 
         @Override
-        public void commitStaged(Path repoRoot, String message, String privateKey, GitCommitIdentity identity) {
-            this.committedStagedIdentity = identity;
-            commitStaged(repoRoot, message, privateKey);
-        }
-
-        @Override
         public void fetch(Path repoRoot, String privateKey) {
             calls.add("fetch:" + repoRoot);
             this.fetchedRepoRoot = repoRoot;
@@ -2298,20 +2286,6 @@ class ManagedWorkspaceApplicationServiceTest {
         @Override
         public void checkoutTrackingBranch(Path repoRoot, String branch, String privateKey) {
             this.currentBranchValue = branch;
-        }
-
-        @Override
-        public void mergeBranch(Path repoRoot, String branch, String privateKey) {
-            calls.add("merge:" + repoRoot + ":" + branch);
-            this.mergedBranch = branch;
-            this.mergedBranchRepoRoot = repoRoot;
-            this.mergeCalls.add(new MergeCall(repoRoot, branch));
-            if (failMergeWithConflict) {
-                throw new PlatformException(
-                        ErrorCode.GIT_UNAVAILABLE,
-                        "合并冲突",
-                        Map.of());
-            }
         }
 
         @Override

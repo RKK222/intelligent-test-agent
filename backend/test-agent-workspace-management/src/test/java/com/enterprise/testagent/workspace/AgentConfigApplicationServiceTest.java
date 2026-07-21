@@ -1954,18 +1954,13 @@ class AgentConfigApplicationServiceTest {
         }
 
         @Override
-        public void mergeBranch(Path repoRoot, String branch, String privateKey) {
+        public void mergeBranch(Path repoRoot, String branch, String privateKey, GitCommitIdentity identity) {
+            this.lastMergeIdentity = identity;
             this.mergedRepoRoot = repoRoot;
             this.mergedBranch = branch;
             if (failMergeWithConflict) {
                 throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "合并冲突", Map.of());
             }
-        }
-
-        @Override
-        public void mergeBranch(Path repoRoot, String branch, String privateKey, GitCommitIdentity identity) {
-            this.lastMergeIdentity = identity;
-            mergeBranch(repoRoot, branch, privateKey);
         }
 
         @Override
@@ -2046,18 +2041,13 @@ class AgentConfigApplicationServiceTest {
         }
 
         @Override
-        public void commitStaged(Path repoRoot, String message, String privateKey) {
+        public void commitStaged(Path repoRoot, String message, String privateKey, GitCommitIdentity identity) {
+            this.lastCommitIdentity = identity;
             this.lastCommitMessage = message;
             this.privateKeyUsed = privateKey;
             // 模拟 commit 后 commit 前进一格
             headHistory.add(currentHead);
             currentHead = "commit_after_update_and_push";
-        }
-
-        @Override
-        public void commitStaged(Path repoRoot, String message, String privateKey, GitCommitIdentity identity) {
-            this.lastCommitIdentity = identity;
-            commitStaged(repoRoot, message, privateKey);
         }
 
         @Override
