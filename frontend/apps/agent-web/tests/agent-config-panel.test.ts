@@ -493,26 +493,44 @@ describe("AgentConfigPanel", () => {
   });
 
 
-  it("initializes an OpenCode-compatible workspace agent and skill package", async () => {
+  it("creates an OpenCode workspace Agent without inserting hyphens between English letters", async () => {
     const { view } = renderPanel();
 
     await waitFor(() => expect(apiClientMock.getWorkspaceAgentConfigStatus).toHaveBeenCalled());
     await fireEvent.click(view.getByRole("button", { name: "初始化应用 Agent/Skill 配置包" }));
-    await fireEvent.update(await view.findByLabelText("配置包名称"), "支付测试技能");
-    await fireEvent.click(view.getByRole("button", { name: "创建" }));
+    const dialog = await view.findByRole("dialog", { name: "初始化应用 Agent/Skill 配置包" });
+    expect(within(dialog).getByRole("radio", { name: "Agent" }).getAttribute("aria-checked")).toBe("true");
+    await fireEvent.update(within(dialog).getByLabelText("Agent 名称"), "Payment Agent");
+    await fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
 
-    await waitFor(() => expect(apiClientMock.writeWorkspaceAgentFile).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(apiClientMock.writeWorkspaceAgentFile).toHaveBeenCalledTimes(1));
     expect(apiClientMock.writeWorkspaceAgentFile.mock.calls.map((call) => call.slice(0, 2))).toEqual([
-      ["wrk_1234567890abcdef", "agents/zhi-fu-ce-shi-ji-neng.md"],
+      ["wrk_1234567890abcdef", "agents/payment-agent.md"]
+    ]);
+    const agentContent = String(apiClientMock.writeWorkspaceAgentFile.mock.calls[0]?.[2]);
+    expect(agentContent).toContain("description: Payment Agent application workspace agent");
+    expect(agentContent).toContain("mode: primary");
+    expect(agentContent).not.toContain("SKILL.md");
+  });
+
+  it("creates an OpenCode workspace Skill with its own template and resource directories", async () => {
+    const { view } = renderPanel();
+
+    await waitFor(() => expect(apiClientMock.getWorkspaceAgentConfigStatus).toHaveBeenCalled());
+    await fireEvent.click(view.getByRole("button", { name: "初始化应用 Agent/Skill 配置包" }));
+    const dialog = await view.findByRole("dialog", { name: "初始化应用 Agent/Skill 配置包" });
+    await fireEvent.click(within(dialog).getByRole("radio", { name: "Skill" }));
+    expect(within(dialog).getByRole("radio", { name: "Skill" }).getAttribute("aria-checked")).toBe("true");
+    await fireEvent.update(within(dialog).getByLabelText("Skill 名称"), "支付测试技能");
+    await fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
+
+    await waitFor(() => expect(apiClientMock.writeWorkspaceAgentFile).toHaveBeenCalledTimes(3));
+    expect(apiClientMock.writeWorkspaceAgentFile.mock.calls.map((call) => call.slice(0, 2))).toEqual([
       ["wrk_1234567890abcdef", "skills/zhi-fu-ce-shi-ji-neng/SKILL.md"],
       ["wrk_1234567890abcdef", "skills/zhi-fu-ce-shi-ji-neng/rules/README.md"],
       ["wrk_1234567890abcdef", "skills/zhi-fu-ce-shi-ji-neng/templates/README.md"]
     ]);
-    const agentContent = String(apiClientMock.writeWorkspaceAgentFile.mock.calls[0]?.[2]);
-    expect(agentContent).toContain("name: zhi-fu-ce-shi-ji-neng");
-    expect(agentContent).toContain("mode: primary");
-    expect(agentContent).toContain("skills/zhi-fu-ce-shi-ji-neng/SKILL.md");
-    const skillContent = String(apiClientMock.writeWorkspaceAgentFile.mock.calls[1]?.[2]);
+    const skillContent = String(apiClientMock.writeWorkspaceAgentFile.mock.calls[0]?.[2]);
     expect(skillContent).toContain("name: zhi-fu-ce-shi-ji-neng");
     expect(skillContent).toContain("description: 支付测试技能 application workspace skill");
     expect(skillContent).toContain("compatibility: opencode");

@@ -766,6 +766,7 @@ const showCreatePublicWorktreeModal = ref(false);
 const createPublicWorktreeLinuxServerId = ref("");
 const createPublicWorktreeError = ref("");
 const showCreateWorkspacePackageModal = ref(false);
+const workspacePackageType = ref<"AGENT" | "SKILL">("AGENT");
 const workspacePackageName = ref("");
 const workspacePackageError = ref("");
 
@@ -1043,6 +1044,7 @@ function worktreeOptionLabel(worktree: AgentConfigWorktreeOption) {
 
 function openCreateWorkspacePackageModal() {
   if (!props.workspaceId || !workspaceCanWrite.value || busy.value) return;
+  workspacePackageType.value = "AGENT";
   workspacePackageName.value = "";
   workspacePackageError.value = "";
   showCreateWorkspacePackageModal.value = true;
@@ -1058,34 +1060,60 @@ async function submitCreateWorkspacePackage() {
   const displayName = workspacePackageName.value.trim();
   const packageName = slugifyPackageName(displayName);
   if (!displayName || !packageName) {
-    workspacePackageError.value = "请输入配置包名称";
+    workspacePackageError.value = `请输入${workspacePackageType.value === "AGENT" ? "Agent" : "Skill"} 名称`;
     return;
   }
   closeCreateWorkspacePackageModal();
   busy.value = true;
   errorMessage.value = "";
   try {
-    await api.writeWorkspaceAgentFile(props.workspaceId, `agents/${packageName}.md`, workspaceAgentTemplate(displayName, packageName), worktreeId("WORKSPACE"));
-    await api.writeWorkspaceAgentFile(props.workspaceId, `skills/${packageName}/SKILL.md`, workspaceSkillTemplate(displayName, packageName), worktreeId("WORKSPACE"));
-    await api.writeWorkspaceAgentFile(props.workspaceId, `skills/${packageName}/rules/README.md`, workspaceRulesTemplate(displayName), worktreeId("WORKSPACE"));
-    await api.writeWorkspaceAgentFile(props.workspaceId, `skills/${packageName}/templates/README.md`, workspaceTemplatesTemplate(displayName), worktreeId("WORKSPACE"));
+    const createdPaths = workspacePackageType.value === "AGENT"
+      ? [`agents/${packageName}.md`]
+      : [
+          `skills/${packageName}/SKILL.md`,
+          `skills/${packageName}/rules/README.md`,
+          `skills/${packageName}/templates/README.md`
+        ];
+    if (workspacePackageType.value === "AGENT") {
+      await api.writeWorkspaceAgentFile(
+        props.workspaceId,
+        createdPaths[0],
+        workspaceAgentTemplate(displayName),
+        worktreeId("WORKSPACE")
+      );
+    } else {
+      await api.writeWorkspaceAgentFile(props.workspaceId, createdPaths[0], workspaceSkillTemplate(displayName, packageName), worktreeId("WORKSPACE"));
+      await api.writeWorkspaceAgentFile(props.workspaceId, createdPaths[1], workspaceRulesTemplate(displayName), worktreeId("WORKSPACE"));
+      await api.writeWorkspaceAgentFile(props.workspaceId, createdPaths[2], workspaceTemplatesTemplate(displayName), worktreeId("WORKSPACE"));
+    }
     rootExpanded.value = new Set([...rootExpanded.value, "WORKSPACE"]);
     entriesByScope.value = { ...entriesByScope.value, WORKSPACE: {} };
-    expandedByScope.value = { ...expandedByScope.value, WORKSPACE: new Set(["agents", "skills", `skills/${packageName}`]) };
+    expandedByScope.value = {
+      ...expandedByScope.value,
+      WORKSPACE: workspacePackageType.value === "AGENT"
+        ? new Set(["agents"])
+        : new Set(["skills", `skills/${packageName}`])
+    };
     await loadDirectory("WORKSPACE", "");
-    await loadDirectory("WORKSPACE", "agents");
-    await loadDirectory("WORKSPACE", "skills");
-    await loadDirectory("WORKSPACE", `skills/${packageName}`);
+    if (workspacePackageType.value === "AGENT") {
+      await loadDirectory("WORKSPACE", "agents");
+    } else {
+      await loadDirectory("WORKSPACE", "skills");
+      await loadDirectory("WORKSPACE", `skills/${packageName}`);
+    }
   } catch (error) {
-    errorMessage.value = formatAgentConfigError(error, "初始化应用 Agent/Skill 配置包失败");
+    errorMessage.value = formatAgentConfigError(
+      error,
+      `新建应用 ${workspacePackageType.value === "AGENT" ? "Agent" : "Skill"} 失败`
+    );
   } finally {
     busy.value = false;
   }
 }
 
-function workspaceAgentTemplate(displayName: string, packageName: string) {
+/** OpenCode Markdown Agent 的名称由文件名决定，模板只写原生支持的配置和提示词。 */
+function workspaceAgentTemplate(displayName: string) {
   return `---
-name: ${packageName}
 description: ${displayName} application workspace agent
 mode: primary
 hidden: false
@@ -1093,7 +1121,7 @@ hidden: false
 
 # ${displayName}
 
-You are the ${displayName} application agent. Follow the workspace skill at \`skills/${packageName}/SKILL.md\` when it applies.
+You are the ${displayName} application agent.
 
 Return verifiable results and keep changes scoped to the current personal worktree.
 `;
@@ -1146,8 +1174,9 @@ Add reusable output templates here. Document the purpose and selection condition
 
 function slugifyPackageName(value: string) {
   const converted = Array.from(value.trim())
-    .map((char) => PINYIN_SEGMENTS[char] ?? char)
-    .join("-");
+    // 中文拼音保持逐字分段；连续英文和数字不插入额外短横线。
+    .map((char) => PINYIN_SEGMENTS[char] ? ` ${PINYIN_SEGMENTS[char]} ` : char)
+    .join("");
   return converted
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -1867,11 +1896,42 @@ defineExpose({
               <span>{{ workspacePackageError }}</span>
             </div>
             <div class="flex flex-col gap-1.5">
-              <label for="workspace-package-name-input" class="text-[11px] text-[var(--ta-muted)] font-medium">配置包名称</label>
+              <span class="text-[11px] text-[var(--ta-muted)] font-medium">配置类型</span>
+              <div role="radiogroup" aria-label="配置类型" class="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  role="radio"
+                  :aria-checked="workspacePackageType === 'AGENT'"
+                  class="h-8 rounded-md border text-[12px] transition-colors"
+                  :class="workspacePackageType === 'AGENT'
+                    ? 'border-[var(--ta-accent)] bg-[var(--ta-hover)] text-[var(--ta-accent)]'
+                    : 'border-[var(--ta-border)] bg-[var(--ta-panel)] text-[var(--ta-muted)] hover:text-[var(--ta-text)]'"
+                  @click="workspacePackageType = 'AGENT'"
+                >
+                  Agent
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  :aria-checked="workspacePackageType === 'SKILL'"
+                  class="h-8 rounded-md border text-[12px] transition-colors"
+                  :class="workspacePackageType === 'SKILL'
+                    ? 'border-[var(--ta-accent)] bg-[var(--ta-hover)] text-[var(--ta-accent)]'
+                    : 'border-[var(--ta-border)] bg-[var(--ta-panel)] text-[var(--ta-muted)] hover:text-[var(--ta-text)]'"
+                  @click="workspacePackageType = 'SKILL'"
+                >
+                  Skill
+                </button>
+              </div>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label for="workspace-package-name-input" class="text-[11px] text-[var(--ta-muted)] font-medium">
+                {{ workspacePackageType === 'AGENT' ? 'Agent 名称' : 'Skill 名称' }}
+              </label>
               <Input
                 id="workspace-package-name-input"
                 v-model="workspacePackageName"
-                placeholder="例如：支付测试技能"
+                :placeholder="workspacePackageType === 'AGENT' ? '例如：支付测试 Agent' : '例如：支付测试技能'"
                 class="h-8 text-[13px]"
                 autofocus
                 @keydown.enter="submitCreateWorkspacePackage"

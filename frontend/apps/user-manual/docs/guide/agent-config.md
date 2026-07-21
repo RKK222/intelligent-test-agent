@@ -12,14 +12,12 @@
 
 应用配置位于当前版本个人 worktree 的 `.opencode/`，用于某个应用版本自己的 Agent、Skill、rules 和 templates。它不再创建独立的“应用配置 worktree”。只有应用管理员与超级管理员可以修改、暂存、提交和发布；普通用户保持只读。左侧 Agents 配置树按角色隐藏初始化和写入入口，内置编辑器以只读方式打开无权限文件；后端文件通道、Agent Git API 和个人 worktree 提交 API 都会再次校验 `.opencode/**` 权限。
 
-创建配置包时，平台会一次生成 OpenCode 可直接识别的四个文件：
+创建配置包时，先选择“Agent”或“Skill”，平台再按 OpenCode 对应模板生成文件：
 
-- `agents/<name>.md`：应用 Agent 模板，当前默认 `mode: primary`
-- `skills/<name>/SKILL.md`
-- `skills/<name>/rules/README.md`
-- `skills/<name>/templates/README.md`
+- 选择 Agent：只生成 `agents/<name>.md`，当前默认 `mode: primary`。
+- 选择 Skill：生成 `skills/<name>/SKILL.md`、`skills/<name>/rules/README.md` 和 `skills/<name>/templates/README.md`。
 
-Skill 名称只使用小写字母、数字和短横线；`SKILL.md` 默认带有 `compatibility: opencode`。这些文件与 docs、spec 和普通 workspace 文件位于同一个人 worktree，但 Git 变更面板把 `.opencode/**` 单独归入“应用Agent”Tab，避免和 workspace 文件混在一棵差异树中。
+Agent 文件名和 Skill 名称只使用小写字母、数字和短横线；连续英文或数字不会在每个字符之间插入短横线，中文名称会按已有拼音片段转换。`SKILL.md` 默认带有 `compatibility: opencode`。这些文件与 docs、spec 和普通 workspace 文件位于同一个人 worktree，但 Git 变更面板把 `.opencode/**` 单独归入“应用Agent”Tab，避免和 workspace 文件混在一棵差异树中。
 
 “应用Agent”和“公共Agent”Tab 都可以逐个或批量回退已跟踪、新增和未跟踪文件。回退后，已打开的 Agent 文件会按磁盘结果刷新；新增文件被删除时对应 tab 会关闭。冲突文件不能直接回退，必须使用合并编辑器选择当前版本、远端版本、手工内容，或取消整次合并。
 

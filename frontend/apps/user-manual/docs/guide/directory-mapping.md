@@ -1057,7 +1057,7 @@ directoryMapping:
 
 ## 目录与发布规则
 
-- `.opencode/agents/**` 与 `.opencode/skills/**`（包括 `rules/`、`templates/`）由应用管理员或超级管理员维护。创建应用配置包会生成 OpenCode 可识别的 Agent、`SKILL.md`、rules 和 templates 模板。
+- `.opencode/agents/**` 与 `.opencode/skills/**`（包括 `rules/`、`templates/`）由应用管理员或超级管理员维护。创建应用配置包时先选择 Agent 或 Skill：Agent 生成 OpenCode Markdown Agent 文件，Skill 生成 `SKILL.md` 及 rules/templates 资源模板。
 - `docs/**` 是应用 Git 中的共享稳定文档，所有应用成员都可以编辑、本地提交并通过 feature 投影发布。
 - `spec/**` 是个人过程资产，所有角色都可以编辑、暂存和提交到个人分支，但任何角色都不能发布，超级管理员也不能绕过目录限制。生成结果按平台现有流程另行同步到系统。
 - `archive/**`、业务代码、单元测试和其它普通应用文件沿用个人 worktree 的提交与 feature 投影流程。
