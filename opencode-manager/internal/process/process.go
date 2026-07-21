@@ -40,11 +40,12 @@ var errPublicConfigNotInitialized = errors.New("public config directory not init
 
 // StartRequest 描述一次启动 opencode server 的本地命令。
 type StartRequest struct {
-	Port        int
-	SessionPath string
-	ConfigPath  string
-	Environment map[string]string
-	TraceID     string
+	Port          int
+	UnifiedAuthID string
+	SessionPath   string
+	ConfigPath    string
+	Environment   map[string]string
+	TraceID       string
 }
 
 // StopRequest 描述一次停止命令，Timeout 控制 SIGTERM 后等待多久再强杀。
@@ -77,16 +78,18 @@ type Result struct {
 
 // StartSpec 是 OSStarter 执行 opencode serve 所需的完整命令描述。
 type StartSpec struct {
-	Command      string
-	Args         []string
-	Env          map[string]string
-	LogPath      string
-	Port         int
-	BaseURL      string
-	SessionPath  string
-	ConfigPath   string
-	StartCommand string
-	TraceID      string
+	Command       string
+	Args          []string
+	Env           map[string]string
+	LogPath       string
+	UnifiedAuthID string
+	StartedAt     time.Time
+	Port          int
+	BaseURL       string
+	SessionPath   string
+	ConfigPath    string
+	StartCommand  string
+	TraceID       string
 }
 
 // Starter 隔离真实 os/exec，便于单测验证启动命令而不拉起真实 opencode。
@@ -202,6 +205,10 @@ func (m *Manager) startConfig() (config.Config, error) {
 
 // BuildStartSpec 构造固定的 opencode serve 命令和启动环境。
 func BuildStartSpec(cfg config.Config, request StartRequest) (StartSpec, error) {
+	return buildStartSpec(cfg, request, time.Now().UTC())
+}
+
+func buildStartSpec(cfg config.Config, request StartRequest, startedAt time.Time) (StartSpec, error) {
 	if err := cfg.Validate(); err != nil {
 		return StartSpec{}, err
 	}
@@ -211,6 +218,10 @@ func BuildStartSpec(cfg config.Config, request StartRequest) (StartSpec, error) 
 	if request.TraceID == "" {
 		return StartSpec{}, fmt.Errorf("traceId is required")
 	}
+	startedAt = startedAt.UTC()
+	if startedAt.IsZero() {
+		return StartSpec{}, fmt.Errorf("startedAt is required")
+	}
 
 	sessionPath := strings.TrimSpace(request.SessionPath)
 	if sessionPath == "" {
@@ -218,6 +229,10 @@ func BuildStartSpec(cfg config.Config, request StartRequest) (StartSpec, error) 
 	} else {
 		// Java 侧按用户生成稳定目录；manager 只规整路径并保留旧端口目录 fallback。
 		sessionPath = filepath.Clean(sessionPath)
+	}
+	unifiedAuthID, err := resolveUnifiedAuthID(request.UnifiedAuthID, sessionPath)
+	if err != nil {
+		return StartSpec{}, err
 	}
 	args := []string{"serve", "--hostname", "0.0.0.0", "--port", strconv.Itoa(request.Port), "--print-logs"}
 	for _, origin := range cfg.AllowedCORS {
@@ -237,16 +252,18 @@ func BuildStartSpec(cfg config.Config, request StartRequest) (StartSpec, error) 
 		}
 	}
 	return StartSpec{
-		Command:      cfg.OpencodeBin,
-		Args:         args,
-		Env:          env,
-		LogPath:      cfg.LogPath(request.Port),
-		Port:         request.Port,
-		BaseURL:      fmt.Sprintf("http://%s:%d", cfg.ServerHost, request.Port),
-		SessionPath:  sessionPath,
-		ConfigPath:   configPath,
-		StartCommand: formatStartCommand(cfg.OpencodeBin, args, env),
-		TraceID:      request.TraceID,
+		Command:       cfg.OpencodeBin,
+		Args:          args,
+		Env:           env,
+		LogPath:       processLogPath(cfg, unifiedAuthID, startedAt, request.Port),
+		UnifiedAuthID: unifiedAuthID,
+		StartedAt:     startedAt,
+		Port:          request.Port,
+		BaseURL:       fmt.Sprintf("http://%s:%d", cfg.ServerHost, request.Port),
+		SessionPath:   sessionPath,
+		ConfigPath:    configPath,
+		StartCommand:  formatStartCommand(cfg.OpencodeBin, args, env),
+		TraceID:       request.TraceID,
 	}, nil
 }
 
@@ -256,7 +273,7 @@ func (m *Manager) Start(ctx context.Context, request StartRequest) (Result, erro
 	if err != nil {
 		return failed(request.Port, request.TraceID, err), err
 	}
-	spec, err := BuildStartSpec(cfg, request)
+	spec, err := buildStartSpec(cfg, request, time.Now().UTC())
 	if err != nil {
 		return failed(request.Port, request.TraceID, err), err
 	}
@@ -308,14 +325,15 @@ func (m *Manager) Start(ctx context.Context, request StartRequest) (Result, erro
 		return failed(request.Port, request.TraceID, err), err
 	}
 	record := state.ProcessRecord{
-		Port:         request.Port,
-		PID:          pid,
-		BaseURL:      spec.BaseURL,
-		SessionPath:  spec.SessionPath,
-		ConfigPath:   spec.ConfigPath,
-		StartedAt:    time.Now().UTC(),
-		StartCommand: spec.StartCommand,
-		TraceID:      request.TraceID,
+		Port:          request.Port,
+		PID:           pid,
+		BaseURL:       spec.BaseURL,
+		UnifiedAuthID: spec.UnifiedAuthID,
+		SessionPath:   spec.SessionPath,
+		ConfigPath:    spec.ConfigPath,
+		StartedAt:     spec.StartedAt,
+		StartCommand:  spec.StartCommand,
+		TraceID:       request.TraceID,
 	}
 	if err := m.store.Create(record); err != nil {
 		_ = m.signaler.Terminate(pid)
@@ -365,15 +383,18 @@ func (m *Manager) Restart(ctx context.Context, request StopRequest) (Result, err
 	}
 	sessionPath := ""
 	configPath := ""
+	unifiedAuthID := ""
 	if ok {
 		sessionPath = record.SessionPath
 		configPath = record.ConfigPath
+		unifiedAuthID = record.UnifiedAuthID
 	}
 	if _, err := m.Stop(ctx, request); err != nil {
 		return failed(request.Port, request.TraceID, err), err
 	}
 	return m.Start(ctx, StartRequest{
-		Port: request.Port, SessionPath: sessionPath, ConfigPath: configPath, TraceID: request.TraceID,
+		Port: request.Port, UnifiedAuthID: unifiedAuthID,
+		SessionPath: sessionPath, ConfigPath: configPath, TraceID: request.TraceID,
 	})
 }
 
@@ -439,10 +460,11 @@ func (m *Manager) withDerivedStartCommands(records []state.ProcessRecord, traceI
 			continue
 		}
 		spec, err := BuildStartSpec(cfg, StartRequest{
-			Port:        records[i].Port,
-			SessionPath: records[i].SessionPath,
-			ConfigPath:  records[i].ConfigPath,
-			TraceID:     nonEmptyTraceID(traceID),
+			Port:          records[i].Port,
+			UnifiedAuthID: records[i].UnifiedAuthID,
+			SessionPath:   records[i].SessionPath,
+			ConfigPath:    records[i].ConfigPath,
+			TraceID:       nonEmptyTraceID(traceID),
 		})
 		if err == nil {
 			records[i].StartCommand = spec.StartCommand

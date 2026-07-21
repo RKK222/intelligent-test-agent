@@ -136,7 +136,12 @@ func TestManagerStartWritesStateAndReusesHealthyManagedPort(t *testing.T) {
 		ProbeBaseURL: healthServer.URL,
 	})
 
-	result, err := manager.Start(context.Background(), StartRequest{Port: 4096, TraceID: "trace_1234567890abcdef"})
+	result, err := manager.Start(context.Background(), StartRequest{
+		Port:          4096,
+		UnifiedAuthID: "DEV_888888888",
+		SessionPath:   "/tmp/sessions/users/DEV_888888888",
+		TraceID:       "trace_1234567890abcdef",
+	})
 	if err != nil {
 		t.Fatalf("Start returned error: %v", err)
 	}
@@ -153,7 +158,19 @@ func TestManagerStartWritesStateAndReusesHealthyManagedPort(t *testing.T) {
 	if record.StartCommand != starter.specs[0].StartCommand {
 		t.Fatalf("expected persisted start command %q, got %q", starter.specs[0].StartCommand, record.StartCommand)
 	}
-	reused, err := manager.Start(context.Background(), StartRequest{Port: 4096, TraceID: "trace_1234567890abcdef"})
+	if record.UnifiedAuthID != "DEV_888888888" || !record.StartedAt.Equal(starter.specs[0].StartedAt) {
+		t.Fatalf("expected state identity and timestamp from start spec, record=%#v spec=%#v", record, starter.specs[0])
+	}
+	wantLogBase := "DEV_888888888-" + record.StartedAt.Format(logTimestampLayout) + "-4096.log"
+	if filepath.Base(starter.specs[0].LogPath) != wantLogBase {
+		t.Fatalf("expected log basename %q, got %q", wantLogBase, starter.specs[0].LogPath)
+	}
+	reused, err := manager.Start(context.Background(), StartRequest{
+		Port:          4096,
+		UnifiedAuthID: "DEV_888888888",
+		SessionPath:   "/tmp/sessions/users/DEV_888888888",
+		TraceID:       "trace_1234567890abcdef",
+	})
 	if err != nil {
 		t.Fatalf("Start should reuse healthy managed port, got error: %v", err)
 	}
@@ -418,14 +435,15 @@ func TestManagerRestartPreservesStoredSessionPath(t *testing.T) {
 	store := state.NewFileStore(t.TempDir())
 	sessionPath := "/tmp/sessions/users/usr_1234567890abcdef"
 	if err := store.Save(state.ProcessRecord{
-		Port:         4096,
-		PID:          12345,
-		BaseURL:      "http://10.8.0.12:4096",
-		SessionPath:  sessionPath,
-		ConfigPath:   cfg.ConfigDir,
-		StartedAt:    time.Now().UTC(),
-		StartCommand: "old",
-		TraceID:      "trace_old",
+		Port:          4096,
+		PID:           12345,
+		BaseURL:       "http://10.8.0.12:4096",
+		SessionPath:   sessionPath,
+		UnifiedAuthID: "usr_1234567890abcdef",
+		ConfigPath:    cfg.ConfigDir,
+		StartedAt:     time.Now().UTC(),
+		StartCommand:  "old",
+		TraceID:       "trace_old",
 	}); err != nil {
 		t.Fatalf("pre-save process state: %v", err)
 	}
@@ -458,6 +476,20 @@ func TestManagerRestartPreservesStoredSessionPath(t *testing.T) {
 	}
 	if starter.specs[0].ConfigPath != expectedConfigPath {
 		t.Fatalf("expected restart to use stored config path %q, got %q", expectedConfigPath, starter.specs[0].ConfigPath)
+	}
+	if starter.specs[0].UnifiedAuthID != "usr_1234567890abcdef" {
+		t.Fatalf("expected restart to preserve unified auth id, got %#v", starter.specs[0])
+	}
+	record, ok, err := store.Get(4096)
+	if err != nil || !ok {
+		t.Fatalf("expected restarted state, ok=%t err=%v", ok, err)
+	}
+	if record.UnifiedAuthID != "usr_1234567890abcdef" || !record.StartedAt.Equal(starter.specs[0].StartedAt) {
+		t.Fatalf("expected restarted state to match start spec, record=%#v spec=%#v", record, starter.specs[0])
+	}
+	wantLogBase := "usr_1234567890abcdef-" + record.StartedAt.Format(logTimestampLayout) + "-4096.log"
+	if filepath.Base(starter.specs[0].LogPath) != wantLogBase {
+		t.Fatalf("expected restart log basename %q, got %q", wantLogBase, starter.specs[0].LogPath)
 	}
 }
 
