@@ -1947,7 +1947,7 @@ test("version selection checks git access and prompts for repository permission 
   await expect.poll(() => page.evaluate(() => (
     window as typeof window & { __testOpenedExternalUrl?: string[] }
   ).__testOpenedExternalUrl)).toEqual([
-    "http://scm-gmp.sdc.cs.icbc/icbc/gmp/index.jsp#@",
+    "https://scm-gmp.sdc.cs.icbc/icbc/gmp/index.jsp#@",
     "_blank",
     "noopener,noreferrer"
   ]);

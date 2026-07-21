@@ -192,7 +192,7 @@ import {
 } from "./workbench-utils";
 
 const apiBaseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
-const SCM_GMP_PERMISSION_APPLICATION_URL = "http://scm-gmp.sdc.cs.icbc/icbc/gmp/index.jsp#@";
+const SCM_GMP_PERMISSION_APPLICATION_URL = "https://scm-gmp.sdc.cs.icbc/icbc/gmp/index.jsp#@";
 // 只保存当前页面生命周期内的 binding 提示，避免刷新或切换用户后沿用旧服务器。
 const routeLinuxServerId = ref("");
 const routeLinuxServerResolved = ref(false);
