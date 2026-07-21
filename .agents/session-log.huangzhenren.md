@@ -5,6 +5,20 @@
 
 ## Entries
 
+### 2026-07-21 - 引用配置自动写入外部目录权限
+
+- Why:
+  - 引用路径位于工作区外部时，OpenCode 会发出 `external_directory` 权限询问；仅写 `references` 会让已选引用仍被全局 `ask` 兜底拦截。
+- What:
+  - 引用 JSONC 补丁在同一正文中同时维护当前 alias 与 `permission.external_directory["{path}/*"] = "allow"`，同路径 `ask/deny` 强制覆盖，并确保精确 allow 位于最后一条匹配规则；合法的根权限和外部目录字符串简写展开后保留原 `*` 兜底，非法结构用中文校验错误整次拒绝。
+  - 弹窗新增权限漂移状态：存量引用的权限缺失、冲突或被后置宽泛规则覆盖时，无需修改描述即可更新；保存仍只重读一次最新正文、生成一次补丁并写盘一次，成功后清除漂移状态。
+  - 同步前端/agent-web README、组件 PACKAGE、引用配置用户手册和应用 worktree 测试说明；授权范围固定为当前所选根层 SDD 目录，不扫描其它引用、不写仓库级或全局 `* allow`。
+- How:
+  - 复用 `jsonc-parser` 的 JSONC 字段编辑与语法树，只在规则重排时移除精确属性正文并保留周围注释；TDD 覆盖空文件、新增/更新、简写、宽泛规则、同路径冲突、非法结构、CRLF、注释/未知字段、幂等、按钮漂移和并发保存 fencing。
+- Result:
+  - 两个目标测试文件 84 项通过；前端 typecheck、lint、用户手册及生产 build、`git diff --check` 通过。前端全量 Vitest 为 1484 passed / 1 skipped / 1 failed；唯一失败仍是既有 `DirectoryRows` 用 `button` 查询实际 `radio` 角色的“上传”，本轮开始前已复现且相关文件未修改。
+  - 不涉及后端、HTTP API、RunEvent/SSE、数据库/SQL、generated SDK、环境配置、性能或鉴权模型；权限变化仅写入当前个人 worktree 的 OpenCode JSONC。工作树中并行的 manager/后端日志功能改动和既有 `.config` 删除未纳入本次范围。
+
 ### 2026-07-21 - 同步 main 并保留两侧功能
 
 - Why:

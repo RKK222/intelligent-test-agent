@@ -71,6 +71,7 @@ const configMode = ref<ReferenceConfigInspection["mode"] | null>(null);
 const configTarget = ref<ReferenceConfigTarget | null>(null);
 const form = ref<ReferenceConfigValue>({ path: "", merge: true, sddFolderName: "", description: "" });
 const baseline = ref<ReferenceConfigValue | null>(null);
+const permissionNeedsUpdate = ref(false);
 const configNotice = ref<(Notice & { kind: "error" | "success" }) | null>(null);
 const dialogElement = ref<HTMLElement | null>(null);
 const operationDialogElement = ref<HTMLElement | null>(null);
@@ -172,7 +173,8 @@ const formModified = computed(() => {
 
 const submitEnabled = computed(() => {
   if (!configTarget.value || configLoading.value || configSaving.value || !normalizedForm.value.description) return false;
-  return configMode.value === "create" || (configMode.value === "update" && formModified.value);
+  return configMode.value === "create"
+    || (configMode.value === "update" && (formModified.value || permissionNeedsUpdate.value));
 });
 
 function notice(error: unknown, fallback: string): Notice {
@@ -342,6 +344,7 @@ function resetSelectionState() {
   configTarget.value = null;
   configMode.value = null;
   baseline.value = null;
+  permissionNeedsUpdate.value = false;
   configNotice.value = null;
   operationProgress.value = null;
   branchSwitchConfirmation.value = null;
@@ -611,6 +614,7 @@ async function confirmSwitchBranch() {
     configTarget.value = null;
     configMode.value = null;
     baseline.value = null;
+    permissionNeedsUpdate.value = false;
     await applyOperationStatus(next, dialogToken, selectionToken, responseToken);
   } catch (error) {
     if (error instanceof BackendApiError && !error.retryable) {
@@ -932,6 +936,7 @@ async function selectFolder(node: VisibleTreeNode) {
   configLoading.value = true;
   configMode.value = null;
   baseline.value = null;
+  permissionNeedsUpdate.value = false;
   configNotice.value = null;
   try {
     const content = await readWorkspaceConfig();
@@ -940,6 +945,7 @@ async function selectFolder(node: VisibleTreeNode) {
     configMode.value = inspection.mode;
     form.value = { ...inspection.value };
     baseline.value = { ...inspection.baseline };
+    permissionNeedsUpdate.value = inspection.permissionNeedsUpdate;
   } catch (error) {
     if (contextIsCurrent(dialogToken, selectionToken, repository.repositoryId) && selectedFolderPath.value === node.path) {
       configNotice.value = { ...notice(error, "读取引用配置失败"), kind: "error" };
@@ -983,6 +989,7 @@ async function submitConfig() {
     if (!contextIsCurrent(dialogToken, selectionToken, repository.repositoryId) || selectedFolderPath.value !== folderPath) return;
     baseline.value = { ...submitted };
     configMode.value = "update";
+    permissionNeedsUpdate.value = false;
     configNotice.value = { kind: "success", message: "引用配置已保存" };
     emit("saved");
   } catch (error) {

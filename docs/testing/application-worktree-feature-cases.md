@@ -58,7 +58,7 @@ flowchart LR
 | 用户全局 OpenCode 配置 | 运行用户的 `~/.config/opencode` | OpenCode 原生全局层；企业环境不得在这里维护模型或供应商，避免污染公共事实源 |
 | 公共配置 | `OPENCODE_CONFIG_DIR={sessionPath}/.testagent-runtime/current-public-config` | 当前用户进程的公共层；软链接默认指向 `OPENCODE_PUBLIC_CONFIG_DIR`，公共个人保存时只对本人切到 `public-{userId}` worktree 的 `opencode/` |
 | 应用个人配置 | 本次请求 directory 对应的个人 worktree `.opencode/opencode.jsonc`、`.opencode/agents/**`、`.opencode/skills/**` | OpenCode 按项目目录原生发现并与公共层组合；不存在平台自定义覆盖/复制规则，也不存在独立应用 Agent worktree |
-| 应用资产引用 | 应用个人 `.opencode/opencode.jsonc` 的 `references`，路径通过 `OPENCODE_REFERENCES_DIR` 展开 | 只记录和加载引用关系；资产库文件、分支不会复制或合并进应用 Git |
+| 应用资产引用 | 应用个人 `.opencode/opencode.jsonc` 的 `references` 与所选目录精确 `permission.external_directory` allow，路径通过 `OPENCODE_REFERENCES_DIR` 展开 | 只记录和加载引用关系并授权当前所选根层 SDD 目录；资产库文件、分支不会复制或合并进应用 Git |
 
 `sessionPath` 是当前统一认证用户的 OpenCode 数据目录，同时作为进程的 `XDG_DATA_HOME`；它不是应用 worktree。平台在其下固定维护 `current-public-config` 软链接，让 manager 的 `configPath` 和 `OPENCODE_CONFIG_DIR` 永远使用同一个入口，只改变软链接目标。当前本地 test 环境的实际关系是：
 
@@ -108,7 +108,7 @@ OPENCODE_CONFIG_DIR / manager configPath
 
 - 可热加载目录定义精确为 `opencode.jsonc`、`agents/**/*.md`、`skills/**/SKILL.md`。公共和应用个人作用域规则相同。
 - `skills/**/rules/**`、`skills/**/templates/**` 等资源文件只保存并刷新 Diff，不 dispose；它们提交并推送后仍会随对应 Git 发布同步。
-- 应用资产引用弹窗保存的是个人 `.opencode/opencode.jsonc`，成功后按 JSONC 规则只热加载当前用户。
+- 应用资产引用弹窗保存的是个人 `.opencode/opencode.jsonc`；保存前重读最新正文，以一次补丁和一次写盘同时更新当前 alias 与 `"{path}/*": "allow"`，成功后按 JSONC 规则只热加载当前用户。
 - 当前用户有运行中任务时，dispose 延迟到任务空闲；进程尚未初始化或不可用时不为了保存额外启动进程。应用个人 `.opencode` 会在后续首次启动或 workspace bootstrap 时直接读取磁盘最新配置；公共个人预览则不会跨进程启动保留，因为启动固定先把链接恢复到共享副本，超管需在进程 READY 后再次保存可热加载文件，或正式推送公共配置。
 - 文件已落盘但 dispose 失败时，界面明确提示“文件已保存，运行态刷新失败”，不会把磁盘写入误报为失败。
 
@@ -127,7 +127,7 @@ OPENCODE_CONFIG_DIR / manager configPath
 | 公共 Agent/Skill/JSONC 本地提交 | 只更新 `public-{userId}` | 无 | 不新增 dispose；本人保存后的预览链接继续有效 |
 | 公共 Agent/Skill/JSONC 提交并推送 | 先合并远端公共分支并推送，再把固定提交同步到所有服务器公共运行副本 | 所有用户最终读取同一共享固定提交 | 全局 rollout 逐用户等待旧任务空闲，先把有效指针恢复到共享副本，再调用原生 `/global/dispose` |
 
-应用资产引用本身仍由资产库 generation/副本程序维护；`opencode.jsonc` 只记录引用关系。保存引用 JSONC 只热加载本人；只有管理员明确把该 JSONC 提交并推送后，引用配置才随 feature 固定提交合并到其他个人 worktree，资产文件不会复制进应用仓库，也不会把资产库分支合并进 feature。
+应用资产引用本身仍由资产库 generation/副本程序维护；`opencode.jsonc` 只记录引用关系及当前所选根层 SDD 目录的精确外部目录 allow，不写仓库级或全局 `* allow`。保存引用 JSONC 只热加载本人；只有管理员明确把该 JSONC 提交并推送后，引用配置才随 feature 固定提交合并到其他个人 worktree，资产文件不会复制进应用仓库，也不会把资产库分支合并进 feature。
 
 表中的“全局 rollout”仍是逐用户进程执行，不存在所有用户共用的 OpenCode 进程。只对已有运行进程登记 dispose 目标；没有运行进程的用户在下次初始化时直接加载最新公共配置和个人 worktree 配置。
 
@@ -247,6 +247,7 @@ tools/create-workspace-branch-model-test-data.sh
 | HOT-01 应用个人 Agent 保存 | 1. 用当前应用个人 worktree 的 `directory` 请求 OpenCode `/agent`，确认 description 为 R1，使当前 Instance 已缓存。<br>2. 在主编辑器打开 `.opencode/agents/personal-hot-reload-20260719.md`，把 description 的 R1 改成 R2。<br>3. 按 macOS `Command+S` 或 Windows/Linux `Ctrl+S`。<br>4. 等当前任务空闲后，再对同一 `directory` 请求 `/agent`。<br>5. 打开“应用 Agent”Diff。 | Agent name `personal-hot-reload-20260719`。 | 文件写盘且只出现在应用 Agent Diff；同一进程第二次返回 R2，证明保存触发本人 dispose 后重新 bootstrap；公共有效配置软链接不变化；远程 feature 不出现该路径。 |
 | HOT-02 应用个人 Skill 保存 | 1. 先对同一 `directory` 请求 OpenCode `/skill` 或在可用 Skill 清单确认 R1。<br>2. 打开对应 `SKILL.md`，把 description 和 metadata marker 的 R1 改成 R2。<br>3. 按 Command/Ctrl+S 并等待任务空闲。<br>4. 再查 `/skill` 或 Skill 清单。 | Skill name `personal-hot-reload-20260719`。 | 同一用户读取到 R2；文件进入应用 Agent Diff；只 dispose 当前用户，无 feature push、无其他用户同步。 |
 | HOT-03 应用 `opencode.jsonc` 保存与 Diff 分类 | 1. 在现有个人 `.opencode/opencode.jsonc` 中对一个测试引用的 description 做可逆修改。<br>2. 保存前在浏览器网络面板记录请求。<br>3. 按 Command/Ctrl+S。<br>4. 打开应用 Agent Diff，并在验证后回退该测试改动。 | 只修改测试引用，不改 provider、model 或凭据。 | JSONC 出现在“应用 Agent”Diff，而不是普通工作区 Diff；保存成功后出现本人运行态刷新请求；不提交、不推送时别人不受影响。 |
+| HOT-REF-01 引用弹窗补齐目录权限 | 1. 在测试个人 worktree 预置同 path 引用并删除其精确外部目录权限，或把同路径动作改为 `ask`/`deny`。<br>2. 打开引用配置并选择该根层 SDD 目录，不修改描述。<br>3. 确认“更新”可用并点击，记录文件 WebSocket 写请求。<br>4. 再次选择同一目录。 | `references` 中使用 `{env:OPENCODE_REFERENCES_DIR}/{仓库英文名}/{目录名}`；权限目标为同路径 `/*`。 | 只发生一次写盘，正文同时含原引用与精确 `"{path}/*": "allow"`；精确 allow 位于所有后续匹配规则之后，不产生仓库级/全局 allow，注释与未知字段保留；再次选择时无字段变化则“更新”禁用，并只热加载当前用户。 |
 | HOT-04 rules 保存不 dispose | 1. 打开 `.opencode/skills/personal-hot-reload-20260719/rules/no-dispose.md`。<br>2. 把 marker 的 R1 改为 R2。<br>3. 清空浏览器网络面板后按 Command/Ctrl+S。<br>4. 打开应用 Agent Diff。 | `rules/no-dispose.md`。 | 文件写盘并进入应用 Agent Diff；没有 `/global/dispose` 或 workspace runtime reload 请求；后续选择 Agent/Skill 一起发布时该资源仍随 feature 同步。 |
 | HOT-05 公共个人 Agent 保存 | 1. 以 `SUPER_ADMIN` 进入自己的公共 worktree。<br>2. 先在当前用户 OpenCode `/agent` 清单确认共享态不含该测试 Agent，或确认 R1。<br>3. 把公共个人 Agent description 的 R1 改成 R2 并 Command/Ctrl+S。<br>4. 在网络面板确认 `POST /agent-config/public/runtime-reload` 返回 HTTP 200 且 `data.reloaded=true`。<br>5. 等任务空闲后再次查 `/agent`，并执行 `readlink {sessionPath}/.testagent-runtime/current-public-config`。<br>6. 在后端日志按本次 traceId 反查。 | `public-personal-hot-reload-20260719.md`。 | 当前超管读到 R2；软链接指向本人的 `public-{userId}/opencode`；共享公共副本和远程分支不变；其他用户不出现该测试 Agent；日志中没有 `block()/blockFirst()/blockLast() are blocking`。 |
 | HOT-06 公共个人 Skill 保存 | 1. 先在当前用户 Skill 清单确认 R1。<br>2. 修改公共个人 `SKILL.md` 的 R1 为 R2 并保存。<br>3. 等任务空闲后复查 Skill 清单和公共 Diff。 | Skill name `public-personal-hot-reload-20260719`。 | 本人读取到 R2并进入公共 Diff；只有本人指针/进程变化，没有全局 rollout。 |
@@ -274,7 +275,9 @@ mvn -pl test-agent-common,test-agent-workspace-management,test-agent-opencode-ru
 cd ../frontend
 corepack pnpm vitest run \
   apps/agent-web/tests/agent-file-load.test.ts \
-  apps/agent-web/tests/git-changes-panel.test.ts
+  apps/agent-web/tests/git-changes-panel.test.ts \
+  apps/agent-web/tests/reference-config-jsonc.test.ts \
+  apps/agent-web/tests/reference-configuration-dialog.test.ts
 corepack pnpm --filter @test-agent/agent-web typecheck
 ```
 

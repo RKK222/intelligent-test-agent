@@ -1398,6 +1398,11 @@ describe("ReferenceConfigurationDialog", () => {
       "hidden": true,
     },
   },
+  "permission": {
+    "external_directory": {
+      "{env:OPENCODE_REFERENCES_DIR}/requirements/docs/*": "allow",
+    },
+  },
 }`;
     const mockApi = api({
       synchronizeReferenceRepository: vi.fn().mockResolvedValue(status()),
@@ -1425,9 +1430,56 @@ describe("ReferenceConfigurationDialog", () => {
     await flushPromises();
 
     const written = mockApi.writeFile.mock.calls[0]?.[2] as string;
+    expect(mockApi.writeFile).toHaveBeenCalledTimes(1);
     expect(written).toContain("// keep root comment");
     expect(written).toContain('"hidden": true');
     expect(written).toContain('"merge": false');
+    expect(written).toContain('"references"');
+    expect(written).toContain('"permission"');
+    expect(written).toContain('"{env:OPENCODE_REFERENCES_DIR}/requirements/docs/*": "allow"');
+  });
+
+  it("enables Update for permission drift and repairs it without changing the description", async () => {
+    const existing = `{
+  "references": {
+    "docs-requirements": {
+      "path": "{env:OPENCODE_REFERENCES_DIR}/requirements/docs",
+      "merge": true,
+      "sdd-folder-name": "docs",
+      "description": "现有说明"
+    }
+  }
+}`;
+    const readFile = vi.fn().mockResolvedValue({
+      path: ".opencode/opencode.jsonc",
+      content: existing,
+      size: existing.length
+    });
+    const mockApi = api({
+      synchronizeReferenceRepository: vi.fn().mockResolvedValue(status()),
+      listReferenceRepositoryTree: vi.fn().mockResolvedValue([
+        { path: "docs", name: "docs", directory: true, size: 0, highlighted: true, selectable: true }
+      ]),
+      readFile
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+    await selectReadyFolder(wrapper);
+
+    const updateButton = wrapper.get('button[aria-label="更新引用配置"]');
+    expect(wrapper.get('textarea[aria-label="描述（description）"]').element).toHaveProperty("value", "现有说明");
+    expect(updateButton.attributes()).not.toHaveProperty("disabled");
+
+    await updateButton.trigger("click");
+    await flushPromises();
+
+    expect(readFile).toHaveBeenCalledTimes(2);
+    expect(mockApi.writeFile).toHaveBeenCalledTimes(1);
+    const written = mockApi.writeFile.mock.calls[0]?.[2] as string;
+    expect(written).toContain('"docs-requirements"');
+    expect(written).toContain('"description": "现有说明"');
+    expect(written).toContain('"{env:OPENCODE_REFERENCES_DIR}/requirements/docs/*": "allow"');
+    expect(wrapper.get('button[aria-label="更新引用配置"]').attributes()).toHaveProperty("disabled");
   });
 
   it("writes an immutable submitted snapshot and never marks edits made during the pending write as clean", async () => {
