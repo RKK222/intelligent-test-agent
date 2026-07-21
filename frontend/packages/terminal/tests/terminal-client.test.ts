@@ -35,6 +35,42 @@ class FakeWebSocket {
 }
 
 describe("terminal client", () => {
+  it("同源企业构建的空 baseUrl 可以直接使用后端返回的绝对 WebSocket 地址", () => {
+    FakeWebSocket.instances = [];
+
+    createTerminalSession({
+      baseUrl: "",
+      ticket: {
+        ticket: "pty_server",
+        expiresAt: "2026-07-21T14:00:00Z",
+        webSocketUrl: "wss://mimo.sdc.cs.icbc:9996/api/internal/platform/opencode-runtime/management/linux-servers/server-a/terminal/ws?ticket=pty_server"
+      },
+      WebSocketCtor: FakeWebSocket
+    });
+
+    expect(FakeWebSocket.instances[0]?.url).toBe(
+      "wss://mimo.sdc.cs.icbc:9996/api/internal/platform/opencode-runtime/management/linux-servers/server-a/terminal/ws?ticket=pty_server"
+    );
+  });
+
+  it("同源企业构建的空 baseUrl 保留旧后端返回的相对 WebSocket 地址", () => {
+    FakeWebSocket.instances = [];
+
+    createTerminalSession({
+      baseUrl: "",
+      ticket: {
+        ticket: "pty_legacy",
+        expiresAt: "2026-07-21T14:00:00Z",
+        webSocketUrl: "/api/internal/platform/opencode-runtime/sessions/ses_1/terminal/ws?ticket=pty_legacy"
+      },
+      WebSocketCtor: FakeWebSocket
+    });
+
+    expect(FakeWebSocket.instances[0]?.url).toBe(
+      "/api/internal/platform/opencode-runtime/sessions/ses_1/terminal/ws?ticket=pty_legacy"
+    );
+  });
+
   it("connects with the ticket URL, captures output, and sends terminal commands", () => {
     FakeWebSocket.instances = [];
     const events: string[] = [];

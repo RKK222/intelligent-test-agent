@@ -121,7 +121,19 @@ export function createTerminalSession({
 }
 
 function toWebSocketUrl(baseUrl: string, webSocketUrl: string) {
-  const url = new URL(webSocketUrl, baseUrl);
+  const normalizedBaseUrl = baseUrl.trim();
+  // 企业同源构建会把 API base 显式编译为空；绝对 ticket URL 不需要 base，
+  // 旧后端的相对 URL 则交给浏览器 WebSocket 按当前页面地址解析。
+  if (!normalizedBaseUrl) {
+    if (webSocketUrl.startsWith("https://")) {
+      return `wss://${webSocketUrl.slice("https://".length)}`;
+    }
+    if (webSocketUrl.startsWith("http://")) {
+      return `ws://${webSocketUrl.slice("http://".length)}`;
+    }
+    return webSocketUrl;
+  }
+  const url = new URL(webSocketUrl, normalizedBaseUrl);
   if (url.protocol === "https:") {
     url.protocol = "wss:";
   } else if (url.protocol === "http:") {

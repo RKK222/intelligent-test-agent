@@ -7,6 +7,7 @@
 ## 主要职责
 
 - 使用后端返回的一次性 terminal ticket 建立 WebSocket。
+- 企业同源构建可把 API base 设为空：绝对 `ws(s)://` ticket 地址直接使用，旧后端相对地址由浏览器按当前页面解析，不能把空字符串传给 `new URL(..., base)`。
 - 解析 `output`、`exit`、`error`、`warning` JSON envelope；`warning` 用于展示输出截断等非致命状态。
 - 发送 `input`、`resize`、`close` JSON envelope。
 - 提供基于 xterm.js + FitAddon 的 `TerminalPanel`，键盘数据直发 PTY，容器变化触发真实 resize，供 workspace 与服务器工作空间选择器内的服务器终端复用。
