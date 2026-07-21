@@ -374,6 +374,8 @@ bash /data/testagent/deploy/internal/configure-nginx.sh \
 
 预期输出 `backend count: 2`、`server route count: 2`。正式安装必须使用本次发布包中的前端部署入口；它会更新前端和部署脚本、渲染候选配置、执行实体 Nginx `-t/-T` 并 reload，失败自动回滚：
 
+若 Mac 重新封装时复用的前端节点包仍是旧键，`package-two-backend-complete.sh` 会只在外层包的临时副本中自动改名；源敏感节点包不会被修改。节点包缺少该映射、重复定义或同时含新旧键时，封装会失败，不能继续交付。
+
 ```bash
 bash /tmp/deploy-internal-frontend.sh \
   --archive /data/0709/test-agent-internal-release.zip \

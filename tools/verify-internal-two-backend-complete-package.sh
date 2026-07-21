@@ -54,6 +54,9 @@ create_node_archive() {
   if [[ "${config_name}" == backend.env ]]; then
     printf 'TEST_AGENT_OPENCODE_MANAGER_TOKEN=must-not-print\n' \
       >"${root}/${node_dir}/config/docker.env"
+  else
+    printf 'TEST_AGENT_NGINX_TERMINAL_ROUTES=server-a=122.233.30.4:8080,server-b=122.233.30.114:8080\n' \
+      >>"${root}/${node_dir}/config/nginx.env"
   fi
   tar -C "${root}" -czf "${NODES_DIR}/${archive_name}" "${node_dir}"
   write_checksum "${NODES_DIR}/${archive_name}"
@@ -106,6 +109,20 @@ grep -Fxq 'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.
 grep -Fxq 'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.30.2.tar.gz' <<<"${listing}"
 if grep -Eq '202[0-9]|-v[0-9]+/' <<<"${listing}"; then
   echo "Fixed-name bundle unexpectedly contains a dated/versioned root" >&2
+  exit 1
+fi
+
+# 旧节点包可以复用，但完整新包内必须只保留统一 server route 键。
+FRONTEND_NODE_ARCHIVE="${TMP_ROOT}/frontend-node.tar.gz"
+unzip -p "${BUNDLE}" \
+  'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.30.2.tar.gz' \
+  >"${FRONTEND_NODE_ARCHIVE}"
+frontend_nginx_env="$(tar -xOzf "${FRONTEND_NODE_ARCHIVE}" \
+  'test-agent-two-backend-122.233.30.2/config/nginx.env')"
+grep -Fq 'TEST_AGENT_NGINX_SERVER_ROUTES=server-a=122.233.30.4:8080,server-b=122.233.30.114:8080' \
+  <<<"${frontend_nginx_env}"
+if grep -Fq 'TEST_AGENT_NGINX_TERMINAL_ROUTES=' <<<"${frontend_nginx_env}"; then
+  echo "Complete package unexpectedly retained the legacy terminal route key" >&2
   exit 1
 fi
 

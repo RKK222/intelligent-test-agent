@@ -178,6 +178,27 @@ validate_node_archive "${NODE_114}" test-agent-two-backend-122.233.30.114 backen
 validate_node_archive "${NODE_114}" test-agent-two-backend-122.233.30.114 docker.env
 validate_node_archive "${NODE_2}" test-agent-two-backend-122.233.30.2 nginx.env
 
+# 旧前端节点包可能仍只包含终端路由键。封装新交付包时在临时副本中完成一次性迁移，
+# 不修改源敏感包，也不把任何路由值或其它 env 内容打印到日志。
+normalize_frontend_server_routes() {
+  local nginx_env="$1"
+  local server_route_count legacy_route_count migrated
+  server_route_count="$(grep -Ec '^TEST_AGENT_NGINX_SERVER_ROUTES=' "${nginx_env}" || true)"
+  legacy_route_count="$(grep -Ec '^TEST_AGENT_NGINX_TERMINAL_ROUTES=' "${nginx_env}" || true)"
+  if [[ "${server_route_count}" -eq 1 && "${legacy_route_count}" -eq 0 ]]; then
+    return 0
+  fi
+  if [[ "${server_route_count}" -ne 0 || "${legacy_route_count}" -ne 1 ]]; then
+    echo "Frontend nginx.env must contain exactly one server route key (legacy or current)" >&2
+    exit 1
+  fi
+  migrated="$(mktemp "${nginx_env}.new.XXXXXX")"
+  sed 's/^TEST_AGENT_NGINX_TERMINAL_ROUTES=/TEST_AGENT_NGINX_SERVER_ROUTES=/' \
+    "${nginx_env}" >"${migrated}"
+  chmod --reference="${nginx_env}" "${migrated}" 2>/dev/null || chmod 0600 "${migrated}"
+  mv -f "${migrated}" "${nginx_env}"
+}
+
 BUNDLE_ROOT="${TMP_ROOT}/${BUNDLE_NAME}"
 mkdir -p "${BUNDLE_ROOT}/nodes" "${OUTPUT_DIR}"
 install -m 0644 "${SCRIPT_DIR}/MULTI-BACKEND.md" "${BUNDLE_ROOT}/START-HERE.md"
@@ -201,6 +222,9 @@ repack_node() {
   local target="${BUNDLE_ROOT}/nodes/$(basename "${source}")"
   mkdir -p "${node_root}"
   tar -C "${node_root}" -xzf "${source}"
+  if [[ "${node_dir}" == "test-agent-two-backend-122.233.30.2" ]]; then
+    normalize_frontend_server_routes "${node_root}/${node_dir}/config/nginx.env"
+  fi
   install -m 0755 "${SCRIPT_DIR}/deploy-multi-backend-node.sh" \
     "${node_root}/${node_dir}/deploy-multi-backend-node.sh"
   install -m 0644 "${SCRIPT_DIR}/MULTI-BACKEND.md" \
