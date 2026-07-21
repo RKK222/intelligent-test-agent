@@ -22,6 +22,7 @@ export const router = createRouter({
       name: "login",
       component: () => import("./views/LoginView.vue"),
     },
+
     {
       path: "/",
       name: "workbench",
@@ -36,7 +37,7 @@ export const router = createRouter({
     {
       path: "/:pathMatch(.*)*",
       name: "not-found",
-      redirect: "/",
+      component: () => import("./views/NotFoundView.vue"),
     },
   ],
 });
@@ -83,6 +84,10 @@ router.beforeEach(async (to, _from) => {
       jumpAam(window.location.href, AAM_BASE_URL);
       return false;
     }
+    return true;
+  }
+
+  if (to.name === "not-found") {
     return true;
   }
 
