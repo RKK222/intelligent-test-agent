@@ -18,7 +18,7 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
-      path: "/login",
+      path: "/985211",
       name: "login",
       component: () => import("./views/LoginView.vue"),
     },
@@ -60,7 +60,7 @@ export function resolveLoginRedirect(rawRedirect: unknown): string {
     return "/";
   }
 
-  if (target.origin !== LOGIN_REDIRECT_BASE_URL || target.pathname === "/login") {
+  if (target.origin !== LOGIN_REDIRECT_BASE_URL || target.pathname === "/985211") {
     return "/";
   }
 
@@ -77,6 +77,12 @@ function isKnownLoginRedirectPath(pathname: string): boolean {
 
 router.beforeEach(async (to, _from) => {
   if (to.name === "login") {
+    // 登录页仅在本地开发环境可用；非 localhost 环境下一律走 AAM 统一认证，
+    // 避免任何不走 AAM 的进入方式（包括主动输入 URL）进入登录页。
+    if (!IS_LOCAL_ENV) {
+      jumpAam(window.location.href, AAM_BASE_URL);
+      return false;
+    }
     return true;
   }
 
@@ -85,7 +91,7 @@ router.beforeEach(async (to, _from) => {
   const unifiedAuthId = to.query.userId;
   const urlToken = to.query.token;
   if (unifiedAuthId && typeof unifiedAuthId === "string" && urlToken && typeof urlToken === "string") {
-    const { token: _, userId: __, ...restQuery } = to.query;
+    const { token: _, userId: __, SSIAuth: ___, SSISign: ____, ...restQuery } = to.query;
     try {
       const baseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
       const response = await fetch(`${baseUrl}/api/auth/login-by-unified-auth`, {
@@ -114,7 +120,7 @@ router.beforeEach(async (to, _from) => {
   const token = sessionStorage.getItem(TOKEN_KEY);
   if (!token) {
     if (IS_LOCAL_ENV) {
-      return { name: "login", replace: true };
+      return { path: "/985211", replace: true };
     }
     jumpAam(window.location.href, AAM_BASE_URL);
     return false;

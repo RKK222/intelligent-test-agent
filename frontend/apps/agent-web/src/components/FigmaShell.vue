@@ -1987,6 +1987,10 @@ function submitJoinApp() {
               <ShieldCheck class="figma-user-menu-icon" />
               <span class="figma-user-menu-role-text" :title="userRoleText">{{ userRoleText }}</span>
             </div>
+            <div class="figma-user-menu-summary">
+              <UserRound class="figma-user-menu-icon" />
+              <span class="figma-user-menu-name">{{ userName }}</span>
+            </div>
             <div
               class="figma-user-menu-service"
               :class="`figma-user-menu-service--${opencodeServiceDisplay.tone}`"
@@ -1996,11 +2000,7 @@ function submitJoinApp() {
               <span class="figma-user-menu-service-dot" aria-hidden="true" />
               <span class="figma-user-menu-service-text" :title="opencodeServiceDisplay.text">{{ opencodeServiceDisplay.text }}</span>
             </div>
-            <div class="figma-user-menu-summary">
-              <UserRound class="figma-user-menu-icon" />
-              <span class="figma-user-menu-name">{{ userName }}</span>
-            </div>
-            <button type="button" class="figma-user-menu-item" role="menuitem" @mousedown.prevent="logout">
+            <button v-if="false" type="button" class="figma-user-menu-item" role="menuitem" @mousedown.prevent="logout">
               <LogOut class="figma-user-menu-icon" />
               <span>退出登录</span>
             </button>
