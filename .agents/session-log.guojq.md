@@ -42,6 +42,24 @@
 - 前端工具注册更新完成
 - 工具目录结构与用户期望一致
 
+## 2026-07-22 修复：后端过滤导致 tools 目录不显示
+
+### Why
+用户反馈公共级目录下没有显示 `tools` 目录。经排查，后端 `AgentConfigApplicationService` 的 `workspaceAgentDisplayPath` 方法只返回 `opencode.jsonc`、`agents/` 和 `skills/` 的路径，`tools/` 被过滤掉了。
+
+### What
+1. **修改** [AgentConfigApplicationService.java](file:///d:/workspace/intelligent-test-agent/backend/test-agent-workspace-management/src/main/java/com/enterprise/testagent/workspace/AgentConfigApplicationService.java)：
+   - `workspaceAgentDisplayPath`: 新增 `display.startsWith("tools/")` 条件
+   - `uploadWorkspaceAgentFile`: 错误消息更新为包含 `tools`
+
+2. **修改** [WorkspaceFileWebSocketHandler.java](file:///d:/workspace/intelligent-test-agent/backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/WorkspaceFileWebSocketHandler.java)：
+   - `protectedConfigPath`: 新增 `.opencode/tools` 和 `.opencode/tools/` 路径保护
+   - `requireWorkspaceWrite`: 错误消息更新为包含 `Tools`
+
+### Result
+- 后端编译成功
+- `tools` 目录现在会在公共级和工作空间级 Agent 配置中显示
+
 ## 2026-07-22 调整：删除错误创建的 agents/tools/opencode.md
 
 ### Why
@@ -49,3 +67,48 @@
 
 ### Result
 - 清理了错误的文件结构，保持配置目录整洁。
+
+## 2026-07-22 修复：Windows 软链接权限问题
+
+### Why
+用户在 Windows 上点击"更新公共配置"时，由于权限限制无法创建软链接，报错"切换当前用户 TestAgent 公共配置软链接失败；当前平台必须支持受管软链接，不能降级复制"。
+
+### What
+修改 [OpencodeProcessConfigLinkService.java](file:///d:/workspace/intelligent-test-agent/backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/process/OpencodeProcessConfigLinkService.java)：
+- `switchLink`: 当软链接创建失败时（`UnsupportedOperationException`、`SecurityException`、`IOException`），自动降级为目录复制方案
+- 新增 `copyDirectory`: 删除目标目录后，递归复制源目录内容到目标目录
+- `rejectUnmanagedTarget`: 允许目标路径为普通目录（支持复制模式）
+
+### How
+1. 优先尝试创建软链接
+2. 失败时自动降级为目录复制
+3. 复制前先删除目标目录，再递归复制所有文件
+
+### Result
+- 后端编译成功
+- Windows 上即使没有软链接权限，也能正常更新公共配置
+
+## 2026-07-22 提交公共级 tools 目录到配置仓库
+
+### Why
+用户在前端公共级 Agent 配置中创建了 `tools/db-operation.ts`，但刷新后 `tools` 目录消失。根本原因是该目录未提交到公共配置 Git 仓库，前端只展示已跟踪的文件。
+
+### What
+1. **确认实际公共级 worktree 路径**：
+   `d:\workspace\intelligent-test-agent\.tmp\data\agent-opencode\.configdev\public-usr_test_superadmin20\opencode`
+   - 之前日志中引用的 `backend/${SYS_DATA_ROOT_DIR}/agent-opencode/.config/opencode/tools/http-call.ts` 路径因包含未解析的变量，实际不存在；已清理对应的错误文件/目录记录。
+2. **提交并推送 `tools/` 目录**：
+   - 在 `public-usr_test_superadmin20` worktree 中执行 `git add tools/`
+   - 提交信息："新增公共级 tools 目录及 db-operation 工具"
+   - 推送到 `origin public-usr_test_superadmin20`（Gitee）
+3. **清理主仓库错误路径**：删除 `backend/${SYS_DATA_ROOT_DIR}/agent-opencode/.config`（含未解析变量的无效路径）。
+
+### How
+- 公共级配置仓库：`git@gitee.com:huangzhenren/opencodeconfig.git`
+- 提交者：`guojq <731115882@qq.com>`
+- 提交后需在前端点击"更新公共配置"，将远端变更拉取到本地运行副本。
+
+### Result
+- `tools/db-operation.ts` 已成功推送到公共配置仓库
+- 主仓库待提交：`.agents/session-log.guojq.md` 更新、`backend/${SYS_DATA_ROOT_DIR}/agent-opencode/.config` 删除
+- 前端刷新后应能稳定显示 `tools` 目录
