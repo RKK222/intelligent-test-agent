@@ -375,8 +375,14 @@ class AgentConfigApplicationServiceTest {
                 false,
                 ADMIN,
                 "trace_update"))
-                .isInstanceOf(PlatformException.class)
-                .hasMessageContaining("Git 工作树存在未提交变更");
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.getMessage())
+                            .contains("公共 Agent 服务器共享运行副本 存在未提交变更")
+                            .contains(root.resolve(".config").toString());
+                    assertThat(exception.details())
+                            .containsEntry("repositoryKind", "SHARED_RUNTIME")
+                            .containsEntry("path", root.resolve(".config").toString());
+                });
         assertThat(git.resetCommit).isNull();
         verifyNoInteractions(coordinator);
     }
@@ -498,8 +504,16 @@ class AgentConfigApplicationServiceTest {
                 false,
                 ADMIN,
                 "trace_pull_dirty_personal"))
-                .isInstanceOf(PlatformException.class)
-                .hasMessageContaining("Git 工作树存在未提交变更");
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.getMessage())
+                            .contains("当前管理员公共 Agent 个人 worktree 存在未提交变更")
+                            .contains("opencode/agents/review.md")
+                            .contains(personalRoot.toString());
+                    assertThat(exception.details())
+                            .containsEntry("repositoryKind", "PERSONAL_WORKTREE")
+                            .containsEntry("path", personalRoot.toString())
+                            .containsEntry("discardLocalChangesAllowed", true);
+                });
 
         assertThat(git.pulledBranch).isNull();
         assertThat(git.fetchCallCount).isZero();
@@ -512,7 +526,7 @@ class AgentConfigApplicationServiceTest {
         Files.writeString(root.resolve(".config/opencode/config.json"), "{}");
         RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
         git.worktreeClean = false;
-        git.stagedAfterAdd = "M opencode/agents/review.md";
+        git.stagedAfterAdd = "M  opencode/agents/review.md";
         RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
         AgentConfigApplicationService service = service(
                 Map.of(
@@ -629,7 +643,7 @@ class AgentConfigApplicationServiceTest {
         Files.writeString(root.resolve(".config/opencode/config.json"), "{}");
         RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
         git.worktreeClean = false;
-        git.stagedAfterAdd = "M opencode/agents/review.md";
+        git.stagedAfterAdd = "M  opencode/agents/review.md";
         AgentConfigApplicationService service = service(
                 Map.of(
                         "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
@@ -661,7 +675,7 @@ class AgentConfigApplicationServiceTest {
         Files.writeString(root.resolve(".config/opencode/agents/review.md"), "local");
         RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
         git.worktreeClean = false;
-        git.stagedAfterAdd = "M opencode/agents/review.md";
+        git.stagedAfterAdd = "M  opencode/agents/review.md";
         git.failMergeWithConflict = true;
         git.conflictFiles = List.of("opencode/agents/review.md");
         AgentConfigApplicationService service = service(
@@ -1087,6 +1101,47 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
+    void publicDiffReportsCommittedTreeThatStillNeedsPublishingAfterPageReload() throws Exception {
+        Path sharedRoot = root.resolve(".config");
+        Path personalRoot = root.resolve(".configdev/public-usr_admin");
+        Files.createDirectories(sharedRoot.resolve(".git"));
+        Files.createDirectories(personalRoot.resolve(".git"));
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.stagedAfterAdd = "";
+        git.headByRoot.put(sharedRoot, "shared_head");
+        git.headByRoot.put(personalRoot, "personal_head");
+        git.resolvedCommitByRootAndRef.put(personalRoot + "\npersonal_head^{tree}", "personal_tree");
+        git.resolvedCommitByRootAndRef.put(personalRoot + "\nshared_head^{tree}", "shared_tree");
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_public_pending",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-1",
+                "public-usr_admin",
+                "public-usr_admin",
+                personalRoot.toString(),
+                ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW));
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", sharedRoot.toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                git,
+                new RecordingBroadcastPublisher(),
+                Optional.empty());
+
+        AgentConfigResponses.AgentConfigDiffResponse diff = service.publicDiff("agw_public_pending", ADMIN);
+
+        assertThat(diff.files()).isEmpty();
+        assertThat(diff.publishPending()).isTrue();
+    }
+
+    @Test
     void publicDiscardUsesOwnedPublicWorktreePaths() {
         InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
         agentConfigs.saveWorktree(new AgentConfigWorktree(
@@ -1238,7 +1293,8 @@ class AgentConfigApplicationServiceTest {
                 git,
                 publisher);
         PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
-        when(coordinator.prepare("main", "commit_base", "commit_base", "linux-1", ADMIN.value(), "trace_publish"))
+        git.publicationCommit = "commit_publish";
+        when(coordinator.prepare("main", "commit_publish", "commit_base", "linux-1", ADMIN.value(), "trace_publish"))
                 .thenReturn("acr_publish");
         service.setPublicConfigRolloutCoordinator(coordinator);
 
@@ -1251,14 +1307,18 @@ class AgentConfigApplicationServiceTest {
         assertThat(response.status()).isEqualTo("SUCCEEDED");
         assertThat(git.mergedRepoRoot).isEqualTo(root.resolve(".configdev/review-agent"));
         assertThat(git.mergedBranch).isEqualTo("origin/main");
+        assertThat(git.linearCommitSource).isEqualTo("commit_base");
+        assertThat(git.linearCommitParent).isEqualTo("commit_base");
+        assertThat(git.linearCommitIdentity.email()).isEqualTo("AUTH_ADMIN@mails.icbc");
         assertThat(git.pushedBranch).isEqualTo("review-agent:main");
-        assertThat(git.resetCommit).isEqualTo("commit_base");
+        assertThat(git.resetCommitsByRoot).containsEntry(root.resolve(".configdev/review-agent"), "commit_publish");
+        assertThat(git.resetCommitsByRoot).containsEntry(root.resolve(".config"), "commit_publish");
         assertThat(agentConfigs.findWorktree("agw_public")).get().extracting(AgentConfigWorktree::status)
                 .isEqualTo(AgentConfigWorktreeStatus.ACTIVE);
         assertThat(publisher.events).hasSize(1);
         assertThat(publisher.events.get(0).payload()).containsEntry("rolloutId", "acr_publish");
-        verify(coordinator).prepare("main", "commit_base", "commit_base", "linux-1", ADMIN.value(), "trace_publish");
-        verify(coordinator).activate("acr_publish", "commit_base");
+        verify(coordinator).prepare("main", "commit_publish", "commit_base", "linux-1", ADMIN.value(), "trace_publish");
+        verify(coordinator).activate("acr_publish", "commit_publish");
         verify(coordinator, never()).claimPendingSync("linux-1");
     }
 
@@ -1856,13 +1916,20 @@ class AgentConfigApplicationServiceTest {
         private int originRefreshOrder;
         private int fetchOrder;
         private String resetCommit;
+        private final Map<Path, String> resetCommitsByRoot = new LinkedHashMap<>();
         private String pulledBranch;
         private int fetchCallCount;
         // 用于验证 update-and-push：模拟 stageAll 之后 porcelain 状态
-        private String stagedAfterAdd = "M opencode/agents/review.md";
+        private String stagedAfterAdd = "M  opencode/agents/review.md";
         // 模拟当前 HEAD；commit 后会推进到下一个 commit id
         private String currentHead = "commit_base";
+        private final Map<Path, String> headByRoot = new LinkedHashMap<>();
         private String remoteCommit = "commit_base";
+        private final Map<String, String> resolvedCommitByRootAndRef = new LinkedHashMap<>();
+        private String publicationCommit = "commit_base";
+        private String linearCommitSource;
+        private String linearCommitParent;
+        private GitCommitIdentity linearCommitIdentity;
         private final List<String> headHistory = new ArrayList<>();
         private int stagedAllCallCount;
         private String lastCommitMessage;
@@ -1916,12 +1983,25 @@ class AgentConfigApplicationServiceTest {
 
         @Override
         public String headCommit(Path repoRoot) {
-            return currentHead;
+            return headByRoot.getOrDefault(repoRoot, currentHead);
         }
 
         @Override
         public String resolveCommit(Path repoRoot, String ref) {
-            return remoteCommit;
+            return resolvedCommitByRootAndRef.getOrDefault(repoRoot + "\n" + ref, remoteCommit);
+        }
+
+        @Override
+        public String createLinearCommitFromTree(
+                Path repoRoot,
+                String sourceCommit,
+                String parentCommit,
+                String message,
+                GitCommitIdentity identity) {
+            this.linearCommitSource = sourceCommit;
+            this.linearCommitParent = parentCommit;
+            this.linearCommitIdentity = identity;
+            return publicationCommit;
         }
 
         @Override
@@ -1977,6 +2057,7 @@ class AgentConfigApplicationServiceTest {
         @Override
         public void resetHardToCommit(Path repoRoot, String commitHash) {
             this.resetCommit = commitHash;
+            this.resetCommitsByRoot.put(repoRoot, commitHash);
         }
 
         @Override

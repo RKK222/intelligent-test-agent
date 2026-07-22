@@ -110,7 +110,13 @@ public final class AgentConfigResponses {
             String patch) {
     }
 
-    public record AgentConfigDiffResponse(List<AgentConfigDiffFileResponse> files) {
+    public record AgentConfigDiffResponse(
+            List<AgentConfigDiffFileResponse> files,
+            boolean publishPending) {
+
+        public AgentConfigDiffResponse(List<AgentConfigDiffFileResponse> files) {
+            this(files, false);
+        }
     }
 
     public record AgentConfigOperationResponse(

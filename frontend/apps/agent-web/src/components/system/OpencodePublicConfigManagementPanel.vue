@@ -21,6 +21,7 @@ const branches = ref<string[]>([]);
 const selectedBranch = ref("");
 const targetRepository = ref<PublicAgentRepositoryStatus | null>(null);
 const initErrorMessage = ref("");
+const dirtyPullDiagnostics = ref<Record<string, { repositoryKind: string; path: string; files: string[] }>>({});
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 const canSubmitInitialize = computed(() => !!targetRepository.value && !!selectedBranch.value && !initializing.value && !branchesLoading.value);
@@ -36,6 +37,7 @@ async function refresh() {
   errorMessage.value = "";
   try {
     rows.value = await api.listPublicAgentRepositories();
+    dirtyPullDiagnostics.value = {};
   } catch (error) {
     errorMessage.value = formatError(error, "加载公共配置仓库状态失败");
   } finally {
@@ -104,8 +106,8 @@ async function pullRepository(repository: PublicAgentRepositoryStatus) {
 
 async function discardAndPullRepository(repository: PublicAgentRepositoryStatus) {
   const confirmed = window.confirm(
-    `将放弃服务器 ${repository.linuxServerId} 公共共享运行副本中的已跟踪文件修改后重新拉取。`
-      + "该操作不影响你的公共个人 worktree，也不会删除未跟踪文件。是否继续？"
+    `将放弃服务器 ${repository.linuxServerId} 上当前管理员个人公共 worktree和共享运行副本中检测到的已跟踪文件修改后重新拉取。`
+      + "其他管理员的个人 worktree不受影响，也不会删除未跟踪文件。是否继续？"
   );
   if (!confirmed) {
     return;
@@ -129,10 +131,26 @@ async function pullRepositoryWithDiscard(repository: PublicAgentRepositoryStatus
       discardLocalChanges
     );
     rows.value = rows.value.map((row) => (row.linuxServerId === updated.linuxServerId ? updated : row));
+    const { [updated.linuxServerId]: _removed, ...remainingDiagnostics } = dirtyPullDiagnostics.value;
+    dirtyPullDiagnostics.value = remainingDiagnostics;
     successMessage.value = `服务器 ${updated.linuxServerId} 公共配置仓库已拉取到最新`;
   } catch (error) {
     errorMessage.value = formatError(error, "拉取公共配置仓库失败");
-    // 拉取前校验发现共享副本变脏时，立即刷新服务器行，展示后端返回的具体文件路径和处理建议。
+    if (error instanceof BackendApiError && error.details.discardLocalChangesAllowed === true) {
+      dirtyPullDiagnostics.value = {
+        ...dirtyPullDiagnostics.value,
+        [repository.linuxServerId]: {
+          repositoryKind: typeof error.details.repositoryKind === "string"
+            ? error.details.repositoryKind
+            : "UNKNOWN",
+          path: typeof error.details.path === "string" ? error.details.path : "-",
+          files: Array.isArray(error.details.dirtyFiles)
+            ? error.details.dirtyFiles.filter((file): file is string => typeof file === "string")
+            : []
+        }
+      };
+    }
+    // 共享副本状态仍由列表接口刷新；个人 worktree 诊断保留本次异常返回的真实路径。
     try {
       rows.value = await api.listPublicAgentRepositories();
     } catch {
@@ -256,6 +274,15 @@ function newOperationId() {
               <td class="ta-opencode-config-mono">{{ shortHash(row.commitHash) }}</td>
               <td class="ta-opencode-config-message">
                 <div>{{ formatNullable(row.message) }}</div>
+                <small v-if="dirtyPullDiagnostics[row.linuxServerId]" class="ta-opencode-config-diagnostic">
+                  最近拉取检测到{{ dirtyPullDiagnostics[row.linuxServerId].repositoryKind === 'PERSONAL_WORKTREE'
+                    ? '当前管理员个人公共 worktree'
+                    : '公共配置仓库' }} 存在本地变更；路径：{{ dirtyPullDiagnostics[row.linuxServerId].path }}；文件：{{
+                    dirtyPullDiagnostics[row.linuxServerId].files.length > 0
+                      ? dirtyPullDiagnostics[row.linuxServerId].files.join('、')
+                      : '请在上述路径执行 git status --short'
+                  }}。
+                </small>
                 <small v-if="row.status === 'CONFLICT' && row.initialized" class="ta-opencode-config-diagnostic">
                   这是该服务器的共享运行副本，不是个人公共 worktree。请先按上述路径核对本机修改；确认无需保留后，可放弃已跟踪修改并重新拉取。
                 </small>
@@ -280,7 +307,7 @@ function newOperationId() {
                     拉取
                   </button>
                   <button
-                    v-if="row.status === 'CONFLICT' && row.initialized"
+                    v-if="(row.status === 'CONFLICT' && row.initialized) || dirtyPullDiagnostics[row.linuxServerId]"
                     type="button"
                     class="ta-opencode-config-btn is-danger"
                     :disabled="!row.currentBranch || pullingServerId !== null"

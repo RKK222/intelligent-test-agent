@@ -274,6 +274,46 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 从 sourceCommit 的最终文件树创建一个仅以 parentCommit 为父节点的线性提交。
+     *
+     * <p>公共配置个人分支可能长期复用，并残留企业 SCM 不认可的历史提交身份。发布时不能直接
+     * 推送整段个人分支历史；这里通过 commit-tree 只保留最终文件树，并由当前操作人生成一个
+     * 可审计的新提交。若文件树与远端父提交完全一致，则直接复用父提交。</p>
+     */
+    public String createLinearCommitFromTree(
+            Path repoRoot,
+            String sourceCommit,
+            String parentCommit,
+            String message,
+            GitCommitIdentity identity) {
+        Objects.requireNonNull(identity, "identity must not be null");
+        String normalizedMessage = Objects.requireNonNull(message, "message must not be null").trim();
+        if (normalizedMessage.isEmpty()) {
+            throw new IllegalArgumentException("message must not be blank");
+        }
+        String sourceTree = resolveCommit(repoRoot, sourceCommit + "^{tree}");
+        String parentTree = resolveCommit(repoRoot, parentCommit + "^{tree}");
+        if (sourceTree.equals(parentTree)) {
+            return parentCommit;
+        }
+        return executor.execute(
+                withCommitIdentity(
+                        List.of(
+                                "git",
+                                "-C",
+                                repoRoot.toString(),
+                                "commit-tree",
+                                sourceTree,
+                                "-p",
+                                parentCommit,
+                                "-m",
+                                normalizedMessage),
+                        identity),
+                null,
+                DEFAULT_TIMEOUT).stdoutText().trim();
+    }
+
+    /**
      * 判断 ancestor 是否已包含在 descendant 中；远端 push 回包不确定时用于确认实际结果。
      */
     public boolean isAncestor(Path repoRoot, String ancestor, String descendant) {

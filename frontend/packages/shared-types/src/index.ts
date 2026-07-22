@@ -257,6 +257,8 @@ export type AgentConfigDiffFile = {
 
 export type AgentConfigDiff = {
   files: AgentConfigDiffFile[];
+  /** 个人 worktree 已有本地提交，但尚未同步到公共共享版本。 */
+  publishPending?: boolean;
 };
 
 export type AgentConfigOperation = {

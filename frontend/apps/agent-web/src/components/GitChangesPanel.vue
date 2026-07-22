@@ -35,6 +35,7 @@ import type {
   WorkspaceGitConflictResolution
 } from "@test-agent/shared-types";
 import { Badge, Button } from "@test-agent/ui-kit";
+import { formatAgentConfigError } from "./agentConfigErrors";
 import { isWorkspaceAgentConfigPath } from "./workbench-utils";
 
 type WorkspacePanelDiffFile = RunDiffFile & { rawStatus?: string };
@@ -46,6 +47,10 @@ type PendingWorkspaceAgentPublish = {
   personalWorkspaceId: string;
   agentConfigWorkspaceId: string;
   files: string[];
+  diffFiles: WorkspaceAgentDiffFile[];
+};
+type PendingPublicAgentPublish = {
+  worktreeId: string;
   diffFiles: WorkspaceAgentDiffFile[];
 };
 
@@ -97,6 +102,30 @@ const effectiveAgentConfigWorkspaceId = computed(() =>
   props.agentConfigWorkspaceId === undefined ? props.workspaceId : (props.agentConfigWorkspaceId || undefined)
 );
 const pendingWorkspaceAgentPublish = ref<PendingWorkspaceAgentPublish | null>(null);
+const pendingPublicAgentPublish = ref<PendingPublicAgentPublish | null>(null);
+
+function currentPendingPublicAgentPublish(): PendingPublicAgentPublish | null {
+  const pending = pendingPublicAgentPublish.value;
+  const worktreeId = workbench.publicWorktree?.worktreeId;
+  return pending && worktreeId && pending.worktreeId === worktreeId ? pending : null;
+}
+
+function rememberPendingPublicAgentPublish(worktreeId: string, diffFiles: AgentPanelDiffFile[]) {
+  pendingPublicAgentPublish.value = {
+    worktreeId,
+    diffFiles: diffFiles.map((file) => ({
+      path: file.path,
+      status: file.status,
+      staged: true,
+      patch: file.patch,
+      pendingPublish: true
+    }))
+  };
+}
+
+function clearPendingPublicAgentPublish() {
+  pendingPublicAgentPublish.value = null;
+}
 
 /**
  * 应用 Agent 的“提交并推送”由两个 HTTP 请求组成。本地提交成功、远端发布失败时，
@@ -616,9 +645,19 @@ const activeHasBlockingConflicts = computed(() =>
 const activeWorkspaceAgentPublishPending = computed(() =>
   activeDiffScope.value === "AGENT_WORKSPACE" && currentPendingWorkspaceAgentPublish() !== null
 );
+const activePublicAgentPublishPending = computed(() =>
+  activeDiffScope.value === "PUBLIC" && currentPendingPublicAgentPublish() !== null
+);
+const activeAgentPublishPending = computed(() =>
+  activeWorkspaceAgentPublishPending.value || activePublicAgentPublishPending.value
+);
 
 function selectInitialDiffScope() {
   if (hasSelectedDiffScope.value) return;
+  if (currentPendingPublicAgentPublish()) {
+    activeDiffScope.value = "PUBLIC";
+    return;
+  }
   if (diffScopes.value.some((scope) => scope.key === activeDiffScope.value && scope.count > 0)) return;
   const firstChangedScope = diffScopes.value.find((scope) => scope.count > 0);
   if (firstChangedScope) activeDiffScope.value = firstChangedScope.key;
@@ -657,7 +696,10 @@ watch(
 watch(
   () => workbench.publicWorktree?.worktreeId,
   (_worktreeId, previousWorktreeId) => {
-    if (previousWorktreeId) resetCommitBatch();
+    if (previousWorktreeId) {
+      resetCommitBatch();
+      clearPendingPublicAgentPublish();
+    }
     // 公共个人 worktree 可能晚于面板挂载才准备完成，切换后重新统计公共 Agent 变更。
     void refreshChanges();
   }
@@ -694,6 +736,31 @@ function applyWorkspaceAgentDiffRefresh(files: AgentConfigDiffFile[]) {
     return;
   }
   workspaceAgentDiffs.value = [...files, ...pending.diffFiles];
+}
+
+/**
+ * 公共 Agent 本地提交成功但发布失败时保留重试入口。新后端会持久识别 clean worktree 中的待发布提交；
+ * 兼容旧后端时，仍使用本次页面会话内保存的文件快照。
+ */
+function applyPublicAgentDiffRefresh(files: AgentConfigDiffFile[], publishPending?: boolean) {
+  if (publishPending === false) {
+    clearPendingPublicAgentPublish();
+  } else if (publishPending === true && !currentPendingPublicAgentPublish()) {
+    const worktreeId = workbench.publicWorktree?.worktreeId;
+    if (worktreeId) rememberPendingPublicAgentPublish(worktreeId, []);
+  }
+  const pending = currentPendingPublicAgentPublish();
+  if (!pending) {
+    publicAgentDiffs.value = files;
+    return;
+  }
+  const refreshedPaths = new Set(files.map((file) => file.path));
+  if (pending.diffFiles.some((file) => refreshedPaths.has(file.path))) {
+    clearPendingPublicAgentPublish();
+    publicAgentDiffs.value = files;
+    return;
+  }
+  publicAgentDiffs.value = [...files, ...pending.diffFiles];
 }
 
 async function refreshChanges(options: { preserveError?: boolean } = {}) {
@@ -755,7 +822,10 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
       const pubDiff = await api.getPublicAgentDiff(workbench.publicWorktree?.worktreeId);
       if (token !== refreshChangesToken) return;
       // 工作区撤权/切换会同时刷新三类 Diff；兼容旧后端或空 mock 缺少 files，避免一次异常中断 Vue 空态渲染。
-      publicAgentDiffs.value = Array.isArray(pubDiff.files) ? pubDiff.files : [];
+      applyPublicAgentDiffRefresh(
+        Array.isArray(pubDiff.files) ? pubDiff.files : [],
+        pubDiff.publishPending
+      );
     } catch {
       if (token !== refreshChangesToken) return;
       publicAgentDiffs.value = [];
@@ -1329,7 +1399,10 @@ function agentRunDiffFile(file: AgentPanelDiffFile): WorkspacePanelDiffFile {
 
 // Commit changes
 async function handleCommit(push = false) {
-  if (committing.value || !hasWritableStagedChanges.value) return;
+  const retryingPublicAgentPublish = activeDiffScope.value === "PUBLIC"
+    ? currentPendingPublicAgentPublish()
+    : null;
+  if (committing.value || (!hasWritableStagedChanges.value && !retryingPublicAgentPublish)) return;
   const operationScope = activeDiffScope.value;
   const retryingWorkspaceAgentPublish = operationScope === "AGENT_WORKSPACE"
     ? currentPendingWorkspaceAgentPublish()
@@ -1355,7 +1428,7 @@ async function handleCommit(push = false) {
     return;
   }
   const msg = commitMessage.value.trim();
-  if (!msg) {
+  if (!msg && !retryingPublicAgentPublish) {
     errorMessage.value = "请输入提交说明";
     return;
   }
@@ -1390,6 +1463,7 @@ async function handleCommit(push = false) {
   let publishAttempted = false;
   let remotePublishCompleted = false;
   let localOnlySpecFileCount = 0;
+  let publicLocalCommitCompleted = false;
 
   try {
     if (workbench.useMockTestData) {
@@ -1505,20 +1579,34 @@ async function handleCommit(push = false) {
     const publicStagedCount = canWriteAgentScope("PUBLIC")
       ? publicAgentDiffs.value.filter((f) => f.staged).length
       : 0;
-    if (activeDiffScope.value === "PUBLIC" && publicStagedCount > 0) {
-      progressMessage.value = "正在提交公共 Agent 配置...";
+    if (activeDiffScope.value === "PUBLIC" && (publicStagedCount > 0 || retryingPublicAgentPublish)) {
       showCommitProgressDialog.value = true;
       commitStep.value = 2;
-      const opId = newOperationId();
-      await runAgentOperation(
-        () => api.commitPublicAgentConfig({ message: msg, worktreeId: workbench.publicWorktree?.worktreeId, operationId: opId }),
-        "提交公共 Agent 配置",
-        opId
-      );
+      if (!retryingPublicAgentPublish) {
+        progressMessage.value = "正在提交公共 Agent 配置...";
+        const opId = newOperationId();
+        await runAgentOperation(
+          () => api.commitPublicAgentConfig({ message: msg, worktreeId: workbench.publicWorktree?.worktreeId, operationId: opId }),
+          "提交公共 Agent 配置",
+          opId
+        );
+      }
+      publicLocalCommitCompleted = true;
       commitStep.value = 2;
       if (push) {
         publishAttempted = true;
-        progressMessage.value = "正在发布公共 Agent 配置...";
+        const publicWorktreeId = workbench.publicWorktree?.worktreeId;
+        if (!retryingPublicAgentPublish && publicWorktreeId) {
+          rememberPendingPublicAgentPublish(
+            publicWorktreeId,
+            publicAgentDiffs.value
+              .filter((file) => file.staged)
+              .map((file) => ({ ...file, scope: "PUBLIC" as const }))
+          );
+        }
+        progressMessage.value = retryingPublicAgentPublish
+          ? "正在重新发布已完成本地提交的公共 Agent 配置..."
+          : "正在发布公共 Agent 配置...";
         const pushOpId = newOperationId();
         await runAgentOperation(
           () => api.publishPublicAgentConfig(workbench.publicWorktree?.worktreeId, pushOpId),
@@ -1528,6 +1616,7 @@ async function handleCommit(push = false) {
         );
         commitStep.value = 5;
         remotePublishCompleted = true;
+        clearPendingPublicAgentPublish();
       }
     }
 
@@ -1623,8 +1712,13 @@ async function handleCommit(push = false) {
     // 失败响应已经给出终态；阻断延迟到达的 RUNNING WebSocket 事件把失败步骤重新改成转圈。
     publishResultConfirmed.value = true;
     progressMessage.value = "";
-    const publishError = errorMessageFor(error, "提交失败");
-    errorMessage.value = publishError;
+    const publishError = errorMessageFor(
+      error,
+      operationScope === "PUBLIC" && publishAttempted ? "远端发布失败" : "提交失败"
+    );
+    errorMessage.value = operationScope === "PUBLIC" && publicLocalCommitCompleted && publishAttempted
+      ? `公共 Agent 个人 worktree 已完成本地提交，但远端公共仓库及其他服务器尚未更新。${publishError}`
+      : publishError;
     if (publishAttempted) {
       // 错误弹框先立即结束；后台刷新用于补充冲突状态，应用 Agent 的待重试快照会跨轮询保留。
       void refreshChanges({ preserveError: true });
@@ -1689,7 +1783,7 @@ function newOperationId() {
 }
 
 function errorMessageFor(error: unknown, fallback: string): string {
-  if (error instanceof BackendApiError) return `${fallback}：${error.message}`;
+  if (error instanceof BackendApiError) return formatAgentConfigError(error, fallback);
   if (error instanceof Error) return `${fallback}：${error.message}`;
   return fallback;
 }
@@ -2180,8 +2274,10 @@ defineExpose({
           <!-- 2b. Agent/Skill scope -->
           <div v-else class="git-sub-section">
             <div class="git-sub-content px-2 py-0.5 space-y-0.5">
-              <div v-if="activeWorkspaceAgentPublishPending" class="git-conflict-note">
-                本地提交已完成，远端推送失败；文件会保留在此处，点击“重新推送”继续发布。
+              <div v-if="activeAgentPublishPending" class="git-conflict-note">
+                {{ activeDiffScope === 'PUBLIC'
+                  ? '个人 worktree 中存在已完成的本地提交，远端公共仓库或共享运行副本尚未同步；点击“重新推送”继续发布。'
+                  : '本地提交已完成，远端推送失败；文件会保留在此处，点击“重新推送”继续发布。' }}
               </div>
               <div v-if="activeAgentStaged.length === 0" class="git-empty-text">无暂存文件</div>
               <div
@@ -2248,29 +2344,29 @@ defineExpose({
         <button
           type="button"
           class="git-action-btn btn-commit flex-1"
-          :title="activeWorkspaceAgentPublishPending
-            ? '应用 Agent 已完成本地提交，请重新推送'
+          :title="activeAgentPublishPending
+            ? `${activeDiffScope === 'PUBLIC' ? '公共' : '应用'} Agent 已完成本地提交，请重新推送`
             : (activeHasBlockingConflicts ? 'Git 存在未解决冲突，解决全部冲突后才能提交' : '提交已暂存变更')"
-          :disabled="committing || activeHasBlockingConflicts || activeWorkspaceAgentPublishPending || !hasWritableStagedChanges || !commitMessage.trim()"
+          :disabled="committing || activeHasBlockingConflicts || activeAgentPublishPending || !hasWritableStagedChanges || !commitMessage.trim()"
           @click="handleCommit(false)"
         >
           <FolderGit2 class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
           <span>提交</span>
         </button>
         <button
-          v-if="hasPublishableStagedChanges"
+          v-if="hasPublishableStagedChanges || activeAgentPublishPending"
           type="button"
           class="git-action-btn btn-push flex-1"
-          :title="activeWorkspaceAgentPublishPending
-            ? '重新推送已完成本地提交的应用 Agent 文件'
+          :title="activeAgentPublishPending
+            ? `重新推送已完成本地提交的${activeDiffScope === 'PUBLIC' ? '公共' : '应用'} Agent 文件`
             : activeHasBlockingConflicts
             ? 'Git 存在未解决冲突，解决全部冲突后才能提交并推送'
             : (!hasPublishableStagedChanges ? '当前暂存内容仅允许本地提交' : '提交并推送可发布变更')"
-          :disabled="committing || activeHasBlockingConflicts || !hasPublishableStagedChanges || !commitMessage.trim()"
+          :disabled="committing || activeHasBlockingConflicts || (!hasPublishableStagedChanges && !activeAgentPublishPending) || (!activeAgentPublishPending && !commitMessage.trim())"
           @click="handleCommit(true)"
         >
           <Upload class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
-          <span>{{ activeWorkspaceAgentPublishPending ? '重新推送' : '提交并推送' }}</span>
+          <span>{{ activeAgentPublishPending ? '重新推送' : '提交并推送' }}</span>
         </button>
       </div>
     </div>

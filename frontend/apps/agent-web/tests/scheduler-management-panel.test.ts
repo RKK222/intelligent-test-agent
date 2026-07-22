@@ -2,7 +2,7 @@ import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/vue";
 import type { Component } from "vue";
-import type { BackendApiClient } from "@test-agent/backend-api";
+import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
 import type {
   CurrentUser,
   OpencodeRuntimeManagementOverview,
@@ -202,7 +202,56 @@ describe("scheduler management panel", () => {
       expect.stringMatching(/^aco_/),
       true
     ));
-    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("不影响你的公共个人 worktree"));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("当前管理员个人公共 worktree和共享运行副本"));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("其他管理员的个人 worktree不受影响"));
+    view.queryClient.clear();
+  });
+
+  it("identifies a dirty current-admin public worktree even when the shared repository is clean", async () => {
+    const initializedPublicRepository = {
+      ...publicRepository,
+      status: "READY",
+      initialized: true,
+      currentBranch: "main",
+      commitHash: "abc1234",
+      message: "已初始化"
+    };
+    const personalPath = "/data/testagent/data/agent-opencode/.configdev/public-usr_admin";
+    const pull = vi.fn()
+      .mockRejectedValueOnce(new BackendApiError(409, {
+        success: false,
+        code: "CONFLICT",
+        message: `当前管理员公共 Agent 个人 worktree 存在未提交变更：opencode/agents/review.md；仓库路径：${personalPath}`,
+        traceId: "trace_dirty_personal",
+        retryable: false,
+        details: {
+          path: personalPath,
+          repositoryKind: "PERSONAL_WORKTREE",
+          dirtyFiles: ["opencode/agents/review.md"],
+          discardLocalChangesAllowed: true
+        }
+      }))
+      .mockResolvedValueOnce(initializedPublicRepository);
+    const backendApi = api({
+      listPublicAgentRepositories: vi.fn().mockResolvedValue([initializedPublicRepository]),
+      pullPublicAgentRepository: pull
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const view = renderWithApi(SystemManagementPanel, backendApi);
+
+    await fireEvent.click(view.getByText("配置管理", { selector: ".ta-system-menu-text" }));
+    await fireEvent.click(await view.findByRole("button", { name: "拉取" }));
+
+    expect((await view.findAllByText(new RegExp(personalPath.replaceAll("/", "\\/")))).length).toBeGreaterThan(0);
+    expect(await view.findByText(/当前管理员个人公共 worktree 存在本地变更/)).toBeTruthy();
+    await fireEvent.click(view.getByRole("button", { name: "放弃本地变更并拉取" }));
+
+    await waitFor(() => expect(pull).toHaveBeenLastCalledWith(
+      "linux-1",
+      "main",
+      expect.stringMatching(/^aco_/),
+      true
+    ));
     view.queryClient.clear();
   });
 });
