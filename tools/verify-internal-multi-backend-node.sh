@@ -195,6 +195,14 @@ verify_worker_log_format() {
 verify_worker_log_format \
   'event=manager_config_update status=applied traceId=fixture previousMaxProcesses=20 appliedMaxProcesses=8 requestedMaxProcesses=8'
 verify_worker_log_format 'manager config update applied'
+skip_output="$(PATH="${VERIFY_BIN}:${PATH}" \
+  TEST_AGENT_WORKER_LOG_LINE='event=manager_config_update status=applied' \
+  bash "${DEPLOY_SCRIPT}" backend \
+    --install-root "${VERIFY_INSTALL_ROOT}" \
+    --backend-host 122.233.30.4 \
+    --skip-peer-check \
+    --verify-only 2>&1)"
+grep -Fq 'peer=deferred' <<<"${skip_output}"
 grep -Fq "grep -E 'event=manager_config_update status=applied|manager config update applied'" \
   "${ROOT_DIR}/deploy/internal/deploy-internal-release.sh"
 

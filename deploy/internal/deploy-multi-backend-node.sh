@@ -10,6 +10,7 @@ INSTALL_ROOT="/data/testagent"
 BACKEND_HOST=""
 PEER_HOST=""
 MODE="deploy"
+SKIP_PEER_CHECK=0
 
 usage() {
   cat <<'USAGE'
@@ -24,6 +25,7 @@ Options:
   --install-root <path>     Installation root. Default: /data/testagent.
   --backend-host <host>     Backend role only; defaults to backend.env.
   --peer-host <host>        Backend health-check peer. Defaults to the other seed node.
+  --skip-peer-check         Backend role only; defer peer check for the first stopped-cluster node.
   --validate-only           Validate configuration, release checksum and embedded RSA only.
   --verify-only             Verify an already deployed node without changing it.
   -h, --help                Show this help.
@@ -60,6 +62,10 @@ while [[ $# -gt 0 ]]; do
     --peer-host)
       PEER_HOST="$2"
       shift 2
+      ;;
+    --skip-peer-check)
+      SKIP_PEER_CHECK=1
+      shift
       ;;
     --validate-only)
       [[ "${MODE}" == "deploy" ]] || {
@@ -422,16 +428,19 @@ verify_backend() {
 
   validate_backend_config "${installed_config}"
   expected_server_id="$(server_id_from_host "${BACKEND_HOST}")"
-  peer_host="${PEER_HOST}"
-  if [[ -z "${peer_host}" ]]; then
-    peer_host="122.233.30.4"
-    [[ "${BACKEND_HOST}" == "122.233.30.4" ]] && peer_host="122.233.30.114"
+  peer_host="deferred"
+  if [[ "${SKIP_PEER_CHECK}" -eq 0 ]]; then
+    peer_host="${PEER_HOST}"
+    if [[ -z "${peer_host}" ]]; then
+      peer_host="122.233.30.4"
+      [[ "${BACKEND_HOST}" == "122.233.30.4" ]] && peer_host="122.233.30.114"
+    fi
+    require_backend_site_ip "${peer_host}" PEER_HOST
+    [[ "${peer_host}" != "${BACKEND_HOST}" ]] || {
+      echo "PEER_HOST must differ from BACKEND_HOST" >&2
+      exit 1
+    }
   fi
-  require_backend_site_ip "${peer_host}" PEER_HOST
-  [[ "${peer_host}" != "${BACKEND_HOST}" ]] || {
-    echo "PEER_HOST must differ from BACKEND_HOST" >&2
-    exit 1
-  }
 
   require_command curl
   require_command systemctl
@@ -441,7 +450,9 @@ verify_backend() {
   curl -fsS http://127.0.0.1:8080/actuator/health >/dev/null
   curl -fsS http://127.0.0.1:8080/actuator/health/readiness >/dev/null
   curl -fsS http://127.0.0.1:18080/xxl-job-admin/actuator/health/readiness >/dev/null
-  curl -fsS "http://${peer_host}:8080/actuator/health" >/dev/null
+  if [[ "${SKIP_PEER_CHECK}" -eq 0 ]]; then
+    curl -fsS "http://${peer_host}:8080/actuator/health" >/dev/null
+  fi
 
   require_file "${INSTALL_ROOT}/data/.serverid"
   require_file "${INSTALL_ROOT}/data/.serverhost"

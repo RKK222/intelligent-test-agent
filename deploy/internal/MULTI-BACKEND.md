@@ -452,6 +452,10 @@ cd /data/0709/test-agent-two-backend-complete
 bash deploy-backend-node.sh
 ```
 
+升级前应先停止 `.4`、`.114` 的旧 Java。`.4` 是固定首节点，入口会完整验证本机 Java、XXL Admin、
+worker、RSA 和身份文件，但把 peer 探测延后；随后 `.114` 会反查 `.4`，最后 `.2` 会同时检查两个
+Java 和两个 XXL Admin，因此不会再因首节点等待尚未启动的 peer 而产生 `verify_exit=1`。
+
 再在 `.114` 执行：
 
 ```bash
