@@ -729,3 +729,19 @@
   - 未改代码，无单测；仅文档与约定变更。提交前已回顾旧档近期条目，与本次约定变更无冲突。
 - Next:
   - None。
+
+### 2026-07-22 - 文件编辑器打开文件时读取中状态改为醒目动画效果
+
+- Why:
+  - 用户希望在文件编辑器加载/读取文件内容时，将单调的“正在读取文件…”纯文本状态替换为一个更醒目、高级和精致的动画效果，从而提升交互过渡的视觉质感。
+- What:
+  - 引入 `@test-agent/ui-kit` 中的点阵 `Spinner` 组件。
+  - 将 `AgentWorkbench.vue` 里的文件加载 `v-if="activeTab?.loadState === 'loading'"` 部分重构为卡片组件结构，使用毛玻璃效果背景 (`backdrop-blur-sm`)、浮层阴影 (`shadow-[0_12px_40px_-12px_rgba(0,0,0,0.12)]`)，并配以双层旋转/呼吸动画光环。
+  - 对加载标题文本应用了漂亮的蓝紫色渐变 (`bg-gradient-to-r from-indigo-600 to-purple-600`)，增设闪烁的辅助加载状态指示器。
+- How:
+  - 修改 `AgentWorkbench.vue` 导入声明，增加引入 `Spinner` 组件。
+  - 重新编排加载区域 HTML，结合 Tailwind 4 的 `animate-spin`、`animate-pulse` 等基础动画。
+  - 在 `<style scoped>` 底部新增 `@keyframes file-load-card-in` 动画与 `.animate-file-load-card` 动效类，确保卡片淡入及微缩放，实现更柔和流畅的转场体验。
+- Result:
+  - 成功完成修改，前端 Vitest 和生产 Vite 编译构建 (`corepack pnpm build`) 顺利通过。
+  - 未修改 API 契约、RunEvent 事件规范、DTO 模型、数据库表或后端 Java 代码，与已有系统功能无冲突。
