@@ -4,6 +4,7 @@ set -uo pipefail
 EXPECTED_HOST=''
 MINUTES=15
 BACKEND_ENV="${TEST_AGENT_DIAG_BACKEND_ENV:-/data/testagent/config/backend.env}"
+PS_BIN="${TEST_AGENT_DIAG_PS_BIN:-ps}"
 STATUS_MARKER='__TEST_AGENT_HTTP_STATUS__:'
 has_failure=0
 
@@ -87,7 +88,7 @@ secret_summary() {
     info "${key}=UNSET"
     return
   fi
-  digest="$(sha256_text "${value}")" || { fail '缺少 SHA-256 命令，无法安全生成配置摘要'; return; }
+  digest="$(sha256_text "${value}")" || critical '缺少可用的 SHA-256 实现，无法安全生成配置摘要'
   info "${key}=SET length=${#value} sha256=${digest}"
 }
 
@@ -127,10 +128,12 @@ property_value() {
 
 redact_stream() {
   sed -E \
+    -e 's/Authorization[[:space:]]*:[[:space:]]*Bearer[[:space:]]+[^,;[:space:]"}]+/Authorization=[REDACTED]/Ig' \
+    -e 's@(https?://[^[:space:]?"#]+|/[^[:space:]?"#]+)\?[^[:space:]"]*@\1?[REDACTED_QUERY]@g' \
+    -e 's@(https?://[^[:space:]?"#]+|/[^[:space:]?"#]+)#[^[:space:]"]*@\1#[REDACTED_FRAGMENT]@g' \
     -e 's@(((jdbc:)?[[:alpha:]][[:alnum:]+.-]*://)[^?[:space:]]+)\?[^[:space:]]+@\1?[REDACTED_QUERY]@g' \
     -e 's|((jdbc:)?[[:alpha:]][[:alnum:]+.-]*://)[^/@[:space:]]+@|\1[REDACTED_USERINFO]@|g' \
     -e 's/((ticket|cookie|token|password|secret|authorization|digest|api[_-]?key)[[:space:]]*[=:][[:space:]]*)[^,;[:space:]"}]+/\1[REDACTED]/Ig' \
-    -e 's/(Authorization:[[:space:]]*Bearer[[:space:]]+)[^,;[:space:]]+/\1[REDACTED]/Ig' \
     -e 's/("(ticket|cookie|token|password|secret|authorization|digest|api[_-]?key)"[[:space:]]*:[[:space:]]*")[^"]*/\1[REDACTED]/Ig'
 }
 
@@ -208,9 +211,19 @@ check_listener() {
   fi
 }
 
-for required_command in ip systemctl ss curl journalctl; do
+for required_command in ip systemctl ss curl journalctl grep sed awk cut sort tr; do
   command -v "${required_command}" >/dev/null 2>&1 || critical "缺少 ${required_command}，无法完成后台诊断"
 done
+command -v "${PS_BIN}" >/dev/null 2>&1 || critical '缺少 ps，无法完成后台诊断'
+if ! printf 'diagnostic-filter-probe\n' | grep -Eq '^diagnostic-filter-probe$'; then
+  critical 'grep 不可用，无法执行日志关键词过滤'
+fi
+if ! REDACTION_PROBE="$(printf 'Authorization: Bearer diagnostic-secret\n' | redact_stream)" || \
+  [[ "${REDACTION_PROBE}" != 'Authorization=[REDACTED]' ]]; then
+  critical 'sed 不可用，无法执行日志脱敏'
+fi
+SHA256_PROBE="$(sha256_text 'diagnostic-sha256-probe' 2>/dev/null)" || critical '缺少可用的 SHA-256 实现'
+[[ "${SHA256_PROBE}" =~ ^[0-9a-f]{16}$ ]] || critical '缺少可用的 SHA-256 实现'
 [[ -r "${BACKEND_ENV}" ]] || critical "backend.env 不存在或不可读: ${BACKEND_ENV}"
 
 if ip -4 -o addr show scope global | grep -Fq "${EXPECTED_HOST}/"; then
@@ -232,6 +245,9 @@ XXL_MYSQL_URL="$(sanitize_jdbc_url "$(env_value "${BACKEND_ENV}" TEST_AGENT_XXL_
 XXL_MYSQL_USERNAME="$(env_value "${BACKEND_ENV}" TEST_AGENT_XXL_JOB_MYSQL_USERNAME)"
 ADMIN_PORT="$(env_value "${BACKEND_ENV}" TEST_AGENT_XXL_JOB_ADMIN_PORT)"
 EXECUTOR_PORT="$(env_value "${BACKEND_ENV}" TEST_AGENT_XXL_JOB_EXECUTOR_PORT)"
+XXL_MYSQL_HOST_PORT="$(jdbc_host_port "${XXL_MYSQL_URL}" 3306)"
+XXL_MYSQL_HOST="${XXL_MYSQL_HOST_PORT%%$'\n'*}"
+XXL_MYSQL_PORT="${XXL_MYSQL_HOST_PORT##*$'\n'}"
 
 info "PROFILE=${PROFILE:-UNSET}"
 info "DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-UNSET}"
@@ -251,6 +267,10 @@ info "EXECUTOR_PORT=${EXECUTOR_PORT:-UNSET}"
 [[ "${XXL_ENABLED}" == 'true' ]] || fail 'XXL-JOB 未启用'
 [[ "${ADMIN_PORT}" == '18080' ]] || fail 'Admin 端口不是固定值 18080'
 [[ "${EXECUTOR_PORT}" == '9999' ]] || fail 'executor 端口不是固定值 9999'
+[[ "${REDIS_HOST}" == '122.233.30.20' && "${REDIS_PORT}" == '6379' ]] || \
+  fail '固定共享拓扑不一致：Redis 必须为 122.233.30.20:6379'
+[[ "${XXL_MYSQL_HOST}" == '122.233.30.148' && "${XXL_MYSQL_PORT}" == '3306' ]] || \
+  fail '固定共享拓扑不一致：XXL MySQL 必须为 122.233.30.148:3306'
 
 for secret_key in \
   TEST_AGENT_DB_PASSWORD \
@@ -286,6 +306,8 @@ ACTIVE_STATE="$(property_value "${SYSTEMD_OUTPUT}" ActiveState)"
 SUB_STATE="$(property_value "${SYSTEMD_OUTPUT}" SubState)"
 MAIN_PID="$(property_value "${SYSTEMD_OUTPUT}" MainPID)"
 ACTIVE_SINCE="$(property_value "${SYSTEMD_OUTPUT}" ActiveEnterTimestamp)"
+EXEC_START="$(property_value "${SYSTEMD_OUTPUT}" ExecStart)"
+ENVIRONMENT_FILES="$(property_value "${SYSTEMD_OUTPUT}" EnvironmentFiles)"
 info "SYSTEMD_LOAD_STATE=${LOAD_STATE:-UNSET}"
 info "SYSTEMD_ACTIVE_STATE=${ACTIVE_STATE:-UNSET}"
 info "SYSTEMD_SUB_STATE=${SUB_STATE:-UNSET}"
@@ -295,6 +317,31 @@ if [[ "${LOAD_STATE}" == 'loaded' && "${ACTIVE_STATE}" == 'active' && "${SUB_STA
   pass "systemd test-agent-backend is active/running with MainPID=${MAIN_PID}"
 else
   fail 'systemd test-agent-backend 未处于 loaded/active/running 或 MainPID 无效'
+fi
+if [[ "${EXEC_START}" == *'/data/testagent/dist/backend/test-agent-app.jar'* ]]; then
+  pass 'systemd ExecStart 指向固定后台 JAR'
+else
+  fail 'systemd ExecStart 未指向 /data/testagent/dist/backend/test-agent-app.jar'
+fi
+if [[ "${ENVIRONMENT_FILES}" == *'/data/testagent/config/backend.env'* ]]; then
+  pass 'systemd EnvironmentFiles 包含固定 backend.env'
+else
+  fail 'systemd EnvironmentFiles 未包含 /data/testagent/config/backend.env'
+fi
+
+if ! PS_OUTPUT="$("${PS_BIN}" -eo pid=,args= 2>&1)"; then
+  fail 'ps 无法读取 Java 进程状态'
+  PS_OUTPUT=''
+fi
+JAVA_PROCESS_COUNT="$(awk '$2 ~ /(^|\/)java$/ { count++ } END { print count + 0 }' <<<"${PS_OUTPUT}")"
+APP_PROCESS_COUNT="$(awk -v jar='/data/testagent/dist/backend/test-agent-app.jar' \
+  '$2 ~ /(^|\/)java$/ && index($0, jar) > 0 { count++ } END { print count + 0 }' <<<"${PS_OUTPUT}")"
+APP_PROCESS_PID="$(awk -v jar='/data/testagent/dist/backend/test-agent-app.jar' \
+  '$2 ~ /(^|\/)java$/ && index($0, jar) > 0 { print $1; exit }' <<<"${PS_OUTPUT}")"
+if [[ "${JAVA_PROCESS_COUNT}" == '1' && "${APP_PROCESS_COUNT}" == '1' && "${APP_PROCESS_PID}" == "${MAIN_PID}" ]]; then
+  pass "专用 Linux 仅有一个后台 Java，PID 与 MainPID=${MAIN_PID} 一致"
+else
+  fail "专用 Linux 上的 Java 进程数量不是 1，或后台 JAR PID 与 MainPID=${MAIN_PID:-UNSET} 不一致"
 fi
 
 if ! SS_OUTPUT="$(ss -ltnp 2>&1)"; then
@@ -308,9 +355,6 @@ check_listener 9999 'XXL executor 端口'
 probe_readiness '127.0.0.1:8080 readiness' 'http://127.0.0.1:8080/actuator/health/readiness'
 probe_readiness '127.0.0.1:18080 XXL Admin readiness' 'http://127.0.0.1:18080/xxl-job-admin/actuator/health/readiness'
 
-XXL_MYSQL_HOST_PORT="$(jdbc_host_port "${XXL_MYSQL_URL}" 3306)"
-XXL_MYSQL_HOST="${XXL_MYSQL_HOST_PORT%%$'\n'*}"
-XXL_MYSQL_PORT="${XXL_MYSQL_HOST_PORT##*$'\n'}"
 tcp_probe 'Redis' "${REDIS_HOST}" "${REDIS_PORT}"
 tcp_probe 'XXL MySQL' "${XXL_MYSQL_HOST}" "${XXL_MYSQL_PORT}"
 if [[ "${EXPECTED_HOST}" == '122.233.30.4' ]]; then
@@ -324,8 +368,17 @@ tcp_probe '对端 XXL executor' "${PEER_HOST}" 9999
 
 info "最近 ${MINUTES} 分钟 XXL-JOB/数据库/调度相关日志（已脱敏）"
 if RECENT_LOGS="$(journalctl -u test-agent-backend --since "${MINUTES} minutes ago" --no-pager -o short-iso 2>&1)"; then
-  grep -Ei 'xxl-job|XxlJob|Flyway|Hikari|MySQL|Admin.*readiness|ExecutorRegistryThread|registry error|Connection refused|SKIPPED_LOCK_HELD|schedule|trigger|handle' \
-    <<<"${RECENT_LOGS}" | redact_stream || true
+  FILTERED_LOGS="$(grep -Ei 'xxl-job|XxlJob|Flyway|Hikari|MySQL|Admin.*readiness|ExecutorRegistryThread|registry error|Connection refused|SKIPPED_LOCK_HELD|schedule|trigger|handle' \
+    <<<"${RECENT_LOGS}")"
+  filter_status=$?
+  case "${filter_status}" in
+    0)
+      REDACTED_LOGS="$(printf '%s\n' "${FILTERED_LOGS}" | redact_stream)" || critical '日志脱敏执行失败'
+      [[ -z "${REDACTED_LOGS}" ]] || printf '%s\n' "${REDACTED_LOGS}"
+      ;;
+    1) info '最近日志中没有命中诊断关键词' ;;
+    *) critical '日志关键词过滤执行失败' ;;
+  esac
 else
   fail 'journalctl 无法读取 test-agent-backend 日志'
 fi
