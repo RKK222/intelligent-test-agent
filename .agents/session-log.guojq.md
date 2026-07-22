@@ -11,7 +11,14 @@
    - [rpc-call.ts](file:///d:/workspace/intelligent-test-agent/backend/$%7BSYS_DATA_ROOT_DIR%7D/agent-opencode/.config/opencode/tools/rpc-call.ts) — RPC 接口调用工具
    - [package.json](file:///d:/workspace/intelligent-test-agent/backend/$%7BSYS_DATA_ROOT_DIR%7D/agent-opencode/.config/opencode/tools/package.json) — 依赖配置，包含 `@opencode-ai/mcp`
 
-2. 修改了前端 [tool-registry.ts](file:///d:/workspace/intelligent-test-agent/frontend/packages/agent-chat/src/opencode-like/state/tool-registry.ts)：
+2. 修改了前端 [AgentConfigPanel.vue](file:///d:/workspace/intelligent-test-agent/frontend/apps/agent-web/src/components/AgentConfigPanel.vue)，支持 `tools/` 目录：
+   - `visibleEntries`: 普通用户根目录显示 `tools` 目录
+   - `isWorkspaceAgentDiffPath`: 支持 `tools/` 路径
+   - `canCreateInDirectory`: 支持在 `tools/` 目录内创建文件
+   - `canDeleteEntry`: 支持删除 `tools/` 目录及其内容
+   - `canRenameEntry`: 支持重命名 `tools/` 下的文件
+
+3. 修改了前端 [tool-registry.ts](file:///d:/workspace/intelligent-test-agent/frontend/packages/agent-chat/src/opencode-like/state/tool-registry.ts)：
    - `ToolInfo.family` 联合类型新增 `"tool"` 分支
    - `getToolInfo` 函数新增 `tools/opencode`、`opencode_tool`、`opencode-tool` 工具名识别
 
@@ -24,6 +31,7 @@
 ### Result
 - tools 目录结构与用户期望一致（和 agents/、skills/、opencode.jsonc、node_modules/ 同级）
 - 工具文件使用 TypeScript 编写，符合 opencode MCP 工具定义规范
+- 前端 AgentConfigPanel 已更新，支持显示和操作 tools 目录
 - 无 API、事件、数据库、安全或兼容性变更
 
 ## 2026-07-22 调整：删除错误创建的 agents/tools/opencode.md

@@ -283,8 +283,7 @@ function visibleEntries(scope: Scope, path: string) {
   if (canWriteScope(scope) || path !== "") {
     return entries;
   }
-  // 普通用户只看 opencode 有效的 agents/skills 根目录，隐藏配置仓库工程杂项。
-  return entries.filter((entry) => entry.path === "agents" || entry.path === "skills");
+  return entries.filter((entry) => entry.path === "agents" || entry.path === "skills" || entry.path === "tools");
 }
 
 function canWriteScope(scope: Scope) {
@@ -308,7 +307,8 @@ function isWorkspaceAgentDiffPath(path: string) {
   const normalized = path.replace(/^\/+/, "");
   return normalized === "opencode.jsonc"
     || normalized.startsWith("agents/")
-    || normalized.startsWith("skills/");
+    || normalized.startsWith("skills/")
+    || normalized.startsWith("tools/");
 }
 
 function canCreateInDirectory(scope: Scope, path: string) {
@@ -316,7 +316,9 @@ function canCreateInDirectory(scope: Scope, path: string) {
     || path === "agents"
     || path.startsWith("agents/")
     || path === "skills"
-    || path.startsWith("skills/");
+    || path.startsWith("skills/")
+    || path === "tools"
+    || path.startsWith("tools/");
 }
 
 function canDeleteEntry(scope: Scope, path: string) {
@@ -326,14 +328,17 @@ function canDeleteEntry(scope: Scope, path: string) {
     || normalized === "agents"
     || normalized.startsWith("agents/")
     || normalized === "skills"
-    || normalized.startsWith("skills/");
+    || normalized.startsWith("skills/")
+    || normalized === "tools"
+    || normalized.startsWith("tools/");
 }
 
 function canRenameEntry(scope: Scope, path: string) {
   const normalized = path.replace(/^\/+|\/+$/g, "");
   return scope === "PUBLIC"
     || normalized.startsWith("agents/")
-    || normalized.startsWith("skills/");
+    || normalized.startsWith("skills/")
+    || normalized.startsWith("tools/");
 }
 
 /** 文件和目录沿用工作空间删除确认面板，作用域仅负责补齐 Agent 文件路由。 */
@@ -359,7 +364,7 @@ async function createAgentEntry(directory: string, name: string, type: "file" | 
   const fullPath = agentEntryPath(directory, name);
   const writtenPath = type === "directory" ? `${fullPath}/.gitkeep` : fullPath;
   if (scope === "WORKSPACE" && !isWorkspaceAgentDiffPath(writtenPath)) {
-    notifyError("创建应用 Agent 配置失败", "请在 agents 或 skills 目录内新建；根目录仅支持 opencode.jsonc、agents 和 skills");
+    notifyError("创建应用 Agent 配置失败", "请在 agents、skills 或 tools 目录内新建；根目录仅支持 opencode.jsonc、agents、skills 和 tools");
     return;
   }
   busy.value = true;
