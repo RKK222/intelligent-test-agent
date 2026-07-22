@@ -5,6 +5,17 @@
 
 ## Entries
 
+### 2026-07-22 - 诊断企业后台升级停机阶段的 Redis 心跳异常
+
+- Why:
+  - 企业节点执行离线部署后，旧 Java 在 systemd 停止期间输出 `LettuceConnectionFactory has been STOPPED`，容易被误判为新版本启动失败。
+- What:
+  - 日志时间线确认部署脚本先主动停止旧服务；Netty 等待活动 WebSocket 满 30 秒后结束，Redis lifecycle 已停止但 5 秒后台心跳尚未销毁，晚到心跳因此报错；随后新 Java 的 health/readiness 通过，worker WebSocket 已连接并应用配置。
+- How:
+  - 对照 `deploy/internal/deploy-internal-release.sh` 的 stop/start/health 顺序、`OpencodeManagerControlConfig.BackendJavaProcessLifecycleRunner` 调度与销毁时机，以及 Redis 心跳写入调用链；未修改代码、配置或现场数据。
+- Result:
+  - 该 Lettuce 堆栈属于可复现的关闭竞态，不是本次部署失败根因；仍需单独处理 Docker IPv4 forwarding 告警。采集文件从另一段 PostgreSQL 堆栈中部开始，若该业务错误仍复现，需补采异常首行和 `Caused by`，当前不能据此定因。
+
 ### 2026-07-21 - 隔离公共与应用配置发布并异步收敛个人 worktree
 
 - Why:
