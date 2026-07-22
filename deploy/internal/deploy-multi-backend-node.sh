@@ -209,6 +209,14 @@ validate_backend_config() {
   require_exact_value "${backend_env}" SYS_DATA_ROOT_DIR /data/testagent/data
   require_exact_value "${backend_env}" TEST_AGENT_DB_URL jdbc:postgresql://122.233.30.147:5432/postgres
   require_exact_value "${backend_env}" TEST_AGENT_REDIS_HOST 122.233.30.20
+  require_exact_value "${backend_env}" TEST_AGENT_XXL_JOB_ENABLED true
+  require_exact_value "${backend_env}" TEST_AGENT_XXL_JOB_MYSQL_URL \
+    'jdbc:mysql://122.233.30.147:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai'
+  require_exact_value "${backend_env}" TEST_AGENT_XXL_JOB_MYSQL_USERNAME xxl_job
+  require_nonempty_value "${backend_env}" TEST_AGENT_XXL_JOB_MYSQL_PASSWORD
+  require_nonempty_value "${backend_env}" TEST_AGENT_XXL_JOB_ACCESS_TOKEN
+  require_exact_value "${backend_env}" TEST_AGENT_XXL_JOB_ADMIN_PORT 18080
+  require_exact_value "${backend_env}" TEST_AGENT_XXL_JOB_EXECUTOR_PORT 9999
   require_exact_value "${backend_env}" TEST_AGENT_CORS_ALLOWED_ORIGINS \
     http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996
   require_exact_value "${backend_env}" TEST_AGENT_SERVER_BROADCAST_ENABLED true
@@ -255,7 +263,7 @@ validate_backend_config() {
 validate_frontend_config() {
   local config_dir="$1"
   local nginx_env="${config_dir}/nginx.env"
-  local backends routes entry host expected_route expected_routes=""
+  local backends routes admins entry host expected_route expected_routes="" expected_admins=""
   local -a backend_entries=()
 
   require_file "${nginx_env}"
@@ -266,8 +274,10 @@ validate_frontend_config() {
   require_exact_value "${nginx_env}" TEST_AGENT_NGINX_MODE multi
   require_one_key "${nginx_env}" TEST_AGENT_NGINX_BACKENDS
   require_one_key "${nginx_env}" TEST_AGENT_NGINX_SERVER_ROUTES
+  require_one_key "${nginx_env}" TEST_AGENT_NGINX_XXL_JOB_ADMINS
   backends="$(env_value "${nginx_env}" TEST_AGENT_NGINX_BACKENDS)"
   routes="$(env_value "${nginx_env}" TEST_AGENT_NGINX_SERVER_ROUTES)"
+  admins="$(env_value "${nginx_env}" TEST_AGENT_NGINX_XXL_JOB_ADMINS)"
   IFS=',' read -r -a backend_entries <<<"${backends}"
   [[ "${#backend_entries[@]}" -ge 2 ]] || {
     echo "TEST_AGENT_NGINX_BACKENDS must contain at least two backends" >&2
@@ -282,6 +292,7 @@ validate_frontend_config() {
     require_backend_site_ip "${host}" TEST_AGENT_NGINX_BACKENDS
     expected_route="$(server_id_from_host "${host}")=${entry}"
     expected_routes="${expected_routes:+${expected_routes},}${expected_route}"
+    expected_admins="${expected_admins:+${expected_admins},}${host}:18080"
   done
   [[ ",${backends}," == *",122.233.30.4:8080,"* \
     && ",${backends}," == *",122.233.30.114:8080,"* ]] || {
@@ -290,6 +301,10 @@ validate_frontend_config() {
   }
   [[ "${routes}" == "${expected_routes}" ]] || {
     echo "TEST_AGENT_NGINX_SERVER_ROUTES must match TEST_AGENT_NGINX_BACKENDS in order" >&2
+    exit 1
+  }
+  [[ "${admins}" == "${expected_admins}" ]] || {
+    echo "TEST_AGENT_NGINX_XXL_JOB_ADMINS must match TEST_AGENT_NGINX_BACKENDS in order" >&2
     exit 1
   }
   require_exact_value "${nginx_env}" TEST_AGENT_NGINX_LISTEN_PORT 80
@@ -425,6 +440,7 @@ verify_backend() {
   systemctl is-active --quiet test-agent-backend
   curl -fsS http://127.0.0.1:8080/actuator/health >/dev/null
   curl -fsS http://127.0.0.1:8080/actuator/health/readiness >/dev/null
+  curl -fsS http://127.0.0.1:18080/xxl-job-admin/actuator/health/readiness >/dev/null
   curl -fsS "http://${peer_host}:8080/actuator/health" >/dev/null
 
   require_file "${INSTALL_ROOT}/data/.serverid"
@@ -473,8 +489,8 @@ verify_backend() {
 verify_frontend() {
   local installed_config="${INSTALL_ROOT}/config"
   local nginx_env="${installed_config}/nginx.env"
-  local nginx_bin nginx_prefix nginx_main_conf nginx_dump backends entry
-  local -a backend_entries=()
+  local nginx_bin nginx_prefix nginx_main_conf nginx_dump backends admins entry
+  local -a backend_entries=() admin_entries=()
 
   validate_frontend_config "${installed_config}"
   require_command curl
@@ -482,6 +498,11 @@ verify_frontend() {
   IFS=',' read -r -a backend_entries <<<"${backends}"
   for entry in "${backend_entries[@]}"; do
     curl -fsS "http://${entry}/actuator/health/readiness" >/dev/null
+  done
+  admins="$(env_value "${nginx_env}" TEST_AGENT_NGINX_XXL_JOB_ADMINS)"
+  IFS=',' read -r -a admin_entries <<<"${admins}"
+  for entry in "${admin_entries[@]}"; do
+    curl -fsS "http://${entry}/xxl-job-admin/actuator/health/readiness" >/dev/null
   done
 
   nginx_bin="$(env_value "${nginx_env}" TEST_AGENT_NGINX_BIN)"

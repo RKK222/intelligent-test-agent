@@ -18,14 +18,16 @@ detect_site_ip() {
     done < <(ip -o -4 addr show scope global 2>/dev/null | awk '{sub(/\/.*/, "", $4); print $4}' || true)
   fi
 
-  if [[ "${role}" == "frontend" ]]; then
+  if [[ "${role}" == "frontend" || "${role}" == "mysql" ]]; then
+    local expected_ip="122.233.30.2"
+    [[ "${role}" == "mysql" ]] && expected_ip="122.233.30.147"
     for candidate in "${candidates[@]}"; do
-      [[ "${candidate}" == "122.233.30.2" ]] && {
+      [[ "${candidate}" == "${expected_ip}" ]] && {
         printf '%s\n' "${candidate}"
         return 0
       }
     done
-    echo "Cannot find frontend IP 122.233.30.2 on this server" >&2
+    echo "Cannot find ${role} IP ${expected_ip} on this server" >&2
     return 1
   fi
 

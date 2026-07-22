@@ -52,7 +52,7 @@
 - `V20260718210000__extend_scheduler_user_plan.sql`：允许 USER_PLAN 专用任务不配置 Cron，为运行记录增加服务器执行亲和字段和到期扫描索引。
 - `V20260718211000__create_night_execution_tasks.sql`：创建夜间任务、单会话待执行锁和 15 分钟时段容量占位表，包含幂等键、状态/时间约束、索引和中文注释。
 - `V20260719210000__seed_night_execution_capacity_parameter.sql`：初始化可编辑全局通用参数 `NIGHT_EXECUTION_SLOT_CAPACITY=20`，供各 Java 实例启动加载和跨实例热刷新。
-- `V20260721134000__migrate_night_execution_to_xxl.sql`：为夜间任务增加 `dispatch_attempt_id`、精确 owner backend process、租约到期和状态版本字段/索引；为 legacy Scheduled Run 增加启动 attempt、租约和 durable handoff 受理时间。短暂停机升级时把旧夜间 `PENDING/RUNNING/STOPPING USER_PLAN` 全部标记为 `SKIPPED`，历史关联字段保留 nullable，遗留 `DISPATCHING` 交给锚点优先的补偿机制收敛。
+- `V20260722130000__migrate_night_execution_to_xxl.sql`：为夜间任务增加 `dispatch_attempt_id`、精确 owner backend process、租约到期和状态版本字段/索引；为 legacy Scheduled Run 增加启动 attempt、租约和 durable handoff 受理时间。版本晚于已交付的 `V20260721213000`，存量库可按序升级；短暂停机升级时把旧夜间 `PENDING/RUNNING/STOPPING USER_PLAN` 全部标记为 `SKIPPED`，历史关联字段保留 nullable，遗留 `DISPATCHING` 交给锚点优先的补偿机制收敛。
 - `V20260717173000__create_public_agent_config_rollouts.sql`：创建公共 Agent/Skill 发布 rollout、服务器同步和存量进程目标表。
 - `V20260717200000__harden_public_agent_config_rollout.sql`：为 rollout 保存发起人，为目标快照用户并增加认领 fencing token；历史目标按服务器、容器、端口回填用户归属，不写测试或演示数据。
 - `V20260721213000__isolate_agent_config_rollout_scopes.sql`：把活动发布唯一锁拆为公共单锁和应用版本维度锁，并新增应用个人 worktree `AWAITING_USER` 补偿表；本地修改或合并冲突不再无限占用公共/其它应用发布。

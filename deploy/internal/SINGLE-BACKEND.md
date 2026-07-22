@@ -10,7 +10,7 @@
 | Java 后台 + worker | `122.233.30.114` |
 | Redis | `122.233.30.20:6379` |
 | PostgreSQL | `122.233.30.147:5432/postgres` |
-| XXL MySQL | `122.233.30.148:3306/xxl_job`（外部共享 MySQL 8.4） |
+| XXL MySQL | `122.233.30.147:3306/xxl_job`（与 PostgreSQL 同机的独立 MySQL 8.4 容器） |
 | 企业内部模型 | `ai-code.sdc.enterprise:9070` |
 
 ## 当前现场问题结论
@@ -132,7 +132,7 @@ TEST_AGENT_DB_PASSWORD=REPLACE_PRODUCTION_DB_PASSWORD
 TEST_AGENT_DB_DRIVER_CLASS_NAME=org.postgresql.Driver
 
 TEST_AGENT_XXL_JOB_ENABLED=true
-TEST_AGENT_XXL_JOB_MYSQL_URL=jdbc:mysql://122.233.30.148:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+TEST_AGENT_XXL_JOB_MYSQL_URL=jdbc:mysql://122.233.30.147:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
 TEST_AGENT_XXL_JOB_MYSQL_USERNAME=xxl_job
 TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=REPLACE_XXL_JOB_MYSQL_PASSWORD
 TEST_AGENT_XXL_JOB_ACCESS_TOKEN=REPLACE_XXL_JOB_ACCESS_TOKEN

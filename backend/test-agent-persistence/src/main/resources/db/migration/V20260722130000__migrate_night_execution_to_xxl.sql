@@ -1,4 +1,4 @@
--- 夜间任务从旧 USER_PLAN 扫描迁移到 XXL-JOB；短暂停机发布保证旧非终态运行可统一收敛为历史跳过记录。
+-- 夜间任务从旧 USER_PLAN 扫描迁移到 XXL-JOB；版本晚于 20260721213000，保证已部署存量库按序升级。
 alter table night_execution_tasks add column if not exists dispatch_attempt_id varchar(128);
 alter table night_execution_tasks add column if not exists dispatch_owner_backend_process_id varchar(128);
 alter table night_execution_tasks add column if not exists dispatch_lease_until timestamp with time zone;

@@ -861,9 +861,9 @@ V10 种子数据对 F-COSS 的影响：
 - 终态任务和历史容量行保留 30 天，由 `opencode-runtime.night-execution-reconcile` 分批清理。普通 Run 受理、取消和最终失败会立即释放时段名额；改期先释放原时段再占用新时段。
 - 全部关系型 SQL 位于 `NightExecutionTaskMapper.xml`；首次创建用 PostgreSQL 事务级 advisory lock 串行化同一 owner/request。新分发认领和补偿 fencing 由下节 migration 增加。
 
-## V20260721134000 夜间任务迁移到 XXL-JOB
+## V20260722130000 夜间任务迁移到 XXL-JOB
 
-`V20260721134000__migrate_night_execution_to_xxl.sql` 为 `night_execution_tasks` 增加：
+`V20260722130000__migrate_night_execution_to_xxl.sql` 的版本晚于已交付的 `V20260721213000`，保证存量库按序升级；它为 `night_execution_tasks` 增加：
 
 | 字段 | 说明 |
 |---|---|
