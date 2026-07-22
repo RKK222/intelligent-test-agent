@@ -241,6 +241,8 @@ validate_strict_manual_contract() {
           while (position <= token_count && token[position] ~ /^-/) {
             option=token[position++]
             if (option == "--") break
+            # 组合 sudo 短选项的取值位置无法在不完整模拟 sudo 的情况下证明安全，统一 fail closed。
+            if (option ~ /^-[^-]/ && length(option) > 2) unsafe_wrapper=1
             if (option !~ /=/ && sudo_option_needs_value(option) && position <= token_count) position++
           }
           changed=1
@@ -249,6 +251,8 @@ validate_strict_manual_contract() {
           while (position <= token_count && token[position] ~ /^-/) {
             option=token[position++]
             if (option == "--") break
+            # env 组合短选项可隐藏 -S 二次分词，无法证明时一律 fail closed。
+            if (option ~ /^-[^-]/ && length(option) > 2) unsafe_wrapper=1
             # env split-string 会把参数重新解析成命令，本校验不执行也不模拟它，直接 fail closed。
             if (option == "-S" || option ~ /^-S./ || option == "--split-string" || option ~ /^--split-string=/) {
               unsafe_wrapper=1
@@ -265,7 +269,8 @@ validate_strict_manual_contract() {
     }
     function docker_option_needs_value(option) {
       return option == "--context" || option == "-c" || option == "--config" ||
-             option == "-H" || option == "--host" || option == "-l" || option == "--log-level"
+             option == "-H" || option == "--host" || option == "-l" || option == "--log-level" ||
+             option == "--tlscacert" || option == "--tlscert" || option == "--tlskey"
     }
     function compose_option_needs_value(option) {
       return option == "-f" || option == "--file" || option == "-p" || option == "--project-name" ||
@@ -276,14 +281,33 @@ validate_strict_manual_contract() {
       return option == "-c" || option == "--connection" || option == "--url" ||
              option == "--identity" || option == "--log-level"
     }
-    function skip_options(position, option_kind,   option) {
+    function option_is_known_flag(option_kind, option) {
+      if (option_kind == "docker")
+        return option == "-D" || option == "--debug" || option == "--tls" || option == "--tlsverify" ||
+               option == "-v" || option == "--version" || option == "--help"
+      if (option_kind == "compose")
+        return option == "--compatibility" || option == "--dry-run" || option == "--help" || option == "--version"
+      if (option_kind == "podman")
+        return option == "--remote" || option == "--help" || option == "--version"
+      return 0
+    }
+    function option_needs_value(option_kind, option) {
+      return (option_kind == "docker" && docker_option_needs_value(option)) ||
+             (option_kind == "compose" && compose_option_needs_value(option)) ||
+             (option_kind == "podman" && podman_option_needs_value(option))
+    }
+    function skip_options(position, option_kind,   option, option_name) {
       while (position <= token_count && token[position] ~ /^-/) {
         option=token[position++]
         if (option == "--") break
-        if (option ~ /=/) continue
-        if (option_kind == "docker" && docker_option_needs_value(option) && position <= token_count) position++
-        else if (option_kind == "compose" && compose_option_needs_value(option) && position <= token_count) position++
-        else if (option_kind == "podman" && podman_option_needs_value(option) && position <= token_count) position++
+        option_name=option
+        sub(/=.*/, "", option_name)
+        if (option_needs_value(option_kind, option_name)) {
+          if (option !~ /=/ && position <= token_count) position++
+        } else if (!option_is_known_flag(option_kind, option_name)) {
+          # 未知容器选项可能吞掉下一个 action，不猜测取值位置，统一 fail closed。
+          unsafe_container_option=1
+        }
       }
       return position
     }
@@ -321,10 +345,14 @@ validate_strict_manual_contract() {
     }
     {
       unsafe_wrapper=0
+      unsafe_container_option=0
       tokenize($0)
       effective_index=strip_wrappers(1)
-      if (unsafe_wrapper) print "__UNSAFE_ENV_SPLIT_STRING__"
-      else if (effective_index <= token_count) print_effective_command(effective_index)
+      if (unsafe_wrapper) print "__UNSAFE_WRAPPER_OPTIONS__"
+      else if (effective_index <= token_count) {
+        print_effective_command(effective_index)
+        if (unsafe_container_option) print "__UNSAFE_CONTAINER_OPTIONS__"
+      }
     }
   ' <<<"${executable_fences}")"
 
@@ -461,7 +489,7 @@ validate_strict_manual_contract() {
   if grep -Eqi '^[[:space:]]*(redis-cli|valkey-cli)[[:space:]].*(GET|GETDEL|MGET|HGET|SCAN|KEYS).*(ticket|session)' <<<"${normalized_commands}"; then
     return 1
   fi
-  if grep -Fq '__UNSAFE_ENV_SPLIT_STRING__' <<<"${normalized_commands}"; then
+  if grep -Eq '__UNSAFE_(WRAPPER|CONTAINER)_OPTIONS__' <<<"${normalized_commands}"; then
     return 1
   fi
   if grep -Eqi '^[[:space:]]*mysql[[:space:]].*((--execute(=|[[:space:]])|-e[^[:space:]]*).*(INSERT|UPDATE|DELETE|REPLACE|MERGE|TRUNCATE|ALTER|CREATE|DROP|CALL|GRANT|REVOKE))' <<<"${normalized_commands}"; then
@@ -470,7 +498,7 @@ validate_strict_manual_contract() {
   if grep -Eqi '^[[:space:]]*(systemctl[[:space:]]+(start|stop|restart|reload)|service[[:space:]]+[^[:space:]]+[[:space:]]+(start|stop|restart|reload)|(kill|pkill|killall)[[:space:]].*(-HUP|-1|SIGHUP|-s[[:space:]]+HUP))' <<<"${normalized_commands}"; then
     return 1
   fi
-  if grep -Eqi '^[[:space:]]*(docker[[:space:]]+((compose|container)[[:space:]]+)?|docker-compose[[:space:]]+|podman[[:space:]]+(container[[:space:]]+)?)(restart|start|stop|rm|kill)([[:space:]]|$)' <<<"${normalized_commands}"; then
+  if grep -Eqi '^[[:space:]]*(docker[[:space:]]+((compose|container)[[:space:]]+)?|docker-compose[[:space:]]+|podman[[:space:]]+(container[[:space:]]+)?)(restart|start|stop|rm|kill|up|down|create|run|pause|unpause)([[:space:]]|$)' <<<"${normalized_commands}"; then
     return 1
   fi
   if grep -Eqi '^[[:space:]]*(sed[[:space:]]+-i|perl[[:space:]]+-pi)|(^|[[:space:]])>+[[:space:]]*(/data/testagent/config/|/data/apps/nginx/([^[:space:]]*/)?conf/)|(^|[[:space:]|;&])tee([[:space:]]+-[^[:space:]]+)*[[:space:]]+(/data/testagent/config/|/data/apps/nginx/([^[:space:]]*/)?conf/)|^[[:space:]]*(cp|mv|install)[[:space:]].*[[:space:]](/data/testagent/config/|/data/apps/nginx/([^[:space:]]*/)?conf/)' <<<"${normalized_commands}"; then
@@ -584,6 +612,16 @@ UNSAFE_GLOBAL_ENV_SPLIT_REDIS_MANUAL="${TMP_ROOT}/unsafe-global-env-split-redis-
 UNSAFE_GLOBAL_ENV_LONG_SPLIT_MYSQL_MANUAL="${TMP_ROOT}/unsafe-global-env-long-split-mysql-manual.md"
 UNSAFE_GLOBAL_SUDO_CHDIR_REDIS_MANUAL="${TMP_ROOT}/unsafe-global-sudo-chdir-redis-manual.md"
 UNSAFE_GLOBAL_SUDO_SHORT_CHDIR_REDIS_MANUAL="${TMP_ROOT}/unsafe-global-sudo-short-chdir-redis-manual.md"
+UNSAFE_GLOBAL_SUDO_COMBINED_USER_REDIS_MANUAL="${TMP_ROOT}/unsafe-global-sudo-combined-user-redis-manual.md"
+UNSAFE_GLOBAL_SUDO_COMBINED_CHDIR_REDIS_MANUAL="${TMP_ROOT}/unsafe-global-sudo-combined-chdir-redis-manual.md"
+UNSAFE_GLOBAL_ENV_COMBINED_SPLIT_MANUAL="${TMP_ROOT}/unsafe-global-env-combined-split-manual.md"
+UNSAFE_GLOBAL_DOCKER_TLSCACERT_RESTART_MANUAL="${TMP_ROOT}/unsafe-global-docker-tlscacert-restart-manual.md"
+UNSAFE_GLOBAL_DOCKER_COMPOSE_UP_MANUAL="${TMP_ROOT}/unsafe-global-docker-compose-up-manual.md"
+UNSAFE_GLOBAL_DOCKER_COMPOSE_DOWN_MANUAL="${TMP_ROOT}/unsafe-global-docker-compose-down-manual.md"
+UNSAFE_GLOBAL_DOCKER_CREATE_MANUAL="${TMP_ROOT}/unsafe-global-docker-create-manual.md"
+UNSAFE_GLOBAL_DOCKER_RUN_MANUAL="${TMP_ROOT}/unsafe-global-docker-run-manual.md"
+UNSAFE_GLOBAL_DOCKER_PAUSE_MANUAL="${TMP_ROOT}/unsafe-global-docker-pause-manual.md"
+UNSAFE_GLOBAL_DOCKER_UNPAUSE_MANUAL="${TMP_ROOT}/unsafe-global-docker-unpause-manual.md"
 SAFE_PASSIVE_PATH_MANUAL="${TMP_ROOT}/safe-passive-path-manual.md"
 SAFE_PASSIVE_COMMAND_MENTIONS_MANUAL="${TMP_ROOT}/safe-passive-command-mentions-manual.md"
 SAFE_PREFIXED_READONLY_MANUAL="${TMP_ROOT}/safe-prefixed-readonly-manual.md"
@@ -775,6 +813,26 @@ make_global_fence_mutation "${UNSAFE_GLOBAL_SUDO_CHDIR_REDIS_MANUAL}" \
   'sudo --chdir /tmp redis-cli GET test-agent:ticket:x'
 make_global_fence_mutation "${UNSAFE_GLOBAL_SUDO_SHORT_CHDIR_REDIS_MANUAL}" \
   'sudo -D /tmp redis-cli GET test-agent:session:x'
+make_global_fence_mutation "${UNSAFE_GLOBAL_SUDO_COMBINED_USER_REDIS_MANUAL}" \
+  'sudo -nu redis redis-cli GET test-agent:ticket:x'
+make_global_fence_mutation "${UNSAFE_GLOBAL_SUDO_COMBINED_CHDIR_REDIS_MANUAL}" \
+  'sudo -nD /tmp redis-cli GET test-agent:ticket:x'
+make_global_fence_mutation "${UNSAFE_GLOBAL_ENV_COMBINED_SPLIT_MANUAL}" \
+  "env -iS 'printf harmless'"
+make_global_fence_mutation "${UNSAFE_GLOBAL_DOCKER_TLSCACERT_RESTART_MANUAL}" \
+  'docker --tlscacert /tmp/ca.pem restart nginx'
+make_global_fence_mutation "${UNSAFE_GLOBAL_DOCKER_COMPOSE_UP_MANUAL}" \
+  'docker compose up -d nginx'
+make_global_fence_mutation "${UNSAFE_GLOBAL_DOCKER_COMPOSE_DOWN_MANUAL}" \
+  'docker compose down'
+make_global_fence_mutation "${UNSAFE_GLOBAL_DOCKER_CREATE_MANUAL}" \
+  'docker create diagnostic-image'
+make_global_fence_mutation "${UNSAFE_GLOBAL_DOCKER_RUN_MANUAL}" \
+  'docker run diagnostic-image'
+make_global_fence_mutation "${UNSAFE_GLOBAL_DOCKER_PAUSE_MANUAL}" \
+  'docker pause diagnostic-container'
+make_global_fence_mutation "${UNSAFE_GLOBAL_DOCKER_UNPAUSE_MANUAL}" \
+  'docker unpause diagnostic-container'
 awk '/^## 11\./ { print "被动识别路径：\n`POST /api/internal/platform/xxl-job/sso-tickets`\n`POST /xxl-job-admin/platform-sso/login`" } { print }' \
   "${TROUBLESHOOTING_MANUAL}" >"${SAFE_PASSIVE_PATH_MANUAL}"
 awk '/^## 2\./ { print "禁止执行 `redis-cli GET test-agent:ticket:diagnostic`、`service nginx restart`、`mysql --execute=\047UPDATE xxl_job_info SET trigger_status=1\047`；这些只是被动识别的禁令文本。" } { print }' \
@@ -782,10 +840,16 @@ awk '/^## 2\./ { print "禁止执行 `redis-cli GET test-agent:ticket:diagnostic
 make_global_fence_mutation "${SAFE_PREFIXED_READONLY_MANUAL}" \
   'cd /tmp && sudo env TRACE=1 mysql --host=diagnostic.invalid < /tmp/xxl-job-readonly.sql
 printf '\''diagnostic\n'\'' | env TRACE=1 redis-cli PING
+sudo -n env -i TRACE=1 redis-cli PING
 docker ps
+docker --tlscacert /tmp/ca.pem ps
+docker --context prod ps
 docker compose ps
+docker compose -f stack.yml ps
 docker-compose ps
-podman ps'
+docker-compose -f stack.yml ps
+podman ps
+podman --remote ps'
 make_global_fence_mutation "${SAFE_QUOTED_OPERATORS_MANUAL}" \
   'grep -E '\''redis-cli GET|docker restart;mysql -e|safe && text|safe \|\| text'\'' /tmp/diagnostic.log
 printf '\''%s\n'\'' '\''docker restart; redis-cli GET test-agent:ticket:x && mysql -eUPDATE || podman kill nginx'\''
@@ -854,7 +918,17 @@ for unsafe_manual in \
   "${UNSAFE_GLOBAL_ENV_SPLIT_REDIS_MANUAL}" \
   "${UNSAFE_GLOBAL_ENV_LONG_SPLIT_MYSQL_MANUAL}" \
   "${UNSAFE_GLOBAL_SUDO_CHDIR_REDIS_MANUAL}" \
-  "${UNSAFE_GLOBAL_SUDO_SHORT_CHDIR_REDIS_MANUAL}"; do
+  "${UNSAFE_GLOBAL_SUDO_SHORT_CHDIR_REDIS_MANUAL}" \
+  "${UNSAFE_GLOBAL_SUDO_COMBINED_USER_REDIS_MANUAL}" \
+  "${UNSAFE_GLOBAL_SUDO_COMBINED_CHDIR_REDIS_MANUAL}" \
+  "${UNSAFE_GLOBAL_ENV_COMBINED_SPLIT_MANUAL}" \
+  "${UNSAFE_GLOBAL_DOCKER_TLSCACERT_RESTART_MANUAL}" \
+  "${UNSAFE_GLOBAL_DOCKER_COMPOSE_UP_MANUAL}" \
+  "${UNSAFE_GLOBAL_DOCKER_COMPOSE_DOWN_MANUAL}" \
+  "${UNSAFE_GLOBAL_DOCKER_CREATE_MANUAL}" \
+  "${UNSAFE_GLOBAL_DOCKER_RUN_MANUAL}" \
+  "${UNSAFE_GLOBAL_DOCKER_PAUSE_MANUAL}" \
+  "${UNSAFE_GLOBAL_DOCKER_UNPAUSE_MANUAL}"; do
   if validate_strict_manual_contract "${unsafe_manual}" >/dev/null 2>&1; then
     printf '严格文档契约错误接受危险变异夹具: %s\n' "${unsafe_manual##*/}" >&2
     exit 1
