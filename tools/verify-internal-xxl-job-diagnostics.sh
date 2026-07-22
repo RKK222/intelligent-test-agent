@@ -453,32 +453,62 @@ if [[ ! -f "${READONLY_SQL_FILE}" ]]; then
   exit 1
 fi
 
-# 只检查去除 -- 注释后的可执行 SQL，避免运维说明中的敏感词触发误报。
-readonly_sql="$(sed -E 's/--.*$//' "${READONLY_SQL_FILE}")"
-while IFS= read -r -d ';' statement; do
+validate_readonly_sql_file() {
+  local sql_file="$1"
+  local readonly_sql statement
+
+  # 只检查去除 -- 注释后的可执行 SQL，避免运维说明中的敏感词触发误报。
+  readonly_sql="$(sed -E 's/--.*$//' "${sql_file}")"
+  # read -d 在 EOF 前无分号时会返回非零但保留内容；|| 条件确保该最后语句仍被校验。
+  while IFS= read -r -d ';' statement || [[ -n "${statement}" ]]; do
+    validate_readonly_sql_statement "${statement}" || return 1
+  done < <(printf '%s' "${readonly_sql}")
+}
+
+validate_readonly_sql_statement() {
+  local statement="$1"
+  local trimmed_statement statement_first_word safe_replace_statement safe_digest_statement
+
   trimmed_statement="$(printf '%s' "${statement}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
   statement_first_word="$(printf '%s\n' "${trimmed_statement}" | awk 'NF { print $1; exit }' | tr '[:lower:]' '[:upper:]')"
-  [[ -z "${statement_first_word}" ]] && continue
+  [[ -z "${statement_first_word}" ]] && return 0
   case "${statement_first_word}" in
     SELECT|SHOW|WITH) ;;
     *)
       printf 'XXL-JOB read-only SQL contains a non-read-only statement: %s\n' "${statement_first_word:-<empty>}" >&2
-      exit 1
+      return 1
       ;;
   esac
 
-  # DML REPLACE 已由语句首词白名单拒绝；这里允许只读字符串函数 REPLACE(...)。
-  if printf '%s\n' "${trimmed_statement}" | grep -Eqi '(^|[^[:alnum:]_])(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|ALTER|CREATE|DROP|CALL|GRANT|REVOKE|LOCK|UNLOCK|SET|START|TRANSACTION|COMMIT|ROLLBACK)([^[:alnum:]_]|$)'; then
+  # 只移除 REPLACE(...) 字符串函数；任何独立 REPLACE（包括 WITH 后的 REPLACE INTO）仍须拒绝。
+  safe_replace_statement="$(printf '%s' "${trimmed_statement}" | sed -E 's/REPLACE[[:space:]]*\([^)]*\)//Ig')"
+  if printf '%s\n' "${safe_replace_statement}" | grep -Eqi '(^|[^[:alnum:]_])(INSERT|UPDATE|DELETE|REPLACE|MERGE|TRUNCATE|ALTER|CREATE|DROP|CALL|GRANT|REVOKE|LOCK|UNLOCK|SET|START|TRANSACTION|COMMIT|ROLLBACK)([^[:alnum:]_]|$)'; then
     printf 'XXL-JOB read-only SQL contains a forbidden keyword\n' >&2
-    exit 1
+    return 1
   fi
 
   safe_digest_statement="$(printf '%s' "${trimmed_statement}" | sed -E 's/CHAR_LENGTH[[:space:]]*\([[:space:]]*platform_session_digest[[:space:]]*\)//Ig')"
   if printf '%s\n' "${safe_digest_statement}" | grep -Eqi '(^|[^[:alnum:]_])(password|token|platform_session_digest|executor_param|trigger_msg|handle_msg)([^[:alnum:]_]|$)'; then
     printf 'XXL-JOB read-only SQL projects a sensitive column or value\n' >&2
-    exit 1
+    return 1
   fi
-done < <(printf '%s' "${readonly_sql}")
+}
+
+EOF_DELETE_SQL_FILE="${TMP_ROOT}/readonly-eof-delete.sql"
+WITH_REPLACE_SQL_FILE="${TMP_ROOT}/readonly-with-replace.sql"
+printf 'DELETE FROM xxl_job_user' >"${EOF_DELETE_SQL_FILE}"
+printf "WITH cte AS (SELECT 1) REPLACE INTO xxl_job_user (username) VALUES ('unsafe');\n" >"${WITH_REPLACE_SQL_FILE}"
+if validate_readonly_sql_file "${EOF_DELETE_SQL_FILE}"; then
+  printf 'XXL-JOB read-only SQL accepted DELETE without a trailing semicolon\n' >&2
+  exit 1
+fi
+if validate_readonly_sql_file "${WITH_REPLACE_SQL_FILE}"; then
+  printf 'XXL-JOB read-only SQL accepted WITH + REPLACE DML\n' >&2
+  exit 1
+fi
+if ! validate_readonly_sql_file "${READONLY_SQL_FILE}"; then
+  exit 1
+fi
 
 printf 'XXL-JOB read-only SQL static boundary verified\n'
 
