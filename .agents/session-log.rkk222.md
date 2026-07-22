@@ -5,16 +5,16 @@
 
 ## Entries
 
-### 2026-07-22 - 诊断企业后台升级停机阶段的 Redis 心跳异常
+### 2026-07-22 - 诊断企业后台升级日志中的 SQL 与停机心跳异常
 
 - Why:
-  - 企业节点执行离线部署后，旧 Java 在 systemd 停止期间输出 `LettuceConnectionFactory has been STOPPED`，容易被误判为新版本启动失败。
+  - 企业节点执行离线部署后同时出现消息门禁 PostgreSQL 错误、停机阶段 `LettuceConnectionFactory has been STOPPED` 和 Docker IPv4 forwarding 告警，需要区分业务缺陷与部署收尾噪声。
 - What:
-  - 日志时间线确认部署脚本先主动停止旧服务；Netty 等待活动 WebSocket 满 30 秒后结束，Redis lifecycle 已停止但 5 秒后台心跳尚未销毁，晚到心跳因此报错；随后新 Java 的 health/readiness 通过，worker WebSocket 已连接并应用配置。
+  - 消息门禁 `findBlockingRolloutId` 误用不存在的 `personal_workspaces.version_id`，真实外键是 `app_workspace_version_id`；部署脚本主动停止旧服务后，Redis lifecycle 已停止但 5 秒心跳尚未销毁，晚到心跳才产生 Lettuce 错误。
 - How:
-  - 对照 `deploy/internal/deploy-internal-release.sh` 的 stop/start/health 顺序、`OpencodeManagerControlConfig.BackendJavaProcessLifecycleRunner` 调度与销毁时机，以及 Redis 心跳写入调用链；未修改代码、配置或现场数据。
+  - 对照 V9 表结构、既有 `SessionHistoryMapper`、`PublicAgentConfigRolloutMapper.xml`、部署脚本 stop/start/health 顺序和心跳销毁时机；本地已有的字段修正及防回归测试并非本次创建，定向 6 项测试通过。
 - Result:
-  - 该 Lettuce 堆栈属于可复现的关闭竞态，不是本次部署失败根因；仍需单独处理 Docker IPv4 forwarding 告警。采集文件从另一段 PostgreSQL 堆栈中部开始，若该业务错误仍复现，需补采异常首行和 `Caused by`，当前不能据此定因。
+  - 新 Java health/readiness、worker health 和 manager 配置均正常，但当前企业坏包的消息门禁仍可能阻断新消息；必须交付包含正确 SQL 的新 JAR。Lettuce 堆栈不是启动失败，Docker `ip_forward=0` 且无持久出站 unit 仍需网络侧处理。
 
 ### 2026-07-21 - 隔离公共与应用配置发布并异步收敛个人 worktree
 
