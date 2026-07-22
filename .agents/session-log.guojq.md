@@ -1,46 +1,51 @@
 # Session Log — guojq
 
-## 2026-07-22 新增 agents/tools 目录及 HTTP/RPC 工具
+## 2026-07-22 新增 HTTP 代理工具及后端接口
 
 ### Why
-用户需要在工作空间 Agent 配置树的公共级根目录下新增 `tools/` 文件夹，里面放 opencode 的 `.ts` 工具定义文件，用于调用第三方 REST API 和 RPC 接口并返回信息。
+用户需要在前台对话中使用自定义 HTTP 工具调用第三方接口，工具通过后端代理服务发起请求，避免跨域问题。
 
 ### What
-1. 在 `opencode/tools/` 目录下创建了三个文件：
-   - [http-call.ts](file:///d:/workspace/intelligent-test-agent/backend/$%7BSYS_DATA_ROOT_DIR%7D/agent-opencode/.config/opencode/tools/http-call.ts) — REST API 调用工具，使用 `@opencode-ai/mcp` 的 `tool` 函数定义
-   - [rpc-call.ts](file:///d:/workspace/intelligent-test-agent/backend/$%7BSYS_DATA_ROOT_DIR%7D/agent-opencode/.config/opencode/tools/rpc-call.ts) — RPC 接口调用工具
-   - [package.json](file:///d:/workspace/intelligent-test-agent/backend/$%7BSYS_DATA_ROOT_DIR%7D/agent-opencode/.config/opencode/tools/package.json) — 依赖配置，包含 `@opencode-ai/mcp`
+1. **更新配置仓库** [http-call.ts](file:///d:/workspace/intelligent-test-agent/backend/$%7BSYS_DATA_ROOT_DIR%7D/agent-opencode/.config/opencode/tools/http-call.ts)：
+   - 使用 `@opencode-ai/plugin` 的 `tool` 函数定义
+   - 通过后端 `/api/proxy/call` 接口转发 HTTP 请求
+   - 支持 GET/POST/PUT/DELETE/PATCH 方法
+   - 支持查询参数、请求头、请求体、超时配置
 
-2. 修改了前端 [AgentConfigPanel.vue](file:///d:/workspace/intelligent-test-agent/frontend/apps/agent-web/src/components/AgentConfigPanel.vue)，支持 `tools/` 目录：
+2. **新增后端 Controller** [HttpProxyController.java](file:///d:/workspace/intelligent-test-agent/backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/HttpProxyController.java)：
+   - 提供 `/api/proxy/call` POST 接口
+   - 记录调用日志，包含用户信息和 traceId
+
+3. **新增后端 Service** [HttpProxyService.java](file:///d:/workspace/intelligent-test-agent/backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/HttpProxyService.java)：
+   - 使用 RestTemplate 发起 HTTP 请求
+   - 支持自定义超时配置
+   - 返回状态码、响应头、响应体
+
+4. **更新前端** [tool-registry.ts](file:///d:/workspace/intelligent-test-agent/frontend/packages/agent-chat/src/opencode-like/state/tool-registry.ts)：
+   - 新增 `http_call`、`http-call` 工具识别，显示为"HTTP 调用"
+   - 新增 `rpc_call`、`rpc-call` 工具识别，显示为"RPC 调用"
+
+5. **更新前端** [AgentConfigPanel.vue](file:///d:/workspace/intelligent-test-agent/frontend/apps/agent-web/src/components/AgentConfigPanel.vue)：
    - `visibleEntries`: 普通用户根目录显示 `tools` 目录
    - `isWorkspaceAgentDiffPath`: 支持 `tools/` 路径
    - `canCreateInDirectory`: 支持在 `tools/` 目录内创建文件
    - `canDeleteEntry`: 支持删除 `tools/` 目录及其内容
    - `canRenameEntry`: 支持重命名 `tools/` 下的文件
 
-3. 修改了前端 [tool-registry.ts](file:///d:/workspace/intelligent-test-agent/frontend/packages/agent-chat/src/opencode-like/state/tool-registry.ts)：
-   - `ToolInfo.family` 联合类型新增 `"tool"` 分支
-   - `getToolInfo` 函数新增 `tools/opencode`、`opencode_tool`、`opencode-tool` 工具名识别
-
 ### How
-- 使用 opencode MCP 工具定义方式，通过 `import { tool } from "@opencode-ai/mcp"` 导入
-- 工具参数使用 `tool.schema` 定义（string, enum, record, optional）
-- execute 函数使用 `fetch` API 调用第三方接口，支持超时控制
-- 用户需要在 tools 目录下执行 `npm install` 生成 node_modules
+- 前端工具文件放在 `opencode/tools/http-call.ts`，opencode 自动加载
+- 工具调用后端 `/api/proxy/call` 接口，后端再转发到目标 URL
+- 用户在对话中可以直接使用 HTTP 调用功能
 
 ### Result
-- tools 目录结构与用户期望一致（和 agents/、skills/、opencode.jsonc、node_modules/ 同级）
-- 工具文件使用 TypeScript 编写，符合 opencode MCP 工具定义规范
-- 前端 AgentConfigPanel 已更新，支持显示和操作 tools 目录
-- 无 API、事件、数据库、安全或兼容性变更
+- 后端编译成功（`mvn compile -pl test-agent-api -am`）
+- 前端工具注册更新完成
+- 工具目录结构与用户期望一致
 
 ## 2026-07-22 调整：删除错误创建的 agents/tools/opencode.md
 
 ### Why
 最初误将工具定义为 agent 的 `.md` 文件，后根据用户提供的图片确认应为 `.ts` 文件格式。
-
-### What
-删除了之前错误创建的 `opencode/agents/tools/opencode.md` 文件。
 
 ### Result
 - 清理了错误的文件结构，保持配置目录整洁。

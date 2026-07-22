@@ -70,6 +70,14 @@ export function getToolInfo(part: Extract<MessagePart, { type: "tool" }>): ToolI
     const url = text(part.input?.url) ?? text(part.input?.endpoint);
     return { title: "REST 工具", subtitle: url ?? displayPath, fullSubtitle: url ?? path, family: "tool" };
   }
+  if (tool === "http_call" || tool === "http-call") {
+    const url = text(part.input?.uri);
+    return { title: "HTTP 调用", subtitle: url ?? displayPath, fullSubtitle: url ?? path, family: "tool" };
+  }
+  if (tool === "rpc_call" || tool === "rpc-call") {
+    const url = text(part.input?.uri);
+    return { title: "RPC 调用", subtitle: url ?? displayPath, fullSubtitle: url ?? path, family: "tool" };
+  }
   if (tool === "lsp") {
     return { title: "LSP", subtitle: displayPath, fullSubtitle: path, family: "generic" };
   }
