@@ -45,7 +45,7 @@
 
 ## 3. 排查前记录项与脱敏规则
 
-开始前记录：故障开始/结束时间（精确到秒、含时区）、实际访问入口、账号是否为平台 `SUPER_ADMIN`、浏览器名称与版本、是否稳定复现、最近一次成功时间、相关任务 key、执行每条命令的机器和命令退出码。不要记录或要求他人回传真实密码、Token、Cookie、票据、Authorization、RSA 私钥、请求体或完整任务参数。
+开始前记录：故障开始/结束时间（精确到秒、含时区）、实际访问入口、账号是否为平台 `SUPER_ADMIN`、浏览器名称与版本、本次失败是否已经保留被动证据、最近一次成功时间、相关任务 key、执行每条命令的机器和命令退出码。不要记录或要求他人回传真实密码、Token、Cookie、票据、Authorization、RSA 私钥、请求体或完整任务参数。
 
 三个脚本使用统一前缀：`[PASS]` 为正常，`[WARN]` 为风险或人工确认项，`[FAIL]` 为异常边界，`[INFO]` 为脱敏上下文。退出码 0 表示关键检查通过，WARN 不一定改变退出码；退出码 1 表示至少一个关键检查失败或高风险不一致；退出码 2 表示用法错误、非法参数、执行机器不符或关键命令/文件缺失。退出码 2 先修正执行前提再重跑，不能解释成业务故障。
 
@@ -79,7 +79,7 @@ bash /data/testagent/deploy/internal/diagnose-xxl-job-frontend.sh \
 
 成功条件：脚本确认本机为 `.2`；读取 `/data/testagent/config/nginx.env`；用 `/data/apps/nginx/sbin/nginx` 读取有效配置；有效配置包含 `test_agent_xxl_job_admin`、`.4:18080`、`.114:18080`、`location /xxl-job-admin/` 和对应 `proxy_pass`；从 `.2` 直连两个 Admin readiness 均为 HTTP 200/UP；退出码为 `0`。
 
-失败停止点：退出码 `2` 表示机器、Nginx binary、env 或日志等关键前提不符，修正执行位置/交付前提后重跑；缺失 upstream/location 或任一 readiness 失败返回 `1`。只有一个 Admin 失败时先记录为单节点 Admin、节点网络或防火墙边界，这会造成负载均衡下的间歇故障。脚本只读取 `nginx -T` 与最近 200 行相关日志，不执行配置测试、reload 或写文件。
+失败停止点：退出码 `2` 表示机器、Nginx binary、env 或日志等关键前提不符，修正执行位置/交付前提后重跑；缺失 upstream/location 或任一 readiness 失败返回 `1`。只有一个 Admin 失败时先记录为单节点 Admin、节点网络或防火墙边界，这会造成负载均衡下的间歇故障。脚本只执行只读 `nginx -T` 解析并 dump 有效配置，同时读取最近 200 行相关日志；不 reload Nginx，也不写配置。
 
 ## 6. 122.233.30.4 后台（expected-host=.4）
 
@@ -109,9 +109,9 @@ bash /data/testagent/deploy/internal/diagnose-xxl-job-backend.sh \
   | tee /data/0709/xxl-job-diagnostics-backend-122.233.30.114.log
 ```
 
-成功条件：本机地址、advertised host、身份文件、systemd、唯一 Java、三个端口、两个 readiness、共享 Redis/MySQL 及到 `.4` 的三个对端端口全部通过；退出码为 `0`。
+成功条件：本机地址为 `.114`，advertised host、`.serverhost/.serverid` 与 `.114` 身份一致；systemd 只运行固定 JAR 且读取固定 backend.env；`8080/18080/9999` 由同一 MainPID 监听；平台与 Admin readiness 均为 UP；`.20:6379`、`.148:3306` 及 `.4` 的 `8080/18080/9999` TCP 可达；固定端口和共享配置摘要通过；退出码为 `0`。
 
-失败停止点与 `.4` 相同，但证据必须单独保存，不能写“同上”或复用 `.4` 的结论。若 `.4` 与 `.114` 只有一个节点失败，先按单节点处理；若两者相同项都失败，再转共享 Redis/MySQL、共同配置或网络边界。`4096-4115` 是 opencode 用户进程端口池，不是管理页首要链路，本排查不操作 worker/manager/Docker。
+失败停止点：退出码 `2` 表示当前机器不是 `.114`、参数非法、关键文件或命令缺失，必须停止并修正执行前提，不得换用 `.4` expected-host 绕过。`8080` 正常而 `18080` 失败时，停止在 `.114` 的 Admin 子上下文或其到 XXL MySQL 的链路；`18080` 正常而 `9999` 失败时，停止在 `.114` executor；到 `.4` 的任一端口失败时交节点网络/防火墙；共享 Redis/MySQL 端点或摘要不符时交 `.114` 应用配置负责人。任何 `[FAIL]` 都先保存 `/data/0709/xxl-job-diagnostics-backend-122.233.30.114.log` 并停止该节点推断，不复用 `.4` 结论。`4096-4115` 是 opencode 用户进程端口池，不是管理页首要链路，本排查不操作 worker/manager/Docker。
 
 ## 8. 122.233.30.20 Redis 的人工只读边界
 
@@ -156,23 +156,53 @@ mysql --host=122.233.30.148 --port=3306 --user='<只读账号>' --password \
 
 ## 10. 浏览器 SSO Network/Console/Cookie/CSP/postMessage
 
-**操作机器：用户浏览器。页面入口：实际使用的 `http://mimo.sdc.cs.icbc:9996` 或经批准的同源入口。** 打开开发者工具后再复现一次，不导出未脱敏 HAR。
+**操作机器：发生故障的用户浏览器。证据来源：本次事故/当前失败尝试已经保留的 DevTools Network、Console 与 Application 状态。** 只允许点击已存在的请求行、Headers/Cookies 面板、已有 Console 行和当前 Cookie 记录；这些是被动 UI 查看动作。禁止为了诊断主动刷新、重试、重放或重新进入页面，也不得点击“Replay/Resend”。如果 Network 未保留本次失败请求，立即停止并升级，不得为补证再次发起 SSO。不得导出未脱敏 HAR。
 
-Network 按顺序核对：平台签票 POST、iframe 的 `/xxl-job-admin/platform-sso/login` POST、随后 Admin GET/静态资源。签票 `401` 表示平台会话无效，`403` 表示不是 `SUPER_ADMIN` 或权限边界拒绝，`5xx` 指向签票服务/Redis；iframe 登录 `403` 指向票据消费失败，`503` 指向 JIT/MySQL/Admin，`502/504` 指向 Nginx upstream。不要复制请求体、票据或 Authorization。
+在已保留的 Network 中只识别如下被动顺序：`POST /api/internal/platform/xxl-job/sso-tickets`、`POST /xxl-job-admin/platform-sso/login`、后续 Admin `GET /xxl-job-admin/` 及静态资源，最后是页面已记录的同源 `postMessage` ready 握手。只记录路径、方法、状态码、时间与安全响应头；不得打开或复制请求体、票据、Cookie、Authorization 或响应中的敏感字段。
 
-Application/Cookie 只记录“是否落 Cookie”以及属性：Path 应为 `/xxl-job-admin/`，并检查 `HttpOnly`、`Secure`、`SameSite=Lax`。当前普通 HTTP 入口可能被浏览器拒收带 `Secure` 属性的 Admin Cookie，表现为登录 POST 成功后立即失效；这是需要升级的入口安全兼容风险，不得以删除 `Secure`、放宽 Cookie、改用不安全脚本或关闭浏览器安全策略作为现场修复。
+签票请求 `401` 表示平台会话无效，`403` 表示不是 `SUPER_ADMIN` 或权限边界拒绝，`5xx` 指向签票服务/Redis；iframe 登录 `403` 指向票据消费失败，`503` 指向 JIT/MySQL/Admin，`502/504` 指向 Nginx upstream。只从已保留的请求读取这些状态，不用任何 HTTP 客户端补发请求。
 
-在 Admin 文档响应头核对 `Content-Security-Policy: frame-ancestors 'self'` 与 `X-Frame-Options: SAMEORIGIN`。Console 保存同源、CSP、frame、Cookie 和资源加载错误；不要粘贴带凭据的对象。普通 iframe `load` 不等于登录成功，平台只在同源 iframe 收到登录成功页的 `postMessage` ready 握手后进入就绪态；所有 HTTP 都是 200 而约 15 秒后仍提示不可用时，优先检查 CSP、实际 origin、iframe 脚本、静态资源与 ready 消息。
+Application/Cookie 只查看当前是否已落 Cookie 及属性：Path 应为 `/xxl-job-admin/`，并检查 `HttpOnly`、`Secure`、`SameSite=Lax`。当前普通 HTTP 入口可能被浏览器拒收带 `Secure` 属性的 Admin Cookie，表现为已保留证据中登录 POST 成功后立即失效；这是需要升级的入口安全兼容风险，不得以删除 `Secure`、放宽 Cookie、改用不安全脚本或关闭浏览器安全策略作为现场修复。
 
-成功条件：签票和登录均成功，Admin 文档/资源返回 200，Cookie 被浏览器接受且属性完整，响应允许同源嵌入，无相关 Console 错误，并收到 ready 握手。任一步不满足时停在对应状态码/浏览器安全边界，不继续猜测任务调度。
+在已保留的 Admin 文档响应头中核对 `Content-Security-Policy: frame-ancestors 'self'` 与 `X-Frame-Options: SAMEORIGIN`。Console 只查看已存在的同源、CSP、frame、Cookie 和资源加载错误，不粘贴带凭据的对象。普通 iframe `load` 不等于登录成功，平台只在同源 iframe 收到登录成功页的 `postMessage` ready 握手后进入就绪态；已保留证据显示 HTTP 全部 200 但约 15 秒后仍不可用时，边界是 CSP、实际 iframe origin、脚本/静态资源或 ready 消息。
+
+成功条件：已保留证据完整呈现上述顺序；前两个 POST 与后续 Admin GET 成功；Cookie 已被接受且四个属性完整；CSP/X-Frame-Options 保持同源；Console 无相关错误；已有同源 ready 消息。失败停止点：任一状态码或安全属性不符就停在对应边界并升级；证据序列不完整同样停止，不主动补发，也不继续猜测任务调度。
 
 ## 11. executor 在线、任务不触发与 SKIPPED_LOCK_HELD
 
-先确认两后台脚本的 `9999` 都由各自 Java MainPID 监听，并确认 MySQL registry 中两个地址近期更新。然后由 DBA 只读 SQL 核对任务的 `trigger_status`、`schedule_type/schedule_conf`、`ROUND` 路由、`DISCARD_LATER` 阻塞策略、`DO_NOTHING` 失败策略与 retry `0`，并结合近 7 日 trigger/handle 计数判断是未调度、触发失败、处理中还是处理失败。
+只检查第 6、7、9 节已经收集的证据，禁止手动触发任务、修改任务策略、清锁或执行额外 SQL。
 
-后台脚本最近 15 分钟日志中重点看 `ExecutorRegistryThread`、`registry error`、`schedule`、`trigger`、`handle` 和 `Connection refused`。页面正常、registry 正常而无触发记录时交 Admin 调度/任务配置负责人；有 trigger 但 executor 无 handle 时交 executor 网络/access token；有 handle 失败时按脱敏错误和 task key 交业务 handler 负责人。
+**操作机器：`122.233.30.4` 后台。证据目录：`/data/0709`。**
 
-`GLOBAL_MUTEX` 任务未取得 Redis 全局锁时会正常结束并记录 `SKIPPED_LOCK_HELD`。这表示另一节点或另一轮已持锁，是防重正常结果，不应作为 executor 失败；应核对相邻执行记录是否存在真正执行的一次。禁止为了“验证”而手动触发、改任务策略或清锁。
+```bash
+cd /data/0709
+grep -Ei 'XXL executor 端口 9999|ExecutorRegistryThread|registry error|Connection refused|SKIPPED_LOCK_HELD|schedule|trigger|handle' \
+  /data/0709/xxl-job-diagnostics-backend-122.233.30.4.log
+```
+
+成功证据：存在 `.4` 的 executor `9999` 由 MainPID 监听的 PASS，且注册/调度相关行没有 `registry error` 或 `Connection refused`。停止点：grep 无输出、端口 FAIL 或出现连接/注册错误时，停止并把该绝对路径交 `.4` executor/网络负责人。
+
+**操作机器：`122.233.30.114` 后台。证据目录：`/data/0709`。**
+
+```bash
+cd /data/0709
+grep -Ei 'XXL executor 端口 9999|ExecutorRegistryThread|registry error|Connection refused|SKIPPED_LOCK_HELD|schedule|trigger|handle' \
+  /data/0709/xxl-job-diagnostics-backend-122.233.30.114.log
+```
+
+成功证据：存在 `.114` 的 executor `9999` 由 MainPID 监听的 PASS，且注册/调度相关行没有错误。停止点：grep 无输出、端口 FAIL 或出现连接/注册错误时，停止并把该绝对路径交 `.114` executor/网络负责人；不得用 `.4` 结果代替。
+
+**操作机器：`122.233.30.148` MySQL DBA 终端。证据目录：`/data/0709`。**
+
+```bash
+cd /data/0709
+grep -E '^(platform_task_key|opencode-runtime\.|scheduler\.|registry_group|EXECUTOR[[:space:]]|trigger_day)' \
+  /data/0709/xxl-job-diagnostics-mysql-122.233.30.148.log
+```
+
+成功证据：`test-agent-backend` registry 包含 `.4:9999` 和 `.114:9999` 的近期行；预期七个 task key 都有只读元数据；近 7 日统计可判断 trigger/handle 状态。停止点：任一 registry 节点或任务元数据缺失时停止并交 Admin/任务配置负责人；有 trigger 无 handle 时交 executor 网络/access token；handle 失败时按脱敏 task key 交业务 handler 负责人，不执行任务验证。
+
+`GLOBAL_MUTEX` 未取得锁时会正常结束并记录 `SKIPPED_LOCK_HELD`，表示另一节点或另一轮已持锁，是防重正常结果，不作为 executor 失败。只在上述已收集日志和 SQL 摘要中核对相邻记录，不能为补证触发任务。
 
 ## 12. 多 Admin 间歇故障与共享配置摘要比对
 
@@ -236,6 +266,37 @@ grep -E '^\[INFO\] (REDIS_ENDPOINT|XXL_MYSQL_ENDPOINT|TEST_AGENT_XXL_JOB_ACCESS_
 
 四份 Shell 证据与一份 DBA 证据固定保存在 `/data/0709/`：入口、`.2`、`.4`、`.114` 和 `.148`。脚本自身不会创建、打包、传输或删除证据；上面的 `tee` 才负责保存。外传前逐份搜索并人工复核 ticket、Cookie、Authorization、token、password、secret、URL query/hash、session digest、请求体和任务参数，任何命中都先脱敏。浏览器只提供裁剪后的截图、响应状态/安全头和脱敏 Console 文本，不提供原始 HAR。
 
+**操作机器：持有五份脱敏日志的受控取证终端。证据目录：`/data/0709`。** 以下扫描只以退出状态报告结果，不打印疑似敏感行：
+
+```bash
+cd /data/0709
+if awk '
+  {
+    line=tolower($0)
+    gsub(/(ticket|cookie|token|password|secret|authorization|platform_session_digest)[[:alnum:]_"'\''-]*[[:space:]]*[=:][[:space:]]*["'\'']*\[redacted(_query|_fragment)?\]["'\'']*/, "", line)
+    gsub(/[[:alnum:]_]*(token|password|secret|digest)[[:alnum:]_]*=(set length=[0-9]+ sha256=[0-9a-f]+|unset)/, "", line)
+    gsub(/\?\[redacted_query\]|#\[redacted_fragment\]/, "", line)
+    if (line ~ /authorization:[[:space:]]*bearer/) leaked=1
+    if (line ~ /(ticket|cookie|token|password|secret|authorization|platform_session_digest)[[:alnum:]_"'\''-]*[[:space:]]*[=:][[:space:]]*["'\'']*[^,;[:space:]"'\''}]/) leaked=1
+    if (line ~ /https?:\/\/[^[:space:]]*[?&][^[:space:]]*=/) leaked=1
+  }
+  END { exit leaked ? 1 : 0 }
+' \
+  /data/0709/xxl-job-diagnostics-entry.log \
+  /data/0709/xxl-job-diagnostics-frontend-122.233.30.2.log \
+  /data/0709/xxl-job-diagnostics-backend-122.233.30.4.log \
+  /data/0709/xxl-job-diagnostics-backend-122.233.30.114.log \
+  /data/0709/xxl-job-diagnostics-mysql-122.233.30.148.log \
+  >/dev/null; then
+  printf '[PASS] 五份证据未命中疑似敏感值\n'
+else
+  printf '[STOP] 证据疑似仍含敏感值；禁止显示命中内容，停止外传并交安全负责人复核\n' >&2
+  exit 1
+fi
+```
+
+成功条件：只输出 `[PASS]` 且退出 `0`，再由人工检查浏览器截图/Console 已裁剪且没有请求体、Cookie、票据或 Authorization。失败停止点：出现 `[STOP]` 或退出非零时不得用 grep/编辑器打印命中行，不得打包或外传，直接交安全负责人在受控终端复核。
+
 升级单使用以下模板：
 
 ```text
@@ -243,7 +304,7 @@ grep -E '^\[INFO\] (REDIS_ENDPOINT|XXL_MYSQL_ENDPOINT|TEST_AGENT_XXL_JOB_ACCESS_
 实际入口：域名 / IP（不含 query）
 账号角色：SUPER_ADMIN / 非 SUPER_ADMIN（不写账号凭据）
 浏览器与版本：
-稳定复现：是 / 否；最近成功时间：
+本次失败被动证据已保留：是 / 否；最近成功时间：
 入口脚本退出码与首个 FAIL：
 .2 脚本退出码与首个 FAIL：
 .4 脚本退出码与首个 FAIL：

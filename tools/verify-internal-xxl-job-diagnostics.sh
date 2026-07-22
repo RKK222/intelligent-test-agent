@@ -51,12 +51,17 @@ grep -Fq '临时夹具' "${ROOT_DIR}/docs/testing/xxl-job-integration.md" || {
   printf 'XXL-JOB 测试文档缺少临时夹具边界\n' >&2
   exit 1
 }
+grep -Fq '浏览器现场只能被动检查事故时已经保留的证据' "${ROOT_DIR}/docs/testing/xxl-job-integration.md" || {
+  printf 'XXL-JOB 测试文档缺少浏览器被动取证边界\n' >&2
+  exit 1
+}
 
 validate_strict_manual_contract() {
   local manual_file="$1"
-  local entry_section frontend_section backend_4_section backend_114_section
-  local redis_section mysql_section browser_section
+  local topology_section entry_section frontend_section backend_4_section backend_114_section
+  local redis_section mysql_section browser_section task_section evidence_section
 
+  topology_section="$(awk '/^## 1\./ { active=1 } /^## 2\./ { active=0 } active' "${manual_file}")"
   entry_section="$(awk '/^## 4\./ { active=1 } /^## 5\./ { active=0 } active' "${manual_file}")"
   frontend_section="$(awk '/^## 5\./ { active=1 } /^## 6\./ { active=0 } active' "${manual_file}")"
   backend_4_section="$(awk '/^## 6\./ { active=1 } /^## 7\./ { active=0 } active' "${manual_file}")"
@@ -64,24 +69,69 @@ validate_strict_manual_contract() {
   redis_section="$(awk '/^## 8\./ { active=1 } /^## 9\./ { active=0 } active' "${manual_file}")"
   mysql_section="$(awk '/^## 9\./ { active=1 } /^## 10\./ { active=0 } active' "${manual_file}")"
   browser_section="$(awk '/^## 10\./ { active=1 } /^## 11\./ { active=0 } active' "${manual_file}")"
+  task_section="$(awk '/^## 11\./ { active=1 } /^## 12\./ { active=0 } active' "${manual_file}")"
+  evidence_section="$(awk '/^## 14\./ { active=1 } /^## 15\./ { active=0 } active' "${manual_file}")"
 
+  grep -Fq '| 浏览器域名入口 | `http://mimo.sdc.cs.icbc:9996` |' <<<"${topology_section}" || return 1
+  grep -Fq '| 浏览器 IP 入口、实体 Nginx | `http://122.233.30.2:9996`、`122.233.30.2` |' <<<"${topology_section}" || return 1
+  grep -Fq '| 后台 A | `122.233.30.4:8080`，Admin `18080`，executor `9999` |' <<<"${topology_section}" || return 1
+  grep -Fq '| 后台 B | `122.233.30.114:8080`，Admin `18080`，executor `9999` |' <<<"${topology_section}" || return 1
+  grep -Fq '| 共享 Redis | `122.233.30.20:6379` |' <<<"${topology_section}" || return 1
+  grep -Fq '| 共享 XXL MySQL | `122.233.30.148:3306/xxl_job` |' <<<"${topology_section}" || return 1
+
+  [[ "$(grep -Fc 'bash /data/testagent/deploy/internal/diagnose-xxl-job-entry.sh' "${manual_file}")" -eq 1 ]] || return 1
+  [[ "$(grep -Fc 'bash /data/testagent/deploy/internal/diagnose-xxl-job-frontend.sh' "${manual_file}")" -eq 1 ]] || return 1
+  [[ "$(grep -Fc 'bash /data/testagent/deploy/internal/diagnose-xxl-job-backend.sh' "${manual_file}")" -eq 2 ]] || return 1
+  [[ "$(grep -Fc -- '--expected-host 122.233.30.4 --minutes 15' "${manual_file}")" -eq 2 ]] || return 1
+  [[ "$(grep -Fc -- '--expected-host 122.233.30.114 --minutes 15' "${manual_file}")" -eq 2 ]] || return 1
+  [[ "$(grep -Fc -- '--expected-host' "${manual_file}")" -eq 4 ]] || return 1
+  [[ "$(grep -Fc "mysql --host=122.233.30.148 --port=3306 --user='<只读账号>' --password" "${manual_file}")" -eq 1 ]] || return 1
+  [[ "$(grep -Fc 'tee /data/0709/xxl-job-diagnostics-entry.log' "${manual_file}")" -eq 1 ]] || return 1
+  [[ "$(grep -Fc 'tee /data/0709/xxl-job-diagnostics-frontend-122.233.30.2.log' "${manual_file}")" -eq 1 ]] || return 1
+  [[ "$(grep -Fc 'tee /data/0709/xxl-job-diagnostics-backend-122.233.30.4.log' "${manual_file}")" -eq 1 ]] || return 1
+  [[ "$(grep -Fc 'tee /data/0709/xxl-job-diagnostics-backend-122.233.30.114.log' "${manual_file}")" -eq 1 ]] || return 1
+
+  grep -Fq '**操作机器：实际浏览器网段内、已放置标准发布目录的 Linux 诊断终端。工作目录：`/data/testagent`。**' <<<"${entry_section}" || return 1
+  grep -Fq 'cd /data/testagent' <<<"${entry_section}" || return 1
+  grep -Fq 'set -o pipefail' <<<"${entry_section}" || return 1
   grep -Fq 'bash /data/testagent/deploy/internal/diagnose-xxl-job-entry.sh' <<<"${entry_section}" || return 1
   grep -Fq 'tee /data/0709/xxl-job-diagnostics-entry.log' <<<"${entry_section}" || return 1
+  grep -Fq '**操作机器：`122.233.30.2` 前端。工作目录：`/data/testagent`。**' <<<"${frontend_section}" || return 1
+  grep -Fq 'cd /data/testagent' <<<"${frontend_section}" || return 1
+  grep -Fq 'set -o pipefail' <<<"${frontend_section}" || return 1
   grep -Fq 'bash /data/testagent/deploy/internal/diagnose-xxl-job-frontend.sh' <<<"${frontend_section}" || return 1
   grep -Fq 'tee /data/0709/xxl-job-diagnostics-frontend-122.233.30.2.log' <<<"${frontend_section}" || return 1
+  grep -Fq '只执行只读 `nginx -T` 解析并 dump 有效配置' <<<"${frontend_section}" || return 1
+  if grep -Eqi '不(执行|做)配置测试' <<<"${frontend_section}"; then
+    return 1
+  fi
 
+  grep -Fq '**操作机器：`122.233.30.4` 后台。工作目录：`/data/testagent`。**' <<<"${backend_4_section}" || return 1
+  grep -Fq 'cd /data/testagent' <<<"${backend_4_section}" || return 1
+  grep -Fq 'set -o pipefail' <<<"${backend_4_section}" || return 1
   grep -Fq 'bash /data/testagent/deploy/internal/diagnose-xxl-job-backend.sh' <<<"${backend_4_section}" || return 1
   grep -Fq -- '--expected-host 122.233.30.4 --minutes 15' <<<"${backend_4_section}" || return 1
   grep -Fq 'tee /data/0709/xxl-job-diagnostics-backend-122.233.30.4.log' <<<"${backend_4_section}" || return 1
+  grep -Fq '**操作机器：`122.233.30.114` 后台。工作目录：`/data/testagent`。**' <<<"${backend_114_section}" || return 1
+  grep -Fq 'cd /data/testagent' <<<"${backend_114_section}" || return 1
+  grep -Fq 'set -o pipefail' <<<"${backend_114_section}" || return 1
   grep -Fq 'bash /data/testagent/deploy/internal/diagnose-xxl-job-backend.sh' <<<"${backend_114_section}" || return 1
   grep -Fq -- '--expected-host 122.233.30.114 --minutes 15' <<<"${backend_114_section}" || return 1
   grep -Fq 'tee /data/0709/xxl-job-diagnostics-backend-122.233.30.114.log' <<<"${backend_114_section}" || return 1
+  grep -Fq '退出码 `2`' <<<"${backend_114_section}" || return 1
+  grep -Fq '`8080` 正常而 `18080` 失败' <<<"${backend_114_section}" || return 1
+  grep -Fq '`18080` 正常而 `9999` 失败' <<<"${backend_114_section}" || return 1
+  grep -Fq '成功条件：本机地址为 `.114`' <<<"${backend_114_section}" || return 1
+  grep -Fq '任何 `[FAIL]` 都先保存 `/data/0709/xxl-job-diagnostics-backend-122.233.30.114.log` 并停止该节点推断' <<<"${backend_114_section}" || return 1
 
   if grep -Eqi 'redis-cli|(^|[^[:alnum:]_])(GET|GETDEL|KEYS|SCAN)([^[:alnum:]_]|$)|test-agent:[^[:space:]]*(ticket|session)|(ticket|session)[_ -]*key' <<<"${redis_section}"; then
     return 1
   fi
 
   grep -Fq "mysql --host=122.233.30.148 --port=3306 --user='<只读账号>' --password" <<<"${mysql_section}" || return 1
+  grep -Fq '**操作机器：`122.233.30.148` MySQL DBA 终端。工作目录：`/data/testagent`。**' <<<"${mysql_section}" || return 1
+  grep -Fq 'cd /data/testagent' <<<"${mysql_section}" || return 1
+  grep -Fq 'set -o pipefail' <<<"${mysql_section}" || return 1
   grep -Fq -- '--database=xxl_job' <<<"${mysql_section}" || return 1
   grep -Fq '< /data/testagent/deploy/internal/xxl-job-readonly-check.sql' <<<"${mysql_section}" || return 1
   if grep -Eq -- '--password=' <<<"${mysql_section}"; then
@@ -89,12 +139,59 @@ validate_strict_manual_contract() {
   fi
 
   grep -Fq '不得以删除 `Secure`' <<<"${browser_section}" || return 1
-  grep -Fq '不导出未脱敏 HAR' <<<"${browser_section}" || return 1
+  grep -Fq '不得导出未脱敏 HAR' <<<"${browser_section}" || return 1
   grep -Fq '`postMessage` ready' <<<"${browser_section}" || return 1
-  if grep -Eiq '^[[:space:]]*(sudo[[:space:]]+)?(systemctl|service|docker|redis-cli|nginx)[[:space:]]' "${manual_file}"; then
+  grep -Fq "Content-Security-Policy: frame-ancestors 'self'" <<<"${browser_section}" || return 1
+  grep -Fq 'X-Frame-Options: SAMEORIGIN' <<<"${browser_section}" || return 1
+  grep -Fq '`POST /api/internal/platform/xxl-job/sso-tickets`' <<<"${browser_section}" || return 1
+  grep -Fq '`POST /xxl-job-admin/platform-sso/login`' <<<"${browser_section}" || return 1
+  grep -Fq '后续 Admin `GET /xxl-job-admin/`' <<<"${browser_section}" || return 1
+  grep -Fq '禁止为了诊断主动刷新、重试、重放或重新进入页面' <<<"${browser_section}" || return 1
+  grep -Fq '如果 Network 未保留本次失败请求，立即停止并升级' <<<"${browser_section}" || return 1
+  if grep -Eqi '打开开发者工具后再复现|刷新页面并|重新加载页面并|重试(该|上述|SSO|登录|请求)|重放(该|上述|SSO|登录|请求)|再次(打开|进入|访问).*(复现|重试)|请.*复现|复现一次|reproduce|retry the|reload the' <<<"${browser_section}"; then
     return 1
   fi
-  if grep -Eiq '^[[:space:]]*curl[[:space:]].*(sso-tickets|platform-sso)' "${manual_file}"; then
+  if grep -Eqi '删除.*(Content-Security-Policy|X-Frame-Options)|关闭.*(CSP|Content-Security-Policy|X-Frame-Options)|frame-ancestors[[:space:]]+\*|放宽.*(CSP|frame|iframe|origin)|允许跨源[[:space:]]*iframe' <<<"${browser_section}"; then
+    return 1
+  fi
+
+  grep -Fq '**操作机器：`122.233.30.4` 后台。证据目录：`/data/0709`。**' <<<"${task_section}" || return 1
+  grep -Fq '/data/0709/xxl-job-diagnostics-backend-122.233.30.4.log' <<<"${task_section}" || return 1
+  grep -Fq '**操作机器：`122.233.30.114` 后台。证据目录：`/data/0709`。**' <<<"${task_section}" || return 1
+  grep -Fq '/data/0709/xxl-job-diagnostics-backend-122.233.30.114.log' <<<"${task_section}" || return 1
+  grep -Fq '**操作机器：`122.233.30.148` MySQL DBA 终端。证据目录：`/data/0709`。**' <<<"${task_section}" || return 1
+  grep -Fq '/data/0709/xxl-job-diagnostics-mysql-122.233.30.148.log' <<<"${task_section}" || return 1
+  grep -Fq '禁止手动触发任务' <<<"${task_section}" || return 1
+  [[ "$(grep -Fc '成功证据：' <<<"${task_section}")" -eq 3 ]] || return 1
+  [[ "$(grep -Fo '停止点：' <<<"${task_section}" | wc -l | tr -d ' ')" -eq 3 ]] || return 1
+  grep -Fq '停止并把该绝对路径交 `.4` executor/网络负责人' <<<"${task_section}" || return 1
+  grep -Fq '停止并把该绝对路径交 `.114` executor/网络负责人' <<<"${task_section}" || return 1
+  grep -Fq '任一 registry 节点或任务元数据缺失时停止' <<<"${task_section}" || return 1
+
+  grep -Fq '**操作机器：持有五份脱敏日志的受控取证终端。证据目录：`/data/0709`。**' <<<"${evidence_section}" || return 1
+  for evidence_file in \
+    xxl-job-diagnostics-entry.log \
+    xxl-job-diagnostics-frontend-122.233.30.2.log \
+    xxl-job-diagnostics-backend-122.233.30.4.log \
+    xxl-job-diagnostics-backend-122.233.30.114.log \
+    xxl-job-diagnostics-mysql-122.233.30.148.log; do
+    grep -Fq "/data/0709/${evidence_file}" <<<"${evidence_section}" || return 1
+  done
+  grep -Fq '>/dev/null' <<<"${evidence_section}" || return 1
+  grep -Fq '[STOP] 证据疑似仍含敏感值' <<<"${evidence_section}" || return 1
+  grep -Fq '成功条件：只输出 `[PASS]` 且退出 `0`' <<<"${evidence_section}" || return 1
+  grep -Fq '失败停止点：出现 `[STOP]` 或退出非零时' <<<"${evidence_section}" || return 1
+
+  if grep -Eiq '^[[:space:]]*(curl|wget|http|httpie|xh|Invoke-WebRequest|python3?)[[:space:]].*(sso-tickets|platform-sso)' "${manual_file}"; then
+    return 1
+  fi
+  if grep -Eiq '^[[:space:]]*(xxl-job(-cli)?|job-cli)[[:space:]]+(trigger|run)|^[[:space:]]*(curl|wget|http|httpie|xh)[[:space:]].*/(trigger|run)' "${manual_file}"; then
+    return 1
+  fi
+  if grep -Eqi '^[[:space:]]*(INSERT|UPDATE|DELETE|REPLACE|MERGE|TRUNCATE|ALTER|CREATE|DROP|CALL|GRANT|REVOKE|LOCK|UNLOCK|SET[[:space:]]+GLOBAL)([[:space:];]|$)' "${manual_file}"; then
+    return 1
+  fi
+  if grep -Eqi '^[[:space:]]*(sudo[[:space:]]+)?(systemctl|service)[[:space:]]+(start|stop|restart|reload)|^[[:space:]]*nginx[[:space:]].*(-s[[:space:]]+reload|reload)|^[[:space:]]*(sed[[:space:]]+-i|perl[[:space:]]+-pi)|^[[:space:]]*(echo|printf|cat)[[:space:]].*>+[[:space:]]*/data/testagent/(config|deploy)|^[[:space:]]*(cp|mv|install)[[:space:]].*[[:space:]]/data/testagent/config/|(^|[[:space:]])>>[[:space:]]*/data/testagent/(config|deploy)' "${manual_file}"; then
     return 1
   fi
 }
@@ -113,6 +210,23 @@ UNSAFE_HOST_MANUAL="${TMP_ROOT}/unsafe-host-manual.md"
 UNSAFE_REDIS_MANUAL="${TMP_ROOT}/unsafe-redis-manual.md"
 UNSAFE_PASSWORD_MANUAL="${TMP_ROOT}/unsafe-password-manual.md"
 UNSAFE_SECURE_MANUAL="${TMP_ROOT}/unsafe-secure-manual.md"
+UNSAFE_ACTIVE_REPLAY_MANUAL="${TMP_ROOT}/unsafe-active-replay-manual.md"
+UNSAFE_HTTP_CLIENT_MANUAL="${TMP_ROOT}/unsafe-http-client-manual.md"
+UNSAFE_TASK_TRIGGER_MANUAL="${TMP_ROOT}/unsafe-task-trigger-manual.md"
+UNSAFE_SQL_DML_MANUAL="${TMP_ROOT}/unsafe-sql-dml-manual.md"
+UNSAFE_CONFIG_WRITE_MANUAL="${TMP_ROOT}/unsafe-config-write-manual.md"
+UNSAFE_SERVICE_RELOAD_MANUAL="${TMP_ROOT}/unsafe-service-reload-manual.md"
+UNSAFE_FRAME_POLICY_MANUAL="${TMP_ROOT}/unsafe-frame-policy-manual.md"
+UNSAFE_DOMAIN_MANUAL="${TMP_ROOT}/unsafe-domain-manual.md"
+UNSAFE_PORT_MANUAL="${TMP_ROOT}/unsafe-port-manual.md"
+UNSAFE_DATABASE_MANUAL="${TMP_ROOT}/unsafe-database-manual.md"
+UNSAFE_EXTRA_BACKEND_MANUAL="${TMP_ROOT}/unsafe-extra-backend-manual.md"
+UNSAFE_MISSING_TASK_BOUNDARIES_MANUAL="${TMP_ROOT}/unsafe-missing-task-boundaries-manual.md"
+UNSAFE_MISSING_EVIDENCE_BOUNDARIES_MANUAL="${TMP_ROOT}/unsafe-missing-evidence-boundaries-manual.md"
+UNSAFE_MISSING_114_SUCCESS_MANUAL="${TMP_ROOT}/unsafe-missing-114-success-manual.md"
+UNSAFE_REOPEN_BROWSER_MANUAL="${TMP_ROOT}/unsafe-reopen-browser-manual.md"
+UNSAFE_NGINX_WORDING_MANUAL="${TMP_ROOT}/unsafe-nginx-wording-manual.md"
+SAFE_PASSIVE_PATH_MANUAL="${TMP_ROOT}/safe-passive-path-manual.md"
 awk '
   !changed && /--expected-host 122\.233\.30\.4 --minutes 15/ {
     sub(/--expected-host 122\.233\.30\.4 --minutes 15/, "--expected-host 122.233.30.114 --minutes 15")
@@ -137,17 +251,131 @@ awk '
   }
   { print }
 ' "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_SECURE_MANUAL}"
+awk '/^## 11\./ { print "打开开发者工具后刷新页面并重试上述 SSO 请求。" } { print }' \
+  "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_ACTIVE_REPLAY_MANUAL}"
+awk '/^## 11\./ { print "wget --post-data=diagnostic http://mimo.sdc.cs.icbc:9996/api/internal/platform/xxl-job/sso-tickets" } { print }' \
+  "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_HTTP_CLIENT_MANUAL}"
+awk '/^## 12\./ { print "xxl-job-cli trigger diagnostic-task" } { print }' \
+  "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_TASK_TRIGGER_MANUAL}"
+awk '/^## 10\./ { print "UPDATE xxl_job_info SET trigger_status = 1;" } { print }' \
+  "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_SQL_DML_MANUAL}"
+awk '/^## 8\./ { print "sed -i s/old/new/ /data/testagent/config/backend.env" } { print }' \
+  "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_CONFIG_WRITE_MANUAL}"
+awk '/^## 6\./ { print "systemctl reload nginx" } { print }' \
+  "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_SERVICE_RELOAD_MANUAL}"
+awk '/^## 11\./ { print "删除 Content-Security-Policy 和 X-Frame-Options，将 frame-ancestors *，允许跨源 iframe。" } { print }' \
+  "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_FRAME_POLICY_MANUAL}"
+awk '
+  !changed && /http:\/\/mimo\.sdc\.cs\.icbc:9996/ {
+    sub(/mimo\.sdc\.cs\.icbc/, "unsafe.example.internal")
+    changed=1
+  }
+  { print }
+' "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_DOMAIN_MANUAL}"
+awk '
+  /^## 1\./ { topology=1 }
+  /^## 2\./ { topology=0 }
+  topology && !changed && /122\.233\.30\.2:9996/ {
+    sub(/122\.233\.30\.2:9996/, "122.233.30.2:9997")
+    changed=1
+  }
+  { print }
+' "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_PORT_MANUAL}"
+awk '
+  /^## 1\./ { topology=1 }
+  /^## 2\./ { topology=0 }
+  topology && !changed && /3306\/xxl_job/ {
+    sub(/3306\/xxl_job/, "3306/unsafe_xxl_job")
+    changed=1
+  }
+  { print }
+' "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_DATABASE_MANUAL}"
+awk '/^## 8\./ { print "bash /data/testagent/deploy/internal/diagnose-xxl-job-backend.sh --expected-host 122.233.30.5 --minutes 15" } { print }' \
+  "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_EXTRA_BACKEND_MANUAL}"
+awk '
+  /^## 11\./ { section=1 }
+  /^## 12\./ { section=0 }
+  section && /^(成功证据|停止点)：/ { next }
+  { print }
+' "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_MISSING_TASK_BOUNDARIES_MANUAL}"
+awk '
+  /^## 14\./ { section=1 }
+  /^## 15\./ { section=0 }
+  section && /^(成功条件|失败停止点)：/ { next }
+  { print }
+' "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_MISSING_EVIDENCE_BOUNDARIES_MANUAL}"
+awk '
+  /^## 7\./ { section=1 }
+  /^## 8\./ { section=0 }
+  section && /^成功条件：/ { next }
+  { print }
+' "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_MISSING_114_SUCCESS_MANUAL}"
+awk '/^## 11\./ { print "请再次打开管理页以复现一次 SSO 故障。" } { print }' \
+  "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_REOPEN_BROWSER_MANUAL}"
+awk '/^## 6\./ { print "该脚本不执行配置测试。" } { print }' \
+  "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_NGINX_WORDING_MANUAL}"
+awk '/^## 11\./ { print "被动识别路径：\n`POST /api/internal/platform/xxl-job/sso-tickets`\n`POST /xxl-job-admin/platform-sso/login`" } { print }' \
+  "${TROUBLESHOOTING_MANUAL}" >"${SAFE_PASSIVE_PATH_MANUAL}"
 
 for unsafe_manual in \
   "${UNSAFE_HOST_MANUAL}" \
   "${UNSAFE_REDIS_MANUAL}" \
   "${UNSAFE_PASSWORD_MANUAL}" \
-  "${UNSAFE_SECURE_MANUAL}"; do
+  "${UNSAFE_SECURE_MANUAL}" \
+  "${UNSAFE_ACTIVE_REPLAY_MANUAL}" \
+  "${UNSAFE_HTTP_CLIENT_MANUAL}" \
+  "${UNSAFE_TASK_TRIGGER_MANUAL}" \
+  "${UNSAFE_SQL_DML_MANUAL}" \
+  "${UNSAFE_CONFIG_WRITE_MANUAL}" \
+  "${UNSAFE_SERVICE_RELOAD_MANUAL}" \
+  "${UNSAFE_FRAME_POLICY_MANUAL}" \
+  "${UNSAFE_DOMAIN_MANUAL}" \
+  "${UNSAFE_PORT_MANUAL}" \
+  "${UNSAFE_DATABASE_MANUAL}" \
+  "${UNSAFE_EXTRA_BACKEND_MANUAL}" \
+  "${UNSAFE_MISSING_TASK_BOUNDARIES_MANUAL}" \
+  "${UNSAFE_MISSING_EVIDENCE_BOUNDARIES_MANUAL}" \
+  "${UNSAFE_MISSING_114_SUCCESS_MANUAL}" \
+  "${UNSAFE_REOPEN_BROWSER_MANUAL}" \
+  "${UNSAFE_NGINX_WORDING_MANUAL}"; do
   if validate_strict_manual_contract "${unsafe_manual}" >/dev/null 2>&1; then
     printf '严格文档契约错误接受危险变异夹具: %s\n' "${unsafe_manual##*/}" >&2
     exit 1
   fi
 done
+
+if ! validate_strict_manual_contract "${SAFE_PASSIVE_PATH_MANUAL}" >/dev/null 2>&1; then
+  printf '严格文档契约错误拒绝合法被动路径夹具\n' >&2
+  exit 1
+fi
+
+EVIDENCE_AWK_PROGRAM="$(awk '
+  $0 == "if awk \047" { active=1; next }
+  active && $0 == "\047 \\" { exit }
+  active { print }
+' "${TROUBLESHOOTING_MANUAL}")"
+[[ -n "${EVIDENCE_AWK_PROGRAM}" ]] || {
+  printf '无法提取正式手册中的无输出证据扫描器\n' >&2
+  exit 1
+}
+EVIDENCE_SCAN_CLEAN_FIXTURE="${TMP_ROOT}/evidence-scan-clean.log"
+EVIDENCE_SCAN_UNSAFE_FIXTURE="${TMP_ROOT}/evidence-scan-unsafe.log"
+cat >"${EVIDENCE_SCAN_CLEAN_FIXTURE}" <<'EOF'
+TEST_AGENT_XXL_JOB_ACCESS_TOKEN=SET length=32 sha256=0123456789abcdef
+Authorization=[REDACTED]
+https://diag.example/xxl-job-admin/?[REDACTED_QUERY]
+EOF
+cat >"${EVIDENCE_SCAN_UNSAFE_FIXTURE}" <<'EOF'
+token=diagnostic-raw-secret https://diag.example/xxl-job-admin/?[REDACTED_QUERY]
+EOF
+if ! awk "${EVIDENCE_AWK_PROGRAM}" "${EVIDENCE_SCAN_CLEAN_FIXTURE}" >/dev/null; then
+  printf '正式手册证据扫描器错误拒绝安全摘要夹具\n' >&2
+  exit 1
+fi
+if awk "${EVIDENCE_AWK_PROGRAM}" "${EVIDENCE_SCAN_UNSAFE_FIXTURE}" >/dev/null; then
+  printf '正式手册证据扫描器错误接受同一行明文与脱敏标记并存夹具\n' >&2
+  exit 1
+fi
 
 cat >"${FAKE_BIN}/getent" <<'EOF'
 #!/usr/bin/env bash
