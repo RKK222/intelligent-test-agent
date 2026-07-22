@@ -103,13 +103,12 @@ deploy/internal/dist/test-agent-internal-release.zip
 deploy/internal/dist/test-agent-internal-release.zip.sha256
 ```
 
-将同一份 zip 和校验文件复制到：
+平台 zip 和校验文件只复制到：
 
 ```text
 122.233.30.2:/data/0709/
 122.233.30.4:/data/0709/
 122.233.30.114:/data/0709/
-122.233.30.147:/data/0709/
 ```
 
 每台都执行：
@@ -416,12 +415,12 @@ bash /tmp/deploy-internal-frontend.sh \
 
 ### 7.1 使用逐机配置包
 
-后续 U 盘交付物固定为 `test-agent-two-backend-complete.zip` 和配套
-`test-agent-two-backend-complete.zip.sha256`，ZIP 内顶层目录固定为
-`test-agent-two-backend-complete/`，不再在文件名或目录名中添加日期、`v2`、`v3`。企业内部中转机和
-三台应用服务器和 `.147` 数据库服务器可以长期复用同一组校验、解压和 `scp` 命令。
+后续 U 盘交付物固定分为两组：平台包 `test-agent-two-backend-complete.zip` 及 SHA，只发到
+`.4/.114/.2`；MySQL 包 `test-agent-mysql-offline.zip` 及 SHA，只发到 `.147`。两个 ZIP 的顶层目录
+分别固定为 `test-agent-two-backend-complete/` 和 `test-agent-mysql-offline/`，不添加日期、`v2`、`v3`。
+普通平台升级不再传输或解压 MySQL 包。
 
-四台服务器都上传并校验同一个外层 ZIP 后，用无参数入口执行。入口脚本从本机网卡识别 IP，自动选择并
+各服务器上传并校验本机对应的外层 ZIP 后，用无参数入口执行。入口脚本从本机网卡识别 IP，自动选择并
 校验节点包、解压节点配置，然后连续完成 `--validate-only`、正式部署和 `--verify-only`。任一步失败都会
 返回非零；Java、Docker、Nginx 和最终校验输出统一写入 `/data/0709/deploy-<本机IP>.log`，不会再出现
 只执行了一个空 `bash`、但实际服务没有重启的情况。
@@ -430,16 +429,20 @@ bash /tmp/deploy-internal-frontend.sh \
 
 ```bash
 cd /data/0709
-sha256sum -c test-agent-two-backend-complete.zip.sha256
-unzip -oq test-agent-two-backend-complete.zip
-cd /data/0709/test-agent-two-backend-complete
+sha256sum -c test-agent-mysql-offline.zip.sha256
+unzip -oq test-agent-mysql-offline.zip
+cd /data/0709/test-agent-mysql-offline
 bash deploy-mysql-node.sh
 ```
 
-该命令离线导入包内 `mysql:8.4` linux/amd64 镜像，在 `/data/testagent/mysql` 持久化数据，初始化
+该命令离线导入独立包内 `mysql:8.4` linux/amd64 镜像，在 `/data/testagent/mysql` 持久化数据，初始化
 `xxl_job` 库和 `xxl_job` 账号。root 密码和应用密码已由打包阶段分别生成；应用密码同时写入 `.4`、
 `.114` 的敏感 `backend.env`，脚本不会打印。已有数据目录不会被删除，若现场曾用另一组密码初始化，
 验证会失败并要求先核对旧凭据，不会自动重建数据库。
+
+脚本成功时会输出容器 ID 和 `docker ps -a` 状态；失败时会保留已退出容器并输出状态、退出码及末尾
+80 行日志。不要只用 `docker ps` 判断，因为它不会显示已退出容器。企业 Linux 开启 SELinux 时脚本
+自动为独占数据目录添加私有容器标签。
 
 企业上午已经部署过旧包时，PostgreSQL 中可能已有 `V20260721213000`。本包把尚未交付的夜间 XXL
 迁移固定为更晚的 `V20260722130000`，Flyway 会正常顺序执行；不要在企业环境添加
@@ -479,7 +482,8 @@ cd /data/0709/test-agent-two-backend-complete
 bash deploy-frontend-node.sh
 ```
 
-正式部署必须由 `root` 执行。外层包内已有完整发布 ZIP，四台服务器不再另外复制内层 ZIP 或逐机包。
+正式部署必须由 `root` 执行。平台外层包内已有完整平台发布 ZIP，三台应用服务器不再另外复制内层 ZIP
+或逐机包；`.147` 只使用独立 MySQL 外层包。
 后台节点包包含真实数据库密码和 token，权限与传输方式按敏感交付物处理；RSA 只使用发布 JAR 内的
 `BOOT-INF/classes/rsa-private.key`，不会生成 RSA env 或外置私钥路径。
 
@@ -488,7 +492,7 @@ bash deploy-frontend-node.sh
 
 ### 7.2 后续增加一台全新后台
 
-把同一个外层 ZIP 和 SHA 上传到新后台并解压。初始化脚本从新服务器网卡自动取
+把平台外层 ZIP 和 SHA 上传到新后台并解压。初始化脚本从新服务器网卡自动取
 `122.233.30.x`，以包内 `.4` 的真实配置为基线，只替换本机 `TEST_AGENT_SERVER_ADVERTISED_HOST` 和
 `TEST_AGENT_LINUX_SERVER_ID`；`docker.env` 沿用集群相同 manager token，整个过程不打印密码或 token，
 生成的节点配置包仍强制不超过 `1 MiB`：

@@ -11,8 +11,9 @@ usage() {
   cat <<'USAGE'
 Usage: package-two-backend-complete.sh --nodes-dir <path> [options]
 
-Assemble the standard enterprise release ZIP and the four prepared node
-packages into one fixed-name USB delivery bundle.
+Assemble the platform release ZIP and the three prepared application node
+packages into one fixed-name USB delivery bundle. The .147 MySQL node package
+is validated only for credential consistency and is not included.
 
 Options:
   --release-archive <path>  Standard release ZIP. Default: deploy/internal/dist/test-agent-internal-release.zip.
@@ -126,8 +127,6 @@ require_file "${RELEASE_ARCHIVE}"
 require_file "${SCRIPT_DIR}/deploy-node-common.sh"
 require_file "${SCRIPT_DIR}/deploy-backend-node.sh"
 require_file "${SCRIPT_DIR}/deploy-frontend-node.sh"
-require_file "${SCRIPT_DIR}/deploy-mysql-node.sh"
-require_file "${SCRIPT_DIR}/deploy-xxl-job-mysql.sh"
 require_file "${SCRIPT_DIR}/init-backend-node-config.sh"
 require_file "${SCRIPT_DIR}/register-backend-on-frontend.sh"
 
@@ -152,9 +151,11 @@ require_archive_entry "${release_listing}" dist/backend/test-agent-app.jar
 require_archive_entry "${release_listing}" dist/test-agent-frontend-dist.tar.gz
 require_archive_entry "${release_listing}" dist/test-agent-programs.tar.gz
 require_archive_entry "${release_listing}" dist/test-agent-opencode-worker_internal-linux-amd64.tar
-require_archive_entry "${release_listing}" dist/mysql_8.4-linux-amd64.tar
 require_archive_entry "${release_listing}" deploy/internal/deploy-multi-backend-node.sh
-require_archive_entry "${release_listing}" deploy/internal/deploy-xxl-job-mysql.sh
+if grep -Fx 'dist/mysql_8.4-linux-amd64.tar' <<<"${release_listing}" >/dev/null; then
+  echo "Platform release archive must not contain the standalone MySQL image" >&2
+  exit 1
+fi
 
 # 完整外层包仍按 RSA 密钥交付物管理，封装前必须确认内层 JAR 的固定资源存在。
 unzip -p "${RELEASE_ARCHIVE}" dist/backend/test-agent-app.jar >"${TMP_ROOT}/test-agent-app.jar"
@@ -273,7 +274,6 @@ install -m 0644 "${SCRIPT_DIR}/MULTI-BACKEND.md" "${BUNDLE_ROOT}/START-HERE.md"
 install -m 0644 "${SCRIPT_DIR}/deploy-node-common.sh" "${BUNDLE_ROOT}/deploy-node-common.sh"
 install -m 0755 "${SCRIPT_DIR}/deploy-backend-node.sh" "${BUNDLE_ROOT}/deploy-backend-node.sh"
 install -m 0755 "${SCRIPT_DIR}/deploy-frontend-node.sh" "${BUNDLE_ROOT}/deploy-frontend-node.sh"
-install -m 0755 "${SCRIPT_DIR}/deploy-mysql-node.sh" "${BUNDLE_ROOT}/deploy-mysql-node.sh"
 install -m 0755 "${SCRIPT_DIR}/init-backend-node-config.sh" "${BUNDLE_ROOT}/init-backend-node-config.sh"
 install -m 0755 "${SCRIPT_DIR}/register-backend-on-frontend.sh" \
   "${BUNDLE_ROOT}/register-backend-on-frontend.sh"
@@ -294,13 +294,8 @@ repack_node() {
   if [[ "${node_dir}" == "test-agent-two-backend-122.233.30.2" ]]; then
     normalize_frontend_server_routes "${node_root}/${node_dir}/config/nginx.env"
   fi
-  if [[ "${node_dir}" == "test-agent-two-backend-122.233.30.147-mysql" ]]; then
-    install -m 0755 "${SCRIPT_DIR}/deploy-xxl-job-mysql.sh" \
-      "${node_root}/${node_dir}/deploy-xxl-job-mysql.sh"
-  else
-    install -m 0755 "${SCRIPT_DIR}/deploy-multi-backend-node.sh" \
-      "${node_root}/${node_dir}/deploy-multi-backend-node.sh"
-  fi
+  install -m 0755 "${SCRIPT_DIR}/deploy-multi-backend-node.sh" \
+    "${node_root}/${node_dir}/deploy-multi-backend-node.sh"
   install -m 0644 "${SCRIPT_DIR}/MULTI-BACKEND.md" \
     "${node_root}/${node_dir}/MULTI-BACKEND.md"
   tar -C "${node_root}" -czf "${target}" "${node_dir}"
@@ -312,7 +307,6 @@ repack_node() {
 repack_node "${NODE_4}" test-agent-two-backend-122.233.30.4
 repack_node "${NODE_114}" test-agent-two-backend-122.233.30.114
 repack_node "${NODE_2}" test-agent-two-backend-122.233.30.2
-repack_node "${NODE_MYSQL}" test-agent-two-backend-122.233.30.147-mysql
 
 TMP_ARCHIVE="${TMP_ROOT}/${BUNDLE_NAME}.zip"
 (cd "${TMP_ROOT}" && zip -qr "${TMP_ARCHIVE}" "${BUNDLE_NAME}")

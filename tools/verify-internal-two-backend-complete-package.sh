@@ -38,9 +38,7 @@ printf 'fixture-rsa-private-key\n' >"${JAR_ROOT}/BOOT-INF/classes/rsa-private.ke
 printf 'frontend\n' >"${RELEASE_ROOT}/dist/test-agent-frontend-dist.tar.gz"
 printf 'programs\n' >"${RELEASE_ROOT}/dist/test-agent-programs.tar.gz"
 printf 'worker\n' >"${RELEASE_ROOT}/dist/test-agent-opencode-worker_internal-linux-amd64.tar"
-printf 'mysql\n' >"${RELEASE_ROOT}/dist/mysql_8.4-linux-amd64.tar"
 printf '#!/usr/bin/env bash\n' >"${RELEASE_ROOT}/deploy/internal/deploy-multi-backend-node.sh"
-printf '#!/usr/bin/env bash\n' >"${RELEASE_ROOT}/deploy/internal/deploy-xxl-job-mysql.sh"
 (cd "${RELEASE_ROOT}" && zip -qr "${RELEASE_ARCHIVE}" .)
 write_checksum "${RELEASE_ARCHIVE}"
 
@@ -130,14 +128,16 @@ grep -Fxq 'test-agent-two-backend-complete/START-HERE.md' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/deploy-node-common.sh' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/deploy-backend-node.sh' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/deploy-frontend-node.sh' <<<"${listing}"
-grep -Fxq 'test-agent-two-backend-complete/deploy-mysql-node.sh' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/init-backend-node-config.sh' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/register-backend-on-frontend.sh' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/test-agent-internal-release.zip' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.30.4-SENSITIVE.tar.gz' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.30.114-SENSITIVE.tar.gz' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.30.2.tar.gz' <<<"${listing}"
-grep -Fxq 'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.30.147-mysql-SENSITIVE.tar.gz' <<<"${listing}"
+if grep -Eq 'mysql_8\.4|deploy-mysql-node|122\.233\.30\.147-mysql' <<<"${listing}"; then
+  echo "Platform bundle unexpectedly contains standalone MySQL artifacts" >&2
+  exit 1
+fi
 if grep -Eq '202[0-9]|-v[0-9]+/' <<<"${listing}"; then
   echo "Fixed-name bundle unexpectedly contains a dated/versioned root" >&2
   exit 1
@@ -161,4 +161,4 @@ fi
 run_package >/dev/null
 test "$(find "${OUTPUT_DIR}" -maxdepth 1 -type f -name 'test-agent-two-backend-complete*.zip' | wc -l | tr -d '[:space:]')" = 1
 
-echo 'Fixed-name complete two-backend bundle, checksum, structure, redaction and overwrite verified'
+echo 'Fixed-name platform bundle, checksum, structure, MySQL separation, redaction and overwrite verified'
