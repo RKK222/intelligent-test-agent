@@ -77,22 +77,9 @@ function isKnownLoginRedirectPath(pathname: string): boolean {
 }
 
 router.beforeEach(async (to, _from) => {
-  if (to.name === "login") {
-    // 登录页仅在本地开发环境可用；非 localhost 环境下一律走 AAM 统一认证，
-    // 避免任何不走 AAM 的进入方式（包括主动输入 URL）进入登录页。
-    if (!IS_LOCAL_ENV) {
-      jumpAam(window.location.href, AAM_BASE_URL);
-      return false;
-    }
-    return true;
-  }
-
-  if (to.name === "not-found") {
-    return true;
-  }
-
   const authStore = useAuthStore();
 
+  // 统一认证登录：URL 携带 userId + token 时，先完成登录再继续路由
   const unifiedAuthId = to.query.userId;
   const urlToken = to.query.token;
   if (unifiedAuthId && typeof unifiedAuthId === "string" && urlToken && typeof urlToken === "string") {
@@ -122,11 +109,26 @@ router.beforeEach(async (to, _from) => {
     return { path: to.path, query: restQuery, replace: true };
   }
 
+  if (to.name === "login") {
+    // 登录页仅在本地开发环境可用；非 localhost 环境下一律走 AAM 统一认证，
+    // 避免任何不走 AAM 的进入方式（包括主动输入 URL）进入登录页。
+    if (!IS_LOCAL_ENV) {
+      jumpAam(window.location.href, AAM_BASE_URL);
+      return false;
+    }
+    return true;
+  }
+
   const token = sessionStorage.getItem(TOKEN_KEY);
   if (!token) {
     if (IS_LOCAL_ENV) {
+      // localhost 下 404 页面可以直接看，其他页面跳登录
+      if (to.name === "not-found") {
+        return true;
+      }
       return { path: "/985211", replace: true };
     }
+    // 非 localhost：任何页面（包括 404）都先走 AAM 登录
     jumpAam(window.location.href, AAM_BASE_URL);
     return false;
   }
