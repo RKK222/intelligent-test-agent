@@ -165,7 +165,9 @@ resolve_image_tar() {
   require_command unzip
   require_file "${RELEASE_ARCHIVE}"
   unzip -tq "${RELEASE_ARCHIVE}" >/dev/null
-  unzip -Z1 "${RELEASE_ARCHIVE}" | grep -Fxq "${archive_entry}" || {
+  # 不能使用 grep -q：大 release 中匹配后提前退出会让 unzip 收到 SIGPIPE，
+  # 在 pipefail 下被误判成镜像条目缺失。重定向普通 grep 会完整消费列表。
+  unzip -Z1 "${RELEASE_ARCHIVE}" | grep -Fx "${archive_entry}" >/dev/null || {
     echo "Release archive is missing ${archive_entry}" >&2
     exit 1
   }

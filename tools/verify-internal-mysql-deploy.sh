@@ -9,6 +9,11 @@ trap cleanup EXIT
 
 mkdir -p "${TMP_ROOT}/release/dist" "${TMP_ROOT}/data"
 printf 'fixture image\n' >"${TMP_ROOT}/release/dist/mysql_8.4-linux-amd64.tar"
+# 让镜像条目后仍有超过管道缓冲区的 ZIP 列表，回归 grep -q + pipefail 的 SIGPIPE 误报。
+mkdir -p "${TMP_ROOT}/release/padding"
+for index in $(seq 1 2000); do
+  printf 'fixture\n' >"${TMP_ROOT}/release/padding/entry-${index}-after-mysql-image.txt"
+done
 (cd "${TMP_ROOT}/release" && zip -qr "${TMP_ROOT}/release.zip" .)
 
 write_valid_env() {
