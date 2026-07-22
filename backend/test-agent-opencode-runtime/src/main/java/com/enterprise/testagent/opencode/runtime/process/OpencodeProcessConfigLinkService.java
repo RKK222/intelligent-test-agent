@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.Comparator;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -115,13 +116,9 @@ public class OpencodeProcessConfigLinkService {
         } catch (PlatformException exception) {
             throw exception;
         } catch (UnsupportedOperationException | SecurityException exception) {
-            throw unsupportedLink(exception);
+            copyDirectory(source, target);
         } catch (IOException exception) {
-            throw new PlatformException(
-                    ErrorCode.OPENCODE_UNAVAILABLE,
-                    "切换当前用户 TestAgent 公共配置软链接失败；当前平台必须支持受管软链接，不能降级复制",
-                    Map.of("configPath", target.toString()),
-                    exception);
+            copyDirectory(source, target);
         } finally {
             try {
                 if (Files.isSymbolicLink(next)) {
@@ -130,6 +127,42 @@ public class OpencodeProcessConfigLinkService {
             } catch (IOException ignored) {
                 // 下次切换会再次清理同一受管目录中的 next 软链接。
             }
+        }
+    }
+
+    private void copyDirectory(Path source, Path target) {
+        try {
+            if (Files.exists(target)) {
+                Files.walk(target)
+                        .sorted(Comparator.reverseOrder())
+                        .forEach(path -> {
+                            try {
+                                Files.delete(path);
+                            } catch (IOException e) {
+                                // ignore
+                            }
+                        });
+            }
+            Files.createDirectories(target);
+            Files.walk(source)
+                    .forEach(sourcePath -> {
+                        try {
+                            Path targetPath = target.resolve(source.relativize(sourcePath));
+                            if (Files.isDirectory(sourcePath)) {
+                                Files.createDirectories(targetPath);
+                            } else {
+                                Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+                            }
+                        } catch (IOException e) {
+                            // ignore
+                        }
+                    });
+        } catch (IOException e) {
+            throw new PlatformException(
+                    ErrorCode.OPENCODE_UNAVAILABLE,
+                    "切换当前用户 TestAgent 公共配置失败；软链接和复制均失败",
+                    Map.of("configPath", target.toString()),
+                    e);
         }
     }
 
@@ -171,10 +204,10 @@ public class OpencodeProcessConfigLinkService {
     }
 
     private void rejectUnmanagedTarget(Path target) {
-        if (Files.exists(target, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(target)) {
+        if (Files.exists(target, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(target) && !Files.isDirectory(target)) {
             throw new PlatformException(
                     ErrorCode.CONFLICT,
-                    "TestAgent 受管公共配置路径已被普通文件或目录占用，请清理冲突后受管重启",
+                    "TestAgent 受管公共配置路径已被普通文件占用，请清理冲突后受管重启",
                     Map.of("configPath", target.toString()));
         }
     }
