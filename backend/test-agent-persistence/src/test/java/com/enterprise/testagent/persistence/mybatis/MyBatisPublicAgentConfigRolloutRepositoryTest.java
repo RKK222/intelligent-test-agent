@@ -11,6 +11,7 @@ import com.enterprise.testagent.domain.configuration.AgentConfigRolloutScope;
 import java.io.Reader;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.io.Resources;
 import org.apache.ibatis.mapping.ResultMap;
@@ -51,6 +52,27 @@ class MyBatisPublicAgentConfigRolloutRepositoryTest {
                 .singleElement()
                 .extracting(mapping -> mapping.getJavaType())
                 .isEqualTo(int.class);
+    }
+
+    @Test
+    void blockingRolloutQueryUsesPersonalWorkspaceVersionForeignKey() throws Exception {
+        Configuration configuration = new Configuration();
+        String resource = "mybatis/PublicAgentConfigRolloutMapper.xml";
+        try (Reader reader = Resources.getResourceAsReader(resource)) {
+            new XMLMapperBuilder(reader, configuration, resource, configuration.getSqlFragments()).parse();
+        }
+
+        // 个人工作空间通过 app_workspace_version_id 关联应用版本，禁止误用不存在的 version_id 列。
+        String sql = configuration
+                .getMappedStatement(
+                        "com.enterprise.testagent.persistence.mybatis.PublicAgentConfigRolloutMapper.findBlockingRolloutId")
+                .getBoundSql(Map.of("userId", "usr-1"))
+                .getSql()
+                .replaceAll("\\s+", " ")
+                .trim();
+
+        assertThat(sql).contains("pw.app_workspace_version_id = v.version_id");
+        assertThat(sql).doesNotContain("pw.version_id");
     }
 
     @Test

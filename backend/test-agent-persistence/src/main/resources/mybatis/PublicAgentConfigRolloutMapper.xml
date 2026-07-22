@@ -85,7 +85,7 @@
            and (r.config_scope = 'PUBLIC' or exists (
                select 1
                from application_workspace_versions v
-               join personal_workspaces pw on pw.version_id = v.version_id
+               join personal_workspaces pw on pw.app_workspace_version_id = v.version_id
                where v.version_id = r.scope_key
                  and pw.user_id = #{userId}
                  and pw.status = 'ACTIVE'
