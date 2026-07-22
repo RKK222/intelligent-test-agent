@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -1239,11 +1240,6 @@ class AgentConfigApplicationServiceTest {
         PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
         when(coordinator.prepare("main", "commit_base", "commit_base", "linux-1", ADMIN.value(), "trace_publish"))
                 .thenReturn("acr_publish");
-        PublicAgentConfigRolloutSyncRequest syncRequest = new PublicAgentConfigRolloutSyncRequest(
-                "acr_publish", "main", "commit_base", ADMIN.value(), "trace_publish",
-                0, NOW.plusSeconds(180), "acl_publish");
-        when(coordinator.claimPendingSync("linux-1")).thenReturn(Optional.of(syncRequest));
-        when(coordinator.renewServerSync(syncRequest)).thenReturn(true);
         service.setPublicConfigRolloutCoordinator(coordinator);
 
         AgentConfigResponses.AgentConfigOperationResponse response = service.publicPublish(
@@ -1263,11 +1259,11 @@ class AgentConfigApplicationServiceTest {
         assertThat(publisher.events.get(0).payload()).containsEntry("rolloutId", "acr_publish");
         verify(coordinator).prepare("main", "commit_base", "commit_base", "linux-1", ADMIN.value(), "trace_publish");
         verify(coordinator).activate("acr_publish", "commit_base");
-        verify(coordinator).markServerSynced(syncRequest);
+        verify(coordinator, never()).claimPendingSync("linux-1");
     }
 
     @Test
-    void publicWorktreePublishStaysSuccessfulWhenImmediateLocalSyncKickFails() throws Exception {
+    void publicWorktreePublishReturnsWithoutClaimingDurableSyncInRequestThread() throws Exception {
         Files.createDirectories(root.resolve(".config/.git"));
         Files.createDirectories(root.resolve(".config/opencode"));
         Files.createDirectories(root.resolve(".configdev/review-agent/.git"));
@@ -1313,7 +1309,7 @@ class AgentConfigApplicationServiceTest {
         assertThat(git.resetCommit).isEqualTo("commit_base");
         assertThat(publisher.events).hasSize(1);
         verify(coordinator).activate("acr_publish", "commit_base");
-        verify(coordinator).claimPendingSync("linux-1");
+        verify(coordinator, never()).claimPendingSync("linux-1");
     }
 
     @Test

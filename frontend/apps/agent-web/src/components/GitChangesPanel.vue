@@ -2285,7 +2285,7 @@ defineExpose({
             <p v-else-if="errorMessage" class="text-xs text-red-600 font-medium">执行失败</p>
             <p v-else class="text-xs text-green-600 font-medium">执行成功</p>
           </div>
-          <button type="button" class="ta-process-startup-close" aria-label="关闭" :disabled="committing" @click="showCommitProgressDialog = false">
+          <button type="button" class="ta-process-startup-close" aria-label="关闭" @click="showCommitProgressDialog = false">
             <X :size="16" />
           </button>
         </header>
@@ -2322,7 +2322,7 @@ defineExpose({
           <li :class="['ta-process-startup-step', getCommitStepClass(5)]">
             <component :is="getCommitStepIcon(5)" :size="18" class="ta-process-startup-step-icon" />
             <div class="ta-process-startup-step-copy">
-              <span>完成并广播更新</span>
+              <span>创建后台同步任务</span>
               <small>{{ getCommitStepStatusText(5) }}</small>
             </div>
           </li>
@@ -2366,8 +2366,11 @@ defineExpose({
         </div>
 
         <footer class="ta-process-startup-footer">
-          <span>{{ activeScopeItem.label }} · {{ activeScopeMeta }}</span>
-          <button type="button" :disabled="committing" @click="showCommitProgressDialog = false">关闭</button>
+          <span>
+            {{ activeScopeItem.label }} · {{ activeScopeMeta }}
+            <small v-if="committing">关闭窗口不会中止当前操作</small>
+          </span>
+          <button type="button" @click="showCommitProgressDialog = false">关闭</button>
         </footer>
       </section>
     </div>

@@ -507,6 +507,8 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 
 消费者在本机公共配置 Git 根目录工作树 clean 时 fetch/checkout/reset 到指定 commit；dirty、未配置或非 Git 仓库时跳过，不覆盖本机修改。该广播不暴露给浏览器，也不通过 RunEvent SSE 下发。
 
+发布端在远端提交与持久化 rollout 激活确认后发送该事件，但不在发布 HTTP 请求线程认领本机同步；本机和其它服务器由广播消费者或默认 5 秒的数据库补偿扫描异步推进。广播仅用于降低唤醒延迟，丢失或发布失败不影响持久化任务继续执行。
+
 ## Platform File WebSocket
 
 平台文件 WebSocket 不产生 RunEvent/SSE，属于前端工作区文件和 Agent 配置文件操作的受控双向 RPC 通道。工作区文件先调用 `POST /api/internal/platform/workspace-management/workspaces/{workspaceId}/file-ws-route` 定位目标后端；Agent 配置文件先调用 `POST /api/internal/platform/workspace-management/agent-config/file-ws-route` 定位目标后端。旧 `/api/workspaces/{workspaceId}/file-ws-route` 和 HTTP 文件接口已作废，返回 `410 API_GONE`。公共 Agent 直接目录模式必须在 route 请求中提供已初始化服务器 `linuxServerId`，公共 worktree 模式由 `worktreeId` 落库服务器决定目标。随后都在目标后端调用 `POST /api/internal/platform/workspace-management/file-ws/tickets` 创建一次性 ticket，最后连接：

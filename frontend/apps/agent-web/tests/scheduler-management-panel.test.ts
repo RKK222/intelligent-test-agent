@@ -174,4 +174,35 @@ describe("scheduler management panel", () => {
     expect(await view.findByText("服务器 linux-1 公共配置仓库已拉取到最新")).toBeTruthy();
     view.queryClient.clear();
   });
+
+  it("shows dirty public repository files and retries pull only after explicit discard confirmation", async () => {
+    const dirtyRepository = {
+      ...publicRepository,
+      status: "CONFLICT",
+      initialized: true,
+      currentBranch: "main",
+      message: "Git 工作树存在未提交变更：opencode/agents/review.md"
+    };
+    const backendApi = api({
+      listPublicAgentRepositories: vi.fn().mockResolvedValue([dirtyRepository])
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const view = renderWithApi(SystemManagementPanel, backendApi);
+
+    await fireEvent.click(view.getByText("配置管理", { selector: ".ta-system-menu-text" }));
+
+    expect(await view.findByText("存在本地变更")).toBeTruthy();
+    expect(await view.findByText(/opencode\/agents\/review\.md/)).toBeTruthy();
+    expect(await view.findByText(/这是该服务器的共享运行副本/)).toBeTruthy();
+    await fireEvent.click(view.getByRole("button", { name: "放弃本地变更并拉取" }));
+
+    await waitFor(() => expect(backendApi.pullPublicAgentRepository).toHaveBeenCalledWith(
+      "linux-1",
+      "main",
+      expect.stringMatching(/^aco_/),
+      true
+    ));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("不影响你的公共个人 worktree"));
+    view.queryClient.clear();
+  });
 });

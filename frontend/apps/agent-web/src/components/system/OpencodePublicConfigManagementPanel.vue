@@ -99,6 +99,21 @@ async function submitInitialize() {
 }
 
 async function pullRepository(repository: PublicAgentRepositoryStatus) {
+  await pullRepositoryWithDiscard(repository, false);
+}
+
+async function discardAndPullRepository(repository: PublicAgentRepositoryStatus) {
+  const confirmed = window.confirm(
+    `将放弃服务器 ${repository.linuxServerId} 公共共享运行副本中的已跟踪文件修改后重新拉取。`
+      + "该操作不影响你的公共个人 worktree，也不会删除未跟踪文件。是否继续？"
+  );
+  if (!confirmed) {
+    return;
+  }
+  await pullRepositoryWithDiscard(repository, true);
+}
+
+async function pullRepositoryWithDiscard(repository: PublicAgentRepositoryStatus, discardLocalChanges: boolean) {
   const branch = repository.currentBranch?.trim();
   if (!repository.initialized || !branch || pullingServerId.value) {
     return;
@@ -107,11 +122,22 @@ async function pullRepository(repository: PublicAgentRepositoryStatus) {
   errorMessage.value = "";
   successMessage.value = "";
   try {
-    const updated = await api.pullPublicAgentRepository(repository.linuxServerId, branch, newOperationId(), false);
+    const updated = await api.pullPublicAgentRepository(
+      repository.linuxServerId,
+      branch,
+      newOperationId(),
+      discardLocalChanges
+    );
     rows.value = rows.value.map((row) => (row.linuxServerId === updated.linuxServerId ? updated : row));
     successMessage.value = `服务器 ${updated.linuxServerId} 公共配置仓库已拉取到最新`;
   } catch (error) {
     errorMessage.value = formatError(error, "拉取公共配置仓库失败");
+    // 拉取前校验发现共享副本变脏时，立即刷新服务器行，展示后端返回的具体文件路径和处理建议。
+    try {
+      rows.value = await api.listPublicAgentRepositories();
+    } catch {
+      // 保留原始拉取错误；状态刷新只是诊断增强，失败不能覆盖真正原因。
+    }
   } finally {
     pullingServerId.value = null;
   }
@@ -126,6 +152,9 @@ function preferredBranch(repository: PublicAgentRepositoryStatus, remoteBranches
 }
 
 function statusText(row: PublicAgentRepositoryStatus) {
+  if (row.status === "CONFLICT" && row.initialized) {
+    return "存在本地变更";
+  }
   if (row.initialized) {
     return "已初始化";
   }
@@ -139,6 +168,9 @@ function statusText(row: PublicAgentRepositoryStatus) {
 }
 
 function statusClass(row: PublicAgentRepositoryStatus) {
+  if (row.status === "CONFLICT") {
+    return "is-error";
+  }
   if (row.initialized) {
     return "is-ready";
   }
@@ -222,7 +254,12 @@ function newOperationId() {
               <td class="ta-opencode-config-path">{{ formatNullable(row.worktreeRootPath) }}</td>
               <td>{{ formatNullable(row.currentBranch) }}</td>
               <td class="ta-opencode-config-mono">{{ shortHash(row.commitHash) }}</td>
-              <td class="ta-opencode-config-message">{{ formatNullable(row.message) }}</td>
+              <td class="ta-opencode-config-message">
+                <div>{{ formatNullable(row.message) }}</div>
+                <small v-if="row.status === 'CONFLICT' && row.initialized" class="ta-opencode-config-diagnostic">
+                  这是该服务器的共享运行副本，不是个人公共 worktree。请先按上述路径核对本机修改；确认无需保留后，可放弃已跟踪修改并重新拉取。
+                </small>
+              </td>
               <td>
                 <div class="ta-opencode-config-actions">
                   <button
@@ -241,6 +278,16 @@ function newOperationId() {
                   >
                     <Loader2 v-if="pullingServerId === row.linuxServerId" class="ta-opencode-config-icon is-spin" />
                     拉取
+                  </button>
+                  <button
+                    v-if="row.status === 'CONFLICT' && row.initialized"
+                    type="button"
+                    class="ta-opencode-config-btn is-danger"
+                    :disabled="!row.currentBranch || pullingServerId !== null"
+                    @click="discardAndPullRepository(row)"
+                  >
+                    <Loader2 v-if="pullingServerId === row.linuxServerId" class="ta-opencode-config-icon is-spin" />
+                    放弃本地变更并拉取
                   </button>
                 </div>
               </td>
@@ -318,6 +365,12 @@ function newOperationId() {
   gap: 6px;
   white-space: nowrap;
 }
+.ta-opencode-config-diagnostic {
+  display: block;
+  margin-top: 4px;
+  color: #92400e;
+  line-height: 1.45;
+}
 .ta-opencode-config-toolbar {
   padding: 12px 14px;
   border-bottom: 1px solid #e5e7eb;
@@ -351,6 +404,16 @@ function newOperationId() {
   background: #2563eb;
   border-color: #2563eb;
   color: #fff;
+}
+.ta-opencode-config-btn.is-danger {
+  border-color: #fecaca;
+  background: #fff7f7;
+  color: #b91c1c;
+}
+.ta-opencode-config-btn.is-danger:hover:not(:disabled),
+.ta-opencode-config-btn.is-danger:focus-visible:not(:disabled) {
+  border-color: #ef4444;
+  color: #991b1b;
 }
 .ta-opencode-config-icon {
   width: 14px;

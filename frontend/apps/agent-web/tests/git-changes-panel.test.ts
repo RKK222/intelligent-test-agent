@@ -471,6 +471,61 @@ describe("GitChangesPanel", () => {
     expect(await view.findByText("提交并推送进度")).toBeTruthy();
   });
 
+  it("allows closing the progress dialog while public Agent publish continues", async () => {
+    let finishPublish: ((value: { status: string; currentStep: string }) => void) | undefined;
+    apiClientMock.publishPublicAgentConfig.mockImplementationOnce(() => new Promise((resolve) => {
+      finishPublish = resolve;
+    }));
+    apiClientMock.getPublicAgentDiff.mockResolvedValue({
+      files: [{
+        path: "opencode/agents/public-review.md",
+        status: "modified",
+        rawStatus: "M ",
+        staged: true,
+        patch: "@@ -1 +1 @@\n-old\n+new"
+      }]
+    });
+    const pinia = createPinia();
+    const workbench = useWorkbenchStore(pinia);
+    workbench.publicWorktree = {
+      worktreeId: "agw_public",
+      scope: "PUBLIC",
+      workspaceId: null,
+      linuxServerId: "linux-1",
+      worktreeName: "public-usr_admin",
+      branch: "public-usr_admin",
+      rootPath: "/data/public-usr_admin",
+      agentDirectory: "/data/public-usr_admin/opencode",
+      status: "ACTIVE",
+      createdAt: "2026-07-17T00:00:00Z",
+      updatedAt: "2026-07-17T00:00:00Z"
+    };
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManagePublicConfig: true
+      },
+      global: { plugins: [pinia] }
+    });
+
+    await view.findByText("public-review.md", { exact: false });
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "更新公共 Agent");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+    await waitFor(() => expect(apiClientMock.publishPublicAgentConfig).toHaveBeenCalledTimes(1));
+
+    expect(view.getByText("创建后台同步任务")).toBeTruthy();
+    expect(view.getAllByRole("button", { name: "关闭" })
+      .every((button) => !(button as HTMLButtonElement).disabled)).toBe(true);
+    await fireEvent.click(view.getAllByRole("button", { name: "关闭" })[0]);
+    expect(view.queryByText("提交并推送进度")).toBeNull();
+    expect(view.getByText("正在发布公共 Agent 配置...")).toBeTruthy();
+
+    finishPublish?.({ status: "SUCCEEDED", currentStep: "COMPLETED" });
+    await waitFor(() => expect(view.getByText("提交并推送成功！")).toBeTruthy());
+  });
+
   it("discards an unstaged application Agent file and reloads its open editor route", async () => {
     apiClientMock.getWorkspaceAgentDiff
       .mockResolvedValueOnce({

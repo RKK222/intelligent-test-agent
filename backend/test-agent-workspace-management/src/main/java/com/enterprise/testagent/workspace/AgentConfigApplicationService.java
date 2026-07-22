@@ -453,7 +453,6 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             activatePublicConfigRollout(rolloutId, commitHash);
             progress.step(AgentConfigOperationStep.BROADCASTING);
             broadcastPublicSync(normalizedBranch, commitHash, "update", rolloutId, traceId);
-            synchronizeLocalPublicRuntimeRepository(rolloutId);
             return progress.succeeded(commitHash);
         } catch (PlatformException exception) {
             progress.failed(exception.errorCode().name(), safeErrorMessage(exception.getMessage()));
@@ -606,7 +605,6 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             activatePublicConfigRollout(rolloutId, commitHash);
             progress.step(AgentConfigOperationStep.BROADCASTING);
             broadcastPublicSync(normalizedBranch, commitHash, "update-and-push", rolloutId, traceId);
-            synchronizeLocalPublicRuntimeRepository(rolloutId);
             return progress.succeeded(commitHash);
         } catch (PlatformException exception) {
             progress.failed(exception.errorCode().name(), safeErrorMessage(exception.getMessage()));
@@ -1233,7 +1231,6 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             activatePublicConfigRollout(rolloutId, commitHash);
             progress.step(AgentConfigOperationStep.BROADCASTING);
             broadcastPublicSync(branch, commitHash, "publish", rolloutId, traceId);
-            synchronizeLocalPublicRuntimeRepository(rolloutId);
             return progress.succeeded(commitHash);
         } catch (PlatformException exception) {
             progress.failed(exception.errorCode().name(), safeErrorMessage(exception.getMessage()));
@@ -1689,7 +1686,11 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         }
         if (!gitWorkspaceService.isWorktreeClean(repoRoot)) {
             if (!discardLocalChanges) {
-                throw new PlatformException(ErrorCode.CONFLICT, "Git 工作树存在未提交变更", Map.of("path", repoRoot.toString()));
+                throw new PlatformException(
+                        ErrorCode.CONFLICT,
+                        dirtyPublicRepositoryMessage(repoRoot)
+                                + "。这是服务器共享运行副本；请先核对这些文件的本机修改，确认无需保留后再选择放弃本地变更并拉取。",
+                        Map.of("path", repoRoot.toString()));
             }
             // 只恢复 Git 已跟踪内容；未跟踪文件不删除，避免“更新”扩大为不可逆清理。
             gitWorkspaceService.resetHardToCommit(repoRoot, "HEAD");
@@ -1720,7 +1721,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 .limit(6)
                 .toList();
         if (paths.isEmpty()) {
-            return "Git 工作树存在未提交变更";
+            return "Git 工作树存在未提交变更（Git 未返回可展示的文件路径，请在该服务器仓库执行 git status --short）";
         }
         boolean truncated = paths.size() > 5;
         List<String> visiblePaths = truncated ? paths.subList(0, 5) : paths;
@@ -2166,6 +2167,10 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 : null;
     }
 
+    /**
+     * 广播只负责低延迟唤醒其它节点；rollout 已持久化，调用方广播后必须直接返回，
+     * 禁止在 HTTP 请求线程继续认领本机同步，后续统一由消费者或定时补偿任务执行。
+     */
     private void broadcastPublicSync(String branch, String commitHash, String reason, String rolloutId, String traceId) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("branch", branch);
