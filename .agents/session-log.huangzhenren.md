@@ -12,11 +12,13 @@
 - What:
   - 固化前端 `122.233.30.2`、后台 `122.233.30.4/122.233.30.114`、Redis `122.233.30.20`、MySQL `122.233.30.148` 拓扑，交付入口、前端 Nginx、后台 Java/Admin/executor 三个可独立携带的自包含 Bash 诊断脚本。
   - 新增受静态边界校验的 MySQL 只读检查 SQL、十五章企业排查手册、文档索引与临时夹具 verifier；三个现场脚本保留少量重复，以保证单文件复制后无需依赖共享库即可执行。
+  - 最终审查进一步区分域名经企业入口到 `.2:80` 与 IP 直达 `.2:9996` 的双入口拓扑；入口脚本拒绝五个基础设施节点，Nginx 检查排除注释伪指令，普通低熵凭据仅报告 `SET/UNSET`，MySQL 静态边界拒绝文件写入、named lock 与用户变量赋值，三个脚本统一输出最终摘要。
 - How:
   - 诊断严格限制为 DNS/HTTP readiness、有效 Nginx 配置读取、systemd/端口/进程/日志、TCP 可达与只读数据库查询；禁止 SSO 重放、Redis 票据或会话读取、任务触发、服务或容器生命周期变更、配置写入和 SQL DML。
   - URL query/fragment、认证头和常见敏感键在输出前统一脱敏；本条不记录任何现场凭据值或摘要。verifier 只使用临时 fake 命令、配置、日志与 SQL 夹具，不访问五个企业地址。
+  - 最终审查按 RED→GREEN 增加九组负向/正向回归；证据 AWK 固定在 verifier 内，手册展示块只做逐字节合同校验，恶意 Markdown `system()` 文本不会被执行；SSO 仍只检查事故时既有被动证据。
 - Result:
-  - 三个诊断脚本与 verifier 的 Bash 语法检查、完整行为 verifier、AI 文档校验均退出 `0`；危险操作、SQL 写操作与冲突标记扫描均无匹配，任务路径及全工作树 `git diff --check` 均退出 `0`。
+  - 三个诊断脚本与 verifier 的 Bash 语法检查、完整行为 verifier、AI 文档校验及手册 13 个 Bash 块语法检查均退出 `0`；危险操作、SQL 写操作/静态副作用与冲突标记扫描均无匹配，任务路径及全工作树 `git diff --check` 均退出 `0`。
   - 未修改运行时代码、HTTP API、RunEvent、数据库结构/Flyway、环境配置或 generated SDK；尚未在企业五台目标机器执行，现场网络、进程和数据状态仍需按手册由授权人员只读取证。
 
 ### 2026-07-22 - 升级 OpenCode 1.18.4 官方 baseline 与 Java SDK

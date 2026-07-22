@@ -8,10 +8,29 @@ FAKE_BIN="${TMP_ROOT}/bin"
 mkdir -p "${FAKE_BIN}"
 
 TROUBLESHOOTING_MANUAL="${ROOT_DIR}/deploy/internal/XXL-JOB-TROUBLESHOOTING.md"
+TROUBLESHOOTING_DESIGN="${ROOT_DIR}/docs/superpowers/specs/2026-07-22-enterprise-xxl-job-troubleshooting-design.md"
+TROUBLESHOOTING_PLAN="${ROOT_DIR}/docs/superpowers/plans/2026-07-22-enterprise-xxl-job-troubleshooting.md"
 if [[ ! -f "${TROUBLESHOOTING_MANUAL}" ]]; then
   printf '正式手册不存在: %s\n' "${TROUBLESHOOTING_MANUAL}" >&2
   exit 1
 fi
+
+# 证据扫描器由验证器持有固定受审副本；手册中的代码块只参与逐字节合同校验，绝不作为可执行源码。
+fixed_evidence_awk_program() {
+  cat <<'AWK'
+  {
+    line=tolower($0)
+    gsub(/(ticket|cookie|token|password|secret|key|authorization|platform_session_digest)[[:alnum:]_"'\''-]*[[:space:]]*[=:][[:space:]]*["'\'']*\[redacted(_query|_fragment)?\]["'\'']*/, "", line)
+    gsub(/[[:alnum:]_]*(token|password|secret|digest|key)[[:alnum:]_]*=(set|set length=[0-9]+ sha256=[0-9a-f]+|unset)/, "", line)
+    gsub(/\?\[redacted_query\]|#\[redacted_fragment\]/, "", line)
+    if (line ~ /authorization:[[:space:]]*bearer/) leaked=1
+    if (line ~ /(ticket|cookie|token|password|secret|key|authorization|platform_session_digest)[[:alnum:]_"'\''-]*[[:space:]]*[=:][[:space:]]*["'\'']*[^,;[:space:]"'\''}]/) leaked=1
+    if (line ~ /[^[:space:]?#][?#][^[:space:]]+/ || line ~ /(^|[[:space:]])[?#][^[:space:]]+/) leaked=1
+  }
+  END { exit leaked ? 1 : 0 }
+AWK
+}
+EVIDENCE_AWK_PROGRAM="$(fixed_evidence_awk_program)"
 
 for required_text in \
   '122.233.30.2' \
@@ -39,6 +58,27 @@ for required_text in \
   }
 done
 
+require_document_text() {
+  local document_file="$1" document_text="$2"
+  grep -Fq "${document_text}" "${document_file}" || {
+    printf '设计/计划缺少双入口拓扑合同: %s\n' "${document_text}" >&2
+    exit 1
+  }
+}
+require_document_text "${TROUBLESHOOTING_DESIGN}" '域名 `http://mimo.sdc.cs.icbc:9996` → 企业入口/网关 → 实体 Nginx `122.233.30.2:80`'
+require_document_text "${TROUBLESHOOTING_DESIGN}" 'IP `http://122.233.30.2:9996` → 实体 Nginx `122.233.30.2:9996`'
+require_document_text "${TROUBLESHOOTING_DESIGN}" '实体 Nginx 同时监听 `80` 与 `9996`'
+require_document_text "${TROUBLESHOOTING_PLAN}" '域名 `http://mimo.sdc.cs.icbc:9996` → 企业入口/网关 → 实体 Nginx `122.233.30.2:80`'
+require_document_text "${TROUBLESHOOTING_PLAN}" 'IP `http://122.233.30.2:9996` → 实体 Nginx `122.233.30.2:9996`'
+require_document_text "${TROUBLESHOOTING_PLAN}" '实体 Nginx 同时监听 `80` 与 `9996`'
+for sso_contract_document in "${TROUBLESHOOTING_DESIGN}" "${TROUBLESHOOTING_PLAN}"; do
+  grep -Fq 'SSO 被动证据顺序固定为：票据签发 POST → 登录 POST → iframe ready `postMessage` → Admin GET。' \
+    "${sso_contract_document}" || {
+    printf '设计/计划缺少真实 SSO 被动证据顺序: %s\n' "${sso_contract_document}" >&2
+    exit 1
+  }
+done
+
 grep -Fq 'deploy/internal/XXL-JOB-TROUBLESHOOTING.md' "${ROOT_DIR}/docs/README.md" || {
   printf 'docs/README.md 缺少 XXL-JOB 正式排查入口\n' >&2
   exit 1
@@ -55,12 +95,18 @@ grep -Fq '浏览器现场只能被动检查事故时已经保留的证据' "${RO
   printf 'XXL-JOB 测试文档缺少浏览器被动取证边界\n' >&2
   exit 1
 }
+portable_forbidden_sed='sed -i '
+portable_forbidden_sed+="''"
+if grep -Fq "${portable_forbidden_sed}" "${BASH_SOURCE[0]}"; then
+  printf '诊断验证器仍使用仅 macOS 可用的 sed -i 写法\n' >&2
+  exit 1
+fi
 
 validate_strict_manual_contract() {
   local manual_file="$1"
   local topology_section entry_section frontend_section backend_4_section backend_114_section
   local redis_section mysql_section browser_section task_section evidence_section executable_fences normalized_commands
-  local ticket_step login_step ready_step admin_get_step relative_write_status
+  local ticket_step login_step ready_step admin_get_step relative_write_status manual_evidence_awk
 
   topology_section="$(awk '/^## 1\./ { active=1 } /^## 2\./ { active=0 } active' "${manual_file}")"
   entry_section="$(awk '/^## 4\./ { active=1 } /^## 5\./ { active=0 } active' "${manual_file}")"
@@ -72,6 +118,12 @@ validate_strict_manual_contract() {
   browser_section="$(awk '/^## 10\./ { active=1 } /^## 11\./ { active=0 } active' "${manual_file}")"
   task_section="$(awk '/^## 11\./ { active=1 } /^## 12\./ { active=0 } active' "${manual_file}")"
   evidence_section="$(awk '/^## 14\./ { active=1 } /^## 15\./ { active=0 } active' "${manual_file}")"
+  manual_evidence_awk="$(awk '
+    $0 == "if awk \047" { active=1; next }
+    active && $0 == "\047 \\" { exit }
+    active { print }
+  ' "${manual_file}")"
+  [[ "${manual_evidence_awk}" == "${EVIDENCE_AWK_PROGRAM}" ]] || return 1
   executable_fences="$(awk '
     function flush_command(   command) {
       command=command_buffer
@@ -356,8 +408,9 @@ validate_strict_manual_contract() {
     }
   ' <<<"${executable_fences}")"
 
-  grep -Fq '| 浏览器域名入口 | `http://mimo.sdc.cs.icbc:9996` |' <<<"${topology_section}" || return 1
-  grep -Fq '| 浏览器 IP 入口、实体 Nginx | `http://122.233.30.2:9996`、`122.233.30.2` |' <<<"${topology_section}" || return 1
+  grep -Fq '| 浏览器域名入口 | `http://mimo.sdc.cs.icbc:9996` → 企业入口/网关 → 实体 Nginx `122.233.30.2:80` |' <<<"${topology_section}" || return 1
+  grep -Fq '| 浏览器 IP 入口 | `http://122.233.30.2:9996` → 实体 Nginx `122.233.30.2:9996` |' <<<"${topology_section}" || return 1
+  grep -Fq '| 实体 Nginx | `122.233.30.2:80` + `122.233.30.2:9996` |' <<<"${topology_section}" || return 1
   grep -Fq '| 后台 A | `122.233.30.4:8080`，Admin `18080`，executor `9999` |' <<<"${topology_section}" || return 1
   grep -Fq '| 后台 B | `122.233.30.114:8080`，Admin `18080`，executor `9999` |' <<<"${topology_section}" || return 1
   grep -Fq '| 共享 Redis | `122.233.30.20:6379` |' <<<"${topology_section}" || return 1
@@ -629,6 +682,8 @@ SAFE_PASSIVE_PATH_MANUAL="${TMP_ROOT}/safe-passive-path-manual.md"
 SAFE_PASSIVE_COMMAND_MENTIONS_MANUAL="${TMP_ROOT}/safe-passive-command-mentions-manual.md"
 SAFE_PREFIXED_READONLY_MANUAL="${TMP_ROOT}/safe-prefixed-readonly-manual.md"
 SAFE_QUOTED_OPERATORS_MANUAL="${TMP_ROOT}/safe-quoted-operators-manual.md"
+UNSAFE_EVIDENCE_AWK_INJECTION_MANUAL="${TMP_ROOT}/unsafe-evidence-awk-injection-manual.md"
+EVIDENCE_AWK_INJECTION_MARKER="${TMP_ROOT}/evidence-awk-injection-executed"
 awk '
   !changed && /--expected-host 122\.233\.30\.4 --minutes 15/ {
     sub(/--expected-host 122\.233\.30\.4 --minutes 15/, "--expected-host 122.233.30.114 --minutes 15")
@@ -869,6 +924,17 @@ grep -E safe\\|docker\\ restart\\;redis-cli\\ GET /tmp/diagnostic.log
 printf '\''%s\n'\'' '\''quoted multiline safe |
 docker restart; redis-cli GET && mysql -eUPDATE || podman kill'\'''
 
+# Markdown 只作为数据：夹具仅写入恶意 AWK 文本，验证过程不得执行该文本。
+XXL_DIAG_EVIDENCE_AWK_MARKER="${EVIDENCE_AWK_INJECTION_MARKER}" awk '
+  !changed && $0 == "if awk \047" {
+    print
+    print "  BEGIN { system(\"touch " ENVIRON["XXL_DIAG_EVIDENCE_AWK_MARKER"] "\") }"
+    changed=1
+    next
+  }
+  { print }
+' "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_EVIDENCE_AWK_INJECTION_MANUAL}"
+
 for unsafe_manual in \
   "${UNSAFE_HOST_MANUAL}" \
   "${UNSAFE_REDIS_MANUAL}" \
@@ -949,6 +1015,15 @@ for unsafe_manual in \
   fi
 done
 
+if validate_strict_manual_contract "${UNSAFE_EVIDENCE_AWK_INJECTION_MANUAL}" >/dev/null 2>&1; then
+  printf '严格文档契约错误接受证据 AWK 注入夹具\n' >&2
+  exit 1
+fi
+if [[ -e "${EVIDENCE_AWK_INJECTION_MARKER}" ]]; then
+  printf '验证器错误执行了 Markdown 中的证据 AWK 注入文本\n' >&2
+  exit 1
+fi
+
 if ! validate_strict_manual_contract "${SAFE_PASSIVE_PATH_MANUAL}" >/dev/null 2>&1; then
   printf '严格文档契约错误拒绝合法被动路径夹具\n' >&2
   exit 1
@@ -966,17 +1041,13 @@ if ! validate_strict_manual_contract "${SAFE_QUOTED_OPERATORS_MANUAL}" >/dev/nul
   exit 1
 fi
 
-EVIDENCE_AWK_PROGRAM="$(awk '
-  $0 == "if awk \047" { active=1; next }
-  active && $0 == "\047 \\" { exit }
-  active { print }
-' "${TROUBLESHOOTING_MANUAL}")"
 [[ -n "${EVIDENCE_AWK_PROGRAM}" ]] || {
-  printf '无法提取正式手册中的无输出证据扫描器\n' >&2
+  printf '验证器固定证据扫描器为空\n' >&2
   exit 1
 }
 EVIDENCE_SCAN_CLEAN_FIXTURE="${TMP_ROOT}/evidence-scan-clean.log"
 EVIDENCE_SCAN_RAW_TOKEN_FIXTURE="${TMP_ROOT}/evidence-scan-raw-token.log"
+EVIDENCE_SCAN_RAW_KEY_FIXTURE="${TMP_ROOT}/evidence-scan-raw-key.log"
 EVIDENCE_SCAN_ABSOLUTE_QUERY_FIXTURE="${TMP_ROOT}/evidence-scan-absolute-query.log"
 EVIDENCE_SCAN_RELATIVE_QUERY_FIXTURE="${TMP_ROOT}/evidence-scan-relative-query.log"
 EVIDENCE_SCAN_ABSOLUTE_FRAGMENT_FIXTURE="${TMP_ROOT}/evidence-scan-absolute-fragment.log"
@@ -988,6 +1059,9 @@ EVIDENCE_SCAN_FRAGMENT_ONLY_FIXTURE="${TMP_ROOT}/evidence-scan-fragment-only.log
 EVIDENCE_SCAN_OUTPUT="${TMP_ROOT}/evidence-scan-output.log"
 cat >"${EVIDENCE_SCAN_CLEAN_FIXTURE}" <<'EOF'
 TEST_AGENT_XXL_JOB_ACCESS_TOKEN=SET length=32 sha256=0123456789abcdef
+TEST_AGENT_DB_PASSWORD=SET
+TEST_AGENT_API_TOKEN=UNSET
+TEST_AGENT_INTERNAL_PROXY_API_KEY=SET
 Authorization=[REDACTED]
 https://diag.example/xxl-job-admin/?[REDACTED_QUERY]
 /xxl-job-admin/?[REDACTED_QUERY]
@@ -996,6 +1070,9 @@ https://diag.example/xxl-job-admin/#[REDACTED_FRAGMENT]
 EOF
 cat >"${EVIDENCE_SCAN_RAW_TOKEN_FIXTURE}" <<'EOF'
 token=diagnostic-raw-secret https://diag.example/xxl-job-admin/?[REDACTED_QUERY]
+EOF
+cat >"${EVIDENCE_SCAN_RAW_KEY_FIXTURE}" <<'EOF'
+TEST_AGENT_INTERNAL_PROXY_API_KEY=diagnostic-raw-key
 EOF
 cat >"${EVIDENCE_SCAN_ABSOLUTE_QUERY_FIXTURE}" <<'EOF'
 https://diag.example/xxl-job-admin/?opaque-query
@@ -1031,6 +1108,7 @@ fi
 }
 for unsafe_evidence_fixture in \
   "${EVIDENCE_SCAN_RAW_TOKEN_FIXTURE}" \
+  "${EVIDENCE_SCAN_RAW_KEY_FIXTURE}" \
   "${EVIDENCE_SCAN_ABSOLUTE_QUERY_FIXTURE}" \
   "${EVIDENCE_SCAN_RELATIVE_QUERY_FIXTURE}" \
   "${EVIDENCE_SCAN_ABSOLUTE_FRAGMENT_FIXTURE}" \
@@ -1058,6 +1136,9 @@ EOF
 
 cat >"${FAKE_BIN}/curl" <<'EOF'
 #!/usr/bin/env bash
+if [[ -n "${XXL_DIAG_CURL_MARKER:-}" ]]; then
+  printf 'called\n' >>"${XXL_DIAG_CURL_MARKER}"
+fi
 url="${*: -1}"
 if [[ "${XXL_DIAG_FIXTURE_MODE:-healthy}" == "backend-admin-down" && "${url}" == 'http://127.0.0.1:18080/xxl-job-admin/actuator/health/readiness' ]]; then
   printf '{"status":"DOWN"}\n__TEST_AGENT_HTTP_STATUS__:503'
@@ -1072,7 +1153,9 @@ fi
 EOF
 cat >"${FAKE_BIN}/ip" <<'EOF'
 #!/usr/bin/env bash
-address="${XXL_DIAG_BACKEND_IP:-${XXL_DIAG_FRONTEND_IP:-122.233.30.2}}"
+[[ "${XXL_DIAG_FIXTURE_MODE:-healthy}" != 'entry-ip-fail' ]] || exit 42
+[[ "${XXL_DIAG_FIXTURE_MODE:-healthy}" != 'entry-ip-empty' ]] || exit 0
+address="${XXL_DIAG_ENTRY_IP:-${XXL_DIAG_BACKEND_IP:-${XXL_DIAG_FRONTEND_IP:-122.233.30.2}}}"
 printf '2: eth0    inet %s/24 brd 122.233.30.255 scope global eth0\n' "${address}"
 EOF
 cat >"${FAKE_BIN}/systemctl" <<'EOF'
@@ -1189,6 +1272,12 @@ chmod +x "${BROKEN_SHA_BIN}/sha256sum" "${BROKEN_SHA_BIN}/shasum" \
   "${FILTER_FAILURE_BIN}/grep" "${REDACTION_FAILURE_BIN}/sed"
 
 ENTRY_SCRIPT="${ROOT_DIR}/deploy/internal/diagnose-xxl-job-entry.sh"
+ENTRY_NO_IP_BIN="${TMP_ROOT}/entry-no-ip-bin"
+mkdir -p "${ENTRY_NO_IP_BIN}"
+ln -s "${FAKE_BIN}/getent" "${ENTRY_NO_IP_BIN}/getent"
+ln -s "${FAKE_BIN}/curl" "${ENTRY_NO_IP_BIN}/curl"
+ln -s "$(command -v awk)" "${ENTRY_NO_IP_BIN}/awk"
+ln -s "$(command -v grep)" "${ENTRY_NO_IP_BIN}/grep"
 set +e
 PATH="${FAKE_BIN}:${PATH}" XXL_DIAG_FIXTURE_MODE=healthy bash "${ENTRY_SCRIPT}" --unexpected-argument >"${TMP_ROOT}/entry-argument.log" 2>&1
 status=$?
@@ -1196,22 +1285,81 @@ set -e
 test "${status}" -eq 2
 grep -Fq '[FAIL] 不接受命令行参数' "${TMP_ROOT}/entry-argument.log"
 
-PATH="${FAKE_BIN}:${PATH}" XXL_DIAG_FIXTURE_MODE=healthy bash "${ENTRY_SCRIPT}" >"${TMP_ROOT}/entry-ok.log"
+PATH="${FAKE_BIN}:${PATH}" XXL_DIAG_FIXTURE_MODE=healthy XXL_DIAG_ENTRY_IP=122.233.31.9 \
+  bash "${ENTRY_SCRIPT}" >"${TMP_ROOT}/entry-ok.log"
 grep -Fq '[PASS] 域名解析' "${TMP_ROOT}/entry-ok.log"
 grep -Fq '[WARN] 当前入口使用 HTTP' "${TMP_ROOT}/entry-ok.log"
+grep -Fxq '[PASS] 诊断完成：未发现关键异常' "${TMP_ROOT}/entry-ok.log" || {
+  printf '入口诊断正常结束缺少统一 PASS 摘要\n' >&2
+  exit 1
+}
 
 set +e
-PATH="${FAKE_BIN}:${PATH}" XXL_DIAG_FIXTURE_MODE=admin-down bash "${ENTRY_SCRIPT}" >"${TMP_ROOT}/entry-down.log" 2>&1
+PATH="${FAKE_BIN}:${PATH}" XXL_DIAG_FIXTURE_MODE=admin-down XXL_DIAG_ENTRY_IP=122.233.31.9 \
+  bash "${ENTRY_SCRIPT}" >"${TMP_ROOT}/entry-down.log" 2>&1
 status=$?
 set -e
 test "${status}" -eq 1
 grep -Fq '[FAIL]' "${TMP_ROOT}/entry-down.log"
+grep -Eq '^\[FAIL\] 诊断完成：发现 [0-9]+ 个关键异常$' "${TMP_ROOT}/entry-down.log" || {
+  printf '入口诊断失败结束缺少统一 FAIL 摘要\n' >&2
+  exit 1
+}
 
 set +e
-PATH="${FAKE_BIN}:${PATH}" XXL_DIAG_FIXTURE_MODE=dns-fail bash "${ENTRY_SCRIPT}" >"${TMP_ROOT}/entry-dns.log" 2>&1
+PATH="${FAKE_BIN}:${PATH}" XXL_DIAG_FIXTURE_MODE=dns-fail XXL_DIAG_ENTRY_IP=122.233.31.9 \
+  bash "${ENTRY_SCRIPT}" >"${TMP_ROOT}/entry-dns.log" 2>&1
 status=$?
 set -e
 test "${status}" -eq 1
+
+for wrong_entry_host in 122.233.30.2 122.233.30.4 122.233.30.114 122.233.30.20 122.233.30.148; do
+  entry_curl_marker="${TMP_ROOT}/entry-curl-${wrong_entry_host}.marker"
+  set +e
+  PATH="${FAKE_BIN}:${PATH}" XXL_DIAG_FIXTURE_MODE=healthy XXL_DIAG_ENTRY_IP="${wrong_entry_host}" \
+    XXL_DIAG_CURL_MARKER="${entry_curl_marker}" bash "${ENTRY_SCRIPT}" \
+    >"${TMP_ROOT}/entry-wrong-host-${wrong_entry_host}.log" 2>&1
+  status=$?
+  set -e
+  if [[ "${status}" -ne 2 ]]; then
+    printf '入口脚本错误机器 %s 应返回 2，实际返回 %s\n' "${wrong_entry_host}" "${status}" >&2
+    exit 1
+  fi
+  grep -Fq '[FAIL] 当前机器是已知基础设施节点' "${TMP_ROOT}/entry-wrong-host-${wrong_entry_host}.log" || {
+    printf '入口脚本错误机器 %s 缺少明确提示\n' "${wrong_entry_host}" >&2
+    exit 1
+  }
+  test ! -e "${entry_curl_marker}"
+done
+
+for entry_ip_mode in entry-ip-fail entry-ip-empty; do
+  set +e
+  PATH="${FAKE_BIN}:${PATH}" XXL_DIAG_FIXTURE_MODE="${entry_ip_mode}" \
+    bash "${ENTRY_SCRIPT}" >"${TMP_ROOT}/${entry_ip_mode}.log" 2>&1
+  status=$?
+  set -e
+  if [[ "${status}" -ne 2 ]]; then
+    printf '入口脚本地址检测模式 %s 应返回 2，实际返回 %s\n' "${entry_ip_mode}" "${status}" >&2
+    exit 1
+  fi
+  grep -Fq '[FAIL] 无法可靠识别本机全局 IPv4' "${TMP_ROOT}/${entry_ip_mode}.log" || {
+    printf '入口脚本地址检测模式 %s 缺少关键前提提示\n' "${entry_ip_mode}" >&2
+    exit 1
+  }
+done
+
+set +e
+PATH="${ENTRY_NO_IP_BIN}" /bin/bash "${ENTRY_SCRIPT}" >"${TMP_ROOT}/entry-ip-missing.log" 2>&1
+status=$?
+set -e
+if [[ "${status}" -ne 2 ]]; then
+  printf '入口脚本缺少 ip 工具时应返回 2，实际返回 %s\n' "${status}" >&2
+  exit 1
+fi
+grep -Fq '[FAIL] 缺少 ip，无法可靠识别本机全局 IPv4' "${TMP_ROOT}/entry-ip-missing.log" || {
+  printf '入口脚本缺少 ip 工具时未输出关键前提提示\n' >&2
+  exit 1
+}
 
 FRONTEND_FIXTURE="${TMP_ROOT}/frontend-fixture"
 mkdir -p "${FRONTEND_FIXTURE}"
@@ -1225,6 +1373,24 @@ cat >"${FRONTEND_FIXTURE}/nginx.conf" <<'EOF'
 upstream test_agent_xxl_job_admin {
     server 122.233.30.4:18080 max_fails=3 fail_timeout=10s;
     server 122.233.30.114:18080 max_fails=3 fail_timeout=10s;
+}
+location /xxl-job-admin/ {
+    proxy_pass http://test_agent_xxl_job_admin;
+}
+EOF
+cat >"${FRONTEND_FIXTURE}/nginx-comments-only.conf" <<'EOF'
+# upstream test_agent_xxl_job_admin {
+#     server 122.233.30.4:18080 max_fails=3 fail_timeout=10s;
+#     server 122.233.30.114:18080 max_fails=3 fail_timeout=10s;
+# }
+# location /xxl-job-admin/ {
+#     proxy_pass http://test_agent_xxl_job_admin;
+# }
+EOF
+cat >"${FRONTEND_FIXTURE}/nginx-one-commented.conf" <<'EOF'
+upstream test_agent_xxl_job_admin {
+    server 122.233.30.4:18080 max_fails=3 fail_timeout=10s;
+    # server 122.233.30.114:18080 max_fails=3 fail_timeout=10s;
 }
 location /xxl-job-admin/ {
     proxy_pass http://test_agent_xxl_job_admin;
@@ -1252,7 +1418,7 @@ FRONTEND_SCRIPT="${ROOT_DIR}/deploy/internal/diagnose-xxl-job-frontend.sh"
 frontend_run() {
   PATH="${FAKE_BIN}:${PATH}" \
     XXL_DIAG_FRONTEND_IP="${XXL_DIAG_FRONTEND_IP:-122.233.30.2}" \
-    XXL_DIAG_FRONTEND_NGINX_CONFIG="${FRONTEND_FIXTURE}/nginx.conf" \
+    XXL_DIAG_FRONTEND_NGINX_CONFIG="${XXL_DIAG_FRONTEND_NGINX_CONFIG:-${FRONTEND_FIXTURE}/nginx.conf}" \
     TEST_AGENT_DIAG_NGINX_BIN="${FRONTEND_FIXTURE}/nginx" \
     TEST_AGENT_DIAG_NGINX_ENV="${FRONTEND_FIXTURE}/nginx.env" \
     TEST_AGENT_DIAG_NGINX_ACCESS_LOG="${FRONTEND_FIXTURE}/access.log" \
@@ -1264,6 +1430,10 @@ frontend_run >"${TMP_ROOT}/frontend-ok.log"
 grep -Fq '[PASS] Nginx effective configuration contains XXL Admin upstream' "${TMP_ROOT}/frontend-ok.log"
 grep -Fq '[PASS] 122.233.30.4:18080 readiness is UP' "${TMP_ROOT}/frontend-ok.log"
 grep -Fq '[PASS] 122.233.30.114:18080 readiness is UP' "${TMP_ROOT}/frontend-ok.log"
+grep -Fxq '[PASS] 诊断完成：未发现关键异常' "${TMP_ROOT}/frontend-ok.log" || {
+  printf '前端诊断正常结束缺少统一 PASS 摘要\n' >&2
+  exit 1
+}
 grep -Fq 'https://diag.example/xxl-job-admin/#[REDACTED_FRAGMENT]' "${TMP_ROOT}/frontend-ok.log"
 grep -Fq '/xxl-job-admin/?[REDACTED_QUERY]' "${TMP_ROOT}/frontend-ok.log"
 grep -Fq '/xxl-job-admin/#[REDACTED_FRAGMENT]' "${TMP_ROOT}/frontend-ok.log"
@@ -1272,7 +1442,27 @@ if grep -Eq 'raw-(ticket|token|cookie|authorization|password|fragment|relative-q
   exit 1
 fi
 
-sed -i '' 's/122\.233\.30\.114:18080 max_fails/122.233.30.115:18080 max_fails/' "${FRONTEND_FIXTURE}/nginx.conf"
+for commented_nginx_case in comments-only one-commented; do
+  set +e
+  XXL_DIAG_FRONTEND_NGINX_CONFIG="${FRONTEND_FIXTURE}/nginx-${commented_nginx_case}.conf" \
+    frontend_run >"${TMP_ROOT}/frontend-${commented_nginx_case}.log" 2>&1
+  status=$?
+  set -e
+  if [[ "${status}" -ne 1 ]]; then
+    printf '前端诊断错误接受 Nginx 注释指令夹具 %s，退出码为 %s\n' \
+      "${commented_nginx_case}" "${status}" >&2
+    exit 1
+  fi
+  grep -Eq '^\[FAIL\] 诊断完成：发现 [0-9]+ 个关键异常$' \
+    "${TMP_ROOT}/frontend-${commented_nginx_case}.log" || {
+    printf '前端诊断失败结束缺少统一 FAIL 摘要: %s\n' "${commented_nginx_case}" >&2
+    exit 1
+  }
+done
+
+sed 's/122\.233\.30\.114:18080 max_fails/122.233.30.115:18080 max_fails/' \
+  "${FRONTEND_FIXTURE}/nginx.conf" >"${FRONTEND_FIXTURE}/nginx.conf.tmp"
+mv "${FRONTEND_FIXTURE}/nginx.conf.tmp" "${FRONTEND_FIXTURE}/nginx.conf"
 set +e
 frontend_run >"${TMP_ROOT}/frontend-missing-upstream.log" 2>&1
 status=$?
@@ -1280,7 +1470,9 @@ set -e
 test "${status}" -eq 1
 grep -Fq '[FAIL] Nginx effective configuration missing XXL Admin server 122.233.30.114:18080' "${TMP_ROOT}/frontend-missing-upstream.log"
 
-sed -i '' 's/122\.233\.30\.115:18080 max_fails/122.233.30.114:18080 max_fails/' "${FRONTEND_FIXTURE}/nginx.conf"
+sed 's/122\.233\.30\.115:18080 max_fails/122.233.30.114:18080 max_fails/' \
+  "${FRONTEND_FIXTURE}/nginx.conf" >"${FRONTEND_FIXTURE}/nginx.conf.tmp"
+mv "${FRONTEND_FIXTURE}/nginx.conf.tmp" "${FRONTEND_FIXTURE}/nginx.conf"
 set +e
 XXL_DIAG_FRONTEND_IP=122.233.30.3 frontend_run >"${TMP_ROOT}/frontend-wrong-host.log" 2>&1
 status=$?
@@ -1356,11 +1548,31 @@ grep -Fq '[PASS] 当前机器包含 expected host 122.233.30.4' "${TMP_ROOT}/bac
 grep -Fq '[PASS] systemd test-agent-backend is active/running with MainPID=4242' "${TMP_ROOT}/backend-ok.log"
 grep -Fq '[PASS] 127.0.0.1:8080 readiness is UP' "${TMP_ROOT}/backend-ok.log"
 grep -Fq '[PASS] 127.0.0.1:18080 XXL Admin readiness is UP' "${TMP_ROOT}/backend-ok.log"
+grep -Fxq '[PASS] 诊断完成：未发现关键异常' "${TMP_ROOT}/backend-ok.log" || {
+  printf '后台诊断正常结束缺少统一 PASS 摘要\n' >&2
+  exit 1
+}
 grep -Fq '[INFO] REDIS_ENDPOINT=122.233.30.20:6379' "${TMP_ROOT}/backend-ok.log"
 grep -Fq '[INFO] XXL_MYSQL_ENDPOINT=jdbc:mysql://122.233.30.148:3306/xxl_job' "${TMP_ROOT}/backend-ok.log"
 grep -Fq '[INFO] ADMIN_PORT=18080' "${TMP_ROOT}/backend-ok.log"
 grep -Fq '[INFO] EXECUTOR_PORT=9999' "${TMP_ROOT}/backend-ok.log"
 grep -Eq '\[INFO\] TEST_AGENT_XXL_JOB_ACCESS_TOKEN=SET length=[0-9]+ sha256=[0-9a-f]{16}$' "${TMP_ROOT}/backend-ok.log"
+for status_only_secret in \
+  TEST_AGENT_DB_PASSWORD \
+  TEST_AGENT_REDIS_PASSWORD \
+  TEST_AGENT_XXL_JOB_MYSQL_PASSWORD \
+  TEST_AGENT_API_TOKEN \
+  TEST_AGENT_OPENCODE_MANAGER_TOKEN \
+  TEST_AGENT_INTERNAL_PROXY_API_KEY; do
+  grep -Fxq "[INFO] ${status_only_secret}=SET" "${TMP_ROOT}/backend-ok.log" || {
+    printf '后台诊断未将低熵凭据 %s 限制为 SET/UNSET\n' "${status_only_secret}" >&2
+    exit 1
+  }
+  if grep -Eq "^\[INFO\] ${status_only_secret}=SET[[:space:]].*(length|sha256)=" "${TMP_ROOT}/backend-ok.log"; then
+    printf '后台诊断泄露低熵凭据 %s 的长度或无盐摘要\n' "${status_only_secret}" >&2
+    exit 1
+  fi
+done
 grep -Fq 'https://diag.example/xxl-job-admin/#[REDACTED_FRAGMENT]' "${TMP_ROOT}/backend-ok.log"
 grep -Fq 'https://diag.example/xxl-job-admin/?[REDACTED_QUERY]' "${TMP_ROOT}/backend-ok.log"
 grep -Fq '/xxl-job-admin/?[REDACTED_QUERY]' "${TMP_ROOT}/backend-ok.log"
@@ -1402,6 +1614,10 @@ status=$?
 set -e
 test "${status}" -eq 1
 grep -Fq '[FAIL] 127.0.0.1:18080 XXL Admin readiness 返回 HTTP 503 或非 UP 响应' "${TMP_ROOT}/backend-admin-down.log"
+grep -Eq '^\[FAIL\] 诊断完成：发现 [0-9]+ 个关键异常$' "${TMP_ROOT}/backend-admin-down.log" || {
+  printf '后台诊断失败结束缺少统一 FAIL 摘要\n' >&2
+  exit 1
+}
 
 set +e
 TEST_AGENT_DIAG_BACKEND_ENV="${BACKEND_FIXTURE}/backend-mismatch.env" backend_run --expected-host 122.233.30.4 >"${TMP_ROOT}/backend-config-mismatch.log" 2>&1
@@ -1529,6 +1745,11 @@ validate_readonly_sql_statement() {
     printf 'XXL-JOB read-only SQL contains a forbidden keyword\n' >&2
     return 1
   fi
+  if printf '%s\n' "${trimmed_statement}" | grep -Eqi \
+    '(^|[^[:alnum:]_])INTO[[:space:]]+(OUTFILE|DUMPFILE)([^[:alnum:]_]|$)|(^|[^[:alnum:]_])(GET_LOCK|RELEASE_LOCK|IS_FREE_LOCK|IS_USED_LOCK)[[:space:]]*\(|:='; then
+    printf 'XXL-JOB read-only SQL contains a file write, lock side effect, or user-variable assignment\n' >&2
+    return 1
+  fi
 
   safe_digest_statement="$(printf '%s' "${trimmed_statement}" | sed -E 's/CHAR_LENGTH[[:space:]]*\([[:space:]]*platform_session_digest[[:space:]]*\)//Ig')"
   if printf '%s\n' "${safe_digest_statement}" | grep -Eqi '(^|[^[:alnum:]_])(password|token|platform_session_digest|executor_param|trigger_msg|handle_msg)([^[:alnum:]_]|$)'; then
@@ -1539,14 +1760,46 @@ validate_readonly_sql_statement() {
 
 EOF_DELETE_SQL_FILE="${TMP_ROOT}/readonly-eof-delete.sql"
 WITH_REPLACE_SQL_FILE="${TMP_ROOT}/readonly-with-replace.sql"
+INTO_OUTFILE_SQL_FILE="${TMP_ROOT}/readonly-into-outfile.sql"
+INTO_DUMPFILE_SQL_FILE="${TMP_ROOT}/readonly-into-dumpfile.sql"
+GET_LOCK_SQL_FILE="${TMP_ROOT}/readonly-get-lock.sql"
+RELEASE_LOCK_SQL_FILE="${TMP_ROOT}/readonly-release-lock.sql"
+IS_FREE_LOCK_SQL_FILE="${TMP_ROOT}/readonly-is-free-lock.sql"
+IS_USED_LOCK_SQL_FILE="${TMP_ROOT}/readonly-is-used-lock.sql"
+USER_VARIABLE_ASSIGNMENT_SQL_FILE="${TMP_ROOT}/readonly-user-variable-assignment.sql"
 printf 'DELETE FROM xxl_job_user' >"${EOF_DELETE_SQL_FILE}"
 printf "WITH cte AS (SELECT 1) REPLACE INTO xxl_job_user (username) VALUES ('unsafe');\n" >"${WITH_REPLACE_SQL_FILE}"
+printf "SELECT 1 INTO OUTFILE '/tmp/xxl-job-diagnostic';\n" >"${INTO_OUTFILE_SQL_FILE}"
+printf "SELECT 1 INTO DUMPFILE '/tmp/xxl-job-diagnostic';\n" >"${INTO_DUMPFILE_SQL_FILE}"
+printf "SELECT GET_LOCK('xxl-job-diagnostic', 0);\n" >"${GET_LOCK_SQL_FILE}"
+printf "SELECT RELEASE_LOCK('xxl-job-diagnostic');\n" >"${RELEASE_LOCK_SQL_FILE}"
+printf "SELECT IS_FREE_LOCK('xxl-job-diagnostic');\n" >"${IS_FREE_LOCK_SQL_FILE}"
+printf "SELECT IS_USED_LOCK('xxl-job-diagnostic');\n" >"${IS_USED_LOCK_SQL_FILE}"
+printf 'SELECT @diagnostic := 1;\n' >"${USER_VARIABLE_ASSIGNMENT_SQL_FILE}"
 if validate_readonly_sql_file "${EOF_DELETE_SQL_FILE}"; then
   printf 'XXL-JOB read-only SQL accepted DELETE without a trailing semicolon\n' >&2
   exit 1
 fi
 if validate_readonly_sql_file "${WITH_REPLACE_SQL_FILE}"; then
   printf 'XXL-JOB read-only SQL accepted WITH + REPLACE DML\n' >&2
+  exit 1
+fi
+sql_negative_failures=0
+for unsafe_sql_fixture in \
+  "${INTO_OUTFILE_SQL_FILE}" \
+  "${INTO_DUMPFILE_SQL_FILE}" \
+  "${GET_LOCK_SQL_FILE}" \
+  "${RELEASE_LOCK_SQL_FILE}" \
+  "${IS_FREE_LOCK_SQL_FILE}" \
+  "${IS_USED_LOCK_SQL_FILE}" \
+  "${USER_VARIABLE_ASSIGNMENT_SQL_FILE}"; do
+  if validate_readonly_sql_file "${unsafe_sql_fixture}"; then
+    printf 'XXL-JOB 只读 SQL 错误接受静态副作用夹具: %s\n' "${unsafe_sql_fixture##*/}" >&2
+    sql_negative_failures=$((sql_negative_failures + 1))
+  fi
+done
+if (( sql_negative_failures > 0 )); then
+  printf 'XXL-JOB 只读 SQL 共错误接受 %s 类静态副作用\n' "${sql_negative_failures}" >&2
   exit 1
 fi
 if ! validate_readonly_sql_file "${READONLY_SQL_FILE}"; then

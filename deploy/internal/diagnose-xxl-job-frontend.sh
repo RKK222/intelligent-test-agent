@@ -13,7 +13,7 @@ ERROR_LOG="${TEST_AGENT_DIAG_NGINX_ERROR_LOG:-/data/apps/nginx/logs/error.log}"
 NGINX_PREFIX='/data/apps/nginx/'
 NGINX_MAIN_CONF='/data/apps/nginx/conf/nginx.conf'
 STATUS_MARKER='__TEST_AGENT_HTTP_STATUS__:'
-has_failure=0
+FAILURES=0
 
 pass() {
   printf '[PASS] %s\n' "$1"
@@ -22,7 +22,16 @@ pass() {
 # 汇总配置和探测异常，确保一次运行可以输出完整的现场证据。
 fail() {
   printf '[FAIL] %s\n' "$1"
-  has_failure=1
+  FAILURES=$((FAILURES + 1))
+}
+
+finish() {
+  if (( FAILURES > 0 )); then
+    printf '[FAIL] 诊断完成：发现 %s 个关键异常\n' "${FAILURES}"
+    exit 1
+  fi
+  printf '[PASS] 诊断完成：未发现关键异常\n'
+  exit 0
 }
 
 env_value() {
@@ -94,19 +103,19 @@ nginx_additional_listen_ports="$(env_value "${NGINX_ENV}" TEST_AGENT_NGINX_ADDIT
 [[ "${nginx_admins}" == '122.233.30.4:18080,122.233.30.114:18080' ]] || fail 'nginx.env 的 XXL Admin 节点与双后台目标不一致'
 [[ "${nginx_listen_port}" == '80' ]] || fail 'nginx.env 的主监听端口不是 80'
 [[ "${nginx_additional_listen_ports}" == '9996' ]] || fail 'nginx.env 的附加监听端口不是 9996'
-if [[ "${has_failure}" -eq 0 ]]; then
+if [[ "${FAILURES}" -eq 0 ]]; then
   pass 'nginx.env 的多节点 Admin 与监听端口配置正确'
 fi
 
 if ! effective_config="$("${NGINX_BIN}" -p "${NGINX_PREFIX}" -c "${NGINX_MAIN_CONF}" -T 2>&1)"; then
   fail 'Nginx -T 无法读取有效配置'
 else
-  grep -Fq 'upstream test_agent_xxl_job_admin {' <<<"${effective_config}" || fail 'Nginx effective configuration missing XXL Admin upstream'
-  grep -Fq 'server 122.233.30.4:18080 max_fails=3 fail_timeout=10s;' <<<"${effective_config}" || fail 'Nginx effective configuration missing XXL Admin server 122.233.30.4:18080'
-  grep -Fq 'server 122.233.30.114:18080 max_fails=3 fail_timeout=10s;' <<<"${effective_config}" || fail 'Nginx effective configuration missing XXL Admin server 122.233.30.114:18080'
-  grep -Fq 'location /xxl-job-admin/ {' <<<"${effective_config}" || fail 'Nginx effective configuration missing /xxl-job-admin/ location'
-  grep -Fq 'proxy_pass http://test_agent_xxl_job_admin;' <<<"${effective_config}" || fail 'Nginx effective configuration missing XXL Admin proxy_pass'
-  [[ "${has_failure}" -eq 0 ]] && pass 'Nginx effective configuration contains XXL Admin upstream'
+  grep -Eq '^[[:space:]]*upstream[[:space:]]+test_agent_xxl_job_admin[[:space:]]*\{' <<<"${effective_config}" || fail 'Nginx effective configuration missing XXL Admin upstream'
+  grep -Eq '^[[:space:]]*server[[:space:]]+122\.233\.30\.4:18080([[:space:];]|$)' <<<"${effective_config}" || fail 'Nginx effective configuration missing XXL Admin server 122.233.30.4:18080'
+  grep -Eq '^[[:space:]]*server[[:space:]]+122\.233\.30\.114:18080([[:space:];]|$)' <<<"${effective_config}" || fail 'Nginx effective configuration missing XXL Admin server 122.233.30.114:18080'
+  grep -Eq '^[[:space:]]*location[[:space:]]+/xxl-job-admin/[[:space:]]*\{' <<<"${effective_config}" || fail 'Nginx effective configuration missing /xxl-job-admin/ location'
+  grep -Eq '^[[:space:]]*proxy_pass[[:space:]]+http://test_agent_xxl_job_admin[[:space:]]*;' <<<"${effective_config}" || fail 'Nginx effective configuration missing XXL Admin proxy_pass'
+  [[ "${FAILURES}" -eq 0 ]] && pass 'Nginx effective configuration contains XXL Admin upstream'
 fi
 
 probe_readiness '122.233.30.4:18080'
@@ -117,4 +126,4 @@ printf '[INFO] 最近 200 行 Nginx XXL Admin 相关日志（已脱敏）\n'
   | grep -Ei 'xxl-job-admin|upstream|connect\(\) failed|timed out|no live upstreams|502|504' \
   | redact_stream || true
 
-exit "${has_failure}"
+finish

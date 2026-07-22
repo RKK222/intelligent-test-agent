@@ -6,14 +6,15 @@
 
 | 层级 | 固定地址与端口 |
 |---|---|
-| 浏览器域名入口 | `http://mimo.sdc.cs.icbc:9996` |
-| 浏览器 IP 入口、实体 Nginx | `http://122.233.30.2:9996`、`122.233.30.2` |
+| 浏览器域名入口 | `http://mimo.sdc.cs.icbc:9996` → 企业入口/网关 → 实体 Nginx `122.233.30.2:80` |
+| 浏览器 IP 入口 | `http://122.233.30.2:9996` → 实体 Nginx `122.233.30.2:9996` |
+| 实体 Nginx | `122.233.30.2:80` + `122.233.30.2:9996` |
 | 后台 A | `122.233.30.4:8080`，Admin `18080`，executor `9999` |
 | 后台 B | `122.233.30.114:8080`，Admin `18080`，executor `9999` |
 | 共享 Redis | `122.233.30.20:6379` |
 | 共享 XXL MySQL | `122.233.30.148:3306/xxl_job` |
 
-请求链路固定为“浏览器网段 → 企业入口 → `.2:9996` Nginx → `.4/.114:18080` Admin”；调度链路再由共享 MySQL 中的 Admin 调度到 `.4/.114:9999` executor。平台 `8080`、Admin `18080` 和 executor `9999` 是三个独立检查层，平台 readiness 正常不能证明 Admin 或 executor 正常。
+两条浏览器链路必须分开判断：域名请求固定经过“浏览器网段 → `mimo.sdc.cs.icbc:9996` → 企业入口/网关 → `.2:80` 实体 Nginx”，IP 请求固定经过“浏览器网段 → `.2:9996` 实体 Nginx”。实体 Nginx 同时监听 `80 + 9996`，两条链路再汇入 `.4/.114:18080` Admin。调度链路由共享 MySQL 中的 Admin 调度到 `.4/.114:9999` executor。平台 `8080`、Admin `18080` 和 executor `9999` 是三个独立检查层，平台 readiness 正常不能证明 Admin 或 executor 正常。
 
 本手册及配套脚本只读：不得启动、停止或重启服务，不得 reload 或生成 Nginx 配置，不得修改 env/身份文件，不得签发或消费真实 SSO 票据，不得触发任务，不得读写 Redis 业务数据，不得写 MySQL。诊断出版本或配置混用时，只记录 JAR、配置摘要和时间，转交部署负责人按现有部署文档处理；这里不复制发布、传输、替换或重启流程。
 
@@ -32,7 +33,7 @@
 
 | 现场现象 | 首要证据 | 优先边界 | 下一步 |
 |---|---|---|---|
-| 域名打不开，IP 入口正常 | 入口脚本中域名与 IP 的结果不同 | 企业 DNS、入口或端口转发 | 保存入口日志后交企业网络负责人 |
+| 域名打不开，IP 入口正常 | 入口脚本中域名与 IP 的结果不同 | 企业 DNS、入口/网关或域名 `9996 -> .2:80` 转发 | 保存入口日志后交企业网络负责人 |
 | 域名和 IP 都是 `502/504` | 入口脚本与 `.2` 脚本 | Nginx Admin upstream 或后台 Admin | 继续分别看 `.4/.114:18080` |
 | “管理服务暂不可用” | Browser Network 的签票、登录、Admin 请求 | 只是统一前端兜底，不能直接定根因 | 按实际 HTTP 状态分层 |
 | 平台页面正常，Admin 不可用 | 后台 `8080` PASS、`18080` FAIL | Admin 子上下文或 XXL MySQL | 保存相应后台日志并查 `.148` |
@@ -47,9 +48,9 @@
 
 开始前记录：故障开始/结束时间（精确到秒、含时区）、实际访问入口、账号是否为平台 `SUPER_ADMIN`、浏览器名称与版本、本次失败是否已经保留被动证据、最近一次成功时间、相关任务 key、执行每条命令的机器和命令退出码。不要记录或要求他人回传真实密码、Token、Cookie、票据、Authorization、RSA 私钥、请求体或完整任务参数。
 
-三个脚本使用统一前缀：`[PASS]` 为正常，`[WARN]` 为风险或人工确认项，`[FAIL]` 为异常边界，`[INFO]` 为脱敏上下文。退出码 0 表示关键检查通过，WARN 不一定改变退出码；退出码 1 表示至少一个关键检查失败或高风险不一致；退出码 2 表示用法错误、非法参数、执行机器不符或关键命令/文件缺失。退出码 2 先修正执行前提再重跑，不能解释成业务故障。
+三个脚本使用统一前缀：`[PASS]` 为正常，`[WARN]` 为风险或人工确认项，`[FAIL]` 为异常边界，`[INFO]` 为脱敏上下文。正常走到结尾时统一输出“诊断完成”的最终 PASS/FAIL 摘要。退出码 0 表示关键检查通过，WARN 不一定改变退出码；退出码 1 表示至少一个关键检查失败或高风险不一致；退出码 2 表示用法错误、非法参数、执行机器不符或关键命令/文件缺失，这类关键前提错误直接停止，不输出正常完成摘要。退出码 2 先修正执行前提再重跑，不能解释成业务故障。
 
-脚本会将 secret 归纳为 `SET/UNSET`、长度和 SHA-256 前 16 位，只用于两节点一致性比较。保存证据时不得启用 shell 调试输出，不得保存完整 env；URL query/hash、请求头和浏览器截图必须先脱敏。严禁外传未脱敏 HAR。
+脚本对数据库/Redis/XXL MySQL password、普通 API token、manager token 和内部代理 key 等低熵凭据只输出 `SET/UNSET`，不输出长度、hash 或摘要。只有生产规范要求强随机且需要跨节点比对的 `TEST_AGENT_XXL_JOB_ACCESS_TOKEN` 才输出长度与 SHA-256 前 16 位。保存证据时不得启用 shell 调试输出，不得保存完整 env；URL query/hash、请求头和浏览器截图必须先脱敏。严禁外传未脱敏 HAR。
 
 ## 4. 浏览器网段入口（执行入口脚本）
 
@@ -62,7 +63,9 @@ bash /data/testagent/deploy/internal/diagnose-xxl-job-entry.sh \
   | tee /data/0709/xxl-job-diagnostics-entry.log
 ```
 
-成功条件：域名解析到 `122.233.30.2`；域名入口与 `122.233.30.2:9996` 均返回 HTTP 200 且非空；两个同源 Admin readiness 都返回 HTTP 200/UP；命令退出码为 `0`。当前入口是 HTTP，因此出现 `Secure` Cookie 风险 WARN 是预期的人工检查提示。
+脚本在任何 DNS/HTTP 探测前检查本机全局 IPv4：若命中 `.2/.4/.114/.20/.148` 任一已知基础设施节点，或缺少/无法执行 `ip`、无法可靠识别地址，会明确返回 `2` 且不继续 curl。不得在这些节点运行后把结果当作浏览器视点。
+
+成功条件：脚本确认当前终端不属于已知基础设施节点；域名解析到 `122.233.30.2`；域名入口与 `122.233.30.2:9996` 均返回 HTTP 200 且非空；两个同源 Admin readiness 都返回 HTTP 200/UP；命令退出码为 `0` 并输出最终 PASS 摘要。当前入口是 HTTP，因此出现 `Secure` Cookie 风险 WARN 是预期的人工检查提示。
 
 失败停止点：域名失败而 IP 成功时停在企业 DNS/入口边界；两个入口都失败时先交企业入口/网络负责人；`404` 停在 Nginx location；`502/504` 继续到 `.2` 仅用于区分 upstream 节点，但不要先判断为 Java 平台故障。脚本不请求签票 API，也不提交 SSO 登录。
 
@@ -77,9 +80,9 @@ bash /data/testagent/deploy/internal/diagnose-xxl-job-frontend.sh \
   | tee /data/0709/xxl-job-diagnostics-frontend-122.233.30.2.log
 ```
 
-成功条件：脚本确认本机为 `.2`；读取 `/data/testagent/config/nginx.env`；用 `/data/apps/nginx/sbin/nginx` 读取有效配置；有效配置包含 `test_agent_xxl_job_admin`、`.4:18080`、`.114:18080`、`location /xxl-job-admin/` 和对应 `proxy_pass`；从 `.2` 直连两个 Admin readiness 均为 HTTP 200/UP；退出码为 `0`。
+成功条件：脚本确认本机为 `.2`；读取 `/data/testagent/config/nginx.env`；用 `/data/apps/nginx/sbin/nginx` 读取有效配置；首个非空白字符起始的活跃指令包含 `test_agent_xxl_job_admin`、`.4:18080`、`.114:18080`、`location /xxl-job-admin/` 和对应 `proxy_pass`，注释行不算有效指令；从 `.2` 直连两个 Admin readiness 均为 HTTP 200/UP；退出码为 `0` 并输出最终 PASS 摘要。
 
-失败停止点：退出码 `2` 表示机器、Nginx binary、env 或日志等关键前提不符，修正执行位置/交付前提后重跑；缺失 upstream/location 或任一 readiness 失败返回 `1`。只有一个 Admin 失败时先记录为单节点 Admin、节点网络或防火墙边界，这会造成负载均衡下的间歇故障。脚本只执行只读 `nginx -T` 解析并 dump 有效配置，同时读取最近 200 行相关日志；不 reload Nginx，也不写配置。
+失败停止点：退出码 `2` 表示机器、Nginx binary、env 或日志等关键前提不符，修正执行位置/交付前提后重跑；缺失 upstream/location、要求只出现在注释中，或任一 readiness 失败返回 `1` 并输出最终 FAIL 摘要。只有一个 Admin 失败时先记录为单节点 Admin、节点网络或防火墙边界，这会造成负载均衡下的间歇故障。脚本只执行只读 `nginx -T` 解析并 dump 有效配置，同时读取最近 200 行相关日志；不 reload Nginx，也不写配置。
 
 ## 6. 122.233.30.4 后台（expected-host=.4）
 
@@ -152,7 +155,7 @@ mysql --host=122.233.30.148 --port=3306 --user='<只读账号>' --password \
 
 成功条件：命令成功结束；Flyway 记录均成功；JIT 用户只显示平台 ID、用户名、角色、digest 长度和过期时间；`test-agent-backend` 组存在；任务元数据包含预期七个 `platform_task_key`；registry 能看到 `.4:9999` 与 `.114:9999` 的近期注册；近 7 日调度统计和两个索引结果可读。SQL 不输出 password、token、digest 原文、`executor_param`、`trigger_msg` 或 `handle_msg`。
 
-失败停止点：连接/权限失败交 DBA；表或 Flyway 版本缺失、migration `success` 异常停止业务推断并交发布/数据库负责人；只有一个 registry 地址时回到对应后台 `9999`、advertised host、网络和共享 access token；任务缺失、停用或 Cron 异常交 XXL 配置负责人。不要用写 SQL 现场修复。
+失败停止点：连接/权限失败交 DBA；表或 Flyway 版本缺失、migration `success` 异常停止业务推断并交发布/数据库负责人；只有一个 registry 地址时回到对应后台 `9999`、advertised host、网络和共享 access token；任务缺失、停用或 Cron 异常交 XXL 配置负责人。不要用写 SQL 现场修复。仓库静态验证会拒绝 `INTO OUTFILE/DUMPFILE`、MySQL named lock 函数和用户变量赋值 `:=`，现场不得绕过这一只读边界。
 
 ## 10. 浏览器 SSO Network/Console/Cookie/CSP/postMessage
 
@@ -231,16 +234,16 @@ grep -E '^\[INFO\] (REDIS_ENDPOINT|XXL_MYSQL_ENDPOINT|TEST_AGENT_XXL_JOB_ACCESS_
   /data/0709/xxl-job-diagnostics-backend-122.233.30.114.log
 ```
 
-成功条件：Redis 为 `.20:6379`、MySQL 为 `.148:3306/xxl_job`、access token 的 SET/UNSET 状态、长度和摘要完全相同，Admin 为 `18080`，executor 为 `9999`；advertised host 则应分别为 `.4` 和 `.114`，不要求相同。摘要不一致或单节点 readiness/registry 异常时停止并把两份脱敏证据交应用配置负责人；不得回传原始 token 进行人工比对。
+成功条件：Redis 为 `.20:6379`、MySQL 为 `.148:3306/xxl_job`、XXL access token 的 SET/UNSET 状态、长度和摘要完全相同，Admin 为 `18080`，executor 为 `9999`；其它 password/token/key 只能确认各自为 `SET/UNSET`，不得使用长度或摘要比较；advertised host 则应分别为 `.4` 和 `.114`，不要求相同。XXL access token 摘要不一致或单节点 readiness/registry 异常时停止并把两份脱敏证据交应用配置负责人；不得回传原始 token 进行人工比对。
 
 ## 13. HTTP 状态码、日志关键字、责任边界决策树
 
 ```text
 域名失败、IP 成功
-└─ 企业 DNS / 入口 / 9996 转发
+└─ 域名链路：企业 DNS / 入口或网关 / 9996 -> .2:80 转发
 
 域名和 IP 都失败
-└─ .2 脚本
+└─ 两条外部链路分别确认后执行 .2 脚本；IP 入口直达 .2:9996，域名入口到达 .2:80
    ├─ 有效 location/upstream 缺失 → Nginx 配置责任方
    ├─ 仅 .4 或仅 .114 readiness 失败 → 对应后台/节点网络
    └─ 两个 Admin 都失败 → 分别执行两个后台脚本
@@ -280,11 +283,11 @@ cd /data/0709
 if awk '
   {
     line=tolower($0)
-    gsub(/(ticket|cookie|token|password|secret|authorization|platform_session_digest)[[:alnum:]_"'\''-]*[[:space:]]*[=:][[:space:]]*["'\'']*\[redacted(_query|_fragment)?\]["'\'']*/, "", line)
-    gsub(/[[:alnum:]_]*(token|password|secret|digest)[[:alnum:]_]*=(set length=[0-9]+ sha256=[0-9a-f]+|unset)/, "", line)
+    gsub(/(ticket|cookie|token|password|secret|key|authorization|platform_session_digest)[[:alnum:]_"'\''-]*[[:space:]]*[=:][[:space:]]*["'\'']*\[redacted(_query|_fragment)?\]["'\'']*/, "", line)
+    gsub(/[[:alnum:]_]*(token|password|secret|digest|key)[[:alnum:]_]*=(set|set length=[0-9]+ sha256=[0-9a-f]+|unset)/, "", line)
     gsub(/\?\[redacted_query\]|#\[redacted_fragment\]/, "", line)
     if (line ~ /authorization:[[:space:]]*bearer/) leaked=1
-    if (line ~ /(ticket|cookie|token|password|secret|authorization|platform_session_digest)[[:alnum:]_"'\''-]*[[:space:]]*[=:][[:space:]]*["'\'']*[^,;[:space:]"'\''}]/) leaked=1
+    if (line ~ /(ticket|cookie|token|password|secret|key|authorization|platform_session_digest)[[:alnum:]_"'\''-]*[[:space:]]*[=:][[:space:]]*["'\'']*[^,;[:space:]"'\''}]/) leaked=1
     if (line ~ /[^[:space:]?#][?#][^[:space:]]+/ || line ~ /(^|[[:space:]])[?#][^[:space:]]+/) leaked=1
   }
   END { exit leaked ? 1 : 0 }

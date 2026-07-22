@@ -6,7 +6,7 @@ MINUTES=15
 BACKEND_ENV="${TEST_AGENT_DIAG_BACKEND_ENV:-/data/testagent/config/backend.env}"
 PS_BIN="${TEST_AGENT_DIAG_PS_BIN:-ps}"
 STATUS_MARKER='__TEST_AGENT_HTTP_STATUS__:'
-has_failure=0
+FAILURES=0
 
 usage() {
   printf '%s\n' 'Usage: diagnose-xxl-job-backend.sh --expected-host <122.233.30.4|122.233.30.114> [--minutes <5-120>]'
@@ -44,7 +44,16 @@ info() {
 # 诊断应尽量收集完整现场，因此普通健康或配置异常只累积失败状态。
 fail() {
   printf '[FAIL] %s\n' "$1"
-  has_failure=1
+  FAILURES=$((FAILURES + 1))
+}
+
+finish() {
+  if (( FAILURES > 0 )); then
+    printf '[FAIL] 诊断完成：发现 %s 个关键异常\n' "${FAILURES}"
+    exit 1
+  fi
+  printf '[PASS] 诊断完成：未发现关键异常\n'
+  exit 0
 }
 
 critical() {
@@ -90,6 +99,17 @@ secret_summary() {
   fi
   digest="$(sha256_text "${value}")" || critical '缺少可用的 SHA-256 实现，无法安全生成配置摘要'
   info "${key}=SET length=${#value} sha256=${digest}"
+}
+
+# 密码和普通 token 可能是低熵值，只报告是否设置，避免长度或无盐摘要被离线枚举。
+secret_presence() {
+  local key="$1" value
+  value="$(env_value "${BACKEND_ENV}" "${key}")"
+  if [[ -z "${value}" ]]; then
+    info "${key}=UNSET"
+  else
+    info "${key}=SET"
+  fi
 }
 
 # JDBC 摘要只保留协议、主机、端口、库名，丢弃 userinfo、query 和 fragment。
@@ -278,12 +298,12 @@ for secret_key in \
   TEST_AGENT_DB_PASSWORD \
   TEST_AGENT_REDIS_PASSWORD \
   TEST_AGENT_XXL_JOB_MYSQL_PASSWORD \
-  TEST_AGENT_XXL_JOB_ACCESS_TOKEN \
   TEST_AGENT_API_TOKEN \
   TEST_AGENT_OPENCODE_MANAGER_TOKEN \
   TEST_AGENT_INTERNAL_PROXY_API_KEY; do
-  secret_summary "${secret_key}"
+  secret_presence "${secret_key}"
 done
+secret_summary TEST_AGENT_XXL_JOB_ACCESS_TOKEN
 
 DATA_ROOT="${TEST_AGENT_DIAG_DATA_ROOT:-$(env_value "${BACKEND_ENV}" SYS_DATA_ROOT_DIR)}"
 [[ -n "${DATA_ROOT}" ]] || critical 'SYS_DATA_ROOT_DIR 未配置'
@@ -387,4 +407,4 @@ else
 fi
 
 info '4096-4115 为 opencode 用户进程端口池，非管理页首要链路；本脚本不执行 Docker/worker/manager 操作'
-exit "${has_failure}"
+finish

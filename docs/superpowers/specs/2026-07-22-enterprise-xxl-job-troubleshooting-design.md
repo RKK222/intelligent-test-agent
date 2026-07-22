@@ -12,8 +12,9 @@
 
 | 角色 | 固定地址 |
 |---|---|
-| 浏览器域名入口 | `http://mimo.sdc.cs.icbc:9996` |
-| 浏览器 IP 入口 / 实体 Nginx | `http://122.233.30.2:9996` / `122.233.30.2` |
+| 浏览器域名入口 | 域名 `http://mimo.sdc.cs.icbc:9996` → 企业入口/网关 → 实体 Nginx `122.233.30.2:80` |
+| 浏览器 IP 入口 | IP `http://122.233.30.2:9996` → 实体 Nginx `122.233.30.2:9996` |
+| 实体 Nginx | 实体 Nginx 同时监听 `80` 与 `9996` |
 | 后台 A | `122.233.30.4`，平台 `8080`、Admin `18080`、executor `9999` |
 | 后台 B | `122.233.30.114`，平台 `8080`、Admin `18080`、executor `9999` |
 | Redis | `122.233.30.20:6379` |
@@ -32,7 +33,7 @@
 3. “管理服务暂不可用”、会话失效、502、执行器离线、任务不触发等现象速查。
 4. 排查前准备：故障时间、实际入口、账号角色、浏览器版本和脱敏规则。
 5. 浏览器 SSO 请求链与 Cookie/CSP/`postMessage`。
-6. 企业入口、DNS 和 `9996 -> .2` 转发。
+6. 企业入口、DNS 和域名 `9996 -> 企业入口/网关 -> .2:80` 转发，并与 IP `.2:9996` 直连分层判断。
 7. `.2` 实体 Nginx、有效配置和 Admin upstream。
 8. `.4` 后台平台/Admin/executor。
 9. `.114` 后台平台/Admin/executor。
@@ -52,6 +53,7 @@
 
 新增 `deploy/internal/diagnose-xxl-job-entry.sh`，在实际浏览器网段的 Linux 终端执行。它只执行 DNS 查询、TCP/HTTP GET/HEAD 探测和响应摘要检查：
 
+- 在任何网络探测前读取本机全局 IPv4；命中 `.2/.4/.114/.20/.148` 已知基础设施节点，或 `ip` 缺失/失败/无法得到地址时，明确返回误用/关键前提退出码 `2`。
 - 检查 `mimo.sdc.cs.icbc` DNS。
 - 分别检查域名入口和 `.2:9996` IP 入口。
 - 检查同源 `/xxl-job-admin/actuator/health/readiness`。
@@ -66,7 +68,7 @@
 - 验证本机地址包含 `.2`，不符时退出 `2`。
 - 读取 `/data/testagent/config/nginx.env` 的非敏感键。
 - 使用 `/data/apps/nginx/sbin/nginx -p /data/apps/nginx/ -c /data/apps/nginx/conf/nginx.conf -T` 读取有效配置，不使用 PATH 中其它 Nginx。
-- 验证已加载配置包含 `test_agent_xxl_job_admin`、`.4:18080`、`.114:18080`、`location /xxl-job-admin/` 和对应 `proxy_pass`。
+- 验证已加载配置中的有效指令包含 `test_agent_xxl_job_admin`、`.4:18080`、`.114:18080`、`location /xxl-job-admin/` 和对应 `proxy_pass`；正则锚定到首个非空白字符，注释行不能满足合同。
 - 分别从 `.2` GET 两个 Admin readiness，识别单节点故障。
 - 有界读取 `/data/apps/nginx/logs/access.log` 和 `error.log` 中的 XXL 路径及 upstream 错误，并在输出前去除 query 和敏感字段。
 - 不执行 `nginx -s reload`、`systemctl reload`、配置生成或任何文件覆盖。
@@ -81,8 +83,8 @@
 - `8080/18080/9999` 监听者及其与 systemd 主 PID 的关系。
 - 平台 `8080` readiness 和本机 Admin `18080/xxl-job-admin/actuator/health/readiness`。
 - 到 `.20:6379`、`.148:3306`、对端 `8080/18080/9999` 的只读网络连通性。
-- `/data/testagent/config/backend.env` 中允许展示的地址、开关、用户名和端口；密码及 token 只输出 `SET/UNSET`、长度和 SHA-256 摘要，不输出原值。
-- 两个后台 Redis、XXL MySQL、access token 摘要和端口是否应当一致；本机 advertised host 与稳定 ID 是否符合本节点。
+- `/data/testagent/config/backend.env` 中允许展示的地址、开关、用户名和端口；数据库/Redis/XXL MySQL password、普通 API token、manager token 和内部代理 key 等低熵凭据只输出 `SET/UNSET`，不输出长度或摘要。
+- 只有生产规范要求强随机且需要跨节点比对的 `TEST_AGENT_XXL_JOB_ACCESS_TOKEN` 输出长度和 SHA-256 前缀；两个后台的 Redis、XXL MySQL、该 access token 摘要和端口应当一致，本机 advertised host 与稳定 ID 应符合本节点。
 - 最近 5～120 分钟的 Admin、Flyway、Hikari、MySQL、executor readiness、注册和调度日志，默认 15 分钟。
 - `.serverid/.serverhost` 只用于关联 Java 身份；manager、worker 和 `4096-4115` 故障明确标记为非管理页首要链路。
 
@@ -99,7 +101,7 @@
 - registry 地址及最近更新时间。
 - 调度日志状态、时间和计数摘要，不输出可能包含参数的完整结果。
 
-SQL 不包含 `INSERT/UPDATE/DELETE/REPLACE/MERGE/TRUNCATE/ALTER/CREATE/DROP/CALL`，也不获取锁或触发存储过程。
+SQL 不包含 `INSERT/UPDATE/DELETE/REPLACE/MERGE/TRUNCATE/ALTER/CREATE/DROP/CALL`，也不获取锁或触发存储过程。静态边界还显式拒绝 `INTO OUTFILE`、`INTO DUMPFILE`、`GET_LOCK`、`RELEASE_LOCK`、`IS_FREE_LOCK`、`IS_USED_LOCK` 和用户变量赋值 `:=`。
 
 ## 输出、退出码与脱敏
 
@@ -120,7 +122,7 @@ SQL 不包含 `INSERT/UPDATE/DELETE/REPLACE/MERGE/TRUNCATE/ALTER/CREATE/DROP/CAL
 
 脚本只写标准输出/标准错误。手册允许操作员用 `tee` 把输出保存为 `/data/0709/xxl-job-diagnostics-<节点>.log`，但脚本本身不自动创建、打包、传输或删除证据文件。
 
-脱敏规则覆盖大小写变体的 `ticket`、`cookie`、`authorization`、`token`、`password`、`secret`、MySQL/Redis 凭据和 session digest。URL 输出去掉 query/hash；不启用 `set -x`；不输出完整 env、请求体、数据库任务参数或异常堆栈。固定强随机 token 的 SHA-256 只用于节点一致性比较。
+脱敏规则覆盖大小写变体的 `ticket`、`cookie`、`authorization`、`token`、`password`、`secret`、MySQL/Redis 凭据和 session digest。URL 输出去掉 query/hash；不启用 `set -x`；不输出完整 env、请求体、数据库任务参数或异常堆栈。只有固定生产强随机 XXL access token 的 SHA-256 前缀可用于节点一致性比较；其它凭据不输出长度或无盐摘要。
 
 ## 端到端决策规则
 
@@ -128,7 +130,7 @@ SQL 不包含 `INSERT/UPDATE/DELETE/REPLACE/MERGE/TRUNCATE/ALTER/CREATE/DROP/CAL
 
 | 证据 | 故障边界 |
 |---|---|
-| 域名入口失败，`.2:9996` 成功 | 企业 DNS、入口或端口转发 |
+| 域名入口失败，`.2:9996` 成功 | 域名链路中的企业 DNS、入口/网关或 `9996 -> .2:80` 转发 |
 | `.2` 入口失败，但 `.2` 直连两个 Admin 成功 | Nginx 有效配置、location 或 upstream |
 | `.2` 只能访问一个 Admin | 单后台 Admin、防火墙或网络；可能间歇失败 |
 | 后台 `8080` 正常、`18080` 失败 | Admin 子上下文或 XXL MySQL；平台 readiness 不能排除该故障 |
@@ -141,7 +143,7 @@ SQL 不包含 `INSERT/UPDATE/DELETE/REPLACE/MERGE/TRUNCATE/ALTER/CREATE/DROP/CAL
 | executor 在线、任务不触发 | 任务启停/Cron、调度线程、registry 或调度日志 |
 | 任务结果为 `SKIPPED_LOCK_HELD` | `GLOBAL_MUTEX` 正常互斥，不作为失败 |
 
-脚本不模拟浏览器登录。浏览器 Network/Console 仍由手册指导人工检查，请求顺序固定为签票 POST、iframe 登录 POST、Admin GET 和同源 `ready`；任何截图或 HAR 在外传前必须删除票据、Cookie、Authorization 和请求体。
+脚本不模拟浏览器登录。SSO 被动证据顺序固定为：票据签发 POST → 登录 POST → iframe ready `postMessage` → Admin GET。全过程只检查事故时已经保留的证据，不得为补证主动刷新、重试或重放；任何截图或 HAR 在外传前必须删除票据、Cookie、Authorization 和请求体。
 
 ## 验证设计
 
@@ -150,9 +152,11 @@ SQL 不包含 `INSERT/UPDATE/DELETE/REPLACE/MERGE/TRUNCATE/ALTER/CREATE/DROP/CAL
 - 三个 Shell 脚本通过 `bash -n`。
 - 入口健康、前端双 Admin 健康、后台健康路径返回 `0`。
 - Admin 不可达、缺失 upstream、配置摘要不一致返回 `1`。
-- 错误机器、非法 `--expected-host`、超出 5～120 分钟范围返回 `2`。
+- 入口脚本在五个已知基础设施节点上均拒绝执行，地址检测工具缺失/失败也返回 `2` 且不调用 curl；后台错误机器、非法 `--expected-host`、超出 5～120 分钟范围返回 `2`。
+- Nginx 要求全部只存在于注释或任一必须指令被注释时返回 `1`；合法活跃配置与附加 `server` 参数继续通过。
 - fixture 中的密码、token、Cookie、ticket、Authorization 和 digest 不出现在输出。
-- backend token 的不同摘要可被识别，但原值不回显。
+- 普通 password/token/key 只输出 `SET/UNSET`；只有 XXL access token 的不同长度/SHA-256 前缀可被识别，原值均不回显。
+- 三个现场脚本走到正常结束路径时都由 `finish()` 输出最终 PASS/FAIL 摘要；误用、错误机器和关键前提继续直接返回 `2`。
 - 静态扫描确认脚本不含服务启停/reload、配置覆盖和数据库写命令。
 - SQL 静态检查只允许注释、空行、`SELECT`、`SHOW` 及只读 CTE，不含 DML、DDL、`CALL` 或显式锁。
 

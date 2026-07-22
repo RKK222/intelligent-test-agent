@@ -10,13 +10,14 @@
 
 ## Global Constraints
 
-- 固定拓扑：入口 `http://mimo.sdc.cs.icbc:9996` / `http://122.233.30.2:9996`，后台 `122.233.30.4` 与 `122.233.30.114`，Redis `122.233.30.20:6379`，XXL MySQL `122.233.30.148:3306/xxl_job`。
+- 固定拓扑：域名 `http://mimo.sdc.cs.icbc:9996` → 企业入口/网关 → 实体 Nginx `122.233.30.2:80`；IP `http://122.233.30.2:9996` → 实体 Nginx `122.233.30.2:9996`；实体 Nginx 同时监听 `80` 与 `9996`。后台为 `122.233.30.4` 与 `122.233.30.114`，Redis 为 `122.233.30.20:6379`，XXL MySQL 为 `122.233.30.148:3306/xxl_job`。
 - 三个现场脚本严格只读：不得启动、停止或重启服务，不得 reload Nginx，不得修改配置、身份文件、日志、Redis 或 MySQL，不得签发/消费 SSO 票据或触发任务。
 - `TEST_AGENT_NGINX_XXL_JOB_ADMINS` 是前端 `nginx.env` 的有效变量；不得恢复已删除的三个 Java 地址变量。
 - 输出统一使用 `[PASS]`、`[WARN]`、`[FAIL]`、`[INFO]`；退出码 `0` 表示无关键失败，`1` 表示关键异常，`2` 表示误用、错误机器或关键前提缺失。
-- 密码、token、Cookie、ticket、Authorization、secret 和 session digest 不得输出原值；URL 去除 query/hash，强随机共享 token 仅输出长度与 SHA-256 前缀用于跨节点比对。
+- 密码、token、Cookie、ticket、Authorization、secret 和 session digest 不得输出原值；URL 去除 query/hash。数据库/Redis/XXL MySQL password、普通 API token、manager token 和内部代理 key 等低熵凭据只输出 `SET/UNSET`；只有生产强随机 `TEST_AGENT_XXL_JOB_ACCESS_TOKEN` 输出长度与 SHA-256 前缀用于跨节点比对。
 - 默认日志窗口 15 分钟，后台脚本只接受 5～120 分钟；前端日志固定最多读取末尾 200 行。
 - 当前 HTTP 入口与强制 `Secure` Admin Cookie 的兼容风险必须提示，但不得建议删除 `Secure` 或放宽 iframe 安全策略。
+- SSO 被动证据顺序固定为：票据签发 POST → 登录 POST → iframe ready `postMessage` → Admin GET。全过程只允许检查事故时既有证据，不得为补证主动发起请求。
 - 不修改 Java、前端运行时代码、HTTP API、RunEvent、数据库结构、Flyway、生产环境文件或现有企业部署脚本。
 - 不修改或暂存工作区中与本任务无关的文件；不新建分支、不拉取、不 rebase、不推送。
 
@@ -78,12 +79,12 @@ TEST_AGENT_DIAG_DATA_ROOT
 - Create/Modify: `tools/verify-internal-xxl-job-diagnostics.sh`
 
 **Interfaces:**
-- Consumes: 固定域名/IP 与系统 `getent`、`curl`。
-- Produces: 无参数命令；输出统一前缀并返回 `0/1`。DNS 查询命令缺失属于关键前提，返回 `2`。
+- Consumes: 固定域名/IP 与系统 `ip`、`getent`、`curl`。
+- Produces: 无参数命令；只允许从实际浏览器网段 Linux 诊断终端运行。`ip/getent/curl` 缺失、`ip` 失败或无法识别本机全局 IPv4，以及命中 `.2/.4/.114/.20/.148` 已知基础设施节点时返回 `2` 且不发起网络探测；其它检查输出统一前缀并返回 `0/1`。
 
 - [ ] **Step 1: 创建失败的入口脚本验证夹具**
 
-在验证脚本中创建临时目录、自动清理、假 `getent` 与假 `curl`。假 curl 必须按 URL 输出 `__TEST_AGENT_HTTP_STATUS__:<code>`，使测试不访问真实网络：
+在验证脚本中创建临时目录、自动清理、假 `ip/getent/curl`。入口健康夹具使用正常浏览器网段地址；五个已知基础设施地址逐一验证返回 `2`，`ip` 缺失/失败/空结果同样返回 `2`，并用调用哨兵证明错误机器不会执行 fake curl。假 curl 必须按 URL 输出 `__TEST_AGENT_HTTP_STATUS__:<code>`，使测试不访问真实网络：
 
 ```bash
 #!/usr/bin/env bash
@@ -197,7 +198,7 @@ probe_readiness() {
 }
 ```
 
-命令前提和调用顺序必须完整写为：
+命令前提和调用顺序必须先检查 `ip`，可靠读取全局 IPv4 并拒绝 `.2/.4/.114/.20/.148` 五个基础设施节点；这一步失败直接返回 `2`，不得执行 `getent/curl` 或输出未验证 PASS。随后网络探测部分完整写为：
 
 ```bash
 command -v getent >/dev/null 2>&1 || { printf '[FAIL] 缺少 getent，无法执行固定入口诊断\n' >&2; exit 2; }
@@ -317,7 +318,7 @@ env_value() {
 effective_config="$("${NGINX_BIN}" -p "${NGINX_PREFIX}" -c "${NGINX_MAIN_CONF}" -T 2>&1)"
 ```
 
-分别断言 upstream 名、两个 `server`、location 和 `proxy_pass`；直连 GET：
+分别用锚定到首个非空白字符的指令正则断言 upstream 名、两个 `server`、location 和 `proxy_pass`，排除 `#` 注释；全部要求只存在于注释、或单个必须指令被注释时均返回 `1`，合法活跃配置及附加 server 参数继续通过。随后直连 GET：
 
 ```text
 http://122.233.30.4:18080/xxl-job-admin/actuator/health/readiness
@@ -358,7 +359,7 @@ git commit -m "feat: 新增 XXL-JOB 前端只读诊断"
 
 **Interfaces:**
 - Consumes: `--expected-host 122.233.30.4|122.233.30.114`、可选 `--minutes 5..120`，以及 systemd、ss、curl、nc、journalctl、backend.env 和身份文件。
-- Produces: 可跨节点人工比较的 `REDIS_ENDPOINT`、`XXL_MYSQL_ENDPOINT`、`XXL_ACCESS_TOKEN_SHA256_PREFIX`、`ADMIN_PORT`、`EXECUTOR_PORT` 摘要；不输出任何 secret 原文。
+- Produces: 可跨节点人工比较的 `REDIS_ENDPOINT`、`XXL_MYSQL_ENDPOINT`、`TEST_AGENT_XXL_JOB_ACCESS_TOKEN` 长度/SHA-256 前缀、`ADMIN_PORT`、`EXECUTOR_PORT` 摘要；其它 password/token/key 只输出 `SET/UNSET`，不输出任何 secret 原文、长度或摘要。
 
 - [ ] **Step 1: 扩展验证脚本，固化后台参数与脱敏契约**
 
@@ -429,19 +430,18 @@ env_value() {
 }
 ```
 
-输出以下非敏感键：profile、deployment mode、advertised host、linux server ID、Redis endpoint、XXL enabled、MySQL endpoint/username、Admin/executor 端口；JDBC URL 必须去掉 query 和 userinfo。对以下键只调用 `secret_summary`：
+输出以下非敏感键：profile、deployment mode、advertised host、linux server ID、Redis endpoint、XXL enabled、MySQL endpoint/username、Admin/executor 端口；JDBC URL 必须去掉 query 和 userinfo。以下低熵键只调用 `secret_presence`，输出 `SET/UNSET`：
 
 ```text
 TEST_AGENT_DB_PASSWORD
 TEST_AGENT_REDIS_PASSWORD
 TEST_AGENT_XXL_JOB_MYSQL_PASSWORD
-TEST_AGENT_XXL_JOB_ACCESS_TOKEN
 TEST_AGENT_API_TOKEN
 TEST_AGENT_OPENCODE_MANAGER_TOKEN
 TEST_AGENT_INTERNAL_PROXY_API_KEY
 ```
 
-`secret_summary` 精确实现如下，输出 `UNSET` 或 `SET length=<N> sha256=<前16位>`：
+只有 `TEST_AGENT_XXL_JOB_ACCESS_TOKEN` 调用 `secret_summary`，输出 `UNSET` 或 `SET length=<N> sha256=<前16位>`：
 
 ```bash
 sha256_text() {
@@ -462,6 +462,20 @@ secret_summary() {
   fi
   digest="$(sha256_text "${value}")" || { fail '缺少 SHA-256 命令，无法安全生成配置摘要'; return; }
   info "${key}=SET length=${#value} sha256=${digest}"
+}
+```
+
+低熵凭据使用独立 `secret_presence`，只读取文本值并输出 `SET/UNSET`；不得复用 `secret_summary`：
+
+```bash
+secret_presence() {
+  local key="$1" value
+  value="$(env_value "${BACKEND_ENV}" "${key}")"
+  if [[ -z "${value}" ]]; then
+    info "${key}=UNSET"
+  else
+    info "${key}=SET"
+  fi
 }
 ```
 
@@ -525,6 +539,8 @@ GRANT REVOKE LOCK UNLOCK SET START TRANSACTION COMMIT ROLLBACK
 ```
 
 同时拒绝敏感列投影：``password``、``token``、``platform_session_digest`` 原值、``executor_param``、``trigger_msg``、``handle_msg``。允许 `CHAR_LENGTH(platform_session_digest)`。
+
+即使语句首词为只读类型，也必须显式拒绝 `INTO OUTFILE`、`INTO DUMPFILE`、`GET_LOCK`、`RELEASE_LOCK`、`IS_FREE_LOCK`、`IS_USED_LOCK` 和用户变量赋值 `:=`；验证只对临时 SQL 文本做静态检查，不连接 MySQL。
 
 - [ ] **Step 2: 运行验证并确认 RED**
 
@@ -633,7 +649,7 @@ Expected: 非零退出，首先报告正式手册不存在。
 手册必须按以下章节落地，每个节点都写出完整命令：
 
 ```text
-1. 适用范围、固定拓扑与只读红线
+1. 适用范围、双入口固定拓扑与只读红线（域名经企业入口到 `.2:80`，IP 直达 `.2:9996`，实体 Nginx 同时监听两端口）
 2. 五分钟现象速查表
 3. 排查前记录项与脱敏规则
 4. 浏览器网段入口（执行入口脚本）
