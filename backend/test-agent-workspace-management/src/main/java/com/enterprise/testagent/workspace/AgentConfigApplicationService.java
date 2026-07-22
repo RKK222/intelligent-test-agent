@@ -825,12 +825,12 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         fileService.writeContent(agentRoot.toString(), relativePath, content);
     }
 
-    /** 应用 Agent 上传固定在可发布的 opencode.jsonc、agents 和 skills 白名单内。 */
+    /** 应用 Agent 上传固定在可发布的 opencode.jsonc、agents、skills 和 tools 白名单内。 */
     public void uploadWorkspaceAgentFile(String workspaceId, String relativePath, String contentBase64, String worktreeId) {
         if (workspaceAgentDisplayPath(workspaceAgentGitPath(relativePath)) == null) {
             throw new PlatformException(
                     ErrorCode.FORBIDDEN,
-                    "应用 Agent 配置只允许上传 opencode.jsonc、agents 或 skills 下的文件");
+                    "应用 Agent 配置只允许上传 opencode.jsonc、agents、skills 或 tools 下的文件");
         }
         Path agentRoot = workspaceAgentRootForWrite(workspaceId, worktreeId);
         ensureDirectory(agentRoot);
@@ -2103,6 +2103,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         return "opencode.jsonc".equals(display)
                 || display.startsWith("agents/")
                 || display.startsWith("skills/")
+                || display.startsWith("tools/")
                 ? display
                 : null;
     }
