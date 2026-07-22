@@ -65,12 +65,12 @@
 - Run Diff 查询、接受和拒绝；`REDIS_SUMMARY` 优先读取 Redis 物化 Diff，只有远端 message/part 定位缺失时才读取 Run 非原文锚点，manifest 已过期时返回 `RUN_DETAILS_EXPIRED`，不回退 legacy `run_events`。接受/拒绝先追加 Redis action，再各用一条关系库 UPDATE 增加 Run Diff 计数，不写新模式原始事件。
 - agent runtime 能力映射，包括 catalog/fs/vcs/lsp/mcp、config、provider auth/OAuth、worktree、session share、permission/question 和 MCP auth；opencode 原路径作为当前标准适配形态。
 - Model/Provider 目录编排：前端对话框始终通过 runtime 代理 opencode 原生 `/api/model`、`/api/provider`，不再从 `ai_model_configs` 或 `ModelCatalogApplicationService` 返回托管目录；Run 启动前不再 `PATCH /global/config` 同步 provider。
-- 内部模型代理：按 `X-Enterprise-Model-Provider` 查 JVM 内存中的内部供应商地址，向上游注入数据库保存的全局 `ENTERPRISE_OPENAI_AUTH_TOKEN` 和 `ucid`，并把流式 `<think>...</think>` 转换为 `reasoning_content`。
+- 内部模型代理：按 `X-Enterprise-Model-Provider` 从同一代 JVM 不可变快照同时查供应商地址和该 Provider 关联的 Token，向上游注入对应 Token 与 `ucid`，并把流式 `<think>...</think>` 转换为 `reasoning_content`；单次请求不访问数据库。
 - PTY terminal ticket、限流、JVM 内 active registry、Pty4J 进程适配、真实 resize 和审计；同一链路同时承载 workspace shell 与默认关闭的服务器 shell。workspace shell 仅允许 `sh`、`bash`、`zsh`；服务器 shell 固定 `/bin/bash`、固定工作目录和不含 Java 密钥的最小环境，操作系统用户与权限直接继承目标 Java 进程，不切换用户或提权。服务器 shell 通过 jar 内置、运行时释放的临时 rcfile 提供绿色用户/主机、蓝色目录提示符，以及 `ls`、`grep`、`git` 的交互式 ANSI 配色；不会写入用户 `.bashrc` 或全局 Git 配置，用户现有 `.bashrc` 最后加载并可覆盖平台默认值。
 
 ## Model 目录配置
 
-`test-agent.model-catalog.source` 和 `ai_model_configs` 相关类保留历史兼容，但不再参与前端模型目录、供应商目录、Run 模型校验或默认模型回退。内部供应商地址维护在 `internal_model_providers`，全局 token 维护在 `internal_model_proxy_settings`；Java 启动和刷新事件会把启用供应商加载到 `InternalModelProviderRegistry`。
+`test-agent.model-catalog.source` 和 `ai_model_configs` 相关类保留历史兼容，但不再参与前端模型目录、供应商目录、Run 模型校验或默认模型回退。内部供应商维护在 `internal_model_providers`，外部 Token 记录在 `internal_model_tokens` 并由 `token_id` 关联；旧 `internal_model_proxy_settings` 只供滚动升级兼容。Java 启动和既有刷新事件会用一次联表查询构建 `InternalModelProviderRegistry` 的 `providersById` 与 `authTokensByProviderId`，地址和 Token 在刷新瞬间不会串代。
 
 ## 测试覆盖
 
@@ -105,7 +105,7 @@
 - `SessionRuntimeStateApplicationServiceTest` 覆盖用户级运行态 snapshot、首帧输出、run/question 全局事件触发刷新、message-only 事件不触发摘要变更，以及用户 Redis marker 命中后 active manifest 摘要 0 次数据库查询。
 - `AiRunFeedbackApplicationServiceTest` 覆盖 Run 反馈创建/更新、成功状态、主对话、归属、批量查询上限；`AiMessageFeedbackApplicationServiceTest` 保留旧消息兼容边界。
 - `AnalyticsQueryServiceTest` 覆盖 overview 指标口径、空分母、参数边界和 CSV 不含 cost 字段。
-- `InternalModelThinkStreamConverterTest` 覆盖企业内部模型流式 `<think>` 标签跨 chunk 转换为 `reasoning_content`；模型目录接口和 Run 选择测试以 opencode 原生目录透传为准。
+- `InternalModelProviderRegistryTest` 覆盖两个 Provider 使用不同 Token、缺失 Token 安全失败和响应快照不泄露明文；`InternalModelThinkStreamConverterTest` 覆盖企业内部模型流式 `<think>` 标签跨 chunk 转换为 `reasoning_content`；模型目录接口和 Run 选择测试以 opencode 原生目录透传为准。
 - `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、用户进程节点路由、固定节点 fallback、session binding 自动重建、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传、permission reply body 兼容和 question 回复成功事件回填。
 - `Terminal*Test` 覆盖 ticket 签发/消费/过期、active session 互斥、输入/输出限流、WebSocket envelope 编解码、本地进程适配，以及交互 shell 显式读取 stdin 的启动参数和真实命令回显。
 

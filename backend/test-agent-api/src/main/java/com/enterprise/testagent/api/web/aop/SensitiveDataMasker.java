@@ -16,7 +16,7 @@ public final class SensitiveDataMasker {
     /** 需要脱敏的字段名（不区分大小写匹配） */
     private static final Set<String> SENSITIVE_FIELDS = Set.of(
             "password", "oldpassword", "newpassword",
-            "token", "accesstoken", "refreshtoken", "contexttoken",
+            "token", "authtoken", "tokenvalue", "accesstoken", "refreshtoken", "contexttoken",
             "ticket", "cookie", "sessiondigest",
             "secret", "apikey", "credential", "authorization",
             "privatekey", "passphrase",

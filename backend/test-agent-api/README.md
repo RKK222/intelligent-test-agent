@@ -30,6 +30,7 @@
 - 暴露超级管理员运行管理 overview、容器/按稳定服务器身份的后端指标历史和有主/无主 opencode server 重启/停止 API；旧后端进程指标入口已作废。Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选/历史/容器/端口参数校验、用户名筛选参数透传、manager 下属 opencode server 明细和 `BOUND/UNBOUND` 归属 DTO 映射、命令结果 DTO 映射、后端指标 DTO 映射和 traceId 处理；后端指标 DTO 按可空字段透传服务器 CPU/load/内存/swap/磁盘、Java 进程 CPU/RSS/FD、JVM heap/non-heap/direct/mapped/GC/线程字段，并保留旧别名 `memoryMaxBytes`、`jvmGcPauseMillis`。重启/停止命令先按 `containerId` 的 Redis manager 快照定位容器所属 `linuxServerId`，目标不是当前 Java 或同服务器选中 Java 时透传用户 JWT 和 traceId 转发到目标 Java，由目标 Java 控制本服务器 manager。API 层不实现 opencode server 启动、停止、状态查询或健康确认；用户进程初始化、STOPPED 进程重启和 `port ... is not managed` 后重新拉起由 `test-agent-opencode-runtime` 的 `OpencodeProcessStartupService` 完成，平台已有进程记录的停止确认和 `STOPPED` 回写由 `OpencodeProcessStopService` 完成，状态查询、健康探测和 heartbeat 刷新由 `OpencodeProcessStatusQueryService` 完成。指标历史主参数为 `windowMinutes`，`hours` 仅兼容旧客户端。
 - 暴露超级管理员 XXL 一次性 SSO 票据 API，Controller 只做 `SUPER_ADMIN` 鉴权和 traceId；旧 scheduler-management 任意子路径统一返回 `410 API_GONE`。
 - 暴露当前用户夜间执行时段和任务创建/查询/改期/取消/失败卡关闭 API；`NightExecutionDtos` 只把完整 prompt/parts 映射到应用命令，任务响应仅返回安全截断预览，不回显完整输入。精确内部路径 `/api/internal/platform/opencode-runtime/night-execution/internal-dispatch` 仅接收目标 `linuxServerId` 和最多 50 个 `taskId`，使用标准 XXL access token 鉴权；分发网关必须先由公共 resolver 选出目标服务器上的精确 backendProcessId，再决定本机调用或统一 HTTP 转发。
+- `InternalModelTokenManagementController` 仅允许 `SUPER_ADMIN` 通过独立 API 记录外部 Token、改名/轮换和删除；响应类型只包含安全元数据。`InternalModelProviderManagementController` 在原供应商字段上返回 `tokenId/tokenName/tokenConfigured` 并接受 `tokenId/clearToken`，旧顶层 `authToken/tokenConfigured` 继续兼容。两类成功变更都复用既有刷新事件和跨 Java 广播。
 - 暴露应用引用资产库 7 个内部 API，`ReferenceRepositoryController` 只做 `APP_ADMIN` 鉴权（`SUPER_ADMIN` 继承）、初始化/切换分支请求 DTO、包含可空 `repositoryPath` 的状态响应、traceId 和阻塞 Git/文件任务调度；列表、初始化、同步、受控分支切换、只读指针核验、状态、单层树的业务规则全部委托 workspace-management，不在 Controller 访问 Repository 或文件系统。
 - 暴露超级管理员用户管理 API，Controller 只做 `SUPER_ADMIN` 鉴权、分页参数、创建用户请求和单角色调整请求转换；用户创建、角色替换和 ROLE 字典校验委托 `test-agent-system-management`。
 - 暴露 AI Run 整体回复反馈 API：单查/写入按 `runId`，批量查询每次最多 100 个 Run；Controller 只读取当前登录用户和 traceId，成功状态、主对话与归属校验由 runtime 服务完成。旧 messageId API 保留兼容。
@@ -91,7 +92,7 @@
 - `RuntimeSecurityConfigTest` 覆盖本地 `frontend-opencode` real E2E Origin 白名单，以及 `X-Test-Agent-Linux-Server-Id` 的 CORS 预检允许。
 - `AuthControllerRolesTest`、`ConfigurationManagementControllerTest` 覆盖认证响应 roles、`APP_ADMIN`/`SUPER_ADMIN` 鉴权、代码库英文名、版本库类型与部署模式 DTO、版本库类型/部署模式下拉接口、应用版本库远端树接口、工作空间创建进度轮询和 SSH key 不回显私钥。
 - `ApiTokenWebFilterTest`、`InMemoryRateLimitWebFilterTest`、`TraceIdWebFilterTest`、`GlobalExceptionHandlerTest`、`LegacyApiGoneWebFilterTest` 覆盖鉴权、限流、traceId、旧接口 410 和统一错误响应。
-- `ApiLoggingAspectTest` / `ServiceLoggingAspectTest` / `WebSocketLoggingAspectTest` 覆盖 Controller、Service 与 WebSocket 日志切面在同步、响应式和错误路径下保留原调用语义；`SensitiveDataMaskerTest` 覆盖 `contextToken` 请求/响应字段脱敏。
+- `InternalModelTokenManagementControllerTest` 覆盖 `SUPER_ADMIN` 鉴权、统一冲突错误和响应不泄露 Token；代理测试覆盖按 Provider ID 注入不同 Token。`ApiLoggingAspectTest` / `ServiceLoggingAspectTest` / `WebSocketLoggingAspectTest` 覆盖 Controller、Service 与 WebSocket 日志切面在同步、响应式和错误路径下保留原调用语义；`SensitiveDataMaskerTest` 覆盖 `contextToken` 及内部模型 `authToken` 请求/响应字段脱敏。
 
 ## 后续 AI 编码指引
 

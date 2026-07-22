@@ -45,6 +45,37 @@ describe("backend-api", () => {
     ]);
   });
 
+  it("uses the reusable internal model Token management endpoints", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: [] }), { status: 200 })
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await client.listInternalModelTokens();
+    await client.createInternalModelToken({ name: "Qwen Token", token: "external-create-secret" });
+    await client.updateInternalModelToken(17, { name: "Qwen Token 2", token: "" });
+    await client.deleteInternalModelToken(17);
+
+    expect(fetcher.mock.calls.map((call) => [call[0], call[1]?.method, call[1]?.body])).toEqual([
+      ["http://api/api/internal/platform/configuration-management/internal-model-tokens", undefined, undefined],
+      [
+        "http://api/api/internal/platform/configuration-management/internal-model-tokens",
+        "POST",
+        JSON.stringify({ name: "Qwen Token", token: "external-create-secret" })
+      ],
+      [
+        "http://api/api/internal/platform/configuration-management/internal-model-tokens/17",
+        "PATCH",
+        JSON.stringify({ name: "Qwen Token 2", token: "" })
+      ],
+      [
+        "http://api/api/internal/platform/configuration-management/internal-model-tokens/17",
+        "DELETE",
+        undefined
+      ]
+    ]);
+  });
+
   it("calls every application reference repository endpoint with the current app id", async () => {
     const status: ReferenceRepositoryStatus = {
       repositoryId: "repo/assets",
@@ -444,6 +475,34 @@ describe("backend-api", () => {
       })
     );
     expect(JSON.stringify(exchanges)).not.toContain("ctx_secret_value");
+  });
+
+  it("redacts internal model token fields from observed request bodies", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(JSON.stringify({ success: true, traceId: "trace_backend", data: {} }), { status: 200 })
+    );
+    const exchanges: Array<Record<string, unknown>> = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_frontend",
+      rawExchangeObserver: (exchange) => exchanges.push(exchange)
+    });
+
+    await client.createInternalModelToken({ name: "Qwen Token", token: "new-provider-secret" });
+    await client.updateInternalModelProviders({
+      providers: [],
+      authToken: "legacy-provider-secret"
+    });
+
+    expect(JSON.stringify(fetcher.mock.calls)).toContain("new-provider-secret");
+    expect(JSON.stringify(fetcher.mock.calls)).toContain("legacy-provider-secret");
+    expect(JSON.stringify(exchanges)).not.toContain("new-provider-secret");
+    expect(JSON.stringify(exchanges)).not.toContain("legacy-provider-secret");
+    expect(exchanges.map((exchange) => exchange.requestBody)).toEqual([
+      JSON.stringify({ name: "Qwen Token", token: "[REDACTED]" }),
+      JSON.stringify({ providers: [], authToken: "[REDACTED]" })
+    ]);
   });
 
   it("redacts conversation context tokens from raw response bodies without changing returned data", async () => {

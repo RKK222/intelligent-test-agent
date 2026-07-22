@@ -119,7 +119,7 @@
 
 `test-agent-app` 的 `test` profile 会通过环境变量装配 PostgreSQL 测试库，并复用本模块 `db/migration` 下的 Flyway migration。持久化模块提供 Druid starter 依赖，实际连接信息和连接池大小由应用 profile 配置注入，不保存环境专属账号、密码或主机地址。
 
-内部模型代理鉴权列改为企业中性命名时，两条已落库历史 migration 通过仅影响校验和的兼容注释保持原 Flyway checksum；`V20260716143000__rename_internal_model_auth_token_column` Java migration 按固定列位置识别历史列并重命名，新建数据库目标列已存在时幂等跳过。
+内部模型代理鉴权列改为企业中性命名时，两条已落库历史 migration 通过仅影响校验和的兼容注释保持原 Flyway checksum；`V20260716143000__rename_internal_model_auth_token_column` Java migration 按固定列位置识别历史列并重命名，新建数据库目标列已存在时幂等跳过。`V20260722180000__add_internal_model_token_definitions.sql` 新建数据库 identity 主键的 `internal_model_tokens`，给 Provider 增加 `RESTRICT` 外键，并把非空旧全局值迁移成单个共享“默认 Token”；旧单例表继续保留，但新运行时只读取联表快照。
 
 ## 测试覆盖
 
@@ -133,6 +133,7 @@
 - `MyBatisSessionRuntimeStateRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖用户级运行计数、终态 Run 排除、真实 asked `id` / replied `sessionID -> requestID` 形式的 `QUESTION/PERMISSION` 待关注与清除、以 Run `seq` 抵御 occurredAt 回拨、缺失/空白 ID 旧事件兜底、不同 request ID 回复隔离、嵌套 option id 隔离，以及不可见会话过滤；`MyBatisSessionRuntimeStatePostgresqlIntegrationTest` 通过 Testcontainers 验证生产 jsonb/databaseId 分支和完整 Flyway 链；`RedisRunRuntimeStoreIntegrationTest` 覆盖 durable/transient 的并发未决 attention、同 ID 跨类型隔离、逐个回复回退、字节/数量容量边界、scope/snapshot 总量账本和终态清理。
 - `MyBatisRunRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖 Run MyBatis XML 保存/读取、active-run 查询、stale active 候选排除 `REDIS_SUMMARY`、token/cost/source 字段映射、`saveIfStatus` 成功更新和状态不匹配时不覆盖终态。
 - `MyBatisRunEventRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖 RunEvent MyBatis XML append、scope 列写入、`raw_event_id=NULL` 语义和 seq 单调分配。
+- `MyBatisInternalModelProviderRepositoryIntegrationTest` 覆盖旧全局 Token 迁移为共享定义、Provider 关联保存、改名/轮换保持关系、引用删除受阻、解除引用后删除，以及名称更新时保留外部 Token 原值。
 - `MyBatisSessionTitleUpdateRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖 Session 标题 XML 条件更新成功与预期标题不匹配时不覆盖新标题。
 - 运营分析原始事实扫描按 `storage_mode` 双读：legacy Diff 只读 `run_events`，`REDIS_SUMMARY` 只读 `runs.diff_*_count`，即使灰度期间残留 shadow 事件也不重复计数；新模式 USER/ASSISTANT 数量只读取 `content_kind=SUMMARY` 的终态摘要，残留 RAW shadow 消息同样排除。相关 XML 通过持久化模块编译、Flyway 集成和运行时服务单测覆盖；`AnalyticsQueryServiceTest` 固化空分母、满意率、采纳率、p95 和 CSV 字段口径。
 - `PersistenceSqlConventionTest` 固化持久层 SQL 规则：存量 JDBC 文件只允许留在白名单，MyBatis mapper 不得使用注解 SQL。

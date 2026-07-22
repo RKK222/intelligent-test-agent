@@ -4,8 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.enterprise.testagent.domain.configuration.InternalModelProvider;
 import com.enterprise.testagent.domain.configuration.InternalModelProviderRepository;
+import com.enterprise.testagent.domain.configuration.InternalModelProviderRuntimeConfig;
+import com.enterprise.testagent.domain.configuration.InternalModelToken;
+import com.enterprise.testagent.domain.configuration.InternalModelTokenRepository;
 import com.enterprise.testagent.persistence.mybatis.InternalModelProviderMapper;
 import com.enterprise.testagent.persistence.mybatis.MyBatisInternalModelProviderRepository;
+import com.enterprise.testagent.persistence.mybatis.MyBatisInternalModelTokenRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -16,18 +20,22 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mybatis.spring.SqlSessionFactoryBean;
 import org.mybatis.spring.SqlSessionTemplate;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 
 /**
- * 验证内部模型供应商配置通过 MyBatis XML 持久化，供 Java 内部代理启动加载和刷新使用。
+ * 验证内部模型供应商与可复用 Token 定义通过 MyBatis XML 持久化。
  */
 class MyBatisInternalModelProviderRepositoryIntegrationTest {
 
     private static final Instant NOW = Instant.parse("2026-07-08T00:00:00Z");
 
     private SingleConnectionDataSource dataSource;
-    private InternalModelProviderRepository repository;
+    private InternalModelProviderRepository providerRepository;
+    private InternalModelTokenRepository tokenRepository;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -37,11 +45,22 @@ class MyBatisInternalModelProviderRepositoryIntegrationTest {
                 "sa",
                 "",
                 true);
-        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+        Flyway.configure()
+                .dataSource(dataSource)
+                .locations("classpath:db/migration")
+                .target("20260716143000")
+                .load()
+                .migrate();
+        seedLegacyConfiguration();
+        new ResourceDatabasePopulator(new ClassPathResource(
+                "db/migration/V20260722180000__add_internal_model_token_definitions.sql"))
+                .execute(dataSource);
 
         SqlSessionFactory sqlSessionFactory = sqlSessionFactory();
-        InternalModelProviderMapper mapper = new SqlSessionTemplate(sqlSessionFactory).getMapper(InternalModelProviderMapper.class);
-        repository = new MyBatisInternalModelProviderRepository(mapper);
+        InternalModelProviderMapper mapper = new SqlSessionTemplate(sqlSessionFactory)
+                .getMapper(InternalModelProviderMapper.class);
+        providerRepository = new MyBatisInternalModelProviderRepository(mapper);
+        tokenRepository = new MyBatisInternalModelTokenRepository(mapper);
     }
 
     @AfterEach
@@ -50,35 +69,90 @@ class MyBatisInternalModelProviderRepositoryIntegrationTest {
     }
 
     @Test
-    void providersAndAuthTokenArePersistedThroughMyBatisXmlMapper() {
-        repository.replaceProviders(List.of(
-                        provider("enterprise-z", "ENTERPRISE Z", "http://z.example/v1", true, 20),
-                        provider("enterprise-a", "ENTERPRISE A", "http://a.example/v1", true, 10),
-                        provider("enterprise-off", "ENTERPRISE Off", "http://off.example/v1", false, 0)),
-                NOW);
-        repository.saveAuthToken("token-one", NOW);
+    void legacyGlobalTokenMigratesToOneSharedTokenDefinition() {
+        List<InternalModelProvider> providers = providerRepository.findAll();
+        List<InternalModelToken> tokens = tokenRepository.findAll();
 
-        assertThat(repository.findEnabled())
-                .extracting(InternalModelProvider::providerId)
-                .containsExactly("enterprise-a", "enterprise-z");
-        assertThat(repository.findAuthToken()).contains("token-one");
-
-        repository.replaceProviders(List.of(
-                        provider("enterprise-a", "ENTERPRISE A Updated", "http://a2.example/v1", true, 5)),
-                NOW.plusSeconds(60));
-        repository.saveAuthToken("token-two", NOW.plusSeconds(60));
-
-        assertThat(repository.findAll())
+        assertThat(tokens).singleElement().satisfies(token -> {
+            assertThat(token.name()).isEqualTo("默认 Token");
+            assertThat(token.referencedProviderCount()).isEqualTo(1);
+        });
+        assertThat(providers).singleElement().satisfies(provider -> {
+            assertThat(provider.providerId()).isEqualTo("legacy-provider");
+            assertThat(provider.tokenId()).isEqualTo(tokens.getFirst().tokenId());
+            assertThat(provider.tokenName()).isEqualTo("默认 Token");
+            assertThat(provider.tokenConfigured()).isTrue();
+        });
+        assertThat(providerRepository.findEnabledRuntimeConfigs())
                 .singleElement()
-                .satisfies(saved -> {
-                    assertThat(saved.providerId()).isEqualTo("enterprise-a");
-                    assertThat(saved.name()).isEqualTo("ENTERPRISE A Updated");
-                    assertThat(saved.baseUrl()).isEqualTo("http://a2.example/v1");
-                    assertThat(saved.sortOrder()).isEqualTo(5);
-                    assertThat(saved.createdAt()).isEqualTo(NOW);
-                    assertThat(saved.updatedAt()).isEqualTo(NOW.plusSeconds(60));
+                .satisfies(config -> {
+                    assertThat(config.provider().providerId()).isEqualTo("legacy-provider");
+                    assertThat(config.authToken()).isEqualTo("legacy-token");
                 });
-        assertThat(repository.findAuthToken()).contains("token-two");
+        assertThat(providerRepository.findAuthToken()).contains("legacy-token");
+    }
+
+    @Test
+    void tokenRotationKeepsProviderAssociationAndReferencedTokenCannotBeDeleted() {
+        InternalModelToken shared = tokenRepository.create("共享 Token", "token-one", NOW.plusSeconds(10));
+        providerRepository.replaceProviders(List.of(
+                        provider("enterprise-a", "ENTERPRISE A", "http://a.example/v1", true, 10, shared.tokenId()),
+                        provider("enterprise-b", "ENTERPRISE B", "http://b.example/v1", true, 20, shared.tokenId())),
+                NOW.plusSeconds(20));
+
+        InternalModelToken updated = tokenRepository.update(
+                shared.tokenId(), "共享 Token 已改名", "token-two", NOW.plusSeconds(30)).orElseThrow();
+
+        assertThat(updated.tokenId()).isEqualTo(shared.tokenId());
+        assertThat(updated.name()).isEqualTo("共享 Token 已改名");
+        assertThat(providerRepository.findEnabledRuntimeConfigs())
+                .extracting(InternalModelProviderRuntimeConfig::authToken)
+                .containsExactly("token-two", "token-two");
+        assertThat(tokenRepository.deleteIfUnreferenced(shared.tokenId())).isFalse();
+
+        providerRepository.replaceProviders(List.of(), NOW.plusSeconds(40));
+
+        assertThat(tokenRepository.deleteIfUnreferenced(shared.tokenId())).isTrue();
+        assertThat(tokenRepository.findById(shared.tokenId())).isEmpty();
+    }
+
+    @Test
+    void updatingOnlyTokenNamePreservesExternalTokenValue() {
+        InternalModelToken token = tokenRepository.create("原名称", "external-token", NOW.plusSeconds(10));
+        providerRepository.replaceProviders(List.of(
+                        provider("enterprise-a", "ENTERPRISE A", "http://a.example/v1", true, 10, token.tokenId())),
+                NOW.plusSeconds(20));
+
+        tokenRepository.update(token.tokenId(), "新名称", null, NOW.plusSeconds(30)).orElseThrow();
+
+        assertThat(providerRepository.findEnabledRuntimeConfigs())
+                .singleElement()
+                .extracting(InternalModelProviderRuntimeConfig::authToken)
+                .isEqualTo("external-token");
+        assertThat(providerRepository.findAll())
+                .singleElement()
+                .extracting(InternalModelProvider::tokenName)
+                .isEqualTo("新名称");
+    }
+
+    private void seedLegacyConfiguration() {
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        jdbc.sql("""
+                insert into internal_model_providers (
+                    provider_id, name, base_url, enabled, sort_order, created_at, updated_at
+                ) values (
+                    'legacy-provider', 'Legacy Provider', 'http://legacy.example/v1', true, 1, :now, :now
+                )
+                """)
+                .param("now", NOW)
+                .update();
+        jdbc.sql("""
+                insert into internal_model_proxy_settings (
+                    setting_id, enterprise_openai_auth_token, created_at, updated_at
+                ) values ('default', 'legacy-token', :now, :now)
+                """)
+                .param("now", NOW)
+                .update();
     }
 
     private static InternalModelProvider provider(
@@ -86,8 +160,19 @@ class MyBatisInternalModelProviderRepositoryIntegrationTest {
             String name,
             String baseUrl,
             boolean enabled,
-            int sortOrder) {
-        return new InternalModelProvider(providerId, name, baseUrl, enabled, sortOrder, NOW, NOW);
+            int sortOrder,
+            Long tokenId) {
+        return new InternalModelProvider(
+                providerId,
+                name,
+                baseUrl,
+                enabled,
+                sortOrder,
+                tokenId,
+                null,
+                false,
+                NOW,
+                NOW);
     }
 
     /**

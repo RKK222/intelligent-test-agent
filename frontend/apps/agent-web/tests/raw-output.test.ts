@@ -71,6 +71,22 @@ describe("raw output boundary", () => {
     expect(text.body).toContain("keep=visible");
   });
 
+  it("redacts internal model authToken fields in raw output", () => {
+    const json = prepareRawOutputBody(
+      JSON.stringify({ authToken: "legacy-provider-secret", tokenValue: "provider-secret", keep: "visible" }),
+      10_000
+    );
+    const text = prepareRawOutputBody(
+      "auth_token=legacy-text-secret&token-value=provider-text-secret&keep=visible",
+      10_000
+    );
+
+    expect(json.body).not.toMatch(/legacy-provider-secret|provider-secret/);
+    expect(text.body).not.toMatch(/legacy-text-secret|provider-text-secret/);
+    expect(json.body).toContain('"keep":"visible"');
+    expect(text.body).toContain("keep=visible");
+  });
+
   it("redacts an unterminated quoted token in linear time", () => {
     const malformed = `data: contextToken:"${"\\".repeat(20_000)}ctx_unterminated_secret`;
     const startedAt = performance.now();

@@ -66,6 +66,17 @@ class SensitiveDataMaskerTest {
         }
 
         @Test
+        @DisplayName("脱敏内部模型兼容 authToken 字段")
+        void mask_internalModelAuthToken() {
+            String input = "{\"authToken\":\"legacy-do-not-log\",\"tokenConfigured\":true}";
+
+            String result = SensitiveDataMasker.mask(input);
+
+            assertTrue(result.contains("\"authToken\":\"***\""));
+            assertFalse(result.contains("legacy-do-not-log"));
+        }
+
+        @Test
         @DisplayName("脱敏 XXL-JOB 一次性票据和会话摘要")
         void mask_xxlJobTicketAndSessionDigest() {
             String input = "{\"ticket\":\"one-time-secret\",\"sessionDigest\":\"sha256-secret\",\"formAction\":\"/xxl-job-admin/platform-sso/login\"}";

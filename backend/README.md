@@ -126,7 +126,7 @@ cp .env.local.example .env.local
 | `EXTERNAL_API_KEY` | 外部 OpenAI-compatible API Key；变量名可通过 `TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV` 改为其他环境变量名。 |
 | `MODELSTUDIO_API_KEY` | `TEST_AGENT_MODEL_CATALOG_SOURCE=bailian` 时使用的 Model Studio API Key；该模式使用代码内置 `modelstudio` provider 和 qwen/kimi 模型清单。 |
 | `TEST_AGENT_INTERNAL_PROXY_API_KEY` | Java 内部模型代理鉴权 apikey；Java 校验 opencode 子进程请求，manager 启动用户 opencode server 时把同值注入子进程环境。 |
-| `ENTERPRISE_OPENAI_AUTH_TOKEN` | 历史兼容项；新实现从数据库 `internal_model_proxy_settings` 明文读取全局 token，由前端“内部模型供应商”页面写入。 |
+| `ENTERPRISE_OPENAI_AUTH_TOKEN` | 历史兼容项；新实现不读取该环境变量，外部 Token 由前端“内部模型供应商”页面记录到 `internal_model_tokens` 并按 Provider 关联。 |
 | `TEST_AGENT_EXTERNAL_MODEL_BASE_URL` | 外部 OpenAI-compatible base URL，例如 `https://api.deepseek.com`。旧 `TEST_AGENT_BAILIAN_BASE_URL` 仍作为兼容兜底。 |
 | `TEST_AGENT_ENTERPRISE_OPENAI_BASE_URL` | 企业内 OpenAI-compatible base URL，默认与 openclaw 企业 patch 中的 `enterprise-openai` 地址一致。 |
 | `TEST_AGENT_ENTERPRISE_OPENAI_UCID_HEADER_NAME` | 历史兼容项；新实现固定由 opencode 配置把环境变量 `ENTERPRISE_UCID` 注入请求头 `ucid`。 |
@@ -201,7 +201,7 @@ mvn test
 - 工作区 `workspace.move` 保持既有文件 WebSocket RPC 契约并整体移动普通文件或非空目录；Linux 通过 JNA 直接调用内核 `renameat2(RENAME_NOREPLACE)`（兼容 Alpine/musl 未导出包装函数），macOS 调用 `renameatx_np(RENAME_EXCL | RENAME_NOFOLLOW_ANY)`，Windows 使用源条目句柄与目标父目录句柄的 `SetFileInformationByHandle`。三者都执行一次不覆盖的原子重命名并阻断校验后的路径替换竞态，缺少等价原子能力的平台失败关闭。
 - 多 agent 运行时接口、`agentId` 选择、日志/指标包装和具体 agent 适配器放在 `test-agent-agent-runtime`。
 - Session、Run、RunEvent、夜间任务提交/投递/补偿、agent runtime 调用、Diff/revert、terminal 业务放在 `test-agent-opencode-runtime`。
-- Model/Provider 目录始终由 opencode 配置文件决定；内部模型代理和 `<think>` 流式转换放在 `test-agent-opencode-runtime` / `test-agent-api`，内部供应商地址和 token 端口放在 `test-agent-domain`，MyBatis/Flyway 实现放在 `test-agent-persistence`。
+- Model/Provider 目录始终由 opencode 配置文件决定；内部模型代理和 `<think>` 流式转换放在 `test-agent-opencode-runtime` / `test-agent-api`，内部供应商、可复用 Token 定义及关联端口放在 `test-agent-domain`，管理编排放在 `test-agent-configuration-management`，MyBatis/Flyway 实现放在 `test-agent-persistence`。Token 值来自外部系统，平台只记录，不新增生成能力。
 - 新增或修改关系型数据库 SQL 必须放在 `test-agent-persistence` 的 MyBatis XML mapper 中；存量 `Jdbc*Repository` 只保留迁移窗口，不承接新 SQL。
 - 涉及 opencode-manager 路由、Java 到 manager 控制、用户 opencode 进程服务器归属、运行管理 `containerId` 路由、Agent 配置或文件 WebSocket 目标后端选择时，必须复用 `BackendJavaRouteResolver`、`BackendHttpForwarder` 和目标 Java 的 `OpencodeProcessManagerGateway` 公共链路；禁止新增自写 Redis 快照扫描、Java->Java HTTP 转发、防循环 header、本机降级或本地绕过。涉及 opencode server 启动、停止或状态查询时，分别复用 `OpencodeProcessStartupService`、`OpencodeProcessStopService` 和 `OpencodeProcessStatusQueryService`。
 - 用户、角色、权限等平台内部管理放在 `test-agent-system-management`。

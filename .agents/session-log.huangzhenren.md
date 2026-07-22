@@ -745,3 +745,19 @@
 - Result:
   - 成功完成修改，前端 Vitest 和生产 Vite 编译构建 (`corepack pnpm build`) 顺利通过。
   - 未修改 API 契约、RunEvent 事件规范、DTO 模型、数据库表或后端 Java 代码，与已有系统功能无冲突。
+
+### 2026-07-22 - 内部模型供应商关联可复用 Token
+
+- Why:
+  - 内部模型供应商原先共用旧单例 Token，无法按 Provider ID 在 Java 内存中解析不同凭据；平台只应记录外部取得的 Token，不应生成 Token 密钥。
+- What:
+  - 新增独立 Token 定义、SUPER_ADMIN 管理 API 和前端维护区；Token 使用数据库自增 `tokenId`，供应商可选择或复用同一 Token，启用时必须关联有效且非空的 Token。
+  - Registry 通过一次联表快照同时构建不可变的 Provider 与按 Provider ID 索引的 Token 映射，代理单次请求从同一代快照解析地址和凭据；供应商或 Token 变更继续发布既有 `InternalModelProvidersUpdatedEvent`，跨 Java 全量刷新和手工刷新接口保持不变。
+  - Flyway 将旧非空全局 Token 迁移为“默认 Token”并关联现有供应商，保留旧单例表用于滚动升级；旧顶层 `authToken/tokenConfigured` 兼容语义保留。Token 响应不返回密钥，前后端调试报文补充脱敏。
+- How:
+  - 关系型 SQL 全部落在 MyBatis XML；Token 密钥只校验非空并按外部原值记录，不 trim、不生成，改名或轮换值不改变 `tokenId`，被供应商引用时依靠业务冲突和外键 `RESTRICT` 阻止删除。
+  - 后端定向 Reactor 50 项、前端定向 Vitest 92 项、13 个前端项目 typecheck、生产 build、隔离任务改动后的后端全量 `mvn clean package -DskipTests` 和 `git diff --check` 通过。
+- Result:
+  - 已覆盖两个 Provider 使用不同 Token、多个 Provider 复用 Token、轮换后刷新、缺失 Token 安全失败、旧请求兼容、鉴权、关联迁移、引用删除冲突、密钥草稿清理和原始报文脱敏。
+  - 隔离全量 `mvn test` 中本任务涉及模块及 API 均通过，随后 persistence 的 67 个既有用例仍被 `V20260717173000__create_public_agent_config_rollouts.sql` 使用 H2 不识别的 `TIMESTAMPTZ` 阻断；近期 session log 已记录同一基线问题，本次未扩大范围修改。
+  - 涉及新增内部 HTTP API、Flyway 表/外键、安全脱敏和运行时快照；不改变 RunEvent/既有刷新广播类型、不修改 generated SDK、环境配置或 Token 明文存储约定。发布时须先升级全部 Java 节点，再开放新页面的 Token 维护操作；混合版本期间不得配置不同 Provider Token。

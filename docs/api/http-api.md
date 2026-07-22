@@ -2650,14 +2650,22 @@ Model/Provider 目录兼容说明：
 - `/api/internal/platform/opencode-runtime/models` 和 `/api/internal/platform/opencode-runtime/providers` 始终代理当前用户 opencode server 的 `/api/model`、`/api/provider`，不再受 `ai_model_configs`、内部供应商表或 `test-agent.model-catalog.source` 影响。
 - 前端会把 opencode 原生 provider map 和 model map 归一化成已有 `ModelInfo` / `ProviderInfo`，但不新增数据库模型字段；浏览器历史偏好仍按当前 opencode 返回目录做前端侧清理。
 
-内部模型供应商配置 API：
+内部模型 Token 与供应商配置 API（全部仅限 `SUPER_ADMIN`）：
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| `GET` | `/api/internal/platform/configuration-management/internal-model-providers` | 查询内部供应商地址配置和 token 是否已配置。 |
-| `PUT` | `/api/internal/platform/configuration-management/internal-model-providers` | 覆盖保存内部供应商地址配置；`authToken` 传空/缺失时不修改 token。 |
-| `GET` | `/api/internal/platform/configuration-management/internal-model-providers/refresh-status` | 查询当前 Java 进程内存中的启用供应商快照。 |
+| `GET` | `/api/internal/platform/configuration-management/internal-model-tokens` | 查询可复用 Token 的安全元数据列表。 |
+| `POST` | `/api/internal/platform/configuration-management/internal-model-tokens` | 记录外部系统提供的 Token，请求为 `{name,token}`。 |
+| `PATCH` | `/api/internal/platform/configuration-management/internal-model-tokens/{tokenId}` | 改名或轮换 Token；`token` 为空/缺失时保留原值。 |
+| `DELETE` | `/api/internal/platform/configuration-management/internal-model-tokens/{tokenId}` | 删除未被供应商引用的 Token；仍被引用时返回 `409 CONFLICT`。 |
+| `GET` | `/api/internal/platform/configuration-management/internal-model-providers` | 查询供应商地址、Token 关联和所有启用供应商的 Token 可用状态。 |
+| `PUT` | `/api/internal/platform/configuration-management/internal-model-providers` | 覆盖保存供应商及 Token 关联。 |
+| `GET` | `/api/internal/platform/configuration-management/internal-model-providers/refresh-status` | 查询当前 Java 进程内存中的启用供应商与逐 Provider Token 状态快照。 |
 | `POST` | `/api/internal/platform/configuration-management/internal-model-providers/refresh` | 发布跨实例刷新事件并返回当前 Java 内存快照。 |
+
+Token 列表及写入响应只返回 `{tokenId,name,referencedProviderCount,createdAt,updatedAt}`，不返回 `token` / `tokenValue`。Token 值由外部系统提供，平台不生成；新增请求必须提供非空值，编辑时留空表示只改名。`name` 去除首尾空白后唯一，`tokenId` 是数据库生成的稳定定义主键，改名和轮换不会改变关联。
+
+供应商响应项在原字段上增加 `tokenId/tokenName/tokenConfigured`。保存项可增加 `tokenId`；停用供应商可用 `clearToken=true` 显式解除关联，启用供应商必须关联存在且非空的 Token。未提交 `tokenId` 的旧客户端会保留既有关联；新供应商可继承兼容默认 Token。顶层旧字段 `authToken` / `tokenConfigured` 暂时保留：非空 `authToken` 会轮换兼容默认 Token、同步旧单例表，并给本次未显式选 Token 且原本无关联的供应商补挂默认 Token；顶层 `tokenConfigured` 表示所有启用供应商都能解析到非空 Token。Provider ID、Token 名称均在服务端去除首尾空白并校验重复或不存在引用。
 
 内部模型代理 API：
 
@@ -2665,7 +2673,7 @@ Model/Provider 目录兼容说明：
 |---|---|---|
 | `*` | `/api/internal/platform/opencode-runtime/internal-model-proxy/v1/**` | 仅供 opencode 子进程调用的 OpenAI-compatible 代理，不给前端 SDK 暴露会话便捷方法。 |
 
-代理只接受 `Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}`；请求头 `X-Enterprise-Model-Provider` 指定内部供应商，`ucid` 由 opencode 配置从 `ENTERPRISE_UCID` 注入。Java 从内存供应商快照找到 `baseUrl` 后转发到对应 OpenAI-compatible 路径，并从 `internal_model_proxy_settings` 注入数据库维护的全局上游 token、`ucid` 和 traceId。仅 `2xx + text/event-stream` 进入 SSE 语义转换，事件字段和 `[DONE]` 保留；没有 `reasoning_content` 时，`delta.content` 里的 `<think>...</think>` 会转换为 `delta.reasoning_content`，普通正文仍保留在 `delta.content`；已有 textual `reasoning_content` 时整个 delta 原样保留，不再解析 `content`。非 `2xx`（包括 `4xx + text/event-stream`）和非 SSE 响应原样透传状态码、Content-Type、Content-Encoding、错误正文、Retry-After 与 trace header；连接/首个响应/首个事件/事件空闲边界分别为 10 秒/30 秒/30 秒/120 秒，不设置整体 SSE 生命周期超时，下游取消会取消上游订阅。
+代理只接受 `Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}`；请求头 `X-Enterprise-Model-Provider` 指定内部供应商，`ucid` 由 opencode 配置从 `ENTERPRISE_UCID` 注入。Java 通过一次联表查询把启用供应商构造成不可变的 `providersById` 与 `authTokensByProviderId` 快照；单次代理请求从同一代快照同时解析 `baseUrl` 和该 Provider 关联的 Token，不访问数据库，也不会串用其它 Provider 的 Token。随后转发到对应 OpenAI-compatible 路径并注入 `ucid` 和 traceId。仅 `2xx + text/event-stream` 进入 SSE 语义转换，事件字段和 `[DONE]` 保留；没有 `reasoning_content` 时，`delta.content` 里的 `<think>...</think>` 会转换为 `delta.reasoning_content`，普通正文仍保留在 `delta.content`；已有 textual `reasoning_content` 时整个 delta 原样保留，不再解析 `content`。非 `2xx`（包括 `4xx + text/event-stream`）和非 SSE 响应原样透传状态码、Content-Type、Content-Encoding、错误正文、Retry-After 与 trace header；连接/首个响应/首个事件/事件空闲边界分别为 10 秒/30 秒/30 秒/120 秒，不设置整体 SSE 生命周期超时，下游取消会取消上游订阅。
 
 opencode 公共配置样例（企业单后端部署可直接使用 `deploy/internal/opencode.jsonc.example`）：
 
@@ -2738,7 +2746,7 @@ opencode 公共配置样例（企业单后端部署可直接使用 `deploy/inter
 }
 ```
 
-`provider` 下的 `enterprise-qwen` / `enterprise-deepseek` 是 opencode 原生 provider key，决定前端模型标识；`X-Enterprise-Model-Provider` 的 `qwen-prod` / `deepseek-prod` 是 Java 内部代理路由键，必须与数据库 `internal_model_providers.provider_id` 完全一致。`includeUsage=false` 用于避免 opencode 1.17.8 默认向不支持 `stream_options.include_usage` 的企业内部接口追加该参数。上游 token 只保存在 `internal_model_proxy_settings`，不得写入 opencode 配置、`backend.env` 或 `docker.env`。
+`provider` 下的 `enterprise-qwen` / `enterprise-deepseek` 是 opencode 原生 provider key，决定前端模型标识；`X-Enterprise-Model-Provider` 的 `qwen-prod` / `deepseek-prod` 是 Java 内部代理路由键，必须与数据库 `internal_model_providers.provider_id` 完全一致。`includeUsage=false` 用于避免 opencode 1.17.8 默认向不支持 `stream_options.include_usage` 的企业内部接口追加该参数。上游 Token 只保存在 `internal_model_tokens.token_value` 并由 `internal_model_providers.token_id` 关联，不得写入 opencode 配置、`backend.env` 或 `docker.env`；旧 `internal_model_proxy_settings` 只为滚动升级兼容保留。
 
 Session 运行态接口：
 

@@ -81,17 +81,18 @@ Token 校验流程：
 13. 普通夜间任务 API 必须使用用户 JWT，owner 只能取认证主体；按 `taskId/sessionId` 查询或变更时必须隔离其他用户。完整 prompt/parts 只允许在 `night_execution_tasks.run_input_json` 的待执行期短期保存，不得写入 XXL 参数/result、跨服务器请求、HTTP 响应、RunEvent、运营分析或日志；普通 Run 锚点受理、取消或最终调度失败时立即清空，数据库 30 天后删除终态行。对外只返回有界 `contentPreview` 和安全错误。目标 Java 必须从共享数据库重读完整任务并重新校验 Session/Workspace 权限，固定目标只能使用任务提交时服务端保存的 `target_linux_server_id`；不得接受客户端覆盖、根据后续 binding 自动迁移、直调 manager gateway或建立夜间专属队列。内部批量请求只允许 `linuxServerId + 1..50 taskId`，使用公共 resolver 选出的精确 backendProcessId 和公共 forwarder、traceId、标准 XXL token、统一防循环 header；同服务器多 JVM 不得按 linuxServerId 本机短路。Run 锚点恢复必须校验来源类型、taskId、owner、Session 和 Workspace，客户端提供的幂等 ID 不能替代归属校验。token、prompt、附件、用户信息和底层异常不得进入日志。夜间容量只能由 `SUPER_ADMIN` 通过既有通用参数管理入口修改，服务端必须在审计和广播前校验正整数；跨服务器刷新 payload 不携带参数值，刷新失败日志不得记录数据库原值或底层敏感错误。
 14. JVM 内存通用参数的查询和手工刷新接口必须强制校验 `SUPER_ADMIN`，因为响应会同时暴露数据库加载源值与进程实际生效值；前端入口可见性不能替代后端权限。跨 Java 请求必须按 `backendProcessId` 精确路由并使用统一防循环头。手工刷新不得写参数修改历史或重复发布广播，日志只允许记录脱敏 traceId、进程身份、参数键和结果状态，不得记录源值、内存值、底层异常消息或堆栈。
 15. 企业离线完整包中的 MySQL root/应用密码和 XXL access token 必须在打包阶段使用安全随机值生成，只能写入权限为 `0600` 的 `.147` MySQL 节点配置和对应后台节点敏感配置；部署脚本只能按文本解析 dotenv，禁止 `source`、回显或写入普通日志。外层 ZIP 因同时包含这些配置和 JAR 内置 RSA 私钥，必须整体按密钥交付物通过受控 U 盘和企业中转机传递。
+15. 内部模型 Token 由外部系统提供，平台不得生成或猜测。仅 `SUPER_ADMIN` 可新增、改名、轮换和删除；API 响应只能返回 `tokenId/name/referencedProviderCount/createdAt/updatedAt`，不得返回明文或密文。`internal_model_tokens.token_value` 继续遵循本系统已确认的明文存储约定，数据库权限、备份和导出必须按密钥数据保护；被 Provider 引用时必须拒绝删除。前端密钥草稿只保存在组件内存，请求完成后立即清空，不得进入浏览器持久化、原始报文或错误提示。刷新广播只携带 traceId 等安全元数据，不携带 Token；Java 仅在一次联表重载时读取明文，并按 Provider ID 保存于不可变内存快照。启用不同 Provider Token 前必须确保全部 Java 节点已经升级。
 
 ## 日志脱敏
 
 必须脱敏或禁止记录：
 
-- Authorization、Cookie、API key、用户 Token、`contextToken`、XXL SSO ticket 和 platform session digest。
+- Authorization、Cookie、API key、用户 Token、内部模型 `token/authToken/tokenValue`、`contextToken`、XXL SSO ticket 和 platform session digest。
 - 用户输入中的敏感内容。
 - 文件路径中的隐私片段。
 - 过大的请求体和响应体。
 
-日志配置必须对可变 message、thread 和 traceId 做 CRLF 编码，避免换行注入伪造日志记录。opencode 节点 health、Redis health、scheduler/XXL 运行日志和 opencode-manager 控制面日志必须避免输出 ticket、token、完整 Authorization header、Cookie、session digest、MySQL 密码、用户输入、完整 prompt 或原始 executor 敏感 payload。前端 `rawExchangeObserver` 对 ticket/token/cookie/password/secret/sessionDigest 做递归、大小写不敏感脱敏后才允许展示。
+日志配置必须对可变 message、thread 和 traceId 做 CRLF 编码，避免换行注入伪造日志记录。opencode 节点 health、Redis health、scheduler/XXL 运行日志和 opencode-manager 控制面日志必须避免输出 ticket、token、完整 Authorization header、Cookie、session digest、MySQL 密码、用户输入、完整 prompt 或原始 executor 敏感 payload。前端 `rawExchangeObserver` 和原始输出缓存对 ticket/token/authToken/tokenValue/cookie/password/secret/sessionDigest 做递归、大小写不敏感脱敏后才允许展示。
 
 受管用户 opencode server 的日志文件名包含统一认证号的路径安全编码、UTC 启动时间和端口。`%HH` 编码或“有界前缀 + 完整 SHA-256”只用于避免路径穿越、冲突和文件名超限，不构成匿名化；日志目录必须限制为运维所需的最小访问权限。manager 生命周期日志、错误响应和普通业务日志不得记录原始统一认证号或完整用户日志文件名，身份与 session 路径不一致时只返回通用校验错误。对外工单、日志下载或排障报告必须遮蔽文件名中的身份部分，可保留启动时间、端口、traceId 等低敏关联字段；日志正文仍按上述 token、prompt 和用户输入规则脱敏。
 

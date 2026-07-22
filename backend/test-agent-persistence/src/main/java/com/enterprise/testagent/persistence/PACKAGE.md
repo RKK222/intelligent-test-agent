@@ -16,8 +16,8 @@
 - `mybatis.MyBatisPersistenceConfig`：扫描 persistence 内部 MyBatis mapper。
 - `mybatis.CommonParameterMapper` / `mybatis/CommonParameterMapper.xml`：通用参数 MyBatis 试点 SQL。
 - `mybatis.MyBatisCommonParameterRepository`：通用参数领域端口的生产 Bean。
-- `mybatis.InternalModelProviderMapper` / `mybatis/InternalModelProviderMapper.xml`：内部模型供应商和代理 token 的 MyBatis SQL。
-- `mybatis.MyBatisInternalModelProviderRepository`：内部模型供应商领域端口的生产 Bean。
+- `mybatis.InternalModelProviderMapper` / `mybatis/InternalModelProviderMapper.xml`：内部模型供应商、可复用 Token 定义、Provider 关联和一次联表运行快照的全部关系型 SQL。
+- `mybatis.MyBatisInternalModelProviderRepository` / `mybatis.MyBatisInternalModelTokenRepository`：内部模型供应商与 Token 定义领域端口的生产 Bean；普通返回模型不包含 Token 明文。
 - `mybatis.UserDeletionMapper` / `mybatis/UserDeletionMapper.xml` / `mybatis.MyBatisUserDeletionRepository`：用户安全删除领域端口的生产实现，锁定目标用户、识别会话/工作区/进程/调度等受保护引用，并按外键顺序清理可随账号删除的附属表。
 - `mybatis.RunMapper` / `mybatis/RunMapper.xml`：Run MyBatis SQL，包含保存、读取、最近非终态 Run 查询、只选择 `LEGACY_FULL` 的 stale active 查询和 `status` 条件更新。
 - `mybatis.MyBatisRunRepository`：Run 领域端口的生产 Bean，通过 `saveIfStatus` 原子条件写入避免终态竞态覆盖。

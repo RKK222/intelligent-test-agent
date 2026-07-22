@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.enterprise.testagent.domain.configuration.InternalModelProvider;
 import com.enterprise.testagent.domain.configuration.InternalModelProviderRepository;
+import com.enterprise.testagent.domain.configuration.InternalModelProviderRuntimeConfig;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProviderRegistry;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
 import com.enterprise.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
@@ -18,7 +19,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
@@ -276,8 +276,8 @@ class InternalModelProxyControllerTest {
                 1,
                 Instant.now(),
                 Instant.now());
-        when(repository.findEnabled()).thenReturn(List.of(provider));
-        when(repository.findAuthToken()).thenReturn(Optional.of(MODEL_TOKEN));
+        when(repository.findEnabledRuntimeConfigs())
+                .thenReturn(List.of(new InternalModelProviderRuntimeConfig(provider, MODEL_TOKEN)));
 
         InternalModelProviderRegistry registry = new InternalModelProviderRegistry(repository);
         registry.refresh("trace_test", "test");

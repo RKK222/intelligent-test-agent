@@ -8,6 +8,7 @@ export const RAW_OUTPUT_MAX_ENTRIES_PER_SESSION = 2_000;
 const RAW_OUTPUT_SENSITIVE_KEYS = new Set([
   "authorization",
   "accesstoken",
+  "authtoken",
   "cookie",
   "contexttoken",
   "password",
@@ -16,7 +17,8 @@ const RAW_OUTPUT_SENSITIVE_KEYS = new Set([
   "sessiondigest",
   "setcookie",
   "ticket",
-  "token"
+  "token",
+  "tokenvalue"
 ]);
 
 /**
@@ -50,7 +52,7 @@ function redactSensitiveDataFromJson(body: string): string {
 }
 
 function redactSensitiveDataFromText(body: string): string {
-  const keyPattern = /(["']?)\b(?:authorization|access[-_]?token|cookie|context[-_]?token|password|refresh[-_]?token|secret|session[-_]?digest|set-cookie|ticket|token)\b\1\s*[:=]\s*/gi;
+  const keyPattern = /(["']?)\b(?:authorization|access[-_]?token|auth[-_]?token|cookie|context[-_]?token|password|refresh[-_]?token|secret|session[-_]?digest|set-cookie|ticket|token[-_]?value|token)\b\1\s*[:=]\s*/gi;
   let redacted = "";
   let cursor = 0;
   let match: RegExpExecArray | null;
