@@ -7,11 +7,11 @@ import com.example.opencode.sdk.model.BadRequestError;
 import com.example.opencode.sdk.model.ExperimentalWorkspaceAdapterList200ResponseInner;
 import com.example.opencode.sdk.model.ExperimentalWorkspaceCreate400Response;
 import com.example.opencode.sdk.model.ExperimentalWorkspaceCreateRequest;
-import com.example.opencode.sdk.model.ExperimentalWorkspaceStatus200ResponseInner;
 import com.example.opencode.sdk.model.ExperimentalWorkspaceWarp400Response;
 import com.example.opencode.sdk.model.ExperimentalWorkspaceWarpRequest;
 import com.example.opencode.sdk.model.NotFoundError;
 import com.example.opencode.sdk.model.Workspace;
+import com.example.opencode.sdk.model.WorkspaceEventConnectionStatus;
 
 import java.util.HashMap;
 import java.util.List;
@@ -35,7 +35,7 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Flux;
 
-@jakarta.annotation.Generated(value = "org.openapitools.codegen.languages.JavaClientCodegen", comments = "Generator version: 7.23.0")
+@jakarta.annotation.Generated(value = "org.openapitools.codegen.languages.JavaClientCodegen", comments = "Generator version: 7.24.0")
 public class WorkspaceApi {
     private ApiClient apiClient;
 
@@ -164,7 +164,7 @@ public class WorkspaceApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -342,11 +342,11 @@ public class WorkspaceApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -513,7 +513,7 @@ public class WorkspaceApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -697,7 +697,7 @@ public class WorkspaceApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -809,10 +809,10 @@ public class WorkspaceApi {
      * <p><b>200</b> - Workspace status
      * <p><b>400</b> - Bad request
      * @param requestParameters The experimentalWorkspaceStatus request parameters as object
-     * @return List&lt;ExperimentalWorkspaceStatus200ResponseInner&gt;
+     * @return List&lt;WorkspaceEventConnectionStatus&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Flux<ExperimentalWorkspaceStatus200ResponseInner> experimentalWorkspaceStatus(ExperimentalWorkspaceStatusRequest requestParameters) throws WebClientResponseException {
+    public Flux<WorkspaceEventConnectionStatus> experimentalWorkspaceStatus(ExperimentalWorkspaceStatusRequest requestParameters) throws WebClientResponseException {
         return this.experimentalWorkspaceStatus(requestParameters.directory(), requestParameters.workspace());
     }
 
@@ -822,10 +822,10 @@ public class WorkspaceApi {
      * <p><b>200</b> - Workspace status
      * <p><b>400</b> - Bad request
      * @param requestParameters The experimentalWorkspaceStatus request parameters as object
-     * @return ResponseEntity&lt;List&lt;ExperimentalWorkspaceStatus200ResponseInner&gt;&gt;
+     * @return ResponseEntity&lt;List&lt;WorkspaceEventConnectionStatus&gt;&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<List<ExperimentalWorkspaceStatus200ResponseInner>>> experimentalWorkspaceStatusWithHttpInfo(ExperimentalWorkspaceStatusRequest requestParameters) throws WebClientResponseException {
+    public Mono<ResponseEntity<List<WorkspaceEventConnectionStatus>>> experimentalWorkspaceStatusWithHttpInfo(ExperimentalWorkspaceStatusRequest requestParameters) throws WebClientResponseException {
         return this.experimentalWorkspaceStatusWithHttpInfo(requestParameters.directory(), requestParameters.workspace());
     }
 
@@ -850,7 +850,7 @@ public class WorkspaceApi {
      * <p><b>400</b> - Bad request
      * @param directory The directory parameter
      * @param workspace The workspace parameter
-     * @return List&lt;ExperimentalWorkspaceStatus200ResponseInner&gt;
+     * @return List&lt;WorkspaceEventConnectionStatus&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
     private ResponseSpec experimentalWorkspaceStatusRequestCreation(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
@@ -866,7 +866,7 @@ public class WorkspaceApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -875,7 +875,7 @@ public class WorkspaceApi {
 
         String[] localVarAuthNames = new String[] {  };
 
-        ParameterizedTypeReference<ExperimentalWorkspaceStatus200ResponseInner> localVarReturnType = new ParameterizedTypeReference<ExperimentalWorkspaceStatus200ResponseInner>() {};
+        ParameterizedTypeReference<WorkspaceEventConnectionStatus> localVarReturnType = new ParameterizedTypeReference<WorkspaceEventConnectionStatus>() {};
         return apiClient.invokeAPI("/experimental/workspace/status", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
     }
 
@@ -886,11 +886,11 @@ public class WorkspaceApi {
      * <p><b>400</b> - Bad request
      * @param directory The directory parameter
      * @param workspace The workspace parameter
-     * @return List&lt;ExperimentalWorkspaceStatus200ResponseInner&gt;
+     * @return List&lt;WorkspaceEventConnectionStatus&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Flux<ExperimentalWorkspaceStatus200ResponseInner> experimentalWorkspaceStatus(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<ExperimentalWorkspaceStatus200ResponseInner> localVarReturnType = new ParameterizedTypeReference<ExperimentalWorkspaceStatus200ResponseInner>() {};
+    public Flux<WorkspaceEventConnectionStatus> experimentalWorkspaceStatus(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
+        ParameterizedTypeReference<WorkspaceEventConnectionStatus> localVarReturnType = new ParameterizedTypeReference<WorkspaceEventConnectionStatus>() {};
         return experimentalWorkspaceStatusRequestCreation(directory, workspace).bodyToFlux(localVarReturnType);
     }
 
@@ -901,11 +901,11 @@ public class WorkspaceApi {
      * <p><b>400</b> - Bad request
      * @param directory The directory parameter
      * @param workspace The workspace parameter
-     * @return ResponseEntity&lt;List&lt;ExperimentalWorkspaceStatus200ResponseInner&gt;&gt;
+     * @return ResponseEntity&lt;List&lt;WorkspaceEventConnectionStatus&gt;&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<List<ExperimentalWorkspaceStatus200ResponseInner>>> experimentalWorkspaceStatusWithHttpInfo(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<ExperimentalWorkspaceStatus200ResponseInner> localVarReturnType = new ParameterizedTypeReference<ExperimentalWorkspaceStatus200ResponseInner>() {};
+    public Mono<ResponseEntity<List<WorkspaceEventConnectionStatus>>> experimentalWorkspaceStatusWithHttpInfo(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
+        ParameterizedTypeReference<WorkspaceEventConnectionStatus> localVarReturnType = new ParameterizedTypeReference<WorkspaceEventConnectionStatus>() {};
         return experimentalWorkspaceStatusRequestCreation(directory, workspace).toEntityList(localVarReturnType);
     }
 
@@ -1029,7 +1029,7 @@ public class WorkspaceApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -1206,11 +1206,11 @@ public class WorkspaceApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);

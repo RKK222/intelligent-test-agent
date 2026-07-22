@@ -148,7 +148,7 @@ class SideQuestionEventProjectorTest {
     void interleavedMainAndForkEventsOnlyEmitForkDelta() {
         SideQuestionEventProjector projector = new SideQuestionEventProjector(TEMPORARY_SESSION_ID);
 
-        // 回归依据：opencode-source/opencode-1.17.8/packages/opencode/src/session/session.ts 的 Session.fork 不设置 parentID，
+        // 回归依据：opencode-source/opencode-1.18.4/packages/opencode/src/session/session.ts 的 Session.fork 不设置 parentID，
         // 因此不能按 parentID 推断 fork，必须按事件 payload 中的实际 sessionID/sessionId 精确过滤。
         projector.project(message("msg_fork", "assistant"));
         projector.project(part("msg_fork", "part_fork", "text"));

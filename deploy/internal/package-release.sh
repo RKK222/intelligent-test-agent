@@ -220,10 +220,9 @@ tag_to_tar_name() {
 
 package_backend() {
   local backend_dir="${OUTPUT_DIR}/backend"
-  local extract_dir manifest_file
+  local backend_jar_path extract_dir manifest_dir manifest_file
   require_command unzip
   require_command zip
-  require_command jar
   mkdir -p "${backend_dir}"
   echo "Building backend jar"
   # 企业包只需要主代码和运行时依赖；跳过测试源码编译，避免无关的存量测试假实现阻断交付包生成。
@@ -238,19 +237,27 @@ package_backend() {
   rm -rf "${backend_dir}"
   mkdir -p "${backend_dir}"
   cp "${jar}" "${backend_dir}/test-agent-app.jar"
+  backend_jar_path="$(cd "${backend_dir}" && pwd)/test-agent-app.jar"
   extract_dir="$(mktemp -d "${OUTPUT_DIR}/.backend-lib.XXXXXX")"
   unzip -q "${backend_dir}/test-agent-app.jar" 'BOOT-INF/lib/*' -d "${extract_dir}"
   mv "${extract_dir}/BOOT-INF/lib" "${backend_dir}/lib"
   rm -rf "${extract_dir}"
   # 交付包只保留启动器和业务 classes，所有依赖由 PropertiesLauncher 从外置 lib 加载。
   zip -qd "${backend_dir}/test-agent-app.jar" 'BOOT-INF/lib/*' >/dev/null
-  manifest_file="$(mktemp "${OUTPUT_DIR}/.backend-manifest.XXXXXX")"
+  manifest_dir="$(mktemp -d "${OUTPUT_DIR}/.backend-manifest.XXXXXX")"
+  mkdir -p "${manifest_dir}/META-INF"
+  manifest_file="${manifest_dir}/META-INF/MANIFEST.MF"
   unzip -p "${backend_dir}/test-agent-app.jar" META-INF/MANIFEST.MF | tr -d '\r' \
     | sed 's#Main-Class: org.springframework.boot.loader.launch.JarLauncher#Main-Class: org.springframework.boot.loader.launch.PropertiesLauncher#' \
     | sed '${/^$/d;}' >"${manifest_file}"
   printf 'Loader-Path: /data/testagent/dist/backend/lib\n\n' >>"${manifest_file}"
-  jar umf "${manifest_file}" "${backend_dir}/test-agent-app.jar" >/dev/null 2>&1
-  rm -f "${manifest_file}"
+  (cd "${manifest_dir}" && zip -q -u "${backend_jar_path}" META-INF/MANIFEST.MF)
+  rm -rf "${manifest_dir}"
+  unzip -p "${backend_dir}/test-agent-app.jar" META-INF/MANIFEST.MF | tr -d '\r' \
+    | grep -Fx 'Loader-Path: /data/testagent/dist/backend/lib' >/dev/null || {
+    echo "Backend jar manifest is missing the external Loader-Path" >&2
+    exit 1
+  }
   [[ -n "$(find "${backend_dir}/lib" -maxdepth 1 -type f -name '*.jar' -print -quit)" ]] || {
     echo "External backend libraries were not extracted" >&2
     exit 1
@@ -304,11 +311,16 @@ build_opencode_worker_image() {
     --build-arg "DEBIAN_SECURITY_MIRROR=${DEBIAN_SECURITY_MIRROR}" \
     --build-arg "GO_IMAGE=${GO_IMAGE}" \
     --build-arg "MANAGER_BUILD_VERSION=${manager_build_version}" \
-    --build-arg "BUN_IMAGE=${BUN_IMAGE}" \
     --build-arg "NODE_IMAGE=${NODE_IMAGE}" \
     --build-arg "OPENCODE_VERSION=${OPENCODE_VERSION}" \
-    --build-arg "OPENCODE_SOURCE_COMMIT=${OPENCODE_SOURCE_COMMIT}" \
-    --build-arg "OPENCODE_SOURCE_REPOSITORY=${OPENCODE_SOURCE_REPOSITORY}" \
+    --build-arg "OPENCODE_RELEASE_COMMIT=${OPENCODE_RELEASE_COMMIT}" \
+    --build-arg "OPENCODE_ASSET_NAME=${OPENCODE_ASSET_NAME}" \
+    --build-arg "OPENCODE_ASSET_SIZE=${OPENCODE_ASSET_SIZE}" \
+    --build-arg "OPENCODE_ASSET_SHA256=${OPENCODE_ASSET_SHA256}" \
+    --build-arg "OPENCODE_BINARY_SHA256=${OPENCODE_BINARY_SHA256}" \
+    --build-arg "OPENCODE_RELEASE_BASE_URL=${OPENCODE_RELEASE_BASE_URL}" \
+    --build-arg "OPENCODE_RUNTIME_PACKAGE_JSON=${OPENCODE_RUNTIME_PACKAGE_JSON}" \
+    --build-arg "OPENCODE_RUNTIME_PACKAGE_LOCK=${OPENCODE_RUNTIME_PACKAGE_LOCK}" \
     "${ROOT_DIR}"
   docker image inspect "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" >/dev/null
 
@@ -402,7 +414,7 @@ export_worker_programs() {
   mkdir -p "${programs_dir}/bin" "${programs_dir}/opencode"
 
   if ! docker cp "${container_id}:/usr/local/bin/opencode-manager" "${programs_dir}/bin/opencode-manager" \
-    || ! docker cp "${container_id}:/usr/local/lib/opencode-node/." "${programs_dir}/opencode/"; then
+    || ! docker cp "${container_id}:/usr/local/lib/opencode/." "${programs_dir}/opencode/"; then
     docker rm -f "${container_id}" >/dev/null 2>&1 || true
     return 1
   fi
@@ -410,8 +422,12 @@ export_worker_programs() {
 
   chmod +x "${programs_dir}/bin/opencode-manager" || true
   chmod +x "${programs_dir}/opencode/bin/opencode" || true
-  printf 'opencode node server: %s\nsource commit: %s\n' \
-    "${OPENCODE_VERSION}" "${OPENCODE_SOURCE_COMMIT}" >"${programs_dir}/VERSION"
+  printf 'official opencode: %s\nasset: %s\narchive size: %s\narchive sha256: %s\nrelease commit: %s\n' \
+    "${OPENCODE_VERSION}" \
+    "${OPENCODE_ASSET_NAME}" \
+    "${OPENCODE_ASSET_SIZE}" \
+    "${OPENCODE_ASSET_SHA256}" \
+    "${OPENCODE_RELEASE_COMMIT}" >"${programs_dir}/VERSION"
   tar -C "${OUTPUT_DIR}" -czf "${OUTPUT_DIR}/test-agent-programs.tar.gz" programs
   ls -lh "${OUTPUT_DIR}/test-agent-programs.tar.gz"
 }
@@ -430,15 +446,19 @@ TEST_AGENT_OPENCODE_WORKER_IMAGE="${TEST_AGENT_OPENCODE_WORKER_IMAGE:-test-agent
 TEST_AGENT_XXL_JOB_MYSQL_IMAGE="${TEST_AGENT_XXL_JOB_MYSQL_IMAGE:-mysql:8.4}"
 NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
-DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}"
-DEBIAN_SECURITY_MIRROR="${DEBIAN_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}"
-OPENCODE_AI_PACKAGE="${OPENCODE_AI_PACKAGE:-opencode-ai@1.17.8}"
-OPENCODE_VERSION="${OPENCODE_VERSION:-${OPENCODE_AI_PACKAGE##*@}}"
-OPENCODE_SOURCE_COMMIT="${OPENCODE_SOURCE_COMMIT:-11e47f91496005aab4d7c5a2d0a7da5d2651b4ac}"
-OPENCODE_SOURCE_REPOSITORY="${OPENCODE_SOURCE_REPOSITORY:-https://github.com/anomalyco/opencode.git}"
-GO_IMAGE="${GO_IMAGE:-golang@sha256:167053a2bb901972bf2c1611f8f52c44d5fe7e762e5cab213708d82c421614db}"
-BUN_IMAGE="${BUN_IMAGE:-oven/bun@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f}"
-NODE_IMAGE="${NODE_IMAGE:-node@sha256:e24976116684e0fd211cbdb3c40fc9cb997565d063fb7fe656d2e2b603c5bb0a}"
+DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://mirrors.ustc.edu.cn/debian}"
+DEBIAN_SECURITY_MIRROR="${DEBIAN_SECURITY_MIRROR:-https://mirrors.ustc.edu.cn/debian-security}"
+OPENCODE_VERSION="${OPENCODE_VERSION:-1.18.4}"
+OPENCODE_RELEASE_COMMIT="${OPENCODE_RELEASE_COMMIT:-49c69c5ed3ccf706b61b3febb43c8aaff7f8325e}"
+OPENCODE_ASSET_NAME="${OPENCODE_ASSET_NAME:-opencode-linux-x64-baseline.tar.gz}"
+OPENCODE_ASSET_SIZE="${OPENCODE_ASSET_SIZE:-59265643}"
+OPENCODE_ASSET_SHA256="${OPENCODE_ASSET_SHA256:-4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc}"
+OPENCODE_BINARY_SHA256="${OPENCODE_BINARY_SHA256:-6ce6570e7db9a40e7bd3304ebdfff607920bde8cafd2eb5587bd7a26f89ba0b5}"
+OPENCODE_RELEASE_BASE_URL="${OPENCODE_RELEASE_BASE_URL:-https://github.com/anomalyco/opencode/releases/download}"
+OPENCODE_RUNTIME_PACKAGE_JSON="${OPENCODE_RUNTIME_PACKAGE_JSON:-deploy/internal/opencode-node-runtime.package.json}"
+OPENCODE_RUNTIME_PACKAGE_LOCK="${OPENCODE_RUNTIME_PACKAGE_LOCK:-deploy/internal/opencode-node-runtime.package-lock.json}"
+GO_IMAGE="${GO_IMAGE:-golang@sha256:e87b2a5f6df2dff71ea330d55d54f4979eb380ae58a7e3aabc9d53121243e689}"
+NODE_IMAGE="${NODE_IMAGE:-node@sha256:b042c6d46a90773b82ea3f95b05457ea93ee127a73b1b47ad5ebbb1a08ec3df8}"
 VITE_TEST_AGENT_API_BASE_URL="${VITE_TEST_AGENT_API_BASE_URL:-}"
 
 mkdir -p "${OUTPUT_DIR}"

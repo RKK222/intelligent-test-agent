@@ -19,7 +19,7 @@ const descriptions = {
 } as const;
 
 describe("permissionPresentation", () => {
-  it.each(Object.entries(descriptions))("uses the opencode 1.17.8 Chinese description for %s", (type, description) => {
+  it.each(Object.entries(descriptions))("uses the opencode 1.18.4 Chinese description for %s", (type, description) => {
     expect(permissionPresentation({
       requestId: `perm_${type}`,
       sessionId: "ses_root",

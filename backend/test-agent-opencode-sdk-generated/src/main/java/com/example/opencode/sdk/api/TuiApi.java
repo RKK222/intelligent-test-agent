@@ -6,10 +6,10 @@ import com.example.opencode.sdk.model.AuthSet400Response;
 import com.example.opencode.sdk.model.BadRequestError;
 import com.example.opencode.sdk.model.FindText200ResponseInnerPath;
 import com.example.opencode.sdk.model.NotFoundError;
-import com.example.opencode.sdk.model.SyncStealRequest;
 import com.example.opencode.sdk.model.TuiControlNext200Response;
 import com.example.opencode.sdk.model.TuiExecuteCommandRequest;
 import com.example.opencode.sdk.model.TuiPublishRequest;
+import com.example.opencode.sdk.model.TuiSelectSessionRequest;
 import com.example.opencode.sdk.model.TuiShowToastRequest;
 
 import java.util.HashMap;
@@ -34,7 +34,7 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Flux;
 
-@jakarta.annotation.Generated(value = "org.openapitools.codegen.languages.JavaClientCodegen", comments = "Generator version: 7.23.0")
+@jakarta.annotation.Generated(value = "org.openapitools.codegen.languages.JavaClientCodegen", comments = "Generator version: 7.24.0")
 public class TuiApi {
     private ApiClient apiClient;
 
@@ -175,11 +175,11 @@ public class TuiApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -346,7 +346,7 @@ public class TuiApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -512,7 +512,7 @@ public class TuiApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -690,11 +690,11 @@ public class TuiApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -873,11 +873,11 @@ public class TuiApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -1044,7 +1044,7 @@ public class TuiApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -1210,7 +1210,7 @@ public class TuiApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -1376,7 +1376,7 @@ public class TuiApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -1542,7 +1542,7 @@ public class TuiApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -1720,11 +1720,11 @@ public class TuiApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -1785,14 +1785,14 @@ public class TuiApi {
     public class TuiSelectSessionRequest {
         private @jakarta.annotation.Nullable String directory;
         private @jakarta.annotation.Nullable String workspace;
-        private @jakarta.annotation.Nullable SyncStealRequest syncStealRequest;
+        private @jakarta.annotation.Nullable TuiSelectSessionRequest tuiSelectSessionRequest;
 
         public TuiSelectSessionRequest() {}
 
-        public TuiSelectSessionRequest(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable SyncStealRequest syncStealRequest) {
+        public TuiSelectSessionRequest(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable TuiSelectSessionRequest tuiSelectSessionRequest) {
             this.directory = directory;
             this.workspace = workspace;
-            this.syncStealRequest = syncStealRequest;
+            this.tuiSelectSessionRequest = tuiSelectSessionRequest;
         }
 
         public @jakarta.annotation.Nullable String directory() {
@@ -1811,11 +1811,11 @@ public class TuiApi {
             return this;
         }
 
-        public @jakarta.annotation.Nullable SyncStealRequest syncStealRequest() {
-            return this.syncStealRequest;
+        public @jakarta.annotation.Nullable TuiSelectSessionRequest tuiSelectSessionRequest() {
+            return this.tuiSelectSessionRequest;
         }
-        public TuiSelectSessionRequest syncStealRequest(@jakarta.annotation.Nullable SyncStealRequest syncStealRequest) {
-            this.syncStealRequest = syncStealRequest;
+        public TuiSelectSessionRequest tuiSelectSessionRequest(@jakarta.annotation.Nullable TuiSelectSessionRequest tuiSelectSessionRequest) {
+            this.tuiSelectSessionRequest = tuiSelectSessionRequest;
             return this;
         }
 
@@ -1830,12 +1830,12 @@ public class TuiApi {
             TuiSelectSessionRequest request = (TuiSelectSessionRequest) o;
             return Objects.equals(this.directory, request.directory()) &&
                 Objects.equals(this.workspace, request.workspace()) &&
-                Objects.equals(this.syncStealRequest, request.syncStealRequest());
+                Objects.equals(this.tuiSelectSessionRequest, request.tuiSelectSessionRequest());
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(directory, workspace, syncStealRequest);
+            return Objects.hash(directory, workspace, tuiSelectSessionRequest);
         }
     }
 
@@ -1850,7 +1850,7 @@ public class TuiApi {
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
     public Mono<Boolean> tuiSelectSession(TuiSelectSessionRequest requestParameters) throws WebClientResponseException {
-        return this.tuiSelectSession(requestParameters.directory(), requestParameters.workspace(), requestParameters.syncStealRequest());
+        return this.tuiSelectSession(requestParameters.directory(), requestParameters.workspace(), requestParameters.tuiSelectSessionRequest());
     }
 
     /**
@@ -1864,7 +1864,7 @@ public class TuiApi {
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
     public Mono<ResponseEntity<Boolean>> tuiSelectSessionWithHttpInfo(TuiSelectSessionRequest requestParameters) throws WebClientResponseException {
-        return this.tuiSelectSessionWithHttpInfo(requestParameters.directory(), requestParameters.workspace(), requestParameters.syncStealRequest());
+        return this.tuiSelectSessionWithHttpInfo(requestParameters.directory(), requestParameters.workspace(), requestParameters.tuiSelectSessionRequest());
     }
 
     /**
@@ -1878,7 +1878,7 @@ public class TuiApi {
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
     public ResponseSpec tuiSelectSessionWithResponseSpec(TuiSelectSessionRequest requestParameters) throws WebClientResponseException {
-        return this.tuiSelectSessionWithResponseSpec(requestParameters.directory(), requestParameters.workspace(), requestParameters.syncStealRequest());
+        return this.tuiSelectSessionWithResponseSpec(requestParameters.directory(), requestParameters.workspace(), requestParameters.tuiSelectSessionRequest());
     }
 
 
@@ -1890,12 +1890,12 @@ public class TuiApi {
      * <p><b>404</b> - NotFoundError
      * @param directory The directory parameter
      * @param workspace The workspace parameter
-     * @param syncStealRequest The syncStealRequest parameter
+     * @param tuiSelectSessionRequest The tuiSelectSessionRequest parameter
      * @return Boolean
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    private ResponseSpec tuiSelectSessionRequestCreation(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable SyncStealRequest syncStealRequest) throws WebClientResponseException {
-        Object postBody = syncStealRequest;
+    private ResponseSpec tuiSelectSessionRequestCreation(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable TuiSelectSessionRequest tuiSelectSessionRequest) throws WebClientResponseException {
+        Object postBody = tuiSelectSessionRequest;
         // create path and map variables
         final Map<String, Object> pathParams = new HashMap<String, Object>();
 
@@ -1907,11 +1907,11 @@ public class TuiApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -1930,13 +1930,13 @@ public class TuiApi {
      * <p><b>404</b> - NotFoundError
      * @param directory The directory parameter
      * @param workspace The workspace parameter
-     * @param syncStealRequest The syncStealRequest parameter
+     * @param tuiSelectSessionRequest The tuiSelectSessionRequest parameter
      * @return Boolean
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<Boolean> tuiSelectSession(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable SyncStealRequest syncStealRequest) throws WebClientResponseException {
+    public Mono<Boolean> tuiSelectSession(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable TuiSelectSessionRequest tuiSelectSessionRequest) throws WebClientResponseException {
         ParameterizedTypeReference<Boolean> localVarReturnType = new ParameterizedTypeReference<Boolean>() {};
-        return tuiSelectSessionRequestCreation(directory, workspace, syncStealRequest).bodyToMono(localVarReturnType);
+        return tuiSelectSessionRequestCreation(directory, workspace, tuiSelectSessionRequest).bodyToMono(localVarReturnType);
     }
 
     /**
@@ -1947,13 +1947,13 @@ public class TuiApi {
      * <p><b>404</b> - NotFoundError
      * @param directory The directory parameter
      * @param workspace The workspace parameter
-     * @param syncStealRequest The syncStealRequest parameter
+     * @param tuiSelectSessionRequest The tuiSelectSessionRequest parameter
      * @return ResponseEntity&lt;Boolean&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<Boolean>> tuiSelectSessionWithHttpInfo(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable SyncStealRequest syncStealRequest) throws WebClientResponseException {
+    public Mono<ResponseEntity<Boolean>> tuiSelectSessionWithHttpInfo(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable TuiSelectSessionRequest tuiSelectSessionRequest) throws WebClientResponseException {
         ParameterizedTypeReference<Boolean> localVarReturnType = new ParameterizedTypeReference<Boolean>() {};
-        return tuiSelectSessionRequestCreation(directory, workspace, syncStealRequest).toEntity(localVarReturnType);
+        return tuiSelectSessionRequestCreation(directory, workspace, tuiSelectSessionRequest).toEntity(localVarReturnType);
     }
 
     /**
@@ -1964,12 +1964,12 @@ public class TuiApi {
      * <p><b>404</b> - NotFoundError
      * @param directory The directory parameter
      * @param workspace The workspace parameter
-     * @param syncStealRequest The syncStealRequest parameter
+     * @param tuiSelectSessionRequest The tuiSelectSessionRequest parameter
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec tuiSelectSessionWithResponseSpec(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable SyncStealRequest syncStealRequest) throws WebClientResponseException {
-        return tuiSelectSessionRequestCreation(directory, workspace, syncStealRequest);
+    public ResponseSpec tuiSelectSessionWithResponseSpec(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable TuiSelectSessionRequest tuiSelectSessionRequest) throws WebClientResponseException {
+        return tuiSelectSessionRequestCreation(directory, workspace, tuiSelectSessionRequest);
     }
 
     public class TuiShowToastRequest {
@@ -2093,11 +2093,11 @@ public class TuiApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -2264,7 +2264,7 @@ public class TuiApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);

@@ -5,6 +5,25 @@
 
 ## Entries
 
+### 2026-07-22 - 升级 OpenCode 1.18.4 官方 baseline 与 Java SDK
+
+- Why:
+  - 项目运行时、源码审计快照和 generated Java SDK 仍基于 OpenCode 1.17.8；用户要求升级到最新稳定版、重新使用最新 OpenAPI Generator 校验影响，并明确企业 Linux 程序必须直接使用官方 `opencode-linux-x64-baseline.tar.gz`，不能从源码构建。
+- What:
+  - 将审计源码快照、plugin/SDK 依赖及本机 OpenCode 更新到 1.18.4；企业 worker 下载并校验官方 baseline 归档/二进制 SHA，启动器只执行官方程序，源码不参与二进制构建。保留 1.17.8 官方 baseline 回滚 image/programs。
+  - OpenAPI Generator 固定为最新稳定版 7.24.0，重新同步 generator 工程和后端 generated SDK；规范由 150/339/175 个 paths/schemas/operations 增至 162/472/188，新增 13 个 operation、无删除，平台消费的 39 个 operation 契约未破坏。生成脚本统一清理生成器输出的行尾空格，generated 源码不手改。
+  - 1.18.2+ 启动配置固定 `subagent_depth=2`，后端和前端补齐 root → child → grandchild 的 scope 归属与状态隔离；1.17.8 回滚启动器会删除旧版不支持的字段。离线运行时继续固定依赖、禁用自动安装，并保留 `includeUsage=false` 兼容要求。
+  - 重写企业 worker/package 链路以固定官方 asset、大小、归档/程序 SHA、glibc 2.31、静态 tini/ripgrep 和 Node/Go 基础镜像；完整包同时携带 backend、frontend、programs、worker image，未操作企业服务器。
+- How:
+  - 对比 1.17.8 与 1.18.4 官方 `/doc`、release asset 和源码 tag `49c69c5ed3ccf706b61b3febb43c8aaff7f8325e`；官方 1.18.4 baseline 归档 SHA-256 为 `4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc`，程序 SHA-256 为 `6ce6570e7db9a40e7bd3304ebdfff607920bde8cafd2eb5587bd7a26f89ba0b5`。
+  - 当前与回滚 worker 均通过断网 serve/health、Tool 链接、RELEASE 元数据、深度配置和优雅停止冒烟；launcher 5/5、前端嵌套 scope 21/21、升级相关后端 Linux JDK 定向 28/28 通过。此前健康本机 JDK 下 client/runtime reactor 为 773 项全通过。
+  - 前端 lint、typecheck、生产 build 通过；全量 Vitest 为 1542 passed / 1 skipped / 1 failed，唯一失败仍是既有 `DirectoryRows.test.ts` 把 role=`radio` 的“上传”按 role=`button` 查询。Linux/musl 全后端运行通过 runtime 前各模块和 runtime 702/706，3 项仅因 glibc PTY/`/bin/bash` 不存在失败，1 项既有 1 秒重试断言单独复跑通过；本机 JDK 的 `libattach.dylib`/`libinstrument.dylib` 代码签名异常不属于本次代码。
+- Result:
+  - 完整离线包为 `deploy/internal/dist-1.18.4/test-agent-internal-release.zip`，SHA-256 `1f7baecd9877aedc82ab45e167975f10680ccb6aeeffb08142e6451af1da98e1`；1.17.8 回滚 image tar SHA-256 为 `a2fdfc588f2d3166cc26f8f9fd61daa9e937487ec93c037cf8cd8841f9c5cf8d`。两者只在本机生成，未部署企业节点。
+  - 已同步 OpenCode client/runtime/generated SDK、前端、内部部署、HTTP/SSE 索引、模块图与测试文档；平台 HTTP API、RunEvent wire、数据库/Flyway、关系型 SQL、鉴权和安全边界未变，没有修改 `.env.local`。本机外部 OpenCode 配置只补充兼容深度并保留原内容。
+- Next:
+  - 企业现场按文档同时替换 image/programs 并滚动重启用户 OpenCode 进程；如需恢复两个全量测试套件全绿，应另行修复既有 `DirectoryRows` 断言，并重装/修复本机 JDK 签名或在 glibc Linux JDK 环境执行后端全量测试。
+
 ### 2026-07-22 - 优化权限请求展示与待处理提醒
 
 - Why:

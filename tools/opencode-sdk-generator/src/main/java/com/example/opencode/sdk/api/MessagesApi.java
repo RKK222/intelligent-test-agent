@@ -31,7 +31,7 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Flux;
 
-@jakarta.annotation.Generated(value = "org.openapitools.codegen.languages.JavaClientCodegen", comments = "Generator version: 7.23.0")
+@jakarta.annotation.Generated(value = "org.openapitools.codegen.languages.JavaClientCodegen", comments = "Generator version: 7.24.0")
 public class MessagesApi {
     private ApiClient apiClient;
 
@@ -203,7 +203,7 @@ public class MessagesApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "order", order));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "cursor", cursor));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);

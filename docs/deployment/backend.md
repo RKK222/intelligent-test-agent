@@ -291,7 +291,7 @@ opencode worker 扩容流程：
 3. 先启动 Java，确认它写出的 `.serverid/.serverhost` 正确，再启动该服务器唯一的 worker；不要配置人工 `containerId/managerId`。
 4. 检查运行管理页中 `containers`、`managers` 和 `managerBackendConnections` 均出现对应记录，容器行以 `containerName` 展示可读名称，并保留哈希 `containerId` 用于路由。
 
-企业离线 worker 的 `/data/testagent/programs/opencode/node_modules` 是自定义 Tool 依赖的统一只读来源，固定包含 OpenCode `1.17.8` 对应的 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及 lockfile 传递依赖。用户进程启动后会为公共配置目录和工作区 `.opencode` 目录补充非覆盖式模块链接，禁止在内网启动阶段执行 npm 下载。Tool 新增其它第三方包时必须在外网构建侧更新 runtime package/lockfile、重打 programs 和 worker 镜像，再重启 worker。
+企业离线 worker 的 `/data/testagent/programs/opencode/node_modules` 是自定义 Tool 依赖的统一只读来源，固定包含 OpenCode `1.18.4` 对应的 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及 lockfile 传递依赖。用户进程启动后会为 XDG 全局配置、公共配置目录和工作区 `.opencode` 目录补充非覆盖式 package/lockfile 与模块链接，禁止在内网启动阶段执行 npm 下载。Tool 新增其它第三方包时必须在外网构建侧更新 runtime package/lockfile、重打 programs 和 worker 镜像，再重启 worker。
 
 常见故障处理：
 
@@ -303,7 +303,7 @@ opencode worker 扩容流程：
 | 用户初始化返回 `OPENCODE_UNAVAILABLE` 且提示公共配置尚未初始化 | 先读取错误消息中的目标服务器和公共配置目录，再进入“系统管理 → 配置管理 → opencode公共配置管理”确认该服务器状态；必要时结合运行管理页或日志确认目标容器/manager，检查错误消息中 manager 实际检查的目录是否存在且非空；确认公共配置 Git 根目录已经 clone/pull 并包含 `opencode/` 配置内容 | 由超级管理员在目标服务器初始化公共配置目录后重试；不要在空目录状态下启动用户进程。 |
 | 创建公共 Agent worktree 返回 `CONFLICT` 且提示“公共配置仓库未初始化” | 在系统管理 > 配置管理 > opencode公共配置管理中查看对应 `linuxServerId` 的 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT`、`OPENCODE_PUBLIC_CONFIG_DIR` 和状态；确认当前管理员 SSH key 有公共配置仓库读取权限 | 对该服务器执行初始化；不要在创建 worktree 时手工拷贝半初始化目录。 |
 | 用户初始化返回 `OPENCODE_TIMEOUT` | 先按统一认证号查找 `{stateDir}/logs/{safeUnifiedAuthId}-*.log` 的最新文件，并结合 `{stateDir}/processes/{port}.json` 的 `startedAt`；升级前或无身份进程再查看 `{stateDir}/logs/{port}.log`，同时检查后端命令超时配置和 opencode CLI 是否卡住 | 先保留日志，再 stop/restart 目标端口或扩容新容器。 |
-| `opencode --version` 返回 `Trace/breakpoint trap`、退出码 `133`，`dmesg` 出现 `trap int3` | 这是旧版交付物中 Bun 可执行文件在低于 `5.1` 内核上的启动失败特征；先检查容器内 `readlink -f /usr/local/bin/opencode` 与版本 | 当前企业发布包已改为 Node 22 加载 OpenCode `1.17.8` server bundle，入口应位于 `/usr/local/lib/opencode-node/`；重新构建并 `docker load` 新 worker 镜像、解压新 `test-agent-programs.tar.gz` 后再重启 worker。若仍指向 `opencode-ai/bin/opencode.exe`，说明旧外挂程序未被替换。 |
+| `opencode --version` 返回 `Trace/breakpoint trap`、退出码 `133`，`dmesg` 出现 `trap int3` | 先确认运行的是否为当前官方 baseline，并检查容器内 `readlink -f /usr/local/bin/opencode`、`/usr/local/lib/opencode/RELEASE` 与版本 | 当前入口应为 `/usr/local/lib/opencode/bin/opencode`，真实程序为同目录 `opencode-official`；重新 `docker load` worker、解压同批次 `test-agent-programs.tar.gz` 并重启用户进程。若仍指向 `opencode-ai/bin/opencode.exe` 或 `/usr/local/lib/opencode-node`，说明旧交付物未被替换。 |
 | 用户日志出现 `triggerUncaughtException`、`ResponseStreamError: SSE read timed out` 后 Node 进程退出 | 核对异常是否来自 provider 分片超时，并检查 worker 是否为包含 Node 取消拒绝兼容修复的新包；`chunkTimeout` 只决定无数据等待时长，不应决定进程存活 | 保留日志用于确认后，在外网 Mac 重打完整发布包，企业内导入新 worker 镜像并重启对应用户进程；不要只把 `chunkTimeout` 调大来掩盖旧镜像缺陷。新包仍把超时交给会话错误/重试流程，但不会因底层 `reader.cancel()` 拒绝而退出 server。 |
 | 自定义 Tool 报 `Cannot find package '@opencode-ai/plugin'` 或其它模块缺失 | 检查 `/data/testagent/programs/opencode/node_modules` 是否包含对应包，并检查 Tool 所在公共配置或 `.opencode` 目录下 `node_modules` 链接；确认 programs 与 worker 镜像来自同一个企业包 | 用完整包同时更新 programs 和 worker 镜像并重启 worker。若缺失的是业务第三方包，先在外网构建侧加入 runtime package/lockfile 后重打包，禁止在内网临时 npm 安装。 |
 | Node 输出 `uv_thread_create` assertion 后 `Aborted`，但 `node --version` 正常 | 检查 Docker server 版本、容器 `Seccomp` 和 `getconf GNU_LIBC_VERSION`；Docker `18.09` 默认 seccomp 无法正确兼容 Debian 12/glibc 2.36 的线程创建路径 | 使用当前 Debian 11 bullseye/glibc 2.31 worker 包并通过 `opencode-worker-docker.sh` 重新创建容器；按企业现场要求，该脚本默认添加 `--privileged`，无需另外手写 `docker run`。 |

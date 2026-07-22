@@ -4,8 +4,11 @@
 !deploy/
 !deploy/internal/
 !deploy/internal/opencode-worker-entrypoint.sh
-!deploy/internal/opencode-node-compat.patch
-!deploy/internal/opencode-node-launcher.mjs
-!deploy/internal/opencode-models.snapshot.json
+!deploy/internal/opencode-official-launcher.mjs
 !deploy/internal/opencode-node-runtime.package.json
 !deploy/internal/opencode-node-runtime.package-lock.json
+!deploy/internal/opencode-node-runtime-1.17.8.package.json
+!deploy/internal/opencode-node-runtime-1.17.8.package-lock.json
+!opencode-source/
+!opencode-source/opencode-1.18.4/
+!opencode-source/opencode-1.18.4/LICENSE

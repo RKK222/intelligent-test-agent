@@ -2441,7 +2441,7 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 
 - 旧 `prompt: string` 继续有效；`parts` 缺失时后端按单个 text part 处理。
 - `contextToken`、`clientRequestId`、`parts`、`messageId`、`agent`、`model`、`variant`、`mode` 均为可选字段；新前端必须传入前两项，旧客户端在 `test-agent.redis-summary.legacy-run-without-context-enabled=true` 的兼容窗口内仍可省略。
-- `messageId` 同时是本轮远端 USER dispatch 锚点。`LEGACY_FULL` 优先沿用显式旧值并原样透传，缺失时由当前 agent runtime 生成；`REDIS_SUMMARY` 始终由 runtime 为新 Run 自动生成。opencode 自动 ID 固定为与 1.17.8 `MessageID.ascending()` 字典序兼容的 `msg_[0-9a-f]{12}[0-9A-Za-z]{14}`，不能使用随机 UUID，否则后续 user ID 可能小于上一轮 assistant 并被远端误判为已经回复。同一生成值传给 agent command、写入平台 USER `remoteMessageId`，并复用于 root scope、Redis manifest 和持久化锚点；锚点来源不一致时 Run 级投影 fail-closed，不按“最后一条 user”猜测。其它 agent 未覆盖 runtime 工厂时仍保持原有 `msg_` + 32 位十六进制 UUID。
+- `messageId` 同时是本轮远端 USER dispatch 锚点。`LEGACY_FULL` 优先沿用显式旧值并原样透传，缺失时由当前 agent runtime 生成；`REDIS_SUMMARY` 始终由 runtime 为新 Run 自动生成。opencode 自动 ID 固定为与 1.18.4 `MessageID.ascending()` 字典序兼容的 `msg_[0-9a-f]{12}[0-9A-Za-z]{14}`，不能使用随机 UUID，否则后续 user ID 可能小于上一轮 assistant 并被远端误判为已经回复。同一生成值传给 agent command、写入平台 USER `remoteMessageId`，并复用于 root scope、Redis manifest 和持久化锚点；锚点来源不一致时 Run 级投影 fail-closed，不按“最后一条 user”猜测。其它 agent 未覆盖 runtime 工厂时仍保持原有 `msg_` + 32 位十六进制 UUID。
 - `clientRequestId` 由浏览器为一次发送生成；若 `contextToken` 失效，前端重新签发上下文并只重试一次，重试必须复用同一个 `clientRequestId`。服务端只以已成功写入 PostgreSQL 的唯一 Run 锚点确认幂等成功；Redis 中已声明但尚无锚点的 crash-window manifest 不会作为成功响应返回，短保护期后由恢复扫描清理。
 - 前端 HTTP 与 RunEvent SSE 原始报文观察副本在进入页面缓存前统一递归脱敏 `contextToken`，后端 API/Service 日志与错误详情也必须脱敏；`clientRequestId` 不是密钥，但不得被用来替代鉴权或 token 绑定校验。
 - `parts` 会下沉为当前 agent runtime 的 prompt parts；`opencode` 实现适配为 `prompt_async` 的 `text/file/agent` parts，`reference` part 会转换为可读 text part。
@@ -2750,7 +2750,7 @@ opencode 公共配置样例（企业单后端部署可直接使用 `deploy/inter
 }
 ```
 
-`provider` 下的 `enterprise-qwen` / `enterprise-deepseek` 是 opencode 原生 provider key，决定前端模型标识；`X-Enterprise-Model-Provider` 的 `qwen-prod` / `deepseek-prod` 是 Java 内部代理路由键，必须与数据库 `internal_model_providers.provider_id` 完全一致。`includeUsage=false` 用于避免 opencode 1.17.8 默认向不支持 `stream_options.include_usage` 的企业内部接口追加该参数。上游 Token 只保存在 `internal_model_tokens.token_value` 并由 `internal_model_providers.token_id` 关联，不得写入 opencode 配置、`backend.env` 或 `docker.env`；旧 `internal_model_proxy_settings` 只为滚动升级兼容保留。
+`provider` 下的 `enterprise-qwen` / `enterprise-deepseek` 是 opencode 原生 provider key，决定前端模型标识；`X-Enterprise-Model-Provider` 的 `qwen-prod` / `deepseek-prod` 是 Java 内部代理路由键，必须与数据库 `internal_model_providers.provider_id` 完全一致。`includeUsage=false` 用于避免 opencode 1.18.4 默认向不支持 `stream_options.include_usage` 的企业内部接口追加该参数。上游 Token 只保存在 `internal_model_tokens.token_value` 并由 `internal_model_providers.token_id` 关联，不得写入 opencode 配置、`backend.env` 或 `docker.env`；旧 `internal_model_proxy_settings` 只为滚动升级兼容保留。
 
 Session 运行态接口：
 

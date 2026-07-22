@@ -83,15 +83,35 @@ deploy/internal/dist/frontend/
 
 完整 zip 同时包含 `deploy/internal/` 下的配置模板、部署脚本、Nginx 模板、模型配置示例和本部署文档。企业服务器只执行校验、解压、`docker load` 和服务启停，不执行 Maven、pnpm、Docker build 或联网下载。
 
+## OpenCode worker 版本与回滚包
+
+当前 worker 固定 OpenCode `1.18.4` 官方 `opencode-linux-x64-baseline.tar.gz`。源码快照不参与程序构建，版本、release commit、asset 和两级 SHA 校验值由 `env.example` 与 Dockerfile 同时固定。标准构建会同时导出镜像 tar 和 `test-agent-programs.tar.gz`，两者必须成对升级。
+
+1.17.8 紧急回滚包使用同一官方 baseline 资产和对应 Tool lockfile，可在外网构建机执行：
+
+```bash
+OPENCODE_VERSION=1.17.8 \
+OPENCODE_RELEASE_COMMIT=11e47f91496005aab4d7c5a2d0a7da5d2651b4ac \
+OPENCODE_ASSET_SIZE=54769220 \
+OPENCODE_ASSET_SHA256=9b34bf34bdc66ea34ddd5858a131febf28b6247693acbfb5fb5c9ad94d90388b \
+OPENCODE_BINARY_SHA256=not-recorded \
+OPENCODE_RUNTIME_PACKAGE_JSON=deploy/internal/opencode-node-runtime-1.17.8.package.json \
+OPENCODE_RUNTIME_PACKAGE_LOCK=deploy/internal/opencode-node-runtime-1.17.8.package-lock.json \
+TEST_AGENT_OPENCODE_WORKER_IMAGE=test-agent-opencode-worker:1.17.8 \
+deploy/internal/package-release.sh --opencode-only --output-dir deploy/internal/dist-opencode-1.17.8
+```
+
+回滚时先加载 1.17.8 image、解压同批次 programs，再通过平台停止并重启用户进程；不删除 session 目录、manager state 或数据库记录。启动器会依据随包 `VERSION` 移除 1.17.8 不支持的 `subagent_depth`，而 1.18.4 继续强制深度 2。完整差异和验证结论见 `docs/deployment/opencode-upgrade-1.18.4.md`。
+
 ## 自定义 Tool 离线依赖
 
-`test-agent-programs.tar.gz` 已内置与 OpenCode `1.17.8` 锁定的自定义 Tool 基线：`@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及其全部传递依赖；Node 22 自带的 `fetch`、`URL`、`AbortController` 等标准 API 不需要额外包。OpenCode 启动时不会联网安装依赖，而会为公共配置 `tools/` 和项目 `.opencode/tools/` 建立指向 `/data/testagent/programs/opencode/node_modules` 的非覆盖式链接；配置目录已有同名包时保留现有版本，链接目录由 `.gitignore` 排除，不应提交到公共仓库。
+`test-agent-programs.tar.gz` 已内置与 OpenCode `1.18.4` 锁定的自定义 Tool 基线：`@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及其全部传递依赖；Node 22 自带的 `fetch`、`URL`、`AbortController` 等标准 API 不需要额外包。OpenCode 启动时不会联网安装依赖，而会为 XDG 全局配置、公共配置和项目 `.opencode` 建立非覆盖式 package/lockfile 与模块链接；配置目录已有同名文件时保留现有版本，链接目录由 `.gitignore` 排除，不应提交到公共仓库。
 
-Node 兼容 bundle 保留 provider `chunkTimeout` 的分片超时保护。上游 SSE 长时间无数据时，当前包会把 `SSE read timed out` 交给既有会话错误/重试流程，并显式消费底层流取消失败；该超时不得再以未处理 Promise 拒绝结束整个用户 opencode server。若日志出现 `triggerUncaughtException`、`ResponseStreamError: SSE read timed out` 后紧接 `Node.js v22.23.1` 且进程退出，说明仍在运行未包含此兼容修复的旧 worker 镜像；调整 `chunkTimeout` 只能改变触发时长，必须在外网 Mac 重打完整包、导入新 worker 镜像并重启对应用户进程。
+worker 不再从 OpenCode 源码生成 Node bundle，而是下载并校验上游官方 `opencode-linux-x64-baseline.tar.gz`。`/usr/local/lib/opencode/RELEASE` 固定记录 asset、归档 SHA、二进制 SHA 和 release commit；源码快照仅用于审计。Node 22 只承载轻量启动器和自定义 Tool 离线依赖。
 
 这套基线覆盖使用官方 `tool(...)`、schema、SDK 类型和 Effect/Zod 的 Tool。`axios`、数据库驱动或企业私有 SDK 等任意业务依赖不会被猜测加入；新增这类 import 时，必须同步修改 `opencode-node-runtime.package.json` 和 lockfile，在外网 Mac 重新打完整企业包。升级依赖不能只替换 Tool 文件，必须同时解压新 programs、导入新 worker 镜像并重启 worker；标准 `deploy-internal-release.sh` 已按该顺序执行。
 
-Agent 配置热加载不修改 OpenCode 的配置目录解析：公共配置继续由 `OPENCODE_CONFIG_DIR` 提供，应用配置由当前个人 workspace 的 `.opencode` 提供；平台在 Git 发布阶段同步个人 worktree，再调用 OpenCode 原生 `/global/dispose`。`opencode-node-compat.patch` 只保留既有企业离线 Node 依赖兼容内容，不再包含公共个人或应用共享路径映射，也不需要在 `docker.env` 手工拼接个人物理路径。
+Agent 配置热加载不修改 OpenCode 的配置目录解析：公共配置继续由 `OPENCODE_CONFIG_DIR` 提供，应用配置由当前个人 workspace 的 `.opencode` 提供；平台在 Git 发布阶段同步个人 worktree，再调用 OpenCode 原生 `/global/dispose`。官方程序启动器只做离线依赖链接、离线开关、`subagent_depth=2` 和信号转发，不包含公共个人或应用共享路径映射，也不需要在 `docker.env` 手工拼接个人物理路径。
 
 ## 统一上传目录
 

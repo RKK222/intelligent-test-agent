@@ -44,6 +44,7 @@ logs/
 build/
 out/
 dist/
+deploy/internal/dist-*/
 # XXL-JOB 3.4.2 上游模板会直接引用 AdminLTE dist；必须保留原版发布资源。
 !backend/test-agent-xxl-job-admin-upstream/src/main/resources/static/adminlte/dist/
 !backend/test-agent-xxl-job-admin-upstream/src/main/resources/static/adminlte/dist/**

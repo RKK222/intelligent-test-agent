@@ -92,7 +92,9 @@
 | `file.watcher.updated` | 文件 watcher 状态更新。 |
 | `opencode.event.unknown` | 未识别 opencode raw event 的兼容兜底。 |
 
-`permission.asked` 的原生请求标识可能位于顶层 `id`，回复可能使用 `requestID`；平台按顶层 `requestId/requestID/id/permissionId/questionId` 兼容匹配，不能误取嵌套 option 的 `id`。前端 `PermissionRequest` 优先保留 `patterns[]`，回退旧 `pattern`；展示标题默认“需要权限”，已知权限说明与 OpenCode 1.17.8 中文文案一致，未知权限仍只展示通用标题和路径，不暴露内部 permission type 或 request id。路径只出现在已授权用户的交互卡中，不进入铃铛通知文案或日志。
+`permission.asked` 的原生请求标识可能位于顶层 `id`，回复可能使用 `requestID`；平台按顶层 `requestId/requestID/id/permissionId/questionId` 兼容匹配，不能误取嵌套 option 的 `id`。前端 `PermissionRequest` 优先保留 `patterns[]`，回退旧 `pattern`；展示标题默认“需要权限”，已知权限说明与 OpenCode 1.18.4 中文文案一致，未知权限仍只展示通用标题和路径，不暴露内部 permission type 或 request id。路径只出现在已授权用户的交互卡中，不进入铃铛通知文案或日志。
+
+task part 指向新 session 时，`parentSessionId` 必须等于发起该 task 的 session，而不是固定 root。root task 建立 child，child task 建立 grandchild；task part 本身仍归属于发起它的 scope。当前运行基线强制 `subagent_depth=2`，前端按精确 `sessionId` 隔离 root、child 和 grandchild 时间线，SSE 字段结构不变。
 
 ## `run.snapshot.reset`
 

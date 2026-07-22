@@ -14,7 +14,7 @@ and a future `OpencodeClientFacade` wrapper.
 - OpenAPI source: `http://127.0.0.1:4096/doc`
 - Raw snapshot: `pinned-opencode-spec.raw.json`
 - Normalized snapshot: `pinned-opencode-spec.json`
-- Generator version: `7.23.0`
+- Generator version: `7.24.0`
 
 The normalized spec only de-duplicates top-level `tags` by name and injects a
 default `servers[0].url`. It does not modify `paths`, `components`, or

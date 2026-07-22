@@ -3,11 +3,12 @@ set -euo pipefail
 
 OPENCODE_BASE_URL="${OPENCODE_BASE_URL:-http://127.0.0.1:4096}"
 OPENCODE_BASE_URL="${OPENCODE_BASE_URL%/}"
-GENERATOR_VERSION="7.23.0"
+GENERATOR_VERSION="7.24.0"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
 SDK_DIR="${REPO_ROOT}/tools/opencode-sdk-generator"
+BACKEND_SDK_JAVA_DIR="${REPO_ROOT}/backend/test-agent-opencode-sdk-generated/src/main/java"
 RAW_SPEC_FILE="${SDK_DIR}/pinned-opencode-spec.raw.json"
 SPEC_FILE="${SDK_DIR}/pinned-opencode-spec.json"
 CONFIG_FILE="${SDK_DIR}/openapi-generator-config.yaml"
@@ -115,6 +116,8 @@ EOF
 require_command curl
 require_command jq
 require_command openapi-generator-cli
+require_command perl
+require_command rsync
 
 RESOLVED_JAVA_HOME="$(resolve_java_home)"
 JAVA_BINARY="${RESOLVED_JAVA_HOME}/bin/java"
@@ -193,7 +196,15 @@ cp -R "${GENERATED_DIR}/." "${SDK_DIR}/"
 chmod +x "${SDK_DIR}/gradlew"
 write_readme
 
+echo "Normalizing generated source whitespace"
+find "${SDK_DIR}/src" -type f -exec perl -pi -e 's/[ \t]+$//' {} +
+find "${SDK_DIR}/src" -type f -exec perl -0pi -e 's/(?:\r?\n)+\z/\n/' {} +
+
 echo "Building generated SDK"
 "${SDK_DIR}/gradlew" -p "${SDK_DIR}" clean build -x test --no-daemon
+
+echo "Synchronizing generated Java sources to backend module"
+mkdir -p "${BACKEND_SDK_JAVA_DIR}"
+rsync -a --delete "${SDK_DIR}/src/main/java/" "${BACKEND_SDK_JAVA_DIR}/"
 
 echo "opencode Java SDK generation and build completed."

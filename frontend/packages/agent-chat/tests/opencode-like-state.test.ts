@@ -395,6 +395,81 @@ describe("opencode-like conversation state", () => {
     expect(createTimelineRows(childState).map((row) => row.type)).toEqual(["user-message", "assistant-part"]);
   });
 
+  it("keeps root child and grandchild timelines isolated at subagent depth two", () => {
+    const messages: AgentMessage[] = [
+      userMessage("msg_user_root", "分析项目"),
+      assistantMessage("msg_root", [toolPart("prt_task_child", "task", { description: "分析后端" })]),
+      userMessage("msg_user_child", "分析后端"),
+      assistantMessage("msg_child", [toolPart("prt_task_grandchild", "task", { description: "分析路由" })]),
+      userMessage("msg_user_grandchild", "分析路由"),
+      assistantMessage("msg_grandchild", [textPart("prt_grandchild_answer", "路由分析完成。")])
+    ];
+    const messageScopesById = {
+      msg_user_root: { sessionId: "ses_root", rootSessionId: "ses_root", isChildSession: false },
+      msg_root: { sessionId: "ses_root", rootSessionId: "ses_root", isChildSession: false },
+      msg_user_child: {
+        sessionId: "ses_child",
+        rootSessionId: "ses_root",
+        parentSessionId: "ses_root",
+        isChildSession: true,
+        taskPartId: "prt_task_child"
+      },
+      msg_child: {
+        sessionId: "ses_child",
+        rootSessionId: "ses_root",
+        parentSessionId: "ses_root",
+        isChildSession: true,
+        taskPartId: "prt_task_child"
+      },
+      msg_user_grandchild: {
+        sessionId: "ses_grandchild",
+        rootSessionId: "ses_root",
+        parentSessionId: "ses_child",
+        isChildSession: true,
+        taskPartId: "prt_task_grandchild"
+      },
+      msg_grandchild: {
+        sessionId: "ses_grandchild",
+        rootSessionId: "ses_root",
+        parentSessionId: "ses_child",
+        isChildSession: true,
+        taskPartId: "prt_task_grandchild"
+      }
+    };
+    const subagentsBySessionId = {
+      ses_child: {
+        sessionId: "ses_child",
+        parentSessionId: "ses_root",
+        taskMessageId: "msg_root",
+        taskPartId: "prt_task_child",
+        status: "running",
+        updatedAt: "2026-07-22T00:00:00Z"
+      },
+      ses_grandchild: {
+        sessionId: "ses_grandchild",
+        parentSessionId: "ses_child",
+        taskMessageId: "msg_child",
+        taskPartId: "prt_task_grandchild",
+        status: "running",
+        updatedAt: "2026-07-22T00:00:01Z"
+      }
+    };
+    const input = { messages, messageScopesById, subagentsBySessionId } as any;
+
+    const rootState = createOpencodeLikeState(input);
+    const childState = createOpencodeLikeState({ ...input, activeSubagentSessionId: "ses_child" });
+    const grandchildState = createOpencodeLikeState({ ...input, activeSubagentSessionId: "ses_grandchild" });
+
+    expect(rootState.userMessages.map((message) => message.messageId)).toEqual(["msg_user_root"]);
+    expect(rootState.partsByMessageId.msg_root.map((part) => part.partId)).toEqual(["prt_task_child"]);
+    expect(childState.userMessages.map((message) => message.messageId)).toEqual(["msg_user_child"]);
+    expect(childState.partsByMessageId.msg_child.map((part) => part.partId)).toEqual(["prt_task_grandchild"]);
+    expect(grandchildState.userMessages.map((message) => message.messageId)).toEqual(["msg_user_grandchild"]);
+    expect(grandchildState.partsByMessageId.msg_grandchild.map((part) => part.partId)).toEqual([
+      "prt_grandchild_answer"
+    ]);
+  });
+
   it("does not project empty running text placeholders while preserving root and child scoped timelines", () => {
     const rootReadParts = Array.from({ length: 88 }, (_, index) =>
       toolPart(`prt_read_${index}`, "read", { filePath: `src/file-${index}.ts` })

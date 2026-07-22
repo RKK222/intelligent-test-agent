@@ -123,4 +123,4 @@ packages/event-stream-client -> packages/shared-types
 
 ## 参考/实验目录
 
-`frontend/interaction-visual-demo` 和 `opencode-source/opencode-1.17.8/` 仅作为 opencode Web 行为参考或交互资料；顶层 `frontend-opencode` 是独立 Vue/Vite 复刻工程，验收命令在该目录执行，不替代 `frontend/` 主 workspace 的检查；`requirements/` 下的历史文档不作为编码依据。
+`frontend/interaction-visual-demo` 和 `opencode-source/opencode-1.18.4/` 仅作为 opencode Web 行为参考或交互资料；顶层 `frontend-opencode` 是独立 Vue/Vite 复刻工程，验收命令在该目录执行，不替代 `frontend/` 主 workspace 的检查；`requirements/` 下的历史文档不作为编码依据。

@@ -223,18 +223,21 @@ OPENCODE_ALLOWED_CORS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996
 OPENCODE_MANAGER_HEARTBEAT_INTERVAL=5s
 OPENCODE_MANAGER_RECONNECT_INTERVAL=10s
 
-OPENCODE_VERSION=1.17.8
-OPENCODE_SOURCE_COMMIT=11e47f91496005aab4d7c5a2d0a7da5d2651b4ac
-OPENCODE_SOURCE_REPOSITORY=https://github.com/anomalyco/opencode.git
-GO_IMAGE=golang@sha256:167053a2bb901972bf2c1611f8f52c44d5fe7e762e5cab213708d82c421614db
-BUN_IMAGE=oven/bun@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f
-NODE_IMAGE=node@sha256:e24976116684e0fd211cbdb3c40fc9cb997565d063fb7fe656d2e2b603c5bb0a
+OPENCODE_VERSION=1.18.4
+OPENCODE_RELEASE_COMMIT=49c69c5ed3ccf706b61b3febb43c8aaff7f8325e
+OPENCODE_ASSET_NAME=opencode-linux-x64-baseline.tar.gz
+OPENCODE_ASSET_SIZE=59265643
+OPENCODE_ASSET_SHA256=4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc
+OPENCODE_BINARY_SHA256=6ce6570e7db9a40e7bd3304ebdfff607920bde8cafd2eb5587bd7a26f89ba0b5
+OPENCODE_RELEASE_BASE_URL=https://github.com/anomalyco/opencode/releases/download
+GO_IMAGE=golang@sha256:e87b2a5f6df2dff71ea330d55d54f4979eb380ae58a7e3aabc9d53121243e689
+NODE_IMAGE=node@sha256:b042c6d46a90773b82ea3f95b05457ea93ee127a73b1b47ad5ebbb1a08ec3df8
 
 NPM_REGISTRY=https://registry.npmmirror.com
 COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
 GOPROXY=https://goproxy.cn,direct
-DEBIAN_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian
-DEBIAN_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
+DEBIAN_MIRROR=https://mirrors.ustc.edu.cn/debian
+DEBIAN_SECURITY_MIRROR=https://mirrors.ustc.edu.cn/debian-security
 
 TEST_AGENT_IMAGE_OUTPUT_DIR=/data/testagent/dist
 ```
