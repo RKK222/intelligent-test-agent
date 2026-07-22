@@ -5,6 +5,25 @@
 
 ## Entries
 
+### 2026-07-22 - 修复主子智能体切换滚动位置
+
+- Why:
+  - 主、子 Agent 共用 `.figma-chat-scroll`；切换到较短的子时间线时浏览器会压缩共享 `scrollTop`，返回主 Agent 后因此落到首条消息。
+- What:
+  - `FigmaChatPanel` 按 `root` / `subagent:<sessionId>` 保存组件内存快照，分别记录滚动位置、离开时是否在底部、固定大小的可见正文摘要和新内容提示状态；首次进入或离开时在底部均跟随最新底部，上滑视图恢复原位置。
+  - 正文摘要只聚合 `opencodeTimelineState` 当前 scope 可见的消息身份、正文/text part 和流式可见长度，并缓存未变消息摘要；反馈、工具状态和其它子 Agent 输出不会推动当前视口。
+  - 延迟滚动增加 scope、代次、viewport 归属和 pending restore 防护；wheel、touch、pointer 用户意图可接管恢复，布局 clamp、快速往返、根终态/history watcher 和跨 scope 残留意图不会覆盖目标快照。
+  - 同步 `frontend/README.md`、`frontend/apps/agent-web/README.md`、`frontend/apps/agent-web/src/PACKAGE.md`，并新增独立滚动回归文件，避免混入同一工作树中并行的 permission/attention 测试改动。
+- How:
+  - TDD 覆盖主/子位置独立恢复、首次滚底、inactive scope 新正文、其它子 Agent 隔离、快速切换、真实会话重置、草稿首次取得 ID、浏览器 clamp、root/child pending restore、用户主动接管和跨 scope 用户意图清理，共 20 项；多轮只读任务审查最终无 Critical/Important finding。
+  - `corepack pnpm test --run apps/agent-web/tests/FigmaChatPanel.test.ts` 为 134 passed / 1 skipped；滚动专项为 20 passed；`corepack pnpm lint`、`corepack pnpm typecheck`、agent-web 生产 build 和 `git diff --check` 通过。
+- Result:
+  - 主、子 Agent 在当前页面生命周期内各自保留阅读位置，后台并行输出和过期延迟回调不再改变当前视图；快照不持久化。
+  - 前端全量 Vitest 为 1527 passed / 1 skipped / 1 failed；唯一失败是任务外既有 `DirectoryRows.test.ts` 将 role=`radio` 的“上传”按 role=`button` 查询，单独复跑稳定失败，相关文件本次无改动且近期 session log 已有记录。
+  - 未修改公共组件接口、CSS、HTTP API、RunEvent、数据库、后端、安全、环境配置或 generated SDK；无新增依赖。
+- Next:
+  - 单独修复 `DirectoryRows.test.ts` 的可访问角色断言后恢复前端全量绿灯；本滚动功能无未完成实现项。
+
 ### 2026-07-21 - 引用配置自动写入外部目录权限
 
 - Why:
