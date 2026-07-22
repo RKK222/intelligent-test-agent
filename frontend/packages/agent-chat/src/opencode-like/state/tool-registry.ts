@@ -5,7 +5,7 @@ export type ToolInfo = {
   title: string;
   subtitle?: string;
   fullSubtitle?: string;
-  family: "context" | "shell" | "file" | "diff" | "web" | "task" | "question" | "skill" | "generic";
+  family: "context" | "shell" | "file" | "diff" | "web" | "task" | "question" | "skill" | "tool" | "generic";
 };
 
 const CONTEXT_TOOLS = new Set(["read", "list", "glob", "grep"]);
@@ -65,6 +65,10 @@ export function getToolInfo(part: Extract<MessagePart, { type: "tool" }>): ToolI
   }
   if (tool === "question") {
     return { title: "提问", subtitle: text(part.input?.question), family: "question" };
+  }
+  if (tool === "tools/opencode" || tool === "opencode_tool" || tool === "opencode-tool") {
+    const url = text(part.input?.url) ?? text(part.input?.endpoint);
+    return { title: "REST 工具", subtitle: url ?? displayPath, fullSubtitle: url ?? path, family: "tool" };
   }
   if (tool === "lsp") {
     return { title: "LSP", subtitle: displayPath, fullSubtitle: path, family: "generic" };
