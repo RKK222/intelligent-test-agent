@@ -128,13 +128,15 @@ property_value() {
 
 redact_stream() {
   sed -E \
-    -e 's/Authorization[[:space:]]*:[[:space:]]*Bearer[[:space:]]+[^,;[:space:]"}]+/Authorization=[REDACTED]/Ig' \
+    -e "s/Authorization[[:space:]]*:[[:space:]]*Bearer[[:space:]]+(\"[^\"]*\"|'[^']*'|[^,;[:space:]\"}]+)/Authorization=[REDACTED]/Ig" \
     -e 's@(https?://[^[:space:]?"#]+|/[^[:space:]?"#]+)\?[^[:space:]"]*@\1?[REDACTED_QUERY]@g' \
     -e 's@(https?://[^[:space:]?"#]+|/[^[:space:]?"#]+)#[^[:space:]"]*@\1#[REDACTED_FRAGMENT]@g' \
     -e 's@(((jdbc:)?[[:alpha:]][[:alnum:]+.-]*://)[^?[:space:]]+)\?[^[:space:]]+@\1?[REDACTED_QUERY]@g' \
     -e 's|((jdbc:)?[[:alpha:]][[:alnum:]+.-]*://)[^/@[:space:]]+@|\1[REDACTED_USERINFO]@|g' \
-    -e 's/((ticket|cookie|token|password|secret|authorization|digest|api[_-]?key)[[:space:]]*[=:][[:space:]]*)[^,;[:space:]"}]+/\1[REDACTED]/Ig' \
-    -e 's/("(ticket|cookie|token|password|secret|authorization|digest|api[_-]?key)"[[:space:]]*:[[:space:]]*")[^"]*/\1[REDACTED]/Ig'
+    -e 's/((ticket|cookie|access[_-]?token|api[_-]?token|api[_-]?key|platform[_-]?session[_-]?digest|token|password|secret|authorization|digest)[[:space:]]*[=:][[:space:]]*")[^"]*"/\1[REDACTED]"/Ig' \
+    -e "s/((ticket|cookie|access[_-]?token|api[_-]?token|api[_-]?key|platform[_-]?session[_-]?digest|token|password|secret|authorization|digest)[[:space:]]*[=:][[:space:]]*')[^']*'/\1[REDACTED]'/Ig" \
+    -e "s/((ticket|cookie|access[_-]?token|api[_-]?token|api[_-]?key|platform[_-]?session[_-]?digest|token|password|secret|authorization|digest)[[:space:]]*[=:][[:space:]]*)[^,;[:space:]\"'}]+/\1[REDACTED]/Ig" \
+    -e 's/("(ticket|cookie|access[_-]?token|api[_-]?token|api[_-]?key|platform[_-]?session[_-]?digest|token|password|secret|authorization|digest)"[[:space:]]*:[[:space:]]*")[^"]*"/\1[REDACTED]"/Ig'
 }
 
 http_get() {
@@ -318,26 +320,27 @@ if [[ "${LOAD_STATE}" == 'loaded' && "${ACTIVE_STATE}" == 'active' && "${SUB_STA
 else
   fail 'systemd test-agent-backend 未处于 loaded/active/running 或 MainPID 无效'
 fi
-if [[ "${EXEC_START}" == *'/data/testagent/dist/backend/test-agent-app.jar'* ]]; then
+BACKEND_JAR_TOKEN_REGEX='(^|[[:space:]=;])/data/testagent/dist/backend/test-agent-app\.jar([[:space:];}]|$)'
+BACKEND_ENV_TOKEN_REGEX='(^|[[:space:]=;])/data/testagent/config/backend\.env([[:space:];}(]|$)'
+if [[ "${EXEC_START}" =~ ${BACKEND_JAR_TOKEN_REGEX} ]]; then
   pass 'systemd ExecStart 指向固定后台 JAR'
 else
   fail 'systemd ExecStart 未指向 /data/testagent/dist/backend/test-agent-app.jar'
 fi
-if [[ "${ENVIRONMENT_FILES}" == *'/data/testagent/config/backend.env'* ]]; then
+if [[ "${ENVIRONMENT_FILES}" =~ ${BACKEND_ENV_TOKEN_REGEX} ]]; then
   pass 'systemd EnvironmentFiles 包含固定 backend.env'
 else
   fail 'systemd EnvironmentFiles 未包含 /data/testagent/config/backend.env'
 fi
 
 if ! PS_OUTPUT="$("${PS_BIN}" -eo pid=,args= 2>&1)"; then
-  fail 'ps 无法读取 Java 进程状态'
-  PS_OUTPUT=''
+  critical 'ps 不可用，无法读取 Java 进程状态'
 fi
 JAVA_PROCESS_COUNT="$(awk '$2 ~ /(^|\/)java$/ { count++ } END { print count + 0 }' <<<"${PS_OUTPUT}")"
 APP_PROCESS_COUNT="$(awk -v jar='/data/testagent/dist/backend/test-agent-app.jar' \
-  '$2 ~ /(^|\/)java$/ && index($0, jar) > 0 { count++ } END { print count + 0 }' <<<"${PS_OUTPUT}")"
+  '$2 ~ /(^|\/)java$/ { for (i = 3; i <= NF; i++) if ($i == jar) { count++; break } } END { print count + 0 }' <<<"${PS_OUTPUT}")"
 APP_PROCESS_PID="$(awk -v jar='/data/testagent/dist/backend/test-agent-app.jar' \
-  '$2 ~ /(^|\/)java$/ && index($0, jar) > 0 { print $1; exit }' <<<"${PS_OUTPUT}")"
+  '$2 ~ /(^|\/)java$/ { for (i = 3; i <= NF; i++) if ($i == jar) { print $1; exit } }' <<<"${PS_OUTPUT}")"
 if [[ "${JAVA_PROCESS_COUNT}" == '1' && "${APP_PROCESS_COUNT}" == '1' && "${APP_PROCESS_PID}" == "${MAIN_PID}" ]]; then
   pass "专用 Linux 仅有一个后台 Java，PID 与 MainPID=${MAIN_PID} 一致"
 else

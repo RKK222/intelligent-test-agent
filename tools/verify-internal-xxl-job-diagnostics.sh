@@ -40,8 +40,12 @@ exec_start='/usr/bin/java -jar /data/testagent/dist/backend/test-agent-app.jar'
 environment_files='/data/testagent/config/backend.env (ignore_errors=no)'
 if [[ "${XXL_DIAG_FIXTURE_MODE:-healthy}" == 'backend-wrong-execstart' ]]; then
   exec_start='/usr/bin/java -jar /data/testagent/dist/backend/wrong-app.jar'
+elif [[ "${XXL_DIAG_FIXTURE_MODE:-healthy}" == 'backend-execstart-jar-backup' ]]; then
+  exec_start='/usr/bin/java -jar /data/testagent/dist/backend/test-agent-app.jar.bak'
 elif [[ "${XXL_DIAG_FIXTURE_MODE:-healthy}" == 'backend-wrong-environment-files' ]]; then
   environment_files='/data/testagent/config/wrong-backend.env (ignore_errors=no)'
+elif [[ "${XXL_DIAG_FIXTURE_MODE:-healthy}" == 'backend-environment-files-old' ]]; then
+  environment_files='/data/testagent/config/backend.env.old (ignore_errors=no)'
 fi
 cat <<'OUTPUT'
 LoadState=loaded
@@ -75,6 +79,13 @@ cat >"${FAKE_BIN}/ps" <<'EOF'
 #!/usr/bin/env bash
 test "$1" = '-eo'
 test "$2" = 'pid=,args='
+if [[ "${XXL_DIAG_FIXTURE_MODE:-healthy}" == 'backend-ps-error' ]]; then
+  exit 42
+fi
+if [[ "${XXL_DIAG_FIXTURE_MODE:-healthy}" == 'backend-ps-jar-backup' ]]; then
+  printf ' 4242 /usr/bin/java -jar /data/testagent/dist/backend/test-agent-app.jar.bak\n'
+  exit 0
+fi
 printf ' 4242 /usr/bin/java -jar /data/testagent/dist/backend/test-agent-app.jar\n'
 if [[ "${XXL_DIAG_FIXTURE_MODE:-healthy}" == 'backend-extra-java' ]]; then
   printf ' 5252 /usr/bin/java -jar /data/testagent/dist/backend/another-java-app.jar\n'
@@ -82,6 +93,10 @@ fi
 EOF
 cat >"${FAKE_BIN}/journalctl" <<'EOF'
 #!/usr/bin/env bash
+if [[ "${XXL_DIAG_FIXTURE_MODE:-healthy}" == 'backend-log-no-match' ]]; then
+  printf '%s\n' '2026-07-22T21:00:00+0800 backend ordinary lifecycle line'
+  exit 0
+fi
 printf '%s\n' \
   '2026-07-22T21:00:00+0800 backend XxlJob ExecutorRegistryThread started token=raw-log-token-value digest=raw-log-digest-value' \
   '2026-07-22T21:00:01+0800 backend Hikari MySQL jdbc:mysql://raw-jdbc-user:raw-jdbc-password@122.233.30.148:3306/xxl_job?password=raw-jdbc-query-value' \
@@ -90,7 +105,11 @@ printf '%s\n' \
   '2026-07-22T21:00:03+0800 backend XxlJob GET /xxl-job-admin/?opaque=raw-relative-query-value' \
   '2026-07-22T21:00:04+0800 backend XxlJob GET /xxl-job-admin/#raw-relative-fragment-value' \
   '2026-07-22T21:00:05+0800 backend XxlJob Authorization: Bearer raw-bearer-token-value' \
+  '2026-07-22T21:00:05+0800 backend XxlJob Authorization: Bearer "raw-sensitive-bearer-double"' \
+  "2026-07-22T21:00:05+0800 backend XxlJob Authorization: Bearer 'raw-sensitive-bearer-single'" \
   '2026-07-22T21:00:06+0800 backend XxlJob payload={"token":"raw-quoted-token-value"}' \
+  "2026-07-22T21:00:07+0800 backend XxlJob ticket=raw-sensitive-ticket-bare cookie='raw-sensitive-cookie-single' token=\"raw-sensitive-token-double\" password=raw-sensitive-password-bare secret='raw-sensitive-secret-single' authorization=\"raw-sensitive-authorization-double\" digest='raw-sensitive-digest-single'" \
+  "2026-07-22T21:00:08+0800 backend XxlJob accessToken=raw-sensitive-access-camel access_token='raw-sensitive-access-snake' apiToken=\"raw-sensitive-api-token-camel\" api_token=raw-sensitive-api-token-snake apiKey='raw-sensitive-api-key-camel' api_key=\"raw-sensitive-api-key-snake\" platform_session_digest='raw-sensitive-platform-session-digest'" \
   '2026-07-22T21:00:02+0800 backend unrelated raw-unrelated-value'
 EOF
 chmod +x "${FAKE_BIN}/getent" "${FAKE_BIN}/curl" "${FAKE_BIN}/ip" \
@@ -304,7 +323,22 @@ grep -Fq 'https://diag.example/xxl-job-admin/?[REDACTED_QUERY]' "${TMP_ROOT}/bac
 grep -Fq '/xxl-job-admin/?[REDACTED_QUERY]' "${TMP_ROOT}/backend-ok.log"
 grep -Fq '/xxl-job-admin/#[REDACTED_FRAGMENT]' "${TMP_ROOT}/backend-ok.log"
 grep -Fq 'Authorization=[REDACTED]' "${TMP_ROOT}/backend-ok.log"
+test "$(grep -Fc 'Authorization=[REDACTED]' "${TMP_ROOT}/backend-ok.log")" -eq 3
 grep -Fq 'payload={"token":"[REDACTED]"}' "${TMP_ROOT}/backend-ok.log"
+grep -Fq 'ticket=[REDACTED]' "${TMP_ROOT}/backend-ok.log"
+grep -Fq "cookie='[REDACTED]'" "${TMP_ROOT}/backend-ok.log"
+grep -Fq 'token="[REDACTED]"' "${TMP_ROOT}/backend-ok.log"
+grep -Fq 'password=[REDACTED]' "${TMP_ROOT}/backend-ok.log"
+grep -Fq "secret='[REDACTED]'" "${TMP_ROOT}/backend-ok.log"
+grep -Fq 'authorization="[REDACTED]"' "${TMP_ROOT}/backend-ok.log"
+grep -Fq "digest='[REDACTED]'" "${TMP_ROOT}/backend-ok.log"
+grep -Fq 'accessToken=[REDACTED]' "${TMP_ROOT}/backend-ok.log"
+grep -Fq "access_token='[REDACTED]'" "${TMP_ROOT}/backend-ok.log"
+grep -Fq 'apiToken="[REDACTED]"' "${TMP_ROOT}/backend-ok.log"
+grep -Fq 'api_token=[REDACTED]' "${TMP_ROOT}/backend-ok.log"
+grep -Fq "apiKey='[REDACTED]'" "${TMP_ROOT}/backend-ok.log"
+grep -Fq 'api_key="[REDACTED]"' "${TMP_ROOT}/backend-ok.log"
+grep -Fq "platform_session_digest='[REDACTED]'" "${TMP_ROOT}/backend-ok.log"
 grep -Fq '[PASS] systemd ExecStart 指向固定后台 JAR' "${TMP_ROOT}/backend-ok.log"
 grep -Fq '[PASS] systemd EnvironmentFiles 包含固定 backend.env' "${TMP_ROOT}/backend-ok.log"
 grep -Fq '[PASS] 专用 Linux 仅有一个后台 Java，PID 与 MainPID=4242 一致' "${TMP_ROOT}/backend-ok.log"
@@ -314,7 +348,7 @@ if grep -Fq 'sed:' "${TMP_ROOT}/backend-ok.log"; then
   exit 1
 fi
 test ! -e "${MALICIOUS_MARKER}"
-if grep -Eq 'raw-(db|redis|xxl|manager|proxy|api|log|jdbc|mysql|unrelated|absolute|relative|bearer|quoted)' "${TMP_ROOT}/backend-ok.log"; then
+if grep -Eq 'raw-(db|redis|xxl|manager|proxy|api|log|jdbc|mysql|unrelated|absolute|relative|bearer|quoted|sensitive)' "${TMP_ROOT}/backend-ok.log"; then
   printf 'backend diagnostics leaked sensitive fixture values\n' >&2
   exit 1
 fi
@@ -343,7 +377,7 @@ for topology_case in wrong-redis-host wrong-redis-port wrong-mysql-host wrong-my
   grep -Fq '[FAIL] 固定共享拓扑不一致' "${TMP_ROOT}/backend-${topology_case}.log"
 done
 
-for systemd_case in backend-extra-java backend-wrong-execstart backend-wrong-environment-files; do
+for systemd_case in backend-extra-java backend-wrong-execstart backend-execstart-jar-backup backend-wrong-environment-files backend-environment-files-old backend-ps-jar-backup; do
   set +e
   XXL_DIAG_FIXTURE_MODE="${systemd_case}" backend_run --expected-host 122.233.30.4 >"${TMP_ROOT}/${systemd_case}.log" 2>&1
   status=$?
@@ -352,9 +386,22 @@ for systemd_case in backend-extra-java backend-wrong-execstart backend-wrong-env
   case "${systemd_case}" in
     backend-extra-java) grep -Fq '[FAIL] 专用 Linux 上的 Java 进程数量不是 1' "${TMP_ROOT}/${systemd_case}.log" ;;
     backend-wrong-execstart) grep -Fq '[FAIL] systemd ExecStart 未指向 /data/testagent/dist/backend/test-agent-app.jar' "${TMP_ROOT}/${systemd_case}.log" ;;
+    backend-execstart-jar-backup) grep -Fq '[FAIL] systemd ExecStart 未指向 /data/testagent/dist/backend/test-agent-app.jar' "${TMP_ROOT}/${systemd_case}.log" ;;
     backend-wrong-environment-files) grep -Fq '[FAIL] systemd EnvironmentFiles 未包含 /data/testagent/config/backend.env' "${TMP_ROOT}/${systemd_case}.log" ;;
+    backend-environment-files-old) grep -Fq '[FAIL] systemd EnvironmentFiles 未包含 /data/testagent/config/backend.env' "${TMP_ROOT}/${systemd_case}.log" ;;
+    backend-ps-jar-backup) grep -Fq '[FAIL] 专用 Linux 上的 Java 进程数量不是 1' "${TMP_ROOT}/${systemd_case}.log" ;;
   esac
 done
+
+set +e
+XXL_DIAG_FIXTURE_MODE=backend-ps-error backend_run --expected-host 122.233.30.4 >"${TMP_ROOT}/backend-ps-error.log" 2>&1
+status=$?
+set -e
+test "${status}" -eq 2
+grep -Fq '[FAIL] ps 不可用，无法读取 Java 进程状态' "${TMP_ROOT}/backend-ps-error.log"
+
+XXL_DIAG_FIXTURE_MODE=backend-log-no-match backend_run --expected-host 122.233.30.4 >"${TMP_ROOT}/backend-log-no-match.log" 2>&1
+grep -Fq '[INFO] 最近日志中没有命中诊断关键词' "${TMP_ROOT}/backend-log-no-match.log"
 
 set +e
 TEST_AGENT_DIAG_EXTRA_PATH="${BROKEN_SHA_BIN}:" backend_run --expected-host 122.233.30.4 >"${TMP_ROOT}/backend-missing-sha.log" 2>&1
