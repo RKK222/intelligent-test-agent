@@ -73,12 +73,73 @@ validate_strict_manual_contract() {
   task_section="$(awk '/^## 11\./ { active=1 } /^## 12\./ { active=0 } active' "${manual_file}")"
   evidence_section="$(awk '/^## 14\./ { active=1 } /^## 15\./ { active=0 } active' "${manual_file}")"
   executable_fences="$(awk '
-    function flush_command() {
-      if (command_buffer != "") {
-        gsub(/[[:space:]]*(&&|\|\||[;|])[[:space:]]*/, "\n", command_buffer)
-        print command_buffer
-        command_buffer=""
+    function flush_command(   command) {
+      command=command_buffer
+      sub(/^[[:space:]]+/, "", command)
+      sub(/[[:space:]]+$/, "", command)
+      if (command != "") print command
+      command_buffer=""
+    }
+    # 只在 shell 引号与转义之外切分命令边界，不执行手册中的任何文本。
+    function process_shell_line(line,   i, char, next_char, line_continued) {
+      line_continued=0
+      for (i=1; i<=length(line); i++) {
+        char=substr(line, i, 1)
+        next_char=(i<length(line) ? substr(line, i+1, 1) : "")
+
+        if (single_quoted) {
+          command_buffer=command_buffer char
+          if (char == "\047") single_quoted=0
+          continue
+        }
+        if (double_quoted) {
+          if (escaped) {
+            command_buffer=command_buffer char
+            escaped=0
+          } else if (char == "\\") {
+            if (i == length(line)) line_continued=1
+            else {
+              command_buffer=command_buffer char
+              escaped=1
+            }
+          } else {
+            command_buffer=command_buffer char
+            if (char == "\"") double_quoted=0
+          }
+          continue
+        }
+        if (escaped) {
+          command_buffer=command_buffer char
+          escaped=0
+        } else if (char == "\\") {
+          if (i == length(line)) line_continued=1
+          else {
+            command_buffer=command_buffer char
+            escaped=1
+          }
+        } else if (char == "\047") {
+          single_quoted=1
+          command_buffer=command_buffer char
+        } else if (char == "\"") {
+          double_quoted=1
+          command_buffer=command_buffer char
+        } else if (char == ";") {
+          flush_command()
+        } else if (char == "&" && next_char == "&") {
+          flush_command()
+          i++
+        } else if (char == "|") {
+          flush_command()
+          if (next_char == "|") i++
+        } else {
+          command_buffer=command_buffer char
+        }
       }
+
+      if (line_continued) command_buffer=command_buffer " "
+      else if (single_quoted || double_quoted) command_buffer=command_buffer " "
+      else flush_command()
+      escaped=0
     }
     {
       marker=tolower($0)
@@ -89,38 +150,181 @@ validate_strict_manual_contract() {
       if (marker ~ /^[[:space:]]*```[[:space:]]*$/) {
         flush_command()
         executable=0
+        single_quoted=0
+        double_quoted=0
+        escaped=0
         next
       }
-      if (executable) {
-        command_line=$0
-        continued=(command_line ~ /\\[[:space:]]*$/)
-        sub(/\\[[:space:]]*$/, "", command_line)
-        if (command_buffer == "") command_buffer=command_line
-        else command_buffer=command_buffer " " command_line
-        if (!continued) flush_command()
-      }
+      if (executable) process_shell_line($0)
     }
     END { flush_command() }
   ' "${manual_file}")"
   normalized_commands="$(awk '
-    {
-      command=$0
-      sub(/^[[:space:]]+/, "", command)
-      previous=""
-      while (command != previous) {
-        previous=command
-        sub(/^sudo[[:space:]]+/, "", command)
-        if (command ~ /^env([[:space:]]|$)/) {
-          sub(/^env[[:space:]]*/, "", command)
-          while (sub(/^[[:alpha:]_][[:alnum:]_]*=[^[:space:]]+[[:space:]]+/, "", command)) {
-            # 去除 env 后连续的 KEY=value，再检查真正命令。
+    # 将单个命令片段分词，保留引号内空格并移除 shell 引号/转义符。
+    function reset_tokens(   key) {
+      for (key in token) delete token[key]
+      token_count=0
+    }
+    function finish_token() {
+      if (token_started) {
+        token[++token_count]=token_buffer
+        token_buffer=""
+        token_started=0
+      }
+    }
+    function tokenize(line,   i, char) {
+      reset_tokens()
+      single_quoted=0
+      double_quoted=0
+      escaped=0
+      for (i=1; i<=length(line); i++) {
+        char=substr(line, i, 1)
+        if (single_quoted) {
+          if (char == "\047") single_quoted=0
+          else token_buffer=token_buffer char
+          token_started=1
+        } else if (double_quoted) {
+          if (escaped) {
+            token_buffer=token_buffer char
+            token_started=1
+            escaped=0
+          } else if (char == "\\") escaped=1
+          else if (char == "\"") double_quoted=0
+          else {
+            token_buffer=token_buffer char
+            token_started=1
           }
-        }
-        while (sub(/^[[:alpha:]_][[:alnum:]_]*=[^[:space:]]+[[:space:]]+/, "", command)) {
-          # 同时覆盖无显式 env 的 shell 临时环境变量前缀。
+        } else if (escaped) {
+          token_buffer=token_buffer char
+          token_started=1
+          escaped=0
+        } else if (char == "\\") escaped=1
+        else if (char == "\047") {
+          single_quoted=1
+          token_started=1
+        } else if (char == "\"") {
+          double_quoted=1
+          token_started=1
+        } else if (char ~ /[[:space:]]/) finish_token()
+        else {
+          token_buffer=token_buffer char
+          token_started=1
         }
       }
-      if (command != "") print command
+      finish_token()
+    }
+    function is_assignment(value) {
+      return value ~ /^[[:alpha:]_][[:alnum:]_]*=/
+    }
+    function sudo_option_needs_value(option) {
+      return option == "-u" || option == "--user" || option == "-g" || option == "--group" ||
+             option == "-h" || option == "--host" || option == "-p" || option == "--prompt" ||
+             option == "-C" || option == "--close-from" || option == "-T" || option == "--command-timeout" ||
+             option == "-r" || option == "--role" || option == "-t" || option == "--type" ||
+             option == "-D" || option == "--chdir" || option == "-R" || option == "--chroot" ||
+             option == "-U" || option == "--other-user"
+    }
+    function env_option_needs_value(option) {
+      return option == "-u" || option == "--unset" || option == "-C" || option == "--chdir" ||
+             option == "-S" || option == "--split-string" || option == "--argv0"
+    }
+    # 循环解包环境赋值、sudo 与 env，以最终可执行命令作为安全检查起点。
+    function strip_wrappers(position,   changed, option) {
+      do {
+        changed=0
+        while (position <= token_count && is_assignment(token[position])) {
+          position++
+          changed=1
+        }
+        if (tolower(token[position]) == "sudo") {
+          position++
+          while (position <= token_count && token[position] ~ /^-/) {
+            option=token[position++]
+            if (option == "--") break
+            if (option !~ /=/ && sudo_option_needs_value(option) && position <= token_count) position++
+          }
+          changed=1
+        } else if (tolower(token[position]) == "env") {
+          position++
+          while (position <= token_count && token[position] ~ /^-/) {
+            option=token[position++]
+            if (option == "--") break
+            # env split-string 会把参数重新解析成命令，本校验不执行也不模拟它，直接 fail closed。
+            if (option == "-S" || option ~ /^-S./ || option == "--split-string" || option ~ /^--split-string=/) {
+              unsafe_wrapper=1
+              if (option !~ /=/ && option !~ /^-S./ && position <= token_count) position++
+              continue
+            }
+            if (option !~ /=/ && env_option_needs_value(option) && position <= token_count) position++
+          }
+          while (position <= token_count && is_assignment(token[position])) position++
+          changed=1
+        }
+      } while (changed && position <= token_count)
+      return position
+    }
+    function docker_option_needs_value(option) {
+      return option == "--context" || option == "-c" || option == "--config" ||
+             option == "-H" || option == "--host" || option == "-l" || option == "--log-level"
+    }
+    function compose_option_needs_value(option) {
+      return option == "-f" || option == "--file" || option == "-p" || option == "--project-name" ||
+             option == "--profile" || option == "--env-file" || option == "--project-directory" ||
+             option == "--parallel" || option == "--ansi" || option == "--progress"
+    }
+    function podman_option_needs_value(option) {
+      return option == "-c" || option == "--connection" || option == "--url" ||
+             option == "--identity" || option == "--log-level"
+    }
+    function skip_options(position, option_kind,   option) {
+      while (position <= token_count && token[position] ~ /^-/) {
+        option=token[position++]
+        if (option == "--") break
+        if (option ~ /=/) continue
+        if (option_kind == "docker" && docker_option_needs_value(option) && position <= token_count) position++
+        else if (option_kind == "compose" && compose_option_needs_value(option) && position <= token_count) position++
+        else if (option_kind == "podman" && podman_option_needs_value(option) && position <= token_count) position++
+      }
+      return position
+    }
+    function print_tokens(position, prefix,   output, i) {
+      output=prefix
+      for (i=position; i<=token_count; i++) output=output (output == "" ? "" : " ") token[i]
+      if (output != "") print output
+    }
+    # 容器 CLI 先跳过全局/组合选项，再输出统一的实际 action 供负向规则匹配。
+    function print_effective_command(position,   executable, cursor, prefix) {
+      executable=tolower(token[position])
+      if (executable == "docker") {
+        cursor=skip_options(position + 1, "docker")
+        prefix="docker"
+        if (tolower(token[cursor]) == "compose") {
+          cursor=skip_options(cursor + 1, "compose")
+          prefix="docker compose"
+        } else if (tolower(token[cursor]) == "container") {
+          cursor++
+          prefix="docker container"
+        }
+        print_tokens(cursor, prefix)
+      } else if (executable == "docker-compose") {
+        cursor=skip_options(position + 1, "compose")
+        print_tokens(cursor, "docker-compose")
+      } else if (executable == "podman") {
+        cursor=skip_options(position + 1, "podman")
+        prefix="podman"
+        if (tolower(token[cursor]) == "container") {
+          cursor++
+          prefix="podman container"
+        }
+        print_tokens(cursor, prefix)
+      } else print_tokens(position, "")
+    }
+    {
+      unsafe_wrapper=0
+      tokenize($0)
+      effective_index=strip_wrappers(1)
+      if (unsafe_wrapper) print "__UNSAFE_ENV_SPLIT_STRING__"
+      else if (effective_index <= token_count) print_effective_command(effective_index)
     }
   ' <<<"${executable_fences}")"
 
@@ -257,7 +461,10 @@ validate_strict_manual_contract() {
   if grep -Eqi '^[[:space:]]*(redis-cli|valkey-cli)[[:space:]].*(GET|GETDEL|MGET|HGET|SCAN|KEYS).*(ticket|session)' <<<"${normalized_commands}"; then
     return 1
   fi
-  if grep -Eqi '^[[:space:]]*mysql[[:space:]].*((--execute(=|[[:space:]])|-e([^[:alnum:]_]|$)).*(INSERT|UPDATE|DELETE|REPLACE|MERGE|TRUNCATE|ALTER|CREATE|DROP|CALL|GRANT|REVOKE))' <<<"${normalized_commands}"; then
+  if grep -Fq '__UNSAFE_ENV_SPLIT_STRING__' <<<"${normalized_commands}"; then
+    return 1
+  fi
+  if grep -Eqi '^[[:space:]]*mysql[[:space:]].*((--execute(=|[[:space:]])|-e[^[:space:]]*).*(INSERT|UPDATE|DELETE|REPLACE|MERGE|TRUNCATE|ALTER|CREATE|DROP|CALL|GRANT|REVOKE))' <<<"${normalized_commands}"; then
     return 1
   fi
   if grep -Eqi '^[[:space:]]*(systemctl[[:space:]]+(start|stop|restart|reload)|service[[:space:]]+[^[:space:]]+[[:space:]]+(start|stop|restart|reload)|(kill|pkill|killall)[[:space:]].*(-HUP|-1|SIGHUP|-s[[:space:]]+HUP))' <<<"${normalized_commands}"; then
@@ -364,9 +571,23 @@ UNSAFE_GLOBAL_DOCKER_COMPOSE_START_MANUAL="${TMP_ROOT}/unsafe-global-docker-comp
 UNSAFE_GLOBAL_DOCKER_COMPOSE_STOP_MANUAL="${TMP_ROOT}/unsafe-global-docker-compose-stop-manual.md"
 UNSAFE_GLOBAL_PODMAN_RM_MANUAL="${TMP_ROOT}/unsafe-global-podman-rm-manual.md"
 UNSAFE_GLOBAL_PODMAN_KILL_MANUAL="${TMP_ROOT}/unsafe-global-podman-kill-manual.md"
+UNSAFE_GLOBAL_SUDO_USER_REDIS_MANUAL="${TMP_ROOT}/unsafe-global-sudo-user-redis-manual.md"
+UNSAFE_GLOBAL_SUDO_LONG_USER_REDIS_MANUAL="${TMP_ROOT}/unsafe-global-sudo-long-user-redis-manual.md"
+UNSAFE_GLOBAL_EMPTY_ASSIGNMENT_REDIS_MANUAL="${TMP_ROOT}/unsafe-global-empty-assignment-redis-manual.md"
+UNSAFE_GLOBAL_ENV_IGNORE_REDIS_MANUAL="${TMP_ROOT}/unsafe-global-env-ignore-redis-manual.md"
+UNSAFE_GLOBAL_ENV_QUOTED_MYSQL_MANUAL="${TMP_ROOT}/unsafe-global-env-quoted-mysql-manual.md"
+UNSAFE_GLOBAL_DOCKER_COMPOSE_FILE_STOP_MANUAL="${TMP_ROOT}/unsafe-global-docker-compose-file-stop-manual.md"
+UNSAFE_GLOBAL_DOCKER_COMPOSE_FILE_RESTART_MANUAL="${TMP_ROOT}/unsafe-global-docker-compose-file-restart-manual.md"
+UNSAFE_GLOBAL_DOCKER_CONTEXT_RESTART_MANUAL="${TMP_ROOT}/unsafe-global-docker-context-restart-manual.md"
+UNSAFE_GLOBAL_PODMAN_REMOTE_KILL_MANUAL="${TMP_ROOT}/unsafe-global-podman-remote-kill-manual.md"
+UNSAFE_GLOBAL_ENV_SPLIT_REDIS_MANUAL="${TMP_ROOT}/unsafe-global-env-split-redis-manual.md"
+UNSAFE_GLOBAL_ENV_LONG_SPLIT_MYSQL_MANUAL="${TMP_ROOT}/unsafe-global-env-long-split-mysql-manual.md"
+UNSAFE_GLOBAL_SUDO_CHDIR_REDIS_MANUAL="${TMP_ROOT}/unsafe-global-sudo-chdir-redis-manual.md"
+UNSAFE_GLOBAL_SUDO_SHORT_CHDIR_REDIS_MANUAL="${TMP_ROOT}/unsafe-global-sudo-short-chdir-redis-manual.md"
 SAFE_PASSIVE_PATH_MANUAL="${TMP_ROOT}/safe-passive-path-manual.md"
 SAFE_PASSIVE_COMMAND_MENTIONS_MANUAL="${TMP_ROOT}/safe-passive-command-mentions-manual.md"
 SAFE_PREFIXED_READONLY_MANUAL="${TMP_ROOT}/safe-prefixed-readonly-manual.md"
+SAFE_QUOTED_OPERATORS_MANUAL="${TMP_ROOT}/safe-quoted-operators-manual.md"
 awk '
   !changed && /--expected-host 122\.233\.30\.4 --minutes 15/ {
     sub(/--expected-host 122\.233\.30\.4 --minutes 15/, "--expected-host 122.233.30.114 --minutes 15")
@@ -528,6 +749,32 @@ make_global_fence_mutation "${UNSAFE_GLOBAL_PODMAN_RM_MANUAL}" \
   'podman rm nginx'
 make_global_fence_mutation "${UNSAFE_GLOBAL_PODMAN_KILL_MANUAL}" \
   'podman kill nginx'
+make_global_fence_mutation "${UNSAFE_GLOBAL_SUDO_USER_REDIS_MANUAL}" \
+  'sudo -u redis redis-cli GET test-agent:ticket:x'
+make_global_fence_mutation "${UNSAFE_GLOBAL_SUDO_LONG_USER_REDIS_MANUAL}" \
+  'sudo --user=redis redis-cli GET test-agent:session:x'
+make_global_fence_mutation "${UNSAFE_GLOBAL_EMPTY_ASSIGNMENT_REDIS_MANUAL}" \
+  'TRACE= redis-cli GET test-agent:session:x'
+make_global_fence_mutation "${UNSAFE_GLOBAL_ENV_IGNORE_REDIS_MANUAL}" \
+  'env -i TRACE=1 redis-cli GET test-agent:ticket:x'
+make_global_fence_mutation "${UNSAFE_GLOBAL_ENV_QUOTED_MYSQL_MANUAL}" \
+  "env --ignore-environment TRACE='a b' mysql -e'UPDATE x SET y=1'"
+make_global_fence_mutation "${UNSAFE_GLOBAL_DOCKER_COMPOSE_FILE_STOP_MANUAL}" \
+  'docker compose -f stack.yml stop nginx'
+make_global_fence_mutation "${UNSAFE_GLOBAL_DOCKER_COMPOSE_FILE_RESTART_MANUAL}" \
+  'docker-compose -f stack.yml restart nginx'
+make_global_fence_mutation "${UNSAFE_GLOBAL_DOCKER_CONTEXT_RESTART_MANUAL}" \
+  'docker --context prod restart nginx'
+make_global_fence_mutation "${UNSAFE_GLOBAL_PODMAN_REMOTE_KILL_MANUAL}" \
+  'podman --remote kill nginx'
+make_global_fence_mutation "${UNSAFE_GLOBAL_ENV_SPLIT_REDIS_MANUAL}" \
+  "env -S 'redis-cli GET test-agent:ticket:x'"
+make_global_fence_mutation "${UNSAFE_GLOBAL_ENV_LONG_SPLIT_MYSQL_MANUAL}" \
+  "env --split-string='mysql -eDELETE FROM x'"
+make_global_fence_mutation "${UNSAFE_GLOBAL_SUDO_CHDIR_REDIS_MANUAL}" \
+  'sudo --chdir /tmp redis-cli GET test-agent:ticket:x'
+make_global_fence_mutation "${UNSAFE_GLOBAL_SUDO_SHORT_CHDIR_REDIS_MANUAL}" \
+  'sudo -D /tmp redis-cli GET test-agent:session:x'
 awk '/^## 11\./ { print "被动识别路径：\n`POST /api/internal/platform/xxl-job/sso-tickets`\n`POST /xxl-job-admin/platform-sso/login`" } { print }' \
   "${TROUBLESHOOTING_MANUAL}" >"${SAFE_PASSIVE_PATH_MANUAL}"
 awk '/^## 2\./ { print "禁止执行 `redis-cli GET test-agent:ticket:diagnostic`、`service nginx restart`、`mysql --execute=\047UPDATE xxl_job_info SET trigger_status=1\047`；这些只是被动识别的禁令文本。" } { print }' \
@@ -539,6 +786,13 @@ docker ps
 docker compose ps
 docker-compose ps
 podman ps'
+make_global_fence_mutation "${SAFE_QUOTED_OPERATORS_MANUAL}" \
+  'grep -E '\''redis-cli GET|docker restart;mysql -e|safe && text|safe \|\| text'\'' /tmp/diagnostic.log
+printf '\''%s\n'\'' '\''docker restart; redis-cli GET test-agent:ticket:x && mysql -eUPDATE || podman kill nginx'\''
+grep -E "quoted \\| operator; docker restart && redis-cli GET \\|\\| mysql -e" /tmp/diagnostic.log
+grep -E safe\\|docker\\ restart\\;redis-cli\\ GET /tmp/diagnostic.log
+printf '\''%s\n'\'' '\''quoted multiline safe |
+docker restart; redis-cli GET && mysql -eUPDATE || podman kill'\'''
 
 for unsafe_manual in \
   "${UNSAFE_HOST_MANUAL}" \
@@ -587,7 +841,20 @@ for unsafe_manual in \
   "${UNSAFE_GLOBAL_DOCKER_COMPOSE_START_MANUAL}" \
   "${UNSAFE_GLOBAL_DOCKER_COMPOSE_STOP_MANUAL}" \
   "${UNSAFE_GLOBAL_PODMAN_RM_MANUAL}" \
-  "${UNSAFE_GLOBAL_PODMAN_KILL_MANUAL}"; do
+  "${UNSAFE_GLOBAL_PODMAN_KILL_MANUAL}" \
+  "${UNSAFE_GLOBAL_SUDO_USER_REDIS_MANUAL}" \
+  "${UNSAFE_GLOBAL_SUDO_LONG_USER_REDIS_MANUAL}" \
+  "${UNSAFE_GLOBAL_EMPTY_ASSIGNMENT_REDIS_MANUAL}" \
+  "${UNSAFE_GLOBAL_ENV_IGNORE_REDIS_MANUAL}" \
+  "${UNSAFE_GLOBAL_ENV_QUOTED_MYSQL_MANUAL}" \
+  "${UNSAFE_GLOBAL_DOCKER_COMPOSE_FILE_STOP_MANUAL}" \
+  "${UNSAFE_GLOBAL_DOCKER_COMPOSE_FILE_RESTART_MANUAL}" \
+  "${UNSAFE_GLOBAL_DOCKER_CONTEXT_RESTART_MANUAL}" \
+  "${UNSAFE_GLOBAL_PODMAN_REMOTE_KILL_MANUAL}" \
+  "${UNSAFE_GLOBAL_ENV_SPLIT_REDIS_MANUAL}" \
+  "${UNSAFE_GLOBAL_ENV_LONG_SPLIT_MYSQL_MANUAL}" \
+  "${UNSAFE_GLOBAL_SUDO_CHDIR_REDIS_MANUAL}" \
+  "${UNSAFE_GLOBAL_SUDO_SHORT_CHDIR_REDIS_MANUAL}"; do
   if validate_strict_manual_contract "${unsafe_manual}" >/dev/null 2>&1; then
     printf '严格文档契约错误接受危险变异夹具: %s\n' "${unsafe_manual##*/}" >&2
     exit 1
@@ -604,6 +871,10 @@ if ! validate_strict_manual_contract "${SAFE_PASSIVE_COMMAND_MENTIONS_MANUAL}" >
 fi
 if ! validate_strict_manual_contract "${SAFE_PREFIXED_READONLY_MANUAL}" >/dev/null 2>&1; then
   printf '严格文档契约错误拒绝合法的包装只读命令夹具\n' >&2
+  exit 1
+fi
+if ! validate_strict_manual_contract "${SAFE_QUOTED_OPERATORS_MANUAL}" >/dev/null 2>&1; then
+  printf '严格文档契约错误拒绝引号内运算符的合法只读夹具\n' >&2
   exit 1
 fi
 
