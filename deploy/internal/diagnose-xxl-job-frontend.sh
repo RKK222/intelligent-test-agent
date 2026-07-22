@@ -45,7 +45,8 @@ env_value() {
 
 redact_stream() {
   sed -E \
-    -e 's|(https?://[^[:space:]?"#]+)\?[^[:space:]"#]*|\1?[REDACTED_QUERY]|g' \
+    -e 's@(https?://[^[:space:]?"#]+|/[^[:space:]?"#]+)\?[^[:space:]"]*@\1?[REDACTED_QUERY]@g' \
+    -e 's@(https?://[^[:space:]?"#]+|/[^[:space:]?"#]+)#[^[:space:]"]*@\1#[REDACTED_FRAGMENT]@g' \
     -e 's/((ticket|cookie|token|password|secret|authorization|digest)[[:space:]]*[=:][[:space:]]*)[^,;[:space:]"}]+/\1[REDACTED]/Ig' \
     -e 's/("(ticket|cookie|token|password|secret|authorization|digest)"[[:space:]]*:[[:space:]]*")[^"]*/\1[REDACTED]/Ig'
 }
