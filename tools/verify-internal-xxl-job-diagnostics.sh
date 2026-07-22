@@ -28,6 +28,13 @@ EOF
 chmod +x "${FAKE_BIN}/getent" "${FAKE_BIN}/curl"
 
 ENTRY_SCRIPT="${ROOT_DIR}/deploy/internal/diagnose-xxl-job-entry.sh"
+set +e
+PATH="${FAKE_BIN}:${PATH}" XXL_DIAG_FIXTURE_MODE=healthy bash "${ENTRY_SCRIPT}" --unexpected-argument >"${TMP_ROOT}/entry-argument.log" 2>&1
+status=$?
+set -e
+test "${status}" -eq 2
+grep -Fq '[FAIL] 不接受命令行参数' "${TMP_ROOT}/entry-argument.log"
+
 PATH="${FAKE_BIN}:${PATH}" XXL_DIAG_FIXTURE_MODE=healthy bash "${ENTRY_SCRIPT}" >"${TMP_ROOT}/entry-ok.log"
 grep -Fq '[PASS] 域名解析' "${TMP_ROOT}/entry-ok.log"
 grep -Fq '[WARN] 当前入口使用 HTTP' "${TMP_ROOT}/entry-ok.log"

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+if [[ "$#" -ne 0 ]]; then
+  printf '[FAIL] 不接受命令行参数，直接运行脚本即可\n' >&2
+  exit 2
+fi
+
 DOMAIN_HOST='mimo.sdc.cs.icbc'
 DOMAIN_BASE='http://mimo.sdc.cs.icbc:9996'
 IP_BASE='http://122.233.30.2:9996'
