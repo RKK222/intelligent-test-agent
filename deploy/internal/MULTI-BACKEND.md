@@ -15,7 +15,7 @@
 | 后台 B + worker B | `122.233.30.114` / `test-agent-backend-122-233-30-114` |
 | Redis | `122.233.30.20:6379` |
 | PostgreSQL | `122.233.30.147:5432/postgres` |
-| XXL MySQL | `122.233.30.147:3306/xxl_job`（与 PostgreSQL 同机的独立 MySQL 8.4 容器） |
+| XXL MySQL | `122.210.106.43:3306/xxl_job`（外部共享 MySQL，当前使用既有 `root` 账号） |
 | 企业内部模型 | `ai-code.sdc.enterprise:9070` |
 
 ## 1. 正式拓扑
@@ -59,8 +59,7 @@ Java A <---------------- 互访 8080 ----------------> Java B
 | `.4` | `.114:8080` | Java A 转发到 Java B |
 | `.114` | `.4:8080` | Java B 转发到 Java A |
 | 每台 worker 容器 | 本机 Java `:8080` | manager WebSocket、内部模型代理 |
-| 每台后台 | PostgreSQL、Redis、XXL MySQL | 平台持久化、运行态与 XXL 独立调度库 |
-| `.147` MySQL 容器 | 本机 `/data/testagent/mysql` | 与 PostgreSQL 进程分离的 XXL 调度数据；禁止把目录挂到 PostgreSQL 数据目录 |
+| 每台后台 | PostgreSQL、Redis、外部 XXL MySQL | 平台持久化、运行态与 XXL 独立调度库 |
 | 每个 Admin | `.4:9999`、`.114:9999` | 调度所有 Java executor；仅可信内网开放 |
 | 每台后台 | `ai-code.sdc.enterprise:9070` | 企业内部模型调用 |
 | Java 后台 | 每台后台 `4096-4115` | 访问本机或目标服务器上的用户 OpenCode 进程；浏览器不直连这些端口 |
@@ -160,8 +159,8 @@ TEST_AGENT_DB_PASSWORD=REPLACE_PRODUCTION_DB_PASSWORD
 TEST_AGENT_DB_DRIVER_CLASS_NAME=org.postgresql.Driver
 
 TEST_AGENT_XXL_JOB_ENABLED=true
-TEST_AGENT_XXL_JOB_MYSQL_URL=jdbc:mysql://122.233.30.147:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
-TEST_AGENT_XXL_JOB_MYSQL_USERNAME=xxl_job
+TEST_AGENT_XXL_JOB_MYSQL_URL=jdbc:mysql://122.210.106.43:3306/xxl_job?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+TEST_AGENT_XXL_JOB_MYSQL_USERNAME=root
 TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=REPLACE_XXL_JOB_MYSQL_PASSWORD
 TEST_AGENT_XXL_JOB_ACCESS_TOKEN=REPLACE_XXL_JOB_ACCESS_TOKEN
 TEST_AGENT_XXL_JOB_ADMIN_PORT=18080
@@ -225,8 +224,8 @@ TEST_AGENT_DB_PASSWORD=REPLACE_PRODUCTION_DB_PASSWORD
 TEST_AGENT_DB_DRIVER_CLASS_NAME=org.postgresql.Driver
 
 TEST_AGENT_XXL_JOB_ENABLED=true
-TEST_AGENT_XXL_JOB_MYSQL_URL=jdbc:mysql://122.233.30.147:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
-TEST_AGENT_XXL_JOB_MYSQL_USERNAME=xxl_job
+TEST_AGENT_XXL_JOB_MYSQL_URL=jdbc:mysql://122.210.106.43:3306/xxl_job?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+TEST_AGENT_XXL_JOB_MYSQL_USERNAME=root
 TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=REPLACE_XXL_JOB_MYSQL_PASSWORD
 TEST_AGENT_XXL_JOB_ACCESS_TOKEN=REPLACE_XXL_JOB_ACCESS_TOKEN
 TEST_AGENT_XXL_JOB_ADMIN_PORT=18080
@@ -415,40 +414,25 @@ bash /tmp/deploy-internal-frontend.sh \
 
 ### 7.1 使用逐机配置包
 
-后续 U 盘交付物固定分为两组：平台包 `test-agent-two-backend-complete.zip` 及 SHA，只发到
-`.4/.114/.2`；MySQL 包 `test-agent-mysql-offline.zip` 及 SHA，只发到 `.147`。两个 ZIP 的顶层目录
-分别固定为 `test-agent-two-backend-complete/` 和 `test-agent-mysql-offline/`，不添加日期、`v2`、`v3`。
-普通平台升级不再传输或解压 MySQL 包。
+后续 U 盘只交付平台包 `test-agent-two-backend-complete.zip` 及 SHA，发到 `.4/.114/.2`。顶层目录
+固定为 `test-agent-two-backend-complete/`，不添加日期、`v2`、`v3`。外部 MySQL 不部署容器、镜像或
+`.147` 节点包。
 
 各服务器上传并校验本机对应的外层 ZIP 后，用无参数入口执行。入口脚本从本机网卡识别 IP，自动选择并
 校验节点包、解压节点配置，然后连续完成 `--validate-only`、正式部署和 `--verify-only`。任一步失败都会
 返回非零；Java、Docker、Nginx 和最终校验输出统一写入 `/data/0709/deploy-<本机IP>.log`，不会再出现
 只执行了一个空 `bash`、但实际服务没有重启的情况。
 
-先在 PostgreSQL 所在的 `.147` 部署独立 MySQL 容器：
-
-```bash
-cd /data/0709
-sha256sum -c test-agent-mysql-offline.zip.sha256
-unzip -oq test-agent-mysql-offline.zip
-cd /data/0709/test-agent-mysql-offline
-bash deploy-mysql-node.sh
-```
-
-该命令离线导入独立包内 `mysql:8.4` linux/amd64 镜像，在 `/data/testagent/mysql` 持久化数据，初始化
-`xxl_job` 库和 `xxl_job` 账号。root 密码和应用密码已由打包阶段分别生成；应用密码同时写入 `.4`、
-`.114` 的敏感 `backend.env`，脚本不会打印。已有数据目录不会被删除，若现场曾用另一组密码初始化，
-验证会失败并要求先核对旧凭据，不会自动重建数据库。
-
-脚本成功时会输出容器 ID 和 `docker ps -a` 状态；失败时会保留已退出容器并输出状态、退出码及末尾
-80 行日志。不要只用 `docker ps` 判断，因为它不会显示已退出容器。企业 Linux 开启 SELinux 时脚本
-自动为独占数据目录添加私有容器标签。
+部署前先从 `.4`、`.114` 确认 `122.210.106.43:3306` 可达。两台敏感 `backend.env` 固定使用同一个
+外部 JDBC 地址、`root` 账号和现场密码；URL 启用 `createDatabaseIfNotExist=true`，因此账号有建库权限时
+会自动创建 `xxl_job` 空库，随后 Admin 子上下文 Flyway 幂等创建表、执行器组和任务。密码不得打印或
+另行写入命令行。
 
 企业上午已经部署过旧包时，PostgreSQL 中可能已有 `V20260721213000`。本包把尚未交付的夜间 XXL
 迁移固定为更晚的 `V20260722130000`，Flyway 会正常顺序执行；不要在企业环境添加
 `SPRING_FLYWAY_OUT_OF_ORDER=true`，也不要手工修改 `flyway_schema_history`。
 
-MySQL 验证通过后，在 `.4` 执行：
+外部 MySQL 端口验证通过后，在 `.4` 执行：
 
 ```bash
 cd /data/0709
@@ -483,7 +467,7 @@ bash deploy-frontend-node.sh
 ```
 
 正式部署必须由 `root` 执行。平台外层包内已有完整平台发布 ZIP，三台应用服务器不再另外复制内层 ZIP
-或逐机包；`.147` 只使用独立 MySQL 外层包。
+或逐机包；`.147` 不再参与本次部署。
 后台节点包包含真实数据库密码和 token，权限与传输方式按敏感交付物处理；RSA 只使用发布 JAR 内的
 `BOOT-INF/classes/rsa-private.key`，不会生成 RSA env 或外置私钥路径。
 

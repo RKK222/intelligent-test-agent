@@ -52,7 +52,7 @@ Java                  122.233.30.114:8080
 PostgreSQL            122.233.30.147:5432/postgres
 PostgreSQL 用户       postgres
 Redis                 122.233.30.20:6379
-XXL MySQL             122.233.30.147:3306/xxl_job
+XXL MySQL             122.210.106.43:3306/xxl_job
 XXL Admin/executor    122.233.30.114:18080 / :9999
 前端 Origin           http://mimo.sdc.cs.icbc:9996
 数据目录              /data/testagent/data
