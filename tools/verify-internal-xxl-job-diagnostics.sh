@@ -59,7 +59,7 @@ grep -Fq '浏览器现场只能被动检查事故时已经保留的证据' "${RO
 validate_strict_manual_contract() {
   local manual_file="$1"
   local topology_section entry_section frontend_section backend_4_section backend_114_section
-  local redis_section mysql_section browser_section task_section evidence_section executable_fences
+  local redis_section mysql_section browser_section task_section evidence_section executable_fences normalized_commands
   local ticket_step login_step ready_step admin_get_step relative_write_status
 
   topology_section="$(awk '/^## 1\./ { active=1 } /^## 2\./ { active=0 } active' "${manual_file}")"
@@ -75,6 +75,7 @@ validate_strict_manual_contract() {
   executable_fences="$(awk '
     function flush_command() {
       if (command_buffer != "") {
+        gsub(/[[:space:]]*(&&|\|\||[;|])[[:space:]]*/, "\n", command_buffer)
         print command_buffer
         command_buffer=""
       }
@@ -101,6 +102,27 @@ validate_strict_manual_contract() {
     }
     END { flush_command() }
   ' "${manual_file}")"
+  normalized_commands="$(awk '
+    {
+      command=$0
+      sub(/^[[:space:]]+/, "", command)
+      previous=""
+      while (command != previous) {
+        previous=command
+        sub(/^sudo[[:space:]]+/, "", command)
+        if (command ~ /^env([[:space:]]|$)/) {
+          sub(/^env[[:space:]]*/, "", command)
+          while (sub(/^[[:alpha:]_][[:alnum:]_]*=[^[:space:]]+[[:space:]]+/, "", command)) {
+            # 去除 env 后连续的 KEY=value，再检查真正命令。
+          }
+        }
+        while (sub(/^[[:alpha:]_][[:alnum:]_]*=[^[:space:]]+[[:space:]]+/, "", command)) {
+          # 同时覆盖无显式 env 的 shell 临时环境变量前缀。
+        }
+      }
+      if (command != "") print command
+    }
+  ' <<<"${executable_fences}")"
 
   grep -Fq '| 浏览器域名入口 | `http://mimo.sdc.cs.icbc:9996` |' <<<"${topology_section}" || return 1
   grep -Fq '| 浏览器 IP 入口、实体 Nginx | `http://122.233.30.2:9996`、`122.233.30.2` |' <<<"${topology_section}" || return 1
@@ -232,16 +254,19 @@ validate_strict_manual_contract() {
   if grep -Eqi '^[[:space:]]*(sudo[[:space:]]+)?(systemctl|service)[[:space:]]+(start|stop|restart|reload)|^[[:space:]]*nginx[[:space:]].*(-s[[:space:]]+reload|reload)|^[[:space:]]*(sed[[:space:]]+-i|perl[[:space:]]+-pi)|^[[:space:]]*(echo|printf|cat)[[:space:]].*>+[[:space:]]*/data/testagent/(config|deploy)|^[[:space:]]*(cp|mv|install)[[:space:]].*[[:space:]]/data/testagent/config/|(^|[[:space:]])>>[[:space:]]*/data/testagent/(config|deploy)' "${manual_file}"; then
     return 1
   fi
-  if grep -Eqi '^[[:space:]]*(redis-cli|valkey-cli)[[:space:]].*(GET|GETDEL|MGET|HGET|SCAN|KEYS).*(ticket|session)' <<<"${executable_fences}"; then
+  if grep -Eqi '^[[:space:]]*(redis-cli|valkey-cli)[[:space:]].*(GET|GETDEL|MGET|HGET|SCAN|KEYS).*(ticket|session)' <<<"${normalized_commands}"; then
     return 1
   fi
-  if grep -Eqi '^[[:space:]]*mysql[[:space:]].*((--execute(=|[[:space:]])|-e([^[:alnum:]_]|$)).*(INSERT|UPDATE|DELETE|REPLACE|MERGE|TRUNCATE|ALTER|CREATE|DROP|CALL|GRANT|REVOKE))' <<<"${executable_fences}"; then
+  if grep -Eqi '^[[:space:]]*mysql[[:space:]].*((--execute(=|[[:space:]])|-e([^[:alnum:]_]|$)).*(INSERT|UPDATE|DELETE|REPLACE|MERGE|TRUNCATE|ALTER|CREATE|DROP|CALL|GRANT|REVOKE))' <<<"${normalized_commands}"; then
     return 1
   fi
-  if grep -Eqi '^[[:space:]]*((sudo[[:space:]]+)?systemctl[[:space:]]+(start|stop|restart|reload)|(sudo[[:space:]]+)?service[[:space:]]+[^[:space:]]+[[:space:]]+(start|stop|restart|reload)|(kill|pkill|killall)[[:space:]].*(-HUP|-1|SIGHUP|-s[[:space:]]+HUP))' <<<"${executable_fences}"; then
+  if grep -Eqi '^[[:space:]]*(systemctl[[:space:]]+(start|stop|restart|reload)|service[[:space:]]+[^[:space:]]+[[:space:]]+(start|stop|restart|reload)|(kill|pkill|killall)[[:space:]].*(-HUP|-1|SIGHUP|-s[[:space:]]+HUP))' <<<"${normalized_commands}"; then
     return 1
   fi
-  if grep -Eqi '^[[:space:]]*(sed[[:space:]]+-i|perl[[:space:]]+-pi)|(^|[[:space:]])>+[[:space:]]*(/data/testagent/config/|/data/apps/nginx/([^[:space:]]*/)?conf/)|(^|[[:space:]|;&])tee([[:space:]]+-[^[:space:]]+)*[[:space:]]+(/data/testagent/config/|/data/apps/nginx/([^[:space:]]*/)?conf/)|^[[:space:]]*(cp|mv|install)[[:space:]].*[[:space:]](/data/testagent/config/|/data/apps/nginx/([^[:space:]]*/)?conf/)' <<<"${executable_fences}"; then
+  if grep -Eqi '^[[:space:]]*(docker[[:space:]]+((compose|container)[[:space:]]+)?|docker-compose[[:space:]]+|podman[[:space:]]+(container[[:space:]]+)?)(restart|start|stop|rm|kill)([[:space:]]|$)' <<<"${normalized_commands}"; then
+    return 1
+  fi
+  if grep -Eqi '^[[:space:]]*(sed[[:space:]]+-i|perl[[:space:]]+-pi)|(^|[[:space:]])>+[[:space:]]*(/data/testagent/config/|/data/apps/nginx/([^[:space:]]*/)?conf/)|(^|[[:space:]|;&])tee([[:space:]]+-[^[:space:]]+)*[[:space:]]+(/data/testagent/config/|/data/apps/nginx/([^[:space:]]*/)?conf/)|^[[:space:]]*(cp|mv|install)[[:space:]].*[[:space:]](/data/testagent/config/|/data/apps/nginx/([^[:space:]]*/)?conf/)' <<<"${normalized_commands}"; then
     return 1
   fi
   if awk '
@@ -327,8 +352,21 @@ UNSAFE_GLOBAL_MYSQL_COMPACT_E_MANUAL="${TMP_ROOT}/unsafe-global-mysql-compact-e-
 UNSAFE_GLOBAL_SUDO_SERVICE_MANUAL="${TMP_ROOT}/unsafe-global-sudo-service-manual.md"
 UNSAFE_GLOBAL_KILL_SIGNAL_MANUAL="${TMP_ROOT}/unsafe-global-kill-signal-manual.md"
 UNSAFE_GLOBAL_RELATIVE_CONFIG_WRITE_MANUAL="${TMP_ROOT}/unsafe-global-relative-config-write-manual.md"
+UNSAFE_GLOBAL_CHAINED_REDIS_MANUAL="${TMP_ROOT}/unsafe-global-chained-redis-manual.md"
+UNSAFE_GLOBAL_SUDO_REDIS_MANUAL="${TMP_ROOT}/unsafe-global-sudo-redis-manual.md"
+UNSAFE_GLOBAL_PIPE_ENV_REDIS_MANUAL="${TMP_ROOT}/unsafe-global-pipe-env-redis-manual.md"
+UNSAFE_GLOBAL_SEMICOLON_REDIS_MANUAL="${TMP_ROOT}/unsafe-global-semicolon-redis-manual.md"
+UNSAFE_GLOBAL_OR_REDIS_MANUAL="${TMP_ROOT}/unsafe-global-or-redis-manual.md"
+UNSAFE_GLOBAL_SUDO_MYSQL_MANUAL="${TMP_ROOT}/unsafe-global-sudo-mysql-manual.md"
+UNSAFE_GLOBAL_ENV_MYSQL_MANUAL="${TMP_ROOT}/unsafe-global-env-mysql-manual.md"
+UNSAFE_GLOBAL_DOCKER_RESTART_MANUAL="${TMP_ROOT}/unsafe-global-docker-restart-manual.md"
+UNSAFE_GLOBAL_DOCKER_COMPOSE_START_MANUAL="${TMP_ROOT}/unsafe-global-docker-compose-start-manual.md"
+UNSAFE_GLOBAL_DOCKER_COMPOSE_STOP_MANUAL="${TMP_ROOT}/unsafe-global-docker-compose-stop-manual.md"
+UNSAFE_GLOBAL_PODMAN_RM_MANUAL="${TMP_ROOT}/unsafe-global-podman-rm-manual.md"
+UNSAFE_GLOBAL_PODMAN_KILL_MANUAL="${TMP_ROOT}/unsafe-global-podman-kill-manual.md"
 SAFE_PASSIVE_PATH_MANUAL="${TMP_ROOT}/safe-passive-path-manual.md"
 SAFE_PASSIVE_COMMAND_MENTIONS_MANUAL="${TMP_ROOT}/safe-passive-command-mentions-manual.md"
+SAFE_PREFIXED_READONLY_MANUAL="${TMP_ROOT}/safe-prefixed-readonly-manual.md"
 awk '
   !changed && /--expected-host 122\.233\.30\.4 --minutes 15/ {
     sub(/--expected-host 122\.233\.30\.4 --minutes 15/, "--expected-host 122.233.30.114 --minutes 15")
@@ -466,10 +504,41 @@ make_global_fence_mutation "${UNSAFE_GLOBAL_KILL_SIGNAL_MANUAL}" \
 make_global_fence_mutation "${UNSAFE_GLOBAL_RELATIVE_CONFIG_WRITE_MANUAL}" \
   'cd /data/apps/nginx/conf
 printf '\''unsafe\n'\'' > nginx.conf'
+make_global_fence_mutation "${UNSAFE_GLOBAL_CHAINED_REDIS_MANUAL}" \
+  'cd /tmp && redis-cli GET test-agent:ticket:diagnostic'
+make_global_fence_mutation "${UNSAFE_GLOBAL_SUDO_REDIS_MANUAL}" \
+  'sudo redis-cli GET test-agent:session:diagnostic'
+make_global_fence_mutation "${UNSAFE_GLOBAL_PIPE_ENV_REDIS_MANUAL}" \
+  "printf '%s\\n' diagnostic | env TRACE=1 redis-cli GET test-agent:ticket:diagnostic"
+make_global_fence_mutation "${UNSAFE_GLOBAL_SEMICOLON_REDIS_MANUAL}" \
+  'cd /tmp; redis-cli GET test-agent:session:diagnostic'
+make_global_fence_mutation "${UNSAFE_GLOBAL_OR_REDIS_MANUAL}" \
+  'false || sudo redis-cli GET test-agent:ticket:diagnostic'
+make_global_fence_mutation "${UNSAFE_GLOBAL_SUDO_MYSQL_MANUAL}" \
+  "sudo mysql -e'UPDATE xxl_job_info SET trigger_status=1'"
+make_global_fence_mutation "${UNSAFE_GLOBAL_ENV_MYSQL_MANUAL}" \
+  "env X=1 mysql --execute='DELETE FROM xxl_job_info'"
+make_global_fence_mutation "${UNSAFE_GLOBAL_DOCKER_RESTART_MANUAL}" \
+  'docker restart nginx'
+make_global_fence_mutation "${UNSAFE_GLOBAL_DOCKER_COMPOSE_START_MANUAL}" \
+  'docker compose start nginx'
+make_global_fence_mutation "${UNSAFE_GLOBAL_DOCKER_COMPOSE_STOP_MANUAL}" \
+  'docker-compose stop nginx'
+make_global_fence_mutation "${UNSAFE_GLOBAL_PODMAN_RM_MANUAL}" \
+  'podman rm nginx'
+make_global_fence_mutation "${UNSAFE_GLOBAL_PODMAN_KILL_MANUAL}" \
+  'podman kill nginx'
 awk '/^## 11\./ { print "被动识别路径：\n`POST /api/internal/platform/xxl-job/sso-tickets`\n`POST /xxl-job-admin/platform-sso/login`" } { print }' \
   "${TROUBLESHOOTING_MANUAL}" >"${SAFE_PASSIVE_PATH_MANUAL}"
 awk '/^## 2\./ { print "禁止执行 `redis-cli GET test-agent:ticket:diagnostic`、`service nginx restart`、`mysql --execute=\047UPDATE xxl_job_info SET trigger_status=1\047`；这些只是被动识别的禁令文本。" } { print }' \
   "${TROUBLESHOOTING_MANUAL}" >"${SAFE_PASSIVE_COMMAND_MENTIONS_MANUAL}"
+make_global_fence_mutation "${SAFE_PREFIXED_READONLY_MANUAL}" \
+  'cd /tmp && sudo env TRACE=1 mysql --host=diagnostic.invalid < /tmp/xxl-job-readonly.sql
+printf '\''diagnostic\n'\'' | env TRACE=1 redis-cli PING
+docker ps
+docker compose ps
+docker-compose ps
+podman ps'
 
 for unsafe_manual in \
   "${UNSAFE_HOST_MANUAL}" \
@@ -506,7 +575,19 @@ for unsafe_manual in \
   "${UNSAFE_GLOBAL_MYSQL_COMPACT_E_MANUAL}" \
   "${UNSAFE_GLOBAL_SUDO_SERVICE_MANUAL}" \
   "${UNSAFE_GLOBAL_KILL_SIGNAL_MANUAL}" \
-  "${UNSAFE_GLOBAL_RELATIVE_CONFIG_WRITE_MANUAL}"; do
+  "${UNSAFE_GLOBAL_RELATIVE_CONFIG_WRITE_MANUAL}" \
+  "${UNSAFE_GLOBAL_CHAINED_REDIS_MANUAL}" \
+  "${UNSAFE_GLOBAL_SUDO_REDIS_MANUAL}" \
+  "${UNSAFE_GLOBAL_PIPE_ENV_REDIS_MANUAL}" \
+  "${UNSAFE_GLOBAL_SEMICOLON_REDIS_MANUAL}" \
+  "${UNSAFE_GLOBAL_OR_REDIS_MANUAL}" \
+  "${UNSAFE_GLOBAL_SUDO_MYSQL_MANUAL}" \
+  "${UNSAFE_GLOBAL_ENV_MYSQL_MANUAL}" \
+  "${UNSAFE_GLOBAL_DOCKER_RESTART_MANUAL}" \
+  "${UNSAFE_GLOBAL_DOCKER_COMPOSE_START_MANUAL}" \
+  "${UNSAFE_GLOBAL_DOCKER_COMPOSE_STOP_MANUAL}" \
+  "${UNSAFE_GLOBAL_PODMAN_RM_MANUAL}" \
+  "${UNSAFE_GLOBAL_PODMAN_KILL_MANUAL}"; do
   if validate_strict_manual_contract "${unsafe_manual}" >/dev/null 2>&1; then
     printf '严格文档契约错误接受危险变异夹具: %s\n' "${unsafe_manual##*/}" >&2
     exit 1
@@ -519,6 +600,10 @@ if ! validate_strict_manual_contract "${SAFE_PASSIVE_PATH_MANUAL}" >/dev/null 2>
 fi
 if ! validate_strict_manual_contract "${SAFE_PASSIVE_COMMAND_MENTIONS_MANUAL}" >/dev/null 2>&1; then
   printf '严格文档契约错误拒绝合法的行内禁令文本夹具\n' >&2
+  exit 1
+fi
+if ! validate_strict_manual_contract "${SAFE_PREFIXED_READONLY_MANUAL}" >/dev/null 2>&1; then
+  printf '严格文档契约错误拒绝合法的包装只读命令夹具\n' >&2
   exit 1
 fi
 
