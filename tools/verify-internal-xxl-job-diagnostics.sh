@@ -326,7 +326,7 @@ validate_strict_manual_contract() {
           cursor=skip_options(cursor + 1, "compose")
           prefix="docker compose"
         } else if (tolower(token[cursor]) == "container") {
-          cursor++
+          cursor=skip_options(cursor + 1, "docker-container")
           prefix="docker container"
         }
         print_tokens(cursor, prefix)
@@ -337,7 +337,7 @@ validate_strict_manual_contract() {
         cursor=skip_options(position + 1, "podman")
         prefix="podman"
         if (tolower(token[cursor]) == "container") {
-          cursor++
+          cursor=skip_options(cursor + 1, "podman-container")
           prefix="podman container"
         }
         print_tokens(cursor, prefix)
@@ -498,7 +498,7 @@ validate_strict_manual_contract() {
   if grep -Eqi '^[[:space:]]*(systemctl[[:space:]]+(start|stop|restart|reload)|service[[:space:]]+[^[:space:]]+[[:space:]]+(start|stop|restart|reload)|(kill|pkill|killall)[[:space:]].*(-HUP|-1|SIGHUP|-s[[:space:]]+HUP))' <<<"${normalized_commands}"; then
     return 1
   fi
-  if grep -Eqi '^[[:space:]]*(docker[[:space:]]+((compose|container)[[:space:]]+)?|docker-compose[[:space:]]+|podman[[:space:]]+(container[[:space:]]+)?)(restart|start|stop|rm|kill|up|down|create|run|pause|unpause)([[:space:]]|$)' <<<"${normalized_commands}"; then
+  if grep -Eqi '^[[:space:]]*(docker[[:space:]]+((compose|container)[[:space:]]+)?|docker-compose[[:space:]]+|podman[[:space:]]+(container[[:space:]]+)?)(restart|start|stop|rm|kill|up|down|create|run|pause|unpause|scale)([[:space:]]|$)' <<<"${normalized_commands}"; then
     return 1
   fi
   if grep -Eqi '^[[:space:]]*(sed[[:space:]]+-i|perl[[:space:]]+-pi)|(^|[[:space:]])>+[[:space:]]*(/data/testagent/config/|/data/apps/nginx/([^[:space:]]*/)?conf/)|(^|[[:space:]|;&])tee([[:space:]]+-[^[:space:]]+)*[[:space:]]+(/data/testagent/config/|/data/apps/nginx/([^[:space:]]*/)?conf/)|^[[:space:]]*(cp|mv|install)[[:space:]].*[[:space:]](/data/testagent/config/|/data/apps/nginx/([^[:space:]]*/)?conf/)' <<<"${normalized_commands}"; then
@@ -622,6 +622,9 @@ UNSAFE_GLOBAL_DOCKER_CREATE_MANUAL="${TMP_ROOT}/unsafe-global-docker-create-manu
 UNSAFE_GLOBAL_DOCKER_RUN_MANUAL="${TMP_ROOT}/unsafe-global-docker-run-manual.md"
 UNSAFE_GLOBAL_DOCKER_PAUSE_MANUAL="${TMP_ROOT}/unsafe-global-docker-pause-manual.md"
 UNSAFE_GLOBAL_DOCKER_UNPAUSE_MANUAL="${TMP_ROOT}/unsafe-global-docker-unpause-manual.md"
+UNSAFE_GLOBAL_DOCKER_COMPOSE_SCALE_MANUAL="${TMP_ROOT}/unsafe-global-docker-compose-scale-manual.md"
+UNSAFE_GLOBAL_DOCKER_CONTAINER_UNKNOWN_OPTION_MANUAL="${TMP_ROOT}/unsafe-global-docker-container-unknown-option-manual.md"
+UNSAFE_GLOBAL_PODMAN_CONTAINER_UNKNOWN_OPTION_MANUAL="${TMP_ROOT}/unsafe-global-podman-container-unknown-option-manual.md"
 SAFE_PASSIVE_PATH_MANUAL="${TMP_ROOT}/safe-passive-path-manual.md"
 SAFE_PASSIVE_COMMAND_MENTIONS_MANUAL="${TMP_ROOT}/safe-passive-command-mentions-manual.md"
 SAFE_PREFIXED_READONLY_MANUAL="${TMP_ROOT}/safe-prefixed-readonly-manual.md"
@@ -833,6 +836,12 @@ make_global_fence_mutation "${UNSAFE_GLOBAL_DOCKER_PAUSE_MANUAL}" \
   'docker pause diagnostic-container'
 make_global_fence_mutation "${UNSAFE_GLOBAL_DOCKER_UNPAUSE_MANUAL}" \
   'docker unpause diagnostic-container'
+make_global_fence_mutation "${UNSAFE_GLOBAL_DOCKER_COMPOSE_SCALE_MANUAL}" \
+  'docker compose scale nginx=2'
+make_global_fence_mutation "${UNSAFE_GLOBAL_DOCKER_CONTAINER_UNKNOWN_OPTION_MANUAL}" \
+  'docker container --future-option /tmp restart nginx'
+make_global_fence_mutation "${UNSAFE_GLOBAL_PODMAN_CONTAINER_UNKNOWN_OPTION_MANUAL}" \
+  'podman container --future-option /tmp kill nginx'
 awk '/^## 11\./ { print "被动识别路径：\n`POST /api/internal/platform/xxl-job/sso-tickets`\n`POST /xxl-job-admin/platform-sso/login`" } { print }' \
   "${TROUBLESHOOTING_MANUAL}" >"${SAFE_PASSIVE_PATH_MANUAL}"
 awk '/^## 2\./ { print "禁止执行 `redis-cli GET test-agent:ticket:diagnostic`、`service nginx restart`、`mysql --execute=\047UPDATE xxl_job_info SET trigger_status=1\047`；这些只是被动识别的禁令文本。" } { print }' \
@@ -842,6 +851,7 @@ make_global_fence_mutation "${SAFE_PREFIXED_READONLY_MANUAL}" \
 printf '\''diagnostic\n'\'' | env TRACE=1 redis-cli PING
 sudo -n env -i TRACE=1 redis-cli PING
 docker ps
+docker container ps
 docker --tlscacert /tmp/ca.pem ps
 docker --context prod ps
 docker compose ps
@@ -849,6 +859,7 @@ docker compose -f stack.yml ps
 docker-compose ps
 docker-compose -f stack.yml ps
 podman ps
+podman container ps
 podman --remote ps'
 make_global_fence_mutation "${SAFE_QUOTED_OPERATORS_MANUAL}" \
   'grep -E '\''redis-cli GET|docker restart;mysql -e|safe && text|safe \|\| text'\'' /tmp/diagnostic.log
@@ -928,7 +939,10 @@ for unsafe_manual in \
   "${UNSAFE_GLOBAL_DOCKER_CREATE_MANUAL}" \
   "${UNSAFE_GLOBAL_DOCKER_RUN_MANUAL}" \
   "${UNSAFE_GLOBAL_DOCKER_PAUSE_MANUAL}" \
-  "${UNSAFE_GLOBAL_DOCKER_UNPAUSE_MANUAL}"; do
+  "${UNSAFE_GLOBAL_DOCKER_UNPAUSE_MANUAL}" \
+  "${UNSAFE_GLOBAL_DOCKER_COMPOSE_SCALE_MANUAL}" \
+  "${UNSAFE_GLOBAL_DOCKER_CONTAINER_UNKNOWN_OPTION_MANUAL}" \
+  "${UNSAFE_GLOBAL_PODMAN_CONTAINER_UNKNOWN_OPTION_MANUAL}"; do
   if validate_strict_manual_contract "${unsafe_manual}" >/dev/null 2>&1; then
     printf '严格文档契约错误接受危险变异夹具: %s\n' "${unsafe_manual##*/}" >&2
     exit 1
