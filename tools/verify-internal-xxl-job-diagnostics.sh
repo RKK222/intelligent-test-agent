@@ -447,4 +447,39 @@ for misuse in missing-host invalid-host minutes-low minutes-high wrong-machine; 
   test "${status}" -eq 2
 done
 
+READONLY_SQL_FILE="${ROOT_DIR}/deploy/internal/xxl-job-readonly-check.sql"
+if [[ ! -f "${READONLY_SQL_FILE}" ]]; then
+  printf 'missing XXL-JOB read-only SQL: %s\n' "${READONLY_SQL_FILE}" >&2
+  exit 1
+fi
+
+# 只检查去除 -- 注释后的可执行 SQL，避免运维说明中的敏感词触发误报。
+readonly_sql="$(sed -E 's/--.*$//' "${READONLY_SQL_FILE}")"
+while IFS= read -r -d ';' statement; do
+  trimmed_statement="$(printf '%s' "${statement}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+  statement_first_word="$(printf '%s\n' "${trimmed_statement}" | awk 'NF { print $1; exit }' | tr '[:lower:]' '[:upper:]')"
+  [[ -z "${statement_first_word}" ]] && continue
+  case "${statement_first_word}" in
+    SELECT|SHOW|WITH) ;;
+    *)
+      printf 'XXL-JOB read-only SQL contains a non-read-only statement: %s\n' "${statement_first_word:-<empty>}" >&2
+      exit 1
+      ;;
+  esac
+
+  # DML REPLACE 已由语句首词白名单拒绝；这里允许只读字符串函数 REPLACE(...)。
+  if printf '%s\n' "${trimmed_statement}" | grep -Eqi '(^|[^[:alnum:]_])(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|ALTER|CREATE|DROP|CALL|GRANT|REVOKE|LOCK|UNLOCK|SET|START|TRANSACTION|COMMIT|ROLLBACK)([^[:alnum:]_]|$)'; then
+    printf 'XXL-JOB read-only SQL contains a forbidden keyword\n' >&2
+    exit 1
+  fi
+
+  safe_digest_statement="$(printf '%s' "${trimmed_statement}" | sed -E 's/CHAR_LENGTH[[:space:]]*\([[:space:]]*platform_session_digest[[:space:]]*\)//Ig')"
+  if printf '%s\n' "${safe_digest_statement}" | grep -Eqi '(^|[^[:alnum:]_])(password|token|platform_session_digest|executor_param|trigger_msg|handle_msg)([^[:alnum:]_]|$)'; then
+    printf 'XXL-JOB read-only SQL projects a sensitive column or value\n' >&2
+    exit 1
+  fi
+done < <(printf '%s' "${readonly_sql}")
+
+printf 'XXL-JOB read-only SQL static boundary verified\n'
+
 printf 'XXL-JOB enterprise diagnostics verified\n'
