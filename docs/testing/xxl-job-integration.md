@@ -45,10 +45,13 @@ cd ..
 docker compose -f deploy/local/docker-compose.yml config
 bash tools/verify-internal-nginx-config.sh
 bash tools/verify-internal-single-config.sh
+bash tools/verify-internal-xxl-job-diagnostics.sh
 bash tools/verify-dev-scripts.sh
 ```
 
 Testcontainers 需要可用 Docker；Docker 不可用时相关 MySQL/Redis 测试会显式跳过，不能把跳过误报为已完成数据库与一次性票据验收。
+
+`verify-internal-xxl-job-diagnostics.sh` 完全使用临时夹具和假命令验证固定现场的只读脚本、SQL 与文档契约，不访问 `122.233.30.2`、`122.233.30.4`、`122.233.30.114`、`122.233.30.20` 或 `122.233.30.148`。
 
 ## 多节点人工验收
 

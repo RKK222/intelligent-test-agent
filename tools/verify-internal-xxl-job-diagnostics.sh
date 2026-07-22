@@ -7,6 +7,148 @@ trap 'rm -rf "${TMP_ROOT}"' EXIT
 FAKE_BIN="${TMP_ROOT}/bin"
 mkdir -p "${FAKE_BIN}"
 
+TROUBLESHOOTING_MANUAL="${ROOT_DIR}/deploy/internal/XXL-JOB-TROUBLESHOOTING.md"
+if [[ ! -f "${TROUBLESHOOTING_MANUAL}" ]]; then
+  printf '正式手册不存在: %s\n' "${TROUBLESHOOTING_MANUAL}" >&2
+  exit 1
+fi
+
+for required_text in \
+  '122.233.30.2' \
+  '122.233.30.4' \
+  '122.233.30.114' \
+  '122.233.30.20' \
+  '122.233.30.148' \
+  'diagnose-xxl-job-entry.sh' \
+  'diagnose-xxl-job-frontend.sh' \
+  'diagnose-xxl-job-backend.sh' \
+  'xxl-job-readonly-check.sql' \
+  'TEST_AGENT_NGINX_XXL_JOB_ADMINS' \
+  'TEST_AGENT_XXL_JOB_ADMIN_ADDRESSES' \
+  'TEST_AGENT_XXL_JOB_EXECUTOR_ADDRESS' \
+  'TEST_AGENT_XXL_JOB_EXECUTOR_IP' \
+  'Secure' \
+  'postMessage' \
+  'SKIPPED_LOCK_HELD' \
+  '退出码 0' \
+  '退出码 1' \
+  '退出码 2'; do
+  grep -Fq "${required_text}" "${TROUBLESHOOTING_MANUAL}" || {
+    printf '正式手册缺少契约文本: %s\n' "${required_text}" >&2
+    exit 1
+  }
+done
+
+grep -Fq 'deploy/internal/XXL-JOB-TROUBLESHOOTING.md' "${ROOT_DIR}/docs/README.md" || {
+  printf 'docs/README.md 缺少 XXL-JOB 正式排查入口\n' >&2
+  exit 1
+}
+grep -Fq 'bash tools/verify-internal-xxl-job-diagnostics.sh' "${ROOT_DIR}/docs/testing/xxl-job-integration.md" || {
+  printf 'XXL-JOB 测试文档缺少诊断验证命令\n' >&2
+  exit 1
+}
+grep -Fq '临时夹具' "${ROOT_DIR}/docs/testing/xxl-job-integration.md" || {
+  printf 'XXL-JOB 测试文档缺少临时夹具边界\n' >&2
+  exit 1
+}
+
+validate_strict_manual_contract() {
+  local manual_file="$1"
+  local entry_section frontend_section backend_4_section backend_114_section
+  local redis_section mysql_section browser_section
+
+  entry_section="$(awk '/^## 4\./ { active=1 } /^## 5\./ { active=0 } active' "${manual_file}")"
+  frontend_section="$(awk '/^## 5\./ { active=1 } /^## 6\./ { active=0 } active' "${manual_file}")"
+  backend_4_section="$(awk '/^## 6\./ { active=1 } /^## 7\./ { active=0 } active' "${manual_file}")"
+  backend_114_section="$(awk '/^## 7\./ { active=1 } /^## 8\./ { active=0 } active' "${manual_file}")"
+  redis_section="$(awk '/^## 8\./ { active=1 } /^## 9\./ { active=0 } active' "${manual_file}")"
+  mysql_section="$(awk '/^## 9\./ { active=1 } /^## 10\./ { active=0 } active' "${manual_file}")"
+  browser_section="$(awk '/^## 10\./ { active=1 } /^## 11\./ { active=0 } active' "${manual_file}")"
+
+  grep -Fq 'bash /data/testagent/deploy/internal/diagnose-xxl-job-entry.sh' <<<"${entry_section}" || return 1
+  grep -Fq 'tee /data/0709/xxl-job-diagnostics-entry.log' <<<"${entry_section}" || return 1
+  grep -Fq 'bash /data/testagent/deploy/internal/diagnose-xxl-job-frontend.sh' <<<"${frontend_section}" || return 1
+  grep -Fq 'tee /data/0709/xxl-job-diagnostics-frontend-122.233.30.2.log' <<<"${frontend_section}" || return 1
+
+  grep -Fq 'bash /data/testagent/deploy/internal/diagnose-xxl-job-backend.sh' <<<"${backend_4_section}" || return 1
+  grep -Fq -- '--expected-host 122.233.30.4 --minutes 15' <<<"${backend_4_section}" || return 1
+  grep -Fq 'tee /data/0709/xxl-job-diagnostics-backend-122.233.30.4.log' <<<"${backend_4_section}" || return 1
+  grep -Fq 'bash /data/testagent/deploy/internal/diagnose-xxl-job-backend.sh' <<<"${backend_114_section}" || return 1
+  grep -Fq -- '--expected-host 122.233.30.114 --minutes 15' <<<"${backend_114_section}" || return 1
+  grep -Fq 'tee /data/0709/xxl-job-diagnostics-backend-122.233.30.114.log' <<<"${backend_114_section}" || return 1
+
+  if grep -Eqi 'redis-cli|(^|[^[:alnum:]_])(GET|GETDEL|KEYS|SCAN)([^[:alnum:]_]|$)|test-agent:[^[:space:]]*(ticket|session)|(ticket|session)[_ -]*key' <<<"${redis_section}"; then
+    return 1
+  fi
+
+  grep -Fq "mysql --host=122.233.30.148 --port=3306 --user='<只读账号>' --password" <<<"${mysql_section}" || return 1
+  grep -Fq -- '--database=xxl_job' <<<"${mysql_section}" || return 1
+  grep -Fq '< /data/testagent/deploy/internal/xxl-job-readonly-check.sql' <<<"${mysql_section}" || return 1
+  if grep -Eq -- '--password=' <<<"${mysql_section}"; then
+    return 1
+  fi
+
+  grep -Fq '不得以删除 `Secure`' <<<"${browser_section}" || return 1
+  grep -Fq '不导出未脱敏 HAR' <<<"${browser_section}" || return 1
+  grep -Fq '`postMessage` ready' <<<"${browser_section}" || return 1
+  if grep -Eiq '^[[:space:]]*(sudo[[:space:]]+)?(systemctl|service|docker|redis-cli|nginx)[[:space:]]' "${manual_file}"; then
+    return 1
+  fi
+  if grep -Eiq '^[[:space:]]*curl[[:space:]].*(sso-tickets|platform-sso)' "${manual_file}"; then
+    return 1
+  fi
+}
+
+validate_strict_manual_contract "${TROUBLESHOOTING_MANUAL}" || {
+  printf '正式手册未满足逐机绝对命令或安全负向契约\n' >&2
+  exit 1
+}
+grep -Fq '不访问 `122.233.30.2`、`122.233.30.4`、`122.233.30.114`、`122.233.30.20` 或 `122.233.30.148`' \
+  "${ROOT_DIR}/docs/testing/xxl-job-integration.md" || {
+  printf 'XXL-JOB 测试文档缺少不访问固定企业地址的边界\n' >&2
+  exit 1
+}
+
+UNSAFE_HOST_MANUAL="${TMP_ROOT}/unsafe-host-manual.md"
+UNSAFE_REDIS_MANUAL="${TMP_ROOT}/unsafe-redis-manual.md"
+UNSAFE_PASSWORD_MANUAL="${TMP_ROOT}/unsafe-password-manual.md"
+UNSAFE_SECURE_MANUAL="${TMP_ROOT}/unsafe-secure-manual.md"
+awk '
+  !changed && /--expected-host 122\.233\.30\.4 --minutes 15/ {
+    sub(/--expected-host 122\.233\.30\.4 --minutes 15/, "--expected-host 122.233.30.114 --minutes 15")
+    changed=1
+  }
+  { print }
+' "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_HOST_MANUAL}"
+awk '/^## 9\./ { print "redis-cli GET diagnostic-ticket-key" } { print }' \
+  "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_REDIS_MANUAL}"
+awk '
+  /^## 9\./ { mysql_section=1 }
+  mysql_section && !changed && /--password / {
+    sub(/--password /, "--password=diagnostic-plaintext ")
+    changed=1
+  }
+  { print }
+' "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_PASSWORD_MANUAL}"
+awk '
+  !changed && /不得以删除 `Secure`/ {
+    sub(/不得以删除 `Secure`/, "建议删除 `Secure`")
+    changed=1
+  }
+  { print }
+' "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_SECURE_MANUAL}"
+
+for unsafe_manual in \
+  "${UNSAFE_HOST_MANUAL}" \
+  "${UNSAFE_REDIS_MANUAL}" \
+  "${UNSAFE_PASSWORD_MANUAL}" \
+  "${UNSAFE_SECURE_MANUAL}"; do
+  if validate_strict_manual_contract "${unsafe_manual}" >/dev/null 2>&1; then
+    printf '严格文档契约错误接受危险变异夹具: %s\n' "${unsafe_manual##*/}" >&2
+    exit 1
+  fi
+done
+
 cat >"${FAKE_BIN}/getent" <<'EOF'
 #!/usr/bin/env bash
 [[ "${XXL_DIAG_FIXTURE_MODE:-healthy}" != "dns-fail" ]] || exit 2
