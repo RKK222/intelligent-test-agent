@@ -93,7 +93,11 @@ class RuntimeManagementControllerTest {
                 .jsonPath("$.data.managers[0].managedProcesses[0].processId").isEqualTo("ocp_1234567890abcdef")
                 .jsonPath("$.data.managers[0].managedProcesses[0].username").isEqualTo("process-user")
                 .jsonPath("$.data.managers[0].managedProcesses[0].bindingStatus").isEqualTo("ACTIVE")
+                .jsonPath("$.data.managers[0].managedProcesses[0].unifiedAuthId").isEqualTo("A")
+                .jsonPath("$.data.managers[0].managedProcesses[0].managerStatus").isEqualTo("PID_ALIVE")
                 .jsonPath("$.data.managers[0].managedProcesses[0].startCommand").isEqualTo("XDG_DATA_HOME=/data/opencode/session/4096 OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs")
+                .jsonPath("$.data.managers[0].managedProcesses[1].unifiedAuthId").value(org.hamcrest.Matchers.nullValue())
+                .jsonPath("$.data.managers[0].managedProcesses[1].managerStatus").value(org.hamcrest.Matchers.nullValue())
                 .jsonPath("$.data.managerBackendConnections[0].status").isEqualTo("CONNECTED")
                 .jsonPath("$.data.opencodeProcesses.items[0].processId").isEqualTo("ocp_1234567890abcdef")
                 .jsonPath("$.data.opencodeProcesses.items[0].username").isEqualTo("process-user")
@@ -651,6 +655,8 @@ class RuntimeManagementControllerTest {
                                 NOW,
                                 "XDG_DATA_HOME=/data/opencode/session/4096 OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs",
                                 "trace_process",
+                                "A",
+                                "PID_ALIVE",
                                 RuntimeManagementManagedProcessOwnership.BOUND,
                                 process.processId(),
                                 process.status(),
@@ -659,7 +665,25 @@ class RuntimeManagementControllerTest {
                                 Optional.of("process-user"),
                                 binding.agentId(),
                                 binding.status(),
-                                binding.updatedAt())),
+                                binding.updatedAt()),
+                                new RuntimeManagementManagedProcess(
+                                        4104,
+                                        22345L,
+                                        "http://10.8.0.12:4104",
+                                        "/data/opencode/session/4104",
+                                        "/data/opencode/.config/opencode/",
+                                        NOW,
+                                        null,
+                                        "trace_legacy_process",
+                                        RuntimeManagementManagedProcessOwnership.UNBOUND,
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        Optional.empty(),
+                                        null,
+                                        null,
+                                        null)),
                         "V20260715.090304")),
                 List.of(connection),
                 new PageResponse<>(List.of(new RuntimeManagementOpencodeProcess(process, Optional.of(binding), Optional.of("process-user"))), 1, 20, 1));

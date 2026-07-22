@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -33,19 +34,26 @@ const (
 )
 
 const (
-	ErrorCodeOpencodeUnavailable = "OPENCODE_UNAVAILABLE"
+	ErrorCodeOpencodeUnavailable      = "OPENCODE_UNAVAILABLE"
+	ErrorCodePortConflict             = "PORT_CONFLICT"
+	ErrorCodePortOutOfRange           = "PORT_OUT_OF_RANGE"
+	ErrorCodeIdentityAlreadyManaged   = "IDENTITY_ALREADY_MANAGED"
+	ErrorCodeIdentityConfigMismatch   = "IDENTITY_CONFIG_MISMATCH"
+	ErrorCodeProcessNotManaged        = "PROCESS_NOT_MANAGED"
+	ErrorCodeProcessOwnershipMismatch = "PROCESS_OWNERSHIP_MISMATCH"
 )
 
 var errPublicConfigNotInitialized = errors.New("public config directory not initialized")
 
 // StartRequest 描述一次启动 opencode server 的本地命令。
 type StartRequest struct {
-	Port          int
-	UnifiedAuthID string
-	SessionPath   string
-	ConfigPath    string
-	Environment   map[string]string
-	TraceID       string
+	Port            int
+	UnifiedAuthID   string
+	SessionPath     string
+	ConfigPath      string
+	Environment     map[string]string
+	BindingRecovery bool
+	TraceID         string
 }
 
 // StopRequest 描述一次停止命令，Timeout 控制 SIGTERM 后等待多久再强杀。
@@ -53,6 +61,16 @@ type StopRequest struct {
 	Port    int
 	TraceID string
 	Timeout time.Duration
+}
+
+// OwnedStopRequest 描述一次带实例所有权栅栏的停止命令。
+// manager 必须在发信号前同时核验用户身份和 PID，禁止迟到命令误杀复用端口的新实例。
+type OwnedStopRequest struct {
+	Port                  int
+	ExpectedUnifiedAuthID string
+	ExpectedPID           int
+	TraceID               string
+	Timeout               time.Duration
 }
 
 // HealthRequest 描述一次健康检测命令。
@@ -63,17 +81,18 @@ type HealthRequest struct {
 
 // Result 是所有进程操作的稳定 JSON 输出模型。
 type Result struct {
-	Status       Status                `json:"status"`
-	Port         int                   `json:"port"`
-	PID          int                   `json:"pid"`
-	BaseURL      string                `json:"baseUrl"`
-	SessionPath  string                `json:"sessionPath"`
-	ConfigPath   string                `json:"configPath"`
-	StartCommand string                `json:"startCommand,omitempty"`
-	Message      string                `json:"message"`
-	ErrorCode    string                `json:"errorCode,omitempty"`
-	TraceID      string                `json:"traceId"`
-	Records      []state.ProcessRecord `json:"records,omitempty"`
+	Status         Status                `json:"status"`
+	Port           int                   `json:"port"`
+	PID            int                   `json:"pid"`
+	BaseURL        string                `json:"baseUrl"`
+	SessionPath    string                `json:"sessionPath"`
+	ConfigPath     string                `json:"configPath"`
+	StartCommand   string                `json:"startCommand,omitempty"`
+	ProcessCreated bool                  `json:"processCreated"`
+	Message        string                `json:"message"`
+	ErrorCode      string                `json:"errorCode,omitempty"`
+	TraceID        string                `json:"traceId"`
+	Records        []state.ProcessRecord `json:"records,omitempty"`
 }
 
 // StartSpec 是 OSStarter 执行 opencode serve 所需的完整命令描述。
@@ -126,6 +145,10 @@ type Manager struct {
 	// maxProcesses 是运行时最大并发进程数，可由后端通过 configUpdate 热更新；
 	// 初始值取自 cfg.MaxProcesses（env 兜底），后端下发值覆盖。
 	maxProcesses atomic.Int64
+
+	// lifecycleMu 串行化同一 manager 内的 start、stop、restart，
+	// 保证状态检查、端口探测和进程变更不会被并发 WebSocket 命令穿插。
+	lifecycleMu sync.Mutex
 }
 
 // NewManager 创建本地进程管理器；后续 socket 控制面可以复用该库。
@@ -269,9 +292,19 @@ func buildStartSpec(cfg config.Config, request StartRequest, startedAt time.Time
 
 // Start 启动一个端口对应的 opencode server，并写入本地 state。
 func (m *Manager) Start(ctx context.Context, request StartRequest) (Result, error) {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	return m.start(ctx, request)
+}
+
+// start 在 lifecycleMu 已持有时执行实际启动流程。
+func (m *Manager) start(ctx context.Context, request StartRequest) (Result, error) {
 	cfg, err := m.startConfig()
 	if err != nil {
 		return failed(request.Port, request.TraceID, err), err
+	}
+	if err := cfg.ValidatePort(request.Port); err != nil {
+		return failedWithCode(request.Port, request.TraceID, ErrorCodePortOutOfRange, err.Error()), err
 	}
 	spec, err := buildStartSpec(cfg, request, time.Now().UTC())
 	if err != nil {
@@ -281,16 +314,18 @@ func (m *Manager) Start(ctx context.Context, request StartRequest) (Result, erro
 		return failed(request.Port, request.TraceID, err), err
 	} else if ok {
 		record.TraceID = request.TraceID
+		if recordUnifiedAuthID(record) != strings.TrimSpace(spec.UnifiedAuthID) {
+			err := fmt.Errorf("requested port is already managed by another identity")
+			return failedWithCode(request.Port, request.TraceID, ErrorCodePortConflict, err.Error()), err
+		}
+		// 同一用户也只能复用同一会话与配置身份路径，防止把旧运行时误报为新配置。
+		if !sameManagedIdentityPaths(record, spec) {
+			err := fmt.Errorf("managed process session or config identity does not match the request")
+			return failedWithCode(request.Port, request.TraceID, ErrorCodeIdentityConfigMismatch, err.Error()), err
+		}
 		// start 命令需要对健康的既有 state 幂等，便于后端在数据库记录丢失时补齐平台进程快照。
 		checked := m.checker.Check(ctx, record)
 		if checked.Status == health.StatusHealthy {
-			// 新后端显式携带用户稳定配置软链接；端口上若仍是旧配置路径，不能把旧进程冒充为本次启动结果。
-			if strings.TrimSpace(request.ConfigPath) != "" && filepath.Clean(record.ConfigPath) != spec.ConfigPath {
-				err := fmt.Errorf(
-					"port %d is healthy but config path differs: managed=%s requested=%s; stop and start it through the platform",
-					request.Port, record.ConfigPath, spec.ConfigPath)
-				return failed(request.Port, request.TraceID, err), err
-			}
 			return result(StatusStarted, record, "opencode server already managed and healthy", request.TraceID), nil
 		}
 		err := fmt.Errorf("port %d is already managed but unhealthy: %s", request.Port, checked.Message)
@@ -300,9 +335,21 @@ func (m *Manager) Start(ctx context.Context, request StartRequest) (Result, erro
 	if err != nil {
 		return failed(request.Port, request.TraceID, err), err
 	}
-	if len(records) >= m.MaxProcesses() {
+	if unifiedAuthID := strings.TrimSpace(spec.UnifiedAuthID); unifiedAuthID != "" {
+		for _, record := range records {
+			if record.Port != request.Port && recordUnifiedAuthID(record) == unifiedAuthID {
+				err := fmt.Errorf("requested identity is already managed at another port")
+				return failedWithCode(request.Port, request.TraceID, ErrorCodeIdentityAlreadyManaged, err.Error()), err
+			}
+		}
+	}
+	// 已有平台 binding 的精确原端口恢复不属于新调度；它仍需通过身份、端口和监听冲突校验。
+	if len(records) >= m.MaxProcesses() && !request.BindingRecovery {
 		err := fmt.Errorf("container max processes reached")
 		return failed(request.Port, request.TraceID, err), err
+	}
+	if err := ensurePortAvailable(request.Port); err != nil {
+		return failedWithCode(request.Port, request.TraceID, ErrorCodePortConflict, "requested port is already in use"), err
 	}
 	if err := ensurePublicConfigInitialized(spec.ConfigPath); err != nil {
 		// 公共配置目录（OPENCODE_PUBLIC_CONFIG_DIR）必须由管理员预先初始化，
@@ -339,11 +386,126 @@ func (m *Manager) Start(ctx context.Context, request StartRequest) (Result, erro
 		_ = m.signaler.Terminate(pid)
 		return failed(request.Port, request.TraceID, err), err
 	}
-	return result(StatusStarted, record, "opencode server started", request.TraceID), nil
+	started := result(StatusStarted, record, "opencode server started", request.TraceID)
+	started.ProcessCreated = true
+	return started, nil
+}
+
+// ensurePortAvailable 按子进程实际绑定范围探测端口，覆盖通配地址和 loopback 专属监听。
+// 调用方在 lifecycleMu 内执行，确保本 manager 的检查与子进程启动不会彼此竞争。
+func ensurePortAvailable(port int) error {
+	for _, host := range []string{"0.0.0.0", "127.0.0.1"} {
+		listener, err := net.Listen("tcp4", net.JoinHostPort(host, strconv.Itoa(port)))
+		if err != nil {
+			return err
+		}
+		if err := listener.Close(); err != nil {
+			return err
+		}
+	}
+	for _, host := range localIPv4Hosts() {
+		connection, err := net.DialTimeout("tcp4", net.JoinHostPort(host, strconv.Itoa(port)), 100*time.Millisecond)
+		if err != nil {
+			continue
+		}
+		_ = connection.Close()
+		return fmt.Errorf("port %d has an active TCP listener", port)
+	}
+	return nil
+}
+
+// localIPv4Hosts 返回本机可用 IPv4 地址，用于补足部分平台上通配绑定不报告特定地址冲突的差异。
+func localIPv4Hosts() []string {
+	hosts := []string{"127.0.0.1"}
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return hosts
+	}
+	seen := map[string]bool{"127.0.0.1": true}
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		addresses, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, address := range addresses {
+			ipNet, ok := address.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ipv4 := ipNet.IP.To4()
+			if ipv4 == nil {
+				continue
+			}
+			host := ipv4.String()
+			if !seen[host] {
+				seen[host] = true
+				hosts = append(hosts, host)
+			}
+		}
+	}
+	return hosts
+}
+
+func sameManagedIdentityPaths(record state.ProcessRecord, spec StartSpec) bool {
+	return cleanIdentityPath(record.SessionPath) == cleanIdentityPath(spec.SessionPath) &&
+		cleanIdentityPath(record.ConfigPath) == cleanIdentityPath(spec.ConfigPath)
+}
+
+func cleanIdentityPath(path string) string {
+	return filepath.Clean(strings.TrimSpace(path))
+}
+
+// recordUnifiedAuthID 兼容滚动升级前缺少 unifiedAuthId 的本地 state，
+// 优先使用已持久化身份，否则仅从稳定 users/{id} 会话路径恢复。
+func recordUnifiedAuthID(record state.ProcessRecord) string {
+	if unifiedAuthID := strings.TrimSpace(record.UnifiedAuthID); unifiedAuthID != "" {
+		return unifiedAuthID
+	}
+	return unifiedAuthIDFromSessionPath(record.SessionPath)
 }
 
 // Stop 停止一个已记录端口的 opencode server，并清理本地 state。
 func (m *Manager) Stop(ctx context.Context, request StopRequest) (Result, error) {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	return m.stop(ctx, request)
+}
+
+// StopOwned 在同一生命周期临界区内完成 state 读取、所有权核验和停止副作用。
+func (m *Manager) StopOwned(ctx context.Context, request OwnedStopRequest) (Result, error) {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	record, ok, err := m.store.Get(request.Port)
+	if err != nil {
+		return failed(request.Port, request.TraceID, err), err
+	}
+	if !ok {
+		err := fmt.Errorf("port %d is not managed", request.Port)
+		return failedWithCode(request.Port, request.TraceID, ErrorCodeProcessNotManaged, err.Error()), err
+	}
+	managedUnifiedAuthID := recordUnifiedAuthID(record)
+	if managedUnifiedAuthID == "" ||
+		strings.TrimSpace(request.ExpectedUnifiedAuthID) == "" ||
+		managedUnifiedAuthID != strings.TrimSpace(request.ExpectedUnifiedAuthID) ||
+		request.ExpectedPID < 1 ||
+		record.PID != request.ExpectedPID {
+		err := errors.New("managed process ownership does not match stop request")
+		return failedWithCode(
+			request.Port,
+			request.TraceID,
+			ErrorCodeProcessOwnershipMismatch,
+			err.Error()), err
+	}
+	return m.stopRecord(ctx, StopRequest{
+		Port: request.Port, TraceID: request.TraceID, Timeout: request.Timeout,
+	}, record)
+}
+
+// stop 在 lifecycleMu 已持有时执行实际停止流程，供 restart 在同一临界区复用。
+func (m *Manager) stop(ctx context.Context, request StopRequest) (Result, error) {
 	record, ok, err := m.store.Get(request.Port)
 	if err != nil {
 		return failed(request.Port, request.TraceID, err), err
@@ -352,6 +514,11 @@ func (m *Manager) Stop(ctx context.Context, request StopRequest) (Result, error)
 		err := fmt.Errorf("port %d is not managed", request.Port)
 		return failed(request.Port, request.TraceID, err), err
 	}
+	return m.stopRecord(ctx, request, record)
+}
+
+// stopRecord 对已经在 lifecycleMu 内读取并按需校验过的精确 state 执行停止。
+func (m *Manager) stopRecord(ctx context.Context, request StopRequest, record state.ProcessRecord) (Result, error) {
 	finished := false
 	if err := m.signaler.Terminate(record.PID); err != nil {
 		if !isProcessFinishedError(err) {
@@ -364,7 +531,15 @@ func (m *Manager) Stop(ctx context.Context, request StopRequest) (Result, error)
 		timeout = 5 * time.Second
 	}
 	if !finished && !m.waitStopped(ctx, record.PID, timeout) {
-		if err := m.signaler.Kill(record.PID); err != nil && !isProcessFinishedError(err) {
+		if err := m.signaler.Kill(record.PID); err != nil {
+			if !isProcessFinishedError(err) {
+				return failed(request.Port, request.TraceID, err), err
+			}
+			finished = true
+		}
+		// 发送 SIGKILL 只代表信号已提交；必须再次确认 PID 消失后才能删除权威 state。
+		if !finished && !m.waitStopped(ctx, record.PID, timeout) {
+			err := fmt.Errorf("process did not exit after force kill")
 			return failed(request.Port, request.TraceID, err), err
 		}
 	}
@@ -377,6 +552,13 @@ func (m *Manager) Stop(ctx context.Context, request StopRequest) (Result, error)
 
 // Restart 先停止旧进程，再使用同一端口启动新进程。
 func (m *Manager) Restart(ctx context.Context, request StopRequest) (Result, error) {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	return m.restart(ctx, request)
+}
+
+// restart 在 lifecycleMu 已持有时复用无锁辅助方法，避免 Restart 调用公开 Stop/Start 时自锁。
+func (m *Manager) restart(ctx context.Context, request StopRequest) (Result, error) {
 	record, ok, err := m.store.Get(request.Port)
 	if err != nil {
 		return failed(request.Port, request.TraceID, err), err
@@ -389,10 +571,10 @@ func (m *Manager) Restart(ctx context.Context, request StopRequest) (Result, err
 		configPath = record.ConfigPath
 		unifiedAuthID = record.UnifiedAuthID
 	}
-	if _, err := m.Stop(ctx, request); err != nil {
+	if _, err := m.stop(ctx, request); err != nil {
 		return failed(request.Port, request.TraceID, err), err
 	}
-	return m.Start(ctx, StartRequest{
+	return m.start(ctx, StartRequest{
 		Port: request.Port, UnifiedAuthID: unifiedAuthID,
 		SessionPath: sessionPath, ConfigPath: configPath, TraceID: request.TraceID,
 	})
@@ -406,7 +588,11 @@ func (m *Manager) Health(ctx context.Context, request HealthRequest) (Result, er
 	}
 	if !ok {
 		err := fmt.Errorf("port %d is not managed", request.Port)
-		return failed(request.Port, request.TraceID, err), err
+		return failedWithCode(
+			request.Port,
+			request.TraceID,
+			ErrorCodeProcessNotManaged,
+			err.Error()), err
 	}
 	record.TraceID = request.TraceID
 	checked := m.checker.Check(ctx, record)
@@ -437,17 +623,48 @@ func (m *Manager) activeRecords() ([]state.ProcessRecord, error) {
 	if alive == nil {
 		alive = health.DefaultProcessAlive
 	}
-	active := records[:0]
+	active := make([]state.ProcessRecord, 0, len(records))
 	for _, record := range records {
-		if !alive(record.PID) {
-			if err := m.store.Delete(record.Port); err != nil {
-				return nil, err
-			}
-			continue
+		current, keep, err := m.reconcileActiveRecord(record, alive)
+		if err != nil {
+			return nil, err
 		}
-		active = append(active, record)
+		if keep {
+			active = append(active, current)
+		}
 	}
 	return active, nil
+}
+
+// reconcileActiveRecord 只删除仍与心跳快照 PID 一致的陈旧 state。
+// restart 可能在首次 PID 探测后写入同端口的新 state，因此删除前必须进入生命周期临界区并重新读取。
+func (m *Manager) reconcileActiveRecord(
+	snapshot state.ProcessRecord,
+	alive func(int) bool,
+) (state.ProcessRecord, bool, error) {
+	if alive(snapshot.PID) {
+		return snapshot, true, nil
+	}
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	current, ok, err := m.store.Get(snapshot.Port)
+	if err != nil || !ok {
+		return state.ProcessRecord{}, false, err
+	}
+	if current.PID != snapshot.PID {
+		// 当前 state 已被生命周期命令替换；本次旧快照无权删除它。
+		if alive(current.PID) {
+			return current, true, nil
+		}
+		return state.ProcessRecord{}, false, nil
+	}
+	if alive(current.PID) {
+		return current, true, nil
+	}
+	if err := m.store.Delete(current.Port); err != nil {
+		return state.ProcessRecord{}, false, err
+	}
+	return state.ProcessRecord{}, false, nil
 }
 
 func (m *Manager) withDerivedStartCommands(records []state.ProcessRecord, traceID string) []state.ProcessRecord {

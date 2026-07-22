@@ -23,6 +23,8 @@ public record RuntimeManagementManagedProcess(
         Instant startedAt,
         String startCommand,
         String traceId,
+        String unifiedAuthId,
+        String managerStatus,
         RuntimeManagementManagedProcessOwnership ownership,
         OpencodeProcessId processId,
         OpencodeServerProcessStatus processStatus,
@@ -41,6 +43,49 @@ public record RuntimeManagementManagedProcess(
         ownership = ownership == null ? RuntimeManagementManagedProcessOwnership.UNBOUND : ownership;
     }
 
+    /**
+     * 兼容未携带 manager 原始元数据的既有调用方；新增字段统一按缺失处理。
+     */
+    public RuntimeManagementManagedProcess(
+            int port,
+            Long pid,
+            String baseUrl,
+            String sessionPath,
+            String configPath,
+            Instant startedAt,
+            String startCommand,
+            String traceId,
+            RuntimeManagementManagedProcessOwnership ownership,
+            OpencodeProcessId processId,
+            OpencodeServerProcessStatus processStatus,
+            String healthMessage,
+            UserId userId,
+            Optional<String> username,
+            String bindingAgentId,
+            UserOpencodeProcessBindingStatus bindingStatus,
+            Instant bindingUpdatedAt) {
+        this(
+                port,
+                pid,
+                baseUrl,
+                sessionPath,
+                configPath,
+                startedAt,
+                startCommand,
+                traceId,
+                null,
+                null,
+                ownership,
+                processId,
+                processStatus,
+                healthMessage,
+                userId,
+                username,
+                bindingAgentId,
+                bindingStatus,
+                bindingUpdatedAt);
+    }
+
     static RuntimeManagementManagedProcess unbound(ManagedOpencodeProcessSnapshot snapshot) {
         Objects.requireNonNull(snapshot, "snapshot must not be null");
         return new RuntimeManagementManagedProcess(
@@ -52,6 +97,8 @@ public record RuntimeManagementManagedProcess(
                 snapshot.startedAt(),
                 snapshot.startCommand(),
                 snapshot.traceId(),
+                snapshot.unifiedAuthId(),
+                snapshot.managerStatus(),
                 RuntimeManagementManagedProcessOwnership.UNBOUND,
                 null,
                 null,
@@ -106,6 +153,8 @@ public record RuntimeManagementManagedProcess(
                 snapshot.startedAt(),
                 snapshot.startCommand(),
                 snapshot.traceId(),
+                snapshot.unifiedAuthId(),
+                snapshot.managerStatus(),
                 ownership,
                 process.processId(),
                 process.status(),

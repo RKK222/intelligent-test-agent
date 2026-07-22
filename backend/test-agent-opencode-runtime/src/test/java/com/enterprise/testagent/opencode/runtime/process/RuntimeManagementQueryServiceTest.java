@@ -173,7 +173,9 @@ class RuntimeManagementQueryServiceTest {
         repository.bindings.put(unhealthy.processId(), binding(unhealthy));
         repository.users.put(unhealthy.userId(), user(unhealthy.userId(), "process-user"));
         FakeGateway gateway = new FakeGateway();
-        gateway.healthResults.put(unhealthy.processId(), OpencodeProcessHealthResult.healthy("ok"));
+        gateway.healthResults.put(
+                unhealthy.processId(),
+                OpencodeProcessHealthResult.healthy(unhealthy.pid(), "ok"));
         RedisSnapshotHeartbeatStore heartbeatStore = new RedisSnapshotHeartbeatStore();
         RuntimeManagementQueryService service = service(repository, heartbeatStore, gateway);
 
@@ -477,7 +479,32 @@ class RuntimeManagementQueryServiceTest {
         assertThat(row.managedProcesses()).singleElement().satisfies(process -> {
             assertThat(process.port()).isEqualTo(4096);
             assertThat(process.startCommand()).contains("opencode serve --hostname 0.0.0.0 --port 4096");
+            assertThat(process.unifiedAuthId()).isEqualTo("A");
+            assertThat(process.managerStatus()).isEqualTo("PID_ALIVE");
         });
+    }
+
+    @Test
+    void overviewKeepsManagedProcessMetadataNullForLegacySnapshot() {
+        FakeRepository repository = new FakeRepository();
+        RedisSnapshotHeartbeatStore heartbeatStore = new RedisSnapshotHeartbeatStore();
+        heartbeatStore.managerSnapshots.add(new ManagerRuntimeSnapshot(
+                container(),
+                manager(),
+                List.of(connection()),
+                null,
+                List.of(legacyManagedProcess())));
+        RuntimeManagementQueryService service = service(repository, heartbeatStore);
+
+        RuntimeManagementManagedProcess row = service
+                .overview(OpencodeServerProcessFilter.empty(), new PageRequest(1, 20), TRACE_ID)
+                .managers()
+                .getFirst()
+                .managedProcesses()
+                .getFirst();
+
+        assertThat(row.unifiedAuthId()).isNull();
+        assertThat(row.managerStatus()).isNull();
     }
 
     @Test
@@ -506,6 +533,8 @@ class RuntimeManagementQueryServiceTest {
         assertThat(row.ownership()).isEqualTo(RuntimeManagementManagedProcessOwnership.BOUND);
         assertThat(row.processId()).isEqualTo(process.processId());
         assertThat(row.processStatus()).isEqualTo(OpencodeServerProcessStatus.RUNNING);
+        assertThat(row.unifiedAuthId()).isEqualTo("A");
+        assertThat(row.managerStatus()).isEqualTo("PID_ALIVE");
         assertThat(row.userId()).isEqualTo(process.userId());
         assertThat(row.username()).contains("process-user");
         assertThat(row.bindingStatus()).isEqualTo(UserOpencodeProcessBindingStatus.ACTIVE);
@@ -726,6 +755,20 @@ class RuntimeManagementQueryServiceTest {
     }
 
     private static ManagedOpencodeProcessSnapshot managedProcess() {
+        return new ManagedOpencodeProcessSnapshot(
+                4096,
+                12345L,
+                "http://10.8.0.12:4096",
+                "/data/opencode/session/4096",
+                "/data/opencode/.config/opencode/",
+                NOW,
+                "XDG_DATA_HOME=/data/opencode/session/4096 OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs",
+                TRACE_ID,
+                "A",
+                "PID_ALIVE");
+    }
+
+    private static ManagedOpencodeProcessSnapshot legacyManagedProcess() {
         return new ManagedOpencodeProcessSnapshot(
                 4096,
                 12345L,

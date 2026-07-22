@@ -568,13 +568,14 @@ bash /tmp/deploy-internal-frontend.sh \
   --archive /data/0709/test-agent-internal-release.zip
 ```
 
-首次部署时先让两台 Java 都通过 health/readiness 并写对身份文件，再分别启动本机 worker。升级时可以逐台滚动，但每一台内部仍必须按：
+首次部署时先让两台 Java 都通过 health/readiness 并写对身份文件，再分别启动本机 worker。已有环境升级用户绑定端口复用版本时，先逐台更新并重启 worker/manager，再滚动更新 Java，全部后端就绪后最后部署一次前端；不要在同一用户初始化期间跨节点切换版本。每台已有节点按：
 
 ```text
-替换 JAR/lib -> 重启 Java -> 检查 .serverid/.serverhost -> 重启本机 worker
+替换 worker 镜像/programs -> 重启 manager 并确认 stopOwned capability
+-> 替换 JAR/lib -> 重启 Java -> 检查 health/readiness 与 .serverid/.serverhost
 ```
 
-不得清理 `/data/testagent/data`，也不要把 A 的数据目录复制覆盖到 B。
+混合版本遇到未知命令或启动错误时必须保留原 binding，只报错、不迁移端口。不得清理 `/data/testagent/data`，也不要把 A 的数据目录复制覆盖到 B；存量无主进程由超级管理员在运行管理核对 UCID/PID/端口后手工处理。
 
 每台后台部署脚本都会校验已有 systemd unit 的 JAR/env 指向；`systemctl stop` 后若 `8080` 仍被同一路径的旧 `test-agent-app.jar` 占用，会安全终止该遗留进程，其他程序占用则拒绝误杀。新 Java health/readiness 通过后还会核对 systemd `MainPID` 正是 `8080` 监听者，避免滚动升级时误连旧手工进程。
 

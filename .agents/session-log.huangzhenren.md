@@ -777,3 +777,19 @@
   - 请求落到 Java A 时，若用户未绑定且 Java B 所在服务器负载更低并满足调度条件，请求会转发到 B 并由 B 完成创建；已有 ACTIVE binding 不随负载变化迁移。
   - 未新增 HTTP 路径或 DTO，不修改 RunEvent、数据库/Flyway、SQL、manager 协议、前端、Nginx、环境变量或安全契约；Redis 快照仍为最终一致，并发容量继续由目标服务器原子预占保证。
   - 本机无真实双 Linux 节点环境，负载反转、manager 启动唯一性和既有绑定驻留仍需部署环境人工验收；当前工作区其它进程生命周期/manager/前端改动均未纳入本次提交。
+
+### 2026-07-22 - 修复用户绑定端口复用与无主进程展示
+
+- Why:
+  - 已有 ACTIVE binding 的进程不健康后会误走首次空闲端口分配，旧端口仍由 manager 托管时，数据库进程与 binding 被迁到新端口，旧进程因此在运行管理中显示为无主进程。
+- What:
+  - 已有 binding 恢复固定复用数据库中的服务器、容器和端口；仅 manager 明确返回 `PORT_CONFLICT` 或 `PORT_OUT_OF_RANGE` 时按原规则迁移。首次分配和迁移使用短事务、MyBatis `FOR UPDATE` 与条件更新原子预留，manager 调用在提交后执行；端口扫描补充 manager 实时占用端口。
+  - manager 串行化进程生命周期命令，补充稳定错误分类、同端口同身份幂等启动、跨端口同 UCID 拒绝、外部监听识别、SIGKILL 后退出确认及心跳清理竞态保护；恢复请求通过可选 `bindingRecovery` 在容量已满时沿用既有绑定。
+  - manager 心跳、Java DTO 与前端共享类型增加可选 `unifiedAuthId`、`managerStatus`；无主进程表与拓扑展示 UCID、PID 存活状态、“平台未登记”和“未执行 HTTP 健康检查”，并修复 `baseUrl` 列错位。未从启动命令解析 UCID，也不自动认领或清理存量无主进程。
+- How:
+  - TDD 覆盖原端口恢复、显式冲突迁移、STALE/超时/配置/容量错误保持绑定、预留后失败重试、同用户与不同用户并发、manager 幂等/身份唯一/外部监听/并发命令、旧响应兼容及无主进程表和拓扑回退。
+  - 验证通过：manager `go test -race ./... -count=1`；runtime Maven reactor、API Controller 定向测试、PostgreSQL 锁集成测试 6 项；前端定向 Vitest 17 项与全 workspace typecheck；`git diff --check` 通过。
+- Result:
+  - 4104 不健康时先由公共停止流程确认退出，再继续在 4104 启动；只有明确端口冲突/越界才迁移到 4105，普通故障和并发跟随者不会创建第二个绑定端口。
+  - 同步 runtime、manager、API/domain/persistence、frontend、HTTP API、事件流、安全及企业部署文档。未新增 HTTP 路径、SSE 事件或数据库结构，不修改环境配置和 generated SDK；可选字段兼容滚动升级，推荐按 manager、Java、前端顺序升级。
+  - 存量重复/无主进程不自动处理；若触发身份唯一保护，仍需管理员根据 SUPER_ADMIN 运行管理页手工处置。全量前端/模拟 E2E 的既有 Mermaid 超时、DirectoryRows role 与工作区可见性基线失败不在本次范围，任务定向验证均通过。

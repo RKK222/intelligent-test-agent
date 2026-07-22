@@ -5,6 +5,7 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.opencodeprocess.ManagedOpencodeProcessSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
+import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessAtomicMutationPort;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcess;
@@ -12,7 +13,6 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcessStat
 import com.enterprise.testagent.opencode.runtime.process.socket.ManagerControlSettings;
 import java.time.Clock;
 import java.time.Instant;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +29,7 @@ import org.springframework.stereotype.Service;
 public class OpencodeProcessStatusQueryService {
 
     private final OpencodeProcessManagementRepository repository;
+    private final OpencodeProcessAtomicMutationPort atomicMutationPort;
     private final OpencodeProcessManagerGateway gateway;
     private final OpencodeProcessHeartbeatStore heartbeatStore;
     private final Clock clock;
@@ -43,8 +44,16 @@ public class OpencodeProcessStatusQueryService {
             OpencodeProcessManagementRepository repository,
             OpencodeProcessManagerGateway gateway,
             OpencodeProcessHeartbeatStore heartbeatStore,
+            OpencodeProcessAtomicMutationPort atomicMutationPort,
             ManagerControlSettings settings) {
-        this(repository, gateway, heartbeatStore, Clock.systemUTC(), new OpencodeServerAddressResolver(settings.advertisedHost()));
+        this(
+                repository,
+                gateway,
+                heartbeatStore,
+                atomicMutationPort,
+                Clock.systemUTC(),
+                new OpencodeServerAddressResolver(settings.advertisedHost()),
+                new JdkOpencodeWeakHealthHttpClient());
     }
 
     /**
@@ -68,13 +77,37 @@ public class OpencodeProcessStatusQueryService {
         this(repository, gateway, heartbeatStore, clock, null);
     }
 
+    /** 测试构造器允许注入可记录/拒绝的原子状态端口。 */
+    OpencodeProcessStatusQueryService(
+            OpencodeProcessManagementRepository repository,
+            OpencodeProcessManagerGateway gateway,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            OpencodeProcessAtomicMutationPort atomicMutationPort,
+            Clock clock) {
+        this(
+                repository,
+                gateway,
+                heartbeatStore,
+                atomicMutationPort,
+                clock,
+                null,
+                new JdkOpencodeWeakHealthHttpClient());
+    }
+
     OpencodeProcessStatusQueryService(
             OpencodeProcessManagementRepository repository,
             OpencodeProcessManagerGateway gateway,
             OpencodeProcessHeartbeatStore heartbeatStore,
             Clock clock,
             OpencodeServerAddressResolver addressResolver) {
-        this(repository, gateway, heartbeatStore, clock, addressResolver, new JdkOpencodeWeakHealthHttpClient());
+        this(
+                repository,
+                gateway,
+                heartbeatStore,
+                new RepositoryBackedOpencodeProcessAtomicMutationPort(repository),
+                clock,
+                addressResolver,
+                new JdkOpencodeWeakHealthHttpClient());
     }
 
     OpencodeProcessStatusQueryService(
@@ -84,7 +117,26 @@ public class OpencodeProcessStatusQueryService {
             Clock clock,
             OpencodeServerAddressResolver addressResolver,
             OpencodeWeakHealthHttpClient weakHealthHttpClient) {
+        this(
+                repository,
+                gateway,
+                heartbeatStore,
+                new RepositoryBackedOpencodeProcessAtomicMutationPort(repository),
+                clock,
+                addressResolver,
+                weakHealthHttpClient);
+    }
+
+    OpencodeProcessStatusQueryService(
+            OpencodeProcessManagementRepository repository,
+            OpencodeProcessManagerGateway gateway,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            OpencodeProcessAtomicMutationPort atomicMutationPort,
+            Clock clock,
+            OpencodeServerAddressResolver addressResolver,
+            OpencodeWeakHealthHttpClient weakHealthHttpClient) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
+        this.atomicMutationPort = Objects.requireNonNull(atomicMutationPort, "atomicMutationPort must not be null");
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
         this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
@@ -110,7 +162,7 @@ public class OpencodeProcessStatusQueryService {
                     true,
                     null);
         }
-        return queryExisting(process.get(), checkedAt, traceId, true);
+        return queryExisting(process.get(), checkedAt, traceId, true, false);
     }
 
     /**
@@ -119,7 +171,20 @@ public class OpencodeProcessStatusQueryService {
      */
     public OpencodeProcessStatusProbe querySnapshot(OpencodeServerProcess processSnapshot, String traceId) {
         Objects.requireNonNull(processSnapshot, "processSnapshot must not be null");
-        return queryExisting(processSnapshot, Instant.now(clock), traceId, false);
+        return queryExisting(processSnapshot, Instant.now(clock), traceId, false, false);
+    }
+
+    /**
+     * 对可信旧坐标执行真正只读的精确健康探测，不写数据库也不刷新 Redis heartbeat。
+     *
+     * <p>该入口用于 startup 竞争补偿的停止后确认：即使数据库 assignment 已迁移，也必须能够
+     * 直接判断旧端口 manager state 是否消失，不能因旧坐标 CAS 冲突退化为 STALE。
+     */
+    public OpencodeProcessStatusProbe querySnapshotReadOnly(
+            OpencodeServerProcess processSnapshot,
+            String traceId) {
+        Objects.requireNonNull(processSnapshot, "processSnapshot must not be null");
+        return queryExisting(processSnapshot, Instant.now(clock), traceId, false, true);
     }
 
     /**
@@ -200,10 +265,13 @@ public class OpencodeProcessStatusQueryService {
             OpencodeServerProcess process,
             Instant checkedAt,
             String traceId,
-            boolean persistStableSnapshot) {
+            boolean persistStableSnapshot,
+            boolean readOnly) {
         try {
             OpencodeProcessHealthResult health = gateway.checkHealth(new OpencodeProcessHealthCommand(
                     process.processId(),
+                    process.containerId(),
+                    process.port(),
                     healthBaseUrl(process),
                     traceId));
             if (health == null) {
@@ -211,17 +279,39 @@ public class OpencodeProcessStatusQueryService {
                 return staleProbe(process, checkedAt, "opencode 健康检测未返回结果", ErrorCode.OPENCODE_BAD_GATEWAY);
             }
             if (health.healthy()) {
-                OpencodeServerProcess running = persistStableSnapshot
-                                || stableSnapshotChanged(process, OpencodeServerProcessStatus.RUNNING, process.pid())
-                        ? saveSnapshot(
+                if (health.pid() == null || health.pid() < 1) {
+                    // tracked stop/start 必须使用 manager 本次确认的 PID，不能回退数据库旧生命周期。
+                    return staleProbe(
+                            process,
+                            checkedAt,
+                            "TestAgent manager 健康结果缺少受管 PID",
+                            ErrorCode.OPENCODE_BAD_GATEWAY);
+                }
+                Long runningPid = health.pid();
+                OpencodeServerProcess running = readOnly
+                        ? runtimeSnapshot(
                                 process,
                                 OpencodeServerProcessStatus.RUNNING,
-                                process.pid(),
+                                runningPid,
                                 health.message(),
                                 checkedAt,
                                 traceId)
-                        : process;
-                heartbeatStore.recordOpencodeHeartbeat(running.processId(), checkedAt);
+                        : !persistStableSnapshot
+                                        && !stableSnapshotChanged(
+                                                process,
+                                                OpencodeServerProcessStatus.RUNNING,
+                                                runningPid)
+                                ? process
+                                : saveSnapshot(
+                                process,
+                                OpencodeServerProcessStatus.RUNNING,
+                                runningPid,
+                                health.message(),
+                                checkedAt,
+                                traceId);
+                if (!readOnly) {
+                    heartbeatStore.recordOpencodeHeartbeat(running.processId(), checkedAt);
+                }
                 return new OpencodeProcessStatusProbe(
                         OpencodeProcessProbeStatus.RUNNING,
                         Optional.of(running),
@@ -232,18 +322,42 @@ public class OpencodeProcessStatusQueryService {
                         false,
                         null);
             }
-            // 只有进程明确死亡或 Manager 明确返回 not managed/not running 才立即写入 STOPPED
-            if (isNotRunningHealthMessage(health.message())) {
-                OpencodeServerProcess stopped = persistStableSnapshot
-                                || stableSnapshotChanged(process, OpencodeServerProcessStatus.STOPPED, null)
-                        ? saveSnapshot(
+            if (health.managerProcessPresent() && health.pid() != null && health.pid() > 0) {
+                // manager 与 PID 均存在时，HTTP/config 不健康是可重启的确定状态，不能降级为瞬时 STALE。
+                OpencodeServerProcess managed = withManagerPid(process, health.pid());
+                return new OpencodeProcessStatusProbe(
+                        OpencodeProcessProbeStatus.HEALTH_CHECK_FAILED,
+                        Optional.of(managed),
+                        "RUNNING",
+                        "UNHEALTHY",
+                        health.message(),
+                        checkedAt,
+                        true,
+                        null);
+            }
+            // manager 明确找不到受管进程或 PID 时才写入 STOPPED。
+            if (!health.managerProcessPresent()) {
+                OpencodeServerProcess stopped = readOnly
+                        ? runtimeSnapshot(
                                 process,
                                 OpencodeServerProcessStatus.STOPPED,
                                 null,
                                 health.message(),
                                 checkedAt,
                                 traceId)
-                        : process;
+                        : !persistStableSnapshot
+                                        && !stableSnapshotChanged(
+                                                process,
+                                                OpencodeServerProcessStatus.STOPPED,
+                                                null)
+                                ? process
+                                : saveSnapshot(
+                                process,
+                                OpencodeServerProcessStatus.STOPPED,
+                                null,
+                                health.message(),
+                                checkedAt,
+                                traceId);
                 return new OpencodeProcessStatusProbe(
                         OpencodeProcessProbeStatus.NOT_STARTED,
                         Optional.of(stopped),
@@ -254,10 +368,7 @@ public class OpencodeProcessStatusQueryService {
                         true,
                         null);
             }
-            // 普通 HTTP 不健康：不持久化数据库状态，返回 STALE 让调用方使用上次成功数据
-            // 注意：当前没有实现连续失败阈值机制，HTTP 长期故障时数据库会保持 RUNNING
-            // TODO: 第二阶段引入连续失败计数和状态降级
-            return staleProbe(process, checkedAt, health.message(), ErrorCode.OPENCODE_UNAVAILABLE);
+            return staleProbe(process, checkedAt, health.message(), ErrorCode.OPENCODE_BAD_GATEWAY);
         } catch (RuntimeException exception) {
             // 瞬时异常（网络超时、连接拒绝等）不持久化，返回 STALE 状态
             ErrorCode errorCode = exception instanceof PlatformException platformException
@@ -297,7 +408,28 @@ public class OpencodeProcessStatusQueryService {
             String healthMessage,
             Instant checkedAt,
             String traceId) {
-        return repository.saveOpencodeServerProcess(new OpencodeServerProcess(
+        OpencodeServerProcess replacement = runtimeSnapshot(
+                process,
+                status,
+                pid,
+                healthMessage,
+                checkedAt,
+                traceId);
+        if (!atomicMutationPort.compareAndSetRuntimeState(process, replacement)) {
+            throw new com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessAssignmentConflictException(
+                    "TestAgent 进程分配已变化，忽略旧健康快照");
+        }
+        return replacement;
+    }
+
+    private OpencodeServerProcess runtimeSnapshot(
+            OpencodeServerProcess process,
+            OpencodeServerProcessStatus status,
+            Long pid,
+            String healthMessage,
+            Instant checkedAt,
+            String traceId) {
+        return new OpencodeServerProcess(
                 process.processId(),
                 process.userId(),
                 process.linuxServerId(),
@@ -313,7 +445,30 @@ public class OpencodeProcessStatusQueryService {
                 healthMessage,
                 process.createdAt(),
                 checkedAt,
-                traceId));
+                traceId);
+    }
+
+    private OpencodeServerProcess withManagerPid(OpencodeServerProcess process, Long managerPid) {
+        if (Objects.equals(process.pid(), managerPid)) {
+            return process;
+        }
+        return new OpencodeServerProcess(
+                process.processId(),
+                process.userId(),
+                process.linuxServerId(),
+                process.containerId(),
+                process.port(),
+                managerPid,
+                process.baseUrl(),
+                process.status(),
+                process.sessionPath(),
+                process.configPath(),
+                process.startedAt(),
+                process.lastHealthCheckAt(),
+                process.healthMessage(),
+                process.createdAt(),
+                process.updatedAt(),
+                process.traceId());
     }
 
     private String refreshedBaseUrl(OpencodeServerProcess process) {
@@ -364,17 +519,4 @@ public class OpencodeProcessStatusQueryService {
         return value == null ? "" : value.trim();
     }
 
-    /**
-     * 判断 manager health 的不健康说明是否表示进程不存在或未启动。
-     */
-    static boolean isNotRunningHealthMessage(String message) {
-        String normalized = message == null ? "" : message.toLowerCase(Locale.ROOT);
-        return normalized.contains("pid is not alive")
-                || normalized.contains("process is not alive")
-                || normalized.contains("process is not running")
-                || normalized.contains("process not found")
-                || normalized.contains("state not found")
-                || normalized.contains("already stopped")
-                || normalized.contains("not managed");
-    }
 }

@@ -1017,6 +1017,8 @@ export type OpencodeRuntimeManagedProcess = {
   startedAt?: string | null;
   startCommand?: string | null;
   traceId?: string | null;
+  unifiedAuthId?: string | null;
+  managerStatus?: string | null;
   ownership?: "BOUND" | "UNBOUND" | string | null;
   processId?: string | null;
   processStatus?: string | null;

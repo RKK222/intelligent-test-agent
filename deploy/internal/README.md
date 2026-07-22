@@ -87,6 +87,8 @@ deploy/internal/dist/frontend/
 
 `test-agent-programs.tar.gz` 已内置与 OpenCode `1.17.8` 锁定的自定义 Tool 基线：`@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及其全部传递依赖；Node 22 自带的 `fetch`、`URL`、`AbortController` 等标准 API 不需要额外包。OpenCode 启动时不会联网安装依赖，而会为公共配置 `tools/` 和项目 `.opencode/tools/` 建立指向 `/data/testagent/programs/opencode/node_modules` 的非覆盖式链接；配置目录已有同名包时保留现有版本，链接目录由 `.gitignore` 排除，不应提交到公共仓库。
 
+Node 兼容 bundle 保留 provider `chunkTimeout` 的分片超时保护。上游 SSE 长时间无数据时，当前包会把 `SSE read timed out` 交给既有会话错误/重试流程，并显式消费底层流取消失败；该超时不得再以未处理 Promise 拒绝结束整个用户 opencode server。若日志出现 `triggerUncaughtException`、`ResponseStreamError: SSE read timed out` 后紧接 `Node.js v22.23.1` 且进程退出，说明仍在运行未包含此兼容修复的旧 worker 镜像；调整 `chunkTimeout` 只能改变触发时长，必须在外网 Mac 重打完整包、导入新 worker 镜像并重启对应用户进程。
+
 这套基线覆盖使用官方 `tool(...)`、schema、SDK 类型和 Effect/Zod 的 Tool。`axios`、数据库驱动或企业私有 SDK 等任意业务依赖不会被猜测加入；新增这类 import 时，必须同步修改 `opencode-node-runtime.package.json` 和 lockfile，在外网 Mac 重新打完整企业包。升级依赖不能只替换 Tool 文件，必须同时解压新 programs、导入新 worker 镜像并重启 worker；标准 `deploy-internal-release.sh` 已按该顺序执行。
 
 Agent 配置热加载不修改 OpenCode 的配置目录解析：公共配置继续由 `OPENCODE_CONFIG_DIR` 提供，应用配置由当前个人 workspace 的 `.opencode` 提供；平台在 Git 发布阶段同步个人 worktree，再调用 OpenCode 原生 `/global/dispose`。`opencode-node-compat.patch` 只保留既有企业离线 Node 依赖兼容内容，不再包含公共个人或应用共享路径映射，也不需要在 `docker.env` 手工拼接个人物理路径。
@@ -172,9 +174,9 @@ test-agent-config-SENSITIVE-<role>-<node>-<timestamp>.tar.gz.sha256
 
 企业交付 JAR/ZIP 包含平台 RSA 私钥，必须按密钥交付物限制读取、复制和留存；替换内置密钥会让既有数据库 SSH key 密文无法解密，除非用户重新保存 SSH key。
 
-## 固定启动顺序
+## 首次部署与版本升级顺序
 
-无论单后台还是多后台，每个后端节点都按以下顺序部署：
+首次部署时 Java 需要先写 `.serverid/.serverhost`，无论单后台还是多后台，每个后端节点都按以下顺序部署：
 
 1. 在 `122.233.30.147` 执行 `deploy-mysql-node.sh`，离线导入 MySQL 8.4 linux/amd64 镜像，初始化 `xxl_job` 库和最小权限账号；密码由打包阶段安全生成并同步写入两个后台节点包。
 2. 替换 Java JAR、`backend/lib/` 和随包 XXL 上游许可证材料。
@@ -184,9 +186,11 @@ test-agent-config-SENSITIVE-<role>-<node>-<timestamp>.tar.gz.sha256
 6. 启动本机唯一 worker，等待当前结构化日志 `event=manager_config_update status=applied`；部署脚本同时兼容旧版 `manager config update applied`。
 7. 配置/重载 Nginx 同源 `/xxl-job-admin/` 代理，初始化公共 OpenCode 并完成 iframe SSO/executor 验收。
 
+已有环境升级“用户绑定端口复用与无主进程展示”版本时，身份文件和 manager state 已存在，顺序改为“manager → Java 后端 → 前端”：先逐台更新 worker/manager 并确认 `stopOwned` capability 和心跳恢复，再滚动更新 Java，全部 Java 就绪后最后部署一次前端。混合版本中的未知命令或错误只允许报错并保留原 binding，不得迁移端口；不要在滚动窗口内同时对同一用户执行人工重启与初始化。该版本不变更 `backend.env`、`docker.env`、数据库结构、SSE 或 generated SDK，也不自动处理存量重复/无主进程。
+
 扩容时只在新 Linux 启动一套 Java/worker，将新节点同时加入 `TEST_AGENT_NGINX_BACKENDS` 和 `TEST_AGENT_NGINX_XXL_JOB_ADMINS` 后执行 Nginx 无停机 reload；这两个 Nginx upstream 变量不是 Java 配置，旧 Java 不需要修改环境或重启。manager 异常时优先核对数据根目录、manager token、`.serverid/.serverhost` 和 `4096-4105` 端口池。
 
-不要先启动 worker 再修 Java 身份文件。
+首次部署不要先启动 worker 再修 Java 身份文件；上述 manager 优先顺序只适用于身份文件和 state 已存在的升级。
 
 ## 配置模板
 

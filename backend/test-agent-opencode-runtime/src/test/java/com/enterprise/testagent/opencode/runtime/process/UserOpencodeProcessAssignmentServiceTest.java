@@ -117,6 +117,7 @@ class UserOpencodeProcessAssignmentServiceTest {
         assertThat(gateway.startCommands.getFirst().sessionPath()).isEqualTo(USER_SESSION_DIR);
         assertThat(gateway.startCommands.getFirst().configPath())
                 .isEqualTo("/tmp/testagent/.session/users/ucid_001/.testagent-runtime/current-public-config");
+        assertThat(gateway.startCommands.getFirst().bindingRecovery()).isFalse();
         assertThat(repository.findUserBinding(USER_ID, "opencode")).get()
                 .extracting(UserOpencodeProcessBinding::linuxServerId)
                 .isEqualTo(new LinuxServerId("10.8.0.13"));
@@ -282,6 +283,28 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     @org.junit.jupiter.api.Test
+    void statusAllowsExactBindingRecoveryWhenBoundContainerIsAtCapacity() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_full", container("ctr_full", "10.8.0.12", 4096, 4099, 4, 4));
+        OpencodeServerProcess process = process(
+                "ocp_existing", USER_ID, "10.8.0.12", "ctr_full", 4096, OpencodeServerProcessStatus.STOPPED);
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(
+                USER_ID.value() + ":opencode",
+                binding(USER_ID, process.processId(), "10.8.0.12", 4096));
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.health = OpencodeProcessHealthResult.notRunning("not managed");
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessStatusResponse response = service.status(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.NEEDS_INITIALIZATION);
+        assertThat(response.initializable()).isTrue();
+        assertThat(response.containerId()).isEqualTo("ctr_full");
+        assertThat(response.port()).isEqualTo(4096);
+    }
+
+    @org.junit.jupiter.api.Test
     void statusKeepsReadyDuringShortStaleGracePeriod() {
         FakeRepository repository = new FakeRepository();
         OpencodeServerProcess process = withLastHealthCheckAt(
@@ -290,7 +313,7 @@ class UserOpencodeProcessAssignmentServiceTest {
         repository.processes.put(process.processId().value(), process);
         repository.bindings.put(USER_ID.value() + ":opencode", binding(USER_ID, process.processId(), "10.8.0.12", 4096));
         RecordingGateway gateway = new RecordingGateway();
-        gateway.health = OpencodeProcessHealthResult.unhealthy("temporary health failure");
+        gateway.healthFailure = new PlatformException(ErrorCode.OPENCODE_TIMEOUT, "temporary manager timeout");
         UserOpencodeProcessAssignmentService service = service(repository, gateway);
 
         UserOpencodeProcessStatusResponse response = service.status(USER_ID, "opencode", TRACE_ID);
@@ -312,13 +335,35 @@ class UserOpencodeProcessAssignmentServiceTest {
         repository.processes.put(process.processId().value(), process);
         repository.bindings.put(USER_ID.value() + ":opencode", binding(USER_ID, process.processId(), "10.8.0.12", 4096));
         RecordingGateway gateway = new RecordingGateway();
-        gateway.health = OpencodeProcessHealthResult.unhealthy("persistent health failure");
+        gateway.healthFailure = new PlatformException(ErrorCode.OPENCODE_TIMEOUT, "persistent manager timeout");
         UserOpencodeProcessAssignmentService service = service(repository, gateway);
 
         assertThatThrownBy(() -> service.requireReadyProcess(USER_ID, "opencode", TRACE_ID))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE));
         assertThat(repository.savedNodes).isEmpty();
+    }
+
+    @org.junit.jupiter.api.Test
+    void statusExpiredStaleIsUnavailableAndKeepsBindingNonInitializable() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_idle", container("ctr_idle", "10.8.0.12", 4096, 4100, 4, 1));
+        OpencodeServerProcess process = process(
+                "ocp_expired", USER_ID, "10.8.0.12", "ctr_idle", 4096, OpencodeServerProcessStatus.RUNNING);
+        UserOpencodeProcessBinding original = binding(USER_ID, process.processId(), "10.8.0.12", 4096);
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(USER_ID.value() + ":opencode", original);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.healthFailure = new PlatformException(ErrorCode.OPENCODE_TIMEOUT, "manager timeout");
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessStatusResponse response = service.status(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.UNAVAILABLE);
+        assertThat(response.initializable()).isFalse();
+        assertThat(response.processId()).isEqualTo("ocp_expired");
+        assertThat(response.port()).isEqualTo(4096);
+        assertThat(repository.bindings.get(USER_ID.value() + ":opencode")).isEqualTo(original);
     }
 
     @org.junit.jupiter.api.Test
@@ -389,7 +434,7 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     @org.junit.jupiter.api.Test
-    void initializeRebuildsUnhealthyBindingOnSameLinuxServer() {
+    void initializeStopsAndRestartsManagedUnhealthyBindingOnSamePort() {
         FakeRepository repository = new FakeRepository();
         repository.containers.put("ctr_old", container("ctr_old", "10.8.0.12", 4096, 4098, 3, 1));
         repository.containers.put("ctr_new", container("ctr_new", "10.8.0.12", 4200, 4202, 3, 0));
@@ -398,18 +443,462 @@ class UserOpencodeProcessAssignmentServiceTest {
         repository.processes.put(oldProcess.processId().value(), oldProcess);
         repository.bindings.put(USER_ID.value() + ":opencode", binding(USER_ID, oldProcess.processId(), "10.8.0.12", 4096));
         RecordingGateway gateway = new RecordingGateway();
-        gateway.healthResults.add(OpencodeProcessHealthResult.unhealthy("down"));
-        gateway.healthResults.add(OpencodeProcessHealthResult.healthy("ok"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.managedUnhealthy(22222L, "http health failed"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.managedUnhealthy(22222L, "http health failed"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.notRunning("stopped"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.healthy(12345L, "ok"));
         UserOpencodeProcessAssignmentService service = service(repository, gateway);
 
         UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
 
         assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
         assertThat(response.linuxServerId()).isEqualTo("10.8.0.12");
+        assertThat(response.containerId()).isEqualTo("ctr_old");
+        assertThat(response.port()).isEqualTo(4096);
+        assertThat(response.processId()).isEqualTo("ocp_existing");
+        assertThat(gateway.ownedStopCommands).singleElement().satisfies(command -> {
+            assertThat(command.containerId()).isEqualTo(new OpencodeContainerId("ctr_old"));
+            assertThat(command.port()).isEqualTo(4096);
+            assertThat(command.expectedUnifiedAuthId()).isEqualTo(USER_UNIFIED_AUTH_ID);
+            assertThat(command.expectedPid()).isEqualTo(22222L);
+        });
+        assertThat(gateway.stopCommands).isEmpty();
+        assertThat(gateway.startCommands).singleElement().satisfies(command -> {
+            assertThat(command.containerId()).isEqualTo(new OpencodeContainerId("ctr_old"));
+            assertThat(command.port()).isEqualTo(4096);
+        });
+        assertThat(gateway.startCommands.getFirst().linuxServerId()).isEqualTo(new LinuxServerId("10.8.0.12"));
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeStartsNotStartedBindingOnExactFullContainerAndOccupiedPort() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_full", container("ctr_full", "10.8.0.12", 4096, 4099, 4, 4));
+        OpencodeServerProcess process = process(
+                "ocp_existing", USER_ID, "10.8.0.12", "ctr_full", 4096, OpencodeServerProcessStatus.STOPPED);
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(USER_ID.value() + ":opencode", binding(USER_ID, process.processId(), "10.8.0.12", 4096));
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.healthResults.add(OpencodeProcessHealthResult.notRunning("not managed"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.healthy(12345L, "ok"));
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.processId()).isEqualTo("ocp_existing");
+        assertThat(response.containerId()).isEqualTo("ctr_full");
+        assertThat(response.port()).isEqualTo(4096);
+        assertThat(gateway.startCommands).singleElement().satisfies(command -> {
+            assertThat(command.port()).isEqualTo(4096);
+            assertThat(command.bindingRecovery()).isTrue();
+        });
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeStaleBindingDoesNotStopStartOrChangeBinding() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_old", container("ctr_old", "10.8.0.12", 4096, 4099, 4, 1));
+        repository.containers.put("ctr_new", container("ctr_new", "10.8.0.12", 4200, 4203, 4, 0));
+        OpencodeServerProcess process = process(
+                "ocp_existing", USER_ID, "10.8.0.12", "ctr_old", 4096, OpencodeServerProcessStatus.RUNNING);
+        UserOpencodeProcessBinding original = binding(USER_ID, process.processId(), "10.8.0.12", 4096);
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(USER_ID.value() + ":opencode", original);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.healthFailure = new PlatformException(ErrorCode.OPENCODE_TIMEOUT, "manager timeout");
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        assertThatThrownBy(() -> service.initialize(USER_ID, "opencode", TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE));
+        assertThat(gateway.stopCommands).isEmpty();
+        assertThat(gateway.ownedStopCommands).isEmpty();
+        assertThat(gateway.startAttempts).isEmpty();
+        assertThat(repository.bindings.get(USER_ID.value() + ":opencode")).isEqualTo(original);
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializePortConflictMigratesOnSameServerAndPreservesIdentityAndCreatedTimes() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_old", container("ctr_old", "10.8.0.12", 4096, 4098, 3, 3));
+        repository.containers.put("ctr_new", container("ctr_new", "10.8.0.12", 4200, 4202, 3, 0));
+        repository.containers.put("ctr_other", container("ctr_other", "10.8.0.13", 4300, 4302, 3, 0));
+        OpencodeServerProcess process = process(
+                "ocp_existing", USER_ID, "10.8.0.12", "ctr_old", 4096, OpencodeServerProcessStatus.STOPPED);
+        UserOpencodeProcessBinding original = binding(USER_ID, process.processId(), "10.8.0.12", 4096);
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(USER_ID.value() + ":opencode", original);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.healthResults.add(OpencodeProcessHealthResult.notRunning("not managed"));
+        gateway.startFailures.add(new OpencodeProcessStartRejectionException(
+                OpencodeProcessStartRejectionReason.PORT_CONFLICT));
+        gateway.healthResults.add(OpencodeProcessHealthResult.healthy(12345L, "ok"));
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.processId()).isEqualTo(process.processId().value());
+        assertThat(response.linuxServerId()).isEqualTo("10.8.0.12");
         assertThat(response.containerId()).isEqualTo("ctr_new");
         assertThat(response.port()).isEqualTo(4200);
+        assertThat(repository.processes.get(process.processId().value()).createdAt()).isEqualTo(process.createdAt());
+        assertThat(repository.bindings.get(USER_ID.value() + ":opencode").createdAt()).isEqualTo(original.createdAt());
+        assertThat(gateway.startAttempts).extracting(OpencodeProcessStartCommand::port)
+                .containsExactly(4096, 4200);
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeConcurrentMigrationFollowerNeverStartsWinnerPort() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_old", container("ctr_old", "10.8.0.12", 4096, 4098, 3, 1));
+        repository.containers.put("ctr_new", container("ctr_new", "10.8.0.12", 4200, 4202, 3, 0));
+        OpencodeServerProcess original = process(
+                "ocp_existing", USER_ID, "10.8.0.12", "ctr_old", 4096, OpencodeServerProcessStatus.STOPPED);
+        OpencodeServerProcess winner = new OpencodeServerProcess(
+                original.processId(),
+                original.userId(),
+                original.linuxServerId(),
+                new OpencodeContainerId("ctr_new"),
+                4200,
+                null,
+                "http://10.8.0.21:4200",
+                OpencodeServerProcessStatus.STARTING,
+                original.sessionPath(),
+                original.configPath(),
+                NOW,
+                NOW,
+                "迁移端口已预留，等待 manager 启动",
+                original.createdAt(),
+                NOW,
+                TRACE_ID);
+        repository.processes.put(original.processId().value(), original);
+        repository.bindings.put(
+                USER_ID.value() + ":opencode",
+                binding(USER_ID, original.processId(), "10.8.0.12", 4096));
+        repository.beforeFindUserBinding = () -> {
+            // 首次读取保留旧坐标；迁移事务复查时模拟另一个请求已提交 4200 的 STARTING assignment。
+            if (repository.findUserBindingCalls == 2) {
+                repository.processes.put(winner.processId().value(), winner);
+                repository.bindings.put(
+                        USER_ID.value() + ":opencode",
+                        binding(USER_ID, winner.processId(), "10.8.0.12", 4200));
+            }
+        };
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.healthResults.add(OpencodeProcessHealthResult.notRunning("not managed"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.notRunning("winner not started yet"));
+        gateway.startFailures.add(new OpencodeProcessStartRejectionException(
+                OpencodeProcessStartRejectionReason.PORT_CONFLICT));
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        assertThatThrownBy(() -> service.initialize(USER_ID, "opencode", TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.getMessage()).contains("初始化正在进行"));
+        assertThat(gateway.startAttempts).extracting(OpencodeProcessStartCommand::port).containsExactly(4096);
+        assertThat(gateway.stopCommands).isEmpty();
+        assertThat(gateway.ownedStopCommands).isEmpty();
+        assertThat(repository.processes.get(original.processId().value()).port()).isEqualTo(4200);
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeRetriesNextSameServerPortAfterReplacementAlsoConflicts() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_old", container("ctr_old", "10.8.0.12", 4096, 4098, 3, 3));
+        repository.containers.put("ctr_new", container("ctr_new", "10.8.0.12", 4200, 4202, 3, 0));
+        OpencodeServerProcess process = process(
+                "ocp_existing", USER_ID, "10.8.0.12", "ctr_old", 4096, OpencodeServerProcessStatus.STOPPED);
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(USER_ID.value() + ":opencode", binding(USER_ID, process.processId(), "10.8.0.12", 4096));
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.healthResults.add(OpencodeProcessHealthResult.notRunning("not managed"));
+        gateway.startFailures.add(new OpencodeProcessStartRejectionException(
+                OpencodeProcessStartRejectionReason.PORT_CONFLICT));
+        gateway.startFailures.add(new OpencodeProcessStartRejectionException(
+                OpencodeProcessStartRejectionReason.PORT_CONFLICT));
+        gateway.healthResults.add(OpencodeProcessHealthResult.healthy(12345L, "ok"));
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.port()).isEqualTo(4201);
+        assertThat(gateway.startAttempts).extracting(OpencodeProcessStartCommand::port)
+                .containsExactly(4096, 4200, 4201);
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeOutOfRangeConfirmsOldPortNotManagedBeforeMigration() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_old", container("ctr_old", "10.8.0.12", 4200, 4202, 3, 0));
+        OpencodeServerProcess process = process(
+                "ocp_existing", USER_ID, "10.8.0.12", "ctr_old", 4096, OpencodeServerProcessStatus.STOPPED);
+        repository.processes.put(process.processId().value(), process);
+        UserOpencodeProcessBinding original = binding(USER_ID, process.processId(), "10.8.0.12", 4096);
+        repository.bindings.put(USER_ID.value() + ":opencode", original);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.healthResults.add(OpencodeProcessHealthResult.notRunning("not managed"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.healthy(12345L, "ok"));
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
+
         assertThat(response.processId()).isEqualTo("ocp_existing");
-        assertThat(gateway.startCommands.getFirst().linuxServerId()).isEqualTo(new LinuxServerId("10.8.0.12"));
+        assertThat(response.port()).isEqualTo(4200);
+        assertThat(repository.processes.get("ocp_existing").createdAt()).isEqualTo(process.createdAt());
+        assertThat(repository.bindings.get(USER_ID.value() + ":opencode").createdAt()).isEqualTo(original.createdAt());
+        assertThat(gateway.startAttempts).extracting(OpencodeProcessStartCommand::port).containsExactly(4200);
+        assertThat(gateway.healthCommands).hasSize(2);
+        assertThat(repository.events).containsSubsequence("health:4096", "saveProcess:4200");
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeOutOfRangeStopsManagedOldIdentityBeforeAnyMigrationWrite() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_old", container("ctr_old", "10.8.0.12", 4200, 4202, 3, 0));
+        OpencodeServerProcess process = process(
+                "ocp_existing", USER_ID, "10.8.0.12", "ctr_old", 4096, OpencodeServerProcessStatus.RUNNING);
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(
+                USER_ID.value() + ":opencode",
+                binding(USER_ID, process.processId(), "10.8.0.12", 4096));
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.trackManagedIdentity = true;
+        gateway.managedPort = 4096;
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.port()).isEqualTo(4200);
+        assertThat(gateway.managedPort).isEqualTo(4200);
+        assertThat(gateway.ownedStopCommands).singleElement().satisfies(command -> {
+            assertThat(command.containerId()).isEqualTo(new OpencodeContainerId("ctr_old"));
+            assertThat(command.port()).isEqualTo(4096);
+            assertThat(command.expectedUnifiedAuthId()).isEqualTo(USER_UNIFIED_AUTH_ID);
+            assertThat(command.expectedPid()).isEqualTo(12345L);
+        });
+        assertThat(gateway.stopCommands).isEmpty();
+        assertThat(repository.events.indexOf("stopCompleted:4096"))
+                .isGreaterThanOrEqualTo(0)
+                .isLessThan(repository.events.indexOf("saveProcess:4200"));
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeOutOfRangeRefusesMigrationWhenSameCoordinateLifecycleRestartsAfterStop() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_old", container("ctr_old", "10.8.0.12", 4200, 4202, 3, 0));
+        OpencodeServerProcess process = process(
+                "ocp_existing", USER_ID, "10.8.0.12", "ctr_old", 4096, OpencodeServerProcessStatus.RUNNING);
+        UserOpencodeProcessBinding original =
+                binding(USER_ID, process.processId(), "10.8.0.12", 4096);
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(USER_ID.value() + ":opencode", original);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.trackManagedIdentity = true;
+        gateway.managedPort = 4096;
+        java.util.concurrent.atomic.AtomicBoolean restarted = new java.util.concurrent.atomic.AtomicBoolean();
+        repository.afterProcessSaved = saved -> {
+            if (saved.status() == OpencodeServerProcessStatus.STOPPED
+                    && restarted.compareAndSet(false, true)) {
+                repository.processes.put(saved.processId().value(), new OpencodeServerProcess(
+                        saved.processId(),
+                        saved.userId(),
+                        saved.linuxServerId(),
+                        saved.containerId(),
+                        saved.port(),
+                        200L,
+                        saved.baseUrl(),
+                        OpencodeServerProcessStatus.RUNNING,
+                        saved.sessionPath(),
+                        saved.configPath(),
+                        NOW.plusSeconds(1),
+                        NOW.plusSeconds(1),
+                        "new lifecycle running",
+                        saved.createdAt(),
+                        NOW.plusSeconds(1),
+                        "trace_new_lifecycle"));
+                gateway.managedPort = saved.port();
+            }
+        };
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        assertThatThrownBy(() -> service.initialize(USER_ID, "opencode", TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE));
+
+        assertThat(repository.processes.get(process.processId().value())).satisfies(actual -> {
+            assertThat(actual.containerId()).isEqualTo(process.containerId());
+            assertThat(actual.port()).isEqualTo(4096);
+            assertThat(actual.status()).isEqualTo(OpencodeServerProcessStatus.RUNNING);
+            assertThat(actual.pid()).isEqualTo(200L);
+            assertThat(actual.traceId()).isEqualTo("trace_new_lifecycle");
+        });
+        assertThat(repository.bindings.get(USER_ID.value() + ":opencode")).isEqualTo(original);
+        assertThat(gateway.startAttempts).isEmpty();
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeOutOfRangeStopFailureKeepsAuthoritativeAssignmentUnchanged() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_old", container("ctr_old", "10.8.0.12", 4200, 4202, 3, 0));
+        OpencodeServerProcess process = process(
+                "ocp_existing", USER_ID, "10.8.0.12", "ctr_old", 4096, OpencodeServerProcessStatus.RUNNING);
+        UserOpencodeProcessBinding binding = binding(USER_ID, process.processId(), "10.8.0.12", 4096);
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(USER_ID.value() + ":opencode", binding);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.trackManagedIdentity = true;
+        gateway.managedPort = 4096;
+        gateway.stopFailure = new PlatformException(ErrorCode.OPENCODE_TIMEOUT, "stop timeout");
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        assertThatThrownBy(() -> service.initialize(USER_ID, "opencode", TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_TIMEOUT));
+
+        assertAssignment(repository, process, binding);
+        assertThat(gateway.startAttempts).isEmpty();
+        assertThat(repository.events).noneMatch(event -> event.equals("saveProcess:4200") || event.equals("saveBinding:4200"));
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeOutOfRangeStaleHealthKeepsAuthoritativeAssignmentUnchanged() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_old", container("ctr_old", "10.8.0.12", 4200, 4202, 3, 0));
+        OpencodeServerProcess process = process(
+                "ocp_existing", USER_ID, "10.8.0.12", "ctr_old", 4096, OpencodeServerProcessStatus.RUNNING);
+        UserOpencodeProcessBinding binding = binding(USER_ID, process.processId(), "10.8.0.12", 4096);
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(USER_ID.value() + ":opencode", binding);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.healthFailure = new PlatformException(ErrorCode.OPENCODE_TIMEOUT, "manager timeout");
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        assertThatThrownBy(() -> service.initialize(USER_ID, "opencode", TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE));
+
+        assertAssignment(repository, process, binding);
+        assertThat(gateway.stopCommands).isEmpty();
+        assertThat(gateway.ownedStopCommands).isEmpty();
+        assertThat(gateway.startAttempts).isEmpty();
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeOutOfRangeKeepsStoppedOldAssignmentWhenNoReplacementPortExists() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_old", container("ctr_old", "10.8.0.12", 4200, 4200, 1, 0));
+        OpencodeServerProcess process = process(
+                "ocp_existing", USER_ID, "10.8.0.12", "ctr_old", 4096, OpencodeServerProcessStatus.RUNNING);
+        UserOpencodeProcessBinding binding = binding(USER_ID, process.processId(), "10.8.0.12", 4096);
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(USER_ID.value() + ":opencode", binding);
+        repository.processes.put(
+                "ocp_other",
+                process("ocp_other", new UserId("usr_other_12345678"), "10.8.0.12", "ctr_old", 4200,
+                        OpencodeServerProcessStatus.RUNNING));
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.trackManagedIdentity = true;
+        gateway.managedPort = 4096;
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        assertThatThrownBy(() -> service.initialize(USER_ID, "opencode", TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE));
+
+        OpencodeServerProcess stopped = repository.processes.get(process.processId().value());
+        assertThat(stopped.port()).isEqualTo(4096);
+        assertThat(stopped.status()).isEqualTo(OpencodeServerProcessStatus.STOPPED);
+        assertThat(repository.bindings.get(USER_ID.value() + ":opencode")).isEqualTo(binding);
+        assertThat(gateway.startAttempts).isEmpty();
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeRetriesAlreadyReservedReplacementAfterGenericStartFailure() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_old", container("ctr_old", "10.8.0.12", 4200, 4202, 3, 0));
+        OpencodeServerProcess process = process(
+                "ocp_existing", USER_ID, "10.8.0.12", "ctr_old", 4096, OpencodeServerProcessStatus.STOPPED);
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(
+                USER_ID.value() + ":opencode",
+                binding(USER_ID, process.processId(), "10.8.0.12", 4096));
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.healthResults.add(OpencodeProcessHealthResult.notRunning("old not managed"));
+        gateway.startFailure = new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "generic failure");
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        assertThatThrownBy(() -> service.initialize(USER_ID, "opencode", TRACE_ID))
+                .isInstanceOf(PlatformException.class);
+
+        assertThat(repository.processes.get("ocp_existing")).satisfies(reserved -> {
+            assertThat(reserved.port()).isEqualTo(4200);
+            assertThat(reserved.status()).isEqualTo(OpencodeServerProcessStatus.STARTING);
+        });
+        assertThat(repository.bindings.get(USER_ID.value() + ":opencode").port()).isEqualTo(4200);
+
+        gateway.startFailure = null;
+        gateway.healthResults.add(OpencodeProcessHealthResult.notRunning("replacement not managed"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.healthy(12345L, "ok"));
+
+        UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.port()).isEqualTo(4200);
+        assertThat(gateway.startAttempts).extracting(OpencodeProcessStartCommand::port).containsExactly(4200, 4200);
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeIdentityRejectionsKeepExactBindingAndDoNotMigrate() {
+        for (OpencodeProcessStartRejectionReason reason : List.of(
+                OpencodeProcessStartRejectionReason.IDENTITY_ALREADY_MANAGED,
+                OpencodeProcessStartRejectionReason.IDENTITY_CONFIG_MISMATCH)) {
+            FakeRepository repository = new FakeRepository();
+            repository.containers.put("ctr_old", container("ctr_old", "10.8.0.12", 4096, 4098, 3, 1));
+            repository.containers.put("ctr_new", container("ctr_new", "10.8.0.12", 4200, 4202, 3, 0));
+            OpencodeServerProcess process = process(
+                    "ocp_existing_" + reason.name().toLowerCase(), USER_ID, "10.8.0.12", "ctr_old", 4096,
+                    OpencodeServerProcessStatus.STOPPED);
+            UserOpencodeProcessBinding original = binding(USER_ID, process.processId(), "10.8.0.12", 4096);
+            repository.processes.put(process.processId().value(), process);
+            repository.bindings.put(USER_ID.value() + ":opencode", original);
+            RecordingGateway gateway = new RecordingGateway();
+            gateway.healthResults.add(OpencodeProcessHealthResult.notRunning("not managed"));
+            gateway.startFailures.add(new OpencodeProcessStartRejectionException(reason));
+            UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+            assertThatThrownBy(() -> service.initialize(USER_ID, "opencode", TRACE_ID))
+                    .isInstanceOf(OpencodeProcessStartRejectionException.class);
+            assertThat(gateway.startAttempts).singleElement()
+                    .extracting(OpencodeProcessStartCommand::port)
+                    .isEqualTo(4096);
+            assertThat(repository.bindings.get(USER_ID.value() + ":opencode")).isEqualTo(original);
+        }
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeConfigCapacityAndGenericStartFailuresKeepExactBinding() {
+        for (String failureMessage : List.of("config unavailable", "capacity exceeded", "generic failure")) {
+            FakeRepository repository = new FakeRepository();
+            repository.containers.put("ctr_old", container("ctr_old", "10.8.0.12", 4096, 4098, 3, 1));
+            repository.containers.put("ctr_new", container("ctr_new", "10.8.0.12", 4200, 4202, 3, 0));
+            OpencodeServerProcess process = process(
+                    "ocp_existing", USER_ID, "10.8.0.12", "ctr_old", 4096, OpencodeServerProcessStatus.STOPPED);
+            UserOpencodeProcessBinding original = binding(USER_ID, process.processId(), "10.8.0.12", 4096);
+            repository.processes.put(process.processId().value(), process);
+            repository.bindings.put(USER_ID.value() + ":opencode", original);
+            RecordingGateway gateway = new RecordingGateway();
+            gateway.healthResults.add(OpencodeProcessHealthResult.notRunning("not managed"));
+            gateway.startFailure = new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, failureMessage);
+            UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+            assertThatThrownBy(() -> service.initialize(USER_ID, "opencode", TRACE_ID))
+                    .isInstanceOfSatisfying(PlatformException.class, exception ->
+                            assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_BAD_GATEWAY));
+            assertThat(gateway.stopCommands).isEmpty();
+            assertThat(gateway.ownedStopCommands).isEmpty();
+            assertThat(gateway.startAttempts).singleElement()
+                    .extracting(OpencodeProcessStartCommand::port)
+                    .isEqualTo(4096);
+            assertThat(repository.bindings.get(USER_ID.value() + ":opencode")).isEqualTo(original);
+        }
     }
 
     @org.junit.jupiter.api.Test
@@ -671,7 +1160,7 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     @org.junit.jupiter.api.Test
-    void initializeTriesNextCandidateOnlyWhenManagerCommandWasNotDispatched() {
+    void initializeKeepsCommittedReservationWhenManagerCommandWasNotDispatched() {
         FakeRepository repository = new FakeRepository();
         repository.containers.put("ctr_a", container("ctr_a", "10.8.0.12", 4096, 4100, 4, 0));
         repository.containers.put("ctr_b", container("ctr_b", "10.8.0.13", 4200, 4205, 4, 1));
@@ -679,14 +1168,13 @@ class UserOpencodeProcessAssignmentServiceTest {
         gateway.startFailures.add(new ManagerCommandNotDispatchedException(new OpencodeContainerId("ctr_a")));
         UserOpencodeProcessAssignmentService service = service(repository, gateway);
 
-        UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
-
-        assertThat(response.containerId()).isEqualTo("ctr_b");
+        assertThatThrownBy(() -> service.initialize(USER_ID, "opencode", TRACE_ID))
+                .isInstanceOf(ManagerCommandNotDispatchedException.class);
         assertThat(gateway.startAttempts).extracting(command -> command.containerId().value())
-                .containsExactly("ctr_a", "ctr_b");
+                .containsExactly("ctr_a");
         assertThat(repository.findUserBinding(USER_ID, "opencode")).get()
                 .extracting(UserOpencodeProcessBinding::linuxServerId)
-                .isEqualTo(new LinuxServerId("10.8.0.13"));
+                .isEqualTo(new LinuxServerId("10.8.0.12"));
     }
 
     @org.junit.jupiter.api.Test
@@ -728,7 +1216,7 @@ class UserOpencodeProcessAssignmentServiceTest {
         FakeRepository repository = new FakeRepository();
         repository.containers.put("ctr_idle", container("ctr_idle", "10.8.0.12", 4096, 4100, 4, 0));
         RecordingGateway gateway = new RecordingGateway();
-        gateway.health = OpencodeProcessHealthResult.unhealthy("opencode http health failed");
+        gateway.health = OpencodeProcessHealthResult.managedUnhealthy(12345L, "opencode http health failed");
         UserOpencodeProcessAssignmentService service = service(repository, gateway);
 
         assertThatThrownBy(() -> service.initialize(USER_ID, "opencode", TRACE_ID))
@@ -738,8 +1226,87 @@ class UserOpencodeProcessAssignmentServiceTest {
         OpencodeServerProcess process = repository.processes.values().stream().findFirst().orElseThrow();
         assertThat(process.status()).isEqualTo(OpencodeServerProcessStatus.UNHEALTHY);
         assertThat(process.healthMessage()).isEqualTo("opencode http health failed");
-        assertThat(repository.findUserBinding(USER_ID, "opencode")).isEmpty();
+        assertThat(repository.findUserBinding(USER_ID, "opencode")).isPresent();
         assertThat(repository.savedNodes).isEmpty();
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializePersistsReservationBeforeGatewayAndRetryUsesSamePortAfterGenericFailure() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_a", container("ctr_a", "10.8.0.12", 4096, 4100, 4, 0));
+        repository.containers.put("ctr_b", container("ctr_b", "10.8.0.13", 4200, 4205, 4, 0));
+        RecordingGateway gateway = new RecordingGateway();
+        java.util.concurrent.atomic.AtomicInteger starts = new java.util.concurrent.atomic.AtomicInteger();
+        gateway.beforeStart = command -> {
+            UserOpencodeProcessBinding binding = repository.findUserBinding(USER_ID, "opencode").orElseThrow();
+            OpencodeServerProcess reserved = repository.findOpencodeServerProcessById(binding.processId()).orElseThrow();
+            assertThat(binding.port()).isEqualTo(command.port());
+            assertThat(reserved.port()).isEqualTo(command.port());
+            if (starts.getAndIncrement() == 0) {
+                assertThat(reserved.status()).isEqualTo(OpencodeServerProcessStatus.STARTING);
+            }
+        };
+        gateway.startFailures.add(new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "generic start failure"));
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        assertThatThrownBy(() -> service.initialize(USER_ID, "opencode", TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_BAD_GATEWAY));
+        UserOpencodeProcessBinding reserved = repository.findUserBinding(USER_ID, "opencode").orElseThrow();
+        assertThat(reserved.port()).isEqualTo(4096);
+
+        gateway.healthResults.add(OpencodeProcessHealthResult.notRunning("not managed"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.healthy(12345L, "ok"));
+        UserOpencodeProcessStatusResponse retried = service.initialize(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(retried.port()).isEqualTo(4096);
+        assertThat(retried.processId()).isEqualTo(reserved.processId().value());
+        assertThat(gateway.startAttempts).extracting(OpencodeProcessStartCommand::port)
+                .containsExactly(4096, 4096);
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeConcurrentReservationFollowerNeverStartsOrStopsWinner() {
+        OpencodeServerProcess winner = new OpencodeServerProcess(
+                new OpencodeProcessId("ocp_concurrent_winner"),
+                USER_ID,
+                new LinuxServerId("10.8.0.12"),
+                new OpencodeContainerId("ctr_idle"),
+                4096,
+                null,
+                "http://10.8.0.21:4096",
+                OpencodeServerProcessStatus.STARTING,
+                USER_SESSION_DIR,
+                "/tmp/testagent/.session/users/ucid_001/.testagent-runtime/current-public-config",
+                NOW,
+                NOW,
+                "端口已预留，等待 manager 启动",
+                NOW,
+                NOW,
+                TRACE_ID);
+        FakeRepository repository = new FakeRepository();
+        repository.beforeFindUserBinding = () -> {
+            // 第一次初始化入口读取为空；预留事务复查时模拟另一个请求已经提交 STARTING binding。
+            if (repository.findUserBindingCalls == 1) {
+                repository.processes.put(winner.processId().value(), winner);
+                repository.bindings.put(
+                        USER_ID.value() + ":opencode",
+                        binding(USER_ID, winner.processId(), "10.8.0.12", 4096));
+            }
+        };
+        repository.containers.put("ctr_idle", container("ctr_idle", "10.8.0.12", 4096, 4100, 4, 0));
+        RecordingGateway gateway = new RecordingGateway();
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        assertThatThrownBy(() -> service.initialize(USER_ID, "opencode", TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE);
+                    assertThat(exception.getMessage()).contains("初始化正在进行");
+                });
+        assertThat(gateway.startAttempts).isEmpty();
+        assertThat(gateway.stopCommands).isEmpty();
+        assertThat(gateway.ownedStopCommands).isEmpty();
+        assertThat(gateway.healthCommands).isEmpty();
     }
 
     @org.junit.jupiter.api.Test
@@ -901,6 +1468,7 @@ class UserOpencodeProcessAssignmentServiceTest {
             OpencodeProcessHeartbeatStore heartbeatStore,
             OpencodeProcessStartOperationRepository operationRepository,
             List<OpencodeContainer> liveContainers) {
+        gateway.events = repository.events;
         BackendJavaProcessLifecycleService backendLifecycle = new BackendJavaProcessLifecycleService(
                 repository,
                 new ManagerControlSettings(
@@ -940,6 +1508,23 @@ class UserOpencodeProcessAssignmentServiceTest {
                 null,
                 operationRepository,
                 repository);
+    }
+
+    private static void assertAssignment(
+            FakeRepository repository,
+            OpencodeServerProcess expectedProcess,
+            UserOpencodeProcessBinding expectedBinding) {
+        assertThat(repository.processes.get(expectedProcess.processId().value())).satisfies(actual -> {
+            assertThat(actual.linuxServerId()).isEqualTo(expectedProcess.linuxServerId());
+            assertThat(actual.containerId()).isEqualTo(expectedProcess.containerId());
+            assertThat(actual.port()).isEqualTo(expectedProcess.port());
+        });
+        assertThat(repository.bindings.get(expectedBinding.userId().value() + ":" + expectedBinding.agentId()))
+                .satisfies(actual -> {
+                    assertThat(actual.processId()).isEqualTo(expectedBinding.processId());
+                    assertThat(actual.linuxServerId()).isEqualTo(expectedBinding.linuxServerId());
+                    assertThat(actual.port()).isEqualTo(expectedBinding.port());
+                });
     }
 
     private static final String SESSION_DIR = "/tmp/testagent/.session/";
@@ -1197,17 +1782,30 @@ class UserOpencodeProcessAssignmentServiceTest {
         private final List<OpencodeProcessStartCommand> startCommands = new ArrayList<>();
         private final List<OpencodeProcessStartCommand> startAttempts = new ArrayList<>();
         private final List<OpencodeProcessHealthCommand> healthCommands = new ArrayList<>();
+        private final List<OpencodeProcessControlCommand> stopCommands = new ArrayList<>();
+        private final List<OpencodeProcessOwnedStopCommand> ownedStopCommands = new ArrayList<>();
         private final Queue<OpencodeProcessHealthResult> healthResults = new ArrayDeque<>();
         private final Queue<RuntimeException> startFailures = new ArrayDeque<>();
-        private OpencodeProcessHealthResult health = OpencodeProcessHealthResult.healthy("ok");
+        private OpencodeProcessHealthResult health = OpencodeProcessHealthResult.healthy(12345L, "ok");
         private PlatformException healthFailure;
         private PlatformException startFailure;
+        private PlatformException stopFailure;
+        private boolean trackManagedIdentity;
+        private Integer managedPort;
+        private List<String> events = new ArrayList<>();
+        private java.util.function.Consumer<OpencodeProcessStartCommand> beforeStart = ignored -> { };
 
         @Override
         public OpencodeProcessHealthResult checkHealth(OpencodeProcessHealthCommand command) {
             healthCommands.add(command);
+            events.add("health:" + portOf(command.baseUrl()));
             if (healthFailure != null) {
                 throw healthFailure;
+            }
+            if (trackManagedIdentity) {
+                return managedPort != null && managedPort == portOf(command.baseUrl())
+                        ? OpencodeProcessHealthResult.healthy(12345L, "ok")
+                        : OpencodeProcessHealthResult.notRunning("not managed");
             }
             return healthResults.isEmpty() ? health : healthResults.remove();
         }
@@ -1215,11 +1813,20 @@ class UserOpencodeProcessAssignmentServiceTest {
         @Override
         public OpencodeProcessStartResult startProcess(OpencodeProcessStartCommand command) {
             startAttempts.add(command);
+            events.add("start:" + command.port());
+            beforeStart.accept(command);
             if (!startFailures.isEmpty()) {
                 throw startFailures.remove();
             }
             if (startFailure != null) {
                 throw startFailure;
+            }
+            if (trackManagedIdentity && managedPort != null && managedPort != command.port()) {
+                throw new OpencodeProcessStartRejectionException(
+                        OpencodeProcessStartRejectionReason.IDENTITY_ALREADY_MANAGED);
+            }
+            if (trackManagedIdentity) {
+                managedPort = command.port();
             }
             startCommands.add(command);
             return new OpencodeProcessStartResult(12345L, "started");
@@ -1232,7 +1839,39 @@ class UserOpencodeProcessAssignmentServiceTest {
 
         @Override
         public OpencodeProcessControlResult stopProcess(OpencodeProcessControlCommand command) {
-            throw new UnsupportedOperationException("stopProcess is not used");
+            stopCommands.add(command);
+            return stop(command.port(), command.traceId());
+        }
+
+        @Override
+        public OpencodeProcessControlResult stopOwnedProcess(OpencodeProcessOwnedStopCommand command) {
+            ownedStopCommands.add(command);
+            if (trackManagedIdentity
+                    && (managedPort == null
+                            || managedPort != command.port()
+                            || command.expectedPid() != 12345L
+                            || !USER_UNIFIED_AUTH_ID.equals(command.expectedUnifiedAuthId()))) {
+                throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "owned process mismatch");
+            }
+            return stop(command.port(), command.traceId());
+        }
+
+        private OpencodeProcessControlResult stop(int port, String traceId) {
+            events.add("stopStarted:" + port);
+            if (stopFailure != null) {
+                throw stopFailure;
+            }
+            if (trackManagedIdentity && managedPort != null && managedPort == port) {
+                managedPort = null;
+            }
+            events.add("stopCompleted:" + port);
+            return new OpencodeProcessControlResult(
+                    "stop", "STOPPED", port, null, null, null, null,
+                    false, "stopped", traceId);
+        }
+
+        private int portOf(String baseUrl) {
+            return java.net.URI.create(baseUrl).getPort();
         }
     }
 
@@ -1350,6 +1989,9 @@ class UserOpencodeProcessAssignmentServiceTest {
         private final Map<String, UserOpencodeProcessBinding> bindings = new LinkedHashMap<>();
         private final Map<String, User> users = new LinkedHashMap<>();
         private final List<ExecutionNode> savedNodes = new ArrayList<>();
+        private final List<String> events = new ArrayList<>();
+        private java.util.function.Consumer<OpencodeServerProcess> afterProcessSaved = ignored -> { };
+        private Runnable beforeFindUserBinding = () -> { };
         int findUserBindingCalls;
 
         FakeRepository() {
@@ -1390,13 +2032,16 @@ class UserOpencodeProcessAssignmentServiceTest {
 
         @Override
         public Optional<UserOpencodeProcessBinding> findUserBinding(UserId userId, String agentId) {
+            beforeFindUserBinding.run();
             findUserBindingCalls++;
             return Optional.ofNullable(bindings.get(userId.value() + ":" + agentId.trim().toLowerCase()));
         }
 
         @Override
         public OpencodeServerProcess saveOpencodeServerProcess(OpencodeServerProcess process) {
+            events.add("saveProcess:" + process.port());
             processes.put(process.processId().value(), process);
+            afterProcessSaved.accept(process);
             return process;
         }
 
@@ -1407,6 +2052,7 @@ class UserOpencodeProcessAssignmentServiceTest {
 
         @Override
         public UserOpencodeProcessBinding saveUserBinding(UserOpencodeProcessBinding binding) {
+            events.add("saveBinding:" + binding.port());
             bindings.put(binding.userId().value() + ":" + binding.agentId(), binding);
             return binding;
         }

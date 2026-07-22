@@ -506,6 +506,8 @@ deepseek-prod
 
 ## 8. 变更与重启判断
 
+完整升级到用户绑定端口复用版本时，已有 `.serverid/.serverhost` 和 manager state 的现场先更新 worker 镜像/programs、重启 manager 并确认 `stopOwned` capability，再替换 JAR/lib 和重启 Java，最后部署前端。混合版本未知错误只报错并保留原 binding，不允许迁移端口；该版本不要求修改两份 env、执行数据库迁移或清理存量无主进程。
+
 | 变更内容 | 必须执行 | 不需要执行 |
 |---|---|---|
 | 仅前端静态包、`nginx.env` 或 Nginx conf | 重新执行前端部署脚本；脚本会校验并 reload 实体 Nginx | Java、worker 不重启 |

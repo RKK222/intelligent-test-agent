@@ -225,6 +225,7 @@ func (s *Supervisor) executeCommand(ctx context.Context, message Message) Messag
 		Port:            result.Port,
 		Status:          status,
 		PID:             result.PID,
+		ProcessCreated:  result.ProcessCreated,
 		BaseURL:         result.BaseURL,
 		SessionPath:     result.SessionPath,
 		ConfigPath:      result.ConfigPath,
@@ -252,17 +253,26 @@ func (s *Supervisor) dispatchProcessCommand(ctx context.Context, message Message
 	switch message.Command {
 	case "start":
 		return s.manager.Start(ctx, process.StartRequest{
-			Port:          message.Port,
-			UnifiedAuthID: message.UnifiedAuthID,
-			SessionPath:   message.SessionPath,
-			ConfigPath:    message.ConfigPath,
-			Environment:   message.Environment,
-			TraceID:       message.TraceID,
+			Port:            message.Port,
+			UnifiedAuthID:   message.UnifiedAuthID,
+			SessionPath:     message.SessionPath,
+			ConfigPath:      message.ConfigPath,
+			Environment:     message.Environment,
+			BindingRecovery: message.BindingRecovery,
+			TraceID:         message.TraceID,
 		})
 	case "health":
 		return s.manager.Health(ctx, process.HealthRequest{Port: message.Port, TraceID: message.TraceID})
 	case "stop":
 		return s.manager.Stop(ctx, process.StopRequest{Port: message.Port, TraceID: message.TraceID, Timeout: timeout})
+	case "stopOwned":
+		return s.manager.StopOwned(ctx, process.OwnedStopRequest{
+			Port:                  message.Port,
+			ExpectedUnifiedAuthID: message.UnifiedAuthID,
+			ExpectedPID:           message.PID,
+			TraceID:               message.TraceID,
+			Timeout:               timeout,
+		})
 	case "restart":
 		return s.manager.Restart(ctx, process.StopRequest{
 			Port:    message.Port,
@@ -290,14 +300,16 @@ func (s *Supervisor) topologyMessage(messageType string) Message {
 		managedProcesses = make([]ManagedProcess, 0, len(records.Records))
 		for _, record := range records.Records {
 			managedProcesses = append(managedProcesses, ManagedProcess{
-				Port:         record.Port,
-				PID:          record.PID,
-				BaseURL:      record.BaseURL,
-				SessionPath:  record.SessionPath,
-				ConfigPath:   record.ConfigPath,
-				StartedAt:    record.StartedAt,
-				StartCommand: record.StartCommand,
-				TraceID:      record.TraceID,
+				Port:          record.Port,
+				PID:           record.PID,
+				BaseURL:       record.BaseURL,
+				UnifiedAuthID: record.UnifiedAuthID,
+				SessionPath:   record.SessionPath,
+				ConfigPath:    record.ConfigPath,
+				ManagerStatus: "PID_ALIVE",
+				StartedAt:     record.StartedAt,
+				StartCommand:  record.StartCommand,
+				TraceID:       record.TraceID,
 			})
 		}
 	}
@@ -327,7 +339,7 @@ func (s *Supervisor) topologyMessage(messageType string) Message {
 		DiskWriteBytesPerSecond: metrics.DiskWriteBytesPerSecond,
 		ManagedProcesses:        managedProcesses,
 		Capabilities: map[string]any{
-			"commands": []string{"start", "health", "stop", "restart"},
+			"commands": []string{"start", "health", "stop", "stopOwned", "restart"},
 		},
 		ConnectedBackendProcessIDs: s.connectedBackendProcessIDs(),
 	}

@@ -20,7 +20,34 @@ public record OpencodeProcessStartCommand(
         String sessionPath,
         String configPath,
         Map<String, String> environment,
-        String traceId) {
+        String traceId,
+        boolean bindingRecovery) {
+
+    /** 兼容既有调用；只有明确的已有 binding 恢复才允许绕过 manager 容量过滤。 */
+    public OpencodeProcessStartCommand(
+            UserId userId,
+            String unifiedAuthId,
+            LinuxServerId linuxServerId,
+            OpencodeContainerId containerId,
+            int port,
+            String baseUrl,
+            String sessionPath,
+            String configPath,
+            Map<String, String> environment,
+            String traceId) {
+        this(
+                userId,
+                unifiedAuthId,
+                linuxServerId,
+                containerId,
+                port,
+                baseUrl,
+                sessionPath,
+                configPath,
+                environment,
+                traceId,
+                false);
+    }
 
     public OpencodeProcessStartCommand {
         Objects.requireNonNull(userId, "userId must not be null");

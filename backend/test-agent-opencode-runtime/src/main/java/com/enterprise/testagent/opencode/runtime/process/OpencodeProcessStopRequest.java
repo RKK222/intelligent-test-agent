@@ -17,7 +17,8 @@ public record OpencodeProcessStopRequest(
         int port,
         OpencodeProcessId processId,
         String baseUrl,
-        String traceId) {
+        String traceId,
+        OpencodeServerProcess processSnapshot) {
 
     public OpencodeProcessStopRequest {
         Objects.requireNonNull(containerId, "containerId must not be null");
@@ -26,6 +27,9 @@ public record OpencodeProcessStopRequest(
         }
         if (processId != null) {
             baseUrl = DomainValidation.requireText(baseUrl, "baseUrl");
+            if (processSnapshot != null && !processSnapshot.processId().equals(processId)) {
+                throw new IllegalArgumentException("processSnapshot must match processId");
+            }
         } else if (baseUrl != null && baseUrl.isBlank()) {
             baseUrl = null;
         }
@@ -42,7 +46,8 @@ public record OpencodeProcessStopRequest(
                 process.port(),
                 process.processId(),
                 process.baseUrl(),
-                traceId);
+                traceId,
+                process);
     }
 
     /**
@@ -52,7 +57,7 @@ public record OpencodeProcessStopRequest(
             OpencodeContainerId containerId,
             int port,
             String traceId) {
-        return new OpencodeProcessStopRequest(containerId, port, null, null, traceId);
+        return new OpencodeProcessStopRequest(containerId, port, null, null, traceId, null);
     }
 
     public boolean tracked() {

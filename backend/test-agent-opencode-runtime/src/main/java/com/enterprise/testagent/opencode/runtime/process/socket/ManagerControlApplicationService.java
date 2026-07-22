@@ -178,7 +178,9 @@ public class ManagerControlApplicationService {
                         process.configPath(),
                         process.startedAt(),
                         process.startCommand(),
-                        process.traceId()))
+                        process.traceId(),
+                        process.unifiedAuthId(),
+                        process.managerStatus()))
                 .toList();
         heartbeatStore.recordManagerSnapshot(new ManagerRuntimeSnapshot(
                 container, manager, connections, metrics, managedProcesses, message.buildVersion()));

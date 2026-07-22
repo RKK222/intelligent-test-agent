@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.OpencodeProcessAtomicMutationMapper">
+    <update id="compareAndSetProcessAssignment">
+        update opencode_server_processes
+        set linux_server_id = #{replacement.linuxServerId.value},
+            container_id = #{replacement.containerId.value},
+            port = #{replacement.port},
+            pid = #{replacement.pid},
+            base_url = #{replacement.baseUrl},
+            status = #{replacement.status},
+            session_path = #{replacement.sessionPath},
+            config_path = #{replacement.configPath},
+            started_at = #{replacement.startedAt},
+            last_health_check_at = #{replacement.lastHealthCheckAt},
+            health_message = #{replacement.healthMessage},
+            trace_id = #{replacement.traceId},
+            updated_at = #{replacement.updatedAt}
+        where process_id = #{expected.processId.value}
+          and user_id = #{expected.userId.value}
+          and linux_server_id = #{expected.linuxServerId.value}
+          and container_id = #{expected.containerId.value}
+          and port = #{expected.port}
+          and status = #{expected.status}
+          and (
+              pid = #{expected.pid,jdbcType=BIGINT}
+              or (pid is null and #{expected.pid,jdbcType=BIGINT} is null)
+          )
+          and (
+              trace_id = #{expected.traceId,jdbcType=VARCHAR}
+              or (trace_id is null and #{expected.traceId,jdbcType=VARCHAR} is null)
+          )
+    </update>
+
+    <update id="compareAndSetBindingAssignment">
+        update user_opencode_process_bindings
+        set process_id = #{replacement.processId.value},
+            linux_server_id = #{replacement.linuxServerId.value},
+            port = #{replacement.port},
+            status = #{replacement.status},
+            trace_id = #{replacement.traceId},
+            updated_at = #{replacement.updatedAt}
+        where user_id = #{expected.userId.value}
+          and agent_id = #{expected.agentId}
+          and process_id = #{expected.processId.value}
+          and linux_server_id = #{expected.linuxServerId.value}
+          and port = #{expected.port}
+          and status = #{expected.status}
+    </update>
+
+    <update id="compareAndSetRuntimeState">
+        update opencode_server_processes
+        set pid = #{replacement.pid},
+            base_url = #{replacement.baseUrl},
+            status = #{replacement.status},
+            started_at = #{replacement.startedAt},
+            last_health_check_at = #{replacement.lastHealthCheckAt},
+            health_message = #{replacement.healthMessage},
+            trace_id = #{replacement.traceId},
+            updated_at = #{replacement.updatedAt}
+        where process_id = #{expected.processId.value}
+          and user_id = #{expected.userId.value}
+          and linux_server_id = #{expected.linuxServerId.value}
+          and container_id = #{expected.containerId.value}
+          and port = #{expected.port}
+          and status = #{expected.status}
+          and (
+              pid = #{expected.pid,jdbcType=BIGINT}
+              or (pid is null and #{expected.pid,jdbcType=BIGINT} is null)
+          )
+          and (
+              trace_id = #{expected.traceId,jdbcType=VARCHAR}
+              or (trace_id is null and #{expected.traceId,jdbcType=VARCHAR} is null)
+          )
+    </update>
+</mapper>

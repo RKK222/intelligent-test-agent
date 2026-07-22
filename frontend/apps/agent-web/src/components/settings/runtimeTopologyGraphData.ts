@@ -134,19 +134,34 @@ export function buildRuntimeTopologyGraph(overview?: OpencodeRuntimeManagementOv
     for (const [index, process] of managedProcesses.entries()) {
       const processX = startX + index * OPENCODE_GAP;
       const bound = process.ownership === "BOUND";
-      const owner = bound ? (process.username || process.userId || "-") : "无主";
+      const userOwner = bound ? (process.username || process.userId || "-") : "-";
+      const owner = bound
+        ? userOwner
+        : process.unifiedAuthId
+          ? `UCID: ${process.unifiedAuthId}`
+          : "无主";
+      // 无平台进程记录时仅展示 manager 事实，避免把未执行的 HTTP 检查误报为异常。
+      const platformStatus = process.processStatus ?? process.managerStatus ?? "-";
+      const platformRegistration = process.processId || "平台未登记";
+      const health = process.processId
+        ? (process.healthMessage || process.processStatus || "-")
+        : "未执行 HTTP 健康检查";
 
       const processNode: RuntimeTopologyNode = {
         id: `opencode:${manager.managerId}:${process.port}:${index}`,
         kind: bound ? "opencode-bound" : "opencode-unbound",
         label: String(process.port),
-        subtitle: `${owner} / ${process.processStatus ?? "-"}`,
-        status: process.processStatus,
+        subtitle: `${owner} / ${platformStatus}`,
+        status: process.processStatus ?? process.managerStatus,
         tooltip: [
           `TestAgent server: ${process.port}`,
           `归属: ${bound ? "有主" : "无主"}`,
-          `用户: ${owner}`,
-          `状态: ${process.processStatus ?? "-"}`,
+          `用户: ${userOwner}`,
+          `UCID: ${process.unifiedAuthId ?? "-"}`,
+          `Manager 状态: ${process.managerStatus ?? "-"}`,
+          `平台登记: ${platformRegistration}`,
+          `平台状态: ${process.processStatus ?? "-"}`,
+          `健康检查: ${health}`,
           `PID: ${process.pid ?? "-"}`,
           `baseUrl: ${process.baseUrl ?? "-"}`
         ].join("\n"),
@@ -160,7 +175,7 @@ export function buildRuntimeTopologyGraph(overview?: OpencodeRuntimeManagementOv
         target: processNode.id,
         kind: "manager-opencode",
         label: "manages",
-        status: process.processStatus
+        status: process.processStatus ?? process.managerStatus
       });
     }
   }

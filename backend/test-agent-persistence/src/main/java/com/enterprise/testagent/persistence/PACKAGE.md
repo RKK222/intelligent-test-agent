@@ -46,6 +46,8 @@
 - `JdbcExecutionNodeRepository`：实现执行节点保存和可路由节点查询。
 - `JdbcRoutingDecisionRepository`：实现路由决策保存和查询。
 - `JdbcOpencodeProcessManagementRepository`：实现 opencode 用户进程管理拓扑、用户进程、用户绑定持久化，以及运行管理页拓扑列表、连接列表、进程分页筛选和绑定关联查询；读取历史用户进程时会兼容 `updated_at < created_at` 的脏数据并按 `created_at` 归一化，避免旧记录阻断状态查询和重新初始化。
+- `mybatis.OpencodeProcessReservationLockMapper` / `mybatis/OpencodeProcessReservationLockMapper.xml` / `mybatis.MyBatisOpencodeProcessReservationLockPort`：按用户、Linux 服务器顺序执行 `SELECT ... FOR UPDATE`，串行化短事务内的 binding 和服务器端口预留。
+- `mybatis.OpencodeProcessAtomicMutationMapper` / `mybatis/OpencodeProcessAtomicMutationMapper.xml` / `mybatis.MyBatisOpencodeProcessAtomicMutationPort`：以旧坐标和 `status/PID/traceId` 生命周期代次同时 CAS process/binding；端口迁移保留原 processId/createdAt，任一表未命中时整笔事务回滚。本实现复用 V14 表结构，不新增 migration。
 - `JdbcCommonParameterRepository`：通用参数存量 JDBC 实现，不再作为生产 Spring Bean，仅保留旧集成测试直接构造。
 - `JdbcWorkspaceCreateOperationRepository`：实现设置页创建应用工作空间进度记录，供配置管理 HTTP 轮询接口读取。
 - `db/migration/V1__create_core_tables.sql`：创建核心业务表和索引。
@@ -113,7 +115,7 @@
 - RunEvent 测试必须覆盖同一 run 的并发 append、scope 列写入和 raw event id 缺失写 `NULL`，防止 stream 事件和取消事件同时落库时重复分配 seq 或误去重。
 - SessionMessage/Run 测试必须覆盖 token/cost 字段、parts_json、远端 messageId 幂等查询、active-run 查询和 Run `saveIfStatus` 条件状态写入。
 - ExecutionNode 测试必须覆盖可路由节点过滤和排序，防止不可用或满载节点被派发。
-- OpencodeProcessManagement 测试必须覆盖拓扑读写、V17 loopback 种子清理、历史用户进程时间戳归一化、健康容器查询、用户绑定唯一约束、服务器端口唯一约束和容器管理进程一对一约束。
+- OpencodeProcessManagement 测试必须覆盖拓扑读写、V17 loopback 种子清理、历史用户进程时间戳归一化、健康容器查询、用户绑定唯一约束、服务器端口唯一约束、容器管理进程一对一约束，以及真实 PostgreSQL 下用户/服务器行锁、并发单胜者和 process/binding 双表 CAS 回滚。
 - ScheduledTask 测试必须覆盖任务定义、用户计划、运行记录、分页筛选和来源字段读写。
 - NightExecution 测试必须覆盖幂等键、状态 CAS、单会话锁、容量上限/释放、过期占位清理和 owner 隔离。
 - CommonParameter 和 WorkspaceCreateOperation 测试必须覆盖平台优先级、默认路径 seed、进度步骤更新、成功/失败状态和按用户隔离查询。

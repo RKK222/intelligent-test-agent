@@ -123,6 +123,268 @@ class OpencodeProcessStartupServiceTest {
     }
 
     @Test
+    void existingReservedStartupVerifiesBindingWithoutUnconditionalBindingSave() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeProcessId processId = new OpencodeProcessId("ocp_reserved");
+        OpencodeServerProcess reserved = reservedProcess(processId, CONTAINER_ID, 4097);
+        UserOpencodeProcessBinding binding = binding(processId, 4097);
+        repository.processes.put(processId, reserved);
+        repository.bindings.put(USER_ID.value() + ":opencode", binding);
+        RecordingGateway gateway = new RecordingGateway();
+        OpencodeProcessStartupService service = service(repository, gateway, new RecordingHeartbeatStore());
+
+        OpencodeServerProcess running = service.startAndVerify(request(processId, reserved.createdAt(), binding.createdAt()));
+
+        assertThat(running.status()).isEqualTo(OpencodeServerProcessStatus.RUNNING);
+        assertThat(repository.savedBindingCount).isZero();
+        assertThat(repository.findUserBinding(USER_ID, "opencode")).contains(binding);
+    }
+
+    @Test
+    void staleStartupSnapshotCannotOverwriteConcurrentMigrationCoordinates() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeProcessId processId = new OpencodeProcessId("ocp_racing_start");
+        OpencodeServerProcess old = reservedProcess(processId, CONTAINER_ID, 4097);
+        UserOpencodeProcessBinding oldBinding = binding(processId, 4097);
+        repository.processes.put(processId, old);
+        repository.bindings.put(USER_ID.value() + ":opencode", oldBinding);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.beforeStart = () -> {
+            OpencodeContainerId replacementContainer = new OpencodeContainerId("ctr_new");
+            repository.processes.put(processId, reservedProcess(processId, replacementContainer, 4200));
+            repository.bindings.put(USER_ID.value() + ":opencode", new UserOpencodeProcessBinding(
+                    USER_ID,
+                    "opencode",
+                    processId,
+                    SERVER_ID,
+                    4200,
+                    UserOpencodeProcessBindingStatus.ACTIVE,
+                    oldBinding.createdAt(),
+                    NOW.plusSeconds(1),
+                    TRACE_ID));
+        };
+        gateway.startResult = new OpencodeProcessStartResult(12345L, "started", true);
+        OpencodeProcessStartupService service = service(repository, gateway, new RecordingHeartbeatStore());
+
+        assertThatThrownBy(() -> service.startAndVerify(request(processId, old.createdAt(), oldBinding.createdAt())))
+                .isInstanceOf(PlatformException.class);
+
+        assertThat(repository.processes.get(processId)).satisfies(actual -> {
+            assertThat(actual.containerId()).isEqualTo(new OpencodeContainerId("ctr_new"));
+            assertThat(actual.port()).isEqualTo(4200);
+        });
+        assertThat(repository.bindings.get(USER_ID.value() + ":opencode").port()).isEqualTo(4200);
+        assertThat(gateway.ownedStopCommands).singleElement().satisfies(command -> {
+            assertThat(command.containerId()).isEqualTo(CONTAINER_ID);
+            assertThat(command.port()).isEqualTo(4097);
+            assertThat(command.expectedUnifiedAuthId()).isEqualTo("ucid_001");
+            assertThat(command.expectedPid()).isEqualTo(12345L);
+        });
+        assertThat(gateway.stopCommands).isEmpty();
+        assertThat(gateway.healthCommands).singleElement().satisfies(command -> {
+            assertThat(command.processId()).isEqualTo(processId);
+            assertThat(command.containerId()).isEqualTo(CONTAINER_ID);
+            assertThat(command.baseUrl()).isEqualTo("http://10.8.0.12:4097");
+        });
+    }
+
+    @Test
+    void staleReusedStartupSnapshotDoesNotStopConcurrentWinner() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeProcessId processId = new OpencodeProcessId("ocp_reused_racing_start");
+        OpencodeServerProcess old = reservedProcess(processId, CONTAINER_ID, 4097);
+        UserOpencodeProcessBinding oldBinding = binding(processId, 4097);
+        repository.processes.put(processId, old);
+        repository.bindings.put(USER_ID.value() + ":opencode", oldBinding);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.startResult = new OpencodeProcessStartResult(12345L, "reused", false);
+        gateway.beforeStart = () -> repository.processes.put(
+                processId,
+                reservedProcess(processId, new OpencodeContainerId("ctr_new"), 4200));
+        OpencodeProcessStartupService service = service(repository, gateway, new RecordingHeartbeatStore());
+
+        assertThatThrownBy(() -> service.startAndVerify(request(processId, old.createdAt(), oldBinding.createdAt())))
+                .isInstanceOf(PlatformException.class);
+
+        assertThat(gateway.ownedStopCommands).isEmpty();
+        assertThat(gateway.stopCommands).isEmpty();
+        assertThat(gateway.healthCommands).isEmpty();
+    }
+
+    @Test
+    void staleLegacyStartupSnapshotWithUnknownCreationDoesNotRiskStoppingReusedInstance() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeProcessId processId = new OpencodeProcessId("ocp_legacy_racing_start");
+        OpencodeServerProcess old = reservedProcess(processId, CONTAINER_ID, 4097);
+        UserOpencodeProcessBinding oldBinding = binding(processId, 4097);
+        repository.processes.put(processId, old);
+        repository.bindings.put(USER_ID.value() + ":opencode", oldBinding);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.startResult = new OpencodeProcessStartResult(12345L, "legacy response");
+        gateway.beforeStart = () -> repository.processes.put(
+                processId,
+                reservedProcess(processId, new OpencodeContainerId("ctr_new"), 4200));
+        OpencodeProcessStartupService service = service(repository, gateway, new RecordingHeartbeatStore());
+
+        assertThatThrownBy(() -> service.startAndVerify(request(processId, old.createdAt(), oldBinding.createdAt())))
+                .isInstanceOf(PlatformException.class);
+
+        assertThat(gateway.ownedStopCommands).isEmpty();
+        assertThat(gateway.stopCommands).isEmpty();
+        assertThat(gateway.healthCommands).isEmpty();
+    }
+
+    @Test
+    void freshStartupFinalStateCasConflictCompensatesWithoutOverwritingMigration() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeProcessId processId = new OpencodeProcessId("ocp_final_state_race");
+        OpencodeServerProcess old = reservedProcess(processId, CONTAINER_ID, 4097);
+        UserOpencodeProcessBinding oldBinding = binding(processId, 4097);
+        repository.processes.put(processId, old);
+        repository.bindings.put(USER_ID.value() + ":opencode", oldBinding);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.startResult = new OpencodeProcessStartResult(12345L, "started", true);
+        java.util.concurrent.atomic.AtomicBoolean migrated = new java.util.concurrent.atomic.AtomicBoolean();
+        gateway.beforeHealth = () -> {
+            if (migrated.compareAndSet(false, true)) {
+                OpencodeContainerId replacementContainer = new OpencodeContainerId("ctr_new");
+                repository.processes.put(processId, reservedProcess(processId, replacementContainer, 4200));
+                repository.bindings.put(USER_ID.value() + ":opencode", new UserOpencodeProcessBinding(
+                        USER_ID,
+                        "opencode",
+                        processId,
+                        SERVER_ID,
+                        4200,
+                        UserOpencodeProcessBindingStatus.ACTIVE,
+                        oldBinding.createdAt(),
+                        NOW.plusSeconds(1),
+                        TRACE_ID));
+            }
+        };
+        OpencodeProcessStartupService service = service(repository, gateway, new RecordingHeartbeatStore());
+
+        assertThatThrownBy(() -> service.startAndVerify(request(processId, old.createdAt(), oldBinding.createdAt())))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE));
+
+        assertThat(repository.processes.get(processId)).satisfies(actual -> {
+            assertThat(actual.containerId()).isEqualTo(new OpencodeContainerId("ctr_new"));
+            assertThat(actual.port()).isEqualTo(4200);
+        });
+        assertThat(gateway.ownedStopCommands).singleElement().satisfies(command -> {
+            assertThat(command.containerId()).isEqualTo(CONTAINER_ID);
+            assertThat(command.port()).isEqualTo(4097);
+            assertThat(command.expectedUnifiedAuthId()).isEqualTo("ucid_001");
+            assertThat(command.expectedPid()).isEqualTo(12345L);
+        });
+        assertThat(gateway.stopCommands).isEmpty();
+        assertThat(gateway.healthCommands).hasSize(2);
+    }
+
+    @Test
+    void sameAssignmentNewLifecycleCannotBeOverwrittenAndCompensationFailsClosed() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeProcessId processId = new OpencodeProcessId("ocp_same_assignment_new_lifecycle");
+        OpencodeServerProcess old = reservedProcess(processId, CONTAINER_ID, 4097);
+        UserOpencodeProcessBinding oldBinding = binding(processId, 4097);
+        repository.processes.put(processId, old);
+        repository.bindings.put(USER_ID.value() + ":opencode", oldBinding);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.startResult = new OpencodeProcessStartResult(12345L, "old lifecycle started", true);
+        gateway.ownedStopFailure = new PlatformException(
+                ErrorCode.OPENCODE_BAD_GATEWAY,
+                "owned process mismatch");
+        java.util.concurrent.atomic.AtomicBoolean replaced = new java.util.concurrent.atomic.AtomicBoolean();
+        gateway.beforeHealth = () -> {
+            if (replaced.compareAndSet(false, true)) {
+                OpencodeServerProcess candidate = repository.processes.get(processId);
+                repository.processes.put(processId, new OpencodeServerProcess(
+                        candidate.processId(),
+                        candidate.userId(),
+                        candidate.linuxServerId(),
+                        candidate.containerId(),
+                        candidate.port(),
+                        200L,
+                        candidate.baseUrl(),
+                        OpencodeServerProcessStatus.RUNNING,
+                        candidate.sessionPath(),
+                        candidate.configPath(),
+                        candidate.startedAt(),
+                        NOW.plusSeconds(1),
+                        "new lifecycle running",
+                        candidate.createdAt(),
+                        NOW.plusSeconds(1),
+                        "trace_new_lifecycle"));
+            }
+        };
+        OpencodeProcessStartupService service = service(repository, gateway, new RecordingHeartbeatStore());
+
+        assertThatThrownBy(() -> service.startAndVerify(request(processId, old.createdAt(), oldBinding.createdAt())))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE);
+                    assertThat(exception.getSuppressed()).singleElement().isInstanceOf(PlatformException.class);
+                });
+
+        assertThat(repository.processes.get(processId)).satisfies(actual -> {
+            assertThat(actual.containerId()).isEqualTo(CONTAINER_ID);
+            assertThat(actual.port()).isEqualTo(4097);
+            assertThat(actual.pid()).isEqualTo(200L);
+            assertThat(actual.status()).isEqualTo(OpencodeServerProcessStatus.RUNNING);
+            assertThat(actual.traceId()).isEqualTo("trace_new_lifecycle");
+        });
+        assertThat(gateway.ownedStopCommands).singleElement().satisfies(command -> {
+            assertThat(command.expectedUnifiedAuthId()).isEqualTo("ucid_001");
+            assertThat(command.expectedPid()).isEqualTo(12345L);
+        });
+        assertThat(gateway.stopCommands).isEmpty();
+    }
+
+    @Test
+    void freshConflictOwnershipMismatchNeverFallsBackOrOverwritesConcurrentWinner() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeProcessId processId = new OpencodeProcessId("ocp_cleanup_ownership_race");
+        OpencodeServerProcess old = reservedProcess(processId, CONTAINER_ID, 4097);
+        UserOpencodeProcessBinding oldBinding = binding(processId, 4097);
+        repository.processes.put(processId, old);
+        repository.bindings.put(USER_ID.value() + ":opencode", oldBinding);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.startResult = new OpencodeProcessStartResult(12345L, "started", true);
+        gateway.ownedStopFailure = new PlatformException(
+                ErrorCode.OPENCODE_BAD_GATEWAY,
+                "owned process mismatch");
+        gateway.beforeStart = () -> {
+            repository.processes.put(
+                    processId,
+                    reservedProcess(processId, new OpencodeContainerId("ctr_new"), 4200));
+            repository.bindings.put(USER_ID.value() + ":opencode", new UserOpencodeProcessBinding(
+                    USER_ID,
+                    "opencode",
+                    processId,
+                    SERVER_ID,
+                    4200,
+                    UserOpencodeProcessBindingStatus.ACTIVE,
+                    oldBinding.createdAt(),
+                    NOW.plusSeconds(1),
+                    TRACE_ID));
+        };
+        OpencodeProcessStartupService service = service(repository, gateway, new RecordingHeartbeatStore());
+
+        assertThatThrownBy(() -> service.startAndVerify(request(processId, old.createdAt(), oldBinding.createdAt())))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE);
+                    assertThat(exception.getSuppressed()).singleElement().isInstanceOf(PlatformException.class);
+                });
+
+        assertThat(repository.processes.get(processId)).satisfies(actual -> {
+            assertThat(actual.containerId()).isEqualTo(new OpencodeContainerId("ctr_new"));
+            assertThat(actual.port()).isEqualTo(4200);
+        });
+        assertThat(gateway.ownedStopCommands).hasSize(1);
+        assertThat(gateway.stopCommands).isEmpty();
+        assertThat(gateway.healthCommands).isEmpty();
+    }
+
+    @Test
     void startAndVerifyInjectsReferencesDirectoryResolvedForTargetPlatform() {
         FakeRepository repository = new FakeRepository();
         RecordingGateway gateway = new RecordingGateway();
@@ -217,7 +479,7 @@ class OpencodeProcessStartupServiceTest {
     void startAndVerifyDoesNotReturnSuccessWhenHealthIsUnhealthy() {
         FakeRepository repository = new FakeRepository();
         RecordingGateway gateway = new RecordingGateway();
-        gateway.health = OpencodeProcessHealthResult.unhealthy("opencode http health failed");
+        gateway.health = OpencodeProcessHealthResult.managedUnhealthy(12345L, "opencode http health failed");
         RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
         OpencodeProcessStartupService service = service(repository, gateway, heartbeatStore);
 
@@ -236,8 +498,9 @@ class OpencodeProcessStartupServiceTest {
     void startAndVerifyWaitsForTransientUnhealthyHealthBeforeMarkingRunning() {
         FakeRepository repository = new FakeRepository();
         RecordingGateway gateway = new RecordingGateway();
-        gateway.healthResults.add(OpencodeProcessHealthResult.unhealthy("opencode health endpoints are not reachable"));
-        gateway.healthResults.add(OpencodeProcessHealthResult.healthy("ok"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.managedUnhealthy(
+                12345L, "opencode health endpoints are not reachable"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.healthy(12345L, "ok"));
         RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
         OpencodeProcessStartupService service = service(repository, gateway, heartbeatStore);
 
@@ -254,7 +517,8 @@ class OpencodeProcessStartupServiceTest {
     void startAndVerifyTimesOutWhenHealthNeverBecomesHealthy() {
         FakeRepository repository = new FakeRepository();
         RecordingGateway gateway = new RecordingGateway();
-        gateway.health = OpencodeProcessHealthResult.unhealthy("opencode health endpoints are not reachable");
+        gateway.health = OpencodeProcessHealthResult.managedUnhealthy(
+                12345L, "opencode health endpoints are not reachable");
         RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
         OpencodeProcessStartupService service = service(repository, gateway, heartbeatStore);
 
@@ -372,17 +636,60 @@ class OpencodeProcessStartupServiceTest {
                 TRACE_ID);
     }
 
+    private static OpencodeServerProcess reservedProcess(
+            OpencodeProcessId processId,
+            OpencodeContainerId containerId,
+            int port) {
+        return new OpencodeServerProcess(
+                processId,
+                USER_ID,
+                SERVER_ID,
+                containerId,
+                port,
+                null,
+                "http://10.8.0.12:" + port,
+                OpencodeServerProcessStatus.STARTING,
+                "/data/opencode/session/users/ucid_001",
+                "/data/opencode/.config/opencode/",
+                NOW,
+                NOW,
+                "reserved",
+                NOW.minusSeconds(3600),
+                NOW,
+                TRACE_ID);
+    }
+
+    private static UserOpencodeProcessBinding binding(OpencodeProcessId processId, int port) {
+        return new UserOpencodeProcessBinding(
+                USER_ID,
+                "opencode",
+                processId,
+                SERVER_ID,
+                port,
+                UserOpencodeProcessBindingStatus.ACTIVE,
+                NOW.minusSeconds(1800),
+                NOW,
+                TRACE_ID);
+    }
+
     private static final class RecordingGateway implements OpencodeProcessManagerGateway {
         private final List<OpencodeProcessStartCommand> startCommands = new ArrayList<>();
         private final List<OpencodeProcessHealthCommand> healthCommands = new ArrayList<>();
+        private final List<OpencodeProcessControlCommand> stopCommands = new ArrayList<>();
+        private final List<OpencodeProcessOwnedStopCommand> ownedStopCommands = new ArrayList<>();
         private final Deque<OpencodeProcessHealthResult> healthResults = new ArrayDeque<>();
-        private OpencodeProcessHealthResult health = OpencodeProcessHealthResult.healthy("ok");
+        private OpencodeProcessHealthResult health = OpencodeProcessHealthResult.healthy(12345L, "ok");
+        private OpencodeProcessStartResult startResult = new OpencodeProcessStartResult(12345L, "started");
         private RuntimeException healthFailure;
         private RuntimeException startFailure;
+        private RuntimeException ownedStopFailure;
+        private Runnable beforeStart = () -> { };
+        private Runnable beforeHealth = () -> { };
 
         @Override
         public OpencodeProcessHealthResult checkHealth(OpencodeProcessHealthCommand command) {
             healthCommands.add(command);
+            beforeHealth.run();
             if (healthFailure != null) {
                 throw healthFailure;
             }
@@ -394,11 +701,12 @@ class OpencodeProcessStartupServiceTest {
 
         @Override
         public OpencodeProcessStartResult startProcess(OpencodeProcessStartCommand command) {
+            beforeStart.run();
             if (startFailure != null) {
                 throw startFailure;
             }
             startCommands.add(command);
-            return new OpencodeProcessStartResult(12345L, "started");
+            return startResult;
         }
 
         @Override
@@ -408,7 +716,32 @@ class OpencodeProcessStartupServiceTest {
 
         @Override
         public OpencodeProcessControlResult stopProcess(OpencodeProcessControlCommand command) {
-            throw new UnsupportedOperationException("stopProcess is not used");
+            stopCommands.add(command);
+            return stopped(command.port(), command.traceId());
+        }
+
+        @Override
+        public OpencodeProcessControlResult stopOwnedProcess(OpencodeProcessOwnedStopCommand command) {
+            ownedStopCommands.add(command);
+            if (ownedStopFailure != null) {
+                throw ownedStopFailure;
+            }
+            health = OpencodeProcessHealthResult.notRunning("process not found");
+            return stopped(command.port(), command.traceId());
+        }
+
+        private OpencodeProcessControlResult stopped(int port, String traceId) {
+            return new OpencodeProcessControlResult(
+                    "stop",
+                    "STOPPED",
+                    port,
+                    null,
+                    "http://10.8.0.12:" + port,
+                    "/data/opencode/session/users/ucid_001",
+                    "/data/opencode/.config/opencode/",
+                    false,
+                    "stopped",
+                    traceId);
         }
     }
 
@@ -416,6 +749,7 @@ class OpencodeProcessStartupServiceTest {
         private final Map<OpencodeProcessId, OpencodeServerProcess> processes = new LinkedHashMap<>();
         private final Map<String, UserOpencodeProcessBinding> bindings = new LinkedHashMap<>();
         private final List<ExecutionNode> savedNodes = new ArrayList<>();
+        private int savedBindingCount;
 
         @Override
         public OpencodeServerProcess saveOpencodeServerProcess(OpencodeServerProcess process) {
@@ -430,6 +764,7 @@ class OpencodeProcessStartupServiceTest {
 
         @Override
         public UserOpencodeProcessBinding saveUserBinding(UserOpencodeProcessBinding binding) {
+            savedBindingCount++;
             bindings.put(binding.userId().value() + ":" + binding.agentId(), binding);
             return binding;
         }
