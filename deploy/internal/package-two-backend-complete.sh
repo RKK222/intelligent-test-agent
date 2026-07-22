@@ -11,12 +11,12 @@ usage() {
   cat <<'USAGE'
 Usage: package-two-backend-complete.sh --nodes-dir <path> [options]
 
-Assemble the standard enterprise release ZIP and the three prepared node
+Assemble the standard enterprise release ZIP and the four prepared node
 packages into one fixed-name USB delivery bundle.
 
 Options:
   --release-archive <path>  Standard release ZIP. Default: deploy/internal/dist/test-agent-internal-release.zip.
-  --nodes-dir <path>        Directory containing the prepared .4, .114 and .2 node archives plus SHA files.
+  --nodes-dir <path>        Directory containing prepared .147, .4, .114 and .2 node archives plus SHA files.
   --output-dir <path>       Output directory. Default: deploy/internal/dist.
   -h, --help                Show this help.
 
