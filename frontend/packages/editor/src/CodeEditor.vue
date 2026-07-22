@@ -17,6 +17,8 @@ export type CodeEditorProps = {
   dirty?: boolean;
   readonly?: boolean;
   saving?: boolean;
+  /** 大文件只读预览按尾部追加，避免每个分片都 setValue 重建完整 Monaco 模型。 */
+  progressiveAppend?: boolean;
   /**
    * Markdown 预览开关（受控）。开启后按 previewMode 渲染全屏或分屏预览区，
    * 关闭后回到全屏编辑。组件本身不维护该状态，由父级（通常是底部 footer）
@@ -76,6 +78,8 @@ const containerEl = ref<HTMLElement | null>(null);
 const editor = shallowRef<monaco.editor.IStandaloneCodeEditor | null>(null);
 let model: monaco.editor.ITextModel | null = null;
 let monacoLib: typeof monaco | null = null;
+let syncedContentLength = 0;
+let syncedProgressiveAppend = false;
 // 内部正在用外部 content 同步模型时，跳过 change 事件，避免回环
 let syncing = false;
 
@@ -150,6 +154,8 @@ async function ensureMonacoEditor(path: string) {
     return;
   }
   model = buildModel(path, props.content);
+  syncedContentLength = props.content.length;
+  syncedProgressiveAppend = props.progressiveAppend ?? false;
   if (editor.value) {
     editor.value.setModel(model);
     emitSelection(editor.value);
@@ -364,11 +370,36 @@ watch(
   () => props.content,
   (content) => {
     // path/content 可能在同一 tick 更新；旧模型 URI 未切换完成时禁止写入新文件内容。
-    if (!model || !props.path || !modelMatchesPath(model, props.path) || content === model.getValue()) {
+    if (!model || !props.path || !modelMatchesPath(model, props.path)) {
+      return;
+    }
+    const unchanged = props.progressiveAppend
+      ? content.length === syncedContentLength && syncedContentLength === model.getValueLength()
+      : content === model.getValue();
+    if (unchanged) {
       return;
     }
     syncing = true;
-    model.setValue(content);
+    if (props.progressiveAppend
+      && syncedProgressiveAppend
+      && monacoLib
+      && content.length >= syncedContentLength
+      && syncedContentLength === model.getValueLength()) {
+      const suffix = content.slice(syncedContentLength);
+      if (suffix) {
+        const lastLine = model.getLineCount();
+        const lastColumn = model.getLineMaxColumn(lastLine);
+        model.applyEdits([{
+          range: new monacoLib.Range(lastLine, lastColumn, lastLine, lastColumn),
+          text: suffix,
+          forceMoveMarkers: true
+        }], false);
+      }
+    } else {
+      model.setValue(content);
+    }
+    syncedContentLength = content.length;
+    syncedProgressiveAppend = props.progressiveAppend ?? false;
     syncing = false;
     if (editor.value) {
       editor.value.layout();
@@ -391,6 +422,8 @@ onBeforeUnmount(() => {
   editor.value?.dispose();
   editor.value = null;
   model = null;
+  syncedContentLength = 0;
+  syncedProgressiveAppend = false;
 });
 
 function revealSelection(payload: { startLine: number; endLine: number; text: string }) {

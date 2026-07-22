@@ -293,6 +293,18 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
         return fileService.readContent(workspace.rootPath(), path);
     }
 
+    /** 渐进读取工作区大文件，调用方使用响应中的 nextOffset 连续请求。 */
+    public FilePreviewChunkResponse readFilePreviewChunk(
+            WorkspaceId workspaceId,
+            String path,
+            long offset,
+            Long expectedSize,
+            Long expectedLastModifiedMillis) {
+        Workspace workspace = getWorkspace(workspaceId);
+        return fileService.readContentChunk(
+                workspace.rootPath(), path, offset, expectedSize, expectedLastModifiedMillis);
+    }
+
     /**
      * 写入工作区内 UTF-8 文本文件；缺失父目录会按文件服务规则自动创建。
      */
@@ -307,6 +319,12 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
     public void uploadFile(WorkspaceId workspaceId, String path, String contentBase64) {
         Workspace workspace = getWorkspace(workspaceId);
         fileService.uploadFile(workspace.rootPath(), path, contentBase64);
+    }
+
+    /** 创建工作区文件分片上传会话；总大小只做完整性校验，不作为业务上限。 */
+    public WorkspaceFileUpload beginFileUpload(WorkspaceId workspaceId, String path, long expectedBytes) {
+        Workspace workspace = getWorkspace(workspaceId);
+        return fileService.beginUpload(workspace.rootPath(), path, expectedBytes);
     }
 
     /**

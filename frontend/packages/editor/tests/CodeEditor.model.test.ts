@@ -7,7 +7,11 @@ type FakeModel = {
   uri: FakeUri;
   value: string;
   getValue: () => string;
+  getValueLength: () => number;
+  getLineCount: () => number;
+  getLineMaxColumn: (line: number) => number;
   setValue: ReturnType<typeof vi.fn>;
+  applyEdits: ReturnType<typeof vi.fn>;
   getValueInRange: () => string;
   dispose: () => void;
 };
@@ -38,6 +42,14 @@ vi.mock("../src/monaco-env", () => {
     dispose: () => {}
   };
   const mockMonaco = {
+    Range: class {
+      constructor(
+        readonly startLineNumber: number,
+        readonly startColumn: number,
+        readonly endLineNumber: number,
+        readonly endColumn: number
+      ) {}
+    },
     Uri: { parse: uri, file: uri },
     KeyMod: { CtrlCmd: 1 << 11 },
     KeyCode: { KeyS: 49 },
@@ -50,8 +62,20 @@ vi.mock("../src/monaco-env", () => {
           getValue() {
             return this.value;
           },
+          getValueLength() {
+            return this.value.length;
+          },
+          getLineCount() {
+            return this.value.split("\n").length;
+          },
+          getLineMaxColumn(line: number) {
+            return (this.value.split("\n")[line - 1]?.length ?? 0) + 1;
+          },
           setValue: vi.fn((next: string) => {
             model.value = next;
+          }),
+          applyEdits: vi.fn((edits: Array<{ text: string }>) => {
+            model.value += edits.map((edit) => edit.text).join("");
           }),
           getValueInRange: () => "",
           dispose: () => {}
@@ -156,5 +180,49 @@ describe("CodeEditor Monaco 模型隔离", () => {
     expect(models.has(firstPath)).toBe(false);
     expect(models.get(latestPath)?.getValue()).toBe("latest Agent");
     monacoLoadGate = Promise.resolve();
+  });
+
+  it("大文件渐进预览只向 Monaco 模型尾部追加新分段", async () => {
+    models.clear();
+    activeModel = null;
+    monacoLoadGate = Promise.resolve();
+    const { rerender } = render(CodeEditor, {
+      props: { path: "logs/large.log", content: "first\n", readonly: true, progressiveAppend: true }
+    });
+    await waitFor(() => expect(models.get("logs/large.log")).toBeTruthy());
+    const model = models.get("logs/large.log")!;
+
+    await rerender({
+      path: "logs/large.log",
+      content: "first\nsecond\n",
+      readonly: true,
+      progressiveAppend: true
+    });
+
+    await waitFor(() => expect(model.getValue()).toBe("first\nsecond\n"));
+    expect(model.applyEdits).toHaveBeenCalledTimes(1);
+    expect(model.setValue).not.toHaveBeenCalled();
+  });
+
+  it("已有标签首次切换为渐进预览时先替换旧快照而不是错误追加", async () => {
+    models.clear();
+    activeModel = null;
+    monacoLoadGate = Promise.resolve();
+    const { rerender } = render(CodeEditor, {
+      props: { path: "logs/growing.log", content: "old", readonly: false, progressiveAppend: false }
+    });
+    await waitFor(() => expect(models.get("logs/growing.log")).toBeTruthy());
+    const model = models.get("logs/growing.log")!;
+
+    await rerender({
+      path: "logs/growing.log",
+      content: "new first preview chunk",
+      readonly: true,
+      progressiveAppend: true
+    });
+
+    await waitFor(() => expect(model.getValue()).toBe("new first preview chunk"));
+    expect(model.setValue).toHaveBeenCalledWith("new first preview chunk");
+    expect(model.applyEdits).not.toHaveBeenCalled();
   });
 });

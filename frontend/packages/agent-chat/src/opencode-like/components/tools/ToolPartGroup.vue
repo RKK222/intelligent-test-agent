@@ -1,11 +1,12 @@
 <script lang="ts">
-import type { MessagePart, SubagentSession } from "@test-agent/shared-types";
+import type { MessagePart, PermissionRequest, SubagentSession } from "@test-agent/shared-types";
 
 export type ToolPartGroupProps = {
   parts: Array<Extract<MessagePart, { type: "tool" }>>;
   busy?: boolean;
   subagentsBySessionId?: Record<string, SubagentSession>;
   subagentByTaskPartId?: Record<string, string>;
+  permissions?: PermissionRequest[];
 };
 </script>
 
@@ -62,6 +63,7 @@ const statusText = computed(() => {
         :part="part"
         :subagents-by-session-id="subagentsBySessionId"
         :subagent-by-task-part-id="subagentByTaskPartId"
+        :permissions="permissions"
         :nested="true"
         @select-subagent="(sessionId) => emit('selectSubagent', sessionId)"
       />

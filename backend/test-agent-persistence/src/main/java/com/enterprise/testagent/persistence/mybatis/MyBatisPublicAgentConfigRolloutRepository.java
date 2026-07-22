@@ -1,6 +1,8 @@
 package com.enterprise.testagent.persistence.mybatis;
 
 import com.enterprise.testagent.domain.configuration.AgentConfigRolloutScope;
+import com.enterprise.testagent.domain.configuration.AgentConfigRolloutWorktreeClaim;
+import com.enterprise.testagent.domain.configuration.AgentConfigRolloutWorktreePending;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutRepository;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutPreparation;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutTarget;
@@ -24,8 +26,8 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
     }
 
     @Override
-    public Optional<String> findActiveRolloutId() {
-        return Optional.ofNullable(mapper.findActiveRolloutId());
+    public Optional<String> findActiveRolloutId(AgentConfigRolloutScope scope, String scopeKey) {
+        return Optional.ofNullable(mapper.findActiveRolloutId(scope.name(), scopeKey));
     }
 
     @Override
@@ -101,6 +103,7 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
         mapper.decommissionServerMembership(linuxServerId, now);
         mapper.decommissionRolloutServers(linuxServerId, now);
         mapper.abandonRolloutTargets(linuxServerId, now);
+        mapper.abandonRolloutWorktrees(linuxServerId, now);
         mapper.completeReadyRollouts(now);
     }
 
@@ -179,6 +182,93 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
                 nextRetryAt,
                 errorMessage,
                 now) == 1;
+    }
+
+    @Override
+    public void savePendingApplicationWorktrees(
+            String rolloutId,
+            String linuxServerId,
+            String targetCommit,
+            String traceId,
+            List<AgentConfigRolloutWorktreePending> pendingWorktrees,
+            Instant now) {
+        if (pendingWorktrees == null || pendingWorktrees.isEmpty()) {
+            return;
+        }
+        mapper.upsertPendingApplicationWorktrees(
+                rolloutId, linuxServerId, targetCommit, traceId, pendingWorktrees, now);
+    }
+
+    @Override
+    @Transactional
+    public Optional<AgentConfigRolloutWorktreeClaim> claimPendingApplicationWorktree(
+            String linuxServerId,
+            Instant now,
+            Instant leaseUntil) {
+        return mapper.findClaimableApplicationWorktrees(linuxServerId, now, 1).stream()
+                .findFirst()
+                .flatMap(row -> {
+                    String leaseToken = com.enterprise.testagent.common.id.RuntimeIdGenerator
+                            .publicAgentConfigRolloutLeaseToken();
+                    int updated = mapper.markApplicationWorktreeProcessing(
+                            row.rolloutId(), row.personalWorkspaceId(), leaseToken, leaseUntil, now);
+                    if (updated != 1) {
+                        return Optional.empty();
+                    }
+                    return Optional.of(new AgentConfigRolloutWorktreeClaim(
+                            row.rolloutId(),
+                            row.versionId(),
+                            row.personalWorkspaceId(),
+                            row.userId(),
+                            row.linuxServerId(),
+                            row.targetCommit(),
+                            row.traceId(),
+                            row.retryCount(),
+                            leaseUntil,
+                            leaseToken));
+                });
+    }
+
+    @Override
+    public boolean markApplicationWorktreeRetry(
+            AgentConfigRolloutWorktreeClaim claim,
+            int retryCount,
+            Instant nextRetryAt,
+            String reason,
+            Instant now) {
+        return mapper.markApplicationWorktreeRetry(
+                claim.rolloutId(),
+                claim.personalWorkspaceId(),
+                claim.leaseToken(),
+                retryCount,
+                nextRetryAt,
+                reason,
+                now) == 1;
+    }
+
+    @Override
+    public boolean markApplicationWorktreeSynchronized(
+            AgentConfigRolloutWorktreeClaim claim,
+            Instant now) {
+        return mapper.markApplicationWorktreeSynchronized(
+                claim.rolloutId(), claim.personalWorkspaceId(), claim.leaseToken(), now) == 1;
+    }
+
+    @Override
+    public boolean abandonApplicationWorktree(
+            AgentConfigRolloutWorktreeClaim claim,
+            String reason,
+            Instant now) {
+        return mapper.abandonApplicationWorktree(
+                claim.rolloutId(), claim.personalWorkspaceId(), claim.leaseToken(), reason, now) == 1;
+    }
+
+    @Override
+    public boolean hasIncompleteApplicationWorktrees(
+            String rolloutId,
+            String linuxServerId,
+            String userId) {
+        return mapper.countIncompleteApplicationWorktrees(rolloutId, linuxServerId, userId) > 0;
     }
 
     /**

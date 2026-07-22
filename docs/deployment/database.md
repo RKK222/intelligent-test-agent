@@ -28,7 +28,17 @@ PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审
 
 ## V20260718123000 Agent 配置发布 rollout 范围
 
-`V20260718123000__generalize_agent_config_rollout_scope.sql` 为既有 `public_agent_config_rollouts` 增加 `config_scope` 与 `scope_key`。历史记录通过默认值保持 `PUBLIC`；新应用 Agent 配置发布写入 `APPLICATION + 应用版本 ID`。唯一活动 rollout、服务器租约、目标进程租约和用户消息闸门继续共用既有表，不新增第二套排空状态机。`config_scope` 受 CHECK 约束限制为 `PUBLIC/APPLICATION`，旧 Java 未写该字段时仍兼容为 `PUBLIC`。
+`V20260718123000__generalize_agent_config_rollout_scope.sql` 为既有 `public_agent_config_rollouts` 增加 `config_scope` 与 `scope_key`。历史记录通过默认值保持 `PUBLIC`；新应用 Agent 配置发布写入 `APPLICATION + 应用版本 ID`。服务器租约、目标进程租约和用户消息闸门继续共用既有排空状态机。`config_scope` 受 CHECK 约束限制为 `PUBLIC/APPLICATION`，旧 Java 未写该字段时仍兼容为 `PUBLIC`。
+
+## V20260721213000 Agent 配置发布作用域隔离与个人 worktree 补偿
+
+`V20260721213000__isolate_agent_config_rollout_scopes.sql` 删除原集群全局活动 rollout 唯一索引，改为：
+
+- `PUBLIC` 范围同一时刻最多一个 `PREPARING/DRAINING`；
+- `APPLICATION` 范围按 `scope_key=应用版本 ID` 各自最多一个活动发布，不同应用版本和公共发布可以并行；
+- 新增 `public_agent_config_rollout_worktrees`，按 `(rollout_id, personal_workspace_id)` 保存 `PENDING/PROCESSING/AWAITING_USER/SYNCED/ABANDONED`、稳定原因码、目标 commit、服务器和租约。
+
+应用服务器共享副本达到目标 commit 后，即使某个个人 worktree 有本地修改或合并冲突，也会把该项写成 `AWAITING_USER` 并确认服务器同步，主 rollout 不再无限占锁。后台仍按服务器租约重试；用户完成提交、回退或冲突合并后，任务转 `SYNCED`，同一用户在该 rollout 的全部 worktree 都收敛时才登记该用户旧进程 dispose。删除个人 worktree 通过外键级联清理任务；永久退役服务器把未完成任务标记为 `ABANDONED`。迁移不修改现有 rollout 状态，部署后现存 `DRAINING + PERSONAL_WORKTREE_UPDATE_PENDING` 会在下一次服务器 claim 时自动生成补偿行并完成主 rollout。
 
 ## V1 核心表
 
@@ -851,9 +861,9 @@ V10 种子数据对 F-COSS 的影响：
 - 终态任务和历史容量行保留 30 天，由 `opencode-runtime.night-execution-reconcile` 分批清理。普通 Run 受理、取消和最终失败会立即释放时段名额；改期先释放原时段再占用新时段。
 - 全部关系型 SQL 位于 `NightExecutionTaskMapper.xml`；首次创建用 PostgreSQL 事务级 advisory lock 串行化同一 owner/request。新分发认领和补偿 fencing 由下节 migration 增加。
 
-## V20260721134000 夜间任务迁移到 XXL-JOB
+## V20260722130000 夜间任务迁移到 XXL-JOB
 
-`V20260721134000__migrate_night_execution_to_xxl.sql` 为 `night_execution_tasks` 增加：
+`V20260722130000__migrate_night_execution_to_xxl.sql` 的版本晚于已交付的 `V20260721213000`，保证存量库按序升级；它为 `night_execution_tasks` 增加：
 
 | 字段 | 说明 |
 |---|---|

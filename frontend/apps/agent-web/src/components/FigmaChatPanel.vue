@@ -52,7 +52,13 @@ import type {
 import aiHeaderUrl from '../assets/figma/ai-header.svg'
 import planLoadingUrl from '../assets/figma/plan-loadding.gif'
 import panelCloseUrl from '../assets/figma/panel-close.svg'
-import { MarkdownView, OpencodeTimeline, createOpencodeLikeState, type OpencodeLikeRuntimeStatus } from '@test-agent/agent-chat'
+import {
+  MarkdownView,
+  OpencodeTimeline,
+  createOpencodeLikeState,
+  permissionPresentation,
+  type OpencodeLikeRuntimeStatus,
+} from '@test-agent/agent-chat'
 import ChatContextAttachmentList from './ChatContextAttachmentList.vue'
 import { copyTextToClipboard, Spinner } from '@test-agent/ui-kit'
 import type { ChatContextItem } from '../stores/chatContextStore'
@@ -650,6 +656,7 @@ const props =
       runId?: string
       runStatus?: string
       pendingQuestion?: boolean
+      pendingAttention?: boolean
       attentionEventId?: string
       attentionAt?: string
       sourceType?: string
@@ -658,6 +665,8 @@ const props =
     historyRunningCount?: number
     /** 当前用户历史中存在待回答 question 的会话数。 */
     historyQuestionCount?: number
+    /** 当前用户历史中存在待处理 permission 的会话数。 */
+    historyPermissionCount?: number
     /** 受控历史搜索词，由父组件负责远端查询。 */
     historySearch?: string
     /** 当前搜索条件下的历史总数。 */
@@ -2162,6 +2171,10 @@ const visiblePermissions = computed(() => {
   const sessionId = interactionSessionId.value
   return sessionId ? props.permissions.filter((item) => item.sessionId === sessionId) : props.permissions
 })
+const visiblePermissionCards = computed(() => visiblePermissions.value.map((request) => ({
+  request,
+  presentation: permissionPresentation(request),
+})))
 const visibleQuestions = computed(() => {
   const sessionId = interactionSessionId.value
   return sessionId ? props.questions.filter((item) => item.sessionId === sessionId) : props.questions
@@ -2170,9 +2183,9 @@ const visibleQuestions = computed(() => {
 watch(
   () => props.currentSessionId,
   (sessionId, previousSessionId) => {
-    // 历史会话切换复用同一个面板实例；不能把上个会话的 child 选择带到新 root。
-    if (sessionId && previousSessionId && sessionId !== previousSessionId) {
-      activeSubagentSessionId.value = null
+    // 空草稿首次落成真实 Session 仍属于同一 root；已有真实 Session 被替换或清空才重置阅读上下文。
+    if (previousSessionId && sessionId !== previousSessionId) {
+      resetScrollScopesForRootChange()
     }
   }
 )
@@ -2781,8 +2794,13 @@ const visibleHistory = computed(() => props.history || [])
 const historyTotalCount = computed(() => props.historyTotal ?? visibleHistory.value.length)
 const visibleHistoryRunningCount = computed(() => visibleHistory.value.filter((item) => item.runtimeState === 'running').length)
 const visibleHistoryQuestionCount = computed(() => visibleHistory.value.filter((item) => item.pendingQuestion).length)
+const visibleHistoryPermissionCount = computed(() => visibleHistory.value.filter(
+  (item) => item.pendingAttention && !item.pendingQuestion
+).length)
 const historyRunningCount = computed(() => props.historyRunningCount ?? visibleHistoryRunningCount.value)
 const historyQuestionCount = computed(() => props.historyQuestionCount ?? visibleHistoryQuestionCount.value)
+const historyPermissionCount = computed(() => props.historyPermissionCount ?? visibleHistoryPermissionCount.value)
+const historyAttentionCount = computed(() => historyQuestionCount.value + historyPermissionCount.value)
 const historyDrawerPanelStyle = computed<CSSProperties>(() => {
   const placement = historyDrawerPlacement.value
   if (!placement) return {}
@@ -3351,6 +3369,7 @@ const opencodeTimelineState = computed(() =>
     messageScopesById: props.messageScopesById,
     subagentsBySessionId: props.subagentsBySessionId,
     subagentByTaskPartId: props.subagentByTaskPartId,
+    permissions: props.permissions,
     activeSubagentSessionId: activeSubagentSessionId.value,
   })
 )
@@ -3363,19 +3382,19 @@ function openTimelineDiff() {
 
 function selectSubagent(sessionId: string) {
   if (props.subagentsBySessionId[sessionId]) {
-    activeSubagentSessionId.value = sessionId
+    switchScrollScope(sessionId)
   }
 }
 
 function returnToRootAgent() {
-  activeSubagentSessionId.value = null
+  switchScrollScope(null)
 }
 
 watch(
   () => props.subagentsBySessionId,
   (value) => {
     if (activeSubagentSessionId.value && !value[activeSubagentSessionId.value]) {
-      activeSubagentSessionId.value = null
+      switchScrollScope(null)
     }
   }
 )
@@ -3476,7 +3495,130 @@ const isAtBottom = ref(true)
 const hasNewContent = ref(false)
 const userInterruptedScroll = ref(false)
 let isProgrammaticScroll = false
+let programmaticScrollTop: number | null = null
+let pendingScrollTimer: ReturnType<typeof setTimeout> | null = null
+let pendingProgrammaticResetTimer: ReturnType<typeof setTimeout> | null = null
+let userScrollIntentResetTimer: ReturnType<typeof setTimeout> | null = null
+let scrollSwitchGeneration = 0
+let transientUserScrollIntent = false
+let pointerUserScrollIntent = false
 const scrollBottomThreshold = 36
+
+type ScrollScopeKey = 'root' | `subagent:${string}`
+type VisibleBodyFingerprint = {
+  first: number
+  second: number
+  messageCount: number
+}
+type ScrollScopeSnapshot = {
+  scrollTop: number
+  atBottom: boolean
+  contentFingerprint: VisibleBodyFingerprint
+  hasNewContent: boolean
+}
+type MessageBodyDigestCacheEntry = {
+  body: string
+  textParts: Array<{ partId: string; text: string }>
+  first: number
+  second: number
+}
+
+const scrollSnapshots = new Map<ScrollScopeKey, ScrollScopeSnapshot>()
+const messageBodyDigestByIdentity = new Map<string, MessageBodyDigestCacheEntry>()
+const currentScrollScopeKey = computed<ScrollScopeKey>(() =>
+  activeSubagentSessionId.value ? `subagent:${activeSubagentSessionId.value}` : 'root'
+)
+let viewportScrollScopeKey: ScrollScopeKey | null = null
+let pendingRestoreScopeKey: ScrollScopeKey | null = null
+
+function mixFingerprintNumber(first: number, second: number, value: number) {
+  const normalized = value >>> 0
+  return {
+    first: Math.imul(first ^ normalized, 16777619) >>> 0,
+    second: (Math.imul(second, 33) ^ normalized) >>> 0,
+  }
+}
+
+function mixFingerprintText(first: number, second: number, text: string) {
+  let mixed = mixFingerprintNumber(first, second, text.length)
+  for (let index = 0; index < text.length; index += 1) {
+    mixed = mixFingerprintNumber(mixed.first, mixed.second, text.charCodeAt(index))
+  }
+  return mixed
+}
+
+function sameTextParts(
+  cached: Array<{ partId: string; text: string }>,
+  current: Array<{ partId: string; text: string }>
+) {
+  return cached.length === current.length && cached.every(
+    (part, index) => part.partId === current[index]?.partId && part.text === current[index]?.text
+  )
+}
+
+// 同一稳定消息只在正文或 text part 真正变化时重新扫描字符串；工具、反馈等元数据更新复用摘要。
+function messageBodyDigest(message: AgentMessage, index: number) {
+  const identity = messageIdentity(message, index)
+  const textParts = message.role === 'assistant'
+    ? (message.parts ?? [])
+      .filter((part): part is Extract<MessagePart, { type: 'text' }> => part.type === 'text')
+      .map((part) => ({ partId: part.partId, text: part.text }))
+    : []
+  const body = message.role === 'user' || (message.role === 'assistant' && !message.parts?.length)
+    ? message.text
+    : ''
+  const cached = messageBodyDigestByIdentity.get(identity)
+  if (cached && cached.body === body && sameTextParts(cached.textParts, textParts)) {
+    return { identity, textParts, first: cached.first, second: cached.second }
+  }
+
+  let first = 2166136261
+  let second = 5381
+  ;({ first, second } = mixFingerprintText(first, second, identity))
+  ;({ first, second } = mixFingerprintText(first, second, body))
+  for (const part of textParts) {
+    ;({ first, second } = mixFingerprintText(first, second, part.partId))
+    ;({ first, second } = mixFingerprintText(first, second, part.text))
+  }
+  messageBodyDigestByIdentity.set(identity, { body, textParts, first, second })
+  return { identity, textParts, first, second }
+}
+
+function sameVisibleBodyFingerprint(left: VisibleBodyFingerprint, right: VisibleBodyFingerprint) {
+  return left.first === right.first
+    && left.second === right.second
+    && left.messageCount === right.messageCount
+}
+
+// 摘要严格取 opencodeTimelineState 已过滤出的可见正文，并以固定大小保存到每个 scope 快照。
+const visibleTimelineBodyFingerprint = computed(() => {
+  const state = opencodeTimelineState.value
+  let first = 2166136261
+  let second = 5381
+  let messageCount = 0
+  const currentMessageIdentities = new Set<string>()
+  timelineMessages.value.forEach((message, index) => {
+    if (message.role === 'card') return
+    const identity = messageIdentity(message, index)
+    currentMessageIdentities.add(identity)
+    if (state.messageById[message.id] !== message) return
+    const digest = messageBodyDigest(message, index)
+    ;({ first, second } = mixFingerprintNumber(first, second, digest.first))
+    ;({ first, second } = mixFingerprintNumber(first, second, digest.second))
+    for (const part of digest.textParts) {
+      const overlay = state.streamingTextByPartId[part.partId] ?? ''
+      const visibleLength = overlay && !part.text.endsWith(overlay)
+        ? part.text.length + overlay.length
+        : part.text.length
+      ;({ first, second } = mixFingerprintNumber(first, second, visibleLength))
+    }
+    messageCount += 1
+  })
+  for (const identity of messageBodyDigestByIdentity.keys()) {
+    if (!currentMessageIdentities.has(identity)) messageBodyDigestByIdentity.delete(identity)
+  }
+  return { first, second, messageCount }
+})
 
 function clearNewContentNotice() {
   hasNewContent.value = false
@@ -3497,12 +3639,49 @@ function shouldFollowOutput() {
   return !userInterruptedScroll.value && isAtBottom.value
 }
 
+function markTransientUserScrollIntent() {
+  transientUserScrollIntent = true
+  if (userScrollIntentResetTimer) clearTimeout(userScrollIntentResetTimer)
+  userScrollIntentResetTimer = setTimeout(() => {
+    userScrollIntentResetTimer = null
+    transientUserScrollIntent = false
+  }, 250)
+}
+
+function beginPointerUserScrollIntent() {
+  pointerUserScrollIntent = true
+}
+
+function endPointerUserScrollIntent() {
+  pointerUserScrollIntent = false
+}
+
+function clearUserScrollIntent() {
+  if (userScrollIntentResetTimer) clearTimeout(userScrollIntentResetTimer)
+  userScrollIntentResetTimer = null
+  transientUserScrollIntent = false
+  pointerUserScrollIntent = false
+}
+
+function hasUserScrollIntent() {
+  return transientUserScrollIntent || pointerUserScrollIntent
+}
+
 function handleChatScroll(event: Event) {
   const viewport = event.currentTarget as HTMLElement
-  if (isProgrammaticScroll) {
+  if (isProgrammaticScroll && viewport.scrollTop === programmaticScrollTop) {
     isProgrammaticScroll = false
+    programmaticScrollTop = null
     return
   }
+  const scopeKey = currentScrollScopeKey.value
+  if (pendingRestoreScopeKey === scopeKey && !hasUserScrollIntent()) {
+    // pending 期间没有 wheel/touch/pointer 意图的 scroll 来自 DOM 布局或 clamp，不能取消目标恢复。
+    return
+  }
+  // 用户滚动优先级最高，同时让尚在 nextTick/定时器队列中的旧滚动回调全部失效。
+  nextScrollGeneration()
+  if (hasUserScrollIntent()) viewportScrollScopeKey = scopeKey
   const atBottom = viewportIsAtBottom(viewport)
   isAtBottom.value = atBottom
   if (atBottom) {
@@ -3513,79 +3692,162 @@ function handleChatScroll(event: Event) {
   }
 }
 
-// 滚动到底部，使用 setTimeout 确保 DOM 完全更新
-function scrollToBottom() {
-  setTimeout(() => {
-    if (scrollEl.value) {
-      isProgrammaticScroll = true
-      scrollEl.value.scrollTop = scrollEl.value.scrollHeight
-      isAtBottom.value = true
-      hasNewContent.value = false
-      setTimeout(() => {
-        isProgrammaticScroll = false
-      }, 50)
-    }
+function cancelScheduledScroll() {
+  if (pendingScrollTimer) clearTimeout(pendingScrollTimer)
+  if (pendingProgrammaticResetTimer) clearTimeout(pendingProgrammaticResetTimer)
+  pendingScrollTimer = null
+  pendingProgrammaticResetTimer = null
+  isProgrammaticScroll = false
+  programmaticScrollTop = null
+}
+
+function nextScrollGeneration() {
+  scrollSwitchGeneration += 1
+  pendingRestoreScopeKey = null
+  cancelScheduledScroll()
+  return scrollSwitchGeneration
+}
+
+// Vue 更新和延迟布局完成后才改 scrollTop；scope 与代次双重校验阻断快速切换的旧回调。
+function scheduleScrollMutation(
+  scopeKey: ScrollScopeKey,
+  generation: number,
+  mutate: (viewport: HTMLElement) => void,
+  domAlreadyUpdated = false
+) {
+  const scheduleMutation = () => {
+    if (generation !== scrollSwitchGeneration || currentScrollScopeKey.value !== scopeKey) return
+    pendingScrollTimer = setTimeout(() => {
+      pendingScrollTimer = null
+      if (generation !== scrollSwitchGeneration || currentScrollScopeKey.value !== scopeKey) return
+      const viewport = scrollEl.value
+      if (!viewport) return
+      mutate(viewport)
+    }, 50)
+  }
+  if (domAlreadyUpdated) {
+    scheduleMutation()
+    return
+  }
+  void nextTick(scheduleMutation)
+}
+
+function setProgrammaticScroll(viewport: HTMLElement, scrollTop: number) {
+  isProgrammaticScroll = true
+  viewport.scrollTop = scrollTop
+  programmaticScrollTop = viewport.scrollTop
+  pendingProgrammaticResetTimer = setTimeout(() => {
+    pendingProgrammaticResetTimer = null
+    isProgrammaticScroll = false
+    programmaticScrollTop = null
   }, 50)
+}
+
+function applyBottomScroll(viewport: HTMLElement) {
+  setProgrammaticScroll(viewport, viewport.scrollHeight)
+  isAtBottom.value = true
+  userInterruptedScroll.value = false
+  hasNewContent.value = false
+}
+
+function scheduleScrollToBottom() {
+  const scopeKey = currentScrollScopeKey.value
+  // 正文、终态和历史加载等所有自动滚底统一在此让位于 scope restore。
+  if (pendingRestoreScopeKey === scopeKey) return
+  const generation = scrollSwitchGeneration
+  cancelScheduledScroll()
+  scheduleScrollMutation(scopeKey, generation, (viewport) => {
+    applyBottomScroll(viewport)
+    viewportScrollScopeKey = scopeKey
+  })
+}
+
+function saveCurrentScrollSnapshot() {
+  const viewport = scrollEl.value
+  const scopeKey = currentScrollScopeKey.value
+  // active scope 已切换但 restore 尚未落地时，共享容器仍属于旧 scope，绝不能污染目标快照。
+  if (!viewport || viewportScrollScopeKey !== scopeKey || pendingRestoreScopeKey === scopeKey) return
+  scrollSnapshots.set(currentScrollScopeKey.value, {
+    scrollTop: viewport.scrollTop,
+    atBottom: viewportIsAtBottom(viewport),
+    contentFingerprint: visibleTimelineBodyFingerprint.value,
+    hasNewContent: hasNewContent.value,
+  })
+}
+
+function restoreScrollScope(scopeKey: ScrollScopeKey, generation: number, domAlreadyUpdated = false) {
+  pendingRestoreScopeKey = scopeKey
+  scheduleScrollMutation(scopeKey, generation, (viewport) => {
+    const snapshot = scrollSnapshots.get(scopeKey)
+    if (!snapshot || snapshot.atBottom) {
+      applyBottomScroll(viewport)
+    } else {
+      setProgrammaticScroll(viewport, snapshot.scrollTop)
+      isAtBottom.value = viewportIsAtBottom(viewport)
+      userInterruptedScroll.value = !isAtBottom.value
+      hasNewContent.value = isAtBottom.value
+        ? false
+        : snapshot.hasNewContent
+          || !sameVisibleBodyFingerprint(snapshot.contentFingerprint, visibleTimelineBodyFingerprint.value)
+    }
+    viewportScrollScopeKey = scopeKey
+    pendingRestoreScopeKey = null
+  }, domAlreadyUpdated)
+}
+
+// 主/子 Agent 统一执行“保存离开视图 → 更新 scope → DOM 更新后恢复目标视图”。
+function switchScrollScope(subagentSessionId: string | null) {
+  const targetScopeKey: ScrollScopeKey = subagentSessionId ? `subagent:${subagentSessionId}` : 'root'
+  if (targetScopeKey === currentScrollScopeKey.value) return
+  saveCurrentScrollSnapshot()
+  // wheel/touch/pointer 意图只属于 outgoing viewport，不能让 incoming scope 的布局 scroll 接管恢复。
+  clearUserScrollIntent()
+  const generation = nextScrollGeneration()
+  activeSubagentSessionId.value = subagentSessionId
+  resetScrollFollowState()
+  restoreScrollScope(targetScopeKey, generation)
+}
+
+function resetScrollScopesForRootChange() {
+  scrollSnapshots.clear()
+  messageBodyDigestByIdentity.clear()
+  clearUserScrollIntent()
+  const generation = nextScrollGeneration()
+  activeSubagentSessionId.value = null
+  viewportScrollScopeKey = null
+  resetScrollFollowState()
+  restoreScrollScope('root', generation)
 }
 
 function jumpToBottom() {
   userInterruptedScroll.value = false
-  scrollToBottom()
+  scheduleScrollToBottom()
 }
 
 function messageIdentity(message: ChatMessageInput, index: number) {
   return message.id ?? (message as { messageId?: string }).messageId ?? `${message.role}-${index}`
 }
 
-function lastMessageContentLength(message: ChatMessageInput | undefined) {
-  if (!message || (message.role !== 'user' && message.role !== 'assistant')) return 0
-  if (typeof message.content === 'string') return message.content.length
-  if (typeof (message as { text?: string }).text === 'string') {
-    return (message as { text?: string }).text?.length ?? 0
-  }
-  if (Array.isArray((message as { parts?: unknown[] }).parts)) {
-    return ((message as { parts?: unknown[] }).parts ?? []).reduce(
-      (n: number, p: unknown) => n + (partText(p)?.length || 0),
-      0
-    )
-  }
-  return 0
-}
-
-// 监听消息变化（数量或内容），流式回复时消息内容增长但数量不变，也需要滚动
+// 只响应当前可见 scope 的正文变化；其它 child 的并行输出和工具元数据不会影响当前视口。
 watch(
-  () => {
-    const msgs = props.messages
-    if (!msgs || msgs.length === 0) return { length: 0, lastId: '', lastLen: 0 }
-    const last = msgs[msgs.length - 1]
-    return {
-      length: msgs.length,
-      lastId: messageIdentity(last, msgs.length - 1),
-      lastLen: lastMessageContentLength(last)
-    }
-  },
+  () => ({ scopeKey: currentScrollScopeKey.value, fingerprint: visibleTimelineBodyFingerprint.value }),
   (current, previous) => {
-    if (current.length === 0) {
+    if (current.scopeKey !== previous?.scopeKey
+      || sameVisibleBodyFingerprint(current.fingerprint, previous.fingerprint)) return
+    if (current.fingerprint.messageCount === 0) {
       resetScrollFollowState()
       return
     }
-    const sameLastMessage = current.lastId === previous?.lastId
-    const grewLastMessage = sameLastMessage && current.lastLen > (previous?.lastLen ?? 0)
-    const appendedMessage = current.length > (previous?.length ?? 0)
-    const receivedLiveOutput = props.running && (grewLastMessage || appendedMessage)
-    if (!receivedLiveOutput) {
-      // 运行中的工具状态、part 状态或反馈元数据更新不代表有新正文输出；
-      // 必须保留用户上滑后的滚动锁，避免工作中状态刷新把视口强制拉回底部。
-      if (!props.running) {
-        clearNewContentNotice()
-      }
+    if (pendingRestoreScopeKey === current.scopeKey) return
+    if (!props.running) {
+      clearNewContentNotice()
       if (!props.running && shouldFollowOutput()) {
-        nextTick(scrollToBottom)
+        scheduleScrollToBottom()
       }
       return
     }
     if (shouldFollowOutput()) {
-      nextTick(scrollToBottom)
+      scheduleScrollToBottom()
     } else {
       hasNewContent.value = true
     }
@@ -3593,22 +3855,41 @@ watch(
 )
 
 watch([wasCompleted, wasStopped, wasFailed], () => {
-  if (shouldFollowOutput()) {
-    nextTick(scrollToBottom)
+  if (currentScrollScopeKey.value === 'root' && shouldFollowOutput()) {
+    scheduleScrollToBottom()
   }
 })
 
 watch(
   () => [props.historyLoading, props.running] as const,
   ([historyLoading, running], [previousHistoryLoading, previousRunning]) => {
+    if (currentScrollScopeKey.value !== 'root') return
     if (historyLoading || (!running && previousRunning)) {
       clearNewContentNotice()
     }
     if (previousHistoryLoading && !historyLoading) {
-      nextTick(scrollToBottom)
+      scheduleScrollToBottom()
     }
   }
 )
+
+onMounted(() => {
+  window.addEventListener('pointerup', endPointerUserScrollIntent)
+  window.addEventListener('pointercancel', endPointerUserScrollIntent)
+  // mounted 已处于首次 DOM 提交之后，直接登记延迟恢复，避免额外 nextTick 让早期用户滚动被旧恢复覆盖。
+  restoreScrollScope(currentScrollScopeKey.value, scrollSwitchGeneration, true)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('pointerup', endPointerUserScrollIntent)
+  window.removeEventListener('pointercancel', endPointerUserScrollIntent)
+  clearUserScrollIntent()
+  scrollSwitchGeneration += 1
+  pendingRestoreScopeKey = null
+  viewportScrollScopeKey = null
+  cancelScheduledScroll()
+  scrollSnapshots.clear()
+  messageBodyDigestByIdentity.clear()
+})
 
 function formatTime(iso: string) {
   try {
@@ -3801,7 +4082,7 @@ function onCompositionEnd() {
           </span>
           <span>会话列表</span>
           <Bell
-            v-if="historyQuestionCount > 0"
+            v-if="historyAttentionCount > 0"
             :size="13"
             class="figma-chat-history-alert-bell"
           />
@@ -3809,7 +4090,14 @@ function onCompositionEnd() {
       </div>
     </header>
 
-    <div ref="scrollEl" class="figma-chat-scroll" @scroll="handleChatScroll">
+    <div
+      ref="scrollEl"
+      class="figma-chat-scroll"
+      @wheel="markTransientUserScrollIntent"
+      @touchmove="markTransientUserScrollIntent"
+      @pointerdown="beginPointerUserScrollIntent"
+      @scroll="handleChatScroll"
+    >
       <div v-if="historyLoading" class="figma-chat-history-loading" role="status">
         <Spinner />
         <span>正在加载会话内容…</span>
@@ -4778,22 +5066,28 @@ function onCompositionEnd() {
 
     <!-- 作废说明：运行中旧任务面板已由 OpencodeTimeline 的工具/事件行取代，避免两套来源显示不一致。 -->
     <section
-      v-if="visiblePermissions.length || visibleQuestions.length"
+      v-if="visiblePermissionCards.length || visibleQuestions.length"
       class="figma-chat-question-dock"
     >
       <div
-        v-for="permission in visiblePermissions"
-        :key="permission.requestId"
+        v-for="permission in visiblePermissionCards"
+        :key="permission.request.requestId"
         class="figma-chat-permission-card"
       >
-        <div class="figma-chat-question-title">{{ permission.title ?? permission.type }}</div>
-        <div class="figma-chat-question-description">
-          {{ permission.description ?? permission.pattern ?? permission.requestId }}
+        <div class="figma-chat-permission-header">
+          <AlertTriangle :size="15" class="figma-chat-permission-icon" aria-hidden="true" />
+          <div class="figma-chat-question-title">{{ permission.presentation.title }}</div>
+        </div>
+        <div v-if="permission.presentation.description" class="figma-chat-question-description">
+          {{ permission.presentation.description }}
+        </div>
+        <div v-if="permission.presentation.patterns.length" class="figma-chat-permission-patterns">
+          <code v-for="pattern in permission.presentation.patterns" :key="pattern">{{ pattern }}</code>
         </div>
         <div class="figma-chat-question-actions">
-          <button type="button" class="figma-chat-question-submit" @click="emit('reply-permission', permission.requestId, 'once')">一次</button>
-          <button type="button" class="figma-chat-question-submit" @click="emit('reply-permission', permission.requestId, 'always')">始终</button>
-          <button type="button" class="figma-chat-question-reject" @click="emit('reply-permission', permission.requestId, 'reject')">拒绝</button>
+          <button type="button" class="figma-chat-question-reject" @click="emit('reply-permission', permission.request.requestId, 'reject')">拒绝</button>
+          <button type="button" class="figma-chat-question-submit" @click="emit('reply-permission', permission.request.requestId, 'always')">始终允许</button>
+          <button type="button" class="figma-chat-question-submit" @click="emit('reply-permission', permission.request.requestId, 'once')">允许一次</button>
         </div>
       </div>
       <template v-for="item in visibleQuestions" :key="item.requestId">
@@ -5614,7 +5908,7 @@ function onCompositionEnd() {
                     class="figma-chat-history-card-completed"
                   />
                   <Bell
-                    v-if="item.pendingQuestion"
+                    v-if="item.pendingAttention || item.pendingQuestion"
                     :size="10"
                     class="figma-chat-history-card-attention"
                   />
@@ -7583,6 +7877,33 @@ function onCompositionEnd() {
 .figma-chat-permission-card {
   border-color: rgba(148, 96, 21, 0.35);
   background: rgba(148, 96, 21, 0.06);
+}
+
+.figma-chat-permission-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.figma-chat-permission-icon {
+  flex: 0 0 auto;
+  color: #946015;
+}
+
+.figma-chat-permission-patterns {
+  display: grid;
+  gap: 5px;
+}
+
+.figma-chat-permission-patterns code {
+  padding: 5px 7px;
+  border-radius: 5px;
+  background: rgba(148, 96, 21, 0.08);
+  color: var(--ta-chat-text, #262626);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .figma-chat-question-item {

@@ -453,7 +453,6 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             activatePublicConfigRollout(rolloutId, commitHash);
             progress.step(AgentConfigOperationStep.BROADCASTING);
             broadcastPublicSync(normalizedBranch, commitHash, "update", rolloutId, traceId);
-            synchronizeLocalPublicRuntimeRepository(rolloutId);
             return progress.succeeded(commitHash);
         } catch (PlatformException exception) {
             progress.failed(exception.errorCode().name(), safeErrorMessage(exception.getMessage()));
@@ -490,7 +489,11 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         }
 
         Path repoRoot = Path.of(activeWorktree.get().rootPath());
-        ensureExistingRepositoryReadyForSync(repoRoot, config, discardLocalChanges);
+        ensureExistingRepositoryReadyForSync(
+                repoRoot,
+                config,
+                discardLocalChanges,
+                PublicRepositorySyncTarget.PERSONAL_WORKTREE);
         if (gitWorkspaceService.isMergeInProgress(repoRoot)) {
             List<String> conflictFiles = gitWorkspaceService.conflictPaths(repoRoot);
             throw publicMergeConflict(
@@ -606,7 +609,6 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             activatePublicConfigRollout(rolloutId, commitHash);
             progress.step(AgentConfigOperationStep.BROADCASTING);
             broadcastPublicSync(normalizedBranch, commitHash, "update-and-push", rolloutId, traceId);
-            synchronizeLocalPublicRuntimeRepository(rolloutId);
             return progress.succeeded(commitHash);
         } catch (PlatformException exception) {
             progress.failed(exception.errorCode().name(), safeErrorMessage(exception.getMessage()));
@@ -748,6 +750,22 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         return fileService.readContent(publicAgentRootForRead(worktreeId, userId).toString(), relativePath);
     }
 
+    /** 公共 Agent 大文件按 UTF-8 字节偏移渐进只读预览。 */
+    public FilePreviewChunkResponse readPublicAgentFilePreviewChunk(
+            String relativePath,
+            long offset,
+            Long expectedSize,
+            Long expectedLastModifiedMillis,
+            String worktreeId,
+            UserId userId) {
+        return fileService.readContentChunk(
+                publicAgentRootForRead(worktreeId, userId).toString(),
+                relativePath,
+                offset,
+                expectedSize,
+                expectedLastModifiedMillis);
+    }
+
     public void writePublicAgentFile(String relativePath, String content, String worktreeId, UserId userId) {
         Path agentRoot = publicAgentRootForWrite(worktreeId, userId);
         ensureDirectory(agentRoot);
@@ -759,6 +777,17 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         Path agentRoot = publicAgentRootForWrite(worktreeId, userId);
         ensureDirectory(agentRoot);
         fileService.uploadFile(agentRoot.toString(), relativePath, contentBase64);
+    }
+
+    /** 公共 Agent 分片上传绑定当前管理员个人 worktree，文件总大小不设应用级上限。 */
+    public WorkspaceFileUpload beginPublicAgentFileUpload(
+            String relativePath,
+            long expectedBytes,
+            String worktreeId,
+            UserId userId) {
+        Path agentRoot = publicAgentRootForWrite(worktreeId, userId);
+        ensureDirectory(agentRoot);
+        return fileService.beginUpload(agentRoot.toString(), relativePath, expectedBytes);
     }
 
     /** 公共 Agent 文件改名复用工作空间文件服务的同目录重命名与路径安全校验。 */
@@ -819,6 +848,22 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         return fileService.readContent(workspaceAgentRootForRead(workspaceId, worktreeId).toString(), relativePath);
     }
 
+    /** 应用 Agent 大文件按 UTF-8 字节偏移渐进只读预览。 */
+    public FilePreviewChunkResponse readWorkspaceAgentFilePreviewChunk(
+            String workspaceId,
+            String relativePath,
+            long offset,
+            Long expectedSize,
+            Long expectedLastModifiedMillis,
+            String worktreeId) {
+        return fileService.readContentChunk(
+                workspaceAgentRootForRead(workspaceId, worktreeId).toString(),
+                relativePath,
+                offset,
+                expectedSize,
+                expectedLastModifiedMillis);
+    }
+
     public void writeWorkspaceAgentFile(String workspaceId, String relativePath, String content, String worktreeId) {
         Path agentRoot = workspaceAgentRootForWrite(workspaceId, worktreeId);
         ensureDirectory(agentRoot);
@@ -827,14 +872,30 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
 
     /** 应用 Agent 上传固定在可发布的 opencode.jsonc、agents、skills 和 tools 白名单内。 */
     public void uploadWorkspaceAgentFile(String workspaceId, String relativePath, String contentBase64, String worktreeId) {
+        requireWorkspaceAgentUploadPath(relativePath);
+        Path agentRoot = workspaceAgentRootForWrite(workspaceId, worktreeId);
+        ensureDirectory(agentRoot);
+        fileService.uploadFile(agentRoot.toString(), relativePath, contentBase64);
+    }
+
+    /** 应用 Agent 分片上传沿用发布白名单，并绑定当前应用个人 worktree。 */
+    public WorkspaceFileUpload beginWorkspaceAgentFileUpload(
+            String workspaceId,
+            String relativePath,
+            long expectedBytes,
+            String worktreeId) {
+        requireWorkspaceAgentUploadPath(relativePath);
+        Path agentRoot = workspaceAgentRootForWrite(workspaceId, worktreeId);
+        ensureDirectory(agentRoot);
+        return fileService.beginUpload(agentRoot.toString(), relativePath, expectedBytes);
+    }
+
+    private void requireWorkspaceAgentUploadPath(String relativePath) {
         if (workspaceAgentDisplayPath(workspaceAgentGitPath(relativePath)) == null) {
             throw new PlatformException(
                     ErrorCode.FORBIDDEN,
                     "应用 Agent 配置只允许上传 opencode.jsonc、agents、skills 或 tools 下的文件");
         }
-        Path agentRoot = workspaceAgentRootForWrite(workspaceId, worktreeId);
-        ensureDirectory(agentRoot);
-        fileService.uploadFile(agentRoot.toString(), relativePath, contentBase64);
     }
 
     /** 应用 Agent 文件改名复用工作空间文件服务的同目录重命名与路径安全校验。 */
@@ -1049,7 +1110,12 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     public AgentConfigResponses.AgentConfigDiffResponse publicDiff(String worktreeId, UserId userId) {
-        return diff(repoRootForPublicOperation(worktreeId, userId));
+        Path personalRepoRoot = repoRootForPublicOperation(worktreeId, userId);
+        AgentConfigResponses.AgentConfigDiffResponse diff = diff(personalRepoRoot);
+        return new AgentConfigResponses.AgentConfigDiffResponse(
+                diff.files(),
+                diff.files().isEmpty()
+                        && hasPendingPublicPublish(personalRepoRoot, publicConfig(userId).gitRoot()));
     }
 
     public AgentConfigResponses.AgentConfigDiffResponse workspaceDiff(String workspaceId, String worktreeId) {
@@ -1129,7 +1195,10 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             Path sharedRepoRoot = config.gitRoot();
             Path personalRepoRoot = Path.of(worktree.rootPath());
             ensureExistingCleanRepository(sharedRepoRoot, config);
-            ensureExistingCleanRepository(personalRepoRoot, config);
+            ensureExistingCleanRepository(
+                    personalRepoRoot,
+                    config,
+                    PublicRepositorySyncTarget.PERSONAL_WORKTREE);
             String branch = gitWorkspaceService.currentBranch(sharedRepoRoot);
             String previousCommitHash = gitWorkspaceService.headCommit(sharedRepoRoot);
             progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
@@ -1151,7 +1220,19 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 throw mergeException;
             }
             progress.step(AgentConfigOperationStep.PUSHING);
-            String commitHash = gitWorkspaceService.headCommit(personalRepoRoot);
+            String personalCommitHash = gitWorkspaceService.headCommit(personalRepoRoot);
+            String remoteCommitHash = gitWorkspaceService.resolveCommit(personalRepoRoot, "origin/" + branch);
+            // 个人公共 worktree 会长期复用，历史中可能存在企业 SCM 不认可的旧提交身份。
+            // 发布只投影最终文件树，并以当前远端提交为唯一父节点，避免把污染历史推入公共分支。
+            String commitHash = gitWorkspaceService.createLinearCommitFromTree(
+                    personalRepoRoot,
+                    personalCommitHash,
+                    remoteCommitHash,
+                    "发布公共 Agent 配置",
+                    commitIdentity);
+            // refspec 的 source 必须是本地 ref；先让个人分支指向干净提交，再按分支名非强推。
+            // 即使后续远端拒绝，个人 worktree 仍保留同一最终文件树，可直接重试发布。
+            gitWorkspaceService.resetHardToCommit(personalRepoRoot, commitHash);
             // PREPARING 必须先于 push，保证远端已变化但数据库写入失败时仍有可恢复的持久化闸门。
             rolloutId = preparePublicConfigRollout(
                     branch, commitHash, previousCommitHash, userId, traceId);
@@ -1174,7 +1255,6 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             activatePublicConfigRollout(rolloutId, commitHash);
             progress.step(AgentConfigOperationStep.BROADCASTING);
             broadcastPublicSync(branch, commitHash, "publish", rolloutId, traceId);
-            synchronizeLocalPublicRuntimeRepository(rolloutId);
             return progress.succeeded(commitHash);
         } catch (PlatformException exception) {
             progress.failed(exception.errorCode().name(), safeErrorMessage(exception.getMessage()));
@@ -1434,6 +1514,26 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         return new AgentConfigResponses.AgentConfigDiffResponse(List.copyOf(files.values()));
     }
 
+    /**
+     * Git status 只能看到尚未提交的文件；发布失败后个人 worktree 已经 clean，页面刷新会因此丢失重试入口。
+     * 个人 HEAD 不是共享 HEAD 的祖先且两者文件树不同，表示个人分支仍有需要合并或重新发布的内容。
+     */
+    private boolean hasPendingPublicPublish(Path personalRepoRoot, Path sharedRepoRoot) {
+        if (!gitWorkspaceService.isGitRepository(personalRepoRoot)
+                || !gitWorkspaceService.isGitRepository(sharedRepoRoot)) {
+            return false;
+        }
+        String personalHead = gitWorkspaceService.headCommit(personalRepoRoot);
+        String sharedHead = gitWorkspaceService.headCommit(sharedRepoRoot);
+        if (personalHead.equals(sharedHead)
+                || gitWorkspaceService.isAncestor(personalRepoRoot, personalHead, sharedHead)) {
+            return false;
+        }
+        String personalTree = gitWorkspaceService.resolveCommit(personalRepoRoot, personalHead + "^{tree}");
+        String sharedTree = gitWorkspaceService.resolveCommit(personalRepoRoot, sharedHead + "^{tree}");
+        return !personalTree.equals(sharedTree);
+    }
+
     private void throwIfConflicted(GitPublishWorkflow.PublishResult result, String message) {
         if (!result.hasConflicts()) {
             return;
@@ -1597,6 +1697,13 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         ensureExistingRepositoryReadyForSync(repoRoot, config, false);
     }
 
+    private void ensureExistingCleanRepository(
+            Path repoRoot,
+            PublicConfig config,
+            PublicRepositorySyncTarget syncTarget) {
+        ensureExistingRepositoryReadyForSync(repoRoot, config, false, syncTarget);
+    }
+
     private void ensureExistingRepositoryReadyForSync(
             Path repoRoot,
             String expectedOrigin,
@@ -1608,7 +1715,19 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             Path repoRoot,
             PublicConfig config,
             boolean discardLocalChanges) {
-        ensureExistingRepositoryReadyForSync(repoRoot, null, config, discardLocalChanges);
+        ensureExistingRepositoryReadyForSync(
+                repoRoot,
+                config,
+                discardLocalChanges,
+                PublicRepositorySyncTarget.SHARED_RUNTIME);
+    }
+
+    private void ensureExistingRepositoryReadyForSync(
+            Path repoRoot,
+            PublicConfig config,
+            boolean discardLocalChanges,
+            PublicRepositorySyncTarget syncTarget) {
+        ensureExistingRepositoryReadyForSync(repoRoot, null, config, discardLocalChanges, syncTarget);
     }
 
     private void ensureExistingRepositoryReadyForSync(
@@ -1616,6 +1735,20 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             String expectedOrigin,
             PublicConfig config,
             boolean discardLocalChanges) {
+        ensureExistingRepositoryReadyForSync(
+                repoRoot,
+                expectedOrigin,
+                config,
+                discardLocalChanges,
+                PublicRepositorySyncTarget.GENERIC);
+    }
+
+    private void ensureExistingRepositoryReadyForSync(
+            Path repoRoot,
+            String expectedOrigin,
+            PublicConfig config,
+            boolean discardLocalChanges,
+            PublicRepositorySyncTarget syncTarget) {
         if (!gitWorkspaceService.isGitRepository(repoRoot)) {
             // 消息带上具体目录，便于前端直接定位问题路径
             throw new PlatformException(ErrorCode.CONFLICT, "目录不是 Git 仓库：" + repoRoot, Map.of("path", repoRoot.toString()));
@@ -1630,7 +1763,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         }
         if (!gitWorkspaceService.isWorktreeClean(repoRoot)) {
             if (!discardLocalChanges) {
-                throw new PlatformException(ErrorCode.CONFLICT, "Git 工作树存在未提交变更", Map.of("path", repoRoot.toString()));
+                throw dirtyPublicRepositoryConflict(repoRoot, syncTarget);
             }
             // 只恢复 Git 已跟踪内容；未跟踪文件不删除，避免“更新”扩大为不可逆清理。
             gitWorkspaceService.resetHardToCommit(repoRoot, "HEAD");
@@ -1654,18 +1787,46 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
      * 公共仓库脏状态最多展示五个真实 Git 路径，帮助管理员区分“目录未初始化”和“文件待提交”。
      */
     private String dirtyPublicRepositoryMessage(Path repoRoot) {
-        List<String> paths = gitWorkspaceService.parseStatusPorcelain(gitWorkspaceService.statusPorcelain(repoRoot)).stream()
+        List<String> paths = dirtyPublicRepositoryPaths(repoRoot);
+        if (paths.isEmpty()) {
+            return "Git 工作树存在未提交变更（Git 未返回可展示的文件路径，请在该服务器仓库执行 git status --short）";
+        }
+        boolean truncated = paths.size() > 5;
+        List<String> visiblePaths = truncated ? paths.subList(0, 5) : paths;
+        return "Git 工作树存在未提交变更：" + String.join("、", visiblePaths) + (truncated ? " 等" : "");
+    }
+
+    private List<String> dirtyPublicRepositoryPaths(Path repoRoot) {
+        return gitWorkspaceService.parseStatusPorcelain(gitWorkspaceService.statusPorcelain(repoRoot)).stream()
                 .map(GitStatusEntry::path)
                 .filter(path -> path != null && !path.isBlank())
                 .distinct()
                 .limit(6)
                 .toList();
-        if (paths.isEmpty()) {
-            return "Git 工作树存在未提交变更";
-        }
+    }
+
+    /**
+     * 脏仓库冲突必须标明真实仓库角色和绝对路径，避免把个人编辑 worktree 误诊为共享运行副本。
+     */
+    private PlatformException dirtyPublicRepositoryConflict(
+            Path repoRoot,
+            PublicRepositorySyncTarget syncTarget) {
+        List<String> paths = dirtyPublicRepositoryPaths(repoRoot);
         boolean truncated = paths.size() > 5;
         List<String> visiblePaths = truncated ? paths.subList(0, 5) : paths;
-        return "Git 工作树存在未提交变更：" + String.join("、", visiblePaths) + (truncated ? " 等" : "");
+        String files = visiblePaths.isEmpty()
+                ? "Git 未返回可展示的文件路径，请在该目录执行 git status --short"
+                : String.join("、", visiblePaths) + (truncated ? " 等" : "");
+        return new PlatformException(
+                ErrorCode.CONFLICT,
+                syncTarget.displayName() + " 存在未提交变更：" + files
+                        + "；仓库路径：" + repoRoot
+                        + "。确认无需保留后，可选择放弃相关本地变更并拉取。",
+                Map.of(
+                        "path", repoRoot.toString(),
+                        "repositoryKind", syncTarget.name(),
+                        "dirtyFiles", visiblePaths,
+                        "discardLocalChangesAllowed", true));
     }
 
     private String decryptSingleSshKey(UserId userId) {
@@ -2108,6 +2269,10 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 : null;
     }
 
+    /**
+     * 广播只负责低延迟唤醒其它节点；rollout 已持久化，调用方广播后必须直接返回，
+     * 禁止在 HTTP 请求线程继续认领本机同步，后续统一由消费者或定时补偿任务执行。
+     */
     private void broadcastPublicSync(String branch, String commitHash, String reason, String rolloutId, String traceId) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("branch", branch);
@@ -2316,10 +2481,9 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         if (gitWorkspaceService.isGitRepository(repoRoot)) {
             ensurePublicRepositoryOriginReady(repoRoot, config);
             if (!discardLocalChanges && !gitWorkspaceService.isWorktreeClean(repoRoot)) {
-                throw new PlatformException(
-                        ErrorCode.CONFLICT,
-                        "Git 工作树存在未提交变更",
-                        Map.of("path", repoRoot.toString()));
+                throw dirtyPublicRepositoryConflict(
+                        repoRoot,
+                        PublicRepositorySyncTarget.SHARED_RUNTIME);
             }
             return;
         }
@@ -2374,6 +2538,22 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
 
     private Instant now() {
         return Instant.now(clock);
+    }
+
+    private enum PublicRepositorySyncTarget {
+        GENERIC("Git 工作树"),
+        SHARED_RUNTIME("公共 Agent 服务器共享运行副本"),
+        PERSONAL_WORKTREE("当前管理员公共 Agent 个人 worktree");
+
+        private final String displayName;
+
+        PublicRepositorySyncTarget(String displayName) {
+            this.displayName = displayName;
+        }
+
+        private String displayName() {
+            return displayName;
+        }
     }
 
     private record PublicConfig(

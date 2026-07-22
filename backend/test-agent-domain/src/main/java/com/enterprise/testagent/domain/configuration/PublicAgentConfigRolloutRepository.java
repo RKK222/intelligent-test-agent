@@ -9,7 +9,12 @@ import java.util.Optional;
  */
 public interface PublicAgentConfigRolloutRepository {
 
-    Optional<String> findActiveRolloutId();
+    /** 查询同一配置作用域内的活动发布；公共范围 scopeKey 为空，应用范围按版本 ID 隔离。 */
+    Optional<String> findActiveRolloutId(AgentConfigRolloutScope scope, String scopeKey);
+
+    default Optional<String> findActiveRolloutId() {
+        return findActiveRolloutId(AgentConfigRolloutScope.PUBLIC, null);
+    }
 
     /** 所有服务器同步前阻止全部用户；同步后仅阻止仍有未 dispose 旧实例的用户。 */
     Optional<String> findBlockingRolloutId(String userId);
@@ -74,6 +79,40 @@ public interface PublicAgentConfigRolloutRepository {
             Instant nextRetryAt,
             String errorMessage,
             Instant now);
+
+    void savePendingApplicationWorktrees(
+            String rolloutId,
+            String linuxServerId,
+            String targetCommit,
+            String traceId,
+            List<AgentConfigRolloutWorktreePending> pendingWorktrees,
+            Instant now);
+
+    Optional<AgentConfigRolloutWorktreeClaim> claimPendingApplicationWorktree(
+            String linuxServerId,
+            Instant now,
+            Instant leaseUntil);
+
+    boolean markApplicationWorktreeRetry(
+            AgentConfigRolloutWorktreeClaim claim,
+            int retryCount,
+            Instant nextRetryAt,
+            String reason,
+            Instant now);
+
+    boolean markApplicationWorktreeSynchronized(
+            AgentConfigRolloutWorktreeClaim claim,
+            Instant now);
+
+    boolean abandonApplicationWorktree(
+            AgentConfigRolloutWorktreeClaim claim,
+            String reason,
+            Instant now);
+
+    boolean hasIncompleteApplicationWorktrees(
+            String rolloutId,
+            String linuxServerId,
+            String userId);
 
     List<PublicAgentConfigRolloutTarget> claimTargets(
             String linuxServerId,

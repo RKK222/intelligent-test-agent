@@ -15,6 +15,52 @@
         </constructor>
     </resultMap>
 
+    <!-- PostgreSQL 通过 jsonb 顶层访问标识，不能把 question/options 等嵌套 id 当作请求标识；
+         无标识旧事件与 Redis 一致回退 current，保证旧 asked/replied 仍能成对收敛。 -->
+    <sql id="attentionRequestId" databaseId="postgresql">
+        coalesce(
+            case when cast(e.payload_json as jsonb) ->> 'requestId' ~ '[^[:space:]]'
+                then cast(e.payload_json as jsonb) ->> 'requestId' end,
+            case when cast(e.payload_json as jsonb) ->> 'requestID' ~ '[^[:space:]]'
+                then cast(e.payload_json as jsonb) ->> 'requestID' end,
+            case when cast(e.payload_json as jsonb) ->> 'id' ~ '[^[:space:]]'
+                then cast(e.payload_json as jsonb) ->> 'id' end,
+            case when cast(e.payload_json as jsonb) ->> 'permissionId' ~ '[^[:space:]]'
+                then cast(e.payload_json as jsonb) ->> 'permissionId' end,
+            case when cast(e.payload_json as jsonb) ->> 'questionId' ~ '[^[:space:]]'
+                then cast(e.payload_json as jsonb) ->> 'questionId' end,
+            'current')
+    </sql>
+
+    <!-- H2 测试夹具不支持 JSON_VALUE；从对象起点只跨越顶层字符串字段，
+         因而兼容真实 sessionID -> requestID 顺序，同时拒绝数组/对象内的嵌套 id。
+         REGEXP_LIKE 遵循 Java regex，空白类必须使用 \s，不能复用 PostgreSQL POSIX 写法。 -->
+    <sql id="attentionRequestId">
+        case
+            when regexp_like(cast(e.payload_json as varchar),
+                '^\s*[{](?:\s*"[^"]+"\s*:\s*"[^"]*"\s*,)*\s*"requestId"\s*:\s*"[^"]*[^"\s][^"]*"')
+                then regexp_replace(cast(e.payload_json as varchar),
+                    '^\s*[{](?:\s*"[^"]+"\s*:\s*"[^"]*"\s*,)*\s*"requestId"\s*:\s*"([^"]+)".*', '\1')
+            when regexp_like(cast(e.payload_json as varchar),
+                '^\s*[{](?:\s*"[^"]+"\s*:\s*"[^"]*"\s*,)*\s*"requestID"\s*:\s*"[^"]*[^"\s][^"]*"')
+                then regexp_replace(cast(e.payload_json as varchar),
+                    '^\s*[{](?:\s*"[^"]+"\s*:\s*"[^"]*"\s*,)*\s*"requestID"\s*:\s*"([^"]+)".*', '\1')
+            when regexp_like(cast(e.payload_json as varchar),
+                '^\s*[{](?:\s*"[^"]+"\s*:\s*"[^"]*"\s*,)*\s*"id"\s*:\s*"[^"]*[^"\s][^"]*"')
+                then regexp_replace(cast(e.payload_json as varchar),
+                    '^\s*[{](?:\s*"[^"]+"\s*:\s*"[^"]*"\s*,)*\s*"id"\s*:\s*"([^"]+)".*', '\1')
+            when regexp_like(cast(e.payload_json as varchar),
+                '^\s*[{](?:\s*"[^"]+"\s*:\s*"[^"]*"\s*,)*\s*"permissionId"\s*:\s*"[^"]*[^"\s][^"]*"')
+                then regexp_replace(cast(e.payload_json as varchar),
+                    '^\s*[{](?:\s*"[^"]+"\s*:\s*"[^"]*"\s*,)*\s*"permissionId"\s*:\s*"([^"]+)".*', '\1')
+            when regexp_like(cast(e.payload_json as varchar),
+                '^\s*[{](?:\s*"[^"]+"\s*:\s*"[^"]*"\s*,)*\s*"questionId"\s*:\s*"[^"]*[^"\s][^"]*"')
+                then regexp_replace(cast(e.payload_json as varchar),
+                    '^\s*[{](?:\s*"[^"]+"\s*:\s*"[^"]*"\s*,)*\s*"questionId"\s*:\s*"([^"]+)".*', '\1')
+            else 'current'
+        end
+    </sql>
+
     <select id="findUserRuntimeState" resultMap="SessionRuntimeStateRowMap">
         with visible_sessions as (
             select s.session_id
@@ -57,30 +103,59 @@
             from ranked_runs
             where run_rank = 1
         ),
-        latest_question_events as (
+        <!-- 同一 requestId 的回复才会消除对应待关注请求，避免乱序或并发请求互相覆盖。 -->
+        attention_events as (
             select
                 e.run_id,
                 e.event_id,
+                e.seq,
                 e.type,
                 e.occurred_at,
-                row_number() over (
-                    partition by e.run_id
-                    order by e.occurred_at desc, e.seq desc
-                ) as event_rank
+                case
+                    when e.type in ('question.asked', 'question.replied', 'question.rejected') then 'QUESTION'
+                    else 'PERMISSION'
+                end as attention,
+                <include refid="attentionRequestId"/> as request_id
             from run_events e
             join active_runs ar on ar.run_id = e.run_id
-            where e.type in ('question.asked', 'question.replied', 'question.rejected')
+            where e.type in (
+                'question.asked', 'question.replied', 'question.rejected',
+                'permission.asked', 'permission.replied')
+        ),
+        latest_unresolved_attention_events as (
+            select
+                asked.run_id,
+                asked.event_id,
+                asked.attention,
+                asked.occurred_at,
+                row_number() over (
+                    partition by asked.run_id
+                    order by asked.seq desc
+                ) as event_rank
+            from attention_events asked
+            where asked.type in ('question.asked', 'permission.asked')
+              and not exists (
+                select 1
+                from attention_events replied
+                where replied.run_id = asked.run_id
+                  and replied.request_id = asked.request_id
+                  and (
+                    (asked.attention = 'QUESTION' and replied.type in ('question.replied', 'question.rejected'))
+                    or (asked.attention = 'PERMISSION' and replied.type = 'permission.replied')
+                  )
+                  and replied.seq > asked.seq
+              )
         )
         select
             ar.session_id,
             ar.run_id,
             ar.status as run_status,
-            case when qe.type = 'question.asked' then 'QUESTION' else null end as attention,
-            case when qe.type = 'question.asked' then qe.event_id else null end as attention_event_id,
-            case when qe.type = 'question.asked' then qe.occurred_at else null end as attention_at,
+            qe.attention as attention,
+            qe.event_id as attention_event_id,
+            qe.occurred_at as attention_at,
             ar.updated_at
         from active_runs ar
-        left join latest_question_events qe
+        left join latest_unresolved_attention_events qe
           on qe.run_id = ar.run_id
          and qe.event_rank = 1
         order by ar.updated_at desc, ar.id desc

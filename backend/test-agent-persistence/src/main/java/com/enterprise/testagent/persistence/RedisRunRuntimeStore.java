@@ -55,6 +55,8 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
     private static final int DEFAULT_SNAPSHOT_EVENT_LIMIT = MAX_DURABLE_EVENTS;
     private static final long MAX_CRITICAL_SNAPSHOT_RESERVE_BYTES = 4L * 1024L * 1024L;
     private static final long MAX_SNAPSHOT_ENTRY_BYTES = 1024L * 1024L;
+    private static final int MAX_PENDING_ATTENTION_ENTRIES = 1024;
+    private static final int MAX_ATTENTION_REQUEST_ID_BYTES = 512;
     private static final Duration CLIENT_REQUEST_CLAIM_TTL = Duration.ofSeconds(30);
 
     private static final DefaultRedisScript<Long> INITIALIZE_SCRIPT = new DefaultRedisScript<>("""
@@ -68,7 +70,9 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
               'inputBytes', ARGV[8], 'scopeBytes', '0', 'pendingBytes', '0', 'streamBytes', '0',
               'snapshotBytes', tostring(string.len(ARGV[9])),
               'detailBytes', tostring(tonumber(ARGV[8]) + string.len(ARGV[9])),
-              'attention', '', 'attentionRequestId', '', 'attentionEventId', '', 'attentionAt', '',
+              'attentionBytes', '0', 'attentionCount', '0',
+              'attention', '', 'attentionRequestId', '', 'attentionRequestKey', '',
+              'attentionEventId', '', 'attentionAt', '',
               'terminalProjectionPending', '0', 'terminalProjectionVersion', '0',
               'rootRemoteSessionId', ARGV[13], 'detailsExpiresAt', ARGV[4], 'updatedAt', ARGV[5])
             redis.call('SET', KEYS[2], ARGV[6], 'PX', ARGV[7])
@@ -429,22 +433,110 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             while redis.call('ZCARD', KEYS[5]) > tonumber(ARGV[6]) do
               if not evictSnapshotEntry() then break end
             end
-            local baseBytes = tonumber(redis.call('HGET', KEYS[1], 'inputBytes') or '0')
+            -- manifest 只投影最新 attention；独立 Hash + ZSET 用类型化摘要键保存全部未决请求，
+            -- 同时把集合字节与数量纳入统一详情预算，避免 HKEYS 全表扫描和无界增长。
+            local attentionBytes = tonumber(redis.call('HGET', KEYS[1], 'attentionBytes') or '0')
+            local attentionCount = tonumber(redis.call('HGET', KEYS[1], 'attentionCount') or '0')
+            local function legacyAttentionField(kind, requestId)
+              return redis.sha1hex(kind .. ':' .. requestId)
+            end
+            local function storePendingAttention(field, candidate, order)
+              local encoded = cjson.encode(candidate)
+              local previous = redis.call('HGET', KEYS[9], field)
+              if previous then
+                attentionBytes = attentionBytes - string.len(previous) - string.len(field)
+              else
+                attentionCount = attentionCount + 1
+              end
+              redis.call('HSET', KEYS[9], field, encoded)
+              redis.call('ZADD', KEYS[10], order, field)
+              attentionBytes = attentionBytes + string.len(encoded) + string.len(field)
+            end
+            local function removePendingAttention(field)
+              local previous = redis.call('HGET', KEYS[9], field)
+              if previous then
+                attentionBytes = math.max(0, attentionBytes - string.len(previous) - string.len(field))
+                attentionCount = math.max(0, attentionCount - 1)
+              end
+              redis.call('HDEL', KEYS[9], field)
+              redis.call('ZREM', KEYS[10], field)
+            end
+            local function seedCurrentAttention()
+              local currentAttention = redis.call('HGET', KEYS[1], 'attention') or ''
+              local currentRequestId = redis.call('HGET', KEYS[1], 'attentionRequestId') or ''
+              local currentRequestKey = redis.call('HGET', KEYS[1], 'attentionRequestKey') or ''
+              if currentRequestKey == '' and currentAttention ~= '' and currentRequestId ~= '' then
+                currentRequestKey = legacyAttentionField(currentAttention, currentRequestId)
+              end
+              if currentAttention ~= '' and currentRequestId ~= ''
+                  and redis.call('HEXISTS', KEYS[9], currentRequestKey) == 0 then
+                storePendingAttention(currentRequestKey, {
+                  value=currentAttention, requestId=currentRequestId, requestKey=currentRequestKey,
+                  eventId=redis.call('HGET', KEYS[1], 'attentionEventId') or '',
+                  at=redis.call('HGET', KEYS[1], 'attentionAt') or '', order=-1}, -1)
+              end
+            end
+            local function clearPendingAttentions()
+              redis.call('DEL', KEYS[9], KEYS[10])
+              attentionBytes = 0
+              attentionCount = 0
+            end
+            local function restoreLatestAttention()
+              while true do
+                local fields = redis.call('ZREVRANGE', KEYS[10], 0, 0)
+                if #fields == 0 then
+                  redis.call('HSET', KEYS[1], 'attention', '', 'attentionRequestId', '',
+                    'attentionRequestKey', '', 'attentionEventId', '', 'attentionAt', '')
+                  return
+                end
+                local field = fields[1]
+                local encoded = redis.call('HGET', KEYS[9], field)
+                local ok, candidate = pcall(cjson.decode, encoded or '')
+                if ok and type(candidate) == 'table' and type(candidate['value']) == 'string'
+                    and type(candidate['requestId']) == 'string' then
+                  redis.call('HSET', KEYS[1], 'attention', candidate['value'],
+                    'attentionRequestId', candidate['requestId'],
+                    'attentionRequestKey', candidate['requestKey'] or field,
+                    'attentionEventId', candidate['eventId'] or '', 'attentionAt', candidate['at'] or '')
+                  return
+                end
+                removePendingAttention(field)
+              end
+            end
+            local attentionChanged = false
+            if ARGV[17] == '1' then
+              clearPendingAttentions()
+              attentionChanged = true
+            elseif ARGV[13] ~= '' then
+              seedCurrentAttention()
+              storePendingAttention(ARGV[37], {
+                value=ARGV[13], requestId=ARGV[14], requestKey=ARGV[37],
+                eventId=ARGV[22] .. tostring(seq), at=ARGV[23], order=runtimeVersion}, runtimeVersion)
+              attentionChanged = true
+            elseif ARGV[15] == '1' then
+              seedCurrentAttention()
+              removePendingAttention(ARGV[37])
+              removePendingAttention(ARGV[40])
+              attentionChanged = true
+            end
+            local otherBaseBytes = tonumber(redis.call('HGET', KEYS[1], 'inputBytes') or '0')
               + tonumber(redis.call('HGET', KEYS[1], 'scopeBytes') or '0')
               + tonumber(redis.call('HGET', KEYS[1], 'pendingBytes') or '0')
+            if attentionChanged then
+              while attentionCount > tonumber(ARGV[39])
+                  or otherBaseBytes + attentionBytes > tonumber(ARGV[38]) do
+                local oldest = redis.call('ZRANGE', KEYS[10], 0, 0)
+                if #oldest == 0 then break end
+                removePendingAttention(oldest[1])
+                evicted = 1
+              end
+              restoreLatestAttention()
+              redis.call('HSET', KEYS[1], 'attentionBytes', tostring(attentionBytes),
+                'attentionCount', tostring(attentionCount))
+            end
+            local baseBytes = otherBaseBytes + attentionBytes
             while snapshotBytes > math.max(0, tonumber(ARGV[9]) - baseBytes) do
               if not evictSnapshotEntry() then break end
-            end
-
-            if ARGV[17] == '1' then
-              redis.call('HSET', KEYS[1], 'attention', '', 'attentionRequestId', '',
-                'attentionEventId', '', 'attentionAt', '')
-            elseif ARGV[13] ~= '' then
-              redis.call('HSET', KEYS[1], 'attention', ARGV[13],
-                'attentionRequestId', ARGV[14], 'attentionEventId', ARGV[22] .. tostring(seq), 'attentionAt', ARGV[23])
-            elseif ARGV[15] == '1' and (redis.call('HGET', KEYS[1], 'attentionRequestId') or '') == ARGV[14] then
-              redis.call('HSET', KEYS[1], 'attention', '', 'attentionRequestId', '',
-                'attentionEventId', '', 'attentionAt', '')
             end
             if nextStatus ~= '' then
               if currentStatus ~= nextStatus then
@@ -496,7 +588,8 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
               redis.call('HSET', KEYS[1], 'snapshotBytes', tostring(snapshotBytes), 'detailBytes', tostring(totalBytes))
             end
             redis.call('HSET', KEYS[1], 'snapshotBytes', tostring(snapshotBytes))
-            redis.call('SADD', KEYS[6], KEYS[1], KEYS[2], KEYS[3], KEYS[4], KEYS[5], KEYS[6], KEYS[7])
+            redis.call('SADD', KEYS[6], KEYS[1], KEYS[2], KEYS[3], KEYS[4], KEYS[5], KEYS[6], KEYS[7],
+              KEYS[9], KEYS[10])
             for _, key in ipairs(redis.call('SMEMBERS', KEYS[6])) do redis.call('PEXPIRE', key, ttl) end
             redis.call('PEXPIRE', KEYS[6], ttl)
             return cjson.encode({seq=seq,runtimeVersion=runtimeVersion,ignored=0,truncated=truncated,
@@ -673,22 +766,109 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             while redis.call('ZCARD', KEYS[4]) > tonumber(ARGV[6]) do
               if not evictSnapshotEntry() then break end
             end
-            local baseBytes = tonumber(redis.call('HGET', KEYS[1], 'inputBytes') or '0')
+            -- transient 与 durable 路径共用类型化、定量的未决 attention 集合语义。
+            local attentionBytes = tonumber(redis.call('HGET', KEYS[1], 'attentionBytes') or '0')
+            local attentionCount = tonumber(redis.call('HGET', KEYS[1], 'attentionCount') or '0')
+            local function legacyAttentionField(kind, requestId)
+              return redis.sha1hex(kind .. ':' .. requestId)
+            end
+            local function storePendingAttention(field, candidate, order)
+              local encoded = cjson.encode(candidate)
+              local previous = redis.call('HGET', KEYS[9], field)
+              if previous then
+                attentionBytes = attentionBytes - string.len(previous) - string.len(field)
+              else
+                attentionCount = attentionCount + 1
+              end
+              redis.call('HSET', KEYS[9], field, encoded)
+              redis.call('ZADD', KEYS[10], order, field)
+              attentionBytes = attentionBytes + string.len(encoded) + string.len(field)
+            end
+            local function removePendingAttention(field)
+              local previous = redis.call('HGET', KEYS[9], field)
+              if previous then
+                attentionBytes = math.max(0, attentionBytes - string.len(previous) - string.len(field))
+                attentionCount = math.max(0, attentionCount - 1)
+              end
+              redis.call('HDEL', KEYS[9], field)
+              redis.call('ZREM', KEYS[10], field)
+            end
+            local function seedCurrentAttention()
+              local currentAttention = redis.call('HGET', KEYS[1], 'attention') or ''
+              local currentRequestId = redis.call('HGET', KEYS[1], 'attentionRequestId') or ''
+              local currentRequestKey = redis.call('HGET', KEYS[1], 'attentionRequestKey') or ''
+              if currentRequestKey == '' and currentAttention ~= '' and currentRequestId ~= '' then
+                currentRequestKey = legacyAttentionField(currentAttention, currentRequestId)
+              end
+              if currentAttention ~= '' and currentRequestId ~= ''
+                  and redis.call('HEXISTS', KEYS[9], currentRequestKey) == 0 then
+                storePendingAttention(currentRequestKey, {
+                  value=currentAttention, requestId=currentRequestId, requestKey=currentRequestKey,
+                  eventId=redis.call('HGET', KEYS[1], 'attentionEventId') or '',
+                  at=redis.call('HGET', KEYS[1], 'attentionAt') or '', order=-1}, -1)
+              end
+            end
+            local function clearPendingAttentions()
+              redis.call('DEL', KEYS[9], KEYS[10])
+              attentionBytes = 0
+              attentionCount = 0
+            end
+            local function restoreLatestAttention()
+              while true do
+                local fields = redis.call('ZREVRANGE', KEYS[10], 0, 0)
+                if #fields == 0 then
+                  redis.call('HSET', KEYS[1], 'attention', '', 'attentionRequestId', '',
+                    'attentionRequestKey', '', 'attentionEventId', '', 'attentionAt', '')
+                  return
+                end
+                local field = fields[1]
+                local encoded = redis.call('HGET', KEYS[9], field)
+                local ok, candidate = pcall(cjson.decode, encoded or '')
+                if ok and type(candidate) == 'table' and type(candidate['value']) == 'string'
+                    and type(candidate['requestId']) == 'string' then
+                  redis.call('HSET', KEYS[1], 'attention', candidate['value'],
+                    'attentionRequestId', candidate['requestId'],
+                    'attentionRequestKey', candidate['requestKey'] or field,
+                    'attentionEventId', candidate['eventId'] or '', 'attentionAt', candidate['at'] or '')
+                  return
+                end
+                removePendingAttention(field)
+              end
+            end
+            local attentionChanged = false
+            if ARGV[17] == '1' then
+              clearPendingAttentions()
+              attentionChanged = true
+            elseif ARGV[13] ~= '' then
+              seedCurrentAttention()
+              storePendingAttention(ARGV[37], {
+                value=ARGV[13], requestId=ARGV[14], requestKey=ARGV[37],
+                eventId=ARGV[22] .. tostring(runtimeVersion), at=ARGV[23], order=runtimeVersion}, runtimeVersion)
+              attentionChanged = true
+            elseif ARGV[15] == '1' then
+              seedCurrentAttention()
+              removePendingAttention(ARGV[37])
+              removePendingAttention(ARGV[40])
+              attentionChanged = true
+            end
+            local otherBaseBytes = tonumber(redis.call('HGET', KEYS[1], 'inputBytes') or '0')
               + tonumber(redis.call('HGET', KEYS[1], 'scopeBytes') or '0')
               + tonumber(redis.call('HGET', KEYS[1], 'pendingBytes') or '0')
+            if attentionChanged then
+              while attentionCount > tonumber(ARGV[39])
+                  or otherBaseBytes + attentionBytes > tonumber(ARGV[38]) do
+                local oldest = redis.call('ZRANGE', KEYS[10], 0, 0)
+                if #oldest == 0 then break end
+                removePendingAttention(oldest[1])
+                evicted = 1
+              end
+              restoreLatestAttention()
+              redis.call('HSET', KEYS[1], 'attentionBytes', tostring(attentionBytes),
+                'attentionCount', tostring(attentionCount))
+            end
+            local baseBytes = otherBaseBytes + attentionBytes
             while snapshotBytes > math.max(0, tonumber(ARGV[9]) - baseBytes) do
               if not evictSnapshotEntry() then break end
-            end
-            if ARGV[17] == '1' then
-              redis.call('HSET', KEYS[1], 'attention', '', 'attentionRequestId', '',
-                'attentionEventId', '', 'attentionAt', '')
-            elseif ARGV[13] ~= '' then
-              redis.call('HSET', KEYS[1], 'attention', ARGV[13],
-                'attentionRequestId', ARGV[14], 'attentionEventId', ARGV[22] .. tostring(runtimeVersion),
-                'attentionAt', ARGV[23])
-            elseif ARGV[15] == '1' and (redis.call('HGET', KEYS[1], 'attentionRequestId') or '') == ARGV[14] then
-              redis.call('HSET', KEYS[1], 'attention', '', 'attentionRequestId', '',
-                'attentionEventId', '', 'attentionAt', '')
             end
             if nextStatus ~= '' then
               if currentStatus ~= nextStatus then
@@ -736,7 +916,8 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
               redis.call('HSET', KEYS[1], 'snapshotBytes', tostring(snapshotBytes), 'detailBytes', tostring(totalBytes))
             end
             redis.call('HSET', KEYS[1], 'snapshotBytes', tostring(snapshotBytes))
-            redis.call('SADD', KEYS[5], KEYS[1], KEYS[2], KEYS[3], KEYS[4], KEYS[5], KEYS[6], KEYS[7])
+            redis.call('SADD', KEYS[5], KEYS[1], KEYS[2], KEYS[3], KEYS[4], KEYS[5], KEYS[6], KEYS[7],
+              KEYS[9], KEYS[10])
             for _, key in ipairs(redis.call('SMEMBERS', KEYS[5])) do redis.call('PEXPIRE', key, ttl) end
             redis.call('PEXPIRE', KEYS[5], ttl)
             return cjson.encode({runtimeVersion=runtimeVersion,ignored=0,truncated=truncated,
@@ -811,19 +992,23 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             if tonumber(redis.call('HGET', KEYS[1], 'lastSeq') or '0') ~= tonumber(ARGV[1]) then return 0 end
             if tonumber(redis.call('HGET', KEYS[1], 'runtimeVersion') or '0') ~= tonumber(ARGV[2]) then return 0 end
             local drafts = cjson.decode(ARGV[3])
-            redis.call('DEL', KEYS[2], KEYS[3])
             local bytes = 0
+            for _, draft in ipairs(drafts) do bytes = bytes + string.len(draft) end
+            local baseBytes = tonumber(redis.call('HGET', KEYS[1], 'inputBytes') or '0')
+              + tonumber(redis.call('HGET', KEYS[1], 'scopeBytes') or '0')
+              + tonumber(redis.call('HGET', KEYS[1], 'pendingBytes') or '0')
+              + tonumber(redis.call('HGET', KEYS[1], 'attentionBytes') or '0')
+            local detailBytes = baseBytes + bytes
+              + tonumber(redis.call('HGET', KEYS[1], 'streamBytes') or '0')
+            if detailBytes > tonumber(ARGV[5]) then return -2 end
+            redis.call('DEL', KEYS[2], KEYS[3])
             for index, draft in ipairs(drafts) do
               local key = 'external:' .. tostring(index)
               redis.call('HSET', KEYS[2], key, draft)
               redis.call('ZADD', KEYS[3], index, key)
-              bytes = bytes + string.len(draft)
             end
-            local baseBytes = tonumber(redis.call('HGET', KEYS[1], 'inputBytes') or '0')
-              + tonumber(redis.call('HGET', KEYS[1], 'scopeBytes') or '0')
-              + tonumber(redis.call('HGET', KEYS[1], 'pendingBytes') or '0')
             redis.call('HSET', KEYS[1], 'snapshotBytes', tostring(bytes),
-              'detailBytes', tostring(baseBytes + bytes + tonumber(redis.call('HGET', KEYS[1], 'streamBytes') or '0')))
+              'detailBytes', tostring(detailBytes))
             redis.call('SADD', KEYS[4], KEYS[1], KEYS[2], KEYS[3], KEYS[4])
             for _, key in ipairs(redis.call('SMEMBERS', KEYS[4])) do redis.call('PEXPIRE', key, ARGV[4]) end
             redis.call('PEXPIRE', KEYS[4], ARGV[4])
@@ -887,11 +1072,14 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
               + (previousSession and string.len(previousSession) or 0)
             local scopeBytes = tonumber(redis.call('HGET', KEYS[6], 'scopeBytes') or '0')
               + string.len(ARGV[1]) + string.len(ARGV[2]) - previousBytes
-            local detailBytes = tonumber(redis.call('HGET', KEYS[6], 'inputBytes') or '0') + scopeBytes
+            local nonSnapshotBytes = tonumber(redis.call('HGET', KEYS[6], 'inputBytes') or '0') + scopeBytes
               + tonumber(redis.call('HGET', KEYS[6], 'pendingBytes') or '0')
+              + tonumber(redis.call('HGET', KEYS[6], 'attentionBytes') or '0')
+            if nonSnapshotBytes > tonumber(ARGV[6]) then return -2 end
+            local detailBytes = nonSnapshotBytes
               + tonumber(redis.call('HGET', KEYS[6], 'streamBytes') or '0')
               + tonumber(redis.call('HGET', KEYS[6], 'snapshotBytes') or '0')
-            if detailBytes > tonumber(ARGV[6]) then return -2 end
+            if detailBytes > tonumber(ARGV[10]) then return -2 end
             redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[3])
             redis.call('SET', KEYS[2], ARGV[2], 'PX', ARGV[3])
             redis.call('HSET', KEYS[6], 'scopeBytes', tostring(scopeBytes))
@@ -918,6 +1106,7 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             local nextStatus = ARGV[2]
             local currentTerminal = currentStatus == 'SUCCEEDED' or currentStatus == 'FAILED' or currentStatus == 'CANCELLED'
             local nextTerminal = nextStatus == 'SUCCEEDED' or nextStatus == 'FAILED' or nextStatus == 'CANCELLED'
+            local nextAttention = nextTerminal and '' or ARGV[3]
             local allowed = (currentTerminal and nextTerminal)
               or (currentStatus == 'PENDING' and (nextStatus == 'RUNNING' or nextStatus == 'FAILED' or nextStatus == 'CANCELLED'))
               or (currentStatus == 'RUNNING' and (nextStatus == 'CANCELLING' or nextTerminal))
@@ -925,9 +1114,15 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             if not allowed then return -2 end
             redis.call('HSET', KEYS[1],
               'status', ARGV[2], 'statusVersion', tostring(current + 1),
-              'attention', ARGV[3], 'updatedAt', ARGV[4], 'detailsExpiresAt', ARGV[5])
-            if ARGV[3] == '' then
-              redis.call('HSET', KEYS[1], 'attentionEventId', '', 'attentionAt', '')
+              'attention', nextAttention, 'updatedAt', ARGV[4], 'detailsExpiresAt', ARGV[5])
+            if nextAttention == '' then
+              local attentionBytes = tonumber(redis.call('HGET', KEYS[1], 'attentionBytes') or '0')
+              local detailBytes = math.max(0,
+                tonumber(redis.call('HGET', KEYS[1], 'detailBytes') or '0') - attentionBytes)
+              redis.call('DEL', KEYS[3], KEYS[4])
+              redis.call('HSET', KEYS[1], 'attentionBytes', '0', 'attentionCount', '0',
+                'detailBytes', tostring(detailBytes), 'attentionRequestId', '', 'attentionRequestKey', '',
+                'attentionEventId', '', 'attentionAt', '')
             end
             for _, key in ipairs(redis.call('SMEMBERS', KEYS[2])) do redis.call('PEXPIRE', key, ARGV[6]) end
             redis.call('PEXPIRE', KEYS[2], ARGV[6])
@@ -1404,7 +1599,9 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                             registryKey(draft.runId()),
                             inputKey(draft.runId()),
                             streamKey(draft.runId()),
-                            ownerLeaseKey(draft.runId())),
+                            ownerLeaseKey(draft.runId()),
+                            pendingAttentionKey(draft.runId()),
+                            pendingAttentionOrderKey(draft.runId())),
                     operationArguments(draft, projection, now, false, lease));
             if (projected == null || "__MISSING__".equals(projected)) {
                 throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run Redis manifest 不存在");
@@ -1440,12 +1637,16 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                     Long.toString(snapshot.barrierSeq()),
                     Long.toString(snapshot.runtimeVersion()),
                     write(snapshot.events().stream().map(this::write).toList()),
-                    Long.toString(ttl.toMillis()));
+                    Long.toString(ttl.toMillis()),
+                    Long.toString(maxDetailBytes));
             if (saved == null || saved == -1L) {
                 throw new PlatformException(ErrorCode.RUN_DETAILS_EXPIRED, "Run 详情已过期");
             }
             if (saved == 0L) {
                 throw new PlatformException(ErrorCode.CONFLICT, "Run snapshot barrier 已变化");
+            }
+            if (saved == -2L) {
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "Run snapshot 超过 Redis 详情容量上限");
             }
         } catch (RuntimeException exception) {
             if (exception instanceof PlatformException platformException) {
@@ -1598,7 +1799,8 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                     Long.toString(nonSnapshotDetailBudgetBytes()),
                     fenced(lease),
                     owner(lease),
-                    token(lease));
+                    token(lease),
+                    Long.toString(maxDetailBytes));
             if (saved == null || saved == -1L) {
                 throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "Run Redis manifest 不存在");
             }
@@ -2016,7 +2218,11 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         try {
             Long result = redisTemplate.execute(
                     UPDATE_STATUS_SCRIPT,
-                    List.of(manifestKey(runId), registryKey(runId)),
+                    List.of(
+                            manifestKey(runId),
+                            registryKey(runId),
+                            pendingAttentionKey(runId),
+                            pendingAttentionOrderKey(runId)),
                     Long.toString(expectedStatusVersion),
                     status.name(),
                     attention == null ? "" : attention,
@@ -2345,7 +2551,9 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                 snapshotOrderKey(runId),
                 registryKey(runId),
                 inputKey(runId),
-                ownerLeaseKey(runId));
+                ownerLeaseKey(runId),
+                pendingAttentionKey(runId),
+                pendingAttentionOrderKey(runId));
     }
 
     private Object[] operationArguments(
@@ -2396,7 +2604,12 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                 terminalProjection.remoteStopConfirmed() ? "1" : "0",
                 terminalProjection.traceId(),
                 terminalProjection.occurredAt(),
-                Long.toString(snapshotEntryLimitBytes())
+                Long.toString(snapshotEntryLimitBytes()),
+                attention.kind() == null ? "" : attention.kind(),
+                attention.requestKey() == null ? "" : attention.requestKey(),
+                Long.toString(nonSnapshotDetailBudgetBytes()),
+                Integer.toString(maxPendingAttentionEntries()),
+                attention.legacyRequestKey() == null ? "" : attention.legacyRequestKey()
         };
     }
 
@@ -2485,7 +2698,7 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
         return Math.max(1L, Math.min(MAX_CRITICAL_SNAPSHOT_RESERVE_BYTES, maxDetailBytes / 2L));
     }
 
-    /** input/scope/pending 只使用非快照预算，避免后续事件把关键 reset 快照空间挤占。 */
+    /** input/scope/pending/attention 只使用非快照预算，避免后续事件把关键 reset 快照空间挤占。 */
     private long nonSnapshotDetailBudgetBytes() {
         return Math.max(0L, maxDetailBytes - criticalSnapshotReserveBytes());
     }
@@ -2493,6 +2706,11 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
     /** latest message、latest part、run-status 三个关键槽共享预留空间，生产单槽仍不超过 1 MiB。 */
     private long snapshotEntryLimitBytes() {
         return Math.max(1L, Math.min(MAX_SNAPSHOT_ENTRY_BYTES, criticalSnapshotReserveBytes() / 3L));
+    }
+
+    /** 未决交互恢复集合使用独立上限，避免异常事件让单次 Redis 脚本或内存无界增长。 */
+    private int maxPendingAttentionEntries() {
+        return Math.max(1, Math.min(MAX_PENDING_ATTENTION_ENTRIES, maxDurableEvents));
     }
 
     private String snapshotJson(RunEventDraft draft) {
@@ -2693,13 +2911,30 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
     }
 
     private AttentionMutation attentionMutation(RunEventDraft draft) {
-        return switch (draft.type()) {
-            case QUESTION_ASKED -> new AttentionMutation("QUESTION", requestId(draft.payload()), false);
-            case PERMISSION_ASKED -> new AttentionMutation("PERMISSION", requestId(draft.payload()), false);
-            case QUESTION_REPLIED, QUESTION_REJECTED, PERMISSION_REPLIED ->
-                    new AttentionMutation(null, requestId(draft.payload()), true);
-            default -> new AttentionMutation(null, null, false);
+        String kind = switch (draft.type()) {
+            case QUESTION_ASKED, QUESTION_REPLIED, QUESTION_REJECTED -> "QUESTION";
+            case PERMISSION_ASKED, PERMISSION_REPLIED -> "PERMISSION";
+            default -> null;
         };
+        if (kind == null) {
+            return AttentionMutation.none();
+        }
+        String requestId = requestId(draft.payload());
+        boolean clear = switch (draft.type()) {
+            case QUESTION_REPLIED, QUESTION_REJECTED, PERMISSION_REPLIED -> true;
+            default -> false;
+        };
+        // Hash field 只保存类型化摘要，原始超长 ID 不进入 Redis key；完整事件仍保留原 payload。
+        String boundedRequestId = requestId.getBytes(StandardCharsets.UTF_8).length <= MAX_ATTENTION_REQUEST_ID_BYTES
+                ? requestId
+                : "sha256:" + digest(requestId);
+        return new AttentionMutation(
+                clear ? null : kind,
+                kind,
+                boundedRequestId,
+                digest(kind + '\0' + requestId),
+                sha1Digest(kind + ':' + requestId),
+                clear);
     }
 
     private Optional<RunStatus> statusFrom(RunEventType type) {
@@ -2715,7 +2950,7 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
     }
 
     private String requestId(Map<String, Object> payload) {
-        return firstText(payload, "requestId", "id", "permissionId", "questionId")
+        return firstText(payload, "requestId", "requestID", "id", "permissionId", "questionId")
                 .orElse("current");
     }
 
@@ -2755,6 +2990,16 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
                     .digest(value.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 unavailable", exception);
+        }
+    }
+
+    /** 仅用于识别升级前 manifest 的兼容 key；新 attention field 一律使用 SHA-256。 */
+    private String sha1Digest(String value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-1")
+                    .digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-1 unavailable", exception);
         }
     }
 
@@ -2834,6 +3079,8 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
     private String runtimeStreamKey(RunId runId) { return runPrefix(runId) + "runtime-events"; }
     private String snapshotKey(RunId runId) { return runPrefix(runId) + "snapshot"; }
     private String snapshotOrderKey(RunId runId) { return runPrefix(runId) + "snapshot:order"; }
+    private String pendingAttentionKey(RunId runId) { return runPrefix(runId) + "pending-attention"; }
+    private String pendingAttentionOrderKey(RunId runId) { return runPrefix(runId) + "pending-attention:order"; }
     private String registryKey(RunId runId) { return runPrefix(runId) + "keys"; }
     private String ownerLeaseKey(RunId runId) { return runPrefix(runId) + "owner-lease"; }
     private String scopeKey(RunId runId) { return runPrefix(runId) + "scope"; }
@@ -2871,7 +3118,18 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
     }
 
     private record SnapshotProjection(String key, String mode, String cleanupKey, boolean latestOrder) { }
-    private record AttentionMutation(String value, String eventId, boolean clear) { }
+    private record AttentionMutation(
+            String value,
+            String kind,
+            String eventId,
+            String requestKey,
+            String legacyRequestKey,
+            boolean clear) {
+
+        private static AttentionMutation none() {
+            return new AttentionMutation(null, null, null, null, null, false);
+        }
+    }
     private record TerminalProjectionMetadata(
             String source,
             String reasonCode,

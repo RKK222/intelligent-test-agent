@@ -65,7 +65,7 @@ class MyBatisNightExecutionTaskRepositoryIntegrationTest {
                     "USER_PLAN", status, NOW, "{}", "trace_legacy_night", NOW, NOW);
         }
         new ResourceDatabasePopulator(new ClassPathResource(
-                "db/migration/V20260721134000__migrate_night_execution_to_xxl.sql")).execute(dataSource);
+                "db/migration/V20260722130000__migrate_night_execution_to_xxl.sql")).execute(dataSource);
 
         jdbc.update("insert into users(user_id, unified_auth_id, username, password_hash, status, created_at, updated_at) "
                 + "values(?,?,?,?,?,?,?)", USER.value(), "u_night_repository", "night-user", "hash", "ACTIVE", NOW, NOW);

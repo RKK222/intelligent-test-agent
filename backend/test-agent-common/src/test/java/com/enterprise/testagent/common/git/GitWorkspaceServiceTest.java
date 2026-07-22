@@ -35,6 +35,14 @@ class GitWorkspaceServiceTest {
         assertThatThrownBy(() -> service.mergeCommit(tempDir, "abc123", null, null))
                 .isInstanceOf(NullPointerException.class)
                 .hasMessage("identity must not be null");
+        assertThatThrownBy(() -> service.createLinearCommitFromTree(
+                tempDir,
+                "source",
+                "parent",
+                "publish",
+                null))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("identity must not be null");
         assertThat(executor.calls).isEmpty();
     }
 

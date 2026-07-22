@@ -28,6 +28,8 @@ import com.enterprise.testagent.domain.configuration.CommonParameterValues;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.configuration.ParameterPlatform;
 import com.enterprise.testagent.domain.configuration.AgentConfigRolloutScope;
+import com.enterprise.testagent.domain.configuration.AgentConfigRolloutWorktreeClaim;
+import com.enterprise.testagent.domain.configuration.AgentConfigRolloutWorktreePending;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutCoordinator;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
 import com.enterprise.testagent.domain.configuration.SshKeyId;
@@ -588,6 +590,30 @@ class ManagedWorkspaceApplicationServiceTest {
                             .containsEntry("workspaceId", personal.runtimeWorkspace().workspaceId())
                             .containsEntry("personalWorkspaceId", personal.personalWorkspaceId());
                 });
+    }
+
+    @Test
+    void globalRecentWorkspaceIsHiddenButRetainedAfterMemberRevocation() {
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService creator = service(
+                new FakeConfigurationRepository(true), managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = creator.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+        creator.ensureDefaultPersonalWorkspace(version.versionId(), new UserId("usr_1"), "trace_default");
+
+        ManagedWorkspaceApplicationService revokedReader = service(
+                new FakeConfigurationRepository(false), managed, workspaces, git);
+
+        assertThat(revokedReader.recentWorkspace(new UserId("usr_1"))).isEmpty();
+        assertThat(managed.personals).hasSize(1);
+        assertThat(workspaces.saved).hasSize(2);
     }
 
     @Test
@@ -1357,11 +1383,11 @@ class ManagedWorkspaceApplicationServiceTest {
             assertThat(record.direction()).isEqualTo(WorkspaceSyncDirection.APPLICATION_TO_PERSONAL);
             assertThat(record.status()).isEqualTo(WorkspaceSyncStatus.SUCCEEDED);
         });
-        verify(coordinator).markServerSyncedForUsers(request, Set.of("usr_1"));
+        verify(coordinator).markServerSyncedForUsers(request, Set.of("usr_1"), List.of());
     }
 
     @Test
-    void applicationAgentRolloutKeepsServerPendingWhenPersonalWorktreeIsDirty() {
+    void applicationAgentRolloutCompletesServerAndPersistsDirtyWorktreeForUserResolution() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
@@ -1369,7 +1395,8 @@ class ManagedWorkspaceApplicationServiceTest {
         ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
         ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
                 "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
-        service.ensureDefaultPersonalWorkspace(version.versionId(), new UserId("usr_1"), "trace_personal");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_personal");
         git.targetContainedInHead = false;
         git.dirtyRepoRoot = personalRepoRoot("feature_testagent_20260707_usr_1_default");
         PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
@@ -1383,10 +1410,49 @@ class ManagedWorkspaceApplicationServiceTest {
 
         assertThat(git.mergedCommit).isNull();
         assertThat(managed.syncRecords).isEmpty();
-        verify(coordinator).markServerSyncRetry(request, "PERSONAL_WORKTREE_UPDATE_PENDING");
-        verify(coordinator, org.mockito.Mockito.never()).markServerSyncedForUsers(
-                org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.anySet());
+        verify(coordinator).markServerSyncedForUsers(
+                request,
+                Set.of(),
+                List.of(new AgentConfigRolloutWorktreePending(
+                        personal.personalWorkspaceId(), "usr_1", "LOCAL_CHANGES")));
+        verify(coordinator, org.mockito.Mockito.never()).markServerSyncRetry(
+                request, "PERSONAL_WORKTREE_UPDATE_PENDING");
+    }
+
+    @Test
+    void pendingApplicationWorktreeIsMergedAndDisposedAfterUserMakesItClean() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_personal");
+        git.targetContainedInHead = false;
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        AgentConfigRolloutWorktreeClaim claim = new AgentConfigRolloutWorktreeClaim(
+                "acr_rollout",
+                version.versionId(),
+                personal.personalWorkspaceId(),
+                "usr_1",
+                "127.0.0.1",
+                "commit_application_agent",
+                "trace_rollout",
+                2,
+                Instant.now().plusSeconds(60),
+                "acl_worktree");
+        when(coordinator.claimPendingApplicationWorktree("127.0.0.1"))
+                .thenReturn(Optional.of(claim));
+        service.setAgentConfigRolloutCoordinator(coordinator);
+
+        service.retryPendingApplicationConfigWorktrees();
+
+        assertThat(git.mergedCommit).isEqualTo("commit_application_agent");
+        verify(coordinator).markApplicationWorktreeSynchronized(claim);
+        verify(coordinator, org.mockito.Mockito.never()).markApplicationWorktreeRetry(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test

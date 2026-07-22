@@ -67,7 +67,7 @@
 - `db/migration/V20260703141000__create_run_session_scopes.sql`：创建 Run session scope 表并为 `run_events` 预留 scope/raw event id 列。
 - `db/migration/V20260715000000__add_scheduler_run_retention_index.sql`：为 `scheduled_task_runs.ended_at` 增加运行记录保留清理索引。
 - `db/migration/V20260718210000__extend_scheduler_user_plan.sql`：允许 USER_PLAN 专用任务无 Cron，并为运行记录增加执行亲和字段和到期索引。
-- `db/migration/V20260721134000__migrate_night_execution_to_xxl.sql`：增加夜间任务 attempt/精确 owner/租约/state-version 与 legacy Scheduled Run attempt/租约/受理时间，重建扫描索引，跳过待执行旧 USER_PLAN，并保留历史审计数据。
+- `db/migration/V20260722130000__migrate_night_execution_to_xxl.sql`：增加夜间任务 attempt/精确 owner/租约/state-version 与 legacy Scheduled Run attempt/租约/受理时间，重建扫描索引，跳过待执行旧 USER_PLAN，并保留历史审计数据；版本晚于已交付迁移，兼容存量库按序升级。
 - `db/migration/V20260718211000__create_night_execution_tasks.sql`：创建夜间任务、会话锁和时段容量占位表及约束/索引/中文注释。
 - `db/migration/V20260719210000__seed_night_execution_capacity_parameter.sql`：初始化 `platform=all`、可编辑、默认值 20 的夜间时段容量通用参数。
 - `db/migration/V20260718100000__seed_references_params.sql`：初始化引用资产根目录和 SDD 根层目录名称清单。

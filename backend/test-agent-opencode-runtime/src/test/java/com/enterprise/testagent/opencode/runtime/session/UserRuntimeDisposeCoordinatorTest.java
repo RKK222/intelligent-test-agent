@@ -51,7 +51,7 @@ class UserRuntimeDisposeCoordinatorTest {
         RunRuntimeStore store = Mockito.mock(RunRuntimeStore.class);
         SessionRuntimeStateApplicationService state = Mockito.mock(SessionRuntimeStateApplicationService.class);
         when(store.tryAcquireUserRuntimeDispose(eq(USER_ID), anyString(), any(Duration.class))).thenReturn(true);
-        when(state.snapshot(USER_ID)).thenReturn(new SessionRuntimeStateSummary(0, 0, List.of(), NOW));
+        when(state.snapshot(USER_ID)).thenReturn(new SessionRuntimeStateSummary(0, 0, 0, List.of(), NOW));
         UserRuntimeDisposeCoordinator coordinator = new UserRuntimeDisposeCoordinator(store, state);
 
         String result = coordinator.withUserIdle(USER_ID, "trace_idle", () -> "disposed");
@@ -81,7 +81,7 @@ class UserRuntimeDisposeCoordinatorTest {
         VirtualTimeScheduler scheduler = VirtualTimeScheduler.create();
         when(store.tryAcquireUserRuntimeDispose(eq(USER_ID), anyString(), eq(ttl))).thenReturn(true);
         when(store.renewUserRuntimeDispose(eq(USER_ID), anyString(), eq(ttl))).thenReturn(true);
-        when(state.snapshot(USER_ID)).thenReturn(new SessionRuntimeStateSummary(0, 0, List.of(), NOW));
+        when(state.snapshot(USER_ID)).thenReturn(new SessionRuntimeStateSummary(0, 0, 0, List.of(), NOW));
         UserRuntimeDisposeCoordinator coordinator = new UserRuntimeDisposeCoordinator(
                 store, state, ttl, renewInterval, scheduler);
 
@@ -104,7 +104,7 @@ class UserRuntimeDisposeCoordinatorTest {
         VirtualTimeScheduler scheduler = VirtualTimeScheduler.create();
         when(store.tryAcquireUserRuntimeDispose(eq(USER_ID), anyString(), eq(ttl))).thenReturn(true);
         when(store.renewUserRuntimeDispose(eq(USER_ID), anyString(), eq(ttl))).thenReturn(false);
-        when(state.snapshot(USER_ID)).thenReturn(new SessionRuntimeStateSummary(0, 0, List.of(), NOW));
+        when(state.snapshot(USER_ID)).thenReturn(new SessionRuntimeStateSummary(0, 0, 0, List.of(), NOW));
         UserRuntimeDisposeCoordinator coordinator = new UserRuntimeDisposeCoordinator(
                 store, state, ttl, renewInterval, scheduler);
 

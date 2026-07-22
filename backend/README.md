@@ -23,13 +23,13 @@
 | 模块 | 作用 |
 |---|---|
 | `test-agent-common` | 公共基础模型与工具 |
-| `test-agent-domain` | 纯领域模型与状态机，包括 Run 运行数据面、opencode 用户进程管理拓扑模型和运营分析/反馈领域端口 |
+| `test-agent-domain` | 纯领域模型与状态机，包括 Run 运行数据面、会话 `QUESTION/PERMISSION` 待关注摘要、opencode 用户进程管理拓扑模型和运营分析/反馈领域端口 |
 | `test-agent-observability` | 日志、trace、指标等观测性封装 |
 | `test-agent-opencode-sdk-generated` | 从 opencode OpenAPI spec 生成的 Java SDK |
 | `test-agent-opencode-client` | 业务侧 opencode client facade |
 | `test-agent-agent-runtime` | 多 agent 运行时接口、registry、统一日志/指标包装和 opencode 适配器 |
 | `test-agent-workspace-management` | Workspace、文件、超级管理员服务器目录选择、git/diff、设置页初始版本工作区创建、应用版本工作区、个人工作区、应用引用资产库多服务器副本、agent 和 skill 管理业务 |
-| `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、夜间异步执行和会话锁、Redis active/session scope 路由、用户级会话运行态摘要、每用户公共配置软链接/个人保存与发布 dispose、opencode 进程启动环境、agent runtime 调用、Diff/revert、AI 回复反馈、运营分析 rollup/query，以及 workspace/server-shell 共用的受控 PTY terminal 业务 |
+| `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、夜间异步执行和会话锁、Redis active/session scope 路由、含 question/permission 计数的用户级会话运行态摘要、每用户公共配置软链接/个人保存与发布 dispose、opencode 进程启动环境、agent runtime 调用、Diff/revert、AI 回复反馈、运营分析 rollup/query，以及 workspace/server-shell 共用的受控 PTY terminal 业务 |
 | `test-agent-system-management` | 用户、角色、权限等系统内部管理业务，包括用户注册、登录认证、Token 管理等 |
 | `test-agent-configuration-management` | 应用、应用成员、代码库英文名与关联、已初始化引用资产库英文名/类型冻结、应用工作空间、个人 SSH key、可审计通用参数配置管理，以及显式 JVM 内存参数的本机注册/诊断状态 |
 | `test-agent-scheduler` | XXL adapter 复用的任务 handler/context/result、Redis 全局锁和旧运行记录清理；不再启动 PostgreSQL runner 或创建 `USER_PLAN` |
@@ -37,7 +37,7 @@
 | `test-agent-xxl-job-admin-upstream` | 原样保存 XXL-JOB Admin 3.4.2 源码/资源与 GPL-3.0 许可证，不承载平台补丁 |
 | `test-agent-xxl-job-integration` | 独立 Servlet Admin 子上下文、MySQL Flyway、Admin readiness 就绪后延迟启动的 executor、周期任务 adapter、平台一次性 SSO、JIT 用户和 XXL health |
 | `test-agent-api` | HTTP/SSE/WebSocket API 定义、DTO、鉴权、限流、traceId、按进程精确 Java->Java 聚合和统一异常入口 |
-| `test-agent-persistence` | 持久化、MyBatis XML mapper、迁移、Redis/PostgreSQL 访问，包括 Redis Run manifest/Stream/snapshot/active 索引、opencode 用户进程管理表映射、scheduler/夜间任务/会话锁/时段容量、引用资产总体/副本表、AI 反馈表和运营分析 rollup 表 |
+| `test-agent-persistence` | 持久化、MyBatis XML mapper、迁移、Redis/PostgreSQL 访问，包括 Redis Run manifest/Stream/snapshot/active 索引、legacy question/permission 待关注查询、opencode 用户进程管理表映射、scheduler/夜间任务/会话锁/时段容量、引用资产总体/副本表、AI 反馈表和运营分析 rollup 表 |
 | `test-agent-event` | 按 storage mode 分流的 RunEvent 追加、SSE、Redis/数据库回放，以及用户级运行态刷新所需的全局事件触发流 |
 | `test-agent-test-support` | 测试支撑、fixture、mock server |
 | `test-agent-app` | 唯一启动入口和唯一可部署后端服务包，不承载业务逻辑 |
@@ -197,6 +197,7 @@ mvn test
 - `test-agent-app` 只放启动、装配、profile、migration 和 health 等运行入口，不放 Controller 或业务服务。
 - HTTP/SSE/WebSocket 入口放在 `test-agent-api`，旧 `/api/...` URL 默认保留，明确作废的入口除外；新 URL 同步写入 `docs/api/http-api.md`。
 - Workspace、文件、git/diff、设置页初始版本工作区创建、应用版本工作区、个人工作区、应用引用资产库副本、agent、skill 管理业务放在 `test-agent-workspace-management`。
+- Workspace 与 Agent 配置的新文件上传统一走平台文件 WebSocket 的 begin/chunk/complete/abort 分片会话：应用层不限制文件总大小，单片默认 256 KiB。UTF-8 一次性读取和文本编辑默认阈值为 5 MiB，超出后使用约 512 KiB 分段的渐进只读预览，可按需读取到 EOF；上传完成前只写隐藏临时文件，连接关闭、取消或失败必须清理，不得新增 HTTP 文件代理或整文件内存缓冲。
 - 工作区 `workspace.move` 保持既有文件 WebSocket RPC 契约并整体移动普通文件或非空目录；Linux 通过 JNA 直接调用内核 `renameat2(RENAME_NOREPLACE)`（兼容 Alpine/musl 未导出包装函数），macOS 调用 `renameatx_np(RENAME_EXCL | RENAME_NOFOLLOW_ANY)`，Windows 使用源条目句柄与目标父目录句柄的 `SetFileInformationByHandle`。三者都执行一次不覆盖的原子重命名并阻断校验后的路径替换竞态，缺少等价原子能力的平台失败关闭。
 - 多 agent 运行时接口、`agentId` 选择、日志/指标包装和具体 agent 适配器放在 `test-agent-agent-runtime`。
 - Session、Run、RunEvent、夜间任务提交/投递/补偿、agent runtime 调用、Diff/revert、terminal 业务放在 `test-agent-opencode-runtime`。

@@ -396,10 +396,10 @@ describe("event-stream-client", () => {
         "event: session-runtime.snapshot\n",
         'data: {"runningCount":0,"questionCount":0,"sessions":[],"generatedAt":"2026-07-08T08:00:00Z"}\n\n',
         "event: session-runtime.updated\n",
-        'data: {"runningCount":1,"questionCount":1,"sessions":[{"sessionId":"ses_1","runId":"run_1","runStatus":"RUNNING","attention":"QUESTION","attentionEventId":"evt_1","attentionAt":"2026-07-08T08:01:00Z","updatedAt":"2026-07-08T08:01:02Z"}],"generatedAt":"2026-07-08T08:01:03Z"}\n\n'
+        'data: {"runningCount":1,"questionCount":0,"permissionCount":1,"sessions":[{"sessionId":"ses_1","runId":"run_1","runStatus":"RUNNING","attention":"PERMISSION","attentionEventId":"evt_1","attentionAt":"2026-07-08T08:01:00Z","updatedAt":"2026-07-08T08:01:02Z"}],"generatedAt":"2026-07-08T08:01:03Z"}\n\n'
       ])
     );
-    const received: Array<{ runningCount: number; questionCount: number }> = [];
+    const received: Array<{ runningCount: number; questionCount: number; permissionCount?: number }> = [];
     const statuses: string[] = [];
 
     const subscription = subscribeSessionRuntimeState({
@@ -423,11 +423,32 @@ describe("event-stream-client", () => {
     expect(headers.get("Accept")).toBe("text/event-stream");
     expect(headers.get("X-Test-Agent-Linux-Server-Id")).toBe("server-a");
     expect(received).toEqual([
-      expect.objectContaining({ runningCount: 0, questionCount: 0 }),
-      expect.objectContaining({ runningCount: 1, questionCount: 1 })
+      expect.objectContaining({ runningCount: 0, questionCount: 0, permissionCount: 0 }),
+      expect.objectContaining({ runningCount: 1, questionCount: 0, permissionCount: 1 })
     ]);
     expect(statuses).toContain("open");
     expect(statuses.at(-1)).toBe("closed");
+  });
+
+  it("derives permissionCount from PERMISSION attention when an old backend omits the field", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      sseResponse([
+        "event: session-runtime.snapshot\n",
+        'data: {"runningCount":1,"questionCount":0,"sessions":[{"sessionId":"ses_1","runId":"run_1","runStatus":"RUNNING","attention":"PERMISSION","updatedAt":"2026-07-08T08:01:02Z"}],"generatedAt":"2026-07-08T08:01:03Z"}\n\n'
+      ])
+    );
+    const received: Array<{ permissionCount?: number }> = [];
+    const subscription = subscribeSessionRuntimeState({
+      baseUrl: "http://api",
+      token: "token_secret",
+      fetcher,
+      onEvent: (event) => received.push(event)
+    });
+
+    await waitFor(() => received.length === 1);
+    subscription.close();
+
+    expect(received[0]).toMatchObject({ permissionCount: 1 });
   });
 
   it("aborts the session runtime state fetch when closed", async () => {

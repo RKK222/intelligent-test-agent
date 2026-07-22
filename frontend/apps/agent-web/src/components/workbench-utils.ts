@@ -208,6 +208,27 @@ export function runEventProjection(event: RunEvent): { reset: boolean; events: R
  * 使子时间线仍只展示属于自己的 permission/question。
  */
 export function projectRootInteractionSession(event: RunEvent, platformSessionId?: string): RunEvent {
+  if (event.type === "run.snapshot.reset" && platformSessionId) {
+    const snapshot = record(event.payload.snapshot);
+    if (!snapshot || !Array.isArray(snapshot.events)) return event;
+    const snapshotEvents = snapshotEventsFromRunReset(event);
+    const projectedEvents = snapshotEvents.map((snapshotEvent) =>
+      projectRootInteractionSession(snapshotEvent, platformSessionId)
+    );
+    if (projectedEvents.every((snapshotEvent, index) => snapshotEvent === snapshotEvents[index])) {
+      return event;
+    }
+    return {
+      ...event,
+      payload: {
+        ...event.payload,
+        snapshot: {
+          ...snapshot,
+          events: projectedEvents
+        }
+      }
+    };
+  }
   if (
     (event.type !== "permission.asked" && event.type !== "question.asked")
     || !platformSessionId
@@ -726,6 +747,7 @@ export function historyItems(run: Run | null, sessions: Session[], runtimeStates
       runId: runtimeState?.runId,
       runStatus: runtimeState?.runStatus,
       pendingQuestion: runtimeState?.attention === "QUESTION",
+      pendingAttention: Boolean(runtimeState?.attention),
       attentionEventId: runtimeState?.attentionEventId ?? undefined,
       attentionAt: runtimeState?.attentionAt ?? undefined,
       ...(item.sourceType ? { sourceType: item.sourceType } : {})
@@ -744,6 +766,7 @@ export function historyRuntimeBadgeCounts(
   const limitedSessions = sessions.slice(0, Math.max(0, limit));
   let runningCount = 0;
   let questionCount = 0;
+  let permissionCount = 0;
   for (const session of limitedSessions) {
     const runtimeState = runtimeStatesBySessionId[session.sessionId];
     if (!runtimeState) {
@@ -753,8 +776,24 @@ export function historyRuntimeBadgeCounts(
     if (runtimeState.attention === "QUESTION") {
       questionCount += 1;
     }
+    if (runtimeState.attention === "PERMISSION") {
+      permissionCount += 1;
+    }
   }
-  return { runningCount, questionCount };
+  return { runningCount, questionCount, permissionCount };
+}
+
+/** 根会话实时快照只替换根 scope，child 的 asked/replied 收敛结果继续以 session tree 为准。 */
+export function replaceRootSessionInteractions<T extends { sessionId: string }>(
+  restored: T[],
+  liveRoot: T[] | null,
+  rootSessionId: string
+): T[] {
+  if (liveRoot === null) return restored;
+  return [
+    ...restored.filter((item) => item.sessionId !== rootSessionId),
+    ...liveRoot.filter((item) => item.sessionId === rootSessionId)
+  ];
 }
 
 export function dedupeSessionMessages(messages: SessionMessage[]): SessionMessage[] {

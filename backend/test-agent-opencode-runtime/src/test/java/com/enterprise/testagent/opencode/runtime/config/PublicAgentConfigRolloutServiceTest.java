@@ -19,6 +19,8 @@ import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutRepository;
 import com.enterprise.testagent.domain.configuration.AgentConfigRolloutScope;
+import com.enterprise.testagent.domain.configuration.AgentConfigRolloutWorktreeClaim;
+import com.enterprise.testagent.domain.configuration.AgentConfigRolloutWorktreePending;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutTarget;
 import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
@@ -87,7 +89,7 @@ class PublicAgentConfigRolloutServiceTest {
 
     @Test
     void preparePersistsGateAndOnlyRegisteredRolloutMembersBeforeGitMutation() {
-        when(repository.findActiveRolloutId()).thenReturn(Optional.empty());
+        when(repository.findActiveRolloutId(AgentConfigRolloutScope.PUBLIC, null)).thenReturn(Optional.empty());
         when(repository.findActiveServerMembershipIds()).thenReturn(List.of("linux-1", "linux-2"));
 
         String rolloutId = service.prepare(
@@ -100,11 +102,14 @@ class PublicAgentConfigRolloutServiceTest {
                 eq("trace-1"), any(Instant.class));
         verify(repository).addServer(eq(rolloutId), eq("linux-1"), any(Instant.class));
         verify(repository).addServer(eq(rolloutId), eq("linux-2"), any(Instant.class));
+        verify(repository).findActiveRolloutId(AgentConfigRolloutScope.PUBLIC, null);
     }
 
     @Test
     void applicationPreparePersistsVersionScopeBeforeGitMutation() {
-        when(repository.findActiveRolloutId()).thenReturn(Optional.empty());
+        when(repository.findActiveRolloutId(
+                AgentConfigRolloutScope.APPLICATION, "awv_1234567890abcdef"))
+                .thenReturn(Optional.empty());
         when(repository.findActiveServerMembershipIds()).thenReturn(List.of("linux-1"));
 
         String rolloutId = service.prepareApplication(
@@ -127,6 +132,8 @@ class PublicAgentConfigRolloutServiceTest {
                 eq("linux-1"),
                 eq("trace-app"),
                 any(Instant.class));
+        verify(repository).findActiveRolloutId(
+                AgentConfigRolloutScope.APPLICATION, "awv_1234567890abcdef");
     }
 
     @Test
@@ -262,7 +269,7 @@ class PublicAgentConfigRolloutServiceTest {
         when(processRepository.findOpencodeServerProcesses(
                 any(OpencodeServerProcessFilter.class), any(PageRequest.class)))
                 .thenReturn(new PageResponse<>(List.of(included, excluded), 1, PageRequest.MAX_SIZE, 2));
-        PublicAgentConfigRolloutSyncRequest request = syncRequest();
+        PublicAgentConfigRolloutSyncRequest request = applicationSyncRequest();
         when(repository.renewServerSync(eq("acr_rollout"), eq("linux-1"), eq("acl_sync"), any(), any()))
                 .thenReturn(true);
 
@@ -277,13 +284,22 @@ class PublicAgentConfigRolloutServiceTest {
     }
 
     @Test
-    void applicationSyncWithoutEligibleUsersNeedsNoManagerSnapshot() {
-        PublicAgentConfigRolloutSyncRequest request = syncRequest();
+    void applicationSyncPersistsPendingWorktreeAndCompletesServerWithoutManagerSnapshot() {
+        PublicAgentConfigRolloutSyncRequest request = applicationSyncRequest();
         when(repository.renewServerSync(eq("acr_rollout"), eq("linux-1"), eq("acl_sync"), any(), any()))
                 .thenReturn(true);
+        List<AgentConfigRolloutWorktreePending> pending = List.of(
+                new AgentConfigRolloutWorktreePending("pws_pending", "usr-pending", "LOCAL_CHANGES"));
 
-        service.markServerSyncedForUsers(request, Set.of());
+        service.markServerSyncedForUsers(request, Set.of(), pending);
 
+        verify(repository).savePendingApplicationWorktrees(
+                eq("acr_rollout"),
+                eq("linux-1"),
+                eq(request.commitHash()),
+                eq(request.traceId()),
+                eq(pending),
+                any(Instant.class));
         verify(repository, never()).addTarget(any(), any());
         verify(repository).markServerSynced(eq("acr_rollout"), eq("linux-1"), eq("acl_sync"), any());
     }
@@ -302,7 +318,7 @@ class PublicAgentConfigRolloutServiceTest {
         when(processRepository.findOpencodeServerProcesses(
                 any(OpencodeServerProcessFilter.class), any(PageRequest.class)))
                 .thenReturn(new PageResponse<>(List.of(stale), 1, PageRequest.MAX_SIZE, 1));
-        PublicAgentConfigRolloutSyncRequest request = syncRequest();
+        PublicAgentConfigRolloutSyncRequest request = applicationSyncRequest();
         when(repository.renewServerSync(eq("acr_rollout"), eq("linux-1"), eq("acl_sync"), any(), any()))
                 .thenReturn(true);
 
@@ -312,6 +328,29 @@ class PublicAgentConfigRolloutServiceTest {
 
         verify(repository, never()).addTarget(any(), any());
         verify(repository, never()).markServerSynced(eq("acr_rollout"), eq("linux-1"), eq("acl_sync"), any());
+    }
+
+    @Test
+    void synchronizedLateWorktreeDoesNotRegisterDisposeBeforeUsersOtherWorktreesFinish() {
+        AgentConfigRolloutWorktreeClaim claim = new AgentConfigRolloutWorktreeClaim(
+                "acr_rollout",
+                "awv_version",
+                "pws_personal",
+                "usr-included",
+                "linux-1",
+                "abc123",
+                "trace-1",
+                3,
+                Instant.now().plusSeconds(180),
+                "acl_worktree");
+        when(repository.markApplicationWorktreeSynchronized(eq(claim), any())).thenReturn(true);
+        when(repository.hasIncompleteApplicationWorktrees(
+                "acr_rollout", "linux-1", "usr-included"))
+                .thenReturn(true);
+
+        service.markApplicationWorktreeSynchronized(claim);
+
+        verify(repository, never()).addTarget(any(), any());
     }
 
     @Test
@@ -540,6 +579,20 @@ class PublicAgentConfigRolloutServiceTest {
         return new PublicAgentConfigRolloutSyncRequest(
                 "acr_rollout", "main", "abc123", "usr-admin", "trace-1",
                 0, Instant.now().plusSeconds(180), "acl_sync");
+    }
+
+    private PublicAgentConfigRolloutSyncRequest applicationSyncRequest() {
+        return new PublicAgentConfigRolloutSyncRequest(
+                "acr_rollout",
+                AgentConfigRolloutScope.APPLICATION,
+                "awv_version",
+                "main",
+                "abc123",
+                "usr-admin",
+                "trace-1",
+                0,
+                Instant.now().plusSeconds(180),
+                "acl_sync");
     }
 
     private ManagerRuntimeSnapshot managerWithPorts(int... ports) {

@@ -9,6 +9,7 @@ import java.util.List;
 public record SessionRuntimeStateSummary(
         int runningCount,
         int questionCount,
+        int permissionCount,
         List<SessionRuntimeState> sessions,
         Instant generatedAt) {
 

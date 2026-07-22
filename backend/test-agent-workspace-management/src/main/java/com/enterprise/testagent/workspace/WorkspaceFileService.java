@@ -3,6 +3,7 @@ package com.enterprise.testagent.workspace;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileSystemException;
@@ -14,6 +15,7 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -36,8 +38,14 @@ public class WorkspaceFileService {
 
     private static final String FILE_TARGET_EXISTS_MESSAGE = "目标文件已存在";
     private static final String MOVE_TARGET_EXISTS_MESSAGE = "目标文件或目录已存在";
+    private static final String UPLOAD_TEMP_PREFIX = ".test-agent-upload-";
+    private static final String UPLOAD_TEMP_SUFFIX = ".part";
+    private static final int DEFAULT_UPLOAD_CHUNK_BYTES = 256 * 1024;
+    private static final int MAX_UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024;
+    private static final Duration STALE_UPLOAD_AGE = Duration.ofHours(24);
 
-    private final long maxFileBytes;
+    private final long maxPreviewBytes;
+    private final int uploadChunkBytes;
     private final int maxDirectoryEntries;
     // 搜索相关配置
     private final int maxSearchResults;
@@ -53,50 +61,56 @@ public class WorkspaceFileService {
      * 使用默认文件大小和目录项上限构造服务，适用于本地测试和未显式配置的运行环境。
      */
     public WorkspaceFileService() {
-        this(1024 * 1024, 1000, 200, 20, 5000L, () -> {});
+        this(5L * 1024L * 1024L, 1000, 200, 20, 5000L, DEFAULT_UPLOAD_CHUNK_BYTES, () -> {});
     }
 
     /**
      * 兼容测试路径：仅指定文件大小和目录项上限，搜索相关参数取默认值。
      */
-    public WorkspaceFileService(long maxFileBytes, int maxDirectoryEntries) {
-        this(maxFileBytes, maxDirectoryEntries, 200, 20, 5000L, () -> {});
+    public WorkspaceFileService(long maxPreviewBytes, int maxDirectoryEntries) {
+        this(maxPreviewBytes, maxDirectoryEntries, 200, 20, 5000L, DEFAULT_UPLOAD_CHUNK_BYTES, () -> {});
     }
 
     /**
      * 测试专用构造器，在最终安全移动前注入一次文件系统变化，用于验证路径竞态必须失败关闭。
      */
-    WorkspaceFileService(long maxFileBytes, int maxDirectoryEntries, Runnable beforeSecureMove) {
-        this(maxFileBytes, maxDirectoryEntries, 200, 20, 5000L, beforeSecureMove);
+    WorkspaceFileService(long maxPreviewBytes, int maxDirectoryEntries, Runnable beforeSecureMove) {
+        this(maxPreviewBytes, maxDirectoryEntries, 200, 20, 5000L, DEFAULT_UPLOAD_CHUNK_BYTES, beforeSecureMove);
     }
 
     /**
-     * 构造文件服务并校验安全上限；maxFileBytes 和 maxDirectoryEntries 必须为正数。
+     * 构造文件服务并校验预览、分片和目录项安全上限。
      */
     @Autowired
     public WorkspaceFileService(
-            @Value("${test-agent.files.max-file-bytes:1048576}") long maxFileBytes,
+            @Value("${test-agent.files.max-preview-bytes:${test-agent.files.max-file-bytes:5242880}}") long maxPreviewBytes,
             @Value("${test-agent.files.max-directory-entries:1000}") int maxDirectoryEntries,
             @Value("${test-agent.files.max-search-results:200}") int maxSearchResults,
             @Value("${test-agent.files.max-search-depth:20}") int maxSearchDepth,
-            @Value("${test-agent.files.search-timeout-millis:5000}") long searchTimeoutMillis) {
-        this(maxFileBytes, maxDirectoryEntries, maxSearchResults, maxSearchDepth, searchTimeoutMillis, () -> {});
+            @Value("${test-agent.files.search-timeout-millis:5000}") long searchTimeoutMillis,
+            @Value("${test-agent.files.upload-chunk-bytes:262144}") int uploadChunkBytes) {
+        this(maxPreviewBytes, maxDirectoryEntries, maxSearchResults, maxSearchDepth, searchTimeoutMillis, uploadChunkBytes, () -> {});
     }
 
     private WorkspaceFileService(
-            long maxFileBytes,
+            long maxPreviewBytes,
             int maxDirectoryEntries,
             int maxSearchResults,
             int maxSearchDepth,
             long searchTimeoutMillis,
+            int uploadChunkBytes,
             Runnable beforeSecureMove) {
-        if (maxFileBytes < 1) {
-            throw new IllegalArgumentException("maxFileBytes must be positive");
+        if (maxPreviewBytes < 1) {
+            throw new IllegalArgumentException("maxPreviewBytes must be positive");
         }
         if (maxDirectoryEntries < 1) {
             throw new IllegalArgumentException("maxDirectoryEntries must be positive");
         }
-        this.maxFileBytes = maxFileBytes;
+        if (uploadChunkBytes < 1 || uploadChunkBytes > MAX_UPLOAD_CHUNK_BYTES) {
+            throw new IllegalArgumentException("uploadChunkBytes must be between 1 and 4194304");
+        }
+        this.maxPreviewBytes = maxPreviewBytes;
+        this.uploadChunkBytes = uploadChunkBytes;
         this.maxDirectoryEntries = maxDirectoryEntries;
         this.maxSearchResults = maxSearchResults;
         this.maxSearchDepth = maxSearchDepth;
@@ -114,11 +128,15 @@ public class WorkspaceFileService {
         }
         try {
             long size = Files.size(target);
-            if (size > maxFileBytes) {
+            if (size > maxPreviewBytes) {
                 throw new PlatformException(
                         ErrorCode.VALIDATION_ERROR,
-                        "文件超过读取大小限制",
-                        Map.of("path", safePath(relativePath), "maxFileBytes", maxFileBytes));
+                        "文件超过预览大小限制",
+                        Map.of(
+                                "path", safePath(relativePath),
+                                "size", size,
+                                "maxPreviewBytes", maxPreviewBytes,
+                                "reason", "PREVIEW_TOO_LARGE"));
             }
             return new FileContentResponse(normalizeRelativePath(relativePath), Files.readString(target), size);
         } catch (PlatformException exception) {
@@ -129,16 +147,71 @@ public class WorkspaceFileService {
     }
 
     /**
+     * 分段读取超大 UTF-8 文件；不限制最终预览总量，每次只在固定内存中读取一段。
+     */
+    public FilePreviewChunkResponse readContentChunk(
+            String rootPath,
+            String relativePath,
+            long offset,
+            Long expectedSize,
+            Long expectedLastModifiedMillis) {
+        Path target = resolveReadablePreviewFile(rootPath, relativePath);
+        return Utf8FilePreviewReader.read(
+                target,
+                normalizeRelativePath(relativePath),
+                offset,
+                expectedSize,
+                expectedLastModifiedMillis,
+                maxPreviewBytes);
+    }
+
+    /** 渐进预览不得通过末端或中间符号链接逃逸工作区真实根目录。 */
+    private Path resolveReadablePreviewFile(String rootPath, String relativePath) {
+        Path root = rootRealPath(rootPath);
+        Path target = resolveInsideRoot(rootPath, relativePath);
+        try {
+            if (Files.isSymbolicLink(target)) {
+                throw new PlatformException(
+                        ErrorCode.FORBIDDEN,
+                        "大文件预览不支持符号链接",
+                        Map.of("path", safePath(relativePath)));
+            }
+            Path realTarget = target.toRealPath();
+            if (!realTarget.startsWith(root)) {
+                throw new PlatformException(
+                        ErrorCode.FORBIDDEN,
+                        "文件路径超出工作区根目录",
+                        Map.of("path", safePath(relativePath)));
+            }
+            return realTarget;
+        } catch (PlatformException exception) {
+            throw exception;
+        } catch (NoSuchFileException exception) {
+            throw new PlatformException(
+                    ErrorCode.NOT_FOUND,
+                    "文件不存在",
+                    Map.of("path", safePath(relativePath)),
+                    exception);
+        } catch (Exception exception) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "文件路径无法安全解析",
+                    Map.of("path", safePath(relativePath)),
+                    exception);
+        }
+    }
+
+    /**
      * 写入 rootPath 内的 UTF-8 文本文件；null content 按空文件处理，写入前会创建缺失父目录。
      */
     public void writeContent(String rootPath, String relativePath, String content) {
         Path target = resolveInsideRoot(rootPath, relativePath);
         byte[] bytes = content == null ? new byte[0] : content.getBytes(StandardCharsets.UTF_8);
-        if (bytes.length > maxFileBytes) {
+        if (bytes.length > maxPreviewBytes) {
             throw new PlatformException(
                     ErrorCode.VALIDATION_ERROR,
-                    "文件超过写入大小限制",
-                    Map.of("path", safePath(relativePath), "maxFileBytes", maxFileBytes));
+                    "文件超过可编辑大小限制",
+                    Map.of("path", safePath(relativePath), "maxPreviewBytes", maxPreviewBytes));
         }
         try {
             Path parent = target.getParent();
@@ -152,17 +225,18 @@ public class WorkspaceFileService {
     }
 
     /**
-     * 把浏览器上传的 Base64 内容写入工作区新文件；拒绝覆盖已有条目，并沿用文本文件相同的大小上限。
+     * 兼容旧客户端的一次性 Base64 上传；新客户端应使用 beginUpload 分片上传。
+     * 旧操作仍受预览大小约束，避免单条 WebSocket 消息重新占用无界内存。
      */
     public void uploadFile(String rootPath, String relativePath, String contentBase64) {
         Path target = resolveNewFileTarget(rootPath, relativePath);
         String encoded = contentBase64 == null ? "" : contentBase64;
-        long maxEncodedLength = 4L * ((maxFileBytes + 2L) / 3L);
+        long maxEncodedLength = 4L * ((maxPreviewBytes + 2L) / 3L);
         if (encoded.length() > maxEncodedLength) {
             throw new PlatformException(
                     ErrorCode.VALIDATION_ERROR,
-                    "上传文件超过大小限制",
-                    Map.of("path", safePath(relativePath), "maxFileBytes", maxFileBytes));
+                    "旧版上传文件超过预览大小限制，请使用分片上传",
+                    Map.of("path", safePath(relativePath), "maxPreviewBytes", maxPreviewBytes));
         }
         final byte[] bytes;
         try {
@@ -174,11 +248,11 @@ public class WorkspaceFileService {
                     Map.of("path", safePath(relativePath)),
                     exception);
         }
-        if (bytes.length > maxFileBytes) {
+        if (bytes.length > maxPreviewBytes) {
             throw new PlatformException(
                     ErrorCode.VALIDATION_ERROR,
-                    "上传文件超过大小限制",
-                    Map.of("path", safePath(relativePath), "maxFileBytes", maxFileBytes));
+                    "旧版上传文件超过预览大小限制，请使用分片上传",
+                    Map.of("path", safePath(relativePath), "maxPreviewBytes", maxPreviewBytes));
         }
         try {
             Files.write(target, bytes, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
@@ -190,6 +264,279 @@ public class WorkspaceFileService {
                     "上传文件失败",
                     Map.of("path", safePath(relativePath)),
                     exception);
+        }
+    }
+
+    /**
+     * 创建不限制文件总大小的分片上传会话。声明大小只用于完成时校验；每次调用仅解码一个有界分片。
+     */
+    public WorkspaceFileUpload beginUpload(String rootPath, String relativePath, long expectedBytes) {
+        if (expectedBytes < 0) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "上传文件大小无效",
+                    Map.of("path", safePath(relativePath), "size", expectedBytes));
+        }
+        Path target = resolveNewFileTarget(rootPath, relativePath);
+        Path realRoot = rootRealPath(rootPath);
+        Path temporary = null;
+        try {
+            Path realParent = target.getParent().toRealPath();
+            if (!realParent.startsWith(realRoot)) {
+                throw new PlatformException(
+                        ErrorCode.FORBIDDEN,
+                        "文件路径超出工作区根目录",
+                        Map.of("path", safePath(relativePath)));
+            }
+            cleanupStaleUploads(realParent);
+            temporary = Files.createTempFile(realParent, UPLOAD_TEMP_PREFIX, UPLOAD_TEMP_SUFFIX).toRealPath();
+            OutputStream output = Files.newOutputStream(temporary, StandardOpenOption.WRITE);
+            Path realTarget = realParent.resolve(target.getFileName()).normalize();
+            return new StreamingWorkspaceFileUpload(
+                    realRoot,
+                    temporary,
+                    realTarget,
+                    normalizeRelativePath(relativePath),
+                    expectedBytes,
+                    output);
+        } catch (PlatformException exception) {
+            deleteUploadTemporaryQuietly(temporary);
+            throw exception;
+        } catch (Exception exception) {
+            deleteUploadTemporaryQuietly(temporary);
+            throw new PlatformException(
+                    ErrorCode.INTERNAL_ERROR,
+                    "创建分片上传失败",
+                    Map.of("path", safePath(relativePath)),
+                    exception);
+        }
+    }
+
+    /** 创建上传会话中途失败时删除已生成的临时文件，避免等待过期清理。 */
+    private void deleteUploadTemporaryQuietly(Path temporary) {
+        if (temporary == null) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(temporary);
+        } catch (Exception ignored) {
+            // 删除失败仍会由过期清理兜底，且临时文件始终对目录和搜索接口隐藏。
+        }
+    }
+
+    /** 超过一天的同目录上传残留可安全清理；活跃连接使用的新文件不会命中该窗口。 */
+    private void cleanupStaleUploads(Path directory) {
+        Instant cutoff = Instant.now().minus(STALE_UPLOAD_AGE);
+        try (var stream = Files.list(directory)) {
+            stream.filter(this::isUploadTemporaryFile)
+                    .filter(path -> {
+                        try {
+                            return Files.getLastModifiedTime(path, LinkOption.NOFOLLOW_LINKS).toInstant().isBefore(cutoff);
+                        } catch (Exception ignored) {
+                            return false;
+                        }
+                    })
+                    .forEach(path -> {
+                        try {
+                            Files.deleteIfExists(path);
+                        } catch (Exception ignored) {
+                            // 清理失败不应阻断新的上传；文件仍会继续被目录与搜索接口隐藏。
+                        }
+                    });
+        } catch (Exception ignored) {
+            // 同上，残留清理是尽力而为，上传主流程仍由临时文件与连接关闭清理保证。
+        }
+    }
+
+    /**
+     * 单个上传对象只持有一个有界分片和一个临时文件流；所有状态方法同步，避免关闭连接与完成请求竞态。
+     */
+    private final class StreamingWorkspaceFileUpload implements WorkspaceFileUpload {
+
+        private final Path realRoot;
+        private final Path temporary;
+        private final Path target;
+        private final String relativePath;
+        private final long expectedBytes;
+        private OutputStream output;
+        private long uploadedBytes;
+        private long nextChunkIndex;
+        private boolean finished;
+
+        private StreamingWorkspaceFileUpload(
+                Path realRoot,
+                Path temporary,
+                Path target,
+                String relativePath,
+                long expectedBytes,
+                OutputStream output) {
+            this.realRoot = realRoot;
+            this.temporary = temporary;
+            this.target = target;
+            this.relativePath = relativePath;
+            this.expectedBytes = expectedBytes;
+            this.output = output;
+        }
+
+        @Override
+        public int chunkBytes() {
+            return uploadChunkBytes;
+        }
+
+        @Override
+        public long expectedBytes() {
+            return expectedBytes;
+        }
+
+        @Override
+        public synchronized long uploadedBytes() {
+            return uploadedBytes;
+        }
+
+        @Override
+        public synchronized void append(long index, String contentBase64) {
+            requireOpen();
+            if (index != nextChunkIndex) {
+                throw new PlatformException(
+                        ErrorCode.VALIDATION_ERROR,
+                        "上传分片序号不连续",
+                        Map.of("path", relativePath, "expectedIndex", nextChunkIndex, "actualIndex", index));
+            }
+            String encoded = contentBase64 == null ? "" : contentBase64;
+            long maxEncodedLength = 4L * ((uploadChunkBytes + 2L) / 3L);
+            if (encoded.length() > maxEncodedLength) {
+                throw chunkTooLarge();
+            }
+            final byte[] bytes;
+            try {
+                bytes = Base64.getDecoder().decode(encoded);
+            } catch (IllegalArgumentException exception) {
+                throw new PlatformException(
+                        ErrorCode.VALIDATION_ERROR,
+                        "上传分片不是有效的 Base64",
+                        Map.of("path", relativePath, "index", index),
+                        exception);
+            }
+            if (bytes.length == 0) {
+                throw new PlatformException(
+                        ErrorCode.VALIDATION_ERROR,
+                        "上传分片不能为空",
+                        Map.of("path", relativePath, "index", index));
+            }
+            if (bytes.length > uploadChunkBytes) {
+                throw chunkTooLarge();
+            }
+            if (uploadedBytes > expectedBytes || bytes.length > expectedBytes - uploadedBytes) {
+                throw new PlatformException(
+                        ErrorCode.VALIDATION_ERROR,
+                        "上传内容超过声明的文件大小",
+                        Map.of(
+                                "path", relativePath,
+                                "uploadedBytes", uploadedBytes,
+                                "chunkBytes", bytes.length,
+                                "expectedBytes", expectedBytes));
+            }
+            try {
+                output.write(bytes);
+                uploadedBytes += bytes.length;
+                nextChunkIndex++;
+            } catch (IOException exception) {
+                abort();
+                throw new PlatformException(
+                        ErrorCode.INTERNAL_ERROR,
+                        "写入上传分片失败",
+                        Map.of("path", relativePath, "index", index),
+                        exception);
+            }
+        }
+
+        @Override
+        public synchronized long complete() {
+            requireOpen();
+            if (uploadedBytes != expectedBytes) {
+                long actualBytes = uploadedBytes;
+                abort();
+                throw new PlatformException(
+                        ErrorCode.VALIDATION_ERROR,
+                        "上传文件大小与声明不一致",
+                        Map.of("path", relativePath, "expectedBytes", expectedBytes, "uploadedBytes", actualBytes));
+            }
+            try {
+                output.close();
+                output = null;
+                beforeSecureMove.run();
+                SecureWorkspaceMover.move(realRoot, temporary, target);
+                finished = true;
+                return uploadedBytes;
+            } catch (FileAlreadyExistsException exception) {
+                throw targetConflict(relativePath, exception);
+            } catch (NoSuchFileException exception) {
+                throw new PlatformException(
+                        ErrorCode.NOT_FOUND,
+                        "上传目标目录不存在",
+                        Map.of("path", relativePath),
+                        exception);
+            } catch (FileSystemException exception) {
+                throw new PlatformException(
+                        ErrorCode.FORBIDDEN,
+                        "上传路径发生变化或包含符号链接",
+                        Map.of("path", relativePath),
+                        exception);
+            } catch (PlatformException exception) {
+                throw exception;
+            } catch (Exception exception) {
+                throw new PlatformException(
+                        ErrorCode.INTERNAL_ERROR,
+                        "完成分片上传失败",
+                        Map.of("path", relativePath),
+                        exception);
+            } finally {
+                if (!finished) {
+                    closeAndDeleteTemporary();
+                    finished = true;
+                }
+            }
+        }
+
+        @Override
+        public synchronized void abort() {
+            if (finished) {
+                return;
+            }
+            closeAndDeleteTemporary();
+            finished = true;
+        }
+
+        private void requireOpen() {
+            if (finished || output == null) {
+                throw new PlatformException(
+                        ErrorCode.VALIDATION_ERROR,
+                        "上传会话已结束",
+                        Map.of("path", relativePath));
+            }
+        }
+
+        private PlatformException chunkTooLarge() {
+            return new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "上传分片超过大小限制",
+                    Map.of("path", relativePath, "maxChunkBytes", uploadChunkBytes));
+        }
+
+        private void closeAndDeleteTemporary() {
+            if (output != null) {
+                try {
+                    output.close();
+                } catch (Exception ignored) {
+                    // 继续删除临时文件；中止操作必须保持幂等并尽量完成清理。
+                }
+                output = null;
+            }
+            try {
+                Files.deleteIfExists(temporary);
+            } catch (Exception ignored) {
+                // 超过一天的残留会在同目录下一次 begin 时再次清理。
+            }
         }
     }
 
@@ -458,7 +805,8 @@ public class WorkspaceFileService {
             throw new PlatformException(ErrorCode.NOT_FOUND, "目录不存在", Map.of("path", safePath(relativePath)));
         }
         try (var stream = Files.list(directory)) {
-            return stream.sorted(Comparator.comparing(path -> path.getFileName().toString()))
+            return stream.filter(path -> !isUploadTemporaryFile(path))
+                    .sorted(Comparator.comparing(path -> path.getFileName().toString()))
                     .limit(limit)
                     .map(path -> entry(root, path))
                     .toList();
@@ -489,7 +837,14 @@ public class WorkspaceFileService {
      */
     private Path resolveInsideRoot(String rootPath, String relativePath) {
         Path root = rootRealPath(rootPath);
-        Path target = root.resolve(normalizeRelativePath(relativePath)).normalize();
+        String normalizedPath = normalizeRelativePath(relativePath);
+        if (containsUploadTemporarySegment(normalizedPath)) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "文件路径属于平台上传临时区",
+                    Map.of("path", safePath(relativePath)));
+        }
+        Path target = root.resolve(normalizedPath).normalize();
         if (!target.startsWith(root)) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "文件路径超出工作区根目录", Map.of("path", safePath(relativePath)));
         }
@@ -651,6 +1006,24 @@ public class WorkspaceFileService {
         return relativePath.replace('\\', '/');
     }
 
+    /** 平台隐藏上传文件名为保留命名空间，不能由普通文件 RPC 读取或覆盖。 */
+    private boolean containsUploadTemporarySegment(String relativePath) {
+        for (String segment : relativePath.split("/")) {
+            if (isUploadTemporaryName(segment)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isUploadTemporaryFile(Path path) {
+        return path.getFileName() != null && isUploadTemporaryName(path.getFileName().toString());
+    }
+
+    private boolean isUploadTemporaryName(String name) {
+        return name.startsWith(UPLOAD_TEMP_PREFIX) && name.endsWith(UPLOAD_TEMP_SUFFIX);
+    }
+
     /**
      * 返回可放入错误 details 的安全路径字符串，避免 null 进入统一错误响应。
      */
@@ -707,6 +1080,9 @@ public class WorkspaceFileService {
                     return;
                 }
                 String name = path.getFileName().toString();
+                if (isUploadTemporaryFile(path)) {
+                    return;
+                }
                 // 跳过黑名单目录
                 if (Files.isDirectory(path) && BLACKLISTED_DIRECTORIES.contains(name)) {
                     return;

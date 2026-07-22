@@ -62,7 +62,9 @@ const emit = defineEmits<{
 // 避免出现"按钮可见但点击后编辑器无反应"的不一致。
 const activeIsMarkdown = computed(() => {
   if (!props.activePath) return false;
-  return languageFromPath(props.activePath) === "markdown";
+  const activeTab = props.tabs.find((tab) => tab.path === props.activePath);
+  return !activeTab?.progressivePreview
+    && languageFromPath(props.activePath) === "markdown";
 });
 
 const tabMenu = ref<{ path: string; x: number; y: number } | null>(null);

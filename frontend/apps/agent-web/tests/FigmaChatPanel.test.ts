@@ -1361,20 +1361,22 @@ describe("FigmaChatPanel", () => {
     }
   });
 
-  it("shows runtime count, spinning history icon and question bell in history controls", async () => {
+  it("shows runtime count, spinning history icon and attention bell in history controls", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [],
         processStatus: { status: "READY", initializable: false, message: "ready" },
         historyRunningCount: 2,
         historyQuestionCount: 1,
+        historyPermissionCount: 1,
         history: [
           {
             id: "ses_running",
             title: "等待回答",
             runtimeState: "running",
             runStatus: "RUNNING",
-            pendingQuestion: true,
+            pendingQuestion: false,
+            pendingAttention: true,
             createdAt: "2026-07-08T09:00:00Z",
             updatedAt: "2026-07-08T10:00:00Z"
           },
@@ -1845,6 +1847,7 @@ describe("FigmaChatPanel", () => {
             type: "bash",
             title: "允许执行命令",
             description: "pnpm test",
+            pattern: "packages/**",
             createdAt: "2026-07-10T09:00:00.000Z"
           }
         ]
@@ -1854,17 +1857,66 @@ describe("FigmaChatPanel", () => {
     const dock = wrapper.get(".figma-chat-question-dock");
     expect(dock.text()).toContain("允许执行命令");
     expect(dock.text()).toContain("pnpm test");
+    expect(dock.text()).toContain("packages/**");
 
     const actions = dock.findAll("button");
+    expect(actions.map((action) => action.text())).toEqual(["拒绝", "始终允许", "允许一次"]);
     await actions[0]!.trigger("click");
     await actions[1]!.trigger("click");
     await actions[2]!.trigger("click");
 
     expect(wrapper.emitted("reply-permission")).toEqual([
-      ["perm_1", "once"],
+      ["perm_1", "reject"],
       ["perm_1", "always"],
-      ["perm_1", "reject"]
+      ["perm_1", "once"]
     ]);
+  });
+
+  it("renders the native external directory permission copy and every pattern without internal ids", () => {
+    const externalPath = "/Users/huang/.testagent/agent-opencode/references/*";
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        permissions: [{
+          requestId: "per_f87165fde001djHSPZp6D8MK1T",
+          sessionId: "ses_07b6c5a70ffeACD32uuwIorSEf",
+          type: "external_directory",
+          patterns: [externalPath, ` ${externalPath} `, "", "/tmp/second/*"],
+          createdAt: "2026-07-21T23:50:18.335217Z"
+        }]
+      } as any
+    });
+
+    const card = wrapper.get(".figma-chat-permission-card");
+    expect(card.find(".figma-chat-permission-icon").exists()).toBe(true);
+    expect(card.text()).toContain("需要权限");
+    expect(card.text()).toContain("访问项目目录之外的文件");
+    expect(card.findAll("code").map((item) => item.text())).toEqual([externalPath, "/tmp/second/*"]);
+    expect(card.text()).not.toContain("external_directory");
+    expect(card.text()).not.toContain("per_f87165fde001djHSPZp6D8MK1T");
+  });
+
+  it("uses generic permission copy for unknown types while still showing legacy patterns", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        permissions: [{
+          requestId: "perm_unknown",
+          sessionId: "ses_1",
+          type: "future_internal_permission",
+          pattern: "/tmp/future/*",
+          createdAt: "2026-07-21T23:50:18.335217Z"
+        }]
+      } as any
+    });
+
+    const card = wrapper.get(".figma-chat-permission-card");
+    expect(card.text()).toContain("需要权限");
+    expect(card.get("code").text()).toBe("/tmp/future/*");
+    expect(card.text()).not.toContain("future_internal_permission");
+    expect(card.text()).not.toContain("perm_unknown");
   });
 
   it("submits a custom answer instead of the selected single-choice option", async () => {
@@ -2203,6 +2255,15 @@ describe("FigmaChatPanel", () => {
             ]
           }
         ],
+        permissions: [
+          {
+            requestId: "perm_child_history",
+            sessionId: "ses_child_frontend",
+            type: "read",
+            pattern: "frontend/**",
+            createdAt: "2026-07-03T00:00:04Z"
+          }
+        ],
         processStatus: { status: "READY", initializable: false, message: "ready" }
       } as any,
       global: { stubs: { MarkdownView: markdownViewStub } }
@@ -2211,8 +2272,10 @@ describe("FigmaChatPanel", () => {
     await showFullTimeline(wrapper);
     expect(wrapper.find(".figma-chat-composer").exists()).toBe(true);
     expect(wrapper.find(".oc-subagent-card").exists()).toBe(true);
+    expect(wrapper.find(".oc-subagent-card__attention").exists()).toBe(true);
     expect(wrapper.text()).toContain("Explore frontend structure");
     expect(wrapper.text()).not.toContain("子 Agent 已读取前端目录。");
+    expect(wrapper.find(".figma-chat-question-dock").exists()).toBe(false);
 
     await wrapper.get(".figma-chat-process-status").trigger("click");
     await wrapper.get(".figma-chat-process-status-dot").trigger("click");
@@ -2232,15 +2295,20 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("子 Agent 已读取前端目录。");
     expect(wrapper.text()).toContain("子 Agent 不支持对话");
     expect(wrapper.find(".figma-chat-subagent-return").exists()).toBe(true);
+    expect(wrapper.get(".figma-chat-question-dock").text()).toContain("读取文件（匹配文件路径）");
+    expect(wrapper.get(".figma-chat-question-dock").text()).toContain("frontend/**");
     // 原生 child session 也可能提出 Question；不能只留下时间线中的 question 工具 JSON。
     expect(wrapper.get(".figma-chat-question-dock").text()).toContain("子 Agent 是否继续读取目录？");
     expect(expandedProcessCardObserver.disconnect).toHaveBeenCalledTimes(1);
+
+    await wrapper.setProps({ permissions: [] });
 
     await wrapper.get(".figma-chat-subagent-return").trigger("click");
     await nextTick();
     await nextTick();
 
     expect(wrapper.find(".figma-chat-composer").exists()).toBe(true);
+    expect(wrapper.find(".oc-subagent-card__attention").exists()).toBe(false);
     expect(wrapper.text()).not.toContain("子 Agent 已读取前端目录。");
     expect(processCardObservers()).toHaveLength(processObserverCountBeforeSubagent + 1);
     expect(processCardObservers().at(-1)!.observe).toHaveBeenCalledTimes(1);

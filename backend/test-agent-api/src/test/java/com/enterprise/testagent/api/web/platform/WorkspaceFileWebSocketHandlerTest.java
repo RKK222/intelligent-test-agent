@@ -7,8 +7,10 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.enterprise.testagent.workspace.FileContentResponse;
+import com.enterprise.testagent.workspace.FilePreviewChunkResponse;
 import com.enterprise.testagent.workspace.WorkspaceApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceDirectoryService;
+import com.enterprise.testagent.workspace.WorkspaceFileUpload;
 import com.enterprise.testagent.workspace.AgentConfigApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceViewApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceViewEntry;
@@ -27,6 +29,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.reactivestreams.Publisher;
@@ -69,6 +72,34 @@ class WorkspaceFileWebSocketHandlerTest {
             assertThat(message).contains("\"content\":\"content\"");
         });
         verify(agentConfigService).readPublicAgentFile("review.md", "agw_123", new UserId("usr_admin"));
+    }
+
+    @Test
+    void progressivelyReadsPublicAgentConfigFileWithSnapshotFence() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
+        when(ticketService.consume("wft_public", "http://localhost:3000"))
+                .thenReturn(agentTicket(true, "PUBLIC", null, "agw_123"));
+        when(agentConfigService.readPublicAgentFilePreviewChunk(
+                "large.log", 524288L, 1048576L, 1234L, "agw_123", new UserId("usr_admin")))
+                .thenReturn(new FilePreviewChunkResponse(
+                        "large.log", "next", 524288L, 524292L, 1048576L, false, 5242880L, 1234L));
+        WebSocketHandler handler = handler(ticketService, agentConfigService);
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_public",
+                List.of("""
+                        {"id":"req_chunk","op":"agent-config.read.chunk","params":{"scope":"PUBLIC","worktreeId":"agw_123","path":"large.log","offset":524288,"expectedSize":1048576,"expectedLastModifiedMillis":1234}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).singleElement().satisfies(message ->
+                assertThat(message).contains(
+                        "\"id\":\"req_chunk\"",
+                        "\"content\":\"next\"",
+                        "\"nextOffset\":524292"));
+        verify(agentConfigService).readPublicAgentFilePreviewChunk(
+                "large.log", 524288L, 1048576L, 1234L, "agw_123", new UserId("usr_admin"));
     }
 
     @Test
@@ -407,6 +438,82 @@ class WorkspaceFileWebSocketHandlerTest {
     }
 
     @Test
+    void streamsWorkspaceUploadThroughBeginChunkAndComplete() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        WorkspaceFileUpload upload = Mockito.mock(WorkspaceFileUpload.class);
+        WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
+        when(ticketService.consume("wft_workspace", "http://localhost:3000"))
+                .thenReturn(workspaceTicket(workspaceId.value()));
+        when(workspaceService.beginFileUpload(workspaceId, "assets/large.bin", 4L)).thenReturn(upload);
+        when(upload.chunkBytes()).thenReturn(262144);
+        when(upload.expectedBytes()).thenReturn(4L);
+        when(upload.uploadedBytes()).thenReturn(4L);
+        when(upload.complete()).thenReturn(4L);
+        WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        FakeWebSocketSession session = FakeWebSocketSession.uploadFlow(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace",
+                """
+                {"id":"req_begin","op":"workspace.upload.begin","params":{"workspaceId":"wrk_1234567890abcdef","path":"assets/large.bin","size":4}}
+                """,
+                response -> {
+                    String uploadId = uploadId(response);
+                    return List.of(
+                            """
+                            {"id":"req_chunk","op":"workspace.upload.chunk","params":{"workspaceId":"wrk_1234567890abcdef","uploadId":"%s","index":0,"contentBase64":"AAEC/w=="}}
+                            """.formatted(uploadId),
+                            """
+                            {"id":"req_complete","op":"workspace.upload.complete","params":{"workspaceId":"wrk_1234567890abcdef","uploadId":"%s"}}
+                            """.formatted(uploadId));
+                });
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).hasSize(3).allSatisfy(message ->
+                assertThat(message).contains("\"type\":\"result\""));
+        assertThat(session.sentText().get(0)).contains("\"chunkBytes\":262144", "\"totalBytes\":4");
+        assertThat(session.sentText().get(2)).contains("\"size\":4");
+        verify(workspaceService).beginFileUpload(workspaceId, "assets/large.bin", 4L);
+        verify(upload).append(0L, "AAEC/w==");
+        verify(upload).complete();
+        verify(upload, never()).abort();
+    }
+
+    @Test
+    void abortsPublicAgentUploadWhenSocketClosesBeforeComplete() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
+        WorkspaceFileUpload upload = Mockito.mock(WorkspaceFileUpload.class);
+        when(ticketService.consume("wft_public", "http://localhost:3000"))
+                .thenReturn(agentTicket(true, "PUBLIC", null, "agw_123"));
+        when(agentConfigService.beginPublicAgentFileUpload(
+                        "agents/large.bin", 9L, "agw_123", new UserId("usr_admin")))
+                .thenReturn(upload);
+        when(upload.chunkBytes()).thenReturn(262144);
+        when(upload.expectedBytes()).thenReturn(9L);
+        WebSocketHandler handler = handler(ticketService, agentConfigService);
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_public",
+                List.of("""
+                        {"id":"req_begin","op":"agent-config.upload.begin","params":{"scope":"PUBLIC","worktreeId":"agw_123","path":"agents/large.bin","size":9}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).singleElement().satisfies(message ->
+                assertThat(message).contains("\"type\":\"result\"", "\"chunkBytes\":262144"));
+        verify(agentConfigService).beginPublicAgentFileUpload(
+                "agents/large.bin", 9L, "agw_123", new UserId("usr_admin"));
+        verify(upload).abort();
+    }
+
+    @Test
     void listsCompositeWorkspaceViewAndMapsOnlyLogicalLocatorFields() {
         WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
         WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
@@ -603,6 +710,14 @@ class WorkspaceFileWebSocketHandlerTest {
                 "http://localhost:3000");
     }
 
+    private static String uploadId(String response) {
+        try {
+            return new ObjectMapper().readTree(response).path("data").path("uploadId").asText();
+        } catch (Exception exception) {
+            throw new AssertionError("无法解析上传会话响应", exception);
+        }
+    }
+
     private static WorkspaceFileSocketTicket agentTicket(
             boolean superAdmin,
             String scope,
@@ -660,17 +775,34 @@ class WorkspaceFileWebSocketHandlerTest {
         private final List<String> incoming;
         private final DataBufferFactory bufferFactory = DefaultDataBufferFactory.sharedInstance;
         private final List<String> sentText = new ArrayList<>();
+        private final Function<String, List<String>> afterFirstResponse;
+        private final reactor.core.publisher.Sinks.One<String> firstResponse = reactor.core.publisher.Sinks.one();
 
         private FakeWebSocketSession(String path, List<String> incoming) {
+            this(path, incoming, null);
+        }
+
+        private FakeWebSocketSession(
+                String path,
+                List<String> incoming,
+                Function<String, List<String>> afterFirstResponse) {
             HttpHeaders headers = new HttpHeaders();
             headers.setOrigin("http://localhost:3000");
             headers.set("X-Trace-Id", TRACE_ID);
             this.handshakeInfo = new HandshakeInfo(URI.create("ws://127.0.0.1:8080" + path), headers, Mono.<Principal>empty(), null);
             this.incoming = List.copyOf(incoming);
+            this.afterFirstResponse = afterFirstResponse;
         }
 
         static FakeWebSocketSession allowed(String path, List<String> incoming) {
             return new FakeWebSocketSession(path, incoming);
+        }
+
+        static FakeWebSocketSession uploadFlow(
+                String path,
+                String begin,
+                Function<String, List<String>> afterFirstResponse) {
+            return new FakeWebSocketSession(path, List.of(begin), afterFirstResponse);
         }
 
         List<String> sentText() {
@@ -699,13 +831,25 @@ class WorkspaceFileWebSocketHandlerTest {
 
         @Override
         public Flux<WebSocketMessage> receive() {
-            return Flux.fromIterable(incoming).map(this::textMessage);
+            Flux<WebSocketMessage> initial = Flux.fromIterable(incoming).map(this::textMessage);
+            if (afterFirstResponse == null) {
+                return initial;
+            }
+            return Flux.concat(
+                    initial,
+                    firstResponse.asMono()
+                            .flatMapMany(response -> Flux.fromIterable(afterFirstResponse.apply(response)))
+                            .map(this::textMessage));
         }
 
         @Override
         public Mono<Void> send(Publisher<WebSocketMessage> messages) {
             return Flux.from(messages)
-                    .doOnNext(message -> sentText.add(message.getPayloadAsText()))
+                    .doOnNext(message -> {
+                        String payload = message.getPayloadAsText();
+                        sentText.add(payload);
+                        firstResponse.tryEmitValue(payload);
+                    })
                     .then();
         }
 

@@ -28,6 +28,8 @@ printf '%s\n' \
   'TEST_AGENT_API_TOKEN=' \
   'TEST_AGENT_OPENCODE_MANAGER_TOKEN=manager-secret-must-not-print' \
   'TEST_AGENT_INTERNAL_PROXY_API_KEY=proxy-secret-must-not-print' \
+  'TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=xxl-mysql-secret-must-not-print' \
+  'TEST_AGENT_XXL_JOB_ACCESS_TOKEN=xxl-access-secret-must-not-print' \
   >"${CONFIG_114}/backend.env"
 printf '%s\n' \
   'TEST_AGENT_OPENCODE_MANAGER_TOKEN=manager-secret-must-not-print' \
@@ -51,6 +53,7 @@ rm -f "${CONFIG_4}/backend.env.bak"
 printf '%s\n' \
   'TEST_AGENT_NGINX_MODE=multi' \
   'TEST_AGENT_NGINX_BACKENDS=122.233.30.4:8080,122.233.30.114:8080' \
+  'TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.4:18080,122.233.30.114:18080' \
   'TEST_AGENT_NGINX_SERVER_ROUTES=test-agent-backend-122-233-30-4=122.233.30.4:8080,test-agent-backend-122-233-30-114=122.233.30.114:8080' \
   'TEST_AGENT_NGINX_LISTEN_PORT=80' \
   'TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=9996' \
@@ -89,7 +92,7 @@ validate_without_secret_output() {
     --config-dir "${config_dir}" \
     --release-archive "${RELEASE_ARCHIVE}" \
     --validate-only "$@" 2>&1)"
-  if grep -Eq 'database-secret|manager-secret|proxy-secret' <<<"${output}"; then
+  if grep -Eq 'database-secret|manager-secret|proxy-secret|xxl-mysql-secret|xxl-access-secret' <<<"${output}"; then
     echo "Validation output leaked a prepared secret" >&2
     exit 1
   fi
@@ -113,6 +116,7 @@ validate_without_secret_output backend "${CONFIG_115}" --backend-host 122.233.30
 cp "${CONFIG_FRONTEND}/nginx.env" "${CONFIG_FRONTEND_3}/nginx.env"
 sed -i.bak \
   -e 's#TEST_AGENT_NGINX_BACKENDS=.*#TEST_AGENT_NGINX_BACKENDS=122.233.30.4:8080,122.233.30.114:8080,122.233.30.115:8080#' \
+  -e 's#TEST_AGENT_NGINX_XXL_JOB_ADMINS=.*#TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.4:18080,122.233.30.114:18080,122.233.30.115:18080#' \
   -e 's#TEST_AGENT_NGINX_SERVER_ROUTES=.*#TEST_AGENT_NGINX_SERVER_ROUTES=test-agent-backend-122-233-30-4=122.233.30.4:8080,test-agent-backend-122-233-30-114=122.233.30.114:8080,test-agent-backend-122-233-30-115=122.233.30.115:8080#' \
   "${CONFIG_FRONTEND_3}/nginx.env"
 rm -f "${CONFIG_FRONTEND_3}/nginx.env.bak"
@@ -191,6 +195,14 @@ verify_worker_log_format() {
 verify_worker_log_format \
   'event=manager_config_update status=applied traceId=fixture previousMaxProcesses=20 appliedMaxProcesses=8 requestedMaxProcesses=8'
 verify_worker_log_format 'manager config update applied'
+skip_output="$(PATH="${VERIFY_BIN}:${PATH}" \
+  TEST_AGENT_WORKER_LOG_LINE='event=manager_config_update status=applied' \
+  bash "${DEPLOY_SCRIPT}" backend \
+    --install-root "${VERIFY_INSTALL_ROOT}" \
+    --backend-host 122.233.30.4 \
+    --skip-peer-check \
+    --verify-only 2>&1)"
+grep -Fq 'peer=deferred' <<<"${skip_output}"
 grep -Fq "grep -E 'event=manager_config_update status=applied|manager config update applied'" \
   "${ROOT_DIR}/deploy/internal/deploy-internal-release.sh"
 

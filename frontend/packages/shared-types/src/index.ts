@@ -126,6 +126,24 @@ export type FileContent = {
   readonly?: boolean;
 };
 
+/** 大文件渐进只读预览分段；offset 使用 UTF-8 字节偏移。 */
+export type FilePreviewChunk = {
+  path: string;
+  content: string;
+  offset: number;
+  nextOffset: number;
+  size: number;
+  eof: boolean;
+  warningThresholdBytes: number;
+  lastModifiedMillis: number;
+};
+
+export type FilePreviewChunkRequest = {
+  offset: number;
+  expectedSize?: number;
+  expectedLastModifiedMillis?: number;
+};
+
 export type FileStatus = {
   path: string;
   exists?: boolean;
@@ -239,6 +257,8 @@ export type AgentConfigDiffFile = {
 
 export type AgentConfigDiff = {
   files: AgentConfigDiffFile[];
+  /** 个人 worktree 已有本地提交，但尚未同步到公共共享版本。 */
+  publishPending?: boolean;
 };
 
 export type AgentConfigOperation = {
@@ -330,7 +350,7 @@ export type ConversationRunContext = {
   expiresAt: string;
 };
 
-export type SessionRuntimeAttention = "QUESTION" | string;
+export type SessionRuntimeAttention = "QUESTION" | "PERMISSION" | string;
 
 export type SessionRuntimeState = {
   sessionId: string;
@@ -345,6 +365,8 @@ export type SessionRuntimeState = {
 export type SessionRuntimeStateSummary = {
   runningCount: number;
   questionCount: number;
+  /** 新前端兼容旧后端：缺失时可由 sessions 中的 PERMISSION attention 推导。 */
+  permissionCount?: number;
   sessions: SessionRuntimeState[];
   generatedAt: string;
 };
@@ -1696,6 +1718,7 @@ export type PermissionRequest = {
   type: string;
   title?: string;
   description?: string;
+  patterns?: string[];
   pattern?: string;
   diff?: SessionDiff;
   createdAt: string;

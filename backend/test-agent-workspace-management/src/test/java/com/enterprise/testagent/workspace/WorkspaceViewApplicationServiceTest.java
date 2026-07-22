@@ -173,6 +173,37 @@ class WorkspaceViewApplicationServiceTest {
     }
 
     @Test
+    void progressivelyReadsMergedReferenceFileToEofWithLogicalPath() throws Exception {
+        writeConfig("""
+                { "references": { "docs-requirements": {
+                  "path": "{env:OPENCODE_REFERENCES_DIR}/requirements/docs",
+                  "merge": true,
+                  "sdd-folder-name": "docs"
+                } } }
+                """);
+        Path docs = Files.createDirectories(referencesRoot.resolve("requirements/docs"));
+        String content = "a".repeat(Utf8FilePreviewReader.CHUNK_BYTES + 8);
+        Files.writeString(docs.resolve("large.md"), content);
+        WorkspaceViewLocator locator = new WorkspaceViewLocator(
+                WorkspaceViewLocatorKind.REFERENCE,
+                "large.md",
+                "docs-requirements");
+
+        FilePreviewChunkResponse first = service.readChunk(WORKSPACE_ID, locator, 0L, null, null);
+        FilePreviewChunkResponse second = service.readChunk(
+                WORKSPACE_ID,
+                locator,
+                first.nextOffset(),
+                first.size(),
+                first.lastModifiedMillis());
+
+        assertThat(first.path()).isEqualTo("docs/large.md");
+        assertThat(first.eof()).isFalse();
+        assertThat(second.eof()).isTrue();
+        assertThat(first.content() + second.content()).isEqualTo(content);
+    }
+
+    @Test
     void preservesLegalLeadingAndTrailingSpacesFromListedWorkspaceAndReferencePaths() throws Exception {
         Files.writeString(workspaceRoot.resolve(" workspace "), "workspace-spaces");
         writeConfig("""

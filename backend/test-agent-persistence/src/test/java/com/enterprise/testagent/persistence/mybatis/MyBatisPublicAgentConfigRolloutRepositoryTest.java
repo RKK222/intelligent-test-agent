@@ -11,6 +11,7 @@ import com.enterprise.testagent.domain.configuration.AgentConfigRolloutScope;
 import java.io.Reader;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.io.Resources;
 import org.apache.ibatis.mapping.ResultMap;
@@ -35,6 +36,8 @@ class MyBatisPublicAgentConfigRolloutRepositoryTest {
                 "com.enterprise.testagent.persistence.mybatis.PublicAgentConfigRolloutMapper.SyncRowMap");
         ResultMap targetRow = configuration.getResultMap(
                 "com.enterprise.testagent.persistence.mybatis.PublicAgentConfigRolloutMapper.TargetRowMap");
+        ResultMap worktreeRow = configuration.getResultMap(
+                "com.enterprise.testagent.persistence.mybatis.PublicAgentConfigRolloutMapper.WorktreeRowMap");
 
         assertThat(syncRow.getResultMappings())
                 .filteredOn(mapping -> "retry_count".equals(mapping.getColumn()))
@@ -44,6 +47,32 @@ class MyBatisPublicAgentConfigRolloutRepositoryTest {
         assertThat(targetRow.getResultMappings())
                 .filteredOn(mapping -> List.of("port", "retry_count").contains(mapping.getColumn()))
                 .allSatisfy(mapping -> assertThat(mapping.getJavaType()).isEqualTo(int.class));
+        assertThat(worktreeRow.getResultMappings())
+                .filteredOn(mapping -> "retry_count".equals(mapping.getColumn()))
+                .singleElement()
+                .extracting(mapping -> mapping.getJavaType())
+                .isEqualTo(int.class);
+    }
+
+    @Test
+    void blockingRolloutQueryUsesPersonalWorkspaceVersionForeignKey() throws Exception {
+        Configuration configuration = new Configuration();
+        String resource = "mybatis/PublicAgentConfigRolloutMapper.xml";
+        try (Reader reader = Resources.getResourceAsReader(resource)) {
+            new XMLMapperBuilder(reader, configuration, resource, configuration.getSqlFragments()).parse();
+        }
+
+        // 个人工作空间通过 app_workspace_version_id 关联应用版本，禁止误用不存在的 version_id 列。
+        String sql = configuration
+                .getMappedStatement(
+                        "com.enterprise.testagent.persistence.mybatis.PublicAgentConfigRolloutMapper.findBlockingRolloutId")
+                .getBoundSql(Map.of("userId", "usr-1"))
+                .getSql()
+                .replaceAll("\\s+", " ")
+                .trim();
+
+        assertThat(sql).contains("pw.app_workspace_version_id = v.version_id");
+        assertThat(sql).doesNotContain("pw.version_id");
     }
 
     @Test
@@ -110,5 +139,34 @@ class MyBatisPublicAgentConfigRolloutRepositoryTest {
         ArgumentCaptor<String> token = ArgumentCaptor.forClass(String.class);
         verify(mapper).markTargetDisposed(eq("act_target"), token.capture(), eq(NOW));
         assertThat(token.getValue()).isEqualTo("acl_current");
+    }
+
+    @Test
+    void applicationWorktreeClaimCarriesExactWorkspaceAndTargetCommit() {
+        PublicAgentConfigRolloutMapper mapper = mock(PublicAgentConfigRolloutMapper.class);
+        MyBatisPublicAgentConfigRolloutRepository repository = new MyBatisPublicAgentConfigRolloutRepository(mapper);
+        AgentConfigRolloutWorktreeRow row = new AgentConfigRolloutWorktreeRow(
+                "acr_rollout",
+                "awv_version",
+                "pws_personal",
+                "usr_1",
+                "linux-1",
+                "abc123",
+                "trace-rollout",
+                7,
+                null,
+                null);
+        when(mapper.findClaimableApplicationWorktrees("linux-1", NOW, 1)).thenReturn(List.of(row));
+        when(mapper.markApplicationWorktreeProcessing(
+                eq("acr_rollout"), eq("pws_personal"), any(), any(), eq(NOW)))
+                .thenReturn(1);
+
+        var claim = repository.claimPendingApplicationWorktree("linux-1", NOW, NOW.plusSeconds(180));
+
+        assertThat(claim).isPresent();
+        assertThat(claim.get().personalWorkspaceId()).isEqualTo("pws_personal");
+        assertThat(claim.get().targetCommit()).isEqualTo("abc123");
+        assertThat(claim.get().retryCount()).isEqualTo(7);
+        assertThat(claim.get().leaseToken()).startsWith("acl_");
     }
 }

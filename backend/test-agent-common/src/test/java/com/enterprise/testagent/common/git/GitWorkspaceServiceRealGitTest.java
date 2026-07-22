@@ -110,6 +110,69 @@ class GitWorkspaceServiceRealGitTest {
     }
 
     @Test
+    void createsLinearPublicationCommitWithoutPollutedPersonalHistory() throws Exception {
+        Path repo = initializeRepository();
+        Path remote = tempDir.resolve("public-agent.git");
+        Files.createDirectories(remote);
+        git(remote, "init", "--bare");
+        git(repo, "remote", "add", "origin", remote.toString());
+        write(repo, "opencode.jsonc", "{\"version\": 1}\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "remote base");
+        String remoteCommit = git(repo, "rev-parse", "HEAD").stdoutText().trim();
+
+        git(repo, "config", "user.name", "Legacy Agent");
+        git(repo, "config", "user.email", "legacy@testagent.local");
+        write(repo, "legacy.txt", "legacy content retained\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "polluted identity");
+        String pollutedCommit = git(repo, "rev-parse", "HEAD").stdoutText().trim();
+        write(repo, "opencode.jsonc", "{\"version\": 2}\n");
+        git(repo, "commit", "-am", "current update");
+        String personalCommit = git(repo, "rev-parse", "HEAD").stdoutText().trim();
+
+        GitWorkspaceService service = new GitWorkspaceService();
+        String publicationCommit = service.createLinearCommitFromTree(
+                repo,
+                personalCommit,
+                remoteCommit,
+                "发布公共 Agent 配置",
+                GitCommitIdentity.forPlatformUser("admin", "001177621"));
+
+        assertThat(git(repo, "rev-parse", publicationCommit + "^").stdoutText().trim())
+                .isEqualTo(remoteCommit);
+        assertThat(git(repo, "rev-parse", publicationCommit + "^{tree}").stdoutText().trim())
+                .isEqualTo(git(repo, "rev-parse", personalCommit + "^{tree}").stdoutText().trim());
+        assertThat(service.isAncestor(repo, pollutedCommit, publicationCommit)).isFalse();
+        assertThat(git(repo, "show", "-s", "--format=%an <%ae>|%cn <%ce>", publicationCommit).stdoutText().trim())
+                .isEqualTo("admin <001177621@mails.icbc>|admin <001177621@mails.icbc>");
+
+        service.resetHardToCommit(repo, publicationCommit);
+        service.pushRef(repo, "main", "main", null);
+        assertThat(git(remote, "rev-parse", "refs/heads/main").stdoutText().trim()).isEqualTo(publicationCommit);
+        assertThat(service.headCommit(repo)).isEqualTo(publicationCommit);
+    }
+
+    @Test
+    void reusesRemoteCommitWhenPublicationTreeHasNoChanges() throws Exception {
+        Path repo = initializeRepository();
+        write(repo, "opencode.jsonc", "{}\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "remote base");
+        String remoteCommit = git(repo, "rev-parse", "HEAD").stdoutText().trim();
+        git(repo, "commit", "--allow-empty", "-m", "polluted empty commit");
+
+        String publicationCommit = new GitWorkspaceService().createLinearCommitFromTree(
+                repo,
+                "HEAD",
+                remoteCommit,
+                "发布公共 Agent 配置",
+                TEST_IDENTITY);
+
+        assertThat(publicationCommit).isEqualTo(remoteCommit);
+    }
+
+    @Test
     void exposesBaseCurrentAndIncomingForRealMergeConflict() throws Exception {
         Path repo = initializeRepository();
         write(repo, "conflict.txt", "base\n");

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/vue";
 import { createPinia } from "pinia";
+import { BackendApiError } from "@test-agent/backend-api";
 import GitChangesPanel from "../src/components/GitChangesPanel.vue";
 import { useWorkbenchStore } from "@test-agent/workbench-shell";
 import { applicationWorkspaceRestrictionsFixture as fixture } from "../../../tests/fixtures/application-workspace-restrictions";
@@ -469,6 +470,161 @@ describe("GitChangesPanel", () => {
       expect.stringMatching(/^aco_/)
     ));
     expect(await view.findByText("提交并推送进度")).toBeTruthy();
+  });
+
+  it("allows closing the progress dialog while public Agent publish continues", async () => {
+    let finishPublish: ((value: { status: string; currentStep: string }) => void) | undefined;
+    apiClientMock.publishPublicAgentConfig.mockImplementationOnce(() => new Promise((resolve) => {
+      finishPublish = resolve;
+    }));
+    apiClientMock.getPublicAgentDiff.mockResolvedValue({
+      files: [{
+        path: "opencode/agents/public-review.md",
+        status: "modified",
+        rawStatus: "M ",
+        staged: true,
+        patch: "@@ -1 +1 @@\n-old\n+new"
+      }]
+    });
+    const pinia = createPinia();
+    const workbench = useWorkbenchStore(pinia);
+    workbench.publicWorktree = {
+      worktreeId: "agw_public",
+      scope: "PUBLIC",
+      workspaceId: null,
+      linuxServerId: "linux-1",
+      worktreeName: "public-usr_admin",
+      branch: "public-usr_admin",
+      rootPath: "/data/public-usr_admin",
+      agentDirectory: "/data/public-usr_admin/opencode",
+      status: "ACTIVE",
+      createdAt: "2026-07-17T00:00:00Z",
+      updatedAt: "2026-07-17T00:00:00Z"
+    };
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManagePublicConfig: true
+      },
+      global: { plugins: [pinia] }
+    });
+
+    await view.findByText("public-review.md", { exact: false });
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "更新公共 Agent");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+    await waitFor(() => expect(apiClientMock.publishPublicAgentConfig).toHaveBeenCalledTimes(1));
+
+    expect(view.getByText("创建后台同步任务")).toBeTruthy();
+    expect(view.getAllByRole("button", { name: "关闭" })
+      .every((button) => !(button as HTMLButtonElement).disabled)).toBe(true);
+    await fireEvent.click(view.getAllByRole("button", { name: "关闭" })[0]);
+    expect(view.queryByText("提交并推送进度")).toBeNull();
+    expect(view.getByText("正在发布公共 Agent 配置...")).toBeTruthy();
+
+    finishPublish?.({ status: "SUCCEEDED", currentStep: "COMPLETED" });
+    await waitFor(() => expect(view.getByText("提交并推送成功！")).toBeTruthy());
+  });
+
+  it("shows that public Agent local commit was retained when remote publish is rejected", async () => {
+    apiClientMock.publishPublicAgentConfig.mockRejectedValueOnce(new BackendApiError(409, {
+      success: false,
+      code: "GIT_UNAVAILABLE",
+      message: "Git 远端拒绝推送",
+      traceId: "trace_publish_rejected",
+      details: {
+        failedStep: "PUSHING",
+        gitFailureHint: "远端拒绝接收提交，请确认提交人已在企业 Git 平台登记"
+      }
+    }));
+    apiClientMock.getPublicAgentDiff
+      .mockResolvedValueOnce({
+        files: [{
+          path: "opencode/opencode.jsonc",
+          status: "modified",
+          rawStatus: "M ",
+          staged: true,
+          patch: "@@ -1 +1 @@\n-old\n+new"
+        }]
+      })
+      .mockResolvedValue({ files: [] });
+    const pinia = createPinia();
+    const workbench = useWorkbenchStore(pinia);
+    workbench.publicWorktree = {
+      worktreeId: "agw_public",
+      scope: "PUBLIC",
+      workspaceId: null,
+      linuxServerId: "linux-114",
+      worktreeName: "public-001177621",
+      branch: "public-001177621",
+      rootPath: "/data/testagent/data/agent-opencode/.configdev/public-001177621",
+      agentDirectory: "/data/testagent/data/agent-opencode/.configdev/public-001177621/opencode",
+      status: "ACTIVE",
+      createdAt: "2026-07-22T00:00:00Z",
+      updatedAt: "2026-07-22T00:00:00Z"
+    };
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManagePublicConfig: true
+      },
+      global: { plugins: [pinia] }
+    });
+
+    await view.findByText("opencode.jsonc", { exact: false });
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "更新公共 Agent");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    expect(await view.findByText(/个人 worktree 已完成本地提交，但远端公共仓库及其他服务器尚未更新/)).toBeTruthy();
+    expect(view.getByText(/远端拒绝接收提交/)).toBeTruthy();
+    expect(view.getByText("执行失败")).toBeTruthy();
+    expect(view.queryByText("提交并推送成功！")).toBeNull();
+    await waitFor(() => expect(view.getByText("待推送")).toBeTruthy());
+    await fireEvent.click(view.getByRole("button", { name: "重新推送" }));
+    await waitFor(() => expect(apiClientMock.publishPublicAgentConfig).toHaveBeenCalledTimes(2));
+    expect(apiClientMock.commitPublicAgentConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores the public Agent retry action from backend state after page reload", async () => {
+    apiClientMock.getPublicAgentDiff
+      .mockResolvedValueOnce({ files: [], publishPending: true })
+      .mockResolvedValue({ files: [], publishPending: false });
+    const pinia = createPinia();
+    const workbench = useWorkbenchStore(pinia);
+    workbench.publicWorktree = {
+      worktreeId: "agw_public_pending",
+      scope: "PUBLIC",
+      workspaceId: null,
+      linuxServerId: "linux-114",
+      worktreeName: "public-001177621",
+      branch: "public-001177621",
+      rootPath: "/data/testagent/data/agent-opencode/.configdev/public-001177621",
+      agentDirectory: "/data/testagent/data/agent-opencode/.configdev/public-001177621/opencode",
+      status: "ACTIVE",
+      createdAt: "2026-07-22T00:00:00Z",
+      updatedAt: "2026-07-22T00:00:00Z"
+    };
+    const view = render(GitChangesPanel, {
+      props: {
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManagePublicConfig: true
+      },
+      global: { plugins: [pinia] }
+    });
+
+    expect(await view.findByText(/个人 worktree 中存在已完成的本地提交/)).toBeTruthy();
+    await fireEvent.click(view.getByRole("button", { name: "重新推送" }));
+
+    await waitFor(() => expect(apiClientMock.publishPublicAgentConfig).toHaveBeenCalledWith(
+      "agw_public_pending",
+      expect.stringMatching(/^aco_/)
+    ));
+    expect(apiClientMock.commitPublicAgentConfig).not.toHaveBeenCalled();
+    await waitFor(() => expect(view.queryByRole("button", { name: "重新推送" })).toBeNull());
   });
 
   it("discards an unstaged application Agent file and reloads its open editor route", async () => {

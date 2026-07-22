@@ -11,7 +11,9 @@ import org.apache.ibatis.annotations.Param;
 @Mapper
 public interface PublicAgentConfigRolloutMapper {
 
-    String findActiveRolloutId();
+    String findActiveRolloutId(
+            @Param("scope") String scope,
+            @Param("scopeKey") String scopeKey);
 
     String findBlockingRolloutId(@Param("userId") String userId);
 
@@ -66,6 +68,10 @@ public interface PublicAgentConfigRolloutMapper {
             @Param("linuxServerId") String linuxServerId,
             @Param("now") Instant now);
 
+    int abandonRolloutWorktrees(
+            @Param("linuxServerId") String linuxServerId,
+            @Param("now") Instant now);
+
     void insertServer(
             @Param("rolloutId") String rolloutId,
             @Param("linuxServerId") String linuxServerId,
@@ -109,6 +115,53 @@ public interface PublicAgentConfigRolloutMapper {
             @Param("nextRetryAt") Instant nextRetryAt,
             @Param("errorMessage") String errorMessage,
             @Param("now") Instant now);
+
+    void upsertPendingApplicationWorktrees(
+            @Param("rolloutId") String rolloutId,
+            @Param("linuxServerId") String linuxServerId,
+            @Param("targetCommit") String targetCommit,
+            @Param("traceId") String traceId,
+            @Param("rows") List<com.enterprise.testagent.domain.configuration.AgentConfigRolloutWorktreePending> rows,
+            @Param("now") Instant now);
+
+    List<AgentConfigRolloutWorktreeRow> findClaimableApplicationWorktrees(
+            @Param("linuxServerId") String linuxServerId,
+            @Param("now") Instant now,
+            @Param("limit") int limit);
+
+    int markApplicationWorktreeProcessing(
+            @Param("rolloutId") String rolloutId,
+            @Param("personalWorkspaceId") String personalWorkspaceId,
+            @Param("leaseToken") String leaseToken,
+            @Param("leaseUntil") Instant leaseUntil,
+            @Param("now") Instant now);
+
+    int markApplicationWorktreeRetry(
+            @Param("rolloutId") String rolloutId,
+            @Param("personalWorkspaceId") String personalWorkspaceId,
+            @Param("leaseToken") String leaseToken,
+            @Param("retryCount") int retryCount,
+            @Param("nextRetryAt") Instant nextRetryAt,
+            @Param("reason") String reason,
+            @Param("now") Instant now);
+
+    int markApplicationWorktreeSynchronized(
+            @Param("rolloutId") String rolloutId,
+            @Param("personalWorkspaceId") String personalWorkspaceId,
+            @Param("leaseToken") String leaseToken,
+            @Param("now") Instant now);
+
+    int abandonApplicationWorktree(
+            @Param("rolloutId") String rolloutId,
+            @Param("personalWorkspaceId") String personalWorkspaceId,
+            @Param("leaseToken") String leaseToken,
+            @Param("reason") String reason,
+            @Param("now") Instant now);
+
+    int countIncompleteApplicationWorktrees(
+            @Param("rolloutId") String rolloutId,
+            @Param("linuxServerId") String linuxServerId,
+            @Param("userId") String userId);
 
     List<PublicAgentConfigRolloutTargetRow> findClaimableTargets(
             @Param("linuxServerId") String linuxServerId,

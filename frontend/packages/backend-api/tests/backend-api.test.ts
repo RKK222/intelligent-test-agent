@@ -563,6 +563,7 @@ describe("backend-api", () => {
     await expect(client.getSessionRuntimeState()).resolves.toMatchObject({
       runningCount: 1,
       questionCount: 1,
+      permissionCount: 0,
       sessions: [expect.objectContaining({ sessionId: "ses_1", attention: "QUESTION" })]
     });
 
@@ -1873,7 +1874,12 @@ describe("backend-api", () => {
         JSON.stringify({
           success: true,
           traceId: "trace_fixed",
-          data: [{ id: "per_history", sessionID: "ses_remote_history", permission: "edit", pattern: "src/**" }]
+          data: [{
+            id: "per_history",
+            sessionID: "ses_remote_history",
+            permission: "external_directory",
+            patterns: ["/Users/huang/.testagent/agent-opencode/references/*", " /Users/huang/.testagent/agent-opencode/references/* "]
+          }]
         }),
         { status: 200 }
       )
@@ -1881,7 +1887,30 @@ describe("backend-api", () => {
     const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
 
     await expect(client.listSessionPermissions("ses_history")).resolves.toMatchObject([
-      { requestId: "per_history", sessionId: "ses_history", type: "edit", pattern: "src/**" }
+      {
+        requestId: "per_history",
+        sessionId: "ses_history",
+        type: "external_directory",
+        patterns: ["/Users/huang/.testagent/agent-opencode/references/*"]
+      }
+    ]);
+  });
+
+  it("keeps the legacy singular permission pattern for old runtime payloads", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: [{ id: "per_legacy", permission: "edit", pattern: "src/**" }]
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.listSessionPermissions("ses_history")).resolves.toMatchObject([
+      { requestId: "per_legacy", sessionId: "ses_history", type: "edit", pattern: "src/**", patterns: ["src/**"] }
     ]);
   });
 
@@ -2511,15 +2540,45 @@ describe("backend-api", () => {
       path: "docs/design.md",
       content: "# 设计"
     });
+    await expect(client.readFilePreviewChunk(
+      "wrk_1234567890abcdef",
+      "docs/large.log",
+      { offset: 524288, expectedSize: 1048576, expectedLastModifiedMillis: 1234 }
+    )).resolves.toEqual({
+      path: "docs/large.log",
+      content: "preview chunk",
+      offset: 524288,
+      nextOffset: 524301,
+      size: 1048576,
+      eof: false,
+      warningThresholdBytes: 5242880,
+      lastModifiedMillis: 1234
+    });
     await client.renameWorkspaceFile("wrk_1234567890abcdef", "docs/design.md", "详细设计.md");
     await client.copyWorkspaceFile("wrk_1234567890abcdef", "docs/design.md", "backup/design.md");
     await client.moveWorkspaceFile("wrk_1234567890abcdef", "docs/design.md", "archive/design.md");
-    await client.uploadWorkspaceFile("wrk_1234567890abcdef", "assets/icon.bin", "AAEC/w==");
+    const uploadProgress: Array<{ uploadedBytes: number; totalBytes: number }> = [];
+    await client.uploadWorkspaceFile(
+      "wrk_1234567890abcdef",
+      "assets/icon.bin",
+      new Blob([new Uint8Array([0, 1, 2, 255])]),
+      (progress) => uploadProgress.push(progress)
+    );
 
     expect(sockets[0]?.sentMessages).toEqual([
       expect.objectContaining({
         op: "workspace.read",
         params: { workspaceId: "wrk_1234567890abcdef", path: "docs/design.md" }
+      }),
+      expect.objectContaining({
+        op: "workspace.read.chunk",
+        params: {
+          workspaceId: "wrk_1234567890abcdef",
+          path: "docs/large.log",
+          offset: 524288,
+          expectedSize: 1048576,
+          expectedLastModifiedMillis: 1234
+        }
       }),
       expect.objectContaining({
         op: "workspace.rename",
@@ -2534,9 +2593,26 @@ describe("backend-api", () => {
         params: { workspaceId: "wrk_1234567890abcdef", sourcePath: "docs/design.md", targetPath: "archive/design.md" }
       }),
       expect.objectContaining({
-        op: "workspace.upload",
-        params: { workspaceId: "wrk_1234567890abcdef", path: "assets/icon.bin", contentBase64: "AAEC/w==" }
+        op: "workspace.upload.begin",
+        params: { workspaceId: "wrk_1234567890abcdef", path: "assets/icon.bin", size: 4 }
+      }),
+      expect.objectContaining({
+        op: "workspace.upload.chunk",
+        params: { workspaceId: "wrk_1234567890abcdef", uploadId: "upl_test_1", index: 0, contentBase64: "AAE=" }
+      }),
+      expect.objectContaining({
+        op: "workspace.upload.chunk",
+        params: { workspaceId: "wrk_1234567890abcdef", uploadId: "upl_test_1", index: 1, contentBase64: "Av8=" }
+      }),
+      expect.objectContaining({
+        op: "workspace.upload.complete",
+        params: { workspaceId: "wrk_1234567890abcdef", uploadId: "upl_test_1" }
       })
+    ]);
+    expect(uploadProgress).toEqual([
+      { uploadedBytes: 0, totalBytes: 4 },
+      { uploadedBytes: 2, totalBytes: 4 },
+      { uploadedBytes: 4, totalBytes: 4 }
     ]);
   });
 
@@ -2841,10 +2917,10 @@ describe("backend-api", () => {
     )).resolves.toBeNull();
     await expect(client.uploadPublicAgentFile(
       "opencode/agents/icon.bin",
-      "AAEC/w==",
+      new Blob([new Uint8Array([0, 1, 2, 255])]),
       "agw_1234567890abcdef",
       "linux-2"
-    )).resolves.toBeNull();
+    )).resolves.toBeUndefined();
     await expect(client.deletePublicAgentFile(
       "opencode/agents/obsolete.md",
       "agw_1234567890abcdef",
@@ -2881,15 +2957,20 @@ describe("backend-api", () => {
       }
     });
     expect(sockets[0]?.sentMessages[2]).toMatchObject({
-      op: "agent-config.upload",
+      op: "agent-config.upload.begin",
       params: {
         scope: "PUBLIC",
         path: "opencode/agents/icon.bin",
-        contentBase64: "AAEC/w==",
+        size: 4,
         worktreeId: "agw_1234567890abcdef"
       }
     });
-    expect(sockets[0]?.sentMessages[3]).toMatchObject({
+    expect(sockets[0]?.sentMessages.slice(3, 6).map((message) => message.op)).toEqual([
+      "agent-config.upload.chunk",
+      "agent-config.upload.chunk",
+      "agent-config.upload.complete"
+    ]);
+    expect(sockets[0]?.sentMessages[6]).toMatchObject({
       op: "agent-config.delete",
       params: {
         scope: "PUBLIC",
@@ -3430,6 +3511,8 @@ class FakeWorkspaceWebSocket {
   onmessage: WebSocketEventHandler = null;
   onerror: WebSocketEventHandler = null;
   onclose: WebSocketEventHandler = null;
+  private readonly uploads = new Map<string, { uploadedBytes: number; totalBytes: number }>();
+  private uploadSequence = 0;
 
   constructor(readonly url: string, autoOpen = true) {
     if (autoOpen) {
@@ -3446,7 +3529,7 @@ class FakeWorkspaceWebSocket {
   }
 
   send(payload: string) {
-    const message = JSON.parse(payload) as { id: string; op: string };
+    const message = JSON.parse(payload) as { id: string; op: string; params?: Record<string, unknown> };
     this.sentMessages.push(message);
     if (this.onSend) {
       this.onSend(message);
@@ -3458,7 +3541,26 @@ class FakeWorkspaceWebSocket {
           id: message.id,
           type: "result",
           data:
-            message.op === "workspace.list"
+            message.op.endsWith(".read.chunk")
+              ? {
+                  path: String(message.params?.path ?? "docs/large.log"),
+                  content: "preview chunk",
+                  offset: Number(message.params?.offset ?? 0),
+                  nextOffset: Number(message.params?.offset ?? 0) + 13,
+                  size: 1048576,
+                  eof: false,
+                  warningThresholdBytes: 5242880,
+                  lastModifiedMillis: 1234
+                }
+              : message.op.endsWith(".upload.begin")
+              ? this.beginUpload(message.params)
+              : message.op.endsWith(".upload.chunk")
+                ? this.appendUpload(message.params)
+                : message.op.endsWith(".upload.complete")
+                  ? this.completeUpload(message.params)
+                  : message.op.endsWith(".upload.abort")
+                    ? null
+                    : message.op === "workspace.list"
               ? [
                   {
                     path: "src/App.vue",
@@ -3494,6 +3596,29 @@ class FakeWorkspaceWebSocket {
         })
       });
     });
+  }
+
+  private beginUpload(params: Record<string, unknown> | undefined) {
+    const uploadId = `upl_test_${++this.uploadSequence}`;
+    const totalBytes = Number(params?.size ?? 0);
+    this.uploads.set(uploadId, { uploadedBytes: 0, totalBytes });
+    return { uploadId, chunkBytes: 2, totalBytes };
+  }
+
+  private appendUpload(params: Record<string, unknown> | undefined) {
+    const uploadId = String(params?.uploadId ?? "");
+    const upload = this.uploads.get(uploadId);
+    if (!upload) return null;
+    upload.uploadedBytes += atob(String(params?.contentBase64 ?? "")).length;
+    return { uploadedBytes: upload.uploadedBytes, totalBytes: upload.totalBytes };
+  }
+
+  private completeUpload(params: Record<string, unknown> | undefined) {
+    const uploadId = String(params?.uploadId ?? "");
+    const upload = this.uploads.get(uploadId);
+    if (!upload) return null;
+    this.uploads.delete(uploadId);
+    return { size: upload.uploadedBytes };
   }
 
   close() {

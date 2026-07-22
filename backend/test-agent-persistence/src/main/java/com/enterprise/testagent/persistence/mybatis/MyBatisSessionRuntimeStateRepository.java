@@ -32,7 +32,10 @@ public class MyBatisSessionRuntimeStateRepository implements SessionRuntimeState
         int questionCount = (int) states.stream()
                 .filter(state -> state.attention() == SessionRuntimeAttention.QUESTION)
                 .count();
-        return new SessionRuntimeStateSummary(states.size(), questionCount, states, Instant.now());
+        int permissionCount = (int) states.stream()
+                .filter(state -> state.attention() == SessionRuntimeAttention.PERMISSION)
+                .count();
+        return new SessionRuntimeStateSummary(states.size(), questionCount, permissionCount, states, Instant.now());
     }
 
     private SessionRuntimeState toDomain(SessionRuntimeStateRow row) {

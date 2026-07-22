@@ -21,6 +21,7 @@ const branches = ref<string[]>([]);
 const selectedBranch = ref("");
 const targetRepository = ref<PublicAgentRepositoryStatus | null>(null);
 const initErrorMessage = ref("");
+const dirtyPullDiagnostics = ref<Record<string, { repositoryKind: string; path: string; files: string[] }>>({});
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 const canSubmitInitialize = computed(() => !!targetRepository.value && !!selectedBranch.value && !initializing.value && !branchesLoading.value);
@@ -36,6 +37,7 @@ async function refresh() {
   errorMessage.value = "";
   try {
     rows.value = await api.listPublicAgentRepositories();
+    dirtyPullDiagnostics.value = {};
   } catch (error) {
     errorMessage.value = formatError(error, "加载公共配置仓库状态失败");
   } finally {
@@ -99,6 +101,21 @@ async function submitInitialize() {
 }
 
 async function pullRepository(repository: PublicAgentRepositoryStatus) {
+  await pullRepositoryWithDiscard(repository, false);
+}
+
+async function discardAndPullRepository(repository: PublicAgentRepositoryStatus) {
+  const confirmed = window.confirm(
+    `将放弃服务器 ${repository.linuxServerId} 上当前管理员个人公共 worktree和共享运行副本中检测到的已跟踪文件修改后重新拉取。`
+      + "其他管理员的个人 worktree不受影响，也不会删除未跟踪文件。是否继续？"
+  );
+  if (!confirmed) {
+    return;
+  }
+  await pullRepositoryWithDiscard(repository, true);
+}
+
+async function pullRepositoryWithDiscard(repository: PublicAgentRepositoryStatus, discardLocalChanges: boolean) {
   const branch = repository.currentBranch?.trim();
   if (!repository.initialized || !branch || pullingServerId.value) {
     return;
@@ -107,11 +124,38 @@ async function pullRepository(repository: PublicAgentRepositoryStatus) {
   errorMessage.value = "";
   successMessage.value = "";
   try {
-    const updated = await api.pullPublicAgentRepository(repository.linuxServerId, branch, newOperationId(), false);
+    const updated = await api.pullPublicAgentRepository(
+      repository.linuxServerId,
+      branch,
+      newOperationId(),
+      discardLocalChanges
+    );
     rows.value = rows.value.map((row) => (row.linuxServerId === updated.linuxServerId ? updated : row));
+    const { [updated.linuxServerId]: _removed, ...remainingDiagnostics } = dirtyPullDiagnostics.value;
+    dirtyPullDiagnostics.value = remainingDiagnostics;
     successMessage.value = `服务器 ${updated.linuxServerId} 公共配置仓库已拉取到最新`;
   } catch (error) {
     errorMessage.value = formatError(error, "拉取公共配置仓库失败");
+    if (error instanceof BackendApiError && error.details.discardLocalChangesAllowed === true) {
+      dirtyPullDiagnostics.value = {
+        ...dirtyPullDiagnostics.value,
+        [repository.linuxServerId]: {
+          repositoryKind: typeof error.details.repositoryKind === "string"
+            ? error.details.repositoryKind
+            : "UNKNOWN",
+          path: typeof error.details.path === "string" ? error.details.path : "-",
+          files: Array.isArray(error.details.dirtyFiles)
+            ? error.details.dirtyFiles.filter((file): file is string => typeof file === "string")
+            : []
+        }
+      };
+    }
+    // 共享副本状态仍由列表接口刷新；个人 worktree 诊断保留本次异常返回的真实路径。
+    try {
+      rows.value = await api.listPublicAgentRepositories();
+    } catch {
+      // 保留原始拉取错误；状态刷新只是诊断增强，失败不能覆盖真正原因。
+    }
   } finally {
     pullingServerId.value = null;
   }
@@ -126,6 +170,9 @@ function preferredBranch(repository: PublicAgentRepositoryStatus, remoteBranches
 }
 
 function statusText(row: PublicAgentRepositoryStatus) {
+  if (row.status === "CONFLICT" && row.initialized) {
+    return "存在本地变更";
+  }
   if (row.initialized) {
     return "已初始化";
   }
@@ -139,6 +186,9 @@ function statusText(row: PublicAgentRepositoryStatus) {
 }
 
 function statusClass(row: PublicAgentRepositoryStatus) {
+  if (row.status === "CONFLICT") {
+    return "is-error";
+  }
   if (row.initialized) {
     return "is-ready";
   }
@@ -222,7 +272,21 @@ function newOperationId() {
               <td class="ta-opencode-config-path">{{ formatNullable(row.worktreeRootPath) }}</td>
               <td>{{ formatNullable(row.currentBranch) }}</td>
               <td class="ta-opencode-config-mono">{{ shortHash(row.commitHash) }}</td>
-              <td class="ta-opencode-config-message">{{ formatNullable(row.message) }}</td>
+              <td class="ta-opencode-config-message">
+                <div>{{ formatNullable(row.message) }}</div>
+                <small v-if="dirtyPullDiagnostics[row.linuxServerId]" class="ta-opencode-config-diagnostic">
+                  最近拉取检测到{{ dirtyPullDiagnostics[row.linuxServerId].repositoryKind === 'PERSONAL_WORKTREE'
+                    ? '当前管理员个人公共 worktree'
+                    : '公共配置仓库' }} 存在本地变更；路径：{{ dirtyPullDiagnostics[row.linuxServerId].path }}；文件：{{
+                    dirtyPullDiagnostics[row.linuxServerId].files.length > 0
+                      ? dirtyPullDiagnostics[row.linuxServerId].files.join('、')
+                      : '请在上述路径执行 git status --short'
+                  }}。
+                </small>
+                <small v-if="row.status === 'CONFLICT' && row.initialized" class="ta-opencode-config-diagnostic">
+                  这是该服务器的共享运行副本，不是个人公共 worktree。请先按上述路径核对本机修改；确认无需保留后，可放弃已跟踪修改并重新拉取。
+                </small>
+              </td>
               <td>
                 <div class="ta-opencode-config-actions">
                   <button
@@ -241,6 +305,16 @@ function newOperationId() {
                   >
                     <Loader2 v-if="pullingServerId === row.linuxServerId" class="ta-opencode-config-icon is-spin" />
                     拉取
+                  </button>
+                  <button
+                    v-if="(row.status === 'CONFLICT' && row.initialized) || dirtyPullDiagnostics[row.linuxServerId]"
+                    type="button"
+                    class="ta-opencode-config-btn is-danger"
+                    :disabled="!row.currentBranch || pullingServerId !== null"
+                    @click="discardAndPullRepository(row)"
+                  >
+                    <Loader2 v-if="pullingServerId === row.linuxServerId" class="ta-opencode-config-icon is-spin" />
+                    放弃本地变更并拉取
                   </button>
                 </div>
               </td>
@@ -318,6 +392,12 @@ function newOperationId() {
   gap: 6px;
   white-space: nowrap;
 }
+.ta-opencode-config-diagnostic {
+  display: block;
+  margin-top: 4px;
+  color: #92400e;
+  line-height: 1.45;
+}
 .ta-opencode-config-toolbar {
   padding: 12px 14px;
   border-bottom: 1px solid #e5e7eb;
@@ -351,6 +431,16 @@ function newOperationId() {
   background: #2563eb;
   border-color: #2563eb;
   color: #fff;
+}
+.ta-opencode-config-btn.is-danger {
+  border-color: #fecaca;
+  background: #fff7f7;
+  color: #b91c1c;
+}
+.ta-opencode-config-btn.is-danger:hover:not(:disabled),
+.ta-opencode-config-btn.is-danger:focus-visible:not(:disabled) {
+  border-color: #ef4444;
+  color: #991b1b;
 }
 .ta-opencode-config-icon {
   width: 14px;

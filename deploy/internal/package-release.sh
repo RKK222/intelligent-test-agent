@@ -15,6 +15,7 @@ PLATFORM="linux/amd64"
 PACKAGE_BACKEND=1
 PACKAGE_FRONTEND=1
 PACKAGE_OPENCODE_WORKER=1
+PACKAGE_MYSQL_IMAGE=1
 SAVE_TARBALL=1
 PACKAGE_ZIP=1
 OUTPUT_DIR_FROM_ENV_BEFORE_DOTENV="${TEST_AGENT_IMAGE_OUTPUT_DIR+x}"
@@ -27,6 +28,7 @@ Build enterprise internal delivery artifacts:
   - backend executable jar
   - frontend dist files and tar.gz
   - opencode-worker image and docker-loadable tar
+  - standalone MySQL 8.4 linux/amd64 image tar
 
 Options:
   --env-file <path>       Dotenv file to read. Defaults to deploy/internal/.env, then env.example.
@@ -37,7 +39,8 @@ Options:
   --backend-only          Package only the backend jar.
   --frontend-only         Package only the frontend dist.
   --opencode-only         Package only the opencode worker image.
-  --no-save               Build opencode image but do not export tarball.
+  --mysql-only            Package only the standalone MySQL image.
+  --no-save               Build/pull Docker images but do not export image tarballs.
   --no-zip                Do not create the complete enterprise release zip.
   -h, --help              Show this help.
 USAGE
@@ -63,18 +66,28 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_BACKEND=1
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_MYSQL_IMAGE=0
       shift
       ;;
     --frontend-only)
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=1
       PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_MYSQL_IMAGE=0
       shift
       ;;
     --opencode-only)
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=1
+      PACKAGE_MYSQL_IMAGE=0
+      shift
+      ;;
+    --mysql-only)
+      PACKAGE_BACKEND=0
+      PACKAGE_FRONTEND=0
+      PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_MYSQL_IMAGE=1
       shift
       ;;
     --no-save)
@@ -309,6 +322,23 @@ build_opencode_worker_image() {
   fi
 }
 
+package_mysql_image() {
+  local tar_path architecture
+  tar_path="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_XXL_JOB_MYSQL_IMAGE}" "${PLATFORM}")"
+  echo "Pulling ${TEST_AGENT_XXL_JOB_MYSQL_IMAGE} for ${PLATFORM}"
+  docker pull --platform "${PLATFORM}" "${TEST_AGENT_XXL_JOB_MYSQL_IMAGE}" >/dev/null
+  architecture="$(docker image inspect -f '{{.Architecture}}' "${TEST_AGENT_XXL_JOB_MYSQL_IMAGE}")"
+  [[ "${architecture}" == "amd64" ]] || {
+    echo "MySQL image architecture must be amd64, got ${architecture}" >&2
+    exit 1
+  }
+  if [[ "${SAVE_TARBALL}" -eq 1 ]]; then
+    echo "Saving ${TEST_AGENT_XXL_JOB_MYSQL_IMAGE} to ${tar_path}"
+    docker save -o "${tar_path}" "${TEST_AGENT_XXL_JOB_MYSQL_IMAGE}"
+    ls -lh "${tar_path}"
+  fi
+}
+
 package_release_zip() {
   local staging_dir="${OUTPUT_DIR}/.release-zip"
   local zip_path
@@ -330,6 +360,10 @@ package_release_zip() {
   local worker_tar
   worker_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
   [[ -f "${worker_tar}" ]] && cp -a "${worker_tar}" "${staging_dir}/dist/"
+
+  local mysql_tar
+  mysql_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_XXL_JOB_MYSQL_IMAGE}" "${PLATFORM}")"
+  [[ -f "${mysql_tar}" ]] && cp -a "${mysql_tar}" "${staging_dir}/dist/"
 
   # 排除默认、当前及历史命名的 dist-* 输出目录，避免旧交付物递归进入新 zip。
   local output_dir_name
@@ -393,6 +427,7 @@ if [[ "${OUTPUT_DIR_FROM_ARG}" -eq 0 && -n "${TEST_AGENT_IMAGE_OUTPUT_DIR:-}" &&
 fi
 
 TEST_AGENT_OPENCODE_WORKER_IMAGE="${TEST_AGENT_OPENCODE_WORKER_IMAGE:-test-agent-opencode-worker:internal}"
+TEST_AGENT_XXL_JOB_MYSQL_IMAGE="${TEST_AGENT_XXL_JOB_MYSQL_IMAGE:-mysql:8.4}"
 NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}"
@@ -428,7 +463,12 @@ if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 ]]; then
   build_opencode_worker_image
 fi
 
-if [[ "${PACKAGE_ZIP}" -eq 1 && "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
+if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 ]]; then
+  require_command docker
+  package_mysql_image
+fi
+
+if [[ "${PACKAGE_ZIP}" -eq 1 && "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${PACKAGE_MYSQL_IMAGE}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   package_release_zip
   write_release_checksum
 fi
@@ -450,7 +490,11 @@ if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo "Target import:"
   echo "  docker load -i ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
 fi
-if [[ "${PACKAGE_ZIP}" -eq 1 && "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
+if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
+  echo "  MySQL image tar: ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_XXL_JOB_MYSQL_IMAGE}" "${PLATFORM}")"
+  echo "  MySQL target import: docker load -i ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_XXL_JOB_MYSQL_IMAGE}" "${PLATFORM}")"
+fi
+if [[ "${PACKAGE_ZIP}" -eq 1 && "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${PACKAGE_MYSQL_IMAGE}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo "  complete release zip: ${OUTPUT_DIR}/test-agent-internal-release.zip"
   echo "  release checksum: ${OUTPUT_DIR}/test-agent-internal-release.zip.sha256"
 fi

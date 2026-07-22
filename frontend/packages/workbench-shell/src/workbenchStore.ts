@@ -13,6 +13,18 @@ export type EditorTab = {
   readonly?: boolean;
   loadState?: "loading" | "loaded" | "error";
   loadError?: string;
+  /** 超过整文件读取阈值后使用的渐进只读预览；可继续加载到 EOF，不代表文件被截断。 */
+  progressivePreview?: {
+    size: number;
+    warningThresholdBytes: number;
+    loadedBytes: number;
+    nextOffset: number;
+    lastModifiedMillis: number;
+    eof: boolean;
+    loading: boolean;
+    loadingAll: boolean;
+    loadError?: string;
+  };
   /** 已取得可用文件快照（包含合法空文件），用于区分首次加载与后台刷新。 */
   hasLoadedSnapshot?: boolean;
   /** 用户内容修订代次；保存或后台同步不递增，用于识别读取期间发生过的编辑。 */

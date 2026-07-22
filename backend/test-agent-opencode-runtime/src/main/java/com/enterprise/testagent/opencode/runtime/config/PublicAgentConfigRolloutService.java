@@ -8,8 +8,10 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.id.RuntimeIdGenerator;
 import com.enterprise.testagent.common.pagination.PageRequest;
-import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
 import com.enterprise.testagent.domain.configuration.AgentConfigRolloutScope;
+import com.enterprise.testagent.domain.configuration.AgentConfigRolloutWorktreeClaim;
+import com.enterprise.testagent.domain.configuration.AgentConfigRolloutWorktreePending;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutCoordinator;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutPreparation;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutRepository;
@@ -143,11 +145,17 @@ public class PublicAgentConfigRolloutService
             String localLinuxServerId,
             String initiatedByUserId,
             String traceId) {
-        repository.findActiveRolloutId().ifPresent(active -> {
+        repository.findActiveRolloutId(scope, scopeKey).ifPresent(active -> {
+            String message = scope == AgentConfigRolloutScope.PUBLIC
+                    ? "已有公共 Agent/Skill 配置发布正在排空"
+                    : "当前应用版本已有 Agent/Skill 配置发布正在收敛";
             throw new PlatformException(
                     ErrorCode.CONFLICT,
-                    "已有共享 Agent/Skill 配置发布正在排空",
-                    Map.of("rolloutId", active));
+                    message,
+                    Map.of(
+                            "rolloutId", active,
+                            "configScope", scope.name(),
+                            "scopeKey", scopeKey == null ? "PUBLIC" : scopeKey));
         });
         String rolloutId = RuntimeIdGenerator.publicAgentConfigRolloutId();
         Instant now = Instant.now();
@@ -258,10 +266,26 @@ public class PublicAgentConfigRolloutService
     public void markServerSyncedForUsers(
             PublicAgentConfigRolloutSyncRequest request,
             Set<String> targetUserIds) {
+        markServerSyncedForUsers(request, targetUserIds, List.of());
+    }
+
+    @Override
+    @Transactional
+    public void markServerSyncedForUsers(
+            PublicAgentConfigRolloutSyncRequest request,
+            Set<String> targetUserIds,
+            List<AgentConfigRolloutWorktreePending> pendingWorktrees) {
         if (!renewServerSync(request)) {
             return;
         }
         Instant now = Instant.now();
+        repository.savePendingApplicationWorktrees(
+                request.rolloutId(),
+                backendInstanceIdentity.linuxServerId(),
+                request.commitHash(),
+                request.traceId(),
+                pendingWorktrees,
+                now);
         Set<String> normalizedUserIds = targetUserIds == null
                 ? Set.of()
                 : targetUserIds.stream()
@@ -278,6 +302,50 @@ public class PublicAgentConfigRolloutService
                     normalizedUserIds);
         }
         markServerSyncedAfterSnapshot(request, now);
+    }
+
+    @Override
+    public Optional<AgentConfigRolloutWorktreeClaim> claimPendingApplicationWorktree(String linuxServerId) {
+        Instant now = Instant.now();
+        return repository.claimPendingApplicationWorktree(
+                linuxServerId, now, now.plus(SERVER_SYNC_LEASE));
+    }
+
+    @Override
+    public void markApplicationWorktreeRetry(AgentConfigRolloutWorktreeClaim claim, String reason) {
+        Instant now = Instant.now();
+        int retryCount = claim.retryCount() + 1;
+        repository.markApplicationWorktreeRetry(
+                claim,
+                retryCount,
+                now.plus(retryDelay.multipliedBy(Math.min(retryCount, 6))),
+                safeError(reason),
+                now);
+    }
+
+    @Override
+    @Transactional
+    public void markApplicationWorktreeSynchronized(AgentConfigRolloutWorktreeClaim claim) {
+        Instant now = Instant.now();
+        if (!repository.markApplicationWorktreeSynchronized(claim, now)) {
+            return;
+        }
+        // 同一用户可能有多个个人 worktree；全部包含目标提交后才登记一次旧进程 dispose，避免提前清缓存。
+        if (!repository.hasIncompleteApplicationWorktrees(
+                claim.rolloutId(), claim.linuxServerId(), claim.userId())) {
+            snapshotServerTargets(
+                    claim.rolloutId(),
+                    AgentConfigRolloutScope.APPLICATION,
+                    claim.linuxServerId(),
+                    claim.traceId(),
+                    now,
+                    Set.of(claim.userId()));
+        }
+    }
+
+    @Override
+    public void abandonApplicationWorktree(AgentConfigRolloutWorktreeClaim claim, String reason) {
+        repository.abandonApplicationWorktree(claim, safeError(reason), Instant.now());
     }
 
     private void markServerSyncedAfterSnapshot(PublicAgentConfigRolloutSyncRequest request, Instant now) {

@@ -34,7 +34,9 @@ public class SessionRuntimeStateApplicationService {
             "run.cancelled",
             "question.asked",
             "question.replied",
-            "question.rejected");
+            "question.rejected",
+            "permission.asked",
+            "permission.replied");
 
     private final SessionRuntimeStateRepository repository;
     private final RunEventLiveBus runEventLiveBus;
@@ -95,7 +97,7 @@ public class SessionRuntimeStateApplicationService {
                         manifest.sessionId(),
                         manifest.runId(),
                         manifest.status(),
-                        "QUESTION".equalsIgnoreCase(manifest.attention()) ? SessionRuntimeAttention.QUESTION : null,
+                        attention(manifest.attention()),
                         manifest.attentionEventId(),
                         manifest.attentionAt(),
                         manifest.updatedAt()))
@@ -103,15 +105,31 @@ public class SessionRuntimeStateApplicationService {
         int questionCount = (int) sessions.stream()
                 .filter(state -> state.attention() == SessionRuntimeAttention.QUESTION)
                 .count();
+        int permissionCount = (int) sessions.stream()
+                .filter(state -> state.attention() == SessionRuntimeAttention.PERMISSION)
+                .count();
         java.time.Instant generatedAt = manifests.stream()
                 .map(RunRuntimeManifest::updatedAt)
                 .max(java.time.Instant::compareTo)
                 .orElseGet(java.time.Instant::now);
-        return new SessionRuntimeStateSummary(sessions.size(), questionCount, sessions, generatedAt);
+        return new SessionRuntimeStateSummary(sessions.size(), questionCount, permissionCount, sessions, generatedAt);
     }
 
     /**
-     * 返回当前用户运行态 SSE 数据流：首帧立即输出，后续由 run/question 事件和低频轮询刷新。
+     * Redis manifest 可能来自旧版本或空运行态；未知 attention 保持为空，避免影响历史会话摘要。
+     */
+    private SessionRuntimeAttention attention(String value) {
+        if ("QUESTION".equalsIgnoreCase(value)) {
+            return SessionRuntimeAttention.QUESTION;
+        }
+        if ("PERMISSION".equalsIgnoreCase(value)) {
+            return SessionRuntimeAttention.PERMISSION;
+        }
+        return null;
+    }
+
+    /**
+     * 返回当前用户运行态 SSE 数据流：首帧立即输出，后续由 run、question、permission 事件和低频轮询刷新。
      */
     public Flux<SessionRuntimeStateSummary> stream(UserId userId) {
         Objects.requireNonNull(userId, "userId must not be null");
@@ -137,7 +155,9 @@ public class SessionRuntimeStateApplicationService {
         StringBuilder builder = new StringBuilder()
                 .append(summary.runningCount())
                 .append('|')
-                .append(summary.questionCount());
+                .append(summary.questionCount())
+                .append('|')
+                .append(summary.permissionCount());
         for (SessionRuntimeState state : summary.sessions()) {
             builder.append('|')
                     .append(state.sessionId().value())

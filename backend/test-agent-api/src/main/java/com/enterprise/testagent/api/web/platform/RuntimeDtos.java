@@ -454,6 +454,7 @@ final class RuntimeDtos {
     record SessionRuntimeStateResponse(
             int runningCount,
             int questionCount,
+            int permissionCount,
             List<SessionRuntimeStateItemResponse> sessions,
             Instant generatedAt) {
 
@@ -461,6 +462,7 @@ final class RuntimeDtos {
             return new SessionRuntimeStateResponse(
                     summary.runningCount(),
                     summary.questionCount(),
+                    summary.permissionCount(),
                     summary.sessions().stream()
                             .map(SessionRuntimeStateItemResponse::from)
                             .toList(),
