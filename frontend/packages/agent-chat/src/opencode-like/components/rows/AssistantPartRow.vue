@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { MessagePart, SubagentSession } from "@test-agent/shared-types";
+import type { MessagePart, PermissionRequest, SubagentSession } from "@test-agent/shared-types";
 
 export type AssistantPartRowProps = {
   part: MessagePart;
@@ -7,6 +7,7 @@ export type AssistantPartRowProps = {
   previousAssistantPart?: boolean;
   subagentsBySessionId?: Record<string, SubagentSession>;
   subagentByTaskPartId?: Record<string, string>;
+  permissions?: PermissionRequest[];
 };
 </script>
 
@@ -39,6 +40,7 @@ const emit = defineEmits<{ selectSubagent: [sessionId: string] }>();
       :part="part"
       :subagents-by-session-id="subagentsBySessionId"
       :subagent-by-task-part-id="subagentByTaskPartId"
+      :permissions="permissions"
       @select-subagent="(sessionId) => emit('selectSubagent', sessionId)"
     />
     <FilePartView v-else-if="part.type === 'file'" :part="part" />

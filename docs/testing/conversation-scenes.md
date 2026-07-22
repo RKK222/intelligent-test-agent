@@ -9,12 +9,14 @@
 | 直接对话 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`direct run projects remote question and permission to the platform session and replies` | 直接 Run、root remote session 映射、question、permission、回复 |
 | 历史运行中继续 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`switching to a running history maps its remote question event and allows reply` | 历史 Session、运行中 SSE、历史 question、继续回复 |
 | 历史已结束 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`switching history restores assistant documents and the file changes summary` | 历史消息、assistant 文档、Diff、结束态 |
-| 历史 permission | `frontend/apps/agent-web/tests/workbench.spec.ts`：`switching history restores a pending native permission dock and allows reply` | 历史 pending 权限弹框、详情、once 回复 |
+| 历史 permission | `frontend/apps/agent-web/tests/workbench.spec.ts`：`switching history restores a pending native permission dock and allows reply` | 历史 pending 权限弹框、完整 `patterns[]`、中文原生说明、“允许一次”回复 |
+| 历史 child permission | `frontend/apps/agent-web/tests/workbench.spec.ts`：`history root permission snapshot keeps child permission attention from the session tree` | 根 permission 快照只替换 root scope、child pending 保留、目标 task “进行中”前铃铛、并行 child 隔离 |
 | Todo | `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`：`renders todos above the composer and expands the task list on demand` | Todo 展示、展开详情、composer 位置 |
 | 跨 Run Todo 隔离 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`a superseded title-pending run cannot restore its todos into the next turn` | 两轮 Run、旧 `todo.updated/todowrite/snapshot reset` 迟到、标题同步、4/9 项分轮展示 |
 | 后端跨 Run 回放隔离 | `backend/test-agent-opencode-runtime/.../RunMessageRecoveryServiceTest.java`、`RunSessionMessageSnapshotServiceTest.java` | 两轮 OpenCode 消息、旧 `todowrite`、dispatch 锚点跨页/冲突/未到达、root/child、终态 `runId` 不覆盖、Session 全量历史 |
 | 后端多轮 dispatch 顺序 | `OpencodeMessageIdGeneratorTest.java`、`AgentRuntimeRegistryTest.java`、`OpencodeAgentRuntimeTest.java`、`RunApplicationServiceTest.java` | 真实随机 UUID 故障样本、OpenCode 时序 ID、同毫秒/时钟回退/并发、观测包装委托、Legacy/Redis 锚点复用、显式旧 ID 兼容 |
-| permission | `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`：`renders a pending permission and emits every native permission decision` | once/always/reject 三种决策 |
+| permission | `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`：`renders a pending permission and emits every native permission decision` | OpenCode 1.17.8 中文标题/说明、完整路径、未知类型与旧字段兼容、拒绝/始终允许/允许一次三种决策且不展示内部类型或 request id |
+| permission 后端摘要 | `RedisRunRuntimeStoreIntegrationTest`、`MyBatisSessionRuntimeStateRepositoryIntegrationTest`、`MyBatisSessionRuntimeStatePostgresqlIntegrationTest` | Redis question/permission 同 ID 隔离、并发回退、详情容量与终态清理；legacy H2/真实 PostgreSQL 顶层请求 ID、Run seq 因果和 occurredAt 回拨 |
 | question | `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`：`renders a single-choice question with option descriptions and emits selected labels` | 单选、多选、选项描述、提交/拒绝 |
 | subagent | `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`：`keeps native pending task visible and converts it to a clickable subagent card` | task part、child Session、子 Agent 卡片和点击进入 |
 | 历史 subagent | `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`：`makes historical subagent cards clickable from session tree snapshot indexes` | 历史树恢复、子 Agent 导航、子时间线 |
@@ -33,7 +35,7 @@ corepack pnpm test --run \
   packages/agent-chat/tests/runtime-reducer.test.ts \
   packages/agent-chat/tests/opencode-timeline.test.ts
 corepack pnpm exec playwright test apps/agent-web/tests/workbench.spec.ts \
-  --grep 'direct run projects|running history maps|pending native question|pending native permission|superseded title-pending run|pet side-question'
+  --grep 'direct run projects|running history maps|pending native question|pending native permission|history root permission snapshot|superseded title-pending run|pet side-question'
 ```
 
 ## 真实 OpenCode 三轮回复验收

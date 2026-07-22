@@ -176,6 +176,7 @@ import {
   retryExpirationDecision,
   projectRootInteractionSession,
   reconcileCurrentTurnTodos,
+  replaceRootSessionInteractions,
   isSupersededInteractionAsk,
   runEventProjectionMode,
   runEventProjection,
@@ -1533,6 +1534,12 @@ const sessionsItems = computed(() => sessionHistoryItems.value);
 const runtimeStatesBySessionId = computed<Record<string, SessionRuntimeState>>(() => {
   const entries = sessionRuntimeState.value?.sessions ?? [];
   return Object.fromEntries(entries.map((item) => [item.sessionId, item]));
+});
+const sessionPermissionAttentionCount = computed(() => {
+  const summary = sessionRuntimeState.value;
+  if (!summary) return 0;
+  return summary.permissionCount
+    ?? summary.sessions.filter((item) => item.attention === "PERMISSION").length;
 });
 const sessionHistoryTotal = computed(() => sessionsQuery.data.value?.total ?? sessionHistoryItems.value.length);
 const sessionHistoryHasMore = computed(() => sessionHistoryTotal.value > sessionHistoryItems.value.length);
@@ -6842,12 +6849,8 @@ async function switchSession(sessionId: string) {
     if (livePermissions !== null || liveQuestions !== null) {
       chatState.value = {
         ...chatState.value,
-        permissions: livePermissions === null
-          ? chatState.value.permissions
-          : livePermissions.filter((item) => item.sessionId === sessionId),
-        questions: liveQuestions === null
-          ? chatState.value.questions
-          : liveQuestions.filter((item) => item.sessionId === sessionId),
+        permissions: replaceRootSessionInteractions(chatState.value.permissions, livePermissions, sessionId),
+        questions: replaceRootSessionInteractions(chatState.value.questions, liveQuestions, sessionId),
       };
     }
     if (livePermissions !== null || liveQuestions !== null) {
@@ -6872,12 +6875,8 @@ async function switchSession(sessionId: string) {
       if (livePermissions !== null || liveQuestions !== null || liveTodos !== null) {
         chatState.value = {
           ...chatState.value,
-          permissions: livePermissions === null
-            ? chatState.value.permissions
-            : livePermissions.filter((item) => item.sessionId === sessionId),
-          questions: liveQuestions === null
-            ? chatState.value.questions
-            : liveQuestions.filter((item) => item.sessionId === sessionId),
+          permissions: replaceRootSessionInteractions(chatState.value.permissions, livePermissions, sessionId),
+          questions: replaceRootSessionInteractions(chatState.value.questions, liveQuestions, sessionId),
           todos: chatState.value.todos
         };
       }
@@ -7055,6 +7054,7 @@ function rememberCurrentRunAsBackgroundRuntimeState() {
   const nextSummary: SessionRuntimeStateSummary = {
     runningCount: nextSessions.length,
     questionCount: nextSessions.filter((item) => item.attention === "QUESTION").length,
+    permissionCount: nextSessions.filter((item) => item.attention === "PERMISSION").length,
     sessions: nextSessions,
     generatedAt: new Date().toISOString()
   };
@@ -7542,6 +7542,7 @@ async function handleLogout() {
           :history-submit-blocked="Boolean(historySwitchingSessionId)"
           :history-running-count="sessionRuntimeState?.runningCount ?? 0"
           :history-question-count="sessionRuntimeState?.questionCount ?? 0"
+          :history-permission-count="sessionPermissionAttentionCount"
           :readonly-reason="readonlySessionReason"
           :process-status="opencodeProcessStatus"
           process-status-placement="pet"

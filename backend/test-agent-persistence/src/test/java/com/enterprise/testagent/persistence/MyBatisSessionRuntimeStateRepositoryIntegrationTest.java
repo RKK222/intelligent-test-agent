@@ -88,6 +88,30 @@ class MyBatisSessionRuntimeStateRepositoryIntegrationTest {
     }
 
     @Test
+    void pendingPermissionWithNoMatchingReplyProducesPermissionAttention() {
+        seedPermissionAttentionRuns();
+
+        var summary = repository.findUserRuntimeState(CURRENT_USER);
+
+        assertThat(summary.permissionCount()).isEqualTo(1);
+        assertThat(summary.sessions())
+                .filteredOn(state -> state.sessionId().value().equals("ses_runtime_permission_pending"))
+                .singleElement()
+                .satisfies(state -> {
+                    assertThat(String.valueOf(state.attention())).isEqualTo("PERMISSION");
+                    assertThat(state.attentionEventId()).isEqualTo("evt_runtime_permission_asked");
+                });
+        assertThat(summary.sessions())
+                .filteredOn(state -> state.sessionId().value().equals("ses_runtime_permission_resolved"))
+                .singleElement()
+                .satisfies(state -> assertThat(state.attention()).isNull());
+        assertThat(summary.sessions())
+                .filteredOn(state -> state.sessionId().value().equals("ses_runtime_permission_legacy_resolved"))
+                .singleElement()
+                .satisfies(state -> assertThat(state.attention()).isNull());
+    }
+
+    @Test
     void runtimeStateExcludesInternalSideQuestionSessionsAndRuns() {
         var summary = repository.findUserRuntimeState(CURRENT_USER);
 
@@ -212,11 +236,11 @@ class MyBatisSessionRuntimeStateRepositoryIntegrationTest {
                 insert into run_events(event_id, run_id, seq, type, trace_id, occurred_at, payload_json)
                 values
                     ('evt_runtime_question_asked', 'run_runtime_question', 1, 'question.asked',
-                     'trace_runtime', :questionAsked, '{}'),
+                     'trace_runtime', :questionAsked, '{"id":"question_pending","options":[{"id":"nested_question"}]}'),
                     ('evt_runtime_resolved_asked', 'run_runtime_resolved', 1, 'question.asked',
-                     'trace_runtime', :resolvedAsked, '{}'),
+                     'trace_runtime', :resolvedAsked, '{"id":"question_resolved","options":[{"id":"nested_question_resolved"}]}'),
                     ('evt_runtime_resolved_reply', 'run_runtime_resolved', 2, 'question.replied',
-                     'trace_runtime', :resolvedReply, '{}'),
+                     'trace_runtime', :resolvedReply, '{"requestID":"question_resolved"}'),
                     ('evt_runtime_terminal_asked', 'run_runtime_terminal', 1, 'question.asked',
                      'trace_runtime', :terminalAsked, '{}')
                 """)
@@ -224,6 +248,66 @@ class MyBatisSessionRuntimeStateRepositoryIntegrationTest {
                 .param("resolvedAsked", NOW.plusSeconds(31))
                 .param("resolvedReply", NOW.plusSeconds(33))
                 .param("terminalAsked", NOW.plusSeconds(41))
+                .update();
+    }
+
+    private void seedPermissionAttentionRuns() {
+        jdbcClient.sql("""
+                insert into sessions(
+                    session_id, workspace_id, title, status, trace_id, created_at, updated_at, created_by_user_id)
+                values
+                    ('ses_runtime_permission_pending', 'wrk_runtime', 'permission pending', 'ACTIVE', 'trace_runtime',
+                     :now, :pendingUpdated, 'usr_runtime_current'),
+                    ('ses_runtime_permission_resolved', 'wrk_runtime', 'permission resolved', 'ACTIVE', 'trace_runtime',
+                     :now, :resolvedUpdated, 'usr_runtime_current'),
+                    ('ses_runtime_permission_legacy_resolved', 'wrk_runtime', 'legacy permission resolved', 'ACTIVE',
+                     'trace_runtime', :now, :legacyResolvedUpdated, 'usr_runtime_current')
+                """)
+                .param("now", NOW)
+                .param("pendingUpdated", NOW.plusSeconds(70))
+                .param("resolvedUpdated", NOW.plusSeconds(80))
+                .param("legacyResolvedUpdated", NOW.plusSeconds(90))
+                .update();
+        // legacy asked/replied 故意使用不同数量的空格，避免错误实现因“相同脏值”偶然收敛。
+        jdbcClient.sql("""
+                insert into runs(run_id, session_id, workspace_id, status, trace_id, created_at, updated_at, triggered_by_user_id)
+                values
+                    ('run_runtime_permission_pending', 'ses_runtime_permission_pending', 'wrk_runtime', 'RUNNING',
+                     'trace_runtime', :now, :pendingUpdated, 'usr_runtime_current'),
+                    ('run_runtime_permission_resolved', 'ses_runtime_permission_resolved', 'wrk_runtime', 'RUNNING',
+                     'trace_runtime', :now, :resolvedUpdated, 'usr_runtime_current'),
+                    ('run_runtime_permission_legacy_resolved', 'ses_runtime_permission_legacy_resolved', 'wrk_runtime',
+                     'RUNNING', 'trace_runtime', :now, :legacyResolvedUpdated, 'usr_runtime_current')
+                """)
+                .param("now", NOW)
+                .param("pendingUpdated", NOW.plusSeconds(70))
+                .param("resolvedUpdated", NOW.plusSeconds(80))
+                .param("legacyResolvedUpdated", NOW.plusSeconds(90))
+                .update();
+        jdbcClient.sql("""
+                insert into run_events(event_id, run_id, seq, type, trace_id, occurred_at, payload_json)
+                values
+                    ('evt_runtime_permission_asked', 'run_runtime_permission_pending', 1, 'permission.asked',
+                     'trace_runtime', :pendingAsked, '{"id":"permission_pending","options":[{"id":"nested_permission"}]}'),
+                    ('evt_runtime_permission_unrelated_reply', 'run_runtime_permission_pending', 2, 'permission.replied',
+                     'trace_runtime', :pendingUnrelatedReply, '{"requestID":"permission_other"}'),
+                    ('evt_runtime_permission_resolved_asked', 'run_runtime_permission_resolved', 1, 'permission.asked',
+                     'trace_runtime', :resolvedAsked, '{"id":"permission_resolved","options":[{"id":"nested_permission_resolved"}]}'),
+                    ('evt_runtime_permission_replied', 'run_runtime_permission_resolved', 2, 'permission.replied',
+                     'trace_runtime', :resolvedReply,
+                     '{"sessionID":"ses_remote_permission","requestID":"permission_resolved","reply":"once"}'),
+                    ('evt_runtime_permission_legacy_asked', 'run_runtime_permission_legacy_resolved', 1,
+                     'permission.asked', 'trace_runtime', :legacyResolvedAsked, '{"id":"   "}'),
+                    ('evt_runtime_permission_legacy_replied', 'run_runtime_permission_legacy_resolved', 2,
+                     'permission.replied', 'trace_runtime', :legacyResolvedReply, '{"requestID":"  "}')
+                """)
+                .param("pendingAsked", NOW.plusSeconds(71))
+                .param("pendingUnrelatedReply", NOW.plusSeconds(72))
+                .param("resolvedAsked", NOW.plusSeconds(81))
+                // seq 才是同一 Run 的因果主序；模拟回复映射时间回拨且 requestID 不是首字段。
+                .param("resolvedReply", NOW.plusSeconds(80))
+                .param("legacyResolvedAsked", NOW.plusSeconds(91))
+                .param("legacyResolvedReply", NOW.plusSeconds(92))
                 .update();
     }
 

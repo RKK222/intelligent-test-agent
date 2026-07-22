@@ -1343,15 +1343,29 @@ export function normalizeMessagePart(raw: Record<string, unknown>, fallbackPartI
 
 function toPermissionRequest(payload: Record<string, unknown>, event: RunEvent): PermissionRequest {
   const requestId = text(payload.requestId) ?? text(payload.requestID) ?? text(payload.id) ?? `permission-${event.seq}`;
+  const patterns = permissionPatterns(payload.patterns, payload.pattern);
   return {
     requestId,
     sessionId: text(payload.sessionId) ?? text(payload.sessionID) ?? "",
     type: text(payload.type) ?? text(payload.permission) ?? text(payload.action) ?? "permission",
     title: text(payload.title),
-    description: text(payload.description) ?? text(payload.pattern),
+    description: text(payload.description),
+    ...(patterns.length > 0 ? { patterns } : {}),
     pattern: text(payload.pattern),
     createdAt: text(payload.createdAt) ?? event.occurredAt
   };
+}
+
+function permissionPatterns(value: unknown, fallback: unknown): string[] {
+  const source = Array.isArray(value) ? value : [fallback];
+  const seen = new Set<string>();
+  return source.reduce<string[]>((patterns, item) => {
+    const pattern = text(item)?.trim();
+    if (!pattern || seen.has(pattern)) return patterns;
+    seen.add(pattern);
+    patterns.push(pattern);
+    return patterns;
+  }, []);
 }
 
 function toQuestionRequest(payload: Record<string, unknown>, event: RunEvent): QuestionRequest {

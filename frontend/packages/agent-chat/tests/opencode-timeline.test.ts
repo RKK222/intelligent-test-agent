@@ -743,6 +743,56 @@ describe("OpencodeTimeline", () => {
     expect(getByText("Explore frontend structure")).toBeTruthy();
   });
 
+  it("marks only the child session with a pending permission and clears the bell after reply", async () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "并行分析前后端结构"),
+        assistantMessage("msg_assistant_1", [
+          { ...toolPart("prt_task_backend", "task", { description: "Explore backend" }), status: "running" },
+          { ...toolPart("prt_task_frontend", "task", { description: "Explore frontend" }), status: "running" }
+        ])
+      ],
+      subagentsBySessionId: {
+        ses_backend: {
+          sessionId: "ses_backend",
+          taskPartId: "prt_task_backend",
+          agentName: "Explore",
+          title: "Explore backend",
+          status: "running",
+          updatedAt: "2026-07-03T00:00:00Z"
+        },
+        ses_frontend: {
+          sessionId: "ses_frontend",
+          taskPartId: "prt_task_frontend",
+          agentName: "Explore",
+          title: "Explore frontend",
+          status: "running",
+          updatedAt: "2026-07-03T00:00:00Z"
+        }
+      },
+      subagentByTaskPartId: {
+        prt_task_backend: "ses_backend",
+        prt_task_frontend: "ses_frontend"
+      },
+      permissions: [{
+        requestId: "perm_frontend",
+        sessionId: "ses_frontend",
+        type: "read",
+        pattern: "frontend/**",
+        createdAt: "2026-07-03T00:00:01Z"
+      }]
+    } as any);
+
+    const rendered = render(OpencodeTimeline, { props: { state } });
+    const cards = rendered.container.querySelectorAll(".oc-subagent-card");
+    expect(within(cards[0] as HTMLElement).queryByLabelText("子智能体有待处理权限")).toBeNull();
+    expect(within(cards[1] as HTMLElement).getByLabelText("子智能体有待处理权限")).toBeTruthy();
+
+    await rendered.rerender({ state: { ...state, permissions: [] } });
+
+    expect(rendered.container.querySelector(".oc-subagent-card__attention")).toBeNull();
+  });
+
   it("renders pending native task parts as disabled agent rows", () => {
     const onSelectSubagent = vi.fn();
     const state = createOpencodeLikeState({

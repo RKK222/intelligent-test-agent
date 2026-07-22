@@ -49,11 +49,30 @@ class SessionRuntimeStateControllerTest {
                 .jsonPath("$.traceId").isEqualTo("trace_1234567890abcdef")
                 .jsonPath("$.data.runningCount").isEqualTo(1)
                 .jsonPath("$.data.questionCount").isEqualTo(1)
+                .jsonPath("$.data.permissionCount").isEqualTo(0)
                 .jsonPath("$.data.sessions[0].sessionId").isEqualTo("ses_runtime_question")
                 .jsonPath("$.data.sessions[0].runId").isEqualTo("run_runtime_question")
                 .jsonPath("$.data.sessions[0].runStatus").isEqualTo("RUNNING")
                 .jsonPath("$.data.sessions[0].attention").isEqualTo("QUESTION")
                 .jsonPath("$.data.sessions[0].attentionEventId").isEqualTo("evt_runtime_question");
+    }
+
+    @Test
+    void returnsPermissionAttentionAndCount() {
+        SessionRuntimeStateApplicationService service =
+                org.mockito.Mockito.mock(SessionRuntimeStateApplicationService.class);
+        when(service.snapshot(USER_ID)).thenReturn(permissionSummary());
+        WebTestClient client = authenticatedClient(service);
+
+        client.get()
+                .uri("/api/internal/platform/opencode-runtime/sessions/runtime-state")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.questionCount").isEqualTo(0)
+                .jsonPath("$.data.permissionCount").isEqualTo(1)
+                .jsonPath("$.data.sessions[0].attention").isEqualTo("PERMISSION")
+                .jsonPath("$.data.sessions[0].attentionEventId").isEqualTo("evt_runtime_permission");
     }
 
     @Test
@@ -134,6 +153,22 @@ class SessionRuntimeStateControllerTest {
                         questionCount > 0 ? "evt_runtime_question" : null,
                         questionCount > 0 ? NOW : null,
                         NOW));
-        return new SessionRuntimeStateSummary(runningCount, questionCount, sessions, NOW);
+        return new SessionRuntimeStateSummary(runningCount, questionCount, 0, sessions, NOW);
+    }
+
+    private static SessionRuntimeStateSummary permissionSummary() {
+        return new SessionRuntimeStateSummary(
+                1,
+                0,
+                1,
+                List.of(new SessionRuntimeState(
+                        new SessionId("ses_runtime_permission"),
+                        new RunId("run_runtime_permission"),
+                        RunStatus.RUNNING,
+                        SessionRuntimeAttention.PERMISSION,
+                        "evt_runtime_permission",
+                        NOW,
+                        NOW)),
+                NOW);
     }
 }

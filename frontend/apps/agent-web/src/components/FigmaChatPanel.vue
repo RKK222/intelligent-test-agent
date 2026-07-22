@@ -52,7 +52,13 @@ import type {
 import aiHeaderUrl from '../assets/figma/ai-header.svg'
 import planLoadingUrl from '../assets/figma/plan-loadding.gif'
 import panelCloseUrl from '../assets/figma/panel-close.svg'
-import { MarkdownView, OpencodeTimeline, createOpencodeLikeState, type OpencodeLikeRuntimeStatus } from '@test-agent/agent-chat'
+import {
+  MarkdownView,
+  OpencodeTimeline,
+  createOpencodeLikeState,
+  permissionPresentation,
+  type OpencodeLikeRuntimeStatus,
+} from '@test-agent/agent-chat'
 import ChatContextAttachmentList from './ChatContextAttachmentList.vue'
 import { copyTextToClipboard, Spinner } from '@test-agent/ui-kit'
 import type { ChatContextItem } from '../stores/chatContextStore'
@@ -650,6 +656,7 @@ const props =
       runId?: string
       runStatus?: string
       pendingQuestion?: boolean
+      pendingAttention?: boolean
       attentionEventId?: string
       attentionAt?: string
       sourceType?: string
@@ -658,6 +665,8 @@ const props =
     historyRunningCount?: number
     /** 当前用户历史中存在待回答 question 的会话数。 */
     historyQuestionCount?: number
+    /** 当前用户历史中存在待处理 permission 的会话数。 */
+    historyPermissionCount?: number
     /** 受控历史搜索词，由父组件负责远端查询。 */
     historySearch?: string
     /** 当前搜索条件下的历史总数。 */
@@ -2162,6 +2171,10 @@ const visiblePermissions = computed(() => {
   const sessionId = interactionSessionId.value
   return sessionId ? props.permissions.filter((item) => item.sessionId === sessionId) : props.permissions
 })
+const visiblePermissionCards = computed(() => visiblePermissions.value.map((request) => ({
+  request,
+  presentation: permissionPresentation(request),
+})))
 const visibleQuestions = computed(() => {
   const sessionId = interactionSessionId.value
   return sessionId ? props.questions.filter((item) => item.sessionId === sessionId) : props.questions
@@ -2781,8 +2794,13 @@ const visibleHistory = computed(() => props.history || [])
 const historyTotalCount = computed(() => props.historyTotal ?? visibleHistory.value.length)
 const visibleHistoryRunningCount = computed(() => visibleHistory.value.filter((item) => item.runtimeState === 'running').length)
 const visibleHistoryQuestionCount = computed(() => visibleHistory.value.filter((item) => item.pendingQuestion).length)
+const visibleHistoryPermissionCount = computed(() => visibleHistory.value.filter(
+  (item) => item.pendingAttention && !item.pendingQuestion
+).length)
 const historyRunningCount = computed(() => props.historyRunningCount ?? visibleHistoryRunningCount.value)
 const historyQuestionCount = computed(() => props.historyQuestionCount ?? visibleHistoryQuestionCount.value)
+const historyPermissionCount = computed(() => props.historyPermissionCount ?? visibleHistoryPermissionCount.value)
+const historyAttentionCount = computed(() => historyQuestionCount.value + historyPermissionCount.value)
 const historyDrawerPanelStyle = computed<CSSProperties>(() => {
   const placement = historyDrawerPlacement.value
   if (!placement) return {}
@@ -3351,6 +3369,7 @@ const opencodeTimelineState = computed(() =>
     messageScopesById: props.messageScopesById,
     subagentsBySessionId: props.subagentsBySessionId,
     subagentByTaskPartId: props.subagentByTaskPartId,
+    permissions: props.permissions,
     activeSubagentSessionId: activeSubagentSessionId.value,
   })
 )
@@ -4063,7 +4082,7 @@ function onCompositionEnd() {
           </span>
           <span>会话列表</span>
           <Bell
-            v-if="historyQuestionCount > 0"
+            v-if="historyAttentionCount > 0"
             :size="13"
             class="figma-chat-history-alert-bell"
           />
@@ -5047,22 +5066,28 @@ function onCompositionEnd() {
 
     <!-- 作废说明：运行中旧任务面板已由 OpencodeTimeline 的工具/事件行取代，避免两套来源显示不一致。 -->
     <section
-      v-if="visiblePermissions.length || visibleQuestions.length"
+      v-if="visiblePermissionCards.length || visibleQuestions.length"
       class="figma-chat-question-dock"
     >
       <div
-        v-for="permission in visiblePermissions"
-        :key="permission.requestId"
+        v-for="permission in visiblePermissionCards"
+        :key="permission.request.requestId"
         class="figma-chat-permission-card"
       >
-        <div class="figma-chat-question-title">{{ permission.title ?? permission.type }}</div>
-        <div class="figma-chat-question-description">
-          {{ permission.description ?? permission.pattern ?? permission.requestId }}
+        <div class="figma-chat-permission-header">
+          <AlertTriangle :size="15" class="figma-chat-permission-icon" aria-hidden="true" />
+          <div class="figma-chat-question-title">{{ permission.presentation.title }}</div>
+        </div>
+        <div v-if="permission.presentation.description" class="figma-chat-question-description">
+          {{ permission.presentation.description }}
+        </div>
+        <div v-if="permission.presentation.patterns.length" class="figma-chat-permission-patterns">
+          <code v-for="pattern in permission.presentation.patterns" :key="pattern">{{ pattern }}</code>
         </div>
         <div class="figma-chat-question-actions">
-          <button type="button" class="figma-chat-question-submit" @click="emit('reply-permission', permission.requestId, 'once')">一次</button>
-          <button type="button" class="figma-chat-question-submit" @click="emit('reply-permission', permission.requestId, 'always')">始终</button>
-          <button type="button" class="figma-chat-question-reject" @click="emit('reply-permission', permission.requestId, 'reject')">拒绝</button>
+          <button type="button" class="figma-chat-question-reject" @click="emit('reply-permission', permission.request.requestId, 'reject')">拒绝</button>
+          <button type="button" class="figma-chat-question-submit" @click="emit('reply-permission', permission.request.requestId, 'always')">始终允许</button>
+          <button type="button" class="figma-chat-question-submit" @click="emit('reply-permission', permission.request.requestId, 'once')">允许一次</button>
         </div>
       </div>
       <template v-for="item in visibleQuestions" :key="item.requestId">
@@ -5883,7 +5908,7 @@ function onCompositionEnd() {
                     class="figma-chat-history-card-completed"
                   />
                   <Bell
-                    v-if="item.pendingQuestion"
+                    v-if="item.pendingAttention || item.pendingQuestion"
                     :size="10"
                     class="figma-chat-history-card-attention"
                   />
@@ -7852,6 +7877,33 @@ function onCompositionEnd() {
 .figma-chat-permission-card {
   border-color: rgba(148, 96, 21, 0.35);
   background: rgba(148, 96, 21, 0.06);
+}
+
+.figma-chat-permission-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.figma-chat-permission-icon {
+  flex: 0 0 auto;
+  color: #946015;
+}
+
+.figma-chat-permission-patterns {
+  display: grid;
+  gap: 5px;
+}
+
+.figma-chat-permission-patterns code {
+  padding: 5px 7px;
+  border-radius: 5px;
+  background: rgba(148, 96, 21, 0.08);
+  color: var(--ta-chat-text, #262626);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .figma-chat-question-item {

@@ -563,6 +563,7 @@ describe("backend-api", () => {
     await expect(client.getSessionRuntimeState()).resolves.toMatchObject({
       runningCount: 1,
       questionCount: 1,
+      permissionCount: 0,
       sessions: [expect.objectContaining({ sessionId: "ses_1", attention: "QUESTION" })]
     });
 
@@ -1873,7 +1874,12 @@ describe("backend-api", () => {
         JSON.stringify({
           success: true,
           traceId: "trace_fixed",
-          data: [{ id: "per_history", sessionID: "ses_remote_history", permission: "edit", pattern: "src/**" }]
+          data: [{
+            id: "per_history",
+            sessionID: "ses_remote_history",
+            permission: "external_directory",
+            patterns: ["/Users/huang/.testagent/agent-opencode/references/*", " /Users/huang/.testagent/agent-opencode/references/* "]
+          }]
         }),
         { status: 200 }
       )
@@ -1881,7 +1887,30 @@ describe("backend-api", () => {
     const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
 
     await expect(client.listSessionPermissions("ses_history")).resolves.toMatchObject([
-      { requestId: "per_history", sessionId: "ses_history", type: "edit", pattern: "src/**" }
+      {
+        requestId: "per_history",
+        sessionId: "ses_history",
+        type: "external_directory",
+        patterns: ["/Users/huang/.testagent/agent-opencode/references/*"]
+      }
+    ]);
+  });
+
+  it("keeps the legacy singular permission pattern for old runtime payloads", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: [{ id: "per_legacy", permission: "edit", pattern: "src/**" }]
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.listSessionPermissions("ses_history")).resolves.toMatchObject([
+      { requestId: "per_legacy", sessionId: "ses_history", type: "edit", pattern: "src/**", patterns: ["src/**"] }
     ]);
   });
 

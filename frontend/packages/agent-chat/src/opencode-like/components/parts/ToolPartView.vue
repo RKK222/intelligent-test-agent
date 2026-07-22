@@ -1,11 +1,12 @@
 <script lang="ts">
 import type { Component } from "vue";
-import type { MessagePart, SubagentSession } from "@test-agent/shared-types";
+import type { MessagePart, PermissionRequest, SubagentSession } from "@test-agent/shared-types";
 
 export type ToolPartViewProps = {
   part: Extract<MessagePart, { type: "tool" }>;
   subagentsBySessionId?: Record<string, SubagentSession>;
   subagentByTaskPartId?: Record<string, string>;
+  permissions?: PermissionRequest[];
   nested?: boolean;
 };
 </script>
@@ -30,6 +31,7 @@ import { normalizeToolName } from "../../state/tool-registry";
 
 const props = defineProps<ToolPartViewProps>();
 const emit = defineEmits<{ selectSubagent: [sessionId: string] }>();
+const isTaskTool = computed(() => normalizeToolName(props.part) === "task");
 
 const component = computed<Component>(() => {
   const name = normalizeToolName(props.part);
@@ -86,6 +88,10 @@ const subagent = computed(() => {
     updatedAt: props.part.endedAt ?? props.part.startedAt ?? new Date(0).toISOString()
   };
 });
+const pendingPermission = computed(() => {
+  const sessionId = subagent.value?.sessionId;
+  return Boolean(sessionId && props.permissions?.some((request) => request.sessionId === sessionId));
+});
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -102,7 +108,15 @@ function displayName(value: string): string {
 </script>
 
 <template>
+  <TaskToolView
+    v-if="isTaskTool"
+    :part="part"
+    :subagent="subagent"
+    :pending-permission="pendingPermission"
+    @select-subagent="(sessionId: string) => emit('selectSubagent', sessionId)"
+  />
   <component
+    v-else
     :is="component"
     :part="part"
     :subagent="subagent"

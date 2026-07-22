@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createInitialAgentChatRuntimeState, reduceAgentChatRuntime } from "@test-agent/agent-chat";
 import type { AgentMessage, FileSearchResult, MessagePart, PromptPart, Run, RunDiffFile, RunEvent, Session, SessionMessage, SessionRuntimeState, SessionTreeMessagesResponse } from "@test-agent/shared-types";
 import * as workbenchUtils from "../src/components/workbench-utils";
 import {
@@ -303,6 +304,45 @@ describe("projectRootInteractionSession", () => {
 
     expect(projectRootInteractionSession(event, "ses_platform_root")).toBe(event);
   });
+
+  it("maps root interaction events inside a reset snapshot and preserves child sessions", () => {
+    const rootPermission = {
+      eventId: "evt_root_permission",
+      runId: "run_1",
+      seq: 9,
+      type: "permission.asked",
+      traceId: "trace_1",
+      occurredAt: "2026-07-11T08:40:51Z",
+      payload: { sessionId: "ses_remote_root", id: "per_root", permission: "read" }
+    } satisfies RunEvent;
+    const childPermission = {
+      ...rootPermission,
+      eventId: "evt_child_permission",
+      seq: 10,
+      payload: { sessionId: "ses_remote_child", id: "per_child", permission: "read", isChildSession: true }
+    } satisfies RunEvent;
+    const reset = {
+      ...rootPermission,
+      eventId: "evt_reset",
+      seq: 11,
+      type: "run.snapshot.reset",
+      payload: { snapshot: { events: [rootPermission, childPermission] } }
+    } satisfies RunEvent;
+
+    const projected = projectRootInteractionSession(reset, "ses_platform_root");
+    expect(runEventProjection(projected).events).toMatchObject([
+      { payload: { sessionId: "ses_platform_root", remoteSessionId: "ses_remote_root" } },
+      { payload: { sessionId: "ses_remote_child", isChildSession: true } }
+    ]);
+    const restored = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: projected
+    });
+    expect(restored.permissions).toMatchObject([
+      { requestId: "per_root", sessionId: "ses_platform_root" },
+      { requestId: "per_child", sessionId: "ses_remote_child" }
+    ]);
+  });
 });
 
 describe("isSupersededInteractionAsk", () => {
@@ -406,7 +446,7 @@ describe("historyItems", () => {
     expect(historyItems(null, sessions)).not.toContainEqual(expect.objectContaining({ id: "local" }));
   });
 
-  it("merges runtime state and question attention into history items", () => {
+  it("merges runtime state and every attention kind into history items", () => {
     const sessions: Session[] = [
       {
         sessionId: "ses_running",
@@ -434,20 +474,32 @@ describe("historyItems", () => {
       attentionAt: "2026-07-08T10:01:00Z",
       updatedAt: "2026-07-08T10:01:02Z"
     };
+    const permissionRuntimeState: SessionRuntimeState = {
+      sessionId: "ses_done",
+      runId: "run_2",
+      runStatus: "RUNNING",
+      attention: "PERMISSION",
+      attentionEventId: "evt_2",
+      attentionAt: "2026-07-08T10:02:00Z",
+      updatedAt: "2026-07-08T10:02:02Z"
+    };
 
-    expect(historyItems(null, sessions, { ses_running: runtimeState })).toEqual([
+    expect(historyItems(null, sessions, { ses_running: runtimeState, ses_done: permissionRuntimeState })).toEqual([
       expect.objectContaining({
         id: "ses_running",
         runtimeState: "running",
         runId: "run_1",
         runStatus: "RUNNING",
         pendingQuestion: true,
+        pendingAttention: true,
         attentionEventId: "evt_1"
       }),
       expect.objectContaining({
         id: "ses_done",
-        runtimeState: "completed",
-        pendingQuestion: false
+        runtimeState: "running",
+        pendingQuestion: false,
+        pendingAttention: true,
+        attentionEventId: "evt_2"
       })
     ]);
   });
@@ -470,7 +522,7 @@ describe("historyRuntimeBadgeCounts", () => {
           sessionId: session.sessionId,
           runId: `run_${index + 1}`,
           runStatus: "RUNNING",
-          attention: index === 0 || index === 30 ? "QUESTION" : null,
+          attention: index === 0 || index === 30 ? "QUESTION" : index === 1 ? "PERMISSION" : null,
           updatedAt: "2026-07-08T10:01:00Z"
         } satisfies SessionRuntimeState
       ])
@@ -478,8 +530,29 @@ describe("historyRuntimeBadgeCounts", () => {
 
     expect(workbenchUtils.historyRuntimeBadgeCounts(sessions, runtimeStates, 30)).toEqual({
       runningCount: 30,
-      questionCount: 1
+      questionCount: 1,
+      permissionCount: 1
     });
+  });
+});
+
+describe("replaceRootSessionInteractions", () => {
+  it("replaces only root pending interactions and keeps child interactions restored from the session tree", () => {
+    const reconcile = (workbenchUtils as unknown as Record<string, unknown>).replaceRootSessionInteractions;
+    expect(reconcile).toBeTypeOf("function");
+    if (typeof reconcile !== "function") return;
+
+    expect(reconcile(
+      [
+        { requestId: "root_stale", sessionId: "ses_root" },
+        { requestId: "child_pending", sessionId: "ses_child" }
+      ],
+      [{ requestId: "root_live", sessionId: "ses_root" }],
+      "ses_root"
+    )).toEqual([
+      { requestId: "child_pending", sessionId: "ses_child" },
+      { requestId: "root_live", sessionId: "ses_root" }
+    ]);
   });
 });
 

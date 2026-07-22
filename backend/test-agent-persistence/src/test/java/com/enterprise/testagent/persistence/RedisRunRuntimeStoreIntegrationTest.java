@@ -109,10 +109,21 @@ class RedisRunRuntimeStoreIntegrationTest {
                     manifest.runId(), RunEventType.DIFF_ACCEPTED, "trace_diff", NOW, Map.of("diffId", "diff-1")));
             assertThat(store.diffCounts(manifest.runId())).isEqualTo(new RunDiffCounts(1, 1, 0));
 
+            store.projectTransient(new RunEventDraft(
+                    manifest.runId(), RunEventType.PERMISSION_ASKED, "trace_permission_terminal", NOW,
+                    Map.of("id", "permission_terminal")));
+            assertThat(store.findManifest(manifest.runId()).orElseThrow().attention()).isEqualTo("PERMISSION");
+
             RunRuntimeManifest current = store.findManifest(manifest.runId()).orElseThrow();
-            store.updateStatus(manifest.runId(), RunStatus.SUCCEEDED, current.statusVersion(), null);
+            // 即使调用方携带旧 attention，终态也必须原子清理摘要与独立待关注索引。
+            store.updateStatus(manifest.runId(), RunStatus.SUCCEEDED, current.statusVersion(), "PERMISSION");
             long runtimeVersionBeforeLateStarted = store.replayAfter(manifest.runId(), 0, 100)
                     .snapshot().runtimeVersion();
+            assertThat(store.findManifest(manifest.runId()).orElseThrow().attention()).isNull();
+            assertThat(redis.hasKey(
+                    "test-agent:run:{" + manifest.runId().value() + "}:pending-attention")).isFalse();
+            assertThat(redis.hasKey(
+                    "test-agent:run:{" + manifest.runId().value() + "}:pending-attention:order")).isFalse();
             assertThat(store.findActiveBySession(manifest.sessionId())).isEmpty();
             assertThat(store.findActiveByUser(manifest.userId())).isEmpty();
             assertThat(store.findRecentBySession(manifest.sessionId(), 10))
@@ -406,11 +417,80 @@ class RedisRunRuntimeStoreIntegrationTest {
                     Map.of("sessionId", "remote-session-redis-runtime", "requestId", "question_2")));
             store.projectTransient(new RunEventDraft(
                     manifest.runId(), RunEventType.QUESTION_REPLIED, "trace_redis_runtime", NOW.plusSeconds(2),
-                    Map.of("sessionId", "remote-session-redis-runtime", "requestId", "question_1")));
+                    Map.of("sessionId", "remote-session-redis-runtime", "requestID", "question_1")));
             RunRuntimeManifest afterOldReply = store.findManifest(manifest.runId()).orElseThrow();
             assertThat(afterOldReply.attention()).isEqualTo("QUESTION");
             assertThat(afterOldReply.attentionEventId()).isEqualTo(
                     "evt_runtime_" + manifest.runId().value() + "_5");
+            RunRuntimeManifest permissionManifest = manifest("run_redis_permission_attention", RunStatus.RUNNING);
+            store.initialize(permissionManifest, input(permissionManifest.runId()));
+            store.projectTransient(new RunEventDraft(
+                    permissionManifest.runId(), RunEventType.PERMISSION_ASKED, "trace_redis_runtime", NOW.plusSeconds(3),
+                    Map.of("sessionId", "remote-session-redis-permission", "id", "permission_1")));
+            RunRuntimeManifest permissionAsked = store.findManifest(permissionManifest.runId()).orElseThrow();
+            assertThat(permissionAsked.attention()).isEqualTo("PERMISSION");
+            store.projectTransient(new RunEventDraft(
+                    permissionManifest.runId(), RunEventType.PERMISSION_ASKED, "trace_redis_runtime", NOW.plusSeconds(4),
+                    Map.of("sessionId", "remote-session-redis-permission-child", "id", "permission_2")));
+            store.projectTransient(new RunEventDraft(
+                    permissionManifest.runId(), RunEventType.PERMISSION_REPLIED, "trace_redis_runtime", NOW.plusSeconds(5),
+                    Map.of("sessionId", "remote-session-redis-permission-child", "requestID", "permission_2")));
+            RunRuntimeManifest firstPermissionRestored = store.findManifest(permissionManifest.runId()).orElseThrow();
+            assertThat(firstPermissionRestored.attention()).isEqualTo("PERMISSION");
+            assertThat(firstPermissionRestored.attentionEventId())
+                    .isEqualTo("evt_runtime_" + permissionManifest.runId().value() + "_1");
+            assertThat(firstPermissionRestored.attentionAt()).isEqualTo(NOW.plusSeconds(3));
+            store.projectTransient(new RunEventDraft(
+                    permissionManifest.runId(), RunEventType.PERMISSION_REPLIED, "trace_redis_runtime", NOW.plusSeconds(6),
+                    Map.of("sessionId", "remote-session-redis-permission", "requestID", "permission_1")));
+            RunRuntimeManifest permissionReplied = store.findManifest(permissionManifest.runId()).orElseThrow();
+            assertThat(permissionReplied.attention()).isNull();
+            assertThat(redis.opsForHash().keys(
+                    "test-agent:run:{" + permissionManifest.runId().value() + "}:manifest"))
+                    .noneMatch(field -> String.valueOf(field).startsWith("pendingAttention:"));
+
+            RunRuntimeManifest durablePermissionManifest = manifest(
+                    "run_redis_permission_durable", RunStatus.RUNNING);
+            store.initialize(durablePermissionManifest, input(durablePermissionManifest.runId()));
+            store.appendDurable(new RunEventDraft(
+                    durablePermissionManifest.runId(), RunEventType.PERMISSION_ASKED,
+                    "trace_redis_runtime", NOW.plusSeconds(7), Map.of("id", "durable_permission_1")));
+            store.appendDurable(new RunEventDraft(
+                    durablePermissionManifest.runId(), RunEventType.PERMISSION_ASKED,
+                    "trace_redis_runtime", NOW.plusSeconds(8), Map.of("id", "durable_permission_2")));
+            store.appendDurable(new RunEventDraft(
+                    durablePermissionManifest.runId(), RunEventType.PERMISSION_REPLIED,
+                    "trace_redis_runtime", NOW.plusSeconds(9), Map.of("requestID", "durable_permission_2")));
+            RunRuntimeManifest durablePermissionRestored = store.findManifest(
+                    durablePermissionManifest.runId()).orElseThrow();
+            assertThat(durablePermissionRestored.attention()).isEqualTo("PERMISSION");
+            assertThat(durablePermissionRestored.attentionEventId())
+                    .isEqualTo("evt_redis_redis_permission_durable_1");
+            assertThat(durablePermissionRestored.attentionAt()).isEqualTo(NOW.plusSeconds(7));
+            store.appendDurable(new RunEventDraft(
+                    durablePermissionManifest.runId(), RunEventType.PERMISSION_REPLIED,
+                    "trace_redis_runtime", NOW.plusSeconds(10), Map.of("requestID", "durable_permission_1")));
+            assertThat(store.findManifest(durablePermissionManifest.runId()).orElseThrow().attention()).isNull();
+
+            RunRuntimeManifest mixedAttentionManifest = manifest(
+                    "run_redis_mixed_attention", RunStatus.RUNNING);
+            store.initialize(mixedAttentionManifest, input(mixedAttentionManifest.runId()));
+            // 旧事件缺失请求 ID 时 question/permission 都回退为 current，仍必须按类型独立收敛。
+            store.projectTransient(new RunEventDraft(
+                    mixedAttentionManifest.runId(), RunEventType.QUESTION_ASKED,
+                    "trace_redis_runtime", NOW.plusSeconds(11), Map.of()));
+            store.projectTransient(new RunEventDraft(
+                    mixedAttentionManifest.runId(), RunEventType.PERMISSION_ASKED,
+                    "trace_redis_runtime", NOW.plusSeconds(12), Map.of()));
+            store.projectTransient(new RunEventDraft(
+                    mixedAttentionManifest.runId(), RunEventType.PERMISSION_REPLIED,
+                    "trace_redis_runtime", NOW.plusSeconds(13), Map.of()));
+            assertThat(store.findManifest(mixedAttentionManifest.runId()).orElseThrow().attention())
+                    .isEqualTo("QUESTION");
+            store.projectTransient(new RunEventDraft(
+                    mixedAttentionManifest.runId(), RunEventType.QUESTION_REPLIED,
+                    "trace_redis_runtime", NOW.plusSeconds(14), Map.of()));
+            assertThat(store.findManifest(mixedAttentionManifest.runId()).orElseThrow().attention()).isNull();
             store.appendDurable(new RunEventDraft(
                     manifest.runId(), RunEventType.RUN_CANCELLED, "trace_redis_runtime", NOW.plusSeconds(3),
                     Map.of("status", RunStatus.CANCELLED.name(), "reason", "PENDING_ASK_EXPIRED")));
@@ -419,10 +499,116 @@ class RedisRunRuntimeStoreIntegrationTest {
             assertThat(terminal.attention()).isNull();
             assertThat(terminal.attentionEventId()).isNull();
             assertThat(terminal.attentionAt()).isNull();
+            assertThat(redis.opsForHash().keys(
+                    "test-agent:run:{" + manifest.runId().value() + "}:manifest"))
+                    .noneMatch(field -> String.valueOf(field).startsWith("pendingAttention:"));
             assertThat(redis.getExpire("test-agent:run:{" + manifest.runId().value() + "}:input"))
                     .isPositive();
             assertThat(redis.getExpire("test-agent:run:active:session:{" + manifest.sessionId().value() + "}"))
                     .isPositive();
+        } finally {
+            redis.getConnectionFactory().getConnection().serverCommands().flushDb();
+            connectionFactory.destroy();
+        }
+    }
+
+    @Test
+    void boundsPendingAttentionByTypeCountAndDetailBudget() throws Exception {
+        String configuredPort = System.getProperty("test.redis.port");
+        Assumptions.assumeTrue(configuredPort != null && !configuredPort.isBlank());
+        RedisStandaloneConfiguration configuration = new RedisStandaloneConfiguration(
+                "127.0.0.1", Integer.parseInt(configuredPort));
+        LettuceConnectionFactory connectionFactory = new LettuceConnectionFactory(configuration);
+        connectionFactory.afterPropertiesSet();
+        connectionFactory.start();
+        StringRedisTemplate redis = new StringRedisTemplate(connectionFactory);
+        redis.afterPropertiesSet();
+        redis.getConnectionFactory().getConnection().serverCommands().flushDb();
+        ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        RedisRunRuntimeStore store = new RedisRunRuntimeStore(
+                redis,
+                objectMapper,
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                Duration.ofMinutes(5),
+                Duration.ofMinutes(10),
+                Duration.ofMinutes(30),
+                3,
+                8192,
+                100);
+        RunRuntimeManifest manifest = manifest("run_redis_attention_capacity", RunStatus.RUNNING);
+        String manifestKey = "test-agent:run:{" + manifest.runId().value() + "}:manifest";
+        String attentionKey = "test-agent:run:{" + manifest.runId().value() + "}:pending-attention";
+        String attentionOrderKey = attentionKey + ":order";
+        try {
+            store.initialize(manifest, input(manifest.runId()));
+            for (int index = 0; index < 4; index++) {
+                store.projectTransient(new RunEventDraft(
+                        manifest.runId(), RunEventType.PERMISSION_ASKED, "trace_attention_capacity",
+                        NOW.plusSeconds(index), Map.of("id", "permission_" + index + "_" + "x".repeat(600))));
+            }
+
+            RunRuntimeManifest bounded = store.findManifest(manifest.runId()).orElseThrow();
+            assertThat(bounded.attention()).isEqualTo("PERMISSION");
+            assertThat(bounded.detailBytes()).isLessThanOrEqualTo(8192L);
+            assertThat(Long.parseLong(String.valueOf(redis.opsForHash().get(manifestKey, "attentionBytes"))))
+                    .isPositive();
+            assertThat(Long.parseLong(String.valueOf(redis.opsForHash().get(manifestKey, "attentionCount"))))
+                    .isLessThanOrEqualTo(3L);
+            assertThat(redis.opsForHash().keys(attentionKey)).hasSizeLessThanOrEqualTo(3);
+            assertThat(redis.opsForHash().keys(attentionKey))
+                    .allSatisfy(field -> assertThat(String.valueOf(field)).hasSize(64));
+            assertThat(redis.opsForZSet().zCard(attentionOrderKey)).isLessThanOrEqualTo(3L);
+            assertDetailBytesMatchComponents(redis, manifestKey);
+
+            RunSessionScope scope = new RunSessionScope(
+                    manifest.runId(), manifest.rootRemoteSessionId(), 1L,
+                    "trace_attention_capacity", NOW, NOW, Map.of());
+            RunSessionScopeSession root = new RunSessionScopeSession(
+                    manifest.runId(), manifest.rootRemoteSessionId(), manifest.rootRemoteSessionId(), null,
+                    false, "ROOT", null, null, null, "trace_attention_capacity", NOW, NOW, Map.of());
+            store.saveScope(scope, root);
+            assertDetailBytesMatchComponents(redis, manifestKey);
+
+            RunRuntimeManifest beforeSnapshot = store.findManifest(manifest.runId()).orElseThrow();
+            long runtimeVersion = Long.parseLong(String.valueOf(
+                    redis.opsForHash().get(manifestKey, "runtimeVersion")));
+            store.saveSnapshot(new RunRuntimeSnapshot(
+                    manifest.runId(), beforeSnapshot.lastSeq(), runtimeVersion,
+                    beforeSnapshot.resetGeneration(), List.of(), NOW));
+            assertDetailBytesMatchComponents(redis, manifestKey);
+
+            store.appendDurable(new RunEventDraft(
+                    manifest.runId(), RunEventType.RUN_CANCELLED, "trace_attention_capacity",
+                    NOW.plusSeconds(20), Map.of("status", RunStatus.CANCELLED.name())));
+            assertThat(redis.opsForHash().get(manifestKey, "attentionBytes")).hasToString("0");
+            assertThat(redis.hasKey(attentionKey)).isFalse();
+            assertThat(redis.hasKey(attentionOrderKey)).isFalse();
+
+            RunRuntimeManifest scopeOverflow = manifest("run_redis_scope_total_capacity", RunStatus.RUNNING);
+            String scopeOverflowManifestKey =
+                    "test-agent:run:{" + scopeOverflow.runId().value() + "}:manifest";
+            store.initialize(scopeOverflow, input(scopeOverflow.runId()));
+            store.saveSnapshot(new RunRuntimeSnapshot(
+                    scopeOverflow.runId(), 0L, 0L, 0L,
+                    List.of(message(scopeOverflow.runId(), "msg_large_snapshot", "x".repeat(5600), 1)), NOW));
+            long detailBeforeScope = Long.parseLong(String.valueOf(
+                    redis.opsForHash().get(scopeOverflowManifestKey, "detailBytes")));
+            RunSessionScope overflowScope = new RunSessionScope(
+                    scopeOverflow.runId(), scopeOverflow.rootRemoteSessionId(), 1L,
+                    "trace_scope_total_capacity", NOW, NOW, Map.of());
+            RunSessionScopeSession overflowSession = new RunSessionScopeSession(
+                    scopeOverflow.runId(), "child_scope_total_capacity", scopeOverflow.rootRemoteSessionId(),
+                    scopeOverflow.rootRemoteSessionId(), false, "CHILD", null, null, null,
+                    "trace_scope_total_capacity", NOW, NOW, Map.of("payload", "y".repeat(2400)));
+            long nextScopeBytes = objectMapper.writeValueAsBytes(overflowScope).length
+                    + objectMapper.writeValueAsBytes(overflowSession).length;
+            long inputBytes = Long.parseLong(String.valueOf(
+                    redis.opsForHash().get(scopeOverflowManifestKey, "inputBytes")));
+            assertThat(inputBytes + nextScopeBytes).isLessThanOrEqualTo(4096L);
+            assertThat(detailBeforeScope + nextScopeBytes).isGreaterThan(8192L);
+            assertThatThrownBy(() -> store.saveScope(overflowScope, overflowSession))
+                    .isInstanceOfSatisfying(PlatformException.class, exception ->
+                            assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
         } finally {
             redis.getConnectionFactory().getConnection().serverCommands().flushDb();
             connectionFactory.destroy();
@@ -670,5 +856,16 @@ class RedisRunRuntimeStoreIntegrationTest {
                         "partId", "part_text",
                         "field", "text",
                         "delta", delta));
+    }
+
+    /** Redis 清单中的详情总量必须始终覆盖所有独立详情载体。 */
+    private void assertDetailBytesMatchComponents(StringRedisTemplate redis, String manifestKey) {
+        long expected = 0L;
+        for (String field : List.of(
+                "inputBytes", "scopeBytes", "pendingBytes", "attentionBytes", "streamBytes", "snapshotBytes")) {
+            Object value = redis.opsForHash().get(manifestKey, field);
+            expected += value == null ? 0L : Long.parseLong(String.valueOf(value));
+        }
+        assertThat(redis.opsForHash().get(manifestKey, "detailBytes")).hasToString(Long.toString(expected));
     }
 }

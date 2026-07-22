@@ -2767,9 +2767,11 @@ Session 运行态接口：
 
 旧 `/api/sessions/{sessionId}/...` 运行态入口已作废，统一返回 `410 API_GONE`。agent path 使用 `/api/internal/agent/{agentId}/session/{sessionId}/...`；当前 `opencode` 的 children、todo、diff、abort、fork、side-question、side-question/runs、compact、revert、unrevert、command、shell 路径保持 `/api/internal/agent/opencode/session/{sessionId}/...`。permission/question 的 agent path 入口使用 `/api/internal/agent/{agentId}/permission|question`，并通过 query `sessionId` 定位平台 session。
 
+permission 列表中的 `PermissionRequest` 保留 `pattern/title/description` 兼容字段，并新增可选 `patterns: string[]`。新前端优先按原顺序读取 `patterns[]`、去空去重，再回退旧 `pattern`；`type/requestId` 只用于协议处理，不作为用户可见标题或说明。物理路径只允许在已鉴权用户的权限交互卡中展示，不进入通知、日志或新增持久化字段。
+
 工作台选择历史会话时，先用 `GET .../messages?refresh=false` 的平台数据库快照渲染正文；permission/question、Todo 和 session-tree 快照并行作为后台增强，不阻塞“正在加载消息列表”首屏。完整历史投影结束前前端仍保持独立发送锁。该编排不改变上述接口的请求、响应、错误或兼容性语义。
 
-用户级会话运行态摘要只面向已登录用户，统计范围与当前用户可见历史会话一致：会话创建人、Run 触发人或消息发送人为当前用户，且会话仍为 ACTIVE；内部 `SIDE_QUESTION` Session 即使异常保留为 ACTIVE 也必须排除。`runningCount` 只统计 `PENDING/RUNNING/CANCELLING` Run；同一会话只返回最近一个非终态 Run。`questionCount` 只统计最新 question 状态仍为 `question.asked` 的运行中会话；收到 `question.replied`、`question.rejected` 或 Run 终态后，该会话会从待关注集合移除。
+用户级会话运行态摘要只面向已登录用户，统计范围与当前用户可见历史会话一致：会话创建人、Run 触发人或消息发送人为当前用户，且会话仍为 ACTIVE；内部 `SIDE_QUESTION` Session 即使异常保留为 ACTIVE 也必须排除。`runningCount` 只统计 `PENDING/RUNNING/CANCELLING` Run；同一会话只返回最近一个非终态 Run。`questionCount` 与 `permissionCount` 分别统计最新待关注状态为 `QUESTION`、`PERMISSION` 的运行中会话；匹配请求的 replied/rejected 或 Run 终态会移除对应待关注状态。计数口径是存在该状态的会话数，不是 pending 请求总数。
 
 `GET /api/internal/platform/opencode-runtime/sessions/runtime-state` 响应仍包裹 `ApiResponse<T>`，`data` 结构为：
 
@@ -2777,6 +2779,7 @@ Session 运行态接口：
 {
   "runningCount": 2,
   "questionCount": 1,
+  "permissionCount": 1,
   "sessions": [
     {
       "sessionId": "ses_...",
@@ -2786,15 +2789,24 @@ Session 运行态接口：
       "attentionEventId": "evt_...",
       "attentionAt": "2026-07-08T14:00:00Z",
       "updatedAt": "2026-07-08T14:00:01Z"
+    },
+    {
+      "sessionId": "ses_permission_...",
+      "runId": "run_permission_...",
+      "runStatus": "RUNNING",
+      "attention": "PERMISSION",
+      "attentionEventId": "evt_permission_...",
+      "attentionAt": "2026-07-08T14:00:00Z",
+      "updatedAt": "2026-07-08T14:00:01Z"
     }
   ],
   "generatedAt": "2026-07-08T14:00:02Z"
 }
 ```
 
-`attention` 目前仅支持 `"QUESTION"` 或 `null`。前端不得把 `attentionEventId` 当作通用 RunEvent 续传游标，只用于去重/展示待答提醒。
+`attention` 支持 `"QUESTION"`、`"PERMISSION"` 或 `null`。前端不得把 `attentionEventId` 当作通用 RunEvent 续传游标，只用于去重/展示待处理提醒。新前端遇到旧后端缺少 `permissionCount` 时按 `0` 或 `sessions[].attention` 安全推导；旧前端可以忽略新增字段。
 
-`GET /api/internal/platform/opencode-runtime/sessions/runtime-state/events` 返回 `text/event-stream`，使用 fetch SSE 以携带 `Authorization: Bearer ...`。SSE data 为上面的摘要 DTO 本体，不再额外包裹 `ApiResponse`；事件名首帧为 `session-runtime.snapshot`，后续变更为 `session-runtime.updated`。服务端在 `run.created/run.started/run.cancelling/run.succeeded/run.failed/run.cancelled/question.asked/question.replied/question.rejected` 后刷新摘要，并保留低频触发器兜底；用户已有 Redis 运行态 marker 时，首帧、事件触发和低频触发都只读取 Redis active 索引/manifest，不查询 PostgreSQL。新前端把该 SSE 作为恢复主入口，不再并行调用 runtime-state HTTP；断线按 1、2、5、10、30 秒退避重连，30 秒为后续重试上限。只有流不可用时，当前 Session 才允许执行一次 `active-run` HTTP fallback；重连成功并收到新摘要后再恢复下一故障窗口的 fallback 资格。该用户级通道不替代单个 Run 的 RunEvent SSE。
+`GET /api/internal/platform/opencode-runtime/sessions/runtime-state/events` 返回 `text/event-stream`，使用 fetch SSE 以携带 `Authorization: Bearer ...`。SSE data 为上面的摘要 DTO 本体，不再额外包裹 `ApiResponse`；事件名首帧为 `session-runtime.snapshot`，后续变更为 `session-runtime.updated`。服务端在 `run.created/run.started/run.cancelling/run.succeeded/run.failed/run.cancelled/question.asked/question.replied/question.rejected/permission.asked/permission.replied` 后刷新摘要，并保留低频触发器兜底；用户已有 Redis 运行态 marker 时，首帧、事件触发和低频触发都只读取 Redis active 索引/manifest，不查询 PostgreSQL。新前端把该 SSE 作为恢复主入口，不再并行调用 runtime-state HTTP；断线按 1、2、5、10、30 秒退避重连，30 秒为后续重试上限。只有流不可用时，当前 Session 才允许执行一次 `active-run` HTTP fallback；重连成功并收到新摘要后再恢复下一故障窗口的 fallback 资格。该用户级通道不替代单个 Run 的 RunEvent SSE。
 
 兼容和安全约束：
 

@@ -29,7 +29,7 @@ import reactor.test.StepVerifier;
 import org.junit.jupiter.api.Test;
 
 /**
- * 验证用户级会话运行态服务能查询快照，并在 run/question 事件后推送刷新结果。
+ * 验证用户级会话运行态服务能查询快照，并在 run/question/permission 事件后推送刷新结果。
  */
 class SessionRuntimeStateApplicationServiceTest {
 
@@ -70,6 +70,40 @@ class SessionRuntimeStateApplicationServiceTest {
                     assertThat(summary.runningCount()).isEqualTo(1);
                     assertThat(summary.questionCount()).isEqualTo(1);
                     assertThat(summary.sessions().get(0).attention()).isEqualTo(SessionRuntimeAttention.QUESTION);
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    void streamRefreshesAfterPermissionEvent() {
+        RunEventLiveBus liveBus = new RunEventLiveBus();
+        SessionRuntimeStateApplicationService service = new SessionRuntimeStateApplicationService(
+                new FakeRepository(List.of(summary(0, 0), permissionSummary(), summary(1, 0))),
+                liveBus,
+                Duration.ofHours(1));
+
+        StepVerifier.create(service.stream(USER_ID).take(3))
+                .assertNext(summary -> assertThat(summary.runningCount()).isZero())
+                .then(() -> liveBus.publishTransient(new RunEventDraft(
+                        new RunId("run_runtime_permission"),
+                        RunEventType.PERMISSION_ASKED,
+                        "trace_runtime",
+                        NOW,
+                        Map.of("requestId", "permission_1"))))
+                .assertNext(summary -> {
+                    assertThat(summary.runningCount()).isEqualTo(1);
+                    assertThat(summary.permissionCount()).isEqualTo(1);
+                    assertThat(summary.sessions().get(0).attention()).isEqualTo(SessionRuntimeAttention.PERMISSION);
+                })
+                .then(() -> liveBus.publishTransient(new RunEventDraft(
+                        new RunId("run_runtime_permission"),
+                        RunEventType.PERMISSION_REPLIED,
+                        "trace_runtime",
+                        NOW.plusSeconds(1),
+                        Map.of("requestID", "permission_1"))))
+                .assertNext(summary -> {
+                    assertThat(summary.runningCount()).isEqualTo(1);
+                    assertThat(summary.permissionCount()).isZero();
                 })
                 .verifyComplete();
     }
@@ -119,6 +153,27 @@ class SessionRuntimeStateApplicationServiceTest {
         verifyNoInteractions(repository);
     }
 
+    @Test
+    void redisSnapshotPreservesPermissionAttention() {
+        SessionRuntimeStateRepository repository = mock(SessionRuntimeStateRepository.class);
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunRuntimeManifest manifest = runtimeManifest("PERMISSION", "permission_redis");
+        when(runtimeStore.hasUserRuntimeState(USER_ID)).thenReturn(true);
+        when(runtimeStore.findActiveByUser(USER_ID)).thenReturn(List.of(manifest));
+        SessionRuntimeStateApplicationService service = new SessionRuntimeStateApplicationService(
+                repository,
+                new RunEventLiveBus(),
+                runtimeStore,
+                Duration.ofHours(1));
+
+        SessionRuntimeStateSummary summary = service.snapshot(USER_ID);
+
+        assertThat(summary.permissionCount()).isEqualTo(1);
+        assertThat(summary.sessions()).singleElement().satisfies(state ->
+                assertThat(String.valueOf(state.attention())).isEqualTo("PERMISSION"));
+        verifyNoInteractions(repository);
+    }
+
     private static SessionRuntimeStateSummary summary(int runningCount, int questionCount) {
         List<SessionRuntimeState> sessions = runningCount == 0
                 ? List.of()
@@ -130,10 +185,30 @@ class SessionRuntimeStateApplicationServiceTest {
                         questionCount > 0 ? "evt_runtime_question" : null,
                         questionCount > 0 ? NOW : null,
                         NOW));
-        return new SessionRuntimeStateSummary(runningCount, questionCount, sessions, NOW);
+        return new SessionRuntimeStateSummary(runningCount, questionCount, 0, sessions, NOW);
+    }
+
+    private static SessionRuntimeStateSummary permissionSummary() {
+        return new SessionRuntimeStateSummary(
+                1,
+                0,
+                1,
+                List.of(new SessionRuntimeState(
+                        new SessionId("ses_runtime_permission"),
+                        new RunId("run_runtime_permission"),
+                        RunStatus.RUNNING,
+                        SessionRuntimeAttention.PERMISSION,
+                        "evt_runtime_permission",
+                        NOW,
+                        NOW)),
+                NOW);
     }
 
     private static RunRuntimeManifest runtimeManifest() {
+        return runtimeManifest("QUESTION", "question_redis");
+    }
+
+    private static RunRuntimeManifest runtimeManifest(String attention, String attentionEventId) {
         return new RunRuntimeManifest(
                 new RunId("run_runtime_redis"),
                 RunStorageMode.REDIS_SUMMARY,
@@ -150,8 +225,8 @@ class SessionRuntimeStateApplicationServiceTest {
                 "remote-session-runtime-redis",
                 RunStatus.RUNNING,
                 2, 7, 1, 0, false, 7, 1024,
-                "QUESTION",
-                "question_redis",
+                attention,
+                attentionEventId,
                 NOW,
                 NOW.plus(Duration.ofHours(3)),
                 NOW,

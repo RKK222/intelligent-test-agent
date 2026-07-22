@@ -2728,7 +2728,7 @@ test("direct run projects remote question and permission to the platform session
   const dock = page.locator(".figma-chat-question-dock");
   await expect(dock).toContainText("执行命令");
   await expect(dock).toContainText("直接对话：请选择 A 或 B");
-  await page.getByRole("button", { name: "一次" }).click();
+  await page.getByRole("button", { name: "允许一次" }).click();
   await dock.getByRole("button", { name: "A", exact: true }).click();
   await dock.getByRole("button", { name: "提交", exact: true }).click();
 
@@ -3669,8 +3669,105 @@ test("switching history restores a pending native permission dock and allows rep
   const dock = page.locator(".figma-chat-question-dock");
   await expect(dock).toContainText("允许修改测试文件");
   await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
-  await page.getByRole("button", { name: "一次" }).click();
+  await page.getByRole("button", { name: "允许一次" }).click();
   await expect.poll(() => permissionReplies).toEqual([{ decision: "once" }]);
+});
+
+test("history root permission snapshot keeps child permission attention from the session tree", async ({ page }) => {
+  const permissionReplies: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    permissionReplies,
+    sessions: [{
+      sessionId: "ses_history_permission_tree",
+      workspaceId: "wrk_1234567890abcdef",
+      title: "历史子智能体权限会话",
+      status: "ACTIVE",
+      createdAt: "2026-07-21T23:49:00Z",
+      updatedAt: "2026-07-21T23:50:18Z"
+    }],
+    sessionMessagesBySessionId: {
+      ses_history_permission_tree: [{
+        messageId: "msg_root_task",
+        sessionId: "ses_history_permission_tree",
+        role: "ASSISTANT",
+        content: "",
+        createdAt: "2026-07-21T23:49:30Z",
+        parts: [{
+          id: "part_child_permission",
+          messageID: "msg_root_task",
+          type: "tool",
+          tool: "task",
+          callID: "call_child_permission",
+          state: {
+            status: "running",
+            input: { description: "检查外部参考目录", subagent_type: "explore" }
+          }
+        }]
+      }]
+    },
+    sessionTreeMessagesBySessionId: {
+      ses_history_permission_tree: {
+        sessionId: "ses_history_permission_tree",
+        sessions: [
+          { rootSessionId: "ses_history_permission_tree", sessionId: "ses_history_permission_tree", childSession: false },
+          {
+            rootSessionId: "ses_history_permission_tree",
+            sessionId: "ses_child_permission",
+            parentSessionId: "ses_history_permission_tree",
+            childSession: true,
+            taskMessageId: "msg_root_task",
+            taskPartId: "part_child_permission",
+            taskCallId: "call_child_permission"
+          }
+        ],
+        messagesBySessionId: {},
+        childSessionIdByTaskPartId: { part_child_permission: "ses_child_permission" },
+        events: [{
+          type: "permission.asked",
+          rootSessionId: "ses_history_permission_tree",
+          sessionId: "ses_child_permission",
+          parentSessionId: "ses_history_permission_tree",
+          childSession: true,
+          payload: {
+            id: "perm_child_tree",
+            sessionID: "ses_child_permission",
+            permission: "external_directory",
+            patterns: ["/Users/huang/.testagent/agent-opencode/references/*"]
+          }
+        }]
+      }
+    },
+    sessionPermissionsById: {
+      ses_history_permission_tree: [{
+        id: "perm_root_live",
+        sessionID: "ses_remote_root",
+        permission: "read",
+        patterns: ["README.md"]
+      }]
+    }
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: /会话列表/ }).click();
+  await page.getByRole("button", { name: /历史子智能体权限会话/ }).click();
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
+
+  await expect(page.locator(".figma-chat-question-dock")).toContainText("README.md");
+  // 历史 snapshot 可能只携带最小 child 索引，任务标题可回退为 Subagent task；session 绑定与铃铛才是本场景契约。
+  const childCard = page.locator(".oc-subagent-card");
+  await expect(childCard.getByLabel("子智能体有待处理权限")).toBeVisible();
+
+  await childCard.click();
+  const childDock = page.locator(".figma-chat-question-dock");
+  await expect(childDock).toContainText("访问项目目录之外的文件");
+  await expect(childDock).toContainText("/Users/huang/.testagent/agent-opencode/references/*");
+  await expect(childDock).not.toContainText("perm_child_tree");
+  await page.getByRole("button", { name: "允许一次" }).click();
+  await expect.poll(() => permissionReplies).toEqual([{ decision: "once" }]);
+
+  await page.getByRole("button", { name: "切换到主 Agent" }).click();
+  await expect(childCard.getByLabel("子智能体有待处理权限")).toHaveCount(0);
 });
 
 test("history pending interaction stays scoped to its own session", async ({ page }) => {
@@ -5108,7 +5205,7 @@ test("phase 11 runtime flow sends attachment parts and handles docks", async ({ 
   });
 
   await expect(page.getByText("Run bash")).toBeVisible();
-  await page.getByRole("button", { name: "一次" }).click();
+  await page.getByRole("button", { name: "允许一次" }).click();
   await expect.poll(() => permissionReplies.length).toBe(1);
   expect(permissionReplies[0]).toEqual({ decision: "once" });
 

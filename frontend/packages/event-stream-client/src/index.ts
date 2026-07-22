@@ -536,6 +536,9 @@ function parseSessionRuntimeState(data: string): SessionRuntimeStateSummary | nu
     return {
       runningCount: value.runningCount,
       questionCount: value.questionCount,
+      permissionCount: typeof value.permissionCount === "number"
+        ? value.permissionCount
+        : value.sessions.filter((item) => item?.attention === "PERMISSION").length,
       sessions: value.sessions,
       generatedAt: typeof value.generatedAt === "string" ? value.generatedAt : new Date().toISOString()
     };

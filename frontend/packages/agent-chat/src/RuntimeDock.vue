@@ -8,10 +8,12 @@ export type RuntimeDockProps = {
 </script>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
+import { AlertTriangle } from "lucide-vue-next";
 import { Button, Input } from "@test-agent/ui-kit";
+import { permissionPresentation } from "./permission-presentation";
 
-defineProps<RuntimeDockProps>();
+const props = defineProps<RuntimeDockProps>();
 const emit = defineEmits<{
   replyPermission: [requestId: string, decision: "once" | "always" | "reject"];
   replyQuestion: [requestId: string, answers: unknown[]];
@@ -22,6 +24,10 @@ const emit = defineEmits<{
 const answers = ref<Record<string, string>>({});
 // 多选题：按 questionId 记录选中的 option id 列表。
 const multiAnswers = ref<Record<string, string[]>>({});
+const permissionCards = computed(() => props.permissions.map((request) => ({
+  request,
+  presentation: permissionPresentation(request)
+})));
 
 // opencode 要求一次回复覆盖同一请求下的全部子问题，answers 为 List<List<String>>：
 // 外层按子问题顺序排列，内层是该问题的选中 label。这里把同一请求所有子问题的答案按序组装。
@@ -49,16 +55,28 @@ function canReplyItem(item: QuestionRequest): boolean {
 <template>
   <div v-if="permissions.length || questions.length" class="space-y-2">
     <div
-      v-for="item in permissions"
-      :key="item.requestId"
+      v-for="item in permissionCards"
+      :key="item.request.requestId"
       class="rounded-md border border-[rgba(245,158,11,.3)] bg-[rgba(245,158,11,.08)] p-3"
     >
-      <div class="text-[12px] font-semibold text-amber-100">{{ item.title ?? item.type }}</div>
-      <div class="mt-1 whitespace-pre-wrap text-[12px] text-amber-200/80">{{ item.description ?? item.pattern ?? item.requestId }}</div>
+      <div class="flex items-center gap-2 text-[12px] font-semibold text-amber-100">
+        <AlertTriangle :size="15" aria-hidden="true" />
+        <span>{{ item.presentation.title }}</span>
+      </div>
+      <div v-if="item.presentation.description" class="mt-1 whitespace-pre-wrap text-[12px] text-amber-200/80">
+        {{ item.presentation.description }}
+      </div>
+      <div v-if="item.presentation.patterns.length" class="mt-2 grid gap-1">
+        <code
+          v-for="pattern in item.presentation.patterns"
+          :key="pattern"
+          class="break-all rounded bg-black/15 px-2 py-1 text-[12px] text-amber-100"
+        >{{ pattern }}</code>
+      </div>
       <div class="mt-2 flex flex-wrap gap-2">
-        <Button type="button" size="sm" variant="secondary" @click="emit('replyPermission', item.requestId, 'once')">一次</Button>
-        <Button type="button" size="sm" variant="secondary" @click="emit('replyPermission', item.requestId, 'always')">始终</Button>
-        <Button type="button" size="sm" variant="secondary" @click="emit('replyPermission', item.requestId, 'reject')">拒绝</Button>
+        <Button type="button" size="sm" variant="secondary" @click="emit('replyPermission', item.request.requestId, 'reject')">拒绝</Button>
+        <Button type="button" size="sm" variant="secondary" @click="emit('replyPermission', item.request.requestId, 'always')">始终允许</Button>
+        <Button type="button" size="sm" variant="primary" @click="emit('replyPermission', item.request.requestId, 'once')">允许一次</Button>
       </div>
     </div>
 

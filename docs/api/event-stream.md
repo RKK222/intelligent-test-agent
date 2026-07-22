@@ -79,8 +79,8 @@
 | `diff.accepted` | 用户已接受 Run 级 Diff。 |
 | `diff.rejected` | 用户已拒绝 Run 级 Diff，后端已提交 opencode revert。 |
 | `test.finished` | 测试执行结束。 |
-| `permission.asked` | 权限请求。 |
-| `permission.replied` | 权限回复。 |
+| `permission.asked` | 权限请求；payload 保留 OpenCode 请求标识、权限类型和 `patterns[]`。 |
+| `permission.replied` | 权限回复；payload 的 `requestID/requestId` 与对应 asked 请求收敛。 |
 | `question.asked` | 提问请求。 |
 | `question.replied` | 提问回复。 |
 | `question.rejected` | 提问拒绝。 |
@@ -92,9 +92,11 @@
 | `file.watcher.updated` | 文件 watcher 状态更新。 |
 | `opencode.event.unknown` | 未识别 opencode raw event 的兼容兜底。 |
 
+`permission.asked` 的原生请求标识可能位于顶层 `id`，回复可能使用 `requestID`；平台按顶层 `requestId/requestID/id/permissionId/questionId` 兼容匹配，不能误取嵌套 option 的 `id`。前端 `PermissionRequest` 优先保留 `patterns[]`，回退旧 `pattern`；展示标题默认“需要权限”，已知权限说明与 OpenCode 1.17.8 中文文案一致，未知权限仍只展示通用标题和路径，不暴露内部 permission type 或 request id。路径只出现在已授权用户的交互卡中，不进入铃铛通知文案或日志。
+
 ## `run.snapshot.reset`
 
-`run.snapshot.reset` 只用于 Redis 运行数据面恢复。新模式每次 SSE 建连首帧都发送当前完整物化 snapshot；snapshot 从 Redis input 的专用保护投影生成本轮 USER 消息，并包含后续最终可见投影，因此不依赖浏览器仍保留乐观输入。建连后以 `snapshot.runtimeVersion` 为 Redis 内部尾流游标；最短 5 秒的 Redis 安全扫描和 live bus 只唤醒按 `runtimeVersion` 分页读取 `runtime-events`，live 事件仍即时唤醒。若连接期间容量换代使游标早于 `earliestRuntimeVersion`，服务端再次发送完整 reset，而不静默跳过事件；容量裁剪至少保留 USER 输入、JSON role 为 assistant 的最新 message、与其 messageId 对应的最新可见 text part（delta 仅 `field=text`，full part 缺 type 时保守保留）和 run-status，tool/reasoning 或非 assistant 投影不得替代这些关键状态。本事件是 transient：payload `seq=0`，SSE 不设置 `id`，不能写回或替代 durable 游标。Run 已终态后晚到的 `run.created/run.started/run.cancelling` 会在 Lua 入口被丢弃，不进入 runtime Stream、run-status snapshot 或 live bus，避免在线与重连视图回退为运行中。
+`run.snapshot.reset` 只用于 Redis 运行数据面恢复。新模式每次 SSE 建连首帧都发送当前完整物化 snapshot；snapshot 从 Redis input 的专用保护投影生成本轮 USER 消息，并包含后续最终可见投影，因此不依赖浏览器仍保留乐观输入。前端在重放前逐条把 root `permission.asked/question.asked` 的远端 session ID 投影为当前订阅的平台 Session ID，明确带 `isChildSession=true` 的事件保持 child session ID，避免重连后根交互卡被 scope 过滤。建连后以 `snapshot.runtimeVersion` 为 Redis 内部尾流游标；最短 5 秒的 Redis 安全扫描和 live bus 只唤醒按 `runtimeVersion` 分页读取 `runtime-events`，live 事件仍即时唤醒。若连接期间容量换代使游标早于 `earliestRuntimeVersion`，服务端再次发送完整 reset，而不静默跳过事件；容量裁剪至少保留 USER 输入、JSON role 为 assistant 的最新 message、与其 messageId 对应的最新可见 text part（delta 仅 `field=text`，full part 缺 type 时保守保留）和 run-status，tool/reasoning 或非 assistant 投影不得替代这些关键状态。本事件是 transient：payload `seq=0`，SSE 不设置 `id`，不能写回或替代 durable 游标。Run 已终态后晚到的 `run.created/run.started/run.cancelling` 会在 Lua 入口被丢弃，不进入 runtime Stream、run-status snapshot 或 live bus，避免在线与重连视图回退为运行中。
 
 payload 字段：
 
@@ -223,7 +225,7 @@ payload 字段：
 
 ## 用户会话运行态 fetch SSE
 
-`GET /api/internal/platform/opencode-runtime/sessions/runtime-state/events` 是用户级历史运行状态提醒通道，用于前端派生历史按钮运行计数、旋转图标和 `question.asked` 铃铛；历史按钮数字只统计历史第一页 30 条会话中的未完成会话。该通道使用 fetch SSE，而不是浏览器原生 `EventSource`，因为请求必须携带当前用户的 `Authorization: Bearer ...`。
+`GET /api/internal/platform/opencode-runtime/sessions/runtime-state/events` 是用户级历史运行状态提醒通道，用于前端派生历史按钮运行计数、旋转图标以及 `question.asked`/`permission.asked` 铃铛；历史按钮直接使用用户级摘要计数，不受历史抽屉已加载分页范围影响。该通道使用 fetch SSE，而不是浏览器原生 `EventSource`，因为请求必须携带当前用户的 `Authorization: Bearer ...`。
 
 事件类型：
 
@@ -247,6 +249,7 @@ data 字段：
 |---|---|---|
 | `runningCount` | number | 当前用户可见 ACTIVE 历史会话中，最近 Run 为 `PENDING/RUNNING/CANCELLING` 的会话数。 |
 | `questionCount` | number | 上述运行中会话里，最新 question 状态仍为 `question.asked` 的会话数。 |
+| `permissionCount` | number | 上述运行中会话里，最新 permission 状态仍为 `permission.asked` 的会话数；旧后端缺失时客户端按 `0` 或会话 attention 推导。 |
 | `sessions` | array | 单会话运行态列表，同一会话最多一条最近非终态 Run。 |
 | `generatedAt` | string | 后端生成本次摘要的 ISO-8601 时间。 |
 
@@ -257,15 +260,16 @@ data 字段：
 | `sessionId` | string | 平台 session id。 |
 | `runId` | string | 最近非终态 Run id。 |
 | `runStatus` | string | `PENDING/RUNNING/CANCELLING`。 |
-| `attention` | string/null | 当前仅支持 `"QUESTION"`，没有待关注事项时为 `null`。 |
-| `attentionEventId` | string/null | 触发待答提醒的 `question.asked` 事件 id，仅用于展示/去重，不是续传游标。 |
-| `attentionAt` | string/null | 触发待答提醒的事件时间。 |
+| `attention` | string/null | 支持 `"QUESTION"`、`"PERMISSION"`，没有待关注事项时为 `null`。 |
+| `attentionEventId` | string/null | 触发待处理提醒的 asked 事件 id，仅用于展示/去重，不是续传游标。 |
+| `attentionAt` | string/null | 触发待处理提醒的事件时间。 |
 | `updatedAt` | string | Run 更新时间。 |
 
 服务端触发规则：
 
 - `run.created/run.started/run.cancelling/run.succeeded/run.failed/run.cancelled` 会触发摘要刷新。
 - `question.asked/question.replied/question.rejected` 会触发摘要刷新。
+- `permission.asked/permission.replied` 会触发摘要刷新。
 - 低频触发器作为兜底，避免本机实时触发丢失时状态长期不更新；用户已有 Redis 运行态 marker 时，每次摘要刷新只读取 Redis active 索引和 manifest，不轮询 PostgreSQL。未进入新链路的 legacy 用户继续使用现有只读 Repository。
 - 该通道只推送摘要，不推送消息正文、工具输出或单 Run durable replay；点击历史会话后仍使用 session-tree/messages 恢复正文，active-run 只作为上述流不可用时的单次 fallback。
 
@@ -396,7 +400,7 @@ scope 发现与缓存规则：
 - `session.status` 的 `payload.status` 可能是字符串，也可能是 opencode 原生对象。当前已知对象形态包含 `type`、`attempt`、`message`、`action` 和 `next`；当 `status.type=retry` 时，前端必须把它归一为运行期 `runtimeStatus.type=retry`，用平台 `eventId` 作为本地 retry key，并在第一次收到该 retry 事件时启动固定 60 秒倒计时。时间线展示“重试中 N 秒后 - 第 X 次 / 共 3 次”、上游 `message` 和可选 `action.link`，等待期间不能继续只显示普通“思考中”。
 - 原生两阶段场景下，未绑定的 root task part 会先显示为不可点击“智能体 / 准备中”；收到带 `taskPartId` 的 child discovery 后，同一个入口转为 `Explore + title` 并可点击。
 - 主 Agent 视图过滤 `messageScopesById[messageId].isChildSession=true` 的 user/assistant 输出，只保留 root 输出和 root task tool part 卡片；task 子 Agent 卡片始终独立展示，不参与普通 `tool-group` 折叠；点击 task 卡片后切到对应 child session 视图。若后续 `message.part.removed`、`message.removed` 或 snapshot 缺少原始 task part，但 `subagentsBySessionId/subagentByTaskPartId` 仍有绑定索引，前端会在主视图合成一个导航入口，避免子 Agent 卡片短暂出现后消失。
-- 子 Agent 视图只展示 `messageScopesById[messageId].sessionId` 等于当前 child session 的完整时间线，不展示 composer、Todo、permission/question 输入区。缺少 scope 的历史消息按 root 消息兼容处理。
+- 子 Agent 视图只展示 `messageScopesById[messageId].sessionId` 等于当前 child session 的完整时间线，不展示 composer 和 Todo；permission/question 仅展示 `request.sessionId` 精确等于当前 child session 的请求。主视图中的 task 子智能体卡片收到匹配的 pending permission 时，在“进行中”等状态文字前显示动态、可访问的铃铛，回复后随 reducer 清除；并行 child 不得互相串铃铛。缺少 scope 的历史消息按 root 消息兼容处理。
 
 终态派生规则：
 

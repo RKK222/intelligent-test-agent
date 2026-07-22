@@ -29,6 +29,8 @@ export {
   todoSnapshotFromToolPart
 } from "./runtime-reducer";
 export type { AgentChatRuntimeState, AgentChatRuntimeAction } from "./runtime-reducer";
+export { permissionPresentation } from "./permission-presentation";
+export type { PermissionPresentation } from "./permission-presentation";
 export {
   displayTextFromUserPrompt,
   promptPartsForUserDisplay,

@@ -5,6 +5,24 @@
 
 ## Entries
 
+### 2026-07-22 - 优化权限请求展示与待处理提醒
+
+- Why:
+  - 平台把 OpenCode `permission.asked` 只显示为 `external_directory + permission id`，遗漏原生 `patterns[]` 路径与中文说明；运行态摘要和历史铃铛又只识别 question，child Agent 待授权时无法定位。
+- What:
+  - 前端新增共享 permission 展示转换，对齐 OpenCode 1.17.8 的中文标题/14 类说明，优先保留去重后的 `patterns[]` 并兼容旧 `pattern/title/description`；Figma 卡和 RuntimeDock 统一警告图标、代码路径及“拒绝 / 始终允许 / 允许一次”，不展示内部 type/requestId。
+  - `PermissionRequest.patterns`、运行态 `permissionCount` 和 `PERMISSION` attention 以可选/开放字符串方式向后兼容；历史入口统计 question+permission，任意 attention 的会话卡显示铃铛，pending permission 只在 sessionId 精确匹配的 child task 状态前显示可访问动态 Bell，回复后 reducer 清除。
+  - 历史恢复把根 permission HTTP 快照限制在 root scope，保留 session tree child 请求；`run.snapshot.reset` 递归投影 root 交互的远端 Session ID 并保留 child scope。
+  - 后端 Redis/legacy MyBatis 摘要支持 permission asked/replied。Redis 用类型化 SHA-256 key 的独立 Hash + order ZSET 保存最多 1024 个未决交互，字节计入 32 MiB/非快照预算，同 ID question/permission 独立、回复最新项后恢复更早项、终态清空；legacy SQL 按 Run seq 收敛，H2 与 PostgreSQL jsonb 均兼容真实 `sessionID -> requestID` 顺序且不误取嵌套 id。
+- How:
+  - TDD 覆盖用户提供的真实 external_directory 事件、多/旧 pattern、未知类型、三个动作、历史 root/child 恢复、并行 child 精确铃铛、旧摘要兼容、SSE 刷新、Redis 同/跨类型并发与容量、H2/真实 PostgreSQL 时钟回拨和请求 ID 提取；多轮只读代码审查发现的 legacy 无 ID、reset 投影、并发 attention、容量与 seq/JSON 方言边界均已补回归。
+- Result:
+  - 前端目标 Vitest 431 passed / 1 skipped，mock Playwright 桌面/移动 6 passed，lint、typecheck、生产 build 通过；全量 Vitest 的唯一失败仍是既有 `DirectoryRows.test.ts` 用 role=`button` 查询实际 role=`radio` 的“上传”，相关文件未修改。
+  - 后端真实 Redis 9 项、H2 legacy 4 项、真实 PostgreSQL jsonb/Flyway 1 项及 domain/runtime/API 定向测试通过；20 模块 `mvn clean package -DskipTests` 成功。全量 `mvn test` 仍仅被既有 `V20260717173000__create_public_agent_config_rollouts.sql` 的 H2 `TIMESTAMPTZ` setup 基线阻断，真实 PostgreSQL 完整 Flyway 链已通过。
+  - 已同步 HTTP/SSE、模块图、测试场景和前后端模块 README/PACKAGE；新增字段均向后兼容，不新增 RunEvent wire name、reply 协议、数据库结构/Flyway、generated SDK、环境配置或鉴权变化。物理路径仅在已授权交互卡显示，不进入通知/日志；无未完成编码项。
+- Next:
+  - 单独修复既有 H2 migration 与 `DirectoryRows` 基线后可恢复两个全量套件全绿，本功能无需追加迁移。
+
 ### 2026-07-22 - 修复主子智能体切换滚动位置
 
 - Why:

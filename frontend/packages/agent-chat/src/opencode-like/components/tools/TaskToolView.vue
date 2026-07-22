@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { Bell } from "lucide-vue-next";
 import type { MessagePart, SubagentSession } from "@test-agent/shared-types";
 
 const props = defineProps<{
   part: Extract<MessagePart, { type: "tool" }>;
   subagent?: SubagentSession;
+  pendingPermission?: boolean;
 }>();
 const emit = defineEmits<{ selectSubagent: [sessionId: string] }>();
 
@@ -60,6 +62,15 @@ function formatStatus(value: string | undefined): string {
   >
     <span class="oc-subagent-card__agent">{{ agentName }}</span>
     <span class="oc-subagent-card__title">{{ title }}</span>
-    <span v-if="status" :class="['oc-subagent-card__status', `is-${status.toLowerCase()}`]">{{ formatStatus(status) }}</span>
+    <span v-if="status || pendingPermission" class="oc-subagent-card__status-row">
+      <Bell
+        v-if="pendingPermission"
+        class="oc-subagent-card__attention"
+        :size="12"
+        role="img"
+        aria-label="子智能体有待处理权限"
+      />
+      <span v-if="status" :class="['oc-subagent-card__status', `is-${status.toLowerCase()}`]">{{ formatStatus(status) }}</span>
+    </span>
   </button>
 </template>

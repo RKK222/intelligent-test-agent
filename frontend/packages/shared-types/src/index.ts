@@ -348,7 +348,7 @@ export type ConversationRunContext = {
   expiresAt: string;
 };
 
-export type SessionRuntimeAttention = "QUESTION" | string;
+export type SessionRuntimeAttention = "QUESTION" | "PERMISSION" | string;
 
 export type SessionRuntimeState = {
   sessionId: string;
@@ -363,6 +363,8 @@ export type SessionRuntimeState = {
 export type SessionRuntimeStateSummary = {
   runningCount: number;
   questionCount: number;
+  /** 新前端兼容旧后端：缺失时可由 sessions 中的 PERMISSION attention 推导。 */
+  permissionCount?: number;
   sessions: SessionRuntimeState[];
   generatedAt: string;
 };
@@ -1714,6 +1716,7 @@ export type PermissionRequest = {
   type: string;
   title?: string;
   description?: string;
+  patterns?: string[];
   pattern?: string;
   diff?: SessionDiff;
   createdAt: string;

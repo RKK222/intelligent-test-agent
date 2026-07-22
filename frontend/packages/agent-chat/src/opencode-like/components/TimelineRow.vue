@@ -124,6 +124,7 @@ const toolGroupParts = computed(() => {
       :busy="row.busy"
       :subagents-by-session-id="state.subagentsBySessionId"
       :subagent-by-task-part-id="state.subagentByTaskPartId"
+      :permissions="state.permissions"
       @select-subagent="(sessionId) => emit('selectSubagent', sessionId)"
     />
   </AssistantMessageFrame>
@@ -140,6 +141,7 @@ const toolGroupParts = computed(() => {
       :previous-assistant-part="row.previousAssistantPart"
       :subagents-by-session-id="state.subagentsBySessionId"
       :subagent-by-task-part-id="state.subagentByTaskPartId"
+      :permissions="state.permissions"
       @select-subagent="(sessionId) => emit('selectSubagent', sessionId)"
     />
   </AssistantMessageFrame>

@@ -1330,8 +1330,10 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     },
     listAllSessions: (page = 1, size = 30, q?: string) =>
       routedRequest<PageResponse<Session>>(`${opencodeRuntimeBase}/sessions${query({ page, size, q })}`),
-    getSessionRuntimeState: () =>
-      routedRequest<SessionRuntimeStateSummary>(`${opencodeRuntimeBase}/sessions/runtime-state`),
+    getSessionRuntimeState: async () =>
+      normalizeSessionRuntimeStateSummary(
+        await routedRequest<SessionRuntimeStateSummary>(`${opencodeRuntimeBase}/sessions/runtime-state`)
+      ),
     listSessions: (workspaceId: string, page = 1, size = 20) =>
       routedRequest<PageResponse<Session>>(`${opencodeRuntimeBase}/workspaces/${workspaceId}/sessions?page=${page}&size=${size}`),
     getSession: (sessionId: string) => routedRequest<Session>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}`),
@@ -2326,6 +2328,7 @@ function toRunDiffFile(value: Record<string, unknown>) {
 
 function toPermissionRequest(value: Record<string, unknown>, fallbackSessionId: string): PermissionRequest {
   const requestId = text(value.requestId) ?? text(value.requestID) ?? text(value.id) ?? "unknown";
+  const patterns = permissionPatterns(value.patterns, value.pattern);
   return compactObject({
     requestId,
     // permission 列表同样已经由平台 session 路由；远端 sessionID 只用于 OpenCode 内部，
@@ -2333,10 +2336,32 @@ function toPermissionRequest(value: Record<string, unknown>, fallbackSessionId: 
     sessionId: fallbackSessionId,
     type: text(value.type) ?? text(value.permission) ?? text(value.action) ?? "permission",
     title: text(value.title),
-    description: text(value.description) ?? text(value.pattern),
+    description: text(value.description),
+    patterns: patterns.length > 0 ? patterns : undefined,
     pattern: text(value.pattern),
     createdAt: text(value.createdAt) ?? text(record(value.time)?.created) ?? new Date(0).toISOString()
   });
+}
+
+function permissionPatterns(value: unknown, fallback: unknown): string[] {
+  const source = Array.isArray(value) ? value : [fallback];
+  const seen = new Set<string>();
+  return source.reduce<string[]>((patterns, item) => {
+    const pattern = text(item)?.trim();
+    if (!pattern || seen.has(pattern)) return patterns;
+    seen.add(pattern);
+    patterns.push(pattern);
+    return patterns;
+  }, []);
+}
+
+function normalizeSessionRuntimeStateSummary(summary: SessionRuntimeStateSummary): SessionRuntimeStateSummary {
+  return {
+    ...summary,
+    permissionCount: typeof summary.permissionCount === "number"
+      ? summary.permissionCount
+      : summary.sessions.filter((item) => item.attention === "PERMISSION").length
+  };
 }
 
 function toQuestionRequest(value: Record<string, unknown>, fallbackSessionId: string): QuestionRequest {

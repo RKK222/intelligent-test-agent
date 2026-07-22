@@ -1348,6 +1348,7 @@ describe("agent-chat runtime reducer", () => {
             requestId: `${type}-1`,
             sessionId: "ses_1",
             permission: "bash",
+            patterns: ["pnpm test", " pnpm test ", "pnpm lint"],
             questions: [{ id: "q1", text: "Run tests?", kind: "single", options: [{ id: "yes", label: "Yes" }] }]
           })
         }),
@@ -1355,6 +1356,12 @@ describe("agent-chat runtime reducer", () => {
     );
 
     expect(asked.permissions).toHaveLength(1);
+    expect(asked.permissions[0]).toMatchObject({
+      requestId: "permission.asked-1",
+      sessionId: "ses_1",
+      type: "bash",
+      patterns: ["pnpm test", "pnpm lint"]
+    });
     expect(asked.questions).toHaveLength(1);
 
     const replied = reduceAgentChatRuntime(asked, {
