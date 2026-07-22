@@ -29,6 +29,24 @@ export function appendLatestRawOutputEntry<T>(current: readonly T[], entry: T): 
 }
 
 /**
+ * 展示与导出统一按发生时间倒序派生，底层缓存继续保留采集顺序以免影响有界追加语义。
+ * 同一时间戳按后到记录优先；无法解析的旧记录放到有效时间之后并保持后到优先。
+ */
+export function sortRawOutputEntriesNewestFirst<T extends { occurredAt: string }>(entries: readonly T[]): T[] {
+  return entries
+    .map((entry, index) => {
+      const parsedTime = Date.parse(entry.occurredAt);
+      return {
+        entry,
+        index,
+        time: Number.isNaN(parsedTime) ? Number.NEGATIVE_INFINITY : parsedTime
+      };
+    })
+    .sort((left, right) => right.time - left.time || right.index - left.index)
+    .map(({ entry }) => entry);
+}
+
+/**
  * 原始输出统一在进入页面缓存前脱敏并截断，避免 HTTP/SSE 新入口绕过安全边界。
  */
 export function prepareRawOutputBody(body: string, maxLength: number): PreparedRawOutputBody {

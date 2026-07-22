@@ -15,7 +15,7 @@
 2. Run、Diff 和 runtime 相关请求默认使用 `agentId=opencode` 的 `/api/internal/agent/{agentId}/...` URL；切换 agent 只能通过 `backend-api` 配置，不得在页面组件中手拼旧 runtime URL。
 3. 工作区文件和 Agent 配置文件的目录列表、读取、写入、上传、复制和移动只能通过 `backend-api` 的文件 WebSocket route/ticket/RPC helper；页面组件不得回退到 HTTP 文件接口或自行拼接 WebSocket URL。工作区拖动只允许可写纯 `WORKSPACE` 文件/目录作为源；只读、纯 `REFERENCE` 和 `MIXED` 条目不可拖。合法目录或根空白区为蓝色落点；当前父目录、自身、被拖目录的后代、文件行、纯引用目录和只读目录必须拒绝，带 `workspacePath` 的 `MIXED` 目录可作为工作区侧落点接收工作区条目。移动成功后 app 层必须先迁移整棵已打开子文件、活动/Diff/展开/请求路径，再按迁移后的 `workspacePath` 补齐祖先并逐层认领组合视图新稳定 ID；无快照的加载中 tab 必须在刷新新代次建立后再补读，最后刷新 Git Diff。反向移动撤销复用同一顺序。公共 Agent worktree/直接目录切换只能更新 `worktreeId/linuxServerId` 上下文，后续文件操作仍由 `backend-api` 申请 route 和 ticket。
 4. API 请求、响应、错误类型必须与 `docs/api/http-api.md` 一致；新增或变更 API 必须同步 `docs/api/http-api.md` 和 `docs/architecture/module-map.md`。
-5. 前端调试用原始报文查看器只能通过 `backend-api` 的可选 observer 捕获浏览器可访问的请求体和响应文本，不得记录 `Authorization`、Cookie 等敏感请求头，不得新增后端持久化或绕过平台后端直连 opencode。
+5. 前端调试用原始报文查看器只能通过 `backend-api` 的可选 observer 捕获浏览器可访问的请求体和响应文本，不得记录 `Authorization`、Cookie 等敏感请求头，不得新增后端持久化或绕过平台后端直连 opencode；展示、筛选和下载按发生时间倒序派生时不得改变有界缓存的原始采集顺序。
 
 ## RunEvent SSE
 
@@ -53,7 +53,7 @@
 
 1. 使用 Tailwind 和 `packages/ui-kit` 建立统一设计语言，工具按钮优先使用图标和 tooltip。
 2. 工作台、编辑器、文件树、Diff、报告等固定格式区域必须有稳定尺寸和响应式约束。
-3. loading、empty、error、retry、cancel 状态必须完整；文案面向测试智能体工作流，避免暴露内部实现细节。
+3. loading、empty、error、retry、cancel 状态必须完整；文案面向测试智能体工作流，避免暴露内部实现细节。固定在输入区上方的长工作状态必须设置高度上限与独立纵向滚动，不能把输入区推出可视面板。
 
 ## 字体与字号
 

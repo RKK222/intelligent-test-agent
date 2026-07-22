@@ -80,7 +80,7 @@ Browser
 | `packages/file-explorer` | 文件树、普通文件复制/剪切/粘贴与拖放、浏览器文件上传选择、超级管理员服务器工作空间选择事件、已加载文件名过滤、变更列表和打开文件入口；实际文件操作由 app 层调用 backend-api。 |
 | `packages/editor` | Monaco 编辑器（原生 `monaco-editor`，源码区默认按可视宽度自动换行）、语言识别、内容编辑、只读展示、path/model URI 一致时才执行的外部正文同步，以及 Mermaid Flowchart、Sequence、State Diagram 的懒加载可视化编辑。 |
 | `packages/diff-viewer` | Monaco Diff、变更文件列表、Run/Session/VCS 来源切换、split/unified 视图、Run 级接受/拒绝按钮和当前文件反馈。 |
-| `packages/agent-chat` | 自建最小 chat 运行时、opencode-like 主时间线、用户消息及夜间定时来源标签、message part timeline（text/reasoning/tool/file/retry/unknown fallback）、工具视图、Diff 摘要、runtime selector/status、slash command、`@` context、对齐 OpenCode 中文说明和 `patterns[]` 的 permission/question/Todo dock、child task 权限铃铛、Markdown 懒加载渲染（markdown-it + DOMPurify + highlight.js）、支持 `run.snapshot.reset` 的纯 RunEvent reducer，以及供实时事件和历史 `partsJson` 共用的 message part 归一化入口。旧 `AgentCard`/`TimelineCard`/`MessageParts` 路径已作废，仅保留兼容。 |
+| `packages/agent-chat` | 自建最小 chat 运行时、opencode-like 主时间线、用户消息及夜间定时来源标签、message part timeline（text/reasoning/tool/file/retry/unknown fallback）、带高度上限和纵向滚动的工作状态 dock、工具视图、Diff 摘要、runtime selector/status、slash command、`@` context、对齐 OpenCode 中文说明和 `patterns[]` 的 permission/question/Todo dock、child task 权限铃铛、Markdown 懒加载渲染（markdown-it + DOMPurify + highlight.js）、支持 `run.snapshot.reset` 的纯 RunEvent reducer，以及供实时事件和历史 `partsJson` 共用的 message part 归一化入口。旧 `AgentCard`/`TimelineCard`/`MessageParts` 路径已作废，仅保留兼容。 |
 | `packages/terminal` | 受控 PTY 前端包，负责 ticket WebSocket 连接、输入、resize、关闭和输出渲染，不创建 ticket、不直连 opencode server。 |
 | `packages/test-runner` | 底部 Run 状态、取消、重试和事件日志面板。 |
 | `packages/ui-kit` | 平台通用 UI 组件、基础样式组合和反馈组件。 |
