@@ -158,7 +158,14 @@ mysql --host=122.233.30.148 --port=3306 --user='<只读账号>' --password \
 
 **操作机器：发生故障的用户浏览器。证据来源：本次事故/当前失败尝试已经保留的 DevTools Network、Console 与 Application 状态。** 只允许点击已存在的请求行、Headers/Cookies 面板、已有 Console 行和当前 Cookie 记录；这些是被动 UI 查看动作。禁止为了诊断主动刷新、重试、重放或重新进入页面，也不得点击“Replay/Resend”。如果 Network 未保留本次失败请求，立即停止并升级，不得为补证再次发起 SSO。不得导出未脱敏 HAR。
 
-在已保留的 Network 中只识别如下被动顺序：`POST /api/internal/platform/xxl-job/sso-tickets`、`POST /xxl-job-admin/platform-sso/login`、后续 Admin `GET /xxl-job-admin/` 及静态资源，最后是页面已记录的同源 `postMessage` ready 握手。只记录路径、方法、状态码、时间与安全响应头；不得打开或复制请求体、票据、Cookie、Authorization 或响应中的敏感字段。
+按如下顺序核对本次事故已经保留的被动证据：
+
+1. 已保留的 Network：`POST /api/internal/platform/xxl-job/sso-tickets`。
+2. 已保留的 Network：`POST /xxl-job-admin/platform-sso/login` 完成响应。
+3. Network 之外的被动证据：父页面已显示 connected/ready，或已有 instrumentation 记录同源 ready `postMessage`。
+4. ready 之后的已保留 Network：重定向及 Admin `GET /xxl-job-admin/`、静态资源。
+
+DevTools Network 不会记录 `postMessage`；第 3 步只能使用事故时已观察到的父页面状态或已存在的 instrumentation，不得为捕获消息新增代码或重放流程。如果这两类 ready 证据都未保留，立即停止并升级，不得重放。只记录路径、方法、状态码、时间与安全响应头；不得打开或复制请求体、票据、Cookie、Authorization 或响应中的敏感字段。
 
 签票请求 `401` 表示平台会话无效，`403` 表示不是 `SUPER_ADMIN` 或权限边界拒绝，`5xx` 指向签票服务/Redis；iframe 登录 `403` 指向票据消费失败，`503` 指向 JIT/MySQL/Admin，`502/504` 指向 Nginx upstream。只从已保留的请求读取这些状态，不用任何 HTTP 客户端补发请求。
 
@@ -166,7 +173,7 @@ Application/Cookie 只查看当前是否已落 Cookie 及属性：Path 应为 `/
 
 在已保留的 Admin 文档响应头中核对 `Content-Security-Policy: frame-ancestors 'self'` 与 `X-Frame-Options: SAMEORIGIN`。Console 只查看已存在的同源、CSP、frame、Cookie 和资源加载错误，不粘贴带凭据的对象。普通 iframe `load` 不等于登录成功，平台只在同源 iframe 收到登录成功页的 `postMessage` ready 握手后进入就绪态；已保留证据显示 HTTP 全部 200 但约 15 秒后仍不可用时，边界是 CSP、实际 iframe origin、脚本/静态资源或 ready 消息。
 
-成功条件：已保留证据完整呈现上述顺序；前两个 POST 与后续 Admin GET 成功；Cookie 已被接受且四个属性完整；CSP/X-Frame-Options 保持同源；Console 无相关错误；已有同源 ready 消息。失败停止点：任一状态码或安全属性不符就停在对应边界并升级；证据序列不完整同样停止，不主动补发，也不继续猜测任务调度。
+成功条件：已保留证据完整呈现上述顺序；前两个 POST 成功；父页面或已有 instrumentation 证实同源 ready；此后的重定向、Admin GET 与静态资源成功；Cookie 已被接受且四个属性完整；CSP/X-Frame-Options 保持同源；Console 无相关错误。失败停止点：任一状态码或安全属性不符就停在对应边界并升级；ready 或 Network 证据序列不完整同样停止，不主动补发，也不继续猜测任务调度。
 
 ## 11. executor 在线、任务不触发与 SKIPPED_LOCK_HELD
 
@@ -278,7 +285,7 @@ if awk '
     gsub(/\?\[redacted_query\]|#\[redacted_fragment\]/, "", line)
     if (line ~ /authorization:[[:space:]]*bearer/) leaked=1
     if (line ~ /(ticket|cookie|token|password|secret|authorization|platform_session_digest)[[:alnum:]_"'\''-]*[[:space:]]*[=:][[:space:]]*["'\'']*[^,;[:space:]"'\''}]/) leaked=1
-    if (line ~ /https?:\/\/[^[:space:]]*[?&][^[:space:]]*=/) leaked=1
+    if (line ~ /[^[:space:]?#][?#][^[:space:]]+/ || line ~ /(^|[[:space:]])[?#][^[:space:]]+/) leaked=1
   }
   END { exit leaked ? 1 : 0 }
 ' \

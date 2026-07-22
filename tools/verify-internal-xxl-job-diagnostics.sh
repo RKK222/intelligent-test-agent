@@ -59,7 +59,8 @@ grep -Fq '浏览器现场只能被动检查事故时已经保留的证据' "${RO
 validate_strict_manual_contract() {
   local manual_file="$1"
   local topology_section entry_section frontend_section backend_4_section backend_114_section
-  local redis_section mysql_section browser_section task_section evidence_section
+  local redis_section mysql_section browser_section task_section evidence_section executable_fences
+  local ticket_step login_step ready_step admin_get_step relative_write_status
 
   topology_section="$(awk '/^## 1\./ { active=1 } /^## 2\./ { active=0 } active' "${manual_file}")"
   entry_section="$(awk '/^## 4\./ { active=1 } /^## 5\./ { active=0 } active' "${manual_file}")"
@@ -71,6 +72,35 @@ validate_strict_manual_contract() {
   browser_section="$(awk '/^## 10\./ { active=1 } /^## 11\./ { active=0 } active' "${manual_file}")"
   task_section="$(awk '/^## 11\./ { active=1 } /^## 12\./ { active=0 } active' "${manual_file}")"
   evidence_section="$(awk '/^## 14\./ { active=1 } /^## 15\./ { active=0 } active' "${manual_file}")"
+  executable_fences="$(awk '
+    function flush_command() {
+      if (command_buffer != "") {
+        print command_buffer
+        command_buffer=""
+      }
+    }
+    {
+      marker=tolower($0)
+      if (marker ~ /^[[:space:]]*```(bash|sh|shell|sql)[[:space:]]*$/) {
+        executable=1
+        next
+      }
+      if (marker ~ /^[[:space:]]*```[[:space:]]*$/) {
+        flush_command()
+        executable=0
+        next
+      }
+      if (executable) {
+        command_line=$0
+        continued=(command_line ~ /\\[[:space:]]*$/)
+        sub(/\\[[:space:]]*$/, "", command_line)
+        if (command_buffer == "") command_buffer=command_line
+        else command_buffer=command_buffer " " command_line
+        if (!continued) flush_command()
+      }
+    }
+    END { flush_command() }
+  ' "${manual_file}")"
 
   grep -Fq '| 浏览器域名入口 | `http://mimo.sdc.cs.icbc:9996` |' <<<"${topology_section}" || return 1
   grep -Fq '| 浏览器 IP 入口、实体 Nginx | `http://122.233.30.2:9996`、`122.233.30.2` |' <<<"${topology_section}" || return 1
@@ -145,7 +175,15 @@ validate_strict_manual_contract() {
   grep -Fq 'X-Frame-Options: SAMEORIGIN' <<<"${browser_section}" || return 1
   grep -Fq '`POST /api/internal/platform/xxl-job/sso-tickets`' <<<"${browser_section}" || return 1
   grep -Fq '`POST /xxl-job-admin/platform-sso/login`' <<<"${browser_section}" || return 1
-  grep -Fq '后续 Admin `GET /xxl-job-admin/`' <<<"${browser_section}" || return 1
+  grep -Fq 'ready 之后的已保留 Network' <<<"${browser_section}" || return 1
+  ticket_step="$(grep -nF '1. 已保留的 Network：`POST /api/internal/platform/xxl-job/sso-tickets`。' <<<"${browser_section}" | cut -d: -f1)"
+  login_step="$(grep -nF '2. 已保留的 Network：`POST /xxl-job-admin/platform-sso/login` 完成响应。' <<<"${browser_section}" | cut -d: -f1)"
+  ready_step="$(grep -nF '3. Network 之外的被动证据：父页面已显示 connected/ready，或已有 instrumentation 记录同源 ready `postMessage`。' <<<"${browser_section}" | cut -d: -f1)"
+  admin_get_step="$(grep -nF '4. ready 之后的已保留 Network：重定向及 Admin `GET /xxl-job-admin/`、静态资源。' <<<"${browser_section}" | cut -d: -f1)"
+  [[ "${ticket_step}" =~ ^[0-9]+$ && "${login_step}" =~ ^[0-9]+$ && "${ready_step}" =~ ^[0-9]+$ && "${admin_get_step}" =~ ^[0-9]+$ ]] || return 1
+  (( ticket_step < login_step && login_step < ready_step && ready_step < admin_get_step )) || return 1
+  grep -Fq 'DevTools Network 不会记录 `postMessage`' <<<"${browser_section}" || return 1
+  grep -Fq '如果这两类 ready 证据都未保留，立即停止并升级，不得重放' <<<"${browser_section}" || return 1
   grep -Fq '禁止为了诊断主动刷新、重试、重放或重新进入页面' <<<"${browser_section}" || return 1
   grep -Fq '如果 Network 未保留本次失败请求，立即停止并升级' <<<"${browser_section}" || return 1
   if grep -Eqi '打开开发者工具后再复现|刷新页面并|重新加载页面并|重试(该|上述|SSO|登录|请求)|重放(该|上述|SSO|登录|请求)|再次(打开|进入|访问).*(复现|重试)|请.*复现|复现一次|reproduce|retry the|reload the' <<<"${browser_section}"; then
@@ -194,6 +232,54 @@ validate_strict_manual_contract() {
   if grep -Eqi '^[[:space:]]*(sudo[[:space:]]+)?(systemctl|service)[[:space:]]+(start|stop|restart|reload)|^[[:space:]]*nginx[[:space:]].*(-s[[:space:]]+reload|reload)|^[[:space:]]*(sed[[:space:]]+-i|perl[[:space:]]+-pi)|^[[:space:]]*(echo|printf|cat)[[:space:]].*>+[[:space:]]*/data/testagent/(config|deploy)|^[[:space:]]*(cp|mv|install)[[:space:]].*[[:space:]]/data/testagent/config/|(^|[[:space:]])>>[[:space:]]*/data/testagent/(config|deploy)' "${manual_file}"; then
     return 1
   fi
+  if grep -Eqi '^[[:space:]]*(redis-cli|valkey-cli)[[:space:]].*(GET|GETDEL|MGET|HGET|SCAN|KEYS).*(ticket|session)' <<<"${executable_fences}"; then
+    return 1
+  fi
+  if grep -Eqi '^[[:space:]]*mysql[[:space:]].*((--execute(=|[[:space:]])|-e([^[:alnum:]_]|$)).*(INSERT|UPDATE|DELETE|REPLACE|MERGE|TRUNCATE|ALTER|CREATE|DROP|CALL|GRANT|REVOKE))' <<<"${executable_fences}"; then
+    return 1
+  fi
+  if grep -Eqi '^[[:space:]]*((sudo[[:space:]]+)?systemctl[[:space:]]+(start|stop|restart|reload)|(sudo[[:space:]]+)?service[[:space:]]+[^[:space:]]+[[:space:]]+(start|stop|restart|reload)|(kill|pkill|killall)[[:space:]].*(-HUP|-1|SIGHUP|-s[[:space:]]+HUP))' <<<"${executable_fences}"; then
+    return 1
+  fi
+  if grep -Eqi '^[[:space:]]*(sed[[:space:]]+-i|perl[[:space:]]+-pi)|(^|[[:space:]])>+[[:space:]]*(/data/testagent/config/|/data/apps/nginx/([^[:space:]]*/)?conf/)|(^|[[:space:]|;&])tee([[:space:]]+-[^[:space:]]+)*[[:space:]]+(/data/testagent/config/|/data/apps/nginx/([^[:space:]]*/)?conf/)|^[[:space:]]*(cp|mv|install)[[:space:]].*[[:space:]](/data/testagent/config/|/data/apps/nginx/([^[:space:]]*/)?conf/)' <<<"${executable_fences}"; then
+    return 1
+  fi
+  if awk '
+    {
+      marker=tolower($0)
+      if (marker ~ /^[[:space:]]*```(bash|sh|shell|sql)[[:space:]]*$/) {
+        executable=1
+        in_config_dir=0
+        next
+      }
+      if (marker ~ /^[[:space:]]*```[[:space:]]*$/) {
+        executable=0
+        in_config_dir=0
+        next
+      }
+      if (!executable) next
+
+      line=tolower($0)
+      if (line ~ /(^|[;&|][[:space:]]*)cd[[:space:]]+(--[[:space:]]+)?["'\''"]*\/data\/testagent\/config([\/"'\''[:space:]]|$)/ ||
+          line ~ /(^|[;&|][[:space:]]*)cd[[:space:]]+(--[[:space:]]+)?["'\''"]*\/data\/apps\/nginx\/([^[:space:]"'\''\/]+\/)*conf([\/"'\''[:space:]]|$)/) {
+        in_config_dir=1
+      } else if (line ~ /(^|[;&|][[:space:]]*)cd[[:space:]]+/) {
+        in_config_dir=0
+      }
+      if (in_config_dir &&
+          (line ~ /(^|[[:space:]])>+[[:space:]]*[^\/[:space:]]/ ||
+           line ~ /(^|[[:space:]|;&])tee([[:space:]]+-[^[:space:]]+)*[[:space:]]+[^\/[:space:]]/ ||
+           line ~ /^[[:space:]]*(cp|mv|install)[[:space:]].*[[:space:]][^\/[:space:]]+[[:space:]]*$/)) {
+        unsafe=1
+      }
+    }
+    END { exit unsafe ? 0 : 1 }
+  ' "${manual_file}"; then
+    return 1
+  else
+    relative_write_status=$?
+    [[ "${relative_write_status}" -eq 1 ]] || return 1
+  fi
 }
 
 validate_strict_manual_contract "${TROUBLESHOOTING_MANUAL}" || {
@@ -226,7 +312,23 @@ UNSAFE_MISSING_EVIDENCE_BOUNDARIES_MANUAL="${TMP_ROOT}/unsafe-missing-evidence-b
 UNSAFE_MISSING_114_SUCCESS_MANUAL="${TMP_ROOT}/unsafe-missing-114-success-manual.md"
 UNSAFE_REOPEN_BROWSER_MANUAL="${TMP_ROOT}/unsafe-reopen-browser-manual.md"
 UNSAFE_NGINX_WORDING_MANUAL="${TMP_ROOT}/unsafe-nginx-wording-manual.md"
+UNSAFE_SSO_ORDER_MANUAL="${TMP_ROOT}/unsafe-sso-order-manual.md"
+UNSAFE_GLOBAL_REDIS_MANUAL="${TMP_ROOT}/unsafe-global-redis-manual.md"
+UNSAFE_GLOBAL_MYSQL_EXEC_MANUAL="${TMP_ROOT}/unsafe-global-mysql-exec-manual.md"
+UNSAFE_GLOBAL_MYSQL_E_MANUAL="${TMP_ROOT}/unsafe-global-mysql-e-manual.md"
+UNSAFE_GLOBAL_SERVICE_MANUAL="${TMP_ROOT}/unsafe-global-service-manual.md"
+UNSAFE_GLOBAL_HUP_MANUAL="${TMP_ROOT}/unsafe-global-hup-manual.md"
+UNSAFE_GLOBAL_SED_MANUAL="${TMP_ROOT}/unsafe-global-sed-manual.md"
+UNSAFE_GLOBAL_REDIRECT_MANUAL="${TMP_ROOT}/unsafe-global-redirect-manual.md"
+UNSAFE_GLOBAL_TEE_NGINX_MANUAL="${TMP_ROOT}/unsafe-global-tee-nginx-manual.md"
+UNSAFE_GLOBAL_CP_MANUAL="${TMP_ROOT}/unsafe-global-cp-manual.md"
+UNSAFE_GLOBAL_REDIS_MULTILINE_MANUAL="${TMP_ROOT}/unsafe-global-redis-multiline-manual.md"
+UNSAFE_GLOBAL_MYSQL_COMPACT_E_MANUAL="${TMP_ROOT}/unsafe-global-mysql-compact-e-manual.md"
+UNSAFE_GLOBAL_SUDO_SERVICE_MANUAL="${TMP_ROOT}/unsafe-global-sudo-service-manual.md"
+UNSAFE_GLOBAL_KILL_SIGNAL_MANUAL="${TMP_ROOT}/unsafe-global-kill-signal-manual.md"
+UNSAFE_GLOBAL_RELATIVE_CONFIG_WRITE_MANUAL="${TMP_ROOT}/unsafe-global-relative-config-write-manual.md"
 SAFE_PASSIVE_PATH_MANUAL="${TMP_ROOT}/safe-passive-path-manual.md"
+SAFE_PASSIVE_COMMAND_MENTIONS_MANUAL="${TMP_ROOT}/safe-passive-command-mentions-manual.md"
 awk '
   !changed && /--expected-host 122\.233\.30\.4 --minutes 15/ {
     sub(/--expected-host 122\.233\.30\.4 --minutes 15/, "--expected-host 122.233.30.114 --minutes 15")
@@ -314,8 +416,60 @@ awk '/^## 11\./ { print "请再次打开管理页以复现一次 SSO 故障。" 
   "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_REOPEN_BROWSER_MANUAL}"
 awk '/^## 6\./ { print "该脚本不执行配置测试。" } { print }' \
   "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_NGINX_WORDING_MANUAL}"
+awk '
+  /^3\. Network 之外的被动证据：/ { sub(/^3\./, "4.") }
+  /^4\. ready 之后的已保留 Network：/ { sub(/^4\./, "3.") }
+  { print }
+' "${TROUBLESHOOTING_MANUAL}" >"${UNSAFE_SSO_ORDER_MANUAL}"
+
+make_global_fence_mutation() {
+  local target="$1" fixture_command="$2"
+  XXL_DIAG_FIXTURE_COMMAND="${fixture_command}" awk '
+    /^## 2\./ {
+      print "```bash"
+      print ENVIRON["XXL_DIAG_FIXTURE_COMMAND"]
+      print "```"
+      print ""
+    }
+    { print }
+  ' "${TROUBLESHOOTING_MANUAL}" >"${target}"
+}
+
+make_global_fence_mutation "${UNSAFE_GLOBAL_REDIS_MANUAL}" \
+  'redis-cli GET test-agent:ticket:diagnostic'
+make_global_fence_mutation "${UNSAFE_GLOBAL_MYSQL_EXEC_MANUAL}" \
+  "mysql --execute='UPDATE xxl_job_info SET trigger_status=1'"
+make_global_fence_mutation "${UNSAFE_GLOBAL_MYSQL_E_MANUAL}" \
+  "mysql -e 'DELETE FROM xxl_job_info'"
+make_global_fence_mutation "${UNSAFE_GLOBAL_SERVICE_MANUAL}" \
+  'service nginx restart'
+make_global_fence_mutation "${UNSAFE_GLOBAL_HUP_MANUAL}" \
+  'kill -HUP 4242'
+make_global_fence_mutation "${UNSAFE_GLOBAL_SED_MANUAL}" \
+  'sed -i s/old/new/ /data/testagent/config/backend.env'
+make_global_fence_mutation "${UNSAFE_GLOBAL_REDIRECT_MANUAL}" \
+  "printf '%s\\n' unsafe > /data/testagent/config/backend.env"
+make_global_fence_mutation "${UNSAFE_GLOBAL_TEE_NGINX_MANUAL}" \
+  "printf '%s\\n' unsafe | tee /data/apps/nginx/conf/nginx.conf"
+make_global_fence_mutation "${UNSAFE_GLOBAL_CP_MANUAL}" \
+  'cp /tmp/backend.env /data/testagent/config/backend.env'
+make_global_fence_mutation "${UNSAFE_GLOBAL_REDIS_MULTILINE_MANUAL}" \
+  'redis-cli \
+  GET \
+  test-agent:ticket:diagnostic'
+make_global_fence_mutation "${UNSAFE_GLOBAL_MYSQL_COMPACT_E_MANUAL}" \
+  "mysql -e'DELETE FROM xxl_job_info'"
+make_global_fence_mutation "${UNSAFE_GLOBAL_SUDO_SERVICE_MANUAL}" \
+  'sudo service nginx restart'
+make_global_fence_mutation "${UNSAFE_GLOBAL_KILL_SIGNAL_MANUAL}" \
+  'kill -s HUP 4242'
+make_global_fence_mutation "${UNSAFE_GLOBAL_RELATIVE_CONFIG_WRITE_MANUAL}" \
+  'cd /data/apps/nginx/conf
+printf '\''unsafe\n'\'' > nginx.conf'
 awk '/^## 11\./ { print "被动识别路径：\n`POST /api/internal/platform/xxl-job/sso-tickets`\n`POST /xxl-job-admin/platform-sso/login`" } { print }' \
   "${TROUBLESHOOTING_MANUAL}" >"${SAFE_PASSIVE_PATH_MANUAL}"
+awk '/^## 2\./ { print "禁止执行 `redis-cli GET test-agent:ticket:diagnostic`、`service nginx restart`、`mysql --execute=\047UPDATE xxl_job_info SET trigger_status=1\047`；这些只是被动识别的禁令文本。" } { print }' \
+  "${TROUBLESHOOTING_MANUAL}" >"${SAFE_PASSIVE_COMMAND_MENTIONS_MANUAL}"
 
 for unsafe_manual in \
   "${UNSAFE_HOST_MANUAL}" \
@@ -337,7 +491,22 @@ for unsafe_manual in \
   "${UNSAFE_MISSING_EVIDENCE_BOUNDARIES_MANUAL}" \
   "${UNSAFE_MISSING_114_SUCCESS_MANUAL}" \
   "${UNSAFE_REOPEN_BROWSER_MANUAL}" \
-  "${UNSAFE_NGINX_WORDING_MANUAL}"; do
+  "${UNSAFE_NGINX_WORDING_MANUAL}" \
+  "${UNSAFE_SSO_ORDER_MANUAL}" \
+  "${UNSAFE_GLOBAL_REDIS_MANUAL}" \
+  "${UNSAFE_GLOBAL_MYSQL_EXEC_MANUAL}" \
+  "${UNSAFE_GLOBAL_MYSQL_E_MANUAL}" \
+  "${UNSAFE_GLOBAL_SERVICE_MANUAL}" \
+  "${UNSAFE_GLOBAL_HUP_MANUAL}" \
+  "${UNSAFE_GLOBAL_SED_MANUAL}" \
+  "${UNSAFE_GLOBAL_REDIRECT_MANUAL}" \
+  "${UNSAFE_GLOBAL_TEE_NGINX_MANUAL}" \
+  "${UNSAFE_GLOBAL_CP_MANUAL}" \
+  "${UNSAFE_GLOBAL_REDIS_MULTILINE_MANUAL}" \
+  "${UNSAFE_GLOBAL_MYSQL_COMPACT_E_MANUAL}" \
+  "${UNSAFE_GLOBAL_SUDO_SERVICE_MANUAL}" \
+  "${UNSAFE_GLOBAL_KILL_SIGNAL_MANUAL}" \
+  "${UNSAFE_GLOBAL_RELATIVE_CONFIG_WRITE_MANUAL}"; do
   if validate_strict_manual_contract "${unsafe_manual}" >/dev/null 2>&1; then
     printf '严格文档契约错误接受危险变异夹具: %s\n' "${unsafe_manual##*/}" >&2
     exit 1
@@ -346,6 +515,10 @@ done
 
 if ! validate_strict_manual_contract "${SAFE_PASSIVE_PATH_MANUAL}" >/dev/null 2>&1; then
   printf '严格文档契约错误拒绝合法被动路径夹具\n' >&2
+  exit 1
+fi
+if ! validate_strict_manual_contract "${SAFE_PASSIVE_COMMAND_MENTIONS_MANUAL}" >/dev/null 2>&1; then
+  printf '严格文档契约错误拒绝合法的行内禁令文本夹具\n' >&2
   exit 1
 fi
 
@@ -359,23 +532,79 @@ EVIDENCE_AWK_PROGRAM="$(awk '
   exit 1
 }
 EVIDENCE_SCAN_CLEAN_FIXTURE="${TMP_ROOT}/evidence-scan-clean.log"
-EVIDENCE_SCAN_UNSAFE_FIXTURE="${TMP_ROOT}/evidence-scan-unsafe.log"
+EVIDENCE_SCAN_RAW_TOKEN_FIXTURE="${TMP_ROOT}/evidence-scan-raw-token.log"
+EVIDENCE_SCAN_ABSOLUTE_QUERY_FIXTURE="${TMP_ROOT}/evidence-scan-absolute-query.log"
+EVIDENCE_SCAN_RELATIVE_QUERY_FIXTURE="${TMP_ROOT}/evidence-scan-relative-query.log"
+EVIDENCE_SCAN_ABSOLUTE_FRAGMENT_FIXTURE="${TMP_ROOT}/evidence-scan-absolute-fragment.log"
+EVIDENCE_SCAN_RELATIVE_FRAGMENT_FIXTURE="${TMP_ROOT}/evidence-scan-relative-fragment.log"
+EVIDENCE_SCAN_PATH_RELATIVE_QUERY_FIXTURE="${TMP_ROOT}/evidence-scan-path-relative-query.log"
+EVIDENCE_SCAN_PATH_RELATIVE_FRAGMENT_FIXTURE="${TMP_ROOT}/evidence-scan-path-relative-fragment.log"
+EVIDENCE_SCAN_QUERY_ONLY_FIXTURE="${TMP_ROOT}/evidence-scan-query-only.log"
+EVIDENCE_SCAN_FRAGMENT_ONLY_FIXTURE="${TMP_ROOT}/evidence-scan-fragment-only.log"
+EVIDENCE_SCAN_OUTPUT="${TMP_ROOT}/evidence-scan-output.log"
 cat >"${EVIDENCE_SCAN_CLEAN_FIXTURE}" <<'EOF'
 TEST_AGENT_XXL_JOB_ACCESS_TOKEN=SET length=32 sha256=0123456789abcdef
 Authorization=[REDACTED]
 https://diag.example/xxl-job-admin/?[REDACTED_QUERY]
+/xxl-job-admin/?[REDACTED_QUERY]
+https://diag.example/xxl-job-admin/#[REDACTED_FRAGMENT]
+/xxl-job-admin/#[REDACTED_FRAGMENT]
 EOF
-cat >"${EVIDENCE_SCAN_UNSAFE_FIXTURE}" <<'EOF'
+cat >"${EVIDENCE_SCAN_RAW_TOKEN_FIXTURE}" <<'EOF'
 token=diagnostic-raw-secret https://diag.example/xxl-job-admin/?[REDACTED_QUERY]
 EOF
-if ! awk "${EVIDENCE_AWK_PROGRAM}" "${EVIDENCE_SCAN_CLEAN_FIXTURE}" >/dev/null; then
+cat >"${EVIDENCE_SCAN_ABSOLUTE_QUERY_FIXTURE}" <<'EOF'
+https://diag.example/xxl-job-admin/?opaque-query
+EOF
+cat >"${EVIDENCE_SCAN_RELATIVE_QUERY_FIXTURE}" <<'EOF'
+/xxl-job-admin/?opaque-query
+EOF
+cat >"${EVIDENCE_SCAN_ABSOLUTE_FRAGMENT_FIXTURE}" <<'EOF'
+https://diag.example/xxl-job-admin/#raw-fragment
+EOF
+cat >"${EVIDENCE_SCAN_RELATIVE_FRAGMENT_FIXTURE}" <<'EOF'
+/xxl-job-admin/#raw-fragment
+EOF
+cat >"${EVIDENCE_SCAN_PATH_RELATIVE_QUERY_FIXTURE}" <<'EOF'
+page?opaque-query
+EOF
+cat >"${EVIDENCE_SCAN_PATH_RELATIVE_FRAGMENT_FIXTURE}" <<'EOF'
+page#raw-fragment
+EOF
+cat >"${EVIDENCE_SCAN_QUERY_ONLY_FIXTURE}" <<'EOF'
+?opaque-query
+EOF
+cat >"${EVIDENCE_SCAN_FRAGMENT_ONLY_FIXTURE}" <<'EOF'
+#raw-fragment
+EOF
+if ! awk "${EVIDENCE_AWK_PROGRAM}" "${EVIDENCE_SCAN_CLEAN_FIXTURE}" >"${EVIDENCE_SCAN_OUTPUT}"; then
   printf '正式手册证据扫描器错误拒绝安全摘要夹具\n' >&2
   exit 1
 fi
-if awk "${EVIDENCE_AWK_PROGRAM}" "${EVIDENCE_SCAN_UNSAFE_FIXTURE}" >/dev/null; then
-  printf '正式手册证据扫描器错误接受同一行明文与脱敏标记并存夹具\n' >&2
+[[ ! -s "${EVIDENCE_SCAN_OUTPUT}" ]] || {
+  printf '正式手册证据扫描器不应输出安全夹具内容\n' >&2
   exit 1
-fi
+}
+for unsafe_evidence_fixture in \
+  "${EVIDENCE_SCAN_RAW_TOKEN_FIXTURE}" \
+  "${EVIDENCE_SCAN_ABSOLUTE_QUERY_FIXTURE}" \
+  "${EVIDENCE_SCAN_RELATIVE_QUERY_FIXTURE}" \
+  "${EVIDENCE_SCAN_ABSOLUTE_FRAGMENT_FIXTURE}" \
+  "${EVIDENCE_SCAN_RELATIVE_FRAGMENT_FIXTURE}" \
+  "${EVIDENCE_SCAN_PATH_RELATIVE_QUERY_FIXTURE}" \
+  "${EVIDENCE_SCAN_PATH_RELATIVE_FRAGMENT_FIXTURE}" \
+  "${EVIDENCE_SCAN_QUERY_ONLY_FIXTURE}" \
+  "${EVIDENCE_SCAN_FRAGMENT_ONLY_FIXTURE}"; do
+  : >"${EVIDENCE_SCAN_OUTPUT}"
+  if awk "${EVIDENCE_AWK_PROGRAM}" "${unsafe_evidence_fixture}" >"${EVIDENCE_SCAN_OUTPUT}"; then
+    printf '正式手册证据扫描器错误接受未脱敏夹具: %s\n' "${unsafe_evidence_fixture##*/}" >&2
+    exit 1
+  fi
+  [[ ! -s "${EVIDENCE_SCAN_OUTPUT}" ]] || {
+    printf '正式手册证据扫描器不应输出未脱敏夹具内容\n' >&2
+    exit 1
+  }
+done
 
 cat >"${FAKE_BIN}/getent" <<'EOF'
 #!/usr/bin/env bash
