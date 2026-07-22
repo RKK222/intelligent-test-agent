@@ -1,8 +1,8 @@
 # 企业内多后台部署
 
-当前代码的普通 HTTP、RunEvent SSE、用户 OpenCode 进程路由、内部模型代理和受控 WebSocket 支持两个或更多后台节点。页面首次查询 `/processes/me` 时不带服务器路由头，仍按 `least_conn` 进入任意 Java；拿到 binding 中的 `linuxServerId` 后，前端仅在页面内存保存它，并给后续用户 OpenCode、会话、Run、SSE 和本地工作区请求增加 `X-Test-Agent-Linux-Server-Id`。Nginx 通过静态白名单把这些请求直接送到一机一 Java 的目标节点，避免正常链路中的 Java→Java 二次转发。
+当前代码的普通 HTTP、RunEvent SSE、用户 OpenCode 进程路由、内部模型代理和受控 WebSocket 支持两个或更多后台节点。页面首次查询 `/processes/me` 时不带服务器路由头，仍按 `least_conn` 进入任意 Java；用户未绑定时，入口 Java 会基于共享 Redis 快照选择进程总数最少且存在本地可用容器的服务器，必要时通过公共 Java→Java 转发器把状态或初始化请求单次转发到该服务器，目标 Java 再完成本地容器选择与原子端口预留。拿到 binding 中的 `linuxServerId` 后，前端仅在页面内存保存它，并给后续用户 OpenCode、会话、Run、SSE 和本地工作区请求增加 `X-Test-Agent-Linux-Server-Id`。Nginx 通过静态白名单把这些请求直接送到一机一 Java 的目标节点，避免正常链路中的 Java→Java 二次转发。
 
-这个头只是首跳性能提示，不是权限或路由事实源。缺失、未知或过期时仍由 `least_conn` 和后端公共路由程序根据真实 binding 兜底；Nginx 在转发前删除外部传入的路由头和 `X-Test-Agent-Backend-Routed`，后端鉴权、Session 归属和运行上下文校验继续生效。workspace PTY 和 Agent 配置进度 ticket 响应沿用签发 Java 地址；当前 HTTP 现场的服务器终端 ticket POST 也复用同一静态路由表，响应再返回签发 Java 的直接 `ws://` 地址，因此 ticket 的签发和消费不会跨 JVM，也不依赖 sticky。
+这个头只是首跳性能提示，不是权限或路由事实源。缺失、未知或过期时仍由 `least_conn` 和后端公共路由程序根据真实 binding 兜底；尚无 binding 的精确状态/初始化请求则重新按当轮集群负载选服，已有 binding 不因负载变化迁移；Nginx 在转发前删除外部传入的路由头和 `X-Test-Agent-Backend-Routed`，后端鉴权、Session 归属和运行上下文校验继续生效。workspace PTY 和 Agent 配置进度 ticket 响应沿用签发 Java 地址；当前 HTTP 现场的服务器终端 ticket POST 也复用同一静态路由表，响应再返回签发 Java 的直接 `ws://` 地址，因此 ticket 的签发和消费不会跨 JVM，也不依赖 sticky。
 
 本文用两个后台举例：
 
@@ -661,7 +661,7 @@ docker logs --tail 200 test-agent-opencode-worker | \
    ```
 
 2. 从实际浏览器网段分别执行 `curl -fsS http://mimo.sdc.cs.icbc:9996/health` 和 `curl -fsS http://122.233.30.2:9996/health`，两条都返回 `ok`；浏览器 Network 中 API 都是当前地址下的相对 `/api/...`，不能固定请求另一个 origin。
-3. 登录后打开浏览器开发者工具的 Network，刷新页面并按时间排序：第一次 `GET /api/internal/agent/opencode/processes/me` 不应携带 `X-Test-Agent-Linux-Server-Id`；响应给出 `linuxServerId` 后，进程健康、Session、Run、permission/question、工作区请求和两个 fetch SSE 请求应携带该值。用户管理、应用列表、登录和共享查询不应携带它；刷新后仍应重新从第一次 `/processes/me` 获取，不能从 localStorage/sessionStorage 恢复。
+3. 登录后打开浏览器开发者工具的 Network，刷新页面并按时间排序：第一次 `GET /api/internal/agent/opencode/processes/me` 不应携带 `X-Test-Agent-Linux-Server-Id`；未绑定用户可能先进入任一 Java、再由后端转发到当前进程总数最少的可初始化服务器，因此两台 Java 都可能出现同一 traceId，但只有目标 Java 执行本地状态逻辑。响应给出 `linuxServerId` 后，进程健康、Session、Run、permission/question、工作区请求和两个 fetch SSE 请求应携带该值。用户管理、应用列表、登录和共享查询不应携带它；刷新后仍应重新从第一次 `/processes/me` 获取，不能从 localStorage/sessionStorage 恢复。
 4. 用已登录浏览器中复制的 JWT 对两个静态映射做可追踪验证。下面先验证绑定在 `.4` 的用户；把 `REPLACE_LOGIN_JWT` 替换为该用户当前 token：
 
    ```bash
@@ -706,7 +706,7 @@ docker logs --tail 200 test-agent-opencode-worker | \
 6. 运行管理中出现两个不同 `linuxServerId` 的 Java、manager 和容器，连接均在线。
 7. 从 `.4` curl `.114:8080/actuator/health`，从 `.114` curl `.4:8080/actuator/health`。
 8. 两个服务器都能初始化用户进程，动态端口的 `/global/health`、`/api/provider`、`/api/model` 正常。
-9. 从前端连续创建多个用户/会话，确认进程可分布在两个服务器。
+9. 做两级调度验收：先让 `.114` 的进程总数低于 `.4`，直接向 `.4` 对一个未绑定用户调用初始化，确认 binding 落到 `.114` 且只有 `.114` manager 收到 start；反转负载后让新用户落到 `.4`；再次请求已有 binding 用户，确认仍留在原服务器。
 10. 分别用 Qwen 和 DeepSeek 验证普通正文、think/reasoning、工具调用、持续 SSE 和 `[DONE]`。
 11. 两台后台都确认 9070 直连；正式链路中没有监听 19070 的 relay。
 12. 分别打开终端、Workspace/Agent 文件编辑和 Agent 配置 Git 进度，浏览器 WebSocket URL 应直连 ticket 响应中的 `.4:8080` 或 `.114:8080`，连接不出现 ticket 无效。

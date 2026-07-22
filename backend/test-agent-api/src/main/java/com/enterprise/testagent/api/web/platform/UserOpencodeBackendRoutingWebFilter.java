@@ -14,8 +14,8 @@ import reactor.core.publisher.Mono;
 /**
  * 用户 opencode 进程 HTTP 后端路由过滤器。
  *
- * <p>认证过滤器写入用户主体后，本过滤器根据用户 ACTIVE binding 判断请求是否应转发到
- * binding 所属服务器的 Java；目标 Java 仍会执行同一套鉴权和业务校验。
+ * <p>认证过滤器写入用户主体后，本过滤器优先按用户 ACTIVE binding 路由；未绑定的首次状态或
+ * 初始化请求按集群负载选择目标 Java。目标 Java 仍会执行同一套鉴权和业务校验。
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 25)

@@ -36,14 +36,15 @@ import org.springframework.http.MediaType;
 import org.springframework.http.server.reactive.ServerHttpRequestDecorator;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ServerWebExchange;
-import reactor.core.publisher.Mono;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * 用户 opencode 进程跨后端路由服务。
  *
- * <p>当前 Java 只控制本服务器 manager；如果用户 ACTIVE binding 属于其他服务器，
- * API 层把相关 HTTP 请求转发到 binding 所属服务器的 Java，由目标 Java 继续鉴权并操作本机 manager。
+ * <p>当前 Java 只控制本服务器 manager；用户已有 ACTIVE binding 时始终路由到 binding 所属服务器。
+ * 尚未绑定时，仅首次进程状态和初始化请求按集群实时负载选服，再由目标 Java 操作本机 manager。
  */
 @Service
 class UserOpencodeBackendRoutingService {
@@ -52,6 +53,7 @@ class UserOpencodeBackendRoutingService {
     private static final String OPENCODE_AGENT_ID = "opencode";
     private static final String AGENT_PREFIX = "/api/internal/agent/";
     private static final String PROCESS_STATUS_PATH = "/api/internal/agent/opencode/processes/me";
+    private static final String PROCESS_INITIALIZE_PATH = PROCESS_STATUS_PATH + "/initialize";
     private static final String PLATFORM_RUNTIME_PREFIX = "/api/internal/platform/opencode-runtime";
     private static final String CONFIGURATION_WORKSPACE_PREFIX =
             "/api/internal/platform/configuration-management/applications/";
@@ -172,7 +174,7 @@ class UserOpencodeBackendRoutingService {
     }
 
     /**
-     * 解析当前请求是否需要路由到远端 binding 所属后端。
+     * 解析当前请求是否需要路由到远端后端；已有 binding 优先，未绑定的首次请求才按全局负载选服。
      */
     Optional<String> targetLinuxServerId(ServerWebExchange exchange, AuthPrincipal principal) {
         Objects.requireNonNull(exchange, "exchange must not be null");
@@ -184,8 +186,16 @@ class UserOpencodeBackendRoutingService {
         if (agentId.isEmpty()) {
             return Optional.empty();
         }
-        return assignmentService.routingLinuxServerId(principal.userId(), agentId.get())
-                .flatMap(routeResolver::remoteTarget);
+        Optional<String> boundTarget = assignmentService.routingLinuxServerId(principal.userId(), agentId.get());
+        if (boundTarget.isPresent()) {
+            return boundTarget.flatMap(routeResolver::remoteTarget);
+        }
+        if (!isInitialAllocationRequest(exchange)) {
+            return Optional.empty();
+        }
+        return routeResolver.selectLeastLoadedInitializableServer()
+                .flatMap(routeResolver::remoteTarget)
+                .map(LinuxServerId::value);
     }
 
     /**
@@ -205,7 +215,11 @@ class UserOpencodeBackendRoutingService {
         }
         Optional<String> startRunAgentId = startRunAgentId(exchange);
         if (startRunAgentId.isEmpty()) {
-            return Mono.just(new RoutingResolution(exchange, targetLinuxServerId(exchange, principal)));
+            // binding 查询与 Redis 全局选服均为同步 I/O，延迟到订阅后才能进入统一异常链路。
+            return Mono.fromCallable(() -> new RoutingResolution(
+                            exchange,
+                            targetLinuxServerId(exchange, principal)))
+                    .subscribeOn(Schedulers.boundedElastic());
         }
         return cacheRequestBody(exchange)
                 .map(cached -> resolveStartRun(cached, principal, startRunAgentId.get()));
@@ -480,6 +494,13 @@ class UserOpencodeBackendRoutingService {
     private boolean isReadOnlyProcessStatusRequest(ServerWebExchange exchange) {
         return HttpMethod.GET.equals(exchange.getRequest().getMethod())
                 && PROCESS_STATUS_PATH.equals(exchange.getRequest().getURI().getRawPath());
+    }
+
+    private boolean isInitialAllocationRequest(ServerWebExchange exchange) {
+        HttpMethod method = exchange.getRequest().getMethod();
+        String path = exchange.getRequest().getURI().getRawPath();
+        return (HttpMethod.GET.equals(method) && PROCESS_STATUS_PATH.equals(path))
+                || (HttpMethod.POST.equals(method) && PROCESS_INITIALIZE_PATH.equals(path));
     }
 
     private boolean shouldFallbackToAllocationStatus(

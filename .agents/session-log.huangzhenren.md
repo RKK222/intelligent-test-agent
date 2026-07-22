@@ -761,3 +761,19 @@
   - 已覆盖两个 Provider 使用不同 Token、多个 Provider 复用 Token、轮换后刷新、缺失 Token 安全失败、旧请求兼容、鉴权、关联迁移、引用删除冲突、密钥草稿清理和原始报文脱敏。
   - 隔离全量 `mvn test` 中本任务涉及模块及 API 均通过，随后 persistence 的 67 个既有用例仍被 `V20260717173000__create_public_agent_config_rollouts.sql` 使用 H2 不识别的 `TIMESTAMPTZ` 阻断；近期 session log 已记录同一基线问题，本次未扩大范围修改。
   - 涉及新增内部 HTTP API、Flyway 表/外键、安全脱敏和运行时快照；不改变 RunEvent/既有刷新广播类型、不修改 generated SDK、环境配置或 Token 明文存储约定。发布时须先升级全部 Java 节点，再开放新页面的 Token 维护操作；混合版本期间不得配置不同 Provider Token。
+
+### 2026-07-22 - 用户 OpenCode 跨服务器两级负载分配
+
+- Why:
+  - 多 Java 部署下，未绑定用户的 OpenCode 首次查询和初始化只在入口 Java 的本地容器中分配，导致请求长期集中到同一 Linux 服务器，无法利用其它服务器的空闲容量。
+- What:
+  - `BackendJavaRouteResolver` 新增首次分配选服：同轮读取 manager/backend Redis 快照，按容器最新心跳去重，将服务器全部已连接容器（含已满容器）的进程数汇总为负载，仅保留存在 READY、未满且与目标在线 Java 已连接容器的服务器，并按负载与服务器 ID 稳定选择。
+  - 未绑定用户仅在精确的进程状态 GET 和初始化 POST 上执行全局选服；远端复用公共 Java 路由与 HTTP 转发，目标 Java 继续使用本地最空容器、原子预占和公共启动流程。ACTIVE binding 始终优先，转发失败不切换下一台服务器。
+  - Redis 选服异常进入响应式统一异常链，返回 `RUNTIME_STATE_UNAVAILABLE`；同步更新后端总览、API/runtime README、HTTP API 与单/多后台部署说明。
+- How:
+  - TDD 覆盖服务器级负载汇总、满容器计数与资格隔离、断连/无容量排除、最新快照去重、稳定排序、当前 Java 放行、远端 GET/POST 转发、binding 优先、防循环、单次失败和 Redis 统一错误。
+  - runtime 定向 74 项、API 路由定向 37 项通过；`mvn -f backend/pom.xml -pl test-agent-opencode-runtime,test-agent-api -am test` 的 16 个模块全部通过，其中 runtime 703 项、API 363 项均为 0 失败。
+- Result:
+  - 请求落到 Java A 时，若用户未绑定且 Java B 所在服务器负载更低并满足调度条件，请求会转发到 B 并由 B 完成创建；已有 ACTIVE binding 不随负载变化迁移。
+  - 未新增 HTTP 路径或 DTO，不修改 RunEvent、数据库/Flyway、SQL、manager 协议、前端、Nginx、环境变量或安全契约；Redis 快照仍为最终一致，并发容量继续由目标服务器原子预占保证。
+  - 本机无真实双 Linux 节点环境，负载反转、manager 启动唯一性和既有绑定驻留仍需部署环境人工验收；当前工作区其它进程生命周期/manager/前端改动均未纳入本次提交。
