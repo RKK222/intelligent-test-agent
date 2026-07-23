@@ -148,6 +148,100 @@ class BackendJavaRouteResolverTest {
                 });
     }
 
+    @Test
+    void selectsLeastLoadedInitializableServerByAggregatedContainerLoad() {
+        BackendJavaRouteResolver resolver = resolver(new FakeHeartbeatStore(
+                List.of(backendSnapshot("bjp_server_b", "server-b", "http://10.8.0.22:8080", NOW)),
+                List.of(
+                        managerSnapshot("ctr_a_01", "server-a", NOW, "bjp_current_backend", 10, 2),
+                        managerSnapshot("ctr_a_02", "server-a", NOW, "bjp_current_backend", 10, 1),
+                        managerSnapshot("ctr_b_01", "server-b", NOW, "bjp_server_b", 10, 1))));
+
+        Optional<LinuxServerId> selected = resolver.selectLeastLoadedInitializableServer();
+
+        assertThat(selected).contains(new LinuxServerId("server-b"));
+    }
+
+    @Test
+    void countsFullConnectedContainersButRequiresAnotherContainerWithCapacity() {
+        BackendJavaRouteResolver resolver = resolver(new FakeHeartbeatStore(
+                List.of(backendSnapshot("bjp_server_b", "server-b", "http://10.8.0.22:8080", NOW)),
+                List.of(
+                        managerSnapshot("ctr_a_full", "server-a", NOW, "bjp_current_backend", 10, 10),
+                        managerSnapshot("ctr_a_ready", "server-a", NOW, "bjp_current_backend", 10, 0),
+                        managerSnapshot("ctr_b_ready", "server-b", NOW, "bjp_server_b", 10, 2))));
+
+        assertThat(resolver.selectLeastLoadedInitializableServer())
+                .contains(new LinuxServerId("server-b"));
+    }
+
+    @Test
+    void excludesServersWithoutCapacityConnectedManagerOrRoutableJava() {
+        BackendJavaRouteResolver resolver = resolver(new FakeHeartbeatStore(
+                List.of(
+                        backendSnapshot("bjp_server_b", "server-b", "http://10.8.0.22:8080", NOW),
+                        backendSnapshot("bjp_server_c", "server-c", "http://10.8.0.23:8080", NOW)),
+                List.of(
+                        managerSnapshot("ctr_a_full", "server-a", NOW, "bjp_current_backend", 1, 1),
+                        managerSnapshot(
+                                "ctr_b_disconnected",
+                                "server-b",
+                                NOW,
+                                "bjp_server_b",
+                                10,
+                                0,
+                                OpencodeContainerStatus.READY,
+                                ManagerConnectionStatus.DISCONNECTED,
+                                ManagerConnectionStatus.CONNECTED),
+                        managerSnapshot(
+                                "ctr_c_backend_disconnected",
+                                "server-c",
+                                NOW,
+                                "bjp_server_c",
+                                10,
+                                0,
+                                OpencodeContainerStatus.READY,
+                                ManagerConnectionStatus.CONNECTED,
+                                ManagerConnectionStatus.DISCONNECTED),
+                        managerSnapshot("ctr_d_no_backend", "server-d", NOW, "bjp_server_d", 10, 0))));
+
+        assertThat(resolver.selectLeastLoadedInitializableServer()).isEmpty();
+    }
+
+    @Test
+    void usesLatestContainerSnapshotAndLinuxServerIdAsStableTieBreaker() {
+        BackendJavaRouteResolver resolver = resolver(new FakeHeartbeatStore(
+                List.of(backendSnapshot("bjp_server_b", "server-b", "http://10.8.0.22:8080", NOW)),
+                List.of(
+                        managerSnapshot(
+                                "ctr_a_01",
+                                "server-a",
+                                NOW.minusSeconds(30),
+                                "bjp_current_backend",
+                                10,
+                                9),
+                        managerSnapshot("ctr_a_01", "server-a", NOW, "bjp_current_backend", 10, 1),
+                        managerSnapshot("ctr_b_01", "server-b", NOW, "bjp_server_b", 10, 1))));
+
+        assertThat(resolver.selectLeastLoadedInitializableServer())
+                .contains(new LinuxServerId("server-a"));
+    }
+
+    @Test
+    void mapsRedisFailureWhileSelectingInitializableServer() {
+        OpencodeProcessHeartbeatStore failingStore = new FakeHeartbeatStore(List.of(), List.of()) {
+            @Override
+            public List<ManagerRuntimeSnapshot> liveManagerSnapshots() {
+                throw new IllegalStateException("redis unavailable");
+            }
+        };
+        BackendJavaRouteResolver resolver = resolver(failingStore);
+
+        assertThatThrownBy(resolver::selectLeastLoadedInitializableServer)
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.RUNTIME_STATE_UNAVAILABLE));
+    }
+
     private static BackendJavaRouteResolver resolver(OpencodeProcessHeartbeatStore heartbeatStore) {
         return resolver(heartbeatStore, new BackendProcessId("bjp_current_backend"));
     }
@@ -207,6 +301,44 @@ class BackendJavaRouteResolverTest {
             String linuxServerId,
             Instant heartbeatAt,
             String connectedBackendProcessId) {
+        return managerSnapshot(
+                containerId,
+                linuxServerId,
+                heartbeatAt,
+                connectedBackendProcessId,
+                10,
+                1);
+    }
+
+    private static ManagerRuntimeSnapshot managerSnapshot(
+            String containerId,
+            String linuxServerId,
+            Instant heartbeatAt,
+            String connectedBackendProcessId,
+            int maxProcesses,
+            int currentProcesses) {
+        return managerSnapshot(
+                containerId,
+                linuxServerId,
+                heartbeatAt,
+                connectedBackendProcessId,
+                maxProcesses,
+                currentProcesses,
+                OpencodeContainerStatus.READY,
+                ManagerConnectionStatus.CONNECTED,
+                ManagerConnectionStatus.CONNECTED);
+    }
+
+    private static ManagerRuntimeSnapshot managerSnapshot(
+            String containerId,
+            String linuxServerId,
+            Instant heartbeatAt,
+            String connectedBackendProcessId,
+            int maxProcesses,
+            int currentProcesses,
+            OpencodeContainerStatus containerStatus,
+            ManagerConnectionStatus managerStatus,
+            ManagerConnectionStatus backendConnectionStatus) {
         LinuxServerId serverId = new LinuxServerId(linuxServerId);
         OpencodeContainerId parsedContainerId = new OpencodeContainerId(containerId);
         ContainerManagerId managerId = new ContainerManagerId("mgr_" + linuxServerId.replace(".", "_").replace("-", "_"));
@@ -217,9 +349,9 @@ class BackendJavaRouteResolverTest {
                         "opencode-" + containerId,
                         4096,
                         4105,
-                        10,
-                        1,
-                        OpencodeContainerStatus.READY,
+                        maxProcesses,
+                        currentProcesses,
+                        containerStatus,
                         heartbeatAt,
                         NOW.minusSeconds(60),
                         heartbeatAt,
@@ -229,7 +361,7 @@ class BackendJavaRouteResolverTest {
                         parsedContainerId,
                         serverId,
                         "opencode-manager.v1",
-                        ManagerConnectionStatus.CONNECTED,
+                        managerStatus,
                         Map.of(),
                         heartbeatAt,
                         NOW.minusSeconds(60),
@@ -238,16 +370,24 @@ class BackendJavaRouteResolverTest {
                 connectedBackendProcessId == null ? List.of() : List.of(new OpencodeManagerBackendConnection(
                         managerId,
                         new BackendProcessId(connectedBackendProcessId),
-                        ManagerConnectionStatus.CONNECTED,
+                        backendConnectionStatus,
                         heartbeatAt,
                         heartbeatAt,
                         heartbeatAt,
                         "trace_manager")));
     }
 
-    private record FakeHeartbeatStore(
-            List<BackendRuntimeSnapshot> backendSnapshots,
-            List<ManagerRuntimeSnapshot> managerSnapshots) implements OpencodeProcessHeartbeatStore {
+    private static class FakeHeartbeatStore implements OpencodeProcessHeartbeatStore {
+        private final List<BackendRuntimeSnapshot> backendSnapshots;
+        private final List<ManagerRuntimeSnapshot> managerSnapshots;
+
+        private FakeHeartbeatStore(
+                List<BackendRuntimeSnapshot> backendSnapshots,
+                List<ManagerRuntimeSnapshot> managerSnapshots) {
+            this.backendSnapshots = backendSnapshots;
+            this.managerSnapshots = managerSnapshots;
+        }
+
         @Override public void recordBackendHeartbeat(LinuxServerId linuxServerId, Instant heartbeatAt) { }
         @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) { }
         @Override public void recordManagerSnapshot(ManagerRuntimeSnapshot snapshot) { }

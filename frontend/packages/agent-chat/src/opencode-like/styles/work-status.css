@@ -97,7 +97,10 @@
   box-sizing: border-box;
   width: 100%;
   min-height: 0;
+  max-height: min(360px, 50vh);
   flex-shrink: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
   padding: 0 10px 6px;
 }
 

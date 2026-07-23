@@ -61,7 +61,7 @@ import type {
 } from "@test-agent/shared-types";
 import { TerminalPanel } from "@test-agent/terminal";
 import { TestRunnerPanel } from "@test-agent/test-runner";
-import { type Feedback } from "@test-agent/ui-kit";
+import { Spinner, type Feedback } from "@test-agent/ui-kit";
 import {
   useWorkbenchStore,
   mockVcsDiffFiles,
@@ -7431,10 +7431,31 @@ async function handleLogout() {
             </CodeEditor>
             <div
               v-if="activeTab?.loadState === 'loading'"
-              class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-white/85 text-sm text-slate-500"
+              class="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-50/70 backdrop-blur-sm"
               role="status"
             >
-              正在读取文件…
+              <!-- 醒目的文件加载动画卡片，包含外圈渐变旋转、呼吸内圈和点阵 Spinner -->
+              <div class="flex flex-col items-center gap-5 p-8 rounded-2xl bg-white/90 border border-slate-100 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.12)] max-w-sm w-[85%] text-center animate-file-load-card">
+                <!-- 动画容器 -->
+                <div class="relative flex items-center justify-center w-16 h-16">
+                  <!-- 外圈旋转渐变色 -->
+                  <div class="absolute inset-0 rounded-full border-2 border-transparent border-t-indigo-500 border-r-purple-500 animate-spin" style="animation-duration: 1.2s;"></div>
+                  <!-- 内圈呼吸背景 -->
+                  <div class="absolute inset-2 rounded-full bg-gradient-to-tr from-indigo-50 to-purple-50 animate-pulse"></div>
+                  <!-- 点阵 Spinner 核心 -->
+                  <Spinner class="relative z-10 w-6 h-6 text-indigo-600" />
+                </div>
+                
+                <div class="flex flex-col gap-1">
+                  <div class="text-sm font-semibold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent select-none">
+                    正在读取文件
+                  </div>
+                  <div class="text-xs text-slate-400 select-none flex items-center gap-1 justify-center">
+                    <span class="inline-block w-1.5 h-1.5 rounded-full bg-indigo-500/80 animate-pulse"></span>
+                    <span>正在努力加载，请稍候</span>
+                  </div>
+                </div>
+              </div>
             </div>
             <div
               v-else-if="activeTab?.progressivePreview"
@@ -7962,5 +7983,21 @@ async function handleLogout() {
 
 .ta-btn-confirm:hover {
   background: #ea580c; /* 深橙色 */
+}
+
+/* 醒目的文件加载卡片淡入及缩放动画，提升首屏过渡体验 */
+@keyframes file-load-card-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-file-load-card {
+  animation: file-load-card-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 </style>

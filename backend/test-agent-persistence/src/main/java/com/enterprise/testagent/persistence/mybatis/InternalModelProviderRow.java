@@ -11,6 +11,20 @@ public record InternalModelProviderRow(
         String baseUrl,
         boolean enabled,
         int sortOrder,
+        Long tokenId,
+        String tokenName,
+        boolean tokenConfigured,
         Instant createdAt,
         Instant updatedAt) {
+
+    public InternalModelProviderRow(
+            String providerId,
+            String name,
+            String baseUrl,
+            boolean enabled,
+            int sortOrder,
+            Instant createdAt,
+            Instant updatedAt) {
+        this(providerId, name, baseUrl, enabled, sortOrder, null, null, false, createdAt, updatedAt);
+    }
 }

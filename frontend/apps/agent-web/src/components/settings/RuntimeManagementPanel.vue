@@ -522,6 +522,10 @@ function processBinding(process: OpencodeRuntimeManagedProcess) {
 }
 
 function processHealth(process: OpencodeRuntimeManagedProcess) {
+  // manager 快照存在但平台没有进程记录时，后端尚未执行平台 HTTP 健康检查。
+  if (!process.processId) {
+    return "未执行 HTTP 健康检查";
+  }
   return process.healthMessage || process.processStatus || "-";
 }
 
@@ -1022,8 +1026,10 @@ function startResize(e: MouseEvent) {
                                   <tr>
                                     <th style="width: 80px; position: relative;">端口<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                                     <th style="width: 80px; position: relative;">PID<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
-                                    <th style="width: 120px; position: relative;">进程<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
-                                    <th style="width: 90px; position: relative;">状态<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 100px; position: relative;">UCID<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 120px; position: relative;">Manager 状态<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 120px; position: relative;">平台进程<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 100px; position: relative;">平台状态<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                                     <th style="width: 160px; position: relative;">baseUrl<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                                     <th style="width: 140px; position: relative;">启动时间<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                                     <th style="width: 100px; position: relative;">健康<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
@@ -1036,8 +1042,11 @@ function startResize(e: MouseEvent) {
                                   <tr v-for="(process, index) in ghostProcesses(row)" :key="`ghost:${row.key}:${process.processId ?? process.port}:${index}`">
                                     <td>{{ process.port }}</td>
                                     <td>{{ formatNullable(process.pid) }}</td>
-                                    <td class="is-compact" :title="process.processId ?? undefined">{{ formatNullable(process.processId) }}</td>
+                                    <td class="is-compact" :title="process.unifiedAuthId ?? undefined">{{ formatNullable(process.unifiedAuthId) }}</td>
+                                    <td><span :class="['ta-status', statusClass(process.managerStatus)]">{{ formatNullable(process.managerStatus) }}</span></td>
+                                    <td class="is-compact" :title="process.processId ?? undefined">{{ process.processId || "平台未登记" }}</td>
                                     <td><span :class="['ta-status', statusClass(process.processStatus)]">{{ formatNullable(process.processStatus) }}</span></td>
+                                    <td class="is-compact" :title="process.baseUrl ?? undefined">{{ formatNullable(process.baseUrl) }}</td>
                                     <td>{{ formatDate(process.startedAt) }}</td>
                                     <td class="is-compact">{{ processHealth(process) }}</td>
                                     <td class="is-command" :title="process.startCommand ?? undefined"><code>{{ formatNullable(process.startCommand) }}</code></td>

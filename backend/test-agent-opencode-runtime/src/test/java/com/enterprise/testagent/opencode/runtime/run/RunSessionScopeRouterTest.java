@@ -33,6 +33,7 @@ class RunSessionScopeRouterTest {
     private static final RunId RUN_ID = new RunId("run_scope1234567890abcdef");
     private static final String ROOT_SESSION_ID = "ses_root1234567890abcdef";
     private static final String CHILD_SESSION_ID = "ses_child1234567890abcdef";
+    private static final String GRANDCHILD_SESSION_ID = "ses_grandchild1234567890abcdef";
     private static final Instant NOW = Instant.parse("2026-07-03T02:00:00Z");
 
     private FakeRunSessionScopeRepository repository;
@@ -133,6 +134,49 @@ class RunSessionScopeRouterTest {
         assertThat(taskPart.scopeContext().sessionId()).isEqualTo(ROOT_SESSION_ID);
         assertThat(taskPart.payload()).containsEntry("sessionId", ROOT_SESSION_ID)
                 .containsEntry("isChildSession", false);
+    }
+
+    @Test
+    void nestedTaskPartDiscoversGrandchildUnderOwningChildScope() {
+        route(childSessionCreatedDraft(CHILD_SESSION_ID, "Explore project structure (@explore subagent)"));
+        RunEventDraft nestedTask = new RunEventDraft(
+                RUN_ID,
+                RunEventType.MESSAGE_PART_UPDATED,
+                "trace_scope1234567890abcdef",
+                NOW.plusMillis(10),
+                payload(Map.of(
+                        "rawType", "message.part.updated",
+                        "sessionID", CHILD_SESSION_ID,
+                        "messageID", "msg_nested_task",
+                        "partID", "part_nested_task",
+                        "part", Map.of(
+                                "id", "part_nested_task",
+                                "messageID", "msg_nested_task",
+                                "sessionID", CHILD_SESSION_ID,
+                                "type", "tool",
+                                "tool", "task",
+                                "callID", "call_nested_task",
+                                "metadata", Map.of(
+                                        "sessionID", GRANDCHILD_SESSION_ID,
+                                        "parentSessionId", CHILD_SESSION_ID)))),
+                rootScope());
+
+        List<RunEventDraft> routed = route(nestedTask);
+
+        assertThat(routed).extracting(RunEventDraft::type)
+                .containsExactly(
+                        RunEventType.SESSION_CHILD_DISCOVERED,
+                        RunEventType.SESSION_SCOPE_UPDATED,
+                        RunEventType.MESSAGE_PART_UPDATED);
+        RunSessionScopeSession grandchild = repository.findSession(RUN_ID, GRANDCHILD_SESSION_ID).orElseThrow();
+        assertThat(grandchild.parentSessionId()).isEqualTo(CHILD_SESSION_ID);
+        assertThat(grandchild.taskMessageId()).isEqualTo("msg_nested_task");
+        assertThat(grandchild.taskPartId()).isEqualTo("part_nested_task");
+        assertThat(grandchild.taskCallId()).isEqualTo("call_nested_task");
+        RunEventDraft taskPart = routed.get(2);
+        assertThat(taskPart.scopeContext().sessionId()).isEqualTo(CHILD_SESSION_ID);
+        assertThat(taskPart.scopeContext().parentSessionId()).isEqualTo(ROOT_SESSION_ID);
+        assertThat(taskPart.scopeContext().childSession()).isTrue();
     }
 
     @Test

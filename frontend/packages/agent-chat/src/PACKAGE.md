@@ -16,7 +16,7 @@
 - `opencode-like/state/work-status.ts`：把探索、技能、命令行、编辑、写入、补丁、网页、待办和未知工具归入稳定事件类别，未知工具按标准化名称独立保留。
 - `MessageParts.vue`、`AnswerPart.vue`、`PlainAnswer.vue`、`ReasoningPartBlock.vue`、`ToolPartBlock.vue`、`ToolDetail.vue`、`FilePartBlock.vue`、`SubtaskPartBlock.vue`、`PatchBlock.vue`、`SnapshotBlock.vue`、`StepMarker.vue`、`StepFinishMarker.vue`、`AgentChip.vue`、`RetryBlock.vue`、`CompactionMarker.vue`、`PartMarker.vue`：已作废的旧气泡消息 part 渲染组件，仅为历史兼容和短期比对保留。
 - `ProcessDisclosure.vue`：存量折叠壳，仍被 `TaskBreakdown.vue` 等局部视图复用；不要用它恢复旧对话主路径或新 Todo 面板。
-- `permission-presentation.ts`：Figma 权限卡与 `RuntimeDock` 的共享展示转换，集中维护 OpenCode 1.17.8 的 14 种中文权限说明、显式旧字段优先级和 `patterns[] -> pattern` 路径兼容；未知类型不泄漏内部标识。
+- `permission-presentation.ts`：Figma 权限卡与 `RuntimeDock` 的共享展示转换，集中维护 OpenCode 1.18.4 的 14 种中文权限说明、显式旧字段优先级和 `patterns[] -> pattern` 路径兼容；未知类型不泄漏内部标识。
 - `ComposerArea.vue`、`RuntimeControls.vue`、`ChicPopover.vue`、`RuntimeDock.vue`、`SuggestionPanel.vue`：仍在当前 Agent 面板中使用的对话区子组件；`RuntimeDock` 的权限卡使用警告图标、代码路径和“拒绝 / 始终允许 / 允许一次”顺序；`TaskBreakdown.vue` 仅保留存量兼容，新 Todo 展示使用 `opencode-like/components/TodoPanel.vue`。
 - `chat-utils.ts`：斜杠/上下文查询、附件合并、流式指纹、卡片默认展开判定等纯函数。
 - `process-status.ts`：过程状态归一化、中文文案、状态色和 Skill tool 判定工具。

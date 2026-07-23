@@ -85,14 +85,17 @@ describe("runtime topology graph data", () => {
               ownership: "BOUND",
               username: "wr",
               processStatus: "RUNNING",
+              unifiedAuthId: "BOUND-A",
+              managerStatus: "PID_ALIVE",
               traceId: "trace_opencode_bound"
             },
             {
-              port: 4097,
+              port: 4104,
               pid: 22345,
-              baseUrl: "http://10.8.0.12:4097",
+              baseUrl: "http://10.8.0.12:4104",
               ownership: "UNBOUND",
-              processStatus: "UNHEALTHY",
+              unifiedAuthId: "A",
+              managerStatus: "PID_ALIVE",
               traceId: "trace_opencode_unbound"
             }
           ]
@@ -117,16 +120,58 @@ describe("runtime topology graph data", () => {
       ["backend:bjp_1234567890abcdef", "backend", "10.8.0.12"],
       ["manager:mgr_1234567890abcdef", "manager", "test-agent-opencode-worker"],
       ["opencode:mgr_1234567890abcdef:4096:0", "opencode-bound", "4096"],
-      ["opencode:mgr_1234567890abcdef:4097:1", "opencode-unbound", "4097"]
+      ["opencode:mgr_1234567890abcdef:4104:1", "opencode-unbound", "4104"]
     ]);
     expect(graph.edges.map((edge) => [edge.source, edge.target, edge.kind])).toEqual([
       ["backend:bjp_1234567890abcdef", "manager:mgr_1234567890abcdef", "backend-manager"],
       ["manager:mgr_1234567890abcdef", "opencode:mgr_1234567890abcdef:4096:0", "manager-opencode"],
-      ["manager:mgr_1234567890abcdef", "opencode:mgr_1234567890abcdef:4097:1", "manager-opencode"]
+      ["manager:mgr_1234567890abcdef", "opencode:mgr_1234567890abcdef:4104:1", "manager-opencode"]
     ]);
-    expect(graph.nodes.find((node) => node.id === "opencode:mgr_1234567890abcdef:4096:0")?.subtitle).toBe("wr / RUNNING");
-    expect(graph.nodes.find((node) => node.id === "opencode:mgr_1234567890abcdef:4097:1")?.subtitle).toBe("无主 / UNHEALTHY");
+    const boundNode = graph.nodes.find((node) => node.id === "opencode:mgr_1234567890abcdef:4096:0");
+    const unboundNode = graph.nodes.find((node) => node.id === "opencode:mgr_1234567890abcdef:4104:1");
+    expect(boundNode?.subtitle).toBe("wr / RUNNING");
+    expect(boundNode?.tooltip).toContain("Manager 状态: PID_ALIVE");
+    expect(unboundNode?.subtitle).toBe("UCID: A / PID_ALIVE");
+    expect(unboundNode?.tooltip).toContain("UCID: A");
+    expect(unboundNode?.tooltip).toContain("Manager 状态: PID_ALIVE");
+    expect(unboundNode?.tooltip).toContain("平台登记: 平台未登记");
+    expect(unboundNode?.tooltip).toContain("健康检查: 未执行 HTTP 健康检查");
     expect(graph.nodes.find((node) => node.id === "manager:mgr_1234567890abcdef")?.tooltip).toContain("容器 ID: ctr_01");
+  });
+
+  it("keeps legacy managed process responses readable when new fields are absent", () => {
+    const overview: OpencodeRuntimeManagementOverview = {
+      ...baseOverview,
+      managers: [
+        {
+          managerId: "mgr_legacy",
+          containerId: "ctr_legacy",
+          linuxServerId: "10.8.0.12",
+          protocolVersion: "opencode-manager.v1",
+          connectionStatus: "CONNECTED",
+          capabilities: {},
+          createdAt: "2026-06-24T08:00:00Z",
+          updatedAt: "2026-06-24T08:00:00Z",
+          traceId: "trace_manager",
+          managedProcesses: [
+            {
+              port: 4097,
+              pid: 32345,
+              baseUrl: "http://10.8.0.12:4097",
+              ownership: "UNBOUND"
+            }
+          ]
+        }
+      ]
+    };
+
+    const graph = buildRuntimeTopologyGraph(overview);
+    const node = graph.nodes.find((candidate) => candidate.kind === "opencode-unbound");
+
+    expect(node?.subtitle).toBe("无主 / -");
+    expect(node?.tooltip).toContain("UCID: -");
+    expect(node?.tooltip).toContain("Manager 状态: -");
+    expect(node?.tooltip).not.toContain("undefined");
   });
 
   it("keeps manager nodes when old responses omit managedProcesses", () => {

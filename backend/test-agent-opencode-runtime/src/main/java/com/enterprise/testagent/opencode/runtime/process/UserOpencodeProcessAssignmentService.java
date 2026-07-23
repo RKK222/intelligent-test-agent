@@ -27,22 +27,18 @@ import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.user.UserRepository;
 import com.enterprise.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
-import com.enterprise.testagent.opencode.runtime.process.socket.ManagerCommandNotDispatchedException;
 import com.enterprise.testagent.opencode.runtime.process.socket.ManagerConnectionRegistry;
 import com.enterprise.testagent.opencode.runtime.process.socket.ManagerControlSettings;
 import java.net.URI;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -51,8 +47,6 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class UserOpencodeProcessAssignmentService {
-
-    private static final Logger log = LoggerFactory.getLogger(UserOpencodeProcessAssignmentService.class);
 
     private static final String OPENCODE_AGENT_ID = "opencode";
     private static final int CONTAINER_CANDIDATE_LIMIT = 100;
@@ -91,9 +85,6 @@ public class UserOpencodeProcessAssignmentService {
     private final OpencodeProcessManagementRepository repository;
     private final CommonParameterValues commonParameterValues;
     private final ExecutionNodeRepository executionNodeRepository;
-    private final OpencodeProcessManagerGateway gateway;
-    private final BackendJavaProcessLifecycleService backendLifecycle;
-    private final OpencodeProcessHeartbeatStore heartbeatStore;
     private final LiveOpencodeContainerCandidateResolver candidateResolver;
     private final OpencodeProcessStartupService startupService;
     private final OpencodeProcessStatusQueryService statusQueryService;
@@ -101,6 +92,8 @@ public class UserOpencodeProcessAssignmentService {
     private final BackendJavaRouteResolver routeResolver;
     private final OpencodeProcessStartOperationRepository startOperationRepository;
     private final UserRepository userRepository;
+    private final OpencodeProcessReservationService reservationService;
+    private final OpencodeProcessStopService stopService;
 
     /**
      * 注入进程管理 Repository、兼容节点 Repository 和管理进程 gateway。
@@ -140,7 +133,6 @@ public class UserOpencodeProcessAssignmentService {
     /**
      * 注入完整依赖；Spring 容器默认走这个构造器。
      */
-    @Autowired
     public UserOpencodeProcessAssignmentService(
             OpencodeProcessManagementRepository repository,
             CommonParameterValues commonParameterValues,
@@ -167,6 +159,43 @@ public class UserOpencodeProcessAssignmentService {
                 statusQueryService,
                 startOperationRepository,
                 userRepository,
+                null,
+                null,
+                true);
+    }
+
+    /** Spring 生产构造器显式注入事务预留和公共停止服务。 */
+    @Autowired
+    public UserOpencodeProcessAssignmentService(
+            OpencodeProcessManagementRepository repository,
+            CommonParameterValues commonParameterValues,
+            ExecutionNodeRepository executionNodeRepository,
+            OpencodeProcessManagerGateway gateway,
+            BackendJavaProcessLifecycleService backendLifecycle,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            LiveOpencodeContainerCandidateResolver candidateResolver,
+            BackendJavaRouteResolver routeResolver,
+            OpencodeProcessStartupService startupService,
+            OpencodeProcessStatusQueryService statusQueryService,
+            OpencodeProcessStartOperationRepository startOperationRepository,
+            UserRepository userRepository,
+            OpencodeProcessReservationService reservationService,
+            OpencodeProcessStopService stopService) {
+        this(
+                repository,
+                commonParameterValues,
+                executionNodeRepository,
+                gateway,
+                backendLifecycle,
+                heartbeatStore,
+                candidateResolver,
+                routeResolver,
+                startupService,
+                statusQueryService,
+                startOperationRepository,
+                userRepository,
+                reservationService,
+                stopService,
                 true);
     }
 
@@ -225,6 +254,8 @@ public class UserOpencodeProcessAssignmentService {
                 statusQueryService,
                 startOperationRepository,
                 userRepository,
+                null,
+                null,
                 requireUserRepository);
     }
 
@@ -241,13 +272,15 @@ public class UserOpencodeProcessAssignmentService {
             OpencodeProcessStatusQueryService statusQueryService,
             OpencodeProcessStartOperationRepository startOperationRepository,
             UserRepository userRepository,
+            OpencodeProcessReservationService reservationService,
+            OpencodeProcessStopService stopService,
             boolean requireUserRepository) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.commonParameterValues = Objects.requireNonNull(commonParameterValues, "commonParameterValues must not be null");
         this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
-        this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
-        this.backendLifecycle = Objects.requireNonNull(backendLifecycle, "backendLifecycle must not be null");
-        this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
+        Objects.requireNonNull(gateway, "gateway must not be null");
+        Objects.requireNonNull(backendLifecycle, "backendLifecycle must not be null");
+        Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
         this.candidateResolver = candidateResolver == null
                 ? new LiveOpencodeContainerCandidateResolver(
                         heartbeatStore,
@@ -274,6 +307,19 @@ public class UserOpencodeProcessAssignmentService {
                         this.statusQueryService,
                         Clock.systemUTC())
                 : startupService;
+        this.reservationService = reservationService == null
+                ? new OpencodeProcessReservationService(repository, new com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessReservationLockPort() {
+                    @Override public boolean lockUser(UserId userId) { return true; }
+                    @Override public boolean lockLinuxServer(LinuxServerId linuxServerId) { return true; }
+                })
+                : reservationService;
+        this.stopService = stopService == null
+                ? new OpencodeProcessStopService(
+                        gateway,
+                        repository,
+                        this.statusQueryService,
+                        this.userRepository)
+                : stopService;
     }
 
     /**
@@ -380,9 +426,8 @@ public class UserOpencodeProcessAssignmentService {
             if (isWithinStaleReadyGrace(current, probe.checkedAt())) {
                 return ready(refreshed, "状态暂时无法确认：" + probe.message(), now);
             }
-            return canRebuildOn(binding.get().linuxServerId())
-                    ? needsInitialization(statusFailureMessage(probe), refreshed, now)
-                    : unavailable("TestAgent 进程健康状态暂无法确认：" + probe.message(), refreshed, now);
+            // 过期 STALE 仍保留权威绑定，不向前端暴露会触发新端口分配的“可初始化”状态。
+            return unavailable("TestAgent 进程健康状态暂无法确认：" + probe.message(), refreshed, now);
         }
         if (probe.errorCode() != null) {
             // 有错误码但非 STALE，可能是明确的失败，根据上次状态决定
@@ -391,7 +436,7 @@ public class UserOpencodeProcessAssignmentService {
             }
             return unavailable("TestAgent 进程健康状态暂无法确认：" + probe.message(), refreshed, now);
         }
-        return canRebuildOn(binding.get().linuxServerId())
+        return canRecoverExistingAssignment(refreshed)
                 ? needsInitialization(statusFailureMessage(probe), refreshed, now)
                 : unavailable(statusFailureMessage(probe).replace("需要重新初始化", "且当前没有可用容器"), refreshed, now);
     }
@@ -498,66 +543,275 @@ public class UserOpencodeProcessAssignmentService {
             UserId userId,
             String traceId,
             OpencodeProcessStartProgress progress) {
-        Instant now = Instant.now();
         progress.step(OpencodeProcessStartOperationStep.CHECKING_ASSIGNMENT);
         Optional<UserOpencodeProcessBinding> existingBinding = repository.findUserBinding(userId, OPENCODE_AGENT_ID);
-        Optional<OpencodeServerProcess> existingProcess = existingBinding.flatMap(binding -> activeProcess(binding).or(() ->
-                repository.findOpencodeServerProcessById(binding.processId())));
-        if (existingProcess.isPresent()) {
-            progress.step(OpencodeProcessStartOperationStep.CHECKING_PROCESS);
-            OpencodeProcessStatusProbe probe = statusQueryService.query(existingProcess.get().processId(), traceId);
-            if (probe.status() != OpencodeProcessProbeStatus.NOT_STARTED) {
-                progress.step(OpencodeProcessStartOperationStep.HEALTH_CHECKING);
+        if (existingBinding.isPresent()) {
+            UserOpencodeProcessBinding binding = existingBinding.get();
+            if (binding.status() != UserOpencodeProcessBindingStatus.ACTIVE) {
+                throw unavailableException("TestAgent 用户绑定不可用");
             }
-            if (probe.status() == OpencodeProcessProbeStatus.RUNNING) {
-                OpencodeServerProcess refreshed = probe.process().orElse(existingProcess.get());
-                ExecutionNode node = projectExecutionNode(refreshed, now, traceId);
-                executionNodeRepository.save(node);
-                progress.succeeded(refreshed.processId().value(), serviceAddress(refreshed));
-                return ready(refreshed, "TestAgent 进程可用", now);
-            }
+            OpencodeServerProcess process = repository.findOpencodeServerProcessById(binding.processId())
+                    .orElseThrow(() -> unavailableException("TestAgent 用户绑定缺少权威进程"));
+            return initializeExisting(binding, process, traceId, progress);
         }
 
-        // 旧 binding 存在时只能按原 linux_server_id 查容器。跨服务器请求由 API 层
-        // 路由到 binding 所属后端，避免当前 Java 静默迁移用户进程归属。
+        return initializeUnassigned(userId, traceId, progress);
+    }
+
+    /** 既有绑定只能精确恢复原容器/端口；只有稳定端口类拒绝才进入同服务器迁移。 */
+    private UserOpencodeProcessStatusResponse initializeExisting(
+            UserOpencodeProcessBinding binding,
+            OpencodeServerProcess process,
+            String traceId,
+            OpencodeProcessStartProgress progress) {
+        OpencodeContainer exactContainer = candidateResolver.findExactBoundContainer(
+                        process.linuxServerId(), process.containerId())
+                .orElseThrow(() -> unavailableException("原 TestAgent 容器暂不可用"));
+        progress.step(OpencodeProcessStartOperationStep.CHECKING_PROCESS);
+        // 使用调用前的权威快照探测旧坐标，避免并发迁移后按 processId 重路由到新端口。
+        OpencodeProcessStatusProbe probe = statusQueryService.querySnapshot(process, traceId);
+        if (probe.status() != OpencodeProcessProbeStatus.NOT_STARTED) {
+            progress.step(OpencodeProcessStartOperationStep.HEALTH_CHECKING);
+        }
+        OpencodeServerProcess refreshed = probe.process().orElse(process);
+        boolean portInRange = refreshed.port() >= exactContainer.portStart()
+                && refreshed.port() <= exactContainer.portEnd();
+        if (probe.status() == OpencodeProcessProbeStatus.RUNNING && portInRange) {
+            OpencodeServerProcess running = refreshed;
+            executionNodeRepository.save(projectExecutionNode(running, Instant.now(), traceId));
+            return completeReady(running, traceId, progress);
+        }
+        if (probe.status() == OpencodeProcessProbeStatus.STALE) {
+            // 控制面不可确认时绝不停止、启动或扫描新端口，避免瞬时故障制造双进程。
+            throw unavailableException("TestAgent 进程状态暂无法确认");
+        }
+        if (probe.status() == OpencodeProcessProbeStatus.RUNNING
+                || probe.status() == OpencodeProcessProbeStatus.HEALTH_CHECK_FAILED) {
+            // 旧身份仍受 manager 管理时，必须先完成公共停止确认，之后才允许提交任何新坐标。
+            // HEALTH_CHECK_FAILED 的 refreshed PID 只来自 manager、未持久化；公共停止需从原数据库代次重新探测。
+            OpencodeServerProcess stopTarget = probe.status() == OpencodeProcessProbeStatus.HEALTH_CHECK_FAILED
+                    ? process
+                    : refreshed;
+            stopService.stopAndVerify(OpencodeProcessStopRequest.tracked(stopTarget, traceId));
+            StoppedAssignmentSnapshot stopped = stoppedAssignmentAfterVerifiedStop(
+                    binding,
+                    stopTarget,
+                    traceId);
+            binding = stopped.binding();
+            refreshed = stopped.process();
+        }
+        if (!portInRange) {
+            return migrateOnSameServer(binding, refreshed, traceId, progress, Set.of(refreshed.port()));
+        }
+        return startExactOrMigrate(binding, refreshed, traceId, progress);
+    }
+
+    /**
+     * 公共停止返回后重新固定本次 STOPPED 代次；同坐标若已被新 PID 重启，必须在迁移前 fail closed。
+     */
+    private StoppedAssignmentSnapshot stoppedAssignmentAfterVerifiedStop(
+            UserOpencodeProcessBinding expectedBinding,
+            OpencodeServerProcess stoppedTarget,
+            String traceId) {
+        UserOpencodeProcessBinding currentBinding = repository
+                .findUserBinding(expectedBinding.userId(), OPENCODE_AGENT_ID)
+                .filter(binding -> binding.status() == UserOpencodeProcessBindingStatus.ACTIVE)
+                .orElseThrow(() -> unavailableException("TestAgent 停止后用户绑定已变化"));
+        OpencodeServerProcess currentProcess = repository
+                .findOpencodeServerProcessById(stoppedTarget.processId())
+                .orElseThrow(() -> unavailableException("TestAgent 停止后权威进程已变化"));
+        boolean bindingUnchanged = currentBinding.processId().equals(expectedBinding.processId())
+                && currentBinding.linuxServerId().equals(expectedBinding.linuxServerId())
+                && currentBinding.port() == expectedBinding.port();
+        boolean exactStoppedGeneration = currentProcess.processId().equals(stoppedTarget.processId())
+                && currentProcess.userId().equals(stoppedTarget.userId())
+                && currentProcess.linuxServerId().equals(stoppedTarget.linuxServerId())
+                && currentProcess.containerId().equals(stoppedTarget.containerId())
+                && currentProcess.port() == stoppedTarget.port()
+                && currentProcess.status() == OpencodeServerProcessStatus.STOPPED
+                && currentProcess.pid() == null
+                && Objects.equals(currentProcess.traceId(), traceId);
+        if (!bindingUnchanged || !exactStoppedGeneration) {
+            throw unavailableException("TestAgent 停止后进程分配已被并发修改");
+        }
+        return new StoppedAssignmentSnapshot(currentProcess, currentBinding);
+    }
+
+    /** 停止后从权威仓储重读的同一运行代次快照。 */
+    private record StoppedAssignmentSnapshot(
+            OpencodeServerProcess process,
+            UserOpencodeProcessBinding binding) { }
+
+    private UserOpencodeProcessStatusResponse startExactOrMigrate(
+            UserOpencodeProcessBinding binding,
+            OpencodeServerProcess process,
+            String traceId,
+            OpencodeProcessStartProgress progress) {
+        try {
+            return startReserved(
+                    new OpencodeProcessReservation(process, binding, false),
+                    traceId,
+                    progress,
+                    true);
+        } catch (OpencodeProcessStartRejectionException exception) {
+            if (!exception.reason().migratable()) {
+                throw exception;
+            }
+            return migrateOnSameServer(binding, process, traceId, progress, Set.of(process.port()));
+        }
+    }
+
+    /** 未分配用户保持既有全局候选顺序，但每次先提交 STARTING/binding 预留再调用 manager。 */
+    private UserOpencodeProcessStatusResponse initializeUnassigned(
+            UserId userId,
+            String traceId,
+            OpencodeProcessStartProgress progress) {
         progress.step(OpencodeProcessStartOperationStep.SELECTING_CONTAINER);
-        List<OpencodeContainer> candidates = existingBinding
-                .map(binding -> candidateResolver.findCandidates(
-                        binding.linuxServerId(),
-                        CONTAINER_CANDIDATE_LIMIT))
-                .orElseGet(() -> candidateResolver.findCandidates(CONTAINER_CANDIDATE_LIMIT));
+        List<OpencodeContainer> candidates = candidateResolver.findCandidates(CONTAINER_CANDIDATE_LIMIT);
         for (OpencodeContainer container : candidates) {
-            Optional<Integer> availablePort = firstAvailablePort(container);
-            if (availablePort.isEmpty()) {
+            Optional<OpencodeProcessReservation> reserved = reservationService.reserveInitial(
+                    userId,
+                    container,
+                    addressResolver::baseUrl,
+                    sessionPath(userId),
+                    configPath(userId),
+                    candidateResolver.liveManagedPorts(container.linuxServerId()),
+                    traceId);
+            if (reserved.isEmpty()) {
                 continue;
             }
-            progress.step(OpencodeProcessStartOperationStep.PREPARING_STARTUP);
-            OpencodeProcessStartCommand command = startCommand(userId, container, availablePort.get(), traceId);
+            if (reserved.get().concurrentWinner()) {
+                return followConcurrentReservation(reserved.get(), traceId, progress);
+            }
             try {
-                OpencodeServerProcess process = startupService.startAndVerify(new OpencodeProcessStartupRequest(
-                        userId,
-                        existingBinding.map(UserOpencodeProcessBinding::processId).orElse(null),
-                        existingProcess.map(OpencodeServerProcess::createdAt).orElse(null),
-                        existingBinding.map(UserOpencodeProcessBinding::createdAt).orElse(null),
-                        command.linuxServerId(),
-                        command.containerId(),
-                        command.port(),
-                        command.baseUrl(),
-                        command.sessionPath(),
-                        command.configPath(),
-                        command.environment(),
-                        traceId), progress);
-                progress.succeeded(process.processId().value(), serviceAddress(process));
-                return ready(process, "TestAgent 进程可用", now);
-            } catch (ManagerCommandNotDispatchedException exception) {
-                // 连接在实时快照解析后、命令发送前断开，尚无重复启动风险，可换下一个候选。
-                log.warn(
-                        "manager 命令发送前连接已断开，尝试下一容器 traceId={} containerId={}",
+                return startReserved(reserved.get(), traceId, progress, false);
+            } catch (OpencodeProcessStartRejectionException exception) {
+                if (!exception.reason().migratable()) {
+                    throw exception;
+                }
+                return migrateOnSameServer(
+                        reserved.get().binding(),
+                        reserved.get().process(),
                         traceId,
-                        container.containerId().value());
+                        progress,
+                        Set.of(reserved.get().process().port()));
             }
         }
         throw unavailableException("没有可用的 TestAgent 容器或端口");
+    }
+
+    /**
+     * 仅在原 Linux 服务器内迁移；冲突端口加入本次避让集，确保有界重试不会来回选择同一端口。
+     */
+    private UserOpencodeProcessStatusResponse migrateOnSameServer(
+            UserOpencodeProcessBinding originalBinding,
+            OpencodeServerProcess originalProcess,
+            String traceId,
+            OpencodeProcessStartProgress progress,
+            Set<Integer> initiallyRejectedPorts) {
+        progress.step(OpencodeProcessStartOperationStep.SELECTING_CONTAINER);
+        List<OpencodeContainer> candidates = candidateResolver.findCandidates(
+                originalBinding.linuxServerId(), CONTAINER_CANDIDATE_LIMIT);
+        if (candidates.isEmpty()) {
+            throw unavailableException("原 Linux 服务器没有可用的 TestAgent 容器或端口");
+        }
+        UserOpencodeProcessBinding expectedBinding = originalBinding;
+        OpencodeServerProcess expectedProcess = originalProcess;
+        Set<Integer> rejectedPorts = new java.util.HashSet<>(initiallyRejectedPorts);
+        for (OpencodeContainer candidate : candidates) {
+            int maxAttempts = Math.max(1, candidate.portEnd() - candidate.portStart() + 1);
+            for (int attempt = 0; attempt < maxAttempts; attempt++) {
+                Set<Integer> unavailablePorts = new java.util.HashSet<>(
+                        candidateResolver.liveManagedPorts(candidate.linuxServerId()));
+                unavailablePorts.addAll(rejectedPorts);
+                Optional<OpencodeProcessReservation> reserved = reservationService.reserveMigration(
+                        expectedBinding,
+                        expectedProcess,
+                        candidate,
+                        addressResolver::baseUrl,
+                        unavailablePorts,
+                        traceId);
+                if (reserved.isEmpty()) {
+                    break;
+                }
+                if (reserved.get().concurrentWinner()) {
+                    return followConcurrentReservation(reserved.get(), traceId, progress);
+                }
+                try {
+                    return startReserved(reserved.get(), traceId, progress, false);
+                } catch (OpencodeProcessStartRejectionException exception) {
+                    if (!exception.reason().migratable()) {
+                        throw exception;
+                    }
+                    rejectedPorts.add(reserved.get().process().port());
+                    expectedBinding = reserved.get().binding();
+                    expectedProcess = reserved.get().process();
+                }
+            }
+        }
+        throw unavailableException("原 Linux 服务器没有可用的 TestAgent 容器或端口");
+    }
+
+    private UserOpencodeProcessStatusResponse startReserved(
+            OpencodeProcessReservation reservation,
+            String traceId,
+            OpencodeProcessStartProgress progress,
+            boolean bindingRecovery) {
+        OpencodeServerProcess process = reservation.process();
+        UserOpencodeProcessBinding binding = reservation.binding();
+        progress.step(OpencodeProcessStartOperationStep.PREPARING_STARTUP);
+        OpencodeServerProcess running = startupService.startAndVerify(new OpencodeProcessStartupRequest(
+                process.userId(),
+                process.processId(),
+                process.createdAt(),
+                binding.createdAt(),
+                process.linuxServerId(),
+                process.containerId(),
+                process.port(),
+                process.baseUrl(),
+                process.sessionPath(),
+                process.configPath(),
+                Map.of(),
+                traceId,
+                bindingRecovery), progress);
+        return completeReady(running, traceId, progress);
+    }
+
+    /**
+     * 首次预留事务发现其它请求已经提交 binding 时，本请求只跟随权威数据库状态。
+     * STARTING 仍由真正的预留者负责 manager start/CAS；跟随者绝不能再次启动或补偿停止同一 PID。
+     */
+    private UserOpencodeProcessStatusResponse followConcurrentReservation(
+            OpencodeProcessReservation reservation,
+            String traceId,
+            OpencodeProcessStartProgress progress) {
+        OpencodeServerProcess current = repository
+                .findOpencodeServerProcessById(reservation.process().processId())
+                .orElseThrow(() -> unavailableException("TestAgent 并发初始化的权威进程已不存在"));
+        UserOpencodeProcessBinding binding = repository
+                .findUserBinding(current.userId(), OPENCODE_AGENT_ID)
+                .filter(item -> item.status() == UserOpencodeProcessBindingStatus.ACTIVE)
+                .orElseThrow(() -> unavailableException("TestAgent 并发初始化的权威绑定已不存在"));
+        boolean sameAssignment = binding.processId().equals(current.processId())
+                && binding.linuxServerId().equals(current.linuxServerId())
+                && binding.port() == current.port();
+        if (!sameAssignment) {
+            throw unavailableException("TestAgent 并发初始化的进程分配已变化");
+        }
+        if (current.status() == OpencodeServerProcessStatus.RUNNING) {
+            executionNodeRepository.save(projectExecutionNode(current, Instant.now(), traceId));
+            return completeReady(current, traceId, progress);
+        }
+        throw unavailableException("TestAgent 初始化正在进行，请稍后重试");
+    }
+
+    private UserOpencodeProcessStatusResponse completeReady(
+            OpencodeServerProcess process,
+            String traceId,
+            OpencodeProcessStartProgress progress) {
+        Instant now = Instant.now();
+        progress.succeeded(process.processId().value(), serviceAddress(process));
+        return ready(process, "TestAgent 进程可用", now);
     }
 
     /**
@@ -643,33 +897,17 @@ public class UserOpencodeProcessAssignmentService {
         return !candidateResolver.findCandidates(linuxServerId, 1).isEmpty();
     }
 
-    private OpencodeProcessStartCommand startCommand(
-            UserId userId,
-            OpencodeContainer container,
-            int port,
-            String traceId) {
-        String baseUrl = addressResolver.baseUrl(port);
-        return new OpencodeProcessStartCommand(
-                userId,
-                userUnifiedAuthPathSegment(userId),
-                container.linuxServerId(),
-                container.containerId(),
-                port,
-                baseUrl,
-                sessionPath(userId),
-                configPath(userId),
-                Map.of(),
-                traceId);
-    }
-
-    private Optional<Integer> firstAvailablePort(OpencodeContainer container) {
-        Set<Integer> occupied = new HashSet<>(repository.findOccupiedPorts(container.linuxServerId(), container.containerId()));
-        for (int port = container.portStart(); port <= container.portEnd(); port++) {
-            if (!occupied.contains(port)) {
-                return Optional.of(port);
-            }
+    /** 已有绑定原端口恢复只要求精确容器 live/connected；容量只约束真正的新分配或迁移。 */
+    private boolean canRecoverExistingAssignment(OpencodeServerProcess process) {
+        Optional<OpencodeContainer> exact = candidateResolver.findExactBoundContainer(
+                process.linuxServerId(), process.containerId());
+        if (exact.isEmpty()) {
+            return false;
         }
-        return Optional.empty();
+        if (process.port() >= exact.get().portStart() && process.port() <= exact.get().portEnd()) {
+            return true;
+        }
+        return canRebuildOn(process.linuxServerId());
     }
 
     private ExecutionNode projectExecutionNode(OpencodeServerProcess process, Instant now, String traceId) {

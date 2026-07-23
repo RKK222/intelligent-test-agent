@@ -7,6 +7,7 @@ import com.example.opencode.sdk.model.BadRequestError;
 import java.math.BigDecimal;
 import com.example.opencode.sdk.model.ConsoleState;
 import com.example.opencode.sdk.model.EffectHttpApiErrorInternalServerError;
+import com.example.opencode.sdk.model.ExperimentalCapabilities;
 import com.example.opencode.sdk.model.ExperimentalConsoleListOrgs200Response;
 import com.example.opencode.sdk.model.ExperimentalConsoleSwitchOrgRequest;
 import com.example.opencode.sdk.model.ExperimentalSessionListRootsParameter;
@@ -41,7 +42,7 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Flux;
 
-@jakarta.annotation.Generated(value = "org.openapitools.codegen.languages.JavaClientCodegen", comments = "Generator version: 7.23.0")
+@jakarta.annotation.Generated(value = "org.openapitools.codegen.languages.JavaClientCodegen", comments = "Generator version: 7.24.0")
 public class ExperimentalApi {
     private ApiClient apiClient;
 
@@ -59,6 +60,172 @@ public class ExperimentalApi {
 
     public void setApiClient(ApiClient apiClient) {
         this.apiClient = apiClient;
+    }
+
+    public class ExperimentalCapabilitiesGetRequest {
+        private @jakarta.annotation.Nullable String directory;
+        private @jakarta.annotation.Nullable String workspace;
+
+        public ExperimentalCapabilitiesGetRequest() {}
+
+        public ExperimentalCapabilitiesGetRequest(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) {
+            this.directory = directory;
+            this.workspace = workspace;
+        }
+
+        public @jakarta.annotation.Nullable String directory() {
+            return this.directory;
+        }
+        public ExperimentalCapabilitiesGetRequest directory(@jakarta.annotation.Nullable String directory) {
+            this.directory = directory;
+            return this;
+        }
+
+        public @jakarta.annotation.Nullable String workspace() {
+            return this.workspace;
+        }
+        public ExperimentalCapabilitiesGetRequest workspace(@jakarta.annotation.Nullable String workspace) {
+            this.workspace = workspace;
+            return this;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            ExperimentalCapabilitiesGetRequest request = (ExperimentalCapabilitiesGetRequest) o;
+            return Objects.equals(this.directory, request.directory()) &&
+                Objects.equals(this.workspace, request.workspace());
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(directory, workspace);
+        }
+    }
+
+    /**
+     * Get experimental capabilities
+     * Get experimental features enabled on the OpenCode server.
+     * <p><b>200</b> - Experimental capabilities
+     * <p><b>400</b> - Bad request
+     * @param requestParameters The experimentalCapabilitiesGet request parameters as object
+     * @return ExperimentalCapabilities
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<ExperimentalCapabilities> experimentalCapabilitiesGet(ExperimentalCapabilitiesGetRequest requestParameters) throws WebClientResponseException {
+        return this.experimentalCapabilitiesGet(requestParameters.directory(), requestParameters.workspace());
+    }
+
+    /**
+     * Get experimental capabilities
+     * Get experimental features enabled on the OpenCode server.
+     * <p><b>200</b> - Experimental capabilities
+     * <p><b>400</b> - Bad request
+     * @param requestParameters The experimentalCapabilitiesGet request parameters as object
+     * @return ResponseEntity&lt;ExperimentalCapabilities&gt;
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<ResponseEntity<ExperimentalCapabilities>> experimentalCapabilitiesGetWithHttpInfo(ExperimentalCapabilitiesGetRequest requestParameters) throws WebClientResponseException {
+        return this.experimentalCapabilitiesGetWithHttpInfo(requestParameters.directory(), requestParameters.workspace());
+    }
+
+    /**
+     * Get experimental capabilities
+     * Get experimental features enabled on the OpenCode server.
+     * <p><b>200</b> - Experimental capabilities
+     * <p><b>400</b> - Bad request
+     * @param requestParameters The experimentalCapabilitiesGet request parameters as object
+     * @return ResponseSpec
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public ResponseSpec experimentalCapabilitiesGetWithResponseSpec(ExperimentalCapabilitiesGetRequest requestParameters) throws WebClientResponseException {
+        return this.experimentalCapabilitiesGetWithResponseSpec(requestParameters.directory(), requestParameters.workspace());
+    }
+
+
+    /**
+     * Get experimental capabilities
+     * Get experimental features enabled on the OpenCode server.
+     * <p><b>200</b> - Experimental capabilities
+     * <p><b>400</b> - Bad request
+     * @param directory The directory parameter
+     * @param workspace The workspace parameter
+     * @return ExperimentalCapabilities
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    private ResponseSpec experimentalCapabilitiesGetRequestCreation(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
+        Object postBody = null;
+        // create path and map variables
+        final Map<String, Object> pathParams = new HashMap<String, Object>();
+
+        final MultiValueMap<String, String> localVarQueryParams = new LinkedMultiValueMap<String, String>();
+        final HttpHeaders headerParams = new HttpHeaders();
+        final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
+        final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
+
+        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
+        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
+
+        final String[] localVarAccepts = {
+            "application/json"
+        };
+        final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
+        final String[] localVarContentTypes = { };
+        final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
+
+        String[] localVarAuthNames = new String[] {  };
+
+        ParameterizedTypeReference<ExperimentalCapabilities> localVarReturnType = new ParameterizedTypeReference<ExperimentalCapabilities>() {};
+        return apiClient.invokeAPI("/experimental/capabilities", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+    }
+
+    /**
+     * Get experimental capabilities
+     * Get experimental features enabled on the OpenCode server.
+     * <p><b>200</b> - Experimental capabilities
+     * <p><b>400</b> - Bad request
+     * @param directory The directory parameter
+     * @param workspace The workspace parameter
+     * @return ExperimentalCapabilities
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<ExperimentalCapabilities> experimentalCapabilitiesGet(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
+        ParameterizedTypeReference<ExperimentalCapabilities> localVarReturnType = new ParameterizedTypeReference<ExperimentalCapabilities>() {};
+        return experimentalCapabilitiesGetRequestCreation(directory, workspace).bodyToMono(localVarReturnType);
+    }
+
+    /**
+     * Get experimental capabilities
+     * Get experimental features enabled on the OpenCode server.
+     * <p><b>200</b> - Experimental capabilities
+     * <p><b>400</b> - Bad request
+     * @param directory The directory parameter
+     * @param workspace The workspace parameter
+     * @return ResponseEntity&lt;ExperimentalCapabilities&gt;
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<ResponseEntity<ExperimentalCapabilities>> experimentalCapabilitiesGetWithHttpInfo(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
+        ParameterizedTypeReference<ExperimentalCapabilities> localVarReturnType = new ParameterizedTypeReference<ExperimentalCapabilities>() {};
+        return experimentalCapabilitiesGetRequestCreation(directory, workspace).toEntity(localVarReturnType);
+    }
+
+    /**
+     * Get experimental capabilities
+     * Get experimental features enabled on the OpenCode server.
+     * <p><b>200</b> - Experimental capabilities
+     * <p><b>400</b> - Bad request
+     * @param directory The directory parameter
+     * @param workspace The workspace parameter
+     * @return ResponseSpec
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public ResponseSpec experimentalCapabilitiesGetWithResponseSpec(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
+        return experimentalCapabilitiesGetRequestCreation(directory, workspace);
     }
 
     public class ExperimentalConsoleGetRequest {
@@ -174,7 +341,7 @@ public class ExperimentalApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -347,7 +514,7 @@ public class ExperimentalApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -524,11 +691,11 @@ public class ExperimentalApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -692,7 +859,7 @@ public class ExperimentalApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -876,7 +1043,7 @@ public class ExperimentalApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -1123,7 +1290,7 @@ public class ExperimentalApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "limit", limit));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "archived", archived));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -1307,7 +1474,7 @@ public class ExperimentalApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -1507,7 +1674,7 @@ public class ExperimentalApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "provider", provider));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "model", model));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -1691,11 +1858,11 @@ public class ExperimentalApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -1862,7 +2029,7 @@ public class ExperimentalApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -2040,11 +2207,11 @@ public class ExperimentalApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -2223,11 +2390,11 @@ public class ExperimentalApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);

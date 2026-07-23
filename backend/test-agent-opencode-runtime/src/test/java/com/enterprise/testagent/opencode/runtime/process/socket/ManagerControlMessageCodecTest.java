@@ -50,6 +50,25 @@ class ManagerControlMessageCodecTest {
     }
 
     @Test
+    void decodesProcessCreatedAsTrueFalseOrLegacyNull() {
+        ManagerControlMessageCodec codec = new ManagerControlMessageCodec(new ObjectMapper());
+
+        ManagerControlMessage fresh = codec.decode("""
+                {"type":"commandResult","protocolVersion":"opencode-manager.v1","processCreated":true}
+                """);
+        ManagerControlMessage reused = codec.decode("""
+                {"type":"commandResult","protocolVersion":"opencode-manager.v1","processCreated":false}
+                """);
+        ManagerControlMessage legacy = codec.decode("""
+                {"type":"commandResult","protocolVersion":"opencode-manager.v1"}
+                """);
+
+        assertThat(fresh.processCreated()).isTrue();
+        assertThat(reused.processCreated()).isFalse();
+        assertThat(legacy.processCreated()).isNull();
+    }
+
+    @Test
     void encodesCommandSessionAndManagedConfigPaths() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
         ManagerControlMessageCodec codec = new ManagerControlMessageCodec(objectMapper);
@@ -60,6 +79,7 @@ class ManagerControlMessageCodecTest {
                 "/data/opencode/session/users/ucid_001",
                 "/data/opencode/session/users/ucid_001/.testagent-runtime/current-public-config",
                 "ucid_001",
+                true,
                 Map.of("ENTERPRISE_UCID", "U001"),
                 10_000,
                 "trace_1234567890abcdef");
@@ -70,10 +90,12 @@ class ManagerControlMessageCodecTest {
         assertThat(objectMapper.readTree(payload).path("sessionPath").asText())
                 .isEqualTo("/data/opencode/session/users/ucid_001");
         assertThat(objectMapper.readTree(payload).path("unifiedAuthId").asText()).isEqualTo("ucid_001");
+        assertThat(objectMapper.readTree(payload).path("bindingRecovery").asBoolean()).isTrue();
         assertThat(decoded.sessionPath()).isEqualTo("/data/opencode/session/users/ucid_001");
         assertThat(decoded.configPath())
                 .isEqualTo("/data/opencode/session/users/ucid_001/.testagent-runtime/current-public-config");
         assertThat(decoded.unifiedAuthId()).isEqualTo("ucid_001");
+        assertThat(decoded.bindingRecovery()).isTrue();
     }
 
     @Test
@@ -136,8 +158,10 @@ class ManagerControlMessageCodecTest {
                     "port":4096,
                     "pid":12345,
                     "baseUrl":"http://10.8.0.12:4096",
+                    "unifiedAuthId":"ucid_001",
                     "sessionPath":"/data/opencode/session/4096",
                     "configPath":"/data/opencode/.config/opencode/",
+                    "managerStatus":"PID_ALIVE",
                     "startedAt":"2026-06-24T00:00:00Z",
                     "startCommand":"XDG_DATA_HOME=/data/opencode/session/4096 OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs",
                     "traceId":"trace_process"
@@ -145,8 +169,29 @@ class ManagerControlMessageCodecTest {
                 }
                 """);
 
-        assertThat(decoded.managedProcesses()).singleElement().satisfies(process ->
-                assertThat(process.startCommand()).contains("opencode serve --hostname 0.0.0.0 --port 4096"));
+        assertThat(decoded.managedProcesses()).singleElement().satisfies(process -> {
+            assertThat(process.startCommand()).contains("opencode serve --hostname 0.0.0.0 --port 4096");
+            assertThat(process.unifiedAuthId()).isEqualTo("ucid_001");
+            assertThat(process.managerStatus()).isEqualTo("PID_ALIVE");
+        });
+    }
+
+    @Test
+    void oldManagedProcessPayloadKeepsNewHeartbeatFieldsNull() {
+        ManagerControlMessageCodec codec = new ManagerControlMessageCodec(new ObjectMapper());
+
+        ManagerControlMessage decoded = codec.decode("""
+                {
+                  "type":"managerHeartbeat",
+                  "protocolVersion":"opencode-manager.v1",
+                  "managedProcesses":[{"port":4096,"pid":12345}]
+                }
+                """);
+
+        assertThat(decoded.managedProcesses()).singleElement().satisfies(process -> {
+            assertThat(process.unifiedAuthId()).isNull();
+            assertThat(process.managerStatus()).isNull();
+        });
     }
 
     @Test

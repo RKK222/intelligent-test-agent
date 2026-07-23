@@ -32,6 +32,8 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcessStat
 import com.enterprise.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.enterprise.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.user.User;
+import com.enterprise.testagent.domain.user.UserRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -85,9 +87,10 @@ class RuntimeManagementCommandServiceTest {
         OpencodeProcessControlResult result = service.restartManagedProcess(new OpencodeContainerId("ctr_01"), 4097, TRACE_ID);
 
         assertThat(gateway.restartCommands).isEmpty();
-        assertThat(gateway.startCommands).singleElement()
-                .extracting(OpencodeProcessStartCommand::port)
-                .isEqualTo(4097);
+        assertThat(gateway.startCommands).singleElement().satisfies(command -> {
+            assertThat(command.port()).isEqualTo(4097);
+            assertThat(command.bindingRecovery()).isTrue();
+        });
         assertThat(gateway.healthCommands).hasSize(1);
         assertThat(result.command()).isEqualTo("restart");
         assertThat(result.status()).isEqualTo("STARTED");
@@ -106,14 +109,16 @@ class RuntimeManagementCommandServiceTest {
         repository.processes.put(running.processId(), running);
         repository.bindingsByProcessId.put(running.processId(), binding(running, NOW.minusSeconds(1800)));
         RecordingGateway gateway = new RecordingGateway();
+        gateway.healthResults.add(OpencodeProcessHealthResult.healthy(11111L, "ok"));
         gateway.healthResults.add(OpencodeProcessHealthResult.unhealthy("port 4097 is not managed"));
-        gateway.healthResults.add(OpencodeProcessHealthResult.healthy("ok"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.healthy(33333L, "ok"));
         RuntimeManagementCommandService service = service(repository, gateway, new RecordingHeartbeatStore());
 
         OpencodeProcessControlResult result = service.restartManagedProcess(new OpencodeContainerId("ctr_01"), 4097, TRACE_ID);
 
         assertThat(gateway.restartCommands).isEmpty();
-        assertThat(gateway.stopCommands).hasSize(1);
+        assertThat(gateway.ownedStopCommands).hasSize(1);
+        assertThat(gateway.stopCommands).isEmpty();
         assertThat(gateway.startCommands).singleElement().satisfies(command -> {
             assertThat(command.port()).isEqualTo(4097);
             assertThat(command.sessionPath()).isEqualTo(running.sessionPath());
@@ -129,7 +134,8 @@ class RuntimeManagementCommandServiceTest {
         repository.bindingsByProcessId.put(running.processId(), binding(running, NOW.minusSeconds(1800)));
         RecordingGateway gateway = new RecordingGateway();
         gateway.healthResults.add(OpencodeProcessHealthResult.unhealthy("port 4097 is not managed"));
-        gateway.healthResults.add(OpencodeProcessHealthResult.healthy("ok"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.unhealthy("port 4097 is not managed"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.healthy(33333L, "ok"));
         CommonParameterValues commonParameterValues = org.mockito.Mockito.mock(CommonParameterValues.class);
         org.mockito.Mockito.when(commonParameterValues.resolvedValue(
                         "OPENCODE_REFERENCES_DIR", ParameterPlatform.current()))
@@ -145,7 +151,7 @@ class RuntimeManagementCommandServiceTest {
                 gateway,
                 repository,
                 startupService,
-                new OpencodeProcessStopService(gateway, repository, Clock.fixed(NOW, ZoneOffset.UTC)));
+                stopService(repository, gateway));
 
         service.restartManagedProcess(new OpencodeContainerId("ctr_01"), 4097, TRACE_ID);
 
@@ -161,15 +167,20 @@ class RuntimeManagementCommandServiceTest {
         repository.processes.put(unhealthy.processId(), unhealthy);
         RecordingGateway gateway = new RecordingGateway();
         gateway.healthResults.add(OpencodeProcessHealthResult.unhealthy("port 4097 is not managed"));
-        gateway.healthResults.add(OpencodeProcessHealthResult.healthy("ok"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.unhealthy("port 4097 is not managed"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.healthy(33333L, "ok"));
         RuntimeManagementCommandService service = service(repository, gateway, new RecordingHeartbeatStore());
 
         OpencodeProcessControlResult result = service.restartManagedProcess(new OpencodeContainerId("ctr_01"), 4097, TRACE_ID);
 
         assertThat(gateway.restartCommands).isEmpty();
-        assertThat(gateway.stopCommands).hasSize(1);
-        assertThat(gateway.startCommands).hasSize(1);
-        assertThat(gateway.healthCommands).hasSize(2);
+        assertThat(gateway.ownedStopCommands).isEmpty();
+        assertThat(gateway.stopCommands).isEmpty();
+        assertThat(gateway.startCommands).singleElement().satisfies(command -> {
+            assertThat(command.port()).isEqualTo(4097);
+            assertThat(command.bindingRecovery()).isTrue();
+        });
+        assertThat(gateway.healthCommands).hasSize(3);
         assertThat(result.status()).isEqualTo("STARTED");
     }
 
@@ -179,7 +190,7 @@ class RuntimeManagementCommandServiceTest {
         OpencodeServerProcess stopped = process("ocp_stopped", 4097, OpencodeServerProcessStatus.STOPPED);
         repository.processes.put(stopped.processId(), stopped);
         RecordingGateway gateway = new RecordingGateway();
-        gateway.health = OpencodeProcessHealthResult.unhealthy("opencode http health failed");
+        gateway.health = OpencodeProcessHealthResult.managedUnhealthy(12345L, "opencode http health failed");
         RuntimeManagementCommandService service = service(repository, gateway, new RecordingHeartbeatStore());
 
         assertThatThrownBy(() -> service.restartManagedProcess(new OpencodeContainerId("ctr_01"), 4097, TRACE_ID))
@@ -197,8 +208,9 @@ class RuntimeManagementCommandServiceTest {
         OpencodeServerProcess stopped = process("ocp_stopped", 4097, OpencodeServerProcessStatus.STOPPED);
         repository.processes.put(stopped.processId(), stopped);
         RecordingGateway gateway = new RecordingGateway();
-        gateway.healthResults.add(OpencodeProcessHealthResult.unhealthy("opencode health endpoints are not reachable"));
-        gateway.healthResults.add(OpencodeProcessHealthResult.healthy("ok"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.managedUnhealthy(
+                12345L, "opencode health endpoints are not reachable"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.healthy(33333L, "ok"));
         RuntimeManagementCommandService service = service(repository, gateway, new RecordingHeartbeatStore());
 
         OpencodeProcessControlResult result = service.restartManagedProcess(new OpencodeContainerId("ctr_01"), 4097, TRACE_ID);
@@ -235,15 +247,19 @@ class RuntimeManagementCommandServiceTest {
         OpencodeServerProcess running = process("ocp_running", 4097, OpencodeServerProcessStatus.RUNNING);
         repository.processes.put(running.processId(), running);
         RecordingGateway gateway = new RecordingGateway();
-        gateway.health = OpencodeProcessHealthResult.unhealthy("process not found");
+        gateway.healthResults.add(OpencodeProcessHealthResult.healthy(11111L, "ok"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.unhealthy("process not found"));
         RuntimeManagementCommandService service = service(repository, gateway, new RecordingHeartbeatStore());
 
         OpencodeProcessControlResult result = service.stopManagedProcess(new OpencodeContainerId("ctr_01"), 4097, TRACE_ID);
 
-        assertThat(gateway.stopCommands).hasSize(1);
-        assertThat(gateway.healthCommands).singleElement()
-                .extracting(OpencodeProcessHealthCommand::processId)
-                .isEqualTo(running.processId());
+        assertThat(gateway.ownedStopCommands).singleElement().satisfies(command -> {
+            assertThat(command.expectedUnifiedAuthId()).isEqualTo("ucid_001");
+            assertThat(command.expectedPid()).isEqualTo(11111L);
+        });
+        assertThat(gateway.stopCommands).isEmpty();
+        assertThat(gateway.healthCommands).hasSize(2).allSatisfy(command ->
+                assertThat(command.processId()).isEqualTo(running.processId()));
         assertThat(result.status()).isEqualTo("STOPPED");
         assertThat(result.healthy()).isFalse();
         assertThat(repository.findOpencodeServerProcessById(running.processId())).get().satisfies(process -> {
@@ -258,7 +274,7 @@ class RuntimeManagementCommandServiceTest {
         OpencodeServerProcess running = process("ocp_running", 4097, OpencodeServerProcessStatus.RUNNING);
         repository.processes.put(running.processId(), running);
         RecordingGateway gateway = new RecordingGateway();
-        gateway.health = OpencodeProcessHealthResult.healthy("ok");
+        gateway.health = OpencodeProcessHealthResult.healthy(11111L, "ok");
         RuntimeManagementCommandService service = service(repository, gateway, new RecordingHeartbeatStore());
 
         assertThatThrownBy(() -> service.stopManagedProcess(new OpencodeContainerId("ctr_01"), 4097, TRACE_ID))
@@ -283,8 +299,36 @@ class RuntimeManagementCommandServiceTest {
         OpencodeProcessStopService stopService = new OpencodeProcessStopService(
                 gateway,
                 repository,
+                null,
+                userRepository(),
+                null,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         return new RuntimeManagementCommandService(gateway, repository, startupService, stopService);
+    }
+
+    private static OpencodeProcessStopService stopService(
+            FakeRepository repository,
+            RecordingGateway gateway) {
+        return new OpencodeProcessStopService(
+                gateway,
+                repository,
+                null,
+                userRepository(),
+                null,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    private static UserRepository userRepository() {
+        UserRepository repository = org.mockito.Mockito.mock(UserRepository.class);
+        org.mockito.Mockito.when(repository.findByUserId(USER_ID)).thenReturn(Optional.of(User.createNew(
+                USER_ID.value(),
+                "ucid_001",
+                "test-user",
+                "password-hash",
+                null,
+                null,
+                null)));
+        return repository;
     }
 
     private static OpencodeServerProcess process(String processId, int port, OpencodeServerProcessStatus status) {
@@ -323,11 +367,12 @@ class RuntimeManagementCommandServiceTest {
     private static final class RecordingGateway implements OpencodeProcessManagerGateway {
         private final List<OpencodeProcessControlCommand> restartCommands = new ArrayList<>();
         private final List<OpencodeProcessControlCommand> stopCommands = new ArrayList<>();
+        private final List<OpencodeProcessOwnedStopCommand> ownedStopCommands = new ArrayList<>();
         private final List<OpencodeProcessStartCommand> startCommands = new ArrayList<>();
         private final List<OpencodeProcessHealthCommand> healthCommands = new ArrayList<>();
         private final Deque<OpencodeProcessHealthResult> healthResults = new ArrayDeque<>();
         private PlatformException restartFailure;
-        private OpencodeProcessHealthResult health = OpencodeProcessHealthResult.healthy("ok");
+        private OpencodeProcessHealthResult health = OpencodeProcessHealthResult.healthy(33333L, "ok");
 
         @Override
         public OpencodeProcessHealthResult checkHealth(OpencodeProcessHealthCommand command) {
@@ -366,17 +411,27 @@ class RuntimeManagementCommandServiceTest {
         @Override
         public OpencodeProcessControlResult stopProcess(OpencodeProcessControlCommand command) {
             stopCommands.add(command);
+            return stopped(command.port(), command.traceId());
+        }
+
+        @Override
+        public OpencodeProcessControlResult stopOwnedProcess(OpencodeProcessOwnedStopCommand command) {
+            ownedStopCommands.add(command);
+            return stopped(command.port(), command.traceId());
+        }
+
+        private OpencodeProcessControlResult stopped(int port, String traceId) {
             return new OpencodeProcessControlResult(
                     "stop",
                     "STOPPED",
-                    command.port(),
+                    port,
                     22345L,
                     "http://10.8.0.12:4097",
                     "/data/opencode/session/4097",
                     "/data/opencode/.config/opencode/",
                     true,
                     "opencode server stopped",
-                    command.traceId());
+                    traceId);
         }
     }
 

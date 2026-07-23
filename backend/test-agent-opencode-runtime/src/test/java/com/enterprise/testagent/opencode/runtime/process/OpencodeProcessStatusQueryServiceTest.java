@@ -20,6 +20,7 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerManager;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerStatus;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeManagerBackendConnection;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
+import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessAtomicMutationPort;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcess;
@@ -85,7 +86,7 @@ class OpencodeProcessStatusQueryServiceTest {
         OpencodeServerProcess old = process("ocp_running", 4097, OpencodeServerProcessStatus.UNHEALTHY, 11111L);
         repository.processes.put(old.processId(), old);
         RecordingGateway gateway = new RecordingGateway();
-        gateway.health = OpencodeProcessHealthResult.healthy("ok");
+        gateway.health = OpencodeProcessHealthResult.healthy(11111L, "ok");
         RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
         OpencodeProcessStatusQueryService service = service(repository, gateway, heartbeatStore);
 
@@ -111,7 +112,7 @@ class OpencodeProcessStatusQueryServiceTest {
         FakeRepository repository = new FakeRepository();
         OpencodeServerProcess cached = process("ocp_running", 4097, OpencodeServerProcessStatus.RUNNING, 11111L);
         RecordingGateway gateway = new RecordingGateway();
-        gateway.health = OpencodeProcessHealthResult.healthy("ok");
+        gateway.health = OpencodeProcessHealthResult.healthy(11111L, "ok");
         RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
         OpencodeProcessStatusQueryService service = service(repository, gateway, heartbeatStore);
 
@@ -125,12 +126,83 @@ class OpencodeProcessStatusQueryServiceTest {
     }
 
     @Test
+    void readOnlySnapshotReturnsFreshRunningStateWithoutDatabaseOrHeartbeatPersistence() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess cached = process("ocp_read_only", 4097, OpencodeServerProcessStatus.UNHEALTHY, 11111L);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.health = OpencodeProcessHealthResult.healthy(33333L, "ok");
+        RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
+        OpencodeProcessStatusQueryService service = service(repository, gateway, heartbeatStore);
+
+        OpencodeProcessStatusProbe probe = service.querySnapshotReadOnly(cached, TRACE_ID);
+
+        assertThat(probe.status()).isEqualTo(OpencodeProcessProbeStatus.RUNNING);
+        assertThat(probe.process()).get().satisfies(process -> {
+            assertThat(process.status()).isEqualTo(OpencodeServerProcessStatus.RUNNING);
+            assertThat(process.pid()).isEqualTo(33333L);
+            assertThat(process.healthMessage()).isEqualTo("ok");
+        });
+        assertThat(repository.findProcessCalls).isZero();
+        assertThat(repository.savedProcesses).isEmpty();
+        assertThat(heartbeatStore.recordedProcessIds).isEmpty();
+    }
+
+    @Test
+    void readOnlyHealthyWithoutManagerPidFailsClosedInsteadOfReusingDatabasePid() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess cached = process(
+                "ocp_read_only_missing_pid",
+                4097,
+                OpencodeServerProcessStatus.RUNNING,
+                11111L);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.health = OpencodeProcessHealthResult.healthy("manager omitted pid");
+        RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
+        OpencodeProcessStatusQueryService service = service(repository, gateway, heartbeatStore);
+
+        OpencodeProcessStatusProbe probe = service.querySnapshotReadOnly(cached, TRACE_ID);
+
+        assertThat(probe.status()).isEqualTo(OpencodeProcessProbeStatus.STALE);
+        assertThat(probe.errorCode()).isEqualTo(ErrorCode.OPENCODE_BAD_GATEWAY);
+        assertThat(probe.process()).contains(cached);
+        assertThat(repository.findProcessCalls).isZero();
+        assertThat(repository.savedProcesses).isEmpty();
+        assertThat(heartbeatStore.recordedProcessIds).isEmpty();
+    }
+
+    @Test
+    void readOnlySnapshotConfirmsNotManagedWithoutStoppedStatePersistence() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess cached = process("ocp_read_only_stopped", 4097, OpencodeServerProcessStatus.RUNNING, 11111L);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.health = OpencodeProcessHealthResult.notRunning("not managed");
+        RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
+        OpencodeProcessStatusQueryService service = service(repository, gateway, heartbeatStore);
+
+        OpencodeProcessStatusProbe probe = service.querySnapshotReadOnly(cached, TRACE_ID);
+
+        assertThat(probe.status()).isEqualTo(OpencodeProcessProbeStatus.NOT_STARTED);
+        assertThat(probe.process()).get().satisfies(process -> {
+            assertThat(process.status()).isEqualTo(OpencodeServerProcessStatus.STOPPED);
+            assertThat(process.pid()).isNull();
+        });
+        assertThat(repository.findProcessCalls).isZero();
+        assertThat(repository.savedProcesses).isEmpty();
+        assertThat(heartbeatStore.recordedProcessIds).isEmpty();
+    }
+
+    @Test
     void cachedSnapshotPersistsOnlyARealStatusTransitionWithoutRepositoryRead() {
         FakeRepository repository = new FakeRepository();
         OpencodeServerProcess cached = process("ocp_unhealthy", 4097, OpencodeServerProcessStatus.UNHEALTHY, 11111L);
         RecordingGateway gateway = new RecordingGateway();
-        gateway.health = OpencodeProcessHealthResult.healthy("ok");
-        OpencodeProcessStatusQueryService service = service(repository, gateway, new RecordingHeartbeatStore());
+        gateway.health = OpencodeProcessHealthResult.healthy(11111L, "ok");
+        OpencodeProcessStatusQueryService service = new OpencodeProcessStatusQueryService(
+                repository,
+                gateway,
+                new RecordingHeartbeatStore(),
+                acceptingStateMutation(repository),
+                Clock.fixed(NOW, ZoneOffset.UTC));
 
         OpencodeProcessStatusProbe probe = service.querySnapshot(cached, TRACE_ID);
 
@@ -139,6 +211,27 @@ class OpencodeProcessStatusQueryServiceTest {
                 .isEqualTo(OpencodeServerProcessStatus.RUNNING);
         assertThat(repository.findProcessCalls).isZero();
         assertThat(repository.savedProcesses).containsOnlyKeys(cached.processId());
+    }
+
+    private static OpencodeProcessAtomicMutationPort acceptingStateMutation(FakeRepository repository) {
+        return new OpencodeProcessAtomicMutationPort() {
+            @Override
+            public void compareAndSetAssignment(
+                    OpencodeServerProcess expectedProcess,
+                    UserOpencodeProcessBinding expectedBinding,
+                    OpencodeServerProcess replacementProcess,
+                    UserOpencodeProcessBinding replacementBinding) {
+                throw new UnsupportedOperationException("assignment migration is not used");
+            }
+
+            @Override
+            public boolean compareAndSetRuntimeState(
+                    OpencodeServerProcess expectedAssignment,
+                    OpencodeServerProcess replacementState) {
+                repository.saveOpencodeServerProcess(replacementState);
+                return true;
+            }
+        };
     }
 
     @Test
@@ -153,7 +246,7 @@ class OpencodeProcessStatusQueryServiceTest {
                 11111L);
         repository.processes.put(old.processId(), old);
         RecordingGateway gateway = new RecordingGateway();
-        gateway.health = OpencodeProcessHealthResult.healthy("ok");
+        gateway.health = OpencodeProcessHealthResult.healthy(11111L, "ok");
         OpencodeProcessStatusQueryService service = new OpencodeProcessStatusQueryService(
                 repository,
                 gateway,
@@ -191,26 +284,26 @@ class OpencodeProcessStatusQueryServiceTest {
     }
 
     @Test
-    void unhealthyHealthMessageReturnsStaleWithoutDatabaseWrite() {
+    void managedPidWithUnhealthyHttpReturnsHealthCheckFailedWithoutDatabaseWrite() {
         FakeRepository repository = new FakeRepository();
         OpencodeServerProcess old = process("ocp_unhealthy", 4097, OpencodeServerProcessStatus.RUNNING, 22222L);
         repository.processes.put(old.processId(), old);
         RecordingGateway gateway = new RecordingGateway();
-        gateway.health = OpencodeProcessHealthResult.unhealthy("opencode http health failed");
+        gateway.health = OpencodeProcessHealthResult.managedUnhealthy(33333L, "opencode http health failed");
         OpencodeProcessStatusQueryService service = service(repository, gateway, new RecordingHeartbeatStore());
 
         OpencodeProcessStatusProbe probe = service.query(old.processId(), TRACE_ID);
 
-        assertThat(probe.status()).isEqualTo(OpencodeProcessProbeStatus.STALE);
-        assertThat(probe.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE);
+        assertThat(probe.status()).isEqualTo(OpencodeProcessProbeStatus.HEALTH_CHECK_FAILED);
+        assertThat(probe.errorCode()).isNull();
         assertThat(probe.process()).get().satisfies(process -> {
             assertThat(process.status()).isEqualTo(OpencodeServerProcessStatus.RUNNING);
-            assertThat(process.pid()).isEqualTo(22222L);
+            assertThat(process.pid()).isEqualTo(33333L);
             assertThat(process.healthMessage()).isEqualTo("old");
         });
-        assertThat(probe.managerStatus()).isEqualTo("STALE");
-        assertThat(probe.healthStatus()).isEqualTo("STALE");
-        assertThat(probe.restartable()).isFalse();
+        assertThat(probe.managerStatus()).isEqualTo("RUNNING");
+        assertThat(probe.healthStatus()).isEqualTo("UNHEALTHY");
+        assertThat(probe.restartable()).isTrue();
         assertThat(repository.savedProcesses).isEmpty();
     }
 
@@ -473,7 +566,7 @@ class OpencodeProcessStatusQueryServiceTest {
 
     private static final class RecordingGateway implements OpencodeProcessManagerGateway {
         private final List<OpencodeProcessHealthCommand> healthCommands = new ArrayList<>();
-        private OpencodeProcessHealthResult health = OpencodeProcessHealthResult.healthy("ok");
+        private OpencodeProcessHealthResult health = OpencodeProcessHealthResult.healthy(11111L, "ok");
         private RuntimeException healthFailure;
 
         @Override

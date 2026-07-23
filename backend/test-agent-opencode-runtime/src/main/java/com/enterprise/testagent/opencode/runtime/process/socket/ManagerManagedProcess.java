@@ -13,5 +13,20 @@ public record ManagerManagedProcess(
         String configPath,
         Instant startedAt,
         String startCommand,
-        String traceId) {
+        String traceId,
+        String unifiedAuthId,
+        String managerStatus) {
+
+    /** 兼容旧 manager payload、旧测试和旧构造调用。 */
+    public ManagerManagedProcess(
+            int port,
+            Long pid,
+            String baseUrl,
+            String sessionPath,
+            String configPath,
+            Instant startedAt,
+            String startCommand,
+            String traceId) {
+        this(port, pid, baseUrl, sessionPath, configPath, startedAt, startCommand, traceId, null, null);
+    }
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -83,6 +84,9 @@ func TestDispatchStartCommandPassesUnifiedAuthIDAndSessionPathToProcessManager(t
 	if result.SessionPath != sessionPath {
 		t.Fatalf("expected result session path %q, got %q", sessionPath, result.SessionPath)
 	}
+	if !result.ProcessCreated {
+		t.Fatalf("fresh start command must report processCreated=true, got %#v", result)
+	}
 	if len(starter.specs) != 1 {
 		t.Fatalf("expected one start spec, got %d", len(starter.specs))
 	}
@@ -91,6 +95,129 @@ func TestDispatchStartCommandPassesUnifiedAuthIDAndSessionPathToProcessManager(t
 	}
 	if starter.specs[0].UnifiedAuthID != "usr_1234567890abcdef" {
 		t.Fatalf("expected unified auth id to reach start spec, got %#v", starter.specs[0])
+	}
+}
+
+func TestDispatchStartCommandPassesBindingRecoveryThroughFullCapacity(t *testing.T) {
+	configDir := filepath.Join(t.TempDir(), "opencode-config")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("pre-create config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, ".ready"), []byte("ready"), 0o644); err != nil {
+		t.Fatalf("write config marker: %v", err)
+	}
+	store := state.NewFileStore(t.TempDir())
+	if err := store.Save(state.ProcessRecord{
+		Port: 4097, PID: 22345, UnifiedAuthID: "another-user",
+		SessionPath: "/tmp/opencode-session/users/another-user", ConfigPath: configDir,
+		StartedAt: time.Now().UTC(), TraceID: "trace_existing",
+	}); err != nil {
+		t.Fatalf("save existing process: %v", err)
+	}
+	starter := &capturingStarter{pid: 12345}
+	manager := process.NewManager(
+		config.Config{
+			ContainerID: "ctr_01", ContainerName: "test-agent-opencode-worker",
+			LinuxServerID: "test-agent-backend-10-8-0-12", ServerHost: "10.8.0.12",
+			PortStart: 4096, PortEnd: 4100, MaxProcesses: 1, OpencodeBin: "opencode",
+			StateDir: t.TempDir(), SessionRoot: "/tmp/opencode-session", ConfigDir: configDir,
+		},
+		store,
+		starter,
+		noopSignaler{},
+		health.Checker{ProcessAlive: func(int) bool { return true }},
+	)
+	supervisor := NewSupervisor(supervisorTestConfig("ws://127.0.0.1:1"), manager)
+
+	result, err := supervisor.dispatchProcessCommand(context.Background(), Message{
+		Command: "start", Port: 4096, UnifiedAuthID: "bound-user",
+		SessionPath: "/tmp/opencode-session/users/bound-user", ConfigPath: configDir,
+		BindingRecovery: true, TraceID: "trace_binding_recovery",
+	}, time.Second)
+
+	if err != nil || result.Status != process.StatusStarted {
+		t.Fatalf("binding recovery should bypass new-allocation capacity, result=%#v err=%v", result, err)
+	}
+	if len(starter.specs) != 1 {
+		t.Fatalf("expected exact binding recovery to start once, specs=%d", len(starter.specs))
+	}
+}
+
+func TestSupervisorStopOwnedPreservesOwnershipMismatchWithoutSideEffects(t *testing.T) {
+	cfg := supervisorTestConfig("")
+	store := state.NewFileStore(t.TempDir())
+	if err := store.Save(state.ProcessRecord{
+		Port:          4096,
+		PID:           200,
+		UnifiedAuthID: "user-b",
+		SessionPath:   "/tmp/sessions/users/user-b",
+		StartedAt:     time.Now().UTC(),
+		TraceID:       "trace_new",
+	}); err != nil {
+		t.Fatalf("save replacement state: %v", err)
+	}
+	signaler := &recordingSupervisorSignaler{}
+	manager := process.NewManager(cfg.Config, store, nil, signaler, health.Checker{})
+	supervisor := NewSupervisor(cfg, manager)
+
+	result := supervisor.executeCommand(context.Background(), Message{
+		Type:          messageTypeCommand,
+		CommandID:     "mcmd_stop_owned_1234567890",
+		Command:       "stopOwned",
+		Port:          4096,
+		PID:           100,
+		UnifiedAuthID: "user-a",
+		TimeoutMillis: 1,
+		TraceID:       "trace_stop_owned_1234567890",
+	})
+
+	if result.Status != string(process.StatusFailed) || result.ErrorCode != "PROCESS_OWNERSHIP_MISMATCH" {
+		t.Fatalf("expected stable ownership mismatch result, got %#v", result)
+	}
+	if len(signaler.terminatedPIDs) != 0 || len(signaler.killedPIDs) != 0 {
+		t.Fatalf("ownership mismatch must not signal replacement process, signaler=%#v", signaler)
+	}
+	record, ok, err := store.Get(4096)
+	if err != nil || !ok || record.PID != 200 || record.UnifiedAuthID != "user-b" {
+		t.Fatalf("replacement state must remain intact, record=%#v ok=%t err=%v", record, ok, err)
+	}
+}
+
+func TestSupervisorUnknownCommandFailsBeforeProcessSideEffects(t *testing.T) {
+	cfg := supervisorTestConfig("")
+	store := state.NewFileStore(t.TempDir())
+	if err := store.Save(state.ProcessRecord{
+		Port: 4096, PID: 200, UnifiedAuthID: "user-b",
+		SessionPath: "/tmp/sessions/users/user-b", StartedAt: time.Now().UTC(), TraceID: "trace_new",
+	}); err != nil {
+		t.Fatalf("save replacement state: %v", err)
+	}
+	signaler := &recordingSupervisorSignaler{}
+	supervisor := NewSupervisor(cfg, process.NewManager(cfg.Config, store, nil, signaler, health.Checker{}))
+
+	result := supervisor.executeCommand(context.Background(), Message{
+		Type: messageTypeCommand, CommandID: "mcmd_unknown_1234567890", Command: "stopOwnedLegacyUnknown",
+		Port: 4096, PID: 200, UnifiedAuthID: "user-b", TimeoutMillis: 1, TraceID: "trace_unknown_1234567890",
+	})
+
+	if result.Status != string(process.StatusFailed) {
+		t.Fatalf("unknown command must fail, got %#v", result)
+	}
+	if len(signaler.terminatedPIDs) != 0 || len(signaler.killedPIDs) != 0 {
+		t.Fatalf("unknown command must fail before signals, signaler=%#v", signaler)
+	}
+	if _, ok, err := store.Get(4096); err != nil || !ok {
+		t.Fatalf("unknown command must not delete state, ok=%t err=%v", ok, err)
+	}
+}
+
+func TestMessageJSONIncludesFalseProcessCreated(t *testing.T) {
+	payload, err := json.Marshal(Message{ProcessCreated: false})
+	if err != nil {
+		t.Fatalf("marshal command result: %v", err)
+	}
+	if !strings.Contains(string(payload), `"processCreated":false`) {
+		t.Fatalf("processCreated=false must be explicit for Java tri-state compatibility, payload=%s", payload)
 	}
 }
 
@@ -293,14 +420,15 @@ func TestSupervisorHeartbeatIncludesResourceMetricsAndManagedProcesses(t *testin
 	cfg := supervisorTestConfig(seedURL)
 	cfg.HeartbeatInterval = 20 * time.Millisecond
 	manager := process.NewManager(cfg.Config, staticStore{records: []state.ProcessRecord{{
-		Port:         4096,
-		PID:          12345,
-		BaseURL:      "http://10.8.0.12:4096",
-		SessionPath:  "/data/opencode/session/4096",
-		ConfigPath:   "/data/opencode/.config/opencode/",
-		StartedAt:    time.Date(2026, 6, 24, 8, 0, 0, 0, time.UTC),
-		StartCommand: "XDG_DATA_HOME=/data/opencode/session/4096 OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs",
-		TraceID:      "trace_process",
+		Port:          4096,
+		PID:           12345,
+		BaseURL:       "http://10.8.0.12:4096",
+		UnifiedAuthID: "user-managed",
+		SessionPath:   "/data/opencode/session/4096",
+		ConfigPath:    "/data/opencode/.config/opencode/",
+		StartedAt:     time.Date(2026, 6, 24, 8, 0, 0, 0, time.UTC),
+		StartCommand:  "XDG_DATA_HOME=/data/opencode/session/4096 OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs",
+		TraceID:       "trace_process",
 	}}}, nil, nil, health.Checker{ProcessAlive: func(pid int) bool { return true }})
 	supervisor := NewSupervisor(cfg, manager)
 	supervisor.metrics = staticMetricsCollector{sample: RuntimeMetricsSample{
@@ -330,6 +458,31 @@ func TestSupervisorHeartbeatIncludesResourceMetricsAndManagedProcesses(t *testin
 	}
 	if heartbeat.ManagedProcesses[0].StartCommand == "" {
 		t.Fatalf("expected managed process start command")
+	}
+	payload, err := json.Marshal(heartbeat.ManagedProcesses[0])
+	if err != nil {
+		t.Fatalf("marshal managed process: %v", err)
+	}
+	var managedPayload map[string]any
+	if err := json.Unmarshal(payload, &managedPayload); err != nil {
+		t.Fatalf("unmarshal managed process: %v", err)
+	}
+	if managedPayload["unifiedAuthId"] != "user-managed" || managedPayload["managerStatus"] != "PID_ALIVE" {
+		t.Fatalf("expected heartbeat identity and PID_ALIVE manager status, got %#v", managedPayload)
+	}
+	emptyPayload, err := json.Marshal(ManagedProcess{})
+	if err != nil {
+		t.Fatalf("marshal empty managed process: %v", err)
+	}
+	var empty map[string]any
+	if err := json.Unmarshal(emptyPayload, &empty); err != nil {
+		t.Fatalf("unmarshal empty managed process: %v", err)
+	}
+	if _, ok := empty["unifiedAuthId"]; ok {
+		t.Fatalf("optional unifiedAuthId must be omitted when empty, got %#v", empty)
+	}
+	if _, ok := empty["managerStatus"]; ok {
+		t.Fatalf("optional managerStatus must be omitted when empty, got %#v", empty)
 	}
 }
 
@@ -503,6 +656,35 @@ func TestSupervisorCommandResultIncludesPublicConfigErrorCode(t *testing.T) {
 	}
 }
 
+func TestSupervisorHealthCommandResultPreservesProcessNotManagedErrorCode(t *testing.T) {
+	cfg := supervisorTestConfig("")
+	cfg.Config.StateDir = t.TempDir()
+	manager := process.NewManager(
+		cfg.Config,
+		state.NewFileStore(t.TempDir()),
+		nil,
+		fakeSupervisorSignaler{},
+		health.Checker{},
+	)
+	supervisor := NewSupervisor(cfg, manager)
+
+	result := supervisor.executeCommand(context.Background(), Message{
+		Type:          messageTypeCommand,
+		CommandID:     "mcmd_health_1234567890",
+		Command:       "health",
+		Port:          4096,
+		TimeoutMillis: int64(time.Second / time.Millisecond),
+		TraceID:       "trace_health_1234567890",
+	})
+
+	if result.Status != string(process.StatusFailed) {
+		t.Fatalf("expected failed health result, got %#v", result)
+	}
+	if result.ErrorCode != "PROCESS_NOT_MANAGED" {
+		t.Fatalf("expected PROCESS_NOT_MANAGED errorCode, got %q", result.ErrorCode)
+	}
+}
+
 func TestSupervisorSendsHeartbeatImmediatelyAfterStopCommand(t *testing.T) {
 	commandResults := make(chan Message, 2)
 	heartbeats := make(chan Message, 4)
@@ -558,8 +740,9 @@ func TestSupervisorSendsHeartbeatImmediatelyAfterStopCommand(t *testing.T) {
 		StartedAt: time.Now().UTC(),
 		TraceID:   "trace_process",
 	})
-	manager := process.NewManager(cfg.Config, store, nil, fakeSupervisorSignaler{}, health.Checker{
-		ProcessAlive: func(pid int) bool { return true },
+	signaler := &stopAwareSupervisorSignaler{}
+	manager := process.NewManager(cfg.Config, store, nil, signaler, health.Checker{
+		ProcessAlive: func(pid int) bool { return !signaler.stopped.Load() },
 	})
 	supervisor := NewSupervisor(cfg, manager)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -721,3 +904,28 @@ type fakeSupervisorSignaler struct{}
 
 func (fakeSupervisorSignaler) Terminate(int) error { return nil }
 func (fakeSupervisorSignaler) Kill(int) error      { return nil }
+
+type stopAwareSupervisorSignaler struct {
+	stopped atomic.Bool
+}
+
+func (s *stopAwareSupervisorSignaler) Terminate(int) error { return nil }
+func (s *stopAwareSupervisorSignaler) Kill(int) error {
+	s.stopped.Store(true)
+	return nil
+}
+
+type recordingSupervisorSignaler struct {
+	terminatedPIDs []int
+	killedPIDs     []int
+}
+
+func (s *recordingSupervisorSignaler) Terminate(pid int) error {
+	s.terminatedPIDs = append(s.terminatedPIDs, pid)
+	return nil
+}
+
+func (s *recordingSupervisorSignaler) Kill(pid int) error {
+	s.killedPIDs = append(s.killedPIDs, pid)
+	return nil
+}

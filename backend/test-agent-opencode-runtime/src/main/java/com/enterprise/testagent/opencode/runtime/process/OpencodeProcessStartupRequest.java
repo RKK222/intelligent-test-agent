@@ -27,7 +27,38 @@ public record OpencodeProcessStartupRequest(
         String sessionPath,
         String configPath,
         Map<String, String> environment,
-        String traceId) {
+        String traceId,
+        boolean bindingRecovery) {
+
+    /** 兼容既有调用；未显式标记时按首次分配执行 manager 容量校验。 */
+    public OpencodeProcessStartupRequest(
+            UserId userId,
+            OpencodeProcessId processId,
+            Instant createdAt,
+            Instant bindingCreatedAt,
+            LinuxServerId linuxServerId,
+            OpencodeContainerId containerId,
+            int port,
+            String baseUrl,
+            String sessionPath,
+            String configPath,
+            Map<String, String> environment,
+            String traceId) {
+        this(
+                userId,
+                processId,
+                createdAt,
+                bindingCreatedAt,
+                linuxServerId,
+                containerId,
+                port,
+                baseUrl,
+                sessionPath,
+                configPath,
+                environment,
+                traceId,
+                false);
+    }
 
     public OpencodeProcessStartupRequest {
         Objects.requireNonNull(userId, "userId must not be null");

@@ -1,8 +1,8 @@
 # 企业内多后台部署
 
-当前代码的普通 HTTP、RunEvent SSE、用户 OpenCode 进程路由、内部模型代理和受控 WebSocket 支持两个或更多后台节点。页面首次查询 `/processes/me` 时不带服务器路由头，仍按 `least_conn` 进入任意 Java；拿到 binding 中的 `linuxServerId` 后，前端仅在页面内存保存它，并给后续用户 OpenCode、会话、Run、SSE 和本地工作区请求增加 `X-Test-Agent-Linux-Server-Id`。Nginx 通过静态白名单把这些请求直接送到一机一 Java 的目标节点，避免正常链路中的 Java→Java 二次转发。
+当前代码的普通 HTTP、RunEvent SSE、用户 OpenCode 进程路由、内部模型代理和受控 WebSocket 支持两个或更多后台节点。页面首次查询 `/processes/me` 时不带服务器路由头，仍按 `least_conn` 进入任意 Java；用户未绑定时，入口 Java 会基于共享 Redis 快照选择进程总数最少且存在本地可用容器的服务器，必要时通过公共 Java→Java 转发器把状态或初始化请求单次转发到该服务器，目标 Java 再完成本地容器选择与原子端口预留。拿到 binding 中的 `linuxServerId` 后，前端仅在页面内存保存它，并给后续用户 OpenCode、会话、Run、SSE 和本地工作区请求增加 `X-Test-Agent-Linux-Server-Id`。Nginx 通过静态白名单把这些请求直接送到一机一 Java 的目标节点，避免正常链路中的 Java→Java 二次转发。
 
-这个头只是首跳性能提示，不是权限或路由事实源。缺失、未知或过期时仍由 `least_conn` 和后端公共路由程序根据真实 binding 兜底；Nginx 在转发前删除外部传入的路由头和 `X-Test-Agent-Backend-Routed`，后端鉴权、Session 归属和运行上下文校验继续生效。workspace PTY 和 Agent 配置进度 ticket 响应沿用签发 Java 地址；当前 HTTP 现场的服务器终端 ticket POST 也复用同一静态路由表，响应再返回签发 Java 的直接 `ws://` 地址，因此 ticket 的签发和消费不会跨 JVM，也不依赖 sticky。
+这个头只是首跳性能提示，不是权限或路由事实源。缺失、未知或过期时仍由 `least_conn` 和后端公共路由程序根据真实 binding 兜底；尚无 binding 的精确状态/初始化请求则重新按当轮集群负载选服，已有 binding 不因负载变化迁移；Nginx 在转发前删除外部传入的路由头和 `X-Test-Agent-Backend-Routed`，后端鉴权、Session 归属和运行上下文校验继续生效。workspace PTY 和 Agent 配置进度 ticket 响应沿用签发 Java 地址；当前 HTTP 现场的服务器终端 ticket POST 也复用同一静态路由表，响应再返回签发 Java 的直接 `ws://` 地址，因此 ticket 的签发和消费不会跨 JVM，也不依赖 sticky。
 
 本文用两个后台举例：
 
@@ -15,7 +15,7 @@
 | 后台 B + worker B | `122.233.30.114` / `test-agent-backend-122-233-30-114` |
 | Redis | `122.233.30.20:6379` |
 | PostgreSQL | `122.233.30.147:5432/postgres` |
-| XXL MySQL | `122.233.30.147:3306/xxl_job`（与 PostgreSQL 同机的独立 MySQL 8.4 容器） |
+| XXL MySQL | `122.210.106.43:3306/xxl_job`（外部共享 MySQL，当前使用既有 `root` 账号） |
 | 企业内部模型 | `ai-code.sdc.enterprise:9070` |
 
 ## 1. 正式拓扑
@@ -59,8 +59,7 @@ Java A <---------------- 互访 8080 ----------------> Java B
 | `.4` | `.114:8080` | Java A 转发到 Java B |
 | `.114` | `.4:8080` | Java B 转发到 Java A |
 | 每台 worker 容器 | 本机 Java `:8080` | manager WebSocket、内部模型代理 |
-| 每台后台 | PostgreSQL、Redis、XXL MySQL | 平台持久化、运行态与 XXL 独立调度库 |
-| `.147` MySQL 容器 | 本机 `/data/testagent/mysql` | 与 PostgreSQL 进程分离的 XXL 调度数据；禁止把目录挂到 PostgreSQL 数据目录 |
+| 每台后台 | PostgreSQL、Redis、外部 XXL MySQL | 平台持久化、运行态与 XXL 独立调度库 |
 | 每个 Admin | `.4:9999`、`.114:9999` | 调度所有 Java executor；仅可信内网开放 |
 | 每台后台 | `ai-code.sdc.enterprise:9070` | 企业内部模型调用 |
 | Java 后台 | 每台后台 `4096-4115` | 访问本机或目标服务器上的用户 OpenCode 进程；浏览器不直连这些端口 |
@@ -103,13 +102,12 @@ deploy/internal/dist/test-agent-internal-release.zip
 deploy/internal/dist/test-agent-internal-release.zip.sha256
 ```
 
-将同一份 zip 和校验文件复制到：
+平台 zip 和校验文件只复制到：
 
 ```text
 122.233.30.2:/data/0709/
 122.233.30.4:/data/0709/
 122.233.30.114:/data/0709/
-122.233.30.147:/data/0709/
 ```
 
 每台都执行：
@@ -161,8 +159,8 @@ TEST_AGENT_DB_PASSWORD=REPLACE_PRODUCTION_DB_PASSWORD
 TEST_AGENT_DB_DRIVER_CLASS_NAME=org.postgresql.Driver
 
 TEST_AGENT_XXL_JOB_ENABLED=true
-TEST_AGENT_XXL_JOB_MYSQL_URL=jdbc:mysql://122.233.30.147:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
-TEST_AGENT_XXL_JOB_MYSQL_USERNAME=xxl_job
+TEST_AGENT_XXL_JOB_MYSQL_URL=jdbc:mysql://122.210.106.43:3306/xxl_job?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+TEST_AGENT_XXL_JOB_MYSQL_USERNAME=root
 TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=REPLACE_XXL_JOB_MYSQL_PASSWORD
 TEST_AGENT_XXL_JOB_ACCESS_TOKEN=REPLACE_XXL_JOB_ACCESS_TOKEN
 TEST_AGENT_XXL_JOB_ADMIN_PORT=18080
@@ -226,8 +224,8 @@ TEST_AGENT_DB_PASSWORD=REPLACE_PRODUCTION_DB_PASSWORD
 TEST_AGENT_DB_DRIVER_CLASS_NAME=org.postgresql.Driver
 
 TEST_AGENT_XXL_JOB_ENABLED=true
-TEST_AGENT_XXL_JOB_MYSQL_URL=jdbc:mysql://122.233.30.147:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
-TEST_AGENT_XXL_JOB_MYSQL_USERNAME=xxl_job
+TEST_AGENT_XXL_JOB_MYSQL_URL=jdbc:mysql://122.210.106.43:3306/xxl_job?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+TEST_AGENT_XXL_JOB_MYSQL_USERNAME=root
 TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=REPLACE_XXL_JOB_MYSQL_PASSWORD
 TEST_AGENT_XXL_JOB_ACCESS_TOKEN=REPLACE_XXL_JOB_ACCESS_TOKEN
 TEST_AGENT_XXL_JOB_ADMIN_PORT=18080
@@ -307,18 +305,21 @@ OPENCODE_ALLOWED_CORS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996
 OPENCODE_MANAGER_HEARTBEAT_INTERVAL=5s
 OPENCODE_MANAGER_RECONNECT_INTERVAL=10s
 
-OPENCODE_VERSION=1.17.8
-OPENCODE_SOURCE_COMMIT=11e47f91496005aab4d7c5a2d0a7da5d2651b4ac
-OPENCODE_SOURCE_REPOSITORY=https://github.com/anomalyco/opencode.git
-GO_IMAGE=golang@sha256:167053a2bb901972bf2c1611f8f52c44d5fe7e762e5cab213708d82c421614db
-BUN_IMAGE=oven/bun@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f
-NODE_IMAGE=node@sha256:e24976116684e0fd211cbdb3c40fc9cb997565d063fb7fe656d2e2b603c5bb0a
+OPENCODE_VERSION=1.18.4
+OPENCODE_RELEASE_COMMIT=49c69c5ed3ccf706b61b3febb43c8aaff7f8325e
+OPENCODE_ASSET_NAME=opencode-linux-x64-baseline.tar.gz
+OPENCODE_ASSET_SIZE=59265643
+OPENCODE_ASSET_SHA256=4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc
+OPENCODE_BINARY_SHA256=6ce6570e7db9a40e7bd3304ebdfff607920bde8cafd2eb5587bd7a26f89ba0b5
+OPENCODE_RELEASE_BASE_URL=https://github.com/anomalyco/opencode/releases/download
+GO_IMAGE=golang@sha256:e87b2a5f6df2dff71ea330d55d54f4979eb380ae58a7e3aabc9d53121243e689
+NODE_IMAGE=node@sha256:b042c6d46a90773b82ea3f95b05457ea93ee127a73b1b47ad5ebbb1a08ec3df8
 
 NPM_REGISTRY=https://registry.npmmirror.com
 COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
 GOPROXY=https://goproxy.cn,direct
-DEBIAN_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian
-DEBIAN_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
+DEBIAN_MIRROR=https://mirrors.ustc.edu.cn/debian
+DEBIAN_SECURITY_MIRROR=https://mirrors.ustc.edu.cn/debian-security
 
 TEST_AGENT_IMAGE_OUTPUT_DIR=/data/testagent/dist
 ```
@@ -413,36 +414,25 @@ bash /tmp/deploy-internal-frontend.sh \
 
 ### 7.1 使用逐机配置包
 
-后续 U 盘交付物固定为 `test-agent-two-backend-complete.zip` 和配套
-`test-agent-two-backend-complete.zip.sha256`，ZIP 内顶层目录固定为
-`test-agent-two-backend-complete/`，不再在文件名或目录名中添加日期、`v2`、`v3`。企业内部中转机和
-三台应用服务器和 `.147` 数据库服务器可以长期复用同一组校验、解压和 `scp` 命令。
+后续 U 盘只交付平台包 `test-agent-two-backend-complete.zip` 及 SHA，发到 `.4/.114/.2`。顶层目录
+固定为 `test-agent-two-backend-complete/`，不添加日期、`v2`、`v3`。外部 MySQL 不部署容器、镜像或
+`.147` 节点包。
 
-四台服务器都上传并校验同一个外层 ZIP 后，用无参数入口执行。入口脚本从本机网卡识别 IP，自动选择并
+各服务器上传并校验本机对应的外层 ZIP 后，用无参数入口执行。入口脚本从本机网卡识别 IP，自动选择并
 校验节点包、解压节点配置，然后连续完成 `--validate-only`、正式部署和 `--verify-only`。任一步失败都会
 返回非零；Java、Docker、Nginx 和最终校验输出统一写入 `/data/0709/deploy-<本机IP>.log`，不会再出现
 只执行了一个空 `bash`、但实际服务没有重启的情况。
 
-先在 PostgreSQL 所在的 `.147` 部署独立 MySQL 容器：
-
-```bash
-cd /data/0709
-sha256sum -c test-agent-two-backend-complete.zip.sha256
-unzip -oq test-agent-two-backend-complete.zip
-cd /data/0709/test-agent-two-backend-complete
-bash deploy-mysql-node.sh
-```
-
-该命令离线导入包内 `mysql:8.4` linux/amd64 镜像，在 `/data/testagent/mysql` 持久化数据，初始化
-`xxl_job` 库和 `xxl_job` 账号。root 密码和应用密码已由打包阶段分别生成；应用密码同时写入 `.4`、
-`.114` 的敏感 `backend.env`，脚本不会打印。已有数据目录不会被删除，若现场曾用另一组密码初始化，
-验证会失败并要求先核对旧凭据，不会自动重建数据库。
+部署前先从 `.4`、`.114` 确认 `122.210.106.43:3306` 可达。两台敏感 `backend.env` 固定使用同一个
+外部 JDBC 地址、`root` 账号和现场密码；URL 启用 `createDatabaseIfNotExist=true`，因此账号有建库权限时
+会自动创建 `xxl_job` 空库，随后 Admin 子上下文 Flyway 幂等创建表、执行器组和任务。密码不得打印或
+另行写入命令行。
 
 企业上午已经部署过旧包时，PostgreSQL 中可能已有 `V20260721213000`。本包把尚未交付的夜间 XXL
 迁移固定为更晚的 `V20260722130000`，Flyway 会正常顺序执行；不要在企业环境添加
 `SPRING_FLYWAY_OUT_OF_ORDER=true`，也不要手工修改 `flyway_schema_history`。
 
-MySQL 验证通过后，在 `.4` 执行：
+外部 MySQL 端口验证通过后，在 `.4` 执行：
 
 ```bash
 cd /data/0709
@@ -476,7 +466,8 @@ cd /data/0709/test-agent-two-backend-complete
 bash deploy-frontend-node.sh
 ```
 
-正式部署必须由 `root` 执行。外层包内已有完整发布 ZIP，四台服务器不再另外复制内层 ZIP 或逐机包。
+正式部署必须由 `root` 执行。平台外层包内已有完整平台发布 ZIP，三台应用服务器不再另外复制内层 ZIP
+或逐机包；`.147` 不再参与本次部署。
 后台节点包包含真实数据库密码和 token，权限与传输方式按敏感交付物处理；RSA 只使用发布 JAR 内的
 `BOOT-INF/classes/rsa-private.key`，不会生成 RSA env 或外置私钥路径。
 
@@ -485,7 +476,7 @@ bash deploy-frontend-node.sh
 
 ### 7.2 后续增加一台全新后台
 
-把同一个外层 ZIP 和 SHA 上传到新后台并解压。初始化脚本从新服务器网卡自动取
+把平台外层 ZIP 和 SHA 上传到新后台并解压。初始化脚本从新服务器网卡自动取
 `122.233.30.x`，以包内 `.4` 的真实配置为基线，只替换本机 `TEST_AGENT_SERVER_ADVERTISED_HOST` 和
 `TEST_AGENT_LINUX_SERVER_ID`；`docker.env` 沿用集群相同 manager token，整个过程不打印密码或 token，
 生成的节点配置包仍强制不超过 `1 MiB`：
@@ -568,13 +559,14 @@ bash /tmp/deploy-internal-frontend.sh \
   --archive /data/0709/test-agent-internal-release.zip
 ```
 
-首次部署时先让两台 Java 都通过 health/readiness 并写对身份文件，再分别启动本机 worker。升级时可以逐台滚动，但每一台内部仍必须按：
+首次部署时先让两台 Java 都通过 health/readiness 并写对身份文件，再分别启动本机 worker。已有环境升级用户绑定端口复用版本时，先逐台更新并重启 worker/manager，再滚动更新 Java，全部后端就绪后最后部署一次前端；不要在同一用户初始化期间跨节点切换版本。每台已有节点按：
 
 ```text
-替换 JAR/lib -> 重启 Java -> 检查 .serverid/.serverhost -> 重启本机 worker
+替换 worker 镜像/programs -> 重启 manager 并确认 stopOwned capability
+-> 替换 JAR/lib -> 重启 Java -> 检查 health/readiness 与 .serverid/.serverhost
 ```
 
-不得清理 `/data/testagent/data`，也不要把 A 的数据目录复制覆盖到 B。
+混合版本遇到未知命令或启动错误时必须保留原 binding，只报错、不迁移端口。不得清理 `/data/testagent/data`，也不要把 A 的数据目录复制覆盖到 B；存量无主进程由超级管理员在运行管理核对 UCID/PID/端口后手工处理。
 
 每台后台部署脚本都会校验已有 systemd unit 的 JAR/env 指向；`systemctl stop` 后若 `8080` 仍被同一路径的旧 `test-agent-app.jar` 占用，会安全终止该遗留进程，其他程序占用则拒绝误杀。新 Java health/readiness 通过后还会核对 systemd `MainPID` 正是 `8080` 监听者，避免滚动升级时误连旧手工进程。
 
@@ -612,7 +604,7 @@ enterprise-deepseek/DeepSeek-V4-Flash-W8A8 -> deepseek-prod
 | `qwen-prod` | `企业通义` | `http://ai-code.sdc.icbc:9070/enterprise/jdt/model/api/openai/v1` | `REPLACE_QWEN_UPSTREAM_TOKEN` | 是 | `1` |
 | `deepseek-prod` | `企业 DeepSeek` | `http://ai-code.sdc.icbc:9070/enterprise/jdt/model/api/openai/v1` | `REPLACE_DEEPSEEK_UPSTREAM_TOKEN` | 是 | `2` |
 
-公共配置必须包含 `includeUsage=false`，避免 OpenCode 1.17.8 默认添加企业内部接口不支持的 `stream_options.include_usage`。供应商地址、启用状态和上游 token 来自共享数据库：`qwen-prod`、`deepseek-prod` 均启用，`baseUrl` 为 `http://ai-code.sdc.icbc:9070/enterprise/jdt/model/api/openai/v1`。公共配置工作树位于各后台本机，因此数据库已经配置供应商并不等于另一台服务器已经初始化公共配置。
+公共配置必须包含 `includeUsage=false`，避免 OpenCode 1.18.4 默认添加企业内部接口不支持的 `stream_options.include_usage`。供应商地址、启用状态和上游 token 来自共享数据库：`qwen-prod`、`deepseek-prod` 均启用，`baseUrl` 为 `http://ai-code.sdc.icbc:9070/enterprise/jdt/model/api/openai/v1`。公共配置工作树位于各后台本机，因此数据库已经配置供应商并不等于另一台服务器已经初始化公共配置。
 
 `enterprise-qwen` / `enterprise-deepseek` 是 OpenCode provider key；`qwen-prod` / `deepseek-prod` 是数据库和 `X-Enterprise-Model-Provider` 使用的 Java 路由键，不能混用。上游 token 只在共享数据库维护，由 Java 以 `Authorization: Bearer <token>` 注入。用户 UCID 由拥有该用户进程的 Java 从用户表读取并逐进程注入，不使用全局 UCID env 文件。
 
@@ -639,7 +631,13 @@ cd /data/testagent/deploy/internal
 ./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env status
 docker logs --tail 200 test-agent-opencode-worker | \
   egrep 'config update applied|websocket|serverhost|serverid|OPENCODE_UNAVAILABLE'
+docker inspect --format 'PidsLimit={{.HostConfig.PidsLimit}} Ulimits={{json .HostConfig.Ulimits}}' \
+  test-agent-opencode-worker
+docker exec test-agent-opencode-worker \
+  sh -lc "grep -E 'Max processes|Max open files' /proc/1/limits"
 ```
+
+两台后台都必须显示 `PidsLimit=8192`，`Ulimits` 包含 `nofile` soft/hard `262144` 和 `nproc` soft/hard `8192`，容器 `/proc/1/limits` 显示最大打开文件数 `262144`、最大用户进程数 `8192`。脚本升级只对重建后的容器生效，因此已有环境按 `.4`、`.114` 顺序逐台执行 worker `restart` 和上述检查；当前节点任一检查失败时立即停止，不操作下一节点。
 
 然后验收：
 
@@ -661,7 +659,7 @@ docker logs --tail 200 test-agent-opencode-worker | \
    ```
 
 2. 从实际浏览器网段分别执行 `curl -fsS http://mimo.sdc.cs.icbc:9996/health` 和 `curl -fsS http://122.233.30.2:9996/health`，两条都返回 `ok`；浏览器 Network 中 API 都是当前地址下的相对 `/api/...`，不能固定请求另一个 origin。
-3. 登录后打开浏览器开发者工具的 Network，刷新页面并按时间排序：第一次 `GET /api/internal/agent/opencode/processes/me` 不应携带 `X-Test-Agent-Linux-Server-Id`；响应给出 `linuxServerId` 后，进程健康、Session、Run、permission/question、工作区请求和两个 fetch SSE 请求应携带该值。用户管理、应用列表、登录和共享查询不应携带它；刷新后仍应重新从第一次 `/processes/me` 获取，不能从 localStorage/sessionStorage 恢复。
+3. 登录后打开浏览器开发者工具的 Network，刷新页面并按时间排序：第一次 `GET /api/internal/agent/opencode/processes/me` 不应携带 `X-Test-Agent-Linux-Server-Id`；未绑定用户可能先进入任一 Java、再由后端转发到当前进程总数最少的可初始化服务器，因此两台 Java 都可能出现同一 traceId，但只有目标 Java 执行本地状态逻辑。响应给出 `linuxServerId` 后，进程健康、Session、Run、permission/question、工作区请求和两个 fetch SSE 请求应携带该值。用户管理、应用列表、登录和共享查询不应携带它；刷新后仍应重新从第一次 `/processes/me` 获取，不能从 localStorage/sessionStorage 恢复。
 4. 用已登录浏览器中复制的 JWT 对两个静态映射做可追踪验证。下面先验证绑定在 `.4` 的用户；把 `REPLACE_LOGIN_JWT` 替换为该用户当前 token：
 
    ```bash
@@ -706,7 +704,7 @@ docker logs --tail 200 test-agent-opencode-worker | \
 6. 运行管理中出现两个不同 `linuxServerId` 的 Java、manager 和容器，连接均在线。
 7. 从 `.4` curl `.114:8080/actuator/health`，从 `.114` curl `.4:8080/actuator/health`。
 8. 两个服务器都能初始化用户进程，动态端口的 `/global/health`、`/api/provider`、`/api/model` 正常。
-9. 从前端连续创建多个用户/会话，确认进程可分布在两个服务器。
+9. 做两级调度验收：先让 `.114` 的进程总数低于 `.4`，直接向 `.4` 对一个未绑定用户调用初始化，确认 binding 落到 `.114` 且只有 `.114` manager 收到 start；反转负载后让新用户落到 `.4`；再次请求已有 binding 用户，确认仍留在原服务器。
 10. 分别用 Qwen 和 DeepSeek 验证普通正文、think/reasoning、工具调用、持续 SSE 和 `[DONE]`。
 11. 两台后台都确认 9070 直连；正式链路中没有监听 19070 的 relay。
 12. 分别打开终端、Workspace/Agent 文件编辑和 Agent 配置 Git 进度，浏览器 WebSocket URL 应直连 ticket 响应中的 `.4:8080` 或 `.114:8080`，连接不出现 ticket 无效。

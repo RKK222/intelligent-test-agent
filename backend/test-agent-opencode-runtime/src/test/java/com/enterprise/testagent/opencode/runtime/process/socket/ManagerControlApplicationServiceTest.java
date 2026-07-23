@@ -249,7 +249,9 @@ class ManagerControlApplicationServiceTest {
                         "/data/opencode/.config/opencode/",
                         NOW,
                         startCommand,
-                        "trace_process")),
+                        "trace_process",
+                        "ucid_001",
+                        "PID_ALIVE")),
                 Map.of("commands", List.of("start", "health")),
                 null,
                 null,
@@ -271,8 +273,11 @@ class ManagerControlApplicationServiceTest {
         service.managerHeartbeat(heartbeat);
 
         assertThat(heartbeatStore.managerSnapshots).singleElement().satisfies(snapshot ->
-                assertThat(snapshot.managedProcesses()).singleElement().satisfies(process ->
-                        assertThat(process.startCommand()).isEqualTo(startCommand)));
+                assertThat(snapshot.managedProcesses()).singleElement().satisfies(process -> {
+                    assertThat(process.startCommand()).isEqualTo(startCommand);
+                    assertThat(process.unifiedAuthId()).isEqualTo("ucid_001");
+                    assertThat(process.managerStatus()).isEqualTo("PID_ALIVE");
+                }));
     }
 
     private static BackendJavaProcessLifecycleService backendLifecycle(

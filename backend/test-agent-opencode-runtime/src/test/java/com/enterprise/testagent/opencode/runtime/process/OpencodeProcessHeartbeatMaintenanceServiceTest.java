@@ -51,8 +51,10 @@ class OpencodeProcessHeartbeatMaintenanceServiceTest {
         OpencodeServerProcess stopped = process("ocp_4444444444444444", 4099, OpencodeServerProcessStatus.STOPPED);
         repository.processes.addAll(List.of(healthy, unhealthy, unavailable, stopped));
         FakeGateway gateway = new FakeGateway();
-        gateway.healthResults.put(healthy.processId(), OpencodeProcessHealthResult.healthy("ok"));
-        gateway.healthResults.put(unhealthy.processId(), OpencodeProcessHealthResult.unhealthy("down"));
+        gateway.healthResults.put(healthy.processId(), OpencodeProcessHealthResult.healthy(healthy.pid(), "ok"));
+        gateway.healthResults.put(
+                unhealthy.processId(),
+                OpencodeProcessHealthResult.managedUnhealthy(unhealthy.pid(), "down"));
         gateway.unavailableProcessIds.add(unavailable.processId());
         FakeHeartbeatStore heartbeatStore = new FakeHeartbeatStore();
         OpencodeProcessHeartbeatMaintenanceService service = new OpencodeProcessHeartbeatMaintenanceService(

@@ -183,10 +183,12 @@ verify_container() {
   health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "${CONTAINER_NAME}" 2>/dev/null || true)"
   [[ "${running}" == "true" ]] || {
     echo "MySQL container is not running: ${CONTAINER_NAME}" >&2
+    report_container_state
     exit 1
   }
   [[ -z "${health}" || "${health}" == "healthy" ]] || {
     echo "MySQL container health is ${health}" >&2
+    report_container_state
     exit 1
   }
   architecture="$(docker image inspect -f '{{.Architecture}}' "${MYSQL_IMAGE}")"
@@ -202,6 +204,22 @@ verify_container() {
     "${CONTAINER_NAME}" "${MYSQL_IMAGE}" "${HOST_PORT}" "${DATABASE}" "${DATABASE_USER}"
 }
 
+# 只输出容器状态和末尾日志，不执行完整 inspect，避免把初始化密码带入部署日志。
+report_container_state() {
+  echo "MySQL container state (docker ps -a):" >&2
+  docker ps -a --filter "name=^/${CONTAINER_NAME}$" \
+    --format 'table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' >&2 || true
+  if docker inspect "${CONTAINER_NAME}" >/dev/null 2>&1; then
+    docker inspect -f \
+      'container={{.Name}} id={{.Id}} running={{.State.Running}} status={{.State.Status}} exit_code={{.State.ExitCode}} error={{.State.Error}}' \
+      "${CONTAINER_NAME}" >&2 || true
+    echo "MySQL container logs (last 80 lines):" >&2
+    docker logs --tail 80 "${CONTAINER_NAME}" >&2 || true
+  else
+    echo "Container was not created: ${CONTAINER_NAME}" >&2
+  fi
+}
+
 wait_until_ready() {
   local attempt health
   for attempt in $(seq 1 120); do
@@ -209,7 +227,7 @@ wait_until_ready() {
     [[ "${health}" == "healthy" ]] && return 0
     sleep 1
   done
-  docker logs --tail 80 "${CONTAINER_NAME}" >&2 || true
+  report_container_state
   echo "MySQL did not become healthy within 120 seconds" >&2
   exit 1
 }
@@ -217,6 +235,7 @@ wait_until_ready() {
 cleanup() {
   [[ -z "${EXTRACT_ROOT:-}" ]] || rm -rf "${EXTRACT_ROOT}"
   [[ -z "${DOCKER_ENV_FILE:-}" ]] || rm -f "${DOCKER_ENV_FILE}"
+  [[ -z "${DOCKER_RUN_ERROR_FILE:-}" ]] || rm -f "${DOCKER_RUN_ERROR_FILE}"
 }
 trap cleanup EXIT
 
@@ -244,6 +263,8 @@ case "${ACTION}" in
     docker logs --tail 200 "${CONTAINER_NAME}"
     ;;
   deploy)
+    container_id=""
+    data_volume=""
     require_command docker
     resolve_image_tar
     if ! docker image inspect "${MYSQL_IMAGE}" >/dev/null 2>&1; then
@@ -259,6 +280,11 @@ case "${ACTION}" in
     }
 
     install -d -m 0700 "${DATA_ROOT}"
+    data_volume="${DATA_ROOT}:/var/lib/mysql"
+    # 企业 Linux 开启 SELinux 时给独占的数据目录设置容器私有标签；其它系统保持普通挂载。
+    if command -v getenforce >/dev/null 2>&1 && [[ "$(getenforce 2>/dev/null || true)" != "Disabled" ]]; then
+      data_volume="${data_volume}:Z"
+    fi
     DOCKER_ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/test-agent-mysql-env.XXXXXX")"
     chmod 0600 "${DOCKER_ENV_FILE}"
     printf '%s\n' \
@@ -268,15 +294,18 @@ case "${ACTION}" in
       "MYSQL_PASSWORD=${DATABASE_PASSWORD}" \
       >"${DOCKER_ENV_FILE}"
 
+    printf 'Preparing MySQL container: name=%s image=%s host_port=%s data_root=%s\n' \
+      "${CONTAINER_NAME}" "${MYSQL_IMAGE}" "${HOST_PORT}" "${DATA_ROOT}"
     docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
-    docker run -d \
+    DOCKER_RUN_ERROR_FILE="$(mktemp "${TMPDIR:-/tmp}/test-agent-mysql-docker-run.XXXXXX")"
+    if ! container_id="$(docker run -d \
       --platform linux/amd64 \
       --name "${CONTAINER_NAME}" \
       --hostname "${CONTAINER_NAME}" \
       --restart unless-stopped \
       --env-file "${DOCKER_ENV_FILE}" \
       -p "${HOST_PORT}:3306" \
-      -v "${DATA_ROOT}:/var/lib/mysql" \
+      -v "${data_volume}" \
       --health-cmd 'mysqladmin ping -h 127.0.0.1 --silent' \
       --health-interval 5s \
       --health-timeout 3s \
@@ -284,7 +313,15 @@ case "${ACTION}" in
       "${MYSQL_IMAGE}" \
       --character-set-server=utf8mb4 \
       --collation-server=utf8mb4_unicode_ci \
-      >/dev/null
+      2>"${DOCKER_RUN_ERROR_FILE}")"; then
+      echo "docker run failed for MySQL container: ${CONTAINER_NAME}" >&2
+      sed -n '1,80p' "${DOCKER_RUN_ERROR_FILE}" >&2
+      report_container_state
+      exit 1
+    fi
+    printf 'MySQL container created: id=%s name=%s\n' "${container_id:0:12}" "${CONTAINER_NAME}"
+    docker ps -a --filter "name=^/${CONTAINER_NAME}$" \
+      --format 'table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
     wait_until_ready
     verify_container
     printf 'MySQL deployment completed; existing data was preserved at %s\n' "${DATA_ROOT}"

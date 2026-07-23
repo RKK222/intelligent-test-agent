@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.configuration.InternalModelProvider;
+import com.enterprise.testagent.domain.configuration.InternalModelProviderRuntimeConfig;
 import com.enterprise.testagent.observability.TraceConstants;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProviderRegistry;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
@@ -110,14 +111,15 @@ public class InternalModelProxyForwardingService {
     public Mono<Void> forward(ServerWebExchange exchange, String body, String traceId) {
         validateProxyAuth(exchange);
         String providerId = exchange.getRequest().getHeaders().getFirst(PROVIDER_HEADER);
-        InternalModelProvider provider = registry.requireProvider(providerId);
+        InternalModelProviderRuntimeConfig runtimeConfig = registry.requireRuntimeConfig(providerId);
+        InternalModelProvider provider = runtimeConfig.provider();
         validateModel(body);
         String targetUrl = targetUrl(provider.baseUrl(), downstreamPath(exchange), exchange.getRequest().getURI().getRawQuery());
         InternalModelThinkStreamConverter converter = new InternalModelThinkStreamConverter(objectMapper);
         Sinks.One<Void> responseHeadersReady = Sinks.one();
         Mono<Void> request = webClient.method(exchange.getRequest().getMethod() == null ? HttpMethod.POST : exchange.getRequest().getMethod())
                 .uri(URI.create(targetUrl))
-                .headers(headers -> applyForwardHeaders(headers, exchange, traceId))
+                .headers(headers -> applyForwardHeaders(headers, exchange, traceId, runtimeConfig.authToken()))
                 .body(BodyInserters.fromValue(body == null ? "" : body))
                 .exchangeToMono(response -> {
                     responseHeadersReady.tryEmitEmpty();
@@ -226,8 +228,12 @@ public class InternalModelProxyForwardingService {
         }
     }
 
-    private void applyForwardHeaders(HttpHeaders headers, ServerWebExchange exchange, String traceId) {
-        headers.setBearerAuth(registry.requireAuthToken());
+    private void applyForwardHeaders(
+            HttpHeaders headers,
+            ServerWebExchange exchange,
+            String traceId,
+            String authToken) {
+        headers.setBearerAuth(authToken);
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setAccept(exchange.getRequest().getHeaders().getAccept());
         headers.set(TraceConstants.TRACE_ID_HEADER, traceId);

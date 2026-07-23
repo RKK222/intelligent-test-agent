@@ -6,7 +6,7 @@ export type PermissionPresentation = {
   patterns: string[];
 };
 
-// 文案与仓库内固定版本 opencode 1.17.8 的 zh.ts 保持一致；未知权限不暴露内部类型。
+// 文案与仓库内固定版本 opencode 1.18.4 的 zh.ts 保持一致；未知权限不暴露内部类型。
 const PERMISSION_DESCRIPTIONS: Readonly<Record<string, string>> = {
   read: "读取文件（匹配文件路径）",
   edit: "修改文件，包括编辑、写入、补丁和多重编辑",

@@ -10,10 +10,17 @@ import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
 import com.enterprise.testagent.domain.opencodeprocess.BackendProcessId;
 import com.enterprise.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
+import com.enterprise.testagent.domain.opencodeprocess.ContainerManagerId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServer;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerStatus;
+import com.enterprise.testagent.domain.opencodeprocess.ManagerConnectionStatus;
 import com.enterprise.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
+import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainer;
+import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerId;
+import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerManager;
+import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerStatus;
+import com.enterprise.testagent.domain.opencodeprocess.OpencodeManagerBackendConnection;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.enterprise.testagent.domain.run.ConversationContextStore;
@@ -64,6 +71,182 @@ class UserOpencodeBackendRoutingWebFilterTest {
     private static final UserId USER_ID = new UserId("usr_1234567890abcdef");
 
     @Test
+    void routesUnboundInitializationToLeastLoadedRemoteServer() {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))
+                .thenReturn(Optional.empty());
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+        UserOpencodeBackendRoutingWebFilter filter = filter(
+                assignmentService,
+                heartbeatStore(
+                        List.of(backend("bjp_server_b", "10.8.0.22", "http://10.8.0.22:8080", NOW)),
+                        List.of(
+                                manager("ctr_server_a", "10.8.0.21", "bjp_current_backend", 10, 3),
+                                manager("ctr_server_b", "10.8.0.22", "bjp_server_b", 10, 1))),
+                httpClient);
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .post("/api/internal/agent/opencode/processes/me/initialize")
+                .body(""));
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+
+        filter.filter(exchange, chain(ignored -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        })).block(Duration.ofSeconds(2));
+
+        assertThat(chainCalled).isFalse();
+        assertThat(httpClient.requests).singleElement().satisfies(request -> {
+            assertThat(request.uri().toString()).isEqualTo(
+                    "http://10.8.0.22:8080/api/internal/agent/opencode/processes/me/initialize");
+            assertThat(request.headers().firstValue(UserOpencodeBackendRoutingWebFilter.ROUTED_HEADER))
+                    .contains("true");
+        });
+    }
+
+    @Test
+    void routesUnboundProcessStatusToLeastLoadedRemoteServer() {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))
+                .thenReturn(Optional.empty());
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+        UserOpencodeBackendRoutingWebFilter filter = filter(
+                assignmentService,
+                heartbeatStore(
+                        List.of(backend("bjp_server_b", "10.8.0.22", "http://10.8.0.22:8080", NOW)),
+                        List.of(
+                                manager("ctr_server_a", "10.8.0.21", "bjp_current_backend", 10, 4),
+                                manager("ctr_server_b", "10.8.0.22", "bjp_server_b", 10, 0))),
+                httpClient);
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .get("/api/internal/agent/opencode/processes/me")
+                .build());
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+
+        filter.filter(exchange, chain(ignored -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        })).block(Duration.ofSeconds(2));
+
+        assertThat(chainCalled).isFalse();
+        assertThat(httpClient.requests).singleElement().satisfies(request ->
+                assertThat(request.uri().toString())
+                        .isEqualTo("http://10.8.0.22:8080/api/internal/agent/opencode/processes/me"));
+    }
+
+    @Test
+    void keepsUnboundInitializationLocalWhenCurrentServerIsLeastLoaded() {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))
+                .thenReturn(Optional.empty());
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+        UserOpencodeBackendRoutingWebFilter filter = filter(
+                assignmentService,
+                heartbeatStore(
+                        List.of(backend("bjp_server_b", "10.8.0.22", "http://10.8.0.22:8080", NOW)),
+                        List.of(
+                                manager("ctr_server_a", "10.8.0.21", "bjp_current_backend", 10, 0),
+                                manager("ctr_server_b", "10.8.0.22", "bjp_server_b", 10, 2))),
+                httpClient);
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .post("/api/internal/agent/opencode/processes/me/initialize")
+                .body(""));
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+
+        filter.filter(exchange, chain(ignored -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        })).block(Duration.ofSeconds(2));
+
+        assertThat(chainCalled).isTrue();
+        assertThat(httpClient.requests).isEmpty();
+    }
+
+    @Test
+    void existingBindingOverridesLeastLoadedInitializableServer() {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))
+                .thenReturn(Optional.of("10.8.0.21"));
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+        UserOpencodeBackendRoutingWebFilter filter = filter(
+                assignmentService,
+                heartbeatStore(
+                        List.of(backend("bjp_server_b", "10.8.0.22", "http://10.8.0.22:8080", NOW)),
+                        List.of(
+                                manager("ctr_server_a", "10.8.0.21", "bjp_current_backend", 10, 5),
+                                manager("ctr_server_b", "10.8.0.22", "bjp_server_b", 10, 0))),
+                httpClient);
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .post("/api/internal/agent/opencode/processes/me/initialize")
+                .body(""));
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+
+        filter.filter(exchange, chain(ignored -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        })).block(Duration.ofSeconds(2));
+
+        assertThat(chainCalled).isTrue();
+        assertThat(httpClient.requests).isEmpty();
+    }
+
+    @Test
+    void failedUnboundInitializationForwardDoesNotRetryAnotherServer() {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))
+                .thenReturn(Optional.empty());
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}", true);
+        UserOpencodeBackendRoutingWebFilter filter = filter(
+                assignmentService,
+                heartbeatStore(
+                        List.of(
+                                backend("bjp_server_b", "10.8.0.22", "http://10.8.0.22:8080", NOW),
+                                backend("bjp_server_c", "10.8.0.23", "http://10.8.0.23:8080", NOW)),
+                        List.of(
+                                manager("ctr_server_a", "10.8.0.21", "bjp_current_backend", 10, 4),
+                                manager("ctr_server_b", "10.8.0.22", "bjp_server_b", 10, 0),
+                                manager("ctr_server_c", "10.8.0.23", "bjp_server_c", 10, 1))),
+                httpClient);
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .post("/api/internal/agent/opencode/processes/me/initialize")
+                .build());
+
+        filter.filter(exchange, chain(ignored -> Mono.empty())).block(Duration.ofSeconds(2));
+
+        assertThat(httpClient.requests).singleElement().satisfies(request ->
+                assertThat(request.uri().getHost()).isEqualTo("10.8.0.22"));
+        assertThat(exchange.getResponse().getStatusCode().value())
+                .isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE.httpStatus());
+    }
+
+    @Test
+    void redisFailureDuringGlobalSelectionReturnsUnifiedRuntimeUnavailable() {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))
+                .thenReturn(Optional.empty());
+        OpencodeProcessHeartbeatStore heartbeatStore = Mockito.mock(OpencodeProcessHeartbeatStore.class);
+        Mockito.when(heartbeatStore.liveManagerSnapshots())
+                .thenThrow(new IllegalStateException("redis unavailable"));
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+        UserOpencodeBackendRoutingWebFilter filter = filter(assignmentService, heartbeatStore, httpClient);
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .post("/api/internal/agent/opencode/processes/me/initialize")
+                .build());
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+
+        filter.filter(exchange, chain(ignored -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        })).block(Duration.ofSeconds(2));
+
+        assertThat(chainCalled).isFalse();
+        assertThat(httpClient.requests).isEmpty();
+        assertThat(exchange.getResponse().getStatusCode().value())
+                .isEqualTo(ErrorCode.RUNTIME_STATE_UNAVAILABLE.httpStatus());
+        assertThat(exchange.getResponse().getBodyAsString().block())
+                .contains("\"code\":\"RUNTIME_STATE_UNAVAILABLE\"");
+    }
+
+    @Test
     void routesUserProcessRequestToBoundBackendAndPreservesAuthTraceAndBody() {
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
         Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))
@@ -105,7 +288,7 @@ class UserOpencodeBackendRoutingWebFilterTest {
         RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
         UserOpencodeBackendRoutingWebFilter filter = filter(assignmentService, heartbeatStore("10.8.0.22"), httpClient);
         MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
-                .get("/api/internal/agent/opencode/api/status")
+                .post("/api/internal/agent/opencode/processes/me/initialize")
                 .header(UserOpencodeBackendRoutingWebFilter.ROUTED_HEADER, "true")
                 .build());
         AtomicBoolean chainCalled = new AtomicBoolean(false);
@@ -117,6 +300,7 @@ class UserOpencodeBackendRoutingWebFilterTest {
 
         assertThat(chainCalled).isTrue();
         assertThat(httpClient.requests).isEmpty();
+        Mockito.verifyNoInteractions(assignmentService);
     }
 
     @Test
@@ -717,6 +901,12 @@ class UserOpencodeBackendRoutingWebFilterTest {
     }
 
     private static OpencodeProcessHeartbeatStore heartbeatStore(List<BackendJavaProcess> backends) {
+        return heartbeatStore(backends, List.of());
+    }
+
+    private static OpencodeProcessHeartbeatStore heartbeatStore(
+            List<BackendJavaProcess> backends,
+            List<ManagerRuntimeSnapshot> managers) {
         return new OpencodeProcessHeartbeatStore() {
             @Override public void recordBackendHeartbeat(LinuxServerId linuxServerId, Instant heartbeatAt) {}
             @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) {}
@@ -737,11 +927,55 @@ class UserOpencodeBackendRoutingWebFilterTest {
                                 backend))
                         .toList();
             }
-            @Override public List<ManagerRuntimeSnapshot> liveManagerSnapshots() { return List.of(); }
+            @Override public List<ManagerRuntimeSnapshot> liveManagerSnapshots() { return managers; }
             @Override public Set<LinuxServerId> liveBackendServerIds() { return Set.of(); }
             @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.of(); }
             @Override public void cleanupExpiredHeartbeats() {}
         };
+    }
+
+    private static ManagerRuntimeSnapshot manager(
+            String containerId,
+            String linuxServerId,
+            String backendProcessId,
+            int maxProcesses,
+            int currentProcesses) {
+        LinuxServerId serverId = new LinuxServerId(linuxServerId);
+        OpencodeContainerId parsedContainerId = new OpencodeContainerId(containerId);
+        ContainerManagerId managerId = new ContainerManagerId("mgr_" + containerId);
+        return new ManagerRuntimeSnapshot(
+                new OpencodeContainer(
+                        parsedContainerId,
+                        serverId,
+                        "opencode-" + containerId,
+                        4096,
+                        4105,
+                        maxProcesses,
+                        currentProcesses,
+                        OpencodeContainerStatus.READY,
+                        NOW,
+                        NOW.minusSeconds(60),
+                        NOW,
+                        "trace_manager"),
+                new OpencodeContainerManager(
+                        managerId,
+                        parsedContainerId,
+                        serverId,
+                        "opencode-manager.v1",
+                        ManagerConnectionStatus.CONNECTED,
+                        Map.of(),
+                        NOW,
+                        NOW.minusSeconds(60),
+                        NOW,
+                        "trace_manager"),
+                List.of(new OpencodeManagerBackendConnection(
+                        managerId,
+                        new BackendProcessId(backendProcessId),
+                        ManagerConnectionStatus.CONNECTED,
+                        NOW,
+                        NOW,
+                        NOW,
+                        "trace_manager")));
     }
 
     private static BackendJavaProcess backend(String processId, String linuxServerId, String listenUrl, Instant heartbeatAt) {

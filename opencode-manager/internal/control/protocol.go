@@ -32,14 +32,16 @@ type BackendEndpoint struct {
 
 // ManagedProcess 是 manager 心跳中随 latest snapshot 保存的本地 opencode server 进程明细。
 type ManagedProcess struct {
-	Port         int       `json:"port"`
-	PID          int       `json:"pid"`
-	BaseURL      string    `json:"baseUrl,omitempty"`
-	SessionPath  string    `json:"sessionPath,omitempty"`
-	ConfigPath   string    `json:"configPath,omitempty"`
-	StartedAt    time.Time `json:"startedAt,omitempty"`
-	StartCommand string    `json:"startCommand,omitempty"`
-	TraceID      string    `json:"traceId,omitempty"`
+	Port          int       `json:"port"`
+	PID           int       `json:"pid"`
+	BaseURL       string    `json:"baseUrl,omitempty"`
+	UnifiedAuthID string    `json:"unifiedAuthId,omitempty"`
+	SessionPath   string    `json:"sessionPath,omitempty"`
+	ConfigPath    string    `json:"configPath,omitempty"`
+	ManagerStatus string    `json:"managerStatus,omitempty"`
+	StartedAt     time.Time `json:"startedAt,omitempty"`
+	StartCommand  string    `json:"startCommand,omitempty"`
+	TraceID       string    `json:"traceId,omitempty"`
 }
 
 // Message 是 manager 与后端 WebSocket 控制面的稳定 JSON 帧。
@@ -75,10 +77,12 @@ type Message struct {
 	TimeoutMillis              int64             `json:"timeoutMillis,omitempty"`
 	Status                     string            `json:"status,omitempty"`
 	PID                        int               `json:"pid,omitempty"`
+	ProcessCreated             bool              `json:"processCreated"`
 	BaseURL                    string            `json:"baseUrl,omitempty"`
 	SessionPath                string            `json:"sessionPath,omitempty"`
 	ConfigPath                 string            `json:"configPath,omitempty"`
 	UnifiedAuthID              string            `json:"unifiedAuthId,omitempty"`
+	BindingRecovery            bool              `json:"bindingRecovery,omitempty"`
 	Healthy                    *bool             `json:"healthy,omitempty"`
 	Message                    string            `json:"message,omitempty"`
 	ErrorCode                  string            `json:"errorCode,omitempty"`

@@ -1,13 +1,12 @@
 {
-  "name": "test-agent-opencode-node-runtime",
-  "version": "1.17.8",
+  "name": "test-agent-opencode-official-runtime",
+  "version": "1.18.4",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@lydell/node-pty": "1.2.0-beta.12",
-    "@opencode-ai/plugin": "1.17.8",
-    "@opencode-ai/sdk": "1.17.8",
-    "effect": "4.0.0-beta.74",
+    "@opencode-ai/plugin": "1.18.4",
+    "@opencode-ai/sdk": "1.18.4",
+    "effect": "4.0.0-beta.83",
     "jsonc-parser": "3.3.1",
     "zod": "4.1.8"
   }

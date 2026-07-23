@@ -2,6 +2,7 @@ package com.enterprise.testagent.persistence.mybatis;
 
 import com.enterprise.testagent.domain.configuration.InternalModelProvider;
 import com.enterprise.testagent.domain.configuration.InternalModelProviderRepository;
+import com.enterprise.testagent.domain.configuration.InternalModelProviderRuntimeConfig;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -28,6 +29,25 @@ public class MyBatisInternalModelProviderRepository implements InternalModelProv
     @Override
     public List<InternalModelProvider> findEnabled() {
         return mapper.findEnabled().stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public List<InternalModelProviderRuntimeConfig> findEnabledRuntimeConfigs() {
+        return mapper.findEnabledRuntimeConfigs().stream()
+                .map(row -> new InternalModelProviderRuntimeConfig(
+                        new InternalModelProvider(
+                                row.providerId(),
+                                row.name(),
+                                row.baseUrl(),
+                                row.enabled(),
+                                row.sortOrder(),
+                                row.tokenId(),
+                                row.tokenName(),
+                                row.authToken() != null && !row.authToken().isBlank(),
+                                row.createdAt(),
+                                row.updatedAt()),
+                        row.authToken()))
+                .toList();
     }
 
     @Override
@@ -73,6 +93,9 @@ public class MyBatisInternalModelProviderRepository implements InternalModelProv
                 row.baseUrl(),
                 row.enabled(),
                 row.sortOrder(),
+                row.tokenId(),
+                row.tokenName(),
+                row.tokenConfigured(),
                 row.createdAt(),
                 row.updatedAt());
     }
@@ -85,6 +108,9 @@ public class MyBatisInternalModelProviderRepository implements InternalModelProv
                 provider.baseUrl(),
                 provider.enabled(),
                 provider.sortOrder(),
+                provider.tokenId(),
+                provider.tokenName(),
+                provider.tokenConfigured(),
                 createdAt,
                 updatedAt);
     }

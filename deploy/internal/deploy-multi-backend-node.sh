@@ -217,8 +217,8 @@ validate_backend_config() {
   require_exact_value "${backend_env}" TEST_AGENT_REDIS_HOST 122.233.30.20
   require_exact_value "${backend_env}" TEST_AGENT_XXL_JOB_ENABLED true
   require_exact_value "${backend_env}" TEST_AGENT_XXL_JOB_MYSQL_URL \
-    'jdbc:mysql://122.233.30.147:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai'
-  require_exact_value "${backend_env}" TEST_AGENT_XXL_JOB_MYSQL_USERNAME xxl_job
+    'jdbc:mysql://122.210.106.43:3306/xxl_job?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai'
+  require_exact_value "${backend_env}" TEST_AGENT_XXL_JOB_MYSQL_USERNAME root
   require_nonempty_value "${backend_env}" TEST_AGENT_XXL_JOB_MYSQL_PASSWORD
   require_nonempty_value "${backend_env}" TEST_AGENT_XXL_JOB_ACCESS_TOKEN
   require_exact_value "${backend_env}" TEST_AGENT_XXL_JOB_ADMIN_PORT 18080

@@ -9,11 +9,11 @@ import com.example.opencode.sdk.model.ForbiddenError;
 import com.example.opencode.sdk.model.InvalidRequestError;
 import com.example.opencode.sdk.model.NotFoundError;
 import com.example.opencode.sdk.model.Pty;
-import com.example.opencode.sdk.model.PtyConnectToken200Response;
 import com.example.opencode.sdk.model.PtyCreateRequest;
 import com.example.opencode.sdk.model.PtyForbiddenError;
 import com.example.opencode.sdk.model.PtyNotFoundError;
 import com.example.opencode.sdk.model.PtyShells200ResponseInner;
+import com.example.opencode.sdk.model.PtyTicketConnectToken;
 import com.example.opencode.sdk.model.PtyUpdateRequest;
 import com.example.opencode.sdk.model.UnauthorizedError;
 import com.example.opencode.sdk.model.V2AgentListLocationParameter;
@@ -44,7 +44,7 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Flux;
 
-@jakarta.annotation.Generated(value = "org.openapitools.codegen.languages.JavaClientCodegen", comments = "Generator version: 7.23.0")
+@jakarta.annotation.Generated(value = "org.openapitools.codegen.languages.JavaClientCodegen", comments = "Generator version: 7.24.0")
 public class PtyApi {
     private ApiClient apiClient;
 
@@ -221,7 +221,7 @@ public class PtyApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "cursor", cursor));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "ticket", ticket));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -355,10 +355,10 @@ public class PtyApi {
      * <p><b>403</b> - PtyForbiddenError
      * <p><b>404</b> - PtyNotFoundError
      * @param requestParameters The ptyConnectToken request parameters as object
-     * @return PtyConnectToken200Response
+     * @return PtyTicketConnectToken
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<PtyConnectToken200Response> ptyConnectToken(PtyConnectTokenRequest requestParameters) throws WebClientResponseException {
+    public Mono<PtyTicketConnectToken> ptyConnectToken(PtyConnectTokenRequest requestParameters) throws WebClientResponseException {
         return this.ptyConnectToken(requestParameters.ptyID(), requestParameters.directory(), requestParameters.workspace());
     }
 
@@ -370,10 +370,10 @@ public class PtyApi {
      * <p><b>403</b> - PtyForbiddenError
      * <p><b>404</b> - PtyNotFoundError
      * @param requestParameters The ptyConnectToken request parameters as object
-     * @return ResponseEntity&lt;PtyConnectToken200Response&gt;
+     * @return ResponseEntity&lt;PtyTicketConnectToken&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<PtyConnectToken200Response>> ptyConnectTokenWithHttpInfo(PtyConnectTokenRequest requestParameters) throws WebClientResponseException {
+    public Mono<ResponseEntity<PtyTicketConnectToken>> ptyConnectTokenWithHttpInfo(PtyConnectTokenRequest requestParameters) throws WebClientResponseException {
         return this.ptyConnectTokenWithHttpInfo(requestParameters.ptyID(), requestParameters.directory(), requestParameters.workspace());
     }
 
@@ -403,7 +403,7 @@ public class PtyApi {
      * @param ptyID The ptyID parameter
      * @param directory The directory parameter
      * @param workspace The workspace parameter
-     * @return PtyConnectToken200Response
+     * @return PtyTicketConnectToken
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
     private ResponseSpec ptyConnectTokenRequestCreation(@jakarta.annotation.Nonnull String ptyID, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
@@ -425,7 +425,7 @@ public class PtyApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -434,7 +434,7 @@ public class PtyApi {
 
         String[] localVarAuthNames = new String[] {  };
 
-        ParameterizedTypeReference<PtyConnectToken200Response> localVarReturnType = new ParameterizedTypeReference<PtyConnectToken200Response>() {};
+        ParameterizedTypeReference<PtyTicketConnectToken> localVarReturnType = new ParameterizedTypeReference<PtyTicketConnectToken>() {};
         return apiClient.invokeAPI("/pty/{ptyID}/connect-token", HttpMethod.POST, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
     }
 
@@ -448,11 +448,11 @@ public class PtyApi {
      * @param ptyID The ptyID parameter
      * @param directory The directory parameter
      * @param workspace The workspace parameter
-     * @return PtyConnectToken200Response
+     * @return PtyTicketConnectToken
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<PtyConnectToken200Response> ptyConnectToken(@jakarta.annotation.Nonnull String ptyID, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<PtyConnectToken200Response> localVarReturnType = new ParameterizedTypeReference<PtyConnectToken200Response>() {};
+    public Mono<PtyTicketConnectToken> ptyConnectToken(@jakarta.annotation.Nonnull String ptyID, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
+        ParameterizedTypeReference<PtyTicketConnectToken> localVarReturnType = new ParameterizedTypeReference<PtyTicketConnectToken>() {};
         return ptyConnectTokenRequestCreation(ptyID, directory, workspace).bodyToMono(localVarReturnType);
     }
 
@@ -466,11 +466,11 @@ public class PtyApi {
      * @param ptyID The ptyID parameter
      * @param directory The directory parameter
      * @param workspace The workspace parameter
-     * @return ResponseEntity&lt;PtyConnectToken200Response&gt;
+     * @return ResponseEntity&lt;PtyTicketConnectToken&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<PtyConnectToken200Response>> ptyConnectTokenWithHttpInfo(@jakarta.annotation.Nonnull String ptyID, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<PtyConnectToken200Response> localVarReturnType = new ParameterizedTypeReference<PtyConnectToken200Response>() {};
+    public Mono<ResponseEntity<PtyTicketConnectToken>> ptyConnectTokenWithHttpInfo(@jakarta.annotation.Nonnull String ptyID, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
+        ParameterizedTypeReference<PtyTicketConnectToken> localVarReturnType = new ParameterizedTypeReference<PtyTicketConnectToken>() {};
         return ptyConnectTokenRequestCreation(ptyID, directory, workspace).toEntity(localVarReturnType);
     }
 
@@ -612,11 +612,11 @@ public class PtyApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -805,7 +805,7 @@ public class PtyApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -977,7 +977,7 @@ public class PtyApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -1165,7 +1165,7 @@ public class PtyApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -1337,7 +1337,7 @@ public class PtyApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -1537,11 +1537,11 @@ public class PtyApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -1770,7 +1770,7 @@ public class PtyApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "cursor", cursor));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "ticket", ticket));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -1972,7 +1972,7 @@ public class PtyApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", location.getDirectory()));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", location.getWorkspace()));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -2155,11 +2155,11 @@ public class PtyApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", location.getDirectory()));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", location.getWorkspace()));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -2340,7 +2340,7 @@ public class PtyApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", location.getDirectory()));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", location.getWorkspace()));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -2426,7 +2426,7 @@ public class PtyApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", location.getDirectory()));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", location.getWorkspace()));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -2603,7 +2603,7 @@ public class PtyApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", location.getDirectory()));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", location.getWorkspace()));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -2803,11 +2803,11 @@ public class PtyApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", location.getDirectory()));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", location.getWorkspace()));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);

@@ -9,7 +9,7 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcessFilt
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerId;
 import com.enterprise.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
-import java.time.Instant;
+import com.enterprise.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -118,11 +118,12 @@ public class RuntimeManagementCommandService {
     }
 
     private OpencodeProcessStartupRequest startupRequest(OpencodeServerProcess process, String traceId) {
+        Optional<UserOpencodeProcessBinding> binding = matchingActiveBinding(process);
         return new OpencodeProcessStartupRequest(
                 process.userId(),
                 process.processId(),
                 process.createdAt(),
-                bindingCreatedAt(process).orElse(null),
+                binding.map(UserOpencodeProcessBinding::createdAt).orElse(null),
                 process.linuxServerId(),
                 process.containerId(),
                 process.port(),
@@ -130,16 +131,25 @@ public class RuntimeManagementCommandService {
                 process.sessionPath(),
                 process.configPath(),
                 Map.of(),
-                traceId);
+                traceId,
+                // 运行管理重启的是平台已登记进程，即使历史记录缺少 ACTIVE binding 也必须保留原端口和容量归属。
+                true);
     }
 
-    private Optional<Instant> bindingCreatedAt(OpencodeServerProcess process) {
+    private Optional<UserOpencodeProcessBinding> matchingActiveBinding(OpencodeServerProcess process) {
         if (repository == null) {
             return Optional.empty();
         }
         UserOpencodeProcessBinding binding = repository.findUserBindingsByProcessIds(List.of(process.processId()))
                 .get(process.processId());
-        return binding == null ? Optional.empty() : Optional.of(binding.createdAt());
+        if (binding == null
+                || binding.status() != UserOpencodeProcessBindingStatus.ACTIVE
+                || !binding.processId().equals(process.processId())
+                || !binding.linuxServerId().equals(process.linuxServerId())
+                || binding.port() != process.port()) {
+            return Optional.empty();
+        }
+        return Optional.of(binding);
     }
 
     private OpencodeProcessControlResult controlResult(OpencodeServerProcess process, String traceId) {

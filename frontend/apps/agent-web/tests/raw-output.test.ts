@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { appendLatestRawOutputEntry, prepareRawOutputBody } from "../src/components/raw-output";
+import {
+  appendLatestRawOutputEntry,
+  prepareRawOutputBody,
+  sortRawOutputEntriesNewestFirst
+} from "../src/components/raw-output";
 
 describe("raw output boundary", () => {
   it("keeps only the latest 2,000 raw-output entries without mutating the input", () => {
@@ -11,6 +15,19 @@ describe("raw output boundary", () => {
     expect(result[0]).toBe(1);
     expect(result.at(-1)).toBe(2_000);
     expect(current).toEqual(Array.from({ length: 2_000 }, (_, index) => index));
+  });
+
+  it("sorts raw-output entries by occurred time descending without mutating the cache", () => {
+    const current = [
+      { id: "middle", occurredAt: "2026-07-22T08:00:01.000Z" },
+      { id: "oldest", occurredAt: "2026-07-22T08:00:00.000Z" },
+      { id: "newest", occurredAt: "2026-07-22T08:00:02.000Z" }
+    ];
+
+    const result = sortRawOutputEntriesNewestFirst(current);
+
+    expect(result.map((entry) => entry.id)).toEqual(["newest", "middle", "oldest"]);
+    expect(current.map((entry) => entry.id)).toEqual(["middle", "oldest", "newest"]);
   });
 
   it("recursively redacts context tokens from RunEvent SSE data before storing it", () => {
@@ -68,6 +85,22 @@ describe("raw output boundary", () => {
     expect(json.body).not.toMatch(/xxl-ticket-secret|cookie-secret|access-secret|mysql-secret|nested-secret|digest-secret/);
     expect(json.body).toContain('"keep":"visible"');
     expect(text.body).not.toMatch(/xxl-text-secret|cookie-text-secret|token-text-secret/);
+    expect(text.body).toContain("keep=visible");
+  });
+
+  it("redacts internal model authToken fields in raw output", () => {
+    const json = prepareRawOutputBody(
+      JSON.stringify({ authToken: "legacy-provider-secret", tokenValue: "provider-secret", keep: "visible" }),
+      10_000
+    );
+    const text = prepareRawOutputBody(
+      "auth_token=legacy-text-secret&token-value=provider-text-secret&keep=visible",
+      10_000
+    );
+
+    expect(json.body).not.toMatch(/legacy-provider-secret|provider-secret/);
+    expect(text.body).not.toMatch(/legacy-text-secret|provider-text-secret/);
+    expect(json.body).toContain('"keep":"visible"');
     expect(text.body).toContain("keep=visible");
   });
 

@@ -106,6 +106,8 @@
 - `JdbcWorkspaceCreateOperationRepository`：实现设置页创建应用工作空间进度保存、步骤更新、成功/失败记录和按 `operationId` 查询。
 - `JdbcManagedWorkspaceRepository`：实现应用版本工作区、每服务器副本、目标 commit、个人工作区、最近使用偏好和同步审计持久化。
 - `JdbcOpencodeProcessManagementRepository`：实现 opencode 用户进程管理拓扑、用户进程、用户绑定持久化，以及超级管理员运行管理页需要的拓扑列表、连接列表、进程分页筛选和绑定关联查询；读取历史用户进程或后端 Java 进程时会兼容 `updated_at < created_at` 的脏数据并按 `created_at` 归一化，避免旧记录阻断状态查询、manager 注册和重新初始化。
+- `MyBatisOpencodeProcessReservationLockPort`：通过 XML `SELECT ... FOR UPDATE` 固定先锁用户、再锁目标 Linux 服务器，供初始化短事务串行化同用户绑定和同服务器端口预留；manager WebSocket 调用不在事务内执行。
+- `MyBatisOpencodeProcessAtomicMutationPort`：通过 MyBatis XML 同时对 `opencode_server_processes` 与 `user_opencode_process_bindings` 做条件更新；首次预留写入 `STARTING + ACTIVE`，迁移保留原 `processId/createdAt`，并以旧服务器/容器/端口及 `status/PID/traceId` 生命周期代次做 CAS。binding 更新不命中时事务整体回滚，禁止只迁移 process。该能力复用 V14 既有表和唯一约束，不新增 Flyway migration。
 - `RedisOpencodeProcessHeartbeatStore`：保存 Java 后端运行快照、manager 运行快照和 opencode server 进程运行心跳。Java/manager 快照 TTL 固定 10 秒，供运行管理页和 manager 后端列表发现识别在线实例；Java 后端 latest snapshot 按 `backendProcessId` 保存，服务器在线集合和指标历史按稳定 `linuxServerId` 分组；Java 服务器级指标按 `test-agent:runtime-metrics:server:{linuxServerId}` 保存，包含 CPU/load/内存/swap/磁盘字段；Java 进程与 JVM 指标按 `test-agent:runtime-metrics:backend:{linuxServerId}` 保存，包含进程 CPU/RSS/FD、heap/non-heap、direct/mapped、GC delta 和线程字段；旧 `backendProcessId` JVM key 仅供兼容接口回退读取，容器指标按 `test-agent:runtime-metrics:container:{containerId}` 保存；Redis 反序列化忽略未知字段，旧样本缺失的新字段保持 `null`；opencode server 进程心跳 key 保留 5 分钟 TTL。Redis 是系统必需依赖，不再提供 no-op 心跳存储。
 - `RedisConversationContextStore`：实现 `ConversationContextStore` 领域端口；所有 key 使用 `{conversation-context}` hash tag，token key 只含原始 `contextToken` 的 SHA-256 摘要。Lua 原子维护 token、用户+Session/用户/Session/Workspace/进程五类 ZSET 反向索引及 generation 快照；索引 score 为 token 绝对过期时间，保存、续期和失效时会先删除已过期成员，避免活跃业务实体的索引成员无界累积。权威读取前的 `beginIssue` 同时检查 Session revoke 和 user mutation gate 并捕获签发 fence、资源和全局代次，`saveIfCurrent` 还会检查 Workspace mutation gate；`resolveForRouting`/`touch` 同样拒绝任一关联 gate。Session 归档使用逐归档 token 的 Redis Set gate；用户权限及 Workspace 可信字段变更使用覆盖关系型写入窗口的 mutation gate，完成脚本原子执行“再次失效 + `SREM` 自己的 gate token”，数据库失败只释放自己的 token，Redis 完成失败则保留 gate fail-closed。三类 gate 均设置 24 小时 TTL，避免异常后永久锁死；generation 不设 TTL，确保 gate 过期后旧 token 仍不能复活。全局可信路径变化通过 O(1) generation 失效。Redis 访问、脚本或 JSON 序列化异常统一映射为 `RUNTIME_STATE_UNAVAILABLE`，不回退 PostgreSQL 或 JVM 内存。
 - `RedisTokenStore` / `TokenStoreConfig`：用户 Token 存储同时实现 `TokenSessionMarkerStore`，用 SHA-256 digest marker 支撑 XXL 每请求校验；marker 与 Token 同寿命并在删除时同步失效。
@@ -119,7 +121,7 @@
 
 `test-agent-app` 的 `test` profile 会通过环境变量装配 PostgreSQL 测试库，并复用本模块 `db/migration` 下的 Flyway migration。持久化模块提供 Druid starter 依赖，实际连接信息和连接池大小由应用 profile 配置注入，不保存环境专属账号、密码或主机地址。
 
-内部模型代理鉴权列改为企业中性命名时，两条已落库历史 migration 通过仅影响校验和的兼容注释保持原 Flyway checksum；`V20260716143000__rename_internal_model_auth_token_column` Java migration 按固定列位置识别历史列并重命名，新建数据库目标列已存在时幂等跳过。
+内部模型代理鉴权列改为企业中性命名时，两条已落库历史 migration 通过仅影响校验和的兼容注释保持原 Flyway checksum；`V20260716143000__rename_internal_model_auth_token_column` Java migration 按固定列位置识别历史列并重命名，新建数据库目标列已存在时幂等跳过。`V20260722180000__add_internal_model_token_definitions.sql` 新建数据库 identity 主键的 `internal_model_tokens`，给 Provider 增加 `RESTRICT` 外键，并把非空旧全局值迁移成单个共享“默认 Token”；旧单例表继续保留，但新运行时只读取联表快照。
 
 ## 测试覆盖
 
@@ -133,6 +135,7 @@
 - `MyBatisSessionRuntimeStateRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖用户级运行计数、终态 Run 排除、真实 asked `id` / replied `sessionID -> requestID` 形式的 `QUESTION/PERMISSION` 待关注与清除、以 Run `seq` 抵御 occurredAt 回拨、缺失/空白 ID 旧事件兜底、不同 request ID 回复隔离、嵌套 option id 隔离，以及不可见会话过滤；`MyBatisSessionRuntimeStatePostgresqlIntegrationTest` 通过 Testcontainers 验证生产 jsonb/databaseId 分支和完整 Flyway 链；`RedisRunRuntimeStoreIntegrationTest` 覆盖 durable/transient 的并发未决 attention、同 ID 跨类型隔离、逐个回复回退、字节/数量容量边界、scope/snapshot 总量账本和终态清理。
 - `MyBatisRunRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖 Run MyBatis XML 保存/读取、active-run 查询、stale active 候选排除 `REDIS_SUMMARY`、token/cost/source 字段映射、`saveIfStatus` 成功更新和状态不匹配时不覆盖终态。
 - `MyBatisRunEventRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖 RunEvent MyBatis XML append、scope 列写入、`raw_event_id=NULL` 语义和 seq 单调分配。
+- `MyBatisInternalModelProviderRepositoryIntegrationTest` 覆盖旧全局 Token 迁移为共享定义、Provider 关联保存、改名/轮换保持关系、引用删除受阻、解除引用后删除，以及名称更新时保留外部 Token 原值。
 - `MyBatisSessionTitleUpdateRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖 Session 标题 XML 条件更新成功与预期标题不匹配时不覆盖新标题。
 - 运营分析原始事实扫描按 `storage_mode` 双读：legacy Diff 只读 `run_events`，`REDIS_SUMMARY` 只读 `runs.diff_*_count`，即使灰度期间残留 shadow 事件也不重复计数；新模式 USER/ASSISTANT 数量只读取 `content_kind=SUMMARY` 的终态摘要，残留 RAW shadow 消息同样排除。相关 XML 通过持久化模块编译、Flyway 集成和运行时服务单测覆盖；`AnalyticsQueryServiceTest` 固化空分母、满意率、采纳率、p95 和 CSV 字段口径。
 - `PersistenceSqlConventionTest` 固化持久层 SQL 规则：存量 JDBC 文件只允许留在白名单，MyBatis mapper 不得使用注解 SQL。
@@ -145,6 +148,7 @@
 - ConfigurationManagement 覆盖 V7 migration、V8 默认用户授权、成员逻辑删除恢复、应用与仓库多对多关联、代码库英文名保存/查询、版本库类型字典与 `repository_type` 回填、版本库部署模式 `deployment_mode` 默认值和 MyBatis XML 保存/读取、通用参数默认值、工作空间创建进度表、应用工作空间保存和用户单 SSH key 唯一约束。
 - ManagedWorkspace 覆盖 V9/V20260626120900 migration、版本工作区唯一性、每服务器副本 upsert、目标 commit、个人空间名称唯一性、最近使用偏好和同步审计保存。
 - OpencodeProcessManagement 覆盖 V14 migration、V17 loopback 种子清理、拓扑读写、历史用户进程与后端 Java 进程时间戳归一化、健康容器查询、运行管理拓扑列表、manager-backend 连接列表、opencode server 进程分页筛选、绑定关联查询、用户绑定唯一约束、服务器端口唯一约束和容器管理进程一对一约束。
+- `MyBatisOpencodeProcessReservationLockPostgresqlIntegrationTest` 使用真实 PostgreSQL 覆盖用户/服务器 `FOR UPDATE` 锁顺序、首次 process/binding 原子预留、同用户并发单胜者、不同用户同服务器端口互斥，以及迁移双表 CAS 成功与冲突整笔回滚。
 - RedisOpencodeProcessHeartbeatStore 覆盖 Java/manager 运行快照写入 Redis 的 key、索引、10 秒 TTL，Java latest snapshot、服务器级指标与 Java/JVM 指标按 `linuxServerId` 分流写入、未知 JSON 字段宽容读取、旧 JSON 缺新字段保持 `null` 和容器指标历史 key。
 - `RedisConversationContextStoreTest` 覆盖同 slot SHA-256 token key、五类反向索引/generation、只读路由解析、签发 fence CAS、Session revoke gate、全局代次、Lua 原子保存与续期及 Redis 异常映射；`RedisConversationContextStoreIntegrationTest` 在提供真实 Redis 端口时验证完整 `OpencodeServerProcess` JSON 往返、Workspace/进程/全局失效、并发归档 gate CAS 回滚及 `beginIssue → invalidate/revoke → late save` 拒绝。
 - `RedisTokenStoreSessionMarkerTest` 覆盖 marker digest 不包含原始 Token、同 TTL 写入、有效性检查和删除同步失效。

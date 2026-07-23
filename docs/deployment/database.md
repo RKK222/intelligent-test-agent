@@ -958,10 +958,19 @@ V10 种子数据对 F-COSS 的影响：
 
 `V20260708100000__create_internal_model_provider_tables.sql` 创建内部模型代理配置表：
 
-- `internal_model_providers(provider_id, name, base_url, enabled, sort_order, created_at, updated_at)` 保存内部供应商地址；`provider_id` 对应代理请求头 `X-Enterprise-Model-Provider` 的路由键（当前为 `qwen-prod` / `deepseek-prod`），不是 opencode 配置中的 `enterprise-qwen` / `enterprise-deepseek` provider key。
-- `internal_model_proxy_settings(setting_id='default', enterprise_openai_auth_token, created_at, updated_at)` 保存全局 `ENTERPRISE_OPENAI_AUTH_TOKEN`，按需求明文保存，不回显到前端。
-- Java 启动时把启用供应商和 token 加载到内存；管理端保存后发布 `internal-model-provider.refresh-requested` 广播，各 Java 从数据库重新加载内存快照。
+- `internal_model_providers(provider_id, name, base_url, enabled, sort_order, created_at, updated_at)` 最初只保存内部供应商地址；`provider_id` 对应代理请求头 `X-Enterprise-Model-Provider` 的路由键（当前为 `qwen-prod` / `deepseek-prod`），不是 opencode 配置中的 `enterprise-qwen` / `enterprise-deepseek` provider key。
+- `internal_model_proxy_settings(setting_id='default', enterprise_openai_auth_token, created_at, updated_at)` 是历史全局 Token 单例表，按既有约定明文保存且不回显到前端。
 - `V20260716143000__rename_internal_model_auth_token_column` Java migration 按第二列识别并重命名既有环境的历史鉴权列；新建数据库已使用目标列名时幂等跳过。两条因去机构标识而调整的历史 SQL migration 通过兼容注释保持原 Flyway checksum，升级不需要执行 `repair`。
+
+`V20260722180000__add_internal_model_token_definitions.sql` 增加可复用 Token 定义与 Provider 关联：
+
+- 新建 `internal_model_tokens(token_id, name, token_value, legacy_key, created_at, updated_at)`。`token_id` 由数据库 identity 生成，只标识平台记录；Token 值来自外部系统，平台不生成。`name` 唯一，`token_value` 按既有约定明文保存，`legacy_key='default'` 仅标识滚动升级兼容记录。
+- `internal_model_providers` 增加可空 `token_id` 外键，删除规则为 `RESTRICT`；应用层也使用条件删除，在仍有 Provider 引用时返回 `CONFLICT`。
+- 升级时若旧单例 Token 非空，只创建一条名为“默认 Token”的兼容记录，并让全部现有供应商共享引用；旧值为空时不创建定义，也不伪造 Token。
+- 旧 `internal_model_proxy_settings` 不删除，供混合版本 Java 短期读取及旧 `authToken` 请求双写；新 Java 运行时只从 Provider/Token 联表快照取值。
+- 供应商或 Token 成功变更继续发布既有 `internal-model-provider.refresh-requested` 广播，各 Java 一次联表重载 `providerId -> provider/token` 内存快照。单次代理请求不访问数据库。
+
+滚动升级必须先完成所有 Java 节点的后端升级，再开放新页面的 Token 维护；混合版本期间不得为不同 Provider 配置不同 Token。
 
 ## V20260708200000 用户级历史会话索引
 

@@ -60,6 +60,10 @@ import type {
   InternalModelProviderManagementResponse,
   InternalModelProviderRefreshStatus,
   InternalModelProviderUpdatePayload,
+  InternalModelTokenCreatePayload,
+  InternalModelTokenDefinition,
+  InternalModelTokenDeleteResponse,
+  InternalModelTokenUpdatePayload,
   LoginRequest,
   LoginResponse,
   ManagedApplication,
@@ -1543,6 +1547,23 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<InternalModelProviderRefreshStatus>(`${configurationBase}/internal-model-providers/refresh-status`),
     refreshInternalModelProviders: () =>
       request<InternalModelProviderRefreshStatus>(`${configurationBase}/internal-model-providers/refresh`, { method: "POST" }),
+    listInternalModelTokens: () =>
+      request<InternalModelTokenDefinition[]>(`${configurationBase}/internal-model-tokens`),
+    createInternalModelToken: (payload: InternalModelTokenCreatePayload) =>
+      request<InternalModelTokenDefinition>(`${configurationBase}/internal-model-tokens`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
+    updateInternalModelToken: (tokenId: number, payload: InternalModelTokenUpdatePayload) =>
+      request<InternalModelTokenDefinition>(
+        `${configurationBase}/internal-model-tokens/${encodeURIComponent(String(tokenId))}`,
+        { method: "PATCH", body: JSON.stringify(payload) }
+      ),
+    deleteInternalModelToken: (tokenId: number) =>
+      request<InternalModelTokenDeleteResponse>(
+        `${configurationBase}/internal-model-tokens/${encodeURIComponent(String(tokenId))}`,
+        { method: "DELETE" }
+      ),
     getRun: (runId: string) => routedRequest<Run>(agentPath(`/runs/${encodeURIComponent(runId)}`)),
     cancelRun: (runId: string) => routedRequest<Run>(agentPath(`/runs/${encodeURIComponent(runId)}/cancel`), { method: "POST" }),
     getRunDiff: (runId: string) => routedRequest<RunDiff>(agentPath(`/runs/${encodeURIComponent(runId)}/diff`)),
@@ -2475,6 +2496,7 @@ function redactObservedJsonText(raw: string): string {
 const OBSERVED_SENSITIVE_KEYS = new Set([
   "authorization",
   "accesstoken",
+  "authtoken",
   "cookie",
   "contexttoken",
   "password",
@@ -2483,11 +2505,12 @@ const OBSERVED_SENSITIVE_KEYS = new Set([
   "sessiondigest",
   "setcookie",
   "ticket",
-  "token"
+  "token",
+  "tokenvalue"
 ]);
 
 function redactObservedSensitiveText(raw: string): string {
-  const keyPattern = /(["']?)\b(?:authorization|access[-_]?token|cookie|context[-_]?token|password|refresh[-_]?token|secret|session[-_]?digest|set-cookie|ticket|token)\b\1\s*[:=]\s*/gi;
+  const keyPattern = /(["']?)\b(?:authorization|access[-_]?token|auth[-_]?token|cookie|context[-_]?token|password|refresh[-_]?token|secret|session[-_]?digest|set-cookie|ticket|token[-_]?value|token)\b\1\s*[:=]\s*/gi;
   let redacted = "";
   let cursor = 0;
   let match: RegExpExecArray | null;

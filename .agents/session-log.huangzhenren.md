@@ -5,6 +5,53 @@
 
 ## Entries
 
+### 2026-07-23 - 确认并完成 main 并发推送
+
+- Why:
+  - 本地 `main` 比 Gitee `origin/main` 超前 25 个提交，首次大对象推送没有即时返回明确退出码；并发重试在对象上传完成后收到 `incorrect old value provided`，需要区分真实内容冲突与远端引用已被另一推送更新。
+- What:
+  - 刷新远端引用并核对提交拓扑、未合并索引项和冲突标记；确认远端原本是本地直接祖先，不需要合并、变基或强制推送。
+  - 推送后重新执行 fetch、提交计数与本地/远端哈希比对，确认第一次推送已把远端推进到本地 HEAD，第二次并发推送的拒绝属于旧值竞争。
+- How:
+  - 使用普通 `git push origin main:main`，未使用 force；以 `git rev-list --left-right --count main...origin/main`、`git rev-parse` 和 `git ls-remote` 交叉验证远端结果。
+- Result:
+  - 本地与远端 `main` 同步到 `afa2b61c827f2cb229d3d7e6f43858c265fe810f`，工作区无未解决冲突；未修改代码、API、事件、数据库、性能、安全、兼容性、环境配置或 generated SDK。
+
+### 2026-07-22 - 新增企业 XXL-JOB 只读排查手册
+
+- Why:
+  - 企业双后台 XXL-JOB 管理页、SSO、Admin、executor、Redis 与共享 MySQL 缺少可直接复制到现场执行、能明确停止边界并避免主动重放或状态变更的统一排查入口。
+- What:
+  - 固化前端 `122.233.30.2`、后台 `122.233.30.4/122.233.30.114`、Redis `122.233.30.20`、MySQL `122.233.30.148` 拓扑，交付入口、前端 Nginx、后台 Java/Admin/executor 三个可独立携带的自包含 Bash 诊断脚本。
+  - 新增受静态边界校验的 MySQL 只读检查 SQL、十五章企业排查手册、文档索引与临时夹具 verifier；三个现场脚本保留少量重复，以保证单文件复制后无需依赖共享库即可执行。
+  - 最终审查进一步区分域名经企业入口到 `.2:80` 与 IP 直达 `.2:9996` 的双入口拓扑；入口脚本拒绝五个基础设施节点，Nginx 检查排除注释伪指令，普通低熵凭据仅报告 `SET/UNSET`，MySQL 静态边界拒绝文件写入、named lock 与用户变量赋值，三个脚本统一输出最终摘要。
+- How:
+  - 诊断严格限制为 DNS/HTTP readiness、有效 Nginx 配置读取、systemd/端口/进程/日志、TCP 可达与只读数据库查询；禁止 SSO 重放、Redis 票据或会话读取、任务触发、服务或容器生命周期变更、配置写入和 SQL DML。
+  - URL query/fragment、认证头和常见敏感键在输出前统一脱敏；本条不记录任何现场凭据值或摘要。verifier 只使用临时 fake 命令、配置、日志与 SQL 夹具，不访问五个企业地址。
+  - 最终审查按 RED→GREEN 增加九组负向/正向回归；证据 AWK 固定在 verifier 内，手册展示块只做逐字节合同校验，恶意 Markdown `system()` 文本不会被执行；SSO 仍只检查事故时既有被动证据。
+- Result:
+  - 三个诊断脚本与 verifier 的 Bash 语法检查、完整行为 verifier、AI 文档校验及手册 13 个 Bash 块语法检查均退出 `0`；危险操作、SQL 写操作/静态副作用与冲突标记扫描均无匹配，任务路径及全工作树 `git diff --check` 均退出 `0`。
+  - 未修改运行时代码、HTTP API、RunEvent、数据库结构/Flyway、环境配置或 generated SDK；尚未在企业五台目标机器执行，现场网络、进程和数据状态仍需按手册由授权人员只读取证。
+
+### 2026-07-22 - 升级 OpenCode 1.18.4 官方 baseline 与 Java SDK
+
+- Why:
+  - 项目运行时、源码审计快照和 generated Java SDK 仍基于 OpenCode 1.17.8；用户要求升级到最新稳定版、重新使用最新 OpenAPI Generator 校验影响，并明确企业 Linux 程序必须直接使用官方 `opencode-linux-x64-baseline.tar.gz`，不能从源码构建。
+- What:
+  - 将审计源码快照、plugin/SDK 依赖及本机 OpenCode 更新到 1.18.4；企业 worker 下载并校验官方 baseline 归档/二进制 SHA，启动器只执行官方程序，源码不参与二进制构建。保留 1.17.8 官方 baseline 回滚 image/programs。
+  - OpenAPI Generator 固定为最新稳定版 7.24.0，重新同步 generator 工程和后端 generated SDK；规范由 150/339/175 个 paths/schemas/operations 增至 162/472/188，新增 13 个 operation、无删除，平台消费的 39 个 operation 契约未破坏。生成脚本统一清理生成器输出的行尾空格，generated 源码不手改。
+  - 1.18.2+ 启动配置固定 `subagent_depth=2`，后端和前端补齐 root → child → grandchild 的 scope 归属与状态隔离；1.17.8 回滚启动器会删除旧版不支持的字段。离线运行时继续固定依赖、禁用自动安装，并保留 `includeUsage=false` 兼容要求。
+  - 重写企业 worker/package 链路以固定官方 asset、大小、归档/程序 SHA、glibc 2.31、静态 tini/ripgrep 和 Node/Go 基础镜像；完整包同时携带 backend、frontend、programs、worker image，未操作企业服务器。
+- How:
+  - 对比 1.17.8 与 1.18.4 官方 `/doc`、release asset 和源码 tag `49c69c5ed3ccf706b61b3febb43c8aaff7f8325e`；官方 1.18.4 baseline 归档 SHA-256 为 `4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc`，程序 SHA-256 为 `6ce6570e7db9a40e7bd3304ebdfff607920bde8cafd2eb5587bd7a26f89ba0b5`。
+  - 当前与回滚 worker 均通过断网 serve/health、Tool 链接、RELEASE 元数据、深度配置和优雅停止冒烟；launcher 5/5、前端嵌套 scope 21/21、升级相关后端 Linux JDK 定向 28/28 通过。此前健康本机 JDK 下 client/runtime reactor 为 773 项全通过。
+  - 前端 lint、typecheck、生产 build 通过；全量 Vitest 为 1542 passed / 1 skipped / 1 failed，唯一失败仍是既有 `DirectoryRows.test.ts` 把 role=`radio` 的“上传”按 role=`button` 查询。Linux/musl 全后端运行通过 runtime 前各模块和 runtime 702/706，3 项仅因 glibc PTY/`/bin/bash` 不存在失败，1 项既有 1 秒重试断言单独复跑通过；本机 JDK 的 `libattach.dylib`/`libinstrument.dylib` 代码签名异常不属于本次代码。
+- Result:
+  - 完整离线包为 `deploy/internal/dist-1.18.4/test-agent-internal-release.zip`，SHA-256 `1f7baecd9877aedc82ab45e167975f10680ccb6aeeffb08142e6451af1da98e1`；1.17.8 回滚 image tar SHA-256 为 `a2fdfc588f2d3166cc26f8f9fd61daa9e937487ec93c037cf8cd8841f9c5cf8d`。两者只在本机生成，未部署企业节点。
+  - 已同步 OpenCode client/runtime/generated SDK、前端、内部部署、HTTP/SSE 索引、模块图与测试文档；平台 HTTP API、RunEvent wire、数据库/Flyway、关系型 SQL、鉴权和安全边界未变，没有修改 `.env.local`。本机外部 OpenCode 配置只补充兼容深度并保留原内容。
+- Next:
+  - 企业现场按文档同时替换 image/programs 并滚动重启用户 OpenCode 进程；如需恢复两个全量测试套件全绿，应另行修复既有 `DirectoryRows` 断言，并重装/修复本机 JDK 签名或在 glibc Linux JDK 环境执行后端全量测试。
+
 ### 2026-07-22 - 优化权限请求展示与待处理提醒
 
 - Why:
@@ -729,3 +776,95 @@
   - 未改代码，无单测；仅文档与约定变更。提交前已回顾旧档近期条目，与本次约定变更无冲突。
 - Next:
   - None。
+
+### 2026-07-22 - 文件编辑器打开文件时读取中状态改为醒目动画效果
+
+- Why:
+  - 用户希望在文件编辑器加载/读取文件内容时，将单调的“正在读取文件…”纯文本状态替换为一个更醒目、高级和精致的动画效果，从而提升交互过渡的视觉质感。
+- What:
+  - 引入 `@test-agent/ui-kit` 中的点阵 `Spinner` 组件。
+  - 将 `AgentWorkbench.vue` 里的文件加载 `v-if="activeTab?.loadState === 'loading'"` 部分重构为卡片组件结构，使用毛玻璃效果背景 (`backdrop-blur-sm`)、浮层阴影 (`shadow-[0_12px_40px_-12px_rgba(0,0,0,0.12)]`)，并配以双层旋转/呼吸动画光环。
+  - 对加载标题文本应用了漂亮的蓝紫色渐变 (`bg-gradient-to-r from-indigo-600 to-purple-600`)，增设闪烁的辅助加载状态指示器。
+- How:
+  - 修改 `AgentWorkbench.vue` 导入声明，增加引入 `Spinner` 组件。
+  - 重新编排加载区域 HTML，结合 Tailwind 4 的 `animate-spin`、`animate-pulse` 等基础动画。
+  - 在 `<style scoped>` 底部新增 `@keyframes file-load-card-in` 动画与 `.animate-file-load-card` 动效类，确保卡片淡入及微缩放，实现更柔和流畅的转场体验。
+- Result:
+  - 成功完成修改，前端 Vitest 和生产 Vite 编译构建 (`corepack pnpm build`) 顺利通过。
+  - 未修改 API 契约、RunEvent 事件规范、DTO 模型、数据库表或后端 Java 代码，与已有系统功能无冲突。
+
+### 2026-07-22 - 内部模型供应商关联可复用 Token
+
+- Why:
+  - 内部模型供应商原先共用旧单例 Token，无法按 Provider ID 在 Java 内存中解析不同凭据；平台只应记录外部取得的 Token，不应生成 Token 密钥。
+- What:
+  - 新增独立 Token 定义、SUPER_ADMIN 管理 API 和前端维护区；Token 使用数据库自增 `tokenId`，供应商可选择或复用同一 Token，启用时必须关联有效且非空的 Token。
+  - Registry 通过一次联表快照同时构建不可变的 Provider 与按 Provider ID 索引的 Token 映射，代理单次请求从同一代快照解析地址和凭据；供应商或 Token 变更继续发布既有 `InternalModelProvidersUpdatedEvent`，跨 Java 全量刷新和手工刷新接口保持不变。
+  - Flyway 将旧非空全局 Token 迁移为“默认 Token”并关联现有供应商，保留旧单例表用于滚动升级；旧顶层 `authToken/tokenConfigured` 兼容语义保留。Token 响应不返回密钥，前后端调试报文补充脱敏。
+- How:
+  - 关系型 SQL 全部落在 MyBatis XML；Token 密钥只校验非空并按外部原值记录，不 trim、不生成，改名或轮换值不改变 `tokenId`，被供应商引用时依靠业务冲突和外键 `RESTRICT` 阻止删除。
+  - 后端定向 Reactor 50 项、前端定向 Vitest 92 项、13 个前端项目 typecheck、生产 build、隔离任务改动后的后端全量 `mvn clean package -DskipTests` 和 `git diff --check` 通过。
+- Result:
+  - 已覆盖两个 Provider 使用不同 Token、多个 Provider 复用 Token、轮换后刷新、缺失 Token 安全失败、旧请求兼容、鉴权、关联迁移、引用删除冲突、密钥草稿清理和原始报文脱敏。
+  - 隔离全量 `mvn test` 中本任务涉及模块及 API 均通过，随后 persistence 的 67 个既有用例仍被 `V20260717173000__create_public_agent_config_rollouts.sql` 使用 H2 不识别的 `TIMESTAMPTZ` 阻断；近期 session log 已记录同一基线问题，本次未扩大范围修改。
+  - 涉及新增内部 HTTP API、Flyway 表/外键、安全脱敏和运行时快照；不改变 RunEvent/既有刷新广播类型、不修改 generated SDK、环境配置或 Token 明文存储约定。发布时须先升级全部 Java 节点，再开放新页面的 Token 维护操作；混合版本期间不得配置不同 Provider Token。
+
+### 2026-07-22 - 用户 OpenCode 跨服务器两级负载分配
+
+- Why:
+  - 多 Java 部署下，未绑定用户的 OpenCode 首次查询和初始化只在入口 Java 的本地容器中分配，导致请求长期集中到同一 Linux 服务器，无法利用其它服务器的空闲容量。
+- What:
+  - `BackendJavaRouteResolver` 新增首次分配选服：同轮读取 manager/backend Redis 快照，按容器最新心跳去重，将服务器全部已连接容器（含已满容器）的进程数汇总为负载，仅保留存在 READY、未满且与目标在线 Java 已连接容器的服务器，并按负载与服务器 ID 稳定选择。
+  - 未绑定用户仅在精确的进程状态 GET 和初始化 POST 上执行全局选服；远端复用公共 Java 路由与 HTTP 转发，目标 Java 继续使用本地最空容器、原子预占和公共启动流程。ACTIVE binding 始终优先，转发失败不切换下一台服务器。
+  - Redis 选服异常进入响应式统一异常链，返回 `RUNTIME_STATE_UNAVAILABLE`；同步更新后端总览、API/runtime README、HTTP API 与单/多后台部署说明。
+- How:
+  - TDD 覆盖服务器级负载汇总、满容器计数与资格隔离、断连/无容量排除、最新快照去重、稳定排序、当前 Java 放行、远端 GET/POST 转发、binding 优先、防循环、单次失败和 Redis 统一错误。
+  - runtime 定向 74 项、API 路由定向 37 项通过；`mvn -f backend/pom.xml -pl test-agent-opencode-runtime,test-agent-api -am test` 的 16 个模块全部通过，其中 runtime 703 项、API 363 项均为 0 失败。
+- Result:
+  - 请求落到 Java A 时，若用户未绑定且 Java B 所在服务器负载更低并满足调度条件，请求会转发到 B 并由 B 完成创建；已有 ACTIVE binding 不随负载变化迁移。
+  - 未新增 HTTP 路径或 DTO，不修改 RunEvent、数据库/Flyway、SQL、manager 协议、前端、Nginx、环境变量或安全契约；Redis 快照仍为最终一致，并发容量继续由目标服务器原子预占保证。
+  - 本机无真实双 Linux 节点环境，负载反转、manager 启动唯一性和既有绑定驻留仍需部署环境人工验收；当前工作区其它进程生命周期/manager/前端改动均未纳入本次提交。
+
+### 2026-07-22 - 修复用户绑定端口复用与无主进程展示
+
+- Why:
+  - 已有 ACTIVE binding 的进程不健康后会误走首次空闲端口分配，旧端口仍由 manager 托管时，数据库进程与 binding 被迁到新端口，旧进程因此在运行管理中显示为无主进程。
+- What:
+  - 已有 binding 恢复固定复用数据库中的服务器、容器和端口；仅 manager 明确返回 `PORT_CONFLICT` 或 `PORT_OUT_OF_RANGE` 时按原规则迁移。首次分配和迁移使用短事务、MyBatis `FOR UPDATE` 与条件更新原子预留，manager 调用在提交后执行；端口扫描补充 manager 实时占用端口。
+  - manager 串行化进程生命周期命令，补充稳定错误分类、同端口同身份幂等启动、跨端口同 UCID 拒绝、外部监听识别、SIGKILL 后退出确认及心跳清理竞态保护；恢复请求通过可选 `bindingRecovery` 在容量已满时沿用既有绑定。
+  - manager 心跳、Java DTO 与前端共享类型增加可选 `unifiedAuthId`、`managerStatus`；无主进程表与拓扑展示 UCID、PID 存活状态、“平台未登记”和“未执行 HTTP 健康检查”，并修复 `baseUrl` 列错位。未从启动命令解析 UCID，也不自动认领或清理存量无主进程。
+- How:
+  - TDD 覆盖原端口恢复、显式冲突迁移、STALE/超时/配置/容量错误保持绑定、预留后失败重试、同用户与不同用户并发、manager 幂等/身份唯一/外部监听/并发命令、旧响应兼容及无主进程表和拓扑回退。
+  - 验证通过：manager `go test -race ./... -count=1`；runtime Maven reactor、API Controller 定向测试、PostgreSQL 锁集成测试 6 项；前端定向 Vitest 17 项与全 workspace typecheck；`git diff --check` 通过。
+- Result:
+  - 4104 不健康时先由公共停止流程确认退出，再继续在 4104 启动；只有明确端口冲突/越界才迁移到 4105，普通故障和并发跟随者不会创建第二个绑定端口。
+  - 同步 runtime、manager、API/domain/persistence、frontend、HTTP API、事件流、安全及企业部署文档。未新增 HTTP 路径、SSE 事件或数据库结构，不修改环境配置和 generated SDK；可选字段兼容滚动升级，推荐按 manager、Java、前端顺序升级。
+  - 存量重复/无主进程不自动处理；若触发身份唯一保护，仍需管理员根据 SUPER_ADMIN 运行管理页手工处置。全量前端/模拟 E2E 的既有 Mermaid 超时、DirectoryRows role 与工作区可见性基线失败不在本次范围，任务定向验证均通过。
+
+### 2026-07-23 - 固定企业 worker 容器进程与文件句柄限制
+
+- Why:
+  - 企业 Docker 18.09 现场不能继续依赖宿主 daemon 的隐式 PID、`nofile` 和 `nproc` 默认值，需要所有 worker 节点使用一致且可核验的容器限制。
+- What:
+  - `opencode-worker-docker.sh` 的唯一 `docker run` 固定加入 `--pids-limit=8192`、`--ulimit nofile=262144:262144` 和 `--ulimit nproc=8192:8192`，不新增 `docker.env` 配置。
+  - `verify-dev-scripts.sh` 增加三个精确命令参数断言；企业部署入口、单/多后台手册和后端排障文档补充重建、生效值检查与逐节点停止条件。
+- How:
+  - TDD 先确认测试因缺少 `--pids-limit=8192` 按预期失败，再加入最小脚本实现并恢复 GREEN。
+  - 本机 Docker Desktop 29.6.1 在 arm64 上以 amd64 仿真运行 `test-agent-opencode-worker:1.18.4`；真实 HostConfig 显示 `PidsLimit=8192`、`nofile` soft/hard `262144`、`nproc` soft/hard `8192`，容器 `/proc/1/limits` 返回相同值。验证容器已停止并删除，临时目录移入废纸篓。
+  - `tools/verify-dev-scripts.sh`、Bash 语法和 `git diff --check` 通过；企业 Docker 18.09 目标机仍需在逐节点重建后执行文档中的 `docker inspect` 与 `/proc/1/limits` 验收。
+- Result:
+  - worker、manager 及其 OpenCode 子进程不再依赖 Docker daemon 的文件句柄和用户进程默认值；业务最大 OpenCode 进程数、端口池、挂载和健康检查保持不变。
+  - 脚本参数只在容器重建时生效；双后台必须先处理 `.4` 并验收，再处理 `.114`，任一节点失败时停止。未修改 API、RunEvent、数据库/Flyway、generated SDK、安全凭据或环境配置文件。
+
+### 2026-07-23 - 修复测试库缺失的 Flyway 历史迁移
+
+- Why:
+  - 测试库曾执行 `V20260721134000__migrate_night_execution_to_xxl.sql`，仓库随后为兼容企业存量库有意将其改为 `V20260722130000`，导致本机 `test` profile 启动时报告已应用迁移无法在本地解析。
+- What:
+  - 对 `.env.test` 指向的 PostgreSQL 执行 Flyway `repair`，将旧版本标记为 `DELETE`；随后执行当前迁移链，使 `V20260722130000` 和 `V20260722180000` 正常落库。
+- How:
+  - dotenv 继续按 `KEY=VALUE` 文本解析，不执行文件内容、不修改 `.env.test`，也未手工更新 `flyway_schema_history`。
+  - 修复前只读确认旧版本成功、当前版本未执行；Flyway 结果为删除标记 1 条、移除失败迁移 0 条、校验和对齐 0 条，迁移 2 条。
+- Result:
+  - 最终 Flyway 目标版本为 `20260722180000`，独立校验通过且无无效迁移；旧版本保留原成功记录和 repair 删除标记，当前版本保留成功记录。
+  - 本次仅修复本机测试数据库外部状态并追加会话留痕；未修改业务代码、迁移文件、API、RunEvent、数据库结构、安全配置或环境配置文件。

@@ -38,9 +38,7 @@ printf 'fixture-rsa-private-key\n' >"${JAR_ROOT}/BOOT-INF/classes/rsa-private.ke
 printf 'frontend\n' >"${RELEASE_ROOT}/dist/test-agent-frontend-dist.tar.gz"
 printf 'programs\n' >"${RELEASE_ROOT}/dist/test-agent-programs.tar.gz"
 printf 'worker\n' >"${RELEASE_ROOT}/dist/test-agent-opencode-worker_internal-linux-amd64.tar"
-printf 'mysql\n' >"${RELEASE_ROOT}/dist/mysql_8.4-linux-amd64.tar"
 printf '#!/usr/bin/env bash\n' >"${RELEASE_ROOT}/deploy/internal/deploy-multi-backend-node.sh"
-printf '#!/usr/bin/env bash\n' >"${RELEASE_ROOT}/deploy/internal/deploy-xxl-job-mysql.sh"
 (cd "${RELEASE_ROOT}" && zip -qr "${RELEASE_ARCHIVE}" .)
 write_checksum "${RELEASE_ARCHIVE}"
 
@@ -50,16 +48,12 @@ create_node_archive() {
   local config_name="$3"
   local root="${TMP_ROOT}/node-${node_dir}"
   mkdir -p "${root}/${node_dir}/config"
-  if [[ "${config_name}" == mysql.env ]]; then
-    printf '#!/usr/bin/env bash\n' >"${root}/${node_dir}/deploy-xxl-job-mysql.sh"
-  else
-    printf '#!/usr/bin/env bash\n' >"${root}/${node_dir}/deploy-multi-backend-node.sh"
-  fi
+  printf '#!/usr/bin/env bash\n' >"${root}/${node_dir}/deploy-multi-backend-node.sh"
   printf '# fixture deployment guide\n' >"${root}/${node_dir}/MULTI-BACKEND.md"
   if [[ "${config_name}" == backend.env ]]; then
     printf '%s\n' \
-      'TEST_AGENT_XXL_JOB_MYSQL_URL=jdbc:mysql://122.233.30.147:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai' \
-      'TEST_AGENT_XXL_JOB_MYSQL_USERNAME=xxl_job' \
+      'TEST_AGENT_XXL_JOB_MYSQL_URL=jdbc:mysql://122.210.106.43:3306/xxl_job?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai' \
+      'TEST_AGENT_XXL_JOB_MYSQL_USERNAME=root' \
       'TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=mysql-password-must-not-print' \
       'TEST_AGENT_XXL_JOB_ACCESS_TOKEN=access-token-must-not-print-0123456789' \
       >"${root}/${node_dir}/config/backend.env"
@@ -71,17 +65,6 @@ create_node_archive() {
       >>"${root}/${node_dir}/config/nginx.env"
     printf 'TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.4:18080,122.233.30.114:18080\n' \
       >>"${root}/${node_dir}/config/nginx.env"
-  else
-    printf '%s\n' \
-      'TEST_AGENT_XXL_JOB_MYSQL_IMAGE=mysql:8.4' \
-      'TEST_AGENT_XXL_JOB_MYSQL_CONTAINER=test-agent-xxl-job-mysql' \
-      'TEST_AGENT_XXL_JOB_MYSQL_HOST_PORT=3306' \
-      'TEST_AGENT_XXL_JOB_MYSQL_DATA_ROOT=/data/testagent/mysql' \
-      'TEST_AGENT_XXL_JOB_MYSQL_ROOT_PASSWORD=root-password-must-not-print' \
-      'TEST_AGENT_XXL_JOB_MYSQL_DATABASE=xxl_job' \
-      'TEST_AGENT_XXL_JOB_MYSQL_USERNAME=xxl_job' \
-      'TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=mysql-password-must-not-print' \
-      >"${root}/${node_dir}/config/mysql.env"
   fi
   tar -C "${root}" -czf "${NODES_DIR}/${archive_name}" "${node_dir}"
   write_checksum "${NODES_DIR}/${archive_name}"
@@ -99,11 +82,6 @@ create_node_archive \
   test-agent-two-backend-122.233.30.2 \
   test-agent-two-backend-122.233.30.2.tar.gz \
   nginx.env
-create_node_archive \
-  test-agent-two-backend-122.233.30.147-mysql \
-  test-agent-two-backend-122.233.30.147-mysql-SENSITIVE.tar.gz \
-  mysql.env
-
 run_package() {
   bash "${PACKAGE_SCRIPT}" \
     --release-archive "${RELEASE_ARCHIVE}" \
@@ -130,14 +108,16 @@ grep -Fxq 'test-agent-two-backend-complete/START-HERE.md' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/deploy-node-common.sh' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/deploy-backend-node.sh' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/deploy-frontend-node.sh' <<<"${listing}"
-grep -Fxq 'test-agent-two-backend-complete/deploy-mysql-node.sh' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/init-backend-node-config.sh' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/register-backend-on-frontend.sh' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/test-agent-internal-release.zip' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.30.4-SENSITIVE.tar.gz' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.30.114-SENSITIVE.tar.gz' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.30.2.tar.gz' <<<"${listing}"
-grep -Fxq 'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.30.147-mysql-SENSITIVE.tar.gz' <<<"${listing}"
+if grep -Eq 'mysql_8\.4|deploy-mysql-node|122\.233\.30\.147-mysql' <<<"${listing}"; then
+  echo "Platform bundle unexpectedly contains standalone MySQL artifacts" >&2
+  exit 1
+fi
 if grep -Eq '202[0-9]|-v[0-9]+/' <<<"${listing}"; then
   echo "Fixed-name bundle unexpectedly contains a dated/versioned root" >&2
   exit 1
@@ -161,4 +141,4 @@ fi
 run_package >/dev/null
 test "$(find "${OUTPUT_DIR}" -maxdepth 1 -type f -name 'test-agent-two-backend-complete*.zip' | wc -l | tr -d '[:space:]')" = 1
 
-echo 'Fixed-name complete two-backend bundle, checksum, structure, redaction and overwrite verified'
+echo 'Fixed-name platform bundle, checksum, structure, MySQL separation, redaction and overwrite verified'

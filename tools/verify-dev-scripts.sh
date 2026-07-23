@@ -273,6 +273,19 @@ worker_output="$(
     --name test-agent-opencode-worker-verify \
     restart 2>&1
 )"
+worker_docker_run="$(grep '^run ' "${worker_docker_calls}")"
+if [[ " ${worker_docker_run} " != *" --pids-limit=8192 "* ]]; then
+  cat "${worker_docker_calls}" >&2
+  fail "worker docker script should set pids limit to 8192"
+fi
+if [[ " ${worker_docker_run} " != *" --ulimit nofile=262144:262144 "* ]]; then
+  cat "${worker_docker_calls}" >&2
+  fail "worker docker script should set nofile soft and hard limits to 262144"
+fi
+if [[ " ${worker_docker_run} " != *" --ulimit nproc=8192:8192 "* ]]; then
+  cat "${worker_docker_calls}" >&2
+  fail "worker docker script should set nproc soft and hard limits to 8192"
+fi
 if [[ "$(cat "${worker_docker_calls}")" == *"--add-host"* ]]; then
   cat "${worker_docker_calls}" >&2
   fail "worker docker script should not require host.docker.internal add-host mapping"

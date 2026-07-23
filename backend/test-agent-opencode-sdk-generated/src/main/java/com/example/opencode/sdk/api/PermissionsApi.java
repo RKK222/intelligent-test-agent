@@ -8,8 +8,11 @@ import com.example.opencode.sdk.model.V2AgentListLocationParameter;
 import com.example.opencode.sdk.model.V2PermissionRequestList200Response;
 import com.example.opencode.sdk.model.V2PermissionSavedList200Response;
 import com.example.opencode.sdk.model.V2SessionGet404Response;
+import com.example.opencode.sdk.model.V2SessionPermissionCreate200Response;
+import com.example.opencode.sdk.model.V2SessionPermissionCreateRequest;
+import com.example.opencode.sdk.model.V2SessionPermissionGet200Response;
+import com.example.opencode.sdk.model.V2SessionPermissionGet404Response;
 import com.example.opencode.sdk.model.V2SessionPermissionList200Response;
-import com.example.opencode.sdk.model.V2SessionPermissionReply404Response;
 import com.example.opencode.sdk.model.V2SessionPermissionReplyRequest;
 
 import java.util.HashMap;
@@ -34,7 +37,7 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Flux;
 
-@jakarta.annotation.Generated(value = "org.openapitools.codegen.languages.JavaClientCodegen", comments = "Generator version: 7.23.0")
+@jakarta.annotation.Generated(value = "org.openapitools.codegen.languages.JavaClientCodegen", comments = "Generator version: 7.24.0")
 public class PermissionsApi {
     private ApiClient apiClient;
 
@@ -77,7 +80,7 @@ public class PermissionsApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", location.getDirectory()));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", location.getWorkspace()));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -156,7 +159,7 @@ public class PermissionsApi {
 
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "projectID", projectID));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -238,7 +241,7 @@ public class PermissionsApi {
         final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
         final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -293,6 +296,383 @@ public class PermissionsApi {
         return v2PermissionSavedRemoveRequestCreation(id);
     }
 
+    public class V2SessionPermissionCreateRequest {
+        private @jakarta.annotation.Nonnull String sessionID;
+        private @jakarta.annotation.Nonnull V2SessionPermissionCreateRequest v2SessionPermissionCreateRequest;
+
+        public V2SessionPermissionCreateRequest() {}
+
+        public V2SessionPermissionCreateRequest(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull V2SessionPermissionCreateRequest v2SessionPermissionCreateRequest) {
+            this.sessionID = sessionID;
+            this.v2SessionPermissionCreateRequest = v2SessionPermissionCreateRequest;
+        }
+
+        public @jakarta.annotation.Nonnull String sessionID() {
+            return this.sessionID;
+        }
+        public V2SessionPermissionCreateRequest sessionID(@jakarta.annotation.Nonnull String sessionID) {
+            this.sessionID = sessionID;
+            return this;
+        }
+
+        public @jakarta.annotation.Nonnull V2SessionPermissionCreateRequest v2SessionPermissionCreateRequest() {
+            return this.v2SessionPermissionCreateRequest;
+        }
+        public V2SessionPermissionCreateRequest v2SessionPermissionCreateRequest(@jakarta.annotation.Nonnull V2SessionPermissionCreateRequest v2SessionPermissionCreateRequest) {
+            this.v2SessionPermissionCreateRequest = v2SessionPermissionCreateRequest;
+            return this;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            V2SessionPermissionCreateRequest request = (V2SessionPermissionCreateRequest) o;
+            return Objects.equals(this.sessionID, request.sessionID()) &&
+                Objects.equals(this.v2SessionPermissionCreateRequest, request.v2SessionPermissionCreateRequest());
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(sessionID, v2SessionPermissionCreateRequest);
+        }
+    }
+
+    /**
+     * Create permission request
+     * Evaluate and, when approval is required, create a permission request for a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError
+     * @param requestParameters The v2SessionPermissionCreate request parameters as object
+     * @return V2SessionPermissionCreate200Response
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<V2SessionPermissionCreate200Response> v2SessionPermissionCreate(V2SessionPermissionCreateRequest requestParameters) throws WebClientResponseException {
+        return this.v2SessionPermissionCreate(requestParameters.sessionID(), requestParameters.v2SessionPermissionCreateRequest());
+    }
+
+    /**
+     * Create permission request
+     * Evaluate and, when approval is required, create a permission request for a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError
+     * @param requestParameters The v2SessionPermissionCreate request parameters as object
+     * @return ResponseEntity&lt;V2SessionPermissionCreate200Response&gt;
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<ResponseEntity<V2SessionPermissionCreate200Response>> v2SessionPermissionCreateWithHttpInfo(V2SessionPermissionCreateRequest requestParameters) throws WebClientResponseException {
+        return this.v2SessionPermissionCreateWithHttpInfo(requestParameters.sessionID(), requestParameters.v2SessionPermissionCreateRequest());
+    }
+
+    /**
+     * Create permission request
+     * Evaluate and, when approval is required, create a permission request for a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError
+     * @param requestParameters The v2SessionPermissionCreate request parameters as object
+     * @return ResponseSpec
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public ResponseSpec v2SessionPermissionCreateWithResponseSpec(V2SessionPermissionCreateRequest requestParameters) throws WebClientResponseException {
+        return this.v2SessionPermissionCreateWithResponseSpec(requestParameters.sessionID(), requestParameters.v2SessionPermissionCreateRequest());
+    }
+
+
+    /**
+     * Create permission request
+     * Evaluate and, when approval is required, create a permission request for a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @param v2SessionPermissionCreateRequest The v2SessionPermissionCreateRequest parameter
+     * @return V2SessionPermissionCreate200Response
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    private ResponseSpec v2SessionPermissionCreateRequestCreation(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull V2SessionPermissionCreateRequest v2SessionPermissionCreateRequest) throws WebClientResponseException {
+        Object postBody = v2SessionPermissionCreateRequest;
+        // verify the required parameter 'sessionID' is set
+        if (sessionID == null) {
+            throw new WebClientResponseException("Missing the required parameter 'sessionID' when calling v2SessionPermissionCreate", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+        }
+        // verify the required parameter 'v2SessionPermissionCreateRequest' is set
+        if (v2SessionPermissionCreateRequest == null) {
+            throw new WebClientResponseException("Missing the required parameter 'v2SessionPermissionCreateRequest' when calling v2SessionPermissionCreate", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+        }
+        // create path and map variables
+        final Map<String, Object> pathParams = new HashMap<String, Object>();
+
+        pathParams.put("sessionID", sessionID);
+
+        final MultiValueMap<String, String> localVarQueryParams = new LinkedMultiValueMap<String, String>();
+        final HttpHeaders headerParams = new HttpHeaders();
+        final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
+        final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
+
+        final String[] localVarAccepts = {
+            "application/json"
+        };
+        final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
+        final String[] localVarContentTypes = {
+            "application/json"
+        };
+        final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
+
+        String[] localVarAuthNames = new String[] {  };
+
+        ParameterizedTypeReference<V2SessionPermissionCreate200Response> localVarReturnType = new ParameterizedTypeReference<V2SessionPermissionCreate200Response>() {};
+        return apiClient.invokeAPI("/api/session/{sessionID}/permission", HttpMethod.POST, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+    }
+
+    /**
+     * Create permission request
+     * Evaluate and, when approval is required, create a permission request for a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @param v2SessionPermissionCreateRequest The v2SessionPermissionCreateRequest parameter
+     * @return V2SessionPermissionCreate200Response
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<V2SessionPermissionCreate200Response> v2SessionPermissionCreate(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull V2SessionPermissionCreateRequest v2SessionPermissionCreateRequest) throws WebClientResponseException {
+        ParameterizedTypeReference<V2SessionPermissionCreate200Response> localVarReturnType = new ParameterizedTypeReference<V2SessionPermissionCreate200Response>() {};
+        return v2SessionPermissionCreateRequestCreation(sessionID, v2SessionPermissionCreateRequest).bodyToMono(localVarReturnType);
+    }
+
+    /**
+     * Create permission request
+     * Evaluate and, when approval is required, create a permission request for a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @param v2SessionPermissionCreateRequest The v2SessionPermissionCreateRequest parameter
+     * @return ResponseEntity&lt;V2SessionPermissionCreate200Response&gt;
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<ResponseEntity<V2SessionPermissionCreate200Response>> v2SessionPermissionCreateWithHttpInfo(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull V2SessionPermissionCreateRequest v2SessionPermissionCreateRequest) throws WebClientResponseException {
+        ParameterizedTypeReference<V2SessionPermissionCreate200Response> localVarReturnType = new ParameterizedTypeReference<V2SessionPermissionCreate200Response>() {};
+        return v2SessionPermissionCreateRequestCreation(sessionID, v2SessionPermissionCreateRequest).toEntity(localVarReturnType);
+    }
+
+    /**
+     * Create permission request
+     * Evaluate and, when approval is required, create a permission request for a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @param v2SessionPermissionCreateRequest The v2SessionPermissionCreateRequest parameter
+     * @return ResponseSpec
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public ResponseSpec v2SessionPermissionCreateWithResponseSpec(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull V2SessionPermissionCreateRequest v2SessionPermissionCreateRequest) throws WebClientResponseException {
+        return v2SessionPermissionCreateRequestCreation(sessionID, v2SessionPermissionCreateRequest);
+    }
+
+    public class V2SessionPermissionGetRequest {
+        private @jakarta.annotation.Nonnull String sessionID;
+        private @jakarta.annotation.Nonnull String requestID;
+
+        public V2SessionPermissionGetRequest() {}
+
+        public V2SessionPermissionGetRequest(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull String requestID) {
+            this.sessionID = sessionID;
+            this.requestID = requestID;
+        }
+
+        public @jakarta.annotation.Nonnull String sessionID() {
+            return this.sessionID;
+        }
+        public V2SessionPermissionGetRequest sessionID(@jakarta.annotation.Nonnull String sessionID) {
+            this.sessionID = sessionID;
+            return this;
+        }
+
+        public @jakarta.annotation.Nonnull String requestID() {
+            return this.requestID;
+        }
+        public V2SessionPermissionGetRequest requestID(@jakarta.annotation.Nonnull String requestID) {
+            this.requestID = requestID;
+            return this;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            V2SessionPermissionGetRequest request = (V2SessionPermissionGetRequest) o;
+            return Objects.equals(this.sessionID, request.sessionID()) &&
+                Objects.equals(this.requestID, request.requestID());
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(sessionID, requestID);
+        }
+    }
+
+    /**
+     * Get permission request
+     * Retrieve a pending permission request owned by a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param requestParameters The v2SessionPermissionGet request parameters as object
+     * @return V2SessionPermissionGet200Response
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<V2SessionPermissionGet200Response> v2SessionPermissionGet(V2SessionPermissionGetRequest requestParameters) throws WebClientResponseException {
+        return this.v2SessionPermissionGet(requestParameters.sessionID(), requestParameters.requestID());
+    }
+
+    /**
+     * Get permission request
+     * Retrieve a pending permission request owned by a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param requestParameters The v2SessionPermissionGet request parameters as object
+     * @return ResponseEntity&lt;V2SessionPermissionGet200Response&gt;
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<ResponseEntity<V2SessionPermissionGet200Response>> v2SessionPermissionGetWithHttpInfo(V2SessionPermissionGetRequest requestParameters) throws WebClientResponseException {
+        return this.v2SessionPermissionGetWithHttpInfo(requestParameters.sessionID(), requestParameters.requestID());
+    }
+
+    /**
+     * Get permission request
+     * Retrieve a pending permission request owned by a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param requestParameters The v2SessionPermissionGet request parameters as object
+     * @return ResponseSpec
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public ResponseSpec v2SessionPermissionGetWithResponseSpec(V2SessionPermissionGetRequest requestParameters) throws WebClientResponseException {
+        return this.v2SessionPermissionGetWithResponseSpec(requestParameters.sessionID(), requestParameters.requestID());
+    }
+
+
+    /**
+     * Get permission request
+     * Retrieve a pending permission request owned by a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @param requestID The requestID parameter
+     * @return V2SessionPermissionGet200Response
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    private ResponseSpec v2SessionPermissionGetRequestCreation(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull String requestID) throws WebClientResponseException {
+        Object postBody = null;
+        // verify the required parameter 'sessionID' is set
+        if (sessionID == null) {
+            throw new WebClientResponseException("Missing the required parameter 'sessionID' when calling v2SessionPermissionGet", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+        }
+        // verify the required parameter 'requestID' is set
+        if (requestID == null) {
+            throw new WebClientResponseException("Missing the required parameter 'requestID' when calling v2SessionPermissionGet", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+        }
+        // create path and map variables
+        final Map<String, Object> pathParams = new HashMap<String, Object>();
+
+        pathParams.put("sessionID", sessionID);
+        pathParams.put("requestID", requestID);
+
+        final MultiValueMap<String, String> localVarQueryParams = new LinkedMultiValueMap<String, String>();
+        final HttpHeaders headerParams = new HttpHeaders();
+        final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
+        final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
+
+        final String[] localVarAccepts = {
+            "application/json"
+        };
+        final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
+        final String[] localVarContentTypes = { };
+        final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
+
+        String[] localVarAuthNames = new String[] {  };
+
+        ParameterizedTypeReference<V2SessionPermissionGet200Response> localVarReturnType = new ParameterizedTypeReference<V2SessionPermissionGet200Response>() {};
+        return apiClient.invokeAPI("/api/session/{sessionID}/permission/{requestID}", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+    }
+
+    /**
+     * Get permission request
+     * Retrieve a pending permission request owned by a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @param requestID The requestID parameter
+     * @return V2SessionPermissionGet200Response
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<V2SessionPermissionGet200Response> v2SessionPermissionGet(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull String requestID) throws WebClientResponseException {
+        ParameterizedTypeReference<V2SessionPermissionGet200Response> localVarReturnType = new ParameterizedTypeReference<V2SessionPermissionGet200Response>() {};
+        return v2SessionPermissionGetRequestCreation(sessionID, requestID).bodyToMono(localVarReturnType);
+    }
+
+    /**
+     * Get permission request
+     * Retrieve a pending permission request owned by a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @param requestID The requestID parameter
+     * @return ResponseEntity&lt;V2SessionPermissionGet200Response&gt;
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<ResponseEntity<V2SessionPermissionGet200Response>> v2SessionPermissionGetWithHttpInfo(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull String requestID) throws WebClientResponseException {
+        ParameterizedTypeReference<V2SessionPermissionGet200Response> localVarReturnType = new ParameterizedTypeReference<V2SessionPermissionGet200Response>() {};
+        return v2SessionPermissionGetRequestCreation(sessionID, requestID).toEntity(localVarReturnType);
+    }
+
+    /**
+     * Get permission request
+     * Retrieve a pending permission request owned by a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @param requestID The requestID parameter
+     * @return ResponseSpec
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public ResponseSpec v2SessionPermissionGetWithResponseSpec(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull String requestID) throws WebClientResponseException {
+        return v2SessionPermissionGetRequestCreation(sessionID, requestID);
+    }
+
     /**
      * List session permission requests
      * Retrieve pending permission requests owned by a session.
@@ -320,7 +700,7 @@ public class PermissionsApi {
         final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
         final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -518,11 +898,11 @@ public class PermissionsApi {
         final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
         final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);

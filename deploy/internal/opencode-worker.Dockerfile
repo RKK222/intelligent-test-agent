@@ -1,8 +1,5 @@
-ARG GO_IMAGE=golang@sha256:167053a2bb901972bf2c1611f8f52c44d5fe7e762e5cab213708d82c421614db
-ARG BUN_IMAGE=oven/bun@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f
-ARG NODE_IMAGE=node@sha256:e24976116684e0fd211cbdb3c40fc9cb997565d063fb7fe656d2e2b603c5bb0a
-ARG DEBIAN_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian
-ARG DEBIAN_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
+ARG GO_IMAGE=golang@sha256:e87b2a5f6df2dff71ea330d55d54f4979eb380ae58a7e3aabc9d53121243e689
+ARG NODE_IMAGE=node@sha256:b042c6d46a90773b82ea3f95b05457ea93ee127a73b1b47ad5ebbb1a08ec3df8
 
 FROM ${GO_IMAGE} AS manager-build
 
@@ -24,73 +21,91 @@ RUN printf '%s' "${MANAGER_BUILD_VERSION}" | grep -Eq '^V[0-9]{8}\.[0-9]{6}$' \
       -ldflags="-s -w -X github.com/enterprise/test-agent/opencode-manager/internal/control.buildVersion=${MANAGER_BUILD_VERSION}" \
       -o /out/opencode-manager ./cmd/opencode-manager
 
-FROM --platform=$BUILDPLATFORM ${BUN_IMAGE} AS opencode-node-build
+# tini 与 ripgrep 使用上游静态程序并校验摘要；此阶段同时向 bullseye 提供首次 HTTPS 所需的 CA 数据。
+FROM ${GO_IMAGE} AS runtime-assets
 
-ARG OPENCODE_VERSION=1.17.8
-ARG OPENCODE_SOURCE_COMMIT=11e47f91496005aab4d7c5a2d0a7da5d2651b4ac
-ARG OPENCODE_SOURCE_REPOSITORY=https://github.com/anomalyco/opencode.git
-ARG NPM_REGISTRY=https://registry.npmmirror.com
-ARG DEBIAN_MIRROR
-ARG DEBIAN_SECURITY_MIRROR
-
-# Bun 只在联网构建阶段把上游 TypeScript 打成 Node ESM bundle；最终运行镜像不复制 Bun。
-# 固定 tag 对应 commit，避免上游 tag 漂移后在不知情的情况下生成不同交付物。
-RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates; \
-    rm -rf /var/lib/apt/lists/*
+ARG TINI_VERSION=0.19.0
+ARG TINI_SHA256=c5b0666b4cb676901f90dfcb37106783c5fe2077b04590973b885950611b30ee
+ARG RIPGREP_VERSION=15.2.0
+ARG RIPGREP_SHA256=33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c
 
 RUN set -eux; \
-    for file in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; do \
-      if [ -f "${file}" ]; then \
-        sed -i \
-          -e "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
-          -e "s|http://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
-          -e "s|https://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
-          -e "s|https://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
-          "${file}"; \
+    curl -fL --retry 3 --retry-delay 2 \
+      "https://github.com/krallin/tini/releases/download/v${TINI_VERSION}/tini-static-amd64" \
+      -o /tmp/tini; \
+    printf '%s  %s\n' "${TINI_SHA256}" /tmp/tini | sha256sum -c -; \
+    install -m 0755 /tmp/tini /usr/local/bin/tini; \
+    curl -fL --retry 3 --retry-delay 2 \
+      "https://github.com/BurntSushi/ripgrep/releases/download/${RIPGREP_VERSION}/ripgrep-${RIPGREP_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+      -o /tmp/ripgrep.tar.gz; \
+    printf '%s  %s\n' "${RIPGREP_SHA256}" /tmp/ripgrep.tar.gz | sha256sum -c -; \
+    mkdir -p /tmp/ripgrep; \
+    tar -xzf /tmp/ripgrep.tar.gz -C /tmp/ripgrep; \
+    install -m 0755 \
+      "/tmp/ripgrep/ripgrep-${RIPGREP_VERSION}-x86_64-unknown-linux-musl/rg" \
+      /usr/local/bin/rg; \
+    tini --version; \
+    rg --version | head -n 1
+
+# 企业 worker 只接收上游官方 baseline 程序；源码快照用于审计和 SDK 对照，不参与二进制构建。
+FROM ${GO_IMAGE} AS opencode-download
+
+ARG OPENCODE_VERSION=1.18.4
+ARG OPENCODE_ASSET_NAME=opencode-linux-x64-baseline.tar.gz
+ARG OPENCODE_ASSET_SIZE=59265643
+ARG OPENCODE_ASSET_SHA256=4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc
+ARG OPENCODE_BINARY_SHA256=6ce6570e7db9a40e7bd3304ebdfff607920bde8cafd2eb5587bd7a26f89ba0b5
+ARG OPENCODE_RELEASE_BASE_URL=https://github.com/anomalyco/opencode/releases/download
+
+RUN set -eux; \
+    asset_url="${OPENCODE_RELEASE_BASE_URL}/v${OPENCODE_VERSION}/${OPENCODE_ASSET_NAME}"; \
+    chunk_size=16777216; \
+    index=0; \
+    start=0; \
+    mkdir -p /tmp/opencode-parts; \
+    while [ "${start}" -lt "${OPENCODE_ASSET_SIZE}" ]; do \
+      end=$((start + chunk_size - 1)); \
+      if [ "${end}" -ge "${OPENCODE_ASSET_SIZE}" ]; then \
+        end=$((OPENCODE_ASSET_SIZE - 1)); \
       fi; \
+      part="$(printf '/tmp/opencode-parts/part-%03d' "${index}")"; \
+      curl -fsSL --retry 3 --retry-delay 2 \
+        --range "${start}-${end}" \
+        "${asset_url}" \
+        -o "${part}" & \
+      index=$((index + 1)); \
+      start=$((end + 1)); \
     done; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends git; \
-    rm -rf /var/lib/apt/lists/*; \
-    git clone --depth 1 --branch "v${OPENCODE_VERSION}" "${OPENCODE_SOURCE_REPOSITORY}" /workspace/opencode; \
-    test "$(git -C /workspace/opencode rev-parse HEAD)" = "${OPENCODE_SOURCE_COMMIT}"
+    wait; \
+    cat /tmp/opencode-parts/part-* > /tmp/opencode.tar.gz; \
+    test "$(stat -c '%s' /tmp/opencode.tar.gz)" = "${OPENCODE_ASSET_SIZE}"; \
+    printf '%s  %s\n' "${OPENCODE_ASSET_SHA256}" /tmp/opencode.tar.gz | sha256sum -c -; \
+    mkdir -p /out; \
+    tar -xzf /tmp/opencode.tar.gz -C /out; \
+    if [ "${OPENCODE_BINARY_SHA256}" != "not-recorded" ]; then \
+      printf '%s  %s\n' "${OPENCODE_BINARY_SHA256}" /out/opencode | sha256sum -c -; \
+    fi; \
+    chmod +x /out/opencode; \
+    test "$(/out/opencode --version)" = "${OPENCODE_VERSION}"
 
-WORKDIR /workspace/opencode
-
-# 只安装 Node server 构建所需 workspace，跳过所有生命周期脚本；运行期原生 PTY
-# 依赖会在目标 linux/amd64 Node 镜像中单独按 lockfile 安装。
-RUN bun install \
-      --no-save \
-      --ignore-scripts \
-      --filter opencode \
-      --filter @opencode-ai/script \
-      --registry "${NPM_REGISTRY}"
-
-COPY deploy/internal/opencode-node-compat.patch /tmp/opencode-node-compat.patch
-COPY deploy/internal/opencode-models.snapshot.json /tmp/opencode-models.snapshot.json
-RUN git apply --check /tmp/opencode-node-compat.patch \
-    && git apply /tmp/opencode-node-compat.patch
-
-RUN MODELS_DEV_API_JSON=/tmp/opencode-models.snapshot.json \
-      bun run --cwd packages/opencode script/build-node.ts \
-    && test -s packages/opencode/dist/node/node.js
-
+# 固定 bullseye/glibc 2.31，兼容企业 Docker 18.09 宿主环境。
 FROM ${NODE_IMAGE}
 
-ARG DEBIAN_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian
-ARG DEBIAN_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
+ARG DEBIAN_MIRROR=https://mirrors.ustc.edu.cn/debian
+ARG DEBIAN_SECURITY_MIRROR=https://mirrors.ustc.edu.cn/debian-security
 ARG NPM_REGISTRY=https://registry.npmmirror.com
-ARG OPENCODE_VERSION=1.17.8
+ARG OPENCODE_VERSION=1.18.4
+ARG OPENCODE_RELEASE_COMMIT=49c69c5ed3ccf706b61b3febb43c8aaff7f8325e
+ARG OPENCODE_ASSET_NAME=opencode-linux-x64-baseline.tar.gz
+ARG OPENCODE_ASSET_SIZE=59265643
+ARG OPENCODE_ASSET_SHA256=4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc
+ARG OPENCODE_BINARY_SHA256=6ce6570e7db9a40e7bd3304ebdfff607920bde8cafd2eb5587bd7a26f89ba0b5
+ARG OPENCODE_RUNTIME_PACKAGE_JSON=deploy/internal/opencode-node-runtime.package.json
+ARG OPENCODE_RUNTIME_PACKAGE_LOCK=deploy/internal/opencode-node-runtime.package-lock.json
 
-# node:bullseye-slim 初始层不保证包含 CA 根证书；先用默认 Debian 源安装证书，
-# 再切到可配置的 HTTPS 镜像源，避免 apt update 在证书校验阶段失败。
-RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates; \
-    rm -rf /var/lib/apt/lists/*
-
+# node:bullseye-slim 初始层没有 CA；先从固定官方镜像复制证书数据，再通过 HTTPS 签名源安装既有工具。
+COPY --from=runtime-assets /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=runtime-assets /usr/share/ca-certificates /usr/share/ca-certificates
 RUN set -eux; \
     for file in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; do \
       if [ -f "${file}" ]; then \
@@ -102,40 +117,60 @@ RUN set -eux; \
           "${file}"; \
       fi; \
     done; \
-    apt-get update; \
+    apt-get \
+      -o Acquire::ForceIPv4=true \
+      -o Acquire::Languages=none \
+      -o Acquire::PDiffs=false \
+      update; \
     apt-get install -y --no-install-recommends \
-      bash \
+      ca-certificates \
       git \
       openssh-client \
-      procps \
-      ripgrep \
-      tini; \
-    rm -rf /var/lib/apt/lists/*
+      procps; \
+    rm -rf /var/lib/apt/lists/*; \
+    test "$(getconf GNU_LIBC_VERSION)" = "glibc 2.31"; \
+    git --version; \
+    ssh -V; \
+    ps --version | head -n 1
 
-WORKDIR /usr/local/lib/opencode-node
+COPY --from=runtime-assets /usr/local/bin/tini /usr/local/bin/tini
+COPY --from=runtime-assets /usr/local/bin/rg /usr/local/bin/rg
 
-COPY deploy/internal/opencode-node-runtime.package.json ./package.json
-COPY deploy/internal/opencode-node-runtime.package-lock.json ./package-lock.json
+WORKDIR /usr/local/lib/opencode
+
+COPY ${OPENCODE_RUNTIME_PACKAGE_JSON} ./package.json
+COPY ${OPENCODE_RUNTIME_PACKAGE_LOCK} ./package-lock.json
 RUN npm config set registry "${NPM_REGISTRY}" \
     && npm config set replace-registry-host always \
     && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
     && npm cache clean --force
 
-COPY --from=opencode-node-build /workspace/opencode/packages/opencode/dist/node ./server
-COPY --from=opencode-node-build /workspace/opencode/LICENSE ./LICENSE
-COPY deploy/internal/opencode-node-launcher.mjs ./bin/opencode
+COPY --from=opencode-download /out/opencode ./bin/opencode-official
+COPY opencode-source/opencode-1.18.4/LICENSE ./LICENSE
+COPY deploy/internal/opencode-official-launcher.mjs ./bin/opencode
 RUN set -eux; \
     printf '%s\n' "${OPENCODE_VERSION}" > ./VERSION; \
-    chmod +x ./bin/opencode; \
-    ln -s /usr/local/lib/opencode-node/bin/opencode /usr/local/bin/opencode; \
+    printf 'version=%s\nasset=%s\narchive_size=%s\narchive_sha256=%s\nbinary_sha256=%s\nrelease_commit=%s\n' \
+      "${OPENCODE_VERSION}" \
+      "${OPENCODE_ASSET_NAME}" \
+      "${OPENCODE_ASSET_SIZE}" \
+      "${OPENCODE_ASSET_SHA256}" \
+      "${OPENCODE_BINARY_SHA256}" \
+      "${OPENCODE_RELEASE_COMMIT}" > ./RELEASE; \
+    chmod +x ./bin/opencode ./bin/opencode-official; \
+    ln -s /usr/local/lib/opencode/bin/opencode /usr/local/bin/opencode; \
     /usr/local/bin/opencode --version; \
-    node -e 'import("@lydell/node-pty").then(() => process.stdout.write("node-pty ok\\n"))'; \
-    node --input-type=module -e 'await Promise.all([import("@opencode-ai/plugin"), import("@opencode-ai/sdk"), import("effect"), import("zod")]); process.stdout.write("custom Tool runtime ok\\n")'
+    node --input-type=module -e 'await Promise.all([import("@opencode-ai/plugin"), import("@opencode-ai/sdk"), import("effect"), import("zod")]); console.log("custom Tool runtime ok")'; \
+    git --version; \
+    ssh -V; \
+    rg --version | head -n 1; \
+    tini --version
 
 COPY --from=manager-build /out/opencode-manager /usr/local/bin/opencode-manager
 COPY deploy/internal/opencode-worker-entrypoint.sh /usr/local/bin/opencode-worker-entrypoint
 RUN chmod +x /usr/local/bin/opencode-manager /usr/local/bin/opencode-worker-entrypoint
 
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ENV SYS_DATA_ROOT_DIR=/data/testagent/data
 ENV OPENCODE_BIN=/usr/local/bin/opencode
 ENV OPENCODE_MANAGER_STATE_DIR=/data/testagent/data/agent-opencode/manager

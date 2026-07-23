@@ -2149,6 +2149,17 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("高优先级");
   });
 
+  it("keeps long docked work status content vertically scrollable", () => {
+    const workStatusCss = readFileSync(
+      resolve(process.cwd(), "packages/agent-chat/src/opencode-like/styles/work-status.css"),
+      "utf8"
+    );
+
+    expect(workStatusCss).toMatch(
+      /\.oc-work-status-dock\s*\{[^}]*max-height:\s*min\(360px,\s*50vh\);[^}]*overflow-y:\s*auto;/s
+    );
+  });
+
   it("switches from the root timeline to a subagent timeline without showing the composer", async () => {
     const resizeObservers: TestResizeObserver[] = [];
     class TestResizeObserver {
@@ -3041,6 +3052,31 @@ describe("FigmaChatPanel", () => {
     const preTexts = wrapper.findAll("pre").map((pre) => pre.text()).join("\n");
     expect(preTexts).toContain('{"sessionId":"ses_1","prompt":"hello"}');
     expect(preTexts).toContain('{"type":"message.part.delta","payload":{"delta":"world"}}');
+    expect(wrapper.findAll(".figma-chat-raw-entry-title").map((title) => title.text())).toEqual([
+      "message.part.delta",
+      "POST /api/internal/agent/opencode/runs"
+    ]);
+
+    const rawOutputBody = wrapper.get(".figma-chat-raw-output-body").element as HTMLElement;
+    rawOutputBody.scrollTop = 120;
+    await wrapper.setProps({
+      rawOutputEntries: [
+        ...(wrapper.props("rawOutputEntries") as any[]),
+        {
+          id: "raw_res_1",
+          kind: "response",
+          title: "201 POST /api/internal/agent/opencode/runs",
+          status: 201,
+          body: '{"runId":"run_1"}',
+          occurredAt: "2026-07-02T08:00:02.000Z"
+        }
+      ]
+    });
+    await nextTick();
+    await nextTick();
+
+    expect(rawOutputBody.scrollTop).toBe(0);
+    expect(wrapper.find(".figma-chat-raw-entry-title").text()).toBe("201 POST /api/internal/agent/opencode/runs");
 
     const sseFilter = wrapper.findAll(".figma-chat-raw-filter").find((button) => button.text() === "SSE");
     expect(sseFilter).toBeTruthy();
@@ -3121,6 +3157,7 @@ describe("FigmaChatPanel", () => {
       expect(text).toContain('{"type":"message.part.delta","payload":{"delta":"world"}}');
       expect(text).toContain("请求");
       expect(text).toContain("SSE");
+      expect(text.indexOf("message.part.delta")).toBeLessThan(text.indexOf("POST /api/internal/agent/opencode/runs"));
       expect(revokeObjectURL).toHaveBeenCalledWith("blob:raw");
 
       // 过滤后只下载命中条目，未命中条目不进入导出文本

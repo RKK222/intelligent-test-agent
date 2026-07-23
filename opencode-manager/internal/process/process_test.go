@@ -2,11 +2,13 @@ package process
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -148,6 +150,9 @@ func TestManagerStartWritesStateAndReusesHealthyManagedPort(t *testing.T) {
 	if result.Status != StatusStarted || result.PID != 12345 {
 		t.Fatalf("unexpected start result %#v", result)
 	}
+	if !result.ProcessCreated {
+		t.Fatalf("fresh start must report processCreated=true, got %#v", result)
+	}
 	if len(starter.specs) != 1 {
 		t.Fatalf("expected one start spec, got %d", len(starter.specs))
 	}
@@ -177,8 +182,136 @@ func TestManagerStartWritesStateAndReusesHealthyManagedPort(t *testing.T) {
 	if reused.Status != StatusStarted || reused.PID != 12345 {
 		t.Fatalf("unexpected reused result %#v", reused)
 	}
+	if reused.ProcessCreated {
+		t.Fatalf("idempotent reuse must report processCreated=false, got %#v", reused)
+	}
 	if len(starter.specs) != 1 {
 		t.Fatalf("expected duplicate start to reuse existing process, got %d starts", len(starter.specs))
+	}
+}
+
+func TestManagerStartReusesHealthyLegacyRecordWithIdentityDerivedFromSessionPath(t *testing.T) {
+	cfg := testConfig(t)
+	store := state.NewFileStore(t.TempDir())
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	sessionPath := "/tmp/sessions/users/legacy-user"
+	if err := store.Save(state.ProcessRecord{
+		Port: 4096, PID: 12345, BaseURL: server.URL,
+		SessionPath: sessionPath, ConfigPath: cfg.ConfigDir,
+		StartedAt: time.Now().UTC(), TraceID: "trace_old",
+	}); err != nil {
+		t.Fatalf("pre-save legacy process state: %v", err)
+	}
+	starter := &fakeStarter{pid: 22345}
+	manager := NewManager(cfg, store, starter, fakeSignaler{}, health.Checker{
+		ProcessAlive: func(pid int) bool { return true },
+		Client:       server.Client(), ProbeBaseURL: server.URL,
+	})
+
+	result, err := manager.Start(context.Background(), StartRequest{
+		Port: 4096, SessionPath: sessionPath, ConfigPath: cfg.ConfigDir, TraceID: "trace_1234567890abcdef",
+	})
+	if err != nil {
+		t.Fatalf("legacy healthy record should be reused, result=%#v err=%v", result, err)
+	}
+	if result.Status != StatusStarted || result.PID != 12345 {
+		t.Fatalf("unexpected legacy reuse result %#v", result)
+	}
+	if len(starter.specs) != 0 {
+		t.Fatalf("starter must not be called for a healthy legacy record, got %d calls", len(starter.specs))
+	}
+}
+
+func TestManagerStartRejectsHealthyManagedPortForDifferentUnifiedAuthID(t *testing.T) {
+	cfg := testConfig(t)
+	store := state.NewFileStore(t.TempDir())
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	if err := store.Save(state.ProcessRecord{
+		Port: 4096, PID: 12345, BaseURL: server.URL,
+		UnifiedAuthID: "user-managed", SessionPath: "/tmp/sessions/users/user-managed", ConfigPath: cfg.ConfigDir,
+		StartedAt: time.Now().UTC(), TraceID: "trace_old",
+	}); err != nil {
+		t.Fatalf("pre-save process state: %v", err)
+	}
+	starter := &fakeStarter{pid: 22345}
+	manager := NewManager(cfg, store, starter, fakeSignaler{}, health.Checker{
+		ProcessAlive: func(pid int) bool { return true },
+		Client:       server.Client(), ProbeBaseURL: server.URL,
+	})
+
+	result, err := manager.Start(context.Background(), StartRequest{
+		Port: 4096, UnifiedAuthID: "user-requested", SessionPath: "/tmp/sessions/users/user-requested",
+		ConfigPath: cfg.ConfigDir, TraceID: "trace_1234567890abcdef",
+	})
+	if err == nil {
+		t.Fatalf("expected different identity to be rejected, result=%#v", result)
+	}
+	if result.ErrorCode != "PORT_CONFLICT" {
+		t.Fatalf("expected PORT_CONFLICT, got %#v", result)
+	}
+	if len(starter.specs) != 0 {
+		t.Fatalf("starter must not be called for an identity conflict, got %d calls", len(starter.specs))
+	}
+}
+
+func TestManagerStartRejectsIdentityAlreadyManagedAtAnotherPort(t *testing.T) {
+	cfg := testConfig(t)
+	store := state.NewFileStore(t.TempDir())
+	if err := store.Save(state.ProcessRecord{
+		Port: 4097, PID: 12345, UnifiedAuthID: "user-managed",
+		SessionPath: "/tmp/sessions/users/user-managed", ConfigPath: cfg.ConfigDir,
+		StartedAt: time.Now().UTC(), TraceID: "trace_old",
+	}); err != nil {
+		t.Fatalf("pre-save process state: %v", err)
+	}
+	starter := &fakeStarter{pid: 22345}
+	manager := NewManager(cfg, store, starter, fakeSignaler{}, health.Checker{})
+
+	result, err := manager.Start(context.Background(), StartRequest{
+		Port: 4096, UnifiedAuthID: " user-managed ", SessionPath: "/tmp/sessions/users/user-managed",
+		ConfigPath: cfg.ConfigDir, TraceID: "trace_1234567890abcdef",
+	})
+	if err == nil {
+		t.Fatalf("expected managed identity to be rejected, result=%#v", result)
+	}
+	if result.ErrorCode != "IDENTITY_ALREADY_MANAGED" {
+		t.Fatalf("expected IDENTITY_ALREADY_MANAGED, got %#v", result)
+	}
+	if len(starter.specs) != 0 {
+		t.Fatalf("starter must not be called for an already managed identity, got %d calls", len(starter.specs))
+	}
+}
+
+func TestManagerStartRejectsIdentityDerivedFromLegacyRecordAtAnotherPort(t *testing.T) {
+	cfg := testConfig(t)
+	store := state.NewFileStore(t.TempDir())
+	sessionPath := "/tmp/sessions/users/legacy-user"
+	if err := store.Save(state.ProcessRecord{
+		Port: 4097, PID: 12345, SessionPath: sessionPath, ConfigPath: cfg.ConfigDir,
+		StartedAt: time.Now().UTC(), TraceID: "trace_old",
+	}); err != nil {
+		t.Fatalf("pre-save legacy process state: %v", err)
+	}
+	starter := &fakeStarter{pid: 22345}
+	manager := NewManager(cfg, store, starter, fakeSignaler{}, health.Checker{})
+
+	result, err := manager.Start(context.Background(), StartRequest{
+		Port: 4096, SessionPath: sessionPath, ConfigPath: cfg.ConfigDir, TraceID: "trace_1234567890abcdef",
+	})
+	if err == nil {
+		t.Fatalf("expected identity derived from legacy state to be rejected, result=%#v", result)
+	}
+	if result.ErrorCode != "IDENTITY_ALREADY_MANAGED" {
+		t.Fatalf("expected IDENTITY_ALREADY_MANAGED, got %#v", result)
+	}
+	if len(starter.specs) != 0 {
+		t.Fatalf("starter must not be called for a legacy managed identity, got %d calls", len(starter.specs))
 	}
 }
 
@@ -198,6 +331,156 @@ func TestManagerStartRejectsWhenMaxProcessesReached(t *testing.T) {
 	}
 }
 
+func TestManagerStartAllowsExplicitBindingRecoveryWhenCapacityIsFull(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.MaxProcesses = 1
+	store := state.NewFileStore(t.TempDir())
+	if err := store.Save(state.ProcessRecord{
+		Port: 4097, PID: 22345, UnifiedAuthID: "other-user",
+		SessionPath: "/tmp/sessions/users/other-user", ConfigPath: cfg.ConfigDir,
+		StartedAt: time.Now().UTC(), TraceID: "trace_old",
+	}); err != nil {
+		t.Fatalf("pre-save process state: %v", err)
+	}
+	starter := &fakeStarter{pid: 12345}
+	manager := NewManager(cfg, store, starter, fakeSignaler{}, health.Checker{})
+
+	result, err := manager.Start(context.Background(), StartRequest{
+		Port: 4096, UnifiedAuthID: "bound-user", SessionPath: "/tmp/sessions/users/bound-user",
+		ConfigPath: cfg.ConfigDir, BindingRecovery: true, TraceID: "trace_1234567890abcdef",
+	})
+
+	if err != nil {
+		t.Fatalf("explicit binding recovery must bypass scheduling capacity: result=%#v err=%v", result, err)
+	}
+	if result.Status != StatusStarted || result.PID != 12345 || !result.ProcessCreated {
+		t.Fatalf("unexpected binding recovery result %#v", result)
+	}
+	if len(starter.specs) != 1 || starter.specs[0].Port != 4096 {
+		t.Fatalf("expected one exact-port recovery start, got %#v", starter.specs)
+	}
+}
+
+func TestManagerStartRejectsOutOfRangePortWithStableErrorCode(t *testing.T) {
+	cfg := testConfig(t)
+	starter := &fakeStarter{pid: 12345}
+	manager := NewManager(cfg, state.NewFileStore(t.TempDir()), starter, fakeSignaler{}, health.Checker{})
+
+	result, err := manager.Start(context.Background(), StartRequest{Port: 4101, TraceID: "trace_1234567890abcdef"})
+	if err == nil {
+		t.Fatalf("expected out-of-range port to be rejected, result=%#v", result)
+	}
+	if result.ErrorCode != "PORT_OUT_OF_RANGE" {
+		t.Fatalf("expected PORT_OUT_OF_RANGE, got %#v", result)
+	}
+	if len(starter.specs) != 0 {
+		t.Fatalf("starter must not be called for an out-of-range port, got %d calls", len(starter.specs))
+	}
+}
+
+func TestManagerStartRejectsUnmanagedListeningPortBeforeStarting(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("open temporary listener: %v", err)
+	}
+	defer listener.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+	cfg := testConfig(t)
+	cfg.PortStart = port
+	cfg.PortEnd = port
+	cfg.MaxProcesses = 1
+	starter := &fakeStarter{pid: 12345}
+	manager := NewManager(cfg, state.NewFileStore(t.TempDir()), starter, fakeSignaler{}, health.Checker{})
+
+	result, err := manager.Start(context.Background(), StartRequest{Port: port, TraceID: "trace_1234567890abcdef"})
+	if err == nil {
+		t.Fatalf("expected occupied listener to be rejected, result=%#v", result)
+	}
+	if result.ErrorCode != "PORT_CONFLICT" {
+		t.Fatalf("expected PORT_CONFLICT, got %#v", result)
+	}
+	if len(starter.specs) != 0 {
+		t.Fatalf("starter must not be called for an occupied listener, got %d calls", len(starter.specs))
+	}
+}
+
+func TestManagerStartRejectsListenerBoundToNonLoopbackIPv4(t *testing.T) {
+	host := nonLoopbackIPv4(t)
+	listener, err := net.Listen("tcp4", net.JoinHostPort(host, "0"))
+	if err != nil {
+		t.Fatalf("open non-loopback temporary listener: %v", err)
+	}
+	defer listener.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+	cfg := testConfig(t)
+	cfg.PortStart = port
+	cfg.PortEnd = port
+	cfg.MaxProcesses = 1
+	starter := &fakeStarter{pid: 12345}
+	manager := NewManager(cfg, state.NewFileStore(t.TempDir()), starter, fakeSignaler{}, health.Checker{})
+
+	result, err := manager.Start(context.Background(), StartRequest{Port: port, TraceID: "trace_1234567890abcdef"})
+	if err == nil {
+		t.Fatalf("expected non-loopback listener conflict, result=%#v", result)
+	}
+	if result.ErrorCode != "PORT_CONFLICT" {
+		t.Fatalf("expected PORT_CONFLICT, got %#v", result)
+	}
+	if len(starter.specs) != 0 {
+		t.Fatalf("starter must not be called for a non-loopback listener, got %d calls", len(starter.specs))
+	}
+}
+
+func TestManagerSerializesConcurrentStartsForSameIdentityAndPort(t *testing.T) {
+	cfg := testConfig(t)
+	store := state.NewFileStore(t.TempDir())
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	starter := newBlockingStarter(12345)
+	manager := NewManager(cfg, store, starter, fakeSignaler{}, health.Checker{
+		ProcessAlive: func(pid int) bool { return true },
+		Client:       server.Client(), ProbeBaseURL: server.URL,
+	})
+	request := StartRequest{
+		Port: 4096, UnifiedAuthID: "user-managed", SessionPath: "/tmp/sessions/users/user-managed",
+		ConfigPath: cfg.ConfigDir, TraceID: "trace_1234567890abcdef",
+	}
+	results := make(chan Result, 2)
+	errors := make(chan error, 2)
+	for range 2 {
+		go func() {
+			result, err := manager.Start(context.Background(), request)
+			results <- result
+			errors <- err
+		}()
+	}
+
+	select {
+	case <-starter.entered:
+	case <-time.After(time.Second):
+		t.Fatal("first starter call did not begin")
+	}
+	select {
+	case <-starter.secondCall:
+		t.Fatal("concurrent start invoked Starter.Start before the first start completed")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(starter.release)
+	for range 2 {
+		if err := <-errors; err != nil {
+			t.Fatalf("concurrent Start returned error: %v", err)
+		}
+		if result := <-results; result.Status != StatusStarted || result.PID != 12345 {
+			t.Fatalf("unexpected concurrent start result %#v", result)
+		}
+	}
+	if calls := starter.CallCount(); calls != 1 {
+		t.Fatalf("expected one OS start after concurrent commands, got %d", calls)
+	}
+}
+
 func TestManagerStartRejectsHealthyExistingProcessWithDifferentExplicitConfigPath(t *testing.T) {
 	cfg := testConfig(t)
 	store := state.NewFileStore(t.TempDir())
@@ -207,7 +490,7 @@ func TestManagerStartRejectsHealthyExistingProcessWithDifferentExplicitConfigPat
 	defer server.Close()
 	if err := store.Save(state.ProcessRecord{
 		Port: 4096, PID: 12345, BaseURL: server.URL,
-		SessionPath: cfg.SessionPath(4096), ConfigPath: cfg.ConfigDir,
+		UnifiedAuthID: "user-managed", SessionPath: "/tmp/sessions/users/user-managed", ConfigPath: cfg.ConfigDir,
 		StartedAt: time.Now().UTC(), TraceID: "trace_old",
 	}); err != nil {
 		t.Fatalf("pre-save process state: %v", err)
@@ -218,11 +501,79 @@ func TestManagerStartRejectsHealthyExistingProcessWithDifferentExplicitConfigPat
 	})
 
 	result, err := manager.Start(context.Background(), StartRequest{
-		Port: 4096, SessionPath: cfg.SessionPath(4096), ConfigPath: "/tmp/session/current-public-config",
+		Port: 4096, UnifiedAuthID: "user-managed", SessionPath: "/tmp/sessions/users/user-managed", ConfigPath: "/tmp/session/current-public-config",
 		TraceID: "trace_1234567890abcdef",
 	})
-	if err == nil || !strings.Contains(err.Error(), "config path differs") {
+	if err == nil {
 		t.Fatalf("expected explicit config mismatch, result=%#v err=%v", result, err)
+	}
+	if result.ErrorCode != "IDENTITY_CONFIG_MISMATCH" {
+		t.Fatalf("expected IDENTITY_CONFIG_MISMATCH, got %#v", result)
+	}
+}
+
+func TestManagerStartRejectsHealthyExistingProcessWithDifferentSessionPath(t *testing.T) {
+	cfg := testConfig(t)
+	store := state.NewFileStore(t.TempDir())
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	if err := store.Save(state.ProcessRecord{
+		Port: 4096, PID: 12345, BaseURL: server.URL,
+		UnifiedAuthID: "user-managed", SessionPath: "/tmp/sessions/users/user-managed", ConfigPath: cfg.ConfigDir,
+		StartedAt: time.Now().UTC(), TraceID: "trace_old",
+	}); err != nil {
+		t.Fatalf("pre-save process state: %v", err)
+	}
+	starter := &fakeStarter{pid: 22345}
+	manager := NewManager(cfg, store, starter, fakeSignaler{}, health.Checker{
+		ProcessAlive: func(pid int) bool { return true },
+		Client:       server.Client(), ProbeBaseURL: server.URL,
+	})
+
+	result, err := manager.Start(context.Background(), StartRequest{
+		Port: 4096, UnifiedAuthID: "user-managed", SessionPath: "/tmp/other-sessions/users/user-managed",
+		ConfigPath: cfg.ConfigDir, TraceID: "trace_1234567890abcdef",
+	})
+	if err == nil {
+		t.Fatalf("expected explicit session mismatch, result=%#v", result)
+	}
+	if result.ErrorCode != "IDENTITY_CONFIG_MISMATCH" {
+		t.Fatalf("expected IDENTITY_CONFIG_MISMATCH, got %#v", result)
+	}
+	if len(starter.specs) != 0 {
+		t.Fatalf("starter must not be called for a session mismatch, got %d calls", len(starter.specs))
+	}
+}
+
+func TestManagerStartChecksIdentityPathsBeforeUnhealthyState(t *testing.T) {
+	cfg := testConfig(t)
+	store := state.NewFileStore(t.TempDir())
+	if err := store.Save(state.ProcessRecord{
+		Port: 4096, PID: 12345, UnifiedAuthID: "user-managed",
+		SessionPath: "/tmp/sessions/users/user-managed", ConfigPath: cfg.ConfigDir,
+		StartedAt: time.Now().UTC(), TraceID: "trace_old",
+	}); err != nil {
+		t.Fatalf("pre-save process state: %v", err)
+	}
+	starter := &fakeStarter{pid: 22345}
+	manager := NewManager(cfg, store, starter, fakeSignaler{}, health.Checker{
+		ProcessAlive: func(pid int) bool { return false },
+	})
+
+	result, err := manager.Start(context.Background(), StartRequest{
+		Port: 4096, UnifiedAuthID: "user-managed", SessionPath: "/tmp/other-sessions/users/user-managed",
+		ConfigPath: cfg.ConfigDir, TraceID: "trace_1234567890abcdef",
+	})
+	if err == nil {
+		t.Fatalf("expected mismatched session path to be rejected, result=%#v", result)
+	}
+	if result.ErrorCode != "IDENTITY_CONFIG_MISMATCH" {
+		t.Fatalf("expected IDENTITY_CONFIG_MISMATCH before unhealthy result, got %#v", result)
+	}
+	if len(starter.specs) != 0 {
+		t.Fatalf("starter must not be called for a mismatched unhealthy record, got %d calls", len(starter.specs))
 	}
 }
 
@@ -430,6 +781,140 @@ func TestManagerStopTerminatesProcessAndRemovesState(t *testing.T) {
 	}
 }
 
+func TestManagerStopOwnedRejectsReusedPortWithoutSignalsOrStateDeletion(t *testing.T) {
+	cases := []struct {
+		name              string
+		managedUnifiedID  string
+		expectedUnifiedID string
+	}{
+		{
+			name:              "another user now owns the port",
+			managedUnifiedID:  "user-b",
+			expectedUnifiedID: "user-a",
+		},
+		{
+			name:              "same user has a newer pid",
+			managedUnifiedID:  "user-a",
+			expectedUnifiedID: "user-a",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testConfig(t)
+			store := state.NewFileStore(t.TempDir())
+			if err := store.Save(state.ProcessRecord{
+				Port:          4096,
+				PID:           200,
+				UnifiedAuthID: tc.managedUnifiedID,
+				SessionPath:   "/tmp/sessions/users/" + tc.managedUnifiedID,
+				StartedAt:     time.Now().UTC(),
+				TraceID:       "trace_new",
+			}); err != nil {
+				t.Fatalf("save replacement state: %v", err)
+			}
+			signaler := &capturingSignaler{}
+			manager := NewManager(cfg, store, &fakeStarter{pid: 12345}, signaler, health.Checker{})
+
+			result, err := manager.StopOwned(context.Background(), OwnedStopRequest{
+				Port:                  4096,
+				ExpectedUnifiedAuthID: tc.expectedUnifiedID,
+				ExpectedPID:           100,
+				TraceID:               "trace_stale_stop",
+				Timeout:               time.Millisecond,
+			})
+
+			if err == nil {
+				t.Fatalf("expected stale owned stop to fail, result=%#v", result)
+			}
+			if result.ErrorCode != "PROCESS_OWNERSHIP_MISMATCH" {
+				t.Fatalf("expected stable ownership mismatch, got %#v", result)
+			}
+			if strings.Contains(result.Message, "user-a") || strings.Contains(result.Message, "user-b") {
+				t.Fatalf("ownership mismatch must not expose UCID, got %q", result.Message)
+			}
+			if len(signaler.terminatedPIDs) != 0 || len(signaler.killedPIDs) != 0 {
+				t.Fatalf("stale stop must not signal replacement process, signaler=%#v", signaler)
+			}
+			record, ok, getErr := store.Get(4096)
+			if getErr != nil || !ok || record.PID != 200 || record.UnifiedAuthID != tc.managedUnifiedID {
+				t.Fatalf("replacement state must remain intact, record=%#v ok=%t err=%v", record, ok, getErr)
+			}
+		})
+	}
+}
+
+func TestManagerStopOwnedUsesLegacySessionIdentityAndFailsClosedWhenUnavailable(t *testing.T) {
+	t.Run("derives legacy identity from users session path", func(t *testing.T) {
+		cfg := testConfig(t)
+		store := state.NewFileStore(t.TempDir())
+		if err := store.Save(state.ProcessRecord{
+			Port:        4096,
+			PID:         100,
+			SessionPath: "/tmp/sessions/users/user-a",
+			StartedAt:   time.Now().UTC(),
+			TraceID:     "trace_legacy",
+		}); err != nil {
+			t.Fatalf("save legacy state: %v", err)
+		}
+		signaler := &capturingSignaler{}
+		manager := NewManager(cfg, store, &fakeStarter{pid: 12345}, signaler, health.Checker{
+			ProcessAlive: func(int) bool { return false },
+		})
+
+		result, err := manager.StopOwned(context.Background(), OwnedStopRequest{
+			Port:                  4096,
+			ExpectedUnifiedAuthID: "user-a",
+			ExpectedPID:           100,
+			TraceID:               "trace_owned_stop",
+			Timeout:               time.Millisecond,
+		})
+
+		if err != nil || result.Status != StatusStopped {
+			t.Fatalf("matching legacy identity should stop, result=%#v err=%v", result, err)
+		}
+		if len(signaler.terminatedPIDs) != 1 || signaler.terminatedPIDs[0] != 100 {
+			t.Fatalf("expected only legacy pid 100 to receive terminate, got %#v", signaler.terminatedPIDs)
+		}
+		if _, ok, getErr := store.Get(4096); getErr != nil || ok {
+			t.Fatalf("matching stopped state should be deleted, ok=%t err=%v", ok, getErr)
+		}
+	})
+
+	t.Run("missing legacy identity is rejected before signal", func(t *testing.T) {
+		cfg := testConfig(t)
+		store := state.NewFileStore(t.TempDir())
+		if err := store.Save(state.ProcessRecord{
+			Port:        4096,
+			PID:         100,
+			SessionPath: "/tmp/legacy/session-4096",
+			StartedAt:   time.Now().UTC(),
+			TraceID:     "trace_legacy",
+		}); err != nil {
+			t.Fatalf("save legacy state: %v", err)
+		}
+		signaler := &capturingSignaler{}
+		manager := NewManager(cfg, store, &fakeStarter{pid: 12345}, signaler, health.Checker{})
+
+		result, err := manager.StopOwned(context.Background(), OwnedStopRequest{
+			Port:                  4096,
+			ExpectedUnifiedAuthID: "user-a",
+			ExpectedPID:           100,
+			TraceID:               "trace_owned_stop",
+			Timeout:               time.Millisecond,
+		})
+
+		if err == nil || result.ErrorCode != "PROCESS_OWNERSHIP_MISMATCH" {
+			t.Fatalf("unverifiable legacy state must fail closed, result=%#v err=%v", result, err)
+		}
+		if len(signaler.terminatedPIDs) != 0 || len(signaler.killedPIDs) != 0 {
+			t.Fatalf("unverifiable state must not be signaled, signaler=%#v", signaler)
+		}
+		if _, ok, getErr := store.Get(4096); getErr != nil || !ok {
+			t.Fatalf("unverifiable state must remain, ok=%t err=%v", ok, getErr)
+		}
+	})
+}
+
 func TestManagerRestartPreservesStoredSessionPath(t *testing.T) {
 	cfg := testConfig(t)
 	store := state.NewFileStore(t.TempDir())
@@ -531,7 +1016,7 @@ func TestManagerStopKillsProcessAfterTimeout(t *testing.T) {
 	_ = store.Save(state.ProcessRecord{Port: 4096, PID: 12345, StartedAt: time.Now().UTC(), TraceID: "trace_old"})
 	signaler := &recordingSignaler{}
 	manager := NewManager(cfg, store, &fakeStarter{pid: 12345}, signaler, health.Checker{
-		ProcessAlive: func(pid int) bool { return true },
+		ProcessAlive: func(pid int) bool { return !signaler.killed },
 	})
 
 	_, err := manager.Stop(context.Background(), StopRequest{Port: 4096, TraceID: "trace_1234567890abcdef", Timeout: time.Millisecond})
@@ -540,6 +1025,34 @@ func TestManagerStopKillsProcessAfterTimeout(t *testing.T) {
 	}
 	if !signaler.terminated || !signaler.killed {
 		t.Fatalf("expected SIGTERM and SIGKILL to be sent, got terminated=%v killed=%v", signaler.terminated, signaler.killed)
+	}
+	if _, ok, getErr := store.Get(4096); getErr != nil || ok {
+		t.Fatalf("confirmed stopped process state should be removed, ok=%t err=%v", ok, getErr)
+	}
+}
+
+func TestManagerStopKeepsStateWhenProcessRemainsAliveAfterKill(t *testing.T) {
+	cfg := testConfig(t)
+	store := state.NewFileStore(t.TempDir())
+	_ = store.Save(state.ProcessRecord{Port: 4096, PID: 12345, StartedAt: time.Now().UTC(), TraceID: "trace_old"})
+	signaler := &recordingSignaler{}
+	manager := NewManager(cfg, store, &fakeStarter{pid: 12345}, signaler, health.Checker{
+		ProcessAlive: func(pid int) bool { return true },
+	})
+
+	result, err := manager.Stop(context.Background(), StopRequest{
+		Port: 4096, TraceID: "trace_process_still_alive", Timeout: time.Millisecond,
+	})
+
+	if err == nil || result.Status != StatusFailed {
+		t.Fatalf("stop must fail while the killed PID remains alive, result=%#v err=%v", result, err)
+	}
+	if !signaler.terminated || !signaler.killed {
+		t.Fatalf("expected SIGTERM and SIGKILL before confirmation failure, signaler=%#v", signaler)
+	}
+	record, ok, getErr := store.Get(4096)
+	if getErr != nil || !ok || record.PID != 12345 {
+		t.Fatalf("unconfirmed process state must remain authoritative, record=%#v ok=%t err=%v", record, ok, getErr)
 	}
 }
 
@@ -603,6 +1116,80 @@ func TestManagerListRemovesDeadProcessRecords(t *testing.T) {
 	}
 }
 
+func TestManagerListDoesNotDeleteReplacementWrittenByConcurrentRestart(t *testing.T) {
+	cfg := testConfig(t)
+	store := state.NewFileStore(t.TempDir())
+	_ = store.Save(state.ProcessRecord{
+		Port: 4096, PID: 12345, UnifiedAuthID: "user-a",
+		SessionPath: "/tmp/sessions/users/user-a", ConfigPath: cfg.ConfigDir,
+		StartedAt: time.Now().UTC(), TraceID: "trace_old",
+	})
+	checkingOldPID := make(chan struct{})
+	releaseOldCheck := make(chan struct{})
+	var oldCheckMu sync.Mutex
+	oldChecks := 0
+	manager := NewManager(cfg, store, &fakeStarter{pid: 22345}, fakeSignaler{}, health.Checker{
+		ProcessAlive: func(pid int) bool {
+			if pid == 22345 {
+				return true
+			}
+			oldCheckMu.Lock()
+			oldChecks++
+			checkNumber := oldChecks
+			oldCheckMu.Unlock()
+			if checkNumber == 1 {
+				close(checkingOldPID)
+				<-releaseOldCheck
+			}
+			return false
+		},
+	})
+
+	type listOutcome struct {
+		result Result
+		err    error
+	}
+	listed := make(chan listOutcome, 1)
+	go func() {
+		result, err := manager.List("trace_heartbeat")
+		listed <- listOutcome{result: result, err: err}
+	}()
+	<-checkingOldPID
+
+	restarted := make(chan error, 1)
+	go func() {
+		_, err := manager.Restart(context.Background(), StopRequest{
+			Port: 4096, TraceID: "trace_restart", Timeout: time.Millisecond,
+		})
+		restarted <- err
+	}()
+	select {
+	case err := <-restarted:
+		if err != nil {
+			t.Fatalf("concurrent restart returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("restart should complete while heartbeat is checking its stale PID snapshot")
+	}
+	replacement, ok, err := store.Get(4096)
+	if err != nil || !ok || replacement.PID != 22345 {
+		t.Fatalf("expected restart to write replacement state before stale check resumes, record=%#v ok=%t err=%v", replacement, ok, err)
+	}
+
+	close(releaseOldCheck)
+	outcome := <-listed
+	if outcome.err != nil {
+		t.Fatalf("List returned error: %v", outcome.err)
+	}
+	replacement, ok, err = store.Get(4096)
+	if err != nil || !ok || replacement.PID != 22345 {
+		t.Fatalf("stale heartbeat must not delete replacement state, record=%#v ok=%t err=%v", replacement, ok, err)
+	}
+	if len(outcome.result.Records) != 1 || outcome.result.Records[0].PID != 22345 {
+		t.Fatalf("heartbeat should report the replacement process, got %#v", outcome.result.Records)
+	}
+}
+
 func TestManagerHealthReturnsUnknownPortFailure(t *testing.T) {
 	cfg := testConfig(t)
 	manager := NewManager(cfg, state.NewFileStore(t.TempDir()), &fakeStarter{pid: 12345}, fakeSignaler{}, health.Checker{})
@@ -613,6 +1200,9 @@ func TestManagerHealthReturnsUnknownPortFailure(t *testing.T) {
 	}
 	if result.Status != StatusFailed {
 		t.Fatalf("expected failed result, got %#v", result)
+	}
+	if result.ErrorCode != "PROCESS_NOT_MANAGED" {
+		t.Fatalf("expected stable PROCESS_NOT_MANAGED errorCode, got %#v", result)
 	}
 }
 
@@ -684,6 +1274,34 @@ func equalStrings(left, right []string) bool {
 	return true
 }
 
+func nonLoopbackIPv4(t *testing.T) string {
+	t.Helper()
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		t.Fatalf("list network interfaces: %v", err)
+	}
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addresses, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, address := range addresses {
+			ipNet, ok := address.(*net.IPNet)
+			if !ok || ipNet.IP.IsLoopback() {
+				continue
+			}
+			if ipv4 := ipNet.IP.To4(); ipv4 != nil {
+				return ipv4.String()
+			}
+		}
+	}
+	t.Skip("test host has no non-loopback IPv4 address")
+	return ""
+}
+
 type fakeStarter struct {
 	pid   int
 	specs []StartSpec
@@ -694,9 +1312,62 @@ func (f *fakeStarter) Start(_ context.Context, spec StartSpec) (int, error) {
 	return f.pid, nil
 }
 
+type blockingStarter struct {
+	pid        int
+	entered    chan struct{}
+	secondCall chan struct{}
+	release    chan struct{}
+	mu         sync.Mutex
+	calls      int
+}
+
+func newBlockingStarter(pid int) *blockingStarter {
+	return &blockingStarter{
+		pid:        pid,
+		entered:    make(chan struct{}),
+		secondCall: make(chan struct{}),
+		release:    make(chan struct{}),
+	}
+}
+
+func (s *blockingStarter) Start(_ context.Context, _ StartSpec) (int, error) {
+	s.mu.Lock()
+	s.calls++
+	calls := s.calls
+	s.mu.Unlock()
+	if calls == 1 {
+		close(s.entered)
+	} else {
+		close(s.secondCall)
+	}
+	<-s.release
+	return s.pid, nil
+}
+
+func (s *blockingStarter) CallCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
+}
+
 type recordingSignaler struct {
 	terminated bool
 	killed     bool
+}
+
+type capturingSignaler struct {
+	terminatedPIDs []int
+	killedPIDs     []int
+}
+
+func (s *capturingSignaler) Terminate(pid int) error {
+	s.terminatedPIDs = append(s.terminatedPIDs, pid)
+	return nil
+}
+
+func (s *capturingSignaler) Kill(pid int) error {
+	s.killedPIDs = append(s.killedPIDs, pid)
+	return nil
 }
 
 func (r *recordingSignaler) Terminate(pid int) error {

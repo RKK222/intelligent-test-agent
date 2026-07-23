@@ -550,7 +550,7 @@ const DIFF_AWARE_TOOL_NAMES = new Set([
 ]);
 
 // 从 tool part 的 input/metadata 推断出本工具的 RunDiffFile。
-// opencode 1.17.8 的 `session.diff` 事件在普通 summarize 流程中只发空 diff 数组，
+// opencode 1.18.4 的 `session.diff` 事件在普通 summarize 流程中只发空 diff 数组，
 // 导致前端"文件变更"卡片 +N 永远显示 0。这里基于工具的入参估算新增/删除行数，
 // 让卡片在写文件工具完成时也能即时反映本次改动，并补一个合成的 unified diff
 // 文本让"文件变更"抽屉的右侧 diff 视图能立刻渲染内容，而不是显示"暂无 diff 内容"。

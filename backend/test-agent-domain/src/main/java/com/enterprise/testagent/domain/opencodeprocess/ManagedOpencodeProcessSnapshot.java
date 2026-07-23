@@ -13,5 +13,20 @@ public record ManagedOpencodeProcessSnapshot(
         String configPath,
         Instant startedAt,
         String startCommand,
-        String traceId) {
+        String traceId,
+        String unifiedAuthId,
+        String managerStatus) {
+
+    /** 兼容旧 Redis JSON 及既有构造调用，新增字段缺失时保持 null。 */
+    public ManagedOpencodeProcessSnapshot(
+            int port,
+            Long pid,
+            String baseUrl,
+            String sessionPath,
+            String configPath,
+            Instant startedAt,
+            String startCommand,
+            String traceId) {
+        this(port, pid, baseUrl, sessionPath, configPath, startedAt, startCommand, traceId, null, null);
+    }
 }

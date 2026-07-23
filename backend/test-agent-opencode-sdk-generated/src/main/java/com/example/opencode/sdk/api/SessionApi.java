@@ -17,11 +17,13 @@ import com.example.opencode.sdk.model.SessionCommandRequest;
 import com.example.opencode.sdk.model.SessionCreateRequest;
 import com.example.opencode.sdk.model.SessionForkRequest;
 import com.example.opencode.sdk.model.SessionInitRequest;
+import com.example.opencode.sdk.model.SessionMessage200Response;
 import com.example.opencode.sdk.model.SessionMessages200ResponseInner;
 import com.example.opencode.sdk.model.SessionPrompt200Response;
 import com.example.opencode.sdk.model.SessionPromptAsyncRequest;
 import com.example.opencode.sdk.model.SessionPromptRequest;
 import com.example.opencode.sdk.model.SessionRevertRequest;
+import com.example.opencode.sdk.model.SessionShell200Response;
 import com.example.opencode.sdk.model.SessionShellRequest;
 import com.example.opencode.sdk.model.SessionStatus;
 import com.example.opencode.sdk.model.SessionSummarizeRequest;
@@ -51,7 +53,7 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Flux;
 
-@jakarta.annotation.Generated(value = "org.openapitools.codegen.languages.JavaClientCodegen", comments = "Generator version: 7.23.0")
+@jakarta.annotation.Generated(value = "org.openapitools.codegen.languages.JavaClientCodegen", comments = "Generator version: 7.24.0")
 public class SessionApi {
     private ApiClient apiClient;
 
@@ -151,7 +153,7 @@ public class SessionApi {
     }
 
     /**
-     * 
+     *
      * Delete a part from a message.
      * <p><b>200</b> - Successfully deleted part
      * <p><b>400</b> - BadRequest | InvalidRequestError
@@ -165,7 +167,7 @@ public class SessionApi {
     }
 
     /**
-     * 
+     *
      * Delete a part from a message.
      * <p><b>200</b> - Successfully deleted part
      * <p><b>400</b> - BadRequest | InvalidRequestError
@@ -179,7 +181,7 @@ public class SessionApi {
     }
 
     /**
-     * 
+     *
      * Delete a part from a message.
      * <p><b>200</b> - Successfully deleted part
      * <p><b>400</b> - BadRequest | InvalidRequestError
@@ -194,7 +196,7 @@ public class SessionApi {
 
 
     /**
-     * 
+     *
      * Delete a part from a message.
      * <p><b>200</b> - Successfully deleted part
      * <p><b>400</b> - BadRequest | InvalidRequestError
@@ -236,7 +238,7 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -250,7 +252,7 @@ public class SessionApi {
     }
 
     /**
-     * 
+     *
      * Delete a part from a message.
      * <p><b>200</b> - Successfully deleted part
      * <p><b>400</b> - BadRequest | InvalidRequestError
@@ -269,7 +271,7 @@ public class SessionApi {
     }
 
     /**
-     * 
+     *
      * Delete a part from a message.
      * <p><b>200</b> - Successfully deleted part
      * <p><b>400</b> - BadRequest | InvalidRequestError
@@ -288,7 +290,7 @@ public class SessionApi {
     }
 
     /**
-     * 
+     *
      * Delete a part from a message.
      * <p><b>200</b> - Successfully deleted part
      * <p><b>400</b> - BadRequest | InvalidRequestError
@@ -396,7 +398,7 @@ public class SessionApi {
     }
 
     /**
-     * 
+     *
      * Update a part in a message.
      * <p><b>200</b> - Successfully updated part
      * <p><b>400</b> - BadRequest | InvalidRequestError
@@ -410,7 +412,7 @@ public class SessionApi {
     }
 
     /**
-     * 
+     *
      * Update a part in a message.
      * <p><b>200</b> - Successfully updated part
      * <p><b>400</b> - BadRequest | InvalidRequestError
@@ -424,7 +426,7 @@ public class SessionApi {
     }
 
     /**
-     * 
+     *
      * Update a part in a message.
      * <p><b>200</b> - Successfully updated part
      * <p><b>400</b> - BadRequest | InvalidRequestError
@@ -439,7 +441,7 @@ public class SessionApi {
 
 
     /**
-     * 
+     *
      * Update a part in a message.
      * <p><b>200</b> - Successfully updated part
      * <p><b>400</b> - BadRequest | InvalidRequestError
@@ -482,11 +484,11 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -498,7 +500,7 @@ public class SessionApi {
     }
 
     /**
-     * 
+     *
      * Update a part in a message.
      * <p><b>200</b> - Successfully updated part
      * <p><b>400</b> - BadRequest | InvalidRequestError
@@ -518,7 +520,7 @@ public class SessionApi {
     }
 
     /**
-     * 
+     *
      * Update a part in a message.
      * <p><b>200</b> - Successfully updated part
      * <p><b>400</b> - BadRequest | InvalidRequestError
@@ -538,7 +540,7 @@ public class SessionApi {
     }
 
     /**
-     * 
+     *
      * Update a part in a message.
      * <p><b>200</b> - Successfully updated part
      * <p><b>400</b> - BadRequest | InvalidRequestError
@@ -718,11 +720,11 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -918,7 +920,7 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -1109,7 +1111,7 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -1315,11 +1317,11 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -1504,11 +1506,11 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -1697,7 +1699,7 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -1912,7 +1914,7 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -2121,7 +2123,7 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "messageID", messageID));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -2327,11 +2329,11 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -2526,7 +2528,7 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -2732,11 +2734,11 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -2987,7 +2989,7 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "search", search));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "limit", limit));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -3137,10 +3139,10 @@ public class SessionApi {
      * <p><b>400</b> - BadRequest | InvalidRequestError
      * <p><b>404</b> - NotFoundError
      * @param requestParameters The sessionMessage request parameters as object
-     * @return SessionMessages200ResponseInner
+     * @return SessionMessage200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<SessionMessages200ResponseInner> sessionMessage(SessionMessageRequest requestParameters) throws WebClientResponseException {
+    public Mono<SessionMessage200Response> sessionMessage(SessionMessageRequest requestParameters) throws WebClientResponseException {
         return this.sessionMessage(requestParameters.sessionID(), requestParameters.messageID(), requestParameters.directory(), requestParameters.workspace());
     }
 
@@ -3151,10 +3153,10 @@ public class SessionApi {
      * <p><b>400</b> - BadRequest | InvalidRequestError
      * <p><b>404</b> - NotFoundError
      * @param requestParameters The sessionMessage request parameters as object
-     * @return ResponseEntity&lt;SessionMessages200ResponseInner&gt;
+     * @return ResponseEntity&lt;SessionMessage200Response&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<SessionMessages200ResponseInner>> sessionMessageWithHttpInfo(SessionMessageRequest requestParameters) throws WebClientResponseException {
+    public Mono<ResponseEntity<SessionMessage200Response>> sessionMessageWithHttpInfo(SessionMessageRequest requestParameters) throws WebClientResponseException {
         return this.sessionMessageWithHttpInfo(requestParameters.sessionID(), requestParameters.messageID(), requestParameters.directory(), requestParameters.workspace());
     }
 
@@ -3183,7 +3185,7 @@ public class SessionApi {
      * @param messageID The messageID parameter
      * @param directory The directory parameter
      * @param workspace The workspace parameter
-     * @return SessionMessages200ResponseInner
+     * @return SessionMessage200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
     private ResponseSpec sessionMessageRequestCreation(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull String messageID, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
@@ -3210,7 +3212,7 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -3219,7 +3221,7 @@ public class SessionApi {
 
         String[] localVarAuthNames = new String[] {  };
 
-        ParameterizedTypeReference<SessionMessages200ResponseInner> localVarReturnType = new ParameterizedTypeReference<SessionMessages200ResponseInner>() {};
+        ParameterizedTypeReference<SessionMessage200Response> localVarReturnType = new ParameterizedTypeReference<SessionMessage200Response>() {};
         return apiClient.invokeAPI("/session/{sessionID}/message/{messageID}", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
     }
 
@@ -3233,11 +3235,11 @@ public class SessionApi {
      * @param messageID The messageID parameter
      * @param directory The directory parameter
      * @param workspace The workspace parameter
-     * @return SessionMessages200ResponseInner
+     * @return SessionMessage200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<SessionMessages200ResponseInner> sessionMessage(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull String messageID, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<SessionMessages200ResponseInner> localVarReturnType = new ParameterizedTypeReference<SessionMessages200ResponseInner>() {};
+    public Mono<SessionMessage200Response> sessionMessage(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull String messageID, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
+        ParameterizedTypeReference<SessionMessage200Response> localVarReturnType = new ParameterizedTypeReference<SessionMessage200Response>() {};
         return sessionMessageRequestCreation(sessionID, messageID, directory, workspace).bodyToMono(localVarReturnType);
     }
 
@@ -3251,11 +3253,11 @@ public class SessionApi {
      * @param messageID The messageID parameter
      * @param directory The directory parameter
      * @param workspace The workspace parameter
-     * @return ResponseEntity&lt;SessionMessages200ResponseInner&gt;
+     * @return ResponseEntity&lt;SessionMessage200Response&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<SessionMessages200ResponseInner>> sessionMessageWithHttpInfo(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull String messageID, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<SessionMessages200ResponseInner> localVarReturnType = new ParameterizedTypeReference<SessionMessages200ResponseInner>() {};
+    public Mono<ResponseEntity<SessionMessage200Response>> sessionMessageWithHttpInfo(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull String messageID, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
+        ParameterizedTypeReference<SessionMessage200Response> localVarReturnType = new ParameterizedTypeReference<SessionMessage200Response>() {};
         return sessionMessageRequestCreation(sessionID, messageID, directory, workspace).toEntity(localVarReturnType);
     }
 
@@ -3433,7 +3435,7 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "limit", limit));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "before", before));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -3645,11 +3647,11 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -3853,11 +3855,11 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -4066,11 +4068,11 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -4272,7 +4274,7 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -4414,10 +4416,10 @@ public class SessionApi {
      * <p><b>404</b> - NotFoundError
      * <p><b>409</b> - SessionBusyError
      * @param requestParameters The sessionShell request parameters as object
-     * @return SessionMessages200ResponseInner
+     * @return SessionShell200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<SessionMessages200ResponseInner> sessionShell(SessionShellRequest requestParameters) throws WebClientResponseException {
+    public Mono<SessionShell200Response> sessionShell(SessionShellRequest requestParameters) throws WebClientResponseException {
         return this.sessionShell(requestParameters.sessionID(), requestParameters.directory(), requestParameters.workspace(), requestParameters.sessionShellRequest());
     }
 
@@ -4429,10 +4431,10 @@ public class SessionApi {
      * <p><b>404</b> - NotFoundError
      * <p><b>409</b> - SessionBusyError
      * @param requestParameters The sessionShell request parameters as object
-     * @return ResponseEntity&lt;SessionMessages200ResponseInner&gt;
+     * @return ResponseEntity&lt;SessionShell200Response&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<SessionMessages200ResponseInner>> sessionShellWithHttpInfo(SessionShellRequest requestParameters) throws WebClientResponseException {
+    public Mono<ResponseEntity<SessionShell200Response>> sessionShellWithHttpInfo(SessionShellRequest requestParameters) throws WebClientResponseException {
         return this.sessionShellWithHttpInfo(requestParameters.sessionID(), requestParameters.directory(), requestParameters.workspace(), requestParameters.sessionShellRequest());
     }
 
@@ -4463,7 +4465,7 @@ public class SessionApi {
      * @param directory The directory parameter
      * @param workspace The workspace parameter
      * @param sessionShellRequest The sessionShellRequest parameter
-     * @return SessionMessages200ResponseInner
+     * @return SessionShell200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
     private ResponseSpec sessionShellRequestCreation(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable SessionShellRequest sessionShellRequest) throws WebClientResponseException {
@@ -4485,18 +4487,18 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
 
         String[] localVarAuthNames = new String[] {  };
 
-        ParameterizedTypeReference<SessionMessages200ResponseInner> localVarReturnType = new ParameterizedTypeReference<SessionMessages200ResponseInner>() {};
+        ParameterizedTypeReference<SessionShell200Response> localVarReturnType = new ParameterizedTypeReference<SessionShell200Response>() {};
         return apiClient.invokeAPI("/session/{sessionID}/shell", HttpMethod.POST, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
     }
 
@@ -4511,11 +4513,11 @@ public class SessionApi {
      * @param directory The directory parameter
      * @param workspace The workspace parameter
      * @param sessionShellRequest The sessionShellRequest parameter
-     * @return SessionMessages200ResponseInner
+     * @return SessionShell200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<SessionMessages200ResponseInner> sessionShell(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable SessionShellRequest sessionShellRequest) throws WebClientResponseException {
-        ParameterizedTypeReference<SessionMessages200ResponseInner> localVarReturnType = new ParameterizedTypeReference<SessionMessages200ResponseInner>() {};
+    public Mono<SessionShell200Response> sessionShell(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable SessionShellRequest sessionShellRequest) throws WebClientResponseException {
+        ParameterizedTypeReference<SessionShell200Response> localVarReturnType = new ParameterizedTypeReference<SessionShell200Response>() {};
         return sessionShellRequestCreation(sessionID, directory, workspace, sessionShellRequest).bodyToMono(localVarReturnType);
     }
 
@@ -4530,11 +4532,11 @@ public class SessionApi {
      * @param directory The directory parameter
      * @param workspace The workspace parameter
      * @param sessionShellRequest The sessionShellRequest parameter
-     * @return ResponseEntity&lt;SessionMessages200ResponseInner&gt;
+     * @return ResponseEntity&lt;SessionShell200Response&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<SessionMessages200ResponseInner>> sessionShellWithHttpInfo(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable SessionShellRequest sessionShellRequest) throws WebClientResponseException {
-        ParameterizedTypeReference<SessionMessages200ResponseInner> localVarReturnType = new ParameterizedTypeReference<SessionMessages200ResponseInner>() {};
+    public Mono<ResponseEntity<SessionShell200Response>> sessionShellWithHttpInfo(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable SessionShellRequest sessionShellRequest) throws WebClientResponseException {
+        ParameterizedTypeReference<SessionShell200Response> localVarReturnType = new ParameterizedTypeReference<SessionShell200Response>() {};
         return sessionShellRequestCreation(sessionID, directory, workspace, sessionShellRequest).toEntity(localVarReturnType);
     }
 
@@ -4665,7 +4667,7 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -4865,11 +4867,11 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
@@ -5064,7 +5066,7 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -5262,7 +5264,7 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -5463,7 +5465,7 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
@@ -5672,11 +5674,11 @@ public class SessionApi {
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
-        final String[] localVarAccepts = { 
+        final String[] localVarAccepts = {
             "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { 
+        final String[] localVarContentTypes = {
             "application/json"
         };
         final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);

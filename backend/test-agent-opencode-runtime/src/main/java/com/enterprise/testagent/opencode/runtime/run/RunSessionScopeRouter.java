@@ -115,12 +115,34 @@ class RunSessionScopeRouter {
         }
 
         if (taskCandidate.isPresent()) {
+            String taskOwnerSessionId = eventSessionId == null ? rootScope.rootSessionId() : eventSessionId;
+            if (!isKnownParent(rootScope, taskOwnerSessionId, storageMode)) {
+                // owner scope 尚未发现时不能把孙会话误挂到 root；原事件后续会随 owner discovery 重放。
+                if (useRuntimeCache && storageMode == RunStorageMode.LEGACY_FULL) {
+                    runtimeCache.appendPending(taskOwnerSessionId, draft);
+                } else if (useRuntimeCache && ownerLease == null) {
+                    requireRuntimeStore().appendPending(taskOwnerSessionId, draft);
+                } else if (useRuntimeCache) {
+                    requireRuntimeStore().appendPending(taskOwnerSessionId, draft, ownerLease);
+                }
+                return List.copyOf(routed);
+            }
             ChildRoute child = discoverChild(
-                    rootScope, draft, taskCandidate.get().toDiscovery(), storageMode, ownerLease);
+                    rootScope,
+                    draft,
+                    taskCandidate.get().toDiscovery(taskOwnerSessionId),
+                    storageMode,
+                    ownerLease);
             routed.addAll(child.discoveryEvents());
             routed.addAll(drainPending(rootScope, child, storageMode, ownerLease));
-            // task part 是 root assistant 的导航入口；child discovery 只建立子会话索引，不能把 root part 改成 child scope。
-            routed.add(recontextualize(draft, rootContext(rootScope, draft)));
+            // task part 属于发起它的 assistant scope；root task 保持 root，child task 保持 child。
+            RunEventScopeContext taskOwnerContext = rootScope.rootSessionId().equals(taskOwnerSessionId)
+                    ? rootContext(rootScope, draft)
+                    : childContext(
+                            rootScope,
+                            findSession(rootScope, taskOwnerSessionId, storageMode).orElseThrow(),
+                            state(rootScope).scopeVersion());
+            routed.add(recontextualize(draft, taskOwnerContext));
             return List.copyOf(routed);
         }
 
@@ -756,7 +778,7 @@ class RunSessionScopeRouter {
 
     private record TaskChildCandidate(String sessionId, String messageId, String partId, String callId) {
 
-        private ChildDiscovery toDiscovery() {
+        private ChildDiscovery toDiscovery(String parentSessionId) {
             LinkedHashMap<String, Object> metadata = new LinkedHashMap<>();
             if (messageId != null) {
                 metadata.put("messageId", messageId);
@@ -769,7 +791,7 @@ class RunSessionScopeRouter {
             }
             return new ChildDiscovery(
                     sessionId,
-                    null,
+                    parentSessionId,
                     SOURCE_TASK_PART,
                     messageId,
                     partId,

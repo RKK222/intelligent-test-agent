@@ -10,7 +10,7 @@
 | Java 后台 + worker | `122.233.30.114` |
 | Redis | `122.233.30.20:6379` |
 | PostgreSQL | `122.233.30.147:5432/postgres` |
-| XXL MySQL | `122.233.30.147:3306/xxl_job`（与 PostgreSQL 同机的独立 MySQL 8.4 容器） |
+| XXL MySQL | `122.210.106.43:3306/xxl_job`（外部共享 MySQL） |
 | 企业内部模型 | `ai-code.sdc.enterprise:9070` |
 
 ## 当前现场问题结论
@@ -132,8 +132,8 @@ TEST_AGENT_DB_PASSWORD=REPLACE_PRODUCTION_DB_PASSWORD
 TEST_AGENT_DB_DRIVER_CLASS_NAME=org.postgresql.Driver
 
 TEST_AGENT_XXL_JOB_ENABLED=true
-TEST_AGENT_XXL_JOB_MYSQL_URL=jdbc:mysql://122.233.30.147:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
-TEST_AGENT_XXL_JOB_MYSQL_USERNAME=xxl_job
+TEST_AGENT_XXL_JOB_MYSQL_URL=jdbc:mysql://122.210.106.43:3306/xxl_job?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+TEST_AGENT_XXL_JOB_MYSQL_USERNAME=root
 TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=REPLACE_XXL_JOB_MYSQL_PASSWORD
 TEST_AGENT_XXL_JOB_ACCESS_TOKEN=REPLACE_XXL_JOB_ACCESS_TOKEN
 TEST_AGENT_XXL_JOB_ADMIN_PORT=18080
@@ -223,18 +223,21 @@ OPENCODE_ALLOWED_CORS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996
 OPENCODE_MANAGER_HEARTBEAT_INTERVAL=5s
 OPENCODE_MANAGER_RECONNECT_INTERVAL=10s
 
-OPENCODE_VERSION=1.17.8
-OPENCODE_SOURCE_COMMIT=11e47f91496005aab4d7c5a2d0a7da5d2651b4ac
-OPENCODE_SOURCE_REPOSITORY=https://github.com/anomalyco/opencode.git
-GO_IMAGE=golang@sha256:167053a2bb901972bf2c1611f8f52c44d5fe7e762e5cab213708d82c421614db
-BUN_IMAGE=oven/bun@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f
-NODE_IMAGE=node@sha256:e24976116684e0fd211cbdb3c40fc9cb997565d063fb7fe656d2e2b603c5bb0a
+OPENCODE_VERSION=1.18.4
+OPENCODE_RELEASE_COMMIT=49c69c5ed3ccf706b61b3febb43c8aaff7f8325e
+OPENCODE_ASSET_NAME=opencode-linux-x64-baseline.tar.gz
+OPENCODE_ASSET_SIZE=59265643
+OPENCODE_ASSET_SHA256=4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc
+OPENCODE_BINARY_SHA256=6ce6570e7db9a40e7bd3304ebdfff607920bde8cafd2eb5587bd7a26f89ba0b5
+OPENCODE_RELEASE_BASE_URL=https://github.com/anomalyco/opencode/releases/download
+GO_IMAGE=golang@sha256:e87b2a5f6df2dff71ea330d55d54f4979eb380ae58a7e3aabc9d53121243e689
+NODE_IMAGE=node@sha256:b042c6d46a90773b82ea3f95b05457ea93ee127a73b1b47ad5ebbb1a08ec3df8
 
 NPM_REGISTRY=https://registry.npmmirror.com
 COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
 GOPROXY=https://goproxy.cn,direct
-DEBIAN_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian
-DEBIAN_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
+DEBIAN_MIRROR=https://mirrors.ustc.edu.cn/debian
+DEBIAN_SECURITY_MIRROR=https://mirrors.ustc.edu.cn/debian-security
 
 TEST_AGENT_IMAGE_OUTPUT_DIR=/data/testagent/dist
 ```
@@ -506,6 +509,8 @@ deepseek-prod
 
 ## 8. 变更与重启判断
 
+完整升级到用户绑定端口复用版本时，已有 `.serverid/.serverhost` 和 manager state 的现场先更新 worker 镜像/programs、重启 manager 并确认 `stopOwned` capability，再替换 JAR/lib 和重启 Java，最后部署前端。混合版本未知错误只报错并保留原 binding，不允许迁移端口；该版本不要求修改两份 env、执行数据库迁移或清理存量无主进程。
+
 | 变更内容 | 必须执行 | 不需要执行 |
 |---|---|---|
 | 仅前端静态包、`nginx.env` 或 Nginx conf | 重新执行前端部署脚本；脚本会校验并 reload 实体 Nginx | Java、worker 不重启 |
@@ -549,11 +554,15 @@ cd /data/testagent/deploy/internal
 ./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env status
 docker logs --tail 200 test-agent-opencode-worker | \
   egrep 'config update applied|websocket|serverhost|serverid|OPENCODE_UNAVAILABLE'
+docker inspect --format 'PidsLimit={{.HostConfig.PidsLimit}} Ulimits={{json .HostConfig.Ulimits}}' \
+  test-agent-opencode-worker
+docker exec test-agent-opencode-worker \
+  sh -lc "grep -E 'Max processes|Max open files' /proc/1/limits"
 
 nc -vz ai-code.sdc.enterprise 9070
 ```
 
-预期 worker 日志出现当前结构化事件 `event=manager_config_update status=applied`；旧版 worker 可能输出 `manager config update applied`，部署脚本兼容两者。再在管理页面确认一个 Java、一个 manager、一个容器均在线；初始化一个用户 OpenCode 进程后，用其实际动态端口检查：
+预期 worker 日志出现当前结构化事件 `event=manager_config_update status=applied`；旧版 worker 可能输出 `manager config update applied`，部署脚本兼容两者。资源限制检查应显示 `PidsLimit=8192`，`Ulimits` 同时包含 `nofile` 的 soft/hard `262144` 和 `nproc` 的 soft/hard `8192`；容器 `/proc/1/limits` 应显示最大打开文件数 `262144`、最大用户进程数 `8192`。任一值不符都表示容器没有使用当前脚本重建，应停止验收并重新执行 worker `restart`。再在管理页面确认一个 Java、一个 manager、一个容器均在线；初始化一个用户 OpenCode 进程后，用其实际动态端口检查：
 
 ```bash
 curl -fsS http://127.0.0.1:<实际端口>/global/health

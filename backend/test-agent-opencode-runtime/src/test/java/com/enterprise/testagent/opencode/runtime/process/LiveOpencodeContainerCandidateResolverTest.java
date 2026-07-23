@@ -12,6 +12,7 @@ import com.enterprise.testagent.domain.opencodeprocess.ContainerManagerId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.opencodeprocess.ManagerConnectionStatus;
 import com.enterprise.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
+import com.enterprise.testagent.domain.opencodeprocess.ManagedOpencodeProcessSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainer;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerId;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerManager;
@@ -23,6 +24,7 @@ import com.enterprise.testagent.opencode.runtime.process.socket.ManagerConnectio
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -116,6 +118,60 @@ class LiveOpencodeContainerCandidateResolverTest {
     }
 
     @Test
+    void resolvesExactBoundContainerEvenWhenCapacityIsFull() {
+        ManagerRuntimeSnapshot full = snapshot("ctr_full", "server-a", 4, 4, OpencodeContainerStatus.READY,
+                ManagerConnectionStatus.CONNECTED, CURRENT_BACKEND, ManagerConnectionStatus.CONNECTED, NOW);
+        ManagerRuntimeSnapshot sameContainerOtherServer = snapshot(
+                "ctr_full", "server-b", 0, 4, OpencodeContainerStatus.READY,
+                ManagerConnectionStatus.CONNECTED, CURRENT_BACKEND, ManagerConnectionStatus.CONNECTED, NOW.minusSeconds(1));
+        when(heartbeatStore.liveManagerSnapshots()).thenReturn(List.of(sameContainerOtherServer, full));
+        connect(full.container().containerId());
+
+        assertThat(resolver.findExactBoundContainer(
+                new LinuxServerId("server-a"), new OpencodeContainerId("ctr_full")))
+                .contains(full.container());
+    }
+
+    @Test
+    void exactBoundContainerDoesNotFallBackToOlderConnectedSnapshot() {
+        ManagerRuntimeSnapshot olderConnected = snapshot(
+                "ctr_exact", "server-a", 0, 4, OpencodeContainerStatus.READY,
+                ManagerConnectionStatus.CONNECTED, CURRENT_BACKEND, ManagerConnectionStatus.CONNECTED,
+                NOW.minusSeconds(1));
+        ManagerRuntimeSnapshot latestDisconnected = snapshot(
+                "ctr_exact", "server-a", 0, 4, OpencodeContainerStatus.READY,
+                ManagerConnectionStatus.DISCONNECTED, CURRENT_BACKEND, ManagerConnectionStatus.CONNECTED,
+                NOW);
+        when(heartbeatStore.liveManagerSnapshots()).thenReturn(List.of(olderConnected, latestDisconnected));
+        connect(olderConnected.container().containerId());
+
+        assertThat(resolver.findExactBoundContainer(
+                new LinuxServerId("server-a"), new OpencodeContainerId("ctr_exact")))
+                .isEmpty();
+    }
+
+    @Test
+    void collectsEveryManagerReportedPortOnTheSameLinuxServer() {
+        ManagerRuntimeSnapshot first = withManagedPorts(
+                snapshot("ctr_a", "server-a", 0, 4, OpencodeContainerStatus.READY,
+                        ManagerConnectionStatus.CONNECTED, CURRENT_BACKEND, ManagerConnectionStatus.CONNECTED, NOW),
+                4096,
+                4097);
+        ManagerRuntimeSnapshot second = withManagedPorts(
+                snapshot("ctr_b", "server-a", 0, 4, OpencodeContainerStatus.READY,
+                        ManagerConnectionStatus.CONNECTED, CURRENT_BACKEND, ManagerConnectionStatus.CONNECTED, NOW),
+                4200);
+        ManagerRuntimeSnapshot otherServer = withManagedPorts(
+                snapshot("ctr_c", "server-b", 0, 4, OpencodeContainerStatus.READY,
+                        ManagerConnectionStatus.CONNECTED, CURRENT_BACKEND, ManagerConnectionStatus.CONNECTED, NOW),
+                4098);
+        when(heartbeatStore.liveManagerSnapshots()).thenReturn(List.of(first, second, otherServer));
+
+        assertThat(resolver.liveManagedPorts(new LinuxServerId("server-a")))
+                .isEqualTo(Set.of(4096, 4097, 4200));
+    }
+
+    @Test
     void mapsRedisFailureToRuntimeStateUnavailableWithoutFallback() {
         when(heartbeatStore.liveManagerSnapshots()).thenThrow(new IllegalStateException("redis down"));
 
@@ -179,5 +235,21 @@ class LiveOpencodeContainerCandidateResolverTest {
                 heartbeatAt,
                 "trace_candidate");
         return new ManagerRuntimeSnapshot(container, manager, List.of(connection));
+    }
+
+    private static ManagerRuntimeSnapshot withManagedPorts(ManagerRuntimeSnapshot snapshot, int... ports) {
+        List<ManagedOpencodeProcessSnapshot> processes = java.util.Arrays.stream(ports)
+                .mapToObj(port -> new ManagedOpencodeProcessSnapshot(
+                        port,
+                        10000L + port,
+                        "http://127.0.0.1:" + port,
+                        "/session/" + port,
+                        "/config",
+                        NOW.minusSeconds(10),
+                        "opencode serve",
+                        "trace_candidate"))
+                .toList();
+        return new ManagerRuntimeSnapshot(
+                snapshot.container(), snapshot.manager(), snapshot.connections(), snapshot.metrics(), processes);
     }
 }

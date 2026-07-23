@@ -11,12 +11,12 @@ usage() {
   cat <<'USAGE'
 Usage: package-two-backend-complete.sh --nodes-dir <path> [options]
 
-Assemble the standard enterprise release ZIP and the four prepared node
+Assemble the platform release ZIP and the three prepared application node
 packages into one fixed-name USB delivery bundle.
 
 Options:
   --release-archive <path>  Standard release ZIP. Default: deploy/internal/dist/test-agent-internal-release.zip.
-  --nodes-dir <path>        Directory containing prepared .147, .4, .114 and .2 node archives plus SHA files.
+  --nodes-dir <path>        Directory containing prepared .4, .114 and .2 node archives plus SHA files.
   --output-dir <path>       Output directory. Default: deploy/internal/dist.
   -h, --help                Show this help.
 
@@ -126,15 +126,12 @@ require_file "${RELEASE_ARCHIVE}"
 require_file "${SCRIPT_DIR}/deploy-node-common.sh"
 require_file "${SCRIPT_DIR}/deploy-backend-node.sh"
 require_file "${SCRIPT_DIR}/deploy-frontend-node.sh"
-require_file "${SCRIPT_DIR}/deploy-mysql-node.sh"
-require_file "${SCRIPT_DIR}/deploy-xxl-job-mysql.sh"
 require_file "${SCRIPT_DIR}/init-backend-node-config.sh"
 require_file "${SCRIPT_DIR}/register-backend-on-frontend.sh"
 
 NODE_4="${NODES_DIR}/test-agent-two-backend-122.233.30.4-SENSITIVE.tar.gz"
 NODE_114="${NODES_DIR}/test-agent-two-backend-122.233.30.114-SENSITIVE.tar.gz"
 NODE_2="${NODES_DIR}/test-agent-two-backend-122.233.30.2.tar.gz"
-NODE_MYSQL="${NODES_DIR}/test-agent-two-backend-122.233.30.147-mysql-SENSITIVE.tar.gz"
 
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/test-agent-two-backend-complete.XXXXXX")"
 cleanup() {
@@ -152,9 +149,11 @@ require_archive_entry "${release_listing}" dist/backend/test-agent-app.jar
 require_archive_entry "${release_listing}" dist/test-agent-frontend-dist.tar.gz
 require_archive_entry "${release_listing}" dist/test-agent-programs.tar.gz
 require_archive_entry "${release_listing}" dist/test-agent-opencode-worker_internal-linux-amd64.tar
-require_archive_entry "${release_listing}" dist/mysql_8.4-linux-amd64.tar
 require_archive_entry "${release_listing}" deploy/internal/deploy-multi-backend-node.sh
-require_archive_entry "${release_listing}" deploy/internal/deploy-xxl-job-mysql.sh
+if grep -Fx 'dist/mysql_8.4-linux-amd64.tar' <<<"${release_listing}" >/dev/null; then
+  echo "Platform release archive must not contain the standalone MySQL image" >&2
+  exit 1
+fi
 
 # 完整外层包仍按 RSA 密钥交付物管理，封装前必须确认内层 JAR 的固定资源存在。
 unzip -p "${RELEASE_ARCHIVE}" dist/backend/test-agent-app.jar >"${TMP_ROOT}/test-agent-app.jar"
@@ -172,11 +171,7 @@ validate_node_archive() {
     exit 1
   fi
   listing="$(tar -tzf "${archive}")"
-  if [[ "${node_dir}" == "test-agent-two-backend-122.233.30.147-mysql" ]]; then
-    require_archive_entry "${listing}" "${node_dir}/deploy-xxl-job-mysql.sh"
-  else
-    require_archive_entry "${listing}" "${node_dir}/deploy-multi-backend-node.sh"
-  fi
+  require_archive_entry "${listing}" "${node_dir}/deploy-multi-backend-node.sh"
   require_archive_entry "${listing}" "${node_dir}/MULTI-BACKEND.md"
   require_archive_entry "${listing}" "${node_dir}/config/${required_config}"
 }
@@ -186,28 +181,25 @@ validate_node_archive "${NODE_4}" test-agent-two-backend-122.233.30.4 docker.env
 validate_node_archive "${NODE_114}" test-agent-two-backend-122.233.30.114 backend.env
 validate_node_archive "${NODE_114}" test-agent-two-backend-122.233.30.114 docker.env
 validate_node_archive "${NODE_2}" test-agent-two-backend-122.233.30.2 nginx.env
-validate_node_archive "${NODE_MYSQL}" test-agent-two-backend-122.233.30.147-mysql mysql.env
 
-# 完整包必须在封装前确认四份配置引用同一组 MySQL 凭据，且后端已经切到 PostgreSQL 同机的 MySQL。
+# 完整包必须在封装前确认两台后台引用同一个外部 MySQL，且账号密码和 access token 一致。
 validate_mysql_cluster_config() {
   local config_root="${TMP_ROOT}/cluster-config-check"
-  local backend_4 backend_114 frontend mysql_env expected_url
-  local backend_password backend_token mysql_password
+  local backend_4 backend_114 frontend expected_url
+  local backend_password backend_token
   mkdir -m 0700 -p "${config_root}"
   backend_4="${config_root}/backend-4.env"
   backend_114="${config_root}/backend-114.env"
   frontend="${config_root}/nginx.env"
-  mysql_env="${config_root}/mysql.env"
   tar -xOzf "${NODE_4}" 'test-agent-two-backend-122.233.30.4/config/backend.env' >"${backend_4}"
   tar -xOzf "${NODE_114}" 'test-agent-two-backend-122.233.30.114/config/backend.env' >"${backend_114}"
   tar -xOzf "${NODE_2}" 'test-agent-two-backend-122.233.30.2/config/nginx.env' >"${frontend}"
-  tar -xOzf "${NODE_MYSQL}" 'test-agent-two-backend-122.233.30.147-mysql/config/mysql.env' >"${mysql_env}"
-  chmod 0600 "${backend_4}" "${backend_114}" "${frontend}" "${mysql_env}"
-  if grep -q 'REPLACE_' "${backend_4}" "${backend_114}" "${frontend}" "${mysql_env}"; then
+  chmod 0600 "${backend_4}" "${backend_114}" "${frontend}"
+  if grep -q 'REPLACE_' "${backend_4}" "${backend_114}" "${frontend}"; then
     echo "Prepared cluster configuration still contains a REPLACE_ placeholder" >&2
     exit 1
   fi
-  expected_url='jdbc:mysql://122.233.30.147:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai'
+  expected_url='jdbc:mysql://122.210.106.43:3306/xxl_job?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai'
   for key in TEST_AGENT_XXL_JOB_MYSQL_URL TEST_AGENT_XXL_JOB_MYSQL_USERNAME \
     TEST_AGENT_XXL_JOB_MYSQL_PASSWORD TEST_AGENT_XXL_JOB_ACCESS_TOKEN; do
     [[ "$(grep -c "^${key}=" "${backend_4}" || true)" -eq 1 \
@@ -218,24 +210,18 @@ validate_mysql_cluster_config() {
   done
   grep -Fxq "TEST_AGENT_XXL_JOB_MYSQL_URL=${expected_url}" "${backend_4}"
   grep -Fxq "TEST_AGENT_XXL_JOB_MYSQL_URL=${expected_url}" "${backend_114}"
-  grep -Fxq 'TEST_AGENT_XXL_JOB_MYSQL_USERNAME=xxl_job' "${backend_4}"
-  grep -Fxq 'TEST_AGENT_XXL_JOB_MYSQL_USERNAME=xxl_job' "${backend_114}"
+  grep -Fxq 'TEST_AGENT_XXL_JOB_MYSQL_USERNAME=root' "${backend_4}"
+  grep -Fxq 'TEST_AGENT_XXL_JOB_MYSQL_USERNAME=root' "${backend_114}"
   grep -Fxq 'TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.4:18080,122.233.30.114:18080' "${frontend}"
-  grep -Fxq 'TEST_AGENT_XXL_JOB_MYSQL_IMAGE=mysql:8.4' "${mysql_env}"
-  grep -Fxq 'TEST_AGENT_XXL_JOB_MYSQL_HOST_PORT=3306' "${mysql_env}"
-  grep -Fxq 'TEST_AGENT_XXL_JOB_MYSQL_DATABASE=xxl_job' "${mysql_env}"
-  grep -Fxq 'TEST_AGENT_XXL_JOB_MYSQL_USERNAME=xxl_job' "${mysql_env}"
 
   backend_password="$(sed -n 's/^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=//p' "${backend_4}")"
   backend_token="$(sed -n 's/^TEST_AGENT_XXL_JOB_ACCESS_TOKEN=//p' "${backend_4}")"
-  mysql_password="$(sed -n 's/^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=//p' "${mysql_env}")"
-  [[ ${#backend_password} -ge 16 && ${#backend_token} -ge 32 ]] || {
+  [[ ${#backend_password} -ge 8 && ${#backend_token} -ge 32 ]] || {
     echo "Prepared XXL-JOB password or access token is too short" >&2
     exit 1
   }
-  [[ "${backend_password}" == "$(sed -n 's/^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=//p' "${backend_114}")" \
-    && "${backend_password}" == "${mysql_password}" ]] || {
-    echo "MySQL application passwords differ across prepared node configs" >&2
+  [[ "${backend_password}" == "$(sed -n 's/^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=//p' "${backend_114}")" ]] || {
+    echo "MySQL passwords differ between prepared backend configs" >&2
     exit 1
   }
   [[ "${backend_token}" == "$(sed -n 's/^TEST_AGENT_XXL_JOB_ACCESS_TOKEN=//p' "${backend_114}")" ]] || {
@@ -273,7 +259,6 @@ install -m 0644 "${SCRIPT_DIR}/MULTI-BACKEND.md" "${BUNDLE_ROOT}/START-HERE.md"
 install -m 0644 "${SCRIPT_DIR}/deploy-node-common.sh" "${BUNDLE_ROOT}/deploy-node-common.sh"
 install -m 0755 "${SCRIPT_DIR}/deploy-backend-node.sh" "${BUNDLE_ROOT}/deploy-backend-node.sh"
 install -m 0755 "${SCRIPT_DIR}/deploy-frontend-node.sh" "${BUNDLE_ROOT}/deploy-frontend-node.sh"
-install -m 0755 "${SCRIPT_DIR}/deploy-mysql-node.sh" "${BUNDLE_ROOT}/deploy-mysql-node.sh"
 install -m 0755 "${SCRIPT_DIR}/init-backend-node-config.sh" "${BUNDLE_ROOT}/init-backend-node-config.sh"
 install -m 0755 "${SCRIPT_DIR}/register-backend-on-frontend.sh" \
   "${BUNDLE_ROOT}/register-backend-on-frontend.sh"
@@ -294,13 +279,8 @@ repack_node() {
   if [[ "${node_dir}" == "test-agent-two-backend-122.233.30.2" ]]; then
     normalize_frontend_server_routes "${node_root}/${node_dir}/config/nginx.env"
   fi
-  if [[ "${node_dir}" == "test-agent-two-backend-122.233.30.147-mysql" ]]; then
-    install -m 0755 "${SCRIPT_DIR}/deploy-xxl-job-mysql.sh" \
-      "${node_root}/${node_dir}/deploy-xxl-job-mysql.sh"
-  else
-    install -m 0755 "${SCRIPT_DIR}/deploy-multi-backend-node.sh" \
-      "${node_root}/${node_dir}/deploy-multi-backend-node.sh"
-  fi
+  install -m 0755 "${SCRIPT_DIR}/deploy-multi-backend-node.sh" \
+    "${node_root}/${node_dir}/deploy-multi-backend-node.sh"
   install -m 0644 "${SCRIPT_DIR}/MULTI-BACKEND.md" \
     "${node_root}/${node_dir}/MULTI-BACKEND.md"
   tar -C "${node_root}" -czf "${target}" "${node_dir}"
@@ -312,7 +292,6 @@ repack_node() {
 repack_node "${NODE_4}" test-agent-two-backend-122.233.30.4
 repack_node "${NODE_114}" test-agent-two-backend-122.233.30.114
 repack_node "${NODE_2}" test-agent-two-backend-122.233.30.2
-repack_node "${NODE_MYSQL}" test-agent-two-backend-122.233.30.147-mysql
 
 TMP_ARCHIVE="${TMP_ROOT}/${BUNDLE_NAME}.zip"
 (cd "${TMP_ROOT}" && zip -qr "${TMP_ARCHIVE}" "${BUNDLE_NAME}")

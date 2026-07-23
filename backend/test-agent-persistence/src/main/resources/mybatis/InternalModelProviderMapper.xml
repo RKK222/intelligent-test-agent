@@ -10,6 +10,34 @@
             <arg column="base_url" javaType="java.lang.String"/>
             <arg column="enabled" javaType="_boolean"/>
             <arg column="sort_order" javaType="_int"/>
+            <arg column="token_id" javaType="java.lang.Long"/>
+            <arg column="token_name" javaType="java.lang.String"/>
+            <arg column="token_configured" javaType="_boolean"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="InternalModelProviderRuntimeRowMap" type="com.enterprise.testagent.persistence.mybatis.InternalModelProviderRuntimeRow">
+        <constructor>
+            <arg column="provider_id" javaType="java.lang.String"/>
+            <arg column="name" javaType="java.lang.String"/>
+            <arg column="base_url" javaType="java.lang.String"/>
+            <arg column="enabled" javaType="_boolean"/>
+            <arg column="sort_order" javaType="_int"/>
+            <arg column="token_id" javaType="java.lang.Long"/>
+            <arg column="token_name" javaType="java.lang.String"/>
+            <arg column="auth_token" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="InternalModelTokenRowMap" type="com.enterprise.testagent.persistence.mybatis.InternalModelTokenRow">
+        <constructor>
+            <arg column="token_id" javaType="_long"/>
+            <arg column="name" javaType="java.lang.String"/>
+            <arg column="referenced_provider_count" javaType="_long"/>
             <arg column="created_at" javaType="java.time.Instant"/>
             <arg column="updated_at" javaType="java.time.Instant"/>
         </constructor>
@@ -25,26 +53,55 @@
     </resultMap>
 
     <sql id="ProviderColumns">
-        provider_id, name, base_url, enabled, sort_order, created_at, updated_at
+        provider.provider_id,
+        provider.name,
+        provider.base_url,
+        provider.enabled,
+        provider.sort_order,
+        provider.token_id,
+        token.name as token_name,
+        case when token.token_id is null then false else true end as token_configured,
+        provider.created_at,
+        provider.updated_at
     </sql>
 
     <select id="findAll" resultMap="InternalModelProviderRowMap">
         select <include refid="ProviderColumns"/>
-        from internal_model_providers
-        order by sort_order, provider_id
+        from internal_model_providers provider
+        left join internal_model_tokens token on token.token_id = provider.token_id
+        order by provider.sort_order, provider.provider_id
     </select>
 
     <select id="findEnabled" resultMap="InternalModelProviderRowMap">
         select <include refid="ProviderColumns"/>
-        from internal_model_providers
-        where enabled = true
-        order by sort_order, provider_id
+        from internal_model_providers provider
+        left join internal_model_tokens token on token.token_id = provider.token_id
+        where provider.enabled = true
+        order by provider.sort_order, provider.provider_id
+    </select>
+
+    <select id="findEnabledRuntimeConfigs" resultMap="InternalModelProviderRuntimeRowMap">
+        select provider.provider_id,
+               provider.name,
+               provider.base_url,
+               provider.enabled,
+               provider.sort_order,
+               provider.token_id,
+               token.name as token_name,
+               token.token_value as auth_token,
+               provider.created_at,
+               provider.updated_at
+        from internal_model_providers provider
+        left join internal_model_tokens token on token.token_id = provider.token_id
+        where provider.enabled = true
+        order by provider.sort_order, provider.provider_id
     </select>
 
     <select id="findByProviderId" resultMap="InternalModelProviderRowMap">
         select <include refid="ProviderColumns"/>
-        from internal_model_providers
-        where provider_id = #{providerId}
+        from internal_model_providers provider
+        left join internal_model_tokens token on token.token_id = provider.token_id
+        where provider.provider_id = #{providerId}
     </select>
 
     <update id="updateProvider">
@@ -53,15 +110,16 @@
             base_url = #{baseUrl},
             enabled = #{enabled},
             sort_order = #{sortOrder},
+            token_id = #{tokenId},
             updated_at = #{updatedAt}
         where provider_id = #{providerId}
     </update>
 
     <insert id="insertProvider">
         insert into internal_model_providers (
-            provider_id, name, base_url, enabled, sort_order, created_at, updated_at
+            provider_id, name, base_url, enabled, sort_order, token_id, created_at, updated_at
         ) values (
-            #{providerId}, #{name}, #{baseUrl}, #{enabled}, #{sortOrder}, #{createdAt}, #{updatedAt}
+            #{providerId}, #{name}, #{baseUrl}, #{enabled}, #{sortOrder}, #{tokenId}, #{createdAt}, #{updatedAt}
         )
     </insert>
 
@@ -97,4 +155,77 @@
             'default', #{authToken}, #{createdAt}, #{updatedAt}
         )
     </insert>
+
+    <sql id="TokenMetadataColumns">
+        token.token_id,
+        token.name,
+        count(provider.provider_id) as referenced_provider_count,
+        token.created_at,
+        token.updated_at
+    </sql>
+
+    <select id="findAllTokens" resultMap="InternalModelTokenRowMap">
+        select <include refid="TokenMetadataColumns"/>
+        from internal_model_tokens token
+        left join internal_model_providers provider on provider.token_id = token.token_id
+        group by token.token_id, token.name, token.created_at, token.updated_at
+        order by token.name, token.token_id
+    </select>
+
+    <select id="findTokenById" resultMap="InternalModelTokenRowMap">
+        select <include refid="TokenMetadataColumns"/>
+        from internal_model_tokens token
+        left join internal_model_providers provider on provider.token_id = token.token_id
+        where token.token_id = #{tokenId}
+        group by token.token_id, token.name, token.created_at, token.updated_at
+    </select>
+
+    <select id="findTokenByName" resultMap="InternalModelTokenRowMap">
+        select <include refid="TokenMetadataColumns"/>
+        from internal_model_tokens token
+        left join internal_model_providers provider on provider.token_id = token.token_id
+        where token.name = #{name}
+        group by token.token_id, token.name, token.created_at, token.updated_at
+    </select>
+
+    <select id="findLegacyDefaultToken" resultMap="InternalModelTokenRowMap">
+        select <include refid="TokenMetadataColumns"/>
+        from internal_model_tokens token
+        left join internal_model_providers provider on provider.token_id = token.token_id
+        where token.legacy_key = 'default'
+        group by token.token_id, token.name, token.created_at, token.updated_at
+    </select>
+
+    <insert id="insertToken">
+        insert into internal_model_tokens (
+            name, token_value, legacy_key, created_at, updated_at
+        ) values (
+            #{name}, #{authToken}, #{legacyKey}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <update id="updateToken">
+        update internal_model_tokens
+        set name = #{name},
+            token_value = coalesce(#{authToken}, token_value),
+            updated_at = #{updatedAt}
+        where token_id = #{tokenId}
+    </update>
+
+    <update id="updateLegacyDefaultToken">
+        update internal_model_tokens
+        set token_value = #{authToken},
+            updated_at = #{updatedAt}
+        where legacy_key = 'default'
+    </update>
+
+    <delete id="deleteTokenIfUnreferenced">
+        delete from internal_model_tokens token
+        where token.token_id = #{tokenId}
+          and not exists (
+              select 1
+              from internal_model_providers provider
+              where provider.token_id = token.token_id
+          )
+    </delete>
 </mapper>

@@ -13,10 +13,13 @@ import com.enterprise.testagent.opencode.runtime.process.socket.BackendJavaProce
 import com.enterprise.testagent.opencode.runtime.process.socket.ManagerConnectionRegistry;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import org.springframework.stereotype.Component;
 
 /**
@@ -103,5 +106,75 @@ public class LiveOpencodeContainerCandidateResolver {
                         .thenComparing(container -> container.containerId().value()))
                 .limit(resolvedLimit)
                 .toList();
+    }
+
+    /**
+     * 精确解析既有绑定的容器。绑定端口已被分配，因此忽略容量是否已满；
+     * 仍要求 Redis 中 manager 存活、连接当前 Java，且当前 Java 持有本地 WebSocket。
+     */
+    public Optional<OpencodeContainer> findExactBoundContainer(
+            LinuxServerId linuxServerId,
+            OpencodeContainerId containerId) {
+        Objects.requireNonNull(linuxServerId, "linuxServerId must not be null");
+        Objects.requireNonNull(containerId, "containerId must not be null");
+        List<ManagerRuntimeSnapshot> snapshots;
+        try {
+            snapshots = heartbeatStore.liveManagerSnapshots();
+        } catch (RuntimeException exception) {
+            throw new PlatformException(
+                    ErrorCode.RUNTIME_STATE_UNAVAILABLE,
+                    "TestAgent Redis 运行态候选不可用",
+                    Map.of(),
+                    exception);
+        }
+        BackendProcessId currentBackend = backendLifecycle.backendProcessId();
+        Optional<ManagerRuntimeSnapshot> latestSnapshot = snapshots.stream()
+                .filter(Objects::nonNull)
+                .filter(snapshot -> snapshot.container().linuxServerId().equals(linuxServerId))
+                .filter(snapshot -> snapshot.container().containerId().equals(containerId))
+                .max(Comparator.comparing(snapshot -> snapshot.container().lastHeartbeatAt()));
+        if (latestSnapshot.isEmpty()) {
+            return Optional.empty();
+        }
+        ManagerRuntimeSnapshot snapshot = latestSnapshot.orElseThrow();
+        OpencodeContainer container = snapshot.container();
+        boolean connectedToCurrentBackend = snapshot.connections().stream()
+                .anyMatch(connection -> connection.backendProcessId().equals(currentBackend)
+                        && connection.status() == ManagerConnectionStatus.CONNECTED);
+        if (snapshot.manager().connectionStatus() != ManagerConnectionStatus.CONNECTED
+                || container.status()
+                        != com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerStatus.READY
+                || !connectedToCurrentBackend
+                || !connectionRegistry.isConnected(containerId)) {
+            return Optional.empty();
+        }
+        return Optional.of(container);
+    }
+
+    /**
+     * 汇总同一 Linux 服务器上所有 live manager 快照中的受管端口。
+     *
+     * <p>即使数据库尚未记录该进程也必须避让；这里不按容器或容量过滤，避免端口唯一约束的
+     * 服务器级作用域被历史容器归属掩盖。
+     */
+    public Set<Integer> liveManagedPorts(LinuxServerId linuxServerId) {
+        Objects.requireNonNull(linuxServerId, "linuxServerId must not be null");
+        try {
+            Set<Integer> ports = new HashSet<>();
+            heartbeatStore.liveManagerSnapshots().stream()
+                    .filter(Objects::nonNull)
+                    .filter(snapshot -> snapshot.container().linuxServerId().equals(linuxServerId))
+                    .flatMap(snapshot -> snapshot.managedProcesses().stream())
+                    .map(process -> process.port())
+                    .filter(port -> port > 0 && port <= 65535)
+                    .forEach(ports::add);
+            return Set.copyOf(ports);
+        } catch (RuntimeException exception) {
+            throw new PlatformException(
+                    ErrorCode.RUNTIME_STATE_UNAVAILABLE,
+                    "TestAgent Redis 运行态端口不可用",
+                    Map.of(),
+                    exception);
+        }
     }
 }

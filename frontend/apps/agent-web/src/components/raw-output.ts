@@ -8,6 +8,7 @@ export const RAW_OUTPUT_MAX_ENTRIES_PER_SESSION = 2_000;
 const RAW_OUTPUT_SENSITIVE_KEYS = new Set([
   "authorization",
   "accesstoken",
+  "authtoken",
   "cookie",
   "contexttoken",
   "password",
@@ -16,7 +17,8 @@ const RAW_OUTPUT_SENSITIVE_KEYS = new Set([
   "sessiondigest",
   "setcookie",
   "ticket",
-  "token"
+  "token",
+  "tokenvalue"
 ]);
 
 /**
@@ -24,6 +26,24 @@ const RAW_OUTPUT_SENSITIVE_KEYS = new Set([
  */
 export function appendLatestRawOutputEntry<T>(current: readonly T[], entry: T): T[] {
   return [...current, entry].slice(-RAW_OUTPUT_MAX_ENTRIES_PER_SESSION);
+}
+
+/**
+ * 展示与导出统一按发生时间倒序派生，底层缓存继续保留采集顺序以免影响有界追加语义。
+ * 同一时间戳按后到记录优先；无法解析的旧记录放到有效时间之后并保持后到优先。
+ */
+export function sortRawOutputEntriesNewestFirst<T extends { occurredAt: string }>(entries: readonly T[]): T[] {
+  return entries
+    .map((entry, index) => {
+      const parsedTime = Date.parse(entry.occurredAt);
+      return {
+        entry,
+        index,
+        time: Number.isNaN(parsedTime) ? Number.NEGATIVE_INFINITY : parsedTime
+      };
+    })
+    .sort((left, right) => right.time - left.time || right.index - left.index)
+    .map(({ entry }) => entry);
 }
 
 /**
@@ -50,7 +70,7 @@ function redactSensitiveDataFromJson(body: string): string {
 }
 
 function redactSensitiveDataFromText(body: string): string {
-  const keyPattern = /(["']?)\b(?:authorization|access[-_]?token|cookie|context[-_]?token|password|refresh[-_]?token|secret|session[-_]?digest|set-cookie|ticket|token)\b\1\s*[:=]\s*/gi;
+  const keyPattern = /(["']?)\b(?:authorization|access[-_]?token|auth[-_]?token|cookie|context[-_]?token|password|refresh[-_]?token|secret|session[-_]?digest|set-cookie|ticket|token[-_]?value|token)\b\1\s*[:=]\s*/gi;
   let redacted = "";
   let cursor = 0;
   let match: RegExpExecArray | null;

@@ -13,6 +13,8 @@ public interface InternalModelProviderRepository {
 
     List<InternalModelProvider> findEnabled();
 
+    List<InternalModelProviderRuntimeConfig> findEnabledRuntimeConfigs();
+
     Optional<InternalModelProvider> findByProviderId(String providerId);
 
     void replaceProviders(List<InternalModelProvider> providers, Instant updatedAt);

@@ -57,5 +57,9 @@ fi
 grep -Fq -- '--platform linux/amd64' "${DEPLOY_SCRIPT}"
 grep -Fq -- '--restart unless-stopped' "${DEPLOY_SCRIPT}"
 grep -Fq 'Existing database data is never deleted' "${DEPLOY_SCRIPT}"
+grep -Fq 'MySQL container created: id=' "${DEPLOY_SCRIPT}"
+grep -Fq 'MySQL container state (docker ps -a):' "${DEPLOY_SCRIPT}"
+grep -Fq 'docker run failed for MySQL container' "${DEPLOY_SCRIPT}"
+grep -Fq 'getenforce' "${DEPLOY_SCRIPT}"
 
-echo 'Standalone MySQL config validation, secret redaction and offline deploy contract verified'
+echo 'Standalone MySQL config, diagnostics, SELinux mount, secret redaction and offline deploy contract verified'

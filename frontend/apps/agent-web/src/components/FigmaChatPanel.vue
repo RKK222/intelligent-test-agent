@@ -65,6 +65,7 @@ import type { ChatContextItem } from '../stores/chatContextStore'
 import { validateChatSend } from '../stores/chatContextStore'
 import type { WorkspaceRequirementReference } from './workbench-utils'
 import { resolveSessionListDrawerPlacement } from './session-list-drawer'
+import { sortRawOutputEntriesNewestFirst } from './raw-output'
 
 type ChatMessageInput = AgentMessage & { content?: string }
 
@@ -2907,6 +2908,7 @@ const rawOutputOpen = ref(false)
 const rawOutputFilter = ref<RawOutputFilter>('all')
 const rawOutputSearchQuery = ref('')
 const rawOutputPosition = ref(defaultRawOutputPosition())
+const rawOutputBodyEl = ref<HTMLElement | null>(null)
 let rawDragState: { startX: number; startY: number; originX: number; originY: number } | null = null
 
 const rawOutputPanelStyle = computed(() => ({
@@ -2915,7 +2917,7 @@ const rawOutputPanelStyle = computed(() => ({
 }))
 
 const filteredRawOutputEntries = computed(() => {
-  const entries = props.rawOutputEntries ?? []
+  const entries = sortRawOutputEntriesNewestFirst(props.rawOutputEntries ?? [])
   const typedEntries = rawOutputFilter.value === 'all'
     ? entries
     : entries.filter((entry) => entry.kind === rawOutputFilter.value)
@@ -2943,12 +2945,31 @@ function defaultRawOutputPosition() {
 
 function openRawOutput() {
   rawOutputOpen.value = true
+  scrollRawOutputToNewest()
 }
 
 function closeRawOutput() {
   rawOutputOpen.value = false
   stopRawOutputDrag()
 }
+
+// 倒序列表的最新记录固定在顶部；打开浮层或收到新采集记录时主动回到顶部，避免误以为没有实时刷新。
+function scrollRawOutputToNewest() {
+  void nextTick(() => {
+    if (rawOutputOpen.value && rawOutputBodyEl.value) {
+      rawOutputBodyEl.value.scrollTop = 0
+    }
+  })
+}
+
+watch(
+  () => props.rawOutputEntries?.at(-1)?.id,
+  (nextId, previousId) => {
+    if (nextId && nextId !== previousId && rawOutputOpen.value) {
+      scrollRawOutputToNewest()
+    }
+  }
+)
 
 function rawOutputSearchText(entry: RawOutputEntry) {
   return [
@@ -6057,7 +6078,7 @@ function onCompositionEnd() {
           aria-label="搜索原始输出"
         />
       </div>
-      <div class="figma-chat-raw-output-body">
+      <div ref="rawOutputBodyEl" class="figma-chat-raw-output-body">
         <div v-if="filteredRawOutputEntries.length === 0" class="figma-chat-raw-empty">
           {{ rawOutputSearchQuery.trim() || rawOutputFilter !== 'all' ? '无匹配的原始报文' : '当前会话暂无原始报文' }}
         </div>

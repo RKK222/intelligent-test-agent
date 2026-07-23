@@ -9,6 +9,7 @@ import com.enterprise.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServer;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerStatus;
+import com.enterprise.testagent.domain.opencodeprocess.ManagerConnectionStatus;
 import com.enterprise.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainer;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerId;
@@ -209,6 +210,59 @@ public class BackendJavaRouteResolver {
     }
 
     /**
+     * 为尚未绑定用户选择当前可初始化且进程总数最少的 Linux 服务器。
+     *
+     * <p>负载按同一轮 Redis 最新 manager 快照汇总服务器上的全部在线容器，已满容器仍计入
+     * 进程总数；但服务器必须至少存在一个由所选在线 Java 连接、状态 READY 且仍有容量的容器。
+     * 该结果只负责首次请求选服，目标 Java 仍需通过本机候选解析和原子预留复核真实容量。
+     */
+    public Optional<LinuxServerId> selectLeastLoadedInitializableServer() {
+        List<ManagerRuntimeSnapshot> managerSnapshots;
+        List<BackendRuntimeSnapshot> backendSnapshots;
+        try {
+            managerSnapshots = heartbeatStore.liveManagerSnapshots();
+            backendSnapshots = heartbeatStore.liveBackendSnapshots();
+        } catch (RuntimeException exception) {
+            throw new PlatformException(
+                    ErrorCode.RUNTIME_STATE_UNAVAILABLE,
+                    "TestAgent Redis 运行态候选不可用",
+                    Map.of(),
+                    exception);
+        }
+
+        Map<OpencodeContainerId, ManagerRuntimeSnapshot> latestManagers = latestManagerSnapshots(managerSnapshots);
+        Map<String, BackendJavaProcess> selectedBackends = latestBackendsByServer(
+                backendSnapshots,
+                List.copyOf(latestManagers.values()));
+        selectedBackends.putIfAbsent(currentLinuxServerIdValue(), currentBackend());
+
+        Map<String, Long> processTotals = new HashMap<>();
+        Set<String> initializableServers = new HashSet<>();
+        for (ManagerRuntimeSnapshot snapshot : latestManagers.values()) {
+            if (snapshot.manager().connectionStatus() != ManagerConnectionStatus.CONNECTED) {
+                continue;
+            }
+            OpencodeContainer container = snapshot.container();
+            String linuxServerId = container.linuxServerId().value();
+            processTotals.merge(linuxServerId, (long) container.currentProcesses(), Long::sum);
+
+            BackendJavaProcess selectedBackend = selectedBackends.get(linuxServerId);
+            if (selectedBackend != null
+                    && container.canAcceptProcess()
+                    && isConnected(snapshot, selectedBackend.backendProcessId())) {
+                initializableServers.add(linuxServerId);
+            }
+        }
+
+        return initializableServers.stream()
+                .sorted(Comparator.comparingLong(
+                                (String linuxServerId) -> processTotals.getOrDefault(linuxServerId, Long.MAX_VALUE))
+                        .thenComparing(Comparator.naturalOrder()))
+                .findFirst()
+                .map(LinuxServerId::new);
+    }
+
+    /**
      * 返回远端服务器最新在线 Java。
      */
     public Map<String, BackendJavaProcess> remoteBackendsByServer() {
@@ -245,9 +299,18 @@ public class BackendJavaRouteResolver {
     }
 
     private Map<String, BackendJavaProcess> latestBackendsByServer() {
+        return latestBackendsByServer(
+                heartbeatStore.liveBackendSnapshots(),
+                heartbeatStore.liveManagerSnapshots());
+    }
+
+    private Map<String, BackendJavaProcess> latestBackendsByServer(
+            List<BackendRuntimeSnapshot> backendSnapshots,
+            List<ManagerRuntimeSnapshot> managerSnapshots) {
         Map<String, BackendJavaProcess> result = new LinkedHashMap<>();
-        Map<String, Set<BackendProcessId>> connectedBackendIdsByServer = connectedBackendIdsByServer();
-        for (BackendRuntimeSnapshot snapshot : heartbeatStore.liveBackendSnapshots()) {
+        Map<String, Set<BackendProcessId>> connectedBackendIdsByServer =
+                connectedBackendIdsByServer(managerSnapshots);
+        for (BackendRuntimeSnapshot snapshot : backendSnapshots) {
             BackendJavaProcess backend = snapshot.backendProcess();
             result.merge(
                     backend.linuxServerId().value(),
@@ -270,17 +333,47 @@ public class BackendJavaRouteResolver {
         return latestBackend(left, right);
     }
 
-    private Map<String, Set<BackendProcessId>> connectedBackendIdsByServer() {
+    private Map<String, Set<BackendProcessId>> connectedBackendIdsByServer(
+            List<ManagerRuntimeSnapshot> managerSnapshots) {
         Map<String, Set<BackendProcessId>> result = new HashMap<>();
-        for (ManagerRuntimeSnapshot snapshot : heartbeatStore.liveManagerSnapshots()) {
+        for (ManagerRuntimeSnapshot snapshot : managerSnapshots) {
+            if (snapshot == null) {
+                continue;
+            }
             String linuxServerId = snapshot.manager().linuxServerId().value();
             for (OpencodeManagerBackendConnection connection : snapshot.connections()) {
-                if (connection.status() == com.enterprise.testagent.domain.opencodeprocess.ManagerConnectionStatus.CONNECTED) {
+                if (connection.status() == ManagerConnectionStatus.CONNECTED) {
                     result.computeIfAbsent(linuxServerId, ignored -> new HashSet<>()).add(connection.backendProcessId());
                 }
             }
         }
         return result;
+    }
+
+    private Map<OpencodeContainerId, ManagerRuntimeSnapshot> latestManagerSnapshots(
+            List<ManagerRuntimeSnapshot> snapshots) {
+        Map<OpencodeContainerId, ManagerRuntimeSnapshot> latestByContainer = new LinkedHashMap<>();
+        for (ManagerRuntimeSnapshot snapshot : snapshots) {
+            if (snapshot == null) {
+                continue;
+            }
+            latestByContainer.merge(
+                    snapshot.container().containerId(),
+                    snapshot,
+                    (left, right) -> right.container().lastHeartbeatAt()
+                                    .isBefore(left.container().lastHeartbeatAt())
+                            ? left
+                            : right);
+        }
+        return latestByContainer;
+    }
+
+    private boolean isConnected(
+            ManagerRuntimeSnapshot snapshot,
+            BackendProcessId backendProcessId) {
+        return snapshot.connections().stream()
+                .anyMatch(connection -> connection.backendProcessId().equals(backendProcessId)
+                        && connection.status() == ManagerConnectionStatus.CONNECTED);
     }
 
     private BackendJavaProcess latestBackend(BackendJavaProcess left, BackendJavaProcess right) {

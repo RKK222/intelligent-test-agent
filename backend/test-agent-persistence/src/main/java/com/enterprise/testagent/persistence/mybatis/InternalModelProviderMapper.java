@@ -15,6 +15,8 @@ public interface InternalModelProviderMapper {
 
     List<InternalModelProviderRow> findEnabled();
 
+    List<InternalModelProviderRuntimeRow> findEnabledRuntimeConfigs();
+
     InternalModelProviderRow findByProviderId(@Param("providerId") String providerId);
 
     int updateProvider(InternalModelProviderRow row);
@@ -35,4 +37,31 @@ public interface InternalModelProviderMapper {
             @Param("authToken") String authToken,
             @Param("createdAt") Instant createdAt,
             @Param("updatedAt") Instant updatedAt);
+
+    List<InternalModelTokenRow> findAllTokens();
+
+    InternalModelTokenRow findTokenById(@Param("tokenId") long tokenId);
+
+    InternalModelTokenRow findTokenByName(@Param("name") String name);
+
+    InternalModelTokenRow findLegacyDefaultToken();
+
+    void insertToken(
+            @Param("name") String name,
+            @Param("authToken") String authToken,
+            @Param("legacyKey") String legacyKey,
+            @Param("createdAt") Instant createdAt,
+            @Param("updatedAt") Instant updatedAt);
+
+    int updateToken(
+            @Param("tokenId") long tokenId,
+            @Param("name") String name,
+            @Param("authToken") String authToken,
+            @Param("updatedAt") Instant updatedAt);
+
+    int updateLegacyDefaultToken(
+            @Param("authToken") String authToken,
+            @Param("updatedAt") Instant updatedAt);
+
+    int deleteTokenIfUnreferenced(@Param("tokenId") long tokenId);
 }

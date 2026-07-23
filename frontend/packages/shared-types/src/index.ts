@@ -1017,6 +1017,8 @@ export type OpencodeRuntimeManagedProcess = {
   startedAt?: string | null;
   startCommand?: string | null;
   traceId?: string | null;
+  unifiedAuthId?: string | null;
+  managerStatus?: string | null;
   ownership?: "BOUND" | "UNBOUND" | string | null;
   processId?: string | null;
   processStatus?: string | null;
@@ -1424,8 +1426,34 @@ export type InternalModelProviderConfig = {
   baseUrl: string;
   enabled: boolean;
   sortOrder: number;
+  tokenId?: number | null;
+  tokenName?: string | null;
+  tokenConfigured?: boolean;
   createdAt?: string;
   updatedAt?: string;
+};
+
+export type InternalModelTokenDefinition = {
+  tokenId: number;
+  name: string;
+  referencedProviderCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type InternalModelTokenCreatePayload = {
+  name: string;
+  token: string;
+};
+
+export type InternalModelTokenUpdatePayload = {
+  name?: string | null;
+  token?: string | null;
+};
+
+export type InternalModelTokenDeleteResponse = {
+  tokenId: number;
+  deleted: boolean;
 };
 
 export type InternalModelProviderManagementResponse = {
@@ -1434,7 +1462,12 @@ export type InternalModelProviderManagementResponse = {
 };
 
 export type InternalModelProviderUpdatePayload = {
-  providers: Array<Pick<InternalModelProviderConfig, "providerId" | "name" | "baseUrl" | "enabled" | "sortOrder">>;
+  providers: Array<
+    Pick<InternalModelProviderConfig, "providerId" | "name" | "baseUrl" | "enabled" | "sortOrder"> & {
+      tokenId?: number | null;
+      clearToken?: boolean;
+    }
+  >;
   authToken?: string | null;
 };
 

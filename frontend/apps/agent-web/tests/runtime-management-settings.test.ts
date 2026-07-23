@@ -539,8 +539,8 @@ describe("runtime management settings", () => {
           portStart: 4096,
           portEnd: 4100,
           maxProcesses: 4,
-          currentProcesses: 3,
-          availableCapacity: 1,
+          currentProcesses: 4,
+          availableCapacity: 0,
           metricsSource: "cgroup",
           status: "READY",
           lastHeartbeatAt: "2026-06-24T08:00:00Z",
@@ -582,17 +582,26 @@ describe("runtime management settings", () => {
               bindingUpdatedAt: "2026-06-24T08:00:00Z"
             },
             {
-              port: 4097,
+              port: 4104,
               pid: 22345,
-              baseUrl: "http://10.8.0.12:4097",
-              sessionPath: "/data/opencode/session/4097",
+              baseUrl: "http://10.8.0.12:4104",
+              sessionPath: "/data/opencode/session/4104",
               configPath: "/data/opencode/.config/opencode/",
               startedAt: "2026-06-24T08:05:00Z",
               traceId: "trace_ghost",
               ownership: "UNBOUND",
-              processId: "ocp_2234567890abcdef",
-              processStatus: "UNHEALTHY",
-              healthMessage: "process is not alive"
+              unifiedAuthId: "A",
+              managerStatus: "PID_ALIVE"
+            },
+            {
+              port: 4097,
+              pid: 32345,
+              baseUrl: "http://10.8.0.12:4097",
+              sessionPath: "/data/opencode/session/4097",
+              configPath: "/data/opencode/.config/opencode/",
+              startedAt: "2026-06-24T08:06:00Z",
+              traceId: "trace_legacy_ghost",
+              ownership: "UNBOUND"
             }
           ]
         }
@@ -609,11 +618,11 @@ describe("runtime management settings", () => {
       stopOpencodeRuntimeManagedProcess: vi.fn().mockResolvedValue({
         command: "stop",
         status: "STOPPED",
-        port: 4097,
+        port: 4104,
         message: "opencode server stopped"
       })
     };
-    const { findAllByRole, findByText, queryByText, queryClient } = renderRuntimePanel(api);
+    const { container, findAllByRole, findByText, queryByText, queryClient } = renderRuntimePanel(api);
 
     expect(await findByText("mgr_1234567890abcdef")).toBeTruthy();
     expect(queryByText(startCommand)).toBeNull();
@@ -622,11 +631,52 @@ describe("runtime management settings", () => {
     expect(await findByText("有主进程")).toBeTruthy();
     expect(await findByText("无主进程")).toBeTruthy();
     expect(await findByText("wr")).toBeTruthy();
-    expect(await findByText("process is not alive")).toBeTruthy();
+    expect(await findByText("PID_ALIVE")).toBeTruthy();
+    expect(await findAllByRole("cell", { name: "平台未登记" })).toHaveLength(2);
+    expect(await findAllByRole("cell", { name: "未执行 HTTP 健康检查" })).toHaveLength(2);
     expect(await findByText(/容量计数来自 manager state/)).toBeTruthy();
     expect(await findByText("启动命令")).toBeTruthy();
     expect(await findByText(startCommand)).toBeTruthy();
     expect(await findByText("http://10.8.0.12:4096")).toBeTruthy();
+
+    const ghostPortCell = await findByText("4104");
+    const ghostRow = ghostPortCell.closest("tr");
+    const ghostTable = ghostRow?.closest("table");
+    const normalizeCell = (value: string | null | undefined) => (value ?? "").replace(/\s+/g, " ").trim();
+    const headers = Array.from(ghostTable?.querySelectorAll("th") ?? []).map((cell) => normalizeCell(cell.textContent));
+    const cells = Array.from(ghostRow?.querySelectorAll("td") ?? []).map((cell) => normalizeCell(cell.textContent));
+    expect(headers).toEqual([
+      "端口",
+      "PID",
+      "UCID",
+      "Manager 状态",
+      "平台进程",
+      "平台状态",
+      "baseUrl",
+      "启动时间",
+      "健康",
+      "启动命令（无主）",
+      "traceId",
+      "操作"
+    ]);
+    expect(cells).toHaveLength(headers.length);
+    expect(cells.slice(0, 7)).toEqual([
+      "4104",
+      "22345",
+      "A",
+      "PID_ALIVE",
+      "平台未登记",
+      "-",
+      "http://10.8.0.12:4104"
+    ]);
+    expect(cells[7]).not.toBe("-");
+    expect(cells.slice(8, 11)).toEqual(["未执行 HTTP 健康检查", "-", "trace_ghost"]);
+    expect(cells[11]).toContain("重启");
+    expect(cells[11]).toContain("停止");
+
+    const legacyRow = (await findByText("4097")).closest("tr");
+    expect(normalizeCell(legacyRow?.textContent)).not.toContain("undefined");
+    expect(container.textContent).not.toContain("undefined");
     const restartButtons = await findAllByRole("button", { name: "重启" });
     const stopButtons = await findAllByRole("button", { name: "停止" });
 
@@ -635,9 +685,9 @@ describe("runtime management settings", () => {
     await waitFor(() => expect(api.getOpencodeRuntimeManagementOverview).toHaveBeenCalledTimes(2));
 
     await fireEvent.click(stopButtons[1]);
-    await waitFor(() => expect(api.stopOpencodeRuntimeManagedProcess).toHaveBeenCalledWith("ctr_01", 4097));
-    await waitFor(() => expect(queryByText("process is not alive")).toBeNull());
-    expect(await findByText("暂无无主进程")).toBeTruthy();
+    await waitFor(() => expect(api.stopOpencodeRuntimeManagedProcess).toHaveBeenCalledWith("ctr_01", 4104));
+    await waitFor(() => expect(queryByText("4104")).toBeNull());
+    expect(await findByText("4097")).toBeTruthy();
     expect(api.getOpencodeRuntimeManagementOverview).toHaveBeenCalledTimes(2);
 
     queryClient.clear();
