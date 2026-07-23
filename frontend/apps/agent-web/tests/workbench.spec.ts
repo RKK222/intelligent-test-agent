@@ -2608,8 +2608,8 @@ test("context usage follows the selected model catalog and live assistant usage"
   const drawerBox = await detail.boundingBox();
   expect(rootBox).not.toBeNull();
   expect(drawerBox).not.toBeNull();
-  expect(Math.abs(drawerBox!.x - rootBox!.x)).toBeLessThanOrEqual(1);
-  expect(drawerBox!.width).toBeLessThan(rootBox!.width);
+  expect(Math.abs(drawerBox!.x + drawerBox!.width - rootBox!.x)).toBeLessThanOrEqual(1);
+  expect(await detail.evaluate((element) => element.closest(".figma-chat-root") === null)).toBe(true);
 
   await contextButton.click();
   await expect(detail).toBeHidden();
@@ -2625,12 +2625,14 @@ test("context usage follows the selected model catalog and live assistant usage"
   await expect(page.locator(".figma-chat-panel-wrapper")).toHaveCSS("width", "240px");
 
   await contextButton.click();
-  const tokenItems = detail.locator(".session-context-token-grid > div");
-  const firstTokenBox = await tokenItems.nth(0).boundingBox();
-  const secondTokenBox = await tokenItems.nth(1).boundingBox();
-  expect(firstTokenBox).not.toBeNull();
-  expect(secondTokenBox).not.toBeNull();
-  expect(secondTokenBox!.y).toBeGreaterThan(firstTokenBox!.y);
+  await detail.evaluate(async (element) => {
+    await Promise.all(element.getAnimations().map((animation) => animation.finished));
+  });
+  const resizedRootBox = await page.locator(".figma-chat-root").boundingBox();
+  const resizedDrawerBox = await detail.boundingBox();
+  expect(resizedRootBox).not.toBeNull();
+  expect(resizedDrawerBox).not.toBeNull();
+  expect(Math.abs(resizedDrawerBox!.x + resizedDrawerBox!.width - resizedRootBox!.x)).toBeLessThanOrEqual(1);
 });
 
 test("workbench clears stale persisted model and sends catalog default", async ({ page }) => {

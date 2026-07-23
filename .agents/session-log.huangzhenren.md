@@ -956,3 +956,19 @@
 - Result:
   - 上下文数据、统计口径和详情字段不变，仅调整展示位置、尺寸、进入动效及触发器关闭交互。
   - 未修改 HTTP API、RunEvent、数据库/Flyway、依赖、安全配置、性能缓存或兼容字段，也未修改环境配置文件。
+
+### 2026-07-23 - 修正上下文抽屉到对话栏外侧
+
+- Why:
+  - 上一版把“左侧抽屉”理解成从对话栏内部左边缘滑入，仍会覆盖消息内容；用户明确要求像会话列表一样展开到对话栏左侧，不能挡住对话。
+- What:
+  - `SessionContextUsage` 改为通过 body Teleport 和 fixed 定位展示，抽屉右边缘始终贴合对话栏左边缘；最大宽度 420px，左侧空间不足时只缩窄抽屉，不回退覆盖对话。
+  - 抽屉在窗口缩放、页面滚动和对话栏尺寸变化时按实测矩形重新定位；上下文与会话列表抽屉双向互斥，隐藏对话栏时自动关闭，并保留圆环二次点击、关闭按钮、Esc、会话切换和焦点返回行为。
+  - 同步 frontend、agent-web README，并补充严格外侧定位、零/极窄左侧空间、两个抽屉打开顺序、Teleport 生命周期及默认/最小会话栏宽度下不遮挡对话的回归测试。
+- How:
+  - TDD 先复现旧抽屉右边缘与对话栏左边缘相差 420px、外侧定位程序缺失和隐藏会话栏后浮层残留，再加入最小定位与生命周期实现。
+  - 目标 Vitest 为 157 passed / 1 skipped，Chromium mock E2E 为 1 passed；`corepack pnpm lint`、`corepack pnpm typecheck`、生产 build 和 `git diff --check` 均通过。
+  - 全量 Vitest 为 1578 passed / 1 skipped / 1 failed；唯一失败仍是既有 `DirectoryRows.test.ts` 将 role=`radio` 的“上传”按 role=`button` 查询，与本次差异无关。
+- Result:
+  - 上下文详情现在占用对话栏左侧的工作台空间，不再覆盖对话内容；统计数据、模型上限、图表和原有 footer 任务消耗行为不变。
+  - 未修改 HTTP API、RunEvent、数据库/Flyway、依赖、安全配置、统计缓存或兼容字段，也未修改环境配置文件。

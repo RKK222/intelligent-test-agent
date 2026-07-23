@@ -5569,6 +5569,9 @@ function onCompositionEnd() {
         :selected-model="selectedModel"
         :models="models"
         :providers="providers"
+        :panel-visible="panelVisible"
+        :history-drawer-open="historyDrawerOpen"
+        @detail-open="closeHistoryDrawer(false)"
       />
       <div v-if="!activeSubagentSessionId" class="figma-chat-usage">
         <span

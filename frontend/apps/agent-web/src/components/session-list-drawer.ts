@@ -55,3 +55,31 @@ export function resolveSessionListDrawerPlacement(
     height
   };
 }
+
+/**
+ * 把详情抽屉严格放在对话栏外侧；左侧空间不足时只收窄抽屉，不回退覆盖对话。
+ */
+export function resolveExternalConversationDrawerPlacement(
+  conversationRect: SessionListDrawerRect,
+  viewport: SessionListDrawerViewport,
+  maxWidth: number
+): SessionListDrawerPlacement {
+  const top = Math.max(VIEWPORT_MARGIN, conversationRect.top);
+  const height = Math.max(
+    0,
+    Math.min(conversationRect.height, viewport.height - top - VIEWPORT_MARGIN)
+  );
+  const conversationLeft = Math.min(conversationRect.left, viewport.width - VIEWPORT_MARGIN);
+  const width = Math.max(
+    0,
+    Math.min(Math.max(0, maxWidth), conversationLeft - VIEWPORT_MARGIN)
+  );
+
+  return {
+    mode: "left",
+    top,
+    left: conversationLeft - width,
+    width,
+    height
+  };
+}

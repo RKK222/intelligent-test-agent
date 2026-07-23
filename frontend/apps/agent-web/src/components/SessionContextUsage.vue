@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch, type CSSProperties } from "vue";
 import { X } from "lucide-vue-next";
 import type { AgentMessage, MessageScope, ModelInfo, ProviderInfo } from "@test-agent/shared-types";
 import {
@@ -7,6 +7,7 @@ import {
   estimateSessionContextBreakdown,
   type SessionContextBreakdownItem
 } from "./session-context-metrics";
+import { resolveExternalConversationDrawerPlacement } from "./session-list-drawer";
 
 const props = defineProps<{
   sessionId: string;
@@ -17,6 +18,11 @@ const props = defineProps<{
   selectedModel?: string;
   models?: ModelInfo[];
   providers?: ProviderInfo[];
+  panelVisible?: boolean;
+  historyDrawerOpen?: boolean;
+}>();
+const emit = defineEmits<{
+  "detail-open": [];
 }>();
 
 const triggerRef = ref<HTMLButtonElement>();
@@ -26,6 +32,19 @@ const tooltipOpen = ref(false);
 const tooltipId = useId();
 const dialogId = useId();
 const tooltipVisible = computed(() => tooltipOpen.value && !detailOpen.value);
+const drawerPlacement = ref<ReturnType<typeof resolveExternalConversationDrawerPlacement> | null>(null);
+const drawerPanelStyle = computed<CSSProperties>(() => {
+  const placement = drawerPlacement.value;
+  if (!placement) return {};
+  return {
+    top: `${placement.top}px`,
+    left: `${placement.left}px`,
+    width: `${placement.width}px`,
+    height: `${placement.height}px`
+  };
+});
+let drawerResizeObserver: ResizeObserver | null = null;
+let drawerPlacementFrame: number | null = null;
 
 const summary = computed(() => buildSessionContextSummary({
   messages: props.messages,
@@ -63,8 +82,14 @@ function formatNumber(value: number | undefined): string {
 
 function openDetail() {
   tooltipOpen.value = false;
+  const placement = measureDrawerPlacement();
+  if (!placement || placement.width <= 0) return;
+  emit("detail-open");
   detailOpen.value = true;
-  nextTick(() => closeRef.value?.focus());
+  nextTick(() => {
+    measureDrawerPlacement();
+    closeRef.value?.focus();
+  });
 }
 
 function toggleDetail() {
@@ -79,7 +104,36 @@ function toggleDetail() {
 function closeDetail(restoreFocus = true) {
   if (!detailOpen.value) return;
   detailOpen.value = false;
+  if (drawerPlacementFrame !== null && typeof window !== "undefined") {
+    window.cancelAnimationFrame(drawerPlacementFrame);
+    drawerPlacementFrame = null;
+  }
   if (restoreFocus) nextTick(() => triggerRef.value?.focus());
+}
+
+// 与会话列表一致，按对话栏实测矩形定位到 body；宽度不足时只压缩外侧抽屉，绝不覆盖对话。
+function measureDrawerPlacement() {
+  if (typeof window === "undefined") return null;
+  const root = triggerRef.value?.closest(".figma-chat-root") as HTMLElement | null;
+  if (!root) return null;
+  const rect = root.getBoundingClientRect();
+  const placement = resolveExternalConversationDrawerPlacement(
+    { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
+    { width: window.innerWidth, height: window.innerHeight },
+    420
+  );
+  drawerPlacement.value = placement;
+  return placement;
+}
+
+// 仅在详情可见时按帧合并滚动和尺寸事件，避免消息滚动期间反复触发布局读取。
+function scheduleDrawerPlacement() {
+  if (!detailOpen.value || typeof window === "undefined" || drawerPlacementFrame !== null) return;
+  drawerPlacementFrame = window.requestAnimationFrame(() => {
+    drawerPlacementFrame = null;
+    const placement = measureDrawerPlacement();
+    if (!placement || placement.width <= 0) closeDetail(false);
+  });
 }
 
 function handleEscape(event: KeyboardEvent) {
@@ -95,8 +149,31 @@ function handleEscape(event: KeyboardEvent) {
 }
 
 watch(() => props.sessionId, () => closeDetail(false));
-window.addEventListener("keydown", handleEscape);
-onBeforeUnmount(() => window.removeEventListener("keydown", handleEscape));
+watch(() => props.panelVisible, (visible) => {
+  if (visible === false) closeDetail(false);
+});
+watch(() => props.historyDrawerOpen, (open) => {
+  if (open) closeDetail(false);
+});
+onMounted(() => {
+  window.addEventListener("keydown", handleEscape);
+  window.addEventListener("resize", scheduleDrawerPlacement);
+  window.addEventListener("scroll", scheduleDrawerPlacement, true);
+  const root = triggerRef.value?.closest(".figma-chat-root") as HTMLElement | null;
+  if (root && typeof ResizeObserver !== "undefined") {
+    drawerResizeObserver = new ResizeObserver(scheduleDrawerPlacement);
+    drawerResizeObserver.observe(root);
+  }
+});
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", handleEscape);
+  window.removeEventListener("resize", scheduleDrawerPlacement);
+  window.removeEventListener("scroll", scheduleDrawerPlacement, true);
+  if (drawerPlacementFrame !== null) window.cancelAnimationFrame(drawerPlacementFrame);
+  drawerPlacementFrame = null;
+  drawerResizeObserver?.disconnect();
+  drawerResizeObserver = null;
+});
 </script>
 
 <template>
@@ -144,15 +221,18 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleEscape));
       <div><span>已使用</span><strong>{{ formatNumber(summary.totalTokens) }}</strong></div>
     </div>
 
-    <section
-      v-if="detailOpen"
-      class="session-context-panel session-context-drawer"
-      data-side="left"
-      :id="dialogId"
-      role="dialog"
-      aria-label="会话上下文"
-      aria-modal="false"
-    >
+    <Teleport to="body">
+      <section
+        v-if="detailOpen && drawerPlacement && drawerPlacement.width > 0"
+        class="session-context-panel session-context-external-drawer"
+        data-side="left"
+        data-placement="left-of-conversation"
+        :id="dialogId"
+        :style="drawerPanelStyle"
+        role="dialog"
+        aria-label="会话上下文"
+        aria-modal="false"
+      >
       <header class="session-context-panel-header">
         <div>
           <p class="session-context-eyebrow">CONTEXT</p>
@@ -225,7 +305,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleEscape));
           </div>
         </section>
       </div>
-    </section>
+      </section>
+    </Teleport>
   </div>
 </template>
 
@@ -312,17 +393,18 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleEscape));
 }
 
 .session-context-panel {
-  position: absolute;
-  inset: 30px auto 30px 0;
-  z-index: 30;
-  width: min(420px, calc(100% - 24px));
+  position: fixed;
+  z-index: 1200;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-right: 1px solid #dedee4;
+  overflow: hidden;
+  border: 1px solid #dedee4;
+  border-radius: 10px 0 0 10px;
   color: #27272a;
   background: #fafafa;
-  box-shadow: 18px 0 34px rgba(15, 15, 18, 0.16);
+  box-shadow: -8px 0 28px rgba(15, 23, 42, 0.14);
   font-family: var(--font-sans);
   animation: session-context-drawer-enter 180ms cubic-bezier(0.2, 0.75, 0.2, 1);
 }
@@ -429,11 +511,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleEscape));
 }
 
 .session-context-meta-grid {
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
 }
 
 .session-context-token-grid {
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(110px, 100%), 1fr));
 }
 
 .session-context-meta-grid div,
@@ -539,7 +621,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleEscape));
 .session-context-breakdown-legend {
   margin-top: 13px;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
   gap: 8px 16px;
 }
 
@@ -576,7 +658,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleEscape));
 }
 
 @keyframes session-context-drawer-enter {
-  from { opacity: 0.92; transform: translateX(-100%); }
+  from { opacity: 0.72; transform: translateX(12px); }
   to { opacity: 1; transform: translateX(0); }
 }
 

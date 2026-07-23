@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { resolveSessionListDrawerPlacement } from "../src/components/session-list-drawer";
+import {
+  resolveExternalConversationDrawerPlacement,
+  resolveSessionListDrawerPlacement
+} from "../src/components/session-list-drawer";
 
 describe("session list drawer placement", () => {
   it("anchors the drawer immediately left of the conversation panel on desktop", () => {
@@ -55,4 +58,53 @@ describe("session list drawer placement", () => {
       height: 784
     });
   });
+});
+
+describe("external conversation drawer placement", () => {
+  it("anchors its right edge to the conversation without covering it", () => {
+    const placement = resolveExternalConversationDrawerPlacement(
+      { top: 40, left: 900, width: 450, height: 720 },
+      { width: 1440, height: 900 },
+      420
+    );
+
+    expect(placement).toEqual({
+      mode: "left",
+      top: 40,
+      left: 480,
+      width: 420,
+      height: 720
+    });
+  });
+
+  it("shrinks to the available left area instead of overlaying the conversation", () => {
+    const placement = resolveExternalConversationDrawerPlacement(
+      { top: 40, left: 220, width: 450, height: 720 },
+      { width: 720, height: 844 },
+      420
+    );
+
+    expect(placement).toEqual({
+      mode: "left",
+      top: 40,
+      left: 8,
+      width: 212,
+      height: 720
+    });
+  });
+
+  it.each([0, 4, 8])(
+    "keeps zero width when the conversation starts at x=%s",
+    (conversationLeft) => {
+      const placement = resolveExternalConversationDrawerPlacement(
+        { top: 40, left: conversationLeft, width: 450, height: 720 },
+        { width: 720, height: 844 },
+        420
+      );
+
+      expect(placement.left).toBe(conversationLeft);
+      expect(placement.width).toBe(0);
+      expect(placement.left + placement.width).toBeLessThanOrEqual(conversationLeft);
+    }
+  );
 });

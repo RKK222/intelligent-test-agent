@@ -101,6 +101,51 @@ describe("FigmaChatPanel", () => {
     ]);
   });
 
+  it("keeps the session list and context drawers mutually exclusive", async () => {
+    setViewport(1440, 900);
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        currentSessionId: "session_context_drawers",
+        title: "抽屉互斥会话",
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      attachTo: document.body
+    });
+    const root = wrapper.get<HTMLElement>(".figma-chat-root").element;
+    root.getBoundingClientRect = () => ({
+      x: 900,
+      y: 40,
+      top: 40,
+      left: 900,
+      right: 1350,
+      bottom: 760,
+      width: 450,
+      height: 720,
+      toJSON: () => ({})
+    });
+    const historyTrigger = wrapper.get<HTMLButtonElement>('button[title="查看会话列表"]');
+    const contextTrigger = wrapper.get<HTMLButtonElement>('button[aria-label="查看会话上下文"]');
+
+    await historyTrigger.trigger("click");
+    expect(document.body.querySelector('[aria-label="会话列表"]')).not.toBeNull();
+    await contextTrigger.trigger("click");
+    await nextTick();
+    expect(document.body.querySelector('[aria-label="会话列表"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"][aria-label="会话上下文"]')).not.toBeNull();
+
+    await historyTrigger.trigger("click");
+    await nextTick();
+    expect(document.body.querySelector('[role="dialog"][aria-label="会话上下文"]')).toBeNull();
+    expect(document.body.querySelector('[aria-label="会话列表"]')).not.toBeNull();
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await nextTick();
+    expect(document.body.querySelector('[aria-label="会话列表"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"][aria-label="会话上下文"]')).toBeNull();
+    expect(document.activeElement).toBe(historyTrigger.element);
+  });
+
   it("shows pending night tasks in a tab and locks only further messages in that session", async () => {
     const pendingTask = {
       taskId: "night_1",
