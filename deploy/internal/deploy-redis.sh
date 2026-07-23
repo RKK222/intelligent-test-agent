@@ -252,7 +252,16 @@ persistence_value() {
 
 run_redis_container() {
   local appendonly_override="${1:-}"
-  local -a command=(redis-server /usr/local/etc/redis/redis.conf)
+  # 配置文件含 Redis 密码且宿主机包保持 0600；容器启动时先在容器内复制并交给 redis 用户读取。
+  # 不改变宿主机敏感文件权限，也兼容 Linux Docker 的 bind mount 权限检查。
+  local -a command=(
+    sh -c '
+      install -m 0600 /usr/local/etc/redis/redis.conf /tmp/test-agent-redis.conf &&
+      chown redis:redis /tmp/test-agent-redis.conf &&
+      exec /usr/bin/setpriv --reuid redis --regid redis --clear-groups \
+        redis-server /tmp/test-agent-redis.conf "$@"
+    ' sh
+  )
   if [[ -n "${appendonly_override}" ]]; then
     command+=(--appendonly "${appendonly_override}")
   fi

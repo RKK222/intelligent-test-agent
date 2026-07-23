@@ -190,6 +190,19 @@ docker image inspect test-agent-redis:7.4.9-alpine \
 
 部署脚本会先用 `docker image inspect` 强制确认镜像为 `linux/amd64`，运行容器时不再传递
 `--platform`，兼容未启用 experimental features 的旧版 Docker daemon；这不会放宽镜像架构校验。
+配置文件继续保持宿主机 `0600`。脚本启动容器时会在容器内复制配置并用 `setpriv` 切换到
+`redis` 用户，避免 Linux bind mount 因 UID 权限报 `permission denied`，不需要把含密码配置改成 `0644`。
+
+如果现场正在使用旧版脚本且已经出现配置文件权限错误，先临时准备运行时配置副本：
+
+```bash
+install -d -m 0700 /data/testagent/redis/config
+install -m 0400 /data/0709/test-agent-redis-offline/config/redis.conf \
+  /data/testagent/redis/config/redis.conf
+chown 999:1000 /data/testagent/redis/config/redis.conf
+```
+
+随后把 `--config-file` 改为 `/data/testagent/redis/config/redis.conf` 重试；原始包内配置不改权限。
 
 如果现场已有同名容器，脚本会拒绝覆盖。确认它就是已备份并停止的旧容器后，才允许显式执行：
 

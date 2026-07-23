@@ -209,6 +209,7 @@ docker logs --tail 120 test-agent-opencode-worker
 
 - `opencode-manager` 报端口配置缺失：不要手工直接跑 `opencode-manager run`；生产用 `opencode-worker-docker.sh`。端口写在 `docker.env` 的 `OPENCODE_WORKER_PORT_START/END`。
 - Redis 部署报 `"--platform" is only supported on a Docker daemon with experimental features enabled`：先确认目标机为 `x86_64`、镜像检查为 `linux/amd64`、没有同名残留容器且数据目录仍只有原 `dump.rdb`；使用当前不带运行期 `--platform` 的 `deploy-redis.sh` 重试，不开启 daemon experimental features，不删除 RDB/AOF，不直接加 `--replace-existing`。
+- Redis 部署报 `can't open config file ... permission denied`：这是 Linux bind mount 读取 0600 宿主机配置的 UID 权限问题，不要把含密码的配置改成 0644；临时将配置复制为 `/data/testagent/redis/config/redis.conf`、设为 `0400` 并赋予镜像 `redis` UID/GID `999:1000` 后用该路径重试。新脚本会在容器内复制配置并用 `setpriv` 切换到 redis 用户，后续无需人工复制。
 - manager 等待 `.serverhost` 或连接旧 IP：检查 `backend.env` 的 `SYS_DATA_ROOT_DIR` 是否等于 `docker.env` 的 `TEST_AGENT_DATA_ROOT`，并确认 Java 已先启动并写出 `.serverid/.serverhost`。
 - 数据库通用参数 `SYS_DATA_ROOT_DIR` 仍是 Linux 默认 `/data/.testagent`：企业内部署需要在系统管理通用参数或数据库中改为 `/data/testagent/data`，否则 Java/worker 共享目录会错位。
 - 公共配置目录未初始化：超级管理员进入“系统管理 -> 配置管理 -> opencode公共配置管理”初始化，确保 `OPENCODE_PUBLIC_CONFIG_DIR` 指向的目录存在且非空。

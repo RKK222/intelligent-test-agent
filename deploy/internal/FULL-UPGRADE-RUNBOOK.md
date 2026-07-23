@@ -323,6 +323,8 @@ docker ps -a --filter name=^/test-agent-redis$ \
 
 镜像必须显示 `os=linux arch=amd64`。部署脚本运行容器时不传 `--platform`，以兼容未启用
 experimental features 的旧版 Docker daemon；脚本仍会在运行前强制校验镜像架构。不存在同名容器时：
+宿主机 Redis 配置继续保持 `0600`；脚本会在容器内复制配置并用 `setpriv` 切换到 `redis` 用户，
+避免 Linux bind mount 因 UID 权限报 `permission denied`。旧脚本临时修复时，不得把含密码配置改为 `0644`。
 
 ```bash
 ./deploy-redis.sh \

@@ -39,6 +39,9 @@ if grep -Fq -- '--platform' "${DEPLOY_SCRIPT}"; then
   exit 1
 fi
 grep -Fq 'Loaded Redis image is not linux/amd64' "${DEPLOY_SCRIPT}"
+grep -Fq 'test-agent-redis.conf' "${DEPLOY_SCRIPT}"
+grep -Fq '/usr/bin/setpriv --reuid redis --regid redis --clear-groups' "${DEPLOY_SCRIPT}"
+grep -Fq 'chown redis:redis' "${DEPLOY_SCRIPT}"
 grep -Fq -- '--restart unless-stopped' "${DEPLOY_SCRIPT}"
 grep -Fq -- '--replace-existing' "${DEPLOY_SCRIPT}"
 grep -Fq 'GETDEL' "${DEPLOY_SCRIPT}"

@@ -70,6 +70,8 @@ if grep -Fq -- '--platform' "${bundle}/deploy-redis.sh"; then
   exit 1
 fi
 grep -Fq 'Loaded Redis image is not linux/amd64' "${bundle}/deploy-redis.sh"
+grep -Fq 'test-agent-redis.conf' "${bundle}/deploy-redis.sh"
+grep -Fq '/usr/bin/setpriv --reuid redis --regid redis --clear-groups' "${bundle}/deploy-redis.sh"
 
 image_tar="${bundle}/test-agent-redis_7.4.9-alpine-linux-amd64.tar"
 [[ "$(awk '{print $1}' "${image_tar}.sha256")" == "$(sha256_digest "${image_tar}")" ]]
