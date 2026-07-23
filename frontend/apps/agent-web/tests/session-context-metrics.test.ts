@@ -65,7 +65,6 @@ describe("session context metrics", () => {
     const summary = buildSessionContextSummary({
       messages,
       messageScopesById: scopes,
-      rootSessionId: "ses_root",
       selectedProvider: "anthropic",
       selectedModel: "anthropic/claude-sonnet",
       models,
@@ -77,7 +76,7 @@ describe("session context metrics", () => {
       providerName: "Anthropic",
       modelId: "claude-sonnet",
       modelName: "Claude Sonnet",
-      messageCount: 4,
+      messageCount: 2,
       contextLimit: 200_000,
       inputTokens: 90_000,
       outputTokens: 8_000,
@@ -104,6 +103,92 @@ describe("session context metrics", () => {
       providerName: "Anthropic",
       modelName: "Claude Sonnet"
     });
+  });
+
+  it("keeps remote root scope usage when its ID differs from the platform session ID", () => {
+    const platformSessionId = "ses_b278fa360be241b39e5382cd33b5f1ae";
+    const remoteRootSessionId = "ses_0719c797fffeuNz55LEr5sU5bH";
+    expect(remoteRootSessionId).not.toBe(platformSessionId);
+    const messages: AgentMessage[] = [
+      { id: "user_remote", messageId: "user_remote", role: "user", text: "分析上下文", createdAt: "2026-07-23T08:00:00Z" },
+      {
+        ...assistant("assistant_remote", {
+          input: 9_518,
+          output: 282,
+          reasoning: 729,
+          cacheRead: 43_008,
+          cacheWrite: 0
+        }, { id: "deepseek-chat", providerId: "deepseek" }),
+        parts: [{ partId: "part_remote_text", type: "text", text: "统计完成" }]
+      }
+    ];
+    const scopes: Record<string, MessageScope> = {
+      user_remote: { sessionId: remoteRootSessionId, rootSessionId: remoteRootSessionId, isChildSession: false },
+      assistant_remote: { sessionId: remoteRootSessionId, rootSessionId: remoteRootSessionId, isChildSession: false }
+    };
+
+    expect(buildSessionContextSummary({
+      messages,
+      messageScopesById: scopes,
+      selectedProvider: "deepseek",
+      selectedModel: "deepseek/deepseek-chat",
+      models: [{ id: "deepseek-chat", providerId: "deepseek", name: "DeepSeek Chat", contextLimit: 1_000_000 }],
+      providers: [{ providerId: "deepseek", name: "DeepSeek" }]
+    })).toMatchObject({
+      messageCount: 2,
+      totalTokens: 53_537,
+      inputTokens: 9_518,
+      outputTokens: 282,
+      usagePercent: 5,
+      ringPercent: 5
+    });
+  });
+
+  it("filters only child scopes and keeps unscoped persisted platform history eligible", () => {
+    const messages: AgentMessage[] = [
+      { id: "user_root", messageId: "user_root", role: "user", text: "根消息", createdAt: "2026-07-23T08:00:00Z" },
+      { id: "user_history", messageId: "user_history", role: "user", text: "平台历史", createdAt: "2026-07-23T08:01:00Z" },
+      assistant("assistant_root", { input: 12, output: 3 }),
+      { id: "user_child", messageId: "user_child", role: "user", text: "子消息", createdAt: "2026-07-23T08:02:00Z" },
+      assistant("assistant_inferred_child", { input: 999, output: 1 })
+    ];
+    const scopes: Record<string, MessageScope> = {
+      user_root: { sessionId: "ses_remote_root", rootSessionId: "ses_remote_root", isChildSession: false },
+      assistant_root: { sessionId: "ses_remote_root", rootSessionId: "ses_remote_root", isChildSession: false },
+      user_child: { sessionId: "ses_child", rootSessionId: "ses_remote_root", isChildSession: true },
+      assistant_inferred_child: { sessionId: "ses_child", rootSessionId: "ses_remote_root" }
+    };
+
+    const summary = buildSessionContextSummary({ messages, messageScopesById: scopes });
+
+    expect(summary.messageCount).toBe(3);
+    expect(summary.totalTokens).toBe(15);
+  });
+
+  it("keeps an explicitly root scope even when its remote session and root IDs differ", () => {
+    const messages = [assistant("assistant_explicit_root", { input: 12, output: 3 })];
+    const scopes: Record<string, MessageScope> = {
+      assistant_explicit_root: {
+        sessionId: "ses_remote_scope",
+        rootSessionId: "ses_remote_root",
+        isChildSession: false
+      }
+    };
+
+    expect(buildSessionContextSummary({ messages, messageScopesById: scopes })).toMatchObject({
+      totalTokens: 15,
+      usageMessageId: "assistant_explicit_root"
+    });
+  });
+
+  it("counts a consecutive assistant turn only after visible text arrives", () => {
+    const user: AgentMessage = { id: "user_1", messageId: "user_1", role: "user", text: "执行任务", createdAt: "2026-07-23T08:00:00Z" };
+    const reasoningOnly = { ...assistant("assistant_reasoning"), text: " ", parts: [{ partId: "reasoning", type: "reasoning" as const, text: "分析中" }] };
+    const toolOnly = { ...assistant("assistant_tool"), text: "", parts: [{ partId: "tool", type: "tool" as const, toolName: "read", status: "completed" as const }] };
+    const finalText = { ...assistant("assistant_final"), text: "", parts: [{ partId: "text", type: "text" as const, text: "任务完成" }] };
+
+    expect(buildSessionContextSummary({ messages: [user, reasoningOnly, toolOnly] }).messageCount).toBe(1);
+    expect(buildSessionContextSummary({ messages: [user, reasoningOnly, toolOnly, finalText] }).messageCount).toBe(2);
   });
 
   it("uses models returned only inside the provider catalog", () => {

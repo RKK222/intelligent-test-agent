@@ -26,6 +26,7 @@ export type SessionContextSummary = {
   modelId?: string;
   modelName: string;
   messageCount: number;
+  eligibleRootMessageCount: number;
   contextLimit?: number;
   usagePercent?: number;
   ringPercent: number;
@@ -41,7 +42,6 @@ export type SessionContextSummary = {
 export type SessionContextMetricsInput = {
   messages: AgentMessage[];
   messageScopesById?: Record<string, MessageScope>;
-  rootSessionId?: string;
   selectedProvider?: string;
   selectedModel?: string;
   models?: ModelInfo[];
@@ -82,16 +82,40 @@ function messageIdentity(message: AgentMessage): string | undefined {
 
 export function isRootContextMessage(
   message: AgentMessage,
-  messageScopesById: Record<string, MessageScope> | undefined,
-  rootSessionId: string | undefined
+  messageScopesById: Record<string, MessageScope> | undefined
 ): boolean {
   if (message.role === "card") return false;
   const id = messageIdentity(message);
   const scope = id ? messageScopesById?.[id] : undefined;
   if (!scope) return true;
-  if (scope.isChildSession) return false;
-  if (rootSessionId && scope.sessionId && scope.sessionId !== rootSessionId) return false;
+  if (scope.isChildSession === true) return false;
+  // 未显式标记时才由 OpenCode scope 自身推断 child；平台 Session ID 不参与此判断。
+  if (scope.isChildSession === undefined && scope.sessionId && scope.rootSessionId && scope.sessionId !== scope.rootSessionId) return false;
   return true;
+}
+
+/** 仅识别非空正文或 text part；reasoning、工具等状态内容不能单独形成可见 assistant 轮次。 */
+function hasVisibleAssistantText(message: Extract<AgentMessage, { role: "assistant" }>): boolean {
+  if (message.text.trim()) return true;
+  return message.parts?.some((part) => part.type === "text" && part.text.trim().length > 0) ?? false;
+}
+
+/** user 每条独立计数；在下一个 user 前连续的 assistant 只合并为一轮，且必须先出现可见正文。 */
+function countVisibleContextMessages(messages: AgentMessage[]): number {
+  let count = 0;
+  let currentAssistantTurnHasText = false;
+  for (const message of messages) {
+    if (message.role === "user") {
+      count += 1;
+      currentAssistantTurnHasText = false;
+      continue;
+    }
+    if (message.role === "assistant" && !currentAssistantTurnHasText && hasVisibleAssistantText(message)) {
+      count += 1;
+      currentAssistantTurnHasText = true;
+    }
+  }
+  return count;
 }
 
 function selectedModelRef(selectedProvider: string | undefined, selectedModel: string | undefined): ModelRef | undefined {
@@ -129,7 +153,7 @@ function mergedCatalogModels(models: ModelInfo[], providers: ProviderInfo[]): Mo
 }
 
 export function buildSessionContextSummary(input: SessionContextMetricsInput): SessionContextSummary {
-  const rootMessages = input.messages.filter((message) => isRootContextMessage(message, input.messageScopesById, input.rootSessionId));
+  const rootMessages = input.messages.filter((message) => isRootContextMessage(message, input.messageScopesById));
   const usageMessage = [...rootMessages].reverse().find(
     (message): message is Extract<AgentMessage, { role: "assistant" }> => message.role === "assistant" && totalTokenUsage(message.tokens) > 0
   );
@@ -146,7 +170,8 @@ export function buildSessionContextSummary(input: SessionContextMetricsInput): S
     providerName: provider?.name ?? providerId ?? "—",
     modelId: reference?.id ?? catalogModel?.id,
     modelName: catalogModel?.name ?? reference?.id ?? "—",
-    messageCount: rootMessages.filter((message) => message.role === "user" || message.role === "assistant").length,
+    messageCount: countVisibleContextMessages(rootMessages),
+    eligibleRootMessageCount: rootMessages.length,
     contextLimit,
     usagePercent,
     ringPercent: usagePercent === undefined ? 0 : Math.min(100, Math.max(0, usagePercent)),
@@ -194,7 +219,7 @@ function estimatedTokens(characters: number): number {
 export function estimateSessionContextBreakdown(
   messages: AgentMessage[],
   inputTokens: number,
-  options: Pick<SessionContextMetricsInput, "messageScopesById" | "rootSessionId"> = {}
+  options: Pick<SessionContextMetricsInput, "messageScopesById"> = {}
 ): SessionContextBreakdownItem[] {
   const target = Math.max(0, Math.round(inputTokens));
   if (target === 0) return [];
@@ -203,7 +228,7 @@ export function estimateSessionContextBreakdown(
   let assistantCharacters = 0;
   let toolCharacters = 0;
   for (const message of messages) {
-    if (!isRootContextMessage(message, options.messageScopesById, options.rootSessionId)) continue;
+    if (!isRootContextMessage(message, options.messageScopesById)) continue;
     if (message.role === "user") {
       userCharacters += promptPartLength(message);
       continue;

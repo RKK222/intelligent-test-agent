@@ -868,10 +868,26 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
         ...base,
         role: "assistant",
         parts: existing && existing.role === "assistant" ? existing.parts : undefined,
-        tokens: incomingTokens ?? (existing?.role === "assistant" ? existing.tokens : undefined),
+        tokens: mergeAssistantTokenUsage(incomingTokens, existing?.role === "assistant" ? existing.tokens : undefined),
         model: incomingModel ?? (existing?.role === "assistant" ? existing.model : undefined)
       };
   return replaceOrAppendMessage(messages, index, message);
+}
+
+function mergeAssistantTokenUsage(
+  incoming: Extract<AgentMessage, { role: "assistant" }>['tokens'] | undefined,
+  existing: Extract<AgentMessage, { role: "assistant" }>['tokens'] | undefined
+) {
+  if (!incoming || !existing || hasValidAssistantTokenUsage(incoming) || !hasValidAssistantTokenUsage(existing)) {
+    return incoming ?? existing;
+  }
+  // 同一远端消息的流式尾帧可能补发全零 usage，不能覆盖此前已经收到的有效快照。
+  return existing;
+}
+
+function hasValidAssistantTokenUsage(tokens: Extract<AgentMessage, { role: "assistant" }>['tokens']): boolean {
+  return [tokens?.input, tokens?.output, tokens?.reasoning, tokens?.cacheRead, tokens?.cacheWrite]
+    .some((value) => typeof value === "number" && Number.isFinite(value) && value > 0);
 }
 
 /**
@@ -1061,19 +1077,22 @@ function messageIdFromPartEvent(event: RunEvent): string | undefined {
 }
 
 function scopeFromPayload(payload: Record<string, unknown>): MessageScope | undefined {
-  const sessionId = text(payload.sessionId) ?? text(payload.sessionID);
-  const rootSessionId = text(payload.rootSessionId);
-  const parentSessionId = text(payload.parentSessionId);
+  // 原生消息把 info/message 主体与平台补齐的 root scope 分散在不同层级，读取时以外层补齐字段优先。
+  const raw = record(payload.message) ?? record(payload.info) ?? payload;
+  const sessionId = text(payload.sessionId) ?? text(payload.sessionID) ?? text(raw.sessionId) ?? text(raw.sessionID);
+  const rootSessionId = text(payload.rootSessionId) ?? text(payload.rootSessionID) ?? text(raw.rootSessionId) ?? text(raw.rootSessionID);
+  const parentSessionId = text(payload.parentSessionId) ?? text(payload.parentSessionID) ?? text(raw.parentSessionId) ?? text(raw.parentSessionID);
   const inferredChildSession = sessionId !== undefined && rootSessionId !== undefined ? sessionId !== rootSessionId : undefined;
-  const isChildSession = booleanValue(payload.isChildSession) ?? booleanValue(payload.childSession) ?? inferredChildSession;
+  const isChildSession = booleanValue(payload.isChildSession) ?? booleanValue(payload.childSession)
+    ?? booleanValue(raw.isChildSession) ?? booleanValue(raw.childSession) ?? inferredChildSession;
   const scope: MessageScope = {
     sessionId,
     rootSessionId,
     parentSessionId,
     isChildSession,
-    taskMessageId: text(payload.taskMessageId) ?? text(payload.taskMessageID),
-    taskPartId: text(payload.taskPartId) ?? text(payload.taskPartID),
-    taskCallId: text(payload.taskCallId) ?? text(payload.taskCallID)
+    taskMessageId: text(payload.taskMessageId) ?? text(payload.taskMessageID) ?? text(raw.taskMessageId) ?? text(raw.taskMessageID),
+    taskPartId: text(payload.taskPartId) ?? text(payload.taskPartID) ?? text(raw.taskPartId) ?? text(raw.taskPartID),
+    taskCallId: text(payload.taskCallId) ?? text(payload.taskCallID) ?? text(raw.taskCallId) ?? text(raw.taskCallID)
   };
   return Object.values(scope).some((value) => value !== undefined) ? scope : undefined;
 }

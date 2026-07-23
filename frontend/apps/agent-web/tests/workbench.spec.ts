@@ -2546,34 +2546,37 @@ test("model picker keeps the selected model after page reload", async ({ page })
   });
 });
 
-test("context usage follows the selected model catalog and live assistant usage", async ({ page }) => {
+test("context usage keeps payload.info remote root usage separate from the platform session", async ({ page }) => {
   await mockBackendApi(page, {
     ...runnableWorkspaceSetup(),
     models: [{
-      id: "gpt-context",
-      providerID: "openai",
-      name: "GPT Context",
+      id: "deepseek-chat",
+      providerID: "deepseek",
+      name: "DeepSeek Chat",
       defaultModel: true,
-      limit: { context: 200_000, output: 32_000 }
+      limit: { context: 1_000_000, output: 32_000 }
     }],
-    providers: [{ id: "openai", name: "OpenAI Context", status: "ready" }],
+    providers: [{ id: "deepseek", name: "DeepSeek", status: "ready" }],
     runEvents: [
       event(1, "message.updated", {
-        message: {
+        rootSessionId: "ses_0719c797fffeuNz55LEr5sU5bH",
+        info: {
           id: "msg_context_live",
-          sessionID: "ses_1",
+          sessionID: "ses_0719c797fffeuNz55LEr5sU5bH",
           role: "assistant",
-          providerID: "openai",
-          modelID: "gpt-context",
+          providerID: "deepseek",
+          modelID: "deepseek-chat",
           tokens: {
-            input: 90_000,
-            output: 8_000,
-            reasoning: 1_000,
-            cache: { read: 500, write: 500 }
+            input: 9_518,
+            output: 282,
+            reasoning: 729,
+            cache: { read: 43_008, write: 0 }
           }
         }
       }),
       event(2, "message.part.updated", {
+        sessionID: "ses_0719c797fffeuNz55LEr5sU5bH",
+        rootSessionId: "ses_0719c797fffeuNz55LEr5sU5bH",
         messageID: "msg_context_live",
         part: { id: "part_context_live", messageID: "msg_context_live", type: "text", text: "上下文统计完成" }
       }),
@@ -2596,19 +2599,23 @@ test("context usage follows the selected model catalog and live assistant usage"
   await expect(contextButton).toHaveCSS("outline-color", "rgb(164, 13, 188)");
   await contextButton.hover();
   const tooltip = page.locator(".session-context-tooltip");
-  await expect(tooltip).toContainText("使用率50%");
-  await expect(tooltip).toContainText("总上下文200,000");
-  await expect(tooltip).toContainText("已使用100,000");
+  await expect(tooltip).toContainText("使用率5%");
+  await expect(tooltip).toContainText("总上下文1,000,000");
+  await expect(tooltip).toContainText("已使用53,537");
   await expect(tooltip).not.toContainText("费用");
   const progressRing = contextButton.locator(".session-context-ring-value");
   await expect(progressRing).toHaveCSS("stroke", "rgb(164, 13, 188)");
-  expect(Number.parseFloat(await progressRing.getAttribute("stroke-dashoffset") ?? "NaN")).toBeCloseTo(Math.PI * 6, 5);
+  expect(Number.parseFloat(await progressRing.getAttribute("stroke-dashoffset") ?? "NaN")).toBeCloseTo(Math.PI * 6 * 1.9, 5);
 
   await contextButton.click();
   const detail = page.getByRole("dialog", { name: "会话上下文" });
   await expect(detail).toContainText("E2E Session");
-  await expect(detail).toContainText("OpenAI Context");
-  await expect(detail).toContainText("GPT Context");
+  await expect(detail).toContainText("DeepSeek");
+  await expect(detail).toContainText("DeepSeek Chat");
+  await expect(detail).toContainText("2 条");
+  await expect(detail).toContainText("53,537");
+  await expect(detail).toContainText("9,518");
+  await expect(detail).toContainText("282");
   await expect(detail.getByTestId("context-breakdown")).toBeVisible();
   await detail.evaluate(async (element) => {
     await Promise.all(element.getAnimations().map((animation) => animation.finished));

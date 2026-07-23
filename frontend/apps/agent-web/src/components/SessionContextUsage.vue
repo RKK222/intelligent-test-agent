@@ -50,7 +50,6 @@ let drawerPlacementFrame: number | null = null;
 const summary = computed(() => buildSessionContextSummary({
   messages: props.messages,
   messageScopesById: props.messageScopesById,
-  rootSessionId: props.sessionId,
   selectedProvider: props.selectedProvider,
   selectedModel: props.selectedModel,
   models: props.models,
@@ -73,13 +72,12 @@ let cachedBreakdown: SessionContextBreakdownItem[] = [];
 const breakdown = computed(() => {
   if (!detailOpen.value) return [];
   const value = summary.value;
-  // 流式正文频繁变化时，只在影响统计口径的最近用量、input 或根消息数变化后重算正文拆分。
-  const cacheKey = `${props.sessionId}:${value.usageMessageId ?? "none"}:${value.inputTokens}:${value.messageCount}`;
+  // 流式正文频繁变化时，只在最近用量、input 或 eligible root 原始消息数变化后重算正文拆分。
+  const cacheKey = `${props.sessionId}:${value.usageMessageId ?? "none"}:${value.inputTokens}:${value.eligibleRootMessageCount}`;
   if (cacheKey === cachedBreakdownKey) return cachedBreakdown;
   cachedBreakdownKey = cacheKey;
   cachedBreakdown = estimateSessionContextBreakdown(props.messages, value.inputTokens, {
-    messageScopesById: props.messageScopesById,
-    rootSessionId: props.sessionId
+    messageScopesById: props.messageScopesById
   });
   return cachedBreakdown;
 });

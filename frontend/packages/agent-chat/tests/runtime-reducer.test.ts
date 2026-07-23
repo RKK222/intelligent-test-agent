@@ -64,6 +64,103 @@ describe("agent-chat runtime reducer", () => {
     });
   });
 
+  it("keeps a same-message valid usage snapshot when a later update reports all zero", () => {
+    const withUsage = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("message.updated", {
+        message: {
+          id: "msg_usage_zero_update",
+          role: "assistant",
+          tokens: { input: 120, output: 20, reasoning: 5, cache: { read: 3, write: 2 } }
+        }
+      })
+    });
+    const withZeroUpdate = reduceAgentChatRuntime(withUsage, {
+      type: "event",
+      event: event("message.updated", {
+        message: {
+          id: "msg_usage_zero_update",
+          role: "assistant",
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+        }
+      })
+    });
+
+    expect(withZeroUpdate.messages[0]).toMatchObject({
+      tokens: { input: 120, output: 20, reasoning: 5, cacheRead: 3, cacheWrite: 2 }
+    });
+
+    const zeroFirst = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("message.updated", {
+        message: {
+          id: "msg_usage_zero_first",
+          role: "assistant",
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+        }
+      })
+    });
+
+    expect(zeroFirst.messages[0]).toMatchObject({
+      tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 }
+    });
+  });
+
+  it("retains payload.info usage, model and remote root scope across later part updates", () => {
+    const remoteRootSessionId = "ses_0719c797fffeuNz55LEr5sU5bH";
+    const withSnapshot = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("message.updated", {
+        rootSessionId: remoteRootSessionId,
+        info: {
+          id: "msg_payload_info",
+          sessionID: remoteRootSessionId,
+          role: "assistant",
+          providerID: "deepseek",
+          modelID: "deepseek-chat",
+          tokens: {
+            input: 9_518,
+            output: 282,
+            reasoning: 729,
+            cache: { read: 43_008, write: 0 }
+          }
+        }
+      })
+    });
+
+    expect(withSnapshot.messages[0]).toMatchObject({
+      tokens: { input: 9_518, output: 282, reasoning: 729, cacheRead: 43_008, cacheWrite: 0 },
+      model: { id: "deepseek-chat", providerId: "deepseek" }
+    });
+    expect(withSnapshot.messageScopesById.msg_payload_info).toEqual({
+      sessionId: remoteRootSessionId,
+      rootSessionId: remoteRootSessionId,
+      isChildSession: false,
+      parentSessionId: undefined,
+      taskMessageId: undefined,
+      taskPartId: undefined,
+      taskCallId: undefined
+    });
+
+    const withPart = reduceAgentChatRuntime(withSnapshot, {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_payload_info",
+        part: { id: "part_payload_info", messageID: "msg_payload_info", type: "text", text: "统计完成" }
+      })
+    });
+
+    expect(withPart.messages[0]).toMatchObject({
+      tokens: { input: 9_518, output: 282, reasoning: 729, cacheRead: 43_008, cacheWrite: 0 },
+      model: { id: "deepseek-chat", providerId: "deepseek" }
+    });
+    expect(withPart.messageScopesById.msg_payload_info).toMatchObject({
+      sessionId: remoteRootSessionId,
+      rootSessionId: remoteRootSessionId,
+      isChildSession: false
+    });
+  });
+
   it("archives the previous turn todos and clears them as soon as a new user message is submitted", () => {
     const previous = {
       ...createInitialAgentChatRuntimeState([

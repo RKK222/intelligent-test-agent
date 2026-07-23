@@ -115,6 +115,135 @@ describe("SessionContextUsage", () => {
     expect(detail.findAll('[data-testid="context-breakdown-item"]')).toHaveLength(5);
   });
 
+  it("keeps remote-root metrics visible and counts the assistant only after text arrives", async () => {
+    const platformSessionId = "ses_b278fa360be241b39e5382cd33b5f1ae";
+    const remoteRootSessionId = "ses_0719c797fffeuNz55LEr5sU5bH";
+    const assistantWithoutText = {
+      id: "assistant_remote",
+      messageId: "assistant_remote",
+      role: "assistant" as const,
+      text: "",
+      tokens: { input: 9_518, output: 282, reasoning: 729, cacheRead: 43_008, cacheWrite: 0 },
+      model: { id: "deepseek-chat", providerId: "deepseek" },
+      parts: [{ partId: "part_reasoning", type: "reasoning" as const, text: "正在分析" }],
+      createdAt: "2026-07-23T08:01:00Z"
+    };
+    const props = {
+      ...baseProps,
+      sessionId: platformSessionId,
+      messages: [
+        { id: "user_remote", messageId: "user_remote", role: "user" as const, text: "分析上下文", createdAt: "2026-07-23T08:00:00Z" },
+        assistantWithoutText
+      ],
+      messageScopesById: {
+        user_remote: { sessionId: remoteRootSessionId, rootSessionId: remoteRootSessionId, isChildSession: false },
+        assistant_remote: { sessionId: remoteRootSessionId, rootSessionId: remoteRootSessionId, isChildSession: false }
+      },
+      selectedProvider: "deepseek",
+      selectedModel: "deepseek/deepseek-chat",
+      models: [{ id: "deepseek-chat", providerId: "deepseek", name: "DeepSeek Chat", contextLimit: 1_000_000 }],
+      providers: [{ providerId: "deepseek", name: "DeepSeek" }]
+    };
+    const wrapper = mountContextUsage(props);
+
+    await wrapper.get('button[aria-label="查看会话上下文"]').trigger("click");
+    const detail = getTeleportedDetail();
+    expect(detail.text()).toContain("1 条");
+    expect(detail.text()).toContain("53,537");
+    expect(detail.text()).toContain("9,518");
+    expect(detail.text()).toContain("282");
+    expect(detail.text()).toContain("5%");
+
+    await wrapper.setProps({
+      messages: [{ ...props.messages[0] }, {
+        ...assistantWithoutText,
+        parts: [...assistantWithoutText.parts, { partId: "part_text", type: "text" as const, text: "统计完成" }]
+      }]
+    });
+
+    expect(getTeleportedDetail().text()).toContain("2 条");
+  });
+
+  it("refreshes the open breakdown when an invisible assistant is added or reclassified", async () => {
+    const remoteRootSessionId = "ses_remote_root";
+    const visibleAssistant = {
+      id: "assistant_visible",
+      messageId: "assistant_visible",
+      role: "assistant" as const,
+      text: "已完成",
+      tokens: { input: 100, output: 1 },
+      model: { id: "claude-sonnet", providerId: "anthropic" },
+      createdAt: "2026-07-23T08:01:00Z"
+    };
+    const toolReasoningAssistant = {
+      id: "assistant_tool_reasoning",
+      messageId: "assistant_tool_reasoning",
+      role: "assistant" as const,
+      text: "",
+      parts: [
+        { partId: "part_reasoning", type: "reasoning" as const, text: "正在分析" },
+        {
+          partId: "part_tool",
+          type: "tool" as const,
+          toolName: "read",
+          status: "completed" as const,
+          input: { path: "example.ts" },
+          output: "O".repeat(80)
+        }
+      ],
+      createdAt: "2026-07-23T08:02:00Z"
+    };
+    const props = {
+      ...baseProps,
+      messages: [
+        { id: "user_root", messageId: "user_root", role: "user" as const, text: "分析上下文", createdAt: "2026-07-23T08:00:00Z" },
+        visibleAssistant
+      ],
+      messageScopesById: {
+        user_root: { sessionId: remoteRootSessionId, rootSessionId: remoteRootSessionId, isChildSession: false },
+        assistant_visible: { sessionId: remoteRootSessionId, rootSessionId: remoteRootSessionId, isChildSession: false }
+      }
+    };
+    const wrapper = mountContextUsage(props);
+    const toolBreakdown = () => {
+      const item = getTeleportedDetail().findAll('[data-testid="context-breakdown-item"]')
+        .find((candidate) => candidate.text().includes("工具"));
+      if (!item) throw new Error("未找到工具上下文拆分");
+      return item.text();
+    };
+
+    await wrapper.get('button[aria-label="查看会话上下文"]').trigger("click");
+    expect(getTeleportedDetail().text()).toContain("2 条");
+    expect(toolBreakdown()).toContain("0");
+
+    await wrapper.setProps({
+      messages: [...props.messages, toolReasoningAssistant],
+      messageScopesById: {
+        ...props.messageScopesById,
+        assistant_tool_reasoning: {
+          sessionId: remoteRootSessionId,
+          rootSessionId: remoteRootSessionId,
+          isChildSession: false
+        }
+      }
+    });
+    expect(getTeleportedDetail().text()).toContain("2 条");
+    expect(toolBreakdown()).toContain("24");
+
+    await wrapper.setProps({
+      messageScopesById: {
+        ...props.messageScopesById,
+        assistant_tool_reasoning: {
+          sessionId: "ses_child",
+          rootSessionId: remoteRootSessionId,
+          isChildSession: true
+        }
+      }
+    });
+    expect(getTeleportedDetail().text()).toContain("2 条");
+    expect(toolBreakdown()).toContain("0");
+  });
+
   it("opens the detail as a drawer outside the conversation", async () => {
     const wrapper = mountContextUsage();
     const trigger = wrapper.get<HTMLButtonElement>('button[aria-label="查看会话上下文"]');

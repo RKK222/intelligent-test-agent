@@ -986,3 +986,20 @@
 - Result:
   - 上下文详情现在占用对话栏左侧的工作台空间，不再覆盖对话内容；统计数据、模型上限、图表和原有 footer 任务消耗行为不变。
   - 未修改 HTTP API、RunEvent、数据库/Flyway、依赖、安全配置、统计缓存或兼容字段，也未修改环境配置文件。
+
+### 2026-07-23 - 修复会话上下文统计归零
+
+- Why:
+  - 平台 Session ID 与 OpenCode 根 scope ID 不同的真实消息被上下文统计错误过滤，圆环、提示和详情因此显示为 0；`payload.info` 的 scope 也没有随消息快照保留。
+  - 详情拆分缓存此前以可见轮次数作为失效条件；新增或重分类 reasoning/tool-only root 消息不会改变轮次数，导致已打开抽屉继续展示旧拆分。
+- What:
+  - 上下文 root 过滤不再接收或比较平台 Session ID：显式 child scope 一律排除，标记缺失时仅按 scope 自身的 `sessionId/rootSessionId` 差异推断 child，未带 scope 的平台历史继续兼容。
+  - 消息数改为可见对话轮次：root user 每条一次，连续 root assistant 原始消息只在出现非空 text/text part 后合并计一次；reasoning、tool、file、retry、step-only 不计数。最近有效 assistant 五项用量仍作为唯一 usage 来源，零/缺失后续 snapshot 不覆盖它。
+  - 详情拆分缓存改用仅内部的 eligible root 原始消息数，而不是展示轮次数；保持仅在详情打开时计算，流式正文 delta 不会反复重算。
+  - reducer 统一从 `payload.message`/`payload.info` 提取远端 session/root/parent scope，保留嵌套 cache、provider/model 和后续 part 更新前的完整快照；同一 assistant message 的后续全零 usage 不覆盖已收到的有效 usage，首包全零仍保持独立规范化值；同步两个前端 README 与 Vitest/Playwright 回归。
+- How:
+  - TDD RED：定向 Vitest 初始 6 个失败，准确暴露平台/远端 ID 错配、`payload.info` scope 丢失、child/无 scope 边界及可见轮次口径；独立审查再加入同 ID 非零→全零 `message.updated` 的 RED，确认有效 usage 被错误覆盖。最小修复后 87 个相关 Vitest 全绿，Chromium/mobile mock E2E 2/2 通过 DeepSeek `1,000,000` 与 `53,537 / 9,518 / 282 / 5%` fixture。
+  - 最终审查先新增“抽屉已打开时新增不可见 root assistant、随后 root→child 重分类”组件 RED；旧 cache 返回 `工具0` 而非预期 `工具24`。最小修复后三个相关 Vitest 文件为 88 项全绿，Chromium/mobile mock E2E 仍为 2/2 通过。
+  - `corepack pnpm lint`、串行 `corepack pnpm typecheck`、`corepack pnpm build` 与 `git diff --check` 通过；最终全量 Vitest 为 1590 passed / 1 skipped / 1 known unrelated failed，唯一失败仍是 `DirectoryRows.test.ts` 以 role=button 查询 role=radio 的“上传”。
+- Result:
+  - 修复只涉及前端展示/reducer投影，不新增或变更 API、RunEvent wire contract、数据库、依赖、安全配置或环境文件；平台与远端 ID 独立可兼容旧历史/旧事件。
