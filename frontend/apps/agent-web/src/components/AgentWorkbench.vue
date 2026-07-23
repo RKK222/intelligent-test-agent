@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, nextTick, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, shallowRef, watch } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/vue-query";
 import {
   AgentChat,
@@ -128,6 +128,7 @@ import ReferenceConfigurationDialog from "./ReferenceConfigurationDialog.vue";
 import { canShowReferenceConfiguration } from "./reference-configuration-access";
 import SettingsDialog from "./settings/SettingsDialog.vue";
 import ServerWorkspacePickerDialog from "./ServerWorkspacePickerDialog.vue";
+import { readServerWorkspacePickerTabState } from "./server-workspace-picker-tab";
 import SystemManagementWrapper from "./SystemManagementWrapper.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import { notifyFeedback } from "./notify";
@@ -216,6 +217,7 @@ const queryClient = useQueryClient();
 const workbench = useWorkbenchStore();
 const authStore = useAuthStore();
 const chatContextStore = useChatContextStore();
+const route = useRoute();
 const router = useRouter();
 const OPENCODE_PROCESS_START_OPERATION_POLL_INTERVAL_MS = 500;
 const AGENT_CATALOG_REQUEST_TIMEOUT_MS = 8000;
@@ -520,6 +522,12 @@ const serverWorkspacePickerLoading = ref(false);
 const serverWorkspaceServers = shallowRef<WorkspaceBackendServer[]>([]);
 const serverWorkspaceDirectory = shallowRef<WorkspaceDirectoryList | null>(null);
 const selectedServerWorkspaceServerId = ref<string | undefined>(undefined);
+const serverWorkspacePickerNewTabUrl = computed(() => router.resolve({
+  name: "workbench",
+  query: {
+    serverWorkspacePicker: "1"
+  }
+}).href);
 // 实时追踪：开启后 agent 每次写文件（write/edit/apply_patch 工具完成）就把该文件以只读预览
 // 打开在中间编辑器并读取磁盘最新内容刷新——agent 直接写盘，磁盘即最新。
 const liveTrack = ref(false);
@@ -3439,7 +3447,11 @@ function cancelCloseTab() {
   tabPathToClose.value = null;
 }
 
-async function openServerWorkspacePicker() {
+function openServerWorkspacePicker() {
+  return openServerWorkspacePickerAt();
+}
+
+async function openServerWorkspacePickerAt(initial?: { serverId?: string; path?: string }) {
   if (!isSuperAdmin.value) return;
   serverWorkspacePickerOpen.value = true;
   serverWorkspacePickerLoading.value = true;
@@ -3447,10 +3459,12 @@ async function openServerWorkspacePicker() {
   try {
     const servers = await api.listWorkspaceBackendServers();
     serverWorkspaceServers.value = servers;
-    const preferred = servers.find((server) => server.sameAsAgent) ?? servers[0];
+    const preferred = servers.find((server) => server.linuxServerId === initial?.serverId)
+      ?? servers.find((server) => server.sameAsAgent)
+      ?? servers[0];
     selectedServerWorkspaceServerId.value = preferred?.linuxServerId;
     if (preferred) {
-      await loadServerWorkspaceDirectories(preferred.defaultDirectory ?? undefined, preferred);
+      await loadServerWorkspaceDirectories(initial?.path || preferred.defaultDirectory || undefined, preferred);
     }
   } catch (error) {
     feedback.value = errorFeedback("加载后端服务器失败", error);
@@ -3458,6 +3472,17 @@ async function openServerWorkspacePicker() {
     serverWorkspacePickerLoading.value = false;
   }
 }
+
+let serverWorkspacePickerRouteHandled = false;
+watch(
+  [isSuperAdmin, () => route.query.serverWorkspacePicker],
+  ([superAdmin, requested]) => {
+    if (serverWorkspacePickerRouteHandled || !superAdmin || requested !== "1") return;
+    serverWorkspacePickerRouteHandled = true;
+    void openServerWorkspacePickerAt(readServerWorkspacePickerTabState());
+  },
+  { immediate: true }
+);
 
 function openReferenceConfiguration() {
   if (!showReferenceConfiguration.value || !selectedAppId.value || !selectedWorkspace.value) return;
@@ -7784,6 +7809,7 @@ async function handleLogout() {
     :server-terminal-enabled="isSuperAdmin"
     :terminal-base-url="apiBaseUrl"
     :create-server-terminal-ticket="createServerTerminalTicket"
+    :new-tab-url="serverWorkspacePickerNewTabUrl"
     @close="serverWorkspacePickerOpen = false"
     @select-server="selectServerWorkspaceServer"
     @navigate="(path: string) => loadServerWorkspaceDirectories(path)"

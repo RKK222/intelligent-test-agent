@@ -1,7 +1,7 @@
 import { defineComponent, h } from "vue";
 import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ElMessageBox } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import type { WorkspaceBackendServer } from "@test-agent/shared-types";
 import ServerWorkspacePickerDialog from "../src/components/ServerWorkspacePickerDialog.vue";
 
@@ -9,6 +9,7 @@ vi.mock("element-plus", async (importOriginal) => {
   const actual = await importOriginal<typeof import("element-plus")>();
   return {
     ...actual,
+    ElMessage: { warning: vi.fn() },
     ElMessageBox: { confirm: vi.fn() }
   };
 });
@@ -57,6 +58,7 @@ const TerminalPanelStub = defineComponent({
 
 describe("server workspace picker dialog", () => {
   beforeEach(() => {
+    vi.mocked(ElMessage.warning).mockReset();
     vi.mocked(ElMessageBox.confirm).mockReset();
     vi.mocked(ElMessageBox.confirm).mockResolvedValue(
       { action: "confirm" } as Awaited<ReturnType<typeof ElMessageBox.confirm>>
@@ -125,5 +127,79 @@ describe("server workspace picker dialog", () => {
     await fireEvent.click(view.getByRole("button", { name: "测试签票" }));
     await waitFor(() => expect(ElMessageBox.confirm).toHaveBeenCalledTimes(1));
     expect(createServerTerminalTicket).not.toHaveBeenCalled();
+  });
+
+  it("支持普通窗口键盘缩放以及页面内全屏和还原", async () => {
+    const view = render(ServerWorkspacePickerDialog, {
+      props: {
+        open: true,
+        servers,
+        selectedServerId: "server-a",
+        directory: { path: "/data/testagent", parentPath: "/data", entries: [] },
+        loading: false
+      }
+    });
+
+    const dialog = view.getByRole("dialog");
+    const resizeHandle = view.getByRole("button", { name: "调整窗口大小" });
+    const originalWidth = Number.parseInt(dialog.style.width, 10);
+    await fireEvent.keyDown(resizeHandle, { key: "ArrowLeft" });
+    expect(Number.parseInt(dialog.style.width, 10)).toBe(originalWidth - 16);
+
+    await fireEvent.click(view.getByRole("button", { name: "进入全屏" }));
+    expect(dialog.getAttribute("data-layout-mode")).toBe("fullscreen");
+    expect(dialog.style.width).toBe("100vw");
+    expect(view.queryByRole("button", { name: "调整窗口大小" })).toBeNull();
+
+    await fireEvent.click(view.getByRole("button", { name: "退出全屏" }));
+    expect(dialog.getAttribute("data-layout-mode")).toBe("window");
+    expect(Number.parseInt(dialog.style.width, 10)).toBe(originalWidth - 16);
+    expect(view.getByRole("button", { name: "调整窗口大小" })).toBeTruthy();
+  });
+
+  it("使用真实应用 URL 打开普通新标签页", async () => {
+    const openedTab = { closed: false } as Window;
+    const openWindow = vi.spyOn(window, "open").mockReturnValue(openedTab);
+    const view = render(ServerWorkspacePickerDialog, {
+      props: {
+        open: true,
+        servers,
+        selectedServerId: "server-a",
+        directory: { path: "/data/testagent", parentPath: "/data", entries: [] },
+        loading: false,
+        newTabUrl: "/?serverWorkspacePicker=1"
+      }
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "在新标签页打开" }));
+    expect(openWindow).toHaveBeenCalledWith(
+      "http://localhost:3000/?serverWorkspacePicker=1",
+      "_blank"
+    );
+    expect(JSON.parse(sessionStorage.getItem("test-agent.server-workspace-picker-tab-state") ?? "{}")).toEqual({
+      serverId: "server-a",
+      path: "/data/testagent"
+    });
+    expect(view.getByRole("dialog").getAttribute("data-layout-mode")).toBe("window");
+    openWindow.mockRestore();
+  });
+
+  it("企业浏览器策略阻止新标签页时保留原页面并给出明确提示", async () => {
+    const openWindow = vi.spyOn(window, "open").mockReturnValue(null);
+    const view = render(ServerWorkspacePickerDialog, {
+      props: {
+        open: true,
+        servers,
+        selectedServerId: "server-a",
+        directory: { path: "/data/testagent", parentPath: "/data", entries: [] },
+        loading: false
+      }
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "在新标签页打开" }));
+    expect(ElMessage.warning).toHaveBeenCalledWith("浏览器阻止了新标签页，请允许此站点打开弹窗后重试");
+    expect(view.getByRole("dialog").getAttribute("data-layout-mode")).toBe("window");
+    expect(view.getAllByText("/data/testagent").length).toBeGreaterThan(0);
+    openWindow.mockRestore();
   });
 });

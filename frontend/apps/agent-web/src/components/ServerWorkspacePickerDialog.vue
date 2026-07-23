@@ -1,11 +1,23 @@
 <script setup lang="ts">
-import { ElMessageBox } from "element-plus";
-import { computed, nextTick, ref, watch } from "vue";
+import { ElMessage, ElMessageBox } from "element-plus";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import type { TerminalTicketResponse, WorkspaceBackendServer, WorkspaceDirectoryList } from "@test-agent/shared-types";
 import { TerminalPanel } from "@test-agent/terminal";
-import { AlertTriangle, ChevronLeft, ChevronRight, Folder, Home, Server, Terminal as TerminalIcon } from "lucide-vue-next";
+import {
+  AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  Folder,
+  Home,
+  Maximize2,
+  Minimize2,
+  Server,
+  Terminal as TerminalIcon
+} from "lucide-vue-next";
 import { Button } from "@test-agent/ui-kit";
 import ServerWorkspaceDirectoryNode from "./ServerWorkspaceDirectoryNode.vue";
+import { writeServerWorkspacePickerTabState } from "./server-workspace-picker-tab";
 
 const props = defineProps<{
   open: boolean;
@@ -17,6 +29,7 @@ const props = defineProps<{
   serverTerminalEnabled?: boolean;
   terminalBaseUrl?: string;
   createServerTerminalTicket?: (linuxServerId: string, confirmationText: string) => Promise<TerminalTicketResponse>;
+  newTabUrl?: string;
 }>();
 
 const emit = defineEmits<{
@@ -32,14 +45,178 @@ const serverMismatch = computed(
 );
 const disabledReason = computed(() => (serverMismatch.value ? "工作空间与 agent 不在同一服务器" : ""));
 const activeView = ref<"workspace" | "terminal">("workspace");
+const isFullscreen = ref(false);
+const isResizing = ref(false);
+
+const DIALOG_MARGIN = 12;
+const MIN_DIALOG_WIDTH = 720;
+const MIN_DIALOG_HEIGHT = 480;
+const dialogBounds = reactive({
+  left: 0,
+  top: 0,
+  width: 1000,
+  height: 640,
+  initialized: false
+});
+
+const dialogLayoutMode = computed(() => (isFullscreen.value ? "fullscreen" : "window"));
+const dialogStyle = computed(() => {
+  if (isFullscreen.value) {
+    return { left: "0px", top: "0px", width: "100vw", height: "100vh" };
+  }
+  return {
+    left: `${dialogBounds.left}px`,
+    top: `${dialogBounds.top}px`,
+    width: `${dialogBounds.width}px`,
+    height: `${dialogBounds.height}px`
+  };
+});
+
+/**
+ * 把普通窗口限制在当前页面视口内；浏览器变窄时允许最小尺寸跟随视口收缩，
+ * 避免固定最小宽高把取消按钮或右下角缩放手柄推出屏幕。
+ */
+function clampDialogBounds() {
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const horizontalMargin = viewportWidth > MIN_DIALOG_WIDTH ? DIALOG_MARGIN : 0;
+  const verticalMargin = viewportHeight > MIN_DIALOG_HEIGHT ? DIALOG_MARGIN : 0;
+  const maxWidth = Math.max(320, viewportWidth - horizontalMargin * 2);
+  const maxHeight = Math.max(320, viewportHeight - verticalMargin * 2);
+  const minWidth = Math.min(MIN_DIALOG_WIDTH, maxWidth);
+  const minHeight = Math.min(MIN_DIALOG_HEIGHT, maxHeight);
+
+  dialogBounds.width = Math.min(maxWidth, Math.max(minWidth, dialogBounds.width));
+  dialogBounds.height = Math.min(maxHeight, Math.max(minHeight, dialogBounds.height));
+  dialogBounds.left = Math.min(
+    Math.max(horizontalMargin, dialogBounds.left),
+    Math.max(horizontalMargin, viewportWidth - horizontalMargin - dialogBounds.width)
+  );
+  dialogBounds.top = Math.min(
+    Math.max(verticalMargin, dialogBounds.top),
+    Math.max(verticalMargin, viewportHeight - verticalMargin - dialogBounds.height)
+  );
+}
+
+/** 首次打开按既有 1000px × 75vh 视觉规格居中，后续打开保留用户在本次页面中的缩放结果。 */
+function initializeDialogBounds() {
+  if (!dialogBounds.initialized) {
+    const availableWidth = Math.max(320, window.innerWidth - DIALOG_MARGIN * 2);
+    const availableHeight = Math.max(320, window.innerHeight - DIALOG_MARGIN * 2);
+    dialogBounds.width = Math.min(1000, availableWidth);
+    dialogBounds.height = Math.min(Math.round(window.innerHeight * 0.75), availableHeight);
+    dialogBounds.left = Math.max(0, Math.round((window.innerWidth - dialogBounds.width) / 2));
+    dialogBounds.top = Math.max(0, Math.round((window.innerHeight - dialogBounds.height) / 2));
+    dialogBounds.initialized = true;
+  }
+  clampDialogBounds();
+}
+
+type ResizeSnapshot = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  width: number;
+  height: number;
+  bodyCursor: string;
+  bodyUserSelect: string;
+};
+
+let resizeSnapshot: ResizeSnapshot | null = null;
+
+/** 右下角缩放使用全局 Pointer Events，指针离开手柄后仍保持 1:1 连续跟随。 */
+function startResize(event: PointerEvent) {
+  if (isFullscreen.value) return;
+  // pointerdown 被模板 preventDefault 后浏览器不会自动聚焦按钮，需显式保留后续方向键调整能力。
+  (event.currentTarget as HTMLElement | null)?.focus();
+  resizeSnapshot = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    width: dialogBounds.width,
+    height: dialogBounds.height,
+    bodyCursor: document.body.style.cursor,
+    bodyUserSelect: document.body.style.userSelect
+  };
+  isResizing.value = true;
+  document.body.style.cursor = "nwse-resize";
+  document.body.style.userSelect = "none";
+  window.addEventListener("pointermove", resizeDialog);
+  window.addEventListener("pointerup", stopResize);
+  window.addEventListener("pointercancel", stopResize);
+}
+
+function resizeDialog(event: PointerEvent) {
+  if (!resizeSnapshot || event.pointerId !== resizeSnapshot.pointerId) return;
+  dialogBounds.width = resizeSnapshot.width + event.clientX - resizeSnapshot.startX;
+  dialogBounds.height = resizeSnapshot.height + event.clientY - resizeSnapshot.startY;
+  clampDialogBounds();
+}
+
+function stopResize(event?: PointerEvent) {
+  if (event && resizeSnapshot && event.pointerId !== resizeSnapshot.pointerId) return;
+  if (resizeSnapshot) {
+    document.body.style.cursor = resizeSnapshot.bodyCursor;
+    document.body.style.userSelect = resizeSnapshot.bodyUserSelect;
+  }
+  resizeSnapshot = null;
+  isResizing.value = false;
+  window.removeEventListener("pointermove", resizeDialog);
+  window.removeEventListener("pointerup", stopResize);
+  window.removeEventListener("pointercancel", stopResize);
+}
+
+/** 键盘聚焦缩放手柄后可用方向键调整尺寸，Shift 将单次步长从 16px 提升到 48px。 */
+function resizeDialogByKeyboard(event: KeyboardEvent) {
+  const step = event.shiftKey ? 48 : 16;
+  if (event.key === "ArrowRight") dialogBounds.width += step;
+  else if (event.key === "ArrowLeft") dialogBounds.width -= step;
+  else if (event.key === "ArrowDown") dialogBounds.height += step;
+  else if (event.key === "ArrowUp") dialogBounds.height -= step;
+  else return;
+  event.preventDefault();
+  clampDialogBounds();
+}
+
+function toggleFullscreen() {
+  isFullscreen.value = !isFullscreen.value;
+}
+
+/** 使用真实应用 URL 打开普通标签页，避免 about:blank，也支持地址栏识别和刷新恢复。 */
+function openInNewTab() {
+  const targetUrl = new URL(props.newTabUrl || window.location.href, window.location.href).href;
+  writeServerWorkspacePickerTabState({
+    serverId: props.selectedServerId,
+    path: props.directory?.path
+  });
+  // 不传 popup/尺寸参数，行为与用户手册一致，由 Chrome 作为普通新标签页打开。
+  if (!window.open(targetUrl, "_blank")) {
+    ElMessage.warning("浏览器阻止了新标签页，请允许此站点打开弹窗后重试");
+  }
+}
 
 /** 关闭弹窗时返回目录视图；切换服务器由 TerminalPanel key 负责关闭旧会话。 */
 watch(
   () => props.open,
   (open) => {
-    if (!open) activeView.value = "workspace";
+    if (open) {
+      initializeDialogBounds();
+      return;
+    }
+    activeView.value = "workspace";
+    isFullscreen.value = false;
   }
 );
+
+onMounted(() => {
+  window.addEventListener("resize", clampDialogBounds);
+  if (props.open) initializeDialogBounds();
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", clampDialogBounds);
+  stopResize();
+});
 
 function openServerTerminal() {
   if (!props.serverTerminalEnabled || !selectedServer.value) return;
@@ -189,13 +366,19 @@ const breadcrumbs = computed(() => {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="open" class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/35 px-4 py-6">
+    <div v-if="open" :class="['fixed inset-0 z-[1000]', isFullscreen ? 'bg-[var(--ta-panel)]' : 'bg-black/35']">
       <section
         role="dialog"
         aria-modal="true"
         aria-label="选择服务器工作空间"
-        class="flex h-[75vh] w-[1000px] max-h-[calc(100vh-48px)] max-w-[calc(100vw-24px)] flex-col rounded-lg border border-[var(--ta-border)] bg-[var(--ta-panel)] shadow-xl"
+        :data-layout-mode="dialogLayoutMode"
+        :style="dialogStyle"
+        :class="[
+          'fixed flex flex-col overflow-hidden bg-[var(--ta-panel)]',
+          isFullscreen
+            ? 'rounded-none border-0 shadow-none'
+            : 'rounded-lg border border-[var(--ta-border)] shadow-xl'
+        ]"
       >
         <header class="flex h-12 shrink-0 items-center justify-between border-b border-[var(--ta-border)] px-4">
           <h2 class="text-[14px] font-semibold text-[var(--ta-text)]">选择服务器工作空间</h2>
@@ -218,6 +401,23 @@ const breadcrumbs = computed(() => {
                 :disabled="!selectedServer"
                 @click="openServerTerminal"
               ><TerminalIcon class="h-3.5 w-3.5" />服务器终端</button>
+            </div>
+            <div class="flex items-center gap-0.5 border-l border-[var(--ta-border)] pl-2">
+              <Button variant="ghost" size="icon" class="h-7 w-7" type="button" aria-label="在新标签页打开" title="在新标签页打开" @click="openInNewTab">
+                <ExternalLink class="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="h-7 w-7"
+                type="button"
+                :aria-label="isFullscreen ? '退出全屏' : '进入全屏'"
+                :title="isFullscreen ? '退出全屏' : '进入全屏'"
+                @click="toggleFullscreen"
+              >
+                <Minimize2 v-if="isFullscreen" class="h-3.5 w-3.5" />
+                <Maximize2 v-else class="h-3.5 w-3.5" />
+              </Button>
             </div>
             <Button variant="ghost" size="sm" @click="emit('close')">取消</Button>
           </div>
@@ -403,9 +603,19 @@ const breadcrumbs = computed(() => {
             </div>
           </main>
         </div>
+
+        <button
+          v-if="!isFullscreen"
+          type="button"
+          class="dialog-resize-handle absolute bottom-0 right-0 z-20 h-5 w-5 cursor-nwse-resize rounded-tl focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-[#2563eb]"
+          :class="{ 'is-resizing': isResizing }"
+          aria-label="调整窗口大小"
+          title="拖动调整窗口大小；聚焦后可使用方向键"
+          @pointerdown.prevent="startResize"
+          @keydown="resizeDialogByKeyboard"
+        />
       </section>
     </div>
-  </Teleport>
 </template>
 
 <style scoped>
@@ -417,5 +627,16 @@ const breadcrumbs = computed(() => {
 .scrollbar-none {
   -ms-overflow-style: none;  /* IE and Edge */
   scrollbar-width: none;  /* Firefox */
+}
+
+.dialog-resize-handle {
+  background:
+    linear-gradient(135deg, transparent 50%, rgba(100, 116, 139, 0.45) 50% 58%, transparent 58%) 4px 4px / 12px 12px no-repeat,
+    linear-gradient(135deg, transparent 50%, rgba(100, 116, 139, 0.7) 50% 58%, transparent 58%) 8px 8px / 8px 8px no-repeat;
+}
+
+.dialog-resize-handle:hover,
+.dialog-resize-handle.is-resizing {
+  background-color: var(--ta-hover);
 }
 </style>
