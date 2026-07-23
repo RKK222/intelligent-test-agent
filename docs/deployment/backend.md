@@ -290,6 +290,7 @@ opencode worker 扩容流程：
 2. 按上文挂载 `/data/.testagent/agent-opencode/.session/`、`/data/.testagent/agent-opencode/.config/opencode/`、`/data/.testagent/agent-opencode/workspace/` 和 `/data/.testagent/agent-opencode/manager`。
 3. 先启动 Java，确认它写出的 `.serverid/.serverhost` 正确，再启动该服务器唯一的 worker；不要配置人工 `containerId/managerId`。
 4. 检查运行管理页中 `containers`、`managers` 和 `managerBackendConnections` 均出现对应记录，容器行以 `containerName` 展示可读名称，并保留哈希 `containerId` 用于路由。
+5. 当前 `opencode-worker-docker.sh` 固定设置 `--pids-limit=8192`、`nofile=262144:262144` 和 `nproc=8192:8192`，不从 `docker.env` 覆盖。脚本升级后必须重建容器，并用 `docker inspect` 与容器 `/proc/1/limits` 确认 PID 上限 `8192`、最大打开文件数 `262144`、最大用户进程数 `8192`。
 
 企业离线 worker 的 `/data/testagent/programs/opencode/node_modules` 是自定义 Tool 依赖的统一只读来源，固定包含 OpenCode `1.18.4` 对应的 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及 lockfile 传递依赖。用户进程启动后会为 XDG 全局配置、公共配置目录和工作区 `.opencode` 目录补充非覆盖式 package/lockfile 与模块链接，禁止在内网启动阶段执行 npm 下载。Tool 新增其它第三方包时必须在外网构建侧更新 runtime package/lockfile、重打 programs 和 worker 镜像，再重启 worker。
 
@@ -307,6 +308,7 @@ opencode worker 扩容流程：
 | 用户日志出现 `triggerUncaughtException`、`ResponseStreamError: SSE read timed out` 后 Node 进程退出 | 核对异常是否来自 provider 分片超时，并检查 worker 是否为包含 Node 取消拒绝兼容修复的新包；`chunkTimeout` 只决定无数据等待时长，不应决定进程存活 | 保留日志用于确认后，在外网 Mac 重打完整发布包，企业内导入新 worker 镜像并重启对应用户进程；不要只把 `chunkTimeout` 调大来掩盖旧镜像缺陷。新包仍把超时交给会话错误/重试流程，但不会因底层 `reader.cancel()` 拒绝而退出 server。 |
 | 自定义 Tool 报 `Cannot find package '@opencode-ai/plugin'` 或其它模块缺失 | 检查 `/data/testagent/programs/opencode/node_modules` 是否包含对应包，并检查 Tool 所在公共配置或 `.opencode` 目录下 `node_modules` 链接；确认 programs 与 worker 镜像来自同一个企业包 | 用完整包同时更新 programs 和 worker 镜像并重启 worker。若缺失的是业务第三方包，先在外网构建侧加入 runtime package/lockfile 后重打包，禁止在内网临时 npm 安装。 |
 | Node 输出 `uv_thread_create` assertion 后 `Aborted`，但 `node --version` 正常 | 检查 Docker server 版本、容器 `Seccomp` 和 `getconf GNU_LIBC_VERSION`；Docker `18.09` 默认 seccomp 无法正确兼容 Debian 12/glibc 2.36 的线程创建路径 | 使用当前 Debian 11 bullseye/glibc 2.31 worker 包并通过 `opencode-worker-docker.sh` 重新创建容器；按企业现场要求，该脚本默认添加 `--privileged`，无需另外手写 `docker run`。 |
+| worker 的 PID、`nofile` 或 `nproc` 限制缺失或值不符 | 执行 `docker inspect --format 'PidsLimit={{.HostConfig.PidsLimit}} Ulimits={{json .HostConfig.Ulimits}}' test-agent-opencode-worker`，并读取容器 `/proc/1/limits`；确认 `/data/testagent/deploy/internal/opencode-worker-docker.sh` 包含当前固定参数 | 使用当前脚本执行 worker `restart` 重新创建容器；不要只在容器内运行 `ulimit`，该操作不会持久修改 Docker HostConfig。多后台逐节点重建并验证，当前节点失败时停止。 |
 | 用户初始化提示已有 manager state 不健康 | 目标 binding 端口仍有 manager state/PID，但 opencode HTTP 健康检查失败；检查 `{stateDir}/processes/{port}.json`、对应启动日志和运行管理 PID 状态 | 新 Java 会先通过公共 owned stop 确认旧实例退出，再在同一端口启动；停止状态不确定、身份/PID 不匹配或旧 manager 不支持时保持原 binding 并报错，禁止手工先给用户换端口。 |
 | 进程健康异常后没有在原端口重建 | 检查状态是否为 `STALE`，manager 是否连接，owned stop 是否确认退出，以及原端口是否明确返回 `PORT_CONFLICT/PORT_OUT_OF_RANGE` | `STALE`、超时、配置/容量错误均保留原 binding；恢复 manager 后重试。只有明确端口冲突或越界才按原服务器既有规则换端口。 |
 | 运行管理出现 4104 无主进程，但同一 UCID 的平台 binding 已指向 4105 | 这是历史版本在 4104 不健康后误进空闲端口分配分支的典型遗留；核对两个端口的 UCID、PID、启动时间、HTTP 健康和平台 process/binding | 系统不会自动认领或停止 4104。管理员确认无业务流量后通过运行管理停止对应无主端口；若 manager 返回 `IDENTITY_ALREADY_MANAGED`，先人工清理确认的旧实例再重试绑定端口。 |

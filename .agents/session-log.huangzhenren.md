@@ -840,3 +840,18 @@
   - 4104 不健康时先由公共停止流程确认退出，再继续在 4104 启动；只有明确端口冲突/越界才迁移到 4105，普通故障和并发跟随者不会创建第二个绑定端口。
   - 同步 runtime、manager、API/domain/persistence、frontend、HTTP API、事件流、安全及企业部署文档。未新增 HTTP 路径、SSE 事件或数据库结构，不修改环境配置和 generated SDK；可选字段兼容滚动升级，推荐按 manager、Java、前端顺序升级。
   - 存量重复/无主进程不自动处理；若触发身份唯一保护，仍需管理员根据 SUPER_ADMIN 运行管理页手工处置。全量前端/模拟 E2E 的既有 Mermaid 超时、DirectoryRows role 与工作区可见性基线失败不在本次范围，任务定向验证均通过。
+
+### 2026-07-23 - 固定企业 worker 容器进程与文件句柄限制
+
+- Why:
+  - 企业 Docker 18.09 现场不能继续依赖宿主 daemon 的隐式 PID、`nofile` 和 `nproc` 默认值，需要所有 worker 节点使用一致且可核验的容器限制。
+- What:
+  - `opencode-worker-docker.sh` 的唯一 `docker run` 固定加入 `--pids-limit=8192`、`--ulimit nofile=262144:262144` 和 `--ulimit nproc=8192:8192`，不新增 `docker.env` 配置。
+  - `verify-dev-scripts.sh` 增加三个精确命令参数断言；企业部署入口、单/多后台手册和后端排障文档补充重建、生效值检查与逐节点停止条件。
+- How:
+  - TDD 先确认测试因缺少 `--pids-limit=8192` 按预期失败，再加入最小脚本实现并恢复 GREEN。
+  - 本机 Docker Desktop 29.6.1 在 arm64 上以 amd64 仿真运行 `test-agent-opencode-worker:1.18.4`；真实 HostConfig 显示 `PidsLimit=8192`、`nofile` soft/hard `262144`、`nproc` soft/hard `8192`，容器 `/proc/1/limits` 返回相同值。验证容器已停止并删除，临时目录移入废纸篓。
+  - `tools/verify-dev-scripts.sh`、Bash 语法和 `git diff --check` 通过；企业 Docker 18.09 目标机仍需在逐节点重建后执行文档中的 `docker inspect` 与 `/proc/1/limits` 验收。
+- Result:
+  - worker、manager 及其 OpenCode 子进程不再依赖 Docker daemon 的文件句柄和用户进程默认值；业务最大 OpenCode 进程数、端口池、挂载和健康检查保持不变。
+  - 脚本参数只在容器重建时生效；双后台必须先处理 `.4` 并验收，再处理 `.114`，任一节点失败时停止。未修改 API、RunEvent、数据库/Flyway、generated SDK、安全凭据或环境配置文件。

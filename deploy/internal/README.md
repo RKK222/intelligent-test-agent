@@ -15,6 +15,7 @@
 
 - Mac 构建机允许联网；企业服务器完全离线。
 - 企业内不使用 Docker Compose；worker 由 `opencode-worker-docker.sh` 管理，XXL MySQL 由 `deploy-xxl-job-mysql.sh` 管理。
+- `opencode-worker-docker.sh` 固定为 worker 容器设置 `--pids-limit=8192`、`nofile=262144:262144` 和 `nproc=8192:8192`；这些值不从 `docker.env` 覆盖。脚本升级后必须重建容器才会生效。
 - Java 读取 `/data/testagent/config/backend.env`。
 - Java 固定读取交付 JAR 内置的 `classpath:rsa-private.key`；`backend.env` 不再接受外置 RSA 路径，多后台必须部署同一 JAR。
 - 所有 Java 连接 `122.233.30.147:3306` 上独立的 XXL MySQL 容器，并使用同一个强随机 XXL access token；MySQL 与平台 PostgreSQL 进程和数据目录分开，但部署在同一台数据库服务器。

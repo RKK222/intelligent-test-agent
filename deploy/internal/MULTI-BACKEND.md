@@ -643,7 +643,13 @@ cd /data/testagent/deploy/internal
 ./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env status
 docker logs --tail 200 test-agent-opencode-worker | \
   egrep 'config update applied|websocket|serverhost|serverid|OPENCODE_UNAVAILABLE'
+docker inspect --format 'PidsLimit={{.HostConfig.PidsLimit}} Ulimits={{json .HostConfig.Ulimits}}' \
+  test-agent-opencode-worker
+docker exec test-agent-opencode-worker \
+  sh -lc "grep -E 'Max processes|Max open files' /proc/1/limits"
 ```
+
+两台后台都必须显示 `PidsLimit=8192`，`Ulimits` 包含 `nofile` soft/hard `262144` 和 `nproc` soft/hard `8192`，容器 `/proc/1/limits` 显示最大打开文件数 `262144`、最大用户进程数 `8192`。脚本升级只对重建后的容器生效，因此已有环境按 `.4`、`.114` 顺序逐台执行 worker `restart` 和上述检查；当前节点任一检查失败时立即停止，不操作下一节点。
 
 然后验收：
 

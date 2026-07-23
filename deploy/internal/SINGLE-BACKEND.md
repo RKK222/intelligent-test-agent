@@ -554,11 +554,15 @@ cd /data/testagent/deploy/internal
 ./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env status
 docker logs --tail 200 test-agent-opencode-worker | \
   egrep 'config update applied|websocket|serverhost|serverid|OPENCODE_UNAVAILABLE'
+docker inspect --format 'PidsLimit={{.HostConfig.PidsLimit}} Ulimits={{json .HostConfig.Ulimits}}' \
+  test-agent-opencode-worker
+docker exec test-agent-opencode-worker \
+  sh -lc "grep -E 'Max processes|Max open files' /proc/1/limits"
 
 nc -vz ai-code.sdc.enterprise 9070
 ```
 
-预期 worker 日志出现当前结构化事件 `event=manager_config_update status=applied`；旧版 worker 可能输出 `manager config update applied`，部署脚本兼容两者。再在管理页面确认一个 Java、一个 manager、一个容器均在线；初始化一个用户 OpenCode 进程后，用其实际动态端口检查：
+预期 worker 日志出现当前结构化事件 `event=manager_config_update status=applied`；旧版 worker 可能输出 `manager config update applied`，部署脚本兼容两者。资源限制检查应显示 `PidsLimit=8192`，`Ulimits` 同时包含 `nofile` 的 soft/hard `262144` 和 `nproc` 的 soft/hard `8192`；容器 `/proc/1/limits` 应显示最大打开文件数 `262144`、最大用户进程数 `8192`。任一值不符都表示容器没有使用当前脚本重建，应停止验收并重新执行 worker `restart`。再在管理页面确认一个 Java、一个 manager、一个容器均在线；初始化一个用户 OpenCode 进程后，用其实际动态端口检查：
 
 ```bash
 curl -fsS http://127.0.0.1:<实际端口>/global/health
