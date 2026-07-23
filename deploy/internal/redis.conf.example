@@ -1,0 +1,25 @@
+# Redis 7.4.9 企业部署基线。密码由 package-redis-offline.sh 写入离线包。
+bind * -::*
+protected-mode yes
+port 6379
+timeout 0
+tcp-keepalive 300
+
+databases 16
+dir /data
+dbfilename dump.rdb
+save 3600 1
+save 300 100
+save 60 10000
+
+# 企业持久化基线：AOF 每秒刷盘，同时保留 RDB 快照。
+appendonly yes
+appendfilename "appendonly.aof"
+appenddirname "appendonlydir"
+appendfsync everysec
+
+# 关键运行状态不可因内存压力被静默驱逐。
+maxmemory-policy noeviction
+
+# 打包时替换为 64 位十六进制随机密码，禁止手工提交真实值。
+requirepass REPLACE_REDIS_PASSWORD

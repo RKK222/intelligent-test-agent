@@ -2,7 +2,7 @@
 
 ## 部署边界
 
-生产和研发测试环境只将 `test-agent-app` 后端 Java 进程放入 Docker 容器。PostgreSQL、XXL MySQL、Redis 和 opencode server 都是外部服务，通过环境变量或配置中心注入地址和凭据；后端镜像不包含也不启动这些依赖。一个应用 JAR 在同一 JVM 中运行 WebFlux 主上下文、独立端口的 XXL Admin Servlet 子上下文和 XXL executor。
+生产和研发测试环境只将 `test-agent-app` 后端 Java 进程放入 Docker 容器。PostgreSQL、XXL MySQL、Redis 和 opencode server 都是外部服务，通过环境变量或配置中心注入地址和凭据；后端镜像不包含也不启动这些依赖。Redis 专项升级可使用独立的 `deploy/internal/package-redis-offline.sh` 交付物，但它不并入后端镜像或平台日常发布包。一个应用 JAR 在同一 JVM 中运行 WebFlux 主上下文、独立端口的 XXL Admin Servlet 子上下文和 XXL executor。
 
 研发测试环境的 PG/PostgreSQL 数据库由远端环境启动和维护，不在后端容器或企业内部署 worker 容器中启动；后端只通过 `TEST_AGENT_TEST_DB_*` 或生产 `TEST_AGENT_DB_*` 配置连接该远端数据库。
 
@@ -555,6 +555,14 @@ TEST_AGENT_LEGACY_RUN_WITHOUT_CONTEXT_ENABLED=true
 - 必须对 `used_memory/maxmemory`、内存增长率、连接数、命令/脚本延迟、AOF 最近写入/重写状态、磁盘可用空间、主从复制延迟、`rejected_connections` 和 `evicted_keys` 建立容量与故障告警；`evicted_keys` 必须长期为 0。容量告警应早于 Redis 拒绝写入，不能依赖应用收到 `RUNTIME_STATE_UNAVAILABLE` 后才处置。
 
 Redis 配置验收至少执行 `CONFIG GET maxmemory-policy`、`CONFIG GET appendonly`、`CONFIG GET appendfsync` 和 ACL/TLS 连通验证，并用真实 Redis 集成测试验证 Lua、Streams、TTL 与显式截断。托管 Redis 禁止 `CONFIG` 时，应由供应商配置页或变更单提供等价证据。
+
+当前本地 Docker 基线固定为 Redis `7.4.9-alpine`。企业 Redis 5.0 升级且不修改业务代码时，可从外网 Mac 生成独立 `linux/amd64` 离线包：
+
+```bash
+deploy/internal/package-redis-offline.sh
+```
+
+包内基线启用 `noeviction`、RDB、AOF `everysec`、`protected-mode` 和强随机密码，并通过真实 `PING/SET/GETDEL` 验证版本与关键命令。完整升级必须先停止所有 Java 写入、生成最终 RDB、备份原数据并在新的数据目录恢复副本；部署脚本只在显式 `--replace-existing` 时替换同名容器，永不删除数据目录。现场步骤见 `deploy/internal/REDIS-OFFLINE.md`。由于现有应用只配置 host/port/password，该专项包不自带企业 TLS 证书或独立 ACL 用户；在完成证书、Spring SSL 和最小权限 ACL 联调前，只能在严格受控内网作为兼容升级基线，不能把它视为已经满足上述完整生产安全基线。
 
 会话运行上下文以 Redis 为唯一运行态存储：原始 `contextToken` 不落 Redis，token key 只使用 SHA-256 摘要；所有 key 使用 `{conversation-context}` hash tag，并维护用户+Session、用户、Session、Workspace、进程五类 ZSET 反向索引、资源/全局 generation，以及 Session revoke、user mutation、Workspace mutation gate。反向索引 score 为 token 绝对过期时间，保存、续期和失效脚本会先清除过期成员。Session 归档 gate 和覆盖关系型用户/Workspace 变更窗口的 mutation gate 均为 24 小时 TTL；变更成功时 Lua 原子再次失效并释放自己的 gate token，数据库失败只撤回自己的 token，Redis 完成失败则保留 gate fail-closed，generation 持久保留以防旧 token 复活。签发托管 Workspace 上下文会实时校验应用启用、有效成员和个人 Workspace owner，`SUPER_ADMIN` 不旁路；历史非托管 Workspace 沿用 Session owner。有效上下文的每次 Run 前置检查都使用完整进程快照调用公共 `querySnapshot` 动态健康探测，不按 processId 查询 Repository；稳定 `RUNNING` 为 0 次 Repository SELECT、0 次数据库写入，只有状态、PID 或服务地址变化时写一次。Redis 失败统一返回 `RUNTIME_STATE_UNAVAILABLE`，不得回退 PostgreSQL 或 JVM 内存。start-run 路由缓存请求体硬上限为 32 MiB，超限在路由查询前返回 400。
 
