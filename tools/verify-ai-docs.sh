@@ -115,8 +115,11 @@ require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" 'cd ~/Desktop/mimoagent/0
 require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" 'OPENCODE_MANAGER_MAX_PROCESSES` 改为 `1000'
 require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" '运行容器时不传 `--platform`'
 require_text "deploy/internal/REDIS-OFFLINE.md" 'permission denied'
+require_text "deploy/internal/REDIS-OFFLINE.md" 'net.ipv4.ip_forward=0'
+require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" 'test "$(sysctl -n net.ipv4.ip_forward)" = "1"'
 require_text ".agents/skills/enterprise-offline-deploy/SKILL.md" 'bind mount 读取 0600 宿主机配置的 UID 权限问题'
 require_text ".agents/skills/enterprise-offline-deploy/SKILL.md" '目标机执行 `docker run` 时不得再强制传 `--platform`'
+require_text ".agents/skills/enterprise-offline-deploy/SKILL.md" 'net.ipv4.ip_forward=1'
 require_text "docs/standards/security.md" "用户专属 opencode server 默认监听"
 require_text "backend/README.md" "Maven multi-module"
 require_text "backend/test-agent-app/README.md" ".env.local"

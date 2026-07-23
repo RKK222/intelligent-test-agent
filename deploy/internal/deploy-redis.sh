@@ -74,6 +74,25 @@ require_file() {
   }
 }
 
+require_ipv4_forwarding() {
+  local proc_root="${TEST_AGENT_PROC_ROOT:-/proc}"
+  local forwarding_file="${proc_root}/sys/net/ipv4/ip_forward"
+  local forwarding=""
+
+  # Redis 通过 Docker DNAT 暴露给远端后台；宿主机关闭 IPv4 转发时，本机验证会成功，跨机连接却会超时。
+  [[ -r "${forwarding_file}" ]] || {
+    echo "Cannot verify Docker IPv4 forwarding: ${forwarding_file} is unreadable" >&2
+    exit 1
+  }
+  forwarding="$(tr -d '[:space:]' <"${forwarding_file}")"
+  [[ "${forwarding}" == "1" ]] || {
+    echo "Docker-published Redis requires net.ipv4.ip_forward=1 for remote backend access; current=${forwarding:-unknown}" >&2
+    echo "Run on the Redis host: sysctl -w net.ipv4.ip_forward=1" >&2
+    echo "Persist the setting through the enterprise-approved sysctl configuration before continuing." >&2
+    exit 1
+  }
+}
+
 # dotenv 只作为文本读取，不能 source，避免现场配置中的 shell 片段被执行。
 env_value() {
   local file="$1"
@@ -334,6 +353,7 @@ case "${ACTION}" in
     printf 'Redis configuration validation passed\n'
     ;;
   verify)
+    require_ipv4_forwarding
     verify_container
     ;;
   stop)
@@ -350,6 +370,7 @@ case "${ACTION}" in
     docker logs --tail 200 "${CONTAINER_NAME}"
     ;;
   deploy)
+    require_ipv4_forwarding
     require_command docker
     if ! docker image inspect "${REDIS_IMAGE}" >/dev/null 2>&1; then
       [[ -n "${IMAGE_TAR}" ]] || {

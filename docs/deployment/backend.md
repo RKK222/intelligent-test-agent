@@ -4,6 +4,12 @@
 
 生产和研发测试环境只将 `test-agent-app` 后端 Java 进程放入 Docker 容器。PostgreSQL、XXL MySQL、Redis 和 opencode server 都是外部服务，通过环境变量或配置中心注入地址和凭据；后端镜像不包含也不启动这些依赖。Redis 专项升级可使用独立的 `deploy/internal/package-redis-offline.sh` 交付物，但它不并入后端镜像或平台日常发布包。一个应用 JAR 在同一 JVM 中运行 WebFlux 主上下文、独立端口的 XXL Admin Servlet 子上下文和 XXL executor。
 
+企业 Redis 服务器使用 Docker 发布 `6379` 时，宿主机必须持久化 `net.ipv4.ip_forward=1`。容器
+`healthy`、本机端口监听和本机 PING 只能证明 Redis 进程正常，不能证明远端 Java 可达；正式启动
+Java 前必须从每个后台节点验证 Redis TCP。值为 `0` 时，Docker DNAT 后的流量不会进入容器，
+表现为 Java `Connect timed out` 和 readiness `DOWN`；应先修复宿主机转发配置，再检查
+`FORWARD/DOCKER-USER` 或上游 ACL，不能靠新增 `INPUT` 规则或重启 Java 解决。
+
 研发测试环境的 PG/PostgreSQL 数据库由远端环境启动和维护，不在后端容器或企业内部署 worker 容器中启动；后端只通过 `TEST_AGENT_TEST_DB_*` 或生产 `TEST_AGENT_DB_*` 配置连接该远端数据库。
 
 个人离线开发备用依赖只能通过本地开发脚本启动，不能作为研发测试或生产部署拓扑。

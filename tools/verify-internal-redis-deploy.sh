@@ -21,6 +21,23 @@ awk -v password='0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde
 
 "${DEPLOY_SCRIPT}" --env-file "${ENV_FILE}" --config-file "${CONFIG_FILE}" validate >/dev/null
 
+# Docker 发布端口在远端访问时依赖宿主机 IPv4 转发；关闭时必须在接触 Docker 前失败。
+PROC_ROOT="${TMP_ROOT}/proc"
+mkdir -p "${PROC_ROOT}/sys/net/ipv4"
+printf '0\n' >"${PROC_ROOT}/sys/net/ipv4/ip_forward"
+for action in deploy verify; do
+  if TEST_AGENT_PROC_ROOT="${PROC_ROOT}" \
+    "${DEPLOY_SCRIPT}" --env-file "${ENV_FILE}" --config-file "${CONFIG_FILE}" "${action}" \
+    >"${TMP_ROOT}/ip-forward-disabled-${action}.log" 2>&1; then
+    echo "Redis ${action} unexpectedly accepted net.ipv4.ip_forward=0" >&2
+    exit 1
+  fi
+  grep -Fq 'Docker-published Redis requires net.ipv4.ip_forward=1' \
+    "${TMP_ROOT}/ip-forward-disabled-${action}.log"
+  grep -Fq 'sysctl -w net.ipv4.ip_forward=1' \
+    "${TMP_ROOT}/ip-forward-disabled-${action}.log"
+done
+
 cp "${ROOT_DIR}/deploy/internal/redis.conf.example" "${TMP_ROOT}/placeholder.conf"
 if "${DEPLOY_SCRIPT}" --env-file "${ENV_FILE}" --config-file "${TMP_ROOT}/placeholder.conf" validate >/dev/null 2>&1; then
   echo "Placeholder Redis password unexpectedly passed validation" >&2
@@ -42,6 +59,7 @@ grep -Fq 'Loaded Redis image is not linux/amd64' "${DEPLOY_SCRIPT}"
 grep -Fq 'test-agent-redis.conf' "${DEPLOY_SCRIPT}"
 grep -Fq '/usr/bin/setpriv --reuid redis --regid redis --clear-groups' "${DEPLOY_SCRIPT}"
 grep -Fq 'chown redis:redis' "${DEPLOY_SCRIPT}"
+grep -Fq 'require_ipv4_forwarding' "${DEPLOY_SCRIPT}"
 grep -Fq -- '--restart unless-stopped' "${DEPLOY_SCRIPT}"
 grep -Fq -- '--replace-existing' "${DEPLOY_SCRIPT}"
 grep -Fq 'GETDEL' "${DEPLOY_SCRIPT}"

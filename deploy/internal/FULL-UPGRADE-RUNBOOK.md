@@ -109,9 +109,14 @@ sha256sum -c test-agent-redis_7.4.9-alpine-linux-amd64.tar.sha256
   --config-file /data/0709/test-agent-redis-offline/config/redis.conf \
   --image-tar /data/0709/test-agent-redis-offline/test-agent-redis_7.4.9-alpine-linux-amd64.tar \
   validate
+sysctl net.ipv4.ip_forward
+test "$(sysctl -n net.ipv4.ip_forward)" = "1"
 ```
 
-只有看到镜像 tar `OK` 和 `Redis configuration validation passed` 才继续。
+只有看到镜像 tar `OK`、`Redis configuration validation passed`，且 IPv4 转发值为 `1` 才继续。
+值为 `0` 时先执行 `sysctl -w net.ipv4.ip_forward=1` 做现场验证，再通过企业批准的 sysctl 配置
+持久化；否则 Docker 容器虽然本机 `healthy`，`.4/.114` 连接 `.20:6379` 仍会超时。部署脚本不会
+自动修改宿主机网络策略，但 `deploy` 和 `verify` 会在值不为 `1` 时提前失败。
 
 ## 5. 升级前连通性检查
 
@@ -317,6 +322,7 @@ cd /data/0709/test-agent-redis-offline
 docker load -i test-agent-redis_7.4.9-alpine-linux-amd64.tar
 docker image inspect test-agent-redis:7.4.9-alpine \
   --format 'os={{.Os}} arch={{.Architecture}} id={{.Id}}'
+sysctl net.ipv4.ip_forward
 docker ps -a --filter name=^/test-agent-redis$ \
   --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
 ```
@@ -365,6 +371,24 @@ docker logs --tail 100 test-agent-redis
 ```
 
 容器必须为 `healthy`，版本必须为 7.4.9，`PING`、`GETDEL`和迁移前后 key 数必须通过。当前平台节点包的 Redis host、port 和密码已与 Redis 包匹配，随后的平台一键部署会安装对应 `backend.env`，不需要通过聊天传递密码。
+
+本机验证通过后仍不能直接启动 Java。当前机器切换为 `122.233.30.4`，执行：
+
+```bash
+timeout 3 bash -c '</dev/tcp/122.233.30.20/6379'
+echo $?
+```
+
+必须返回 `0`。当前机器切换为 `122.233.30.114`，执行：
+
+```bash
+timeout 3 bash -c '</dev/tcp/122.233.30.20/6379'
+echo $?
+```
+
+也必须返回 `0`。任一返回 `124` 时回到 `.20` 检查 `net.ipv4.ip_forward`；如抓包能看到 SYN
+到达但没有 SYN-ACK，继续检查 `FORWARD/DOCKER-USER`，不要通过反复重启 Java 或新增 INPUT
+规则掩盖 Docker 转发问题。
 
 ## 13. 部署后台 A `.4`
 

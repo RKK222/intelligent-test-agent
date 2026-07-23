@@ -72,6 +72,8 @@ fi
 grep -Fq 'Loaded Redis image is not linux/amd64' "${bundle}/deploy-redis.sh"
 grep -Fq 'test-agent-redis.conf' "${bundle}/deploy-redis.sh"
 grep -Fq '/usr/bin/setpriv --reuid redis --regid redis --clear-groups' "${bundle}/deploy-redis.sh"
+grep -Fq 'Docker-published Redis requires net.ipv4.ip_forward=1' "${bundle}/deploy-redis.sh"
+grep -Fq 'net.ipv4.ip_forward = 1' "${bundle}/START-HERE.md"
 
 image_tar="${bundle}/test-agent-redis_7.4.9-alpine-linux-amd64.tar"
 [[ "$(awk '{print $1}' "${image_tar}.sha256")" == "$(sha256_digest "${image_tar}")" ]]

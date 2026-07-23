@@ -15,6 +15,7 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 - Mac 只负责构建交付物。交付物已进入企业内部中转机后，不得再把现场传输步骤描述为“从 Mac scp”。
 - 企业内不使用 Docker Compose；`opencode-worker` 用 `deploy/internal/opencode-worker-docker.sh` 纯 Docker 命令管理。
 - 企业目标机可能使用未启用 experimental features 的旧 Docker daemon。Redis 离线镜像在加载后通过 `docker image inspect` 校验 `linux/amd64`；目标机执行 `docker run` 时不得再强制传 `--platform`。`--platform linux/amd64` 只用于 Mac 外网构建机拉取、构建或验证固定架构镜像。
+- Redis 服务器 `.20` 通过 Docker 发布 `6379` 时必须持久化 `net.ipv4.ip_forward=1`。Redis 容器本机 `healthy`、`0.0.0.0:6379` 和本机 TCP 成功都不能替代 `.4/.114` 跨机验证；`deploy-redis.sh deploy/verify` 会拒绝转发值为 `0` 的宿主机，但不会擅自修改系统网络策略。
 - 企业内不要使用根目录 `.env.local`、`.env.test` 作为生产配置。
 - Java 后端读取 `/data/testagent/config/backend.env`。
 - Java 的 SSH 混合加密 RSA 私钥固定内置在交付 JAR 的 `classpath:rsa-private.key`；`backend.env` 不配置外置路径，多后台必须部署同一 JAR。交付 JAR/ZIP 按密钥交付物受控留存。
@@ -175,7 +176,7 @@ bash deploy/internal/configure-single-deployment.sh frontend --nginx-home /data/
 ## 标准部署顺序
 
 1. 中转机在 `~/Desktop/mimoagent/0709` 校验固定名 ZIP/SHA，然后分别 `scp` 到目标服务器 `/data/0709`。
-2. 若现网仍是 Redis 5，先停 `.4/.114` Java，在 `.20` 完成盘点、最终 RDB、可恢复备份和 Redis 7.4.9 升级；原数据目录不删除。
+2. 若现网仍是 Redis 5，先在 `.20` 确认 `net.ipv4.ip_forward=1`，再停 `.4/.114` Java，完成盘点、最终 RDB、可恢复备份和 Redis 7.4.9 升级；原数据目录不删除。Redis 本机验证通过后，必须从 `.4`、`.114` 分别确认 `.20:6379` TCP 可达，任一失败不得启动 Java。
 3. 在 `.4` 执行后台一键入口，内部先启动 Java、写入身份文件，再导入 programs/worker 并启动 manager。
 4. 确认 `.4` Java 写出：
 
@@ -210,6 +211,7 @@ docker logs --tail 120 test-agent-opencode-worker
 - `opencode-manager` 报端口配置缺失：不要手工直接跑 `opencode-manager run`；生产用 `opencode-worker-docker.sh`。端口写在 `docker.env` 的 `OPENCODE_WORKER_PORT_START/END`。
 - Redis 部署报 `"--platform" is only supported on a Docker daemon with experimental features enabled`：先确认目标机为 `x86_64`、镜像检查为 `linux/amd64`、没有同名残留容器且数据目录仍只有原 `dump.rdb`；使用当前不带运行期 `--platform` 的 `deploy-redis.sh` 重试，不开启 daemon experimental features，不删除 RDB/AOF，不直接加 `--replace-existing`。
 - Redis 部署报 `can't open config file ... permission denied`：这是 Linux bind mount 读取 0600 宿主机配置的 UID 权限问题，不要把含密码的配置改成 0644；临时将配置复制为 `/data/testagent/redis/config/redis.conf`、设为 `0400` 并赋予镜像 `redis` UID/GID `999:1000` 后用该路径重试。新脚本会在容器内复制配置并用 `setpriv` 切换到 redis 用户，后续无需人工复制。
+- Redis 容器 `healthy`、宿主机监听 `0.0.0.0:6379`、`.20` 本机 TCP 成功，但 `.4/.114` 连接超时：先检查 `.20` 的 `sysctl net.ipv4.ip_forward`，值为 `0` 是 Docker DNAT 无法转发到容器的直接原因；先用 `sysctl -w net.ipv4.ip_forward=1` 验证并通过企业批准的 sysctl 配置持久化。抓包能看到远端 SYN、没有 SYN-ACK 时先查该值和 `FORWARD/DOCKER-USER`，完全看不到 SYN 才查上游 VLAN/ACL；不要优先新增 `INPUT` 规则或反复重启 Java。
 - manager 等待 `.serverhost` 或连接旧 IP：检查 `backend.env` 的 `SYS_DATA_ROOT_DIR` 是否等于 `docker.env` 的 `TEST_AGENT_DATA_ROOT`，并确认 Java 已先启动并写出 `.serverid/.serverhost`。
 - 数据库通用参数 `SYS_DATA_ROOT_DIR` 仍是 Linux 默认 `/data/.testagent`：企业内部署需要在系统管理通用参数或数据库中改为 `/data/testagent/data`，否则 Java/worker 共享目录会错位。
 - 公共配置目录未初始化：超级管理员进入“系统管理 -> 配置管理 -> opencode公共配置管理”初始化，确保 `OPENCODE_PUBLIC_CONFIG_DIR` 指向的目录存在且非空。

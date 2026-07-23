@@ -39,8 +39,50 @@ ZIP 内含：
 | 持久化 | RDB + AOF，`appendfsync everysec` |
 | 内存淘汰 | `noeviction` |
 | 认证 | 64 位十六进制随机密码 |
+| Docker IPv4 转发 | `net.ipv4.ip_forward = 1` |
 
 当前应用配置只启用 Redis 密码认证，包内没有企业证书，因此本包不启用 Redis TLS。必须通过企业防火墙/安全组只允许 `.4`、`.114` 和授权运维源访问 `6379`；如安全基线强制 TLS，需要另行提供证书并同步验证 Spring Redis SSL 配置，不能仅靠本包宣称满足 TLS 要求。
+
+### Docker 网络前置条件
+
+Redis 容器通过 `-p 6379:6379` 和 Docker DNAT 向 `.4/.114` 提供服务。Redis 容器 `healthy`、本机访问
+`122.233.30.20:6379` 成功以及宿主机显示 `0.0.0.0:6379`，都不能替代跨机检查；如果
+`net.ipv4.ip_forward=0`，远端 SYN 可以到达 `.20`，但不会转发到容器，Java 会出现
+`Connect timed out`、readiness `DOWN` 或 systemd 反复重启。此时新增 `INPUT` 放行规则无效，因为
+Docker DNAT 后的流量走 `FORWARD/DOCKER-USER`。
+
+在 Redis 服务器 `.20` 开始停机升级前必须执行：
+
+```bash
+sysctl net.ipv4.ip_forward
+test "$(sysctl -n net.ipv4.ip_forward)" = "1"
+```
+
+不是 `1` 时先临时恢复并确认：
+
+```bash
+sysctl -w net.ipv4.ip_forward=1
+```
+
+再检查是否有企业基线把它设置回 `0`，通过企业批准的 sysctl 配置持久化；不得只依赖本次临时值：
+
+```bash
+grep -RnsE \
+  '^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=' \
+  /etc/sysctl.conf /etc/sysctl.d /usr/lib/sysctl.d \
+  2>/dev/null || true
+```
+
+当前 `deploy-redis.sh deploy` 和 `verify` 都会在访问 Docker 前强制检查该值并失败提示，但脚本不会
+擅自修改宿主机网络策略。Redis 启动并通过本机 `verify` 后，必须分别在 `.4`、`.114` 执行：
+
+```bash
+timeout 3 bash -c '</dev/tcp/122.233.30.20/6379'
+echo $?
+```
+
+两台都必须返回 `0`，否则不得启动 Java。若 `.20` 抓包能看到远端 SYN、却没有 SYN-ACK，先检查
+`net.ipv4.ip_forward`，再检查 `FORWARD/DOCKER-USER`；完全看不到 SYN 才转交网络侧排查 VLAN/ACL。
 
 ## 1. 在中转机校验并传到 Redis 服务器
 
@@ -184,12 +226,14 @@ cd /data/0709/test-agent-redis-offline
 docker load -i test-agent-redis_7.4.9-alpine-linux-amd64.tar
 docker image inspect test-agent-redis:7.4.9-alpine \
   --format 'os={{.Os}} arch={{.Architecture}} id={{.Id}}'
+sysctl net.ipv4.ip_forward
 ./deploy-redis.sh --env-file ./config/redis.env --config-file ./config/redis.conf \
   --image-tar ./test-agent-redis_7.4.9-alpine-linux-amd64.tar deploy
 ```
 
 部署脚本会先用 `docker image inspect` 强制确认镜像为 `linux/amd64`，运行容器时不再传递
 `--platform`，兼容未启用 experimental features 的旧版 Docker daemon；这不会放宽镜像架构校验。
+脚本还会强制确认 `net.ipv4.ip_forward=1`，避免本机 Redis 验证正常、远端后台却持续超时。
 配置文件继续保持宿主机 `0600`。脚本启动容器时会在容器内复制配置并用 `setpriv` 切换到
 `redis` 用户，避免 Linux bind mount 因 UID 权限报 `permission denied`，不需要把含密码配置改成 `0644`。
 
