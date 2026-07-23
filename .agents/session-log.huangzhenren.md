@@ -855,3 +855,16 @@
 - Result:
   - worker、manager 及其 OpenCode 子进程不再依赖 Docker daemon 的文件句柄和用户进程默认值；业务最大 OpenCode 进程数、端口池、挂载和健康检查保持不变。
   - 脚本参数只在容器重建时生效；双后台必须先处理 `.4` 并验收，再处理 `.114`，任一节点失败时停止。未修改 API、RunEvent、数据库/Flyway、generated SDK、安全凭据或环境配置文件。
+
+### 2026-07-23 - 修复测试库缺失的 Flyway 历史迁移
+
+- Why:
+  - 测试库曾执行 `V20260721134000__migrate_night_execution_to_xxl.sql`，仓库随后为兼容企业存量库有意将其改为 `V20260722130000`，导致本机 `test` profile 启动时报告已应用迁移无法在本地解析。
+- What:
+  - 对 `.env.test` 指向的 PostgreSQL 执行 Flyway `repair`，将旧版本标记为 `DELETE`；随后执行当前迁移链，使 `V20260722130000` 和 `V20260722180000` 正常落库。
+- How:
+  - dotenv 继续按 `KEY=VALUE` 文本解析，不执行文件内容、不修改 `.env.test`，也未手工更新 `flyway_schema_history`。
+  - 修复前只读确认旧版本成功、当前版本未执行；Flyway 结果为删除标记 1 条、移除失败迁移 0 条、校验和对齐 0 条，迁移 2 条。
+- Result:
+  - 最终 Flyway 目标版本为 `20260722180000`，独立校验通过且无无效迁移；旧版本保留原成功记录和 repair 删除标记，当前版本保留成功记录。
+  - 本次仅修复本机测试数据库外部状态并追加会话留痕；未修改业务代码、迁移文件、API、RunEvent、数据库结构、安全配置或环境配置文件。
