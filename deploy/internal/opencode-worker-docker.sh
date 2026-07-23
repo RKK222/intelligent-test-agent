@@ -104,6 +104,9 @@ start_container() {
   # 企业现场 Docker 18.09 的默认 seccomp 会阻断 Node 运行时创建线程，按部署要求使用特权容器。
   docker run -d \
     --privileged \
+    --pids-limit=8192 \
+    --ulimit nofile=262144:262144 \
+    --ulimit nproc=8192:8192 \
     --name "${CONTAINER_NAME}" \
     --hostname "${CONTAINER_NAME}" \
     --restart unless-stopped \
