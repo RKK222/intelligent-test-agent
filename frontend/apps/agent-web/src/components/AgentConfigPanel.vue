@@ -38,14 +38,9 @@ import {
   initialFileUploadOverlayState,
   type FileUploadOverlayState
 } from "./fileUploadOverlayState";
+import type { AgentConfigMutation } from "./agentFileLoad";
 
 type Scope = "PUBLIC" | "WORKSPACE";
-type AgentConfigMutation = {
-  scope: Scope;
-  paths: string[];
-  deleted?: { path: string; type: "file" | "directory" };
-  renamed?: { path: string; nextPath: string; type: "file" };
-};
 type AgentClipboard = {
   scope: Scope;
   entries: FileTreeEntry[];
@@ -264,6 +259,27 @@ function worktreeId(scope: Scope) {
   return scope === "PUBLIC" ? publicWorktree.value?.worktreeId : undefined;
 }
 
+/** 文件变更事件固定携带当前个人 worktree 路由，避免父层重新猜测写入目标。 */
+function emitFilesMutated(
+  scope: Scope,
+  mutation: Omit<AgentConfigMutation, "scope" | "workspaceId" | "worktreeId" | "linuxServerId">
+) {
+  if (scope === "PUBLIC") {
+    emit("files-mutated", {
+      scope,
+      ...mutation,
+      worktreeId: worktreeId(scope),
+      linuxServerId: publicWorktree.value?.linuxServerId ?? undefined
+    });
+    return;
+  }
+  emit("files-mutated", {
+    scope,
+    ...mutation,
+    workspaceId: props.workspaceId
+  });
+}
+
 function activeAgentFileFromLocalSelection() {
   if (!activeScope.value) return null;
   const path = activeFileByScope.value[activeScope.value];
@@ -416,7 +432,7 @@ async function copyAgentEntries(scope: Scope, entries: FileTreeEntry[], targetDi
       }
     }
     await loadDirectory(scope, targetDirectory, true);
-    if (copiedPaths.length > 0) emit("files-mutated", { scope, paths: copiedPaths });
+    if (copiedPaths.length > 0) emitFilesMutated(scope, { paths: copiedPaths });
     if (failedPaths.length > 0) {
       notifyError(copiedPaths.length > 0 ? "部分 Agent 文件复制失败" : "复制 Agent 文件失败", failedPaths.join("、"));
     } else {
@@ -458,8 +474,7 @@ async function moveAgentEntries(scope: Scope, sourcePaths: string[], targetDirec
     const refreshDirectories = new Set([targetDirectory, ...moved.map((item) => parentDirectory(item.path))]);
     await Promise.all([...refreshDirectories].map((directory) => loadDirectory(scope, directory, true)));
     for (const item of moved) {
-      emit("files-mutated", {
-        scope,
+      emitFilesMutated(scope, {
         paths: [item.path, item.nextPath],
         renamed: { path: item.path, nextPath: item.nextPath, type: "file" }
       });
@@ -517,7 +532,7 @@ async function createAgentEntry(directory: string, name: string, type: "file" | 
       await api.writeWorkspaceAgentFile(props.workspaceId!, writtenPath, "", worktreeId(scope));
     }
     await loadDirectory(scope, directory, true);
-    emit("files-mutated", { scope, paths: [writtenPath] });
+    emitFilesMutated(scope, { paths: [writtenPath] });
     if (type === "file") {
       await openFile(scope, fullPath);
     }
@@ -549,8 +564,7 @@ async function renameAgentEntry(scope: Scope, path: string, name: string) {
       activeFileByScope.value = { ...activeFileByScope.value, [scope]: nextPath };
     }
     await loadDirectory(scope, parent, true);
-    emit("files-mutated", {
-      scope,
+    emitFilesMutated(scope, {
       paths: [path, nextPath],
       renamed: { path, nextPath, type: "file" }
     });
@@ -601,7 +615,7 @@ async function deleteAgentEntry(path: string, type: "file" | "directory") {
       activeFileByScope.value = { ...activeFileByScope.value, [scope]: null };
     }
     await loadDirectory(scope, parent, true);
-    emit("files-mutated", { scope, paths: [path], deleted: { path, type } });
+    emitFilesMutated(scope, { paths: [path], deleted: { path, type } });
     notifySuccess(type === "file" ? "Agent 文件已删除" : "Agent 文件夹已删除", path);
   } catch (error) {
     errorMessage.value = formatAgentConfigError(error, `删除 Agent ${type === "file" ? "文件" : "文件夹"}失败`);
@@ -635,7 +649,7 @@ async function deleteAgentEntries(entries: { path: string; type: "file" | "direc
     const parents = new Set(deleted.map((entry) => parentDirectory(entry.path)));
     await Promise.all([...parents].map((directory) => loadDirectory(scope, directory, true)));
     for (const entry of deleted) {
-      emit("files-mutated", { scope, paths: [entry.path], deleted: entry });
+      emitFilesMutated(scope, { paths: [entry.path], deleted: entry });
     }
     setAgentSelection(scope, []);
     if (failedPaths.length > 0) {
@@ -1489,7 +1503,7 @@ async function createAgentTemplate(
       await loadDirectory(scope, "skills");
       await loadDirectory(scope, `skills/${packageName}`);
     }
-    emit("files-mutated", { scope, paths: createdPaths });
+    emitFilesMutated(scope, { paths: createdPaths });
     notifySuccess(`${scope === "PUBLIC" ? "公共" : "应用"} ${type === "agent" ? "Agent" : "Skill"} 已创建`, createdPaths[0]);
   } catch (error) {
     errorMessage.value = formatAgentConfigError(
@@ -1575,7 +1589,7 @@ async function uploadAgentFiles(files: File[]) {
     }
     if (uploadedPaths.length > 0) {
       await loadDirectory(scope, directory, true);
-      emit("files-mutated", { scope, paths: uploadedPaths });
+      emitFilesMutated(scope, { paths: uploadedPaths });
       notifySuccess(`已上传 ${uploadedPaths.length} 个 Agent 配置文件`, directory || "Agent 配置根目录");
     }
     if (failures.length > 0) {

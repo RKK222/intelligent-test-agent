@@ -5,7 +5,7 @@ import type { FileSearchResult, RunDiffFile, WorkspaceViewEntry, WorkspaceViewWa
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import AgentConfigPanel from "./AgentConfigPanel.vue";
-import type { AgentFileLoadRequest } from "./agentFileLoad";
+import type { AgentConfigMutation, AgentFileLoadRequest } from "./agentFileLoad";
 import GitChangesPanel from "./GitChangesPanel.vue";
 import { ChevronDown, ChevronRight, FolderTree, GitBranch, Globe, Plus, RefreshCw, Search } from "lucide-vue-next";
 
@@ -87,12 +87,7 @@ const emit = defineEmits<{
     totalCount?: number;
   }];
   "agent-files-discarded": [payload: { scope: "PUBLIC" | "WORKSPACE"; paths: string[] }];
-  "agent-config-mutated": [payload: {
-    scope: "PUBLIC" | "WORKSPACE";
-    paths: string[];
-    deleted?: { path: string; type: "file" | "directory" };
-    renamed?: { path: string; nextPath: string; type: "file" };
-  }];
+  "agent-config-mutated": [payload: AgentConfigMutation];
   "personal-runtime-reload": [payload: {
     scope: "PUBLIC" | "WORKSPACE";
     worktreeId?: string;

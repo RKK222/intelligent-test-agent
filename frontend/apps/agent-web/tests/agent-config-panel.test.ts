@@ -580,6 +580,11 @@ describe("AgentConfigPanel", () => {
     expect(agentContent).toContain('description: "Payment Agent（支付测试智能体）。application workspace agent"');
     expect(agentContent).toContain("mode: primary");
     expect(agentContent).not.toContain("SKILL.md");
+    await waitFor(() => expect((view.emitted("files-mutated")?.at(-1) as unknown[] | undefined)?.[0]).toEqual({
+      scope: "WORKSPACE",
+      paths: ["agents/payment-agent.md"],
+      workspaceId: "wrk_1234567890abcdef"
+    }));
   });
 
   it("creates an OpenCode workspace Skill with its own template and resource directories", async () => {
@@ -612,6 +617,15 @@ describe("AgentConfigPanel", () => {
     expect(skillContent).toContain("## When to use me");
     expect(skillContent).toContain("## Resources");
     await waitFor(() => expect(apiClientMock.listWorkspaceAgentFiles).toHaveBeenCalledWith("wrk_1234567890abcdef", "", undefined));
+    await waitFor(() => expect((view.emitted("files-mutated")?.at(-1) as unknown[] | undefined)?.[0]).toEqual({
+      scope: "WORKSPACE",
+      paths: [
+        "skills/jie-kou-zi-dong-hua-ce-shi/SKILL.md",
+        "skills/jie-kou-zi-dong-hua-ce-shi/rules/README.md",
+        "skills/jie-kou-zi-dong-hua-ce-shi/templates/README.md"
+      ],
+      workspaceId: "wrk_1234567890abcdef"
+    }));
   });
 
   it("uploads application Agent configuration files from the shared create panel", async () => {
@@ -653,7 +667,8 @@ describe("AgentConfigPanel", () => {
     resolveUpload();
     await waitFor(() => expect((view.emitted("files-mutated")?.at(-1) as unknown[] | undefined)?.[0]).toEqual({
       scope: "WORKSPACE",
-      paths: ["opencode.jsonc"]
+      paths: ["opencode.jsonc"],
+      workspaceId: "wrk_1234567890abcdef"
     }));
     await waitFor(() => expect(view.queryByTestId("file-upload-overlay")).toBeNull());
   });
@@ -691,7 +706,9 @@ describe("AgentConfigPanel", () => {
         "skills/shared-testing/SKILL.md",
         "skills/shared-testing/rules/README.md",
         "skills/shared-testing/templates/README.md"
-      ]
+      ],
+      worktreeId: "agw_1234567890abcdef",
+      linuxServerId: "linux-1"
     }));
   });
 
@@ -721,7 +738,12 @@ describe("AgentConfigPanel", () => {
       "linux-1"
     ));
     await waitFor(() => expect(view.emitted("files-mutated")).toEqual([[
-      { scope: "PUBLIC", paths: ["agents/review.md"] }
+      {
+        scope: "PUBLIC",
+        paths: ["agents/review.md"],
+        worktreeId: "agw_1234567890abcdef",
+        linuxServerId: "linux-1"
+      }
     ]]));
   });
 
@@ -746,7 +768,11 @@ describe("AgentConfigPanel", () => {
       undefined
     ));
     await waitFor(() => expect(view.emitted("files-mutated")).toEqual([[
-      { scope: "WORKSPACE", paths: ["skills/templates/.gitkeep"] }
+      {
+        scope: "WORKSPACE",
+        paths: ["skills/templates/.gitkeep"],
+        workspaceId: "wrk_1234567890abcdef"
+      }
     ]]));
   });
 
@@ -781,7 +807,8 @@ describe("AgentConfigPanel", () => {
           path: "agents/review.md",
           nextPath: "agents/payment-review.md",
           type: "file"
-        }
+        },
+        workspaceId: "wrk_1234567890abcdef"
       }
     ]]));
   });
@@ -813,7 +840,9 @@ describe("AgentConfigPanel", () => {
         path: "agents/public.md",
         nextPath: "agents/shared-review.md",
         type: "file"
-      }
+      },
+      worktreeId: "agw_1234567890abcdef",
+      linuxServerId: "linux-1"
     }));
   });
 
@@ -967,7 +996,9 @@ describe("AgentConfigPanel", () => {
       {
         scope: "PUBLIC",
         paths: ["agents/review.md"],
-        deleted: { path: "agents/review.md", type: "file" }
+        deleted: { path: "agents/review.md", type: "file" },
+        worktreeId: "agw_1234567890abcdef",
+        linuxServerId: "linux-1"
       }
     ]]));
   });
@@ -993,7 +1024,8 @@ describe("AgentConfigPanel", () => {
       {
         scope: "WORKSPACE",
         paths: ["skills/obsolete"],
-        deleted: { path: "skills/obsolete", type: "directory" }
+        deleted: { path: "skills/obsolete", type: "directory" },
+        workspaceId: "wrk_1234567890abcdef"
       }
     ]]));
   });

@@ -169,6 +169,7 @@ describe("FigmaFileExplorer", () => {
     });
     const mutation = {
       scope: "WORKSPACE" as const,
+      workspaceId: "wrk_personal",
       paths: ["agents/obsolete"],
       deleted: { path: "agents/obsolete", type: "directory" as const }
     };

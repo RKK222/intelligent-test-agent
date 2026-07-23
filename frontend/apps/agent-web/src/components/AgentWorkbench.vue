@@ -90,10 +90,12 @@ import {
 } from "./fileUploadOverlayState";
 import { formatPreviewBytes, progressivePreviewRequired } from "./fileProgressivePreview";
 import {
+  agentConfigMutationReloadTarget,
   agentFileInfo,
   agentTabPath,
   isAgentFilePath,
   shouldReloadPersonalRuntimeCatalog,
+  type AgentConfigMutation,
   type AgentFileTabInfo,
   type AgentFileLoadRequest
 } from "./agentFileLoad";
@@ -2460,13 +2462,8 @@ function scheduleRuntimeReloadConflictRetry() {
 // Agent 文件落盘后递增，由左侧 GitChangesPanel 监听并刷新公共/应用 Agent diff。
 const agentConfigRevision = ref(0);
 
-/** Agents 树创建或删除配置条目后复用保存动作的 revision 信号刷新 Git Diff。 */
-function handleAgentConfigMutation(payload: {
-  scope: "PUBLIC" | "WORKSPACE";
-  paths: string[];
-  deleted?: { path: string; type: "file" | "directory" };
-  renamed?: { path: string; nextPath: string; type: "file" };
-}) {
+/** Agents 树变更后刷新 Git Diff，并让目录定义复用保存动作的个人运行态热加载。 */
+function handleAgentConfigMutation(payload: AgentConfigMutation) {
   if (payload.deleted) {
     const deletedPath = payload.deleted.path.replace(/\\/g, "/");
     for (const tab of [...workbench.tabs]) {
@@ -2513,6 +2510,15 @@ function handleAgentConfigMutation(payload: {
     }
   }
   agentConfigRevision.value += 1;
+  const reloadTarget = agentConfigMutationReloadTarget(payload);
+  if (reloadTarget) {
+    // 新建、上传、改名和删除继续复用保存文件的个人热加载与任务忙碌队列。
+    void refreshRuntimeCatalogAfterAgentConfigSave(reloadTarget).then((error) => {
+      if (error) {
+        feedback.value = errorFeedback("Agent 配置已变更，但运行态目录刷新失败", error);
+      }
+    });
+  }
 }
 
 const saveMutation = useMutation({

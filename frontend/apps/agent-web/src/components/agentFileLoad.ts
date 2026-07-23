@@ -22,6 +22,17 @@ export type AgentFileTabInfo = {
   linuxServerId?: string;
 };
 
+/** Agent 配置树的文件变更同时携带物理路由，供父工作台复用个人运行态热加载。 */
+export type AgentConfigMutation = {
+  scope: "PUBLIC" | "WORKSPACE";
+  paths: string[];
+  workspaceId?: string;
+  worktreeId?: string;
+  linuxServerId?: string;
+  deleted?: { path: string; type: "file" | "directory" };
+  renamed?: { path: string; nextPath: string; type: "file" };
+};
+
 const AGENT_PUBLIC_FILE_PREFIX = "agent-public:";
 const AGENT_WORKSPACE_FILE_PREFIX = "agent-workspace:";
 
@@ -39,6 +50,25 @@ export function shouldReloadPersonalRuntimeCatalog(
   return personalPreviewScope && (/(^|\/)opencode\.jsonc?$/i.test(normalized)
     || /(^|\/)agents\/.*\.md$/i.test(normalized)
     || /(^|\/)skills\/.+\/SKILL\.md$/i.test(normalized));
+}
+
+/**
+ * 从一次配置树变更中选择一个会影响 OpenCode 目录的定义文件；多文件 Skill 模板只触发一次重载。
+ */
+export function agentConfigMutationReloadTarget(
+  mutation: AgentConfigMutation
+): AgentFileTabInfo | null {
+  const path = mutation.paths.find((candidate) =>
+    shouldReloadPersonalRuntimeCatalog(mutation.scope, candidate)
+  );
+  if (!path) return null;
+  return {
+    scope: mutation.scope,
+    path,
+    workspaceId: mutation.workspaceId,
+    worktreeId: mutation.worktreeId,
+    linuxServerId: mutation.linuxServerId
+  };
 }
 
 /**
