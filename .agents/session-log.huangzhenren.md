@@ -896,3 +896,19 @@
 - Result:
   - 新启动或平台受管重启后的 Linux OpenCode 进程按统一认证号使用独立 HOME/XDG/TMP 目录，停止与重启不清理；同一 manager 系统账号下仍是目录级隔离，不引入独立 OS 用户。
   - 未新增 HTTP/WebSocket/DTO/RunEvent 字段、数据库或 Flyway 变更，不修改 Java 启动公共服务、generated SDK 或环境配置；存量 PID 需受管重启后生效。
+
+### 2026-07-23 - 优化已关联版本库的备注展示为图标提示
+
+- Why:
+  - 创建工作空间时，"已关联版本库" 后方的文本备注占用多余空间，改为图标悬浮提示以简化 UI 布局。
+- What:
+  - 将 `SettingsAppWorkspacePanel.vue` 中 "已关联版本库" 后的文字备注 `ta-form-label-hint` 替换为由 `el-tooltip` 包装的 `el-icon` (使用 `InfoFilled` 图标)。
+  - 更新对应的样式，删除弃用的 `.ta-form-label-hint` 并新增 `.ta-form-label-hint-icon` 样式类。
+  - 同步修改 `settings-app-workspace-panel.test.ts` 中对应的单元测试，将文本存在性断言修改为对 `el-tooltip` 转换后 Title 的断言。
+- How:
+  - 在 `frontend` 目录运行 `corepack pnpm test tests/settings-app-workspace-panel.test.ts` 确认测试通过。
+  - 运行 `corepack pnpm typecheck`、`corepack pnpm lint` 和 `corepack pnpm build` 确认项目通过类型检查、规范检查并打包成功。
+- Result:
+  - 版本库关联提示在界面上变为了信息图标，鼠标悬浮在图标上时展示原描述文本，使整体表单样式更为紧凑。
+  - 未修改 API、事件、数据库或 security 相关内容。
+

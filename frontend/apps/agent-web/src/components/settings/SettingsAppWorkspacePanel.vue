@@ -963,7 +963,9 @@ onBeforeUnmount(() => {
               <label class="ta-form-field">
                 <span class="ta-form-label">
                   已关联版本库
-                  <span class="ta-form-label-hint">只能关联类型为测试工作库的版本库。</span>
+                  <el-tooltip content="只能关联类型为测试工作库的版本库。" placement="top">
+                    <el-icon class="ta-form-label-hint-icon"><InfoFilled /></el-icon>
+                  </el-tooltip>
                 </span>
                 <el-select v-model="workspaceRepositoryId" placeholder="选择已关联版本库" style="width: 100%" filterable @change="loadBranches">
                   <el-option v-for="repo in workspaceRepositories" :key="repo.repositoryId" :label="formatRepositoryOption(repo)" :value="repo.repositoryId" />
@@ -1144,10 +1146,12 @@ onBeforeUnmount(() => {
   color: #606266;
   line-height: 1;
 }
-.ta-form-label-hint {
-  margin-left: 6px;
+.ta-form-label-hint-icon {
+  margin-left: 4px;
   color: #909399;
-  font-weight: 400;
+  cursor: pointer;
+  vertical-align: middle;
+  font-size: 14px;
 }
 .ta-readonly-field {
   font-size: 13px;

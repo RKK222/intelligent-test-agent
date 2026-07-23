@@ -413,7 +413,7 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
       repositories[0]
     ]);
     api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature_testagent_20260707"]);
-    const { findByText, getByLabelText, getByText } = renderPanel(api);
+    const { findByText, getByLabelText, getByText, getByTitle } = renderPanel(api);
 
     await findByText("应用人员管理");
     await fireEvent.click(getByText("工作空间管理"));
@@ -423,7 +423,7 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     expect(within(repositorySelect).getByText("F-WRTESTAPP 本地测试库(file:///Users/kaka/Desktop/intelligent-test-agent/test-workspaces/F-WRTESTAPP)")).toBeTruthy();
     expect(within(repositorySelect).queryByText("显式应用代码库(https://gitee.com/mimo/demo.git)")).toBeNull();
     expect(within(repositorySelect).queryByText("MIMO 示例库(https://gitee.com/mimo/demo.git)")).toBeNull();
-    expect(getByText("只能关联类型为测试工作库的版本库。")).toBeTruthy();
+    expect(getByTitle("只能关联类型为测试工作库的版本库。")).toBeTruthy();
     await waitFor(() => expect(api.listRepositoryBranches).toHaveBeenCalledWith("repo_legacy_test"));
     expect(api.listRepositoryBranches).not.toHaveBeenCalledWith("repo_explicit_non_test");
     expect(api.listRepositoryBranches).not.toHaveBeenCalledWith("repo_mimo");
