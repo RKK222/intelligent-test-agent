@@ -1494,6 +1494,18 @@ func equalStrings(left, right []string) bool {
 	return true
 }
 
+func TestShouldProbeLocalInterfaceSkipsPointToPointTunnel(t *testing.T) {
+	if shouldProbeLocalInterface(net.FlagUp | net.FlagPointToPoint) {
+		t.Fatal("point-to-point tunnel must not participate in local listener detection")
+	}
+	if !shouldProbeLocalInterface(net.FlagUp) {
+		t.Fatal("an active non-tunnel interface must participate in local listener detection")
+	}
+	if shouldProbeLocalInterface(0) {
+		t.Fatal("an inactive interface must not participate in local listener detection")
+	}
+}
+
 func nonLoopbackIPv4(t *testing.T) string {
 	t.Helper()
 	interfaces, err := net.Interfaces()

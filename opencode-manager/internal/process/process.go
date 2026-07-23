@@ -422,6 +422,7 @@ func ensurePortAvailable(port int) error {
 }
 
 // localIPv4Hosts 返回本机可用 IPv4 地址，用于补足部分平台上通配绑定不报告特定地址冲突的差异。
+// 点对点隧道（例如 macOS utun）可能把任意目标端口转交给 VPN 代理，不能据此判定宿主机端口被监听。
 func localIPv4Hosts() []string {
 	hosts := []string{"127.0.0.1"}
 	interfaces, err := net.Interfaces()
@@ -430,7 +431,7 @@ func localIPv4Hosts() []string {
 	}
 	seen := map[string]bool{"127.0.0.1": true}
 	for _, iface := range interfaces {
-		if iface.Flags&net.FlagUp == 0 {
+		if !shouldProbeLocalInterface(iface.Flags) {
 			continue
 		}
 		addresses, err := iface.Addrs()
@@ -454,6 +455,11 @@ func localIPv4Hosts() []string {
 		}
 	}
 	return hosts
+}
+
+// shouldProbeLocalInterface 只保留能代表宿主机真实监听面的网络接口。
+func shouldProbeLocalInterface(flags net.Flags) bool {
+	return flags&net.FlagUp != 0 && flags&net.FlagPointToPoint == 0
 }
 
 func sameManagedIdentityPaths(record state.ProcessRecord, spec StartSpec) bool {
