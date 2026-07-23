@@ -49,11 +49,16 @@ ZIP 内含：
 在企业中转机执行：
 
 ```bash
-cd /data/0709
+cd ~/Desktop/mimoagent/0709
 sha256sum -c test-agent-redis-offline.zip.sha256
 unzip -t test-agent-redis-offline.zip
-scp test-agent-redis-offline.zip test-agent-redis-offline.zip.sha256 root@122.233.30.20:/data/0709/
+ssh root@122.233.30.20 'install -d -m 0755 /data/0709'
+scp ~/Desktop/mimoagent/0709/test-agent-redis-offline.zip \
+  ~/Desktop/mimoagent/0709/test-agent-redis-offline.zip.sha256 \
+  root@122.233.30.20:/data/0709/
 ```
+
+中转机固定使用 `~/Desktop/mimoagent/0709`，不在中转机创建或使用 `/data/0709`；后者只是 Redis 目标服务器的接收目录。
 
 在 `122.233.30.20` 执行：
 

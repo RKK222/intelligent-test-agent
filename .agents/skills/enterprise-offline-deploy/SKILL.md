@@ -11,7 +11,7 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 
 - 打包机是 Mac，允许联网，用来拉 Maven、pnpm、Docker base image、npm/opencode 包等构建依赖。
 - 企业内部署环境完全不能联网，只能接收 Mac 打好的交付物。
-- 当前现场通过 U 盘把完整交付物导入企业内部中转机；用户说文件已位于 `Desktop/mimoagent/0709` 时，该目录属于企业内部中转机，不是 Mac。后续 `scp` 从企业内部中转机发起。
+- 当前现场通过 U 盘把完整交付物导入企业内部中转机；中转机固定交付目录是 `~/Desktop/mimoagent/0709`，不得写成 `/data/0709`。后续 `scp` 从该目录发起；只有 `.20/.4/.114/.2` 等目标服务器的接收目录是 `/data/0709`。
 - Mac 只负责构建交付物。交付物已进入企业内部中转机后，不得再把现场传输步骤描述为“从 Mac scp”。
 - 企业内不使用 Docker Compose；`opencode-worker` 用 `deploy/internal/opencode-worker-docker.sh` 纯 Docker 命令管理。
 - 企业内不要使用根目录 `.env.local`、`.env.test` 作为生产配置。
@@ -45,7 +45,7 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 5. 顺序固定为：中转机校验并 `scp` → `.4` 后台 → `.114` 后台 → `.2` 前端 → 浏览器业务验收；滚动部署有特殊前提时必须说明。
 6. 区分“外层 U 盘完整包”“内层完整发布 ZIP”“节点专属配置包”，明确每台服务器需要哪一对文件及落盘路径。
 7. 不要求用户回传真实数据库密码、token、Cookie、RSA 私钥或其他密钥；诊断输出只展示状态、长度或哈希。
-8. 现场把已校验的明确文件复制到 `/data/0709` 时统一使用绝对命令 `/bin/cp -f <源文件> <目标目录>/`，绕过企业服务器常见的 `alias cp='cp -i'`，不再逐个询问覆盖。只对逐条列明的文件使用 `-f`，禁止扩大为 `cp -rf` 覆盖目录。
+8. 中转机直接在 `~/Desktop/mimoagent/0709` 校验并向目标服务器 `scp`，不在中转机创建 `/data/0709`。只有目标服务器需要把本机已校验的明确文件复制到 `/data/0709` 时，才使用 `/bin/cp -f <源文件> /data/0709/`；禁止扩大为 `cp -rf` 覆盖目录。
 9. 后续双后台 U 盘外层交付固定为 `test-agent-two-backend-complete.zip` 和 `test-agent-two-backend-complete.zip.sha256`，包内顶层固定为 `test-agent-two-backend-complete/`；不再添加日期、`v2`、`v3` 或临时目录名。一个 ZIP 内必须包含内层标准发布 ZIP 和三台节点包，SHA 文件只作为这个唯一完整包的传输校验。
 
 ## 标准目录
@@ -149,13 +149,12 @@ TEST_AGENT_OPENCODE_WORKER_IMAGE=test-agent-opencode-worker:internal
 
 OPENCODE_WORKER_BACKEND_PORT=8080
 OPENCODE_WORKER_PORT_START=4096
-OPENCODE_WORKER_PORT_END=4115
+OPENCODE_WORKER_PORT_END=5095
 
-VITE_TEST_AGENT_API_BASE_URL=http://<前端入口>
-TEST_AGENT_BACKEND=<后端服务器IP或域名>:8080
+VITE_TEST_AGENT_API_BASE_URL=
 ```
 
-端口池必须是宿主机可访问端口，Docker 映射保持 `4096-4115:4096-4115` 这种内外一致形式，不要做 `14096:4096`。端口池容量是 20；数据库通用参数 `OPENCODE_MANAGER_MAX_PROCESSES` 也必须由超级管理员调到 `20`，否则实际并发仍受较小参数值限制。
+当前 `.4 + .114` 企业包的端口池必须是宿主机可访问的 `4096-5095`，Docker 内外保持同号映射，不要做 `14096:4096`。每台提供 1000 个端口坐标；数据库通用参数 `OPENCODE_MANAGER_MAX_PROCESSES` 也必须由超级管理员调到 `1000`，否则实际并发仍受较小参数值限制。
 `TEST_AGENT_INTERNAL_PROXY_API_KEY` 是 Java 内部模型代理鉴权 key，只配置在 `backend.env`，不要放到 `docker.env`；Java 会在启动用户 opencode server 时通过 manager command 注入给子进程。
 
 ### 单后台配置脚本
@@ -174,17 +173,18 @@ bash deploy/internal/configure-single-deployment.sh frontend --nginx-home /data/
 
 ## 标准部署顺序
 
-1. 前端服务器解压前端包到 `/data/testagent/frontend`，配置 Nginx，反代 `/api` 到 Java 后端。
-2. 后端服务器放置 jar、programs 包、worker 镜像 tar、`deploy/internal/`。
-3. 启动 Java 后端。
-4. 确认 Java 写出：
+1. 中转机在 `~/Desktop/mimoagent/0709` 校验固定名 ZIP/SHA，然后分别 `scp` 到目标服务器 `/data/0709`。
+2. 若现网仍是 Redis 5，先停 `.4/.114` Java，在 `.20` 完成盘点、最终 RDB、可恢复备份和 Redis 7.4.9 升级；原数据目录不删除。
+3. 在 `.4` 执行后台一键入口，内部先启动 Java、写入身份文件，再导入 programs/worker 并启动 manager。
+4. 确认 `.4` Java 写出：
 
 ```bash
 cat /data/testagent/data/.serverid
 cat /data/testagent/data/.serverhost
 ```
 
-5. 再启动 worker：
+5. `.4` 全部通过后在 `.114` 执行后台入口，并确认本机 `.serverid/.serverhost`。
+6. 两台后台通过后，最后在 `.2` 部署前端并 reload Nginx。一键入口已封装下列 worker 操作，只在排障时手工执行：
 
 ```bash
 docker load -i /data/testagent/dist/test-agent-opencode-worker_internal-linux-amd64.tar
@@ -193,7 +193,7 @@ cd /data/testagent/deploy/internal
 ./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env restart
 ```
 
-6. 验证：
+7. 验证：
 
 ```bash
 curl -fsS http://<后端服务器>:8080/actuator/health

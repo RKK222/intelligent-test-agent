@@ -104,6 +104,33 @@ deploy/internal/dist/test-agent-internal-release.zip
 deploy/internal/dist/test-agent-internal-release.zip.sha256
 ```
 
+Mac 只负责构建；U 盘导入企业网后，中转机固定在 `~/Desktop/mimoagent/0709` 校验和分发，不得在中转机使用 `/data/0709`。`/data/0709` 只是 `.4/.114/.2` 目标服务器的接收目录。当前固定名外层包在中转机执行：
+
+```bash
+cd ~/Desktop/mimoagent/0709
+sha256sum -c test-agent-two-backend-complete.zip.sha256
+unzip -t test-agent-two-backend-complete.zip
+```
+
+然后由中转机逐台发往目标服务器：
+
+```bash
+ssh root@122.233.30.4 'install -d -m 0755 /data/0709'
+scp ~/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip \
+  ~/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip.sha256 \
+  root@122.233.30.4:/data/0709/
+
+ssh root@122.233.30.114 'install -d -m 0755 /data/0709'
+scp ~/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip \
+  ~/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip.sha256 \
+  root@122.233.30.114:/data/0709/
+
+ssh root@122.233.30.2 'install -d -m 0755 /data/0709'
+scp ~/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip \
+  ~/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip.sha256 \
+  root@122.233.30.2:/data/0709/
+```
+
 平台 zip 和校验文件只复制到：
 
 ```text

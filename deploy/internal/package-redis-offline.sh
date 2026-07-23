@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT_DIR="${SCRIPT_DIR}/dist"
 BUNDLE_NAME="test-agent-redis-offline"
 IMAGE_TAR=""
+ZIP_ONLY=0
 REDIS_VERSION="7.4.9"
 REDIS_IMAGE="test-agent-redis:7.4.9-alpine"
 # 官方 redis:7.4.9-alpine 的 linux/amd64 manifest，锁定后避免浮动 tag 改变交付内容。
@@ -18,12 +19,15 @@ Build a fixed-name, sensitive standalone Redis 7.4.9 linux/amd64 offline bundle.
 
 Options:
   --image-tar <path>   Reuse a Docker-loadable test-agent-redis:7.4.9-alpine tar.
+  --zip-only           Repack the existing fixed ZIP without rotating its password.
   --output-dir <path>  Output directory. Default: deploy/internal/dist.
   -h, --help           Show this help.
 
 Without --image-tar the script pulls the pinned official linux/amd64 manifest,
 tags it as test-agent-redis:7.4.9-alpine and exports it. The generated bundle
 contains a random Redis password and must be handled as a 0600 sensitive file.
+--zip-only preserves the current bundle's image and secret config, refreshes
+the deployment manual/scripts, and replaces the fixed ZIP plus checksum.
 USAGE
 }
 
@@ -32,6 +36,10 @@ while [[ $# -gt 0 ]]; do
     --image-tar)
       IMAGE_TAR="$2"
       shift 2
+      ;;
+    --zip-only)
+      ZIP_ONLY=1
+      shift
       ;;
     --output-dir)
       OUTPUT_DIR="$2"
@@ -84,6 +92,80 @@ mkdir -p "${OUTPUT_DIR}"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/test-agent-redis-offline.XXXXXX")"
 cleanup() { rm -rf "${TMP_ROOT}"; }
 trap cleanup EXIT
+
+write_bundle_archive() {
+  local bundle_root="$1"
+  local bundle_parent tmp_archive output_archive output_checksum
+  local output_archive_tmp output_checksum_tmp
+  bundle_parent="$(dirname "${bundle_root}")"
+  tmp_archive="${TMP_ROOT}/${BUNDLE_NAME}.zip"
+  (cd "${bundle_parent}" && zip -qr "${tmp_archive}" "${BUNDLE_NAME}")
+  unzip -tq "${tmp_archive}" >/dev/null
+
+  output_archive="${OUTPUT_DIR}/${BUNDLE_NAME}.zip"
+  output_checksum="${output_archive}.sha256"
+  output_archive_tmp="$(mktemp "${OUTPUT_DIR}/.${BUNDLE_NAME}.zip.XXXXXX")"
+  output_checksum_tmp="$(mktemp "${OUTPUT_DIR}/.${BUNDLE_NAME}.zip.sha256.XXXXXX")"
+  install -m 0600 "${tmp_archive}" "${output_archive_tmp}"
+  printf '%s  %s\n' "$(sha256_digest "${output_archive_tmp}")" "$(basename "${output_archive}")" \
+    >"${output_checksum_tmp}"
+  chmod 0600 "${output_checksum_tmp}"
+  mv -f "${output_archive_tmp}" "${output_archive}"
+  mv -f "${output_checksum_tmp}" "${output_checksum}"
+
+  printf 'Standalone Redis bundle: %s\n' "${output_archive}"
+  printf 'Bundle checksum: %s\n' "${output_checksum}"
+  printf 'Bundle SHA256: %s\n' "$(sha256_digest "${output_archive}")"
+  printf 'Sensitive bundle permissions: %s\n' \
+    "$(stat -f '%Lp' "${output_archive}" 2>/dev/null || stat -c '%a' "${output_archive}")"
+}
+
+if [[ "${ZIP_ONLY}" -eq 1 ]]; then
+  [[ -z "${IMAGE_TAR}" ]] || {
+    echo "--zip-only cannot be combined with --image-tar" >&2
+    exit 2
+  }
+  existing_archive="${OUTPUT_DIR}/${BUNDLE_NAME}.zip"
+  require_file "${existing_archive}"
+  reuse_parent="${TMP_ROOT}/reuse"
+  mkdir -p "${reuse_parent}"
+  unzip -q "${existing_archive}" -d "${reuse_parent}"
+  reuse_root="${reuse_parent}/${BUNDLE_NAME}"
+  require_file "${reuse_root}/config/redis.env"
+  require_file "${reuse_root}/config/redis.conf"
+  require_file "${reuse_root}/config/backend-redis.env"
+  require_file "${reuse_root}/test-agent-redis_${REDIS_VERSION}-alpine-linux-amd64.tar"
+  require_file "${reuse_root}/test-agent-redis_${REDIS_VERSION}-alpine-linux-amd64.tar.sha256"
+  if grep -R 'REPLACE_' "${reuse_root}/config" >/dev/null; then
+    echo "Existing Redis bundle contains a placeholder" >&2
+    exit 1
+  fi
+  existing_redis_password="$(awk '$1 == "requirepass" {print $2; exit}' \
+    "${reuse_root}/config/redis.conf")"
+  existing_backend_password="$(awk -F= '$1 == "TEST_AGENT_REDIS_PASSWORD" {print $2; exit}' \
+    "${reuse_root}/config/backend-redis.env")"
+  if [[ ${#existing_redis_password} -ne 64 \
+    || "${existing_redis_password}" != "${existing_backend_password}" ]]; then
+    echo "Existing Redis bundle contains inconsistent credentials" >&2
+    exit 1
+  fi
+  existing_image_tar="${reuse_root}/test-agent-redis_${REDIS_VERSION}-alpine-linux-amd64.tar"
+  existing_image_checksum="$(awk 'NF >= 2 {print $1; exit}' "${existing_image_tar}.sha256")"
+  if [[ "${existing_image_checksum}" != "$(sha256_digest "${existing_image_tar}")" ]]; then
+    echo "Existing Redis bundle image checksum mismatch" >&2
+    exit 1
+  fi
+  install -m 0644 "${SCRIPT_DIR}/REDIS-OFFLINE.md" "${reuse_root}/START-HERE.md"
+  install -m 0755 "${SCRIPT_DIR}/deploy-redis.sh" "${reuse_root}/deploy-redis.sh"
+  install -m 0755 "${SCRIPT_DIR}/redis-healthcheck.sh" "${reuse_root}/redis-healthcheck.sh"
+  chmod 0600 "${reuse_root}/config/redis.env" \
+    "${reuse_root}/config/redis.conf" \
+    "${reuse_root}/config/backend-redis.env" \
+    "${reuse_root}/test-agent-redis_${REDIS_VERSION}-alpine-linux-amd64.tar" \
+    "${reuse_root}/test-agent-redis_${REDIS_VERSION}-alpine-linux-amd64.tar.sha256"
+  write_bundle_archive "${reuse_root}"
+  exit 0
+fi
 
 if [[ -z "${IMAGE_TAR}" ]]; then
   require_command docker
@@ -145,22 +227,4 @@ printf '%s  %s\n' "$(sha256_digest "${TARGET_IMAGE_TAR}")" "$(basename "${TARGET
   >"${TARGET_IMAGE_TAR}.sha256"
 chmod 0600 "${TARGET_IMAGE_TAR}.sha256"
 
-TMP_ARCHIVE="${TMP_ROOT}/${BUNDLE_NAME}.zip"
-(cd "${TMP_ROOT}" && zip -qr "${TMP_ARCHIVE}" "${BUNDLE_NAME}")
-unzip -tq "${TMP_ARCHIVE}" >/dev/null
-
-OUTPUT_ARCHIVE="${OUTPUT_DIR}/${BUNDLE_NAME}.zip"
-OUTPUT_CHECKSUM="${OUTPUT_ARCHIVE}.sha256"
-OUTPUT_ARCHIVE_TMP="$(mktemp "${OUTPUT_DIR}/.${BUNDLE_NAME}.zip.XXXXXX")"
-OUTPUT_CHECKSUM_TMP="$(mktemp "${OUTPUT_DIR}/.${BUNDLE_NAME}.zip.sha256.XXXXXX")"
-install -m 0600 "${TMP_ARCHIVE}" "${OUTPUT_ARCHIVE_TMP}"
-printf '%s  %s\n' "$(sha256_digest "${OUTPUT_ARCHIVE_TMP}")" "$(basename "${OUTPUT_ARCHIVE}")" \
-  >"${OUTPUT_CHECKSUM_TMP}"
-chmod 0600 "${OUTPUT_CHECKSUM_TMP}"
-mv -f "${OUTPUT_ARCHIVE_TMP}" "${OUTPUT_ARCHIVE}"
-mv -f "${OUTPUT_CHECKSUM_TMP}" "${OUTPUT_CHECKSUM}"
-
-printf 'Standalone Redis bundle: %s\n' "${OUTPUT_ARCHIVE}"
-printf 'Bundle checksum: %s\n' "${OUTPUT_CHECKSUM}"
-printf 'Bundle SHA256: %s\n' "$(sha256_digest "${OUTPUT_ARCHIVE}")"
-printf 'Sensitive bundle permissions: %s\n' "$(stat -f '%Lp' "${OUTPUT_ARCHIVE}" 2>/dev/null || stat -c '%a' "${OUTPUT_ARCHIVE}")"
+write_bundle_archive "${BUNDLE_ROOT}"

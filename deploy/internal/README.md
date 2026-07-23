@@ -9,12 +9,14 @@
 - [单后台部署](SINGLE-BACKEND.md)：一个 Java 后端和一个 `opencode-worker`，当前现场示例为 `122.233.30.114`；包含可整文件替换的生产配置。
 - [多后台部署](MULTI-BACKEND.md)：两个或更多 Java/worker 节点，包含 `.4 + .114` 各自的完整配置、部署和验收示例。
 - [Redis 7.4.9 独立离线升级](REDIS-OFFLINE.md)：将当前本地 Redis 版本和配置单独封包，用于企业 Redis 5.0 的受控备份、升级、验证与回滚；不修改业务代码，也不并入日常平台包。
+- [Redis 5 升级 + 双后台平台全量执行手册](FULL-UPGRADE-RUNBOOK.md)：按当前现场路径和 `.20 → .4 → .114 → .2` 顺序整合完整命令、成功条件、页面配置、脏数据边界与回滚。
 
 底层 Java、manager、Redis 路由设计见 [后端部署说明](../../docs/deployment/backend.md)。
 
 ## 共同前提
 
 - Mac 构建机允许联网；企业服务器完全离线。
+- 企业内部中转机的固定交付目录是 `~/Desktop/mimoagent/0709`；中转机不使用 `/data/0709`。`.20/.4/.114/.2` 等目标服务器的固定接收目录才是 `/data/0709`。
 - `opencode-worker-docker.sh` 固定为 worker 容器设置 `--pids-limit=8192`、`nofile=262144:262144` 和 `nproc=8192:8192`；这些值不从 `docker.env` 覆盖。脚本升级后必须重建容器才会生效。
 - 企业内不使用 Docker Compose；worker 由 `opencode-worker-docker.sh` 管理，当前 XXL MySQL 直接使用外部实例，不在平台服务器部署 MySQL 容器。
 - Redis 仍是独立共享基础设施，不随平台 ZIP 部署；只有明确执行 Redis 专项升级时，才使用固定名 `test-agent-redis-offline.zip`。
@@ -104,6 +106,13 @@ deploy/internal/package-redis-offline.sh
 ```
 
 输出固定为 `test-agent-redis-offline.zip` 和同名 `.sha256`。该包包含随机 Redis 密码，必须按 `0600` 敏感文件传输；完整停写、备份、数据副本、部署、双后台密码更新及回滚步骤只以 [Redis 7.4.9 独立离线升级](REDIS-OFFLINE.md) 为准。
+如果只是更新已有 Redis 包中的手册和部署脚本，必须保留已与平台节点包匹配的密码和镜像，使用：
+
+```bash
+deploy/internal/package-redis-offline.sh --zip-only --output-dir deploy/internal/dist
+```
+
+`--zip-only` 不旋转 Redis 密码，不重新导出镜像；已有固定包缺失、存在占位符或关键文件不全时会失败。
 
 ## OpenCode worker 版本与回滚包
 
@@ -135,9 +144,28 @@ worker 不再从 OpenCode 源码生成 Node bundle，而是下载并校验上游
 
 Agent 配置热加载不修改 OpenCode 的配置目录解析：公共配置继续由 `OPENCODE_CONFIG_DIR` 提供，应用配置由当前个人 workspace 的 `.opencode` 提供；平台在 Git 发布阶段同步个人 worktree，再调用 OpenCode 原生 `/global/dispose`。官方程序启动器只做离线依赖链接、离线开关、`subagent_depth=2` 和信号转发，不包含公共个人或应用共享路径映射，也不需要在 `docker.env` 手工拼接个人物理路径。
 
-## 统一上传目录
+## 中转机与目标服务器交付目录
 
-企业内 `.4/.114/.2` 统一使用 `/data/0709/`，只上传平台 ZIP 与 SHA。文件名保持不变：
+企业内部中转机只在 `~/Desktop/mimoagent/0709` 放置、校验并分发 U 盘交付物；禁止把中转机目录写成 `/data/0709`。固定文件为：
+
+```text
+~/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip
+~/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip.sha256
+~/Desktop/mimoagent/0709/test-agent-redis-offline.zip
+~/Desktop/mimoagent/0709/test-agent-redis-offline.zip.sha256
+```
+
+中转机校验命令：
+
+```bash
+cd ~/Desktop/mimoagent/0709
+sha256sum -c test-agent-two-backend-complete.zip.sha256
+sha256sum -c test-agent-redis-offline.zip.sha256
+unzip -t test-agent-two-backend-complete.zip
+unzip -t test-agent-redis-offline.zip
+```
+
+目标服务器 `.20/.4/.114/.2` 才统一使用 `/data/0709/` 作为交付物接收和校验目录。平台文件名保持不变：
 
 ```text
 /data/0709/test-agent-two-backend-complete.zip

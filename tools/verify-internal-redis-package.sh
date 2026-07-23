@@ -69,6 +69,18 @@ grep -Fxq 'protected-mode yes' "${bundle}/config/redis.conf"
 image_tar="${bundle}/test-agent-redis_7.4.9-alpine-linux-amd64.tar"
 [[ "$(awk '{print $1}' "${image_tar}.sha256")" == "$(sha256_digest "${image_tar}")" ]]
 
+# 只重封手册时必须保留原密码和镜像，不能生成与平台节点包失配的新凭据。
+${PACKAGE_SCRIPT} --zip-only --output-dir "${OUTPUT_DIR}" >/dev/null
+rm -rf "${EXTRACT_ROOT}"
+mkdir -p "${EXTRACT_ROOT}"
+unzip -q "${archive}" -d "${EXTRACT_ROOT}"
+bundle="${EXTRACT_ROOT}/test-agent-redis-offline"
+repacked_password="$(awk '$1 == "requirepass" {print $2; exit}' "${bundle}/config/redis.conf")"
+[[ "${repacked_password}" == "${redis_password}" ]]
+grep -Fq 'cd ~/Desktop/mimoagent/0709' "${bundle}/START-HERE.md"
+[[ "$(awk '{print $1}' "${bundle}/test-agent-redis_7.4.9-alpine-linux-amd64.tar.sha256")" \
+  == "$(sha256_digest "${bundle}/test-agent-redis_7.4.9-alpine-linux-amd64.tar")" ]]
+
 # 固定文件名允许重复封包覆盖，不堆积带时间戳的旧敏感包。
 ${PACKAGE_SCRIPT} --image-tar "${TMP_ROOT}/redis.tar" --output-dir "${OUTPUT_DIR}" >/dev/null
 [[ "$(find "${OUTPUT_DIR}" -maxdepth 1 -type f -name 'test-agent-redis-offline.zip' | wc -l | tr -d ' ')" == "1" ]]

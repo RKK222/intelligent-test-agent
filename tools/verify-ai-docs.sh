@@ -37,6 +37,7 @@ required_files=(
   "docs/deployment/backend.md"
   "docs/deployment/database.md"
   "docs/deployment/frontend.md"
+  "deploy/internal/FULL-UPGRADE-RUNBOOK.md"
   "frontend/README.md"
   "frontend/apps/agent-web/README.md"
   "frontend/apps/agent-web/src/PACKAGE.md"
@@ -108,6 +109,9 @@ require_text "docs/deployment/backend.md" "tools/dev-backend-run.sh"
 require_text "docs/deployment/backend.md" "tools/verify-opencode-process-deployment.sh"
 require_text "docs/deployment/backend.md" "多服务器用户进程拓扑规划"
 require_text "docs/deployment/database.md" "V10 opencode 用户进程管理表"
+require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" '中转机不创建、不使用 `/data/0709`'
+require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" 'cd ~/Desktop/mimoagent/0709'
+require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" 'OPENCODE_MANAGER_MAX_PROCESSES` 改为 `1000'
 require_text "docs/standards/security.md" "用户专属 opencode server 默认监听"
 require_text "backend/README.md" "Maven multi-module"
 require_text "backend/test-agent-app/README.md" ".env.local"
