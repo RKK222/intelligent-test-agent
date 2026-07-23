@@ -13,7 +13,7 @@
 - 定义 `CommonParameterMemoryValue`、`CommonParameterMemoryProcess`、`CommonParameterMemoryCluster` 及状态联合类型，表达显式注册参数的数据库源值、JVM 生效值、加载/刷新时间，以及按 `backendProcessId` 独立返回的集群成功、部分失败、失败和不可用结果。
 - 定义兼容同步 `SideQuestionRequest/Response`、主会话流式 `SideQuestionRunRequest/Response` 和无主对话 `ManualQuestionRunRequest`；旁路 Run 的问题和回答不进入普通主会话时间线。配置管理类型包含超级管理员新建应用的 `CreateApplicationPayload`。
 - `SessionMessage` 保留旧 `content` 字段，并可选承载 `runId`、`remoteMessageId`、`parts`、`tokens`、`costUsd`、`updatedAt` 及 `contentKind/summaryStatus/summaryVersion`，用于区分旧原文与新模式终态摘要；旧响应缺失这些字段时前端继续按纯文本展示。
-- `AgentMessage` 可选携带 `runId` 以绑定整轮状态与反馈；`platformMessageId`/`remoteMessageId` 继续分别用于平台摘要和运行期消息归并，不再作为新反馈业务键。
+- assistant `AgentMessage` 可选携带 `tokens: TokenUsage` 与 `model: ModelRef`，供历史/实时消息保留最近完整用量和模型；所有 `AgentMessage` 继续可选携带 `runId` 以绑定整轮状态与反馈，`platformMessageId`/`remoteMessageId` 分别用于平台摘要和运行期消息归并，不作为新反馈业务键。旧投影缺少新可选字段时保持兼容。
 - `Run` 可选承载 `tokens`、`costUsd`、`storageMode`、`clientRequestId`、`detailsAvailableUntil`，统计口径为单次 Run；缺失消耗字段必须按未知处理，缺失 `clientRequestId` 时调用方只能在同认证、Session、Workspace、交互代次且 runtime-state 已接管 busy Run 的条件下兼容判断 HTTP 歧义结果。`SessionTreeMessagesResponse` 的 `historyRepresentation/replayAvailable/detailsAvailableUntil` 同样可选，旧响应缺失时按完整历史兼容展示。
 - `RunEventType` 包含 transient `run.snapshot.reset`；`RunRuntimeSnapshot` 与 `RunSnapshotResetPayload` 的 `barrierSeq/runtimeVersion/events/reason/resetGeneration/earliestSeq/detailsAvailableUntil` 均保持可选，兼容旧后端、空物化快照和新增字段。`runtimeVersion` 是后端 Redis durable/transient 尾流版本，不是 durable SSE 游标；snapshot 内部事件只用于 reducer 重放，不推进 `Last-Event-ID`。
 - 定义 `SessionRuntimeStateSummary` / `SessionRuntimeState` / `SessionRuntimeAttention`，表达当前用户历史会话中的运行中 Run 数、待回答 question 数和单会话运行态；字段需兼容旧后端缺失场景，由消费方降级为空摘要。

@@ -848,6 +848,8 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
     }
   }
   const existing = index >= 0 ? messages[index] : undefined;
+  const incomingTokens = normalizeAssistantTokenUsage(raw);
+  const incomingModel = normalizeAssistantModel(raw);
   const base = {
     id: messageId,
     messageId,
@@ -862,8 +864,49 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
         role: "user",
         parts: existing?.role === "user" ? existing.parts : undefined
       }
-    : { ...base, role: "assistant", parts: existing && existing.role === "assistant" ? existing.parts : undefined };
+    : {
+        ...base,
+        role: "assistant",
+        parts: existing && existing.role === "assistant" ? existing.parts : undefined,
+        tokens: incomingTokens ?? (existing?.role === "assistant" ? existing.tokens : undefined),
+        model: incomingModel ?? (existing?.role === "assistant" ? existing.model : undefined)
+      };
   return replaceOrAppendMessage(messages, index, message);
+}
+
+/**
+ * OpenCode 不同版本会把消息用量放在 tokens 或 usage，并混用驼峰字段与嵌套 cache。
+ * 这里统一成共享 TokenUsage，确保后续 part 增量更新不会覆盖最近完整快照。
+ */
+function normalizeAssistantTokenUsage(raw: Record<string, unknown>) {
+  const usage = record(raw.tokens) ?? record(raw.usage);
+  if (!usage) {
+    const hasTopLevelUsage = [raw.input, raw.inputTokens, raw.output, raw.outputTokens, raw.reasoning, raw.reasoningTokens, raw.cacheRead, raw.cacheWrite]
+      .some((value) => number(value) !== undefined);
+    if (!hasTopLevelUsage) return undefined;
+  }
+  const source = usage ?? raw;
+  const cache = record(source.cache) ?? record(raw.cache);
+  const tokens = {
+    input: number(source.input) ?? number(source.inputTokens) ?? number(source.input_tokens),
+    output: number(source.output) ?? number(source.outputTokens) ?? number(source.output_tokens),
+    reasoning: number(source.reasoning) ?? number(source.reasoningTokens) ?? number(source.reasoning_tokens),
+    cacheRead: number(source.cacheRead) ?? number(source.cache_read) ?? number(cache?.read) ?? number(raw.cacheRead) ?? number(raw.cache_read),
+    cacheWrite: number(source.cacheWrite) ?? number(source.cache_write) ?? number(cache?.write) ?? number(raw.cacheWrite) ?? number(raw.cache_write),
+    contextWindow: number(source.contextWindow) ?? number(source.context_window)
+  };
+  return Object.values(tokens).some((value) => value !== undefined) ? tokens : undefined;
+}
+
+function normalizeAssistantModel(raw: Record<string, unknown>) {
+  const nested = record(raw.model);
+  const id = text(raw.modelId) ?? text(raw.modelID) ?? text(nested?.id) ?? text(nested?.modelId) ?? text(nested?.modelID);
+  if (!id) return undefined;
+  return {
+    id,
+    providerId: text(raw.providerId) ?? text(raw.providerID) ?? text(nested?.providerId) ?? text(nested?.providerID),
+    variant: text(raw.variant) ?? text(nested?.variant)
+  };
 }
 
 function findAssistantMessage(messages: AgentMessage[], messageId: string) {

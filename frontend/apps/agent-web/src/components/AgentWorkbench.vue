@@ -7788,6 +7788,7 @@ async function handleLogout() {
           :stop-disabled-reason="stopDisabledReason"
           :models="models"
           :providers="providers"
+          :selected-provider="selectedProvider"
           :selected-model="selectedModel"
           :run-feedbacks="runFeedbacks"
           :feedback-submitting="feedbackSubmitting"

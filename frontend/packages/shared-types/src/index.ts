@@ -1914,6 +1914,10 @@ export type AgentMessage =
       role: "assistant";
       text: string;
       parts?: MessagePart[];
+      /** 最近一次 OpenCode assistant 快照携带的用量，不累计 step-finish。 */
+      tokens?: TokenUsage;
+      /** 生成该 assistant 消息的模型，用于当前未选择模型时回退展示。 */
+      model?: ModelRef;
       createdAt: string;
       messageId?: string;
       platformMessageId?: string;

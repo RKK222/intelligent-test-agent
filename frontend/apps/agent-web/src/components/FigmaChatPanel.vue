@@ -41,10 +41,12 @@ import type {
   FileSearchResult,
   MessageScope,
   MessagePart,
+  ModelInfo,
   NightExecutionSlots,
   NightExecutionTask,
   PermissionRequest,
   QuestionRequest,
+  ProviderInfo,
   RunDiffFile,
   SubagentSession,
   TodoItem,
@@ -60,6 +62,7 @@ import {
   type OpencodeLikeRuntimeStatus,
 } from '@test-agent/agent-chat'
 import ChatContextAttachmentList from './ChatContextAttachmentList.vue'
+import SessionContextUsage from './SessionContextUsage.vue'
 import { copyTextToClipboard, Spinner } from '@test-agent/ui-kit'
 import type { ChatContextItem } from '../stores/chatContextStore'
 import { validateChatSend } from '../stores/chatContextStore'
@@ -718,9 +721,11 @@ const props =
     processRefreshBlocksSubmit?: boolean
     processInitializing?: boolean
     /** 可选模型列表（供快速标签使用） */
-    models?: any[]
+    models?: ModelInfo[]
     /** Provider 列表；部分后端只在 provider.models 内返回模型目录。 */
-    providers?: any[]
+    providers?: ProviderInfo[]
+    /** 当前选中的供应商标识。 */
+    selectedProvider?: string
     /** 当前选中的模型标识 */
     selectedModel?: string
     /** 当前用户按 Run 保存的整轮评价。 */
@@ -5554,6 +5559,17 @@ function onCompositionEnd() {
     </div>
     <!-- 与左侧面板、中心面板底部栏等高的常驻 footer -->
     <div class="figma-chat-footer">
+      <SessionContextUsage
+        v-if="currentSessionId && !activeSubagentSessionId"
+        :session-id="currentSessionId"
+        :session-title="title"
+        :messages="messages"
+        :message-scopes-by-id="messageScopesById"
+        :selected-provider="selectedProvider"
+        :selected-model="selectedModel"
+        :models="models"
+        :providers="providers"
+      />
       <div v-if="!activeSubagentSessionId" class="figma-chat-usage">
         <span
           v-if="showTaskStopped"

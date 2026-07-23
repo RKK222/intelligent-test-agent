@@ -51,6 +51,40 @@ describe("backend-api", () => {
     ]);
   });
 
+  it("maps OpenCode V2 model limits and provider all envelopes", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const path = String(input);
+      const data = path.endsWith("/config")
+        ? { enabled_providers: ["anthropic"] }
+        : path.includes("/models")
+          ? [{ id: "claude-sonnet", providerID: "anthropic", name: "Claude Sonnet", limit: { context: 200_000, output: 64_000 } }]
+          : {
+              all: [{ id: "anthropic", name: "Anthropic", models: {
+                "claude-sonnet": { name: "Claude Sonnet", limit: { context: 200_000, output: 64_000 } }
+              } }],
+              connected: ["anthropic"]
+            };
+      return new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data }), { status: 200 });
+    });
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.listModels("wrk_1")).resolves.toEqual([
+      expect.objectContaining({
+        id: "claude-sonnet",
+        providerId: "anthropic",
+        contextLimit: 200_000,
+        outputLimit: 64_000
+      })
+    ]);
+    await expect(client.listProviders("wrk_1")).resolves.toEqual([
+      expect.objectContaining({
+        providerId: "anthropic",
+        name: "Anthropic",
+        models: [expect.objectContaining({ id: "claude-sonnet", contextLimit: 200_000, outputLimit: 64_000 })]
+      })
+    ]);
+  });
+
   it("keeps an explicitly empty Vite API base URL for same-origin deployment", async () => {
     vi.stubEnv("VITE_TEST_AGENT_API_BASE_URL", "");
     try {

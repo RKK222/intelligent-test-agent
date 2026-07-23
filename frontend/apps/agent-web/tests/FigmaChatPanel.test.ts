@@ -2287,6 +2287,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("Explore frontend structure");
     expect(wrapper.text()).not.toContain("子 Agent 已读取前端目录。");
     expect(wrapper.find(".figma-chat-question-dock").exists()).toBe(false);
+    expect(wrapper.find(".session-context-usage").exists()).toBe(true);
 
     await wrapper.get(".figma-chat-process-status").trigger("click");
     await wrapper.get(".figma-chat-process-status-dot").trigger("click");
@@ -2306,6 +2307,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("子 Agent 已读取前端目录。");
     expect(wrapper.text()).toContain("子 Agent 不支持对话");
     expect(wrapper.find(".figma-chat-subagent-return").exists()).toBe(true);
+    expect(wrapper.find(".session-context-usage").exists()).toBe(false);
     expect(wrapper.get(".figma-chat-question-dock").text()).toContain("读取文件（匹配文件路径）");
     expect(wrapper.get(".figma-chat-question-dock").text()).toContain("frontend/**");
     // 原生 child session 也可能提出 Question；不能只留下时间线中的 question 工具 JSON。
@@ -2319,6 +2321,7 @@ describe("FigmaChatPanel", () => {
     await nextTick();
 
     expect(wrapper.find(".figma-chat-composer").exists()).toBe(true);
+    expect(wrapper.find(".session-context-usage").exists()).toBe(true);
     expect(wrapper.find(".oc-subagent-card__attention").exists()).toBe(false);
     expect(wrapper.text()).not.toContain("子 Agent 已读取前端目录。");
     expect(processCardObservers()).toHaveLength(processObserverCountBeforeSubagent + 1);
@@ -3764,6 +3767,46 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find(".figma-chat-usage-dot").exists()).toBe(true);
     expect(wrapper.text()).toContain("任务消耗");
     expect(wrapper.text()).toContain("2.0w tokens");
+  });
+
+  it("places context usage at the far left of the footer and preserves task usage", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        currentSessionId: "ses_context",
+        title: "上下文会话",
+        messages: [{
+          id: "a_context",
+          messageId: "a_context",
+          role: "assistant",
+          text: "完成",
+          tokens: { input: 50, output: 10 },
+          model: { id: "gpt-5", providerId: "openai" },
+          createdAt: "2026-07-23T08:00:00Z"
+        }],
+        selectedProvider: "openai",
+        selectedModel: "openai/gpt-5",
+        models: [{ id: "gpt-5", providerId: "openai", name: "GPT-5", contextLimit: 1000 }],
+        providers: [{ providerId: "openai", name: "OpenAI" }],
+        running: false,
+        taskUsage: { duration: "1s", tokens: 19915 },
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any
+    });
+
+    const footer = wrapper.get(".figma-chat-footer");
+    expect(footer.element.firstElementChild).toBe(wrapper.get(".session-context-usage").element);
+    expect(wrapper.text()).toContain("任务消耗");
+  });
+
+  it("does not show context usage before a session exists", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any
+    });
+
+    expect(wrapper.find(".session-context-usage").exists()).toBe(false);
   });
 
   it("shows failed task status from runtime status", () => {

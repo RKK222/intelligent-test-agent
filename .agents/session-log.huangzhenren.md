@@ -912,3 +912,17 @@
   - 版本库关联提示在界面上变为了信息图标，鼠标悬浮在图标上时展示原描述文本，使整体表单样式更为紧凑。
   - 未修改 API、事件、数据库或 security 相关内容。
 
+### 2026-07-23 - 增加会话上下文查看
+
+- Why:
+  - 右侧会话栏缺少按当前模型查看上下文占用、最近消息用量和输入上下文构成的入口，用户需要参考 OpenCode 1.18.4 在不引入新后端契约的前提下补齐该能力。
+- What:
+  - 会话 footer 最左侧新增 16px 使用率圆环和精简悬浮卡；点击后在右侧栏 header/footer 之间展示会话、供应商、模型、根消息数、限制、使用率、总/输入/输出 Token及五类横向拆分，支持 Esc/按钮关闭、焦点返回、会话切换关闭和子 Agent 隐藏。
+  - assistant `AgentMessage` 保留可选 `tokens/model`；历史映射与实时 reducer 恢复 input/output/reasoning/cache 和 provider/model，正文拆分仅在详情打开时按最近用量消息、input 与根消息数缓存。
+  - backend-api 兼容 OpenCode V2 `limit.context/limit.output` 及 Provider `{ all: [...] }` envelope；同步 frontend、agent-web、agent-chat、shared-types、backend-api README。
+- How:
+  - TDD 覆盖最近有效根 assistant、cache/reasoning、模型切换、未知/超限、根/child 过滤、五类校准、历史/实时恢复、Provider/Model V2 映射、圆环位置、悬浮/详情、关闭焦点、会话/子 Agent 切换和任务消耗保留。
+  - `corepack pnpm lint`、`corepack pnpm typecheck`、生产 build、目标 380 条 Vitest 和 Chromium mock E2E 均通过；全量 Vitest 为 1565 passed / 1 skipped / 1 failed，唯一失败仍是既有 `DirectoryRows.test.ts` 把 role=`radio` 的“上传”按 role=`button` 查询，已单文件复现且与本次差异无关。
+- Result:
+  - 上下文限制始终跟随当前模型，未选择时回退最近 assistant 模型；用量取最近有效根 assistant 的五项总和，文本可超过 100% 且 SVG 封顶，系统提示和协议等不可还原开销归入“其他”。
+  - 未新增或变更 HTTP API、RunEvent、数据库/Flyway、依赖、费用展示、安全凭据或环境配置；可选前端字段兼容旧历史和旧事件。

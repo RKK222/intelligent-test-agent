@@ -857,6 +857,7 @@ export function messagesFromSessionMessages(messages: SessionMessage[]): AgentMe
       role: "assistant",
       text: message.content,
       parts: normalizeSessionMessageParts(message),
+      tokens: message.tokens,
       createdAt: message.createdAt
     };
   });

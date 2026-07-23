@@ -38,6 +38,7 @@
 - 暴露超级管理员用户管理方法：用户分页查询、创建用户（默认密码 123456）、调整用户全局角色、单个/批量安全删除、单个/批量 TCDS 信息同步和角色列表，统一走 `/api/internal/platform/system-management`，自动携带用户 Bearer Token；删除方法返回实际删除 ID/数量，TCDS 同步只刷新姓名和部门并保留原 `userId`/应用关系。创建用户能力仅用于研发测试便捷造号，角色调整由超管直接操作，不包含普通用户审批通知流。
 - `startRun` 同时支持旧 `(sessionId, prompt)` 参数和对象 payload（`parts`、`messageId`、`agent`、`model`、`variant`、`mode`、`command`、`arguments`、`contextToken`、`clientRequestId`）；`getRunContext(sessionId)` 签发仅存页面内存的会话上下文。上下文过期重试必须复用同一 `clientRequestId`，调用方还需自行校验认证、Session、Workspace 与交互代次，不能让迟到 HTTP 结果覆盖当前页面状态。
 - 暴露 opencode Web App 标准运行态方法：Agent/Model/Provider/Command/Reference 目录、config、provider auth/OAuth、worktree、Session active-run/children/todo/diff/abort/fork/side-question/compact/revert/command/shell/share、permission/question、fs/vcs/lsp/mcp status/resources/tools/auth 和 terminal ticket；permission 列表保留原生 `patterns[]` 并兼容旧 `pattern`。`startSideQuestionRun` 基于主 Session，`startManualQuestionRun` 只提交 `{workspaceId,question,model?}` 并用于无主对话手册问答，两者立即取得 `runId` 并通过既有 RunEvent SSE 消费，不写普通主时间线；旧 `askSideQuestion` 同步调用保留兼容。配置管理额外暴露 `createApplication`，只由超级管理员 UI 调用。其他只读目录、Session 操作、fs/vcs/lsp/mcp 和 terminal ticket 统一走 `/api/internal/platform/opencode-runtime/...`，Run/Diff/SSE、当前用户 opencode 进程和历史 session-tree 主读取继续按 `/api/internal/agent/{agentId}/...` 调用。`listAgents(workspaceId, init?)` 支持透传单请求 `signal` / `timeoutMs`，用于工作区切换取消旧请求和 Agent 下拉短超时重试；内部模型管理方法覆盖系统管理页的 Token CRUD、Provider 关联与内存刷新 DTO，不给内部代理暴露前端便捷方法。Token 写请求的明文只进入实际 fetch body，原始交换观察副本会对 `token/authToken/tokenValue` 脱敏。
+- Model 目录映射兼容 OpenCode V2 的 `limit.context/limit.output`；Provider 目录兼容数组及 `{ all: [...] }` envelope，并为 Provider 内嵌模型补齐 `providerId`，供前端按当前供应商/模型取得准确上下文上限和展示名称。该兼容只改变 client projection，不改变平台 HTTP wire 契约。
 - Command catalog 映射会保留 opencode runtime 的 `source/hints` 可选字段，供 frontend-opencode 生成 slash command 参数表单。
 - 把后端文件 DTO 转换为前端稳定展示模型。
 - SSH key 新增方法只发送私钥给平台后端，响应类型只包含 key 元信息，不包含明文或密文。
@@ -55,4 +56,4 @@ corepack pnpm --filter @test-agent/backend-api typecheck
 corepack pnpm test -- backend-api
 ```
 
-`backend-api.test.ts` 覆盖动态路由 ID 空值不发送、绑定请求携带修剪后的 `X-Test-Agent-Linux-Server-Id`、普通控制面不携带，用户单个/批量删除与 TCDS 同步的方法/路径/body，以及 7 个引用资产端点的 app/repository/path 编码、初始化/切换 body、无 body同步/核验和响应透传、组合视图 list/read 的 locator/稳定身份/只读来源/局部 warning 映射、通用参数内存值四个接口的 URL 编码与 HTTP 方法；`night-execution.test.ts` 覆盖夜间时段和任务创建/查询/改期/取消/关闭的 URL、查询参数与请求体。
+`backend-api.test.ts` 覆盖动态路由 ID 空值不发送、绑定请求携带修剪后的 `X-Test-Agent-Linux-Server-Id`、普通控制面不携带，OpenCode V2 模型 limit 与 Provider `all` envelope 映射，用户单个/批量删除与 TCDS 同步的方法/路径/body，以及 7 个引用资产端点的 app/repository/path 编码、初始化/切换 body、无 body同步/核验和响应透传、组合视图 list/read 的 locator/稳定身份/只读来源/局部 warning 映射、通用参数内存值四个接口的 URL 编码与 HTTP 方法；`night-execution.test.ts` 覆盖夜间时段和任务创建/查询/改期/取消/关闭的 URL、查询参数与请求体。

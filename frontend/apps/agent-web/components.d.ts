@@ -68,6 +68,7 @@ declare module 'vue' {
     ScheduledTaskManagementPanel: typeof import('./src/components/system/ScheduledTaskManagementPanel.vue')['default']
     ServerWorkspaceDirectoryNode: typeof import('./src/components/ServerWorkspaceDirectoryNode.vue')['default']
     ServerWorkspacePickerDialog: typeof import('./src/components/ServerWorkspacePickerDialog.vue')['default']
+    SessionContextUsage: typeof import('./src/components/SessionContextUsage.vue')['default']
     SettingsAppWorkspacePanel: typeof import('./src/components/settings/SettingsAppWorkspacePanel.vue')['default']
     SettingsDialog: typeof import('./src/components/settings/SettingsDialog.vue')['default']
     SettingsMenu: typeof import('./src/components/settings/SettingsMenu.vue')['default']

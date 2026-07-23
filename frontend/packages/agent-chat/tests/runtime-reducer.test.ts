@@ -3,6 +3,67 @@ import { createInitialAgentChatRuntimeState, reduceAgentChatRuntime } from "../s
 import type { RunEvent } from "@test-agent/shared-types";
 
 describe("agent-chat runtime reducer", () => {
+  it("keeps assistant usage and model metadata across later part updates", () => {
+    const withMessage = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("message.updated", {
+        message: {
+          id: "msg_usage",
+          role: "assistant",
+          providerID: "anthropic",
+          modelID: "claude-sonnet",
+          tokens: {
+            input: 120,
+            output: 20,
+            reasoning: 5,
+            cache: { read: 3, write: 2 }
+          }
+        }
+      })
+    });
+
+    expect(withMessage.messages[0]).toMatchObject({
+      role: "assistant",
+      tokens: { input: 120, output: 20, reasoning: 5, cacheRead: 3, cacheWrite: 2 },
+      model: { id: "claude-sonnet", providerId: "anthropic" }
+    });
+
+    const withPart = reduceAgentChatRuntime(withMessage, {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_usage",
+        part: { id: "part_text", messageID: "msg_usage", type: "text", text: "完成" }
+      })
+    });
+
+    expect(withPart.messages[0]).toMatchObject({
+      tokens: { input: 120, output: 20, reasoning: 5, cacheRead: 3, cacheWrite: 2 },
+      model: { id: "claude-sonnet", providerId: "anthropic" }
+    });
+  });
+
+  it("normalizes usage aliases and top-level cache counters", () => {
+    const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("message.updated", {
+        message: {
+          id: "msg_usage_alias",
+          role: "assistant",
+          providerId: "openai",
+          modelId: "gpt-5",
+          usage: { inputTokens: 40, outputTokens: 8, reasoningTokens: 2 },
+          cacheRead: 6,
+          cacheWrite: 4
+        }
+      })
+    });
+
+    expect(state.messages[0]).toMatchObject({
+      tokens: { input: 40, output: 8, reasoning: 2, cacheRead: 6, cacheWrite: 4 },
+      model: { id: "gpt-5", providerId: "openai" }
+    });
+  });
+
   it("archives the previous turn todos and clears them as soon as a new user message is submitted", () => {
     const previous = {
       ...createInitialAgentChatRuntimeState([

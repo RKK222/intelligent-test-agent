@@ -513,10 +513,14 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   }
 
   async function runtimeCatalogList(path: string, workspaceId?: string): Promise<Record<string, unknown>[]> {
-    const [items, allowlist] = await Promise.all([
-      runtimeList(path, routedRequest),
+    const [value, allowlist] = await Promise.all([
+      routedRequest<unknown>(path),
       runtimeProviderAllowlist(workspaceId)
     ]);
+    // OpenCode V2 的 Provider 目录包在 `{ all: [...] }` 中；统一解包后再应用平台 allowlist。
+    const payload = record(value)?.data ?? value;
+    const all = record(payload)?.all;
+    const items = listFromRuntimeEnvelope(Array.isArray(all) ? all : payload);
     if (!allowlist) return items;
     return items.filter((item) => {
       const providerId = runtimeCatalogProviderId(item);
@@ -2367,12 +2371,13 @@ function toAgentInfo(value: Record<string, unknown>): AgentInfo {
 function toModelInfo(value: Record<string, unknown>): ModelInfo {
   const id = text(value.id) ?? text(value.modelId) ?? text(value.modelID) ?? "unknown";
   const variants = Array.isArray(value.variants) ? value.variants.filter((item): item is string => typeof item === "string") : undefined;
+  const limit = record(value.limit);
   return compactObject({
     id,
     providerId: text(value.providerId) ?? text(value.providerID) ?? text(record(value.provider)?.id),
     name: text(value.name) ?? id,
-    contextLimit: number(value.contextLimit) ?? number(value.context),
-    outputLimit: number(value.outputLimit),
+    contextLimit: number(value.contextLimit) ?? number(value.context) ?? number(limit?.context),
+    outputLimit: number(value.outputLimit) ?? number(limit?.output),
     free: typeof value.free === "boolean" ? value.free : undefined,
     defaultModel: typeof value.defaultModel === "boolean" ? value.defaultModel : undefined,
     variants
@@ -2387,7 +2392,7 @@ function toProviderInfo(value: Record<string, unknown>): ProviderInfo {
     name: text(value.name) ?? providerId,
     status: text(value.status),
     models: rawModels
-      ? Object.entries(rawModels).map(([id, model]) => toModelInfo({ id, ...(record(model) ?? {}) }))
+      ? Object.entries(rawModels).map(([id, model]) => toModelInfo({ id, providerId, ...(record(model) ?? {}) }))
       : undefined,
     metadata: value
   });

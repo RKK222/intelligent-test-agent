@@ -2546,6 +2546,62 @@ test("model picker keeps the selected model after page reload", async ({ page })
   });
 });
 
+test("context usage follows the selected model catalog and live assistant usage", async ({ page }) => {
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    models: [{
+      id: "gpt-context",
+      providerID: "openai",
+      name: "GPT Context",
+      defaultModel: true,
+      limit: { context: 200_000, output: 32_000 }
+    }],
+    providers: [{ id: "openai", name: "OpenAI Context", status: "ready" }],
+    runEvents: [
+      event(1, "message.updated", {
+        message: {
+          id: "msg_context_live",
+          sessionID: "ses_1",
+          role: "assistant",
+          providerID: "openai",
+          modelID: "gpt-context",
+          tokens: {
+            input: 90_000,
+            output: 8_000,
+            reasoning: 1_000,
+            cache: { read: 500, write: 500 }
+          }
+        }
+      }),
+      event(2, "message.part.updated", {
+        messageID: "msg_context_live",
+        part: { id: "part_context_live", messageID: "msg_context_live", type: "text", text: "上下文统计完成" }
+      }),
+      event(3, "run.succeeded", {})
+    ]
+  });
+
+  await gotoWorkbench(page);
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("统计当前上下文");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  const contextButton = page.getByRole("button", { name: "查看会话上下文" });
+  await expect(contextButton).toBeVisible();
+  await contextButton.hover();
+  const tooltip = page.locator(".session-context-tooltip");
+  await expect(tooltip).toContainText("使用率50%");
+  await expect(tooltip).toContainText("总上下文200,000");
+  await expect(tooltip).toContainText("已使用100,000");
+  await expect(tooltip).not.toContainText("费用");
+
+  await contextButton.click();
+  const detail = page.getByRole("dialog", { name: "会话上下文" });
+  await expect(detail).toContainText("E2E Session");
+  await expect(detail).toContainText("OpenAI Context");
+  await expect(detail).toContainText("GPT Context");
+  await expect(detail.getByTestId("context-breakdown")).toBeVisible();
+});
+
 test("workbench clears stale persisted model and sends catalog default", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, {

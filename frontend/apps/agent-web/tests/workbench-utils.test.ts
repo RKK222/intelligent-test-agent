@@ -888,6 +888,22 @@ describe("nextCenterModeAfterRunDiff", () => {
 });
 
 describe("historical session restoration", () => {
+  it("keeps assistant token usage from persisted history", () => {
+    const mapped = messagesFromSessionMessages([{
+      messageId: "msg_usage",
+      sessionId: "ses_usage",
+      role: "ASSISTANT",
+      content: "完成",
+      tokens: { input: 120, output: 20, reasoning: 5, cacheRead: 3, cacheWrite: 2 },
+      createdAt: "2026-07-23T08:00:00Z"
+    }]);
+
+    expect(mapped[0]).toMatchObject({
+      role: "assistant",
+      tokens: { input: 120, output: 20, reasoning: 5, cacheRead: 3, cacheWrite: 2 }
+    });
+  });
+
   it("keeps scheduled-task source fields on restored user messages", () => {
     const mapped = messagesFromSessionMessages([{
       messageId: "msg_night",
