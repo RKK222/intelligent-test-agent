@@ -868,3 +868,31 @@
 - Result:
   - 最终 Flyway 目标版本为 `20260722180000`，独立校验通过且无无效迁移；旧版本保留原成功记录和 repair 删除标记，当前版本保留成功记录。
   - 本次仅修复本机测试数据库外部状态并追加会话留痕；未修改业务代码、迁移文件、API、RunEvent、数据库结构、安全配置或环境配置文件。
+
+### 2026-07-23 - 兼容企业 Redis 与 HTTP XXL 登录
+
+- Why:
+  - 企业固定 HTTP 入口的 SSO 登录返回 HTTP 200 的 `System Error` 页面，后台根因为 `RedisSystemException`；上游错误页随后访问缺失的父窗口 `adminTab`，又产生次生 JavaScript 异常。
+- What:
+  - 将 SSO ticket 一次消费从 Redis 6.2 的原生 `GETDEL` 改为兼容 Redis 5/6.0 的原子 Lua；ticket 消费、用户 JIT 和 XXL 登录任一运行时异常都返回平台 503 状态页，不再落入上游通用错误页。
+  - XXL 会话 cookie 默认保持 `Secure`，增加显式企业 HTTP 开关；单/双后台模板及诊断脚本要求固定 HTTP 部署在每个 Java 节点设置 `TEST_AGENT_XXL_JOB_COOKIE_SECURE=false`。
+- How:
+  - 按 TDD 完成失败与恢复场景，使用真实 Redis 5 和 MySQL 8.4 容器验证，并执行 XXL integration 全量测试、平台应用打包、企业配置及诊断脚本校验。
+  - 后端全量测试仍被干净基线中的 `OpencodeProcessConfigLinkServiceTest.rejectsOrdinaryDirectoryAtManagedPathWithoutDeletingUserData` 阻塞；该用例已独立复现，相关代码与本次差异无关。
+- Result:
+  - 未变更 HTTP 路径/DTO、RunEvent、数据库/Flyway 或 XXL 上游源码；本次属于 Redis 兼容性与 HTTP cookie 安全配置变更。企业需发布新 JAR，并在所有固定 HTTP 后端节点显式关闭 cookie 的 `Secure` 属性。
+
+### 2026-07-23 - 隔离 OpenCode 用户运行目录
+
+- Why:
+  - 用户 OpenCode 进程此前只设置 `XDG_DATA_HOME`，系统 HOME、cache、state 和 tmp 仍可能落到 manager 系统账号的共享目录，需要按统一认证号的稳定 `sessionPath` 完成目录级隔离。
+- What:
+  - Go manager 在合并调用方环境后强制派生并覆盖 `HOME`、`XDG_DATA_HOME`、`XDG_CACHE_HOME`、`XDG_STATE_HOME`、`TMPDIR` 和 `OPENCODE_CONFIG_DIR`；fork 前创建或校正 session、`.cache`、`.local/state`、`.tmp` 为 `0755` 普通物理目录，冲突或创建失败不拉起进程、不写成功 state。
+  - 保留 Java 维护的公共配置软链接、legacy 端口目录 fallback、健康进程幂等复用和受管重启语义；`startCommand` 按固定顺序展示新增非敏感变量，原 API key 脱敏不变。
+  - 企业 worker smoke 在断网容器内实际启动 OpenCode，核验 PID 1 环境、`/path` 和 data/cache/state/tmp 下的 `opencode` 普通子目录；同步 manager/runtime、部署、HTTP 和事件流文档。
+- How:
+  - TDD 覆盖保留变量不可覆盖、不同统一认证号路径分离、既有目录权限校正、文件/软链接冲突时 starter 未调用且 state 未写入、创建失败不泄露 sessionPath/统一认证号，以及 legacy/幂等兼容路径。
+  - `cd opencode-manager && go test ./...`、`bash -n tools/verify-opencode-node-worker-image.sh`、`git diff --check` 和 `tools/verify-opencode-node-worker-image.sh test-agent-opencode-worker:internal` 均通过；镜像实际验证 OpenCode 1.18.4、glibc 2.31。
+- Result:
+  - 新启动或平台受管重启后的 Linux OpenCode 进程按统一认证号使用独立 HOME/XDG/TMP 目录，停止与重启不清理；同一 manager 系统账号下仍是目录级隔离，不引入独立 OS 用户。
+  - 未新增 HTTP/WebSocket/DTO/RunEvent 字段、数据库或 Flyway 变更，不修改 Java 启动公共服务、generated SDK 或环境配置；存量 PID 需受管重启后生效。

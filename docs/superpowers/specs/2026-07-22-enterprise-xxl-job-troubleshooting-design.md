@@ -18,7 +18,7 @@
 | 后台 A | `122.233.30.4`，平台 `8080`、Admin `18080`、executor `9999` |
 | 后台 B | `122.233.30.114`，平台 `8080`、Admin `18080`、executor `9999` |
 | Redis | `122.233.30.20:6379` |
-| XXL MySQL | `122.233.30.148:3306/xxl_job` |
+| 外部 XXL MySQL | `122.210.106.43:3306/xxl_job`（现网外部服务，不在平台节点部署容器） |
 
 `TEST_AGENT_NGINX_XXL_JOB_ADMINS` 仍是前端服务器 `nginx.env` 的有效渲染输入，用于生成中央 Nginx Admin upstream；它不是 Java 环境变量。已删除的 Java 地址变量是 `TEST_AGENT_XXL_JOB_ADMIN_ADDRESSES`、`TEST_AGENT_XXL_JOB_EXECUTOR_ADDRESS` 和 `TEST_AGENT_XXL_JOB_EXECUTOR_IP`。
 
@@ -38,7 +38,7 @@
 8. `.4` 后台平台/Admin/executor。
 9. `.114` 后台平台/Admin/executor。
 10. `.20` Redis 票据和 session marker 边界。
-11. `.148` MySQL、Flyway、JIT 用户、执行器组、任务和 registry。
+11. 外部 MySQL `122.210.106.43`、Flyway、JIT 用户、执行器组、任务和 registry。
 12. 多 Admin 间歇性故障及节点配置一致性。
 13. executor 在线但任务不触发、互斥跳过和调度日志。
 14. HTTP 状态码、日志关键字和故障责任边界决策树。
@@ -53,7 +53,7 @@
 
 新增 `deploy/internal/diagnose-xxl-job-entry.sh`，在实际浏览器网段的 Linux 终端执行。它只执行 DNS 查询、TCP/HTTP GET/HEAD 探测和响应摘要检查：
 
-- 在任何网络探测前读取本机全局 IPv4；命中 `.2/.4/.114/.20/.148` 已知基础设施节点，或 `ip` 缺失/失败/无法得到地址时，明确返回误用/关键前提退出码 `2`。
+- 在任何网络探测前读取本机全局 IPv4；命中 `.2/.4/.114/.20` 或外部 MySQL `122.210.106.43` 已知基础设施地址，或 `ip` 缺失/失败/无法得到地址时，明确返回误用/关键前提退出码 `2`。
 - 检查 `mimo.sdc.cs.icbc` DNS。
 - 分别检查域名入口和 `.2:9996` IP 入口。
 - 检查同源 `/xxl-job-admin/actuator/health/readiness`。
@@ -82,7 +82,7 @@
 - `test-agent-backend` systemd 的 `ExecStart`、`EnvironmentFiles`、`MainPID` 和启动时间。
 - `8080/18080/9999` 监听者及其与 systemd 主 PID 的关系。
 - 平台 `8080` readiness 和本机 Admin `18080/xxl-job-admin/actuator/health/readiness`。
-- 到 `.20:6379`、`.148:3306`、对端 `8080/18080/9999` 的只读网络连通性。
+- 到 `.20:6379`、外部 MySQL `122.210.106.43:3306`、对端 `8080/18080/9999` 的只读网络连通性。
 - `/data/testagent/config/backend.env` 中允许展示的地址、开关、用户名和端口；数据库/Redis/XXL MySQL password、普通 API token、manager token 和内部代理 key 等低熵凭据只输出 `SET/UNSET`，不输出长度或摘要。
 - 只有生产规范要求强随机且需要跨节点比对的 `TEST_AGENT_XXL_JOB_ACCESS_TOKEN` 输出长度和 SHA-256 前缀；两个后台的 Redis、XXL MySQL、该 access token 摘要和端口应当一致，本机 advertised host 与稳定 ID 应符合本节点。
 - 最近 5～120 分钟的 Admin、Flyway、Hikari、MySQL、executor readiness、注册和调度日志，默认 15 分钟。
@@ -176,7 +176,7 @@ bash tools/verify-internal-xxl-job-diagnostics.sh
 
 ## 验收标准
 
-1. 现场人员可以按“浏览器网段 -> `.2` -> `.4` -> `.114` -> `.148` -> 浏览器 SSO”的固定顺序完成只读取证。
+1. 现场人员可以按“浏览器网段 -> `.2` -> `.4` -> `.114` -> 外部 MySQL 只读证据 -> 浏览器 SSO”的固定顺序完成只读取证。
 2. 每个脚本在错误机器上拒绝执行，在目标机器上输出统一、可判定且已脱敏的结果。
 3. 平台健康、Admin 健康、executor 健康三层不会互相混淆。
 4. 单节点 Admin 故障、Nginx upstream 缺失、共享配置不一致、HTTP `Secure` Cookie 风险和 SSO 状态码均有明确判断路径。

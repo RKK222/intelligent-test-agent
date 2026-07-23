@@ -2,6 +2,7 @@ package com.enterprise.testagent.xxljob.admin;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.enterprise.testagent.xxljob.XxlJobProperties;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.http.Cookie;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -30,7 +31,8 @@ class PlatformXxlAdminAccessFilterTest {
 
     @Test
     void addsSameOriginFramePolicyAndHardensXxlCookie() throws Exception {
-        PlatformXxlAdminSecurityHeadersFilter filter = new PlatformXxlAdminSecurityHeadersFilter();
+        XxlJobProperties properties = new XxlJobProperties();
+        PlatformXxlAdminSecurityHeadersFilter filter = new PlatformXxlAdminSecurityHeadersFilter(properties);
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/");
         request.setContextPath("/xxl-job-admin");
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -47,6 +49,26 @@ class PlatformXxlAdminAccessFilterTest {
         assertThat(cookie.getSecure()).isTrue();
         assertThat(cookie.getAttribute("SameSite")).isEqualTo("Lax");
         assertThat(cookie.getPath()).isEqualTo("/xxl-job-admin/");
+    }
+
+    @Test
+    void permitsExplicitHttpOnlyDeploymentWithoutSecureCookie() throws Exception {
+        XxlJobProperties properties = new XxlJobProperties();
+        properties.getAdmin().setCookieSecure(false);
+        PlatformXxlAdminSecurityHeadersFilter filter = new PlatformXxlAdminSecurityHeadersFilter(properties);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/");
+        request.setContextPath("/xxl-job-admin");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = (req, rawResponse) -> ((jakarta.servlet.http.HttpServletResponse) rawResponse)
+                .addCookie(new Cookie("test_agent_xxl_login", "secret"));
+
+        filter.doFilter(request, response, chain);
+
+        Cookie cookie = response.getCookie("test_agent_xxl_login");
+        assertThat(cookie).isNotNull();
+        assertThat(cookie.isHttpOnly()).isTrue();
+        assertThat(cookie.getSecure()).isFalse();
+        assertThat(cookie.getAttribute("SameSite")).isEqualTo("Lax");
     }
 
     private static void assertBlocked(PlatformXxlAdminAccessFilter filter, String method, String path)

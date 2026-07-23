@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- 固定拓扑：域名 `http://mimo.sdc.cs.icbc:9996` → 企业入口/网关 → 实体 Nginx `122.233.30.2:80`；IP `http://122.233.30.2:9996` → 实体 Nginx `122.233.30.2:9996`；实体 Nginx 同时监听 `80` 与 `9996`。后台为 `122.233.30.4` 与 `122.233.30.114`，Redis 为 `122.233.30.20:6379`，XXL MySQL 为 `122.233.30.148:3306/xxl_job`。
+- 固定拓扑：域名 `http://mimo.sdc.cs.icbc:9996` → 企业入口/网关 → 实体 Nginx `122.233.30.2:80`；IP `http://122.233.30.2:9996` → 实体 Nginx `122.233.30.2:9996`；实体 Nginx 同时监听 `80` 与 `9996`。后台为 `122.233.30.4` 与 `122.233.30.114`，Redis 为 `122.233.30.20:6379`，XXL MySQL 为外部共享服务 `122.210.106.43:3306/xxl_job`，不在平台节点部署容器。
 - 三个现场脚本严格只读：不得启动、停止或重启服务，不得 reload Nginx，不得修改配置、身份文件、日志、Redis 或 MySQL，不得签发/消费 SSO 票据或触发任务。
 - `TEST_AGENT_NGINX_XXL_JOB_ADMINS` 是前端 `nginx.env` 的有效变量；不得恢复已删除的三个 Java 地址变量。
 - 输出统一使用 `[PASS]`、`[WARN]`、`[FAIL]`、`[INFO]`；退出码 `0` 表示无关键失败，`1` 表示关键异常，`2` 表示误用、错误机器或关键前提缺失。
@@ -80,7 +80,7 @@ TEST_AGENT_DIAG_DATA_ROOT
 
 **Interfaces:**
 - Consumes: 固定域名/IP 与系统 `ip`、`getent`、`curl`。
-- Produces: 无参数命令；只允许从实际浏览器网段 Linux 诊断终端运行。`ip/getent/curl` 缺失、`ip` 失败或无法识别本机全局 IPv4，以及命中 `.2/.4/.114/.20/.148` 已知基础设施节点时返回 `2` 且不发起网络探测；其它检查输出统一前缀并返回 `0/1`。
+- Produces: 无参数命令；只允许从实际浏览器网段 Linux 诊断终端运行。`ip/getent/curl` 缺失、`ip` 失败或无法识别本机全局 IPv4，以及命中 `.2/.4/.114/.20` 或外部 MySQL `122.210.106.43` 已知基础设施地址时返回 `2` 且不发起网络探测；其它检查输出统一前缀并返回 `0/1`。
 
 - [ ] **Step 1: 创建失败的入口脚本验证夹具**
 
@@ -198,7 +198,7 @@ probe_readiness() {
 }
 ```
 
-命令前提和调用顺序必须先检查 `ip`，可靠读取全局 IPv4 并拒绝 `.2/.4/.114/.20/.148` 五个基础设施节点；这一步失败直接返回 `2`，不得执行 `getent/curl` 或输出未验证 PASS。随后网络探测部分完整写为：
+命令前提和调用顺序必须先检查 `ip`，可靠读取全局 IPv4 并拒绝 `.2/.4/.114/.20` 与外部 MySQL `122.210.106.43` 五个基础设施地址；这一步失败直接返回 `2`，不得执行 `getent/curl` 或输出未验证 PASS。随后网络探测部分完整写为：
 
 ```bash
 command -v getent >/dev/null 2>&1 || { printf '[FAIL] 缺少 getent，无法执行固定入口诊断\n' >&2; exit 2; }
@@ -657,7 +657,7 @@ Expected: 非零退出，首先报告正式手册不存在。
 6. 122.233.30.4 后台（expected-host=.4）
 7. 122.233.30.114 后台（expected-host=.114）
 8. 122.233.30.20 Redis 的人工只读边界
-9. 122.233.30.148 MySQL（DBA 执行只读 SQL）
+9. 外部共享 MySQL（DBA 从获准访问 `122.210.106.43:3306` 的受控客户端执行只读 SQL，不登录外部服务宿主机）
 10. 浏览器 SSO Network/Console/Cookie/CSP/postMessage
 11. executor 在线、任务不触发与 SKIPPED_LOCK_HELD
 12. 多 Admin 间歇故障与共享配置摘要比对
@@ -685,7 +685,7 @@ bash /data/testagent/deploy/internal/diagnose-xxl-job-backend.sh \
 MySQL 命令必须使用交互式密码输入：
 
 ```bash
-mysql --host=122.233.30.148 --port=3306 --user='<只读账号>' --password \
+mysql --host=122.210.106.43 --port=3306 --user='<只读账号>' --password \
   --database=xxl_job \
   < /data/testagent/deploy/internal/xxl-job-readonly-check.sql
 ```
@@ -706,7 +706,7 @@ Redis 章节只能说明确认 TCP 可达和由应用摘要判断配置一致；
 bash tools/verify-internal-xxl-job-diagnostics.sh
 ```
 
-并注明验证完全使用临时夹具，不访问 `.2/.4/.114/.20/.148`。
+并注明验证完全使用临时夹具，不访问 `.2/.4/.114/.20` 或外部 MySQL `122.210.106.43`。
 
 - [ ] **Step 5: 运行文档与脚本验证**
 

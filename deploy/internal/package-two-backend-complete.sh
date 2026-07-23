@@ -201,7 +201,8 @@ validate_mysql_cluster_config() {
   fi
   expected_url='jdbc:mysql://122.210.106.43:3306/xxl_job?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai'
   for key in TEST_AGENT_XXL_JOB_MYSQL_URL TEST_AGENT_XXL_JOB_MYSQL_USERNAME \
-    TEST_AGENT_XXL_JOB_MYSQL_PASSWORD TEST_AGENT_XXL_JOB_ACCESS_TOKEN; do
+    TEST_AGENT_XXL_JOB_MYSQL_PASSWORD TEST_AGENT_XXL_JOB_ACCESS_TOKEN \
+    TEST_AGENT_XXL_JOB_COOKIE_SECURE; do
     [[ "$(grep -c "^${key}=" "${backend_4}" || true)" -eq 1 \
       && "$(grep -c "^${key}=" "${backend_114}" || true)" -eq 1 ]] || {
       echo "Both backend configs must contain exactly one ${key}" >&2
@@ -212,6 +213,8 @@ validate_mysql_cluster_config() {
   grep -Fxq "TEST_AGENT_XXL_JOB_MYSQL_URL=${expected_url}" "${backend_114}"
   grep -Fxq 'TEST_AGENT_XXL_JOB_MYSQL_USERNAME=root' "${backend_4}"
   grep -Fxq 'TEST_AGENT_XXL_JOB_MYSQL_USERNAME=root' "${backend_114}"
+  grep -Fxq 'TEST_AGENT_XXL_JOB_COOKIE_SECURE=false' "${backend_4}"
+  grep -Fxq 'TEST_AGENT_XXL_JOB_COOKIE_SECURE=false' "${backend_114}"
   grep -Fxq 'TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.4:18080,122.233.30.114:18080' "${frontend}"
 
   backend_password="$(sed -n 's/^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=//p' "${backend_4}")"

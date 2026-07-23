@@ -8,15 +8,16 @@
 
 - [单后台部署](SINGLE-BACKEND.md)：一个 Java 后端和一个 `opencode-worker`，当前现场示例为 `122.233.30.114`；包含可整文件替换的生产配置。
 - [多后台部署](MULTI-BACKEND.md)：两个或更多 Java/worker 节点，包含 `.4 + .114` 各自的完整配置、部署和验收示例。
+- [Redis 7.4.9 独立离线升级](REDIS-OFFLINE.md)：将当前本地 Redis 版本和配置单独封包，用于企业 Redis 5.0 的受控备份、升级、验证与回滚；不修改业务代码，也不并入日常平台包。
 
 底层 Java、manager、Redis 路由设计见 [后端部署说明](../../docs/deployment/backend.md)。
 
 ## 共同前提
 
 - Mac 构建机允许联网；企业服务器完全离线。
-- 企业内不使用 Docker Compose；worker 由 `opencode-worker-docker.sh` 管理，XXL MySQL 由 `deploy-xxl-job-mysql.sh` 管理。
 - `opencode-worker-docker.sh` 固定为 worker 容器设置 `--pids-limit=8192`、`nofile=262144:262144` 和 `nproc=8192:8192`；这些值不从 `docker.env` 覆盖。脚本升级后必须重建容器才会生效。
 - 企业内不使用 Docker Compose；worker 由 `opencode-worker-docker.sh` 管理，当前 XXL MySQL 直接使用外部实例，不在平台服务器部署 MySQL 容器。
+- Redis 仍是独立共享基础设施，不随平台 ZIP 部署；只有明确执行 Redis 专项升级时，才使用固定名 `test-agent-redis-offline.zip`。
 - Java 读取 `/data/testagent/config/backend.env`。
 - Java 固定读取交付 JAR 内置的 `classpath:rsa-private.key`；`backend.env` 不再接受外置 RSA 路径，多后台必须部署同一 JAR。
 - 所有 Java 连接外部 `122.210.106.43:3306/xxl_job`，当前按现场要求使用同一个 `root` 账号和密码，并使用同一个强随机 XXL access token；JDBC 启用 `createDatabaseIfNotExist=true`，Flyway 负责后续表和基础任务初始化。
@@ -87,6 +88,14 @@ deploy/internal/dist/frontend/
 平台 ZIP 同时包含 `deploy/internal/` 下的配置模板、部署脚本、Nginx 模板、模型配置示例和本部署文档。
 仓库保留的 MySQL 容器脚本只作为其它隔离环境备用，不属于当前现场交付。企业服务器只执行校验、解压、`docker load` 和服务启停，不执行
 Maven、pnpm、Docker build 或联网下载。
+
+Redis 专项升级与平台发布相互独立。需要把企业 Redis 5.0 升级到当前本地基线时，另行执行：
+
+```bash
+deploy/internal/package-redis-offline.sh
+```
+
+输出固定为 `test-agent-redis-offline.zip` 和同名 `.sha256`。该包包含随机 Redis 密码，必须按 `0600` 敏感文件传输；完整停写、备份、数据副本、部署、双后台密码更新及回滚步骤只以 [Redis 7.4.9 独立离线升级](REDIS-OFFLINE.md) 为准。
 
 ## OpenCode worker 版本与回滚包
 
@@ -222,6 +231,8 @@ test-agent-config-SENSITIVE-<role>-<node>-<timestamp>.tar.gz.sha256
 - worker/构建：[env.example](env.example)
 - 前端 Nginx：[nginx.env.example](nginx.env.example)、[configure-nginx.sh](configure-nginx.sh)
 - XXL MySQL：当前生产直接使用外部实例；[mysql.env.example](mysql.env.example) 和 [deploy-xxl-job-mysql.sh](deploy-xxl-job-mysql.sh) 仅作为其它隔离环境的容器备用方案
+
+当前企业浏览器入口固定为 HTTP，因此 Java 模板显式设置 `TEST_AGENT_XXL_JOB_COOKIE_SECURE=false`；基础应用默认仍为 `true`，HTTPS 环境不得复制该例外。两台后台必须保持一致，诊断脚本会输出脱敏的 `COOKIE_SECURE` 状态并拒绝缺失或错误值。
 - `.4 + .114` 逐机配置包：[deploy-multi-backend-node.sh](deploy-multi-backend-node.sh)，支持
   `--validate-only`、正式部署和 `--verify-only`，内部复用标准后台/前端部署脚本
 - 一键入口：平台包使用 [deploy-backend-node.sh](deploy-backend-node.sh)、

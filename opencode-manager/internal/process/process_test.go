@@ -42,7 +42,7 @@ func TestBuildStartSpecUsesFixedOpencodeServeCommand(t *testing.T) {
 	if spec.BaseURL != "http://10.8.0.12:4096" {
 		t.Fatalf("unexpected base url %q", spec.BaseURL)
 	}
-	wantStartCommand := "XDG_DATA_HOME=/tmp/sessions/4096 OPENCODE_CONFIG_DIR=/tmp/config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs"
+	wantStartCommand := "HOME=/tmp/sessions/4096 XDG_DATA_HOME=/tmp/sessions/4096 XDG_CACHE_HOME=/tmp/sessions/4096/.cache XDG_STATE_HOME=/tmp/sessions/4096/.local/state TMPDIR=/tmp/sessions/4096/.tmp OPENCODE_CONFIG_DIR=/tmp/config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs"
 	if spec.StartCommand != wantStartCommand {
 		t.Fatalf("unexpected start command %q", spec.StartCommand)
 	}
@@ -67,7 +67,7 @@ func TestBuildStartSpecPrefersExplicitSessionPath(t *testing.T) {
 	if spec.Env["XDG_DATA_HOME"] != sessionPath {
 		t.Fatalf("expected XDG_DATA_HOME from explicit session path, got %#v", spec.Env)
 	}
-	wantStartCommand := "XDG_DATA_HOME=/tmp/sessions/users/usr_1234567890abcdef OPENCODE_CONFIG_DIR=/tmp/config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs"
+	wantStartCommand := "HOME=/tmp/sessions/users/usr_1234567890abcdef XDG_DATA_HOME=/tmp/sessions/users/usr_1234567890abcdef XDG_CACHE_HOME=/tmp/sessions/users/usr_1234567890abcdef/.cache XDG_STATE_HOME=/tmp/sessions/users/usr_1234567890abcdef/.local/state TMPDIR=/tmp/sessions/users/usr_1234567890abcdef/.tmp OPENCODE_CONFIG_DIR=/tmp/config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs"
 	if spec.StartCommand != wantStartCommand {
 		t.Fatalf("unexpected start command %q", spec.StartCommand)
 	}
@@ -85,6 +85,79 @@ func TestBuildStartSpecPrefersExplicitManagedConfigPath(t *testing.T) {
 	}
 	if spec.ConfigPath != managedConfig || spec.Env["OPENCODE_CONFIG_DIR"] != managedConfig {
 		t.Fatalf("expected explicit managed config path, spec=%#v", spec)
+	}
+}
+
+func TestBuildStartSpecOwnsPerUserRuntimeDirectories(t *testing.T) {
+	cfg := testConfig(t)
+	sessionPath := "/tmp/sessions/users/DEV_888888888"
+	configPath := sessionPath + "/.testagent-runtime/current-public-config"
+
+	spec, err := BuildStartSpec(cfg, StartRequest{
+		Port:        4096,
+		SessionPath: sessionPath,
+		ConfigPath:  configPath,
+		Environment: map[string]string{
+			"HOME":                "/tmp/shared-home",
+			"XDG_DATA_HOME":       "/tmp/shared-data",
+			"XDG_CACHE_HOME":      "/tmp/shared-cache",
+			"XDG_STATE_HOME":      "/tmp/shared-state",
+			"TMPDIR":              "/tmp/shared-tmp",
+			"OPENCODE_CONFIG_DIR": "/tmp/shared-config",
+			"CUSTOM_ENV":          "preserved",
+		},
+		TraceID: "trace_1234567890abcdef",
+	})
+	if err != nil {
+		t.Fatalf("BuildStartSpec returned error: %v", err)
+	}
+
+	want := map[string]string{
+		"HOME":                sessionPath,
+		"XDG_DATA_HOME":       sessionPath,
+		"XDG_CACHE_HOME":      filepath.Join(sessionPath, ".cache"),
+		"XDG_STATE_HOME":      filepath.Join(sessionPath, ".local", "state"),
+		"TMPDIR":              filepath.Join(sessionPath, ".tmp"),
+		"OPENCODE_CONFIG_DIR": configPath,
+	}
+	for key, value := range want {
+		if spec.Env[key] != value {
+			t.Fatalf("expected manager-owned %s=%q, got %#v", key, value, spec.Env)
+		}
+	}
+	if spec.Env["CUSTOM_ENV"] != "preserved" {
+		t.Fatalf("expected non-reserved environment to remain, got %#v", spec.Env)
+	}
+	wantStartCommand := "HOME=/tmp/sessions/users/DEV_888888888 " +
+		"XDG_DATA_HOME=/tmp/sessions/users/DEV_888888888 " +
+		"XDG_CACHE_HOME=/tmp/sessions/users/DEV_888888888/.cache " +
+		"XDG_STATE_HOME=/tmp/sessions/users/DEV_888888888/.local/state " +
+		"TMPDIR=/tmp/sessions/users/DEV_888888888/.tmp " +
+		"OPENCODE_CONFIG_DIR=/tmp/sessions/users/DEV_888888888/.testagent-runtime/current-public-config " +
+		"opencode serve --hostname 0.0.0.0 --port 4096 --print-logs"
+	if spec.StartCommand != wantStartCommand {
+		t.Fatalf("unexpected start command %q", spec.StartCommand)
+	}
+}
+
+func TestBuildStartSpecSeparatesRuntimeDirectoriesBySessionPath(t *testing.T) {
+	cfg := testConfig(t)
+	firstRoot := "/tmp/sessions/users/DEV_100000001"
+	secondRoot := "/tmp/sessions/users/DEV_100000002"
+	first, firstErr := BuildStartSpec(cfg, StartRequest{
+		Port: 4096, UnifiedAuthID: "DEV_100000001", SessionPath: firstRoot, TraceID: "trace_first_123456",
+	})
+	second, secondErr := BuildStartSpec(cfg, StartRequest{
+		Port: 4097, UnifiedAuthID: "DEV_100000002", SessionPath: secondRoot, TraceID: "trace_second_12345",
+	})
+	if firstErr != nil || secondErr != nil {
+		t.Fatalf("BuildStartSpec failed: first=%v second=%v", firstErr, secondErr)
+	}
+
+	for _, key := range []string{"HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "TMPDIR"} {
+		if first.Env[key] == second.Env[key] {
+			t.Fatalf("expected %s to differ by unified auth session path, first=%q second=%q", key, first.Env[key], second.Env[key])
+		}
 	}
 }
 
@@ -187,6 +260,146 @@ func TestManagerStartWritesStateAndReusesHealthyManagedPort(t *testing.T) {
 	}
 	if len(starter.specs) != 1 {
 		t.Fatalf("expected duplicate start to reuse existing process, got %d starts", len(starter.specs))
+	}
+}
+
+func TestManagerStartCreatesPerUserRuntimeDirectories(t *testing.T) {
+	cfg := testConfig(t)
+	store := state.NewFileStore(t.TempDir())
+	starter := &fakeStarter{pid: 12345}
+	manager := NewManager(cfg, store, starter, fakeSignaler{}, health.Checker{})
+	sessionPath := filepath.Join(t.TempDir(), "sessions", "users", "DEV_888888888")
+	cachePath := filepath.Join(sessionPath, ".cache")
+	if err := os.MkdirAll(cachePath, 0o700); err != nil {
+		t.Fatalf("create existing cache directory: %v", err)
+	}
+	if err := os.Chmod(cachePath, 0o700); err != nil {
+		t.Fatalf("set existing cache directory mode: %v", err)
+	}
+
+	result, err := manager.Start(context.Background(), StartRequest{
+		Port:          4096,
+		UnifiedAuthID: "DEV_888888888",
+		SessionPath:   sessionPath,
+		ConfigPath:    cfg.ConfigDir,
+		TraceID:       "trace_1234567890abcdef",
+	})
+	if err != nil || result.Status != StatusStarted {
+		t.Fatalf("Start returned result=%#v error=%v", result, err)
+	}
+
+	for _, directory := range []string{
+		sessionPath,
+		cachePath,
+		filepath.Join(sessionPath, ".local"),
+		filepath.Join(sessionPath, ".local", "state"),
+		filepath.Join(sessionPath, ".tmp"),
+	} {
+		info, statErr := os.Lstat(directory)
+		if statErr != nil {
+			t.Fatalf("expected runtime directory %q: %v", directory, statErr)
+		}
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			t.Fatalf("expected physical directory %q, mode=%v", directory, info.Mode())
+		}
+		if info.Mode().Perm() != 0o755 {
+			t.Fatalf("expected runtime directory %q mode 0755, got %04o", directory, info.Mode().Perm())
+		}
+	}
+}
+
+func TestManagerStartRejectsRuntimeDirectoryOccupiedByFile(t *testing.T) {
+	cfg := testConfig(t)
+	store := state.NewFileStore(t.TempDir())
+	starter := &fakeStarter{pid: 12345}
+	manager := NewManager(cfg, store, starter, fakeSignaler{}, health.Checker{})
+	sessionPath := filepath.Join(t.TempDir(), "sessions", "users", "DEV_888888888")
+	if err := os.MkdirAll(sessionPath, 0o755); err != nil {
+		t.Fatalf("create session directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionPath, ".cache"), []byte("occupied"), 0o644); err != nil {
+		t.Fatalf("create conflicting cache file: %v", err)
+	}
+
+	result, err := manager.Start(context.Background(), StartRequest{
+		Port:          4096,
+		UnifiedAuthID: "DEV_888888888",
+		SessionPath:   sessionPath,
+		ConfigPath:    cfg.ConfigDir,
+		TraceID:       "trace_1234567890abcdef",
+	})
+	if err == nil || result.Status != StatusFailed {
+		t.Fatalf("expected runtime directory conflict, result=%#v error=%v", result, err)
+	}
+	if len(starter.specs) != 0 {
+		t.Fatalf("starter must not be called on runtime directory conflict, got %d calls", len(starter.specs))
+	}
+	if _, ok, getErr := store.Get(4096); getErr != nil || ok {
+		t.Fatalf("failed start must not persist state, ok=%v error=%v", ok, getErr)
+	}
+}
+
+func TestManagerStartRedactsRuntimeDirectoryCreationFailure(t *testing.T) {
+	cfg := testConfig(t)
+	store := state.NewFileStore(t.TempDir())
+	starter := &fakeStarter{pid: 12345}
+	manager := NewManager(cfg, store, starter, fakeSignaler{}, health.Checker{})
+	blockedParent := filepath.Join(t.TempDir(), "blocked")
+	if err := os.WriteFile(blockedParent, []byte("occupied"), 0o644); err != nil {
+		t.Fatalf("create blocking parent file: %v", err)
+	}
+	unifiedAuthID := "DEV_888888888"
+	sessionPath := filepath.Join(blockedParent, "users", unifiedAuthID)
+
+	result, err := manager.Start(context.Background(), StartRequest{
+		Port:          4096,
+		UnifiedAuthID: unifiedAuthID,
+		SessionPath:   sessionPath,
+		ConfigPath:    cfg.ConfigDir,
+		TraceID:       "trace_1234567890abcdef",
+	})
+	if err == nil || result.Status != StatusFailed {
+		t.Fatalf("expected runtime directory creation failure, result=%#v error=%v", result, err)
+	}
+	for _, message := range []string{result.Message, err.Error()} {
+		if strings.Contains(message, sessionPath) || strings.Contains(message, unifiedAuthID) {
+			t.Fatalf("runtime directory failure must redact user path, got %q", message)
+		}
+	}
+	if len(starter.specs) != 0 {
+		t.Fatalf("starter must not be called on runtime directory creation failure, got %d calls", len(starter.specs))
+	}
+	if _, ok, getErr := store.Get(4096); getErr != nil || ok {
+		t.Fatalf("failed start must not persist state, ok=%v error=%v", ok, getErr)
+	}
+}
+
+func TestManagerStartRejectsSymlinkRuntimeDirectory(t *testing.T) {
+	cfg := testConfig(t)
+	store := state.NewFileStore(t.TempDir())
+	starter := &fakeStarter{pid: 12345}
+	manager := NewManager(cfg, store, starter, fakeSignaler{}, health.Checker{})
+	sessionPath := filepath.Join(t.TempDir(), "sessions", "users", "DEV_888888888")
+	if err := os.MkdirAll(sessionPath, 0o755); err != nil {
+		t.Fatalf("create session directory: %v", err)
+	}
+	sharedTemp := t.TempDir()
+	if err := os.Symlink(sharedTemp, filepath.Join(sessionPath, ".tmp")); err != nil {
+		t.Fatalf("create conflicting temp symlink: %v", err)
+	}
+
+	result, err := manager.Start(context.Background(), StartRequest{
+		Port:          4096,
+		UnifiedAuthID: "DEV_888888888",
+		SessionPath:   sessionPath,
+		ConfigPath:    cfg.ConfigDir,
+		TraceID:       "trace_1234567890abcdef",
+	})
+	if err == nil || result.Status != StatusFailed {
+		t.Fatalf("expected runtime symlink conflict, result=%#v error=%v", result, err)
+	}
+	if len(starter.specs) != 0 {
+		t.Fatalf("starter must not be called on runtime symlink conflict, got %d calls", len(starter.specs))
 	}
 }
 
@@ -716,7 +929,14 @@ func TestManagerApplyRuntimeConfigUsesCommonParameterPaths(t *testing.T) {
 	if result.ConfigPath != configDir {
 		t.Fatalf("expected config path from common parameter, got %q", result.ConfigPath)
 	}
-	wantStartCommand := "XDG_DATA_HOME=" + sessionRoot + "4096 OPENCODE_CONFIG_DIR=" + configDir + " opencode serve --hostname 0.0.0.0 --port 4096 --print-logs"
+	userRoot := sessionRoot + "4096"
+	wantStartCommand := "HOME=" + userRoot +
+		" XDG_DATA_HOME=" + userRoot +
+		" XDG_CACHE_HOME=" + userRoot + "/.cache" +
+		" XDG_STATE_HOME=" + userRoot + "/.local/state" +
+		" TMPDIR=" + userRoot + "/.tmp" +
+		" OPENCODE_CONFIG_DIR=" + configDir +
+		" opencode serve --hostname 0.0.0.0 --port 4096 --print-logs"
 	if starter.specs[0].StartCommand != wantStartCommand {
 		t.Fatalf("unexpected start command %q", starter.specs[0].StartCommand)
 	}
@@ -1272,6 +1492,18 @@ func equalStrings(left, right []string) bool {
 		}
 	}
 	return true
+}
+
+func TestShouldProbeLocalInterfaceSkipsPointToPointTunnel(t *testing.T) {
+	if shouldProbeLocalInterface(net.FlagUp | net.FlagPointToPoint) {
+		t.Fatal("point-to-point tunnel must not participate in local listener detection")
+	}
+	if !shouldProbeLocalInterface(net.FlagUp) {
+		t.Fatal("an active non-tunnel interface must participate in local listener detection")
+	}
+	if shouldProbeLocalInterface(0) {
+		t.Fatal("an inactive interface must not participate in local listener detection")
+	}
 }
 
 func nonLoopbackIPv4(t *testing.T) string {

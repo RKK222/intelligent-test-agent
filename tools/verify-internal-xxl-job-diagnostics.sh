@@ -37,7 +37,7 @@ for required_text in \
   '122.233.30.4' \
   '122.233.30.114' \
   '122.233.30.20' \
-  '122.233.30.148' \
+  '122.210.106.43' \
   'diagnose-xxl-job-entry.sh' \
   'diagnose-xxl-job-frontend.sh' \
   'diagnose-xxl-job-backend.sh' \
@@ -414,7 +414,7 @@ validate_strict_manual_contract() {
   grep -Fq '| 后台 A | `122.233.30.4:8080`，Admin `18080`，executor `9999` |' <<<"${topology_section}" || return 1
   grep -Fq '| 后台 B | `122.233.30.114:8080`，Admin `18080`，executor `9999` |' <<<"${topology_section}" || return 1
   grep -Fq '| 共享 Redis | `122.233.30.20:6379` |' <<<"${topology_section}" || return 1
-  grep -Fq '| 共享 XXL MySQL | `122.233.30.148:3306/xxl_job` |' <<<"${topology_section}" || return 1
+  grep -Fq '| 外部共享 XXL MySQL | `122.210.106.43:3306/xxl_job`（现网外部服务，不在平台节点部署容器） |' <<<"${topology_section}" || return 1
 
   [[ "$(grep -Fc 'bash /data/testagent/deploy/internal/diagnose-xxl-job-entry.sh' "${manual_file}")" -eq 1 ]] || return 1
   [[ "$(grep -Fc 'bash /data/testagent/deploy/internal/diagnose-xxl-job-frontend.sh' "${manual_file}")" -eq 1 ]] || return 1
@@ -422,7 +422,7 @@ validate_strict_manual_contract() {
   [[ "$(grep -Fc -- '--expected-host 122.233.30.4 --minutes 15' "${manual_file}")" -eq 2 ]] || return 1
   [[ "$(grep -Fc -- '--expected-host 122.233.30.114 --minutes 15' "${manual_file}")" -eq 2 ]] || return 1
   [[ "$(grep -Fc -- '--expected-host' "${manual_file}")" -eq 4 ]] || return 1
-  [[ "$(grep -Fc "mysql --host=122.233.30.148 --port=3306 --user='<只读账号>' --password" "${manual_file}")" -eq 1 ]] || return 1
+  [[ "$(grep -Fc "mysql --host=122.210.106.43 --port=3306 --user='<只读账号>' --password" "${manual_file}")" -eq 1 ]] || return 1
   [[ "$(grep -Fc 'tee /data/0709/xxl-job-diagnostics-entry.log' "${manual_file}")" -eq 1 ]] || return 1
   [[ "$(grep -Fc 'tee /data/0709/xxl-job-diagnostics-frontend-122.233.30.2.log' "${manual_file}")" -eq 1 ]] || return 1
   [[ "$(grep -Fc 'tee /data/0709/xxl-job-diagnostics-backend-122.233.30.4.log' "${manual_file}")" -eq 1 ]] || return 1
@@ -465,8 +465,10 @@ validate_strict_manual_contract() {
     return 1
   fi
 
-  grep -Fq "mysql --host=122.233.30.148 --port=3306 --user='<只读账号>' --password" <<<"${mysql_section}" || return 1
-  grep -Fq '**操作机器：`122.233.30.148` MySQL DBA 终端。工作目录：`/data/testagent`。**' <<<"${mysql_section}" || return 1
+  grep -Fq "mysql --host=122.210.106.43 --port=3306 --user='<只读账号>' --password" <<<"${mysql_section}" || return 1
+  grep -Fq '**操作机器：获准访问 `122.210.106.43:3306` 的 DBA 受控客户端。工作目录：`/data/testagent`。**' <<<"${mysql_section}" || return 1
+  grep -Fq '不在 `.2/.4/.114` 或其它平台节点部署 MySQL 容器' <<<"${mysql_section}" || return 1
+  grep -Fq '不要求或允许按本手册登录外部服务宿主机' <<<"${mysql_section}" || return 1
   grep -Fq 'cd /data/testagent' <<<"${mysql_section}" || return 1
   grep -Fq 'set -o pipefail' <<<"${mysql_section}" || return 1
   grep -Fq -- '--database=xxl_job' <<<"${mysql_section}" || return 1
@@ -504,8 +506,8 @@ validate_strict_manual_contract() {
   grep -Fq '/data/0709/xxl-job-diagnostics-backend-122.233.30.4.log' <<<"${task_section}" || return 1
   grep -Fq '**操作机器：`122.233.30.114` 后台。证据目录：`/data/0709`。**' <<<"${task_section}" || return 1
   grep -Fq '/data/0709/xxl-job-diagnostics-backend-122.233.30.114.log' <<<"${task_section}" || return 1
-  grep -Fq '**操作机器：`122.233.30.148` MySQL DBA 终端。证据目录：`/data/0709`。**' <<<"${task_section}" || return 1
-  grep -Fq '/data/0709/xxl-job-diagnostics-mysql-122.233.30.148.log' <<<"${task_section}" || return 1
+  grep -Fq '**操作机器：持有外部 MySQL 只读查询结果的 DBA 受控客户端。证据目录：`/data/0709`。**' <<<"${task_section}" || return 1
+  grep -Fq '/data/0709/xxl-job-diagnostics-mysql-external.log' <<<"${task_section}" || return 1
   grep -Fq '禁止手动触发任务' <<<"${task_section}" || return 1
   [[ "$(grep -Fc '成功证据：' <<<"${task_section}")" -eq 3 ]] || return 1
   [[ "$(grep -Fo '停止点：' <<<"${task_section}" | wc -l | tr -d ' ')" -eq 3 ]] || return 1
@@ -519,7 +521,7 @@ validate_strict_manual_contract() {
     xxl-job-diagnostics-frontend-122.233.30.2.log \
     xxl-job-diagnostics-backend-122.233.30.4.log \
     xxl-job-diagnostics-backend-122.233.30.114.log \
-    xxl-job-diagnostics-mysql-122.233.30.148.log; do
+    xxl-job-diagnostics-mysql-external.log; do
     grep -Fq "/data/0709/${evidence_file}" <<<"${evidence_section}" || return 1
   done
   grep -Fq '>/dev/null' <<<"${evidence_section}" || return 1
@@ -599,7 +601,7 @@ validate_strict_manual_contract "${TROUBLESHOOTING_MANUAL}" || {
   printf '正式手册未满足逐机绝对命令或安全负向契约\n' >&2
   exit 1
 }
-grep -Fq '不访问 `122.233.30.2`、`122.233.30.4`、`122.233.30.114`、`122.233.30.20` 或 `122.233.30.148`' \
+grep -Fq '不访问 `122.233.30.2`、`122.233.30.4`、`122.233.30.114`、`122.233.30.20` 或外部 MySQL `122.210.106.43`' \
   "${ROOT_DIR}/docs/testing/xxl-job-integration.md" || {
   printf 'XXL-JOB 测试文档缺少不访问固定企业地址的边界\n' >&2
   exit 1
@@ -1225,7 +1227,7 @@ if [[ "${XXL_DIAG_FIXTURE_MODE:-healthy}" == 'backend-log-no-match' ]]; then
 fi
 printf '%s\n' \
   '2026-07-22T21:00:00+0800 backend XxlJob ExecutorRegistryThread started token=raw-log-token-value digest=raw-log-digest-value' \
-  '2026-07-22T21:00:01+0800 backend Hikari MySQL jdbc:mysql://raw-jdbc-user:raw-jdbc-password@122.233.30.148:3306/xxl_job?password=raw-jdbc-query-value' \
+  '2026-07-22T21:00:01+0800 backend Hikari MySQL jdbc:mysql://raw-jdbc-user:raw-jdbc-password@122.210.106.43:3306/xxl_job?password=raw-jdbc-query-value' \
   '2026-07-22T21:00:02+0800 backend XxlJob GET https://diag.example/xxl-job-admin/#raw-absolute-fragment-value' \
   '2026-07-22T21:00:03+0800 backend XxlJob GET https://diag.example/xxl-job-admin/?opaque=raw-absolute-query-value' \
   '2026-07-22T21:00:03+0800 backend XxlJob GET /xxl-job-admin/?opaque=raw-relative-query-value' \
@@ -1313,7 +1315,7 @@ status=$?
 set -e
 test "${status}" -eq 1
 
-for wrong_entry_host in 122.233.30.2 122.233.30.4 122.233.30.114 122.233.30.20 122.233.30.148; do
+for wrong_entry_host in 122.233.30.2 122.233.30.4 122.233.30.114 122.233.30.20 122.210.106.43; do
   entry_curl_marker="${TMP_ROOT}/entry-curl-${wrong_entry_host}.marker"
   set +e
   PATH="${FAKE_BIN}:${PATH}" XXL_DIAG_FIXTURE_MODE=healthy XXL_DIAG_ENTRY_IP="${wrong_entry_host}" \
@@ -1504,12 +1506,13 @@ TEST_AGENT_REDIS_HOST=122.233.30.20
 TEST_AGENT_REDIS_PORT=6379
 TEST_AGENT_REDIS_PASSWORD=raw-redis-password-value
 TEST_AGENT_XXL_JOB_ENABLED=true
-TEST_AGENT_XXL_JOB_MYSQL_URL=jdbc:mysql://raw-mysql-url-user:raw-mysql-url-password@122.233.30.148:3306/xxl_job?password=raw-mysql-query-value
+TEST_AGENT_XXL_JOB_MYSQL_URL=jdbc:mysql://raw-mysql-url-user:raw-mysql-url-password@122.210.106.43:3306/xxl_job?password=raw-mysql-query-value
 TEST_AGENT_XXL_JOB_MYSQL_USERNAME=xxl_job
 TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=raw-xxl-password-value
 TEST_AGENT_XXL_JOB_ACCESS_TOKEN=raw-xxl-access-token-value
 TEST_AGENT_XXL_JOB_ADMIN_PORT=18080
 TEST_AGENT_XXL_JOB_EXECUTOR_PORT=9999
+TEST_AGENT_XXL_JOB_COOKIE_SECURE=false
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=raw-manager-token-value
 TEST_AGENT_INTERNAL_PROXY_API_KEY=raw-proxy-api-key-value
 SYS_DATA_ROOT_DIR=/must/not/be/used/by/fixture
@@ -1529,9 +1532,9 @@ make_backend_env_variant "${BACKEND_FIXTURE}/backend-wrong-redis-host.env" \
 make_backend_env_variant "${BACKEND_FIXTURE}/backend-wrong-redis-port.env" \
   's/TEST_AGENT_REDIS_PORT=6379/TEST_AGENT_REDIS_PORT=6380/'
 make_backend_env_variant "${BACKEND_FIXTURE}/backend-wrong-mysql-host.env" \
-  's/122\.233\.30\.148:3306\/xxl_job/122.233.30.149:3306\/xxl_job/'
+  's/122\.210\.106\.43:3306\/xxl_job/122.210.106.44:3306\/xxl_job/'
 make_backend_env_variant "${BACKEND_FIXTURE}/backend-wrong-mysql-port.env" \
-  's/122\.233\.30\.148:3306\/xxl_job/122.233.30.148:3307\/xxl_job/'
+  's/122\.210\.106\.43:3306\/xxl_job/122.210.106.43:3307\/xxl_job/'
 
 backend_run() {
   PATH="${TEST_AGENT_DIAG_EXTRA_PATH:-}${FAKE_BIN}:${PATH}" \
@@ -1553,9 +1556,10 @@ grep -Fxq '[PASS] 诊断完成：未发现关键异常' "${TMP_ROOT}/backend-ok.
   exit 1
 }
 grep -Fq '[INFO] REDIS_ENDPOINT=122.233.30.20:6379' "${TMP_ROOT}/backend-ok.log"
-grep -Fq '[INFO] XXL_MYSQL_ENDPOINT=jdbc:mysql://122.233.30.148:3306/xxl_job' "${TMP_ROOT}/backend-ok.log"
+grep -Fq '[INFO] XXL_MYSQL_ENDPOINT=jdbc:mysql://122.210.106.43:3306/xxl_job' "${TMP_ROOT}/backend-ok.log"
 grep -Fq '[INFO] ADMIN_PORT=18080' "${TMP_ROOT}/backend-ok.log"
 grep -Fq '[INFO] EXECUTOR_PORT=9999' "${TMP_ROOT}/backend-ok.log"
+grep -Fq '[INFO] COOKIE_SECURE=false' "${TMP_ROOT}/backend-ok.log"
 grep -Eq '\[INFO\] TEST_AGENT_XXL_JOB_ACCESS_TOKEN=SET length=[0-9]+ sha256=[0-9a-f]{16}$' "${TMP_ROOT}/backend-ok.log"
 for status_only_secret in \
   TEST_AGENT_DB_PASSWORD \

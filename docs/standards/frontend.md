@@ -9,6 +9,13 @@
 3. Web IDE 能力按 package 边界沉淀，避免把业务逻辑堆到页面入口。
 4. 人工维护的复杂逻辑必须有中文注释，说明业务意图、边界和异常分支。
 
+## 浏览器兼容性
+
+1. 企业内浏览器最低基线固定为 Chromium 108。`agent-web` 生产构建必须保持 `build.target=chrome108` 与 `build.cssTarget=chrome108`，新增语法、DOM/CSS 能力或第三方资源升级都要按该基线验证，不能只以开发机最新 Chrome 为准。
+2. 访问 `window.parent`、`window.opener`、`window.top` 或第三方页面暴露的 `$`、插件等跨窗口全局对象前，必须逐级做存在性检查；跨源或宿主页能力不确定时还必须捕获安全异常。禁止直接写出类似 `window.parent.$.adminTab` 的连续解引用。
+3. iframe SSO 的成功、失败和过期页必须使用平台自有状态页向同源父页面发送明确 `postMessage`；不能让平台 SSO 异常落入依赖父页 jQuery/插件的第三方通用错误页，否则二次脚本异常会掩盖服务端首因。
+4. 涉及旧内核、HTTP 安全上下文或 iframe/父子窗口交互的改动，至少补充对应能力缺失或父窗口不含预期全局对象的回归测试，并运行 Chromium 108 构建检查。
+
 ## API 访问
 
 1. 只能通过 `packages/backend-api` 访问平台后端服务（当前由 `test-agent-app` 装配运行），不得直连 opencode server，不得在组件中直接拼接后端 URL。

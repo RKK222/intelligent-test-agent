@@ -11,19 +11,29 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
-/** Redis GETDEL 一次性 SSO 票据实现，键和值均不保存平台原始 Token。 */
+/** Redis Lua 原子一次性 SSO 票据实现，键和值均不保存平台原始 Token。 */
 @Component
 public class RedisXxlJobSsoTicketService implements XxlJobSsoTicketService {
 
     private static final String KEY_PREFIX = "test-agent:xxl-job:sso-ticket:";
     private static final String TICKET_PATTERN = "[A-Za-z0-9_-]{43}";
+    /** 使用 Redis 2.6 即支持的 Lua，兼容未提供 GETDEL 命令的企业 Redis 5/6.0。 */
+    private static final DefaultRedisScript<String> CONSUME_SCRIPT = new DefaultRedisScript<>("""
+            local value = redis.call('GET', KEYS[1])
+            if value then
+                redis.call('DEL', KEYS[1])
+            end
+            return value
+            """, String.class);
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
@@ -89,7 +99,7 @@ public class RedisXxlJobSsoTicketService implements XxlJobSsoTicketService {
         if (ticket == null || !ticket.matches(TICKET_PATTERN)) {
             return Optional.empty();
         }
-        String json = redisTemplate.opsForValue().getAndDelete(KEY_PREFIX + ticket);
+        String json = redisTemplate.execute(CONSUME_SCRIPT, List.of(KEY_PREFIX + ticket));
         if (json == null) {
             return Optional.empty();
         }

@@ -53,6 +53,7 @@ public class XxlJobProperties {
     public static final class Admin {
         private int port = 18080;
         private String contextPath = "/xxl-job-admin";
+        private boolean cookieSecure = true;
         private Duration retryInitialDelay = Duration.ofSeconds(5);
         private Duration retryMaxDelay = Duration.ofSeconds(60);
 
@@ -71,6 +72,14 @@ public class XxlJobProperties {
         public void setContextPath(String contextPath) {
             String value = requireText(contextPath, "admin.contextPath");
             this.contextPath = value.startsWith("/") ? value : "/" + value;
+        }
+
+        public boolean isCookieSecure() {
+            return cookieSecure;
+        }
+
+        public void setCookieSecure(boolean cookieSecure) {
+            this.cookieSecure = cookieSecure;
         }
 
         public Duration getRetryInitialDelay() {

@@ -38,14 +38,14 @@
 
 1. 只有平台 `SUPER_ADMIN` 可以调用 `POST /api/internal/platform/xxl-job/sso-tickets`。
 2. 后端生成 32 字节安全随机数，编码为 43 字符 URL-safe 票据；票据最长 60 秒有效，并受平台 Token 剩余有效期约束。
-3. Redis 只保存一次性票据载荷，消费使用原子 `GETDEL`。载荷保存平台用户 ID、显示名、平台 session digest 和过期时间，不保存原始 Token。
+3. Redis 只保存一次性票据载荷，消费使用一段 `GET` 后立即 `DEL` 的原子 Lua 脚本。该实现兼容 Redis 5、Redis 6.0 及更新版本，不依赖 Redis 6.2 才增加的 `GETDEL`；Redis ACL 必须允许应用执行 `EVAL`。载荷保存平台用户 ID、显示名、平台 session digest 和过期时间，不保存原始 Token。
 4. 前端用隐藏表单把票据 `POST` 到同源 `/xxl-job-admin/platform-sso/login` iframe；票据不进入 URL、浏览器历史或访问日志。
 5. 首次登录按 `platform_user_id` JIT upsert XXL 管理员账号。显示名冲突时追加平台用户 ID SHA-256 的稳定 8 位短 hash；平台改名会同步更新 XXL 显示账号。
 6. XXL Cookie 会话每次请求都通过自定义 `LoginStore` 校验平台 SHA-256 session marker。平台登出、刷新 Token 或 Token 过期后 marker 失效，XXL 会话同步失效。
 
 不初始化 XXL 默认管理员。原生登录、改密及账号新增/修改/删除入口由 integration Filter 禁止，账号列表保持只读可查看。平台删除账号后不删除 XXL 行，保留历史审计；没有有效平台会话 marker 时无法继续访问。
 
-Admin 响应固定设置 `Content-Security-Policy: frame-ancestors 'self'` 和 `X-Frame-Options: SAMEORIGIN`；会话 Cookie 使用 `HttpOnly`、`Secure`、`SameSite=Lax` 和 `/xxl-job-admin/` Path。
+Admin 响应固定设置 `Content-Security-Policy: frame-ancestors 'self'` 和 `X-Frame-Options: SAMEORIGIN`；会话 Cookie 固定使用 `HttpOnly`、`SameSite=Lax` 和 `/xxl-job-admin/` Path，`Secure` 默认开启。只有受控内网入口明确无法提供 HTTPS 时，部署配置才可显式设置 `TEST_AGENT_XXL_JOB_COOKIE_SECURE=false`，入口升级 HTTPS 后必须恢复 `true`。票据消费、JIT 或 XXL 登录的运行时异常统一返回 integration 维护的 `503 unavailable` 状态页，避免上游通用错误页在嵌入态访问不存在的父窗口 AdminLTE 对象。
 
 ## 嵌入页面边界
 

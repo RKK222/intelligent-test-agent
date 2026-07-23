@@ -187,6 +187,8 @@ render_backend_template() {
       TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET) value="true" ;;
       TEST_AGENT_XXL_JOB_MYSQL_PASSWORD) value="${xxl_mysql_password}" ;;
       TEST_AGENT_XXL_JOB_ACCESS_TOKEN) value="${xxl_access_token}" ;;
+      # 当前现场只有 HTTP 入口；模板升级为 HTTPS 后必须显式改回 true。
+      TEST_AGENT_XXL_JOB_COOKIE_SECURE) value="false" ;;
       *)
         printf '%s\n' "${line}" >>"${output}"
         continue

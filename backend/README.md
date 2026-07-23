@@ -118,6 +118,7 @@ cp .env.local.example .env.local
 | `TEST_AGENT_XXL_JOB_MYSQL_*` | 独立 XXL MySQL JDBC URL、账号和密码；不得指向平台 PostgreSQL。 |
 | `TEST_AGENT_XXL_JOB_ACCESS_TOKEN` | Admin 与所有 executor 共用的独立 access token。 |
 | `TEST_AGENT_XXL_JOB_ADMIN_PORT` / `TEST_AGENT_XXL_JOB_EXECUTOR_PORT` | 当前 Java 的本机 Admin/executor 端口；每台 Linux 只部署一个 Java。 |
+| `TEST_AGENT_XXL_JOB_COOKIE_SECURE` | XXL SSO Cookie 是否带 `Secure`，默认 `true`；只有受控内网固定 HTTP 入口才允许显式设为 `false`。 |
 | `TEST_AGENT_OPENCODE_BASE_URL` | 本地脚本判断是否启动 opencode-manager 和端口池的地址，不再作为 Java 固定 opencode node 配置。 |
 | `TEST_AGENT_LINUX_SERVER_ID` | 稳定 Linux 服务器身份，可使用 `server-a`、`prod_01`、`10.1.2.3` 等 1-128 位标识；缺失时使用 Java 主机名。 |
 | `TEST_AGENT_DEPLOYMENT_MODE` | 部署模式：`external`（外部部署，默认）或 `internal`（企业内部部署）。 |

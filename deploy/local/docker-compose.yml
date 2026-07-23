@@ -19,7 +19,7 @@ services:
       retries: 20
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.9-alpine
     container_name: test-agent-redis
     profiles:
       - redis

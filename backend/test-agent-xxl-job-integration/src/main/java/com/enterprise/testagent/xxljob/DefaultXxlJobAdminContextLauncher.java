@@ -39,6 +39,7 @@ public class DefaultXxlJobAdminContextLauncher implements XxlJobAdminContextLaun
                     context.getEnvironment().getPropertySources()
                             .addFirst(new MapPropertySource("platformXxlJobAdmin", childProperties));
                     context.getBeanFactory().registerSingleton("xxlJobAdminBridge", bridge);
+                    context.getBeanFactory().registerSingleton("xxlJobProperties", properties);
                 })
                 .run();
     }
