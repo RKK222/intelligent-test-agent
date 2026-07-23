@@ -941,3 +941,18 @@
 - Result:
   - 停用仅影响工作空间切换模板展示，不删除或修改版本、个人工作区、运行态 Workspace、最近使用、会话和当前已打开状态；重新启用后可再次展示。
   - 变更了兼容性 HTTP DTO 和数据库结构，未新增事件，不涉及性能、安全、generated SDK 或环境配置。
+
+### 2026-07-23 - 会话上下文详情改为左侧抽屉
+
+- Why:
+  - 会话上下文详情原先覆盖右侧会话栏全部内容，用户要求改为从会话内容区左侧弹出的局部抽屉，并允许再次点击 footer 圆环关闭。
+- What:
+  - `SessionContextUsage` 将详情容器收窄为最大 420px、从会话内容区左边缘滑入并增加右侧阴影；header、footer 和右侧剩余内容保持可见，字段与图例网格按抽屉自身宽度自动折行以兼容最小 240px 会话栏。
+  - 圆环点击改为开关行为，第二次点击复用原关闭与焦点恢复逻辑；关闭按钮、Esc、会话切换和子 Agent 隐藏行为不变。
+  - 触发器通过 `aria-haspopup/aria-controls` 关联详情 dialog；同步 frontend 与 agent-web README，并增加左侧抽屉语义、圆环二次点击关闭和窄栏重排回归测试。
+- How:
+  - TDD 先验证旧实现缺少左侧抽屉标识、第二次点击仍保持打开且 240px 会话栏内统计仍挤在同一行，再加入最小布局与 toggle 实现；目标组件测试 145 passed / 1 skipped，Chromium mock E2E 1 passed。
+  - `corepack pnpm lint`、`corepack pnpm typecheck` 和生产 build 通过；全量 Vitest 为 1570 passed / 1 skipped / 1 failed，唯一失败仍是既有 `DirectoryRows.test.ts` 将 role=`radio` 的“上传”按 role=`button` 查询，与本次文件无关。
+- Result:
+  - 上下文数据、统计口径和详情字段不变，仅调整展示位置、尺寸、进入动效及触发器关闭交互。
+  - 未修改 HTTP API、RunEvent、数据库/Flyway、依赖、安全配置、性能缓存或兼容字段，也未修改环境配置文件。

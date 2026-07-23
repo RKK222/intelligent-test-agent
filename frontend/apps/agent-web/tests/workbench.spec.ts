@@ -2600,6 +2600,37 @@ test("context usage follows the selected model catalog and live assistant usage"
   await expect(detail).toContainText("OpenAI Context");
   await expect(detail).toContainText("GPT Context");
   await expect(detail.getByTestId("context-breakdown")).toBeVisible();
+  await detail.evaluate(async (element) => {
+    await Promise.all(element.getAnimations().map((animation) => animation.finished));
+  });
+
+  const rootBox = await page.locator(".figma-chat-root").boundingBox();
+  const drawerBox = await detail.boundingBox();
+  expect(rootBox).not.toBeNull();
+  expect(drawerBox).not.toBeNull();
+  expect(Math.abs(drawerBox!.x - rootBox!.x)).toBeLessThanOrEqual(1);
+  expect(drawerBox!.width).toBeLessThan(rootBox!.width);
+
+  await contextButton.click();
+  await expect(detail).toBeHidden();
+  await expect(contextButton).toBeFocused();
+
+  const resizeHandle = page.getByRole("separator", { name: "拖拽调整对话窗口宽度" });
+  const resizeBox = await resizeHandle.boundingBox();
+  expect(resizeBox).not.toBeNull();
+  await page.mouse.move(resizeBox!.x + resizeBox!.width / 2, resizeBox!.y + 80);
+  await page.mouse.down();
+  await page.mouse.move(resizeBox!.x + 280, resizeBox!.y + 80);
+  await page.mouse.up();
+  await expect(page.locator(".figma-chat-panel-wrapper")).toHaveCSS("width", "240px");
+
+  await contextButton.click();
+  const tokenItems = detail.locator(".session-context-token-grid > div");
+  const firstTokenBox = await tokenItems.nth(0).boundingBox();
+  const secondTokenBox = await tokenItems.nth(1).boundingBox();
+  expect(firstTokenBox).not.toBeNull();
+  expect(secondTokenBox).not.toBeNull();
+  expect(secondTokenBox!.y).toBeGreaterThan(firstTokenBox!.y);
 });
 
 test("workbench clears stale persisted model and sends catalog default", async ({ page }) => {

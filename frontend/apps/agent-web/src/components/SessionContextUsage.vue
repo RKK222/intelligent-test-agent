@@ -24,6 +24,7 @@ const closeRef = ref<HTMLButtonElement>();
 const detailOpen = ref(false);
 const tooltipOpen = ref(false);
 const tooltipId = useId();
+const dialogId = useId();
 const tooltipVisible = computed(() => tooltipOpen.value && !detailOpen.value);
 
 const summary = computed(() => buildSessionContextSummary({
@@ -66,6 +67,15 @@ function openDetail() {
   nextTick(() => closeRef.value?.focus());
 }
 
+function toggleDetail() {
+  if (detailOpen.value) {
+    tooltipOpen.value = false;
+    closeDetail();
+    return;
+  }
+  openDetail();
+}
+
 function closeDetail(restoreFocus = true) {
   if (!detailOpen.value) return;
   detailOpen.value = false;
@@ -97,8 +107,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleEscape));
       class="session-context-trigger"
       aria-label="查看会话上下文"
       :aria-expanded="detailOpen"
+      aria-haspopup="dialog"
+      :aria-controls="dialogId"
       :aria-describedby="tooltipVisible ? tooltipId : undefined"
-      @click="openDetail"
+      @click="toggleDetail"
       @mouseenter="tooltipOpen = true"
       @mouseleave="tooltipOpen = false"
       @focus="tooltipOpen = true"
@@ -134,7 +146,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleEscape));
 
     <section
       v-if="detailOpen"
-      class="session-context-panel"
+      class="session-context-panel session-context-drawer"
+      data-side="left"
+      :id="dialogId"
       role="dialog"
       aria-label="会话上下文"
       aria-modal="false"
@@ -299,15 +313,18 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleEscape));
 
 .session-context-panel {
   position: absolute;
-  inset: 30px 0 30px;
+  inset: 30px auto 30px 0;
   z-index: 30;
+  width: min(420px, calc(100% - 24px));
   display: flex;
   flex-direction: column;
   min-height: 0;
+  border-right: 1px solid #dedee4;
   color: #27272a;
   background: #fafafa;
+  box-shadow: 18px 0 34px rgba(15, 15, 18, 0.16);
   font-family: var(--font-sans);
-  animation: session-context-enter 150ms ease-out;
+  animation: session-context-drawer-enter 180ms cubic-bezier(0.2, 0.75, 0.2, 1);
 }
 
 .session-context-panel-header {
@@ -412,11 +429,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleEscape));
 }
 
 .session-context-meta-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
 .session-context-token-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
 }
 
 .session-context-meta-grid div,
@@ -522,7 +539,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleEscape));
 .session-context-breakdown-legend {
   margin-top: 13px;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 8px 16px;
 }
 
@@ -558,17 +575,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleEscape));
   font-size: 11px;
 }
 
-@keyframes session-context-enter {
-  from { opacity: 0; transform: translateX(6px); }
+@keyframes session-context-drawer-enter {
+  from { opacity: 0.92; transform: translateX(-100%); }
   to { opacity: 1; transform: translateX(0); }
-}
-
-@media (max-width: 420px) {
-  .session-context-meta-grid,
-  .session-context-token-grid,
-  .session-context-breakdown-legend {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
