@@ -126,6 +126,11 @@ function selectedForEntry(): FileTreeEntry[] {
 function openContextMenu(event: MouseEvent) {
   event.preventDefault();
   const selection = selectedForEntry();
+  // Agents 目录只在已有文件剪贴板时提供粘贴；否则不渲染空白右键菜单。
+  if (selection.length === 0 && !(props.clipboardAvailable && canPasteHere.value)) {
+    closeContextMenu();
+    return;
+  }
   if (selection.length > 0 && !isSelected.value) emit("selectionChange", selection);
   contextMenu.value = { x: event.clientX, y: event.clientY, selection };
 }

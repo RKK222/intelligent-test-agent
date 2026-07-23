@@ -770,6 +770,18 @@ describe("AgentConfigPanel", () => {
     }));
   });
 
+  it("does not render an empty context menu for an Agent directory without a clipboard", async () => {
+    apiClientMock.listPublicAgentFiles.mockResolvedValue([
+      { path: "agents", name: "agents", type: "directory" }
+    ]);
+    const { view } = renderPanel();
+    const directoryRow = await view.findByRole("button", { name: "agents" });
+
+    await fireEvent.contextMenu(directoryRow);
+
+    expect(view.queryByRole("menu")).toBeNull();
+  });
+
   it("copies and deletes Ctrl-selected public Agent files from the context menu", async () => {
     apiClientMock.listPublicAgentFiles.mockImplementation(async (path: string) => {
       if (path === "") return [

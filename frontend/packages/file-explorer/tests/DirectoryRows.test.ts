@@ -150,6 +150,33 @@ describe("DirectoryRows", () => {
     expect(view.getByRole("dialog", { name: "新建或上传文件" }).textContent).toContain("docs");
   });
 
+  it("does not render an empty context menu for a mixed directory without available actions", async () => {
+    const mixed = {
+      id: "mixed:docs",
+      type: "directory" as const,
+      path: "docs",
+      name: "docs",
+      locator: { kind: "COMPOSITE" as const, path: "docs" },
+      source: "MIXED" as const,
+      merged: true,
+      collision: false,
+      readonly: false,
+      workspacePath: "docs",
+      referenceAliases: ["requirements"]
+    };
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory: { "": [mixed] },
+        expandedDirectories: new Set<string>()
+      }
+    });
+
+    await fireEvent.contextMenu(view.getByRole("button", { name: "docs" }));
+
+    expect(view.queryByRole("menu")).toBeNull();
+  });
+
   it("blocks mutations and git badges for pure reference nodes", async () => {
     const reference = {
       id: "reference:requirements:guide",

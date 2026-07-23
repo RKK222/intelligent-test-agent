@@ -156,6 +156,15 @@ function focusRenameInput() {
 function openFileContextMenu(event: MouseEvent, entry: FileTreeEntry) {
   event.preventDefault();
   const selection = selectedForEntry(entry);
+  // 组合/引用目录没有变更权限且剪贴板为空时，不创建只剩边框的空白菜单。
+  const hasAction = selection.length > 0
+    || entry.type === "file"
+    || Boolean(props.clipboardEntry && canPasteIntoEntry(entry))
+    || canUndoFromEntry(entry);
+  if (!hasAction) {
+    closeFileContextMenu();
+    return;
+  }
   if (!isSelected(entry)) emit("selectionChange", selection);
   entryContextMenu.value = { entry, selection, x: event.clientX, y: event.clientY };
 }
