@@ -356,21 +356,24 @@ onBeforeUnmount(() => {
 }
 
 .markdown-body :deep(table) {
-  /* github-markdown-css 将 table 设为 display:block 以实现横向滚动，
-     但这会导致 border-collapse 失效，th/td 与 tr 的边框各自独立渲染，
-     在表头与表体之间、行与行之间产生多余空隙。
-     这里恢复为 display:table 使 border-collapse 正常工作。
-     加 !important 确保覆盖 github-markdown-css 的 display:block。 */
-  display: table !important;
-  border-collapse: collapse;
+  /* 使用 display:block 实现横向滚动，
+     用 table 边框 + td 边框组合模拟 border-collapse 效果 */
+  display: block;
+  overflow-x: auto;
+  border-spacing: 0;
   margin: 4px 0 !important;
   line-height: 1.25 !important;
   font-size: 12px;
+  max-width: 100%;
+  width: max-content;
+  border-left: 1px solid var(--ta-chat-border);
+  border-top: 1px solid var(--ta-chat-border);
 }
 
 .markdown-body :deep(table th),
 .markdown-body :deep(table td) {
-  border: 1px solid var(--ta-chat-border);
+  border-right: 1px solid var(--ta-chat-border);
+  border-bottom: 1px solid var(--ta-chat-border);
   padding: 2px 5px !important;
 }
 

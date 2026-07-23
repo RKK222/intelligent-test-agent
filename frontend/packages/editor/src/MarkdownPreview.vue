@@ -451,15 +451,22 @@ defineExpose({ scrollToSourceLine });
 
 /* github-markdown-css 将 table 设为 display:block 以实现横向滚动，
    但这会导致 border-collapse 失效，产生多余行间空隙。
-   编辑器预览的父容器已有 overflow-auto，无需依赖 table 自身的 block 滚动。 */
+   用 table 边框 + td 边框组合模拟 border-collapse 效果。 */
 .markdown-body :deep(table) {
-  display: table;
-  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  border-spacing: 0;
+  margin: 8px 0;
+  max-width: 100%;
+  width: max-content;
+  border-left: 1px solid var(--ta-border);
+  border-top: 1px solid var(--ta-border);
 }
 
 .markdown-body :deep(table th),
 .markdown-body :deep(table td) {
-  border-color: var(--ta-border);
+  border-right: 1px solid var(--ta-border);
+  border-bottom: 1px solid var(--ta-border);
 }
 
 /* 去除 github-markdown-css 在每行顶部的独立边框 */
