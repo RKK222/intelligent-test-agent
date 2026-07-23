@@ -4,6 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.model;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
+import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
 
 import com.enterprise.testagent.xxljob.XxlJobAdminBridge;
 import com.enterprise.testagent.xxljob.XxlJobSsoIdentity;
@@ -15,9 +20,25 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.servlet.ModelAndView;
 
 class PlatformXxlSsoControllerTest {
+
+    @Test
+    void rendersPlatformUnavailablePageWhenLoginThrowsInsteadOfFallingBackToUpstreamErrorPage()
+            throws Exception {
+        XxlJobAdminBridge bridge = mock(XxlJobAdminBridge.class);
+        PlatformXxlJobUserProvisioner provisioner = mock(PlatformXxlJobUserProvisioner.class);
+        when(bridge.consumeTicket("ticket-one")).thenThrow(new IllegalStateException("login failed"));
+        MockMvc mockMvc = standaloneSetup(new PlatformXxlSsoController(bridge, provisioner)).build();
+
+        mockMvc.perform(post("/platform-sso/login").param("ticket", "ticket-one"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(view().name("platform/xxl-sso-status"))
+                .andExpect(model().attribute("state", "unavailable"))
+                .andExpect(model().attribute("message", "XXL-JOB 管理服务暂不可用"));
+    }
 
     @Test
     void returnsReadyHandshakePageOnlyAfterTicketProvisioningAndXxlLoginSucceed() {

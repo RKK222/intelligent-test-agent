@@ -52,6 +52,8 @@ bash tools/verify-dev-scripts.sh
 
 Testcontainers 需要可用 Docker；Docker 不可用时相关 MySQL/Redis 测试会显式跳过，不能把跳过误报为已完成数据库与一次性票据验收。
 
+`PlatformXxlSsoControllerTest` 必须覆盖平台 SSO 登录运行时异常：响应固定为 `503 + platform/xxl-sso-status + unavailable`，不能回退到上游 `framework/common/common.errorpage`。后者会在平台父页面没有 jQuery 时继续读取 `window.parent.$.adminTab`，浏览器控制台异常只是二次故障，不能替代服务端首因日志。
+
 `verify-internal-xxl-job-diagnostics.sh` 完全使用临时夹具和假命令验证固定现场的只读脚本、SQL 与文档契约，不访问 `122.233.30.2`、`122.233.30.4`、`122.233.30.114`、`122.233.30.20` 或外部 MySQL `122.210.106.43`。文档变异夹具还会拒绝主动重放 SSO、触发任务，并用不执行命令的状态机按未被引号或反斜杠保护的换行、`;`、`&&`、`||` 和管道边界扫描全手册可执行代码块。解析 `sudo`/`env` 选项、空或带引号的 `KEY=value` 及 Docker/Compose/Podman 全局选项后，会拒绝读 Redis 票据/会话、执行 SQL DML、改写配置、重启/reload 服务和容器 `up/down/create/run/pause/unpause/scale` 等生命周期变更；无法安全解释的组合 wrapper 短选项、env split-string 或未知容器全局/子命令选项统一 fail closed，同时保留引号内文本与已知选项下只读 `ps` 命令。SQL 临时负向夹具还会拒绝 `INTO OUTFILE/DUMPFILE`、`GET_LOCK/RELEASE_LOCK/IS_FREE_LOCK/IS_USED_LOCK` 和用户变量赋值 `:=`，只做静态解析，不执行 SQL。证据扫描夹具覆盖绝对/相对 URL 的未脱敏 query 与 fragment。低熵 password/token/key 夹具还会断言只输出 `SET/UNSET`，不输出长度或无盐摘要；仅生产强随机 XXL access token 保留跨节点长度和 SHA-256 前缀。浏览器现场只能被动检查事故时已经保留的证据。
 
 入口夹具使用正常浏览器网段地址，并逐一拒绝五个已知基础设施地址及 `ip` 缺失/失败/空结果；错误机器的 fake curl 调用哨兵必须不存在。Nginx 夹具拒绝全注释和单指令注释配置。三个脚本正常结束均断言最终 PASS/FAIL 摘要，误用与关键前提仍返回 `2`。证据扫描程序由 verifier 持有固定受审副本，手册展示块只做逐字节等值校验；恶意 `system()` Markdown 夹具必须被合同拒绝且哨兵文件不存在。

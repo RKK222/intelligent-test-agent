@@ -15,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -73,6 +74,18 @@ public class PlatformXxlSsoController {
     @XxlSso(login = false)
     public ModelAndView required(HttpServletResponse response) {
         return error(response, HttpServletResponse.SC_UNAUTHORIZED, "expired", "平台会话已失效，请重新加载");
+    }
+
+    /**
+     * 平台 SSO 的运行时异常统一回到可向父页面发送状态的页面，避免落入上游通用错误页后再次触发 adminTab 脚本异常。
+     */
+    @ExceptionHandler(RuntimeException.class)
+    public ModelAndView handleLoginException(RuntimeException exception, HttpServletResponse response) {
+        LOGGER.error(
+                "component=xxl-job-sso action=login status=failed error_type={}",
+                exception.getClass().getName(),
+                exception);
+        return error(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE, "unavailable", "XXL-JOB 管理服务暂不可用");
     }
 
     private ModelAndView error(HttpServletResponse response, int status, String state, String message) {
