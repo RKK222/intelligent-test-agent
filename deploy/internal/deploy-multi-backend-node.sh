@@ -245,8 +245,8 @@ validate_backend_config() {
   require_exact_value "${docker_env}" TEST_AGENT_DATA_ROOT /data/testagent/data
   require_exact_value "${docker_env}" TEST_AGENT_PROGRAM_ROOT /data/testagent/programs
   require_exact_value "${docker_env}" OPENCODE_WORKER_BACKEND_PORT 8080
-  require_exact_value "${docker_env}" OPENCODE_WORKER_PORT_START 4096
-  require_exact_value "${docker_env}" OPENCODE_WORKER_PORT_END 5095
+  require_exact_value "${docker_env}" OPENCODE_WORKER_PORT_START 14096
+  require_exact_value "${docker_env}" OPENCODE_WORKER_PORT_END 16095
   require_exact_value "${docker_env}" OPENCODE_ALLOWED_CORS \
     http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996
   require_nonempty_value "${docker_env}" TEST_AGENT_OPENCODE_MANAGER_TOKEN
@@ -488,8 +488,8 @@ verify_backend() {
     exit 1
   }
   worker_ports="$(docker port test-agent-opencode-worker)"
-  grep -Eq '^4096/tcp[[:space:]]+->' <<<"${worker_ports}"
-  grep -Eq '^5095/tcp[[:space:]]+->' <<<"${worker_ports}"
+  grep -Eq '^14096/tcp[[:space:]]+->' <<<"${worker_ports}"
+  grep -Eq '^16095/tcp[[:space:]]+->' <<<"${worker_ports}"
   # 当前 manager 输出结构化事件；保留旧文本兼容，避免升级期间把健康节点误报为失败。
   docker logs --tail 200 test-agent-opencode-worker 2>&1 \
     | grep -E 'event=manager_config_update status=applied|manager config update applied' >/dev/null

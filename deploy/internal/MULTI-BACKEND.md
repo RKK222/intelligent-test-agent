@@ -62,11 +62,11 @@ Java A <---------------- 互访 8080 ----------------> Java B
 | 每台后台 | PostgreSQL、Redis、外部 XXL MySQL | 平台持久化、运行态与 XXL 独立调度库 |
 | 每个 Admin | `.4:9999`、`.114:9999` | 调度所有 Java executor；仅可信内网开放 |
 | 每台后台 | `ai-code.sdc.enterprise:9070` | 企业内部模型调用 |
-| Java 后台 | 每台后台 `4096-5095` | 访问本机或目标服务器上的用户 OpenCode 进程；浏览器不直连这些端口 |
+| Java 后台 | 每台后台 `14096-16095` | 访问本机或目标服务器上的用户 OpenCode 进程；浏览器不直连这些端口 |
 
-两个服务器可以重复使用 `4096-5095`，因为 IP 不同；同一台服务器的宿主机和容器端口必须同号。每台 worker 发布 1000 个端口，两台合计提供 2000 个端口坐标。正式部署不使用 `--network host`、`19070` relay 或额外 model relay。域名和 IP 虽然都由浏览器访问 `9996`，但域名链路已有企业入口把 `9996` 转到实体 Nginx `80`；实体 Nginx 额外监听 `9996` 是为了让 IP 直连，不得删掉原来的 `listen 80`。
+两个服务器可以重复使用 `14096-16095`，因为 IP 不同；同一台服务器的宿主机和容器端口必须同号。每台 worker 发布 2000 个端口坐标，两台合计提供 4000 个端口坐标；全局 `OPENCODE_MANAGER_MAX_PROCESSES=1000` 继续把每台实际进程数限制为 1000。正式部署不使用 `--network host`、`19070` relay 或额外 model relay。域名和 IP 虽然都由浏览器访问 `9996`，但域名链路已有企业入口把 `9996` 转到实体 Nginx `80`；实体 Nginx 额外监听 `9996` 是为了让 IP 直连，不得删掉原来的 `listen 80`。
 
-端口池容量不等于已经验证的并发承载能力。1000 个端口只表示 manager 可分配坐标上限；实际同时运行 1000 个 OpenCode 进程还受宿主机 CPU、内存、Docker `PidsLimit=8192`、`nproc=8192`、文件句柄和外部模型容量限制，上线前必须压测，不能仅凭端口映射宣称容量达标。
+端口池容量不等于已经验证的并发承载能力。2000 个端口只表示 manager 可分配坐标上限，当前每台实际进程数仍由全局参数限制为 1000；CPU、内存、Docker `PidsLimit=8192`、`nproc=8192`、文件句柄和外部模型容量仍需上线前压测，不能仅凭端口映射宣称容量达标。
 
 部署前验证：
 
@@ -329,8 +329,8 @@ TEST_AGENT_OPENCODE_WORKER_IMAGE=test-agent-opencode-worker:internal
 VITE_TEST_AGENT_API_BASE_URL=
 
 OPENCODE_WORKER_BACKEND_PORT=8080
-OPENCODE_WORKER_PORT_START=4096
-OPENCODE_WORKER_PORT_END=5095
+OPENCODE_WORKER_PORT_START=14096
+OPENCODE_WORKER_PORT_END=16095
 
 OPENCODE_ALLOWED_CORS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996
 OPENCODE_MANAGER_HEARTBEAT_INTERVAL=5s
@@ -357,7 +357,7 @@ TEST_AGENT_IMAGE_OUTPUT_DIR=/data/testagent/dist
 
 当前 worker 不读取旧的 `TEST_AGENT_BACKEND`，而是读取本机 Java 写出的 `.serverhost` 并结合 `OPENCODE_WORKER_BACKEND_PORT` 建立 manager WebSocket，所以不要恢复旧变量。Nginx 使用前端服务器独立的 `nginx.env`，不在每台 worker 的 `docker.env` 中维护 upstream。
 
-两台 worker 都重建并连接后，超级管理员必须在“系统管理 → 配置管理 → 通用参数管理”把全局 `OPENCODE_MANAGER_MAX_PROCESSES` 改为 `1000`。保存后 Java 会向两台在线 manager 热推；manager 按本机 1000 个端口池裁剪并立即回报心跳。运行管理页两台 manager 的 `portStart/portEnd/maxProcesses` 应分别显示 `4096/5095/1000`。若该参数仍是 `20` 或 `8`，即使已经发布 1000 个端口，实际新建进程上限仍是较小值。
+两台 worker 都重建并连接后，超级管理员必须在“系统管理 → 配置管理 → 通用参数管理”把全局 `OPENCODE_MANAGER_MAX_PROCESSES` 改为 `1000`。保存后 Java 会向两台在线 manager 热推；manager 按本机 2000 个端口池裁剪并立即回报心跳。运行管理页两台 manager 的 `portStart/portEnd/maxProcesses` 应分别显示 `14096/16095/1000`。若该参数仍是 `20` 或 `8`，即使已经发布 2000 个端口，实际新建进程上限仍是较小值。
 
 每台 Java 启动后，本机身份文件分别应为：
 
@@ -433,7 +433,7 @@ bash /data/testagent/deploy/internal/configure-nginx.sh \
 
 预期输出 `backend count: 2`、`server route count: 2`。正式安装必须使用本次发布包中的前端部署入口；它会更新前端和部署脚本、渲染候选配置、执行实体 Nginx `-t/-T` 并 reload，失败自动回滚：
 
-若 Mac 重新封装时复用旧节点包，`package-two-backend-complete.sh` 只会在外层包的临时副本中处理固定非密钥字段：前端路由键迁移为 `TEST_AGENT_NGINX_SERVER_ROUTES`，两个后台补齐 HTTP Cookie、大文件预览/分片参数并将 worker 端口池固定为 `4096-5095`。源敏感节点包和其中的密码/token 不会被修改或输出；同一键重复定义时封装直接失败，不能继续交付。
+若 Mac 重新封装时复用旧节点包，`package-two-backend-complete.sh` 只会在外层包的临时副本中处理固定非密钥字段：前端路由键迁移为 `TEST_AGENT_NGINX_SERVER_ROUTES`，两个后台补齐 HTTP Cookie、大文件预览/分片参数并将 worker 端口池固定为 `14096-16095`。源敏感节点包和其中的密码/token 不会被修改或输出；同一键重复定义时封装直接失败，不能继续交付。
 
 ```bash
 bash /tmp/deploy-internal-frontend.sh \
@@ -670,7 +670,7 @@ docker exec test-agent-opencode-worker \
   sh -lc "grep -E 'Max processes|Max open files' /proc/1/limits"
 ```
 
-两台后台都必须显示 `PidsLimit=8192`，`Ulimits` 包含 `nofile` soft/hard `262144` 和 `nproc` soft/hard `8192`，容器 `/proc/1/limits` 显示最大打开文件数 `262144`、最大用户进程数 `8192`；`docker port` 还必须同时列出 `4096/tcp` 和 `5095/tcp`。脚本升级只对重建后的容器生效，因此已有环境按 `.4`、`.114` 顺序逐台执行 worker `restart` 和上述检查；当前节点任一检查失败时立即停止，不操作下一节点。
+两台后台都必须显示 `PidsLimit=8192`，`Ulimits` 包含 `nofile` soft/hard `262144` 和 `nproc` soft/hard `8192`，容器 `/proc/1/limits` 显示最大打开文件数 `262144`、最大用户进程数 `8192`；`docker port` 还必须同时列出 `14096/tcp` 和 `16095/tcp`。脚本升级只对重建后的容器生效，因此已有环境按 `.4`、`.114` 顺序逐台执行 worker `restart` 和上述检查；当前节点任一检查失败时立即停止，不操作下一节点。
 
 然后验收：
 

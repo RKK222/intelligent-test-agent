@@ -1601,7 +1601,7 @@ grep -Fq "platform_session_digest='[REDACTED]'" "${TMP_ROOT}/backend-ok.log"
 grep -Fq '[PASS] systemd ExecStart 指向固定后台 JAR' "${TMP_ROOT}/backend-ok.log"
 grep -Fq '[PASS] systemd EnvironmentFiles 包含固定 backend.env' "${TMP_ROOT}/backend-ok.log"
 grep -Fq '[PASS] 专用 Linux 仅有一个后台 Java，PID 与 MainPID=4242 一致' "${TMP_ROOT}/backend-ok.log"
-grep -Fq '[INFO] 4096-5095 为当前双后台 opencode 用户进程端口池，非管理页首要链路；本脚本不执行 Docker/worker/manager 操作' "${TMP_ROOT}/backend-ok.log"
+grep -Fq '[INFO] 14096-16095 为当前双后台 opencode 用户进程端口池，非管理页首要链路；本脚本不执行 Docker/worker/manager 操作' "${TMP_ROOT}/backend-ok.log"
 if grep -Fq 'sed:' "${TMP_ROOT}/backend-ok.log"; then
   printf 'backend diagnostics redaction failed\n' >&2
   exit 1
