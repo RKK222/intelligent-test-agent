@@ -84,15 +84,19 @@ ss -lntp | grep ':6379 '
 ps -ef | grep '[r]edis-server'
 systemctl status redis redis-server --no-pager || true
 docker ps -a --filter publish=6379 --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
-find /etc/redis /data -maxdepth 4 -type f \( -name 'redis*.conf' -o -name 'dump.rdb' -o -name 'appendonly.aof' \) -ls 2>/dev/null
+find /etc/redis /data -maxdepth 4 -type f \( -name '*.conf' -o -name 'dump.rdb' -o -name 'appendonly.aof' \) -ls 2>/dev/null
 ```
 
 使用现有密码进行只读查询时，不把密码写进命令行历史：
 
 ```bash
-read -rsp 'Existing Redis password: ' REDISCLI_AUTH
-export REDISCLI_AUTH
+read -rsp 'Existing Redis password: ' redis5_auth
 printf '\n'
+if [[ -n "${redis5_auth}" ]]; then
+  export REDISCLI_AUTH="${redis5_auth}"
+else
+  unset REDISCLI_AUTH
+fi
 redis-cli -h 127.0.0.1 -p 6379 INFO server | grep '^redis_version:'
 redis-cli -h 127.0.0.1 -p 6379 CONFIG GET dir
 redis-cli -h 127.0.0.1 -p 6379 CONFIG GET dbfilename
@@ -100,6 +104,7 @@ redis-cli -h 127.0.0.1 -p 6379 CONFIG GET appendonly
 redis-cli -h 127.0.0.1 -p 6379 CONFIG GET appenddirname
 redis-cli -h 127.0.0.1 -p 6379 INFO persistence
 unset REDISCLI_AUTH
+unset redis5_auth
 ```
 
 如果命令显示的实际数据目录、AOF 形态或 Redis 主机与本文不一致，先停在这里记录现场结构，不要执行替换。
@@ -117,13 +122,18 @@ ss -lntp | grep ':8080 ' || true
 回到 Redis 服务器，使用现有密码生成最终 RDB：
 
 ```bash
-read -rsp 'Existing Redis password: ' REDISCLI_AUTH
-export REDISCLI_AUTH
+read -rsp 'Existing Redis password: ' redis5_auth
 printf '\n'
+if [[ -n "${redis5_auth}" ]]; then
+  export REDISCLI_AUTH="${redis5_auth}"
+else
+  unset REDISCLI_AUTH
+fi
 redis-cli -h 127.0.0.1 -p 6379 BGSAVE
 redis-cli -h 127.0.0.1 -p 6379 LASTSAVE
 redis-cli -h 127.0.0.1 -p 6379 INFO persistence | grep -E 'rdb_bgsave_in_progress|rdb_last_bgsave_status'
 unset REDISCLI_AUTH
+unset redis5_auth
 ```
 
 等待 `rdb_bgsave_in_progress:0` 且 `rdb_last_bgsave_status:ok`。随后按第 2 步确认的真实数据目录制作带时间戳的只读备份，并由运维人员确认恢复路径。下面仅是结构示例，`<旧Redis数据目录>` 必须替换成已确认的精确绝对路径：
@@ -177,6 +187,9 @@ docker image inspect test-agent-redis:7.4.9-alpine \
 ./deploy-redis.sh --env-file ./config/redis.env --config-file ./config/redis.conf \
   --image-tar ./test-agent-redis_7.4.9-alpine-linux-amd64.tar deploy
 ```
+
+部署脚本会先用 `docker image inspect` 强制确认镜像为 `linux/amd64`，运行容器时不再传递
+`--platform`，兼容未启用 experimental features 的旧版 Docker daemon；这不会放宽镜像架构校验。
 
 如果现场已有同名容器，脚本会拒绝覆盖。确认它就是已备份并停止的旧容器后，才允许显式执行：
 

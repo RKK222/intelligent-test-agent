@@ -65,6 +65,11 @@ grep -Fxq 'appendonly yes' "${bundle}/config/redis.conf"
 grep -Fxq 'appendfsync everysec' "${bundle}/config/redis.conf"
 grep -Fxq 'maxmemory-policy noeviction' "${bundle}/config/redis.conf"
 grep -Fxq 'protected-mode yes' "${bundle}/config/redis.conf"
+if grep -Fq -- '--platform' "${bundle}/deploy-redis.sh"; then
+  echo "Packaged Redis deploy script must support Docker daemons without runtime --platform" >&2
+  exit 1
+fi
+grep -Fq 'Loaded Redis image is not linux/amd64' "${bundle}/deploy-redis.sh"
 
 image_tar="${bundle}/test-agent-redis_7.4.9-alpine-linux-amd64.tar"
 [[ "$(awk '{print $1}' "${image_tar}.sha256")" == "$(sha256_digest "${image_tar}")" ]]

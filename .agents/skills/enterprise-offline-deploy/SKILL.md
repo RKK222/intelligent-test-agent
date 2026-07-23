@@ -14,6 +14,7 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 - 当前现场通过 U 盘把完整交付物导入企业内部中转机；中转机固定交付目录是 `~/Desktop/mimoagent/0709`，不得写成 `/data/0709`。后续 `scp` 从该目录发起；只有 `.20/.4/.114/.2` 等目标服务器的接收目录是 `/data/0709`。
 - Mac 只负责构建交付物。交付物已进入企业内部中转机后，不得再把现场传输步骤描述为“从 Mac scp”。
 - 企业内不使用 Docker Compose；`opencode-worker` 用 `deploy/internal/opencode-worker-docker.sh` 纯 Docker 命令管理。
+- 企业目标机可能使用未启用 experimental features 的旧 Docker daemon。Redis 离线镜像在加载后通过 `docker image inspect` 校验 `linux/amd64`；目标机执行 `docker run` 时不得再强制传 `--platform`。`--platform linux/amd64` 只用于 Mac 外网构建机拉取、构建或验证固定架构镜像。
 - 企业内不要使用根目录 `.env.local`、`.env.test` 作为生产配置。
 - Java 后端读取 `/data/testagent/config/backend.env`。
 - Java 的 SSH 混合加密 RSA 私钥固定内置在交付 JAR 的 `classpath:rsa-private.key`；`backend.env` 不配置外置路径，多后台必须部署同一 JAR。交付 JAR/ZIP 按密钥交付物受控留存。
@@ -207,6 +208,7 @@ docker logs --tail 120 test-agent-opencode-worker
 ## 常见问题提醒
 
 - `opencode-manager` 报端口配置缺失：不要手工直接跑 `opencode-manager run`；生产用 `opencode-worker-docker.sh`。端口写在 `docker.env` 的 `OPENCODE_WORKER_PORT_START/END`。
+- Redis 部署报 `"--platform" is only supported on a Docker daemon with experimental features enabled`：先确认目标机为 `x86_64`、镜像检查为 `linux/amd64`、没有同名残留容器且数据目录仍只有原 `dump.rdb`；使用当前不带运行期 `--platform` 的 `deploy-redis.sh` 重试，不开启 daemon experimental features，不删除 RDB/AOF，不直接加 `--replace-existing`。
 - manager 等待 `.serverhost` 或连接旧 IP：检查 `backend.env` 的 `SYS_DATA_ROOT_DIR` 是否等于 `docker.env` 的 `TEST_AGENT_DATA_ROOT`，并确认 Java 已先启动并写出 `.serverid/.serverhost`。
 - 数据库通用参数 `SYS_DATA_ROOT_DIR` 仍是 Linux 默认 `/data/.testagent`：企业内部署需要在系统管理通用参数或数据库中改为 `/data/testagent/data`，否则 Java/worker 共享目录会错位。
 - 公共配置目录未初始化：超级管理员进入“系统管理 -> 配置管理 -> opencode公共配置管理”初始化，确保 `OPENCODE_PUBLIC_CONFIG_DIR` 指向的目录存在且非空。

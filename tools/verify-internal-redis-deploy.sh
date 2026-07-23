@@ -33,7 +33,12 @@ if "${DEPLOY_SCRIPT}" --env-file "${ENV_FILE}" --config-file "${TMP_ROOT}/unsafe
   exit 1
 fi
 
-grep -Fq -- '--platform linux/amd64' "${DEPLOY_SCRIPT}"
+# 运行前已经强制校验镜像为 linux/amd64；运行命令不再携带旧 daemon 不支持的 --platform。
+if grep -Fq -- '--platform' "${DEPLOY_SCRIPT}"; then
+  echo "Redis deploy script must support Docker daemons without runtime --platform" >&2
+  exit 1
+fi
+grep -Fq 'Loaded Redis image is not linux/amd64' "${DEPLOY_SCRIPT}"
 grep -Fq -- '--restart unless-stopped' "${DEPLOY_SCRIPT}"
 grep -Fq -- '--replace-existing' "${DEPLOY_SCRIPT}"
 grep -Fq 'GETDEL' "${DEPLOY_SCRIPT}"

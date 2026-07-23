@@ -256,8 +256,8 @@ run_redis_container() {
   if [[ -n "${appendonly_override}" ]]; then
     command+=(--appendonly "${appendonly_override}")
   fi
+  # 目标机可能是未启用 experimental features 的旧 Docker；镜像架构已在 deploy 前强校验。
   docker run -d \
-    --platform linux/amd64 \
     --name "${CONTAINER_NAME}" \
     --hostname "${CONTAINER_NAME}" \
     --restart unless-stopped \

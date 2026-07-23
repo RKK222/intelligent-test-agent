@@ -171,7 +171,7 @@ docker ps -a --filter publish=6379 \
 find /etc/redis /data /var/lib/redis \
   -maxdepth 5 \
   -type f \
-  \( -name 'redis*.conf' -o -name 'dump.rdb' -o -name 'appendonly.aof' \) \
+  \( -name '*.conf' -o -name 'dump.rdb' -o -name 'appendonly.aof' \) \
   -ls 2>/dev/null
 ```
 
@@ -180,7 +180,11 @@ find /etc/redis /data /var/lib/redis \
 ```bash
 read -rsp 'Existing Redis password: ' redis5_auth
 printf '\n'
-export REDISCLI_AUTH="${redis5_auth}"
+if [[ -n "${redis5_auth}" ]]; then
+  export REDISCLI_AUTH="${redis5_auth}"
+else
+  unset REDISCLI_AUTH
+fi
 redis-cli -h 127.0.0.1 -p 6379 PING
 redis-cli -h 127.0.0.1 -p 6379 INFO server | grep '^redis_version:'
 redis-cli -h 127.0.0.1 -p 6379 CONFIG GET dir
@@ -317,7 +321,8 @@ docker ps -a --filter name=^/test-agent-redis$ \
   --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
 ```
 
-镜像必须显示 `os=linux arch=amd64`。不存在同名容器时：
+镜像必须显示 `os=linux arch=amd64`。部署脚本运行容器时不传 `--platform`，以兼容未启用
+experimental features 的旧版 Docker daemon；脚本仍会在运行前强制校验镜像架构。不存在同名容器时：
 
 ```bash
 ./deploy-redis.sh \
