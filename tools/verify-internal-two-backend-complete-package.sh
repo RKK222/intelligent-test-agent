@@ -29,6 +29,7 @@ RELEASE_ARCHIVE="${TMP_ROOT}/test-agent-internal-release.zip"
 NODES_DIR="${TMP_ROOT}/nodes"
 OUTPUT_DIR="${TMP_ROOT}/output"
 mkdir -p "${RELEASE_ROOT}/dist/backend" "${RELEASE_ROOT}/deploy/internal" \
+  "${RELEASE_ROOT}/.agents" \
   "${NODES_DIR}" "${OUTPUT_DIR}"
 
 JAR_ROOT="${TMP_ROOT}/jar-root"
@@ -39,6 +40,9 @@ printf 'frontend\n' >"${RELEASE_ROOT}/dist/test-agent-frontend-dist.tar.gz"
 printf 'programs\n' >"${RELEASE_ROOT}/dist/test-agent-programs.tar.gz"
 printf 'worker\n' >"${RELEASE_ROOT}/dist/test-agent-opencode-worker_internal-linux-amd64.tar"
 printf '#!/usr/bin/env bash\n' >"${RELEASE_ROOT}/deploy/internal/deploy-multi-backend-node.sh"
+for session_log in "${ROOT_DIR}"/.agents/session-log*.md; do
+  cp "${session_log}" "${RELEASE_ROOT}/.agents/$(basename "${session_log}")"
+done
 (cd "${RELEASE_ROOT}" && zip -qr "${RELEASE_ARCHIVE}" .)
 write_checksum "${RELEASE_ARCHIVE}"
 
@@ -114,6 +118,12 @@ grep -Fxq 'test-agent-two-backend-complete/test-agent-internal-release.zip' <<<"
 grep -Fxq 'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.30.4-SENSITIVE.tar.gz' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.30.114-SENSITIVE.tar.gz' <<<"${listing}"
 grep -Fxq 'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.30.2.tar.gz' <<<"${listing}"
+INNER_RELEASE="${TMP_ROOT}/inner-release.zip"
+unzip -p "${BUNDLE}" 'test-agent-two-backend-complete/test-agent-internal-release.zip' >"${INNER_RELEASE}"
+inner_listing="$(unzip -Z1 "${INNER_RELEASE}")"
+for session_log in "${ROOT_DIR}"/.agents/session-log*.md; do
+  grep -Fxq ".agents/$(basename "${session_log}")" <<<"${inner_listing}"
+done
 if grep -Eq 'mysql_8\.4|deploy-mysql-node|122\.233\.30\.147-mysql' <<<"${listing}"; then
   echo "Platform bundle unexpectedly contains standalone MySQL artifacts" >&2
   exit 1
@@ -137,8 +147,23 @@ if grep -Fq 'TEST_AGENT_NGINX_TERMINAL_ROUTES=' <<<"${frontend_nginx_env}"; then
   exit 1
 fi
 
+# 复用的旧后台节点包应在临时副本中自动补齐当前固定配置。
+BACKEND_NODE_ARCHIVE="${TMP_ROOT}/backend-node.tar.gz"
+unzip -p "${BUNDLE}" \
+  'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.30.4-SENSITIVE.tar.gz' \
+  >"${BACKEND_NODE_ARCHIVE}"
+backend_env="$(tar -xOzf "${BACKEND_NODE_ARCHIVE}" \
+  'test-agent-two-backend-122.233.30.4/config/backend.env')"
+docker_env="$(tar -xOzf "${BACKEND_NODE_ARCHIVE}" \
+  'test-agent-two-backend-122.233.30.4/config/docker.env')"
+grep -Fxq 'TEST_AGENT_XXL_JOB_COOKIE_SECURE=false' <<<"${backend_env}"
+grep -Fxq 'TEST_AGENT_MAX_PREVIEW_BYTES=5242880' <<<"${backend_env}"
+grep -Fxq 'TEST_AGENT_UPLOAD_CHUNK_BYTES=262144' <<<"${backend_env}"
+grep -Fxq 'OPENCODE_WORKER_PORT_START=4096' <<<"${docker_env}"
+grep -Fxq 'OPENCODE_WORKER_PORT_END=5095' <<<"${docker_env}"
+
 # 第二次执行必须无交互覆盖固定文件名，不能生成日期或版本后缀的新包。
 run_package >/dev/null
 test "$(find "${OUTPUT_DIR}" -maxdepth 1 -type f -name 'test-agent-two-backend-complete*.zip' | wc -l | tr -d '[:space:]')" = 1
 
-echo 'Fixed-name platform bundle, checksum, structure, MySQL separation, redaction and overwrite verified'
+echo 'Fixed-name platform bundle, session logs, node normalization, checksum, structure, MySQL separation, redaction and overwrite verified'

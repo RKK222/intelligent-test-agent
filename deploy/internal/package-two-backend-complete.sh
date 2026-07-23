@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 RELEASE_ARCHIVE="${SCRIPT_DIR}/dist/test-agent-internal-release.zip"
 NODES_DIR=""
 OUTPUT_DIR="${SCRIPT_DIR}/dist"
@@ -150,6 +151,17 @@ require_archive_entry "${release_listing}" dist/test-agent-frontend-dist.tar.gz
 require_archive_entry "${release_listing}" dist/test-agent-programs.tar.gz
 require_archive_entry "${release_listing}" dist/test-agent-opencode-worker_internal-linux-amd64.tar
 require_archive_entry "${release_listing}" deploy/internal/deploy-multi-backend-node.sh
+# 外层完整包只接受包含当前仓库全部会话日志的内层发布包，避免业务制品与交付追溯记录脱节。
+session_log_count=0
+for session_log in "${ROOT_DIR}"/.agents/session-log*.md; do
+  [[ -f "${session_log}" ]] || continue
+  require_archive_entry "${release_listing}" ".agents/$(basename "${session_log}")"
+  session_log_count=$((session_log_count + 1))
+done
+if [[ "${session_log_count}" -eq 0 ]]; then
+  echo "No .agents/session-log*.md files found for complete bundle validation" >&2
+  exit 1
+fi
 if grep -Fx 'dist/mysql_8.4-linux-amd64.tar' <<<"${release_listing}" >/dev/null; then
   echo "Platform release archive must not contain the standalone MySQL image" >&2
   exit 1
@@ -181,6 +193,61 @@ validate_node_archive "${NODE_4}" test-agent-two-backend-122.233.30.4 docker.env
 validate_node_archive "${NODE_114}" test-agent-two-backend-122.233.30.114 backend.env
 validate_node_archive "${NODE_114}" test-agent-two-backend-122.233.30.114 docker.env
 validate_node_archive "${NODE_2}" test-agent-two-backend-122.233.30.2 nginx.env
+
+# 现场敏感配置包允许复用，但封装时必须在临时副本中补齐本次发布新增的非密钥配置。
+# 原始采集包及其中的密码/token 均不修改、不输出；重复键直接拒绝，避免掩盖脏配置。
+replace_or_append_env_value() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  local count tmp_file
+  count="$(grep -c "^${key}=" "${file}" || true)"
+  if [[ "${count}" -gt 1 ]]; then
+    echo "Prepared node configuration contains duplicate ${key}" >&2
+    exit 1
+  fi
+  tmp_file="$(mktemp "${file}.new.XXXXXX")"
+  if [[ "${count}" -eq 1 ]]; then
+    awk -v key="${key}" -v value="${value}" \
+      'index($0, key "=") == 1 { print key "=" value; next } { print }' \
+      "${file}" >"${tmp_file}"
+  else
+    cp "${file}" "${tmp_file}"
+    printf '%s=%s\n' "${key}" "${value}" >>"${tmp_file}"
+  fi
+  chmod --reference="${file}" "${tmp_file}" 2>/dev/null || chmod 0600 "${tmp_file}"
+  mv -f "${tmp_file}" "${file}"
+}
+
+normalize_backend_node_archive() {
+  local source="$1"
+  local node_dir="$2"
+  local node_root="${TMP_ROOT}/normalize-${node_dir}"
+  local backend_env docker_env target
+  mkdir -p "${node_root}"
+  tar -C "${node_root}" -xzf "${source}"
+  backend_env="${node_root}/${node_dir}/config/backend.env"
+  docker_env="${node_root}/${node_dir}/config/docker.env"
+
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_XXL_JOB_COOKIE_SECURE false
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_MAX_PREVIEW_BYTES 5242880
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_UPLOAD_CHUNK_BYTES 262144
+  replace_or_append_env_value "${docker_env}" OPENCODE_WORKER_BACKEND_PORT 8080
+  replace_or_append_env_value "${docker_env}" OPENCODE_WORKER_PORT_START 4096
+  replace_or_append_env_value "${docker_env}" OPENCODE_WORKER_PORT_END 5095
+
+  target="${TMP_ROOT}/$(basename "${source}")"
+  tar -C "${node_root}" -czf "${target}" "${node_dir}"
+  chmod 0600 "${target}"
+  printf '%s\n' "${target}"
+}
+
+NODE_4="$(normalize_backend_node_archive "${NODE_4}" test-agent-two-backend-122.233.30.4)"
+NODE_114="$(normalize_backend_node_archive "${NODE_114}" test-agent-two-backend-122.233.30.114)"
+validate_node_archive "${NODE_4}" test-agent-two-backend-122.233.30.4 backend.env
+validate_node_archive "${NODE_4}" test-agent-two-backend-122.233.30.4 docker.env
+validate_node_archive "${NODE_114}" test-agent-two-backend-122.233.30.114 backend.env
+validate_node_archive "${NODE_114}" test-agent-two-backend-122.233.30.114 docker.env
 
 # 完整包必须在封装前确认两台后台引用同一个外部 MySQL，且账号密码和 access token 一致。
 validate_mysql_cluster_config() {

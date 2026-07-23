@@ -115,7 +115,7 @@ bash /data/testagent/deploy/internal/diagnose-xxl-job-backend.sh \
 
 成功条件：本机地址为 `.114`，advertised host、`.serverhost/.serverid` 与 `.114` 身份一致；systemd 只运行固定 JAR 且读取固定 backend.env；`8080/18080/9999` 由同一 MainPID 监听；平台与 Admin readiness 均为 UP；`.20:6379`、外部 MySQL `122.210.106.43:3306` 及 `.4` 的 `8080/18080/9999` TCP 可达；固定端口、`COOKIE_SECURE=false` 和共享配置摘要通过；退出码为 `0`。
 
-失败停止点：退出码 `2` 表示当前机器不是 `.114`、参数非法、关键文件或命令缺失，必须停止并修正执行前提，不得换用 `.4` expected-host 绕过。`8080` 正常而 `18080` 失败时，停止在 `.114` 的 Admin 子上下文或其到 XXL MySQL 的链路；`18080` 正常而 `9999` 失败时，停止在 `.114` executor；到 `.4` 的任一端口失败时交节点网络/防火墙；共享 Redis/MySQL 端点或摘要不符时交 `.114` 应用配置负责人。任何 `[FAIL]` 都先保存 `/data/0709/xxl-job-diagnostics-backend-122.233.30.114.log` 并停止该节点推断，不复用 `.4` 结论。`4096-4115` 是 opencode 用户进程端口池，不是管理页首要链路，本排查不操作 worker/manager/Docker。
+失败停止点：退出码 `2` 表示当前机器不是 `.114`、参数非法、关键文件或命令缺失，必须停止并修正执行前提，不得换用 `.4` expected-host 绕过。`8080` 正常而 `18080` 失败时，停止在 `.114` 的 Admin 子上下文或其到 XXL MySQL 的链路；`18080` 正常而 `9999` 失败时，停止在 `.114` executor；到 `.4` 的任一端口失败时交节点网络/防火墙；共享 Redis/MySQL 端点或摘要不符时交 `.114` 应用配置负责人。任何 `[FAIL]` 都先保存 `/data/0709/xxl-job-diagnostics-backend-122.233.30.114.log` 并停止该节点推断，不复用 `.4` 结论。`4096-5095` 是当前双后台 opencode 用户进程端口池，不是管理页首要链路，本排查不操作 worker/manager/Docker。
 
 ## 8. 122.233.30.20 Redis 的人工只读边界
 

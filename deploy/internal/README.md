@@ -46,6 +46,14 @@ VITE_TEST_AGENT_API_BASE_URL="" \
 
 这样 `http://mimo.sdc.cs.icbc:9996` 和 `http://122.233.30.2:9996` 都请求各自同源 `/api`。入口策略变更后只修改服务器 `docker.env` 不会改变已经编译的静态文件，必须重新构建并替换前端产物。
 
+完整构建和制品验证已经通过、仅补充当前会话日志时，可复用刚生成的 backend/frontend/programs/worker 制品重新封装内层 ZIP，不重复编译二进制：
+
+```bash
+deploy/internal/package-release.sh --zip-only --output-dir deploy/internal/dist
+```
+
+`--zip-only` 会重新复制当前 `deploy/internal/` 和全部 `.agents/session-log*.md`，并强制检查四类二进制制品齐全；缺少任一文件都会失败，不会生成部分发布包。
+
 当前外部 MySQL 不需要离线镜像包。标准发布 ZIP 和三台应用节点配置包齐全后，只生成一个固定平台
 U 盘交付包：
 
@@ -68,8 +76,8 @@ test-agent-two-backend-complete.zip.sha256
 三个应用节点包及后台/前端入口，不包含 MySQL 镜像、容器入口或 `.147` 节点包。入口从本机网卡取 IP，连续执行节点包
 校验、预校验、正式部署和部署后校验，完整输出保存在交付目录上一层的 `deploy-<本机IP>.log`。
 企业内部中转机每次只接收平台 ZIP 和 SHA。
-封装脚本可复用仍含 `TEST_AGENT_NGINX_TERMINAL_ROUTES` 的旧前端节点包：它只在临时副本中迁移为
-`TEST_AGENT_NGINX_SERVER_ROUTES`，不会修改源敏感包或输出 env 内容；缺少路由键、重复定义或新旧键并存会直接失败。
+封装脚本可复用旧节点包：它只在临时副本中把旧前端路由键迁移为
+`TEST_AGENT_NGINX_SERVER_ROUTES`，并给两个后台补齐当前 HTTP Cookie、大文件预览/分片和 `4096-5095` 端口池等固定非密钥字段。源敏感包、密码和 token 不会被修改或输出；发现重复键、缺少必需路由或新旧路由键并存会直接失败。
 
 交付物：
 
@@ -85,7 +93,7 @@ deploy/internal/dist/test-agent-opencode-worker_internal-linux-amd64.tar
 deploy/internal/dist/frontend/
 ```
 
-平台 ZIP 同时包含 `deploy/internal/` 下的配置模板、部署脚本、Nginx 模板、模型配置示例和本部署文档。
+平台 ZIP 同时包含 `deploy/internal/` 下的配置模板、部署脚本、Nginx 模板、模型配置示例和本部署文档，并在 `.agents/` 下保留当前仓库全部 `session-log*.md` 会话日志作为交付追溯基线；外层完整包封装前会逐一校验这些日志均已进入内层 ZIP。
 仓库保留的 MySQL 容器脚本只作为其它隔离环境备用，不属于当前现场交付。企业服务器只执行校验、解压、`docker load` 和服务启停，不执行
 Maven、pnpm、Docker build 或联网下载。
 
@@ -221,7 +229,7 @@ test-agent-config-SENSITIVE-<role>-<node>-<timestamp>.tar.gz.sha256
 
 已有环境升级“用户绑定端口复用与无主进程展示”版本时，身份文件和 manager state 已存在，顺序改为“manager → Java 后端 → 前端”：先逐台更新 worker/manager 并确认 `stopOwned` capability 和心跳恢复，再滚动更新 Java，全部 Java 就绪后最后部署一次前端。混合版本中的未知命令或错误只允许报错并保留原 binding，不得迁移端口；不要在滚动窗口内同时对同一用户执行人工重启与初始化。该版本不变更 `backend.env`、`docker.env`、数据库结构、SSE 或 generated SDK，也不自动处理存量重复/无主进程。
 
-扩容时只在新 Linux 启动一套 Java/worker，将新节点同时加入 `TEST_AGENT_NGINX_BACKENDS` 和 `TEST_AGENT_NGINX_XXL_JOB_ADMINS` 后执行 Nginx 无停机 reload；这两个 Nginx upstream 变量不是 Java 配置，旧 Java 不需要修改环境或重启。manager 异常时优先核对数据根目录、manager token、`.serverid/.serverhost` 和 `4096-4105` 端口池。
+扩容时只在新 Linux 启动一套 Java/worker，将新节点同时加入 `TEST_AGENT_NGINX_BACKENDS` 和 `TEST_AGENT_NGINX_XXL_JOB_ADMINS` 后执行 Nginx 无停机 reload；这两个 Nginx upstream 变量不是 Java 配置，旧 Java 不需要修改环境或重启。当前 `.4 + .114` 双后台交付为每台 worker 发布 `4096-5095` 共 1000 个端口，并要求页面通用参数 `OPENCODE_MANAGER_MAX_PROCESSES=1000`；其它部署仍按各自节点包配置。manager 异常时优先核对数据根目录、manager token、`.serverid/.serverhost` 和本机端口池。
 
 首次部署不要先启动 worker 再修 Java 身份文件；上述 manager 优先顺序只适用于身份文件和 state 已存在的升级。
 

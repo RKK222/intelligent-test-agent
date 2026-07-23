@@ -18,6 +18,7 @@ PACKAGE_OPENCODE_WORKER=1
 PACKAGE_MYSQL_IMAGE=0
 SAVE_TARBALL=1
 PACKAGE_ZIP=1
+PACKAGE_ZIP_ONLY=0
 OUTPUT_DIR_FROM_ENV_BEFORE_DOTENV="${TEST_AGENT_IMAGE_OUTPUT_DIR+x}"
 
 usage() {
@@ -28,6 +29,7 @@ Build enterprise internal delivery artifacts:
   - backend executable jar
   - frontend dist files and tar.gz
   - opencode-worker image and docker-loadable tar
+  - repository session logs under .agents/
 
 The default release ZIP is platform-only. Build the standalone MySQL 8.4
 linux/amd64 image separately with --mysql-only.
@@ -42,6 +44,7 @@ Options:
   --frontend-only         Package only the frontend dist.
   --opencode-only         Package only the opencode worker image.
   --mysql-only            Package only the standalone MySQL image.
+  --zip-only              Reassemble the release ZIP from existing complete artifacts and current session logs.
   --no-save               Build/pull Docker images but do not export image tarballs.
   --no-zip                Do not create the complete enterprise release zip.
   -h, --help              Show this help.
@@ -90,6 +93,14 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
       PACKAGE_MYSQL_IMAGE=1
+      shift
+      ;;
+    --zip-only)
+      PACKAGE_BACKEND=0
+      PACKAGE_FRONTEND=0
+      PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_MYSQL_IMAGE=0
+      PACKAGE_ZIP_ONLY=1
       shift
       ;;
     --no-save)
@@ -355,25 +366,34 @@ package_mysql_image() {
 
 package_release_zip() {
   local staging_dir="${OUTPUT_DIR}/.release-zip"
-  local zip_path
+  local zip_path session_log session_log_count=0
+  local worker_tar required_artifact
 
   require_command zip
   require_command rsync
   rm -rf "${staging_dir}"
   mkdir -p "${staging_dir}/dist" "${staging_dir}/deploy/internal"
   zip_path="$(cd "${OUTPUT_DIR}" && pwd)/test-agent-internal-release.zip"
+  worker_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
+
+  # zip-only 复用刚完成验证的二进制制品，但不允许任何一层缺失后生成看似完整的发布包。
+  for required_artifact in \
+    "${OUTPUT_DIR}/backend/test-agent-app.jar" \
+    "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" \
+    "${OUTPUT_DIR}/test-agent-programs.tar.gz" \
+    "${worker_tar}"; do
+    if [[ ! -f "${required_artifact}" ]]; then
+      echo "Required release artifact not found: ${required_artifact}" >&2
+      exit 1
+    fi
+  done
 
   # 交付 zip 只放部署所需产物和脚本，避免把 deploy/internal/dist 自身递归打进去。
-  if [[ -d "${OUTPUT_DIR}/backend" ]]; then
-    mkdir -p "${staging_dir}/dist/backend"
-    cp -a "${OUTPUT_DIR}/backend/." "${staging_dir}/dist/backend/"
-  fi
-  [[ -f "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" ]] && cp -a "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" "${staging_dir}/dist/"
-  [[ -f "${OUTPUT_DIR}/test-agent-programs.tar.gz" ]] && cp -a "${OUTPUT_DIR}/test-agent-programs.tar.gz" "${staging_dir}/dist/"
-
-  local worker_tar
-  worker_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
-  [[ -f "${worker_tar}" ]] && cp -a "${worker_tar}" "${staging_dir}/dist/"
+  mkdir -p "${staging_dir}/dist/backend"
+  cp -a "${OUTPUT_DIR}/backend/." "${staging_dir}/dist/backend/"
+  cp -a "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" "${staging_dir}/dist/"
+  cp -a "${OUTPUT_DIR}/test-agent-programs.tar.gz" "${staging_dir}/dist/"
+  cp -a "${worker_tar}" "${staging_dir}/dist/"
 
   if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 ]]; then
     local mysql_tar
@@ -385,6 +405,18 @@ package_release_zip() {
   local output_dir_name
   output_dir_name="$(basename "${OUTPUT_DIR}")"
   rsync -a --exclude 'dist' --exclude 'dist-*' --exclude "${output_dir_name}" --exclude '.env' "${SCRIPT_DIR}/" "${staging_dir}/deploy/internal/"
+
+  # 会话日志属于本次交付基线，保留原始文件名放入 .agents，便于内网追溯变更、坑点和未完成事项。
+  mkdir -p "${staging_dir}/.agents"
+  for session_log in "${ROOT_DIR}"/.agents/session-log*.md; do
+    [[ -f "${session_log}" ]] || continue
+    install -m 0644 "${session_log}" "${staging_dir}/.agents/$(basename "${session_log}")"
+    session_log_count=$((session_log_count + 1))
+  done
+  if [[ "${session_log_count}" -eq 0 ]]; then
+    echo "No .agents/session-log*.md files found for release provenance" >&2
+    exit 1
+  fi
 
   rm -f "${zip_path}"
   (cd "${staging_dir}" && zip -qr "${zip_path}" .)
@@ -492,7 +524,9 @@ if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 ]]; then
   package_mysql_image
 fi
 
-if [[ "${PACKAGE_ZIP}" -eq 1 && "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
+if [[ "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 \
+  && ( "${PACKAGE_ZIP_ONLY}" -eq 1 \
+    || ( "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 ) ) ]]; then
   package_release_zip
   write_release_checksum
 fi
@@ -518,7 +552,9 @@ if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo "  MySQL image tar: ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_XXL_JOB_MYSQL_IMAGE}" "${PLATFORM}")"
   echo "  MySQL target import: docker load -i ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_XXL_JOB_MYSQL_IMAGE}" "${PLATFORM}")"
 fi
-if [[ "${PACKAGE_ZIP}" -eq 1 && "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
+if [[ "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 \
+  && ( "${PACKAGE_ZIP_ONLY}" -eq 1 \
+    || ( "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 ) ) ]]; then
   echo "  complete release zip: ${OUTPUT_DIR}/test-agent-internal-release.zip"
   echo "  release checksum: ${OUTPUT_DIR}/test-agent-internal-release.zip.sha256"
 fi

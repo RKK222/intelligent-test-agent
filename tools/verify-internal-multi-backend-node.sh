@@ -42,6 +42,11 @@ bash "${CONFIGURE_SCRIPT}" backend \
   --backend-template "${ROOT_DIR}/deploy/internal/backend.env.example" \
   --docker-template "${ROOT_DIR}/deploy/internal/env.example" \
   >/dev/null
+# 当前双后台现场每台 worker 固定发布 1000 个同号端口；通用单后台模板仍保留较小默认值。
+sed -i.bak \
+  's/^OPENCODE_WORKER_PORT_END=.*/OPENCODE_WORKER_PORT_END=5095/' \
+  "${CONFIG_114}/docker.env"
+rm -f "${CONFIG_114}/docker.env.bak"
 cp "${CONFIG_114}/backend.env" "${CONFIG_4}/backend.env"
 cp "${CONFIG_114}/docker.env" "${CONFIG_4}/docker.env"
 sed -i.bak \
@@ -171,7 +176,7 @@ printf '%s\n' \
   '    if [[ "$*" == *".State.Running"* ]]; then printf "true\n"; else printf "healthy\n"; fi' \
   '    ;;' \
   '  port)' \
-  '    printf "4096/tcp -> 0.0.0.0:4096\n4115/tcp -> 0.0.0.0:4115\n"' \
+  '    printf "4096/tcp -> 0.0.0.0:4096\n5095/tcp -> 0.0.0.0:5095\n"' \
   '    ;;' \
   '  logs)' \
   '    printf "%s\n" "${TEST_AGENT_WORKER_LOG_LINE}"' \
@@ -193,7 +198,7 @@ verify_worker_log_format() {
 }
 
 verify_worker_log_format \
-  'event=manager_config_update status=applied traceId=fixture previousMaxProcesses=20 appliedMaxProcesses=8 requestedMaxProcesses=8'
+  'event=manager_config_update status=applied traceId=fixture previousMaxProcesses=20 appliedMaxProcesses=1000 requestedMaxProcesses=1000'
 verify_worker_log_format 'manager config update applied'
 skip_output="$(PATH="${VERIFY_BIN}:${PATH}" \
   TEST_AGENT_WORKER_LOG_LINE='event=manager_config_update status=applied' \
