@@ -12,6 +12,7 @@ public record ApplicationWorkspaceRow(
         String branch,
         String directoryPath,
         String workspaceName,
+        boolean enabled,
         Instant createdAt,
         Instant updatedAt) {
 }

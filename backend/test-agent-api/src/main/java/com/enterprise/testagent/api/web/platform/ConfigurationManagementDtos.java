@@ -36,7 +36,7 @@ final class ConfigurationManagementDtos {
             String operationId) {
     }
 
-    record RenameApplicationWorkspaceRequest(String workspaceName) {
+    record UpdateApplicationWorkspaceRequest(String workspaceName, Boolean enabled) {
     }
 
     /**

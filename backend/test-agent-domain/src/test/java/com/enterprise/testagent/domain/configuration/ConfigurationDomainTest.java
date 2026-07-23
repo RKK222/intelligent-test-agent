@@ -126,4 +126,25 @@ class ConfigurationDomainTest {
                 NOW))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void applicationWorkspaceCanChangeEnabledStateWithoutChangingItsLocation() {
+        ApplicationWorkspace workspace = new ApplicationWorkspace(
+                new ApplicationWorkspaceId("awp_1234567890abcdef"),
+                new ApplicationId("app_gcms"),
+                new CodeRepositoryId("repo_1234567890abcdef"),
+                "main",
+                "F-GCMS/workspace",
+                "demo",
+                true,
+                NOW,
+                NOW);
+
+        ApplicationWorkspace disabled = workspace.withEnabled(false, NOW.plusSeconds(10));
+
+        assertThat(disabled.enabled()).isFalse();
+        assertThat(disabled.workspaceName()).isEqualTo("demo");
+        assertThat(disabled.directoryPath()).isEqualTo("F-GCMS/workspace");
+        assertThat(disabled.updatedAt()).isEqualTo(NOW.plusSeconds(10));
+    }
 }

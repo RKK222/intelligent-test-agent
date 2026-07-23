@@ -2081,6 +2081,8 @@ export type ApplicationWorkspaceConfig = {
   branch: string;
   directoryPath: string;
   workspaceName: string;
+  /** 旧版本后端未返回该字段时按启用处理。 */
+  enabled?: boolean;
   initialVersion?: ApplicationWorkspaceVersion | null;
   createdAt: string;
   updatedAt: string;
@@ -2239,6 +2241,11 @@ export type CreateApplicationWorkspacePayload = {
 
 export type RenameApplicationWorkspacePayload = {
   workspaceName: string;
+};
+
+export type UpdateApplicationWorkspacePayload = {
+  workspaceName?: string;
+  enabled?: boolean;
 };
 
 export type AddSshKeyPayload = {

@@ -476,13 +476,34 @@ public class ConfigurationManagementApplicationService {
     }
 
     public ApplicationWorkspaceResponse renameWorkspace(String appId, String workspaceId, String workspaceName) {
+        return updateWorkspace(appId, workspaceId, workspaceName, null);
+    }
+
+    /**
+     * 部分更新应用工作空间配置；未提供的字段保持原值，兼容原有仅重命名请求。
+     */
+    public ApplicationWorkspaceResponse updateWorkspace(
+            String appId,
+            String workspaceId,
+            String workspaceName,
+            Boolean enabled) {
+        if (workspaceName == null && enabled == null) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "工作空间更新内容不能为空");
+        }
         ApplicationId applicationId = new ApplicationId(appId);
         ApplicationWorkspace workspace = configurationRepository.findWorkspace(new ApplicationWorkspaceId(workspaceId))
                 .filter(found -> found.appId().equals(applicationId))
                 .orElseThrow(() -> notFound("应用工作空间不存在", "workspaceId", workspaceId));
-        String normalizedName = requireText(workspaceName, "工作空间名称不能为空", "workspaceName");
-        ensureWorkspaceNameUnique(applicationId, normalizedName, workspace.workspaceId());
-        ApplicationWorkspace updated = workspace.rename(normalizedName, Instant.now());
+        Instant now = Instant.now();
+        ApplicationWorkspace updated = workspace;
+        if (workspaceName != null) {
+            String normalizedName = requireText(workspaceName, "工作空间名称不能为空", "workspaceName");
+            ensureWorkspaceNameUnique(applicationId, normalizedName, workspace.workspaceId());
+            updated = updated.rename(normalizedName, now);
+        }
+        if (enabled != null) {
+            updated = updated.withEnabled(enabled, now);
+        }
         return workspaceResponse(configurationRepository.updateWorkspace(updated));
     }
 
@@ -809,6 +830,7 @@ public class ConfigurationManagementApplicationService {
                 workspace.branch(),
                 workspace.directoryPath(),
                 workspace.workspaceName(),
+                workspace.enabled(),
                 workspace.createdAt(),
                 workspace.updatedAt());
     }

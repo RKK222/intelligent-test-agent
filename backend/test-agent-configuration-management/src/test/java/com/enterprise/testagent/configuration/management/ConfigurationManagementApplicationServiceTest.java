@@ -494,6 +494,40 @@ class ConfigurationManagementApplicationServiceTest {
     }
 
     @Test
+    void updateWorkspaceCanDisableItWithoutRenamingIt() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        ApplicationId appId = new ApplicationId("app_1");
+        ApplicationWorkspace current = new ApplicationWorkspace(
+                new ApplicationWorkspaceId("awp_1"),
+                appId,
+                new CodeRepositoryId("repo_1"),
+                "main",
+                "F-COSS/W1",
+                "工作空间1",
+                true,
+                NOW,
+                NOW);
+        when(repository.findWorkspace(current.workspaceId())).thenReturn(Optional.of(current));
+        when(repository.updateWorkspace(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                repositoryTypeDictionaryRepository(),
+                org.mockito.Mockito.mock(UserRepository.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
+
+        ConfigurationManagementResponses.ApplicationWorkspaceResponse response =
+                service.updateWorkspace("app_1", "awp_1", null, false);
+
+        assertThat(response.workspaceName()).isEqualTo("工作空间1");
+        assertThat(response.enabled()).isFalse();
+        verify(repository).updateWorkspace(argThat(workspace ->
+                workspace.workspaceName().equals("工作空间1") && !workspace.enabled()));
+    }
+
+    @Test
     void sshRepositoryBranchesUseCurrentUsersStoredPrivateKey() {
         ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
         UserRepository userRepository = org.mockito.Mockito.mock(UserRepository.class);

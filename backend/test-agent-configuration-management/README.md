@@ -2,7 +2,7 @@
 
 ## 工程定位
 
-应用配置管理业务模块，承载应用定义查询与超级管理员新建、应用成员、应用与代码库关联、应用工作空间模板、个人 SSH key，以及内部模型供应商和可复用 Token 定义管理。
+应用配置管理业务模块，承载应用定义查询与超级管理员新建、应用成员、应用与代码库关联、应用工作空间模板及启用状态、个人 SSH key，以及内部模型供应商和可复用 Token 定义管理。
 
 ## 性能优化
 
@@ -56,6 +56,7 @@
 ## 主要接口
 
 - `ConfigurationManagementApplicationService`：配置管理编排服务。
+- 工作空间更新接口支持按字段修改 `workspaceName` 和 `enabled`；停用只记录配置状态，模板切换入口的过滤由 workspace-management 负责。
 - `createApplication()` 校验应用 ID/名称非空和数据库字段长度，拒绝重复 ID，并通过 MyBatis 配置管理仓储写入默认启用的应用定义；API 层只允许 `SUPER_ADMIN` 调用。
 - 代码库新增/编辑会校验 `englishName` 为字母、数字、连字符 1 到 128 位，首尾不能是连字符，非空唯一，并统一小写；内部模式创建时 `englishName` 为空会从 Git 路径派生（去掉 `.git`，`/` 替换为 `-`）。新增代码库优先使用 `repositoryType`，`TEST_WORK_REPOSITORY` 写旧 `standard=true`，应用代码库和应用资产库写 `standard=false`，旧客户端未传 `repositoryType` 时仍按 `standard` 推导类型；历史数据允许英文名为空，但后续创建应用版本工作区会被 workspace-management 拒绝。编辑时通过 `ReferenceRepositoryRepository` 只读检查引用初始化状态；已初始化资产库拒绝改变 `englishName` 或失去 `APPLICATION_ASSET_REPOSITORY` 类型，不在配置模块执行副本 Git 或状态写入。
 - `listRepositoryTypes()` 从通用字典表返回版本库类型下拉选项，字典缺失会让新增请求返回统一 `VALIDATION_ERROR`，避免 API 和 DB 字典不一致；`repositoryDeploymentOptions()` 返回默认部署模式、内部 SSH 前缀和内外部模式选项，默认模式读取 `test-agent.deployment.mode`，不依赖 `test-agent-app` 配置类。

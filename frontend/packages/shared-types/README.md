@@ -31,6 +31,7 @@
 - 定义应用配置管理 DTO：`ApplicationDefinition`、`ApplicationMember`、`CodeRepositoryConfig`、`RepositoryTypeOption`、`RepositoryDeploymentOptions`、`RepositoryTreeNode`、`RepositoryTreeResponse`、`ApplicationWorkspaceConfig`、`WorkspaceCreateOperation`、`SshKeyMetadata` 和对应请求 payload；`CodeRepositoryConfig.englishName` 对历史数据保持可空，新增/编辑 payload 必填；`deploymentMode` 对旧响应保持可选，新增 payload 可携带 `EXTERNAL/INTERNAL`；`repositoryType` / `repositoryTypeLabel` 对旧响应保持可选，新增 payload 可携带 `repositoryType` 并继续保留兼容 `standard`；`CreateApplicationWorkspacePayload.directoryNew` 可选，仅表示设置页保存时需要在 clone 后创建前端内存新增的工作空间目录。
 - 定义内部模型 `InternalModelTokenDefinition` 与新增/更新/删除 payload，以及带可选 `tokenId/tokenName/tokenConfigured` 的 Provider DTO；Token 定义响应没有明文值，Provider 更新通过 `tokenId/clearToken` 表达关联并保留顶层 `authToken` 旧请求兼容。
 - 定义应用版本工作区 DTO：`ManagedApplication`、`ApplicationWorkspaceTemplate`、`ApplicationWorkspaceVersion`、`PersonalWorkspace`、`WorkspaceDiff`、`WorkspaceSyncResult` 和对应请求 payload；`ApplicationWorkspaceVersion` 的 `targetCommitHash`、`replicaCommitHash`、`replicaLinuxServerId`、`replicaStatus` 均为可选字段，兼容旧后端和历史版本。
+- `ApplicationWorkspaceConfig.enabled` 对旧响应可选且缺失时按启用处理；`UpdateApplicationWorkspacePayload` 支持部分更新工作空间名称或启用状态。
 - 不引入运行时依赖。
 
 ## 禁止事项

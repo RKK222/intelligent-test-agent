@@ -271,13 +271,13 @@ public class ConfigurationManagementController {
     }
 
     @PatchMapping("/applications/{appId}/workspaces/{workspaceId}")
-    public ApiResponse<Object> renameWorkspace(
+    public ApiResponse<Object> updateWorkspace(
             @PathVariable String appId,
             @PathVariable String workspaceId,
-            @RequestBody ConfigurationManagementDtos.RenameApplicationWorkspaceRequest request,
+            @RequestBody ConfigurationManagementDtos.UpdateApplicationWorkspaceRequest request,
             ServerWebExchange exchange) {
         requireAdmin(exchange);
-        return ok(exchange, service.renameWorkspace(appId, workspaceId, request.workspaceName()));
+        return ok(exchange, service.updateWorkspace(appId, workspaceId, request.workspaceName(), request.enabled()));
     }
 
     @DeleteMapping("/applications/{appId}/workspaces/{workspaceId}")

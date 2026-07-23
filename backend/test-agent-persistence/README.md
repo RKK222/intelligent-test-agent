@@ -1,5 +1,7 @@
 # test-agent-persistence
 
+- `V20260723145200__add_application_workspace_enabled.sql` 为应用工作空间配置增加默认启用的 `enabled` 字段；配置管理 MyBatis XML 负责该字段的查询、新增和更新，未新增 JDBC SQL。
+
 ## 工程定位
 
 持久化模块，负责数据库、迁移、Repository 和 Redis 运行态访问适配。

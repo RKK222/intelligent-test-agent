@@ -264,6 +264,7 @@ public class MyBatisConfigurationManagementRepository implements ConfigurationMa
                 row.branch(),
                 row.directoryPath(),
                 row.workspaceName(),
+                row.enabled(),
                 row.createdAt(),
                 row.updatedAt());
     }
@@ -276,6 +277,7 @@ public class MyBatisConfigurationManagementRepository implements ConfigurationMa
                 workspace.branch(),
                 workspace.directoryPath(),
                 workspace.workspaceName(),
+                workspace.enabled(),
                 workspace.createdAt(),
                 workspace.updatedAt());
     }

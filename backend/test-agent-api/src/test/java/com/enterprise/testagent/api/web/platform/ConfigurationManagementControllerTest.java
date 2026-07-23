@@ -410,6 +410,38 @@ class ConfigurationManagementControllerTest {
     }
 
     @Test
+    void appAdminCanDisableApplicationWorkspaceThroughPatch() {
+        ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
+        when(service.updateWorkspace("app_gcms", "awp_123", null, false))
+                .thenReturn(new com.enterprise.testagent.configuration.management.ConfigurationManagementResponses.ApplicationWorkspaceResponse(
+                        "awp_123",
+                        "app_gcms",
+                        "repo_123",
+                        "feature_testagent_20260707",
+                        "F-GCMS/W1",
+                        "主工作区",
+                        false,
+                        Instant.parse("2026-07-01T00:00:00Z"),
+                        Instant.parse("2026-07-23T00:00:00Z")));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_APP_ADMIN));
+
+        client.patch()
+                .uri("/api/internal/platform/configuration-management/applications/app_gcms/workspaces/awp_123")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"enabled":false}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.workspaceName").isEqualTo("主工作区")
+                .jsonPath("$.data.enabled").isEqualTo(false);
+
+        verify(service).updateWorkspace("app_gcms", "awp_123", null, false);
+    }
+
+    @Test
     void appAdminCanQueryWorkspaceCreateOperation() {
         ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
         ManagedWorkspaceApplicationService workspaceService = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);

@@ -46,6 +46,7 @@
             <arg column="branch" javaType="java.lang.String"/>
             <arg column="directory_path" javaType="java.lang.String"/>
             <arg column="workspace_name" javaType="java.lang.String"/>
+            <arg column="enabled" javaType="_boolean"/>
             <arg column="created_at" javaType="java.time.Instant"/>
             <arg column="updated_at" javaType="java.time.Instant"/>
         </constructor>
@@ -222,20 +223,20 @@
     </delete>
 
     <select id="findWorkspaces" resultMap="ApplicationWorkspaceMap">
-        select workspace_id, app_id, repository_id, branch, directory_path, workspace_name, created_at, updated_at
+        select workspace_id, app_id, repository_id, branch, directory_path, workspace_name, enabled, created_at, updated_at
         from application_workspaces
         where app_id = #{appId}
         order by updated_at desc, workspace_id
     </select>
 
     <select id="findWorkspace" resultMap="ApplicationWorkspaceMap">
-        select workspace_id, app_id, repository_id, branch, directory_path, workspace_name, created_at, updated_at
+        select workspace_id, app_id, repository_id, branch, directory_path, workspace_name, enabled, created_at, updated_at
         from application_workspaces
         where workspace_id = #{workspaceId}
     </select>
 
     <select id="findWorkspaceByLocation" resultMap="ApplicationWorkspaceMap">
-        select workspace_id, app_id, repository_id, branch, directory_path, workspace_name, created_at, updated_at
+        select workspace_id, app_id, repository_id, branch, directory_path, workspace_name, enabled, created_at, updated_at
         from application_workspaces
         where app_id = #{appId}
           and repository_id = #{repositoryId}
@@ -244,7 +245,7 @@
     </select>
 
     <select id="findWorkspaceByName" resultMap="ApplicationWorkspaceMap">
-        select workspace_id, app_id, repository_id, branch, directory_path, workspace_name, created_at, updated_at
+        select workspace_id, app_id, repository_id, branch, directory_path, workspace_name, enabled, created_at, updated_at
         from application_workspaces
         where app_id = #{appId}
           and workspace_name = #{workspaceName}
@@ -254,16 +255,16 @@
 
     <insert id="insertWorkspace" parameterType="com.enterprise.testagent.persistence.mybatis.ApplicationWorkspaceRow">
         insert into application_workspaces(
-            workspace_id, app_id, repository_id, branch, directory_path, workspace_name, created_at, updated_at
+            workspace_id, app_id, repository_id, branch, directory_path, workspace_name, enabled, created_at, updated_at
         )
         values (
-            #{workspaceId}, #{appId}, #{repositoryId}, #{branch}, #{directoryPath}, #{workspaceName}, #{createdAt}, #{updatedAt}
+            #{workspaceId}, #{appId}, #{repositoryId}, #{branch}, #{directoryPath}, #{workspaceName}, #{enabled}, #{createdAt}, #{updatedAt}
         )
     </insert>
 
     <update id="updateWorkspace" parameterType="com.enterprise.testagent.persistence.mybatis.ApplicationWorkspaceRow">
         update application_workspaces
-        set workspace_name = #{workspaceName}, updated_at = #{updatedAt}
+        set workspace_name = #{workspaceName}, enabled = #{enabled}, updated_at = #{updatedAt}
         where workspace_id = #{workspaceId}
     </update>
 

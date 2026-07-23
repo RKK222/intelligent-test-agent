@@ -6039,6 +6039,12 @@ function handleCloseRobotSideQuestion() {
   robotSideQuestion.reset();
 }
 
+function closeSettings() {
+  settingsOpen.value = false;
+  // 设置页可能修改工作空间启用状态，关闭后仅刷新切换模板，不改变当前工作空间。
+  void queryClient.invalidateQueries({ queryKey: ["managed-workspace", "app-templates"] });
+}
+
 /**
  * 顶部入口和具体功能按钮共用一个帮助中心，只通过 topic 决定初始章节。
  */
@@ -7907,7 +7913,7 @@ async function handleLogout() {
     :initial-app-id="selectedAppId"
     :initial-menu-key="firstLoginGuideActive ? firstLoginGuideSettingsMenu : undefined"
     :initial-app-tab="firstLoginGuideActive ? firstLoginGuideSettingsTab : undefined"
-    @close="settingsOpen = false"
+    @close="closeSettings"
   />
 
   <HelpCenterDialog

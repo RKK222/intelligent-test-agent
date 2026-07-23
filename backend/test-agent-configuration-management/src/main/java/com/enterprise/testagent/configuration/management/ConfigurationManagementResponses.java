@@ -64,6 +64,7 @@ public final class ConfigurationManagementResponses {
             String branch,
             String directoryPath,
             String workspaceName,
+            boolean enabled,
             Instant createdAt,
             Instant updatedAt) {
     }

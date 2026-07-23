@@ -154,6 +154,27 @@ describe("WorkbenchFooter", () => {
     expect(document.body.textContent).toContain("worktree: feature_testagent_20260618_usr_888888888_default");
   });
 
+  it("hides disabled workspace templates and keeps legacy templates visible", async () => {
+    const wrapper = mount(WorkbenchFooter, {
+      attachTo: document.body,
+      props: {
+        appName: "F-COSS",
+        templates: [
+          { ...template, workspaceId: "wks_enabled", workspaceName: "已启用工作空间", enabled: true },
+          { ...template, workspaceId: "wks_disabled", workspaceName: "已停用工作空间", enabled: false },
+          { ...template, workspaceId: "wks_legacy", workspaceName: "历史工作空间", enabled: undefined }
+        ],
+        showSave: false
+      }
+    });
+
+    await wrapper.find(".ta-workbench-footer-branch").trigger("click");
+
+    expect(document.body.textContent).toContain("已启用工作空间");
+    expect(document.body.textContent).toContain("历史工作空间");
+    expect(document.body.textContent).not.toContain("已停用工作空间");
+  });
+
   it("handles preview button single click (full) and double click (split)", async () => {
     const wrapper = mount(WorkbenchFooter, {
       props: {

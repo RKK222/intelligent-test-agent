@@ -51,6 +51,20 @@ describe("backend-api", () => {
     ]);
   });
 
+  it("updates application workspace settings through the existing PATCH resource", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: { enabled: false } }), { status: 200 })
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await client.updateApplicationWorkspace("app/demo", "awp/main", { enabled: false });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/configuration-management/applications/app%2Fdemo/workspaces/awp%2Fmain",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ enabled: false }) })
+    );
+  });
+
   it("maps OpenCode V2 model limits and provider all envelopes", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
       const path = String(input);

@@ -553,6 +553,22 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void workspaceSwitchTemplatesExcludeDisabledConfigurations() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true, false);
+        ManagedWorkspaceApplicationService service = service(
+                configuration,
+                new FakeManagedWorkspaceRepository(),
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("F-GCMS/workspace"));
+
+        assertThat(service.listTemplates("app_gcms", new UserId("usr_1"))).isEmpty();
+        assertThat(configuration.findWorkspace(new ApplicationWorkspaceId("awp_1")))
+                .get()
+                .extracting(ApplicationWorkspace::enabled)
+                .isEqualTo(false);
+    }
+
+    @Test
     void recentWorkspaceForbiddenIncludesLoadingContext() {
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
@@ -2584,16 +2600,36 @@ class ManagedWorkspaceApplicationServiceTest {
         private final List<ApplicationWorkspace> savedWorkspaces = new ArrayList<>();
 
         private FakeConfigurationRepository(boolean member) {
+            this(member, true);
+        }
+
+        private FakeConfigurationRepository(boolean member, boolean workspaceEnabled) {
             this(member, new CodeRepository(
-                    new CodeRepositoryId("repo_1"), "https://example.com/gcms.git", "gcms/gcms", "gcms", true, Instant.now(), Instant.now()), List.of());
+                    new CodeRepositoryId("repo_1"), "https://example.com/gcms.git", "gcms/gcms", "gcms", true, Instant.now(), Instant.now()), List.of(), workspaceEnabled);
         }
 
         private FakeConfigurationRepository(boolean member, CodeRepository repository, List<UserSshKey> sshKeys) {
+            this(member, repository, sshKeys, true);
+        }
+
+        private FakeConfigurationRepository(
+                boolean member,
+                CodeRepository repository,
+                List<UserSshKey> sshKeys,
+                boolean workspaceEnabled) {
             this.member = member;
             this.repository = repository;
             this.sshKeys = List.copyOf(sshKeys);
             this.workspace = new ApplicationWorkspace(
-                    new ApplicationWorkspaceId("awp_1"), app.appId(), repository.repositoryId(), "main", "F-GCMS/workspace", "GCMS Workspace", Instant.now(), Instant.now());
+                    new ApplicationWorkspaceId("awp_1"),
+                    app.appId(),
+                    repository.repositoryId(),
+                    "main",
+                    "F-GCMS/workspace",
+                    "GCMS Workspace",
+                    workspaceEnabled,
+                    Instant.now(),
+                    Instant.now());
         }
 
         @Override public List<ApplicationDefinition> findApplications(Boolean enabledOnly) { return List.of(app); }

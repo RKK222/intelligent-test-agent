@@ -517,6 +517,14 @@ async function loadWorkspaces() {
   workspaces.value = selectedAppId.value ? await api.listApplicationWorkspaces(selectedAppId.value) : [];
 }
 
+async function updateWorkspaceEnabled(workspace: ApplicationWorkspaceConfig, enabled: boolean) {
+  await run(async () => {
+    // 开关只控制切换入口可见性，不删除工作空间及其版本数据。
+    await api.updateApplicationWorkspace(selectedAppId.value, workspace.workspaceId, { enabled });
+    await loadWorkspaces();
+  });
+}
+
 async function loadBranches() {
   loadingBranches.value = true;
   await run(async () => {
@@ -1066,6 +1074,14 @@ onBeforeUnmount(() => {
               <div class="ta-item-title">{{ ws.workspaceName }}</div>
               <div class="ta-item-subtitle">{{ ws.branch }} · {{ ws.directoryPath }}</div>
             </div>
+            <el-switch
+              :model-value="ws.enabled !== false"
+              :disabled="loading"
+              active-text="启用"
+              inactive-text="停用"
+              :aria-label="`设置工作空间“${ws.workspaceName}”是否启用`"
+              @change="(enabled: string | number | boolean) => updateWorkspaceEnabled(ws, Boolean(enabled))"
+            />
           </div>
         </div>
       </div>

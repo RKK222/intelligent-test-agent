@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.enterprise.testagent.domain.configuration.CodeRepository;
 import com.enterprise.testagent.domain.configuration.ApplicationDefinition;
 import com.enterprise.testagent.domain.configuration.ApplicationId;
+import com.enterprise.testagent.domain.configuration.ApplicationWorkspace;
+import com.enterprise.testagent.domain.configuration.ApplicationWorkspaceId;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryDeploymentMode;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryType;
@@ -22,7 +24,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mybatis.spring.SqlSessionFactoryBean;
 import org.mybatis.spring.SqlSessionTemplate;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
@@ -54,8 +58,18 @@ class MyBatisConfigurationManagementRepositoryIntegrationTest {
         jdbcClient = JdbcClient.create(dataSource);
         insertLegacyRepository("repo_legacy_standard", "git@gitee.com:demo/standard.git", true);
         insertLegacyRepository("repo_legacy_application", "git@gitee.com:demo/application.git", false);
+        insertLegacyWorkspace();
 
-        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+        Flyway.configure()
+                .dataSource(dataSource)
+                .locations("classpath:db/migration")
+                .target("20260702180000")
+                .load()
+                .migrate();
+        // H2 不支持后续 PostgreSQL 部分索引语法；本测试只执行并验证本功能迁移。
+        new ResourceDatabasePopulator(
+                        new ClassPathResource("db/migration/V20260723145200__add_application_workspace_enabled.sql"))
+                .execute(dataSource);
 
         SqlSessionFactory sqlSessionFactory = sqlSessionFactory();
         ConfigurationManagementMapper mapper = new SqlSessionTemplate(sqlSessionFactory).getMapper(ConfigurationManagementMapper.class);
@@ -137,6 +151,23 @@ class MyBatisConfigurationManagementRepositoryIntegrationTest {
                 .contains(application);
     }
 
+    @Test
+    void workspaceEnabledMigrationDefaultsLegacyRowsAndMyBatisPersistsChanges() {
+        ApplicationWorkspace legacy = repository.findWorkspace(new ApplicationWorkspaceId("awp_legacy"))
+                .orElseThrow();
+        assertThat(legacy.enabled()).isTrue();
+
+        ApplicationWorkspace disabled = legacy.withEnabled(false, NOW.plusSeconds(10));
+        repository.updateWorkspace(disabled);
+
+        assertThat(repository.findWorkspace(legacy.workspaceId()))
+                .get()
+                .satisfies(saved -> {
+                    assertThat(saved.enabled()).isFalse();
+                    assertThat(saved.workspaceName()).isEqualTo("历史工作空间");
+                });
+    }
+
     private void insertLegacyRepository(String repositoryId, String gitUrl, boolean standard) {
         jdbcClient.sql("""
                         insert into code_repositories(repository_id, git_url, name, english_name, standard, created_at, updated_at)
@@ -147,6 +178,34 @@ class MyBatisConfigurationManagementRepositoryIntegrationTest {
                 .param("name", repositoryId)
                 .param("englishName", repositoryId.replace("repo_", ""))
                 .param("standard", standard)
+                .param("createdAt", Timestamp.from(NOW))
+                .param("updatedAt", Timestamp.from(NOW))
+                .update();
+    }
+
+    private void insertLegacyWorkspace() {
+        jdbcClient.sql("""
+                        insert into applications(app_id, app_name, enabled, created_at, updated_at)
+                        values (:appId, :appName, true, :createdAt, :updatedAt)
+                        """)
+                .param("appId", "app_legacy")
+                .param("appName", "历史应用")
+                .param("createdAt", Timestamp.from(NOW))
+                .param("updatedAt", Timestamp.from(NOW))
+                .update();
+        jdbcClient.sql("""
+                        insert into application_workspaces(
+                            workspace_id, app_id, repository_id, branch, directory_path, workspace_name, created_at, updated_at
+                        ) values (
+                            :workspaceId, :appId, :repositoryId, :branch, :directoryPath, :workspaceName, :createdAt, :updatedAt
+                        )
+                        """)
+                .param("workspaceId", "awp_legacy")
+                .param("appId", "app_legacy")
+                .param("repositoryId", "repo_legacy_standard")
+                .param("branch", "feature_testagent_20260701")
+                .param("directoryPath", "F-LEGACY/W1")
+                .param("workspaceName", "历史工作空间")
                 .param("createdAt", Timestamp.from(NOW))
                 .param("updatedAt", Timestamp.from(NOW))
                 .update();

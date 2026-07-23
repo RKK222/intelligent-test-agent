@@ -63,6 +63,7 @@ import type {
   InternalModelTokenCreatePayload,
   InternalModelTokenDefinition,
   InternalModelTokenDeleteResponse,
+  UpdateApplicationWorkspacePayload,
   InternalModelTokenUpdatePayload,
   LoginRequest,
   LoginResponse,
@@ -1924,6 +1925,11 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     getWorkspaceCreateOperation: (operationId: string) =>
       request<WorkspaceCreateOperation>(`${configurationBase}/workspace-create-operations/${encodeURIComponent(operationId)}`),
     renameApplicationWorkspace: (appId: string, workspaceId: string, payload: { workspaceName: string }) =>
+      request<ApplicationWorkspaceConfig>(
+        `${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces/${encodeURIComponent(workspaceId)}`,
+        { method: "PATCH", body: JSON.stringify(payload) }
+      ),
+    updateApplicationWorkspace: (appId: string, workspaceId: string, payload: UpdateApplicationWorkspacePayload) =>
       request<ApplicationWorkspaceConfig>(
         `${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces/${encodeURIComponent(workspaceId)}`,
         { method: "PATCH", body: JSON.stringify(payload) }

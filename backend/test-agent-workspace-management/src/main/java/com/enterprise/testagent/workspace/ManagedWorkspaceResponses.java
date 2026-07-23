@@ -78,6 +78,7 @@ public final class ManagedWorkspaceResponses {
             String directoryPath,
             String workspaceName,
             String branch,
+            boolean enabled,
             boolean standard,
             Instant createdAt,
             Instant updatedAt) {
@@ -89,6 +90,7 @@ public final class ManagedWorkspaceResponses {
                     workspace.directoryPath(),
                     workspace.workspaceName(),
                     workspace.branch(),
+                    workspace.enabled(),
                     standard,
                     workspace.createdAt(),
                     workspace.updatedAt());

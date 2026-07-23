@@ -351,6 +351,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                         repo -> repo.repositoryId().value(),
                         CodeRepository::standard));
         return configurationRepository.findWorkspaces(applicationId).stream()
+                // 停用只影响工作空间切换入口，不删除模板、版本或个人工作区数据。
+                .filter(ApplicationWorkspace::enabled)
                 .map(workspace -> ManagedWorkspaceResponses.WorkspaceTemplateResponse.from(
                         workspace,
                         standardByRepoId.getOrDefault(workspace.repositoryId().value(), false)))

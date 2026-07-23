@@ -129,7 +129,8 @@ async function copyPath(textToCopy: string) {
   }
 }
 
-const templates = computed(() => props.templates ?? []);
+// 双端过滤保证旧后端响应仍可使用：只有显式停用的配置不展示。
+const templates = computed(() => (props.templates ?? []).filter((template) => template.enabled !== false));
 
 // ===== 应用工作空间两级菜单的弹出状态 =====
 // 模板列表尚未加载或为空时仍展示入口，用于直接暴露当前个人 worktree 分支；

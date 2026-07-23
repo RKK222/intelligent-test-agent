@@ -1,5 +1,7 @@
 # test-agent-workspace-management
 
+应用工作空间模板列表只返回配置管理中 `enabled=true` 的模板，使停用项不出现在切换入口；版本查询/创建、最近工作空间、个人工作区、运行态 Workspace 和会话切换逻辑不受该状态影响。
+
 ## 工程定位
 
 Workspace、文件管理、应用版本工作区、个人工作区、git/diff、agent 和 skill 管理业务模块。

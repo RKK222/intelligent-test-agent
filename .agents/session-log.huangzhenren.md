@@ -926,3 +926,18 @@
 - Result:
   - 上下文限制始终跟随当前模型，未选择时回退最近 assistant 模型；用量取最近有效根 assistant 的五项总和，文本可超过 100% 且 SVG 封顶，系统提示和协议等不可还原开销归入“其他”。
   - 未新增或变更 HTTP API、RunEvent、数据库/Flyway、依赖、费用展示、安全凭据或环境配置；可选前端字段兼容旧历史和旧事件。
+
+### 2026-07-23 - 应用工作空间支持启用状态
+
+- Why:
+  - 应用管理员需要保留已有工作空间配置和历史数据，但可将暂不使用的工作空间从工作台切换入口隐藏，且不能改变其它工作空间切换行为。
+- What:
+  - `application_workspaces` 新增默认 `true` 的 `enabled` 字段，领域模型、MyBatis XML、配置查询与 PATCH 响应同步透传；PATCH 支持部分更新 `workspaceName/enabled` 并兼容原重命名请求。
+  - 设置页已有工作空间增加启用开关；workspace-management 模板列表和前端 footer 双重过滤显式停用项，关闭设置后刷新模板查询，但不清空当前已打开工作空间。
+  - 同步 HTTP API、数据库、后端模块和前端包 README，并补充领域、服务、Controller、MyBatis、backend-api 和 Vue 组件测试。
+- How:
+  - 通过 TDD 先验证开关 API、设置交互和切换菜单过滤失败，再补实现；旧响应缺少 `enabled` 时前端按启用处理，存量数据库记录由默认值回填。
+  - 后端相关定向 Maven 测试、前端 113 项定向 Vitest、全 workspace typecheck/lint、前端生产 build、后端 20 模块 `mvn clean package -DskipTests` 均通过。
+- Result:
+  - 停用仅影响工作空间切换模板展示，不删除或修改版本、个人工作区、运行态 Workspace、最近使用、会话和当前已打开状态；重新启用后可再次展示。
+  - 变更了兼容性 HTTP DTO 和数据库结构，未新增事件，不涉及性能、安全、generated SDK 或环境配置。

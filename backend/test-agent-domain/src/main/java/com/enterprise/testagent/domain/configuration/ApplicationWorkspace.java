@@ -13,8 +13,24 @@ public record ApplicationWorkspace(
         String branch,
         String directoryPath,
         String workspaceName,
+        boolean enabled,
         Instant createdAt,
         Instant updatedAt) {
+
+    /**
+     * 兼容既有创建调用；新建工作空间配置默认启用。
+     */
+    public ApplicationWorkspace(
+            ApplicationWorkspaceId workspaceId,
+            ApplicationId appId,
+            CodeRepositoryId repositoryId,
+            String branch,
+            String directoryPath,
+            String workspaceName,
+            Instant createdAt,
+            Instant updatedAt) {
+        this(workspaceId, appId, repositoryId, branch, directoryPath, workspaceName, true, createdAt, updatedAt);
+    }
 
     public ApplicationWorkspace {
         Objects.requireNonNull(workspaceId, "workspaceId must not be null");
@@ -40,6 +56,22 @@ public record ApplicationWorkspace(
      * 编辑展示名称，保留应用、仓库、分支和目录定位。
      */
     public ApplicationWorkspace rename(String nextName, Instant now) {
-        return new ApplicationWorkspace(workspaceId, appId, repositoryId, branch, directoryPath, nextName, createdAt, now);
+        return new ApplicationWorkspace(workspaceId, appId, repositoryId, branch, directoryPath, nextName, enabled, createdAt, now);
+    }
+
+    /**
+     * 切换工作空间配置的启用状态，不改变仓库、分支、目录和展示名称。
+     */
+    public ApplicationWorkspace withEnabled(boolean nextEnabled, Instant now) {
+        return new ApplicationWorkspace(
+                workspaceId,
+                appId,
+                repositoryId,
+                branch,
+                directoryPath,
+                workspaceName,
+                nextEnabled,
+                createdAt,
+                now);
     }
 }

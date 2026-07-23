@@ -102,6 +102,17 @@ function createApi(): Partial<BackendApiClient> {
     }),
     createRepository: vi.fn().mockResolvedValue(repositories[1]),
     updateRepository: vi.fn().mockResolvedValue(repositories[0]),
+    updateApplicationWorkspace: vi.fn().mockImplementation(async (_appId, _workspaceId, payload) => ({
+      workspaceId: "ws_test",
+      appId: "F-COSS",
+      repositoryId: "repo_wr",
+      branch: "feature_testagent_20260707",
+      directoryPath: "tests",
+      workspaceName: "测试工作空间",
+      enabled: payload.enabled ?? true,
+      createdAt: "2026-07-01T00:00:00Z",
+      updatedAt: "2026-07-23T00:00:00Z"
+    })),
     removeApplicationMember: vi.fn().mockResolvedValue(undefined),
     unlinkApplicationRepository: vi.fn().mockResolvedValue(undefined),
     deleteApplicationWorkspace: vi.fn().mockResolvedValue(undefined)
@@ -224,6 +235,23 @@ const ElCheckboxStub = defineComponent({
   }
 });
 
+const ElSwitchStub = defineComponent({
+  props: ["modelValue", "disabled", "activeText", "inactiveText", "ariaLabel"],
+  emits: ["change"],
+  setup(props, { emit }) {
+    return () => h("label", [
+      h("input", {
+        type: "checkbox",
+        checked: Boolean(props.modelValue),
+        disabled: Boolean(props.disabled),
+        "aria-label": props.ariaLabel,
+        onChange: (event: Event) => emit("change", (event.target as HTMLInputElement).checked)
+      }),
+      h("span", Boolean(props.modelValue) ? props.activeText : props.inactiveText)
+    ]);
+  }
+});
+
 function getTreePathElement(container: ParentNode, path: string) {
   return Array.from(container.querySelectorAll(".ta-workspace-tree-path")).find((item) => item.textContent === path) as HTMLElement | undefined;
 }
@@ -271,6 +299,7 @@ function renderPanel(api = createApi(), roles = ["APP_ADMIN"], initialAppTab?: "
         ElRadioButton: ElRadioButtonStub,
         ElRadioGroup: ElRadioGroupStub,
         ElSelect: ElSelectStub,
+        ElSwitch: ElSwitchStub,
         ElOption: ElOptionStub,
         ElProgress: {
           template: `<div class="el-progress">Progress</div>`
@@ -610,5 +639,41 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     expect(queryByText("删除")).toBeNull();
     expect(api.deleteApplicationWorkspace).not.toHaveBeenCalled();
     expect(queryByText("确认删除工作空间")).toBeNull();
+  });
+
+  it("updates whether an existing workspace is enabled", async () => {
+    const api = createApi();
+    let workspaceEnabled = true;
+    api.listApplicationWorkspaces = vi.fn().mockImplementation(async () => [
+      {
+        workspaceId: "ws_test",
+        appId: "F-COSS",
+        workspaceName: "测试工作空间",
+        branch: "feature_testagent_20260707",
+        directoryPath: "tests",
+        repositoryId: "repo_wr",
+        enabled: workspaceEnabled,
+        createdAt: "2026-07-01T00:00:00Z",
+        updatedAt: "2026-07-23T00:00:00Z"
+      }
+    ]);
+    api.updateApplicationWorkspace = vi.fn().mockImplementation(async (_appId, _workspaceId, payload) => {
+      workspaceEnabled = payload.enabled ?? workspaceEnabled;
+    });
+    const { findByText, getByLabelText, getByText } = renderPanel(api);
+
+    await findByText("应用人员管理");
+    await fireEvent.click(getByText("工作空间管理"));
+    const enabledSwitch = await waitFor(() => getByLabelText("设置工作空间“测试工作空间”是否启用"));
+    expect((enabledSwitch as HTMLInputElement).checked).toBe(true);
+
+    await fireEvent.click(enabledSwitch);
+
+    await waitFor(() => expect(api.updateApplicationWorkspace).toHaveBeenCalledWith(
+      "F-COSS",
+      "ws_test",
+      { enabled: false }
+    ));
+    await waitFor(() => expect((getByLabelText("设置工作空间“测试工作空间”是否启用") as HTMLInputElement).checked).toBe(false));
   });
 });

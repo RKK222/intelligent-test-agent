@@ -1228,6 +1228,10 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 | `night_execution_session_locks` | 待执行夜间任务会话写锁表 |
 | `night_execution_slot_reservations` | 夜间15分钟启动时段容量占位表 |
 
+## V20260723145200 应用工作空间启用状态
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260723145200__add_application_workspace_enabled.sql` 为 `application_workspaces` 增加非空布尔字段 `enabled`，默认值为 `true`。存量记录和新建记录因此默认继续出现在工作空间切换入口；设置页显式停用后只影响切换模板列表，不删除关联版本、个人工作区、运行态工作区或最近使用记录。
+
 ### 字段注释原则
 
 - 业务ID字段均标注格式，如：`wks_xxx`、`ses_xxx`、`run_xxx`、`msg_xxx`
