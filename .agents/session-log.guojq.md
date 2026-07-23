@@ -112,3 +112,28 @@
 - `tools/db-operation.ts` 已成功推送到公共配置仓库
 - 主仓库待提交：`.agents/session-log.guojq.md` 更新、`backend/${SYS_DATA_ROOT_DIR}/agent-opencode/.config` 删除
 - 前端刷新后应能稳定显示 `tools` 目录
+
+## 2026-07-22 db-operation 工具新增 sid 和 managed 必填参数
+
+### Why
+用户使用 `db-operation` 工具时发现缺少两个关键参数：
+- `sid`：数据库名称/Schema 名称
+- `managed`：是否纳管（字典值 "1" / "0"）
+
+### What
+修改 [db-operation.ts](file:///d:/workspace/intelligent-test-agent/.tmp/data/agent-opencode/.configdev/public-usr_test_superadmin20/opencode/tools/db-operation.ts)：
+- 参数 schema 新增 `sid`（必填）：数据库名称/Schema 名称
+- 参数 schema 新增 `managed`（必填）：是否纳管，"1" 表示纳管，"0" 表示不纳管
+- 删除原 `database` 可选参数（已被 `sid` 替代）
+- 更新 `description` 说明必填参数列表和 `managed` 取值规则
+- 更新 `execute` 函数的请求体，传递 `sid` 和 `managed`
+- 更新成功输出格式，显示数据库名称和纳管状态
+
+### How
+- 用户说"是"时传 `"1"`，否则默认 `"0"`
+- opencode 工具框架会自动根据 schema 要求用户补全必填参数
+
+### Result
+- 工具参数已更新并推送到公共配置仓库
+- 运行时目录已同步更新（`current-public-config/tools/db-operation.ts`）
+- 下次对话中使用工具时会自动要求用户提供 `sid` 和 `managed` 参数
