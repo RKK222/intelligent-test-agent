@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process"
-import { lstat, mkdir, readFile, realpath, symlink } from "node:fs/promises"
+import { appendFile, lstat, mkdir, readFile, realpath, symlink } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -78,6 +78,29 @@ async function runtimeSupportsSubagentDepth(runtimeRoot) {
 }
 
 /**
+ * 在 OpenCode 创建 package/lockfile 前补齐运行文件忽略规则。
+ * 现场已有规则原样保留，只追加交付基线中缺失的规则，重复启动不会重复写入。
+ */
+async function ensureRuntimeGitIgnore(directory, runtimeRoot) {
+  const rules = (await readFile(join(runtimeRoot, "opencode-runtime.gitignore"), "utf8"))
+    .split(/\r?\n/u)
+    .map((rule) => rule.trim())
+    .filter((rule) => rule && !rule.startsWith("#"))
+  const gitignore = join(directory, ".gitignore")
+  let existing = ""
+  try {
+    existing = await readFile(gitignore, "utf8")
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error
+  }
+  const existingRules = new Set(existing.split(/\r?\n/u))
+  const missing = rules.filter((rule) => !existingRules.has(rule))
+  if (missing.length === 0) return
+  const separator = existing && !existing.endsWith("\n") ? "\n" : ""
+  await appendFile(gitignore, `${separator}${missing.join("\n")}\n`, "utf8")
+}
+
+/**
  * 为官方单文件程序准备完全离线的 Tool 运行目录。
  * 所有链接均为非覆盖式，工作区自行维护的依赖和 package 元数据优先保留。
  */
@@ -92,6 +115,7 @@ export async function prepareOfflineRuntime({ cwd = process.cwd(), env = process
 
   for (const directory of effectiveConfigDirectories(resolve(cwd), prepared)) {
     await mkdir(directory, { recursive: true })
+    await ensureRuntimeGitIgnore(directory, resolvedRuntimeRoot)
     await linkIfMissing(join(resolvedRuntimeRoot, "package.json"), join(directory, "package.json"))
     await linkIfMissing(join(resolvedRuntimeRoot, "package-lock.json"), join(directory, "package-lock.json"))
     for (const dependency of TOOL_DEPENDENCIES) {

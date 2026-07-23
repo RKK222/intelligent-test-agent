@@ -311,6 +311,8 @@ opencode worker 扩容流程：
 
 企业离线 worker 的 `/data/testagent/programs/opencode/node_modules` 是自定义 Tool 依赖的统一只读来源，固定包含 OpenCode `1.18.4` 对应的 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及 lockfile 传递依赖。用户进程启动后会为 XDG 全局配置、公共配置目录和工作区 `.opencode` 目录补充非覆盖式 package/lockfile 与模块链接，禁止在内网启动阶段执行 npm 下载。Tool 新增其它第三方包时必须在外网构建侧更新 runtime package/lockfile、重打 programs 和 worker 镜像，再重启 worker。
 
+这些配置目录的运行文件忽略规则由 `deploy/internal/opencode-runtime.gitignore` 统一维护。标准后台升级会在公共仓库已经初始化时补齐 `node_modules`、`package.json`、`package-lock.json`、`bun.lock` 和 `.gitignore`，不覆盖已有规则、不删除文件，也不取消已跟踪文件；新增后台尚未初始化公共仓库时跳过，随后由随 programs 交付的 `opencode-official-launcher.mjs` 在第一次创建运行依赖链接前补齐。扩容验收必须在新后台执行 `git check-ignore -v opencode/package.json opencode/package-lock.json opencode/node_modules` 和 `git status --short --untracked-files=all`；运行文件应被忽略，`agents/**`、`skills/**`、`tools/**` 及用户维护配置仍保持 Git 可见。
+
 常见故障处理：
 
 | 现象 | 排查顺序 | 处理 |
@@ -324,6 +326,7 @@ opencode worker 扩容流程：
 | `opencode --version` 返回 `Trace/breakpoint trap`、退出码 `133`，`dmesg` 出现 `trap int3` | 先确认运行的是否为当前官方 baseline，并检查容器内 `readlink -f /usr/local/bin/opencode`、`/usr/local/lib/opencode/RELEASE` 与版本 | 当前入口应为 `/usr/local/lib/opencode/bin/opencode`，真实程序为同目录 `opencode-official`；重新 `docker load` worker、解压同批次 `test-agent-programs.tar.gz` 并重启用户进程。若仍指向 `opencode-ai/bin/opencode.exe` 或 `/usr/local/lib/opencode-node`，说明旧交付物未被替换。 |
 | 用户日志出现 `triggerUncaughtException`、`ResponseStreamError: SSE read timed out` 后 Node 进程退出 | 核对异常是否来自 provider 分片超时，并检查 worker 是否为包含 Node 取消拒绝兼容修复的新包；`chunkTimeout` 只决定无数据等待时长，不应决定进程存活 | 保留日志用于确认后，在外网 Mac 重打完整发布包，企业内导入新 worker 镜像并重启对应用户进程；不要只把 `chunkTimeout` 调大来掩盖旧镜像缺陷。新包仍把超时交给会话错误/重试流程，但不会因底层 `reader.cancel()` 拒绝而退出 server。 |
 | 自定义 Tool 报 `Cannot find package '@opencode-ai/plugin'` 或其它模块缺失 | 检查 `/data/testagent/programs/opencode/node_modules` 是否包含对应包，并检查 Tool 所在公共配置或 `.opencode` 目录下 `node_modules` 链接；确认 programs 与 worker 镜像来自同一个企业包 | 用完整包同时更新 programs 和 worker 镜像并重启 worker。若缺失的是业务第三方包，先在外网构建侧加入 runtime package/lockfile 后重打包，禁止在内网临时 npm 安装。 |
+| 公共配置管理反复提示 `opencode/package.json` 或 `opencode/package-lock.json` 存在本地变更 | 在报错后台的 `/data/testagent/data/agent-opencode/.config` 执行 `git check-ignore -v`、`git status --short --untracked-files=all` 和 `git ls-files --`；确认 `opencode/.gitignore` 是否包含交付清单 | 使用包含当前启动器和部署脚本的完整包升级该后台并重启 worker/相关用户进程。若文件只是 `??`，规则补齐后自动消失；若 `git ls-files` 有输出，先人工审查历史提交，部署脚本不会自动删文件或取消跟踪。 |
 | Node 输出 `uv_thread_create` assertion 后 `Aborted`，但 `node --version` 正常 | 检查 Docker server 版本、容器 `Seccomp` 和 `getconf GNU_LIBC_VERSION`；Docker `18.09` 默认 seccomp 无法正确兼容 Debian 12/glibc 2.36 的线程创建路径 | 使用当前 Debian 11 bullseye/glibc 2.31 worker 包并通过 `opencode-worker-docker.sh` 重新创建容器；按企业现场要求，该脚本默认添加 `--privileged`，无需另外手写 `docker run`。 |
 | worker 的 PID、`nofile` 或 `nproc` 限制缺失或值不符 | 执行 `docker inspect --format 'PidsLimit={{.HostConfig.PidsLimit}} Ulimits={{json .HostConfig.Ulimits}}' test-agent-opencode-worker`，并读取容器 `/proc/1/limits`；确认 `/data/testagent/deploy/internal/opencode-worker-docker.sh` 包含当前固定参数 | 使用当前脚本执行 worker `restart` 重新创建容器；不要只在容器内运行 `ulimit`，该操作不会持久修改 Docker HostConfig。多后台逐节点重建并验证，当前节点失败时停止。 |
 | 用户初始化提示已有 manager state 不健康 | 目标 binding 端口仍有 manager state/PID，但 opencode HTTP 健康检查失败；检查 `{stateDir}/processes/{port}.json`、对应启动日志和运行管理 PID 状态 | 新 Java 会先通过公共 owned stop 确认旧实例退出，再在同一端口启动；停止状态不确定、身份/PID 不匹配或旧 manager 不支持时保持原 binding 并报错，禁止手工先给用户换端口。 |

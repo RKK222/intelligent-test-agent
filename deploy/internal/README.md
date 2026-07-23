@@ -138,7 +138,22 @@ deploy/internal/package-release.sh --opencode-only --output-dir deploy/internal/
 
 ## 自定义 Tool 离线依赖
 
-`test-agent-programs.tar.gz` 已内置与 OpenCode `1.18.4` 锁定的自定义 Tool 基线：`@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及其全部传递依赖；Node 22 自带的 `fetch`、`URL`、`AbortController` 等标准 API 不需要额外包。OpenCode 启动时不会联网安装依赖，而会为 XDG 全局配置、公共配置和项目 `.opencode` 建立非覆盖式 package/lockfile 与模块链接；配置目录已有同名文件时保留现有版本，链接目录由 `.gitignore` 排除，不应提交到公共仓库。
+`test-agent-programs.tar.gz` 已内置与 OpenCode `1.18.4` 锁定的自定义 Tool 基线：`@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及其全部传递依赖；Node 22 自带的 `fetch`、`URL`、`AbortController` 等标准 API 不需要额外包。OpenCode 启动时不会联网安装依赖，而会为 XDG 全局配置、公共配置和项目 `.opencode` 建立非覆盖式 package/lockfile 与模块链接；配置目录已有同名文件时保留现有版本。
+
+运行依赖的 Git 忽略清单以 `deploy/internal/opencode-runtime.gitignore` 为单一来源，固定包含 `node_modules`、`package.json`、`package-lock.json`、`bun.lock` 和 `.gitignore`。后台升级脚本会对已经初始化的标准公共配置目录幂等补齐缺失规则，不覆盖管理员已有规则；新增节点尚未 clone 公共仓库时不会提前创建目录，第一个 OpenCode 进程会在创建 package/lockfile 链接前补齐同一清单。因此升级、扩容或重复启动后，这些运行文件不会让公共仓库误报本地变更，`agents/**`、`skills/**`、`tools/**` 和用户维护的 OpenCode 配置仍按原 Git 规则检测。忽略规则不会自动取消已经跟踪的文件，也不会删除任何未跟踪文件。
+
+升级或新增后台完成后，在该后台验证：
+
+```bash
+cd /data/testagent/data/agent-opencode/.config
+git check-ignore -v \
+  opencode/package.json \
+  opencode/package-lock.json \
+  opencode/node_modules
+git status --short --untracked-files=all
+```
+
+前三个路径应命中 `opencode/.gitignore`，最后一条不应出现上述运行文件；真实 Agent、Skill、Tool 或公共配置改动仍应显示。若 `git ls-files -- opencode/package.json opencode/package-lock.json` 有输出，说明文件已被历史提交跟踪，部署脚本会保留现场，必须先人工确认仓库内容再决定是否从版本控制中移除。
 
 worker 不再从 OpenCode 源码生成 Node bundle，而是下载并校验上游官方 `opencode-linux-x64-baseline.tar.gz`。`/usr/local/lib/opencode/RELEASE` 固定记录 asset、归档 SHA、二进制 SHA 和 release commit；源码快照仅用于审计。Node 22 只承载轻量启动器和自定义 Tool 离线依赖。
 

@@ -405,6 +405,15 @@ package_release_zip() {
   local output_dir_name
   output_dir_name="$(basename "${OUTPUT_DIR}")"
   rsync -a --exclude 'dist' --exclude 'dist-*' --exclude "${output_dir_name}" --exclude '.env' "${SCRIPT_DIR}/" "${staging_dir}/deploy/internal/"
+  # 升级脚本和官方启动器共用这份忽略清单；任一文件漏包都会让存量节点或新增节点重新出现 Git 脏状态。
+  for required_artifact in \
+    "${staging_dir}/deploy/internal/ensure-opencode-runtime-gitignore.sh" \
+    "${staging_dir}/deploy/internal/opencode-runtime.gitignore"; do
+    if [[ ! -f "${required_artifact}" ]]; then
+      echo "Required OpenCode Git ignore deployment artifact not found: ${required_artifact}" >&2
+      exit 1
+    fi
+  done
 
   # 会话日志属于本次交付基线，保留原始文件名放入 .agents，便于内网追溯变更、坑点和未完成事项。
   mkdir -p "${staging_dir}/.agents"

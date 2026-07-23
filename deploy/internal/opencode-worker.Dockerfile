@@ -147,6 +147,7 @@ RUN npm config set registry "${NPM_REGISTRY}" \
 
 COPY --from=opencode-download /out/opencode ./bin/opencode-official
 COPY opencode-source/opencode-1.18.4/LICENSE ./LICENSE
+COPY deploy/internal/opencode-runtime.gitignore ./opencode-runtime.gitignore
 COPY deploy/internal/opencode-official-launcher.mjs ./bin/opencode
 RUN set -eux; \
     printf '%s\n' "${OPENCODE_VERSION}" > ./VERSION; \

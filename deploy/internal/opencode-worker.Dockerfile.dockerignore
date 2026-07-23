@@ -5,6 +5,7 @@
 !deploy/internal/
 !deploy/internal/opencode-worker-entrypoint.sh
 !deploy/internal/opencode-official-launcher.mjs
+!deploy/internal/opencode-runtime.gitignore
 !deploy/internal/opencode-node-runtime.package.json
 !deploy/internal/opencode-node-runtime.package-lock.json
 !deploy/internal/opencode-node-runtime-1.17.8.package.json

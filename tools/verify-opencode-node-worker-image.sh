@@ -115,7 +115,7 @@ fi
 docker exec "${CONTAINER}" node -e \
   'fetch("http://127.0.0.1:4096/experimental/tool/ids?directory=%2Ftmp%2Fworkspace").then(async (response) => { if (!response.ok) throw new Error(`${response.status} ${await response.text()}`); const ids = await response.json(); for (const expected of ["public-probe", "workspace-probe"]) { if (!ids.includes(expected)) throw new Error(`missing custom Tool: ${expected}; ids=${JSON.stringify(ids)}`) } }).catch((error) => { console.error(error); process.exit(1) })'
 docker exec "${CONTAINER}" sh -lc \
-  'for dir in /tmp/opencode-config /tmp/workspace/.opencode; do test -L "$dir/node_modules/@opencode-ai/plugin"; test -L "$dir/node_modules/@opencode-ai/sdk"; test -L "$dir/node_modules/effect"; test -L "$dir/node_modules/zod"; test -L "$dir/package.json"; test -L "$dir/package-lock.json"; done'
+  'for dir in /tmp/opencode-config /tmp/workspace/.opencode; do test -L "$dir/node_modules/@opencode-ai/plugin"; test -L "$dir/node_modules/@opencode-ai/sdk"; test -L "$dir/node_modules/effect"; test -L "$dir/node_modules/zod"; test -L "$dir/package.json"; test -L "$dir/package-lock.json"; for rule in node_modules package.json package-lock.json bun.lock .gitignore; do grep -Fx "$rule" "$dir/.gitignore" >/dev/null; done; done'
 docker exec "${CONTAINER}" sh -lc \
   "test \"\$(readlink -f /usr/local/bin/opencode)\" = /usr/local/lib/opencode/bin/opencode && test -x /usr/local/lib/opencode/bin/opencode-official && grep -Fx 'asset=${EXPECTED_OPENCODE_ASSET_NAME}' /usr/local/lib/opencode/RELEASE && grep -Fx 'archive_sha256=${EXPECTED_OPENCODE_ASSET_SHA256}' /usr/local/lib/opencode/RELEASE && ! command -v bun >/dev/null"
 

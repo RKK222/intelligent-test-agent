@@ -561,6 +561,8 @@ if [[ -z "${DEPLOY_INTERNAL_SRC}" || ! -d "${DEPLOY_INTERNAL_SRC}" ]]; then
   echo "deploy/internal directory not found in archive" >&2
   exit 1
 fi
+require_file "${DEPLOY_INTERNAL_SRC}/ensure-opencode-runtime-gitignore.sh"
+require_file "${DEPLOY_INTERNAL_SRC}/opencode-runtime.gitignore"
 
 if [[ "${VALIDATE_ONLY}" -eq 1 ]]; then
   log "Release archive validation passed"
@@ -601,7 +603,16 @@ if [[ -d "${INSTALL_ROOT}/deploy/internal" ]]; then
   mv "${INSTALL_ROOT}/deploy/internal" "${INSTALL_ROOT}/deploy/internal.bak.${timestamp}"
 fi
 mv "${INSTALL_ROOT}/deploy/internal.new" "${INSTALL_ROOT}/deploy/internal"
-chmod +x "${INSTALL_ROOT}/deploy/internal/opencode-worker-docker.sh" || true
+chmod +x \
+  "${INSTALL_ROOT}/deploy/internal/opencode-worker-docker.sh" \
+  "${INSTALL_ROOT}/deploy/internal/ensure-opencode-runtime-gitignore.sh" \
+  || true
+
+# 升级已初始化节点时立即消除 OpenCode 运行文件造成的 Git 脏状态；新节点尚未 clone 时不提前创建目录，
+# 后续第一个用户进程会由同批次 programs 中的官方启动器在创建 package/lockfile 前补齐相同规则。
+bash "${INSTALL_ROOT}/deploy/internal/ensure-opencode-runtime-gitignore.sh" \
+  --config-dir "${INSTALL_ROOT}/data/agent-opencode/.config/opencode" \
+  --if-present
 
 ensure_backend_service
 

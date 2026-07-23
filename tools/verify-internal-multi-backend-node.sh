@@ -84,6 +84,8 @@ printf 'fixture worker image\n' >"${RELEASE_ROOT}/dist/test-agent-opencode-worke
 cp "${ROOT_DIR}/deploy/internal/deploy-internal-release.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/deploy-internal-frontend.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/opencode-worker-docker.sh" "${RELEASE_ROOT}/deploy/internal/"
+cp "${ROOT_DIR}/deploy/internal/ensure-opencode-runtime-gitignore.sh" "${RELEASE_ROOT}/deploy/internal/"
+cp "${ROOT_DIR}/deploy/internal/opencode-runtime.gitignore" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/configure-nginx.sh" "${RELEASE_ROOT}/deploy/internal/"
 (cd "${RELEASE_ROOT}" && zip -qr "${RELEASE_ARCHIVE}" .)
 (cd "${TMP_ROOT}" && shasum -a 256 "$(basename "${RELEASE_ARCHIVE}")" \

@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict"
 import { execFile } from "node:child_process"
-import { chmod, lstat, mkdtemp, mkdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises"
+import { chmod, copyFile, lstat, mkdtemp, mkdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -19,6 +19,10 @@ async function createRuntime(root) {
   await mkdir(join(root, "node_modules", "zod"), { recursive: true })
   await writeFile(join(root, "package.json"), '{"private":true}\n')
   await writeFile(join(root, "package-lock.json"), '{"lockfileVersion":3}\n')
+  await copyFile(
+    new URL("../deploy/internal/opencode-runtime.gitignore", import.meta.url),
+    join(root, "opencode-runtime.gitignore"),
+  )
   await writeFile(join(root, "VERSION"), "1.18.4\n")
 }
 
@@ -54,6 +58,10 @@ test("prepares every effective config directory for offline tools and enforces d
       join(workspace, ".opencode"),
     ]
     for (const directory of effectiveDirectories) {
+      assert.equal(
+        await readFile(join(directory, ".gitignore"), "utf8"),
+        await readFile(new URL("../deploy/internal/opencode-runtime.gitignore", import.meta.url), "utf8"),
+      )
       assert.equal((await lstat(join(directory, "package.json"))).isSymbolicLink(), true)
       assert.equal((await lstat(join(directory, "package-lock.json"))).isSymbolicLink(), true)
       assert.equal(
@@ -66,6 +74,34 @@ test("prepares every effective config directory for offline tools and enforces d
       )
       assert.equal(await readlink(join(directory, "node_modules", "effect")), join(runtimeRoot, "node_modules", "effect"))
       assert.equal(await readlink(join(directory, "node_modules", "zod")), join(runtimeRoot, "node_modules", "zod"))
+    }
+  } finally {
+    await rm(root, { force: true, recursive: true })
+  }
+})
+
+test("preserves existing Git ignore rules and appends runtime rules only once", async () => {
+  const root = await mkdtemp(join(tmpdir(), "opencode-official-launcher-gitignore-"))
+  try {
+    const runtimeRoot = join(root, "runtime")
+    const workspace = join(root, "workspace")
+    const workspaceConfig = join(workspace, ".opencode")
+    await createRuntime(runtimeRoot)
+    await mkdir(workspaceConfig, { recursive: true })
+    await writeFile(join(workspaceConfig, ".gitignore"), "custom-cache/")
+
+    const options = {
+      cwd: workspace,
+      env: { HOME: join(root, "home") },
+      runtimeRoot,
+    }
+    await prepareOfflineRuntime(options)
+    await prepareOfflineRuntime(options)
+
+    const lines = (await readFile(join(workspaceConfig, ".gitignore"), "utf8")).trim().split("\n")
+    assert.equal(lines[0], "custom-cache/")
+    for (const rule of ["node_modules", "package.json", "package-lock.json", "bun.lock", ".gitignore"]) {
+      assert.equal(lines.filter((line) => line === rule).length, 1)
     }
   } finally {
     await rm(root, { force: true, recursive: true })
