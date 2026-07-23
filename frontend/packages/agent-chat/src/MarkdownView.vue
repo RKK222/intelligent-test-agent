@@ -356,16 +356,23 @@ onBeforeUnmount(() => {
 }
 
 .markdown-body :deep(table) {
-  display: table !important;
-  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  border-spacing: 0;
   margin: 4px 0 !important;
   line-height: 1.25 !important;
   font-size: 12px;
+  max-width: 100%;
+  width: max-content;
+  border-left: 1px solid var(--ta-chat-border);
+  border-top: 1px solid var(--ta-chat-border);
 }
 
 .markdown-body :deep(table th),
 .markdown-body :deep(table td) {
-  border: 1px solid var(--ta-chat-border);
+  display: table-cell;
+  border-right: 1px solid var(--ta-chat-border);
+  border-bottom: 1px solid var(--ta-chat-border);
   padding: 2px 5px !important;
 }
 

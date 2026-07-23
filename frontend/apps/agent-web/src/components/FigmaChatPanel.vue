@@ -7103,6 +7103,8 @@ function onCompositionEnd() {
   padding: 0;
   color: #333;
   border-top-left-radius: 2px;
+  width: 100%;
+  max-width: 100%;
 }
 
 .figma-chat-text-bubble {
@@ -7117,6 +7119,9 @@ function onCompositionEnd() {
   font-size: 14px;
   line-height: 1.6;
   position: relative;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .figma-chat-bubble-copy-btn {
@@ -7554,6 +7559,7 @@ function onCompositionEnd() {
 .figma-chat-assistant-content {
   flex: 1;
   min-width: 0;
+  max-width: 100%;
 }
 
 /* ---- Empty state ---- */
