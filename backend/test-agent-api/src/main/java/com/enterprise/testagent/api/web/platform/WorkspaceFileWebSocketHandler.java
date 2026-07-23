@@ -266,6 +266,14 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                     agentConfigRename(ticket, params);
                     yield null;
                 }
+                case "agent-config.copy" -> {
+                    agentConfigCopy(ticket, params);
+                    yield null;
+                }
+                case "agent-config.move" -> {
+                    agentConfigMove(ticket, params);
+                    yield null;
+                }
                 case "agent-config.delete" -> {
                     agentConfigDelete(ticket, params);
                     yield null;
@@ -654,6 +662,56 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 agentConfigWorkspaceId(ticket, params),
                 requiredText(params, "path"),
                 requiredText(params, "name"),
+                agentConfigWorktreeId(ticket, params));
+    }
+
+    private void agentConfigCopy(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        String scope = agentConfigScope(ticket, params);
+        String sourcePath = requiredText(params, "sourcePath");
+        String targetPath = requiredText(params, "targetPath");
+        if (SCOPE_PUBLIC.equals(scope)) {
+            if (!ticket.superAdmin()) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "无权限");
+            }
+            agentConfigService.copyPublicAgentFile(
+                    sourcePath,
+                    targetPath,
+                    agentConfigWorktreeId(ticket, params),
+                    ticketUserId(ticket));
+            return;
+        }
+        if (!ticket.appAdmin()) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "应用 Agent 配置仅应用管理员可编辑");
+        }
+        agentConfigService.copyWorkspaceAgentFile(
+                agentConfigWorkspaceId(ticket, params),
+                sourcePath,
+                targetPath,
+                agentConfigWorktreeId(ticket, params));
+    }
+
+    private void agentConfigMove(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        String scope = agentConfigScope(ticket, params);
+        String sourcePath = requiredText(params, "sourcePath");
+        String targetPath = requiredText(params, "targetPath");
+        if (SCOPE_PUBLIC.equals(scope)) {
+            if (!ticket.superAdmin()) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "无权限");
+            }
+            agentConfigService.movePublicAgentFile(
+                    sourcePath,
+                    targetPath,
+                    agentConfigWorktreeId(ticket, params),
+                    ticketUserId(ticket));
+            return;
+        }
+        if (!ticket.appAdmin()) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "应用 Agent 配置仅应用管理员可编辑");
+        }
+        agentConfigService.moveWorkspaceAgentFile(
+                agentConfigWorkspaceId(ticket, params),
+                sourcePath,
+                targetPath,
                 agentConfigWorktreeId(ticket, params));
     }
 

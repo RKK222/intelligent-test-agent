@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
 import { cn } from "@test-agent/ui-kit";
-import { FileIcon } from "@test-agent/file-explorer";
+import { FileEntryContextMenu, FileIcon } from "@test-agent/file-explorer";
 import { Plus, Trash2 } from "lucide-vue-next";
 import type { FileTreeEntry } from "@test-agent/shared-types";
 
@@ -42,6 +42,12 @@ const props = defineProps<{
   canDeleteEntry?: (path: string) => boolean;
   /** 当前节点是否允许复用行内重命名交互。 */
   canRenameEntry?: (path: string) => boolean;
+  /** 当前作用域由父组件统一持有的 Ctrl/Cmd 多选文件。 */
+  selectedEntries?: FileTreeEntry[];
+  /** 当前作用域正在拖动的文件路径。 */
+  dragSourcePaths?: string[];
+  /** 当前作用域是否已有可粘贴的文件剪贴板。 */
+  clipboardAvailable?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -55,12 +61,20 @@ const emit = defineEmits<{
   deleteEntry: [entry: FileTreeEntry];
   /** 复用父组件的 Agent 配置文件重命名链路。 */
   renameEntry: [path: string, name: string];
+  selectionChange: [entries: FileTreeEntry[]];
+  deleteEntries: [entries: FileTreeEntry[]];
+  setClipboard: [entries: FileTreeEntry[], mode: "copy" | "move"];
+  pasteEntries: [targetDirectory: string];
+  moveEntries: [sourcePaths: string[], targetDirectory: string];
+  dragSourceChange: [paths: string[] | undefined];
 }>();
 
 const renameInput = ref<HTMLInputElement | null>(null);
 const renaming = ref(false);
 const renameName = ref("");
 const renameOriginalName = ref("");
+const contextMenu = ref<{ x: number; y: number; selection: FileTreeEntry[] } | null>(null);
+const dragOver = ref(false);
 
 // 严格区分"未加载"和"已加载为空数组"：
 // - children 为 undefined：尚未请求过该目录的子项，需要渲染 chevron + 允许点击
@@ -77,8 +91,24 @@ const isKnownEmpty = computed(
   () => isDirectory.value && Array.isArray(children.value) && children.value.length === 0
 );
 const indentPx = computed(() => 6 + props.depth * 16);
+const isSelected = computed(() => props.selectedEntries?.some((entry) => entry.path === props.entry.path) ?? false);
+const canMutateFile = computed(() => !isDirectory.value
+  && Boolean(props.canWrite)
+  && (props.canDeleteEntry?.(props.entry.path) ?? true)
+  && (props.canRenameEntry?.(props.entry.path) ?? true));
+const canReceiveFiles = computed(() => isDirectory.value
+  && Boolean(props.canWrite)
+  && (props.canCreateInDirectory?.(props.entry.path) ?? true));
+const canPasteHere = computed(() => canReceiveFiles.value || canMutateFile.value);
 
-function onRowClick() {
+function onRowClick(event: MouseEvent) {
+  if ((event.ctrlKey || event.metaKey) && canMutateFile.value) {
+    const current = props.selectedEntries ?? [];
+    emit("selectionChange", isSelected.value
+      ? current.filter((entry) => entry.path !== props.entry.path)
+      : [...current, props.entry]);
+    return;
+  }
   if (isDirectory.value) {
     // 已知为空的目录：点击不展开，也不发请求，避免无意义的 UI 抖动。
     if (isKnownEmpty.value) return;
@@ -86,6 +116,103 @@ function onRowClick() {
   } else {
     emit("openFile", props.entry.path);
   }
+}
+
+function selectedForEntry(): FileTreeEntry[] {
+  if (!canMutateFile.value) return [];
+  return isSelected.value ? [...(props.selectedEntries ?? [])] : [props.entry];
+}
+
+function openContextMenu(event: MouseEvent) {
+  event.preventDefault();
+  const selection = selectedForEntry();
+  if (selection.length > 0 && !isSelected.value) emit("selectionChange", selection);
+  contextMenu.value = { x: event.clientX, y: event.clientY, selection };
+}
+
+function closeContextMenu() {
+  contextMenu.value = null;
+}
+
+function contextTargetDirectory(): string {
+  if (isDirectory.value) return props.entry.path;
+  const index = props.entry.path.lastIndexOf("/");
+  return index >= 0 ? props.entry.path.slice(0, index) : "";
+}
+
+function deleteContextSelection() {
+  const selection = contextMenu.value?.selection ?? [];
+  closeContextMenu();
+  if (selection.length > 0) emit("deleteEntries", selection);
+}
+
+function setContextClipboard(mode: "copy" | "move") {
+  const selection = contextMenu.value?.selection ?? [];
+  closeContextMenu();
+  if (selection.length > 0) emit("setClipboard", selection, mode);
+}
+
+function pasteContextEntries() {
+  const target = contextTargetDirectory();
+  closeContextMenu();
+  emit("pasteEntries", target);
+}
+
+function renameContextEntry() {
+  closeContextMenu();
+  startRename();
+}
+
+function dragSources(event: DragEvent): string[] {
+  const transferred = event.dataTransfer?.getData("application/x-test-agent-config-files") ?? "";
+  if (transferred) {
+    try {
+      const parsed = JSON.parse(transferred);
+      if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
+    } catch {
+      // 非法拖动数据按非内部拖动处理。
+    }
+  }
+  return props.dragSourcePaths ?? [];
+}
+
+function onDragStart(event: DragEvent) {
+  if (!canMutateFile.value || !event.dataTransfer) {
+    event.preventDefault();
+    return;
+  }
+  const selection = selectedForEntry();
+  const paths = selection.map((entry) => entry.path);
+  if (!isSelected.value) emit("selectionChange", selection);
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("application/x-test-agent-config-files", JSON.stringify(paths));
+  event.dataTransfer.setData("text/plain", paths[0] ?? "");
+  emit("dragSourceChange", paths);
+}
+
+function canDrop(paths: string[]): boolean {
+  return canReceiveFiles.value && paths.length > 0 && paths.every((path) => {
+    const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+    return parent !== props.entry.path;
+  });
+}
+
+function onDragOver(event: DragEvent) {
+  const paths = dragSources(event);
+  if (!canDrop(paths)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  dragOver.value = true;
+}
+
+function onDrop(event: DragEvent) {
+  const paths = dragSources(event);
+  if (!canDrop(paths)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  dragOver.value = false;
+  emit("moveEntries", paths, props.entry.path);
 }
 
 function startRename() {
@@ -127,11 +254,20 @@ function submitRename() {
       :class="cn(
         'ta-file-tree-row',
         isActiveFile && 'is-active',
-        isConflictFile && 'is-conflict'
+        isConflictFile && 'is-conflict',
+        isSelected && 'is-selected',
+        dragOver && 'is-drop-target',
+        dragSourcePaths?.includes(entry.path) && 'is-dragging'
       )"
+      :draggable="canMutateFile"
       :style="{ paddingLeft: `${indentPx}px` }"
       @click="onRowClick"
-      @dblclick.stop="startRename"
+      @contextmenu="openContextMenu"
+      @dragstart="onDragStart"
+      @dragend="emit('dragSourceChange', undefined)"
+      @dragover="onDragOver"
+      @dragleave="dragOver = false"
+      @drop="onDrop"
     >
       <span
         v-for="i in depth"
@@ -204,13 +340,64 @@ function submitRename() {
         :can-create-in-directory="canCreateInDirectory"
         :can-delete-entry="canDeleteEntry"
         :can-rename-entry="canRenameEntry"
+        :selected-entries="selectedEntries"
+        :drag-source-paths="dragSourcePaths"
+        :clipboard-available="clipboardAvailable"
         @toggle="(path: string) => emit('toggle', path)"
         @open-file="(path: string) => emit('openFile', path)"
         @create-entry="(path: string) => emit('createEntry', path)"
         @delete-entry="(child: FileTreeEntry) => emit('deleteEntry', child)"
         @rename-entry="(path: string, name: string) => emit('renameEntry', path, name)"
+        @selection-change="(entries: FileTreeEntry[]) => emit('selectionChange', entries)"
+        @delete-entries="(entries: FileTreeEntry[]) => emit('deleteEntries', entries)"
+        @set-clipboard="(entries: FileTreeEntry[], mode: 'copy' | 'move') => emit('setClipboard', entries, mode)"
+        @paste-entries="(targetDirectory: string) => emit('pasteEntries', targetDirectory)"
+        @move-entries="(sourcePaths: string[], targetDirectory: string) => emit('moveEntries', sourcePaths, targetDirectory)"
+        @drag-source-change="(paths: string[] | undefined) => emit('dragSourceChange', paths)"
       />
     </div>
+    <FileEntryContextMenu
+      v-if="contextMenu"
+      :x="contextMenu.x"
+      :y="contextMenu.y"
+      @close="closeContextMenu"
+    >
+        <button
+          v-if="contextMenu.selection.length === 1 && canRenameEntry?.(entry.path)"
+          type="button"
+          role="menuitem"
+          class="ta-file-context-menu-item"
+          @click="renameContextEntry"
+        >重命名</button>
+        <button
+          v-if="contextMenu.selection.length > 0"
+          type="button"
+          role="menuitem"
+          class="ta-file-context-menu-item"
+          @click="setContextClipboard('copy')"
+        >复制</button>
+        <button
+          v-if="contextMenu.selection.length > 0"
+          type="button"
+          role="menuitem"
+          class="ta-file-context-menu-item"
+          @click="setContextClipboard('move')"
+        >剪切</button>
+        <button
+          v-if="clipboardAvailable && canPasteHere"
+          type="button"
+          role="menuitem"
+          class="ta-file-context-menu-item"
+          @click="pasteContextEntries"
+        >粘贴到此处</button>
+        <button
+          v-if="contextMenu.selection.length > 0"
+          type="button"
+          role="menuitem"
+          class="ta-file-context-menu-item is-danger"
+          @click="deleteContextSelection"
+        >{{ contextMenu.selection.length > 1 ? `删除 ${contextMenu.selection.length} 个文件` : '删除' }}</button>
+    </FileEntryContextMenu>
   </div>
 </template>
 
@@ -221,6 +408,17 @@ function submitRename() {
 
 .agent-config-tree-node > .ta-file-tree-row {
   padding-right: 48px;
+}
+
+.ta-file-tree-row.is-dragging {
+  opacity: 0.55;
+}
+
+.ta-file-tree-row.is-selected,
+.ta-file-tree-row.is-drop-target {
+  outline: 1px solid var(--ta-accent, #2563eb);
+  outline-offset: -1px;
+  background: rgb(37 99 235 / 12%);
 }
 
 .agent-tree-actions {

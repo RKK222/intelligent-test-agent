@@ -14,7 +14,7 @@
 - `getNightExecutionSlots/createNightExecutionTask/listNightExecutionTasks/adjustNightExecutionTask/cancelNightExecutionTask/dismissNightExecutionTask`：夜间时段和任务 HTTP client；完整输入只用于创建请求，任务响应使用 shared-types 的安全投影。
 - `createXxlJobSsoTicket()`：调用平台票据 API并返回同源表单动作；只允许组件把 ticket 写入瞬时隐藏表单，禁止拼接 URL。原始 HTTP observer 会对 ticket/token/authToken/tokenValue/cookie/password/secret/sessionDigest 递归脱敏。
 
-- 工作区重命名 WebSocket RPC 通过 `renameWorkspaceFile(workspaceId, path, name)` 兼容调用文件和目录；`uploadWorkspaceFile`、`copyWorkspaceFile`、`moveWorkspaceFile` 分别承载 Base64 二进制新文件上传和普通文件复制/移动；实际路径、写权限、目标冲突和大小限制由目标后端统一校验。
+- 工作区重命名 WebSocket RPC 通过 `renameWorkspaceFile(workspaceId, path, name)` 兼容调用文件和目录；`uploadWorkspaceFile`、`copyWorkspaceFile`、`moveWorkspaceFile` 分别承载 Base64 二进制新文件上传和普通文件复制/移动。Agent 配置对应提供公共级与应用级 copy/move 方法，通过同一目标后端文件 WebSocket 执行；实际路径、写权限、白名单和目标冲突由目标后端统一校验。
 
 ## 允许依赖
 

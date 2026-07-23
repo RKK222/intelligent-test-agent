@@ -4747,10 +4747,16 @@ function workspacePathInDirectory(directory: string, name: string): string {
   return `${directory}${directory.includes("\\") ? "\\" : "/"}${name}`;
 }
 
-async function handleCopyEntry(sourcePath: string, targetDirectory: string) {
+async function handleCopyEntry(
+  sourcePath: string,
+  targetDirectory: string,
+  options: { quiet?: boolean } = {}
+): Promise<boolean> {
   if (!selectedWorkspace.value || !currentPersonalWorkspaceId.value) {
-    feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再复制文件。" };
-    return;
+    if (!options.quiet) {
+      feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再复制文件。" };
+    }
+    return false;
   }
   const targetPath = copiedWorkspaceFileTargetPath(
     sourcePath,
@@ -4763,19 +4769,45 @@ async function handleCopyEntry(sourcePath: string, targetDirectory: string) {
     await loadDirectory(targetDirectory, undefined, true);
     workspaceUndoStack.value.push({ kind: "delete", paths: [targetPath], label: `复制 ${targetPath}` });
     void refreshWorkspaceGitDiff();
-    feedback.value = { kind: "success", title: "文件已复制", description: targetPath };
+    if (!options.quiet) feedback.value = { kind: "success", title: "文件已复制", description: targetPath };
+    return true;
   } catch (error) {
-    feedback.value = errorFeedback("复制工作区文件失败", error);
+    if (!options.quiet) feedback.value = errorFeedback("复制工作区文件失败", error);
+    return false;
   }
 }
 
-async function handleMoveEntry(sourcePath: string, targetDirectory: string) {
+async function handleCopyEntries(sourcePaths: string[], targetDirectory: string) {
+  let copied = 0;
+  const failed: string[] = [];
+  for (const sourcePath of sourcePaths) {
+    if (await handleCopyEntry(sourcePath, targetDirectory, { quiet: true })) copied += 1;
+    else failed.push(sourcePath);
+  }
+  if (failed.length > 0) {
+    feedback.value = {
+      kind: "error",
+      title: copied > 0 ? "部分工作区文件复制失败" : "复制工作区文件失败",
+      description: failed.join("、")
+    };
+  } else if (copied > 0) {
+    feedback.value = { kind: "success", title: `已复制 ${copied} 个工作区文件`, description: targetDirectory || "工作区根目录" };
+  }
+}
+
+async function handleMoveEntry(
+  sourcePath: string,
+  targetDirectory: string,
+  options: { quiet?: boolean } = {}
+): Promise<boolean> {
   if (!selectedWorkspace.value || !currentPersonalWorkspaceId.value) {
-    feedback.value = { kind: "info", title: "当前工作区条目只读", description: "请切换到个人 worktree 后再移动工作区条目。" };
-    return;
+    if (!options.quiet) {
+      feedback.value = { kind: "info", title: "当前工作区条目只读", description: "请切换到个人 worktree 后再移动工作区条目。" };
+    }
+    return false;
   }
   const sourceDirectory = workspaceParentDirectory(sourcePath);
-  if (sourceDirectory === targetDirectory) return;
+  if (sourceDirectory === targetDirectory) return false;
   const targetPath = workspacePathInDirectory(targetDirectory, fileNameOf(sourcePath));
   try {
     const workspaceId = selectedWorkspace.value.workspaceId;
@@ -4798,9 +4830,30 @@ async function handleMoveEntry(sourcePath: string, targetDirectory: string) {
       label: `移动 ${sourcePath}`
     });
     void refreshWorkspaceGitDiff();
-    feedback.value = { kind: "success", title: "工作区条目已移动", description: targetPath };
+    if (!options.quiet) feedback.value = { kind: "success", title: "工作区条目已移动", description: targetPath };
+    return true;
   } catch (error) {
-    feedback.value = errorFeedback("移动工作区条目失败", error);
+    if (!options.quiet) feedback.value = errorFeedback("移动工作区条目失败", error);
+    return false;
+  }
+}
+
+/** 多选拖动逐项复用已验证的单条移动链路，任一失败不回滚此前成功项，并明确报告部分成功。 */
+async function handleMoveEntries(sourcePaths: string[], targetDirectory: string) {
+  let moved = 0;
+  const failed: string[] = [];
+  for (const sourcePath of sourcePaths) {
+    if (await handleMoveEntry(sourcePath, targetDirectory, { quiet: true })) moved += 1;
+    else failed.push(sourcePath);
+  }
+  if (failed.length > 0) {
+    feedback.value = {
+      kind: "error",
+      title: moved > 0 ? "部分工作区条目移动失败" : "移动工作区条目失败",
+      description: failed.join("、")
+    };
+  } else if (moved > 0) {
+    feedback.value = { kind: "success", title: `已移动 ${moved} 个工作区条目`, description: targetDirectory || "工作区根目录" };
   }
 }
 
@@ -5029,13 +5082,19 @@ async function handleRenameEntry(path: string, name: string) {
   }
 }
 
-async function handleDeleteEntry(path: string, type: "file" | "directory") {
+async function handleDeleteEntry(
+  path: string,
+  type: "file" | "directory",
+  options: { quiet?: boolean } = {}
+): Promise<boolean> {
   if (!selectedWorkspace.value) {
-    return;
+    return false;
   }
   if (!currentPersonalWorkspaceId.value) {
-    feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再修改应用文件。" };
-    return;
+    if (!options.quiet) {
+      feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再修改应用文件。" };
+    }
+    return false;
   }
   const workspaceId = selectedWorkspace.value.workspaceId;
   try {
@@ -5078,13 +5137,36 @@ async function handleDeleteEntry(path: string, type: "file" | "directory") {
       }
     }
     void refreshWorkspaceGitDiff();
-    feedback.value = {
-      kind: "success",
-      title: type === "directory" ? "文件夹已删除" : "文件已删除",
-      description: path
-    };
+    if (!options.quiet) {
+      feedback.value = {
+        kind: "success",
+        title: type === "directory" ? "文件夹已删除" : "文件已删除",
+        description: path
+      };
+    }
+    return true;
   } catch (error) {
-    feedback.value = errorFeedback(`删除${type === "file" ? "文件" : "文件夹"}失败`, error);
+    if (!options.quiet) feedback.value = errorFeedback(`删除${type === "file" ? "文件" : "文件夹"}失败`, error);
+    return false;
+  }
+}
+
+/** 右键批量删除逐项复用单条清理逻辑，保证目录缓存、打开标签和 Git Diff 均按成功项收敛。 */
+async function handleDeleteEntries(entries: { path: string; type: "file" | "directory" }[]) {
+  let deleted = 0;
+  const failed: string[] = [];
+  for (const entry of entries) {
+    if (await handleDeleteEntry(entry.path, entry.type, { quiet: true })) deleted += 1;
+    else failed.push(entry.path);
+  }
+  if (failed.length > 0) {
+    feedback.value = {
+      kind: "error",
+      title: deleted > 0 ? "部分工作区条目删除失败" : "删除工作区条目失败",
+      description: failed.join("、")
+    };
+  } else if (deleted > 0) {
+    feedback.value = { kind: "success", title: `已删除 ${deleted} 个工作区条目`, description: "工作区文件树已刷新" };
   }
 }
 
@@ -7294,9 +7376,12 @@ async function handleLogout() {
           @search="handleFileSearch"
           @create-entry="handleCreateEntry"
           @delete-entry="handleDeleteEntry"
+          @delete-entries="handleDeleteEntries"
           @rename-entry="handleRenameEntry"
           @copy-entry="handleCopyEntry"
+          @copy-entries="handleCopyEntries"
           @move-entry="handleMoveEntry"
+          @move-entries="handleMoveEntries"
           @upload-files="handleUploadFiles"
           @undo-entry="handleUndoWorkspaceFileOperation"
           @cache-and-navigate="handleCacheAndNavigate"

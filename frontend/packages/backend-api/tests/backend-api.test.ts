@@ -2974,6 +2974,18 @@ describe("backend-api", () => {
       "agw_1234567890abcdef",
       "linux-2"
     )).resolves.toBeNull();
+    await expect(client.copyPublicAgentFile(
+      "opencode/agents/review.md",
+      "opencode/skills/review.md",
+      "agw_1234567890abcdef",
+      "linux-2"
+    )).resolves.toBeNull();
+    await expect(client.movePublicAgentFile(
+      "opencode/agents/review.md",
+      "opencode/templates/review.md",
+      "agw_1234567890abcdef",
+      "linux-2"
+    )).resolves.toBeNull();
     await expect(client.uploadPublicAgentFile(
       "opencode/agents/icon.bin",
       new Blob([new Uint8Array([0, 1, 2, 255])]),
@@ -3016,6 +3028,24 @@ describe("backend-api", () => {
       }
     });
     expect(sockets[0]?.sentMessages[2]).toMatchObject({
+      op: "agent-config.copy",
+      params: {
+        scope: "PUBLIC",
+        sourcePath: "opencode/agents/review.md",
+        targetPath: "opencode/skills/review.md",
+        worktreeId: "agw_1234567890abcdef"
+      }
+    });
+    expect(sockets[0]?.sentMessages[3]).toMatchObject({
+      op: "agent-config.move",
+      params: {
+        scope: "PUBLIC",
+        sourcePath: "opencode/agents/review.md",
+        targetPath: "opencode/templates/review.md",
+        worktreeId: "agw_1234567890abcdef"
+      }
+    });
+    expect(sockets[0]?.sentMessages[4]).toMatchObject({
       op: "agent-config.upload.begin",
       params: {
         scope: "PUBLIC",
@@ -3024,12 +3054,12 @@ describe("backend-api", () => {
         worktreeId: "agw_1234567890abcdef"
       }
     });
-    expect(sockets[0]?.sentMessages.slice(3, 6).map((message) => message.op)).toEqual([
+    expect(sockets[0]?.sentMessages.slice(5, 8).map((message) => message.op)).toEqual([
       "agent-config.upload.chunk",
       "agent-config.upload.chunk",
       "agent-config.upload.complete"
     ]);
-    expect(sockets[0]?.sentMessages[6]).toMatchObject({
+    expect(sockets[0]?.sentMessages[8]).toMatchObject({
       op: "agent-config.delete",
       params: {
         scope: "PUBLIC",
@@ -3251,6 +3281,12 @@ describe("backend-api", () => {
     await expect(
       client.renameWorkspaceAgentFile("wrk_1234567890abcdef", "review.md", "renamed.md")
     ).resolves.toBeNull();
+    await expect(client.copyWorkspaceAgentFile(
+      "wrk_1234567890abcdef", "agents/review.md", "skills/review.md"
+    )).resolves.toBeNull();
+    await expect(client.moveWorkspaceAgentFile(
+      "wrk_1234567890abcdef", "agents/review.md", "tools/review.md"
+    )).resolves.toBeNull();
     await expect(client.deleteWorkspaceAgentFile("wrk_1234567890abcdef", "skills/obsolete")).resolves.toBeNull();
 
     expect(fetcher).toHaveBeenCalledTimes(2);
@@ -3265,6 +3301,8 @@ describe("backend-api", () => {
       "agent-config.read",
       "agent-config.write",
       "agent-config.rename",
+      "agent-config.copy",
+      "agent-config.move",
       "agent-config.delete"
     ]);
   });

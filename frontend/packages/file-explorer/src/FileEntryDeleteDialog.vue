@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { AlertTriangle, X } from "lucide-vue-next";
 
 type DeleteEntry = {
@@ -9,29 +9,40 @@ type DeleteEntry = {
 
 const emit = defineEmits<{
   confirm: [path: string, type: "file" | "directory"];
+  confirmMany: [entries: DeleteEntry[]];
 }>();
 
 const visible = ref(false);
-const entry = ref<DeleteEntry | null>(null);
+const entries = ref<DeleteEntry[]>([]);
+const entry = computed(() => entries.value[0] ?? null);
+const multiple = computed(() => entries.value.length > 1);
+const containsDirectory = computed(() => entries.value.some((item) => item.type === "directory"));
 
 /** 工作空间与 Agents 文件树共用同一递归删除确认面板。 */
 function open(target: DeleteEntry) {
-  entry.value = target;
+  entries.value = [target];
+  visible.value = true;
+}
+
+/** 多选删除沿用同一确认面板，只展示顶层选择，避免父目录与后代重复执行。 */
+function openMany(targets: DeleteEntry[]) {
+  entries.value = [...targets];
   visible.value = true;
 }
 
 function close() {
   visible.value = false;
-  entry.value = null;
+  entries.value = [];
 }
 
 function submit() {
   if (!entry.value) return;
-  emit("confirm", entry.value.path, entry.value.type);
+  if (multiple.value) emit("confirmMany", [...entries.value]);
+  else emit("confirm", entry.value.path, entry.value.type);
   close();
 }
 
-defineExpose({ open });
+defineExpose({ open, openMany });
 </script>
 
 <template>
@@ -45,7 +56,7 @@ defineExpose({ open });
       <section
         role="dialog"
         aria-modal="true"
-        :aria-label="entry?.type === 'directory' ? '删除文件夹' : '删除文件'"
+        :aria-label="multiple ? '删除多个条目' : (entry?.type === 'directory' ? '删除文件夹' : '删除文件')"
         class="ta-file-dialog ta-file-dialog--danger"
       >
         <header class="ta-file-dialog-header">
@@ -62,11 +73,11 @@ defineExpose({ open });
         </header>
         <div class="ta-file-dialog-body">
           <div class="ta-file-dialog-danger-card">
-            <span>{{ entry?.type === 'directory' ? '文件夹' : '文件' }}</span>
-            <strong>{{ entry?.path }}</strong>
+            <span>{{ multiple ? `${entries.length} 个条目` : (entry?.type === 'directory' ? '文件夹' : '文件') }}</span>
+            <strong v-for="item in entries" :key="item.path">{{ item.path }}</strong>
           </div>
           <p class="ta-file-dialog-warning">
-            {{ entry?.type === 'directory' ? '文件夹及其中的全部内容都会被删除。' : '文件删除后无法恢复。' }}
+            {{ containsDirectory ? '所选文件夹及其中的全部内容都会被删除。' : '所选文件删除后无法恢复。' }}
           </p>
         </div>
         <footer class="ta-file-dialog-footer">

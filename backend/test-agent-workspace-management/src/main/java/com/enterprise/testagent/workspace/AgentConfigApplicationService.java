@@ -796,6 +796,18 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         fileService.renameFile(agentRoot.toString(), relativePath, name);
     }
 
+    /** 公共 Agent 文件或目录跨目录移动继续绑定当前管理员个人 worktree，并复用统一文件安全校验。 */
+    public void movePublicAgentFile(String sourcePath, String targetPath, String worktreeId, UserId userId) {
+        Path agentRoot = publicAgentRootForWrite(worktreeId, userId);
+        fileService.moveFile(agentRoot.toString(), sourcePath, targetPath);
+    }
+
+    /** 公共 Agent 普通文件复制复用工作空间文件服务，不覆盖目标同名条目。 */
+    public void copyPublicAgentFile(String sourcePath, String targetPath, String worktreeId, UserId userId) {
+        Path agentRoot = publicAgentRootForWrite(worktreeId, userId);
+        fileService.copyFile(agentRoot.toString(), sourcePath, targetPath);
+    }
+
     /** 公共 Agent 文件和目录删除复用工作空间文件服务的路径归一化与递归删除保护。 */
     public void deletePublicAgentFile(String relativePath, String worktreeId, UserId userId) {
         Path agentRoot = publicAgentRootForWrite(worktreeId, userId);
@@ -902,6 +914,22 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     public void renameWorkspaceAgentFile(String workspaceId, String relativePath, String name, String worktreeId) {
         Path agentRoot = workspaceAgentRootForWrite(workspaceId, worktreeId);
         fileService.renameFile(agentRoot.toString(), relativePath, name);
+    }
+
+    /** 应用 Agent 移动前同时校验源和目标白名单，避免借跨目录移动写入其它 `.opencode` 内容。 */
+    public void moveWorkspaceAgentFile(String workspaceId, String sourcePath, String targetPath, String worktreeId) {
+        requireWorkspaceAgentUploadPath(sourcePath);
+        requireWorkspaceAgentUploadPath(targetPath);
+        Path agentRoot = workspaceAgentRootForWrite(workspaceId, worktreeId);
+        fileService.moveFile(agentRoot.toString(), sourcePath, targetPath);
+    }
+
+    /** 应用 Agent 普通文件复制同时校验源和目标发布白名单。 */
+    public void copyWorkspaceAgentFile(String workspaceId, String sourcePath, String targetPath, String worktreeId) {
+        requireWorkspaceAgentUploadPath(sourcePath);
+        requireWorkspaceAgentUploadPath(targetPath);
+        Path agentRoot = workspaceAgentRootForWrite(workspaceId, worktreeId);
+        fileService.copyFile(agentRoot.toString(), sourcePath, targetPath);
     }
 
     /** 应用 Agent 文件和目录删除复用工作空间文件服务，并固定在当前个人 worktree 的 `.opencode` 根内。 */

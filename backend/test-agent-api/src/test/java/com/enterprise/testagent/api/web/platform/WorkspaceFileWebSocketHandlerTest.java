@@ -145,6 +145,31 @@ class WorkspaceFileWebSocketHandlerTest {
     }
 
     @Test
+    void copiesAndMovesPublicAgentFilesThroughSuperAdminTicket() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
+        when(ticketService.consume("wft_public", "http://localhost:3000")).thenReturn(agentTicket(true, "PUBLIC", null, "agw_123"));
+        WebSocketHandler handler = handler(ticketService, agentConfigService);
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_public",
+                List.of(
+                        """
+                        {"id":"req_copy","op":"agent-config.copy","params":{"scope":"PUBLIC","worktreeId":"agw_123","sourcePath":"agents/a.md","targetPath":"skills/a.md"}}
+                        """,
+                        """
+                        {"id":"req_move","op":"agent-config.move","params":{"scope":"PUBLIC","worktreeId":"agw_123","sourcePath":"agents/b.md","targetPath":"skills/b.md"}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).hasSize(2).allSatisfy(message -> assertThat(message).contains("\"type\":\"result\""));
+        verify(agentConfigService).copyPublicAgentFile(
+                "agents/a.md", "skills/a.md", "agw_123", new UserId("usr_admin"));
+        verify(agentConfigService).movePublicAgentFile(
+                "agents/b.md", "skills/b.md", "agw_123", new UserId("usr_admin"));
+    }
+
+    @Test
     void uploadsPublicAgentFileThroughSuperAdminTicket() {
         WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
         AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
@@ -212,6 +237,32 @@ class WorkspaceFileWebSocketHandlerTest {
                 "wrk_1234567890abcdef",
                 "agents/obsolete.md",
                 null);
+    }
+
+    @Test
+    void copiesAndMovesWorkspaceAgentFilesWhenTicketHasAppAdminPermission() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
+        when(ticketService.consume("wft_workspace_agent", "http://localhost:3000"))
+                .thenReturn(workspaceAgentTicket(true));
+        WebSocketHandler handler = handler(ticketService, agentConfigService);
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace_agent",
+                List.of(
+                        """
+                        {"id":"req_copy","op":"agent-config.copy","params":{"scope":"WORKSPACE","workspaceId":"wrk_1234567890abcdef","sourcePath":"agents/a.md","targetPath":"skills/a.md"}}
+                        """,
+                        """
+                        {"id":"req_move","op":"agent-config.move","params":{"scope":"WORKSPACE","workspaceId":"wrk_1234567890abcdef","sourcePath":"agents/b.md","targetPath":"skills/b.md"}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).hasSize(2).allSatisfy(message -> assertThat(message).contains("\"type\":\"result\""));
+        verify(agentConfigService).copyWorkspaceAgentFile(
+                "wrk_1234567890abcdef", "agents/a.md", "skills/a.md", null);
+        verify(agentConfigService).moveWorkspaceAgentFile(
+                "wrk_1234567890abcdef", "agents/b.md", "skills/b.md", null);
     }
 
     @Test

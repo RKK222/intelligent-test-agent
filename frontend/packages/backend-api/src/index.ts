@@ -1138,6 +1138,28 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         { path, name },
         { worktreeId, linuxServerId }
       ),
+    copyPublicAgentFile: (
+      sourcePath: string,
+      targetPath: string,
+      worktreeId?: string | null,
+      linuxServerId?: string | null
+    ) => agentConfigFileRpc<void>(
+      "PUBLIC",
+      "agent-config.copy",
+      { sourcePath, targetPath },
+      { worktreeId, linuxServerId }
+    ),
+    movePublicAgentFile: (
+      sourcePath: string,
+      targetPath: string,
+      worktreeId?: string | null,
+      linuxServerId?: string | null
+    ) => agentConfigFileRpc<void>(
+      "PUBLIC",
+      "agent-config.move",
+      { sourcePath, targetPath },
+      { worktreeId, linuxServerId }
+    ),
     deletePublicAgentFile: (path: string, worktreeId?: string | null, linuxServerId?: string | null) =>
       agentConfigFileRpc<void>(
         "PUBLIC",
@@ -1237,6 +1259,28 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         { path, name },
         { workspaceId, worktreeId }
       ),
+    copyWorkspaceAgentFile: (
+      workspaceId: string,
+      sourcePath: string,
+      targetPath: string,
+      worktreeId?: string | null
+    ) => agentConfigFileRpc<void>(
+      "WORKSPACE",
+      "agent-config.copy",
+      { sourcePath, targetPath },
+      { workspaceId, worktreeId }
+    ),
+    moveWorkspaceAgentFile: (
+      workspaceId: string,
+      sourcePath: string,
+      targetPath: string,
+      worktreeId?: string | null
+    ) => agentConfigFileRpc<void>(
+      "WORKSPACE",
+      "agent-config.move",
+      { sourcePath, targetPath },
+      { workspaceId, worktreeId }
+    ),
     deleteWorkspaceAgentFile: (workspaceId: string, path: string, worktreeId?: string | null) =>
       agentConfigFileRpc<void>(
         "WORKSPACE",

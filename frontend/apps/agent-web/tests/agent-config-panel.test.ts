@@ -29,6 +29,10 @@ const apiClientMock = vi.hoisted(() => ({
   uploadWorkspaceAgentFile: vi.fn(),
   renamePublicAgentFile: vi.fn(),
   renameWorkspaceAgentFile: vi.fn(),
+  copyPublicAgentFile: vi.fn(),
+  copyWorkspaceAgentFile: vi.fn(),
+  movePublicAgentFile: vi.fn(),
+  moveWorkspaceAgentFile: vi.fn(),
   deletePublicAgentFile: vi.fn(),
   deleteWorkspaceAgentFile: vi.fn(),
   updatePublicAgentConfig: vi.fn(),
@@ -108,6 +112,10 @@ describe("AgentConfigPanel", () => {
     apiClientMock.uploadWorkspaceAgentFile.mockResolvedValue(undefined);
     apiClientMock.renamePublicAgentFile.mockResolvedValue(undefined);
     apiClientMock.renameWorkspaceAgentFile.mockResolvedValue(undefined);
+    apiClientMock.copyPublicAgentFile.mockResolvedValue(undefined);
+    apiClientMock.copyWorkspaceAgentFile.mockResolvedValue(undefined);
+    apiClientMock.movePublicAgentFile.mockResolvedValue(undefined);
+    apiClientMock.moveWorkspaceAgentFile.mockResolvedValue(undefined);
     apiClientMock.deletePublicAgentFile.mockResolvedValue(undefined);
     apiClientMock.deleteWorkspaceAgentFile.mockResolvedValue(undefined);
     apiClientMock.updatePublicAgentConfig.mockResolvedValue({ status: "SUCCEEDED" });
@@ -695,7 +703,7 @@ describe("AgentConfigPanel", () => {
     ]]));
   });
 
-  it("renames an application Agent file on double click and reports both Git paths", async () => {
+  it("renames an application Agent file from the context menu and reports both Git paths", async () => {
     apiClientMock.listWorkspaceAgentFiles.mockImplementation(async (_workspaceId: string, path: string) => path === ""
       ? [{ path: "agents", name: "agents", type: "directory" }]
       : [{ path: "agents/review.md", name: "review.md", type: "file" }]);
@@ -705,6 +713,9 @@ describe("AgentConfigPanel", () => {
     await fireEvent.click(await view.findByRole("button", { name: "agents" }));
     const fileRow = await view.findByRole("button", { name: "review.md" });
     await fireEvent.dblClick(fileRow);
+    expect(view.queryByLabelText("重命名 Agent 文件")).toBeNull();
+    await fireEvent.contextMenu(fileRow);
+    await fireEvent.click(view.getByRole("menuitem", { name: "重命名" }));
     const input = view.getByLabelText("重命名 Agent 文件");
     await fireEvent.update(input, "payment-review.md");
     await fireEvent.keyDown(input, { key: "Enter" });
@@ -736,7 +747,8 @@ describe("AgentConfigPanel", () => {
 
     await fireEvent.click(await view.findByRole("button", { name: "agents" }));
     const fileRow = await view.findByRole("button", { name: "public.md" });
-    await fireEvent.dblClick(fileRow);
+    await fireEvent.contextMenu(fileRow);
+    await fireEvent.click(view.getByRole("menuitem", { name: "重命名" }));
     const input = view.getByLabelText("重命名 Agent 文件");
     await fireEvent.update(input, "shared-review.md");
     await fireEvent.keyDown(input, { key: "Enter" });
@@ -756,6 +768,91 @@ describe("AgentConfigPanel", () => {
         type: "file"
       }
     }));
+  });
+
+  it("copies and deletes Ctrl-selected public Agent files from the context menu", async () => {
+    apiClientMock.listPublicAgentFiles.mockImplementation(async (path: string) => {
+      if (path === "") return [
+        { path: "agents", name: "agents", type: "directory" },
+        { path: "skills", name: "skills", type: "directory" }
+      ];
+      if (path === "agents") return [
+        { path: "agents/a.md", name: "a.md", type: "file" },
+        { path: "agents/b.md", name: "b.md", type: "file" }
+      ];
+      return [];
+    });
+    const { view } = renderPanel();
+
+    await fireEvent.click(await view.findByRole("button", { name: "agents" }));
+    await fireEvent.click(await view.findByRole("button", { name: "skills" }));
+    const a = await view.findByRole("button", { name: "a.md" });
+    const b = await view.findByRole("button", { name: "b.md" });
+    await fireEvent.click(a, { ctrlKey: true });
+    await fireEvent.click(b, { ctrlKey: true });
+
+    await fireEvent.contextMenu(a);
+    await fireEvent.click(view.getByRole("menuitem", { name: "复制" }));
+    await fireEvent.contextMenu(view.getByRole("button", { name: "skills" }));
+    await fireEvent.click(view.getByRole("menuitem", { name: "粘贴到此处" }));
+
+    await waitFor(() => expect(apiClientMock.copyPublicAgentFile).toHaveBeenCalledTimes(2));
+    expect(apiClientMock.copyPublicAgentFile).toHaveBeenNthCalledWith(
+      1, "agents/a.md", "skills/a.md", "agw_1234567890abcdef", "linux-1"
+    );
+    expect(apiClientMock.copyPublicAgentFile).toHaveBeenNthCalledWith(
+      2, "agents/b.md", "skills/b.md", "agw_1234567890abcdef", "linux-1"
+    );
+    await waitFor(() => expect(view.emitted("files-mutated")?.length).toBeGreaterThan(0));
+
+    await fireEvent.contextMenu(a);
+    await fireEvent.click(view.getByRole("menuitem", { name: "删除 2 个文件" }));
+    const dialog = await view.findByRole("dialog", { name: "删除多个条目" });
+    await fireEvent.click(within(dialog).getByRole("button", { name: "确认删除" }));
+    await waitFor(() => expect(apiClientMock.deletePublicAgentFile).toHaveBeenCalledTimes(2));
+  });
+
+  it("moves Ctrl-selected application Agent files together by drag and drop", async () => {
+    apiClientMock.listWorkspaceAgentFiles.mockImplementation(async (_workspaceId: string, path: string) => {
+      if (path === "") return [
+        { path: "agents", name: "agents", type: "directory" },
+        { path: "skills", name: "skills", type: "directory" }
+      ];
+      if (path === "agents") return [
+        { path: "agents/a.md", name: "a.md", type: "file" },
+        { path: "agents/b.md", name: "b.md", type: "file" }
+      ];
+      return [];
+    });
+    const { view } = renderPanel();
+    await fireEvent.click(view.getByRole("button", { name: /^应用级/ }));
+    const roots = await view.findAllByRole("button", { name: "agents" });
+    const skillsRoots = await view.findAllByRole("button", { name: "skills" });
+    await fireEvent.click(roots.at(-1)!);
+    await fireEvent.click(skillsRoots.at(-1)!);
+    const a = await view.findByRole("button", { name: "a.md" });
+    const b = await view.findByRole("button", { name: "b.md" });
+    await fireEvent.click(a, { metaKey: true });
+    await fireEvent.click(b, { metaKey: true });
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "none",
+      dropEffect: "none",
+      setData: (type: string, value: string) => data.set(type, value),
+      getData: (type: string) => data.get(type) ?? ""
+    };
+
+    await fireEvent.dragStart(a, { dataTransfer });
+    await fireEvent.dragOver(skillsRoots.at(-1)!, { dataTransfer });
+    await fireEvent.drop(skillsRoots.at(-1)!, { dataTransfer });
+
+    await waitFor(() => expect(apiClientMock.moveWorkspaceAgentFile).toHaveBeenCalledTimes(2));
+    expect(apiClientMock.moveWorkspaceAgentFile).toHaveBeenNthCalledWith(
+      1, "wrk_1234567890abcdef", "agents/a.md", "skills/a.md", undefined
+    );
+    expect(apiClientMock.moveWorkspaceAgentFile).toHaveBeenNthCalledWith(
+      2, "wrk_1234567890abcdef", "agents/b.md", "skills/b.md", undefined
+    );
   });
 
   it("keeps public and application Agent files read-only for users without write permission", async () => {

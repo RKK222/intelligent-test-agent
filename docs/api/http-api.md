@@ -1137,6 +1137,8 @@ Agent 配置文件上传使用同一文件 WebSocket 上的 `agent-config.upload
 
 Agent 配置文件改名使用 `agent-config.rename`，请求携带 `scope`、可选 `workspaceId`、可选 `worktreeId`、`path` 和新文件名 `name`；公共 scope 仅 `SUPER_ADMIN`，工作空间 scope 仅 `APP_ADMIN`（`SUPER_ADMIN` 继承），普通成员返回 `FORBIDDEN`。该操作只允许同目录改名并复用工作空间文件服务的名称、重名和路径安全校验。
 
+Agent 配置普通文件复制和文件/目录移动分别使用 `agent-config.copy` 与 `agent-config.move`，请求携带 `scope`、可选 `workspaceId`、可选 `worktreeId`、`sourcePath` 和 `targetPath`。公共 scope 仅 `SUPER_ADMIN`，工作空间 scope 仅 `APP_ADMIN`（`SUPER_ADMIN` 继承）；应用级操作同时校验源、目标均位于 `opencode.jsonc`、`agents/**`、`skills/**` 或 `tools/**` 白名单。复制不覆盖同名目标且仅支持普通文件；移动不覆盖目标，并拒绝把目录移动到自身后代。多选由前端在同一目标连接上逐项调用，协议保持单项原子结果，部分失败不会回滚此前成功项。
+
 Agent 配置文件或目录删除使用 `agent-config.delete`，请求携带 `scope`、可选 `workspaceId`、可选 `worktreeId` 和 `path`；公共 scope 仅 `SUPER_ADMIN`，工作空间 scope 仅 `APP_ADMIN`（`SUPER_ADMIN` 继承）。目录删除递归执行且不跟随符号链接，并复用工作空间文件服务对根目录、`.git` 元数据和越界路径的保护；成功后前端立即刷新对应 Agent 树和 Git Changes。
 
 请求体：

@@ -115,10 +115,13 @@ const emit = defineEmits<{
   createEntry: [directory: string, name: string, type: "file" | "directory"];
   // 删除文件或文件夹
   deleteEntry: [path: string, type: "file" | "directory"];
-  // 双击文件或目录后重命名
+  deleteEntries: [entries: { path: string; type: "file" | "directory" }[]];
+  // 通过右键菜单重命名文件或目录
   renameEntry: [path: string, name: string];
   copyEntry: [sourcePath: string, targetDirectory: string];
+  copyEntries: [sourcePaths: string[], targetDirectory: string];
   moveEntry: [sourcePath: string, targetDirectory: string];
+  moveEntries: [sourcePaths: string[], targetDirectory: string];
   uploadFiles: [directory: string, files: File[]];
   undoEntry: [];
   // 缓存并跳转
@@ -482,9 +485,12 @@ defineExpose({
               @search="emit('search', $event)"
               @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
               @delete-entry="(path, type) => emit('deleteEntry', path, type)"
+              @delete-entries="emit('deleteEntries', $event)"
               @rename-entry="(path, name) => emit('renameEntry', path, name)"
               @copy-entry="(sourcePath, targetDirectory) => emit('copyEntry', sourcePath, targetDirectory)"
+              @copy-entries="(sourcePaths, targetDirectory) => emit('copyEntries', sourcePaths, targetDirectory)"
               @move-entry="(sourcePath, targetDirectory) => emit('moveEntry', sourcePath, targetDirectory)"
+              @move-entries="(sourcePaths, targetDirectory) => emit('moveEntries', sourcePaths, targetDirectory)"
               @upload-files="(directory, files) => emit('uploadFiles', directory, files)"
               @undo-entry="emit('undoEntry')"
               @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"

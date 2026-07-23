@@ -45,6 +45,11 @@ type AgentConfigMutation = {
   deleted?: { path: string; type: "file" | "directory" };
   renamed?: { path: string; nextPath: string; type: "file" };
 };
+type AgentClipboard = {
+  scope: Scope;
+  entries: FileTreeEntry[];
+  mode: "copy" | "move";
+};
 
 const props = defineProps<{
   baseUrl: string;
@@ -100,6 +105,9 @@ const uploadInput = ref<HTMLInputElement | null>(null);
 const uploadOverlay = ref<FileUploadOverlayState | null>(null);
 const deleteEntryDialog = ref<InstanceType<typeof FileEntryDeleteDialog> | null>(null);
 const deleteEntryScope = ref<Scope>("WORKSPACE");
+const selectedEntriesByScope = ref<Record<Scope, FileTreeEntry[]>>({ PUBLIC: [], WORKSPACE: [] });
+const dragSourcePathsByScope = ref<Record<Scope, string[]>>({ PUBLIC: [], WORKSPACE: [] });
+const agentClipboard = ref<AgentClipboard | null>(null);
 const publicConflictPathHints = ref<string[]>([]);
 const selectedDiffPath = ref("");
 const commitMessage = ref("");
@@ -147,6 +155,9 @@ void refreshAll(false);
 watch(
   () => props.workspaceId,
   () => {
+    selectedEntriesByScope.value = { ...selectedEntriesByScope.value, WORKSPACE: [] };
+    dragSourcePathsByScope.value = { ...dragSourcePathsByScope.value, WORKSPACE: [] };
+    if (agentClipboard.value?.scope === "WORKSPACE") agentClipboard.value = null;
     invalidateDirectoryCache("WORKSPACE", true);
     void refreshStatus();
     if (rootExpanded.value.has("WORKSPACE")) {
@@ -356,6 +367,128 @@ function openDeleteEntryDialog(scope: Scope, entry: FileTreeEntry) {
   deleteEntryDialog.value?.open({ path: entry.path, type: entry.type });
 }
 
+function openDeleteEntriesDialog(scope: Scope, entries: FileTreeEntry[]) {
+  if (!canWriteScope(scope) || busy.value || entries.length === 0) return;
+  const allowed = entries.filter((entry) => entry.type === "file" && canDeleteEntry(scope, entry.path));
+  if (allowed.length === 0) return;
+  deleteEntryScope.value = scope;
+  if (allowed.length > 1) deleteEntryDialog.value?.openMany(allowed);
+  else deleteEntryDialog.value?.open({ path: allowed[0]!.path, type: allowed[0]!.type });
+}
+
+function setAgentSelection(scope: Scope, entries: FileTreeEntry[]) {
+  selectedEntriesByScope.value = { ...selectedEntriesByScope.value, [scope]: entries };
+}
+
+function setAgentDragSources(scope: Scope, paths: string[] | undefined) {
+  dragSourcePathsByScope.value = { ...dragSourcePathsByScope.value, [scope]: paths ?? [] };
+}
+
+function setAgentClipboard(scope: Scope, entries: FileTreeEntry[], mode: "copy" | "move") {
+  if (!canWriteScope(scope) || entries.length === 0) return;
+  agentClipboard.value = { scope, entries: [...entries], mode };
+}
+
+function fileName(path: string) {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
+}
+
+/** Agent 多文件复制逐项复用同一 WebSocket 连接，成功后按目标目录一次刷新并汇总 Git 修订。 */
+async function copyAgentEntries(scope: Scope, entries: FileTreeEntry[], targetDirectory: string) {
+  if (!canWriteScope(scope) || busy.value || entries.length === 0) return;
+  busy.value = true;
+  const copiedPaths: string[] = [];
+  const failedPaths: string[] = [];
+  try {
+    const linuxServerId = scope === "PUBLIC" ? await publicFileLinuxServerId() : undefined;
+    for (const entry of entries) {
+      const targetPath = agentEntryPath(targetDirectory, fileName(entry.path));
+      try {
+        if (scope === "PUBLIC") {
+          await api.copyPublicAgentFile(entry.path, targetPath, worktreeId(scope), linuxServerId);
+        } else {
+          await api.copyWorkspaceAgentFile(props.workspaceId!, entry.path, targetPath, worktreeId(scope));
+        }
+        copiedPaths.push(targetPath);
+      } catch {
+        failedPaths.push(entry.path);
+      }
+    }
+    await loadDirectory(scope, targetDirectory, true);
+    if (copiedPaths.length > 0) emit("files-mutated", { scope, paths: copiedPaths });
+    if (failedPaths.length > 0) {
+      notifyError(copiedPaths.length > 0 ? "部分 Agent 文件复制失败" : "复制 Agent 文件失败", failedPaths.join("、"));
+    } else {
+      notifySuccess(`已复制 ${copiedPaths.length} 个 Agent 文件`, targetDirectory || "Agent 根目录");
+    }
+  } catch (error) {
+    errorMessage.value = formatAgentConfigError(error, "复制 Agent 文件失败");
+    notifyError("复制 Agent 文件失败", errorMessage.value);
+  } finally {
+    busy.value = false;
+  }
+}
+
+/** 剪切粘贴与多选拖动共用同一移动程序，并把打开文件 tab 通过既有 renamed mutation 迁移到新路径。 */
+async function moveAgentEntries(scope: Scope, sourcePaths: string[], targetDirectory: string) {
+  if (!canWriteScope(scope) || busy.value || sourcePaths.length === 0) return;
+  busy.value = true;
+  const moved: Array<{ path: string; nextPath: string }> = [];
+  const failedPaths: string[] = [];
+  try {
+    const linuxServerId = scope === "PUBLIC" ? await publicFileLinuxServerId() : undefined;
+    for (const path of sourcePaths) {
+      const nextPath = agentEntryPath(targetDirectory, fileName(path));
+      if (parentDirectory(path) === targetDirectory) continue;
+      try {
+        if (scope === "PUBLIC") {
+          await api.movePublicAgentFile(path, nextPath, worktreeId(scope), linuxServerId);
+        } else {
+          await api.moveWorkspaceAgentFile(props.workspaceId!, path, nextPath, worktreeId(scope));
+        }
+        moved.push({ path, nextPath });
+        if (activeFileByScope.value[scope] === path) {
+          activeFileByScope.value = { ...activeFileByScope.value, [scope]: nextPath };
+        }
+      } catch {
+        failedPaths.push(path);
+      }
+    }
+    const refreshDirectories = new Set([targetDirectory, ...moved.map((item) => parentDirectory(item.path))]);
+    await Promise.all([...refreshDirectories].map((directory) => loadDirectory(scope, directory, true)));
+    for (const item of moved) {
+      emit("files-mutated", {
+        scope,
+        paths: [item.path, item.nextPath],
+        renamed: { path: item.path, nextPath: item.nextPath, type: "file" }
+      });
+    }
+    setAgentSelection(scope, []);
+    if (failedPaths.length > 0) {
+      notifyError(moved.length > 0 ? "部分 Agent 文件移动失败" : "移动 Agent 文件失败", failedPaths.join("、"));
+    } else if (moved.length > 0) {
+      notifySuccess(`已移动 ${moved.length} 个 Agent 文件`, targetDirectory || "Agent 根目录");
+    }
+  } catch (error) {
+    errorMessage.value = formatAgentConfigError(error, "移动 Agent 文件失败");
+    notifyError("移动 Agent 文件失败", errorMessage.value);
+  } finally {
+    busy.value = false;
+    setAgentDragSources(scope, undefined);
+  }
+}
+
+function pasteAgentEntries(scope: Scope, targetDirectory: string) {
+  const clipboard = agentClipboard.value;
+  if (!clipboard || clipboard.scope !== scope) return;
+  if (clipboard.mode === "copy") {
+    void copyAgentEntries(scope, clipboard.entries, targetDirectory);
+  } else {
+    agentClipboard.value = null;
+    void moveAgentEntries(scope, clipboard.entries.map((entry) => entry.path), targetDirectory);
+  }
+}
+
 /**
  * 新文件沿用 Agent 配置 write RPC；Git 不记录空目录，因此文件夹用 `.gitkeep` 形成可提交变更。
  * 创建完成后只刷新目标目录，并把真实 Git 路径交给既有 revision/diff 刷新链路。
@@ -396,7 +529,7 @@ async function createAgentEntry(directory: string, name: string, type: "file" | 
   }
 }
 
-/** 公共/应用 Agent 文件共用普通文件树的双击行内改名交互与专用 Agent 配置 RPC。 */
+/** 公共/应用 Agent 文件共用普通文件树的右键行内改名交互与专用 Agent 配置 RPC。 */
 async function renameAgentEntry(scope: Scope, path: string, name: string) {
   if (!canWriteScope(scope) || busy.value || !canRenameEntry(scope, path)) return;
   if (scope === "PUBLIC" && (!publicWorktree.value?.worktreeId || status.value.PUBLIC?.enabled === false)) return;
@@ -472,6 +605,46 @@ async function deleteAgentEntry(path: string, type: "file" | "directory") {
   } catch (error) {
     errorMessage.value = formatAgentConfigError(error, `删除 Agent ${type === "file" ? "文件" : "文件夹"}失败`);
     notifyError(`删除 Agent ${type === "file" ? "文件" : "文件夹"}失败`, errorMessage.value);
+  } finally {
+    busy.value = false;
+  }
+}
+
+/** 多选删除只接收文件选择，逐项执行后统一刷新相关父目录并保留失败文件的明确反馈。 */
+async function deleteAgentEntries(entries: { path: string; type: "file" | "directory" }[]) {
+  const scope = deleteEntryScope.value;
+  if (!canWriteScope(scope) || busy.value || entries.length === 0) return;
+  busy.value = true;
+  const deleted: typeof entries = [];
+  const failedPaths: string[] = [];
+  try {
+    const linuxServerId = scope === "PUBLIC" ? await publicFileLinuxServerId() : undefined;
+    for (const entry of entries) {
+      try {
+        if (scope === "PUBLIC") {
+          await api.deletePublicAgentFile(entry.path, worktreeId(scope), linuxServerId);
+        } else {
+          await api.deleteWorkspaceAgentFile(props.workspaceId!, entry.path, worktreeId(scope));
+        }
+        deleted.push(entry);
+      } catch {
+        failedPaths.push(entry.path);
+      }
+    }
+    const parents = new Set(deleted.map((entry) => parentDirectory(entry.path)));
+    await Promise.all([...parents].map((directory) => loadDirectory(scope, directory, true)));
+    for (const entry of deleted) {
+      emit("files-mutated", { scope, paths: [entry.path], deleted: entry });
+    }
+    setAgentSelection(scope, []);
+    if (failedPaths.length > 0) {
+      notifyError(deleted.length > 0 ? "部分 Agent 文件删除失败" : "删除 Agent 文件失败", failedPaths.join("、"));
+    } else {
+      notifySuccess(`已删除 ${deleted.length} 个 Agent 文件`, scope === "PUBLIC" ? "公共级" : "应用级");
+    }
+  } catch (error) {
+    errorMessage.value = formatAgentConfigError(error, "删除 Agent 文件失败");
+    notifyError("删除 Agent 文件失败", errorMessage.value);
   } finally {
     busy.value = false;
   }
@@ -1767,11 +1940,20 @@ defineExpose({
           :can-create-in-directory="(path) => canCreateInDirectory('PUBLIC', path)"
           :can-delete-entry="(path) => canDeleteEntry('PUBLIC', path)"
           :can-rename-entry="(path) => canRenameEntry('PUBLIC', path)"
+          :selected-entries="selectedEntriesByScope.PUBLIC"
+          :drag-source-paths="dragSourcePathsByScope.PUBLIC"
+          :clipboard-available="agentClipboard?.scope === 'PUBLIC'"
           @toggle="(path) => toggleDirectory('PUBLIC', path)"
           @open-file="(path) => openFile('PUBLIC', path)"
           @create-entry="(path) => openCreateEntryDialog('PUBLIC', path)"
           @delete-entry="(entry) => openDeleteEntryDialog('PUBLIC', entry)"
           @rename-entry="(path, name) => renameAgentEntry('PUBLIC', path, name)"
+          @selection-change="(entries) => setAgentSelection('PUBLIC', entries)"
+          @delete-entries="(entries) => openDeleteEntriesDialog('PUBLIC', entries)"
+          @set-clipboard="(entries, mode) => setAgentClipboard('PUBLIC', entries, mode)"
+          @paste-entries="(targetDirectory) => pasteAgentEntries('PUBLIC', targetDirectory)"
+          @move-entries="(sourcePaths, targetDirectory) => moveAgentEntries('PUBLIC', sourcePaths, targetDirectory)"
+          @drag-source-change="(paths) => setAgentDragSources('PUBLIC', paths)"
         />
       </div>
 
@@ -1833,11 +2015,20 @@ defineExpose({
           :can-create-in-directory="(path) => canCreateInDirectory('WORKSPACE', path)"
           :can-delete-entry="(path) => canDeleteEntry('WORKSPACE', path)"
           :can-rename-entry="(path) => canRenameEntry('WORKSPACE', path)"
+          :selected-entries="selectedEntriesByScope.WORKSPACE"
+          :drag-source-paths="dragSourcePathsByScope.WORKSPACE"
+          :clipboard-available="agentClipboard?.scope === 'WORKSPACE'"
           @toggle="(path) => toggleDirectory('WORKSPACE', path)"
           @open-file="(path) => openFile('WORKSPACE', path)"
           @create-entry="(path) => openCreateEntryDialog('WORKSPACE', path)"
           @delete-entry="(entry) => openDeleteEntryDialog('WORKSPACE', entry)"
           @rename-entry="(path, name) => renameAgentEntry('WORKSPACE', path, name)"
+          @selection-change="(entries) => setAgentSelection('WORKSPACE', entries)"
+          @delete-entries="(entries) => openDeleteEntriesDialog('WORKSPACE', entries)"
+          @set-clipboard="(entries, mode) => setAgentClipboard('WORKSPACE', entries, mode)"
+          @paste-entries="(targetDirectory) => pasteAgentEntries('WORKSPACE', targetDirectory)"
+          @move-entries="(sourcePaths, targetDirectory) => moveAgentEntries('WORKSPACE', sourcePaths, targetDirectory)"
+          @drag-source-change="(paths) => setAgentDragSources('WORKSPACE', paths)"
         />
       </div>
     </div>
@@ -1861,7 +2052,11 @@ defineExpose({
       @request-upload="requestAgentUpload"
     />
     <input ref="uploadInput" type="file" multiple hidden @change="handleAgentUploadChange" />
-    <FileEntryDeleteDialog ref="deleteEntryDialog" @confirm="deleteAgentEntry" />
+    <FileEntryDeleteDialog
+      ref="deleteEntryDialog"
+      @confirm="deleteAgentEntry"
+      @confirm-many="deleteAgentEntries"
+    />
 
     <div v-if="activeScope === 'PUBLIC' && canWrite && !hideGitOps" class="agent-diff">
       <div class="agent-diff-toolbar">

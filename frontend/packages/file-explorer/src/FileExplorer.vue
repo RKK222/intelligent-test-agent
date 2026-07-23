@@ -34,7 +34,7 @@ import { filterLoadedFiles } from "./filterLoadedFiles";
 import { getVsCodeFileIconClass } from "./fileIcons";
 import { highlightKeyword } from "./highlightKeyword";
 import DirectoryRows from "./DirectoryRows.vue";
-import type { WorkspaceClipboardEntry } from "./DirectoryRows.vue";
+import type { WorkspaceClipboardEntry, WorkspaceSelectionEntry } from "./DirectoryRows.vue";
 import FileIcon from "./FileIcon.vue";
 
 const props = withDefaults(defineProps<FileExplorerProps>(), { workspaceName: "Workspace", canWrite: true });
@@ -51,9 +51,12 @@ const emit = defineEmits<{
   search: [keyword: string];
   createEntry: [directory: string, name: string, type: "file" | "directory"];
   deleteEntry: [path: string, type: "file" | "directory"];
+  deleteEntries: [entries: WorkspaceSelectionEntry[]];
   renameEntry: [path: string, name: string];
   copyEntry: [sourcePath: string, targetDirectory: string];
+  copyEntries: [sourcePaths: string[], targetDirectory: string];
   moveEntry: [sourcePath: string, targetDirectory: string];
+  moveEntries: [sourcePaths: string[], targetDirectory: string];
   uploadFiles: [directory: string, files: File[]];
   undoEntry: [];
   cacheAndNavigate: [path: string, type: "file" | "directory"];
@@ -66,7 +69,8 @@ const uploadInput = ref<HTMLInputElement | null>(null);
 const uploadDirectory = ref("");
 const rootDropActive = ref(false);
 const dragResetToken = ref(0);
-const dragSourcePath = ref<string>();
+const dragSourcePaths = ref<string[]>([]);
+const selectedEntries = ref<WorkspaceSelectionEntry[]>([]);
 const directoryRowsRef = ref<InstanceType<typeof DirectoryRows> | null>(null);
 // 本地过滤结果（备用，当 searchResults prop 未提供时使用），统一映射为 FileSearchResult 形态
 const localSearchResults = computed<FileSearchResult[]>(() =>
@@ -124,18 +128,28 @@ function fileIconClass(name: string, path: string) {
 }
 
 function setClipboard(path: string, mode: "copy" | "move") {
-  clipboardEntry.value = { path, mode };
+  clipboardEntry.value = { path, entries: [{ path, type: "file" }], mode };
+}
+
+function setClipboardEntries(entries: WorkspaceSelectionEntry[], mode: "copy" | "move") {
+  clipboardEntry.value = { entries: [...entries], mode };
 }
 
 function pasteEntry(directory: string) {
-  const entry = clipboardEntry.value;
-  if (!entry || !props.canWrite) return;
-  if (entry.mode === "copy") {
-    emit("copyEntry", entry.path, directory);
+  const clipboard = clipboardEntry.value;
+  if (!clipboard || !props.canWrite) return;
+  const entries = clipboard.entries ?? (clipboard.path ? [{ path: clipboard.path, type: "file" as const }] : []);
+  const paths = entries.map((entry) => entry.path);
+  if (paths.length === 0) return;
+  if (clipboard.mode === "copy") {
+    if (paths.length > 1) emit("copyEntries", paths, directory);
+    else emit("copyEntry", paths[0]!, directory);
   } else {
-    emit("moveEntry", entry.path, directory);
+    if (paths.length > 1) emit("moveEntries", paths, directory);
+    else emit("moveEntry", paths[0]!, directory);
     clipboardEntry.value = undefined;
   }
+  selectedEntries.value = [];
 }
 
 function requestUpload(directory: string) {
@@ -161,34 +175,46 @@ function parentDirectory(path: string): string {
   return segments.join("/");
 }
 
-function internalDragSource(event: DragEvent): string {
+function internalDragSources(event: DragEvent): string[] {
   const transfer = event.dataTransfer;
+  const transferredPaths = transfer && typeof transfer.getData === "function"
+    ? transfer.getData("application/x-test-agent-workspace-files")
+    : "";
+  if (transferredPaths) {
+    try {
+      const parsed = JSON.parse(transferredPaths);
+      if (Array.isArray(parsed)) return parsed.map(String).map(normalizePath).filter(Boolean);
+    } catch {
+      // 兼容旧单路径拖动数据。
+    }
+  }
   const transferredPath = transfer && typeof transfer.getData === "function"
     ? transfer.getData("application/x-test-agent-workspace-file")
     : "";
-  return normalizePath(dragSourcePath.value ?? transferredPath);
+  const paths = dragSourcePaths.value.length > 0 ? dragSourcePaths.value : [transferredPath];
+  return paths.map(normalizePath).filter(Boolean);
 }
 
-function setDragSource(path: string | undefined) {
-  dragSourcePath.value = path ? normalizePath(path) : undefined;
+function setDragSources(paths: string[] | undefined) {
+  dragSourcePaths.value = paths?.map(normalizePath).filter(Boolean) ?? [];
 }
 
-function canMoveIntoRoot(sourcePath: string): boolean {
-  return Boolean(sourcePath) && parentDirectory(sourcePath) !== "";
+function canMoveIntoRoot(sourcePaths: string[]): boolean {
+  return sourcePaths.length > 0 && sourcePaths.every((sourcePath) => parentDirectory(sourcePath) !== "");
 }
 
 function onRootDragOver(event: DragEvent) {
   if (!props.canWrite) return;
   if (event.target !== event.currentTarget) return;
   event.preventDefault();
-  const sourcePath = internalDragSource(event);
-  if (sourcePath && !canMoveIntoRoot(sourcePath)) {
+  const sourcePaths = internalDragSources(event);
+  if (sourcePaths.length > 0 && !canMoveIntoRoot(sourcePaths)) {
     event.stopPropagation();
     if (event.dataTransfer) event.dataTransfer.dropEffect = "none";
     rootDropActive.value = false;
     return;
   }
-  if (event.dataTransfer) event.dataTransfer.dropEffect = sourcePath ? "move" : "copy";
+  if (event.dataTransfer) event.dataTransfer.dropEffect = sourcePaths.length > 0 ? "move" : "copy";
   rootDropActive.value = true;
 }
 
@@ -196,10 +222,10 @@ function onRootDrop(event: DragEvent) {
   if (!props.canWrite || !event.dataTransfer) return;
   if (event.target !== event.currentTarget) return;
   event.preventDefault();
-  const sourcePath = internalDragSource(event);
+  const sourcePaths = internalDragSources(event);
   const files = Array.from(event.dataTransfer.files ?? []);
   rootDropActive.value = false;
-  if (sourcePath && !canMoveIntoRoot(sourcePath)) {
+  if (sourcePaths.length > 0 && !canMoveIntoRoot(sourcePaths)) {
     event.dataTransfer.dropEffect = "none";
     return;
   }
@@ -207,12 +233,21 @@ function onRootDrop(event: DragEvent) {
     emit("uploadFiles", "", files);
     return;
   }
-  if (sourcePath && canMoveIntoRoot(sourcePath)) emit("moveEntry", sourcePath, "");
+  if (canMoveIntoRoot(sourcePaths)) {
+    if (sourcePaths.length > 1) emit("moveEntries", sourcePaths, "");
+    else emit("moveEntry", sourcePaths[0]!, "");
+    selectedEntries.value = [];
+  }
+}
+
+function emitDeleteEntries(entries: WorkspaceSelectionEntry[]) {
+  emit("deleteEntries", entries);
+  selectedEntries.value = [];
 }
 
 function resetDragState() {
   rootDropActive.value = false;
-  dragSourcePath.value = undefined;
+  dragSourcePaths.value = [];
   dragResetToken.value += 1;
 }
 
@@ -309,7 +344,8 @@ defineExpose({ openRootActions });
         :can-write="canWrite"
         :can-undo="canUndo"
         :drag-reset-token="dragResetToken"
-        :drag-source-path="dragSourcePath"
+        :drag-source-paths="dragSourcePaths"
+        :selected-entries="selectedEntries"
         :clipboard-entry="clipboardEntry"
         :depth="0"
         @toggle-directory="emit('toggleDirectory', $event)"
@@ -320,15 +356,19 @@ defineExpose({ openRootActions });
         @add-view-file-context="emit('addViewFileContext', $event)"
         @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
         @delete-entry="(path, type) => emit('deleteEntry', path, type)"
+        @delete-entries="emitDeleteEntries"
         @rename-entry="(path, name) => emit('renameEntry', path, name)"
         @set-clipboard="setClipboard"
+        @set-clipboard-entries="setClipboardEntries"
         @paste-entry="pasteEntry"
         @undo-entry="emit('undoEntry')"
         @move-entry="(sourcePath, targetDirectory) => emit('moveEntry', sourcePath, targetDirectory)"
+        @move-entries="(sourcePaths, targetDirectory) => { emit('moveEntries', sourcePaths, targetDirectory); selectedEntries = []; }"
         @upload-files="(directory, files) => emit('uploadFiles', directory, files)"
         @request-upload="requestUpload"
         @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
-        @drag-source-change="setDragSource"
+        @drag-source-change="setDragSources"
+        @selection-change="selectedEntries = $event"
       />
       <input
         ref="uploadInput"

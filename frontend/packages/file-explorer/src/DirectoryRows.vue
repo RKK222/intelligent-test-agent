@@ -15,7 +15,11 @@ export type DirectoryRowsProps = {
   /** 根组件递增该值，统一清理递归目录残留的拖放高亮。 */
   dragResetToken?: number;
   /** 根组件保存的内部拖源相对路径，递归行共享它以统一校验落点。 */
+  dragSourcePaths?: string[];
+  /** 兼容旧调用方的单项拖源；新交互统一使用 dragSourcePaths。 */
   dragSourcePath?: string;
+  /** Ctrl/Cmd 多选的可写工作区条目，由文件树根组件统一持有。 */
+  selectedEntries?: WorkspaceSelectionEntry[];
   /** 文件路径 → 行变更统计，用于在文件名后展示 +N -N。 */
   changeStats?: Record<string, { additions: number; deletions: number }>;
   /** 文件树内部剪贴板，仅保存当前工作区的普通文件引用。 */
@@ -23,8 +27,15 @@ export type DirectoryRowsProps = {
 };
 
 export type WorkspaceClipboardEntry = {
-  path: string;
+  /** 新版多选剪贴板；path 仅保留给旧调用方兼容。 */
+  entries?: WorkspaceSelectionEntry[];
+  path?: string;
   mode: "copy" | "move";
+};
+
+export type WorkspaceSelectionEntry = {
+  path: string;
+  type: "file" | "directory";
 };
 </script>
 
@@ -33,6 +44,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import { Plane, Plus, Trash2 } from "lucide-vue-next";
 import { cn } from "@test-agent/ui-kit";
 import FileEntryCreateDialog from "./FileEntryCreateDialog.vue";
+import FileEntryContextMenu from "./FileEntryContextMenu.vue";
 import FileEntryDeleteDialog from "./FileEntryDeleteDialog.vue";
 import FileIcon from "./FileIcon.vue";
 
@@ -46,15 +58,19 @@ const emit = defineEmits<{
   addViewFileContext: [entry: WorkspaceViewEntry];
   createEntry: [directory: string, name: string, type: "file" | "directory"];
   deleteEntry: [path: string, type: "file" | "directory"];
+  deleteEntries: [entries: WorkspaceSelectionEntry[]];
   renameEntry: [path: string, name: string];
   setClipboard: [path: string, mode: "copy" | "move"];
+  setClipboardEntries: [entries: WorkspaceSelectionEntry[], mode: "copy" | "move"];
   pasteEntry: [directory: string];
   undoEntry: [];
   moveEntry: [sourcePath: string, targetDirectory: string];
+  moveEntries: [sourcePaths: string[], targetDirectory: string];
   uploadFiles: [directory: string, files: File[]];
   requestUpload: [directory: string];
   cacheAndNavigate: [path: string, type: "file" | "directory"];
-  dragSourceChange: [path: string | undefined];
+  dragSourceChange: [paths: string[] | undefined];
+  selectionChange: [entries: WorkspaceSelectionEntry[]];
 }>();
 
 const entries = computed(() => {
@@ -114,7 +130,12 @@ function showsWorkspaceChangeStats(entry: MaybeWorkspaceViewEntry): boolean {
   return entry.source === undefined || entry.source === "WORKSPACE";
 }
 
-const entryContextMenu = ref<{ entry: FileTreeEntry; x: number; y: number } | null>(null);
+const entryContextMenu = ref<{
+  entry: FileTreeEntry;
+  selection: WorkspaceSelectionEntry[];
+  x: number;
+  y: number;
+} | null>(null);
 const dragOverDirectory = ref<string | null>(null);
 const createDialog = ref<InstanceType<typeof FileEntryCreateDialog> | null>(null);
 const deleteDialog = ref<InstanceType<typeof FileEntryDeleteDialog> | null>(null);
@@ -134,7 +155,9 @@ function focusRenameInput() {
 
 function openFileContextMenu(event: MouseEvent, entry: FileTreeEntry) {
   event.preventDefault();
-  entryContextMenu.value = { entry, x: event.clientX, y: event.clientY };
+  const selection = selectedForEntry(entry);
+  if (!isSelected(entry)) emit("selectionChange", selection);
+  entryContextMenu.value = { entry, selection, x: event.clientX, y: event.clientY };
 }
 
 function closeFileContextMenu() {
@@ -162,29 +185,68 @@ function normalizePath(path: string): string {
   return path.split(/[\\/]+/).filter(Boolean).join("/");
 }
 
+function selectionEntry(entry: FileTreeEntry): WorkspaceSelectionEntry {
+  return { path: normalizePath(workspaceEntryPath(entry)), type: entry.type };
+}
+
+function isSelected(entry: FileTreeEntry): boolean {
+  const path = normalizePath(workspaceEntryPath(entry));
+  return props.selectedEntries?.some((item) => normalizePath(item.path) === path) ?? false;
+}
+
+/** 父目录已被选中时忽略其后代，避免批量移动或删除重复操作同一棵子树。 */
+function topLevelSelection(items: WorkspaceSelectionEntry[]): WorkspaceSelectionEntry[] {
+  const normalized = items.map((item) => ({ ...item, path: normalizePath(item.path) }));
+  return normalized.filter((item) => !normalized.some((parent) =>
+    parent.type === "directory" && parent.path !== item.path && isDescendantPath(parent.path, item.path)
+  ));
+}
+
+function selectedForEntry(entry: FileTreeEntry): WorkspaceSelectionEntry[] {
+  if (!canMutateEntry(entry)) return [];
+  if (isSelected(entry)) return topLevelSelection(props.selectedEntries ?? []);
+  return [selectionEntry(entry)];
+}
+
 function isDescendantPath(path: string, candidate: string): boolean {
   const sourceSegments = normalizePath(path).split("/").filter(Boolean);
   const targetSegments = normalizePath(candidate).split("/").filter(Boolean);
   return targetSegments.length > sourceSegments.length && sourceSegments.every((segment, index) => segment === targetSegments[index]);
 }
 
-function internalDragSource(event: DragEvent): string {
+function internalDragSources(event: DragEvent): string[] {
   const transfer = event.dataTransfer;
+  const transferredPaths = transfer && typeof transfer.getData === "function"
+    ? transfer.getData("application/x-test-agent-workspace-files")
+    : "";
+  if (transferredPaths) {
+    try {
+      const parsed = JSON.parse(transferredPaths);
+      if (Array.isArray(parsed)) return parsed.map(String).map(normalizePath).filter(Boolean);
+    } catch {
+      // 兼容旧单项拖动数据，解析失败后继续读取单路径 MIME。
+    }
+  }
   const transferredPath = transfer && typeof transfer.getData === "function"
     ? transfer.getData("application/x-test-agent-workspace-file")
     : "";
-  return normalizePath(props.dragSourcePath ?? transferredPath);
+  const paths = props.dragSourcePaths?.length ? props.dragSourcePaths : [props.dragSourcePath ?? transferredPath];
+  return paths.map(normalizePath).filter(Boolean);
 }
 
 /** 同目录、自身或目录后代都会让服务端移动语义失效，必须在树内提前阻断。 */
-function canMoveIntoDirectory(sourcePath: string, entry: MaybeWorkspaceViewEntry): boolean {
-  if (!sourcePath || !canWriteChildren(entry)) return false;
+function canMoveIntoDirectory(sourcePaths: string[], entry: MaybeWorkspaceViewEntry): boolean {
+  if (sourcePaths.length === 0 || !canWriteChildren(entry)) return false;
   const targetPath = normalizePath(workspaceEntryPath(entry));
-  return targetPath !== sourcePath && parentDirectory(sourcePath) !== targetPath && !isDescendantPath(sourcePath, targetPath);
+  return sourcePaths.every((sourcePath) =>
+    targetPath !== sourcePath && parentDirectory(sourcePath) !== targetPath && !isDescendantPath(sourcePath, targetPath)
+  );
 }
 
 function isDraggingEntry(entry: MaybeWorkspaceViewEntry): boolean {
-  return normalizePath(props.dragSourcePath ?? "") === normalizePath(workspaceEntryPath(entry));
+  const path = normalizePath(workspaceEntryPath(entry));
+  return (props.dragSourcePaths ?? [props.dragSourcePath ?? ""])
+    .some((source) => normalizePath(source) === path);
 }
 
 function targetDirectory(entry: FileTreeEntry): string {
@@ -192,9 +254,11 @@ function targetDirectory(entry: FileTreeEntry): string {
 }
 
 function emitSetClipboard(mode: "copy" | "move") {
-  const entry = entryContextMenu.value?.entry;
-  if (!entry || entry.type !== "file" || !canMutateEntry(entry)) return;
-  emit("setClipboard", workspaceEntryPath(entry), mode);
+  const context = entryContextMenu.value;
+  if (!context || context.selection.length === 0) return;
+  if (mode === "copy" && context.selection.some((entry) => entry.type !== "file")) return;
+  if (context.selection.length === 1) emit("setClipboard", context.selection[0]!.path, mode);
+  emit("setClipboardEntries", context.selection, mode);
   closeFileContextMenu();
 }
 
@@ -211,13 +275,16 @@ function onRowKeydown(event: KeyboardEvent, entry: FileTreeEntry) {
   const key = event.key.toLowerCase();
   if (key === "delete" || key === "del") {
     event.preventDefault();
-    if (canMutateEntry(entry)) openDeleteDialog(entry);
+    if (canMutateEntry(entry)) openDeleteDialog(entry, selectedForEntry(entry));
     return;
   }
   if (!event.ctrlKey && !event.metaKey) return;
-  if ((key === "c" || key === "x") && entry.type === "file" && canMutateEntry(entry)) {
+  if ((key === "c" || key === "x") && canMutateEntry(entry)) {
+    const selection = selectedForEntry(entry);
+    if (key === "c" && selection.some((item) => item.type !== "file")) return;
     event.preventDefault();
-    emit("setClipboard", workspaceEntryPath(entry), key === "c" ? "copy" : "move");
+    if (selection.length === 1) emit("setClipboard", selection[0]!.path, key === "c" ? "copy" : "move");
+    emit("setClipboardEntries", selection, key === "c" ? "copy" : "move");
     return;
   }
   if (key === "v" && props.clipboardEntry && canPasteIntoEntry(entry)) {
@@ -241,16 +308,20 @@ function onDragStart(event: DragEvent, entry: FileTreeEntry) {
     event.preventDefault();
     return;
   }
-  const sourcePath = workspaceEntryPath(entry);
+  const selected = selectedForEntry(entry);
+  const sourcePaths = selected.map((item) => item.path);
+  const sourcePath = sourcePaths[0]!;
+  if (!isSelected(entry)) emit("selectionChange", selected);
   event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("application/x-test-agent-workspace-files", JSON.stringify(sourcePaths));
   event.dataTransfer.setData("application/x-test-agent-workspace-file", sourcePath);
   event.dataTransfer.setData("text/plain", sourcePath);
-  emit("dragSourceChange", normalizePath(sourcePath));
+  emit("dragSourceChange", sourcePaths);
 }
 
 function onDirectoryDragOver(event: DragEvent, entry: FileTreeEntry) {
-  const sourcePath = internalDragSource(event);
-  if (entry.type !== "directory" || !canWriteChildren(entry) || (sourcePath && !canMoveIntoDirectory(sourcePath, entry))) {
+  const sourcePaths = internalDragSources(event);
+  if (entry.type !== "directory" || !canWriteChildren(entry) || (sourcePaths.length > 0 && !canMoveIntoDirectory(sourcePaths, entry))) {
     // 非法树内落点必须吞掉事件，避免错误冒泡到工作区根目录触发移动或上传。
     event.preventDefault();
     event.stopPropagation();
@@ -260,13 +331,13 @@ function onDirectoryDragOver(event: DragEvent, entry: FileTreeEntry) {
   }
   event.preventDefault();
   event.stopPropagation();
-  if (event.dataTransfer) event.dataTransfer.dropEffect = sourcePath ? "move" : "copy";
+  if (event.dataTransfer) event.dataTransfer.dropEffect = sourcePaths.length > 0 ? "move" : "copy";
   dragOverDirectory.value = nodeId(entry);
 }
 
 function onDirectoryDrop(event: DragEvent, entry: FileTreeEntry) {
-  const sourcePath = internalDragSource(event);
-  if (entry.type !== "directory" || !canWriteChildren(entry) || (sourcePath && !canMoveIntoDirectory(sourcePath, entry)) || !event.dataTransfer) {
+  const sourcePaths = internalDragSources(event);
+  if (entry.type !== "directory" || !canWriteChildren(entry) || (sourcePaths.length > 0 && !canMoveIntoDirectory(sourcePaths, entry)) || !event.dataTransfer) {
     event.preventDefault();
     event.stopPropagation();
     if (event.dataTransfer) event.dataTransfer.dropEffect = "none";
@@ -282,7 +353,8 @@ function onDirectoryDrop(event: DragEvent, entry: FileTreeEntry) {
     return;
   }
   dragOverDirectory.value = null;
-  if (sourcePath) emit("moveEntry", sourcePath, workspaceEntryPath(entry));
+  if (sourcePaths.length > 1) emit("moveEntries", sourcePaths, workspaceEntryPath(entry));
+  else if (sourcePaths[0]) emit("moveEntry", sourcePaths[0], workspaceEntryPath(entry));
 }
 
 function onDragEnd() {
@@ -294,7 +366,17 @@ function isKnownEmptyDirectory(entry: FileTreeEntry): boolean {
   return Array.isArray(children) && children.length === 0;
 }
 
-function onRowClick(entry: FileTreeEntry) {
+function onRowClick(event: MouseEvent, entry: FileTreeEntry) {
+  if ((event.ctrlKey || event.metaKey) && canMutateEntry(entry)) {
+    const current = props.selectedEntries ?? [];
+    const path = normalizePath(workspaceEntryPath(entry));
+    const next = isSelected(entry)
+      ? current.filter((item) => normalizePath(item.path) !== path)
+      : [...current, selectionEntry(entry)];
+    emit("selectionChange", next);
+    return;
+  }
+  if (props.selectedEntries?.length) emit("selectionChange", []);
   if (entry.type === "directory") {
     if (isKnownEmptyDirectory(entry)) {
       return;
@@ -315,9 +397,24 @@ function openCreateDialog(directory: string) {
 /** 根目录标题与目录行的“+”共用同一个明确目标路径的操作面板。 */
 defineExpose({ openCreateDialog });
 
-function openDeleteDialog(entry: FileTreeEntry) {
+function openDeleteDialog(entry: FileTreeEntry, selection: WorkspaceSelectionEntry[] = [selectionEntry(entry)]) {
   if (!canMutateEntry(entry)) return;
-  deleteDialog.value?.open({ path: workspaceEntryPath(entry), type: entry.type });
+  const targets = topLevelSelection(selection);
+  if (targets.length > 1) deleteDialog.value?.openMany(targets);
+  else if (targets[0]) deleteDialog.value?.open(targets[0]);
+}
+
+function deleteContextSelection() {
+  const context = entryContextMenu.value;
+  if (!context) return;
+  closeFileContextMenu();
+  openDeleteDialog(context.entry, context.selection);
+}
+
+function renameContextEntry() {
+  const entry = entryContextMenu.value?.entry;
+  closeFileContextMenu();
+  if (entry) startRename(entry);
 }
 
 function startRename(entry: FileTreeEntry) {
@@ -370,6 +467,7 @@ function submitRename() {
         :class="cn(
           'ta-file-tree-row',
           (isWorkspaceViewEntry(entry) ? activePath === nodeId(entry) : activePath === entry.path) && 'is-active',
+          isSelected(entry) && 'is-selected',
           dragOverDirectory === nodeId(entry) && 'is-drop-target',
           canMutateEntry(entry) && 'is-draggable',
           isDraggingEntry(entry) && 'is-dragging',
@@ -383,9 +481,8 @@ function submitRename() {
             ? (entry.type === 'directory' ? (entry.name.includes('测试执行') ? '68px' : '48px') : '26px')
             : (entry.type === 'directory' && entry.name.includes('测试执行') ? '26px' : '6px')
         }"
-        @click="onRowClick(entry)"
+        @click="onRowClick($event, entry)"
         @contextmenu="openFileContextMenu($event, entry)"
-        @dblclick.stop="startRename(entry)"
         @keydown="onRowKeydown($event, entry)"
         @dragstart="onDragStart($event, entry)"
         @dragend="onDragEnd"
@@ -477,7 +574,8 @@ function submitRename() {
         :can-write="canWrite"
         :can-undo="canUndo"
         :drag-reset-token="dragResetToken"
-        :drag-source-path="dragSourcePath"
+        :drag-source-paths="dragSourcePaths"
+        :selected-entries="selectedEntries"
         :clipboard-entry="clipboardEntry"
         :depth="depth + 1"
         @toggle-directory="emit('toggleDirectory', $event)"
@@ -488,30 +586,45 @@ function submitRename() {
         @add-view-file-context="emit('addViewFileContext', $event)"
         @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
         @delete-entry="(path, type) => emit('deleteEntry', path, type)"
+        @delete-entries="emit('deleteEntries', $event)"
         @rename-entry="(path, name) => emit('renameEntry', path, name)"
         @set-clipboard="(path, mode) => emit('setClipboard', path, mode)"
+        @set-clipboard-entries="(entries, mode) => emit('setClipboardEntries', entries, mode)"
         @paste-entry="emit('pasteEntry', $event)"
         @undo-entry="emit('undoEntry')"
         @move-entry="(sourcePath, targetDirectory) => emit('moveEntry', sourcePath, targetDirectory)"
+        @move-entries="(sourcePaths, targetDirectory) => emit('moveEntries', sourcePaths, targetDirectory)"
         @upload-files="(directory, files) => emit('uploadFiles', directory, files)"
         @request-upload="emit('requestUpload', $event)"
         @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
         @drag-source-change="emit('dragSourceChange', $event)"
+        @selection-change="emit('selectionChange', $event)"
       />
     </div>
-    <Teleport to="body">
-      <div
-        v-if="entryContextMenu"
-        class="ta-file-context-menu-backdrop"
-        @click="closeFileContextMenu"
-        @contextmenu.prevent="closeFileContextMenu"
-      />
-      <div
-        v-if="entryContextMenu"
-        class="ta-file-context-menu"
-        role="menu"
-        :style="{ left: `${entryContextMenu.x}px`, top: `${entryContextMenu.y}px` }"
-      >
+    <FileEntryContextMenu
+      v-if="entryContextMenu"
+      :x="entryContextMenu.x"
+      :y="entryContextMenu.y"
+      @close="closeFileContextMenu"
+    >
+        <button
+          v-if="entryContextMenu.selection.length === 1 && canMutateEntry(entryContextMenu.entry)"
+          type="button"
+          role="menuitem"
+          class="ta-file-context-menu-item"
+          @click="renameContextEntry"
+        >
+          重命名
+        </button>
+        <button
+          v-if="entryContextMenu.selection.length > 0"
+          type="button"
+          role="menuitem"
+          class="ta-file-context-menu-item is-danger"
+          @click="deleteContextSelection"
+        >
+          {{ entryContextMenu.selection.length > 1 ? `删除 ${entryContextMenu.selection.length} 个条目` : '删除' }}
+        </button>
         <button
           v-if="entryContextMenu.entry.type === 'file'"
           type="button"
@@ -522,7 +635,7 @@ function submitRename() {
           添加文件到对话
         </button>
         <button
-          v-if="entryContextMenu.entry.type === 'file' && canMutateEntry(entryContextMenu.entry)"
+          v-if="entryContextMenu.selection.length > 0 && entryContextMenu.selection.every((entry) => entry.type === 'file')"
           type="button"
           role="menuitem"
           class="ta-file-context-menu-item"
@@ -532,7 +645,7 @@ function submitRename() {
           <span>Ctrl/Cmd+C</span>
         </button>
         <button
-          v-if="entryContextMenu.entry.type === 'file' && canMutateEntry(entryContextMenu.entry)"
+          v-if="entryContextMenu.selection.length > 0"
           type="button"
           role="menuitem"
           class="ta-file-context-menu-item"
@@ -561,8 +674,7 @@ function submitRename() {
           撤销上一步
           <span>Ctrl/Cmd+Z</span>
         </button>
-      </div>
-    </Teleport>
+    </FileEntryContextMenu>
     <FileEntryCreateDialog
       ref="createDialog"
       @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
@@ -571,6 +683,7 @@ function submitRename() {
     <FileEntryDeleteDialog
       ref="deleteDialog"
       @confirm="(path, type) => emit('deleteEntry', path, type)"
+      @confirm-many="emit('deleteEntries', $event)"
     />
   </div>
 </template>
@@ -583,6 +696,12 @@ function submitRename() {
 .ta-file-tree-row.is-dragging {
   cursor: grabbing;
   opacity: 0.55;
+}
+
+.ta-file-tree-row.is-selected {
+  outline: 1px solid var(--ta-accent, #2563eb);
+  outline-offset: -1px;
+  background: rgb(37 99 235 / 12%);
 }
 </style>
 
@@ -957,45 +1076,6 @@ function submitRename() {
   .ta-file-dialog { animation: none; }
 }
 
-.ta-file-context-menu-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 2600;
-  background: transparent;
-}
-
-.ta-file-context-menu {
-  position: fixed;
-  z-index: 2601;
-  min-width: 140px;
-  padding: 4px;
-  border: 1px solid #d4d4d8;
-  border-radius: 6px;
-  background: #fff;
-  box-shadow: 0 12px 28px rgb(15 23 42 / 18%);
-}
-
-.ta-file-context-menu-item {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  padding: 6px 8px;
-  color: #1f2937;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.ta-file-context-menu-item span {
-  color: #8b949e;
-  font-size: 11px;
-}
-
 :deep(.ta-file-tree-row.is-drop-target) {
   outline: 1px solid var(--ta-accent, #2563eb);
   outline-offset: -1px;
@@ -1033,10 +1113,6 @@ function submitRename() {
 
 .ta-file-tree-row.is-reference-collision :deep(.ta-file-tree-icon) {
   filter: brightness(0) saturate(100%) invert(24%) sepia(83%) saturate(3165%) hue-rotate(347deg) brightness(93%) contrast(87%);
-}
-
-.ta-file-context-menu-item:hover {
-  background: #f1f5f9;
 }
 
 .ta-file-tree-row-wrapper {

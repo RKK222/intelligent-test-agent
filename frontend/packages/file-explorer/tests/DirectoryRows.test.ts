@@ -269,7 +269,7 @@ describe("DirectoryRows", () => {
     expect(view.emitted("deleteEntry")).toEqual([["docs", "directory"]]);
   });
 
-  it("double-clicks a file to edit its name and emits the renamed filename", async () => {
+  it("renames a file from the context menu and ignores double click", async () => {
     const view = render(DirectoryRows, {
       props: {
         directory: "",
@@ -280,7 +280,11 @@ describe("DirectoryRows", () => {
       }
     });
 
-    await fireEvent.dblClick(view.getByRole("button", { name: "README.md" }));
+    const row = view.getByRole("button", { name: "README.md" });
+    await fireEvent.dblClick(row);
+    expect(view.queryByRole("textbox", { name: "重命名工作区条目" })).toBeNull();
+    await fireEvent.contextMenu(row);
+    await fireEvent.click(view.getByRole("menuitem", { name: "重命名" }));
     const input = view.getByRole("textbox", { name: "重命名工作区条目" }) as HTMLInputElement;
     expect(input.value).toBe("README.md");
 
@@ -290,7 +294,7 @@ describe("DirectoryRows", () => {
     expect(view.emitted("renameEntry")).toEqual([["README.md", "详细设计.md"]]);
   });
 
-  it("double-clicks a directory to edit its name and emits the renamed directory", async () => {
+  it("renames a directory from the context menu", async () => {
     const view = render(DirectoryRows, {
       props: {
         directory: "",
@@ -301,7 +305,8 @@ describe("DirectoryRows", () => {
       }
     });
 
-    await fireEvent.dblClick(view.getByRole("button", { name: "tests" }));
+    await fireEvent.contextMenu(view.getByRole("button", { name: "tests" }));
+    await fireEvent.click(view.getByRole("menuitem", { name: "重命名" }));
     const input = view.getByRole("textbox", { name: "重命名工作区条目" }) as HTMLInputElement;
     expect(input.value).toBe("tests");
 
@@ -360,6 +365,73 @@ describe("DirectoryRows", () => {
       ["README.md", "move"]
     ]);
     expect(view.emitted("pasteEntry")).toEqual([["docs"]]);
+  });
+
+  it("selects files with Ctrl/Cmd and exposes multi-file context actions", async () => {
+    const selectedEntries = [
+      { path: "a.md", type: "file" as const },
+      { path: "b.md", type: "file" as const }
+    ];
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory: {
+          "": [
+            { type: "file" as const, path: "a.md", name: "a.md" },
+            { type: "file" as const, path: "b.md", name: "b.md" }
+          ]
+        },
+        expandedDirectories: new Set<string>(),
+        selectedEntries
+      }
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "a.md" }), { ctrlKey: true });
+    expect(view.emitted("selectionChange")?.[0]).toEqual([[selectedEntries[1]]]);
+
+    await fireEvent.contextMenu(view.getByRole("button", { name: "a.md" }));
+    await fireEvent.click(view.getByRole("menuitem", { name: /^复制/ }));
+    expect(view.emitted("setClipboardEntries")).toEqual([[selectedEntries, "copy"]]);
+
+    await fireEvent.contextMenu(view.getByRole("button", { name: "a.md" }));
+    await fireEvent.click(view.getByRole("menuitem", { name: "删除 2 个条目" }));
+    const dialog = view.getByRole("dialog", { name: "删除多个条目" });
+    await fireEvent.click(within(dialog).getByRole("button", { name: "确认删除" }));
+    expect(view.emitted("deleteEntries")).toEqual([[selectedEntries]]);
+  });
+
+  it("moves all selected files when one selected row is dragged", async () => {
+    const selectedEntries = [
+      { path: "a.md", type: "file" as const },
+      { path: "b.md", type: "file" as const }
+    ];
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory: {
+          "": [
+            { type: "directory" as const, path: "archive", name: "archive" },
+            { type: "file" as const, path: "a.md", name: "a.md" },
+            { type: "file" as const, path: "b.md", name: "b.md" }
+          ]
+        },
+        expandedDirectories: new Set<string>(),
+        selectedEntries
+      }
+    });
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "none",
+      dropEffect: "none",
+      setData: (type: string, value: string) => data.set(type, value),
+      getData: (type: string) => data.get(type) ?? ""
+    };
+
+    await fireEvent.dragStart(view.getByRole("button", { name: "a.md" }), { dataTransfer });
+    await fireEvent.dragOver(view.getByRole("button", { name: "archive" }), { dataTransfer });
+    await fireEvent.drop(view.getByRole("button", { name: "archive" }), { dataTransfer });
+
+    expect(view.emitted("moveEntries")).toEqual([[['a.md', 'b.md'], "archive"]]);
   });
 
   it("moves a dragged file when it is dropped on a directory", async () => {
@@ -424,7 +496,7 @@ describe("DirectoryRows", () => {
     await fireEvent.dragEnd(src, { dataTransfer });
 
     expect(view.emitted("moveEntry")).toEqual([["src", "archive"]]);
-    expect(view.emitted("dragSourceChange")).toEqual([["src"], [undefined]]);
+    expect(view.emitted("dragSourceChange")).toEqual([[["src"]], [undefined]]);
   });
 
   it("rejects a directory dropped onto itself, its parent, or a descendant without matching sibling prefixes", async () => {
@@ -637,7 +709,7 @@ describe("DirectoryRows", () => {
     const dialog = view.getByRole("dialog", { name: "新建或上传文件" });
     expect(dialog.textContent).toContain("目标目录");
     expect(dialog.textContent).toContain("docs");
-    await fireEvent.click(within(dialog).getByRole("button", { name: "上传" }));
+    await fireEvent.click(within(dialog).getByRole("radio", { name: "上传" }));
     await fireEvent.click(within(dialog).getByRole("button", { name: "选择文件" }));
 
     expect(view.emitted("requestUpload")).toEqual([["docs"]]);

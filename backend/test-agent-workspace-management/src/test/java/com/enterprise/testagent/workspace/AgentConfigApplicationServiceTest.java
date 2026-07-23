@@ -925,6 +925,7 @@ class AgentConfigApplicationServiceTest {
     void workspaceAgentFilesUsePluralAgentsDirectory() throws Exception {
         Path workspaceRoot = root.resolve("project");
         Files.createDirectories(workspaceRoot.resolve(".opencode/agents"));
+        Files.createDirectories(workspaceRoot.resolve(".opencode/skills"));
         Files.writeString(workspaceRoot.resolve(".opencode/agents/review.md"), "review");
         AgentConfigApplicationService service = service(
                 Map.of(
@@ -948,6 +949,10 @@ class AgentConfigApplicationServiceTest {
         service.writeWorkspaceAgentFile("wrk_project", "agents/new.md", "new agent", null);
         service.uploadWorkspaceAgentFile("wrk_project", "agents/icon.bin", "AAEC/w==", null);
         service.renameWorkspaceAgentFile("wrk_project", "agents/review.md", "payment-review.md", null);
+        service.copyWorkspaceAgentFile(
+                "wrk_project", "agents/payment-review.md", "skills/payment-review.md", null);
+        service.moveWorkspaceAgentFile(
+                "wrk_project", "skills/payment-review.md", "agents/moved-review.md", null);
 
         assertThat(entries).extracting(FileTreeEntryResponse::name).contains("review.md");
         assertThat(Files.readString(workspaceRoot.resolve(".opencode/agents/new.md"))).isEqualTo("new agent");
@@ -955,8 +960,14 @@ class AgentConfigApplicationServiceTest {
         assertThat(Files.readAllBytes(workspaceRoot.resolve(".opencode/agents/icon.bin")))
                 .containsExactly((byte) 0, (byte) 1, (byte) 2, (byte) 255);
         assertThat(Files.exists(workspaceRoot.resolve(".opencode/agents/review.md"))).isFalse();
+        assertThat(Files.readString(workspaceRoot.resolve(".opencode/agents/moved-review.md"))).isEqualTo("review");
+        assertThat(Files.exists(workspaceRoot.resolve(".opencode/skills/payment-review.md"))).isFalse();
         assertThat(Files.exists(workspaceRoot.resolve(".opencode/agent/new.md"))).isFalse();
         assertThatThrownBy(() -> service.uploadWorkspaceAgentFile("wrk_project", "package.json", "e30=", null))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("只允许上传");
+        assertThatThrownBy(() -> service.moveWorkspaceAgentFile(
+                "wrk_project", "agents/payment-review.md", "package.json", null))
                 .isInstanceOf(PlatformException.class)
                 .hasMessageContaining("只允许上传");
         service.deleteWorkspaceAgentFile("wrk_project", "agents/new.md", null);
@@ -1179,6 +1190,7 @@ class AgentConfigApplicationServiceTest {
     void publicAgentFileRenameUsesOwnedPersonalWorktree() throws Exception {
         Path worktreeRoot = root.resolve(".configdev/public-usr_admin");
         Files.createDirectories(worktreeRoot.resolve("opencode/agents"));
+        Files.createDirectories(worktreeRoot.resolve("opencode/skills"));
         Files.writeString(worktreeRoot.resolve("opencode/agents/review.md"), "review");
         InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
         agentConfigs.saveWorktree(new AgentConfigWorktree(
@@ -1204,12 +1216,18 @@ class AgentConfigApplicationServiceTest {
                 Optional.empty());
 
         service.renamePublicAgentFile("agents/review.md", "shared-review.md", "agw_public_rename", ADMIN);
+        service.copyPublicAgentFile(
+                "agents/shared-review.md", "skills/shared-review.md", "agw_public_rename", ADMIN);
+        service.movePublicAgentFile(
+                "skills/shared-review.md", "agents/moved-review.md", "agw_public_rename", ADMIN);
         service.uploadPublicAgentFile("agents/icon.bin", "AAEC/w==", "agw_public_rename", ADMIN);
 
         assertThat(Files.readString(worktreeRoot.resolve("opencode/agents/shared-review.md"))).isEqualTo("review");
         assertThat(Files.readAllBytes(worktreeRoot.resolve("opencode/agents/icon.bin")))
                 .containsExactly((byte) 0, (byte) 1, (byte) 2, (byte) 255);
         assertThat(Files.exists(worktreeRoot.resolve("opencode/agents/review.md"))).isFalse();
+        assertThat(Files.readString(worktreeRoot.resolve("opencode/agents/moved-review.md"))).isEqualTo("review");
+        assertThat(Files.exists(worktreeRoot.resolve("opencode/skills/shared-review.md"))).isFalse();
     }
 
     @Test
