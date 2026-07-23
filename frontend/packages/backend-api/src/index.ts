@@ -487,6 +487,42 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const workspaceFileConnections = new Map<string, Promise<WorkspaceFileSocketClient>>();
   const agentConfigFileSockets = new Map<string, WorkspaceFileSocketClient>();
   const agentConfigFileConnections = new Map<string, Promise<WorkspaceFileSocketClient>>();
+  const runtimeProviderAllowlistRequests = new Map<string, Promise<Set<string> | undefined>>();
+
+  /**
+   * 模型和 Provider 目录并发加载时复用同一轮 config 请求；请求结束即清理，配置热加载后可及时生效。
+   * config 暂时不可用时保持原生目录兼容，不能让辅助过滤阻断整个模型选择器。
+   */
+  function runtimeProviderAllowlist(workspaceId?: string): Promise<Set<string> | undefined> {
+    const routeLinuxServerId = options.routeLinuxServerId?.()?.trim() ?? "";
+    const key = `${routeLinuxServerId}\u0000${workspaceId ?? ""}`;
+    const existing = runtimeProviderAllowlistRequests.get(key);
+    if (existing) return existing;
+
+    const pending = routedRequest<unknown>(`${opencodeRuntimeBase}/config${query({ workspaceId })}`).then(
+      providerAllowlistFromConfig,
+      () => undefined
+    );
+    runtimeProviderAllowlistRequests.set(key, pending);
+    void pending.then(() => {
+      if (runtimeProviderAllowlistRequests.get(key) === pending) {
+        runtimeProviderAllowlistRequests.delete(key);
+      }
+    });
+    return pending;
+  }
+
+  async function runtimeCatalogList(path: string, workspaceId?: string): Promise<Record<string, unknown>[]> {
+    const [items, allowlist] = await Promise.all([
+      runtimeList(path, routedRequest),
+      runtimeProviderAllowlist(workspaceId)
+    ]);
+    if (!allowlist) return items;
+    return items.filter((item) => {
+      const providerId = runtimeCatalogProviderId(item);
+      return providerId !== undefined && allowlist.has(providerId);
+    });
+  }
 
   async function workspaceFileRpc<T>(
     workspaceId: string,
@@ -1615,9 +1651,10 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     rejectRunDiff: (runId: string) => routedRequest<RunDiffAction>(agentPath(`/runs/${encodeURIComponent(runId)}/diff/reject`), { method: "POST" }),
     listAgents: async (workspaceId?: string, init?: ExtraRequestInit) =>
       (await runtimeList(`${opencodeRuntimeBase}/agents${query({ workspaceId })}`, routedRequest, init)).map(toAgentInfo),
-    listModels: async (workspaceId?: string) => (await runtimeList(`${opencodeRuntimeBase}/models${query({ workspaceId })}`, routedRequest)).map(toModelInfo),
+    listModels: async (workspaceId?: string) =>
+      (await runtimeCatalogList(`${opencodeRuntimeBase}/models${query({ workspaceId })}`, workspaceId)).map(toModelInfo),
     listProviders: async (workspaceId?: string) =>
-      (await runtimeList(`${opencodeRuntimeBase}/providers${query({ workspaceId })}`, routedRequest)).map(toProviderInfo),
+      (await runtimeCatalogList(`${opencodeRuntimeBase}/providers${query({ workspaceId })}`, workspaceId)).map(toProviderInfo),
     getConfig: (workspaceId?: string) => routedRequest<unknown>(`${opencodeRuntimeBase}/config${query({ workspaceId })}`),
     updateConfig: (payload: Record<string, unknown>, workspaceId?: string) =>
       routedRequest<unknown>(`${opencodeRuntimeBase}/config${query({ workspaceId })}`, { method: "PATCH", body: JSON.stringify(payload) }),
@@ -2271,6 +2308,24 @@ function toWebSocketUrl(baseUrl: string, webSocketUrl: string): string {
 
 async function runtimeList(path: string, request: RequestFn, init?: ExtraRequestInit) {
   return listFromRuntimeEnvelope(await request<unknown>(path, init));
+}
+
+function providerAllowlistFromConfig(value: unknown): Set<string> | undefined {
+  const config = record(value);
+  const raw = config?.enabled_providers ?? config?.enabledProviders;
+  if (!Array.isArray(raw)) return undefined;
+  const providerIds = raw
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return providerIds.length > 0 ? new Set(providerIds) : undefined;
+}
+
+function runtimeCatalogProviderId(value: Record<string, unknown>): string | undefined {
+  return text(value.providerId)
+    ?? text(value.providerID)
+    ?? text(record(value.provider)?.id)
+    ?? text(value.id);
 }
 
 function postRuntime(path: string, payload: Record<string, unknown> | undefined, request: RequestFn, init?: ExtraRequestInit) {

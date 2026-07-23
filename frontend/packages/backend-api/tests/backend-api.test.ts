@@ -8,6 +8,49 @@ import {
 } from "../src";
 
 describe("backend-api", () => {
+  it("filters OpenCode Zen from model and provider catalogs using the configured provider allowlist", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const url = String(input);
+      const data = url.endsWith("/config")
+        ? { enabled_providers: ["enterprise-qwen"] }
+        : url.endsWith("/models")
+          ? [
+              { id: "ring-2.6-1t-free", providerID: "opencode", name: "Ring 2.6 1T Free" },
+              { id: "Qwen3.6-27B", providerID: "enterprise-qwen", name: "Qwen3.6 27B" }
+            ]
+          : [
+              { id: "opencode", name: "OpenCode Zen", models: { "ring-2.6-1t-free": { name: "Ring 2.6 1T Free" } } },
+              { id: "enterprise-qwen", name: "企业通义", models: { "Qwen3.6-27B": { name: "Qwen3.6 27B" } } }
+            ];
+      return new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data }), { status: 200 });
+    });
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    const [models, providers] = await Promise.all([client.listModels(), client.listProviders()]);
+
+    expect(models).toEqual([
+      expect.objectContaining({ id: "Qwen3.6-27B", providerId: "enterprise-qwen" })
+    ]);
+    expect(providers).toEqual([
+      expect.objectContaining({ providerId: "enterprise-qwen", name: "企业通义" })
+    ]);
+    expect(fetcher.mock.calls.filter((call) => String(call[0]).endsWith("/config"))).toHaveLength(1);
+  });
+
+  it("keeps the native catalog when enabled providers are not configured", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const data = String(input).endsWith("/config")
+        ? {}
+        : [{ id: "ring-2.6-1t-free", providerID: "opencode", name: "Ring 2.6 1T Free" }];
+      return new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data }), { status: 200 });
+    });
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.listModels()).resolves.toEqual([
+      expect.objectContaining({ id: "ring-2.6-1t-free", providerId: "opencode" })
+    ]);
+  });
+
   it("keeps an explicitly empty Vite API base URL for same-origin deployment", async () => {
     vi.stubEnv("VITE_TEST_AGENT_API_BASE_URL", "");
     try {
