@@ -14,7 +14,6 @@
 ## 共同前提
 
 - Mac 构建机允许联网；企业服务器完全离线。
-- 企业内不使用 Docker Compose；worker 由 `opencode-worker-docker.sh` 管理，XXL MySQL 由 `deploy-xxl-job-mysql.sh` 管理。
 - `opencode-worker-docker.sh` 固定为 worker 容器设置 `--pids-limit=8192`、`nofile=262144:262144` 和 `nproc=8192:8192`；这些值不从 `docker.env` 覆盖。脚本升级后必须重建容器才会生效。
 - 企业内不使用 Docker Compose；worker 由 `opencode-worker-docker.sh` 管理，当前 XXL MySQL 直接使用外部实例，不在平台服务器部署 MySQL 容器。
 - Java 读取 `/data/testagent/config/backend.env`。

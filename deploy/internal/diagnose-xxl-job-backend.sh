@@ -295,8 +295,8 @@ info "COOKIE_SECURE=${COOKIE_SECURE:-UNSET}"
   fail '当前固定 HTTP 入口要求 TEST_AGENT_XXL_JOB_COOKIE_SECURE=false'
 [[ "${REDIS_HOST}" == '122.233.30.20' && "${REDIS_PORT}" == '6379' ]] || \
   fail '固定共享拓扑不一致：Redis 必须为 122.233.30.20:6379'
-[[ "${XXL_MYSQL_HOST}" == '122.233.30.148' && "${XXL_MYSQL_PORT}" == '3306' ]] || \
-  fail '固定共享拓扑不一致：XXL MySQL 必须为 122.233.30.148:3306'
+[[ "${XXL_MYSQL_HOST}" == '122.210.106.43' && "${XXL_MYSQL_PORT}" == '3306' ]] || \
+  fail '固定共享拓扑不一致：外部 XXL MySQL 必须为 122.210.106.43:3306'
 
 for secret_key in \
   TEST_AGENT_DB_PASSWORD \

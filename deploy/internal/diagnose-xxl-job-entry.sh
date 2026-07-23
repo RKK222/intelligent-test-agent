@@ -87,7 +87,7 @@ if ! local_ipv4s="$(ip -4 -o addr show scope global 2>/dev/null | awk '$4 ~ /^[0
   printf '[FAIL] 无法可靠识别本机全局 IPv4，停止入口诊断\n' >&2
   exit 2
 fi
-for infrastructure_host in 122.233.30.2 122.233.30.4 122.233.30.114 122.233.30.20 122.233.30.148; do
+for infrastructure_host in 122.233.30.2 122.233.30.4 122.233.30.114 122.233.30.20 122.210.106.43; do
   if grep -Fxq "${infrastructure_host}" <<<"${local_ipv4s}"; then
     printf '[FAIL] 当前机器是已知基础设施节点 %s；入口脚本必须从实际浏览器网段的 Linux 诊断终端执行\n' \
       "${infrastructure_host}" >&2
