@@ -56,6 +56,16 @@ function mountContextUsage(props: Record<string, unknown> = baseProps, conversat
   return mount(SessionContextUsage, { props: props as any, attachTo: host });
 }
 
+function propsForUsage(totalTokens: number) {
+  return {
+    ...baseProps,
+    messages: [{
+      ...baseProps.messages[1],
+      tokens: { input: totalTokens, output: 0 }
+    }]
+  };
+}
+
 describe("SessionContextUsage", () => {
   afterEach(() => {
     document.body.innerHTML = "";
@@ -175,11 +185,29 @@ describe("SessionContextUsage", () => {
       providers: [{ providerId: "local", name: "Local" }]
     });
 
-    expect(wrapper.get('[data-testid="context-ring"]').attributes("data-usage-percent")).toBe("");
+    const trigger = wrapper.get('button[aria-label="查看会话上下文"]');
+    const ring = wrapper.get('[data-testid="context-ring"]');
+    expect(trigger.classes()).toContain("session-context-trigger--unknown");
+    expect(trigger.attributes("data-usage-level")).toBe("unknown");
+    expect(ring.attributes("data-usage-percent")).toBe("");
+    expect(ring.find(".session-context-ring-value").exists()).toBe(false);
     await wrapper.get('button[aria-label="查看会话上下文"]').trigger("click");
     const detail = getTeleportedDetail();
     expect(detail.get('[data-testid="context-limit"]').text()).toBe("—");
     expect(detail.get('[data-testid="context-breakdown-empty"]').text()).toContain("暂无可用的上下文拆分");
+  });
+
+  it.each([
+    ["normal", 100_000, "rgb(164, 13, 188)"],
+    ["warning", 120_000, "rgb(217, 119, 6)"],
+    ["danger", 160_000, "rgb(220, 38, 38)"]
+  ] as const)("applies the %s level class, data attribute and trigger color", (level, totalTokens, expectedColor) => {
+    const wrapper = mountContextUsage(propsForUsage(totalTokens));
+    const trigger = wrapper.get('button[aria-label="查看会话上下文"]');
+
+    expect(trigger.classes()).toContain(`session-context-trigger--${level}`);
+    expect(trigger.attributes("data-usage-level")).toBe(level);
+    expect(getComputedStyle(trigger.element).color).toBe(expectedColor);
   });
 
   it("does not render a bordered drawer when no external width is available", async () => {

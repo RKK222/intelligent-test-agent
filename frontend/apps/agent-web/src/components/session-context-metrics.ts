@@ -10,6 +10,8 @@ import type {
 
 export type SessionContextCategory = "system" | "user" | "assistant" | "tool" | "other";
 
+export type SessionContextUsageLevel = "unknown" | "normal" | "warning" | "danger";
+
 export type SessionContextBreakdownItem = {
   key: SessionContextCategory;
   label: string;
@@ -53,6 +55,14 @@ const CATEGORY_META: Record<SessionContextCategory, { label: string; color: stri
   tool: { label: "工具", color: "#d97706" },
   other: { label: "其他", color: "#94a3b8" }
 };
+
+/** 按展示用百分比分级；未知上限不推断使用风险，超过 100% 保持危险级。 */
+export function calculateSessionContextUsageLevel(usagePercent: number | undefined): SessionContextUsageLevel {
+  if (usagePercent === undefined) return "unknown";
+  if (usagePercent < 60) return "normal";
+  if (usagePercent < 80) return "warning";
+  return "danger";
+}
 
 function safeToken(value: number | undefined): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;

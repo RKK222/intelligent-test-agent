@@ -5,6 +5,20 @@
 
 ## Entries
 
+### 2026-07-23 - 上下文圆环展示占用等级
+
+- Why:
+  - 16px 会话上下文圆环此前只用固定紫色表示使用量，无法在接近或超过模型上下文上限时提供即时风险反馈。
+- What:
+  - 新增可测试的 `unknown/normal/warning/danger` 等级计算：未知上限为 unknown，0–59% 为 normal，60–79% 为 warning，80% 及以上（包括溢出）为 danger。
+  - 触发按钮增加等级 class 与 `data-usage-level`，圆环保留 12 点起始、顺时针、16px/2px stroke 与既有弧长；normal/warning/danger 精确使用紫/橙/红色，未知上限只保留空轨道，hover/focus 随等级给出低透明背景，键盘 `focus-visible` 增加同色可见描边，并在 reduced-motion 下关闭颜色和弧长过渡。
+  - 补齐指标/组件/Chromium mock E2E 断言，并同步前端与 agent-web README 的 60/80 阈值、未知及溢出语义。
+- How:
+  - 先执行测试先行 RED：等级函数缺失，组件缺少等级 class/data 属性；再以最小 helper、computed 状态和 CSS 状态实现至 GREEN。Chromium 场景断言 50% 圆环 `rgb(164, 13, 188)`、半周 dash offset 和键盘聚焦描边。
+- Result:
+  - 聚焦 Vitest 20/20 通过，Chromium 上下文 E2E 1/1 通过，`corepack pnpm lint`、`typecheck` 和 `build` 通过；全量 Vitest 仍只保留既有 `DirectoryRows.test.ts` 将实际 role=`radio` 的“上传”查询为 role=`button`（1 failed，1582 passed，1 skipped），未修改 file-explorer。
+  - 未涉及 API、RunEvent、数据库、性能、安全、兼容性、环境配置或 generated SDK；`git diff --check` 通过。
+
 ### 2026-07-23 - 确认并完成 main 并发推送
 
 - Why:

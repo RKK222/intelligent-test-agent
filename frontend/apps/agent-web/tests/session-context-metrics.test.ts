@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentMessage, MessageScope, ModelInfo, ProviderInfo } from "@test-agent/shared-types";
 import {
   buildSessionContextSummary,
+  calculateSessionContextUsageLevel,
   estimateSessionContextBreakdown
 } from "../src/components/session-context-metrics";
 
@@ -34,6 +35,15 @@ function assistant(
 }
 
 describe("session context metrics", () => {
+  it("classifies unknown, normal, warning and danger usage at the exact boundaries", () => {
+    expect(calculateSessionContextUsageLevel(undefined)).toBe("unknown");
+    expect(calculateSessionContextUsageLevel(59)).toBe("normal");
+    expect(calculateSessionContextUsageLevel(60)).toBe("warning");
+    expect(calculateSessionContextUsageLevel(79)).toBe("warning");
+    expect(calculateSessionContextUsageLevel(80)).toBe("danger");
+    expect(calculateSessionContextUsageLevel(101)).toBe("danger");
+  });
+
   it("uses the latest valid root assistant usage and includes reasoning and cache tokens", () => {
     const messages: AgentMessage[] = [
       { id: "user_1", messageId: "user_1", role: "user", text: "hello", createdAt: "2026-07-23T07:59:00Z" },

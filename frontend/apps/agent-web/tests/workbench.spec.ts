@@ -2587,12 +2587,22 @@ test("context usage follows the selected model catalog and live assistant usage"
 
   const contextButton = page.getByRole("button", { name: "查看会话上下文" });
   await expect(contextButton).toBeVisible();
+  await contextButton.focus();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(contextButton).toBeFocused();
+  await expect(contextButton).toHaveCSS("outline-style", "solid");
+  await expect(contextButton).toHaveCSS("outline-width", "2px");
+  await expect(contextButton).toHaveCSS("outline-color", "rgb(164, 13, 188)");
   await contextButton.hover();
   const tooltip = page.locator(".session-context-tooltip");
   await expect(tooltip).toContainText("使用率50%");
   await expect(tooltip).toContainText("总上下文200,000");
   await expect(tooltip).toContainText("已使用100,000");
   await expect(tooltip).not.toContainText("费用");
+  const progressRing = contextButton.locator(".session-context-ring-value");
+  await expect(progressRing).toHaveCSS("stroke", "rgb(164, 13, 188)");
+  expect(Number.parseFloat(await progressRing.getAttribute("stroke-dashoffset") ?? "NaN")).toBeCloseTo(Math.PI * 6, 5);
 
   await contextButton.click();
   const detail = page.getByRole("dialog", { name: "会话上下文" });

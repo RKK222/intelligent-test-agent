@@ -4,6 +4,7 @@ import { X } from "lucide-vue-next";
 import type { AgentMessage, MessageScope, ModelInfo, ProviderInfo } from "@test-agent/shared-types";
 import {
   buildSessionContextSummary,
+  calculateSessionContextUsageLevel,
   estimateSessionContextBreakdown,
   type SessionContextBreakdownItem
 } from "./session-context-metrics";
@@ -59,6 +60,13 @@ const summary = computed(() => buildSessionContextSummary({
 const ringRadius = 6;
 const ringCircumference = 2 * Math.PI * ringRadius;
 const ringOffset = computed(() => ringCircumference * (1 - summary.value.ringPercent / 100));
+const usageLevel = computed(() => calculateSessionContextUsageLevel(summary.value.usagePercent));
+const usageColor = computed(() => ({
+  unknown: "#71717A",
+  normal: "#A40DBC",
+  warning: "#D97706",
+  danger: "#DC2626"
+})[usageLevel.value]);
 
 let cachedBreakdownKey = "";
 let cachedBreakdown: SessionContextBreakdownItem[] = [];
@@ -182,6 +190,9 @@ onBeforeUnmount(() => {
       ref="triggerRef"
       type="button"
       class="session-context-trigger"
+      :class="`session-context-trigger--${usageLevel}`"
+      :data-usage-level="usageLevel"
+      :style="{ color: usageColor }"
       aria-label="查看会话上下文"
       :aria-expanded="detailOpen"
       aria-haspopup="dialog"
@@ -326,15 +337,48 @@ onBeforeUnmount(() => {
   justify-content: center;
   border: 0;
   border-radius: 5px;
-  color: #a40dbc;
+  color: #71717a;
   background: transparent;
   cursor: pointer;
+  transition: color 180ms ease, background-color 180ms ease;
 }
 
-.session-context-trigger:hover,
-.session-context-trigger:focus-visible {
+.session-context-trigger--normal {
+  color: #a40dbc;
+}
+
+.session-context-trigger--warning {
+  color: #d97706;
+}
+
+.session-context-trigger--danger {
+  color: #dc2626;
+}
+
+.session-context-trigger--normal:hover,
+.session-context-trigger--normal:focus-visible {
   background: rgba(164, 13, 188, 0.08);
-  outline: none;
+}
+
+.session-context-trigger--warning:hover,
+.session-context-trigger--warning:focus-visible {
+  background: rgba(217, 119, 6, 0.08);
+}
+
+.session-context-trigger--danger:hover,
+.session-context-trigger--danger:focus-visible {
+  background: rgba(220, 38, 38, 0.08);
+}
+
+.session-context-trigger--unknown:hover,
+.session-context-trigger--unknown:focus-visible {
+  background: rgba(113, 113, 122, 0.08);
+}
+
+.session-context-trigger:focus-visible {
+  /* 低透明度背景保留等级反馈，同色描边保证键盘焦点清晰可见。 */
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }
 
 .session-context-ring {
@@ -357,7 +401,7 @@ onBeforeUnmount(() => {
   stroke-linecap: round;
   transform: rotate(-90deg);
   transform-origin: 8px 8px;
-  transition: stroke-dashoffset 180ms ease;
+  transition: stroke-dashoffset 180ms ease, stroke 180ms ease;
 }
 
 .session-context-tooltip {
@@ -664,6 +708,7 @@ onBeforeUnmount(() => {
 
 @media (prefers-reduced-motion: reduce) {
   .session-context-panel,
+  .session-context-trigger,
   .session-context-ring-value,
   .session-context-meter-track span {
     animation: none;
