@@ -19,14 +19,14 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
-/** 使用真实 Redis 7 验证 GETDEL 一次消费和票据 TTL。 */
+/** 使用真实 Redis 5 验证兼容旧版本的原子一次消费和票据 TTL。 */
 @Testcontainers(disabledWithoutDocker = true)
 class RedisXxlJobSsoTicketIntegrationTest {
 
     private static final Instant NOW = Instant.parse("2026-07-20T00:00:00Z");
 
     @Container
-    private static final GenericContainer<?> REDIS = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
+    private static final GenericContainer<?> REDIS = new GenericContainer<>(DockerImageName.parse("redis:5.0.14-alpine"))
             .withExposedPorts(6379);
 
     @Test

@@ -107,5 +107,5 @@ probe_page '域名入口' "${DOMAIN_BASE}/"
 probe_page 'IP 入口' "${IP_BASE}/"
 probe_readiness '域名同源 Admin readiness' "${DOMAIN_BASE}/xxl-job-admin/actuator/health/readiness"
 probe_readiness 'IP 同源 Admin readiness' "${IP_BASE}/xxl-job-admin/actuator/health/readiness"
-warn '当前入口使用 HTTP；浏览器可能拒收带 Secure 属性的 XXL Admin Cookie，请在浏览器 Network/Application 中取证'
+warn '当前入口使用 HTTP；两台后台必须统一配置 TEST_AGENT_XXL_JOB_COOKIE_SECURE=false，请用后台诊断脚本核对'
 finish

@@ -267,6 +267,7 @@ XXL_MYSQL_URL="$(sanitize_jdbc_url "$(env_value "${BACKEND_ENV}" TEST_AGENT_XXL_
 XXL_MYSQL_USERNAME="$(env_value "${BACKEND_ENV}" TEST_AGENT_XXL_JOB_MYSQL_USERNAME)"
 ADMIN_PORT="$(env_value "${BACKEND_ENV}" TEST_AGENT_XXL_JOB_ADMIN_PORT)"
 EXECUTOR_PORT="$(env_value "${BACKEND_ENV}" TEST_AGENT_XXL_JOB_EXECUTOR_PORT)"
+COOKIE_SECURE="$(env_value "${BACKEND_ENV}" TEST_AGENT_XXL_JOB_COOKIE_SECURE)"
 XXL_MYSQL_HOST_PORT="$(jdbc_host_port "${XXL_MYSQL_URL}" 3306)"
 XXL_MYSQL_HOST="${XXL_MYSQL_HOST_PORT%%$'\n'*}"
 XXL_MYSQL_PORT="${XXL_MYSQL_HOST_PORT##*$'\n'}"
@@ -283,12 +284,15 @@ info "XXL_MYSQL_ENDPOINT=${XXL_MYSQL_URL:-UNSET}"
 info "XXL_MYSQL_USERNAME=${XXL_MYSQL_USERNAME:-UNSET}"
 info "ADMIN_PORT=${ADMIN_PORT:-UNSET}"
 info "EXECUTOR_PORT=${EXECUTOR_PORT:-UNSET}"
+info "COOKIE_SECURE=${COOKIE_SECURE:-UNSET}"
 
 [[ "${ADVERTISED_HOST}" == "${EXPECTED_HOST}" ]] || fail 'advertised host 与 expected host 不一致'
 [[ -n "${LINUX_SERVER_ID}" ]] || fail 'linux server ID 未配置'
 [[ "${XXL_ENABLED}" == 'true' ]] || fail 'XXL-JOB 未启用'
 [[ "${ADMIN_PORT}" == '18080' ]] || fail 'Admin 端口不是固定值 18080'
 [[ "${EXECUTOR_PORT}" == '9999' ]] || fail 'executor 端口不是固定值 9999'
+[[ "${COOKIE_SECURE}" == 'false' ]] || \
+  fail '当前固定 HTTP 入口要求 TEST_AGENT_XXL_JOB_COOKIE_SECURE=false'
 [[ "${REDIS_HOST}" == '122.233.30.20' && "${REDIS_PORT}" == '6379' ]] || \
   fail '固定共享拓扑不一致：Redis 必须为 122.233.30.20:6379'
 [[ "${XXL_MYSQL_HOST}" == '122.233.30.148' && "${XXL_MYSQL_PORT}" == '3306' ]] || \

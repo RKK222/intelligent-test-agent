@@ -113,6 +113,7 @@ test-agent:
     admin:
       port: ${TEST_AGENT_XXL_JOB_ADMIN_PORT:18080}
       context-path: /xxl-job-admin
+      cookie-secure: ${TEST_AGENT_XXL_JOB_COOKIE_SECURE:true}
       retry-initial-delay: 5s
       retry-max-delay: 60s
     mysql:

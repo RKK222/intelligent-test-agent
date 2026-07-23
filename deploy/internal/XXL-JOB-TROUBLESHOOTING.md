@@ -38,7 +38,8 @@
 | “管理服务暂不可用” | Browser Network 的签票、登录、Admin 请求 | 只是统一前端兜底，不能直接定根因 | 按实际 HTTP 状态分层 |
 | 平台页面正常，Admin 不可用 | 后台 `8080` PASS、`18080` FAIL | Admin 子上下文或 XXL MySQL | 保存相应后台日志并查 `.148` |
 | Admin 偶发成功、偶发失败 | `.2` 对两个 Admin 的独立 readiness | 某一个 Admin、节点网络或配置不一致 | 两后台脚本与摘要逐项比对 |
-| SSO `200` 后马上失效 | Application Cookie 与 Network | Cookie/session marker；HTTP 入口的 `Secure` Cookie 风险 | 只取证，不删除安全属性 |
+| 登录 `200` 但正文是 `System Error`，同时出现 `RedisSystemException` | 登录响应正文与后台日志的异常类型 | 旧交付仍用 Redis 6.2 `GETDEL`，企业 Redis 不支持；`adminTab` 是上游错误页的次生前端异常 | 升级到使用 Redis Lua 原子消费的新 JAR；不要修改上游 JS |
+| SSO 成功后马上失效 | Application Cookie 与后台脚本 `COOKIE_SECURE` | 两后台未统一配置 HTTP Cookie 模式，或 session marker 失效 | 当前固定 HTTP 入口要求两节点均为 `false`；按变更流程部署 |
 | 全部 HTTP `200`，15 秒后仍失败 | Console、CSP/X-Frame-Options、iframe 消息 | 同源、iframe 脚本或 `postMessage` ready 握手 | 保存脱敏 Console 与响应头 |
 | 页面正常但 executor 离线 | 后台 `9999`、registry 结果 | advertised host、端口网络或共享 access token | 比对后台摘要和 `.148` registry |
 | executor 在线但任务不触发 | 任务启停/Cron、registry、近 7 日统计 | Admin 调度线程、任务配置或调度记录 | DBA SQL + 两后台日志 |
@@ -65,7 +66,7 @@ bash /data/testagent/deploy/internal/diagnose-xxl-job-entry.sh \
 
 脚本在任何 DNS/HTTP 探测前检查本机全局 IPv4：若命中 `.2/.4/.114/.20/.148` 任一已知基础设施节点，或缺少/无法执行 `ip`、无法可靠识别地址，会明确返回 `2` 且不继续 curl。不得在这些节点运行后把结果当作浏览器视点。
 
-成功条件：脚本确认当前终端不属于已知基础设施节点；域名解析到 `122.233.30.2`；域名入口与 `122.233.30.2:9996` 均返回 HTTP 200 且非空；两个同源 Admin readiness 都返回 HTTP 200/UP；命令退出码为 `0` 并输出最终 PASS 摘要。当前入口是 HTTP，因此出现 `Secure` Cookie 风险 WARN 是预期的人工检查提示。
+成功条件：脚本确认当前终端不属于已知基础设施节点；域名解析到 `122.233.30.2`；域名入口与 `122.233.30.2:9996` 均返回 HTTP 200 且非空；两个同源 Admin readiness 都返回 HTTP 200/UP；命令退出码为 `0` 并输出最终 PASS 摘要。当前入口是 HTTP，因此脚本会提示必须在两个后台都核对 `TEST_AGENT_XXL_JOB_COOKIE_SECURE=false`。
 
 失败停止点：域名失败而 IP 成功时停在企业 DNS/入口边界；两个入口都失败时先交企业入口/网络负责人；`404` 停在 Nginx location；`502/504` 继续到 `.2` 仅用于区分 upstream 节点，但不要先判断为 Java 平台故障。脚本不请求签票 API，也不提交 SSO 登录。
 
@@ -96,7 +97,7 @@ bash /data/testagent/deploy/internal/diagnose-xxl-job-backend.sh \
   | tee /data/0709/xxl-job-diagnostics-backend-122.233.30.4.log
 ```
 
-成功条件：本机地址、`TEST_AGENT_SERVER_ADVERTISED_HOST`、`.serverhost/.serverid` 一致；systemd 只运行固定 JAR 且读取固定 backend.env；`8080/18080/9999` 由同一 MainPID 监听；平台和 Admin readiness 都为 UP；`.20:6379`、`.148:3306` 及 `.114` 的 `8080/18080/9999` TCP 可达；固定端口和配置摘要通过；退出码为 `0`。
+成功条件：本机地址、`TEST_AGENT_SERVER_ADVERTISED_HOST`、`.serverhost/.serverid` 一致；systemd 只运行固定 JAR 且读取固定 backend.env；`8080/18080/9999` 由同一 MainPID 监听；平台和 Admin readiness 都为 UP；`.20:6379`、`.148:3306` 及 `.114` 的 `8080/18080/9999` TCP 可达；固定端口、`COOKIE_SECURE=false` 和配置摘要通过；退出码为 `0`。
 
 失败停止点：机器不匹配、参数非法、关键文件或命令缺失返回 `2`，不得改用另一 expected-host 绕过；`8080` 正常而 `18080` 失败时定位 Admin/MySQL；`18080` 正常而 `9999` 失败时定位 executor；systemd、身份、端口、共享拓扑或对端网络不一致返回 `1`。保存脱敏日志后再检查 `.114`，不要在现场重启服务或修改 env。
 
@@ -112,7 +113,7 @@ bash /data/testagent/deploy/internal/diagnose-xxl-job-backend.sh \
   | tee /data/0709/xxl-job-diagnostics-backend-122.233.30.114.log
 ```
 
-成功条件：本机地址为 `.114`，advertised host、`.serverhost/.serverid` 与 `.114` 身份一致；systemd 只运行固定 JAR 且读取固定 backend.env；`8080/18080/9999` 由同一 MainPID 监听；平台与 Admin readiness 均为 UP；`.20:6379`、`.148:3306` 及 `.4` 的 `8080/18080/9999` TCP 可达；固定端口和共享配置摘要通过；退出码为 `0`。
+成功条件：本机地址为 `.114`，advertised host、`.serverhost/.serverid` 与 `.114` 身份一致；systemd 只运行固定 JAR 且读取固定 backend.env；`8080/18080/9999` 由同一 MainPID 监听；平台与 Admin readiness 均为 UP；`.20:6379`、`.148:3306` 及 `.4` 的 `8080/18080/9999` TCP 可达；固定端口、`COOKIE_SECURE=false` 和共享配置摘要通过；退出码为 `0`。
 
 失败停止点：退出码 `2` 表示当前机器不是 `.114`、参数非法、关键文件或命令缺失，必须停止并修正执行前提，不得换用 `.4` expected-host 绕过。`8080` 正常而 `18080` 失败时，停止在 `.114` 的 Admin 子上下文或其到 XXL MySQL 的链路；`18080` 正常而 `9999` 失败时，停止在 `.114` executor；到 `.4` 的任一端口失败时交节点网络/防火墙；共享 Redis/MySQL 端点或摘要不符时交 `.114` 应用配置负责人。任何 `[FAIL]` 都先保存 `/data/0709/xxl-job-diagnostics-backend-122.233.30.114.log` 并停止该节点推断，不复用 `.4` 结论。`4096-4115` 是 opencode 用户进程端口池，不是管理页首要链路，本排查不操作 worker/manager/Docker。
 
@@ -136,7 +137,7 @@ grep -E '^\[(PASS|INFO)\] (Redis |REDIS_ENDPOINT=)' \
   /data/0709/xxl-job-diagnostics-backend-122.233.30.114.log
 ```
 
-成功条件：两份证据都是 `REDIS_ENDPOINT=122.233.30.20:6379` 且 TCP PASS。失败停止点：任一节点不可达交网络/Redis 运维；端点摘要不一致交应用配置负责人。若签票或会话仍异常，使用应用/浏览器状态码继续分层，禁止通过直接读取 Redis 内部数据“验证”真实票据。
+成功条件：两份证据都是 `REDIS_ENDPOINT=122.233.30.20:6379` 且 TCP PASS。当前版本用 Redis Lua 完成原子读删，兼容 Redis 5+，但 Redis ACL 仍需允许应用执行 `EVAL`。失败停止点：任一节点不可达交网络/Redis 运维；端点摘要不一致交应用配置负责人；新版本仍出现 `RedisSystemException` 时由 Redis 管理员核对 ACL/禁用命令策略。若签票或会话仍异常，使用应用/浏览器状态码继续分层，禁止通过直接读取 Redis 内部数据“验证”真实票据。
 
 ## 9. 122.233.30.148 MySQL（DBA 执行只读 SQL）
 
@@ -170,13 +171,13 @@ mysql --host=122.233.30.148 --port=3306 --user='<只读账号>' --password \
 
 DevTools Network 不会记录 `postMessage`；第 3 步只能使用事故时已观察到的父页面状态或已存在的 instrumentation，不得为捕获消息新增代码或重放流程。如果这两类 ready 证据都未保留，立即停止并升级，不得重放。只记录路径、方法、状态码、时间与安全响应头；不得打开或复制请求体、票据、Cookie、Authorization 或响应中的敏感字段。
 
-签票请求 `401` 表示平台会话无效，`403` 表示不是 `SUPER_ADMIN` 或权限边界拒绝，`5xx` 指向签票服务/Redis；iframe 登录 `403` 指向票据消费失败，`503` 指向 JIT/MySQL/Admin，`502/504` 指向 Nginx upstream。只从已保留的请求读取这些状态，不用任何 HTTP 客户端补发请求。
+签票请求 `401` 表示平台会话无效，`403` 表示不是 `SUPER_ADMIN` 或权限边界拒绝，`5xx` 指向签票服务/Redis；iframe 登录 `403` 指向票据无效或已消费，`503` 指向 Redis 消费/JIT/MySQL/XXL 登录，`502/504` 指向 Nginx upstream。HTTP `200` 只有响应是成功中转页且随后出现 ready 握手才算成功；`200` 但正文为 `System Error`/`RedisSystemException` 是旧 JAR 的失败页，不是成功。只从已保留的请求读取这些状态，不用任何 HTTP 客户端补发请求。
 
-Application/Cookie 只查看当前是否已落 Cookie 及属性：Path 应为 `/xxl-job-admin/`，并检查 `HttpOnly`、`Secure`、`SameSite=Lax`。当前普通 HTTP 入口可能被浏览器拒收带 `Secure` 属性的 Admin Cookie，表现为已保留证据中登录 POST 成功后立即失效；这是需要升级的入口安全兼容风险，不得以删除 `Secure`、放宽 Cookie、改用不安全脚本或关闭浏览器安全策略作为现场修复。
+Application/Cookie 只查看当前是否已落 Cookie 及属性：Path 应为 `/xxl-job-admin/`，并检查 `HttpOnly` 与 `SameSite=Lax`。当前固定普通 HTTP 入口要求受审的后台部署配置 `TEST_AGENT_XXL_JOB_COOKIE_SECURE=false`，因此响应 Cookie 不应出现 `Secure`；两个后台脚本都必须输出 `COOKIE_SECURE=false`。这不是允许现场人员直接编辑响应、不得以删除 `Secure`、放宽其它 Cookie 属性、改用不安全脚本或关闭浏览器安全策略作为临时修复；必须通过正式发布配置变更。以后入口升级 HTTPS 时，两节点必须同步恢复 `true`。
 
 在已保留的 Admin 文档响应头中核对 `Content-Security-Policy: frame-ancestors 'self'` 与 `X-Frame-Options: SAMEORIGIN`。Console 只查看已存在的同源、CSP、frame、Cookie 和资源加载错误，不粘贴带凭据的对象。普通 iframe `load` 不等于登录成功，平台只在同源 iframe 收到登录成功页的 `postMessage` ready 握手后进入就绪态；已保留证据显示 HTTP 全部 200 但约 15 秒后仍不可用时，边界是 CSP、实际 iframe origin、脚本/静态资源或 ready 消息。
 
-成功条件：已保留证据完整呈现上述顺序；前两个 POST 成功；父页面或已有 instrumentation 证实同源 ready；此后的重定向、Admin GET 与静态资源成功；Cookie 已被接受且四个属性完整；CSP/X-Frame-Options 保持同源；Console 无相关错误。失败停止点：任一状态码或安全属性不符就停在对应边界并升级；ready 或 Network 证据序列不完整同样停止，不主动补发，也不继续猜测任务调度。
+成功条件：已保留证据完整呈现上述顺序；前两个 POST 成功；父页面或已有 instrumentation 证实同源 ready；此后的重定向、Admin GET 与静态资源成功；Cookie 已被接受且具备 HttpOnly、SameSite、受限 Path，当前 HTTP 配置下不带 Secure；CSP/X-Frame-Options 保持同源；Console 无相关错误。失败停止点：任一状态码或安全属性不符就停在对应边界并升级；ready 或 Network 证据序列不完整同样停止，不主动补发，也不继续猜测任务调度。
 
 ## 11. executor 在线、任务不触发与 SKIPPED_LOCK_HELD
 
@@ -222,7 +223,7 @@ grep -E '^(platform_task_key|opencode-runtime\.|scheduler\.|registry_group|EXECU
 
 ```bash
 cd /data/0709
-grep -E '^\[INFO\] (REDIS_ENDPOINT|XXL_MYSQL_ENDPOINT|TEST_AGENT_XXL_JOB_ACCESS_TOKEN|ADMIN_PORT|EXECUTOR_PORT)=' \
+grep -E '^\[INFO\] (REDIS_ENDPOINT|XXL_MYSQL_ENDPOINT|TEST_AGENT_XXL_JOB_ACCESS_TOKEN|ADMIN_PORT|EXECUTOR_PORT|COOKIE_SECURE)=' \
   /data/0709/xxl-job-diagnostics-backend-122.233.30.4.log
 ```
 
@@ -230,11 +231,11 @@ grep -E '^\[INFO\] (REDIS_ENDPOINT|XXL_MYSQL_ENDPOINT|TEST_AGENT_XXL_JOB_ACCESS_
 
 ```bash
 cd /data/0709
-grep -E '^\[INFO\] (REDIS_ENDPOINT|XXL_MYSQL_ENDPOINT|TEST_AGENT_XXL_JOB_ACCESS_TOKEN|ADMIN_PORT|EXECUTOR_PORT)=' \
+grep -E '^\[INFO\] (REDIS_ENDPOINT|XXL_MYSQL_ENDPOINT|TEST_AGENT_XXL_JOB_ACCESS_TOKEN|ADMIN_PORT|EXECUTOR_PORT|COOKIE_SECURE)=' \
   /data/0709/xxl-job-diagnostics-backend-122.233.30.114.log
 ```
 
-成功条件：Redis 为 `.20:6379`、MySQL 为 `.148:3306/xxl_job`、XXL access token 的 SET/UNSET 状态、长度和摘要完全相同，Admin 为 `18080`，executor 为 `9999`；其它 password/token/key 只能确认各自为 `SET/UNSET`，不得使用长度或摘要比较；advertised host 则应分别为 `.4` 和 `.114`，不要求相同。XXL access token 摘要不一致或单节点 readiness/registry 异常时停止并把两份脱敏证据交应用配置负责人；不得回传原始 token 进行人工比对。
+成功条件：Redis 为 `.20:6379`、MySQL 为 `.148:3306/xxl_job`、XXL access token 的 SET/UNSET 状态、长度和摘要完全相同，Admin 为 `18080`，executor 为 `9999`，两个节点 `COOKIE_SECURE` 均为 `false`；其它 password/token/key 只能确认各自为 `SET/UNSET`，不得使用长度或摘要比较；advertised host 则应分别为 `.4` 和 `.114`，不要求相同。XXL access token 摘要、Cookie 模式不一致或单节点 readiness/registry 异常时停止并把两份脱敏证据交应用配置负责人；不得回传原始 token 进行人工比对。
 
 ## 13. HTTP 状态码、日志关键字、责任边界决策树
 
@@ -256,9 +257,10 @@ grep -E '^\[INFO\] (REDIS_ENDPOINT|XXL_MYSQL_ENDPOINT|TEST_AGENT_XXL_JOB_ACCESS_
    ├─ 签票 401/403 → 平台会话 / SUPER_ADMIN 权限
    ├─ 签票 5xx → 平台签票服务 / Redis
    ├─ 登录 403 → 票据消费
-   ├─ 登录 503 → JIT / MySQL / Admin
+   ├─ 登录 503 → Redis 票据消费 / JIT / MySQL / XXL 登录
    ├─ 登录 502/504 → Nginx upstream
-   ├─ 200 后立即失效 → Cookie / session marker / HTTP + Secure 风险
+   ├─ 200 正文为 System Error + RedisSystemException → 旧 JAR 的 GETDEL 兼容问题
+   ├─ 成功页后立即失效 → Cookie 模式 / session marker
    └─ 全 200、15 秒超时 → 同源 / CSP / iframe / postMessage
 
 管理页正常、调度异常
@@ -339,6 +341,8 @@ MySQL 只读检查结论：
 | `.148` DBA SQL | `/data/testagent/deploy/internal/xxl-job-readonly-check.sql`，用只读账号和交互式密码执行 |
 
 `TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.4:18080,122.233.30.114:18080` 只在 `122.233.30.2` 的 `/data/testagent/config/nginx.env` 中有效，用于渲染中央 Nginx Admin upstream；它不是 Java 环境变量。
+
+`TEST_AGENT_XXL_JOB_COOKIE_SECURE=false` 是当前固定 HTTP 入口的 Java 环境变量，必须同时出现在 `.4` 与 `.114` 的 `backend.env`。它只控制 XXL SSO Cookie 的 `Secure` 属性；HttpOnly、SameSite、Path、CSP 和同源限制不会随之关闭。基础默认值仍为 `true`，其它 HTTPS 环境不得复制这一例外。
 
 以下三个 Java 地址变量已经删除，任何节点都不得恢复或配置：`TEST_AGENT_XXL_JOB_ADMIN_ADDRESSES`、`TEST_AGENT_XXL_JOB_EXECUTOR_ADDRESS`、`TEST_AGENT_XXL_JOB_EXECUTOR_IP`。Java 内部 Admin 地址和 executor 注册地址由当前公共程序按本机身份派生；排查只核对派生结果，不以废弃变量现场覆盖。
 

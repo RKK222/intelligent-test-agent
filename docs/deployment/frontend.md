@@ -71,6 +71,7 @@ npx serve apps/agent-web/dist -l 3000
 - 若通过同域反代把 `/api` 转发到 `test-agent-app`，可避免跨域，但仍需保证后端 CORS 配置与实际访问 origin 一致。
 - 同一 Nginx `server` 块可通过 `TEST_AGENT_NGINX_LISTEN_PORT=80` 与 `TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=9996` 同时承接企业入口转发和 IP 直连；两个浏览器 URL 都保持 `:9996`，不代表实体链路内部只能监听一个端口。
 - `/xxl-job-admin/` 必须在同一个浏览器 origin 下代理到 Java 的 XXL Admin 子端口，并保留路径前缀、表单 POST、重定向和 `Set-Cookie`。禁止把它改成跨域 iframe，否则平台 SSO Cookie、`SAMEORIGIN` 和 `frame-ancestors 'self'` 会阻断页面。
+- Admin Cookie 默认带 `Secure`；HTTPS 入口保持默认。只有受控企业入口确定无法升级 HTTPS 时，后端节点才统一显式配置 `TEST_AGENT_XXL_JOB_COOKIE_SECURE=false`，否则普通 HTTP 浏览器不会回传 Cookie。该例外不改变 HttpOnly、SameSite、Path 与同源 iframe 要求。
 - 多 Java 时，Nginx 可对 Admin 子端口负载均衡；所有节点必须共用 XXL MySQL 与 access token。iframe 登录 POST 与后续请求不依赖 ticket 重放，平台会话校验由共享 marker 完成。
 - SSE（`text/event-stream`）和 PTY WebSocket 升级路径需在反代层禁用缓冲、支持长连接和 `Upgrade` 头。
 - 浏览器报 `ERR_NAME_NOT_RESOLVED` 时应在浏览器所在终端检查 DNS；Nginx 配置不能修复客户端名称解析。DNS 只解析域名，不提供端口转换；外部入口使用 `9996`、实体 Nginx 使用 `80` 时，必须由企业网关或网络转发层明确承担端口映射。

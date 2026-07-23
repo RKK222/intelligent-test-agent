@@ -18,9 +18,19 @@ class XxlJobPropertiesTest {
         assertThat(properties.getAdmin().getContextPath()).isEqualTo("/xxl-job-admin");
         assertThat(properties.getAdmin().getRetryInitialDelay()).isEqualTo(Duration.ofSeconds(5));
         assertThat(properties.getAdmin().getRetryMaxDelay()).isEqualTo(Duration.ofSeconds(60));
+        assertThat(properties.getAdmin().isCookieSecure()).isTrue();
         assertThat(properties.getExecutor().getAppName()).isEqualTo("test-agent-backend");
         assertThat(properties.getExecutor().getLogRetentionDays()).isEqualTo(30);
         assertThat(properties.getSso().getTicketTtl()).isEqualTo(Duration.ofSeconds(60));
+    }
+
+    @Test
+    void permitsExplicitHttpCookieModeForRestrictedEnterpriseIngress() {
+        XxlJobProperties properties = new XxlJobProperties();
+
+        properties.getAdmin().setCookieSecure(false);
+
+        assertThat(properties.getAdmin().isCookieSecure()).isFalse();
     }
 
     @Test

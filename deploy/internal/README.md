@@ -222,6 +222,8 @@ test-agent-config-SENSITIVE-<role>-<node>-<timestamp>.tar.gz.sha256
 - worker/构建：[env.example](env.example)
 - 前端 Nginx：[nginx.env.example](nginx.env.example)、[configure-nginx.sh](configure-nginx.sh)
 - XXL MySQL：当前生产直接使用外部实例；[mysql.env.example](mysql.env.example) 和 [deploy-xxl-job-mysql.sh](deploy-xxl-job-mysql.sh) 仅作为其它隔离环境的容器备用方案
+
+当前企业浏览器入口固定为 HTTP，因此 Java 模板显式设置 `TEST_AGENT_XXL_JOB_COOKIE_SECURE=false`；基础应用默认仍为 `true`，HTTPS 环境不得复制该例外。两台后台必须保持一致，诊断脚本会输出脱敏的 `COOKIE_SECURE` 状态并拒绝缺失或错误值。
 - `.4 + .114` 逐机配置包：[deploy-multi-backend-node.sh](deploy-multi-backend-node.sh)，支持
   `--validate-only`、正式部署和 `--verify-only`，内部复用标准后台/前端部署脚本
 - 一键入口：平台包使用 [deploy-backend-node.sh](deploy-backend-node.sh)、

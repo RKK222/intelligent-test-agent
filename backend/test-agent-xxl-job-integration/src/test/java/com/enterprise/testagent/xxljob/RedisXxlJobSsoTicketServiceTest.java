@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.data.redis.core.script.RedisScript;
 
 class RedisXxlJobSsoTicketServiceTest {
 
@@ -50,7 +51,9 @@ class RedisXxlJobSsoTicketServiceTest {
         XxlJobSsoTicketIssue issue = fixture.service().issue(principal());
         ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
         verify(fixture.values()).set(any(), json.capture(), any(Duration.class));
-        when(fixture.values().getAndDelete("test-agent:xxl-job:sso-ticket:" + issue.ticket()))
+        when(fixture.redis().execute(
+                        any(RedisScript.class),
+                        eq(List.of("test-agent:xxl-job:sso-ticket:" + issue.ticket()))))
                 .thenReturn(json.getValue(), (String) null);
 
         assertThat(fixture.service().consume(issue.ticket()))
@@ -63,7 +66,9 @@ class RedisXxlJobSsoTicketServiceTest {
 
         Clock expiredClock = Clock.fixed(NOW.plusSeconds(61), ZoneOffset.UTC);
         RedisXxlJobSsoTicketService expiredService = fixture.withClock(expiredClock);
-        when(fixture.values().getAndDelete("test-agent:xxl-job:sso-ticket:" + issue.ticket()))
+        when(fixture.redis().execute(
+                        any(RedisScript.class),
+                        eq(List.of("test-agent:xxl-job:sso-ticket:" + issue.ticket()))))
                 .thenReturn(json.getValue());
         assertThat(expiredService.consume(issue.ticket())).isEmpty();
     }

@@ -223,6 +223,7 @@ validate_backend_config() {
   require_nonempty_value "${backend_env}" TEST_AGENT_XXL_JOB_ACCESS_TOKEN
   require_exact_value "${backend_env}" TEST_AGENT_XXL_JOB_ADMIN_PORT 18080
   require_exact_value "${backend_env}" TEST_AGENT_XXL_JOB_EXECUTOR_PORT 9999
+  require_exact_value "${backend_env}" TEST_AGENT_XXL_JOB_COOKIE_SECURE false
   require_exact_value "${backend_env}" TEST_AGENT_CORS_ALLOWED_ORIGINS \
     http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996
   require_exact_value "${backend_env}" TEST_AGENT_SERVER_BROADCAST_ENABLED true

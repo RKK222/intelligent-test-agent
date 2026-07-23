@@ -4,7 +4,8 @@
 
 后端至少覆盖：
 
-- SSO 票据仅 `SUPER_ADMIN` 可签发、256 位随机、60 秒上限、Redis `GETDEL` 一次消费和过期拒绝。
+- SSO 票据仅 `SUPER_ADMIN` 可签发、256 位随机、60 秒上限；Redis 5 Testcontainers 验证 Lua 原子一次消费和过期拒绝，确保不依赖 Redis 6.2 `GETDEL`。
+- Redis 消费、JIT 和 XXL 登录异常必须落到 platform `503 unavailable` 状态页，不得渲染会访问父窗口 `adminTab` 的上游通用错误页；Cookie 默认 `Secure`，受控 HTTP 配置显式关闭时仍保持 `HttpOnly`、`SameSite=Lax` 和受限 Path。
 - 平台 Token session digest marker 在登录、刷新、登出和过期后的写入/删除，以及 XXL `LoginStore` 的逐请求失效检查。
 - JIT 用户按 `platform_user_id` 幂等、改名、稳定冲突后缀和无原生密码登录。
 - 原生登录/改密/用户写入口禁用，用户列表只读保留。

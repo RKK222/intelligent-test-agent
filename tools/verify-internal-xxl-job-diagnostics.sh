@@ -1510,6 +1510,7 @@ TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=raw-xxl-password-value
 TEST_AGENT_XXL_JOB_ACCESS_TOKEN=raw-xxl-access-token-value
 TEST_AGENT_XXL_JOB_ADMIN_PORT=18080
 TEST_AGENT_XXL_JOB_EXECUTOR_PORT=9999
+TEST_AGENT_XXL_JOB_COOKIE_SECURE=false
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=raw-manager-token-value
 TEST_AGENT_INTERNAL_PROXY_API_KEY=raw-proxy-api-key-value
 SYS_DATA_ROOT_DIR=/must/not/be/used/by/fixture
@@ -1556,6 +1557,7 @@ grep -Fq '[INFO] REDIS_ENDPOINT=122.233.30.20:6379' "${TMP_ROOT}/backend-ok.log"
 grep -Fq '[INFO] XXL_MYSQL_ENDPOINT=jdbc:mysql://122.233.30.148:3306/xxl_job' "${TMP_ROOT}/backend-ok.log"
 grep -Fq '[INFO] ADMIN_PORT=18080' "${TMP_ROOT}/backend-ok.log"
 grep -Fq '[INFO] EXECUTOR_PORT=9999' "${TMP_ROOT}/backend-ok.log"
+grep -Fq '[INFO] COOKIE_SECURE=false' "${TMP_ROOT}/backend-ok.log"
 grep -Eq '\[INFO\] TEST_AGENT_XXL_JOB_ACCESS_TOKEN=SET length=[0-9]+ sha256=[0-9a-f]{16}$' "${TMP_ROOT}/backend-ok.log"
 for status_only_secret in \
   TEST_AGENT_DB_PASSWORD \
