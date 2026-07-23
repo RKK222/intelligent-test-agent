@@ -208,6 +208,47 @@ describe("AgentConfigPanel", () => {
     expect(view.container.querySelector("use")?.getAttribute("href")).toContain("#Readme");
   });
 
+  it("shows Chinese Agent and Skill names while opening the original English paths", async () => {
+    apiClientMock.listPublicAgentFiles.mockImplementation(async (path: string) => {
+      if (path === "") {
+        return [
+          { path: "agents", name: "agents", type: "directory" },
+          { path: "skills", name: "skills", type: "directory" }
+        ];
+      }
+      if (path === "agents") {
+        return [{
+          path: "agents/test-case-review.md",
+          name: "test-case-review.md",
+          displayName: "测试案例审核",
+          displayNameEn: "Test Case Review",
+          type: "file"
+        }];
+      }
+      if (path === "skills") {
+        return [{
+          path: "skills/api-automation-testing",
+          name: "api-automation-testing",
+          displayName: "接口自动化测试",
+          displayNameEn: "API Automation Testing",
+          type: "directory"
+        }];
+      }
+      return [];
+    });
+    const { view } = renderPanel();
+
+    await fireEvent.click(await view.findByRole("button", { name: "agents" }));
+    const agentRow = await view.findByRole("button", { name: /测试案例审核.*Test Case Review/ });
+    expect(agentRow.getAttribute("title")).toContain("agents/test-case-review.md");
+    await fireEvent.click(agentRow);
+    await fireEvent.click(view.getByRole("button", { name: "skills" }));
+
+    expect(await view.findByRole("button", { name: /接口自动化测试.*API Automation Testing/ })).toBeTruthy();
+    const events = (view.emitted("openFile") ?? []) as unknown[][];
+    expect(events.at(-1)?.[0]).toMatchObject({ path: "agents/test-case-review.md" });
+  });
+
   it("automatically mounts the current user's public worktree", async () => {
     const { view } = renderPanel();
 
@@ -527,7 +568,8 @@ describe("AgentConfigPanel", () => {
     await fireEvent.click(within(dialog).getByRole("radio", { name: "Agent" }));
     expect(within(dialog).getByRole("radio", { name: "Agent" }).getAttribute("aria-checked")).toBe("true");
     expect(dialog.textContent).toContain("用于定义可选择、可调用的 Agent");
-    await fireEvent.update(within(dialog).getByLabelText("Agent 名称"), "Payment Agent");
+    await fireEvent.update(within(dialog).getByLabelText("Agent 中文名称"), "支付测试智能体");
+    await fireEvent.update(within(dialog).getByLabelText("英文名称（选填）"), "Payment Agent");
     await fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
 
     await waitFor(() => expect(apiClientMock.writeWorkspaceAgentFile).toHaveBeenCalledTimes(1));
@@ -535,7 +577,7 @@ describe("AgentConfigPanel", () => {
       ["wrk_1234567890abcdef", "agents/payment-agent.md"]
     ]);
     const agentContent = String(apiClientMock.writeWorkspaceAgentFile.mock.calls[0]?.[2]);
-    expect(agentContent).toContain("description: Payment Agent application workspace agent");
+    expect(agentContent).toContain('description: "Payment Agent（支付测试智能体）。application workspace agent"');
     expect(agentContent).toContain("mode: primary");
     expect(agentContent).not.toContain("SKILL.md");
   });
@@ -548,20 +590,23 @@ describe("AgentConfigPanel", () => {
     const dialog = await view.findByRole("dialog", { name: "新建或上传应用配置" });
     await fireEvent.click(within(dialog).getByRole("radio", { name: "Skill" }));
     expect(within(dialog).getByRole("radio", { name: "Skill" }).getAttribute("aria-checked")).toBe("true");
-    await fireEvent.update(within(dialog).getByLabelText("Skill 名称"), "支付测试技能");
+    await fireEvent.update(within(dialog).getByLabelText("Skill 中文名称"), "接口自动化测试");
+    expect(dialog.textContent).toContain("留空时按完整拼音生成英文目录");
     await fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
 
     await waitFor(() => expect(apiClientMock.writeWorkspaceAgentFile).toHaveBeenCalledTimes(3));
     expect(apiClientMock.writeWorkspaceAgentFile.mock.calls.map((call) => call.slice(0, 2))).toEqual([
-      ["wrk_1234567890abcdef", "skills/zhi-fu-ce-shi-ji-neng/SKILL.md"],
-      ["wrk_1234567890abcdef", "skills/zhi-fu-ce-shi-ji-neng/rules/README.md"],
-      ["wrk_1234567890abcdef", "skills/zhi-fu-ce-shi-ji-neng/templates/README.md"]
+      ["wrk_1234567890abcdef", "skills/jie-kou-zi-dong-hua-ce-shi/SKILL.md"],
+      ["wrk_1234567890abcdef", "skills/jie-kou-zi-dong-hua-ce-shi/rules/README.md"],
+      ["wrk_1234567890abcdef", "skills/jie-kou-zi-dong-hua-ce-shi/templates/README.md"]
     ]);
     const skillContent = String(apiClientMock.writeWorkspaceAgentFile.mock.calls[0]?.[2]);
-    expect(skillContent).toContain("name: zhi-fu-ce-shi-ji-neng");
-    expect(skillContent).toContain("description: 支付测试技能 application workspace skill");
+    expect(skillContent).toContain("name: jie-kou-zi-dong-hua-ce-shi");
+    expect(skillContent).toContain('description: "Jie Kou Zi Dong Hua Ce Shi（接口自动化测试）。application workspace skill"');
     expect(skillContent).toContain("compatibility: opencode");
     expect(skillContent).toContain("metadata:");
+    expect(skillContent).toContain('display-name: "Jie Kou Zi Dong Hua Ce Shi"');
+    expect(skillContent).toContain('display-name-zh: "接口自动化测试"');
     expect(skillContent).not.toContain("version:");
     expect(skillContent).toContain("## What I do");
     expect(skillContent).toContain("## When to use me");
@@ -625,12 +670,13 @@ describe("AgentConfigPanel", () => {
     expect(within(dialog).getAllByRole("radio").map((button) => button.textContent?.trim()))
       .toEqual(["文件", "文件夹", "上传", "Agent", "Skill"]);
     await fireEvent.click(within(dialog).getByRole("radio", { name: "Skill" }));
-    await fireEvent.update(within(dialog).getByLabelText("Skill 名称"), "Shared Testing");
+    await fireEvent.update(within(dialog).getByLabelText("Skill 中文名称"), "共享测试");
+    await fireEvent.update(within(dialog).getByLabelText("英文名称（选填）"), "Shared Testing");
     await fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
 
     await waitFor(() => expect(apiClientMock.writePublicAgentFile).toHaveBeenCalledTimes(3));
     expect(apiClientMock.writePublicAgentFile.mock.calls.map((call) => call.slice(0, 2))).toEqual([
-      ["skills/shared-testing/SKILL.md", expect.stringContaining("description: Shared Testing public skill")],
+      ["skills/shared-testing/SKILL.md", expect.stringContaining('description: "Shared Testing（共享测试）。public skill"')],
       ["skills/shared-testing/rules/README.md", expect.stringContaining("shared public rule Markdown files")],
       ["skills/shared-testing/templates/README.md", expect.stringContaining("shared public reusable output templates")]
     ]);
@@ -638,6 +684,7 @@ describe("AgentConfigPanel", () => {
       call[2] === "agw_1234567890abcdef" && call[3] === "linux-1"
     )).toBe(true);
     expect(String(apiClientMock.writePublicAgentFile.mock.calls[0]?.[1])).toContain("scope: public");
+    expect(String(apiClientMock.writePublicAgentFile.mock.calls[0]?.[1])).toContain('display-name-zh: "共享测试"');
     await waitFor(() => expect((view.emitted("files-mutated")?.at(-1) as unknown[] | undefined)?.[0]).toEqual({
       scope: "PUBLIC",
       paths: [

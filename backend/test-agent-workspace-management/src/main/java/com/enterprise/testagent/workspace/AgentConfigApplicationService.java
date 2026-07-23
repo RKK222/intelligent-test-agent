@@ -37,10 +37,13 @@ import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.charset.StandardCharsets;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.Reader;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -85,12 +88,18 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     private static final String WORKSPACE_AGENT_RELATIVE_ROOT = ".opencode";
     private static final String WORKSPACE_AGENT_LEGACY_RELATIVE_ROOT = ".opencode/agents";
     private static final long MAX_CONFLICT_FILE_BYTES = 1024L * 1024L;
+    private static final int MAX_DISPLAY_METADATA_CHARS = 64 * 1024;
     private static final Duration PREPARATION_RECOVERY_DELAY = Duration.ofMinutes(3);
     private static final Duration PREPARATION_ABORT_DELAY = Duration.ofMinutes(5);
     /** 本地最终 commit 尚未产生；崩溃恢复不能把当前远端 HEAD 误当作本次发布结果。 */
     private static final String PENDING_EXPECTED_COMMIT = "PENDING_LOCAL_COMMIT";
     private static final Pattern OPERATION_ID_PATTERN = Pattern.compile("^aco_[A-Za-z0-9_-]{8,128}$");
     private static final Pattern WORKTREE_NAME_PATTERN = Pattern.compile("^[A-Za-z0-9._-]{1,64}$");
+    private static final Pattern FRONTMATTER_PATTERN = Pattern.compile("\\A---\\R(.*?)\\R---(?:\\R|\\z)", Pattern.DOTALL);
+    private static final Pattern BILINGUAL_DESCRIPTION_PATTERN = Pattern.compile(
+            "^([A-Za-z][A-Za-z0-9 &+./_-]*?)（([^）\\r\\n]+)）[。；]");
+    private static final Pattern MARKDOWN_TITLE_PATTERN = Pattern.compile("(?m)^#\\s+(.+?)\\s*$");
+    private static final ObjectMapper JSON_SCALAR_MAPPER = new ObjectMapper();
     private static final DateTimeFormatter WORKTREE_SUFFIX_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd").withZone(ZoneOffset.UTC);
     private static final ServerBroadcastPublisher NOOP_BROADCAST = new ServerBroadcastPublisher() {
         @Override
@@ -743,7 +752,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         if (!Files.isDirectory(agentRoot)) {
             return List.of();
         }
-        return fileService.listDirectory(agentRoot.toString(), relativePath);
+        return listAgentConfigDirectory(agentRoot, relativePath);
     }
 
     public FileContentResponse readPublicAgentFile(String relativePath, String worktreeId, UserId userId) {
@@ -853,7 +862,160 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         if (!Files.isDirectory(agentRoot)) {
             return List.of();
         }
-        return fileService.listDirectory(agentRoot.toString(), relativePath);
+        return listAgentConfigDirectory(agentRoot, relativePath);
+    }
+
+    /**
+     * 文件列表仍以英文物理路径为身份，只为 Agent Markdown 和 Skill 包目录补充可选双语展示名。
+     * 读取限制在 64 KiB，且不跟随符号链接，避免目录展开触发无界内容读取或越过配置根目录。
+     */
+    private List<FileTreeEntryResponse> listAgentConfigDirectory(Path agentRoot, String relativePath) {
+        Path normalizedRoot = agentRoot.toAbsolutePath().normalize();
+        return fileService.listDirectory(normalizedRoot.toString(), relativePath).stream()
+                .map(entry -> withAgentConfigDisplayNames(normalizedRoot, entry))
+                .toList();
+    }
+
+    private FileTreeEntryResponse withAgentConfigDisplayNames(Path root, FileTreeEntryResponse entry) {
+        String relativeEntry = entry.path().replace('\\', '/');
+        Path entryPath = root.resolve(entry.path()).normalize();
+        if (!entryPath.startsWith(root)) {
+            return entry;
+        }
+        boolean skill = entry.directory() && relativeEntry.startsWith("skills/");
+        Path metadataFile = skill ? entryPath.resolve("SKILL.md") : entryPath;
+        boolean agent = !entry.directory()
+                && relativeEntry.startsWith("agents/")
+                && relativeEntry.toLowerCase(Locale.ROOT).endsWith(".md");
+        if ((!skill && !agent)
+                || containsSymbolicLink(root, metadataFile)
+                || !Files.isRegularFile(metadataFile, LinkOption.NOFOLLOW_LINKS)) {
+            return entry;
+        }
+        String header = readDisplayMetadata(metadataFile);
+        if (header == null) {
+            return entry;
+        }
+        AgentConfigDisplayNames names = resolveDisplayNames(
+                header,
+                skill,
+                entry.directory() ? entry.name() : entry.name().replaceFirst("(?i)\\.md$", ""));
+        return names == null ? entry : entry.withDisplayNames(names.chineseName(), names.englishName());
+    }
+
+    /**
+     * {@code NOFOLLOW_LINKS} 只约束目标文件本身；这里逐段拒绝符号链接，避免 Skill 目录链接到配置根外后读取其 SKILL.md。
+     */
+    private boolean containsSymbolicLink(Path root, Path target) {
+        Path relative;
+        try {
+            relative = root.relativize(target);
+        } catch (IllegalArgumentException exception) {
+            return true;
+        }
+        Path current = root;
+        for (Path segment : relative) {
+            current = current.resolve(segment);
+            if (Files.isSymbolicLink(current)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String readDisplayMetadata(Path file) {
+        StringBuilder content = new StringBuilder();
+        char[] buffer = new char[4096];
+        try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            while (content.length() < MAX_DISPLAY_METADATA_CHARS) {
+                int length = reader.read(buffer, 0, Math.min(buffer.length, MAX_DISPLAY_METADATA_CHARS - content.length()));
+                if (length < 0) {
+                    break;
+                }
+                content.append(buffer, 0, length);
+            }
+            return content.toString();
+        } catch (Exception ignored) {
+            // 展示元数据损坏或暂时不可读时仍返回原始英文目录项，不阻断配置树浏览。
+            return null;
+        }
+    }
+
+    private AgentConfigDisplayNames resolveDisplayNames(String content, boolean skill, String technicalName) {
+        var frontmatterMatcher = FRONTMATTER_PATTERN.matcher(content);
+        String frontmatter = frontmatterMatcher.find() ? frontmatterMatcher.group(1) : "";
+        if (skill) {
+            String chineseName = yamlNestedScalar(frontmatter, "display-name-zh");
+            String englishName = yamlNestedScalar(frontmatter, "display-name");
+            if (chineseName != null) {
+                return new AgentConfigDisplayNames(chineseName, englishName == null ? technicalName : englishName);
+            }
+        }
+
+        String description = yamlTopLevelScalar(frontmatter, "description");
+        if (description != null) {
+            var bilingualMatcher = BILINGUAL_DESCRIPTION_PATTERN.matcher(description);
+            if (bilingualMatcher.find()) {
+                String englishName = normalizedDisplayName(bilingualMatcher.group(1));
+                String chineseName = normalizedDisplayName(bilingualMatcher.group(2));
+                if (chineseName != null) {
+                    return new AgentConfigDisplayNames(chineseName, englishName == null ? technicalName : englishName);
+                }
+            }
+        }
+
+        // 历史应用配置没有双语 description；标题仅作为兼容回退，Skill metadata 仍是第一优先级。
+        var titleMatcher = MARKDOWN_TITLE_PATTERN.matcher(content);
+        if (titleMatcher.find()) {
+            String title = normalizedDisplayName(titleMatcher.group(1));
+            if (title != null && title.codePoints().anyMatch(codePoint -> codePoint >= 0x3400 && codePoint <= 0x9fff)) {
+                return new AgentConfigDisplayNames(title, technicalName);
+            }
+        }
+        return null;
+    }
+
+    private String yamlTopLevelScalar(String frontmatter, String field) {
+        return yamlScalar(frontmatter, Pattern.compile(
+                "(?m)^" + Pattern.quote(field) + "\\s*:\\s*(.+?)\\s*$"));
+    }
+
+    private String yamlNestedScalar(String frontmatter, String field) {
+        return yamlScalar(frontmatter, Pattern.compile(
+                "(?m)^[ \\t]+" + Pattern.quote(field) + "\\s*:\\s*(.+?)\\s*$"));
+    }
+
+    private String yamlScalar(String frontmatter, Pattern pattern) {
+        var matcher = pattern.matcher(frontmatter);
+        if (!matcher.find()) {
+            return null;
+        }
+        String raw = matcher.group(1).trim();
+        try {
+            if (raw.startsWith("\"") && raw.endsWith("\"")) {
+                return normalizedDisplayName(JSON_SCALAR_MAPPER.readValue(raw, String.class));
+            }
+            if (raw.startsWith("'") && raw.endsWith("'") && raw.length() >= 2) {
+                return normalizedDisplayName(raw.substring(1, raw.length() - 1).replace("''", "'"));
+            }
+            return normalizedDisplayName(raw);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String normalizedDisplayName(String value) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.replace('\r', ' ').replace('\n', ' ').trim();
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        return normalized.length() <= 160 ? normalized : normalized.substring(0, 160);
+    }
+
+    private record AgentConfigDisplayNames(String chineseName, String englishName) {
     }
 
     public FileContentResponse readWorkspaceAgentFile(String workspaceId, String relativePath, String worktreeId) {

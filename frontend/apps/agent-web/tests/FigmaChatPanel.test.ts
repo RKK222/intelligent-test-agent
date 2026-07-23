@@ -1014,17 +1014,17 @@ describe("FigmaChatPanel", () => {
     await wrapper.get('[aria-label="切换 Agent"]').trigger("click");
 
     expect(wrapper.find(".figma-chat-agent-dropdown").exists()).toBe(true);
-    expect(wrapper.text()).toContain("Test Design");
-    expect(wrapper.text()).toContain("测试设计 · 默认构建");
-    expect(wrapper.text()).toContain("Test Execution");
-    expect(wrapper.text()).toContain("测试执行 · 可作为主 Agent");
+    expect(wrapper.text()).toContain("测试设计");
+    expect(wrapper.text()).toContain("Test Design · 默认构建");
+    expect(wrapper.text()).toContain("测试执行");
+    expect(wrapper.text()).toContain("Test Execution · 可作为主 Agent");
     expect(wrapper.text()).not.toContain("Review");
     expect(wrapper.text()).not.toContain("Secret");
-    expect(wrapper.get(".figma-chat-agent-option-item.is-active").text()).toContain("Test Design");
+    expect(wrapper.get(".figma-chat-agent-option-item.is-active").text()).toContain("测试设计");
 
     const allRounder = wrapper
       .findAll(".figma-chat-agent-option-item")
-      .find((item) => item.text().includes("Test Execution"));
+      .find((item) => item.text().includes("测试执行"));
     expect(allRounder).toBeTruthy();
     await allRounder!.trigger("click");
 
@@ -1628,10 +1628,10 @@ describe("FigmaChatPanel", () => {
 
     const panel = wrapper.find(".figma-chat-agent-panel");
     expect(panel.exists()).toBe(true);
-    expect(panel.text()).toContain("Test Case Review");
-    expect(panel.text()).toContain("测试案例审核 · 评审实现");
-    expect(panel.text()).toContain("Test Analysis");
-    expect(panel.text()).toContain("测试分析 · 分析测试对象");
+    expect(panel.text()).toContain("测试案例审核");
+    expect(panel.text()).toContain("Test Case Review · 评审实现");
+    expect(panel.text()).toContain("测试分析");
+    expect(panel.text()).toContain("Test Analysis · 分析测试对象");
     expect(panel.text()).not.toContain("Build");
     expect(panel.text()).not.toContain("Hidden Review");
   });
@@ -1751,8 +1751,8 @@ describe("FigmaChatPanel", () => {
     await wrapper.get("textarea").setValue("/");
 
     expect(wrapper.find(".figma-chat-skill-panel").exists()).toBe(true);
-    expect(wrapper.text()).toContain("Equivalence Partitioning");
-    expect(wrapper.text()).toContain("等价类法 · 生成等价类表");
+    expect(wrapper.text()).toContain("等价类法");
+    expect(wrapper.text()).toContain("Equivalence Partitioning · 生成等价类表");
     expect(wrapper.text()).not.toContain("帮助");
 
     await wrapper.setProps({
@@ -1761,9 +1761,9 @@ describe("FigmaChatPanel", () => {
       ]
     });
 
-    expect(wrapper.text()).toContain("API Testing");
-    expect(wrapper.text()).toContain("针对接口的案例设计 · 使用最新接口模板");
-    expect(wrapper.text()).not.toContain("等价类法 · 生成等价类表");
+    expect(wrapper.text()).toContain("针对接口的案例设计");
+    expect(wrapper.text()).toContain("API Testing · 使用最新接口模板");
+    expect(wrapper.text()).not.toContain("Equivalence Partitioning · 生成等价类表");
 
     await wrapper.get(".figma-chat-skill-row").trigger("click");
 

@@ -1941,6 +1941,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
 type BackendFileTreeEntry = {
   path: string;
   name: string;
+  displayName?: string;
+  displayNameEn?: string;
   directory: boolean;
   size: number;
   lastModifiedAt?: string;
@@ -2015,6 +2017,8 @@ function toFileTreeEntry(entry: BackendFileTreeEntry): FileTreeEntry {
   return {
     path: entry.path,
     name: entry.name,
+    displayName: entry.displayName,
+    displayNameEn: entry.displayNameEn,
     type: entry.directory ? "directory" : "file",
     size: entry.size,
     modifiedAt: entry.lastModifiedAt

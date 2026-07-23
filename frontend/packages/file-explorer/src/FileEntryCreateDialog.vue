@@ -22,7 +22,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   createEntry: [directory: string, name: string, type: "file" | "directory"];
-  createAgentTemplate: [directory: string, name: string, type: "agent" | "skill"];
+  createAgentTemplate: [directory: string, name: string, type: "agent" | "skill", englishName?: string];
   requestUpload: [directory: string];
 }>();
 
@@ -30,6 +30,7 @@ const visible = ref(false);
 const targetDirectory = ref("");
 const entryType = ref<"file" | "directory" | "upload" | "agent" | "skill">("file");
 const entryName = ref("");
+const englishName = ref("");
 const errorMessage = ref("");
 const nameInput = ref<HTMLInputElement | null>(null);
 
@@ -38,6 +39,7 @@ function open(directory: string) {
   targetDirectory.value = directory;
   entryType.value = "file";
   entryName.value = "";
+  englishName.value = "";
   errorMessage.value = "";
   visible.value = true;
   void nextTick(() => nameInput.value?.focus());
@@ -66,7 +68,12 @@ function submit() {
   }
   if (entryType.value === "agent" || entryType.value === "skill") {
     if (!props.allowAgentTemplates) return;
-    emit("createAgentTemplate", targetDirectory.value, name, entryType.value);
+    const optionalEnglishName = englishName.value.trim();
+    if (optionalEnglishName && !/^[A-Za-z0-9][A-Za-z0-9 ._+&-]*$/.test(optionalEnglishName)) {
+      errorMessage.value = "英文名称只能包含英文字母、数字、空格及 . _ + & -";
+      return;
+    }
+    emit("createAgentTemplate", targetDirectory.value, name, entryType.value, optionalEnglishName || undefined);
   } else {
     emit("createEntry", targetDirectory.value, name, entryType.value);
   }
@@ -79,8 +86,8 @@ const resolvedDialogLabel = () => props.dialogLabel || (props.allowUpload ? "新
 function entryLabel() {
   if (entryType.value === "file") return "文件名";
   if (entryType.value === "directory") return "文件夹名";
-  if (entryType.value === "agent") return "Agent 名称";
-  return "Skill 名称";
+  if (entryType.value === "agent") return "Agent 中文名称";
+  return "Skill 中文名称";
 }
 
 function entryPlaceholder() {
@@ -93,8 +100,8 @@ function entryPlaceholder() {
 function entryHelp() {
   if (entryType.value === "file") return "创建空白普通文件，由你自行编写内容；不会自动生成可调用的 Agent 或 Skill。";
   if (entryType.value === "directory") return "创建普通目录，用于整理配置素材；不会生成 Agent 或 Skill 模板。";
-  if (entryType.value === "agent") return "按 OpenCode 模板创建 agents/<名称>.md，用于定义可选择、可调用的 Agent。";
-  return "按 OpenCode 模板创建 skills/<名称>/ 及 SKILL.md、rules、templates，用于封装可复用技能。";
+  if (entryType.value === "agent") return "用于定义可选择、可调用的 Agent。英文名称选填；留空时按完整拼音生成英文文件名 agents/<技术标识>.md。";
+  return "用于封装可复用 Skill。英文名称选填；留空时按完整拼音生成英文目录 skills/<技术标识>/，并创建 SKILL.md、rules、templates。";
 }
 
 defineExpose({ open });
@@ -189,6 +196,17 @@ defineExpose({ open });
               @keydown.enter="submit"
             />
             <span v-if="allowAgentTemplates" class="ta-file-dialog-help">{{ entryHelp() }}</span>
+            <template v-if="entryType === 'agent' || entryType === 'skill'">
+              <label :for="`new-entry-${entryType}-english`">英文名称（选填）</label>
+              <input
+                :id="`new-entry-${entryType}-english`"
+                v-model="englishName"
+                type="text"
+                :placeholder="entryType === 'agent' ? '例如：Payment Testing Agent' : '例如：Payment Testing'"
+                class="ta-file-dialog-input"
+                @keydown.enter="submit"
+              />
+            </template>
             <span v-if="errorMessage" class="ta-file-dialog-error">{{ errorMessage }}</span>
           </div>
           <div v-else class="ta-file-dialog-upload-note">

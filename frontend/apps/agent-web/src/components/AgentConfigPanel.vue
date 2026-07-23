@@ -17,6 +17,7 @@ import { createBackendApiClient } from "@test-agent/backend-api";
 import { FileEntryCreateDialog, FileEntryDeleteDialog } from "@test-agent/file-explorer";
 import { useWorkbenchStore } from "@test-agent/workbench-shell";
 import { Button, Input } from "@test-agent/ui-kit";
+import { pinyin } from "pinyin-pro";
 import type {
   AgentConfigDiffFile,
   AgentConfigProgressEvent,
@@ -1434,14 +1435,24 @@ async function writeScopedAgentFile(scope: Scope, path: string, content: string)
 }
 
 /** Agent/Skill 类型只在根入口出现，并在这里组合 OpenCode 原生模板。 */
-async function createAgentTemplate(_directory: string, rawName: string, type: "agent" | "skill") {
+async function createAgentTemplate(
+  _directory: string,
+  rawName: string,
+  type: "agent" | "skill",
+  rawEnglishName?: string
+) {
   const scope = createEntryScope.value;
   if (!canWriteScope(scope) || busy.value) return;
   if (scope === "PUBLIC" && !publicWorktree.value?.worktreeId) return;
   if (scope === "WORKSPACE" && !props.workspaceId) return;
   const displayName = rawName.trim();
-  const packageName = slugifyPackageName(displayName);
-  if (!packageName) return;
+  const englishDisplayName = rawEnglishName?.trim() || defaultEnglishDisplayName(displayName);
+  const packageName = slugifyPackageName(englishDisplayName);
+  if (!packageName) {
+    errorMessage.value = "无法生成英文技术标识，请填写英文名称";
+    notifyError(`新建${type === "agent" ? "Agent" : "Skill"}失败`, errorMessage.value);
+    return;
+  }
   busy.value = true;
   errorMessage.value = "";
   try {
@@ -1453,9 +1464,13 @@ async function createAgentTemplate(_directory: string, rawName: string, type: "a
           `skills/${packageName}/templates/README.md`
         ];
     if (type === "agent") {
-      await writeScopedAgentFile(scope, createdPaths[0], agentTemplate(displayName, scope));
+      await writeScopedAgentFile(scope, createdPaths[0], agentTemplate(displayName, englishDisplayName, scope));
     } else {
-      await writeScopedAgentFile(scope, createdPaths[0], skillTemplate(displayName, packageName, scope));
+      await writeScopedAgentFile(
+        scope,
+        createdPaths[0],
+        skillTemplate(displayName, englishDisplayName, packageName, scope)
+      );
       await writeScopedAgentFile(scope, createdPaths[1], rulesTemplate(displayName, scope));
       await writeScopedAgentFile(scope, createdPaths[2], templatesTemplate(displayName, scope));
     }
@@ -1602,10 +1617,10 @@ const TEMPLATE_SCOPE_COPY = {
 } as const;
 
 /** OpenCode Markdown Agent 的名称由文件名决定，模板文案按公共/应用作用域集中配置。 */
-function agentTemplate(displayName: string, scope: Scope) {
+function agentTemplate(displayName: string, englishDisplayName: string, scope: Scope) {
   const copy = TEMPLATE_SCOPE_COPY[scope];
   return `---
-description: ${displayName} ${copy.agentDescription}
+description: ${yamlScalar(`${englishDisplayName}（${displayName}）。${copy.agentDescription}`)}
 mode: primary
 hidden: false
 ---
@@ -1618,13 +1633,15 @@ Return verifiable results and keep changes scoped to the ${copy.agentLocation}.
 `;
 }
 
-function skillTemplate(displayName: string, packageName: string, scope: Scope) {
+function skillTemplate(displayName: string, englishDisplayName: string, packageName: string, scope: Scope) {
   const copy = TEMPLATE_SCOPE_COPY[scope];
   return `---
 name: ${packageName}
-description: ${displayName} ${copy.skillDescription}
+description: ${yamlScalar(`${englishDisplayName}（${displayName}）。${copy.skillDescription}`)}
 compatibility: opencode
 metadata:
+  display-name: ${yamlScalar(englishDisplayName)}
+  display-name-zh: ${yamlScalar(displayName)}
   scope: ${copy.metadataScope}
   source: test-agent
 ---
@@ -1666,12 +1683,28 @@ Add ${qualifier} reusable output templates here. Document the purpose and select
 `;
 }
 
-function slugifyPackageName(value: string) {
-  const converted = Array.from(value.trim())
-    // 中文拼音保持逐字分段；连续英文和数字不插入额外短横线。
-    .map((char) => PINYIN_SEGMENTS[char] ? ` ${PINYIN_SEGMENTS[char]} ` : char)
-    .join("");
+/** 英文名留空时使用完整拼音；保留连续英文，避免再维护会漏字的手写字符表。 */
+function defaultEnglishDisplayName(value: string) {
+  if (!/[\u3400-\u9fff]/u.test(value)) return value.trim();
+  const converted = pinyin(value, {
+    toneType: "none",
+    type: "string",
+    nonZh: "consecutive",
+    v: true
+  })
+    .replace(/[^A-Za-z0-9]+/g, " ")
+    .trim();
   return converted
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((segment) => segment.length > 1
+      ? `${segment[0].toUpperCase()}${segment.slice(1)}`
+      : segment.toUpperCase())
+    .join(" ");
+}
+
+function slugifyPackageName(value: string) {
+  return value
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
@@ -1681,40 +1714,10 @@ function slugifyPackageName(value: string) {
     .slice(0, 64);
 }
 
-const PINYIN_SEGMENTS: Record<string, string> = {
-  "支": "zhi",
-  "付": "fu",
-  "测": "ce",
-  "试": "shi",
-  "技": "ji",
-  "能": "neng",
-  "应": "ying",
-  "用": "yong",
-  "接": "jie",
-  "口": "kou",
-  "设": "she",
-  "计": "ji",
-  "执": "zhi",
-  "行": "xing",
-  "案": "an",
-  "例": "li",
-  "对": "dui",
-  "象": "xiang",
-  "策": "ce",
-  "略": "lue",
-  "规": "gui",
-  "划": "hua",
-  "生": "sheng",
-  "成": "cheng",
-  "审": "shen",
-  "查": "cha",
-  "工": "gong",
-  "作": "zuo",
-  "空": "kong",
-  "间": "jian",
-  "配": "pei",
-  "置": "zhi"
-};
+/** JSON 双引号标量是合法 YAML，可覆盖中英文名中的冒号、井号和引号。 */
+function yamlScalar(value: string) {
+  return JSON.stringify(value);
+}
 
 async function loadDiff(scope = activeScope.value) {
   if (!scope) return;

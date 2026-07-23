@@ -3006,6 +3006,8 @@ describe("backend-api", () => {
       {
         path: "opencode/agents/review.md",
         name: "review.md",
+        displayName: "测试案例审核",
+        displayNameEn: "Test Case Review",
         type: "file",
         size: 18,
         modifiedAt: "2026-06-26T09:00:00Z"
@@ -3715,6 +3717,8 @@ class FakeWorkspaceWebSocket {
                     {
                       path: "opencode/agents/review.md",
                       name: "review.md",
+                      displayName: "测试案例审核",
+                      displayNameEn: "Test Case Review",
                       directory: false,
                       size: 18,
                       lastModifiedAt: "2026-06-26T09:00:00Z"

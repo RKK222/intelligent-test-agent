@@ -87,6 +87,11 @@ const isLoading = computed(() => props.loadingPath.has(props.entry.path));
 const isDirectory = computed(() => props.entry.type === "directory");
 const isActiveFile = computed(() => !isDirectory.value && props.activePath === props.entry.path);
 const isConflictFile = computed(() => !isDirectory.value && props.conflictPaths?.has(props.entry.path));
+const treeLabel = computed(() => props.entry.displayName?.trim() || props.entry.name);
+const treeSecondaryLabel = computed(() => {
+  const english = props.entry.displayNameEn?.trim();
+  return english && english !== treeLabel.value ? english : "";
+});
 const isKnownEmpty = computed(
   () => isDirectory.value && Array.isArray(children.value) && children.value.length === 0
 );
@@ -266,6 +271,7 @@ function submitRename() {
       )"
       :draggable="canMutateFile"
       :style="{ paddingLeft: `${indentPx}px` }"
+      :title="props.entry.displayName ? `${props.entry.path} · ${treeLabel}` : props.entry.path"
       @click="onRowClick"
       @contextmenu="openContextMenu"
       @dragstart="onDragStart"
@@ -292,7 +298,10 @@ function submitRename() {
         <span class="ta-file-tree-file-spacer" />
         <FileIcon :entry="entry" />
       </template>
-      <span v-if="!renaming" class="min-w-0 flex-1 truncate">{{ entry.name }}</span>
+      <span v-if="!renaming" class="min-w-0 flex-1 truncate">
+        <span>{{ treeLabel }}</span>
+        <span v-if="treeSecondaryLabel" class="agent-tree-secondary-name"> · {{ treeSecondaryLabel }}</span>
+      </span>
       <input
         v-else
         ref="renameInput"
@@ -487,5 +496,10 @@ function submitRename() {
   font-weight: 600;
   line-height: 16px;
   padding: 0 5px;
+}
+
+.agent-tree-secondary-name {
+  color: var(--ta-tree-muted, #8b949e);
+  font-size: 11px;
 }
 </style>

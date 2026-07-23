@@ -66,6 +66,10 @@ export type WorkspaceDirectoryList = {
 export type FileTreeEntry = {
   path: string;
   name: string;
+  /** Agent/Skill 的中文展示名；文件系统操作始终继续使用 path/name。 */
+  displayName?: string;
+  /** Agent/Skill 的英文展示名，供中文主名旁辅助展示。 */
+  displayNameEn?: string;
   type: "file" | "directory";
   size?: number;
   modifiedAt?: string;

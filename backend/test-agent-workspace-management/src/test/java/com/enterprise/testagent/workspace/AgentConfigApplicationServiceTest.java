@@ -183,6 +183,86 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
+    void publicAgentFilesExposeChineseDisplayNamesWithoutChangingEnglishPaths() throws Exception {
+        Path worktreeRoot = root.resolve(".configdev/public-usr_admin");
+        Files.createDirectories(worktreeRoot.resolve("opencode/agents"));
+        Files.createDirectories(worktreeRoot.resolve("opencode/skills/api-automation-testing"));
+        Path externalSkill = root.resolve("external-skill");
+        Files.createDirectories(externalSkill);
+        Files.writeString(worktreeRoot.resolve("opencode/agents/test-case-review.md"), """
+                ---
+                description: "Test Case Review（测试案例审核）。Review test cases"
+                mode: subagent
+                ---
+
+                # 测试案例审核
+                """);
+        Files.writeString(worktreeRoot.resolve("opencode/skills/api-automation-testing/SKILL.md"), """
+                ---
+                name: api-automation-testing
+                metadata:
+                  display-name: API Automation Testing
+                  display-name-zh: 接口自动化测试
+                ---
+
+                # 接口自动化测试
+                """);
+        Files.writeString(externalSkill.resolve("SKILL.md"), """
+                ---
+                name: external-skill
+                metadata:
+                  display-name: External Skill
+                  display-name-zh: 越界技能
+                ---
+                """);
+        Files.createSymbolicLink(worktreeRoot.resolve("opencode/skills/external-skill"), externalSkill);
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_public_display",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-1",
+                "public-usr_admin",
+                "public-usr_admin",
+                worktreeRoot.toString(),
+                ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW));
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                new RecordingGitWorkspaceService(),
+                new RecordingBroadcastPublisher(),
+                Optional.empty());
+
+        FileTreeEntryResponse agent = service.listPublicAgentFiles("agents", "agw_public_display", ADMIN).getFirst();
+        List<FileTreeEntryResponse> skills = service.listPublicAgentFiles("skills", "agw_public_display", ADMIN);
+        FileTreeEntryResponse skill = skills.stream()
+                .filter(entry -> entry.name().equals("api-automation-testing"))
+                .findFirst()
+                .orElseThrow();
+        FileTreeEntryResponse linkedSkill = skills.stream()
+                .filter(entry -> entry.name().equals("external-skill"))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(agent.path().replace('\\', '/')).isEqualTo("agents/test-case-review.md");
+        assertThat(agent.name()).isEqualTo("test-case-review.md");
+        assertThat(agent.displayName()).isEqualTo("测试案例审核");
+        assertThat(agent.displayNameEn()).isEqualTo("Test Case Review");
+        assertThat(skill.path().replace('\\', '/')).isEqualTo("skills/api-automation-testing");
+        assertThat(skill.name()).isEqualTo("api-automation-testing");
+        assertThat(skill.displayName()).isEqualTo("接口自动化测试");
+        assertThat(skill.displayNameEn()).isEqualTo("API Automation Testing");
+        assertThat(linkedSkill.displayName()).isNull();
+        assertThat(linkedSkill.displayNameEn()).isNull();
+    }
+
+    @Test
     void publicDirectWriteIsRejectedBecausePersonalWorktreeIsRequired() {
         AgentConfigApplicationService service = service(Map.of(
                 "OPENCODE_PUBLIC_AGENT_GIT_URL", "UNCONFIGURED",
@@ -979,8 +1059,20 @@ class AgentConfigApplicationServiceTest {
         Path workspaceRoot = root.resolve("project");
         Files.createDirectories(workspaceRoot.resolve(".opencode/agents"));
         Files.createDirectories(workspaceRoot.resolve(".opencode/skills/app-skill"));
-        Files.writeString(workspaceRoot.resolve(".opencode/agents/review.md"), "review");
-        Files.writeString(workspaceRoot.resolve(".opencode/skills/app-skill/SKILL.md"), "skill");
+        Files.writeString(workspaceRoot.resolve(".opencode/agents/review.md"), """
+                ---
+                description: 历史应用 Agent
+                ---
+
+                # 历史应用审核
+                """);
+        Files.writeString(workspaceRoot.resolve(".opencode/skills/app-skill/SKILL.md"), """
+                ---
+                name: app-skill
+                ---
+
+                # 历史应用技能
+                """);
         AgentConfigApplicationService service = service(
                 Map.of(
                         "OPENCODE_PUBLIC_AGENT_GIT_URL", "UNCONFIGURED",
@@ -1000,10 +1092,16 @@ class AgentConfigApplicationServiceTest {
                         "trace_workspace")));
 
         List<FileTreeEntryResponse> rootEntries = service.listWorkspaceAgentFiles("wrk_project", "", null);
+        List<FileTreeEntryResponse> agentEntries = service.listWorkspaceAgentFiles("wrk_project", "agents", null);
+        List<FileTreeEntryResponse> skillDirectories = service.listWorkspaceAgentFiles("wrk_project", "skills", null);
         List<FileTreeEntryResponse> skillEntries = service.listWorkspaceAgentFiles("wrk_project", "skills/app-skill", null);
         service.writeWorkspaceAgentFile("wrk_project", "skills/new-skill/SKILL.md", "new skill", null);
 
         assertThat(rootEntries).extracting(FileTreeEntryResponse::name).contains("agents", "skills");
+        assertThat(agentEntries.getFirst().displayName()).isEqualTo("历史应用审核");
+        assertThat(agentEntries.getFirst().displayNameEn()).isEqualTo("review");
+        assertThat(skillDirectories.getFirst().displayName()).isEqualTo("历史应用技能");
+        assertThat(skillDirectories.getFirst().displayNameEn()).isEqualTo("app-skill");
         assertThat(skillEntries).extracting(FileTreeEntryResponse::name).containsExactly("SKILL.md");
         assertThat(Files.readString(workspaceRoot.resolve(".opencode/skills/new-skill/SKILL.md"))).isEqualTo("new skill");
         assertThat(Files.exists(workspaceRoot.resolve(".opencode/agents/skills/new-skill/SKILL.md"))).isFalse();

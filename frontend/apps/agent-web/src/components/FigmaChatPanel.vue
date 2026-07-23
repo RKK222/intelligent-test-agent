@@ -1035,11 +1035,11 @@ function agentValue(agent: AgentInfo): string {
   return agent.agentId || agent.name
 }
 
-const BILINGUAL_DISPLAY_NAME_PATTERN = /^([A-Za-z][A-Za-z0-9 &+/-]*?)（([^）\n]+)）[。；]\s*/
+const BILINGUAL_DISPLAY_NAME_PATTERN = /^([A-Za-z][A-Za-z0-9 &+./_-]*?)（([^）\n]+)）[。；]\s*/
 
-// 公共配置首句统一为“English（中文）”；界面以英文为主、中文为辅，运行时仍提交稳定技术 ID。
+// 公共配置首句统一为“English（中文）”；界面以中文为主、英文为辅，运行时仍提交稳定技术 ID。
 function configuredDisplayName(name: string, description?: string): string {
-  return description?.match(BILINGUAL_DISPLAY_NAME_PATTERN)?.[1]?.trim() || name
+  return description?.match(BILINGUAL_DISPLAY_NAME_PATTERN)?.[2]?.trim() || name
 }
 
 function configuredDescription(description?: string): string {
@@ -1047,7 +1047,7 @@ function configuredDescription(description?: string): string {
   const match = description.match(BILINGUAL_DISPLAY_NAME_PATTERN)
   if (!match) return description
   const details = description.slice(match[0].length).trim()
-  return details ? `${match[2].trim()} · ${details}` : match[2].trim()
+  return details ? `${match[1].trim()} · ${details}` : match[1].trim()
 }
 
 function agentLabel(agent: AgentInfo): string {
