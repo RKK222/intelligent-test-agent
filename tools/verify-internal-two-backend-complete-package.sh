@@ -164,12 +164,12 @@ grep -Fxq 'TEST_AGENT_XXL_JOB_COOKIE_SECURE=false' <<<"${backend_env}"
 grep -Fxq 'TEST_AGENT_MAX_PREVIEW_BYTES=5242880' <<<"${backend_env}"
 grep -Fxq 'TEST_AGENT_UPLOAD_CHUNK_BYTES=262144' <<<"${backend_env}"
 grep -Fxq 'OPENCODE_WORKER_PORT_START=14096' <<<"${docker_env}"
-grep -Fxq 'OPENCODE_WORKER_PORT_END=16095' <<<"${docker_env}"
+grep -Fxq 'OPENCODE_WORKER_PORT_END=15095' <<<"${docker_env}"
 grep -Fq 'require_exact_value "${docker_env}" OPENCODE_WORKER_PORT_START 14096' \
   <<<"${node_deploy_script}"
-grep -Fq 'require_exact_value "${docker_env}" OPENCODE_WORKER_PORT_END 16095' \
+grep -Fq 'require_exact_value "${docker_env}" OPENCODE_WORKER_PORT_END 15095' \
   <<<"${node_deploy_script}"
-grep -Fq '14096-16095' <<<"${node_guide}"
+grep -Fq '14096-15095' <<<"${node_guide}"
 
 # 第二次执行必须无交互覆盖固定文件名，不能生成日期或版本后缀的新包。
 run_package >/dev/null

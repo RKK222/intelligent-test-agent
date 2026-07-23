@@ -113,7 +113,8 @@ require_text "docs/deployment/database.md" "V10 opencode 用户进程管理表"
 require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" '中转机不创建、不使用 `/data/0709`'
 require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" 'cd ~/Desktop/mimoagent/0709'
 require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" 'OPENCODE_MANAGER_MAX_PROCESSES` 改为 `1000'
-require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" '14096-16095 共 2000 个端口坐标'
+require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" '14096-15095 共 1000 个端口'
+require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" '`"userland-proxy": false`'
 require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" '运行容器时不传 `--platform`'
 require_text "deploy/internal/REDIS-OFFLINE.md" 'permission denied'
 require_text "deploy/internal/REDIS-OFFLINE.md" 'net.ipv4.ip_forward=0'
@@ -121,7 +122,7 @@ require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" 'test "$(sysctl -n net.ip
 require_text ".agents/skills/enterprise-offline-deploy/SKILL.md" 'bind mount 读取 0600 宿主机配置的 UID 权限问题'
 require_text ".agents/skills/enterprise-offline-deploy/SKILL.md" '目标机执行 `docker run` 时不得再强制传 `--platform`'
 require_text ".agents/skills/enterprise-offline-deploy/SKILL.md" 'net.ipv4.ip_forward=1'
-require_text ".agents/skills/enterprise-offline-deploy/SKILL.md" '14096-16095'
+require_text ".agents/skills/enterprise-offline-deploy/SKILL.md" '14096-15095'
 require_text "docs/standards/security.md" "用户专属 opencode server 默认监听"
 require_text "backend/README.md" "Maven multi-module"
 require_text "backend/test-agent-app/README.md" ".env.local"

@@ -410,5 +410,5 @@ else
   fail 'journalctl 无法读取 test-agent-backend 日志'
 fi
 
-info '14096-16095 为当前双后台 opencode 用户进程端口池，非管理页首要链路；本脚本不执行 Docker/worker/manager 操作'
+info '14096-15095 为当前双后台 opencode 用户进程端口池，每台共 1000 个端口；非管理页首要链路，本脚本不执行 Docker/worker/manager 操作'
 finish

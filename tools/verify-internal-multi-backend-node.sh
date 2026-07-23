@@ -42,10 +42,10 @@ bash "${CONFIGURE_SCRIPT}" backend \
   --backend-template "${ROOT_DIR}/deploy/internal/backend.env.example" \
   --docker-template "${ROOT_DIR}/deploy/internal/env.example" \
   >/dev/null
-# 当前双后台现场每台 worker 固定发布 2000 个同号端口；通用单后台模板仍保留较小默认值。
+# 当前双后台现场每台 worker 固定发布 1000 个同号端口；通用单后台模板仍保留较小默认值。
 sed -i.bak \
   -e 's/^OPENCODE_WORKER_PORT_START=.*/OPENCODE_WORKER_PORT_START=14096/' \
-  -e 's/^OPENCODE_WORKER_PORT_END=.*/OPENCODE_WORKER_PORT_END=16095/' \
+  -e 's/^OPENCODE_WORKER_PORT_END=.*/OPENCODE_WORKER_PORT_END=15095/' \
   "${CONFIG_114}/docker.env"
 rm -f "${CONFIG_114}/docker.env.bak"
 cp "${CONFIG_114}/backend.env" "${CONFIG_4}/backend.env"
@@ -177,7 +177,7 @@ printf '%s\n' \
   '    if [[ "$*" == *".State.Running"* ]]; then printf "true\n"; else printf "healthy\n"; fi' \
   '    ;;' \
   '  port)' \
-  '    printf "14096/tcp -> 0.0.0.0:14096\n16095/tcp -> 0.0.0.0:16095\n"' \
+  '    printf "14096/tcp -> 0.0.0.0:14096\n15095/tcp -> 0.0.0.0:15095\n"' \
   '    ;;' \
   '  logs)' \
   '    printf "%s\n" "${TEST_AGENT_WORKER_LOG_LINE}"' \

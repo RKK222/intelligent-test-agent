@@ -151,12 +151,12 @@ TEST_AGENT_OPENCODE_WORKER_IMAGE=test-agent-opencode-worker:internal
 
 OPENCODE_WORKER_BACKEND_PORT=8080
 OPENCODE_WORKER_PORT_START=14096
-OPENCODE_WORKER_PORT_END=16095
+OPENCODE_WORKER_PORT_END=15095
 
 VITE_TEST_AGENT_API_BASE_URL=
 ```
 
-当前 `.4 + .114` 企业包的端口池必须是宿主机可访问的 `14096-16095`，Docker 内外保持同号映射。每台提供 2000 个端口坐标；数据库通用参数 `OPENCODE_MANAGER_MAX_PROCESSES` 仍由超级管理员设置为 `1000`，因此每台实际最多运行 1000 个进程，避免未经压测直接把进程容量翻倍。
+当前 `.4 + .114` 企业包的端口池必须是宿主机可访问的 `14096-15095`，Docker 内外保持同号映射。每台提供正好 1000 个端口坐标；数据库通用参数 `OPENCODE_MANAGER_MAX_PROCESSES` 由超级管理员设置为 `1000`，与端口池容量一致。旧 Docker 如在批量映射期间报 `iptables ... resource temporarily unavailable`，先删除启动失败的 worker 容器并检查 Docker `TasksMax`/`userland-proxy`，不反复重试、不清理 manager state。
 `TEST_AGENT_INTERNAL_PROXY_API_KEY` 是 Java 内部模型代理鉴权 key，只配置在 `backend.env`，不要放到 `docker.env`；Java 会在启动用户 opencode server 时通过 manager command 注入给子进程。
 
 ### 单后台配置脚本

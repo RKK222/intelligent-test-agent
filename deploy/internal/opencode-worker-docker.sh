@@ -89,6 +89,36 @@ require_value() {
   fi
 }
 
+# Docker 18.09 默认为每个发布端口创建一个 userland proxy。企业现场实测大端口池
+# 会在容器启动中途耗尽 fork 资源，因此在删除现有容器前先拒绝这类组合。
+require_large_port_range_compatibility() {
+  local port_count docker_server_version daemon_config
+  if [[ ! "${OPENCODE_WORKER_PORT_START}" =~ ^[0-9]+$ ]] \
+    || [[ ! "${OPENCODE_WORKER_PORT_END}" =~ ^[0-9]+$ ]] \
+    || (( OPENCODE_WORKER_PORT_START > OPENCODE_WORKER_PORT_END )); then
+    echo "Invalid worker port range: ${OPENCODE_WORKER_PORT_START}-${OPENCODE_WORKER_PORT_END}" >&2
+    exit 1
+  fi
+
+  port_count=$((OPENCODE_WORKER_PORT_END - OPENCODE_WORKER_PORT_START + 1))
+  (( port_count >= 1000 )) || return 0
+
+  docker_server_version="$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
+  [[ "${docker_server_version}" == 18.09.* ]] || return 0
+
+  daemon_config="${TEST_AGENT_DOCKER_DAEMON_CONFIG_FILE:-/etc/docker/daemon.json}"
+  if [[ -f "${daemon_config}" ]] \
+    && grep -Eq '"userland-proxy"[[:space:]]*:[[:space:]]*false([[:space:],}]|$)' \
+      "${daemon_config}"; then
+    return 0
+  fi
+
+  echo "Docker ${docker_server_version} cannot safely publish ${port_count} worker ports while userland-proxy is enabled." >&2
+  echo "Set \"userland-proxy\": false in ${daemon_config}, restart Docker under the approved maintenance procedure, and retry." >&2
+  echo "The existing worker container and manager state were not changed." >&2
+  exit 1
+}
+
 stop_container() {
   docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 }
@@ -97,6 +127,8 @@ start_container() {
   require_value TEST_AGENT_OPENCODE_MANAGER_TOKEN
   require_value TEST_AGENT_DATA_ROOT
   require_value TEST_AGENT_PROGRAM_ROOT
+
+  require_large_port_range_compatibility
 
   mkdir -p "${TEST_AGENT_DATA_ROOT}" "${TEST_AGENT_PROGRAM_ROOT}"
   stop_container

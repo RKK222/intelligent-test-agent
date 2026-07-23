@@ -234,7 +234,7 @@ normalize_backend_node_archive() {
   replace_or_append_env_value "${backend_env}" TEST_AGENT_UPLOAD_CHUNK_BYTES 262144
   replace_or_append_env_value "${docker_env}" OPENCODE_WORKER_BACKEND_PORT 8080
   replace_or_append_env_value "${docker_env}" OPENCODE_WORKER_PORT_START 14096
-  replace_or_append_env_value "${docker_env}" OPENCODE_WORKER_PORT_END 16095
+  replace_or_append_env_value "${docker_env}" OPENCODE_WORKER_PORT_END 15095
 
   target="${TMP_ROOT}/$(basename "${source}")"
   tar -C "${node_root}" -czf "${target}" "${node_dir}"

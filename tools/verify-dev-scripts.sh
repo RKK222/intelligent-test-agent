@@ -291,4 +291,60 @@ if [[ "$(cat "${worker_docker_calls}")" == *"--add-host"* ]]; then
   fail "worker docker script should not require host.docker.internal add-host mapping"
 fi
 
+# Docker 18.09 的千端口池必须在删除现有容器前拒绝默认 userland proxy；
+# daemon 明确禁用后才允许继续到 docker rm/run。
+large_worker_env="${tmp_dir}/large-worker.env"
+large_worker_daemon_config="${tmp_dir}/daemon.json"
+cat >"${large_worker_env}" <<EOF
+TEST_AGENT_OPENCODE_MANAGER_TOKEN=test-token
+TEST_AGENT_DATA_ROOT=${worker_data_root}
+TEST_AGENT_PROGRAM_ROOT=${worker_program_root}
+TEST_AGENT_OPENCODE_WORKER_IMAGE=test-agent-opencode-worker:internal
+OPENCODE_WORKER_BACKEND_PORT=8080
+OPENCODE_WORKER_PORT_START=14096
+OPENCODE_WORKER_PORT_END=15095
+EOF
+cat >"${tmp_dir}/bin/docker" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "\$*" >>$(printf "%q" "${worker_docker_calls}")
+if [[ "\${1:-}" == "version" ]]; then
+  printf '18.09.7\n'
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "${tmp_dir}/bin/docker"
+printf '{}\n' >"${large_worker_daemon_config}"
+: >"${worker_docker_calls}"
+set +e
+large_worker_failure="$({
+  TEST_AGENT_DOCKER_DAEMON_CONFIG_FILE="${large_worker_daemon_config}" \
+    PATH="${tmp_dir}/bin:${PATH}" \
+    bash "${ROOT_DIR}/deploy/internal/opencode-worker-docker.sh" \
+      --env-file "${large_worker_env}" restart
+} 2>&1)"
+large_worker_status=$?
+set -e
+if [[ "${large_worker_status}" -eq 0 ]] \
+  || [[ "${large_worker_failure}" != *'cannot safely publish 1000 worker ports while userland-proxy is enabled'* ]]; then
+  echo "${large_worker_failure}" >&2
+  fail "Docker 18.09 large worker range should require disabled userland-proxy"
+fi
+if grep -Eq '^(rm|run) ' "${worker_docker_calls}"; then
+  cat "${worker_docker_calls}" >&2
+  fail "large-range preflight should fail before changing the worker container"
+fi
+
+printf '{"userland-proxy": false}\n' >"${large_worker_daemon_config}"
+: >"${worker_docker_calls}"
+TEST_AGENT_DOCKER_DAEMON_CONFIG_FILE="${large_worker_daemon_config}" \
+  PATH="${tmp_dir}/bin:${PATH}" \
+  bash "${ROOT_DIR}/deploy/internal/opencode-worker-docker.sh" \
+    --env-file "${large_worker_env}" restart >/dev/null
+grep -Eq '^run .*14096-15095:14096-15095' "${worker_docker_calls}" || {
+  cat "${worker_docker_calls}" >&2
+  fail "disabled userland-proxy should allow the 1000-port worker range"
+}
+
 echo "Development script verification passed."
