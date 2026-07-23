@@ -5,6 +5,18 @@
 
 ## Entries
 
+### 2026-07-23 - 确认并完成 main 并发推送
+
+- Why:
+  - 本地 `main` 比 Gitee `origin/main` 超前 25 个提交，首次大对象推送没有即时返回明确退出码；并发重试在对象上传完成后收到 `incorrect old value provided`，需要区分真实内容冲突与远端引用已被另一推送更新。
+- What:
+  - 刷新远端引用并核对提交拓扑、未合并索引项和冲突标记；确认远端原本是本地直接祖先，不需要合并、变基或强制推送。
+  - 推送后重新执行 fetch、提交计数与本地/远端哈希比对，确认第一次推送已把远端推进到本地 HEAD，第二次并发推送的拒绝属于旧值竞争。
+- How:
+  - 使用普通 `git push origin main:main`，未使用 force；以 `git rev-list --left-right --count main...origin/main`、`git rev-parse` 和 `git ls-remote` 交叉验证远端结果。
+- Result:
+  - 本地与远端 `main` 同步到 `afa2b61c827f2cb229d3d7e6f43858c265fe810f`，工作区无未解决冲突；未修改代码、API、事件、数据库、性能、安全、兼容性、环境配置或 generated SDK。
+
 ### 2026-07-22 - 新增企业 XXL-JOB 只读排查手册
 
 - Why:
