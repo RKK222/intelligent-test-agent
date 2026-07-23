@@ -7372,6 +7372,9 @@ function onCompositionEnd() {
   font-size: 14px;
   line-height: 22px;
   color: inherit;
+  overflow-x: auto;
+  max-width: 100%;
+  width: 100%;
 }
 
 .figma-chat-file-summary {
