@@ -62,4 +62,4 @@ EXPECTED_OPENCODE_SUBAGENT_DEPTH=unsupported \
 tools/verify-opencode-node-worker-image.sh test-agent-opencode-worker:1.17.8
 ```
 
-worker 验证覆盖 glibc 2.31、官方版本/asset 元数据、断网启动、健康检查、两处自定义 Tool、1.18.4 的 `subagent_depth=2`、1.17.8 的旧配置兼容、依赖链接和五秒内优雅停止。
+worker 验证覆盖 glibc 2.31、官方版本/asset 元数据、断网启动、健康检查、按统一认证号隔离的 PID 1 HOME/XDG/TMP/config 环境、`/path` 解析和各 `opencode` 普通子目录、两处自定义 Tool、1.18.4 的 `subagent_depth=2`、1.17.8 的旧配置兼容、依赖链接和五秒内优雅停止。

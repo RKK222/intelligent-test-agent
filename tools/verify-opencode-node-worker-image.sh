@@ -28,14 +28,15 @@ if [[ "${version}" != "${EXPECTED_OPENCODE_VERSION}" ]]; then
   exit 1
 fi
 
-# 用最小公共配置拉起官方 baseline server；不发布宿主机端口，所有探测都在容器内完成。
+# 用最小公共配置和按统一认证号隔离的用户运行目录拉起官方 baseline server；
+# 不发布宿主机端口，所有探测都在容器内完成。
 docker run -d \
   --platform linux/amd64 \
   --name "${CONTAINER}" \
   --network none \
   --entrypoint bash \
   "${IMAGE}" \
-  -lc 'mkdir -p /tmp/opencode-config/tools /tmp/opencode-data /tmp/workspace/.opencode/tools && printf "%s\n" "{\"\$schema\":\"https://opencode.ai/config.json\"}" > /tmp/opencode-config/opencode.json && printf "%s\n" '\''import { tool } from "@opencode-ai/plugin"; export default tool({ description: "public offline probe", args: { value: tool.schema.string().optional() }, async execute(args) { return args.value ?? "public-ok" } })'\'' > /tmp/opencode-config/tools/public-probe.ts && printf "%s\n" '\''import { tool } from "@opencode-ai/plugin"; import * as sdk from "@opencode-ai/sdk"; import * as Effect from "effect"; import { z } from "zod"; const loaded = Boolean(sdk && Effect && z); export default tool({ description: "workspace offline probe", args: { value: z.string().optional() }, async execute(args) { return loaded ? (args.value ?? "workspace-ok") : "missing" } })'\'' > /tmp/workspace/.opencode/tools/workspace-probe.ts && cd /tmp/workspace && XDG_DATA_HOME=/tmp/opencode-data OPENCODE_CONFIG_DIR=/tmp/opencode-config exec /usr/local/bin/opencode serve --hostname 127.0.0.1 --port 4096 --print-logs' \
+  -lc 'user_root=/tmp/opencode-users/DEV_888888888 && config_link="$user_root/.testagent-runtime/current-public-config" && mkdir -p /tmp/opencode-config/tools "$user_root/.cache" "$user_root/.local/state" "$user_root/.tmp" "$user_root/.testagent-runtime" /tmp/workspace/.opencode/tools && chmod 0755 "$user_root" "$user_root/.cache" "$user_root/.local" "$user_root/.local/state" "$user_root/.tmp" && printf "%s\n" "{\"\$schema\":\"https://opencode.ai/config.json\"}" > /tmp/opencode-config/opencode.json && printf "%s\n" '\''import { tool } from "@opencode-ai/plugin"; export default tool({ description: "public offline probe", args: { value: tool.schema.string().optional() }, async execute(args) { return args.value ?? "public-ok" } })'\'' > /tmp/opencode-config/tools/public-probe.ts && printf "%s\n" '\''import { tool } from "@opencode-ai/plugin"; import * as sdk from "@opencode-ai/sdk"; import * as Effect from "effect"; import { z } from "zod"; const loaded = Boolean(sdk && Effect && z); export default tool({ description: "workspace offline probe", args: { value: z.string().optional() }, async execute(args) { return loaded ? (args.value ?? "workspace-ok") : "missing" } })'\'' > /tmp/workspace/.opencode/tools/workspace-probe.ts && ln -s /tmp/opencode-config "$config_link" && cd /tmp/workspace && HOME="$user_root" XDG_DATA_HOME="$user_root" XDG_CACHE_HOME="$user_root/.cache" XDG_STATE_HOME="$user_root/.local/state" TMPDIR="$user_root/.tmp" OPENCODE_CONFIG_DIR="$config_link" exec /usr/local/bin/opencode serve --hostname 127.0.0.1 --port 4096 --print-logs' \
   >/dev/null
 
 healthy=0
@@ -53,6 +54,55 @@ if [[ "${healthy}" -ne 1 ]]; then
   echo "OpenCode Node server health check timed out" >&2
   exit 1
 fi
+
+# 直接读取 PID 1 环境，确认最终 OpenCode 进程继承了隔离参数，而不是只检查启动命令文本。
+docker exec "${CONTAINER}" node -e '
+  const fs = require("node:fs");
+  const values = Object.fromEntries(fs.readFileSync("/proc/1/environ", "utf8").split("\0").filter(Boolean).map((entry) => {
+    const index = entry.indexOf("=");
+    return [entry.slice(0, index), entry.slice(index + 1)];
+  }));
+  const root = "/tmp/opencode-users/DEV_888888888";
+  const expected = {
+    HOME: root,
+    XDG_DATA_HOME: root,
+    XDG_CACHE_HOME: `${root}/.cache`,
+    XDG_STATE_HOME: `${root}/.local/state`,
+    TMPDIR: `${root}/.tmp`,
+    OPENCODE_CONFIG_DIR: `${root}/.testagent-runtime/current-public-config`,
+  };
+  for (const [key, value] of Object.entries(expected)) {
+    if (values[key] !== value) throw new Error(`unexpected ${key}: ${JSON.stringify(values[key])}`);
+  }
+'
+
+# OpenCode 会在模块加载时读取 HOME/XDG/TMP 并创建各自的 opencode 子目录；新增隔离目录必须保持为物理目录。
+docker exec "${CONTAINER}" sh -lc '
+  test -L /tmp/opencode-users/DEV_888888888/.testagent-runtime/current-public-config
+  test "$(readlink -f /tmp/opencode-users/DEV_888888888/.testagent-runtime/current-public-config)" = /tmp/opencode-config
+  for path in \
+    /tmp/opencode-users/DEV_888888888 \
+    /tmp/opencode-users/DEV_888888888/.cache \
+    /tmp/opencode-users/DEV_888888888/.local/state \
+    /tmp/opencode-users/DEV_888888888/.tmp \
+    /tmp/opencode-users/DEV_888888888/opencode \
+    /tmp/opencode-users/DEV_888888888/.cache/opencode \
+    /tmp/opencode-users/DEV_888888888/.local/state/opencode \
+    /tmp/opencode-users/DEV_888888888/.tmp/opencode; do
+    test -d "$path"
+    test ! -L "$path"
+  done
+'
+docker exec "${CONTAINER}" node -e '
+  const root = "/tmp/opencode-users/DEV_888888888";
+  fetch("http://127.0.0.1:4096/path?directory=%2Ftmp%2Fworkspace").then(async (response) => {
+    if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+    const paths = await response.json();
+    if (paths.home !== root) throw new Error(`unexpected home: ${JSON.stringify(paths.home)}`);
+    if (paths.state !== `${root}/.local/state/opencode`) throw new Error(`unexpected state: ${JSON.stringify(paths.state)}`);
+    if (paths.config !== `${root}/.config/opencode`) throw new Error(`unexpected config: ${JSON.stringify(paths.config)}`);
+  }).catch((error) => { console.error(error); process.exit(1) });
+'
 
 if [[ "${EXPECTED_OPENCODE_SUBAGENT_DEPTH}" == "unsupported" ]]; then
   docker exec "${CONTAINER}" node -e \

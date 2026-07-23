@@ -268,12 +268,19 @@ func buildStartSpec(cfg config.Config, request StartRequest, startedAt time.Time
 	} else {
 		configPath = filepath.Clean(configPath)
 	}
-	env := map[string]string{"XDG_DATA_HOME": sessionPath, "OPENCODE_CONFIG_DIR": configPath}
+	env := make(map[string]string, len(request.Environment)+6)
 	for key, value := range request.Environment {
 		if strings.TrimSpace(key) != "" {
 			env[key] = value
 		}
 	}
+	// 用户运行目录全部由 manager 基于已校验的 sessionPath 派生，调用方环境不得覆盖隔离边界。
+	env["HOME"] = sessionPath
+	env["XDG_DATA_HOME"] = sessionPath
+	env["XDG_CACHE_HOME"] = filepath.Join(sessionPath, ".cache")
+	env["XDG_STATE_HOME"] = filepath.Join(sessionPath, ".local", "state")
+	env["TMPDIR"] = filepath.Join(sessionPath, ".tmp")
+	env["OPENCODE_CONFIG_DIR"] = configPath
 	return StartSpec{
 		Command:       cfg.OpencodeBin,
 		Args:          args,
@@ -361,7 +368,7 @@ func (m *Manager) start(ctx context.Context, request StartRequest) (Result, erro
 				publicConfigNotInitializedMessage(cfg.LinuxServerID, spec.ConfigPath)),
 			err
 	}
-	if err := os.MkdirAll(spec.SessionPath, 0o755); err != nil {
+	if err := ensureUserRuntimeDirectories(spec); err != nil {
 		return failed(request.Port, request.TraceID, err), err
 	}
 	if err := os.MkdirAll(filepath.Dir(spec.LogPath), 0o755); err != nil {
@@ -749,6 +756,58 @@ func ensurePublicConfigInitialized(path string) error {
 	return nil
 }
 
+// ensureUserRuntimeDirectories 在 fork 前创建用户独占的 HOME、缓存、状态和临时目录。
+// 这些目录必须是普通物理目录，禁止通过文件或软链接把不同统一认证号重新汇聚到共享位置。
+func ensureUserRuntimeDirectories(spec StartSpec) error {
+	statePath := spec.Env["XDG_STATE_HOME"]
+	directories := []struct {
+		kind string
+		path string
+	}{
+		{kind: "home", path: spec.Env["HOME"]},
+		{kind: "cache", path: spec.Env["XDG_CACHE_HOME"]},
+		{kind: "state parent", path: filepath.Dir(statePath)},
+		{kind: "state", path: statePath},
+		{kind: "temporary", path: spec.Env["TMPDIR"]},
+	}
+	for _, directory := range directories {
+		if err := ensurePhysicalDirectory(directory.path, 0o755); err != nil {
+			// PathError 会携带原始统一认证号路径；控制面和生命周期日志只返回目录类别。
+			return fmt.Errorf("prepare user %s directory failed", directory.kind)
+		}
+	}
+	return nil
+}
+
+// ensurePhysicalDirectory 创建固定权限目录；已存在路径也必须保持为普通目录。
+func ensurePhysicalDirectory(directory string, permission os.FileMode) error {
+	directory = strings.TrimSpace(directory)
+	if directory == "" {
+		return fmt.Errorf("runtime directory must not be blank")
+	}
+	info, err := os.Lstat(directory)
+	if err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return fmt.Errorf("runtime path is not a physical directory")
+		}
+		return os.Chmod(directory, permission)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.MkdirAll(directory, permission); err != nil {
+		return err
+	}
+	info, err = os.Lstat(directory)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("runtime path is not a physical directory")
+	}
+	return os.Chmod(directory, permission)
+}
+
 // publicConfigNotInitializedMessage 明确暴露 manager 实际检查的服务器和目录，便于定位 Java 页面状态与目标进程文件系统不一致的问题。
 func publicConfigNotInitializedMessage(linuxServerID string, configPath string) string {
 	return fmt.Sprintf("服务器%s，公共 opencode 配置目录%s尚未初始化。请联系超级管理员进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化后重试。",
@@ -793,7 +852,11 @@ func flattenEnv(values map[string]string) []string {
 func formatStartCommand(command string, args []string, env map[string]string) string {
 	parts := make([]string, 0, len(args)+3)
 	for _, key := range []string{
+		"HOME",
 		"XDG_DATA_HOME",
+		"XDG_CACHE_HOME",
+		"XDG_STATE_HOME",
+		"TMPDIR",
 		"OPENCODE_CONFIG_DIR",
 		"OPENCODE_REFERENCES_DIR",
 		"TEST_AGENT_INTERNAL_PROXY_BASE_URL",
