@@ -226,6 +226,9 @@ func TestManagerStartWritesStateAndReusesHealthyManagedPort(t *testing.T) {
 	if !result.ProcessCreated {
 		t.Fatalf("fresh start must report processCreated=true, got %#v", result)
 	}
+	if result.StartedAt == nil || !result.StartedAt.Equal(starter.specs[0].StartedAt) {
+		t.Fatalf("fresh start must return manager state startedAt, result=%#v spec=%#v", result, starter.specs[0])
+	}
 	if len(starter.specs) != 1 {
 		t.Fatalf("expected one start spec, got %d", len(starter.specs))
 	}
@@ -258,8 +261,24 @@ func TestManagerStartWritesStateAndReusesHealthyManagedPort(t *testing.T) {
 	if reused.ProcessCreated {
 		t.Fatalf("idempotent reuse must report processCreated=false, got %#v", reused)
 	}
+	if reused.StartedAt == nil || !reused.StartedAt.Equal(record.StartedAt) {
+		t.Fatalf("idempotent reuse must return existing manager state startedAt, result=%#v record=%#v", reused, record)
+	}
 	if len(starter.specs) != 1 {
 		t.Fatalf("expected duplicate start to reuse existing process, got %d starts", len(starter.specs))
+	}
+}
+
+func TestProcessResultCarriesManagerStateStartedAt(t *testing.T) {
+	startedAt := time.Date(2026, 7, 24, 9, 43, 35, 672196176, time.UTC)
+	record := state.ProcessRecord{
+		Port: 4096, PID: 12345, StartedAt: startedAt, TraceID: "trace_started_at",
+	}
+
+	actual := result(StatusStarted, record, "started", "trace_started_at")
+
+	if actual.StartedAt == nil || !actual.StartedAt.Equal(startedAt) {
+		t.Fatalf("process result must preserve manager state startedAt, actual=%#v", actual)
 	}
 }
 

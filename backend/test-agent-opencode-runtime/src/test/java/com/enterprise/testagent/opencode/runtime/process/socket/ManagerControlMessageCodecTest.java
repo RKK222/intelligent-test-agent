@@ -69,6 +69,23 @@ class ManagerControlMessageCodecTest {
     }
 
     @Test
+    void decodesCommandResultManagerStartedAtAsRfc3339Instant() {
+        ManagerControlMessageCodec codec = new ManagerControlMessageCodec(new ObjectMapper());
+
+        ManagerControlMessage decoded = codec.decode("""
+                {
+                  "type":"commandResult",
+                  "protocolVersion":"opencode-manager.v1",
+                  "status":"STARTED",
+                  "pid":12345,
+                  "startedAt":"2026-07-24T09:43:35.672196176Z"
+                }
+                """);
+
+        assertThat(decoded.startedAt()).isEqualTo(Instant.parse("2026-07-24T09:43:35.672196176Z"));
+    }
+
+    @Test
     void encodesCommandSessionAndManagedConfigPaths() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
         ManagerControlMessageCodec codec = new ManagerControlMessageCodec(objectMapper);

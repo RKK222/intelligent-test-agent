@@ -77,6 +77,7 @@ type Message struct {
 	TimeoutMillis              int64             `json:"timeoutMillis,omitempty"`
 	Status                     string            `json:"status,omitempty"`
 	PID                        int               `json:"pid,omitempty"`
+	StartedAt                  *time.Time        `json:"startedAt,omitempty"`
 	ProcessCreated             bool              `json:"processCreated"`
 	BaseURL                    string            `json:"baseUrl,omitempty"`
 	SessionPath                string            `json:"sessionPath,omitempty"`

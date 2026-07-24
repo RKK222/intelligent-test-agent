@@ -206,6 +206,11 @@ func (s *Supervisor) executeCommand(ctx context.Context, message Message) Messag
 	if err != nil && responseMessage == "" {
 		responseMessage = err.Error()
 	}
+	var processStartedAt *time.Time
+	if result.StartedAt != nil && !result.StartedAt.IsZero() {
+		startedAt := result.StartedAt.UTC()
+		processStartedAt = &startedAt
+	}
 	log.Printf("event=manager_command_exit traceId=%s commandId=%s command=%s port=%d status=%s healthy=%t durationMs=%d errorCode=%s message=%s",
 		message.TraceID,
 		message.CommandID,
@@ -225,6 +230,7 @@ func (s *Supervisor) executeCommand(ctx context.Context, message Message) Messag
 		Port:            result.Port,
 		Status:          status,
 		PID:             result.PID,
+		StartedAt:       processStartedAt,
 		ProcessCreated:  result.ProcessCreated,
 		BaseURL:         result.BaseURL,
 		SessionPath:     result.SessionPath,

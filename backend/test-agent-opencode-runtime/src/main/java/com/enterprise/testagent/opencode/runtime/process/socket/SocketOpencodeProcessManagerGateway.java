@@ -118,7 +118,8 @@ public class SocketOpencodeProcessManagerGateway implements OpencodeProcessManag
         return new OpencodeProcessStartResult(
                 result.pid(),
                 safeMessage(result.message(), "started"),
-                result.processCreated());
+                result.processCreated(),
+                result.startedAt());
     }
 
     @Override

@@ -9,6 +9,7 @@ import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.node.ExecutionNodeRepository;
 import com.enterprise.testagent.domain.node.ExecutionNodeStatus;
+import com.enterprise.testagent.domain.opencodeprocess.ManagedOpencodeProcessSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessAtomicMutationPort;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessAssignmentConflictException;
@@ -29,6 +30,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -50,6 +52,8 @@ public class OpencodeProcessStartupService {
     private static final String OPENCODE_REFERENCES_DIR_PARAM = "OPENCODE_REFERENCES_DIR";
     private static final Duration DEFAULT_STARTUP_HEALTH_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration DEFAULT_STARTUP_HEALTH_POLL_INTERVAL = Duration.ofMillis(500);
+    /** 旧 manager 在 start 后会立即补发心跳；最多等待约两秒读取同一 state 的启动时间。 */
+    private static final int MANAGER_STATE_STARTED_AT_MAX_ATTEMPTS = 5;
 
     private final OpencodeProcessManagementRepository repository;
     private final OpencodeProcessAtomicMutationPort atomicMutationPort;
@@ -378,7 +382,12 @@ public class OpencodeProcessStartupService {
             if (started == null) {
                 throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "TestAgent 管理进程启动未返回结果");
             }
-            OpencodeServerProcess candidate = startupCandidate(request, started.pid(), started.message());
+            Instant managerStartedAt = authoritativeStartedAt(request, command, started);
+            OpencodeServerProcess candidate = startupCandidate(
+                    request,
+                    started.pid(),
+                    managerStartedAt,
+                    started.message());
             try {
                 return markStartedAndVerify(request, candidate, resolvedProgress, expectedExisting);
             } catch (OpencodeProcessAssignmentConflictException exception) {
@@ -411,8 +420,9 @@ public class OpencodeProcessStartupService {
     public OpencodeServerProcess markStartedAndVerify(
             OpencodeProcessStartupRequest request,
             Long pid,
+            Instant startedAt,
             String startMessage) {
-        return markStartedAndVerify(request, pid, startMessage, OpencodeProcessStartProgress.noop());
+        return markStartedAndVerify(request, pid, startedAt, startMessage, OpencodeProcessStartProgress.noop());
     }
 
     /**
@@ -421,11 +431,13 @@ public class OpencodeProcessStartupService {
     public OpencodeServerProcess markStartedAndVerify(
             OpencodeProcessStartupRequest request,
             Long pid,
+            Instant startedAt,
             String startMessage,
             OpencodeProcessStartProgress progress) {
         return markStartedAndVerify(
                 request,
                 pid,
+                startedAt,
                 startMessage,
                 progress,
                 expectedExistingAssignment(request));
@@ -434,12 +446,13 @@ public class OpencodeProcessStartupService {
     private OpencodeServerProcess markStartedAndVerify(
             OpencodeProcessStartupRequest request,
             Long pid,
+            Instant startedAt,
             String startMessage,
             OpencodeProcessStartProgress progress,
             Optional<OpencodeServerProcess> expectedExisting) {
         return markStartedAndVerify(
                 request,
-                startupCandidate(request, pid, startMessage),
+                startupCandidate(request, pid, startedAt, startMessage),
                 progress,
                 expectedExisting);
     }
@@ -499,8 +512,16 @@ public class OpencodeProcessStartupService {
     private OpencodeServerProcess startupCandidate(
             OpencodeProcessStartupRequest request,
             Long pid,
+            Instant managerStartedAt,
             String startMessage) {
         Instant now = Instant.now(clock);
+        if (managerStartedAt == null) {
+            throw new PlatformException(
+                    ErrorCode.OPENCODE_BAD_GATEWAY,
+                    "TestAgent 管理进程启动结果缺少权威启动时间");
+        }
+        // PostgreSQL timestamp 仅保留微秒；先对 manager 权威值截断，避免落库后与心跳纳秒值比较漂移。
+        Instant startedAt = managerStartedAt.truncatedTo(ChronoUnit.MICROS);
         OpencodeProcessId processId = request.processId() == null
                 ? new OpencodeProcessId(RuntimeIdGenerator.opencodeProcessId())
                 : request.processId();
@@ -516,12 +537,70 @@ public class OpencodeProcessStartupService {
                 OpencodeServerProcessStatus.STARTING,
                 request.sessionPath(),
                 request.configPath(),
-                now,
+                startedAt,
                 now,
                 startMessage == null || startMessage.isBlank() ? "started" : startMessage,
                 createdAt,
                 now,
                 request.traceId());
+    }
+
+    /**
+     * 新 manager 直接在命令结果返回 state.startedAt；滚动升级期间旧 manager 缺字段时，等待其紧随
+     * STARTED 结果发送的即时心跳，并按完整运行坐标读取同一份 state。任何路径都不使用 Java 观察时间。
+     */
+    private Instant authoritativeStartedAt(
+            OpencodeProcessStartupRequest request,
+            OpencodeProcessStartCommand command,
+            OpencodeProcessStartResult started) {
+        if (started.startedAt() != null) {
+            return started.startedAt();
+        }
+        if (started.pid() == null || started.pid() < 1) {
+            throw missingAuthoritativeStartedAt();
+        }
+        for (int attempt = 1; attempt <= MANAGER_STATE_STARTED_AT_MAX_ATTEMPTS; attempt++) {
+            Optional<Instant> heartbeatStartedAt = managerStateStartedAt(request, command, started.pid());
+            if (heartbeatStartedAt.isPresent()) {
+                return heartbeatStartedAt.get();
+            }
+            if (attempt < MANAGER_STATE_STARTED_AT_MAX_ATTEMPTS) {
+                startupHealthSleeper.accept(startupHealthPollInterval);
+            }
+        }
+        throw missingAuthoritativeStartedAt();
+    }
+
+    private Optional<Instant> managerStateStartedAt(
+            OpencodeProcessStartupRequest request,
+            OpencodeProcessStartCommand command,
+            Long pid) {
+        return heartbeatStore.liveManagerSnapshots().stream()
+                .filter(snapshot -> snapshot.container().linuxServerId().equals(request.linuxServerId()))
+                .filter(snapshot -> snapshot.container().containerId().equals(request.containerId()))
+                .flatMap(snapshot -> snapshot.managedProcesses().stream())
+                .filter(process -> matchesManagerState(request, command, pid, process))
+                .map(ManagedOpencodeProcessSnapshot::startedAt)
+                .filter(Objects::nonNull)
+                .findFirst();
+    }
+
+    private boolean matchesManagerState(
+            OpencodeProcessStartupRequest request,
+            OpencodeProcessStartCommand command,
+            Long pid,
+            ManagedOpencodeProcessSnapshot process) {
+        return process.port() == request.port()
+                && Objects.equals(process.pid(), pid)
+                && Objects.equals(process.unifiedAuthId(), command.unifiedAuthId())
+                && Objects.equals(process.sessionPath(), request.sessionPath())
+                && Objects.equals(process.configPath(), request.configPath());
+    }
+
+    private PlatformException missingAuthoritativeStartedAt() {
+        return new PlatformException(
+                ErrorCode.OPENCODE_BAD_GATEWAY,
+                "TestAgent 管理进程启动结果和实时 state 均缺少权威启动时间");
     }
 
     /** 仅 manager 明确报告本次新建进程时，才允许按启动回包的精确身份执行补偿。 */

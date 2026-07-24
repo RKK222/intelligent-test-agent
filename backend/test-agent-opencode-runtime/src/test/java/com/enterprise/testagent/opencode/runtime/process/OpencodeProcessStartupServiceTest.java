@@ -18,6 +18,7 @@ import com.enterprise.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.ContainerManagerId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServer;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
+import com.enterprise.testagent.domain.opencodeprocess.ManagedOpencodeProcessSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainer;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerId;
@@ -53,6 +54,7 @@ import org.mockito.Mockito;
 class OpencodeProcessStartupServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-06-30T00:00:00Z");
+    private static final Instant MANAGER_STARTED_AT = Instant.parse("2026-06-29T23:59:59.672196176Z");
     private static final UserId USER_ID = new UserId("usr_1234567890abcdef");
     private static final LinuxServerId SERVER_ID = new LinuxServerId("10.8.0.12");
     private static final OpencodeContainerId CONTAINER_ID = new OpencodeContainerId("ctr_01");
@@ -76,6 +78,8 @@ class OpencodeProcessStartupServiceTest {
         });
         assertThat(process.status()).isEqualTo(OpencodeServerProcessStatus.RUNNING);
         assertThat(process.pid()).isEqualTo(12345L);
+        assertThat(process.startedAt()).isEqualTo(Instant.parse("2026-06-29T23:59:59.672196Z"));
+        assertThat(process.startedAt()).isNotEqualTo(NOW);
         assertThat(process.healthMessage()).isEqualTo("ok");
         assertThat(repository.findUserBinding(USER_ID, "opencode")).get()
                 .extracting(UserOpencodeProcessBinding::processId)
@@ -100,6 +104,39 @@ class OpencodeProcessStartupServiceTest {
         Mockito.verify(configLinkService).switchToShared(request.sessionPath(), request.configPath());
         assertThat(gateway.startCommands).singleElement().satisfies(command ->
                 assertThat(command.configPath()).isEqualTo(request.configPath()));
+    }
+
+    @Test
+    void startAndVerifyRejectsManagerResultWithoutAuthoritativeStartedAtBeforePersistence() {
+        FakeRepository repository = new FakeRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.startResult = new OpencodeProcessStartResult(12345L, "legacy response", true);
+        OpencodeProcessStartupService service = service(repository, gateway, new RecordingHeartbeatStore());
+
+        assertThatThrownBy(() -> service.startAndVerify(request(null, null, null)))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_BAD_GATEWAY);
+                    assertThat(exception.getMessage()).contains("缺少权威启动时间");
+                });
+
+        assertThat(repository.processes).isEmpty();
+        assertThat(gateway.healthCommands).isEmpty();
+    }
+
+    @Test
+    void startAndVerifyUsesLegacyManagerStateWhenCommandResultOmitsStartedAt() {
+        FakeRepository repository = new FakeRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.startResult = new OpencodeProcessStartResult(12345L, "legacy response", true);
+        RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
+        heartbeatStore.managerSnapshots.add(managerSnapshot(12345L, MANAGER_STARTED_AT));
+        heartbeatStore.emptyManagerSnapshotReads = 1;
+        OpencodeProcessStartupService service = service(repository, gateway, heartbeatStore);
+
+        OpencodeServerProcess process = service.startAndVerify(request(null, null, null));
+
+        assertThat(process.startedAt()).isEqualTo(Instant.parse("2026-06-29T23:59:59.672196Z"));
+        assertThat(process.startedAt()).isNotEqualTo(NOW);
     }
 
     @Test
@@ -163,7 +200,7 @@ class OpencodeProcessStartupServiceTest {
                     NOW.plusSeconds(1),
                     TRACE_ID));
         };
-        gateway.startResult = new OpencodeProcessStartResult(12345L, "started", true);
+        gateway.startResult = new OpencodeProcessStartResult(12345L, "started", true, MANAGER_STARTED_AT);
         OpencodeProcessStartupService service = service(repository, gateway, new RecordingHeartbeatStore());
 
         assertThatThrownBy(() -> service.startAndVerify(request(processId, old.createdAt(), oldBinding.createdAt())))
@@ -197,7 +234,7 @@ class OpencodeProcessStartupServiceTest {
         repository.processes.put(processId, old);
         repository.bindings.put(USER_ID.value() + ":opencode", oldBinding);
         RecordingGateway gateway = new RecordingGateway();
-        gateway.startResult = new OpencodeProcessStartResult(12345L, "reused", false);
+        gateway.startResult = new OpencodeProcessStartResult(12345L, "reused", false, MANAGER_STARTED_AT);
         gateway.beforeStart = () -> repository.processes.put(
                 processId,
                 reservedProcess(processId, new OpencodeContainerId("ctr_new"), 4200));
@@ -220,7 +257,7 @@ class OpencodeProcessStartupServiceTest {
         repository.processes.put(processId, old);
         repository.bindings.put(USER_ID.value() + ":opencode", oldBinding);
         RecordingGateway gateway = new RecordingGateway();
-        gateway.startResult = new OpencodeProcessStartResult(12345L, "legacy response");
+        gateway.startResult = new OpencodeProcessStartResult(12345L, "legacy response", null, MANAGER_STARTED_AT);
         gateway.beforeStart = () -> repository.processes.put(
                 processId,
                 reservedProcess(processId, new OpencodeContainerId("ctr_new"), 4200));
@@ -243,7 +280,7 @@ class OpencodeProcessStartupServiceTest {
         repository.processes.put(processId, old);
         repository.bindings.put(USER_ID.value() + ":opencode", oldBinding);
         RecordingGateway gateway = new RecordingGateway();
-        gateway.startResult = new OpencodeProcessStartResult(12345L, "started", true);
+        gateway.startResult = new OpencodeProcessStartResult(12345L, "started", true, MANAGER_STARTED_AT);
         java.util.concurrent.atomic.AtomicBoolean migrated = new java.util.concurrent.atomic.AtomicBoolean();
         gateway.beforeHealth = () -> {
             if (migrated.compareAndSet(false, true)) {
@@ -290,7 +327,8 @@ class OpencodeProcessStartupServiceTest {
         repository.processes.put(processId, old);
         repository.bindings.put(USER_ID.value() + ":opencode", oldBinding);
         RecordingGateway gateway = new RecordingGateway();
-        gateway.startResult = new OpencodeProcessStartResult(12345L, "old lifecycle started", true);
+        gateway.startResult = new OpencodeProcessStartResult(
+                12345L, "old lifecycle started", true, MANAGER_STARTED_AT);
         gateway.ownedStopFailure = new PlatformException(
                 ErrorCode.OPENCODE_BAD_GATEWAY,
                 "owned process mismatch");
@@ -348,7 +386,7 @@ class OpencodeProcessStartupServiceTest {
         repository.processes.put(processId, old);
         repository.bindings.put(USER_ID.value() + ":opencode", oldBinding);
         RecordingGateway gateway = new RecordingGateway();
-        gateway.startResult = new OpencodeProcessStartResult(12345L, "started", true);
+        gateway.startResult = new OpencodeProcessStartResult(12345L, "started", true, MANAGER_STARTED_AT);
         gateway.ownedStopFailure = new PlatformException(
                 ErrorCode.OPENCODE_BAD_GATEWAY,
                 "owned process mismatch");
@@ -672,6 +710,30 @@ class OpencodeProcessStartupServiceTest {
                 TRACE_ID);
     }
 
+    private static ManagerRuntimeSnapshot managerSnapshot(Long pid, Instant startedAt) {
+        OpencodeContainer container = Mockito.mock(OpencodeContainer.class);
+        Mockito.when(container.linuxServerId()).thenReturn(SERVER_ID);
+        Mockito.when(container.containerId()).thenReturn(CONTAINER_ID);
+        ManagedOpencodeProcessSnapshot process = new ManagedOpencodeProcessSnapshot(
+                4097,
+                pid,
+                "http://10.8.0.12:4097",
+                "/data/opencode/session/users/ucid_001",
+                "/data/opencode/.config/opencode/",
+                startedAt,
+                "opencode serve",
+                TRACE_ID,
+                "ucid_001",
+                "PID_ALIVE");
+        return new ManagerRuntimeSnapshot(
+                container,
+                Mockito.mock(OpencodeContainerManager.class),
+                List.of(),
+                null,
+                List.of(process),
+                "legacy-manager");
+    }
+
     private static final class RecordingGateway implements OpencodeProcessManagerGateway {
         private final List<OpencodeProcessStartCommand> startCommands = new ArrayList<>();
         private final List<OpencodeProcessHealthCommand> healthCommands = new ArrayList<>();
@@ -679,7 +741,8 @@ class OpencodeProcessStartupServiceTest {
         private final List<OpencodeProcessOwnedStopCommand> ownedStopCommands = new ArrayList<>();
         private final Deque<OpencodeProcessHealthResult> healthResults = new ArrayDeque<>();
         private OpencodeProcessHealthResult health = OpencodeProcessHealthResult.healthy(12345L, "ok");
-        private OpencodeProcessStartResult startResult = new OpencodeProcessStartResult(12345L, "started");
+        private OpencodeProcessStartResult startResult = new OpencodeProcessStartResult(
+                12345L, "started", null, MANAGER_STARTED_AT);
         private RuntimeException healthFailure;
         private RuntimeException startFailure;
         private RuntimeException ownedStopFailure;
@@ -805,15 +868,23 @@ class OpencodeProcessStartupServiceTest {
 
     private static final class RecordingHeartbeatStore implements OpencodeProcessHeartbeatStore {
         private final Set<OpencodeProcessId> liveOpencodeProcessIds = new LinkedHashSet<>();
+        private final List<ManagerRuntimeSnapshot> managerSnapshots = new ArrayList<>();
+        private int emptyManagerSnapshotReads;
 
         @Override public void recordBackendHeartbeat(LinuxServerId linuxServerId, Instant heartbeatAt) { }
         @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) { }
-        @Override public void recordManagerSnapshot(ManagerRuntimeSnapshot snapshot) { }
+        @Override public void recordManagerSnapshot(ManagerRuntimeSnapshot snapshot) { managerSnapshots.add(snapshot); }
         @Override public void recordOpencodeHeartbeat(OpencodeProcessId processId, Instant heartbeatAt) {
             liveOpencodeProcessIds.add(processId);
         }
         @Override public List<BackendRuntimeSnapshot> liveBackendSnapshots() { return List.of(); }
-        @Override public List<ManagerRuntimeSnapshot> liveManagerSnapshots() { return List.of(); }
+        @Override public List<ManagerRuntimeSnapshot> liveManagerSnapshots() {
+            if (emptyManagerSnapshotReads > 0) {
+                emptyManagerSnapshotReads--;
+                return List.of();
+            }
+            return List.copyOf(managerSnapshots);
+        }
         @Override public Set<LinuxServerId> liveBackendServerIds() { return Set.of(); }
         @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.copyOf(liveOpencodeProcessIds); }
         @Override public void cleanupExpiredHeartbeats() { }

@@ -5,7 +5,7 @@
 
 ## Entries
 
-### 2026-07-24 - 固化跨进程启动时间的单一权威源规范
+### 2026-07-24 - 修复跨进程启动时间双时间源与存量 rollout
 
 ### Why
 - 应用 Agent/Skill rollout 在目标服务器持续报“目标用户进程身份尚未收敛”；现场核对确认 manager 与数据库的端口、PID 相同，但 `startedAt` 相差约 2.8 毫秒，重启仍会复现。
@@ -13,12 +13,19 @@
 ### What
 - 在入口规范和后端规范中明确：运行态身份的事件时间必须来自事件发生方，opencode `startedAt` 以 manager state 为唯一权威值，禁止用 Java 收到启动回包后的 `Instant.now()` 补造。
 - 补充时区/微秒精度、PID 复用、旧协议有界兼容及双时间源测试要求，并加入完成前自检项。
+- manager 的 `start` 命令结果新增权威 `startedAt`；Java 公共启动程序按 PostgreSQL 微秒精度落库，旧 manager 回包缺字段时从其即时心跳按完整进程坐标读取同一 state，结果和实时 state 均缺失才在写库前失败关闭，不再制造第二个启动时间。
+- 应用范围 rollout 对旧版本遗留数据增加有界收敛：仅在服务器、container、端口、用户、PID 全部一致且 DB/manager 启动时间偏差不超过一秒时，按 manager 时间建立 target；其他不一致继续失败关闭。
+- 同步 runtime/manager README、manager WebSocket 协议和企业部署排障文档；未新增 HTTP API、数据库字段、Flyway、SQL 或 OpenCode 源码修改。
 
 ### How
 - 对照 `OpencodeProcessStartupService`、manager 启动回包和 `PublicAgentConfigRolloutService` 的精确身份匹配，确认当前启动结果只返回 PID，Java 随后独立取时，微秒归一化无法消除两个时间源的真实偏差。
+- 用现场 `14098` 的真实差值 `2.803824ms` 增加 rollout 回归，并覆盖大于一秒仍拒绝、manager 时间纳秒到数据库微秒归一化、旧 manager 心跳兼容、结果和实时 state 均缺失时失败关闭及 Go 命令结果透传。
+- Java 定向 139 项通过；runtime reactor 全量执行 724 项，仅命中主线已知且与本次差异无关的 `OpencodeProcessConfigLinkServiceTest.rejectsOrdinaryDirectoryAtManagedPathWithoutDeletingUserData`；Go 全包编译和新增 process/control 定向用例通过，完整 Go 运行测试受本机非项目 `opencode web` 占用 `4096` 影响。
+- `verify-ai-docs.sh`、`git diff --check` 通过；按 test profile 重建并重启 backend、manager、frontend，health/readiness 为 `UP`、前端/CORS 正常，manager WebSocket 已连接。
 
 ### Result
-- 本次只固化项目规范和诊断结论，未修改运行时代码、API、事件、数据库/Flyway、SQL、环境配置、generated SDK 或 OpenCode 源码；生产缺陷及现有 rollout 恢复仍待后续实现和现场处置。
+- 新构建同时升级 Java 与 manager 后，新启动进程永久使用同一权威时间；旧 manager 心跳兼容保证企业标准“先 Java、再 worker”窗口不使用 Java 观察时间，也不会仅因回包缺少新字段而失败。
+- 当前 `.4` 现场同 PID 的 2.8ms 存量偏差可由新 Java 的 rollout 重试自动收敛，无需手改 rollout/target/process 数据或再次重启用户进程；企业现场尚待构建新包并滚动部署后复查 rollout 状态。
 
 ### 2026-07-24 - 重打精简版公共 Agent/Skill 独立包
 

@@ -84,6 +84,7 @@ type Result struct {
 	Status         Status                `json:"status"`
 	Port           int                   `json:"port"`
 	PID            int                   `json:"pid"`
+	StartedAt      *time.Time            `json:"startedAt,omitempty"`
 	BaseURL        string                `json:"baseUrl"`
 	SessionPath    string                `json:"sessionPath"`
 	ConfigPath     string                `json:"configPath"`
@@ -822,10 +823,12 @@ func publicConfigNotInitializedMessage(linuxServerID string, configPath string) 
 }
 
 func result(status Status, record state.ProcessRecord, message string, traceID string) Result {
+	startedAt := record.StartedAt.UTC()
 	return Result{
 		Status:       status,
 		Port:         record.Port,
 		PID:          record.PID,
+		StartedAt:    &startedAt,
 		BaseURL:      record.BaseURL,
 		SessionPath:  record.SessionPath,
 		ConfigPath:   record.ConfigPath,

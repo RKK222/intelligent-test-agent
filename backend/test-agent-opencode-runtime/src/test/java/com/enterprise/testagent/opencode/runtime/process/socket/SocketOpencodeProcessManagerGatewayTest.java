@@ -71,6 +71,7 @@ class SocketOpencodeProcessManagerGatewayTest {
         assertThat(result.pid()).isEqualTo(12345L);
         assertThat(result.message()).isEqualTo("started");
         assertThat(result.processCreated()).isTrue();
+        assertThat(result.startedAt()).isEqualTo(Instant.parse("2026-07-24T09:43:35.672196176Z"));
     }
 
     @Test
@@ -574,6 +575,7 @@ class SocketOpencodeProcessManagerGatewayTest {
                   "port":%d,
                   "status":"STARTED",
                   "pid":12345,
+                  "startedAt":"2026-07-24T09:43:35.672196176Z",
                   "baseUrl":"http://10.8.0.12:4096",
                   "sessionPath":"/data/opencode/session/4096",
                   "configPath":"/data/opencode/.config/opencode/",

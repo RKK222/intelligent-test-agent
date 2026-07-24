@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -86,6 +87,9 @@ func TestDispatchStartCommandPassesUnifiedAuthIDAndSessionPathToProcessManager(t
 	}
 	if !result.ProcessCreated {
 		t.Fatalf("fresh start command must report processCreated=true, got %#v", result)
+	}
+	if result.StartedAt == nil || result.StartedAt.IsZero() || !result.StartedAt.Equal(starter.specs[0].StartedAt) {
+		t.Fatalf("fresh start command must return manager state startedAt, result=%#v spec=%#v", result, starter.specs[0])
 	}
 	if len(starter.specs) != 1 {
 		t.Fatalf("expected one start spec, got %d", len(starter.specs))
@@ -218,6 +222,59 @@ func TestMessageJSONIncludesFalseProcessCreated(t *testing.T) {
 	}
 	if !strings.Contains(string(payload), `"processCreated":false`) {
 		t.Fatalf("processCreated=false must be explicit for Java tri-state compatibility, payload=%s", payload)
+	}
+}
+
+func TestExecuteStartCommandIncludesManagerStartedAt(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("allocate test port: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatalf("release test port: %v", err)
+	}
+	configDir := filepath.Join(t.TempDir(), "opencode-config")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("pre-create config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, ".ready"), []byte("ready"), 0o644); err != nil {
+		t.Fatalf("write config marker: %v", err)
+	}
+	starter := &capturingStarter{pid: 12345}
+	manager := process.NewManager(
+		config.Config{
+			ContainerID: "ctr_01", ContainerName: "test-agent-opencode-worker",
+			LinuxServerID: "test-agent-backend-10-8-0-12", ServerHost: "10.8.0.12",
+			PortStart: port, PortEnd: port, MaxProcesses: 1, OpencodeBin: "opencode",
+			StateDir: t.TempDir(), SessionRoot: "/tmp/opencode-session", ConfigDir: configDir,
+		},
+		state.NewFileStore(t.TempDir()),
+		starter,
+		noopSignaler{},
+		health.Checker{},
+	)
+	supervisor := NewSupervisor(supervisorTestConfig("ws://127.0.0.1:1"), manager)
+
+	result := supervisor.executeCommand(context.Background(), Message{
+		Type: messageTypeCommand, CommandID: "mcmd_start_1234567890", Command: "start",
+		Port: port, UnifiedAuthID: "usr_1234567890abcdef",
+		SessionPath: "/tmp/opencode-session/users/usr_1234567890abcdef",
+		ConfigPath:  configDir, TimeoutMillis: 1000, TraceID: "trace_start_1234567890",
+	})
+
+	if result.Status != string(process.StatusStarted) || result.StartedAt == nil {
+		t.Fatalf("start commandResult must include manager startedAt, got %#v", result)
+	}
+	if !result.StartedAt.Equal(starter.specs[0].StartedAt) {
+		t.Fatalf("commandResult startedAt must equal start spec, result=%s spec=%s", result.StartedAt, starter.specs[0].StartedAt)
+	}
+	payload, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal start command result: %v", err)
+	}
+	if !strings.Contains(string(payload), `"startedAt":"`) {
+		t.Fatalf("commandResult startedAt must use RFC3339 JSON string, payload=%s", payload)
 	}
 }
 

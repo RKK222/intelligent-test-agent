@@ -1,6 +1,7 @@
 package com.enterprise.testagent.opencode.runtime.process.socket;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -50,7 +51,8 @@ public record ManagerControlMessage(
         Map<String, String> environment,
         String buildVersion,
         Boolean processCreated,
-        Boolean bindingRecovery) {
+        Boolean bindingRecovery,
+        Instant startedAt) {
 
     /**
      * 规整可扩展能力字段，避免调用方持有可变 Map。
@@ -61,6 +63,96 @@ public record ManagerControlMessage(
         connectedBackendProcessIds = connectedBackendProcessIds == null ? List.of() : List.copyOf(connectedBackendProcessIds);
         backendEndpoints = backendEndpoints == null ? List.of() : List.copyOf(backendEndpoints);
         environment = environment == null ? Map.of() : Map.copyOf(environment);
+    }
+
+    /** 兼容新增 startedAt 前的完整构造调用；只有 manager 命令结果或 JSON 解码提供权威启动时间。 */
+    public ManagerControlMessage(
+            String type,
+            String protocolVersion,
+            String traceId,
+            String managerId,
+            String containerId,
+            String linuxServerId,
+            String containerName,
+            Integer portStart,
+            Integer portEnd,
+            Integer maxProcesses,
+            Integer currentProcesses,
+            Double cpuUsagePercent,
+            Long memoryMaxBytes,
+            Long memoryUsedBytes,
+            Double memoryUsagePercent,
+            Double diskReadBytesPerSecond,
+            Double diskWriteBytesPerSecond,
+            List<ManagerManagedProcess> managedProcesses,
+            Map<String, Object> capabilities,
+            String backendProcessId,
+            String commandId,
+            String command,
+            Integer port,
+            Long timeoutMillis,
+            String status,
+            Long pid,
+            String baseUrl,
+            String sessionPath,
+            String configPath,
+            String unifiedAuthId,
+            Boolean healthy,
+            String message,
+            String errorCode,
+            List<String> connectedBackendProcessIds,
+            List<ManagerBackendEndpoint> backendEndpoints,
+            String metricsSource,
+            String sessionRoot,
+            String configDir,
+            Map<String, String> environment,
+            String buildVersion,
+            Boolean processCreated,
+            Boolean bindingRecovery) {
+        this(
+                type,
+                protocolVersion,
+                traceId,
+                managerId,
+                containerId,
+                linuxServerId,
+                containerName,
+                portStart,
+                portEnd,
+                maxProcesses,
+                currentProcesses,
+                cpuUsagePercent,
+                memoryMaxBytes,
+                memoryUsedBytes,
+                memoryUsagePercent,
+                diskReadBytesPerSecond,
+                diskWriteBytesPerSecond,
+                managedProcesses,
+                capabilities,
+                backendProcessId,
+                commandId,
+                command,
+                port,
+                timeoutMillis,
+                status,
+                pid,
+                baseUrl,
+                sessionPath,
+                configPath,
+                unifiedAuthId,
+                healthy,
+                message,
+                errorCode,
+                connectedBackendProcessIds,
+                backendEndpoints,
+                metricsSource,
+                sessionRoot,
+                configDir,
+                environment,
+                buildVersion,
+                processCreated,
+                bindingRecovery,
+                null);
     }
 
     /**

@@ -386,7 +386,11 @@ class RuntimeManagementCommandServiceTest {
         @Override
         public OpencodeProcessStartResult startProcess(OpencodeProcessStartCommand command) {
             startCommands.add(command);
-            return new OpencodeProcessStartResult(33333L, "started");
+            return new OpencodeProcessStartResult(
+                    33333L,
+                    "started",
+                    null,
+                    Instant.parse("2026-06-30T00:00:00Z"));
         }
 
         @Override

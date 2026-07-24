@@ -284,6 +284,37 @@ class PublicAgentConfigRolloutServiceTest {
     }
 
     @Test
+    void applicationSyncConvergesLegacyMillisecondStartTimeSkewUsingManagerIdentity() {
+        ManagerRuntimeSnapshot manager = managerWithPorts(4096);
+        when(heartbeatStore.liveManagerSnapshots()).thenReturn(List.of(manager));
+        OpencodeServerProcess legacy = mock(OpencodeServerProcess.class);
+        when(legacy.userId()).thenReturn(new UserId("usr-included"));
+        when(legacy.linuxServerId()).thenReturn(new LinuxServerId("linux-1"));
+        when(legacy.containerId()).thenReturn(new OpencodeContainerId("container-1"));
+        when(legacy.port()).thenReturn(4096);
+        when(legacy.pid()).thenReturn(123L);
+        when(legacy.startedAt()).thenReturn(PROCESS_STARTED_AT.plusNanos(2_803_824));
+        when(processRepository.findOpencodeServerProcesses(
+                any(OpencodeServerProcessFilter.class), any(PageRequest.class)))
+                .thenReturn(new PageResponse<>(List.of(legacy), 1, PageRequest.MAX_SIZE, 1));
+        PublicAgentConfigRolloutSyncRequest request = applicationSyncRequest();
+        when(repository.renewServerSync(eq("acr_rollout"), eq("linux-1"), eq("acl_sync"), any(), any()))
+                .thenReturn(true);
+
+        service.markServerSyncedForUsers(request, Set.of("usr-included"));
+
+        ArgumentCaptor<PublicAgentConfigRolloutTarget> targetCaptor =
+                ArgumentCaptor.forClass(PublicAgentConfigRolloutTarget.class);
+        verify(repository).addTarget(targetCaptor.capture(), any(Instant.class));
+        assertThat(targetCaptor.getValue()).satisfies(target -> {
+            assertThat(target.userId()).isEqualTo("usr-included");
+            assertThat(target.processPid()).isEqualTo(123L);
+            assertThat(target.processStartedAt()).isEqualTo(PROCESS_STARTED_AT);
+        });
+        verify(repository).markServerSynced(eq("acr_rollout"), eq("linux-1"), eq("acl_sync"), any());
+    }
+
+    @Test
     void applicationSyncPersistsPendingWorktreeAndCompletesServerWithoutManagerSnapshot() {
         PublicAgentConfigRolloutSyncRequest request = applicationSyncRequest();
         when(repository.renewServerSync(eq("acr_rollout"), eq("linux-1"), eq("acl_sync"), any(), any()))
@@ -305,7 +336,7 @@ class PublicAgentConfigRolloutServiceTest {
     }
 
     @Test
-    void applicationSyncRetriesWhenEligibleUsersExactProcessIdentityHasNotConverged() {
+    void applicationSyncRetriesWhenEligibleUsersStartTimeSkewExceedsCompatibilityWindow() {
         ManagerRuntimeSnapshot manager = managerWithPorts(4096);
         when(heartbeatStore.liveManagerSnapshots()).thenReturn(List.of(manager));
         OpencodeServerProcess stale = mock(OpencodeServerProcess.class);
@@ -313,8 +344,8 @@ class PublicAgentConfigRolloutServiceTest {
         when(stale.linuxServerId()).thenReturn(new LinuxServerId("linux-1"));
         when(stale.containerId()).thenReturn(new OpencodeContainerId("container-1"));
         when(stale.port()).thenReturn(4096);
-        when(stale.pid()).thenReturn(122L);
-        when(stale.startedAt()).thenReturn(PROCESS_STARTED_AT.minusSeconds(1));
+        when(stale.pid()).thenReturn(123L);
+        when(stale.startedAt()).thenReturn(PROCESS_STARTED_AT.minusSeconds(2));
         when(processRepository.findOpencodeServerProcesses(
                 any(OpencodeServerProcessFilter.class), any(PageRequest.class)))
                 .thenReturn(new PageResponse<>(List.of(stale), 1, PageRequest.MAX_SIZE, 1));

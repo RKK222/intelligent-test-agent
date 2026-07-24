@@ -61,6 +61,8 @@ public class PublicAgentConfigRolloutService
     private static final Duration TARGET_LEASE = Duration.ofSeconds(60);
     private static final Duration SERVER_SYNC_LEASE = Duration.ofMinutes(3);
     private static final Duration RUNTIME_TIMEOUT = Duration.ofSeconds(10);
+    /** 兼容旧 Java 用回包观察时间落库造成的毫秒级偏差；超过该窗口仍按替换进程失败关闭。 */
+    private static final Duration LEGACY_PROCESS_START_TIME_SKEW = Duration.ofSeconds(1);
 
     private final PublicAgentConfigRolloutRepository repository;
     private final OpencodeProcessHeartbeatStore heartbeatStore;
@@ -425,15 +427,15 @@ public class PublicAgentConfigRolloutService
                     Map.of("linuxServerId", linuxServerId, "rolloutId", rolloutId));
         }
         Map<ProcessKey, String> usersByProcess = new HashMap<>();
-        Map<ProcessLocation, String> usersByLocation = new HashMap<>();
+        Map<ProcessLocation, OpencodeServerProcess> processesByLocation = new HashMap<>();
         // 目标登记只允许读取本服务器进程；跨服务器历史脏行既不属于本 worker，也不能阻塞本机排空。
         List<OpencodeServerProcess> localProcesses = processRepository.findOpencodeServerProcesses(
                 new OpencodeServerProcessFilter(null, new LinuxServerId(linuxServerId), null, null),
                 new PageRequest(1, TOPOLOGY_LIMIT)).items();
         for (OpencodeServerProcess process : localProcesses) {
-            usersByLocation.putIfAbsent(
+            processesByLocation.putIfAbsent(
                     new ProcessLocation(process.containerId().value(), process.port()),
-                    process.userId().value());
+                    process);
             usersByProcess.putIfAbsent(
                     new ProcessKey(
                             process.linuxServerId().value(),
@@ -446,7 +448,9 @@ public class PublicAgentConfigRolloutService
         for (ManagerRuntimeSnapshot manager : managers) {
             String containerId = manager.container().containerId().value();
             for (ManagedOpencodeProcessSnapshot process : manager.managedProcesses()) {
-                String locationUserId = usersByLocation.get(new ProcessLocation(containerId, process.port()));
+                OpencodeServerProcess locationProcess = processesByLocation.get(
+                        new ProcessLocation(containerId, process.port()));
+                String locationUserId = locationProcess == null ? null : locationProcess.userId().value();
                 if (process.pid() == null
                         || process.pid() <= 0
                         || process.startedAt() == null
@@ -470,13 +474,21 @@ public class PublicAgentConfigRolloutService
                 if (targetUserIds != null
                         && (exactUserId == null || !targetUserIds.contains(exactUserId))) {
                     if (locationUserId != null && targetUserIds.contains(locationUserId)) {
-                        // 端口属于目标用户但精确进程身份尚未收敛时必须重试，不能漏掉本次热加载。
-                        throw new PlatformException(
-                                ErrorCode.OPENCODE_UNAVAILABLE,
-                                "目标用户进程身份尚未收敛，暂不能安全 dispose",
-                                Map.of("linuxServerId", linuxServerId, "rolloutId", rolloutId));
+                        if (sameLegacyProcessIdentity(locationProcess, process)) {
+                            // 旧 Java 把 manager 回包到达时间写成 startedAt；只在完整坐标、PID、用户归属
+                            // 均一致且偏差不超过一秒时，使用 manager 权威时间建立本次 target。
+                            exactUserId = locationUserId;
+                        } else {
+                            // 端口属于目标用户但精确进程身份尚未收敛时必须重试，不能漏掉本次热加载。
+                            throw new PlatformException(
+                                    ErrorCode.OPENCODE_UNAVAILABLE,
+                                    "目标用户进程身份尚未收敛，暂不能安全 dispose",
+                                    Map.of("linuxServerId", linuxServerId, "rolloutId", rolloutId));
+                        }
                     }
-                    continue;
+                    if (exactUserId == null || !targetUserIds.contains(exactUserId)) {
+                        continue;
+                    }
                 }
                 repository.addTarget(new PublicAgentConfigRolloutTarget(
                         RuntimeIdGenerator.publicAgentConfigRolloutTargetId(),
@@ -498,6 +510,23 @@ public class PublicAgentConfigRolloutService
     }
 
     private record ProcessLocation(String containerId, int port) {
+    }
+
+    private boolean sameLegacyProcessIdentity(
+            OpencodeServerProcess platformProcess,
+            ManagedOpencodeProcessSnapshot managerProcess) {
+        if (platformProcess == null
+                || platformProcess.pid() == null
+                || managerProcess.pid() == null
+                || !platformProcess.pid().equals(managerProcess.pid())
+                || platformProcess.startedAt() == null
+                || managerProcess.startedAt() == null) {
+            return false;
+        }
+        Duration skew = Duration.between(
+                normalizedStartedAt(platformProcess.startedAt()),
+                normalizedStartedAt(managerProcess.startedAt())).abs();
+        return skew.compareTo(LEGACY_PROCESS_START_TIME_SKEW) <= 0;
     }
 
     @Override

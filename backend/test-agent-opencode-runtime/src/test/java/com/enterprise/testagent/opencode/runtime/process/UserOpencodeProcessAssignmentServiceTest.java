@@ -1829,7 +1829,11 @@ class UserOpencodeProcessAssignmentServiceTest {
                 managedPort = command.port();
             }
             startCommands.add(command);
-            return new OpencodeProcessStartResult(12345L, "started");
+            return new OpencodeProcessStartResult(
+                    12345L,
+                    "started",
+                    null,
+                    Instant.parse("2026-06-30T00:00:00Z"));
         }
 
         @Override
