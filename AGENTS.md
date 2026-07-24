@@ -13,6 +13,10 @@
 
 根目录 `requirements/` 下的历史设计、需求草案和阶段计划**不作为编码依据**，仅供追溯。
 
+## OpenCode 源码边界
+
+本项目严格禁止直接修改 OpenCode 源码。`opencode-source/opencode-1.18.4/` 只读用于源码审计、行为对照和 OpenAPI 兼容性分析，不得提交其中的源码、测试、配置、构建脚本、资源或临时补丁；平台适配必须放在本项目的后端、前端、worker 启动器或受控配置层。OpenCode 升级只能按 `docs/deployment/opencode-upgrade-1.18.4.md` 获取干净上游快照，不能在快照上本地修补。详细边界见 `docs/standards/opencode.md`。
+
 ## 强制规则
 
 1. 只改与任务直接相关的最小范围，不允许顺手重构无关代码。

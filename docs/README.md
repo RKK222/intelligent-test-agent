@@ -9,6 +9,7 @@
 - `docs/guides/ai-workflow.md`：AI 编码工作流（读文档→定位→修改→测试→文档→自检→提交）。
 - `docs/guides/self-checklist.md`：完成前自检清单。
 - `docs/architecture/dependency-rules.md`：分层依赖与访问边界。
+- `docs/standards/opencode.md`：OpenCode 只读源码快照、平台适配和 generated SDK 边界。
 
 ## 技术栈与编码规范
 

@@ -10,7 +10,7 @@
 | `@opencode-ai/plugin` / `@opencode-ai/sdk` | 1.17.8 | 1.18.4 |
 | `effect` | 4.0.0-beta.74 | 4.0.0-beta.83 |
 
-企业 worker 使用上游 release 的 `opencode-linux-x64-baseline.tar.gz`，不从源码构建。1.18.4 归档大小为 59,265,643 bytes，SHA-256 为 `4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc`，解压后二进制 SHA-256 为 `6ce6570e7db9a40e7bd3304ebdfff607920bde8cafd2eb5587bd7a26f89ba0b5`。源码快照只用于审计和行为参考。
+企业 worker 使用上游 release 的 `opencode-linux-x64-baseline.tar.gz`，不从源码构建。1.18.4 归档大小为 59,265,643 bytes，SHA-256 为 `4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc`，解压后二进制 SHA-256 为 `6ce6570e7db9a40e7bd3304ebdfff607920bde8cafd2eb5587bd7a26f89ba0b5`。源码快照只用于审计和行为参考，本项目严格禁止修改 `opencode-source/opencode-1.18.4/` 中的 OpenCode 源码、测试、配置、构建脚本、资源或临时补丁。
 
 ## API 差异
 

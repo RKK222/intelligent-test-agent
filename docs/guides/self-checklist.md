@@ -13,6 +13,7 @@
 - [ ] 工程 README、模块/包 README 已检查并按需更新。
 - [ ] API、事件、数据库、安全、性能、测试文档已检查并按需更新。
 - [ ] 文档中的模块名、包名、命令和依赖关系与代码一致。
+- [ ] 未修改 `opencode-source/` 中的 OpenCode 源码、测试、配置、构建脚本、资源或临时补丁；平台适配仍位于项目自身边界内。
 - [ ] 稳定文档（`docs/`、模块/包 README、`PACKAGE.md`）未使用阶段名（Phase NN）作为来源或时间注脚；阶段计划与待办只放在 `requirements/`。
 - [ ] 提交前已回顾所有 `.agents/session-log*.md`（含已冻结旧档 `.agents/session-log.md` 和各 `.agents/session-log.{id}.md`）中近期条目的变更、坑点和未完成事项，确认本次暂存内容不会覆盖或丢弃他人已提交成果。
 - [ ] 若本次会话收尾时确有需要留痕的新增信息，已按会话级别更新本机对应的 `.agents/session-log.{id}.md`（`{id}` 为清洗后的 `git config user.name`），且条目包含 `Why`、`What`、`How`、`Result`；同一会话的零散改动已合并，不按文件级频繁记录；不再向已冻结的 `.agents/session-log.md` 追加。

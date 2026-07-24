@@ -8,8 +8,9 @@
 2. 后端任务读 `backend/README.md`、目标模块 `README.md`，再读 `docs/standards/backend.md` 和 `docs/architecture/dependency-rules.md`。
 3. 前端任务读 `frontend/README.md`、目标 app/package `README.md`，再读 `docs/standards/frontend.md`。
 4. API、事件、数据库、安全、性能任务必须读 `docs/api/`、`docs/deployment/database.md`、`docs/standards/security.md`。
-5. 用 `rg`、`find` 定位相关代码，确认入口、调用链、依赖方向和测试位置；确认是否涉及 generated SDK、数据库 migration、API 或事件文档。
-6. 先分析影响范围（兼容性、安全、性能、错误处理、可观测性），再开始修改；不允许在未理解边界时直接搜索替换或大范围重构。
+5. 涉及 OpenCode 行为、版本、SDK 或源码参考时，必须读 `docs/standards/opencode.md` 和对应升级文档；`opencode-source/` 只读，平台适配不得通过修改快照实现。
+6. 用 `rg`、`find` 定位相关代码，确认入口、调用链、依赖方向和测试位置；确认是否涉及 generated SDK、数据库 migration、API 或事件文档。
+7. 先分析影响范围（兼容性、安全、性能、错误处理、可观测性），再开始修改；不允许在未理解边界时直接搜索替换或大范围重构。
 
 ## 2. 修改范围
 
@@ -39,6 +40,7 @@
 - `docs/api/`（HTTP 接口、SSE 事件）。
 - `docs/deployment/database.md`（migration）。
 - `docs/standards/`、`docs/architecture/` 相关规范。
+- `docs/standards/opencode.md` 以及 OpenCode 升级/兼容性文档（涉及 OpenCode 行为或版本时）。
 
 代码、接口、配置、数据结构和行为变更不能只改实现不改文档。`requirements/` 下的历史文档不是编码依据，不在此同步范围。
 

@@ -18,6 +18,8 @@
 - PostgreSQL（平台）与 MySQL 8.4（XXL-JOB）双数据库隔离
 - OpenAPI Generator 生成的 opencode Java SDK
 
+OpenCode 源码快照 `opencode-source/opencode-1.18.4/` 只用于审计和行为参考，严格禁止修改；平台适配必须通过 `test-agent-opencode-client`、运行时业务或其他本项目模块实现。
+
 ## 模块说明
 
 | 模块 | 作用 |
