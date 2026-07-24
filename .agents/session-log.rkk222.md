@@ -5,6 +5,23 @@
 
 ## Entries
 
+### 2026-07-24 - 精简公共测试设计生成与审核链路
+
+### Why
+- 用户确认旧四段式不再使用，并要求先调整一稿当前公共区案例设计流程，减少 Agent 召唤、规约复读和重复门禁；同时明确内部 Agent 不应命名为“测试设计执行”。
+
+### What
+- 当前公共配置删除独立 `test-design-analysis`，保留原技术 ID `test-design-generation` 并命名为“测试设计生成”，在单个 Task 内依次完成事实分析基线、Phase A、冻结/确认和 Phase B；独立 Review 保留。
+- 入口改为只派发 generation/review 两个 Task，材料按 manifest/路径按需读取；用一次 `policyManifest` 和一次 `reviewPolicyManifest` 取代三阶段 `ruleUsage`。
+- 删除无消费者的 `skill-map.md` 和重复对象规格卡模板，同步 Skill 4.0.0、质量门禁、输出模板、eval、公共 README 与 AGENTS。
+
+### How
+- 公共配置提示词由 4 个 Agent 共 526 行收敛为 3 个 Agent 共 384 行；自动模式子 Agent 调用由 3 次降为 2 次。
+- `quick_validate.py`、eval JSON、资源引用、权限、冲突标记和 `git diff --check` 通过；OpenCode 1.18.4 实际解析 generation/review 为隐藏 subagent、入口为可见 all，并确认已删除 analysis 不可加载、`test-design` Skill 可发现。
+
+### Result
+- 公共配置提交 `8cac11e`（`精简测试设计生成与审核链路`）已生成，未推送；旧 `temp/opencode-config` 历史检出目录未修改。未涉及应用代码、API、RunEvent、数据库、环境配置、OpenCode 源码、性能或安全契约。
+
 ### 2026-07-24 - 审查公共区测试设计 Agent 流程重复
 
 ### Why
