@@ -29,12 +29,17 @@ public class InternalModelProxyController {
     @RequestMapping("/api/internal/platform/opencode-runtime/internal-model-proxy/v1/**")
     public Mono<Void> proxy(ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
-        long contentLength = exchange.getRequest().getHeaders().getContentLength();
-        if (contentLength > MAX_REQUEST_BODY_BYTES) {
-            return Mono.error(payloadTooLarge());
-        }
-        return readRequestBody(exchange)
-                .flatMap(body -> forwardingService.forward(exchange, body, traceId));
+        return Mono.defer(() -> {
+            // 鉴权和供应商快照解析必须先于请求体订阅，避免无效请求占用 2 MiB 聚合缓冲区。
+            InternalModelProxyForwardingService.PreparedRequest preparedRequest =
+                    forwardingService.prepareRequest(exchange);
+            long contentLength = exchange.getRequest().getHeaders().getContentLength();
+            if (contentLength > MAX_REQUEST_BODY_BYTES) {
+                return Mono.error(payloadTooLarge());
+            }
+            return readRequestBody(exchange)
+                    .flatMap(body -> forwardingService.forward(exchange, body, traceId, preparedRequest));
+        });
     }
 
     /**

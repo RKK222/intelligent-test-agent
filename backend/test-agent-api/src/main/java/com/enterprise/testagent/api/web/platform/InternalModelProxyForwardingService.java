@@ -1,6 +1,7 @@
 package com.enterprise.testagent.api.web.platform;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
@@ -11,6 +12,7 @@ import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProv
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelThinkStreamConverter;
 import io.netty.channel.ChannelOption;
+import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.Collections;
@@ -109,9 +111,25 @@ public class InternalModelProxyForwardingService {
     }
 
     public Mono<Void> forward(ServerWebExchange exchange, byte[] body, String traceId) {
+        return forward(exchange, body, traceId, prepareRequest(exchange));
+    }
+
+    /**
+     * 在订阅请求体之前完成代理密钥校验和供应商快照解析，拒绝无效请求的聚合内存占用。
+     */
+    PreparedRequest prepareRequest(ServerWebExchange exchange) {
         validateProxyAuth(exchange);
         String providerId = exchange.getRequest().getHeaders().getFirst(PROVIDER_HEADER);
-        InternalModelProviderRuntimeConfig runtimeConfig = registry.requireRuntimeConfig(providerId);
+        return new PreparedRequest(registry.requireRuntimeConfig(providerId));
+    }
+
+    Mono<Void> forward(
+            ServerWebExchange exchange,
+            byte[] body,
+            String traceId,
+            PreparedRequest preparedRequest) {
+        InternalModelProviderRuntimeConfig runtimeConfig =
+                Objects.requireNonNull(preparedRequest, "preparedRequest must not be null").runtimeConfig();
         InternalModelProvider provider = runtimeConfig.provider();
         validateModel(body);
         String targetUrl = targetUrl(provider.baseUrl(), downstreamPath(exchange), exchange.getRequest().getURI().getRawQuery());
@@ -215,16 +233,50 @@ public class InternalModelProxyForwardingService {
     }
 
     private void validateModel(byte[] body) {
-        try {
-            JsonNode root = objectMapper.readTree(body == null || body.length == 0 ? new byte[] {'{', '}'} : body);
-            JsonNode model = root.get("model");
-            if (model == null || !model.isTextual() || model.asText().isBlank()) {
+        byte[] requestBody = body == null ? new byte[0] : body;
+        try (JsonParser parser = objectMapper.getFactory().createParser(requestBody)) {
+            JsonToken rootToken = parser.nextToken();
+            if (rootToken != JsonToken.START_OBJECT) {
+                if (rootToken != null) {
+                    parser.skipChildren();
+                    requireDocumentEnd(parser);
+                }
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "内部模型代理请求缺少 model");
+            }
+
+            String model = null;
+            boolean textualModel = false;
+            JsonToken token;
+            while ((token = parser.nextToken()) != JsonToken.END_OBJECT) {
+                if (token == null || token != JsonToken.FIELD_NAME) {
+                    throw new IOException("内部模型代理请求体对象未正常结束");
+                }
+                String fieldName = parser.currentName();
+                JsonToken valueToken = parser.nextToken();
+                if (valueToken == null) {
+                    throw new IOException("内部模型代理请求字段缺少值");
+                }
+                if ("model".equals(fieldName)) {
+                    textualModel = valueToken == JsonToken.VALUE_STRING;
+                    model = textualModel ? parser.getValueAsString() : null;
+                }
+                parser.skipChildren();
+            }
+            requireDocumentEnd(parser);
+            if (!textualModel || model == null || model.isBlank()) {
                 throw new PlatformException(ErrorCode.VALIDATION_ERROR, "内部模型代理请求缺少 model");
             }
         } catch (PlatformException exception) {
             throw exception;
-        } catch (Exception exception) {
+        } catch (IOException exception) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "内部模型代理请求体不是合法 JSON");
+        }
+    }
+
+    /** 流式扫描仍消费完整文档，避免找到 model 后忽略尾部畸形 JSON 或额外根值。 */
+    private void requireDocumentEnd(JsonParser parser) throws IOException {
+        if (parser.nextToken() != null) {
+            throw new IOException("内部模型代理请求体包含额外根值");
         }
     }
 
@@ -280,5 +332,13 @@ public class InternalModelProxyForwardingService {
         return rawQuery == null || rawQuery.isBlank()
                 ? normalizedBase + normalizedPath
                 : normalizedBase + normalizedPath + "?" + rawQuery;
+    }
+
+    /** 鉴权通过后固化同一代供应商与 Token 快照，后续读取请求体期间不会发生串代。 */
+    record PreparedRequest(InternalModelProviderRuntimeConfig runtimeConfig) {
+
+        PreparedRequest {
+            Objects.requireNonNull(runtimeConfig, "runtimeConfig must not be null");
+        }
     }
 }

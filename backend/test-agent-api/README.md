@@ -92,7 +92,7 @@
 - `RuntimeSecurityConfigTest` 覆盖本地 `frontend-opencode` real E2E Origin 白名单，以及 `X-Test-Agent-Linux-Server-Id` 的 CORS 预检允许。
 - `AuthControllerRolesTest`、`ConfigurationManagementControllerTest` 覆盖认证响应 roles、`APP_ADMIN`/`SUPER_ADMIN` 鉴权、代码库英文名、版本库类型与部署模式 DTO、版本库类型/部署模式下拉接口、应用版本库远端树接口、工作空间创建进度轮询和 SSH key 不回显私钥。
 - `ApiTokenWebFilterTest`、`InMemoryRateLimitWebFilterTest`、`TraceIdWebFilterTest`、`GlobalExceptionHandlerTest`、`LegacyApiGoneWebFilterTest` 覆盖鉴权、限流、traceId、旧接口 410 和统一错误响应。
-- `InternalModelTokenManagementControllerTest` 覆盖 `SUPER_ADMIN` 鉴权、统一冲突错误和响应不泄露 Token；代理测试覆盖按 Provider ID 注入不同 Token。`ApiLoggingAspectTest` / `ServiceLoggingAspectTest` / `WebSocketLoggingAspectTest` 覆盖 Controller、Service 与 WebSocket 日志切面在同步、响应式和错误路径下保留原调用语义；`SensitiveDataMaskerTest` 覆盖 `contextToken` 及内部模型 `authToken` 请求/响应字段脱敏。
+- `InternalModelTokenManagementControllerTest` 覆盖 `SUPER_ADMIN` 鉴权、统一冲突错误和响应不泄露 Token；代理测试覆盖按 Provider ID 注入不同 Token、鉴权先于请求体聚合、`2 MiB` 定长及 chunked 上限和流式 JSON 完整性校验。`ApiLoggingAspectTest` / `ServiceLoggingAspectTest` / `WebSocketLoggingAspectTest` 覆盖 Controller、Service 与 WebSocket 日志切面在同步、响应式和错误路径下保留原调用语义；`SensitiveDataMaskerTest` 覆盖 `contextToken` 及内部模型 `authToken` 请求/响应字段脱敏。
 
 ## 后续 AI 编码指引
 

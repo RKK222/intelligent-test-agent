@@ -12,11 +12,13 @@
 - What:
   - 内部模型代理改为端点专用 `2 MiB` 有界聚合：已知 Content-Length 超限时立即拒绝，未知长度仍由 `DataBufferUtils.join` 强制上限；请求体以 `byte[]` 校验并转发，避免额外整包 String 副本。
   - 新增稳定 `413 PAYLOAD_TOO_LARGE` 及 `details.maxBytes=2097152`，同步 API 文档和 API 包说明，不记录或回显模型请求内容。
+  - 复核后将代理密钥校验和供应商同代快照解析前置到请求体订阅之前；顶层 `model` 改用 Jackson 流式扫描，并继续消费完整文档以拒绝尾部畸形 JSON 或额外根值，避免构建完整 JSON 对象树。
 - How:
-  - 定向 11 项通过，覆盖 300 KiB 正常转发、超过 2 MiB 统一 413、SSE 和首响应超时；全量 `mvn test` 在 720 项后因两个无关既有用例失败，独立复跑后定时重试用例通过，`OpencodeProcessConfigLinkServiceTest` 仍稳定失败。
+  - 定向 15 项通过，覆盖 300 KiB 正常转发、超过 2 MiB 的定长与 chunked 请求统一 413、无效鉴权/供应商先于大小检查拒绝、完整 JSON 扫描、SSE 和首响应超时；全量 `mvn test` 在 720 项后因两个无关既有用例失败，独立复跑后定时重试用例通过，`OpencodeProcessConfigLinkServiceTest` 仍稳定失败。
   - JDK 25 下完整构建并按 `.env.test`/`test` profile 重启 backend、opencode-manager、frontend，backend readiness 为 UP、frontend 3000 启动成功。
+  - 真实进程探针确认未认证超限请求返回 `401 UNAUTHENTICATED`；本地数据库没有启用且已绑定 Token 的内部供应商，因此已认证请求会在供应商前置检查返回 400，未为探针修改数据库，真实 413 分支由带有效供应商快照的 WebFlux 端到端测试覆盖。
 - Result:
-  - 模型代理不再受全局 256 KiB codec 限制，单请求 JVM 聚合边界固定为 2 MiB；未修改 OpenCode 源码、环境配置、RunEvent、数据库/Flyway、SQL 或 generated SDK。
+  - 模型代理不再受全局 256 KiB codec 限制，单请求 JVM 聚合边界固定为 2 MiB；无效调用不再进入请求体聚合，有效调用也不再为 model 校验构建整棵 JSON 树。未修改 OpenCode 源码、环境配置、RunEvent、数据库/Flyway、SQL 或 generated SDK。
 - Next:
   - 企业发布后观察 413 数量和模型请求大小分布；`OpencodeProcessConfigLinkServiceTest` 的现有失败另行排查。
 

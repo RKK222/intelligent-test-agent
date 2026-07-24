@@ -36,6 +36,7 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 import org.springframework.web.reactive.config.EnableWebFlux;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.adapter.WebHttpHandlerBuilder;
+import reactor.core.publisher.Flux;
 import reactor.netty.DisposableServer;
 import reactor.test.StepVerifier;
 
@@ -223,6 +224,74 @@ class InternalModelProxyControllerTest {
                 .jsonPath("$.code").isEqualTo("PAYLOAD_TOO_LARGE")
                 .jsonPath("$.details.maxBytes")
                 .isEqualTo(InternalModelProxyController.MAX_REQUEST_BODY_BYTES);
+    }
+
+    @Test
+    void rejectsUnauthenticatedRequestBeforeApplyingBodySizeLimit() {
+        String request = largeRequest(InternalModelProxyController.MAX_REQUEST_BODY_BYTES + 1);
+
+        clientForProvider(upstreamBaseUrl()).post()
+                .uri("/api/internal/platform/opencode-runtime/internal-model-proxy/v1/chat/completions")
+                .header(InternalModelProxyForwardingService.PROVIDER_HEADER, PROVIDER_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(request)
+                .exchange()
+                .expectStatus().isUnauthorized()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(false)
+                .jsonPath("$.code").isEqualTo("UNAUTHENTICATED");
+    }
+
+    @Test
+    void rejectsMissingProviderBeforeApplyingBodySizeLimit() {
+        String request = largeRequest(InternalModelProxyController.MAX_REQUEST_BODY_BYTES + 1);
+
+        clientForProvider(upstreamBaseUrl()).post()
+                .uri("/api/internal/platform/opencode-runtime/internal-model-proxy/v1/chat/completions")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + PROXY_KEY)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(request)
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(false)
+                .jsonPath("$.code").isEqualTo("VALIDATION_ERROR")
+                .jsonPath("$.message").isEqualTo("缺少内部模型供应商标识");
+    }
+
+    @Test
+    void rejectsChunkedRequestBodyAboveTwoMebibytes() {
+        String request = largeRequest(InternalModelProxyController.MAX_REQUEST_BODY_BYTES + 1);
+        int middle = request.length() / 2;
+
+        clientForProvider(upstreamBaseUrl()).post()
+                .uri("/api/internal/platform/opencode-runtime/internal-model-proxy/v1/chat/completions")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + PROXY_KEY)
+                .header(InternalModelProxyForwardingService.PROVIDER_HEADER, PROVIDER_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Flux.just(request.substring(0, middle), request.substring(middle)), String.class)
+                .exchange()
+                .expectStatus().isEqualTo(413)
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("PAYLOAD_TOO_LARGE")
+                .jsonPath("$.details.maxBytes")
+                .isEqualTo(InternalModelProxyController.MAX_REQUEST_BODY_BYTES);
+    }
+
+    @Test
+    void rejectsMalformedJsonAfterTopLevelModel() {
+        clientForProvider(upstreamBaseUrl()).post()
+                .uri("/api/internal/platform/opencode-runtime/internal-model-proxy/v1/chat/completions")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + PROXY_KEY)
+                .header(InternalModelProxyForwardingService.PROVIDER_HEADER, PROVIDER_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"model\":\"Qwen3.6-27B\",\"messages\":[}")
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(false)
+                .jsonPath("$.code").isEqualTo("VALIDATION_ERROR")
+                .jsonPath("$.message").isEqualTo("内部模型代理请求体不是合法 JSON");
     }
 
     @Test
