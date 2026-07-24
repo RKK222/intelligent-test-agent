@@ -34,17 +34,7 @@
 
 ## Mac 打包
 
-正式企业包只允许来自一个已提交且干净的 Git 工作树。`package-release.sh` 和
-`package-two-backend-complete.sh` 都会在读取制品或配置前执行该检查；只要存在已暂存、未暂存或未跟踪文件就直接失败，防止本地开发改动进入 JAR、前端、Docker 构建上下文或外层包。打包前先确认：
-
-```bash
-cd /Users/kaka/Desktop/intelligent-test-agent
-git status --short
-```
-
-预期无输出。需要保留当前工作区改动时，不得临时删除或把它们带入包；应在目标提交上创建干净的 detached worktree，并从该目录运行打包脚本。
-
-从干净工作树的仓库根目录执行：
+从仓库根目录执行：
 
 ```bash
 cd /Users/kaka/Desktop/intelligent-test-agent
@@ -66,10 +56,7 @@ VITE_TEST_AGENT_API_BASE_URL="" \
 deploy/internal/package-release.sh --zip-only --output-dir deploy/internal/dist
 ```
 
-`--zip-only` 会重新复制当前 `deploy/internal/` 和全部 `.agents/session-log*.md`，并强制检查四类二进制制品齐全；缺少任一文件都会失败，不会生成部分发布包。它同样要求干净工作树。
-
-每次生成新的内层 `test-agent-internal-release.zip` 后，脚本都会检查输出目录中已有的固定名外层包。若外层包内嵌 ZIP 与本次内层 ZIP 不同、外层 ZIP 无法读取，或其 SHA 缺失/无效，旧外层 ZIP 和 SHA 会被移动到隐藏目录
-`deploy/internal/dist/.stale-complete-bundles/<旧外层SHA>/`，不再留在交付根目录。该目录只用于追溯，任何文件都不得交付；看到根目录缺少固定名外层包时必须重新执行外层封装。
+`--zip-only` 会重新复制当前 `deploy/internal/` 和全部 `.agents/session-log*.md`，并强制检查四类二进制制品齐全；缺少任一文件都会失败，不会生成部分发布包。
 
 当前外部 MySQL 不需要离线镜像包。标准发布 ZIP 和三台应用节点配置包齐全后，只生成一个固定平台
 U 盘交付包：
@@ -95,7 +82,6 @@ test-agent-two-backend-complete.zip.sha256
 企业内部中转机每次只接收平台 ZIP 和 SHA。
 封装脚本可复用旧节点包：它只在临时副本中把旧前端路由键迁移为
 `TEST_AGENT_NGINX_SERVER_ROUTES`，并给两个后台补齐当前 HTTP Cookie、大文件预览/分片和 `14096-15095` 端口池等固定非密钥字段。源敏感包、密码和 token 不会被修改或输出；发现重复键、缺少必需路由或新旧路由键并存会直接失败。
-封装完成前还会按字节校验外层包内嵌的 `test-agent-internal-release.zip` 与 `--release-archive` 指定文件完全一致，并再次校验固定名外层 ZIP/SHA 对；任一校验失败都不会作为可交付结果报告。企业中转机只接收输出目录根部本次生成的固定名 ZIP 和 SHA，禁止从 `.stale-complete-bundles/` 取文件。
 
 交付物：
 
@@ -111,7 +97,7 @@ deploy/internal/dist/test-agent-opencode-worker_internal-linux-amd64.tar
 deploy/internal/dist/frontend/
 ```
 
-平台 ZIP 同时包含 `deploy/internal/` 下的配置模板、部署脚本、Nginx 模板、模型配置示例和本部署文档，在顶层 `SOURCE-COMMIT` 固化干净工作树的提交 SHA，并在 `.agents/` 下保留当前仓库全部 `session-log*.md` 会话日志作为交付追溯基线；外层完整包封装前会校验 `SOURCE-COMMIT` 与当前封装脚本来自同一提交，并逐一确认这些日志均已进入内层 ZIP。
+平台 ZIP 同时包含 `deploy/internal/` 下的配置模板、部署脚本、Nginx 模板、模型配置示例和本部署文档，并在 `.agents/` 下保留当前仓库全部 `session-log*.md` 会话日志作为交付追溯基线；外层完整包封装前会逐一校验这些日志均已进入内层 ZIP。
 仓库保留的 MySQL 容器脚本只作为其它隔离环境备用，不属于当前现场交付。企业服务器只执行校验、解压、`docker load` 和服务启停，不执行
 Maven、pnpm、Docker build 或联网下载。
 

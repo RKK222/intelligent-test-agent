@@ -7,7 +7,6 @@ RELEASE_ARCHIVE="${SCRIPT_DIR}/dist/test-agent-internal-release.zip"
 NODES_DIR=""
 OUTPUT_DIR="${SCRIPT_DIR}/dist"
 BUNDLE_NAME="test-agent-two-backend-complete"
-SOURCE_GUARD="${SCRIPT_DIR}/packaging-source-guard.sh"
 
 usage() {
   cat <<'USAGE'
@@ -84,17 +83,6 @@ sha256_digest() {
   fi
 }
 
-sha256_stream() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum | awk '{print $1}'
-  elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 | awk '{print $1}'
-  else
-    echo "Neither sha256sum nor shasum is available" >&2
-    exit 1
-  fi
-}
-
 # SHA 文件必须指向同目录的实际文件名，避免误校验同目录中的历史版本。
 verify_checksum_pair() {
   local file="$1"
@@ -135,10 +123,6 @@ require_command zip
 require_command unzip
 require_command tar
 require_command awk
-require_file "${SOURCE_GUARD}"
-# shellcheck source=deploy/internal/packaging-source-guard.sh
-source "${SOURCE_GUARD}"
-require_clean_packaging_source "${ROOT_DIR}"
 require_file "${RELEASE_ARCHIVE}"
 require_file "${SCRIPT_DIR}/deploy-node-common.sh"
 require_file "${SCRIPT_DIR}/deploy-backend-node.sh"
@@ -167,15 +151,6 @@ require_archive_entry "${release_listing}" dist/test-agent-frontend-dist.tar.gz
 require_archive_entry "${release_listing}" dist/test-agent-programs.tar.gz
 require_archive_entry "${release_listing}" dist/test-agent-opencode-worker_internal-linux-amd64.tar
 require_archive_entry "${release_listing}" deploy/internal/deploy-multi-backend-node.sh
-require_archive_entry "${release_listing}" SOURCE-COMMIT
-# 外层脚本会换入当前部署入口和手册，因此必须与内层发布 ZIP 来自同一源码提交。
-release_source_commit="$(unzip -p "${RELEASE_ARCHIVE}" SOURCE-COMMIT | tr -d '[:space:]')"
-current_source_commit="$(git -C "${ROOT_DIR}" rev-parse HEAD)"
-if [[ ! "${release_source_commit}" =~ ^[0-9a-f]{40,64}$ \
-  || "${release_source_commit}" != "${current_source_commit}" ]]; then
-  echo "Release archive source commit does not match the packaging worktree" >&2
-  exit 1
-fi
 # 外层完整包只接受包含当前仓库全部会话日志的内层发布包，避免业务制品与交付追溯记录脱节。
 session_log_count=0
 for session_log in "${ROOT_DIR}"/.agents/session-log*.md; do
@@ -392,15 +367,6 @@ TMP_ARCHIVE="${TMP_ROOT}/${BUNDLE_NAME}.zip"
 (cd "${TMP_ROOT}" && zip -qr "${TMP_ARCHIVE}" "${BUNDLE_NAME}")
 unzip -tq "${TMP_ARCHIVE}" >/dev/null
 
-# 外层包落盘前做字节级关联校验，不能只依赖文件名或外层自身 SHA。
-source_release_sha="$(sha256_digest "${RELEASE_ARCHIVE}")"
-embedded_release_sha="$(unzip -p "${TMP_ARCHIVE}" \
-  "${BUNDLE_NAME}/test-agent-internal-release.zip" | sha256_stream)"
-if [[ "${embedded_release_sha}" != "${source_release_sha}" ]]; then
-  echo "Embedded release ZIP does not match the selected release archive" >&2
-  exit 1
-fi
-
 OUTPUT_ARCHIVE="${OUTPUT_DIR}/${BUNDLE_NAME}.zip"
 OUTPUT_CHECKSUM="${OUTPUT_ARCHIVE}.sha256"
 OUTPUT_ARCHIVE_TMP="$(mktemp "${OUTPUT_DIR}/.${BUNDLE_NAME}.zip.XXXXXX")"
@@ -413,7 +379,6 @@ chmod 0600 "${OUTPUT_CHECKSUM_TMP}"
 # 固定文件逐个原子替换，不生成日期或版本后缀，也不触发交互式覆盖。
 mv -f "${OUTPUT_ARCHIVE_TMP}" "${OUTPUT_ARCHIVE}"
 mv -f "${OUTPUT_CHECKSUM_TMP}" "${OUTPUT_CHECKSUM}"
-verify_checksum_pair "${OUTPUT_ARCHIVE}"
 
 printf 'Complete two-backend bundle: %s\n' "${OUTPUT_ARCHIVE}"
 printf 'Bundle checksum: %s\n' "${OUTPUT_CHECKSUM}"

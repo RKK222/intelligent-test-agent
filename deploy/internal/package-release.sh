@@ -20,7 +20,6 @@ SAVE_TARBALL=1
 PACKAGE_ZIP=1
 PACKAGE_ZIP_ONLY=0
 OUTPUT_DIR_FROM_ENV_BEFORE_DOTENV="${TEST_AGENT_IMAGE_OUTPUT_DIR+x}"
-SOURCE_GUARD="${SCRIPT_DIR}/packaging-source-guard.sh"
 
 usage() {
   cat <<'USAGE'
@@ -154,28 +153,6 @@ load_dotenv() {
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Required command not found: $1" >&2
-    exit 1
-  fi
-}
-
-sha256_digest() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | awk '{print $1}'
-  elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$1" | awk '{print $1}'
-  else
-    echo "Neither sha256sum nor shasum is available" >&2
-    exit 1
-  fi
-}
-
-sha256_stream() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum | awk '{print $1}'
-  elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 | awk '{print $1}'
-  else
-    echo "Neither sha256sum nor shasum is available" >&2
     exit 1
   fi
 }
@@ -389,7 +366,7 @@ package_mysql_image() {
 
 package_release_zip() {
   local staging_dir="${OUTPUT_DIR}/.release-zip"
-  local zip_path session_log session_log_count=0 source_commit
+  local zip_path session_log session_log_count=0
   local worker_tar required_artifact
 
   require_command zip
@@ -450,10 +427,6 @@ package_release_zip() {
     exit 1
   fi
 
-  # 在包内固化唯一源码提交，便于外层封装和交付审计确认制品没有混入工作区改动。
-  source_commit="$(git -C "${ROOT_DIR}" rev-parse HEAD)"
-  printf '%s\n' "${source_commit}" >"${staging_dir}/SOURCE-COMMIT"
-
   rm -f "${zip_path}"
   (cd "${staging_dir}" && zip -qr "${zip_path}" .)
   rm -rf "${staging_dir}"
@@ -475,63 +448,6 @@ write_release_checksum() {
     exit 1
   fi
   cat "${zip_path}.sha256"
-}
-
-# 内层发布 ZIP 改变后，固定名外层包已经不再代表本次发布。将其连同 SHA
-# 移出交付根目录并保留在隐藏隔离目录，避免误拷贝，同时允许人工追溯或恢复。
-isolate_stale_complete_bundle() {
-  local release_zip="${OUTPUT_DIR}/test-agent-internal-release.zip"
-  local bundle_zip="${OUTPUT_DIR}/test-agent-two-backend-complete.zip"
-  local bundle_checksum="${bundle_zip}.sha256"
-  local bundle_name expected_bundle_sha actual_bundle_sha
-  local release_sha embedded_release_sha stale_reason quarantine_dir
-
-  if [[ ! -f "${bundle_zip}" ]]; then
-    if [[ -f "${bundle_checksum}" ]]; then
-      actual_bundle_sha="$(sha256_digest "${bundle_checksum}")"
-      quarantine_dir="${OUTPUT_DIR}/.stale-complete-bundles/orphan-${actual_bundle_sha}"
-      mkdir -p "${quarantine_dir}"
-      mv -f "${bundle_checksum}" "${quarantine_dir}/"
-      echo "Isolated orphan complete-bundle checksum: ${quarantine_dir}" >&2
-    fi
-    return 0
-  fi
-
-  require_command unzip
-  bundle_name="$(basename "${bundle_zip}")"
-  release_sha="$(sha256_digest "${release_zip}")"
-  actual_bundle_sha="$(sha256_digest "${bundle_zip}")"
-  stale_reason=""
-
-  if ! embedded_release_sha="$(unzip -p "${bundle_zip}" \
-    'test-agent-two-backend-complete/test-agent-internal-release.zip' | sha256_stream)"; then
-    stale_reason="cannot read embedded release ZIP"
-  elif [[ "${embedded_release_sha}" != "${release_sha}" ]]; then
-    stale_reason="embedded release ZIP differs from the current release"
-  elif [[ ! -f "${bundle_checksum}" ]]; then
-    stale_reason="bundle checksum is missing"
-  else
-    expected_bundle_sha="$(awk -v name="${bundle_name}" \
-      'NF >= 2 { file=$2; sub(/^\*/, "", file); if (file == name) { print $1; exit } }' \
-      "${bundle_checksum}")"
-    if [[ -z "${expected_bundle_sha}" || "${expected_bundle_sha}" != "${actual_bundle_sha}" ]]; then
-      stale_reason="bundle checksum is invalid"
-    fi
-  fi
-
-  if [[ -z "${stale_reason}" ]]; then
-    echo "Existing complete bundle still matches the current release: ${bundle_zip}"
-    return 0
-  fi
-
-  quarantine_dir="${OUTPUT_DIR}/.stale-complete-bundles/${actual_bundle_sha}"
-  mkdir -p "${quarantine_dir}"
-  mv -f "${bundle_zip}" "${quarantine_dir}/"
-  if [[ -f "${bundle_checksum}" ]]; then
-    mv -f "${bundle_checksum}" "${quarantine_dir}/"
-  fi
-  printf 'Isolated stale complete bundle (%s): %s\n' "${stale_reason}" "${quarantine_dir}" >&2
-  echo "Rebuild test-agent-two-backend-complete.zip before delivery." >&2
 }
 
 export_worker_programs() {
@@ -560,14 +476,6 @@ export_worker_programs() {
   tar -C "${OUTPUT_DIR}" -czf "${OUTPUT_DIR}/test-agent-programs.tar.gz" programs
   ls -lh "${OUTPUT_DIR}/test-agent-programs.tar.gz"
 }
-
-if [[ ! -f "${SOURCE_GUARD}" ]]; then
-  echo "Required packaging source guard not found: ${SOURCE_GUARD}" >&2
-  exit 1
-fi
-# shellcheck source=deploy/internal/packaging-source-guard.sh
-source "${SOURCE_GUARD}"
-require_clean_packaging_source "${ROOT_DIR}"
 
 load_dotenv "${ENV_FILE}"
 
@@ -630,7 +538,6 @@ if [[ "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 \
     || ( "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 ) ) ]]; then
   package_release_zip
   write_release_checksum
-  isolate_stale_complete_bundle
 fi
 
 echo

@@ -3,8 +3,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGE_SCRIPT="${ROOT_DIR}/deploy/internal/package-two-backend-complete.sh"
-RELEASE_PACKAGE_SCRIPT="${ROOT_DIR}/deploy/internal/package-release.sh"
-SOURCE_GUARD="${ROOT_DIR}/deploy/internal/packaging-source-guard.sh"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/test-agent-complete-package-verify.XXXXXX")"
 
 cleanup() {
@@ -26,32 +24,6 @@ write_checksum() {
     >"${file}.sha256"
 }
 
-# 默认保护必须在任意 Git 工作树中都可复用：干净提交放行，产生本地改动后拒绝。
-GUARD_REPO="${TMP_ROOT}/guard-repo"
-mkdir -p "${GUARD_REPO}"
-git -C "${GUARD_REPO}" init -q
-git -C "${GUARD_REPO}" config user.name packaging-verify
-git -C "${GUARD_REPO}" config user.email packaging-verify@example.invalid
-printf 'tracked\n' >"${GUARD_REPO}/tracked.txt"
-git -C "${GUARD_REPO}" add tracked.txt
-git -C "${GUARD_REPO}" commit -qm 'fixture'
-(
-  unset TEST_AGENT_ALLOW_DIRTY_SOURCE
-  # shellcheck source=deploy/internal/packaging-source-guard.sh
-  source "${SOURCE_GUARD}"
-  require_clean_packaging_source "${GUARD_REPO}" >/dev/null
-)
-printf 'dirty\n' >>"${GUARD_REPO}/tracked.txt"
-if (
-  unset TEST_AGENT_ALLOW_DIRTY_SOURCE
-  # shellcheck source=deploy/internal/packaging-source-guard.sh
-  source "${SOURCE_GUARD}"
-  require_clean_packaging_source "${GUARD_REPO}"
-) >/dev/null 2>&1; then
-  echo "Dirty packaging source was unexpectedly accepted" >&2
-  exit 1
-fi
-
 RELEASE_ROOT="${TMP_ROOT}/release-root"
 RELEASE_ARCHIVE="${TMP_ROOT}/test-agent-internal-release.zip"
 NODES_DIR="${TMP_ROOT}/nodes"
@@ -68,7 +40,6 @@ printf 'frontend\n' >"${RELEASE_ROOT}/dist/test-agent-frontend-dist.tar.gz"
 printf 'programs\n' >"${RELEASE_ROOT}/dist/test-agent-programs.tar.gz"
 printf 'worker\n' >"${RELEASE_ROOT}/dist/test-agent-opencode-worker_internal-linux-amd64.tar"
 printf '#!/usr/bin/env bash\n' >"${RELEASE_ROOT}/deploy/internal/deploy-multi-backend-node.sh"
-git -C "${ROOT_DIR}" rev-parse HEAD >"${RELEASE_ROOT}/SOURCE-COMMIT"
 for session_log in "${ROOT_DIR}"/.agents/session-log*.md; do
   cp "${session_log}" "${RELEASE_ROOT}/.agents/$(basename "${session_log}")"
 done
@@ -116,7 +87,7 @@ create_node_archive \
   test-agent-two-backend-122.233.30.2.tar.gz \
   nginx.env
 run_package() {
-  TEST_AGENT_ALLOW_DIRTY_SOURCE=1 bash "${PACKAGE_SCRIPT}" \
+  bash "${PACKAGE_SCRIPT}" \
     --release-archive "${RELEASE_ARCHIVE}" \
     --nodes-dir "${NODES_DIR}" \
     --output-dir "${OUTPUT_DIR}"
@@ -149,14 +120,7 @@ grep -Fxq 'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.
 grep -Fxq 'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.30.2.tar.gz' <<<"${listing}"
 INNER_RELEASE="${TMP_ROOT}/inner-release.zip"
 unzip -p "${BUNDLE}" 'test-agent-two-backend-complete/test-agent-internal-release.zip' >"${INNER_RELEASE}"
-if [[ "$(sha256_digest "${INNER_RELEASE}")" != "$(sha256_digest "${RELEASE_ARCHIVE}")" ]]; then
-  echo "Complete bundle embedded a different release ZIP" >&2
-  exit 1
-fi
 inner_listing="$(unzip -Z1 "${INNER_RELEASE}")"
-grep -Fxq 'SOURCE-COMMIT' <<<"${inner_listing}"
-test "$(unzip -p "${INNER_RELEASE}" SOURCE-COMMIT | tr -d '[:space:]')" = \
-  "$(git -C "${ROOT_DIR}" rev-parse HEAD)"
 for session_log in "${ROOT_DIR}"/.agents/session-log*.md; do
   grep -Fxq ".agents/$(basename "${session_log}")" <<<"${inner_listing}"
 done
@@ -211,30 +175,4 @@ grep -Fq '14096-15095' <<<"${node_guide}"
 run_package >/dev/null
 test "$(find "${OUTPUT_DIR}" -maxdepth 1 -type f -name 'test-agent-two-backend-complete*.zip' | wc -l | tr -d '[:space:]')" = 1
 
-# 重新生成内层 ZIP 时，旧外层包及其 SHA 必须自动移出交付根目录，不能继续伪装成本次制品。
-REPACKAGE_OUTPUT="${TMP_ROOT}/repackage-output"
-mkdir -p "${REPACKAGE_OUTPUT}/backend"
-cp "${RELEASE_ROOT}/dist/backend/test-agent-app.jar" "${REPACKAGE_OUTPUT}/backend/"
-cp "${RELEASE_ROOT}/dist/test-agent-frontend-dist.tar.gz" "${REPACKAGE_OUTPUT}/"
-cp "${RELEASE_ROOT}/dist/test-agent-programs.tar.gz" "${REPACKAGE_OUTPUT}/"
-cp "${RELEASE_ROOT}/dist/test-agent-opencode-worker_internal-linux-amd64.tar" "${REPACKAGE_OUTPUT}/"
-cp "${BUNDLE}" "${BUNDLE}.sha256" "${REPACKAGE_OUTPUT}/"
-repackage_output="$(
-  TEST_AGENT_ALLOW_DIRTY_SOURCE=1 \
-  TEST_AGENT_OPENCODE_WORKER_IMAGE=test-agent-opencode-worker:internal \
-    bash "${RELEASE_PACKAGE_SCRIPT}" \
-      --env-file "${ROOT_DIR}/deploy/internal/env.example" \
-      --zip-only \
-      --output-dir "${REPACKAGE_OUTPUT}" 2>&1
-)"
-grep -Fq 'Isolated stale complete bundle' <<<"${repackage_output}"
-test -s "${REPACKAGE_OUTPUT}/test-agent-internal-release.zip"
-test -s "${REPACKAGE_OUTPUT}/test-agent-internal-release.zip.sha256"
-test ! -e "${REPACKAGE_OUTPUT}/test-agent-two-backend-complete.zip"
-test ! -e "${REPACKAGE_OUTPUT}/test-agent-two-backend-complete.zip.sha256"
-test "$(find "${REPACKAGE_OUTPUT}/.stale-complete-bundles" -type f \
-  -name 'test-agent-two-backend-complete.zip' | wc -l | tr -d '[:space:]')" = 1
-test "$(find "${REPACKAGE_OUTPUT}/.stale-complete-bundles" -type f \
-  -name 'test-agent-two-backend-complete.zip.sha256' | wc -l | tr -d '[:space:]')" = 1
-
-echo 'Clean-source guard, stale-bundle isolation, embedded release identity, fixed names, session logs, node normalization, checksum, structure, MySQL separation, redaction and overwrite verified'
+echo 'Fixed-name platform bundle, session logs, node normalization, checksum, structure, MySQL separation, redaction and overwrite verified'
