@@ -34,7 +34,17 @@
 
 ## Mac 打包
 
-从仓库根目录执行：
+企业包以执行命令时的本地工作树为准：已提交和未提交、但会被 Maven、前端或 Docker 构建实际读取的本地代码都属于本次构建输入。打包前先合并确认需要交付的相关分支并检查状态；这些命令用于记录输入范围，不要求 `git status --short` 为空，也不得为打包擅自清理、stash 或切换到另一份源码：
+
+```bash
+cd /Users/kaka/Desktop/intelligent-test-agent
+git rev-parse HEAD
+git status --short
+git branch --no-merged main
+test -z "$(git diff --name-only --diff-filter=U)"
+```
+
+仍在其它活动 worktree 中且未提交的实验改动不会自动进入当前工作树；只有明确完成并合并到当前 `main` 的分支才进入企业包。确认范围后从当前仓库根目录执行：
 
 ```bash
 cd /Users/kaka/Desktop/intelligent-test-agent
@@ -68,6 +78,20 @@ deploy/internal/package-two-backend-complete.sh \
   --output-dir /path/to/usb-output
 
 ```
+
+每次重新生成内层 `test-agent-internal-release.zip` 后都必须重新执行外层封装，不能继续使用输出目录中的历史固定名外层包。封装完成后在 Mac 校验外层 SHA、ZIP 结构及内嵌内层 ZIP 与本次内层文件完全一致：
+
+```bash
+cd /Users/kaka/Desktop/intelligent-test-agent/deploy/internal/dist
+shasum -a 256 -c test-agent-two-backend-complete.zip.sha256
+unzip -tq test-agent-two-backend-complete.zip
+inner_sha="$(shasum -a 256 test-agent-internal-release.zip | awk '{print $1}')"
+embedded_sha="$(unzip -p test-agent-two-backend-complete.zip \
+  test-agent-two-backend-complete/test-agent-internal-release.zip | shasum -a 256 | awk '{print $1}')"
+test "${inner_sha}" = "${embedded_sha}"
+```
+
+最后一条必须返回 0；否则外层包不是本次内层发布，禁止交付。
 
 以后只使用以下固定名称，不添加日期、`v2`、`v3` 等后缀；重复打包会无交互覆盖旧文件：
 

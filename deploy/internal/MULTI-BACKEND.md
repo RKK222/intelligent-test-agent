@@ -93,10 +93,13 @@ nc -vz ai-code.sdc.enterprise 9070
 
 ## 3. Mac 打包与分发
 
-只构建一份版本，禁止两个后台分别打包：
+只构建一份版本，禁止两个后台分别打包。企业包以当前本地工作树为源码输入，允许明确要交付的未提交改动参与构建；打包前必须先合并已完成的相关分支、确认没有未解决冲突，并记录当前 HEAD 和工作树状态，不为打包擅自清理或切换源码：
 
 ```bash
 cd /Users/kaka/Desktop/intelligent-test-agent
+git rev-parse HEAD
+git status --short
+test -z "$(git diff --name-only --diff-filter=U)"
 VITE_TEST_AGENT_API_BASE_URL="" \
   deploy/internal/package-release.sh --output-dir deploy/internal/dist
 ```
@@ -109,6 +112,22 @@ VITE_TEST_AGENT_API_BASE_URL="" \
 deploy/internal/dist/test-agent-internal-release.zip
 deploy/internal/dist/test-agent-internal-release.zip.sha256
 ```
+
+内层 ZIP 重建后必须立即用本次内层 ZIP 和三台节点包重建固定名外层包；不能只校验历史外层包自身 SHA 后继续交付：
+
+```bash
+deploy/internal/package-two-backend-complete.sh \
+  --release-archive deploy/internal/dist/test-agent-internal-release.zip \
+  --nodes-dir /path/to/prepared-node-packages \
+  --output-dir deploy/internal/dist
+
+inner_sha="$(shasum -a 256 deploy/internal/dist/test-agent-internal-release.zip | awk '{print $1}')"
+embedded_sha="$(unzip -p deploy/internal/dist/test-agent-two-backend-complete.zip \
+  test-agent-two-backend-complete/test-agent-internal-release.zip | shasum -a 256 | awk '{print $1}')"
+test "${inner_sha}" = "${embedded_sha}"
+```
+
+最后一条必须返回 0，失败时停止分发并重新封装外层包。
 
 Mac 只负责构建；U 盘导入企业网后，中转机固定在 `~/Desktop/mimoagent/0709` 校验和分发，不得在中转机使用 `/data/0709`。`/data/0709` 只是 `.4/.114/.2` 目标服务器的接收目录。当前固定名外层包在中转机执行：
 

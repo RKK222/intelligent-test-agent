@@ -1754,3 +1754,18 @@
 - Result:
   - 大文件不再进入聊天 HTTP 请求，同名附件可在新旧对话重复上传，Excel 等非模型媒体文件改由智能体通过工作区工具读取；附件目录边界和既有工作区上传能力保持不变。
   - 仅调整既有 Run `parts` 适配语义和前端上传命名；未新增 HTTP 路径、RunEvent 类型、数据库/Flyway、SQL、权限、环境配置、依赖或 generated SDK，也未修改 OpenCode 源码。
+
+### 2026-07-24 - 按当前本地代码恢复企业打包口径
+
+- Why:
+  - 用户明确要求企业包继续以当前本地代码为准，允许本地改动参与构建，并要求不要修改现有打包脚本；此前“只允许干净提交”的保护方案不再适用。
+- What:
+  - 完整撤回 `7ba0f7708` 对内层/外层打包脚本、回归脚本和新增 guard 的修改，恢复既有打包实现；部署 README、多后台手册、全量执行手册和离线部署 skill 改为记录当前 HEAD/工作树、允许明确本地改动，并要求每次内层重建后手工校验外层内嵌 ZIP 的 SHA。
+  - 合并 `feature/frontend-beautify` 的领域模型文档和 `feat/optimize-sse-performance` 分支；后者的事件去重与 `v-memo` 已由当前主线演进实现，冲突保留主线版本。`codex/apple-design-preview` 仍有未提交文件且包含独立实验功能，本次不触碰、不合并。
+  - 修正最新附件提交遗漏的一条弹窗文案断言，使测试与“智能体按工作区路径读取”的当前实现一致，不改变运行时代码。
+- How:
+  - 合并前用 `git cherry`、三方 diff 和 `merge-tree` 检查独有提交；领域模型索引冲突保留 XXL 与领域模型两个入口，SSE 冲突确认主线已有更完整实现后选择主线。
+  - `runtime-reducer` 与 `FigmaChatPanel` 定向 Vitest 为 204 passed / 1 skipped；AI 文档校验和 `git diff --check` 通过。
+- Result:
+  - 当前 `main` 保留本地附件/Ctrl+S 等最新提交并纳入后续企业包，打包脚本与 `0094e264c` 后的既有实现一致；后续通过构建后 SHA/结构校验防止误交付旧外层包。
+  - 文档和合并涉及既有领域模型说明与前端实现历史，不新增本次 HTTP API、RunEvent、数据库/Flyway、SQL、安全配置、generated SDK、OpenCode 源码或环境配置变更。

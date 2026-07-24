@@ -4254,7 +4254,7 @@ describe("FigmaChatPanel", () => {
 
     expect(wrapper.find('[role="dialog"][aria-label="上传附件"]').exists()).toBe(true);
     expect(wrapper.text()).toContain("先上传到当前个人工作区，再随任务提交给智能体");
-    expect(wrapper.text()).toContain("上传完成后，文件会保留在工作区并作为本轮附件发送");
+    expect(wrapper.text()).toContain("上传完成后，文件会保留在工作区，智能体按工作区路径读取");
     expect(wrapper.emitted("download-files")).toBeUndefined();
   });
 

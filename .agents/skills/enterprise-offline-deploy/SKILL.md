@@ -10,6 +10,7 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 ## 固定前提
 
 - 打包机是 Mac，允许联网，用来拉 Maven、pnpm、Docker base image、npm/opencode 包等构建依赖。
+- 企业包以执行命令时的当前本地工作树为源码输入；允许用户明确要交付的未提交改动参与构建。打包前合并已完成的相关分支、记录 `git rev-parse HEAD` 和 `git status --short`、确认没有冲突，不得为打包擅自清理、stash、丢弃本地改动或切换到另一份源码。
 - 企业内部署环境完全不能联网，只能接收 Mac 打好的交付物。
 - 当前现场通过 U 盘把完整交付物导入企业内部中转机；中转机固定交付目录是 `~/Desktop/mimoagent/0709`，不得写成 `/data/0709`。后续 `scp` 从该目录发起；只有 `.20/.4/.114/.2` 等目标服务器的接收目录是 `/data/0709`。
 - Mac 只负责构建交付物。交付物已进入企业内部中转机后，不得再把现场传输步骤描述为“从 Mac scp”。
@@ -49,6 +50,7 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 7. 不要求用户回传真实数据库密码、token、Cookie、RSA 私钥或其他密钥；诊断输出只展示状态、长度或哈希。
 8. 中转机直接在 `~/Desktop/mimoagent/0709` 校验并向目标服务器 `scp`，不在中转机创建 `/data/0709`。只有目标服务器需要把本机已校验的明确文件复制到 `/data/0709` 时，才使用 `/bin/cp -f <源文件> /data/0709/`；禁止扩大为 `cp -rf` 覆盖目录。
 9. 后续双后台 U 盘外层交付固定为 `test-agent-two-backend-complete.zip` 和 `test-agent-two-backend-complete.zip.sha256`，包内顶层固定为 `test-agent-two-backend-complete/`；不再添加日期、`v2`、`v3` 或临时目录名。一个 ZIP 内必须包含内层标准发布 ZIP 和三台节点包，SHA 文件只作为这个唯一完整包的传输校验。
+10. 每次内层 ZIP 重建后都必须重新执行外层封装；Mac 交付前必须分别计算当前内层 ZIP 和外层内嵌 ZIP 的 SHA256 并确认相等，不能只凭历史外层 ZIP 自身 SHA 通过就继续分发。
 
 ## 标准目录
 
@@ -73,8 +75,13 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 
 ```bash
 cd /Users/kaka/Desktop/intelligent-test-agent
+git rev-parse HEAD
+git status --short
+test -z "$(git diff --name-only --diff-filter=U)"
 deploy/internal/package-release.sh
 ```
+
+`git status --short` 用于记录本地构建输入，不要求无输出；其中明确要交付的本地代码应直接参与本次构建。其它活动 worktree 的未提交实验改动不会自动进入当前包，必须由用户确认完成并合并后才能纳入。
 
 本地 Mac 默认输出到：
 
@@ -91,6 +98,7 @@ deploy/internal/package-release.sh --output-dir /path/to/dist
 以上命令只在外部联网 Mac 重新构建交付物时执行。包已通过 U 盘进入企业内部中转机后，现场步骤从中转机上的 SHA256 校验和 `scp` 开始。
 
 标准发布 ZIP 与三台节点包齐全后，使用 `deploy/internal/package-two-backend-complete.sh` 生成固定外层完整包。企业内部中转机每次只接收固定名 ZIP 和配套 SHA，不再按日期或版本改变命令。
+内层 ZIP 每次重建后必须重建外层包，并比较当前内层 ZIP 与外层内嵌 ZIP 的 SHA256；不一致时禁止进入企业内部中转机。
 
 ## 打包产物
 
