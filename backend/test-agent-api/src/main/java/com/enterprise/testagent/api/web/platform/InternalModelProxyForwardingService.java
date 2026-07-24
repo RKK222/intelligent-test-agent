@@ -108,7 +108,7 @@ public class InternalModelProxyForwardingService {
         this.streamIdleTimeout = requirePositive(streamIdleTimeout, "streamIdleTimeout");
     }
 
-    public Mono<Void> forward(ServerWebExchange exchange, String body, String traceId) {
+    public Mono<Void> forward(ServerWebExchange exchange, byte[] body, String traceId) {
         validateProxyAuth(exchange);
         String providerId = exchange.getRequest().getHeaders().getFirst(PROVIDER_HEADER);
         InternalModelProviderRuntimeConfig runtimeConfig = registry.requireRuntimeConfig(providerId);
@@ -120,7 +120,7 @@ public class InternalModelProxyForwardingService {
         Mono<Void> request = webClient.method(exchange.getRequest().getMethod() == null ? HttpMethod.POST : exchange.getRequest().getMethod())
                 .uri(URI.create(targetUrl))
                 .headers(headers -> applyForwardHeaders(headers, exchange, traceId, runtimeConfig.authToken()))
-                .body(BodyInserters.fromValue(body == null ? "" : body))
+                .body(BodyInserters.fromValue(body == null ? new byte[0] : body))
                 .exchangeToMono(response -> {
                     responseHeadersReady.tryEmitEmpty();
                     return writeResponse(exchange, response, converter);
@@ -214,9 +214,9 @@ public class InternalModelProxyForwardingService {
         }
     }
 
-    private void validateModel(String body) {
+    private void validateModel(byte[] body) {
         try {
-            JsonNode root = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+            JsonNode root = objectMapper.readTree(body == null || body.length == 0 ? new byte[] {'{', '}'} : body);
             JsonNode model = root.get("model");
             if (model == null || !model.isTextual() || model.asText().isBlank()) {
                 throw new PlatformException(ErrorCode.VALIDATION_ERROR, "内部模型代理请求缺少 model");

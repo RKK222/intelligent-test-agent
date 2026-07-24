@@ -5,6 +5,21 @@
 
 ## Entries
 
+### 2026-07-24 - 限制内部模型代理请求体为 2 MiB
+
+- Why:
+  - 企业定时任务在模型请求超过 Spring 默认 256 KiB 聚合上限后被错误映射为 500，且全局放大 WebFlux codec 会扩大 JVM 内存风险。
+- What:
+  - 内部模型代理改为端点专用 `2 MiB` 有界聚合：已知 Content-Length 超限时立即拒绝，未知长度仍由 `DataBufferUtils.join` 强制上限；请求体以 `byte[]` 校验并转发，避免额外整包 String 副本。
+  - 新增稳定 `413 PAYLOAD_TOO_LARGE` 及 `details.maxBytes=2097152`，同步 API 文档和 API 包说明，不记录或回显模型请求内容。
+- How:
+  - 定向 11 项通过，覆盖 300 KiB 正常转发、超过 2 MiB 统一 413、SSE 和首响应超时；全量 `mvn test` 在 720 项后因两个无关既有用例失败，独立复跑后定时重试用例通过，`OpencodeProcessConfigLinkServiceTest` 仍稳定失败。
+  - JDK 25 下完整构建并按 `.env.test`/`test` profile 重启 backend、opencode-manager、frontend，backend readiness 为 UP、frontend 3000 启动成功。
+- Result:
+  - 模型代理不再受全局 256 KiB codec 限制，单请求 JVM 聚合边界固定为 2 MiB；未修改 OpenCode 源码、环境配置、RunEvent、数据库/Flyway、SQL 或 generated SDK。
+- Next:
+  - 企业发布后观察 413 数量和模型请求大小分布；`OpencodeProcessConfigLinkServiceTest` 的现有失败另行排查。
+
 ### 2026-07-24 - 推送公共配置 master 到 Gitee
 
 - Why:

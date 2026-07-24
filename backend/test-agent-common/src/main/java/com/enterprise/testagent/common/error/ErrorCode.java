@@ -13,6 +13,7 @@ public enum ErrorCode {
     CONVERSATION_CONTEXT_EXPIRED(409, "会话运行上下文已过期"),
     API_GONE(410, "接口已作废"),
     RUN_DETAILS_EXPIRED(410, "运行详情已过期"),
+    PAYLOAD_TOO_LARGE(413, "请求体超过允许上限"),
     RATE_LIMITED(429, "请求过于频繁"),
     INTERNAL_ERROR(500, "服务器内部错误"),
     OPENCODE_BAD_GATEWAY(502, "TestAgent 服务响应异常"),

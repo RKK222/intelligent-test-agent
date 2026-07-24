@@ -11,6 +11,7 @@ import com.enterprise.testagent.domain.configuration.InternalModelProviderRuntim
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProviderRegistry;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
 import com.enterprise.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -32,7 +33,8 @@ class InternalModelProxyForwardingServiceTest {
     private static final String PROXY_KEY = "proxy-key";
     private static final String MODEL_TOKEN = "model-token";
     private static final String PROVIDER_ID = "qwen-prod";
-    private static final String REQUEST_BODY = "{\"model\":\"Qwen3.6-27B\",\"stream\":true}";
+    private static final String REQUEST_JSON = "{\"model\":\"Qwen3.6-27B\",\"stream\":true}";
+    private static final byte[] REQUEST_BODY = REQUEST_JSON.getBytes(StandardCharsets.UTF_8);
     private static final Duration SHORT_TIMEOUT = Duration.ofMillis(80);
 
     @Test
@@ -140,7 +142,7 @@ class InternalModelProxyForwardingServiceTest {
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + PROXY_KEY)
                 .header(InternalModelProxyForwardingService.PROVIDER_HEADER, providerId)
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(REQUEST_BODY);
+                .body(REQUEST_JSON);
         return MockServerWebExchange.from(request);
     }
 }

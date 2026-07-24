@@ -16,6 +16,7 @@ class ErrorCodeTest {
         assertThat(ErrorCode.CONVERSATION_CONTEXT_REQUIRED.httpStatus()).isEqualTo(409);
         assertThat(ErrorCode.CONVERSATION_CONTEXT_EXPIRED.httpStatus()).isEqualTo(409);
         assertThat(ErrorCode.RUN_DETAILS_EXPIRED.httpStatus()).isEqualTo(410);
+        assertThat(ErrorCode.PAYLOAD_TOO_LARGE.httpStatus()).isEqualTo(413);
         assertThat(ErrorCode.RATE_LIMITED.httpStatus()).isEqualTo(429);
         assertThat(ErrorCode.INTERNAL_ERROR.httpStatus()).isEqualTo(500);
         assertThat(ErrorCode.RUNTIME_STATE_UNAVAILABLE.httpStatus()).isEqualTo(503);

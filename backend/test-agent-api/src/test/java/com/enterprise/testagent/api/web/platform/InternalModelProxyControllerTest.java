@@ -5,6 +5,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.enterprise.testagent.api.web.common.GlobalExceptionHandler;
 import com.enterprise.testagent.domain.configuration.InternalModelProvider;
 import com.enterprise.testagent.domain.configuration.InternalModelProviderRepository;
 import com.enterprise.testagent.domain.configuration.InternalModelProviderRuntimeConfig;
@@ -21,6 +22,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -178,6 +180,52 @@ class InternalModelProxyControllerTest {
     }
 
     @Test
+    void forwardsRequestBodyAboveLegacyCodecLimitWithinTwoMebibytes() {
+        AtomicInteger receivedBytes = new AtomicInteger();
+        upstream.createContext("/enterprise/jdt/model/api/openai/v1/chat/completions", exchange -> {
+            receivedBytes.set(exchange.getRequestBody().readAllBytes().length);
+            byte[] response = "{}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE);
+            exchange.sendResponseHeaders(200, response.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(response);
+            }
+        });
+        upstream.start();
+        String request = largeRequest(300 * 1024);
+
+        clientForProvider(upstreamBaseUrl()).post()
+                .uri("/api/internal/platform/opencode-runtime/internal-model-proxy/v1/chat/completions")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + PROXY_KEY)
+                .header(InternalModelProxyForwardingService.PROVIDER_HEADER, PROVIDER_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(request)
+                .exchange()
+                .expectStatus().isOk();
+
+        assertThat(receivedBytes).hasValue(request.getBytes(StandardCharsets.UTF_8).length);
+    }
+
+    @Test
+    void rejectsRequestBodyAboveTwoMebibytesWithUnifiedPayloadTooLargeError() {
+        String request = largeRequest(InternalModelProxyController.MAX_REQUEST_BODY_BYTES + 1);
+
+        clientForProvider(upstreamBaseUrl()).post()
+                .uri("/api/internal/platform/opencode-runtime/internal-model-proxy/v1/chat/completions")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + PROXY_KEY)
+                .header(InternalModelProxyForwardingService.PROVIDER_HEADER, PROVIDER_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(request)
+                .exchange()
+                .expectStatus().isEqualTo(413)
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(false)
+                .jsonPath("$.code").isEqualTo("PAYLOAD_TOO_LARGE")
+                .jsonPath("$.details.maxBytes")
+                .isEqualTo(InternalModelProxyController.MAX_REQUEST_BODY_BYTES);
+    }
+
+    @Test
     void preservesDeepSeekNativeReasoningToolCallsAndComment() {
         upstream.createContext("/enterprise/jdt/model/api/openai/v1/chat/completions", exchange -> {
             exchange.getResponseHeaders().set(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_EVENT_STREAM_VALUE);
@@ -294,6 +342,7 @@ class InternalModelProxyControllerTest {
         downstreamContext.registerBean(
                 InternalModelProxyController.class,
                 () -> new InternalModelProxyController(service));
+        downstreamContext.registerBean(GlobalExceptionHandler.class);
         downstreamContext.refresh();
 
         ReactorHttpHandlerAdapter adapter = new ReactorHttpHandlerAdapter(
@@ -311,6 +360,13 @@ class InternalModelProxyControllerTest {
 
     private String upstreamBaseUrl() {
         return "http://127.0.0.1:" + upstream.getAddress().getPort();
+    }
+
+    /** 构造指定最小字节数的合法模型请求，覆盖 WebFlux 请求体聚合边界。 */
+    private String largeRequest(int minimumBytes) {
+        String prefix = "{\"model\":\"Qwen3.6-27B\",\"padding\":\"";
+        String suffix = "\"}";
+        return prefix + "x".repeat(Math.max(0, minimumBytes - prefix.length() - suffix.length())) + suffix;
     }
 
     @Configuration(proxyBeanMethods = false)
