@@ -5,6 +5,19 @@
 
 ## Entries
 
+### 2026-07-24 - 真实验收聊天附件上传与 Run 透传
+
+- Why:
+  - 上一轮只有组件、构建和无认证页面验证，尚未确认登录态工作区 RPC 落盘及真实 Run 请求的 file part。
+- What:
+  - 在已登录工作台上传 73 B 合成文本附件并发起只读任务；原始输出确认 Run 请求携带 `type=file/name/mimeType/content`，OpenCode 事件恢复出同名 file part 与 73 字符 source。
+- How:
+  - 文件实际落到个人 worktree 的 `.testagent/attachments/codex-attachment-check-20260724.txt`，根目录没有同名文件；上传前后 SHA-256 一致。验收后将测试文件移动到 `/tmp/codex-attachment-check-20260724.uploaded.txt` 保留可恢复副本。
+- Result:
+  - 附件选择、工作区专用目录、附件卡片、发送清空及智能体 Run 透传均通过真实链路验证；测试 Run 后续因当前模型 `opencode/hy3-free` 不存在而失败，与附件链路无关。
+- Next:
+  - 单独校正默认模型/模型目录映射后可补做模型回答终态；附件功能本身无需追加代码。
+
 ### 2026-07-24 - 接通聊天附件上传并隔离工作区目录
 
 - Why:
