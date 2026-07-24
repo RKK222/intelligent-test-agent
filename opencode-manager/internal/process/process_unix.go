@@ -24,6 +24,11 @@ func (OSStarter) Start(_ context.Context, spec StartSpec) (int, error) {
 	if err := command.Start(); err != nil {
 		return 0, err
 	}
+	// Unix 子进程必须由创建它的 manager 调用 Wait 回收，否则退出后会以 zombie 保留 PID，
+	// 使基于 signal 0 的停止确认误判为仍存活；异步等待保持 Start 的非阻塞语义。
+	go func() {
+		_ = command.Wait()
+	}()
 	return command.Process.Pid, nil
 }
 
