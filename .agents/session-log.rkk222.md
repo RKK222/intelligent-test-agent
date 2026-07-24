@@ -5,6 +5,21 @@
 
 ## Entries
 
+### 2026-07-24 - 审查公共区测试设计 Agent 流程重复
+
+### Why
+- 用户反馈公共区案例设计链路过长，需要定位重复的 Agent 调用、规约读取和检查项，并在不削弱质量门禁的前提下提出精简方向。
+
+### What
+- 确认当前自动流程为 orchestrator → analysis → generation → review，manual 模式还会再次调用 generation；四个 Agent 提示词共 526 行。
+- 定位三类主要重复：工作区/输出路径/skill-map 被各阶段重复读取，对象规约在分析、生成、审核三次读取，generation 全量自检与 review 独立门禁及 orchestrator 状态门禁职责重叠。
+
+### How
+- 对照公共配置 `ee8e978` 的四个测试设计 Agent、`test-design` Skill、阶段规则、模板和提交 `a773af7`；区分实际子 Agent 调用与同一 generation 内的方法 Skill A/B 调用。
+
+### Result
+- 建议保持“事实分析 → Phase A → 冻结/确认 → Phase B → 独立审核”的语义顺序，但把 analysis 与 generation 合并为一个设计执行 Agent，入口只解析/派发，Review 改为最小规则按需读取；自动模式可由 3 次子 Agent 调用降至 2 次。此次仅完成审查，未修改公共配置、应用代码、API、事件、数据库或环境配置。
+
 ### 2026-07-24 - 修复工作状态详情弹层被 Dock 裁剪
 
 ### Why
