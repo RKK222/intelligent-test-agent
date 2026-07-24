@@ -95,6 +95,7 @@ public class RunApplicationService {
     private static final Logger LOGGER = LoggerFactory.getLogger(RunApplicationService.class);
     private static final int ROUTING_CANDIDATE_LIMIT = 50;
     private static final String DEFAULT_OPENCODE_AGENT = "build";
+    private static final String WORKSPACE_ATTACHMENT_CONTEXT_TYPE = "workspace_attachment";
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final Set<String> LIVE_DIFF_TOOLS = Set.of("write", "edit", "apply_patch");
     private static final Duration TRANSPORT_ERROR_TERMINAL_GRACE = Duration.ofMillis(300);
@@ -2060,9 +2061,12 @@ public class RunApplicationService {
     }
 
     /**
-     * 将平台文件上下文转成 opencode file part，优先使用内联文本，其次使用前端给出的 URL，再兜底 workspace file URL。
+     * 将平台文件上下文转成 opencode part。聊天上传附件使用工作区路径文本，其他上下文继续保持原生 file part。
      */
     private AgentPromptPart toAgentFilePart(StartRunInput.PromptPart part, Workspace workspace) {
+        if (isWorkspaceAttachment(part)) {
+            return toWorkspaceAttachmentTextPart(part, workspace);
+        }
         String mime = firstText(part.mimeType(), "text/plain");
         String filename = firstText(part.name(), filenameFromPath(part.path()), "attachment");
         String text = sourceText(part);
@@ -2079,6 +2083,35 @@ public class RunApplicationService {
             return AgentPromptPart.file(workspaceFileUrl(workspace, part.path()), mime, filename, fileSource(part, null));
         }
         return null;
+    }
+
+    /**
+     * 工作区聊天附件已经通过平台文件 RPC 落盘，只向智能体暴露受控相对路径。
+     * 这样既不把大文件再次内联到 Run 请求，也不触发模型对 Excel 等媒体类型的能力校验。
+     */
+    private AgentPromptPart toWorkspaceAttachmentTextPart(StartRunInput.PromptPart part, Workspace workspace) {
+        if (part.path() == null) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "工作区附件缺少文件路径",
+                    Map.of("filename", firstText(part.name(), "attachment")));
+        }
+        String relativePath = workspaceRelativeFilePath(workspace, part.path());
+        String filename = firstText(part.name(), filenameFromPath(relativePath), "attachment");
+        String mime = firstText(part.mimeType(), "application/octet-stream");
+        LinkedHashMap<String, String> attachment = new LinkedHashMap<>();
+        attachment.put("filename", filename);
+        attachment.put("workspacePath", relativePath);
+        attachment.put("mimeType", mime);
+        String metadata = OBJECT_MAPPER.valueToTree(attachment).toString();
+        return AgentPromptPart.text(
+                "用户上传的附件已保存在当前工作区。附件信息：" + metadata
+                        + "\n请根据用户任务使用工作区工具读取或处理 workspacePath 指向的文件。该路径相对于当前工作目录。");
+    }
+
+    /** 判断 file part 是否来自聊天附件上传入口。 */
+    private boolean isWorkspaceAttachment(StartRunInput.PromptPart part) {
+        return WORKSPACE_ATTACHMENT_CONTEXT_TYPE.equals(part.source().get("contextType"));
     }
 
     /**
@@ -2171,6 +2204,29 @@ public class RunApplicationService {
      * 将 workspace 相对路径转成 file URL，并拒绝路径穿越到 workspace 根目录外。
      */
     private String workspaceFileUrl(Workspace workspace, String path) {
+        return workspaceFilePath(workspace, path).toUri().toString();
+    }
+
+    /**
+     * 返回规范化后的工作区相对文件路径，供智能体工具在当前工作目录内读取。
+     */
+    private String workspaceRelativeFilePath(Workspace workspace, String path) {
+        Path root = workspaceRoot(workspace);
+        Path target = workspaceFilePath(workspace, path);
+        String relativePath = root.relativize(target).toString().replace('\\', '/');
+        if (relativePath.isBlank()) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "工作区附件必须指向文件",
+                    Map.of("path", path, "workspaceId", workspace.workspaceId().value()));
+        }
+        return relativePath;
+    }
+
+    /**
+     * 解析并校验工作区文件路径，拒绝绝对路径和越出当前 Workspace 的路径。
+     */
+    private Path workspaceFilePath(Workspace workspace, String path) {
         Path root = workspaceRoot(workspace);
         Path target = root.resolve(path).toAbsolutePath().normalize();
         if (!target.startsWith(root)) {
@@ -2179,7 +2235,7 @@ public class RunApplicationService {
                     "文件上下文必须位于当前 Workspace 内",
                     Map.of("path", path, "workspaceId", workspace.workspaceId().value()));
         }
-        return target.toUri().toString();
+        return target;
     }
 
     /**

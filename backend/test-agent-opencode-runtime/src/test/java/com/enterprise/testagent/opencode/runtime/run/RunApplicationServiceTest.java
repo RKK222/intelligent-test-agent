@@ -1486,6 +1486,58 @@ class RunApplicationServiceTest {
     }
 
     @Test
+    void workspaceAttachmentUsesToolReadablePathInsteadOfNativeMediaPart() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                new FakeRunRepository(),
+                messages,
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository()),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
+
+        service.startRun(new StartRunInput(
+                        new SessionId("ses_1234567890abcdef"),
+                        "分析附件中的测试用例",
+                        List.of(new StartRunInput.PromptPart(
+                                "file",
+                                null,
+                                ".testagent/attachments/req_123-cases.xlsx",
+                                "cases.xlsx",
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                Map.of("contextType", "workspace_attachment"),
+                                null)),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null),
+                "trace_1234567890abcdef");
+
+        OpencodeStartRunCommand command = facade.startRunCommands.getFirst();
+        assertThat(command.parts()).extracting(OpencodePromptPart::type)
+                .containsExactly("text", "text");
+        assertThat(command.parts().get(1).text())
+                .contains("\"filename\":\"cases.xlsx\"")
+                .contains("\"workspacePath\":\".testagent/attachments/req_123-cases.xlsx\"")
+                .contains("使用工作区工具读取或处理");
+        assertThat(command.parts()).noneMatch(part -> "file".equals(part.type()));
+        assertThat(messages.saved.getFirst().partsJson())
+                .contains("\"type\":\"file\"")
+                .contains("\"contextType\":\"workspace_attachment\"");
+    }
+
+    @Test
     void legacyRunGeneratesOneDispatchMessageIdForRemoteUserAndRootScope() {
         FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
         FakeRunSessionScopeRepository scopes = new FakeRunSessionScopeRepository();

@@ -2451,7 +2451,8 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 - `clientRequestId` 由浏览器为一次发送生成；若 `contextToken` 失效，前端重新签发上下文并只重试一次，重试必须复用同一个 `clientRequestId`。服务端只以已成功写入 PostgreSQL 的唯一 Run 锚点确认幂等成功；Redis 中已声明但尚无锚点的 crash-window manifest 不会作为成功响应返回，短保护期后由恢复扫描清理。
 - 前端 HTTP 与 RunEvent SSE 原始报文观察副本在进入页面缓存前统一递归脱敏 `contextToken`，后端 API/Service 日志与错误详情也必须脱敏；`clientRequestId` 不是密钥，但不得被用来替代鉴权或 token 绑定校验。
 - `parts` 会下沉为当前 agent runtime 的 prompt parts；`opencode` 实现适配为 `prompt_async` 的 `text/file/agent` parts，`reference` part 会转换为可读 text part。
-- file part 带 `source.text` 或 `content` 时后端生成 `data:` URL；前端图片附件可直接提交 `url: "data:<mime>;base64,..."`。只有没有内联内容或 URL 时，后端才把 workspace 内路径转为 `file://` URL，越出 workspace 的路径返回 `VALIDATION_ERROR`。`source.startLine/endLine/contextType` 是可选前端来源元数据，当前用于工作区选区附件展示，旧客户端和旧后端可忽略。
+- file part 带 `source.text` 或 `content` 时后端生成 `data:` URL；前端图片附件可直接提交 `url: "data:<mime>;base64,..."`。没有内联内容或 URL 的普通工作区上下文会把 workspace 内路径转为 `file://` URL，越出 workspace 的路径返回 `VALIDATION_ERROR`。`source.startLine/endLine/contextType` 是可选前端来源元数据，当前用于工作区选区和上传附件展示，旧客户端和旧后端可忽略。
+- 聊天上传附件固定提交 `source.contextType="workspace_attachment"`、工作区相对 `path`、原始 `name` 和 `mimeType`，不提交 `content` 或 `data:` URL。后端校验路径仍位于当前 Workspace 后，把它转换成包含文件名、MIME 和工作区相对路径的 text part，提示智能体使用工作区工具读取；不把 Excel 等二进制文件作为模型原生媒体输入。附件原始 file part 继续写入平台用户消息 `partsJson`，供实时和历史 Timeline 展示附件 chip。
 - `model` 使用 `providerId/modelId` 字符串格式；Java 端只解析并透传给 opencode，不再读取数据库模型目录做校验、默认模型回退或 `/global/config` provider 同步。前端模型和供应商下拉始终以 opencode 配置文件的 `/api/model`、`/api/provider` 原生结果为准。
 - Agent/Model/Variant/Mode 属于运行态选择，不代表 Provider/server/settings 配置；其中 `mode` 当前只保留为平台字段，opencode `PromptInput` 不支持该字段，因此 opencode runtime 不写入 `prompt_async` 请求体。
 

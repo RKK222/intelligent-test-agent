@@ -7,9 +7,9 @@ import {
   AgentChat,
   buildComposerPromptParts,
   createInitialAgentChatRuntimeState,
-  fileToPromptAttachment,
   promptPartsForUserDisplay,
   reduceAgentChatRuntime,
+  workspaceFileToPromptAttachment,
   type ComposerAttachment
 } from "@test-agent/agent-chat";
 import {
@@ -199,6 +199,7 @@ import {
   text,
   workspaceRequirementReferences,
   workspaceRequirementStageDirectories,
+  workspaceAttachmentTargetPath,
   workspaceLoadIsCurrent,
   type AutoRetryRunDraft,
   type OpencodeAvailabilityState,
@@ -4903,6 +4904,7 @@ type WorkspaceUploadResult = {
 };
 
 type WorkspaceUploadOptions = {
+  resolveTargetPath?: (file: File, index: number) => string;
   onUploaded?: (file: File, targetPath: string) => Promise<void> | void;
 };
 
@@ -4940,7 +4942,8 @@ async function uploadWorkspaceFiles(
       };
       try {
         // 浏览器通常只提供 basename；再次截断路径分隔符，避免构造 File 时夹带目录片段。
-        const targetPath = workspacePathInDirectory(directory, fileNameOf(file.name));
+        const targetPath = options.resolveTargetPath?.(file, index)
+          ?? workspacePathInDirectory(directory, fileNameOf(file.name));
         await api.uploadWorkspaceFile(workspaceId, targetPath, file, (progress) => {
           if (!workspaceUploadOverlay.value) return;
           workspaceUploadOverlay.value = {
@@ -4997,7 +5000,7 @@ async function handleUploadFiles(directory: string, files: File[]) {
   }
 }
 
-/** 聊天附件落到专用工作区目录，上传成功后复用 agent-chat 的 file PromptPart。 */
+/** 聊天附件落到专用工作区目录，Run 只携带唯一物理路径和原始展示名。 */
 async function handleChatAttachmentUpload(files: File[]) {
   if (!selectedWorkspace.value || !currentPersonalWorkspaceId.value) {
     feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再上传聊天附件。" };
@@ -5009,8 +5012,13 @@ async function handleChatAttachmentUpload(files: File[]) {
     // 目录创建仍走现有工作区文件 WebSocket RPC；createDirectories 可安全处理已存在目录。
     await api.createDirectory(selectedWorkspace.value.workspaceId, CHAT_ATTACHMENT_DIRECTORY);
     const result = await uploadWorkspaceFiles(CHAT_ATTACHMENT_DIRECTORY, files, {
-      onUploaded: async (file) => {
-        const attachment = await fileToPromptAttachment(file);
+      resolveTargetPath: (file) => workspaceAttachmentTargetPath(
+        CHAT_ATTACHMENT_DIRECTORY,
+        file.name,
+        createClientRequestId()
+      ),
+      onUploaded: (file, targetPath) => {
+        const attachment = workspaceFileToPromptAttachment(file, targetPath);
         if (!chatAttachments.value.some((item) => item.id === attachment.id)) {
           chatAttachments.value = [...chatAttachments.value, attachment];
         }

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildComposerPromptParts, fileToPromptAttachment } from "../src/prompt-parts";
+import {
+  buildComposerPromptParts,
+  fileToPromptAttachment,
+  workspaceFileToPromptAttachment
+} from "../src/prompt-parts";
 
 describe("prompt part attachments", () => {
   it("reads text files as inline file prompt parts", async () => {
@@ -49,5 +53,37 @@ describe("prompt part attachments", () => {
       { type: "text", text: "run tests" },
       attachment.part
     ]);
+  });
+
+  it("keeps large workspace files as path-only prompt parts", () => {
+    const file = new File(
+      [new Uint8Array(602 * 1024)],
+      "cases.xlsx",
+      {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        lastModified: 3
+      }
+    );
+
+    const attachment = workspaceFileToPromptAttachment(
+      file,
+      ".testagent/attachments/req_123-cases.xlsx"
+    );
+
+    expect(attachment).toEqual({
+      id: "workspace:.testagent/attachments/req_123-cases.xlsx",
+      name: "cases.xlsx",
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      size: 602 * 1024,
+      part: {
+        type: "file",
+        path: ".testagent/attachments/req_123-cases.xlsx",
+        name: "cases.xlsx",
+        mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        source: { contextType: "workspace_attachment" }
+      }
+    });
+    expect(attachment.part).not.toHaveProperty("content");
+    expect(attachment.part).not.toHaveProperty("url");
   });
 });

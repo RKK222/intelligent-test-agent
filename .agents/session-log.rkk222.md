@@ -1723,3 +1723,20 @@
 - Result:
   - 后续正式企业包必须从目标提交的干净 clone 或 detached worktree 构建；本地开发改动不会被静默打入包，旧外层包也不会继续伪装成本次交付物。
   - 仅修改打包脚本、回归测试和部署文档；未修改业务代码、HTTP API、RunEvent、数据库/Flyway、SQL、性能、安全协议、generated SDK、OpenCode 源码或环境配置。
+
+### 2026-07-24 - 修复聊天附件大文件、重复上传与 Excel 媒体报错
+
+- Why:
+  - 聊天附件上传后又被浏览器读回并内联到 Run 请求，602K 文件会放大请求体；Excel/Word 等 MIME 被 OpenCode 当作模型原生媒体后，供应商返回 `functionality not supported`。
+  - 附件固定使用原文件名写入 `.testagent/attachments`，新建对话再次上传同名文件会命中已存在错误。
+- What:
+  - 继续复用既有工作区文件 WebSocket 分片上传，将聊天附件以请求 ID 前缀生成唯一物理名，仍保存在个人 worktree 的 `.testagent/attachments`，不写个人工作区根目录；PromptPart 保留原始展示名。
+  - 工作区已上传附件只提交相对路径、原始文件名、MIME 与 `workspace_attachment` 来源，不再携带正文或 `data:` URL；后端校验路径位于当前 Workspace 后，转换为提示智能体使用工作区工具读取的 text part，平台历史消息仍保留原 file part 展示附件 chip。
+  - 补充 602K Excel 路径-only、同名唯一落盘和后端不发送原生媒体 part 的回归测试，并同步 runtime、agent-web、agent-chat 与 HTTP API 文档。
+- How:
+  - 前端两个定向 Vitest 文件 94 项通过，agent-web typecheck 与生产 build 通过；后端 `RunApplicationServiceTest` 69 项通过，`git diff --check` 通过。
+  - 使用未修改的 `.env.test` 和 `test` profile 重启 backend、opencode-manager、frontend，health/readiness 为 UP、前端 3000 返回 200、Manager 连接正常。
+  - 真实创建平台会话并用已上传 Excel 路径启动 Run，请求体仅 557 bytes，后端下发两个 text part、无 file/data URL，Run `run_95bbaecd1391419598a1cf753f6c9ec3` 最终 `SUCCEEDED`。
+- Result:
+  - 大文件不再进入聊天 HTTP 请求，同名附件可在新旧对话重复上传，Excel 等非模型媒体文件改由智能体通过工作区工具读取；附件目录边界和既有工作区上传能力保持不变。
+  - 仅调整既有 Run `parts` 适配语义和前端上传命名；未新增 HTTP 路径、RunEvent 类型、数据库/Flyway、SQL、权限、环境配置、依赖或 generated SDK，也未修改 OpenCode 源码。

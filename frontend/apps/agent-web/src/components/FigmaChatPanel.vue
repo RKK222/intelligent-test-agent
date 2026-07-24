@@ -5928,11 +5928,11 @@ function onCompositionEnd() {
           <span class="figma-chat-attachment-drop-title"
             >选择或拖拽文件到这里</span
           >
-          <span class="figma-chat-attachment-drop-hint">支持多文件；同名文件按工作区重名规则处理。</span>
+          <span class="figma-chat-attachment-drop-hint">支持多文件；同名文件可重复上传并分别保存。</span>
         </button>
         <div class="figma-chat-attachment-note">
           <span class="figma-chat-attachment-disabled-dot" aria-hidden="true" />
-          上传完成后，文件会保留在工作区并作为本轮附件发送。
+          上传完成后，文件会保留在工作区，智能体按工作区路径读取。
         </div>
       </section>
     </div>

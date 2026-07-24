@@ -45,6 +45,7 @@ import {
   shouldFailExhaustedRetry,
   workspaceRequirementReferences,
   workspaceRequirementStageDirectories,
+  workspaceAttachmentTargetPath,
   workspaceLoadIsCurrent
 } from "../src/components/workbench-utils";
 import type { FileTreeEntry } from "@test-agent/shared-types";
@@ -75,6 +76,33 @@ describe("filterWorkspaceRootEntries", () => {
       { path: "src", name: "src", type: "directory" }
     ]);
     expect(filterWorkspaceRootEntries("config", entries)).toEqual(entries);
+  });
+});
+
+describe("workspaceAttachmentTargetPath", () => {
+  it("isolates repeated names under the attachment directory", () => {
+    const first = workspaceAttachmentTargetPath(
+      ".testagent/attachments",
+      "cases.xlsx",
+      "req_first"
+    );
+    const second = workspaceAttachmentTargetPath(
+      ".testagent/attachments",
+      "cases.xlsx",
+      "req_second"
+    );
+
+    expect(first).toBe(".testagent/attachments/req_first-cases.xlsx");
+    expect(second).toBe(".testagent/attachments/req_second-cases.xlsx");
+    expect(second).not.toBe(first);
+  });
+
+  it("drops browser-supplied directory segments and unsafe storage id characters", () => {
+    expect(workspaceAttachmentTargetPath(
+      ".testagent/attachments/",
+      "nested\\cases.xlsx",
+      "req:third/value"
+    )).toBe(".testagent/attachments/reqthirdvalue-cases.xlsx");
   });
 });
 

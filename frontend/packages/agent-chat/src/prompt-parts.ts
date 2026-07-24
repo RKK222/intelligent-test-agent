@@ -28,6 +28,29 @@ export async function fileToPromptAttachment(file: File): Promise<ComposerAttach
   };
 }
 
+/**
+ * 已上传到工作区的聊天附件只传递路径元数据，禁止再次读取浏览器 File 并内联到 Run 请求。
+ * 后端会把 workspace_attachment 转成工具可读的工作区引用，避免大文件请求和模型媒体类型限制。
+ */
+export function workspaceFileToPromptAttachment(file: File, workspacePath: string): ComposerAttachment {
+  const mimeType = file.type || "application/octet-stream";
+  return {
+    id: `workspace:${workspacePath}`,
+    name: file.name,
+    mimeType,
+    size: file.size,
+    part: {
+      type: "file",
+      path: workspacePath,
+      name: file.name,
+      mimeType,
+      source: {
+        contextType: "workspace_attachment"
+      }
+    }
+  };
+}
+
 export function buildComposerPromptParts(prompt: string, attachments: ComposerAttachment[] = []): PromptPart[] {
   const parts: PromptPart[] = [];
   const trimmed = prompt.trim();
