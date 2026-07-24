@@ -40,6 +40,14 @@
 3. Persistence 映射对象只在持久化模块内部使用。
 4. API 请求和响应 DTO 变更必须更新 `docs/api/http-api.md`。
 
+## 跨进程时间戳与运行态身份
+
+1. 跨 Java、manager、数据库或其它进程传递的事件时间必须先确定唯一权威来源，并区分“事件实际发生时间”和“接收方观察时间”；两个语义需要同时保留时使用不同字段，禁止用接收方 `Instant.now()`、数据库写入时间或回包到达时间冒充远端事件时间。
+2. 用户 opencode 进程身份固定由 `linuxServerId + containerId + port + PID + startedAt` 共同确定，其中 `startedAt` 只能来自 manager 实际创建进程时写入的 state。`start/restart` 回包必须携带该值，或由 `OpencodeProcessStartupService` 按回包 PID 查询 manager state 后取得；缺失时保持失败关闭，禁止由 Java 本机时钟补造。否则即使 PID 相同，几毫秒的双时间源偏差也会让 rollout、dispose 和端口复用保护永久无法收敛。
+3. 协议、Java `Instant` 和数据库时间列之间必须明确 UTC/会话时区及持久化精度。当前 PostgreSQL 时间持久化按微秒比较，允许的处理只有对同一个权威时间做格式转换和精度归一化；精度截断不能修复两个独立时钟产生的值，也不能用宽松时间窗口替代权威身份。
+4. 涉及 PID 复用、进程重启、rollout/dispose 或跨进程租约的实现不得只比较端口、PID 或模糊时间。若兼容旧协议确需有界容差，必须同时核对服务器、容器、端口、PID 和用户归属，明确容差上限及退场条件，并覆盖“同端口新生命周期不得命中旧身份”的测试。
+5. 相关测试必须故意让 manager 启动时间与 Java 接收回包时间不同，并覆盖重启、时区转换、纳秒到微秒持久化和 PID/端口复用；仅使用同一个 fake clock 生成两侧时间，不能证明身份链路正确。
+
 ## 错误处理
 
 所有后端错误必须转换为平台统一格式，不把任意 Java 异常直接返回给前端，不泄露堆栈、SQL、密钥、token、内部路径和第三方原始敏感错误。generated SDK 异常必须在 `test-agent-opencode-client` 转换为平台异常。

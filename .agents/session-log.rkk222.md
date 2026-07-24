@@ -5,6 +5,21 @@
 
 ## Entries
 
+### 2026-07-24 - 固化跨进程启动时间的单一权威源规范
+
+### Why
+- 应用 Agent/Skill rollout 在目标服务器持续报“目标用户进程身份尚未收敛”；现场核对确认 manager 与数据库的端口、PID 相同，但 `startedAt` 相差约 2.8 毫秒，重启仍会复现。
+
+### What
+- 在入口规范和后端规范中明确：运行态身份的事件时间必须来自事件发生方，opencode `startedAt` 以 manager state 为唯一权威值，禁止用 Java 收到启动回包后的 `Instant.now()` 补造。
+- 补充时区/微秒精度、PID 复用、旧协议有界兼容及双时间源测试要求，并加入完成前自检项。
+
+### How
+- 对照 `OpencodeProcessStartupService`、manager 启动回包和 `PublicAgentConfigRolloutService` 的精确身份匹配，确认当前启动结果只返回 PID，Java 随后独立取时，微秒归一化无法消除两个时间源的真实偏差。
+
+### Result
+- 本次只固化项目规范和诊断结论，未修改运行时代码、API、事件、数据库/Flyway、SQL、环境配置、generated SDK 或 OpenCode 源码；生产缺陷及现有 rollout 恢复仍待后续实现和现场处置。
+
 ### 2026-07-24 - 重打精简版公共 Agent/Skill 独立包
 
 ### Why
