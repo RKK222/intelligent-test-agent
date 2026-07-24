@@ -1766,6 +1766,8 @@
 - How:
   - 合并前用 `git cherry`、三方 diff 和 `merge-tree` 检查独有提交；领域模型索引冲突保留 XXL 与领域模型两个入口，SSE 冲突确认主线已有更完整实现后选择主线。
   - `runtime-reducer` 与 `FigmaChatPanel` 定向 Vitest 为 204 passed / 1 skipped；AI 文档校验和 `git diff --check` 通过。
+  - 使用 JDK 25、未修改的 `deploy/internal/.env` 和命令行空 `VITE_TEST_AGENT_API_BASE_URL` 全量构建后端、前端、programs、worker 与内层 ZIP；双后台固定名封包回归、内外层 SHA 关联、4 类核心制品逐字节比对、JAR/RSA/160 个依赖和 worker `linux/amd64` / OpenCode 1.18.4 校验通过。
 - Result:
   - 当前 `main` 保留本地附件/Ctrl+S 等最新提交并纳入后续企业包，打包脚本与 `0094e264c` 后的既有实现一致；后续通过构建后 SHA/结构校验防止误交付旧外层包。
+  - 固定名 `test-agent-two-backend-complete.zip` 及 SHA 已基于当前本地代码和 `.4/.114/.2` 节点包重新生成；最终会话日志通过 `--zip-only` 进入内层后，外层按同一节点包再次覆盖封装。
   - 文档和合并涉及既有领域模型说明与前端实现历史，不新增本次 HTTP API、RunEvent、数据库/Flyway、SQL、安全配置、generated SDK、OpenCode 源码或环境配置变更。
