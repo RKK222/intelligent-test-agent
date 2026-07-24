@@ -35,6 +35,13 @@ const emit = defineEmits<{
 }>();
 
 const rootRef = ref<HTMLElement | null>(null);
+const isDocked = ref(false);
+const popoverPosition = ref<{
+  left: number;
+  width: number;
+  top?: number;
+  bottom?: number;
+} | null>(null);
 const placement = ref<"above" | "below">("below");
 
 const reasoningParts = computed(() =>
@@ -46,6 +53,18 @@ const reasoningParts = computed(() =>
 const selectedEvent = computed(() => props.row.events.find((event) => event.key === props.openEventKey));
 const selectedToolParts = computed(() => toolPartsForEvent(selectedEvent.value));
 const popoverId = computed(() => `oc-work-status-popover-${props.row.key.replace(/[^a-zA-Z0-9_-]/g, "-")}`);
+const popoverStyle = computed<Record<string, string>>(() => {
+  const position = popoverPosition.value;
+  if (!isDocked.value || !position) return {};
+  return {
+    position: "fixed",
+    left: `${position.left}px`,
+    width: `${position.width}px`,
+    boxSizing: "border-box",
+    ...(position.top !== undefined ? { top: `${position.top}px` } : {}),
+    ...(position.bottom !== undefined ? { bottom: `${position.bottom}px` } : {})
+  };
+});
 const animatedDivider = computed(() => props.row.isLatest && (props.row.status === "running" || props.row.status === "retry"));
 // 任何新用户轮次都会改变该值，让所有历史 reasoning 展开态一起回到收起状态。
 const detailResetKey = computed(() => {
@@ -82,16 +101,23 @@ function eventAriaLabel(event: WorkStatusEventGroup): string {
 function updatePlacement(): void {
   const root = rootRef.value;
   if (!root || !selectedEvent.value) return;
+  isDocked.value = Boolean(root.closest(".oc-work-status-dock"));
   const rect = root.getBoundingClientRect();
   const viewport = root.closest(".figma-chat-scroll, .ta-thread-viewport");
   const viewportRect = viewport?.getBoundingClientRect();
-  const top = viewportRect?.top ?? 0;
-  const bottom = viewportRect?.bottom ?? window.innerHeight;
+  const top = isDocked.value ? 0 : viewportRect?.top ?? 0;
+  const bottom = isDocked.value ? window.innerHeight : viewportRect?.bottom ?? window.innerHeight;
   const availableAbove = Math.max(0, rect.top - top);
   const availableBelow = Math.max(0, bottom - rect.bottom);
   placement.value = availableBelow >= Math.min(360, window.innerHeight * 0.5) || availableBelow >= availableAbove
     ? "below"
     : "above";
+  // Dock 自身是可滚动容器，详情向上展开时会被 overflow 裁剪；改用视口坐标固定在 Dock 外层显示。
+  popoverPosition.value = isDocked.value
+    ? placement.value === "above"
+      ? { left: rect.left, width: rect.width, bottom: window.innerHeight - rect.top + 6 }
+      : { left: rect.left, width: rect.width, top: rect.bottom + 6 }
+    : null;
 }
 
 function onDocumentPointerDown(event: PointerEvent): void {
@@ -113,10 +139,14 @@ watch(
       nextTick(updatePlacement);
       document.addEventListener("pointerdown", onDocumentPointerDown);
       document.addEventListener("keydown", onDocumentKeyDown);
+      window.addEventListener("resize", updatePlacement);
+      window.addEventListener("scroll", updatePlacement, true);
       return;
     }
     document.removeEventListener("pointerdown", onDocumentPointerDown);
     document.removeEventListener("keydown", onDocumentKeyDown);
+    window.removeEventListener("resize", updatePlacement);
+    window.removeEventListener("scroll", updatePlacement, true);
   },
   { immediate: true }
 );
@@ -124,6 +154,8 @@ watch(
 onBeforeUnmount(() => {
   document.removeEventListener("pointerdown", onDocumentPointerDown);
   document.removeEventListener("keydown", onDocumentKeyDown);
+  window.removeEventListener("resize", updatePlacement);
+  window.removeEventListener("scroll", updatePlacement, true);
 });
 </script>
 
@@ -179,6 +211,7 @@ onBeforeUnmount(() => {
       role="dialog"
       :aria-label="`${selectedEvent.label}详情`"
       :class="['oc-work-status__popover', `is-${placement}`]"
+      :style="popoverStyle"
     >
       <div class="oc-work-status__popover-title">{{ selectedEvent.label }}详情</div>
       <div class="oc-work-status__popover-body">

@@ -132,6 +132,37 @@ describe("OpencodeTimeline", () => {
     }
   });
 
+  it("keeps docked event details outside the dock overflow clipping boundary", async () => {
+    const dock = document.createElement("div");
+    dock.id = "test-docked-event-popover";
+    document.body.appendChild(dock);
+    try {
+      const state = createOpencodeLikeState({
+        messages: [
+          userMessage("msg_user_1", "查找文件"),
+          assistantMessage("msg_assistant_1", [toolPart("part_read", "read", { filePath: "README.md" })])
+        ],
+        running: true
+      });
+      const { container } = render(OpencodeTimeline, {
+        props: { state, workStatusDockTarget: dock }
+      });
+      await nextTick();
+
+      const eventButton = dock.querySelector("[data-testid='oc-work-status-event-explore']") as HTMLElement;
+      await fireEvent.click(eventButton);
+      await nextTick();
+
+      const popover = container.ownerDocument.querySelector("[data-testid='oc-work-status-popover']") as HTMLElement;
+      expect(popover).toBeTruthy();
+      expect(popover.style.position).toBe("fixed");
+      expect(popover.style.width).not.toBe("");
+      expect(popover.style.top !== "" || popover.style.bottom !== "").toBe(true);
+    } finally {
+      dock.remove();
+    }
+  });
+
   it("moves the latest completed status after the final assistant output while keeping diff in the dock", async () => {
     const dock = document.createElement("div");
     dock.id = "test-completed-work-status-dock";

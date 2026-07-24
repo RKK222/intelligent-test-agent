@@ -5,6 +5,22 @@
 
 ## Entries
 
+### 2026-07-24 - 修复工作状态详情弹层被 Dock 裁剪
+
+### Why
+- 工作状态行的“探索/技能/待办/命令行”按钮点击后会进入 `is-active`，但输入框上方 Dock 使用 `overflow-y: auto`，详情层向上展开时被 Dock 顶部裁掉。
+
+### What
+- `WorkStatusRow.vue` 为 Dock 内详情层增加视口固定定位和 resize/scroll 重定位；普通时间线详情仍沿用原有相对定位。
+- 增加 Dock 弹层回归测试，并同步 `frontend/packages/agent-chat/README.md` 的交互说明。
+
+### How
+- 定向 `opencode-timeline` 与 `FigmaChatPanel` 测试共 183 项通过（1 项既有跳过）；前端全量 Vitest 为 1617 passed / 1 skipped。
+- agent-web typecheck、生产 build、`git diff --check` 通过；已在 `http://127.0.0.1:3000/` 登录态点击“探索”确认详情可见，backend health/readiness 均为 UP。
+
+### Result
+- Dock 内事件详情不再被滚动边界裁剪；未涉及 API、RunEvent、数据库、环境配置、性能或安全契约。
+
 ### 2026-07-24 - 排查企业用户 Ctrl+S 保存不一致
 
 - Why:
