@@ -4,11 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.enterprise.testagent.common.error.ErrorCode;
+import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTask;
+import com.enterprise.testagent.domain.nightexecution.NightExecutionScheduleMode;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskId;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskRepository;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskStatus;
@@ -59,6 +63,48 @@ class NightExecutionRunLifecycleServiceTest {
         assertThat(updated.getValue().runId()).isEqualTo(run.runId());
         verify(tasks).deleteSessionLock(task.sessionId(), task.taskId());
         verify(tasks).releaseSlot(task.slotStart(), now);
+    }
+
+    @Test
+    void acceptedCustomRunReleasesSessionLockWithoutTouchingNightCapacity() {
+        Instant now = Instant.parse("2026-07-18T13:02:00Z");
+        NightExecutionTask task = dispatchingTask(NightExecutionScheduleMode.ADMIN_CUSTOM);
+        NightExecutionTaskRepository tasks = mock(NightExecutionTaskRepository.class);
+        when(tasks.findById(task.taskId())).thenReturn(Optional.of(task));
+        when(tasks.updateDispatchIfAttempt(any(), eq("nda_lifecycle"))).thenReturn(true);
+        NightExecutionRunLifecycleService service = new NightExecutionRunLifecycleService(
+                tasks, mock(SessionMessageRepository.class), mock(RunSummaryPersistencePort.class),
+                new ObjectMapper().findAndRegisterModules(), Clock.fixed(now, ZoneOffset.UTC));
+        Run run = new Run(new RunId("run_lifecycle_custom"), task.sessionId(), task.workspaceId(),
+                RunStatus.RUNNING, now, now, "trace_lifecycle");
+
+        service.onAccepted(new ScheduledRunMetadata(task.taskId().value(), "nda_lifecycle"), run);
+
+        verify(tasks).deleteSessionLock(task.sessionId(), task.taskId());
+        verify(tasks, never()).releaseSlot(any(), any());
+    }
+
+    @Test
+    void permanentlyRejectedCustomRunFailsWithoutTouchingNightCapacity() {
+        Instant now = Instant.parse("2026-07-18T13:02:00Z");
+        NightExecutionTask task = dispatchingTask(NightExecutionScheduleMode.ADMIN_CUSTOM);
+        NightExecutionTaskRepository tasks = mock(NightExecutionTaskRepository.class);
+        when(tasks.findById(task.taskId())).thenReturn(Optional.of(task));
+        when(tasks.updateDispatchIfAttempt(any(), eq("nda_lifecycle"))).thenReturn(true);
+        NightExecutionRunLifecycleService service = new NightExecutionRunLifecycleService(
+                tasks, mock(SessionMessageRepository.class), mock(RunSummaryPersistencePort.class),
+                new ObjectMapper().findAndRegisterModules(), Clock.fixed(now, ZoneOffset.UTC));
+
+        service.onRejected(
+                new ScheduledRunMetadata(task.taskId().value(), "nda_lifecycle"),
+                new PlatformException(ErrorCode.VALIDATION_ERROR, "invalid input"));
+
+        ArgumentCaptor<NightExecutionTask> updated = ArgumentCaptor.forClass(NightExecutionTask.class);
+        verify(tasks).updateDispatchIfAttempt(updated.capture(), eq("nda_lifecycle"));
+        assertThat(updated.getValue().status()).isEqualTo(NightExecutionTaskStatus.FAILED);
+        assertThat(updated.getValue().reservationReleasedAt()).isNull();
+        verify(tasks).deleteSessionLock(task.sessionId(), task.taskId());
+        verify(tasks, never()).releaseSlot(any(), any());
     }
 
     @Test
@@ -145,6 +191,10 @@ class NightExecutionRunLifecycleServiceTest {
     }
 
     private NightExecutionTask dispatchingTask() {
+        return dispatchingTask(NightExecutionScheduleMode.NIGHT_WINDOW);
+    }
+
+    private NightExecutionTask dispatchingTask(NightExecutionScheduleMode scheduleMode) {
         Instant created = Instant.parse("2026-07-18T12:00:00Z");
         Instant claimed = Instant.parse("2026-07-18T13:01:00Z");
         return new NightExecutionTask(
@@ -153,10 +203,16 @@ class NightExecutionRunLifecycleServiceTest {
                 "request-lifecycle", "夜间执行", "执行任务",
                 "{\"prompt\":\"执行任务\",\"messageId\":\"msg-lifecycle\","
                         + "\"clientRequestId\":\"run-request-lifecycle\"}",
-                NightExecutionTaskStatus.SCHEDULED, Instant.parse("2026-07-18T13:00:00Z"),
-                Instant.parse("2026-07-18T13:15:00Z"), Instant.parse("2026-07-18T23:00:00Z"),
-                "linux-night-a", null, null, 0, false, null, null, null, null, null,
-                "trace_lifecycle", created, created)
+                scheduleMode, NightExecutionTaskStatus.SCHEDULED,
+                Instant.parse("2026-07-18T13:00:00Z"),
+                scheduleMode == NightExecutionScheduleMode.ADMIN_CUSTOM
+                        ? Instant.parse("2026-07-18T13:01:00Z")
+                        : Instant.parse("2026-07-18T13:15:00Z"),
+                scheduleMode == NightExecutionScheduleMode.ADMIN_CUSTOM
+                        ? Instant.parse("2026-07-18T13:15:00Z")
+                        : Instant.parse("2026-07-18T23:00:00Z"),
+                "linux-night-a", null, null, 0, false, null, null, null, null, 0L,
+                null, null, null, null, "trace_lifecycle", created, created)
                 .startDispatch("nda_lifecycle", "bjp_lifecycle", claimed.plusSeconds(300), claimed);
     }
 }

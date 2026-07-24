@@ -55,6 +55,7 @@
 - `V20260718211000__create_night_execution_tasks.sql`：创建夜间任务、单会话待执行锁和 15 分钟时段容量占位表，包含幂等键、状态/时间约束、索引和中文注释。
 - `V20260719210000__seed_night_execution_capacity_parameter.sql`：初始化可编辑全局通用参数 `NIGHT_EXECUTION_SLOT_CAPACITY=20`，供各 Java 实例启动加载和跨实例热刷新。
 - `V20260722130000__migrate_night_execution_to_xxl.sql`：为夜间任务增加 `dispatch_attempt_id`、精确 owner backend process、租约到期和状态版本字段/索引；为 legacy Scheduled Run 增加启动 attempt、租约和 durable handoff 受理时间。版本晚于已交付的 `V20260721213000`，存量库可按序升级；短暂停机升级时把旧夜间 `PENDING/RUNNING/STOPPING USER_PLAN` 全部标记为 `SKIPPED`，历史关联字段保留 nullable，遗留 `DISPATCHING` 交给锚点优先的补偿机制收敛。
+- `V20260724143000__add_night_execution_schedule_mode.sql`：为夜间任务增加非空 `schedule_mode` 和 `NIGHT_WINDOW/ADMIN_CUSTOM` 检查约束；存量行默认回填标准夜间模式，自定义模式仍走同一到期扫描但不写夜间容量表。
 - `V20260717173000__create_public_agent_config_rollouts.sql`：创建公共 Agent/Skill 发布 rollout、服务器同步和存量进程目标表。
 - `V20260717200000__harden_public_agent_config_rollout.sql`：为 rollout 保存发起人，为目标快照用户并增加认领 fencing token；历史目标按服务器、容器、端口回填用户归属，不写测试或演示数据。
 - `V20260721213000__isolate_agent_config_rollout_scopes.sql`：把活动发布唯一锁拆为公共单锁和应用版本维度锁，并新增应用个人 worktree `AWAITING_USER` 补偿表；本地修改或合并冲突不再无限占用公共/其它应用发布。
@@ -102,7 +103,7 @@
 - `ScheduledTaskRunRetentionMapper` / `ScheduledTaskRunRetentionMapper.xml`：按 `ended_at` 和终态 status 清理超过 7 天的 scheduler 运行记录，显式排除活动状态。
 - `MyBatisScheduledTaskRunRetentionRepository`：实现 scheduler 运行记录保留策略 domain 端口，供框架维护任务调用。
 - `ScheduledTaskMapper` / `ScheduledTaskMapper.xml` / `MyBatisScheduledTaskRepository`：保留旧 scheduler 任务定义和运行记录的历史兼容持久化；生产不再调用其 Cron、手工或 `USER_PLAN` 扫描/认领能力。
-- `NightExecutionTaskMapper` / `NightExecutionTaskMapper.xml` / `MyBatisNightExecutionTaskRepository`：持久化夜间任务、owner/clientRequestId 幂等锁、会话锁和全局时段容量；按 `slot_start, created_at` 有限扫描已到期且窗口未结束的 `SCHEDULED`，以 `status + state_version + target_linux_server_id` 原子认领 attempt，所有续租/完成/回退 SQL 匹配 `task_id + DISPATCHING + attemptId`，续租还要求 `window_end > now`，作为 Run 创建副作用前的最终窗口 fencing。PostgreSQL 首次创建使用事务级 advisory lock；30 天终态清理再次匹配状态、更新时间和 stateVersion，不能删除扫描后刚被用户关闭/更新的任务。
+- `NightExecutionTaskMapper` / `NightExecutionTaskMapper.xml` / `MyBatisNightExecutionTaskRepository`：持久化双模式定时任务、owner/clientRequestId 幂等锁、会话锁和标准夜间全局时段容量；`schedule_mode` 以枚举名往返。按 `slot_start, created_at` 有限扫描两种模式中已到期且窗口未结束的 `SCHEDULED`，以 `status + state_version + target_linux_server_id` 原子认领 attempt，所有续租/完成/回退 SQL 匹配 `task_id + DISPATCHING + attemptId`，续租还要求 `window_end > now`，作为 Run 创建副作用前的最终窗口 fencing。PostgreSQL 首次创建使用事务级 advisory lock；30 天终态清理再次匹配状态、更新时间和 stateVersion，不能删除扫描后刚被用户关闭/更新的任务。
 - `RedisRunTerminalRetryStore`：独立保存 PostgreSQL 终态事务失败后的已清洗 `RunTerminalProjection`。record 与全局 due ZSET 统一使用固定 `{terminal-retry}` hash tag；保存 Lua 按 `terminalProjectionVersion → lastEventSeq → failedAttempts/nextAttemptAt` 单调更新，旧 worker 不能覆盖晚到纠正版；删除 Lua 只在完整白名单 JSON 仍等于调用方处理记录时执行 `ZREM + DEL`，旧 worker 不能删除新版。缺失/非法 due member 的自愈 Lua 也只在 record 仍不存在时移除索引，不会误删并发新记录。每 Run JSON 使用 24 小时内的绝对 TTL，due ZSET 只保存 runId 和 `nextAttemptAt`；显式白名单序列化形状不包含 prompt、完整回答、parts、reasoning、工具输入输出或原始事件，Redis 不可用时返回 `RUNTIME_STATE_UNAVAILABLE`，不回退数据库或 JVM 内存队列。
 - `JdbcCommonParameterRepository`：通用参数存量 JDBC 实现已不再作为 Spring Bean，仅保留给旧集成测试直接构造；后续通用参数 SQL 变更必须改 MyBatis XML。
 - `JdbcWorkspaceCreateOperationRepository`：实现设置页创建应用工作空间进度保存、步骤更新、成功/失败记录和按 `operationId` 查询。

@@ -61,7 +61,7 @@ class XxlJobMysqlMigrationTest {
                     .isZero();
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where executor_route_strategy='ROUND' and executor_block_strategy='DISCARD_LATER' and misfire_strategy='DO_NOTHING' and executor_fail_retry_count=0"))
                     .isEqualTo(7);
-            assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.night-execution-dispatch' and schedule_conf='0 0/15 * * * ? *' and trigger_status=1"))
+            assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='opencode-runtime.night-execution-dispatch' and schedule_conf='0 0/1 * * * ? *' and trigger_status=1"))
                     .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where executor_param like '%executionAffinity%' or executor_param like '%linuxServerId%'"))
                     .isZero();
@@ -94,7 +94,7 @@ class XxlJobMysqlMigrationTest {
                 schemaUrl, MYSQL.getUsername(), MYSQL.getPassword());
              Statement statement = connection.createStatement()) {
             assertThat(singleInt(statement, "select count(*) from flyway_schema_history where success=1"))
-                    .isEqualTo(4);
+                    .isEqualTo(5);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key is not null"))
                     .isEqualTo(7);
         }

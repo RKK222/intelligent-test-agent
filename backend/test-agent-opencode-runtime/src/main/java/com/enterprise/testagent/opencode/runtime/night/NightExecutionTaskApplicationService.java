@@ -10,6 +10,7 @@ import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTask;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskId;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskRepository;
+import com.enterprise.testagent.domain.nightexecution.NightExecutionScheduleMode;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskStatus;
 import com.enterprise.testagent.domain.session.ConversationSourceType;
 import com.enterprise.testagent.domain.session.Session;
@@ -85,24 +86,33 @@ public class NightExecutionTaskApplicationService {
 
     /** 幂等创建夜间任务；空白对话的 Session、占位和锁同属一个数据库事务。 */
     @Transactional
-    public NightExecutionTask create(UserId owner, NightExecutionCreateCommand command, String traceId) {
+    public NightExecutionTask create(
+            UserId owner,
+            boolean superAdmin,
+            NightExecutionCreateCommand command,
+            String traceId) {
         Objects.requireNonNull(owner, "owner must not be null");
         Objects.requireNonNull(command, "command must not be null");
-        taskRepository.lockCreateRequest(owner, command.clientRequestId());
+        requireCustomPermission(command.scheduleMode(), superAdmin);
         NightExecutionTask existing = taskRepository
                 .findByOwnerAndClientRequestId(owner, command.clientRequestId()).orElse(null);
         if (existing != null) return existing;
 
         Instant now = clock.instant();
-        var window = slots();
-        var selected = selectableSlot(command.slotStart(), window);
+        TaskSchedule schedule = scheduleForCreate(command, now);
+        taskRepository.lockCreateRequest(owner, command.clientRequestId());
+        existing = taskRepository
+                .findByOwnerAndClientRequestId(owner, command.clientRequestId()).orElse(null);
+        if (existing != null) return existing;
+
         Workspace workspace = workspaceRepository.findById(command.workspaceId())
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Workspace 不存在"));
         accessAuthorizer.requireAccess(owner, workspace.workspaceId());
 
         NightExecutionTaskId taskId = new NightExecutionTaskId(RuntimeIdGenerator.nightExecutionTaskId());
         SessionResolution session = resolveSession(owner, command, taskId, traceId, now);
-        if (!taskRepository.reserveSlot(selected.slotStart(), window.capacity(), now)) {
+        if (schedule.reservesCapacity()
+                && !taskRepository.reserveSlot(schedule.slotStart(), schedule.capacity(), now)) {
             throw slotConflict("所选夜间时段刚刚已满，请重新选择", slots());
         }
 
@@ -112,9 +122,11 @@ public class NightExecutionTaskApplicationService {
         NightExecutionTask draft = new NightExecutionTask(
                 taskId, owner, session.session().sessionId(), workspace.workspaceId(), command.clientRequestId(),
                 session.session().title(), preview(snapshot.effectivePrompt()), writeSnapshot(snapshot),
-                NightExecutionTaskStatus.SCHEDULED, selected.slotStart(), selected.slotEnd(),
-                window.windowEnd(), targetLinuxServerId, null, null, 0, session.created(),
-                null, null, null, null, null, traceId, now, now);
+                command.scheduleMode(), NightExecutionTaskStatus.SCHEDULED,
+                schedule.slotStart(), schedule.slotEnd(), schedule.windowEnd(),
+                targetLinuxServerId, null, null, 0, session.created(),
+                null, null, null, null, 0L, null, null, null, null,
+                traceId, now, now);
         taskRepository.save(draft);
         if (!taskRepository.insertSessionLock(session.session().sessionId(), taskId, owner, now)) {
             throw new PlatformException(ErrorCode.CONFLICT, "当前会话已有待执行夜间任务");
@@ -138,11 +150,27 @@ public class NightExecutionTaskApplicationService {
 
     /** 用户改期只允许尚未认领的任务；新占位写入成功后才释放旧时段。 */
     @Transactional
-    public NightExecutionTask adjust(UserId owner, NightExecutionTaskId taskId, Instant slotStart, String traceId) {
+    public NightExecutionTask adjust(
+            UserId owner,
+            boolean superAdmin,
+            NightExecutionTaskId taskId,
+            Instant slotStart,
+            String traceId) {
         NightExecutionTask current = owned(owner, taskId);
         requireScheduled(current, "任务已经开始，无法调整时段");
+        requireCustomPermission(current.scheduleMode(), superAdmin);
         if (current.slotStart().equals(slotStart)) return current;
         Instant now = clock.instant();
+        if (current.scheduleMode() == NightExecutionScheduleMode.ADMIN_CUSTOM) {
+            var custom = NightExecutionCustomSchedulePolicy.resolve(slotStart, now);
+            NightExecutionTask adjusted = current.reschedule(
+                    custom.slotStart(), custom.slotEnd(), custom.windowEnd(),
+                    current.targetLinuxServerId(), now);
+            if (!taskRepository.updateIfStatus(adjusted, NightExecutionTaskStatus.SCHEDULED)) {
+                throw new PlatformException(ErrorCode.CONFLICT, "任务已经开始，无法调整时段");
+            }
+            return adjusted;
+        }
         var window = slots();
         if (!window.windowEnd().equals(current.windowEnd())) {
             throw new PlatformException(ErrorCode.CONFLICT, "当前夜间窗口已结束，不能再调整时段");
@@ -152,11 +180,12 @@ public class NightExecutionTaskApplicationService {
             throw slotConflict("所选夜间时段刚刚已满，请重新选择", slots());
         }
         NightExecutionTask adjusted = current.reschedule(
-                selected.slotStart(), selected.slotEnd(), current.targetLinuxServerId(), now);
+                selected.slotStart(), selected.slotEnd(), current.windowEnd(),
+                current.targetLinuxServerId(), now);
         if (!taskRepository.updateIfStatus(adjusted, NightExecutionTaskStatus.SCHEDULED)) {
             throw new PlatformException(ErrorCode.CONFLICT, "任务已经开始，无法调整时段");
         }
-        taskRepository.releaseSlot(current.slotStart(), now);
+        releaseCapacity(current, now);
         return adjusted;
     }
 
@@ -171,7 +200,7 @@ public class NightExecutionTaskApplicationService {
             throw new PlatformException(ErrorCode.CONFLICT, "任务已经开始，无法取消");
         }
         taskRepository.deleteSessionLock(current.sessionId(), current.taskId());
-        taskRepository.releaseSlot(current.slotStart(), now);
+        releaseCapacity(current, now);
         archiveEmptyCreatedSession(current, traceId, now);
         return cancelled;
     }
@@ -228,6 +257,33 @@ public class NightExecutionTaskApplicationService {
                 .filter(slot -> slot.slotStart().equals(slotStart) && slot.available())
                 .findFirst()
                 .orElseThrow(() -> slotConflict("所选夜间时段不可用，请重新选择", window));
+    }
+
+    /** 创建前完成权限和时间校验，确保非法测试请求不产生幂等锁、Session 或容量副作用。 */
+    private TaskSchedule scheduleForCreate(
+            NightExecutionCreateCommand command,
+            Instant now) {
+        if (command.scheduleMode() == NightExecutionScheduleMode.ADMIN_CUSTOM) {
+            var custom = NightExecutionCustomSchedulePolicy.resolve(command.slotStart(), now);
+            return new TaskSchedule(
+                    custom.slotStart(), custom.slotEnd(), custom.windowEnd(), 0, false);
+        }
+        var window = slots();
+        var selected = selectableSlot(command.slotStart(), window);
+        return new TaskSchedule(
+                selected.slotStart(), selected.slotEnd(), window.windowEnd(), window.capacity(), true);
+    }
+
+    private void requireCustomPermission(NightExecutionScheduleMode mode, boolean superAdmin) {
+        if (mode == NightExecutionScheduleMode.ADMIN_CUSTOM && !superAdmin) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "仅超级管理员可使用测试定时");
+        }
+    }
+
+    private void releaseCapacity(NightExecutionTask task, Instant now) {
+        if (task.scheduleMode().reservesNightCapacity()) {
+            taskRepository.releaseSlot(task.slotStart(), now);
+        }
     }
 
     /** 容量冲突同时返回最新窗口，前端可立即刷新选择器而无需猜测可用时段。 */
@@ -289,4 +345,12 @@ public class NightExecutionTaskApplicationService {
     }
 
     private record SessionResolution(Session session, boolean created) { }
+
+    /** 两种模式统一交给聚合的持久时间边界；容量字段仅对标准夜间模式有意义。 */
+    private record TaskSchedule(
+            Instant slotStart,
+            Instant slotEnd,
+            Instant windowEnd,
+            int capacity,
+            boolean reservesCapacity) { }
 }

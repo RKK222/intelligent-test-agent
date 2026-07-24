@@ -70,6 +70,7 @@ import type {
   ManagedApplication,
   ManagedWorkspaceRuntime,
   ModelInfo,
+  NightExecutionScheduleMode,
   NightExecutionSlots,
   NightExecutionTask,
   NightExecutionTaskQueryResponse,
@@ -269,6 +270,7 @@ export type CreateNightExecutionTaskPayload = Omit<StartRunPayload, "sessionId" 
   sessionId?: string;
   workspaceId: string;
   sessionTitle?: string;
+  scheduleMode?: NightExecutionScheduleMode;
   slotStart: string;
 };
 

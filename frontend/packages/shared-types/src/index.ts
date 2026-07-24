@@ -406,6 +406,8 @@ export type NightExecutionTaskStatus =
   | "FAILED"
   | string;
 
+export type NightExecutionScheduleMode = "NIGHT_WINDOW" | "ADMIN_CUSTOM";
+
 export type NightExecutionSlot = {
   slotStart: string;
   slotEnd: string;
@@ -431,6 +433,8 @@ export type NightExecutionTask = {
   sessionTitle?: string | null;
   contentPreview: string;
   status: NightExecutionTaskStatus;
+  /** 兼容旧后端响应；缺失时前端按 NIGHT_WINDOW 展示。 */
+  scheduleMode?: NightExecutionScheduleMode;
   slotStart: string;
   slotEnd: string;
   windowEnd: string;

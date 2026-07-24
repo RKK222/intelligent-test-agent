@@ -1,6 +1,7 @@
 package com.enterprise.testagent.api.web.platform;
 
 import com.enterprise.testagent.common.pagination.PageResponse;
+import com.enterprise.testagent.domain.nightexecution.NightExecutionScheduleMode;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTask;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
@@ -36,6 +37,7 @@ final class NightExecutionDtos {
             String command,
             String arguments,
             @Size(max = 128) String runClientRequestId,
+            NightExecutionScheduleMode scheduleMode,
             @NotNull Instant slotStart) {
 
         @AssertTrue(message = "prompt or text part must not be blank")
@@ -57,6 +59,7 @@ final class NightExecutionDtos {
                     new NightExecutionRunInputSnapshot(
                             prompt, inputParts, messageId, agent, model, variant, mode,
                             command, arguments, runClientRequestId),
+                    scheduleMode == null ? NightExecutionScheduleMode.NIGHT_WINDOW : scheduleMode,
                     slotStart);
         }
     }
@@ -99,6 +102,7 @@ final class NightExecutionDtos {
             String sessionTitle,
             String contentPreview,
             String status,
+            String scheduleMode,
             Instant slotStart,
             Instant slotEnd,
             Instant windowEnd,
@@ -113,7 +117,8 @@ final class NightExecutionDtos {
             if (task == null) return null;
             return new TaskResponse(
                     task.taskId().value(), task.sessionId().value(), task.workspaceId().value(),
-                    task.sessionTitle(), task.contentPreview(), task.status().name(), task.slotStart(),
+                    task.sessionTitle(), task.contentPreview(), task.status().name(),
+                    task.scheduleMode().name(), task.slotStart(),
                     task.slotEnd(), task.windowEnd(), task.rolloverCount(),
                     task.runId() == null ? null : task.runId().value(),
                     task.errorCode(), task.errorMessage(), task.createdAt(), task.updatedAt());

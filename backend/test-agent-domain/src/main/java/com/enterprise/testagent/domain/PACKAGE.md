@@ -30,7 +30,7 @@
 - `configuration.*`：应用定义、应用成员、代码库配置、应用仓库关联、应用工作空间模板、个人 SSH key、通用参数、显式 JVM 内存参数 SPI/状态和设置页工作空间创建进度；`CommonParameterMemoryEntry` 约束实现先完整查库校验再原子替换，未注册参数仍按需直读数据库；`ConfigurationManagementRepository`、`CommonParameterRepository`、`WorkspaceCreateOperationRepository` 作为持久化端口。
 - `scheduler.*`：旧定时任务定义、用户级计划、运行记录、触发来源和状态枚举的历史兼容模型；生产只继续使用任务 handler 所需值对象和 `ScheduledTaskRunRetentionRepository` 清理端口，不再执行 `USER_PLAN`。
 - `auth.TokenSessionMarkerStore`：平台 Token SHA-256 session marker 领域端口；用于 Token 登录/刷新/登出/过期与外部管理会话联动，不暴露基础设施 key。
-- `nightexecution.*`：夜间任务聚合、状态和值对象；完整 Run 输入仅在待执行期短期保存，固定目标服务器以及 attempt/owner/租约用于分发 fencing，仓储端口统一暴露到期扫描、状态 CAS、租约续期、会话写锁和 15 分钟时段容量。
+- `nightexecution.*`：定时任务聚合、`NIGHT_WINDOW/ADMIN_CUSTOM` 模式、状态和值对象；完整 Run 输入仅在待执行期短期保存，固定目标服务器以及 attempt/owner/租约用于分发 fencing，仓储端口统一暴露到期扫描、状态 CAS、租约续期、会话写锁和夜间 15 分钟时段容量。仅标准夜间模式预留和释放容量。
 - 后续可新增领域命令、领域服务接口和更多状态规则。
 
 ## 允许依赖

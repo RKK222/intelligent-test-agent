@@ -42,6 +42,7 @@ import type {
   RuntimeResourceInfo,
   RuntimeToolInfo,
   ModelInfo,
+  NightExecutionScheduleMode,
   NightExecutionSlots,
   NightExecutionTask,
   NightExecutionTaskQueryResponse,
@@ -135,6 +136,7 @@ import SystemManagementWrapper from "./SystemManagementWrapper.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import { notifyFeedback } from "./notify";
 import { appendLatestRawOutputEntry, prepareRawOutputBody } from "./raw-output";
+import { formatBeijingDateTimeInput } from "../utils/night-execution-schedule";
 import {
   createRuntimeStateOutageTracker,
   type RuntimeStateFallbackLease
@@ -5771,8 +5773,16 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
  * 夜间任务使用与立即发送相同的 prompt/上下文组装规则，但提交成功前不写入 Timeline，
  * 避免“尚未执行”的输入被误认为已经发送给模型。
  */
-async function handleScheduleNight(payload: { prompt: string; slotStart: string }) {
+async function handleScheduleNight(payload: {
+  prompt: string;
+  scheduleMode: NightExecutionScheduleMode;
+  slotStart: string;
+}) {
   if (nightTaskSubmitting.value || historySwitchingSessionId.value) return;
+  if (payload.scheduleMode === "ADMIN_CUSTOM" && !isSuperAdmin.value) {
+    feedback.value = { kind: "error", title: "无权使用测试定时", description: "仅超级管理员可以自定义执行时间。" };
+    return;
+  }
   if (currentNightTask.value) {
     feedback.value = { kind: "info", title: "当前对话已有夜间任务", description: "请先取消原任务再重新安排。" };
     return;
@@ -5839,6 +5849,7 @@ async function handleScheduleNight(payload: { prompt: string; slotStart: string 
     workspaceId: workspace.workspaceId,
     prompt: submitPrompt,
     parts,
+    scheduleMode: payload.scheduleMode,
     slotStart: payload.slotStart,
     agent: selectedAgent.value,
     model: selectedModel.value,
@@ -5866,6 +5877,7 @@ async function handleScheduleNight(payload: { prompt: string; slotStart: string 
     mode: promptMode.value,
     command: command?.command,
     arguments: command?.arguments,
+    scheduleMode: payload.scheduleMode,
     slotStart: payload.slotStart
   };
 
@@ -5897,8 +5909,10 @@ async function handleScheduleNight(payload: { prompt: string; slotStart: string 
     diffContextParts.value = [];
     feedback.value = {
       kind: "success",
-      title: "夜间任务已安排",
-      description: "任务会在所选 15 分钟时间段内自动启动。"
+      title: payload.scheduleMode === "ADMIN_CUSTOM" ? "测试定时已安排" : "夜间任务已安排",
+      description: payload.scheduleMode === "ADMIN_CUSTOM"
+        ? `计划于 ${formatBeijingDateTimeInput(new Date(payload.slotStart)).replace("T", " ")}（北京时间）启动。`
+        : "任务会在所选 15 分钟时间段内自动启动。"
     };
     void queryClient.invalidateQueries({ queryKey: ["sessions"] });
     void refreshNightExecutionTasks();
@@ -5922,16 +5936,27 @@ function markNightTaskAction(taskId: string, pending: boolean) {
 
 async function handleAdjustNightTask(payload: { taskId: string; slotStart: string }) {
   if (nightTaskActionPending.value[payload.taskId]) return;
+  const existingTask = nightTasks.value.find((task) => task.taskId === payload.taskId)
+    ?? (recentlyCreatedNightTask.value?.taskId === payload.taskId ? recentlyCreatedNightTask.value : null);
+  const customSchedule = existingTask?.scheduleMode === "ADMIN_CUSTOM";
+  if (customSchedule && !isSuperAdmin.value) {
+    feedback.value = { kind: "error", title: "无权调整测试定时", description: "仅超级管理员可以调整自定义执行时间。" };
+    return;
+  }
   markNightTaskAction(payload.taskId, true);
   try {
     const adjusted = await api.adjustNightExecutionTask(payload.taskId, payload.slotStart);
     nightTasks.value = nightTasks.value.map((task) => task.taskId === adjusted.taskId ? adjusted : task);
     if (recentlyCreatedNightTask.value?.taskId === adjusted.taskId) recentlyCreatedNightTask.value = adjusted;
-    feedback.value = { kind: "success", title: "执行时间已调整", description: "系统已重新预留夜间容量。" };
-    void requestNightExecutionSlots();
+    feedback.value = {
+      kind: "success",
+      title: "执行时间已调整",
+      description: customSchedule ? "测试定时已更新，不占用夜间容量。" : "系统已重新预留夜间容量。"
+    };
+    if (!customSchedule) void requestNightExecutionSlots();
   } catch (error) {
     feedback.value = errorFeedback("调整夜间任务失败", error);
-    if (error instanceof BackendApiError && error.status === 409) void requestNightExecutionSlots();
+    if (!customSchedule && error instanceof BackendApiError && error.status === 409) void requestNightExecutionSlots();
   } finally {
     markNightTaskAction(payload.taskId, false);
     void refreshNightExecutionTasks();
@@ -5952,7 +5977,7 @@ async function handleCancelNightTask(taskId: string) {
         && shouldResetAfterNightTaskClosure(session.value, taskId, persistedMessageCount)) {
       handleNewConversation();
     }
-    void requestNightExecutionSlots();
+    if (task?.scheduleMode !== "ADMIN_CUSTOM") void requestNightExecutionSlots();
   } catch (error) {
     feedback.value = errorFeedback("取消夜间任务失败", error);
   } finally {
@@ -7773,6 +7798,7 @@ async function handleLogout() {
           :night-slots-loading="nightSlotsLoading"
           :night-task-submitting="nightTaskSubmitting"
           :night-task-action-pending="nightTaskActionPending"
+          :can-schedule-custom-time="isSuperAdmin"
           :todos="chatState.todos"
           :todo-snapshots-by-user-message-id="chatState.todoSnapshotsByUserMessageId"
           :chat-contexts="chatContextStore.items"

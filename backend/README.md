@@ -207,7 +207,7 @@ mvn test
 - 涉及 opencode-manager 路由、Java 到 manager 控制、用户 opencode 进程服务器归属、运行管理 `containerId` 路由、Agent 配置或文件 WebSocket 目标后端选择时，必须复用 `BackendJavaRouteResolver`、`BackendHttpForwarder` 和目标 Java 的 `OpencodeProcessManagerGateway` 公共链路；禁止新增自写 Redis 快照扫描、Java->Java HTTP 转发、防循环 header、本机降级或本地绕过。涉及 opencode server 启动、停止或状态查询时，分别复用 `OpencodeProcessStartupService`、`OpencodeProcessStopService` 和 `OpencodeProcessStatusQueryService`。
 - 用户、角色、权限等平台内部管理放在 `test-agent-system-management`。
 - 应用配置、应用人员、代码库英文名与关联、应用工作空间模板和个人 SSH key 管理放在 `test-agent-configuration-management`；应用版本工作区运行编排和工作空间创建进度放在 `test-agent-workspace-management`。
-- 周期任务的 XXL Admin、executor、MySQL Flyway、iframe SSO 与统一 handler 适配放在 `test-agent-xxl-job-integration`；XXL executor 本身不携带稳定 Linux 亲和。`test-agent-scheduler` 只提供 `ScheduledTaskHandler`、context/result、Redis 锁和历史清理能力。夜间任务直接保存在 `night_execution_tasks`，由 XXL 每 15 分钟扫描并通过公共 Java 路由转发到任务创建时固定的目标服务器；目标 Java 复用普通 Run 受理链路，不建立夜间专属队列。
+- 周期任务的 XXL Admin、executor、MySQL Flyway、iframe SSO 与统一 handler 适配放在 `test-agent-xxl-job-integration`；XXL executor 本身不携带稳定 Linux 亲和。`test-agent-scheduler` 只提供 `ScheduledTaskHandler`、context/result、Redis 锁和历史清理能力。定时任务直接保存在 `night_execution_tasks`，支持标准夜间窗口与仅 `SUPER_ADMIN` 可用的未来 24 小时精确分钟测试模式；XXL 每分钟扫描并通过公共 Java 路由转发到任务创建时固定的目标服务器。目标 Java 复用普通 Run 受理链路，不建立夜间专属队列，自定义模式不占夜间容量。
 - 非 opencode 外部系统联动放在 `test-agent-integration`。
 - 业务模块不要直接依赖 `test-agent-opencode-sdk-generated`，应通过 `test-agent-opencode-client`。
 - 领域模型保持在 `test-agent-domain`，不要依赖 Spring Web 或持久化技术。

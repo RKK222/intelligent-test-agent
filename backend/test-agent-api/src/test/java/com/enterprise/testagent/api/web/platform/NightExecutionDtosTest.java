@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTask;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskId;
+import com.enterprise.testagent.domain.nightexecution.NightExecutionScheduleMode;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskStatus;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.user.UserId;
@@ -29,6 +30,17 @@ class NightExecutionDtosTest {
         NightExecutionDtos.TaskResponse response = NightExecutionDtos.TaskResponse.from(task);
 
         assertThat(response.contentPreview()).isEqualTo("安全预览");
+        assertThat(response.scheduleMode()).isEqualTo(NightExecutionScheduleMode.NIGHT_WINDOW.name());
         assertThat(response.toString()).doesNotContain("never-return", "runInputJson");
+    }
+
+    @Test
+    void missingCreateModeDefaultsToNightWindow() {
+        NightExecutionDtos.CreateTaskRequest request = new NightExecutionDtos.CreateTaskRequest(
+                "request-night-default", null, "wrk_night_dto_test", null,
+                "执行回归", null, null, null, null, null, null, null, null,
+                null, null, Instant.parse("2026-07-18T13:00:00Z"));
+
+        assertThat(request.toCommand().scheduleMode()).isEqualTo(NightExecutionScheduleMode.NIGHT_WINDOW);
     }
 }

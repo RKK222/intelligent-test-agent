@@ -1031,3 +1031,21 @@
 - Result:
   - 功能分支与主线的目录过滤、V2 Provider 兼容和工作空间行为均被保留；没有额外新增 API、事件、数据库、安全或环境配置变更。
   - 完整后端测试的上述既有基线问题继续保留为已知风险，受本次集成影响的定向测试均通过。
+
+### 2026-07-24 - 支持超级管理员精确分钟测试定时
+
+- Why:
+  - 夜间执行需要一条便于白天联调和功能验收的快速路径，同时必须保证普通用户、21:00–07:00 窗口、15 分钟容量时段和现有 Run 幂等语义不变。
+- What:
+  - 定时任务增加 `NIGHT_WINDOW/ADMIN_CUSTOM` 领域模式；后者仅允许当前 `SUPER_ADMIN` 选择下一完整分钟至未来 24 小时的时间，使用 1 分钟显示区间和 15 分钟重试窗口，不预留或释放夜间容量。创建和改期由后端认证主体强制校验，owner 不接受客户端指定；角色移除后可取消但不可改期。
+  - PostgreSQL 增加非空默认的 `schedule_mode` 和枚举检查约束，MyBatis XML 完整读写；XXL MySQL V5 将既有分发任务改为每分钟 Cron，保持原有路由、阻塞、过期、全局互斥和零 XXL 重试策略。
+  - 前端普通用户交互不变；超级管理员可在原定时面板切换“测试时间”，使用 1/3/5 分钟快捷值或北京时间 `datetime-local`；待执行 Tab、当前会话卡片和失败卡片以“测试定时 + 单个精确时间”展示。
+- How:
+  - TDD 覆盖默认模式、时间边界、权限前置且无副作用、创建/改期/取消/生命周期/补偿容量隔离、新旧 DTO 兼容、两种模式持久化与到期扫描、XXL 真实 MySQL migration、北京时间解析和前端双模式交互。
+  - 相关后端回归通过：runtime 27 项、API 6 项、persistence 9 项、XXL MySQL Testcontainers 3 项；前端全量 Vitest 95 文件 1612 passed / 1 skipped，测试定时 Chromium/mobile E2E 2/2 通过，typecheck 和生产 build 通过；后端 20 模块生产打包通过。
+  - 独立审查发现创建幂等重试在返回既有任务前误重新校验时间/容量；已改为“模式权限→只读幂等命中→新请求时间/容量校验→幂等锁→二次命中”，并补充原时间已过、夜间时段已满、自定义永久失败和 HTTP 伪造模式 403 回归；同步清理后端部署文档中残留的每 15 分钟描述。
+  - 使用未修改的 `.env.test` 完整重启三服务；backend readiness 和前端 3000 均正常，真实 PostgreSQL 已迁移至 `V20260724143000`，XXL MySQL 已迁移至 V5，分发任务查询为 `0 0/1 * * * ? * / ROUND / DISCARD_LATER / DO_NOTHING / retry=0 / enabled`。
+- Result:
+  - 新模式复用原会话锁、XXL 分发、租约/心跳/attemptId、Run 唯一锚点和 RunEvent SSE，未增加专属队列、内部分发协议字段、RunEvent 类型或 generated SDK 改动。
+  - 同步 HTTP API、事件流、数据库、XXL 架构、安全、测试与相关工程 README/PACKAGE；兼容旧请求、旧任务和缺失模式的旧前端响应。
+  - 后端全量 `mvn test` 仍只被主线已知的 `OpencodeProcessConfigLinkServiceTest.rejectsOrdinaryDirectoryAtManagedPathWithoutDeletingUserData` 阻断；已独立稳定复现，该服务/测试与本次 diff 无关，本次不扩大范围修改。

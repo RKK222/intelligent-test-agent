@@ -7,6 +7,7 @@ import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTask;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskId;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskRepository;
+import com.enterprise.testagent.domain.nightexecution.NightExecutionScheduleMode;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskStatus;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.scheduler.ScheduledTaskRunId;
@@ -209,7 +210,8 @@ public class MyBatisNightExecutionTaskRepository implements NightExecutionTaskRe
                 new SessionId(text(row, "sessionId")),
                 new WorkspaceId(text(row, "workspaceId")),
                 text(row, "clientRequestId"), text(row, "sessionTitle"), text(row, "contentPreview"),
-                text(row, "runInputJson"), NightExecutionTaskStatus.valueOf(text(row, "status")),
+                text(row, "runInputJson"), NightExecutionScheduleMode.valueOf(text(row, "scheduleMode")),
+                NightExecutionTaskStatus.valueOf(text(row, "status")),
                 instant(row, "slotStart"), instant(row, "slotEnd"), instant(row, "windowEnd"),
                 text(row, "targetLinuxServerId"),
                 value(row, "scheduledTaskRunId", ScheduledTaskRunId::new),
@@ -232,6 +234,7 @@ public class MyBatisNightExecutionTaskRepository implements NightExecutionTaskRe
         values.put("sessionTitle", task.sessionTitle());
         values.put("contentPreview", task.contentPreview());
         values.put("runInputJson", task.runInputJson());
+        values.put("scheduleMode", task.scheduleMode().name());
         values.put("status", task.status().name());
         values.put("slotStart", task.slotStart());
         values.put("slotEnd", task.slotEnd());

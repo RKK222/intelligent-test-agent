@@ -3,6 +3,8 @@ package com.enterprise.testagent.api.web.platform;
 import com.enterprise.testagent.api.web.common.AuthWebSupport;
 import com.enterprise.testagent.api.web.common.RuntimeApiSupport;
 import com.enterprise.testagent.common.api.ApiResponse;
+import com.enterprise.testagent.domain.auth.AuthPrincipal;
+import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskId;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.user.UserId;
@@ -44,9 +46,12 @@ public class NightExecutionController {
             @Valid @RequestBody NightExecutionDtos.CreateTaskRequest request,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
-        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
+        UserId userId = principal.userId();
+        boolean superAdmin = AuthWebSupport.hasRole(principal, Dictionary.ROLE_SUPER_ADMIN);
         return Mono.fromCallable(() -> ApiResponse.ok(
-                        NightExecutionDtos.TaskResponse.from(service.create(userId, request.toCommand(), traceId)),
+                        NightExecutionDtos.TaskResponse.from(
+                                service.create(userId, superAdmin, request.toCommand(), traceId)),
                         traceId))
                 .subscribeOn(Schedulers.boundedElastic());
     }
@@ -71,9 +76,12 @@ public class NightExecutionController {
             @Valid @RequestBody NightExecutionDtos.AdjustTaskRequest request,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
-        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
+        UserId userId = principal.userId();
+        boolean superAdmin = AuthWebSupport.hasRole(principal, Dictionary.ROLE_SUPER_ADMIN);
         return Mono.fromCallable(() -> ApiResponse.ok(NightExecutionDtos.TaskResponse.from(
-                        service.adjust(userId, new NightExecutionTaskId(taskId), request.slotStart(), traceId)), traceId))
+                        service.adjust(userId, superAdmin, new NightExecutionTaskId(taskId),
+                                request.slotStart(), traceId)), traceId))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 

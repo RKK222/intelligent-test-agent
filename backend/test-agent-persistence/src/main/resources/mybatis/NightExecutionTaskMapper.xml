@@ -10,7 +10,8 @@
     <sql id="columns">
         task_id as "taskId", owner_user_id as "ownerUserId", session_id as "sessionId",
         workspace_id as "workspaceId", client_request_id as "clientRequestId", session_title as "sessionTitle",
-        content_preview as "contentPreview", run_input_json as "runInputJson", status,
+        content_preview as "contentPreview", run_input_json as "runInputJson",
+        schedule_mode as "scheduleMode", status,
         slot_start as "slotStart", slot_end as "slotEnd", window_end as "windowEnd",
         target_linux_server_id as "targetLinuxServerId", scheduled_task_run_id as "scheduledTaskRunId",
         run_id as "runId", rollover_count as "rolloverCount", task_created_session as "taskCreatedSession",
@@ -25,7 +26,8 @@
     <sql id="taskValues">
         owner_user_id=#{ownerUserId}, session_id=#{sessionId}, workspace_id=#{workspaceId},
         client_request_id=#{clientRequestId}, session_title=#{sessionTitle}, content_preview=#{contentPreview},
-        run_input_json=#{runInputJson}, status=#{status}, slot_start=#{slotStart}, slot_end=#{slotEnd},
+        run_input_json=#{runInputJson}, schedule_mode=#{scheduleMode}, status=#{status},
+        slot_start=#{slotStart}, slot_end=#{slotEnd},
         window_end=#{windowEnd}, target_linux_server_id=#{targetLinuxServerId},
         scheduled_task_run_id=#{scheduledTaskRunId}, run_id=#{runId}, rollover_count=#{rolloverCount},
         task_created_session=#{taskCreatedSession}, dispatch_started_at=#{dispatchStartedAt},
@@ -65,12 +67,12 @@
     <insert id="insertTask" parameterType="map">
         insert into night_execution_tasks(
         task_id, owner_user_id, session_id, workspace_id, client_request_id, session_title, content_preview,
-        run_input_json, status, slot_start, slot_end, window_end, target_linux_server_id,
+        run_input_json, schedule_mode, status, slot_start, slot_end, window_end, target_linux_server_id,
         scheduled_task_run_id, run_id, rollover_count, task_created_session, dispatch_started_at,
         dispatch_attempt_id, dispatch_owner_backend_process_id, dispatch_lease_until, state_version,
         dismissed_at, reservation_released_at, error_code, error_message, trace_id, created_at, updated_at)
         values(#{taskId},#{ownerUserId},#{sessionId},#{workspaceId},#{clientRequestId},#{sessionTitle},
-        #{contentPreview},#{runInputJson},#{status},#{slotStart},#{slotEnd},#{windowEnd},
+        #{contentPreview},#{runInputJson},#{scheduleMode},#{status},#{slotStart},#{slotEnd},#{windowEnd},
         #{targetLinuxServerId},#{scheduledTaskRunId},#{runId},#{rolloverCount},#{taskCreatedSession},
         #{dispatchStartedAt},#{dispatchAttemptId},#{dispatchOwnerBackendProcessId},#{dispatchLeaseUntil},
         #{stateVersion},#{dismissedAt},#{reservationReleasedAt},#{errorCode},#{errorMessage},

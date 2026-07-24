@@ -54,7 +54,7 @@ public class NightExecutionRunLifecycleService implements ScheduledRunLifecycleO
         NightExecutionTask dispatched = task.dispatched(run.runId(), now);
         if (taskRepository.updateDispatchIfAttempt(dispatched, metadata.dispatchAttemptId())) {
             taskRepository.deleteSessionLock(task.sessionId(), task.taskId());
-            taskRepository.releaseSlot(task.slotStart(), now);
+            releaseCapacity(task, now);
         }
     }
 
@@ -74,11 +74,18 @@ public class NightExecutionRunLifecycleService implements ScheduledRunLifecycleO
             NightExecutionTask failed = task.fail(errorCode(failure), safeMessage(failure), now);
             if (taskRepository.updateDispatchIfAttempt(failed, metadata.dispatchAttemptId())) {
                 taskRepository.deleteSessionLock(task.sessionId(), task.taskId());
-                taskRepository.releaseSlot(task.slotStart(), now);
+                releaseCapacity(task, now);
             }
             return;
         }
         taskRepository.updateDispatchIfAttempt(task.retryDispatch(now), metadata.dispatchAttemptId());
+    }
+
+    /** 测试定时不占用公共夜间时段，完成或失败时只释放会话锁。 */
+    private void releaseCapacity(NightExecutionTask task, Instant now) {
+        if (task.scheduleMode().reservesNightCapacity()) {
+            taskRepository.releaseSlot(task.slotStart(), now);
+        }
     }
 
     /** 优先使用 Redis/legacy 关系型唯一锚点；仅对没有数据库锚点的历史数据兼容查询用户消息。 */

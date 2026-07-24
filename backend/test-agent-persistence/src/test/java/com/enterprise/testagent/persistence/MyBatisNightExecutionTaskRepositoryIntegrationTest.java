@@ -6,6 +6,7 @@ import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTask;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskId;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskRepository;
+import com.enterprise.testagent.domain.nightexecution.NightExecutionScheduleMode;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskStatus;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.user.UserId;
@@ -73,6 +74,15 @@ class MyBatisNightExecutionTaskRepositoryIntegrationTest {
                 + "values(?,?,?,?,?,?,?)", WORKSPACE.value(), "night", "/tmp/night", "ACTIVE", "trace_night_repo", NOW, NOW);
         jdbc.update("insert into sessions(session_id, workspace_id, title, status, trace_id, created_at, updated_at) "
                 + "values(?,?,?,?,?,?,?)", SESSION.value(), WORKSPACE.value(), "night", "ACTIVE", "trace_night_repo", NOW, NOW);
+        jdbc.update("insert into night_execution_tasks(task_id,owner_user_id,session_id,workspace_id,"
+                        + "client_request_id,session_title,content_preview,status,slot_start,slot_end,window_end,"
+                        + "target_linux_server_id,trace_id,created_at,updated_at) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "net_legacy_night_mode", USER.value(), SESSION.value(), WORKSPACE.value(),
+                "request-legacy-night-mode", "历史夜间任务", "历史任务", "CANCELLED", SLOT,
+                SLOT.plusSeconds(900), Instant.parse("2026-07-18T23:00:00Z"), "linux-night-1",
+                "trace_legacy_night_mode", NOW, NOW.plusSeconds(3600));
+        new ResourceDatabasePopulator(new ClassPathResource(
+                "db/migration/V20260724143000__add_night_execution_schedule_mode.sql")).execute(dataSource);
 
         SqlSessionFactoryBean factoryBean = new SqlSessionFactoryBean();
         factoryBean.setDataSource(dataSource);
@@ -115,13 +125,18 @@ class MyBatisNightExecutionTaskRepositoryIntegrationTest {
     @Test
     void scheduledScanUsesSlotAndWindowInsteadOfUpdatedAtDelay() {
         NightExecutionTask scheduled = task().reschedule(
-                SLOT, SLOT.plusSeconds(900), "linux-night-1", SLOT.plusSeconds(30));
+                SLOT, SLOT.plusSeconds(900), Instant.parse("2026-07-18T23:00:00Z"),
+                "linux-night-1", SLOT.plusSeconds(30));
+        NightExecutionTask custom = customTask();
         repository.save(scheduled);
+        repository.save(custom);
 
         assertThat(repository.findScheduledDue(SLOT.minusSeconds(1), 10)).isEmpty();
-        assertThat(repository.findScheduledDue(SLOT.plusSeconds(1), 10)).containsExactly(scheduled);
+        assertThat(repository.findScheduledDue(SLOT.plusSeconds(1), 10))
+                .containsExactlyInAnyOrder(scheduled, custom);
         assertThat(repository.findScheduledDue(scheduled.windowEnd(), 10)).isEmpty();
-        assertThat(repository.findScheduledWindowExpired(scheduled.windowEnd(), 10)).containsExactly(scheduled);
+        assertThat(repository.findScheduledWindowExpired(custom.windowEnd(), 10)).contains(custom);
+        assertThat(repository.findScheduledWindowExpired(scheduled.windowEnd(), 10)).contains(scheduled, custom);
     }
 
     @Test
@@ -160,7 +175,8 @@ class MyBatisNightExecutionTaskRepositoryIntegrationTest {
         NightExecutionTask scheduled = task();
         repository.save(scheduled);
         NightExecutionTask adjusted = scheduled.reschedule(
-                SLOT.plusSeconds(900), SLOT.plusSeconds(1800), "linux-night-1", NOW.plusSeconds(1));
+                SLOT.plusSeconds(900), SLOT.plusSeconds(1800), scheduled.windowEnd(),
+                "linux-night-1", NOW.plusSeconds(1));
         NightExecutionTask cancelled = scheduled.cancel(NOW.plusSeconds(2));
 
         assertThat(repository.updateIfStatus(adjusted, NightExecutionTaskStatus.SCHEDULED)).isTrue();
@@ -178,6 +194,20 @@ class MyBatisNightExecutionTaskRepositoryIntegrationTest {
                     .containsEntry("SKIP_REASON", "夜间执行已迁移至 XXL-JOB")
                     .containsKey("ENDED_AT");
         }
+    }
+
+    @Test
+    void migrationDefaultsExistingRowsToNightWindowAndRepositoryPersistsCustomMode() {
+        assertThat(jdbc.queryForObject(
+                "select schedule_mode from night_execution_tasks where task_id=?",
+                String.class, "net_legacy_night_mode")).isEqualTo("NIGHT_WINDOW");
+
+        NightExecutionTask custom = customTask();
+        repository.save(custom);
+
+        assertThat(repository.findById(custom.taskId())).contains(custom);
+        assertThat(repository.findById(custom.taskId()).orElseThrow().scheduleMode())
+                .isEqualTo(NightExecutionScheduleMode.ADMIN_CUSTOM);
     }
 
     @Test
@@ -204,5 +234,15 @@ class MyBatisNightExecutionTaskRepositoryIntegrationTest {
                 NightExecutionTaskStatus.SCHEDULED, SLOT, SLOT.plusSeconds(900),
                 Instant.parse("2026-07-18T23:00:00Z"), "linux-night-1", null, null, 0,
                 false, null, null, null, null, null, "trace_night_repo", NOW, NOW);
+    }
+
+    private NightExecutionTask customTask() {
+        return new NightExecutionTask(
+                new NightExecutionTaskId("net_custom_repository"), USER, SESSION, WORKSPACE,
+                "request-custom-1", "测试定时", "生成回归测试", "{\"prompt\":\"生成回归测试\"}",
+                NightExecutionScheduleMode.ADMIN_CUSTOM, NightExecutionTaskStatus.SCHEDULED,
+                SLOT, SLOT.plusSeconds(60), SLOT.plusSeconds(900), "linux-night-1",
+                null, null, 0, false, null, null, null, null, 0L,
+                null, null, null, null, "trace_custom_repo", NOW, NOW);
     }
 }

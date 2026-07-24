@@ -2097,6 +2097,7 @@ test("a blank conversation schedules a night task and restores it from the pendi
   expect(nightTaskRequests[0]).toMatchObject({
     workspaceId: "wrk_personal_default",
     prompt: "夜间执行完整回归",
+    scheduleMode: "NIGHT_WINDOW",
     slotStart: "2026-07-18T13:15:00Z"
   });
   expect(nightTaskRequests[0]?.sessionId).toBeUndefined();
@@ -2145,6 +2146,37 @@ test("a blank conversation schedules a night task and restores it from the pendi
   await expect(page.locator(".oc-user-message__source-badge")).toContainText("21:16");
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect(page.getByTestId("current-night-task-card")).toHaveCount(0);
+});
+
+test("a super administrator can schedule a daytime 测试定时 to the minute", async ({ page }) => {
+  const nightTaskRequests: Array<Record<string, unknown>> = [];
+  const nightTasks: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    authRoles: ["SUPER_ADMIN"],
+    nightTaskRequests,
+    nightTasks
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("白天验证一分钟扫描");
+  await page.getByRole("button", { name: "定时执行" }).click();
+  await expect(page.getByTestId("schedule-mode-night")).toHaveClass(/is-active/);
+  await page.getByTestId("schedule-mode-custom").click();
+  await page.getByTestId("custom-schedule-plus-3").click();
+  await page.getByTestId("night-schedule-confirm").click();
+
+  await expect.poll(() => nightTaskRequests.length).toBe(1);
+  expect(nightTaskRequests[0]).toMatchObject({
+    workspaceId: "wrk_personal_default",
+    prompt: "白天验证一分钟扫描",
+    scheduleMode: "ADMIN_CUSTOM"
+  });
+  const slotStart = new Date(String(nightTaskRequests[0]?.slotStart));
+  expect(slotStart.getUTCSeconds()).toBe(0);
+  expect(slotStart.getUTCMilliseconds()).toBe(0);
+  await expect(page.getByTestId("current-night-task-card")).toContainText("测试定时");
+  await expect(page.getByTestId("current-night-task-card")).not.toContainText("–");
 });
 
 test("an existing-session night task locks only that conversation", async ({ page }) => {
@@ -6760,16 +6792,24 @@ async function mockBackendApi(
       const request = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
       capture.nightTaskRequests?.push(request);
       const taskId = `net_e2e_${nightTasks.length + 1}`;
+      const scheduleMode = String(request.scheduleMode ?? "NIGHT_WINDOW");
+      const slotStart = String(request.slotStart ?? "2026-07-18T13:15:00Z");
+      const slotStartMillis = new Date(slotStart).getTime();
       const task = {
         taskId,
         sessionId: String(request.sessionId ?? "ses_night_created"),
         workspaceId: String(request.workspaceId ?? "wrk_1234567890abcdef"),
         sessionTitle: String(request.sessionTitle ?? "夜间任务"),
         contentPreview: String(request.prompt ?? "夜间任务"),
+        scheduleMode,
         status: "SCHEDULED",
-        slotStart: String(request.slotStart ?? "2026-07-18T13:15:00Z"),
-        slotEnd: "2026-07-18T13:30:00Z",
-        windowEnd: "2026-07-18T23:00:00Z",
+        slotStart,
+        slotEnd: scheduleMode === "ADMIN_CUSTOM"
+          ? new Date(slotStartMillis + 60_000).toISOString()
+          : "2026-07-18T13:30:00Z",
+        windowEnd: scheduleMode === "ADMIN_CUSTOM"
+          ? new Date(slotStartMillis + 15 * 60_000).toISOString()
+          : "2026-07-18T23:00:00Z",
         rolloverCount: 0,
         runId: null,
         errorCode: null,

@@ -48,7 +48,7 @@
 - `application-test.yml`：数据库使用 `TEST_AGENT_TEST_DB_*`；为避免共享测试库中的占位/跨机器 Git 地址被本机后台反复 clone，应用版本工作区副本补偿器在 test profile 默认关闭。
 - 企业 Java 运行时使用外置 `dist/backend/lib/` 加载全部依赖；PostgreSQL JDBC 驱动类使用 `TEST_AGENT_DB_DRIVER_CLASS_NAME`，默认 `org.postgresql.Driver`。
 - `application.yml`：`test-agent.xxl-job.enabled` 默认 `true`；MySQL、access token、Admin/executor 端口和地址使用 `TEST_AGENT_XXL_JOB_*` 注入。readiness group 明确不包含 `xxlJobAdmin`。
-- 夜间执行每个 15 分钟时段容量不绑定环境变量，由全局通用参数 `NIGHT_EXECUTION_SLOT_CAPACITY` 提供；该显式内存参数在运行态 Flyway 完成后严格加载，缺失或非法会让应用启动失败。15 分钟分发和 5 分钟补偿均由 XXL 任务触发。
+- 标准夜间执行每个 15 分钟时段容量不绑定环境变量，由全局通用参数 `NIGHT_EXECUTION_SLOT_CAPACITY` 提供；该显式内存参数在运行态 Flyway 完成后严格加载，缺失或非法会让应用启动失败。支持精确分钟测试定时后，分发改由 XXL 每分钟触发，补偿仍每 5 分钟触发。
 - 运营分析等周期 handler 不再由旧 runner 注册；任务定义由 XXL MySQL 版本 SQL 初始化，启停、Cron、手动触发和日志在 XXL 页面维护。
 - 应用版本工作区物理根目录由 `common_parameters` 中的 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 决定（数据库唯一来源，缺失抛业务异常），不在 yaml 预留 fallback；副本补偿器除 test profile 外默认开启，可用 `test-agent.managed-workspace.replica-reconciler.enabled=false` 关闭，扫描间隔默认 60 秒。
 - 用户进程运行管理和 manager 控制面在线状态强依赖 Redis；多服务器应用版本工作区副本实时同步也需要共享 Redis，并显式开启 `test-agent.server-broadcast.enabled=true`；默认 channel 为 `test-agent:server-broadcast`。

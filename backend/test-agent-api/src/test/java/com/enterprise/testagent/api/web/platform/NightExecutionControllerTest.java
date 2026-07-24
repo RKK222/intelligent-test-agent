@@ -1,14 +1,20 @@
 package com.enterprise.testagent.api.web.platform;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.api.web.common.AuthWebSupport;
 import com.enterprise.testagent.api.web.common.GlobalExceptionHandler;
 import com.enterprise.testagent.api.web.common.TraceIdWebFilter;
+import com.enterprise.testagent.common.error.ErrorCode;
+import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
+import com.enterprise.testagent.domain.dictionary.Dictionary;
+import com.enterprise.testagent.domain.nightexecution.NightExecutionScheduleMode;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTask;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskId;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskStatus;
@@ -47,7 +53,7 @@ class NightExecutionControllerTest {
     @Test
     void createsTaskForAuthenticatedUserWithoutReturningFullInput() {
         NightExecutionTaskApplicationService service = mock(NightExecutionTaskApplicationService.class);
-        when(service.create(eq(USER_ID), any(NightExecutionCreateCommand.class), eq(TRACE_ID)))
+        when(service.create(eq(USER_ID), eq(false), any(NightExecutionCreateCommand.class), eq(TRACE_ID)))
                 .thenReturn(task());
         WebTestClient client = authenticatedClient(service);
 
@@ -67,14 +73,82 @@ class NightExecutionControllerTest {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.data.taskId").isEqualTo("net_night_controller")
+                .jsonPath("$.data.scheduleMode").isEqualTo("NIGHT_WINDOW")
                 .jsonPath("$.data.contentPreview").isEqualTo("安全预览")
                 .jsonPath("$.data.runInputJson").doesNotExist()
                 .jsonPath("$.data.prompt").doesNotExist();
+
+        verify(service).create(eq(USER_ID), eq(false),
+                argThat(command -> command.scheduleMode() == NightExecutionScheduleMode.NIGHT_WINDOW),
+                eq(TRACE_ID));
+    }
+
+    @Test
+    void passesSuperAdminFactAndCustomModeToApplicationService() {
+        NightExecutionTaskApplicationService service = mock(NightExecutionTaskApplicationService.class);
+        when(service.create(eq(USER_ID), eq(true), any(NightExecutionCreateCommand.class), eq(TRACE_ID)))
+                .thenReturn(task());
+        WebTestClient client = authenticatedClient(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.post().uri("/api/internal/platform/opencode-runtime/night-execution/tasks")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {
+                          "clientRequestId":"task-request-1",
+                          "workspaceId":"wrk_night_controller",
+                          "prompt":"执行白天验证",
+                          "scheduleMode":"ADMIN_CUSTOM",
+                          "slotStart":"2026-07-18T04:01:00Z"
+                        }
+                        """)
+                .exchange()
+                .expectStatus().isOk();
+
+        verify(service).create(eq(USER_ID), eq(true),
+                argThat(command -> command.scheduleMode() == NightExecutionScheduleMode.ADMIN_CUSTOM),
+                eq(TRACE_ID));
+    }
+
+    @Test
+    void rejectsForgedCustomModeWithUnifiedForbiddenResponse() {
+        NightExecutionTaskApplicationService service = mock(NightExecutionTaskApplicationService.class);
+        when(service.create(
+                        eq(USER_ID),
+                        eq(false),
+                        argThat(command -> command.scheduleMode() == NightExecutionScheduleMode.ADMIN_CUSTOM),
+                        eq(TRACE_ID)))
+                .thenThrow(new PlatformException(ErrorCode.FORBIDDEN, "仅超级管理员可使用测试定时"));
+        WebTestClient client = authenticatedClient(service);
+
+        client.post().uri("/api/internal/platform/opencode-runtime/night-execution/tasks")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {
+                          "clientRequestId":"task-request-forged",
+                          "workspaceId":"wrk_night_controller",
+                          "prompt":"伪造测试定时",
+                          "scheduleMode":"ADMIN_CUSTOM",
+                          "slotStart":"2026-07-18T04:01:00Z"
+                        }
+                        """)
+                .exchange()
+                .expectStatus().isForbidden()
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("FORBIDDEN")
+                .jsonPath("$.traceId").isEqualTo(TRACE_ID);
     }
 
     private static WebTestClient authenticatedClient(NightExecutionTaskApplicationService service) {
+        return authenticatedClient(service, List.of(Dictionary.ROLE_APP_ADMIN));
+    }
+
+    private static WebTestClient authenticatedClient(
+            NightExecutionTaskApplicationService service,
+            List<String> roles) {
         AuthPrincipal principal = new AuthPrincipal(
-                "token", USER_ID, "night-user", "night-user", List.of("APP_ADMIN"),
+                "token", USER_ID, "night-user", "night-user", roles,
                 NOW, NOW.plusSeconds(3600));
         return WebTestClient.bindToController(new NightExecutionController(service))
                 .webFilter(new TraceIdWebFilter())

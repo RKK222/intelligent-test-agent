@@ -13,8 +13,8 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 ## 主要程序清单
 
 - `session.SessionApplicationService`：会话创建、查询、消息和归档；消息列表会优先触发 projected messages 刷新，失败回退数据库快照。
-- `night.NightExecutionCapacityRegistry` / `NightExecutionTaskApplicationService`：从全局通用参数 `NIGHT_EXECUTION_SLOT_CAPACITY` 原子维护内存容量快照，并负责夜间窗口、15 分钟时段、提交查询/改期/取消和会话锁；任务提交时固化目标 Linux 服务器，不创建 `USER_PLAN`。
-- `night.NightExecutionDispatchScanTaskHandler` / `NightExecutionDispatchCoordinator` / `NightExecutionDispatchService`：XXL 每 15 分钟扫描 500 条、按目标服务器分组并以 50 条批次/8 台服务器并发分发；公共路由器先选出精确 backendProcessId，目标 Java 用 attempt/owner/5 分钟租约认领并在 Run 副作用前再次执行窗口续租 CAS，最多并发受理 4 个普通 Run，不建立夜间队列。
+- `night.NightExecutionCapacityRegistry` / `NightExecutionTaskApplicationService` / `NightExecutionCustomSchedulePolicy`：从全局通用参数 `NIGHT_EXECUTION_SLOT_CAPACITY` 原子维护内存容量快照，并负责标准夜间窗口、15 分钟容量时段、仅超级管理员可用的未来 24 小时精确分钟测试定时、提交查询/改期/取消和会话锁；测试定时不读写夜间容量，任务提交时固化目标 Linux 服务器，不创建 `USER_PLAN`。
+- `night.NightExecutionDispatchScanTaskHandler` / `NightExecutionDispatchCoordinator` / `NightExecutionDispatchService`：XXL 每分钟扫描 500 条两种模式的到期任务，按目标服务器分组并以 50 条批次/8 台服务器并发分发；公共路由器先选出精确 backendProcessId，目标 Java 用 attempt/owner/5 分钟租约认领并在 Run 副作用前再次执行窗口续租 CAS，最多并发受理 4 个普通 Run，不建立夜间队列。
 - `night.NightExecutionRunLifecycleService` / `NightExecutionDispatchLeaseGuard` / `NightExecutionDispatchOwnerWatchdog` / `NightExecutionReconcileService`：只用来源/任务/owner/Session/Workspace 全部匹配且确已受理的普通 Run 锚点驱动 `DISPATCHED` 和容量/会话锁释放；默认 legacy Scheduled Run 还用 Run 级 attempt/租约/受理标记恢复 anchor-only 崩溃窗口，不把仅有用户消息视为受理。恢复重投前通过 `RunDispatchAcceptanceProbe` 精确检查远端稳定消息，ACCEPTED 只补受理标记，NOT_ACCEPTED 才发送，UNKNOWN 不发送；同步调用每分钟续租，owner 本机先查锚点并收敛 handle 已消失的过期 attempt，跨 Java 的 5 分钟补偿再按精确 backendProcessId 心跳和 attempt fencing 恢复，窗口结束时仍先保护存活的 in-flight 调用。Run 终态继续使用既有会话与 RunEvent SSE，不反向修改夜间调度状态。
 - `process.BackendJavaRouteResolver`：统一按服务器、容器归属或稳定 `backendProcessId` 解析在线 Java；进程级诊断使用精确 ID，同服务器多个 Java 不合并。
 - `run.RunApplicationService`：Run 启动、路由、通用 agent binding 创建/复用、root session scope 记录、事件订阅、active-run 查询和取消；自动 dispatch 锚点由当前 runtime 生成并在远端 command、平台 USER、scope、manifest 和持久化锚点间复用，Legacy 显式旧 ID 保持透传。所有带 runId 的用户入口先通过该服务校验 Run 归属，新模式只读 Redis manifest 用户字段，legacy/manifest 缺失才回查 Run 与 Session。active-run 对已有 Redis user marker 的用户只读 Session active 索引。携带有效上下文的新 Run 由 `RunStorageModeSelector` 按 userId 稳定灰度固定为 `LEGACY_FULL` 或 `REDIS_SUMMARY`，活动期间不得切换；容量 reset 继续由同一运行数据面保留 USER、最新 assistant/可见 text part 和 run-status，不从数据库补原文。
@@ -61,7 +61,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 
 - `backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime`。
 - `run.*` 测试必须覆盖 Run 创建、通用 agent binding 保存/复用、远端 session 懒创建/复用、事件持久化策略、Redis manifest 优先的 RunEvent SSE 生产 Java 路由、Run 用户归属与新模式鉴权零 PostgreSQL、new/legacy scope 数据库访问边界和新模式 root/scope/dedup/pending 统一端口、终态快照/token 回写、确定性双摘要的净化/Unicode 截断/fallback、Redis active-run、Redis 连续故障 30 秒后的无原文收敛、待交互 7 天与普通无活动 2 小时精确边界/同服务器 Java 路由/owner lease、Diff fallback、按 dispatch user 的跨 Run 消息/Todo 隔离、Session 全量历史，以及 legacy stale active Run 收敛任务。
-- `night.*` 测试必须覆盖北京时间夜间窗口、15 分钟推荐/容量、幂等提交、单会话锁、固定目标批量路由、attempt 认领、租约续期、普通 Run 受理、稳定 Run 锚点恢复、心跳失联、07:00 最终失败和 30 天清理。
+- `night.*` 测试必须覆盖北京时间夜间窗口、15 分钟推荐/容量、超级管理员白天精确分钟与 24 小时边界、自定义模式容量隔离、幂等提交、单会话锁、固定目标批量路由、attempt 认领、租约续期、普通 Run 受理、稳定 Run 锚点恢复、心跳失联、模式对应窗口结束后的最终失败和 30 天清理。
 - `session.*` 测试必须覆盖 Workspace 校验、归档隐藏、局部更新、消息追加默认 role 和消息列表数据库 fallback。
 - `runtime.*` 测试必须覆盖 opencode runtime path、workspace directory 透传、query 过滤、permission/question body 兼容、旁路事件隔离、终态竞态和孤儿清理。
 - `process.*` 测试必须覆盖用户进程分配、并发预留单胜者、原端口恢复与明确冲突迁移、公共状态查询、公共启动/owned-stop 健康确认、通用参数路径读取、引用目录启动环境的目标平台解析/覆盖/缺失兼容、workspace 文件路由的实时应用成员校验、manager 控制面命令路由、后端心跳注册和含可空 UCID/manager 状态的运行管理快照聚合。

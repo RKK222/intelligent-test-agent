@@ -57,6 +57,7 @@ async function openSessionListDrawer(wrapper: any) {
 
 describe("FigmaChatPanel", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -97,7 +98,140 @@ describe("FigmaChatPanel", () => {
     await wrapper.get('[data-testid="night-slot-option"]').trigger("click");
     await wrapper.get('[data-testid="night-schedule-confirm"]').trigger("click");
     expect(wrapper.emitted("schedule-night")?.[0]).toEqual([
-      { prompt: "夜间分析完整测试集", slotStart: "2026-07-18T13:15:00Z" }
+      {
+        prompt: "夜间分析完整测试集",
+        scheduleMode: "NIGHT_WINDOW",
+        slotStart: "2026-07-18T13:15:00Z"
+      }
+    ]);
+  });
+
+  it("lets super administrators schedule an exact Beijing test time", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-24T02:00:30Z"));
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        inputValue: "白天验证定时分发",
+        canScheduleCustomTime: true,
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        nightSlots: {
+          timeZone: "Asia/Shanghai",
+          windowStart: "2026-07-24T13:00:00Z",
+          windowEnd: "2026-07-24T23:00:00Z",
+          capacity: 20,
+          slots: []
+        }
+      } as any
+    });
+
+    await wrapper.get('button[aria-label="定时执行"]').trigger("click");
+    expect(wrapper.get('[data-testid="schedule-mode-night"]').classes()).toContain("is-active");
+    await wrapper.get('[data-testid="schedule-mode-custom"]').trigger("click");
+    expect(wrapper.get('[data-testid="custom-schedule-input"]').element).toHaveProperty(
+      "value",
+      "2026-07-24T10:01"
+    );
+
+    await wrapper.get('[data-testid="custom-schedule-input"]').setValue("2026-07-24T10:00");
+    await wrapper.get('[data-testid="night-schedule-confirm"]').trigger("click");
+    expect(wrapper.get('[data-testid="custom-schedule-error"]').text()).toContain("下一完整分钟");
+    expect(wrapper.emitted("schedule-night")).toBeUndefined();
+
+    await wrapper.get('[data-testid="custom-schedule-plus-3"]').trigger("click");
+    await wrapper.get('[data-testid="night-schedule-confirm"]').trigger("click");
+    expect(wrapper.emitted("schedule-night")?.[0]).toEqual([
+      {
+        prompt: "白天验证定时分发",
+        scheduleMode: "ADMIN_CUSTOM",
+        slotStart: "2026-07-24T02:03:00.000Z"
+      }
+    ]);
+  });
+
+  it("shows custom schedules precisely and preserves cancellation after role removal", async () => {
+    const customTask = {
+      taskId: "night_custom",
+      sessionId: "session_custom",
+      workspaceId: "workspace_1",
+      sessionTitle: "白天测试",
+      contentPreview: "验证一分钟扫描",
+      scheduleMode: "ADMIN_CUSTOM",
+      status: "SCHEDULED",
+      slotStart: "2026-07-24T02:03:00Z",
+      slotEnd: "2026-07-24T02:04:00Z",
+      windowEnd: "2026-07-24T02:18:00Z",
+      rolloverCount: 0,
+      createdAt: "2026-07-24T02:00:00Z",
+      updatedAt: "2026-07-24T02:00:00Z"
+    };
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        currentSessionId: "session_custom",
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        currentNightTask: customTask,
+        nightTasks: [customTask],
+        canScheduleCustomTime: false
+      } as any
+    });
+
+    const currentCard = wrapper.get('[data-testid="current-night-task-card"]');
+    expect(currentCard.text()).toContain("测试定时");
+    expect(currentCard.text()).toContain("10:03");
+    expect(currentCard.text()).not.toContain("10:04");
+    expect(currentCard.text()).not.toContain("调整时间");
+    expect(currentCard.text()).toContain("取消任务");
+
+    const drawer = await openSessionListDrawer(wrapper);
+    await drawer.get('[data-testid="session-list-night-tasks-tab"]').trigger("click");
+    expect(drawer.get('[data-testid="night-task-list"]').text()).toContain("测试定时");
+    expect(drawer.get('[data-testid="night-task-list"]').text()).not.toContain("调整时间");
+    wrapper.unmount();
+  });
+
+  it("adjusts a custom task without switching its schedule mode", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-24T02:00:30Z"));
+    const customTask = {
+      taskId: "night_custom_adjust",
+      sessionId: "session_custom",
+      workspaceId: "workspace_1",
+      contentPreview: "验证改期",
+      scheduleMode: "ADMIN_CUSTOM",
+      status: "SCHEDULED",
+      slotStart: "2026-07-24T02:03:00Z",
+      slotEnd: "2026-07-24T02:04:00Z",
+      windowEnd: "2026-07-24T02:18:00Z",
+      rolloverCount: 0,
+      createdAt: "2026-07-24T02:00:00Z",
+      updatedAt: "2026-07-24T02:00:00Z"
+    };
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        currentSessionId: "session_custom",
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        currentNightTask: customTask,
+        canScheduleCustomTime: true
+      } as any
+    });
+
+    const adjust = wrapper.get('[data-testid="current-night-task-card"]')
+      .findAll("button")
+      .find((button) => button.text() === "调整时间");
+    expect(adjust).toBeDefined();
+    await adjust!.trigger("click");
+    expect(wrapper.find('[data-testid="schedule-mode-night"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="custom-schedule-input"]').element).toHaveProperty(
+      "value",
+      "2026-07-24T10:03"
+    );
+
+    await wrapper.get('[data-testid="custom-schedule-plus-5"]').trigger("click");
+    await wrapper.get('[data-testid="night-schedule-confirm"]').trigger("click");
+    expect(wrapper.emitted("adjust-night-task")?.[0]).toEqual([
+      { taskId: "night_custom_adjust", slotStart: "2026-07-24T02:05:00.000Z" }
     ]);
   });
 

@@ -42,6 +42,7 @@ import type {
   MessageScope,
   MessagePart,
   ModelInfo,
+  NightExecutionScheduleMode,
   NightExecutionSlots,
   NightExecutionTask,
   PermissionRequest,
@@ -69,6 +70,12 @@ import { validateChatSend } from '../stores/chatContextStore'
 import type { WorkspaceRequirementReference } from './workbench-utils'
 import { resolveSessionListDrawerPlacement } from './session-list-drawer'
 import { sortRawOutputEntriesNewestFirst } from './raw-output'
+import {
+  adminCustomScheduleBounds,
+  customScheduleAtOffset,
+  formatBeijingDateTimeInput,
+  validateAdminCustomSchedule,
+} from '../utils/night-execution-schedule'
 
 type ChatMessageInput = AgentMessage & { content?: string }
 
@@ -774,6 +781,8 @@ const props =
     nightSlotsLoading?: boolean
     nightTaskSubmitting?: boolean
     nightTaskActionPending?: Record<string, boolean>
+    /** 超级管理员测试能力：允许选择未来 24 小时内的北京时间分钟。 */
+    canScheduleCustomTime?: boolean
   }>(), {
     processRefreshBlocksSubmit: true,
     processStatusPlacement: 'chat',
@@ -796,6 +805,7 @@ const props =
     nightVisibleFailure: null,
     nightSlots: null,
     nightTaskActionPending: () => ({}),
+    canScheduleCustomTime: false,
     panelVisible: true,
   })
 
@@ -806,7 +816,11 @@ const emit =
     (e: 'retry'): void
     (e: 'new-conversation'): void
     (e: 'request-night-slots'): void
-    (e: 'schedule-night', payload: { prompt: string; slotStart: string }): void
+    (e: 'schedule-night', payload: {
+      prompt: string
+      scheduleMode: NightExecutionScheduleMode
+      slotStart: string
+    }): void
     (e: 'adjust-night-task', payload: { taskId: string; slotStart: string }): void
     (e: 'cancel-night-task', taskId: string): void
     (e: 'dismiss-night-task', taskId: string): void
@@ -853,7 +867,12 @@ const localInput = ref(props.inputValue ?? '')
 const nightPickerOpen = ref(false)
 const nightPickerMode = ref<'create' | 'adjust'>('create')
 const adjustingNightTaskId = ref<string | null>(null)
+const nightPickerScheduleMode = ref<NightExecutionScheduleMode>('NIGHT_WINDOW')
 const selectedNightSlotStart = ref('')
+const customScheduleInput = ref('')
+const customScheduleMin = ref('')
+const customScheduleMax = ref('')
+const customScheduleError = ref('')
 const nightSubmissionAwaiting = ref(false)
 const submittedNightTaskId = ref<string | null>(null)
 const cancelConfirmTaskId = ref<string | null>(null)
@@ -3187,6 +3206,7 @@ watch(localInput, (v) => onComposerInput(v))
 watch(
   () => props.nightSlots,
   (window) => {
+    if (nightPickerScheduleMode.value !== 'NIGHT_WINDOW') return
     if (nightPickerMode.value === 'adjust' && selectedNightSlotStart.value) return
     const selectedStillAvailable = window?.slots.some(
       (slot) => slot.slotStart === selectedNightSlotStart.value && slot.available
@@ -3198,6 +3218,14 @@ watch(
       ?? ''
   },
   { immediate: true }
+)
+
+watch(
+  () => props.canScheduleCustomTime,
+  (allowed) => {
+    // 角色刷新后立即收回测试定时入口；服务端仍会再次执行 SUPER_ADMIN 强校验。
+    if (!allowed && nightPickerScheduleMode.value === 'ADMIN_CUSTOM') closeNightPicker()
+  }
 )
 
 watch(
@@ -3951,6 +3979,20 @@ function formatNightRange(task: Pick<NightExecutionTask, 'slotStart' | 'slotEnd'
   return `${formatNightDate(task.slotStart)} ${formatNightTime(task.slotStart)}–${formatNightTime(task.slotEnd)}`
 }
 
+function nightTaskScheduleMode(task: Pick<NightExecutionTask, 'scheduleMode'>): NightExecutionScheduleMode {
+  return task.scheduleMode ?? 'NIGHT_WINDOW'
+}
+
+function isCustomSchedule(task: Pick<NightExecutionTask, 'scheduleMode'>): boolean {
+  return nightTaskScheduleMode(task) === 'ADMIN_CUSTOM'
+}
+
+function formatNightTaskSchedule(task: NightExecutionTask): string {
+  return isCustomSchedule(task)
+    ? `${formatNightDate(task.slotStart)} ${formatNightTime(task.slotStart)}`
+    : formatNightRange(task)
+}
+
 function formatNightCreatedAt(iso: string): string {
   return `${formatNightDate(iso)} ${formatNightTime(iso)}`
 }
@@ -3970,13 +4012,48 @@ function nightActionPending(taskId: string): boolean {
   return props.nightTaskActionPending?.[taskId] === true
 }
 
+function canAdjustNightTask(task: NightExecutionTask): boolean {
+  return !isCustomSchedule(task) || props.canScheduleCustomTime
+}
+
+function refreshCustomScheduleBounds(now = new Date()) {
+  const bounds = adminCustomScheduleBounds(now)
+  customScheduleMin.value = bounds.min
+  customScheduleMax.value = bounds.max
+}
+
+function setCustomScheduleOffset(minutes: number, now = new Date()) {
+  refreshCustomScheduleBounds(now)
+  customScheduleInput.value = formatBeijingDateTimeInput(customScheduleAtOffset(now, minutes))
+  customScheduleError.value = ''
+}
+
+function selectScheduleMode(mode: NightExecutionScheduleMode) {
+  if (nightPickerMode.value !== 'create' || mode === nightPickerScheduleMode.value) return
+  if (mode === 'ADMIN_CUSTOM' && !props.canScheduleCustomTime) return
+  nightPickerScheduleMode.value = mode
+  customScheduleError.value = ''
+  if (mode === 'ADMIN_CUSTOM') setCustomScheduleOffset(1)
+}
+
+function onCustomScheduleInput() {
+  customScheduleError.value = ''
+}
+
 function openNightPicker() {
   if (nightScheduleBlocked.value) return
+  if (nightPickerOpen.value) {
+    closeNightPicker()
+    return
+  }
   nightPickerMode.value = 'create'
   adjustingNightTaskId.value = null
+  nightPickerScheduleMode.value = 'NIGHT_WINDOW'
+  customScheduleInput.value = ''
+  customScheduleError.value = ''
   submittedNightTaskId.value = props.currentNightTask?.taskId ?? null
-  nightPickerOpen.value = !nightPickerOpen.value
-  if (nightPickerOpen.value) emit('request-night-slots')
+  nightPickerOpen.value = true
+  emit('request-night-slots')
 }
 
 function openNightTaskConversation(sessionId: string) {
@@ -3988,6 +4065,7 @@ function closeNightPicker() {
   nightPickerOpen.value = false
   nightPickerMode.value = 'create'
   adjustingNightTaskId.value = null
+  customScheduleError.value = ''
 }
 
 function selectNightSlot(slotStart: string, available: boolean) {
@@ -3996,11 +4074,24 @@ function selectNightSlot(slotStart: string, available: boolean) {
 }
 
 function confirmNightSchedule() {
-  if (!selectedNightSlotStart.value || props.nightTaskSubmitting) return
+  if (props.nightTaskSubmitting) return
+  let slotStart = selectedNightSlotStart.value
+  if (nightPickerScheduleMode.value === 'ADMIN_CUSTOM') {
+    if (!props.canScheduleCustomTime) return
+    const validation = validateAdminCustomSchedule(customScheduleInput.value, new Date())
+    refreshCustomScheduleBounds()
+    if (!validation.valid) {
+      customScheduleError.value = validation.reason
+      return
+    }
+    slotStart = validation.slotStart
+    customScheduleError.value = ''
+  }
+  if (!slotStart) return
   if (nightPickerMode.value === 'adjust' && adjustingNightTaskId.value) {
     emit('adjust-night-task', {
       taskId: adjustingNightTaskId.value,
-      slotStart: selectedNightSlotStart.value,
+      slotStart,
     })
     closeNightPicker()
     return
@@ -4009,16 +4100,32 @@ function confirmNightSchedule() {
   if (!prompt || nightScheduleBlocked.value) return
   nightSubmissionAwaiting.value = true
   submittedNightTaskId.value = props.currentNightTask?.taskId ?? null
-  emit('schedule-night', { prompt, slotStart: selectedNightSlotStart.value })
+  emit('schedule-night', {
+    prompt,
+    scheduleMode: nightPickerScheduleMode.value,
+    slotStart,
+  })
 }
 
 function beginAdjustNightTask(task: NightExecutionTask) {
   if (task.status !== 'SCHEDULED' || nightActionPending(task.taskId)) return
+  if (!canAdjustNightTask(task)) return
   nightPickerMode.value = 'adjust'
   adjustingNightTaskId.value = task.taskId
-  selectedNightSlotStart.value = task.slotStart
+  nightPickerScheduleMode.value = nightTaskScheduleMode(task)
+  customScheduleError.value = ''
+  if (nightPickerScheduleMode.value === 'ADMIN_CUSTOM') {
+    const now = new Date()
+    refreshCustomScheduleBounds(now)
+    const existing = formatBeijingDateTimeInput(new Date(task.slotStart))
+    customScheduleInput.value = validateAdminCustomSchedule(existing, now).valid
+      ? existing
+      : formatBeijingDateTimeInput(customScheduleAtOffset(now, 1))
+  } else {
+    selectedNightSlotStart.value = task.slotStart
+  }
   nightPickerOpen.value = true
-  emit('request-night-slots')
+  if (nightPickerScheduleMode.value === 'NIGHT_WINDOW') emit('request-night-slots')
 }
 
 function askCancelNightTask(taskId: string) {
@@ -4178,14 +4285,19 @@ function onCompositionEnd() {
         data-testid="current-night-task-card"
       >
         <div class="figma-chat-night-card-head">
-          <span class="figma-chat-night-status">{{ nightTaskStatusLabel(currentNightTask) }}</span>
-          <span class="figma-chat-night-time">{{ formatNightRange(currentNightTask) }}</span>
+          <span class="figma-chat-night-status">
+            {{ isCustomSchedule(currentNightTask) ? '测试定时 · ' : '' }}{{ nightTaskStatusLabel(currentNightTask) }}
+          </span>
+          <span class="figma-chat-night-time">{{ formatNightTaskSchedule(currentNightTask) }}</span>
         </div>
-        <strong class="figma-chat-night-title">夜间执行已安排</strong>
+        <strong class="figma-chat-night-title">
+          {{ isCustomSchedule(currentNightTask) ? '测试定时已安排' : '夜间执行已安排' }}
+        </strong>
         <p class="figma-chat-night-preview">{{ currentNightTask.contentPreview }}</p>
         <div class="figma-chat-night-actions">
           <template v-if="currentNightTask.status === 'SCHEDULED'">
             <button
+              v-if="canAdjustNightTask(currentNightTask)"
               type="button"
               :disabled="nightActionPending(currentNightTask.taskId)"
               @click="beginAdjustNightTask(currentNightTask)"
@@ -4212,8 +4324,10 @@ function onCompositionEnd() {
         data-testid="night-failure-card"
       >
         <div class="figma-chat-night-card-head">
-          <span class="figma-chat-night-status">夜间执行失败</span>
-          <span class="figma-chat-night-time">{{ formatNightRange(nightVisibleFailure) }}</span>
+          <span class="figma-chat-night-status">
+            {{ isCustomSchedule(nightVisibleFailure) ? '测试定时失败' : '夜间执行失败' }}
+          </span>
+          <span class="figma-chat-night-time">{{ formatNightTaskSchedule(nightVisibleFailure) }}</span>
         </div>
         <strong class="figma-chat-night-title">{{ nightVisibleFailure.contentPreview }}</strong>
         <p class="figma-chat-night-error">{{ nightVisibleFailure.errorMessage || '任务未能在夜间窗口内启动' }}</p>
@@ -5237,44 +5351,100 @@ function onCompositionEnd() {
         v-if="nightPickerOpen"
         class="figma-chat-night-picker"
         data-testid="night-slot-picker"
-        aria-label="选择夜间执行时间"
+        aria-label="选择定时执行时间"
       >
         <div class="figma-chat-night-picker-head">
           <div>
-            <strong>{{ nightPickerMode === 'adjust' ? '调整启动时间' : '安排夜间执行' }}</strong>
-            <span>北京时间 · 每 15 分钟一个启动时间段</span>
+            <strong>{{ nightPickerMode === 'adjust' ? '调整启动时间' : '安排定时执行' }}</strong>
+            <span v-if="nightPickerScheduleMode === 'NIGHT_WINDOW'">北京时间 · 每 15 分钟一个启动时间段</span>
+            <span v-else>北京时间 · 测试专用 · 精确到分钟</span>
           </div>
           <button type="button" aria-label="关闭时间选择" @click="closeNightPicker"><X :size="14" /></button>
         </div>
-        <div v-if="nightSlotsLoading" class="figma-chat-night-picker-loading">
-          <Spinner /> 正在计算合适时间…
-        </div>
-        <div v-else-if="!nightSlots?.slots.length" class="figma-chat-night-picker-empty">
-          暂无可用夜间时间段，请稍后重试。
-        </div>
-        <div v-else class="figma-chat-night-track">
+        <div
+          v-if="canScheduleCustomTime && nightPickerMode === 'create'"
+          class="figma-chat-schedule-mode"
+          aria-label="定时模式"
+        >
           <button
-            v-for="slot in nightSlots.slots"
-            :key="slot.slotStart"
             type="button"
-            data-testid="night-slot-option"
-            :class="[
-              'figma-chat-night-slot',
-              selectedNightSlotStart === slot.slotStart && 'is-selected',
-              slot.recommended && 'is-recommended',
-            ]"
-            :disabled="!slot.available || nightTaskSubmitting"
-            :title="slot.available ? `${slot.reservedCount}/${slot.capacity} 已预约` : '该时间段已满'"
-            @click="selectNightSlot(slot.slotStart, slot.available)"
-          >
-            <span>{{ formatNightTime(slot.slotStart) }}</span>
-            <small v-if="slot.recommended">系统推荐</small>
-            <small v-else-if="!slot.available">已满</small>
-            <small v-else>{{ slot.reservedCount }}/{{ slot.capacity }}</small>
-          </button>
+            data-testid="schedule-mode-night"
+            :class="{ 'is-active': nightPickerScheduleMode === 'NIGHT_WINDOW' }"
+            @click="selectScheduleMode('NIGHT_WINDOW')"
+          >夜间时段</button>
+          <button
+            type="button"
+            data-testid="schedule-mode-custom"
+            :class="{ 'is-active': nightPickerScheduleMode === 'ADMIN_CUSTOM' }"
+            @click="selectScheduleMode('ADMIN_CUSTOM')"
+          >测试时间</button>
+        </div>
+        <template v-if="nightPickerScheduleMode === 'NIGHT_WINDOW'">
+          <div v-if="nightSlotsLoading" class="figma-chat-night-picker-loading">
+            <Spinner /> 正在计算合适时间…
+          </div>
+          <div v-else-if="!nightSlots?.slots.length" class="figma-chat-night-picker-empty">
+            暂无可用夜间时间段，请稍后重试。
+          </div>
+          <div v-else class="figma-chat-night-track">
+            <button
+              v-for="slot in nightSlots.slots"
+              :key="slot.slotStart"
+              type="button"
+              data-testid="night-slot-option"
+              :class="[
+                'figma-chat-night-slot',
+                selectedNightSlotStart === slot.slotStart && 'is-selected',
+                slot.recommended && 'is-recommended',
+              ]"
+              :disabled="!slot.available || nightTaskSubmitting"
+              :title="slot.available ? `${slot.reservedCount}/${slot.capacity} 已预约` : '该时间段已满'"
+              @click="selectNightSlot(slot.slotStart, slot.available)"
+            >
+              <span>{{ formatNightTime(slot.slotStart) }}</span>
+              <small v-if="slot.recommended">系统推荐</small>
+              <small v-else-if="!slot.available">已满</small>
+              <small v-else>{{ slot.reservedCount }}/{{ slot.capacity }}</small>
+            </button>
+          </div>
+        </template>
+        <div v-else class="figma-chat-custom-schedule">
+          <div class="figma-chat-custom-quick" aria-label="快捷测试时间">
+            <button
+              v-for="minutes in [1, 3, 5]"
+              :key="minutes"
+              type="button"
+              :data-testid="`custom-schedule-plus-${minutes}`"
+              :disabled="nightTaskSubmitting"
+              @click="setCustomScheduleOffset(minutes)"
+            >{{ minutes }} 分钟后</button>
+          </div>
+          <label class="figma-chat-custom-input-label">
+            <span>计划启动时间（北京时间）</span>
+            <input
+              v-model="customScheduleInput"
+              type="datetime-local"
+              step="60"
+              :min="customScheduleMin"
+              :max="customScheduleMax"
+              :disabled="nightTaskSubmitting"
+              data-testid="custom-schedule-input"
+              @input="onCustomScheduleInput"
+            />
+          </label>
+          <span
+            v-if="customScheduleError"
+            class="figma-chat-custom-error"
+            data-testid="custom-schedule-error"
+          >{{ customScheduleError }}</span>
+          <span v-else class="figma-chat-custom-hint">到达计划时间后，通常会在 1 分钟内发起执行。</span>
         </div>
         <div class="figma-chat-night-picker-foot">
-          <span v-if="selectedNightSlotStart">
+          <span v-if="nightPickerScheduleMode === 'ADMIN_CUSTOM' && customScheduleInput">
+            将按北京时间 {{ customScheduleInput.replace('T', ' ') }} 启动
+          </span>
+          <span v-else-if="nightPickerScheduleMode === 'ADMIN_CUSTOM'">请选择未来 24 小时内的完整分钟</span>
+          <span v-else-if="selectedNightSlotStart">
             将在 {{ formatNightDate(selectedNightSlotStart) }} {{ formatNightTime(selectedNightSlotStart) }}–{{
               formatNightTime(nightSlots?.slots.find((slot) => slot.slotStart === selectedNightSlotStart)?.slotEnd || selectedNightSlotStart)
             }} 内启动
@@ -5283,7 +5453,7 @@ function onCompositionEnd() {
           <button
             type="button"
             data-testid="night-schedule-confirm"
-            :disabled="!selectedNightSlotStart || nightTaskSubmitting"
+            :disabled="nightTaskSubmitting || (nightPickerScheduleMode === 'NIGHT_WINDOW' ? !selectedNightSlotStart : !customScheduleInput)"
             @click="confirmNightSchedule"
           >
             <Spinner v-if="nightTaskSubmitting" />
@@ -6010,8 +6180,10 @@ function onCompositionEnd() {
                 :class="{ 'is-dispatching': task.status === 'DISPATCHING' }"
               >
                 <div class="figma-chat-night-card-head">
-                  <span class="figma-chat-night-status">{{ nightTaskStatusLabel(task) }}</span>
-                  <span class="figma-chat-night-time">{{ formatNightRange(task) }}</span>
+                  <span class="figma-chat-night-status">
+                    {{ isCustomSchedule(task) ? '测试定时 · ' : '' }}{{ nightTaskStatusLabel(task) }}
+                  </span>
+                  <span class="figma-chat-night-time">{{ formatNightTaskSchedule(task) }}</span>
                 </div>
                 <strong class="figma-chat-night-title">{{ task.sessionTitle || '新对话' }}</strong>
                 <p class="figma-chat-night-preview">{{ task.contentPreview }}</p>
@@ -6019,7 +6191,12 @@ function onCompositionEnd() {
                 <div class="figma-chat-night-actions">
                   <button type="button" @click="openNightTaskConversation(task.sessionId)">查看对话</button>
                   <template v-if="task.status === 'SCHEDULED'">
-                    <button type="button" :disabled="nightActionPending(task.taskId)" @click="beginAdjustNightTask(task)">调整时间</button>
+                    <button
+                      v-if="canAdjustNightTask(task)"
+                      type="button"
+                      :disabled="nightActionPending(task.taskId)"
+                      @click="beginAdjustNightTask(task)"
+                    >调整时间</button>
                     <button
                       v-if="cancelConfirmTaskId !== task.taskId"
                       type="button"
@@ -8828,6 +9005,91 @@ function onCompositionEnd() {
 .figma-chat-night-picker-head > button:hover {
   background: #eceef4;
   color: #27272a;
+}
+.figma-chat-schedule-mode {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid #e0e1e7;
+  border-radius: 8px;
+  background: #f1f2f6;
+}
+.figma-chat-schedule-mode button {
+  min-height: 29px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #71717a;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.figma-chat-schedule-mode button.is-active {
+  background: #fff;
+  color: #27325e;
+  box-shadow: 0 1px 3px rgba(39, 50, 94, 0.13);
+}
+.figma-chat-custom-schedule {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid #e0e1e7;
+  border-radius: 9px;
+  background: #fff;
+}
+.figma-chat-custom-quick {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+.figma-chat-custom-quick button {
+  min-height: 30px;
+  border: 1px solid #d8dbe7;
+  border-radius: 7px;
+  background: #f8f8fb;
+  color: #3f3f46;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.figma-chat-custom-quick button:hover:not(:disabled) {
+  border-color: #aeb3c6;
+  background: #f2f3f8;
+}
+.figma-chat-custom-input-label {
+  display: grid;
+  gap: 5px;
+  color: #52525b;
+  font-size: 11px;
+  line-height: 16px;
+}
+.figma-chat-custom-input-label input {
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid #cfd2de;
+  border-radius: 7px;
+  background: #fff;
+  color: #27272a;
+  font: inherit;
+  font-size: 12px;
+}
+.figma-chat-custom-input-label input:focus {
+  border-color: #27325e;
+  box-shadow: 0 0 0 2px rgba(39, 50, 94, 0.1);
+  outline: none;
+}
+.figma-chat-custom-error,
+.figma-chat-custom-hint {
+  font-size: 11px;
+  line-height: 16px;
+}
+.figma-chat-custom-error {
+  color: #a23731;
+}
+.figma-chat-custom-hint {
+  color: #71717a;
 }
 .figma-chat-night-track {
   display: grid;

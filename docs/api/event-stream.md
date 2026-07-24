@@ -686,6 +686,8 @@ event: message.part.delta
 data: {"eventId":"evt_live_...","runId":"run_...","seq":0,"type":"message.part.delta","traceId":"trace_...","occurredAt":"2026-06-19T00:00:00Z","payload":{"messageID":"msg_...","partID":"part_...","delta":"hello"}}
 ```
 
+定时任务的 `NIGHT_WINDOW/ADMIN_CUSTOM` 仅影响 Run 创建前的调度时间和夜间容量；两种模式受理后都复用现有 `SCHEDULED_TASK` Session/Run 来源及本章 RunEvent。`scheduleMode`、分发 attempt 和租约不进入 RunEvent payload，本功能不新增事件类型。
+
 实现策略：
 
 - RunEvent SSE 入口优先从 Redis manifest 读取 Run 创建时固定的 `producerLinuxServerId`；manifest 缺失的 legacy/旧 Run 才按 `routing_decisions -> executionNodeId -> opencode process -> linuxServerId` 定位生产 Java。目标不是当前 Java 时通过 `BackendSseForwarder` 流式转发 `text/event-stream`，并透传 `Authorization`、`X-Trace-Id`、`Last-Event-ID` 和 query。目标 Java 收到内部路由头后跳过二次路由。

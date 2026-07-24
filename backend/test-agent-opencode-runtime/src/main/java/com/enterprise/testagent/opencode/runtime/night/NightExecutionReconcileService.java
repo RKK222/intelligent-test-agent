@@ -170,7 +170,9 @@ public class NightExecutionReconcileService {
 
     private void release(NightExecutionTask task, Instant now) {
         repository.deleteSessionLock(task.sessionId(), task.taskId());
-        repository.releaseSlot(task.slotStart(), now);
+        if (task.scheduleMode().reservesNightCapacity()) {
+            repository.releaseSlot(task.slotStart(), now);
+        }
     }
 
     @Autowired(required = false)

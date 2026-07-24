@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTask;
+import com.enterprise.testagent.domain.nightexecution.NightExecutionScheduleMode;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskId;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskRepository;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskStatus;
@@ -168,6 +169,25 @@ class NightExecutionReconcileServiceTest {
         verify(repository).releaseSlot(task.slotStart(), now);
     }
 
+    @Test
+    void failsExpiredCustomTaskWithoutTouchingNightCapacity() {
+        Instant now = Instant.parse("2026-07-18T13:15:00Z");
+        NightExecutionTask task = scheduledTask(now, NightExecutionScheduleMode.ADMIN_CUSTOM);
+        NightExecutionTaskRepository repository = mock(NightExecutionTaskRepository.class);
+        when(repository.findDispatchingLeaseExpiredBefore(now, 50)).thenReturn(List.of());
+        when(repository.findScheduledWindowExpired(now, 50)).thenReturn(List.of(task));
+        when(repository.findTerminalBefore(now.minusSeconds(30L * 24 * 3600), 50)).thenReturn(List.of());
+        when(repository.updateIfStatus(any(), eq(NightExecutionTaskStatus.SCHEDULED))).thenReturn(true);
+        NightExecutionReconcileService service = service(
+                repository, mock(NightExecutionRunLifecycleService.class), now);
+
+        NightExecutionReconcileService.Result result = service.reconcile("trace_reconcile", () -> false);
+
+        assertThat(result.failed()).isEqualTo(1);
+        verify(repository).deleteSessionLock(task.sessionId(), task.taskId());
+        verify(repository, never()).releaseSlot(any(), any());
+    }
+
     private NightExecutionTaskRepository baseRepository(Instant now, NightExecutionTask task) {
         NightExecutionTaskRepository repository = mock(NightExecutionTaskRepository.class);
         when(repository.findDispatchingLeaseExpiredBefore(now, 50)).thenReturn(List.of(task));
@@ -191,14 +211,24 @@ class NightExecutionReconcileServiceTest {
     }
 
     private NightExecutionTask scheduledTask(Instant windowEnd) {
+        return scheduledTask(windowEnd, NightExecutionScheduleMode.NIGHT_WINDOW);
+    }
+
+    private NightExecutionTask scheduledTask(
+            Instant windowEnd,
+            NightExecutionScheduleMode scheduleMode) {
         Instant created = Instant.parse("2026-07-18T12:00:00Z");
         return new NightExecutionTask(
                 new NightExecutionTaskId("net_night_reconcile"), new UserId("usr_night_reconcile"),
                 new SessionId("ses_night_reconcile"), new WorkspaceId("wrk_night_reconcile"),
                 "request-night-reconcile", "夜间回归", "执行回归", "{}",
-                NightExecutionTaskStatus.SCHEDULED,
-                Instant.parse("2026-07-18T13:00:00Z"), Instant.parse("2026-07-18T13:15:00Z"),
+                scheduleMode, NightExecutionTaskStatus.SCHEDULED,
+                Instant.parse("2026-07-18T13:00:00Z"),
+                scheduleMode == NightExecutionScheduleMode.ADMIN_CUSTOM
+                        ? Instant.parse("2026-07-18T13:01:00Z")
+                        : Instant.parse("2026-07-18T13:15:00Z"),
                 windowEnd, "linux-night-a", null, null, 0, false,
-                null, null, null, null, null, "trace_reconcile", created, created);
+                null, null, null, null, 0L, null, null, null, null,
+                "trace_reconcile", created, created);
     }
 }

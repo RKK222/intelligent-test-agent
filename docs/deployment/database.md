@@ -19,10 +19,11 @@ XXL MySQL 与平台 PostgreSQL 完全分离。Admin 子上下文只扫描 `backe
 | `V2__platform_sso_and_task_keys.sql` | `xxl_job_user` 增加唯一 `platform_user_id`、SHA-256 session digest/expiry，用户名扩为 128；`xxl_job_info` 增加唯一 `platform_task_key`。 |
 | `V3__register_platform_executor_and_tasks.sql` | 新增自动注册执行器组 `test-agent-backend` 与六个首批周期任务。 |
 | `V4__register_night_execution_dispatch_task.sql` | 注册每 15 分钟执行的 `opencode-runtime.night-execution-dispatch`，使用 ROUND、DISCARD_LATER、DO_NOTHING、GLOBAL_MUTEX 和零 XXL 重试。 |
+| `V5__schedule_night_execution_dispatch_every_minute.sql` | 把既有分发任务 Cron 更新为每分钟并触发下一次时间重算，其它策略不变。 |
 
-V3/V4 是生产必需基础调度配置，不是演示数据。后续新增任务使用完全相同的模式：每次新建不可变的 `V5`、`V6` 等版本 SQL，以新的 `platform_task_key` 插入任务；不得在应用启动阶段 upsert，也不得覆盖 XXL 页面中已调整的启停、Cron 或其它运行参数。
+V3/V4/V5 是生产必需基础调度配置，不是演示数据。后续新增任务使用完全相同的模式：每次新建不可变的 `V6`、`V7` 等版本 SQL，以新的 `platform_task_key` 插入任务；不得在应用启动阶段 upsert，也不得覆盖 XXL 页面中已调整的启停、Cron 或其它运行参数。
 
-所有平台任务固定 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`，参数只含 `taskKey/concurrencyPolicy/payload`。V1-V4 可被多个 Admin 节点并发启动，Flyway schema history 负责互斥；重复启动不得重复 executor 组或任务。
+所有平台任务固定 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`，参数只含 `taskKey/concurrencyPolicy/payload`。V1-V5 可被多个 Admin 节点并发启动，Flyway schema history 负责互斥；重复启动不得重复 executor 组或任务。
 
 PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审计，不再产生新的 PostgreSQL scheduler 运行。短暂停机升级 migration 将旧夜间 `PENDING/RUNNING/STOPPING USER_PLAN` 全部标记为 `SKIPPED`，避免旧 runner 删除后留下永久活动记录。XXL 运行日志独立留在 MySQL，默认保留 30 天。
 
@@ -847,7 +848,7 @@ V10 种子数据对 F-COSS 的影响：
 
 | 表 | 说明 |
 |---|---|
-| `night_execution_tasks` | 夜间任务聚合，保存 owner、Session/Workspace、幂等请求、展示预览、待执行输入、15 分钟时段、固定目标服务器、历史 USER_PLAN/当前 Run 关联、状态和安全错误。 |
+| `night_execution_tasks` | 定时任务聚合，保存 owner、Session/Workspace、幂等请求、展示预览、待执行输入、调度模式/时间窗口、固定目标服务器、历史 USER_PLAN/当前 Run 关联、状态和安全错误。 |
 | `night_execution_session_locks` | 每个 Session 至多一个待执行任务的持久化写锁；任务取消、最终失败或 Run 成功创建后删除。 |
 | `night_execution_slot_reservations` | 以 `slot_start` 为主键保存每个 15 分钟时段的全局已占名额；条件更新保证不超过当前内存容量快照。 |
 
@@ -858,7 +859,7 @@ V10 种子数据对 F-COSS 的影响：
 - `night_execution_session_locks.session_id` 为主键，`task_id` 唯一，数据库层保证单会话互斥；删除任务时锁级联删除。
 - `run_input_json` 只在待执行期短期保存完整 Run 输入，任务进入 `DISPATCHED/CANCELLED/FAILED` 后清空；查询 API 只返回 `content_preview`。不得把该字段写入 XXL 参数/结果、跨服务器请求、RunEvent、日志或运营分析表。终态行清理在删除时再次校验状态、30 天 cutoff 和 `state_version`，避免与失败卡关闭等并发更新竞态。
 - 任务绑定已有 Session，或在创建事务中预创建 `source_type=SCHEDULED_TASK/source_ref_id=task_id` 的空白 Session。成功 Run 和 USER 消息沿用同一来源字段；旧数据默认 `MANUAL` 兼容。
-- 终态任务和历史容量行保留 30 天，由 `opencode-runtime.night-execution-reconcile` 分批清理。普通 Run 受理、取消和最终失败会立即释放时段名额；改期先释放原时段再占用新时段。
+- 终态任务和历史容量行保留 30 天，由 `opencode-runtime.night-execution-reconcile` 分批清理。标准夜间任务在普通 Run 受理、取消和最终失败时立即释放时段名额；改期先占用新时段，事务成功后再释放原时段。
 - 全部关系型 SQL 位于 `NightExecutionTaskMapper.xml`；首次创建用 PostgreSQL 事务级 advisory lock 串行化同一 owner/request。新分发认领和补偿 fencing 由下节 migration 增加。
 
 ## V20260722130000 夜间任务迁移到 XXL-JOB
@@ -877,6 +878,14 @@ V10 种子数据对 F-COSS 的影响：
 迁移重建 `status + slot_start + window_end + created_at` 到期扫描索引，并增加 `status + dispatch_lease_until + created_at`、`owner + status + lease` 补偿索引。新到期查询固定为 `SCHEDULED AND slot_start<=now AND window_end>now`，按 `slot_start, created_at` 返回最多 500 条；认领匹配 `status + state_version + target_linux_server_id`，续租、完成、失败和回退统一匹配 `task_id + DISPATCHING + dispatch_attempt_id`，旧执行者无法覆盖新 attempt。
 
 兼容数据处理只做生产必需收敛：旧 `opencode-runtime.night-execution` 的 `PENDING/RUNNING/STOPPING USER_PLAN` 运行全部标记为 `SKIPPED` 并补齐结束时间；`SCHEDULED` 任务清空历史 `scheduled_task_run_id`；遗留 `DISPATCHING` 补齐已过期的迁移 attempt/owner/lease，由 5 分钟补偿先查 Run 锚点再恢复。历史运行和审计行不删除。发布必须先停止全部旧 Java，再应用 PostgreSQL/XXL MySQL migration 并启动新版本，避免两套入口并行。
+
+## V20260724143000 夜间任务调度模式
+
+`V20260724143000__add_night_execution_schedule_mode.sql` 为 `night_execution_tasks` 增加非空 `schedule_mode varchar(32)`，默认值为 `NIGHT_WINDOW`，并通过检查约束只允许 `NIGHT_WINDOW/ADMIN_CUSTOM`。存量任务和未显式写入该列的旧客户端数据自动回填为 `NIGHT_WINDOW`，因此原夜间窗口、容量和展示语义保持不变。
+
+`ADMIN_CUSTOM` 仍写同一任务表并复用同一到期扫描索引：`slot_start` 为超级管理员选择的完整分钟，`slot_end=slot_start+1 分钟`，`window_end=slot_start+15 分钟`。该模式不写 `night_execution_slot_reservations`，终态也不记录容量释放时间；会话锁、固定目标服务器、attempt、租约和 Run 幂等字段与标准夜间任务一致。新增读写 SQL仍位于 `NightExecutionTaskMapper.xml`，没有新增 JDBC 或 MyBatis 注解 SQL。
+
+XXL MySQL 的独立 migration `xxl-job/db/migration/V5__schedule_night_execution_dispatch_every_minute.sql` 只把 `platform_task_key=opencode-runtime.night-execution-dispatch` 的 Cron 从每 15 分钟改为 `0 0/1 * * * ? *`，并把 `trigger_next_time` 清零以便 Admin 重算。执行器组、启停状态、`GLOBAL_MUTEX`、`ROUND`、`DISCARD_LATER`、`DO_NOTHING` 和重试次数 `0` 均保持不变；平台 PostgreSQL Flyway 不扫描该路径。
 
 ## V20260719210000 夜间任务容量通用参数
 

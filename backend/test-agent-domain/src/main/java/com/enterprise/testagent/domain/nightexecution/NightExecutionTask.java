@@ -18,6 +18,7 @@ public record NightExecutionTask(
         String sessionTitle,
         String contentPreview,
         String runInputJson,
+        NightExecutionScheduleMode scheduleMode,
         NightExecutionTaskStatus status,
         Instant slotStart,
         Instant slotEnd,
@@ -42,7 +43,8 @@ public record NightExecutionTask(
 
     public NightExecutionTask {
         Objects.requireNonNull(taskId); Objects.requireNonNull(ownerUserId); Objects.requireNonNull(sessionId);
-        Objects.requireNonNull(workspaceId); Objects.requireNonNull(status); Objects.requireNonNull(slotStart);
+        Objects.requireNonNull(workspaceId); Objects.requireNonNull(scheduleMode); Objects.requireNonNull(status);
+        Objects.requireNonNull(slotStart);
         Objects.requireNonNull(slotEnd); Objects.requireNonNull(windowEnd); Objects.requireNonNull(createdAt);
         Objects.requireNonNull(updatedAt);
         if (!slotStart.isBefore(slotEnd) || slotEnd.isAfter(windowEnd)) {
@@ -92,7 +94,8 @@ public record NightExecutionTask(
             Instant createdAt,
             Instant updatedAt) {
         this(taskId, ownerUserId, sessionId, workspaceId, clientRequestId, sessionTitle, contentPreview,
-                runInputJson, status, slotStart, slotEnd, windowEnd, targetLinuxServerId,
+                runInputJson, NightExecutionScheduleMode.NIGHT_WINDOW, status,
+                slotStart, slotEnd, windowEnd, targetLinuxServerId,
                 scheduledTaskRunId, runId, rolloverCount, taskCreatedSession, dispatchStartedAt,
                 null, null, null, 0L, dismissedAt, reservationReleasedAt, errorCode, errorMessage,
                 traceId, createdAt, updatedAt);
@@ -108,6 +111,7 @@ public record NightExecutionTask(
         Objects.requireNonNull(leaseUntil, "leaseUntil must not be null");
         if (!leaseUntil.isAfter(now)) throw new IllegalArgumentException("leaseUntil must be after now");
         return copy(NightExecutionTaskStatus.DISPATCHING, slotStart, slotEnd, targetLinuxServerId,
+                windowEnd,
                 null, runId, rolloverCount, now, required(attemptId, "attemptId"),
                 required(ownerBackendProcessId, "ownerBackendProcessId"), leaseUntil,
                 dismissedAt, reservationReleasedAt, null, null, runInputJson,
@@ -120,7 +124,8 @@ public record NightExecutionTask(
         if (leaseUntil == null || !leaseUntil.isAfter(now)) {
             throw new IllegalArgumentException("leaseUntil must be after now");
         }
-        return copy(status, slotStart, slotEnd, targetLinuxServerId, scheduledTaskRunId, runId,
+        return copy(status, slotStart, slotEnd, targetLinuxServerId, windowEnd,
+                scheduledTaskRunId, runId,
                 rolloverCount, dispatchStartedAt, dispatchAttemptId, dispatchOwnerBackendProcessId,
                 leaseUntil, dismissedAt, reservationReleasedAt, errorCode, errorMessage,
                 runInputJson, stateVersion, now);
@@ -131,17 +136,19 @@ public record NightExecutionTask(
         Objects.requireNonNull(acceptedRunId, "runId must not be null");
         if (status != NightExecutionTaskStatus.DISPATCHING) throw invalid("完成投递");
         return copy(NightExecutionTaskStatus.DISPATCHED, slotStart, slotEnd, targetLinuxServerId,
+                windowEnd,
                 scheduledTaskRunId, acceptedRunId, rolloverCount, dispatchStartedAt,
                 dispatchAttemptId, dispatchOwnerBackendProcessId, dispatchLeaseUntil,
-                dismissedAt, now, null, null, null, stateVersion + 1, now);
+                dismissedAt, releasedAt(now), null, null, null, stateVersion + 1, now);
     }
 
     /** 用户仅可取消尚未被目标 Java 认领的任务。 */
     public NightExecutionTask cancel(Instant now) {
         if (status != NightExecutionTaskStatus.SCHEDULED) throw invalid("取消");
         return copy(NightExecutionTaskStatus.CANCELLED, slotStart, slotEnd, targetLinuxServerId,
+                windowEnd,
                 scheduledTaskRunId, runId, rolloverCount, dispatchStartedAt, dispatchAttemptId,
-                dispatchOwnerBackendProcessId, dispatchLeaseUntil, dismissedAt, now,
+                dispatchOwnerBackendProcessId, dispatchLeaseUntil, dismissedAt, releasedAt(now),
                 null, null, null, stateVersion + 1, now);
     }
 
@@ -149,14 +156,15 @@ public record NightExecutionTask(
     public NightExecutionTask reschedule(
             Instant newSlotStart,
             Instant newSlotEnd,
+            Instant newWindowEnd,
             String newTargetLinuxServerId,
             Instant now) {
         if (!status.pending()) throw invalid("调整时段");
-        if (!newSlotStart.isBefore(newSlotEnd) || newSlotEnd.isAfter(windowEnd)) {
+        if (!newSlotStart.isBefore(newSlotEnd) || newSlotEnd.isAfter(newWindowEnd)) {
             throw new IllegalArgumentException("invalid rescheduled slot");
         }
         return copy(NightExecutionTaskStatus.SCHEDULED, newSlotStart, newSlotEnd,
-                required(newTargetLinuxServerId, "targetLinuxServerId"), null, null,
+                required(newTargetLinuxServerId, "targetLinuxServerId"), newWindowEnd, null, null,
                 rolloverCount, null, null, null, null, dismissedAt, null,
                 null, null, runInputJson, stateVersion + 1, now);
     }
@@ -165,6 +173,7 @@ public record NightExecutionTask(
     public NightExecutionTask retryDispatch(Instant now) {
         if (status != NightExecutionTaskStatus.DISPATCHING) throw invalid("恢复待执行");
         return copy(NightExecutionTaskStatus.SCHEDULED, slotStart, slotEnd, targetLinuxServerId,
+                windowEnd,
                 null, null, rolloverCount, null, null, null, null,
                 dismissedAt, reservationReleasedAt, null, null, runInputJson,
                 stateVersion + 1, now);
@@ -174,8 +183,9 @@ public record NightExecutionTask(
     public NightExecutionTask fail(String code, String message, Instant now) {
         if (!status.pending()) throw invalid("标记失败");
         return copy(NightExecutionTaskStatus.FAILED, slotStart, slotEnd, targetLinuxServerId,
+                windowEnd,
                 scheduledTaskRunId, runId, rolloverCount, dispatchStartedAt, dispatchAttemptId,
-                dispatchOwnerBackendProcessId, dispatchLeaseUntil, dismissedAt, now,
+                dispatchOwnerBackendProcessId, dispatchLeaseUntil, dismissedAt, releasedAt(now),
                 required(code, "errorCode"), bounded(message, 500), null,
                 stateVersion + 1, now);
     }
@@ -184,7 +194,8 @@ public record NightExecutionTask(
     public NightExecutionTask dismiss(Instant now) {
         if (status != NightExecutionTaskStatus.FAILED) throw invalid("关闭失败卡");
         if (dismissedAt != null) return this;
-        return copy(status, slotStart, slotEnd, targetLinuxServerId, scheduledTaskRunId, runId,
+        return copy(status, slotStart, slotEnd, targetLinuxServerId, windowEnd,
+                scheduledTaskRunId, runId,
                 rolloverCount, dispatchStartedAt, dispatchAttemptId, dispatchOwnerBackendProcessId,
                 dispatchLeaseUntil, now, reservationReleasedAt, errorCode, errorMessage,
                 runInputJson, stateVersion + 1, now);
@@ -195,6 +206,7 @@ public record NightExecutionTask(
             Instant nextSlotStart,
             Instant nextSlotEnd,
             String nextTargetLinuxServerId,
+            Instant nextWindowEnd,
             ScheduledTaskRunId nextScheduledRunId,
             RunId nextRunId,
             int nextRolloverCount,
@@ -211,11 +223,17 @@ public record NightExecutionTask(
             Instant now) {
         return new NightExecutionTask(
                 taskId, ownerUserId, sessionId, workspaceId, clientRequestId, sessionTitle, contentPreview,
-                nextRunInputJson, nextStatus, nextSlotStart, nextSlotEnd, windowEnd, nextTargetLinuxServerId,
+                nextRunInputJson, scheduleMode, nextStatus, nextSlotStart, nextSlotEnd,
+                nextWindowEnd, nextTargetLinuxServerId,
                 nextScheduledRunId, nextRunId, nextRolloverCount, taskCreatedSession, nextDispatchStartedAt,
                 nextDispatchAttemptId, nextDispatchOwnerBackendProcessId, nextDispatchLeaseUntil,
                 nextStateVersion, nextDismissedAt, nextReservationReleasedAt, nextErrorCode,
                 nextErrorMessage, traceId, createdAt, now);
+    }
+
+    /** 测试定时不占用夜间容量，因此不能记录一个并未发生的容量释放动作。 */
+    private Instant releasedAt(Instant now) {
+        return scheduleMode.reservesNightCapacity() ? now : reservationReleasedAt;
     }
 
     private IllegalStateException invalid(String action) {

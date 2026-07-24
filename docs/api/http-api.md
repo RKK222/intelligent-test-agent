@@ -2260,15 +2260,15 @@ Base URL：`/api/internal/platform/scheduler-management`
 
 ### 夜间异步执行 API
 
-Base URL：`/api/internal/platform/opencode-runtime/night-execution`。除下文单列的系统内部批量入口外，所有入口要求当前登录用户，owner 始终取认证主体；任务完整输入不会出现在响应、XXL 参数/结果、跨服务器请求或日志中。夜间窗口固定为 `Asia/Shanghai` 21:00 至次日 07:00，按 15 分钟划分启动时段；全局容量来自 `platform=all` 的可编辑通用参数 `NIGHT_EXECUTION_SLOT_CAPACITY`，migration 初始化为 `20`。各 Java 实例启动时加载到内存，修改后经现有通用参数广播刷新；后端根据每个时段的全局占用选择最低占用且最早的推荐时段，前端可以调整。
+Base URL：`/api/internal/platform/opencode-runtime/night-execution`。除下文单列的系统内部批量入口外，所有入口要求当前登录用户，owner 始终取认证主体；任务完整输入不会出现在响应、XXL 参数/结果、跨服务器请求或日志中。调度模式分为 `NIGHT_WINDOW` 和 `ADMIN_CUSTOM`：前者固定使用 `Asia/Shanghai` 21:00 至次日 07:00 的 15 分钟启动时段；后者仅允许 `SUPER_ADMIN` 选择下一完整分钟至未来 24 小时内的任意完整分钟，允许白天执行，显示区间为 1 分钟、分发重试窗口为 15 分钟且不占用夜间容量。`scheduleMode` 缺失时按 `NIGHT_WINDOW` 兼容。夜间全局容量来自 `platform=all` 的可编辑通用参数 `NIGHT_EXECUTION_SLOT_CAPACITY`，migration 初始化为 `20`。各 Java 实例启动时加载到内存，修改后经现有通用参数广播刷新；后端根据每个夜间时段的全局占用选择最低占用且最早的推荐时段，前端可以调整。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `GET` | `/slots` | 查询当前可提交夜间窗口、全局容量、各 15 分钟时段和推荐值。 |
-| `POST` | `/tasks` | 幂等创建夜间任务；可绑定当前 Session，省略 `sessionId` 时事务内预创建空白会话。 |
+| `POST` | `/tasks` | 幂等创建定时任务；可绑定当前 Session，省略 `sessionId` 时事务内预创建空白会话。 |
 | `GET` | `/tasks?page=&size=` | 分页查询当前用户全部待执行/投递中的任务。 |
 | `GET` | `/tasks?sessionId={sessionId}` | 查询当前 Session 的待执行任务和最近未关闭最终失败卡。 |
-| `PATCH` | `/tasks/{taskId}` | 调整尚未认领任务的启动时段。 |
+| `PATCH` | `/tasks/{taskId}` | 调整尚未认领任务的启动时间；只接收 `slotStart`，保持任务原调度模式。 |
 | `POST` | `/tasks/{taskId}/cancel` | 取消尚未认领任务并解除会话锁。 |
 | `POST` | `/tasks/{taskId}/dismiss` | 关闭最终失败卡；不影响已启动 Run。 |
 
@@ -2311,11 +2311,12 @@ Base URL：`/api/internal/platform/opencode-runtime/night-execution`。除下文
   "command": null,
   "arguments": null,
   "runClientRequestId": "run-night-7a6e...",
+  "scheduleMode": "NIGHT_WINDOW",
   "slotStart": "2026-07-18T13:00:00Z"
 }
 ```
 
-同一用户重复提交相同 `clientRequestId` 返回原任务，不重复创建 Session 或容量占位，也不创建 `USER_PLAN`。`prompt` 或至少一个 text part 必须非空；`workspaceId` 和 `slotStart` 必填。`sessionId` 存在时必须是当前用户可用、ACTIVE 且属于同一 Workspace 的会话；省略时后端创建来源为 `SCHEDULED_TASK` 的空白会话，取消或最终失败关闭后若仍无消息会自动归档。交互不提供单独“执行位置”字段：已有会话默认在该会话继续，新对话草稿默认使用预创建的新会话。后端在提交时固化当前用户进程所属 `targetLinuxServerId`，之后不随 binding 变化迁移。`POST /tasks` 与普通 Run 一样由路由层缓存请求体，硬上限为 32 MiB；超限返回 `400 VALIDATION_ERROR`，不查询进程 assignment，也不会进入本地 Controller 或远端转发。
+同一用户重复提交相同 `clientRequestId` 时，后端在完成当前模式权限校验后先返回原任务，不会因原定时时间已过、时段已满或窗口切换而拒绝响应；不重复创建 Session 或容量占位，也不创建 `USER_PLAN`。`prompt` 或至少一个 text part 必须非空；`workspaceId` 和 `slotStart` 必填。`scheduleMode` 可省略，省略时为 `NIGHT_WINDOW`；未知枚举值返回统一 `400 VALIDATION_ERROR`。`ADMIN_CUSTOM` 必须由后端根据认证主体确认 `SUPER_ADMIN`，普通用户伪造请求返回 `403 FORBIDDEN`，且权限和时间校验发生在幂等锁、Session、会话锁和任务写入之前。自定义时间必须秒和纳秒均为零，并位于请求处理时刻的下一完整分钟至未来 24 小时之间。调整请求仍只有 `{ "slotStart": "..." }`，不允许切换模式；自定义任务改期时再次校验 `SUPER_ADMIN`，角色被移除后仍可取消但不可改期。`sessionId` 存在时必须是当前用户可用、ACTIVE 且属于同一 Workspace 的会话；省略时后端创建来源为 `SCHEDULED_TASK` 的空白会话，取消或最终失败关闭后若仍无消息会自动归档。交互不提供单独“执行位置”字段：已有会话默认在该会话继续，新对话草稿默认使用预创建的新会话。后端在提交时固化当前用户进程所属 `targetLinuxServerId`，之后不随 binding 变化迁移。`POST /tasks` 与普通 Run 一样由路由层缓存请求体，硬上限为 32 MiB；超限返回 `400 VALIDATION_ERROR`，不查询进程 assignment，也不会进入本地 Controller 或远端转发。
 
 任务响应只返回安全展示字段：
 
@@ -2327,6 +2328,7 @@ Base URL：`/api/internal/platform/opencode-runtime/night-execution`。除下文
   "sessionTitle": "夜间生成回归用例",
   "contentPreview": "生成支付模块回归用例",
   "status": "SCHEDULED",
+  "scheduleMode": "NIGHT_WINDOW",
   "slotStart": "2026-07-18T13:00:00Z",
   "slotEnd": "2026-07-18T13:15:00Z",
   "windowEnd": "2026-07-18T23:00:00Z",
@@ -2339,15 +2341,15 @@ Base URL：`/api/internal/platform/opencode-runtime/night-execution`。除下文
 }
 ```
 
-`GET /tasks` 返回 `{ items, page, size, total, visibleFailure }`。无 `sessionId` 时 `items` 只包含当前用户的 `SCHEDULED/DISPATCHING` 任务并按 `slotStart` 排序；带 `sessionId` 时 `items` 最多一条，`visibleFailure` 返回该会话最近一条 `FAILED` 且未关闭的任务。任务状态为 `SCHEDULED` 时允许改期/取消；进入 `DISPATCHING` 后不可改期或取消。`DISPATCHED` 表示夜间调度已成功交给普通 Run 且 `runId` 非空，不表示对话最终成功；Run 后续 `SUCCEEDED/FAILED/CANCELLED` 均不反向改变该状态。`CANCELLED/FAILED` 是尚未交给 Run 的夜间调度终态。完整输入在 `DISPATCHED/CANCELLED/FAILED` 时清除，终态任务和时段占位保留 30 天后清理。
+`GET /tasks` 返回 `{ items, page, size, total, visibleFailure }`。任务响应新增 `scheduleMode`；旧响应缺失该字段时客户端按 `NIGHT_WINDOW` 展示。无 `sessionId` 时 `items` 只包含当前用户的 `SCHEDULED/DISPATCHING` 任务并按 `slotStart` 排序，两种模式都进入同一查询；带 `sessionId` 时 `items` 最多一条，`visibleFailure` 返回该会话最近一条 `FAILED` 且未关闭的任务。任务状态为 `SCHEDULED` 时允许改期/取消；进入 `DISPATCHING` 后不可改期或取消。`DISPATCHED` 表示定时调度已成功交给普通 Run 且 `runId` 非空，不表示对话最终成功；Run 后续 `SUCCEEDED/FAILED/CANCELLED` 均不反向改变该状态。`CANCELLED/FAILED` 是尚未交给 Run 的调度终态。完整输入在 `DISPATCHED/CANCELLED/FAILED` 时清除，终态任务和夜间时段占位保留 30 天后清理；`ADMIN_CUSTOM` 的 `reservationReleasedAt` 始终为空，也不会创建、释放或改动夜间容量行。
 
-同一 Session 同时最多一个 `SCHEDULED/DISPATCHING` 夜间任务。持锁期间普通 Run 启动、手工追加消息和 Session 归档返回 `409 CONFLICT`；取消、最终失败或普通 Run 锚点受理后解除锁。XXL 每 15 分钟扫描最多 500 条 `slotStart<=now && windowEnd>now` 的 `SCHEDULED`，按固定目标服务器分组，每批最多 50 条、同时最多调用 8 台服务器。公共 resolver 先选出目标服务器上的精确 backendProcessId，同服务器多 JVM 也不得按 linuxServerId 直接本机执行。目标 Java 生成 attemptId，以 `status + stateVersion + targetLinuxServerId` 原子认领为 `DISPATCHING`，写入精确 backendProcessId 和 5 分钟租约；普通 Run 同步受理期间每分钟续租，单批最多并发 4 个受理调用，不等待 Run 完成，也没有夜间专属执行队列。
+同一 Session 同时最多一个 `SCHEDULED/DISPATCHING` 定时任务。持锁期间普通 Run 启动、手工追加消息和 Session 归档返回 `409 CONFLICT`；取消、最终失败或普通 Run 锚点受理后解除锁。XXL 每分钟扫描最多 500 条 `slotStart<=now && windowEnd>now` 的 `SCHEDULED`，不按模式过滤，按固定目标服务器分组，每批最多 50 条、同时最多调用 8 台服务器。公共 resolver 先选出目标服务器上的精确 backendProcessId，同服务器多 JVM 也不得按 linuxServerId 直接本机执行。目标 Java 生成 attemptId，以 `status + stateVersion + targetLinuxServerId` 原子认领为 `DISPATCHING`，写入精确 backendProcessId 和 5 分钟租约；普通 Run 同步受理期间每分钟续租，单批最多并发 4 个受理调用，不等待 Run 完成，也没有夜间专属执行队列。
 
 目标 Java 从共享数据库重读完整输入和用户/会话/Workspace，重新校验归属并通过公共 `UserOpencodeProcessAssignmentService.initialize`、会话上下文和 `RunApplicationService.startScheduledRun` 启动，与前台普通 Run 共用锚点、事件订阅和异步 prompt 提交。普通 Run 使用任务快照中的稳定 `runClientRequestId`；默认 `LEGACY_FULL` Scheduled Run 也在消息写入前把该 ID 落入 `runs`，与 Redis 摘要模式共用 `(session_id, client_request_id)` 唯一锚点。legacy 锚点同时保存 Run 启动 attempt、5 分钟恢复租约和 handoff 受理时间；锚点后崩溃时，新 attempt 以 CAS 认领并复用原 `runId + messageId` 补齐消息和订阅，随后按 remoteSessionId + dispatchMessageId 探测远端：已存在只补 durable handoff，不存在才重投，查询不确定则等待下一轮，远端副作用前再次续租。活动态锚点只有 durable handoff 标记存在才算已受理，不能因平台用户消息已经落库就提前更新夜间任务。恢复锚点还必须同时匹配 `SCHEDULED_TASK + taskId + owner + session + workspace`，客户端复用历史 `runClientRequestId/messageId` 不会误绑定旧 Run。HTTP 超时、响应丢失和补偿重试只返回同一 runId，且不会因“远端已接收、本地标记未落库”再次进入执行 loop。Run 受理后按 attemptId 写 `DISPATCHED`；锚点前可重试故障恢复 `SCHEDULED`，永久输入/权限错误记 `FAILED`。
 
-5 分钟补偿先查稳定 Run 锚点，存在则修复 `DISPATCHED`；无锚点且租约未过期不处理，租约已过期但精确 owner Java 心跳仍在线时不跨进程抢占，由 owner 本机每分钟 watchdog 在 in-flight handle 消失后先查锚点再恢复；owner 心跳消失后跨进程补偿才按 attemptId 恢复 `SCHEDULED`。普通 Run 创建锚点前必须重新以 `taskId + attemptId + DISPATCHING + windowEnd>now` 续租 CAS；达到北京时间 07:00 时仍有本机 in-flight handle 或在线 owner 的 attempt 先等待其收敛，防止任务已 `FAILED` 后旧调用又创建 Run，handle 消失后再按锚点或窗口终态处理。任务不自动顺延。传输至少一次，业务语义为同一夜间任务只创建一个 Run。
+5 分钟补偿先查稳定 Run 锚点，存在则修复 `DISPATCHED`；无锚点且租约未过期不处理，租约已过期但精确 owner Java 心跳仍在线时不跨进程抢占，由 owner 本机每分钟 watchdog 在 in-flight handle 消失后先查锚点再恢复；owner 心跳消失后跨进程补偿才按 attemptId 恢复 `SCHEDULED`。普通 Run 创建锚点前必须重新以 `taskId + attemptId + DISPATCHING + windowEnd>now` 续租 CAS；`NIGHT_WINDOW` 到北京时间 07:00、`ADMIN_CUSTOM` 到 `slotStart + 15 分钟` 时仍有本机 in-flight handle 或在线 owner 的 attempt 先等待其收敛，防止任务已 `FAILED` 后旧调用又创建 Run，handle 消失后再按锚点或窗口终态处理。任务不自动顺延。传输至少一次，业务语义为同一定时任务只创建一个 Run。
 
-任务提交、时段查询和改期不检查 XXL 当前是否在线；XXL 恢复后从数据库补发。容量参数缺失或非法会在应用启动时失败，不使用环境变量或代码默认值继续服务。时段已满、会话已有任务、任务已开始或状态变化返回 `409 CONFLICT`。调低容量不取消已有预约；当 `reservedCount >= capacity` 时拒绝新增，调高后新容量立即可用。其中创建或改期遇到时段容量竞争时，错误 `details` 会返回与 `/slots` 同结构的最新 `timeZone/windowStart/windowEnd/capacity/slots`，前端立即刷新选择器；owner 不匹配对外按 `404 NOT_FOUND` 隔离。
+任务提交、时段查询和改期不检查 XXL 当前是否在线；XXL 恢复后从数据库补发。容量参数缺失或非法会在应用启动时失败，不使用环境变量或代码默认值继续服务。会话已有任务、任务已开始或状态变化返回 `409 CONFLICT`；夜间时段已满也返回 `409 CONFLICT`。调低容量不取消已有夜间预约；当 `reservedCount >= capacity` 时拒绝新增，调高后新容量立即可用。其中 `NIGHT_WINDOW` 创建或改期遇到容量竞争时，错误 `details` 会返回与 `/slots` 同结构的最新 `timeZone/windowStart/windowEnd/capacity/slots`，前端立即刷新选择器；`ADMIN_CUSTOM` 不读取或返回夜间容量。owner 不匹配对外按 `404 NOT_FOUND` 隔离。
 
 #### 系统内部批量分发
 

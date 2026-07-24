@@ -2,6 +2,48 @@ import { describe, expect, it, vi } from "vitest";
 import { createBackendApiClient } from "../src";
 
 describe("backend-api night execution", () => {
+  it("sends the super-admin custom schedule mode without changing the adjust contract", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_custom",
+        data: {
+          taskId: "night_custom",
+          sessionId: "ses_custom",
+          workspaceId: "wrk_custom",
+          contentPreview: "白天验证",
+          status: "SCHEDULED",
+          scheduleMode: "ADMIN_CUSTOM",
+          slotStart: "2026-07-24T06:31:00Z",
+          slotEnd: "2026-07-24T06:32:00Z",
+          windowEnd: "2026-07-24T06:46:00Z",
+          rolloverCount: 0,
+          createdAt: "2026-07-24T06:30:00Z",
+          updatedAt: "2026-07-24T06:30:00Z"
+        }
+      }), { status: 200 }));
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher });
+
+    await client.createNightExecutionTask({
+      clientRequestId: "task_custom_1",
+      workspaceId: "wrk_custom",
+      prompt: "白天验证",
+      scheduleMode: "ADMIN_CUSTOM",
+      slotStart: "2026-07-24T06:31:00Z"
+    });
+    await client.adjustNightExecutionTask("night_custom", "2026-07-24T06:35:00Z");
+
+    expect(fetcher.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({
+      clientRequestId: "task_custom_1",
+      workspaceId: "wrk_custom",
+      prompt: "白天验证",
+      scheduleMode: "ADMIN_CUSTOM",
+      slotStart: "2026-07-24T06:31:00Z"
+    }));
+    expect(fetcher.mock.calls[1]?.[1]?.body).toBe(JSON.stringify({
+      slotStart: "2026-07-24T06:35:00Z"
+    }));
+  });
+
   it("uses the platform runtime endpoints for slots, create, query and task actions", async () => {
     const task = {
       taskId: "night_1",

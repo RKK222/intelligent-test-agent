@@ -29,8 +29,8 @@
 - `mybatis.ScheduledTaskRunRetentionMapper` / `mybatis/ScheduledTaskRunRetentionMapper.xml`：按 `ended_at` 和终态 status 清理超过 7 天的 scheduler 运行记录，显式排除活动状态。
 - `mybatis.MyBatisScheduledTaskRunRetentionRepository`：实现 scheduler 运行记录保留策略 domain 端口，供 scheduler 框架维护任务调用。
 - `mybatis.ScheduledTaskMapper` / `mybatis/ScheduledTaskMapper.xml` / `mybatis.MyBatisScheduledTaskRepository`：旧 scheduler 任务与运行记录的 MyBatis 历史兼容实现；生产不再扫描或认领 `USER_PLAN`。
-- `mybatis.NightExecutionTaskMapper` / `mybatis/NightExecutionTaskMapper.xml` / `mybatis.MyBatisNightExecutionTaskRepository`：夜间任务到期/窗口扫描、固定目标 state-version 认领、attempt 租约续期与完成 fencing、会话锁和时段容量实现。
-- `mybatis.NightExecutionTaskMapper` / `mybatis/NightExecutionTaskMapper.xml` / `mybatis.MyBatisNightExecutionTaskRepository`：夜间任务、幂等创建、会话写锁、15 分钟全局容量占位和 30 天清理的生产实现。
+- `mybatis.NightExecutionTaskMapper` / `mybatis/NightExecutionTaskMapper.xml` / `mybatis.MyBatisNightExecutionTaskRepository`：双模式定时任务的到期/窗口扫描、模式往返、固定目标 state-version 认领、attempt 租约续期与完成 fencing、会话锁和仅标准夜间使用的时段容量实现。
+- `mybatis.NightExecutionTaskMapper` / `mybatis/NightExecutionTaskMapper.xml` / `mybatis.MyBatisNightExecutionTaskRepository`：定时任务、幂等创建、会话写锁、15 分钟夜间容量占位和 30 天清理的生产实现；`ADMIN_CUSTOM` 不创建容量记录。
 - `mybatis.ReferenceRepositoryMapper` / `mybatis/ReferenceRepositoryMapper.xml`：引用资产总体状态与服务器副本的全部关系型 SQL，包含操作类型、旧分支/generation CAS、保留实际指针的目标 upsert、离线 `DEFERRED`、租约认领/续期和带 fencing 条件的同步/核验写回。
 - `mybatis.MyBatisReferenceRepositoryRepository`：引用资产仓储领域端口的生产 Bean，负责行模型映射、分页上限和多目标事务边界。
 - `RedisRunRuntimeStore` / `RunRuntimeStoreConfig`：Run 运行数据面领域端口的 Redis 唯一生产实现和装配；单 Run key 使用 `{runId}` hash tag，durable `events` Stream 使用 `${seq}-0`，durable/transient `runtime-events` Stream 使用 `${runtimeVersion}-0`，snapshot 使用 Hash + order ZSET 物化当前实体状态，外部 snapshot 同时 CAS seq/runtimeVersion，动态 key registry 统一滑动 TTL；跨 slot active/history 索引在单 Run Lua 前按“active TTL + pending TTL”安全窗保守登记并由读路径清脏，避免任一事件 Lua 提交后 Java 退出造成恢复失联；用户级 dispose 以 `{userId}` slot 原子清理过期 active 索引、确认用户空闲并申请/续租 token 闸门，新 Run 则在同一用户 slot 原子检查闸门、登记 `active:user` 并以随机 owner 创建 `runtime-user` marker，闸门拒绝时在 marker 与其他外部索引写入前返回；owner 条件接管原子校验活跃 manifest 快照并提升 token，事件、远端 Session 绑定和 scope/dedup/pending Lua 在副作用前校验 owner + token，pending 同时原子计入/扣减统一详情字节预算；生产 32 MiB 中为关键快照固定预留 4 MiB，durable/runtime 事件或 snapshot 投影项超过 20,000 或总详情超限时显式截断旧 Stream、递增 reset generation，并保留专用 USER 输入、JSON role 为 assistant 的最新 message、对应最新可见 text part 和 run-status，tool/reasoning/非 assistant 实体只作为可淘汰投影。
@@ -70,6 +70,7 @@
 - `db/migration/V20260715000000__add_scheduler_run_retention_index.sql`：为 `scheduled_task_runs.ended_at` 增加运行记录保留清理索引。
 - `db/migration/V20260718210000__extend_scheduler_user_plan.sql`：允许 USER_PLAN 专用任务无 Cron，并为运行记录增加执行亲和字段和到期索引。
 - `db/migration/V20260722130000__migrate_night_execution_to_xxl.sql`：增加夜间任务 attempt/精确 owner/租约/state-version 与 legacy Scheduled Run attempt/租约/受理时间，重建扫描索引，跳过待执行旧 USER_PLAN，并保留历史审计数据；版本晚于已交付迁移，兼容存量库按序升级。
+- `db/migration/V20260724143000__add_night_execution_schedule_mode.sql`：增加非空调度模式列和双枚举检查约束，存量任务默认回填 `NIGHT_WINDOW`。
 - `db/migration/V20260718211000__create_night_execution_tasks.sql`：创建夜间任务、会话锁和时段容量占位表及约束/索引/中文注释。
 - `db/migration/V20260719210000__seed_night_execution_capacity_parameter.sql`：初始化 `platform=all`、可编辑、默认值 20 的夜间时段容量通用参数。
 - `db/migration/V20260718100000__seed_references_params.sql`：初始化引用资产根目录和 SDD 根层目录名称清单。
