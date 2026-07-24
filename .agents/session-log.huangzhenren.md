@@ -1003,3 +1003,18 @@
   - `corepack pnpm lint`、串行 `corepack pnpm typecheck`、`corepack pnpm build` 与 `git diff --check` 通过；最终全量 Vitest 为 1590 passed / 1 skipped / 1 known unrelated failed，唯一失败仍是 `DirectoryRows.test.ts` 以 role=button 查询 role=radio 的“上传”。
 - Result:
   - 修复只涉及前端展示/reducer投影，不新增或变更 API、RunEvent wire contract、数据库、依赖、安全配置或环境文件；平台与远端 ID 独立可兼容旧历史/旧事件。
+
+### 2026-07-24 - 合并 featrue 与主线
+
+- Why:
+  - `featrue` 需要纳入最新 `main` 并推送远端；工作区开始时已处于将该分支 rebase 到 `origin/main` 的中断状态，需要保留双方已有成果并完成集成验证。
+- What:
+  - 完成七个功能提交到 `origin/main` 的 rebase；冲突处理中同时保留主线的模型/供应商 allowlist 过滤、应用工作空间配置与文件树交互，以及功能分支的 OpenCode V2 Provider `{ all: [...] }` 解包和嵌套模型限制映射。
+  - backend-api Provider 目录先统一解包 V2 envelope，再应用平台 `enabled_providers` allowlist；对应测试同时覆盖主线过滤语义和 V2 响应结构。
+- How:
+  - 前端全量 Vitest 为 94 个文件通过、1604 passed / 1 skipped；backend-api 与应用工作空间相关定向 Vitest 115/115 通过，受影响后端领域、应用、MyBatis 和 Controller 定向 Maven 测试通过。
+  - `corepack pnpm lint`、`corepack pnpm typecheck`、`corepack pnpm build` 和 `git diff --check` 通过。
+  - 后端全量 `mvn -q -f backend/pom.xml test` 仍命中 `OpencodeProcessConfigLinkServiceTest.rejectsOrdinaryDirectoryAtManagedPathWithoutDeletingUserData` 这一主线既有失败；服务与测试文件和 `origin/main` 无差异，未由本次合并引入。
+- Result:
+  - 功能分支与主线的目录过滤、V2 Provider 兼容和工作空间行为均被保留；没有额外新增 API、事件、数据库、安全或环境配置变更。
+  - 完整后端测试的上述既有基线问题继续保留为已知风险，受本次集成影响的定向测试均通过。
