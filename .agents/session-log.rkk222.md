@@ -5,6 +5,22 @@
 
 ## Entries
 
+### 2026-07-24 - 重打精简版公共 Agent/Skill 独立包
+
+### Why
+- 用户要求将刚完成流程精简的公共 Agent 配置重新打成可交付 ZIP，替换仍包含旧 `test-design-analysis` 和 `api-execute-case` 的历史包。
+
+### What
+- 从公共配置干净提交 `8cac11e` 重新生成固定名 `deploy/internal/dist/test-agent-public-agents-skills.zip` 及 `.sha256`；只收录 README、`opencode/agents/**`、`opencode/skills/**`。
+- 新包包含 6 个 Agent、12 个 Skill、62 个文件；测试设计只保留 orchestrator、generation、review 三个 Agent，旧分析 Agent、旧“测试设计执行”名称和已废弃资源均未进入包。
+
+### How
+- 复用既有 `git archive` 固定前缀出包方式；在调用 OpenCode 前先冷解压并逐文件对比公共配置 HEAD，避免 OpenCode 校验时自动生成 `.gitignore` 干扰目录一致性检查。
+- ZIP CRC、SHA、允许/禁止路径、12/12 Skill 校验、6/6 Agent 与 12/12 包内 Skill 的 OpenCode 1.18.4 实际加载均通过。
+
+### Result
+- ZIP 大小 84,314 字节，SHA-256 为 `f2a9eabbde31f320f8f89610df2a50c4ccce77b121b4e9d7f9e25ea854d149cf`；未修改应用代码、稳定工程文档、API、RunEvent、数据库、环境配置、OpenCode 源码或 generated SDK，企业现场导入与发布待执行。
+
 ### 2026-07-24 - 精简公共测试设计生成与审核链路
 
 ### Why
