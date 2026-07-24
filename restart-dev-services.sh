@@ -12,7 +12,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 BACKEND_DIR="${ROOT_DIR}/backend"
 FRONTEND_DIR="${ROOT_DIR}/frontend"
-BACKEND_JAR="${BACKEND_DIR}/test-agent-app/target/test-agent-app-0.1.0-SNAPSHOT.jar"
+BACKEND_BUILD_JAR="${BACKEND_DIR}/test-agent-app/target/test-agent-app-0.1.0-SNAPSHOT.jar"
+BACKEND_RUNTIME_DIR=""
+BACKEND_RUNTIME_JAR=""
 BACKEND_APP_LOG_DIR="${BACKEND_DIR}/logs"
 LOG_DIR="${ROOT_DIR}/.tmp/dev-services"
 OPENCODE_MANAGER_RUNTIME_STATE_DIR=""
@@ -147,6 +149,7 @@ fi
 if [[ "${LOG_DIR}" != /* ]]; then
   LOG_DIR="${ROOT_DIR}/${LOG_DIR}"
 fi
+BACKEND_RUNTIME_DIR="${LOG_DIR}/backend-runtime"
 
 frontend_url="${TEST_AGENT_FRONTEND_URL:-http://127.0.0.1:3000}"
 backend_url="${TEST_AGENT_BASE_URL:-http://127.0.0.1:8080}"
@@ -199,10 +202,11 @@ load_env_file() {
   done < "${file}"
 }
 
-# 只匹配本仓库 test-agent-app 的可执行 jar，避免误杀其他 Java 服务。
+# 同时匹配历史 target JAR 与本地不可变运行副本，避免遗漏升级前启动的后端进程。
 backend_pids() {
-  ps -eo pid=,command= | awk -v jar="${BACKEND_JAR}" '
-    index($0, jar) && index($0, " -jar ") { print $1 }
+  ps -eo pid=,command= | awk -v build_jar="${BACKEND_BUILD_JAR}" -v runtime_dir="${BACKEND_RUNTIME_DIR}" '
+    index($0, " -jar ") &&
+      (index($0, build_jar) || index($0, runtime_dir "/test-agent-app.")) { print $1 }
   '
 }
 
@@ -694,6 +698,25 @@ build_backend() {
   (cd "${BACKEND_DIR}" && mvn clean package -Dmaven.test.skip=true)
 }
 
+# Maven target 会被企业打包或其它本地构建覆盖；运行前复制到唯一文件，隔离 Spring Boot 的按需类加载。
+prepare_backend_runtime_jar() {
+  BACKEND_RUNTIME_JAR="$(
+    "${ROOT_DIR}/tools/stage-backend-runtime-jar.sh" "${BACKEND_BUILD_JAR}" "${BACKEND_RUNTIME_DIR}"
+  )"
+  echo "Staged immutable backend runtime jar: ${BACKEND_RUNTIME_JAR}"
+}
+
+# 仅在旧后端已经停止后清理历史副本，保留本次即将启动的 JAR。
+cleanup_stale_backend_runtime_jars() {
+  local candidate
+  mkdir -p "${BACKEND_RUNTIME_DIR}"
+  for candidate in "${BACKEND_RUNTIME_DIR}"/test-agent-app.*.jar; do
+    [[ -e "${candidate}" ]] || continue
+    [[ "${candidate}" == "${BACKEND_RUNTIME_JAR}" ]] && continue
+    rm -f "${candidate}"
+  done
+}
+
 frontend_dependency_manifest_changed() {
   local marker="$1"
   local manifest changed
@@ -770,6 +793,10 @@ start_backend() {
     echo "TEST_AGENT_OPENCODE_BASE_URL is required in ${env_file}." >&2
     exit 1
   fi
+  if [[ -z "${BACKEND_RUNTIME_JAR}" || ! -f "${BACKEND_RUNTIME_JAR}" ]]; then
+    echo "Backend runtime jar is not prepared." >&2
+    exit 1
+  fi
 
   mkdir -p "${LOG_DIR}"
   echo "Starting backend with profile '${profile}'. Process log: ${LOG_DIR}/backend.log"
@@ -780,12 +807,12 @@ start_backend() {
     local backend_cmd proxy_args
     printf -v proxy_args '%q ' "${BACKEND_JAVA_DIRECT_NETWORK_ARGS[@]}"
     printf -v backend_cmd 'cd %q && exec java %s-jar %q --spring.profiles.active=%q >>%q 2>&1' \
-      "${BACKEND_DIR}" "${proxy_args}" "${BACKEND_JAR}" "${profile}" "${LOG_DIR}/backend.log"
+      "${BACKEND_DIR}" "${proxy_args}" "${BACKEND_RUNTIME_JAR}" "${profile}" "${LOG_DIR}/backend.log"
     screen -dmS "${BACKEND_SCREEN_SESSION}" bash -lc "${backend_cmd}"
   else
     (
       cd "${BACKEND_DIR}"
-      nohup java "${BACKEND_JAVA_DIRECT_NETWORK_ARGS[@]}" -jar "${BACKEND_JAR}" --spring.profiles.active="${profile}" \
+      nohup java "${BACKEND_JAVA_DIRECT_NETWORK_ARGS[@]}" -jar "${BACKEND_RUNTIME_JAR}" --spring.profiles.active="${profile}" \
         >>"${LOG_DIR}/backend.log" 2>&1 &
       echo "$!" >"${LOG_DIR}/backend.pid"
     )
@@ -991,6 +1018,7 @@ echo "Builds run before stopping existing services; failed builds leave current 
 
 # 先统一构建：任一构建失败则直接退出，不会动到现有运行中的服务。
 build_backend
+prepare_backend_runtime_jar
 build_opencode_manager
 build_frontend
 
@@ -999,6 +1027,7 @@ build_frontend
 
 # 1) 后端
 stop_backend_service
+cleanup_stale_backend_runtime_jars
 start_backend
 
 # 2) opencode-manager（Go 管理进程）。非本地环境 should_start_opencode_manager 为 false 时自动跳过，

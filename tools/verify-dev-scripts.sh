@@ -35,6 +35,7 @@ else
   echo "Skipping windows restart script PowerShell parse: pwsh/powershell not found."
 fi
 run_check "dev backend script bash syntax" bash -n "${ROOT_DIR}/tools/dev-backend-run.sh"
+run_check "backend runtime staging script bash syntax" bash -n "${ROOT_DIR}/tools/stage-backend-runtime-jar.sh"
 run_check "internal worker docker script bash syntax" bash -n "${ROOT_DIR}/deploy/internal/opencode-worker-docker.sh"
 
 restart_help="$(sh "${ROOT_DIR}/restart-dev-services.sh" --help)"
@@ -85,6 +86,19 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "${tmp_dir}/bin" "${tmp_dir}/logs"
+
+# 运行副本必须与构建产物路径不同且内容一致，后续覆盖 source JAR 不能改变已暂存文件。
+mkdir -p "${tmp_dir}/jar-content" "${tmp_dir}/runtime-jars"
+printf 'runtime-fixture\n' >"${tmp_dir}/jar-content/fixture.txt"
+jar --create --file "${tmp_dir}/source.jar" -C "${tmp_dir}/jar-content" fixture.txt
+staged_runtime_jar="$(
+  "${ROOT_DIR}/tools/stage-backend-runtime-jar.sh" "${tmp_dir}/source.jar" "${tmp_dir}/runtime-jars"
+)"
+[[ "${staged_runtime_jar}" != "${tmp_dir}/source.jar" ]] || fail "backend runtime jar should use an isolated path"
+cmp -s "${tmp_dir}/source.jar" "${staged_runtime_jar}" || fail "staged backend runtime jar content differs from source"
+printf 'overwritten-build-output\n' >"${tmp_dir}/source.jar"
+jar tf "${staged_runtime_jar}" >/dev/null || fail "staged backend runtime jar changed after source overwrite"
+
 screen_calls="${tmp_dir}/screen.calls"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${tmp_dir}/bin/ps"
 printf '#!/usr/bin/env bash\nif [[ "${1:-}" == "-list" ]]; then exit 1; fi\nprintf "%%s\\n" "$*" >>%q\nexit 0\n' "${screen_calls}" >"${tmp_dir}/bin/screen"
@@ -92,7 +106,9 @@ printf '#!/usr/bin/env bash\nexit 0\n' >"${tmp_dir}/bin/curl"
 printf '#!/usr/bin/env bash\necho "   interface: en0"\n' >"${tmp_dir}/bin/route"
 printf '#!/usr/bin/env bash\nif [[ "${1:-}" == "getifaddr" && "${2:-}" == "en0" ]]; then echo "10.8.0.115"; exit 0; fi\nexit 1\n' >"${tmp_dir}/bin/ipconfig"
 printf '#!/usr/bin/env bash\necho "go should not run for remote opencode base URL" >&2\nexit 99\n' >"${tmp_dir}/bin/go"
-chmod +x "${tmp_dir}/bin/ps" "${tmp_dir}/bin/screen" "${tmp_dir}/bin/curl" "${tmp_dir}/bin/route" "${tmp_dir}/bin/ipconfig" "${tmp_dir}/bin/go"
+printf '#!/usr/bin/env bash\nif [[ "$#" -eq 2 && "${1}" == */backend/test-agent-app/target/test-agent-app-0.1.0-SNAPSHOT.jar ]]; then printf "runtime-fixture\\n" >"${2}"; exit 0; fi\nexec /bin/cp "$@"\n' >"${tmp_dir}/bin/cp"
+printf '#!/usr/bin/env bash\nexit 0\n' >"${tmp_dir}/bin/jar"
+chmod +x "${tmp_dir}/bin/ps" "${tmp_dir}/bin/screen" "${tmp_dir}/bin/curl" "${tmp_dir}/bin/route" "${tmp_dir}/bin/ipconfig" "${tmp_dir}/bin/go" "${tmp_dir}/bin/cp" "${tmp_dir}/bin/jar"
 printf 'PLACEHOLDER=1\n' >"${tmp_dir}/env.local"
 
 set +e
@@ -229,11 +245,22 @@ if [[ "$(cat "${screen_calls}" 2>/dev/null || true)" != *"-DsocksProxyHost="* ]]
   cat "${screen_calls}" >&2 || true
   fail "restart script backend launch should clear JVM SOCKS proxy host"
 fi
+if [[ "$(cat "${screen_calls}" 2>/dev/null || true)" != *"/backend-runtime/test-agent-app."* ]]; then
+  cat "${screen_calls}" >&2 || true
+  fail "restart script backend launch should use an isolated runtime jar"
+fi
+if [[ "$(cat "${screen_calls}" 2>/dev/null || true)" == *"/backend/test-agent-app/target/test-agent-app-0.1.0-SNAPSHOT.jar"* ]]; then
+  cat "${screen_calls}" >&2 || true
+  fail "restart script backend launch should not use the mutable Maven target jar"
+fi
 if [[ "$(sed -n '1,220p' "${ROOT_DIR}/tools/dev-backend-run.sh")" != *"-Djava.net.useSystemProxies=false"* ]]; then
   fail "dev backend script should disable JVM system proxies"
 fi
 if [[ "$(sed -n '1,220p' "${ROOT_DIR}/tools/dev-backend-run.sh")" != *"-DsocksProxyHost="* ]]; then
   fail "dev backend script should clear JVM SOCKS proxy host"
+fi
+if ! grep -Fq 'stage-backend-runtime-jar.sh' "${ROOT_DIR}/tools/dev-backend-run.sh"; then
+  fail "dev backend script should stage an isolated runtime jar"
 fi
 
 worker_env="${tmp_dir}/worker.env"

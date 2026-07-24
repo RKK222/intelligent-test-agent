@@ -1771,3 +1771,18 @@
   - 当前 `main` 保留本地附件/Ctrl+S 等最新提交并纳入后续企业包，打包脚本与 `0094e264c` 后的既有实现一致；后续通过构建后 SHA/结构校验防止误交付旧外层包。
   - 固定名 `test-agent-two-backend-complete.zip` 及 SHA 已基于当前本地代码和 `.4/.114/.2` 节点包重新生成；最终会话日志通过 `--zip-only` 进入内层后，外层按同一节点包再次覆盖封装。
   - 文档和合并涉及既有领域模型说明与前端实现历史，不新增本次 HTTP API、RunEvent、数据库/Flyway、SQL、安全配置、generated SDK、OpenCode 源码或环境配置变更。
+
+### 2026-07-24 - 隔离本地后端运行 JAR 与 Maven 构建产物
+
+- Why:
+  - 本地后端从 `backend/test-agent-app/target` 直接运行 Spring Boot 可执行 JAR；企业打包在服务运行期间重新生成同一路径后，Boot 的按需类加载读到不一致归档，连续出现 MyBatis、Reactor、runtime 等无关类的 `ClassNotFoundException`，所有消息继而进入超时重试。
+- What:
+  - 新增统一运行 JAR 暂存脚本，启动前把已完成构建的 JAR 校验并复制到 `.tmp/dev-services/backend-runtime/` 的唯一文件；根目录重启脚本与单后端启动脚本只运行该不可变副本。
+  - 根目录脚本兼容发现并停止旧 `target` JAR 与新运行副本进程，只在旧后端停止后清理历史副本；同步启动脚本回归、后端 README 和 AI 工作流说明。
+- How:
+  - 隔离重编领域模块确认缺失 class 是受干扰的半成品而非源码错误；开发脚本回归模拟覆盖 source JAR，验证已暂存副本仍完整，且 Java 启动命令不再引用 Maven `target`。
+  - JDK 25 下完整构建并按 `.env.test`/`test` profile 重启 backend、opencode-manager、frontend；随后保持 JVM 运行再次执行 Maven package，`target` 更新时间变化而运行副本哈希不变，readiness 保持 `UP`，新启动线后无缺类异常或 provider header timeout。
+  - 复核现有固定名企业完整包：外层 SHA/ZIP 完整性、内外层发布 ZIP SHA 一致、三台节点包清单及双后台封包回归均通过；本地启动隔离不改变企业 systemd/worker/Nginx 运行方式。
+- Result:
+  - 后续本地企业打包可以覆盖 Maven 构建目录而不破坏已经运行的后端；并发构建自身若互相清理 `target` 仍可能让当次构建失败，但失败会发生在停服务前，重新执行即可。
+  - 未修改业务 Java、HTTP API、RunEvent、数据库/Flyway、SQL、权限、安全配置、generated SDK、OpenCode 源码或环境配置；当前企业完整包仍可按 `.4 → .114 → .2` 顺序部署并做现场验收。

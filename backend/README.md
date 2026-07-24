@@ -87,7 +87,7 @@ cd backend
 SPRING_PROFILES_ACTIVE=local mvn spring-boot:run -pl test-agent-app
 ```
 
-`tools/dev-backend-run.sh` 和仓库根目录的 `restart-dev-services.sh` 启动后端 Java 进程时会清空 JVM 的 HTTP/HTTPS/FTP/SOCKS 代理系统属性，避免本机系统代理影响 PostgreSQL JDBC 与 Redis 直连。直接使用 Maven 或 IDEA 启动时，如果本机开启了全局 SOCKS/HTTP 代理，需要在 VM options 中显式清空同类 `-D*proxy*` 参数。
+`tools/dev-backend-run.sh` 和仓库根目录的 `restart-dev-services.sh` 启动后端 Java 进程时，会先把 Maven `target` 中的可执行 JAR 校验并复制为 `.tmp/dev-services/backend-runtime/` 下本次启动专属的不可变副本，再清空 JVM 的 HTTP/HTTPS/FTP/SOCKS 代理系统属性后运行。这样企业打包或其它 Maven 构建即使覆盖 `target`，也不会破坏运行中 Spring Boot 对尚未加载类的读取。直接使用 Maven 或 IDEA 启动时，如果本机开启了全局 SOCKS/HTTP 代理，需要在 VM options 中显式清空同类 `-D*proxy*` 参数。
 
 Windows 开发人员若只需要 legacy guo profile，可直接使用已提交的 IDEA 运行配置 `TestAgentApplication guo`：
 

@@ -144,4 +144,10 @@ echo "Backend JVM proxy settings are disabled for direct DB/Redis connections."
 
 cd "${ROOT_DIR}/backend"
 mvn -pl test-agent-app -am -DskipTests package
-exec java "${BACKEND_JAVA_DIRECT_NETWORK_ARGS[@]}" -jar "${ROOT_DIR}/backend/test-agent-app/target/test-agent-app-0.1.0-SNAPSHOT.jar" ${profile:+--spring.profiles.active="${profile}"}
+backend_runtime_jar="$(
+  "${ROOT_DIR}/tools/stage-backend-runtime-jar.sh" \
+    "${ROOT_DIR}/backend/test-agent-app/target/test-agent-app-0.1.0-SNAPSHOT.jar" \
+    "${ROOT_DIR}/.tmp/dev-services/backend-runtime"
+)"
+echo "Staged immutable backend runtime jar: ${backend_runtime_jar}"
+exec java "${BACKEND_JAVA_DIRECT_NETWORK_ARGS[@]}" -jar "${backend_runtime_jar}" ${profile:+--spring.profiles.active="${profile}"}
