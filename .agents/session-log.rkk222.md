@@ -5,6 +5,20 @@
 
 ## Entries
 
+### 2026-07-24 - 排查企业用户 Ctrl+S 保存不一致
+
+- Why:
+  - 企业内部不同用户反馈编辑器 Ctrl+S 行为不一致，需要区分快捷键事件、工作区权限和文件写入链路。
+- What:
+  - 确认普通文件无 `currentPersonalWorkspaceId` 时前端按只读打开；应用版本副本、引用文件、公共/应用 Agent 配置还受个人 worktree 与角色权限限制。
+  - 发现 `CodeEditor` 只在 Monaco 首次创建且 `readonly=false` 时注册 Ctrl/Cmd+S，切换文件时仅更新 model/readOnly，不补注册命令；而 `AgentWorkbench` 对 Monaco 目标会跳过全局 keydown，因此“先打开只读文件、再切可编辑文件”可能出现能编辑但 Ctrl+S 无动作。
+- How:
+  - 对照 `AgentWorkbench`、`CodeEditor`、文件 WebSocket handler 与现有测试；未修改业务代码，未启动服务或运行测试。
+- Result:
+  - 根因候选已收敛为前端 Monaco 命令生命周期与用户工作区/权限状态两类；需用浏览器事件日志和 WebSocket `workspace.write` / `agent-config.write` 帧做最终归因。
+- Next:
+  - 用同浏览器对比“可用用户/异常用户、同一文件、同一应用版本”，记录 `readonly`、个人 worktree、键盘事件和 WS 错误 traceId。
+
 ### 2026-07-24 - 真实验收聊天附件上传与 Run 透传
 
 - Why:
