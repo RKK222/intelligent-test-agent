@@ -37,6 +37,8 @@ test-agent-redis-offline.zip.sha256
 
 平台外层 ZIP 已包含内层发布 ZIP、`.4/.114/.2` 三台节点包和一键入口；不再单独上传内层 ZIP 或节点包。
 
+Mac 生成正式平台包时必须使用已提交且干净的 Git 工作树；打包脚本会拒绝任何本地改动。每次重建内层 `test-agent-internal-release.zip` 后必须重新运行 `package-two-backend-complete.sh`。不匹配、损坏或缺少有效 SHA 的旧外层包会被自动移动到 `deploy/internal/dist/.stale-complete-bundles/`，该隐藏目录中的文件禁止进入 U 盘。外层脚本只有在确认内嵌内层 ZIP 与本次指定内层 ZIP 字节级一致、外层 SHA 对有效后才报告成功。
+
 ## 3. 中转机校验和分发
 
 当前机器：企业内部中转机。

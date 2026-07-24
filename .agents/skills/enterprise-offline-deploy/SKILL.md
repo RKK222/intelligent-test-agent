@@ -10,6 +10,7 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 ## 固定前提
 
 - 打包机是 Mac，允许联网，用来拉 Maven、pnpm、Docker base image、npm/opencode 包等构建依赖。
+- 正式企业包只允许来自已提交且干净的 Git 工作树。`package-release.sh` 和 `package-two-backend-complete.sh` 默认拒绝已暂存、未暂存及未跟踪文件；当前目录需要保留本地改动时，从目标提交创建干净的 detached worktree 打包，不得让本地改动进入制品。
 - 企业内部署环境完全不能联网，只能接收 Mac 打好的交付物。
 - 当前现场通过 U 盘把完整交付物导入企业内部中转机；中转机固定交付目录是 `~/Desktop/mimoagent/0709`，不得写成 `/data/0709`。后续 `scp` 从该目录发起；只有 `.20/.4/.114/.2` 等目标服务器的接收目录是 `/data/0709`。
 - Mac 只负责构建交付物。交付物已进入企业内部中转机后，不得再把现场传输步骤描述为“从 Mac scp”。
@@ -49,6 +50,8 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 7. 不要求用户回传真实数据库密码、token、Cookie、RSA 私钥或其他密钥；诊断输出只展示状态、长度或哈希。
 8. 中转机直接在 `~/Desktop/mimoagent/0709` 校验并向目标服务器 `scp`，不在中转机创建 `/data/0709`。只有目标服务器需要把本机已校验的明确文件复制到 `/data/0709` 时，才使用 `/bin/cp -f <源文件> /data/0709/`；禁止扩大为 `cp -rf` 覆盖目录。
 9. 后续双后台 U 盘外层交付固定为 `test-agent-two-backend-complete.zip` 和 `test-agent-two-backend-complete.zip.sha256`，包内顶层固定为 `test-agent-two-backend-complete/`；不再添加日期、`v2`、`v3` 或临时目录名。一个 ZIP 内必须包含内层标准发布 ZIP 和三台节点包，SHA 文件只作为这个唯一完整包的传输校验。
+10. 每次内层 ZIP 重建后必须重建外层完整包。内层脚本会把不匹配、损坏或 SHA 无效的历史外层包移入 `dist/.stale-complete-bundles/`；该目录只用于追溯，禁止交付。外层脚本必须确认内嵌 ZIP 与所选内层 ZIP 字节级一致后才能报告成功。
+11. 内层 ZIP 顶层 `SOURCE-COMMIT` 必须记录干净打包工作树的提交 SHA；外层封装必须拒绝 `SOURCE-COMMIT` 与当前脚本工作树 `HEAD` 不一致的发布包，不能混用不同提交的内层制品和外层部署入口。
 
 ## 标准目录
 
@@ -73,8 +76,11 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 
 ```bash
 cd /Users/kaka/Desktop/intelligent-test-agent
+git status --short
 deploy/internal/package-release.sh
 ```
+
+`git status --short` 必须无输出。若用户需要保留当前本地改动，先提交本次交付所需修复，再从该提交建立干净 detached worktree 执行打包；不要暂存、删除或打入用户未提交的文件。
 
 本地 Mac 默认输出到：
 
@@ -91,6 +97,7 @@ deploy/internal/package-release.sh --output-dir /path/to/dist
 以上命令只在外部联网 Mac 重新构建交付物时执行。包已通过 U 盘进入企业内部中转机后，现场步骤从中转机上的 SHA256 校验和 `scp` 开始。
 
 标准发布 ZIP 与三台节点包齐全后，使用 `deploy/internal/package-two-backend-complete.sh` 生成固定外层完整包。企业内部中转机每次只接收固定名 ZIP 和配套 SHA，不再按日期或版本改变命令。
+每次重新生成标准发布 ZIP 后都必须重新执行外层封装。输出目录中旧外层包若与新内层包不一致，会自动移入 `.stale-complete-bundles/`；不能从该隐藏目录取包，也不能只凭旧外层 ZIP 自身 SHA 通过就继续交付。
 
 ## 打包产物
 

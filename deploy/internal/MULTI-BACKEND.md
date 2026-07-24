@@ -93,15 +93,16 @@ nc -vz ai-code.sdc.enterprise 9070
 
 ## 3. Mac 打包与分发
 
-只构建一份版本，禁止两个后台分别打包：
+只构建一份版本，禁止两个后台分别打包。正式包必须来自已提交且干净的 Git 工作树；两个打包脚本都会拒绝任何已暂存、未暂存或未跟踪改动。若当前目录需要保留本地开发改动，应从目标提交创建干净的 detached worktree 打包，不能让本地改动进入制品：
 
 ```bash
 cd /Users/kaka/Desktop/intelligent-test-agent
+git status --short
 VITE_TEST_AGENT_API_BASE_URL="" \
   deploy/internal/package-release.sh --output-dir deploy/internal/dist
 ```
 
-空值是有意配置：前端统一使用同源相对 `/api`，所以从域名打开时请求域名，从 IP 打开时请求 IP。不得固定成其中任一 origin，否则另一个入口会重新产生跨域或名称解析问题。
+`git status --short` 必须无输出。空值是有意配置：前端统一使用同源相对 `/api`，所以从域名打开时请求域名，从 IP 打开时请求 IP。不得固定成其中任一 origin，否则另一个入口会重新产生跨域或名称解析问题。
 
 交付：
 
@@ -109,6 +110,19 @@ VITE_TEST_AGENT_API_BASE_URL="" \
 deploy/internal/dist/test-agent-internal-release.zip
 deploy/internal/dist/test-agent-internal-release.zip.sha256
 ```
+
+内层 ZIP 每次重建后，都必须用本次内层 ZIP 和三台节点包重新生成固定名外层包：
+
+```bash
+deploy/internal/package-two-backend-complete.sh \
+  --release-archive deploy/internal/dist/test-agent-internal-release.zip \
+  --nodes-dir /path/to/prepared-node-packages \
+  --output-dir deploy/internal/dist
+```
+
+`package-release.sh` 会把内嵌旧内层 ZIP、损坏或缺少有效 SHA 的历史外层包移动到
+`dist/.stale-complete-bundles/`，避免误交付；`package-two-backend-complete.sh` 会再按字节确认新外层包内嵌 ZIP 与本次内层 ZIP 完全一致。隐藏隔离目录中的文件只能追溯，不能复制到 U 盘。
+内层 ZIP 顶层 `SOURCE-COMMIT` 记录打包提交；外层封装脚本会拒绝该提交与当前封装工作树 `HEAD` 不一致的组合，避免旧内层包与新部署脚本混装。
 
 Mac 只负责构建；U 盘导入企业网后，中转机固定在 `~/Desktop/mimoagent/0709` 校验和分发，不得在中转机使用 `/data/0709`。`/data/0709` 只是 `.4/.114/.2` 目标服务器的接收目录。当前固定名外层包在中转机执行：
 
@@ -439,7 +453,7 @@ bash /data/testagent/deploy/internal/configure-nginx.sh \
 
 预期输出 `backend count: 2`、`server route count: 2`。正式安装必须使用本次发布包中的前端部署入口；它会更新前端和部署脚本、渲染候选配置、执行实体 Nginx `-t/-T` 并 reload，失败自动回滚：
 
-若 Mac 重新封装时复用旧节点包，`package-two-backend-complete.sh` 只会在外层包的临时副本中处理固定非密钥字段：前端路由键迁移为 `TEST_AGENT_NGINX_SERVER_ROUTES`，两个后台补齐 HTTP Cookie、大文件预览/分片参数并将 worker 端口池固定为 `14096-15095`。源敏感节点包和其中的密码/token 不会被修改或输出；同一键重复定义时封装直接失败，不能继续交付。
+若 Mac 重新封装时复用旧节点包，`package-two-backend-complete.sh` 只会在外层包的临时副本中处理固定非密钥字段：前端路由键迁移为 `TEST_AGENT_NGINX_SERVER_ROUTES`，两个后台补齐 HTTP Cookie、大文件预览/分片参数并将 worker 端口池固定为 `14096-15095`。源敏感节点包和其中的密码/token 不会被修改或输出；同一键重复定义时封装直接失败，不能继续交付。脚本还会校验外层内嵌 ZIP 与所选内层发布 ZIP 的 SHA256 完全一致，不能用“外层 ZIP 自身校验通过”替代版本关联校验。
 
 ```bash
 bash /tmp/deploy-internal-frontend.sh \
