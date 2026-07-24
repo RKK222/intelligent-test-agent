@@ -1049,3 +1049,17 @@
   - 新模式复用原会话锁、XXL 分发、租约/心跳/attemptId、Run 唯一锚点和 RunEvent SSE，未增加专属队列、内部分发协议字段、RunEvent 类型或 generated SDK 改动。
   - 同步 HTTP API、事件流、数据库、XXL 架构、安全、测试与相关工程 README/PACKAGE；兼容旧请求、旧任务和缺失模式的旧前端响应。
   - 后端全量 `mvn test` 仍只被主线已知的 `OpencodeProcessConfigLinkServiceTest.rejectsOrdinaryDirectoryAtManagedPathWithoutDeletingUserData` 阻断；已独立稳定复现，该服务/测试与本次 diff 无关，本次不扩大范围修改。
+
+### 2026-07-24 - 修复 Manager Unix 子进程停止误判
+
+- Why:
+  - Unix `OSStarter.Start` 启动 OpenCode 后没有调用 `Wait` 回收子进程；进程退出后以 zombie 保留 PID，`DefaultProcessAlive` 的 signal 0 检查因此持续判定存活，最终令运行管理停止命令返回 `OPENCODE_BAD_GATEWAY`。
+- What:
+  - Unix 启动器在成功 `Start` 后异步调用 `command.Wait()`，保持启动接口非阻塞，并让操作系统及时回收已退出子进程；Windows 启动路径不变。
+  - 新增 Unix 回归测试，直接验证短命子进程退出后 PID 不再被判定为存活；同步更新 `opencode-manager/README.md`，并补充设计与实施计划文档。
+- How:
+  - TDD RED 在修复前稳定复现退出 PID 仍存活，加入异步回收后目标测试通过；临时停止用户授权的 4096 独立 `opencode web` 后运行 `go test ./...`，全部 Manager 包通过，随后恢复该进程。
+  - 使用未修改的 `.env.test` 和 `test` profile 完整构建并重启 backend、manager、frontend；后端 health/readiness 为 UP、前端 3000 返回 200、Manager WebSocket 连接正常。
+  - 真实运行管理链路将本机 4098 进程重启到 PID 74990、`RUNNING / HEALTHY` 后执行停止；Manager 在 50ms 内返回 `STOPPED`，4098 无监听、PID 消失、状态文件删除，页面回到 `STOPPED / NOT_RUNNING`，未再出现 `OPENCODE_BAD_GATEWAY`。
+- Result:
+  - 修复只涉及 Manager 的 Unix 子进程生命周期和对应测试/文档；未修改 HTTP API、RunEvent、数据库/Flyway、SQL、generated SDK、权限、安全配置或环境文件，现有 Java 公共停止程序和错误转换保持不变。
