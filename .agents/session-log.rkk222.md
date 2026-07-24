@@ -5,6 +5,20 @@
 
 ## Entries
 
+### 2026-07-24 - 明确公共 Skill 职责并补齐 OpenCode 1.18.4 子 Agent 权限
+
+- Why:
+  - 公共 Skill 的名称、用途、实际调用 Agent 和串联时机不够直观；OpenCode 1.18.4 的 Task 子 Session 权限派生还会对 `task`、`todowrite` 做同名显式规则检查，只有 `permission."*": allow` 时可能被追加 deny。
+- What:
+  - 在公共配置 README 中逐项说明 12 个 Skill 的加载 Agent、调用时机、产出和设计/执行两条调用链；用户可见名称调整为“生成接口测试案例”“文本理解生成”“生成接口自动化脚本”“生成接口自动化报文”，并具体说明 `api-execute-case` 负责请求/数据准备、平台 API/DB 调用、响应/数据库断言和执行证据。
+  - 7 个 `opencode/agents/*.md` 统一显式声明 `permission."*": allow`、`permission.task: allow`、`permission.todowrite: allow`；技术 ID 与既有案例文件方法后缀保持兼容。执行报文文件名统一为 `<案例名称>-接口自动化报文.md`，脚本格式校验规则与当前输出命名一致。
+- How:
+  - 核对 OpenCode 官方 Permissions/Agents 文档与官方 v1.18.4 标签的 `subagent-permissions.ts`、`task.ts`：官方文档仍将 `*` 定义为通用规则，v1.18.4 子 Session 派生实现只额外按同名显式规则检查 `task`、`todowrite`，未发现第三个需要同类显式补齐的权限；父 Session deny 和 `external_directory` 规则继续按运行时继承。
+  - YAML/frontmatter、Skill 目录名、旧术语、冲突标记和 `git diff --check` 通过；本地 OpenCode 配置加载确认 7 个 Agent 的三项权限均解析为 allow。使用 JDK 25、`.env.test`、`test` profile 完整构建并重启 backend、opencode-manager、frontend，health/readiness、前端 HTTP、登录 CORS 和 4104 OpenCode health 均正常。
+- Result:
+  - 公共配置仓库提交为 `622769c`（`明确公共技能职责并补齐子智能体权限`）；未推送远端。未修改 OpenCode 源码、应用 API、RunEvent、数据库/Flyway、SQL、generated SDK、环境配置、性能或安全边界。
+- Next: None。
+
 ### 2026-07-24 - 固化 OpenCode 源码只读边界
 
 - Why: 用户明确要求本项目严格禁止修改 OpenCode 源码，并将约束补入项目相关文档。
