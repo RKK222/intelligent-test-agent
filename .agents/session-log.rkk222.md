@@ -5,6 +5,23 @@
 
 ## Entries
 
+### 2026-07-24 - 重打进程启动时间修复企业完整包
+
+### Why
+- `23d256975` 已完成 Java 与 opencode-manager 的进程启动时间权威源修复，但上一条记录仍明确标记企业完整包待构建，旧包不包含新的 `startedAt` 控制协议。
+
+### What
+- 基于当前 `main` 全量重建后端薄 JAR、前端、programs、`linux/amd64` worker/manager 和内层发布 ZIP，并复用经 SHA 校验的 `.4/.114/.2` 三台节点配置包重新封装固定名双后台完整包。
+- 打包脚本继续保持与既有基线一致，未修改 `deploy/internal/.env` 或现场配置；独立且有未提交实验改动的 `codex/apple-design-preview` 不属于本次交付。
+
+### How
+- JDK 25 下执行 `package-release.sh` 全量构建，再执行 `package-two-backend-complete.sh`；内外层 SHA、ZIP、内嵌发布 ZIP一致性、四类核心制品逐字节比对、JAR 内置 RSA 和 160 个依赖库均通过。
+- 额外确认 runtime JAR 包含 `startedAt` 字段，worker 内 manager 二进制包含同名协议字段，镜像为 `linux/amd64` 且 OpenCode 为 1.18.4；双后台封包回归、AI 文档校验和 `git diff --check` 通过。
+
+### Result
+- 进程启动时间修复已进入固定名企业完整包；现场必须同步升级 `.4/.114` 的 Java 与 worker/manager，再部署 `.2` 前端，不能只替换前端或只升级 Java。
+- 本次未修改业务源码、HTTP API、RunEvent 类型、数据库/Flyway、SQL、generated SDK、OpenCode 源码或环境配置；真实企业 x86_64/Docker 现场部署与 rollout 复查仍待执行。
+
 ### 2026-07-24 - 修复跨进程启动时间双时间源与存量 rollout
 
 ### Why
