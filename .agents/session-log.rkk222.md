@@ -5,6 +5,19 @@
 
 ## Entries
 
+### 2026-07-24 - 推送公共配置 master 到 Gitee
+
+- Why:
+  - 用户明确要求把本地已验证的公共 OpenCode 配置推送到 `git@gitee.com:huangzhenren/opencodeconfig.git`。
+- What:
+  - 将公共配置 `master` 的 8 个本地提交推送到 `origin/master`，包含 Agent/Skill 权限与名称整改、测试设计/执行规约归属调整、远端合并和自定义 Tool 兼容修正。
+- How:
+  - 推送前 fetch 确认为 ahead 8 / behind 0；推送后再次 fetch 并通过 `git ls-remote` 核对本地 HEAD、远端跟踪分支和 Gitee 实际引用。
+- Result:
+  - 三者均为 `ee8e978ea0af17a54a8fe3fe3651623e6c3798c7`，Gitee `master` 已更新成功。
+- Next:
+  - 企业内部同步 ZIP 后，按公共配置发布流程拉取该提交并重启相关用户 OpenCode 进程。
+
 ### 2026-07-24 - 生成当前企业公共 OpenCode 配置包
 
 - Why:
