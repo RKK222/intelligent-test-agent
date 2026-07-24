@@ -1665,3 +1665,17 @@
 - Result:
   - 例如中文“接口自动化测试”且英文留空时，实际 Skill 目录为 `skills/jie-kou-zi-dong-hua-ce-shi/`；用户在配置树和运行态候选看到中文主名称，OpenCode 仍识别英文目录、顶层 `name` 和技术 ID。
   - 仅扩展既有 `FileTreeEntryResponse` 可选响应字段并同步事件流协议文档；未新增 HTTP 路径、RunEvent/SSE 类型、数据库/Flyway、SQL、安全权限或环境配置变更，未修改 generated SDK 和 OpenCode 源码。
+
+### 2026-07-24 - 基于当前 main 重打企业内层发布包
+
+- Why:
+  - 用户要求基于本地代码重新生成企业交付物；当前 `main` HEAD 为 `5edf896a341de8202019d858fba4faab0f2de7fb`，旧 `dist` 制品不能直接视为当前代码构建结果。
+- What:
+  - 重新构建后端 JAR、前端静态包、OpenCode 1.18.4 `linux/amd64` worker 镜像 tar、外置 programs 及标准内层发布 ZIP；前端使用命令行临时的空 `VITE_TEST_AGENT_API_BASE_URL`，未修改 `deploy/internal/.env`。
+  - 发布 ZIP 保留仓库全部 `.agents/session-log*.md`，并包含 `deploy/internal/` 部署脚本、OpenCode 运行文件 Git 忽略清单和 JAR 内置 RSA 私钥资源。
+- How:
+  - 首次执行因当前 shell 的 JDK 17 不支持 Maven `--release 21` 失败；显式切换 `/usr/libexec/java_home -v 25` 后使用 `deploy/internal/package-release.sh --output-dir deploy/internal/dist` 全量完成。随后执行 `--zip-only` 重封会话日志。
+  - 校验内层 ZIP SHA256、`unzip -t`、JAR manifest/外置依赖/RSA 私钥、前端相对 API、programs 内容和 worker `linux/amd64` 架构；运行 `tools/verify-internal-two-backend-complete-package.sh` 通过。
+- Result:
+  - 标准内层企业发布包已基于当前 HEAD 生成并可交付；本次未生成外层双后台完整包，因为工作区没有三台节点配置包，避免复用旧敏感节点包造成配置与代码批次不一致。
+  - 未修改 Java/前端/manager 业务源码、HTTP API、RunEvent、数据库/Flyway、SQL、generated SDK、OpenCode 源码或环境配置；企业现场 Docker 端口映射、服务启动和浏览器验收仍需按部署手册执行。
