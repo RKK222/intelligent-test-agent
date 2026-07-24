@@ -5,6 +5,19 @@
 
 ## Entries
 
+### 2026-07-24 - 定稿超级管理员自定义定时执行时间设计
+
+- Why:
+  - 超级管理员需要在白天方便验证夜间任务的 XXL 分发、固定服务器路由、普通 Run 启动和状态展示，而普通用户仍应保持既有夜间容量规则。
+- What:
+  - 定稿 `NIGHT_WINDOW` 与 `ADMIN_CUSTOM` 双模式：普通用户继续选择 15 分钟夜间时段；超级管理员可用 1/3/5 分钟快捷项或北京时间日期时间输入选择下一分钟至未来 24 小时的任意分钟。
+  - 自定义模式不占用 `NIGHT_EXECUTION_SLOT_CAPACITY`，使用 15 分钟重试宽限期；XXL 分发扫描改为每分钟，两种模式复用同一任务表、handler、租约/心跳/attemptId、Run 幂等和补偿链路。
+  - 设计明确可选 `scheduleMode` 的 API 兼容、后端 `SUPER_ADMIN` 强校验、PostgreSQL 模式字段、MySQL Cron 更新、待执行展示、调整/取消和测试文档边界。
+- How:
+  - 对比“双模式扫描”“映射 15 分钟容量桶”“每任务动态 XXL Job”三种方案后选择最小且可真实覆盖生产链路的双模式；完成占位符、矛盾、范围和兼容性自检。
+- Result:
+  - 设计写入 `docs/superpowers/specs/2026-07-24-super-admin-custom-schedule-time-design.md`；本次仅冻结设计，不修改运行时代码、API、数据库、环境配置或 generated SDK，待用户审阅后再编写实施计划。
+
 ### 2026-07-23 - 上下文圆环展示占用等级
 
 - Why:
