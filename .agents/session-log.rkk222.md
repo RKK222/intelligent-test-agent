@@ -5,6 +5,20 @@
 
 ## Entries
 
+### 2026-07-24 - 生成当前企业公共 OpenCode 配置包
+
+- Why:
+  - 用户需要把当前公共 OpenCode 配置同步到企业内部，并确认本地提交是否已进入 Gitee 公共配置仓库。
+- What:
+  - 生成 `deploy/internal/dist/opencode-public-config-enterprise-current-full.zip` 及 `.sha256`；保留企业基线 `1ad3d20` 的 `opencode.jsonc`，叠加公共配置提交 `ee8e978` 的 README、AGENTS、7 个 Agent、12 个 Skill 和 4 个 Tool。
+- How:
+  - ZIP 共 106 个条目、97,778 字节，逐文件与两个来源提交一致；CRC、SHA-256、允许路径和敏感文件名扫描通过，未包含根 `agents/**` 运行快照、Session、认证/模型文件、`.env`、Git 元数据、依赖目录或已删除的 `api-execute-case`。
+  - 从 ZIP 独立冷解压后，OpenCode 1.18.4 实际加载 12/12 Skill、7/7 Agent 和 4/4 Tool。
+- Result:
+  - SHA-256 为 `0878a6832bfbcf6e8c7f46ee3ea0186a19114e82e0053132b2abd35d1ff28fef`。公共配置本地 `master` 相对 Gitee `origin/master` 为 ahead 8 / behind 0，本轮未推送。
+- Next:
+  - 将 ZIP 和 SHA 文件一并传入企业内部中转机 `~/Desktop/mimoagent/0709`，校验后通过企业公共配置发布流程同步两台后台并重启相关用户 OpenCode 进程。
+
 ### 2026-07-24 - 将接口执行共享内容归回对应 Skill
 
 - Why:
