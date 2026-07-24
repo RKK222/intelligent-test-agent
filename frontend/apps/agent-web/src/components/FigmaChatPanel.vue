@@ -59,6 +59,7 @@ import {
   MarkdownView,
   OpencodeTimeline,
   createOpencodeLikeState,
+  type ComposerAttachment,
   permissionPresentation,
   type OpencodeLikeRuntimeStatus,
 } from '@test-agent/agent-chat'
@@ -105,6 +106,12 @@ function getFileName(path: string): string {
   if (!path) return ''
   const normalized = path.replace(/\\/g, '/')
   return normalized.split('/').filter(Boolean).pop() || path
+}
+
+function formatAttachmentBytes(size: number): string {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {
@@ -755,6 +762,10 @@ const props =
     chatContextTotalChars?: number
     chatContextOverLimit?: boolean
     chatContextError?: string | null
+    /** 已上传到当前个人工作区、等待随本轮 Run 提交的浏览器文件附件。 */
+    chatAttachments?: ComposerAttachment[]
+    /** 工作区附件正在走分片上传；上传完成前禁止提交本轮消息。 */
+    chatAttachmentsUploading?: boolean
     /** permission.asked 投影出的待处理权限请求。 */
     permissions?: PermissionRequest[]
     /** question.asked 投影出的待处理提问请求。 */
@@ -795,6 +806,7 @@ const props =
     todos: () => [],
     todoSnapshotsByUserMessageId: () => ({}),
     chatContexts: () => [],
+    chatAttachments: () => [],
     permissions: () => [],
     questions: () => [],
     messageScopesById: () => ({}),
@@ -811,7 +823,7 @@ const props =
 
 const emit =
   defineEmits<{
-    (e: 'send', prompt: string): void
+    (e: 'send', prompt: string, attachments?: ComposerAttachment[]): void
     (e: 'stop'): void
     (e: 'retry'): void
     (e: 'new-conversation'): void
@@ -820,6 +832,7 @@ const emit =
       prompt: string
       scheduleMode: NightExecutionScheduleMode
       slotStart: string
+      attachments?: ComposerAttachment[]
     }): void
     (e: 'adjust-night-task', payload: { taskId: string; slotStart: string }): void
     (e: 'cancel-night-task', taskId: string): void
@@ -832,6 +845,8 @@ const emit =
     (e: 'select-session', id: string): void
     (e: 'request-night-tasks'): void
     (e: 'update:inputValue', value: string): void
+    (e: 'upload-chat-attachments', files: File[]): void
+    (e: 'remove-chat-attachment', id: string): void
     (e: 'open-diff', path: string): void
     (e: 'open-file', path: string): void
     (e: 'initialize-process'): void
@@ -864,6 +879,8 @@ const emit =
 const collapsedMessages = ref<Record<string, boolean>>({})
 
 const localInput = ref(props.inputValue ?? '')
+const attachmentInput = ref<HTMLInputElement | null>(null)
+const attachmentDragOver = ref(false)
 const nightPickerOpen = ref(false)
 const nightPickerMode = ref<'create' | 'adjust'>('create')
 const adjustingNightTaskId = ref<string | null>(null)
@@ -2116,6 +2133,7 @@ const contextSendBlockedReason = computed(() => {
 const sendBlockedTitle = computed(() => {
   if (!processReady.value) return '请先初始化 TestAgent 进程'
   if (publicConfigMessageBlocked.value) return publicConfigMessageBlockedReason.value
+  if (props.chatAttachmentsUploading) return '附件上传完成后才能发送'
   if (nightSessionLocked.value) return nightSessionLockedReason.value
   return readonlyBlockedReason.value || contextSendBlockedReason.value || '发送'
 })
@@ -2123,6 +2141,7 @@ const sendSubmitBlocked = computed(
   () => props.historyLoading === true
     || props.historySubmitBlocked === true
     || processSubmitBlocked.value
+    || props.chatAttachmentsUploading === true
     || nightSessionLocked.value
     || readonlySubmitBlocked.value
     || contextSubmitBlocked.value
@@ -2135,7 +2154,7 @@ const composerPlaceholder = computed(() => {
   return props.placeholder || 'Ask the AI agent...'
 })
 const nightScheduleBlocked = computed(() =>
-  !localInput.value.trim()
+  (!localInput.value.trim() && props.chatAttachments.length === 0)
     || props.running === true
     || composerInteractionBlocked.value
     || publicConfigMessageBlocked.value
@@ -2782,6 +2801,26 @@ function openAttachmentDialog() {
 
 function closeAttachmentDialog() {
   attachmentDialogOpen.value = false
+  attachmentDragOver.value = false
+}
+
+function selectChatAttachmentFiles(files: FileList | File[]) {
+  const selected = Array.from(files)
+  if (selected.length === 0) return
+  closeAttachmentDialog()
+  emit('upload-chat-attachments', selected)
+}
+
+function onAttachmentInputChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  selectChatAttachmentFiles(input.files ?? [])
+  // 允许用户再次选择同名文件，后端会按工作区重名规则给出明确反馈。
+  input.value = ''
+}
+
+function onAttachmentDrop(event: DragEvent) {
+  attachmentDragOver.value = false
+  selectChatAttachmentFiles(event.dataTransfer?.files ?? [])
 }
 
 function selectDrawerFile(path: string) {
@@ -4097,14 +4136,23 @@ function confirmNightSchedule() {
     return
   }
   const prompt = localInput.value.trim()
-  if (!prompt || nightScheduleBlocked.value) return
+  if ((!prompt && props.chatAttachments.length === 0) || nightScheduleBlocked.value) return
   nightSubmissionAwaiting.value = true
   submittedNightTaskId.value = props.currentNightTask?.taskId ?? null
-  emit('schedule-night', {
+  const schedulePayload: {
+    prompt: string
+    scheduleMode: NightExecutionScheduleMode
+    slotStart: string
+    attachments?: ComposerAttachment[]
+  } = {
     prompt,
     scheduleMode: nightPickerScheduleMode.value,
     slotStart,
-  })
+  }
+  if (props.chatAttachments.length > 0) {
+    schedulePayload.attachments = props.chatAttachments
+  }
+  emit('schedule-night', schedulePayload)
 }
 
 function beginAdjustNightTask(task: NightExecutionTask) {
@@ -4139,11 +4187,16 @@ function confirmCancelNightTask(taskId: string) {
 
 function submit() {
   const text = localInput.value.trim()
-  if (!text || sendSubmitBlocked.value) return
+  const attachments = props.chatAttachments
+  if ((!text && attachments.length === 0) || sendSubmitBlocked.value) return
   wasStopped.value = false
   wasCompleted.value = false
   wasFailed.value = false
-  emit('send', text)
+  if (attachments.length > 0) {
+    emit('send', text, attachments)
+  } else {
+    emit('send', text)
+  }
   localInput.value = ''
   emit('update:inputValue', '')
 }
@@ -5345,6 +5398,34 @@ function onCompositionEnd() {
       @clear="emit('clear-chat-contexts')"
       @preview="onContextPreview"
     />
+    <section
+      v-if="!activeSubagentSessionId && (chatAttachments.length > 0 || chatAttachmentsUploading)"
+      class="figma-chat-uploaded-attachments"
+      aria-label="已上传文件附件"
+      data-testid="chat-uploaded-attachments"
+    >
+      <div class="figma-chat-uploaded-attachments-head">
+        <span>{{ chatAttachments.length }} 个文件附件</span>
+        <span v-if="chatAttachmentsUploading" class="figma-chat-uploaded-attachments-status">正在上传到工作区…</span>
+        <span v-else class="figma-chat-uploaded-attachments-status">发送时一并交给智能体</span>
+      </div>
+      <div v-if="chatAttachments.length" class="figma-chat-uploaded-attachments-list">
+        <div v-for="attachment in chatAttachments" :key="attachment.id" class="figma-chat-uploaded-attachment" :title="attachment.name">
+          <FileText :size="13" aria-hidden="true" />
+          <span class="figma-chat-uploaded-attachment-name">{{ attachment.name }}</span>
+          <span class="figma-chat-uploaded-attachment-size">{{ formatAttachmentBytes(attachment.size) }}</span>
+          <button
+            type="button"
+            class="figma-chat-uploaded-attachment-remove"
+            aria-label="移除文件附件"
+            title="移除文件附件"
+            @click="emit('remove-chat-attachment', attachment.id)"
+          >
+            <X :size="12" />
+          </button>
+        </div>
+      </div>
+    </section>
     <!-- 统一输入卡片：textarea + 底部工具行（附件、模型、新建、发送/停止）整合在一个圆角卡片内 -->
     <div v-if="!activeSubagentSessionId" class="figma-chat-composer">
       <section
@@ -5500,7 +5581,7 @@ function onCompositionEnd() {
               type="button"
               class="figma-chat-card-btn figma-chat-attachment-btn"
               aria-label="上传附件"
-              :disabled="composerInteractionBlocked"
+              :disabled="composerInteractionBlocked || chatAttachmentsUploading"
               @click="openAttachmentDialog"
             >
               <Upload class="figma-chat-btn-icon" />
@@ -5701,7 +5782,7 @@ function onCompositionEnd() {
             v-if="!running"
             type="button"
             class="figma-chat-send-card"
-            :disabled="!localInput.trim() || sendSubmitBlocked"
+            :disabled="(!localInput.trim() && chatAttachments.length === 0) || sendSubmitBlocked"
             :title="sendBlockedTitle"
             aria-label="发送"
             @click="submit"
@@ -5808,12 +5889,18 @@ function onCompositionEnd() {
         aria-modal="true"
         aria-label="上传附件"
       >
+        <input
+          ref="attachmentInput"
+          class="figma-chat-attachment-input"
+          type="file"
+          multiple
+          data-testid="chat-attachment-input"
+          @change="onAttachmentInputChange"
+        />
         <header class="figma-chat-attachment-header">
           <div>
             <h3 class="figma-chat-attachment-title">上传附件</h3>
-            <p class="figma-chat-attachment-subtitle">
-              附件会随测试任务一起提交
-            </p>
+            <p class="figma-chat-attachment-subtitle">先上传到当前个人工作区，再随任务提交给智能体</p>
           </div>
           <button
             type="button"
@@ -5824,20 +5911,28 @@ function onCompositionEnd() {
             <X :size="14" />
           </button>
         </header>
-        <button type="button" class="figma-chat-attachment-drop" @click.prevent>
+        <button
+          type="button"
+          class="figma-chat-attachment-drop"
+          :class="{ 'is-drag-over': attachmentDragOver }"
+          data-testid="chat-attachment-dropzone"
+          @click.prevent="attachmentInput?.click()"
+          @dragenter.prevent="attachmentDragOver = true"
+          @dragover.prevent="attachmentDragOver = true"
+          @dragleave.prevent="attachmentDragOver = false"
+          @drop.prevent="onAttachmentDrop"
+        >
           <span class="figma-chat-attachment-drop-icon" aria-hidden="true">
             <Upload :size="22" />
           </span>
           <span class="figma-chat-attachment-drop-title"
             >选择或拖拽文件到这里</span
           >
-          <span class="figma-chat-attachment-drop-hint"
-            >支持文档、图片和日志文件，后台接口接入后开放上传。</span
-          >
+          <span class="figma-chat-attachment-drop-hint">支持多文件；同名文件按工作区重名规则处理。</span>
         </button>
-        <div class="figma-chat-attachment-disabled">
+        <div class="figma-chat-attachment-note">
           <span class="figma-chat-attachment-disabled-dot" aria-hidden="true" />
-          当前仅展示前端样式，暂未连接后台上传能力
+          上传完成后，文件会保留在工作区并作为本轮附件发送。
         </div>
       </section>
     </div>
@@ -9470,6 +9565,81 @@ function onCompositionEnd() {
 }
 
 /* ---- Attachment Dialog ---- */
+.figma-chat-uploaded-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 10px 6px;
+  padding: 6px 8px;
+  border: 1px solid rgba(51, 102, 255, 0.14);
+  border-radius: 8px;
+  background: #f8faff;
+  color: #4b5563;
+  font-size: 11px;
+}
+
+.figma-chat-uploaded-attachments-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.figma-chat-uploaded-attachments-status {
+  color: #64748b;
+}
+
+.figma-chat-uploaded-attachments-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.figma-chat-uploaded-attachment {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 4px 0 7px;
+  border: 1px solid #dbe4ff;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+}
+
+.figma-chat-uploaded-attachment-name {
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.figma-chat-uploaded-attachment-size {
+  flex: 0 0 auto;
+  color: #64748b;
+}
+
+.figma-chat-uploaded-attachment-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.figma-chat-uploaded-attachment-remove:hover {
+  background: #eef2ff;
+  color: #334155;
+}
+
 .figma-chat-attachment-mask {
   position: absolute;
   inset: 0;
@@ -9547,8 +9717,24 @@ function onCompositionEnd() {
   border-radius: 8px;
   background: #f8faff;
   color: #333;
-  cursor: default;
+  cursor: pointer;
   font-family: var(--font-sans);
+}
+
+.figma-chat-attachment-drop:hover,
+.figma-chat-attachment-drop.is-drag-over {
+  border-color: #3366ff;
+  background: #f0f4ff;
+}
+
+.figma-chat-attachment-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .figma-chat-attachment-drop-icon {
@@ -9579,7 +9765,7 @@ function onCompositionEnd() {
   text-align: center;
 }
 
-.figma-chat-attachment-disabled {
+.figma-chat-attachment-note {
   display: flex;
   align-items: center;
   gap: 6px;

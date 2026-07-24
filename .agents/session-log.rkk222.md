@@ -5,6 +5,21 @@
 
 ## Entries
 
+### 2026-07-24 - 接通聊天附件上传并隔离工作区目录
+
+- Why:
+  - “上传附件”此前只有前端占位弹窗；附件需要复用工作区上传能力并作为当前任务的 file PromptPart 交给智能体，且不能把文件直接写入个人工作区根目录。
+- What:
+  - `FigmaChatPanel` 增加原生多文件选择/拖拽、上传中门禁、附件列表、移除和附件发送事件；`AgentWorkbench` 复用现有工作区分片上传、进度遮罩、撤销栈/Git diff 刷新与 `fileToPromptAttachment`，文件固定保存到个人 worktree 的 `.testagent/attachments`，普通发送和夜间任务均携带完整 file parts。
+  - 同步更新 agent-web README/PACKAGE 与 FigmaChatPanel 回归测试；未新增 HTTP API、SSE 事件、数据库、SQL、generated SDK 或环境配置。
+- How:
+  - `vue-tsc`、agent-web 生产构建、`git diff --check` 通过；FigmaChatPanel/prompt-context/night-execution 定向测试 148 passed / 1 skipped。
+  - 复用已运行的 `@test-agent/agent-web` localhost Vite 服务，`http://127.0.0.1:3000/` 返回 200；无认证的 Playwright smoke 只进入登录页，因此真实登录后的文件 RPC 上传与 Run 请求未做端到端探针。
+- Result:
+  - 附件不再落到个人工作区根目录，发送链路已接通并保留原文件附件内容；代码级验证通过，认证态上传链路仍需在真实登录页面补一次验收。
+- Next:
+  - 在已登录的工作台中选择一个小文件，确认 `.testagent/attachments/<文件名>` 上传成功、发送请求包含 `parts[].type=file`，并检查普通工作区上传未受影响。
+
 ### 2026-07-24 - 限制内部模型代理请求体为 2 MiB
 
 - Why:
@@ -1679,3 +1694,19 @@
 - Result:
   - 标准内层企业发布包已基于当前 HEAD 生成并可交付；本次未生成外层双后台完整包，因为工作区没有三台节点配置包，避免复用旧敏感节点包造成配置与代码批次不一致。
   - 未修改 Java/前端/manager 业务源码、HTTP API、RunEvent、数据库/Flyway、SQL、generated SDK、OpenCode 源码或环境配置；企业现场 Docker 端口映射、服务启动和浏览器验收仍需按部署手册执行。
+
+### 2026-07-24 - 收紧企业包源码与内外层一致性
+
+- Why:
+  - 重打内层发布 ZIP 后，输出目录中的固定名双后台外层包仍可能保留旧内层 ZIP；旧外层自身 ZIP/SHA 校验可以通过，但并不代表它属于本次发布。
+  - 企业打包入口此前允许从脏工作树运行，本地未提交文件可能被后端、前端或 Docker 构建上下文带入制品，无法仅凭最终文件名判断源码边界。
+- What:
+  - 新增共用打包源保护：内层和外层脚本默认拒绝已暂存、未暂存及未跟踪改动，只允许从干净 Git 提交生成企业包；内层 ZIP 顶层新增 `SOURCE-COMMIT`，外层封装要求其与当前脚本工作树 `HEAD` 一致。
+  - 内层 ZIP 每次生成后自动核对输出目录中的固定名外层包；内嵌 ZIP 不匹配、外层损坏或 SHA 缺失/无效时，将旧 ZIP/SHA 移入 `.stale-complete-bundles/<SHA>/`，避免继续出现在交付根目录。
+  - 外层封装落盘前按字节校验内嵌内层 ZIP 与所选发布 ZIP 一致，落盘后再校验固定名外层 SHA；同步企业部署 README、多后台手册、全量执行手册和离线部署 skill。
+- How:
+  - 扩展 `tools/verify-internal-two-backend-complete-package.sh`，使用临时 Git fixture 验证干净源放行/脏源拒绝，并覆盖旧外层隔离、`SOURCE-COMMIT`、内嵌 ZIP 身份、固定名覆盖、节点配置归一化和敏感值不出日志。
+  - Shell 语法、`git diff --check` 和双后台封包回归通过；在当前含用户本地前端改动的工作区直接运行 `package-release.sh --zip-only` 会按预期在写制品前拒绝。
+- Result:
+  - 后续正式企业包必须从目标提交的干净 clone 或 detached worktree 构建；本地开发改动不会被静默打入包，旧外层包也不会继续伪装成本次交付物。
+  - 仅修改打包脚本、回归测试和部署文档；未修改业务代码、HTTP API、RunEvent、数据库/Flyway、SQL、性能、安全协议、generated SDK、OpenCode 源码或环境配置。

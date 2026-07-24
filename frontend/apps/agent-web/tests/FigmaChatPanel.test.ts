@@ -4240,7 +4240,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find(".figma-chat-task-panel").exists()).toBe(false);
   });
 
-  it("opens a frontend-only attachment dialog from the composer action", async () => {
+  it("opens the workspace-backed attachment dialog from the composer action", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [],
@@ -4253,8 +4253,39 @@ describe("FigmaChatPanel", () => {
     await wrapper.get('[aria-label="上传附件"]').trigger("click");
 
     expect(wrapper.find('[role="dialog"][aria-label="上传附件"]').exists()).toBe(true);
-    expect(wrapper.text()).toContain("当前仅展示前端样式，暂未连接后台上传能力");
+    expect(wrapper.text()).toContain("先上传到当前个人工作区，再随任务提交给智能体");
+    expect(wrapper.text()).toContain("上传完成后，文件会保留在工作区并作为本轮附件发送");
     expect(wrapper.emitted("download-files")).toBeUndefined();
+  });
+
+  it("emits selected files for workspace upload and sends completed attachments", async () => {
+    const file = new File(["case content"], "case.md", { type: "text/markdown" });
+    const attachment = {
+      id: "case.md:12:0",
+      name: "case.md",
+      mimeType: "text/markdown",
+      size: 12,
+      part: { type: "file", name: "case.md", mimeType: "text/markdown", content: "case content" }
+    } as const;
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        inputValue: "",
+        chatAttachments: [attachment],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any
+    });
+
+    await wrapper.get('[aria-label="上传附件"]').trigger("click");
+    const input = wrapper.get('[data-testid="chat-attachment-input"]');
+    Object.defineProperty(input.element, "files", { configurable: true, value: [file] });
+    await input.trigger("change");
+
+    expect(wrapper.emitted("upload-chat-attachments")?.[0]).toEqual([[file]]);
+    expect(wrapper.get('[data-testid="chat-uploaded-attachments"]').text()).toContain("case.md");
+
+    await wrapper.get('[aria-label="发送"]').trigger("click");
+    expect(wrapper.emitted("send")?.[0]).toEqual(["", [attachment]]);
   });
 
   it("shows the assign action when the opencode process is unassigned (fallback inference)", async () => {

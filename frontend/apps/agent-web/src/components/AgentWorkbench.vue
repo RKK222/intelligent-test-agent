@@ -7,6 +7,7 @@ import {
   AgentChat,
   buildComposerPromptParts,
   createInitialAgentChatRuntimeState,
+  fileToPromptAttachment,
   promptPartsForUserDisplay,
   reduceAgentChatRuntime,
   type ComposerAttachment
@@ -482,6 +483,10 @@ type WorkspaceUndoOperation =
 // 撤销历史只属于当前个人 worktree，切换工作区后立即清空，避免跨 worktree 写入。
 const workspaceUndoStack = ref<WorkspaceUndoOperation[]>([]);
 const workspaceUploadOverlay = ref<FileUploadOverlayState | null>(null);
+// 聊天附件复用工作区上传会话，上传成功后保留原始 File 对应的 PromptPart，提交时随 Run 一并发送。
+const chatAttachments = ref<ComposerAttachment[]>([]);
+// 聊天附件属于平台专用资产，固定放在个人 worktree 的专用目录，不能污染工作区根目录。
+const CHAT_ATTACHMENT_DIRECTORY = ".testagent/attachments";
 let retryingWorkspaceAfterOpencodeReady = false;
 let selectingAppId: string | undefined;
 let appSelectionSeq = 0;
@@ -3381,6 +3386,7 @@ function resetWorkspaceState() {
   selectedWorkspaceSnapshot.value = undefined;
   currentPersonalWorkspaceId.value = undefined;
   currentPersonalWorkspaceBranch.value = undefined;
+  chatAttachments.value = [];
   // 引用弹窗绑定个人工作区；切仓必须立即卸载其轮询与迟到响应上下文。
   referenceConfigurationOpen.value = false;
   workbench.resetWorkspaceView();
@@ -4890,13 +4896,33 @@ async function handleMoveEntries(sourcePaths: string[], targetDirectory: string)
   }
 }
 
-async function handleUploadFiles(directory: string, files: File[]) {
-  if (!selectedWorkspace.value || !currentPersonalWorkspaceId.value) {
-    feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再上传文件。" };
-    return;
+type WorkspaceUploadResult = {
+  uploaded: number;
+  uploadedPaths: string[];
+  failures: string[];
+};
+
+type WorkspaceUploadOptions = {
+  onUploaded?: (file: File, targetPath: string) => Promise<void> | void;
+};
+
+/**
+ * 工作区普通文件和聊天附件共用这一条分片上传链路；回调只在目标文件发布成功后执行。
+ * 上传完成后统一刷新目录、撤销栈和 Git diff，避免聊天入口另起一套文件写入逻辑。
+ */
+async function uploadWorkspaceFiles(
+  directory: string,
+  files: File[],
+  options: WorkspaceUploadOptions = {}
+): Promise<WorkspaceUploadResult> {
+  const workspace = selectedWorkspace.value;
+  if (!workspace || files.length === 0) {
+    return { uploaded: 0, uploadedPaths: [], failures: [] };
   }
-  if (workspaceUploadOverlay.value || files.length === 0) return;
-  const workspaceId = selectedWorkspace.value.workspaceId;
+  if (workspaceUploadOverlay.value) {
+    return { uploaded: 0, uploadedPaths: [], failures: ["已有文件正在上传，请稍后重试"] };
+  }
+  const workspaceId = workspace.workspaceId;
   const failures: string[] = [];
   const uploadedPaths: string[] = [];
   let uploaded = 0;
@@ -4925,6 +4951,12 @@ async function handleUploadFiles(directory: string, files: File[]) {
         });
         uploaded += 1;
         uploadedPaths.push(targetPath);
+        try {
+          await options.onUploaded?.(file, targetPath);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : "附件处理失败";
+          failures.push(`${file.name}：文件已上传，但未能加入附件（${reason}）`);
+        }
       } catch (error) {
         const reason = error instanceof Error ? error.message : "上传失败";
         failures.push(`${file.name}：${reason}`);
@@ -4937,18 +4969,74 @@ async function handleUploadFiles(directory: string, files: File[]) {
       workspaceUndoStack.value.push({ kind: "delete", paths: uploadedPaths, label: `上传 ${uploaded} 个文件` });
       void refreshWorkspaceGitDiff();
     }
-    if (failures.length > 0) {
-      feedback.value = {
-        kind: "error",
-        title: uploaded > 0 ? "部分文件上传失败" : "上传文件失败",
-        description: failures.join("；")
-      };
-      return;
-    }
-    feedback.value = { kind: "success", title: `已上传 ${uploaded} 个文件`, description: directory || "工作区根目录" };
+    return { uploaded, uploadedPaths, failures };
   } finally {
     workspaceUploadOverlay.value = null;
   }
+}
+
+async function handleUploadFiles(directory: string, files: File[]) {
+  if (!selectedWorkspace.value || !currentPersonalWorkspaceId.value) {
+    feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再上传文件。" };
+    return;
+  }
+  if (files.length === 0) return;
+  try {
+    const result = await uploadWorkspaceFiles(directory, files);
+    if (result.failures.length > 0) {
+      feedback.value = {
+        kind: "error",
+        title: result.uploaded > 0 ? "部分文件上传失败" : "上传文件失败",
+        description: result.failures.join("；")
+      };
+      return;
+    }
+    feedback.value = { kind: "success", title: `已上传 ${result.uploaded} 个文件`, description: directory || "工作区根目录" };
+  } catch (error) {
+    feedback.value = errorFeedback("上传文件失败", error);
+  }
+}
+
+/** 聊天附件落到专用工作区目录，上传成功后复用 agent-chat 的 file PromptPart。 */
+async function handleChatAttachmentUpload(files: File[]) {
+  if (!selectedWorkspace.value || !currentPersonalWorkspaceId.value) {
+    feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再上传聊天附件。" };
+    return;
+  }
+  if (files.length === 0) return;
+  const beforeCount = chatAttachments.value.length;
+  try {
+    // 目录创建仍走现有工作区文件 WebSocket RPC；createDirectories 可安全处理已存在目录。
+    await api.createDirectory(selectedWorkspace.value.workspaceId, CHAT_ATTACHMENT_DIRECTORY);
+    const result = await uploadWorkspaceFiles(CHAT_ATTACHMENT_DIRECTORY, files, {
+      onUploaded: async (file) => {
+        const attachment = await fileToPromptAttachment(file);
+        if (!chatAttachments.value.some((item) => item.id === attachment.id)) {
+          chatAttachments.value = [...chatAttachments.value, attachment];
+        }
+      }
+    });
+    const addedCount = chatAttachments.value.length - beforeCount;
+    if (result.failures.length > 0) {
+      feedback.value = {
+        kind: "error",
+        title: addedCount > 0 ? "部分聊天附件上传失败" : "聊天附件上传失败",
+        description: result.failures.join("；")
+      };
+      return;
+    }
+    feedback.value = {
+      kind: "success",
+      title: `已添加 ${addedCount} 个聊天附件`,
+      description: `文件已保存到工作区 ${CHAT_ATTACHMENT_DIRECTORY}，并会随下一条任务提交。`
+    };
+  } catch (error) {
+    feedback.value = errorFeedback("上传聊天附件失败", error);
+  }
+}
+
+function handleRemoveChatAttachment(id: string) {
+  chatAttachments.value = chatAttachments.value.filter((attachment) => attachment.id !== id);
 }
 
 /** 撤销本页面最近一次复制、移动或上传；所有逆操作仍走当前个人 worktree 的平台文件 RPC。 */
@@ -5752,6 +5840,7 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     );
     feedback.value = { kind: "info", title: "Prompt 已排队", description: `等待当前 Run 完成后继续执行，队列 ${followUpQueue.value.length} 条` };
     chatContextStore.clearContexts();
+    chatAttachments.value = [];
     return;
   }
   // slash 技能和普通消息统一创建平台 Run，才能复用 SSE、刷新恢复和终止能力。
@@ -5766,6 +5855,7 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   clearRunEventSseFeedback();
   requestChatRun(userMessageId);
   chatContextStore.clearContexts();
+  chatAttachments.value = [];
   startRunMutation.mutate({ input: runDraft, guard: captureConversationInteraction() });
 }
 
@@ -5777,6 +5867,7 @@ async function handleScheduleNight(payload: {
   prompt: string;
   scheduleMode: NightExecutionScheduleMode;
   slotStart: string;
+  attachments?: ComposerAttachment[];
 }) {
   if (nightTaskSubmitting.value || historySwitchingSessionId.value) return;
   if (payload.scheduleMode === "ADMIN_CUSTOM" && !isSuperAdmin.value) {
@@ -5817,6 +5908,7 @@ async function handleScheduleNight(payload: {
   }
 
   const guard = captureConversationInteraction();
+  const attachments = payload.attachments ?? chatAttachments.value;
   const chatContextParts = chatContextItemsToPromptParts(chatContextStore.items);
   const implicitEditorTab = chatContextStore.items.length === 0 ? activeTab.value : undefined;
   const implicitEditorSelection = chatContextStore.items.length === 0 ? editorSelection.value : undefined;
@@ -5826,7 +5918,7 @@ async function handleScheduleNight(payload: {
   const displayParts = buildPromptParts(
     payload.prompt,
     implicitEditorTab,
-    [],
+    attachments,
     [...chatContextParts, ...diffContextParts.value],
     implicitEditorSelection
   );
@@ -5838,7 +5930,7 @@ async function handleScheduleNight(payload: {
   const parts = buildPromptParts(
     submitPrompt,
     implicitEditorTab,
-    [],
+    attachments,
     [...chatContextParts, ...diffContextParts.value],
     implicitEditorSelection
   );
@@ -5906,6 +5998,7 @@ async function handleScheduleNight(payload: {
       recentlyCreatedNightTask.value = null;
     }
     chatContextStore.clearContexts();
+    chatAttachments.value = [];
     diffContextParts.value = [];
     feedback.value = {
       kind: "success",
@@ -7292,6 +7385,8 @@ function handleNewConversation() {
   assistantSummaryMessageIdsByRunId.value = {};
   readonlySessionReason.value = "";
   diffFiles.value = [];
+  // 新建对话后不能把上一轮尚未发送的文件附件带入新 Session。
+  chatAttachments.value = [];
   
   // 新建对话后清空任务消耗统计，防止上一轮对话的耗时残留。
   chatStartedAt.value = null;
@@ -7812,6 +7907,8 @@ async function handleLogout() {
           :workspace-file-candidates-loading="workspaceFileCandidatesLoading"
           :workspace-requirement-references="workspaceRequirementCandidates"
           :workspace-requirement-references-loading="workspaceRequirementCandidatesLoading"
+          :chat-attachments="chatAttachments"
+          :chat-attachments-uploading="!!workspaceUploadOverlay"
           :agents-loading="agentsLoading"
           :agents-refreshing="agentsRefreshing"
           :agents-error="agentsError"
@@ -7828,7 +7925,9 @@ async function handleLogout() {
           :commands="commands"
           :raw-output-entries="currentRawOutputEntries"
           placeholder="描述测试任务，例如：跑 checkout 模块并分析失败原因"
-          @send="(text: string) => handleSend(text)"
+          @send="(text: string, attachments?: ComposerAttachment[]) => handleSend(text, attachments)"
+          @upload-chat-attachments="handleChatAttachmentUpload"
+          @remove-chat-attachment="handleRemoveChatAttachment"
           @stop="handleStopRun"
           @retry="handleRetryRun"
           @new-conversation="handleNewConversation"
