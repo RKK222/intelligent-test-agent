@@ -5,6 +5,23 @@
 
 ## Entries
 
+### 2026-07-24 - 将接口执行共享内容归回对应 Skill
+
+- Why:
+  - 用户指出不独立触发或执行的 `api-execute-case` 不应作为独立 Skill，其规则和模板应由实际使用它们的 Skill 持有。
+- What:
+  - 删除 `api-execute-case`；新增 `test-execution` 公共能力包，将请求动作、真实执行证据、断言和输出路径放入 `rules/`。
+  - 将接口自动化脚本模板迁回 `generate-api-automation-markdown/templates/`，同步更新测试执行 Agent、报文生成、脚本校验、工作区规则和公共说明文档的引用。
+  - 拉取公共配置远端最新 11 个提交并以 merge 保留双方历史；修正远端新增 `rpc-call` 对不存在模块、旧参数名、Zod record 和返回值契约的使用，并在公共文档中固化设计规约、执行规约和产物模板的归属原则。
+- How:
+  - OpenCode 1.18.4 实际加载 12/12 个公共 Skill，确认 `test-execution` 存在且 `api-execute-case` 不再加载；7/7 个 Agent 和 `*`、`task`、`todowrite` 显式权限均正常。
+  - 81 处规则/模板引用、frontmatter、冲突标记和 `git diff --check` 校验通过；合并后 4 个自定义 Tool 均由 OpenCode 实际导入，`rpc-call` 失败返回契约实跑通过。
+  - 使用 JDK 25、`.env.test`、`test` profile 完整构建 20 个 Maven 模块并重启三项服务，health/readiness、前端 HTTP、登录 CORS 和 manager WebSocket 正常。启动脚本按项目约定跳过测试。
+- Result:
+  - 公共配置仓库提交为 `fcc02ad`（`归并测试执行公共规则`）和 merge 提交 `ee8e978`（`合并远端公共配置并修正规约归属`），未推送。未修改 OpenCode 源码、应用 API、RunEvent、数据库/Flyway、SQL、generated SDK 或环境配置。
+- Next:
+  - None。
+
 ### 2026-07-24 - 升级本机 OpenCode 并统一公共 Agent/Skill 规约
 
 - Why:
