@@ -36,7 +36,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 - `run.RunRuntimeSchedulingConfiguration`：owner lease 续租独占单线程调度器，其余恢复/到期/重试任务使用独立 4 线程维护调度器，避免阻塞 Boot 默认调度线程或饿死 5 秒续租。
 - `run.RunOwnerLeaseSupervisor`：统一维护本机 owner handle 的 5 秒续租信号；fencing 被其它 owner 取得时正常完成 `lost` 只停止旧订阅，Redis/运行态异常时以原错误终止 `lost`，让 Run 启动订阅和恢复订阅调度 30 秒安全收敛。
 - `run.RunMessageRecoveryService`：为 Run/Session HTTP 历史按 Redis → OpenCode → PostgreSQL 双摘要恢复，并携带完整度、可回放性和详情到期时间；Run 级 OpenCode 来源因果裁剪到目标轮，Session 级来源保持全量多轮，legacy SSE 兼容方法只输出目标轮 assistant。
-- `runtime.OpencodeRuntimeApplicationService`：opencode Web App runtime API 到 `AgentRuntime` 的映射。
+- `runtime.OpencodeRuntimeApplicationService`：opencode Web App runtime API 到 `AgentRuntime` 的映射；平台配置 GET 使用实例级 `/config` 读取包含 `OPENCODE_CONFIG_DIR` 的合并有效配置，Agent 标准 global config 兼容路径继续使用 `/global/config`。
 - `runtime.SideQuestionStreamingApplicationService` / `runtime.SideQuestionTerminalService`：以归档内部 Session 启动 `SIDE_QUESTION` Run；临时 fork 仅接收用户问题并禁用工具，通过本轮 assistant 事件流输出增量，消息快照补偿漏失终态，最后以事务 CAS 写唯一终态。
 - `runtime.SideQuestionOrphanCleanupTaskHandler` / `runtime.SideQuestionOrphanCleanupService`：复用 scheduler 每 5 分钟回收超过 10 分钟的旁路 fork；按内部映射使用原节点，404 幂等，无映射时记录潜在泄漏窗口并收敛平台 Run。
 - `process.*`：当前用户 opencode 进程分配、用户/服务器短事务预留、process/binding 生命周期代次 CAS、已有 binding 原端口恢复、公共状态查询、公共启动/owned-stop 健康确认、通用参数 session/config 路径读取、启动时可选注入当前平台 `OPENCODE_REFERENCES_DIR`、manager WebSocket 控制面网关、后端实例生命周期和超级管理员运行管理快照/命令编排。只有明确 `PORT_CONFLICT/PORT_OUT_OF_RANGE` 才进入既有端口选择；引用目录参数缺失不阻断滚动升级中的进程启动，既有进程不热更新环境。

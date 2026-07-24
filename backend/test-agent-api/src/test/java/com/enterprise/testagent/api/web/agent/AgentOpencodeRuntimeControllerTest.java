@@ -64,6 +64,24 @@ class AgentOpencodeRuntimeControllerTest {
     }
 
     @Test
+    void agentControllerKeepsGlobalConfigCompatibilityPath() {
+        OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
+        when(service.getConfig(eq("wrk_1234567890abcdef"), eq("trace_1234567890abcdef")))
+                .thenReturn(Map.of("theme", "dark"));
+        stubWithAgent(service);
+        WebTestClient client = client(service, null);
+
+        client.get()
+                .uri("/api/internal/agent/opencode/global/config?workspaceId=wrk_1234567890abcdef")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(true)
+                .jsonPath("$.data.theme").isEqualTo("dark");
+    }
+
+    @Test
     void agentControllerRepliesToPermissionThroughOpencodePath() {
         OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
         when(service.replyPermission(

@@ -2636,7 +2636,7 @@ opencode Web App 运行态能力统一由 `test-agent-api` 的 runtime Controlle
 | `GET` | `/api/internal/platform/opencode-runtime/mcp/status?workspaceId=` | 读取 MCP 状态。 |
 | `GET` | `/api/internal/platform/opencode-runtime/mcp/resources?workspaceId=` | 读取 MCP resource 目录，后端映射到 opencode `/experimental/resource`。 |
 | `GET` | `/api/internal/platform/opencode-runtime/mcp/tools?workspaceId=&provider=&model=` | 读取 MCP/runtime tool 目录；带 provider/model 时返回工具 schema，否则返回 tool id 降级列表。 |
-| `GET` | `/api/internal/platform/opencode-runtime/config?workspaceId=` | 读取 opencode global config。 |
+| `GET` | `/api/internal/platform/opencode-runtime/config?workspaceId=` | 读取 opencode 实例级合并有效配置，后端映射 `/config`；响应包含 `OPENCODE_CONFIG_DIR` 中的 `enabled_providers`，供原生 Model/Provider 目录过滤。 |
 | `PATCH` | `/api/internal/platform/opencode-runtime/config?workspaceId=` | 更新 opencode global config，body 透传给 runtime。 |
 | `POST` | `/api/internal/platform/opencode-runtime/global/dispose` | 触发当前用户 opencode 进程释放缓存的 workspace Instance；后续请求重新 bootstrap 并读取磁盘配置。引用 JSONC、Agent 定义或 Skill 入口保存只在当前用户全部 Session 空闲时调用，运行中或与其它重载竞态时返回 `CONFLICT`，由后端用户级闸门原子复核；闸门覆盖主 Run、宠物/手册旁路问答和 legacy sideQuestion/command/shell，并以 token 定时续租覆盖 OpenCode 超时重试上限。该接口不会重启进程，也不能补充进程启动时缺失的环境变量。 |
 | `GET` | `/api/internal/platform/opencode-runtime/provider/auth?workspaceId=` | 查询 provider auth 状态。 |
@@ -2684,6 +2684,8 @@ Token 列表及写入响应只返回 `{tokenId,name,referencedProviderCount,crea
 | `*` | `/api/internal/platform/opencode-runtime/internal-model-proxy/v1/**` | 仅供 opencode 子进程调用的 OpenAI-compatible 代理，不给前端 SDK 暴露会话便捷方法。 |
 
 代理只接受 `Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}`；请求头 `X-Enterprise-Model-Provider` 指定内部供应商，`ucid` 由 opencode 配置从 `ENTERPRISE_UCID` 注入。Java 通过一次联表查询把启用供应商构造成不可变的 `providersById` 与 `authTokensByProviderId` 快照；单次代理请求从同一代快照同时解析 `baseUrl` 和该 Provider 关联的 Token，不访问数据库，也不会串用其它 Provider 的 Token。随后转发到对应 OpenAI-compatible 路径并注入 `ucid` 和 traceId。仅 `2xx + text/event-stream` 进入 SSE 语义转换，事件字段和 `[DONE]` 保留；没有 `reasoning_content` 时，`delta.content` 里的 `<think>...</think>` 会转换为 `delta.reasoning_content`，普通正文仍保留在 `delta.content`；已有 textual `reasoning_content` 时整个 delta 原样保留，不再解析 `content`。非 `2xx`（包括 `4xx + text/event-stream`）和非 SSE 响应原样透传状态码、Content-Type、Content-Encoding、错误正文、Retry-After 与 trace header；连接/首个响应/首个事件/事件空闲边界分别为 10 秒/30 秒/30 秒/120 秒，不设置整体 SSE 生命周期超时，下游取消会取消上游订阅。
+
+OpenCode 1.18.4 的 `/api/model`、`/api/provider` 即使配置了 `enabled_providers` 仍可能返回 Zen；平台不得据此重新引入数据库模型目录，而是通过上述实例级配置 GET 读取合并后的 Provider 白名单，再由前端按 Provider ID 同时过滤两个原生目录。白名单限制的是企业 Provider，不限制这些 Provider 内的模型数量。
 
 opencode 公共配置样例（企业单后端部署可直接使用 `deploy/internal/opencode.jsonc.example`）：
 

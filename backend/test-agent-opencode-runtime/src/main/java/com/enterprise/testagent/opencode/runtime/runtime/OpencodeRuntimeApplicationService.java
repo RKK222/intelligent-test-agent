@@ -319,7 +319,14 @@ public class OpencodeRuntimeApplicationService {
     }
 
     /**
-     * 读取 opencode 全局配置；仍按 workspace 路由节点，避免前端直连 opencode server。
+     * 读取当前 workspace 合并后的有效配置；模型目录必须从这里取得 OPENCODE_CONFIG_DIR 中的 Provider 白名单。
+     */
+    public Object getEffectiveConfig(String workspaceId, String traceId) {
+        return get(workspaceLocation(workspaceId, traceId), "/config", Map.of(), traceId);
+    }
+
+    /**
+     * 读取 opencode 全局配置；只供 Agent 标准 global/config 兼容路径使用。
      */
     public Object getConfig(String workspaceId, String traceId) {
         return get(workspaceLocation(workspaceId, traceId), "/global/config", Map.of(), traceId);

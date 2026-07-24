@@ -8,20 +8,26 @@ import {
 } from "../src";
 
 describe("backend-api", () => {
-  it("filters OpenCode Zen from model and provider catalogs using the configured provider allowlist", async () => {
+  it("filters OpenCode 1.18.4 Zen envelopes using the configured provider allowlist", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
       const url = String(input);
       const data = url.endsWith("/config")
         ? { enabled_providers: ["enterprise-qwen"] }
         : url.endsWith("/models")
-          ? [
-              { id: "ring-2.6-1t-free", providerID: "opencode", name: "Ring 2.6 1T Free" },
-              { id: "Qwen3.6-27B", providerID: "enterprise-qwen", name: "Qwen3.6 27B" }
-            ]
-          : [
-              { id: "opencode", name: "OpenCode Zen", models: { "ring-2.6-1t-free": { name: "Ring 2.6 1T Free" } } },
-              { id: "enterprise-qwen", name: "企业通义", models: { "Qwen3.6-27B": { name: "Qwen3.6 27B" } } }
-            ];
+          ? {
+              data: [
+                { id: "ring-2.6-1t-free", providerID: "opencode", name: "Ring 2.6 1T Free" },
+                { id: "Qwen3.6-27B", providerID: "enterprise-qwen", name: "Qwen3.6 27B" }
+              ],
+              location: { directory: "/data/testagent/data/agent-opencode/workspace" }
+            }
+          : {
+              data: [
+                { id: "opencode", name: "OpenCode Zen" },
+                { id: "enterprise-qwen", name: "企业通义" }
+              ],
+              location: { directory: "/data/testagent/data/agent-opencode/workspace" }
+            };
       return new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data }), { status: 200 });
     });
     const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });

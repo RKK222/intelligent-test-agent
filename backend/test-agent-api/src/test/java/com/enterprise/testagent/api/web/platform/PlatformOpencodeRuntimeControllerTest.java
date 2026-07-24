@@ -65,6 +65,25 @@ class PlatformOpencodeRuntimeControllerTest {
     }
 
     @Test
+    void runtimeControllerReadsEffectiveConfigForProviderAllowlist() {
+        OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
+        when(service.getEffectiveConfig(eq("wrk_1234567890abcdef"), eq("trace_1234567890abcdef")))
+                .thenReturn(Map.of("enabled_providers", List.of("enterprise-qwen", "enterprise-deepseek")));
+        stubWithUser(service);
+        WebTestClient client = client(service, null);
+
+        client.get()
+                .uri("/api/internal/platform/opencode-runtime/config?workspaceId=wrk_1234567890abcdef")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(true)
+                .jsonPath("$.data.enabled_providers[0]").isEqualTo("enterprise-qwen")
+                .jsonPath("$.data.enabled_providers[1]").isEqualTo("enterprise-deepseek");
+    }
+
+    @Test
     void runtimeControllerRepliesToPermissionThroughUnifiedResponse() {
         OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
         when(service.replyPermission(

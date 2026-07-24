@@ -210,13 +210,13 @@ public class PlatformOpencodeRuntimeController {
     }
 
     /**
-     * 读取 opencode 配置，前端只访问平台代理路径。
+     * 读取 opencode 合并后的有效配置，确保公共配置目录中的 Provider 白名单可供模型目录过滤。
      */
     @GetMapping({
             "/api/internal/platform/opencode-runtime/config",
     })
     public Mono<ApiResponse<Object>> getConfig(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
-        return platformResponse(exchange, traceId -> runtimeService.getConfig(workspaceId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.getEffectiveConfig(workspaceId, traceId));
     }
 
     /**

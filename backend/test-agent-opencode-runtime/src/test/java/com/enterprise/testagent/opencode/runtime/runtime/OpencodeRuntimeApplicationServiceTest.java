@@ -371,7 +371,21 @@ class OpencodeRuntimeApplicationServiceTest {
     }
 
     @Test
-    void getConfigUsesGlobalConfigPath() {
+    void getEffectiveConfigUsesInstanceConfigPath() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("enabled_providers", List.of("enterprise-qwen"))))));
+
+        fixture.service.getEffectiveConfig("wrk_1234567890abcdef", "trace_1234567890abcdef");
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.method()).isEqualTo("GET");
+        assertThat(command.path()).isEqualTo("/config");
+        assertThat(command.directory()).isEqualTo("/tmp/demo");
+    }
+
+    @Test
+    void getConfigKeepsGlobalConfigCompatibilityPath() {
         Fixture fixture = new Fixture();
         when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
                 objectMapper.valueToTree(Map.of("theme", "dark")))));
