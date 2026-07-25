@@ -5,6 +5,26 @@
 
 ## Entries
 
+### 2026-07-26 - 重构 Agent & Skill Hub 顶部与右侧抽屉布局
+
+### Why
+- 响应用户需求：Agent & Skill Hub 顶部原有的深色 Hero 区域占据较多纵向空间，Agent/Skill 制品列表在未选中资产时默认只占 57% 宽度，且右侧详情面板缺少滑出与显式关闭交互；资产卡片与详情页需要更直观地标识“原创应用”。
+
+### What
+- 移除 `.hub-hero` 渐变深色背景，升级为与 Workbench 风格一致的明亮顶栏 `.hub-header`，保留核心 Branding、四个分类统计徽章和“刷新目录”按钮。
+- 将资产目录 `.hub-catalog` 调整为全宽响应式网格 (`repeat(auto-fill, minmax(280px, 1fr))`)，资产卡片铺满整个视图空间。
+- 修改资产详情面板为右侧滑出抽屉 (`.hub-drawer` / `.hub-detail-panel`)，增加 `X` 关闭按钮与遮罩层点击事件；选中资产时顺滑划出，关闭时回到全屏网格。
+- 在资产卡片底部与抽屉顶部新增显式“原创应用”信息展示（`sourceAppName` / `sourceWorkspaceName` 或 `平台内置`）。
+
+### How
+- 修改 `AgentSkillHub.vue` 的 DOM 结构、CSS 动画及 `loadAssets` 初始状态处理逻辑（未选中时保持 `selectedAsset` 为 `null`，点击卡片显式滑出抽屉）。
+- 同步更新 `agent-skill-hub.test.ts` 单元测试，补充点击资产卡片触发展示详情面板的交互流程。
+- 执行 Vitest 单测 `pnpm exec vitest run tests/agent-skill-hub.test.ts`，5 个测试全数通过。
+
+### Result
+- 视觉上提升了 Hub 界面空间利用率，资产卡片平铺更全，选中查看详情时右侧抽屉滑动展示，并清晰标识能力原创归属应用。
+- 未改动后端 API 契约、RunEvent 结构、Flyway 或环境配置文件；提交信息使用中文。
+
 ### 2026-07-24 - 重打进程启动时间修复企业完整包
 
 ### Why
@@ -1889,3 +1909,21 @@
 - Result:
   - 后续本地企业打包可以覆盖 Maven 构建目录而不破坏已经运行的后端；并发构建自身若互相清理 `target` 仍可能让当次构建失败，但失败会发生在停服务前，重新执行即可。
   - 未修改业务 Java、HTTP API、RunEvent、数据库/Flyway、SQL、权限、安全配置、generated SDK、OpenCode 源码或环境配置；当前企业完整包仍可按 `.4 → .114 → .2` 顺序部署并做现场验收。
+
+### 2026-07-26 - 实现 Agent & Skill Hub 发布、引用与更新闭环
+
+- Why:
+  - 用户需要在工作台左侧增加统一 Hub，让全员浏览所有应用已 push 的 Agent/Skill，由应用管理员发布、引用、修改和确认上游更新，同时能查看当前应用引用了什么以及每个资产被哪些应用引用。
+- What:
+  - push 成功后从精确 Git commit 索引 `.opencode/agents` 和完整 Skill 目录，以 SHA-256 内容寻址 + GZIP 不可变制品固化每次快照；显式 publish 锁定当前修订和精确依赖。
+  - 引用和取消引用实现两阶段语义：`PENDING_PUSH → ACTIVE`、`ACTIVE → PENDING_REMOVE → 删除`；只有远程 push 内容匹配后才改变有效引用状态，并阻止已有 Agent 文件或 Skill 根目录被覆盖。
+  - 上游新发布版使用 active/current/incoming 三方合并；冲突先持久化且不改工作树，用户解决完后再一次性落盘。
+  - 新增 AgentHub + SkillHub 统一能力市场视图，提供发现/Agents/Skills/当前应用/待更新分类、概览指标、卡片目录、显式图标+文字状态、有效引用应用数和详情引用方清单；待更新角标和当前应用统计按选中个人工作区隔离。
+  - 新增两个 Flyway migration、MyBatis XML mapper、HTTP 元数据 API、文件 WebSocket ticket/RPC 操作和可重复演示 fixture，同步 API、事件流、数据库、安全、模块图及前后端 README。
+- How:
+  - Hub 服务定向单测 7 项、MyBatis 集成 2 项、Flyway 命名 2 项、文件 ticket 7 项、Git 合并 2 项全部通过；前端 Hub 交互 5 项、typecheck 和生产 build 通过。
+  - 演示数据构造了多应用 Agent/Skill、未发布/已发布/待推送/已生效/取消待推送等状态和独立个人 worktree；Playwright 真实页面验证了 Hub 概览、当前应用两条引用及 F-COSS/Hub 演示应用引用方列表。
+  - 使用 JDK 25、未修改的 `.env.test` 和 `test` profile 完整重启 backend、opencode-manager、frontend；backend readiness 和前端 3000 均正常。
+- Result:
+  - Agent & Skill Hub 四项核心需求、AgentHub 合并、引用状态修正、取消引用、当前应用引用库与引用方可见性已形成完整闭环。
+  - 变更涉及 additive HTTP/WS 协议、关系型数据库/Flyway/MyBatis、应用成员与制品路径安全边界；不新增 RunEvent 类型，不修改 generated SDK、OpenCode 源码、环境配置或业务远程仓库。
