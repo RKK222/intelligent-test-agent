@@ -14,7 +14,7 @@
 - 移除 `.hub-hero` 渐变深色背景，升级为与 Workbench 风格一致的明亮顶栏 `.hub-header`，保留核心 Branding、四个分类统计徽章和“刷新目录”按钮。
 - 优化顶栏与侧边栏折叠按钮 `[>]` 的避界排布，增加左侧 54px 安全间距，并将原较大蓝色块图标替换为干净精简的 32px 蓝色线框图标，消解按钮重叠与突兀感。
 - 将资产目录 `.hub-catalog` 调整为全宽响应式网格 (`repeat(auto-fill, minmax(280px, 1fr))`)，资产卡片铺满整个视图空间。
-- 修改资产详情面板为右侧滑出抽屉 (`.hub-drawer` / `.hub-detail-panel`)，增加 `X` 关闭按钮与遮罩层点击事件；选中资产时顺滑划出，关闭时回到全屏网格。
+- 修改资产详情面板为右侧滑出抽屉 (`.hub-drawer` / `.hub-detail-panel`)，增加顶部 `X` 关闭按钮、底部固定 Drawer Footer 栏 (`.hub-drawer-footer`) 与遮罩层点击事件；增加 32px 滚动底边距，消除截断感，选中资产时顺滑划出，关闭时回到全屏网格。
 - 在资产卡片底部与抽屉顶部新增显式“原创应用”信息展示（`sourceAppName` / `sourceWorkspaceName` 或 `平台内置`）。
 
 ### How

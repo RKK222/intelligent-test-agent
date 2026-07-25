@@ -639,6 +639,10 @@ onMounted(async () => {
               </div>
             </div>
             <div v-else class="hub-loading overlay"><Loader2 class="hub-spin" :size="18" />正在加载资产详情...</div>
+            <div class="hub-drawer-footer">
+              <span class="hub-drawer-footer-note">不可变版本快照 · 只读模式</span>
+              <button class="hub-secondary" type="button" @click="closeDetail">关闭详情</button>
+            </div>
           </div>
         </aside>
       </Transition>
@@ -753,7 +757,7 @@ onMounted(async () => {
 .hub-origin-info strong{color:#0c4a6e;font-size:12px}
 .hub-origin-workspace{color:#0284c7;font-size:10px}
 
-.hub-detail-content{flex:1;min-height:0;overflow:auto;padding:16px 20px 24px}
+.hub-detail-content{flex:1;min-height:0;overflow-y:auto;padding:16px 20px 32px}
 .hub-detail-top{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
 .hub-detail-top>div:first-child{min-width:0}
 .hub-detail-top code{color:#64748b;font-size:10px;font-family:var(--font-mono)}
@@ -792,12 +796,15 @@ onMounted(async () => {
 .hub-consumer-list em.removing,.hub-consumer-list em.conflict{background:#fef2f2;color:#b91c1c}
 .hub-consumers>p{margin-top:8px;color:#64748b;font-size:9px}
 
-.hub-files{display:grid;height:340px;min-height:260px;grid-template-columns:150px minmax(0,1fr);margin-top:12px;overflow:hidden;border:1px solid #cbd5e1;border-radius:8px;background:#fff}
+.hub-files{display:grid;height:320px;min-height:240px;grid-template-columns:150px minmax(0,1fr);margin-top:12px;margin-bottom:8px;overflow:hidden;border:1px solid #cbd5e1;border-radius:8px;background:#fff}
 .hub-file-tabs{overflow:auto;border-right:1px solid #e2e8f0;background:#f8fafc;padding:5px}
 .hub-file-tabs button{display:flex;width:100%;flex-direction:column;border:0;border-radius:5px;background:transparent;padding:6px 8px;text-align:left;font-family:var(--font-mono);font-size:9px;color:#334155;cursor:pointer}
 .hub-file-tabs button.is-active{background:#eff6ff;color:#1d4ed8;font-weight:600}
 .hub-file-tabs small{margin-top:2px;color:#94a3b8;font-size:8px}
 .hub-code{position:relative;min-width:0;min-height:0}.hub-code :deep(.ta-code-editor){height:100%}
+
+.hub-drawer-footer{display:flex;flex:none;height:44px;align-items:center;justify-content:space-between;padding:0 20px;border-top:1px solid #e2e8f0;background:#f8fafc;box-shadow:0 -2px 10px rgba(0,0,0,.02)}
+.hub-drawer-footer-note{color:#94a3b8;font-size:10px;font-weight:500}
 
 .hub-updates{min-height:0;overflow:auto;padding:20px 24px}.hub-updates .hub-section-heading{max-width:960px;margin-right:auto;margin-left:auto}
 .hub-update-card{display:grid;grid-template-columns:34px minmax(0,1fr) auto auto;align-items:center;gap:12px;max-width:960px;margin:0 auto 9px;border:1px solid #e2e8f0;border-left:3px solid #3b82f6;border-radius:9px;background:#fff;padding:11px 14px;box-shadow:0 1px 3px rgba(0,0,0,.03)}
