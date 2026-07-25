@@ -21,7 +21,7 @@ import {
 import { DiffViewer, parseUnifiedPatch } from "@test-agent/diff-viewer";
 import { CodeEditor, languageFromPath, type EditorSelectionContext } from "@test-agent/editor";
 import { subscribeRunEvents, subscribeSessionRuntimeState, type RunEventRawMessage } from "@test-agent/event-stream-client";
-import { BookOpenText, Code2, FileWarning, MessageSquare, Monitor } from "lucide-vue-next";
+import { BookOpenText, Boxes, Code2, FileWarning, MessageSquare, Monitor } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
@@ -134,6 +134,7 @@ import SettingsDialog from "./settings/SettingsDialog.vue";
 import ServerWorkspacePickerDialog from "./ServerWorkspacePickerDialog.vue";
 import { readServerWorkspacePickerTabState } from "./server-workspace-picker-tab";
 import SystemManagementWrapper from "./SystemManagementWrapper.vue";
+import AgentSkillHub from "./AgentSkillHub.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import { notifyFeedback } from "./notify";
 import { appendLatestRawOutputEntry, prepareRawOutputBody } from "./raw-output";
@@ -400,7 +401,10 @@ const diffFiles = ref<RunDiffFile[]>([]);
 const vcsDiffFiles = ref<RunDiffFile[]>([]);
 const diffSource = ref<"run" | "session" | "vcs" | "agent">("run");
 const diffViewMode = ref<"split" | "unified">("split");
-const centerMode = ref<"editor" | "diff" | "system">("editor");
+const centerMode = ref<"editor" | "diff" | "system" | "hub">("editor");
+const centerModeBeforeHub = ref<"editor" | "diff" | "system">("editor");
+const hubUpdateCount = ref(0);
+let hubUpdateTimer: ReturnType<typeof setInterval> | null = null;
 const feedback = ref<Feedback | null>(null);
 // 所有个人运行态重载共用一把响应式锁，手动入口和自动保存入口不会并发 dispose。
 const runtimeReloadLock = ref<"PUBLIC" | "WORKSPACE" | "REFERENCE" | null>(null);
@@ -459,17 +463,60 @@ function clearRunEventSseFeedback() {
 }
 
 watch(centerMode, (newMode, oldMode) => {
-  if (newMode === "system") {
-    if (oldMode !== "system") {
+  const nextImmersive = newMode === "system" || newMode === "hub";
+  const previousImmersive = oldMode === "system" || oldMode === "hub";
+  if (nextImmersive) {
+    if (!previousImmersive) {
       savedLeftPanelOpen.value = leftPanelOpen.value;
       savedRightPanelOpen.value = rightPanelOpen.value;
     }
     leftPanelOpen.value = false;
     rightPanelOpen.value = false;
-  } else if (oldMode === "system") {
+  } else if (previousImmersive) {
     leftPanelOpen.value = savedLeftPanelOpen.value;
     rightPanelOpen.value = savedRightPanelOpen.value;
   }
+});
+
+function toggleAgentSkillHub() {
+  if (centerMode.value === "hub") {
+    centerMode.value = centerModeBeforeHub.value;
+    return;
+  }
+  centerModeBeforeHub.value = centerMode.value;
+  centerMode.value = "hub";
+  bottomDrawerOpen.value = false;
+}
+
+function handleHubChanged(paths: string[]) {
+  handleAgentConfigMutation({
+    scope: "WORKSPACE",
+    paths,
+    workspaceId: selectedWorkspaceIdRef.value
+  });
+}
+
+async function refreshHubUpdateCount() {
+  if (!authStore.token || !selectedWorkspaceId.value) {
+    hubUpdateCount.value = 0;
+    return;
+  }
+  try {
+    hubUpdateCount.value = (await api.getAgentSkillHubUpdateCount(selectedWorkspaceId.value)).count;
+  } catch {
+    // Hub 角标轮询失败不打断编辑器；进入 Hub 后会显示可操作错误。
+  }
+}
+
+watch([() => authStore.token, selectedWorkspaceId], () => void refreshHubUpdateCount(), { immediate: true });
+
+onMounted(() => {
+  hubUpdateTimer = setInterval(() => void refreshHubUpdateCount(), 60_000);
+});
+
+onBeforeUnmount(() => {
+  if (hubUpdateTimer) clearInterval(hubUpdateTimer);
+  hubUpdateTimer = null;
 });
 
 const selectedAppId = ref<string | undefined>(undefined);
@@ -6391,7 +6438,9 @@ function applyRunEventWorkbenchProjection(
       path: normalizeWorkspacePath(f.path) || f.path
     }));
     if (files.length) {
-      centerMode.value = nextCenterModeAfterRunDiff(centerMode.value, diffSource.value);
+      if (centerMode.value !== "hub") {
+        centerMode.value = nextCenterModeAfterRunDiff(centerMode.value, diffSource.value);
+      }
       diffSource.value = "run";
       diffFiles.value = mergeDiffFiles(diffFiles.value, files);
       workbench.setSelectedDiffPath(files[0]?.path);
@@ -6408,7 +6457,9 @@ function applyRunEventWorkbenchProjection(
       path: normalizeWorkspacePath(f.path) || f.path
     }));
     if (files.length) {
-      centerMode.value = nextCenterModeAfterRunDiff(centerMode.value, diffSource.value);
+      if (centerMode.value !== "hub") {
+        centerMode.value = nextCenterModeAfterRunDiff(centerMode.value, diffSource.value);
+      }
       diffSource.value = "session";
       diffFiles.value = mergeDiffFiles(diffFiles.value, files);
       workbench.setSelectedDiffPath(files[0]?.path);
@@ -6944,7 +6995,9 @@ async function refreshWorkspaceGitDiff(options: {
     vcsDiffFiles.value = nextFiles;
     if (diffSource.value === "vcs") {
       diffFiles.value = nextFiles;
-      centerMode.value = nextCenterModeAfterVcsRefresh(centerMode.value, diffSource.value, nextFiles);
+      if (centerMode.value !== "hub") {
+        centerMode.value = nextCenterModeAfterVcsRefresh(centerMode.value, diffSource.value, nextFiles);
+      }
       if (!workbench.selectedDiffPath || !nextFiles.some((file) => file.path === workbench.selectedDiffPath)) {
         workbench.setSelectedDiffPath(nextFiles[0]?.path);
       }
@@ -7530,6 +7583,19 @@ async function handleLogout() {
           >
             <Monitor class="figma-activity-icon" :stroke-width="1.5" />
           </button>
+          <button
+            type="button"
+            :class="['figma-activity-btn hub-activity-button', centerMode === 'hub' && 'figma-activity-btn--active']"
+            aria-label="Agent 与 Skill Hub"
+            title="Agent 与 Skill Hub"
+            data-testid="agent-skill-hub-button"
+            @click="toggleAgentSkillHub"
+          >
+            <Boxes class="figma-activity-icon" :stroke-width="1.5" />
+            <span v-if="hubUpdateCount > 0" class="hub-activity-badge" aria-label="有可用更新">
+              {{ hubUpdateCount > 99 ? '99+' : hubUpdateCount }}
+            </span>
+          </button>
         </div>
         <div class="figma-activity-bottom">
           <button
@@ -7628,7 +7694,16 @@ async function handleLogout() {
 
     <template #editor>
       <main class="managed-editor-main">
-        <template v-if="centerMode === 'diff'">
+        <template v-if="centerMode === 'hub'">
+          <AgentSkillHub
+            :selected-app-id="selectedAppId"
+            :workspace-id="selectedWorkspace?.workspaceId"
+            :can-manage="isAppAdmin"
+            @update-count="hubUpdateCount = $event"
+            @changed="handleHubChanged"
+          />
+        </template>
+        <template v-else-if="centerMode === 'diff'">
           <div class="flex-1 min-h-0 min-w-0">
             <DiffViewer
               ref="diffViewerRef"
@@ -8097,6 +8172,27 @@ async function handleLogout() {
 </template>
 
 <style scoped>
+.hub-activity-button {
+  position: relative;
+}
+
+.hub-activity-badge {
+  position: absolute;
+  top: 2px;
+  right: 1px;
+  min-width: 14px;
+  height: 14px;
+  border: 2px solid var(--ta-activity-bg, #f4f4f5);
+  border-radius: 999px;
+  background: #d94a4a;
+  padding: 0 2px;
+  color: #fff;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 10px;
+  text-align: center;
+}
+
 .managed-chat-panel {
   display: flex;
   flex-direction: column;

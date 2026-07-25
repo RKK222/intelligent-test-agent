@@ -7,6 +7,13 @@ import type {
   AgentConfigOperationTicketResponse,
   AgentConfigProgressEvent,
   AgentConfigStatus,
+  AgentSkillHubAsset,
+  AgentSkillHubAssetDetail,
+  AgentSkillHubAssetType,
+  AgentSkillHubFileContent,
+  AgentSkillHubReference,
+  AgentSkillHubUpdate,
+  AgentSkillHubUpdateOperation,
   AgentConfigWorktree,
   AgentConfigWorktreeOption,
   AgentConfigWorktreePayload,
@@ -331,6 +338,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const configurationBase = "/api/internal/platform/configuration-management";
   const workspaceManagementBase = "/api/internal/platform/workspace-management";
   const agentConfigBase = `${workspaceManagementBase}/agent-config`;
+  const agentSkillHubBase = `${workspaceManagementBase}/agent-skill-hub`;
   const opencodeRuntimeBase = "/api/internal/platform/opencode-runtime";
   const opencodeRuntimeManagementBase = "/api/internal/platform/opencode-runtime/management";
   const schedulerManagementBase = "/api/internal/platform/scheduler-management";
@@ -490,6 +498,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const workspaceFileConnections = new Map<string, Promise<WorkspaceFileSocketClient>>();
   const agentConfigFileSockets = new Map<string, WorkspaceFileSocketClient>();
   const agentConfigFileConnections = new Map<string, Promise<WorkspaceFileSocketClient>>();
+  let agentSkillHubFileSocket: WorkspaceFileSocketClient | null = null;
+  let agentSkillHubFileConnection: Promise<WorkspaceFileSocketClient> | null = null;
   const runtimeProviderAllowlistRequests = new Map<string, Promise<Set<string> | undefined>>();
 
   /**
@@ -719,7 +729,108 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     return [scope, context.workspaceId ?? "", context.worktreeId ?? "", context.linuxServerId ?? ""].join(":");
   }
 
+  async function ensureAgentSkillHubFileClient(): Promise<WorkspaceFileSocketClient> {
+    if (agentSkillHubFileSocket?.open) return agentSkillHubFileSocket;
+    if (agentSkillHubFileConnection) return agentSkillHubFileConnection;
+    agentSkillHubFileSocket?.close();
+    const connection = (async () => {
+      const ticket = await request<WorkspaceFileSocketTicketResponse>(
+        `${workspaceManagementBase}/file-ws/tickets`,
+        { method: "POST", body: JSON.stringify({ mode: "agent-skill-hub", scope: "HUB" }) }
+      );
+      let client!: WorkspaceFileSocketClient;
+      client = new WorkspaceFileSocketClient(
+        toWebSocketUrl(baseUrl, ticket.webSocketUrl),
+        webSocketFactory,
+        () => {
+          if (agentSkillHubFileSocket === client) agentSkillHubFileSocket = null;
+        }
+      );
+      agentSkillHubFileSocket = client;
+      await client.ready();
+      return client;
+    })();
+    agentSkillHubFileConnection = connection;
+    try {
+      return await connection;
+    } finally {
+      if (agentSkillHubFileConnection === connection) agentSkillHubFileConnection = null;
+    }
+  }
+
+  async function hubReadRpc<T>(op: string, params: Record<string, unknown>): Promise<T> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await (await ensureAgentSkillHubFileClient()).request<T>(op, params);
+      } catch (error) {
+        if (attempt > 0 || !(error instanceof WorkspaceFileTransportError)) throw error;
+      }
+    }
+  }
+
   return {
+    listAgentSkillHubAssets: (params: {
+      type?: AgentSkillHubAssetType;
+      keyword?: string;
+      referencedOnly?: boolean;
+      targetWorkspaceId?: string;
+      page?: number;
+      size?: number;
+    } = {}) => request<PageResponse<AgentSkillHubAsset>>(`${agentSkillHubBase}/assets${query(params)}`),
+    getAgentSkillHubAsset: (assetId: string, revisionId?: string, targetWorkspaceId?: string) =>
+      request<AgentSkillHubAssetDetail>(
+        `${agentSkillHubBase}/assets/${encodeURIComponent(assetId)}${query({ revisionId, targetWorkspaceId })}`
+      ),
+    readAgentSkillHubFile: (revisionId: string, path: string) =>
+      hubReadRpc<AgentSkillHubFileContent>("hub.asset.read", { revisionId, path }),
+    publishAgentSkillHubAsset: (assetId: string, dependencyAssetIds: string[] = []) =>
+      request<{ assetId: string; revisionId: string; publishedAt: string; dependencyCount: number }>(
+        `${agentSkillHubBase}/assets/${encodeURIComponent(assetId)}/publish`,
+        { method: "POST", body: JSON.stringify({ dependencyAssetIds }) }
+      ),
+    getAgentSkillHubUpdateCount: (targetWorkspaceId?: string) =>
+      request<{ count: number }>(`${agentSkillHubBase}/updates/count${query({ targetWorkspaceId })}`),
+    listAgentSkillHubUpdates: (page = 1, size = 30, targetWorkspaceId?: string) =>
+      request<PageResponse<AgentSkillHubUpdate>>(
+        `${agentSkillHubBase}/references/updates${query({ page, size, targetWorkspaceId })}`
+      ),
+    createAgentSkillHubReference: (
+      workspaceId: string,
+      assetId: string,
+      aliasTechnicalId?: string
+    ) => agentConfigFileRpc<AgentSkillHubReference>(
+      "WORKSPACE",
+      "hub.reference.create",
+      { assetId, aliasTechnicalId },
+      { workspaceId }
+    ),
+    removeAgentSkillHubReference: (workspaceId: string, assetId: string) =>
+      agentConfigFileRpc<AgentSkillHubReference>(
+        "WORKSPACE", "hub.reference.remove", { assetId }, { workspaceId }
+      ),
+    startAgentSkillHubReferenceUpdate: (workspaceId: string, referenceId: string) =>
+      agentConfigFileRpc<AgentSkillHubUpdateOperation>(
+        "WORKSPACE", "hub.reference.update.start", { referenceId }, { workspaceId }
+      ),
+    getAgentSkillHubUpdateOperation: (workspaceId: string, operationId: string) =>
+      agentConfigFileRpc<AgentSkillHubUpdateOperation>(
+        "WORKSPACE", "hub.reference.update.read-conflict", { operationId }, { workspaceId }, true
+      ),
+    resolveAgentSkillHubUpdateConflict: (
+      workspaceId: string,
+      operationId: string,
+      payload: { path: string; resolution: string; content?: string | null }
+    ) => agentConfigFileRpc<AgentSkillHubUpdateOperation>(
+      "WORKSPACE", "hub.reference.update.resolve", { operationId, ...payload }, { workspaceId }
+    ),
+    completeAgentSkillHubUpdate: (workspaceId: string, operationId: string) =>
+      agentConfigFileRpc<AgentSkillHubReference>(
+        "WORKSPACE", "hub.reference.update.complete", { operationId }, { workspaceId }
+      ),
+    abortAgentSkillHubUpdate: (workspaceId: string, operationId: string) =>
+      agentConfigFileRpc<void>(
+        "WORKSPACE", "hub.reference.update.abort", { operationId }, { workspaceId }
+      ),
     listWorkspaces: (page = 1, size = 20) =>
       request<PageResponse<Workspace>>(`${workspaceManagementBase}/workspaces?page=${page}&size=${size}`),
     getWorkspace: (workspaceId: string) => routedRequest<Workspace>(`${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}`),

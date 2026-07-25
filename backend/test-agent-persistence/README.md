@@ -120,6 +120,12 @@
 - 单 Run durable 事件、runtime 事件或 snapshot 投影项超过 20,000，或 input + scope + pending + 两条 Stream + snapshot 规范化详情超过 32 MiB 时不依赖 Redis eviction：Lua 显式删除旧 Stream、递增 `resetGeneration`、更新 `earliestSeq/earliestRuntimeVersion/detailsTruncated` 并保留当前物化状态。过大的单个 payload 先做深度/字符串/集合规范化并标记 `snapshotTruncated`；累积文本 delta 超过单槽预算时保留当前规范化片段并同样触发 reset，不会静默覆盖。容量压力下先移除 latest/tool/diff/session-status/child/scope 等低价值投影，再只保留独立 USER 输入、从 JSON role 判定的最新 assistant message、与其 messageId 对应的最新可见 text part（delta 仅 `field=text`，full part 缺 type 时保守视为可见）以及 run-status；tool/reasoning part 和后到非 assistant message 不得挤掉最终可见回答。活跃 SSE 的旧 runtimeVersion 会收到 `RUNTIME_STREAM_TRUNCATED` reset。Redis 访问、Lua、JSON 或 manifest 缺失分别映射为 `RUNTIME_STATE_UNAVAILABLE` 或 `RUN_DETAILS_EXPIRED`，新模式不得回退 PostgreSQL/JVM 内存。
 - RunEvent append-only：持久化层分配 `eventId` 和同一 run 内单调递增 `seq`，并发追加时通过 `(run_id, seq)` 唯一约束冲突后重读重试，支持 `runId + lastSeq` 增量读取；Session 级历史树按 `root_session_id` 读取跨 Run durable 状态事件。opencode raw event id 缺失时写入 `NULL`，避免 `"unknown"` 误去重。
 
+### Agent & Skill Hub
+
+- `MyBatisAgentSkillHubRepository` / `AgentSkillHubMapper.xml` 保存内容寻址 GZIP 制品、每个远端 commit 的不可变修订、发布依赖、应用级引用和更新操作。
+- `V20260725143000__create_agent_skill_hub.sql` 创建六张 Hub 表；`V20260725230000__support_hub_reference_removal.sql` 增加 `PENDING_REMOVE` 并允许引用解除时级联清理临时更新操作。相同 canonical 内容按 SHA-256 去重，逻辑修订仍按 `(asset_id, source_commit_hash)` 保留每次 push 身份。
+- 多资产引用批量保存以及“引用状态 + 更新操作终态”在同一 Spring 事务中提交；列表按目标应用工作空间返回 `PENDING_PUSH/ACTIVE/PENDING_REMOVE/UPDATE_CONFLICT`，支持当前应用引用过滤、有效引用应用计数和引用方应用/工作空间投影，待删除引用不进入更新角标。H2 集成测试覆盖 mapper CRUD/发布/引用/取消状态/引用方查询与 PostgreSQL `bytea` 映射，完整 migration 链由真实 PostgreSQL 启动验证。
+
 ## 测试环境 PostgreSQL
 
 `test-agent-app` 的 `test` profile 会通过环境变量装配 PostgreSQL 测试库，并复用本模块 `db/migration` 下的 Flyway migration。持久化模块提供 Druid starter 依赖，实际连接信息和连接池大小由应用 profile 配置注入，不保存环境专属账号、密码或主机地址。

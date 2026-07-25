@@ -151,6 +151,16 @@ Token 校验流程：
 
 ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 
+## Agent & Skill Hub 安全边界
+
+- Hub 是企业内显式共享域：所有已登录用户可以查看所有应用成功 push 的 Agent/Skill 完整快照，因此 Agent/Skill 文件不得包含密钥、Token 或本应按应用隔离的秘密；UI 不把“未发布”误表示为私密。
+- 发布要求 `APP_ADMIN`（`SUPER_ADMIN` 继承）且必须仍是来源应用有效成员。引用、取消引用、更新和冲突解决要求同一角色、当前个人 worktree owner 以及目标应用成员三项同时成立；HTTP 的 `targetWorkspaceId` 也必须解析为当前用户拥有的个人运行工作区后才能投影状态。
+- 已生效引用的目标应用/工作空间名称属于企业共享 Hub 元数据，可随资产详情向已登录用户展示；尚未 push 的 `PENDING_PUSH` 只向目标应用有效成员展示，避免公开本地未提交意图。
+- 浏览正文只接受独立 `agent-skill-hub/HUB` 一次性只读 ticket；引用写入复用绑定目标 `workspaceId` 的 `agent-config/WORKSPACE` ticket，不新增后端到后端文件 HTTP 代理。
+- 快照从 Git 精确 commit 读取，不读取 push 后可能变化的工作树。技术 ID、相对路径、文件数、未压缩大小、压缩编码和 SHA-256 都必须校验，拒绝绝对路径、路径穿越、符号链接目标和越过 `.opencode` 的写入。
+- 三方合并有冲突时不得提前改工作树；完成前再次校验 current 摘要，数据库持久化失败时恢复文件系统备份，避免把被用户继续修改的内容静默覆盖。取消引用同样先备份后移除，数据库失败必须恢复；只有远端 push 能证明目标路径已消失时才正式删除引用元数据。
+- Hub 业务日志只记录资产/修订/工作空间标识和错误摘要，不记录制品正文或冲突内容。
+
 ## 安全变更文档
 
 鉴权、限流、CORS、密钥、日志脱敏变更必须同步 `docs/standards/security.md`、`docs/api/http-api.md` 和相关 README。

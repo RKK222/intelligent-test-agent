@@ -191,6 +191,120 @@ export type WorkspaceFileSocketTicketResponse = {
 
 export type AgentConfigScope = "PUBLIC" | "WORKSPACE" | string;
 
+export type AgentSkillHubAssetType = "AGENT" | "SKILL";
+
+export type AgentSkillHubAsset = {
+  assetId: string;
+  type: AgentSkillHubAssetType;
+  technicalId: string;
+  displayName?: string | null;
+  displayNameEn?: string | null;
+  description?: string | null;
+  sourceAppId: string;
+  sourceAppName: string;
+  sourceWorkspaceId: string;
+  sourceWorkspaceName: string;
+  pushedRevisionId: string;
+  publishedRevisionId?: string | null;
+  published: boolean;
+  builtin: boolean;
+  updateAvailable: boolean;
+  referenced: boolean;
+  deleted: boolean;
+  referenceStatus?: "ACTIVE" | "PENDING_PUSH" | "PENDING_REMOVE" | "UPDATE_CONFLICT" | string | null;
+  referenceCount: number;
+  pushedAt: string;
+  publishedAt?: string | null;
+};
+
+export type AgentSkillHubArtifactFile = {
+  path: string;
+  size: number;
+  sha256: string;
+  mediaType: string;
+};
+
+export type AgentSkillHubDependency = {
+  assetId: string;
+  revisionId: string;
+  type: AgentSkillHubAssetType;
+  technicalId: string;
+  displayName?: string | null;
+};
+
+export type AgentSkillHubAssetDetail = {
+  asset: AgentSkillHubAsset;
+  selectedRevisionId: string;
+  files: AgentSkillHubArtifactFile[];
+  dependencies: AgentSkillHubDependency[];
+  consumers: AgentSkillHubReferenceConsumer[];
+};
+
+export type AgentSkillHubReferenceConsumer = {
+  referenceId: string;
+  targetAppId: string;
+  targetAppName: string;
+  targetWorkspaceId: string;
+  targetWorkspaceName: string;
+  aliasTechnicalId: string;
+  targetPath: string;
+  status: "ACTIVE" | "PENDING_PUSH" | "PENDING_REMOVE" | "UPDATE_CONFLICT" | string;
+  updatedAt: string;
+};
+
+export type AgentSkillHubFileContent = {
+  revisionId: string;
+  path: string;
+  content: string;
+  size: number;
+  sha256: string;
+};
+
+export type AgentSkillHubReference = {
+  referenceId: string;
+  assetId: string;
+  targetPath: string;
+  aliasTechnicalId: string;
+  activeRevisionId?: string | null;
+  pendingRevisionId?: string | null;
+  status: "ACTIVE" | "PENDING_PUSH" | "PENDING_REMOVE" | "UPDATE_CONFLICT" | string;
+  runtimeReloadRequired: boolean;
+  message: string;
+};
+
+export type AgentSkillHubUpdate = {
+  referenceId: string;
+  assetId: string;
+  technicalId: string;
+  displayName?: string | null;
+  sourceAppName: string;
+  sourceWorkspaceName: string;
+  activeRevisionId?: string | null;
+  latestRevisionId: string;
+  status: string;
+  targetPath: string;
+  publishedAt: string;
+};
+
+export type AgentSkillHubConflictFile = {
+  path: string;
+  kind: "TEXT" | "BINARY" | string;
+  baseContent?: string | null;
+  currentContent?: string | null;
+  incomingContent?: string | null;
+  resultContent?: string | null;
+  conflicted: boolean;
+  resolution?: string | null;
+};
+
+export type AgentSkillHubUpdateOperation = {
+  operationId: string;
+  referenceId: string;
+  status: "CONFLICT" | "RESOLVED" | "COMPLETED" | "ABORTED" | string;
+  files: AgentSkillHubConflictFile[];
+  worktreeChanged: boolean;
+};
+
 export type AgentConfigFileRoute = {
   scope: AgentConfigScope;
   workspaceId?: string | null;

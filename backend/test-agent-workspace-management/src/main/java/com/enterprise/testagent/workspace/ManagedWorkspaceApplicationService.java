@@ -46,6 +46,7 @@ import com.enterprise.testagent.domain.managedworkspace.WorkspaceSyncRecord;
 import com.enterprise.testagent.domain.managedworkspace.WorkspaceSyncRecordId;
 import com.enterprise.testagent.domain.managedworkspace.WorkspaceSyncStatus;
 import com.enterprise.testagent.domain.managedworkspace.WorkspaceReplicaSyncStatus;
+import com.enterprise.testagent.domain.hub.AgentSkillHubPushIndexer;
 import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.user.UserRepository;
@@ -151,6 +152,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private final Object defaultPersonalWorkspaceLock = new Object();
     private ConversationContextStore conversationContextStore;
     private PublicAgentConfigRolloutCoordinator agentConfigRolloutCoordinator;
+    private AgentSkillHubPushIndexer agentSkillHubPushIndexer;
 
     /**
      * 可选注入运行上下文端口；测试构造器无需感知 Redis，实现仍保持模块只依赖 domain。
@@ -164,6 +166,12 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     @Autowired(required = false)
     void setAgentConfigRolloutCoordinator(PublicAgentConfigRolloutCoordinator coordinator) {
         this.agentConfigRolloutCoordinator = coordinator;
+    }
+
+    /** Hub 索引是 push 后的旁路持久化；失败只记录并由周期对账重试，不能反转远端 Git 成功。 */
+    @Autowired(required = false)
+    void setAgentSkillHubPushIndexer(AgentSkillHubPushIndexer indexer) {
+        this.agentSkillHubPushIndexer = indexer;
     }
 
     /**
@@ -1834,6 +1842,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 .map(replica -> managedWorkspaceRepository.saveVersionReplica(replica.ready(headCommit, now, traceId)))
                 .orElse(prepared.replica());
         activateApplicationConfigRollout(rolloutId, headCommit);
+        indexHubAfterSuccessfulPush(updatedVersion, prepared.repoRoot(),
+                pathResolver.resolve(prepared.replica().workspaceRootPath()), headCommit);
         synchronizeFeatureCommitToPersonalWorktrees(
                 updatedVersion,
                 synchronizedReplica,
@@ -1846,6 +1856,25 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
                 "PUBLISHED", personalWorkspaceId, version.versionId().value(), List.of(),
                 "已从个人 HEAD 投影并推送 feature 分支: " + headCommit, true, headCommit);
+    }
+
+    private void indexHubAfterSuccessfulPush(
+            ApplicationWorkspaceVersion version,
+            Path repoRoot,
+            Path workspaceRoot,
+            String commitHash) {
+        if (agentSkillHubPushIndexer == null) {
+            return;
+        }
+        try {
+            agentSkillHubPushIndexer.indexSuccessfulPush(version, repoRoot, workspaceRoot, commitHash);
+        } catch (RuntimeException exception) {
+            LOGGER.warn(
+                    "event=agent_skill_hub_snapshot_failed versionId={} commit={} error={}",
+                    version.versionId().value(),
+                    commitHash,
+                    exception.toString());
+        }
     }
 
     /** 本地提交只改变个人 worktree，不触发远端推送或广播。 */
@@ -3109,8 +3138,16 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 requireText(commitHash, "提交哈希不能为空", "commitHash"),
                 now);
         managedWorkspaceRepository.findVersionReplica(version.versionId(), serverIdentity.linuxServerId())
-                .ifPresent(replica -> managedWorkspaceRepository.saveVersionReplica(
-                        replica.ready(commitHash, now, traceId)));
+                .ifPresent(replica -> {
+                    ApplicationWorkspaceVersionReplica readyReplica = managedWorkspaceRepository.saveVersionReplica(
+                            replica.ready(commitHash, now, traceId));
+                    // Agent 配置专用发布入口与 Git Changes 发布入口必须生成同一种远端提交快照。
+                    indexHubAfterSuccessfulPush(
+                            updatedVersion,
+                            pathResolver.resolve(readyReplica.repoRootPath()),
+                            pathResolver.resolve(readyReplica.workspaceRootPath()),
+                            commitHash);
+                });
         if (rolloutId != null && agentConfigRolloutCoordinator != null) {
             agentConfigRolloutCoordinator.recordExpectedCommit(rolloutId, commitHash);
             agentConfigRolloutCoordinator.activate(rolloutId, commitHash);

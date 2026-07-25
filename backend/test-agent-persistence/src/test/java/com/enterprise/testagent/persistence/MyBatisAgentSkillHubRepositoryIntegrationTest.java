@@ -1,0 +1,201 @@
+package com.enterprise.testagent.persistence;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Artifact;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.AssetType;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedAsset;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedSnapshot;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Reference;
+import com.enterprise.testagent.domain.hub.AgentSkillHubRepository;
+import com.enterprise.testagent.persistence.mybatis.AgentSkillHubMapper;
+import com.enterprise.testagent.persistence.mybatis.MyBatisAgentSkillHubRepository;
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+import org.apache.ibatis.session.SqlSessionFactory;
+import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mybatis.spring.SqlSessionFactoryBean;
+import org.mybatis.spring.SqlSessionTemplate;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
+
+/** 使用真实 Flyway 与 MyBatis XML 固化 Hub 快照、发布、引用和更新查询。 */
+class MyBatisAgentSkillHubRepositoryIntegrationTest {
+
+    private static final Instant NOW = Instant.parse("2026-07-25T00:00:00Z");
+
+    private SingleConnectionDataSource dataSource;
+    private AgentSkillHubRepository repository;
+
+    @BeforeEach
+    void setUp() throws Exception {
+        dataSource = new SingleConnectionDataSource(
+                ("jdbc:h2:mem:testagent_hub_%s;MODE=PostgreSQL;DATABASE_TO_UPPER=false;"
+                        + "INIT=CREATE DOMAIN IF NOT EXISTS timestamptz AS TIMESTAMP WITH TIME ZONE")
+                        .formatted(UUID.randomUUID().toString().replace("-", "")),
+                "sa", "", true);
+        // 后续存量 migration 含 H2 不支持的 PostgreSQL partial expression index；
+        // 本测试迁移到其前一稳定基线，再单独执行本功能 migration。完整链由真实 PostgreSQL 启动验证。
+        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
+                .target("20260715213000").load().migrate();
+        new ResourceDatabasePopulator(new ClassPathResource(
+                "db/migration/V20260725143000__create_agent_skill_hub.sql")).execute(dataSource);
+        new ResourceDatabasePopulator(new ClassPathResource(
+                "db/migration/V20260725230000__support_hub_reference_removal.sql")).execute(dataSource);
+        seedRequiredParents(JdbcClient.create(dataSource));
+        SqlSessionFactoryBean factory = new SqlSessionFactoryBean();
+        factory.setDataSource(dataSource);
+        factory.setMapperLocations(new PathMatchingResourcePatternResolver()
+                .getResources("classpath*:mybatis/**/*.xml"));
+        SqlSessionFactory sessionFactory = factory.getObject();
+        AgentSkillHubMapper mapper = new SqlSessionTemplate(sessionFactory).getMapper(AgentSkillHubMapper.class);
+        repository = new MyBatisAgentSkillHubRepository(mapper);
+    }
+
+    @AfterEach
+    void tearDown() {
+        dataSource.destroy();
+    }
+
+    @Test
+    void immutablePushesPublishAndExposeApplicationWideUpdate() {
+        repository.replacePushedSnapshot(snapshot("a".repeat(40), "1".repeat(64), NOW));
+        var first = repository.listAssets(AssetType.AGENT, null, "usr_hub", null, false, 0, 10).getFirst();
+        repository.publish(first.asset().assetId(), first.pushedRevision().revisionId(), "usr_hub", List.of(), NOW);
+        repository.saveReferences(List.of(new Reference(
+                "hub_ref_test", first.asset().assetId(), "app_hub", "aw_hub",
+                ".opencode/agents/reviewer.md", "reviewer", first.pushedRevision().revisionId(),
+                null, null, "ACTIVE", "usr_hub", NOW, NOW)));
+
+        repository.replacePushedSnapshot(snapshot("b".repeat(40), "2".repeat(64), NOW.plusSeconds(60)));
+        var second = repository.listAssets(AssetType.AGENT, null, "usr_hub", null, false, 0, 10).getFirst();
+        repository.publish(second.asset().assetId(), second.pushedRevision().revisionId(),
+                "usr_hub", List.of(), NOW.plusSeconds(60));
+
+        assertThat(second.pushedRevision().revisionId()).isNotEqualTo(first.pushedRevision().revisionId());
+        assertThat(repository.countUpdates("usr_hub", null)).isEqualTo(1);
+        assertThat(repository.listUpdates("usr_hub", null, 0, 10)).singleElement().satisfies(update -> {
+            assertThat(update.reference().activeRevisionId()).isEqualTo(first.pushedRevision().revisionId());
+            assertThat(update.latestRevision().revisionId()).isEqualTo(second.pushedRevision().revisionId());
+            assertThat(update.sourceAppName()).isEqualTo("Hub 来源应用");
+        });
+
+        repository.saveReference(new Reference(
+                "hub_ref_test", first.asset().assetId(), "app_hub", "aw_hub",
+                ".opencode/agents/reviewer.md", "reviewer", second.pushedRevision().revisionId(),
+                null, null, "ACTIVE", "usr_hub", NOW, NOW.plusSeconds(60)));
+        repository.replacePushedSnapshot(snapshot("c".repeat(40), "2".repeat(64), NOW.plusSeconds(120)));
+        var unchanged = repository.listAssets(AssetType.AGENT, null, "usr_hub", null, false, 0, 10).getFirst();
+        repository.publish(unchanged.asset().assetId(), unchanged.pushedRevision().revisionId(),
+                "usr_hub", List.of(), NOW.plusSeconds(120));
+
+        assertThat(unchanged.updateAvailable()).isFalse();
+        assertThat(repository.countUpdates("usr_hub", null)).isZero();
+    }
+
+    @Test
+    void distinguishesPendingActiveAndPendingRemovalReferenceStates() {
+        repository.replacePushedSnapshot(snapshot("a".repeat(40), "1".repeat(64), NOW));
+        var asset = repository.listAssets(AssetType.AGENT, null, "usr_hub", "aw_hub", false, 0, 10).getFirst();
+        repository.publish(asset.asset().assetId(), asset.pushedRevision().revisionId(), "usr_hub", List.of(), NOW);
+        assertThat(repository.findArtifact("1".repeat(64))).get().satisfies(artifact ->
+                assertThat(artifact.content()).containsExactly(1, 2, 3));
+
+        Reference pending = new Reference(
+                "hub_ref_state", asset.asset().assetId(), "app_hub", "aw_hub",
+                ".opencode/agents/reviewer.md", "reviewer", null, asset.pushedRevision().revisionId(),
+                "f".repeat(64), "PENDING_PUSH", "usr_hub", NOW, NOW);
+        repository.saveReference(pending);
+        assertThat(repository.listAssets(AssetType.AGENT, null, "usr_hub", "aw_hub", false, 0, 10))
+                .singleElement().extracting("referenceStatus").isEqualTo("PENDING_PUSH");
+        assertThat(repository.listAssets(null, null, "usr_hub", "aw_hub", true, 0, 10))
+                .singleElement().satisfies(summary -> {
+                    assertThat(summary.referenceStatus()).isEqualTo("PENDING_PUSH");
+                    assertThat(summary.referenceCount()).isZero();
+                });
+        assertThat(repository.listReferenceConsumers(asset.asset().assetId(), "usr_hub"))
+                .singleElement().satisfies(consumer -> {
+                    assertThat(consumer.targetAppName()).isEqualTo("Hub 来源应用");
+                    assertThat(consumer.targetWorkspaceName()).isEqualTo("Hub 来源工作空间");
+                    assertThat(consumer.reference().status()).isEqualTo("PENDING_PUSH");
+                });
+
+        Reference active = new Reference(
+                pending.referenceId(), pending.assetId(), pending.targetAppId(), pending.targetApplicationWorkspaceId(),
+                pending.targetPath(), pending.aliasTechnicalId(), asset.pushedRevision().revisionId(), null, null,
+                "ACTIVE", pending.createdByUserId(), pending.createdAt(), NOW.plusSeconds(1));
+        repository.saveReference(active);
+        assertThat(repository.listAssets(AssetType.AGENT, null, "usr_hub", "aw_hub", false, 0, 10))
+                .singleElement().satisfies(summary -> {
+                    assertThat(summary.referenceStatus()).isEqualTo("ACTIVE");
+                    assertThat(summary.referenceCount()).isEqualTo(1);
+                });
+        assertThat(repository.countAssets(null, null, "aw_hub", true)).isEqualTo(1);
+
+        Reference removing = new Reference(
+                active.referenceId(), active.assetId(), active.targetAppId(), active.targetApplicationWorkspaceId(),
+                active.targetPath(), active.aliasTechnicalId(), active.activeRevisionId(), null, null,
+                "PENDING_REMOVE", active.createdByUserId(), active.createdAt(), NOW.plusSeconds(2));
+        repository.saveReference(removing);
+        assertThat(repository.countUpdates("usr_hub", "aw_hub")).isZero();
+        assertThat(repository.findPendingReferences("aw_hub"))
+                .singleElement().extracting("status").isEqualTo("PENDING_REMOVE");
+        assertThat(repository.listReferenceConsumers(asset.asset().assetId(), "usr_hub"))
+                .singleElement().extracting(consumer -> consumer.reference().status()).isEqualTo("PENDING_REMOVE");
+        repository.deleteReference(removing.referenceId());
+        assertThat(repository.findReferencesByTargetAsset("aw_hub", active.assetId())).isEmpty();
+        assertThat(repository.listAssets(null, null, "usr_hub", "aw_hub", true, 0, 10)).isEmpty();
+    }
+
+    private PushedSnapshot snapshot(String commit, String artifactSha, Instant pushedAt) {
+        byte[] compressed = new byte[]{1, 2, 3};
+        Artifact artifact = new Artifact(artifactSha, "GZIP_JSON_V1", compressed, "[]", 12,
+                compressed.length, 1, pushedAt);
+        PushedAsset asset = new PushedAsset(AssetType.AGENT, "reviewer", artifact, artifactSha,
+                "评审专家", "Reviewer", "评审测试设计");
+        return new PushedSnapshot("app_hub", "aw_hub", "ver_hub", commit, pushedAt, List.of(asset));
+    }
+
+    private void seedRequiredParents(JdbcClient jdbc) {
+        jdbc.sql("""
+                insert into users(user_id, unified_auth_id, username, password_hash, status, created_at, updated_at)
+                values('usr_hub', 'hub-user', 'hub-user', 'hash', 'ACTIVE', :now, :now)
+                """).param("now", NOW).update();
+        jdbc.sql("""
+                insert into applications(app_id, app_name, enabled, created_at, updated_at)
+                values('app_hub', 'Hub 来源应用', true, :now, :now)
+                """).param("now", NOW).update();
+        jdbc.sql("""
+                insert into application_members(app_id, user_id, created_at, updated_at)
+                values('app_hub', 'usr_hub', :now, :now)
+                """).param("now", NOW).update();
+        jdbc.sql("""
+                insert into code_repositories(repository_id, git_url, name, standard, created_at, updated_at)
+                values('repo_hub', 'ssh://git/hub.git', 'hub', true, :now, :now)
+                """).param("now", NOW).update();
+        jdbc.sql("""
+                insert into application_workspaces(
+                    workspace_id, app_id, repository_id, branch, directory_path, workspace_name, created_at, updated_at)
+                values('aw_hub', 'app_hub', 'repo_hub', 'main', '/', 'Hub 来源工作空间', :now, :now)
+                """).param("now", NOW).update();
+        jdbc.sql("""
+                insert into workspaces(workspace_id, name, root_path, status, trace_id, created_at, updated_at)
+                values('wrk_hub', 'Hub runtime', '/tmp/hub', 'ACTIVE', 'trace_hub', :now, :now)
+                """).param("now", NOW).update();
+        jdbc.sql("""
+                insert into application_workspace_versions(
+                    version_id, application_workspace_id, app_id, repository_id, version, branch,
+                    repo_root_path, workspace_root_path, runtime_workspace_id, created_by_user_id,
+                    status, target_commit_hash, target_commit_updated_at, created_at, updated_at)
+                values('ver_hub', 'aw_hub', 'app_hub', 'repo_hub', '20260725', 'main',
+                    '/repo/hub', '/repo/hub', 'wrk_hub', 'usr_hub', 'ACTIVE', :commit, :now, :now, :now)
+                """).param("commit", "a".repeat(40)).param("now", NOW).update();
+    }
+}

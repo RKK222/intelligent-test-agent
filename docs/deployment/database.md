@@ -1086,6 +1086,25 @@ XXL MySQL 的独立 migration `xxl-job/db/migration/V5__schedule_night_execution
 - `SocketOpencodeProcessManagerGateway` 是唯一生产装配，本地和生产都走 manager WebSocket；本地没起 manager 时 health/start 都会返回 `OPENCODE_UNAVAILABLE`，前端状态会落到 "opencode 进程健康检测失败，需要重新初始化"。
 - `application-local.yml` / `application-guo.yml` 不再配置 `gateway-mode=local` 或 `local-direct`；本地调试用户进程必须启动 Go manager，并依赖真实 manager/backend 心跳注册获得运行态拓扑。
 
+## V20260725143000 Agent & Skill Hub 不可变快照
+
+新增六张 PostgreSQL 表：
+
+- `agent_skill_hub_artifacts`：以 canonical JSON 的 SHA-256 为主键，保存 `GZIP_JSON_V1` 压缩 `bytea`、manifest、压缩前后大小和文件数；相同内容跨应用/提交物理去重。
+- `agent_skill_hub_assets`：以“来源应用 + 应用工作空间模板 + 类型 + 英文技术 ID”唯一标识逻辑资产，并指向最新 pushed / published 修订。
+- `agent_skill_hub_revisions`：每个来源 Git commit 固化一个不可变修订；`(asset_id, source_commit_hash)` 唯一。删除用 tombstone 修订表达，不改写历史制品；更新判断比较内容 SHA-256，避免未改动资产因新 commit 误报。
+- `agent_skill_hub_dependencies`：发布时把依赖固定到精确资产修订。
+- `agent_skill_hub_references`：保存目标应用工作空间路径、别名、active/pending 修订和待推送内容摘要；它描述应用级引用状态，不绑定单个用户 worktree。
+- `agent_skill_hub_update_operations`：保存三方合并的 base/current/incoming 冲突状态；终态为 `COMPLETED` 或 `ABORTED`。
+
+快照只在远端 push 成功后从该次精确 commit 读取，单资产最多 256 个文件、解压前总计 20 MiB；读取时重新校验压缩编码和 SHA-256，解压安全上限为 32 MiB。关系型 SQL 全部位于 `AgentSkillHubMapper.xml`，Flyway 仅负责结构创建。
+
+## V20260725230000 Hub 取消引用状态
+
+- `agent_skill_hub_references.status` 增加 `PENDING_REMOVE`：文件先从个人 worktree 移除，远端 push 确认目标路径已不存在后才删除引用记录。
+- `agent_skill_hub_update_operations.reference_id` 外键改为 `ON DELETE CASCADE`；正式解除引用时同步清理只服务于该引用的临时三方合并操作。
+- `PENDING_PUSH` 与 `ACTIVE` 继续严格区分；前者只表示本地已写入，不表示远端应用已经引用。
+
 ## 后续 migration 版本规则
 
 V18 及以前保留既有数字版本，已在本地或共享库执行过的 migration 禁止删除、重命名或改写。V18 之后新增 migration 必须使用 `VyyyyMMddHHmmss__description.sql`，时间戳按开发者创建迁移时的本地时间确定；多人并行开发时不得再抢占 `V19`、`V20` 这类顺序数字版本。提交前需运行持久化模块 migration 命名测试，确认版本唯一、历史已落库 migration 仍可解析且时间戳规则生效。

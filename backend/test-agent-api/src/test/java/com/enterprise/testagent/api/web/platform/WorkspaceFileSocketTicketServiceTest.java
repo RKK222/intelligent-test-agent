@@ -134,6 +134,26 @@ class WorkspaceFileSocketTicketServiceTest {
     }
 
     @Test
+    void createsReadOnlyHubTicketForOrdinaryAuthenticatedUser() {
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        WorkspaceFileSocketTicketService service = service(workspaceService, assignmentService);
+        when(workspaceService.currentLinuxServerId()).thenReturn("10.8.0.12");
+
+        service.createTicket(
+                principal(List.of(Dictionary.ROLE_USER)),
+                new WorkspaceFileSocketDtos.TicketRequest(null, "10.8.0.12", "agent-skill-hub"),
+                TRACE_ID);
+
+        WorkspaceFileSocketTicket ticket = service.consume("wft_fixed", "http://localhost:3000");
+        assertThat(ticket.mode()).isEqualTo("agent-skill-hub");
+        assertThat(ticket.scope()).isEqualTo("HUB");
+        assertThat(ticket.userId()).isEqualTo(USER_ID.value());
+        assertThat(ticket.appAdmin()).isFalse();
+        verify(assignmentService, never()).fileRoutingAffinity(USER_ID, "opencode", TRACE_ID);
+    }
+
+    @Test
     void rejectsAgentConfigTicketWhenTargetBackendDoesNotMatchCurrentBackend() {
         WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);

@@ -95,11 +95,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     private static final String PENDING_EXPECTED_COMMIT = "PENDING_LOCAL_COMMIT";
     private static final Pattern OPERATION_ID_PATTERN = Pattern.compile("^aco_[A-Za-z0-9_-]{8,128}$");
     private static final Pattern WORKTREE_NAME_PATTERN = Pattern.compile("^[A-Za-z0-9._-]{1,64}$");
-    private static final Pattern FRONTMATTER_PATTERN = Pattern.compile("\\A---\\R(.*?)\\R---(?:\\R|\\z)", Pattern.DOTALL);
-    private static final Pattern BILINGUAL_DESCRIPTION_PATTERN = Pattern.compile(
-            "^([A-Za-z][A-Za-z0-9 &+./_-]*?)（([^）\\r\\n]+)）[。；]");
-    private static final Pattern MARKDOWN_TITLE_PATTERN = Pattern.compile("(?m)^#\\s+(.+?)\\s*$");
-    private static final ObjectMapper JSON_SCALAR_MAPPER = new ObjectMapper();
+    private static final AgentConfigMetadataParser METADATA_PARSER = new AgentConfigMetadataParser();
     private static final DateTimeFormatter WORKTREE_SUFFIX_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd").withZone(ZoneOffset.UTC);
     private static final ServerBroadcastPublisher NOOP_BROADCAST = new ServerBroadcastPublisher() {
         @Override
@@ -942,77 +938,11 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     private AgentConfigDisplayNames resolveDisplayNames(String content, boolean skill, String technicalName) {
-        var frontmatterMatcher = FRONTMATTER_PATTERN.matcher(content);
-        String frontmatter = frontmatterMatcher.find() ? frontmatterMatcher.group(1) : "";
-        if (skill) {
-            String chineseName = yamlNestedScalar(frontmatter, "display-name-zh");
-            String englishName = yamlNestedScalar(frontmatter, "display-name");
-            if (chineseName != null) {
-                return new AgentConfigDisplayNames(chineseName, englishName == null ? technicalName : englishName);
-            }
-        }
-
-        String description = yamlTopLevelScalar(frontmatter, "description");
-        if (description != null) {
-            var bilingualMatcher = BILINGUAL_DESCRIPTION_PATTERN.matcher(description);
-            if (bilingualMatcher.find()) {
-                String englishName = normalizedDisplayName(bilingualMatcher.group(1));
-                String chineseName = normalizedDisplayName(bilingualMatcher.group(2));
-                if (chineseName != null) {
-                    return new AgentConfigDisplayNames(chineseName, englishName == null ? technicalName : englishName);
-                }
-            }
-        }
-
-        // 历史应用配置没有双语 description；标题仅作为兼容回退，Skill metadata 仍是第一优先级。
-        var titleMatcher = MARKDOWN_TITLE_PATTERN.matcher(content);
-        if (titleMatcher.find()) {
-            String title = normalizedDisplayName(titleMatcher.group(1));
-            if (title != null && title.codePoints().anyMatch(codePoint -> codePoint >= 0x3400 && codePoint <= 0x9fff)) {
-                return new AgentConfigDisplayNames(title, technicalName);
-            }
+        AgentConfigMetadataParser.Metadata metadata = METADATA_PARSER.parse(content, skill, technicalName);
+        if (metadata.displayName() != null) {
+            return new AgentConfigDisplayNames(metadata.displayName(), metadata.displayNameEn());
         }
         return null;
-    }
-
-    private String yamlTopLevelScalar(String frontmatter, String field) {
-        return yamlScalar(frontmatter, Pattern.compile(
-                "(?m)^" + Pattern.quote(field) + "\\s*:\\s*(.+?)\\s*$"));
-    }
-
-    private String yamlNestedScalar(String frontmatter, String field) {
-        return yamlScalar(frontmatter, Pattern.compile(
-                "(?m)^[ \\t]+" + Pattern.quote(field) + "\\s*:\\s*(.+?)\\s*$"));
-    }
-
-    private String yamlScalar(String frontmatter, Pattern pattern) {
-        var matcher = pattern.matcher(frontmatter);
-        if (!matcher.find()) {
-            return null;
-        }
-        String raw = matcher.group(1).trim();
-        try {
-            if (raw.startsWith("\"") && raw.endsWith("\"")) {
-                return normalizedDisplayName(JSON_SCALAR_MAPPER.readValue(raw, String.class));
-            }
-            if (raw.startsWith("'") && raw.endsWith("'") && raw.length() >= 2) {
-                return normalizedDisplayName(raw.substring(1, raw.length() - 1).replace("''", "'"));
-            }
-            return normalizedDisplayName(raw);
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private String normalizedDisplayName(String value) {
-        if (value == null) {
-            return null;
-        }
-        String normalized = value.replace('\r', ' ').replace('\n', ' ').trim();
-        if (normalized.isEmpty()) {
-            return null;
-        }
-        return normalized.length() <= 160 ? normalized : normalized.substring(0, 160);
     }
 
     private record AgentConfigDisplayNames(String chineseName, String englishName) {

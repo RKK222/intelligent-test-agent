@@ -13,6 +13,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     AgentConfigPanel: typeof import('./src/components/AgentConfigPanel.vue')['default']
     AgentConfigTreeNode: typeof import('./src/components/AgentConfigTreeNode.vue')['default']
+    AgentSkillHub: typeof import('./src/components/AgentSkillHub.vue')['default']
     AgentWorkbench: typeof import('./src/components/AgentWorkbench.vue')['default']
     AnalyticsManagementPanel: typeof import('./src/components/system/AnalyticsManagementPanel.vue')['default']
     ChatContextAttachmentCard: typeof import('./src/components/ChatContextAttachmentCard.vue')['default']

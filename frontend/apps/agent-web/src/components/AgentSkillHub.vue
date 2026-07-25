@@ -445,21 +445,21 @@ onMounted(async () => {
     <header class="hub-header">
       <div class="hub-header-main">
         <div class="hub-brand">
-          <span class="hub-brand-mark"><Boxes :size="20" /></span>
-          <div>
-            <div class="hub-brand-title">
-              <strong>Agent &amp; Skill Hub</strong>
-              <span class="hub-kicker">SHARED CAPABILITY REGISTRY</span>
+          <span class="hub-brand-icon"><Boxes :size="16" /></span>
+          <div class="hub-brand-text">
+            <div class="hub-title-row">
+              <h1>Agent &amp; Skill Hub</h1>
+              <span class="hub-kicker-tag">共享能力中心</span>
             </div>
             <p>发现、发布并追踪来自所有应用远端提交的可复用能力。</p>
           </div>
         </div>
         <div class="hub-header-actions">
           <div class="hub-overview" aria-label="Hub 概览">
-            <div class="hub-overview-item"><Bot :size="14" /><span><b>{{ agentTotal }}</b> Agents</span></div>
-            <div class="hub-overview-item"><Sparkles :size="14" /><span><b>{{ skillTotal }}</b> Skills</span></div>
-            <div class="hub-overview-item"><Library :size="14" /><span><b>{{ referencedTotal }}</b> 当前应用引用</span></div>
-            <div class="hub-overview-item" :class="{ 'is-alert': updateCount > 0 }"><Clock3 :size="14" /><span><b>{{ updateCount }}</b> 待处理</span></div>
+            <div class="hub-overview-item"><Bot :size="13" /><span><b>{{ agentTotal }}</b> Agents</span></div>
+            <div class="hub-overview-item"><Sparkles :size="13" /><span><b>{{ skillTotal }}</b> Skills</span></div>
+            <div class="hub-overview-item"><Library :size="13" /><span><b>{{ referencedTotal }}</b> 当前应用引用</span></div>
+            <div class="hub-overview-item" :class="{ 'is-alert': updateCount > 0 }"><Clock3 :size="13" /><span><b>{{ updateCount }}</b> 待处理</span></div>
           </div>
           <button class="hub-refresh-btn" type="button" @click="tab === 'UPDATES' ? loadUpdates() : loadAssets()">
             <RefreshCw :size="13" :class="loading && 'hub-spin'" />刷新目录
@@ -469,15 +469,15 @@ onMounted(async () => {
     </header>
 
     <nav class="hub-tabs" aria-label="Hub 分类">
-      <button :class="tab === 'DISCOVER' && 'is-active'" @click="tab = 'DISCOVER'"><Compass :size="15" />发现</button>
-      <button :class="tab === 'AGENT' && 'is-active'" @click="tab = 'AGENT'"><Bot :size="15" />Agents</button>
-      <button :class="tab === 'SKILL' && 'is-active'" @click="tab = 'SKILL'"><Sparkles :size="15" />Skills</button>
+      <button :class="tab === 'DISCOVER' && 'is-active'" @click="tab = 'DISCOVER'"><Compass :size="14" />发现</button>
+      <button :class="tab === 'AGENT' && 'is-active'" @click="tab = 'AGENT'"><Bot :size="14" />Agents</button>
+      <button :class="tab === 'SKILL' && 'is-active'" @click="tab = 'SKILL'"><Sparkles :size="14" />Skills</button>
       <span class="hub-tabs-divider" />
       <button :class="tab === 'REFERENCED' && 'is-active'" @click="tab = 'REFERENCED'">
-        <Library :size="15" />当前应用<span class="hub-nav-note">{{ referencedTotal }}</span>
+        <Library :size="14" />当前应用<span class="hub-nav-note">{{ referencedTotal }}</span>
       </button>
       <button :class="tab === 'UPDATES' && 'is-active'" @click="tab = 'UPDATES'">
-        <Clock3 :size="15" />待更新<span v-if="updateCount" class="hub-tab-count" aria-label="待更新数量">{{ updateCount }}</span>
+        <Clock3 :size="14" />待更新<span v-if="updateCount" class="hub-tab-count" aria-label="待更新数量">{{ updateCount }}</span>
       </button>
     </nav>
 
@@ -680,13 +680,14 @@ onMounted(async () => {
 
 <style scoped>
 .hub{--hub-ink:#15233b;--hub-muted:#69768c;--hub-blue:#3567ee;--hub-line:#e2e8f0;position:relative;display:flex;height:100%;min-height:0;flex-direction:column;background:#f6f8fc;color:var(--hub-ink);font-family:var(--font-sans)}
-.hub-header{position:relative;flex:none;background:#fff;border-bottom:1px solid #e2e8f0;padding:14px 24px;box-shadow:0 1px 3px rgba(0,0,0,.03)}
+.hub-header{position:relative;flex:none;background:#fff;border-bottom:1px solid #e2e8f0;padding:12px 24px 12px 54px;box-shadow:0 1px 2px rgba(0,0,0,.02)}
 .hub-header-main{display:flex;align-items:center;justify-content:space-between;gap:16px}
-.hub-brand{display:flex;align-items:center;gap:12px}
-.hub-brand-mark{display:grid;height:38px;width:38px;place-items:center;border-radius:10px;background:linear-gradient(135deg,#3567ee,#1ec1b3);color:#fff;box-shadow:0 4px 12px rgba(53,103,238,.2)}
-.hub-brand-title{display:flex;align-items:baseline;gap:8px}
-.hub-brand-title strong{font-size:17px;letter-spacing:-.02em;color:#1e293b}
-.hub-kicker{color:#64748b;font-family:var(--font-mono);font-size:9px;letter-spacing:.1em;font-weight:600}
+.hub-brand{display:flex;align-items:center;gap:10px}
+.hub-brand-icon{display:grid;height:32px;width:32px;flex:none;place-items:center;border-radius:8px;background:#eff6ff;color:#2563eb}
+.hub-brand-text{display:flex;flex-direction:column}
+.hub-title-row{display:flex;align-items:center;gap:8px}
+.hub-title-row h1{margin:0;font-size:16px;font-weight:700;letter-spacing:-.02em;color:#0f172a;line-height:1.2}
+.hub-kicker-tag{display:inline-flex;align-items:center;border-radius:4px;background:#f1f5f9;padding:2px 6px;color:#64748b;font-size:10px;font-weight:600;white-space:nowrap}
 .hub-brand p{margin:2px 0 0;color:#64748b;font-size:11px}
 .hub-header-actions{display:flex;align-items:center;gap:14px}
 .hub-overview{display:flex;align-items:center;gap:8px}
@@ -697,7 +698,7 @@ onMounted(async () => {
 .hub-refresh-btn{display:flex;align-items:center;gap:6px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;padding:6px 12px;color:#334155;font-size:11px;font-weight:600;transition:all .15s ease;cursor:pointer}
 .hub-refresh-btn:hover{background:#f1f5f9;border-color:#94a3b8;color:#0f172a}
 
-.hub-tabs{display:flex;height:42px;flex:none;align-items:center;gap:3px;border-bottom:1px solid var(--hub-line);background:#fff;padding:0 24px}
+.hub-tabs{display:flex;height:40px;flex:none;align-items:center;gap:4px;border-bottom:1px solid var(--hub-line);background:#fff;padding:0 24px 0 54px}
 .hub-tabs button{display:flex;height:30px;align-items:center;gap:6px;border:0;border-radius:6px;background:transparent;padding:0 12px;color:#64748b;font-size:12px;font-weight:500;transition:all .15s ease;cursor:pointer}
 .hub-tabs button:hover{background:#f1f5f9;color:#0f172a}
 .hub-tabs button.is-active{background:#eff6ff;color:#2563eb;font-weight:700}

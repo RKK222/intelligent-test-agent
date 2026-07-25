@@ -58,6 +58,10 @@ packages/shared-types
 
 超级管理员服务器工作空间选择器支持视口内缩放、页面内全屏/还原，也可像用户手册一样通过真实应用 URL 打开普通浏览器新标签页；URL 只保留入口标记，当前服务器和目录通过同源 `sessionStorage` 交接，不写入地址栏或浏览历史。
 
+### Agent & Skill Hub
+
+`apps/agent-web` 的 activity rail 在代码/监控入口下方提供统一 Agent & Skill Hub。沉浸式页面采用能力市场结构，包含远端能力概览、发现/Agents/Skills、当前应用引用库、待更新收件箱、能力卡片和引用应用清单；所有用户可读取远端精确快照，应用管理员可发布、引用、两阶段取消及确认三方合并冲突。目录状态和更新按当前个人运行工作区限定，`PENDING_PUSH/PENDING_REMOVE` 使用图标与明确文案而不只依赖颜色。`packages/backend-api` 统一承载 Hub HTTP 与平台文件 WebSocket 调用，`packages/shared-types` 保存兼容 DTO。
+
 ## 本地命令
 
 ```bash

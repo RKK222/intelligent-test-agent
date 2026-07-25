@@ -43,6 +43,12 @@
 - 把后端文件 DTO 转换为前端稳定展示模型。
 - SSH key 新增方法只发送私钥给平台后端，响应类型只包含 key 元信息，不包含明文或密文。
 
+### Agent & Skill Hub client
+
+- Hub 目录、详情、发布、更新列表和角标使用 `/workspace-management/agent-skill-hub` HTTP API；目录可携带 `referencedOnly + targetWorkspaceId` 获取当前应用引用清单，详情返回引用方应用/工作空间，更新请求按同一目标工作区统计。
+- `readAgentSkillHubFile` 使用独立 `agent-skill-hub/HUB` ticket；引用、取消引用和更新方法复用目标 workspace 的 Agent 配置 WebSocket route/ticket/RPC，保持多 Java 文件路由边界。
+- 调用方只得到标准响应和冲突 DTO，不接触 Git 仓库路径、压缩制品或数据库标识实现。
+
 ## 禁止事项
 
 - 不依赖 Vue 组件、dockview-vue、Monaco 或页面状态。

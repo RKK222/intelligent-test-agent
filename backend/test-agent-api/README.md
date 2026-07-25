@@ -41,6 +41,12 @@
 - RunEvent SSE 路由由 runtime 服务优先使用 Redis manifest 的生产服务器，manifest 缺失的 legacy/旧 Run 才读取 routing/process 兼容数据。目标 Java 的 `REDIS_SUMMARY` 流首帧总发送 Redis 物化 `run.snapshot.reset`，随后按 `runtimeVersion` 分页读取 durable/transient 全事件尾流；最短 5 秒的 Redis 安全扫描负责丢唤醒补偿，本机 live 事件仍即时唤醒尾流读取。API 层只负责流式转发，不实现数据库轮询或运行态降级。
 - 本地 CORS 默认允许主前端和 `frontend-opencode` Vite/Preview/E2E 端口；生产必须通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 显式收敛。
 
+### Agent & Skill Hub 入口
+
+- `AgentSkillHubController` 提供全员可读的目录/详情/更新角标，以及 `APP_ADMIN` 的显式发布入口。
+- Hub 正文由 `agent-skill-hub/HUB` 独立只读文件 ticket 获取；引用、取消引用与更新复用现有 `agent-config/WORKSPACE` ticket，并校验 `appAdmin`、绑定 workspace 和当前用户。目录和更新 HTTP 查询可携带个人运行 `targetWorkspaceId`；`referencedOnly` 返回当前应用引用清单，详情附带按状态收敛的引用方应用/工作空间。
+- Hub 不新增 SSE 或后端间文件 HTTP 代理；跨服务器引用始终由浏览器连接目标工作区所在 Java 的平台文件 WebSocket。
+
 ## 允许依赖
 
 - `test-agent-common`。

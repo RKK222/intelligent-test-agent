@@ -34,6 +34,13 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 - 所有平台用户触发的 Git commit 以及可能产生 commit 的 merge 都必须显式传入当前用户身份，并注入命令级作者/提交者；提交与发布程序不再提供缺省身份兼容入口，也不依赖公共仓库或全局 Git 配置中的默认身份。平台没有邮箱字段时由 common Git 工具按统一认证号生成企业 SCM 已登记的 `mails.icbc` email，避免 invalid committer 拒绝。公共发布额外使用 `commit-tree` 从最终文件树生成单父提交，远端只新增当前管理员身份的提交，不要求企业 SCM 接受个人分支中的旧历史身份。
 - `checkVersionGitAccess()` 在用户显式选择应用版本、创建或修复个人 worktree 前复用 `GitRemoteService.listBranches()`、当前用户唯一 SSH key 和内部仓库有效 URL 做只读预检。认证失败/仓库不可访问返回稳定的权限申请结果，缺少 SSH key 单独返回配置提示；网络和超时继续抛统一 Git 异常。
 
+## Agent & Skill Hub
+
+- `AgentSkillHubApplicationService` 在应用 feature push 成功后从精确 Git commit 扫描 `.opencode/agents/*.md` 与完整 `.opencode/skills/{id}/**`，生成不可变压缩快照；定时对账本机 READY 副本补偿漏记。
+- push 与 publish 分离：全员可浏览 pushed 快照，显式发布固定当前修订和精确依赖；公共配置仓库只以平台内置只读资产展示。
+- 引用递归物化已发布依赖到当前管理员个人 worktree，不自动 commit/push；`PENDING_PUSH` 只表示本地待推送，feature push 内容摘要吻合后才提升为 `ACTIVE`。取消引用先安全移除 worktree 文件并进入 `PENDING_REMOVE`，push 确认远端路径消失后才正式删除引用记录。
+- 更新使用 active/current/incoming 三方合并。任何冲突都会先持久化操作且保持工作树不变；全部解决后做 current 摘要乐观校验，再以文件备份和数据库事务收敛落盘。目录、详情和更新查询可绑定当前个人运行工作区；`referencedOnly` 提供当前应用引用资产库，详情返回已生效引用方，并仅向目标应用成员补充待推送引用方。
+
 ## 测试覆盖
 
 - `WorkspaceApplicationServiceTest` 覆盖工作区创建、服务器归属、分页/详情查询、未找到错误和文件服务编排。

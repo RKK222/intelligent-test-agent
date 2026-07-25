@@ -20,6 +20,7 @@
 ## 已有模型
 
 - Workspace：`Workspace`、`WorkspaceId`。
+- Agent & Skill Hub：`AgentSkillHubModels`、`AgentSkillHubRepository`、`AgentSkillHubPushIndexer`；领域层只表达不可变制品、逻辑资产、提交修订、精确依赖、应用级引用（含待推送/生效/取消待推送状态）和三方更新操作，不依赖压缩/Git/SQL 实现。
 - 会话 Workspace 权限：`ConversationWorkspaceAccessAuthorizer` 隔离 runtime 与托管应用/个人 Workspace 权威成员查询；`TrustedWorkspaceResolver` 负责当前节点可信 root/server 解析，两者职责分离。
 - Session：`Session`、`SessionId`、`SessionStatus`、`SessionMessage`、`SessionMessageId`、`SessionMessageRole`；`Session` 内含平台置顶状态和后端内部 opencode session/node 映射字段，软删除使用 `ARCHIVED` 状态。
 - 会话运行态摘要：`SessionRuntimeState`、`SessionRuntimeStateSummary`、`SessionRuntimeAttention`；attention 支持 `QUESTION/PERMISSION`，摘要分别提供 `questionCount/permissionCount`，计数均表示存在对应待关注状态的会话数。

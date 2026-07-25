@@ -605,6 +605,14 @@ route 响应已经包含目标 Java `baseUrl`，客户端必须在该目标地�
 | `agent-config.copy` | `scope`, `workspaceId?`, `worktreeId?`, `sourcePath`, `targetPath` | `null`；复制普通文件且不覆盖同名目标，应用级同时校验源和目标白名单 |
 | `agent-config.move` | `scope`, `workspaceId?`, `worktreeId?`, `sourcePath`, `targetPath` | `null`；移动文件或目录且不覆盖目标，拒绝目录移入自身后代，应用级同时校验源和目标白名单 |
 | `agent-config.delete` | `scope`, `workspaceId?`, `worktreeId?`, `path` | `null`；公共 scope 仅 `SUPER_ADMIN`，工作空间 scope 仅 `APP_ADMIN`（`SUPER_ADMIN` 继承）；文件直接删除，目录递归删除且不跟随符号链接，复用根目录、`.git` 和越界路径保护 |
+| `hub.asset.read` | `revisionId`, `path` | `FileContentResponse`；仅 `mode=agent-skill-hub, scope=HUB` 的独立只读 ticket，按不可变修订读取 UTF-8 正文 |
+| `hub.reference.create` | `assetId`, `aliasTechnicalId?`, `workspaceId` | `ReferenceResponse`；仅当前个人工作区的 `agent-config/WORKSPACE` ticket 且 `APP_ADMIN`，递归写入已发布精确依赖 |
+| `hub.reference.remove` | `assetId`, `workspaceId` | `ReferenceResponse`；从当前个人 worktree 移除唯一引用并进入 `PENDING_REMOVE`，后续 push 确认远端路径消失后正式解除 |
+| `hub.reference.update.start` | `referenceId`, `workspaceId` | `UpdateOperationResponse`；无冲突时原子写入并返回 `COMPLETED`，有冲突时只返回 `CONFLICT` 操作而不改工作树 |
+| `hub.reference.update.read-conflict` | `operationId`, `workspaceId` | `UpdateOperationResponse`；读取当前用户创建的冲突操作 |
+| `hub.reference.update.resolve` | `operationId`, `path`, `resolution`, `content?`, `workspaceId` | `UpdateOperationResponse`；文本支持 `CURRENT/INCOMING/BOTH/MANUAL/DELETE`，二进制支持 `CURRENT/INCOMING/DELETE` |
+| `hub.reference.update.complete` | `operationId`, `workspaceId` | `ReferenceResponse`；全部冲突解决且 worktree 未漂移后整体写盘，状态进入 `PENDING_PUSH` |
+| `hub.reference.update.abort` | `operationId`, `workspaceId` | `null`；取消未完成操作，不修改工作树 |
 | `directory.list` | `path?` | `WorkspaceDirectoryListResponse`；用于服务器工作空间选择器 |
 | `workspace.create` | `name`, `rootPath` | `WorkspaceResponse`；仅 `SUPER_ADMIN` 且目标服务器与当前 agent 同服务器时允许 |
 
@@ -670,6 +678,8 @@ route 响应已经包含目标 Java `baseUrl`，客户端必须在该目标地�
 服务端不得信任客户端提交的引用路径：每次 list/read 都从当前工作区最新 JSONC 重新建立允许集合，并校验应用关联、仓库类型、本机 READY 副本、平台参数、`.git`、符号链接和 root 越界。某个引用配置非法或副本暂不可用时，只跳过该引用并返回 `warnings`；工作区树本身仍可浏览。每层最多 1000 项，达到上限时 `truncated=true`。
 
 服务端必须按 ticket 绑定的 workspace、服务器和模式校验请求：workspace 操作的 `workspaceId` 必须等于 ticket 绑定值，并在路由、ticket 签发和每条 workspace RPC 时重新校验托管工作区的当前用户仍是应用成员；非托管 Workspace 文件访问默认拒绝，仅 ticket 记录为 `SUPER_ADMIN` 的服务器工作空间兼容入口可放行。应用版本副本对普通成员的 write/rename/delete/mkdir 返回只读错误，个人 worktree 普通文件允许 owner 写入；`.opencode/agents/**`、`.opencode/skills/**` 及其 rules/templates 只允许 APP_ADMIN。Agent 配置操作的 `scope/workspaceId/worktreeId` 必须等于 ticket 绑定值，公共直接目录模式还必须受 ticket 绑定的 `linuxServerId` 约束；`directory.list` 仅 `directory-picker` ticket 可用；`workspace.create` 必须由 `SUPER_ADMIN` 创建，并且工作空间服务器与当前用户 opencode 进程服务器一致。客户端必须按 `id` 匹配响应，允许未知字段，收到错误 envelope 后按统一错误码处理。
+
+Agent & Skill Hub 不新增 RunEvent/SSE 类型。更新角标由 HTTP 查询，制品读取和引用变更复用上述平台文件 WebSocket；应用 feature push 成功后的快照索引及引用状态提升属于服务端持久化流程，不通过 RunEvent 广播。
 
 示例：
 

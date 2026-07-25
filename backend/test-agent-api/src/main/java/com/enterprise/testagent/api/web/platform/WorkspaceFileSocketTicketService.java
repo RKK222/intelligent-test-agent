@@ -27,6 +27,7 @@ class WorkspaceFileSocketTicketService {
     private static final String MODE_WORKSPACE = "workspace";
     private static final String MODE_DIRECTORY_PICKER = "directory-picker";
     private static final String MODE_AGENT_CONFIG = "agent-config";
+    private static final String MODE_AGENT_SKILL_HUB = "agent-skill-hub";
     private static final String SCOPE_PUBLIC = "PUBLIC";
     private static final String SCOPE_WORKSPACE = "WORKSPACE";
 
@@ -76,6 +77,11 @@ class WorkspaceFileSocketTicketService {
                     agentConfigScope(request),
                     normalizeOptional(request.worktreeId()),
                     traceId));
+        }
+        if (MODE_AGENT_SKILL_HUB.equals(mode)) {
+            return response(ticketStore.issue(
+                    null, currentLinuxServerId, null, superAdmin, appAdmin, principal.userId().value(),
+                    mode, "HUB", null, traceId));
         }
         if (MODE_WORKSPACE.equals(mode)) {
             String workspaceId = requiredWorkspaceId(request);

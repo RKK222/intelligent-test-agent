@@ -10,6 +10,7 @@ import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuth
 import com.enterprise.testagent.observability.TraceConstants;
 import com.enterprise.testagent.observability.TraceIdSupport;
 import com.enterprise.testagent.workspace.AgentConfigApplicationService;
+import com.enterprise.testagent.workspace.AgentSkillHubApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceDirectoryService;
 import com.enterprise.testagent.workspace.WorkspaceFileUpload;
@@ -44,6 +45,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
     private static final String MODE_DIRECTORY_PICKER = "directory-picker";
     private static final String MODE_WORKSPACE = "workspace";
     private static final String MODE_AGENT_CONFIG = "agent-config";
+    private static final String MODE_AGENT_SKILL_HUB = "agent-skill-hub";
     private static final String SCOPE_PUBLIC = "PUBLIC";
     private static final String SCOPE_WORKSPACE = "WORKSPACE";
     private static final int MAX_ACTIVE_UPLOADS = 4;
@@ -52,6 +54,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
     private final WorkspaceApplicationService workspaceService;
     private final WorkspaceDirectoryService directoryService;
     private final AgentConfigApplicationService agentConfigService;
+    private final AgentSkillHubApplicationService agentSkillHubService;
     private final WorkspaceViewApplicationService workspaceViewService;
     private final ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer;
     private final ObjectMapper objectMapper;
@@ -66,6 +69,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
             WorkspaceApplicationService workspaceService,
             WorkspaceDirectoryService directoryService,
             AgentConfigApplicationService agentConfigService,
+            AgentSkillHubApplicationService agentSkillHubService,
             WorkspaceViewApplicationService workspaceViewService,
             ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer,
             ObjectMapper objectMapper,
@@ -75,6 +79,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         this.workspaceService = Objects.requireNonNull(workspaceService, "workspaceService must not be null");
         this.directoryService = Objects.requireNonNull(directoryService, "directoryService must not be null");
         this.agentConfigService = Objects.requireNonNull(agentConfigService, "agentConfigService must not be null");
+        this.agentSkillHubService = Objects.requireNonNull(agentSkillHubService, "agentSkillHubService must not be null");
         this.workspaceViewService = Objects.requireNonNull(workspaceViewService, "workspaceViewService must not be null");
         this.workspaceAccessAuthorizer = Objects.requireNonNull(
                 workspaceAccessAuthorizer,
@@ -98,8 +103,34 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         this.workspaceService = Objects.requireNonNull(workspaceService, "workspaceService must not be null");
         this.directoryService = Objects.requireNonNull(directoryService, "directoryService must not be null");
         this.agentConfigService = Objects.requireNonNull(agentConfigService, "agentConfigService must not be null");
+        this.agentSkillHubService = null;
         this.workspaceViewService = null;
         this.workspaceAccessAuthorizer = (userId, workspaceId) -> { };
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.allowedOrigins = Set.copyOf(Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(origin -> !origin.isBlank())
+                .toList());
+    }
+
+    /** 兼容既有组合视图单元测试构造路径；Hub RPC 测试应使用生产形状构造器显式注入服务。 */
+    WorkspaceFileWebSocketHandler(
+            WorkspaceFileSocketTicketService ticketService,
+            WorkspaceApplicationService workspaceService,
+            WorkspaceDirectoryService directoryService,
+            AgentConfigApplicationService agentConfigService,
+            WorkspaceViewApplicationService workspaceViewService,
+            ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer,
+            ObjectMapper objectMapper,
+            String allowedOrigins) {
+        this.ticketService = Objects.requireNonNull(ticketService, "ticketService must not be null");
+        this.workspaceService = Objects.requireNonNull(workspaceService, "workspaceService must not be null");
+        this.directoryService = Objects.requireNonNull(directoryService, "directoryService must not be null");
+        this.agentConfigService = Objects.requireNonNull(agentConfigService, "agentConfigService must not be null");
+        this.agentSkillHubService = null;
+        this.workspaceViewService = Objects.requireNonNull(workspaceViewService, "workspaceViewService must not be null");
+        this.workspaceAccessAuthorizer = Objects.requireNonNull(
+                workspaceAccessAuthorizer, "workspaceAccessAuthorizer must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.allowedOrigins = Set.copyOf(Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim)
@@ -276,6 +307,17 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 }
                 case "agent-config.delete" -> {
                     agentConfigDelete(ticket, params);
+                    yield null;
+                }
+                case "hub.asset.read" -> hubAssetRead(ticket, params);
+                case "hub.reference.create" -> hubReferenceCreate(ticket, params);
+                case "hub.reference.remove" -> hubReferenceRemove(ticket, params);
+                case "hub.reference.update.start" -> hubReferenceUpdateStart(ticket, params);
+                case "hub.reference.update.read-conflict" -> hubReferenceUpdateReadConflict(ticket, params);
+                case "hub.reference.update.resolve" -> hubReferenceUpdateResolve(ticket, params);
+                case "hub.reference.update.complete" -> hubReferenceUpdateComplete(ticket, params);
+                case "hub.reference.update.abort" -> {
+                    hubReferenceUpdateAbort(ticket, params);
                     yield null;
                 }
                 case "directory.list" -> directoryList(ticket, params);
@@ -735,6 +777,69 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 agentConfigWorkspaceId(ticket, params),
                 path,
                 agentConfigWorktreeId(ticket, params));
+    }
+
+    /** Hub 正文只允许使用独立只读 ticket，避免通过普通 HTTP 大对象响应旁路文件通道。 */
+    private Object hubAssetRead(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        requireHubService();
+        if (!MODE_AGENT_SKILL_HUB.equals(ticket.mode()) || !"HUB".equals(ticket.scope())) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "当前 ticket 不允许读取 Hub 制品");
+        }
+        return agentSkillHubService.readFile(requiredText(params, "revisionId"), requiredText(params, "path"));
+    }
+
+    private Object hubReferenceCreate(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        requireHubReferenceWrite(ticket);
+        return agentSkillHubService.createReference(
+                requiredText(params, "assetId"), ticket.workspaceId(), text(params, "aliasTechnicalId"), ticketUserId(ticket));
+    }
+
+    private Object hubReferenceRemove(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        requireHubReferenceWrite(ticket);
+        return agentSkillHubService.removeReference(
+                requiredText(params, "assetId"), ticket.workspaceId(), ticketUserId(ticket));
+    }
+
+    private Object hubReferenceUpdateStart(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        requireHubReferenceWrite(ticket);
+        return agentSkillHubService.startUpdate(
+                requiredText(params, "referenceId"), ticket.workspaceId(), ticketUserId(ticket));
+    }
+
+    private Object hubReferenceUpdateReadConflict(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        requireHubReferenceWrite(ticket);
+        return agentSkillHubService.getUpdateOperation(requiredText(params, "operationId"), ticketUserId(ticket));
+    }
+
+    private Object hubReferenceUpdateResolve(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        requireHubReferenceWrite(ticket);
+        return agentSkillHubService.resolveUpdateConflict(
+                requiredText(params, "operationId"), requiredText(params, "path"),
+                requiredText(params, "resolution"), text(params, "content"), ticketUserId(ticket));
+    }
+
+    private Object hubReferenceUpdateComplete(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        requireHubReferenceWrite(ticket);
+        return agentSkillHubService.completeUpdate(requiredText(params, "operationId"), ticketUserId(ticket));
+    }
+
+    private void hubReferenceUpdateAbort(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        requireHubReferenceWrite(ticket);
+        agentSkillHubService.abortUpdate(requiredText(params, "operationId"), ticketUserId(ticket));
+    }
+
+    private void requireHubReferenceWrite(WorkspaceFileSocketTicket ticket) {
+        requireHubService();
+        if (!MODE_AGENT_CONFIG.equals(ticket.mode()) || !SCOPE_WORKSPACE.equals(ticket.scope())
+                || ticket.workspaceId() == null || !ticket.appAdmin()) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "Hub 引用仅允许应用管理员写入当前个人工作区");
+        }
+    }
+
+    private void requireHubService() {
+        if (agentSkillHubService == null) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "Hub 文件服务不可用");
+        }
     }
 
     private String agentConfigScope(WorkspaceFileSocketTicket ticket, JsonNode params) {

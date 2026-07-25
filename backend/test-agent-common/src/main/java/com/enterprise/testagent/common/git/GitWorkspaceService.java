@@ -1187,6 +1187,95 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 列出指定提交和目录前缀下的普通 Git blob 路径。Hub 只从已 push 的不可变提交取材，
+     * 不读取可能继续变化的工作树。
+     */
+    public List<String> listFilesAtCommit(Path repoRoot, String commit, String pathPrefix) {
+        String prefix = pathPrefix == null ? "" : pathPrefix.replace('\\', '/');
+        return executor.execute(
+                        List.of("git", "-C", repoRoot.toString(), "ls-tree", "-r", "--name-only", commit, "--", prefix),
+                        null,
+                        DEFAULT_TIMEOUT)
+                .stdoutText().lines()
+                .map(String::trim)
+                .filter(path -> !path.isEmpty())
+                .toList();
+    }
+
+    /** 读取指定提交中的原始 blob 字节，供 Hub 构造不可变内容制品。 */
+    public byte[] readFileAtCommit(Path repoRoot, String commit, String file) {
+        return executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "show", commit + ":" + file),
+                null,
+                DEFAULT_TIMEOUT).stdoutBytes();
+    }
+
+    /**
+     * 使用 Git 自带的 diff3 算法做纯文本三方合并。返回值携带冲突标记但不接触真实工作树，
+     * Hub 可在所有冲突确认完成前保持目标个人 worktree 不变。
+     */
+    public MergeTextResult mergeText(String base, String current, String incoming) {
+        Path directory = null;
+        try {
+            directory = Files.createTempDirectory("test-agent-hub-merge-");
+            Path currentFile = directory.resolve("current.txt");
+            Path baseFile = directory.resolve("base.txt");
+            Path incomingFile = directory.resolve("incoming.txt");
+            Files.writeString(currentFile, current == null ? "" : current, StandardCharsets.UTF_8);
+            Files.writeString(baseFile, base == null ? "" : base, StandardCharsets.UTF_8);
+            Files.writeString(incomingFile, incoming == null ? "" : incoming, StandardCharsets.UTF_8);
+            try {
+                String merged = executor.execute(
+                        List.of("git", "merge-file", "-p", "-L", "当前引用", "-L", "引用基线", "-L", "Hub 最新版",
+                                currentFile.toString(), baseFile.toString(), incomingFile.toString()),
+                        null,
+                        DEFAULT_TIMEOUT).stdoutText();
+                return new MergeTextResult(merged, false);
+            } catch (PlatformException exception) {
+                Object exitCode = exception.details().get("exitCode");
+                if (exitCode instanceof Number number && number.intValue() == 1) {
+                    // ProcessGitCommandExecutor 的失败摘要不保留 stdout，因此用原生命令仅处理本机临时文件，
+                    // 不携带密钥和用户路径；退出码 1 是 git merge-file 的正常冲突语义。
+                    Process process = new ProcessBuilder(
+                            "git", "merge-file", "-p", "-L", "当前引用", "-L", "引用基线", "-L", "Hub 最新版",
+                            currentFile.toString(), baseFile.toString(), incomingFile.toString()).start();
+                    byte[] output = process.getInputStream().readAllBytes();
+                    int status = process.waitFor();
+                    if (status == 1) {
+                        return new MergeTextResult(new String(output, StandardCharsets.UTF_8), true);
+                    }
+                }
+                throw exception;
+            }
+        } catch (PlatformException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new PlatformException(
+                    com.enterprise.testagent.common.error.ErrorCode.GIT_UNAVAILABLE,
+                    "执行 Hub 三方合并失败",
+                    Map.of(),
+                    exception);
+        } finally {
+            if (directory != null) {
+                try (var files = Files.walk(directory)) {
+                    files.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                        try {
+                            Files.deleteIfExists(path);
+                        } catch (Exception ignored) {
+                            // 临时合并目录清理失败不改变已计算结果。
+                        }
+                    });
+                } catch (Exception ignored) {
+                    // 临时目录清理由操作系统兜底。
+                }
+            }
+        }
+    }
+
+    public record MergeTextResult(String content, boolean conflicted) {
+    }
+
+    /**
      * 删除 worktree 目录并清理 Git worktree 元数据。
      */
     public void removeWorktree(Path repoRoot, Path worktreeRoot, String privateKey) {
