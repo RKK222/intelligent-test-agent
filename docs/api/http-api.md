@@ -1603,7 +1603,7 @@ Hub 元数据与更新角标走 HTTP；制品正文、引用落盘和三方合�
 
 | 方法 | 路径 | 权限 | 说明 |
 |---|---|---|---|
-| `GET` | `/api/internal/platform/workspace-management/agent-skill-hub/assets?type=AGENT|SKILL&keyword=&referencedOnly=false&targetWorkspaceId=&page=1&size=30` | 已登录 | 分页浏览 pushed 快照；`referencedOnly=true` 必须携带当前个人运行工作区，只返回该应用工作空间已有引用（含待推送/取消待推送）；响应区分 `published/builtin/updateAvailable/referenced/deleted/referenceStatus/referenceCount`，其中 `referenceCount` 是远端仍有效的去重应用数 |
+| `GET` | `/api/internal/platform/workspace-management/agent-skill-hub/assets?type=AGENT|SKILL&keyword=&referencedOnly=false&targetWorkspaceId=&page=1&size=30` | 已登录 | 分页浏览 pushed 快照；`referencedOnly=true` 必须携带当前个人运行工作区，只返回该应用工作空间当前可用的引用（`PENDING_PUSH/ACTIVE/UPDATE_CONFLICT`，不含已取消的 `PENDING_REMOVE`）；响应区分 `published/builtin/updateAvailable/referenced/deleted/referenceStatus/referenceCount`，其中 `referenceCount` 是远端仍有效的去重应用数，不统计待推送和已取消关系 |
 | `GET` | `/api/internal/platform/workspace-management/agent-skill-hub/assets/{assetId}?revisionId=&targetWorkspaceId=` | 已登录 | 读取资产详情、精确修订文件清单、固定依赖及 `consumers[]` 引用方；不返回文件正文；已生效引用方对全员可见，`PENDING_PUSH` 只向目标应用成员展示 |
 | `POST` | `/api/internal/platform/workspace-management/agent-skill-hub/assets/{assetId}/publish` | `APP_ADMIN` | 发布当前最新 pushed 修订；请求 `{ "dependencyAssetIds": [] }`，依赖固定到当时已发布的精确修订并拒绝环 |
 | `GET` | `/api/internal/platform/workspace-management/agent-skill-hub/updates/count?targetWorkspaceId=` | 已登录 | 返回当前用户待确认或待推送的引用数量；带个人运行工作区时只统计该应用工作空间，响应 `{ "count": n }` |
@@ -1611,9 +1611,9 @@ Hub 元数据与更新角标走 HTTP；制品正文、引用落盘和三方合�
 
 发布是显式动作：push 只生成不可变修订，未发布修订可被全员浏览但不能被引用。平台公共配置仓库中的 Agent/Skill 以 `builtin=true` 的虚拟精确提交资产展示，响应文案为“平台内置、无需引用”，不允许再次发布或复制到应用工作区。
 
-引用和更新不自动提交 Git。成功写入当前个人 worktree 后返回 `PENDING_PUSH`，此时 `referenced=false/referenceStatus=PENDING_PUSH`；只有后续应用 feature 发布的远端提交内容摘要与待推送摘要一致时，引用才提升为 `ACTIVE` 并显示为已引用。取消引用先移除当前 worktree 文件并进入 `PENDING_REMOVE`，远端 push 确认目标路径不存在后才删除引用关系；push 前仍属于远端有效引用，不能误显示为已解除。更新以 active 修订为 base、当前 worktree 为 current、最新发布修订为 incoming 做三方合并；存在任何冲突时不改工作树，全部冲突确认后再整体落盘。修订链按每个远端 commit 保留，但更新角标比较内容 SHA-256，未改动资产不会因其它文件的 push 产生假更新。
+引用和更新不自动提交 Git。成功写入当前个人 worktree 后返回 `PENDING_PUSH`，此时 `referenced=false/referenceStatus=PENDING_PUSH`；只有后续应用 feature 发布的远端提交内容摘要与待推送摘要一致时，引用才提升为 `ACTIVE` 并显示为已引用。取消引用先移除当前个人 worktree 文件并进入 `PENDING_REMOVE`：该关系立即从“当前应用”、有效引用计数和公开引用方清单隐藏，但保留内部记录等待远端 push 确认目标路径消失后删除；确认前再次引用会复用原记录、重新写盘并恢复为 `PENDING_PUSH`。更新以 active 修订为 base、当前 worktree 为 current、最新发布修订为 incoming 做三方合并；存在任何冲突时不改工作树，全部冲突确认后再整体落盘。修订链按每个远端 commit 保留，但更新角标比较内容 SHA-256，未改动资产不会因其它文件的 push 产生假更新。
 
-`consumers[]` 每项包含目标应用/工作空间名称、引用别名、目标路径、状态和更新时间。“当前应用”目录通过 `referencedOnly=true + targetWorkspaceId` 查询，不在前端截断全量目录后过滤，因此分页总数和列表始终一致。
+`consumers[]` 每项包含目标应用/工作空间名称、引用别名、目标路径、状态和更新时间，已取消关系不返回。“当前应用”目录通过 `referencedOnly=true + targetWorkspaceId` 查询，不在前端截断全量目录后过滤，因此分页总数和列表始终一致。
 
 ### Session API
 

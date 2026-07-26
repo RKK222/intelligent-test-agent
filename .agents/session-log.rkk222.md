@@ -1928,3 +1928,20 @@
 - Result:
   - Agent & Skill Hub 四项核心需求、AgentHub 合并、引用状态修正、取消引用、当前应用引用库与引用方可见性已形成完整闭环。
   - 变更涉及 additive HTTP/WS 协议、关系型数据库/Flyway/MyBatis、应用成员与制品路径安全边界；不新增 RunEvent 类型，不修改 generated SDK、OpenCode 源码、环境配置或业务远程仓库。
+
+### 2026-07-26 - 修复 Hub 取消引用、分类状态与列表竞态
+
+- Why:
+  - `PENDING_REMOVE` 仍被当前应用过滤、有效引用计数和消费者查询纳入，取消后卡片继续出现；服务又拒绝所有已有记录，导致取消后无法重新引用。
+  - 分类页直接展示目标应用的引用状态，Skill 卡片把“取消待推送”误当作资产状态；首次全量目录请求迟到时还会覆盖用户已经切换到的“当前应用”结果。
+- What:
+  - MyBatis 当前应用过滤、有效引用计数和消费者投影统一排除 `PENDING_REMOVE`；引用记录更新补齐目标路径和别名。取消记录仍等待远端删除确认，但用户侧立即解除，`referenced=false`。
+  - 再次引用会复用同一 `PENDING_REMOVE` 记录，保留 active 修订和创建审计字段，重新物化最新发布快照并转为 `PENDING_PUSH`。
+  - 前端按板块拆分状态：发现/Agents/Skills 只展示资产发布状态、原创应用和归属工作区，当前应用才展示引用状态；加入请求代次 fencing，丢弃分类、工作区或搜索条件切换后的迟到响应。
+- How:
+  - Hub 服务 9 项与 MyBatis 集成 2 项定向测试通过；前端 Hub 7 项、全量 96 文件 1624 passed / 1 skipped、typecheck 和生产 build 通过。
+  - 扩大后端回归时 workspace-management 模块通过；persistence 全模块 192 项中 64 项被既有 H2 无法识别 `V20260717173000__create_public_agent_config_rollouts.sql` 的 `timestamptz` 阻断，Hub 自身 H2/MyBatis 用例不受影响。
+  - 使用未修改的 `.env.test` 和 test profile 重启三服务；真实页面刷新前后“当前应用”均为 1 条，取消 Skill 只在 Skill 目录显示“已发布 / 原创应用 / 归属工作区”，详情重新提供“引用到当前应用”。
+- Result:
+  - 取消引用立即退出当前应用和消费者视图，确认前可重新引用；Skill/Agent 分类不再混入应用引用状态，刷新与快速切换不会再被旧请求覆盖。
+  - 变更调整既有 HTTP 响应语义和 MyBatis SQL，不改 API 结构、RunEvent、数据库结构/Flyway、安全权限、generated SDK、OpenCode 源码或环境配置；同步更新 HTTP API、安全规范及前后端模块 README。

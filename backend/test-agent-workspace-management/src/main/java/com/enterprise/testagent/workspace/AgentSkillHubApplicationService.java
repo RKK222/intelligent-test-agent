@@ -329,24 +329,31 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         }
         String rootAlias = normalizeTechnicalId(alias == null || alias.isBlank() ? rootAsset.technicalId() : alias);
         List<ImportRequest> imports = collectImports(rootAsset, rootAlias);
-        ensureNotAlreadyReferenced(personal, imports);
+        Map<String, Reference> reusableReferences = reusablePendingRemovals(personal, imports);
         List<Path> created = materializeImports(personal, imports);
         try {
             Instant now = Instant.now();
             List<Reference> pendingReferences = imports.stream().map(request -> {
                 String targetPath = targetPath(request.asset(), request.alias());
+                Reference reusable = reusableReferences.get(request.asset().assetId());
                 return new Reference(
-                        id("hub_ref_"), request.asset().assetId(), personal.appId().value(),
-                        personal.applicationWorkspaceId().value(), targetPath, request.alias(), null,
+                        reusable == null ? id("hub_ref_") : reusable.referenceId(),
+                        request.asset().assetId(), personal.appId().value(),
+                        personal.applicationWorkspaceId().value(), targetPath, request.alias(),
+                        reusable == null ? null : reusable.activeRevisionId(),
                         request.revision().revisionId(), request.contentSha256(), "PENDING_PUSH",
-                        userId.value(), now, now);
+                        reusable == null ? userId.value() : reusable.createdByUserId(),
+                        reusable == null ? now : reusable.createdAt(), now);
             }).toList();
             List<Reference> savedReferences = repository.saveReferences(pendingReferences);
             Reference rootReference = savedReferences.stream()
                     .filter(reference -> reference.assetId().equals(rootAsset.assetId()))
                     .findFirst().orElseThrow();
+            boolean reactivated = reusableReferences.containsKey(rootAsset.assetId());
             return referenceResponse(Objects.requireNonNull(rootReference), true,
-                    "已写入当前个人 worktree；请在 Git Changes 中提交并推送后生效");
+                    reactivated
+                            ? "已重新引用并写入当前个人 worktree；请在 Git Changes 中提交并推送后生效"
+                            : "已写入当前个人 worktree；请在 Git Changes 中提交并推送后生效");
         } catch (RuntimeException exception) {
             rollbackCreated(created);
             throw exception;
@@ -660,16 +667,23 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         }
     }
 
-    /** 同一应用工作空间对同一逻辑资产只保留一条引用，避免别名导致取消与升级目标不确定。 */
-    private void ensureNotAlreadyReferenced(PersonalWorkspace personal, List<ImportRequest> imports) {
+    /** 取消待推送的记录可原位恢复；其它状态仍禁止重复引用，确保同一资产只有一条有效关系。 */
+    private Map<String, Reference> reusablePendingRemovals(PersonalWorkspace personal, List<ImportRequest> imports) {
+        Map<String, Reference> reusable = new HashMap<>();
         for (ImportRequest request : imports) {
             List<Reference> existing = repository.findReferencesByTargetAsset(
                     personal.applicationWorkspaceId().value(), request.asset().assetId());
-            if (!existing.isEmpty()) {
+            if (existing.isEmpty()) {
+                continue;
+            }
+            if (existing.size() == 1 && "PENDING_REMOVE".equals(existing.getFirst().status())) {
+                reusable.put(request.asset().assetId(), existing.getFirst());
+            } else {
                 throw new PlatformException(ErrorCode.CONFLICT, "当前应用工作空间已引用该 Agent/Skill",
                         Map.of("assetId", request.asset().assetId(), "targetPath", existing.getFirst().targetPath()));
             }
         }
+        return Map.copyOf(reusable);
     }
 
     private List<ConflictFile> mergeFiles(Map<String, byte[]> base, Map<String, byte[]> current, Map<String, byte[]> incoming) {
@@ -1019,7 +1033,7 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
     }
 
     private boolean isEffectiveReference(String status) {
-        return "ACTIVE".equals(status) || "UPDATE_CONFLICT".equals(status) || "PENDING_REMOVE".equals(status);
+        return "ACTIVE".equals(status) || "UPDATE_CONFLICT".equals(status);
     }
 
     private AgentSkillHubResponses.UpdateResponse response(ReferenceUpdate update) {

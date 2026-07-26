@@ -147,11 +147,29 @@ class MyBatisAgentSkillHubRepositoryIntegrationTest {
         assertThat(repository.countUpdates("usr_hub", "aw_hub")).isZero();
         assertThat(repository.findPendingReferences("aw_hub"))
                 .singleElement().extracting("status").isEqualTo("PENDING_REMOVE");
-        assertThat(repository.listReferenceConsumers(asset.asset().assetId(), "usr_hub"))
-                .singleElement().extracting(consumer -> consumer.reference().status()).isEqualTo("PENDING_REMOVE");
-        repository.deleteReference(removing.referenceId());
-        assertThat(repository.findReferencesByTargetAsset("aw_hub", active.assetId())).isEmpty();
+        assertThat(repository.listAssets(AssetType.AGENT, null, "usr_hub", "aw_hub", false, 0, 10))
+                .singleElement().satisfies(summary -> {
+                    assertThat(summary.referenceStatus()).isEqualTo("PENDING_REMOVE");
+                    assertThat(summary.referenceCount()).isZero();
+                });
         assertThat(repository.listAssets(null, null, "usr_hub", "aw_hub", true, 0, 10)).isEmpty();
+        assertThat(repository.listReferenceConsumers(asset.asset().assetId(), "usr_hub")).isEmpty();
+
+        Reference reactivated = new Reference(
+                removing.referenceId(), removing.assetId(), removing.targetAppId(),
+                removing.targetApplicationWorkspaceId(), ".opencode/agents/reviewer-v2.md", "reviewer-v2",
+                removing.activeRevisionId(), asset.pushedRevision().revisionId(), "e".repeat(64),
+                "PENDING_PUSH", removing.createdByUserId(), removing.createdAt(), NOW.plusSeconds(3));
+        repository.saveReference(reactivated);
+        assertThat(repository.findReferencesByTargetAsset("aw_hub", active.assetId()))
+                .singleElement().satisfies(reference -> {
+                    assertThat(reference.referenceId()).isEqualTo(removing.referenceId());
+                    assertThat(reference.targetPath()).isEqualTo(".opencode/agents/reviewer-v2.md");
+                    assertThat(reference.aliasTechnicalId()).isEqualTo("reviewer-v2");
+                    assertThat(reference.status()).isEqualTo("PENDING_PUSH");
+                });
+        assertThat(repository.listAssets(null, null, "usr_hub", "aw_hub", true, 0, 10))
+                .singleElement().extracting("referenceStatus").isEqualTo("PENDING_PUSH");
     }
 
     private PushedSnapshot snapshot(String commit, String artifactSha, Instant pushedAt) {

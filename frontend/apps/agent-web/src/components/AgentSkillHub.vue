@@ -88,38 +88,48 @@ const canPublishSelected = computed(() =>
 );
 const canReferenceSelected = computed(() =>
   props.canManage && Boolean(props.workspaceId) && !selectedAsset.value?.builtin
-    && selectedAsset.value?.published && !selectedAsset.value?.deleted && !selectedAsset.value?.referenceStatus
+    && selectedAsset.value?.published && !selectedAsset.value?.deleted
+    && (!selectedAsset.value?.referenceStatus || selectedAsset.value.referenceStatus === "PENDING_REMOVE")
 );
 const canRemoveSelected = computed(() =>
   props.canManage && Boolean(props.workspaceId) && !selectedAsset.value?.builtin
     && Boolean(selectedAsset.value?.referenceStatus)
+    && selectedAsset.value?.referenceStatus !== "PENDING_REMOVE"
 );
 
-function selectedAssetType(): AgentSkillHubAssetType | undefined {
-  if (tab.value === "AGENT" || tab.value === "SKILL") return tab.value;
+function selectedAssetType(value: HubTab = tab.value): AgentSkillHubAssetType | undefined {
+  if (value === "AGENT" || value === "SKILL") return value;
   return undefined;
 }
 
+let assetRequestVersion = 0;
+
 async function loadAssets() {
+  const requestVersion = ++assetRequestVersion;
+  const requestedTab = tab.value;
+  const requestedWorkspaceId = props.workspaceId;
+  const requestedKeyword = keyword.value;
   loading.value = true;
   error.value = "";
   try {
-    if (tab.value === "REFERENCED" && !props.workspaceId) {
+    if (requestedTab === "REFERENCED" && !requestedWorkspaceId) {
       assets.value = [];
       selectedAsset.value = null;
       clearDetail();
       return;
     }
     const page = await api.listAgentSkillHubAssets({
-      type: selectedAssetType(),
-      keyword: keyword.value || undefined,
-      referencedOnly: tab.value === "REFERENCED",
-      targetWorkspaceId: props.workspaceId,
+      type: selectedAssetType(requestedTab),
+      keyword: requestedKeyword || undefined,
+      referencedOnly: requestedTab === "REFERENCED",
+      targetWorkspaceId: requestedWorkspaceId,
       page: 1,
       size: 100
     });
+    // 切换分类、工作区或搜索条件后，迟到的旧请求不得覆盖当前列表。
+    if (requestVersion !== assetRequestVersion) return;
     // 未选个人工作区时没有可判定的目标引用上下文，避免把其它应用的引用误显示为当前引用。
-    assets.value = props.workspaceId
+    assets.value = requestedWorkspaceId
       ? page.items
       : page.items.map((item) => ({ ...item, referenced: false, referenceStatus: null }));
     if (selectedAsset.value && assets.value.some((item) => item.assetId === selectedAsset.value?.assetId)) {
@@ -128,9 +138,9 @@ async function loadAssets() {
       closeDetail();
     }
   } catch (cause) {
-    error.value = message(cause);
+    if (requestVersion === assetRequestVersion) error.value = message(cause);
   } finally {
-    loading.value = false;
+    if (requestVersion === assetRequestVersion) loading.value = false;
   }
 }
 
@@ -367,22 +377,21 @@ function message(cause: unknown) {
 function assetStatus(asset: AgentSkillHubAsset) {
   if (asset.deleted) return { key: "deleted", label: "远端已删除", title: "该资产已从来源远端删除" };
   if (asset.builtin) return { key: "builtin", label: "平台内置", title: "平台内置、无需发布或引用" };
-  if (asset.referenceStatus === "PENDING_REMOVE") {
-    return { key: "removing", label: "取消待推送", title: "已从当前 worktree 移除，push 后正式解除引用" };
-  }
-  if (asset.referenceStatus === "PENDING_PUSH") {
-    return { key: "waiting", label: "引用待推送", title: "已写入当前 worktree，尚未 push 到远端" };
-  }
-  if (asset.referenceStatus === "UPDATE_CONFLICT") {
-    return { key: "conflict", label: "更新有冲突", title: "引用更新存在待解决冲突" };
-  }
-  if (asset.referenceStatus === "ACTIVE" && asset.updateAvailable) {
-    return { key: "update", label: "已引用 · 新版待发布", title: "当前引用已生效，来源另有尚未发布的新 push" };
+  if (tab.value === "REFERENCED") {
+    if (asset.referenceStatus === "PENDING_PUSH") {
+      return { key: "waiting", label: "引用待推送", title: "已写入当前 worktree，尚未 push 到远端" };
+    }
+    if (asset.referenceStatus === "UPDATE_CONFLICT") {
+      return { key: "conflict", label: "更新有冲突", title: "引用更新存在待解决冲突" };
+    }
+    if (asset.referenceStatus === "ACTIVE" && asset.updateAvailable) {
+      return { key: "update", label: "已引用 · 新版待发布", title: "当前引用已生效，来源另有尚未发布的新 push" };
+    }
+    if (asset.referenceStatus === "ACTIVE" && asset.referenced) {
+      return { key: "referenced", label: "引用生效", title: "该引用已由当前应用成功 push 到远端" };
+    }
   }
   if (asset.updateAvailable) return { key: "update", label: "新版待发布", title: "最新 push 内容尚未发布" };
-  if (asset.referenceStatus === "ACTIVE" && asset.referenced) {
-    return { key: "referenced", label: "已发布 · 已引用", title: "该引用已由当前应用成功 push 到远端" };
-  }
   if (asset.published) return { key: "published", label: "已发布", title: "其他应用可以引用" };
   return { key: "pushed", label: "仅已推送", title: "已形成不可变快照，尚未发布" };
 }
@@ -395,7 +404,10 @@ function consumerStatus(status: string) {
 }
 
 watch(tab, async (value) => {
-  if (value === "UPDATES") await loadUpdates();
+  if (value === "UPDATES") {
+    assetRequestVersion++;
+    await loadUpdates();
+  }
   else await loadAssets();
 });
 
@@ -513,7 +525,7 @@ onMounted(async () => {
           <div>
             <span>{{ tab === 'REFERENCED' ? 'CURRENT APPLICATION' : 'CAPABILITY CATALOG' }}</span>
             <h2>{{ tab === 'REFERENCED' ? '当前应用的能力' : tab === 'AGENT' ? 'Agent 目录' : tab === 'SKILL' ? 'Skill 目录' : '探索全部能力' }}</h2>
-            <p>{{ tab === 'REFERENCED' ? '包含已生效、待推送和取消待推送的全部引用。' : '每个版本都来自成功 push 的不可变远端快照。' }}</p>
+            <p>{{ tab === 'REFERENCED' ? '展示当前应用已生效、待推送和更新冲突的引用。' : '展示远端能力、原创应用和归属工作区；每个版本均为成功 push 的不可变快照。' }}</p>
           </div>
           <label class="hub-search"><Search :size="14" /><input v-model="keyword" placeholder="搜索名称、应用或技术 ID" /></label>
         </div>
@@ -540,7 +552,8 @@ onMounted(async () => {
             <p>{{ asset.description || '该能力暂未提供说明。' }}</p>
             <span class="hub-card-meta">
               <span class="hub-card-origin"><Building2 :size="12" />原创应用：<b>{{ asset.builtin ? '平台内置' : asset.sourceAppName }}</b></span>
-              <span :aria-label="`${asset.referenceCount} 个应用引用`"><UsersRound :size="12" />{{ asset.referenceCount }} 个引用</span>
+              <span v-if="tab === 'REFERENCED'" :aria-label="`${asset.referenceCount} 个应用引用`"><UsersRound :size="12" />{{ asset.referenceCount }} 个引用</span>
+              <span v-else><Library :size="12" />归属工作区：{{ asset.builtin ? '平台' : asset.sourceWorkspaceName }}</span>
             </span>
           </button>
         </div>

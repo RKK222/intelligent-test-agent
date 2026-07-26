@@ -38,8 +38,8 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 
 - `AgentSkillHubApplicationService` 在应用 feature push 成功后从精确 Git commit 扫描 `.opencode/agents/*.md` 与完整 `.opencode/skills/{id}/**`，生成不可变压缩快照；定时对账本机 READY 副本补偿漏记。
 - push 与 publish 分离：全员可浏览 pushed 快照，显式发布固定当前修订和精确依赖；公共配置仓库只以平台内置只读资产展示。
-- 引用递归物化已发布依赖到当前管理员个人 worktree，不自动 commit/push；`PENDING_PUSH` 只表示本地待推送，feature push 内容摘要吻合后才提升为 `ACTIVE`。取消引用先安全移除 worktree 文件并进入 `PENDING_REMOVE`，push 确认远端路径消失后才正式删除引用记录。
-- 更新使用 active/current/incoming 三方合并。任何冲突都会先持久化操作且保持工作树不变；全部解决后做 current 摘要乐观校验，再以文件备份和数据库事务收敛落盘。目录、详情和更新查询可绑定当前个人运行工作区；`referencedOnly` 提供当前应用引用资产库，详情返回已生效引用方，并仅向目标应用成员补充待推送引用方。
+- 引用递归物化已发布依赖到当前管理员个人 worktree，不自动 commit/push；`PENDING_PUSH` 只表示本地待推送，feature push 内容摘要吻合后才提升为 `ACTIVE`。取消引用先安全移除 worktree 文件并进入 `PENDING_REMOVE`，立即退出当前应用和消费者视图，push 确认远端路径消失后才正式删除引用记录；确认前重新引用会原位恢复该记录并重新物化最新发布修订。
+- 更新使用 active/current/incoming 三方合并。任何冲突都会先持久化操作且保持工作树不变；全部解决后做 current 摘要乐观校验，再以文件备份和数据库事务收敛落盘。目录、详情和更新查询可绑定当前个人运行工作区；`referencedOnly` 提供当前应用可用引用资产库并排除 `PENDING_REMOVE`，详情返回已生效引用方，并仅向目标应用成员补充待推送引用方。
 
 ## 测试覆盖
 

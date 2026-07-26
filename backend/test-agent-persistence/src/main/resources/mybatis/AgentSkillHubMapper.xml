@@ -130,7 +130,8 @@
           <if test="referencedOnly">
             and exists (select 1 from agent_skill_hub_references current_ref
               where current_ref.asset_id = a.asset_id
-                and current_ref.target_application_workspace_id = #{targetWorkspaceId})
+                and current_ref.target_application_workspace_id = #{targetWorkspaceId}
+                and current_ref.status in ('PENDING_PUSH', 'ACTIVE', 'UPDATE_CONFLICT'))
           </if>
     </sql>
     <select id="listAssets" resultType="com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows$AssetSummaryRow">
@@ -164,7 +165,7 @@
             limit 1) as referenceStatus,
           (select count(distinct effective_ref.target_app_id) from agent_skill_hub_references effective_ref
             where effective_ref.asset_id = a.asset_id
-              and effective_ref.status in ('ACTIVE', 'UPDATE_CONFLICT', 'PENDING_REMOVE')) as referenceCount
+              and effective_ref.status in ('ACTIVE', 'UPDATE_CONFLICT')) as referenceCount
         from agent_skill_hub_assets a
         join agent_skill_hub_revisions pr on pr.revision_id = a.latest_pushed_revision_id
         left join agent_skill_hub_revisions pub on pub.revision_id = a.latest_published_revision_id
@@ -220,7 +221,7 @@
         join applications app on app.app_id = r.target_app_id
         join application_workspaces aw on aw.workspace_id = r.target_application_workspace_id
         where r.asset_id = #{assetId}
-          and (r.status in ('ACTIVE', 'UPDATE_CONFLICT', 'PENDING_REMOVE')
+          and (r.status in ('ACTIVE', 'UPDATE_CONFLICT')
             or (r.status = 'PENDING_PUSH' and exists (
               select 1 from application_members member
               where member.app_id = r.target_app_id and member.user_id = #{currentUserId}
@@ -240,7 +241,8 @@
           #{createdByUserId}, #{createdAt}, #{updatedAt})
     </insert>
     <update id="updateReference">
-        update agent_skill_hub_references set active_revision_id = #{activeRevisionId}, pending_revision_id = #{pendingRevisionId},
+        update agent_skill_hub_references set target_path = #{targetPath}, alias_technical_id = #{aliasTechnicalId},
+          active_revision_id = #{activeRevisionId}, pending_revision_id = #{pendingRevisionId},
           pending_content_sha256 = #{pendingContentSha256}, status = #{status}, updated_at = #{updatedAt}
         where reference_id = #{referenceId}
     </update>

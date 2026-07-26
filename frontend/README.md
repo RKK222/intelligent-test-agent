@@ -60,7 +60,7 @@ packages/shared-types
 
 ### Agent & Skill Hub
 
-`apps/agent-web` 的 activity rail 在代码/监控入口下方提供统一 Agent & Skill Hub。沉浸式页面采用能力市场结构，包含远端能力概览、发现/Agents/Skills、当前应用引用库、待更新收件箱、能力卡片和引用应用清单；所有用户可读取远端精确快照，应用管理员可发布、引用、两阶段取消及确认三方合并冲突。目录状态和更新按当前个人运行工作区限定，`PENDING_PUSH/PENDING_REMOVE` 使用图标与明确文案而不只依赖颜色。`packages/backend-api` 统一承载 Hub HTTP 与平台文件 WebSocket 调用，`packages/shared-types` 保存兼容 DTO。
+`apps/agent-web` 的 activity rail 在代码/监控入口下方提供统一 Agent & Skill Hub。沉浸式页面采用能力市场结构，包含远端能力概览、发现/Agents/Skills、当前应用引用库、待更新收件箱、能力卡片和引用应用清单；分类目录展示能力发布状态、原创应用与归属工作区，应用引用状态只在“当前应用”板块展示。所有用户可读取远端精确快照，应用管理员可发布、引用、取消并重新引用，以及确认三方合并冲突；取消关系会立即退出应用引用库。`packages/backend-api` 统一承载 Hub HTTP 与平台文件 WebSocket 调用，`packages/shared-types` 保存兼容 DTO。
 
 ## 本地命令
 

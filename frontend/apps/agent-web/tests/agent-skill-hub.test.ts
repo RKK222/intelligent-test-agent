@@ -92,7 +92,7 @@ describe("AgentSkillHub", () => {
     expect(view.emitted().changed?.[0]).toEqual([[".opencode/agents/checkout.md"]]);
   });
 
-  it("shows update records and explicit text statuses instead of color-only dots", async () => {
+  it("keeps catalog status independent from the current application's reference state", async () => {
     const published = { ...hubAsset(), referenced: true, referenceStatus: "ACTIVE" };
     const pushed = {
       ...hubAsset(),
@@ -125,26 +125,95 @@ describe("AgentSkillHub", () => {
     });
     const view = renderHub({ canManage: true });
 
-    await waitFor(() => expect(view.getByText("已发布 · 已引用")).toBeTruthy());
+    await waitFor(() => expect(view.getByText("已发布")).toBeTruthy());
+    expect(view.queryByText("已发布 · 已引用")).toBeNull();
     expect(view.getByText("仅已推送")).toBeTruthy();
     await fireEvent.click(view.getByText("待更新"));
     await waitFor(() => expect(view.getByText("待确认更新")).toBeTruthy());
     expect(view.getByLabelText("待更新数量").textContent).toBe("1");
   });
 
-  it("marks a new reference as pending push and supports two-phase cancellation", async () => {
+  it("removes a cancelled reference from the current application immediately", async () => {
     const pending = { ...hubAsset(), referenceStatus: "PENDING_PUSH", referenced: false };
-    api.listAgentSkillHubAssets.mockResolvedValue({ items: [pending], total: 1, page: 1, size: 100 });
+    let removed = false;
+    api.listAgentSkillHubAssets.mockImplementation(async (query) => query.referencedOnly && removed
+      ? { items: [], total: 0, page: 1, size: query.size }
+      : { items: [pending], total: 1, page: 1, size: query.size });
+    api.removeAgentSkillHubReference.mockImplementation(async () => {
+      removed = true;
+      return {
+        referenceId: "hub_ref_1",
+        assetId: "hub_asset_1",
+        targetPath: ".opencode/agents/checkout.md",
+        aliasTechnicalId: "checkout",
+        activeRevisionId: null,
+        pendingRevisionId: null,
+        status: "PENDING_REMOVE",
+        runtimeReloadRequired: true,
+        message: "已从当前个人 worktree 移除"
+      };
+    });
     const view = renderHub({ canManage: true });
 
+    await fireEvent.click(await view.findByText("当前应用"));
     await waitFor(() => expect(view.getByText("引用待推送")).toBeTruthy());
-    expect(view.queryByText("已发布 · 已引用")).toBeNull();
     await fireEvent.click(view.getByText("结账检查"));
     await fireEvent.click(view.getByText("取消引用"));
     await fireEvent.click(view.getByText("移除并等待推送"));
     await waitFor(() => expect(api.removeAgentSkillHubReference).toHaveBeenCalledWith(
       "wrk_personal", "hub_asset_1"
     ));
+    await waitFor(() => expect(view.getByText("当前应用还没有引用能力")).toBeTruthy());
+    expect(view.queryByText("取消待推送")).toBeNull();
+  });
+
+  it("shows ownership in the Skill catalog and allows a cancelled asset to be referenced again", async () => {
+    const removing = {
+      ...hubAsset(), type: "SKILL", technicalId: "api-check", displayName: "接口检查",
+      referenceStatus: "PENDING_REMOVE", referenced: false, referenceCount: 0
+    } as const;
+    api.listAgentSkillHubAssets.mockResolvedValue({ items: [removing], total: 1, page: 1, size: 100 });
+    api.getAgentSkillHubAsset.mockResolvedValue({
+      asset: removing,
+      selectedRevisionId: "hub_rev_published",
+      files: [{ path: "SKILL.md", size: 30, sha256: "a".repeat(64), mediaType: "text/markdown" }],
+      dependencies: [],
+      consumers: []
+    });
+    const view = renderHub({ canManage: true });
+
+    await fireEvent.click(await view.findByRole("button", { name: "Skills" }));
+    await waitFor(() => expect(view.getByText("接口检查")).toBeTruthy());
+    expect(view.getByText("已发布")).toBeTruthy();
+    expect(view.getByText("归属工作区：支付服务")).toBeTruthy();
+    expect(view.queryByText("取消待推送")).toBeNull();
+    await fireEvent.click(view.getByText("接口检查"));
+    await fireEvent.click(await view.findByText("引用到当前应用"));
+    await fireEvent.click(view.getByText("写入引用"));
+    await waitFor(() => expect(api.createAgentSkillHubReference).toHaveBeenCalledWith(
+      "wrk_personal", "hub_asset_1", "api-check"
+    ));
+  });
+
+  it("does not let a late initial catalog response overwrite the current application tab", async () => {
+    let resolveCatalog!: (value: unknown) => void;
+    const lateCatalog = new Promise((resolve) => { resolveCatalog = resolve; });
+    const current = { ...hubAsset(), assetId: "hub_asset_current", displayName: "当前引用" };
+    const stale = { ...hubAsset(), assetId: "hub_asset_stale", displayName: "迟到的全量能力" };
+    api.listAgentSkillHubAssets.mockImplementation((query) => {
+      if (query.size === 1) return Promise.resolve({ items: [], total: 0, page: 1, size: 1 });
+      if (query.referencedOnly) return Promise.resolve({ items: [current], total: 1, page: 1, size: 100 });
+      return lateCatalog;
+    });
+    const view = renderHub({ canManage: true });
+
+    await fireEvent.click(view.getByText("当前应用"));
+    await waitFor(() => expect(view.getByText("当前引用")).toBeTruthy());
+    resolveCatalog({ items: [stale], total: 1, page: 1, size: 100 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(view.getByText("当前引用")).toBeTruthy();
+    expect(view.queryByText("迟到的全量能力")).toBeNull();
   });
 
   it("shows the current application library and the applications consuming an asset", async () => {

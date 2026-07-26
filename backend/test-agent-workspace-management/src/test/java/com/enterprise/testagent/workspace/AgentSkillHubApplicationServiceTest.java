@@ -186,6 +186,33 @@ class AgentSkillHubApplicationServiceTest {
     }
 
     @Test
+    void pendingRemovalIsNotReportedAsEffectiveReference() {
+        AgentSkillHubRepository repository = mock(AgentSkillHubRepository.class);
+        Instant now = Instant.parse("2026-07-25T00:00:00Z");
+        Asset asset = new Asset("hub_asset_1", "app_source", "aw_source", AssetType.SKILL, "api-check",
+                "hub_rev_1", "hub_rev_1", now, now);
+        Revision revision = new Revision(
+                "hub_rev_1", asset.assetId(), "ver_1", "a".repeat(40), "1".repeat(64), "1".repeat(64),
+                "API Check", null, null, false, now, now, "usr_1");
+        when(repository.listAssets(any(), nullable(String.class), anyString(), nullable(String.class),
+                anyBoolean(), anyInt(), anyInt()))
+                .thenReturn(List.of(new AssetSummary(
+                        asset, revision, revision, "来源应用", "来源工作空间", false, "PENDING_REMOVE", 0)));
+        AgentSkillHubApplicationService service = new AgentSkillHubApplicationService(
+                repository,
+                mock(ConfigurationManagementRepository.class),
+                mock(ManagedWorkspaceRepository.class),
+                mock(CommonParameterValues.class),
+                mock(GitWorkspaceService.class),
+                new ObjectMapper());
+
+        var response = service.listAssets("SKILL", null, 1, 10, new UserId("usr_1")).items().getFirst();
+
+        assertThat(response.referenceStatus()).isEqualTo("PENDING_REMOVE");
+        assertThat(response.referenced()).isFalse();
+    }
+
+    @Test
     void conflictFreeUpdateWritesIncomingAndPersistsCompletedOperation(@TempDir Path workspaceRoot) throws Exception {
         AgentSkillHubRepository repository = mock(AgentSkillHubRepository.class);
         GitWorkspaceService git = mock(GitWorkspaceService.class);
@@ -292,6 +319,63 @@ class AgentSkillHubApplicationServiceTest {
         assertThat(result.pendingRevisionId()).isNull();
         assertThat(target).doesNotExist();
         assertThat(result.message()).contains("推送后正式解除引用");
+    }
+
+    @Test
+    void createReferenceReactivatesPendingRemovalInTheSameReference(@TempDir Path workspaceRoot) throws Exception {
+        AgentSkillHubRepository repository = mock(AgentSkillHubRepository.class);
+        GitWorkspaceService git = mock(GitWorkspaceService.class);
+        ConfigurationManagementRepository configuration = mock(ConfigurationManagementRepository.class);
+        ManagedWorkspaceRepository managed = mock(ManagedWorkspaceRepository.class);
+        CommonParameterValues parameters = mock(CommonParameterValues.class);
+        when(parameters.resolvedValue(ManagedWorkspacePathResolver.PARAM_OPENCODE_PERSONAL_WORKTREE_ROOT))
+                .thenReturn(Optional.of(workspaceRoot.toString()));
+        Path sourceRepo = Path.of("/repo");
+        Path sourceWorkspace = Path.of("/repo/service/pay");
+        String commit = "f".repeat(40);
+        String agentPath = "service/pay/.opencode/agents/reviewer.md";
+        when(git.listFilesAtCommit(sourceRepo, commit, "service/pay/.opencode")).thenReturn(List.of(agentPath));
+        when(git.readFileAtCommit(sourceRepo, commit, agentPath)).thenReturn(
+                "---\ndescription: Reviewer\n---\n# Reviewer\n".getBytes(StandardCharsets.UTF_8));
+        AgentSkillHubApplicationService service = new AgentSkillHubApplicationService(
+                repository, configuration, managed, parameters, git, new ObjectMapper());
+        service.indexSuccessfulPush(version(commit), sourceRepo, sourceWorkspace, commit);
+        ArgumentCaptor<PushedSnapshot> snapshot = ArgumentCaptor.forClass(PushedSnapshot.class);
+        verify(repository).replacePushedSnapshot(snapshot.capture());
+        var artifact = snapshot.getValue().assets().getFirst().artifact();
+
+        Instant now = Instant.parse("2026-07-25T00:00:00Z");
+        Asset asset = new Asset("hub_asset_agent", "app_source", "aw_source", AssetType.AGENT, "reviewer",
+                "hub_rev_agent", "hub_rev_agent", now, now);
+        Revision revision = new Revision(
+                "hub_rev_agent", asset.assetId(), "ver_1", commit, artifact.sha256(), artifact.sha256(),
+                "Reviewer", null, null, false, now, now, "usr_1");
+        Reference removing = new Reference(
+                "hub_ref_existing", asset.assetId(), "app_target", "awp_target",
+                ".opencode/agents/reviewer.md", "reviewer", "hub_rev_old", null, null,
+                "PENDING_REMOVE", "usr_1", now, now.plusSeconds(1));
+        when(managed.findPersonalWorkspaceByRuntimeWorkspace(new WorkspaceId("wrk_target")))
+                .thenReturn(Optional.of(personalWorkspace()));
+        when(configuration.isActiveMember(new ApplicationId("app_target"), new UserId("usr_1"))).thenReturn(true);
+        when(repository.findAsset(asset.assetId())).thenReturn(Optional.of(asset));
+        when(repository.findRevision(revision.revisionId())).thenReturn(Optional.of(revision));
+        when(repository.findArtifact(artifact.sha256())).thenReturn(Optional.of(artifact));
+        when(repository.findReferencesByTargetAsset("awp_target", asset.assetId())).thenReturn(List.of(removing));
+        when(repository.saveReferences(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var result = service.createReference(asset.assetId(), "wrk_target", null, new UserId("usr_1"));
+
+        assertThat(result.referenceId()).isEqualTo(removing.referenceId());
+        assertThat(result.status()).isEqualTo("PENDING_PUSH");
+        assertThat(result.activeRevisionId()).isEqualTo("hub_rev_old");
+        assertThat(result.pendingRevisionId()).isEqualTo(revision.revisionId());
+        assertThat(result.message()).contains("重新引用");
+        assertThat(workspaceRoot.resolve("hub-user/.opencode/agents/reviewer.md"))
+                .hasContent("---\ndescription: Reviewer\n---\n# Reviewer\n");
+        verify(repository).saveReferences(org.mockito.ArgumentMatchers.argThat(references ->
+                references.size() == 1
+                        && references.getFirst().referenceId().equals(removing.referenceId())
+                        && references.getFirst().status().equals("PENDING_PUSH")));
     }
 
     @Test
