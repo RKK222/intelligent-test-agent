@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -86,8 +87,9 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
             err.join(1000);
             int exit = process.exitValue();
             if (exit != 0) {
-                String stderrText = safeStderr(stderr);
-                GitCommandFailure failure = GitCommandFailureClassifier.classify(command, stderrText);
+                String rawStderr = new String(stderr.toByteArray(), StandardCharsets.UTF_8);
+                String stderrText = safeStderr(rawStderr);
+                GitCommandFailure failure = GitCommandFailureClassifier.classify(command, rawStderr);
                 LOGGER.warn(
                         "event=git_command_failed durationMs={} exitCode={} failureType={} failureHint={} command={} stderr={}",
                         elapsedMillis(startedAt),
@@ -96,15 +98,16 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
                         failure.hint(),
                         safeCommand,
                         stderrText);
-                throw new PlatformException(
-                        ErrorCode.GIT_UNAVAILABLE,
-                        failure.message(),
-                        Map.of(
-                                "command", safeCommand,
-                                "exitCode", exit,
-                                "stderr", stderrText,
-                                "gitFailureType", failure.type(),
-                                "gitFailureHint", failure.hint()));
+                Map<String, Object> details = new LinkedHashMap<>();
+                details.put("command", safeCommand);
+                details.put("exitCode", exit);
+                details.put("stderr", stderrText);
+                details.put("gitFailureType", failure.type());
+                details.put("gitFailureHint", failure.hint());
+                if (!failure.blockingFiles().isEmpty()) {
+                    details.put("gitBlockingFiles", failure.blockingFiles());
+                }
+                throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, failure.message(), details);
             }
             byte[] stdoutBytes = stdout.toByteArray();
             long durationMs = elapsedMillis(startedAt);
@@ -209,8 +212,8 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
         }
     }
 
-    private static String safeStderr(ByteArrayOutputStream stderr) {
-        String text = new String(stderr.toByteArray(), StandardCharsets.UTF_8)
+    private static String safeStderr(String stderr) {
+        String text = stderr
                 .replace('\r', ' ')
                 .replace('\n', ' ')
                 .trim();

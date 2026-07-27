@@ -5,6 +5,7 @@ import FigmaFileExplorer from "../src/components/FigmaFileExplorer.vue";
 import AgentConfigPanel from "../src/components/AgentConfigPanel.vue";
 import GitChangesPanel from "../src/components/GitChangesPanel.vue";
 import WorkbenchFooter from "../src/components/WorkbenchFooter.vue";
+import agentWorkbenchSource from "../src/components/AgentWorkbench.vue?raw";
 import { FileExplorer } from "@test-agent/file-explorer";
 
 vi.mock("@test-agent/workbench-shell", async () =>
@@ -12,6 +13,12 @@ vi.mock("@test-agent/workbench-shell", async () =>
 );
 
 describe("FigmaFileExplorer", () => {
+  it("describes the complete personal pull scope without implying an application-wide rollout", () => {
+    expect(agentWorkbenchSource).toContain(
+      "已更新你在当前应用的个人内容（含应用 Agent 和其它 workspace）；其他用户及公共 Agent 不受影响。"
+    );
+  });
+
   it("groups refresh and remote pull in one workspace more menu while keeping Git changes independent", async () => {
     const wrapper = shallowMount(FigmaFileExplorer, {
       props: {

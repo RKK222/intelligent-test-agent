@@ -64,4 +64,34 @@ class GitCommandFailureClassifierTest {
         assertThat(failure.message()).contains("Git worktree 创建冲突");
         assertThat(failure.hint()).contains("worktree 名称");
     }
+
+    @Test
+    void classifiesTrackedFilesThatWouldBeOverwrittenByMerge() {
+        GitCommandFailure failure = GitCommandFailureClassifier.classify(
+                List.of("git", "-C", "/tmp/repo", "merge", "--no-edit", "origin/main"),
+                """
+                error: Your local changes to the following files would be overwritten by merge:
+                    workspace/docs/design.md
+                Please commit your changes or stash them before you merge.
+                Aborting
+                """);
+
+        assertThat(failure.type()).isEqualTo("LOCAL_CHANGES");
+        assertThat(failure.blockingFiles()).containsExactly("workspace/docs/design.md");
+    }
+
+    @Test
+    void classifiesUntrackedFilesThatWouldBeOverwrittenByMerge() {
+        GitCommandFailure failure = GitCommandFailureClassifier.classify(
+                List.of("git", "-C", "/tmp/repo", "merge", "--no-edit", "origin/main"),
+                """
+                error: The following untracked working tree files would be overwritten by merge:
+                    workspace/new.txt
+                Please move or remove them before you merge.
+                Aborting
+                """);
+
+        assertThat(failure.type()).isEqualTo("LOCAL_CHANGES");
+        assertThat(failure.blockingFiles()).containsExactly("workspace/new.txt");
+    }
 }

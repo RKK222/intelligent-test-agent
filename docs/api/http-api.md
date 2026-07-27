@@ -1400,7 +1400,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 `accessible=true` 时 `reason=null`；缺少当前用户 SSH key 时返回 `accessible=false, reason=SSH_KEY_MISSING`；Git 认证失败或仓库不可访问时返回 `accessible=false, reason=REPOSITORY_PERMISSION_REQUIRED`，供前端展示对应版本库权限申请提示。网络、DNS、SSH 端口故障和超时仍返回统一 `GIT_UNAVAILABLE` / `GIT_TIMEOUT`，不得误报为用户没有版本库权限。应用成员校验与其它版本接口一致。
 
-`POST /personal-workspaces/{personalWorkspaceId}/git-pull` 无请求体，只允许个人工作区 owner 调用。后端在该个人 worktree 中显式 fetch `origin/{branch}` 并执行原生 merge；当前 worktree 有 unstaged、staged、untracked 或未完成 merge 时直接返回 `CONFLICT`，`details.reason=LOCAL_CHANGES` 且附带 `files/blockingFiles`，不会 stash、reset 或覆盖本地内容。成功响应返回 `personalWorkspaceId/versionId/remoteBranch/commitHash/updated/agentConfigChanged/changedFiles`。该动作不更新版本 `targetCommitHash` 或共享副本，不广播，不扫描或同步其他成员的 worktree，也不执行 commit/push；前端入口与“刷新文件树”一起收纳在当前 workspace 标题栏的“…”菜单中。
+`POST /personal-workspaces/{personalWorkspaceId}/git-pull` 无请求体，只允许个人工作区 owner 调用。后端在当前用户位于该应用的整棵个人 worktree 中显式 fetch `origin/{branch}` 并执行原生 merge；应用 workspace 文件和应用 Agent 文件使用相同规则。未完成 merge 会直接返回 `CONFLICT`；普通 unstaged、staged 或 untracked 改动不再先行阻止，Git 能安全合并时保留原改动并完成拉取。只有 Git 判定本地文件会被覆盖时返回 `CONFLICT`、`details.reason=LOCAL_CHANGES`，并在 `files/blockingFiles` 中列出实际阻塞文件。全程不 stash、reset 或覆盖本地内容。成功响应返回 `personalWorkspaceId/versionId/remoteBranch/commitHash/updated/agentConfigChanged/changedFiles`。该动作不更新版本 `targetCommitHash` 或共享副本，不广播，不扫描或同步其他成员的 worktree，也不执行 commit/push；前端入口与“刷新文件树”一起收纳在当前 workspace 标题栏的“…”菜单中。
 
 ### 对话工作区 Git Tool
 

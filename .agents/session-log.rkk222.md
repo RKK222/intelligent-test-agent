@@ -2389,3 +2389,26 @@
 ### Result
 
 - 内包 SHA256 为 `0526628f7d02ade564b2c6da56d2249076be8a72344a9b078c2576c15293c3cc`，外层企业包 SHA256 为 `02416716053bd01c65734f00a248862c473be04949e3ddf096e90635876c8638`；工作区无新增未提交改动，打包脚本未修改。
+
+### 2026-07-27 - 个人拉取统一使用原生 Git 合并
+
+### Why
+
+- 个人“拉取远程”原本只要整棵 worktree 有任何 unstaged、staged 或 untracked 内容就拒绝，比 Git 原生 merge 更严格，也让用户误以为应用 Agent 是独立拉取的。
+
+### What
+
+- 移除个人拉取前的“任意 dirty 即阻止”检查；应用 workspace 和应用 Agent 统一调用现有 `git merge --no-edit <remoteCommit>`，不重叠本地改动原样保留，只在 Git 确认会覆盖时阻止。
+- Git 执行器新增 `LOCAL_CHANGES` 归因和标准 stderr 阻塞路径提取；业务层与失败后实时 status 取交集，前端只展示真正挡住拉取的文件。不自动 stash、reset、commit 或 push。
+- 成功提示和公共 Workspace Git Assistant Skill 明确：拉取更新点击者在当前应用的整棵个人 worktree，包括同分支其它 workspace 目录和应用 Agent；其他用户和独立公共 Agent 仓库不受影响。
+
+### How
+
+- 真实临时 Git 仓库验证不重叠 dirty 文件在 merge 后保留，重叠 dirty 文件返回精确 `gitBlockingFiles` 且 HEAD、内容和 merge 状态不变；common 定向 24 项、个人拉取业务 68 项通过。
+- 目录权限、对话 Tool owner、应用/公共 Agent 配置、当前用户空闲 dispose 和公共 rollout 回归分别 54、33、19 项通过；前端拉取/Diff 55 项、typecheck 与生产 build 通过。
+- 使用 JDK 25、未修改的 `.env.test` 和 test profile 重启 backend、opencode-manager、frontend；backend health/readiness 均为 `UP`，前端与登录 CORS 返回 200，manager WebSocket 已连接，OpenCode 1.18.4 health 为 healthy。
+
+### Result
+
+- 个人拉取现在与 Git 原生能力一致；应用 Agent 更新成功后仍只等待点击者空闲再 dispose，没有启动应用级或公共 rollout。
+- 未修改应用工作区/应用 Agent/公共 Agent 的角色与目录权限、提交/推送白名单、共享 target、跨用户同步或 dispose 规则。无 API 结构、RunEvent、数据库/Flyway/SQL、generated SDK、OpenCode 源码或环境配置变更。

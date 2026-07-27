@@ -2822,10 +2822,11 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     /**
-     * 只把远端 feature 分支合入当前 owner 的个人 worktree。
+     * 把远端 feature 分支合入当前 owner 在该应用下的整棵个人 worktree。
      *
-     * <p>这里不更新应用版本 target、不修改共享副本、不广播，也不枚举其它成员；应用 Agent
-     * 变化仅通过响应通知当前页面按既有用户空闲闸门 dispose 当前用户。</p>
+     * <p>应用 workspace 文件与应用 Agent 文件统一交给原生 Git merge 判断：可安全保留时继续拉取，
+     * 实际会覆盖时才阻止，不自动 stash/reset。这里不更新应用版本 target、不修改共享副本、不广播，
+     * 也不枚举其它成员；应用 Agent 更新成功后仅通过响应通知当前页面按既有空闲闸门 dispose 当前用户。</p>
      */
     public ManagedWorkspaceResponses.PersonalWorkspaceGitPullResponse gitPullPersonalWorkspace(
             String personalWorkspaceId,
@@ -2845,22 +2846,6 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                             "reason", "MERGE_IN_PROGRESS",
                             "files", gitWorkspaceService.conflictPaths(repoRoot)));
         }
-        List<String> blockingFiles = repositoryStatusPaths(repoRoot);
-        if (!blockingFiles.isEmpty()) {
-            List<ManagedWorkspaceResponses.WorkspaceGitUpdateBlockerResponse> blockingDetails =
-                    applicationUpdateBlockingFiles(
-                            personal.runtimeWorkspaceId().value(),
-                            repoRoot,
-                            new WorkspaceFeatureSyncState(false, true, null));
-            throw new PlatformException(
-                    ErrorCode.CONFLICT,
-                    "无法更新到远程最新提交，请先提交或回退下列文件",
-                    Map.of(
-                            "reason", "LOCAL_CHANGES",
-                            "files", blockingFiles,
-                            "blockingFiles", blockingDetails));
-        }
-
         ensureInternalOrigin(repository, userId, repoRoot, privateKey);
         gitWorkspaceService.fetchBranch(repoRoot, version.branch(), privateKey);
         String remoteCommit = gitWorkspaceService.resolveCommit(
@@ -2902,6 +2887,13 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                                 "files", conflictFiles),
                         exception);
             }
+            if ("LOCAL_CHANGES".equals(exception.details().get("gitFailureType"))) {
+                throw personalPullLocalChanges(
+                        personal.runtimeWorkspaceId().value(),
+                        repoRoot,
+                        mergeBlockingFiles(exception, repositoryStatusEntries(repoRoot)),
+                        exception);
+            }
             throw exception;
         }
         String currentCommit = gitWorkspaceService.headCommit(repoRoot);
@@ -2913,6 +2905,52 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 true,
                 agentConfigChanged,
                 changedPaths);
+    }
+
+    private PlatformException personalPullLocalChanges(
+            String workspaceId,
+            Path repoRoot,
+            List<String> blockingFiles,
+            PlatformException cause) {
+        LinkedHashSet<String> normalizedFiles = blockingFiles.stream()
+                .map(path -> path.replace('\\', '/'))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        List<ManagedWorkspaceResponses.WorkspaceGitUpdateBlockerResponse> blockingDetails =
+                applicationUpdateBlockingFiles(
+                                workspaceId,
+                                repoRoot,
+                                new WorkspaceFeatureSyncState(false, true, null)).stream()
+                        .filter(blocker -> normalizedFiles.contains(blocker.path().replace('\\', '/')))
+                        .toList();
+        return new PlatformException(
+                ErrorCode.CONFLICT,
+                "无法更新到远程最新提交，请先提交或回退下列文件",
+                Map.of(
+                        "reason", "LOCAL_CHANGES",
+                        "files", List.copyOf(normalizedFiles),
+                        "blockingFiles", blockingDetails),
+                cause);
+    }
+
+    /** Git 给出了覆盖列表时只展示真实 dirty 文件；无法解析时安全回退到全部本地改动。 */
+    private List<String> mergeBlockingFiles(
+            PlatformException exception,
+            List<GitStatusEntry> localChanges) {
+        LinkedHashSet<String> localPaths = localChanges.stream()
+                .map(GitStatusEntry::path)
+                .map(path -> path.replace('\\', '/'))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        LinkedHashSet<String> parsedPaths = new LinkedHashSet<>();
+        Object rawBlockingFiles = exception.details().get("gitBlockingFiles");
+        if (rawBlockingFiles instanceof List<?> values) {
+            values.stream()
+                    .filter(String.class::isInstance)
+                    .map(String.class::cast)
+                    .map(path -> path.replace('\\', '/'))
+                    .filter(localPaths::contains)
+                    .forEach(parsedPaths::add);
+        }
+        return parsedPaths.isEmpty() ? List.copyOf(localPaths) : List.copyOf(parsedPaths);
     }
 
     private boolean containsRepositoryGroupApplicationAgentConfig(

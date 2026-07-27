@@ -1958,6 +1958,7 @@ class ManagedWorkspaceApplicationServiceTest {
                 "trace_personal");
         git.nextRemoteCommit = "commit_after_agent_pull";
         git.nextNameStatus = "M\tF-GCMS/workspace/.opencode/agents/reviewer.md\n";
+        git.nextRepoStatusPorcelain = " M F-GCMS/workspace/.opencode/agents/local-draft.md\n";
         git.targetContainedInHead = false;
         PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
         service.setAgentConfigRolloutCoordinator(coordinator);
@@ -1974,7 +1975,7 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
-    void gitPullPersonalWorkspaceRejectsLocalChangesAndOtherOwnersWithoutFetching() {
+    void gitPullPersonalWorkspaceRejectsOtherOwnersWithoutFetching() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
@@ -2001,16 +2002,86 @@ class ManagedWorkspaceApplicationServiceTest {
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
 
+        assertThat(git.fetchedBranch).isNull();
+    }
+
+    @Test
+    void gitPullPersonalWorkspaceKeepsNonOverlappingLocalChanges() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_version");
+        ManagedWorkspaceResponses.PersonalWorkspaceResponse personal = service.createPersonalWorkspace(
+                version.versionId(),
+                "default",
+                new UserId("usr_1"),
+                "trace_personal");
         git.nextRepoStatusPorcelain = " M F-GCMS/workspace/docs/design.md\n";
+        git.nextRemoteCommit = "commit_after_pull";
+        git.nextNameStatus = "M\tF-GCMS/workspace/src/remote.java\n";
+        git.targetContainedInHead = false;
+
+        ManagedWorkspaceResponses.PersonalWorkspaceGitPullResponse response = service.gitPullPersonalWorkspace(
+                personal.personalWorkspaceId(),
+                new UserId("usr_1"),
+                "trace_dirty_non_overlap");
+
+        assertThat(response.updated()).isTrue();
+        assertThat(git.fetchedBranch).isEqualTo("feature_testagent_20260707");
+        assertThat(git.mergedCommit).isEqualTo("commit_after_pull");
+    }
+
+    @Test
+    void gitPullPersonalWorkspaceReportsOnlyNativeMergeBlockingFiles() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_version");
+        ManagedWorkspaceResponses.PersonalWorkspaceResponse personal = service.createPersonalWorkspace(
+                version.versionId(),
+                "default",
+                new UserId("usr_1"),
+                "trace_personal");
+        String blockingFile = "F-GCMS/workspace/docs/design.md";
+        git.nextRepoStatusPorcelain = " M " + blockingFile + "\n?? F-GCMS/workspace/local-note.txt\n";
+        git.nextRemoteCommit = "commit_after_pull";
+        git.nextNameStatus = "M\t" + blockingFile + "\n";
+        git.targetContainedInHead = false;
+        git.mergeFailure = new PlatformException(
+                ErrorCode.GIT_UNAVAILABLE,
+                "本地改动会被远程更新覆盖",
+                Map.of(
+                        "gitFailureType", "LOCAL_CHANGES",
+                        "gitBlockingFiles", List.of(blockingFile)));
+
         assertThatThrownBy(() -> service.gitPullPersonalWorkspace(
                 personal.personalWorkspaceId(),
                 new UserId("usr_1"),
-                "trace_dirty"))
+                "trace_dirty_overlap"))
                 .isInstanceOfSatisfying(PlatformException.class, exception -> {
                     assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
                     assertThat(exception.details()).containsEntry("reason", "LOCAL_CHANGES");
+                    assertThat(exception.details().get("files")).isEqualTo(List.of(blockingFile));
                 });
-        assertThat(git.fetchedBranch).isNull();
+        assertThat(git.fetchedBranch).isEqualTo("feature_testagent_20260707");
     }
 
     @Test
@@ -2706,6 +2777,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private String mergedCommit;
         private boolean targetContainedInHead = true;
         private boolean failMergeWithConflict;
+        private PlatformException mergeFailure;
         private List<String> nextConflictPaths = List.of();
         private Path abortedMergeRepoRoot;
         private Path pushedRepoRoot;
@@ -2937,6 +3009,9 @@ class ManagedWorkspaceApplicationServiceTest {
                 GitCommitIdentity identity) {
             this.mergedCommitRepoRoot = repoRoot;
             this.mergedCommit = targetCommit;
+            if (mergeFailure != null) {
+                throw mergeFailure;
+            }
             if (failMergeWithConflict) {
                 this.mergeInProgress = true;
                 throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "合并冲突", Map.of());

@@ -3895,8 +3895,8 @@ function personalPullBlockers(error: unknown): WorkspaceGitUpdateBlocker[] {
 }
 
 /**
- * 远端拉取只更新当前 owner 的个人 worktree；提交并推送仍负责应用级发布和全员同步。
- * 若拉取包含应用 Agent 配置，只复用当前用户的空闲闸门与 dispose。
+ * 远端拉取更新当前 owner 在该应用下的整棵个人 worktree；提交并推送仍负责应用级发布和全员同步。
+ * 应用 workspace 与应用 Agent 都遵循原生 Git 合并规则；Agent 更新成功后只 dispose 空闲的当前用户。
  */
 async function handlePullPersonalWorkspace(personalWorkspaceId: string) {
   if (
@@ -3915,7 +3915,7 @@ async function handlePullPersonalWorkspace(personalWorkspaceId: string) {
     feedback.value = {
       kind: "success",
       title: response.updated ? "已更新到远程最新版本" : "当前已是远程最新版本",
-      description: "本次只更新你的个人 workspace，其他用户不受影响。"
+      description: "已更新你在当前应用的个人内容（含应用 Agent 和其它 workspace）；其他用户及公共 Agent 不受影响。"
     };
     if (response.agentConfigChanged) {
       pendingRuntimeReloadKind = "agent";

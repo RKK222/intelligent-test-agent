@@ -1,5 +1,6 @@
 package com.enterprise.testagent.common.git;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -32,6 +33,10 @@ final class GitCommandFailureClassifier {
             "REMOTE_REJECTED",
             "Git 远端拒绝推送",
             "请先拉取远端最新提交并确认本地仓库可快进，再重新提交或推送。");
+    private static final GitCommandFailure LOCAL_CHANGES = new GitCommandFailure(
+            "LOCAL_CHANGES",
+            "本地改动会被远端更新覆盖",
+            "请先提交或回退阻止拉取的文件，再重试拉取。");
     private static final GitCommandFailure UNKNOWN = new GitCommandFailure(
             "UNKNOWN",
             "Git 远端读取失败",
@@ -63,6 +68,18 @@ final class GitCommandFailureClassifier {
                 "failed to push some refs")) {
             return REMOTE_REJECTED;
         }
+        if (containsAny(commandText, " merge ")
+                && containsAny(
+                        text,
+                        "your local changes to the following files would be overwritten by merge",
+                        "the following untracked working tree files would be overwritten by merge",
+                        "not uptodate. cannot merge")) {
+            return new GitCommandFailure(
+                    LOCAL_CHANGES.type(),
+                    LOCAL_CHANGES.message(),
+                    LOCAL_CHANGES.hint(),
+                    mergeBlockingFiles(stderr));
+        }
         if (containsAny(text, "repository not found", "not appear to be a git repository",
                 "could not read from remote repository", "repository does not exist", "access denied")) {
             return REPOSITORY_UNAVAILABLE;
@@ -71,6 +88,43 @@ final class GitCommandFailureClassifier {
             return WORKTREE_CONFLICT;
         }
         return UNKNOWN;
+    }
+
+    /**
+     * 只解析 Git merge 标准的“会被覆盖”文件段；业务层还会与实际 status 取交集，
+     * 避免把 stderr 中的其它文字误当成可操作路径。
+     */
+    private static List<String> mergeBlockingFiles(String stderr) {
+        if (stderr == null || stderr.isBlank()) {
+            return List.of();
+        }
+        List<String> files = new ArrayList<>();
+        boolean collecting = false;
+        for (String rawLine : stderr.replace('\r', '\n').split("\\n")) {
+            String line = rawLine.trim();
+            String normalized = line.toLowerCase(Locale.ROOT);
+            if (containsAny(
+                    normalized,
+                    "your local changes to the following files would be overwritten by merge",
+                    "the following untracked working tree files would be overwritten by merge")) {
+                collecting = true;
+                continue;
+            }
+            if (!collecting || line.isBlank()) {
+                continue;
+            }
+            if (containsAny(
+                    normalized,
+                    "please commit your changes",
+                    "please move or remove them",
+                    "aborting",
+                    "merge with strategy",
+                    "updating ")) {
+                break;
+            }
+            files.add(line.replace('\\', '/'));
+        }
+        return List.copyOf(files);
     }
 
     private static String normalize(String value) {

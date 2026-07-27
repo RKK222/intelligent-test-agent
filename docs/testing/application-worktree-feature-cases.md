@@ -123,7 +123,7 @@ OPENCODE_CONFIG_DIR / manager configPath
 | 应用 Agent/Skill/JSONC 保存 | 写入本人个人 worktree，并出现在“应用 Agent”Diff；`agents/**/*.md`、`skills/**/SKILL.md`、`opencode.jsonc` 保存后在当前任务空闲时直接调用本人进程 `/global/dispose`，供发布前调试；rules/templates 只保存 | 无 | 只热加载当前用户，不是全局发布；不切换公共配置指针 |
 | 应用 Agent/Skill/JSONC 本地提交 | 只更新本人个人分支 | 无 | 不新增全局影响；保存时的本人调试热加载仍有效 |
 | 应用 Agent/Skill/JSONC 提交并推送 | 复用普通发布投影进入 feature；各服务器以同一个固定 commit 反向合并完整 feature 更新 | clean worktree 立即合入；dirty/冲突按 worktree 持久化为 `AWAITING_USER`，主 rollout 完成且后台每 5 秒补偿，不覆盖个人内容 | 已收敛用户进入应用级 dispose；待处理用户解决本地状态并收敛后再单独 dispose，不占用公共或其它应用发布锁 |
-| 个人 workspace 拉取远程 | 从当前 workspace 标题栏“…”菜单只在点击者的个人 worktree fetch/merge 远端；同菜单还提供本地文件树刷新；不提交、不推送、不修改共享 target | 其他用户和共享副本均不变化；本人 worktree 不干净时拒绝拉取并提示先提交或回退 | 普通文件无 dispose；差异包含应用 Agent/Skill/JSONC 时只等待当前用户空闲后 dispose，不启动应用或公共 rollout |
+| 个人 workspace 拉取远程 | 从当前 workspace 标题栏“…”菜单在点击者的整棵应用个人 worktree fetch/merge 远端；同一分支的其它 workspace 目录与应用 Agent 一起更新；不提交、不推送、不修改共享 target | 其他用户、共享副本和公共 Agent 均不变化；应用 workspace 与应用 Agent 统一交给原生 Git，不重叠改动原样保留，只有实际会被覆盖的文件阻止拉取 | 普通文件无 dispose；成功合入应用 Agent/Skill/JSONC 时只等待当前用户空闲后 dispose，不启动应用或公共 rollout |
 | 公共 Agent/Skill/JSONC 保存 | 只写当前超管公共个人 worktree并进入公共 Diff；目录定义保存后把本人的有效公共配置软链接切到该 worktree | 无 | 当前任务空闲时只 dispose 当前超管本人，下一次 bootstrap 读取个人 worktree；共享副本和别人不变 |
 | 公共 Agent/Skill/JSONC 本地提交 | 只更新 `public-{userId}` | 无 | 不新增 dispose；本人保存后的预览链接继续有效 |
 | 公共 Agent/Skill/JSONC 提交并推送 | 先合并远端公共分支并推送，再把固定提交同步到所有服务器公共运行副本 | 所有用户最终读取同一共享固定提交 | 全局 rollout 逐用户等待旧任务空闲，先把有效指针恢复到共享副本，再调用原生 `/global/dispose` |
@@ -271,7 +271,7 @@ tools/create-workspace-branch-model-test-data.sh
 | INT-03 公共 Agent/Skill 正式发布 | 1. SUPER_ADMIN 在专用测试公共远程提交并推送。<br>2. 记录公共 target commit。<br>3. 等各服务器共享副本同步和用户任务空闲。<br>4. 查询 A、B 配置并检查 A 的个人预览指针。 | 公共 `public-personal-hot-reload-{tag}` 测试配置。 | 所有共享副本固定到 target；各用户指针恢复共享副本后逐一 dispose；A、B 都读到发布版本；没有运行进程的用户不被额外启动。 |
 | INT-04 spec 发布拒绝 | 1. 任意角色先把 `spec/test-data/local-only-{tag}.md` 提交到个人分支。<br>2. 单独选择该路径点击提交并推送。<br>3. 再用 `./spec/...` 或重复分隔符别名调用一次。<br>4. 检查个人 HEAD 和远程 feature。 | `spec/**` 正常路径及规范化别名。 | 本地提交保留；两次发布都返回 `FORBIDDEN`；远程 feature 不含路径且 HEAD 不前进。 |
 | INT-05 普通成员写应用配置拒绝 | 1. 用 `USER` 读取应用 Agent。<br>2. 分别调用写入、stage、commit、publish。<br>3. 检查文件、index、HEAD 和远程 ref。 | 应用 `.opencode/agents/**` 测试路径。 | 读取允许；所有写操作返回 `FORBIDDEN`；工作树、index、个人 HEAD 和远程 ref 均不变化。 |
-| INT-06 个人 workspace 独立拉取 | 1. 在远端 feature 准备一个普通文件提交和一个应用 `.opencode/agents/**` 提交。<br>2. A、B 的个人 worktree 保持 clean；C 预留 staged 或 untracked 文件。<br>3. A 从当前 workspace 标题栏“…”菜单点击“拉取远程”。<br>4. C 再点击“拉取远程”，检查变更提示。<br>5. 检查共享 target、A/B/C HEAD、远程 ref和运行态。 | 专用 feature；A/B clean、C dirty。 | A 无需 stage 即可拉取且只有 A HEAD 更新；B、C、共享 target 和远程 ref 不变；C 返回 `LOCAL_CHANGES` 并显示“无法更新到远程最新提交 / 请先提交或回退下列文件”；没有 commit/push 或服务器广播。应用 Agent 差异只在 A 空闲后 dispose A，应用/公共 rollout 均不启动。 |
+| INT-06 个人 workspace 独立拉取 | 1. 在远端 feature 准备普通文件和应用 `.opencode/agents/**` 提交。<br>2. A 保持 clean；C 先保留一个与远端不重叠的 dirty 文件，再另造一个会被远端覆盖的 dirty/untracked 文件。<br>3. A 从当前 workspace 标题栏“…”菜单点击“拉取远程”。<br>4. C 分别在两种本地状态下点击“拉取远程”。<br>5. 检查共享 target、A/B/C HEAD、远程 ref 和运行态。 | 专用 feature；同时覆盖 workspace 与应用 Agent 路径。 | A 拉取后应用 workspace 和应用 Agent 都更新，且只有 A HEAD 变化；C 的不重叠改动原样保留且拉取成功，会被覆盖时返回 `LOCAL_CHANGES` 并只列实际阻塞文件。B、共享 target、远程 ref 和公共 Agent 不变；无 commit/push 或服务器广播。应用 Agent 差异只在拉取成功者空闲后 dispose 本人，应用/公共 rollout 均不启动。 |
 
 ### 7.4 自动化回归入口
 
@@ -301,9 +301,9 @@ corepack pnpm --filter @test-agent/agent-web typecheck
 1. 健康检查：`curl -fsS http://127.0.0.1:8080/actuator/health/readiness` 应返回 `UP`。两人选择 F-GCMS-PSN 的同一版本；记录 `001350912` 默认个人仓库根路径为 `PSN_REPO_ROOT`。
 2. 造 dirty/staged 数据：`001350912` 在当前 workspace 新建两个带唯一时间戳的测试文件，只暂存其中一个。不要提交，也不要批量回退原有个人数据。此时文件分别位于 UNSTAGED、STAGED。
 3. 发布目标：`001177621` 在同一测试 feature 提交并推送另一个唯一 marker 文件，记录响应或 Diff 中的 `applicationTargetCommit` 为 `PSN_TARGET_COMMIT`。
-4. 验证待处理展示：正式发布后的待同步仍显示“应用有新版本待更新 · `<commit>` · N 个文件待处理”；个人主动拉取被本地改动阻止时显示“无法更新到远程最新提交 / 请先提交或回退下列文件”。N 是整个个人仓库的待处理总数。普通 docs 行显示橙色小 Tag，spec 行同时显示橙色待处理 Tag 和蓝紫色“默认只提交”Tag，且文件名仍清晰可见。橙色 Tag 悬停说明按“想保留：先点暂存、再点提交；不想保留：点回退”的步骤引导，并说明“只点暂存还不会更新”；提示区不展开完整路径。若仓库其它目录仍有变更，只显示默认折叠的“当前应用的其它 workspace / Agent 配置还有 N 个待处理文件”。切到“公共Agent”后该提示消失。
-5. 验证不覆盖：服务器执行 `git -C "$PSN_REPO_ROOT" status --short`，两个测试文件状态和内容保持不变；`git -C "$PSN_REPO_ROOT" merge-base --is-ancestor "$PSN_TARGET_COMMIT" HEAD` 此时应返回非 0。
-6. 处理文件：只对两个唯一测试文件逐个提交或撤销。等待自动重试后，Diff 的 `applicationUpdatePending` 应变为 `false`，更新提示与橙色 Tag 消失；服务器执行 `git -C "$PSN_REPO_ROOT" merge-base --is-ancestor "$PSN_TARGET_COMMIT" HEAD` 应返回 0，发布者的 docs marker 文件可读。
+4. 验证待处理展示：正式发布后的自动同步仍在任意 dirty 时显示“应用有新版本待更新 · `<commit>` · N 个文件待处理”。个人主动“拉取远程”另按原生 Git 处理：不重叠的 dirty/staged 文件保留并允许拉取；只有实际会被覆盖时显示“无法更新到远程最新提交 / 请先提交或回退下列文件”，列表只包含 Git 报告的阻塞文件。普通 docs 行显示橙色小 Tag，spec 行同时显示橙色待处理 Tag 和蓝紫色“默认只提交”Tag，且文件名仍清晰可见。若阻塞文件位于仓库其它目录，只显示默认折叠的“当前应用的其它 workspace / Agent 配置还有 N 个待处理文件”。切到“公共Agent”后该提示消失。
+5. 验证不覆盖：服务器执行 `git -C "$PSN_REPO_ROOT" status --short`，两个测试文件状态和内容保持不变。未点击个人拉取前，`git -C "$PSN_REPO_ROOT" merge-base --is-ancestor "$PSN_TARGET_COMMIT" HEAD` 应返回非 0；点击后若改动不重叠则应返回 0，且本地文件仍保持原状态和内容。
+6. 处理文件：若个人拉取已成功，`applicationUpdatePending` 应立即为 `false`；若 Git 返回阻塞文件，只对本轮唯一测试文件逐个提交或撤销后重试拉取。最终更新提示与橙色 Tag 消失；服务器执行 `git -C "$PSN_REPO_ROOT" merge-base --is-ancestor "$PSN_TARGET_COMMIT" HEAD` 应返回 0，发布者的 docs marker 文件可读。
 7. 多目录核对：切换同 Git 库的 ai-test 与 workspace-house；各自已发布 marker 都应存在。两人的完整文件树允许因未发布的个人文件不同，但两边个人 HEAD 都必须包含同一个 `PSN_TARGET_COMMIT`，不能仅凭“树看起来一样”判定通过。
 8. 单仓库单工作空间回归：在专用测试应用把应用 Agent description 从 R1 发布为 R2；另一 clean 用户的个人 HEAD 包含 target、重新加载后读到 R2。公共 Agent 目录、其它应用和个人未发布文件均不变化。
 
