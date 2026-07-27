@@ -215,6 +215,57 @@ class ManagerControlWebSocketHandlerTest {
     }
 
     @Test
+    void configuredManagerHeartbeatTriggersRunningProcessRecovery() {
+        ManagerControlApplicationService controlService = Mockito.mock(ManagerControlApplicationService.class);
+        OpencodeManagerConfigSyncService configSyncService = Mockito.mock(OpencodeManagerConfigSyncService.class);
+        ManagerControlMessage register = ManagerControlMessage.register(
+                "mgr_1234567890abcdef",
+                "ctr_01",
+                "10.8.0.12",
+                "opencode-a",
+                4096,
+                4100,
+                8,
+                0,
+                Map.of("health", true),
+                "trace_register");
+        when(controlService.register(register)).thenReturn(ManagerControlMessage.registered(
+                "bjp_1234567890abcdef",
+                "trace_register"));
+        when(configSyncService.configUpdateMessage("trace_config")).thenReturn(Optional.of(
+                ManagerControlMessage.configUpdate(
+                        8,
+                        "/data/.testagent/agent-opencode/.session/",
+                        "/data/.testagent/agent-opencode/.config/opencode/",
+                        "trace_config")));
+        ManagerControlMessage heartbeat = ManagerControlMessage.managerHeartbeat(
+                "mgr_1234567890abcdef",
+                "ctr_01",
+                "10.8.0.12",
+                "opencode-a",
+                4096,
+                4100,
+                8,
+                0,
+                Map.of("health", true),
+                List.of("bjp_1234567890abcdef"),
+                "trace_heartbeat");
+        FakeWebSocketSession session = FakeWebSocketSession.withToken(
+                "secret-token",
+                List.of(
+                        codec.encode(register),
+                        codec.encode(ManagerControlMessage.configRequest("trace_config")),
+                        codec.encode(heartbeat)));
+
+        handler(controlService, new ManagerPendingCommandRegistry(), configSyncService)
+                .handle(session)
+                .block(Duration.ofSeconds(1));
+
+        verify(controlService).managerHeartbeatAndRecoverRunningProcesses(heartbeat);
+        verify(controlService, never()).managerHeartbeat(heartbeat);
+    }
+
+    @Test
     void sendsEveryManagerCommandWhenDifferentThreadsPublishConcurrently() throws Exception {
         ManagerControlApplicationService controlService = Mockito.mock(ManagerControlApplicationService.class);
         ManagerConnectionRegistry connections = new ManagerConnectionRegistry();
@@ -232,13 +283,35 @@ class ManagerControlWebSocketHandlerTest {
         when(controlService.register(register)).thenReturn(ManagerControlMessage.registered(
                 "bjp_1234567890abcdef",
                 "trace_register"));
+        OpencodeManagerConfigSyncService configSyncService = Mockito.mock(OpencodeManagerConfigSyncService.class);
+        when(configSyncService.configUpdateMessage("trace_config")).thenReturn(Optional.of(
+                ManagerControlMessage.configUpdate(
+                        4,
+                        "/data/.testagent/agent-opencode/.session/",
+                        "/data/.testagent/agent-opencode/.config/opencode/",
+                        "trace_config")));
+        ManagerControlMessage heartbeat = ManagerControlMessage.managerHeartbeat(
+                "mgr_1234567890abcdef",
+                "ctr_01",
+                "10.8.0.12",
+                "opencode-a",
+                4096,
+                4100,
+                4,
+                1,
+                Map.of("health", true),
+                List.of("bjp_1234567890abcdef"),
+                "trace_heartbeat");
         FakeWebSocketSession session = FakeWebSocketSession.openWithToken(
                 "secret-token",
-                List.of(codec.encode(register)));
+                List.of(
+                        codec.encode(register),
+                        codec.encode(ManagerControlMessage.configRequest("trace_config")),
+                        codec.encode(heartbeat)));
         Disposable connection = handler(
                 controlService,
                 new ManagerPendingCommandRegistry(),
-                Mockito.mock(OpencodeManagerConfigSyncService.class),
+                configSyncService,
                 connections)
                 .handle(session)
                 .subscribe();

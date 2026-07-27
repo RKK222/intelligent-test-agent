@@ -5,6 +5,25 @@
 
 ## Entries
 
+### 2026-07-27 - 自动恢复服务重启前运行的 OpenCode 进程
+
+### Why
+- 本地重启脚本会按设计停止 manager 管理的 `opencode serve` 并清理 state，但 manager 重连后此前没有恢复入口，数据库仍有 ACTIVE binding 的用户也必须手工点击“启动进程”。
+- 首轮端到端验证还发现前端强状态查询可能在新 manager state 为空时抢先把原 `RUNNING` 写成 `STOPPED`，仅在配置心跳后扫描数据库会丢失运行意图。
+
+### What
+- 新增 `OpencodeProcessAutoRecoveryService`：manager 注册且尚未开放命令路由时冻结同容器 `RUNNING/STARTING + ACTIVE binding` 候选，完整配置应用后的首个运行心跳再异步执行；`STOPPED/FAILED/UNHEALTHY`、非活跃 binding 和无主进程不恢复。
+- 控制 WebSocket 延后到完整配置心跳才登记可用连接；恢复复用 `UserOpencodeProcessAssignmentService.initialize` 和公共 `OpencodeProcessStartupService`，保留原容器/端口，单进程失败重试一次，候选扫描异常不阻断 manager 或 readiness。
+- 补充 runtime/API 单测，并同步后端模块 README、HTTP API、部署和 AI 重启流程文档。
+
+### How
+- JDK 25 定向测试通过：runtime 11 项（自动恢复 3 项、manager 应用服务 8 项），API WebSocket 6 项；`git diff --check` 通过。
+- 三次真实 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 用于暴露并修复构造器注入和状态探测竞态；最终 Maven 20 模块打包成功，脚本停止旧 4104 进程后自动拉起 PID 75596，日志为 `candidates=1 recovered=1 failed=0`。
+- 最终 backend readiness 为 `UP`、frontend HTTP 200、OpenCode `/global/health` 为 `healthy=true/version=1.18.4`、登录后 `/processes/me` 为 `READY/RUNNING/4104`，CORS 预检为 200。
+
+### Result
+- 服务重启后，重启前仍有 ACTIVE 运行意图的用户 OpenCode 会默认自动恢复，不再要求手工启动；显式停止和失败态保持不启动。未新增或变更 HTTP/WS wire、RunEvent、数据库/Flyway、SQL、权限、安全配置、环境配置、generated SDK 或 OpenCode 源码。
+
 ### 2026-07-27 - 修复应用整提交同步空文件校验
 
 ### Why

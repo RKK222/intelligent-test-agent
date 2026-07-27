@@ -16,6 +16,7 @@ import com.enterprise.testagent.opencode.runtime.process.socket.ManagerControlSe
 import com.enterprise.testagent.opencode.runtime.process.socket.ManagerPendingCommandRegistry;
 import com.enterprise.testagent.opencode.runtime.process.socket.OpencodeManagerConfigSyncService;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -75,11 +76,19 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
         Sinks.Many<ManagerControlMessage> outbound = Sinks.many().unicast().onBackpressureBuffer();
         AtomicReference<ContainerManagerId> managerRef = new AtomicReference<>();
         AtomicReference<OpencodeContainerId> containerRef = new AtomicReference<>();
+        AtomicBoolean fullRuntimeConfigSent = new AtomicBoolean(false);
+        AtomicBoolean controlConnectionRegistered = new AtomicBoolean(false);
 
         Mono<Void> inbound = session.receive()
                 .map(WebSocketMessage::getPayloadAsText)
                 .map(codec::decode)
-                .concatMap(message -> handleMessage(outbound, managerRef, containerRef, message))
+                .concatMap(message -> handleMessage(
+                        outbound,
+                        managerRef,
+                        containerRef,
+                        fullRuntimeConfigSent,
+                        controlConnectionRegistered,
+                        message))
                 .doOnError(exception -> LOGGER.warn(
                         "manager WebSocket 入站处理失败 managerId={} containerId={} traceId={}",
                         managerRef.get(),
@@ -108,6 +117,8 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
             Sinks.Many<ManagerControlMessage> outbound,
             AtomicReference<ContainerManagerId> managerRef,
             AtomicReference<OpencodeContainerId> containerRef,
+            AtomicBoolean fullRuntimeConfigSent,
+            AtomicBoolean controlConnectionRegistered,
             ManagerControlMessage message) {
         if (!ManagerControlProtocol.VERSION.equals(message.protocolVersion())) {
             emitOutbound(outbound, ManagerControlMessage.error("VALIDATION_ERROR", "manager 协议版本无效", message.traceId()));
@@ -119,11 +130,6 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
             OpencodeContainerId containerId = new OpencodeContainerId(message.containerId());
             managerRef.set(managerId);
             containerRef.set(containerId);
-            connections.register(
-                    managerId,
-                    containerId,
-                    backendLifecycle.backendProcessId(),
-                    outboundMessage -> emitOutbound(outbound, outboundMessage));
             emitOutbound(outbound, registered);
             return Mono.empty();
         }
@@ -132,7 +138,17 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
             return Mono.empty();
         }
         if (ManagerControlProtocol.TYPE_MANAGER_HEARTBEAT.equals(message.type())) {
-            controlService.managerHeartbeat(message);
+            if (fullRuntimeConfigSent.get()) {
+                registerControlConnection(
+                        outbound,
+                        managerRef,
+                        containerRef,
+                        controlConnectionRegistered,
+                        message.traceId());
+                controlService.managerHeartbeatAndRecoverRunningProcesses(message);
+            } else {
+                controlService.managerHeartbeat(message);
+            }
             return Mono.empty();
         }
         if (ManagerControlProtocol.TYPE_BACKEND_LIST_REQUEST.equals(message.type())) {
@@ -140,9 +156,15 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
             return Mono.empty();
         }
         if (ManagerControlProtocol.TYPE_CONFIG_REQUEST.equals(message.type())) {
-            emitOutbound(outbound, configSyncService.configUpdateMessage(message.traceId())
-                    .orElseGet(() -> ManagerControlMessage.error(
-                            "OPENCODE_UNAVAILABLE", "manager 运行公共参数未配置", message.traceId())));
+            var configUpdate = configSyncService.configUpdateMessage(message.traceId());
+            if (configUpdate.isPresent()) {
+                emitOutbound(outbound, configUpdate.orElseThrow());
+                // 后续首个 managerHeartbeat 由 manager 应用完整配置后立即发送，可安全触发用户进程恢复。
+                fullRuntimeConfigSent.set(true);
+            } else {
+                emitOutbound(outbound, ManagerControlMessage.error(
+                        "OPENCODE_UNAVAILABLE", "manager 运行公共参数未配置", message.traceId()));
+            }
             return Mono.empty();
         }
         if (ManagerControlProtocol.TYPE_COMMAND_RESULT.equals(message.type()) || ManagerControlProtocol.TYPE_ERROR.equals(message.type())) {
@@ -153,6 +175,36 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
         }
         emitOutbound(outbound, ManagerControlMessage.error("VALIDATION_ERROR", "未知 manager 消息类型", message.traceId()));
         return Mono.empty();
+    }
+
+    /**
+     * 完整配置应用前不把 manager 暴露给业务探测，避免空 manager 抢先把待恢复进程写成 STOPPED。
+     */
+    private void registerControlConnection(
+            Sinks.Many<ManagerControlMessage> outbound,
+            AtomicReference<ContainerManagerId> managerRef,
+            AtomicReference<OpencodeContainerId> containerRef,
+            AtomicBoolean controlConnectionRegistered,
+            String traceId) {
+        if (controlConnectionRegistered.get()) {
+            return;
+        }
+        ContainerManagerId managerId = managerRef.get();
+        OpencodeContainerId containerId = containerRef.get();
+        if (managerId == null || containerId == null) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "manager 尚未注册，不能处理运行心跳");
+        }
+        connections.register(
+                managerId,
+                containerId,
+                backendLifecycle.backendProcessId(),
+                outboundMessage -> emitOutbound(outbound, outboundMessage));
+        controlConnectionRegistered.set(true);
+        LOGGER.info(
+                "manager 完整配置已应用，控制连接可用 managerId={} containerId={} traceId={}",
+                managerId,
+                containerId,
+                traceId);
     }
 
     /**

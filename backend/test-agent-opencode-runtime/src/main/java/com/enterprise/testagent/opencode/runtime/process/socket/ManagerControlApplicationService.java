@@ -18,6 +18,7 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeManagerBackendCon
 import com.enterprise.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
+import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessAutoRecoveryService;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.LinkedHashSet;
@@ -40,6 +41,7 @@ public class ManagerControlApplicationService {
     private final OpencodeProcessManagementRepository repository;
     private final OpencodeProcessHeartbeatStore heartbeatStore;
     private final BackendJavaProcessLifecycleService backendLifecycle;
+    private final OpencodeProcessAutoRecoveryService autoRecoveryService;
     private final Clock clock;
 
     /**
@@ -49,8 +51,9 @@ public class ManagerControlApplicationService {
     public ManagerControlApplicationService(
             OpencodeProcessManagementRepository repository,
             OpencodeProcessHeartbeatStore heartbeatStore,
-            BackendJavaProcessLifecycleService backendLifecycle) {
-        this(repository, heartbeatStore, backendLifecycle, Clock.systemUTC());
+            BackendJavaProcessLifecycleService backendLifecycle,
+            OpencodeProcessAutoRecoveryService autoRecoveryService) {
+        this(repository, heartbeatStore, backendLifecycle, autoRecoveryService, Clock.systemUTC());
     }
 
     /**
@@ -61,9 +64,20 @@ public class ManagerControlApplicationService {
             OpencodeProcessHeartbeatStore heartbeatStore,
             BackendJavaProcessLifecycleService backendLifecycle,
             Clock clock) {
+        this(repository, heartbeatStore, backendLifecycle, null, clock);
+    }
+
+    /** 完整测试构造器允许验证 manager 配置就绪后的恢复触发。 */
+    ManagerControlApplicationService(
+            OpencodeProcessManagementRepository repository,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            BackendJavaProcessLifecycleService backendLifecycle,
+            OpencodeProcessAutoRecoveryService autoRecoveryService,
+            Clock clock) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
         this.backendLifecycle = Objects.requireNonNull(backendLifecycle, "backendLifecycle must not be null");
+        this.autoRecoveryService = autoRecoveryService;
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
@@ -85,6 +99,13 @@ public class ManagerControlApplicationService {
                     message == null ? null : message.linuxServerId(),
                     message == null ? null : message.traceId(),
                     exception);
+        }
+        if (autoRecoveryService != null) {
+            autoRecoveryService.prepareRecovery(
+                    new ContainerManagerId(message.managerId()),
+                    new LinuxServerId(message.linuxServerId()),
+                    new OpencodeContainerId(message.containerId()),
+                    message.traceId());
         }
         return ManagerControlMessage.registered(backendLifecycle.backendProcessId().value(), message.traceId());
     }
@@ -118,6 +139,20 @@ public class ManagerControlApplicationService {
      * 将 manager 运行心跳写入 Redis；数据库只保留注册时的持久拓扑，不承载在线判断。
      */
     public void managerHeartbeat(ManagerControlMessage message) {
+        recordManagerHeartbeat(message);
+    }
+
+    /**
+     * 完整运行配置已下发后记录 manager 心跳，并异步恢复重启前仍处于运行意图的用户进程。
+     */
+    public void managerHeartbeatAndRecoverRunningProcesses(ManagerControlMessage message) {
+        ManagerRuntimeSnapshot snapshot = recordManagerHeartbeat(message);
+        if (autoRecoveryService != null) {
+            autoRecoveryService.requestPreparedRecovery(snapshot.manager().managerId(), message.traceId());
+        }
+    }
+
+    private ManagerRuntimeSnapshot recordManagerHeartbeat(ManagerControlMessage message) {
         validateRegistrationLike(message);
         Instant now = Instant.now(clock);
         LinuxServerId linuxServerId = new LinuxServerId(message.linuxServerId());
@@ -182,8 +217,10 @@ public class ManagerControlApplicationService {
                         process.unifiedAuthId(),
                         process.managerStatus()))
                 .toList();
-        heartbeatStore.recordManagerSnapshot(new ManagerRuntimeSnapshot(
-                container, manager, connections, metrics, managedProcesses, message.buildVersion()));
+        ManagerRuntimeSnapshot snapshot = new ManagerRuntimeSnapshot(
+                container, manager, connections, metrics, managedProcesses, message.buildVersion());
+        heartbeatStore.recordManagerSnapshot(snapshot);
+        return snapshot;
     }
 
     /**
@@ -214,6 +251,9 @@ public class ManagerControlApplicationService {
                 now,
                 now,
                 traceId));
+        if (autoRecoveryService != null) {
+            autoRecoveryService.managerDisconnected(managerId);
+        }
     }
 
     private void saveTopology(ManagerControlMessage message, ManagerConnectionStatus connectionStatus) {
