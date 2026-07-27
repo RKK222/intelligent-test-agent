@@ -2048,3 +2048,16 @@
 - Result:
   - 企业同源入口现在会连接 `ws://当前入口/api/...`，HTTPS 自动使用 `wss://`，无需把入口地址硬编码进环境配置；部署现场需要重新构建并替换前端静态包。
   - 未修改 HTTP/WS wire 字段、RunEvent、数据库/Flyway、SQL、权限、安全配置、generated SDK、OpenCode 源码或环境文件。
+
+### 2026-07-27 - 复核公共测试设计 Agent/Skill 协同契约
+
+- Why:
+  - 公共测试规约已按对象类型落入 `test-design/rules/`，需要再次确认入口、生成、方法 Skill、Phase A/B 和独立 Review 的协同是否形成可执行闭环。
+- What:
+  - 只读复核公共配置仓库中的三个测试设计 Agent、八个测试设计 Skill、71 张对象规则卡、阶段/追溯/审核规则和八条 eval；未修改公共配置正文。
+  - 确认 OpenCode 1.18.4 能加载 1 个可见入口和 2 个隐藏子 Agent，方法 Skill 均归属 generation，规则版本和编号连续；同时识别出 Review 入参缺少其审核所需的 `sourceManifest/materialsRead/structuralGateCheck` 等信息、规则卡缺少到 Phase A 项的直接追溯、只生成单类产物及直接 Review 尚无显式路由、五类公共规则卡与其余对象规约的完整编号契约边界不清等待修正项。
+- How:
+  - 执行 Agent/Skill frontmatter、版本、规则编号、引用和 OpenCode 实际加载校验；逐项对照 orchestrator 的交接字段、generation 返回契约、Phase A/B 不变量、Review 质量门禁及 eval 覆盖。
+- Result:
+  - 基础发现、角色归属、规则数量和完整链路加载正常，批量任务规则为 17 条、五类公共规则共 71 条，不存在 129 条；当前风险集中在阶段间数据契约和请求路由，尚未修改或重新打包。
+  - 本次不涉及 HTTP API、RunEvent、数据库/Flyway、SQL、性能、安全、generated SDK、OpenCode 源码或环境配置。
