@@ -2386,9 +2386,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                                 ? "MERGE_AWAITING_COMPLETION"
                                 : "MERGE_CONFLICT");
             }
-            if (!gitWorkspaceService.isWorktreeClean(repoRoot)) {
-                return PersonalFeatureMergeResult.pending("LOCAL_CHANGES");
-            }
+            // 与个人主动拉取保持同一套 Git 原生语义：非重叠的本地改动可保留并继续合并，
+            // 只有 Git 明确拒绝覆盖本地文件时才进入 LOCAL_CHANGES 待处理状态。
             List<String> changedFiles = featureMergeFiles(personal, targetCommit);
             WorkspaceSyncRecordId syncId = new WorkspaceSyncRecordId(RuntimeIdGenerator.workspaceSyncRecordId());
             gitWorkspaceService.mergeCommit(repoRoot, targetCommit, null, commitIdentity);
@@ -2426,7 +2425,11 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     targetCommit,
                     safeMessage(exception));
             return PersonalFeatureMergeResult.pending(
-                    mergeInProgress ? "MERGE_CONFLICT" : "MERGE_FAILED");
+                    mergeInProgress
+                            ? "MERGE_CONFLICT"
+                            : "LOCAL_CHANGES".equals(exception.details().get("gitFailureType"))
+                                    ? "LOCAL_CHANGES"
+                                    : "MERGE_FAILED");
         } catch (RuntimeException exception) {
             LOGGER.warn(
                     "event=application_feature_personal_merge_failed versionId={} personalWorkspaceId={} targetCommit={}",

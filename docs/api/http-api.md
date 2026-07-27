@@ -357,7 +357,7 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 
 工作空间级接口把同名能力挂在 `/workspaces/{workspaceId}/...`，其中 `diff/stage/unstage/discard/commit/publish/worktrees/status` 的语义与公共级一致；文件读写与上传必须通过文件 WebSocket。物理目录为当前运行态 Workspace 或指定 worktree 下的 `.opencode/`，但普通工作空间文件树不重复展示根级 `.opencode`。工作空间级 `diff` 只返回根文件 `.opencode/opencode.jsonc` 以及 `.opencode/agents`、`.opencode/skills` 下的变更，响应 path 会去掉 `.opencode/` 前缀；其它 `.opencode` 内容继续排除。公共级和应用级根均支持按 OpenCode 模板创建 `agents/<name>.md`，或创建 `skills/<name>/SKILL.md`、`rules/README.md`、`templates/README.md`；前端同时保留普通文件、文件夹和上传入口。
 
-应用 Agent `publish` 仍先提交当前个人分支，再把所选 `.opencode` 白名单投影并推送应用 feature。远端确认后，应用普通文件和 Agent/Skill 统一按版本 `targetCommitHash` 在各服务器相关个人 worktree 执行原生 `git merge --no-edit <targetCommit>`：clean 时快进或生成 merge commit；任意 dirty/staged/untracked 时不 stash、不 reset、不覆盖，Diff 返回待同步；冲突保留 `MERGE_HEAD` 和三方 index。应用配置主 rollout 只为已经包含固定提交的用户登记目标并调用原生 `/global/dispose`；未收敛 worktree 按业务 ID、用户、服务器、目标 commit 和稳定原因码持久化为 `AWAITING_USER`，主 rollout 完成后仍由独立租约补偿，收敛后再只登记该用户 dispose。公共活动发布单独互斥，应用活动发布按版本 ID 互斥，彼此不占用同一全局锁。OpenCode 不增加应用共享配置目录或覆盖层，也不修改 OpenCode 源码。应用个人 worktree 保存 Agent/Skill 目录定义或 JSONC 后直接只热加载当前用户；公共个人保存同类文件时调用 `/public/runtime-reload`，先切换本人受管公共配置软链接再只热加载本人。两者推送后才分别进入应用目标用户 rollout 或公共全用户 rollout。
+应用 Agent `publish` 仍先提交当前个人分支，再把所选 `.opencode` 白名单投影并推送应用 feature。远端确认后，应用普通文件和 Agent/Skill 统一按版本 `targetCommitHash` 在各服务器相关个人 worktree 执行原生 `git merge --no-edit <targetCommit>`，不以整仓 clean 作为前置条件：非重叠的 dirty/staged/untracked 内容保留并完成合并；只有 Git 判定本地文件会被覆盖时才不 stash、不 reset、不覆盖并由 Diff 返回待同步；真实冲突保留 `MERGE_HEAD` 和三方 index。应用配置主 rollout 只为已经包含固定提交的用户登记目标并调用原生 `/global/dispose`；未收敛 worktree 按业务 ID、用户、服务器、目标 commit 和稳定原因码持久化为 `AWAITING_USER`，主 rollout 完成后仍由独立租约补偿，收敛后再只登记该用户 dispose。公共活动发布单独互斥，应用活动发布按版本 ID 互斥，彼此不占用同一全局锁。OpenCode 不增加应用共享配置目录或覆盖层，也不修改 OpenCode 源码。应用个人 worktree 保存 Agent/Skill 目录定义或 JSONC 后直接只热加载当前用户；公共个人保存同类文件时调用 `/public/runtime-reload`，先切换本人受管公共配置软链接再只热加载本人。两者推送后才分别进入应用目标用户 rollout 或公共全用户 rollout。
 
 公共 publish 在个人 worktree 合并远端公共分支发生冲突时返回 HTTP 409、错误码 `CONFLICT`，`details.conflictFiles` 携带冲突文件，并保留个人 worktree 的 Git 原生 merge 现场；前端在统一 Git 变更面板中选择保留本地、保留远程、手工合并或取消合并，解决后提交并再次推送。工作空间级旧 worktree publish 的冲突语义保持不变。
 
@@ -1444,7 +1444,7 @@ Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有�
 }
 ```
 
-`sync-to-application` 保留 `force` 字段用于兼容审计，但不再绕过权限和提交约束：后端要求所选文件在个人 worktree 已提交，读取个人 `HEAD`，再按白名单投影到应用 feature worktree，提交并推送。`spec/**` 是个人本地资产，任何角色都不能发布；请求只要包含规范化后位于 `spec/**` 的路径（包括 `./spec/**` 等别名）即返回 `FORBIDDEN`，`force` 不能绕过。其它未选文件也不会进入 feature 分支。成功后更新应用版本 `targetCommitHash` 与当前服务器副本 `replicaCommitHash`，并广播 `workspace.version.sync-requested`；本机与其他服务器随后把同一固定 commit 反向 merge 到相关个人 worktree。dirty worktree 保留原状并显示待同步，真实冲突进入既有三方 Diff；浏览器不新增 SSE，已打开的文件树/标签按现有刷新或重新进入机制重读磁盘。应用版本工作区与个人工作区同步不新增 RunEvent/SSE 事件。
+`sync-to-application` 保留 `force` 字段用于兼容审计，但不再绕过权限和提交约束：后端要求所选文件在个人 worktree 已提交，读取个人 `HEAD`，再按白名单投影到应用 feature worktree，提交并推送。`spec/**` 是个人本地资产，任何角色都不能发布；请求只要包含规范化后位于 `spec/**` 的路径（包括 `./spec/**` 等别名）即返回 `FORBIDDEN`，`force` 不能绕过。其它未选文件也不会进入 feature 分支。成功后更新应用版本 `targetCommitHash` 与当前服务器副本 `replicaCommitHash`，并广播 `workspace.version.sync-requested`；本机与其他服务器随后把同一固定 commit 反向 merge 到相关个人 worktree。非重叠的本地改动保留并继续合并；只有 Git 判定会被覆盖的文件才保持原状并显示待同步，真实冲突进入既有三方 Diff；浏览器不新增 SSE，已打开的文件树/标签按现有刷新或重新进入机制重读磁盘。应用版本工作区与个人工作区同步不新增 RunEvent/SSE 事件。
 
 应用 Agent 根节点的“配置更新”操作复用 `sync-from-application`，以空 `files` 请求合并整个固定 feature commit；成功后刷新文件树与 Diff，当前用户进程已就绪时再调用既有 `/global/dispose`，未就绪时由下次启动读取最新个人 worktree。该操作不是仅刷新 OpenCode 缓存，因此即使 Diff 没有可提交/回退文件，也能消除个人 `HEAD` 落后造成的待同步状态；dirty 或真实冲突仍保留现有保护和三方处理语义。
 
@@ -1561,7 +1561,7 @@ Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有�
 2. `publish` 校验个人 worktree 未处于 merge 状态，且 `files` 在个人 worktree 没有未提交变更；未先本地提交时返回 `CONFLICT`。
 3. 确保当前服务器的应用 feature worktree clean，`git fetch` + `git pull --ff-only {appVersionBranch}`，并校验可选 `expectedApplicationHead`。
 4. 读取个人仓库 `HEAD`，将 `files` 映射为 feature worktree 的仓库相对路径；存在的文件执行 checkout 投影，不存在的文件执行定点删除。
-5. 在 feature worktree 提交投影结果并 `git push origin {appVersionBranch}`；个人分支不 push。push 成功后更新版本目标并广播固定 commit；本机和远端服务器都在相关个人 worktree clean 时执行 `git merge --no-edit <targetCommit>`，dirty 时保留待同步，冲突时保留 Git 原生 merge 状态。应用 Agent 使用同一 Git merge；其持久化 rollout 等待相关个人 worktree 全部包含目标 commit 后才 dispose 目标用户。服务端在准备 feature worktree 前对所有角色强制拒绝 `spec/**`，`SUPER_ADMIN` 也不能绕过目录规则，其它未选文件仍不会泄漏。
+5. 在 feature worktree 提交投影结果并 `git push origin {appVersionBranch}`；个人分支不 push。push 成功后更新版本目标并广播固定 commit；本机和远端服务器都直接在相关个人 worktree 执行 `git merge --no-edit <targetCommit>`，非重叠本地改动保留并继续合并，只有 Git 判定会覆盖本地文件时才保留待同步，冲突时保留 Git 原生 merge 状态。应用 Agent 使用同一 Git merge；其持久化 rollout 只在相关个人 worktree 包含目标 commit 后 dispose 对应用户。服务端在准备 feature worktree 前对所有角色强制拒绝 `spec/**`，`SUPER_ADMIN` 也不能绕过目录规则，其它未选文件仍不会泄漏。
 
 发布结果：
 

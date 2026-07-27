@@ -2430,3 +2430,25 @@
 
 - 个人拉取现在与 Git 原生能力一致；应用 Agent 更新成功后仍只等待点击者空闲再 dispose，没有启动应用级或公共 rollout。
 - 未修改应用工作区/应用 Agent/公共 Agent 的角色与目录权限、提交/推送白名单、共享 target、跨用户同步或 dispose 规则。无 API 结构、RunEvent、数据库/Flyway/SQL、generated SDK、OpenCode 源码或环境配置变更。
+
+### 2026-07-27 - 后台应用更新统一为原生 Git 合并
+
+### Why
+
+- 应用发布后的后台 rollout 仍在 merge 前要求整个物理个人 worktree clean，导致同仓库中不相关的 spec 或应用 Agent 本地改动阻塞更新；这与已落地的个人“拉取远程”原生 Git 语义不一致。
+
+### What
+
+- 移除后台 feature commit 反向同步的整仓 clean 前置检查，直接执行现有 `git merge --no-edit <targetCommit>`；非重叠 staged、unstaged、untracked 内容保留并完成合并。
+- Git 明确返回 `gitFailureType=LOCAL_CHANGES` 时才持久化为 `LOCAL_CHANGES` 待处理；真实冲突继续保留 `MERGE_HEAD` 与三方 index。只有已包含目标提交的用户进入既有应用级 dispose，待处理用户不 dispose。
+- 补充后台 rollout 回归并同步 workspace-management README、HTTP API、事件流、集成测试矩阵与 agent-web README，明确手动拉取和后台同步使用同一 Git 原生判断。
+
+### How
+
+- JDK 25 下真实 Git 与工作区服务定向测试 82 项通过；工作区权限/路径/对话 Tool 74 项、公共 Agent rollout 与 dispose 协调器 30 项通过；后端 20 模块生产打包成功。
+- 使用未修改的 `.env.test` 和 test profile 完整重启 backend、opencode-manager、frontend；backend health/readiness 为 `UP`，前端 3000 与登录 CORS 返回 200，manager WebSocket 已连接且 OpenCode health 为 `HEALTHY`。
+
+### Result
+
+- 别人推送后，本地存在不重叠 spec 或应用 Agent 改动的用户也会自动合并，并按既有规则只 dispose 该用户；只有 Git 判定会覆盖文件或发生真实冲突时才等待用户处理。
+- 未改变应用工作区、应用 Agent、公共 Agent 的角色/目录权限、stage/commit/push 白名单、共享 target、跨用户范围或 dispose 时机；未新增或变更 API 结构、RunEvent、数据库/Flyway/SQL、安全配置、generated SDK、OpenCode 源码或环境文件。

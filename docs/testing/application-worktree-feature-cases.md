@@ -47,7 +47,7 @@ flowchart LR
   C -->|Git 冲突| X["保留 MERGE_HEAD 与三方 index"]
 ```
 
-反向同步固定使用版本记录的 `targetCommitHash`，不在执行时重新解析可移动分支名。个人 worktree clean 时立即合并；任意 dirty、staged 或 untracked 内容存在时不 stash、不 reset、不覆盖，Diff 返回待同步状态；真实冲突保留 Git 原生 merge 状态，在三方编辑器解决全部冲突后点击“完成合并”提交完整 merge index。
+反向同步固定使用版本记录的 `targetCommitHash`，不在执行时重新解析可移动分支名。个人 worktree 无论是否存在 dirty、staged 或 untracked 内容都会先执行 Git 原生合并：非重叠本地改动原样保留并完成合并；只有 Git 判定文件会被覆盖时才不 stash、不 reset、不覆盖并在 Diff 返回待同步状态。真实冲突保留 Git 原生 merge 状态，在三方编辑器解决全部冲突后点击“完成合并”提交完整 merge index。
 
 ### 1.3 OpenCode 如何读取并整合配置
 
@@ -118,11 +118,11 @@ OPENCODE_CONFIG_DIR / manager configPath
 | --- | --- | --- | --- |
 | 个人 worktree 普通文件保存 | 只写本人工作树，进入 Diff | 无 | 无 dispose |
 | 个人 worktree 普通文件本地提交 | 只更新本人个人分支；若此前有待同步 feature，提交后立即重试固定提交 merge | 无远程变化 | 无 dispose |
-| 个人 worktree 非 `spec/**` 普通文件提交并推送 | 先提交本人 HEAD，再把选中的非 spec 路径投影到 feature，提交并 push；随后各服务器把固定 feature commit 合并到相关个人 worktree。适用于 `docs/**`、`archive/**`、README、源码、测试和部署文件等 | clean worktree 自动更新；dirty worktree 显示待同步；冲突保留在 Diff。已经打开的浏览器树/标签没有新增 SSE，按现有刷新或重新进入工作区重读磁盘 | 无 dispose |
+| 个人 worktree 非 `spec/**` 普通文件提交并推送 | 先提交本人 HEAD，再把选中的非 spec 路径投影到 feature，提交并 push；随后各服务器把固定 feature commit 合并到相关个人 worktree。适用于 `docs/**`、`archive/**`、README、源码、测试和部署文件等 | 直接尝试 Git 原生合并；非重叠本地改动保留并自动更新，Git 判定会覆盖的文件显示待同步，真实冲突保留在 Diff。已经打开的浏览器树/标签没有新增 SSE，按现有刷新或重新进入工作区重读磁盘 | 无 dispose |
 | 个人 worktree `spec/**` 提交 | 只进入本人个人分支 | 无 | 无 dispose，任何角色都不能推送 |
 | 应用 Agent/Skill/JSONC 保存 | 写入本人个人 worktree，并出现在“应用 Agent”Diff；`agents/**/*.md`、`skills/**/SKILL.md`、`opencode.jsonc` 保存后在当前任务空闲时直接调用本人进程 `/global/dispose`，供发布前调试；rules/templates 只保存 | 无 | 只热加载当前用户，不是全局发布；不切换公共配置指针 |
 | 应用 Agent/Skill/JSONC 本地提交 | 只更新本人个人分支 | 无 | 不新增全局影响；保存时的本人调试热加载仍有效 |
-| 应用 Agent/Skill/JSONC 提交并推送 | 复用普通发布投影进入 feature；各服务器以同一个固定 commit 反向合并完整 feature 更新 | clean worktree 立即合入；dirty/冲突按 worktree 持久化为 `AWAITING_USER`，主 rollout 完成且后台每 5 秒补偿，不覆盖个人内容 | 已收敛用户进入应用级 dispose；待处理用户解决本地状态并收敛后再单独 dispose，不占用公共或其它应用发布锁 |
+| 应用 Agent/Skill/JSONC 提交并推送 | 复用普通发布投影进入 feature；各服务器以同一个固定 commit 反向合并完整 feature 更新 | 直接尝试 Git 原生合并；非重叠的 spec、应用 Agent 或其它本地改动不阻塞。只有 Git 判定会覆盖本地文件或产生真实冲突时，才按 worktree 持久化为 `AWAITING_USER`，主 rollout 完成且后台每 5 秒补偿 | 已合入目标提交的用户进入应用级 dispose；待处理用户解决阻塞或冲突并收敛后再单独 dispose，不占用公共或其它应用发布锁 |
 | 个人 workspace 拉取远程 | 从当前 workspace 标题栏“…”菜单确认应用 Agent 范围和直接 Git merge 后，在点击者的整棵应用个人 worktree fetch/merge 远端；确认可按用户在当前浏览器设为不再提示，但每次仍展示执行步骤和结果文件；同一分支的其它 workspace 目录与应用 Agent 一起更新；不提交、不推送、不修改共享 target | 其他用户、共享副本和公共 Agent 均不变化；应用 workspace 与应用 Agent 统一交给原生 Git，不重叠改动原样保留，只有实际会被覆盖的文件阻止拉取 | 结果弹框明确显示：普通文件无 dispose；成功合入应用 Agent/Skill/JSONC 时当前用户已 dispose、等待空闲、进程未运行或 dispose 失败，不启动应用或公共 rollout |
 | 公共 Agent/Skill/JSONC 保存 | 只写当前超管公共个人 worktree并进入公共 Diff；目录定义保存后把本人的有效公共配置软链接切到该 worktree | 无 | 当前任务空闲时只 dispose 当前超管本人，下一次 bootstrap 读取个人 worktree；共享副本和别人不变 |
 | 公共 Agent/Skill/JSONC 本地提交 | 只更新 `public-{userId}` | 无 | 不新增 dispose；本人保存后的预览链接继续有效 |
@@ -139,7 +139,7 @@ OPENCODE_CONFIG_DIR / manager configPath
 | 个人本地提交 | `ManagedWorkspaceApplicationService.commitPersonalWorkspace` | 隔离 index，`git add -- <files>`，提交个人分支；不 push |
 | 个人发布 | `ManagedWorkspaceApplicationService.publishPersonalWorkspace` | feature 副本 `fetch` + `pull --ff-only`；从个人 `HEAD` 定点 checkout/删除选中路径；feature `commit` + `git push origin {featureBranch}` |
 | 版本广播 | `publishVersionSync` / `handleVersionSyncEvent` | payload 只携带 `targetCommitHash` 等标识；远端服务器先把 feature 副本 reset 到固定提交 |
-| feature 反向同步 | `synchronizeFeatureCommitToPersonalWorktrees` → `mergeFeatureCommitIntoPersonalWorkspace` | 先用 `git merge-base --is-ancestor <target> HEAD` 判定；clean 时调用 `GitWorkspaceService.mergeCommit` 执行 `git merge --no-edit <targetCommit>`；同仓库多目录按物理 repoRoot 去重后全部同步 |
+| feature 反向同步 | `synchronizeFeatureCommitToPersonalWorktrees` → `mergeFeatureCommitIntoPersonalWorkspace` | 先用 `git merge-base --is-ancestor <target> HEAD` 判定；未处于 merge 中就调用 `GitWorkspaceService.mergeCommit` 执行 `git merge --no-edit <targetCommit>`，不以整仓 clean 作为前置条件；同仓库多目录按物理 repoRoot 去重后全部同步 |
 | dirty 补偿 | `retryLatestFeatureMerge` | 本地提交、回退、显式进入 default 个人工作区后重试；副本补偿和版本广播也会重试 |
 | 手动应用 Agent 更新 | `AgentWorkbench.handlePersonalRuntimeReload` → `sync-from-application` | 先合并整个固定 feature commit 并刷新文件树/Diff；进程 READY 时再 dispose，本地无变更但 HEAD 落后时也可完成同步 |
 | 冲突展示 | `getWorkspaceGitDiff` / `GitChangesPanel.vue` | Diff 返回 `mergeInProgress`、`applicationUpdatePending`、`applicationTargetCommit`；待同步且未进入 merge 时，`applicationUpdateBlockingFiles` 返回整个个人仓库的阻塞路径和兄弟目录视图归属；Git unmerged stage 用既有三方编辑器读取 |
@@ -267,7 +267,7 @@ tools/create-workspace-branch-model-test-data.sh
 | 案例 | 测试步骤 | 测试数据 | 预期结果 |
 | --- | --- | --- | --- |
 | INT-01 应用普通文件正式发布 | 1. 在专用测试应用/feature 中，由 A 只选择测试 docs、archive 文件进行个人提交。<br>2. 点击提交并推送。<br>3. 记录响应 target commit 和远程 feature HEAD。<br>4. 用 clean 的 B、dirty 的 C 重新打开 Diff。 | 5.2 的 docs、archive；C 预先留一个 untracked 文件。 | 远程 HEAD 等于 target；B 自动 merge 并读到文件；C 内容不被覆盖且显示待同步；普通文件发布不产生 OpenCode dispose。 |
-| INT-02 应用 Agent/Skill 正式发布 | 1. APP_ADMIN 在专用测试 feature 提交并推送 Agent、Skill 和 rules。<br>2. 观察各服务器固定 commit 同步。<br>3. 预留 B clean、C dirty 或冲突，检查 rollout/worktree 状态。<br>4. 先验证公共拉取和其它应用发布，再处理 C 并分别查询 Agent/Skill 清单。 | 应用 `personal-hot-reload-{tag}` 测试配置。 | feature 与 B 包含同一 target，B dispose 后读取新版本；主 rollout 完成，C 为 `AWAITING_USER + LOCAL_CHANGES/MERGE_CONFLICT` 且文件不被覆盖；公共和其它应用不受阻；C 处理后自动转 `SYNCED` 并只 dispose C。 |
+| INT-02 应用 Agent/Skill 正式发布 | 1. APP_ADMIN 在专用测试 feature 提交并推送 Agent、Skill 和 rules。<br>2. 观察各服务器固定 commit 同步。<br>3. 预留 B clean、C 有非重叠 spec 改动、D 的本地文件会被远端覆盖或产生冲突，检查 rollout/worktree 状态。<br>4. 先验证公共拉取和其它应用发布，再处理 D 并分别查询 Agent/Skill 清单。 | 应用 `personal-hot-reload-{tag}` 测试配置。 | feature、B、C 包含同一 target；C 的本地 spec 保留，B/C dispose 后读取新版本。主 rollout 完成，D 为 `AWAITING_USER + LOCAL_CHANGES/MERGE_CONFLICT` 且文件不被覆盖；公共和其它应用不受阻；D 处理后自动转 `SYNCED` 并只 dispose D。 |
 | INT-03 公共 Agent/Skill 正式发布 | 1. SUPER_ADMIN 在专用测试公共远程提交并推送。<br>2. 记录公共 target commit。<br>3. 等各服务器共享副本同步和用户任务空闲。<br>4. 查询 A、B 配置并检查 A 的个人预览指针。 | 公共 `public-personal-hot-reload-{tag}` 测试配置。 | 所有共享副本固定到 target；各用户指针恢复共享副本后逐一 dispose；A、B 都读到发布版本；没有运行进程的用户不被额外启动。 |
 | INT-04 spec 发布拒绝 | 1. 任意角色先把 `spec/test-data/local-only-{tag}.md` 提交到个人分支。<br>2. 单独选择该路径点击提交并推送。<br>3. 再用 `./spec/...` 或重复分隔符别名调用一次。<br>4. 检查个人 HEAD 和远程 feature。 | `spec/**` 正常路径及规范化别名。 | 本地提交保留；两次发布都返回 `FORBIDDEN`；远程 feature 不含路径且 HEAD 不前进。 |
 | INT-05 普通成员写应用配置拒绝 | 1. 用 `USER` 读取应用 Agent。<br>2. 分别调用写入、stage、commit、publish。<br>3. 检查文件、index、HEAD 和远程 ref。 | 应用 `.opencode/agents/**` 测试路径。 | 读取允许；所有写操作返回 `FORBIDDEN`；工作树、index、个人 HEAD 和远程 ref 均不变化。 |

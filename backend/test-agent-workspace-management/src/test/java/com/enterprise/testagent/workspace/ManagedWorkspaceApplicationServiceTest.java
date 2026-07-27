@@ -1657,7 +1657,7 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
-    void applicationAgentRolloutCompletesServerAndPersistsDirtyWorktreeForUserResolution() {
+    void applicationAgentRolloutMergesNonOverlappingDirtyPersonalWorktreeAndDisposesUser() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
@@ -1678,7 +1678,44 @@ class ManagedWorkspaceApplicationServiceTest {
 
         service.retryPendingApplicationConfigSync();
 
-        assertThat(git.mergedCommit).isNull();
+        assertThat(git.mergedCommit).isEqualTo("commit_application_agent");
+        assertThat(git.mergedCommitRepoRoot).isEqualTo(
+                personalRepoRoot("feature_testagent_20260707_usr_1_default"));
+        assertThat(managed.syncRecords).singleElement().satisfies(record ->
+                assertThat(record.status()).isEqualTo(WorkspaceSyncStatus.SUCCEEDED));
+        verify(coordinator).markServerSyncedForUsers(request, Set.of("usr_1"), List.of());
+        verify(coordinator, org.mockito.Mockito.never()).markServerSyncRetry(
+                request, "PERSONAL_WORKTREE_UPDATE_PENDING");
+    }
+
+    @Test
+    void applicationAgentRolloutPersistsOnlyNativeMergeBlockingWorktree() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_personal");
+        git.targetContainedInHead = false;
+        git.mergeFailure = new PlatformException(
+                ErrorCode.GIT_UNAVAILABLE,
+                "本地修改会被合并覆盖",
+                Map.of(
+                        "gitFailureType", "LOCAL_CHANGES",
+                        "gitBlockingFiles", List.of("F-GCMS/workspace/spec/local.md")));
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        PublicAgentConfigRolloutSyncRequest request = applicationSyncRequest(version.versionId());
+        when(coordinator.claimPendingSync("127.0.0.1", AgentConfigRolloutScope.APPLICATION))
+                .thenReturn(Optional.of(request));
+        when(coordinator.renewServerSync(request)).thenReturn(true);
+        service.setAgentConfigRolloutCoordinator(coordinator);
+
+        service.retryPendingApplicationConfigSync();
+
+        assertThat(git.mergedCommit).isEqualTo("commit_application_agent");
         assertThat(managed.syncRecords).isEmpty();
         verify(coordinator).markServerSyncedForUsers(
                 request,
@@ -1690,7 +1727,7 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
-    void pendingApplicationWorktreeIsMergedAndDisposedAfterUserMakesItClean() {
+    void pendingApplicationWorktreeIsMergedAndDisposedAfterBlockingChangeIsResolved() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
