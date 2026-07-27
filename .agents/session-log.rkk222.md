@@ -5,6 +5,24 @@
 
 ## Entries
 
+### 2026-07-27 - 补齐公共规则卡独立审核能力
+
+### Why
+- 公共规约已转换为 71 个 Agent 可执行规则卡，但 Review 仍只接收生成阶段声明的命中/排除项，无法确定每个对象是否评估了完整编号集合，也缺少规则到实际案例的明确引用。
+
+### What
+- 复用现有 `test-design` Skill 和 `rules/quality-gate.md`，不创建职责重复的 Review Skill；增加公共规则卡完整性基线和专项审核流程。
+- 生成阶段按对象输出完整 `evaluatedRules`，逐卡记录命中、不适用、互斥或缺证据决策；命中项记录材料证据、最低覆盖和 `caseRefs`。Review 独立复核全部编号并输出 `publicRuleCoverageVerdict`、`reviewedObjectRuleSets`。
+- 审核模板新增“公共规约命中、最低覆盖与排除”行，评测集新增批量规则漏评、错误重跑分支和最低覆盖缺失场景；测试设计 Skill 升至 4.3.0。
+
+### How
+- 71 个规则编号连续性、Review 契约字段、Evals JSON 和 `git diff --check` 校验通过；OpenCode 1.18.4 实际加载入口、生成与 Review Agent，生成/审核 prompt 均包含新契约。
+- 公共配置提交为 `c287897`；从该提交重打固定名企业替换包，63 个文件与提交逐字节一致，包含 6 个 Agent、12 个 Skill且无禁带内容，解压后实际加载 12 个包内 Skill。
+
+### Result
+- Review 不再只相信生成阶段的命中清单，能够拒绝编号集合不完整、规则漏判/误判、互斥冲突和关键最低覆盖缺失的设计。
+- 新包 SHA256 为 `44f2bde7a8441511f3bec6ea710da5942b5336445d200cc3b2b8cd9fab6cc8c6`；企业内实际上传、发布和在线回归仍待现场执行。未修改业务 API、事件、数据库、环境配置或 OpenCode 源码。
+
 ### 2026-07-27 - 重写公共测试设计规约并生成替换包
 
 ### Why
