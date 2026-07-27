@@ -230,6 +230,7 @@ const router = useRouter();
 const OPENCODE_PROCESS_START_OPERATION_POLL_INTERVAL_MS = 500;
 const AGENT_CATALOG_REQUEST_TIMEOUT_MS = 8000;
 const MANAGED_APPLICATION_MEMBERSHIP_REFETCH_INTERVAL_MS = 30_000;
+const RUNTIME_CATALOG_RECOVERY_REFETCH_INTERVAL_MS = 3_000;
 const RUN_EVENT_SSE_ERROR_TITLE = "RunEvent SSE 连接异常";
 const RUN_EVENT_TERMINAL_SETTLE_MS = 500;
 const OPENCODE_PROCESS_START_STEPS = [
@@ -1416,14 +1417,25 @@ const modelsQuery = useQuery({
   queryKey: ["runtime", "models"],
   enabled: authReady,
   queryFn: () => api.listModels(),
-  retry: false
+  retry: false,
+  refetchOnWindowFocus: "always",
+  // 服务重启窗口可能先返回空目录或请求失败；仅在目录为空时短轮询，恢复后立即停止。
+  refetchInterval: (query) => runtimeCatalogRecoveryRefetchInterval(query.state.data)
 });
 const providersQuery = useQuery({
   queryKey: ["runtime", "providers"],
   enabled: authReady,
   queryFn: () => api.listProviders(),
-  retry: false
+  retry: false,
+  refetchOnWindowFocus: "always",
+  refetchInterval: (query) => runtimeCatalogRecoveryRefetchInterval(query.state.data)
 });
+
+function runtimeCatalogRecoveryRefetchInterval(data: unknown) {
+  return Array.isArray(data) && data.length > 0
+    ? false
+    : RUNTIME_CATALOG_RECOVERY_REFETCH_INTERVAL_MS;
+}
 
 // Agent、Command 需要 opencode READY + workspace
 const agentsQuery = useQuery({
@@ -6248,6 +6260,11 @@ function closeSettings() {
   void queryClient.invalidateQueries({ queryKey: ["managed-workspace", "app-templates"] });
 }
 
+function refreshManagedWorkspaceCatalog() {
+  // 异步创建操作真正成功时立即刷新底部选择器；不能只依赖关闭设置时可能过早的刷新。
+  void queryClient.invalidateQueries({ queryKey: ["managed-workspace", "app-templates"] });
+}
+
 /**
  * 顶部入口和具体功能按钮共用一个帮助中心，只通过 topic 决定初始章节。
  */
@@ -8135,6 +8152,7 @@ async function handleLogout() {
     :initial-menu-key="firstLoginGuideActive ? firstLoginGuideSettingsMenu : undefined"
     :initial-app-tab="firstLoginGuideActive ? firstLoginGuideSettingsTab : undefined"
     @close="closeSettings"
+    @workspace-catalog-changed="refreshManagedWorkspaceCatalog"
   />
 
   <HelpCenterDialog

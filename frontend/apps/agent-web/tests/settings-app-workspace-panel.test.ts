@@ -260,7 +260,12 @@ function getTreePathButton(container: ParentNode, path: string) {
   return getTreePathElement(container, path)!.closest("button") as HTMLButtonElement;
 }
 
-function renderPanel(api = createApi(), roles = ["APP_ADMIN"], initialAppTab?: "members" | "repositories" | "workspaces") {
+function renderPanel(
+  api = createApi(),
+  roles = ["APP_ADMIN"],
+  initialAppTab?: "members" | "repositories" | "workspaces",
+  onWorkspaceCatalogChanged?: () => void
+) {
   return render(SettingsAppWorkspacePanel, {
     props: {
       initialAppTab,
@@ -270,6 +275,9 @@ function renderPanel(api = createApi(), roles = ["APP_ADMIN"], initialAppTab?: "
         unifiedAuthId: "AUTH_ADMIN",
         roles
       }
+    },
+    attrs: {
+      "onWorkspace-catalog-changed": onWorkspaceCatalogChanged
     },
     global: {
       stubs: {
@@ -474,10 +482,16 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
 
   it("shows all root directories without filtering by app name, expanding to direct-child directories by default", async () => {
     const api = createApi();
+    const onWorkspaceCatalogChanged = vi.fn();
     api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature_testagent_20260707"]);
     api.getRepositoryTree = vi.fn().mockResolvedValue(repositoryTree);
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("12345678-1234-1234-1234-123456789abc");
-    const { container, findByText, getByText, queryByText } = renderPanel(api);
+    const { container, findByText, getByText, queryByText } = renderPanel(
+      api,
+      ["APP_ADMIN"],
+      undefined,
+      onWorkspaceCatalogChanged
+    );
 
     await findByText("应用人员管理");
     await fireEvent.click(getByText("工作空间管理"));
@@ -502,6 +516,7 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
       operationId: "wco_12345678123412341234123456789abc"
     }));
     await waitFor(() => expect(api.getWorkspaceCreateOperation).toHaveBeenCalledWith("wco_12345678123412341234123456789abc"));
+    await waitFor(() => expect(onWorkspaceCatalogChanged).toHaveBeenCalledTimes(1));
   });
 
   it("adds a new direct child directory in memory and sends directoryNew on save", async () => {

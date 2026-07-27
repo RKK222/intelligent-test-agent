@@ -2071,6 +2071,24 @@ test("model picker groups models by provider and updates run model", async ({ pa
   });
 });
 
+test("model picker recovers automatically when the first catalog response after restart is empty", async ({ page }) => {
+  await mockBackendApi(page, {
+    modelResponses: [
+      [],
+      [{ id: "recovered-model", providerId: "anthropic", name: "Recovered Model" }]
+    ],
+    providers: [{ id: "anthropic", name: "Anthropic", status: "ready" }]
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: "切换模型" }).click();
+  await expect(page.getByRole("dialog", { name: "模型选择" })).toContainText("暂无匹配模型");
+  await expect(
+    page.getByRole("dialog", { name: "模型选择" }).getByRole("button", { name: /Recovered Model/ }).first()
+  ).toBeVisible({ timeout: 8_000 });
+  await expect(page.getByRole("button", { name: "切换模型" })).toContainText("Recovered Model");
+});
+
 test("new runs use one in-memory conversation context and a client request id", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   const runContextRequests: string[] = [];
@@ -5980,6 +5998,7 @@ async function mockBackendApi(
     agentsByWorkspace?: Record<string, Array<Record<string, unknown>>>;
     agentGatesByWorkspace?: Record<string, Promise<void>>;
     models?: Array<Record<string, unknown>>;
+    modelResponses?: Array<Array<Record<string, unknown>>>;
     providers?: Array<Record<string, unknown>>;
     applications?: Array<{ appId: string; appName: string; enabled: boolean }>;
     managedApplications?: Array<{ appId: string; appName: string; enabled: boolean }>;
@@ -7118,7 +7137,7 @@ async function mockBackendApi(
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/models") {
-      await route.fulfill(json(capture.models ?? [
+      await route.fulfill(json(capture.modelResponses?.shift() ?? capture.models ?? [
         { id: "sonnet", providerId: "anthropic", name: "Sonnet" },
         { id: "opus", providerId: "anthropic", name: "Opus" },
         { id: "glm-5.2", providerId: "volcengine", name: "GLM-5.2" },

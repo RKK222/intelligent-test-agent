@@ -7,6 +7,7 @@ import type { OpencodeRuntimeManagementOverview } from "@test-agent/shared-types
 import RuntimeManagementPanel from "../src/components/settings/RuntimeManagementPanel.vue";
 import { formatMetricSampleTime } from "../src/components/settings/runtimeMetricFormatting";
 import SettingsMenu from "../src/components/settings/SettingsMenu.vue";
+import SettingsDialog from "../src/components/settings/SettingsDialog.vue";
 import SettingsPanel from "../src/components/settings/SettingsPanel.vue";
 
 const radioGroupKey = Symbol("radio-group");
@@ -188,6 +189,49 @@ describe("runtime management settings", () => {
 
     expect(view.getByText("应用管理")).toBeTruthy();
     expect(view.queryByText("应用与工作区")).toBeNull();
+  });
+
+  it("forwards successful workspace catalog changes through the settings shell", async () => {
+    const onWorkspaceCatalogChanged = vi.fn();
+    const WorkspacePanelStub = defineComponent({
+      emits: ["workspace-catalog-changed"],
+      template: `<button type="button" @click="$emit('workspace-catalog-changed')">工作空间已更新</button>`
+    });
+    const currentUser = {
+      userId: "usr_admin",
+      username: "admin",
+      unifiedAuthId: "AUTH_1",
+      roles: ["SUPER_ADMIN"]
+    };
+    const panel = render(SettingsPanel, {
+      props: { activeKey: "appWorkspace", currentUser },
+      attrs: { "onWorkspace-catalog-changed": onWorkspaceCatalogChanged },
+      global: { stubs: { SettingsAppWorkspacePanel: WorkspacePanelStub } }
+    });
+
+    await fireEvent.click(panel.getByRole("button", { name: "工作空间已更新" }));
+    expect(onWorkspaceCatalogChanged).toHaveBeenCalledTimes(1);
+    panel.unmount();
+
+    const SettingsPanelStub = defineComponent({
+      emits: ["workspace-catalog-changed"],
+      template: `<button type="button" @click="$emit('workspace-catalog-changed')">目录刷新事件</button>`
+    });
+    const dialog = render(SettingsDialog, {
+      props: { open: true, currentUser },
+      attrs: { "onWorkspace-catalog-changed": onWorkspaceCatalogChanged },
+      global: {
+        stubs: {
+          ElDialog: { props: ["modelValue"], template: `<section v-if="modelValue"><slot /><slot name="footer" /></section>` },
+          ElButton: { template: `<button type="button"><slot /></button>` },
+          SettingsMenu: { template: `<nav />` },
+          SettingsPanel: SettingsPanelStub
+        }
+      }
+    });
+
+    await fireEvent.click(dialog.getByRole("button", { name: "目录刷新事件" }));
+    expect(onWorkspaceCatalogChanged).toHaveBeenCalledTimes(2);
   });
 
   it("lets an application admin open application settings but not user management", () => {

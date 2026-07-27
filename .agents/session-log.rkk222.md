@@ -5,6 +5,22 @@
 
 ## Entries
 
+### 2026-07-27 - 修复重启后模型与新增工作空间目录不刷新
+
+### Why
+- 服务重启窗口内模型/Provider 目录可能先失败或返回空数组，前端会把空结果保留到整页刷新；工作空间异步创建成功后只刷新设置页内部列表，关闭设置时的模板刷新又可能早于 operation 终态。
+
+### What
+- 模型和 Provider 查询仅在目录为空或失败时每 3 秒自动恢复，非空后停止短轮询，并在窗口聚焦时刷新。
+- 工作空间 operation 成功后按 ID 去重上报目录变更，经设置组件链通知 `AgentWorkbench` 失效并重拉左下角模板查询。
+- 补充设置事件链单测、工作空间成功通知单测和模型空目录自动恢复的桌面/移动 mock E2E，同步前端 README 与包说明。
+
+### How
+- 前端定向单测 32 项、模型恢复 Playwright 2 项、全量 Vitest 1628 passed / 1 skipped、全 workspace lint、agent-web typecheck 和生产 build 通过；独立启动 Vite 验证实例 `127.0.0.1:3001`，页面和现有后端 readiness 均返回 200。
+
+### Result
+- 两个目录都无需整页刷新即可在后端恢复或异步创建完成后自动出现；未修改 HTTP/WS wire、RunEvent、数据库/Flyway、SQL、权限、安全配置、环境配置、generated SDK 或 OpenCode 源码。
+
 ### 2026-07-27 - 修复应用配置手动同步与停用工作空间复用
 
 ### Why

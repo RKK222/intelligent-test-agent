@@ -121,6 +121,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "switch-menu", key: string): void;
+  (e: "workspace-catalog-changed"): void;
 }>();
 
 const api = inject<BackendApiClient>("api")!;
@@ -190,6 +191,7 @@ const treeErrorMessage = ref("");
 const workspaceName = ref(DEFAULT_WORKSPACE_ALIAS);
 const workspaceVersion = ref("");
 const workspaceCreateOperation = ref<WorkspaceCreateOperation | null>(null);
+const workspaceCatalogNotifiedOperationIds = new Set<string>();
 let workspaceCreatePollTimer: number | undefined;
 const loadingBranches = ref(false);
 const loadingDirectories = ref(false);
@@ -721,6 +723,10 @@ async function refreshWorkspaceCreateOperation(operationId: string) {
     if (operation.status === "SUCCEEDED" || operation.status === "FAILED") {
       stopWorkspaceCreatePolling();
       if (operation.status === "SUCCEEDED") {
+        if (!workspaceCatalogNotifiedOperationIds.has(operationId)) {
+          workspaceCatalogNotifiedOperationIds.add(operationId);
+          emit("workspace-catalog-changed");
+        }
         // 操作完成后刷新已有工作空间列表，确保刚创建的工作空间可见
         await loadWorkspaces();
       }

@@ -19,6 +19,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "close"): void;
+  (e: "workspace-catalog-changed"): void;
 }>();
 
 const apiBaseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
@@ -119,6 +120,7 @@ function selectMenu(key: MenuKey) {
           :initial-app-tab="props.initialAppTab"
           :refresh-key="refreshKey"
           @switch-menu="handleSwitchMenu"
+          @workspace-catalog-changed="emit('workspace-catalog-changed')"
         />
       </div>
     </div>
