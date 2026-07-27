@@ -111,6 +111,9 @@
                     and t.status not in ('DISPOSED', 'ABANDONED')
                     and t.user_id = #{userId}
               ))
+          or (r.config_scope = 'PERSONAL_APPLICATION'
+              and r.status in ('PREPARING', 'DRAINING')
+              and r.initiated_by_user_id = #{userId})
         )
         order by r.created_at desc
         limit 1

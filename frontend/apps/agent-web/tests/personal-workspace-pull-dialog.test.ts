@@ -82,16 +82,18 @@ describe("PersonalWorkspacePullDialog", () => {
         commitHash: "ad170bfc12345678",
         updated: true,
         agentConfigChanged: true,
+        runtimeReloadStatus: "SCHEDULED",
+        runtimeReloadId: "acr_personal_reload",
         changedFiles: ["F-GCMS/workspace/src/Main.java", ".opencode/agents/reviewer.md"],
         disposeStatus: "WAITING_IDLE",
-        disposeMessage: "应用 Agent 已更新；当前用户仍有运行中的 Session，结束后会自动 dispose。"
+        disposeMessage: "应用 Agent 已更新；后台已登记当前用户，Session 空闲后会自动 dispose。"
       }
     });
 
     expect(wrapper.get('[data-testid="personal-pull-result"]').text()).toContain("已更新 2 个文件");
     expect(wrapper.text()).toContain("F-GCMS/workspace/src/Main.java");
     expect(wrapper.text()).toContain(".opencode/agents/reviewer.md");
-    expect(wrapper.text()).toContain("结束后会自动 dispose");
+    expect(wrapper.text()).toContain("后台已登记当前用户");
     expect(wrapper.text()).toContain("等待空闲");
   });
 

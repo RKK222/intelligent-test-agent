@@ -2500,3 +2500,27 @@
 
 - 最终交付物固定为 `deploy/internal/dist/test-agent-two-backend-complete.zip` 及同名 `.sha256`；当前内层 ZIP 与外层内嵌 ZIP 的 SHA256 必须相等后才可交付。
 - 本次未修改业务代码、API、RunEvent、数据库/Flyway/SQL、权限、安全配置、generated SDK、OpenCode 源码或环境文件；只新增本机交付追溯记录并重新生成被 Git 忽略的企业制品。
+
+### 2026-07-28 - 个人拉取 Agent 重载改由后台单用户排空
+
+### Why
+
+- 个人“拉取远程”包含应用 Agent 更新时，浏览器 localStorage 只能记住当前页面的待 dispose 状态，不能保证关页、换浏览器或后端重启后继续处理；同时必须保持该动作只影响点击者，不能复用应用级成员广播。
+
+### What
+
+- 新增 `PERSONAL_APPLICATION` rollout 范围：Git merge 成功且当前用户进程运行时，只登记发起用户所在服务器和本人进程，不枚举应用成员、不做后台 Git 同步、不占用 PUBLIC/APPLICATION 发布锁。
+- 单用户任务复用既有 server/target 数据库租约、manager 进程身份核验、Session 空闲检测、用户消息门禁和 `/global/dispose`；进程未运行时不创建任务，下次启动直接读取最新个人 worktree。
+- 个人拉取响应新增可选 `runtimeReloadStatus/runtimeReloadId`；前端移除待 dispose 的 localStorage 标记，按后台登记结果展示，仍保留滚动升级时旧后端缺失字段的当前页面兼容路径。
+- Flyway 只扩展 rollout scope CHECK 约束；MyBatis 门禁 SQL 仅以 `initiated_by_user_id = 当前用户` 命中个人任务。同步 HTTP/事件/数据库/部署/测试文档、模块 README、前端 README/PACKAGE 和用户手册。
+
+### How
+
+- 后端相关 121 项定向测试通过；前端 3 个定向文件 102 项通过，agent-web typecheck 通过；全前端 lint/typecheck/build 通过，全量 Vitest 为 97 文件、1639 passed / 1 skipped。
+- 后端 20 模块生产打包通过；全量 `mvn test` 执行 738 项，唯一失败仍是已知基线 `OpencodeProcessConfigLinkServiceTest.rejectsOrdinaryDirectoryAtManagedPathWithoutDeletingUserData`，本次相关模块在失败前及独立定向回归均通过。
+- 使用未修改的 `.env.test` 和 test profile、JDK 25 完整重启 backend、opencode-manager、frontend；Flyway 成功应用 `V20260728100000`，backend health/readiness 为 `UP`，前端 3000 返回 200。`tools/verify-ai-docs.sh` 与 `git diff --check` 通过。
+
+### Result
+
+- 个人拉取应用 Agent 后的 dispose 现在由后台持久化续接，页面生命周期不再参与；只阻止和 dispose 发起者本人，其他用户、共享版本 target、公共 Agent 和应用级 rollout 均不受影响。
+- 原有应用 workspace、应用 Agent、公共 Agent 的角色与目录权限、stage/commit/push 白名单、普通文件自动同步和 dispose 时机未修改。HTTP 仅 additive 字段；无 RunEvent/SSE、新文件代理、generated SDK、OpenCode 源码、安全或环境配置变更。

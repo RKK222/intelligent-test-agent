@@ -2829,7 +2829,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
      *
      * <p>应用 workspace 文件与应用 Agent 文件统一交给原生 Git merge 判断：可安全保留时继续拉取，
      * 实际会覆盖时才阻止，不自动 stash/reset。这里不更新应用版本 target、不修改共享副本、不广播，
-     * 也不枚举其它成员；应用 Agent 更新成功后仅通过响应通知当前页面按既有空闲闸门 dispose 当前用户。</p>
+     * 也不枚举其它成员；应用 Agent 更新成功后由后端持久化登记当前用户，复用既有空闲闸门 dispose。</p>
      */
     public ManagedWorkspaceResponses.PersonalWorkspaceGitPullResponse gitPullPersonalWorkspace(
             String personalWorkspaceId,
@@ -2864,6 +2864,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     previousCommit,
                     false,
                     false,
+                    "NOT_REQUIRED",
+                    null,
                     List.of());
         }
 
@@ -2900,6 +2902,13 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             throw exception;
         }
         String currentCommit = gitWorkspaceService.headCommit(repoRoot);
+        PersonalPullRuntimeReload runtimeReload = schedulePersonalPullRuntimeReload(
+                personal,
+                version,
+                currentCommit,
+                agentConfigChanged,
+                userId,
+                traceId);
         return new ManagedWorkspaceResponses.PersonalWorkspaceGitPullResponse(
                 personalWorkspaceId,
                 version.versionId().value(),
@@ -2907,7 +2916,48 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 currentCommit,
                 true,
                 agentConfigChanged,
+                runtimeReload.status(),
+                runtimeReload.rolloutId(),
                 changedPaths);
+    }
+
+    /** Git 已成功合并后登记后台单用户排空；登记失败不能把已经落盘的 merge 误报为整体失败。 */
+    private PersonalPullRuntimeReload schedulePersonalPullRuntimeReload(
+            PersonalWorkspace personal,
+            ApplicationWorkspaceVersion version,
+            String commitHash,
+            boolean agentConfigChanged,
+            UserId userId,
+            String traceId) {
+        if (!agentConfigChanged) {
+            return new PersonalPullRuntimeReload("NOT_REQUIRED", null);
+        }
+        if (agentConfigRolloutCoordinator == null) {
+            return new PersonalPullRuntimeReload("FAILED", null);
+        }
+        try {
+            Optional<String> rolloutId = agentConfigRolloutCoordinator.schedulePersonalApplicationReload(
+                    personal.personalWorkspaceId().value(),
+                    version.branch(),
+                    commitHash,
+                    serverIdentity.linuxServerId(),
+                    userId.value(),
+                    traceId);
+            return rolloutId
+                    .map(id -> new PersonalPullRuntimeReload("SCHEDULED", id))
+                    .orElseGet(() -> new PersonalPullRuntimeReload("NOT_RUNNING", null));
+        } catch (RuntimeException exception) {
+            LOGGER.warn(
+                    "event=personal_application_agent_reload_schedule_failed personalWorkspaceId={} userId={} traceId={} exceptionType={}",
+                    personal.personalWorkspaceId().value(),
+                    userId.value(),
+                    traceId,
+                    exception.getClass().getSimpleName());
+            return new PersonalPullRuntimeReload("FAILED", null);
+        }
+    }
+
+    private record PersonalPullRuntimeReload(String status, String rolloutId) {
     }
 
     private PlatformException personalPullLocalChanges(

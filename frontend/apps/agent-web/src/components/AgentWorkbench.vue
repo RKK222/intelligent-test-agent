@@ -283,7 +283,6 @@ const isAppAdmin = computed(() =>
 
 const FIRST_LOGIN_GUIDE_STORAGE_VERSION = "v7";
 const PERSONAL_PULL_CONFIRM_STORAGE_VERSION = "v1";
-const PERSONAL_PULL_RUNTIME_RELOAD_STORAGE_VERSION = "v1";
 const firstLoginGuideActive = ref(true);
 
 function firstLoginGuideStorageKey(userId: string) {
@@ -317,71 +316,6 @@ function dismissPersonalPullConfirm(userId: string | undefined) {
     localStorage.setItem(personalPullConfirmStorageKey(userId), "dismissed");
   } catch {
     // 浏览器禁用本地存储时只影响“不再提示”偏好，不阻断实际拉取。
-  }
-}
-
-type PendingPersonalPullRuntimeReload = {
-  personalWorkspaceId: string;
-  recordedAt: string;
-};
-
-function personalPullRuntimeReloadStorageKey(userId: string) {
-  return `test-agent.personal-pull-runtime-reload.${PERSONAL_PULL_RUNTIME_RELOAD_STORAGE_VERSION}:${userId}`;
-}
-
-/**
- * 个人拉取已经写盘，但运行中的 Session 可能让 dispose 延后；把这个事实按用户保留，
- * 页面刷新或关闭后重新进入时仍复用现有空闲重载流程，不能把待处理状态只留在 Vue 内存中。
- */
-function persistPendingPersonalPullRuntimeReload(
-  userId: string | undefined,
-  personalWorkspaceId: string
-) {
-  if (!userId) return;
-  const marker: PendingPersonalPullRuntimeReload = {
-    personalWorkspaceId,
-    recordedAt: new Date().toISOString()
-  };
-  try {
-    localStorage.setItem(personalPullRuntimeReloadStorageKey(userId), JSON.stringify(marker));
-  } catch {
-    // 浏览器禁用本地存储时继续使用当前页面既有重载流程，不把配置已写盘误报为拉取失败。
-  }
-}
-
-function readPendingPersonalPullRuntimeReload(
-  userId: string | undefined
-): PendingPersonalPullRuntimeReload | null {
-  if (!userId) return null;
-  try {
-    const raw = localStorage.getItem(personalPullRuntimeReloadStorageKey(userId));
-    if (!raw) return null;
-    const marker = JSON.parse(raw) as Partial<PendingPersonalPullRuntimeReload>;
-    if (typeof marker.personalWorkspaceId !== "string" || !marker.personalWorkspaceId.trim()) {
-      return null;
-    }
-    return {
-      personalWorkspaceId: marker.personalWorkspaceId.trim(),
-      recordedAt: typeof marker.recordedAt === "string" ? marker.recordedAt : ""
-    };
-  } catch {
-    return null;
-  }
-}
-
-function clearPendingPersonalPullRuntimeReload(
-  userId: string | undefined,
-  personalWorkspaceId: string
-) {
-  if (!userId) return;
-  try {
-    const marker = readPendingPersonalPullRuntimeReload(userId);
-    // 另一标签页可能已经登记更新的个人 worktree；只清理本次实际处理的同一标记。
-    if (marker?.personalWorkspaceId === personalWorkspaceId) {
-      localStorage.removeItem(personalPullRuntimeReloadStorageKey(userId));
-    }
-  } catch {
-    // 本地存储清理失败只会导致下次空闲时多执行一次安全 dispose。
   }
 }
 
@@ -520,7 +454,6 @@ const pendingReferenceRuntimeReloadRevision = ref(0);
 let handledReferenceRuntimeReloadRevision = 0;
 let pendingRuntimeReloadKind: "reference" | "agent" = "reference";
 let pendingPublicRuntimeReloadTarget: Pick<AgentFileTabInfo, "worktreeId" | "linuxServerId"> | null = null;
-let pendingPersonalPullRuntimeReloadWorkspaceId: string | null = null;
 let lastRuntimeReloadError: unknown | null = null;
 const diffViewerRef = ref<InstanceType<typeof DiffViewer> | null>(null);
 const isDiffDirty = ref(false);
@@ -2518,7 +2451,6 @@ async function handlePersonalRuntimeReload(payload: {
       await api.disposeGlobal();
     }
     await Promise.all([agentsQuery.refetch(), commandsQuery.refetch()]);
-    completePendingPersonalPullRuntimeReload();
     feedback.value = {
       kind: "success",
       title: payload.scope === "PUBLIC" ? "公共个人配置已重载" : "应用个人配置已重载",
@@ -2542,22 +2474,6 @@ async function handlePersonalRuntimeReload(payload: {
   }
 }
 
-function restorePendingPersonalPullRuntimeReload() {
-  const userId = authStore.currentUser?.userId;
-  const marker = readPendingPersonalPullRuntimeReload(userId);
-  if (!marker || pendingPersonalPullRuntimeReloadWorkspaceId === marker.personalWorkspaceId) return;
-  pendingPersonalPullRuntimeReloadWorkspaceId = marker.personalWorkspaceId;
-  pendingRuntimeReloadKind = "agent";
-  pendingReferenceRuntimeReloadRevision.value += 1;
-}
-
-function completePendingPersonalPullRuntimeReload() {
-  const personalWorkspaceId = pendingPersonalPullRuntimeReloadWorkspaceId;
-  if (!personalWorkspaceId) return;
-  clearPendingPersonalPullRuntimeReload(authStore.currentUser?.userId, personalWorkspaceId);
-  pendingPersonalPullRuntimeReloadWorkspaceId = null;
-}
-
 async function reloadReferenceRuntimeIfIdle(options: { quiet?: boolean } = {}): Promise<RuntimeReloadOutcome> {
   const targetRevision = pendingReferenceRuntimeReloadRevision.value;
   if (targetRevision <= handledReferenceRuntimeReloadRevision) return "NO_PENDING";
@@ -2565,26 +2481,9 @@ async function reloadReferenceRuntimeIfIdle(options: { quiet?: boolean } = {}): 
     return "WAITING_IDLE";
   }
   const publicReloadTarget = pendingPublicRuntimeReloadTarget;
-  if (pendingPersonalPullRuntimeReloadWorkspaceId && !opencodeProcessQuery.isFetched.value) {
-    return "WAITING_IDLE";
-  }
-  if (!publicReloadTarget && !selectedWorkspaceIdRef.value) {
-    // 页面恢复个人拉取待处理标记时，先等工作区路由恢复，不能把“尚未选中目录”误判成进程未运行。
-    return "WAITING_IDLE";
-  }
-  if (!opencodeProcessReady.value) {
-    const process = opencodeProcessStatus.value;
-    const definitelyNotRunning = !process
-      || process.serviceStatus === "NOT_RUNNING"
-      || process.serviceStatus === "UNASSIGNED"
-      || process.status === "NEEDS_INITIALIZATION";
-    if (!definitelyNotRunning) {
-      // 已分配进程可能仍在等待 health 或暂时不可用；保留持久化标记，后续 READY 再处理。
-      return "WAITING_IDLE";
-    }
+  if (!opencodeProcessReady.value || (!publicReloadTarget && !selectedWorkspaceIdRef.value)) {
     // 进程未运行时无需 dispose；下次受管启动会直接读取刚保存的磁盘配置和引用目录环境。
     handledReferenceRuntimeReloadRevision = targetRevision;
-    completePendingPersonalPullRuntimeReload();
     lastRuntimeReloadError = null;
     if (!options.quiet) {
       feedback.value = {
@@ -2611,7 +2510,6 @@ async function reloadReferenceRuntimeIfIdle(options: { quiet?: boolean } = {}): 
     }
     await Promise.all([agentsQuery.refetch(), commandsQuery.refetch()]);
     handledReferenceRuntimeReloadRevision = targetRevision;
-    completePendingPersonalPullRuntimeReload();
     if (pendingReferenceRuntimeReloadRevision.value === targetRevision) {
       pendingPublicRuntimeReloadTarget = null;
     }
@@ -3210,27 +3108,6 @@ watch(runtimeBusy, (busy) => {
     stopTick();
   }
 }, { immediate: true });
-watch(
-  [
-    () => authStore.currentUser?.userId?.trim() || null,
-    selectedWorkspaceIdRef,
-    () => opencodeProcessQuery.isFetched.value,
-    opencodeProcessReady
-  ],
-  ([userId, workspaceId, processFetched], [previousUserId]) => {
-    if (userId !== previousUserId) {
-      // 登录用户变化时不允许沿用上一用户的页面内存代次；持久化标记本身按 userId 隔离。
-      pendingPersonalPullRuntimeReloadWorkspaceId = null;
-      handledReferenceRuntimeReloadRevision = pendingReferenceRuntimeReloadRevision.value;
-    }
-    if (!userId) return;
-    restorePendingPersonalPullRuntimeReload();
-    if (workspaceId && processFetched && !userRuntimeBusy.value) {
-      void reloadReferenceRuntimeIfIdle();
-    }
-  },
-  { immediate: true }
-);
 watch(userRuntimeBusy, (busy) => {
   if (busy) return;
   if (runtimeReloadConflictWaitingForIdle.value) {
@@ -4083,6 +3960,24 @@ function personalPullDisposeResult(
       disposeMessage: "本次没有更新应用 Agent 文件，无需 dispose。"
     };
   }
+  if (response.runtimeReloadStatus === "SCHEDULED") {
+    return {
+      disposeStatus: "WAITING_IDLE",
+      disposeMessage: "应用 Agent 已更新；后台已登记当前用户，Session 空闲后会自动 dispose。"
+    };
+  }
+  if (response.runtimeReloadStatus === "NOT_RUNNING") {
+    return {
+      disposeStatus: "NOT_RUNNING",
+      disposeMessage: "应用 Agent 已更新；当前 TestAgent 进程未运行，下次启动会直接加载。"
+    };
+  }
+  if (response.runtimeReloadStatus === "FAILED") {
+    return {
+      disposeStatus: "FAILED",
+      disposeMessage: "应用 Agent 文件已更新，但后台未能登记运行态重载，请稍后重试应用 Agent 更新。"
+    };
+  }
   const outcomes: Record<RuntimeReloadOutcome, {
     disposeStatus: PersonalWorkspacePullDisposeStatus;
     disposeMessage: string;
@@ -4175,12 +4070,8 @@ async function executePersonalWorkspacePull(personalWorkspaceId: string) {
     fileExplorerRef.value?.refreshAll();
     refreshCurrentWorkspacePanels();
     let runtimeOutcome: RuntimeReloadOutcome = "NO_PENDING";
-    if (response.agentConfigChanged) {
-      persistPendingPersonalPullRuntimeReload(
-        authStore.currentUser?.userId,
-        response.personalWorkspaceId
-      );
-      pendingPersonalPullRuntimeReloadWorkspaceId = response.personalWorkspaceId;
+    // 兼容滚动升级期间的旧后端；新版后端返回 runtimeReloadStatus 后由持久化 rollout 接管。
+    if (response.agentConfigChanged && !response.runtimeReloadStatus) {
       pendingRuntimeReloadKind = "agent";
       pendingReferenceRuntimeReloadRevision.value += 1;
       runtimeOutcome = await reloadReferenceRuntimeIfIdle({ quiet: true });

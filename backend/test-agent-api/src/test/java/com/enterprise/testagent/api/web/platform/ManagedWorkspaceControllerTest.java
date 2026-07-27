@@ -108,6 +108,8 @@ class ManagedWorkspaceControllerTest {
                         "commit_remote",
                         true,
                         false,
+                        "NOT_REQUIRED",
+                        null,
                         List.of("F-GCMS/workspace/docs/design.md")));
 
         client(service).post()
@@ -117,7 +119,8 @@ class ManagedWorkspaceControllerTest {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.data.personalWorkspaceId").isEqualTo("pws_123")
-                .jsonPath("$.data.updated").isEqualTo(true);
+                .jsonPath("$.data.updated").isEqualTo(true)
+                .jsonPath("$.data.runtimeReloadStatus").isEqualTo("NOT_REQUIRED");
 
         verify(service).gitPullPersonalWorkspace("pws_123", USER_ID, TRACE_ID);
     }

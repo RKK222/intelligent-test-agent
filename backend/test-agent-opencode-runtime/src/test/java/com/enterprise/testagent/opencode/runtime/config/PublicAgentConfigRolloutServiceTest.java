@@ -137,6 +137,107 @@ class PublicAgentConfigRolloutServiceTest {
     }
 
     @Test
+    void personalApplicationReloadRegistersOnlyCurrentServerWhenProcessIsRunning() {
+        when(processRepository.findUserBinding(new UserId("usr-1"), "opencode"))
+                .thenReturn(Optional.of(targetBinding()));
+        when(processRepository.findOpencodeServerProcessById(new OpencodeProcessId("ocp_1234567890abcdef")))
+                .thenReturn(Optional.of(targetProcess()));
+        when(repository.activateRollout(any(), eq("commit_personal"), any(Instant.class))).thenReturn(true);
+
+        Optional<String> rolloutId = service.schedulePersonalApplicationReload(
+                "pws_personal",
+                "feature_testagent_20260728",
+                "commit_personal",
+                "linux-1",
+                "usr-1",
+                "trace-personal");
+
+        assertThat(rolloutId).isPresent();
+        verify(repository).createRollout(
+                eq(rolloutId.orElseThrow()),
+                eq(AgentConfigRolloutScope.PERSONAL_APPLICATION),
+                eq("pws_personal"),
+                eq("feature_testagent_20260728"),
+                eq("commit_personal"),
+                eq("commit_personal"),
+                eq("usr-1"),
+                eq("linux-1"),
+                eq("trace-personal"),
+                any(Instant.class));
+        verify(repository).addServer(eq(rolloutId.orElseThrow()), eq("linux-1"), any(Instant.class));
+        verify(repository).activateRollout(eq(rolloutId.orElseThrow()), eq("commit_personal"), any(Instant.class));
+        verify(repository, never()).findActiveServerMembershipIds();
+    }
+
+    @Test
+    void personalApplicationReloadNeedsNoRolloutWhenProcessIsNotRunning() {
+        when(processRepository.findUserBinding(new UserId("usr-1"), "opencode"))
+                .thenReturn(Optional.empty());
+
+        Optional<String> rolloutId = service.schedulePersonalApplicationReload(
+                "pws_personal",
+                "feature_testagent_20260728",
+                "commit_personal",
+                "linux-1",
+                "usr-1",
+                "trace-personal");
+
+        assertThat(rolloutId).isEmpty();
+        verify(repository, never()).createRollout(
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+        verify(repository, never()).addServer(any(), any(), any());
+    }
+
+    @Test
+    void personalApplicationReloadWorkerSnapshotsOnlyInitiatingUser() {
+        PublicAgentConfigRolloutSyncRequest request = personalApplicationSyncRequest();
+        when(repository.claimPendingSync(
+                eq("linux-1"), eq(AgentConfigRolloutScope.PERSONAL_APPLICATION), any(), any()))
+                .thenReturn(Optional.of(request));
+        when(repository.renewServerSync(eq("acr_personal"), eq("linux-1"), eq("acl_sync"), any(), any()))
+                .thenReturn(true);
+        when(processRepository.findUserBinding(new UserId("usr-1"), "opencode"))
+                .thenReturn(Optional.of(targetBinding()));
+        when(processRepository.findOpencodeServerProcessById(new OpencodeProcessId("ocp_1234567890abcdef")))
+                .thenReturn(Optional.of(targetProcess()));
+        when(processRepository.findOpencodeServerProcesses(
+                any(OpencodeServerProcessFilter.class), any(PageRequest.class)))
+                .thenReturn(new PageResponse<>(List.of(targetProcess()), 1, PageRequest.MAX_SIZE, 1));
+        useManagerPorts(4096);
+
+        service.registerPersonalApplicationReloadTargets();
+
+        ArgumentCaptor<PublicAgentConfigRolloutTarget> targetCaptor =
+                ArgumentCaptor.forClass(PublicAgentConfigRolloutTarget.class);
+        verify(repository).addTarget(targetCaptor.capture(), any(Instant.class));
+        assertThat(targetCaptor.getValue().configScope())
+                .isEqualTo(AgentConfigRolloutScope.PERSONAL_APPLICATION);
+        assertThat(targetCaptor.getValue().userId()).isEqualTo("usr-1");
+        verify(repository).markServerSynced(eq("acr_personal"), eq("linux-1"), eq("acl_sync"), any());
+    }
+
+    @Test
+    void personalApplicationReloadWorkerRetriesWhenManagerSnapshotIsUnavailable() {
+        PublicAgentConfigRolloutSyncRequest request = personalApplicationSyncRequest();
+        when(repository.claimPendingSync(
+                eq("linux-1"), eq(AgentConfigRolloutScope.PERSONAL_APPLICATION), any(), any()))
+                .thenReturn(Optional.of(request));
+        when(repository.renewServerSync(eq("acr_personal"), eq("linux-1"), eq("acl_sync"), any(), any()))
+                .thenReturn(true);
+        when(processRepository.findUserBinding(new UserId("usr-1"), "opencode"))
+                .thenReturn(Optional.of(targetBinding()));
+        when(processRepository.findOpencodeServerProcessById(new OpencodeProcessId("ocp_1234567890abcdef")))
+                .thenReturn(Optional.of(targetProcess()));
+
+        service.registerPersonalApplicationReloadTargets();
+
+        verify(repository).markServerSyncRetry(
+                eq("acr_personal"), eq("linux-1"), eq("acl_sync"), eq(1), any(),
+                eq("目标服务器 manager 进程清单尚未就绪"), any());
+        verify(repository, never()).markServerSynced(eq("acr_personal"), eq("linux-1"), eq("acl_sync"), any());
+    }
+
+    @Test
     void userGateOpensImmediatelyAfterOwnTargetsAreDisposed() {
         when(repository.findBlockingRolloutId("usr-1")).thenReturn(Optional.empty());
 
@@ -621,6 +722,20 @@ class PublicAgentConfigRolloutServiceTest {
                 "abc123",
                 "usr-admin",
                 "trace-1",
+                0,
+                Instant.now().plusSeconds(180),
+                "acl_sync");
+    }
+
+    private PublicAgentConfigRolloutSyncRequest personalApplicationSyncRequest() {
+        return new PublicAgentConfigRolloutSyncRequest(
+                "acr_personal",
+                AgentConfigRolloutScope.PERSONAL_APPLICATION,
+                "pws_personal",
+                "feature_testagent_20260728",
+                "commit_personal",
+                "usr-1",
+                "trace-personal",
                 0,
                 Instant.now().plusSeconds(180),
                 "acl_sync");

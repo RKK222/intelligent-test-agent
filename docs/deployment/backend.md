@@ -164,6 +164,8 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端和前端展�
 
 公共配置远端 push 或共享副本切换前先建立 `PREPARING` 持久化排空任务，远端提交确认后转 `DRAINING`；最终本地 commit 尚未产生的占位准备记录不会作为 Git 引用解析，确认 push 尚未开始且超过 5 分钟后会先恢复共享副本再安全终止。HTTP 发布请求在远端提交确认、rollout 激活和广播后返回，不同步等待本机或其它服务器完成 Git 同步、进程登记和排空；各节点由广播唤醒，并由默认 5 秒的数据库补偿扫描保证丢广播或重启后继续执行。公共发布使用独立活动锁，应用发布按应用版本 ID 使用独立锁，应用发布不会再阻塞公共拉取或其它应用。同步范围来自独立发布 membership：每台新版 Java 自动登记，临时离线成员继续保留，历史 `linux_servers` 行不会自动加入；永久下线的离线服务器可由超级管理员调用运行管理退役 API 移除。各目标 Java 用数据库租约互斥认领本服务器 Git 同步，并使用发起管理员数据库中已存的 SSH key 将共享运行副本 checkout/reset 到目标 commit。应用共享副本完成后，脏或冲突的个人 worktree 以 `AWAITING_USER + 原因码` 独立持久化，主 rollout 结束且后台继续补偿；用户处理完成后只对该用户建立 dispose 目标。目标服务器取得带 PID/启动时间的本机 manager 进程清单后才确认同步，随后固定延迟任务只处理本 `linuxServerId` 的目标，持续续租并通过本机 opencode 检查该进程历史绑定的所有 Workspace Session 状态；dispose 前再次确认 PID 和启动时间仍一致。公共范围恢复共享配置链接时优先使用这个精确 manager 快照携带的 `sessionPath/configPath`，平台进程 PID 为空、启动时间源微差或 `userId` 无法映射时仍可安全处理同一进程；旧 manager 缺路径时只对数据库身份完全匹配的已知用户保留兼容读取，禁止按端口猜测用户或操作替换进程。全部空闲并恢复链接后调用 `/global/dispose`。该用户目标完成即单独开闸，下一次消息会重新创建 Instance，因此新 `opencode.jsonc`、Agent 和 Skill 在该用户下一次请求生效；忙碌、非法响应、服务器离线或 manager 清单缺失均持续重试，不设最大次数。
 
+个人 `git-pull` 已成功 merge 应用 Agent 配置时，运行中的发起用户使用独立 `PERSONAL_APPLICATION` 排空范围。该任务只创建当前服务器 server 行并登记 `initiated_by_user_id` 对应进程，不读取发布 membership、不执行 Git 同步、不广播，也不占用 PUBLIC 或 APPLICATION 活动发布唯一锁；其后复用同一 manager 进程身份核验、Session 空闲检查、目标租约和 `/global/dispose`。用户进程未运行时不创建任务，下次受管启动直接读取最新个人 worktree。
+
 目录和日志规划：
 
 | 路径 | 所属节点 | 用途 | 运维要求 |

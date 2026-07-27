@@ -2302,6 +2302,9 @@ export type PersonalWorkspaceGitPullResult = {
   commitHash: string;
   updated: boolean;
   agentConfigChanged: boolean;
+  /** 新后端持久化登记结果；缺失时前端兼容旧后端并仅在当前页面尝试重载。 */
+  runtimeReloadStatus?: "NOT_REQUIRED" | "SCHEDULED" | "NOT_RUNNING" | "FAILED";
+  runtimeReloadId?: string | null;
   changedFiles: string[];
 };
 

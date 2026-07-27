@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.common.error.ErrorCode;
@@ -1968,13 +1967,15 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(response.updated()).isTrue();
         assertThat(response.commitHash()).isEqualTo("commit_after_pull");
         assertThat(response.agentConfigChanged()).isFalse();
+        assertThat(response.runtimeReloadStatus()).isEqualTo("NOT_REQUIRED");
+        assertThat(response.runtimeReloadId()).isNull();
         assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_base");
         assertThat(git.resetCommit).isNull();
         assertThat(publisher.events).isEmpty();
     }
 
     @Test
-    void gitPullPersonalWorkspaceReportsApplicationAgentChangeWithoutStartingGlobalRollout() {
+    void gitPullPersonalWorkspaceSchedulesOnlyCurrentUserRuntimeReload() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
@@ -1998,6 +1999,14 @@ class ManagedWorkspaceApplicationServiceTest {
         git.nextRepoStatusPorcelain = " M F-GCMS/workspace/.opencode/agents/local-draft.md\n";
         git.targetContainedInHead = false;
         PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        when(coordinator.schedulePersonalApplicationReload(
+                personal.personalWorkspaceId(),
+                "feature_testagent_20260707",
+                "commit_after_agent_pull",
+                "127.0.0.1",
+                "usr_1",
+                "trace_pull_agent"))
+                .thenReturn(Optional.of("acr_personal_reload"));
         service.setAgentConfigRolloutCoordinator(coordinator);
 
         ManagedWorkspaceResponses.PersonalWorkspaceGitPullResponse response = service.gitPullPersonalWorkspace(
@@ -2006,9 +2015,49 @@ class ManagedWorkspaceApplicationServiceTest {
                 "trace_pull_agent");
 
         assertThat(response.agentConfigChanged()).isTrue();
+        assertThat(response.runtimeReloadStatus()).isEqualTo("SCHEDULED");
+        assertThat(response.runtimeReloadId()).isEqualTo("acr_personal_reload");
         assertThat(git.mergedCommit).isEqualTo("commit_after_agent_pull");
-        verifyNoInteractions(coordinator);
+        verify(coordinator).schedulePersonalApplicationReload(
+                personal.personalWorkspaceId(),
+                "feature_testagent_20260707",
+                "commit_after_agent_pull",
+                "127.0.0.1",
+                "usr_1",
+                "trace_pull_agent");
         assertThat(git.pushes).isEmpty();
+    }
+
+    @Test
+    void gitPullPersonalWorkspaceSkipsDisposeWhenCurrentUserProcessIsNotRunning() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "127.0.0.1", "trace_version");
+        ManagedWorkspaceResponses.PersonalWorkspaceResponse personal = service.createPersonalWorkspace(
+                version.versionId(), "default", new UserId("usr_1"), "trace_personal");
+        git.nextRemoteCommit = "commit_after_agent_pull";
+        git.nextNameStatus = "M\tF-GCMS/workspace/.opencode/opencode.jsonc\n";
+        git.targetContainedInHead = false;
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        when(coordinator.schedulePersonalApplicationReload(
+                personal.personalWorkspaceId(),
+                "feature_testagent_20260707",
+                "commit_after_agent_pull",
+                "127.0.0.1",
+                "usr_1",
+                "trace_pull_agent"))
+                .thenReturn(Optional.empty());
+        service.setAgentConfigRolloutCoordinator(coordinator);
+
+        ManagedWorkspaceResponses.PersonalWorkspaceGitPullResponse response = service.gitPullPersonalWorkspace(
+                personal.personalWorkspaceId(), new UserId("usr_1"), "trace_pull_agent");
+
+        assertThat(response.runtimeReloadStatus()).isEqualTo("NOT_RUNNING");
+        assertThat(response.runtimeReloadId()).isNull();
     }
 
     @Test

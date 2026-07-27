@@ -19,10 +19,9 @@ describe("FigmaFileExplorer", () => {
     );
     expect(agentWorkbenchSource).toContain("hasDismissedPersonalPullConfirm(authStore.currentUser?.userId)");
     expect(agentWorkbenchSource).toContain("dismissPersonalPullConfirm(authStore.currentUser?.userId)");
-    expect(agentWorkbenchSource).toContain("persistPendingPersonalPullRuntimeReload(");
-    expect(agentWorkbenchSource).toContain("restorePendingPersonalPullRuntimeReload();");
-    expect(agentWorkbenchSource).toContain("completePendingPersonalPullRuntimeReload();");
-    expect(agentWorkbenchSource).toContain("页面刷新或关闭后重新进入时仍复用现有空闲重载流程");
+    expect(agentWorkbenchSource).not.toContain("personal-pull-runtime-reload");
+    expect(agentWorkbenchSource).toContain('response.runtimeReloadStatus === "SCHEDULED"');
+    expect(agentWorkbenchSource).toContain("新版后端返回 runtimeReloadStatus 后由持久化 rollout 接管");
     expect(agentWorkbenchSource).toContain("<PersonalWorkspacePullDialog");
   });
 

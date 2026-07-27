@@ -1723,6 +1723,8 @@ describe("backend-api", () => {
       commitHash: "abc123",
       updated: true,
       agentConfigChanged: false,
+      runtimeReloadStatus: "NOT_REQUIRED",
+      runtimeReloadId: null,
       changedFiles: ["F-GCMS/workspace/docs/design.md"]
     };
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) =>

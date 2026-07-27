@@ -253,6 +253,8 @@ public final class ManagedWorkspaceResponses {
             String commitHash,
             boolean updated,
             boolean agentConfigChanged,
+            String runtimeReloadStatus,
+            String runtimeReloadId,
             List<String> changedFiles) {
     }
 
