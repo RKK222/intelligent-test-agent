@@ -2588,8 +2588,10 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         ApplicationWorkspaceVersion version = existingVersion(personal.versionId());
         ApplicationWorkspaceVersionReplica applicationReplica = replicaForPersonalWorkspace(version, personal, traceId);
         // 兼容旧请求体中的 files，但反向更新不再逐文件 copy：Git merge 的原子单位必须是版本固定 commit。
-        // 这样才会保留个人提交历史，并让冲突进入平台已有的三方合并流程。
-        normalizeFiles(files);
+        // 空列表表示显式同步整个目标提交；旧客户端仍传路径时只校验格式，不用它缩小合并范围。
+        if (files != null && !files.isEmpty()) {
+            normalizeFiles(files);
+        }
         PersonalFeatureMergeResult result = mergeFeatureCommitIntoPersonalWorkspace(
                 version,
                 applicationReplica,

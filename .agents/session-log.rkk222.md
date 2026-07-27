@@ -5,6 +5,23 @@
 
 ## Entries
 
+### 2026-07-27 - 修复应用整提交同步空文件校验
+
+### Why
+- 应用 Agent 更新按钮按既定契约发送 `files: []` 表示合并整个版本固定提交，但后端仍调用旧逐文件校验并返回“同步文件不能为空”，企业侧因此出现 `VALIDATION_ERROR`，Git merge 和文件树刷新都没有执行。
+
+### What
+- `syncApplicationToPersonal` 允许空或缺省 `files` 进入整提交 merge；旧客户端传入非空路径时仍校验安全格式，但路径不缩小 Git merge 范围。
+- 增加空列表同步固定提交的服务回归，并同步 workspace-management README 与应用 worktree 测试文档。
+
+### How
+- TDD 先复现 `PlatformException: 同步文件不能为空`，修复后 `ManagedWorkspaceApplicationServiceTest` 60 项全绿；JDK 25 整仓跳过测试打包成功。
+- 使用未修改的 `.env.test` 和 test profile 重启 backend、opencode-manager、frontend；backend health/readiness 为 UP、前端 3000 和登录 CORS 正常，manager 最终健康。
+
+### Result
+- 应用个人 worktree 即使没有可选择的本地文件，也能通过左侧更新按钮合入 feature 固定提交并刷新 Agent/Skill/Tool 文件树；dirty 和冲突保护保持不变。
+- 未新增或修改 HTTP/WS 字段、RunEvent、数据库/Flyway、SQL、权限、安全配置、环境配置、generated SDK 或 OpenCode 源码。
+
 ### 2026-07-27 - 修复重启后模型与新增工作空间目录不刷新
 
 ### Why

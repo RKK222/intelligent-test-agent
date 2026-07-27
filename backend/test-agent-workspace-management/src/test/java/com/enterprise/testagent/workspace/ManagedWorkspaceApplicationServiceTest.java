@@ -1515,6 +1515,33 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void syncApplicationToPersonalAcceptsEmptyFilesBecauseItMergesTheWholeTargetCommit() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_personal");
+        git.targetContainedInHead = false;
+
+        ManagedWorkspaceResponses.WorkspaceSyncResponse sync = service.syncApplicationToPersonal(
+                personal.personalWorkspaceId(),
+                List.of(),
+                new UserId("usr_1"),
+                "trace_sync_all");
+
+        assertThat(sync.status()).isEqualTo(WorkspaceSyncStatus.SUCCEEDED.name());
+        assertThat(git.mergedCommit).isEqualTo(managed.versions.get(0).targetCommitHash());
+        assertThat(managed.syncRecords).singleElement().satisfies(record -> {
+            assertThat(record.direction()).isEqualTo(WorkspaceSyncDirection.APPLICATION_TO_PERSONAL);
+            assertThat(record.status()).isEqualTo(WorkspaceSyncStatus.SUCCEEDED);
+        });
+    }
+
+    @Test
     void featureMergeConflictStaysInDiffUntilUserCompletesMergeCommit() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
