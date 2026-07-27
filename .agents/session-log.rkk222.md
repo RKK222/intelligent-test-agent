@@ -2335,3 +2335,23 @@
 - Result:
   - 拉取远程变为严格按人、按个人 worktree 生效；其它用户、共享版本、推送权限和目录权限均不改变。个人拉取不产生 RunEvent 或服务器广播，Agent 变化也只热加载点击者本人。
   - 新增一个向后兼容的 HTTP 响应类型和个人拉取端点；未涉及数据库/Flyway/SQL、generated SDK、OpenCode 源码、环境配置、性能或权限扩大。
+
+### 2026-07-27 - 企业包构建固定当前 HEAD
+
+### Why
+
+- 打包过程中本地 `main` 曾在构建输入之后前进，导致已生成的内包与当前 HEAD 不一致；直接复用该包存在交付旧代码的风险。
+
+### What
+
+- 本次企业包以最终稳定的 `29889f38d8c5` 为源码输入重新完整构建，并重新封装固定名称的企业三节点包。
+- 形成打包校验约束：构建前记录 HEAD，构建后再次比较 HEAD；不一致时不得继续分发。
+
+### How
+
+- 重新执行 `deploy/internal/package-release.sh --output-dir deploy/internal/dist`，再执行 `deploy/internal/package-two-backend-complete.sh`。
+- 校验内外层 ZIP SHA256、内嵌发布包一致性、四类发布产物字节一致、敏感节点 XXL-JOB MySQL 配置、worker `linux/amd64`、OpenCode `1.18.4`、固定脚本哈希、企业包验收脚本和 AI 文档校验。
+
+### Result
+
+- 内包 SHA256 为 `0526628f7d02ade564b2c6da56d2249076be8a72344a9b078c2576c15293c3cc`，外层企业包 SHA256 为 `02416716053bd01c65734f00a248862c473be04949e3ddf096e90635876c8638`；工作区无新增未提交改动，打包脚本未修改。
