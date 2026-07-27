@@ -2477,3 +2477,26 @@
 - 普通文件推送不要求其他用户主动拉取，也不触发 dispose；平台自动尝试更新，无冲突就完成，有覆盖风险或冲突才由对应用户处理后重试。
 - 应用工作区、应用 Agent、公共 Agent 的用户角色、目录权限、stage/commit/push 白名单、共享 target、跨用户同步范围和 dispose 规则未改变。按约定未处理仅可通过直接后台接口触发、页面没有入口的权限审计项。
 - 未变更 HTTP wire、RunEvent 类型、数据库/Flyway/SQL、安全配置、generated SDK、OpenCode 源码或环境文件。浏览器禁用本地存储时仍退化为原有的当前页面内存续接能力。
+
+### 2026-07-28 - 重建内部企业双后台交付包
+
+### Why
+
+- 最近的个人拉取、后台原生 merge 和待重载续接调整需要进入新的企业内完整包；历史外层包只能复用三台节点的受控敏感配置，不能继续作为代码交付物。
+- 内层 ZIP 与外层内嵌 ZIP 必须来自同一次当前源码封装，避免只校验旧外层 SHA 而实际交付旧代码。
+
+### What
+
+- 从干净 `main` 的运行时代码提交 `8dc46d4036e9317914ec9a7bdbfa4e5c7ac762e4` 全量重建后端 JAR、同源前端、外置 programs 和 `linux/amd64` worker 镜像；再用已验真的 `.4/.114/.2` 节点配置包重建固定名双后台外层包。
+- 本记录随提交进入内层 ZIP 后，仅复用已通过检查的二进制制品执行 `package-release.sh --zip-only`，随后再次运行 `package-two-backend-complete.sh`，保证最终包包含本次追溯记录且运行时代码没有二次漂移。
+
+### How
+
+- AI 文档、开发脚本及内部自动部署、多后台、Nginx、systemd、配置采集、MySQL、Redis、XXL-JOB 等部署 fixture 校验通过；前端 lint/typecheck 和 97 个测试文件通过，1639 项通过、1 项跳过。
+- 后端全量测试执行 734 项，733 项通过；唯一失败仍是主线已知的 `OpencodeProcessConfigLinkServiceTest.rejectsOrdinaryDirectoryAtManagedPathWithoutDeletingUserData`，与本次打包及最近工作区改动无关，未隐瞒或扩大范围修改。
+- worker 真实容器冒烟通过：`linux/amd64`、glibc 2.31、OpenCode 1.18.4、断网 Tool 运行、用户目录隔离和优雅退出均符合基线；JAR 内置 RSA、外置 lib manifest、必需产物、三台节点包、无 MySQL 镜像混入及 ZIP 完整性均通过。
+
+### Result
+
+- 最终交付物固定为 `deploy/internal/dist/test-agent-two-backend-complete.zip` 及同名 `.sha256`；当前内层 ZIP 与外层内嵌 ZIP 的 SHA256 必须相等后才可交付。
+- 本次未修改业务代码、API、RunEvent、数据库/Flyway/SQL、权限、安全配置、generated SDK、OpenCode 源码或环境文件；只新增本机交付追溯记录并重新生成被 Git 忽略的企业制品。
