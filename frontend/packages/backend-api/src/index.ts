@@ -2419,11 +2419,24 @@ class WorkspaceFileSocketClient {
 }
 
 function toWebSocketUrl(baseUrl: string, webSocketUrl: string): string {
-  const absolute = webSocketUrl.startsWith("ws://") || webSocketUrl.startsWith("wss://")
-    ? webSocketUrl
-    : webSocketUrl.startsWith("http://") || webSocketUrl.startsWith("https://")
-      ? webSocketUrl
-      : `${baseUrl.replace(/\/$/, "")}${webSocketUrl.startsWith("/") ? "" : "/"}${webSocketUrl}`;
+  const normalizedWebSocketUrl = webSocketUrl.trim();
+  if (normalizedWebSocketUrl.startsWith("ws://") || normalizedWebSocketUrl.startsWith("wss://")) {
+    return normalizedWebSocketUrl;
+  }
+  const normalizedBaseUrl = baseUrl.trim().replace(/\/$/, "");
+  let absolute = normalizedWebSocketUrl;
+  if (!normalizedWebSocketUrl.startsWith("http://") && !normalizedWebSocketUrl.startsWith("https://")) {
+    if (normalizedBaseUrl) {
+      absolute = `${normalizedBaseUrl}${normalizedWebSocketUrl.startsWith("/") ? "" : "/"}${normalizedWebSocketUrl}`;
+    } else {
+      // 企业同源包会把 HTTP API 基址编译为空；WebSocket 构造器要求绝对地址，因此必须按当前页面补全 origin。
+      const pageUrl = typeof globalThis.location?.href === "string" ? globalThis.location.href.trim() : "";
+      if (!pageUrl) {
+        throw new Error("Cannot resolve a relative WebSocket URL without an API base URL or browser location");
+      }
+      absolute = new URL(normalizedWebSocketUrl, pageUrl).toString();
+    }
+  }
   if (absolute.startsWith("https://")) {
     return `wss://${absolute.slice("https://".length)}`;
   }

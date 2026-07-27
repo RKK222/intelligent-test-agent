@@ -2324,6 +2324,57 @@ describe("backend-api", () => {
     );
   });
 
+  it("resolves a relative Hub file websocket ticket against the enterprise same-origin page", async () => {
+    vi.stubGlobal("location", { href: "http://mimo.sdc.cs.icbc:9996/hub" });
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: {
+            ticket: "wft_hub_relative",
+            expiresAt: "2026-07-27T10:00:00Z",
+            webSocketUrl: "/api/internal/platform/workspace-management/file/ws?ticket=wft_hub_relative"
+          }
+        }),
+        { status: 200 }
+      )
+    );
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const client = createBackendApiClient({
+      baseUrl: "",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: fakeWorkspaceWebSocketFactory(sockets)
+    });
+
+    try {
+      await expect(client.readAgentSkillHubFile("hub_rev_published", "SKILL.md")).resolves.toEqual({
+        path: "SKILL.md",
+        content: "# Hub Skill\n\n企业部署内容",
+        size: 31,
+        encoding: "utf-8"
+      });
+
+      expect(fetcher).toHaveBeenCalledWith(
+        "/api/internal/platform/workspace-management/file-ws/tickets",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ mode: "agent-skill-hub", scope: "HUB" })
+        })
+      );
+      expect(sockets[0]?.url).toBe(
+        "ws://mimo.sdc.cs.icbc:9996/api/internal/platform/workspace-management/file/ws?ticket=wft_hub_relative"
+      );
+      expect(sockets[0]?.sentMessages[0]).toMatchObject({
+        op: "hub.asset.read",
+        params: { revisionId: "hub_rev_published", path: "SKILL.md" }
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("routes workspace file listing through target backend websocket", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
@@ -3784,6 +3835,13 @@ class FakeWorkspaceWebSocket {
                       content: "agent content",
                       size: 13
                     }
+                  : message.op === "hub.asset.read"
+                    ? {
+                        path: String(message.params?.path ?? "SKILL.md"),
+                        content: "# Hub Skill\n\n企业部署内容",
+                        size: 31,
+                        encoding: "utf-8"
+                      }
                   : message.op === "workspace.read"
                     ? {
                         path: "docs/design.md",

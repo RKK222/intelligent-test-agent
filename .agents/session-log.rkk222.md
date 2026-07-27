@@ -1980,3 +1980,17 @@
 - Result:
   - 取消引用立即退出当前应用和消费者视图，确认前可重新引用；Skill/Agent 分类不再混入应用引用状态，刷新与快速切换不会再被旧请求覆盖。
   - 变更调整既有 HTTP 响应语义和 MyBatis SQL，不改 API 结构、RunEvent、数据库结构/Flyway、安全权限、generated SDK、OpenCode 源码或环境配置；同步更新 HTTP API、安全规范及前后端模块 README。
+
+### 2026-07-27 - 修复企业同源 Hub 文件 WebSocket 地址
+
+- Why:
+  - 企业前端以空 `VITE_TEST_AGENT_API_BASE_URL` 构建时，Hub 文件 ticket 返回 `/api/...` 相对路径；浏览器 `WebSocket` 构造器要求绝对地址，点击 Skill 因此无法展示 `SKILL.md`。
+- What:
+  - `backend-api` 的共用 WebSocket URL 归一化在 API base 为空时按当前页面 origin 补全地址，并把 `http/https` 转换为 `ws/wss`；已有绝对目标 Java 地址语义保持不变。
+  - 增加企业同源 Hub 文件回归，真实执行 ticket、WebSocket RPC 和 Markdown 内容返回；同步 backend-api、HTTP API、前端部署及单后台故障排查文档。
+- How:
+  - TDD 先稳定复现传给 WebSocket 的仍是 `/api/...`，修复后全量前端 96 个测试文件为 1626 passed / 1 skipped，backend-api typecheck 和空 API base 的 agent-web 生产构建通过。
+  - 使用未修改的 `.env.test` 和 test profile 构建并启动；后端冷启动超过脚本 90 秒等待后自行达到 readiness `UP`，随后单独启动前端。Playwright 真实页面点击 Hub 演示 Skill，`SKILL.md` 正文正常展示，控制台没有 WebSocket 构造或文件连接错误。
+- Result:
+  - 企业同源入口现在会连接 `ws://当前入口/api/...`，HTTPS 自动使用 `wss://`，无需把入口地址硬编码进环境配置；部署现场需要重新构建并替换前端静态包。
+  - 未修改 HTTP/WS wire 字段、RunEvent、数据库/Flyway、SQL、权限、安全配置、generated SDK、OpenCode 源码或环境文件。

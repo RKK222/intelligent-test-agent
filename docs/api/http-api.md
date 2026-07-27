@@ -1175,6 +1175,8 @@ Agent 配置文件 ticket 请求体：
 }
 ```
 
+`webSocketUrl` 可以是目标 Java 的绝对地址，也可以是同源 `/api/...` 相对路径。浏览器不能把相对路径直接传给 `new WebSocket()`；当编译期 API base 为空时，前端必须用当前页面的协议与 origin 补全，并把 `http/https` 分别转换为 `ws/wss` 后再建连。
+
 WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSocket”段。旧 HTTP 文件接口已作废，历史调用方和调试脚本也必须迁移到 route + ticket + 目标后端 WebSocket。
 
 服务器目录选择器只通过短期 ticket 建立的文件 WebSocket 使用；缺失、不可访问或非目录返回 `VALIDATION_ERROR`。创建服务器工作空间仍要求 `SUPER_ADMIN`，且目标服务器必须与当前 agent 服务器一致。

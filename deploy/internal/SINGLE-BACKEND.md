@@ -660,6 +660,7 @@ fi
 |---|---|
 | 浏览器 `ERR_NAME_NOT_RESOLVED` | 在实际浏览器终端执行 `nslookup mimo.sdc.cs.icbc`；名称解析失败需由企业 DNS/入口管理方处理。DNS 不负责端口映射，不能靠把实体 Nginx 改成 `9996` 修复。 |
 | 登录请求跨域并报 CORS | 前端包不应固化 API 地址；用空 `VITE_TEST_AGENT_API_BASE_URL` 重新打包并部署，同时确认 `backend.env` 的 CORS 包含域名和 IP 两个 `:9996` origin 后重启 Java。不要用 `no-cors` 隐藏错误。 |
+| Hub 点击 Skill 后报 `Failed to construct 'WebSocket'` 且 URL 为 `/api/...` | 前端静态包仍包含旧的相对 WebSocket 建连逻辑；用空 `VITE_TEST_AGENT_API_BASE_URL` 重新生成并部署最新前端包，确认浏览器实际建连地址为 `ws://当前入口/api/...`（HTTPS 为 `wss://`），再清理浏览器缓存。无需修改 ticket 或把入口地址硬编码进环境文件。 |
 | 前端部署提示 Nginx 未 include 新网关文件 | 当前主配置只显式加载 `/data/apps/nginx/conf/test-agent.conf`；把 `TEST_AGENT_NGINX_CONF_PATH` 指向该专用文件，实体端口保持 `80`。不要把同目录新建文件当作已加载，也不要只看 `nginx -t`，必须用 `nginx -T` 核对文件清单。 |
 | 前端 502/进不去 | `.2` 用 `/data/apps/nginx/sbin/nginx -p /data/apps/nginx/ -c /data/apps/nginx/conf/nginx.conf -t`，再从 `.2` curl `.114:8080/actuator/health`。禁止使用 PATH 中可能读取 `/root/conf/nginx.conf` 的另一个 Nginx。 |
 | 部署提示 systemd unit 不匹配 | 执行 `systemctl show test-agent-backend -p ExecStart -p EnvironmentFiles`；必须分别指向 `/data/testagent/dist/backend/test-agent-app.jar` 和 `/data/testagent/config/backend.env`，不要让脚本覆盖未知 unit。 |

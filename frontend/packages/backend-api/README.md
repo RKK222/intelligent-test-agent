@@ -6,7 +6,7 @@
 
 ## 主要职责
 
-- 统一 baseUrl、traceId、鉴权头和 JSON 解析；`VITE_TEST_AGENT_API_BASE_URL` 显式为空时保留同源相对 `/api`，不会回退到本机开发地址。
+- 统一 baseUrl、traceId、鉴权头和 JSON 解析；`VITE_TEST_AGENT_API_BASE_URL` 显式为空时，HTTP 请求保留同源相对 `/api`，WebSocket ticket 的相对路径则按当前页面 origin 补全为绝对 `ws://` / `wss://` 地址，不会回退到本机开发地址。
 - Model/Provider 目录仍读取 opencode 原生接口；平台 config GET 代理实例级 `/config` 合并有效配置，存在非空 `enabled_providers` 时，client 按同一 Provider ID 白名单过滤两类目录，企业配置只展示白名单 Provider 下的全部模型，不会混入 OpenCode Zen。未配置白名单或 config 暂时读取失败时保持原生目录；并发目录查询复用同一轮 config 请求，请求结束即失效以支持配置热加载。
 - 可选 `routeLinuxServerId` 动态读取当前页面内存中的用户 binding；只有用户 OpenCode、Session、Run、夜间任务和本地工作区/Agent 配置请求通过内部 `routedRequest` 增加 `X-Test-Agent-Linux-Server-Id`。空值不发送，登录、用户管理、应用列表和共享控制面仍使用普通请求；该值仅用于 Nginx 首跳，不替代后端权威路由。
 - 可选 `rawExchangeObserver` 供前端调试面板记录浏览器与平台后端之间的最终 method/url/path/traceId、请求体、响应状态/响应头和响应原文；observer 不记录 `Authorization`、Cookie 等敏感请求头，也不改变后端 API 契约。
@@ -46,7 +46,7 @@
 ### Agent & Skill Hub client
 
 - Hub 目录、详情、发布、更新列表和角标使用 `/workspace-management/agent-skill-hub` HTTP API；目录可携带 `referencedOnly + targetWorkspaceId` 获取当前应用引用清单，详情返回引用方应用/工作空间，更新请求按同一目标工作区统计。
-- `readAgentSkillHubFile` 使用独立 `agent-skill-hub/HUB` ticket；引用、取消引用和更新方法复用目标 workspace 的 Agent 配置 WebSocket route/ticket/RPC，保持多 Java 文件路由边界。
+- `readAgentSkillHubFile` 使用独立 `agent-skill-hub/HUB` ticket；企业同源构建收到相对 `webSocketUrl` 时，client 必须用浏览器当前页面补全 origin 后再创建 WebSocket。引用、取消引用和更新方法复用目标 workspace 的 Agent 配置 WebSocket route/ticket/RPC，保持多 Java 文件路由边界。
 - 调用方只得到标准响应和冲突 DTO，不接触 Git 仓库路径、压缩制品或数据库标识实现。
 
 ## 禁止事项
