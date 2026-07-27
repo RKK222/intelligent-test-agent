@@ -682,6 +682,8 @@ generation、租约和 CAS 规则：
 - 旧 `application_workspace_versions.runtime_workspace_id/repo_root_path/workspace_root_path` 保留，作为首次创建节点和旧响应兼容字段；新建/显式修复记录保存 `appworkspace:` 逻辑路径，接口响应返回解析后的当前服务器物理路径。
 - migration 只对已具备 `workspaces.linux_server_id` 的历史应用版本回填副本；`current_commit_hash` 为空，由启动/周期补偿任务读取本机 Git HEAD 后更新。
 - `target_commit_hash` 为空的历史版本在首次本机副本校验成功后由业务层回填为当前 HEAD；随后各服务器通过内部广播和补偿扫描追平。
+- 物理仓库身份按 `app_id + repository_id + version + branch` 判定；同组不同 `application_workspace_id` 只是目录视图。兼容现有表结构，任何 publish、pull、新目录提交或版本读取都会把组内 `target_commit_hash/target_commit_updated_at` 扇出为同一值；检测历史值不一致时，以 `target_commit_updated_at` 最新的非空提交为准自动收敛。该修复不新增表和 migration。
+- 历史 `personal_workspaces.workspace_root_path` 或关联 `workspaces.root_path` 指向个人仓库根、旧服务器绝对路径时，默认个人工作区进入流程会按版本、用户、仓库、分支和模板目录重新计算逻辑路径并更新既有记录；目标目录不存在且因本地变更不能合并时保持原数据并返回阻塞文件，禁止将仓库根继续写成工作空间根。
 
 ## 用户 → 应用 → 工作空间 默认进入行为
 

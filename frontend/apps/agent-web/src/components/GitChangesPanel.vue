@@ -31,6 +31,7 @@ import type {
   AgentConfigProgressEvent,
   RunDiffFile,
   WorkspaceGitDiffFile,
+  WorkspaceGitUpdateBlocker,
   WorkspaceGitConflict,
   WorkspaceGitConflictResolution
 } from "@test-agent/shared-types";
@@ -235,6 +236,7 @@ const publishResultConfirmed = ref(false);
 const workspaceMergeInProgress = ref(false);
 const workspaceApplicationUpdatePending = ref(false);
 const workspaceApplicationTargetCommit = ref<string | null>(null);
+const workspaceApplicationUpdateBlockingFiles = ref<WorkspaceGitUpdateBlocker[]>([]);
 const commitRequestedPush = ref(false);
 type CommitResultSummary = {
   committedFiles: number;
@@ -677,6 +679,7 @@ watch(
     workspaceMergeInProgress.value = false;
     workspaceApplicationUpdatePending.value = false;
     workspaceApplicationTargetCommit.value = null;
+    workspaceApplicationUpdateBlockingFiles.value = [];
     stagedWorkspacePaths.value.clear();
     void refreshChanges();
   },
@@ -784,6 +787,9 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
         workspaceMergeInProgress.value = gitDiff.mergeInProgress === true;
         workspaceApplicationUpdatePending.value = gitDiff.applicationUpdatePending === true;
         workspaceApplicationTargetCommit.value = gitDiff.applicationTargetCommit ?? null;
+        workspaceApplicationUpdateBlockingFiles.value = Array.isArray(gitDiff.applicationUpdateBlockingFiles)
+          ? gitDiff.applicationUpdateBlockingFiles
+          : [];
         // `.opencode` 与普通文件同属个人 worktree，但在“应用Agent”视图单独展示和提交。
         const workspaceFiles = gitDiff.files
           .filter((f) => !isWorkspaceAgentConfigPath(f.path))
@@ -809,12 +815,14 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
         workspaceMergeInProgress.value = false;
         workspaceApplicationUpdatePending.value = false;
         workspaceApplicationTargetCommit.value = null;
+        workspaceApplicationUpdateBlockingFiles.value = [];
       }
     } else {
       workspaceDiffFiles.value = [];
       workspaceMergeInProgress.value = false;
       workspaceApplicationUpdatePending.value = false;
       workspaceApplicationTargetCommit.value = null;
+      workspaceApplicationUpdateBlockingFiles.value = [];
     }
 
     // 2. Fetch public agent changes
@@ -1959,7 +1967,20 @@ defineExpose({
                 class="git-conflict-note"
               >
                 应用 feature 有待同步更新<span v-if="workspaceApplicationTargetCommit">（{{ workspaceApplicationTargetCommit.slice(0, 12) }}）</span>；
-                请先提交或回退当前个人变更，系统随后自动重试 Git 合并。
+                <template v-if="workspaceApplicationUpdateBlockingFiles.length > 0">
+                  以下个人仓库变更正在阻塞合并，请提交或回退后重试：
+                  <div
+                    v-for="file in workspaceApplicationUpdateBlockingFiles.slice(0, 8)"
+                    :key="`workspace-update-blocker:${file.path}`"
+                    class="mt-1 break-all"
+                  >
+                    {{ file.rawStatus || "??" }} · <span v-if="file.workspaceName">{{ file.workspaceName }} · </span>{{ file.path }}
+                  </div>
+                  <div v-if="workspaceApplicationUpdateBlockingFiles.length > 8" class="mt-1">
+                    另有 {{ workspaceApplicationUpdateBlockingFiles.length - 8 }} 个阻塞文件
+                  </div>
+                </template>
+                <template v-else>系统将在个人仓库可合并后自动重试 Git 合并。</template>
               </div>
               <div
                 v-else-if="workspaceMergeInProgress && workspaceAgentConflicts.length > 0 && workspaceConflicts.length === 0"
@@ -2135,7 +2156,20 @@ defineExpose({
                 class="git-conflict-note"
               >
                 应用 feature 有待同步更新<span v-if="workspaceApplicationTargetCommit">（{{ workspaceApplicationTargetCommit.slice(0, 12) }}）</span>；
-                请先提交或回退当前个人变更，系统随后自动重试 Git 合并。
+                <template v-if="workspaceApplicationUpdateBlockingFiles.length > 0">
+                  以下个人仓库变更正在阻塞合并，请提交或回退后重试：
+                  <div
+                    v-for="file in workspaceApplicationUpdateBlockingFiles.slice(0, 8)"
+                    :key="`agent-update-blocker:${file.path}`"
+                    class="mt-1 break-all"
+                  >
+                    {{ file.rawStatus || "??" }} · <span v-if="file.workspaceName">{{ file.workspaceName }} · </span>{{ file.path }}
+                  </div>
+                  <div v-if="workspaceApplicationUpdateBlockingFiles.length > 8" class="mt-1">
+                    另有 {{ workspaceApplicationUpdateBlockingFiles.length - 8 }} 个阻塞文件
+                  </div>
+                </template>
+                <template v-else>系统将在个人仓库可合并后自动重试 Git 合并。</template>
               </div>
               <div
                 v-for="file in activeAgentConflicts"

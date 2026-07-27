@@ -325,6 +325,9 @@ class ManagedWorkspaceApplicationServiceTest {
 
         assertThat(response.directoryPath()).isEqualTo("F-GCMS/NewSpace");
         assertThat(Files.isDirectory(root.resolve("appworkspace/20260707/gcms/F-GCMS/NewSpace"))).isTrue();
+        assertThat(git.stagedFiles).containsExactly("F-GCMS/NewSpace/.gitkeep");
+        assertThat(git.committedStagedMessage).contains("创建应用工作空间目录");
+        assertThat(git.pushedBranch).isEqualTo("feature_testagent_20260707");
     }
 
     @Test
@@ -906,7 +909,7 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
-    void ensureDefaultPersonalWorkspaceReusesExistingValidWorktreeEvenWhenPathDiffersFromConfiguredRoot() throws Exception {
+    void ensureDefaultPersonalWorkspaceRepairsExistingWorktreeThatPointsOutsideManagedRoot() throws Exception {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
@@ -955,18 +958,19 @@ class ManagedWorkspaceApplicationServiceTest {
                 runtime.updatedAt(),
                 runtime.linuxServerId(),
                 runtime.traceId()));
-        git.currentBranchValue = personal.personalWorkspaceBranch();
         git.reusedWorktreeBranch = null;
 
-        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse reused = service.ensureDefaultPersonalWorkspace(
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse repaired = service.ensureDefaultPersonalWorkspace(
                 version.versionId(),
                 new UserId("usr_1"),
                 "trace_reuse");
 
-        assertThat(reused.personalWorkspaceId()).isEqualTo(personal.personalWorkspaceId());
-        assertThat(reused.runtimeWorkspace().rootPath()).isEqualTo(existingWorkspaceRoot.toString());
+        assertThat(repaired.personalWorkspaceId()).isEqualTo(personal.personalWorkspaceId());
+        assertThat(repaired.runtimeWorkspace().rootPath().replace('\\', '/'))
+                .contains("/personalworktree/20260707/usr_1/gcms/feature_testagent_20260707_usr_1_default/F-GCMS/workspace");
         assertThat(git.reusedWorktreeBranch).isNull();
-        assertThat(managed.personals.get(0).repoRootPath()).isEqualTo(existingRepoRoot.toString());
+        assertThat(managed.personals.get(0).repoRootPath())
+                .isEqualTo("personalworktree:20260707/usr_1/gcms/feature_testagent_20260707_usr_1_default");
     }
 
     @Test
@@ -1034,7 +1038,7 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
-    void ensureDefaultPersonalWorkspaceRepairsMissingConfiguredDirectoryToRepoRoot() throws Exception {
+    void ensureDefaultPersonalWorkspaceRejectsMissingConfiguredDirectoryInsteadOfUsingRepoRoot() throws Exception {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
@@ -1080,17 +1084,17 @@ class ManagedWorkspaceApplicationServiceTest {
                 Instant.now(),
                 Instant.now()));
 
-        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse repaired = service.ensureDefaultPersonalWorkspace(
+        assertThatThrownBy(() -> service.ensureDefaultPersonalWorkspace(
                 version.versionId(),
                 new UserId("usr_1"),
-                "trace_repair_missing_dir");
-
-        String expectedRepoRoot = repoRoot.toAbsolutePath().normalize().toString();
-        String expectedRepoValue = "personalworktree:20260707/usr_1/gcms/" + branch;
-        assertThat(repaired.runtimeWorkspace().rootPath()).isEqualTo(expectedRepoRoot);
-        assertThat(managed.personals.get(0).workspaceRootPath()).isEqualTo(expectedRepoValue);
+                "trace_repair_missing_dir"))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("应用工作空间目录在个人仓库中不存在")
+                .satisfies(error -> assertThat(((PlatformException) error).details())
+                        .containsEntry("directoryPath", "F-GCMS/workspace"));
+        assertThat(managed.personals.get(0).workspaceRootPath()).isEqualTo(missingWorkspaceRoot.toString());
         assertThat(workspaces.findById(runtimeId)).get()
-                .satisfies(workspace -> assertThat(workspace.rootPath()).isEqualTo(expectedRepoValue));
+                .satisfies(workspace -> assertThat(workspace.rootPath()).isEqualTo(missingWorkspaceRoot.toString()));
     }
 
     @Test
@@ -1171,6 +1175,79 @@ class ManagedWorkspaceApplicationServiceTest {
         } finally {
             java.nio.file.Files.deleteIfExists(untrackedFile);
         }
+    }
+
+    @Test
+    void workspaceGitDiffReturnsRepoWideBlockersOwnedBySiblingDirectoryView() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        configuration.savedWorkspaces.add(new ApplicationWorkspace(
+                new ApplicationWorkspaceId("awp_house"),
+                new ApplicationId("app_gcms"),
+                new CodeRepositoryId("repo_1"),
+                "feature_testagent_20260707",
+                "F-GCMS/workspace-house",
+                "psn-house",
+                Instant.now(),
+                Instant.now()));
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_default");
+        git.targetContainedInHead = false;
+        git.nextStatusPorcelain = "";
+        git.nextRepoStatusPorcelain = "M  F-GCMS/workspace-house/docs/design.md\n";
+
+        ManagedWorkspaceResponses.WorkspaceGitDiffResponse diff = service.getWorkspaceGitDiff(
+                personal.runtimeWorkspace().workspaceId(),
+                new UserId("usr_1"));
+
+        assertThat(diff.files()).isEmpty();
+        assertThat(diff.applicationUpdatePending()).isTrue();
+        assertThat(diff.applicationUpdateBlockingFiles()).singleElement().satisfies(blocker -> {
+            assertThat(blocker.path()).isEqualTo("F-GCMS/workspace-house/docs/design.md");
+            assertThat(blocker.rawStatus()).isEqualTo("M ");
+            assertThat(blocker.applicationWorkspaceId()).isEqualTo("awp_house");
+            assertThat(blocker.workspaceName()).isEqualTo("psn-house");
+        });
+    }
+
+    @Test
+    void historicalDirectoryVersionsOfSameRepositoryConvergeToLatestTargetCommit() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ApplicationWorkspaceVersion first = managed.findVersion(new ApplicationWorkspaceVersionId(version.versionId())).orElseThrow();
+        Instant newer = first.updatedAt().plusSeconds(60);
+        managed.versions.add(new ApplicationWorkspaceVersion(
+                new ApplicationWorkspaceVersionId("awv_house"),
+                new ApplicationWorkspaceId("awp_house"),
+                first.appId(),
+                first.repositoryId(),
+                first.version(),
+                first.branch(),
+                first.repoRootPath(),
+                "appworkspace:20260707/gcms/F-GCMS/workspace-house",
+                new WorkspaceId("wrk_house"),
+                first.createdBy(),
+                first.status(),
+                "commit_house_latest",
+                newer,
+                first.createdAt(),
+                newer));
+
+        service.listPersonalWorkspaces(version.versionId(), new UserId("usr_1"));
+
+        assertThat(managed.versions)
+                .extracting(ApplicationWorkspaceVersion::targetCommitHash)
+                .containsOnly("commit_house_latest");
     }
 
     @Test
@@ -2341,6 +2418,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private String reusedWorktreeBranch;
         private Path createWorktreeBaseRepoRoot;
         private String nextStatusPorcelain = "";
+        private String nextRepoStatusPorcelain;
         private final Map<String, String> diffByFile = new java.util.HashMap<>();
         private final Map<String, String> diffByFileAndStage = new java.util.HashMap<>();
         private String lastDiffFile;
@@ -2421,6 +2499,7 @@ class ManagedWorkspaceApplicationServiceTest {
         public void createWorktreeReusingBranch(Path repoRoot, Path worktreeRoot, String branch, String privateKey) {
             this.createWorktreeBaseRepoRoot = repoRoot;
             this.reusedWorktreeBranch = branch;
+            this.worktreeBranch = branch;
             createWorktreeDirectory(worktreeRoot);
         }
 
@@ -2545,11 +2624,15 @@ class ManagedWorkspaceApplicationServiceTest {
         @Override
         public void commitStaged(Path repoRoot, String message, String privateKey, GitCommitIdentity identity) {
             this.committedStagedIdentity = identity;
-            if (nextStatusPorcelain.isBlank() && !commitStagedUpdatesHead) {
+            boolean createsWorkspaceDirectory = stagedFiles.stream().anyMatch(path -> path.endsWith("/.gitkeep"));
+            if (nextStatusPorcelain.isBlank() && !commitStagedUpdatesHead && !createsWorkspaceDirectory) {
                 throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "nothing to commit", Map.of());
             }
             this.committedStagedRepoRoot = repoRoot;
             this.committedStagedMessage = message;
+            if (createsWorkspaceDirectory) {
+                this.nextHeadCommit = "commit_workspace_directory";
+            }
             if (commitStagedUpdatesHead) {
                 this.nextHeadCommit = mergeInProgress && mergedCommit != null
                         ? mergedCommit
@@ -2634,7 +2717,7 @@ class ManagedWorkspaceApplicationServiceTest {
         public String statusPorcelain(Path repoRoot) {
             this.statusRepoRoot = repoRoot;
             this.statusPathspec = null;
-            return nextStatusPorcelain;
+            return nextRepoStatusPorcelain == null ? nextStatusPorcelain : nextRepoStatusPorcelain;
         }
 
         @Override
@@ -2764,16 +2847,22 @@ class ManagedWorkspaceApplicationServiceTest {
         private UserWorkspacePreference applicationPreference;
         private UserWorkspaceBranchPreference branchPreference;
 
-        @Override public List<ApplicationWorkspaceVersion> findVersions(ApplicationWorkspaceId applicationWorkspaceId) { return versions; }
+        @Override public List<ApplicationWorkspaceVersion> findVersions(ApplicationWorkspaceId applicationWorkspaceId) {
+            return versions.stream().filter(item -> item.applicationWorkspaceId().equals(applicationWorkspaceId)).toList();
+        }
         @Override public List<ApplicationWorkspaceVersion> findVersionsByApplication(ApplicationId appId) { return versions; }
-        @Override public Optional<ApplicationWorkspaceVersion> findVersion(ApplicationWorkspaceVersionId versionId) { return versions.stream().findFirst(); }
-        @Override public Optional<ApplicationWorkspaceVersion> findVersionByTemplateAndVersion(ApplicationWorkspaceId applicationWorkspaceId, String version) { return Optional.empty(); }
+        @Override public Optional<ApplicationWorkspaceVersion> findVersion(ApplicationWorkspaceVersionId versionId) {
+            return versions.stream().filter(item -> item.versionId().equals(versionId)).findFirst();
+        }
+        @Override public Optional<ApplicationWorkspaceVersion> findVersionByTemplateAndVersion(ApplicationWorkspaceId applicationWorkspaceId, String version) {
+            return versions.stream().filter(item -> item.applicationWorkspaceId().equals(applicationWorkspaceId) && item.version().equals(version)).findFirst();
+        }
         @Override public ApplicationWorkspaceVersion saveVersion(ApplicationWorkspaceVersion version) { versions.add(version); return version; }
         @Override public ApplicationWorkspaceVersion updateVersionTargetCommit(ApplicationWorkspaceVersionId versionId, String targetCommitHash, Instant updatedAt) {
             ApplicationWorkspaceVersion current = findVersion(versionId).orElseThrow();
             ApplicationWorkspaceVersion updated = current.withTargetCommit(targetCommitHash, updatedAt);
-            versions.clear();
-            versions.add(updated);
+            int index = versions.indexOf(current);
+            versions.set(index, updated);
             return updated;
         }
         @Override public ApplicationWorkspaceVersionReplica saveVersionReplica(ApplicationWorkspaceVersionReplica replica) {
@@ -2797,7 +2886,9 @@ class ManagedWorkspaceApplicationServiceTest {
             personals.add(workspace);
             return workspace;
         }
-        @Override public Optional<ApplicationWorkspaceVersion> findVersionByRuntimeWorkspace(WorkspaceId workspaceId) { return versions.stream().findFirst(); }
+        @Override public Optional<ApplicationWorkspaceVersion> findVersionByRuntimeWorkspace(WorkspaceId workspaceId) {
+            return versions.stream().filter(item -> item.runtimeWorkspaceId().equals(workspaceId)).findFirst();
+        }
         @Override public void savePreference(UserWorkspacePreference preference) {
             if (preference.appId() == null) {
                 globalPreference = preference;

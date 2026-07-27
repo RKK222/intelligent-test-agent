@@ -427,6 +427,32 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     await waitFor(() => expect(api.getRepositoryTree).toHaveBeenCalledWith("F-COSS", "repo_wr", "feature_testagent_20260707"));
   });
 
+  it("ignores a stale branch response after switching repositories", async () => {
+    const api = createApi();
+    const secondRepository: CodeRepositoryConfig = {
+      ...repositories[0],
+      repositoryId: "repo_wr_2",
+      name: "第二测试工作库"
+    };
+    api.listApplicationRepositories = vi.fn().mockResolvedValue([repositories[0], secondRepository]);
+    let resolveFirst!: (branches: string[]) => void;
+    const firstResponse = new Promise<string[]>((resolve) => { resolveFirst = resolve; });
+    api.listRepositoryBranches = vi.fn().mockImplementation((repositoryId: string) =>
+      repositoryId === "repo_wr" ? firstResponse : Promise.resolve(["feature_testagent_20260708"])
+    );
+    const view = renderPanel(api);
+
+    await view.findByText("应用人员管理");
+    await fireEvent.click(view.getByText("工作空间管理"));
+    await fireEvent.update(view.getByLabelText("选择已关联版本库"), "repo_wr_2");
+    await waitFor(() => expect(api.listRepositoryBranches).toHaveBeenCalledWith("repo_wr_2"));
+    resolveFirst(["feature_testagent_20260707"]);
+
+    const branchSelect = view.getByLabelText("选择分支") as HTMLSelectElement;
+    await waitFor(() => expect(branchSelect.value).toBe("feature_testagent_20260708"));
+    expect(within(branchSelect).queryByText("feature_testagent_20260707")).toBeNull();
+  });
+
   it("only offers linked test work repositories when creating a workspace", async () => {
     const api = createApi();
     const explicitlyNonTestStandardRepository: CodeRepositoryConfig = {

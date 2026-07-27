@@ -1446,7 +1446,14 @@ describe("GitChangesPanel", () => {
         files: [],
         mergeInProgress: false,
         applicationUpdatePending: true,
-        applicationTargetCommit: "1234567890abcdef"
+        applicationTargetCommit: "1234567890abcdef",
+        applicationUpdateBlockingFiles: [{
+          path: "F-GCMS/workspace-house/docs/design.md",
+          rawStatus: "M ",
+          applicationWorkspaceId: "awp_house",
+          workspaceName: "psn-house",
+          directoryPath: "F-GCMS/workspace-house"
+        }]
       })
       .mockResolvedValue({
         files: [],
@@ -1468,6 +1475,7 @@ describe("GitChangesPanel", () => {
     });
 
     expect(await view.findByText(/应用 feature 有待同步更新/)).toBeTruthy();
+    expect(view.container.textContent).toContain("psn-house · F-GCMS/workspace-house/docs/design.md");
     await fireEvent.click(view.getByRole("tab", { name: /^应用Agent/ }));
     expect(await view.findByText(/应用 feature 有待同步更新/)).toBeTruthy();
     await fireEvent.click(view.getByRole("tab", { name: /^workspace/ }));

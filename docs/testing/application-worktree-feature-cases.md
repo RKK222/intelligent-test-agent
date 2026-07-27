@@ -141,7 +141,7 @@ OPENCODE_CONFIG_DIR / manager configPath
 | feature 反向同步 | `synchronizeFeatureCommitToPersonalWorktrees` → `mergeFeatureCommitIntoPersonalWorkspace` | 先用 `git merge-base --is-ancestor <target> HEAD` 判定；clean 时调用 `GitWorkspaceService.mergeCommit` 执行 `git merge --no-edit <targetCommit>` |
 | dirty 补偿 | `retryLatestFeatureMerge` | 本地提交、回退、显式进入 default 个人工作区后重试；副本补偿和版本广播也会重试 |
 | 手动应用 Agent 更新 | `AgentWorkbench.handlePersonalRuntimeReload` → `sync-from-application` | 先合并整个固定 feature commit 并刷新文件树/Diff；进程 READY 时再 dispose，本地无变更但 HEAD 落后时也可完成同步 |
-| 冲突展示 | `getWorkspaceGitDiff` / `GitChangesPanel.vue` | Diff 返回 `mergeInProgress`、`applicationUpdatePending`、`applicationTargetCommit`；Git unmerged stage 用既有三方编辑器读取 |
+| 冲突展示 | `getWorkspaceGitDiff` / `GitChangesPanel.vue` | Diff 返回 `mergeInProgress`、`applicationUpdatePending`、`applicationTargetCommit`；待同步且未进入 merge 时，`applicationUpdateBlockingFiles` 返回整个个人仓库的阻塞路径和兄弟目录视图归属；Git unmerged stage 用既有三方编辑器读取 |
 | 冲突完成 | `completeWorkspaceGitMerge` | 冲突全部解决后提交完整 merge index；若包含 `.opencode/**`，入口要求 `APP_ADMIN` |
 | 应用配置发布热加载 | `PublicAgentConfigRolloutCoordinator` 的 APPLICATION scope | 每服务器个人 worktree 全部包含固定提交后登记目标用户，等待空闲并调用现有 OpenCode client 的 `/global/dispose` |
 | 公共保存时本人热加载 | `AgentWorkbench.refreshRuntimeCatalogAfterAgentConfigSave` → `POST /agent-config/public/runtime-reload` → `PersonalAgentConfigRuntimeReloadService` | Controller 把同步等待 dispose 的本地调用或跨服务器转发调度到 `boundedElastic`，避免在 WebFlux 事件线程调用 `block()`；随后校验 worktree owner/服务器，原子切换 `{sessionPath}/.testagent-runtime/current-public-config` 到本人公共 worktree，再只调用本人进程 `/global/dispose` |
@@ -149,6 +149,8 @@ OPENCODE_CONFIG_DIR / manager configPath
 | 公共发布热加载 | `PublicAgentConfigRolloutService` 的 PUBLIC scope | 各服务器共享 Git 副本固定提交同步后，逐进程等待全部 Session 空闲，恢复共享配置链接并调用 `/global/dispose`；升级前直接读取共享路径的旧进程兼容只 dispose |
 
 兼容接口 `POST /personal-workspaces/{id}/sync-from-application` 不再逐文件复制，也不接受 `force` 覆盖个人内容；`files: []` 是“合并整个固定 feature commit”的合法请求，旧客户端传非空路径时只校验格式，不以路径缩小合并范围。
+
+同一 `appId + repositoryId + version + branch` 的多个应用工作空间版本共用物理 feature 仓库和目标提交；测试需覆盖历史 target 不一致自动收敛、新增目录 `.gitkeep` 提交并 push、历史个人记录指向仓库根时修复到模板子目录，以及子目录仍缺失时拒绝回退到仓库根。设置页还需覆盖快速切换两个版本库后先发请求迟到，分支下拉只保留最后所选版本库的响应。
 
 ## 5. 可重复测试数据
 

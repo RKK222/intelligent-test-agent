@@ -2468,6 +2468,16 @@ export type WorkspaceGitDiff = {
   /** 当前个人 HEAD 尚未包含应用版本固定的 target commit。 */
   applicationUpdatePending?: boolean;
   applicationTargetCommit?: string | null;
+  /** 整个个人仓库内阻塞应用更新的本地变更；可能属于同仓库的其它目录视图。 */
+  applicationUpdateBlockingFiles?: WorkspaceGitUpdateBlocker[];
+};
+
+export type WorkspaceGitUpdateBlocker = {
+  path: string;
+  rawStatus?: string;
+  applicationWorkspaceId?: string | null;
+  workspaceName?: string | null;
+  directoryPath?: string | null;
 };
 
 export type WorkspaceGitMergeCompletion = {

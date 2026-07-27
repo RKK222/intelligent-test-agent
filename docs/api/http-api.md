@@ -779,7 +779,7 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 - 测试工作库的 `directoryPath` 必须是当前应用同名根目录的一级子目录，例如 `F-COSS/W1` 可选，`F-COSS/W1/F1` 只能浏览不能作为工作空间；非测试工作库不套用该限制。
 - 非标准代码库必须传入 `version`，格式为 `yyyyMMdd`；标准代码库传入的 `version` 会被分支解析结果覆盖。
 - 只有保存接口会触发 Git clone/fetch、分支 checkout 和本地目录准备；页面上的分支、远端树和新增目录操作均不落磁盘。
-- `directoryNew=true` 表示前端在远端树内存中新增了测试工作库应用根目录下的一级子目录。后端在 clone/checkout 后如果目标目录不存在，则在保存阶段创建该目录；不会向 Git 提交空目录。旧客户端不传该字段时行为不变。
+- `directoryNew=true` 表示前端在远端树内存中新增了测试工作库应用根目录下的一级子目录。后端在 clone/checkout 后如果目标目录不存在，则在保存阶段创建 `.gitkeep`，以当前用户身份提交并 push 当前 feature 分支；push 未确认时创建失败，避免只在单台服务器留下 Git 无法复制的空目录。旧客户端不传该字段时行为不变。
 - 后端会先保存或复用 `应用 + 代码库 + 分支 + 目录路径` 对应的工作空间模板，再创建同版本的应用版本工作区并完成 Git clone/fetch、分支 checkout 和运行态 `Workspace` 创建。命中已有位置时返回原 `workspaceId`，按本次请求更新别名；若原模板已停用则同时重新启用，避免异步操作显示成功但模板仍不可见。别名仍需满足同应用唯一约束。
 - 创建前会按当前用户 READY 的 opencode 进程确定目标 `linuxServerId`，确保初始运行态工作区落在当前用户 agent 所在服务器。
 - 应用版本工作区目录使用通用参数 `{OPENCODE_APP_WORKSPACE_ROOT}/{yyyymmdd}/{repository.englishName}/{directoryPath}`；缺少代码库英文名称时返回统一 `VALIDATION_ERROR`。
@@ -1454,7 +1454,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 ### 工作区本地 Git Diff
 
-`GET /workspaces/{workspaceId}/git-diff` 无请求参数。后端通过 runtime workspace 反查 personal workspace、应用版本工作区副本或应用版本工作区记录，使用对应 `repoRootPath` 执行 `git status --porcelain` + `git diff`，应用模板子目录通过 pathspec 限定扫描范围，并复用公共解析逻辑处理路径反转义、rename 新路径、staged/unstaged patch 合并和 additions/deletions 统计。响应中的 `path` 始终是当前运行态工作区相对路径，例如仓库内 `F-GCMS/workspace/docs/app.md` 返回为 `docs/app.md`。`rawStatus` 是 Git porcelain 两字符状态码，`DD/AU/UD/UA/DU/AA/UU` 统一映射为 `status=conflict`。个人 worktree 还只读比较版本 `targetCommitHash` 与当前 `HEAD` 的祖先关系，返回 merge 是否进行中和 feature 是否待同步；Diff 查询本身不执行 fetch/merge。该接口不依赖 opencode `/vcs/diff`。
+`GET /workspaces/{workspaceId}/git-diff` 无请求参数。后端通过 runtime workspace 反查 personal workspace、应用版本工作区副本或应用版本工作区记录，使用对应 `repoRootPath` 执行 `git status --porcelain` + `git diff`，应用模板子目录通过 pathspec 限定扫描范围，并复用公共解析逻辑处理路径反转义、rename 新路径、staged/unstaged patch 合并和 additions/deletions 统计。响应中的 `files[].path` 始终是当前运行态工作区相对路径，例如仓库内 `F-GCMS/workspace/docs/app.md` 返回为 `docs/app.md`。`rawStatus` 是 Git porcelain 两字符状态码，`DD/AU/UD/UA/DU/AA/UU` 统一映射为 `status=conflict`。个人 worktree 还只读比较仓库版本组 `targetCommitHash` 与当前 `HEAD` 的祖先关系，返回 merge 是否进行中和 feature 是否待同步；待同步但尚未进入 merge 时，会额外执行仓库级 status 生成 `applicationUpdateBlockingFiles`，因此同一仓库其它目录视图的 staged/unstaged/untracked 文件不会被当前 pathspec 隐藏。Diff 查询本身不执行 fetch/merge。该接口不依赖 opencode `/vcs/diff`。
 
 响应 `WorkspaceGitDiffResponse`：
 
@@ -1463,6 +1463,15 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
   "mergeInProgress": false,
   "applicationUpdatePending": true,
   "applicationTargetCommit": "1234567890abcdef...",
+  "applicationUpdateBlockingFiles": [
+    {
+      "path": "F-GCMS/workspace-house/docs/design.md",
+      "rawStatus": "M ",
+      "applicationWorkspaceId": "awp_...",
+      "workspaceName": "psn-house",
+      "directoryPath": "F-GCMS/workspace-house"
+    }
+  ],
   "files": [
     {
       "path": "src/App.java",
@@ -1477,7 +1486,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-`mergeInProgress=true` 表示仓库存在 `MERGE_HEAD`；`applicationUpdatePending=true` 表示当前个人 `HEAD` 尚未包含版本固定提交。dirty 跳过、未完成冲突和冲突已解决但尚未点击“完成合并”都可保持 pending。非个人工作区或版本尚无目标提交时这些字段为 `false/false/null`，旧前端可忽略新增字段。
+`mergeInProgress=true` 表示仓库存在 `MERGE_HEAD`；`applicationUpdatePending=true` 表示当前个人 `HEAD` 尚未包含版本固定提交。`applicationUpdateBlockingFiles[].path` 是仓库相对路径，不受当前工作空间 pathspec 裁剪；能匹配同应用、同仓库、同分支目录视图时补充工作空间 ID、名称和目录，仓库根级文件则三个归属字段为 `null`。dirty 跳过、未完成冲突和冲突已解决但尚未点击“完成合并”都可保持 pending。非个人工作区或版本尚无目标提交时同步字段为 `false/false/null` 且阻塞列表为空，旧前端可忽略新增字段。
 
 `POST /workspaces/{workspaceId}/git-discard` 请求体：
 

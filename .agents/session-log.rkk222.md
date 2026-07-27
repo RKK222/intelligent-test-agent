@@ -2252,3 +2252,20 @@
   - 先回顾全部会话日志近期条目；对模板、部署手册和数据库说明做定点修改，再运行文档/包校验并重新封装内外层企业包。
 - Result:
   - 配置模板、文档、敏感节点包和交付校验口径一致；后续可从 `backend.env.example` 与 `MULTI-BACKEND.md` 直接定位配置位置，不再依赖 ZIP 内部临时目录。
+
+### 2026-07-27 - 修复同仓库应用工作空间同步与历史个人路径
+
+- Why:
+  - 同一应用、版本、分支和 Git 仓库下的多个应用工作空间实际只是不同目录视图，但版本表中的 `targetCommitHash` 按目录记录且仅更新当前记录，导致一个目录发布后另一个目录及其个人 worktree 仍停留在旧提交。
+  - 新增空目录只创建服务器目录而未进入 Git，跨服务器克隆后目录消失；历史个人空间又会在预期子目录缺失时回退到整个仓库，造成不同用户看到不同文件树。分支与目录异步请求还可能被迟到响应覆盖，页面表现为“没有分支”。
+  - feature 同步只展示当前目录的 Git Diff，但 Git 合并会被同仓库其他目录的未提交文件阻塞，因此页面只提示待同步而看不到真实阻塞文件。
+- What:
+  - 将同应用、仓库、版本、分支的 target commit 作为仓库组状态统一扇出，读取旧的不一致记录时按最近更新时间自动收敛；新增目录写入并推送 `.gitkeep`，确保跨服务器可克隆。
+  - 个人空间创建和历史复用严格绑定预期仓库根、工作空间子目录与 runtime 路径；打开前在干净 worktree 上合并仓库组 target，缺目录时明确报错，不再回退到仓库根目录。
+  - Git Diff 保持当前目录文件列表，同时新增仓库级同步阻塞文件及所属兄弟工作空间信息；前端直接展示实际阻塞路径。工作空间设置页为分支和目录请求增加代次隔离、空结果/错误提示，并修复确认弹窗受无关 loading 状态影响的问题。
+- How:
+  - 后端 `GitWorkspaceServiceRealGitTest`、`ManagedWorkspaceApplicationServiceTest`、`PersonalAgentConfigRuntimeReloadServiceTest`、`ManagedWorkspaceControllerTest`、`AgentConfigControllerTest` 共 109 项通过；前端相关 5 个测试文件 148 项通过，最终并发修正定向 18 项通过，agent-web typecheck 与 `git diff --check` 通过。
+  - 使用 JDK 25、未修改的 `.env.test` 和 test profile 执行 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build`，后端 health/readiness 为 UP、前端 3000 返回 200、CORS 预检为 200，manager WebSocket 已连接且 OpenCode 健康探测最终为 HEALTHY。
+- Result:
+  - 已发布内容会沿同一物理仓库的全部目录视图传播；历史错误 repo-root 个人空间会在再次进入时修复到正确子目录。个人未提交内容仍保持私有且不会被覆盖，但所有阻塞文件现在可见，清理后即可继续合并，不再形成无文件可处理的永久阻塞。
+  - HTTP Diff 响应仅增加可选兼容字段；未新增 RunEvent、数据库结构/Flyway/SQL、安全配置、generated SDK、OpenCode 源码或环境配置变更。
