@@ -245,6 +245,17 @@ public final class ManagedWorkspaceResponses {
         }
     }
 
+    /** 当前用户个人 worktree 拉取远端 feature 分支后的结果；不会更新应用共享版本目标。 */
+    public record PersonalWorkspaceGitPullResponse(
+            String personalWorkspaceId,
+            String versionId,
+            String remoteBranch,
+            String commitHash,
+            boolean updated,
+            boolean agentConfigChanged,
+            List<String> changedFiles) {
+    }
+
     public record WorkspaceDiffFileResponse(String path, String status, boolean conflict) {
     }
 

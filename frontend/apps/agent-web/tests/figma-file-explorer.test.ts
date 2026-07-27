@@ -17,6 +17,7 @@ describe("FigmaFileExplorer", () => {
       props: {
         workspaceId: "wrk_personal",
         selectedVersionId: "awv_selected",
+        personalWorkspaceId: "pws_current",
         entriesByDirectory: { "": [] },
         expandedDirectories: new Set<string>(),
         changedFiles: []
@@ -30,7 +31,7 @@ describe("FigmaFileExplorer", () => {
     const pullButton = wrapper.get('button[aria-label="拉取远程"]');
     await pullButton.trigger("click");
 
-    expect(wrapper.emitted("pullWorkspaceVersion")).toEqual([["awv_selected"]]);
+    expect(wrapper.emitted("pullPersonalWorkspace")).toEqual([["pws_current"]]);
     expect(wrapper.findComponent(GitChangesPanel).exists()).toBe(true);
   });
 
@@ -39,7 +40,8 @@ describe("FigmaFileExplorer", () => {
       props: {
         workspaceId: "wrk_personal",
         selectedVersionId: "awv_selected",
-        pullingWorkspaceVersion: true,
+        personalWorkspaceId: "pws_current",
+        pullingPersonalWorkspace: true,
         entriesByDirectory: { "": [] },
         expandedDirectories: new Set<string>(),
         changedFiles: []

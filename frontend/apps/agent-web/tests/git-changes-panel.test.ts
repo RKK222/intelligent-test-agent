@@ -1508,22 +1508,23 @@ describe("GitChangesPanel", () => {
     const updateSummary = await view.findByTestId("feature-update-summary");
     expect(updateSummary.textContent).toContain("应用有新版本待更新");
     expect(updateSummary.textContent).toContain("4 个文件待处理");
-    expect(updateSummary.textContent).toContain("请提交或撤销带橙色标签的文件，应用更新会自动继续");
+    expect(updateSummary.textContent).toContain("请先提交或回退下列文件");
     expect(updateSummary.textContent).not.toContain("F-GCMS/workspace/docs/design.md");
     expect(updateSummary.textContent).not.toContain("以下个人仓库变更正在阻塞合并");
     const unstagedRow = await view.findByLabelText("docs/design.md");
     const stagedRow = await view.findByLabelText("spec/commit-only.md");
-    expect(within(unstagedRow).getByLabelText("待处理：提交或撤销后更新应用").classList.contains("git-file-marker")).toBe(true);
-    expect(within(stagedRow).getByLabelText("待处理：提交或撤销后更新应用").classList.contains("git-file-marker")).toBe(true);
+    expect(within(unstagedRow).getByLabelText("待处理：暂存并提交或回退后更新应用").classList.contains("git-file-marker")).toBe(true);
+    expect(within(stagedRow).getByLabelText("待处理：暂存并提交或回退后更新应用").classList.contains("git-file-marker")).toBe(true);
+    expect(within(stagedRow).getByLabelText("待处理：暂存并提交或回退后更新应用").getAttribute("title")).toContain("只点“暂存”还不会更新");
     expect(within(unstagedRow).queryByLabelText("spec 文件默认只提交，不发布到应用")).toBeNull();
     expect(within(stagedRow).getByLabelText("spec 文件默认只提交，不发布到应用")).toBeTruthy();
     expect(unstagedRow.textContent).not.toContain("待处理");
     expect(stagedRow.textContent).not.toContain("默认只提交");
-    expect(view.getByText("其它目录或应用配置还有 2 个待处理文件")).toBeTruthy();
+    expect(view.getByText("当前应用的其它 workspace / Agent 配置还有 2 个待处理文件")).toBeTruthy();
 
     await fireEvent.click(view.getByRole("tab", { name: /^应用Agent/ }));
-    expect(within(await view.findByLabelText("agents/reviewer.md")).getByLabelText("待处理：提交或撤销后更新应用")).toBeTruthy();
-    expect(view.getByText("其它目录或应用配置还有 3 个待处理文件")).toBeTruthy();
+    expect(within(await view.findByLabelText("agents/reviewer.md")).getByLabelText("待处理：暂存并提交或回退后更新应用")).toBeTruthy();
+    expect(view.getByText("当前应用的其它 workspace / Agent 配置还有 3 个待处理文件")).toBeTruthy();
 
     await fireEvent.click(view.getByRole("tab", { name: /^公共Agent/ }));
     expect(view.queryByTestId("feature-update-summary")).toBeNull();
@@ -1535,6 +1536,48 @@ describe("GitChangesPanel", () => {
     await waitFor(() => expect(apiClientMock.completeWorkspaceGitMerge).toHaveBeenCalledWith(
       fixture.application.personalRuntimeWorkspaceId
     ));
+  });
+
+  it("explains a blocked personal pull without implying that other users are updated", async () => {
+    apiClientMock.getWorkspaceGitDiff.mockResolvedValue({
+      files: [{ path: "docs/design.md", status: "modified", rawStatus: " M", staged: false, patch: "" }],
+      applicationUpdatePending: false
+    });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: fixture.application.personalRuntimeWorkspaceId,
+        personalWorkspaceId: fixture.application.personalWorkspaceId,
+        workspaceDirectoryPath: "F-GCMS/workspace",
+        personalPullBlockingFiles: [
+          {
+            path: "F-GCMS/workspace/docs/design.md",
+            rawStatus: " M",
+            applicationWorkspaceId: "awp_default",
+            workspaceName: "psn-default",
+            directoryPath: "F-GCMS/workspace"
+          },
+          {
+            path: "F-GCMS/workspace-house/docs/sibling.md",
+            rawStatus: "??",
+            applicationWorkspaceId: "awp_house",
+            workspaceName: "psn-house",
+            directoryPath: "F-GCMS/workspace-house"
+          }
+        ],
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManageAgentConfig: true,
+        canManagePublicConfig: false
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    const updateSummary = await view.findByTestId("feature-update-summary");
+    expect(updateSummary.textContent).toContain("无法更新到远程最新提交");
+    expect(updateSummary.textContent).toContain("请先提交或回退下列文件");
+    expect(updateSummary.textContent).not.toContain("所有用户");
+    expect(view.getByText("当前应用的其它 workspace / Agent 配置还有 1 个待处理文件")).toBeTruthy();
   });
 
   it("keeps conflict prompt after publish refresh and separates unmerged files from staged files", async () => {

@@ -2294,6 +2294,17 @@ export type PersonalWorkspace = {
   updatedAt: string;
 };
 
+/** 个人 worktree 拉取结果；该操作不会更新应用共享版本或其它用户。 */
+export type PersonalWorkspaceGitPullResult = {
+  personalWorkspaceId: string;
+  versionId: string;
+  remoteBranch: string;
+  commitHash: string;
+  updated: boolean;
+  agentConfigChanged: boolean;
+  changedFiles: string[];
+};
+
 // 用户在 (appId, workspaceId) 维度下最近一次手动选择的 VCS 分支，
 // 用于工作区下分支选择按钮的"下次进入默认切换"持久化。
 export type WorkspaceBranchPreference = {

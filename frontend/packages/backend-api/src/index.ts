@@ -156,6 +156,7 @@ import type {
   WorkspaceGitDiff,
   WorkspaceGitMergeCompletion,
   WorkspaceGitConflict,
+  PersonalWorkspaceGitPullResult,
   PublishPersonalWorkspacePreview,
   WorkspaceSyncResult,
   WorkspaceBranchPreference,
@@ -879,6 +880,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates/${encodeURIComponent(templateId)}/versions`,
         { method: "POST", body: JSON.stringify(payload) }
       ),
+    /** @deprecated 版本级全员拉取已停用；请使用 gitPullPersonalWorkspace。 */
     gitPullWorkspaceVersion: (versionId: string) =>
       routedRequest<ApplicationWorkspaceVersion>(
         `${workspaceManagementBase}/workspace-versions/${encodeURIComponent(versionId)}/git-pull`,
@@ -896,6 +898,12 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         method: "POST",
         body: JSON.stringify(payload)
       }),
+    /** 只拉取当前登录用户拥有的个人 worktree，不更新共享版本或其它成员。 */
+    gitPullPersonalWorkspace: (personalWorkspaceId: string) =>
+      routedRequest<PersonalWorkspaceGitPullResult>(
+        `${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/git-pull`,
+        { method: "POST" }
+      ),
     getRecentManagedWorkspace: () => request<ManagedWorkspaceRuntime | null>(`${workspaceManagementBase}/recent-workspace`),
     getRecentManagedWorkspaceForApplication: (appId: string) =>
       request<ManagedWorkspaceRuntime | null>(`${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/recent-workspace`),

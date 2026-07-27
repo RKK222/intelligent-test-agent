@@ -58,6 +58,7 @@ import type {
   WorkspaceBackendServer,
   WorkspaceDirectoryList,
   WorkspaceGitDiffFile,
+  WorkspaceGitUpdateBlocker,
   WorkspaceViewEntry,
   WorkspaceViewWarning
 } from "@test-agent/shared-types";
@@ -527,6 +528,17 @@ const visibleManagedApplicationIds = shallowRef<ReadonlySet<string> | null>(null
 // 当前选中版本对应的默认个人工作区 ID，供 GitChangesPanel 调用 publishPersonalWorkspace。
 const currentPersonalWorkspaceId = ref<string | undefined>(undefined);
 const currentPersonalWorkspaceBranch = ref<string | undefined>(undefined);
+const personalPullBlockState = ref<{
+  personalWorkspaceId: string;
+  files: WorkspaceGitUpdateBlocker[];
+} | null>(null);
+const currentPersonalPullBlockingFiles = computed(() => {
+  const blockState = personalPullBlockState.value;
+  if (!blockState || blockState.personalWorkspaceId !== currentPersonalWorkspaceId.value) {
+    return [];
+  }
+  return blockState.files;
+});
 type WorkspaceUndoOperation =
   | { kind: "delete"; paths: string[]; label: string }
   | { kind: "move"; sourcePath: string; targetPath: string; label: string };
@@ -3859,36 +3871,67 @@ function refreshCurrentWorkspacePanels() {
 // 「+新增版本」流程：把 yyyyMMdd 和后端所需的 branch（非标准库）传给 createWorkspaceVersion。
 // 成功后失效该模板下的版本查询，让 useQueries 重新拉取；同时把新版本切到工作区。
 const creatingVersion = ref(false);
-const pullingWorkspaceVersion = ref(false);
+const pullingPersonalWorkspace = ref(false);
+
+/** 后端返回仓库级阻塞文件；前端只做兼容归一化，不猜测其它用户或 workspace。 */
+function personalPullBlockers(error: unknown): WorkspaceGitUpdateBlocker[] {
+  if (!(error instanceof BackendApiError) || error.details.reason !== "LOCAL_CHANGES") return [];
+  const files = error.details.blockingFiles;
+  if (!Array.isArray(files)) return [];
+  return files.flatMap((file) => {
+    if (!file || typeof file !== "object") return [];
+    const candidate = file as Record<string, unknown>;
+    if (typeof candidate.path !== "string" || !candidate.path.trim()) return [];
+    return [{
+      path: candidate.path,
+      rawStatus: typeof candidate.rawStatus === "string" ? candidate.rawStatus : undefined,
+      applicationWorkspaceId: typeof candidate.applicationWorkspaceId === "string"
+        ? candidate.applicationWorkspaceId
+        : undefined,
+      workspaceName: typeof candidate.workspaceName === "string" ? candidate.workspaceName : undefined,
+      directoryPath: typeof candidate.directoryPath === "string" ? candidate.directoryPath : undefined
+    }];
+  });
+}
 
 /**
- * 应用工作空间的远端拉取独立于 Git Changes 的 stage/commit/push。
- * 后端负责共享副本快进、个人 worktree 安全合并以及应用 Agent 配置 rollout。
+ * 远端拉取只更新当前 owner 的个人 worktree；提交并推送仍负责应用级发布和全员同步。
+ * 若拉取包含应用 Agent 配置，只复用当前用户的空闲闸门与 dispose。
  */
-async function handlePullWorkspaceVersion(versionId: string) {
-  if (pullingWorkspaceVersion.value || versionId !== selectedVersionId.value) return;
-  pullingWorkspaceVersion.value = true;
+async function handlePullPersonalWorkspace(personalWorkspaceId: string) {
+  if (
+    pullingPersonalWorkspace.value
+    || personalWorkspaceId !== currentPersonalWorkspaceId.value
+  ) return;
+  pullingPersonalWorkspace.value = true;
   try {
-    const response = await api.gitPullWorkspaceVersion(versionId);
-    const nextVersions = { ...versionsByTemplateId.value };
-    for (const [templateId, versions] of Object.entries(nextVersions)) {
-      nextVersions[templateId] = versions.map((version) =>
-        version.versionId === response.versionId ? response : version
-      );
+    const response = await api.gitPullPersonalWorkspace(personalWorkspaceId);
+    if (personalPullBlockState.value?.personalWorkspaceId === personalWorkspaceId) {
+      personalPullBlockState.value = null;
     }
-    versionsByTemplateId.value = nextVersions;
     agentConfigRevision.value += 1;
     fileExplorerRef.value?.refreshAll();
     refreshCurrentWorkspacePanels();
     feedback.value = {
       kind: "success",
-      title: "已拉取远程",
-      description: `${response.branch} · ${response.targetCommitHash?.slice(0, 8) ?? "最新提交"}；有本地改动的个人 worktree 会保留并等待同步。`
+      title: response.updated ? "已更新到远程最新版本" : "当前已是远程最新版本",
+      description: "本次只更新你的个人 workspace，其他用户不受影响。"
     };
+    if (response.agentConfigChanged) {
+      pendingRuntimeReloadKind = "agent";
+      pendingReferenceRuntimeReloadRevision.value += 1;
+      await reloadReferenceRuntimeIfIdle();
+    }
   } catch (error) {
+    const blockers = personalPullBlockers(error);
+    if (blockers.length > 0) {
+      personalPullBlockState.value = { personalWorkspaceId, files: blockers };
+    }
+    fileExplorerRef.value?.refreshChanges();
+    refreshCurrentWorkspacePanels();
     feedback.value = errorFeedback("拉取远程失败", error);
   } finally {
-    pullingWorkspaceVersion.value = false;
+    pullingPersonalWorkspace.value = false;
   }
 }
 
@@ -7692,7 +7735,7 @@ async function handleLogout() {
           :loading-app-templates="loadingAppTemplates"
           :loading-app-versions="loadingAppVersions"
           :creating-version="creatingVersion"
-          :pulling-workspace-version="pullingWorkspaceVersion"
+          :pulling-personal-workspace="pullingPersonalWorkspace"
           :can-write="!!currentPersonalWorkspaceId"
           :can-undo="workspaceUndoStack.length > 0"
           :can-manage-agent-config="isAppAdmin"
@@ -7702,6 +7745,7 @@ async function handleLogout() {
           :workspace-id="selectedWorkspace?.workspaceId"
           :agent-config-workspace-id="selectedAgentConfigWorkspaceId"
           :personal-workspace-id="currentPersonalWorkspaceId"
+          :personal-pull-blocking-files="currentPersonalPullBlockingFiles"
           :personal-workspace-branch="currentPersonalWorkspaceBranch"
           :agent-config-revision="agentConfigRevision"
           :personal-runtime-reloading="personalRuntimeReloading"
@@ -7734,7 +7778,7 @@ async function handleLogout() {
           @select-version="handleSelectVersion"
           @load-versions="handleLoadVersions"
           @create-version="handleCreateVersion"
-          @pull-workspace-version="handlePullWorkspaceVersion"
+          @pull-personal-workspace="handlePullPersonalWorkspace"
           @open-agent-file="openAgentFile"
           @open-server-workspace-picker="openServerWorkspacePicker"
           @open-reference-configuration="openReferenceConfiguration"

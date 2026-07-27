@@ -85,6 +85,17 @@ public class ManagedWorkspaceController {
                 RuntimeApiSupport.traceId(exchange)));
     }
 
+    /** 拉取只作用于当前登录用户拥有的个人 worktree，不更新应用版本或其它用户。 */
+    @PostMapping("/personal-workspaces/{personalWorkspaceId}/git-pull")
+    public ApiResponse<Object> gitPullPersonalWorkspace(
+            @PathVariable String personalWorkspaceId,
+            ServerWebExchange exchange) {
+        return ok(exchange, service.gitPullPersonalWorkspace(
+                personalWorkspaceId,
+                userId(exchange),
+                RuntimeApiSupport.traceId(exchange)));
+    }
+
     /**
      * 版本切换前只读校验当前用户是否可以访问关联 Git 版本库，不创建或修改本地工作区。
      */

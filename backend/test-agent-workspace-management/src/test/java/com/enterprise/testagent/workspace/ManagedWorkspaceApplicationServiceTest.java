@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.common.error.ErrorCode;
@@ -424,6 +425,7 @@ class ManagedWorkspaceApplicationServiceTest {
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
         FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
         ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        String expectedGitUrl = "ssh://000857009@scm-share.sdc.cs.enterprise:29418/hzefficiencytools/interfaceplatform";
 
         ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
                 "app_gcms",
@@ -432,11 +434,18 @@ class ManagedWorkspaceApplicationServiceTest {
                 "main",
                 userId,
                 "trace_internal_clone");
+        git.originUrlValue = expectedGitUrl;
+        ManagedWorkspaceResponses.PersonalWorkspaceResponse personal = service.createPersonalWorkspace(
+                version.versionId(),
+                "default",
+                userId,
+                "trace_internal_personal");
         git.originUrlValue = "ssh://009988776@scm-share.sdc.cs.enterprise:29418/hzefficiencytools/interfaceplatform";
+        git.nextRemoteCommit = "commit_remote";
+        git.targetContainedInHead = false;
 
-        service.gitPullVersion(version.versionId(), userId, "127.0.0.1", "trace_internal_pull");
+        service.gitPullPersonalWorkspace(personal.personalWorkspaceId(), userId, "trace_internal_pull");
 
-        String expectedGitUrl = "ssh://000857009@scm-share.sdc.cs.enterprise:29418/hzefficiencytools/interfaceplatform";
         assertThat(git.clonedGitUrl).isEqualTo(expectedGitUrl);
         assertThat(git.originUpdates)
                 .extracting(OriginUpdate::gitUrl)
@@ -1852,7 +1861,7 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
-    void gitPullVersionUpdatesTargetCommitAndBroadcastsReplicaSync() {
+    void gitPullVersionRejectsDeprecatedApplicationWidePullWithoutSideEffects() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
@@ -1868,24 +1877,67 @@ class ManagedWorkspaceApplicationServiceTest {
                 "127.0.0.1",
                 "trace_version");
         publisher.events.clear();
-        git.nextRemoteCommit = "commit_after_pull";
+        git.calls.clear();
 
-        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse response = service.gitPullVersion(
+        assertThatThrownBy(() -> service.gitPullVersion(
                 version.versionId(),
                 new UserId("usr_1"),
                 "127.0.0.1",
-                "trace_pull");
+                "trace_deprecated_pull"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR);
+                    assertThat(exception.getMessage()).contains("版本级拉取已停用");
+                });
 
-        assertThat(git.fetchedBranch).isEqualTo("feature_testagent_20260707");
-        assertThat(git.resetCommit).isEqualTo("commit_after_pull");
-        assertThat(response.targetCommitHash()).isEqualTo("commit_after_pull");
-        assertThat(response.replicaCommitHash()).isEqualTo("commit_after_pull");
-        assertThat(publisher.events).hasSize(1);
-        assertThat(publisher.events.get(0).payload()).containsEntry("reason", "GIT_PULLED");
+        assertThat(git.calls).isEmpty();
+        assertThat(publisher.events).isEmpty();
+        assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_base");
     }
 
     @Test
-    void gitPullVersionUsesApplicationAgentRolloutWithoutChangingPushWorkflow() {
+    void gitPullPersonalWorkspaceOnlyUpdatesCurrentOwnerAndLeavesSharedVersionUntouched() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git, publisher);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_version");
+        ManagedWorkspaceResponses.PersonalWorkspaceResponse personal = service.createPersonalWorkspace(
+                version.versionId(),
+                "default",
+                new UserId("usr_1"),
+                "trace_personal");
+        publisher.events.clear();
+        git.nextRemoteCommit = "commit_after_pull";
+        git.nextNameStatus = "M\tF-GCMS/workspace/docs/design.md\n";
+        git.targetContainedInHead = false;
+
+        ManagedWorkspaceResponses.PersonalWorkspaceGitPullResponse response = service.gitPullPersonalWorkspace(
+                personal.personalWorkspaceId(),
+                new UserId("usr_1"),
+                "trace_pull");
+
+        assertThat(git.fetchedBranch).isEqualTo("feature_testagent_20260707");
+        assertThat(git.mergedCommitRepoRoot).isEqualTo(Path.of(personal.repoRootPath()));
+        assertThat(git.mergedCommit).isEqualTo("commit_after_pull");
+        assertThat(response.updated()).isTrue();
+        assertThat(response.commitHash()).isEqualTo("commit_after_pull");
+        assertThat(response.agentConfigChanged()).isFalse();
+        assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_base");
+        assertThat(git.resetCommit).isNull();
+        assertThat(publisher.events).isEmpty();
+    }
+
+    @Test
+    void gitPullPersonalWorkspaceReportsApplicationAgentChangeWithoutStartingGlobalRollout() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
@@ -1899,29 +1951,66 @@ class ManagedWorkspaceApplicationServiceTest {
                 new UserId("usr_1"),
                 "127.0.0.1",
                 "trace_version");
+        ManagedWorkspaceResponses.PersonalWorkspaceResponse personal = service.createPersonalWorkspace(
+                version.versionId(),
+                "default",
+                new UserId("usr_1"),
+                "trace_personal");
         git.nextRemoteCommit = "commit_after_agent_pull";
         git.nextNameStatus = "M\tF-GCMS/workspace/.opencode/agents/reviewer.md\n";
+        git.targetContainedInHead = false;
         PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
-        when(coordinator.prepareApplication(
-                version.versionId(),
-                "feature_testagent_20260707",
-                "commit_after_agent_pull",
-                "commit_base",
-                "127.0.0.1",
-                "usr_1",
-                "trace_pull_agent"))
-                .thenReturn("acr_pull_agent");
         service.setAgentConfigRolloutCoordinator(coordinator);
 
-        service.gitPullVersion(
-                version.versionId(),
+        ManagedWorkspaceResponses.PersonalWorkspaceGitPullResponse response = service.gitPullPersonalWorkspace(
+                personal.personalWorkspaceId(),
                 new UserId("usr_1"),
-                "127.0.0.1",
                 "trace_pull_agent");
 
-        verify(coordinator).activate("acr_pull_agent", "commit_after_agent_pull");
-        assertThat(git.resetCommit).isEqualTo("commit_after_agent_pull");
+        assertThat(response.agentConfigChanged()).isTrue();
+        assertThat(git.mergedCommit).isEqualTo("commit_after_agent_pull");
+        verifyNoInteractions(coordinator);
         assertThat(git.pushes).isEmpty();
+    }
+
+    @Test
+    void gitPullPersonalWorkspaceRejectsLocalChangesAndOtherOwnersWithoutFetching() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_version");
+        ManagedWorkspaceResponses.PersonalWorkspaceResponse personal = service.createPersonalWorkspace(
+                version.versionId(),
+                "default",
+                new UserId("usr_1"),
+                "trace_personal");
+
+        assertThatThrownBy(() -> service.gitPullPersonalWorkspace(
+                personal.personalWorkspaceId(),
+                new UserId("usr_2"),
+                "trace_other_owner"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        git.nextRepoStatusPorcelain = " M F-GCMS/workspace/docs/design.md\n";
+        assertThatThrownBy(() -> service.gitPullPersonalWorkspace(
+                personal.personalWorkspaceId(),
+                new UserId("usr_1"),
+                "trace_dirty"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.details()).containsEntry("reason", "LOCAL_CHANGES");
+                });
+        assertThat(git.fetchedBranch).isNull();
     }
 
     @Test

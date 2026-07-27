@@ -1306,10 +1306,11 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `GET` | `/applications/{appId}/workspace-templates` | 查询应用工作空间切换模板，只返回 `application_workspaces.enabled=true` 的配置。 |
 | `GET` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 查询模板下已创建的应用版本工作区。 |
 | `POST` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 创建或接管应用版本工作区，并创建运行态 Workspace。 |
-| `POST` | `/workspace-versions/{versionId}/git-pull` | 在当前用户 READY opencode agent 所在服务器独立拉取应用版本远端分支；只允许 fast-forward，不依赖个人暂存区，也不执行提交或推送。成功后广播其他服务器同步到同一 commit。 |
+| `POST` | `/workspace-versions/{versionId}/git-pull` | 已停用的版本级拉取兼容入口；返回 `VALIDATION_ERROR`，不会修改共享版本、个人 worktree 或触发广播。 |
 | `GET` | `/workspace-versions/{versionId}/git-access` | 版本选择前以当前用户身份只读探测关联 Git 版本库，不创建或修改本地工作区。 |
 | `GET` | `/workspace-versions/{versionId}/personal-workspaces` | 查询当前用户基于某版本派生的个人工作区。 |
 | `POST` | `/workspace-versions/{versionId}/personal-workspaces` | 基于应用版本工作区创建 git worktree 个人工作区。 |
+| `POST` | `/personal-workspaces/{personalWorkspaceId}/git-pull` | 只为当前登录用户拥有的个人 worktree 拉取并合并远端版本；不更新共享版本目标，不影响其他用户，也不提交或推送。 |
 | `GET` | `/recent-workspace` | 查询当前用户全局最近使用且当前仍可见的托管运行态 Workspace；关联应用已撤权、停用或删除时返回 `null`。 |
 | `GET` | `/applications/{appId}/recent-workspace` | 查询当前用户在指定应用下最近使用的托管运行态 Workspace。 |
 | `POST` | `/workspaces/{workspaceId}/recent` | 标记某个托管运行态 Workspace 为最近使用。 |
@@ -1399,9 +1400,9 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 `accessible=true` 时 `reason=null`；缺少当前用户 SSH key 时返回 `accessible=false, reason=SSH_KEY_MISSING`；Git 认证失败或仓库不可访问时返回 `accessible=false, reason=REPOSITORY_PERMISSION_REQUIRED`，供前端展示对应版本库权限申请提示。网络、DNS、SSH 端口故障和超时仍返回统一 `GIT_UNAVAILABLE` / `GIT_TIMEOUT`，不得误报为用户没有版本库权限。应用成员校验与其它版本接口一致。
 
-`POST /workspace-versions/{versionId}/git-pull` 无请求体。后端先解析当前登录用户的 READY opencode agent 所在 `linuxServerId`，再在同服务器受控应用版本副本上显式 fetch `origin/{branch}`、固定远端 tracking commit、确认当前 HEAD 是其祖先，最后 reset 到该固定 commit，语义等价于受控的 fast-forward-only 拉取。该接口不检查或消费个人 worktree 的 staged 文件，不执行 commit/push；前端入口与“刷新文件树”一起收纳在应用工作空间标题栏的“…”菜单中，仍与 Git Changes 的提交推送入口分离。共享副本存在未提交变更、非 fast-forward、目标服务器副本缺失或 SSH key 不可用时返回统一错误；成功后更新 `targetCommitHash` 与本机副本 `replicaCommitHash`，并通过内部服务器广播要求其他服务器同步到同一 commit。clean 个人 worktree 自动合并固定提交；dirty、staged、untracked 或冲突 worktree 不被 stash/reset/覆盖，继续显示待同步。
+`POST /personal-workspaces/{personalWorkspaceId}/git-pull` 无请求体，只允许个人工作区 owner 调用。后端在该个人 worktree 中显式 fetch `origin/{branch}` 并执行原生 merge；当前 worktree 有 unstaged、staged、untracked 或未完成 merge 时直接返回 `CONFLICT`，`details.reason=LOCAL_CHANGES` 且附带 `files/blockingFiles`，不会 stash、reset 或覆盖本地内容。成功响应返回 `personalWorkspaceId/versionId/remoteBranch/commitHash/updated/agentConfigChanged/changedFiles`。该动作不更新版本 `targetCommitHash` 或共享副本，不广播，不扫描或同步其他成员的 worktree，也不执行 commit/push；前端入口与“刷新文件树”一起收纳在当前 workspace 标题栏的“…”菜单中。
 
-若本次远端差异包含应用目录下 `.opencode/opencode.jsonc`、`.opencode/opencode.json`、`.opencode/agents/**` 或 `.opencode/skills/**`，后端在共享副本切换前建立现有 APPLICATION rollout 闸门。个人 worktree 收敛后按现有规则等待对应用户任务空闲并调用原生 `/global/dispose`；未收敛用户进入持久化 `AWAITING_USER` 补偿，处理本地状态后再单独同步和 dispose。公共 Agent 配置与公共 rollout 不受该应用版本拉取影响。
+若本次个人拉取差异包含同仓库任一应用目录的 `.opencode/opencode.jsonc`、`.opencode/opencode.json`、`.opencode/agents/**` 或 `.opencode/skills/**`，响应 `agentConfigChanged=true`，前端只让当前用户的运行态等待空闲后调用现有 `/global/dispose`。其他用户、共享 APPLICATION rollout 和公共 Agent rollout 均不受影响。提交并推送仍沿用个人提交、白名单投影 feature、更新共享目标以及多用户同步/rollout 的既有流程。旧 `POST /workspace-versions/{versionId}/git-pull` 固定返回 `VALIDATION_ERROR`，用于阻止旧客户端继续触发版本级全员拉取。
 
 `POST /workspace-versions/{versionId}/personal-workspaces` 请求体：
 

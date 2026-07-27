@@ -2319,3 +2319,19 @@
 - Result:
   - 用户可从一个紧凑的“…”菜单选择本地刷新或独立拉取；拉取无需 stage，不创建提交、不推送，push 权限、目录白名单和既有 worktree 管理边界均未扩大。
   - 本次复用既有 HTTP 路径和内部同步事件，没有新增 API/RunEvent 类型、数据库/Flyway/SQL、性能或安全配置变更，也未修改 generated SDK、OpenCode 源码或环境文件。
+
+### 2026-07-27 - 将拉取远程收敛为个人 workspace 操作
+
+- Why:
+  - 版本级拉取会更新共享 target 并同步应用内其他成员，与用户对“谁点击、谁生效”的理解冲突；成功提示也容易让人误以为一次点击会影响全应用用户。
+- What:
+  - 新增个人工作区 `git-pull`：只允许 owner 在自己的物理 worktree fetch/merge 远端，不更新共享 target/replica、不广播、不扫描其他成员；旧版本级入口固定返回 `VALIDATION_ERROR`，滚动升级期间收到旧拉取广播也直接忽略。
+  - 当前个人 worktree 有 unstaged、staged、untracked 或未完成 merge 时拒绝拉取，Diff 展示“无法更新到远程最新提交 / 请先提交或回退下列文件”，同仓库兄弟目录折叠为“当前应用的其它 workspace / Agent 配置”。
+  - 拉取包含应用 Agent/Skill/JSONC 时只由当前页面等待本人任务空闲后 dispose；提交并推送仍保留既有共享 target、多用户同步和 APPLICATION rollout 流程。
+  - “刷新文件树”和“拉取远程”继续共用 workspace 标题栏“…”菜单；成功反馈明确“本次只更新你的个人 workspace，其他用户不受影响”。
+- How:
+  - 后端服务、Controller 和路由测试覆盖 owner、脏状态、Agent 变化、共享版本不变、零广播以及旧版本级入口无副作用；前端组件/API 测试覆盖个人 ID 路由和新手提示，并执行 typecheck、生产 build、静态差异检查。
+  - 同步 workspace-management、API、shared-types、backend-api、agent-web、HTTP API、事件流和集成测试文档；使用 JDK 25 与未修改的 `.env.test` 按 test profile 重启实际服务并检查健康状态。
+- Result:
+  - 拉取远程变为严格按人、按个人 worktree 生效；其它用户、共享版本、推送权限和目录权限均不改变。个人拉取不产生 RunEvent 或服务器广播，Agent 变化也只热加载点击者本人。
+  - 新增一个向后兼容的 HTTP 响应类型和个人拉取端点；未涉及数据库/Flyway/SQL、generated SDK、OpenCode 源码、环境配置、性能或权限扩大。

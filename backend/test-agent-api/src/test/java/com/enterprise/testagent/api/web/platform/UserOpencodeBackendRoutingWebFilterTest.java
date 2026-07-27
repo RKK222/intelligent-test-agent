@@ -339,8 +339,8 @@ class UserOpencodeBackendRoutingWebFilterTest {
     }
 
     @Test
-    void routesManagedWorkspaceGitPullBecauseItRequiresUserOpencodeServer() {
-        assertRequestIsForwarded("/api/internal/platform/workspace-management/workspace-versions/ver_1/git-pull");
+    void routesPersonalWorkspaceGitPullBecauseItRequiresOwnerWorktreeServer() {
+        assertRequestIsForwarded("/api/internal/platform/workspace-management/personal-workspaces/pws_1/git-pull");
     }
 
     @Test

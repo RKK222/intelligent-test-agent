@@ -62,6 +62,8 @@ const props = defineProps<{
   agentConfigWorkspaceId?: string;
   /** 当前默认个人 worktree ID，用于本地提交和 feature 发布 */
   personalWorkspaceId?: string;
+  /** 当前用户主动拉取远端时，被本地改动阻止的仓库级文件。 */
+  personalPullBlockingFiles?: WorkspaceGitUpdateBlocker[];
   /** 当前默认个人 worktree 分支，用于在变更面板标识提交目标。 */
   personalWorkspaceBranch?: string;
   /** 当前目录视图在仓库内的相对路径，用于把仓库级同步阻塞项精确映射到文件行。 */
@@ -240,6 +242,16 @@ const workspaceMergeInProgress = ref(false);
 const workspaceApplicationUpdatePending = ref(false);
 const workspaceApplicationTargetCommit = ref<string | null>(null);
 const workspaceApplicationUpdateBlockingFiles = ref<WorkspaceGitUpdateBlocker[]>([]);
+const activePersonalPullBlockingFiles = computed(() => props.personalPullBlockingFiles ?? []);
+const showingPersonalPullBlockers = computed(() => activePersonalPullBlockingFiles.value.length > 0);
+const effectiveApplicationUpdatePending = computed(() =>
+  showingPersonalPullBlockers.value || workspaceApplicationUpdatePending.value
+);
+const effectiveApplicationUpdateBlockingFiles = computed(() =>
+  showingPersonalPullBlockers.value
+    ? activePersonalPullBlockingFiles.value
+    : workspaceApplicationUpdateBlockingFiles.value
+);
 const commitRequestedPush = ref(false);
 type CommitResultSummary = {
   committedFiles: number;
@@ -464,7 +476,7 @@ function normalizeRepositoryPath(path?: string | null): string {
  */
 function featureUpdateBlockerForFile(path: string, scope: DiffScope): WorkspaceGitUpdateBlocker | undefined {
   if (
-    !workspaceApplicationUpdatePending.value
+    !effectiveApplicationUpdatePending.value
     || workspaceMergeInProgress.value
     || scope === "PUBLIC"
   ) return undefined;
@@ -474,11 +486,11 @@ function featureUpdateBlockerForFile(path: string, scope: DiffScope): WorkspaceG
   const directoryPath = normalizeRepositoryPath(props.workspaceDirectoryPath);
   if (directoryPath) {
     const expectedPath = normalizeRepositoryPath(`${directoryPath}/${relativePath}`);
-    return workspaceApplicationUpdateBlockingFiles.value.find(
+    return effectiveApplicationUpdateBlockingFiles.value.find(
       (file) => normalizeRepositoryPath(file.path) === expectedPath
     );
   }
-  const candidates = workspaceApplicationUpdateBlockingFiles.value.filter((file) => {
+  const candidates = effectiveApplicationUpdateBlockingFiles.value.filter((file) => {
     const blockerPath = normalizeRepositoryPath(file.path);
     return blockerPath === relativePath || blockerPath.endsWith(`/${relativePath}`);
   });
@@ -489,7 +501,10 @@ function featureUpdateBlockerTitle(path: string, scope: DiffScope): string {
   const blocker = featureUpdateBlockerForFile(path, scope);
   if (!blocker) return "";
   const owner = blocker.workspaceName ? `${blocker.workspaceName} · ` : "";
-  return `这个文件有未提交修改。提交或撤销后，应用更新会自动继续。${blocker.rawStatus || "??"} · ${owner}${blocker.path}`;
+  const blockedAction = showingPersonalPullBlockers.value
+    ? "这次拉取无法继续"
+    : "应用暂时不能更新";
+  return `这个文件有本地改动，${blockedAction}。想保留改动：先点“暂存”，再点“提交”；不想保留：点“回退”。只点“暂存”还不会更新。${blocker.rawStatus || "??"} · ${owner}${blocker.path}`;
 }
 const workspaceConflicts = computed(() =>
   workspaceDiffFiles.value.filter((f) => isConflictFile(f))
@@ -646,7 +661,7 @@ const activeAgentConflicts = computed(() =>
   activeDiffScope.value === "PUBLIC" ? publicAgentConflicts.value : workspaceAgentConflicts.value
 );
 const showFeatureUpdateSummary = computed(() =>
-  workspaceApplicationUpdatePending.value
+  effectiveApplicationUpdatePending.value
   && !workspaceMergeInProgress.value
   && activeDiffScope.value !== "PUBLIC"
 );
@@ -667,7 +682,7 @@ const activeFeatureUpdateVisibleBlockerPaths = computed(() => {
   return visiblePaths;
 });
 const activeFeatureUpdateOtherBlockingFiles = computed(() =>
-  workspaceApplicationUpdateBlockingFiles.value.filter(
+  effectiveApplicationUpdateBlockingFiles.value.filter(
     (file) => !activeFeatureUpdateVisibleBlockerPaths.value.has(normalizeRepositoryPath(file.path))
   )
 );
@@ -1937,19 +1952,20 @@ defineExpose({
       <div class="feature-update-summary-main">
         <AlertTriangle class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
         <strong>
-          应用有新版本待更新<span v-if="workspaceApplicationTargetCommit"> · {{ workspaceApplicationTargetCommit.slice(0, 12) }}</span>
+          <template v-if="showingPersonalPullBlockers">无法更新到远程最新提交</template>
+          <template v-else>应用有新版本待更新<span v-if="workspaceApplicationTargetCommit"> · {{ workspaceApplicationTargetCommit.slice(0, 12) }}</span></template>
         </strong>
-        <span v-if="workspaceApplicationUpdateBlockingFiles.length > 0" class="feature-update-count">
-          {{ workspaceApplicationUpdateBlockingFiles.length }} 个文件待处理
+        <span v-if="effectiveApplicationUpdateBlockingFiles.length > 0" class="feature-update-count">
+          {{ effectiveApplicationUpdateBlockingFiles.length }} 个文件待处理
         </span>
       </div>
       <div class="feature-update-instruction">
-        {{ workspaceApplicationUpdateBlockingFiles.length > 0
-          ? '请提交或撤销带橙色标签的文件，应用更新会自动继续'
+        {{ effectiveApplicationUpdateBlockingFiles.length > 0
+          ? '请先提交或回退下列文件'
           : '准备完成后，应用更新会自动继续' }}
       </div>
       <details v-if="activeFeatureUpdateOtherBlockingFiles.length > 0" class="feature-update-other">
-        <summary>其它目录或应用配置还有 {{ activeFeatureUpdateOtherBlockingFiles.length }} 个待处理文件</summary>
+        <summary>当前应用的其它 workspace / Agent 配置还有 {{ activeFeatureUpdateOtherBlockingFiles.length }} 个待处理文件</summary>
         <div
           v-for="file in activeFeatureUpdateOtherBlockingFiles"
           :key="`feature-update-other:${file.path}`"
@@ -2127,7 +2143,7 @@ defineExpose({
                   v-if="featureUpdateBlockerForFile(file.path, 'WORKSPACE')"
                   class="git-file-marker git-file-marker--update"
                   role="img"
-                  aria-label="待处理：提交或撤销后更新应用"
+                  aria-label="待处理：暂存并提交或回退后更新应用"
                   :title="featureUpdateBlockerTitle(file.path, 'WORKSPACE')"
                 ><Tag class="h-3 w-3" :stroke-width="1.8" aria-hidden="true" /></span>
                 <span v-if="file.rawStatus" class="git-raw-status ml-1">{{ file.rawStatus }}</span>
@@ -2149,7 +2165,7 @@ defineExpose({
                   v-if="featureUpdateBlockerForFile(file.path, 'WORKSPACE')"
                   class="git-file-marker git-file-marker--update"
                   role="img"
-                  aria-label="待处理：提交或撤销后更新应用"
+                  aria-label="待处理：暂存并提交或回退后更新应用"
                   :title="featureUpdateBlockerTitle(file.path, 'WORKSPACE')"
                 ><Tag class="h-3 w-3" :stroke-width="1.8" aria-hidden="true" /></span>
                 <span
@@ -2274,7 +2290,7 @@ defineExpose({
                   v-if="featureUpdateBlockerForFile(file.path, activeDiffScope)"
                   class="git-file-marker git-file-marker--update"
                   role="img"
-                  aria-label="待处理：提交或撤销后更新应用"
+                  aria-label="待处理：暂存并提交或回退后更新应用"
                   :title="featureUpdateBlockerTitle(file.path, activeDiffScope)"
                 ><Tag class="h-3 w-3" :stroke-width="1.8" aria-hidden="true" /></span>
               </div>
@@ -2295,7 +2311,7 @@ defineExpose({
                   v-if="featureUpdateBlockerForFile(file.path, activeDiffScope)"
                   class="git-file-marker git-file-marker--update"
                   role="img"
-                  aria-label="待处理：提交或撤销后更新应用"
+                  aria-label="待处理：暂存并提交或回退后更新应用"
                   :title="featureUpdateBlockerTitle(file.path, activeDiffScope)"
                 ><Tag class="h-3 w-3" :stroke-width="1.8" aria-hidden="true" /></span>
                 
@@ -2379,7 +2395,7 @@ defineExpose({
                   v-if="featureUpdateBlockerForFile(file.path, 'WORKSPACE')"
                   class="git-file-marker git-file-marker--update"
                   role="img"
-                  aria-label="待处理：提交或撤销后更新应用"
+                  aria-label="待处理：暂存并提交或回退后更新应用"
                   :title="featureUpdateBlockerTitle(file.path, 'WORKSPACE')"
                 ><Tag class="h-3 w-3" :stroke-width="1.8" aria-hidden="true" /></span>
                 <span
@@ -2443,7 +2459,7 @@ defineExpose({
                   v-if="featureUpdateBlockerForFile(file.path, activeDiffScope)"
                   class="git-file-marker git-file-marker--update"
                   role="img"
-                  aria-label="待处理：提交或撤销后更新应用"
+                  aria-label="待处理：暂存并提交或回退后更新应用"
                   :title="featureUpdateBlockerTitle(file.path, activeDiffScope)"
                 ><Tag class="h-3 w-3" :stroke-width="1.8" aria-hidden="true" /></span>
                 <Badge v-if="file.pendingPublish" tone="warning" class="ml-1 py-0 px-1 text-[9px]">待推送</Badge>

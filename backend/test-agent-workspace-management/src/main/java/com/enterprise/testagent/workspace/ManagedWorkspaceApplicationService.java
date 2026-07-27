@@ -2815,132 +2815,122 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 version,
                 "应用版本工作区",
                 version.version()));
-        ApplicationWorkspace template = existingTemplate(version.applicationWorkspaceId());
-        if (!serverIdentity.linuxServerId().equals(targetLinuxServerId)) {
-            publishVersionSync(version, userId, "GIT_PULL_REQUESTED", traceId, Map.of("targetLinuxServerId", targetLinuxServerId));
-            ApplicationWorkspaceVersionReplica remoteReplica = waitForReadyReplica(version.versionId(), targetLinuxServerId)
-                    .orElseThrow(() -> new PlatformException(
-                            ErrorCode.CONFLICT,
-                            "目标服务器应用版本工作区副本未就绪",
-                            Map.of("targetLinuxServerId", targetLinuxServerId, "versionId", versionId)));
-            ApplicationWorkspaceVersion updated = existingVersion(version.versionId());
-            return versionResponse(updated, remoteReplica);
-        }
-        ApplicationWorkspaceVersionReplica replica = managedWorkspaceRepository.findVersionReplica(version.versionId(), targetLinuxServerId)
-                .orElseGet(() -> ensureReplicaForTarget(version, template, userId, targetLinuxServerId, "GIT_PULL", traceId));
-        PulledVersionReplica pulled = pullRemoteVersionReplica(version, replica, userId, traceId);
-        publishVersionSync(pulled.version(), userId, "GIT_PULLED", traceId, Map.of());
-        return versionResponse(pulled.version(), pulled.replica());
+        throw new PlatformException(
+                ErrorCode.VALIDATION_ERROR,
+                "版本级拉取已停用，请从当前个人工作区拉取远程",
+                Map.of("versionId", versionId));
     }
 
     /**
-     * 把应用共享副本快进到固定的远端提交，并在涉及应用 Agent/Skill 时复用既有 rollout 闸门。
-     * fetch 与 reset 分开执行，确保应用配置闸门建立前不会先改动共享副本工作树。
+     * 只把远端 feature 分支合入当前 owner 的个人 worktree。
+     *
+     * <p>这里不更新应用版本 target、不修改共享副本、不广播，也不枚举其它成员；应用 Agent
+     * 变化仅通过响应通知当前页面按既有用户空闲闸门 dispose 当前用户。</p>
      */
-    private PulledVersionReplica pullRemoteVersionReplica(
-            ApplicationWorkspaceVersion version,
-            ApplicationWorkspaceVersionReplica replica,
+    public ManagedWorkspaceResponses.PersonalWorkspaceGitPullResponse gitPullPersonalWorkspace(
+            String personalWorkspaceId,
             UserId userId,
             String traceId) {
-        Path replicaRepoRoot = pathResolver.resolve(replica.repoRootPath());
-        if (!gitWorkspaceService.isWorktreeClean(replicaRepoRoot)) {
-            throw new PlatformException(
-                    ErrorCode.CONFLICT,
-                    "应用版本工作区存在未提交变更，无法拉取远程",
-                    Map.of("versionId", version.versionId().value()));
-        }
+        PersonalWorkspace personal = existingPersonal(new PersonalWorkspaceId(personalWorkspaceId));
+        ensurePersonalOwner(personal, userId);
+        ApplicationWorkspaceVersion version = existingVersion(personal.versionId());
         CodeRepository repository = existingRepository(version.repositoryId());
         String privateKey = privateKeyFor(repository, userId);
-        ensureInternalOrigin(repository, userId, replicaRepoRoot, privateKey);
-        String previousCommit = gitWorkspaceService.headCommit(replicaRepoRoot);
-        gitWorkspaceService.fetchBranch(replicaRepoRoot, version.branch(), privateKey);
-        String remoteCommit = gitWorkspaceService.resolveCommit(
-                replicaRepoRoot,
-                "refs/remotes/origin/" + version.branch());
-        if (!previousCommit.equals(remoteCommit)
-                && !gitWorkspaceService.isAncestor(replicaRepoRoot, previousCommit, remoteCommit)) {
+        Path repoRoot = pathResolver.resolve(personal.repoRootPath());
+        if (gitWorkspaceService.isMergeInProgress(repoRoot)) {
             throw new PlatformException(
                     ErrorCode.CONFLICT,
-                    "远端分支不能快进到本地应用工作空间",
+                    "个人工作区存在未完成合并，请先在变更区解决冲突",
                     Map.of(
-                            "versionId", version.versionId().value(),
-                            "localCommit", previousCommit,
-                            "remoteCommit", remoteCommit));
+                            "reason", "MERGE_IN_PROGRESS",
+                            "files", gitWorkspaceService.conflictPaths(repoRoot)));
+        }
+        List<String> blockingFiles = repositoryStatusPaths(repoRoot);
+        if (!blockingFiles.isEmpty()) {
+            List<ManagedWorkspaceResponses.WorkspaceGitUpdateBlockerResponse> blockingDetails =
+                    applicationUpdateBlockingFiles(
+                            personal.runtimeWorkspaceId().value(),
+                            repoRoot,
+                            new WorkspaceFeatureSyncState(false, true, null));
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "无法更新到远程最新提交，请先提交或回退下列文件",
+                    Map.of(
+                            "reason", "LOCAL_CHANGES",
+                            "files", blockingFiles,
+                            "blockingFiles", blockingDetails));
         }
 
-        List<String> rolloutIds = preparePulledApplicationConfigRollouts(
-                version,
-                replicaRepoRoot,
-                previousCommit,
-                remoteCommit,
-                userId,
-                traceId);
-        try {
-            if (!previousCommit.equals(remoteCommit)) {
-                gitWorkspaceService.resetHardToCommit(replicaRepoRoot, remoteCommit);
-            }
-        } catch (RuntimeException exception) {
-            rolloutIds.forEach(rolloutId -> abortApplicationConfigRollout(rolloutId, "APPLICATION_PULL_FAILED"));
-            throw exception;
+        ensureInternalOrigin(repository, userId, repoRoot, privateKey);
+        gitWorkspaceService.fetchBranch(repoRoot, version.branch(), privateKey);
+        String remoteCommit = gitWorkspaceService.resolveCommit(
+                repoRoot,
+                "refs/remotes/origin/" + version.branch());
+        String previousCommit = gitWorkspaceService.headCommit(repoRoot);
+        if (previousCommit.equals(remoteCommit)
+                || gitWorkspaceService.isAncestor(repoRoot, remoteCommit, "HEAD")) {
+            return new ManagedWorkspaceResponses.PersonalWorkspaceGitPullResponse(
+                    personalWorkspaceId,
+                    version.versionId().value(),
+                    version.branch(),
+                    previousCommit,
+                    false,
+                    false,
+                    List.of());
         }
 
-        Instant now = Instant.now();
-        ApplicationWorkspaceVersion updatedVersion = updateRepositoryGroupTargetCommit(version, remoteCommit, now);
-        ApplicationWorkspaceVersionReplica updatedReplica = managedWorkspaceRepository.saveVersionReplica(
-                replica.ready(remoteCommit, now, traceId));
-        markRepositoryGroupLocalReplicasReady(
-                updatedVersion, replicaRepoRoot, remoteCommit, now, traceId);
-        rolloutIds.forEach(rolloutId -> activateApplicationConfigRollout(rolloutId, remoteCommit));
-        synchronizeFeatureCommitToPersonalWorktrees(
-                updatedVersion,
-                updatedReplica,
-                remoteCommit,
-                userId,
-                traceId);
-        // 一个仓库组可能包含多个应用目录；每个受影响目录都有独立 rollout，需要逐个领取本机同步任务。
-        rolloutIds.forEach(ignored -> synchronizeLocalApplicationConfigRollout());
-        return new PulledVersionReplica(updatedVersion, updatedReplica);
-    }
-
-    private List<String> preparePulledApplicationConfigRollouts(
-            ApplicationWorkspaceVersion anchor,
-            Path repoRoot,
-            String previousCommit,
-            String remoteCommit,
-            UserId userId,
-            String traceId) {
-        if (agentConfigRolloutCoordinator == null || previousCommit.equals(remoteCommit)) {
-            return List.of();
-        }
         List<String> changedPaths = changedPathsFromNameStatus(
                 gitWorkspaceService.diffNameStatus(repoRoot, previousCommit, remoteCommit));
-        List<String> rolloutIds = new ArrayList<>();
+        boolean agentConfigChanged = containsRepositoryGroupApplicationAgentConfig(
+                version,
+                repoRoot,
+                changedPaths);
         try {
-            for (ApplicationWorkspaceVersion member : repositoryVersionGroup(anchor)) {
-                ApplicationWorkspace template = existingTemplate(member.applicationWorkspaceId());
-                String workspacePrefix = repoRelativePrefix(repoRoot, repoRoot.resolve(template.directoryPath()));
-                List<String> workspacePaths = changedPaths.stream()
-                        .filter(path -> workspacePrefix.isBlank() || path.startsWith(workspacePrefix))
-                        .map(path -> stripDisplayPathPrefix(path, workspacePrefix))
-                        .toList();
-                String rolloutId = prepareApplicationConfigRolloutIfNeeded(
-                        workspacePaths,
-                        member,
-                        member.branch(),
-                        remoteCommit,
-                        previousCommit,
-                        userId,
-                        traceId);
-                if (rolloutId != null) {
-                    rolloutIds.add(rolloutId);
-                }
+            gitWorkspaceService.mergeCommit(
+                    repoRoot,
+                    remoteCommit,
+                    privateKey,
+                    gitCommitIdentity(userId));
+        } catch (PlatformException exception) {
+            List<String> conflictFiles = gitWorkspaceService.conflictPaths(repoRoot);
+            if (!conflictFiles.isEmpty()) {
+                throw new PlatformException(
+                        ErrorCode.CONFLICT,
+                        "远程更新与个人提交存在冲突，请在变更区解决冲突",
+                        Map.of(
+                                "reason", "MERGE_CONFLICT",
+                                "files", conflictFiles),
+                        exception);
             }
-            return List.copyOf(rolloutIds);
-        } catch (RuntimeException exception) {
-            rolloutIds.forEach(rolloutId -> abortApplicationConfigRollout(
-                    rolloutId, "APPLICATION_PULL_PREPARATION_FAILED"));
             throw exception;
         }
+        String currentCommit = gitWorkspaceService.headCommit(repoRoot);
+        return new ManagedWorkspaceResponses.PersonalWorkspaceGitPullResponse(
+                personalWorkspaceId,
+                version.versionId().value(),
+                version.branch(),
+                currentCommit,
+                true,
+                agentConfigChanged,
+                changedPaths);
+    }
+
+    private boolean containsRepositoryGroupApplicationAgentConfig(
+            ApplicationWorkspaceVersion anchor,
+            Path repoRoot,
+            List<String> changedPaths) {
+        for (ApplicationWorkspaceVersion member : repositoryVersionGroup(anchor)) {
+            ApplicationWorkspace template = existingTemplate(member.applicationWorkspaceId());
+            String workspacePrefix = repoRelativePrefix(repoRoot, repoRoot.resolve(template.directoryPath()));
+            List<String> workspacePaths = changedPaths.stream()
+                    .filter(path -> workspacePrefix.isBlank() || path.startsWith(workspacePrefix))
+                    .map(path -> stripDisplayPathPrefix(path, workspacePrefix))
+                    .toList();
+            if (containsApplicationAgentConfig(workspacePaths)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** name-status 的 rename/copy 同时保留旧、新路径，避免移出 .opencode 时漏掉运行态更新。 */
@@ -2955,11 +2945,6 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             }
         }
         return List.copyOf(paths);
-    }
-
-    private record PulledVersionReplica(
-            ApplicationWorkspaceVersion version,
-            ApplicationWorkspaceVersionReplica replica) {
     }
 
     @Override
@@ -3548,17 +3533,11 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         String reason = payloadString(payload, "reason").orElse("SYNC");
         ApplicationWorkspaceVersionReplica replica = ensureLocalReplica(version, template, userId, event.traceId());
         if ("GIT_PULL_REQUESTED".equals(reason)) {
-            if (!gitWorkspaceService.isWorktreeClean(pathResolver.resolve(replica.repoRootPath()))) {
-                managedWorkspaceRepository.saveVersionReplica(replica.failed("工作树存在未提交变更", Instant.now(), event.traceId()));
-                return;
-            }
-            PulledVersionReplica pulled = pullRemoteVersionReplica(version, replica, userId, event.traceId());
-            publishVersionSync(
-                    pulled.version(),
-                    userId,
-                    "GIT_PULLED",
-                    event.traceId(),
-                    Map.of("targetLinuxServerId", pulled.replica().linuxServerId()));
+            // 滚动升级期间可能收到旧节点发出的版本级拉取事件；新语义禁止它继续触发全员同步。
+            LOGGER.warn(
+                    "Ignore deprecated application-wide git pull event, versionId={}, eventId={}",
+                    versionId.value(),
+                    event.eventId());
             return;
         }
         synchronizeFeatureCommitToPersonalWorktrees(

@@ -23,8 +23,8 @@ const props = defineProps<FileExplorerProps & {
   loadingAppVersions?: boolean;
   /** 「+新增版本」提交中标记（父组件控制 WorkbenchFooter 弹窗按钮的禁用与文案） */
   creatingVersion?: boolean;
-  /** 应用工作空间正在独立拉取远端；与 Git 变更面板的暂存、提交、推送无关。 */
-  pullingWorkspaceVersion?: boolean;
+  /** 当前个人工作区正在拉取远端；与提交、推送及其它用户无关。 */
+  pullingPersonalWorkspace?: boolean;
   /** 是否允许当前个人工作区执行普通文件写操作 */
   canWrite?: boolean;
   /** 是否允许编辑应用级 Agent/Skill/Rules/Templates 配置 */
@@ -41,6 +41,8 @@ const props = defineProps<FileExplorerProps & {
   agentConfigWorkspaceId?: string;
   /** 当前默认个人工作区 ID，透传给 GitChangesPanel 用于提交并推送 */
   personalWorkspaceId?: string;
+  /** 本次个人拉取被本地文件阻止；透传给 Diff 区展示具体文件。 */
+  personalPullBlockingFiles?: import("@test-agent/shared-types").WorkspaceGitUpdateBlocker[];
   /** 当前默认个人 worktree 分支，透传给底部工作空间切换入口展示 */
   personalWorkspaceBranch?: string;
   /** Agent 配置保存修订号；变化时通知 GitChangesPanel 立即重新统计变更。 */
@@ -103,8 +105,8 @@ const emit = defineEmits<{
   loadVersions: [templateId: string];
   // 「+新增版本」弹窗确认后由父组件调用 createWorkspaceVersion。
   createVersion: [payload: { template: AppWorkspaceTemplate; version: string; branch?: string }];
-  // 工作空间标题栏“更多操作”菜单中的拉取动作只处理当前应用版本，不复用提交/推送入口。
-  pullWorkspaceVersion: [versionId: string];
+  // 工作空间标题栏“更多操作”菜单中的拉取动作只处理当前用户的个人 worktree。
+  pullPersonalWorkspace: [personalWorkspaceId: string];
   openAgentFile: [payload: AgentFileLoadRequest];
   openServerWorkspacePicker: [];
   openReferenceConfiguration: [];
@@ -161,9 +163,9 @@ function closeWorkspaceMoreMenu() {
   }
 }
 
-function pullSelectedWorkspaceVersion() {
-  if (!props.selectedVersionId || props.pullingWorkspaceVersion) return;
-  emit("pullWorkspaceVersion", props.selectedVersionId);
+function pullCurrentPersonalWorkspace() {
+  if (!props.personalWorkspaceId || props.pullingPersonalWorkspace) return;
+  emit("pullPersonalWorkspace", props.personalWorkspaceId);
   closeWorkspaceMoreMenu();
 }
 
@@ -392,6 +394,7 @@ defineExpose({
         :workspace-id="workspaceId"
         :agent-config-workspace-id="agentConfigWorkspaceId"
         :personal-workspace-id="personalWorkspaceId"
+        :personal-pull-blocking-files="personalPullBlockingFiles"
         :personal-workspace-branch="personalWorkspaceBranch"
         :workspace-directory-path="selectedWorkspaceDirectoryPath"
         :agent-config-revision="agentConfigRevision"
@@ -482,15 +485,15 @@ defineExpose({
                     type="button"
                     class="figma-fe-more-menu-item"
                     aria-label="拉取远程"
-                    :disabled="!selectedVersionId || pullingWorkspaceVersion"
-                    @click="pullSelectedWorkspaceVersion"
+                    :disabled="!personalWorkspaceId || pullingPersonalWorkspace"
+                    @click="pullCurrentPersonalWorkspace"
                   >
                     <CloudDownload
                       class="h-3.5 w-3.5"
-                      :class="{ 'animate-pulse': pullingWorkspaceVersion }"
+                      :class="{ 'animate-pulse': pullingPersonalWorkspace }"
                       :stroke-width="1.5"
                     />
-                    <span>{{ pullingWorkspaceVersion ? "正在拉取远程" : "拉取远程" }}</span>
+                    <span>{{ pullingPersonalWorkspace ? "正在拉取远程" : "拉取远程" }}</span>
                   </button>
                 </div>
               </details>
