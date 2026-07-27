@@ -24,13 +24,41 @@
 - `.20` 通过 Docker `-p 6379:6379` 提供共享 Redis 时必须持久化 `net.ipv4.ip_forward=1`；Redis `deploy/verify` 脚本会提前拒绝值为 `0` 的宿主机。容器本机 `healthy` 后仍必须从 `.4`、`.114` 分别验证 `.20:6379`，跨机超时不得通过反复重启 Java 处理。
 - Java 读取 `/data/testagent/config/backend.env`。
 - Java 固定读取交付 JAR 内置的 `classpath:rsa-private.key`；`backend.env` 不再接受外置 RSA 路径，多后台必须部署同一 JAR。
-- 所有 Java 连接外部 `122.210.106.43:3306/xxl_job`，当前按现场要求使用同一个 `root` 账号和密码，并使用同一个强随机 XXL access token；JDBC 启用 `createDatabaseIfNotExist=true`，Flyway 负责后续表和基础任务初始化。
+- 所有 Java 连接外部 `122.210.106.43:3306/xxl_job`，当前现场统一使用 `root` 账号和同一组纳管密码、XXL access token；JDBC 启用 `createDatabaseIfNotExist=true`，Flyway 负责后续表和基础任务初始化。真实密码只进入 `.4/.114` 敏感节点包，不写入仓库模板、文档或命令行。
 - 每个 Java 的 Admin 固定与同 JVM executor 配对，executor 注册地址复用平台 advertised host；同机多 Java 的 Admin/executor 端口必须唯一，所有 Admin 必须能访问所有 executor。前端 Nginx 把 `/xxl-job-admin/` 同源代理到各 Admin 子端口。
 - worker 读取 `/data/testagent/config/docker.env`。
 - Java 的 `SYS_DATA_ROOT_DIR` 必须与本机 worker 的 `TEST_AGENT_DATA_ROOT` 一致。
 - 每个稳定 `TEST_AGENT_LINUX_SERVER_ID` 只运行一个 worker，不配置人工 `containerId/managerId`。
 - 企业模型供应商地址和上游 token 由数据库及管理页面维护，不写入 `docker.env`。
 - 正式模型链路为 `OpenCode → 本机 Java:8080 → 企业内部模型:9070`，不使用 19070 relay 或 host network。
+
+## 现场 XXL-JOB MySQL 配置变更
+
+当前现场的 XXL-JOB 外部 MySQL 连接配置已固定为：
+
+```text
+地址：122.210.106.43
+端口：3306
+数据库：xxl_job
+账号：root
+```
+
+本次纳管密码已更新到企业包内 `.4`、`.114` 两个敏感节点的
+`config/backend.env`。仓库中的 [backend.env.example](backend.env.example) 只保留占位符，
+避免把生产密码提交到 Git。密码包含 `=`、`@`、`*` 等特殊字符，落盘时应直接写入 dotenv
+配置行，不要执行 `source backend.env`，也不要把密码放在 shell 命令参数中。
+
+部署前在两台后台分别执行以下脱敏校验，预期第一条输出 `1`，第二条无输出：
+
+```bash
+# 122.233.30.4
+grep -c '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=' /data/testagent/config/backend.env
+grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=$' /data/testagent/config/backend.env
+
+# 122.233.30.114
+grep -c '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=' /data/testagent/config/backend.env
+grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=$' /data/testagent/config/backend.env
+```
 
 ## Mac 打包
 

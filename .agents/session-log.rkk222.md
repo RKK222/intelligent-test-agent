@@ -2136,3 +2136,16 @@
 - Result:
   - 所有 Git 可见 `.opencode/**` 变更都会出现在应用 Agent Diff，可被提交或回退，不再因新增 OpenCode 目录类型形成不可见脏状态并阻塞 feature 同步；普通工作区文件仍不会误入应用配置 Diff。
   - 未新增 HTTP/WS 字段或 RunEvent 类型，不涉及数据库/Flyway、SQL、性能、generated SDK、OpenCode 源码或环境配置；既有 API 行为范围扩大且权限边界同步收紧。
+
+### 2026-07-27 - 固化企业 XXL-JOB MySQL 配置说明
+
+- Why:
+  - 现场 XXL-JOB 外部 MySQL 密码已完成纳管轮换，但此前只更新了敏感三节点交付包，仓库配置模板和部署文档没有明确说明配置落点与特殊字符处理，容易造成“包内已更新、源文件看不到”的误解。
+- What:
+  - 更新 `deploy/internal/backend.env.example`，明确当前 `122.210.106.43:3306/xxl_job`、`root` 现场配置和敏感密码不入 Git 的边界。
+  - 更新企业部署 README、多后台/单后台手册和 `docs/deployment/database.md`，说明 `.4/.114` 敏感 `backend.env` 的密码来源、`=/@/*` 特殊字符的 dotenv 落盘规则，以及不回显密码的现场校验命令。
+  - 保持真实密码只存在于受控企业节点包和目标服务器配置，不新增 HTTP/API、事件、数据库结构或脚本变更。
+- How:
+  - 先回顾全部会话日志近期条目；对模板、部署手册和数据库说明做定点修改，再运行文档/包校验并重新封装内外层企业包。
+- Result:
+  - 配置模板、文档、敏感节点包和交付校验口径一致；后续可从 `backend.env.example` 与 `MULTI-BACKEND.md` 直接定位配置位置，不再依赖 ZIP 内部临时目录。

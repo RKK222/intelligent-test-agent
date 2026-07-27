@@ -13,6 +13,20 @@
 
 XXL MySQL 与平台 PostgreSQL 完全分离。Admin 子上下文只扫描 `backend/test-agent-xxl-job-integration/src/main/resources/xxl-job/db/migration`，平台主 Flyway 的 `classpath:db/migration` 不会扫描该独立顶层目录。
 
+### 当前企业现场连接配置
+
+当前企业现场使用外部共享 XXL-JOB MySQL：
+
+| 配置项 | 值 |
+|---|---|
+| 地址 | `122.210.106.43` |
+| 端口 | `3306` |
+| 数据库 | `xxl_job` |
+| 账号 | `root` |
+| Java 配置键 | `TEST_AGENT_XXL_JOB_MYSQL_URL`、`TEST_AGENT_XXL_JOB_MYSQL_USERNAME`、`TEST_AGENT_XXL_JOB_MYSQL_PASSWORD` |
+
+生产密码属于敏感部署配置：本次纳管密码只写入 `.4/.114` 企业节点包中的 `backend.env`，不提交到仓库模板、文档、日志或命令行。密码含 `=`、`@`、`*` 等特殊字符，写入 dotenv 文件时必须保持原值；部署前只校验键数量和占位符，不回显密码。两台 Java 必须使用同一个密码和同一个 XXL access token，并先确认 `122.210.106.43:3306` 网络可达，再启动 Java。
+
 | 版本 | 内容 |
 |---|---|
 | `V1__xxl_job_3_4_2_base_schema.sql` | XXL-JOB 3.4.2 基础表与 schedule lock；不包含示例任务和默认管理员。 |

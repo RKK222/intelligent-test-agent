@@ -108,7 +108,7 @@ unzip -t test-agent-internal-release.zip
 
 ## 3. 配置后台
 
-在 `.114` 创建 `/data/testagent/config/backend.env`。下面是可整文件替换的完整生产配置；只需要替换 PostgreSQL 密码、manager token、内部代理 key、XXL MySQL 密码和 XXL access token 这 5 个 `REPLACE_...` 值。模板按 Redis 无密码、平台 API token 为空填写；如果现网这两项非空，必须保留现网值。替换前先备份：
+在 `.114` 创建 `/data/testagent/config/backend.env`。下面是可整文件替换的完整生产配置；只需要替换 PostgreSQL 密码、manager token、内部代理 key、XXL MySQL 密码和 XXL access token 这 5 个 `REPLACE_...` 值。本次现场纳管密码已更新到交付包内 `.114` 敏感节点配置，不在本文或 Git 模板中明文记录。密码包含 `=`、`@`、`*` 等特殊字符，必须按 dotenv 原值写入，不能 `source` 文件或通过命令行传递。模板按 Redis 无密码、平台 API token 为空填写；如果现网这两项非空，必须保留现网值。替换前先备份：
 
 ```bash
 install -d -m 0755 /data/testagent/config

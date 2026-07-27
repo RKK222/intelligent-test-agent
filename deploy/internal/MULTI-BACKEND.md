@@ -187,7 +187,7 @@ token，但不采集 JAR/RSA、日志、Docker、programs、worker 镜像、业�
 
 ## 4. 每个后台的 backend.env
 
-以下两份都是可整文件替换的完整配置。两台机器必须把 PostgreSQL 密码、manager token、内部代理 key、XXL MySQL 密码和 XXL access token 这 5 个同名 `REPLACE_...` 替换为同一组现场值。模板按 Redis 无密码、平台 API token 为空填写；如果现网这两项非空，必须保留现网值。替换前先备份原文件：
+以下两份都是可整文件替换的完整配置。两台机器必须把 PostgreSQL 密码、manager token、内部代理 key、XXL MySQL 密码和 XXL access token 这 5 个同名 `REPLACE_...` 替换为同一组现场值。本次现场纳管密码已更新到交付包内 `.4/.114` 的敏感 `backend.env`，不在本文或 Git 模板中明文记录。密码包含 `=`、`@`、`*` 等特殊字符，必须作为 dotenv 原值写入，不能 `source` 文件或通过命令行传递。模板按 Redis 无密码、平台 API token 为空填写；如果现网这两项非空，必须保留现网值。替换前先备份原文件：
 
 ```bash
 install -d -m 0755 /data/testagent/config
@@ -485,6 +485,20 @@ bash /tmp/deploy-internal-frontend.sh \
 外部 JDBC 地址、`root` 账号和现场密码；URL 启用 `createDatabaseIfNotExist=true`，因此账号有建库权限时
 会自动创建 `xxl_job` 空库，随后 Admin 子上下文 Flyway 幂等创建表、执行器组和任务。密码不得打印或
 另行写入命令行。
+
+两台后台更新后分别执行以下脱敏校验：
+
+```bash
+# 122.233.30.4
+grep -c '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=' /data/testagent/config/backend.env
+grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=$' /data/testagent/config/backend.env
+
+# 122.233.30.114
+grep -c '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=' /data/testagent/config/backend.env
+grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=$' /data/testagent/config/backend.env
+```
+
+两台第一条都应输出 `1`，第二条均无输出；不要使用 `grep` 直接回显密码。
 
 企业上午已经部署过旧包时，PostgreSQL 中可能已有 `V20260721213000`。本包把尚未交付的夜间 XXL
 迁移固定为更晚的 `V20260722130000`，Flyway 会正常顺序执行；不要在企业环境添加
