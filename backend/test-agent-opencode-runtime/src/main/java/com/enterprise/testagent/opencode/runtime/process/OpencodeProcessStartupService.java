@@ -71,6 +71,7 @@ public class OpencodeProcessStartupService {
     private final CommonParameterValues commonParameterValues;
     private OpencodeProcessConfigLinkService configLinkService;
     private OpencodeProcessStopService stopService;
+    private WorkspaceGitToolTokenService workspaceGitToolTokenService;
 
     /** 启动前把用户有效公共配置链接到共享运行副本；方法注入保持既有测试构造器兼容。 */
     @Autowired
@@ -82,6 +83,13 @@ public class OpencodeProcessStartupService {
     @Autowired
     void setStopService(OpencodeProcessStopService stopService) {
         this.stopService = Objects.requireNonNull(stopService, "stopService must not be null");
+    }
+
+    /** 启动时为公共 Tool 注入仅限工作区 Git 入口的用户签名凭据。 */
+    @Autowired
+    void setWorkspaceGitToolTokenService(WorkspaceGitToolTokenService workspaceGitToolTokenService) {
+        this.workspaceGitToolTokenService = Objects.requireNonNull(
+                workspaceGitToolTokenService, "workspaceGitToolTokenService must not be null");
     }
 
     /**
@@ -850,6 +858,14 @@ public class OpencodeProcessStartupService {
             environment.put(InternalModelProxyRuntimeSettings.API_KEY_ENV_NAME, internalProxySettings.requireApiKey());
             environment.put(InternalModelProxyRuntimeSettings.BASE_URL_ENV_NAME, internalProxySettings.sameNodeProxyBaseUrl());
             environment.put(InternalModelProxyRuntimeSettings.UCID_ENV_NAME, unifiedAuthId(request.userId()));
+        }
+        if (workspaceGitToolTokenService != null && internalProxySettings != null) {
+            environment.put(
+                    WorkspaceGitToolTokenService.BASE_URL_ENV_NAME,
+                    internalProxySettings.sameNodeBaseUrl());
+            environment.put(
+                    WorkspaceGitToolTokenService.TOKEN_ENV_NAME,
+                    workspaceGitToolTokenService.issue(request.userId()));
         }
         return Map.copyOf(environment);
     }

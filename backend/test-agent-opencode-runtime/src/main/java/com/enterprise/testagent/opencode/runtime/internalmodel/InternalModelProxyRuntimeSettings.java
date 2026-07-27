@@ -39,10 +39,15 @@ public class InternalModelProxyRuntimeSettings {
     }
 
     public String sameNodeProxyBaseUrl() {
+        return sameNodeBaseUrl() + PROXY_PATH;
+    }
+
+    /** 当前 Java 的 HTTP 根地址，供同进程签发的受控 Tool 回调专用平台入口。 */
+    public String sameNodeBaseUrl() {
         String listenUrl = backendLifecycle.listenUrl();
         if (listenUrl.endsWith("/")) {
             listenUrl = listenUrl.substring(0, listenUrl.length() - 1);
         }
-        return listenUrl + PROXY_PATH;
+        return listenUrl;
     }
 }

@@ -5,6 +5,25 @@
 
 ## Entries
 
+### 2026-07-27 - 公共 Agent 新增对话式工作区 Git 助手
+
+### Why
+- 工作区 Git 同时包含个人拉取、暂存/回退、个人提交、应用发布、冲突处理、目录角色和 Agent dispose 规则，普通用户仅靠页面提示仍难以判断下一步。
+- 直接让 Agent 执行原生 `git` 会绕过平台 owner、`.opencode/**`、`spec/**`、发布同步和 dispose 约束，需要把既有平台能力安全地暴露给对话。
+
+### What
+- 公共 Agent 配置新增 `workspace-git` Tool 与 `workspace-git-assistant` Skill，支持状态、个人拉取、暂存/取消暂存、逐文件回退、个人提交、发布预览/发布和冲突处理，并用普通用户语言组织流程。
+- 后端新增对话 Git 专用入口：由 OpenCode session 反查当前个人 workspace，不接受客户端 workspace ID；所有动作委托既有 `ManagedWorkspaceApplicationService`，HTTP 页面与 Tool 共用 `.opencode/**` 路径角色策略。
+- 用户 OpenCode 启动时注入同节点平台地址和七天有效的专用签名凭据；凭据只能访问精确 Tool 入口，用户状态与角色每次调用实时校验，不能作为通用登录 Token。
+
+### How
+- 定向回归覆盖个人 workspace 归属、角色路径、操作映射、专用凭据签发/过期/禁用用户、API 认证豁免边界和 OpenCode 启动环境注入；相关 Maven 测试通过。
+- 使用 JDK 25 与未修改的 `.env.test` 完整打包并重启 backend、manager、frontend；health/readiness 为 UP、前端和 CORS 为 200、无凭据 Tool 请求为 401，自动恢复的 4104 OpenCode 进程实际发现 `workspace-git` 且包含受控运行时凭据。
+
+### Result
+- 用户可以在对话中处理当前个人 workspace 文件，个人拉取和个人提交仍只影响本人；只有明确发布才进入原有共享 target、同步和 dispose 流程。
+- 原有 owner、目录角色、`spec/**` 发布限制、应用同步、冲突和 dispose 逻辑未复制或放宽；未修改前端、数据库/Flyway、SQL、RunEvent、generated SDK、环境配置或 OpenCode 源码。
+
 ### 2026-07-27 - 公共 Agent 初始化与拉取操作固定展示
 
 ### Why

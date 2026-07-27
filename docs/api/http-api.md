@@ -1402,6 +1402,27 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 `POST /personal-workspaces/{personalWorkspaceId}/git-pull` 无请求体，只允许个人工作区 owner 调用。后端在该个人 worktree 中显式 fetch `origin/{branch}` 并执行原生 merge；当前 worktree 有 unstaged、staged、untracked 或未完成 merge 时直接返回 `CONFLICT`，`details.reason=LOCAL_CHANGES` 且附带 `files/blockingFiles`，不会 stash、reset 或覆盖本地内容。成功响应返回 `personalWorkspaceId/versionId/remoteBranch/commitHash/updated/agentConfigChanged/changedFiles`。该动作不更新版本 `targetCommitHash` 或共享副本，不广播，不扫描或同步其他成员的 worktree，也不执行 commit/push；前端入口与“刷新文件树”一起收纳在当前 workspace 标题栏的“…”菜单中。
 
+### 对话工作区 Git Tool
+
+`POST /api/internal/agent/opencode/workspace-git-tool` 仅供公共 `workspace-git` Tool 从当前用户 OpenCode 进程回调。请求使用进程启动时注入的七天有效专用 Bearer 凭据；该凭据只被本端点接受，不能替代用户登录 Token，也不能调用其它平台 API。当前个人 workspace 由请求中的远端 `sessionId` 经既有 agent session binding 反查，接口不接受客户端指定 workspace ID。
+
+请求体：
+
+```json
+{
+  "sessionId": "ses_remote_...",
+  "action": "status|pull|stage|unstage|discard|commit|publish_preview|publish|conflict|resolve_conflict|abort_merge|complete_merge",
+  "files": ["docs/design.md"],
+  "message": "更新设计说明",
+  "path": "docs/conflicted.md",
+  "resolution": "CURRENT|INCOMING|BOTH|MANUAL|DELETE",
+  "content": "resolution=MANUAL 时的完整正文",
+  "expectedApplicationHead": "publish_preview 返回的 applicationHead"
+}
+```
+
+Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有托管工作区服务：owner、`.opencode/**` 的 `APP_ADMIN`（含 `SUPER_ADMIN`）、`spec/**` 禁发布、个人提交、应用 feature 发布、成员同步和冲突规则均不变。`discard/publish/resolve_conflict/abort_merge` 等动作还会先由 OpenCode permission 卡向当前用户确认。凭据过期或用户状态失效返回 `UNAUTHENTICATED`；当前对话不是个人 workspace 返回 `CONFLICT`。
+
 若本次个人拉取差异包含同仓库任一应用目录的 `.opencode/opencode.jsonc`、`.opencode/opencode.json`、`.opencode/agents/**` 或 `.opencode/skills/**`，响应 `agentConfigChanged=true`，前端只让当前用户的运行态等待空闲后调用现有 `/global/dispose`。其他用户、共享 APPLICATION rollout 和公共 Agent rollout 均不受影响。提交并推送仍沿用个人提交、白名单投影 feature、更新共享目标以及多用户同步/rollout 的既有流程。旧 `POST /workspace-versions/{versionId}/git-pull` 固定返回 `VALIDATION_ERROR`，用于阻止旧客户端继续触发版本级全员拉取。
 
 `POST /workspace-versions/{versionId}/personal-workspaces` 请求体：

@@ -161,6 +161,13 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 - 三方合并有冲突时不得提前改工作树；完成前再次校验 current 摘要，数据库持久化失败时恢复文件系统备份，避免把被用户继续修改的内容静默覆盖。取消引用同样先备份后移除，数据库失败必须恢复；关系立即退出用户侧有效视图，但只有远端 push 能证明目标路径已消失时才正式删除引用元数据，确认前重新引用必须复用原记录而非绕过唯一关系约束。
 - Hub 业务日志只记录资产/修订/工作空间标识和错误摘要，不记录制品正文或冲突内容。
 
+## 对话工作区 Git Tool 安全边界
+
+- 公共 `workspace-git` Tool 禁止直接执行原生 Git 绕过平台；所有副作用必须调用 agent-scoped 专用入口并复用 workspace-management 的 owner、路径角色、`spec/**` 禁发布、应用同步和冲突规则。
+- Tool 凭据由 `OpencodeProcessStartupService` 按用户签发，只允许专用 Git 端点使用，不能被通用用户 Token 过滤器接受，也不能访问其它平台 API；签名密钥不得注入 OpenCode 进程。凭据包含过期时间，验证时必须实时检查用户启用状态和角色。
+- 当前 workspace 必须由远端 session 经平台 agent binding 反查，禁止接受 Tool 传入 workspace ID、个人 workspace ID、物理路径或目标服务器。owner 不一致、非个人 workspace 或绑定缺失必须失败关闭。
+- `discard`、`publish`、冲突解决和取消合并必须先显示 OpenCode permission 确认；Tool 返回给模型的错误详情只保留原因、相对文件和并发提交等安全字段，不返回凭据、Git 命令或物理路径。
+
 ## 安全变更文档
 
 鉴权、限流、CORS、密钥、日志脱敏变更必须同步 `docs/standards/security.md`、`docs/api/http-api.md` 和相关 README。
