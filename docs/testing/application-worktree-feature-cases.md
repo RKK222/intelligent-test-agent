@@ -138,12 +138,12 @@ OPENCODE_CONFIG_DIR / manager configPath
 | 个人本地提交 | `ManagedWorkspaceApplicationService.commitPersonalWorkspace` | 隔离 index，`git add -- <files>`，提交个人分支；不 push |
 | 个人发布 | `ManagedWorkspaceApplicationService.publishPersonalWorkspace` | feature 副本 `fetch` + `pull --ff-only`；从个人 `HEAD` 定点 checkout/删除选中路径；feature `commit` + `git push origin {featureBranch}` |
 | 版本广播 | `publishVersionSync` / `handleVersionSyncEvent` | payload 只携带 `targetCommitHash` 等标识；远端服务器先把 feature 副本 reset 到固定提交 |
-| feature 反向同步 | `synchronizeFeatureCommitToPersonalWorktrees` → `mergeFeatureCommitIntoPersonalWorkspace` | 先用 `git merge-base --is-ancestor <target> HEAD` 判定；clean 时调用 `GitWorkspaceService.mergeCommit` 执行 `git merge --no-edit <targetCommit>` |
+| feature 反向同步 | `synchronizeFeatureCommitToPersonalWorktrees` → `mergeFeatureCommitIntoPersonalWorkspace` | 先用 `git merge-base --is-ancestor <target> HEAD` 判定；clean 时调用 `GitWorkspaceService.mergeCommit` 执行 `git merge --no-edit <targetCommit>`；同仓库多目录按物理 repoRoot 去重后全部同步 |
 | dirty 补偿 | `retryLatestFeatureMerge` | 本地提交、回退、显式进入 default 个人工作区后重试；副本补偿和版本广播也会重试 |
 | 手动应用 Agent 更新 | `AgentWorkbench.handlePersonalRuntimeReload` → `sync-from-application` | 先合并整个固定 feature commit 并刷新文件树/Diff；进程 READY 时再 dispose，本地无变更但 HEAD 落后时也可完成同步 |
 | 冲突展示 | `getWorkspaceGitDiff` / `GitChangesPanel.vue` | Diff 返回 `mergeInProgress`、`applicationUpdatePending`、`applicationTargetCommit`；待同步且未进入 merge 时，`applicationUpdateBlockingFiles` 返回整个个人仓库的阻塞路径和兄弟目录视图归属；Git unmerged stage 用既有三方编辑器读取 |
 | 冲突完成 | `completeWorkspaceGitMerge` | 冲突全部解决后提交完整 merge index；若包含 `.opencode/**`，入口要求 `APP_ADMIN` |
-| 应用配置发布热加载 | `PublicAgentConfigRolloutCoordinator` 的 APPLICATION scope | 每服务器个人 worktree 全部包含固定提交后登记目标用户，等待空闲并调用现有 OpenCode client 的 `/global/dispose` |
+| 应用配置发布热加载 | `PublicAgentConfigRolloutCoordinator` 的 APPLICATION scope | 同仓库兄弟目录会同步固定提交，但只在发布源目录的个人 worktree 包含目标后登记其用户，等待空闲并调用现有 OpenCode client 的 `/global/dispose` |
 | 公共保存时本人热加载 | `AgentWorkbench.refreshRuntimeCatalogAfterAgentConfigSave` → `POST /agent-config/public/runtime-reload` → `PersonalAgentConfigRuntimeReloadService` | Controller 把同步等待 dispose 的本地调用或跨服务器转发调度到 `boundedElastic`，避免在 WebFlux 事件线程调用 `block()`；随后校验 worktree owner/服务器，原子切换 `{sessionPath}/.testagent-runtime/current-public-config` 到本人公共 worktree，再只调用本人进程 `/global/dispose` |
 | 应用保存时本人热加载 | `AgentWorkbench.refreshRuntimeCatalogAfterAgentConfigSave` | 当前用户在个人 worktree 保存后直接调用 `disposeGlobal()`；OpenCode 下一次按请求 directory 重读该个人 worktree `.opencode` |
 | 公共发布热加载 | `PublicAgentConfigRolloutService` 的 PUBLIC scope | 各服务器共享 Git 副本固定提交同步后，逐进程等待全部 Session 空闲，恢复共享配置链接并调用 `/global/dispose`；升级前直接读取共享路径的旧进程兼容只 dispose |
@@ -162,7 +162,7 @@ OPENCODE_CONFIG_DIR / manager configPath
 tools/create-workspace-branch-model-test-data.sh
 ```
 
-脚本在被 Git 忽略的 `.tmp/workspace-branch-model.*` 下创建独立真实仓库，并在最后输出 fixture 绝对路径。两个 `origin` 都是 fixture 内的本地 bare remote，不会连接或推送 Gitee：
+脚本在被 Git 忽略的 `.tmp/workspace-branch-model.*` 下创建独立真实仓库，并在最后输出 fixture 绝对路径。三个 `origin` 都是 fixture 内的本地 bare remote，不会连接或推送 Gitee：
 
 | 数据 | 状态与用途 |
 | --- | --- |
@@ -172,11 +172,13 @@ tools/create-workspace-branch-model-test-data.sh
 | `personal-clean` | 有个人提交，已真实 merge 已推送的 feature target commit |
 | `personal-dirty` | 保留 untracked 文件，模拟 `applicationUpdatePending=true` |
 | `personal-conflict` | 保留 `MERGE_HEAD`、三方 index 和 `docs/shared.md` 冲突 |
+| `F-GCMS-PSN/ai-test` + `workspace-house` | 同一应用 feature 仓库的两个目录视图；target 新增兄弟目录 `.gitkeep` 并更新 ai-test Agent |
+| `single-workspace-remote.git` + `single-workspace-personal` | 一应用一 Git 仓库一工作空间；个人 worktree 已真实 merge Agent R2 target |
 | `public-config-remote.git` | 公共配置本地远程，main 已存在一次真实 push |
 | `public-personal-admin` | 未提交公共 Agent、Skill 和 rules，用于公共个人提交/推送 |
 | `README.md` | 记录随机路径、commit id、初始断言和可直接复制的安全 commit/push 命令 |
 
-脚本退出前会自动断言两个本地远程 ref、clean、dirty、conflict、发布就绪和公共个人数据状态；任何断言失败都不会把该目录报告为可用 fixture。
+脚本退出前会自动断言三个本地远程 ref、共享仓库新目录、兄弟目录 dirty 文件、单工作空间 Agent target、clean、conflict、发布就绪和公共个人数据状态；任何断言失败都不会把该目录报告为可用 fixture。
 
 ### 5.2 当前平台个人本地热加载数据
 
@@ -242,6 +244,8 @@ tools/create-workspace-branch-model-test-data.sh
 | GIT-05 dirty 时不覆盖 | 1. 执行 `git -C personal-dirty status --short`。<br>2. 记录 `docs/local-draft.md` 内容和 HEAD。<br>3. 尝试平台同步时应只登记待同步；fixture 可用记录值与 target 比较。<br>4. 再核对文件内容和 HEAD。 | `personal-dirty/docs/local-draft.md` 为 untracked。 | dirty 文件和 HEAD 均不变化，没有 stash/reset/覆盖；平台集成场景中 Diff 显示目标 commit 待同步。 |
 | GIT-06 同文件真实冲突 | 1. 执行 `git -C personal-conflict rev-parse MERGE_HEAD`。<br>2. 执行 `git -C personal-conflict diff --name-only --diff-filter=U`。<br>3. 执行 `git -C personal-conflict ls-files -u docs/shared.md`。<br>4. 在三方编辑器解决并点击“完成合并”。 | feature 与个人分支都修改 `docs/shared.md`。 | 合并完成前存在 `MERGE_HEAD`、冲突路径和 stage 1/2/3；完成后 unmerged index 清空并生成完整 merge commit，双方其他提交不丢失。 |
 | GIT-07 公共个人提交并安全推送 | 1. 复制 fixture README 的“安全执行公共提交与推送”命令。<br>2. 在 `public-personal-admin` 提交 Agent、Skill、rules。<br>3. push `HEAD:main` 到 fixture bare remote。<br>4. 从 bare remote 读取公共 Agent。 | `public-personal-hot-reload-20260719` 三类文件。 | 公共远程 main 前进到个人提交；Agent、Skill、rules 均存在；push 目标仅为 fixture 本地路径。 |
+| GIT-08 同仓库多目录 | 1. 核对远程 target 存在 `F-GCMS-PSN/workspace-house/.gitkeep`。<br>2. 核对 ai-test Agent 已是 R2。<br>3. 检查 `personal-dirty/F-GCMS-PSN/workspace-house` 的未跟踪文件。<br>4. 从 ai-test 目录查 Diff 后再查仓库级阻塞清单。 | 共享应用远程和 `personal-dirty`。 | 两个目录共享同一 target；ai-test pathspec 不会把兄弟文件伪装成自身 Diff，但 `applicationUpdateBlockingFiles` 显示兄弟目录归属；不覆盖 dirty 内容。 |
+| GIT-09 单仓库单工作空间兼容 | 1. 从 README 取 single target。<br>2. 执行 `merge-base --is-ancestor <target> HEAD`。<br>3. 从 single bare remote 读取 `single-reviewer.md`。 | `single-workspace-personal`、`single-workspace-remote.git`。 | 祖先检查成功；远程与个人均为 Agent R2；仓库组仅一个成员时没有多余目录或运行态副作用。 |
 
 ### 7.2 当前用户个人本地热加载
 
@@ -272,7 +276,7 @@ tools/create-workspace-branch-model-test-data.sh
 ```bash
 cd backend
 mvn -pl test-agent-common,test-agent-workspace-management,test-agent-opencode-runtime,test-agent-api -am \
-  -Dtest=GitWorkspaceServiceRealGitTest,ManagedWorkspaceApplicationServiceTest,ManagedWorkspaceControllerTest,PersonalAgentConfigRuntimeReloadServiceTest,AgentConfigControllerTest \
+  -Dtest=GitWorkspaceServiceRealGitTest,ManagedWorkspaceApplicationServiceTest,ManagedWorkspaceControllerTest,PersonalAgentConfigRuntimeReloadServiceTest,PublicAgentConfigRolloutServiceTest,AgentConfigControllerTest \
   -Dsurefire.failIfNoSpecifiedTests=false test
 
 cd ../frontend
@@ -280,7 +284,8 @@ corepack pnpm vitest run \
   apps/agent-web/tests/agent-file-load.test.ts \
   apps/agent-web/tests/git-changes-panel.test.ts \
   apps/agent-web/tests/reference-config-jsonc.test.ts \
-  apps/agent-web/tests/reference-configuration-dialog.test.ts
+  apps/agent-web/tests/reference-configuration-dialog.test.ts \
+  apps/agent-web/tests/settings-app-workspace-panel.test.ts
 corepack pnpm --filter @test-agent/agent-web typecheck
 ```
 

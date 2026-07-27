@@ -29,6 +29,9 @@ PUBLISH_READY="${FIXTURE_DIR}/personal-publish-ready"
 PUBLIC_REPO="${FIXTURE_DIR}/public-config-repository"
 PUBLIC_REMOTE="${FIXTURE_DIR}/public-config-remote.git"
 PUBLIC_PERSONAL="${FIXTURE_DIR}/public-personal-admin"
+SINGLE_APP_REPO="${FIXTURE_DIR}/single-workspace-repository"
+SINGLE_APP_REMOTE="${FIXTURE_DIR}/single-workspace-remote.git"
+SINGLE_PERSONAL="${FIXTURE_DIR}/single-workspace-personal"
 
 git_identity() {
   local repository="$1"
@@ -119,11 +122,16 @@ git init -q --bare "${APP_REMOTE}"
 git init -q -b main "${APP_REPO}"
 git_identity "${APP_REPO}"
 git -C "${APP_REPO}" remote add origin "${APP_REMOTE}"
-mkdir -p "${APP_REPO}/docs" "${APP_REPO}/.opencode/agents"
+mkdir -p \
+  "${APP_REPO}/docs" \
+  "${APP_REPO}/.opencode/agents" \
+  "${APP_REPO}/F-GCMS-PSN/ai-test/.opencode/agents"
 printf 'base shared document\n' >"${APP_REPO}/docs/shared.md"
 printf '%s\n' '---' 'name: reviewer' 'description: 应用 Agent 基线 R1' 'mode: subagent' '---' \
   'application reviewer baseline' >"${APP_REPO}/.opencode/agents/reviewer.md"
-git -C "${APP_REPO}" add docs/shared.md .opencode/agents/reviewer.md
+printf '%s\n' '---' 'name: psn-reviewer' 'description: ai-test 应用 Agent 基线 R1' 'mode: subagent' '---' \
+  'psn reviewer baseline' >"${APP_REPO}/F-GCMS-PSN/ai-test/.opencode/agents/psn-reviewer.md"
+git -C "${APP_REPO}" add docs/shared.md .opencode/agents/reviewer.md F-GCMS-PSN/ai-test
 git -C "${APP_REPO}" commit -q -m "初始化应用 feature 基线"
 APP_BASE_COMMIT="$(git -C "${APP_REPO}" rev-parse HEAD)"
 git -C "${APP_REPO}" branch "feature_testagent_${TEST_DATA_TAG}" "${APP_BASE_COMMIT}"
@@ -140,6 +148,9 @@ git -C "${APP_REPO}" worktree add -q -b "feature_testagent_${TEST_DATA_TAG}_usr_
   "${FIXTURE_DIR}/personal-dirty" "${APP_BASE_COMMIT}"
 git_identity "${FIXTURE_DIR}/personal-dirty"
 printf 'uncommitted local draft\n' >"${FIXTURE_DIR}/personal-dirty/docs/local-draft.md"
+mkdir -p "${FIXTURE_DIR}/personal-dirty/F-GCMS-PSN/workspace-house/docs"
+printf 'sibling workspace uncommitted draft\n' \
+  >"${FIXTURE_DIR}/personal-dirty/F-GCMS-PSN/workspace-house/docs/local-draft.md"
 
 git -C "${APP_REPO}" worktree add -q -b "feature_testagent_${TEST_DATA_TAG}_usr_conflict_default" \
   "${FIXTURE_DIR}/personal-conflict" "${APP_BASE_COMMIT}"
@@ -153,7 +164,16 @@ printf 'feature side of shared document\n' >"${APP_REPO}/docs/shared.md"
 printf 'published by user A\n' >"${APP_REPO}/docs/published-by-a.md"
 printf '%s\n' '---' 'name: reviewer' 'description: 应用 Agent 已发布 R2' 'mode: subagent' '---' \
   'updated application reviewer' >"${APP_REPO}/.opencode/agents/reviewer.md"
-git -C "${APP_REPO}" add docs/shared.md docs/published-by-a.md .opencode/agents/reviewer.md
+mkdir -p "${APP_REPO}/F-GCMS-PSN/workspace-house"
+printf '' >"${APP_REPO}/F-GCMS-PSN/workspace-house/.gitkeep"
+printf '%s\n' '---' 'name: psn-reviewer' 'description: ai-test 应用 Agent 已发布 R2' 'mode: subagent' '---' \
+  'updated psn reviewer' >"${APP_REPO}/F-GCMS-PSN/ai-test/.opencode/agents/psn-reviewer.md"
+git -C "${APP_REPO}" add \
+  docs/shared.md \
+  docs/published-by-a.md \
+  .opencode/agents/reviewer.md \
+  F-GCMS-PSN/ai-test/.opencode/agents/psn-reviewer.md \
+  F-GCMS-PSN/workspace-house/.gitkeep
 git -C "${APP_REPO}" commit -q -m "A 推送 docs 与应用 Agent"
 APP_TARGET_COMMIT="$(git -C "${APP_REPO}" rev-parse HEAD)"
 git -C "${APP_REPO}" push -q origin "feature_testagent_${TEST_DATA_TAG}"
@@ -184,6 +204,32 @@ write_lines_if_missing "${PUBLISH_READY}/.opencode/skills/publish-skill-${TEST_D
   "compatibility: opencode" "---" "publish fixture skill"
 write_lines_if_missing "${PUBLISH_READY}/.opencode/skills/publish-skill-${TEST_DATA_TAG}/rules/check.md" \
   "# 随 Skill 发布的规则" "" "marker: FIXTURE-RULE-${TEST_DATA_TAG}-R1"
+
+# 单仓库单工作空间 fixture：用于证明仓库组只有一个成员时，发布与 Agent 同步语义保持原样。
+git init -q --bare "${SINGLE_APP_REMOTE}"
+git init -q -b main "${SINGLE_APP_REPO}"
+git_identity "${SINGLE_APP_REPO}"
+git -C "${SINGLE_APP_REPO}" remote add origin "${SINGLE_APP_REMOTE}"
+mkdir -p "${SINGLE_APP_REPO}/F-SINGLE/workspace/.opencode/agents"
+printf 'single workspace baseline\n' >"${SINGLE_APP_REPO}/F-SINGLE/workspace/README.md"
+printf '%s\n' '---' 'name: single-reviewer' 'description: 单工作空间 Agent R1' 'mode: subagent' '---' \
+  'single reviewer baseline' >"${SINGLE_APP_REPO}/F-SINGLE/workspace/.opencode/agents/single-reviewer.md"
+git -C "${SINGLE_APP_REPO}" add F-SINGLE/workspace
+git -C "${SINGLE_APP_REPO}" commit -q -m "初始化单工作空间基线"
+SINGLE_BASE_COMMIT="$(git -C "${SINGLE_APP_REPO}" rev-parse HEAD)"
+git -C "${SINGLE_APP_REPO}" branch "feature_testagent_${TEST_DATA_TAG}" "${SINGLE_BASE_COMMIT}"
+git -C "${SINGLE_APP_REPO}" push -q origin main "feature_testagent_${TEST_DATA_TAG}"
+git -C "${SINGLE_APP_REPO}" worktree add -q -b "feature_testagent_${TEST_DATA_TAG}_usr_single_default" \
+  "${SINGLE_PERSONAL}" "${SINGLE_BASE_COMMIT}"
+git_identity "${SINGLE_PERSONAL}"
+git -C "${SINGLE_APP_REPO}" checkout -q "feature_testagent_${TEST_DATA_TAG}"
+printf '%s\n' '---' 'name: single-reviewer' 'description: 单工作空间 Agent R2' 'mode: subagent' '---' \
+  'single reviewer updated' >"${SINGLE_APP_REPO}/F-SINGLE/workspace/.opencode/agents/single-reviewer.md"
+git -C "${SINGLE_APP_REPO}" add F-SINGLE/workspace/.opencode/agents/single-reviewer.md
+git -C "${SINGLE_APP_REPO}" commit -q -m "发布单工作空间 Agent"
+SINGLE_TARGET_COMMIT="$(git -C "${SINGLE_APP_REPO}" rev-parse HEAD)"
+git -C "${SINGLE_APP_REPO}" push -q origin "feature_testagent_${TEST_DATA_TAG}"
+git -C "${SINGLE_PERSONAL}" merge -q --no-edit "${SINGLE_TARGET_COMMIT}"
 
 # 公共 fixture：公共 main 是本地 bare remote 的共享事实源，管理员在长期 worktree 编辑。
 git init -q --bare "${PUBLIC_REMOTE}"
@@ -225,6 +271,11 @@ fi
   printf -- '- 正常个人 worktree：`%s`，已经通过真实 `git merge <targetCommit>` 包含目标提交。\n' "${FIXTURE_DIR}/personal-clean"
   printf -- '- dirty 个人 worktree：`%s`，保留未提交文件，平台应显示待同步且不覆盖。\n' "${FIXTURE_DIR}/personal-dirty"
   printf -- '- 冲突个人 worktree：`%s`，保留 `MERGE_HEAD` 和 `docs/shared.md` 三方冲突。\n' "${FIXTURE_DIR}/personal-conflict"
+  printf -- '- 同仓库多目录：`F-GCMS-PSN/ai-test` 与 `F-GCMS-PSN/workspace-house`；target 新增后者 `.gitkeep` 并更新前者 Agent。\n'
+  printf -- '- 兄弟目录 dirty 数据：`%s`，从 ai-test 目录看不到该 Diff，但仓库级阻塞清单必须显示其归属。\n' \
+    "${FIXTURE_DIR}/personal-dirty/F-GCMS-PSN/workspace-house/docs/local-draft.md"
+  printf -- '- 单仓库单工作空间远程：`%s`，个人 worktree：`%s`，已合并 Agent R2 target：`%s`。\n' \
+    "${SINGLE_APP_REMOTE}" "${SINGLE_PERSONAL}" "${SINGLE_TARGET_COMMIT}"
   printf -- '- 公共本地远程：`%s`。\n' "${PUBLIC_REMOTE}"
   printf -- '- 公共管理员 worktree：`%s`，保留未提交的公共 Agent/Skill 修改。\n\n' "${PUBLIC_PERSONAL}"
   printf '## 初始状态核对\n\n```bash\n'
@@ -234,6 +285,12 @@ fi
   printf 'git -C %q rev-parse MERGE_HEAD\n' "${FIXTURE_DIR}/personal-conflict"
   printf 'git -C %q merge-base --is-ancestor %q HEAD\n' "${FIXTURE_DIR}/personal-clean" "${APP_TARGET_COMMIT}"
   printf 'git --git-dir=%q rev-parse %q\n' "${APP_REMOTE}" "refs/heads/feature_testagent_${TEST_DATA_TAG}"
+  printf 'git --git-dir=%q cat-file -e %q\n' "${APP_REMOTE}" \
+    "feature_testagent_${TEST_DATA_TAG}:F-GCMS-PSN/workspace-house/.gitkeep"
+  printf 'git -C %q status --short -- F-GCMS-PSN/workspace-house\n' "${FIXTURE_DIR}/personal-dirty"
+  printf 'git -C %q merge-base --is-ancestor %q HEAD\n' "${SINGLE_PERSONAL}" "${SINGLE_TARGET_COMMIT}"
+  printf 'git --git-dir=%q show %q:%q\n' "${SINGLE_APP_REMOTE}" \
+    "feature_testagent_${TEST_DATA_TAG}" "F-SINGLE/workspace/.opencode/agents/single-reviewer.md"
   printf 'git -C %q status --short\n' "${PUBLIC_PERSONAL}"
   printf '```\n\n'
   printf '## 安全执行个人提交与应用 feature 推送\n\n'
@@ -268,11 +325,18 @@ fi
 # 自动断言 fixture 的 Git 状态和已推送远程提交，失败即不交付目录。
 git -C "${FIXTURE_DIR}/personal-clean" merge-base --is-ancestor "${APP_TARGET_COMMIT}" HEAD
 test -n "$(git -C "${FIXTURE_DIR}/personal-dirty" status --short)"
+test "$(git -C "${FIXTURE_DIR}/personal-dirty" status --short -- F-GCMS-PSN/workspace-house)" = \
+  "?? F-GCMS-PSN/workspace-house/docs/local-draft.md"
 git -C "${FIXTURE_DIR}/personal-conflict" rev-parse -q --verify MERGE_HEAD >/dev/null
 test "$(git -C "${FIXTURE_DIR}/personal-conflict" diff --name-only --diff-filter=U)" = "docs/shared.md"
 test -n "$(git -C "${PUBLISH_READY}" status --short)"
 test -n "$(git -C "${PUBLIC_PERSONAL}" status --short)"
 test "$(git --git-dir="${APP_REMOTE}" rev-parse "refs/heads/feature_testagent_${TEST_DATA_TAG}")" = "${APP_TARGET_COMMIT}"
+git --git-dir="${APP_REMOTE}" cat-file -e \
+  "feature_testagent_${TEST_DATA_TAG}:F-GCMS-PSN/workspace-house/.gitkeep"
+git -C "${SINGLE_PERSONAL}" merge-base --is-ancestor "${SINGLE_TARGET_COMMIT}" HEAD
+test "$(git --git-dir="${SINGLE_APP_REMOTE}" rev-parse "refs/heads/feature_testagent_${TEST_DATA_TAG}")" = \
+  "${SINGLE_TARGET_COMMIT}"
 test "$(git --git-dir="${PUBLIC_REMOTE}" rev-parse refs/heads/main)" = \
   "$(git -C "${PUBLIC_REPO}" rev-parse main)"
 

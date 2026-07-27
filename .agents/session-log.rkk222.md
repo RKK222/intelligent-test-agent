@@ -2285,3 +2285,20 @@
 - Result:
   - 已发布内容会沿同一物理仓库的全部目录视图传播；历史错误 repo-root 个人空间会在再次进入时修复到正确子目录。个人未提交内容仍保持私有且不会被覆盖，但所有阻塞文件现在可见，清理后即可继续合并，不再形成无文件可处理的永久阻塞。
   - HTTP Diff 响应仅增加可选兼容字段；未新增 RunEvent、数据库结构/Flyway/SQL、安全配置、generated SDK、OpenCode 源码或环境配置变更。
+
+### 2026-07-27 - 补齐仓库组即时同步与双拓扑验证
+
+- Why:
+  - 上一轮已统一同仓库目标提交，但应用 Agent rollout 仍只枚举发布源目录的个人记录；兄弟目录的 clean 物理 worktree 可能要等后续进入或补偿才更新，同路径 replica 元数据也可能短暂保留旧 commit。
+  - 需要同时确认“同 Git 仓库多目录”和“一应用一 Git 仓库一工作空间”两种拓扑，并防止兄弟目录同步误触发 Agent dispose。
+- What:
+  - feature 固定提交反向同步改为按仓库组枚举当前服务器个人 worktree，按规范化 repoRoot 去重并优先发布源记录；兄弟目录同步目标提交，但不进入发布源 Agent rollout 的用户 dispose 或待处理列表。
+  - 同物理仓库的本机 replica 仅在其工作空间目录真实存在时同步标记 READY；无效历史个人/replica 路径会记录警告并跳过，不再拖垮其他有效目录的 rollout。
+  - 新工作空间 `.gitkeep` 提交前增加 `fetch` 和 `pull --ff-only`，避免复用旧应用副本时生成非快进 push。扩展可重复 Git fixture，加入 F-GCMS-PSN 共享仓库双目录、兄弟目录 dirty、新目录占位和单仓库单工作空间 Agent R2。
+- How:
+  - JDK 25 下后端相关 135 项通过，包含真实 Git merge/冲突、工作空间服务、应用/公共 Agent rollout 和 Controller；前端 5 个相关文件 148 项及 agent-web typecheck 通过。
+  - `tools/create-workspace-branch-model-test-data.sh` 通过 `bash -n` 和全部真实 Git 断言；生成的本地 bare remote 不访问业务 Gitee。后端 20 模块跳过测试生产打包成功。
+  - 使用未修改的 `.env.test` 和 test profile 完整重启 backend、opencode-manager、frontend；backend readiness 为 UP，前端 3000 返回 200。
+- Result:
+  - 共享仓库中任一目录发布后，clean 兄弟物理 worktree 立即合并同一 target；dirty/staged/untracked 仍保留用户内容并等待提交或回退后重试。只有实际加载发布源 `.opencode` 的运行态被 dispose，兄弟目录不会被误重启。
+  - 仓库组只有一个工作空间时退化为既有单记录路径，未引入额外目录、Git 分支或运行态副作用。本次未新增/alter HTTP API、RunEvent、数据库/Flyway/SQL、安全权限、generated SDK、OpenCode 源码或环境配置。

@@ -38,6 +38,7 @@ import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVers
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionId;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplica;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplicaId;
+import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceStatus;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspace;
 import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspaceId;
@@ -328,6 +329,11 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(git.stagedFiles).containsExactly("F-GCMS/NewSpace/.gitkeep");
         assertThat(git.committedStagedMessage).contains("创建应用工作空间目录");
         assertThat(git.pushedBranch).isEqualTo("feature_testagent_20260707");
+        assertThat(git.calls).containsSubsequence(
+                "clean:" + applicationRepoRoot(),
+                "fetch:" + applicationRepoRoot(),
+                "pull:" + applicationRepoRoot() + ":feature_testagent_20260707",
+                "push:" + applicationRepoRoot() + ":feature_testagent_20260707:false");
     }
 
     @Test
@@ -1520,6 +1526,125 @@ class ManagedWorkspaceApplicationServiceTest {
             assertThat(record.status()).isEqualTo(WorkspaceSyncStatus.SUCCEEDED);
         });
         verify(coordinator).markServerSyncedForUsers(request, Set.of("usr_1"), List.of());
+    }
+
+    @Test
+    void applicationAgentRolloutUpdatesCleanSiblingAndSkipsInvalidSiblingPathWithoutDisposingSiblingRuntime() throws Exception {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse source = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+
+        Instant now = Instant.now();
+        ApplicationWorkspaceVersion sourceVersion = managed.findVersion(
+                new ApplicationWorkspaceVersionId(source.versionId())).orElseThrow();
+        ApplicationWorkspaceVersionId siblingVersionId = new ApplicationWorkspaceVersionId("awv_house");
+        ApplicationWorkspaceId siblingTemplateId = new ApplicationWorkspaceId("awp_house");
+        WorkspaceId siblingRuntimeId = new WorkspaceId("wrk_house_personal");
+        WorkspaceId siblingFeatureRuntimeId = new WorkspaceId("wrk_house_feature");
+        Path siblingRepoRoot = personalRepoRoot("feature_testagent_20260707_usr_1_house");
+        Path siblingWorkspaceRoot = siblingRepoRoot.resolve("F-GCMS/workspace-house");
+        Files.createDirectories(siblingWorkspaceRoot);
+        Files.createDirectories(applicationRepoRoot().resolve("F-GCMS/workspace-house"));
+        managed.saveVersion(new ApplicationWorkspaceVersion(
+                siblingVersionId,
+                siblingTemplateId,
+                sourceVersion.appId(),
+                sourceVersion.repositoryId(),
+                sourceVersion.version(),
+                sourceVersion.branch(),
+                sourceVersion.repoRootPath(),
+                "appworkspace:20260707/gcms/F-GCMS/workspace-house",
+                siblingFeatureRuntimeId,
+                sourceVersion.createdBy(),
+                sourceVersion.status(),
+                sourceVersion.targetCommitHash(),
+                sourceVersion.targetCommitUpdatedAt(),
+                now,
+                now));
+        managed.saveVersionReplica(new ApplicationWorkspaceVersionReplica(
+                new ApplicationWorkspaceVersionReplicaId("awr_house"),
+                siblingVersionId,
+                "127.0.0.1",
+                sourceVersion.repoRootPath(),
+                "appworkspace:20260707/gcms/F-GCMS/workspace-house",
+                siblingFeatureRuntimeId,
+                "commit_base",
+                WorkspaceReplicaSyncStatus.READY,
+                null,
+                now,
+                "trace_house_replica",
+                now,
+                now));
+        managed.savePersonalWorkspace(new PersonalWorkspace(
+                new PersonalWorkspaceId("per_house"),
+                siblingVersionId,
+                sourceVersion.appId(),
+                siblingTemplateId,
+                new UserId("usr_1"),
+                "house",
+                "feature_testagent_20260707_usr_1_house",
+                siblingRepoRoot.toString(),
+                siblingWorkspaceRoot.toString(),
+                siblingRuntimeId,
+                "commit_base",
+                ManagedWorkspaceStatus.ACTIVE,
+                now,
+                now));
+        workspaces.save(new Workspace(
+                siblingRuntimeId,
+                "house",
+                siblingWorkspaceRoot.toString(),
+                WorkspaceStatus.ACTIVE,
+                now,
+                now,
+                "127.0.0.1",
+                "trace_house"));
+        WorkspaceId invalidSiblingRuntimeId = new WorkspaceId("wrk_house_invalid");
+        managed.savePersonalWorkspace(new PersonalWorkspace(
+                new PersonalWorkspaceId("per_house_invalid"),
+                siblingVersionId,
+                sourceVersion.appId(),
+                siblingTemplateId,
+                new UserId("usr_1"),
+                "invalid-house",
+                "feature_testagent_20260707_usr_1_invalid_house",
+                "personalworktree:../invalid-house",
+                "personalworktree:../invalid-house/F-GCMS/workspace-house",
+                invalidSiblingRuntimeId,
+                "commit_base",
+                ManagedWorkspaceStatus.ACTIVE,
+                now,
+                now));
+        workspaces.save(new Workspace(
+                invalidSiblingRuntimeId,
+                "invalid-house",
+                root.resolve("invalid-house").toString(),
+                WorkspaceStatus.ACTIVE,
+                now,
+                now,
+                "127.0.0.1",
+                "trace_house_invalid"));
+        git.targetContainedInHead = false;
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        PublicAgentConfigRolloutSyncRequest request = applicationSyncRequest(source.versionId());
+        when(coordinator.claimPendingSync("127.0.0.1", AgentConfigRolloutScope.APPLICATION))
+                .thenReturn(Optional.of(request));
+        when(coordinator.renewServerSync(request)).thenReturn(true);
+        service.setAgentConfigRolloutCoordinator(coordinator);
+
+        service.retryPendingApplicationConfigSync();
+
+        assertThat(git.mergedCommit).isEqualTo("commit_application_agent");
+        assertThat(git.mergedCommitRepoRoot).isEqualTo(siblingRepoRoot);
+        assertThat(managed.findVersionReplica(siblingVersionId, "127.0.0.1")).get()
+                .extracting(ApplicationWorkspaceVersionReplica::currentCommitHash)
+                .isEqualTo("commit_application_agent");
+        // 兄弟目录只是共享同一物理 Git 仓库，不加载本次源目录的 .opencode，因此不应误 dispose。
+        verify(coordinator).markServerSyncedForUsers(request, Set.of(), List.of());
     }
 
     @Test
@@ -2877,7 +3002,11 @@ class ManagedWorkspaceApplicationServiceTest {
             return replicas.stream().filter(item -> item.runtimeWorkspaceId().equals(workspaceId)).findFirst();
         }
         @Override public List<ApplicationWorkspaceVersion> findActiveVersionsMissingReadyReplica(String linuxServerId) { return versions; }
-        @Override public List<PersonalWorkspace> findPersonalWorkspaces(ApplicationWorkspaceVersionId versionId, UserId userId) { return personals; }
+        @Override public List<PersonalWorkspace> findPersonalWorkspaces(ApplicationWorkspaceVersionId versionId, UserId userId) {
+            return personals.stream()
+                    .filter(item -> item.versionId().equals(versionId) && item.userId().equals(userId))
+                    .toList();
+        }
         @Override public Optional<PersonalWorkspace> findPersonalWorkspace(PersonalWorkspaceId personalWorkspaceId) { return personals.stream().filter(item -> item.personalWorkspaceId().equals(personalWorkspaceId)).findFirst(); }
         @Override public Optional<PersonalWorkspace> findPersonalWorkspaceByRuntimeWorkspace(WorkspaceId workspaceId) { return personals.stream().filter(item -> item.runtimeWorkspaceId().equals(workspaceId)).findFirst(); }
         @Override public PersonalWorkspace savePersonalWorkspace(PersonalWorkspace workspace) { personals.add(workspace); return workspace; }

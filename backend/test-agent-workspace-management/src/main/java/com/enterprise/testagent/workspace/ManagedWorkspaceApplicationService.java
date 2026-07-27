@@ -1947,6 +1947,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         ApplicationWorkspaceVersionReplica synchronizedReplica = currentReplica
                 .map(replica -> managedWorkspaceRepository.saveVersionReplica(replica.ready(headCommit, now, traceId)))
                 .orElse(prepared.replica());
+        markRepositoryGroupLocalReplicasReady(
+                updatedVersion, prepared.repoRoot(), headCommit, now, traceId);
         activateApplicationConfigRollout(rolloutId, headCommit);
         indexHubAfterSuccessfulPush(updatedVersion, prepared.repoRoot(),
                 pathResolver.resolve(prepared.replica().workspaceRootPath()), headCommit);
@@ -2173,6 +2175,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             gitWorkspaceService.resetHardToCommit(repoRoot, request.commitHash());
             Instant now = Instant.now();
             managedWorkspaceRepository.saveVersionReplica(replica.ready(request.commitHash(), now, request.traceId()));
+            markRepositoryGroupLocalReplicasReady(
+                    version, repoRoot, request.commitHash(), now, request.traceId());
             FeatureMergeBatchResult mergeResult = synchronizeFeatureCommitToPersonalWorktrees(
                     version,
                     replica,
@@ -2280,15 +2284,12 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         GitCommitIdentity commitIdentity = gitCommitIdentity(initiator);
         for (var member : configurationRepository.findActiveMembers(version.appId())) {
             UserId targetUserId = member.userId();
-            List<PersonalWorkspace> personalWorkspaces = managedWorkspaceRepository
-                    .findPersonalWorkspaces(version.versionId(), targetUserId).stream()
-                    .filter(personal -> personal.status() == ManagedWorkspaceStatus.ACTIVE)
-                    .filter(this::isPersonalWorkspaceOnCurrentServer)
-                    .toList();
+            List<PersonalWorkspace> personalWorkspaces = repositoryGroupPersonalWorkspaces(version, targetUserId);
             if (personalWorkspaces.isEmpty()) {
                 continue;
             }
-            boolean userSynchronized = true;
+            boolean rolloutWorkspaceFound = false;
+            boolean rolloutWorkspacesSynchronized = true;
             for (PersonalWorkspace personal : personalWorkspaces) {
                 PersonalFeatureMergeResult result = mergeFeatureCommitIntoPersonalWorkspace(
                         version,
@@ -2297,21 +2298,63 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                         targetCommit,
                         commitIdentity,
                         traceId);
+                // 同仓库兄弟目录需要同步同一个 Git 提交，但只有发布源目录加载了本次 .opencode，
+                // 因此兄弟目录不能被误加入 Agent dispose 或其持久化待处理列表。
+                if (!personal.versionId().equals(version.versionId())) {
+                    continue;
+                }
+                rolloutWorkspaceFound = true;
                 if (!result.synchronizedWithTarget()) {
-                    userSynchronized = false;
+                    rolloutWorkspacesSynchronized = false;
                     pendingWorktrees.add(new AgentConfigRolloutWorktreePending(
                             personal.personalWorkspaceId().value(),
                             personal.userId().value(),
                             result.status()));
                 }
             }
-            if (userSynchronized) {
+            if (rolloutWorkspaceFound && rolloutWorkspacesSynchronized) {
                 synchronizedUserIds.add(targetUserId.value());
             }
         }
         return new FeatureMergeBatchResult(
                 Set.copyOf(synchronizedUserIds),
                 List.copyOf(pendingWorktrees));
+    }
+
+    /**
+     * 同仓库目录视图共享物理 feature 仓库，因此任一目录发布后必须即时尝试合并到该仓库组的全部
+     * 个人 worktree。相同物理 repoRoot 的多条目录记录只处理一次，并优先保留发布源版本记录，
+     * 使应用 Agent rollout 仍只 dispose 真正加载该源目录配置的用户运行态。
+     */
+    private List<PersonalWorkspace> repositoryGroupPersonalWorkspaces(
+            ApplicationWorkspaceVersion anchor,
+            UserId userId) {
+        Map<Path, PersonalWorkspace> uniqueByRepoRoot = new LinkedHashMap<>();
+        List<ApplicationWorkspaceVersion> versions = repositoryVersionGroup(anchor).stream()
+                .sorted(Comparator.comparing(item -> !item.versionId().equals(anchor.versionId())))
+                .toList();
+        for (ApplicationWorkspaceVersion version : versions) {
+            List<PersonalWorkspace> personalWorkspaces = managedWorkspaceRepository
+                    .findPersonalWorkspaces(version.versionId(), userId).stream()
+                    .filter(personal -> personal.status() == ManagedWorkspaceStatus.ACTIVE)
+                    .filter(this::isPersonalWorkspaceOnCurrentServer)
+                    .sorted(Comparator.comparing(personal -> personal.personalWorkspaceId().value()))
+                    .toList();
+            for (PersonalWorkspace personal : personalWorkspaces) {
+                try {
+                    Path repoRoot = pathResolver.resolve(personal.repoRootPath()).toAbsolutePath().normalize();
+                    uniqueByRepoRoot.putIfAbsent(repoRoot, personal);
+                } catch (RuntimeException exception) {
+                    // 兄弟目录的历史坏路径不能拖垮发布源目录的 Agent rollout；该记录继续留给进入时修复。
+                    LOGGER.warn(
+                            "Skip invalid historical personal repository path while synchronizing group, versionId={}, personalWorkspaceId={}, path={}",
+                            version.versionId().value(),
+                            personal.personalWorkspaceId().value(),
+                            personal.repoRootPath());
+                }
+            }
+        }
+        return List.copyOf(uniqueByRepoRoot.values());
     }
 
     private boolean isPersonalWorkspaceOnCurrentServer(PersonalWorkspace personal) {
@@ -2596,6 +2639,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         updateRepositoryGroupTargetCommit(version, head, now);
         ApplicationWorkspaceVersionReplica readyReplica =
                 managedWorkspaceRepository.saveVersionReplica(replica.ready(head, now, traceId));
+        markRepositoryGroupLocalReplicasReady(version, repoRoot, head, now, traceId);
         return new PreparedApplicationBranch(readyReplica, repoRoot, head);
     }
 
@@ -2796,6 +2840,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         String headCommit = gitWorkspaceService.headCommit(replicaRepoRoot);
         ApplicationWorkspaceVersion updatedVersion = updateRepositoryGroupTargetCommit(version, headCommit, now);
         ApplicationWorkspaceVersionReplica updatedReplica = managedWorkspaceRepository.saveVersionReplica(replica.ready(headCommit, now, traceId));
+        markRepositoryGroupLocalReplicasReady(
+                updatedVersion, replicaRepoRoot, headCommit, now, traceId);
         synchronizeFeatureCommitToPersonalWorktrees(
                 updatedVersion,
                 updatedReplica,
@@ -2962,14 +3008,20 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                                 "path", workspaceRoot.toString(),
                                 "blockingFiles", repositoryStatusPaths(repoRoot)));
             }
-            Files.createDirectories(marker.getParent());
-            Files.createFile(marker);
-            gitWorkspaceService.stageFiles(repoRoot, List.of(markerPath), privateKey);
-            gitWorkspaceService.commitStaged(
-                    repoRoot,
-                    "创建应用工作空间目录 " + marker.getParent().getFileName(),
-                    privateKey,
-                    gitCommitIdentity(userId));
+            // 目录占位提交前先追平远端，避免复用中的应用仓库落后时生成必然被拒绝的非快进 push。
+            gitWorkspaceService.fetch(repoRoot, privateKey);
+            gitWorkspaceService.pullFastForward(repoRoot, branch, privateKey);
+            headCommit = gitWorkspaceService.headCommit(repoRoot);
+            if (!gitWorkspaceService.pathExistsAtCommit(repoRoot, headCommit, markerPath)) {
+                Files.createDirectories(marker.getParent());
+                Files.createFile(marker);
+                gitWorkspaceService.stageFiles(repoRoot, List.of(markerPath), privateKey);
+                gitWorkspaceService.commitStaged(
+                        repoRoot,
+                        "创建应用工作空间目录 " + marker.getParent().getFileName(),
+                        privateKey,
+                        gitCommitIdentity(userId));
+            }
         }
         // 上一次操作可能已经本地提交但在 push 阶段失败；无条件重试 push 可安全补偿这种历史中间态。
         gitWorkspaceService.push(repoRoot, branch, false, privateKey);
@@ -3100,7 +3152,10 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                         traceId,
                         now,
                         now));
-        return managedWorkspaceRepository.saveVersionReplica(replica);
+        ApplicationWorkspaceVersionReplica saved = managedWorkspaceRepository.saveVersionReplica(replica);
+        markRepositoryGroupLocalReplicasReady(
+                updatedVersion, repoRoot, currentCommit, now, traceId);
+        return saved;
     }
 
     /**
@@ -3165,7 +3220,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String currentCommit,
             String traceId,
             Instant now) {
-        return managedWorkspaceRepository.saveVersionReplica(new ApplicationWorkspaceVersionReplica(
+        ApplicationWorkspaceVersionReplica saved = managedWorkspaceRepository.saveVersionReplica(new ApplicationWorkspaceVersionReplica(
                 new ApplicationWorkspaceVersionReplicaId(RuntimeIdGenerator.applicationWorkspaceVersionReplicaId()),
                 version.versionId(),
                 serverIdentity.linuxServerId(),
@@ -3179,6 +3234,42 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 traceId,
                 now,
                 now));
+        markRepositoryGroupLocalReplicasReady(version, repoRoot, currentCommit, now, traceId);
+        return saved;
+    }
+
+    /**
+     * 同仓库目录版本的本机副本记录指向同一物理 Git 根。该根已经切到固定提交后，同路径的兄弟
+     * 副本元数据必须同时标记 READY，避免页面继续显示旧 commit 或等待 60 秒补偿扫描。
+     */
+    private void markRepositoryGroupLocalReplicasReady(
+            ApplicationWorkspaceVersion anchor,
+            Path synchronizedRepoRoot,
+            String commitHash,
+            Instant syncedAt,
+            String traceId) {
+        Path normalizedRoot = synchronizedRepoRoot.toAbsolutePath().normalize();
+        for (ApplicationWorkspaceVersion member : repositoryVersionGroup(anchor)) {
+            managedWorkspaceRepository.findVersionReplica(member.versionId(), serverIdentity.linuxServerId())
+                    .filter(replica -> isUsableReplicaAtRoot(replica, normalizedRoot))
+                    .ifPresent(replica -> managedWorkspaceRepository.saveVersionReplica(
+                            replica.ready(commitHash, syncedAt, traceId)));
+        }
+    }
+
+    private boolean isUsableReplicaAtRoot(ApplicationWorkspaceVersionReplica replica, Path expectedRoot) {
+        try {
+            Path repoRoot = pathResolver.resolve(replica.repoRootPath()).toAbsolutePath().normalize();
+            Path workspaceRoot = pathResolver.resolve(replica.workspaceRootPath()).toAbsolutePath().normalize();
+            return repoRoot.equals(expectedRoot) && Files.isDirectory(workspaceRoot);
+        } catch (RuntimeException exception) {
+            LOGGER.warn(
+                    "Skip invalid historical repository replica path while converging group, replicaId={}, repoRootPath={}, workspaceRootPath={}",
+                    replica.replicaId().value(),
+                    replica.repoRootPath(),
+                    replica.workspaceRootPath());
+            return false;
+        }
     }
 
     private ApplicationWorkspaceVersionReplica replicaForPersonalWorkspace(
@@ -3304,6 +3395,12 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 .ifPresent(replica -> {
                     ApplicationWorkspaceVersionReplica readyReplica = managedWorkspaceRepository.saveVersionReplica(
                             replica.ready(commitHash, now, traceId));
+                    markRepositoryGroupLocalReplicasReady(
+                            updatedVersion,
+                            pathResolver.resolve(readyReplica.repoRootPath()),
+                            commitHash,
+                            now,
+                            traceId);
                     // Agent 配置专用发布入口与 Git Changes 发布入口必须生成同一种远端提交快照。
                     indexHubAfterSuccessfulPush(
                             updatedVersion,
@@ -3354,6 +3451,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String headCommit = gitWorkspaceService.headCommit(replicaRepoRoot);
             ApplicationWorkspaceVersion updatedVersion = updateRepositoryGroupTargetCommit(version, headCommit, now);
             ApplicationWorkspaceVersionReplica updatedReplica = managedWorkspaceRepository.saveVersionReplica(replica.ready(headCommit, now, event.traceId()));
+            markRepositoryGroupLocalReplicasReady(
+                    updatedVersion, replicaRepoRoot, headCommit, now, event.traceId());
             synchronizeFeatureCommitToPersonalWorktrees(
                     updatedVersion,
                     updatedReplica,
