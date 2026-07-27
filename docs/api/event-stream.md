@@ -335,6 +335,7 @@ retry 字段：
 - `session.status.retry` 在右侧时间线展示原因和“重试中 N 秒后 - 第 X 次 / 共 3 次”。
 - 等待 retry 时前端运行态仍视为运行中，不出队 busy follow-up，不关闭 RunEvent SSE，也不显示失败卡。
 - 前端按固定 60 秒倒计时展示每次 retry；最多等待 3 次。第 1/2 次倒计时结束后可 best-effort 取消当前等待 Run，并用最近一次 Run 草稿自动新建 Run；第 3 次倒计时结束前若收到后续消息、非 retry 状态或 `run.*` 终态，以后续事件为准；若倒计时结束后仍没有新状态，前端本地把对话收敛为失败并展示最近一次 retry message。
+- 失败卡片的手动重试与上述自动重试复用同一准备流程：聊天状态已经失败但平台 Run 仍为非终态时，前端先隔离旧 Run、best-effort 取消，再以同一用户轮次启动新 Run，旧 Run 的晚到事件不得覆盖新轮。刷新或重新进入历史失败会话后，前端从最后一条持久化 USER 消息恢复正文与可重放 PromptPart；找不到有效用户请求时必须明确提示重新输入，不能把失败卡或 assistant 内容当作 prompt。
 - 后端 `run.succeeded/run.failed/run.cancelled` 仍是持久 Run 终态事实源；前端 retry 失败兜底只用于避免浏览器一直停留在运行中。
 
 ## `session.updated`

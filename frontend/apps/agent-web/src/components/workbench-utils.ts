@@ -432,6 +432,36 @@ export function prepareAutoRetryRun(
   return { type: "start", input: draft };
 }
 
+/**
+ * 页面刷新或重新进入历史会话后，内存草稿已经丢失；从平台持久化的最后一条用户消息恢复同一轮请求。
+ * 只复用用户输入与可重放的 PromptPart，不从 assistant/card 内容猜测请求，避免把错误说明再次发给模型。
+ */
+export function retryRunDraftFromSessionMessages(
+  messages: SessionMessage[]
+): AutoRetryRunDraft | null {
+  const deduped = dedupeSessionMessages(messages);
+  for (let index = deduped.length - 1; index >= 0; index -= 1) {
+    const message = deduped[index];
+    if (message.role !== "USER") {
+      continue;
+    }
+    const parts = normalizeSessionPromptParts(message);
+    const prompt = message.content.trim() || promptFromParts(parts);
+    if (!prompt) {
+      continue;
+    }
+    const command = parseCommand(prompt, "build") ?? undefined;
+    return {
+      prompt,
+      parts: parts.length > 0 ? parts : [{ type: "text", text: prompt }],
+      userMessageId: message.messageId,
+      title: prompt,
+      ...(command ? { command } : {})
+    };
+  }
+  return null;
+}
+
 function retryDeadlineKey(retryRuntimeStatus: OpencodeLikeRuntimeStatus): string {
   return retryRuntimeStatus.retryKey ?? `${retryRuntimeStatus.attempt ?? 0}:${retryRuntimeStatus.message ?? ""}`;
 }

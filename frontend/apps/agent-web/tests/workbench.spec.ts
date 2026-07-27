@@ -3280,7 +3280,96 @@ test("retrying a failed chat run sends the previous prompt again", async ({ page
   await page.locator(".figma-chat-retry-card-btn").click();
 
   await expect.poll(() => runRequests.length).toBe(2);
-  expect(runRequests[1]).toMatchObject({ prompt: "重试这条测试任务" });
+  expect(runRequests[1]).toMatchObject({ prompt: runRequests[0]?.prompt });
+  await expect(page.getByTestId("oc-user-message")).toHaveCount(1);
+  await expect(page.locator(".figma-chat-retry-card")).toHaveCount(0);
+});
+
+test("manual retry isolates a still-running run after an abnormal session interruption", async ({ page }) => {
+  const runRequests: Array<Record<string, unknown>> = [];
+  const cancelRunRequests: string[] = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    runRequests,
+    cancelRunRequests,
+    runIds: ["run_1", "run_2"],
+    runEventsByRunId: {
+      run_1: [event(1, "session.status", {
+        status: { type: "error", message: "conversation interrupted" }
+      })],
+      run_2: []
+    }
+  });
+
+  await gotoWorkbench(page);
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("恢复异常对话");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect.poll(() => runRequests.length).toBe(1);
+  await expect(page.locator(".figma-chat-retry-card")).toBeVisible();
+
+  await page.locator(".figma-chat-retry-card-btn").click();
+
+  await expect.poll(() => cancelRunRequests).toEqual(["run_1"]);
+  await expect.poll(() => runRequests.length).toBe(2);
+  expect(runRequests[1]).toMatchObject({ prompt: runRequests[0]?.prompt });
+  await expect(page.locator(".figma-chat-retry-card")).toHaveCount(0);
+});
+
+test("retrying a reopened failed chat restores the persisted user request", async ({ page }) => {
+  const runRequests: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    runRequests,
+    runIds: ["run_2"],
+    sessions: [{
+      sessionId: "ses_history",
+      workspaceId: "wrk_1234567890abcdef",
+      title: "异常中断的对话",
+      status: "ACTIVE",
+      pinned: false,
+      createdAt: "2026-07-05T10:00:00Z",
+      updatedAt: "2026-07-05T10:01:00Z"
+    }],
+    sessionMessages: [{
+      messageId: "msg_user_failed",
+      sessionId: "ses_history",
+      role: "USER",
+      content: "重新检查登录流程",
+      createdAt: "2026-07-05T10:00:00Z",
+      runId: "run_history",
+      parts: [
+        { type: "text", text: "重新检查登录流程" },
+        { type: "file", path: "docs/login.md", name: "login.md", mimeType: "text/markdown" }
+      ]
+    }],
+    historyRun: {
+      runId: "run_history",
+      sessionId: "ses_history",
+      workspaceId: "wrk_1234567890abcdef",
+      status: "FAILED",
+      createdAt: "2026-07-05T10:00:00Z",
+      updatedAt: "2026-07-05T10:01:00Z"
+    },
+    runEventsByRunId: { run_2: [] }
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: /会话列表/ }).click();
+  await page.getByRole("button", { name: "异常中断的对话" }).click();
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
+  await expect(page.locator(".figma-chat-retry-card")).toBeVisible();
+
+  await page.locator(".figma-chat-retry-card-btn").click();
+
+  await expect.poll(() => runRequests.length).toBe(1);
+  expect(runRequests[0]).toMatchObject({
+    sessionId: "ses_history",
+    prompt: "重新检查登录流程",
+    parts: [
+      { type: "text", text: "重新检查登录流程" },
+      { type: "file", path: "docs/login.md", name: "login.md", mimeType: "text/markdown" }
+    ]
+  });
   await expect(page.getByTestId("oc-user-message")).toHaveCount(1);
   await expect(page.locator(".figma-chat-retry-card")).toHaveCount(0);
 });
@@ -5810,6 +5899,7 @@ async function mockBackendApi(
   page: Page,
   capture: {
     runRequests?: Array<Record<string, unknown>>;
+    cancelRunRequests?: string[];
     commandRequests?: Array<Record<string, unknown>>;
     sessionRequests?: Array<Record<string, unknown>>;
     permissionReplies?: Array<Record<string, unknown>>;
@@ -7058,6 +7148,19 @@ async function mockBackendApi(
         clientRequestId: request.clientRequestId,
         createdAt: "2026-06-19T00:00:00Z",
         updatedAt: "2026-06-19T00:00:00Z"
+      }));
+      return;
+    }
+    if (method === "POST" && /^\/api\/internal\/agent\/opencode\/runs\/[^/]+\/cancel$/.test(url.pathname)) {
+      const runId = url.pathname.match(/\/runs\/([^/]+)\/cancel$/)?.[1] ?? "";
+      capture.cancelRunRequests?.push(runId);
+      await route.fulfill(json({
+        runId,
+        sessionId: "ses_1",
+        workspaceId: "wrk_1234567890abcdef",
+        status: "CANCELLED",
+        createdAt: "2026-06-19T00:00:00Z",
+        updatedAt: "2026-06-19T00:00:01Z"
       }));
       return;
     }

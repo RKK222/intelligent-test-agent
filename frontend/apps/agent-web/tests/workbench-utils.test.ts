@@ -30,6 +30,7 @@ import {
   nextCenterModeAfterVcsRefresh,
   nextCenterModeAfterRunDiff,
   prepareAutoRetryRun,
+  retryRunDraftFromSessionMessages,
   resolveRetryDeadline,
   retryCountdownSeconds,
   retryExpirationDecision,
@@ -767,6 +768,49 @@ describe("auto retry run helpers", () => {
   it("fails auto retry when the previous run draft is missing", () => {
     expect(prepareAutoRetryRun(null, null, "2026-07-05T11:01:00.000Z")).toEqual({
       type: "missing-draft"
+    });
+  });
+
+  it("restores the last persisted user request for retry after reopening a failed session", () => {
+    const messages: SessionMessage[] = [
+      {
+        messageId: "msg_user_old",
+        sessionId: "ses_1",
+        role: "USER",
+        content: "上一轮请求",
+        createdAt: "2026-07-05T10:00:00Z",
+        runId: "run_old"
+      },
+      {
+        messageId: "msg_assistant_failed",
+        sessionId: "ses_1",
+        role: "ASSISTANT",
+        content: "连接异常",
+        createdAt: "2026-07-05T10:01:00Z",
+        runId: "run_failed"
+      },
+      {
+        messageId: "msg_user_failed",
+        sessionId: "ses_1",
+        role: "USER",
+        content: "重新检查登录流程",
+        createdAt: "2026-07-05T10:02:00Z",
+        runId: "run_failed",
+        parts: [
+          { partId: "part_text", type: "text", text: "重新检查登录流程" },
+          { partId: "part_file", type: "file", path: "docs/login.md", name: "login.md", mimeType: "text/markdown" }
+        ]
+      }
+    ];
+
+    expect(retryRunDraftFromSessionMessages(messages)).toEqual({
+      prompt: "重新检查登录流程",
+      parts: [
+        { type: "text", text: "重新检查登录流程" },
+        { type: "file", path: "docs/login.md", name: "login.md", mimeType: "text/markdown", source: undefined }
+      ],
+      userMessageId: "msg_user_failed",
+      title: "重新检查登录流程"
     });
   });
 });

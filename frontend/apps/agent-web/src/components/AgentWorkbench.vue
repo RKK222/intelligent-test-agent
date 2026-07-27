@@ -179,6 +179,7 @@ import {
   prepareAutoRetryRun,
   promptFromParts,
   resolveRetryDeadline,
+  retryRunDraftFromSessionMessages,
   retryCountdownSeconds,
   retryExpirationDecision,
   projectRootInteractionSession,
@@ -3108,13 +3109,20 @@ function failRetryingRun(message: string) {
   }
 }
 
-function handleAutoRetryRun() {
+function retryLastRun(trigger: "manual" | "automatic") {
   const prepared = prepareAutoRetryRun(run.value, lastRunDraft.value, new Date().toISOString());
   if (prepared.type === "missing-draft") {
-    feedback.value = { kind: "error", title: "自动重试失败", description: "未找到上一条任务内容，请重新输入后发送" };
-    failRetryingRun("未找到可自动重试的任务内容");
+    feedback.value = {
+      kind: trigger === "automatic" ? "error" : "info",
+      title: trigger === "automatic" ? "自动重试失败" : "无法重试",
+      description: "未找到上一条任务内容，请重新输入后发送"
+    };
+    if (trigger === "automatic") {
+      failRetryingRun("未找到可自动重试的任务内容");
+    }
     return;
   }
+  // 异常中断时聊天状态可能已经失败，但后端 Run 仍在等待；沿用自动重试的隔离逻辑，避免新请求撞上旧运行。
   autoRetryStarting.value = true;
   if (prepared.cancelRunId) {
     ignoredRunIds.value = new Set([...ignoredRunIds.value, prepared.cancelRunId]);
@@ -3132,12 +3140,21 @@ function handleAutoRetryRun() {
       : prepared.input.userMessageId
   };
   lastRunDraft.value = retryInput;
+  if (trigger === "manual") {
+    // 手动重试是一轮新的用户操作，重新统计本轮耗时与 token；自动重试仍延续原请求的累计口径。
+    chatStartedAt.value = Date.now();
+    accumulatedTokens.value = 0;
+  }
   requestChatRun(retryInput.userMessageId);
   startRunMutation.mutate({ input: retryInput, guard: captureConversationInteraction() }, {
     onSettled: () => {
       autoRetryStarting.value = false;
     }
   });
+}
+
+function handleAutoRetryRun() {
+  retryLastRun("automatic");
 }
 
 // follow-up 队列：Run 空闲且有排队 prompt 时自动出队执行
@@ -6311,29 +6328,9 @@ function handleStopRun() {
   }
 }
 
-/** 失败后的所有重试入口复用原用户消息轮次，不追加第二条相同的乐观 user message。 */
+/** 手动重试复用自动重试的旧 Run 隔离和原用户消息归属，不追加第二条相同的乐观 user message。 */
 function handleRetryRun() {
-  const previousDraft = lastRunDraft.value;
-  if (!previousDraft?.prompt.trim()) {
-    feedback.value = {
-      kind: "info",
-      title: "无法重试",
-      description: "未找到上一条任务内容，请重新输入后发送"
-    };
-    return;
-  }
-  const retryDraft: AutoRetryRunDraft = {
-    ...previousDraft,
-    userMessageId: run.value?.runId
-      ? chatState.value.todoUserMessageIdByRunId[run.value.runId] ?? previousDraft.userMessageId
-      : previousDraft.userMessageId
-  };
-  lastRunDraft.value = retryDraft;
-  chatStartedAt.value = Date.now();
-  accumulatedTokens.value = 0;
-  clearRunEventSseFeedback();
-  requestChatRun(retryDraft.userMessageId);
-  startRunMutation.mutate({ input: retryDraft, guard: captureConversationInteraction() });
+  retryLastRun("manual");
 }
 
 function handleRunEvent(event: RunEvent, subscribedSessionId?: string) {
@@ -7203,6 +7200,8 @@ async function switchSession(sessionId: string) {
     }
     const persistedMessages = dedupeSessionMessages(page.items);
     rememberPersistedMessageIdentities(persistedMessages);
+    // 历史失败卡片来自持久化消息/Run；同步恢复最近用户请求，确保刷新或切回后仍可直接重试。
+    lastRunDraft.value = retryRunDraftFromSessionMessages(persistedMessages);
     // 先以分页消息渲染正文，树快照和 Todo 作为后续增强；避免大历史树把首屏卡住。
     dispatchChat({ type: "reset", messages: messagesFromSessionMessages(persistedMessages) });
     // 视觉 loading 只等待数据库正文；实时 interaction 校准继续后台完成，发送锁仍由 switching 状态持有。

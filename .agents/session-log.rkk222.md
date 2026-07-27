@@ -5,6 +5,24 @@
 
 ## Entries
 
+### 2026-07-27 - 修复异常中断对话重试失效
+
+### Why
+- 对话被 `session.status=error` 等异常状态打断时，聊天卡片已经进入失败态，但平台 Run 可能仍为运行中；手动“重试”此前直接启动新 Run，容易与旧 Run 冲突。刷新或重新进入历史失败会话后，内存中的上一轮草稿也已丢失，按钮只能提示重新输入。
+
+### What
+- 手动与自动重试复用同一准备流程：隔离旧 Run、best-effort 取消仍忙的 Run，再复用原用户消息轮次启动新 Run，避免旧事件覆盖和重复追加用户消息。
+- 历史会话加载后从最后一条持久化 USER 消息恢复正文、附件/上下文 PromptPart 与 slash command；无有效用户请求时保持明确提示，不从 assistant 或失败卡内容猜测。
+- 补充工具函数单测、当前页/异常仍忙/历史重开三类桌面与移动端 E2E，并同步 agent-web README 和 RunEvent 前端处理文档。
+
+### How
+- 复用既有 `prepareAutoRetryRun`、消息去重和 PromptPart 归一化逻辑，只在工作台编排层合并入口；保留手动重试重新统计耗时/token、自动重试延续原请求累计的既有口径。
+- 全量前端 Vitest 为 1625 passed / 1 skipped，agent-web typecheck 和生产 build 通过；相关 Vitest 233 passed / 1 skipped，三类 E2E 在 Chromium 与 mobile 均通过。并行冷启动时普通重试用例曾在 Vite 首屏编译阶段超时，单 worker 顺序复跑 2/2 通过。
+
+### Result
+- 异常中断、旧 Run 尚未终态以及刷新后重新进入历史失败会话时，“重试”均能重放原请求；按 test profile 重启 backend、manager、frontend 后，health/readiness 为 `UP`、前端 HTTP 200、CORS 正常、manager WebSocket 已连接。
+- 未变更 HTTP API、RunEvent wire、数据库/Flyway、关系型 SQL、权限/安全边界、环境配置、generated SDK 或 OpenCode 源码。
+
 ### 2026-07-27 - 重打 Agent Skill Hub 企业完整包
 
 ### Why
