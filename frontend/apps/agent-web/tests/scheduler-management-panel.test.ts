@@ -9,6 +9,7 @@ import type {
   PublicAgentRepositoryStatus
 } from "@test-agent/shared-types";
 import SystemManagementPanel from "../src/components/system/SystemManagementPanel.vue";
+import OpencodePublicConfigManagementPanel from "../src/components/system/OpencodePublicConfigManagementPanel.vue";
 
 function queryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -85,10 +86,10 @@ function api(overrides: Partial<BackendApiClient> = {}) {
   } as Partial<BackendApiClient> as BackendApiClient;
 }
 
-function renderWithApi(component: Component, backendApi: BackendApiClient) {
+function renderWithApi(component: Component, backendApi: BackendApiClient, user: CurrentUser = currentUser) {
   const client = queryClient();
   const view = render(component, {
-    props: { currentUser },
+    props: { currentUser: user },
     global: {
       plugins: [[VueQueryPlugin, { queryClient: client }]],
       stubs: {
@@ -149,6 +150,23 @@ describe("scheduler management panel", () => {
     view.queryClient.clear();
   });
 
+  it("keeps public repository management unavailable to non-super-admin users", async () => {
+    const backendApi = api();
+    const appAdmin: CurrentUser = {
+      ...currentUser,
+      userId: "usr_app_admin",
+      username: "app-admin",
+      roles: ["APP_ADMIN"]
+    };
+    const view = renderWithApi(OpencodePublicConfigManagementPanel, backendApi, appAdmin);
+
+    expect(await view.findByText("当前账号无配置管理权限")).toBeTruthy();
+    expect(view.queryByRole("button", { name: "初始化" })).toBeNull();
+    expect(view.queryByRole("button", { name: "拉取更新" })).toBeNull();
+    expect(backendApi.listPublicAgentRepositories).not.toHaveBeenCalled();
+    view.queryClient.clear();
+  });
+
   it("system management lets super admin pull initialized public opencode repository", async () => {
     const initializedPublicRepository = {
       ...publicRepository,
@@ -166,7 +184,7 @@ describe("scheduler management panel", () => {
     await fireEvent.click(view.getByText("配置管理", { selector: ".ta-system-menu-text" }));
 
     expect(await view.findByText("TestAgent公共配置管理")).toBeTruthy();
-    await fireEvent.click(view.getByRole("button", { name: "拉取" }));
+    await fireEvent.click(view.getByRole("button", { name: "拉取更新" }));
 
     await waitFor(() =>
       expect(backendApi.pullPublicAgentRepository).toHaveBeenCalledWith("linux-1", "master", expect.stringMatching(/^aco_/), false)
@@ -240,7 +258,7 @@ describe("scheduler management panel", () => {
     const view = renderWithApi(SystemManagementPanel, backendApi);
 
     await fireEvent.click(view.getByText("配置管理", { selector: ".ta-system-menu-text" }));
-    await fireEvent.click(await view.findByRole("button", { name: "拉取" }));
+    await fireEvent.click(await view.findByRole("button", { name: "拉取更新" }));
 
     expect((await view.findAllByText(new RegExp(personalPath.replaceAll("/", "\\/")))).length).toBeGreaterThan(0);
     expect(await view.findByText(/当前管理员个人公共 worktree 存在本地变更/)).toBeTruthy();
