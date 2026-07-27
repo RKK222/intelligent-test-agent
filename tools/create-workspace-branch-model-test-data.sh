@@ -193,6 +193,8 @@ APP_TARGET_COMMIT="$(git -C "${APP_REPO}" rev-parse HEAD)"
 git -C "${APP_REPO}" push -q origin "feature_testagent_${TEST_DATA_TAG}"
 
 git -C "${FIXTURE_DIR}/personal-clean" merge -q --no-edit "${APP_TARGET_COMMIT}"
+# staged、unstaged、untracked 都与 target 不重叠时，Git 原生 merge 应保留其状态并完成更新。
+git -C "${FIXTURE_DIR}/personal-dirty" merge -q --no-edit "${APP_TARGET_COMMIT}"
 if git -C "${FIXTURE_DIR}/personal-conflict" merge --no-edit "${APP_TARGET_COMMIT}" >/dev/null 2>&1; then
   echo "FAIL: expected personal-conflict to retain a native merge conflict" >&2
   exit 1
@@ -283,12 +285,12 @@ fi
   printf -- '- 应用 feature：`%s`，已推送目标提交：`%s`。\n' "${APP_REPO}" "${APP_TARGET_COMMIT}"
   printf -- '- 发布就绪个人 worktree：`%s`，包含 docs、archive、spec、Agent、Skill 和 rules 未提交数据。\n' "${PUBLISH_READY}"
   printf -- '- 正常个人 worktree：`%s`，已经通过真实 `git merge <targetCommit>` 包含目标提交。\n' "${FIXTURE_DIR}/personal-clean"
-  printf -- '- dirty 个人 worktree：`%s`，保留未提交文件，平台应显示待同步且不覆盖。\n' "${FIXTURE_DIR}/personal-dirty"
+  printf -- '- 非重叠 dirty 个人 worktree：`%s`，保留未提交文件并已完成原生 merge，不应显示待同步。\n' "${FIXTURE_DIR}/personal-dirty"
   printf -- '- 冲突个人 worktree：`%s`，保留 `MERGE_HEAD` 和 `docs/shared.md` 三方冲突。\n' "${FIXTURE_DIR}/personal-conflict"
   printf -- '- 同仓库多目录：`F-GCMS-PSN/ai-test` 与 `F-GCMS-PSN/workspace-house`；target 新增后者 `.gitkeep` 并更新前者 Agent。\n'
   printf -- '- ai-test UI 对照：本地 docs 未暂存、spec 已暂存；target 另有已发布 docs 提交 `%s`。\n' \
     "F-GCMS-PSN/ai-test/docs/update-ui-published-${TEST_DATA_TAG}.md"
-  printf -- '- 兄弟目录 dirty 数据：`%s`，从 ai-test 目录看不到该 Diff，但仓库级阻塞清单必须显示其归属。\n' \
+  printf -- '- 兄弟目录 dirty 数据：`%s`，从 ai-test 目录看不到该 Diff；因已安全合入 target，不应进入仓库级阻塞清单。\n' \
     "${FIXTURE_DIR}/personal-dirty/F-GCMS-PSN/workspace-house/docs/local-draft.md"
   printf -- '- 单仓库单工作空间远程：`%s`，个人 worktree：`%s`，已合并 Agent R2 target：`%s`。\n' \
     "${SINGLE_APP_REMOTE}" "${SINGLE_PERSONAL}" "${SINGLE_TARGET_COMMIT}"
@@ -344,6 +346,7 @@ fi
 
 # 自动断言 fixture 的 Git 状态和已推送远程提交，失败即不交付目录。
 git -C "${FIXTURE_DIR}/personal-clean" merge-base --is-ancestor "${APP_TARGET_COMMIT}" HEAD
+git -C "${FIXTURE_DIR}/personal-dirty" merge-base --is-ancestor "${APP_TARGET_COMMIT}" HEAD
 test -n "$(git -C "${FIXTURE_DIR}/personal-dirty" status --short)"
 test "$(git -C "${FIXTURE_DIR}/personal-dirty" status --short -- F-GCMS-PSN/workspace-house)" = \
   "?? F-GCMS-PSN/workspace-house/docs/local-draft.md"

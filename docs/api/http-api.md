@@ -321,7 +321,7 @@ Git 命令返回 `GIT_UNAVAILABLE` 或 `GIT_TIMEOUT` 时，错误 `details` 可�
 
 Base URL：`/api/internal/platform/workspace-management/agent-config`。该能力管理工作台左侧 Agent 栏目中的“公共级”和“工作空间级”opencode 配置文件。公共级 Git 根目录来自通用参数 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT`，opencode 运行时配置目录来自 `OPENCODE_PUBLIC_CONFIG_DIR`，文件树根为 Git 根目录下 `opencode/`；工作空间级文件树根为 `{workspace.rootPath}/.opencode/`。前端在该根下管理 `agents/` Agent Markdown 和 `skills/<skill-name>/SKILL.md` 技能包，写入路径必须显式带 `agents/` 或 `skills/` 前缀。
 
-工作空间级 Diff、暂存和回退白名单还精确包含根文件 `opencode.jsonc`，使引用运行态配置进入“应用 Agent”提交/发布链路；该文件仍通过 workspace 文件 WebSocket 写入。`package.json`、`node_modules/**` 等其它 `.opencode` 内容不会因为此白名单扩展而进入应用 Agent Git 作用域。
+工作空间级 Diff、暂存和回退以完整 `.opencode/**` 安全命名空间为边界，使 JSON/JSONC、agent、skill、command、plugin、tool、旧 mode 别名及辅助源码都进入“应用 Agent”提交/发布链路；文件仍通过 workspace/agent-config 文件 WebSocket 写入。运行依赖生成的 `node_modules`、package/lockfile 等应由 `.gitignore` 排除，但一旦已跟踪或实际出现在 Git status 中就必须进入应用 Agent Diff，不能形成不可见脏状态。
 
 鉴权：
 
@@ -355,7 +355,7 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 | `POST` | `/public/commit` | 提交当前暂存区。 |
 | `POST` | `/public/publish` | 在当前用户公共 worktree 中 fetch 并 merge `origin/{公共分支}`，把最终文件树投影为以远端当前提交为唯一父节点、由当前管理员企业身份签署的线性提交，避免长期个人分支的旧无效 committer 历史进入公共分支；远端 push 前建立持久化禁发任务，再以非强制 refspec 推送该固定提交。push 与 rollout 激活确认后即返回发布成功，请求线程不认领本机同步；成功后个人分支和发起服务器共享副本均重置到该干净提交。各服务器由广播或默认 5 秒补偿任务异步同步共享副本并登记本机 manager 进程，旧 Session 空闲后逐实例 dispose；某用户旧实例 dispose 后该用户立即恢复发送，个人 worktree 保持 `ACTIVE`。 |
 
-工作空间级接口把同名能力挂在 `/workspaces/{workspaceId}/...`，其中 `diff/stage/unstage/discard/commit/publish/worktrees/status` 的语义与公共级一致；文件读写与上传必须通过文件 WebSocket。物理目录为当前运行态 Workspace 或指定 worktree 下的 `.opencode/`，但普通工作空间文件树不重复展示根级 `.opencode`。工作空间级 `diff` 只返回根文件 `.opencode/opencode.jsonc` 以及 `.opencode/agents`、`.opencode/skills` 下的变更，响应 path 会去掉 `.opencode/` 前缀；其它 `.opencode` 内容继续排除。公共级和应用级根均支持按 OpenCode 模板创建 `agents/<name>.md`，或创建 `skills/<name>/SKILL.md`、`rules/README.md`、`templates/README.md`；前端同时保留普通文件、文件夹和上传入口。
+工作空间级接口把同名能力挂在 `/workspaces/{workspaceId}/...`，其中 `diff/stage/unstage/discard/commit/publish/worktrees/status` 的语义与公共级一致；文件读写与上传必须通过文件 WebSocket。物理目录为当前运行态 Workspace 或指定 worktree 下的 `.opencode/`，但普通工作空间文件树不重复展示根级 `.opencode`。工作空间级 `diff` 返回同一 Git 根全部 Git 可见的 `.opencode/**` 用户配置，响应 path 会去掉 `.opencode/` 前缀；后端是该范围的唯一事实源，前端不得再枚举子目录。公共级和应用级根均支持按 OpenCode 模板创建 `agents/<name>.md`，或创建 `skills/<name>/SKILL.md`、`rules/README.md`、`templates/README.md`；前端同时保留普通文件、文件夹和上传入口。
 
 应用 Agent `publish` 仍先提交当前个人分支，再把所选 `.opencode` 白名单投影并推送应用 feature。远端确认后，应用普通文件和 Agent/Skill 统一按版本 `targetCommitHash` 在各服务器相关个人 worktree 执行原生 `git merge --no-edit <targetCommit>`，不以整仓 clean 作为前置条件：非重叠的 dirty/staged/untracked 内容保留并完成合并；只有 Git 判定本地文件会被覆盖时才不 stash、不 reset、不覆盖并由 Diff 返回待同步；真实冲突保留 `MERGE_HEAD` 和三方 index。应用配置主 rollout 只为已经包含固定提交的用户登记目标并调用原生 `/global/dispose`；未收敛 worktree 按业务 ID、用户、服务器、目标 commit 和稳定原因码持久化为 `AWAITING_USER`，主 rollout 完成后仍由独立租约补偿，收敛后再只登记该用户 dispose。公共活动发布单独互斥，应用活动发布按版本 ID 互斥，彼此不占用同一全局锁。OpenCode 不增加应用共享配置目录或覆盖层，也不修改 OpenCode 源码。应用个人 worktree 保存 Agent/Skill 目录定义或 JSONC 后直接只热加载当前用户；公共个人保存同类文件时调用 `/public/runtime-reload`，先切换本人受管公共配置软链接再只热加载本人。两者推送后才分别进入应用目标用户 rollout 或公共全用户 rollout。
 
@@ -1423,7 +1423,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有托管工作区服务：owner、`.opencode/**` 的 `APP_ADMIN`（含 `SUPER_ADMIN`）、`spec/**` 禁发布、个人提交、应用 feature 发布、成员同步和冲突规则均不变。`discard/publish/resolve_conflict/abort_merge` 等动作还会先由 OpenCode permission 卡向当前用户确认。凭据过期或用户状态失效返回 `UNAUTHENTICATED`；当前对话不是个人 workspace 返回 `CONFLICT`。
 
-若本次个人拉取差异包含同仓库任一应用目录的 `.opencode/opencode.jsonc`、`.opencode/opencode.json`、`.opencode/agents/**` 或 `.opencode/skills/**`，响应 `agentConfigChanged=true`，前端只让当前用户的运行态等待空闲后调用现有 `/global/dispose`。其他用户、共享 APPLICATION rollout 和公共 Agent rollout 均不受影响。提交并推送仍沿用个人提交、白名单投影 feature、更新共享目标以及多用户同步/rollout 的既有流程。旧 `POST /workspace-versions/{versionId}/git-pull` 固定返回 `VALIDATION_ERROR`，用于阻止旧客户端继续触发版本级全员拉取。
+若本次个人拉取差异包含同仓库任一应用目录的 `.opencode/opencode.jsonc`、`.opencode/opencode.json`、`.opencode/agents/**` 或 `.opencode/skills/**`，响应 `agentConfigChanged=true`，前端只让当前用户的运行态等待空闲后调用现有 `/global/dispose`。拉取已经写盘但用户仍忙碌时，前端按 userId 在当前浏览器持久化待重载标记；页面刷新或关闭后重新进入，会继续复用同一空闲检测和 dispose，不新增后台 Git/权限接口。dispose 成功或确认进程未运行后清理标记；浏览器禁用本地存储时退化为当前页面内既有流程。其他用户、共享 APPLICATION rollout 和公共 Agent rollout 均不受影响。提交并推送仍沿用个人提交、白名单投影 feature、更新共享目标以及多用户自动同步/rollout 的既有流程；普通文件 push 后，相关用户的 worktree 在无覆盖风险时自动 merge，无需逐人手工拉取，也不 dispose。旧 `POST /workspace-versions/{versionId}/git-pull` 固定返回 `VALIDATION_ERROR`，用于阻止旧客户端继续触发版本级全员拉取。
 
 `POST /workspace-versions/{versionId}/personal-workspaces` 请求体：
 
@@ -1510,7 +1510,7 @@ Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有�
 }
 ```
 
-`mergeInProgress=true` 表示仓库存在 `MERGE_HEAD`；`applicationUpdatePending=true` 表示当前个人 `HEAD` 尚未包含版本固定提交。`applicationUpdateBlockingFiles[].path` 是仓库相对路径，不受当前工作空间 pathspec 裁剪；能匹配同应用、同仓库、同分支目录视图时补充工作空间 ID、名称和目录，仓库根级文件则三个归属字段为 `null`。dirty 跳过、未完成冲突和冲突已解决但尚未点击“完成合并”都可保持 pending。非个人工作区或版本尚无目标提交时同步字段为 `false/false/null` 且阻塞列表为空，旧前端可忽略新增字段。
+`mergeInProgress=true` 表示仓库存在 `MERGE_HEAD`；`applicationUpdatePending=true` 表示当前个人 `HEAD` 尚未包含版本固定提交。`applicationUpdateBlockingFiles[].path` 是仓库相对路径，不受当前工作空间 pathspec 裁剪；能匹配同应用、同仓库、同分支目录视图时补充工作空间 ID、名称和目录，仓库根级文件则三个归属字段为 `null`。只有 Git 判定会覆盖本地文件、未完成冲突或冲突已解决但尚未点击“完成合并”时才保持 pending；非重叠 dirty/staged/untracked 内容会在原状态保留并完成 merge。非个人工作区或版本尚无目标提交时同步字段为 `false/false/null` 且阻塞列表为空，旧前端可忽略新增字段。
 
 `POST /workspaces/{workspaceId}/git-discard` 请求体：
 

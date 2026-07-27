@@ -41,10 +41,10 @@ flowchart LR
   F -->|"git push feature"| R["远程 feature 事实源"]
   R -->|"广播固定 targetCommit"| S["各服务器 feature 副本"]
   S -->|"git merge --no-edit targetCommit"| O["各用户个人 worktree"]
-  O --> C{"个人工作树状态"}
-  C -->|clean| M["快进或 merge commit"]
-  C -->|dirty/staged| D["保留本地内容并标记待同步"]
-  C -->|Git 冲突| X["保留 MERGE_HEAD 与三方 index"]
+  O --> C{"Git 原生合并结果"}
+  C -->|clean 或非重叠本地改动| M["保留本地改动并完成合并"]
+  C -->|本地文件会被覆盖| D["不覆盖文件并标记待同步"]
+  C -->|产生 Git 冲突| X["保留 MERGE_HEAD 与三方 index"]
 ```
 
 反向同步固定使用版本记录的 `targetCommitHash`，不在执行时重新解析可移动分支名。个人 worktree 无论是否存在 dirty、staged 或 untracked 内容都会先执行 Git 原生合并：非重叠本地改动原样保留并完成合并；只有 Git 判定文件会被覆盖时才不 stash、不 reset、不覆盖并在 Diff 返回待同步状态。真实冲突保留 Git 原生 merge 状态，在三方编辑器解决全部冲突后点击“完成合并”提交完整 merge index。
@@ -123,10 +123,12 @@ OPENCODE_CONFIG_DIR / manager configPath
 | 应用 Agent/Skill/JSONC 保存 | 写入本人个人 worktree，并出现在“应用 Agent”Diff；`agents/**/*.md`、`skills/**/SKILL.md`、`opencode.jsonc` 保存后在当前任务空闲时直接调用本人进程 `/global/dispose`，供发布前调试；rules/templates 只保存 | 无 | 只热加载当前用户，不是全局发布；不切换公共配置指针 |
 | 应用 Agent/Skill/JSONC 本地提交 | 只更新本人个人分支 | 无 | 不新增全局影响；保存时的本人调试热加载仍有效 |
 | 应用 Agent/Skill/JSONC 提交并推送 | 复用普通发布投影进入 feature；各服务器以同一个固定 commit 反向合并完整 feature 更新 | 直接尝试 Git 原生合并；非重叠的 spec、应用 Agent 或其它本地改动不阻塞。只有 Git 判定会覆盖本地文件或产生真实冲突时，才按 worktree 持久化为 `AWAITING_USER`，主 rollout 完成且后台每 5 秒补偿 | 已合入目标提交的用户进入应用级 dispose；待处理用户解决阻塞或冲突并收敛后再单独 dispose，不占用公共或其它应用发布锁 |
-| 个人 workspace 拉取远程 | 从当前 workspace 标题栏“…”菜单确认应用 Agent 范围和直接 Git merge 后，在点击者的整棵应用个人 worktree fetch/merge 远端；确认可按用户在当前浏览器设为不再提示，但每次仍展示执行步骤和结果文件；同一分支的其它 workspace 目录与应用 Agent 一起更新；不提交、不推送、不修改共享 target | 其他用户、共享副本和公共 Agent 均不变化；应用 workspace 与应用 Agent 统一交给原生 Git，不重叠改动原样保留，只有实际会被覆盖的文件阻止拉取 | 结果弹框明确显示：普通文件无 dispose；成功合入应用 Agent/Skill/JSONC 时当前用户已 dispose、等待空闲、进程未运行或 dispose 失败，不启动应用或公共 rollout |
+| 个人 workspace 拉取远程 | 从当前 workspace 标题栏“…”菜单确认应用 Agent 范围和直接 Git merge 后，在点击者的整棵应用个人 worktree fetch/merge 远端；确认可按用户在当前浏览器设为不再提示，但每次仍展示执行步骤和结果文件；同一分支的其它 workspace 目录与应用 Agent 一起更新；不提交、不推送、不修改共享 target | 其他用户、共享副本和公共 Agent 均不变化；应用 workspace 与应用 Agent 统一交给原生 Git，不重叠改动原样保留，只有实际会被覆盖的文件阻止拉取 | 结果弹框明确显示：普通文件无 dispose；成功合入应用 Agent/Skill/JSONC 时当前用户已 dispose、等待空闲、进程未运行或 dispose 失败。等待空闲标记按 userId 保存在当前浏览器，刷新或关闭页面后重新进入仍复用既有空闲重载流程；不启动应用或公共 rollout |
 | 公共 Agent/Skill/JSONC 保存 | 只写当前超管公共个人 worktree并进入公共 Diff；目录定义保存后把本人的有效公共配置软链接切到该 worktree | 无 | 当前任务空闲时只 dispose 当前超管本人，下一次 bootstrap 读取个人 worktree；共享副本和别人不变 |
 | 公共 Agent/Skill/JSONC 本地提交 | 只更新 `public-{userId}` | 无 | 不新增 dispose；本人保存后的预览链接继续有效 |
 | 公共 Agent/Skill/JSONC 提交并推送 | 先合并远端公共分支并推送，再把固定提交同步到所有服务器公共运行副本 | 所有用户最终读取同一共享固定提交 | 全局 rollout 逐用户等待旧任务空闲，先把有效指针恢复到共享副本，再调用原生 `/global/dispose` |
+
+普通 workspace 文件推送成功后，平台会主动把固定 feature 提交 merge 到相关用户的个人 worktree，其他用户不需要手工点击“拉取远程”。干净 worktree 和只有非重叠本地改动的 worktree 都会自动更新；只有 Git 判断会覆盖本地文件或产生真实冲突时才等待该用户处理。“拉取远程”是本人主动补拉或重试入口，不是跨用户更新的必经步骤；普通文件不进入 OpenCode 配置缓存，因此无论自动更新还是个人拉取都不 dispose。
 
 应用资产引用本身仍由资产库 generation/副本程序维护；`opencode.jsonc` 只记录引用关系及当前所选根层 SDD 目录的精确外部目录 allow，不写仓库级或全局 `* allow`。保存引用 JSONC 只热加载本人；只有管理员明确把该 JSONC 提交并推送后，引用配置才随 feature 固定提交合并到其他个人 worktree，资产文件不会复制进应用仓库，也不会把资产库分支合并进 feature。
 
@@ -140,7 +142,7 @@ OPENCODE_CONFIG_DIR / manager configPath
 | 个人发布 | `ManagedWorkspaceApplicationService.publishPersonalWorkspace` | feature 副本 `fetch` + `pull --ff-only`；从个人 `HEAD` 定点 checkout/删除选中路径；feature `commit` + `git push origin {featureBranch}` |
 | 版本广播 | `publishVersionSync` / `handleVersionSyncEvent` | payload 只携带 `targetCommitHash` 等标识；远端服务器先把 feature 副本 reset 到固定提交 |
 | feature 反向同步 | `synchronizeFeatureCommitToPersonalWorktrees` → `mergeFeatureCommitIntoPersonalWorkspace` | 先用 `git merge-base --is-ancestor <target> HEAD` 判定；未处于 merge 中就调用 `GitWorkspaceService.mergeCommit` 执行 `git merge --no-edit <targetCommit>`，不以整仓 clean 作为前置条件；同仓库多目录按物理 repoRoot 去重后全部同步 |
-| dirty 补偿 | `retryLatestFeatureMerge` | 本地提交、回退、显式进入 default 个人工作区后重试；副本补偿和版本广播也会重试 |
+| 待同步补偿 | `retryLatestFeatureMerge` | 仅 Git 判定会覆盖本地文件或已有真实冲突时进入待同步；用户提交、回退、完成/取消冲突后重试，副本补偿和版本广播也会重试 |
 | 手动应用 Agent 更新 | `AgentWorkbench.handlePersonalRuntimeReload` → `sync-from-application` | 先合并整个固定 feature commit 并刷新文件树/Diff；进程 READY 时再 dispose，本地无变更但 HEAD 落后时也可完成同步 |
 | 冲突展示 | `getWorkspaceGitDiff` / `GitChangesPanel.vue` | Diff 返回 `mergeInProgress`、`applicationUpdatePending`、`applicationTargetCommit`；待同步且未进入 merge 时，`applicationUpdateBlockingFiles` 返回整个个人仓库的阻塞路径和兄弟目录视图归属；Git unmerged stage 用既有三方编辑器读取 |
 | 冲突完成 | `completeWorkspaceGitMerge` | 冲突全部解决后提交完整 merge index；若包含 `.opencode/**`，入口要求 `APP_ADMIN` |
@@ -171,7 +173,7 @@ tools/create-workspace-branch-model-test-data.sh
 | `application-repository` | 应用 feature 副本，模拟平台的发布投影目标 |
 | `personal-publish-ready` | 未提交 docs、archive、spec、Agent、Skill 和 rules；用于重复执行个人提交与选择性发布 |
 | `personal-clean` | 有个人提交，已真实 merge 已推送的 feature target commit |
-| `personal-dirty` | ai-test 下保留未暂存 docs、已暂存 spec，兄弟目录另有未跟踪 docs；模拟 `applicationUpdatePending=true` 并对照两类 Tag |
+| `personal-dirty` | ai-test 下保留未暂存 docs、已暂存 spec，兄弟目录另有未跟踪 docs；已在这些非重叠改动存在时真实 merge target，用于验证本地改动保留且不会误报待同步 |
 | `personal-conflict` | 保留 `MERGE_HEAD`、三方 index 和 `docs/shared.md` 冲突 |
 | `F-GCMS-PSN/ai-test` + `workspace-house` | 同一应用 feature 仓库的两个目录视图；target 新增已发布 docs、兄弟目录 `.gitkeep` 并更新 ai-test Agent |
 | `single-workspace-remote.git` + `single-workspace-personal` | 一应用一 Git 仓库一工作空间；个人 worktree 已真实 merge Agent R2 target |
@@ -217,7 +219,7 @@ tools/create-workspace-branch-model-test-data.sh
 | 维度 | 覆盖内容 | 关键观测点 |
 | --- | --- | --- |
 | Git 提交/推送 | docs、archive、spec、应用 Agent/Skill、公共 Agent/Skill | 个人 HEAD、远程 feature/main ref、远程树中路径是否存在 |
-| 反向同步 | clean、dirty、同文件冲突 | target commit 祖先关系、待同步状态、`MERGE_HEAD` 与 unmerged index |
+| 反向同步 | clean、非重叠 dirty、会被覆盖的本地文件、同文件冲突 | target commit 祖先关系、本地状态保留、精确待同步文件、`MERGE_HEAD` 与 unmerged index |
 | 个人热加载 | 应用 Agent、应用 Skill、公共 Agent、公共 Skill | 保存前先加载 R1；保存 R2 后同一进程读到 R2；其他用户/共享副本不变 |
 | 不应热加载 | 普通文件、`skills/**/rules/**`、`skills/**/templates/**` | 文件写盘并进入 Diff，但无 dispose 请求 |
 | Diff 分类 | 任意 Git 可见 `.opencode/**` 与一个普通工作区文件 | 前者全部出现在“应用 Agent”Diff，后者只出现在普通工作区 Diff；没有两边都不可见的脏文件 |
@@ -242,10 +244,10 @@ tools/create-workspace-branch-model-test-data.sh
 | GIT-02 核对已发生的真实 push | 1. 执行 `git --git-dir=${FIXTURE_DIR}/application-remote.git log --oneline --all`。<br>2. 执行 `git --git-dir=${FIXTURE_DIR}/application-remote.git show feature_testagent_20260719:docs/published-by-a.md`。<br>3. 对公共远程 main 执行同类 `log`。 | `docs/published-by-a.md` 内容为 `published by user A`；应用 Agent description 为“已发布 R2”。 | bare remote 中可直接读取已推送提交和文件，证明不是只在本地工作树 commit；命令全程不访问真实网络。 |
 | GIT-03 个人提交并选择性发布 | 1. 复制 fixture README 的“安全执行个人提交与应用 feature 推送”命令。<br>2. 先在 `personal-publish-ready` 提交全部测试数据。<br>3. 只把 docs、archive、`.opencode` 投影到 feature 并 push。<br>4. 从 bare remote 读取 docs；用 `cat-file -e` 反查 spec。<br>5. 执行 `git --git-dir=application-remote.git show-ref --verify refs/heads/feature_testagent_20260719_usr_publish_default`。 | `publish-normal-20260719.md`、`publish-archive-20260719.md`、`local-only-20260719.md`、Agent、Skill、rules。 | 个人 HEAD 包含全部路径；远程 feature 包含 docs、archive、Agent、Skill 和 rules；远程 feature 不含 spec；最后一步返回非 0，证明个人分支本身没有被 push。 |
 | GIT-04 clean 个人 worktree 反向同步 | 1. 取 README 中 target commit。<br>2. 执行 `git -C personal-clean merge-base --is-ancestor <target> HEAD`。<br>3. 执行 `git -C personal-clean log --merges --oneline -1`。<br>4. 读取 `docs/published-by-a.md`。 | `personal-clean` 在基线后已有一笔个人提交。 | 第 2 步退出码 0；存在 merge commit；个人原提交仍在历史中；已发布 docs 可读。 |
-| GIT-05 dirty 时不覆盖 | 1. 执行 `git -C personal-dirty status --short`。<br>2. 记录 `docs/local-draft.md` 内容和 HEAD。<br>3. 尝试平台同步时应只登记待同步；fixture 可用记录值与 target 比较。<br>4. 再核对文件内容和 HEAD。 | `personal-dirty/docs/local-draft.md` 为 untracked。 | dirty 文件和 HEAD 均不变化，没有 stash/reset/覆盖；平台集成场景中 Diff 显示目标 commit 待同步。 |
+| GIT-05 非重叠 dirty 原生合并 | 1. 执行 `git -C personal-dirty status --short`。<br>2. 记录未暂存 docs、已暂存 spec 和兄弟目录未跟踪文件的内容。<br>3. 执行 `git -C personal-dirty merge-base --is-ancestor <target> HEAD`。<br>4. 再核对三个本地文件的状态和内容。 | `personal-dirty` 中同时存在 unstaged、staged 和 untracked 文件，且都与 target 不重叠。 | 祖先检查成功，说明存在本地改动时仍完成原生 merge；三个文件的状态和内容保持不变，没有 stash/reset/覆盖，Diff 不显示应用待同步。 |
 | GIT-06 同文件真实冲突 | 1. 执行 `git -C personal-conflict rev-parse MERGE_HEAD`。<br>2. 执行 `git -C personal-conflict diff --name-only --diff-filter=U`。<br>3. 执行 `git -C personal-conflict ls-files -u docs/shared.md`。<br>4. 在三方编辑器解决并点击“完成合并”。 | feature 与个人分支都修改 `docs/shared.md`。 | 合并完成前存在 `MERGE_HEAD`、冲突路径和 stage 1/2/3；完成后 unmerged index 清空并生成完整 merge commit，双方其他提交不丢失。 |
 | GIT-07 公共个人提交并安全推送 | 1. 复制 fixture README 的“安全执行公共提交与推送”命令。<br>2. 在 `public-personal-admin` 提交 Agent、Skill、rules。<br>3. push `HEAD:main` 到 fixture bare remote。<br>4. 从 bare remote 读取公共 Agent。 | `public-personal-hot-reload-20260719` 三类文件。 | 公共远程 main 前进到个人提交；Agent、Skill、rules 均存在；push 目标仅为 fixture 本地路径。 |
-| GIT-08 同仓库多目录 | 1. 核对远程 target 存在 `F-GCMS-PSN/workspace-house/.gitkeep` 和 ai-test 已发布 docs。<br>2. 核对 ai-test Agent 已是 R2。<br>3. 检查 `personal-dirty` 中 ai-test 的未暂存 docs、已暂存 spec，以及 workspace-house 的未跟踪 docs。<br>4. 从 ai-test 目录查 Diff 后再查仓库级待处理清单。<br>5. 在变更面板分别切换 `workspace`、`应用Agent`、`公共Agent`。 | 共享应用远程和 `personal-dirty`。 | 两个目录共享同一 target；ai-test pathspec 不会把兄弟文件伪装成自身 Diff，但 `applicationUpdateBlockingFiles` 显示兄弟目录归属；顶部显示“应用有新版本待更新”和待处理文件数，并明确提示提交或回退改动。普通 docs 行只显示橙色小 Tag；spec 行显示橙色待处理 Tag 和蓝紫色“默认只提交”Tag；文件名仍完整占据主要宽度。“当前应用的其它 workspace / Agent 配置”默认折叠，公共 Agent 不显示该提示；不覆盖个人内容。 |
+| GIT-08 同仓库多目录 | 1. 核对远程 target 存在 `F-GCMS-PSN/workspace-house/.gitkeep` 和 ai-test 已发布 docs。<br>2. 核对 ai-test Agent 已是 R2。<br>3. 检查 `personal-dirty` 中 ai-test 的未暂存 docs、已暂存 spec，以及 workspace-house 的未跟踪 docs。<br>4. 从 ai-test 目录查 Diff，并核对 `applicationUpdatePending=false`、仓库级阻塞清单为空。<br>5. 在变更面板分别切换 `workspace`、`应用Agent`、`公共Agent`。 | 共享应用远程和已完成原生 merge 的 `personal-dirty`。 | 两个目录共享同一 target；ai-test pathspec 不会把兄弟文件伪装成自身 Diff，三个非重叠本地改动仍按原状态展示。因为 target 已合入，不显示“应用有新版本待更新”或橙色待处理 Tag；spec 仍显示蓝紫色“默认只提交”Tag，文件名完整可见，公共 Agent 不受影响。 |
 | GIT-09 单仓库单工作空间兼容 | 1. 从 README 取 single target。<br>2. 执行 `merge-base --is-ancestor <target> HEAD`。<br>3. 从 single bare remote 读取 `single-reviewer.md`。 | `single-workspace-personal`、`single-workspace-remote.git`。 | 祖先检查成功；远程与个人均为 Agent R2；仓库组仅一个成员时没有多余目录或运行态副作用。 |
 
 ### 7.2 当前用户个人本地热加载
@@ -266,7 +268,7 @@ tools/create-workspace-branch-model-test-data.sh
 
 | 案例 | 测试步骤 | 测试数据 | 预期结果 |
 | --- | --- | --- | --- |
-| INT-01 应用普通文件正式发布 | 1. 在专用测试应用/feature 中，由 A 只选择测试 docs、archive 文件进行个人提交。<br>2. 点击提交并推送。<br>3. 记录响应 target commit 和远程 feature HEAD。<br>4. 用 clean 的 B、dirty 的 C 重新打开 Diff。 | 5.2 的 docs、archive；C 预先留一个 untracked 文件。 | 远程 HEAD 等于 target；B 自动 merge 并读到文件；C 内容不被覆盖且显示待同步；普通文件发布不产生 OpenCode dispose。 |
+| INT-01 应用普通文件正式发布 | 1. 在专用测试应用/feature 中，由 A 只选择测试 docs、archive 文件进行个人提交。<br>2. 点击提交并推送。<br>3. 记录响应 target commit 和远程 feature HEAD。<br>4. 用 clean 的 B、保留非重叠 untracked 文件的 C 重新打开 Diff；再让 D 在远端将更新的同一路径保留本地改动。 | 5.2 的 docs、archive；C 的本地文件与发布路径不重叠，D 的本地文件会被覆盖。 | 远程 HEAD 等于 target；B、C 自动 merge 并读到文件，C 的本地内容原样保留且不显示待同步；D 不被覆盖并只显示实际阻塞文件。普通文件发布不产生 OpenCode dispose，B/C/D 也都可在本人 workspace 菜单再次“拉取远程”。 |
 | INT-02 应用 Agent/Skill 正式发布 | 1. APP_ADMIN 在专用测试 feature 提交并推送 Agent、Skill 和 rules。<br>2. 观察各服务器固定 commit 同步。<br>3. 预留 B clean、C 有非重叠 spec 改动、D 的本地文件会被远端覆盖或产生冲突，检查 rollout/worktree 状态。<br>4. 先验证公共拉取和其它应用发布，再处理 D 并分别查询 Agent/Skill 清单。 | 应用 `personal-hot-reload-{tag}` 测试配置。 | feature、B、C 包含同一 target；C 的本地 spec 保留，B/C dispose 后读取新版本。主 rollout 完成，D 为 `AWAITING_USER + LOCAL_CHANGES/MERGE_CONFLICT` 且文件不被覆盖；公共和其它应用不受阻；D 处理后自动转 `SYNCED` 并只 dispose D。 |
 | INT-03 公共 Agent/Skill 正式发布 | 1. SUPER_ADMIN 在专用测试公共远程提交并推送。<br>2. 记录公共 target commit。<br>3. 等各服务器共享副本同步和用户任务空闲。<br>4. 查询 A、B 配置并检查 A 的个人预览指针。 | 公共 `public-personal-hot-reload-{tag}` 测试配置。 | 所有共享副本固定到 target；各用户指针恢复共享副本后逐一 dispose；A、B 都读到发布版本；没有运行进程的用户不被额外启动。 |
 | INT-04 spec 发布拒绝 | 1. 任意角色先把 `spec/test-data/local-only-{tag}.md` 提交到个人分支。<br>2. 单独选择该路径点击提交并推送。<br>3. 再用 `./spec/...` 或重复分隔符别名调用一次。<br>4. 检查个人 HEAD 和远程 feature。 | `spec/**` 正常路径及规范化别名。 | 本地提交保留；两次发布都返回 `FORBIDDEN`；远程 feature 不含路径且 HEAD 不前进。 |
@@ -301,8 +303,8 @@ corepack pnpm --filter @test-agent/agent-web typecheck
 1. 健康检查：`curl -fsS http://127.0.0.1:8080/actuator/health/readiness` 应返回 `UP`。两人选择 F-GCMS-PSN 的同一版本；记录 `001350912` 默认个人仓库根路径为 `PSN_REPO_ROOT`。
 2. 造 dirty/staged 数据：`001350912` 在当前 workspace 新建两个带唯一时间戳的测试文件，只暂存其中一个。不要提交，也不要批量回退原有个人数据。此时文件分别位于 UNSTAGED、STAGED。
 3. 发布目标：`001177621` 在同一测试 feature 提交并推送另一个唯一 marker 文件，记录响应或 Diff 中的 `applicationTargetCommit` 为 `PSN_TARGET_COMMIT`。
-4. 验证待处理展示：正式发布后的自动同步仍在任意 dirty 时显示“应用有新版本待更新 · `<commit>` · N 个文件待处理”。个人主动“拉取远程”另按原生 Git 处理：不重叠的 dirty/staged 文件保留并允许拉取；只有实际会被覆盖时显示“无法更新到远程最新提交 / 请先提交或回退下列文件”，列表只包含 Git 报告的阻塞文件。普通 docs 行显示橙色小 Tag，spec 行同时显示橙色待处理 Tag 和蓝紫色“默认只提交”Tag，且文件名仍清晰可见。若阻塞文件位于仓库其它目录，只显示默认折叠的“当前应用的其它 workspace / Agent 配置还有 N 个待处理文件”。切到“公共Agent”后该提示消失。
-5. 验证不覆盖：服务器执行 `git -C "$PSN_REPO_ROOT" status --short`，两个测试文件状态和内容保持不变。未点击个人拉取前，`git -C "$PSN_REPO_ROOT" merge-base --is-ancestor "$PSN_TARGET_COMMIT" HEAD` 应返回非 0；点击后若改动不重叠则应返回 0，且本地文件仍保持原状态和内容。
+4. 验证原生合并：正式发布后的自动同步和个人主动“拉取远程”都先交给 Git 原生 merge。第 2 步的非重叠 dirty/staged 文件应保留并成功更新，不显示“应用有新版本待更新”。只有另造一个与远端同路径、会被覆盖的本地文件时，才显示“无法更新到远程最新提交 / 请先提交或回退下列文件”，列表只包含 Git 报告的阻塞文件。spec 行仍显示蓝紫色“默认只提交”Tag；若阻塞文件位于仓库其它目录，只显示默认折叠的“当前应用的其它 workspace / Agent 配置还有 N 个待处理文件”。切到“公共Agent”后该提示消失。
+5. 验证不覆盖：服务器执行 `git -C "$PSN_REPO_ROOT" status --short`，两个测试文件状态和内容保持不变；自动同步完成后，`git -C "$PSN_REPO_ROOT" merge-base --is-ancestor "$PSN_TARGET_COMMIT" HEAD` 对非重叠改动应直接返回 0。若因实际覆盖风险停下，个人拉取同样返回阻塞而不改变 HEAD 和文件内容。
 6. 处理文件：若个人拉取已成功，`applicationUpdatePending` 应立即为 `false`；若 Git 返回阻塞文件，只对本轮唯一测试文件逐个提交或撤销后重试拉取。最终更新提示与橙色 Tag 消失；服务器执行 `git -C "$PSN_REPO_ROOT" merge-base --is-ancestor "$PSN_TARGET_COMMIT" HEAD` 应返回 0，发布者的 docs marker 文件可读。
 7. 多目录核对：切换同 Git 库的 ai-test 与 workspace-house；各自已发布 marker 都应存在。两人的完整文件树允许因未发布的个人文件不同，但两边个人 HEAD 都必须包含同一个 `PSN_TARGET_COMMIT`，不能仅凭“树看起来一样”判定通过。
 8. 单仓库单工作空间回归：在专用测试应用把应用 Agent description 从 R1 发布为 R2；另一 clean 用户的个人 HEAD 包含 target、重新加载后读到 R2。公共 Agent 目录、其它应用和个人未发布文件均不变化。

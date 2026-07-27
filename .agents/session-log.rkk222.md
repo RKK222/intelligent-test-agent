@@ -2452,3 +2452,28 @@
 
 - 别人推送后，本地存在不重叠 spec 或应用 Agent 改动的用户也会自动合并，并按既有规则只 dispose 该用户；只有 Git 判定会覆盖文件或发生真实冲突时才等待用户处理。
 - 未改变应用工作区、应用 Agent、公共 Agent 的角色/目录权限、stage/commit/push 白名单、共享 target、跨用户范围或 dispose 时机；未新增或变更 API 结构、RunEvent、数据库/Flyway/SQL、安全配置、generated SDK、OpenCode 源码或环境文件。
+
+### 2026-07-27 - 收敛工作区自动同步说明并续接个人拉取待重载
+
+### Why
+
+- 稳定文档和真实 Git fixture 仍有“任意 dirty worktree 都待同步”的旧描述，与已经落地的原生 merge 行为不一致，容易让用户误以为其他人每次都必须手动拉取。
+- 个人拉取包含应用 Agent 更新且本人 Session 忙碌时，待 dispose 状态只保存在当前页面内存；刷新或关闭页面会丢失后续空闲重载机会。
+
+### What
+
+- 统一 README、HTTP API、事件流、模块图和测试设计：普通文件推送后自动尝试合并到相关个人 worktree；干净或仅有非重叠 dirty/staged/untracked 内容都会更新，只有覆盖风险或真实冲突才待处理，普通文件同步不 dispose。
+- 调整真实 Git fixture，让非重叠 dirty worktree 在 staged、unstaged、untracked 状态下实际执行 merge 并断言目标提交已合入；同步应用 Agent 的完整 Git 可见 `.opencode/**` 目录口径。
+- 个人拉取应用 Agent 已写盘但等待空闲时，按 userId 在浏览器本地存储待重载标记；刷新或重新进入后继续复用既有用户忙碌检测和 `/global/dispose`，成功或确认进程未运行后清理标记。未新增后台接口或 Java 分支。
+
+### How
+
+- `tools/create-workspace-branch-model-test-data.sh` 通过 shell 语法与真实 Git 断言；`tools/verify-ai-docs.sh`、agent-web typecheck、全仓 lint、前端生产 build 均通过。
+- 前端 97 个测试文件执行完成，1639 项通过、1 项跳过；个人拉取、文件树、Git Changes、Agent 配置和 backend-api 定向 6 个文件共 96 项通过。
+- 使用 JDK 25、未修改的 `.env.test` 和 test profile 执行 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build`；后端 health/readiness 为 UP、前端 3000 与 CORS 预检返回 200，manager WebSocket 已连接且 OpenCode health 为 HEALTHY。
+
+### Result
+
+- 普通文件推送不要求其他用户主动拉取，也不触发 dispose；平台自动尝试更新，无冲突就完成，有覆盖风险或冲突才由对应用户处理后重试。
+- 应用工作区、应用 Agent、公共 Agent 的用户角色、目录权限、stage/commit/push 白名单、共享 target、跨用户同步范围和 dispose 规则未改变。按约定未处理仅可通过直接后台接口触发、页面没有入口的权限审计项。
+- 未变更 HTTP wire、RunEvent 类型、数据库/Flyway/SQL、安全配置、generated SDK、OpenCode 源码或环境文件。浏览器禁用本地存储时仍退化为原有的当前页面内存续接能力。
