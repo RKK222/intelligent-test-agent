@@ -5,6 +5,26 @@
 
 ## Entries
 
+### 2026-07-27 - 修复测试设计协同并暂缓非功能规约
+
+### Why
+- 上一轮复核定位三个 P1：Review 交接缺少材料与结构检查字段、公共规则未直接追溯到 Phase A 中间物、仅设计/仅案例/直接审核没有明确短路由；同时用户要求混沌、性能、安全和生产安全三板斧当前不参与案例设计。
+
+### What
+- 复用现有测试设计入口、生成、Review Agent 和 `test-design` Skill，不新增 Agent/Skill；用单一 `requestedDeliverable=FULL|DESIGN|CASES|REVIEW` 选择最短链路，并补齐 Review 所需输入。
+- `policyManifest` 为每条命中规则增加 `artifactItemRefs`，形成“规则卡 → Phase A 中间物项 → Phase B 案例”追溯；Review 独立检查绑定缺口。
+- 把混沌、性能、安全、生产安全三板斧分别保存为 `rules/` 下四份 `DEFERRED` 规约，从其它、异步、UI、批量、接口活动规则和接口方法模板中移除专项覆盖；当前启用功能规则为 52 条。
+- 更新测试设计 Skill 至 4.4.0，并把 eval 扩充为 13 条，覆盖三种短路由、Phase A 追溯失败和非功能规约暂缓。
+
+### How
+- 规则编号、路由/交接字段、方法 Skill 归属、暂缓边界和 eval JSON 合同检查通过；`git diff --check` 通过。OpenCode 1.18.4 从公共配置及解压包实际加载 12 个 Skill，入口为 `all`，生成/Review 为隐藏 `subagent`。
+- Codex `quick_validate.py` 与旧公共 skill validator 分别拒绝项目既有的 `compatibility: opencode` 和缺少 `metadata.source`，因此没有修改已被 OpenCode 1.18.4 接受的既有 frontmatter；改用真实运行时加载验证。
+- 公共配置提交为 `aebe011`；从该提交重打 `deploy/internal/dist/test-agent-public-agents-skills.zip`，61 个文件与提交逐字节一致，包含 5 个 Agent、12 个 Skill且无禁带内容。
+
+### Result
+- 三个 P1 已修复，非功能规约已独立保存但当前生成和 Review 均不加载；企业替换包 SHA256 为 `89dcbada9ef1e7d14ae8bda200c4c9774defc917ffa2a804193cc0cc960d3715`。
+- eval 资产及静态合同已验证，未运行长耗时企业模型行为评测；企业内上传、发布和在线任务回归仍需现场执行。未修改应用代码、HTTP API、RunEvent、数据库/Flyway、SQL、环境配置、generated SDK 或 OpenCode 源码。
+
 ### 2026-07-27 - 清理公共配置无用文档并重打包
 
 ### Why
