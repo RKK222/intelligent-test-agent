@@ -15,6 +15,7 @@ PLATFORM="linux/amd64"
 PACKAGE_BACKEND=1
 PACKAGE_FRONTEND=1
 PACKAGE_OPENCODE_WORKER=1
+PACKAGE_TOOLBOX=1
 PACKAGE_MYSQL_IMAGE=0
 SAVE_TARBALL=1
 PACKAGE_ZIP=1
@@ -29,6 +30,7 @@ Build enterprise internal delivery artifacts:
   - backend executable jar
   - frontend dist files and tar.gz
   - opencode-worker image and docker-loadable tar
+  - pinned IT-Tools and OmniTools images, checksums and complete modified source
   - repository session logs under .agents/
 
 The default release ZIP is platform-only. Build the standalone MySQL 8.4
@@ -43,6 +45,7 @@ Options:
   --backend-only          Package only the backend jar.
   --frontend-only         Package only the frontend dist.
   --opencode-only         Package only the opencode worker image.
+  --toolbox-only          Package only the two toolbox images and modified source.
   --mysql-only            Package only the standalone MySQL image.
   --zip-only              Reassemble the release ZIP from existing complete artifacts and current session logs.
   --no-save               Build/pull Docker images but do not export image tarballs.
@@ -71,6 +74,7 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_BACKEND=1
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
       shift
       ;;
@@ -78,6 +82,7 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=1
       PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
       shift
       ;;
@@ -85,6 +90,15 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=1
+      PACKAGE_TOOLBOX=0
+      PACKAGE_MYSQL_IMAGE=0
+      shift
+      ;;
+    --toolbox-only)
+      PACKAGE_BACKEND=0
+      PACKAGE_FRONTEND=0
+      PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_TOOLBOX=1
       PACKAGE_MYSQL_IMAGE=0
       shift
       ;;
@@ -92,6 +106,7 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=1
       shift
       ;;
@@ -99,6 +114,7 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
       PACKAGE_ZIP_ONLY=1
       shift
@@ -153,6 +169,16 @@ load_dotenv() {
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Required command not found: $1" >&2
+    exit 1
+  fi
+}
+
+require_digest_pinned_image() {
+  local variable_name="$1"
+  local image_reference="$2"
+  # 工具镜像必须可复现；允许切换受控 registry 前缀，但禁止退化为可漂移的纯 tag。
+  if [[ ! "${image_reference}" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]]; then
+    echo "${variable_name} must be an image reference pinned by a lowercase sha256 digest: ${image_reference}" >&2
     exit 1
   fi
 }
@@ -229,6 +255,20 @@ tag_to_tar_name() {
   local safe="${tag//\//_}"
   safe="${safe//:/_}"
   printf '%s-%s.tar' "${safe}" "${platform_suffix}"
+}
+
+write_artifact_checksum() {
+  local artifact="$1" directory name
+  directory="$(dirname "${artifact}")"
+  name="$(basename "${artifact}")"
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "${directory}" && sha256sum "${name}" >"${name}.sha256")
+  elif command -v shasum >/dev/null 2>&1; then
+    (cd "${directory}" && shasum -a 256 "${name}" >"${name}.sha256")
+  else
+    echo "Neither sha256sum nor shasum is available; cannot checksum ${artifact}" >&2
+    exit 1
+  fi
 }
 
 package_backend() {
@@ -347,6 +387,52 @@ build_opencode_worker_image() {
   fi
 }
 
+build_toolbox_image() {
+  local image="$1" context="$2" tar_path architecture
+  echo "Building ${image} for ${PLATFORM}"
+  docker buildx build \
+    --platform "${PLATFORM}" \
+    -t "${image}" \
+    --load \
+    --build-arg "TOOLBOX_NODE_BASE_IMAGE=${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE}" \
+    --build-arg "TOOLBOX_NGINX_BASE_IMAGE=${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE}" \
+    "${context}"
+  architecture="$(docker image inspect -f '{{.Architecture}}' "${image}")"
+  [[ "${architecture}" == "amd64" ]] || {
+    echo "Toolbox image architecture must be amd64, got ${architecture}: ${image}" >&2
+    exit 1
+  }
+  if [[ "${SAVE_TARBALL}" -eq 1 ]]; then
+    tar_path="${OUTPUT_DIR}/$(tag_to_tar_name "${image}" "${PLATFORM}")"
+    docker save -o "${tar_path}" "${image}"
+    write_artifact_checksum "${tar_path}"
+    ls -lh "${tar_path}" "${tar_path}.sha256"
+  fi
+}
+
+package_toolbox() {
+  local source_archive="${OUTPUT_DIR}/test-agent-toolbox-source.tar.gz"
+  build_toolbox_image "${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}" "${ROOT_DIR}/toolbox-source/it-tools"
+  build_toolbox_image "${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}" "${ROOT_DIR}/toolbox-source/omni-tools"
+
+  # GPL/MIT 完整修改源码、锁定证据、许可证和已校验运行资源随离线包一起交付；构建缓存不入包。
+  tar -C "${ROOT_DIR}" \
+    --exclude='toolbox-source/it-tools/node_modules' \
+    --exclude='toolbox-source/it-tools/dist' \
+    --exclude='toolbox-source/omni-tools/node_modules' \
+    --exclude='toolbox-source/omni-tools/dist' \
+    --exclude='toolbox-source/**/.git' \
+    -czf "${source_archive}" toolbox-source
+  write_artifact_checksum "${source_archive}"
+  cp "${ROOT_DIR}/backend/test-agent-integration/src/main/resources/toolbox/catalog-v1.json" \
+    "${OUTPUT_DIR}/toolbox-catalog-v1.json"
+  write_artifact_checksum "${OUTPUT_DIR}/toolbox-catalog-v1.json"
+  install -m 0644 "${SCRIPT_DIR}/toolbox.env.example" "${OUTPUT_DIR}/toolbox.env.example"
+  install -m 0755 "${SCRIPT_DIR}/toolbox-docker.sh" "${OUTPUT_DIR}/toolbox-docker.sh"
+  install -m 0755 "${SCRIPT_DIR}/diagnose-toolbox.sh" "${OUTPUT_DIR}/diagnose-toolbox.sh"
+  install -m 0644 "${ROOT_DIR}/docs/deployment/toolbox.md" "${OUTPUT_DIR}/TOOLBOX.md"
+}
+
 package_mysql_image() {
   local tar_path architecture
   tar_path="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_XXL_JOB_MYSQL_IMAGE}" "${PLATFORM}")"
@@ -367,7 +453,7 @@ package_mysql_image() {
 package_release_zip() {
   local staging_dir="${OUTPUT_DIR}/.release-zip"
   local zip_path session_log session_log_count=0
-  local worker_tar required_artifact
+  local worker_tar it_tools_tar omni_tools_tar required_artifact
 
   require_command zip
   require_command rsync
@@ -375,13 +461,24 @@ package_release_zip() {
   mkdir -p "${staging_dir}/dist" "${staging_dir}/deploy/internal"
   zip_path="$(cd "${OUTPUT_DIR}" && pwd)/test-agent-internal-release.zip"
   worker_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
+  it_tools_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}" "${PLATFORM}")"
+  omni_tools_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}" "${PLATFORM}")"
 
   # zip-only 复用刚完成验证的二进制制品，但不允许任何一层缺失后生成看似完整的发布包。
   for required_artifact in \
     "${OUTPUT_DIR}/backend/test-agent-app.jar" \
     "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" \
     "${OUTPUT_DIR}/test-agent-programs.tar.gz" \
-    "${worker_tar}"; do
+    "${worker_tar}" \
+    "${it_tools_tar}" \
+    "${it_tools_tar}.sha256" \
+    "${omni_tools_tar}" \
+    "${omni_tools_tar}.sha256" \
+    "${OUTPUT_DIR}/test-agent-toolbox-source.tar.gz" \
+    "${OUTPUT_DIR}/test-agent-toolbox-source.tar.gz.sha256" \
+    "${OUTPUT_DIR}/toolbox-catalog-v1.json" \
+    "${OUTPUT_DIR}/toolbox-catalog-v1.json.sha256" \
+    "${OUTPUT_DIR}/TOOLBOX.md"; do
     if [[ ! -f "${required_artifact}" ]]; then
       echo "Required release artifact not found: ${required_artifact}" >&2
       exit 1
@@ -394,6 +491,13 @@ package_release_zip() {
   cp -a "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" "${staging_dir}/dist/"
   cp -a "${OUTPUT_DIR}/test-agent-programs.tar.gz" "${staging_dir}/dist/"
   cp -a "${worker_tar}" "${staging_dir}/dist/"
+  cp -a "${it_tools_tar}" "${it_tools_tar}.sha256" "${staging_dir}/dist/"
+  cp -a "${omni_tools_tar}" "${omni_tools_tar}.sha256" "${staging_dir}/dist/"
+  cp -a "${OUTPUT_DIR}/test-agent-toolbox-source.tar.gz" \
+    "${OUTPUT_DIR}/test-agent-toolbox-source.tar.gz.sha256" \
+    "${OUTPUT_DIR}/toolbox-catalog-v1.json" \
+    "${OUTPUT_DIR}/toolbox-catalog-v1.json.sha256" \
+    "${staging_dir}/dist/"
 
   if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 ]]; then
     local mysql_tar
@@ -405,6 +509,7 @@ package_release_zip() {
   local output_dir_name
   output_dir_name="$(basename "${OUTPUT_DIR}")"
   rsync -a --exclude 'dist' --exclude 'dist-*' --exclude "${output_dir_name}" --exclude '.env' "${SCRIPT_DIR}/" "${staging_dir}/deploy/internal/"
+  install -m 0644 "${OUTPUT_DIR}/TOOLBOX.md" "${staging_dir}/deploy/internal/TOOLBOX.md"
   # 升级脚本和官方启动器共用这份忽略清单；任一文件漏包都会让存量节点或新增节点重新出现 Git 脏状态。
   for required_artifact in \
     "${staging_dir}/deploy/internal/ensure-opencode-runtime-gitignore.sh" \
@@ -488,6 +593,10 @@ if [[ "${OUTPUT_DIR_FROM_ARG}" -eq 0 && -n "${TEST_AGENT_IMAGE_OUTPUT_DIR:-}" &&
 fi
 
 TEST_AGENT_OPENCODE_WORKER_IMAGE="${TEST_AGENT_OPENCODE_WORKER_IMAGE:-test-agent-opencode-worker:internal}"
+TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE="${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE:-test-agent/it-tools:2024.10.22-7ca5933-platform.1}"
+TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE="${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE:-test-agent/omni-tools:0.6.0-platform.1}"
+TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE="${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE:-node:20.18.0-alpine3.20@sha256:a1d39fe127e43881c6770abf2f0843c955607fb56eb9b45bf6f103c992c5442a}"
+TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE="${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE:-nginx:1.27.2-alpine3.20@sha256:d213b2a02ef4e7ec85882e8955343cdd08ab49d6548995ad18623f47017c65ee}"
 TEST_AGENT_XXL_JOB_MYSQL_IMAGE="${TEST_AGENT_XXL_JOB_MYSQL_IMAGE:-mysql:8.4}"
 NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
@@ -505,6 +614,11 @@ OPENCODE_RUNTIME_PACKAGE_LOCK="${OPENCODE_RUNTIME_PACKAGE_LOCK:-deploy/internal/
 GO_IMAGE="${GO_IMAGE:-golang@sha256:e87b2a5f6df2dff71ea330d55d54f4979eb380ae58a7e3aabc9d53121243e689}"
 NODE_IMAGE="${NODE_IMAGE:-node@sha256:b042c6d46a90773b82ea3f95b05457ea93ee127a73b1b47ad5ebbb1a08ec3df8}"
 VITE_TEST_AGENT_API_BASE_URL="${VITE_TEST_AGENT_API_BASE_URL:-}"
+
+if [[ "${PACKAGE_TOOLBOX}" -eq 1 ]]; then
+  require_digest_pinned_image "TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE" "${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE}"
+  require_digest_pinned_image "TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE" "${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE}"
+fi
 
 mkdir -p "${OUTPUT_DIR}"
 
@@ -528,6 +642,11 @@ if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 ]]; then
   build_opencode_worker_image
 fi
 
+if [[ "${PACKAGE_TOOLBOX}" -eq 1 ]]; then
+  require_command docker
+  package_toolbox
+fi
+
 if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 ]]; then
   require_command docker
   package_mysql_image
@@ -535,7 +654,7 @@ fi
 
 if [[ "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 \
   && ( "${PACKAGE_ZIP_ONLY}" -eq 1 \
-    || ( "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 ) ) ]]; then
+    || ( "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${PACKAGE_TOOLBOX}" -eq 1 ) ) ]]; then
   package_release_zip
   write_release_checksum
 fi
@@ -557,13 +676,20 @@ if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo "Target import:"
   echo "  docker load -i ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
 fi
+if [[ "${PACKAGE_TOOLBOX}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
+  echo "  IT-Tools image tar: ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}" "${PLATFORM}")"
+  echo "  OmniTools image tar: ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}" "${PLATFORM}")"
+  echo "  toolbox modified source: ${OUTPUT_DIR}/test-agent-toolbox-source.tar.gz"
+  echo "  toolbox catalog: ${OUTPUT_DIR}/toolbox-catalog-v1.json"
+  echo "  toolbox deployment kit: ${OUTPUT_DIR}/toolbox.env.example, toolbox-docker.sh, diagnose-toolbox.sh, TOOLBOX.md"
+fi
 if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo "  MySQL image tar: ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_XXL_JOB_MYSQL_IMAGE}" "${PLATFORM}")"
   echo "  MySQL target import: docker load -i ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_XXL_JOB_MYSQL_IMAGE}" "${PLATFORM}")"
 fi
 if [[ "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 \
   && ( "${PACKAGE_ZIP_ONLY}" -eq 1 \
-    || ( "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 ) ) ]]; then
+    || ( "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${PACKAGE_TOOLBOX}" -eq 1 ) ) ]]; then
   echo "  complete release zip: ${OUTPUT_DIR}/test-agent-internal-release.zip"
   echo "  release checksum: ${OUTPUT_DIR}/test-agent-internal-release.zip.sha256"
 fi

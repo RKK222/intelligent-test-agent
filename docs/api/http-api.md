@@ -97,6 +97,7 @@
 | `system-management` | `/api/internal/platform/system-management/users` | 无旧 URL |
 | `system-management` | `/api/internal/platform/system-management/users/{userId}/roles` | 无旧 URL |
 | `system-management` | `/api/internal/platform/system-management/roles` | 无旧 URL |
+| `integration/toolbox` | `/api/internal/platform/toolbox/tools`、`/api/internal/platform/toolbox/tools/{toolId}/clicks` | 无旧 URL |
 | `configuration-management` | `/api/internal/platform/configuration-management/applications` | 无旧 URL |
 | `configuration-management` | `/api/internal/platform/configuration-management/personal/ssh-keys` | 无旧 URL |
 | `configuration-management` | `/api/internal/platform/configuration-management/workspace-create-operations/{operationId}` | 无旧 URL |
@@ -3048,6 +3049,75 @@ Diff API 属于平台 Run 级能力。Controller 只调用 `RunDiffApplicationSe
 - Diff 文件对象可新增字段，前端必须忽略未知字段。
 - 当前不支持 per-file 后端回滚；前端“当前文件接受/拒绝”只能作为当前选择和反馈，不承诺后端按文件应用。
 - legacy 接受/拒绝继续通过 append-only RunEvent 记录；`REDIS_SUMMARY` 只在 Redis 保存动作详情，PostgreSQL 仅更新聚合计数。
+
+### 工具盒子目录与点击
+
+Base URL：`/api/internal/platform/toolbox`。两个接口都要求平台登录，但不校验 `SUPER_ADMIN`、`APP_ADMIN` 或其它角色；所有登录用户使用同一目录。具体 `/toolbox/apps/...` 静态工具路径不属于后端 API，不执行工具级鉴权。
+
+#### 查询目录
+
+`GET /api/internal/platform/toolbox/tools` 无查询参数，请求成功的 `data`：
+
+```json
+{
+  "catalogVersion": "2026-07-27.it-tools-2024.10.22-7ca5933.omni-tools-0.6.0",
+  "total": 193,
+  "hotLimit": 10,
+  "tools": [
+    {
+      "toolId": "it-tools.token-generator",
+      "source": "IT_TOOLS",
+      "sourceName": "IT-Tools",
+      "sourceVersion": "2024.10.22-7ca5933",
+      "nameZh": "Token 生成器",
+      "nameEn": "Token generator",
+      "descriptionZh": "生成指定字符集的随机字符串。",
+      "category": "SECURITY",
+      "categoryLabel": "安全与加密",
+      "keywords": ["token", "random", "密码"],
+      "launchPath": "/toolbox/apps/it-tools/token-generator",
+      "clickCount": 12,
+      "hotRank": 1
+    }
+  ]
+}
+```
+
+稳定 `toolId` 形状为 `it-tools.<slug>` 或 `omni-tools.<category>.<slug>`；`launchPath` 只能属于 `/toolbox/apps/it-tools/` 或 `/toolbox/apps/omni-tools/`，且永远指向具体工具，不指向套件首页。固定分类为 `SECURITY/ENCODING/WEB/IMAGE/DEVELOPMENT/NETWORK/MATH/TEXT/DATA/DATE_TIME/AUDIO_VIDEO/PDF/OTHER`。重复能力保留各来源入口。
+
+`hotRank` 只为累计点击大于 0 的前 10 项赋值，其余为 `null`。排序依次为 `clickCount` 降序、最后有效计数时间降序、版本化目录顺序升序；零点击时所有 `hotRank` 都为 `null`。当前离线目录固定 193 项，摄像头录制和依赖 SimplePDF 在线 iframe 的 PDF Editor 不返回。
+
+#### 记录点击
+
+`POST /api/internal/platform/toolbox/tools/{toolId}/clicks` 请求体：
+
+```json
+{ "eventId": "tbx_019fa3671e677f81a261ff704e4b51ee" }
+```
+
+`eventId` 必填、非空且最长 128 字符，是一次打开动作的全局幂等键。客户端不得提交点击时间、用户、来源、计数结果或 traceId 字段；用户取当前认证主体，时间取服务端 UTC 时钟，traceId 取当前请求。
+
+成功 `data`：
+
+```json
+{
+  "toolId": "it-tools.token-generator",
+  "clickCount": 13,
+  "recorded": true,
+  "incremented": true
+}
+```
+
+- 首次 `eventId` 永久写入明细，`recorded=true`。
+- 同一用户同一工具距上次有效计数不足 30 秒时仍写明细，但 `incremented=false`，累计不变；恰好第 30 秒视为窗口到期，可以再次计数。
+- 窗口竞争成功时 `incremented=true`，累计原子加一，并把该明细标记为 counted。
+- 重复 `eventId` 不再写明细或参与窗口，返回 `recorded=false`、`incremented=false` 和该工具当前累计。
+
+不存在、已剔除或不属于当前版本目录的 `toolId` 返回 `404 NOT_FOUND`，安全消息为“工具不存在或当前离线版本不可用”；空/超长 `eventId` 返回 `400 VALIDATION_ERROR`；未登录返回 `401 UNAUTHENTICATED`。数据库异常走统一 `INTERNAL_ERROR`，不得影响浏览器原生链接是否打开。成功和错误都按统一 envelope 返回响应头/响应体同一个 traceId。
+
+兼容性：两个 API、字段和路径均为新增；工具字段可 additive 扩展，前端必须忽略未知字段。稳定工具 ID 在同一工具后续目录版本中不能复用给其它能力；目录数量和 `catalogVersion` 可随经过离线验收的上游升级变化。不新增 RunEvent SSE 事件。
+
+对应测试：`ToolboxControllerTest`、`ToolboxCatalogServiceTest`、`ToolboxCatalogContractTest`、`MyBatisToolboxClickRepositoryIntegrationTest` 和 PostgreSQL Testcontainers 并发/用户删除测试。
 
 ### 健康检查
 

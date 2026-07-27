@@ -44,6 +44,7 @@
 - `docs/deployment/backend.md`：后端 Java 进程容器部署。
 - `docs/deployment/opencode-upgrade-1.18.4.md`：OpenCode 1.18.4 / OpenAPI Generator 7.24.0 差异、影响、验证与回滚基线。
 - `docs/deployment/frontend.md`：前端 Vue + Vite 生产构建与部署。
+- `docs/deployment/toolbox.md`：IT-Tools + OmniTools 的 193 项离线目录、派生源码、独立工具节点、Nginx、发布与回滚。
 - `deploy/internal/SINGLE-BACKEND.md`：企业内单 Java 后台 + 单 worker 离线部署。
 - `deploy/internal/MULTI-BACKEND.md`：企业内两个或更多 Java/worker 节点部署与跨节点验收。
 - `deploy/internal/REDIS-OFFLINE.md`：当前本地 Redis 7.4.9 的独立 linux/amd64 离线封包、企业 Redis 5.0 停写备份、升级验证与回滚。

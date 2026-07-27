@@ -79,6 +79,7 @@ declare module 'vue' {
     SettingsUserManagementPanel: typeof import('./src/components/settings/SettingsUserManagementPanel.vue')['default']
     SystemManagementPanel: typeof import('./src/components/system/SystemManagementPanel.vue')['default']
     SystemManagementWrapper: typeof import('./src/components/SystemManagementWrapper.vue')['default']
+    ToolboxPanel: typeof import('./src/components/ToolboxPanel.vue')['default']
     WorkbenchFooter: typeof import('./src/components/WorkbenchFooter.vue')['default']
   }
   export interface GlobalDirectives {

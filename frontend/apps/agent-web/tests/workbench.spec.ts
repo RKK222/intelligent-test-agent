@@ -1793,6 +1793,52 @@ test("super admin can open system management from the activity bar", async ({ pa
   await expect(page.getByRole("button", { name: "通用参数管理" })).toBeVisible();
 });
 
+test("ordinary user opens toolbox immersively and browser history restores panels", async ({ page }) => {
+  await mockBackendApi(page, { authRoles: ["USER"] });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  const editorButton = page.getByRole("button", { name: "打开编辑器" });
+  const toolboxButton = page.getByRole("button", { name: "工具盒子" });
+  await expect(editorButton).toBeVisible();
+  await expect(toolboxButton).toBeVisible();
+  await expect(page.getByRole("button", { name: "系统管理" })).toHaveCount(0);
+  expect(await editorButton.evaluate((node) => node.compareDocumentPosition(
+    document.querySelector('[data-testid="toolbox-activity-button"]')!
+  ) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTruthy();
+
+  const leftPanel = page.locator(".figma-panel-left");
+  const rightPanel = page.locator(".figma-chat-panel-wrapper");
+  const initialLeftWidth = await leftPanel.evaluate((node) => getComputedStyle(node).width);
+  const initialRightWidth = await rightPanel.evaluate((node) => getComputedStyle(node).width);
+  expect(parseFloat(initialLeftWidth)).toBeGreaterThan(0);
+  expect(parseFloat(initialRightWidth)).toBeGreaterThan(0);
+
+  await toolboxButton.click();
+  await expect(page).toHaveURL(/\/toolbox$/);
+  await expect(page.getByRole("heading", { name: "工具盒子", exact: true })).toBeVisible();
+  await expect(leftPanel).toHaveCSS("width", "0px");
+  await expect(rightPanel).toHaveCSS("width", "0px");
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(leftPanel).toHaveCSS("width", initialLeftWidth);
+  await expect(rightPanel).toHaveCSS("width", initialRightWidth);
+
+  await page.goForward();
+  await expect(page).toHaveURL(/\/toolbox$/);
+  await expect(page.getByRole("heading", { name: "工具盒子", exact: true })).toBeVisible();
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page).toHaveURL(/\/toolbox$/);
+  await expect(page.getByRole("heading", { name: "工具盒子", exact: true })).toBeVisible();
+
+  await page.goto("/toolbox/");
+  await expect(page).toHaveURL(/\/toolbox\/$/);
+  await expect(page.getByRole("heading", { name: "工具盒子", exact: true })).toBeVisible();
+  await expect(leftPanel).toHaveCSS("width", "0px");
+  await expect(rightPanel).toHaveCSS("width", "0px");
+});
+
 test("settings dialog manages application context and SSH key metadata", async ({ page }) => {
   await mockBackendApi(page);
 
@@ -6516,6 +6562,38 @@ async function mockBackendApi(
     if (method === "POST" && url.pathname === "/api/auth/logout") {
       capture.logoutRequests?.push(`${method} ${url.pathname}`);
       await route.fulfill(json(null));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/toolbox/tools") {
+      await route.fulfill(json({
+        catalogVersion: "catalog-e2e",
+        total: 1,
+        hotLimit: 10,
+        tools: [{
+          toolId: "it-tools.hash-text",
+          source: "IT_TOOLS",
+          sourceName: "IT-Tools",
+          sourceVersion: "2024.10.22-7ca5933",
+          nameZh: "文本哈希",
+          nameEn: "Hash text",
+          descriptionZh: "计算文本摘要",
+          category: "SECURITY",
+          categoryLabel: "安全与加密",
+          keywords: ["sha256", "摘要"],
+          launchPath: "/toolbox/apps/it-tools/hash-text",
+          clickCount: 0,
+          hotRank: null
+        }]
+      }));
+      return;
+    }
+    if (method === "POST" && /^\/api\/internal\/platform\/toolbox\/tools\/[^/]+\/clicks$/.test(url.pathname)) {
+      await route.fulfill(json({
+        toolId: decodeURIComponent(url.pathname.split("/").at(-2) ?? ""),
+        clickCount: 1,
+        recorded: true,
+        incremented: true
+      }));
       return;
     }
     if (url.pathname.startsWith("/api/internal/platform/configuration-management")) {

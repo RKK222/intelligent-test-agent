@@ -120,6 +120,15 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 
 `tests/agent-skill-hub.test.ts` 覆盖普通用户全量浏览但无管理按钮、应用管理员引用入口、分类与应用状态隔离、归属工作区、取消后立即隐藏与重新引用、迟到响应隔离，以及当前应用引用库和引用方应用清单。
 
+### 工具盒子
+
+- activity rail 的 `Wrench` 入口位于编辑器后，对所有登录用户可见，不复用系统管理角色判断；`/toolbox` 深链接由 router 登录保护并支持浏览器历史。
+- `ToolboxPanel` 直接展示一个工具一张卡片，不增加二级工具门户。热门区只显示累计点击大于 0 的 Top 10；目录支持中文、英文和关键词搜索，以及 IT-Tools/OmniTools 来源和固定分类筛选。
+- 卡片使用原生新标签链接打开 `/toolbox/apps/it-tools/<route>` 或 `/toolbox/apps/omni-tools/<route>`，普通点击、键盘激活和中键均生成一次 `eventId` 后异步上报；失败不得 `preventDefault`、弹窗或回退到套件首页，成功则更新本地累计和热门排序。
+- 进入沉浸式工具盒子前保存左、右和底部面板可见性，离开时按快照精确恢复；工具盒子激活期间运行态事件和 SSE 导航不得把页面劫持回编辑器。
+
+`tests/toolbox-panel.test.ts` 覆盖搜索/筛选、重复能力来源区分、热门与零点击空态、原生新标签属性、普通/中键上报和失败不阻断；`tests/toolbox-navigation.test.ts` 与 `tests/login-redirect.test.ts` 覆盖沉浸式布局状态机和 `/toolbox` 登录回跳，`tests/workbench.spec.ts` 真实浏览器场景覆盖普通用户入口、左右面板恢复、前进/后退和深链接刷新。
+
 ## 禁止事项
 
 - 不直接拼接后端 URL。

@@ -22,6 +22,54 @@ export type PageResponse<T> = {
   total: number;
 };
 
+export type ToolboxSource = "IT_TOOLS" | "OMNI_TOOLS";
+
+export type ToolboxCategory =
+  | "SECURITY"
+  | "ENCODING"
+  | "TEXT"
+  | "DATA"
+  | "WEB"
+  | "NETWORK"
+  | "DEVELOPMENT"
+  | "IMAGE"
+  | "AUDIO_VIDEO"
+  | "PDF"
+  | "DATE_TIME"
+  | "MATH"
+  | "OTHER";
+
+/** 离线工具目录单项；launchPath 只能是平台同源子路径。 */
+export type ToolboxTool = {
+  toolId: string;
+  source: ToolboxSource;
+  sourceName: string;
+  sourceVersion: string;
+  nameZh: string;
+  nameEn: string;
+  descriptionZh: string;
+  category: ToolboxCategory;
+  categoryLabel: string;
+  keywords: string[];
+  launchPath: string;
+  clickCount: number;
+  hotRank: number | null;
+};
+
+export type ToolboxCatalog = {
+  catalogVersion: string;
+  total: number;
+  hotLimit: number;
+  tools: ToolboxTool[];
+};
+
+export type ToolboxClickResult = {
+  toolId: string;
+  clickCount: number;
+  recorded: boolean;
+  incremented: boolean;
+};
+
 export type Workspace = {
   workspaceId: string;
   name: string;

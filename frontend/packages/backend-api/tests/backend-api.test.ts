@@ -8,6 +8,49 @@ import {
 } from "../src";
 
 describe("backend-api", () => {
+  it("reads the toolbox catalog and records an idempotent click event", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const isClick = String(input).endsWith("/toolbox/tools/omni-tools.text%2Fhash/clicks");
+      return new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: isClick
+          ? { toolId: "omni-tools.text/hash", clickCount: 8, recorded: true, incremented: true }
+          : { catalogVersion: "catalog-v1", total: 193, hotLimit: 10, tools: [] }
+      }), { status: 200 });
+    });
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "token",
+      routeLinuxServerId: () => "server-a",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(client.getToolboxCatalog()).resolves.toEqual(expect.objectContaining({ total: 193 }));
+    await expect(client.recordToolboxClick("omni-tools.text/hash", "evt/toolbox")).resolves.toEqual({
+      toolId: "omni-tools.text/hash",
+      clickCount: 8,
+      recorded: true,
+      incremented: true
+    });
+
+    expect(fetcher.mock.calls.map((call) => [call[0], call[1]?.method, call[1]?.body])).toEqual([
+      ["http://api/api/internal/platform/toolbox/tools", undefined, undefined],
+      [
+        "http://api/api/internal/platform/toolbox/tools/omni-tools.text%2Fhash/clicks",
+        "POST",
+        JSON.stringify({ eventId: "evt/toolbox" })
+      ]
+    ]);
+    for (const call of fetcher.mock.calls) {
+      const headers = new Headers(call[1]?.headers);
+      expect(headers.get("Authorization")).toBe("Bearer token");
+      expect(headers.get("X-Trace-Id")).toBe("trace_fixed");
+      expect(headers.get(LINUX_SERVER_ROUTE_HEADER)).toBeNull();
+    }
+  });
+
   it("filters OpenCode 1.18.4 Zen envelopes using the configured provider allowlist", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
       const url = String(input);

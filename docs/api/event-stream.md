@@ -754,6 +754,10 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 - 客户端必须优先按 `eventId` 去重；缺失 `eventId` 的旧事件才回退按 `runId + seq` 去重，允许同一事件重复投递。
 - 客户端必须忽略未知 payload 字段和未知 event name。
 
+## 工具盒子不新增事件
+
+工具盒子目录查询和点击上报都是普通 HTTP API，不创建 Run、Session 或 RunEvent，也不进入用户级 session-runtime SSE。点击成功后的累计与热门排名由当前页面本地更新，刷新时重新查询 `GET /api/internal/platform/toolbox/tools`；其它已打开页面不承诺实时同步。首版不提供点击趋势、明细查询、收藏或目录管理事件。后续如需跨页面实时刷新，必须另行设计稳定事件契约，不能复用 `tool.*`、`analytics.*` 或 opencode raw event。
+
 ## 兼容性
 
 1. 新增事件字段必须保持旧前端可忽略。

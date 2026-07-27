@@ -1063,3 +1063,21 @@
   - 真实运行管理链路将本机 4098 进程重启到 PID 74990、`RUNNING / HEALTHY` 后执行停止；Manager 在 50ms 内返回 `STOPPED`，4098 无监听、PID 消失、状态文件删除，页面回到 `STOPPED / NOT_RUNNING`，未再出现 `OPENCODE_BAD_GATEWAY`。
 - Result:
   - 修复只涉及 Manager 的 Unix 子进程生命周期和对应测试/文档；未修改 HTTP API、RunEvent、数据库/Flyway、SQL、generated SDK、权限、安全配置或环境文件，现有 Java 公共停止程序和错误转换保持不变。
+
+### 2026-07-28 - 增加企业离线工具盒子
+
+- Why:
+  - 所有登录用户需要从左侧直接打开独立小工具，并在 HTTP、离线企业环境下仅暴露真正可运行的工具，同时记录热点点击。
+- What:
+  - 新增 `/toolbox` 沉浸式前端、193 项双语目录（IT-Tools 85 项、OmniTools 108 项）、搜索筛选、热门 Top 10、新标签直达及静默点击上报。
+  - 新增目录与点击 API、30 秒计数窗口、`eventId` 幂等，以及永久明细、累计、用户状态三表；Flyway 建表并仅通过 MyBatis XML 读写业务 SQL。
+  - 锁定并派生两套上游源码，移除品牌与门户，支持子路径深链；剔除摄像头和 SimplePDF，运行资源全部本地化，并为 HTTP 环境提供剪贴板降级。
+  - 增加摘要锁定的 `linux/amd64` Docker 镜像、离线包、独立工具节点部署、Nginx 代理、只读容器、健康诊断和双镜像原子回滚。
+- How:
+  - 后端 PostgreSQL Testcontainers、H2、API、服务测试通过；前端全量 1636 项通过、1 项既有跳过，类型检查、生产构建及桌面/移动端 E2E 通过；两套派生应用的测试和构建通过。
+  - 最终镜像通过 193 条路由断网加载、FFmpeg、Ghostscript、OCR、AI 抠图等真实功能冒烟，以及 SHA-256、许可证、完整源码包、失败保护和成功回滚验证。
+  - 真实 CSP 验收发现并修复 ONNX `blob:` 动态模块和上游动态表达式所需的 `blob:`/`unsafe-eval`；外部脚本、连接、Worker、图片和媒体源仍被禁止。
+- Result:
+  - 最终离线目录是 193 项而非初始预期的 194 项：除 HTTP 下不可用的摄像头外，OmniTools SimplePDF 依赖外部 iframe，按离线入口约束一并剔除。
+  - 最终离线包位于 `/private/tmp/test-agent-toolbox-release-final`；点击明细永久增长需纳入容量监控，工具节点首版仍为单点；不新增 SSE，不修改 OpenCode、generated SDK 或 `.env.local`。
+  - 本机 Docker 的 Aliyun mirror 存在 manifest 异常，构建时使用 Daocloud registry 前缀但保持官方 `linux/amd64` digest；发布脚本会拒绝仅使用 tag 的基础镜像。

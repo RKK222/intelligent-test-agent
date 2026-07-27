@@ -1269,10 +1269,39 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 | `night_execution_tasks` | 夜间异步执行任务主表 |
 | `night_execution_session_locks` | 待执行夜间任务会话写锁表 |
 | `night_execution_slot_reservations` | 夜间15分钟启动时段容量占位表 |
+| `toolbox_tool_click_events` | 工具盒子永久点击明细表 |
+| `toolbox_tool_click_totals` | 工具盒子累计点击投影表 |
+| `toolbox_tool_user_click_states` | 用户与工具30秒计数窗口状态表 |
 
 ## V20260723145200 应用工作空间启用状态
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260723145200__add_application_workspace_enabled.sql` 为 `application_workspaces` 增加非空布尔字段 `enabled`，默认值为 `true`。存量记录和新建记录因此默认继续出现在工作空间切换入口；设置页显式停用后只影响切换模板列表，不删除关联版本、个人工作区、运行态工作区或最近使用记录。
+
+## V20260727203500 工具盒子点击跟踪
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260727203500__create_toolbox_click_tracking.sql` 新增三个生产业务表，不写工具目录、测试点击或演示数据。目录继续由版本化 classpath JSON 管理。
+
+### `toolbox_tool_click_events`
+
+永久 append-only 点击明细，`event_id` 是客户端一次打开动作生成的最长 128 字符全局幂等键。表保存稳定 `tool_id`、`IT_TOOLS/OMNI_TOOLS` 来源、可空用户、traceId、是否计入累计和服务端点击时间。用户删除时外键 `ON DELETE SET NULL`，历史事件继续用于总量审计，但不再关联身份。
+
+索引 `(tool_id, clicked_at desc)` 支撑单工具容量排查，`(user_id, clicked_at desc)` 支撑用户删除/审计定位。首版不提供明细查询 API，也不建立清理任务。
+
+### `toolbox_tool_click_totals`
+
+每个稳定工具最多一行累计投影，保存非负 `click_count`、最后有效计数时间和更新时间。零点击工具不预写行；目录查询将缺失投影映射为 0。热门查询不直接扫描事件明细，业务服务只批量读取当前目录工具的累计投影，再按累计数、最后计数时间和目录顺序排序。
+
+### `toolbox_tool_user_click_states`
+
+以 `(tool_id, user_id)` 为主键保存该用户对该工具最后一次有效计数时间。MyBatis XML 使用 PostgreSQL `INSERT ... ON CONFLICT ... DO UPDATE ... WHERE` 原子竞争 30 秒窗口；只有影响一行的请求递增累计并标记事件 counted。用户删除时 `ON DELETE CASCADE`，不保留可识别的节流状态。
+
+### 事务、兼容与监控
+
+- `eventId` 幂等插入、窗口竞争、累计递增和事件 counted 标记在同一个 Spring 事务中；重复事件直接返回当前累计。
+- 所有运行 SQL 都在 `ToolboxClickMapper.xml`，没有新增 JDBC SQL。PostgreSQL 是生产方言，H2 `MERGE` 只用于 PostgreSQL 模式集成测试。
+- 三张表和两个 API 都是向后兼容新增；旧 Java/前端不会访问。回滚应用或工具镜像时不回退 migration，累计数据保留。
+- `toolbox_tool_click_events` 永久保留且会持续增长。数据库监控必须采集表行数、表/索引字节数、日增量和剩余容量；达到容量阈值前需另行评审归档/保留策略，不能在首版临时删除明细。
+- PostgreSQL Testcontainers 验证完整 Flyway、MyBatis 方言、并发窗口单赢家和用户删除匿名化；H2 集成测试验证首次点击、窗口内重复、窗口到期和 `eventId` 幂等。
 
 ### 字段注释原则
 

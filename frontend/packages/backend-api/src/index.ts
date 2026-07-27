@@ -141,6 +141,8 @@ import type {
   TerminalTicketRequest,
   ServerTerminalTicketRequest,
   TerminalTicketResponse,
+  ToolboxCatalog,
+  ToolboxClickResult,
   TodoItem,
   DeleteUsersResult,
   SyncUsersFromTcdsResult,
@@ -344,6 +346,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const schedulerManagementBase = "/api/internal/platform/scheduler-management";
   const xxlJobBase = "/api/internal/platform/xxl-job";
   const systemManagementBase = "/api/internal/platform/system-management";
+  const toolboxBase = "/api/internal/platform/toolbox";
   const analyticsBase = "/api/internal/platform/analytics";
   const commonParameterBase = `${configurationBase}/common-parameters`;
   const referenceRepositoryBase = (appId: string) =>
@@ -1881,6 +1884,18 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
           body: JSON.stringify(payload)
         }
       ),
+
+    // ---- 工具盒子 API ----
+
+    /** 获取固定版本、可完全离线运行的工具目录及热门排名。 */
+    getToolboxCatalog: () => request<ToolboxCatalog>(`${toolboxBase}/tools`),
+
+    /** 点击上报失败由调用界面静默处理，不参与工具链接的导航控制。 */
+    recordToolboxClick: (toolId: string, eventId: string) =>
+      request<ToolboxClickResult>(`${toolboxBase}/tools/${encodeURIComponent(toolId)}/clicks`, {
+        method: "POST",
+        body: JSON.stringify({ eventId })
+      }),
 
     // ---- 认证相关 API ----
 

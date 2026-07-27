@@ -14,6 +14,7 @@
 - 默认 30 秒请求超时，可通过 `requestTimeoutMs` 覆盖，或通过单个请求 init 参数中的 `timeoutMs` 进行局部覆盖；超时统一映射为 `BackendApiError` 的 `REQUEST_TIMEOUT`。
 - 映射统一错误响应为 `BackendApiError`。
 - 暴露 Workspace、Session message、Run 与 Diff API；历史恢复优先使用 `getSessionTreeMessages`，`listSessionMessages(..., refresh=false)` 用于只读 transcript、Run ID 恢复和旧消息反馈兼容。新反馈不再依赖平台 assistant messageId。
+- 暴露 `getToolboxCatalog()` 与 `recordToolboxClick(toolId, eventId)`，统一访问 `/api/internal/platform/toolbox`；目录和点击沿用登录 Token，不携带工具级角色，`toolId` 使用路径编码，点击失败由工具盒子页面静默处理且不得阻断原生链接打开。
 - 工作区原始文件列表、读取、写入、二进制上传、普通文件复制/移动、状态和删除，以及工作台使用的引用组合视图 `listWorkspaceView/readWorkspaceViewFile`，统一走“route 查询 + 目标后端 ticket + 文件 WebSocket RPC”，不再调用旧 HTTP 文件接口；client 负责 requestId 匹配、超时、断线错误和切换工作区关闭旧连接。组合视图只映射后端签发的稳定 `id/locator/source/readonly/workspacePath/warnings`，不在浏览器自行解析引用根目录。
 - 工作区与 Agent 配置文件连接分别按路由键复用 single-flight 建连过程，并对缓存连接做实例身份校验；连接在 open 前关闭、报错或同步发送失败时会立即结算 pending，同步发送失败还会安全关闭已失效的底层 socket。只有 `workspace.read`、`workspace.view.read`、三类 `*.read.chunk` 与 `agent-config.read` 等幂等只读操作遇到明确 WebSocket 传输错误时自动重连并重试一次，业务错误、请求超时和写操作不重试。
 - 工作区、组合引用视图和 Agent 配置文件超过一次性读取阈值后，分别通过 `readFilePreviewChunk`、`readWorkspaceViewFilePreviewChunk`、`readPublicAgentFilePreviewChunk`、`readWorkspaceAgentFilePreviewChunk` 读取约 512 KiB UTF-8 分段；client 透传 `offset/expectedSize/expectedLastModifiedMillis` 并返回 `nextOffset/eof`，调用方可加载到 EOF。上传方法直接接收 `Blob`，只把当前 `Blob.slice()` 分片读入内存并在同一 socket 上执行 begin/chunk/complete，进度回调使用已上传/总字节；读写会话都不把完整大文件打进单个 WebSocket frame。

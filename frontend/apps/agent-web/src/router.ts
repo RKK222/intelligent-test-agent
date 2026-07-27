@@ -29,6 +29,11 @@ export const router = createRouter({
       component: () => import("./views/WorkbenchView.vue"),
     },
     {
+      path: "/toolbox",
+      name: "toolbox",
+      component: () => import("./views/WorkbenchView.vue"),
+    },
+    {
       path: "/s/:sessionId",
       name: "transcript",
       component: () => import("./views/TranscriptView.vue"),
@@ -73,7 +78,7 @@ export function resolveLoginRedirect(rawRedirect: unknown): string {
 }
 
 function isKnownLoginRedirectPath(pathname: string): boolean {
-  return pathname === "/" || /^\/s\/[^/]+$/.test(pathname);
+  return pathname === "/" || /^\/toolbox\/?$/.test(pathname) || /^\/s\/[^/]+$/.test(pathname);
 }
 
 router.beforeEach(async (to, _from) => {

@@ -21,7 +21,7 @@ import {
 import { DiffViewer, parseUnifiedPatch } from "@test-agent/diff-viewer";
 import { CodeEditor, languageFromPath, type EditorSelectionContext } from "@test-agent/editor";
 import { subscribeRunEvents, subscribeSessionRuntimeState, type RunEventRawMessage } from "@test-agent/event-stream-client";
-import { BookOpenText, Boxes, Code2, FileWarning, MessageSquare, Monitor } from "lucide-vue-next";
+import { BookOpenText, Boxes, Code2, FileWarning, MessageSquare, Monitor, Wrench } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
@@ -135,6 +135,13 @@ import ServerWorkspacePickerDialog from "./ServerWorkspacePickerDialog.vue";
 import { readServerWorkspacePickerTabState } from "./server-workspace-picker-tab";
 import SystemManagementWrapper from "./SystemManagementWrapper.vue";
 import AgentSkillHub from "./AgentSkillHub.vue";
+import ToolboxPanel from "./ToolboxPanel.vue";
+import {
+  routeCenterTransition,
+  transitionImmersivePanels,
+  type NonToolboxCenterMode,
+  type WorkbenchCenterMode
+} from "./toolbox-navigation";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import { notifyFeedback } from "./notify";
 import { appendLatestRawOutputEntry, prepareRawOutputBody } from "./raw-output";
@@ -402,8 +409,9 @@ const diffFiles = ref<RunDiffFile[]>([]);
 const vcsDiffFiles = ref<RunDiffFile[]>([]);
 const diffSource = ref<"run" | "session" | "vcs" | "agent">("run");
 const diffViewMode = ref<"split" | "unified">("split");
-const centerMode = ref<"editor" | "diff" | "system" | "hub">("editor");
+const centerMode = ref<WorkbenchCenterMode>("editor");
 const centerModeBeforeHub = ref<"editor" | "diff" | "system">("editor");
+const centerModeBeforeToolbox = ref<NonToolboxCenterMode>("editor");
 const hubUpdateCount = ref(0);
 let hubUpdateTimer: ReturnType<typeof setInterval> | null = null;
 const feedback = ref<Feedback | null>(null);
@@ -456,6 +464,8 @@ const leftPanelOpen = ref(true);
 const rightPanelOpen = ref(true);
 const savedLeftPanelOpen = ref(true);
 const savedRightPanelOpen = ref(true);
+const savedBottomDrawerOpen = ref(false);
+let restoringToolboxRouteMode = false;
 
 function clearRunEventSseFeedback() {
   if (feedback.value?.title === RUN_EVENT_SSE_ERROR_TITLE) {
@@ -464,29 +474,65 @@ function clearRunEventSseFeedback() {
 }
 
 watch(centerMode, (newMode, oldMode) => {
-  const nextImmersive = newMode === "system" || newMode === "hub";
-  const previousImmersive = oldMode === "system" || oldMode === "hub";
-  if (nextImmersive) {
-    if (!previousImmersive) {
-      savedLeftPanelOpen.value = leftPanelOpen.value;
-      savedRightPanelOpen.value = rightPanelOpen.value;
-    }
-    leftPanelOpen.value = false;
-    rightPanelOpen.value = false;
-  } else if (previousImmersive) {
-    leftPanelOpen.value = savedLeftPanelOpen.value;
-    rightPanelOpen.value = savedRightPanelOpen.value;
+  // /toolbox 是可前进/后退的权威路由；后台事件不得把沉浸式目录切回编辑器。
+  if (restoringToolboxRouteMode) {
+    restoringToolboxRouteMode = false;
+    return;
   }
+  if (route.name === "toolbox" && newMode !== "toolbox") {
+    restoringToolboxRouteMode = true;
+    centerMode.value = "toolbox";
+    return;
+  }
+
+  const next = transitionImmersivePanels({
+    leftOpen: leftPanelOpen.value,
+    rightOpen: rightPanelOpen.value,
+    bottomOpen: bottomDrawerOpen.value,
+    savedLeftOpen: savedLeftPanelOpen.value,
+    savedRightOpen: savedRightPanelOpen.value,
+    savedBottomOpen: savedBottomDrawerOpen.value
+  }, newMode, oldMode);
+  leftPanelOpen.value = next.leftOpen;
+  rightPanelOpen.value = next.rightOpen;
+  bottomDrawerOpen.value = next.bottomOpen;
+  savedLeftPanelOpen.value = next.savedLeftOpen;
+  savedRightPanelOpen.value = next.savedRightOpen;
+  savedBottomDrawerOpen.value = next.savedBottomOpen;
 });
 
-function toggleAgentSkillHub() {
+watch(() => route.name === "toolbox", (isToolboxRoute) => {
+  const next = routeCenterTransition(isToolboxRoute, centerMode.value, centerModeBeforeToolbox.value);
+  centerModeBeforeToolbox.value = next.beforeToolbox;
+  centerMode.value = next.mode;
+}, { immediate: true });
+
+async function selectActivityCenterMode(mode: NonToolboxCenterMode) {
+  if (route.name === "toolbox") {
+    await router.push({ name: "workbench" });
+  }
+  centerMode.value = mode;
+}
+
+async function toggleToolbox() {
+  if (route.name === "toolbox") {
+    await router.push({ name: "workbench" });
+    return;
+  }
+  await router.push({ name: "toolbox" });
+}
+
+async function toggleAgentSkillHub() {
+  if (centerMode.value === "toolbox") {
+    await selectActivityCenterMode("hub");
+    return;
+  }
   if (centerMode.value === "hub") {
-    centerMode.value = centerModeBeforeHub.value;
+    await selectActivityCenterMode(centerModeBeforeHub.value);
     return;
   }
   centerModeBeforeHub.value = centerMode.value;
-  centerMode.value = "hub";
-  bottomDrawerOpen.value = false;
+  await selectActivityCenterMode("hub");
 }
 
 function handleHubChanged(paths: string[]) {
@@ -6435,7 +6481,7 @@ function applyRunEventWorkbenchProjection(
       path: normalizeWorkspacePath(f.path) || f.path
     }));
     if (files.length) {
-      if (centerMode.value !== "hub") {
+      if (centerMode.value !== "hub" && centerMode.value !== "toolbox") {
         centerMode.value = nextCenterModeAfterRunDiff(centerMode.value, diffSource.value);
       }
       diffSource.value = "run";
@@ -6454,7 +6500,7 @@ function applyRunEventWorkbenchProjection(
       path: normalizeWorkspacePath(f.path) || f.path
     }));
     if (files.length) {
-      if (centerMode.value !== "hub") {
+      if (centerMode.value !== "hub" && centerMode.value !== "toolbox") {
         centerMode.value = nextCenterModeAfterRunDiff(centerMode.value, diffSource.value);
       }
       diffSource.value = "session";
@@ -6992,7 +7038,7 @@ async function refreshWorkspaceGitDiff(options: {
     vcsDiffFiles.value = nextFiles;
     if (diffSource.value === "vcs") {
       diffFiles.value = nextFiles;
-      if (centerMode.value !== "hub") {
+      if (centerMode.value !== "hub" && centerMode.value !== "toolbox") {
         centerMode.value = nextCenterModeAfterVcsRefresh(centerMode.value, diffSource.value, nextFiles);
       }
       if (!workbench.selectedDiffPath || !nextFiles.some((file) => file.path === workbench.selectedDiffPath)) {
@@ -7565,9 +7611,19 @@ async function handleLogout() {
             data-onboarding="editor-button"
             aria-label="打开编辑器"
             title="打开编辑器"
-            @click="centerMode = 'editor'"
+            @click="selectActivityCenterMode('editor')"
           >
             <Code2 class="figma-activity-icon" :stroke-width="1.5" />
+          </button>
+          <button
+            type="button"
+            :class="['figma-activity-btn', centerMode === 'toolbox' && 'figma-activity-btn--active']"
+            aria-label="工具盒子"
+            title="工具盒子"
+            data-testid="toolbox-activity-button"
+            @click="toggleToolbox"
+          >
+            <Wrench class="figma-activity-icon" :stroke-width="1.5" />
           </button>
           <button
             v-if="isSuperAdmin"
@@ -7575,10 +7631,7 @@ async function handleLogout() {
             :class="['figma-activity-btn', centerMode === 'system' && 'figma-activity-btn--active']"
             aria-label="系统管理"
             title="系统管理"
-            @click="
-              centerMode = 'system';
-              bottomDrawerOpen = false;
-            "
+            @click="selectActivityCenterMode('system')"
           >
             <Monitor class="figma-activity-icon" :stroke-width="1.5" />
           </button>
@@ -7693,7 +7746,10 @@ async function handleLogout() {
 
     <template #editor>
       <main class="managed-editor-main">
-        <template v-if="centerMode === 'hub'">
+        <template v-if="centerMode === 'toolbox'">
+          <ToolboxPanel />
+        </template>
+        <template v-else-if="centerMode === 'hub'">
           <AgentSkillHub
             :selected-app-id="selectedAppId"
             :workspace-id="selectedWorkspace?.workspaceId"
