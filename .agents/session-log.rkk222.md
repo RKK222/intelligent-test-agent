@@ -5,6 +5,23 @@
 
 ## Entries
 
+### 2026-07-27 - 重打 Agent Skill Hub 企业完整包
+
+### Why
+- `d4f762f7c` 已完成 Agent & Skill Hub 的后端 API、MyBatis/Flyway、文件 WebSocket 和前端 Hub 交付，上一版企业包不包含这些变更。
+
+### What
+- 基于当前 `main` 全量重建 Java、前端、programs、`linux/amd64` worker/manager 和内层发布 ZIP；复用经 SHA 校验的 `.4/.114/.2` 节点配置包重封固定名双后台完整包。
+- 打包脚本、`deploy/internal/.env` 和现场配置均未修改；`codex/apple-design-preview` 独立实验分支未纳入。
+
+### How
+- JDK 25 下执行全量 `package-release.sh` 和 `package-two-backend-complete.sh`；内外层 SHA、ZIP、核心制品逐字节比对、Hub Controller、Hub Flyway 迁移、RSA 和 160 个依赖库校验通过。
+- Worker 镜像校验为 `linux/amd64`、OpenCode 1.18.4，Manager 协议字段、双后台封包回归、AI 文档校验和 `git diff --check` 通过。
+
+### Result
+- Agent & Skill Hub 前后端及数据库迁移已进入固定名企业完整包；现场需按 `.4 → .114 → .2` 完整升级，不能只更新前端。
+- 本次未修改 OpenCode 源码、打包脚本或环境配置；真实企业部署、Flyway 执行和 Hub 登录态验收仍待现场完成。
+
 ### 2026-07-26 - 重构 Agent & Skill Hub 顶部与右侧抽屉布局
 
 ### Why
