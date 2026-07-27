@@ -1121,7 +1121,7 @@ describe("GitChangesPanel", () => {
     expect(await view.findByText("design.md")).toBeTruthy();
     expect(view.queryByText("应用工作空间")).toBeNull();
     expect(view.queryByText("普通文件、docs、spec")).toBeNull();
-    expect(view.getByText("选择“提交并推送”时：提交 2 个文件、推送 1 个文件；其中 1 个 spec 文件只提交到个人 worktree。")).toBeTruthy();
+    expect(view.getByText("选择“提交并推送”时：提交 2 个文件、发布 1 个文件；其中 1 个 spec 文件默认只提交，不发布到应用。")).toBeTruthy();
     await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "docs: 更新支付说明");
     await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
 
@@ -1131,10 +1131,10 @@ describe("GitChangesPanel", () => {
     expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith("psw_default", expect.objectContaining({
       files: ["docs/payment.md"]
     }));
-    expect(await view.findByText("可发布文件已推送；1 个 spec 文件仅提交到个人 worktree。")).toBeTruthy();
+    expect(await view.findByText("可发布文件已发布；1 个 spec 文件已按默认规则只提交。")).toBeTruthy();
     expect(view.getByLabelText("本轮累计结果").textContent).toContain("本地提交 2 个文件");
     expect(view.getByLabelText("本轮累计结果").textContent).toContain("远端推送 1 个文件");
-    expect(view.getByLabelText("本轮累计结果").textContent).toContain("仅本地 1 个 spec 文件");
+    expect(view.getByLabelText("本轮累计结果").textContent).toContain("默认只提交 1 个 spec 文件");
   });
 
   it("only commits when all selected workspace files are under spec", async () => {
@@ -1157,8 +1157,9 @@ describe("GitChangesPanel", () => {
     });
 
     expect(await view.findByText("design.md")).toBeTruthy();
-    expect(view.getByText("仅本地")).toBeTruthy();
-    expect(view.getByText("1 个 spec 文件只提交到个人 worktree，不会推送。")).toBeTruthy();
+    const commitOnlyMarker = view.getByLabelText("spec 文件默认只提交，不发布到应用");
+    expect(commitOnlyMarker.classList.contains("git-file-marker")).toBe(true);
+    expect(view.getByText("1 个 spec 文件默认只提交，不发布到应用。")).toBeTruthy();
     await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "spec: 保存本地设计");
     expect(view.queryByRole("button", { name: "提交并推送" })).toBeNull();
     await fireEvent.click(view.getByRole("button", { name: "提交" }));
@@ -1169,7 +1170,7 @@ describe("GitChangesPanel", () => {
     expect(apiClientMock.publishPersonalWorkspace).not.toHaveBeenCalled();
     expect(await view.findByText("提交成功！")).toBeTruthy();
     expect(view.getByLabelText("本轮累计结果").textContent).toContain("本地提交 1 个文件");
-    expect(view.getByLabelText("本轮累计结果").textContent).toContain("仅本地 1 个 spec 文件");
+    expect(view.getByLabelText("本轮累计结果").textContent).toContain("默认只提交 1 个 spec 文件");
   });
 
   it("accumulates workspace, application Agent, and public Agent results in one batch", async () => {
@@ -1242,8 +1243,8 @@ describe("GitChangesPanel", () => {
     expect((view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述...") as HTMLInputElement).value).toBe("");
     expect(summary.textContent).toContain("本地提交 4 个文件");
     expect(summary.textContent).toContain("远端推送 3 个文件");
-    expect(summary.textContent).toContain("仅本地 1 个 spec 文件");
-    expect(summary.textContent).toContain("workspace提交 2远端 1仅本地 spec 1");
+    expect(summary.textContent).toContain("默认只提交 1 个 spec 文件");
+    expect(summary.textContent).toContain("workspace提交 2远端 1spec 默认只提交 1");
     expect(summary.textContent).toContain("应用 Agent提交 1远端 1");
     expect(summary.textContent).toContain("公共 Agent提交 1远端 1");
   });
@@ -1441,19 +1442,48 @@ describe("GitChangesPanel", () => {
   });
 
   it("shows pending feature update and completes a resolved native merge from the diff area", async () => {
+    apiClientMock.getWorkspaceAgentDiff.mockResolvedValue({
+      files: [{ path: "agents/reviewer.md", status: "modified", staged: false, patch: "" }]
+    });
     apiClientMock.getWorkspaceGitDiff
       .mockResolvedValueOnce({
-        files: [],
+        files: [
+          { path: "docs/design.md", status: "modified", rawStatus: " M", staged: false, patch: "" },
+          { path: "spec/commit-only.md", status: "added", rawStatus: "A ", staged: true, patch: "" }
+        ],
         mergeInProgress: false,
         applicationUpdatePending: true,
         applicationTargetCommit: "1234567890abcdef",
-        applicationUpdateBlockingFiles: [{
-          path: "F-GCMS/workspace-house/docs/design.md",
-          rawStatus: "M ",
-          applicationWorkspaceId: "awp_house",
-          workspaceName: "psn-house",
-          directoryPath: "F-GCMS/workspace-house"
-        }]
+        applicationUpdateBlockingFiles: [
+          {
+            path: "F-GCMS/workspace/docs/design.md",
+            rawStatus: " M",
+            applicationWorkspaceId: "awp_default",
+            workspaceName: "psn-default",
+            directoryPath: "F-GCMS/workspace"
+          },
+          {
+            path: "F-GCMS/workspace/spec/commit-only.md",
+            rawStatus: "A ",
+            applicationWorkspaceId: "awp_default",
+            workspaceName: "psn-default",
+            directoryPath: "F-GCMS/workspace"
+          },
+          {
+            path: "F-GCMS/workspace/.opencode/agents/reviewer.md",
+            rawStatus: " M",
+            applicationWorkspaceId: "awp_default",
+            workspaceName: "psn-default",
+            directoryPath: "F-GCMS/workspace"
+          },
+          {
+            path: "F-GCMS/workspace-house/docs/sibling.md",
+            rawStatus: " M",
+            applicationWorkspaceId: "awp_house",
+            workspaceName: "psn-house",
+            directoryPath: "F-GCMS/workspace-house"
+          }
+        ]
       })
       .mockResolvedValue({
         files: [],
@@ -1466,6 +1496,7 @@ describe("GitChangesPanel", () => {
       props: {
         workspaceId: fixture.application.personalRuntimeWorkspaceId,
         personalWorkspaceId: fixture.application.personalWorkspaceId,
+        workspaceDirectoryPath: "F-GCMS/workspace",
         apiBaseUrl: "http://api",
         canWrite: true,
         canManageAgentConfig: true,
@@ -1474,10 +1505,28 @@ describe("GitChangesPanel", () => {
       global: { plugins: [createPinia()] }
     });
 
-    expect(await view.findByText(/应用 feature 有待同步更新/)).toBeTruthy();
-    expect(view.container.textContent).toContain("psn-house · F-GCMS/workspace-house/docs/design.md");
+    const updateSummary = await view.findByTestId("feature-update-summary");
+    expect(updateSummary.textContent).toContain("应用有新版本待更新");
+    expect(updateSummary.textContent).toContain("4 个文件待处理");
+    expect(updateSummary.textContent).toContain("请提交或撤销带橙色标签的文件，应用更新会自动继续");
+    expect(updateSummary.textContent).not.toContain("F-GCMS/workspace/docs/design.md");
+    expect(updateSummary.textContent).not.toContain("以下个人仓库变更正在阻塞合并");
+    const unstagedRow = await view.findByLabelText("docs/design.md");
+    const stagedRow = await view.findByLabelText("spec/commit-only.md");
+    expect(within(unstagedRow).getByLabelText("待处理：提交或撤销后更新应用").classList.contains("git-file-marker")).toBe(true);
+    expect(within(stagedRow).getByLabelText("待处理：提交或撤销后更新应用").classList.contains("git-file-marker")).toBe(true);
+    expect(within(unstagedRow).queryByLabelText("spec 文件默认只提交，不发布到应用")).toBeNull();
+    expect(within(stagedRow).getByLabelText("spec 文件默认只提交，不发布到应用")).toBeTruthy();
+    expect(unstagedRow.textContent).not.toContain("待处理");
+    expect(stagedRow.textContent).not.toContain("默认只提交");
+    expect(view.getByText("其它目录或应用配置还有 2 个待处理文件")).toBeTruthy();
+
     await fireEvent.click(view.getByRole("tab", { name: /^应用Agent/ }));
-    expect(await view.findByText(/应用 feature 有待同步更新/)).toBeTruthy();
+    expect(within(await view.findByLabelText("agents/reviewer.md")).getByLabelText("待处理：提交或撤销后更新应用")).toBeTruthy();
+    expect(view.getByText("其它目录或应用配置还有 3 个待处理文件")).toBeTruthy();
+
+    await fireEvent.click(view.getByRole("tab", { name: /^公共Agent/ }));
+    expect(view.queryByTestId("feature-update-summary")).toBeNull();
     await fireEvent.click(view.getByRole("tab", { name: /^workspace/ }));
     await fireEvent.click(view.getByTitle("刷新变更列表"));
     const complete = await view.findByRole("button", { name: "完成合并" });

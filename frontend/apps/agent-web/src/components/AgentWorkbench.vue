@@ -3859,6 +3859,39 @@ function refreshCurrentWorkspacePanels() {
 // 「+新增版本」流程：把 yyyyMMdd 和后端所需的 branch（非标准库）传给 createWorkspaceVersion。
 // 成功后失效该模板下的版本查询，让 useQueries 重新拉取；同时把新版本切到工作区。
 const creatingVersion = ref(false);
+const pullingWorkspaceVersion = ref(false);
+
+/**
+ * 应用工作空间的远端拉取独立于 Git Changes 的 stage/commit/push。
+ * 后端负责共享副本快进、个人 worktree 安全合并以及应用 Agent 配置 rollout。
+ */
+async function handlePullWorkspaceVersion(versionId: string) {
+  if (pullingWorkspaceVersion.value || versionId !== selectedVersionId.value) return;
+  pullingWorkspaceVersion.value = true;
+  try {
+    const response = await api.gitPullWorkspaceVersion(versionId);
+    const nextVersions = { ...versionsByTemplateId.value };
+    for (const [templateId, versions] of Object.entries(nextVersions)) {
+      nextVersions[templateId] = versions.map((version) =>
+        version.versionId === response.versionId ? response : version
+      );
+    }
+    versionsByTemplateId.value = nextVersions;
+    agentConfigRevision.value += 1;
+    fileExplorerRef.value?.refreshAll();
+    refreshCurrentWorkspacePanels();
+    feedback.value = {
+      kind: "success",
+      title: "已拉取远程",
+      description: `${response.branch} · ${response.targetCommitHash?.slice(0, 8) ?? "最新提交"}；有本地改动的个人 worktree 会保留并等待同步。`
+    };
+  } catch (error) {
+    feedback.value = errorFeedback("拉取远程失败", error);
+  } finally {
+    pullingWorkspaceVersion.value = false;
+  }
+}
+
 async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemplate; version: string; branch?: string }) {
   invalidateConversationInteraction();
   const appId = selectedAppId.value;
@@ -7659,6 +7692,7 @@ async function handleLogout() {
           :loading-app-templates="loadingAppTemplates"
           :loading-app-versions="loadingAppVersions"
           :creating-version="creatingVersion"
+          :pulling-workspace-version="pullingWorkspaceVersion"
           :can-write="!!currentPersonalWorkspaceId"
           :can-undo="workspaceUndoStack.length > 0"
           :can-manage-agent-config="isAppAdmin"
@@ -7700,6 +7734,7 @@ async function handleLogout() {
           @select-version="handleSelectVersion"
           @load-versions="handleLoadVersions"
           @create-version="handleCreateVersion"
+          @pull-workspace-version="handlePullWorkspaceVersion"
           @open-agent-file="openAgentFile"
           @open-server-workspace-picker="openServerWorkspacePicker"
           @open-reference-configuration="openReferenceConfiguration"

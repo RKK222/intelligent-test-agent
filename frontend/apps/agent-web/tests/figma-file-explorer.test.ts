@@ -12,6 +12,63 @@ vi.mock("@test-agent/workbench-shell", async () =>
 );
 
 describe("FigmaFileExplorer", () => {
+  it("groups refresh and remote pull in one workspace more menu while keeping Git changes independent", async () => {
+    const wrapper = shallowMount(FigmaFileExplorer, {
+      props: {
+        workspaceId: "wrk_personal",
+        selectedVersionId: "awv_selected",
+        entriesByDirectory: { "": [] },
+        expandedDirectories: new Set<string>(),
+        changedFiles: []
+      }
+    });
+
+    expect(wrapper.find('summary[aria-label="更多工作空间操作"]').exists()).toBe(true);
+    await wrapper.get('button[aria-label="刷新文件树"]').trigger("click");
+    expect(wrapper.emitted("refresh")).toHaveLength(1);
+
+    const pullButton = wrapper.get('button[aria-label="拉取远程"]');
+    await pullButton.trigger("click");
+
+    expect(wrapper.emitted("pullWorkspaceVersion")).toEqual([["awv_selected"]]);
+    expect(wrapper.findComponent(GitChangesPanel).exists()).toBe(true);
+  });
+
+  it("disables remote pull in the workspace more menu while a pull is running", () => {
+    const wrapper = shallowMount(FigmaFileExplorer, {
+      props: {
+        workspaceId: "wrk_personal",
+        selectedVersionId: "awv_selected",
+        pullingWorkspaceVersion: true,
+        entriesByDirectory: { "": [] },
+        expandedDirectories: new Set<string>(),
+        changedFiles: []
+      }
+    });
+
+    expect(wrapper.get('button[aria-label="拉取远程"]').attributes("disabled")).toBeDefined();
+  });
+
+  it("passes the selected application workspace directory to Git changes", () => {
+    const wrapper = shallowMount(FigmaFileExplorer, {
+      props: {
+        workspaceId: "wrk_personal",
+        selectedVersionId: "awv_selected",
+        appTemplates: [{
+          workspaceId: "awp_default",
+          directoryPath: "F-GCMS/workspace",
+          initialVersion: { versionId: "awv_selected" }
+        } as never],
+        entriesByDirectory: { "": [] },
+        expandedDirectories: new Set<string>(),
+        changedFiles: []
+      }
+    });
+
+    expect(wrapper.findComponent(GitChangesPanel).props("workspaceDirectoryPath"))
+      .toBe("F-GCMS/workspace");
+  });
+
   it("refreshes changes immediately and continuously while the changes panel is visible", async () => {
     vi.useFakeTimers();
     const refreshChanges = vi.fn();

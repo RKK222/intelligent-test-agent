@@ -1306,7 +1306,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `GET` | `/applications/{appId}/workspace-templates` | 查询应用工作空间切换模板，只返回 `application_workspaces.enabled=true` 的配置。 |
 | `GET` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 查询模板下已创建的应用版本工作区。 |
 | `POST` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 创建或接管应用版本工作区，并创建运行态 Workspace。 |
-| `POST` | `/workspace-versions/{versionId}/git-pull` | 在当前用户 READY opencode agent 所在服务器对应用版本工作区执行 `git pull --ff-only`，成功后广播其他服务器同步到同一 commit。 |
+| `POST` | `/workspace-versions/{versionId}/git-pull` | 在当前用户 READY opencode agent 所在服务器独立拉取应用版本远端分支；只允许 fast-forward，不依赖个人暂存区，也不执行提交或推送。成功后广播其他服务器同步到同一 commit。 |
 | `GET` | `/workspace-versions/{versionId}/git-access` | 版本选择前以当前用户身份只读探测关联 Git 版本库，不创建或修改本地工作区。 |
 | `GET` | `/workspace-versions/{versionId}/personal-workspaces` | 查询当前用户基于某版本派生的个人工作区。 |
 | `POST` | `/workspace-versions/{versionId}/personal-workspaces` | 基于应用版本工作区创建 git worktree 个人工作区。 |
@@ -1399,7 +1399,9 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 `accessible=true` 时 `reason=null`；缺少当前用户 SSH key 时返回 `accessible=false, reason=SSH_KEY_MISSING`；Git 认证失败或仓库不可访问时返回 `accessible=false, reason=REPOSITORY_PERMISSION_REQUIRED`，供前端展示对应版本库权限申请提示。网络、DNS、SSH 端口故障和超时仍返回统一 `GIT_UNAVAILABLE` / `GIT_TIMEOUT`，不得误报为用户没有版本库权限。应用成员校验与其它版本接口一致。
 
-`POST /workspace-versions/{versionId}/git-pull` 无请求体。后端先解析当前登录用户的 READY opencode agent 所在 `linuxServerId`，再在同服务器应用版本副本上执行 `git pull --ff-only origin {branch}`。工作树存在未提交变更、非 fast-forward、目标服务器副本缺失或 SSH key 不可用时返回统一错误；成功后更新 `targetCommitHash` 与本机副本 `replicaCommitHash`，并通过内部服务器广播要求其他服务器同步到同一 commit。
+`POST /workspace-versions/{versionId}/git-pull` 无请求体。后端先解析当前登录用户的 READY opencode agent 所在 `linuxServerId`，再在同服务器受控应用版本副本上显式 fetch `origin/{branch}`、固定远端 tracking commit、确认当前 HEAD 是其祖先，最后 reset 到该固定 commit，语义等价于受控的 fast-forward-only 拉取。该接口不检查或消费个人 worktree 的 staged 文件，不执行 commit/push；前端入口与“刷新文件树”一起收纳在应用工作空间标题栏的“…”菜单中，仍与 Git Changes 的提交推送入口分离。共享副本存在未提交变更、非 fast-forward、目标服务器副本缺失或 SSH key 不可用时返回统一错误；成功后更新 `targetCommitHash` 与本机副本 `replicaCommitHash`，并通过内部服务器广播要求其他服务器同步到同一 commit。clean 个人 worktree 自动合并固定提交；dirty、staged、untracked 或冲突 worktree 不被 stash/reset/覆盖，继续显示待同步。
+
+若本次远端差异包含应用目录下 `.opencode/opencode.jsonc`、`.opencode/opencode.json`、`.opencode/agents/**` 或 `.opencode/skills/**`，后端在共享副本切换前建立现有 APPLICATION rollout 闸门。个人 worktree 收敛后按现有规则等待对应用户任务空闲并调用原生 `/global/dispose`；未收敛用户进入持久化 `AWAITING_USER` 补偿，处理本地状态后再单独同步和 dispose。公共 Agent 配置与公共 rollout 不受该应用版本拉取影响。
 
 `POST /workspace-versions/{versionId}/personal-workspaces` 请求体：
 

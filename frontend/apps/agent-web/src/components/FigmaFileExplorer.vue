@@ -7,7 +7,7 @@ import WorkbenchFooter from "./WorkbenchFooter.vue";
 import AgentConfigPanel from "./AgentConfigPanel.vue";
 import type { AgentConfigMutation, AgentFileLoadRequest } from "./agentFileLoad";
 import GitChangesPanel from "./GitChangesPanel.vue";
-import { ChevronDown, ChevronRight, FolderTree, GitBranch, Globe, Plus, RefreshCw, Search } from "lucide-vue-next";
+import { ChevronDown, ChevronRight, CloudDownload, FolderTree, GitBranch, Globe, MoreHorizontal, Plus, RefreshCw, Search } from "lucide-vue-next";
 
 const props = defineProps<FileExplorerProps & {
   workspaceRootPath?: string;
@@ -23,6 +23,8 @@ const props = defineProps<FileExplorerProps & {
   loadingAppVersions?: boolean;
   /** 「+新增版本」提交中标记（父组件控制 WorkbenchFooter 弹窗按钮的禁用与文案） */
   creatingVersion?: boolean;
+  /** 应用工作空间正在独立拉取远端；与 Git 变更面板的暂存、提交、推送无关。 */
+  pullingWorkspaceVersion?: boolean;
   /** 是否允许当前个人工作区执行普通文件写操作 */
   canWrite?: boolean;
   /** 是否允许编辑应用级 Agent/Skill/Rules/Templates 配置 */
@@ -101,6 +103,8 @@ const emit = defineEmits<{
   loadVersions: [templateId: string];
   // 「+新增版本」弹窗确认后由父组件调用 createWorkspaceVersion。
   createVersion: [payload: { template: AppWorkspaceTemplate; version: string; branch?: string }];
+  // 工作空间标题栏“更多操作”菜单中的拉取动作只处理当前应用版本，不复用提交/推送入口。
+  pullWorkspaceVersion: [versionId: string];
   openAgentFile: [payload: AgentFileLoadRequest];
   openServerWorkspacePicker: [];
   openReferenceConfiguration: [];
@@ -132,6 +136,15 @@ const gitChangesPanelRef = ref<InstanceType<typeof GitChangesPanel> | null>(null
 const tab = ref<ExplorerTab>("explorer");
 const totalChangedFileCount = ref<number | null>(null);
 const displayedChangedFileCount = computed(() => totalChangedFileCount.value ?? props.changedFiles.length);
+// Git diff 文件是当前目录内路径；把当前版本所属目录下传，才能与仓库级阻塞路径做无歧义映射。
+const selectedWorkspaceDirectoryPath = computed(() => {
+  const selectedVersionId = props.selectedVersionId;
+  if (!selectedVersionId) return undefined;
+  return props.appTemplates?.find((template) =>
+    template.initialVersion?.versionId === selectedVersionId
+    || template.versions?.some((version) => version.versionId === selectedVersionId)
+  )?.directoryPath;
+});
 const workspaceHeight = ref<number | null>(null);
 const resizing = ref(false);
 let dragStartY = 0;
@@ -140,6 +153,25 @@ let dragStartHeight = 0;
 const iframeDialogVisible = ref(false);
 const iframeRef = ref<HTMLIFrameElement | null>(null);
 const fileExplorerRef = ref<InstanceType<typeof FileExplorer> | null>(null);
+const workspaceMoreMenuRef = ref<HTMLDetailsElement | null>(null);
+
+function closeWorkspaceMoreMenu() {
+  if (workspaceMoreMenuRef.value) {
+    workspaceMoreMenuRef.value.open = false;
+  }
+}
+
+function pullSelectedWorkspaceVersion() {
+  if (!props.selectedVersionId || props.pullingWorkspaceVersion) return;
+  emit("pullWorkspaceVersion", props.selectedVersionId);
+  closeWorkspaceMoreMenu();
+}
+
+function refreshWorkspaceFileTree() {
+  if (!props.workspaceId || props.loadingPath?.has("")) return;
+  emit("refresh");
+  closeWorkspaceMoreMenu();
+}
 
 function openRootActions() {
   if (!props.canWrite) return;
@@ -361,6 +393,7 @@ defineExpose({
         :agent-config-workspace-id="agentConfigWorkspaceId"
         :personal-workspace-id="personalWorkspaceId"
         :personal-workspace-branch="personalWorkspaceBranch"
+        :workspace-directory-path="selectedWorkspaceDirectoryPath"
         :agent-config-revision="agentConfigRevision"
         :api-base-url="apiBaseUrl"
         :route-linux-server-id="routeLinuxServerId"
@@ -422,17 +455,45 @@ defineExpose({
               >
                 <Globe class="h-3.5 w-3.5" :stroke-width="1.5" />
               </button>
-               <button
-                v-if="tab === 'explorer'"
-                type="button"
-                class="figma-fe-section-action-btn"
-                title="刷新文件树"
-                aria-label="刷新文件树"
-                :disabled="!workspaceId || loadingPath?.has('')"
-                @click="emit('refresh')"
-              >
-                <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': loadingPath?.has('') }" :stroke-width="1.5" />
-              </button>
+              <details v-if="tab === 'explorer'" ref="workspaceMoreMenuRef" class="figma-fe-more-menu">
+                <summary
+                  class="figma-fe-section-action-btn"
+                  title="更多工作空间操作"
+                  aria-label="更多工作空间操作"
+                >
+                  <MoreHorizontal class="h-3.5 w-3.5" :stroke-width="1.5" />
+                </summary>
+                <div class="figma-fe-more-menu-dropdown">
+                  <button
+                    type="button"
+                    class="figma-fe-more-menu-item"
+                    aria-label="刷新文件树"
+                    :disabled="!workspaceId || loadingPath?.has('')"
+                    @click="refreshWorkspaceFileTree"
+                  >
+                    <RefreshCw
+                      class="h-3.5 w-3.5"
+                      :class="{ 'animate-spin': loadingPath?.has('') }"
+                      :stroke-width="1.5"
+                    />
+                    <span>刷新文件树</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="figma-fe-more-menu-item"
+                    aria-label="拉取远程"
+                    :disabled="!selectedVersionId || pullingWorkspaceVersion"
+                    @click="pullSelectedWorkspaceVersion"
+                  >
+                    <CloudDownload
+                      class="h-3.5 w-3.5"
+                      :class="{ 'animate-pulse': pullingWorkspaceVersion }"
+                      :stroke-width="1.5"
+                    />
+                    <span>{{ pullingWorkspaceVersion ? "正在拉取远程" : "拉取远程" }}</span>
+                  </button>
+                </div>
+              </details>
             </div>
           </div>
           <div v-show="workspaceExpanded" class="figma-fe-section-content">
@@ -721,6 +782,65 @@ defineExpose({
 .figma-fe-section-action-btn:disabled {
   opacity: 0.5;
   pointer-events: none;
+}
+
+.figma-fe-more-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.figma-fe-more-menu > summary {
+  list-style: none;
+}
+
+.figma-fe-more-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.figma-fe-more-menu[open] > summary {
+  background: var(--ta-tree-hover);
+  color: var(--ta-tree-text);
+}
+
+.figma-fe-more-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 50;
+  display: flex;
+  min-width: 148px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--ta-tree-border);
+  border-radius: 6px;
+  background: var(--ta-tree-bg);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 14%);
+}
+
+.figma-fe-more-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ta-tree-text);
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.figma-fe-more-menu-item:hover:not(:disabled) {
+  background: var(--ta-tree-hover);
+}
+
+.figma-fe-more-menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .figma-fe-section-content {

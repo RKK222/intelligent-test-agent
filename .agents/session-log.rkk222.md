@@ -2302,3 +2302,20 @@
 - Result:
   - 共享仓库中任一目录发布后，clean 兄弟物理 worktree 立即合并同一 target；dirty/staged/untracked 仍保留用户内容并等待提交或回退后重试。只有实际加载发布源 `.opencode` 的运行态被 dispose，兄弟目录不会被误重启。
   - 仓库组只有一个工作空间时退化为既有单记录路径，未引入额外目录、Git 分支或运行态副作用。本次未新增/alter HTTP API、RunEvent、数据库/Flyway/SQL、安全权限、generated SDK、OpenCode 源码或环境配置。
+
+### 2026-07-27 - 修正应用工作空间独立拉取与 Agent 安全更新
+
+- Why:
+  - 应用工作空间原有拉取入口依赖个人暂存状态，和约定的“远端更新独立于提交推送”不一致；标题栏同时放置拉取与刷新也造成操作按钮过多。
+  - 拉取远端可能包含应用 `.opencode` 配置，需要和普通文件共用同一固定提交同步，同时遵守现有应用 Agent 空闲闸门，不能影响公共 Agent 或覆盖 dirty 个人 worktree。
+- What:
+  - 应用版本拉取改为受控副本显式 fetch、固定远端 tracking commit、仅允许 fast-forward，再更新同仓库组 target/replica 并安全同步个人 worktree；dirty、staged、untracked 和冲突 worktree 保留为待同步。
+  - 远端差异命中应用 JSON/Agent/Skill 配置时，在共享副本切换前建立现有 APPLICATION rollout，收敛后只对受影响且空闲的应用运行态 dispose；公共 Agent 不参与。
+  - 前端将“刷新文件树”和独立“拉取远程”收进工作空间标题栏同一个“…”菜单；Git Changes 的暂存、提交、白名单投影和推送流程保持原样，并继续展示仓库级待同步阻塞路径。
+- How:
+  - JDK 25 下 `ManagedWorkspaceApplicationServiceTest` 64 项、`ManagedWorkspaceControllerTest` 16 项通过；workspace/API 扩大测试共执行 730 项，仅命中主线已知且无关的 `OpencodeProcessConfigLinkServiceTest.rejectsOrdinaryDirectoryAtManagedPathWithoutDeletingUserData` 单项失败。
+  - 前端相关 3 个测试文件 140 项通过，agent-web typecheck 与生产 build 通过；fixture 脚本通过 `bash -n`，`git diff --check` 和冲突标记检查通过。
+  - 使用未修改的 `.env.test` 和 test profile 完整重启 backend、opencode-manager、frontend；backend health/readiness 为 UP、前端 3000 和 CORS 预检为 200，manager WebSocket 已连接且 OpenCode health 为 HEALTHY。
+- Result:
+  - 用户可从一个紧凑的“…”菜单选择本地刷新或独立拉取；拉取无需 stage，不创建提交、不推送，push 权限、目录白名单和既有 worktree 管理边界均未扩大。
+  - 本次复用既有 HTTP 路径和内部同步事件，没有新增 API/RunEvent 类型、数据库/Flyway/SQL、性能或安全配置变更，也未修改 generated SDK、OpenCode 源码或环境文件。

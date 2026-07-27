@@ -441,7 +441,7 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(git.originUpdates)
                 .extracting(OriginUpdate::gitUrl)
                 .contains(expectedGitUrl);
-        assertThat(git.pulledBranch).isEqualTo("main");
+        assertThat(git.fetchedBranch).isEqualTo("main");
     }
 
     @Test
@@ -1868,7 +1868,7 @@ class ManagedWorkspaceApplicationServiceTest {
                 "127.0.0.1",
                 "trace_version");
         publisher.events.clear();
-        git.nextHeadCommit = "commit_after_pull";
+        git.nextRemoteCommit = "commit_after_pull";
 
         ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse response = service.gitPullVersion(
                 version.versionId(),
@@ -1876,11 +1876,52 @@ class ManagedWorkspaceApplicationServiceTest {
                 "127.0.0.1",
                 "trace_pull");
 
-        assertThat(git.pulledBranch).isEqualTo("feature_testagent_20260707");
+        assertThat(git.fetchedBranch).isEqualTo("feature_testagent_20260707");
+        assertThat(git.resetCommit).isEqualTo("commit_after_pull");
         assertThat(response.targetCommitHash()).isEqualTo("commit_after_pull");
         assertThat(response.replicaCommitHash()).isEqualTo("commit_after_pull");
         assertThat(publisher.events).hasSize(1);
         assertThat(publisher.events.get(0).payload()).containsEntry("reason", "GIT_PULLED");
+    }
+
+    @Test
+    void gitPullVersionUsesApplicationAgentRolloutWithoutChangingPushWorkflow() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_version");
+        git.nextRemoteCommit = "commit_after_agent_pull";
+        git.nextNameStatus = "M\tF-GCMS/workspace/.opencode/agents/reviewer.md\n";
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        when(coordinator.prepareApplication(
+                version.versionId(),
+                "feature_testagent_20260707",
+                "commit_after_agent_pull",
+                "commit_base",
+                "127.0.0.1",
+                "usr_1",
+                "trace_pull_agent"))
+                .thenReturn("acr_pull_agent");
+        service.setAgentConfigRolloutCoordinator(coordinator);
+
+        service.gitPullVersion(
+                version.versionId(),
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_pull_agent");
+
+        verify(coordinator).activate("acr_pull_agent", "commit_after_agent_pull");
+        assertThat(git.resetCommit).isEqualTo("commit_after_agent_pull");
+        assertThat(git.pushes).isEmpty();
     }
 
     @Test
@@ -2532,8 +2573,10 @@ class ManagedWorkspaceApplicationServiceTest {
         private List<String> committedFiles = List.of();
         private String pushedBranch;
         private boolean pushedForce;
-        private String pulledBranch;
         private String nextHeadCommit = "commit_base";
+        private String nextRemoteCommit;
+        private String fetchedBranch;
+        private String resetCommit;
         private int nextCommitCount;
         private String nextNameStatus = "";
         private boolean worktreeClean = true;
@@ -2699,6 +2742,11 @@ class ManagedWorkspaceApplicationServiceTest {
         }
 
         @Override
+        public String resolveCommit(Path repoRoot, String ref) {
+            return nextRemoteCommit == null ? nextHeadCommit : nextRemoteCommit;
+        }
+
+        @Override
         public int countCommits(Path repoRoot, String from, String to) {
             return nextCommitCount;
         }
@@ -2776,6 +2824,13 @@ class ManagedWorkspaceApplicationServiceTest {
         }
 
         @Override
+        public void fetchBranch(Path repoRoot, String branch, String privateKey) {
+            calls.add("fetch-branch:" + repoRoot + ":" + branch);
+            this.fetchedRepoRoot = repoRoot;
+            this.fetchedBranch = branch;
+        }
+
+        @Override
         public void checkoutTrackingBranch(Path repoRoot, String branch, String privateKey) {
             this.currentBranchValue = branch;
         }
@@ -2831,11 +2886,11 @@ class ManagedWorkspaceApplicationServiceTest {
         @Override
         public void pullFastForward(Path repoRoot, String branch, String privateKey) {
             calls.add("pull:" + repoRoot + ":" + branch);
-            this.pulledBranch = branch;
         }
 
         @Override
         public void resetHardToCommit(Path repoRoot, String commitHash) {
+            this.resetCommit = commitHash;
         }
 
         @Override

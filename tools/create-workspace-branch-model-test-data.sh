@@ -148,7 +148,17 @@ git -C "${APP_REPO}" worktree add -q -b "feature_testagent_${TEST_DATA_TAG}_usr_
   "${FIXTURE_DIR}/personal-dirty" "${APP_BASE_COMMIT}"
 git_identity "${FIXTURE_DIR}/personal-dirty"
 printf 'uncommitted local draft\n' >"${FIXTURE_DIR}/personal-dirty/docs/local-draft.md"
-mkdir -p "${FIXTURE_DIR}/personal-dirty/F-GCMS-PSN/workspace-house/docs"
+mkdir -p \
+  "${FIXTURE_DIR}/personal-dirty/F-GCMS-PSN/ai-test/docs" \
+  "${FIXTURE_DIR}/personal-dirty/F-GCMS-PSN/ai-test/spec/test-data" \
+  "${FIXTURE_DIR}/personal-dirty/F-GCMS-PSN/workspace-house/docs"
+# UI 对照：普通 docs 保持未暂存，spec 进入暂存区；两者都应保留完整文件名，仅用小 Tag 区分规则。
+printf 'local docs change waiting for application update\n' \
+  >"${FIXTURE_DIR}/personal-dirty/F-GCMS-PSN/ai-test/docs/update-ui-local-${TEST_DATA_TAG}.md"
+printf 'spec defaults to commit only\n' \
+  >"${FIXTURE_DIR}/personal-dirty/F-GCMS-PSN/ai-test/spec/test-data/commit-only-ui-${TEST_DATA_TAG}.md"
+git -C "${FIXTURE_DIR}/personal-dirty" add \
+  "F-GCMS-PSN/ai-test/spec/test-data/commit-only-ui-${TEST_DATA_TAG}.md"
 printf 'sibling workspace uncommitted draft\n' \
   >"${FIXTURE_DIR}/personal-dirty/F-GCMS-PSN/workspace-house/docs/local-draft.md"
 
@@ -162,6 +172,9 @@ git -C "${FIXTURE_DIR}/personal-conflict" commit -q -m "个人分支冲突提交
 git -C "${APP_REPO}" checkout -q "feature_testagent_${TEST_DATA_TAG}"
 printf 'feature side of shared document\n' >"${APP_REPO}/docs/shared.md"
 printf 'published by user A\n' >"${APP_REPO}/docs/published-by-a.md"
+mkdir -p "${APP_REPO}/F-GCMS-PSN/ai-test/docs"
+printf 'published docs marker for update UI %s\n' "${TEST_DATA_TAG}" \
+  >"${APP_REPO}/F-GCMS-PSN/ai-test/docs/update-ui-published-${TEST_DATA_TAG}.md"
 printf '%s\n' '---' 'name: reviewer' 'description: 应用 Agent 已发布 R2' 'mode: subagent' '---' \
   'updated application reviewer' >"${APP_REPO}/.opencode/agents/reviewer.md"
 mkdir -p "${APP_REPO}/F-GCMS-PSN/workspace-house"
@@ -173,6 +186,7 @@ git -C "${APP_REPO}" add \
   docs/published-by-a.md \
   .opencode/agents/reviewer.md \
   F-GCMS-PSN/ai-test/.opencode/agents/psn-reviewer.md \
+  "F-GCMS-PSN/ai-test/docs/update-ui-published-${TEST_DATA_TAG}.md" \
   F-GCMS-PSN/workspace-house/.gitkeep
 git -C "${APP_REPO}" commit -q -m "A 推送 docs 与应用 Agent"
 APP_TARGET_COMMIT="$(git -C "${APP_REPO}" rev-parse HEAD)"
@@ -272,6 +286,8 @@ fi
   printf -- '- dirty 个人 worktree：`%s`，保留未提交文件，平台应显示待同步且不覆盖。\n' "${FIXTURE_DIR}/personal-dirty"
   printf -- '- 冲突个人 worktree：`%s`，保留 `MERGE_HEAD` 和 `docs/shared.md` 三方冲突。\n' "${FIXTURE_DIR}/personal-conflict"
   printf -- '- 同仓库多目录：`F-GCMS-PSN/ai-test` 与 `F-GCMS-PSN/workspace-house`；target 新增后者 `.gitkeep` 并更新前者 Agent。\n'
+  printf -- '- ai-test UI 对照：本地 docs 未暂存、spec 已暂存；target 另有已发布 docs 提交 `%s`。\n' \
+    "F-GCMS-PSN/ai-test/docs/update-ui-published-${TEST_DATA_TAG}.md"
   printf -- '- 兄弟目录 dirty 数据：`%s`，从 ai-test 目录看不到该 Diff，但仓库级阻塞清单必须显示其归属。\n' \
     "${FIXTURE_DIR}/personal-dirty/F-GCMS-PSN/workspace-house/docs/local-draft.md"
   printf -- '- 单仓库单工作空间远程：`%s`，个人 worktree：`%s`，已合并 Agent R2 target：`%s`。\n' \
@@ -287,6 +303,10 @@ fi
   printf 'git --git-dir=%q rev-parse %q\n' "${APP_REMOTE}" "refs/heads/feature_testagent_${TEST_DATA_TAG}"
   printf 'git --git-dir=%q cat-file -e %q\n' "${APP_REMOTE}" \
     "feature_testagent_${TEST_DATA_TAG}:F-GCMS-PSN/workspace-house/.gitkeep"
+  printf 'git --git-dir=%q show %q:%q\n' "${APP_REMOTE}" \
+    "feature_testagent_${TEST_DATA_TAG}" "F-GCMS-PSN/ai-test/docs/update-ui-published-${TEST_DATA_TAG}.md"
+  printf 'git -C %q status --short -- F-GCMS-PSN/ai-test/docs F-GCMS-PSN/ai-test/spec\n' \
+    "${FIXTURE_DIR}/personal-dirty"
   printf 'git -C %q status --short -- F-GCMS-PSN/workspace-house\n' "${FIXTURE_DIR}/personal-dirty"
   printf 'git -C %q merge-base --is-ancestor %q HEAD\n' "${SINGLE_PERSONAL}" "${SINGLE_TARGET_COMMIT}"
   printf 'git --git-dir=%q show %q:%q\n' "${SINGLE_APP_REMOTE}" \
@@ -294,7 +314,7 @@ fi
   printf 'git -C %q status --short\n' "${PUBLIC_PERSONAL}"
   printf '```\n\n'
   printf '## 安全执行个人提交与应用 feature 推送\n\n'
-  printf '下面只访问 fixture 内本地 bare remote，不会访问真实 Gitee。`spec/**` 只提交到个人分支，不投影到 feature。\n\n```bash\n'
+  printf '下面只访问 fixture 内本地 bare remote，不会访问真实 Gitee。`spec/**` 默认只提交，不发布到应用 feature。\n\n```bash\n'
   printf 'git -C %q add docs archive spec .opencode\n' "${PUBLISH_READY}"
   printf "git -C %q commit -m '测试：个人提交发布数据'\n" "${PUBLISH_READY}"
   printf 'PERSONAL_HEAD=$(git -C %q rev-parse HEAD)\n' "${PUBLISH_READY}"
@@ -334,6 +354,14 @@ test -n "$(git -C "${PUBLIC_PERSONAL}" status --short)"
 test "$(git --git-dir="${APP_REMOTE}" rev-parse "refs/heads/feature_testagent_${TEST_DATA_TAG}")" = "${APP_TARGET_COMMIT}"
 git --git-dir="${APP_REMOTE}" cat-file -e \
   "feature_testagent_${TEST_DATA_TAG}:F-GCMS-PSN/workspace-house/.gitkeep"
+git --git-dir="${APP_REMOTE}" cat-file -e \
+  "feature_testagent_${TEST_DATA_TAG}:F-GCMS-PSN/ai-test/docs/update-ui-published-${TEST_DATA_TAG}.md"
+test "$(git -C "${FIXTURE_DIR}/personal-dirty" status --short -- \
+  "F-GCMS-PSN/ai-test/docs/update-ui-local-${TEST_DATA_TAG}.md")" = \
+  "?? F-GCMS-PSN/ai-test/docs/update-ui-local-${TEST_DATA_TAG}.md"
+test "$(git -C "${FIXTURE_DIR}/personal-dirty" status --short -- \
+  "F-GCMS-PSN/ai-test/spec/test-data/commit-only-ui-${TEST_DATA_TAG}.md")" = \
+  "A  F-GCMS-PSN/ai-test/spec/test-data/commit-only-ui-${TEST_DATA_TAG}.md"
 git -C "${SINGLE_PERSONAL}" merge-base --is-ancestor "${SINGLE_TARGET_COMMIT}" HEAD
 test "$(git --git-dir="${SINGLE_APP_REMOTE}" rev-parse "refs/heads/feature_testagent_${TEST_DATA_TAG}")" = \
   "${SINGLE_TARGET_COMMIT}"
