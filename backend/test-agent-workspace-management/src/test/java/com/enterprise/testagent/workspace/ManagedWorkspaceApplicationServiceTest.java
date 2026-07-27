@@ -353,6 +353,49 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void workspaceCreateRenamesAndReenablesDisabledTemplateAtSameLocation() {
+        CodeRepository repository = new CodeRepository(
+                new CodeRepositoryId("repo_1"),
+                "https://example.com/gcms.git",
+                "gcms/gcms",
+                "gcms",
+                false,
+                Instant.now(),
+                Instant.now());
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(
+                true,
+                repository,
+                List.of(),
+                false);
+        ManagedWorkspaceApplicationService service = service(
+                configuration,
+                new FakeManagedWorkspaceRepository(),
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("F-GCMS/workspace"));
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceCreateResponse response =
+                service.createApplicationWorkspaceWithInitialVersion(
+                        "app_gcms",
+                        "repo_1",
+                        "main",
+                        "F-GCMS/workspace",
+                        "GCMS 新工作空间",
+                        false,
+                        "20260707",
+                        null,
+                        new UserId("usr_1"),
+                        "127.0.0.1",
+                        "trace_reactivate_location");
+
+        assertThat(response.workspaceId()).isEqualTo("awp_1");
+        assertThat(response.workspaceName()).isEqualTo("GCMS 新工作空间");
+        assertThat(configuration.updatedWorkspace)
+                .isNotNull()
+                .extracting(ApplicationWorkspace::workspaceName, ApplicationWorkspace::enabled)
+                .containsExactly("GCMS 新工作空间", true);
+    }
+
+    @Test
     void internalRepositoryGitOperationsUseCurrentUsersEffectiveGitUrl() throws Exception {
         UserId userId = new UserId("usr_1");
         CodeRepository internalRepository = new CodeRepository(
@@ -2598,6 +2641,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private final List<UserSshKey> sshKeys;
         private final ApplicationWorkspace workspace;
         private final List<ApplicationWorkspace> savedWorkspaces = new ArrayList<>();
+        private ApplicationWorkspace updatedWorkspace;
 
         private FakeConfigurationRepository(boolean member) {
             this(member, true);
@@ -2673,7 +2717,10 @@ class ManagedWorkspaceApplicationServiceTest {
                     .findFirst();
         }
         @Override public ApplicationWorkspace saveWorkspace(ApplicationWorkspace workspace) { savedWorkspaces.add(workspace); return workspace; }
-        @Override public ApplicationWorkspace updateWorkspace(ApplicationWorkspace workspace) { return workspace; }
+        @Override public ApplicationWorkspace updateWorkspace(ApplicationWorkspace workspace) {
+            updatedWorkspace = workspace;
+            return workspace;
+        }
         @Override public void deleteWorkspace(ApplicationWorkspaceId workspaceId) {}
         @Override public List<UserSshKey> findSshKeys(UserId userId) { return sshKeys; }
         @Override public Optional<UserSshKey> findSshKey(UserId userId, SshKeyId sshKeyId) { return Optional.empty(); }

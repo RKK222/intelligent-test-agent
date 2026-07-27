@@ -5,6 +5,26 @@
 
 ## Entries
 
+### 2026-07-27 - 修复应用配置手动同步与停用工作空间复用
+
+### Why
+- 企业多用户场景中，应用 Agent 根节点更新此前只调用 OpenCode `global dispose`，没有把应用版本固定 feature commit 合入当前个人 worktree；因此个人 `HEAD` 落后时 Diff 会显示待同步提交，但 clean 工作树没有任何可提交或回退文件。
+- 设置页按同一 `应用 + 代码库 + 分支 + 目录` 保存工作空间时，后端受位置唯一约束会直接复用旧模板，却不应用本次别名或启用状态；命中已停用模板时进度可成功，但新名称不出现且菜单仍不可见。
+
+### What
+- 应用 Agent 更新复用既有 `sync-from-application` 固定提交 merge，成功后刷新 Agent、文件树和 Diff；当前用户进程 READY 时再 dispose，未启动时保留已完成的 Git 同步并由下次启动加载。dirty 或真实冲突继续交给现有 Diff/三方合并处理。
+- 同位置工作空间保存改为更新原 `workspaceId` 的别名并重新启用，再继续确保对应版本工作区存在；前端提前识别同位置模板，明确展示“保存更新”或“保存并重新启用”，且别名重复校验排除正在复用的模板。
+- 同步 workspace-management、HTTP API、agent-web、前端工程/包和 feature 测试文档；未新增接口、事件、数据库字段、Flyway 或关系型 SQL。
+
+### How
+- 后端 TDD 覆盖同位置已停用模板重命名并重新启用；`ManagedWorkspaceApplicationServiceTest` 通过。前端设置面板 17 项通过，应用更新 mock Playwright 在 Chromium/mobile 2 项通过。
+- 前端全量 Vitest 96 个文件为 1627 passed / 1 skipped，13 个 workspace typecheck、生产 build、后端全模块 `clean package -DskipTests`、AI 文档校验和 `git diff --check` 通过。
+- 按 `.env.test` / `test` profile 和 JDK 25 重启 backend、opencode-manager、frontend；health/readiness 为 `UP`，前端 HTTP 200、登录 CORS 正常，manager WebSocket 已连接且无重连/解码循环。
+
+### Result
+- clean 个人 worktree 即使只有 `applicationUpdatePending` 也可通过应用 Agent 更新按钮真正追平 feature 提交；不同用户文件树只在其个人分支仍有未合并提交、dirty 或冲突时继续合理分化。
+- 已停用的同目录工作空间可在一次保存中按新名称恢复可见，不再出现“进度成功但工作空间没建出来”的假象。未修改 `.env.local`、generated SDK 或 OpenCode 源码。
+
 ### 2026-07-27 - 按适用性判断合并批量测试规约
 
 ### Why

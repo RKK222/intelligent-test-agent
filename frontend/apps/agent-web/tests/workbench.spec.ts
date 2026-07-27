@@ -355,6 +355,24 @@ test("Agent files open through the parent loader for public and workspace scopes
   });
 });
 
+test("application Agent update merges the feature commit even when the runtime is not ready", async ({ page }) => {
+  const runtimeReloadRequests: string[] = [];
+  await mockBackendApi(page, {
+    ...agentWorkspaceSetup(),
+    processStatus: "NEEDS_INITIALIZATION",
+    runtimeReloadRequests
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "Agents", exact: true }).click();
+  await page.getByRole("button", { name: "Agent 配置更新（应用）" }).click();
+
+  await expect.poll(() => runtimeReloadRequests).toEqual([
+    "sync:psw_default"
+  ]);
+  await expect(page.getByText("应用个人配置已同步", { exact: true })).toBeVisible();
+});
+
 test("Agent loading distinguishes empty files, retries failures, and reuses loaded tab cache", async ({ page }) => {
   const agentFileFrames: Array<{
     op: string;
@@ -6035,6 +6053,8 @@ async function mockBackendApi(
     loginRequests?: Array<{ username?: string; password?: string }>;
     sideQuestionRequests?: Array<Record<string, unknown>>;
     sideQuestionRunIds?: string[];
+    /** 记录应用个人配置更新的 Git 同步与运行态 dispose 顺序。 */
+    runtimeReloadRequests?: string[];
   } = {}
 ) {
   await page.exposeFunction("__taRecordWorkspaceFileRequest", (workspaceId: string, path: string) => {
@@ -6771,6 +6791,17 @@ async function mockBackendApi(
         }));
         return;
       }
+      if (method === "POST" && /\/api\/internal\/platform\/workspace-management\/personal-workspaces\/[^/]+\/sync-from-application$/.test(url.pathname)) {
+        const personalWorkspaceId = url.pathname.match(/\/personal-workspaces\/([^/]+)\/sync-from-application$/)?.[1] ?? "";
+        capture.runtimeReloadRequests?.push(`sync:${personalWorkspaceId}`);
+        await route.fulfill(json({
+          syncRecordId: "wsy_agent_update",
+          status: "SUCCEEDED",
+          files: [],
+          force: false
+        }));
+        return;
+      }
       if (method === "GET" && /\/api\/internal\/platform\/workspace-management\/workspaces\/[^/]+\/git-diff$/.test(url.pathname)) {
         capture.gitDiffRequests?.push(`${method} ${url.pathname}`);
         await route.fulfill(json({ files: capture.historyDiffFiles ?? [] }));
@@ -6784,6 +6815,11 @@ async function mockBackendApi(
     if (method === "GET" && url.pathname === "/api/internal/agent/opencode/processes/me") {
       capture.processStatusRequests?.push(`${method} ${url.pathname}`);
       await route.fulfill(json(opencodeProcessStatus(currentProcessStatus, capture.processServiceStatus)));
+      return;
+    }
+    if (method === "POST" && url.pathname === "/api/internal/agent/opencode/global/dispose") {
+      capture.runtimeReloadRequests?.push("dispose");
+      await route.fulfill(json(true));
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/agent/opencode/processes/me/health") {

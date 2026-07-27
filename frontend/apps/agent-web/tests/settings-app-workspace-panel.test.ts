@@ -676,4 +676,39 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     ));
     await waitFor(() => expect((getByLabelText("设置工作空间“测试工作空间”是否启用") as HTMLInputElement).checked).toBe(false));
   });
+
+  it("shows that saving a disabled workspace location will rename and re-enable the existing template", async () => {
+    const api = createApi();
+    api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature_testagent_20260707"]);
+    api.listApplicationWorkspaces = vi.fn().mockResolvedValue([
+      {
+        workspaceId: "ws_disabled",
+        appId: "F-COSS",
+        workspaceName: "旧工作空间",
+        branch: "feature_testagent_20260707",
+        directoryPath: "F-COSS/W1",
+        repositoryId: "repo_wr",
+        enabled: false,
+        createdAt: "2026-07-01T00:00:00Z",
+        updatedAt: "2026-07-23T00:00:00Z"
+      }
+    ]);
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("42345678-1234-1234-1234-123456789abc");
+    const { container, findByText, getByPlaceholderText, getByText } = renderPanel(api);
+
+    await findByText("应用人员管理");
+    await fireEvent.click(getByText("工作空间管理"));
+    await findByText("F-COSS/W1");
+    await fireEvent.click(getTreePathButton(container, "F-COSS/W1"));
+    await fireEvent.update(getByPlaceholderText("ai-test"), "新工作空间");
+
+    expect(await findByText("该目录已有已停用工作空间“旧工作空间”，保存后将重命名并重新启用，不会重复创建。")).toBeTruthy();
+    await fireEvent.click(getByText("保存并重新启用"));
+    await waitFor(() => expect(api.createApplicationWorkspace).toHaveBeenCalledWith("F-COSS", expect.objectContaining({
+      repositoryId: "repo_wr",
+      branch: "feature_testagent_20260707",
+      directoryPath: "F-COSS/W1",
+      workspaceName: "新工作空间"
+    })));
+  });
 });

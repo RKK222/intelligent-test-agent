@@ -576,6 +576,7 @@ const robotSideQuestion = useSideQuestionRun({
 });
 const serverWorkspacePickerOpen = ref(false);
 const referenceConfigurationOpen = ref(false);
+const fileExplorerRef = ref<InstanceType<typeof FigmaFileExplorer> | null>(null);
 const serverWorkspacePickerLoading = ref(false);
 const serverWorkspaceServers = shallowRef<WorkspaceBackendServer[]>([]);
 const serverWorkspaceDirectory = shallowRef<WorkspaceDirectoryList | null>(null);
@@ -2322,7 +2323,7 @@ async function refreshRuntimeCatalogAfterAgentConfigSave(
 
 /**
  * 手动验证个人 Agent/Skill 配置的运行态重载。
- * 公共配置必须先切换当前用户的公共 worktree 指针，再 dispose；应用配置只 dispose 当前用户。
+ * 公共配置先切换当前用户的公共 worktree 指针；应用配置先合并 feature 固定提交；随后才 dispose 当前用户。
  */
 async function handlePersonalRuntimeReload(payload: {
   scope: "PUBLIC" | "WORKSPACE";
@@ -2331,11 +2332,11 @@ async function handlePersonalRuntimeReload(payload: {
   workspaceId?: string;
 }) {
   if (runtimeReloadLock.value) return;
-  if (payload.scope === "WORKSPACE" && !selectedWorkspaceIdRef.value) {
+  if (payload.scope === "WORKSPACE" && (!selectedWorkspaceIdRef.value || !currentPersonalWorkspaceId.value)) {
     feedback.value = {
       kind: "info",
       title: "个人配置未重载",
-      description: "请先选择应用工作区，再重载个人运行态。"
+      description: "请先进入当前版本的个人工作区，再更新应用个人配置。"
     };
     return;
   }
@@ -2344,14 +2345,6 @@ async function handlePersonalRuntimeReload(payload: {
       kind: "info",
       title: "当前任务运行中",
       description: "当前用户仍有运行中的 Session，结束后再重载个人运行态。"
-    };
-    return;
-  }
-  if (!opencodeProcessReady.value) {
-    feedback.value = {
-      kind: "info",
-      title: payload.scope === "PUBLIC" ? "公共个人配置未重载" : "应用个人配置未重载",
-      description: "当前 TestAgent 进程未就绪，无需 dispose；下次启动会读取最新配置。"
     };
     return;
   }
@@ -2375,6 +2368,26 @@ async function handlePersonalRuntimeReload(payload: {
 
   runtimeReloadLock.value = payload.scope;
   try {
+    if (payload.scope === "WORKSPACE") {
+      // 应用配置更新必须先复用现有 Git 合并链路；仅 dispose 不会把 feature 固定提交带入个人 worktree。
+      const sync = await api.syncApplicationToPersonal(currentPersonalWorkspaceId.value!, { files: [] });
+      if (sync.status.toUpperCase() !== "SUCCEEDED") {
+        throw new Error("应用 feature 更新未合并；请在 Diff 中处理个人变更或 Git 冲突后重试。");
+      }
+      agentConfigRevision.value += 1;
+      fileExplorerRef.value?.refreshAll();
+      refreshCurrentWorkspacePanels();
+    }
+    if (!opencodeProcessReady.value) {
+      feedback.value = {
+        kind: "info",
+        title: payload.scope === "PUBLIC" ? "公共个人配置未重载" : "应用个人配置已同步",
+        description: payload.scope === "PUBLIC"
+          ? "当前 TestAgent 进程未就绪，无需 dispose；下次启动会读取最新配置。"
+          : "应用 feature 更新已合并；TestAgent 进程下次启动时会读取最新配置。"
+      };
+      return;
+    }
     if (payload.scope === "PUBLIC") {
       const result = await api.reloadPublicPersonalAgentRuntime(publicRuntimeRoute!.worktreeId!, publicRuntimeRoute!.linuxServerId!);
       if (!result.reloaded) {
@@ -7614,6 +7627,7 @@ async function handleLogout() {
     <template #files>
       <div v-if="selectedManagedApplication || selectedWorkspace" class="managed-workspace-layout">
         <FigmaFileExplorer
+          ref="fileExplorerRef"
           class="managed-workspace-files"
           :workspace-name="selectedWorkspace?.name ?? '未选择工作区'"
           :workspace-root-path="selectedWorkspace?.rootPath"

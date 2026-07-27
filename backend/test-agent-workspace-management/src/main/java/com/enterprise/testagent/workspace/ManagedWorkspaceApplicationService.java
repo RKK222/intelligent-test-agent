@@ -3445,13 +3445,26 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String branch,
             String directoryPath,
             String workspaceName) {
-        Optional<ApplicationWorkspace> existing = configurationRepository.findWorkspaceByLocation(appId, repositoryId, branch, directoryPath);
-        if (existing.isPresent()) {
-            return existing.get();
-        }
         String resolvedName = workspaceName == null || workspaceName.isBlank()
                 ? defaultWorkspaceName(directoryPath)
                 : workspaceName.trim();
+        Optional<ApplicationWorkspace> existing = configurationRepository.findWorkspaceByLocation(appId, repositoryId, branch, directoryPath);
+        if (existing.isPresent()) {
+            ApplicationWorkspace current = existing.get();
+            ensureWorkspaceNameUnique(appId, resolvedName, current.workspaceId());
+            Instant now = Instant.now();
+            ApplicationWorkspace updated = current;
+            if (!current.workspaceName().equals(resolvedName)) {
+                updated = updated.rename(resolvedName, now);
+            }
+            if (!current.enabled()) {
+                // 位置唯一约束决定这里是恢复已有模板；保存成功不能继续保留旧名称或停用状态。
+                updated = updated.withEnabled(true, now);
+            }
+            return updated.equals(current)
+                    ? current
+                    : configurationRepository.updateWorkspace(updated);
+        }
         ensureWorkspaceNameUnique(appId, resolvedName, null);
         Instant now = Instant.now();
         return configurationRepository.saveWorkspace(new ApplicationWorkspace(

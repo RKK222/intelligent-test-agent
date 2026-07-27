@@ -200,9 +200,28 @@ const workspaceCreateSteps = computed(() => workspaceCreateOperation.value?.step
 const customBranchError = ref("");
 const selectedAppName = computed(() => selectedApp.value?.appName ?? "");
 const workspaceAlias = computed(() => workspaceName.value.trim());
+const matchingWorkspaceLocation = computed(() => workspaces.value.find((workspace) =>
+  workspace.repositoryId === workspaceRepositoryId.value
+  && workspace.branch === workspaceBranch.value
+  && workspace.directoryPath === workspaceDirectory.value
+) ?? null);
 const workspaceAliasDuplicate = computed(() => {
   const alias = workspaceAlias.value;
-  return Boolean(alias) && workspaces.value.some((workspace) => workspace.workspaceName.trim() === alias);
+  return Boolean(alias) && workspaces.value.some((workspace) =>
+    workspace.workspaceId !== matchingWorkspaceLocation.value?.workspaceId
+    && workspace.workspaceName.trim() === alias
+  );
+});
+const workspaceLocationReuseMessage = computed(() => {
+  const workspace = matchingWorkspaceLocation.value;
+  if (!workspace) return "";
+  return workspace.enabled === false
+    ? `该目录已有已停用工作空间“${workspace.workspaceName}”，保存后将重命名并重新启用，不会重复创建。`
+    : `该目录已有工作空间“${workspace.workspaceName}”，保存后将更新其名称，不会重复创建。`;
+});
+const workspaceSaveLabel = computed(() => {
+  if (matchingWorkspaceLocation.value?.enabled === false) return "保存并重新启用";
+  return matchingWorkspaceLocation.value ? "保存更新" : "保存";
 });
 const canAddWorkspaceDirectory = computed(() => {
   if (!isTestWorkRepository(selectedWorkspaceRepository.value)) return false;
@@ -1043,10 +1062,13 @@ onBeforeUnmount(() => {
                 <el-button :disabled="loading || !newDirectoryName.trim()" @click="addWorkspaceDirectory">新增目录</el-button>
               </div>
               <div v-if="treeErrorMessage" class="ta-branch-error">{{ treeErrorMessage }}</div>
+              <div v-if="workspaceLocationReuseMessage" class="ta-workspace-location-hint">
+                {{ workspaceLocationReuseMessage }}
+              </div>
             </div>
 
             <div class="ta-workspace-form-actions">
-              <el-button type="primary" :disabled="!canSaveWorkspace" @click="createWorkspace">保存</el-button>
+              <el-button type="primary" :disabled="!canSaveWorkspace" @click="createWorkspace">{{ workspaceSaveLabel }}</el-button>
             </div>
           </div>
           <div v-if="workspaceCreateOperation" class="ta-workspace-progress">
@@ -1649,5 +1671,14 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: #f56c6c;
   line-height: 1.4;
+}
+.ta-workspace-location-hint {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #ecf5ff;
+  color: #337ecc;
+  font-size: 12px;
+  line-height: 1.5;
 }
 </style>

@@ -780,7 +780,7 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 - 非标准代码库必须传入 `version`，格式为 `yyyyMMdd`；标准代码库传入的 `version` 会被分支解析结果覆盖。
 - 只有保存接口会触发 Git clone/fetch、分支 checkout 和本地目录准备；页面上的分支、远端树和新增目录操作均不落磁盘。
 - `directoryNew=true` 表示前端在远端树内存中新增了测试工作库应用根目录下的一级子目录。后端在 clone/checkout 后如果目标目录不存在，则在保存阶段创建该目录；不会向 Git 提交空目录。旧客户端不传该字段时行为不变。
-- 后端会先保存或复用 `应用 + 代码库 + 分支 + 目录路径` 对应的工作空间模板，再创建同版本的应用版本工作区并完成 Git clone/fetch、分支 checkout 和运行态 `Workspace` 创建。
+- 后端会先保存或复用 `应用 + 代码库 + 分支 + 目录路径` 对应的工作空间模板，再创建同版本的应用版本工作区并完成 Git clone/fetch、分支 checkout 和运行态 `Workspace` 创建。命中已有位置时返回原 `workspaceId`，按本次请求更新别名；若原模板已停用则同时重新启用，避免异步操作显示成功但模板仍不可见。别名仍需满足同应用唯一约束。
 - 创建前会按当前用户 READY 的 opencode 进程确定目标 `linuxServerId`，确保初始运行态工作区落在当前用户 agent 所在服务器。
 - 应用版本工作区目录使用通用参数 `{OPENCODE_APP_WORKSPACE_ROOT}/{yyyymmdd}/{repository.englishName}/{directoryPath}`；缺少代码库英文名称时返回统一 `VALIDATION_ERROR`。
 - 删除配置记录只删除模板配置，不级联清理已创建的应用版本工作区、个人工作区或运行态 `Workspace`。
@@ -1421,6 +1421,8 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 ```
 
 `sync-to-application` 保留 `force` 字段用于兼容审计，但不再绕过权限和提交约束：后端要求所选文件在个人 worktree 已提交，读取个人 `HEAD`，再按白名单投影到应用 feature worktree，提交并推送。`spec/**` 是个人本地资产，任何角色都不能发布；请求只要包含规范化后位于 `spec/**` 的路径（包括 `./spec/**` 等别名）即返回 `FORBIDDEN`，`force` 不能绕过。其它未选文件也不会进入 feature 分支。成功后更新应用版本 `targetCommitHash` 与当前服务器副本 `replicaCommitHash`，并广播 `workspace.version.sync-requested`；本机与其他服务器随后把同一固定 commit 反向 merge 到相关个人 worktree。dirty worktree 保留原状并显示待同步，真实冲突进入既有三方 Diff；浏览器不新增 SSE，已打开的文件树/标签按现有刷新或重新进入机制重读磁盘。应用版本工作区与个人工作区同步不新增 RunEvent/SSE 事件。
+
+应用 Agent 根节点的“配置更新”操作复用 `sync-from-application`，以空 `files` 请求合并整个固定 feature commit；成功后刷新文件树与 Diff，当前用户进程已就绪时再调用既有 `/global/dispose`，未就绪时由下次启动读取最新个人 worktree。该操作不是仅刷新 OpenCode 缓存，因此即使 Diff 没有可提交/回退文件，也能消除个人 `HEAD` 落后造成的待同步状态；dirty 或真实冲突仍保留现有保护和三方处理语义。
 
 ### 默认个人工作区显式创建/修复
 
