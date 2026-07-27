@@ -471,12 +471,14 @@ describe("AgentConfigPanel", () => {
     expect(apiClientMock.readPublicAgentFile).not.toHaveBeenCalled();
   });
 
-  it("keeps agents and skills visible for normal users while hiding repository root noise", async () => {
+  it("keeps user-maintained OpenCode config visible for normal users while hiding runtime root noise", async () => {
     apiClientMock.listPublicAgentFiles.mockResolvedValue([
       { path: ".DS_Store", name: ".DS_Store", type: "file" },
       { path: ".gitignore", name: ".gitignore", type: "file" },
       { path: ".keep", name: ".keep", type: "file" },
       { path: "agents", name: "agents", type: "directory" },
+      { path: "commands", name: "commands", type: "directory" },
+      { path: "lib", name: "lib", type: "directory" },
       { path: "node_modules", name: "node_modules", type: "directory" },
       { path: "opencode.jsonc", name: "opencode.jsonc", type: "file" },
       { path: "package-lock.json", name: "package-lock.json", type: "file" },
@@ -489,11 +491,13 @@ describe("AgentConfigPanel", () => {
     await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalled());
     expect(await view.findByText("agents")).toBeTruthy();
     expect(await view.findByText("skills")).toBeTruthy();
+    expect(await view.findByText("commands")).toBeTruthy();
+    expect(await view.findByText("lib")).toBeTruthy();
+    expect(await view.findByText("opencode.jsonc")).toBeTruthy();
     expect(view.queryByText(".DS_Store")).toBeNull();
     expect(view.queryByText(".gitignore")).toBeNull();
     expect(view.queryByText(".keep")).toBeNull();
     expect(view.queryByText("node_modules")).toBeNull();
-    expect(view.queryByText("opencode.jsonc")).toBeNull();
     expect(view.queryByText("package-lock.json")).toBeNull();
     expect(view.queryByText("package.json")).toBeNull();
     expect(view.queryByRole("button", { name: "Agent 配置更新（公共）" })).toBeNull();

@@ -1006,6 +1006,8 @@ class AgentConfigApplicationServiceTest {
         Path workspaceRoot = root.resolve("project");
         Files.createDirectories(workspaceRoot.resolve(".opencode/agents"));
         Files.createDirectories(workspaceRoot.resolve(".opencode/skills"));
+        Files.createDirectories(workspaceRoot.resolve(".opencode/commands"));
+        Files.createDirectories(workspaceRoot.resolve(".opencode/lib"));
         Files.writeString(workspaceRoot.resolve(".opencode/agents/review.md"), "review");
         AgentConfigApplicationService service = service(
                 Map.of(
@@ -1043,13 +1045,11 @@ class AgentConfigApplicationServiceTest {
         assertThat(Files.readString(workspaceRoot.resolve(".opencode/agents/moved-review.md"))).isEqualTo("review");
         assertThat(Files.exists(workspaceRoot.resolve(".opencode/skills/payment-review.md"))).isFalse();
         assertThat(Files.exists(workspaceRoot.resolve(".opencode/agent/new.md"))).isFalse();
-        assertThatThrownBy(() -> service.uploadWorkspaceAgentFile("wrk_project", "package.json", "e30=", null))
-                .isInstanceOf(PlatformException.class)
-                .hasMessageContaining("只允许上传");
-        assertThatThrownBy(() -> service.moveWorkspaceAgentFile(
-                "wrk_project", "agents/payment-review.md", "package.json", null))
-                .isInstanceOf(PlatformException.class)
-                .hasMessageContaining("只允许上传");
+        service.uploadWorkspaceAgentFile("wrk_project", "commands/deploy.md", "ZGVwbG95", null);
+        service.moveWorkspaceAgentFile(
+                "wrk_project", "agents/payment-review.md", "lib/payment-review.md", null);
+        assertThat(Files.readString(workspaceRoot.resolve(".opencode/commands/deploy.md"))).isEqualTo("deploy");
+        assertThat(Files.readString(workspaceRoot.resolve(".opencode/lib/payment-review.md"))).isEqualTo("review");
         service.deleteWorkspaceAgentFile("wrk_project", "agents/new.md", null);
         assertThat(Files.exists(workspaceRoot.resolve(".opencode/agents/new.md"))).isFalse();
     }
@@ -1120,6 +1120,8 @@ class AgentConfigApplicationServiceTest {
                 ?? F-COSS/workspace/.opencode/opencode.jsonc
                  M "F-COSS/workspace/.opencode/agents/review rule.md"
                  M F-COSS/workspace/.opencode/skills/payment/SKILL.md
+                ?? F-COSS/workspace/.opencode/commands/deploy.md
+                ?? F-COSS/workspace/.opencode/lib/runtime-helper.ts
                 ?? F-COSS/workspace/.opencode/package.json
                 """);
         git.diffByFile.put(".opencode/opencode.jsonc", "diff --git a/.opencode/opencode.jsonc b/.opencode/opencode.jsonc\n");
@@ -1146,7 +1148,13 @@ class AgentConfigApplicationServiceTest {
         AgentConfigResponses.AgentConfigDiffResponse diff = service.workspaceDiff("wrk_project", null);
 
         assertThat(diff.files()).extracting(AgentConfigResponses.AgentConfigDiffFileResponse::path)
-                .containsExactly("opencode.jsonc", "agents/review rule.md", "skills/payment/SKILL.md");
+                .containsExactly(
+                        "opencode.jsonc",
+                        "agents/review rule.md",
+                        "skills/payment/SKILL.md",
+                        "commands/deploy.md",
+                        "lib/runtime-helper.ts",
+                        "package.json");
         assertThat(git.lastStatusPathspec).isEqualTo(".opencode");
         // 未跟踪文件由 collectDiffFiles 直接合成响应，不会调用 git diff；已跟踪文件仍逐个读取 patch。
         assertThat(git.diffFiles).containsExactly(
@@ -1672,14 +1680,23 @@ class AgentConfigApplicationServiceTest {
 
         service.workspaceStage(
                 "wrk_project",
-                List.of("opencode.jsonc", "agents/review.md", "skills/payment/SKILL.md", "package.json"),
+                List.of(
+                        "opencode.jsonc",
+                        "agents/review.md",
+                        "skills/payment/SKILL.md",
+                        "commands/deploy.md",
+                        "lib/runtime-helper.ts",
+                        "package.json"),
                 null,
                 ADMIN);
 
         assertThat(git.stagedFiles).containsExactly(
                 ".opencode/opencode.jsonc",
                 ".opencode/agents/review.md",
-                ".opencode/skills/payment/SKILL.md");
+                ".opencode/skills/payment/SKILL.md",
+                ".opencode/commands/deploy.md",
+                ".opencode/lib/runtime-helper.ts",
+                ".opencode/package.json");
     }
 
     @Test

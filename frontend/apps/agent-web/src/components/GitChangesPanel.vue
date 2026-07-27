@@ -878,7 +878,9 @@ function normalizeWorkspaceAgentDiffPath(path: string): string | null {
   if (markerIndex >= 0) {
     value = value.slice(markerIndex + marker.length);
   }
-  return value === "opencode.jsonc" || value.startsWith("agents/") || value.startsWith("skills/") ? value : null;
+  value = value.replace(/^\.\//, "").replace(/^\/+|\/+$/g, "");
+  // 后端已把 Diff 限定在 `.opencode/**`；前端只做路径归一化，避免子目录白名单隐藏真实脏文件。
+  return value && value !== "." && value !== ".." && !value.startsWith("../") ? value : null;
 }
 
 // 单文件和批量暂存复用同一真实 Git index 链路，避免批量操作产生第二套状态语义。

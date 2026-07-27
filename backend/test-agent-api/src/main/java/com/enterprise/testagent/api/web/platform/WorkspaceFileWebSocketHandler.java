@@ -437,7 +437,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                     ticket.appAdmin());
         }
         if (protectedConfigPath(path) && !ticket.appAdmin()) {
-            throw new PlatformException(ErrorCode.FORBIDDEN, "Agent、Skill、Tools 和 Templates 仅应用管理员可编辑");
+            throw new PlatformException(ErrorCode.FORBIDDEN, "应用 OpenCode 配置仅应用管理员可编辑");
         }
     }
 
@@ -455,13 +455,8 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         } catch (RuntimeException exception) {
             return true;
         }
-        return normalized.equals(".opencode")
-                || normalized.equals(".opencode/agents")
-                || normalized.startsWith(".opencode/agents/")
-                || normalized.equals(".opencode/skills")
-                || normalized.startsWith(".opencode/skills/")
-                || normalized.equals(".opencode/tools")
-                || normalized.startsWith(".opencode/tools/");
+        // 整个命名空间都属于应用配置，不能让 command/plugin 或辅助源码通过目录别名绕过管理员权限。
+        return normalized.equals(".opencode") || normalized.startsWith(".opencode/");
     }
 
     private Object directoryList(WorkspaceFileSocketTicket ticket, JsonNode params) {

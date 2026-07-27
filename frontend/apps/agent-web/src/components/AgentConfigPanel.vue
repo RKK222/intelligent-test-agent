@@ -312,12 +312,24 @@ function isRootActive(scope: Scope) {
   return activeScope.value === scope && activeFileByScope.value[scope] === null;
 }
 
+const hiddenReadOnlyConfigRootEntries = new Set([
+  ".DS_Store",
+  ".gitignore",
+  ".keep",
+  "node_modules",
+  "package.json",
+  "package-lock.json",
+  "bun.lock",
+  "bun.lockb"
+]);
+
 function visibleEntries(scope: Scope, path: string) {
   const entries = entriesByScope.value[scope][path] ?? [];
   if (canWriteScope(scope) || path !== "") {
     return entries;
   }
-  return entries.filter((entry) => entry.path === "agents" || entry.path === "skills" || entry.path === "tools");
+  // 普通用户可浏览全部用户维护配置；依赖安装产生的根目录噪声不进入只读导航。
+  return entries.filter((entry) => !hiddenReadOnlyConfigRootEntries.has(entry.name));
 }
 
 function canWriteScope(scope: Scope) {
@@ -338,41 +350,23 @@ function agentEntryPath(directory: string, name: string) {
 }
 
 function isWorkspaceAgentDiffPath(path: string) {
-  const normalized = path.replace(/^\/+/, "");
-  return normalized === "opencode.jsonc"
-    || normalized.startsWith("agents/")
-    || normalized.startsWith("skills/")
-    || normalized.startsWith("tools/");
+  const normalized = path.replaceAll("\\", "/").trim().replace(/^\/+|\/+$/g, "");
+  return normalized.length > 0
+    && normalized !== "."
+    && normalized !== ".."
+    && !normalized.startsWith("../");
 }
 
 function canCreateInDirectory(scope: Scope, path: string) {
-  return scope === "PUBLIC"
-    || path === "agents"
-    || path.startsWith("agents/")
-    || path === "skills"
-    || path.startsWith("skills/")
-    || path === "tools"
-    || path.startsWith("tools/");
+  return scope === "PUBLIC" || path === "" || isWorkspaceAgentDiffPath(path);
 }
 
 function canDeleteEntry(scope: Scope, path: string) {
-  if (scope === "PUBLIC") return true;
-  const normalized = path.replace(/^\/+|\/+$/g, "");
-  return normalized === "opencode.jsonc"
-    || normalized === "agents"
-    || normalized.startsWith("agents/")
-    || normalized === "skills"
-    || normalized.startsWith("skills/")
-    || normalized === "tools"
-    || normalized.startsWith("tools/");
+  return scope === "PUBLIC" || isWorkspaceAgentDiffPath(path);
 }
 
 function canRenameEntry(scope: Scope, path: string) {
-  const normalized = path.replace(/^\/+|\/+$/g, "");
-  return scope === "PUBLIC"
-    || normalized.startsWith("agents/")
-    || normalized.startsWith("skills/")
-    || normalized.startsWith("tools/");
+  return scope === "PUBLIC" || isWorkspaceAgentDiffPath(path);
 }
 
 /** 文件和目录沿用工作空间删除确认面板，作用域仅负责补齐 Agent 文件路由。 */
@@ -519,7 +513,7 @@ async function createAgentEntry(directory: string, name: string, type: "file" | 
   const fullPath = agentEntryPath(directory, name);
   const writtenPath = type === "directory" ? `${fullPath}/.gitkeep` : fullPath;
   if (scope === "WORKSPACE" && !isWorkspaceAgentDiffPath(writtenPath)) {
-    notifyError("创建应用 Agent 配置失败", "请在 agents、skills 或 tools 目录内新建；根目录仅支持 opencode.jsonc、agents、skills 和 tools");
+    notifyError("创建应用 Agent 配置失败", "应用配置路径必须位于当前 .opencode 根目录内");
     return;
   }
   busy.value = true;
@@ -1550,7 +1544,7 @@ async function uploadAgentFiles(files: File[]) {
       };
       const path = agentEntryPath(directory, uploadedFileName(file.name));
       if (scope === "WORKSPACE" && !isWorkspaceAgentDiffPath(path)) {
-        failures.push(`${file.name}：应用根目录仅允许上传 opencode.jsonc，其他文件请上传到 agents 或 skills 目录`);
+        failures.push(`${file.name}：应用配置路径必须位于当前 .opencode 根目录内`);
         completedBytes += file.size;
         continue;
       }

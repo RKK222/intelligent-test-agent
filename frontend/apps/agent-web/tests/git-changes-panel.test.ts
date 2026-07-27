@@ -241,10 +241,25 @@ describe("GitChangesPanel", () => {
           patch: "@@ -1 +1 @@\n-old\n+new"
         },
         {
-          path: "F-COSS/workspace/02-设计/Test Material.md",
-          status: "M",
+          path: "tools/db-operation.ts",
+          status: "?",
+          rawStatus: "??",
           staged: false,
-          patch: "@@ -1 +1 @@\n-old\n+new"
+          patch: "@@ -0,0 +1 @@\n+export const tool = {}"
+        },
+        {
+          path: "commands/deploy.md",
+          status: "?",
+          rawStatus: "??",
+          staged: false,
+          patch: "@@ -0,0 +1 @@\n+deploy"
+        },
+        {
+          path: "lib/runtime-helper.ts",
+          status: "?",
+          rawStatus: "??",
+          staged: false,
+          patch: "@@ -0,0 +1 @@\n+export const helper = true"
         }
       ]
     });
@@ -269,8 +284,10 @@ describe("GitChangesPanel", () => {
     await fireEvent.click(view.getByRole("tab", { name: /^应用Agent/ }));
     expect(await view.findByText("payment-test.md", { exact: false })).toBeTruthy();
     expect(await view.findByText("SKILL.md", { exact: false })).toBeTruthy();
+    expect(await view.findByText("db-operation.ts", { exact: false })).toBeTruthy();
+    expect(await view.findByText("deploy.md", { exact: false })).toBeTruthy();
+    expect(await view.findByText("runtime-helper.ts", { exact: false })).toBeTruthy();
     expect(view.queryByText("登录测试.md")).toBeNull();
-    expect(view.queryByText("F-COSS/workspace/02-设计/Test Material.md", { exact: false })).toBeNull();
     expect(view.queryByText("[公共]", { exact: false })).toBeNull();
     expect(view.queryByText("opencode/agents/public_agent_test.json", { exact: false })).toBeNull();
   });

@@ -311,7 +311,7 @@ opencode worker 扩容流程：
 
 企业离线 worker 的 `/data/testagent/programs/opencode/node_modules` 是自定义 Tool 依赖的统一只读来源，固定包含 OpenCode `1.18.4` 对应的 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及 lockfile 传递依赖。用户进程启动后会为 XDG 全局配置、公共配置目录和工作区 `.opencode` 目录补充非覆盖式 package/lockfile 与模块链接，禁止在内网启动阶段执行 npm 下载。Tool 新增其它第三方包时必须在外网构建侧更新 runtime package/lockfile、重打 programs 和 worker 镜像，再重启 worker。
 
-这些配置目录的运行文件忽略规则由 `deploy/internal/opencode-runtime.gitignore` 统一维护。标准后台升级会在公共仓库已经初始化时补齐 `node_modules`、`package.json`、`package-lock.json`、`bun.lock` 和 `.gitignore`，不覆盖已有规则、不删除文件，也不取消已跟踪文件；新增后台尚未初始化公共仓库时跳过，随后由随 programs 交付的 `opencode-official-launcher.mjs` 在第一次创建运行依赖链接前补齐。扩容验收必须在新后台执行 `git check-ignore -v opencode/package.json opencode/package-lock.json opencode/node_modules` 和 `git status --short --untracked-files=all`；运行文件应被忽略，`agents/**`、`skills/**`、`tools/**` 及用户维护配置仍保持 Git 可见。
+这些配置目录的运行文件忽略规则由 `deploy/internal/opencode-runtime.gitignore` 统一维护。标准后台升级会在公共仓库已经初始化时补齐 `node_modules`、`package.json`、`package-lock.json`、`bun.lock` 和 `.gitignore`，不覆盖已有规则、不删除文件，也不取消已跟踪文件；新增后台尚未初始化公共仓库时跳过，随后由随 programs 交付的 `opencode-official-launcher.mjs` 在第一次创建运行依赖链接前补齐。扩容验收必须在新后台执行 `git check-ignore -v opencode/package.json opencode/package-lock.json opencode/node_modules` 和 `git status --short --untracked-files=all`；运行文件应被忽略，agent、skill、command、plugin、tool 及辅助源码等用户维护配置仍保持 Git 可见。忽略规则不负责隐藏已经跟踪的运行文件；这类文件若出现在 Git status，平台 Diff 必须展示并由管理员提交或回退。
 
 常见故障处理：
 

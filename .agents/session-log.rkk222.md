@@ -2100,3 +2100,20 @@
 - Result:
   - 基础发现、角色归属、规则数量和完整链路加载正常，批量任务规则为 17 条、五类公共规则共 71 条，不存在 129 条；当前风险集中在阶段间数据契约和请求路由，尚未修改或重新打包。
   - 本次不涉及 HTTP API、RunEvent、数据库/Flyway、SQL、性能、安全、generated SDK、OpenCode 源码或环境配置。
+
+### 2026-07-27 - 修复应用 OpenCode 配置隐藏变更和 feature 同步阻塞
+
+- Why:
+  - 应用个人 worktree 的 `.opencode/tools/**` 已产生 Git 变更，但普通 workspace Diff 会排除整个 `.opencode`，应用 Agent Diff 又只允许 JSONC、agents、skills、tools 子目录，未知目录会两边都不可见；Git 仍把这些文件视为脏状态，因此 feature 固定提交反向合并持续提示“请先提交或回退当前个人变更”。
+  - OpenCode 1.18.4 除 agent、skill、tool 外还原生识别 command、plugin、旧 mode 单复数别名，自定义配置也可引用 `lib/**` 等辅助源码，继续枚举子目录会反复产生同类遗漏。
+- What:
+  - 应用配置 Diff、stage/unstage/discard、上传、复制和移动统一以安全的 `.opencode/**` 命名空间为边界；后端只从 Git status 中接受真实位于该命名空间的路径，前端仅归一化后端返回值，不再维护第二份子目录白名单。
+  - 配置树对普通用户展示全部用户维护目录，只隐藏根部运行依赖噪声；运行生成的 node_modules、package/lockfile 仍由 `.gitignore` 排除，一旦已跟踪或实际出现在 Git status 中则必须进入 Diff。
+  - 工作区文件 WebSocket 把完整 `.opencode/**` 设为 APP_ADMIN 保护范围，封堵 command/plugin/tool 或辅助源码目录的权限旁路；同步前后端、workspace-management、HTTP API、安全、部署和测试文档。
+- How:
+  - 只读审计 `opencode-source/opencode-1.18.4` 的配置加载器确认 agent(s)、skill(s)、command(s)、plugin(s)、tool(s)、mode(s) 和 JSON/JSONC 路径，未修改上游快照。
+  - TDD 先让 commands、lib、tools 和 package.json 的配置树/Diff/stage/上传用例失败，再实现命名空间边界；前端目标 74 项、全量 1626 passed / 1 skipped、lint、typecheck 和生产 build 通过，后端 `AgentConfigApplicationServiceTest` 49 项、`WorkspaceFileWebSocketHandlerTest` 22 项及相关模块测试通过，AI 文档校验与完整后端跳过测试打包通过。
+  - 扩大后端测试在 725 项时仍被主线已知的 `OpencodeProcessConfigLinkServiceTest.rejectsOrdinaryDirectoryAtManagedPathWithoutDeletingUserData` 单项失败阻断；该失败已在 `session-log.huangzhenren.md` 记录且独立稳定复现，本次未修改对应服务/测试。使用未修改的 `.env.test` 和 test profile 重启三服务，backend health/readiness 为 UP、前端 3000 为 200、CORS 与 manager 连接正常。
+- Result:
+  - 所有 Git 可见 `.opencode/**` 变更都会出现在应用 Agent Diff，可被提交或回退，不再因新增 OpenCode 目录类型形成不可见脏状态并阻塞 feature 同步；普通工作区文件仍不会误入应用配置 Diff。
+  - 未新增 HTTP/WS 字段或 RunEvent 类型，不涉及数据库/Flyway、SQL、性能、generated SDK、OpenCode 源码或环境配置；既有 API 行为范围扩大且权限边界同步收紧。

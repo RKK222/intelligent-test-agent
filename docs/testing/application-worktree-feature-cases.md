@@ -26,11 +26,11 @@
 | 应用远程 feature | 标准库为 `feature_testagent_{version}`；非标准库为创建版本时所选分支 | 该应用版本的共享事实源 | 否 |
 | 每服务器 feature 副本 | 同一 feature 的本地副本 | 发布投影目标、多服务器固定提交同步源；对所有角色只读 | 否 |
 | 用户个人 worktree | `{featureBranch}_{userId}_{workspaceName}` | 本人的普通文件、`docs/**`、`spec/**` 和 `.opencode/**` 编辑/调试分支 | 是，仅 owner |
-| 应用 Agent Diff 作用域 | 个人 worktree 中 `.opencode/opencode.jsonc`、`.opencode/agents/**`、`.opencode/skills/**` | 只隔离展示、权限、暂存和发布路径 | 不是独立分支 |
+| 应用 Agent Diff 作用域 | 个人 worktree 中全部 Git 可见 `.opencode/**` 用户配置 | 只隔离展示、权限、暂存和发布路径；不枚举 OpenCode 子目录 | 不是独立分支 |
 
 “应用普通文件”指个人 worktree 中进入 `workspace` Diff 的项目文件，例如根 `README.md`、`docs/**`、`archive/**`、源码、测试、部署脚本和普通业务配置。边界如下：
 
-- `.opencode/**` 不属于普通文件 Diff；其中只有 `.opencode/opencode.jsonc`、`.opencode/agents/**`、`.opencode/skills/**` 进入“应用 Agent”Diff，其余 `.opencode` 文件不进入应用 Agent 提交/发布白名单。
+- `.opencode/**` 不属于普通文件 Diff；其中全部 Git 可见文件进入“应用 Agent”Diff，包括 JSON/JSONC、agent、skill、command、plugin、tool、旧 mode 别名及辅助源码。运行依赖生成的 `node_modules`、package/lockfile 等应由 `.gitignore` 排除；若已被 Git 跟踪或实际出现在 status 中，必须仍可见、可提交或回退。
 - `spec/**` 会进入普通文件 Diff，允许所有应用成员保存、暂存并提交到本人个人分支，但属于本地资产，任何角色都不能发布到 feature；`./spec/**`、重复分隔符等别名在后端规范化后同样拒绝。
 - `.git/**` 元数据、绝对路径和 `../` 越界路径不允许操作；被 Git 忽略的 `node_modules`、构建产物等通常不会进入 Diff。
 - 发布只投影用户明确选择、已经进入个人 `HEAD` 且不属于 `spec/**` 的路径；存在未完成 merge、所选文件仍有未提交内容或确认后 feature HEAD 已变化时拒绝发布。个人分支本身始终不 push。
@@ -57,7 +57,7 @@ flowchart LR
 | --- | --- | --- |
 | 用户全局 OpenCode 配置 | 运行用户的 `~/.config/opencode` | OpenCode 原生全局层；企业环境不得在这里维护模型或供应商，避免污染公共事实源 |
 | 公共配置 | `OPENCODE_CONFIG_DIR={sessionPath}/.testagent-runtime/current-public-config` | 当前用户进程的公共层；软链接默认指向 `OPENCODE_PUBLIC_CONFIG_DIR`，公共个人保存时只对本人切到 `public-{userId}` worktree 的 `opencode/` |
-| 应用个人配置 | 本次请求 directory 对应的个人 worktree `.opencode/opencode.jsonc`、`.opencode/agents/**`、`.opencode/skills/**` | OpenCode 按项目目录原生发现并与公共层组合；不存在平台自定义覆盖/复制规则，也不存在独立应用 Agent worktree |
+| 应用个人配置 | 本次请求 directory 对应的个人 worktree `.opencode/**` | OpenCode 按项目目录原生发现并与公共层组合；不存在平台自定义覆盖/复制规则，也不存在独立应用 Agent worktree |
 | 应用资产引用 | 应用个人 `.opencode/opencode.jsonc` 的 `references` 与所选目录精确 `permission.external_directory` allow，路径通过 `OPENCODE_REFERENCES_DIR` 展开 | 只记录和加载引用关系并授权当前所选根层 SDD 目录；资产库文件、分支不会复制或合并进应用 Git |
 
 `sessionPath` 是当前统一认证用户的 OpenCode 数据目录，同时作为进程的 `XDG_DATA_HOME`；它不是应用 worktree。平台在其下固定维护 `current-public-config` 软链接，让 manager 的 `configPath` 和 `OPENCODE_CONFIG_DIR` 永远使用同一个入口，只改变软链接目标。当前本地 test 环境的实际关系是：
@@ -214,7 +214,7 @@ tools/create-workspace-branch-model-test-data.sh
 | 反向同步 | clean、dirty、同文件冲突 | target commit 祖先关系、待同步状态、`MERGE_HEAD` 与 unmerged index |
 | 个人热加载 | 应用 Agent、应用 Skill、公共 Agent、公共 Skill | 保存前先加载 R1；保存 R2 后同一进程读到 R2；其他用户/共享副本不变 |
 | 不应热加载 | 普通文件、`skills/**/rules/**`、`skills/**/templates/**` | 文件写盘并进入 Diff，但无 dispose 请求 |
-| Diff 分类 | `.opencode/opencode.jsonc`、agents、skills | 三者都出现在“应用 Agent”或公共 Agent Diff，不混入普通工作区 Diff |
+| Diff 分类 | 任意 Git 可见 `.opencode/**` 与一个普通工作区文件 | 前者全部出现在“应用 Agent”Diff，后者只出现在普通工作区 Diff；没有两边都不可见的脏文件 |
 | 权限与边界 | USER 写应用配置、非成员访问、任意角色发布 spec | 后端拒绝且 Git ref、工作树不发生越权变化 |
 | rollout | 应用配置推送、公共配置推送 | 固定 commit 同步完成后，逐用户等待任务空闲并 dispose；无运行进程不被额外启动 |
 

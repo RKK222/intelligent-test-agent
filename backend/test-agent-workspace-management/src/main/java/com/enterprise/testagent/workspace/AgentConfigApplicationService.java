@@ -974,7 +974,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         fileService.writeContent(agentRoot.toString(), relativePath, content);
     }
 
-    /** 应用 Agent 上传固定在可发布的 opencode.jsonc、agents、skills 和 tools 白名单内。 */
+    /** 应用配置上传固定在当前个人 worktree 的 `.opencode/**` 命名空间内。 */
     public void uploadWorkspaceAgentFile(String workspaceId, String relativePath, String contentBase64, String worktreeId) {
         requireWorkspaceAgentUploadPath(relativePath);
         Path agentRoot = workspaceAgentRootForWrite(workspaceId, worktreeId);
@@ -982,7 +982,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         fileService.uploadFile(agentRoot.toString(), relativePath, contentBase64);
     }
 
-    /** 应用 Agent 分片上传沿用发布白名单，并绑定当前应用个人 worktree。 */
+    /** 应用配置分片上传沿用 `.opencode/**` 命名空间，并绑定当前应用个人 worktree。 */
     public WorkspaceFileUpload beginWorkspaceAgentFileUpload(
             String workspaceId,
             String relativePath,
@@ -998,7 +998,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         if (workspaceAgentDisplayPath(workspaceAgentGitPath(relativePath)) == null) {
             throw new PlatformException(
                     ErrorCode.FORBIDDEN,
-                    "应用 Agent 配置只允许上传 opencode.jsonc、agents、skills 或 tools 下的文件");
+                    "应用配置文件必须位于 .opencode 目录内");
         }
     }
 
@@ -1008,7 +1008,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         fileService.renameFile(agentRoot.toString(), relativePath, name);
     }
 
-    /** 应用 Agent 移动前同时校验源和目标白名单，避免借跨目录移动写入其它 `.opencode` 内容。 */
+    /** 应用配置移动前同时校验源和目标仍位于 `.opencode/**`，避免越出配置根目录。 */
     public void moveWorkspaceAgentFile(String workspaceId, String sourcePath, String targetPath, String worktreeId) {
         requireWorkspaceAgentUploadPath(sourcePath);
         requireWorkspaceAgentUploadPath(targetPath);
@@ -1665,14 +1665,14 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     /**
-     * 工作空间级 Agent 配置只允许展示 .opencode 下的 opencode.jsonc、agents 与 skills。
-     * Git porcelain 在子目录执行时仍可能返回仓库根相对路径，因此这里保留 Git 命令路径并单独生成 UI 展示路径。
+     * 工作空间级应用配置展示 `.opencode/**` 下全部 Git 可见文件。
+     * Git porcelain 在子目录执行时仍可能返回仓库根相对路径，因此范围判定不能复用“给用户输入补前缀”的转换函数。
      */
     private AgentConfigResponses.AgentConfigDiffResponse workspaceDiff(Path repoRoot) {
         String statusOutput = gitWorkspaceService.statusPorcelain(repoRoot, WORKSPACE_AGENT_RELATIVE_ROOT);
         Map<String, AgentConfigResponses.AgentConfigDiffFileResponse> files = new LinkedHashMap<>();
         List<GitStatusEntry> entries = gitWorkspaceService.parseStatusPorcelain(statusOutput).stream()
-                .map(entry -> entry.withPath(workspaceAgentGitPath(entry.path())))
+                .map(entry -> entry.withPath(workspaceAgentGitStatusPath(entry.path())))
                 .filter(entry -> workspaceAgentDisplayPath(entry.path()) != null)
                 .toList();
         for (GitDiffFile file : gitWorkspaceService.collectDiffFiles(repoRoot, entries)) {
@@ -2364,29 +2364,39 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
 
     private String workspaceAgentGitPath(String path) {
         String value = requireText(path, "文件路径不能为空", "path").replace('\\', '/');
-        int marker = value.indexOf(WORKSPACE_AGENT_RELATIVE_ROOT + "/");
-        if (marker >= 0) {
-            return value.substring(marker);
-        }
         return value.startsWith(WORKSPACE_AGENT_RELATIVE_ROOT + "/")
                 ? value
                 : WORKSPACE_AGENT_RELATIVE_ROOT + "/" + value;
     }
 
+    private String workspaceAgentGitStatusPath(String path) {
+        String value = path == null ? "" : path.replace('\\', '/');
+        String marker = WORKSPACE_AGENT_RELATIVE_ROOT + "/";
+        int markerIndex = value.indexOf(marker);
+        if (markerIndex < 0 || (markerIndex > 0 && value.charAt(markerIndex - 1) != '/')) {
+            return null;
+        }
+        return value.substring(markerIndex);
+    }
+
     private String workspaceAgentDisplayPath(String gitPath) {
-        String normalized = gitPath.replace('\\', '/');
+        String normalized;
+        try {
+            Path relative = Path.of(gitPath.replace('\\', '/')).normalize();
+            if (relative.isAbsolute()) {
+                return null;
+            }
+            normalized = relative.toString().replace('\\', '/');
+        } catch (RuntimeException exception) {
+            return null;
+        }
         String prefix = WORKSPACE_AGENT_RELATIVE_ROOT + "/";
         if (!normalized.startsWith(prefix)) {
             return null;
         }
         String display = normalized.substring(prefix.length());
-        // opencode.jsonc 是应用级 Agent/Skill 的运行态入口配置，必须与目录定义进入同一 Diff、提交和发布链路。
-        return "opencode.jsonc".equals(display)
-                || display.startsWith("agents/")
-                || display.startsWith("skills/")
-                || display.startsWith("tools/")
-                ? display
-                : null;
+        // `.opencode` 还支持 command/plugin 等目录及其辅助源码；Git 可见文件都必须进入 Diff，避免隐藏脏状态阻塞 feature 合并。
+        return display.isBlank() ? null : display;
     }
 
     /**

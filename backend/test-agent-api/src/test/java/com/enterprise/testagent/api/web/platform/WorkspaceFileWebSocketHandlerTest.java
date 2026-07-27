@@ -405,6 +405,8 @@ class WorkspaceFileWebSocketHandlerTest {
                 List.of("""
                         {"id":"req_write","op":"workspace.write","params":{"workspaceId":"wrk_1234567890abcdef","path":".opencode/skills/pay/SKILL.md","content":"changed"}}
                         """, """
+                        {"id":"req_write_command","op":"workspace.write","params":{"workspaceId":"wrk_1234567890abcdef","path":".opencode/commands/deploy.md","content":"changed"}}
+                        """, """
                         {"id":"req_delete","op":"workspace.delete","params":{"workspaceId":"wrk_1234567890abcdef","path":".opencode"}}
                         """, """
                         {"id":"req_delete_alias","op":"workspace.delete","params":{"workspaceId":"wrk_1234567890abcdef","path":"./tmp/../.opencode"}}
@@ -412,7 +414,7 @@ class WorkspaceFileWebSocketHandlerTest {
 
         handler.handle(session).block();
 
-        assertThat(session.sentText()).hasSize(3).allSatisfy(message -> {
+        assertThat(session.sentText()).hasSize(4).allSatisfy(message -> {
             assertThat(message).contains("\"type\":\"error\"");
             assertThat(message).contains("\"code\":\"FORBIDDEN\"");
         });
