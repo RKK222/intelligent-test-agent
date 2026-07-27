@@ -47,6 +47,7 @@ import type {
   NightExecutionSlots,
   NightExecutionTask,
   NightExecutionTaskQueryResponse,
+  PersonalWorkspaceGitPullResult,
   ProviderInfo,
   Session,
   SessionMessage,
@@ -129,6 +130,11 @@ import HelpCenterDialog from "./HelpCenterDialog.vue";
 import { buildManualQuestionPrompt, DEFAULT_HELP_TOPIC } from "./help-center";
 import { type PreviewMode } from "./WorkbenchFooter.vue";
 import OpencodeProcessStartupDialog from "./OpencodeProcessStartupDialog.vue";
+import PersonalWorkspacePullDialog, {
+  type PersonalWorkspacePullDialogPhase,
+  type PersonalWorkspacePullDialogResult,
+  type PersonalWorkspacePullDisposeStatus
+} from "./PersonalWorkspacePullDialog.vue";
 import ReferenceConfigurationDialog from "./ReferenceConfigurationDialog.vue";
 import { canShowReferenceConfiguration } from "./reference-configuration-access";
 import SettingsDialog from "./settings/SettingsDialog.vue";
@@ -276,6 +282,7 @@ const isAppAdmin = computed(() =>
 );
 
 const FIRST_LOGIN_GUIDE_STORAGE_VERSION = "v7";
+const PERSONAL_PULL_CONFIRM_STORAGE_VERSION = "v1";
 const firstLoginGuideActive = ref(true);
 
 function firstLoginGuideStorageKey(userId: string) {
@@ -287,6 +294,28 @@ function hasSeenFirstLoginGuide(userId: string) {
     return localStorage.getItem(firstLoginGuideStorageKey(userId)) === "seen";
   } catch {
     return false;
+  }
+}
+
+function personalPullConfirmStorageKey(userId: string) {
+  return `test-agent.personal-pull-confirm.${PERSONAL_PULL_CONFIRM_STORAGE_VERSION}:${userId}`;
+}
+
+function hasDismissedPersonalPullConfirm(userId: string | undefined) {
+  if (!userId) return false;
+  try {
+    return localStorage.getItem(personalPullConfirmStorageKey(userId)) === "dismissed";
+  } catch {
+    return false;
+  }
+}
+
+function dismissPersonalPullConfirm(userId: string | undefined) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(personalPullConfirmStorageKey(userId), "dismissed");
+  } catch {
+    // 浏览器禁用本地存储时只影响“不再提示”偏好，不阻断实际拉取。
   }
 }
 
@@ -409,6 +438,7 @@ const centerModeBeforeHub = ref<"editor" | "diff" | "system">("editor");
 const hubUpdateCount = ref(0);
 let hubUpdateTimer: ReturnType<typeof setInterval> | null = null;
 const feedback = ref<Feedback | null>(null);
+type RuntimeReloadOutcome = "RELOADED" | "NOT_RUNNING" | "WAITING_IDLE" | "FAILED" | "NO_PENDING";
 // 所有个人运行态重载共用一把响应式锁，手动入口和自动保存入口不会并发 dispose。
 const runtimeReloadLock = ref<"PUBLIC" | "WORKSPACE" | "REFERENCE" | null>(null);
 const personalRuntimeReloading = computed<"PUBLIC" | "WORKSPACE" | null>(() =>
@@ -2444,27 +2474,25 @@ async function handlePersonalRuntimeReload(payload: {
   }
 }
 
-async function reloadReferenceRuntimeIfIdle(): Promise<void> {
+async function reloadReferenceRuntimeIfIdle(options: { quiet?: boolean } = {}): Promise<RuntimeReloadOutcome> {
   const targetRevision = pendingReferenceRuntimeReloadRevision.value;
-  if (
-    targetRevision <= handledReferenceRuntimeReloadRevision
-    || runtimeReloadLock.value
-    || runtimeReloadConflictWaitingForIdle.value
-    || userRuntimeBusy.value
-  ) {
-    return;
+  if (targetRevision <= handledReferenceRuntimeReloadRevision) return "NO_PENDING";
+  if (runtimeReloadLock.value || runtimeReloadConflictWaitingForIdle.value || userRuntimeBusy.value) {
+    return "WAITING_IDLE";
   }
   const publicReloadTarget = pendingPublicRuntimeReloadTarget;
   if (!opencodeProcessReady.value || (!publicReloadTarget && !selectedWorkspaceIdRef.value)) {
     // 进程未运行时无需 dispose；下次受管启动会直接读取刚保存的磁盘配置和引用目录环境。
     handledReferenceRuntimeReloadRevision = targetRevision;
     lastRuntimeReloadError = null;
-    feedback.value = {
-      kind: "info",
-      title: pendingRuntimeReloadKind === "reference" ? "引用配置已保存" : "Agent 配置已保存",
-      description: "TestAgent 进程下次启动时会加载最新配置。"
-    };
-    return;
+    if (!options.quiet) {
+      feedback.value = {
+        kind: "info",
+        title: pendingRuntimeReloadKind === "reference" ? "引用配置已保存" : "Agent 配置已保存",
+        description: "TestAgent 进程下次启动时会加载最新配置。"
+      };
+    }
+    return "NOT_RUNNING";
   }
   runtimeReloadLock.value = "REFERENCE";
   try {
@@ -2486,35 +2514,43 @@ async function reloadReferenceRuntimeIfIdle(): Promise<void> {
       pendingPublicRuntimeReloadTarget = null;
     }
     lastRuntimeReloadError = null;
-    feedback.value = {
-      kind: "info",
-      title: pendingRuntimeReloadKind === "reference" ? "引用配置已生效" : "Agent 配置已生效",
-      description: "已重新加载当前用户的 TestAgent workspace 实例，无需重启专属进程。"
-    };
+    if (!options.quiet) {
+      feedback.value = {
+        kind: "info",
+        title: pendingRuntimeReloadKind === "reference" ? "引用配置已生效" : "Agent 配置已生效",
+        description: "已重新加载当前用户的 TestAgent workspace 实例，无需重启专属进程。"
+      };
+    }
+    return "RELOADED";
   } catch (error) {
     if (error instanceof BackendApiError && error.code === "CONFLICT") {
       // 不消费 revision/公共 worktree 目标；SSE 若尚未观察到新 Run，短延迟后再复核一次。
       lastRuntimeReloadError = null;
       runtimeReloadConflictWaitingForIdle.value = true;
       scheduleRuntimeReloadConflictRetry();
-      feedback.value = {
-        kind: "info",
-        title: pendingRuntimeReloadKind === "reference" ? "引用配置已保存" : "Agent 配置已保存",
-        description: "当前用户有刚启动的 Session，结束后会自动重新加载运行态。"
-      };
-      return;
+      if (!options.quiet) {
+        feedback.value = {
+          kind: "info",
+          title: pendingRuntimeReloadKind === "reference" ? "引用配置已保存" : "Agent 配置已保存",
+          description: "当前用户有刚启动的 Session，结束后会自动重新加载运行态。"
+        };
+      }
+      return "WAITING_IDLE";
     }
     handledReferenceRuntimeReloadRevision = targetRevision;
     if (pendingReferenceRuntimeReloadRevision.value === targetRevision) {
       pendingPublicRuntimeReloadTarget = null;
     }
     lastRuntimeReloadError = error;
-    feedback.value = errorFeedback(
-      pendingRuntimeReloadKind === "reference"
-        ? "引用配置已保存，但运行态重新加载失败"
-        : "Agent 配置已保存，但运行态重新加载失败",
-      error
-    );
+    if (!options.quiet) {
+      feedback.value = errorFeedback(
+        pendingRuntimeReloadKind === "reference"
+          ? "引用配置已保存，但运行态重新加载失败"
+          : "Agent 配置已保存，但运行态重新加载失败",
+        error
+      );
+    }
+    return "FAILED";
   } finally {
     if (runtimeReloadLock.value === "REFERENCE") {
       runtimeReloadLock.value = null;
@@ -3873,6 +3909,26 @@ function refreshCurrentWorkspacePanels() {
 const creatingVersion = ref(false);
 const pullingPersonalWorkspace = ref(false);
 
+type PersonalPullDialogState = {
+  open: boolean;
+  phase: PersonalWorkspacePullDialogPhase;
+  personalWorkspaceId: string | null;
+  pullResult: PersonalWorkspaceGitPullResult | null;
+  result: PersonalWorkspacePullDialogResult | null;
+  errorTitle: string;
+  errorDescription: string;
+};
+
+const personalPullDialog = ref<PersonalPullDialogState>({
+  open: false,
+  phase: "CONFIRM",
+  personalWorkspaceId: null,
+  pullResult: null,
+  result: null,
+  errorTitle: "",
+  errorDescription: ""
+});
+
 /** 后端返回仓库级阻塞文件；前端只做兼容归一化，不猜测其它用户或 workspace。 */
 function personalPullBlockers(error: unknown): WorkspaceGitUpdateBlocker[] {
   if (!(error instanceof BackendApiError) || error.details.reason !== "LOCAL_CHANGES") return [];
@@ -3894,34 +3950,123 @@ function personalPullBlockers(error: unknown): WorkspaceGitUpdateBlocker[] {
   });
 }
 
+function personalPullDisposeResult(
+  response: PersonalWorkspaceGitPullResult,
+  runtimeOutcome: RuntimeReloadOutcome
+): Pick<PersonalWorkspacePullDialogResult, "disposeStatus" | "disposeMessage"> {
+  if (!response.agentConfigChanged) {
+    return {
+      disposeStatus: "NOT_REQUIRED",
+      disposeMessage: "本次没有更新应用 Agent 文件，无需 dispose。"
+    };
+  }
+  const outcomes: Record<RuntimeReloadOutcome, {
+    disposeStatus: PersonalWorkspacePullDisposeStatus;
+    disposeMessage: string;
+  }> = {
+    RELOADED: {
+      disposeStatus: "DISPOSED",
+      disposeMessage: "应用 Agent 已更新，已 dispose 当前用户的空闲运行态；其他用户不受影响。"
+    },
+    NOT_RUNNING: {
+      disposeStatus: "NOT_RUNNING",
+      disposeMessage: "应用 Agent 已更新；当前 TestAgent 进程未运行，无需立即 dispose，下次启动会直接加载。"
+    },
+    WAITING_IDLE: {
+      disposeStatus: "WAITING_IDLE",
+      disposeMessage: "应用 Agent 已更新；当前用户仍有运行中的 Session，结束后会自动 dispose。"
+    },
+    FAILED: {
+      disposeStatus: "FAILED",
+      disposeMessage: "应用 Agent 文件已更新，但当前用户运行态 dispose 失败，请稍后重试应用 Agent 更新。"
+    },
+    NO_PENDING: {
+      disposeStatus: "DISPOSED",
+      disposeMessage: "应用 Agent 已更新，当前用户运行态已由同一刷新流程处理。"
+    }
+  };
+  return outcomes[runtimeOutcome];
+}
+
+function closePersonalPullDialog() {
+  if (pullingPersonalWorkspace.value) return;
+  personalPullDialog.value.open = false;
+}
+
+function cancelPersonalPullDialog() {
+  if (personalPullDialog.value.phase !== "CONFIRM") return;
+  personalPullDialog.value.open = false;
+}
+
+function confirmPersonalPull(doNotShowAgain: boolean) {
+  const personalWorkspaceId = personalPullDialog.value.personalWorkspaceId;
+  if (!personalWorkspaceId || personalPullDialog.value.phase !== "CONFIRM") return;
+  if (doNotShowAgain) dismissPersonalPullConfirm(authStore.currentUser?.userId);
+  personalPullDialog.value.phase = "PULLING";
+  void executePersonalWorkspacePull(personalWorkspaceId);
+}
+
 /**
- * 远端拉取更新当前 owner 在该应用下的整棵个人 worktree；提交并推送仍负责应用级发布和全员同步。
- * 应用 workspace 与应用 Agent 都遵循原生 Git 合并规则；Agent 更新成功后只 dispose 空闲的当前用户。
+ * 远端拉取更新当前 owner 在该应用下的整棵个人 worktree；确认偏好只跳过说明页，
+ * 每次仍展示 fetch → merge → 刷新 → 当前用户运行态处理的真实结果。
  */
-async function handlePullPersonalWorkspace(personalWorkspaceId: string) {
+function handlePullPersonalWorkspace(personalWorkspaceId: string) {
   if (
     pullingPersonalWorkspace.value
+    || personalPullDialog.value.open
     || personalWorkspaceId !== currentPersonalWorkspaceId.value
   ) return;
+  const skipConfirm = hasDismissedPersonalPullConfirm(authStore.currentUser?.userId);
+  personalPullDialog.value = {
+    open: true,
+    phase: skipConfirm ? "PULLING" : "CONFIRM",
+    personalWorkspaceId,
+    pullResult: null,
+    result: null,
+    errorTitle: "",
+    errorDescription: ""
+  };
+  if (skipConfirm) void executePersonalWorkspacePull(personalWorkspaceId);
+}
+
+async function executePersonalWorkspacePull(personalWorkspaceId: string) {
+  if (pullingPersonalWorkspace.value) return;
+  if (
+    personalWorkspaceId !== currentPersonalWorkspaceId.value
+    || personalPullDialog.value.personalWorkspaceId !== personalWorkspaceId
+  ) {
+    personalPullDialog.value.phase = "FAILED";
+    personalPullDialog.value.errorTitle = "当前个人工作区已变化";
+    personalPullDialog.value.errorDescription = "请关闭弹框，在当前工作区重新点击“拉取远程”。";
+    return;
+  }
   pullingPersonalWorkspace.value = true;
   try {
     const response = await api.gitPullPersonalWorkspace(personalWorkspaceId);
+    personalPullDialog.value.pullResult = response;
+    personalPullDialog.value.phase = "FINALIZING";
     if (personalPullBlockState.value?.personalWorkspaceId === personalWorkspaceId) {
       personalPullBlockState.value = null;
     }
     agentConfigRevision.value += 1;
     fileExplorerRef.value?.refreshAll();
     refreshCurrentWorkspacePanels();
-    feedback.value = {
-      kind: "success",
-      title: response.updated ? "已更新到远程最新版本" : "当前已是远程最新版本",
-      description: "已更新你在当前应用的个人内容（含应用 Agent 和其它 workspace）；其他用户及公共 Agent 不受影响。"
-    };
+    let runtimeOutcome: RuntimeReloadOutcome = "NO_PENDING";
     if (response.agentConfigChanged) {
       pendingRuntimeReloadKind = "agent";
       pendingReferenceRuntimeReloadRevision.value += 1;
-      await reloadReferenceRuntimeIfIdle();
+      runtimeOutcome = await reloadReferenceRuntimeIfIdle({ quiet: true });
     }
+    const dispose = personalPullDisposeResult(response, runtimeOutcome);
+    personalPullDialog.value.result = { ...response, ...dispose };
+    personalPullDialog.value.phase = "SUCCEEDED";
+    feedback.value = {
+      kind: "success",
+      title: response.updated ? "已更新到远程最新版本" : "当前已是远程最新版本",
+      description: response.updated
+        ? `已更新 ${response.changedFiles.length} 个文件；${dispose.disposeMessage}`
+        : "当前用户的应用 workspace 与应用 Agent 已是远程最新版本。"
+    };
   } catch (error) {
     const blockers = personalPullBlockers(error);
     if (blockers.length > 0) {
@@ -3929,7 +4074,11 @@ async function handlePullPersonalWorkspace(personalWorkspaceId: string) {
     }
     fileExplorerRef.value?.refreshChanges();
     refreshCurrentWorkspacePanels();
-    feedback.value = errorFeedback("拉取远程失败", error);
+    const failure = errorFeedback("拉取远程失败", error);
+    personalPullDialog.value.phase = "FAILED";
+    personalPullDialog.value.errorTitle = failure.title;
+    personalPullDialog.value.errorDescription = failure.description ?? "请检查提示后重试。";
+    feedback.value = failure;
   } finally {
     pullingPersonalWorkspace.value = false;
   }
@@ -8197,6 +8346,20 @@ async function handleLogout() {
       </div>
     </template>
   </FigmaShell>
+
+  <PersonalWorkspacePullDialog
+    :open="personalPullDialog.open"
+    :phase="personalPullDialog.phase"
+    :app-name="selectedManagedApplication?.appName"
+    :branch="currentPersonalWorkspaceBranch"
+    :pull-result="personalPullDialog.pullResult"
+    :result="personalPullDialog.result"
+    :error-title="personalPullDialog.errorTitle"
+    :error-description="personalPullDialog.errorDescription"
+    @confirm="confirmPersonalPull"
+    @cancel="cancelPersonalPullDialog"
+    @close="closePersonalPullDialog"
+  />
 
   <ServerWorkspacePickerDialog
     :open="serverWorkspacePickerOpen"

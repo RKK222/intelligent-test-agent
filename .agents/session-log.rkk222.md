@@ -5,6 +5,24 @@
 
 ## Entries
 
+### 2026-07-27 - 展示个人拉取 merge 流程与 dispose 结果
+
+### Why
+- 用户需要在个人拉取前明确知道应用 Agent 也会更新且系统会直接执行 Git merge，并希望可关闭后续确认；拉取后还需看到更新文件和 dispose 结论。
+- 应用 Agent 平台发布只能立即同步可安全合并的个人 worktree，本地 dirty/冲突用户保留为持久化待同步，不能假设推送瞬间所有用户都已收敛。
+
+### What
+- 新增 `PersonalWorkspacePullDialog.vue`，按“确认 → fetch/比较 → merge → 文件/Diff 刷新 → 运行态检查”展示；确认偏好按用户写入浏览器 localStorage，但每次仍展示过程和结果。
+- 复用个人 `git-pull` 的 `changedFiles/agentConfigChanged` 与既有 `reloadReferenceRuntimeIfIdle`，结果区列出更新文件，并区分无需 dispose、已 dispose、等待 Session 空闲、进程未运行和 dispose 失败。
+
+### How
+- 定向 Vitest 3 文件 59 项、agent-web typecheck、前端全仓 lint 和生产 build 通过；JDK 25 后端 20 模块跳过测试打包成功。
+- 使用未修改的 `.env.test` / test profile 完整重启 backend、manager、frontend；health/readiness 为 UP、前端和登录 CORS 为 200，manager WebSocket 与自动恢复的 OpenCode 4104 最终健康。
+
+### Result
+- 不再提示只跳过确认，不跳过拉取过程和结果；应用 workspace/Agent、提交推送、角色/目录权限和 dispose 时机均继续复用原程序。
+- 未修改 HTTP/RunEvent wire、数据库/Flyway、SQL、后端业务代码、安全配置、环境配置、generated SDK 或 OpenCode 源码。
+
 ### 2026-07-27 - 公共 Agent 新增对话式工作区 Git 助手
 
 ### Why

@@ -15,8 +15,11 @@ vi.mock("@test-agent/workbench-shell", async () =>
 describe("FigmaFileExplorer", () => {
   it("describes the complete personal pull scope without implying an application-wide rollout", () => {
     expect(agentWorkbenchSource).toContain(
-      "已更新你在当前应用的个人内容（含应用 Agent 和其它 workspace）；其他用户及公共 Agent 不受影响。"
+      "每次仍展示 fetch → merge → 刷新 → 当前用户运行态处理的真实结果。"
     );
+    expect(agentWorkbenchSource).toContain("hasDismissedPersonalPullConfirm(authStore.currentUser?.userId)");
+    expect(agentWorkbenchSource).toContain("dismissPersonalPullConfirm(authStore.currentUser?.userId)");
+    expect(agentWorkbenchSource).toContain("<PersonalWorkspacePullDialog");
   });
 
   it("groups refresh and remote pull in one workspace more menu while keeping Git changes independent", async () => {
