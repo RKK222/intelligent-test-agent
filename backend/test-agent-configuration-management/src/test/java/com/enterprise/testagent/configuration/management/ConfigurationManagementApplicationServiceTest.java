@@ -23,6 +23,7 @@ import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.configuration.SshKeyId;
 import com.enterprise.testagent.domain.configuration.UserSshKey;
+import com.enterprise.testagent.domain.appsource.AppSourceRepositoryHistory;
 import com.enterprise.testagent.domain.dictionary.DictId;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.dictionary.DictionaryRepository;
@@ -453,6 +454,79 @@ class ConfigurationManagementApplicationServiceTest {
                 "资产库新名称".equals(updated.name())
                         && current.englishName().equals(updated.englishName())
                         && CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value().equals(updated.repositoryType())));
+    }
+
+    @Test
+    void appSourceHistoryRejectsRepositoryEnglishNameChange() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        CodeRepository current = codeRepository("https://gitee.com/demo/source.git");
+        when(repository.findRepository(current.repositoryId())).thenReturn(Optional.of(current));
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                repositoryTypeDictionaryRepository(),
+                org.mockito.Mockito.mock(UserRepository.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
+        service.setAppSourceRepositoryHistory(repositoryId -> true);
+
+        assertThatThrownBy(() -> service.updateRepository(
+                        current.repositoryId().value(), "源码库新名称", "source-renamed", false))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.getMessage()).contains("英文名称");
+                });
+        verify(repository, org.mockito.Mockito.never()).updateRepositoryMetadata(any());
+    }
+
+    @Test
+    void appSourceHistoryRejectsLeavingApplicationCodeRepositoryType() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        CodeRepository current = codeRepository("https://gitee.com/demo/source.git");
+        when(repository.findRepository(current.repositoryId())).thenReturn(Optional.of(current));
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                repositoryTypeDictionaryRepository(),
+                org.mockito.Mockito.mock(UserRepository.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
+        service.setAppSourceRepositoryHistory(repositoryId -> true);
+
+        assertThatThrownBy(() -> service.updateRepository(
+                        current.repositoryId().value(), "源码库新名称", current.englishName(), true))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.getMessage()).contains("类型");
+                });
+        verify(repository, org.mockito.Mockito.never()).updateRepositoryMetadata(any());
+    }
+
+    @Test
+    void appSourceHistoryAllowsChineseNameOnlyChange() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        CodeRepository current = codeRepository("https://gitee.com/demo/source.git");
+        when(repository.findRepository(current.repositoryId())).thenReturn(Optional.of(current));
+        when(repository.findRepositoryByEnglishName(current.englishName())).thenReturn(Optional.of(current));
+        when(repository.updateRepositoryMetadata(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                repositoryTypeDictionaryRepository(),
+                org.mockito.Mockito.mock(UserRepository.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
+        AppSourceRepositoryHistory history = repositoryId -> true;
+        service.setAppSourceRepositoryHistory(history);
+
+        ConfigurationManagementResponses.CodeRepositoryResponse response = service.updateRepository(
+                current.repositoryId().value(), "源码库新名称", current.englishName(), false);
+
+        assertThat(response.name()).isEqualTo("源码库新名称");
+        assertThat(response.repositoryType()).isEqualTo(CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value());
     }
 
     @Test

@@ -8,6 +8,7 @@ import com.enterprise.testagent.common.git.SshKeyEncryptionService;
 import com.enterprise.testagent.configuration.management.ConfigurationManagementApplicationService;
 import com.enterprise.testagent.configuration.management.GitCloneCacheService;
 import com.enterprise.testagent.domain.broadcast.ServerBroadcastPublisher;
+import com.enterprise.testagent.domain.appsource.AppSourceRepositoryHistory;
 import com.enterprise.testagent.domain.configuration.CommonParameterValues;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.dictionary.DictionaryRepository;
@@ -18,6 +19,7 @@ import com.enterprise.testagent.domain.user.UserRepository;
 import com.enterprise.testagent.persistence.mybatis.MyBatisReferenceRepositoryRepository;
 import com.enterprise.testagent.persistence.mybatis.ReferenceRepositoryMapper;
 import com.enterprise.testagent.workspace.ReferenceRepositoryApplicationService;
+import com.enterprise.testagent.workspace.ReferenceRepositoryReplicaTaskDispatcher;
 import com.enterprise.testagent.workspace.ReferenceRepositoryReplicaReconciler;
 import com.enterprise.testagent.workspace.WorkspaceServerIdentity;
 import org.junit.jupiter.api.Test;
@@ -40,6 +42,9 @@ class ReferenceRepositoryContextTest {
                 .withBean(WorkspaceServerIdentity.class, () -> new WorkspaceServerIdentity("linux-test"))
                 .withBean(ServerBroadcastPublisher.class, () -> mock(ServerBroadcastPublisher.class))
                 .withBean(ReferenceRepositoryMapper.class, () -> mock(ReferenceRepositoryMapper.class))
+                .withBean(AppSourceRepositoryHistory.class, () -> mock(AppSourceRepositoryHistory.class))
+                .withBean(ReferenceRepositoryReplicaTaskDispatcher.class,
+                        () -> mock(ReferenceRepositoryReplicaTaskDispatcher.class))
                 .withBean(MyBatisReferenceRepositoryRepository.class)
                 .withBean(ConfigurationManagementApplicationService.class)
                 .withBean(ReferenceRepositoryApplicationService.class)

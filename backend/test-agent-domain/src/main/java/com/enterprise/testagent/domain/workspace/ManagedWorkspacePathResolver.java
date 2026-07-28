@@ -21,9 +21,11 @@ public final class ManagedWorkspacePathResolver {
 
     public static final String PARAM_OPENCODE_APP_WORKSPACE_ROOT = "OPENCODE_APP_WORKSPACE_ROOT";
     public static final String PARAM_OPENCODE_PERSONAL_WORKTREE_ROOT = "OPENCODE_PERSONAL_WORKTREE_ROOT";
+    public static final String PARAM_OPENCODE_APP_SOURCE_ROOT = "OPENCODE_APP_SOURCE_ROOT";
 
     private static final String APP_PREFIX = "appworkspace:";
     private static final String PERSONAL_PREFIX = "personalworktree:";
+    private static final String APP_SOURCE_PREFIX = "appsource:";
     private static final Pattern WINDOWS_DRIVE_ABSOLUTE = Pattern.compile("^[A-Za-z]:[\\\\/].*");
     private static final Pattern WINDOWS_UNC_ABSOLUTE = Pattern.compile("^(\\\\\\\\|//).+");
     private static final CommonParameterValues EMPTY_VALUES = new CommonParameterValues() {
@@ -77,6 +79,9 @@ public final class ManagedWorkspacePathResolver {
         if (value.startsWith(PERSONAL_PREFIX)) {
             return resolveLogical(PARAM_OPENCODE_PERSONAL_WORKTREE_ROOT, PERSONAL_PREFIX, value);
         }
+        if (value.startsWith(APP_SOURCE_PREFIX)) {
+            return resolveLogical(PARAM_OPENCODE_APP_SOURCE_ROOT, APP_SOURCE_PREFIX, value);
+        }
         if (isLegacyAbsolutePath(value)) {
             return Path.of(value).normalize();
         }
@@ -95,6 +100,11 @@ public final class ManagedWorkspacePathResolver {
      */
     public String personalValue(String... fragments) {
         return logicalValue(PERSONAL_PREFIX, fragments);
+    }
+
+    /** 生成应用源码快照逻辑路径，实际根目录由只读通用参数按目标平台展开。 */
+    public String appSourceValue(String... fragments) {
+        return logicalValue(APP_SOURCE_PREFIX, fragments);
     }
 
     /**
