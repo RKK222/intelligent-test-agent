@@ -1,0 +1,60 @@
+<script setup lang="ts">
+import { convertBase } from '../integer-base-converter/integer-base-converter.model';
+import { ipv4ToInt, ipv4ToIpv6, isValidIpv4 } from './ipv4-address-converter.service';
+import { useValidation } from '@/composable/validation';
+
+const rawIpAddress = useStorage('ipv4-converter:ip', '192.168.1.1');
+const { t } = useI18n();
+
+const convertedSections = computed(() => {
+  const ipInDecimal = ipv4ToInt({ ip: rawIpAddress.value });
+
+  return [
+    {
+      label: t('tools.ipv4-address-converter.ui.decimal'),
+      value: String(ipInDecimal),
+    },
+    {
+      label: t('tools.ipv4-address-converter.ui.hexadecimal'),
+      value: convertBase({ fromBase: 10, toBase: 16, value: String(ipInDecimal) }).toUpperCase(),
+    },
+    {
+      label: t('tools.ipv4-address-converter.ui.binary'),
+      value: convertBase({ fromBase: 10, toBase: 2, value: String(ipInDecimal) }),
+    },
+    {
+      label: t('tools.ipv4-address-converter.ui.ipv6'),
+      value: ipv4ToIpv6({ ip: rawIpAddress.value }),
+    },
+    {
+      label: t('tools.ipv4-address-converter.ui.ipv6Short'),
+      value: ipv4ToIpv6({ ip: rawIpAddress.value, prefix: '::ffff:' }),
+    },
+  ];
+});
+
+const { attrs: validationAttrs } = useValidation<string>({
+  source: rawIpAddress,
+  rules: computed(() => [{ message: t('tools.ipv4-address-converter.ui.invalidIpv4'), validator: ip => isValidIpv4({ ip }) }]),
+});
+</script>
+
+<template>
+  <div>
+    <c-input-text v-model:value="rawIpAddress" :label="t('tools.ipv4-address-converter.ui.inputLabel')" :placeholder="t('tools.ipv4-address-converter.ui.inputPlaceholder')" />
+
+    <n-divider />
+
+    <input-copyable
+      v-for="{ label, value } of convertedSections"
+      :key="label"
+      :label="label"
+      label-position="left"
+      label-width="100px"
+      label-align="right"
+      mb-2
+      :value="validationAttrs.validationStatus === 'error' ? '' : value"
+      :placeholder="t('tools.ipv4-address-converter.ui.correctAddress')"
+    />
+  </div>
+</template>

@@ -1,0 +1,8 @@
+- generic [ref=e4]:
+  - generic [ref=e5]:
+    - heading "智能测试代理平台" [level=1] [ref=e6]
+    - paragraph [ref=e7]: 请登录以继续
+  - generic [ref=e8]:
+    - textbox "用户名" [ref=e9]: "888888888"
+    - textbox "密码" [ref=e10]: "123456"
+    - button "登录" [ref=e11]

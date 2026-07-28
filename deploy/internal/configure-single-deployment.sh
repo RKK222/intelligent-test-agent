@@ -14,6 +14,8 @@ NGINX_HOME="/data/apps/nginx"
 NGINX_BIN=""
 NGINX_MAIN_CONF=""
 NGINX_GATEWAY_CONF=""
+TOOLBOX_IT_TOOLS_UPSTREAM="${TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM:-}"
+TOOLBOX_OMNI_TOOLS_UPSTREAM="${TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM:-}"
 
 usage() {
   cat <<'USAGE'
@@ -42,6 +44,10 @@ Options:
   --nginx-bin <path>         Nginx executable. Default: <nginx-home>/sbin/nginx.
   --nginx-main-conf <path>   Nginx main config. Default: <nginx-home>/conf/nginx.conf.
   --gateway-conf <path>      Included gateway .conf path. Auto-detected by default.
+  --toolbox-it-tools-upstream <host:port>
+                             IT-Tools private endpoint; otherwise preserve nginx.env.
+  --toolbox-omni-tools-upstream <host:port>
+                             OmniTools private endpoint; otherwise preserve nginx.env.
   -h, --help                 Show this help.
 
 The backend role intentionally fails when any required existing secret is missing.
@@ -92,6 +98,14 @@ while [[ $# -gt 0 ]]; do
       NGINX_GATEWAY_CONF="$2"
       shift 2
       ;;
+    --toolbox-it-tools-upstream)
+      TOOLBOX_IT_TOOLS_UPSTREAM="$2"
+      shift 2
+      ;;
+    --toolbox-omni-tools-upstream)
+      TOOLBOX_OMNI_TOOLS_UPSTREAM="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -124,6 +138,19 @@ require_absolute_path() {
     echo "${name} must be an absolute path: ${value}" >&2
     exit 1
   fi
+}
+
+require_toolbox_endpoint() {
+  local value="$1" name="$2" port
+  [[ "${value}" =~ ^([A-Za-z0-9.-]+):([0-9]{1,5})$ ]] || {
+    echo "${name} must be an explicit host:port endpoint: ${value:-<missing>}" >&2
+    exit 1
+  }
+  port="${BASH_REMATCH[2]}"
+  (( port >= 1 && port <= 65535 )) || {
+    echo "${name} port is out of range: ${value}" >&2
+    exit 1
+  }
 }
 
 # dotenv 以最后一次赋值为准；只读取值，不 source 文件，避免执行现场内容。
@@ -417,6 +444,15 @@ configure_frontend() {
   require_absolute_path "${NGINX_BIN}" NGINX_BIN
   require_absolute_path "${NGINX_MAIN_CONF}" NGINX_MAIN_CONF
   require_absolute_path "${NGINX_ENV}" NGINX_ENV
+  if [[ -z "${TOOLBOX_IT_TOOLS_UPSTREAM}" ]]; then
+    TOOLBOX_IT_TOOLS_UPSTREAM="$(env_value "${NGINX_ENV}" TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM)"
+  fi
+  if [[ -z "${TOOLBOX_OMNI_TOOLS_UPSTREAM}" ]]; then
+    TOOLBOX_OMNI_TOOLS_UPSTREAM="$(env_value "${NGINX_ENV}" TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM)"
+  fi
+  # 独立工具节点不能静默回退到前端本机，否则标准部署会在切流后产生 502。
+  require_toolbox_endpoint "${TOOLBOX_IT_TOOLS_UPSTREAM}" TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM
+  require_toolbox_endpoint "${TOOLBOX_OMNI_TOOLS_UPSTREAM}" TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM
   [[ -x "${NGINX_BIN}" ]] || {
     echo "Nginx executable not found: ${NGINX_BIN}" >&2
     exit 1
@@ -442,6 +478,8 @@ TEST_AGENT_NGINX_MODE=single
 TEST_AGENT_NGINX_BACKENDS=122.233.30.114:8080
 TEST_AGENT_NGINX_SERVER_ROUTES=test-agent-backend-122-233-30-114=122.233.30.114:8080
 TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.114:18080
+TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=${TOOLBOX_IT_TOOLS_UPSTREAM}
+TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=${TOOLBOX_OMNI_TOOLS_UPSTREAM}
 TEST_AGENT_NGINX_LISTEN_PORT=80
 TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=9996
 TEST_AGENT_NGINX_TLS_ENABLED=false

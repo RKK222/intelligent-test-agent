@@ -35,6 +35,9 @@ import type {
   ApplicationWorkspaceTemplate,
   ApplicationWorkspaceVersion,
   ApplicationDefinition,
+  ApplicationGitRefreshScope,
+  ApplicationGitRefreshGroupSelector,
+  ApplicationGitRefreshResult,
   CreateApplicationPayload,
   ApplicationMember,
   ApplicationWorkspaceConfig,
@@ -103,6 +106,7 @@ import type {
   WorkspaceViewList,
   WorkspaceViewLocator,
   PublicAgentRepositoryStatus,
+  PublicAgentConfigRolloutStatus,
   ProviderInfo,
   RepositoryDeploymentOptions,
   RepositoryTreeResponse,
@@ -141,6 +145,8 @@ import type {
   TerminalTicketRequest,
   ServerTerminalTicketRequest,
   TerminalTicketResponse,
+  ToolboxCatalog,
+  ToolboxClickResult,
   TodoItem,
   DeleteUsersResult,
   SyncUsersFromTcdsResult,
@@ -345,6 +351,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const schedulerManagementBase = "/api/internal/platform/scheduler-management";
   const xxlJobBase = "/api/internal/platform/xxl-job";
   const systemManagementBase = "/api/internal/platform/system-management";
+  const toolboxBase = "/api/internal/platform/toolbox";
   const analyticsBase = "/api/internal/platform/analytics";
   const commonParameterBase = `${configurationBase}/common-parameters`;
   const referenceRepositoryBase = (appId: string) =>
@@ -904,6 +911,21 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         `${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/git-pull`,
         { method: "POST" }
       ),
+    /** 超级管理员只读查询每个应用将刷新的工作空间、版本和 feature 分支。 */
+    listApplicationGitRefreshScopes: () =>
+      request<ApplicationGitRefreshScope[]>(`${workspaceManagementBase}/applications/git-refresh-scopes`),
+    /** 超级管理员刷新应用全部 feature 仓库组，并触发相关个人 worktree 安全收敛。 */
+    refreshApplicationGit: (appId: string) =>
+      request<ApplicationGitRefreshResult>(
+        `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/git-refresh`,
+        { method: "POST" }
+      ),
+    /** 超级管理员只刷新一个物理 feature 分支组及其关联 worktree。 */
+    refreshApplicationGitGroup: (appId: string, payload: ApplicationGitRefreshGroupSelector) =>
+      request<ApplicationGitRefreshResult>(
+        `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/git-refresh-groups`,
+        { method: "POST", body: JSON.stringify(payload) }
+      ),
     getRecentManagedWorkspace: () => request<ManagedWorkspaceRuntime | null>(`${workspaceManagementBase}/recent-workspace`),
     getRecentManagedWorkspaceForApplication: (appId: string) =>
       request<ManagedWorkspaceRuntime | null>(`${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/recent-workspace`),
@@ -1169,6 +1191,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       routedRequest<AgentConfigStatus>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/status`),
     listPublicAgentBranches: () => request<string[]>(`${agentConfigBase}/public/branches`),
     listPublicAgentRepositories: () => request<PublicAgentRepositoryStatus[]>(`${agentConfigBase}/public/repositories`),
+    getPublicAgentConfigRollout: () =>
+      request<PublicAgentConfigRolloutStatus | null>(`${agentConfigBase}/public/rollout`),
     listPublicAgentWorktrees: (linuxServerId: string) =>
       request<AgentConfigWorktreeOption[]>(`${agentConfigBase}/public/worktrees${query({ linuxServerId })}`),
     initializePublicAgentRepository: (linuxServerId: string, branch: string, operationId?: string) =>
@@ -1179,6 +1203,10 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
           body: JSON.stringify({ branch, operationId })
         }
       ),
+    /**
+     * 仅保留给旧客户端的按服务器 URL 兼容方法；当前前端没有调用方。
+     * 后端实际委托公共全局 rollout，linuxServerId 不代表只更新一台服务器。
+     */
     pullPublicAgentRepository: (linuxServerId: string, branch: string, operationId?: string, discardLocalChanges = false) =>
       request<PublicAgentRepositoryStatus>(
         `${agentConfigBase}/public/repositories/${encodeURIComponent(linuxServerId)}/pull`,
@@ -1889,6 +1917,18 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
           body: JSON.stringify(payload)
         }
       ),
+
+    // ---- 工具盒子 API ----
+
+    /** 获取固定版本、可完全离线运行的工具目录及热门排名。 */
+    getToolboxCatalog: () => request<ToolboxCatalog>(`${toolboxBase}/tools`),
+
+    /** 点击上报失败由调用界面静默处理，不参与工具链接的导航控制。 */
+    recordToolboxClick: (toolId: string, eventId: string) =>
+      request<ToolboxClickResult>(`${toolboxBase}/tools/${encodeURIComponent(toolId)}/clicks`, {
+        method: "POST",
+        body: JSON.stringify({ eventId })
+      }),
 
     // ---- 认证相关 API ----
 

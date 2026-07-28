@@ -4,8 +4,12 @@ import com.enterprise.testagent.domain.configuration.AgentConfigRolloutScope;
 import com.enterprise.testagent.domain.configuration.AgentConfigRolloutWorktreeClaim;
 import com.enterprise.testagent.domain.configuration.AgentConfigRolloutWorktreePending;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutRepository;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutServerStatus;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutStatus;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutPreparation;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutTarget;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigWorktreeClaim;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigWorktreePending;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
 import java.time.Instant;
 import java.util.List;
@@ -28,6 +32,43 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
     @Override
     public Optional<String> findActiveRolloutId(AgentConfigRolloutScope scope, String scopeKey) {
         return Optional.ofNullable(mapper.findActiveRolloutId(scope.name(), scopeKey));
+    }
+
+    @Override
+    public Optional<PublicAgentConfigRolloutStatus> findLatestRolloutStatus(
+            AgentConfigRolloutScope scope,
+            String scopeKey) {
+        return Optional.ofNullable(mapper.findLatestRolloutStatus(scope.name(), scopeKey))
+                .map(row -> new PublicAgentConfigRolloutStatus(
+                        row.rolloutId(),
+                        row.status(),
+                        row.branch(),
+                        row.commitHash(),
+                        row.failureReason(),
+                        row.createdAt(),
+                        row.updatedAt(),
+                        row.completedAt(),
+                        List.of()));
+    }
+
+    @Override
+    public List<PublicAgentConfigRolloutServerStatus> findRolloutServerStatuses(String rolloutId) {
+        return mapper.findRolloutServerStatuses(rolloutId).stream()
+                .map(row -> new PublicAgentConfigRolloutServerStatus(
+                        row.linuxServerId(),
+                        row.syncStatus(),
+                        row.retryCount(),
+                        row.targetTotal(),
+                        row.targetPending(),
+                        row.targetDisposed(),
+                        row.targetAbandoned(),
+                        row.worktreeTotal(),
+                        row.worktreePending(),
+                        row.worktreeSynced(),
+                        row.lastError(),
+                        row.syncedAt(),
+                        row.updatedAt()))
+                .toList();
     }
 
     @Override
@@ -55,6 +96,7 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
             String branch,
             String expectedCommitHash,
             String previousCommitHash,
+            boolean discardSharedRuntimeChanges,
             String initiatedByUserId,
             String initiatedLinuxServerId,
             String traceId,
@@ -66,6 +108,7 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
                 branch,
                 expectedCommitHash,
                 previousCommitHash,
+                discardSharedRuntimeChanges,
                 initiatedByUserId,
                 initiatedLinuxServerId,
                 traceId,
@@ -104,6 +147,7 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
         mapper.decommissionRolloutServers(linuxServerId, now);
         mapper.abandonRolloutTargets(linuxServerId, now);
         mapper.abandonRolloutWorktrees(linuxServerId, now);
+        mapper.abandonPublicRolloutWorktrees(linuxServerId, now);
         mapper.completeReadyRollouts(now);
     }
 
@@ -141,9 +185,73 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
                     }
                     return Optional.of(new PublicAgentConfigRolloutSyncRequest(
                             row.rolloutId(), AgentConfigRolloutScope.valueOf(row.scope()), row.scopeKey(),
-                            row.branch(), row.commitHash(), row.initiatedByUserId(), row.traceId(),
+                            row.branch(), row.commitHash(), row.discardSharedRuntimeChanges(),
+                            row.initiatedByUserId(), row.traceId(),
                             row.retryCount(), leaseUntil, leaseToken));
                 });
+    }
+
+    @Override
+    public void savePendingPublicWorktrees(
+            String rolloutId,
+            String linuxServerId,
+            String targetCommit,
+            String traceId,
+            List<PublicAgentConfigWorktreePending> pendingWorktrees,
+            Instant now) {
+        if (pendingWorktrees == null || pendingWorktrees.isEmpty()) {
+            return;
+        }
+        mapper.upsertPendingPublicWorktrees(
+                rolloutId, linuxServerId, targetCommit, traceId, pendingWorktrees, now);
+    }
+
+    @Override
+    @Transactional
+    public Optional<PublicAgentConfigWorktreeClaim> claimPendingPublicWorktree(
+            String linuxServerId,
+            Instant now,
+            Instant leaseUntil) {
+        return mapper.findClaimablePublicWorktrees(linuxServerId, now, 1).stream()
+                .findFirst()
+                .flatMap(row -> {
+                    String leaseToken = com.enterprise.testagent.common.id.RuntimeIdGenerator
+                            .publicAgentConfigRolloutLeaseToken();
+                    int updated = mapper.markPublicWorktreeProcessing(
+                            row.rolloutId(), row.worktreeId(), leaseToken, leaseUntil, now);
+                    if (updated != 1) {
+                        return Optional.empty();
+                    }
+                    return Optional.of(new PublicAgentConfigWorktreeClaim(
+                            row.rolloutId(), row.worktreeId(), row.userId(), row.linuxServerId(),
+                            row.targetCommit(), row.traceId(), row.retryCount(), leaseUntil, leaseToken));
+                });
+    }
+
+    @Override
+    public boolean markPublicWorktreeRetry(
+            PublicAgentConfigWorktreeClaim claim,
+            int retryCount,
+            Instant nextRetryAt,
+            String reason,
+            Instant now) {
+        return mapper.markPublicWorktreeRetry(
+                claim.rolloutId(), claim.worktreeId(), claim.leaseToken(), retryCount, nextRetryAt, reason, now) == 1;
+    }
+
+    @Override
+    public boolean markPublicWorktreeSynchronized(PublicAgentConfigWorktreeClaim claim, Instant now) {
+        return mapper.markPublicWorktreeSynchronized(
+                claim.rolloutId(), claim.worktreeId(), claim.leaseToken(), now) == 1;
+    }
+
+    @Override
+    public boolean abandonPublicWorktree(
+            PublicAgentConfigWorktreeClaim claim,
+            String reason,
+            Instant now) {
+        return mapper.abandonPublicWorktree(
+                claim.rolloutId(), claim.worktreeId(), claim.leaseToken(), reason, now) == 1;
     }
 
     @Override

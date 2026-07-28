@@ -97,6 +97,7 @@
 | `system-management` | `/api/internal/platform/system-management/users` | 无旧 URL |
 | `system-management` | `/api/internal/platform/system-management/users/{userId}/roles` | 无旧 URL |
 | `system-management` | `/api/internal/platform/system-management/roles` | 无旧 URL |
+| `integration/toolbox` | `/api/internal/platform/toolbox/tools`、`/api/internal/platform/toolbox/tools/{toolId}/clicks` | 无旧 URL |
 | `configuration-management` | `/api/internal/platform/configuration-management/applications` | 无旧 URL |
 | `configuration-management` | `/api/internal/platform/configuration-management/personal/ssh-keys` | 无旧 URL |
 | `configuration-management` | `/api/internal/platform/configuration-management/workspace-create-operations/{operationId}` | 无旧 URL |
@@ -337,9 +338,10 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 | `GET` | `/public/status` | 查询公共 Agent Git 是否启用、根目录、agent 目录、当前分支和 commit。 |
 | `GET` | `/public/branches` | 使用当前登录用户唯一 SSH key 实时查询公共 Agent Git 远端分支，不缓存；内部部署保存 `host[:port]/path` 片段时，后端会在执行 `git ls-remote` 前按当前用户统一认证号拼接 `ssh://{unifiedAuthId}@...`。 |
 | `GET` | `/public/repositories` | 查询 Redis 中当前仍在线的后端服务器及当前后端的公共配置仓库初始化状态；在线 Java 快照按 `linuxServerId` 合并，响应不包含目标后端 `listenUrl`。 |
+| `GET` | `/public/rollout` | 查询最近一次公共 Agent 全局刷新以及每台服务器的 Git 同步、进程排空、个人 worktree 补偿计数和 `lastError`；仅 `SUPER_ADMIN` 可读。 |
 | `GET` | `/public/repositories/local` | 目标后端本机状态查询入口，仅供后端到后端代理使用。 |
 | `POST` | `/public/repositories/{linuxServerId}/initialize` | 通过当前后端代理到目标服务器，用当前登录用户唯一 SSH key 初始化或刷新该服务器本地公共配置仓库。 |
-| `POST` | `/public/update` | 先把远端公共分支合并到当前管理员在本服务器的稳定个人 worktree，再按分支 clone/fetch/checkout/pull 共享运行副本并广播其他服务器同步；任一工作树有已跟踪修改时必须显式确认恢复。rollout 激活后即返回，不等待服务器同步和进程排空。 |
+| `POST` | `/public/update` | 读取所选远端分支的目标 commit，建立一次全局 rollout；所有服务器共享运行副本 checkout/reset 到同一 commit，所有有效公共个人 worktree 原生 merge 该 commit。rollout 激活后即返回，不等待服务器同步和进程排空。 |
 | `POST` | `/public/update-and-push` | 公共配置"提交并推送"复合操作：先 `fetch` 远端最新提交，再 stage/commit 本地变更，随后 merge `origin/{branch}` 并 push；`discardLocalChanges=true` 时先 `git reset --hard HEAD` 放弃受控仓库中的已跟踪修改。远端提交和 rollout 激活确认后即返回，服务器同步和进程排空在后台继续。 |
 | `POST` | `/file-ws-route` | 查询 Agent 配置文件 WebSocket 应连接的目标后端，body 包含 `scope`、`workspaceId?`、`worktreeId?`、`linuxServerId?`。 |
 | `POST` | `/public/worktrees` | 在请求指定且已初始化的 `linuxServerId` 上确保当前用户的长期公共配置 worktree；分支和目录按用户稳定命名、不包含应用版本，同一用户重复调用返回已有有效 worktree。目标服务器本地 Git 根目录未初始化时返回 `CONFLICT`，不在该接口 clone。 |
@@ -361,9 +363,9 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 
 公共 publish 在个人 worktree 合并远端公共分支发生冲突时返回 HTTP 409、错误码 `CONFLICT`，`details.conflictFiles` 携带冲突文件，并保留个人 worktree 的 Git 原生 merge 现场；前端在统一 Git 变更面板中选择保留本地、保留远程、手工合并或取消合并，解决后提交并再次推送。工作空间级旧 worktree publish 的冲突语义保持不变。
 
-公共仓库显式拉取会依次校验当前管理员在目标服务器的个人公共 worktree 和该服务器共享运行副本。任一副本脏时返回 HTTP 409、错误码 `CONFLICT`，安全 details 包含 `repositoryKind=PERSONAL_WORKTREE|SHARED_RUNTIME`、绝对 `path`、最多五个 `dirtyFiles` 和 `discardLocalChangesAllowed=true`；前端据此在目标服务器行展示真实副本与文件，不能仅依赖共享仓库列表状态推断。管理员显式确认放弃后只 reset 已跟踪内容，未跟踪文件不删除；其他管理员的个人 worktree 不受影响。
+公共 Git 刷新以远端分支解析出的 commit hash 为唯一目标，不把发起服务器当前 HEAD 当作目标。请求先聚合各服务器只读状态；共享运行副本存在 staged、unstaged 或 untracked 内容且未明确确认时返回 HTTP 409，安全 details 包含 `linuxServerIds`、`repositoryKind=SHARED_RUNTIME` 和 `discardLocalChangesAllowed=true`，且此时不会建立 rollout 或修改工作树。确认后先取得公共全局锁，再由各服务器 worker 将共享运行副本恢复并清理到目标 commit。确认只作用于共享运行副本；个人 worktree 永不 stash/reset/clean，而是执行原生 `git merge --no-edit <targetCommit>`，非重叠 staged、unstaged、untracked 内容原样保留。Git 判定会覆盖本地文件或产生真实冲突时，该 worktree 进入独立 `AWAITING_USER` 补偿，不能阻塞其它 worktree、共享副本或主 rollout。
 
-公共 `update`、`update-and-push`、`publish` 的同步广播携带内部 `rolloutId`。发布端在远端 push 或共享副本修改前先写 `PREPARING` 任务、发起人用户 ID 以及持久化服务器清单（包含发布瞬间离线的已登记服务器），远端提交确认后激活为 `DRAINING`，形成后端禁发硬闸门；一旦该任务建立，广播失败、服务器离线或 Java 重启都只会保留 `PENDING/DRAINING` 并由定时补偿继续处理，不允许以失败状态提前开闸。发布请求不再认领或执行本服务器同步，只在远端事实和 rollout 激活确认后发送低延迟广播并返回；本机与其它服务器均由广播消费者或默认每 5 秒运行的数据库补偿程序认领，因此 Git 同步、进程登记和旧 Session 排空不会占用发布 HTTP 请求。每台服务器使用发起人的已存 SSH 凭据把本机共享运行仓库 checkout/reset 到目标 commit；只有取得本服务器 manager 的实时进程清单、把已有 opencode 进程及其用户快照写入目标表后，才确认该服务器同步完成。凭据只在目标 Java 从数据库读取并解密，不进入广播 payload。
+公共 `update`、`update-and-push`、`publish` 的同步广播携带内部 `rolloutId`。发布端在远端 push 或任何工作树修改前先写 `PREPARING` 任务、发起人用户 ID、是否已确认恢复共享运行副本以及持久化服务器清单（包含发布瞬间离线的已登记服务器），远端提交确认后激活为 `DRAINING`，形成后端禁发硬闸门；一旦该任务建立，广播失败、服务器离线或 Java 重启都只会保留 `PENDING/DRAINING` 并由定时补偿继续处理，不允许以失败状态提前开闸。发布请求不再认领或执行本服务器同步，只在远端事实和 rollout 激活确认后发送低延迟广播并返回；本机与其它服务器均由广播消费者或默认每 5 秒运行的数据库补偿程序认领，因此 Git 同步、进程登记和旧 Session 排空不会占用发布 HTTP 请求。每台服务器使用发起人的已存 SSH 凭据把本机共享运行仓库 checkout/reset 到目标 commit，并尝试把同一 commit 原生合入本机所有有效公共个人 worktree；个人 worktree 的冲突只登记补偿任务。只有取得本服务器 manager 的实时进程清单、把已有 opencode 进程及其用户快照写入目标表后，才确认该服务器同步完成。凭据只在目标 Java 从数据库读取并解密，不进入广播 payload。前端在活动期每 2 秒轮询 `GET /public/rollout`，所有重复刷新入口禁用；终态保留各服务器同步/排空计数、个人 worktree 计数与 `lastError`。
 
 所有服务器确认后，每台 Java 的固定延迟任务只认领 `target.linuxServerId=本机 linuxServerId` 的一条目标；租约 token 隔离过期 worker，发布端可以统一插表，但不能替其他服务器执行。公共发布登记本机全部存量进程；应用发布只登记已经成功同步相关个人 worktree 的用户进程；个人拉取范围只登记发起用户当前服务器上的本人进程。目标 Java 先用本机 manager 快照确认端口仍存在，再经本机 opencode 逐一对该进程历史绑定的所有 Workspace 目录调用 `GET /session/status`；任一目录出现 `busy/retry`、未知状态或非法响应都跳过 dispose、累计 `retryCount` 并按退避持续重试。全部目录明确空闲后，对这个用户专属 opencode 进程只调用一次 `POST /global/dispose`；明确返回布尔 `true` 才把目标置为 `DISPOSED`。该用户的全部目标完成后立即恢复发送，下一次请求重新创建 Instance 并加载已同步的 `opencode.jsonc`、Agent 和 Skill；不等待其他用户。manager 已明确确认目标进程不存在时按已释放处理；manager 清单不可用时继续重试。全部目标结束后主 rollout 原子变为 `COMPLETED`；公共范围同一时刻只允许一个活动任务，应用范围按应用版本 ID 各自只允许一个活动任务，个人拉取范围不进入这两类唯一锁。已完成应用 rollout 后续补偿产生的用户目标仍由同一 target worker 处理，并在 dispose 完成前只阻止该用户发送。
 
@@ -389,9 +391,9 @@ ticket 响应中的 `webSocketUrl` 是签发 ticket 的当前 Java 绝对地址�
 }
 ```
 
-`discardLocalChanges` 可选且默认 `false`。公共仓库存在已跟踪文件修改（包括误删）时，默认返回 `CONFLICT`；只有超级管理员在页面明确勾选放弃本地修改并传 `true` 后，后端才执行 `git reset --hard HEAD` 再 fetch/checkout/pull。该操作不删除未跟踪文件。
+`discardLocalChanges` 可选且默认 `false`。任一服务器共享运行副本存在本地修改时，默认在任何工作树变更前返回 `CONFLICT`；只有超级管理员针对列出的服务器明确确认并传 `true` 后，各服务器 worker 才在持有全局 rollout 锁时恢复已跟踪内容并定点删除 Git status 枚举出的未跟踪文件，最终 reset 到远端目标 commit。个人 worktree 不受该参数影响。
 
-`POST /public/repositories/{linuxServerId}/pull` 请求体同 `/public/update`，用于超级管理员在“系统管理 → 配置管理 → opencode 公共配置管理”中对指定服务器执行显式拉取。该接口按 `linuxServerId` 路由到目标 Java 后端，使用当前登录管理员唯一 SSH key；如果该管理员在目标服务器已有稳定 `public-{userId}` 个人 worktree，后端先在个人 worktree 中 `fetch` 并合并 `origin/{branch}`，成功后才更新服务器共享运行副本的 `fetch/checkout/pull --ff-only`，避免接口返回成功但文件树仍读取旧 worktree。内部部署公共 Git 地址同样按当前用户统一认证号拼接实际 SSH URL。`discardLocalChanges` 可选且默认 `false`；个人 worktree 或共享副本有未提交修改时默认返回 `CONFLICT`，传 `true` 时只恢复已跟踪本地修改、不删除未跟踪文件。个人 worktree 合并冲突会保留冲突文件并返回既有 `conflictFiles`，共享副本不会继续更新。响应为最新的 `PublicRepositoryStatusResponse`。该接口只负责拉取远端最新提交，不主动提交本地业务修改、不 push。`configDirPath` 必须由公共配置 Git 仓库初始化后产生且非空，后端不会在 manager 启动时创建空配置目录。
+`POST /public/repositories/{linuxServerId}/pull` 保留给旧客户端兼容；请求仍按 `linuxServerId` 路由，但底层调用同一公共全局 rollout，不再表示“只拉这一台”。新版“系统管理 → 配置管理”只展示一个全局刷新按钮，不允许选择服务器。`configDirPath` 必须由公共配置 Git 仓库初始化后产生且非空，后端不会在 manager 启动时创建空配置目录。
 
 `POST /public/update-and-push` 请求体：
 
@@ -1181,6 +1183,10 @@ WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSoc
 
 服务器目录选择器只通过短期 ticket 建立的文件 WebSocket 使用；缺失、不可访问或非目录返回 `VALIDATION_ERROR`。创建服务器工作空间仍要求 `SUPER_ADMIN`，且目标服务器必须与当前 agent 服务器一致。
 
+应用源码 Runtime Workspace 的 `.testagent-appsource-index.json` 属于平台保留元数据：`workspace.list/search` 不返回，`read/read.chunk/write/upload/copy/move/rename/delete/status` 一律拒绝；服务端用数据库 snapshot 的权威 SHA-256 发现缺失或损坏后原子修复。应用源码 Workspace 的 route、ticket 和每条 RPC 还必须实时复核当前 active generation、snapshot 未过期、本机 READY replica、应用启用/仓库关联与成员关系。
+
+应用源码最近选择解析只在可确定的 `FORBIDDEN`、`NOT_FOUND` 或 `CONFLICT` 失效场景删除偏好；Git、文件系统或内部服务故障返回原错误并保留偏好，避免瞬时故障被误当成用户选择失效。显式清除最近选择也必须带当前 Linux 服务器上下文，先按与打开工作区相同的 active generation、未过期 snapshot、本机 READY replica、应用关联和成员规则完成鉴权，再删除偏好。
+
 文件 WebSocket RPC 的 `path` / `sourcePath` / `targetPath` 必须解析在 workspace root 内，越权路径返回 `FORBIDDEN`。目录列表为单层、不递归，默认最多 1000 项；`workspace.search` 按工作区相对路径递归匹配，空 query 可返回受深度、数量和超时保护的文件目录，默认最多 200 项、20 层、5 秒，并跳过 `.git`、`node_modules` 等黑名单目录。文件读取和文本写入只支持 UTF-8，默认一次性预览/可编辑阈值为 5 MiB，可通过 `test-agent.files.max-preview-bytes` / `TEST_AGENT_MAX_PREVIEW_BYTES` 配置；普通读取超出阈值时返回 `VALIDATION_ERROR`，`details.reason=PREVIEW_TOO_LARGE` 与 `size/maxPreviewBytes`，前端随即改用 `workspace.read.chunk`、`workspace.view.read.chunk` 或 `agent-config.read.chunk`，按约 512 KiB 分段形成只读预览。渐进预览没有应用层总量上限，用户可逐段或加载到 EOF；界面必须提示完整加载可能占用大量内存并导致编辑器卡顿。每段响应含 UTF-8 字节 `nextOffset`、`size`、`lastModifiedMillis` 和 `eof`，后续请求回传大小/修改时间快照；加载期间文件变化返回 `CONFLICT + PREVIEW_CHANGED`，禁止混合拼接。新建二进制文件使用同一连接上的 `workspace.upload.begin/chunk/complete`，取消时调用 `workspace.upload.abort`；默认上传分片 256 KiB，可通过 `test-agent.files.upload-chunk-bytes` / `TEST_AGENT_UPLOAD_CHUNK_BYTES` 调整，最大 4 MiB。分片上传不设置应用层文件总大小上限，临时文件在完成并校验声明大小前不会作为目标文件出现，失败、取消或连接关闭时清理。WebSocket 单帧上限只覆盖一次性预览文本、一个渐进预览分段或一个 Base64 上传分片及 RPC envelope，不等于上传或最终预览总大小。旧 `workspace.upload` 单帧 Base64 操作仅为兼容保留，仍受一次性阈值约束。上传、`workspace.copy`、`workspace.move` 都不覆盖已有目标；`workspace.move` 保持 `workspaceId/sourcePath/targetPath` 请求与 `null` 成功响应，在同一工作区以一次原子文件系统重命名整体移动普通文件或普通目录（包括非空目录），不递归拆分；Linux 使用从 `/` 逐段打开的目录句柄和内核 `renameat2(RENAME_NOREPLACE)`，macOS 使用逐段目录句柄和 `renameatx_np(RENAME_EXCL | RENAME_NOFOLLOW_ANY)`，Windows 使用已核对最终路径的源条目、目标父目录句柄和不替换的 `SetFileInformationByHandle`，目标父目录替换或目标并发创建都失败关闭。同路径幂等成功；缺失源为 `NOT_FOUND`，目标存在为 `CONFLICT`，根、符号链接/特殊文件或目录自身后代目标为 `VALIDATION_ERROR`，路径越界为 `FORBIDDEN`。它仍是文件 WebSocket RPC，不新增 HTTP API 或 RunEvent SSE；应用配置源与目标路径都对完整 `.opencode/**` 命名空间执行 `APP_ADMIN` 保护校验。
 
 组合视图只消费当前工作区 `.opencode/opencode.jsonc` 中平台可验证的本地引用对象。后端会重新校验引用别名、`path`、`merge`、`sdd-folder-name`、当前应用关联的 `APPLICATION_ASSET_REPOSITORY`、总体和本机副本 `READY` 状态，以及当前平台解析后的 `OPENCODE_REFERENCES_DIR`；配置不能把视图指向任意绝对路径、其它应用仓库、`.git` 或符号链接。单个引用失效时 `workspace.view.list` 仍返回可用工作区内容，并在 `warnings` 中说明被跳过的别名；每层组合结果最多 1000 项，超限通过 `truncated=true` 显式标记。
@@ -1296,6 +1302,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 鉴权：
 
 - 所有接口要求已登录用户。
+- `GET /applications/git-refresh-scopes`、`POST /applications/{appId}/git-refresh` 与 `POST /applications/{appId}/git-refresh-groups` 是共享控制面操作，仅允许 `SUPER_ADMIN`，不要求超级管理员先加入目标应用或启动个人 OpenCode；其它应用工作区接口仍按下述成员规则校验。
 - 应用、模板、版本、切换最近使用等应用相关接口要求当前用户是 `application_members` 中的有效成员；不区分管理员和普通成员。
 - 个人工作区接口要求当前用户是个人工作区拥有者且属于对应应用。
 - 托管工作区成员校验失败返回 `FORBIDDEN`，message 固定包含当前加载上下文：`无该应用工作区权限：当前正在加载应用 {appName}({appId})，版本 {version/versionId/未确定}，工作区 {workspaceKind}:{workspaceName/workspaceId/未确定}`。`details` 仅放安全业务字段：`loadingStage`、`appId`、`appName`、`versionId`、`version`、`applicationWorkspaceId`、`workspaceKind`、`workspaceName`、`workspaceId`、`personalWorkspaceId`；无值字段不返回。
@@ -1303,6 +1310,9 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `GET` | `/applications` | 查询当前用户加入的启用应用。 |
+| `GET` | `/applications/git-refresh-scopes` | 超级管理员查询全部应用实际将刷新的工作空间、版本和 feature 分支。 |
+| `POST` | `/applications/{appId}/git-refresh` | 超级管理员按应用刷新全部物理 feature 仓库组，并触发相关个人 worktree 与应用 Agent 配置安全收敛。 |
+| `POST` | `/applications/{appId}/git-refresh-groups` | 超级管理员按 `repositoryId + version + branch` 精确刷新一个物理 feature 仓库组及其关联 worktree。 |
 | `GET` | `/applications/{appId}/workspace-templates` | 查询应用工作空间切换模板，只返回 `application_workspaces.enabled=true` 的配置。 |
 | `GET` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 查询模板下已创建的应用版本工作区。 |
 | `POST` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 创建或接管应用版本工作区，并创建运行态 Workspace。 |
@@ -1332,6 +1342,71 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/publish-preview` | 发布前预检应用分支 HEAD、待合入提交数、A/M/D/R 汇总和样例路径；不修改个人 worktree。若个人 worktree 已处于未完成 merge，只返回已记录的应用 HEAD，不重复拉取远程。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/commit` | 仅在个人 worktree stage 并提交 `files` 白名单；不推送、不广播。请求包含 `.opencode/**` 时要求 `APP_ADMIN`（`SUPER_ADMIN` 继承）。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 要求 `files` 已在个人 worktree 本地提交，再从个人 `HEAD` 按白名单投影到应用 feature worktree，提交并推送；不 merge 整个个人分支。请求包含 `.opencode/**` 时要求 `APP_ADMIN`，响应包含 `currentStep/executedCommands`。 |
+
+`GET /applications/git-refresh-scopes` 返回所有启用和停用应用。每个应用的 `groups[]` 按实际执行使用的 `repositoryId + version + branch` 去重，`workspaces[]` 列出该物理 feature 组对应的 `versionId/applicationWorkspaceId/workspaceName/directoryPath/enabled`；因此同一工作空间的不同版本、不同工作空间的不同分支都会逐项展示。该只读接口和执行接口复用同一分组程序，不访问 Git 远端，也不发送 `X-Test-Agent-Linux-Server-Id` 首跳提示。
+
+范围响应示例：
+
+```json
+[
+  {
+    "appId": "app-demo",
+    "appName": "示例应用",
+    "enabled": true,
+    "totalGroups": 1,
+    "groups": [
+      {
+        "repositoryId": "repo_1",
+        "repositoryName": "测试工作库",
+        "version": "20260728",
+        "branch": "feature_testagent_20260728",
+        "workspaceCount": 1,
+        "workspaces": [
+          {
+            "versionId": "awv_1",
+            "applicationWorkspaceId": "aws_1",
+            "workspaceName": "登录测试",
+            "directoryPath": "demo/login",
+            "enabled": true
+          }
+        ]
+      }
+    ]
+  }
+]
+```
+
+`POST /applications/{appId}/git-refresh` 使用当前超级管理员保存的唯一 SSH Key，对应用下每个去重后的 `repositoryId + version + branch` 物理 feature 仓库组执行 fetch 和只允许快进的更新。feature 工作树存在未提交修改、远端发生分叉、SSH Key 缺失或 Git 不可用时，该组返回 `FAILED`，其它组继续执行；接口以 HTTP 成功响应返回完整汇总，调用方必须检查 `failedGroups`，不能把部分成功显示为全量成功。更新或已是最新的组都会重新发布固定目标并触发相关服务器个人 worktree 的原生 Git merge；非重叠 staged、unstaged 和 untracked 修改保留，可能被覆盖的 worktree 保持待处理，真实冲突保留三方 index，不执行 stash、reset 或强制覆盖个人内容。远端差异包含应用 `.opencode/**` 时复用既有应用 Agent rollout，仅在目标提交已进入对应个人 worktree 后等待该用户空闲并 dispose。该入口不要求超级管理员拥有 READY OpenCode 进程，也不发送 `X-Test-Agent-Linux-Server-Id` 首跳提示。
+
+`POST /applications/{appId}/git-refresh-groups` 请求体为 `{"repositoryId":"repo_1","version":"20260728","branch":"feature_testagent_20260728"}`。三个字段必须精确命中范围查询中的同一个物理组；不存在时返回 `NOT_FOUND`，不能只凭分支名误选同名分支。命中后只复用上述执行程序处理该组，响应仍使用 `ApplicationGitRefreshResponse`，其中 `totalGroups=1`；同应用其它分支、target、replica 和个人 worktree 均不处理。
+
+响应示例：
+
+```json
+{
+  "appId": "app-demo",
+  "appName": "示例应用",
+  "totalGroups": 2,
+  "updatedGroups": 1,
+  "unchangedGroups": 0,
+  "failedGroups": 1,
+  "groups": [
+    {
+      "versionId": "awv_1",
+      "repositoryId": "repo_1",
+      "repositoryName": "测试工作库",
+      "version": "20260728",
+      "branch": "feature_testagent_20260728",
+      "workspaceCount": 2,
+      "previousCommitHash": "abc123",
+      "commitHash": "def456",
+      "status": "UPDATED",
+      "errorCode": null,
+      "message": "已刷新 feature，并触发相关 worktree 收敛"
+    }
+  ]
+}
+```
 
 `POST /applications/{appId}/workspace-templates/{templateId}/versions` 请求体：
 
@@ -2743,6 +2818,28 @@ Token 列表及写入响应只返回 `{tokenId,name,referencedProviderCount,crea
 
 代理只接受 `Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}`；请求头 `X-Enterprise-Model-Provider` 指定内部供应商，`ucid` 由 opencode 配置从 `ENTERPRISE_UCID` 注入。Java 通过一次联表查询把启用供应商构造成不可变的 `providersById` 与 `authTokensByProviderId` 快照；单次代理请求在订阅请求体前完成代理密钥校验，并从同一代快照同时解析 `baseUrl` 和该 Provider 关联的 Token，无效凭据或供应商不会占用请求体聚合缓冲区；解析过程不访问数据库，也不会串用其它 Provider 的 Token。随后转发到对应 OpenAI-compatible 路径并注入 `ucid` 和 traceId。代理请求体上限固定为 `2 MiB`（`2097152` bytes），只在该内部端点按字节聚合，不放大全局 WebFlux codec 缓冲区；超限返回统一 `413 PAYLOAD_TOO_LARGE`，`details.maxBytes=2097152`，且不记录或回显模型请求内容。请求体的顶层 `model` 使用流式 JSON 扫描校验，不构建完整对象树，同时会消费完整文档并拒绝尾部畸形内容或额外根值。仅 `2xx + text/event-stream` 进入 SSE 语义转换，事件字段和 `[DONE]` 保留；没有 `reasoning_content` 时，`delta.content` 里的 `<think>...</think>` 会转换为 `delta.reasoning_content`，普通正文仍保留在 `delta.content`；已有 textual `reasoning_content` 时整个 delta 原样保留，不再解析 `content`。非 `2xx`（包括 `4xx + text/event-stream`）和非 SSE 响应原样透传状态码、Content-Type、Content-Encoding、错误正文、Retry-After 与 trace header；连接/首个响应/首个事件/事件空闲边界分别为 10 秒/30 秒/30 秒/120 秒，不设置整体 SSE 生命周期超时，下游取消会取消上游订阅。
 
+Codex `0.145.0` 使用固定子路径：
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `POST` | `/api/internal/platform/opencode-runtime/internal-model-proxy/v1/responses` | 将 Codex 所需的流式 Responses API 子集适配到选定供应商 `/chat/completions`。 |
+
+该路径必须携带与原代理相同的 Bearer、`X-Enterprise-Model-Provider` 和 `ucid`。请求只支持
+`stream=true`、纯文本 `message`、function tools、`function_call` 和
+`function_call_output`；`instructions` 转为 system message，连续 function call 转为 assistant
+tool calls，工具结果转为 tool message。图片、文件、内置 Web 工具、非 function tool、非纯
+文本格式、`previous_response_id` 和非流式请求返回统一 `VALIDATION_ERROR`。reasoning item、
+`reasoning`、加密 reasoning include 等字段不转发给供应商。
+
+供应商 `2xx text/event-stream` 被转换为 Codex 可消费的 `response.created`、
+`response.output_text.delta`、`response.function_call_arguments.delta`、
+`response.output_item.done`、`response.completed` 或脱敏 `response.failed` 事件；usage 映射为
+`input_tokens/output_tokens/total_tokens` 及缓存、reasoning token 明细。畸形上游事件只返回
+稳定错误码和通用说明，不回显上游 payload；上游在 `[DONE]` 前断流或事件超时同样转换为
+脱敏 `response.failed`。非 2xx 与非 SSE 仍沿用原代理的状态和正文透传，
+原 `/chat/completions` 转换行为保持不变。该端点仅供 Codex MCP 子进程使用，不新增前端接口、
+generated SDK 或 RunEvent。
+
 OpenCode 1.18.4 的 `/api/model`、`/api/provider` 即使配置了 `enabled_providers` 仍可能返回 Zen；平台不得据此重新引入数据库模型目录，而是通过上述实例级配置 GET 读取合并后的 Provider 白名单，再由前端按 Provider ID 同时过滤两个原生目录。白名单限制的是企业 Provider，不限制这些 Provider 内的模型数量。
 
 opencode 公共配置样例（企业单后端部署可直接使用 `deploy/internal/opencode.jsonc.example`）：
@@ -3085,6 +3182,75 @@ Diff API 属于平台 Run 级能力。Controller 只调用 `RunDiffApplicationSe
 - Diff 文件对象可新增字段，前端必须忽略未知字段。
 - 当前不支持 per-file 后端回滚；前端“当前文件接受/拒绝”只能作为当前选择和反馈，不承诺后端按文件应用。
 - legacy 接受/拒绝继续通过 append-only RunEvent 记录；`REDIS_SUMMARY` 只在 Redis 保存动作详情，PostgreSQL 仅更新聚合计数。
+
+### 工具盒子目录与点击
+
+Base URL：`/api/internal/platform/toolbox`。两个接口都要求平台登录，但不校验 `SUPER_ADMIN`、`APP_ADMIN` 或其它角色；所有登录用户使用同一目录。具体 `/toolbox/apps/...` 静态工具路径不属于后端 API，不执行工具级鉴权。
+
+#### 查询目录
+
+`GET /api/internal/platform/toolbox/tools` 无查询参数，请求成功的 `data`：
+
+```json
+{
+  "catalogVersion": "2026-07-27.it-tools-2024.10.22-7ca5933.omni-tools-0.6.0",
+  "total": 193,
+  "hotLimit": 10,
+  "tools": [
+    {
+      "toolId": "it-tools.token-generator",
+      "source": "IT_TOOLS",
+      "sourceName": "IT-Tools",
+      "sourceVersion": "2024.10.22-7ca5933",
+      "nameZh": "Token 生成器",
+      "nameEn": "Token generator",
+      "descriptionZh": "生成指定字符集的随机字符串。",
+      "category": "SECURITY",
+      "categoryLabel": "安全与加密",
+      "keywords": ["token", "random", "密码"],
+      "launchPath": "/toolbox/apps/it-tools/token-generator",
+      "clickCount": 12,
+      "hotRank": 1
+    }
+  ]
+}
+```
+
+稳定 `toolId` 形状为 `it-tools.<slug>` 或 `omni-tools.<category>.<slug>`；`launchPath` 只能属于 `/toolbox/apps/it-tools/` 或 `/toolbox/apps/omni-tools/`，且永远指向具体工具，不指向套件首页。固定分类为 `SECURITY/ENCODING/WEB/IMAGE/DEVELOPMENT/NETWORK/MATH/TEXT/DATA/DATE_TIME/AUDIO_VIDEO/PDF/OTHER`。重复能力保留各来源入口。
+
+`hotRank` 只为累计点击大于 0 的前 10 项赋值，其余为 `null`。排序依次为 `clickCount` 降序、最后有效计数时间降序、版本化目录顺序升序；零点击时所有 `hotRank` 都为 `null`。当前离线目录固定 193 项，摄像头录制和依赖 SimplePDF 在线 iframe 的 PDF Editor 不返回。
+
+#### 记录点击
+
+`POST /api/internal/platform/toolbox/tools/{toolId}/clicks` 请求体：
+
+```json
+{ "eventId": "tbx_019fa3671e677f81a261ff704e4b51ee" }
+```
+
+`eventId` 必填、非空且最长 128 字符，是一次打开动作的全局幂等键。客户端不得提交点击时间、用户、来源、计数结果或 traceId 字段；用户取当前认证主体，时间取服务端 UTC 时钟，traceId 取当前请求。
+
+成功 `data`：
+
+```json
+{
+  "toolId": "it-tools.token-generator",
+  "clickCount": 13,
+  "recorded": true,
+  "incremented": true
+}
+```
+
+- 首次 `eventId` 永久写入明细，`recorded=true`。
+- 同一用户同一工具距上次有效计数不足 30 秒时仍写明细，但 `incremented=false`，累计不变；恰好第 30 秒视为窗口到期，可以再次计数。
+- 窗口竞争成功时 `incremented=true`，累计原子加一，并把该明细标记为 counted。
+- 重复 `eventId` 不再写明细或参与窗口，返回 `recorded=false`、`incremented=false` 和该工具当前累计。
+
+不存在、已剔除或不属于当前版本目录的 `toolId` 返回 `404 NOT_FOUND`，安全消息为“工具不存在或当前离线版本不可用”；空/超长 `eventId` 返回 `400 VALIDATION_ERROR`；未登录返回 `401 UNAUTHENTICATED`。数据库异常走统一 `INTERNAL_ERROR`，不得影响浏览器原生链接是否打开。成功和错误都按统一 envelope 返回响应头/响应体同一个 traceId。
+
+兼容性：两个 API、字段和路径均为新增；工具字段可 additive 扩展，前端必须忽略未知字段。稳定工具 ID 在同一工具后续目录版本中不能复用给其它能力；目录数量和 `catalogVersion` 可随经过离线验收的上游升级变化。不新增 RunEvent SSE 事件。
+
+对应测试：`ToolboxControllerTest`、`ToolboxCatalogServiceTest`、`ToolboxCatalogContractTest`、`MyBatisToolboxClickRepositoryIntegrationTest` 和 PostgreSQL Testcontainers 并发/用户删除测试。
 
 ### 健康检查
 

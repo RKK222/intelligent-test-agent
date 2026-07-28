@@ -97,6 +97,9 @@ OPENCODE_CONFIG_DIR / manager configPath
 | 写入、暂存、提交、发布应用 Agent/Skill/JSONC | 禁止 | 允许 | 允许，且需为应用成员 |
 | 读取公共 Agent/Skill | 允许，读取共享运行副本 | 允许，读取共享运行副本 | 允许 |
 | 创建/写入/提交/推送公共个人 worktree | 禁止 | 禁止 | 允许，仅本人的 `public-{userId}` |
+| 系统管理按应用刷新全部 feature 与相关 worktree | 禁止 | 禁止 | 允许；不要求成为应用成员，但使用本人的 SSH Key |
+
+超级管理员应用刷新按 `repositoryId + version + branch` 去重物理 feature 组，逐组只允许快进；一组失败不阻断其它组，页面必须展示部分失败。成功组继续走固定 target、多服务器广播、个人 worktree 原生 merge 和应用 Agent rollout，不 stash/reset 个人内容。
 
 ## 3. 保存、提交和推送后的影响
 
@@ -126,6 +129,7 @@ OPENCODE_CONFIG_DIR / manager configPath
 | 个人 workspace 拉取远程 | 从当前 workspace 标题栏“…”菜单确认应用 Agent 范围和直接 Git merge 后，在点击者的整棵应用个人 worktree fetch/merge 远端；确认可按用户在当前浏览器设为不再提示，但每次仍展示执行步骤和结果文件；同一分支的其它 workspace 目录与应用 Agent 一起更新；不提交、不推送、不修改共享 target | 其他用户、共享副本和公共 Agent 均不变化；应用 workspace 与应用 Agent 统一交给原生 Git，不重叠改动原样保留，只有实际会被覆盖的文件阻止拉取 | 结果弹框明确显示：普通文件无 dispose；成功合入应用 Agent/Skill/JSONC 且本人进程运行时，后端以 `PERSONAL_APPLICATION` 只登记当前用户并持久化等待空闲；刷新或关闭页面不丢任务，前端不保存待 dispose 标记。进程未运行时下次启动直接加载；不启动共享 APPLICATION 或 PUBLIC rollout |
 | 公共 Agent/Skill/JSONC 保存 | 只写当前超管公共个人 worktree并进入公共 Diff；目录定义保存后把本人的有效公共配置软链接切到该 worktree | 无 | 当前任务空闲时只 dispose 当前超管本人，下一次 bootstrap 读取个人 worktree；共享副本和别人不变 |
 | 公共 Agent/Skill/JSONC 本地提交 | 只更新 `public-{userId}` | 无 | 不新增 dispose；本人保存后的预览链接继续有效 |
+| 超管刷新公共 Agent Git | 从远端分支解析固定 commit；全服务器共享运行副本 checkout/reset 到该 commit，所有有效公共个人 worktree 原生 merge。共享副本 dirty 必须先聚合确认且锁内恢复；个人 worktree 不 stash/reset/clean | 非重叠 staged/unstaged/untracked 内容原样保留；覆盖风险或冲突只把对应 worktree 记为 `AWAITING_USER`，其它用户和服务器继续 | 主 rollout 按服务器同步并逐用户排空；页面活动期禁用重复刷新并展示每服务器 `lastError`。个人补偿不延长主 rollout，收敛后再处理该用户运行态 |
 | 公共 Agent/Skill/JSONC 提交并推送 | 先合并远端公共分支并推送，再把固定提交同步到所有服务器公共运行副本 | 所有用户最终读取同一共享固定提交 | 全局 rollout 逐用户等待旧任务空闲，先把有效指针恢复到共享副本，再调用原生 `/global/dispose` |
 
 普通 workspace 文件推送成功后，平台会主动把固定 feature 提交 merge 到相关用户的个人 worktree，其他用户不需要手工点击“拉取远程”。干净 worktree 和只有非重叠本地改动的 worktree 都会自动更新；只有 Git 判断会覆盖本地文件或产生真实冲突时才等待该用户处理。“拉取远程”是本人主动补拉或重试入口，不是跨用户更新的必经步骤；普通文件不进入 OpenCode 配置缓存，因此无论自动更新还是个人拉取都不 dispose。
@@ -275,6 +279,7 @@ tools/create-workspace-branch-model-test-data.sh
 | INT-04 spec 发布拒绝 | 1. 任意角色先把 `spec/test-data/local-only-{tag}.md` 提交到个人分支。<br>2. 单独选择该路径点击提交并推送。<br>3. 再用 `./spec/...` 或重复分隔符别名调用一次。<br>4. 检查个人 HEAD 和远程 feature。 | `spec/**` 正常路径及规范化别名。 | 本地提交保留；两次发布都返回 `FORBIDDEN`；远程 feature 不含路径且 HEAD 不前进。 |
 | INT-05 普通成员写应用配置拒绝 | 1. 用 `USER` 读取应用 Agent。<br>2. 分别调用写入、stage、commit、publish。<br>3. 检查文件、index、HEAD 和远程 ref。 | 应用 `.opencode/agents/**` 测试路径。 | 读取允许；所有写操作返回 `FORBIDDEN`；工作树、index、个人 HEAD 和远程 ref 均不变化。 |
 | INT-06 个人 workspace 独立拉取 | 1. 在远端 feature 准备普通文件和应用 `.opencode/agents/**` 提交。<br>2. A 保持 clean；C 先保留一个与远端不重叠的 dirty 文件，再另造一个会被远端覆盖的 dirty/untracked 文件。<br>3. A 从当前 workspace 标题栏“…”菜单点击“拉取远程”，核对确认文案后选择“不再提示”；再次操作应直接进入过程弹框。<br>4. C 分别在两种本地状态下点击“拉取远程”。<br>5. 检查弹框中的 fetch/merge 顺序、更新文件、`runtimeReloadStatus/runtimeReloadId`，并刷新或关闭页面后确认 dispose 仍会完成；再核对共享 target、A/B/C HEAD、远程 ref 和运行态。 | 专用 feature；同时覆盖 workspace 与应用 Agent 路径。 | A 拉取后应用 workspace 和应用 Agent 都更新，且只有 A HEAD 变化；结果列出实际远程更新文件。A 进程运行时返回 `SCHEDULED` 并只生成 A 的 PERSONAL_APPLICATION server/target，空闲后 dispose；未运行时返回 `NOT_RUNNING` 且不建任务。C 的不重叠改动原样保留且拉取成功，会被覆盖时返回 `LOCAL_CHANGES` 并只列实际阻塞文件。B、共享 target、远程 ref 和公共 Agent 不变；无 commit/push 或服务器广播。应用 Agent 差异只处理拉取成功者本人，APPLICATION/PUBLIC rollout 均不启动。 |
+| INT-07 超级管理员刷新应用 Git | 1. 用 `SUPER_ADMIN` 打开“系统管理 → 配置管理 → 应用 Git 刷新”，选择含不同工作空间、不同版本/分支、同物理仓库多个目录和另一独立仓库组的专用测试应用。<br>2. 执行前核对页面列出的工作空间名称、版本和 feature 分支；先点击一个“刷新该分支”，确认其它分支未 fetch、target/replica/worktree 未变化。<br>3. 再点击“刷新全部分支”，展开逐组结果；制造一组 feature 脏工作树或远端分叉后重试。<br>4. 用 `APP_ADMIN` 和 `USER` 直接请求范围查询、单分支和全量刷新接口。 | 专用测试应用；超级管理员自己的 SSH Key 对全部仓库有权限。 | 页面预览与两类执行使用同一 `repositoryId + version + branch` 分组；每个工作空间版本显示实际分支。单分支请求只处理精确组选中的 feature 和相关 worktree，响应 `totalGroups=1`；全量请求中同组只执行一次，远端可快进组显示 `UPDATED` 或 `UP_TO_DATE`，非重叠本地状态保留；`.opencode/**` 变化只在提交已合入对应 worktree 后触发其应用 rollout。失败组显示 `FAILED/errorCode` 且其它组继续；无 stash/reset。非超管三个接口均返回 `FORBIDDEN`；请求不要求发起人加入应用、READY OpenCode 或用户进程服务器路由头。 |
 
 ### 7.4 自动化回归入口
 

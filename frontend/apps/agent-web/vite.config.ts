@@ -5,6 +5,10 @@ import { defineConfig, type Plugin } from "vite";
 import AutoImport from "unplugin-auto-import/vite";
 import Components from "unplugin-vue-components/vite";
 import { ElementPlusResolver } from "unplugin-vue-components/resolvers";
+import {
+  createToolboxDevProxyOptions,
+  toolboxSuiteRootGuard
+} from "./toolbox-dev-proxy";
 
 // 统一通过 import.meta.url 解析 workspace 包源码，避免硬编码绝对路径
 const pkgSrc = (name: string): string =>
@@ -61,6 +65,7 @@ export default defineConfig({
     exclude: ["mermaid", "@mermaid-js/layout-elk"]
   },
   plugins: [
+    toolboxSuiteRootGuard(),
     manualIndexRoute(),
     vue(),
     tailwindcss(),
@@ -92,6 +97,12 @@ export default defineConfig({
     host: devServerHost,
     port: 3000,
     proxy: {
+      ...createToolboxDevProxyOptions({
+        itToolsTarget:
+          process.env.TEST_AGENT_TOOLBOX_IT_TOOLS_URL ?? "http://127.0.0.1:18120",
+        omniToolsTarget:
+          process.env.TEST_AGENT_TOOLBOX_OMNI_TOOLS_URL ?? "http://127.0.0.1:18121"
+      }),
       "/xxl-job-admin": {
         target: process.env.TEST_AGENT_XXL_JOB_ADMIN_URL ?? "http://127.0.0.1:18080",
         changeOrigin: true

@@ -22,6 +22,54 @@ export type PageResponse<T> = {
   total: number;
 };
 
+export type ToolboxSource = "IT_TOOLS" | "OMNI_TOOLS";
+
+export type ToolboxCategory =
+  | "SECURITY"
+  | "ENCODING"
+  | "TEXT"
+  | "DATA"
+  | "WEB"
+  | "NETWORK"
+  | "DEVELOPMENT"
+  | "IMAGE"
+  | "AUDIO_VIDEO"
+  | "PDF"
+  | "DATE_TIME"
+  | "MATH"
+  | "OTHER";
+
+/** 离线工具目录单项；launchPath 只能是平台同源子路径。 */
+export type ToolboxTool = {
+  toolId: string;
+  source: ToolboxSource;
+  sourceName: string;
+  sourceVersion: string;
+  nameZh: string;
+  nameEn: string;
+  descriptionZh: string;
+  category: ToolboxCategory;
+  categoryLabel: string;
+  keywords: string[];
+  launchPath: string;
+  clickCount: number;
+  hotRank: number | null;
+};
+
+export type ToolboxCatalog = {
+  catalogVersion: string;
+  total: number;
+  hotLimit: number;
+  tools: ToolboxTool[];
+};
+
+export type ToolboxClickResult = {
+  toolId: string;
+  clickCount: number;
+  recorded: boolean;
+  incremented: boolean;
+};
+
 export type Workspace = {
   workspaceId: string;
   name: string;
@@ -339,6 +387,35 @@ export type PublicAgentRepositoryStatus = {
   currentBranch?: string | null;
   commitHash?: string | null;
   message?: string | null;
+  localChangesPresent?: boolean;
+};
+
+export type PublicAgentConfigRolloutServerStatus = {
+  linuxServerId: string;
+  syncStatus: string;
+  retryCount: number;
+  targetTotal: number;
+  targetPending: number;
+  targetDisposed: number;
+  targetAbandoned: number;
+  worktreeTotal?: number;
+  worktreePending?: number;
+  worktreeSynced?: number;
+  lastError?: string | null;
+  syncedAt?: string | null;
+  updatedAt: string;
+};
+
+export type PublicAgentConfigRolloutStatus = {
+  rolloutId: string;
+  status: string;
+  branch: string;
+  commitHash?: string | null;
+  failureReason?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+  servers: PublicAgentConfigRolloutServerStatus[];
 };
 
 export type AgentConfigWorktree = {
@@ -2095,6 +2172,58 @@ export type ApplicationDefinition = {
   appId: string;
   appName: string;
   enabled: boolean;
+};
+
+export type ApplicationGitRefreshScopeWorkspace = {
+  versionId: string;
+  applicationWorkspaceId: string;
+  workspaceName: string;
+  directoryPath: string;
+  enabled: boolean;
+};
+
+export type ApplicationGitRefreshScopeGroup = {
+  repositoryId: string;
+  repositoryName: string;
+  version: string;
+  branch: string;
+  workspaceCount: number;
+  workspaces: ApplicationGitRefreshScopeWorkspace[];
+};
+
+export type ApplicationGitRefreshScope = ApplicationDefinition & {
+  totalGroups: number;
+  groups: ApplicationGitRefreshScopeGroup[];
+};
+
+export type ApplicationGitRefreshGroupSelector = {
+  repositoryId: string;
+  version: string;
+  branch: string;
+};
+
+export type ApplicationGitRefreshGroup = {
+  versionId: string;
+  repositoryId: string;
+  repositoryName: string;
+  version: string;
+  branch: string;
+  workspaceCount: number;
+  previousCommitHash?: string | null;
+  commitHash?: string | null;
+  status: "UPDATED" | "UP_TO_DATE" | "FAILED";
+  errorCode?: string | null;
+  message: string;
+};
+
+export type ApplicationGitRefreshResult = {
+  appId: string;
+  appName: string;
+  totalGroups: number;
+  updatedGroups: number;
+  unchangedGroups: number;
+  failedGroups: number;
+  groups: ApplicationGitRefreshGroup[];
 };
 
 export type CreateApplicationPayload = {

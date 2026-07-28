@@ -17,6 +17,9 @@ import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutPre
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutRepository;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutTarget;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutStatus;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigWorktreeClaim;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigWorktreePending;
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.node.ExecutionNodeStatus;
@@ -107,6 +110,7 @@ public class PublicAgentConfigRolloutService
             String branch,
             String expectedCommitHash,
             String previousCommitHash,
+            boolean discardSharedRuntimeChanges,
             String localLinuxServerId,
             String initiatedByUserId,
             String traceId) {
@@ -116,6 +120,7 @@ public class PublicAgentConfigRolloutService
                 branch,
                 expectedCommitHash,
                 previousCommitHash,
+                discardSharedRuntimeChanges,
                 localLinuxServerId,
                 initiatedByUserId,
                 traceId);
@@ -137,6 +142,7 @@ public class PublicAgentConfigRolloutService
                 branch,
                 expectedCommitHash,
                 previousCommitHash,
+                false,
                 localLinuxServerId,
                 initiatedByUserId,
                 traceId);
@@ -175,6 +181,7 @@ public class PublicAgentConfigRolloutService
                 requireText(branch, "个人工作区分支不能为空"),
                 requireText(commitHash, "个人工作区提交不能为空"),
                 commitHash,
+                false,
                 requireText(userId, "用户 ID 不能为空"),
                 targetServer,
                 traceId,
@@ -196,6 +203,7 @@ public class PublicAgentConfigRolloutService
             String branch,
             String expectedCommitHash,
             String previousCommitHash,
+            boolean discardSharedRuntimeChanges,
             String localLinuxServerId,
             String initiatedByUserId,
             String traceId) {
@@ -221,6 +229,7 @@ public class PublicAgentConfigRolloutService
                 branch,
                 expectedCommitHash,
                 previousCommitHash,
+                discardSharedRuntimeChanges,
                 initiatedByUserId,
                 localLinuxServerId,
                 traceId,
@@ -275,6 +284,13 @@ public class PublicAgentConfigRolloutService
             String linuxServerId,
             AgentConfigRolloutScope scope) {
         return repository.findPreparing(linuxServerId, scope);
+    }
+
+    @Override
+    public Optional<PublicAgentConfigRolloutStatus> latestPublicRolloutStatus() {
+        return repository.findLatestRolloutStatus(AgentConfigRolloutScope.PUBLIC, null)
+                .map(status -> status.withServers(
+                        repository.findRolloutServerStatuses(status.rolloutId())));
     }
 
     @Override
@@ -356,6 +372,62 @@ public class PublicAgentConfigRolloutService
                     normalizedUserIds);
         }
         markServerSyncedAfterSnapshot(request, now);
+    }
+
+    /** 公共运行副本继续对全用户 dispose；个人 worktree 冲突单独持久化，不拖住主排空。 */
+    @Override
+    @Transactional
+    public void markPublicServerSynced(
+            PublicAgentConfigRolloutSyncRequest request,
+            List<PublicAgentConfigWorktreePending> pendingWorktrees) {
+        if (!renewServerSync(request)) {
+            return;
+        }
+        Instant now = Instant.now();
+        repository.savePendingPublicWorktrees(
+                request.rolloutId(),
+                backendInstanceIdentity.linuxServerId(),
+                request.commitHash(),
+                request.traceId(),
+                pendingWorktrees,
+                now);
+        snapshotServerTargets(
+                request.rolloutId(),
+                request.scope(),
+                backendInstanceIdentity.linuxServerId(),
+                request.traceId(),
+                now,
+                null);
+        markServerSyncedAfterSnapshot(request, now);
+    }
+
+    @Override
+    public Optional<PublicAgentConfigWorktreeClaim> claimPendingPublicWorktree(String linuxServerId) {
+        Instant now = Instant.now();
+        return repository.claimPendingPublicWorktree(
+                linuxServerId, now, now.plus(SERVER_SYNC_LEASE));
+    }
+
+    @Override
+    public void markPublicWorktreeRetry(PublicAgentConfigWorktreeClaim claim, String reason) {
+        Instant now = Instant.now();
+        int retryCount = claim.retryCount() + 1;
+        repository.markPublicWorktreeRetry(
+                claim,
+                retryCount,
+                now.plus(retryDelay.multipliedBy(Math.min(retryCount, 6))),
+                safeError(reason),
+                now);
+    }
+
+    @Override
+    public void markPublicWorktreeSynchronized(PublicAgentConfigWorktreeClaim claim) {
+        repository.markPublicWorktreeSynchronized(claim, Instant.now());
+    }
+
+    @Override
+    public void abandonPublicWorktree(PublicAgentConfigWorktreeClaim claim, String reason) {
+        repository.abandonPublicWorktree(claim, safeError(reason), Instant.now());
     }
 
     @Override

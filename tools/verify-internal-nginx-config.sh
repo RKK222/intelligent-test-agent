@@ -43,6 +43,8 @@ write_env() {
     printf 'TEST_AGENT_NGINX_MODE=%s\n' "${mode}"
     printf 'TEST_AGENT_NGINX_BACKENDS=%s\n' "${backends}"
     printf 'TEST_AGENT_NGINX_XXL_JOB_ADMINS=%s\n' "${admins}"
+    printf 'TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=122.233.30.20:18120\n'
+    printf 'TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=122.233.30.20:18121\n'
     printf 'TEST_AGENT_NGINX_LISTEN_PORT=80\n'
     printf 'TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=%s\n' "${additional_listen_ports}"
     printf 'TEST_AGENT_FRONTEND_ROOT=/data/testagent/frontend\n'
@@ -61,7 +63,21 @@ run_configure
 grep -Fq 'server 122.233.30.114:8080 max_fails=3 fail_timeout=10s;' "${CONF_PATH}"
 grep -Fq 'server 122.233.30.114:18080 max_fails=3 fail_timeout=10s;' "${CONF_PATH}"
 grep -Fq 'location /xxl-job-admin/ {' "${CONF_PATH}"
+grep -Fq 'server 122.233.30.20:18120 max_fails=2 fail_timeout=10s;' "${CONF_PATH}"
+grep -Fq 'server 122.233.30.20:18121 max_fails=2 fail_timeout=10s;' "${CONF_PATH}"
+grep -Fq 'location ^~ /toolbox/apps/it-tools/ {' "${CONF_PATH}"
+grep -Fq 'location ^~ /toolbox/apps/omni-tools/ {' "${CONF_PATH}"
+test "$(grep -nF 'location ^~ /toolbox/apps/it-tools/' "${CONF_PATH}" | cut -d: -f1)" -lt \
+  "$(grep -nF 'location / {' "${CONF_PATH}" | cut -d: -f1)"
 test "$(grep -Fc 'max_fails=3' "${CONF_PATH}")" = 2
+
+MISSING_TOOLBOX_ENV="${TMP_ROOT}/nginx-missing-toolbox.env"
+grep -v '^TEST_AGENT_NGINX_TOOLBOX_' "${ENV_FILE}" >"${MISSING_TOOLBOX_ENV}"
+if PATH="${FAKE_BIN}:${PATH}" bash "${ROOT_DIR}/deploy/internal/configure-nginx.sh" \
+  --env-file "${MISSING_TOOLBOX_ENV}" --validate-only; then
+  echo "Missing toolbox upstreams were unexpectedly replaced by localhost defaults" >&2
+  exit 1
+fi
 
 write_env multi '122.233.30.4:8080,122.233.30.114:8080' '9996'
 printf 'TEST_AGENT_NGINX_SERVER_ROUTES=server-a=122.233.30.4:8080,server-b=122.233.30.114:8080\n' >>"${ENV_FILE}"
@@ -126,6 +142,8 @@ chmod +x "${CUSTOM_ROOT}/sbin/nginx"
   printf 'TEST_AGENT_NGINX_MODE=single\n'
   printf 'TEST_AGENT_NGINX_BACKENDS=122.233.30.114:8080\n'
   printf 'TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.114:18080\n'
+  printf 'TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=10.20.30.40:18120\n'
+  printf 'TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=10.20.30.40:18121\n'
   printf 'TEST_AGENT_NGINX_LISTEN_PORT=80\n'
   printf 'TEST_AGENT_FRONTEND_ROOT=/data/testagent/frontend\n'
   printf 'TEST_AGENT_NGINX_CONF_PATH=%s\n' "${CUSTOM_CONF_PATH}"

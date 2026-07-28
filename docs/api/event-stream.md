@@ -426,11 +426,11 @@ scope 发现与缓存规则：
 
 应用配置管理、版本库部署模式配置和个人 SSH key 管理不产生 RunEvent，也不新增 SSE 事件类型。`/api/internal/platform/configuration-management/**` 的版本库创建/编辑/列表、部署模式选项查询和个人 SSH key 维护均通过 HTTP 同步返回；设置页创建应用工作空间接口虽然会触发初始版本工作区 clone/checkout 和运行态 Workspace 创建，但进度写入 `workspace_create_operations` 并由 `GET /api/internal/platform/configuration-management/workspace-create-operations/{operationId}` HTTP 轮询读取；不通过 RunEvent SSE 发布“校验、保存配置、解析版本、下载代码、创建运行态工作区、完成/失败”等步骤。
 
-应用版本工作区和个人工作区管理接口也不产生 RunEvent/SSE。`/api/internal/platform/workspace-management/applications/**`、`/workspace-versions/**`、`/personal-workspaces/**` 会执行 Git clone/worktree/diff/push/merge 并创建或切换运行态 `Workspace` 配置，但不会启动 Session/Run；后续 opencode 对话仍只通过 Run API 产生 RunEvent。个人 `git-pull` 在当前 owner 的整棵个人 worktree 上 fetch/merge，应用 workspace 与应用 Agent 都交给原生 Git 判断是否会覆盖本地改动；该动作不修改共享 target、不广播、不同步其他用户。若应用 Agent 配置发生变化且本人进程正在运行，后端创建 `PERSONAL_APPLICATION` 单用户持久化任务并在 HTTP 响应中返回登记状态；任务复用已有数据库租约、Session 空闲检测和 dispose worker，不写浏览器状态，也不新增 SSE、RunEvent 或后台 Git 接口。个人发布只从本地提交后的个人 `HEAD` 按白名单投影到 feature worktree；本地提交不推送。feature push 后，多服务器通过内部广播取得固定 `targetCommitHash`，再向当前服务器相关个人 worktree执行同样的原生 Git merge；因此其他用户无需主动拉取：非重叠本地改动保留并自动完成合并，只有 Git 判定会被覆盖的文件才进入待同步，真实冲突保留在本机 Diff。普通文件同步不触发 dispose。该分支同步不暴露给浏览器 SSE，已打开的文件树/标签仍按现有刷新或重新进入机制重读磁盘。
+应用版本工作区和个人工作区管理接口也不产生 RunEvent/SSE。`/api/internal/platform/workspace-management/applications/**`、`/workspace-versions/**`、`/personal-workspaces/**` 会执行 Git clone/worktree/diff/push/merge 并创建或切换运行态 `Workspace` 配置，但不会启动 Session/Run；后续 opencode 对话仍只通过 Run API 产生 RunEvent。个人 `git-pull` 在当前 owner 的整棵个人 worktree 上 fetch/merge，应用 workspace 与应用 Agent 都交给原生 Git 判断是否会覆盖本地改动；该动作不修改共享 target、不广播、不同步其他用户。若应用 Agent 配置发生变化且本人进程正在运行，后端创建 `PERSONAL_APPLICATION` 单用户持久化任务并在 HTTP 响应中返回登记状态；任务复用已有数据库租约、Session 空闲检测和 dispose worker，不写浏览器状态，也不新增 SSE、RunEvent 或后台 Git 接口。超级管理员的应用刷新范围使用同步 HTTP GET 返回工作空间、版本与分支；应用级 `git-refresh` 和单分支组 `git-refresh-groups` 都是独立共享控制面 HTTP 操作：按选定物理 feature 组更新固定 target，以既有内部广播和数据库补偿驱动多服务器副本、相关个人 worktree 与应用 Agent rollout，浏览器只读取同步 HTTP 汇总，不新增进度 SSE 或 RunEvent。个人发布只从本地提交后的个人 `HEAD` 按白名单投影到 feature worktree；本地提交不推送。feature push 后，多服务器通过内部广播取得固定 `targetCommitHash`，再向当前服务器相关个人 worktree执行同样的原生 Git merge；因此其他用户无需主动拉取：非重叠本地改动保留并自动完成合并，只有 Git 判定会被覆盖的文件才进入待同步，真实冲突保留在本机 Diff。普通文件同步不触发 dispose。该分支同步不暴露给浏览器 SSE，已打开的文件树/标签仍按现有刷新或重新进入机制重读磁盘。
 
 应用引用资产库的初始化、同步、状态和目录树接口同样不产生 RunEvent/SSE。多服务器副本通过内部 `reference-repository.sync-requested` 广播低延迟唤醒，并通过数据库 generation、租约和定时补偿收敛；该广播不写入 `run_events`，不进入 RunEvent SSE，也不参与 `Last-Event-ID` 续传。
 
-Agent 配置管理接口不产生 RunEvent/SSE。`/api/internal/platform/workspace-management/agent-config/**` 的公共级/工作空间级 Git 更新、worktree、commit、publish 进度通过 ticket 保护的 WebSocket `/operations/{operationId}/ws?ticket=...` 推送 `snapshot`、`step`、`completed`、`failed`，也可通过 `GET /operations/{operationId}` 查询快照；公共 Git 仅 SUPER_ADMIN，应用级 Agent/Skill Git 由 APP_ADMIN（含 SUPER_ADMIN）执行。保存公共个人 Agent/Skill 目录定义或 JSONC 时，`POST /public/runtime-reload` 只把当前用户的受管公共配置软链接切到本人公共 worktree 并调用本人 `/global/dispose`；保存应用个人同类文件时直接只 dispose 本人。公共推送成功后，rollout 在目标用户空闲时恢复共享公共链接并 dispose；应用 Agent/Skill 推送成功后，只对已经合入目标 feature commit 的用户 dispose，不切换公共链接。Git 判定会覆盖本地文件或产生真实冲突的个人 worktree 作为 `AWAITING_USER` 数据库补偿任务继续收敛；非重叠本地改动不会进入待处理。该补偿不延长主 rollout，也不产生新的 RunEvent/SSE 类型；收敛后仍只 dispose 对应用户。ticket 响应返回签发节点的绝对 `ws://`/`wss://` 地址，保证多后台下 upgrade 回到保存一次性 ticket 的同一 JVM；跨节点进度继续由既有服务器广播汇入该节点。以上保存、发布和 dispose 状态不写入 `run_events`，不参与 RunEvent `Last-Event-ID` 续传。
+Agent 配置管理接口不产生 RunEvent/SSE。`/api/internal/platform/workspace-management/agent-config/**` 的公共级/工作空间级 Git 更新、worktree、commit、publish 进度通过 ticket 保护的 WebSocket `/operations/{operationId}/ws?ticket=...` 推送 `snapshot`、`step`、`completed`、`failed`，也可通过 `GET /operations/{operationId}` 查询快照；公共 Git 仅 SUPER_ADMIN，应用级 Agent/Skill Git 由 APP_ADMIN（含 SUPER_ADMIN）执行。公共全局刷新在 HTTP 返回后由页面每 2 秒轮询 `GET /public/rollout`，读取各服务器 Git 同步、进程排空、个人 worktree 补偿和 `lastError`，不新增 SSE 或 WebSocket 消息类型。保存公共个人 Agent/Skill 目录定义或 JSONC 时，`POST /public/runtime-reload` 只把当前用户的受管公共配置软链接切到本人公共 worktree 并调用本人 `/global/dispose`；保存应用个人同类文件时直接只 dispose 本人。公共推送成功后，rollout 在目标用户空闲时恢复共享公共链接并 dispose；应用 Agent/Skill 推送成功后，只对已经合入目标 feature commit 的用户 dispose，不切换公共链接。Git 判定会覆盖本地文件或产生真实冲突的个人 worktree 作为 `AWAITING_USER` 数据库补偿任务继续收敛；非重叠本地改动不会进入待处理。该补偿不延长主 rollout，也不产生新的 RunEvent/SSE 类型；收敛后仍只 dispose 对应用户。ticket 响应返回签发节点的绝对 `ws://`/`wss://` 地址，保证多后台下 upgrade 回到保存一次性 ticket 的同一 JVM；跨节点进度继续由既有服务器广播汇入该节点。以上保存、发布和 dispose 状态不写入 `run_events`，不参与 RunEvent `Last-Event-ID` 续传。
 
 当前用户 opencode 进程初始化进度不产生 RunEvent/SSE。`POST /api/internal/agent/{agentId}/processes/me/initialize` 传入 `operationId` 时，后端把校验、确认分配、选择容器、准备参数、进程启动、记录候选进程、检查进程、健康检查、写入绑定和完成/失败写入 `opencode_process_start_operations`；前端通过 `GET /api/internal/agent/{agentId}/processes/me/initialize-operations/{operationId}` HTTP 轮询读取。该只读查询不触发 manager health/start，不写 RunEvent，也不参与 `Last-Event-ID` 续传。
 
@@ -514,7 +514,7 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 }
 ```
 
-消费者在本机公共配置 Git 根目录工作树 clean 时 fetch/checkout/reset 到指定 commit；dirty、未配置或非 Git 仓库时跳过，不覆盖本机修改。该广播不暴露给浏览器，也不通过 RunEvent SSE 下发。
+消费者不直接依赖广播 payload 修改 Git，而是按 `rolloutId` 认领数据库任务并读取固定目标 commit。共享运行副本 dirty 且 rollout 未记录超级管理员明确确认时持久化重试；已确认时才恢复并定点清理到目标 commit。随后同一 worker 尝试原生 merge 本服务器全部公共个人 worktree，冲突只进入独立补偿。该广播不暴露给浏览器，也不通过 RunEvent SSE 下发。
 
 发布端在远端提交与持久化 rollout 激活确认后发送该事件，但不在发布 HTTP 请求线程认领本机同步；本机和其它服务器由广播消费者或默认 5 秒的数据库补偿扫描异步推进。广播仅用于降低唤醒延迟，丢失或发布失败不影响持久化任务继续执行。
 
@@ -753,6 +753,10 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 - 断线重连传上次成功处理的 SSE `id`。
 - 客户端必须优先按 `eventId` 去重；缺失 `eventId` 的旧事件才回退按 `runId + seq` 去重，允许同一事件重复投递。
 - 客户端必须忽略未知 payload 字段和未知 event name。
+
+## 工具盒子不新增事件
+
+工具盒子目录查询和点击上报都是普通 HTTP API，不创建 Run、Session 或 RunEvent，也不进入用户级 session-runtime SSE。点击成功后的累计与热门排名由当前页面本地更新，刷新时重新查询 `GET /api/internal/platform/toolbox/tools`；其它已打开页面不承诺实时同步。首版不提供点击趋势、明细查询、收藏或目录管理事件。后续如需跨页面实时刷新，必须另行设计稳定事件契约，不能复用 `tool.*`、`analytics.*` 或 opencode raw event。
 
 ## 兼容性
 

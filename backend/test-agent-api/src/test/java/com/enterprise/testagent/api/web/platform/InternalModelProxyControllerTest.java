@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.enterprise.testagent.api.web.common.GlobalExceptionHandler;
 import com.enterprise.testagent.domain.configuration.InternalModelProvider;
@@ -23,6 +24,7 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -122,6 +124,93 @@ class InternalModelProxyControllerTest {
                 .assertNext(bytes -> assertThat(new String(bytes, StandardCharsets.UTF_8)).contains("[DONE]"))
                 .expectComplete()
                 .verify(Duration.ofSeconds(3));
+    }
+
+    @Test
+    void adaptsCodexResponsesRequestAndStreamsTextToolUsageAndCompletion() throws Exception {
+        AtomicReference<String> upstreamRequestBody = new AtomicReference<>();
+        AtomicReference<String> upstreamAccept = new AtomicReference<>();
+        upstream.createContext("/enterprise/jdt/model/api/openai/v1/chat/completions", exchange -> {
+            upstreamRequestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            upstreamAccept.set(exchange.getRequestHeaders().getFirst(HttpHeaders.ACCEPT));
+            exchange.getResponseHeaders().set(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_EVENT_STREAM_VALUE);
+            exchange.sendResponseHeaders(200, 0);
+            String response = """
+                    data: {"choices":[{"delta":{"content":"结论"}}]}
+
+                    data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"shell","arguments":"{\\"cmd\\":\\"rg main\\"}"}}]}}]}
+
+                    data: {"choices":[],"usage":{"prompt_tokens":8,"completion_tokens":3,"total_tokens":11}}
+
+                    data: [DONE]
+
+                    """;
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(response.getBytes(StandardCharsets.UTF_8));
+                output.flush();
+            }
+        });
+        upstream.start();
+
+        String request = """
+                {
+                  "model":"Qwen3.6-27B",
+                  "instructions":"只读分析",
+                  "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"找入口"}]}],
+                  "tools":[{"type":"function","name":"shell","parameters":{"type":"object"}}],
+                  "tool_choice":"auto","parallel_tool_calls":true,"reasoning":{"effort":"medium"},
+                  "store":false,"stream":true,"include":["reasoning.encrypted_content"]
+                }
+                """;
+
+        clientForProvider(upstreamBaseUrl()).post()
+                .uri("/api/internal/platform/opencode-runtime/internal-model-proxy/v1/responses")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + PROXY_KEY)
+                .header(InternalModelProxyForwardingService.PROVIDER_HEADER, PROVIDER_ID)
+                .header(InternalModelProxyForwardingService.UCID_HEADER, UCID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(request)
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM)
+                .expectBody(String.class)
+                .consumeWith(result -> assertThat(result.getResponseBody())
+                        .contains("event:response.created")
+                        .contains("event:response.output_text.delta")
+                        .contains("event:response.function_call_arguments.delta")
+                        .contains("event:response.output_item.done")
+                        .contains("event:response.completed")
+                        .contains("\"input_tokens\":8")
+                        .doesNotContain("reasoning_content"));
+
+        JsonNode converted = OBJECT_MAPPER.readTree(upstreamRequestBody.get());
+        assertThat(converted.path("messages").get(0).path("role").asText()).isEqualTo("system");
+        assertThat(converted.path("messages").get(1).path("content").asText()).isEqualTo("找入口");
+        assertThat(converted.path("tools").get(0).path("function").path("name").asText())
+                .isEqualTo("shell");
+        assertThat(converted.has("reasoning")).isFalse();
+        assertThat(upstreamAccept.get()).isEqualTo(MediaType.TEXT_EVENT_STREAM_VALUE);
+    }
+
+    @Test
+    void rejectsUnsupportedResponsesInputWithUnifiedValidationError() {
+        upstream.start();
+
+        clientForProvider(upstreamBaseUrl()).post()
+                .uri("/api/internal/platform/opencode-runtime/internal-model-proxy/v1/responses")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + PROXY_KEY)
+                .header(InternalModelProxyForwardingService.PROVIDER_HEADER, PROVIDER_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"model":"Qwen3.6-27B","stream":true,"input":[
+                          {"type":"message","role":"user","content":[{"type":"input_image","image_url":"x"}]}
+                        ]}
+                        """)
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(false)
+                .jsonPath("$.code").isEqualTo("VALIDATION_ERROR");
     }
 
     @Test

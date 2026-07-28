@@ -16,6 +16,10 @@ final class ManagedWorkspaceDtos {
     record CreatePersonalWorkspaceRequest(String workspaceName) {
     }
 
+    /** 精确选择一个“版本库 + 版本 + 分支”物理 feature 仓库组。 */
+    record RefreshApplicationGitGroupRequest(String repositoryId, String version, String branch) {
+    }
+
     record SyncWorkspaceRequest(List<String> files, Boolean force) {
     }
 

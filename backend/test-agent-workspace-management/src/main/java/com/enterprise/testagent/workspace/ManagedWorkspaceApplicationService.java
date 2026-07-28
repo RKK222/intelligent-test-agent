@@ -2825,6 +2825,328 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     /**
+     * 查询超级管理员应用 Git 刷新页的完整范围。
+     *
+     * <p>范围与实际刷新共用同一分组程序，避免页面展示的分支和真正执行的分支发生漂移。
+     * 这里返回所有应用，包括停用应用；是否执行仍由超级管理员显式确认。</p>
+     */
+    public List<ManagedWorkspaceResponses.ApplicationGitRefreshScopeResponse> listApplicationGitRefreshScopes() {
+        return configurationRepository.findApplications(false).stream()
+                .map(this::applicationGitRefreshScope)
+                .toList();
+    }
+
+    private ManagedWorkspaceResponses.ApplicationGitRefreshScopeResponse applicationGitRefreshScope(
+            ApplicationDefinition application) {
+        Map<ApplicationWorkspaceId, ApplicationWorkspace> workspacesById = new LinkedHashMap<>();
+        for (ApplicationWorkspace workspace : configurationRepository.findWorkspaces(application.appId())) {
+            workspacesById.put(workspace.workspaceId(), workspace);
+        }
+        List<ManagedWorkspaceResponses.ApplicationGitRefreshScopeGroupResponse> groups = new ArrayList<>();
+        for (List<ApplicationWorkspaceVersion> members : applicationGitRefreshGroups(application.appId()).values()) {
+            ApplicationWorkspaceVersion anchor = members.get(0);
+            CodeRepository repository = existingRepository(anchor.repositoryId());
+            List<ManagedWorkspaceResponses.ApplicationGitRefreshScopeWorkspaceResponse> workspaces = members.stream()
+                    .map(member -> {
+                        ApplicationWorkspace workspace = Optional.ofNullable(
+                                        workspacesById.get(member.applicationWorkspaceId()))
+                                .orElseGet(() -> existingTemplate(member.applicationWorkspaceId()));
+                        return new ManagedWorkspaceResponses.ApplicationGitRefreshScopeWorkspaceResponse(
+                                member.versionId().value(),
+                                member.applicationWorkspaceId().value(),
+                                workspace.workspaceName(),
+                                workspace.directoryPath(),
+                                workspace.enabled());
+                    })
+                    .toList();
+            groups.add(new ManagedWorkspaceResponses.ApplicationGitRefreshScopeGroupResponse(
+                    anchor.repositoryId().value(),
+                    repository.name(),
+                    anchor.version(),
+                    anchor.branch(),
+                    workspaces.size(),
+                    workspaces));
+        }
+        return new ManagedWorkspaceResponses.ApplicationGitRefreshScopeResponse(
+                application.appId().value(),
+                application.appName(),
+                application.enabled(),
+                groups.size(),
+                List.copyOf(groups));
+    }
+
+    /**
+     * 超级管理员按应用刷新全部物理 feature 仓库组。
+     *
+     * <p>API 层负责 SUPER_ADMIN 强鉴权；这里按“版本库 + 版本 + 分支”去重，复用应用发布后的
+     * 固定提交同步、个人 worktree 原生 merge、多服务器广播和应用配置 rollout。单组失败不会
+     * 阻断其它仓库组，结果必须完整返回，避免把部分刷新误报为全量成功。</p>
+     */
+    public ManagedWorkspaceResponses.ApplicationGitRefreshResponse refreshApplicationGit(
+            String appId,
+            UserId userId,
+            String traceId) {
+        ApplicationId applicationId = new ApplicationId(requireText(appId, "应用 ID 不能为空", "appId"));
+        ApplicationDefinition application = configurationRepository.findApplication(applicationId)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.NOT_FOUND,
+                        "应用不存在",
+                        Map.of("appId", applicationId.value())));
+        Map<ApplicationGitRefreshGroupKey, List<ApplicationWorkspaceVersion>> groups =
+                applicationGitRefreshGroups(applicationId);
+        return refreshApplicationGitGroups(applicationId, application.appName(), groups, userId, traceId);
+    }
+
+    /** 超级管理员精确刷新一个物理 feature 分支组，避免影响同应用的其它分支。 */
+    public ManagedWorkspaceResponses.ApplicationGitRefreshResponse refreshApplicationGitGroup(
+            String appId,
+            String repositoryId,
+            String version,
+            String branch,
+            UserId userId,
+            String traceId) {
+        ApplicationId applicationId = new ApplicationId(requireText(appId, "应用 ID 不能为空", "appId"));
+        ApplicationDefinition application = configurationRepository.findApplication(applicationId)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.NOT_FOUND,
+                        "应用不存在",
+                        Map.of("appId", applicationId.value())));
+        ApplicationGitRefreshGroupKey selectedKey = new ApplicationGitRefreshGroupKey(
+                new CodeRepositoryId(requireText(repositoryId, "版本库 ID 不能为空", "repositoryId")),
+                requireText(version, "版本不能为空", "version"),
+                requireText(branch, "分支不能为空", "branch"));
+        List<ApplicationWorkspaceVersion> selectedMembers =
+                applicationGitRefreshGroups(applicationId).get(selectedKey);
+        if (selectedMembers == null || selectedMembers.isEmpty()) {
+            throw new PlatformException(
+                    ErrorCode.NOT_FOUND,
+                    "应用 Git 刷新分支组不存在",
+                    Map.of(
+                            "appId", applicationId.value(),
+                            "repositoryId", selectedKey.repositoryId().value(),
+                            "version", selectedKey.version(),
+                            "branch", selectedKey.branch()));
+        }
+        Map<ApplicationGitRefreshGroupKey, List<ApplicationWorkspaceVersion>> selectedGroup = new LinkedHashMap<>();
+        selectedGroup.put(selectedKey, selectedMembers);
+        return refreshApplicationGitGroups(
+                applicationId,
+                application.appName(),
+                selectedGroup,
+                userId,
+                traceId);
+    }
+
+    /** 全量与单分支刷新共用同一执行程序和结果汇总。 */
+    private ManagedWorkspaceResponses.ApplicationGitRefreshResponse refreshApplicationGitGroups(
+            ApplicationId applicationId,
+            String applicationName,
+            Map<ApplicationGitRefreshGroupKey, List<ApplicationWorkspaceVersion>> groups,
+            UserId userId,
+            String traceId) {
+        List<ManagedWorkspaceResponses.ApplicationGitRefreshGroupResponse> results = new ArrayList<>();
+        for (List<ApplicationWorkspaceVersion> members : groups.values()) {
+            ApplicationWorkspaceVersion anchor = existingVersion(members.get(0).versionId());
+            CodeRepository repository = existingRepository(anchor.repositoryId());
+            try {
+                ApplicationWorkspace template = existingTemplate(anchor.applicationWorkspaceId());
+                ApplicationWorkspaceVersionReplica replica = ensureLocalReplica(
+                        anchor, template, userId, traceId);
+                PulledVersionReplica pulled = pullRemoteVersionReplica(
+                        anchor, replica, userId, traceId);
+                publishVersionSync(pulled.version(), userId, "ADMIN_APPLICATION_GIT_REFRESHED", traceId, Map.of());
+                boolean updated = !pulled.previousCommit().equals(pulled.commitHash());
+                results.add(new ManagedWorkspaceResponses.ApplicationGitRefreshGroupResponse(
+                        anchor.versionId().value(),
+                        anchor.repositoryId().value(),
+                        repository.name(),
+                        anchor.version(),
+                        anchor.branch(),
+                        members.size(),
+                        pulled.previousCommit(),
+                        pulled.commitHash(),
+                        updated ? "UPDATED" : "UP_TO_DATE",
+                        null,
+                        updated ? "已刷新 feature，并触发相关 worktree 收敛" : "feature 已是远端最新，已重新触发相关 worktree 收敛"));
+            } catch (RuntimeException exception) {
+                String errorCode = exception instanceof PlatformException platformException
+                        ? platformException.errorCode().name()
+                        : ErrorCode.INTERNAL_ERROR.name();
+                String message = exception instanceof PlatformException
+                        ? exception.getMessage()
+                        : "刷新失败，请结合 traceId 排查";
+                LOGGER.warn(
+                        "event=admin_application_git_refresh_group_failed appId={} repositoryId={} version={} branch={} errorCode={} traceId={}",
+                        applicationId.value(),
+                        anchor.repositoryId().value(),
+                        anchor.version(),
+                        anchor.branch(),
+                        errorCode,
+                        traceId);
+                results.add(new ManagedWorkspaceResponses.ApplicationGitRefreshGroupResponse(
+                        anchor.versionId().value(),
+                        anchor.repositoryId().value(),
+                        repository.name(),
+                        anchor.version(),
+                        anchor.branch(),
+                        members.size(),
+                        anchor.targetCommitHash(),
+                        anchor.targetCommitHash(),
+                        "FAILED",
+                        errorCode,
+                        message));
+            }
+        }
+
+        int updatedGroups = (int) results.stream().filter(result -> "UPDATED".equals(result.status())).count();
+        int unchangedGroups = (int) results.stream().filter(result -> "UP_TO_DATE".equals(result.status())).count();
+        int failedGroups = (int) results.stream().filter(result -> "FAILED".equals(result.status())).count();
+        return new ManagedWorkspaceResponses.ApplicationGitRefreshResponse(
+                applicationId.value(),
+                applicationName,
+                results.size(),
+                updatedGroups,
+                unchangedGroups,
+                failedGroups,
+                List.copyOf(results));
+    }
+
+    /** 页面预览和实际刷新共用“版本库 + 版本 + 分支”物理仓库分组口径。 */
+    private Map<ApplicationGitRefreshGroupKey, List<ApplicationWorkspaceVersion>> applicationGitRefreshGroups(
+            ApplicationId applicationId) {
+        Map<ApplicationGitRefreshGroupKey, List<ApplicationWorkspaceVersion>> groups = new LinkedHashMap<>();
+        for (ApplicationWorkspaceVersion version : managedWorkspaceRepository.findVersionsByApplication(applicationId)) {
+            ApplicationGitRefreshGroupKey key = new ApplicationGitRefreshGroupKey(
+                    version.repositoryId(), version.version(), version.branch());
+            groups.computeIfAbsent(key, ignored -> new ArrayList<>()).add(version);
+        }
+        return groups;
+    }
+
+    /**
+     * 把应用共享副本快进到固定远端提交，并复用现有 worktree 同步和应用配置 rollout。
+     * fetch 与 reset 分开执行，保证应用配置闸门在共享工作树变化前已经建立。
+     */
+    private PulledVersionReplica pullRemoteVersionReplica(
+            ApplicationWorkspaceVersion version,
+            ApplicationWorkspaceVersionReplica replica,
+            UserId userId,
+            String traceId) {
+        Path replicaRepoRoot = pathResolver.resolve(replica.repoRootPath());
+        if (!gitWorkspaceService.isWorktreeClean(replicaRepoRoot)) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "应用 feature 工作树存在未提交变更，无法拉取远程",
+                    Map.of("versionId", version.versionId().value()));
+        }
+        CodeRepository repository = existingRepository(version.repositoryId());
+        String privateKey = privateKeyFor(repository, userId);
+        ensureInternalOrigin(repository, userId, replicaRepoRoot, privateKey);
+        String previousCommit = gitWorkspaceService.headCommit(replicaRepoRoot);
+        gitWorkspaceService.fetchBranch(replicaRepoRoot, version.branch(), privateKey);
+        String remoteCommit = gitWorkspaceService.resolveCommit(
+                replicaRepoRoot,
+                "refs/remotes/origin/" + version.branch());
+        if (!previousCommit.equals(remoteCommit)
+                && !gitWorkspaceService.isAncestor(replicaRepoRoot, previousCommit, remoteCommit)) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "远端分支不能快进到本地应用 feature",
+                    Map.of(
+                            "versionId", version.versionId().value(),
+                            "localCommit", previousCommit,
+                            "remoteCommit", remoteCommit));
+        }
+
+        List<String> rolloutIds = preparePulledApplicationConfigRollouts(
+                version,
+                replicaRepoRoot,
+                previousCommit,
+                remoteCommit,
+                userId,
+                traceId);
+        try {
+            if (!previousCommit.equals(remoteCommit)) {
+                gitWorkspaceService.resetHardToCommit(replicaRepoRoot, remoteCommit);
+            }
+        } catch (RuntimeException exception) {
+            rolloutIds.forEach(rolloutId -> abortApplicationConfigRollout(rolloutId, "APPLICATION_REFRESH_FAILED"));
+            throw exception;
+        }
+
+        Instant now = Instant.now();
+        ApplicationWorkspaceVersion updatedVersion = updateRepositoryGroupTargetCommit(version, remoteCommit, now);
+        ApplicationWorkspaceVersionReplica updatedReplica = managedWorkspaceRepository.saveVersionReplica(
+                replica.ready(remoteCommit, now, traceId));
+        markRepositoryGroupLocalReplicasReady(
+                updatedVersion, replicaRepoRoot, remoteCommit, now, traceId);
+        rolloutIds.forEach(rolloutId -> activateApplicationConfigRollout(rolloutId, remoteCommit));
+        synchronizeFeatureCommitToPersonalWorktrees(
+                updatedVersion,
+                updatedReplica,
+                remoteCommit,
+                userId,
+                traceId);
+        // 同一物理仓库可能承载多个应用目录，每个受影响目录都有独立 rollout。
+        rolloutIds.forEach(ignored -> synchronizeLocalApplicationConfigRollout());
+        return new PulledVersionReplica(updatedVersion, updatedReplica, previousCommit, remoteCommit);
+    }
+
+    private List<String> preparePulledApplicationConfigRollouts(
+            ApplicationWorkspaceVersion anchor,
+            Path repoRoot,
+            String previousCommit,
+            String remoteCommit,
+            UserId userId,
+            String traceId) {
+        if (agentConfigRolloutCoordinator == null || previousCommit.equals(remoteCommit)) {
+            return List.of();
+        }
+        List<String> changedPaths = changedPathsFromNameStatus(
+                gitWorkspaceService.diffNameStatus(repoRoot, previousCommit, remoteCommit));
+        List<String> rolloutIds = new ArrayList<>();
+        try {
+            for (ApplicationWorkspaceVersion member : repositoryVersionGroup(anchor)) {
+                ApplicationWorkspace template = existingTemplate(member.applicationWorkspaceId());
+                String workspacePrefix = repoRelativePrefix(repoRoot, repoRoot.resolve(template.directoryPath()));
+                List<String> workspacePaths = changedPaths.stream()
+                        .filter(path -> workspacePrefix.isBlank() || path.startsWith(workspacePrefix))
+                        .map(path -> stripDisplayPathPrefix(path, workspacePrefix))
+                        .toList();
+                String rolloutId = prepareApplicationConfigRolloutIfNeeded(
+                        workspacePaths,
+                        member,
+                        member.branch(),
+                        remoteCommit,
+                        previousCommit,
+                        userId,
+                        traceId);
+                if (rolloutId != null) {
+                    rolloutIds.add(rolloutId);
+                }
+            }
+            return List.copyOf(rolloutIds);
+        } catch (RuntimeException exception) {
+            rolloutIds.forEach(rolloutId -> abortApplicationConfigRollout(
+                    rolloutId, "APPLICATION_REFRESH_PREPARATION_FAILED"));
+            throw exception;
+        }
+    }
+
+    private record ApplicationGitRefreshGroupKey(
+            CodeRepositoryId repositoryId,
+            String version,
+            String branch) {
+    }
+
+    private record PulledVersionReplica(
+            ApplicationWorkspaceVersion version,
+            ApplicationWorkspaceVersionReplica replica,
+            String previousCommit,
+            String commitHash) {
+    }
+
+    /**
      * 把远端 feature 分支合入当前 owner 在该应用下的整棵个人 worktree。
      *
      * <p>应用 workspace 文件与应用 Agent 文件统一交给原生 Git merge 判断：可安全保留时继续拉取，

@@ -31,6 +31,7 @@ import com.enterprise.testagent.domain.configuration.CodeRepositoryType;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.configuration.SshKeyId;
 import com.enterprise.testagent.domain.configuration.UserSshKey;
+import com.enterprise.testagent.domain.appsource.AppSourceRepositoryHistory;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.dictionary.DictionaryRepository;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
@@ -72,11 +73,18 @@ public class ConfigurationManagementApplicationService {
     private final ReferenceRepositoryRepository referenceRepository;
     private final String defaultRepositoryDeploymentMode;
     private ConversationContextStore conversationContextStore;
+    private AppSourceRepositoryHistory appSourceRepositoryHistory = repositoryId -> false;
 
     /** 成员撤权后按用户失效运行上下文；测试构造路径可不注入。 */
     @Autowired(required = false)
     void setConversationContextStore(ConversationContextStore conversationContextStore) {
         this.conversationContextStore = conversationContextStore;
+    }
+
+    /** 测试构造路径可替换源码历史端口；生产构造器要求显式注入。 */
+    void setAppSourceRepositoryHistory(AppSourceRepositoryHistory appSourceRepositoryHistory) {
+        this.appSourceRepositoryHistory = Objects.requireNonNull(
+                appSourceRepositoryHistory, "appSourceRepositoryHistory must not be null");
     }
 
     /**
@@ -91,6 +99,7 @@ public class ConfigurationManagementApplicationService {
             SshKeyEncryptionService sshKeyEncryptionService,
             ManagedWorkspaceRepository managedWorkspaceRepository,
             ReferenceRepositoryRepository referenceRepository,
+            AppSourceRepositoryHistory appSourceRepositoryHistory,
             @Value("${test-agent.deployment.mode:external}") String deploymentMode) {
         this(
                 configurationRepository,
@@ -102,6 +111,8 @@ public class ConfigurationManagementApplicationService {
                 managedWorkspaceRepository,
                 referenceRepository,
                 deploymentMode);
+        this.appSourceRepositoryHistory = Objects.requireNonNull(
+                appSourceRepositoryHistory, "appSourceRepositoryHistory must not be null");
     }
 
     /**
@@ -326,6 +337,7 @@ public class ConfigurationManagementApplicationService {
                 ? repository.repositoryType()
                 : CodeRepositoryType.fromStandard(Boolean.TRUE.equals(standard)).value();
         ensureInitializedReferenceIdentity(repository, normalizedEnglishName, nextRepositoryType);
+        ensureAppSourceIdentity(repository, normalizedEnglishName, nextRepositoryType);
         ensureRepositoryEnglishNameUnique(normalizedEnglishName, repository.repositoryId());
         CodeRepository updated = repository.editMetadata(
                 requireText(name, "代码库名称不能为空", "name"),
@@ -356,6 +368,28 @@ public class ConfigurationManagementApplicationService {
             throw new PlatformException(
                     ErrorCode.CONFLICT,
                     "引用资产库初始化后禁止修改版本库类型",
+                    Map.of("repositoryId", repository.repositoryId().value(), "field", "repositoryType"));
+        }
+    }
+
+    /** 任一源码状态或清理历史存在后，目录英文名及应用代码库类型成为持久磁盘身份。 */
+    private void ensureAppSourceIdentity(
+            CodeRepository repository,
+            String nextEnglishName,
+            String nextRepositoryType) {
+        if (!appSourceRepositoryHistory.hasRepositoryHistory(repository.repositoryId())) {
+            return;
+        }
+        if (!repository.englishName().equals(nextEnglishName)) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "应用源码历史存在后禁止修改版本库英文名称",
+                    Map.of("repositoryId", repository.repositoryId().value(), "field", "englishName"));
+        }
+        if (!CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value().equals(nextRepositoryType)) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "应用源码历史存在后禁止修改版本库类型",
                     Map.of("repositoryId", repository.repositoryId().value(), "field", "repositoryType"));
         }
     }

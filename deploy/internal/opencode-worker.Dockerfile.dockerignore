@@ -5,11 +5,16 @@
 !deploy/internal/
 !deploy/internal/opencode-worker-entrypoint.sh
 !deploy/internal/opencode-official-launcher.mjs
+!deploy/internal/codex-whitebox-mcp.mjs
+!deploy/internal/codex-whitebox-mcp-launcher.sh
+!deploy/internal/codex-whitebox-requirements.toml
 !deploy/internal/opencode-runtime.gitignore
 !deploy/internal/opencode-node-runtime.package.json
 !deploy/internal/opencode-node-runtime.package-lock.json
 !deploy/internal/opencode-node-runtime-1.17.8.package.json
 !deploy/internal/opencode-node-runtime-1.17.8.package-lock.json
+!tools/
+!tools/probe-codex-whitebox-e2e.mjs
 !opencode-source/
 !opencode-source/opencode-1.18.4/
 !opencode-source/opencode-1.18.4/LICENSE

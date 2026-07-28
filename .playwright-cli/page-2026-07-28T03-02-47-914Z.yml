@@ -1,0 +1,235 @@
+- generic [ref=e12]:
+  - banner [ref=e13]:
+    - generic [ref=e15]:
+      - img "logo" [ref=e16]
+      - generic [ref=e17]:
+        - generic [ref=e18]: MIMO测试智能体
+        - generic [ref=e19]: MIMO Intelligent Test Agent
+    - generic [ref=e20]:
+      - button "打开用户手册" [ref=e21] [cursor=pointer]
+      - button "查看运行态资源详情" [ref=e26] [cursor=pointer]:
+        - generic [ref=e27]: Agent 7
+        - generic [ref=e28]: Skill 16
+        - generic [ref=e29]: MCP 0
+        - generic [ref=e30]: Plugin 0
+      - button "F-COSS" [ref=e32] [cursor=pointer]
+      - button "当前用户 888888888" [ref=e37] [cursor=pointer]:
+        - generic [ref=e38]: "8"
+  - generic [ref=e39]:
+    - button "切换侧边栏" [ref=e41] [cursor=pointer]:
+      - img "toggle panel" [ref=e42]
+    - button "切换右侧栏" [ref=e44] [cursor=pointer]:
+      - img "toggle panel" [ref=e45]
+    - complementary [ref=e46]:
+      - navigation "工作台活动栏" [ref=e47]:
+        - generic [ref=e48]:
+          - button "打开编辑器" [ref=e49] [cursor=pointer]
+          - button "系统管理" [active] [ref=e54] [cursor=pointer]
+          - button "Agent 与 Skill Hub" [ref=e57] [cursor=pointer]:
+            - generic "有可用更新" [ref=e289]: "1"
+        - button "系统设置" [ref=e69] [cursor=pointer]
+      - button "唤起小宠物" [ref=e73] [cursor=pointer]
+    - generic [ref=e76]:
+      - generic:
+        - generic:
+          - generic:
+            - tablist "工作区面板":
+              - button "文件树"
+              - button "搜索"
+              - button "变更":
+                - generic: "15"
+            - generic:
+              - generic:
+                - generic:
+                  - 'button "工作空间 / worktree: feature_testagent_20260618_usr_test_dev_default"':
+                    - generic "default": 工作空间
+                    - generic: "/ worktree: feature_testagent_20260618_usr_test_dev_default"
+                  - generic:
+                    - button "新建或上传到工作区根目录"
+                    - button "打开外部页面"
+                    - group:
+                      - generic "更多工作空间操作"
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - button ".testagent":
+                            - generic: 
+                            - generic: 
+                        - generic:
+                          - button "archive":
+                            - generic: 
+                            - generic: 
+                        - generic:
+                          - button "docs":
+                            - generic: 
+                            - generic: 
+                        - generic:
+                          - button "spec":
+                            - generic: 
+                            - generic: 
+                        - generic:
+                          - button ".gitignore"
+                        - generic:
+                          - button "README.md"
+                      - button "选择要上传到工作区的文件"
+              - generic:
+                - generic:
+                  - button "Agents"
+                - text:     
+            - contentinfo:
+              - generic:
+                - generic:
+                  - button "本地-测试 / 20260618 / feature_testagent_20260618_usr_test_dev_default"
+                - button "打开引用配置"
+                - button "切换服务器工作空间"
+      - generic [ref=e145]:
+        - main [ref=e147]:
+          - generic [ref=e334]:
+            - navigation "系统管理导航" [ref=e335]:
+              - button "定时任务管理" [ref=e336] [cursor=pointer]
+              - button "运行管理" [ref=e342] [cursor=pointer]
+              - button "通用参数管理" [ref=e346] [cursor=pointer]
+              - button "内部模型供应商" [ref=e349] [cursor=pointer]
+              - button "配置管理" [ref=e356] [cursor=pointer]
+              - button "运营分析" [ref=e361] [cursor=pointer]
+            - generic [ref=e366]:
+              - generic [ref=e367]:
+                - strong [ref=e369]: 定时任务管理
+                - generic [ref=e370]:
+                  - generic [ref=e371]: XXL-JOB 控制台已连接
+                  - button "重新加载" [ref=e376] [cursor=pointer]
+              - iframe [ref=e383]:
+                - generic [ref=f1e2]:
+                  - banner [ref=f1e3]:
+                    - navigation:
+                      - text: 
+                      - generic:
+                        - list:
+                          - listitem:
+                            - status "欢迎：888888888" [ref=f1e4]
+                  - complementary [ref=f1e5]:
+                    - list [ref=f1e8]:
+                      - listitem [ref=f1e9]:
+                        - link " 运行报表" [ref=f1e10] [cursor=pointer]:
+                          - /url: /xxl-job-admin/dashboard
+                          - generic [ref=f1e11]: 
+                          - generic [ref=f1e12]: 运行报表
+                      - listitem [ref=f1e13]:
+                        - link " 任务管理" [ref=f1e14] [cursor=pointer]:
+                          - /url: /xxl-job-admin/jobinfo
+                          - generic [ref=f1e15]: 
+                          - generic [ref=f1e16]: 任务管理
+                      - listitem [ref=f1e17]:
+                        - link " 调度日志" [ref=f1e18] [cursor=pointer]:
+                          - /url: /xxl-job-admin/joblog
+                          - generic [ref=f1e19]: 
+                          - generic [ref=f1e20]: 调度日志
+                      - listitem [ref=f1e21]:
+                        - link " 执行器管理" [ref=f1e22] [cursor=pointer]:
+                          - /url: /xxl-job-admin/jobgroup
+                          - generic [ref=f1e23]: 
+                          - generic [ref=f1e24]: 执行器管理
+                      - listitem [ref=f1e25]:
+                        - link " 用户管理" [ref=f1e26] [cursor=pointer]:
+                          - /url: /xxl-job-admin/user
+                          - generic [ref=f1e27]: 
+                          - generic [ref=f1e28]: 用户管理
+                      - listitem [ref=f1e29]:
+                        - link " 使用教程" [ref=f1e30] [cursor=pointer]:
+                          - /url: /xxl-job-admin/help
+                          - generic [ref=f1e31]: 
+                          - generic [ref=f1e32]: 使用教程
+                  - generic [ref=f1e33]:
+                    - generic [ref=f1e34]:
+                      - button "" [ref=f1e35] [cursor=pointer]
+                      - navigation [ref=f1e37]:
+                        - link "运行报表" [ref=f1e39] [cursor=pointer]:
+                          - /url: javascript:;
+                      - button "" [ref=f1e40] [cursor=pointer]
+                      - button "页签操作" [ref=f1e43] [cursor=pointer]
+                      - link " 刷新" [ref=f1e45] [cursor=pointer]:
+                        - /url: "#"
+                        - generic [ref=f1e46]: 
+                        - text: 刷新
+                      - link "" [ref=f1e47] [cursor=pointer]:
+                        - /url: "#"
+                    - iframe [ref=f1e50]:
+                      - generic [ref=f2e1]:
+                        - generic [ref=f2e3]:
+                          - generic [ref=f2e4]:
+                            - generic [ref=f2e6]:
+                              - generic [ref=f2e7]: 
+                              - generic [ref=f2e9]:
+                                - generic [ref=f2e10]: 任务数量
+                                - generic [ref=f2e11]: "7"
+                                - generic [ref=f2e14]: 调度中心运行的任务数量
+                            - generic [ref=f2e16]:
+                              - generic [ref=f2e17]: 
+                              - generic [ref=f2e19]:
+                                - generic [ref=f2e20]: 调度次数
+                                - generic [ref=f2e21]: "64032"
+                                - generic [ref=f2e24]: 调度中心触发的调度次数
+                            - generic [ref=f2e26]:
+                              - generic [ref=f2e27]: 
+                              - generic [ref=f2e29]:
+                                - generic [ref=f2e30]: 执行器数量
+                                - generic [ref=f2e31]: "1"
+                                - generic [ref=f2e34]: 调度中心在线的执行器机器数量
+                          - generic [ref=f2e38]:
+                            - heading "调度报表" [level=3] [ref=f2e39]
+                            - button "" [ref=f2e41] [cursor=pointer]
+                        - text:    
+                  - contentinfo [ref=f1e51]:
+                    - text: Powered by XXL-JOB 3.4.2
+                    - strong [ref=f1e53]:
+                      - text: Copyright © 2015-2026
+                      - link "xuxueli" [ref=f1e54] [cursor=pointer]:
+                        - /url: https://www.xuxueli.com/
+                      - link "github" [ref=f1e55] [cursor=pointer]:
+                        - /url: https://github.com/xuxueli/xxl-job
+                  - text: 
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - banner:
+                    - generic:
+                      - heading [level=2]
+                      - button "原始输出"
+                      - button "2 会话列表":
+                        - generic: "2"
+                        - generic: 会话列表
+                  - generic: 等待任务输入
+                  - generic:
+                    - generic:
+                      - separator "拖动调整输入框高度"
+                      - textbox "发送":
+                        - /placeholder: 描述测试任务，例如：跑 checkout 模块并分析失败原因
+                      - generic:
+                        - button "上传附件"
+                        - generic:
+                          - button "切换 Agent":
+                            - generic: build
+                        - generic:
+                          - button "切换模型":
+                            - generic: Ling-3.0-flash Free
+                        - button "新建对话"
+                        - button "定时执行" [disabled]
+                        - button "发送" [disabled]
+    - region "运行与终端" [ref=e245]:
+      - generic:
+        - generic [ref=e246]:
+          - button "运行" [ref=e247]
+          - button "终端" [ref=e248]
+          - button "关闭运行与终端" [ref=e249]: 关闭
+        - generic:
+          - generic:
+            - generic [ref=e250]:
+              - generic [ref=e251]: 运行
+              - generic [ref=e252]: IDLE
+              - button "取消" [disabled]
+              - button "重试" [ref=e253]
+            - generic [ref=e257]: 等待运行输出...

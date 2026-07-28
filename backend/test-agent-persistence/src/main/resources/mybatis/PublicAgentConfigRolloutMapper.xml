@@ -8,7 +8,21 @@
             <arg column="scope_key" javaType="java.lang.String"/>
             <arg column="branch" javaType="java.lang.String"/>
             <arg column="commit_hash" javaType="java.lang.String"/>
+            <arg column="discard_shared_runtime_changes" javaType="_boolean"/>
             <arg column="initiated_by_user_id" javaType="java.lang.String"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="retry_count" javaType="_int"/>
+            <arg column="lease_until" javaType="java.time.Instant"/>
+            <arg column="lease_token" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+    <resultMap id="PublicWorktreeRowMap" type="com.enterprise.testagent.persistence.mybatis.PublicAgentConfigWorktreeRow">
+        <constructor>
+            <arg column="rollout_id" javaType="java.lang.String"/>
+            <arg column="worktree_id" javaType="java.lang.String"/>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="linux_server_id" javaType="java.lang.String"/>
+            <arg column="target_commit" javaType="java.lang.String"/>
             <arg column="trace_id" javaType="java.lang.String"/>
             <arg column="retry_count" javaType="_int"/>
             <arg column="lease_until" javaType="java.time.Instant"/>
@@ -61,6 +75,35 @@
             <arg column="lease_token" javaType="java.lang.String"/>
         </constructor>
     </resultMap>
+    <resultMap id="RolloutStatusRowMap" type="com.enterprise.testagent.persistence.mybatis.PublicAgentConfigRolloutStatusRow">
+        <constructor>
+            <arg column="rollout_id" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="branch" javaType="java.lang.String"/>
+            <arg column="commit_hash" javaType="java.lang.String"/>
+            <arg column="failure_reason" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+            <arg column="completed_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+    <resultMap id="RolloutServerStatusRowMap" type="com.enterprise.testagent.persistence.mybatis.PublicAgentConfigRolloutServerStatusRow">
+        <constructor>
+            <arg column="linux_server_id" javaType="java.lang.String"/>
+            <arg column="sync_status" javaType="java.lang.String"/>
+            <arg column="retry_count" javaType="_int"/>
+            <arg column="target_total" javaType="_long"/>
+            <arg column="target_pending" javaType="_long"/>
+            <arg column="target_disposed" javaType="_long"/>
+            <arg column="target_abandoned" javaType="_long"/>
+            <arg column="worktree_total" javaType="_long"/>
+            <arg column="worktree_pending" javaType="_long"/>
+            <arg column="worktree_synced" javaType="_long"/>
+            <arg column="last_error" javaType="java.lang.String"/>
+            <arg column="synced_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
 
     <select id="findActiveRolloutId" resultType="java.lang.String">
         select rollout_id from public_agent_config_rollouts
@@ -75,6 +118,61 @@
             </otherwise>
         </choose>
         order by created_at desc limit 1
+    </select>
+
+    <select id="findLatestRolloutStatus" resultMap="RolloutStatusRowMap">
+        select rollout_id, status, branch, commit_hash, failure_reason, created_at, updated_at, completed_at
+        from public_agent_config_rollouts
+        where config_scope = #{scope}
+        <choose>
+            <when test="scopeKey == null">
+                and scope_key is null
+            </when>
+            <otherwise>
+                and scope_key = #{scopeKey}
+            </otherwise>
+        </choose>
+        order by case when status in ('PREPARING', 'DRAINING') then 0 else 1 end,
+                 created_at desc
+        limit 1
+    </select>
+
+    <select id="findRolloutServerStatuses" resultMap="RolloutServerStatusRowMap">
+        select s.linux_server_id, s.status as sync_status, s.retry_count,
+               coalesce(t.target_total, 0) as target_total,
+               coalesce(t.target_pending, 0) as target_pending,
+               coalesce(t.target_disposed, 0) as target_disposed,
+               coalesce(t.target_abandoned, 0) as target_abandoned,
+               coalesce(w.worktree_total, 0) as worktree_total,
+               coalesce(w.worktree_pending, 0) as worktree_pending,
+               coalesce(w.worktree_synced, 0) as worktree_synced,
+               coalesce(s.last_error, w.last_error, t.last_error) as last_error,
+               s.synced_at,
+               s.updated_at
+        from public_agent_config_rollout_servers s
+        left join (
+            select rollout_id, linux_server_id,
+                   count(*) as target_total,
+                   count(*) filter (where status not in ('DISPOSED', 'ABANDONED')) as target_pending,
+                   count(*) filter (where status = 'DISPOSED') as target_disposed,
+                   count(*) filter (where status = 'ABANDONED') as target_abandoned,
+                   max(last_error) filter (where last_error is not null) as last_error
+            from public_agent_config_rollout_targets
+            where rollout_id = #{rolloutId}
+            group by rollout_id, linux_server_id
+        ) t on t.rollout_id = s.rollout_id and t.linux_server_id = s.linux_server_id
+        left join (
+            select rollout_id, linux_server_id,
+                   count(*) as worktree_total,
+                   count(*) filter (where status not in ('SYNCED', 'ABANDONED')) as worktree_pending,
+                   count(*) filter (where status = 'SYNCED') as worktree_synced,
+                   max(reason) filter (where reason is not null) as last_error
+            from public_agent_config_rollout_public_worktrees
+            where rollout_id = #{rolloutId}
+            group by rollout_id, linux_server_id
+        ) w on w.rollout_id = s.rollout_id and w.linux_server_id = s.linux_server_id
+        where s.rollout_id = #{rolloutId}
+        order by s.linux_server_id
     </select>
 
     <select id="findBlockingRolloutId" resultType="java.lang.String">
@@ -137,7 +235,8 @@
     </select>
 
     <select id="findClaimableServerSyncs" resultMap="SyncRowMap">
-        select r.rollout_id, r.config_scope, r.scope_key, r.branch, r.commit_hash, r.initiated_by_user_id, r.trace_id,
+        select r.rollout_id, r.config_scope, r.scope_key, r.branch, r.commit_hash,
+               r.discard_shared_runtime_changes, r.initiated_by_user_id, r.trace_id,
                s.retry_count, s.lease_until, s.lease_token
         from public_agent_config_rollouts r
         join public_agent_config_rollout_servers s on s.rollout_id = r.rollout_id
@@ -167,11 +266,11 @@
     <insert id="insertRollout">
         insert into public_agent_config_rollouts(
             rollout_id, config_scope, scope_key, branch, commit_hash, previous_commit_hash,
-            initiated_by_user_id, initiated_linux_server_id,
+            discard_shared_runtime_changes, initiated_by_user_id, initiated_linux_server_id,
             status, trace_id, created_at, updated_at
         ) values (
             #{rolloutId}, #{scope}, #{scopeKey}, #{branch}, #{expectedCommitHash}, #{previousCommitHash},
-            #{initiatedByUserId}, #{initiatedLinuxServerId},
+            #{discardSharedRuntimeChanges}, #{initiatedByUserId}, #{initiatedLinuxServerId},
             'PREPARING', #{traceId}, #{now}, #{now}
         )
     </insert>
@@ -240,6 +339,14 @@
           and status not in ('SYNCED', 'ABANDONED')
     </update>
 
+    <update id="abandonPublicRolloutWorktrees">
+        update public_agent_config_rollout_public_worktrees
+        set status = 'ABANDONED', reason = 'SERVER_DECOMMISSIONED',
+            lease_until = null, lease_token = null, updated_at = #{now}
+        where linux_server_id = #{linuxServerId}
+          and status not in ('SYNCED', 'ABANDONED')
+    </update>
+
     <insert id="insertServer">
         insert into public_agent_config_rollout_servers(
             rollout_id, linux_server_id, status, retry_count, next_retry_at, created_at, updated_at
@@ -287,6 +394,81 @@
         set status = 'RETRY_WAIT', retry_count = #{retryCount}, next_retry_at = #{nextRetryAt},
             lease_until = null, lease_token = null, last_error = #{errorMessage}, updated_at = #{now}
         where rollout_id = #{rolloutId} and linux_server_id = #{linuxServerId}
+          and status = 'PROCESSING' and lease_token = #{leaseToken}
+    </update>
+
+    <insert id="upsertPendingPublicWorktrees">
+        insert into public_agent_config_rollout_public_worktrees(
+            rollout_id, worktree_id, user_id, linux_server_id, target_commit,
+            status, reason, retry_count, next_retry_at, lease_until, lease_token,
+            trace_id, created_at, updated_at
+        ) values
+        <foreach collection="rows" item="row" separator=",">
+            (
+                #{rolloutId}, #{row.worktreeId}, #{row.userId}, #{linuxServerId}, #{targetCommit},
+                'AWAITING_USER', #{row.reason}, 0, #{now}, null, null,
+                #{traceId}, #{now}, #{now}
+            )
+        </foreach>
+        on conflict (rollout_id, worktree_id) do update
+        set reason = case
+                when public_agent_config_rollout_public_worktrees.status in ('SYNCED', 'ABANDONED')
+                    then public_agent_config_rollout_public_worktrees.reason
+                else excluded.reason
+            end,
+            next_retry_at = case
+                when public_agent_config_rollout_public_worktrees.status in ('SYNCED', 'ABANDONED')
+                    then public_agent_config_rollout_public_worktrees.next_retry_at
+                else excluded.next_retry_at
+            end,
+            updated_at = excluded.updated_at
+    </insert>
+
+    <select id="findClaimablePublicWorktrees" resultMap="PublicWorktreeRowMap">
+        select w.rollout_id, w.worktree_id, w.user_id, w.linux_server_id,
+               w.target_commit, w.trace_id, w.retry_count, w.lease_until, w.lease_token
+        from public_agent_config_rollout_public_worktrees w
+        join public_agent_config_rollouts r
+          on r.rollout_id = w.rollout_id
+         and r.config_scope = 'PUBLIC'
+         and r.status in ('DRAINING', 'COMPLETED')
+        where w.linux_server_id = #{linuxServerId}
+          and ((w.status = 'AWAITING_USER' and w.next_retry_at &lt;= #{now})
+            or (w.status = 'PROCESSING' and w.lease_until &lt;= #{now}))
+        order by w.next_retry_at, w.created_at
+        for update skip locked
+        limit #{limit}
+    </select>
+
+    <update id="markPublicWorktreeProcessing">
+        update public_agent_config_rollout_public_worktrees
+        set status = 'PROCESSING', lease_until = #{leaseUntil}, lease_token = #{leaseToken}, updated_at = #{now}
+        where rollout_id = #{rolloutId} and worktree_id = #{worktreeId}
+          and ((status = 'AWAITING_USER' and next_retry_at &lt;= #{now})
+            or (status = 'PROCESSING' and lease_until &lt;= #{now}))
+    </update>
+
+    <update id="markPublicWorktreeRetry">
+        update public_agent_config_rollout_public_worktrees
+        set status = 'AWAITING_USER', reason = #{reason}, retry_count = #{retryCount},
+            next_retry_at = #{nextRetryAt}, lease_until = null, lease_token = null, updated_at = #{now}
+        where rollout_id = #{rolloutId} and worktree_id = #{worktreeId}
+          and status = 'PROCESSING' and lease_token = #{leaseToken}
+    </update>
+
+    <update id="markPublicWorktreeSynchronized">
+        update public_agent_config_rollout_public_worktrees
+        set status = 'SYNCED', reason = null, synced_at = #{now},
+            lease_until = null, lease_token = null, updated_at = #{now}
+        where rollout_id = #{rolloutId} and worktree_id = #{worktreeId}
+          and status = 'PROCESSING' and lease_token = #{leaseToken}
+    </update>
+
+    <update id="abandonPublicWorktree">
+        update public_agent_config_rollout_public_worktrees
+        set status = 'ABANDONED', reason = #{reason},
+            lease_until = null, lease_token = null, updated_at = #{now}
+        where rollout_id = #{rolloutId} and worktree_id = #{worktreeId}
           and status = 'PROCESSING' and lease_token = #{leaseToken}
     </update>
 

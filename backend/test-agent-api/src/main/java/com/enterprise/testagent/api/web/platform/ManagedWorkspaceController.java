@@ -47,6 +47,13 @@ public class ManagedWorkspaceController {
         return ok(exchange, service.listApplications(userId(exchange)));
     }
 
+    /** 超级管理员只读查看应用刷新将覆盖的工作空间、版本与实际 feature 分支。 */
+    @GetMapping("/applications/git-refresh-scopes")
+    public ApiResponse<Object> listApplicationGitRefreshScopes(ServerWebExchange exchange) {
+        AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        return ok(exchange, service.listApplicationGitRefreshScopes());
+    }
+
     @GetMapping("/applications/{appId}/workspace-templates")
     public ApiResponse<Object> listTemplates(@PathVariable String appId, ServerWebExchange exchange) {
         return ok(exchange, service.listTemplates(appId, userId(exchange)));
@@ -83,6 +90,34 @@ public class ManagedWorkspaceController {
                 versionId,
                 userId(exchange),
                 agentLinuxServerId(exchange),
+                RuntimeApiSupport.traceId(exchange)));
+    }
+
+    /** 超级管理员刷新应用全部 feature 仓库组，并触发相关个人 worktree 安全收敛。 */
+    @PostMapping("/applications/{appId}/git-refresh")
+    public ApiResponse<Object> refreshApplicationGit(
+            @PathVariable String appId,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        return ok(exchange, service.refreshApplicationGit(
+                appId,
+                principal.userId(),
+                RuntimeApiSupport.traceId(exchange)));
+    }
+
+    /** 超级管理员只刷新一个实际 feature 分支组及其关联个人 worktree。 */
+    @PostMapping("/applications/{appId}/git-refresh-groups")
+    public ApiResponse<Object> refreshApplicationGitGroup(
+            @PathVariable String appId,
+            @RequestBody ManagedWorkspaceDtos.RefreshApplicationGitGroupRequest request,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        return ok(exchange, service.refreshApplicationGitGroup(
+                appId,
+                request.repositoryId(),
+                request.version(),
+                request.branch(),
+                principal.userId(),
                 RuntimeApiSupport.traceId(exchange)));
     }
 

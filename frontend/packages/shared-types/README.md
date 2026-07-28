@@ -7,6 +7,7 @@
 ## 主要职责
 
 - 提供 `XxlJobSsoTicket`，只表达短期 `ticket/expiresAt/formAction` 响应；原始票据不得进入持久化状态、URL 或日志。
+- 定义 `ToolboxCatalogResponse`、`ToolboxTool` 与 `ToolboxClickResponse`，表达版本化离线目录、双语名称/说明、固定分类、来源版本、同源深链接、累计点击和可空热门排名；点击请求的 `eventId` 由页面每次打开动作生成，不包含客户端时间或用户身份。
 
 - 定义 API 响应、Workspace、WorkspaceDirectoryList、Session、SessionMessage、Run、RunEvent、Diff、AgentMessage 类型；Session、SessionMessage、Run 和 AgentMessage 可选携带 `sourceType/sourceRefId`，用于兼容并展示 `SCHEDULED_TASK` 来源。Workspace 可选携带 `linuxServerId`，用于前端文件 WebSocket 同服务器路由。`Session.workspaceContext` 可选携带历史会话所属 `appId/appName/applicationWorkspaceId/workspaceName/versionId/version`，旧后端或单会话详情缺失时前端必须兼容 `null/undefined`。
 - 定义 `NightExecutionScheduleMode`、`NightExecutionSlotsResponse`、`NightExecutionTask`、`NightExecutionTaskQueryResponse`，表达 `NIGHT_WINDOW/ADMIN_CUSTOM`、北京时间夜间窗口、15 分钟容量时段、待执行任务和当前会话可见失败卡；任务的 `scheduleMode` 保持可选以兼容旧后端响应，响应不包含完整 prompt/parts。
@@ -27,11 +28,12 @@
 - 定义 Run 整体回复反馈 DTO：`AiRunFeedback`、`AiRunFeedbackPayload`、`RunFeedbackState`、`RunFeedbackQuery`；旧 `AiMessageFeedback` 类型保留兼容。
 - 定义运营分析 DTO：`AnalyticsQueryParams`、`AnalyticsOverview`、`AnalyticsTimeSeriesPoint`、`AnalyticsPeaks`、用户/组织/满意度/异常明细行和 freshness；类型只表达 token 使用，不新增费用字段。
 - 定义 Workspace/Agent 配置文件 WebSocket 路由、目标后端服务器、ticket 请求/响应 DTO，供 `backend-api` 和 agent-web 复用；`FileTreeEntry` 的可选 `displayName/displayNameEn` 只用于 Agent/Skill 配置树双语展示，稳定文件身份仍是 `path/name`；`AgentConfigWorktreeOption` 在公共 worktree 切换列表中补充 `createdByUserId/createdByUsername`。
+- `PublicAgentRepositoryStatus.localChangesPresent` 可选表达共享运行副本是否需要全局恢复确认；`PublicAgentConfigRolloutStatus` 及服务器明细表达公共全局刷新的同步、排空、个人 worktree 补偿任务总数/待处理/已收敛和 `lastError`。新增字段按 additive 兼容，旧后端缺失 worktree 计数时调用方按 0 展示。
 - 定义 `AgentSkillHubAsset/Detail/Reference/ReferenceConsumer/Update/UpdateOperation` 等 DTO；新增状态或字段应保持 additive，`referenceCount` 表示有效引用应用数，详情 `consumers` 表示可见引用方；`builtin` 明确区分平台公共配置的只读虚拟资产，`referenceStatus` 区分 `PENDING_PUSH/ACTIVE/PENDING_REMOVE/UPDATE_CONFLICT`。
 - 定义 `WorkspaceViewLocator`、稳定 `WorkspaceViewEntry.id`、`WORKSPACE/REFERENCE/MIXED` 来源、节点只读/冲突/工作区写入路径、局部 warning 和组合视图读取结果；展示 `path` 允许重复，调用方必须使用 `id/locator` 区分工作区与引用文件。
 - 定义应用配置管理 DTO：`ApplicationDefinition`、`ApplicationMember`、`CodeRepositoryConfig`、`RepositoryTypeOption`、`RepositoryDeploymentOptions`、`RepositoryTreeNode`、`RepositoryTreeResponse`、`ApplicationWorkspaceConfig`、`WorkspaceCreateOperation`、`SshKeyMetadata` 和对应请求 payload；`CodeRepositoryConfig.englishName` 对历史数据保持可空，新增/编辑 payload 必填；`deploymentMode` 对旧响应保持可选，新增 payload 可携带 `EXTERNAL/INTERNAL`；`repositoryType` / `repositoryTypeLabel` 对旧响应保持可选，新增 payload 可携带 `repositoryType` 并继续保留兼容 `standard`；`CreateApplicationWorkspacePayload.directoryNew` 可选，仅表示设置页保存时需要在 clone 后创建前端内存新增的工作空间目录。
 - 定义内部模型 `InternalModelTokenDefinition` 与新增/更新/删除 payload，以及带可选 `tokenId/tokenName/tokenConfigured` 的 Provider DTO；Token 定义响应没有明文值，Provider 更新通过 `tokenId/clearToken` 表达关联并保留顶层 `authToken` 旧请求兼容。
-- 定义应用版本工作区 DTO：`ManagedApplication`、`ApplicationWorkspaceTemplate`、`ApplicationWorkspaceVersion`、`PersonalWorkspace`、`PersonalWorkspaceGitPullResult`、`WorkspaceDiff`、`WorkspaceSyncResult` 和对应请求 payload；个人拉取结果区分是否实际更新、是否包含应用 Agent 配置及变更文件，并以可选 `runtimeReloadStatus/runtimeReloadId` 表达新版后端的单用户持久化运行态重载登记结果；字段保持可选以兼容滚动升级旧后端。`ApplicationWorkspaceVersion` 的 `targetCommitHash`、`replicaCommitHash`、`replicaLinuxServerId`、`replicaStatus` 均为可选字段，兼容旧后端和历史版本。
+- 定义应用版本工作区 DTO：`ManagedApplication`、`ApplicationWorkspaceTemplate`、`ApplicationWorkspaceVersion`、`PersonalWorkspace`、`PersonalWorkspaceGitPullResult`、`ApplicationGitRefreshScope`、`ApplicationGitRefreshScopeGroup`、`ApplicationGitRefreshScopeWorkspace`、`ApplicationGitRefreshGroupSelector`、`ApplicationGitRefreshResult`、`ApplicationGitRefreshGroup`、`WorkspaceDiff`、`WorkspaceSyncResult` 和对应请求 payload；个人拉取结果区分是否实际更新、是否包含应用 Agent 配置及变更文件，并以可选 `runtimeReloadStatus/runtimeReloadId` 表达新版后端的单用户持久化运行态重载登记结果；应用级刷新范围明确映射工作空间、版本和实际 feature 分支，selector 支持精确刷新单个物理组，执行结果按物理 feature 仓库组返回成功、失败、个人 worktree 合并与应用 Agent 重载统计。字段保持可选以兼容滚动升级旧后端。`ApplicationWorkspaceVersion` 的 `targetCommitHash`、`replicaCommitHash`、`replicaLinuxServerId`、`replicaStatus` 均为可选字段，兼容旧后端和历史版本。
 - `ApplicationWorkspaceConfig.enabled` 对旧响应可选且缺失时按启用处理；`UpdateApplicationWorkspacePayload` 支持部分更新工作空间名称或启用状态。
 - 不引入运行时依赖。
 

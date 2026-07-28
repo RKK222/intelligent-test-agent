@@ -1,0 +1,208 @@
+- generic [ref=e12]:
+  - banner [ref=e13]:
+    - generic [ref=e15]:
+      - img "logo" [ref=e16]
+      - generic [ref=e17]:
+        - generic [ref=e18]: MIMO测试智能体
+        - generic [ref=e19]: MIMO Intelligent Test Agent
+    - generic [ref=e20]:
+      - button "打开用户手册" [ref=e21] [cursor=pointer]
+      - button "查看运行态资源详情" [ref=e26] [cursor=pointer]:
+        - generic [ref=e27]: Agent 7
+        - generic [ref=e28]: Skill 16
+        - generic [ref=e29]: MCP 0
+        - generic [ref=e30]: Plugin 0
+      - button "F-COSS" [ref=e32] [cursor=pointer]
+      - button "当前用户 888888888" [ref=e37] [cursor=pointer]:
+        - generic [ref=e38]: "8"
+  - generic [ref=e39]:
+    - button "切换侧边栏" [ref=e41] [cursor=pointer]:
+      - img "toggle panel" [ref=e42]
+    - button "切换右侧栏" [ref=e44] [cursor=pointer]:
+      - img "toggle panel" [ref=e45]
+    - complementary [ref=e46]:
+      - navigation "工作台活动栏" [ref=e47]:
+        - generic [ref=e48]:
+          - button "打开编辑器" [ref=e49] [cursor=pointer]
+          - button "系统管理" [ref=e54] [cursor=pointer]
+          - button "Agent 与 Skill Hub" [ref=e57] [cursor=pointer]:
+            - generic "有可用更新" [ref=e289]: "1"
+        - button "系统设置" [ref=e69] [cursor=pointer]
+      - button "唤起小宠物" [ref=e73] [cursor=pointer]
+    - generic [ref=e76]:
+      - generic:
+        - generic:
+          - generic:
+            - tablist "工作区面板":
+              - button "文件树"
+              - button "搜索"
+              - button "变更":
+                - generic: "15"
+            - generic:
+              - generic:
+                - generic:
+                  - 'button "工作空间 / worktree: feature_testagent_20260618_usr_test_dev_default"':
+                    - generic "default": 工作空间
+                    - generic: "/ worktree: feature_testagent_20260618_usr_test_dev_default"
+                  - generic:
+                    - button "新建或上传到工作区根目录"
+                    - button "打开外部页面"
+                    - group:
+                      - generic "更多工作空间操作"
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - button ".testagent":
+                            - generic: 
+                            - generic: 
+                        - generic:
+                          - button "archive":
+                            - generic: 
+                            - generic: 
+                        - generic:
+                          - button "docs":
+                            - generic: 
+                            - generic: 
+                        - generic:
+                          - button "spec":
+                            - generic: 
+                            - generic: 
+                        - generic:
+                          - button ".gitignore"
+                        - generic:
+                          - button "README.md"
+                      - button "选择要上传到工作区的文件"
+              - generic:
+                - generic:
+                  - button "Agents"
+                - text:     
+            - contentinfo:
+              - generic:
+                - generic:
+                  - button "本地-测试 / 20260618 / feature_testagent_20260618_usr_test_dev_default"
+                - button "打开引用配置"
+                - button "切换服务器工作空间"
+      - generic [ref=e145]:
+        - main [ref=e147]:
+          - generic [ref=e334]:
+            - navigation "系统管理导航" [ref=e335]:
+              - button "定时任务管理" [ref=e336] [cursor=pointer]
+              - button "运行管理" [ref=e342] [cursor=pointer]
+              - button "通用参数管理" [ref=e346] [cursor=pointer]
+              - button "内部模型供应商" [ref=e349] [cursor=pointer]
+              - button "配置管理" [ref=e356] [cursor=pointer]
+              - button "运营分析" [ref=e361] [cursor=pointer]
+            - generic [ref=e385]:
+              - navigation "配置管理导航" [ref=e386]:
+                - button "TestAgent公共配置管理" [ref=e387] [cursor=pointer]
+                - button "应用 Git 刷新" [active] [ref=e394] [cursor=pointer]
+              - generic [ref=e442]:
+                - generic [ref=e443]:
+                  - generic [ref=e444]:
+                    - heading "应用 Git 刷新" [level=2] [ref=e445]
+                    - paragraph [ref=e446]: 按应用刷新全部物理 feature 仓库组，并触发各服务器相关个人 worktree 的安全合并与应用配置重载。
+                  - button "刷新列表" [ref=e447] [cursor=pointer]
+                - table [ref=e454]:
+                  - rowgroup [ref=e455]:
+                    - row [ref=e456]:
+                      - columnheader "应用" [ref=e457]
+                      - columnheader "工作空间 / 版本 / 分支" [ref=e458]
+                      - columnheader "状态" [ref=e459]
+                      - columnheader "刷新结果" [ref=e460]
+                      - columnheader "操作" [ref=e461]
+                  - rowgroup [ref=e462]:
+                    - row [ref=e463]:
+                      - cell "F-COSS app_fcoss" [ref=e464]:
+                        - strong [ref=e465]: F-COSS
+                        - generic [ref=e466]: app_fcoss
+                      - cell "feature_testagent_20260618 feature_testagent_20260618 · 版本 20260618 本地-测试 feature_testagent_20260626 springbootDemo · 版本 20260709 wrtest" [ref=e467]:
+                        - list [ref=e468]:
+                          - listitem [ref=e469]:
+                            - code [ref=e470]: feature_testagent_20260618
+                            - generic [ref=e471]: feature_testagent_20260618 · 版本 20260618
+                            - generic [ref=e472]: 本地-测试
+                          - listitem [ref=e473]:
+                            - code [ref=e474]: feature_testagent_20260626
+                            - generic [ref=e475]: springbootDemo · 版本 20260709
+                            - generic [ref=e476]: wrtest
+                      - cell "启用" [ref=e477]
+                      - cell "尚未执行" [ref=e479]
+                      - cell [ref=e480]:
+                        - button "刷新应用 Git：F-COSS" [ref=e481] [cursor=pointer]: 刷新应用 Git
+                    - row [ref=e486]:
+                      - cell "F-WRAPP 113023" [ref=e487]:
+                        - strong [ref=e488]: F-WRAPP
+                        - generic [ref=e489]: "113023"
+                      - cell "codex/mimoagent-opencode mimoagent2 · 版本 20260701 ui main intelligent-test-agent 本地仓库 · 版本 local F-WRAPP 本地工作区模板" [ref=e490]:
+                        - list [ref=e491]:
+                          - listitem [ref=e492]:
+                            - code [ref=e493]: codex/mimoagent-opencode
+                            - generic [ref=e494]: mimoagent2 · 版本 20260701
+                            - generic [ref=e495]: ui
+                          - listitem [ref=e496]:
+                            - code [ref=e497]: main
+                            - generic [ref=e498]: intelligent-test-agent 本地仓库 · 版本 local
+                            - generic [ref=e499]: F-WRAPP 本地工作区模板
+                      - cell "启用" [ref=e500]
+                      - cell "尚未执行" [ref=e502]
+                      - cell [ref=e503]:
+                        - button "刷新应用 Git：F-WRAPP" [ref=e504] [cursor=pointer]: 刷新应用 Git
+                    - row [ref=e509]:
+                      - cell "Hub 演示应用 app_hub_demo" [ref=e510]:
+                        - strong [ref=e511]: Hub 演示应用
+                        - generic [ref=e512]: app_hub_demo
+                      - cell "main Hub 演示仓库 · 版本 20260725 Hub 演示工作空间" [ref=e513]:
+                        - list [ref=e514]:
+                          - listitem [ref=e515]:
+                            - code [ref=e516]: main
+                            - generic [ref=e517]: Hub 演示仓库 · 版本 20260725
+                            - generic [ref=e518]: Hub 演示工作空间
+                      - cell "启用" [ref=e519]
+                      - cell "尚未执行" [ref=e521]
+                      - cell [ref=e522]:
+                        - button "刷新应用 Git：Hub 演示应用" [ref=e523] [cursor=pointer]: 刷新应用 Git
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - banner:
+                    - generic:
+                      - heading [level=2]
+                      - button "原始输出"
+                      - button "2 会话列表":
+                        - generic: "2"
+                        - generic: 会话列表
+                  - generic: 等待任务输入
+                  - generic:
+                    - generic:
+                      - separator "拖动调整输入框高度"
+                      - textbox "发送":
+                        - /placeholder: 描述测试任务，例如：跑 checkout 模块并分析失败原因
+                      - generic:
+                        - button "上传附件"
+                        - generic:
+                          - button "切换 Agent":
+                            - generic: build
+                        - generic:
+                          - button "切换模型":
+                            - generic: Ling-3.0-flash Free
+                        - button "新建对话"
+                        - button "定时执行" [disabled]
+                        - button "发送" [disabled]
+    - region "运行与终端" [ref=e245]:
+      - generic:
+        - generic [ref=e246]:
+          - button "运行" [ref=e247]
+          - button "终端" [ref=e248]
+          - button "关闭运行与终端" [ref=e249]: 关闭
+        - generic:
+          - generic:
+            - generic [ref=e250]:
+              - generic [ref=e251]: 运行
+              - generic [ref=e252]: IDLE
+              - button "取消" [disabled]
+              - button "重试" [ref=e253]
+            - generic [ref=e257]: 等待运行输出...

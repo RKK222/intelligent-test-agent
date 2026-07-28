@@ -117,6 +117,8 @@ NGINX_BACKENDS="${TEST_AGENT_NGINX_BACKENDS:-}"
 NGINX_SERVER_ROUTES="${TEST_AGENT_NGINX_SERVER_ROUTES:-}"
 NGINX_LEGACY_TERMINAL_ROUTES="${TEST_AGENT_NGINX_TERMINAL_ROUTES:-}"
 NGINX_XXL_JOB_ADMINS="${TEST_AGENT_NGINX_XXL_JOB_ADMINS:-}"
+NGINX_TOOLBOX_IT_TOOLS_UPSTREAM="${TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM:-}"
+NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM="${TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM:-}"
 NGINX_TLS_ENABLED="${TEST_AGENT_NGINX_TLS_ENABLED:-false}"
 NGINX_TLS_CERTIFICATE="${TEST_AGENT_NGINX_TLS_CERTIFICATE:-}"
 NGINX_TLS_CERTIFICATE_KEY="${TEST_AGENT_NGINX_TLS_CERTIFICATE_KEY:-}"
@@ -131,6 +133,17 @@ NGINX_SYSTEMD_SERVICE="${TEST_AGENT_NGINX_SYSTEMD_SERVICE:-nginx}"
   echo "TEST_AGENT_NGINX_MODE must be single or multi" >&2
   exit 1
 }
+for toolbox_endpoint in "${NGINX_TOOLBOX_IT_TOOLS_UPSTREAM}" "${NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM}"; do
+  [[ "${toolbox_endpoint}" =~ ^([A-Za-z0-9.-]+):([0-9]{1,5})$ ]] || {
+    echo "Invalid toolbox upstream endpoint: ${toolbox_endpoint}" >&2
+    exit 1
+  }
+  toolbox_port="${BASH_REMATCH[2]}"
+  (( toolbox_port >= 1 && toolbox_port <= 65535 )) || {
+    echo "Invalid toolbox upstream port: ${toolbox_endpoint}" >&2
+    exit 1
+  }
+done
 if [[ -n "${NGINX_SERVER_ROUTES}" && -n "${NGINX_LEGACY_TERMINAL_ROUTES}" ]]; then
   echo "Configure only TEST_AGENT_NGINX_SERVER_ROUTES; TEST_AGENT_NGINX_TERMINAL_ROUTES is a legacy fallback" >&2
   exit 1
@@ -332,6 +345,8 @@ tls_token='${TEST_AGENT_NGINX_TLS_DIRECTIVES}'
 terminal_token='${TEST_AGENT_TERMINAL_LOCATIONS}'
 server_upstreams_token='${TEST_AGENT_SERVER_UPSTREAMS}'
 server_route_map_token='${TEST_AGENT_SERVER_ROUTE_MAP}'
+toolbox_it_tools_token='${TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM}'
+toolbox_omni_tools_token='${TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM}'
 listen_directive="listen ${NGINX_LISTEN_PORT};"
 additional_listen_directives=()
 tls_directives=""
@@ -423,6 +438,8 @@ while IFS= read -r line || [[ -n "${line}" ]]; do
   line="${line//${listen_token}/${listen_directive}}"
   line="${line//${tls_token}/${tls_directives}}"
   line="${line//${root_token}/${FRONTEND_ROOT}}"
+  line="${line//${toolbox_it_tools_token}/${NGINX_TOOLBOX_IT_TOOLS_UPSTREAM}}"
+  line="${line//${toolbox_omni_tools_token}/${NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM}}"
   printf '%s\n' "${line}" >>"${rendered}"
 done <"${TEMPLATE}"
 
@@ -438,6 +455,7 @@ if [[ "${VALIDATE_ONLY}" -eq 1 ]]; then
   printf 'backend count: %s\n' "${#backend_directives[@]}"
   printf 'server route count: %s\n' "${#server_route_ids[@]}"
   printf 'XXL-JOB Admin count: %s\n' "${#xxl_job_admin_directives[@]}"
+  printf 'toolbox upstreams: %s,%s\n' "${NGINX_TOOLBOX_IT_TOOLS_UPSTREAM}" "${NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM}"
   printf 'tls enabled: %s\n' "${NGINX_TLS_ENABLED}"
   exit 0
 fi

@@ -7,6 +7,7 @@
 | `122.233.30.114` | `/data/testagent/config/backend.env` | `configure-single-deployment.sh backend` |
 | `122.233.30.114` | `/data/testagent/config/docker.env` | 同上，一次同时生成 |
 | `122.233.30.2` | `/data/testagent/config/nginx.env` | `configure-single-deployment.sh frontend` |
+| 独立工具节点 | `/data/testagent/config/toolbox.env` | 从发布包示例复制并填写私网绑定地址 |
 
 完整部署、模型配置和验收仍见 [SINGLE-BACKEND.md](SINGLE-BACKEND.md)。
 
@@ -104,7 +105,44 @@ test-agent-backend-122-233-30-114
 
 服务器终端配置预期为 `ENABLED=true`、工作目录 `/data/testagent`、公开 WSS 基址为空、`ALLOW_INSECURE_WEBSOCKET=true`。这是当前 HTTP 现场例外；通用企业模板仍以 WSS 为安全默认。
 
-## 3. `.2` 生成 nginx.env
+## 3. 独立工具节点先部署并健康
+
+在工具节点从同一份已校验发布包提取镜像、校验文件和脚本；不要只复制其中一个镜像：
+
+```bash
+set -euo pipefail
+rm -rf /tmp/test-agent-toolbox-release
+mkdir -p /tmp/test-agent-toolbox-release /data/testagent/dist /data/testagent/deploy/internal /data/testagent/config
+unzip -q /data/0709/test-agent-internal-release.zip \
+  'dist/test-agent_*tools_*-linux-amd64.tar*' \
+  'deploy/internal/toolbox.env.example' \
+  'deploy/internal/toolbox-docker.sh' \
+  'deploy/internal/diagnose-toolbox.sh' \
+  'deploy/internal/TOOLBOX.md' \
+  -d /tmp/test-agent-toolbox-release
+install -m 0644 /tmp/test-agent-toolbox-release/dist/test-agent_*tools_*-linux-amd64.tar* /data/testagent/dist/
+install -m 0755 /tmp/test-agent-toolbox-release/deploy/internal/toolbox-docker.sh \
+  /tmp/test-agent-toolbox-release/deploy/internal/diagnose-toolbox.sh \
+  /data/testagent/deploy/internal/
+install -m 0644 /tmp/test-agent-toolbox-release/deploy/internal/TOOLBOX.md \
+  /data/testagent/deploy/internal/
+test -f /data/testagent/config/toolbox.env || \
+  install -m 0644 /tmp/test-agent-toolbox-release/deploy/internal/toolbox.env.example \
+    /data/testagent/config/toolbox.env
+```
+
+编辑 `toolbox.env`，把 `TEST_AGENT_TOOLBOX_BIND_ADDRESS` 设置为该节点供 `.2` 访问的真实私网 IP，并按 `TOOLBOX.md` 配置仅允许 `.2` 访问 18120/18121 的防火墙。然后执行：
+
+```bash
+TEST_AGENT_TOOLBOX_ENV_FILE=/data/testagent/config/toolbox.env \
+  /data/testagent/deploy/internal/toolbox-docker.sh deploy
+TEST_AGENT_TOOLBOX_ENV_FILE=/data/testagent/config/toolbox.env \
+  /data/testagent/deploy/internal/diagnose-toolbox.sh
+```
+
+只有两个固定容器都为 `healthy` 且从 `.2` 能访问工具节点的两个健康地址后，才继续配置前端。详细安全、诊断和回滚步骤见同目录 `TOOLBOX.md`。
+
+## 4. `.2` 生成 nginx.env
 
 当前 Nginx 安装目录是 `/data/apps/nginx`，`nginx -T` 已确认主配置只显式加载 `/data/apps/nginx/conf/test-agent.conf`，没有 `*.conf` 通配 include。先确认该文件只属于本应用并备份：
 
@@ -117,10 +155,13 @@ cp -a /data/apps/nginx/conf/test-agent.conf \
 若文件中还有其他系统的配置，停止覆盖并由 Nginx 管理方拆出专用 include；若是本应用专用文件，执行：
 
 ```bash
+TOOLBOX_PRIVATE_IP=REPLACE_WITH_TOOLBOX_PRIVATE_IP
 bash /tmp/test-agent-release-config/deploy/internal/configure-single-deployment.sh \
   frontend \
   --nginx-home /data/apps/nginx \
-  --gateway-conf /data/apps/nginx/conf/test-agent.conf
+  --gateway-conf /data/apps/nginx/conf/test-agent.conf \
+  --toolbox-it-tools-upstream "${TOOLBOX_PRIVATE_IP}:18120" \
+  --toolbox-omni-tools-upstream "${TOOLBOX_PRIVATE_IP}:18121"
 
 sed -n '1,40p' /data/testagent/config/nginx.env
 ```
@@ -131,6 +172,8 @@ sed -n '1,40p' /data/testagent/config/nginx.env
 TEST_AGENT_NGINX_MODE=single
 TEST_AGENT_NGINX_BACKENDS=122.233.30.114:8080
 TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.114:18080
+TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=<toolbox-private-ip>:18120
+TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=<toolbox-private-ip>:18121
 TEST_AGENT_NGINX_LISTEN_PORT=80
 TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=9996
 TEST_AGENT_NGINX_TLS_ENABLED=false
@@ -154,10 +197,13 @@ include /data/apps/nginx/conf/test-agent-enabled/*.conf;
 
 ```bash
 mkdir -p /data/apps/nginx/conf/test-agent-enabled
+TOOLBOX_PRIVATE_IP=REPLACE_WITH_TOOLBOX_PRIVATE_IP
 bash /tmp/test-agent-release-config/deploy/internal/configure-single-deployment.sh \
   frontend \
   --nginx-home /data/apps/nginx \
-  --gateway-conf /data/apps/nginx/conf/test-agent-enabled/test-agent-gateway.conf
+  --gateway-conf /data/apps/nginx/conf/test-agent-enabled/test-agent-gateway.conf \
+  --toolbox-it-tools-upstream "${TOOLBOX_PRIVATE_IP}:18120" \
+  --toolbox-omni-tools-upstream "${TOOLBOX_PRIVATE_IP}:18121"
 ```
 
 如果现有主配置已经包含 `/data/apps/nginx/conf/vhosts/*.conf` 或 `conf.d/*.conf`，无需修改主配置，直接把 `--gateway-conf` 指到对应目录。禁止只因为某个同级文件被显式 include，就把新网关放在其旁边；`nginx -t` 虽会成功，但 `nginx -T` 不会列出新文件，部署脚本会拒绝 reload。

@@ -1931,6 +1931,248 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void superAdminRefreshScopeListsEveryWorkspaceVersionAndActualFeatureBranch() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        ApplicationWorkspace secondWorkspace = new ApplicationWorkspace(
+                new ApplicationWorkspaceId("awp_2"),
+                new ApplicationId("app_gcms"),
+                new CodeRepositoryId("repo_1"),
+                "main",
+                "F-GCMS/order",
+                "订单 Workspace",
+                true,
+                Instant.now(),
+                Instant.now());
+        configuration.savedWorkspaces.add(secondWorkspace);
+        Instant now = Instant.now();
+        managed.versions.add(versionForScope(
+                "awv_1", "awp_1", "wrk_1", "20260707", "feature_testagent_20260707", "F-GCMS/workspace", now));
+        managed.versions.add(versionForScope(
+                "awv_2", "awp_2", "wrk_2", "20260707", "feature_testagent_20260707", "F-GCMS/order", now));
+        managed.versions.add(versionForScope(
+                "awv_3", "awp_2", "wrk_3", "20260708", "feature_testagent_20260708", "F-GCMS/order", now));
+        ManagedWorkspaceApplicationService service = service(
+                configuration,
+                managed,
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("F-GCMS/workspace"));
+
+        List<ManagedWorkspaceResponses.ApplicationGitRefreshScopeResponse> scopes =
+                service.listApplicationGitRefreshScopes();
+
+        assertThat(scopes).singleElement().satisfies(scope -> {
+            assertThat(scope.appId()).isEqualTo("app_gcms");
+            assertThat(scope.totalGroups()).isEqualTo(2);
+            assertThat(scope.groups()).extracting(ManagedWorkspaceResponses.ApplicationGitRefreshScopeGroupResponse::branch)
+                    .containsExactly("feature_testagent_20260707", "feature_testagent_20260708");
+            assertThat(scope.groups().get(0).workspaceCount()).isEqualTo(2);
+            assertThat(scope.groups().get(0).workspaces())
+                    .extracting(ManagedWorkspaceResponses.ApplicationGitRefreshScopeWorkspaceResponse::workspaceName)
+                    .containsExactly("GCMS Workspace", "订单 Workspace");
+        });
+    }
+
+    private static ApplicationWorkspaceVersion versionForScope(
+            String versionId,
+            String applicationWorkspaceId,
+            String runtimeWorkspaceId,
+            String version,
+            String branch,
+            String workspaceRootPath,
+            Instant now) {
+        return new ApplicationWorkspaceVersion(
+                new ApplicationWorkspaceVersionId(versionId),
+                new ApplicationWorkspaceId(applicationWorkspaceId),
+                new ApplicationId("app_gcms"),
+                new CodeRepositoryId("repo_1"),
+                version,
+                branch,
+                "/data/appworkspace/" + version + "/gcms",
+                "/data/appworkspace/" + version + "/gcms/" + workspaceRootPath,
+                new WorkspaceId(runtimeWorkspaceId),
+                new UserId("usr_1"),
+                ManagedWorkspaceStatus.ACTIVE,
+                now,
+                now);
+    }
+
+    @Test
+    void superAdminApplicationRefreshUpdatesFeatureAndMergesRelatedPersonalWorktree() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git, publisher);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_version");
+        ManagedWorkspaceResponses.PersonalWorkspaceResponse personal = service.createPersonalWorkspace(
+                version.versionId(),
+                "default",
+                new UserId("usr_1"),
+                "trace_personal");
+        publisher.events.clear();
+        git.nextRemoteCommit = "commit_after_admin_refresh";
+        git.nextNameStatus = "M\tF-GCMS/workspace/docs/design.md\n";
+        git.targetContainedInHead = false;
+
+        ManagedWorkspaceResponses.ApplicationGitRefreshResponse response = service.refreshApplicationGit(
+                "app_gcms",
+                new UserId("usr_1"),
+                "trace_admin_refresh");
+
+        assertThat(response.totalGroups()).isEqualTo(1);
+        assertThat(response.groups()).singleElement().satisfies(group -> {
+            assertThat(group.status()).as(group.errorCode() + ": " + group.message()).isEqualTo("UPDATED");
+            assertThat(group.workspaceCount()).isEqualTo(1);
+            assertThat(group.commitHash()).isEqualTo("commit_after_admin_refresh");
+        });
+        assertThat(response.updatedGroups()).isEqualTo(1);
+        assertThat(response.failedGroups()).isZero();
+        assertThat(git.fetchedBranch).isEqualTo("feature_testagent_20260707");
+        assertThat(git.resetCommit).isEqualTo("commit_after_admin_refresh");
+        assertThat(git.mergedCommitRepoRoot).isEqualTo(Path.of(personal.repoRootPath()));
+        assertThat(git.mergedCommit).isEqualTo("commit_after_admin_refresh");
+        assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_after_admin_refresh");
+        assertThat(publisher.events).singleElement().satisfies(event ->
+                assertThat(event.payload()).containsEntry("reason", "ADMIN_APPLICATION_GIT_REFRESHED"));
+    }
+
+    @Test
+    void superAdminCanRefreshOneFeatureGroupWithoutFetchingOtherApplicationBranch() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = serviceWithBranches(
+                configuration,
+                managed,
+                new FakeWorkspaceRepository(),
+                git,
+                List.of("feature_testagent_20260707", "feature_testagent_20260708"));
+        service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_first_version");
+        service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260708",
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_second_version");
+        git.nextRemoteCommit = "commit_second_branch";
+        git.nextNameStatus = "M\tF-GCMS/workspace/docs/second.md\n";
+        git.fetchedBranch = null;
+
+        ManagedWorkspaceResponses.ApplicationGitRefreshResponse response = service.refreshApplicationGitGroup(
+                "app_gcms",
+                "repo_1",
+                "20260708",
+                "feature_testagent_20260708",
+                new UserId("usr_1"),
+                "trace_one_branch");
+
+        assertThat(response.totalGroups()).isEqualTo(1);
+        assertThat(response.groups()).singleElement().satisfies(group -> {
+            assertThat(group.branch()).isEqualTo("feature_testagent_20260708");
+            assertThat(group.status()).isEqualTo("UPDATED");
+        });
+        assertThat(git.fetchedBranch).isEqualTo("feature_testagent_20260708");
+        assertThat(managed.versions).extracting(ApplicationWorkspaceVersion::targetCommitHash)
+                .containsExactly("commit_base", "commit_second_branch");
+    }
+
+    @Test
+    void superAdminApplicationRefreshUsesExistingApplicationAgentRollout() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_version");
+        git.nextRemoteCommit = "commit_after_agent_refresh";
+        git.nextNameStatus = "M\tF-GCMS/workspace/.opencode/agents/reviewer.md\n";
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        when(coordinator.prepareApplication(
+                version.versionId(),
+                "feature_testagent_20260707",
+                "commit_after_agent_refresh",
+                "commit_base",
+                "127.0.0.1",
+                "usr_1",
+                "trace_admin_agent_refresh"))
+                .thenReturn("acr_admin_refresh");
+        service.setAgentConfigRolloutCoordinator(coordinator);
+
+        ManagedWorkspaceResponses.ApplicationGitRefreshResponse response = service.refreshApplicationGit(
+                "app_gcms",
+                new UserId("usr_1"),
+                "trace_admin_agent_refresh");
+
+        assertThat(response.failedGroups()).isZero();
+        verify(coordinator).activate("acr_admin_refresh", "commit_after_agent_refresh");
+        assertThat(git.resetCommit).isEqualTo("commit_after_agent_refresh");
+        assertThat(git.pushes).isEmpty();
+    }
+
+    @Test
+    void superAdminApplicationRefreshReportsDirtyFeatureGroupAsFailureWithoutMutatingTarget() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git, publisher);
+        service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_version");
+        publisher.events.clear();
+        git.worktreeClean = false;
+        git.nextRemoteCommit = "commit_must_not_apply";
+
+        ManagedWorkspaceResponses.ApplicationGitRefreshResponse response = service.refreshApplicationGit(
+                "app_gcms",
+                new UserId("usr_1"),
+                "trace_admin_refresh_dirty");
+
+        assertThat(response.totalGroups()).isEqualTo(1);
+        assertThat(response.updatedGroups()).isZero();
+        assertThat(response.failedGroups()).isEqualTo(1);
+        assertThat(response.groups()).singleElement().satisfies(group -> {
+            assertThat(group.status()).isEqualTo("FAILED");
+            assertThat(group.errorCode()).isEqualTo("CONFLICT");
+            assertThat(group.message()).contains("未提交变更");
+        });
+        assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_base");
+        assertThat(git.resetCommit).isNull();
+        assertThat(publisher.events).isEmpty();
+    }
+
+    @Test
     void gitPullPersonalWorkspaceOnlyUpdatesCurrentOwnerAndLeavesSharedVersionUntouched() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
@@ -2862,6 +3104,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private Path mergedCommitRepoRoot;
         private String mergedCommit;
         private boolean targetContainedInHead = true;
+        private boolean remoteFastForward = true;
         private boolean failMergeWithConflict;
         private PlatformException mergeFailure;
         private List<String> nextConflictPaths = List.of();
@@ -3084,6 +3327,10 @@ class ManagedWorkspaceApplicationServiceTest {
 
         @Override
         public boolean isAncestor(Path repoRoot, String ancestor, String descendant) {
+            if ((nextRemoteCommit != null && nextRemoteCommit.equals(descendant) && nextHeadCommit.equals(ancestor))
+                    || descendant.startsWith("refs/remotes/origin/")) {
+                return remoteFastForward;
+            }
             return targetContainedInHead;
         }
 
@@ -3243,7 +3490,11 @@ class ManagedWorkspaceApplicationServiceTest {
             result.addAll(savedWorkspaces);
             return result;
         }
-        @Override public Optional<ApplicationWorkspace> findWorkspace(ApplicationWorkspaceId workspaceId) { return Optional.of(workspace); }
+        @Override public Optional<ApplicationWorkspace> findWorkspace(ApplicationWorkspaceId workspaceId) {
+            return findWorkspaces(app.appId()).stream()
+                    .filter(item -> item.workspaceId().equals(workspaceId))
+                    .findFirst();
+        }
         @Override public Optional<ApplicationWorkspace> findWorkspaceByLocation(ApplicationId appId, CodeRepositoryId repositoryId, String branch, String directoryPath) {
             return findWorkspaces(appId).stream()
                     .filter(item -> item.repositoryId().equals(repositoryId)

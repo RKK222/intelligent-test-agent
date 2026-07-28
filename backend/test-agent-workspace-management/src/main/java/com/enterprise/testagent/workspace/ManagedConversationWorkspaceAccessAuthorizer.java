@@ -3,6 +3,13 @@ package com.enterprise.testagent.workspace;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.configuration.ApplicationDefinition;
+import com.enterprise.testagent.domain.appsource.AppSourceRepository;
+import com.enterprise.testagent.domain.appsource.AppSourcePurpose;
+import com.enterprise.testagent.domain.appsource.AppSourceReplica;
+import com.enterprise.testagent.domain.appsource.AppSourceReplicaStatus;
+import com.enterprise.testagent.domain.appsource.AppSourceSnapshot;
+import com.enterprise.testagent.domain.appsource.AppSourceSnapshotStatus;
+import com.enterprise.testagent.domain.configuration.CodeRepositoryType;
 import com.enterprise.testagent.domain.configuration.ApplicationId;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersion;
@@ -15,6 +22,8 @@ import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.time.Clock;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -29,16 +38,38 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
 
     private final ManagedWorkspaceRepository managedWorkspaceRepository;
     private final ConfigurationManagementRepository configurationRepository;
+    private final AppSourceRepository appSourceRepository;
+    private final Clock clock;
 
     public ManagedConversationWorkspaceAccessAuthorizer(
             ManagedWorkspaceRepository managedWorkspaceRepository,
             ConfigurationManagementRepository configurationRepository) {
+        this(managedWorkspaceRepository, configurationRepository, null, Clock.systemUTC());
+    }
+
+    /** 生产构造器同时接入 generation 专属 app-source Runtime Workspace 反查。 */
+    @Autowired
+    public ManagedConversationWorkspaceAccessAuthorizer(
+            ManagedWorkspaceRepository managedWorkspaceRepository,
+            ConfigurationManagementRepository configurationRepository,
+            AppSourceRepository appSourceRepository) {
+        this(managedWorkspaceRepository, configurationRepository, appSourceRepository, Clock.systemUTC());
+    }
+
+    /** 测试构造器允许固定到期判断时间。 */
+    ManagedConversationWorkspaceAccessAuthorizer(
+            ManagedWorkspaceRepository managedWorkspaceRepository,
+            ConfigurationManagementRepository configurationRepository,
+            AppSourceRepository appSourceRepository,
+            Clock clock) {
         this.managedWorkspaceRepository = Objects.requireNonNull(
                 managedWorkspaceRepository,
                 "managedWorkspaceRepository must not be null");
         this.configurationRepository = Objects.requireNonNull(
                 configurationRepository,
                 "configurationRepository must not be null");
+        this.appSourceRepository = appSourceRepository;
+        this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
     @Override
@@ -77,6 +108,9 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
                 Optional<PersonalWorkspace> personal =
                         managedWorkspaceRepository.findPersonalWorkspaceByRuntimeWorkspace(workspaceId);
                 if (personal.isEmpty()) {
+                    if (requireAppSourceAccessIfMapped(userId, workspaceId)) {
+                        return;
+                    }
                     if (allowUnmanagedWorkspace) {
                         return;
                     }
@@ -111,5 +145,44 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
                     "当前用户已不是应用有效成员，不能创建会话运行上下文",
                     Map.of("appId", appId.value(), "appName", application.appName()));
         }
+    }
+
+    /**
+     * generation/server Workspace 不进入 managed-workspace 表，必须按 replica→snapshot→当前应用关联实时回溯。
+     * 任一状态、到期、个人 owner 或成员校验失败都失败关闭，不能降级为历史非托管 Workspace。
+     */
+    private boolean requireAppSourceAccessIfMapped(UserId userId, WorkspaceId workspaceId) {
+        if (appSourceRepository == null) {
+            return false;
+        }
+        AppSourceReplica replica = appSourceRepository.findReplicaByRuntimeWorkspaceId(workspaceId.value()).orElse(null);
+        if (replica == null) {
+            return false;
+        }
+        if (replica.status() != AppSourceReplicaStatus.READY) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "应用源码工作区副本未就绪");
+        }
+        AppSourceSnapshot snapshot = appSourceRepository
+                .findSnapshot(replica.repositoryId(), replica.generation())
+                .orElseThrow(() -> new PlatformException(ErrorCode.FORBIDDEN, "应用源码工作区缺少快照映射"));
+        if (snapshot.status() != AppSourceSnapshotStatus.ACTIVE
+                || !snapshot.expiresAt().isAfter(clock.instant())) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "应用源码快照已失效");
+        }
+        if (snapshot.purpose() == AppSourcePurpose.PERSONAL
+                && !snapshot.ownerUserId().equals(userId)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "个人应用源码工作区只允许拥有者访问");
+        }
+        boolean activeLinkedMember = configurationRepository.findApplicationsByRepository(replica.repositoryId()).stream()
+                .filter(ApplicationDefinition::enabled)
+                .filter(application -> configurationRepository.findRepositoriesByApplication(application.appId()).stream()
+                        .anyMatch(repository -> repository.repositoryId().equals(replica.repositoryId())
+                                && CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value()
+                                        .equals(repository.repositoryType())))
+                .anyMatch(application -> configurationRepository.isActiveMember(application.appId(), userId));
+        if (!activeLinkedMember) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "当前用户已不是应用源码关联应用的有效成员");
+        }
+        return true;
     }
 }

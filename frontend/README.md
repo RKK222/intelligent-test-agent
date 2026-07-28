@@ -62,6 +62,10 @@ packages/shared-types
 
 `apps/agent-web` 的 activity rail 在代码/监控入口下方提供统一 Agent & Skill Hub。沉浸式页面采用能力市场结构，包含远端能力概览、发现/Agents/Skills、当前应用引用库、待更新收件箱、能力卡片和引用应用清单；分类目录展示能力发布状态、原创应用与归属工作区，应用引用状态只在“当前应用”板块展示。所有用户可读取远端精确快照，应用管理员可发布、引用、取消并重新引用，以及确认三方合并冲突；取消关系会立即退出应用引用库。`packages/backend-api` 统一承载 Hub HTTP 与平台文件 WebSocket 调用，`packages/shared-types` 保存兼容 DTO。
 
+### 工具盒子
+
+`apps/agent-web` 在“编辑器”后为所有登录用户提供工具盒子活动栏入口和受保护 `/toolbox` 路由。工具盒子进入时保存并隐藏左右面板和底部抽屉，退出、浏览器前进/后退时精确恢复原布局；页面移除占空间的顶部 Hero，只保留屏幕阅读器标题，并从 `packages/backend-api` 读取 193 项离线目录。搜索、来源和 14 个固定分类标签组成吸顶控制区；分类数字随搜索词和来源实时联动，不受当前分类选择影响，移动端标签保持单行横向滚动。热门区仍展示正点击 Top 10。每张卡片是带 `target="_blank"`、`rel="noopener noreferrer"` 的原生具体工具链接，普通点击和中键会异步上报，失败不阻断打开或显示干扰提示。本地 Vite 默认把两个工具前缀分别代理到 `127.0.0.1:18120/18121` 并剥离公开前缀，套件根路径返回 `/toolbox`，因此使用 `restart-dev-services.sh` 时直接访问 3000 端口即可联调具体工具。
+
 ## 本地命令
 
 ```bash
@@ -101,6 +105,8 @@ Agents 配置树的公共级、应用级根统一复用工作空间 `FileEntryCr
 ```bash
 ./restart-dev-services.sh
 ```
+
+工具镜像已在本机以 `18120/18121` 启动时，上述命令会让 `http://127.0.0.1:3000/toolbox/apps/...` 直接经过 Vite 代理访问具体工具。若容器位于其他地址，可在启动命令前临时设置 `TEST_AGENT_TOOLBOX_IT_TOOLS_URL` 和 `TEST_AGENT_TOOLBOX_OMNI_TOOLS_URL`；无需也不应为此修改 `.env.local`。
 
 Windows PowerShell 直接使用同名入口：
 
@@ -189,7 +195,7 @@ tools/dev-phase11-real-e2e.sh --start-services
 - `apps/agent-web` 负责组合页面；业务能力必须沉淀到对应 package。
 - 应用管理的已有工作空间支持启用/停用；工作空间切换菜单只显示启用项，旧响应缺少 `enabled` 时按启用兼容，停用当前打开项不会强制退出或清理现有状态。
 - opencode Web App 复刻以运行态能力为范围，交互行为参考 `opencode-source/opencode-1.18.4/packages/app`；OpenCode 源码快照严格只读，禁止通过修改快照实现前端适配；顶层 `frontend-opencode` 承载 Vue/Vite 复刻工程，opencode `packages/web` 官网/文档/公网分享轮询不进入默认边界。
-- 当前已接入 backend-api runtime 方法、夜间任务时段/创建/查询/改期/取消/关闭、Agent/Provider/Model 运行态选择（底部 Agent 下拉按 opencode `local.agent.list()` 过滤为 primary+all 且排除 subagent/hidden，输入框 `@agent` 候选按 prompt autocomplete 过滤为 subagent+all 且排除 primary/hidden，当前用户 opencode 健康状态 ready 后自动刷新运行态目录）、右上角成员应用切换、应用版本工作区/个人工作区切换与同步、超级管理员服务器工作空间选择、用户级 session history 远端搜索/分页（默认 30 条、显示应用/工作区/版本、按更新时间倒序、不拼接本地伪历史，历史按钮的运行中与 question/permission 待处理数字使用用户级摘要，不受已加载分页范围影响）、历史会话完整消息渲染与所属应用/工作区不可切换时的只读态、按成功主 Run 提供的整轮满意/不满意反馈（每轮使用 `runId` 独立定位，成功历史 Run 永久保留入口，无 assistant part 也可评价，失败/取消/子 Agent 不展示，历史状态和反馈每批最多恢复 100 个 Run）、message part reducer、active run 恢复入口、permission/question dock（permission 对齐 OpenCode 1.17.8 中文说明，优先展示完整 `patterns[]`，不展示内部 type/requestId，子智能体待授权时在对应 task 状态前显示铃铛）、Todo、工作区上下文附件（Monaco 选区、文件树文件、编辑器 Tab 文件添加到对话，输入框上方预览/删除/清空，发送时前端结构化拼接 prompt，并按字符数拦截超长内容）、上传附件前端弹窗样式（后台上传暂未接入）、busy follow-up 队列、输入法组合输入阶段 Enter 防误发、后台每 10 秒调用弱健康接口检测当前用户 opencode 进程健康，弱健康不健康时复查 `/processes/me`，MCP/LSP 状态 5 分钟刷新一次且 VCS 状态保持 30 秒刷新、Monaco 选区上下文、统一进入可恢复 Run 的 slash command palette 与参数表单补全、`@` context picker、Run/Session/VCS Diff 来源切换、Diff hunk 导航与懒加载 editor、运行中实时追踪写文件工具变更、MCP/LSP/VCS 状态摘要、顶部应用切换左侧 Agent/Skill/MCP/Plugin 已加载数量摘要和详情弹层、左下角设置模态（应用与工作空间管理含版本库内外部部署模式、版本库英文名、创建工作空间进度轮询、个人 SSH key、用户管理查询/创建测试用户和超管直接调整角色；无应用配置权限时显示角色提示）、仅 `SUPER_ADMIN` 可见的系统管理入口（XXL 同源 iframe 定时任务管理 + 运行管理 + 通用参数 JVM 内存值按需查询/刷新 + 运营分析，运行管理展示最新 CPU/内存并在点击容器或后端 Java 进程后用 ECharts 展示 Redis 48 小时指标趋势；运营分析展示用户漏斗、使用强度、Run 结果、满意度、Diff 采纳、token 强度、趋势、热力、排行、明细和 CSV 导出且不展示费用字段）、`/s/[sessionId]` 只读 transcript 和受控 PTY terminal panel；公开 share 授权、per-file/per-message 回滚和真实三服务联调 E2E 仍按后续批次推进。
+- 当前已接入 backend-api runtime 方法、夜间任务时段/创建/查询/改期/取消/关闭、Agent/Provider/Model 运行态选择（底部 Agent 下拉按 opencode `local.agent.list()` 过滤为 primary+all 且排除 subagent/hidden，输入框 `@agent` 候选按 prompt autocomplete 过滤为 subagent+all 且排除 primary/hidden，当前用户 opencode 健康状态 ready 后自动刷新运行态目录）、右上角成员应用切换、应用版本工作区/个人工作区切换与同步、超级管理员服务器工作空间选择、用户级 session history 远端搜索/分页（默认 30 条、显示应用/工作区/版本、按更新时间倒序、不拼接本地伪历史，历史按钮的运行中与 question/permission 待处理数字使用用户级摘要，不受已加载分页范围影响）、历史会话完整消息渲染与所属应用/工作区不可切换时的只读态、按成功主 Run 提供的整轮满意/不满意反馈（每轮使用 `runId` 独立定位，成功历史 Run 永久保留入口，无 assistant part 也可评价，失败/取消/子 Agent 不展示，历史状态和反馈每批最多恢复 100 个 Run）、message part reducer、active run 恢复入口、permission/question dock（permission 对齐 OpenCode 1.17.8 中文说明，优先展示完整 `patterns[]`，不展示内部 type/requestId，子智能体待授权时在对应 task 状态前显示铃铛）、Todo、工作区上下文附件（Monaco 选区、文件树文件、编辑器 Tab 文件添加到对话，输入框上方预览/删除/清空，发送时前端结构化拼接 prompt，并按字符数拦截超长内容）、上传附件前端弹窗样式（后台上传暂未接入）、busy follow-up 队列、输入法组合输入阶段 Enter 防误发、后台每 10 秒调用弱健康接口检测当前用户 opencode 进程健康，弱健康不健康时复查 `/processes/me`，MCP/LSP 状态 5 分钟刷新一次且 VCS 状态保持 30 秒刷新、Monaco 选区上下文、统一进入可恢复 Run 的 slash command palette 与参数表单补全、`@` context picker、Run/Session/VCS Diff 来源切换、Diff hunk 导航与懒加载 editor、运行中实时追踪写文件工具变更、MCP/LSP/VCS 状态摘要、顶部应用切换左侧 Agent/Skill/MCP/Plugin 已加载数量摘要和详情弹层、左下角设置模态（应用与工作空间管理含版本库内外部部署模式、版本库英文名、创建工作空间进度轮询、个人 SSH key、用户管理查询/创建测试用户和超管直接调整角色；无应用配置权限时显示角色提示）、仅 `SUPER_ADMIN` 可见的系统管理入口（XXL 同源 iframe 定时任务管理 + 运行管理 + 配置管理中的公共仓库维护和应用 Git 全量安全刷新 + 通用参数 JVM 内存值按需查询/刷新 + 运营分析，运行管理展示最新 CPU/内存并在点击容器或后端 Java 进程后用 ECharts 展示 Redis 48 小时指标趋势；运营分析展示用户漏斗、使用强度、Run 结果、满意度、Diff 采纳、token 强度、趋势、热力、排行、明细和 CSV 导出且不展示费用字段）、`/s/[sessionId]` 只读 transcript 和受控 PTY terminal panel；公开 share 授权、per-file/per-message 回滚和真实三服务联调 E2E 仍按后续批次推进。
 - 右侧对话面板在当前页面生命周期内分别记忆主 Agent 与各子 Agent 的阅读位置。首次进入某个视图时滚到最新底部；离开时仍在底部的视图返回后继续跟随最新正文，已上滑的视图返回后恢复原位置，并在该视图正文有新增时显示“查看新内容”。其它子 Agent 的并行输出不会移动当前视口或触发当前视图提示；这些快照不写入持久化存储。
 - 运行管理的后端 Java 进程表格和趋势图会展示服务器 CPU/load/内存/swap/磁盘、Java 进程 CPU/RSS/FD、JVM heap/non-heap/direct/mapped、GC、线程等可空字段；旧后端缺失新增字段时继续显示 `-` 或使用旧字段回退，趋势图保留断点。
 - 运行管理无主进程明细展示可空 UCID 和 manager PID 状态；无平台记录时固定显示“平台未登记”和“未执行 HTTP 健康检查”，`baseUrl` 保持独立列，拓扑缺新字段时回退 `-`。这些字段只来自 `SUPER_ADMIN` overview，前端不解析启动命令中的 UCID，也不自动认领、停止或改绑无主进程。

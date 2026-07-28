@@ -28,6 +28,7 @@
 - `user.User`、`user.UserId`、`user.UserRepository`、`user.UserDeletionRepository`：用户聚合、常规持久化端口和安全删除端口；外部身份资料刷新保持用户业务 ID 与既有关系不变，删除端口负责锁定目标并区分可清理账号附属数据与受保护业务引用。
 - `opencodeprocess.*`：Linux 服务器、后端 Java 进程、opencode 容器、容器管理进程、管理进程连接、用户专属 opencode server 进程、查询筛选和用户绑定模型；`OpencodeProcessManagementRepository` 作为持久化端口。
 - `configuration.*`：应用定义、应用成员、代码库配置、应用仓库关联、应用工作空间模板、个人 SSH key、通用参数、显式 JVM 内存参数 SPI/状态和设置页工作空间创建进度；`CommonParameterMemoryEntry` 约束实现先完整查库校验再原子替换，未注册参数仍按需直读数据库；`ConfigurationManagementRepository`、`CommonParameterRepository`、`WorkspaceCreateOperationRepository` 作为持久化端口。
+- `appsource.*`：应用源码仓库槽位、不可变 snapshot、服务器 replica、全局/服务器 operation step、cleanup task 和 recent selection 模型；领域规则约束 generation fencing、从 `acceptedAt` 推导的 1–72 整小时保留期、状态转换与租约所有权，`AppSourceRepository` 和 `AppSourceRepositoryHistory` 作为持久化端口。
 - `scheduler.*`：旧定时任务定义、用户级计划、运行记录、触发来源和状态枚举的历史兼容模型；生产只继续使用任务 handler 所需值对象和 `ScheduledTaskRunRetentionRepository` 清理端口，不再执行 `USER_PLAN`。
 - `auth.TokenSessionMarkerStore`：平台 Token SHA-256 session marker 领域端口；用于 Token 登录/刷新/登出/过期与外部管理会话联动，不暴露基础设施 key。
 - `nightexecution.*`：定时任务聚合、`NIGHT_WINDOW/ADMIN_CUSTOM` 模式、状态和值对象；完整 Run 输入仅在待执行期短期保存，固定目标服务器以及 attempt/owner/租约用于分发 fencing，仓储端口统一暴露到期扫描、状态 CAS、租约续期、会话写锁和夜间 15 分钟时段容量。仅标准夜间模式预留和释放容量。
@@ -60,7 +61,7 @@
 ## 测试位置
 
 - domain 模块单元测试。
-- Workspace、Session、AgentSessionBinding、Run、TokenUsage、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、应用配置、通用参数、工作空间创建进度、定时任务等值对象约束必须覆盖成功和失败场景。
+- Workspace、Session、AgentSessionBinding、Run、TokenUsage、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、应用配置、应用源码快照、通用参数、工作空间创建进度、定时任务等值对象约束必须覆盖成功和失败场景。
 - 状态机、路由决策、通用 agent binding 和内部 opencode session/node 兼容映射必须覆盖成功和冲突场景。
 - Repository 端口不直接测试数据库，实现测试放在 persistence 模块。
 

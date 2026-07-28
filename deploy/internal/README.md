@@ -10,6 +10,7 @@
 - [多后台部署](MULTI-BACKEND.md)：两个或更多 Java/worker 节点，包含 `.4 + .114` 各自的完整配置、部署和验收示例。
 - [Redis 7.4.9 独立离线升级](REDIS-OFFLINE.md)：将当前本地 Redis 版本和配置单独封包，用于企业 Redis 5.0 的受控备份、升级、验证与回滚；不修改业务代码，也不并入日常平台包。
 - [Redis 5 升级 + 双后台平台全量执行手册](FULL-UPGRADE-RUNBOOK.md)：按当前现场路径和 `.20 → .4 → .114 → .2` 顺序整合完整命令、成功条件、页面配置、脏数据边界与回滚。
+- [工具盒子离线部署](../../docs/deployment/toolbox.md)：IT-Tools + OmniTools 的 193 项目录、双镜像、独立工具节点、Nginx 切流和回滚。
 
 底层 Java、manager、Redis 路由设计见 [后端部署说明](../../docs/deployment/backend.md)。
 
@@ -19,6 +20,7 @@
 - 企业内部中转机的固定交付目录是 `~/Desktop/mimoagent/0709`；中转机不使用 `/data/0709`。`.20/.4/.114/.2` 等目标服务器的固定接收目录才是 `/data/0709`。
 - `opencode-worker-docker.sh` 固定为 worker 容器设置 `--pids-limit=8192`、`nofile=262144:262144` 和 `nproc=8192:8192`；这些值不从 `docker.env` 覆盖。脚本升级后必须重建容器才会生效。
 - Docker 18.09 发布 1000 个 worker 端口前必须在 daemon 中禁用 `userland-proxy`；脚本会在删除旧 worker 前拒绝不安全组合，避免启动中途耗尽 fork 资源。
+- worker 构建会自动检查 Codex 版本、摘要、MCP 契约和失败关闭；启用白盒分析前，每台 Linux 4.19 / Docker 18.09.7 worker 节点还必须执行 `./check-codex-whitebox-host.sh test-agent-opencode-worker:internal`。脚本按十进制解析 `18.09.7`，并用镜像内的 `/bin/true` 和真实 Codex/bubblewrap 证明 namespace 可用、只读、越界拒读和断网；不以 Apple Silicon Mac 的 amd64 仿真结果代替现场内核验收。完整说明见 `docs/deployment/codex-whitebox-mcp.md`。
 - 企业内不使用 Docker Compose；worker 由 `opencode-worker-docker.sh` 管理，当前 XXL MySQL 直接使用外部实例，不在平台服务器部署 MySQL 容器。
 - Redis 仍是独立共享基础设施，不随平台 ZIP 部署；只有明确执行 Redis 专项升级时，才使用固定名 `test-agent-redis-offline.zip`。
 - `.20` 通过 Docker `-p 6379:6379` 提供共享 Redis 时必须持久化 `net.ipv4.ip_forward=1`；Redis `deploy/verify` 脚本会提前拒绝值为 `0` 的宿主机。容器本机 `healthy` 后仍必须从 `.4`、`.114` 分别验证 `.20:6379`，跨机超时不得通过反复重启 Java 处理。
@@ -96,6 +98,14 @@ deploy/internal/package-release.sh --zip-only --output-dir deploy/internal/dist
 
 `--zip-only` 会重新复制当前 `deploy/internal/` 和全部 `.agents/session-log*.md`，并强制检查四类二进制制品齐全；缺少任一文件都会失败，不会生成部分发布包。
 
+仅构建工具盒子交付物时可执行：
+
+```bash
+deploy/internal/package-release.sh --toolbox-only --output-dir deploy/internal/dist-toolbox
+```
+
+标准完整构建默认同时生成两个固定 `linux/amd64` 工具镜像 tar/SHA、完整修改源码/SHA、193 项目录/SHA，以及 `toolbox.env.example`、部署/诊断脚本和 `TOOLBOX.md`；完整 ZIP 会把这些工具制品放入 `dist/`，把脚本和说明放入 `deploy/internal/`。不能用 `--no-save` 生成企业离线交付。独立工具节点必须先按 `TOOLBOX.md` 健康，再发布后端 migration/API，最后替换前端静态资源并 reload Nginx。
+
 当前外部 MySQL 不需要离线镜像包。标准发布 ZIP 和三台应用节点配置包齐全后，只生成一个固定平台
 U 盘交付包：
 
@@ -171,6 +181,12 @@ deploy/internal/package-redis-offline.sh --zip-only --output-dir deploy/internal
 ## OpenCode worker 版本与回滚包
 
 当前 worker 固定 OpenCode `1.18.4` 官方 `opencode-linux-x64-baseline.tar.gz`。源码快照不参与程序构建，版本、release commit、asset 和两级 SHA 校验值由 `env.example` 与 Dockerfile 同时固定。标准构建会同时导出镜像 tar 和 `test-agent-programs.tar.gz`，两者必须成对升级。
+
+同一 worker/programs 批次固定携带官方 Codex CLI `0.145.0` Linux amd64 musl 和官方同标签
+bubblewrap，分别校验归档/可执行文件 SHA-256，并包含 Codex Apache-2.0 LICENSE/NOTICE 与
+bubblewrap COPYING；MCP SDK 精确锁定 `1.29.0`。企业目标机不会下载这些依赖，Codex 与
+OpenCode 一样必须成对替换 image/programs。应用启用和现场能力验收见
+`docs/deployment/codex-whitebox-mcp.md`。
 
 1.17.8 紧急回滚包使用同一官方 baseline 资产和对应 Tool lockfile，可在外网构建机执行：
 
@@ -347,7 +363,7 @@ test-agent-config-SENSITIVE-<role>-<node>-<timestamp>.tar.gz.sha256
   在前端登记新后台并更新打包的 `nginx.env`
 - 公共模型配置：[opencode.jsonc.example](opencode.jsonc.example)
 
-单后台的 `configure-single-deployment.sh frontend` 会用临时 `.conf` 实测候选目录是否加载新文件，避免把“显式 include 某一个现有文件”的同级目录误判为通配目录。当前 `.2` 已确认显式加载专用 `/data/apps/nginx/conf/test-agent.conf`，检查并备份后应通过 `--gateway-conf` 明确复用该文件；只有它还承载其他系统、不能由本应用接管时，才由 Nginx 管理方增加专用通配目录。具体命令见 [单后台配置脚本执行单](SINGLE-BACKEND-CONFIGURATION.md)。
+单后台的 `configure-single-deployment.sh frontend` 会用临时 `.conf` 实测候选目录是否加载新文件，避免把“显式 include 某一个现有文件”的同级目录误判为通配目录。首次配置还必须显式传入两套工具节点 `host:port`；后续重跑会保留现有 `nginx.env` 中的值，绝不静默改为本机端口。当前 `.2` 已确认显式加载专用 `/data/apps/nginx/conf/test-agent.conf`，检查并备份后应通过 `--gateway-conf` 明确复用该文件；只有它还承载其他系统、不能由本应用接管时，才由 Nginx 管理方增加专用通配目录。具体命令见 [单后台配置脚本执行单](SINGLE-BACKEND-CONFIGURATION.md)。
 
 同一个 Nginx `server` 块需要同时监听多个端口时，保留主端口 `TEST_AGENT_NGINX_LISTEN_PORT`，并在 `TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS` 中填写逗号分隔的附加端口。当前域名链路继续落到实体 `:80`，IP 直连增加 `:9996`；渲染脚本会拒绝非法或重复端口。
 

@@ -45,6 +45,7 @@ test-agent-scheduler
 test-agent-workspace-management
   -> test-agent-common
   -> test-agent-domain
+  -> test-agent-scheduler
 
 test-agent-opencode-runtime
   -> test-agent-common
@@ -109,7 +110,7 @@ test-agent-event
 
 新增后端文件前必须先分析并列出现有合适工程：
 
-- Workspace、文件查看/新增/修改/删除、git 操作、差异比对、应用版本工作区、个人工作区、agent 和 skill 管理：`test-agent-workspace-management`。
+- Workspace、文件查看/新增/修改/删除、git 操作、差异比对、应用版本工作区、个人工作区、应用源码固定提交物化/多服务器副本/打开/清理、agent 和 skill 管理：`test-agent-workspace-management`。应用源码 XXL handler 只消费 `test-agent-scheduler` 契约，持久化 SQL 仍在 `test-agent-persistence` MyBatis XML。
 - 多 agent 运行时接口、agentId registry、统一日志/指标包装、opencode/otheragent 适配骨架：`test-agent-agent-runtime`。
 - Session、Run、RunEvent 编排、agent runtime 调用、Diff/revert、terminal ticket/PTY、opencode runtime 业务定时任务：`test-agent-opencode-runtime`。
 - 用户、角色、权限等平台内部管理：`test-agent-system-management`。

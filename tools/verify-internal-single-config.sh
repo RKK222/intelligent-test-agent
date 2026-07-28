@@ -89,7 +89,9 @@ chmod +x "${NGINX_HOME}/sbin/nginx"
 
 bash "${ROOT_DIR}/deploy/internal/configure-single-deployment.sh" frontend \
   --nginx-env "${NGINX_ENV}" \
-  --nginx-home "${NGINX_HOME}"
+  --nginx-home "${NGINX_HOME}" \
+  --toolbox-it-tools-upstream 10.20.30.40:18120 \
+  --toolbox-omni-tools-upstream 10.20.30.40:18121
 
 grep -Fxq "TEST_AGENT_NGINX_BIN=${NGINX_HOME}/sbin/nginx" "${NGINX_ENV}"
 grep -Fxq "TEST_AGENT_NGINX_PREFIX=${NGINX_HOME}" "${NGINX_ENV}"
@@ -99,6 +101,14 @@ grep -Fxq 'TEST_AGENT_NGINX_RELOAD_MODE=binary' "${NGINX_ENV}"
 grep -Fxq 'TEST_AGENT_NGINX_SERVER_ROUTES=test-agent-backend-122-233-30-114=122.233.30.114:8080' "${NGINX_ENV}"
 grep -Fxq 'TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=9996' "${NGINX_ENV}"
 grep -Fxq 'TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.114:18080' "${NGINX_ENV}"
+grep -Fxq 'TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=10.20.30.40:18120' "${NGINX_ENV}"
+grep -Fxq 'TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=10.20.30.40:18121' "${NGINX_ENV}"
+# 后续重跑未重复传参时必须保留独立工具节点，不能回退到 localhost。
+bash "${ROOT_DIR}/deploy/internal/configure-single-deployment.sh" frontend \
+  --nginx-env "${NGINX_ENV}" \
+  --nginx-home "${NGINX_HOME}"
+grep -Fxq 'TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=10.20.30.40:18120' "${NGINX_ENV}"
+grep -Fxq 'TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=10.20.30.40:18121' "${NGINX_ENV}"
 bash "${ROOT_DIR}/deploy/internal/configure-nginx.sh" --env-file "${NGINX_ENV}"
 grep -Fq 'server 122.233.30.114:8080 max_fails=3 fail_timeout=10s;' \
   "${LOADED_DIR}/test-agent-gateway.conf"
@@ -132,7 +142,9 @@ chmod +x "${EXPLICIT_HOME}/sbin/nginx"
 
 if bash "${ROOT_DIR}/deploy/internal/configure-single-deployment.sh" frontend \
   --nginx-env "${EXPLICIT_ENV}" \
-  --nginx-home "${EXPLICIT_HOME}"; then
+  --nginx-home "${EXPLICIT_HOME}" \
+  --toolbox-it-tools-upstream 10.20.30.40:18120 \
+  --toolbox-omni-tools-upstream 10.20.30.40:18121; then
   echo 'Explicit single-file include was incorrectly treated as a wildcard directory' >&2
   exit 1
 fi

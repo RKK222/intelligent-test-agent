@@ -14,6 +14,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 class WorkspaceFileServiceTest {
 
+    private static final String APP_SOURCE_INDEX = ".testagent-appsource-index.json";
+
     @TempDir
     Path root;
 
@@ -51,6 +53,50 @@ class WorkspaceFileServiceTest {
         assertThat(service.listDirectory(root.toString(), "src"))
                 .extracting(FileTreeEntryResponse::name)
                 .containsExactly("a.txt", "b.txt");
+    }
+
+    @Test
+    void serviceHidesAppSourceIndexFromDirectoryAndSearchViews() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1);
+        Files.writeString(root.resolve(APP_SOURCE_INDEX), "platform metadata");
+        Files.writeString(root.resolve("README.md"), "visible");
+
+        assertThat(service.listDirectory(root.toString(), ""))
+                .extracting(FileTreeEntryResponse::name)
+                .containsExactly("README.md");
+        assertThat(service.searchFiles(root.toString(), ""))
+                .extracting(FileSearchResultResponse::name)
+                .containsExactly("README.md");
+    }
+
+    @Test
+    void serviceRejectsDirectReadAndWriteAccessToAppSourceIndex() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.writeString(root.resolve(APP_SOURCE_INDEX), "platform metadata");
+
+        assertThatThrownBy(() -> service.readContent(root.toString(), APP_SOURCE_INDEX))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThatThrownBy(() -> service.writeContent(root.toString(), APP_SOURCE_INDEX, "tampered"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThatThrownBy(() -> service.status(root.toString(), APP_SOURCE_INDEX))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThat(Files.readString(root.resolve(APP_SOURCE_INDEX))).isEqualTo("platform metadata");
+    }
+
+    @Test
+    void serviceRejectsRenamingOrdinaryFileIntoReservedAppSourceIndexName() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.writeString(root.resolve("ordinary.txt"), "user content");
+
+        assertThatThrownBy(() -> service.renameFile(root.toString(), "ordinary.txt", APP_SOURCE_INDEX))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        assertThat(root.resolve("ordinary.txt")).hasContent("user content");
+        assertThat(root.resolve(APP_SOURCE_INDEX)).doesNotExist();
     }
 
     @Test

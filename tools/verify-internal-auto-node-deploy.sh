@@ -89,8 +89,16 @@ backend_output="$(cd "${BUNDLE}" && PATH="${FAKE_BIN}:${PATH}" TEST_AGENT_FIXTUR
 grep -Fq 'Detected backend IP: 122.233.30.4' <<<"${backend_output}"
 grep -Fq 'Java and Docker started' <<<"${backend_output}"
 test "$(grep -c '^backend ' "${CALL_LOG}")" -eq 3
-grep -Fq -- '--peer-host 122.233.30.114' "${CALL_LOG}"
+grep -Fq -- '--skip-peer-check' "${CALL_LOG}"
 test -s "${TMP_ROOT}/deploy-122.233.30.4.log"
+
+backend_output="$(cd "${BUNDLE}" && PATH="${FAKE_BIN}:${PATH}" TEST_AGENT_FIXTURE_IP=122.233.30.114 \
+  bash deploy-backend-node.sh 2>&1)"
+grep -Fq 'Detected backend IP: 122.233.30.114' <<<"${backend_output}"
+grep -Fq 'Java and Docker started' <<<"${backend_output}"
+test "$(grep -c '^backend ' "${CALL_LOG}")" -eq 6
+grep -Fq -- '--peer-host 122.233.30.4' "${CALL_LOG}"
+test -s "${TMP_ROOT}/deploy-122.233.30.114.log"
 
 frontend_output="$(cd "${BUNDLE}" && PATH="${FAKE_BIN}:${PATH}" TEST_AGENT_FIXTURE_IP=122.233.30.2 \
   bash deploy-frontend-node.sh 2>&1)"

@@ -40,6 +40,16 @@ class ManagedWorkspacePathResolverTest {
     }
 
     @Test
+    void resolvesAndBuildsApplicationSourceLogicalPath() {
+        ManagedWorkspacePathResolver resolver = new ManagedWorkspacePathResolver(parameters());
+
+        assertThat(resolver.appSourceValue("source-repo", "7", "server-a"))
+                .isEqualTo("appsource:source-repo/7/server-a");
+        assertThat(resolver.resolve("appsource:source-repo/7/server-a"))
+                .isEqualTo(root.resolve("appsource/source-repo/7/server-a").toAbsolutePath().normalize());
+    }
+
+    @Test
     void keepsUnixAndWindowsAbsolutePathsAsLegacyValues() {
         ManagedWorkspacePathResolver resolver = new ManagedWorkspacePathResolver(parameters());
 
@@ -72,7 +82,9 @@ class ManagedWorkspacePathResolverTest {
                 ManagedWorkspacePathResolver.PARAM_OPENCODE_APP_WORKSPACE_ROOT,
                 root.resolve("appworkspace").toString(),
                 ManagedWorkspacePathResolver.PARAM_OPENCODE_PERSONAL_WORKTREE_ROOT,
-                root.resolve("personalworktree").toString());
+                root.resolve("personalworktree").toString(),
+                ManagedWorkspacePathResolver.PARAM_OPENCODE_APP_SOURCE_ROOT,
+                root.resolve("appsource").toString());
         return new CommonParameterValues() {
             @Override
             public Optional<String> resolvedValue(String englishName) {

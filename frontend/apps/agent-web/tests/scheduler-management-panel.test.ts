@@ -2,14 +2,17 @@ import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/vue";
 import type { Component } from "vue";
-import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
+import type { BackendApiClient } from "@test-agent/backend-api";
 import type {
+  ApplicationGitRefreshScope,
+  ApplicationGitRefreshResult,
   CurrentUser,
   OpencodeRuntimeManagementOverview,
   PublicAgentRepositoryStatus
 } from "@test-agent/shared-types";
 import SystemManagementPanel from "../src/components/system/SystemManagementPanel.vue";
 import OpencodePublicConfigManagementPanel from "../src/components/system/OpencodePublicConfigManagementPanel.vue";
+import ApplicationGitRefreshManagementPanel from "../src/components/system/ApplicationGitRefreshManagementPanel.vue";
 
 function queryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -60,12 +63,74 @@ const publicRepository: PublicAgentRepositoryStatus = {
   message: "未初始化"
 };
 
+const applicationScope: ApplicationGitRefreshScope = {
+  appId: "app_gcms",
+  appName: "F-GCMS",
+  enabled: true,
+  totalGroups: 2,
+  groups: [{
+    repositoryId: "repo_1",
+    repositoryName: "GCMS",
+    version: "20260707",
+    branch: "feature_testagent_20260707",
+    workspaceCount: 1,
+    workspaces: [{
+      versionId: "awv_1",
+      applicationWorkspaceId: "aws_login",
+      workspaceName: "登录测试",
+      directoryPath: "F-GCMS/login",
+      enabled: true
+    }]
+  }, {
+    repositoryId: "repo_1",
+    repositoryName: "GCMS",
+    version: "20260708",
+    branch: "feature_testagent_20260708",
+    workspaceCount: 1,
+    workspaces: [{
+      versionId: "awv_2",
+      applicationWorkspaceId: "aws_order",
+      workspaceName: "订单测试",
+      directoryPath: "F-GCMS/order",
+      enabled: true
+    }]
+  }]
+};
+
+const applicationRefreshResult: ApplicationGitRefreshResult = {
+  appId: "app_gcms",
+  appName: "F-GCMS",
+  totalGroups: 1,
+  updatedGroups: 1,
+  unchangedGroups: 0,
+  failedGroups: 0,
+  groups: [{
+    versionId: "awv_1",
+    repositoryId: "repo_1",
+    repositoryName: "GCMS",
+    version: "20260707",
+    branch: "feature_testagent_20260707",
+    workspaceCount: 2,
+    previousCommitHash: "commit_before",
+    commitHash: "commit_after",
+    status: "UPDATED",
+    errorCode: null,
+    message: "已刷新 feature，并触发相关 worktree 收敛"
+  }]
+};
+
 function api(overrides: Partial<BackendApiClient> = {}) {
   return {
     createXxlJobSsoTicket: vi.fn().mockRejectedValue(new Error("XXL-JOB unavailable in navigation test")),
     getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(emptyRuntimeOverview),
     listPublicAgentRepositories: vi.fn().mockResolvedValue([publicRepository]),
+    getPublicAgentConfigRollout: vi.fn().mockResolvedValue(null),
     listPublicAgentBranches: vi.fn().mockResolvedValue(["main", "develop"]),
+    updatePublicAgentConfig: vi.fn().mockResolvedValue({
+      operationId: "aco_update",
+      status: "SUCCEEDED",
+      commitHash: "def5678"
+    }),
     pullPublicAgentRepository: vi.fn().mockResolvedValue({
       ...publicRepository,
       status: "READY",
@@ -82,6 +147,9 @@ function api(overrides: Partial<BackendApiClient> = {}) {
       commitHash: "abc1234",
       message: "已初始化"
     }),
+    listApplicationGitRefreshScopes: vi.fn().mockResolvedValue([applicationScope]),
+    refreshApplicationGit: vi.fn().mockResolvedValue(applicationRefreshResult),
+    refreshApplicationGitGroup: vi.fn().mockResolvedValue(applicationRefreshResult),
     ...overrides
   } as Partial<BackendApiClient> as BackendApiClient;
 }
@@ -167,7 +235,59 @@ describe("scheduler management panel", () => {
     view.queryClient.clear();
   });
 
-  it("system management lets super admin pull initialized public opencode repository", async () => {
+  it("lets super admin refresh every feature and related worktree for one application", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const backendApi = api();
+    const view = renderWithApi(ApplicationGitRefreshManagementPanel, backendApi);
+
+    expect(await view.findByText("F-GCMS")).toBeTruthy();
+    expect(await view.findByText("feature_testagent_20260707")).toBeTruthy();
+    expect(await view.findByText("feature_testagent_20260708")).toBeTruthy();
+    expect(await view.findByText("登录测试")).toBeTruthy();
+    expect(await view.findByText("订单测试")).toBeTruthy();
+    await fireEvent.click(view.getByRole("button", { name: "刷新应用 Git：F-GCMS" }));
+
+    await waitFor(() => expect(backendApi.refreshApplicationGit).toHaveBeenCalledWith("app_gcms"));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("feature_testagent_20260707、feature_testagent_20260708"));
+    expect(await view.findByText("共 1 组：成功 1，更新 1，已是最新 0，失败 0")).toBeTruthy();
+    await fireEvent.click(view.getByText("查看仓库组明细"));
+    expect(await view.findByText(/GCMS · 20260707 · feature_testagent_20260707 · 2 个 workspace/)).toBeTruthy();
+    view.queryClient.clear();
+  });
+
+  it("lets super admin refresh one feature branch without selecting other branches", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const backendApi = api();
+    const view = renderWithApi(ApplicationGitRefreshManagementPanel, backendApi);
+
+    await view.findByText("feature_testagent_20260707");
+    await fireEvent.click(view.getByRole("button", {
+      name: "刷新分支：F-GCMS / feature_testagent_20260707"
+    }));
+
+    await waitFor(() => expect(backendApi.refreshApplicationGitGroup).toHaveBeenCalledWith("app_gcms", {
+      repositoryId: "repo_1",
+      version: "20260707",
+      branch: "feature_testagent_20260707"
+    }));
+    expect(backendApi.refreshApplicationGit).not.toHaveBeenCalled();
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("不会影响同应用其它分支"));
+    view.queryClient.clear();
+  });
+
+  it("keeps application Git refresh unavailable to non-super-admin users", async () => {
+    const backendApi = api();
+    const appAdmin: CurrentUser = { ...currentUser, roles: ["APP_ADMIN"] };
+    const view = renderWithApi(ApplicationGitRefreshManagementPanel, backendApi, appAdmin);
+
+    expect(await view.findByText("当前账号无配置管理权限")).toBeTruthy();
+    expect(backendApi.listApplicationGitRefreshScopes).not.toHaveBeenCalled();
+    expect(backendApi.refreshApplicationGit).not.toHaveBeenCalled();
+    expect(backendApi.refreshApplicationGitGroup).not.toHaveBeenCalled();
+    view.queryClient.clear();
+  });
+
+  it("starts one global public Agent refresh without selecting a server", async () => {
     const initializedPublicRepository = {
       ...publicRepository,
       status: "READY",
@@ -184,21 +304,25 @@ describe("scheduler management panel", () => {
     await fireEvent.click(view.getByText("配置管理", { selector: ".ta-system-menu-text" }));
 
     expect(await view.findByText("TestAgent公共配置管理")).toBeTruthy();
-    await fireEvent.click(view.getByRole("button", { name: "拉取更新" }));
+    expect(view.queryByRole("button", { name: "拉取更新" })).toBeNull();
+    await fireEvent.click(view.getByRole("button", { name: "刷新公共 Agent Git" }));
+    await fireEvent.click(await view.findByRole("button", { name: "开始全局刷新" }));
 
     await waitFor(() =>
-      expect(backendApi.pullPublicAgentRepository).toHaveBeenCalledWith("linux-1", "master", expect.stringMatching(/^aco_/), false)
+      expect(backendApi.updatePublicAgentConfig).toHaveBeenCalledWith("main", expect.stringMatching(/^aco_/), false)
     );
-    expect(await view.findByText("服务器 linux-1 公共配置仓库已拉取到最新")).toBeTruthy();
+    expect(await view.findByText(/已发起所有服务器刷新到远端目标 commit def5678/)).toBeTruthy();
+    expect(backendApi.pullPublicAgentRepository).not.toHaveBeenCalled();
     view.queryClient.clear();
   });
 
-  it("shows dirty public repository files and retries pull only after explicit discard confirmation", async () => {
+  it("requires explicit confirmation before resetting dirty shared runtime replicas", async () => {
     const dirtyRepository = {
       ...publicRepository,
       status: "CONFLICT",
       initialized: true,
       currentBranch: "main",
+      localChangesPresent: true,
       message: "Git 工作树存在未提交变更：opencode/agents/review.md"
     };
     const backendApi = api({
@@ -211,65 +335,53 @@ describe("scheduler management panel", () => {
 
     expect(await view.findByText("存在本地变更")).toBeTruthy();
     expect(await view.findByText(/opencode\/agents\/review\.md/)).toBeTruthy();
-    expect(await view.findByText(/这是该服务器的共享运行副本/)).toBeTruthy();
-    await fireEvent.click(view.getByRole("button", { name: "放弃本地变更并拉取" }));
+    await fireEvent.click(view.getByRole("button", { name: "刷新公共 Agent Git" }));
+    await fireEvent.click(await view.findByRole("button", { name: "开始全局刷新" }));
 
-    await waitFor(() => expect(backendApi.pullPublicAgentRepository).toHaveBeenCalledWith(
-      "linux-1",
+    await waitFor(() => expect(backendApi.updatePublicAgentConfig).toHaveBeenCalledWith(
       "main",
       expect.stringMatching(/^aco_/),
       true
     ));
-    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("当前管理员个人公共 worktree和共享运行副本"));
-    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("其他管理员的个人 worktree不受影响"));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("共享运行副本存在本地变更"));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("个人 worktree 的 staged、unstaged、untracked 内容不会被清理"));
     view.queryClient.clear();
   });
 
-  it("identifies a dirty current-admin public worktree even when the shared repository is clean", async () => {
-    const initializedPublicRepository = {
-      ...publicRepository,
-      status: "READY",
-      initialized: true,
-      currentBranch: "main",
-      commitHash: "abc1234",
-      message: "已初始化"
-    };
-    const personalPath = "/data/testagent/data/agent-opencode/.configdev/public-usr_admin";
-    const pull = vi.fn()
-      .mockRejectedValueOnce(new BackendApiError(409, {
-        success: false,
-        code: "CONFLICT",
-        message: `当前管理员公共 Agent 个人 worktree 存在未提交变更：opencode/agents/review.md；仓库路径：${personalPath}`,
-        traceId: "trace_dirty_personal",
-        retryable: false,
-        details: {
-          path: personalPath,
-          repositoryKind: "PERSONAL_WORKTREE",
-          dirtyFiles: ["opencode/agents/review.md"],
-          discardLocalChangesAllowed: true
-        }
-      }))
-      .mockResolvedValueOnce(initializedPublicRepository);
+  it("disables the global refresh during rollout and shows every server's progress and last_error", async () => {
     const backendApi = api({
-      listPublicAgentRepositories: vi.fn().mockResolvedValue([initializedPublicRepository]),
-      pullPublicAgentRepository: pull
+      getPublicAgentConfigRollout: vi.fn().mockResolvedValue({
+        rolloutId: "acr_1",
+        status: "DRAINING",
+        branch: "main",
+        commitHash: "commit_target",
+        failureReason: null,
+        createdAt: "2026-07-28T00:00:00Z",
+        updatedAt: "2026-07-28T00:00:01Z",
+        completedAt: null,
+        servers: [{
+          linuxServerId: "linux-2",
+          syncStatus: "RETRY",
+          retryCount: 2,
+          targetTotal: 3,
+          targetPending: 2,
+          targetDisposed: 1,
+          targetAbandoned: 0,
+          worktreeTotal: 2,
+          worktreePending: 1,
+          worktreeSynced: 1,
+          lastError: "git fetch 超时",
+          syncedAt: null,
+          updatedAt: "2026-07-28T00:00:01Z"
+        }]
+      })
     });
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-    const view = renderWithApi(SystemManagementPanel, backendApi);
+    const view = renderWithApi(OpencodePublicConfigManagementPanel, backendApi);
 
-    await fireEvent.click(view.getByText("配置管理", { selector: ".ta-system-menu-text" }));
-    await fireEvent.click(await view.findByRole("button", { name: "拉取更新" }));
-
-    expect((await view.findAllByText(new RegExp(personalPath.replaceAll("/", "\\/")))).length).toBeGreaterThan(0);
-    expect(await view.findByText(/当前管理员个人公共 worktree 存在本地变更/)).toBeTruthy();
-    await fireEvent.click(view.getByRole("button", { name: "放弃本地变更并拉取" }));
-
-    await waitFor(() => expect(pull).toHaveBeenLastCalledWith(
-      "linux-1",
-      "main",
-      expect.stringMatching(/^aco_/),
-      true
-    ));
+    expect(await view.findByText("正在同步并排空")).toBeTruthy();
+    expect(await view.findByText("git fetch 超时")).toBeTruthy();
+    expect(await view.findByText(/补偿已收敛 1\/2，待用户处理 1/)).toBeTruthy();
+    expect(view.getByRole("button", { name: "刷新公共 Agent Git" }).hasAttribute("disabled")).toBe(true);
     view.queryClient.clear();
   });
 });

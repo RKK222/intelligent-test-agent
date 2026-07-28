@@ -258,6 +258,60 @@ public final class ManagedWorkspaceResponses {
             List<String> changedFiles) {
     }
 
+    /** 超级管理员页面展示的应用 Git 刷新范围，明确列出全部工作空间版本和实际 feature 分支。 */
+    public record ApplicationGitRefreshScopeResponse(
+            String appId,
+            String appName,
+            boolean enabled,
+            int totalGroups,
+            List<ApplicationGitRefreshScopeGroupResponse> groups) {
+    }
+
+    /** 单个物理 feature 仓库组及其包含的应用工作空间。 */
+    public record ApplicationGitRefreshScopeGroupResponse(
+            String repositoryId,
+            String repositoryName,
+            String version,
+            String branch,
+            int workspaceCount,
+            List<ApplicationGitRefreshScopeWorkspaceResponse> workspaces) {
+    }
+
+    /** 刷新范围中的工作空间目录视图；同一工作空间的不同版本可对应不同 feature 分支。 */
+    public record ApplicationGitRefreshScopeWorkspaceResponse(
+            String versionId,
+            String applicationWorkspaceId,
+            String workspaceName,
+            String directoryPath,
+            boolean enabled) {
+    }
+
+    /** 超级管理员按应用刷新全部 feature 仓库组后的汇总结果。 */
+    public record ApplicationGitRefreshResponse(
+            String appId,
+            String appName,
+            int totalGroups,
+            int updatedGroups,
+            int unchangedGroups,
+            int failedGroups,
+            List<ApplicationGitRefreshGroupResponse> groups) {
+    }
+
+    /** 单个“版本库 + 版本 + 分支”物理 feature 仓库组的刷新结果。 */
+    public record ApplicationGitRefreshGroupResponse(
+            String versionId,
+            String repositoryId,
+            String repositoryName,
+            String version,
+            String branch,
+            int workspaceCount,
+            String previousCommitHash,
+            String commitHash,
+            String status,
+            String errorCode,
+            String message) {
+    }
+
     public record WorkspaceDiffFileResponse(String path, String status, boolean conflict) {
     }
 

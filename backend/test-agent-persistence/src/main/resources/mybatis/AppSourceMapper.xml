@@ -1,0 +1,432 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.AppSourceMapper">
+
+    <!-- app-source 受理先锁既有代码库事实行；SELECT FOR UPDATE 不属于持久化写。 -->
+    <select id="lockRepositoryForAppSource" resultType="string">
+        select repository_id from code_repositories where repository_id = #{repositoryId} for update
+    </select>
+    <resultMap id="SlotMap" type="com.enterprise.testagent.persistence.mybatis.AppSourceRows$SlotRow">
+        <constructor>
+            <arg column="repository_id" javaType="java.lang.String"/>
+            <arg column="active_generation" javaType="java.lang.Long"/>
+            <arg column="pending_generation" javaType="java.lang.Long"/>
+            <arg column="next_generation" javaType="_long"/>
+            <arg column="latest_operation_id" javaType="java.lang.String"/>
+            <arg column="lock_version" javaType="_long"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+    <resultMap id="SnapshotMap" type="com.enterprise.testagent.persistence.mybatis.AppSourceRows$SnapshotRow">
+        <constructor>
+            <arg column="repository_id" javaType="java.lang.String"/>
+            <arg column="generation" javaType="_long"/>
+            <arg column="repository_english_name" javaType="java.lang.String"/>
+            <arg column="purpose" javaType="java.lang.String"/>
+            <arg column="owner_user_id" javaType="java.lang.String"/>
+            <arg column="branch" javaType="java.lang.String"/>
+            <arg column="target_commit" javaType="java.lang.String"/>
+            <arg column="selected_paths_json" javaType="java.lang.String"/>
+            <arg column="index_sha256" javaType="java.lang.String"/>
+            <arg column="accepted_at" javaType="java.time.Instant"/>
+            <arg column="expires_at" javaType="java.time.Instant"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+    <resultMap id="ReplicaMap" type="com.enterprise.testagent.persistence.mybatis.AppSourceRows$ReplicaRow">
+        <constructor>
+            <arg column="repository_id" javaType="java.lang.String"/>
+            <arg column="generation" javaType="_long"/>
+            <arg column="linux_server_id" javaType="java.lang.String"/>
+            <arg column="runtime_workspace_id" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="lease_owner" javaType="java.lang.String"/>
+            <arg column="lease_until" javaType="java.time.Instant"/>
+            <arg column="attempt_count" javaType="_int"/>
+            <arg column="next_retry_at" javaType="java.time.Instant"/>
+            <arg column="safe_error_code" javaType="java.lang.String"/>
+            <arg column="safe_error_message" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+    <resultMap id="OperationMap" type="com.enterprise.testagent.persistence.mybatis.AppSourceRows$OperationRow">
+        <constructor>
+            <arg column="operation_id" javaType="java.lang.String"/>
+            <arg column="app_id" javaType="java.lang.String"/>
+            <arg column="repository_id" javaType="java.lang.String"/>
+            <arg column="source_generation" javaType="java.lang.Long"/>
+            <arg column="target_generation" javaType="_long"/>
+            <arg column="actor_user_id" javaType="java.lang.String"/>
+            <arg column="operation_type" javaType="java.lang.String"/>
+            <arg column="request_hash" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="accepted_at" javaType="java.time.Instant"/>
+            <arg column="completed_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+    <resultMap id="StepMap" type="com.enterprise.testagent.persistence.mybatis.AppSourceRows$StepRow">
+        <constructor>
+            <arg column="step_id" javaType="java.lang.String"/>
+            <arg column="operation_id" javaType="java.lang.String"/>
+            <arg column="scope" javaType="java.lang.String"/>
+            <arg column="linux_server_id" javaType="java.lang.String"/>
+            <arg column="step_code" javaType="java.lang.String"/>
+            <arg column="sequence" javaType="_int"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="safe_summary" javaType="java.lang.String"/>
+            <arg column="started_at" javaType="java.time.Instant"/>
+            <arg column="completed_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+    <resultMap id="CleanupMap" type="com.enterprise.testagent.persistence.mybatis.AppSourceRows$CleanupRow">
+        <constructor>
+            <arg column="cleanup_task_id" javaType="java.lang.String"/>
+            <arg column="operation_id" javaType="java.lang.String"/>
+            <arg column="repository_id" javaType="java.lang.String"/>
+            <arg column="generation" javaType="_long"/>
+            <arg column="linux_server_id" javaType="java.lang.String"/>
+            <arg column="delete_at" javaType="java.time.Instant"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="lease_owner" javaType="java.lang.String"/>
+            <arg column="lease_until" javaType="java.time.Instant"/>
+            <arg column="attempt_count" javaType="_int"/>
+            <arg column="next_retry_at" javaType="java.time.Instant"/>
+            <arg column="safe_error_code" javaType="java.lang.String"/>
+            <arg column="safe_error_message" javaType="java.lang.String"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+    <resultMap id="RecentMap" type="com.enterprise.testagent.persistence.mybatis.AppSourceRows$RecentRow">
+        <constructor>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="app_id" javaType="java.lang.String"/>
+            <arg column="repository_id" javaType="java.lang.String"/>
+            <arg column="generation" javaType="_long"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="SlotColumns">repository_id, active_generation, pending_generation, next_generation, latest_operation_id, lock_version, created_at, updated_at</sql>
+    <sql id="SnapshotColumns">repository_id, generation, repository_english_name, purpose, owner_user_id, branch, target_commit, selected_paths_json, index_sha256, accepted_at, expires_at, status, created_at, updated_at</sql>
+    <sql id="ReplicaColumns">repository_id, generation, linux_server_id, runtime_workspace_id, status, lease_owner, lease_until, attempt_count, next_retry_at, safe_error_code, safe_error_message, created_at, updated_at</sql>
+    <sql id="OperationColumns">operation_id, app_id, repository_id, source_generation, target_generation, actor_user_id, operation_type, request_hash, status, trace_id, accepted_at, completed_at</sql>
+    <sql id="StepColumns">step_id, operation_id, scope, linux_server_id, step_code, sequence, status, safe_summary, started_at, completed_at, updated_at</sql>
+    <sql id="CleanupColumns">cleanup_task_id, operation_id, repository_id, generation, linux_server_id, delete_at, status, lease_owner, lease_until, attempt_count, next_retry_at, safe_error_code, safe_error_message, trace_id, created_at, updated_at</sql>
+
+    <select id="hasRepositoryHistory" resultType="boolean">
+        select exists(
+            select repository_id from app_source_repository_slots where repository_id = #{repositoryId}
+            union all
+            select repository_id from app_source_snapshots where repository_id = #{repositoryId}
+            union all
+            select repository_id from app_source_cleanup_tasks where repository_id = #{repositoryId}
+            union all
+            select repository_id from app_source_operations where repository_id = #{repositoryId}
+        )
+    </select>
+    <select id="findSlot" resultMap="SlotMap">
+        select <include refid="SlotColumns"/> from app_source_repository_slots where repository_id = #{repositoryId}
+    </select>
+    <select id="findSlotForUpdate" resultMap="SlotMap">
+        select <include refid="SlotColumns"/> from app_source_repository_slots where repository_id = #{repositoryId} for update
+    </select>
+    <insert id="insertSlotIfAbsent" databaseId="postgresql">
+        insert into app_source_repository_slots(<include refid="SlotColumns"/>) values (
+            #{row.repositoryId}, #{row.activeGeneration}, #{row.pendingGeneration}, #{row.nextGeneration},
+            #{row.latestOperationId}, #{row.lockVersion}, #{row.createdAt}, #{row.updatedAt})
+        on conflict (repository_id) do nothing
+    </insert>
+    <insert id="insertSlotIfAbsent">
+        merge into app_source_repository_slots target using (values (
+            #{row.repositoryId}, #{row.activeGeneration}, #{row.pendingGeneration}, #{row.nextGeneration},
+            #{row.latestOperationId}, #{row.lockVersion}, cast(#{row.createdAt} as timestamp), cast(#{row.updatedAt} as timestamp)
+        )) source(repository_id, active_generation, pending_generation, next_generation, latest_operation_id, lock_version, created_at, updated_at)
+        on target.repository_id = source.repository_id
+        when not matched then insert (<include refid="SlotColumns"/>) values (
+            source.repository_id, source.active_generation, source.pending_generation, source.next_generation,
+            source.latest_operation_id, source.lock_version, source.created_at, source.updated_at)
+    </insert>
+    <update id="updateSlotIfVersion">
+        update app_source_repository_slots set active_generation = #{row.activeGeneration},
+            pending_generation = #{row.pendingGeneration}, next_generation = #{row.nextGeneration},
+            latest_operation_id = #{row.latestOperationId}, lock_version = #{row.lockVersion}, updated_at = #{row.updatedAt}
+        where repository_id = #{row.repositoryId} and lock_version = #{expectedLockVersion}
+    </update>
+
+    <select id="findSnapshot" resultMap="SnapshotMap">
+        select <include refid="SnapshotColumns"/> from app_source_snapshots
+        where repository_id = #{repositoryId} and generation = #{generation}
+    </select>
+    <select id="findActiveSnapshot" resultMap="SnapshotMap">
+        select <include refid="SnapshotColumns"/> from app_source_snapshots
+        where repository_id = #{repositoryId} and status = 'ACTIVE'
+    </select>
+    <insert id="insertSnapshot" databaseId="postgresql">
+        insert into app_source_snapshots(<include refid="SnapshotColumns"/>) values (
+            #{row.repositoryId}, #{row.generation}, #{row.repositoryEnglishName}, #{row.purpose}, #{row.ownerUserId},
+            #{row.branch}, #{row.targetCommit}, cast(#{row.selectedPathsJson} as jsonb), #{row.indexSha256},
+            #{row.acceptedAt}, #{row.expiresAt}, #{row.status}, #{row.createdAt}, #{row.updatedAt})
+    </insert>
+    <insert id="insertSnapshot">
+        insert into app_source_snapshots(<include refid="SnapshotColumns"/>) values (
+            #{row.repositoryId}, #{row.generation}, #{row.repositoryEnglishName}, #{row.purpose}, #{row.ownerUserId},
+            #{row.branch}, #{row.targetCommit}, cast(#{row.selectedPathsJson} as json), #{row.indexSha256},
+            #{row.acceptedAt}, #{row.expiresAt}, #{row.status}, #{row.createdAt}, #{row.updatedAt})
+    </insert>
+    <update id="updateSnapshotStatusAndIndex">
+        update app_source_snapshots set status = #{nextStatus}, index_sha256 = #{indexSha256}, updated_at = #{updatedAt}
+        where repository_id = #{repositoryId} and generation = #{generation} and status = #{expectedStatus}
+    </update>
+
+    <select id="findReplica" resultMap="ReplicaMap">
+        select <include refid="ReplicaColumns"/> from app_source_replicas
+        where repository_id = #{repositoryId} and generation = #{generation} and linux_server_id = #{linuxServerId}
+    </select>
+    <select id="findReplicas" resultMap="ReplicaMap">
+        select <include refid="ReplicaColumns"/> from app_source_replicas
+        where repository_id = #{repositoryId} and generation = #{generation} order by linux_server_id
+    </select>
+    <select id="findClaimableReplicas" resultMap="ReplicaMap">
+        select <include refid="ReplicaColumns"/> from app_source_replicas replica
+        where replica.linux_server_id = #{linuxServerId}
+          and (
+            replica.status = 'PENDING'
+            or (replica.status = 'RUNNING' and replica.lease_until &lt;= #{now})
+            or (replica.status in ('FAILED', 'STALE') and exists (
+                select 1
+                from app_source_operations operation
+                join app_source_operation_steps step on step.operation_id = operation.operation_id
+                where operation.repository_id = replica.repository_id
+                  and operation.target_generation = replica.generation
+                  and operation.operation_type = 'RETRY_REPLICAS'
+                  and operation.status in ('PENDING', 'RUNNING')
+                  and step.scope = 'SERVER'
+                  and step.linux_server_id = replica.linux_server_id
+                  and step.step_code = 'RETRY_QUEUED'
+                  and step.status in ('PENDING', 'RUNNING')
+            ))
+          )
+        order by replica.updated_at, replica.repository_id, replica.generation
+        limit #{limit}
+    </select>
+    <select id="findReplicaByRuntimeWorkspaceId" resultMap="ReplicaMap">
+        select <include refid="ReplicaColumns"/> from app_source_replicas
+        where runtime_workspace_id = #{runtimeWorkspaceId}
+    </select>
+    <insert id="insertReplicaIfAbsent" databaseId="postgresql">
+        insert into app_source_replicas(<include refid="ReplicaColumns"/>) values (
+            #{row.repositoryId}, #{row.generation}, #{row.linuxServerId}, #{row.runtimeWorkspaceId}, #{row.status},
+            #{row.leaseOwner}, #{row.leaseUntil}, #{row.attemptCount}, #{row.nextRetryAt}, #{row.safeErrorCode},
+            #{row.safeErrorMessage}, #{row.createdAt}, #{row.updatedAt})
+        on conflict (repository_id, generation, linux_server_id) do nothing
+    </insert>
+    <insert id="insertReplicaIfAbsent">
+        merge into app_source_replicas target using (values (
+            #{row.repositoryId}, #{row.generation}, #{row.linuxServerId}, #{row.runtimeWorkspaceId}, #{row.status},
+            #{row.leaseOwner}, cast(#{row.leaseUntil} as timestamp), #{row.attemptCount}, cast(#{row.nextRetryAt} as timestamp),
+            #{row.safeErrorCode}, #{row.safeErrorMessage}, cast(#{row.createdAt} as timestamp), cast(#{row.updatedAt} as timestamp)
+        )) source(repository_id, generation, linux_server_id, runtime_workspace_id, status, lease_owner, lease_until,
+            attempt_count, next_retry_at, safe_error_code, safe_error_message, created_at, updated_at)
+        on target.repository_id = source.repository_id and target.generation = source.generation
+            and target.linux_server_id = source.linux_server_id
+        when not matched then insert (<include refid="ReplicaColumns"/>) values (
+            source.repository_id, source.generation, source.linux_server_id, source.runtime_workspace_id, source.status,
+            source.lease_owner, source.lease_until, source.attempt_count, source.next_retry_at, source.safe_error_code,
+            source.safe_error_message, source.created_at, source.updated_at)
+    </insert>
+    <update id="claimReplica">
+        update app_source_replicas set status = 'RUNNING', lease_owner = #{leaseOwner}, lease_until = #{leaseUntil},
+            attempt_count = attempt_count + 1, next_retry_at = null, safe_error_code = null,
+            safe_error_message = null, updated_at = #{now}
+        where repository_id = #{repositoryId} and generation = #{generation} and linux_server_id = #{linuxServerId}
+          and (status in ('PENDING', 'FAILED', 'STALE') or (status = 'RUNNING' and lease_until &lt;= #{now}))
+    </update>
+    <update id="updateReplicaIfLease">
+        update app_source_replicas set runtime_workspace_id = #{row.runtimeWorkspaceId}, status = #{row.status},
+            lease_owner = #{row.leaseOwner}, lease_until = #{row.leaseUntil}, attempt_count = #{row.attemptCount},
+            next_retry_at = #{row.nextRetryAt}, safe_error_code = #{row.safeErrorCode},
+            safe_error_message = #{row.safeErrorMessage}, updated_at = #{row.updatedAt}
+        where repository_id = #{row.repositoryId} and generation = #{row.generation}
+          and linux_server_id = #{row.linuxServerId} and status = 'RUNNING'
+          and lease_owner = #{expectedLeaseOwner} and lease_until &gt; #{now}
+    </update>
+    <update id="markReplicaCleaned">
+        update app_source_replicas set status = 'CLEANED', lease_owner = null, lease_until = null,
+            next_retry_at = null, safe_error_code = null, safe_error_message = null, updated_at = #{now}
+        where repository_id = #{repositoryId} and generation = #{generation}
+          and linux_server_id = #{linuxServerId}
+          and (status in ('PENDING', 'READY', 'FAILED', 'STALE', 'CLEANUP_PENDING')
+            or (status = 'RUNNING' and (lease_until is null or lease_until &lt;= #{now})))
+    </update>
+
+    <select id="findOperation" resultMap="OperationMap">
+        select <include refid="OperationColumns"/> from app_source_operations where operation_id = #{operationId}
+    </select>
+    <select id="findLatestOperation" resultMap="OperationMap">
+        select <include refid="OperationColumns"/> from app_source_operations
+        where repository_id = #{repositoryId} order by accepted_at desc, operation_id desc limit 1
+    </select>
+    <select id="findInFlightOperationForReplica" resultMap="OperationMap">
+        select <include refid="OperationColumns"/> from app_source_operations
+        where operation_id = (
+            select operation.operation_id
+            from app_source_operations operation
+            join app_source_operation_steps step on step.operation_id = operation.operation_id
+            where operation.repository_id = #{repositoryId}
+              and operation.target_generation = #{generation}
+              and operation.status in ('PENDING', 'RUNNING')
+              and step.linux_server_id = #{linuxServerId}
+              and step.status in ('PENDING', 'RUNNING')
+            order by operation.accepted_at desc, operation.operation_id desc
+            limit 1
+        )
+    </select>
+    <insert id="insertOperation">
+        insert into app_source_operations(<include refid="OperationColumns"/>) values (
+            #{row.operationId}, #{row.appId}, #{row.repositoryId}, #{row.sourceGeneration}, #{row.targetGeneration},
+            #{row.actorUserId}, #{row.operationType}, #{row.requestHash}, #{row.status}, #{row.traceId},
+            #{row.acceptedAt}, #{row.completedAt})
+    </insert>
+    <update id="updateOperationStatus">
+        update app_source_operations set status = #{nextStatus}, completed_at = #{completedAt}
+        where operation_id = #{operationId} and status = #{expectedStatus}
+    </update>
+
+    <insert id="upsertStep" databaseId="postgresql">
+        insert into app_source_operation_steps(<include refid="StepColumns"/>) values (
+            #{row.stepId}, #{row.operationId}, #{row.scope}, #{row.linuxServerId}, #{row.stepCode}, #{row.sequence},
+            #{row.status}, #{row.safeSummary}, #{row.startedAt}, #{row.completedAt}, #{row.updatedAt})
+        on conflict (step_id) do update set status = excluded.status, safe_summary = excluded.safe_summary,
+            started_at = excluded.started_at, completed_at = excluded.completed_at, updated_at = excluded.updated_at
+        where (app_source_operation_steps.status = 'PENDING'
+                and excluded.status in ('PENDING', 'RUNNING', 'FAILED', 'SKIPPED'))
+            or (app_source_operation_steps.status = 'RUNNING'
+                and excluded.status in ('RUNNING', 'SUCCEEDED', 'FAILED', 'SKIPPED'))
+    </insert>
+    <insert id="upsertStep">
+        merge into app_source_operation_steps target using (values (
+            #{row.stepId}, #{row.operationId}, #{row.scope}, #{row.linuxServerId}, #{row.stepCode}, #{row.sequence},
+            #{row.status}, #{row.safeSummary}, cast(#{row.startedAt} as timestamp),
+            cast(#{row.completedAt} as timestamp), cast(#{row.updatedAt} as timestamp)
+        )) source(step_id, operation_id, scope, linux_server_id, step_code, sequence, status, safe_summary,
+            started_at, completed_at, updated_at)
+        on target.step_id = source.step_id
+        when matched and (
+            (target.status = 'PENDING' and source.status in ('PENDING', 'RUNNING', 'FAILED', 'SKIPPED'))
+            or (target.status = 'RUNNING' and source.status in ('RUNNING', 'SUCCEEDED', 'FAILED', 'SKIPPED'))
+        ) then update set status = source.status, safe_summary = source.safe_summary,
+            started_at = source.started_at, completed_at = source.completed_at, updated_at = source.updated_at
+        when not matched then insert (<include refid="StepColumns"/>) values (
+            source.step_id, source.operation_id, source.scope, source.linux_server_id, source.step_code,
+            source.sequence, source.status, source.safe_summary, source.started_at, source.completed_at,
+            source.updated_at)
+    </insert>
+    <select id="findSteps" resultMap="StepMap">
+        select <include refid="StepColumns"/> from app_source_operation_steps
+        where operation_id = #{operationId} order by sequence, step_id
+    </select>
+
+    <insert id="insertCleanupIfAbsent" databaseId="postgresql">
+        insert into app_source_cleanup_tasks(<include refid="CleanupColumns"/>) values (
+            #{row.cleanupTaskId}, #{row.operationId}, #{row.repositoryId}, #{row.generation}, #{row.linuxServerId},
+            #{row.deleteAt}, #{row.status}, #{row.leaseOwner}, #{row.leaseUntil}, #{row.attemptCount},
+            #{row.nextRetryAt}, #{row.safeErrorCode}, #{row.safeErrorMessage}, #{row.traceId},
+            #{row.createdAt}, #{row.updatedAt})
+        on conflict (repository_id, generation, linux_server_id) do nothing
+    </insert>
+    <insert id="insertCleanupIfAbsent">
+        merge into app_source_cleanup_tasks target using (values (
+            #{row.cleanupTaskId}, #{row.operationId}, #{row.repositoryId}, #{row.generation}, #{row.linuxServerId},
+            cast(#{row.deleteAt} as timestamp), #{row.status}, #{row.leaseOwner}, cast(#{row.leaseUntil} as timestamp),
+            #{row.attemptCount}, cast(#{row.nextRetryAt} as timestamp), #{row.safeErrorCode}, #{row.safeErrorMessage},
+            #{row.traceId}, cast(#{row.createdAt} as timestamp), cast(#{row.updatedAt} as timestamp)
+        )) source(cleanup_task_id, operation_id, repository_id, generation, linux_server_id, delete_at, status,
+            lease_owner, lease_until, attempt_count, next_retry_at, safe_error_code, safe_error_message, trace_id,
+            created_at, updated_at)
+        on target.repository_id = source.repository_id and target.generation = source.generation
+            and target.linux_server_id = source.linux_server_id
+        when not matched then insert (<include refid="CleanupColumns"/>) values (
+            source.cleanup_task_id, source.operation_id, source.repository_id, source.generation, source.linux_server_id,
+            source.delete_at, source.status, source.lease_owner, source.lease_until, source.attempt_count,
+            source.next_retry_at, source.safe_error_code, source.safe_error_message, source.trace_id,
+            source.created_at, source.updated_at)
+    </insert>
+    <select id="findDueCleanupTasks" resultMap="CleanupMap">
+        select <include refid="CleanupColumns"/> from app_source_cleanup_tasks
+        where linux_server_id = #{linuxServerId} and delete_at &lt;= #{now}
+          and (status = 'PENDING'
+            or (status = 'RETRY_WAIT' and (next_retry_at is null or next_retry_at &lt;= #{now}))
+            or (status = 'RUNNING' and lease_until &lt;= #{now}))
+        order by delete_at, cleanup_task_id limit #{limit}
+    </select>
+    <select id="findCleanupTask" resultMap="CleanupMap">
+        select <include refid="CleanupColumns"/> from app_source_cleanup_tasks where cleanup_task_id = #{cleanupTaskId}
+    </select>
+    <update id="claimCleanupTask">
+        update app_source_cleanup_tasks set status = 'RUNNING', lease_owner = #{leaseOwner}, lease_until = #{leaseUntil},
+            attempt_count = attempt_count + 1, next_retry_at = null, updated_at = #{now}
+        where cleanup_task_id = #{cleanupTaskId} and delete_at &lt;= #{now}
+          and (status = 'PENDING'
+            or (status = 'RETRY_WAIT' and (next_retry_at is null or next_retry_at &lt;= #{now}))
+            or (status = 'RUNNING' and lease_until &lt;= #{now}))
+    </update>
+    <update id="rescheduleCleanupTask">
+        update app_source_cleanup_tasks set status = 'RETRY_WAIT', lease_owner = null, lease_until = null,
+            attempt_count = #{attemptCount}, next_retry_at = #{nextRetryAt}, safe_error_code = #{safeErrorCode},
+            safe_error_message = #{safeErrorMessage}, updated_at = #{now}
+        where cleanup_task_id = #{cleanupTaskId} and status = 'RUNNING'
+          and lease_owner = #{leaseOwner} and lease_until &gt; #{now}
+    </update>
+    <update id="completeCleanupTask">
+        update app_source_cleanup_tasks set status = 'CLEANED', lease_owner = null, lease_until = null,
+            next_retry_at = null, safe_error_code = null, safe_error_message = null, updated_at = #{now}
+        where cleanup_task_id = #{cleanupTaskId} and status = 'RUNNING'
+          and lease_owner = #{leaseOwner} and lease_until &gt; #{now}
+    </update>
+    <update id="supersedeCleanupTask">
+        update app_source_cleanup_tasks set status = 'SUPERSEDED', lease_owner = null, lease_until = null,
+            next_retry_at = null, updated_at = #{now}
+        where cleanup_task_id = #{cleanupTaskId} and status in ('PENDING', 'RUNNING', 'RETRY_WAIT')
+    </update>
+    <select id="findCleanupTasks" resultMap="CleanupMap">
+        select <include refid="CleanupColumns"/> from app_source_cleanup_tasks
+        where repository_id = #{repositoryId} and generation = #{generation} and linux_server_id = #{linuxServerId}
+        order by cleanup_task_id
+    </select>
+    <update id="makeCleanupDueNow">
+        update app_source_cleanup_tasks
+        set delete_at = case when delete_at &lt; #{now} then delete_at else #{now} end,
+            next_retry_at = case when next_retry_at is null or next_retry_at &gt; #{now} then #{now} else next_retry_at end,
+            updated_at = #{now}
+        where repository_id = #{repositoryId} and generation = #{generation}
+          and status in ('PENDING', 'RETRY_WAIT')
+    </update>
+
+    <select id="findRecentSelection" resultMap="RecentMap">
+        select user_id, app_id, repository_id, generation, updated_at
+        from app_source_recent_selections where user_id = #{userId}
+    </select>
+    <insert id="upsertRecentSelection" databaseId="postgresql">
+        insert into app_source_recent_selections(user_id, app_id, repository_id, generation, updated_at)
+        values (#{row.userId}, #{row.appId}, #{row.repositoryId}, #{row.generation}, #{row.updatedAt})
+        on conflict (user_id) do update set app_id = excluded.app_id, repository_id = excluded.repository_id,
+            generation = excluded.generation, updated_at = excluded.updated_at
+    </insert>
+    <insert id="upsertRecentSelection">
+        merge into app_source_recent_selections key(user_id)
+        values (#{row.userId}, #{row.appId}, #{row.repositoryId}, #{row.generation}, #{row.updatedAt})
+    </insert>
+    <delete id="deleteRecentSelection">
+        delete from app_source_recent_selections where user_id = #{userId}
+    </delete>
+</mapper>

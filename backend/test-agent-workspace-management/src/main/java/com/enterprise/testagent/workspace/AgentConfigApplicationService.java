@@ -25,7 +25,10 @@ import com.enterprise.testagent.domain.configuration.CommonParameterValues;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutCoordinator;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutPreparation;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutStatus;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigWorktreeClaim;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigWorktreePending;
 import com.enterprise.testagent.domain.configuration.PersonalAgentConfigRuntimeReloadResult;
 import com.enterprise.testagent.domain.configuration.PersonalAgentConfigRuntimeReloader;
 import com.enterprise.testagent.domain.configuration.UserSshKey;
@@ -361,6 +364,13 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         return publicRepositoryStatus(config);
     }
 
+    /** 查询最近一次公共全局 rollout；没有运行时协调器时按无状态兼容。 */
+    public Optional<PublicAgentConfigRolloutStatus> latestPublicRolloutStatus() {
+        return publicConfigRolloutCoordinator == null
+                ? Optional.empty()
+                : publicConfigRolloutCoordinator.latestPublicRolloutStatus();
+    }
+
     public AgentConfigResponses.PublicRepositoryStatusResponse initializeLocalPublicRepository(
             String branch,
             String operationId,
@@ -435,93 +445,36 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         String normalizedBranch = requireText(branch, "分支不能为空", "branch");
         AgentConfigProgress progress = startProgress(operationId, AgentConfigScope.PUBLIC, null, "update", normalizedBranch, traceId);
         String rolloutId = null;
+        boolean rolloutActivated = false;
         try {
             PublicConfig config = requireEnabledPublicConfig(userId);
             String privateKey = decryptSingleSshKey(userId);
             progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
             String previousCommitHash = existingRepositoryHead(config.gitRoot());
-            // “拉取”不仅更新服务器共享运行副本，还必须先把远端公共分支合并到当前超管的稳定个人
-            // worktree；否则前端继续从个人 worktree 读取时会看到旧内容，却收到“已拉取”的误导结果。
-            progress.step(AgentConfigOperationStep.MERGING);
-            syncOwnedPublicWorktreeFromRemote(
-                    config,
-                    normalizedBranch,
-                    discardLocalChanges,
-                    userId,
-                    privateKey);
             validatePublicRuntimeRepositoryBeforeRollout(config, discardLocalChanges);
-            // 个人 worktree 更新不影响运行实例；只有它成功后，才在共享运行副本 clone/pull 前建立门禁。
+            // 全局锁必须先于任何 reset/merge：即使另一台服务器正在排空，本次失败也不能先改掉
+            // 当前管理员的个人 worktree 或服务器共享运行副本。
             rolloutId = preparePublicConfigRollout(
-                    normalizedBranch, null, previousCommitHash, userId, traceId);
-            ensurePublicRepositoryReady(config, normalizedBranch, privateKey, discardLocalChanges);
-            String commitHash = gitWorkspaceService.headCommit(config.gitRoot());
+                    normalizedBranch, null, previousCommitHash, discardLocalChanges, userId, traceId);
+            // 请求线程只固定远端目标提交并激活全局任务；共享副本和所有个人 worktree 都由各服务器
+            // worker 收敛，避免某一个人的本地冲突阻断其它服务器。
+            progress.step(AgentConfigOperationStep.MERGING);
+            String commitHash = gitWorkspaceService.resolveRemoteBranchCommit(
+                    publicGitCommandUrl(config, userId), normalizedBranch, privateKey);
+            recordExpectedPublicConfigCommit(rolloutId, commitHash);
             activatePublicConfigRollout(rolloutId, commitHash);
+            rolloutActivated = true;
             progress.step(AgentConfigOperationStep.BROADCASTING);
             broadcastPublicSync(normalizedBranch, commitHash, "update", rolloutId, traceId);
             return progress.succeeded(commitHash);
         } catch (PlatformException exception) {
+            abortPreparedPublicConfigRollout(rolloutId, rolloutActivated, exception.getMessage());
             progress.failed(exception.errorCode().name(), safeErrorMessage(exception.getMessage()));
             throw exception;
         } catch (Exception exception) {
+            abortPreparedPublicConfigRollout(rolloutId, rolloutActivated, exception.getMessage());
             progress.failed(ErrorCode.INTERNAL_ERROR.name(), "公共 Agent 配置更新失败");
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "公共 Agent 配置更新失败", Map.of(), exception);
-        }
-    }
-
-    /**
-     * 将远端公共分支合并到当前用户在本服务器上的稳定个人 worktree。
-     *
-     * <p>公共文件读写已经以个人 worktree 为事实源，因此服务器“拉取”必须同步这棵 worktree。
-     * 有未提交改动时默认拒绝覆盖；只有调用方明确确认放弃本地已跟踪改动后才 reset。
-     * 合并冲突保留在个人 worktree 中，供既有三方冲突界面继续处理。
-     */
-    private void syncOwnedPublicWorktreeFromRemote(
-            PublicConfig config,
-            String branch,
-            boolean discardLocalChanges,
-            UserId userId,
-            String privateKey) {
-        Optional<AgentConfigWorktree> activeWorktree = agentConfigRepository.findWorktrees(
-                AgentConfigScope.PUBLIC,
-                null,
-                userId,
-                serverIdentity.linuxServerId(),
-                AgentConfigWorktreeStatus.ACTIVE).stream()
-                .filter(worktree -> isReusablePublicWorktree(worktree, userId))
-                .findFirst();
-        if (activeWorktree.isEmpty()) {
-            return;
-        }
-
-        Path repoRoot = Path.of(activeWorktree.get().rootPath());
-        ensureExistingRepositoryReadyForSync(
-                repoRoot,
-                config,
-                discardLocalChanges,
-                PublicRepositorySyncTarget.PERSONAL_WORKTREE);
-        if (gitWorkspaceService.isMergeInProgress(repoRoot)) {
-            List<String> conflictFiles = gitWorkspaceService.conflictPaths(repoRoot);
-            throw publicMergeConflict(
-                    conflictFiles,
-                    conflictFiles.isEmpty()
-                            ? "公共 Agent 个人 worktree 存在未完成的 Git 合并，请先完成或取消合并"
-                            : "公共 Agent 个人 worktree 仍有未解决的 Git 合并冲突");
-        }
-        gitWorkspaceService.fetch(repoRoot, privateKey);
-        try {
-            gitWorkspaceService.mergeBranch(
-                    repoRoot,
-                    "origin/" + branch,
-                    privateKey,
-                    gitCommitIdentity(userId));
-        } catch (PlatformException mergeException) {
-            List<String> conflictFiles = gitWorkspaceService.conflictPaths(repoRoot);
-            if (!conflictFiles.isEmpty()) {
-                throw publicMergeConflict(
-                        conflictFiles,
-                        "公共 Agent 个人 worktree 与远端分支存在冲突，请解决后重新拉取");
-            }
-            throw mergeException;
         }
     }
 
@@ -563,7 +516,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             ensurePublicRepositoryOriginReady(repoRoot, config);
             // 共享仓库本身是运行副本；reset、commit、merge 之前必须先建立 PREPARING 全员闸门。
             rolloutId = preparePublicConfigRollout(
-                    normalizedBranch, PENDING_EXPECTED_COMMIT, previousCommitHash, userId, traceId);
+                    normalizedBranch, PENDING_EXPECTED_COMMIT, previousCommitHash, false, userId, traceId);
             // 可选：放弃受控仓库中的已跟踪修改（不删除未跟踪文件）。
             if (discardLocalChanges && !gitWorkspaceService.isWorktreeClean(repoRoot)) {
                 gitWorkspaceService.resetHardToCommit(repoRoot, "HEAD");
@@ -1355,7 +1308,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             gitWorkspaceService.resetHardToCommit(personalRepoRoot, commitHash);
             // PREPARING 必须先于 push，保证远端已变化但数据库写入失败时仍有可恢复的持久化闸门。
             rolloutId = preparePublicConfigRollout(
-                    branch, commitHash, previousCommitHash, userId, traceId);
+                    branch, commitHash, previousCommitHash, false, userId, traceId);
             try {
                 gitWorkspaceService.pushRef(personalRepoRoot, worktree.branch(), branch, privateKey);
             } catch (PlatformException pushException) {
@@ -1522,21 +1475,21 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                         ? null
                         : new UserId(request.initiatedByUserId());
                 PublicConfig config = initiator == null ? publicConfig() : requireEnabledPublicConfig(initiator);
-                if (!config.enabled() || !gitWorkspaceService.isGitRepository(config.gitRoot())) {
+                if (!config.enabled()) {
                     throw new PlatformException(
                             ErrorCode.CONFLICT,
-                            "公共 Agent 运行副本尚未初始化",
-                            Map.of("path", config.gitRoot().toString()));
-                }
-                if (!gitWorkspaceService.isWorktreeClean(config.gitRoot())) {
-                    throw new PlatformException(
-                            ErrorCode.CONFLICT,
-                            "公共 Agent 运行副本存在未提交变更",
+                            "公共 Agent 配置尚未启用",
                             Map.of("path", config.gitRoot().toString()));
                 }
                 String privateKey = initiator == null ? null : decryptSingleSshKey(initiator);
-                if (initiator != null) {
-                    ensurePublicRepositoryOriginReady(config.gitRoot(), config);
+                if (!gitWorkspaceService.isGitRepository(config.gitRoot())) {
+                    ensurePublicRepositoryReady(config, request.branch(), privateKey);
+                } else {
+                    ensureExistingRepositoryReadyForSync(
+                            config.gitRoot(),
+                            config,
+                            request.discardSharedRuntimeChanges(),
+                            PublicRepositorySyncTarget.SHARED_RUNTIME);
                 }
                 gitWorkspaceService.fetch(config.gitRoot(), privateKey);
                 if (!publicConfigRolloutCoordinator.renewServerSync(request)) {
@@ -1550,7 +1503,12 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 if (!publicConfigRolloutCoordinator.renewServerSync(request)) {
                     return;
                 }
-                publicConfigRolloutCoordinator.markServerSynced(request);
+                List<PublicAgentConfigWorktreePending> pendingWorktrees = synchronizePublicPersonalWorktrees(
+                        config,
+                        request.commitHash(),
+                        initiator,
+                        privateKey);
+                publicConfigRolloutCoordinator.markPublicServerSynced(request, pendingWorktrees);
             } catch (Exception exception) {
                 publicConfigRolloutCoordinator.markServerSyncRetry(request, safeErrorMessage(exception.getMessage()));
                 LOGGER.warn(
@@ -1560,6 +1518,123 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                         request.retryCount() + 1,
                         safeErrorMessage(exception.getMessage()));
             }
+        }
+    }
+
+    /**
+     * 把固定远程 commit 原生合入本服务器所有有效公共个人 worktree。
+     *
+     * <p>该动作没有独立前端按钮，由公共全局 rollout 自动执行；页面只展示同步/补偿状态。
+     * 任何一棵个人 worktree 的冲突都只记录补偿任务，不阻止共享副本和其他服务器上线。</p>
+     */
+    private List<PublicAgentConfigWorktreePending> synchronizePublicPersonalWorktrees(
+            PublicConfig config,
+            String targetCommit,
+            UserId initiator,
+            String privateKey) {
+        UserId commitUser = initiator == null ? null : initiator;
+        GitCommitIdentity identity = commitUser == null ? null : gitCommitIdentity(commitUser);
+        List<PublicAgentConfigWorktreePending> pending = new ArrayList<>();
+        for (AgentConfigWorktree worktree : agentConfigRepository.findWorktrees(
+                AgentConfigScope.PUBLIC,
+                null,
+                null,
+                serverIdentity.linuxServerId(),
+                AgentConfigWorktreeStatus.ACTIVE)) {
+            String reason = mergeTargetIntoPublicWorktree(worktree, config, targetCommit, privateKey, identity);
+            if (reason != null) {
+                pending.add(new PublicAgentConfigWorktreePending(
+                        worktree.worktreeId(), worktree.createdBy().value(), reason));
+            }
+        }
+        return List.copyOf(pending);
+    }
+
+    /** 成功返回 null；可由用户处理或后台重试的状态返回稳定原因码。 */
+    private String mergeTargetIntoPublicWorktree(
+            AgentConfigWorktree worktree,
+            PublicConfig config,
+            String targetCommit,
+            String privateKey,
+            GitCommitIdentity identity) {
+        if (!isReusablePublicWorktree(worktree, worktree.createdBy())) {
+            return "WORKTREE_NOT_REUSABLE";
+        }
+        Path repoRoot = Path.of(worktree.rootPath());
+        if (!gitWorkspaceService.isGitRepository(repoRoot)) {
+            return "WORKTREE_NOT_GIT_REPOSITORY";
+        }
+        try {
+            ensurePublicRepositoryOriginReady(repoRoot, config);
+            if (gitWorkspaceService.isMergeInProgress(repoRoot)) {
+                return gitWorkspaceService.conflictPaths(repoRoot).isEmpty()
+                        ? "MERGE_AWAITING_COMPLETION"
+                        : "MERGE_CONFLICT";
+            }
+            if (gitWorkspaceService.isAncestor(repoRoot, targetCommit, "HEAD")) {
+                return null;
+            }
+            if (identity == null) {
+                return "COMMIT_IDENTITY_UNAVAILABLE";
+            }
+            gitWorkspaceService.mergeCommit(repoRoot, targetCommit, privateKey, identity);
+            return gitWorkspaceService.isAncestor(repoRoot, targetCommit, "HEAD")
+                    ? null
+                    : "TARGET_COMMIT_NOT_REACHED";
+        } catch (PlatformException exception) {
+            if (!gitWorkspaceService.conflictPaths(repoRoot).isEmpty()) {
+                return "MERGE_CONFLICT";
+            }
+            return "LOCAL_CHANGES".equals(exception.details().get("gitFailureType"))
+                    ? "LOCAL_CHANGES"
+                    : "MERGE_FAILED";
+        } catch (RuntimeException exception) {
+            return "MERGE_FAILED";
+        }
+    }
+
+    /** 公共个人 worktree 冲突不占用主 rollout；用户处理后由租约任务自动继续合入。 */
+    @Scheduled(
+            fixedDelayString = "${test-agent.public-agent-config.rollout.worktree-retry-delay-ms:5000}",
+            initialDelayString = "${test-agent.public-agent-config.rollout.initial-delay-ms:5000}")
+    void retryPendingPublicConfigWorktrees() {
+        if (publicConfigRolloutCoordinator == null) {
+            return;
+        }
+        publicConfigRolloutCoordinator.claimPendingPublicWorktree(serverIdentity.linuxServerId())
+                .ifPresent(this::reconcilePendingPublicConfigWorktree);
+    }
+
+    private void reconcilePendingPublicConfigWorktree(PublicAgentConfigWorktreeClaim claim) {
+        try {
+            Optional<AgentConfigWorktree> current = agentConfigRepository.findWorktree(claim.worktreeId());
+            if (current.isEmpty()) {
+                publicConfigRolloutCoordinator.abandonPublicWorktree(claim, "WORKTREE_REMOVED");
+                return;
+            }
+            AgentConfigWorktree worktree = current.get();
+            if (worktree.scope() != AgentConfigScope.PUBLIC
+                    || worktree.status() != AgentConfigWorktreeStatus.ACTIVE
+                    || !claim.userId().equals(worktree.createdBy().value())
+                    || !serverIdentity.linuxServerId().equals(worktree.linuxServerId())) {
+                publicConfigRolloutCoordinator.abandonPublicWorktree(claim, "WORKTREE_NO_LONGER_ELIGIBLE");
+                return;
+            }
+            UserId owner = worktree.createdBy();
+            PublicConfig config = requireEnabledPublicConfig(owner);
+            String reason = mergeTargetIntoPublicWorktree(
+                    worktree,
+                    config,
+                    claim.targetCommit(),
+                    null,
+                    gitCommitIdentity(owner));
+            if (reason == null) {
+                publicConfigRolloutCoordinator.markPublicWorktreeSynchronized(claim);
+            } else {
+                publicConfigRolloutCoordinator.markPublicWorktreeRetry(claim, reason);
+            }
+        } catch (RuntimeException exception) {
+            publicConfigRolloutCoordinator.markPublicWorktreeRetry(claim, safeErrorMessage(exception.getMessage()));
         }
     }
 
@@ -1733,6 +1808,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         String status = "UNINITIALIZED";
         boolean initialized = false;
         boolean initializationAllowed = config.enabled();
+        boolean localChangesPresent = false;
         String currentBranch = null;
         String commitHash = null;
         if (!config.enabled()) {
@@ -1744,6 +1820,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             commitHash = gitWorkspaceService.headCommit(config.gitRoot());
             boolean originMatched = config.matchesOrigin(gitWorkspaceService.originUrl(config.gitRoot()));
             boolean clean = gitWorkspaceService.isWorktreeClean(config.gitRoot());
+            localChangesPresent = !clean;
             boolean configReady = isInitializedConfigDirectory(config);
             initialized = originMatched && configReady;
             status = initialized && clean ? "READY" : "CONFLICT";
@@ -1774,7 +1851,8 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 initializationAllowed,
                 currentBranch,
                 commitHash,
-                message);
+                message,
+                localChangesPresent);
     }
 
     private boolean isInitializedConfigDirectory(PublicConfig config) {
@@ -1885,8 +1963,20 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             if (!discardLocalChanges) {
                 throw dirtyPublicRepositoryConflict(repoRoot, syncTarget);
             }
-            // 只恢复 Git 已跟踪内容；未跟踪文件不删除，避免“更新”扩大为不可逆清理。
+            List<String> untrackedFiles = syncTarget == PublicRepositorySyncTarget.SHARED_RUNTIME
+                    ? gitWorkspaceService.parseStatusPorcelain(gitWorkspaceService.statusPorcelain(repoRoot)).stream()
+                            .filter(GitStatusEntry::untrackedFile)
+                            .map(GitStatusEntry::path)
+                            .filter(path -> path != null && !path.isBlank())
+                            .distinct()
+                            .toList()
+                    : List.of();
+            // 共享运行副本只有在超管明确确认后才恢复为受控 Git 内容；删除范围固定为确认时
+            // status 枚举出的未跟踪文件，不使用无边界 git clean。个人 worktree 始终保留未跟踪内容。
             gitWorkspaceService.resetHardToCommit(repoRoot, "HEAD");
+            if (!untrackedFiles.isEmpty()) {
+                gitWorkspaceService.cleanUntrackedFiles(repoRoot, untrackedFiles, null);
+            }
         }
     }
 
@@ -2425,6 +2515,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             String branch,
             String expectedCommitHash,
             String previousCommitHash,
+            boolean discardSharedRuntimeChanges,
             UserId userId,
             String traceId) {
         if (publicConfigRolloutCoordinator == null) {
@@ -2434,6 +2525,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 branch,
                 expectedCommitHash,
                 previousCommitHash,
+                discardSharedRuntimeChanges,
                 serverIdentity.linuxServerId(),
                 userId.value(),
                 traceId);
@@ -2442,6 +2534,24 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     private void activatePublicConfigRollout(String rolloutId, String commitHash) {
         if (rolloutId != null && publicConfigRolloutCoordinator != null) {
             publicConfigRolloutCoordinator.activate(rolloutId, commitHash);
+        }
+    }
+
+    /** 仅回滚尚未激活的 PREPARING 门禁；已激活任务必须由持久化排空程序继续收敛。 */
+    private void abortPreparedPublicConfigRollout(
+            String rolloutId,
+            boolean rolloutActivated,
+            String reason) {
+        if (rolloutId == null || rolloutActivated || publicConfigRolloutCoordinator == null) {
+            return;
+        }
+        try {
+            publicConfigRolloutCoordinator.abortPreparation(rolloutId, safeErrorMessage(reason));
+        } catch (RuntimeException abortException) {
+            LOGGER.warn(
+                    "event=agent_config_public_preparation_abort_failed rolloutId={} message={}",
+                    rolloutId,
+                    safeErrorMessage(abortException.getMessage()));
         }
     }
 
@@ -2609,7 +2719,13 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             boolean discardLocalChanges) {
         Path repoRoot = config.gitRoot();
         if (gitWorkspaceService.isGitRepository(repoRoot)) {
-            ensurePublicRepositoryOriginReady(repoRoot, config);
+            // 锁前只做读检查；内部部署的 origin 用户刷新也必须留到各服务器租约任务内。
+            if (!config.matchesOrigin(gitWorkspaceService.originUrl(repoRoot))) {
+                throw new PlatformException(
+                        ErrorCode.CONFLICT,
+                        "Git origin 与配置不一致",
+                        Map.of("path", repoRoot.toString()));
+            }
             if (!discardLocalChanges && !gitWorkspaceService.isWorktreeClean(repoRoot)) {
                 throw dirtyPublicRepositoryConflict(
                         repoRoot,

@@ -12,7 +12,7 @@
 
 ## 主要职责
 
-- Workspace、Session、AgentSessionBinding、Run、ConversationRunContext、Run 运行数据面、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、夜间执行任务、AI 回复反馈、运营分析、应用配置管理、应用版本工作区、应用版本服务器副本、个人工作区、服务器广播和定时任务框架等领域对象。
+- Workspace、Session、AgentSessionBinding、Run、ConversationRunContext、Run 运行数据面、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、应用源码快照、夜间执行任务、AI 回复反馈、运营分析、应用配置管理、应用版本工作区、应用版本服务器副本、个人工作区、服务器广播和定时任务框架等领域对象。
 - Run 状态机、路由决策值对象、领域服务接口。
 - 保持业务规则与基础设施分离。
 - 认证领域端口 `TokenSessionMarkerStore` 只定义平台 Token 的 SHA-256 session marker 写入、删除、校验与摘要规则，供平台 Token 生命周期和 XXL 会话联动复用；不暴露 Redis key。
@@ -38,6 +38,7 @@
 - OpencodeProcess：`LinuxServer`、`BackendJavaProcess`、`BackendRuntimeSnapshot`、`BackendRuntimeMetrics`、`ServerRuntimeMetricSample`、`BackendRuntimeMetricSample`、`OpencodeContainer`、`OpencodeContainerManager`、`ManagerRuntimeSnapshot`、`ManagedOpencodeProcessSnapshot`、`OpencodeManagerBackendConnection`、`OpencodeServerProcess`、`OpencodeServerProcessFilter`、`UserOpencodeProcessBinding`、`OpencodeProcessManagementRepository`、`OpencodeProcessReservationLockPort`、`OpencodeProcessAtomicMutationPort` 和 `OpencodeProcessHeartbeatStore`；只表达 Linux 服务器、容器、管理进程、用户专属 opencode 进程拓扑、Redis 运行快照、查询筛选、事务预留/代次 CAS、服务器级/Java 进程/JVM/容器指标样本和运行心跳端口，不直接发起进程操作或 socket 通信。`OpencodeProcessAssignmentConflictException` 表达 process/binding 原子写竞争，调用方必须重读权威绑定而不能继续覆盖。后端运行指标按可空字段兼容扩展，`memoryMaxBytes` 是 `memoryTotalBytes` 旧别名，`jvmGcPauseMillis` 是 `jvmGcCollectionTimeDeltaMillis` 旧别名。
 - Configuration：`ApplicationDefinition`、`ApplicationMember`、`CodeRepository`（含可空 `englishName`）、`ApplicationRepositoryLink`、`ApplicationWorkspace`、`UserSshKey`、`CommonParameter`、`CommonParameterReferenceResolver`、`CommonParameterMemoryEntry`、`CommonParameterMemoryKey/State`、`WorkspaceCreateOperation`、`InternalModelProvider`、`InternalModelToken` 与 `InternalModelProviderRuntimeConfig`，与运行态 Workspace/Session/Run 解耦；内部模型 Token 领域响应只含安全元数据，明文仅通过运行配置端口进入 JVM 快照。通用参数支持 `${englishName}` 互相引用，`${NAME}` 未命中通用参数时回退进程环境变量，`$NAME` 直接读取环境变量，并在路径开头支持 `$HOME` / `~/` 展开为用户主目录。内存参数 SPI 只描述显式注册项的查库重载契约和安全诊断状态，不把普通通用参数改为缓存读取。
 - ManagedWorkspace：`ApplicationWorkspaceVersion`、`ApplicationWorkspaceVersionReplica`、`PersonalWorkspace`、`UserWorkspacePreference`、`WorkspaceSyncRecord`，把应用工作空间模板落为运行态 Workspace，记录每服务器副本 commit/status、个人 worktree 与同步审计。
+- AppSource：`AppSourceRepositorySlot` 以 repositoryId 唯一分配 active/pending generation 并通过 `lockVersion` 乐观并发；`AppSourceSnapshot` 冻结仓库英文名、`PERSONAL/TEAM` 用途、分支、提交和结构化路径选择，并严格校验 `expiresAt = acceptedAt + 1..72` 整小时；`AppSourceReplica`、`AppSourceOperation`、全局/服务器步骤、绝对 `deleteAt` 清理任务和每用户 recent selection 分别表达 generation/lease fencing、操作进度、延迟删除和最近入口。`AppSourceRetention` 只接受 1–72 小时且默认 48 小时。领域端口不暴露 JSONB、SQL 或物理目录。
 - Broadcast：`ServerBroadcastEvent`、`ServerBroadcastPublisher`、`ServerBroadcastHandler`，定义后端实例之间广播事件的领域端口，不绑定 Redis 或其他传输。
 - Scheduler：`ScheduledTask`、`ScheduledTaskPlan`、`ScheduledTaskRun`、状态枚举和值对象只保留旧数据兼容和运行记录清理端口；生产调度不再创建或执行 `USER_PLAN`。
 - NightExecution：`NightExecutionTask`、`NightExecutionScheduleMode`、`NightExecutionTaskStatus`、`NightExecutionTaskRepository` 表达任务状态机、完整输入短期持有、固定目标服务器、会话锁、15 分钟时段容量以及 attempt/owner/租约 fencing；`NIGHT_WINDOW` 预留夜间容量，`ADMIN_CUSTOM` 使用精确分钟且不产生容量释放标记。`SCHEDULED/DISPATCHING` 为待执行，普通 Run 锚点受理后进入 `DISPATCHED`，Run 后续终态不反向修改调度状态。
@@ -66,6 +67,7 @@
 - `OpencodeProcessDomainTest` 覆盖稳定 Linux 服务器身份、容器端口范围、用户进程 baseUrl 和用户绑定边界。
 - `RunEventTest`、`RunEventTypeTest`、`DomainValidationTest` 覆盖事件模型、事件 wireName 映射和值对象公共校验。
 - `ConfigurationDomainTest`、`CommonParameterReferenceResolverTest` 覆盖应用成员逻辑删除、代码库 URL 不可编辑、英文名称兼容、应用工作空间目录约束、通用参数互相引用、环境变量回退和 `$HOME` 路径展开等配置领域规则。
+- `AppSourceDomainTest` 覆盖用途、状态前向流转、结构化安全相对路径、1–72 小时边界、默认 48 小时和 generation/乐观版本/租约 fencing；`ManagedWorkspacePathResolverTest` 覆盖 `appsource:` 逻辑路径及旧物理路径兼容。
 - `SchedulerDomainTest` 覆盖任务定义、用户计划、运行记录状态和会话来源默认值。
 
 ## 允许依赖

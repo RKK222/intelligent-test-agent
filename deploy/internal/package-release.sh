@@ -15,6 +15,7 @@ PLATFORM="linux/amd64"
 PACKAGE_BACKEND=1
 PACKAGE_FRONTEND=1
 PACKAGE_OPENCODE_WORKER=1
+PACKAGE_TOOLBOX=1
 PACKAGE_MYSQL_IMAGE=0
 SAVE_TARBALL=1
 PACKAGE_ZIP=1
@@ -29,6 +30,7 @@ Build enterprise internal delivery artifacts:
   - backend executable jar
   - frontend dist files and tar.gz
   - opencode-worker image and docker-loadable tar
+  - pinned IT-Tools and OmniTools images, checksums and complete modified source
   - repository session logs under .agents/
 
 The default release ZIP is platform-only. Build the standalone MySQL 8.4
@@ -43,6 +45,7 @@ Options:
   --backend-only          Package only the backend jar.
   --frontend-only         Package only the frontend dist.
   --opencode-only         Package only the opencode worker image.
+  --toolbox-only          Package only the two toolbox images and modified source.
   --mysql-only            Package only the standalone MySQL image.
   --zip-only              Reassemble the release ZIP from existing complete artifacts and current session logs.
   --no-save               Build/pull Docker images but do not export image tarballs.
@@ -71,6 +74,7 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_BACKEND=1
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
       shift
       ;;
@@ -78,6 +82,7 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=1
       PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
       shift
       ;;
@@ -85,6 +90,15 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=1
+      PACKAGE_TOOLBOX=0
+      PACKAGE_MYSQL_IMAGE=0
+      shift
+      ;;
+    --toolbox-only)
+      PACKAGE_BACKEND=0
+      PACKAGE_FRONTEND=0
+      PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_TOOLBOX=1
       PACKAGE_MYSQL_IMAGE=0
       shift
       ;;
@@ -92,6 +106,7 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=1
       shift
       ;;
@@ -99,6 +114,7 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
       PACKAGE_ZIP_ONLY=1
       shift
@@ -153,6 +169,26 @@ load_dotenv() {
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Required command not found: $1" >&2
+    exit 1
+  fi
+}
+
+require_digest_pinned_image() {
+  local variable_name="$1"
+  local image_reference="$2"
+  # 工具镜像必须可复现；允许切换受控 registry 前缀，但禁止退化为可漂移的纯 tag。
+  if [[ ! "${image_reference}" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]]; then
+    echo "${variable_name} must be an image reference pinned by a lowercase sha256 digest: ${image_reference}" >&2
+    exit 1
+  fi
+}
+
+require_platform_image() {
+  local variable_name="$1" image_reference="$2" repository="$3" version="$4"
+  # 企业 registry 前缀可配置，但源码、镜像 tag 与离线 tar 不能跨平台版本混用。
+  if [[ "${image_reference}" != "${repository}:${version}" \
+      && "${image_reference}" != */"${repository}:${version}" ]]; then
+    echo "${variable_name} must end with ${repository}:${version}: ${image_reference}" >&2
     exit 1
   fi
 }
@@ -229,6 +265,20 @@ tag_to_tar_name() {
   local safe="${tag//\//_}"
   safe="${safe//:/_}"
   printf '%s-%s.tar' "${safe}" "${platform_suffix}"
+}
+
+write_artifact_checksum() {
+  local artifact="$1" directory name
+  directory="$(dirname "${artifact}")"
+  name="$(basename "${artifact}")"
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "${directory}" && sha256sum "${name}" >"${name}.sha256")
+  elif command -v shasum >/dev/null 2>&1; then
+    (cd "${directory}" && shasum -a 256 "${name}" >"${name}.sha256")
+  else
+    echo "Neither sha256sum nor shasum is available; cannot checksum ${artifact}" >&2
+    exit 1
+  fi
 }
 
 package_backend() {
@@ -332,10 +382,22 @@ build_opencode_worker_image() {
     --build-arg "OPENCODE_ASSET_SHA256=${OPENCODE_ASSET_SHA256}" \
     --build-arg "OPENCODE_BINARY_SHA256=${OPENCODE_BINARY_SHA256}" \
     --build-arg "OPENCODE_RELEASE_BASE_URL=${OPENCODE_RELEASE_BASE_URL}" \
+    --build-arg "CODEX_VERSION=${CODEX_VERSION}" \
+    --build-arg "CODEX_ASSET_NAME=${CODEX_ASSET_NAME}" \
+    --build-arg "CODEX_ASSET_SIZE=${CODEX_ASSET_SIZE}" \
+    --build-arg "CODEX_ASSET_SHA256=${CODEX_ASSET_SHA256}" \
+    --build-arg "CODEX_BWRAP_ASSET_NAME=${CODEX_BWRAP_ASSET_NAME}" \
+    --build-arg "CODEX_BWRAP_ASSET_SIZE=${CODEX_BWRAP_ASSET_SIZE}" \
+    --build-arg "CODEX_BWRAP_ASSET_SHA256=${CODEX_BWRAP_ASSET_SHA256}" \
+    --build-arg "CODEX_BWRAP_BINARY_SHA256=${CODEX_BWRAP_BINARY_SHA256}" \
+    --build-arg "CODEX_RELEASE_BASE_URL=${CODEX_RELEASE_BASE_URL}" \
     --build-arg "OPENCODE_RUNTIME_PACKAGE_JSON=${OPENCODE_RUNTIME_PACKAGE_JSON}" \
     --build-arg "OPENCODE_RUNTIME_PACKAGE_LOCK=${OPENCODE_RUNTIME_PACKAGE_LOCK}" \
     "${ROOT_DIR}"
   docker image inspect "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" >/dev/null
+
+  # 构建机先验证固定版本、摘要、MCP 契约和失败关闭；native amd64 的 namespace E2E 由脚本自动执行。
+  "${ROOT_DIR}/tools/verify-codex-whitebox-worker-image.sh" "${TEST_AGENT_OPENCODE_WORKER_IMAGE}"
 
   export_worker_programs
 
@@ -345,6 +407,52 @@ build_opencode_worker_image() {
     docker save -o "${tar_path}" "${TEST_AGENT_OPENCODE_WORKER_IMAGE}"
     ls -lh "${tar_path}"
   fi
+}
+
+build_toolbox_image() {
+  local image="$1" context="$2" tar_path architecture
+  echo "Building ${image} for ${PLATFORM}"
+  docker buildx build \
+    --platform "${PLATFORM}" \
+    -t "${image}" \
+    --load \
+    --build-arg "TOOLBOX_NODE_BASE_IMAGE=${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE}" \
+    --build-arg "TOOLBOX_NGINX_BASE_IMAGE=${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE}" \
+    "${context}"
+  architecture="$(docker image inspect -f '{{.Architecture}}' "${image}")"
+  [[ "${architecture}" == "amd64" ]] || {
+    echo "Toolbox image architecture must be amd64, got ${architecture}: ${image}" >&2
+    exit 1
+  }
+  if [[ "${SAVE_TARBALL}" -eq 1 ]]; then
+    tar_path="${OUTPUT_DIR}/$(tag_to_tar_name "${image}" "${PLATFORM}")"
+    docker save -o "${tar_path}" "${image}"
+    write_artifact_checksum "${tar_path}"
+    ls -lh "${tar_path}" "${tar_path}.sha256"
+  fi
+}
+
+package_toolbox() {
+  local source_archive="${OUTPUT_DIR}/test-agent-toolbox-source.tar.gz"
+  build_toolbox_image "${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}" "${ROOT_DIR}/toolbox-source/it-tools"
+  build_toolbox_image "${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}" "${ROOT_DIR}/toolbox-source/omni-tools"
+
+  # GPL/MIT 完整修改源码、锁定证据、许可证和已校验运行资源随离线包一起交付；构建缓存不入包。
+  tar -C "${ROOT_DIR}" \
+    --exclude='toolbox-source/it-tools/node_modules' \
+    --exclude='toolbox-source/it-tools/dist' \
+    --exclude='toolbox-source/omni-tools/node_modules' \
+    --exclude='toolbox-source/omni-tools/dist' \
+    --exclude='toolbox-source/**/.git' \
+    -czf "${source_archive}" toolbox-source
+  write_artifact_checksum "${source_archive}"
+  cp "${ROOT_DIR}/backend/test-agent-integration/src/main/resources/toolbox/catalog-v1.json" \
+    "${OUTPUT_DIR}/toolbox-catalog-v1.json"
+  write_artifact_checksum "${OUTPUT_DIR}/toolbox-catalog-v1.json"
+  install -m 0644 "${SCRIPT_DIR}/toolbox.env.example" "${OUTPUT_DIR}/toolbox.env.example"
+  install -m 0755 "${SCRIPT_DIR}/toolbox-docker.sh" "${OUTPUT_DIR}/toolbox-docker.sh"
+  install -m 0755 "${SCRIPT_DIR}/diagnose-toolbox.sh" "${OUTPUT_DIR}/diagnose-toolbox.sh"
+  install -m 0644 "${ROOT_DIR}/docs/deployment/toolbox.md" "${OUTPUT_DIR}/TOOLBOX.md"
 }
 
 package_mysql_image() {
@@ -367,7 +475,7 @@ package_mysql_image() {
 package_release_zip() {
   local staging_dir="${OUTPUT_DIR}/.release-zip"
   local zip_path session_log session_log_count=0
-  local worker_tar required_artifact
+  local worker_tar it_tools_tar omni_tools_tar required_artifact
 
   require_command zip
   require_command rsync
@@ -375,13 +483,24 @@ package_release_zip() {
   mkdir -p "${staging_dir}/dist" "${staging_dir}/deploy/internal"
   zip_path="$(cd "${OUTPUT_DIR}" && pwd)/test-agent-internal-release.zip"
   worker_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
+  it_tools_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}" "${PLATFORM}")"
+  omni_tools_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}" "${PLATFORM}")"
 
   # zip-only 复用刚完成验证的二进制制品，但不允许任何一层缺失后生成看似完整的发布包。
   for required_artifact in \
     "${OUTPUT_DIR}/backend/test-agent-app.jar" \
     "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" \
     "${OUTPUT_DIR}/test-agent-programs.tar.gz" \
-    "${worker_tar}"; do
+    "${worker_tar}" \
+    "${it_tools_tar}" \
+    "${it_tools_tar}.sha256" \
+    "${omni_tools_tar}" \
+    "${omni_tools_tar}.sha256" \
+    "${OUTPUT_DIR}/test-agent-toolbox-source.tar.gz" \
+    "${OUTPUT_DIR}/test-agent-toolbox-source.tar.gz.sha256" \
+    "${OUTPUT_DIR}/toolbox-catalog-v1.json" \
+    "${OUTPUT_DIR}/toolbox-catalog-v1.json.sha256" \
+    "${OUTPUT_DIR}/TOOLBOX.md"; do
     if [[ ! -f "${required_artifact}" ]]; then
       echo "Required release artifact not found: ${required_artifact}" >&2
       exit 1
@@ -394,6 +513,13 @@ package_release_zip() {
   cp -a "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" "${staging_dir}/dist/"
   cp -a "${OUTPUT_DIR}/test-agent-programs.tar.gz" "${staging_dir}/dist/"
   cp -a "${worker_tar}" "${staging_dir}/dist/"
+  cp -a "${it_tools_tar}" "${it_tools_tar}.sha256" "${staging_dir}/dist/"
+  cp -a "${omni_tools_tar}" "${omni_tools_tar}.sha256" "${staging_dir}/dist/"
+  cp -a "${OUTPUT_DIR}/test-agent-toolbox-source.tar.gz" \
+    "${OUTPUT_DIR}/test-agent-toolbox-source.tar.gz.sha256" \
+    "${OUTPUT_DIR}/toolbox-catalog-v1.json" \
+    "${OUTPUT_DIR}/toolbox-catalog-v1.json.sha256" \
+    "${staging_dir}/dist/"
 
   if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 ]]; then
     local mysql_tar
@@ -405,6 +531,7 @@ package_release_zip() {
   local output_dir_name
   output_dir_name="$(basename "${OUTPUT_DIR}")"
   rsync -a --exclude 'dist' --exclude 'dist-*' --exclude "${output_dir_name}" --exclude '.env' "${SCRIPT_DIR}/" "${staging_dir}/deploy/internal/"
+  install -m 0644 "${OUTPUT_DIR}/TOOLBOX.md" "${staging_dir}/deploy/internal/TOOLBOX.md"
   # 升级脚本和官方启动器共用这份忽略清单；任一文件漏包都会让存量节点或新增节点重新出现 Git 脏状态。
   for required_artifact in \
     "${staging_dir}/deploy/internal/ensure-opencode-runtime-gitignore.sh" \
@@ -456,10 +583,11 @@ export_worker_programs() {
   container_id="$(docker create --platform "${PLATFORM}" "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" true)"
 
   rm -rf "${programs_dir}"
-  mkdir -p "${programs_dir}/bin" "${programs_dir}/opencode"
+  mkdir -p "${programs_dir}/bin" "${programs_dir}/opencode" "${programs_dir}/codex"
 
   if ! docker cp "${container_id}:/usr/local/bin/opencode-manager" "${programs_dir}/bin/opencode-manager" \
-    || ! docker cp "${container_id}:/usr/local/lib/opencode/." "${programs_dir}/opencode/"; then
+    || ! docker cp "${container_id}:/usr/local/lib/opencode/." "${programs_dir}/opencode/" \
+    || ! docker cp "${container_id}:/usr/local/lib/codex/." "${programs_dir}/codex/"; then
     docker rm -f "${container_id}" >/dev/null 2>&1 || true
     return 1
   fi
@@ -467,12 +595,21 @@ export_worker_programs() {
 
   chmod +x "${programs_dir}/bin/opencode-manager" || true
   chmod +x "${programs_dir}/opencode/bin/opencode" || true
-  printf 'official opencode: %s\nasset: %s\narchive size: %s\narchive sha256: %s\nrelease commit: %s\n' \
+  chmod +x "${programs_dir}/codex/bin/codex-official" "${programs_dir}/codex/bin/codex-resources/bwrap" "${programs_dir}/codex/bin/test-agent-codex-mcp" || true
+  printf 'official opencode: %s\nasset: %s\narchive size: %s\narchive sha256: %s\nrelease commit: %s\nofficial codex: %s\ncodex asset: %s\ncodex archive size: %s\ncodex archive sha256: %s\ncodex bwrap asset: %s\ncodex bwrap archive size: %s\ncodex bwrap archive sha256: %s\ncodex bwrap binary sha256: %s\n' \
     "${OPENCODE_VERSION}" \
     "${OPENCODE_ASSET_NAME}" \
     "${OPENCODE_ASSET_SIZE}" \
     "${OPENCODE_ASSET_SHA256}" \
-    "${OPENCODE_RELEASE_COMMIT}" >"${programs_dir}/VERSION"
+    "${OPENCODE_RELEASE_COMMIT}" \
+    "${CODEX_VERSION}" \
+    "${CODEX_ASSET_NAME}" \
+    "${CODEX_ASSET_SIZE}" \
+    "${CODEX_ASSET_SHA256}" \
+    "${CODEX_BWRAP_ASSET_NAME}" \
+    "${CODEX_BWRAP_ASSET_SIZE}" \
+    "${CODEX_BWRAP_ASSET_SHA256}" \
+    "${CODEX_BWRAP_BINARY_SHA256}" >"${programs_dir}/VERSION"
   tar -C "${OUTPUT_DIR}" -czf "${OUTPUT_DIR}/test-agent-programs.tar.gz" programs
   ls -lh "${OUTPUT_DIR}/test-agent-programs.tar.gz"
 }
@@ -488,6 +625,10 @@ if [[ "${OUTPUT_DIR_FROM_ARG}" -eq 0 && -n "${TEST_AGENT_IMAGE_OUTPUT_DIR:-}" &&
 fi
 
 TEST_AGENT_OPENCODE_WORKER_IMAGE="${TEST_AGENT_OPENCODE_WORKER_IMAGE:-test-agent-opencode-worker:internal}"
+TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE="${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE:-test-agent/it-tools:2024.10.22-7ca5933-platform.2}"
+TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE="${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE:-test-agent/omni-tools:0.6.0-platform.1}"
+TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE="${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE:-node:20.18.0-alpine3.20@sha256:a1d39fe127e43881c6770abf2f0843c955607fb56eb9b45bf6f103c992c5442a}"
+TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE="${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE:-nginx:1.27.2-alpine3.20@sha256:d213b2a02ef4e7ec85882e8955343cdd08ab49d6548995ad18623f47017c65ee}"
 TEST_AGENT_XXL_JOB_MYSQL_IMAGE="${TEST_AGENT_XXL_JOB_MYSQL_IMAGE:-mysql:8.4}"
 NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
@@ -500,11 +641,27 @@ OPENCODE_ASSET_SIZE="${OPENCODE_ASSET_SIZE:-59265643}"
 OPENCODE_ASSET_SHA256="${OPENCODE_ASSET_SHA256:-4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc}"
 OPENCODE_BINARY_SHA256="${OPENCODE_BINARY_SHA256:-6ce6570e7db9a40e7bd3304ebdfff607920bde8cafd2eb5587bd7a26f89ba0b5}"
 OPENCODE_RELEASE_BASE_URL="${OPENCODE_RELEASE_BASE_URL:-https://github.com/anomalyco/opencode/releases/download}"
+CODEX_VERSION="${CODEX_VERSION:-0.145.0}"
+CODEX_ASSET_NAME="${CODEX_ASSET_NAME:-codex-x86_64-unknown-linux-musl.tar.gz}"
+CODEX_ASSET_SIZE="${CODEX_ASSET_SIZE:-113724150}"
+CODEX_ASSET_SHA256="${CODEX_ASSET_SHA256:-bfaf13c9ba34f2ad764e4a916c49cf7177aeba329cf0f719e2227566fc8d662a}"
+CODEX_BWRAP_ASSET_NAME="${CODEX_BWRAP_ASSET_NAME:-bwrap-x86_64-unknown-linux-musl.tar.gz}"
+CODEX_BWRAP_ASSET_SIZE="${CODEX_BWRAP_ASSET_SIZE:-261563}"
+CODEX_BWRAP_ASSET_SHA256="${CODEX_BWRAP_ASSET_SHA256:-bf829ae02652acdb13732e3b00b3e656baaa56be2a65d50309d676df2b5d7581}"
+CODEX_BWRAP_BINARY_SHA256="${CODEX_BWRAP_BINARY_SHA256:-77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c}"
+CODEX_RELEASE_BASE_URL="${CODEX_RELEASE_BASE_URL:-https://github.com/openai/codex/releases/download}"
 OPENCODE_RUNTIME_PACKAGE_JSON="${OPENCODE_RUNTIME_PACKAGE_JSON:-deploy/internal/opencode-node-runtime.package.json}"
 OPENCODE_RUNTIME_PACKAGE_LOCK="${OPENCODE_RUNTIME_PACKAGE_LOCK:-deploy/internal/opencode-node-runtime.package-lock.json}"
 GO_IMAGE="${GO_IMAGE:-golang@sha256:e87b2a5f6df2dff71ea330d55d54f4979eb380ae58a7e3aabc9d53121243e689}"
 NODE_IMAGE="${NODE_IMAGE:-node@sha256:b042c6d46a90773b82ea3f95b05457ea93ee127a73b1b47ad5ebbb1a08ec3df8}"
 VITE_TEST_AGENT_API_BASE_URL="${VITE_TEST_AGENT_API_BASE_URL:-}"
+
+if [[ "${PACKAGE_TOOLBOX}" -eq 1 ]]; then
+  require_platform_image "TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE" "${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}" "test-agent/it-tools" "2024.10.22-7ca5933-platform.2"
+  require_platform_image "TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE" "${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}" "test-agent/omni-tools" "0.6.0-platform.1"
+  require_digest_pinned_image "TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE" "${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE}"
+  require_digest_pinned_image "TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE" "${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE}"
+fi
 
 mkdir -p "${OUTPUT_DIR}"
 
@@ -528,6 +685,11 @@ if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 ]]; then
   build_opencode_worker_image
 fi
 
+if [[ "${PACKAGE_TOOLBOX}" -eq 1 ]]; then
+  require_command docker
+  package_toolbox
+fi
+
 if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 ]]; then
   require_command docker
   package_mysql_image
@@ -535,7 +697,7 @@ fi
 
 if [[ "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 \
   && ( "${PACKAGE_ZIP_ONLY}" -eq 1 \
-    || ( "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 ) ) ]]; then
+    || ( "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${PACKAGE_TOOLBOX}" -eq 1 ) ) ]]; then
   package_release_zip
   write_release_checksum
 fi
@@ -557,13 +719,20 @@ if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo "Target import:"
   echo "  docker load -i ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
 fi
+if [[ "${PACKAGE_TOOLBOX}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
+  echo "  IT-Tools image tar: ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}" "${PLATFORM}")"
+  echo "  OmniTools image tar: ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}" "${PLATFORM}")"
+  echo "  toolbox modified source: ${OUTPUT_DIR}/test-agent-toolbox-source.tar.gz"
+  echo "  toolbox catalog: ${OUTPUT_DIR}/toolbox-catalog-v1.json"
+  echo "  toolbox deployment kit: ${OUTPUT_DIR}/toolbox.env.example, toolbox-docker.sh, diagnose-toolbox.sh, TOOLBOX.md"
+fi
 if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo "  MySQL image tar: ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_XXL_JOB_MYSQL_IMAGE}" "${PLATFORM}")"
   echo "  MySQL target import: docker load -i ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_XXL_JOB_MYSQL_IMAGE}" "${PLATFORM}")"
 fi
 if [[ "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 \
   && ( "${PACKAGE_ZIP_ONLY}" -eq 1 \
-    || ( "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 ) ) ]]; then
+    || ( "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${PACKAGE_TOOLBOX}" -eq 1 ) ) ]]; then
   echo "  complete release zip: ${OUTPUT_DIR}/test-agent-internal-release.zip"
   echo "  release checksum: ${OUTPUT_DIR}/test-agent-internal-release.zip.sha256"
 fi

@@ -4,6 +4,8 @@
 
 默认平台前端是 `frontend/apps/agent-web`，基于 Vue 3 + Vite SPA。定时任务管理以同源 `/xxl-job-admin/` iframe 嵌入 Java 进程中的 XXL Admin，静态前端不打包 XXL 页面。`frontend-opencode` 是独立的 Vue/TypeScript/Vite opencode IDE App 复刻工程，需要按该目录 README 单独构建和部署；后端及数据库、Redis、opencode server 都是外部服务。
 
+工具盒子 `/toolbox` 属于 agent-web SPA；两套具体工具不进入该 pnpm workspace，由前端 Nginx 在 SPA catch-all 前把 `/toolbox/apps/it-tools/` 和 `/toolbox/apps/omni-tools/` 代理到独立工具节点。固定镜像、193 项离线口径、工具节点和回滚见 `docs/deployment/toolbox.md`。
+
 ## 构建
 
 在 `frontend/` 目录执行：
@@ -63,7 +65,7 @@ Vite 构建产物为纯静态 SPA，用任意静态服务器托管 `apps/agent-w
 npx serve apps/agent-web/dist -l 3000
 ```
 
-或通过反向代理把静态资源指向 `dist/`、把 `/api` 转发到 `test-agent-app`。SPA 路由（`/`、`/s/:sessionId`）需配置 history fallback，所有非静态路径回退到 `dist/index.html`。生产监听端口由外部 Web server 决定。
+或通过反向代理把静态资源指向 `dist/`、把 `/api` 转发到 `test-agent-app`。SPA 路由（`/`、`/toolbox`、`/s/:sessionId`）需配置 history fallback，所有非静态路径回退到 `dist/index.html`；两个 `/toolbox/apps/...` 前缀必须先代理到工具节点，不能被 history fallback 吞掉。生产监听端口由外部 Web server 决定。
 
 ## 反向代理与 CORS
 

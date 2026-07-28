@@ -119,7 +119,7 @@ Token 校验流程：
 2. Agent 配置文件必须通过 `agent-config/file-ws-route` 按 `scope/workspaceId/worktreeId/linuxServerId` 解析目标后端；公共 worktree 使用落库 `linuxServerId`，公共直接模式必须由前端传入已初始化公共配置服务器 ID。
 3. ticket 只能通过用户登录态创建，短期过期、一次性消费，并绑定 workspace、目标服务器、当前 agent 服务器、模式、Agent 配置 scope/worktree、traceId 和是否 `SUPER_ADMIN`；不得把长期 Bearer token 放入 WebSocket URL。
 4. WebSocket upgrade 必须校验 Origin 白名单、ticket 有效性和 ticket 模式；ticket 消费后无论连接成功与否都不能重复使用。
-5. 所有 `workspace.*` 操作必须绑定 ticket workspace，路径必须归一化在 workspace root 内；`rename` 只允许同一父目录内的普通文件或目录改名，目录树删除不跟随符号链接并拒绝根目录和任意层级 `.git`。`workspace.view.list/read/read.chunk` 的 locator 只能表达逻辑来源，后端必须从当前工作区最新 JSONC 重建允许挂载，重新校验当前应用关联、`APPLICATION_ASSET_REPOSITORY`、总体及本机副本 READY、当前平台 `OPENCODE_REFERENCES_DIR`、SDD 根目录白名单和路径安全，禁止接收物理路径或 repositoryId。引用内容只能读取，单引用错误以不含物理路径的局部 warning 返回。渐进读取每段都必须重新校验 ticket、成员关系、逻辑 locator 和文件快照，不能把首次解析出的物理路径保存在客户端。
+5. 所有 `workspace.*` 操作必须绑定 ticket workspace，路径必须归一化在 workspace root 内；`rename` 只允许同一父目录内的普通文件或目录改名，目录树删除不跟随符号链接并拒绝根目录和任意层级 `.git`。应用源码 Runtime Workspace 还必须在每条 RPC 实时复核 enabled 应用、当前成员、`APPLICATION_CODE_REPOSITORY` 关联、slot active generation、snapshot 未过期和本机 READY replica；`SUPER_ADMIN` 不旁路这些条件。固定索引 `.testagent-appsource-index.json` 不得出现在列表/搜索，也不得通过读取、分片、写入、上传、复制、移动、重命名、状态或删除访问。`workspace.view.list/read/read.chunk` 的 locator 只能表达逻辑来源，后端必须从当前工作区最新 JSONC 重建允许挂载，重新校验当前应用关联、`APPLICATION_ASSET_REPOSITORY`、总体及本机副本 READY、当前平台 `OPENCODE_REFERENCES_DIR`、SDD 根目录白名单和路径安全，禁止接收物理路径或 repositoryId。引用内容只能读取，单引用错误以不含物理路径的局部 warning 返回。渐进读取每段都必须重新校验 ticket、成员关系、逻辑 locator 和文件快照，不能把首次解析出的物理路径保存在客户端。
 6. `agent-config.list/read/read.chunk/write/upload.*/rename/delete` 必须绑定 ticket scope、workspaceId 和 worktreeId；读取允许登录用户，公共配置写入、上传、重命名和删除校验 `SUPER_ADMIN`，应用配置对应变更校验 `APP_ADMIN`（`SUPER_ADMIN` 继承）。分片上传的 begin/chunk/complete/abort 必须在同一 WebSocket 连接内复用 workspace-management 的分片顺序、声明大小、不覆盖和越界校验，每个分片继续复核 ticket 绑定和权限；应用上传、改名、复制、移动和删除必须统一限制在当前配置根对应的 `.opencode/**` 命名空间，不得枚举 agent/skill/tool 等子目录形成权限缺口。上传总大小不设应用层上限，但单分片必须有界，完成前只能写隐藏临时文件，取消、失败和连接关闭必须清理；改名只允许同目录文件，删除文件或目录树必须复用 root 归一化、根目录/`.git` 保护与不跟随符号链接语义。
 7. 应用 `.opencode/**` 与普通文件共用版本个人 worktree 时，个人 worktree的 `commit/publish` HTTP 入口也必须对规范化后的整个配置命名空间执行 `APP_ADMIN` 校验；不能只依赖前端 Tab 或 Agent 文件 WebSocket 权限。`spec/**` 禁止发布的服务层规则继续对所有角色生效。
 8. `directory.list` 只允许 `directory-picker` ticket；跨服务器目录浏览仅 `SUPER_ADMIN` 可创建 ticket，普通用户只能浏览当前 agent 同服务器目录。
@@ -133,7 +133,9 @@ Token 校验流程：
 1. 广播 payload 只允许包含业务 ID、事件原因、服务器 ID、版本号、分支名、目标 commit hash 和 traceId 等必要字段；禁止携带 SSH 私钥、token、Authorization、Cookie、文件内容、完整用户输入或大段错误堆栈。
 2. Redis pub/sub 仅作为同一可信后端集群内的实时增强通道；生产必须使用受控内网 Redis，并通过外部配置开启 `test-agent.server-broadcast.enabled=true`，不得在代码或示例中硬编码 Redis 密码或生产地址。
 3. 消费端必须跳过本服务器来源事件，并在业务层做幂等校验；广播失败不能影响本机已完成的 Git/数据库主流程，漏消息由数据库目标 commit 与本机补偿扫描恢复。
-4. 日志只记录 `eventId`、`type`、`traceId`、`versionId`、`linuxServerId` 和错误码等低敏字段，不能输出私钥、token、完整路径中的敏感片段或原始第三方错误详情。
+4. 公共 Agent 全局刷新必须在任何 reset/clean/merge 前取得数据库活动 rollout 锁。共享运行副本存在本地内容时，恢复确认必须由 `SUPER_ADMIN` 在聚合真实服务器状态后显式提交并持久化；未确认不得修改工作树。确认范围只能覆盖共享运行副本，个人 worktree 禁止 stash/reset/clean，只允许 Git 原生 merge 和用户自行解决冲突。状态 API 可返回服务器 ID、计数、稳定原因和脱敏 `lastError`，不得返回 SSH key、内部凭据或文件正文。
+5. 日志只记录 `eventId`、`type`、`traceId`、`versionId`、`linuxServerId` 和错误码等低敏字段，不能输出私钥、token、完整路径中的敏感片段或原始第三方错误详情。
+6. 应用源码 `app-source.replica-requested` 只允许 repositoryId、generation 和目标服务器 ID，`app-source.cleanup-requested` 使用空 payload；SSH 私钥只在目标 worker 的 Git 命令期从操作人加密配置解析，clone、冻结提交 fetch、checkout 和提交校验复用同一临时凭据，禁止写入 snapshot、operation、step、广播、索引、错误响应、物化源码或日志。广播只负责唤醒，数据库租约、本机有界 dispatcher 及其启动/周期数据库补偿扫描才是执行与幂等事实源。应用源码物化、索引修复、打开和清理必须以可信配置根为边界逐段执行 `NOFOLLOW_LINKS` 校验，并在目录创建后、文件锁内或破坏性操作前复核，禁止祖先或目标符号链接把读写/删除重定向到托管根之外。
 
 ## PTY WebSocket 安全例外
 
@@ -151,6 +153,18 @@ Token 校验流程：
 
 ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 
+## Codex 白盒分析 MCP 安全边界
+
+1. 功能只在目标应用显式启用本地 `codex_whitebox` MCP 后出现；使用者必须仍是该应用有效成员，普通成员、应用管理员和已加入应用的 `SUPER_ADMIN` 权限相同，超级管理员不得旁路成员校验。
+2. 对话只允许调用安全门面的 `whitebox_analyze({prompt})` 与 `whitebox_reply({threadId,prompt})`。不得暴露官方 MCP 的 cwd、模型、配置、沙箱、审批、基础指令或开发者指令参数；cwd 必须固定为当前已鉴权 workspace。
+3. 管理员级 `/etc/codex/requirements.toml` 必须固定 approval `never`、Web Search disabled、根文件系统 deny、Codex 最小运行文件和当前 workspace read、临时目录 deny、网络 disabled。策略缺失、被修改、bubblewrap 不可用或精细只读探针失败时必须拒绝启动，不能降级为普通只读提示词。
+4. 每个门面进程使用独立 `0700` 临时 `CODEX_HOME` 和 `0600` 配置，只接受本进程生成的 thread ID；取消、超时、stdin 断开和进程终止都必须回收 Codex 子进程并删除临时目录。
+5. 模型代理密钥、代理地址和用户 UCID 只复用 Java/manager 向该用户 OpenCode 进程注入的环境变量，不写入应用 JSONC。Codex shell 环境只允许 PATH/HOME，不能继承代理 key、UCID 或其它 Java/OpenCode 进程秘密。
+6. Responses 适配只接收纯文本与 function calling 子集，不透传图片、文件、Web 工具、reasoning 或加密思维链。日志只记录随机 traceId、耗时、结果状态和稳定错误码，不记录代码、提示词、工具参数、Token、供应商错误正文或敏感路径。
+7. 企业 Linux 节点必须在启用前执行 `deploy/internal/check-codex-whitebox-host.sh`，真实验证当前内核/Docker 上的读、拒写、越界拒读、断网和 Git 状态不变。当前现场基线为 Linux 4.19、Docker 18.09.7、x86_64、privileged worker；构建机验证不能替代逐节点能力验收。
+
+详细启用、构建和回滚流程见 `docs/deployment/codex-whitebox-mcp.md`。
+
 ## Agent & Skill Hub 安全边界
 
 - Hub 是企业内显式共享域：所有已登录用户可以查看所有应用成功 push 的 Agent/Skill 完整快照，因此 Agent/Skill 文件不得包含密钥、Token 或本应按应用隔离的秘密；UI 不把“未发布”误表示为私密。
@@ -165,6 +179,7 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 
 - 公共 `workspace-git` Tool 禁止直接执行原生 Git 绕过平台；所有副作用必须调用 agent-scoped 专用入口并复用 workspace-management 的 owner、路径角色、`spec/**` 禁发布、应用同步和冲突规则。
 - 对话中的个人拉取仅能合并当前会话绑定 owner 在当前应用的个人 worktree；应用 workspace 和应用 Agent 统一使用 Git 原生合并保护，禁止自动 stash/reset，也不得把该凭据扩大为共享版本、其他用户或公共 Agent 的更新权限。
+- 超级管理员“应用 Git 刷新”、单分支组刷新及其工作空间/版本/分支范围查询是单独的共享控制面能力，必须在 HTTP 入口强校验 `SUPER_ADMIN`，不以应用成员或 READY OpenCode 进程替代鉴权。范围查询只能读取应用与托管工作区元数据，不访问 Git 远端或返回物理仓库路径；单分支选择必须以 `repositoryId + version + branch` 三字段精确命中当前应用，禁止只按可重名分支字符串执行。Git 远端访问只使用当前超级管理员保存的唯一 SSH Key；物理 feature 只允许快进，脏工作树或分叉必须按仓库组失败。向相关个人 worktree 收敛时继续使用原生 merge，禁止 stash、reset 或强制覆盖个人 staged、unstaged、untracked 内容；部分失败必须在响应中显式计数和列明，不能伪装为全部成功。
 - Tool 凭据由 `OpencodeProcessStartupService` 按用户签发，只允许专用 Git 端点使用，不能被通用用户 Token 过滤器接受，也不能访问其它平台 API；签名密钥不得注入 OpenCode 进程。凭据包含过期时间，验证时必须实时检查用户启用状态和角色。
 - 当前 workspace 必须由远端 session 经平台 agent binding 反查，禁止接受 Tool 传入 workspace ID、个人 workspace ID、物理路径或目标服务器。owner 不一致、非个人 workspace 或绑定缺失必须失败关闭。
 - `discard`、`publish`、冲突解决和取消合并必须先显示 OpenCode permission 确认；Tool 返回给模型的错误详情只保留原因、相对文件和并发提交等安全字段，不返回凭据、Git 命令或物理路径。

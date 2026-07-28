@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import { computed, inject, onMounted, ref } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, ref } from "vue";
 import { AlertTriangle, CheckCircle2, GitBranch, Loader2, RefreshCw } from "lucide-vue-next";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
-import type { CurrentUser, PublicAgentRepositoryStatus } from "@test-agent/shared-types";
+import type {
+  CurrentUser,
+  PublicAgentConfigRolloutServerStatus,
+  PublicAgentConfigRolloutStatus,
+  PublicAgentRepositoryStatus
+} from "@test-agent/shared-types";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -10,21 +15,26 @@ const props = defineProps<{
 
 const api = inject<BackendApiClient>("api")!;
 const rows = ref<PublicAgentRepositoryStatus[]>([]);
+const rollout = ref<PublicAgentConfigRolloutStatus | null>(null);
 const loading = ref(false);
 const initializing = ref(false);
-const pullingServerId = ref<string | null>(null);
+const pulling = ref(false);
 const errorMessage = ref("");
 const successMessage = ref("");
 const dialogOpen = ref(false);
+const pullDialogOpen = ref(false);
 const branchesLoading = ref(false);
 const branches = ref<string[]>([]);
 const selectedBranch = ref("");
 const targetRepository = ref<PublicAgentRepositoryStatus | null>(null);
 const initErrorMessage = ref("");
-const dirtyPullDiagnostics = ref<Record<string, { repositoryKind: string; path: string; files: string[] }>>({});
+let rolloutTimer: number | null = null;
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 const canSubmitInitialize = computed(() => !!targetRepository.value && !!selectedBranch.value && !initializing.value && !branchesLoading.value);
+const rolloutActive = computed(() => rollout.value?.status === "PREPARING" || rollout.value?.status === "DRAINING");
+const canSubmitPull = computed(() => !!selectedBranch.value && !pulling.value && !branchesLoading.value && !rolloutActive.value);
+const dirtyServers = computed(() => rows.value.filter((row) => row.localChangesPresent || row.status === "CONFLICT"));
 
 onMounted(() => {
   if (hasSuperAdmin.value) {
@@ -32,16 +42,52 @@ onMounted(() => {
   }
 });
 
+onBeforeUnmount(stopRolloutPolling);
+
 async function refresh() {
   loading.value = true;
   errorMessage.value = "";
   try {
-    rows.value = await api.listPublicAgentRepositories();
-    dirtyPullDiagnostics.value = {};
+    const [repositories, latestRollout] = await Promise.all([
+      api.listPublicAgentRepositories(),
+      api.getPublicAgentConfigRollout()
+    ]);
+    rows.value = repositories;
+    rollout.value = latestRollout;
+    scheduleRolloutPolling();
   } catch (error) {
     errorMessage.value = formatError(error, "加载公共配置仓库状态失败");
   } finally {
     loading.value = false;
+  }
+}
+
+async function refreshRollout() {
+  try {
+    const latest = await api.getPublicAgentConfigRollout();
+    const wasActive = rolloutActive.value;
+    rollout.value = latest;
+    if (wasActive && !rolloutActive.value) {
+      rows.value = await api.listPublicAgentRepositories();
+    }
+    scheduleRolloutPolling();
+  } catch (error) {
+    errorMessage.value = formatError(error, "刷新公共 Agent 全局同步状态失败");
+    scheduleRolloutPolling();
+  }
+}
+
+function scheduleRolloutPolling() {
+  stopRolloutPolling();
+  if (rolloutActive.value) {
+    rolloutTimer = window.setTimeout(() => void refreshRollout(), 2_000);
+  }
+}
+
+function stopRolloutPolling() {
+  if (rolloutTimer !== null) {
+    window.clearTimeout(rolloutTimer);
+    rolloutTimer = null;
   }
 }
 
@@ -100,64 +146,66 @@ async function submitInitialize() {
   }
 }
 
-async function pullRepository(repository: PublicAgentRepositoryStatus) {
-  await pullRepositoryWithDiscard(repository, false);
-}
-
-async function discardAndPullRepository(repository: PublicAgentRepositoryStatus) {
-  const confirmed = window.confirm(
-    `将放弃服务器 ${repository.linuxServerId} 上当前管理员个人公共 worktree和共享运行副本中检测到的已跟踪文件修改后重新拉取。`
-      + "其他管理员的个人 worktree不受影响，也不会删除未跟踪文件。是否继续？"
-  );
-  if (!confirmed) {
+async function openPullDialog() {
+  if (pulling.value || rolloutActive.value) {
     return;
   }
-  await pullRepositoryWithDiscard(repository, true);
+  selectedBranch.value = "";
+  branches.value = [];
+  initErrorMessage.value = "";
+  pullDialogOpen.value = true;
+  branchesLoading.value = true;
+  try {
+    branches.value = await api.listPublicAgentBranches();
+    selectedBranch.value = preferredGlobalBranch(rows.value, branches.value);
+  } catch (error) {
+    initErrorMessage.value = formatError(error, "加载远端分支失败");
+  } finally {
+    branchesLoading.value = false;
+  }
 }
 
-async function pullRepositoryWithDiscard(repository: PublicAgentRepositoryStatus, discardLocalChanges: boolean) {
-  const branch = repository.currentBranch?.trim();
-  if (!repository.initialized || !branch || pullingServerId.value) {
+function closePullDialog() {
+  if (pulling.value) {
     return;
   }
-  pullingServerId.value = repository.linuxServerId;
+  pullDialogOpen.value = false;
+  selectedBranch.value = "";
+  branches.value = [];
+  initErrorMessage.value = "";
+}
+
+async function submitGlobalPull() {
+  if (!selectedBranch.value || pulling.value || rolloutActive.value) {
+    return;
+  }
+  const discardSharedRuntimeChanges = dirtyServers.value.length > 0;
+  if (discardSharedRuntimeChanges) {
+    const serverIds = dirtyServers.value.map((row) => row.linuxServerId).join("、");
+    const confirmed = window.confirm(
+      `服务器 ${serverIds} 的共享运行副本存在本地变更。继续将只恢复这些共享副本到远端目标 commit，并删除其中未跟踪文件；个人 worktree 的 staged、unstaged、untracked 内容不会被清理。是否继续？`
+    );
+    if (!confirmed) {
+      return;
+    }
+  }
+  pulling.value = true;
   errorMessage.value = "";
   successMessage.value = "";
   try {
-    const updated = await api.pullPublicAgentRepository(
-      repository.linuxServerId,
-      branch,
+    const operation = await api.updatePublicAgentConfig(
+      selectedBranch.value,
       newOperationId(),
-      discardLocalChanges
+      discardSharedRuntimeChanges
     );
-    rows.value = rows.value.map((row) => (row.linuxServerId === updated.linuxServerId ? updated : row));
-    const { [updated.linuxServerId]: _removed, ...remainingDiagnostics } = dirtyPullDiagnostics.value;
-    dirtyPullDiagnostics.value = remainingDiagnostics;
-    successMessage.value = `服务器 ${updated.linuxServerId} 公共配置仓库已拉取到最新`;
+    successMessage.value = `已发起所有服务器刷新到远端目标 commit ${shortHash(operation.commitHash)}`;
+    pullDialogOpen.value = false;
+    rollout.value = await api.getPublicAgentConfigRollout();
+    scheduleRolloutPolling();
   } catch (error) {
-    errorMessage.value = formatError(error, "拉取公共配置仓库失败");
-    if (error instanceof BackendApiError && error.details.discardLocalChangesAllowed === true) {
-      dirtyPullDiagnostics.value = {
-        ...dirtyPullDiagnostics.value,
-        [repository.linuxServerId]: {
-          repositoryKind: typeof error.details.repositoryKind === "string"
-            ? error.details.repositoryKind
-            : "UNKNOWN",
-          path: typeof error.details.path === "string" ? error.details.path : "-",
-          files: Array.isArray(error.details.dirtyFiles)
-            ? error.details.dirtyFiles.filter((file): file is string => typeof file === "string")
-            : []
-        }
-      };
-    }
-    // 共享副本状态仍由列表接口刷新；个人 worktree 诊断保留本次异常返回的真实路径。
-    try {
-      rows.value = await api.listPublicAgentRepositories();
-    } catch {
-      // 保留原始拉取错误；状态刷新只是诊断增强，失败不能覆盖真正原因。
-    }
+    errorMessage.value = formatError(error, "发起公共 Agent 全局刷新失败");
   } finally {
-    pullingServerId.value = null;
+    pulling.value = false;
   }
 }
 
@@ -167,6 +215,47 @@ function preferredBranch(repository: PublicAgentRepositoryStatus, remoteBranches
     return current;
   }
   return remoteBranches[0] ?? current ?? "main";
+}
+
+function preferredGlobalBranch(repositories: PublicAgentRepositoryStatus[], remoteBranches: string[]) {
+  const current = repositories.find((repository) => repository.currentBranch?.trim())?.currentBranch?.trim();
+  if (current && remoteBranches.includes(current)) {
+    return current;
+  }
+  return remoteBranches[0] ?? current ?? "main";
+}
+
+function rolloutStatusText(status: string) {
+  return ({
+    PREPARING: "准备全局刷新",
+    DRAINING: "正在同步并排空",
+    COMPLETED: "已完成",
+    ABORTED: "已终止"
+  } as Record<string, string>)[status] ?? status;
+}
+
+function serverProgress(server: PublicAgentConfigRolloutServerStatus) {
+  if (server.syncStatus !== "SYNCED") {
+    return server.syncStatus;
+  }
+  if (server.targetPending > 0) {
+    return `排空中（剩余 ${server.targetPending}/${server.targetTotal}）`;
+  }
+  if (server.targetAbandoned > 0) {
+    return `已同步，${server.targetAbandoned} 个运行目标已放弃`;
+  }
+  return "已同步并排空";
+}
+
+function worktreeProgress(server: PublicAgentConfigRolloutServerStatus) {
+  const total = server.worktreeTotal ?? 0;
+  const synced = server.worktreeSynced ?? 0;
+  const pending = server.worktreePending ?? 0;
+  if (total === 0) {
+    return "无待处理补偿";
+  }
+  const summary = `补偿已收敛 ${synced}/${total}`;
+  return pending > 0 ? `${summary}，待用户处理 ${pending}` : summary;
 }
 
 function statusText(row: PublicAgentRepositoryStatus) {
@@ -231,7 +320,17 @@ function newOperationId() {
           <RefreshCw v-else class="ta-opencode-config-icon" :stroke-width="1.6" />
           刷新
         </button>
-        <span class="ta-opencode-config-toolbar-hint">仅超级管理员可按服务器初始化或拉取公共 Agent</span>
+        <button
+          type="button"
+          class="ta-opencode-config-btn is-primary"
+          :disabled="loading || initializing || pulling || rolloutActive"
+          @click="openPullDialog"
+        >
+          <Loader2 v-if="pulling || rolloutActive" class="ta-opencode-config-icon is-spin" />
+          <RefreshCw v-else class="ta-opencode-config-icon" :stroke-width="1.6" />
+          刷新公共 Agent Git
+        </button>
+        <span class="ta-opencode-config-toolbar-hint">一次选择远端分支，所有服务器共享副本同步到同一目标 commit</span>
       </div>
 
       <div v-if="errorMessage" class="ta-opencode-config-alert" role="alert">
@@ -242,6 +341,40 @@ function newOperationId() {
         <CheckCircle2 class="ta-opencode-config-icon" :stroke-width="1.6" />
         <span>{{ successMessage }}</span>
       </div>
+
+      <section v-if="rollout" class="ta-opencode-config-rollout" aria-label="公共 Agent 全局刷新状态">
+        <header>
+          <div>
+            <strong>{{ rolloutStatusText(rollout.status) }}</strong>
+            <span>{{ rollout.branch }} · {{ shortHash(rollout.commitHash) }}</span>
+          </div>
+          <span class="ta-opencode-config-muted">{{ rollout.rolloutId }}</span>
+        </header>
+        <div v-if="rollout.failureReason" class="ta-opencode-config-diagnostic">{{ rollout.failureReason }}</div>
+        <table class="ta-opencode-config-rollout-table">
+          <thead>
+            <tr>
+              <th>服务器</th>
+              <th>同步 / 排空</th>
+              <th>个人 worktree 补偿</th>
+              <th>重试</th>
+              <th>last_error</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="server in rollout.servers" :key="server.linuxServerId">
+              <td>{{ server.linuxServerId }}</td>
+              <td>{{ serverProgress(server) }}</td>
+              <td>{{ worktreeProgress(server) }}</td>
+              <td>{{ server.retryCount }}</td>
+              <td class="ta-opencode-config-message">{{ formatNullable(server.lastError) }}</td>
+            </tr>
+            <tr v-if="rollout.servers.length === 0">
+              <td colspan="5" class="ta-opencode-config-empty">正在登记服务器同步任务</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
 
       <div class="ta-opencode-config-table-wrap">
         <table class="ta-opencode-config-table">
@@ -275,17 +408,8 @@ function newOperationId() {
               <td class="ta-opencode-config-mono">{{ shortHash(row.commitHash) }}</td>
               <td class="ta-opencode-config-message">
                 <div>{{ formatNullable(row.message) }}</div>
-                <small v-if="dirtyPullDiagnostics[row.linuxServerId]" class="ta-opencode-config-diagnostic">
-                  最近拉取检测到{{ dirtyPullDiagnostics[row.linuxServerId].repositoryKind === 'PERSONAL_WORKTREE'
-                    ? '当前管理员个人公共 worktree'
-                    : '公共配置仓库' }} 存在本地变更；路径：{{ dirtyPullDiagnostics[row.linuxServerId].path }}；文件：{{
-                    dirtyPullDiagnostics[row.linuxServerId].files.length > 0
-                      ? dirtyPullDiagnostics[row.linuxServerId].files.join('、')
-                      : '请在上述路径执行 git status --short'
-                  }}。
-                </small>
                 <small v-if="row.status === 'CONFLICT' && row.initialized" class="ta-opencode-config-diagnostic">
-                  这是该服务器的共享运行副本，不是个人公共 worktree。请先按上述路径核对本机修改；确认无需保留后，可放弃已跟踪修改并重新拉取。
+                  这是共享运行副本，不是个人 worktree。全局刷新会在明确确认后恢复到远端目标 commit。
                 </small>
               </td>
               <td class="ta-opencode-config-operation">
@@ -299,26 +423,7 @@ function newOperationId() {
                   >
                     初始化
                   </button>
-                  <button
-                    v-else
-                    type="button"
-                    class="ta-opencode-config-btn"
-                    :disabled="!row.currentBranch || pullingServerId !== null"
-                    @click="pullRepository(row)"
-                  >
-                    <Loader2 v-if="pullingServerId === row.linuxServerId" class="ta-opencode-config-icon is-spin" />
-                    拉取更新
-                  </button>
-                  <button
-                    v-if="(row.status === 'CONFLICT' && row.initialized) || dirtyPullDiagnostics[row.linuxServerId]"
-                    type="button"
-                    class="ta-opencode-config-btn is-danger"
-                    :disabled="!row.currentBranch || pullingServerId !== null"
-                    @click="discardAndPullRepository(row)"
-                  >
-                    <Loader2 v-if="pullingServerId === row.linuxServerId" class="ta-opencode-config-icon is-spin" />
-                    放弃本地变更并拉取
-                  </button>
+                  <span v-else class="ta-opencode-config-muted">由顶部全局刷新统一同步</span>
                 </div>
               </td>
             </tr>
@@ -358,6 +463,43 @@ function newOperationId() {
             <button type="button" class="ta-opencode-config-btn is-primary" :disabled="!canSubmitInitialize" @click="submitInitialize">
               <Loader2 v-if="initializing" class="ta-opencode-config-icon is-spin" />
               确定
+            </button>
+          </footer>
+        </section>
+      </div>
+
+      <div v-if="pullDialogOpen" class="ta-opencode-config-dialog-backdrop" @keydown.esc="closePullDialog">
+        <section role="dialog" aria-modal="true" aria-label="刷新公共 Agent Git" class="ta-opencode-config-dialog">
+          <header class="ta-opencode-config-dialog-header">
+            <h2>刷新公共 Agent Git</h2>
+            <span>所有在线服务器同步到同一远端 commit</span>
+          </header>
+
+          <div class="ta-opencode-config-dialog-body">
+            <div v-if="initErrorMessage" class="ta-opencode-config-alert" role="alert">
+              <AlertTriangle class="ta-opencode-config-icon" :stroke-width="1.6" />
+              <span>{{ initErrorMessage }}</span>
+            </div>
+            <div class="ta-opencode-config-field">
+              <label for="public-config-pull-branch">远端分支</label>
+              <div class="ta-opencode-config-select-wrap">
+                <GitBranch class="ta-opencode-config-icon" :stroke-width="1.6" />
+                <select id="public-config-pull-branch" v-model="selectedBranch" :disabled="branchesLoading || pulling">
+                  <option v-for="branch in branches" :key="branch" :value="branch">{{ branch }}</option>
+                </select>
+              </div>
+              <span v-if="branchesLoading" class="ta-opencode-config-muted">正在实时读取远端分支</span>
+              <span v-else class="ta-opencode-config-muted">
+                个人 worktree 使用原生 merge；Git 可安全合入时保留 staged、unstaged 和 untracked 内容。
+              </span>
+            </div>
+          </div>
+
+          <footer class="ta-opencode-config-dialog-footer">
+            <button type="button" class="ta-opencode-config-btn" :disabled="pulling" @click="closePullDialog">取消</button>
+            <button type="button" class="ta-opencode-config-btn is-primary" :disabled="!canSubmitPull" @click="submitGlobalPull">
+              <Loader2 v-if="pulling" class="ta-opencode-config-icon is-spin" />
+              开始全局刷新
             </button>
           </footer>
         </section>
@@ -474,6 +616,36 @@ function newOperationId() {
 .ta-opencode-config-success {
   background: #ecfdf5;
   color: #047857;
+}
+.ta-opencode-config-rollout {
+  margin: 10px 14px 0;
+  overflow: auto;
+  border: 1px solid #dbeafe;
+  border-radius: 6px;
+  background: #fff;
+  padding: 10px;
+  font-size: 12px;
+}
+.ta-opencode-config-rollout > header,
+.ta-opencode-config-rollout > header > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ta-opencode-config-rollout > header {
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.ta-opencode-config-rollout-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.ta-opencode-config-rollout-table th,
+.ta-opencode-config-rollout-table td {
+  border-top: 1px solid #e5e7eb;
+  padding: 7px 8px;
+  text-align: left;
+  vertical-align: top;
 }
 .ta-opencode-config-table-wrap {
   flex: 1;

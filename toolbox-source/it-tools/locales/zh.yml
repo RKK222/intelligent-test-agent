@@ -1,0 +1,1994 @@
+common:
+  copy: 复制
+  copyToClipboard: 复制到剪贴板
+  copied: 已复制
+  copiedToClipboard: 已复制到剪贴板
+  dropFiles: 拖放文件到此处，或点击选择文件
+  or: 或
+  browseFiles: 选择文件
+  selectOption: 请选择
+  search: 搜索…
+  noResults: 未找到结果
+  inputText: 请输入文本
+  input: 输入
+  inputPlaceholder: 请输入…
+  output: 输出
+  yes: 是
+  no: 否
+  notAvailable: 暂无
+  dataTable: 数据表格
+  selectLanguage: 选择语言
+  commandSearch: 搜索工具或命令…
+  commandPalette:
+    categories:
+      tools: 工具
+      actions: 操作
+      external: 外部链接
+      pages: 页面
+    randomTool:
+      name: 随机工具
+      description: 从列表中随机打开一个工具。
+    toggleDarkMode:
+      name: 切换深色模式
+      description: 开启或关闭深色模式。
+    github:
+      name: GitHub 仓库
+      description: 查看 IT-Tools 的源代码。
+    reportIssue:
+      name: 报告问题
+      description: 报告错误或问题，帮助改进 IT-Tools。
+    about:
+      name: 关于
+      description: 了解更多 IT-Tools 信息。
+home:
+  categories:
+    newestTools: '最新工具'
+    favoriteTools: '我的收藏'
+    allTools: '全部工具'
+  subtitle: '助力开发人员和 IT 工作者'
+  toggleMenu: '切换菜单'
+  home: '主页'
+  uiLib: 'UI 库'
+  support: '支持 IT 工具开发'
+  buyMeACoffee: '赞助'
+  follow:
+    title: '关注我们'
+    p1: '给我们 Star'
+    githubRepository: 'GitHub 仓库'
+    p2: '关注我们的'
+    twitterAccount: 'Twitter'
+    thankYou: '感谢您的支持！'
+  nav:
+    github: 'GitHub 仓库'
+    githubRepository: 'GitHub 仓库'
+    twitter: 'Twitter 账号'
+    twitterAccount: 'Twitter 账号'
+    about: '关于 IT-Tools'
+    aboutLabel: '关于'
+    darkMode: '深色模式'
+    lightMode: '浅色模式'
+    mode: '颜色模式'
+about:
+  content: >
+    # 关于 IT-Tools
+
+    IT-Tools 由 [Corentin Thomasset](https://corentin.tech?utm_source=it-tools&utm_medium=about) 用 ❤ 开发，汇集了对开发人员和 IT 从业者有用的工具。如果对您有帮助，请将其分享给您的朋友，并且添加到收藏夹中！
+
+    IT-Tools 永久免费且开源（MIT 许可证），但需要资金用于托管和续订域名。如果您想支持我的工作，并鼓励我添加更多工具，请考虑通过 [赞助我](https://www.buymeacoffee.com/cthmsst) 进行支持。
+
+    ## 技术
+
+    IT-Tools 采用 Vue.js（Vue 3）和 Naive UI 组件库开发，并由 Vercel 托管和持续部署。某些工具使用了第三方开源库，您可以在仓库的 [package.json](https://github.com/CorentinTh/it-tools/blob/main/package.json) 文件中找到完整的列表。
+
+    ## 发现了 Bug？缺少工具？
+
+    如果目前这里没有您需要的工具，并且您认为它可能有用，欢迎在 GitHub 仓库的 [issues](https://github.com/CorentinTh/it-tools/issues/new/choose) 中提交新增功能的请求。
+
+    如果您发现了 Bug，或者某些功能未能按预期工作，请在 GitHub 仓库的 [issues](https://github.com/CorentinTh/it-tools/issues/new/choose) 中提交错误报告。
+
+404:
+  notFound: '404 页面不存在'
+  sorry: '抱歉，该页面似乎不存在'
+  maybe: '也许缓存出现了一些问题，试试强制刷新页面？'
+  backHome: '返回主页'
+favoriteButton:
+  remove: '取消收藏'
+  add: '加入收藏'
+toolCard:
+  new: '新'
+search:
+  label: '搜索'
+tools:
+  categories:
+    favorite-tools: '我的收藏'
+    crypto: '加密'
+    converter: '转换器'
+    web: Web
+    images and videos: '图片和视频'
+    development: '开发'
+    network: '网络'
+    math: '数学'
+    measurement: '测量'
+    text: '文本'
+    data: '数据'
+
+  password-strength-analyser:
+    title: 密码强度分析器
+    description: 在浏览器本地分析密码强度，并估算破解所需时间。
+    ui:
+      passwordPlaceholder: 请输入密码…
+      crackDuration: 暴力破解此密码所需时间
+      passwordLength: 密码长度：
+      entropy: 信息熵：
+      charsetSize: 字符集大小：
+      score: 评分：
+      noteLabel: 注意：
+      note: 此结果根据暴力破解所需时间估算，未考虑字典攻击。
+      duration:
+        instant: 瞬间
+        lessThanSecond: 不到 1 秒
+        separator: ，
+        units:
+          millennium: { singular: 千年, plural: 千年 }
+          century: { singular: 世纪, plural: 世纪 }
+          decade: { singular: 十年, plural: 十年 }
+          year: { singular: 年, plural: 年 }
+          month: { singular: 个月, plural: 个月 }
+          week: { singular: 周, plural: 周 }
+          day: { singular: 天, plural: 天 }
+          hour: { singular: 小时, plural: 小时 }
+          minute: { singular: 分钟, plural: 分钟 }
+          second: { singular: 秒, plural: 秒 }
+
+  chronometer:
+    title: 计时器
+    description: 使用开始、暂停和重置等基本功能测量经过的时间。
+    ui:
+      start: 开始
+      stop: 停止
+      reset: 重置
+
+  token-generator:
+    title: 令牌生成器
+    description: 按需使用大小写字母、数字和符号生成随机字符串。
+
+    uppercase: '大写 (ABC...)'
+    lowercase: '小写 (abc...)'
+    numbers: '数字 (123...)'
+    symbols: '符号 (!-;...)'
+    length: '长度'
+    tokenPlaceholder: '令牌...'
+    copied: 复制到剪贴板
+    button:
+      copy: 复制
+      refresh: 刷新
+    ui:
+      uppercase: 大写字母（ABC…）
+      lowercase: 小写字母（abc…）
+      numbers: 数字（123…）
+      symbols: 符号（!-;…）
+      length: 长度
+      tokenPlaceholder: 生成的令牌…
+      copied: 令牌已复制到剪贴板
+      copy: 复制
+      refresh: 刷新
+  percentage-calculator:
+    title: 百分比计算器
+    description: 计算数值之间的百分比变化，或根据百分比反求数值。
+    ui:
+      whatIs: 计算
+      percentOf: '% 乘以'
+      result: 结果
+      xPercentOfY: 第一个数值是第二个数值的百分之几
+      isWhatPercentOf: 是下列数值的百分之几
+      increaseDecrease: 计算百分比增减幅度
+      from: 原值
+      to: 新值
+
+  svg-placeholder-generator:
+    title: SVG 占位符生成器
+    description: 生成可用于应用程序占位的 SVG 图像。
+    ui:
+      width: 宽度（像素）
+      widthPlaceholder: SVG 宽度…
+      background: 背景色
+      height: 高度（像素）
+      heightPlaceholder: SVG 高度…
+      textColor: 文字颜色
+      fontSize: 字号
+      fontSizePlaceholder: 请输入字号…
+      customText: 自定义文字
+      defaultText: '默认：{width} × {height}'
+      exactSize: 使用精确尺寸
+      htmlElement: SVG HTML 元素
+      base64: Base64 格式的 SVG
+      copySvg: 复制 SVG
+      copyBase64: 复制 Base64
+      download: 下载 SVG
+      previewAlt: SVG 预览
+
+  json-to-csv:
+    title: JSON 转 CSV
+    description: 自动识别表头并将 JSON 转换为 CSV。
+    ui:
+      invalidJson: 提供的 JSON 无效
+      inputLabel: 原始 JSON
+      inputPlaceholder: 请粘贴原始 JSON…
+      outputLabel: 由 JSON 转换的 CSV
+
+  camera-recorder:
+    title: 摄像机记录器
+    description: 从网络摄像头或照相机拍摄照片或录制视频。
+
+  keycode-info:
+    title: 键盘按键信息
+    description: 查看所按按键的键值、物理代码、位置和修饰键等信息。
+    ui:
+      key: 按键：
+      keyPlaceholder: 按键名称…
+      keycode: 键码：
+      keycodePlaceholder: 键码…
+      code: 物理代码：
+      codePlaceholder: 物理代码…
+      location: 位置：
+      locationPlaceholder: 按键位置…
+      modifiers: 修饰键：
+      none: 无
+      instruction: 请按下要查看信息的键盘按键
+
+  emoji-picker:
+    title: Emoji 选择器
+    description: 便捷选择和复制 Emoji，并查看对应的 Unicode 码点。
+    ui:
+      searchPlaceholder: 搜索 Emoji…
+      searchResult: 搜索结果
+      emojiCopied: 'Emoji {emoji} 已复制到剪贴板'
+      codePointsCopied: "码点“{value}”已复制到剪贴板"
+      unicodeCopied: "Unicode“{value}”已复制到剪贴板"
+      groups:
+        smileys: 笑脸与情感
+        people: 人物与身体
+        animals: 动物与自然
+        food: 食物与饮品
+        travel: 旅行与地点
+        activities: 活动
+        objects: 物品
+        symbols: 符号
+        flags: 旗帜
+        component: 组成部分
+        other: 其他
+
+  color-converter:
+    title: 颜色格式转换器
+    description: 在 HEX、RGB、HSL 和 CSS 颜色名称之间转换。
+    ui:
+      colorPicker: 颜色选择器
+      name: 颜色名称
+      unknown: 未知
+      example: '例如 {value}'
+      invalidColorPicker: 颜色选择器的值无效。
+      invalidFormat: '{format} 格式无效。'
+      invalidName: 颜色名称无效。
+  bcrypt:
+    title: Bcrypt 哈希
+    description: 使用基于 Blowfish 的 Bcrypt 算法对文本进行哈希，并校验文本与哈希值是否匹配。
+    ui:
+      hashTitle: 计算哈希
+      hashPlaceholder: 输入要使用 Bcrypt 哈希的字符串…
+      stringLabel: 字符串：
+      saltLabel: 盐轮数：
+      saltPlaceholder: 请输入盐轮数…
+      copied: 哈希值已复制到剪贴板
+      copyHash: 复制哈希值
+      compareTitle: 比较字符串与哈希值
+      compareStringPlaceholder: 输入要比较的字符串…
+      hashLabel: 哈希值：
+      compareHashPlaceholder: 输入要比较的哈希值…
+      matchLabel: 是否匹配？
+
+  crontab-generator:
+    title: Crontab 表达式生成器
+    description: 生成并验证 Crontab 表达式，同时显示 Cron 计划的易读说明。
+    ui:
+      invalidCron: Cron 表达式无效
+      verbose: 显示详细说明
+      use24Hour: 使用 24 小时制
+      daysStartAtZero: 星期从 0 开始
+      symbol: 符号
+      meaning: 含义
+      example: 示例
+      equivalent: 等效表达式
+      diagram:
+        optionalSeconds: 可选的秒
+        minute: 分钟
+        hour: 小时
+        dayOfMonth: 月中的日期
+        month: 月份
+        dayOfWeek: 星期
+        sundayZero: 星期日 = 0
+        or: 或
+        command: 命令
+      helpers:
+        anyValue: 任意值
+        everyMinute: 每分钟
+        range: 值范围
+        minutesRange: 第 1 到第 10 分钟
+        list: 值列表
+        minutesList: 第 1 和第 10 分钟
+        step: 步进值
+        everyTenMinutes: 每 10 分钟
+        yearly: 每年 1 月 1 日零点执行一次
+        sameAsYearly: 等同于年度快捷表达式
+        monthly: 每月第一天零点执行一次
+        weekly: 每周日零点执行一次
+        daily: 每天零点执行一次
+        sameAsDaily: 等同于每日快捷表达式
+        hourly: 每小时开始时执行一次
+        reboot: 启动时执行
+
+  http-status-codes:
+    title: HTTP 状态码
+    description: 查阅 HTTP 状态码及其名称和含义。
+    ui:
+      searchPlaceholder: 搜索 HTTP 状态码…
+      searchResults: 搜索结果
+      forProtocol: '适用于 {type}。'
+      categories:
+        informational: 1xx 信息响应
+        success: 2xx 成功响应
+        redirection: 3xx 重定向
+        clientError: 4xx 客户端错误
+        serverError: 5xx 服务器错误
+      codes:
+        '100':
+          name: "继续"
+          description: "客户端可以继续发送请求正文。"
+        '101':
+          name: "切换协议"
+          description: "服务器已同意切换协议。"
+        '102':
+          name: "处理中"
+          description: "服务器正在处理请求，但尚无可用响应。"
+        '103':
+          name: "早期提示"
+          description: "服务器在最终响应前先返回部分响应头。"
+        '200':
+          name: "成功"
+          description: "请求已成功完成。"
+        '201':
+          name: "已创建"
+          description: "请求已完成，并创建了新资源。"
+        '202':
+          name: "已接受"
+          description: "请求已接受处理，但处理尚未完成。"
+        '203':
+          name: "非权威信息"
+          description: "请求成功，但响应内容已被转换代理修改。"
+        '204':
+          name: "无内容"
+          description: "服务器已成功处理请求，但不返回内容。"
+        '205':
+          name: "重置内容"
+          description: "服务器要求重置发起请求的文档视图。"
+        '206':
+          name: "部分内容"
+          description: "因客户端发送了范围请求头，服务器仅返回部分资源。"
+        '207':
+          name: "多状态"
+          description: "响应正文为 XML，可包含多个独立响应码。"
+        '208':
+          name: "已报告"
+          description: "该绑定的成员已在多状态响应的前文中列出。"
+        '226':
+          name: "已使用实例操作"
+          description: "服务器已完成资源请求，响应表示操作结果。"
+        '300':
+          name: "多种选择"
+          description: "资源有多个可供客户端选择的结果。"
+        '301':
+          name: "永久移动"
+          description: "当前及后续请求都应改用指定的 URI。"
+        '302':
+          name: "已找到"
+          description: "资源临时位于另一个 URL。"
+        '303':
+          name: "查看其他位置"
+          description: "可使用 HTTP GET 方法从另一个 URI 获取请求结果。"
+        '304':
+          name: "未修改"
+          description: "自请求头指定的版本以来，资源没有变化。"
+        '305':
+          name: "使用代理"
+          description: "只能通过响应中提供地址的代理访问资源。"
+        '306':
+          name: "切换代理"
+          description: "此状态码已停用，原意是后续请求改用指定代理。"
+        '307':
+          name: "临时重定向"
+          description: "本次请求应改用另一个 URI，后续请求仍使用原 URI。"
+        '308':
+          name: "永久重定向"
+          description: "本次及后续请求都应改用另一个 URI。"
+        '400':
+          name: "错误请求"
+          description: "服务器因明显的客户端错误而无法或拒绝处理请求。"
+        '401':
+          name: "未认证"
+          description: "请求需要身份认证，但认证失败或尚未提供。"
+        '402':
+          name: "需要付款"
+          description: "保留供将来的数字支付场景使用。"
+        '403':
+          name: "禁止访问"
+          description: "请求有效，但服务器拒绝执行，用户可能没有所需权限。"
+        '404':
+          name: "未找到"
+          description: "找不到请求的资源，该资源将来可能可用。"
+        '405':
+          name: "方法不允许"
+          description: "请求的资源不支持所使用的方法。"
+        '406':
+          name: "不可接受"
+          description: "资源无法生成符合请求接收条件的内容。"
+        '407':
+          name: "需要代理认证"
+          description: "客户端必须先向代理完成身份认证。"
+        '408':
+          name: "请求超时"
+          description: "服务器等待请求时超时。"
+        '409':
+          name: "冲突"
+          description: "请求因资源状态冲突而无法处理。"
+        '410':
+          name: "已删除"
+          description: "请求的资源已永久不可用。"
+        '411':
+          name: "需要内容长度"
+          description: "请求未提供资源所要求的内容长度。"
+        '412':
+          name: "前置条件失败"
+          description: "服务器不满足请求者设置的某项前置条件。"
+        '413':
+          name: "负载过大"
+          description: "请求大小超过服务器愿意或能够处理的范围。"
+        '414':
+          name: "URI 过长"
+          description: "提供的 URI 过长，服务器无法处理。"
+        '415':
+          name: "不支持的媒体类型"
+          description: "服务器或资源不支持请求实体的媒体类型。"
+        '416':
+          name: "范围无法满足"
+          description: "客户端请求了文件的一部分，但服务器无法提供该范围。"
+        '417':
+          name: "预期条件失败"
+          description: "服务器无法满足请求头中的预期条件。"
+        '418':
+          name: "我是茶壶"
+          description: "服务器拒绝使用茶壶冲泡咖啡。"
+        '421':
+          name: "请求指向错误"
+          description: "请求被发送到无法生成响应的服务器。"
+        '422':
+          name: "无法处理的实体"
+          description: "请求格式正确，但因语义错误而无法执行。"
+        '423':
+          name: "已锁定"
+          description: "正在访问的资源已锁定。"
+        '424':
+          name: "依赖失败"
+          description: "由于之前的请求失败，本请求也失败。"
+        '425':
+          name: "过早"
+          description: "服务器不愿冒险处理可能被重放的请求。"
+        '426':
+          name: "需要升级"
+          description: "客户端应切换到其他协议，例如 TLS/1.0。"
+        '428':
+          name: "需要前置条件"
+          description: "源服务器要求请求带有条件。"
+        '429':
+          name: "请求过多"
+          description: "用户在给定时间内发送了过多请求。"
+        '431':
+          name: "请求头字段过大"
+          description: "单个或全部请求头字段过大，服务器拒绝处理。"
+        '451':
+          name: "因法律原因不可用"
+          description: "服务器运营者因法律要求而拒绝访问相关资源。"
+        '500':
+          name: "服务器内部错误"
+          description: "服务器遇到意外情况，且没有更具体的错误信息。"
+        '501':
+          name: "尚未实现"
+          description: "服务器无法识别请求方法或不具备处理能力。"
+        '502':
+          name: "错误网关"
+          description: "服务器作为网关或代理时收到上游服务器的无效响应。"
+        '503':
+          name: "服务不可用"
+          description: "服务器因过载或维护而暂时不可用。"
+        '504':
+          name: "网关超时"
+          description: "服务器作为网关或代理时未能及时收到上游响应。"
+        '505':
+          name: "不支持的 HTTP 版本"
+          description: "服务器不支持请求所使用的 HTTP 协议版本。"
+        '506':
+          name: "变体协商循环"
+          description: "请求的透明内容协商产生了循环引用。"
+        '507':
+          name: "存储空间不足"
+          description: "服务器无法存储完成请求所需的数据。"
+        '508':
+          name: "检测到循环"
+          description: "服务器在处理请求时检测到无限循环。"
+        '510':
+          name: "未扩展"
+          description: "服务器需要请求提供进一步扩展才能完成处理。"
+        '511':
+          name: "需要网络认证"
+          description: "客户端需要完成身份认证才能访问网络。"
+
+  sql-prettify:
+    title: SQL 美化与格式化
+    description: 格式化 SQL 查询，并支持多种 SQL 方言。
+    ui:
+      dialect: 数据库方言
+      keywordCase: 关键字大小写
+      uppercase: 大写
+      lowercase: 小写
+      preserve: 保持原样
+      indentStyle: 缩进样式
+      standard: 标准
+      tabularLeft: 表格左对齐
+      tabularRight: 表格右对齐
+      inputLabel: SQL 查询
+      inputPlaceholder: 请输入 SQL 查询…
+      outputLabel: 美化后的查询
+
+  benchmark-builder:
+    title: 性能基准测试器
+    description: 创建简单的基准测试，比较多个任务的执行时间。
+    ui:
+      suiteNumber: '测试组 {number}'
+      position: 排名
+      suite: 测试组
+      samples: 样本数
+      mean: 平均值
+      variance: 方差
+      suiteName: 测试组名称
+      suiteNamePlaceholder: 请输入测试组名称…
+      suiteValues: 测量值
+      deleteSuite: 删除测试组
+      addSuite: 添加测试组
+      unit: 单位
+      unitPlaceholder: 单位，例如 ms
+      resetSuites: 重置测试组
+      copyMarkdown: 复制为 Markdown 表格
+      copyBulletList: 复制为项目符号列表
+      measurePlaceholder: 请输入测量值…
+      deleteValue: 删除此测量值
+      addMeasure: 添加测量值
+
+  git-memo:
+    title: Git 备忘录
+    description: 快速查阅常用 Git 命令和操作方法。
+    ui:
+      content: |-
+        ## 配置
+
+        设置全局配置
+
+        ```shell
+        git config --global user.name "[name]"
+        git config --global user.email "[email]"
+        ```
+
+        ## 开始使用
+
+        创建 Git 仓库
+
+        ```shell
+        git init
+        ```
+
+        克隆现有 Git 仓库
+
+        ```shell
+        git clone [url]
+        ```
+
+        ## 提交
+
+        提交所有已跟踪的更改
+
+        ```shell
+        git commit -am "[commit message]"
+        ```
+
+        将新修改追加到上一次提交
+
+        ```shell
+        git commit --amend --no-edit
+        ```
+
+        ## 操作失误后的处理
+
+        修改上一次提交信息
+
+        ```shell
+        git commit --amend
+        ```
+
+        撤销最近一次提交并保留更改
+
+        ```shell
+        git reset HEAD~1
+        ```
+
+        撤销最近 `N` 次提交并保留更改
+
+        ```shell
+        git reset HEAD~N
+        ```
+
+        撤销最近一次提交并丢弃更改
+
+        ```shell
+        git reset HEAD~1 --hard
+        ```
+
+        将分支重置为远程状态
+
+        ```shell
+        git fetch origin
+        git reset --hard origin/[branch-name]
+        ```
+
+        ## 其他操作
+
+        重命名本地主分支
+
+        ```shell
+        git branch -m master main
+        ```
+
+  slugify-string:
+    title: 字符串 Slug 转换器
+    description: 将字符串转换为适合 URL、文件名和 ID 使用的安全格式。
+    ui:
+      copied: Slug 已复制到剪贴板
+      inputLabel: 待生成 Slug 的字符串
+      inputPlaceholder: 请输入字符串…
+      outputLabel: Slug
+      outputPlaceholder: Slug 将显示在此处
+      copy: 复制 Slug
+
+  encryption:
+    title: 加密/解密文本
+    description: 使用 AES、TripleDES、Rabbit 或 RC4 等算法加密和解密文本。
+    ui:
+      encrypt: 加密
+      decrypt: 解密
+      plainText: 原文：
+      plainTextPlaceholder: 输入要加密的字符串
+      secretKey: 密钥：
+      algorithm: 加密算法：
+      encryptedText: 加密结果：
+      encryptedInput: 密文：
+      encryptedInputPlaceholder: 输入要解密的字符串
+      decryptedText: 解密结果：
+      outputPlaceholder: 结果将在此显示
+      unableToDecrypt: 无法解密此文本
+      decryptErrorTitle: 解密失败
+
+  random-port-generator:
+    title: 随机端口生成器
+    description: 生成知名端口范围（0–1023）之外的随机端口号。
+    ui:
+      copied: 端口已复制到剪贴板
+      refresh: 刷新
+
+  yaml-prettify:
+    title: YAML 美化与格式化
+    description: 将 YAML 字符串格式化为易读结构。
+    ui:
+      invalidYaml: 提供的 YAML 无效
+      sortKeys: 键名排序
+      indentSize: 缩进宽度
+      inputLabel: 原始 YAML
+      inputPlaceholder: 请粘贴原始 YAML…
+      outputLabel: 美化后的 YAML
+
+  eta-calculator:
+    title: ETA 计算器
+    description: 根据任务进度估算完成时间和剩余时长，例如文件下载的结束时间。
+    ui:
+      example: 例如，3 分钟洗 5 个盘子，共有 500 个盘子时，全部洗完约需 5 小时。
+      amount: 项目总数
+      startedAt: 开始处理时间
+      rate: 每个时间段处理的项目数
+      in: 每
+      milliseconds: 毫秒
+      seconds: 秒
+      minutes: 分钟
+      hours: 小时
+      days: 天
+      totalDuration: 总耗时
+      endAt: 预计结束时间
+
+  roman-numeral-converter:
+    title: 罗马数字转换器
+    description: 将罗马数字转换为数字，并将数字转换为罗马数字。
+    ui:
+      rangeError: 仅支持转换 {min} 到 {max} 之间的数字
+      invalidRoman: 输入内容不是有效的罗马数字
+      romanCopied: 罗马数字已复制到剪贴板
+      arabicCopied: 阿拉伯数字已复制到剪贴板
+      arabicToRoman: 阿拉伯数字转罗马数字
+      romanToArabic: 罗马数字转阿拉伯数字
+
+  hmac-generator:
+    title: HMAC 生成器
+    description: 使用密钥和选定的哈希函数计算消息认证码（HMAC）。
+    ui:
+      plainText: 待认证的原文
+      plainTextPlaceholder: 输入要计算 HMAC 的原文…
+      secret: 密钥
+      secretPlaceholder: 请输入密钥…
+      hashFunction: 哈希函数
+      hashFunctionPlaceholder: 请选择哈希函数…
+      outputEncoding: 输出编码
+      outputEncodingPlaceholder: 请选择结果编码…
+      binary: 二进制（2 进制）
+      hexadecimal: 十六进制（16 进制）
+      base64: Base64（64 进制）
+      base64Url: URL 安全 Base64（64 进制）
+      outputLabel: 文本的 HMAC
+      outputPlaceholder: HMAC 结果…
+      copy: 复制 HMAC
+
+  bip39-generator:
+    title: BIP39 助记词生成器
+    description: 从现有或随机助记词生成 BIP39 密码短语，也可从密码短语还原助记词。
+    ui:
+      language: 语言：
+      entropy: 熵（种子）：
+      entropyPlaceholder: 输入十六进制熵…
+      passphrase: 密码短语（助记词）：
+      passphrasePlaceholder: 输入助记词…
+      entropyLengthError: 熵长度必须在 16 到 32 之间，且为 4 的倍数
+      entropyHexError: 熵必须是十六进制字符串
+      invalidMnemonic: 助记词无效
+      entropyCopied: 熵已复制到剪贴板
+      passphraseCopied: 密码短语已复制到剪贴板
+      languages:
+        english: 英语
+        chineseSimplified: 简体中文
+        chineseTraditional: 繁体中文
+        czech: 捷克语
+        french: 法语
+        italian: 意大利语
+        japanese: 日语
+        korean: 韩语
+        portuguese: 葡萄牙语
+        spanish: 西班牙语
+
+  base64-file-converter:
+    title: Base64 文件转换器
+    description: 将字符串、文件或图像转换为其 Base64 表示形式。
+    ui:
+      invalidBase64: Base64 字符串无效
+      copied: Base64 字符串已复制到剪贴板
+      base64ToFile: Base64 转文件
+      fileName: 文件名
+      fileNamePlaceholder: 下载文件名
+      extension: 扩展名
+      base64InputPlaceholder: 在此粘贴文件的 Base64 字符串…
+      previewImage: 预览图片
+      downloadFile: 下载文件
+      fileToBase64: 文件转 Base64
+      upload: 将文件拖放到此处，或点击选择文件
+      outputPlaceholder: 文件的 Base64 将显示在此处
+  list-converter:
+    title: 列表转换器
+    description: 对逐行数据执行转置、添加前后缀、反转、排序、转小写或截断等批量处理。
+    ui:
+      sortAscending: 升序排序
+      sortDescending: 降序排序
+      trimItems: 清除列表项首尾空白
+      removeDuplicates: 删除重复项
+      lowercase: 转换为小写
+      keepLineBreaks: 保留换行
+      sortList: 列表排序
+      sortPlaceholder: 按字母排序
+      separator: 分隔符
+      wrapItem: 包裹列表项
+      itemPrefix: 列表项前缀
+      itemSuffix: 列表项后缀
+      wrapList: 包裹列表
+      listPrefix: 列表前缀
+      listSuffix: 列表后缀
+      inputLabel: 输入数据
+      inputPlaceholder: 在此粘贴输入数据…
+      outputLabel: 转换结果
+
+  base64-string-converter:
+    title: Base64 字符串编码/解码
+    description: 在普通字符串与 Base64 表示之间进行编码和解码。
+    ui:
+      base64Copied: Base64 字符串已复制到剪贴板
+      stringCopied: 字符串已复制到剪贴板
+      invalidBase64: Base64 字符串无效
+      stringToBase64: 字符串转 Base64
+      encodeUrlSafe: 使用 URL 安全字符编码
+      stringPlaceholder: 请输入字符串…
+      stringToEncode: 待编码字符串
+      base64OfString: Base64 表示
+      base64OutputPlaceholder: Base64 表示将显示在此处
+      copyBase64: 复制 Base64
+      base64ToString: Base64 转字符串
+      decodeUrlSafe: 解码 URL 安全字符
+      base64InputPlaceholder: 请输入 Base64 字符串…
+      base64ToDecode: 待解码 Base64 字符串
+      decodedString: 解码后的字符串
+      decodedPlaceholder: 解码后的字符串将显示在此处
+      copyDecoded: 复制解码结果
+
+  toml-to-yaml:
+    title: TOML 到 YAML
+    description: 解析 TOML 并将其转换为 YAML。
+    ui:
+      invalidToml: 提供的 TOML 无效。
+      inputLabel: 您的 TOML
+      inputPlaceholder: 在此粘贴 TOML…
+      outputLabel: 由 TOML 转换的 YAML
+
+  math-evaluator:
+    title: 数学计算器
+    description: 计算数学表达式，并支持 sqrt、cos、sin、abs 等函数。
+    ui:
+      placeholder: '请输入数学表达式，例如 2*sqrt(6)…'
+      result: 计算结果
+
+  json-to-yaml-converter:
+    title: JSON 转 YAML
+    description: 将 JSON 数据转换为 YAML。
+    ui:
+      invalidJson: 提供的 JSON 无效。
+      inputLabel: 您的 JSON
+      inputPlaceholder: 在此粘贴 JSON…
+      outputLabel: 由 JSON 转换的 YAML
+
+  url-parser:
+    title: URL 解析器
+    description: 将 URL 解析为协议、来源、参数、端口和用户凭据等组成部分。
+    ui:
+      invalidUrl: URL 无效
+      protocol: 协议
+      username: 用户名
+      password: 密码
+      hostname: 主机名
+      port: 端口
+      path: 路径
+      params: 查询参数
+      inputLabel: 待解析 URL
+      inputPlaceholder: 请输入 URL…
+
+  iban-validator-and-parser:
+    title: IBAN 验证与解析器
+    description: 验证并解析 IBAN，查看国家、BBAN、QR-IBAN 状态和易读格式等信息。
+    ui:
+      isValid: IBAN 是否有效
+      errorsLabel: IBAN 错误
+      isQrIban: 是否为 QR-IBAN
+      countryCode: 国家或地区代码
+      friendlyFormat: 易读的 IBAN 格式
+      inputPlaceholder: 请输入要校验的 IBAN…
+      examples: 有效 IBAN 示例
+      errors:
+        noIban: 未提供 IBAN
+        noCountry: 未找到 IBAN 所属国家或地区
+        wrongBbanLength: BBAN 长度不正确
+        wrongBbanFormat: BBAN 格式不正确
+        checksumNotNumber: 校验位不是数字
+        wrongChecksum: IBAN 校验和不正确
+        wrongBranchChecksum: 账户、银行或分行校验和不正确
+        qrNotAllowed: 不允许使用 QR-IBAN
+
+  user-agent-parser:
+    title: User-Agent 解析器
+    description: 从 User-Agent 字符串中识别浏览器、引擎、操作系统、CPU 和设备类型或型号。
+    ui:
+      browser: 浏览器
+      engine: 浏览器引擎
+      os: 操作系统
+      device: 设备
+      cpu: CPU
+      name: 名称
+      version: 版本
+      model: 型号
+      type: 类型
+      vendor: 制造商
+      architecture: 架构
+      noBrowserName: 暂无浏览器名称
+      noBrowserVersion: 暂无浏览器版本
+      noEngineName: 暂无引擎名称
+      noEngineVersion: 暂无引擎版本
+      noOsName: 暂无操作系统名称
+      noOsVersion: 暂无操作系统版本
+      noDeviceModel: 暂无设备型号
+      noDeviceType: 暂无设备类型
+      noDeviceVendor: 暂无设备制造商
+      noCpuArchitecture: 暂无 CPU 架构
+      inputLabel: User-Agent 字符串
+      inputPlaceholder: 请输入 User-Agent 字符串…
+
+  numeronym-generator:
+    title: 数字缩写生成器
+    description: 将单词转换为 numeronym 数字缩写，例如用 i18n 表示 internationalization。
+    ui:
+      inputPlaceholder: 请输入单词，例如“internationalization”
+      outputPlaceholder: 缩写将在此显示，例如“i18n”
+
+  case-converter:
+    title: 大小写转换
+    description: 将字符串转换为多种大小写命名格式。
+    ui:
+      inputLabel: 字符串：
+      inputPlaceholder: 请输入字符串…
+      lowercase: 全小写：
+      uppercase: 全大写：
+      camelCase: 驼峰命名：
+      capitalCase: 首字母大写：
+      constantCase: 常量命名：
+      dotCase: 点号命名：
+      headerCase: 连字符标题命名：
+      noCase: 空格分词：
+      paramCase: 参数命名：
+      pascalCase: 帕斯卡命名：
+      pathCase: 路径命名：
+      sentenceCase: 句式命名：
+      snakeCase: 蛇形命名：
+      mockingCase: 交替大小写：
+
+  html-entities:
+    title: HTML 实体转义
+    description: 在特殊字符与对应的 HTML 实体之间进行转义和反转义。
+    ui:
+      escapeTitle: HTML 实体转义
+      inputString: 字符串：
+      escapePlaceholder: 输入要转义的字符串
+      escapedString: 转义结果：
+      escapedPlaceholder: 转义后的字符串
+      unescapeTitle: HTML 实体反转义
+      escapedInput: 已转义字符串：
+      unescapePlaceholder: 输入要反转义的字符串
+      unescapedString: 反转义结果：
+      unescapedPlaceholder: 反转义后的字符串
+
+  json-prettify:
+    title: JSON 美化与格式化
+    description: 将 JSON 字符串格式化为易读结构。
+    ui:
+      invalidJson: 提供的 JSON 无效
+      sortKeys: 键名排序
+      indentSize: 缩进宽度
+      inputLabel: 原始 JSON
+      inputPlaceholder: 请粘贴原始 JSON…
+      outputLabel: 美化后的 JSON
+
+  docker-run-to-docker-compose-converter:
+    title: Docker Run 转 Compose
+    description: 将 docker run 命令转换为 Docker Compose 配置。
+    ui:
+      unknownOption: 未知选项
+      optionNotImplemented: '选项 {option} 尚未实现。'
+      optionNotTranslatable: '选项 {option} 无法表示为 docker-compose.yml。'
+      conversionError: '转换选项 {option} 时发生错误。'
+      inputLabel: docker run 命令
+      inputPlaceholder: 请输入要转换的 docker run 命令…
+      download: 下载 docker-compose.yml
+      notTranslatableTitle: 无法转换的选项
+      notImplementedTitle: 尚未实现的选项
+      errorsTitle: 转换错误
+
+  mac-address-lookup:
+    title: MAC 地址厂商查询
+    description: 根据设备的 MAC 地址查询供应商和制造商。
+    ui:
+      invalidMac: MAC 地址无效
+      copied: 制造商信息已复制到剪贴板
+      inputLabel: MAC 地址
+      inputPlaceholder: 请输入 MAC 地址
+      vendorInfo: 制造商信息
+      unknownVendor: 未找到此地址对应的制造商
+      copyVendor: 复制制造商信息
+
+  mime-types:
+    title: MIME 类型查询
+    description: 在 MIME 类型与文件扩展名之间双向查询。
+    ui:
+      mimeToExtension: MIME 类型转扩展名
+      mimeToExtensionHelp: 输入 MIME 类型以查询对应的文件扩展名。
+      mimePlaceholder: 输入 MIME 类型，例如 application/json
+      extensionsFor: '{mime} 对应的扩展名：'
+      extensionToMime: 扩展名转 MIME 类型
+      extensionToMimeHelp: 输入文件扩展名以查询对应的 MIME 类型。
+      extensionPlaceholder: 输入扩展名，例如 json
+      mimeForExtension: '.{extension} 对应的 MIME 类型：'
+      mimeTypes: MIME 类型
+      extensions: 扩展名
+
+  toml-to-json:
+    title: TOML 到 JSON
+    description: 解析 TOML 并将其转换为 JSON。
+    ui:
+      invalidToml: 提供的 TOML 无效。
+      inputLabel: 您的 TOML
+      inputPlaceholder: 在此粘贴 TOML…
+      outputLabel: 由 TOML 转换的 JSON
+
+  lorem-ipsum-generator:
+    title: Lorem Ipsum 生成器
+    description: 生成用于展示文档排版或字体效果的 Lorem Ipsum 占位文本。
+    ui:
+      copied: 占位文本已复制到剪贴板
+      paragraphs: 段落数
+      sentencesPerParagraph: 每段句子数
+      wordsPerSentence: 每句单词数
+      startWithLorem: 以标准占位句开头
+      asHtml: 生成 HTML
+      outputPlaceholder: 生成的占位文本…
+      refresh: 刷新
+
+  qrcode-generator:
+    title: 二维码生成器
+    description: 根据 URL 或普通文本生成并下载二维码，同时支持自定义前景色和背景色。
+    ui:
+      textLabel: 文本
+      textPlaceholder: 请输入链接或文本…
+      foregroundColor: 前景色
+      backgroundColor: 背景色
+      errorResistance: 容错级别
+      errorCorrection:
+        low: 低
+        medium: 中
+        quartile: 较高
+        high: 高
+      download: 下载二维码
+
+  wifi-qrcode-generator:
+    title: WiFi 二维码生成器
+    description: 生成并下载用于快速连接 WiFi 网络的二维码。
+    ui:
+      encryptionMethod: 加密方式
+      noPassword: 无密码
+      ssid: SSID
+      ssidPlaceholder: 请输入 WiFi SSID…
+      hiddenSsid: 隐藏 SSID
+      password: 密码
+      passwordPlaceholder: 请输入 WiFi 密码…
+      eapMethod: EAP 方法
+      identity: 身份
+      identityPlaceholder: 请输入 EAP 身份…
+      anonymous: 匿名身份
+      eapPhase2Method: EAP 第二阶段方法
+      foregroundColor: 前景色
+      backgroundColor: 背景色
+      imageAlt: WiFi 二维码
+      download: 下载二维码
+
+  xml-formatter:
+    title: XML 格式化
+    description: 将 XML 字符串格式化为易读结构。
+    ui:
+      invalidXml: 提供的 XML 无效
+      collapseContent: 折叠内容
+      indentSize: 缩进宽度
+      inputLabel: XML
+      inputPlaceholder: 请粘贴 XML…
+      outputLabel: 格式化后的 XML
+
+  temperature-converter:
+    title: 温度转换器
+    description: 在开尔文、摄氏度、华氏度、兰金等多种温标之间转换。
+    ui:
+      kelvin: 开尔文
+      celsius: 摄氏度
+      fahrenheit: 华氏度
+      rankine: 兰金度
+      delisle: 德利尔度
+      newton: 牛顿度
+      reaumur: 列氏度
+      romer: 罗默度
+
+  chmod-calculator:
+    title: Chmod 计算器
+    description: 根据文件权限计算 Chmod 数值和命令。
+    ui:
+      read: 读取（4）
+      write: 写入（2）
+      execute: 执行（1）
+      owner: 所有者
+      group: 用户组
+      public: 其他用户
+
+  rsa-key-pair-generator:
+    title: RSA 密钥对生成器
+    description: 生成随机的 RSA 私钥和公钥 PEM 文件。
+    ui:
+      bits: 位数：
+      bitsError: 位数必须在 256 到 16384 之间，且为 8 的倍数
+      refresh: 重新生成密钥对
+      publicKey: 公钥
+      privateKey: 私钥
+
+  html-wysiwyg-editor:
+    title: HTML 所见即所得编辑器
+    description: 提供所见即所得的 HTML 编辑体验，并可查看生成的源代码。
+    ui:
+      bold: 粗体
+      italic: 斜体
+      strike: 删除线
+      inlineCode: 行内代码
+      heading1: 一级标题
+      heading2: 二级标题
+      heading3: 三级标题
+      heading4: 四级标题
+      bulletList: 无序列表
+      orderedList: 有序列表
+      codeBlock: 代码块
+      blockquote: 引用块
+      hardBreak: 强制换行
+      clearFormat: 清除格式
+      undo: 撤销
+      redo: 重做
+
+  yaml-to-toml:
+    title: YAML 到 TOML
+    description: 解析 YAML 并将其转换为 TOML。
+    ui:
+      invalidYaml: 提供的 YAML 无效。
+      inputLabel: 您的 YAML
+      inputPlaceholder: 在此粘贴 YAML…
+      outputLabel: 由 YAML 转换的 TOML
+
+  mac-address-generator:
+    title: MAC 地址生成器
+    description: 根据指定数量和前缀生成大写或小写格式的 MAC 地址。
+    ui:
+      invalidPrefix: MAC 地址前缀无效
+      uppercase: 大写
+      lowercase: 小写
+      none: 无
+      copied: MAC 地址已复制到剪贴板
+      quantity: 数量
+      prefix: MAC 地址前缀
+      prefixPlaceholder: '请输入前缀，例如 64:16:7F'
+      case: 字母大小写
+      separator: 分隔符
+      refresh: 刷新
+
+  json-diff:
+    title: JSON 差异比较
+    description: 比较两个 JSON 对象并查看差异。
+    ui:
+      invalidJson: JSON 格式无效
+      firstJsonLabel: 第一个 JSON
+      firstJsonPlaceholder: 请粘贴第一个 JSON…
+      compareJsonLabel: 待比较的 JSON
+      compareJsonPlaceholder: 请粘贴待比较的 JSON…
+      onlyDifferences: 仅显示差异
+      sameJson: 提供的两个 JSON 内容相同
+
+  jwt-parser:
+    title: JWT 解析器
+    description: 解析并解码 JWT，查看其中的内容。
+    ui:
+      inputLabel: 待解码 JWT
+      inputPlaceholder: 在此粘贴 JWT…
+      invalidJwt: JWT 无效
+      header: 请求头
+      payload: 载荷
+      algorithms:
+        HS256: 使用 SHA-256 的 HMAC
+        HS384: 使用 SHA-384 的 HMAC
+        HS512: 使用 SHA-512 的 HMAC
+        RS256: 使用 SHA-256 的 RSASSA-PKCS1-v1_5
+        RS384: 使用 SHA-384 的 RSASSA-PKCS1-v1_5
+        RS512: 使用 SHA-512 的 RSASSA-PKCS1-v1_5
+        ES256: 使用 P-256 和 SHA-256 的 ECDSA
+        ES384: 使用 P-384 和 SHA-384 的 ECDSA
+        ES512: 使用 P-521 和 SHA-512 的 ECDSA
+        PS256: 使用 SHA-256 和 MGF1（SHA-256）的 RSASSA-PSS
+        PS384: 使用 SHA-384 和 MGF1（SHA-384）的 RSASSA-PSS
+        PS512: 使用 SHA-512 和 MGF1（SHA-512）的 RSASSA-PSS
+        none: 不使用数字签名或 MAC
+      claims:
+        typ: 类型
+        alg: 算法
+        iss: 签发者
+        sub: 主题
+        aud: 接收方
+        exp: 过期时间
+        nbf: 生效时间
+        iat: 签发时间
+        jti: JWT 标识符
+        name: 全名
+        given_name: 名
+        family_name: 姓
+        middle_name: 中间名
+        nickname: 昵称
+        preferred_username: 首选简称
+        profile: 资料页 URL
+        picture: 头像 URL
+        website: 网页或博客 URL
+        email: 首选电子邮箱地址
+        email_verified: 电子邮箱地址是否已验证
+        gender: 性别
+        birthdate: 出生日期
+        zoneinfo: 时区
+        locale: 语言区域
+        phone_number: 首选电话号码
+        phone_number_verified: 电话号码是否已验证
+        address: 首选邮寄地址
+        updated_at: 信息最后更新时间
+        azp: 获得此 ID Token 的授权方
+        nonce: 将客户端会话与 ID Token 关联的值
+        auth_time: 身份验证发生时间
+        at_hash: Access Token 哈希值
+        c_hash: 授权码哈希值
+        acr: 身份验证上下文类别引用
+        amr: 身份验证方法引用
+        sub_jwk: 用于验证 ID Token 签名的公钥
+        cnf: 确认信息
+        sip_from_tag: SIP From 标签请求头参数值
+        sip_date: SIP Date 请求头值
+        sip_callid: SIP Call-Id 请求头值
+        sip_cseq_num: SIP CSeq 数字请求头参数值
+        sip_via_branch: SIP Via 分支请求头参数值
+        orig: 主叫身份字符串
+        dest: 被叫身份字符串
+        mky: 媒体密钥指纹字符串
+        events: 安全事件
+        toe: 事件时间
+        txn: 事务标识符
+        rph: 资源优先级请求头授权
+        sid: 会话标识符
+        vot: 信任向量值
+        vtm: 信任向量信任标记 URL
+        attest: SHAKEN 框架定义的认证等级
+        origid: SHAKEN 框架定义的主叫标识符
+        act: 行为主体
+        scope: 权限范围值
+        client_id: 客户端标识符
+        may_act: 获准成为行为主体的一方
+        jcard: jCard 数据
+        at_use_nbr: Access Token 允许调用 API 的次数
+        div: 呼叫转移目标
+        opt: 完整形式的原始 PASSporT
+        vc: W3C 定义的可验证凭证
+        vp: W3C 定义的可验证陈述
+        sph: SIP 优先级请求头字段
+        ace_profile: 此令牌适用的 ACE 配置文件
+        cnonce: 客户端随机数
+        exi: 剩余有效时间
+        roles: 角色
+        groups: 用户组
+        entitlements: 权益
+        token_introspection: 令牌内省响应
+
+  date-converter:
+    title: 日期时间转换器
+    description: 在多种日期、时间和时间戳格式之间转换。
+    ui:
+      jsLocaleDate: JS 本地日期字符串
+      unixTimestamp: Unix 时间戳
+      timestamp: 时间戳（毫秒）
+      utcFormat: UTC 格式
+      excelDateTime: Excel 日期/时间
+      invalidForFormat: 此日期不符合所选格式
+      inputPlaceholder: 请输入日期字符串…
+      invalidDate: 日期无效…
+
+  phone-parser-and-formatter:
+    title: 电话号码解析与格式化
+    description: 解析、验证和格式化电话号码，并查看国家或地区代码、号码类型等信息。
+    ui:
+      invalidPhone: 手机号码无效
+      countryCode: 国家或地区代码
+      country: 国家或地区
+      callingCode: 国际区号
+      isValid: 是否有效
+      isPossible: 是否可能存在
+      type: 号码类型
+      internationalFormat: 国际格式
+      nationalFormat: 国内格式
+      e164Format: E.164 格式
+      rfc3966Format: RFC3966 格式
+      defaultCountry: 默认国家或地区代码
+      inputPlaceholder: 请输入手机号码
+      inputLabel: 手机号码
+      unknown: 未知
+      types:
+        mobile: 移动号码
+        fixedLine: 固定电话
+        fixedOrMobile: 固定电话或移动号码
+        personal: 个人号码
+        premium: 高资费号码
+        sharedCost: 分摊付费号码
+        tollFree: 免费号码
+        uan: 通用接入号码
+        voicemail: 语音信箱
+        pager: 寻呼机
+
+  ipv4-subnet-calculator:
+    title: IPv4 子网计算器
+    description: 解析 IPv4 CIDR 网段并计算子网的详细信息。
+    ui:
+      invalidAddress: 无法解析此地址，请检查格式
+      netmask: 网段
+      networkAddress: 网络地址
+      networkMask: 子网掩码
+      binaryMask: 二进制子网掩码
+      cidrNotation: CIDR 表示法
+      wildcardMask: 通配符掩码
+      networkSize: 网络规模
+      firstAddress: 首个地址
+      lastAddress: 最后地址
+      broadcastAddress: 广播地址
+      noBroadcast: 此掩码没有可用的广播地址
+      ipClass: IP 类别
+      unknownClass: 未知类别
+      inputLabel: 带或不带掩码的 IPv4 地址
+      inputPlaceholder: 请输入 IPv4 地址…
+      previousBlock: 上一个网段
+      nextBlock: 下一个网段
+
+  og-meta-generator:
+    title: Open Graph Meta 生成器
+    description: 为网站生成 Open Graph 和社交平台所需的 HTML Meta 标签。
+    ui:
+      metaTags: 您的 Meta 标签
+      schema:
+        common:
+          author: 作者
+          creator: 创建者
+          disc: 光盘编号
+          discReversePlaceholder: 歌曲所在的光盘编号…
+          duration: 时长
+          musician: 音乐人
+          musicianPlaceholder: 音乐人的资料页 URL…
+          releaseDate: 发布日期
+          song: 歌曲
+          tag: 标签
+          track: 音轨编号
+          trackReversePlaceholder: 歌曲的音轨编号…
+        article:
+          name: 文章
+          publishingDate: 发布时间
+          publishingDatePlaceholder: 文章首次发布的时间…
+          modificationDate: 修改时间
+          modificationDatePlaceholder: 文章最后修改的时间…
+          expirationDate: 失效时间
+          expirationDatePlaceholder: 文章失效的时间…
+          authorPlaceholder: 作者的资料页 URL…
+          section: 栏目
+          sectionPlaceholder: 文章所属的主要栏目…
+          tagPlaceholder: 与文章相关的关键词…
+        book:
+          name: 图书
+          authorPlaceholder: 作者的资料页 URL…
+          isbnPlaceholder: 图书的 ISBN…
+          releaseDatePlaceholder: 图书的发布日期…
+          tagPlaceholder: 与图书相关的关键词…
+        image:
+          name: 图片
+          url: 图片 URL
+          urlPlaceholder: 图片 URL…
+          alt: 替代文本
+          altPlaceholder: 图片内容说明…
+          width: 宽度
+          widthPlaceholder: 图片宽度（像素）…
+          height: 高度
+          heightPlaceholder: 图片高度（像素）…
+        musicAlbum:
+          name: 音乐专辑
+          songPlaceholder: 专辑中的歌曲 URL…
+          releaseDatePlaceholder: 专辑发布日期…
+        musicPlaylist:
+          name: 音乐播放列表
+          creatorPlaceholder: 创建者的资料页 URL…
+        musicRadio:
+          name: 音乐广播电台
+          creatorPlaceholder: 创建者的资料页 URL…
+        musicSong:
+          name: 歌曲
+          durationPlaceholder: 歌曲时长（秒）…
+          album: 专辑
+          albumPlaceholder: 专辑 URL…
+          discPlaceholder: 歌曲所在的光盘编号…
+          trackPlaceholder: 歌曲在专辑中的音轨编号…
+        profile:
+          name: 个人资料
+          firstName: 名
+          firstNamePlaceholder: 此人的名…
+          lastName: 姓
+          lastNamePlaceholder: 此人的姓…
+          username: 用户名
+          usernamePlaceholder: 简短且唯一的用户名…
+          gender: 性别
+          genderPlaceholder: 此人的性别…
+        twitter:
+          summary: 摘要
+          largeImage: 大图摘要
+          application: 应用
+          player: 播放器
+          cardType: 卡片类型
+          cardTypePlaceholder: 选择 Twitter 卡片类型…
+          siteAccount: 网站账号
+          siteAccountPlaceholder: 网站的 Twitter 账号…
+          creatorAccount: 创建者账号
+          creatorAccountPlaceholder: 内容创建者的 Twitter 账号…
+        videoEpisode:
+          name: 视频剧集
+          series: 系列
+          seriesPlaceholder: 此剧集所属的系列…
+        videoMovie:
+          name: 视频电影
+          actor: 演员
+          actorPlaceholder: 演员的资料页 URL…
+          director: 导演
+          directorPlaceholder: 导演的资料页 URL…
+          writer: 编剧
+          writerPlaceholder: 编剧的资料页 URL…
+          durationPlaceholder: 视频时长（秒）…
+          releaseDatePlaceholder: 视频发布日期…
+          tagPlaceholder: 与视频相关的关键词…
+        videoOther:
+          name: 其他视频
+        videoTvShow:
+          name: 电视节目
+        website:
+          website: 网站
+          music: 音乐
+          musicAlbum: 专辑
+          playlist: 播放列表
+          radioStation: 广播电台
+          video: 视频
+          movie: 电影
+          episode: 剧集
+          tvShow: 电视节目
+          otherVideo: 其他视频
+          generalInformation: 基本信息
+          pageType: 页面类型
+          pageTypePlaceholder: 选择页面类型…
+          title: 标题
+          titlePlaceholder: 页面标题…
+          description: 描述
+          descriptionPlaceholder: 页面简要描述…
+          pageUrl: 页面 URL
+          pageUrlPlaceholder: 页面的规范 URL…
+
+  ipv6-ula-generator:
+    title: IPv6 ULA 生成器
+    description: 根据 RFC 4193 生成本地使用且不可在公网路由的 IPv6 地址。
+    ui:
+      ula: IPv6 ULA
+      firstBlock: 首个可路由网段
+      lastBlock: 最后一个可路由网段
+      invalidMac: MAC 地址无效
+      infoTitle: 说明
+      infoDescription: 此工具采用 IETF 建议的第一种方法，将当前时间戳与 MAC 地址进行 SHA-1 哈希，并取低 40 位生成随机 ULA。
+      inputPlaceholder: 请输入 MAC 地址
+      inputLabel: MAC 地址
+
+  hash-text:
+    title: 文本哈希计算器
+    description: 使用 MD5、SHA-1、SHA-2、SHA-3 或 RIPEMD-160 等算法计算文本摘要。
+    ui:
+      inputLabel: 待哈希文本：
+      inputPlaceholder: 请输入要哈希的字符串…
+      encodingLabel: 摘要编码
+      binary: 二进制（2 进制）
+      hexadecimal: 十六进制（16 进制）
+      base64: Base64（64 进制）
+      base64Url: URL 安全 Base64（64 进制）
+
+  json-to-toml:
+    title: JSON 转 TOML
+    description: 解析 JSON 并将其转换为 TOML。
+    ui:
+      invalidJson: 提供的 JSON 无效。
+      inputLabel: 您的 JSON
+      inputPlaceholder: 在此粘贴 JSON…
+      outputLabel: 由 JSON 转换的 TOML
+
+  device-information:
+    title: 设备信息
+    description: 查看当前设备的屏幕尺寸、像素比、User-Agent 等信息。
+    ui:
+      screen: 屏幕
+      screenSize: 屏幕尺寸
+      orientation: 屏幕方向
+      orientationAngle: 方向角度
+      colorDepth: 颜色深度
+      pixelRatio: 像素比
+      windowSize: 窗口尺寸
+      device: 设备
+      browserVendor: 浏览器厂商
+      languages: 语言
+      platform: 平台
+      userAgent: User-Agent
+      unknown: 未知
+
+  pdf-signature-checker:
+    title: PDF 签名检查器
+    description: 验证 PDF 中的数字签名，并判断文件内容在签名后是否被修改。
+    ui:
+      upload: 将 PDF 文件拖放到此处，或点击选择文件
+      noSignatures: 提供的文件中未找到签名。
+      signatureCertificates: 签名 {index} 的证书：
+      validityPeriod: 有效期
+      issuedBy: 颁发者
+      issuedTo: 颁发对象
+      pemCertificate: PEM 证书
+      notBefore: 生效时间
+      notAfter: 失效时间
+      commonName: 通用名称
+      organizationName: 组织名称
+      countryName: 国家或地区
+      localityName: 地区名称
+      organizationalUnitName: 组织单位名称
+      stateOrProvinceName: 州或省名称
+      viewPem: 查看 PEM 证书
+      certificate: 证书 {index}
+
+  json-minify:
+    title: JSON 压缩
+    description: 删除不必要的空白字符以压缩 JSON。
+    ui:
+      invalidJson: 提供的 JSON 无效
+      inputLabel: 原始 JSON
+      inputPlaceholder: 请粘贴原始 JSON…
+      outputLabel: 压缩后的 JSON
+
+  ulid-generator:
+    title: ULID 生成器
+    description: 生成随机的通用唯一字典序可排序标识符（ULID）。
+    ui:
+      raw: 原始文本
+      quantity: 数量：
+      format: 格式：
+      copied: ULID 已复制到剪贴板
+      refresh: 刷新
+
+  string-obfuscator:
+    title: 字符串混淆器
+    description: 对密钥、IBAN、令牌等敏感字符串进行可识别的脱敏处理。
+    ui:
+      placeholder: 请输入要脱敏的字符串
+      label: 待脱敏字符串
+      keepFirst: 保留开头字符数
+      keepLast: 保留结尾字符数
+      keepSpaces: 保留空格
+
+  base-converter:
+    title: 整数进制转换器
+    description: 在十进制、十六进制、二进制、八进制和 Base64 等进制之间转换整数。
+    ui:
+      inputNumber: 输入数字
+      inputNumberPlaceholder: 输入数字（例如 42）
+      inputBase: 输入进制
+      inputBasePlaceholder: 输入原进制（例如 10）
+      invalidDigit: 字符“{digit}”不是 {base} 进制的有效数字。
+      conversionError: 无法转换此数字。
+      binary: 二进制（2）
+      binaryPlaceholder: 二进制结果将显示在此处…
+      octal: 八进制（8）
+      octalPlaceholder: 八进制结果将显示在此处…
+      decimal: 十进制（10）
+      decimalPlaceholder: 十进制结果将显示在此处…
+      hexadecimal: 十六进制（16）
+      hexadecimalPlaceholder: 十六进制结果将显示在此处…
+      base64Placeholder: Base64 结果将显示在此处…
+      custom: 自定义：
+      customPlaceholder: '{base} 进制结果将显示在此处…'
+
+  yaml-to-json-converter:
+    title: YAML 转 JSON
+    description: 将 YAML 数据转换为 JSON。
+    ui:
+      invalidYaml: 提供的 YAML 无效。
+      inputLabel: 您的 YAML
+      inputPlaceholder: 在此粘贴 YAML…
+      outputLabel: 由 YAML 转换的 JSON
+
+  uuid-generator:
+    title: UUID 生成器
+    description: 生成用于在计算机系统中唯一标识信息的 128 位 UUID。
+    ui:
+      invalidUuid: UUID 无效
+      copied: UUID 已复制到剪贴板
+      version: UUID 版本
+      quantity: 数量
+      quantityPlaceholder: UUID 数量
+      namespace: 命名空间
+      name: 名称
+      outputPlaceholder: 生成的 UUID
+      refresh: 刷新
+
+  ipv4-address-converter:
+    title: IPv4 地址转换器
+    description: 将 IPv4 地址转换为十进制、二进制、十六进制或 IPv6 表示。
+    ui:
+      decimal: 十进制
+      hexadecimal: 十六进制
+      binary: 二进制
+      ipv6: IPv6
+      ipv6Short: IPv6（简写）
+      invalidIpv4: IPv4 地址无效
+      inputLabel: IPv4 地址
+      inputPlaceholder: 请输入 IPv4 地址…
+      correctAddress: 请输入有效的 IPv4 地址
+
+  text-statistics:
+    title: 文本统计
+    description: 统计文本的字符数、词数和字节大小等信息。
+    ui:
+      placeholder: 请输入文本…
+      characters: 字符数
+      words: 单词数
+      lines: 行数
+      bytes: 字节大小
+
+  text-to-nato-alphabet:
+    title: 文本转 NATO 音标字母
+    description: 将文本转换为 NATO 音标字母，便于口头传达。
+    ui:
+      copied: NATO 音标字母已复制。
+      inputLabel: 要转换为 NATO 音标字母的文本
+      inputPlaceholder: 在此输入文本…
+      outputLabel: 文本对应的 NATO 音标字母
+      copy: 复制 NATO 文本
+
+  basic-auth-generator:
+    title: Basic Auth 生成器
+    description: 根据用户名和密码生成 Base64 编码的 Basic Authentication 请求头。
+    ui:
+      copied: 身份验证请求头已复制到剪贴板
+      username: 用户名
+      usernamePlaceholder: 请输入用户名…
+      password: 密码
+      passwordPlaceholder: 请输入密码…
+      header: 身份验证请求头
+      copyHeader: 复制请求头
+
+  text-to-unicode:
+    title: 文本转 Unicode
+    description: 在普通文本与 Unicode 转义序列之间双向转换。
+    ui:
+      textToUnicode: 文本转 Unicode
+      textExample: 例如“Hello Avengers”
+      textInputLabel: 输入要转换为 Unicode 的文本
+      unicodeOutputLabel: 文本对应的 Unicode
+      unicodeOutputPlaceholder: Unicode 表示将显示在此处
+      copyUnicode: 复制 Unicode 到剪贴板
+      unicodeToText: Unicode 转文本
+      unicodeInputPlaceholder: 输入 Unicode
+      unicodeInputLabel: 输入要转换为文本的 Unicode
+      textOutputLabel: Unicode 对应的文本
+      textOutputPlaceholder: 文本表示将显示在此处
+      copyText: 复制文本到剪贴板
+
+  ipv4-range-expander:
+    title: IPv4 地址范围展开器
+    description: 根据起始和结束 IPv4 地址计算覆盖该范围的有效 CIDR 网段。
+    ui:
+      startAddress: 起始地址
+      endAddress: 结束地址
+      addressesInRange: 地址数量
+      invalidIpv4: IPv4 地址无效
+      startPlaceholder: 起始 IPv4 地址…
+      endPlaceholder: 结束 IPv4 地址…
+      oldValue: 原值
+      newValue: 扩展值
+      invalidRangeTitle: IPv4 地址范围无效
+      invalidRangeDescription: 结束地址小于起始地址，无法计算地址范围。通常交换两个地址即可解决。
+      switchAddresses: 交换起始和结束地址
+
+  text-diff:
+    title: 文本比较
+    description: 比较两个文本并查看它们之间的差异。
+    ui:
+      originalText: 原始文本
+      modifiedText: 修改后的文本
+
+  otp-generator:
+    title: OTP 验证码生成器
+    description: 为多因素身份验证生成和校验基于时间的一次性密码（TOTP）。
+    ui:
+      secretBase32Error: 密钥必须是有效的 Base32 字符串
+      secretRequired: 密钥不能为空
+      secret: Base32 密钥
+      secretPlaceholder: 请输入 Base32 密钥…
+      generateSecret: 生成新密钥
+      nextIn: '{seconds} 秒后生成下一个验证码'
+      openKeyUri: 打开 OTP 密钥链接
+      secretHex: 十六进制密钥
+      secretHexPlaceholder: 十六进制密钥将显示在此处
+      epoch: 起始时间
+      epochPlaceholder: 输入 Unix 纪元时间（毫秒）
+      iteration: 迭代次数
+      count: 计数器
+      countPlaceholder: 输入计数器值
+      paddedHex: 补齐后的十六进制计数器
+      paddedHexPlaceholder: 补齐后的十六进制值将显示在此处
+      previous: 上一个
+      current: 当前
+      next: 下一个
+      copyPrevious: 复制上一个验证码
+      copyCurrent: 复制当前验证码
+      copyNext: 复制下一个验证码
+
+  url-encoder:
+    title: URL 编码/解码
+    description: 在普通文本与 URL 百分号编码格式之间转换。
+    ui:
+      encodedCopied: 编码结果已复制到剪贴板
+      parseError: 该内容不是有效的 URL 编码文本
+      decodedCopied: 解码结果已复制到剪贴板
+      encode: 文本编码
+      inputString: 待编码字符串
+      encodePlaceholder: 请输入要编码的字符串…
+      encodedString: 编码结果
+      encodedPlaceholder: 编码结果将显示在此处
+      decode: 文本解码
+      encodedInput: 待解码字符串
+      decodePlaceholder: 请输入 URL 编码字符串…
+      decodedString: 解码结果
+      decodedPlaceholder: 解码结果将显示在此处
+
+  text-to-binary:
+    title: 文本与 ASCII 二进制转换
+    description: 在普通文本与 ASCII 二进制表示之间双向转换。
+    ui:
+      invalidBinary: 二进制必须是按 8 位分组的有效 ASCII 二进制字符串
+      textToBinary: 文本转 ASCII 二进制
+      textExample: 例如“Hello world”
+      textInputLabel: 输入要转换为二进制的文本
+      binaryOutputLabel: 文本对应的二进制
+      binaryOutputPlaceholder: 二进制表示将显示在此处
+      copyBinary: 复制二进制到剪贴板
+      binaryToText: ASCII 二进制转文本
+      binaryExample: 例如“01001000 01100101 01101100 01101100 01101111”
+      binaryInputLabel: 输入要转换为文本的二进制
+      textOutputLabel: 二进制对应的文本
+      textOutputPlaceholder: 文本表示将显示在此处
+      copyText: 复制文本到剪贴板
+
+  ascii-text-drawer:
+    title: ASCII 艺术字生成器
+    description: 使用多种字体和样式生成 ASCII 艺术字。
+    ui:
+      defaultText: ASCII ART
+      inputLabel: 文本
+      inputPlaceholder: 请输入要绘制的文本
+      font: 字体
+      fontPlaceholder: 请选择字体
+      width: 宽度
+      widthPlaceholder: 文字宽度
+      loadingFont: 正在加载字体…
+      settingsError: 当前设置导致生成失败
+      outputLabel: ASCII 艺术字
+
+  email-normalizer:
+    title: 邮箱地址规范化
+    description: 将邮箱地址规范为统一格式，便于比较、去重和数据清理。
+    ui:
+      unableToParse: '无法解析邮箱：{email}'
+      copied: 规范化邮箱已复制到剪贴板
+      inputLabel: 待规范化的邮箱
+      inputPlaceholder: 每行输入一个邮箱…
+      outputLabel: 规范化后的邮箱
+      outputPlaceholder: 规范化后的邮箱将在此显示…
+      clear: 清空邮箱
+      copy: 复制规范化邮箱
+
+  json-to-xml:
+    title: JSON 转 XML
+    description: 将 JSON 数据转换为 XML。
+    ui:
+      invalidJson: 提供的 JSON 无效。
+      inputLabel: 您的 JSON 内容
+      inputPlaceholder: 在此粘贴 JSON 内容…
+      outputLabel: 转换后的 XML
+
+  markdown-to-html:
+    title: Markdown 转 HTML
+    description: 将 Markdown 转换为 HTML，并可将结果打印为 PDF。
+    ui:
+      inputPlaceholder: 您的 Markdown 内容…
+      inputLabel: 待转换的 Markdown：
+      outputLabel: 输出 HTML：
+      printPdf: 打印为 PDF
+
+  regex-memo:
+    title: 正则表达式速查表
+    description: 快速查阅常用的 JavaScript 正则表达式语法。
+    ui:
+      content: |-
+        ### 普通字符
+
+        表达式 ¦ 说明
+        :--¦:--
+        `.` 或 `[^\n\r]` ¦ 除换行符和回车符以外的任意字符
+        `[A-Za-z]` ¦ 字母
+        `[a-z]` ¦ 小写字母
+        `[A-Z]` ¦ 大写字母
+        `\d` 或 `[0-9]` ¦ 数字
+        `\D` 或 `[^0-9]` ¦ 非数字
+        `_` ¦ 下划线
+        `\w` 或 `[A-Za-z0-9_]` ¦ 字母、数字或下划线
+        `\W` 或 `[^A-Za-z0-9_]` ¦ `\w` 的反向匹配
+        `\S` ¦ `\s` 的反向匹配
+
+        ### 空白字符
+
+        表达式 ¦ 说明
+        :--¦:--
+        ` ` ¦ 空格
+        `\t` ¦ 制表符
+        `\n` ¦ 换行符
+        `\r` ¦ 回车符
+        `\s` ¦ 空格、制表符、换行符或回车符
+
+        ### 字符集
+
+        表达式 ¦ 说明
+        :--¦:--
+        `[xyz]` ¦ `x`、`y` 或 `z` 中任意一个
+        `[^xyz]` ¦ 不为 `x`、`y` 或 `z`
+        `[1-3]` ¦ `1`、`2` 或 `3` 中任意一个
+        `[^1-3]` ¦ 不为 `1`、`2` 或 `3`
+
+        - 字符集相当于对方括号内的单个字符执行“或”运算。
+        - 在起始 `[` 后使用 `^` 可对字符集取反。
+        - 在字符集中，`.` 表示普通句点。
+
+        ### 需要转义的字符
+
+        #### 字符集外部
+
+        表达式 ¦ 说明
+        :--¦:--
+        `\.` ¦ 句点
+        `\^` ¦ 脱字符
+        `\$` ¦ 美元符号
+        `\¦` ¦ 竖线
+        `\\` ¦ 反斜杠
+        `\/` ¦ 正斜杠
+        `\(` ¦ 左圆括号
+        `\)` ¦ 右圆括号
+        `\[` ¦ 左方括号
+        `\]` ¦ 右方括号
+        `\⦃` ¦ 左花括号
+        `\⦄` ¦ 右花括号
+
+        #### 字符集内部
+
+        表达式 ¦ 说明
+        :--¦:--
+        `\\` ¦ 反斜杠
+        `\]` ¦ 右方括号
+
+        - 仅当 `^` 紧跟在字符集起始 `[` 后时才需要转义。
+        - 仅当 `-` 位于两个字母或两个数字之间时才需要转义。
+
+        ### 量词
+
+        表达式 ¦ 说明
+        :--¦:--
+        `⦃2⦄` ¦ 恰好 2 次
+        `⦃2,⦄` ¦ 至少 2 次
+        `⦃2,7⦄` ¦ 至少 2 次且不超过 7 次
+        `*` ¦ 0 次或多次
+        `+` ¦ 1 次或多次
+        `?` ¦ 恰好 0 次或 1 次
+
+        - 量词应放在待量化表达式之后。
+
+        ### 边界
+
+        表达式 ¦ 说明
+        :--¦:--
+        `^` ¦ 字符串开头
+        `$` ¦ 字符串结尾
+        `\b` ¦ 单词边界
+
+        - 单词边界的匹配方式：
+            - 如果首字符为 `\w`，则匹配字符串开头。
+            - 如果两个相邻字符中前一个为 `\w`、后一个为 `\W`，则匹配二者之间的位置。
+            - 如果末字符为 `\w`，则匹配字符串结尾。
+
+        ### 匹配
+
+        表达式 ¦ 说明
+        :--¦:--
+        `foo\¦bar` ¦ 匹配 `foo` 或 `bar`
+        `foo(?=bar)` ¦ 当 `foo` 后面是 `bar` 时匹配 `foo`
+        `foo(?!bar)` ¦ 当 `foo` 后面不是 `bar` 时匹配 `foo`
+        `(?<=bar)foo` ¦ 当 `foo` 前面是 `bar` 时匹配 `foo`
+        `(?<!bar)foo` ¦ 当 `foo` 前面不是 `bar` 时匹配 `foo`
+
+        ### 分组与捕获
+
+        表达式 ¦ 说明
+        :--¦:--
+        `(foo)` ¦ 捕获组；匹配并捕获 `foo`
+        `(?:foo)` ¦ 非捕获组；匹配 `foo` 但不捕获
+        `(foo)bar\1` ¦ `\1` 反向引用第 1 个捕获组；匹配 `foobarfoo`
+
+        - 捕获组仅与以下方法有关：
+            - `string.match(regexp)`
+            - `string.matchAll(regexp)`
+            - `string.replace(regexp, callback)`
+        - `\N` 反向引用第 `N` 个捕获组。捕获组从 1 开始编号。
+
+        ## 参考资料与工具
+
+        - [MDN](https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Guide/Regular_expressions)
+        - [RegExplained](https://leaverou.github.io/regexplained/)
+
+  regex-tester:
+    title: 正则表达式测试器
+    description: 使用示例文本测试正则表达式的匹配结果。
+    ui:
+      invalidRegex: 正则表达式无效
+      regexTitle: 正则表达式
+      regexLabel: 待测试的正则表达式
+      regexPlaceholder: 请输入待测试的正则表达式
+      cheatsheet: 打开正则表达式速查表
+      textLabel: 待匹配文本
+      textPlaceholder: 请输入待匹配文本
+      matches: 匹配结果
+      index: 文本中的位置
+      value: 值
+      captures: 捕获内容
+      groups: 命名组
+      noMatch: 无匹配结果
+      sample: 匹配示例文本
+      diagram: 正则表达式图解
+      flags:
+        global: 全局搜索
+        globalTooltip: 查找全部匹配结果
+        ignoreCase: 忽略大小写
+        ignoreCaseTooltip: 匹配时忽略字母大小写
+        multiline: 多行模式
+        multilineTooltip: 允许 ^ 和 $ 在换行符旁匹配
+        dotAll: 单行模式
+        dotAllTooltip: 允许 . 匹配换行符
+        unicodeTooltip: 将模式视为 Unicode 码点序列
+        unicodeSets: Unicode 集合
+        unicodeSetsTooltip: 支持更多集合功能的 Unicode 模式
+
+  safelink-decoder:
+    title: Outlook Safe Links 解码器
+    description: 解码由 Microsoft Outlook Safe Links 保护的链接。
+    ui:
+      invalidUrl: 提供的 Safe Links URL 无效
+      unknownError: 无法解码此 URL
+      inputLabel: Outlook Safe Links URL
+      inputPlaceholder: 请输入 Outlook Safe Links URL…
+      outputLabel: 解码后的 URL
+
+  xml-to-json:
+    title: XML 转 JSON
+    description: 将 XML 数据转换为 JSON。
+    ui:
+      invalidXml: 提供的 XML 无效。
+      inputLabel: 您的 XML 内容
+      inputPlaceholder: 在此粘贴 XML 内容…
+      outputLabel: 转换后的 JSON

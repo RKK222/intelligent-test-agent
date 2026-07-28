@@ -10,6 +10,7 @@ import com.enterprise.testagent.domain.configuration.InternalModelProviderRuntim
 import com.enterprise.testagent.observability.TraceConstants;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProviderRegistry;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
+import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelResponsesAdapter;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelThinkStreamConverter;
 import io.netty.channel.ChannelOption;
 import java.io.IOException;
@@ -48,6 +49,8 @@ public class InternalModelProxyForwardingService {
     public static final String PROVIDER_HEADER = "X-Enterprise-Model-Provider";
     public static final String UCID_HEADER = "ucid";
 
+    private static final String RESPONSES_PATH = "/responses";
+    private static final String CHAT_COMPLETIONS_PATH = "/chat/completions";
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration FIRST_RESPONSE_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration FIRST_EVENT_TIMEOUT = Duration.ofSeconds(30);
@@ -131,17 +134,34 @@ public class InternalModelProxyForwardingService {
         InternalModelProviderRuntimeConfig runtimeConfig =
                 Objects.requireNonNull(preparedRequest, "preparedRequest must not be null").runtimeConfig();
         InternalModelProvider provider = runtimeConfig.provider();
-        validateModel(body);
-        String targetUrl = targetUrl(provider.baseUrl(), downstreamPath(exchange), exchange.getRequest().getURI().getRawQuery());
+        String requestedPath = downstreamPath(exchange);
+        boolean responsesRequest = RESPONSES_PATH.equals(requestedPath);
+        InternalModelResponsesAdapter responsesAdapter = new InternalModelResponsesAdapter(objectMapper);
+        byte[] upstreamBody;
+        String upstreamPath;
+        InternalModelResponsesAdapter.StreamSession responsesSession;
+        if (responsesRequest) {
+            InternalModelResponsesAdapter.ConvertedRequest converted = responsesAdapter.convertRequest(body);
+            upstreamBody = converted.body();
+            upstreamPath = CHAT_COMPLETIONS_PATH;
+            responsesSession = responsesAdapter.newStreamSession(converted.model());
+        } else {
+            validateModel(body);
+            upstreamBody = body == null ? new byte[0] : body;
+            upstreamPath = requestedPath;
+            responsesSession = null;
+        }
+        String targetUrl = targetUrl(provider.baseUrl(), upstreamPath, exchange.getRequest().getURI().getRawQuery());
         InternalModelThinkStreamConverter converter = new InternalModelThinkStreamConverter(objectMapper);
         Sinks.One<Void> responseHeadersReady = Sinks.one();
         Mono<Void> request = webClient.method(exchange.getRequest().getMethod() == null ? HttpMethod.POST : exchange.getRequest().getMethod())
                 .uri(URI.create(targetUrl))
-                .headers(headers -> applyForwardHeaders(headers, exchange, traceId, runtimeConfig.authToken()))
-                .body(BodyInserters.fromValue(body == null ? new byte[0] : body))
+                .headers(headers -> applyForwardHeaders(
+                        headers, exchange, traceId, runtimeConfig.authToken(), responsesRequest))
+                .body(BodyInserters.fromValue(upstreamBody))
                 .exchangeToMono(response -> {
                     responseHeadersReady.tryEmitEmpty();
-                    return writeResponse(exchange, response, converter);
+                    return writeResponse(exchange, response, converter, responsesSession);
                 });
         Mono<Void> responseHeaderTimeout = responseHeadersReady.asMono()
                 .timeout(firstResponseTimeout)
@@ -152,7 +172,8 @@ public class InternalModelProxyForwardingService {
     private Mono<Void> writeResponse(
             ServerWebExchange exchange,
             ClientResponse response,
-            InternalModelThinkStreamConverter converter) {
+            InternalModelThinkStreamConverter converter,
+            InternalModelResponsesAdapter.StreamSession responsesSession) {
         ServerHttpResponse targetResponse = exchange.getResponse();
         targetResponse.setStatusCode(response.statusCode());
 
@@ -165,8 +186,22 @@ public class InternalModelProxyForwardingService {
             return targetResponse.writeWith(withStreamingTimeouts(response.bodyToFlux(DataBuffer.class)));
         }
 
-        Flux<ServerSentEvent<String>> events = withStreamingTimeouts(response.bodyToFlux(SSE_EVENT_TYPE))
-                .map(event -> convertEvent(event, converter));
+        Flux<ServerSentEvent<String>> upstreamEvents = withStreamingTimeouts(response.bodyToFlux(SSE_EVENT_TYPE));
+        Flux<ServerSentEvent<String>> events;
+        if (responsesSession == null) {
+            events = upstreamEvents.map(event -> convertEvent(event, converter));
+        } else {
+            events = upstreamEvents
+                    .concatMapIterable(event -> convertResponsesEvent(event, converter, responsesSession))
+                    .concatWith(Flux.defer(() -> Flux.fromIterable(convertResponsesFailure(
+                            responsesSession,
+                            "upstream_stream_interrupted",
+                            "上游模型流在完成前结束"))))
+                    .onErrorResume(ignored -> Flux.fromIterable(convertResponsesFailure(
+                            responsesSession,
+                            "upstream_stream_failed",
+                            "上游模型流读取失败")));
+        }
         return sseWriter.write(
                 events,
                 SSE_EVENT_RESOLVABLE_TYPE,
@@ -223,6 +258,33 @@ public class InternalModelProxyForwardingService {
             builder.data(converter.convertData(event.data()));
         }
         return builder.build();
+    }
+
+    private List<ServerSentEvent<String>> convertResponsesEvent(
+            ServerSentEvent<String> event,
+            InternalModelThinkStreamConverter converter,
+            InternalModelResponsesAdapter.StreamSession session) {
+        if (event.data() == null) {
+            return List.of();
+        }
+        return session.convertData(converter.convertData(event.data())).stream()
+                .map(converted -> ServerSentEvent.<String>builder()
+                        .event(converted.event())
+                        .data(converted.data())
+                        .build())
+                .toList();
+    }
+
+    private List<ServerSentEvent<String>> convertResponsesFailure(
+            InternalModelResponsesAdapter.StreamSession session,
+            String code,
+            String message) {
+        return session.failIfIncomplete(code, message).stream()
+                .map(converted -> ServerSentEvent.<String>builder()
+                        .event(converted.event())
+                        .data(converted.data())
+                        .build())
+                .toList();
     }
 
     private void validateProxyAuth(ServerWebExchange exchange) {
@@ -284,10 +346,15 @@ public class InternalModelProxyForwardingService {
             HttpHeaders headers,
             ServerWebExchange exchange,
             String traceId,
-            String authToken) {
+            String authToken,
+            boolean responsesRequest) {
         headers.setBearerAuth(authToken);
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setAccept(exchange.getRequest().getHeaders().getAccept());
+        if (responsesRequest) {
+            headers.setAccept(List.of(MediaType.TEXT_EVENT_STREAM));
+        } else {
+            headers.setAccept(exchange.getRequest().getHeaders().getAccept());
+        }
         headers.set(TraceConstants.TRACE_ID_HEADER, traceId);
         String ucid = exchange.getRequest().getHeaders().getFirst(UCID_HEADER);
         if (ucid != null && !ucid.isBlank()) {

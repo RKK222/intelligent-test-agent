@@ -1811,6 +1811,135 @@ test("super admin can open system management from the activity bar", async ({ pa
   await expect(page.getByRole("button", { name: "通用参数管理" })).toBeVisible();
 });
 
+test("ordinary user opens toolbox immersively and browser history restores panels", async ({ page }) => {
+  await mockBackendApi(page, { authRoles: ["USER"] });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  const editorButton = page.getByRole("button", { name: "打开编辑器" });
+  const toolboxButton = page.getByRole("button", { name: "工具盒子" });
+  await expect(editorButton).toBeVisible();
+  await expect(toolboxButton).toBeVisible();
+  await expect(page.getByRole("button", { name: "系统管理" })).toHaveCount(0);
+  expect(await editorButton.evaluate((node) => node.compareDocumentPosition(
+    document.querySelector('[data-testid="toolbox-activity-button"]')!
+  ) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTruthy();
+
+  const leftPanel = page.locator(".figma-panel-left");
+  const rightPanel = page.locator(".figma-chat-panel-wrapper");
+  const initialLeftWidth = await leftPanel.evaluate((node) => getComputedStyle(node).width);
+  const initialRightWidth = await rightPanel.evaluate((node) => getComputedStyle(node).width);
+  expect(parseFloat(initialLeftWidth)).toBeGreaterThan(0);
+  expect(parseFloat(initialRightWidth)).toBeGreaterThan(0);
+
+  await toolboxButton.click();
+  await expect(page).toHaveURL(/\/toolbox$/);
+  await expect(page.getByRole("heading", { name: "工具盒子", exact: true })).toHaveClass(/sr-only/);
+  await expect(leftPanel).toHaveCSS("width", "0px");
+  await expect(rightPanel).toHaveCSS("width", "0px");
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(leftPanel).toHaveCSS("width", initialLeftWidth);
+  await expect(rightPanel).toHaveCSS("width", initialRightWidth);
+
+  await page.goForward();
+  await expect(page).toHaveURL(/\/toolbox$/);
+  await expect(page.getByRole("heading", { name: "工具盒子", exact: true })).toHaveClass(/sr-only/);
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page).toHaveURL(/\/toolbox$/);
+  await expect(page.getByRole("heading", { name: "工具盒子", exact: true })).toHaveClass(/sr-only/);
+
+  await page.goto("/toolbox/");
+  await expect(page).toHaveURL(/\/toolbox\/$/);
+  await expect(page.getByRole("heading", { name: "工具盒子", exact: true })).toHaveClass(/sr-only/);
+  await expect(leftPanel).toHaveCSS("width", "0px");
+  await expect(rightPanel).toHaveCSS("width", "0px");
+});
+
+test("toolbox keeps search source and clear filters on one row at tablet width", async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 900 });
+  await mockBackendApi(page, { authRoles: ["USER"] });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "工具盒子" }).click();
+
+  const search = page.locator(".toolbox-search");
+  const source = page.locator(".toolbox-source-filter");
+  const clear = page.getByRole("button", { name: "清除筛选", exact: true });
+  await expect(search).toBeVisible();
+  await expect(source).toBeVisible();
+  await expect(clear).toBeVisible();
+
+  const controlTops = await Promise.all([search, source, clear].map((locator) => locator.evaluate((node) => node.getBoundingClientRect().top)));
+  expect(controlTops[0]).toBe(controlTops[1]);
+  expect(controlTops[1]).toBe(controlTops[2]);
+});
+
+test("toolbox controls stick to the panel scroll container on desktop", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 420 });
+  await mockBackendApi(page, { authRoles: ["USER"] });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "工具盒子" }).click();
+
+  const panel = page.locator(".toolbox-panel");
+  const controls = page.locator(".toolbox-controls");
+  await expect(panel).toBeVisible();
+  expect(await panel.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
+
+  await panel.evaluate((node) => { node.scrollTop = 240; });
+  await expect.poll(() => panel.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+  await expect.poll(async () => {
+    const [panelTop, controlsTop] = await Promise.all([
+      panel.evaluate((node) => node.getBoundingClientRect().top),
+      controls.evaluate((node) => node.getBoundingClientRect().top)
+    ]);
+    return Math.abs(panelTop - controlsTop);
+  }).toBeLessThanOrEqual(1);
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+});
+
+test("toolbox category tags stay on one mobile row and support keyboard activation", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 700 });
+  await mockBackendApi(page, { authRoles: ["USER"] });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "工具盒子" }).click();
+
+  const categories = page.locator(".toolbox-category-filter");
+  await expect(categories).toBeVisible();
+  const layout = await categories.evaluate((node) => {
+    const style = getComputedStyle(node);
+    return {
+      flexWrap: style.flexWrap,
+      overflowX: style.overflowX,
+      scrollWidth: node.scrollWidth,
+      clientWidth: node.clientWidth
+    };
+  });
+  expect(layout.flexWrap).toBe("nowrap");
+  expect(layout.overflowX).toBe("auto");
+  expect(layout.scrollWidth).toBeGreaterThan(layout.clientWidth);
+
+  const security = page.getByRole("button", { name: "安全与加密 1" });
+  await security.focus();
+  await expect(security).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(security).toHaveAttribute("aria-pressed", "true");
+
+  const panel = page.locator(".toolbox-panel");
+  const controls = page.locator(".toolbox-controls");
+  await panel.evaluate((node) => { node.scrollTop = 320; });
+  await expect.poll(async () => {
+    const [panelTop, controlsTop] = await Promise.all([
+      panel.evaluate((node) => node.getBoundingClientRect().top),
+      controls.evaluate((node) => node.getBoundingClientRect().top)
+    ]);
+    return Math.abs(panelTop - controlsTop);
+  }).toBeLessThanOrEqual(1);
+});
+
 test("settings dialog manages application context and SSH key metadata", async ({ page }) => {
   await mockBackendApi(page);
 
@@ -6555,6 +6684,38 @@ async function mockBackendApi(
     if (method === "POST" && url.pathname === "/api/auth/logout") {
       capture.logoutRequests?.push(`${method} ${url.pathname}`);
       await route.fulfill(json(null));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/toolbox/tools") {
+      await route.fulfill(json({
+        catalogVersion: "catalog-e2e",
+        total: 1,
+        hotLimit: 10,
+        tools: [{
+          toolId: "it-tools.hash-text",
+          source: "IT_TOOLS",
+          sourceName: "IT-Tools",
+          sourceVersion: "2024.10.22-7ca5933",
+          nameZh: "文本哈希",
+          nameEn: "Hash text",
+          descriptionZh: "计算文本摘要",
+          category: "SECURITY",
+          categoryLabel: "安全与加密",
+          keywords: ["sha256", "摘要"],
+          launchPath: "/toolbox/apps/it-tools/hash-text",
+          clickCount: 0,
+          hotRank: null
+        }]
+      }));
+      return;
+    }
+    if (method === "POST" && /^\/api\/internal\/platform\/toolbox\/tools\/[^/]+\/clicks$/.test(url.pathname)) {
+      await route.fulfill(json({
+        toolId: decodeURIComponent(url.pathname.split("/").at(-2) ?? ""),
+        clickCount: 1,
+        recorded: true,
+        incremented: true
+      }));
       return;
     }
     if (url.pathname.startsWith("/api/internal/platform/configuration-management")) {

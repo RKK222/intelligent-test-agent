@@ -59,6 +59,15 @@ PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审
 
 `V20260728100000__add_personal_application_rollout_scope.sql` 仅扩展 `public_agent_config_rollouts.config_scope` 的 CHECK 约束，允许 `PERSONAL_APPLICATION`。该范围在个人 `git-pull` 已完成 Git merge 后使用，`scope_key` 保存个人工作区 ID，`initiated_by_user_id` 保存唯一受影响用户；只为当前服务器创建 server 行，并复用既有 target 租约、进程身份、空闲检测和 dispose 状态机。它不进入 PUBLIC 单锁或 APPLICATION 按版本唯一索引，因此不会占用共享发布锁；门禁 SQL 只按 `initiated_by_user_id = 当前用户` 命中。迁移不新增表、不回填历史行，也不写测试、演示或个人数据。
 
+## V20260728160000 公共 Agent 全局刷新确认与个人 worktree 补偿
+
+`V20260728160000__extend_public_agent_config_refresh.sql` 为公共全局刷新增加两项持久化边界：
+
+- `public_agent_config_rollouts.discard_shared_runtime_changes` 记录超级管理员是否已明确确认恢复所有服务器共享运行副本的本地内容。默认 `false` 兼容旧 Java；worker 只能在该值为 `true` 且已取得服务器租约后 reset/clean，共享副本不会在全局锁建立前被修改。
+- 新增 `public_agent_config_rollout_public_worktrees`，按 `(rollout_id, worktree_id)` 保存公共个人 worktree 的用户、服务器、固定目标 commit、稳定原因码、重试次数与 fencing 租约。`worktree_id` 外键指向 `agent_config_worktrees`，不复用应用个人工作区外键表。
+
+公共主 rollout 在共享副本同步和本机进程快照完成后即可继续排空；某个个人 worktree 因覆盖风险、未完成 merge 或真实冲突而进入 `AWAITING_USER` 时，不占用主 rollout 锁。用户处理完成后独立 worker 原生 merge 同一目标 commit 并转为 `SYNCED`；删除 worktree 或服务器退役时转为级联删除或 `ABANDONED`。迁移只包含生产运行状态结构、索引和注释，不写测试、演示或个人数据。
+
 ## V1 核心表
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V1__create_core_tables.sql` 创建以下表：
@@ -1275,10 +1284,56 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 | `night_execution_tasks` | 夜间异步执行任务主表 |
 | `night_execution_session_locks` | 待执行夜间任务会话写锁表 |
 | `night_execution_slot_reservations` | 夜间15分钟启动时段容量占位表 |
+| `toolbox_tool_click_events` | 工具盒子永久点击明细表 |
+| `toolbox_tool_click_totals` | 工具盒子累计点击投影表 |
+| `toolbox_tool_user_click_states` | 用户与工具30秒计数窗口状态表 |
 
 ## V20260723145200 应用工作空间启用状态
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260723145200__add_application_workspace_enabled.sql` 为 `application_workspaces` 增加非空布尔字段 `enabled`，默认值为 `true`。存量记录和新建记录因此默认继续出现在工作空间切换入口；设置页显式停用后只影响切换模板列表，不删除关联版本、个人工作区、运行态工作区或最近使用记录。
+
+## V20260727203500 工具盒子点击跟踪
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260727203500__create_toolbox_click_tracking.sql` 新增三个生产业务表，不写工具目录、测试点击或演示数据。目录继续由版本化 classpath JSON 管理。
+
+### `toolbox_tool_click_events`
+
+永久 append-only 点击明细，`event_id` 是客户端一次打开动作生成的最长 128 字符全局幂等键。表保存稳定 `tool_id`、`IT_TOOLS/OMNI_TOOLS` 来源、可空用户、traceId、是否计入累计和服务端点击时间。用户删除时外键 `ON DELETE SET NULL`，历史事件继续用于总量审计，但不再关联身份。
+
+索引 `(tool_id, clicked_at desc)` 支撑单工具容量排查，`(user_id, clicked_at desc)` 支撑用户删除/审计定位。首版不提供明细查询 API，也不建立清理任务。
+
+### `toolbox_tool_click_totals`
+
+每个稳定工具最多一行累计投影，保存非负 `click_count`、最后有效计数时间和更新时间。零点击工具不预写行；目录查询将缺失投影映射为 0。热门查询不直接扫描事件明细，业务服务只批量读取当前目录工具的累计投影，再按累计数、最后计数时间和目录顺序排序。
+
+### `toolbox_tool_user_click_states`
+
+以 `(tool_id, user_id)` 为主键保存该用户对该工具最后一次有效计数时间。MyBatis XML 使用 PostgreSQL `INSERT ... ON CONFLICT ... DO UPDATE ... WHERE` 原子竞争 30 秒窗口；只有影响一行的请求递增累计并标记事件 counted。用户删除时 `ON DELETE CASCADE`，不保留可识别的节流状态。
+
+### 事务、兼容与监控
+
+- `eventId` 幂等插入、窗口竞争、累计递增和事件 counted 标记在同一个 Spring 事务中；重复事件直接返回当前累计。
+- 所有运行 SQL 都在 `ToolboxClickMapper.xml`，没有新增 JDBC SQL。PostgreSQL 是生产方言，H2 `MERGE` 只用于 PostgreSQL 模式集成测试。
+- 三张表和两个 API 都是向后兼容新增；旧 Java/前端不会访问。回滚应用或工具镜像时不回退 migration，累计数据保留。
+- `toolbox_tool_click_events` 永久保留且会持续增长。数据库监控必须采集表行数、表/索引字节数、日增量和剩余容量；达到容量阈值前需另行评审归档/保留策略，不能在首版临时删除明细。
+- PostgreSQL Testcontainers 验证完整 Flyway、MyBatis 方言、并发窗口单赢家和用户删除匿名化；H2 集成测试验证首次点击、窗口内重复、窗口到期和 `eventId` 幂等。
+
+## V20260728103000 应用源码快照持久化
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260728103000__create_app_source_snapshot_tables.sql` 新增七类生产状态表，不写测试、演示或环境专属业务数据：
+
+- `app_source_repository_slots`：每个 repositoryId 唯一，保存 active/pending generation、下一代次、最近操作和 `lock_version`；分配流程使用 `SELECT FOR UPDATE` 或显式版本 CAS，旧执行者不能覆盖新槽位。
+- `app_source_snapshots`：以 `(repository_id, generation)` 为主键，冻结仓库英文名、`PERSONAL/TEAM` 用途、owner、分支、目标提交和 JSONB 结构化选择路径；领域对象和数据库都强制 `expires_at = accepted_at + 1..72` 整小时，默认 48 小时，`index_sha256` 非空时必须为 64 位十六进制。每个仓库最多一个 `ACTIVE` 快照。
+- `app_source_replicas`：以 repository/generation/server 唯一，保存可空运行态 Workspace、状态、attempt、退避和绝对租约；初始化使用 insert-if-absent，不覆盖已进入 `RUNNING/READY` 的行，后续写回同时校验 generation、owner、未过期租约和合法状态流转。
+- `app_source_operations` / `app_source_operation_steps`：保存用户操作、幂等摘要和全局/服务器步骤。部分唯一索引分别固定 `(operation_id, step_code)` 的 GLOBAL 步骤和 `(operation_id, linux_server_id, step_code)` 的 SERVER 步骤，避免 NULL 破坏全局幂等；步骤 upsert 只允许从 `PENDING/RUNNING` 向合法状态推进，终态行不再被更新。
+- `app_source_cleanup_tasks`：以 repository/generation/server 唯一，保存绝对 `delete_at`、认领租约和安全错误。到 operation 和 snapshot 的两个外键均为 `DEFERRABLE INITIALLY DEFERRED`，业务事务可以先插 cleanup，再补齐 operation/snapshot，提交时统一校验；其它服务器外键仍即时校验。
+- `app_source_recent_selections`：仅以 userId 唯一，保存 app/repository/generation，不保存 workspaceId；打开时按用户当前 opencode 进程服务器解析 READY 副本。
+
+同一 migration 初始化 `platform=all`、`editable=false` 的 `OPENCODE_APP_SOURCE_ROOT`，数据库值精确为 `${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/appsource/`。SQL 通过 `'$' || '{SYS_DATA_ROOT_DIR}/...'` 拼接规避 Flyway 占位符替换，运行态继续由通用参数解析器按当前或目标平台展开。
+
+兼容策略：所有表和参数均为向后兼容新增，旧 Java 不访问这些表；回滚应用版本时保留 migration 和历史 cleanup。H2 使用等价时间函数验证可移植 mapper 行为；JSONB、整小时过期/十六进制摘要约束、步骤终态保护、部分唯一索引、完整 Flyway 链及 cleanup 第一写的延迟外键由 PostgreSQL 16 Testcontainers 原样验证。
+
+运行态只通过 `AppSourceMapper.xml` 访问这些关系表，不新增 JDBC SQL。物化/重试事务先对 `code_repositories` 执行 `SELECT FOR UPDATE`，cleanup task 是第一条持久化写；副本完成和 cleanup 完成分别用 generation、服务器、owner、绝对租约 fencing。dispatcher 按服务器扫描 `PENDING` 和租约已到期的 `RUNNING` 副本，用数据库事实恢复队列拒绝、广播丢失与进程重启；worker 通过 repository/generation/server 对应的非终态 operation step 定位待完成操作，重试登记也在仓库行锁内拒绝同 generation/server 的重叠非终态操作。Runtime Workspace 反查直接按受外键保护的 `runtime_workspace_id` 查询；旧 generation 提升为立即清理时，`makeCleanupDueNow` 只提前 `PENDING/RETRY_WAIT` 的绝对执行时间，不覆盖正在执行或终态任务；清理成功把 replica 单向推进到 `CLEANED`，同步归档 Workspace，并且只在 slot 仍指向该 generation 时清除 active。真实 H2 PostgreSQL 模式集成测试执行行锁、claimable 副本扫描、operation step 精确绑定、Workspace 反查、到期提前和清理终态 XML；PostgreSQL 16 Testcontainers 还原样执行生产 mapper 的上述查询、due scan/提前、双 owner cleanup 租约 fencing 和生产约束。
 
 ### 字段注释原则
 

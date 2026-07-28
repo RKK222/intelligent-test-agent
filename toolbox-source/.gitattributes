@@ -1,0 +1,7 @@
+# 锁定源码中的这些行尾来自上游；保留原始字节，避免交付源码与版本证据产生无意义偏差。
+it-tools/scripts/create-tool.mjs whitespace=-trailing-space
+it-tools/src/shims.d.ts whitespace=-trailing-space
+it-tools/src/tools/list-converter/list-converter.models.test.ts whitespace=-trailing-space
+it-tools/src/tools/svg-placeholder-generator/svg-placeholder-generator.vue whitespace=-trailing-space
+omni-tools/src/pages/tools/csv/csv-to-yaml/index.tsx whitespace=-trailing-space
+omni-tools/src/pages/tools/json/validateJson/index.tsx whitespace=-trailing-space

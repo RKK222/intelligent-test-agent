@@ -15,6 +15,13 @@ public interface PublicAgentConfigRolloutMapper {
             @Param("scope") String scope,
             @Param("scopeKey") String scopeKey);
 
+    PublicAgentConfigRolloutStatusRow findLatestRolloutStatus(
+            @Param("scope") String scope,
+            @Param("scopeKey") String scopeKey);
+
+    List<PublicAgentConfigRolloutServerStatusRow> findRolloutServerStatuses(
+            @Param("rolloutId") String rolloutId);
+
     String findBlockingRolloutId(@Param("userId") String userId);
 
     PublicAgentConfigRolloutPreparationRow findPreparing(
@@ -32,6 +39,7 @@ public interface PublicAgentConfigRolloutMapper {
             @Param("branch") String branch,
             @Param("expectedCommitHash") String expectedCommitHash,
             @Param("previousCommitHash") String previousCommitHash,
+            @Param("discardSharedRuntimeChanges") boolean discardSharedRuntimeChanges,
             @Param("initiatedByUserId") String initiatedByUserId,
             @Param("initiatedLinuxServerId") String initiatedLinuxServerId,
             @Param("traceId") String traceId,
@@ -69,6 +77,10 @@ public interface PublicAgentConfigRolloutMapper {
             @Param("now") Instant now);
 
     int abandonRolloutWorktrees(
+            @Param("linuxServerId") String linuxServerId,
+            @Param("now") Instant now);
+
+    int abandonPublicRolloutWorktrees(
             @Param("linuxServerId") String linuxServerId,
             @Param("now") Instant now);
 
@@ -114,6 +126,48 @@ public interface PublicAgentConfigRolloutMapper {
             @Param("retryCount") int retryCount,
             @Param("nextRetryAt") Instant nextRetryAt,
             @Param("errorMessage") String errorMessage,
+            @Param("now") Instant now);
+
+    void upsertPendingPublicWorktrees(
+            @Param("rolloutId") String rolloutId,
+            @Param("linuxServerId") String linuxServerId,
+            @Param("targetCommit") String targetCommit,
+            @Param("traceId") String traceId,
+            @Param("rows") List<com.enterprise.testagent.domain.configuration.PublicAgentConfigWorktreePending> rows,
+            @Param("now") Instant now);
+
+    List<PublicAgentConfigWorktreeRow> findClaimablePublicWorktrees(
+            @Param("linuxServerId") String linuxServerId,
+            @Param("now") Instant now,
+            @Param("limit") int limit);
+
+    int markPublicWorktreeProcessing(
+            @Param("rolloutId") String rolloutId,
+            @Param("worktreeId") String worktreeId,
+            @Param("leaseToken") String leaseToken,
+            @Param("leaseUntil") Instant leaseUntil,
+            @Param("now") Instant now);
+
+    int markPublicWorktreeRetry(
+            @Param("rolloutId") String rolloutId,
+            @Param("worktreeId") String worktreeId,
+            @Param("leaseToken") String leaseToken,
+            @Param("retryCount") int retryCount,
+            @Param("nextRetryAt") Instant nextRetryAt,
+            @Param("reason") String reason,
+            @Param("now") Instant now);
+
+    int markPublicWorktreeSynchronized(
+            @Param("rolloutId") String rolloutId,
+            @Param("worktreeId") String worktreeId,
+            @Param("leaseToken") String leaseToken,
+            @Param("now") Instant now);
+
+    int abandonPublicWorktree(
+            @Param("rolloutId") String rolloutId,
+            @Param("worktreeId") String worktreeId,
+            @Param("leaseToken") String leaseToken,
+            @Param("reason") String reason,
             @Param("now") Instant now);
 
     void upsertPendingApplicationWorktrees(
