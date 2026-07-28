@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { FolderGit2 } from "lucide-vue-next";
+import { FolderGit2, GitPullRequest } from "lucide-vue-next";
 import type { CurrentUser } from "@test-agent/shared-types";
 import OpencodePublicConfigManagementPanel from "./OpencodePublicConfigManagementPanel.vue";
+import ApplicationGitRefreshManagementPanel from "./ApplicationGitRefreshManagementPanel.vue";
 
 defineProps<{
   currentUser: CurrentUser | null;
 }>();
 
-type ConfigMenuKey = "opencode-public";
+type ConfigMenuKey = "opencode-public" | "application-git";
 
 const activeKey = ref<ConfigMenuKey>("opencode-public");
 </script>
@@ -24,9 +25,18 @@ const activeKey = ref<ConfigMenuKey>("opencode-public");
         <FolderGit2 class="ta-config-submenu-icon" :stroke-width="1.6" />
         <span>TestAgent公共配置管理</span>
       </button>
+      <button
+        type="button"
+        :class="['ta-config-submenu-item', { 'is-active': activeKey === 'application-git' }]"
+        @click="activeKey = 'application-git'"
+      >
+        <GitPullRequest class="ta-config-submenu-icon" :stroke-width="1.6" />
+        <span>应用 Git 刷新</span>
+      </button>
     </nav>
     <div class="ta-config-content">
       <OpencodePublicConfigManagementPanel v-if="activeKey === 'opencode-public'" :current-user="currentUser" />
+      <ApplicationGitRefreshManagementPanel v-else :current-user="currentUser" />
     </div>
   </section>
 </template>

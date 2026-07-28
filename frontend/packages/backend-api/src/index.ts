@@ -35,6 +35,7 @@ import type {
   ApplicationWorkspaceTemplate,
   ApplicationWorkspaceVersion,
   ApplicationDefinition,
+  ApplicationGitRefreshResult,
   CreateApplicationPayload,
   ApplicationMember,
   ApplicationWorkspaceConfig,
@@ -905,6 +906,12 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     gitPullPersonalWorkspace: (personalWorkspaceId: string) =>
       routedRequest<PersonalWorkspaceGitPullResult>(
         `${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/git-pull`,
+        { method: "POST" }
+      ),
+    /** 超级管理员刷新应用全部 feature 仓库组，并触发相关个人 worktree 安全收敛。 */
+    refreshApplicationGit: (appId: string) =>
+      request<ApplicationGitRefreshResult>(
+        `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/git-refresh`,
         { method: "POST" }
       ),
     getRecentManagedWorkspace: () => request<ManagedWorkspaceRuntime | null>(`${workspaceManagementBase}/recent-workspace`),

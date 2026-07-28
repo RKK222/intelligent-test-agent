@@ -258,6 +258,32 @@ public final class ManagedWorkspaceResponses {
             List<String> changedFiles) {
     }
 
+    /** 超级管理员按应用刷新全部 feature 仓库组后的汇总结果。 */
+    public record ApplicationGitRefreshResponse(
+            String appId,
+            String appName,
+            int totalGroups,
+            int updatedGroups,
+            int unchangedGroups,
+            int failedGroups,
+            List<ApplicationGitRefreshGroupResponse> groups) {
+    }
+
+    /** 单个“版本库 + 版本 + 分支”物理 feature 仓库组的刷新结果。 */
+    public record ApplicationGitRefreshGroupResponse(
+            String versionId,
+            String repositoryId,
+            String repositoryName,
+            String version,
+            String branch,
+            int workspaceCount,
+            String previousCommitHash,
+            String commitHash,
+            String status,
+            String errorCode,
+            String message) {
+    }
+
     public record WorkspaceDiffFileResponse(String path, String status, boolean conflict) {
     }
 

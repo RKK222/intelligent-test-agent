@@ -1301,6 +1301,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 鉴权：
 
 - 所有接口要求已登录用户。
+- `POST /applications/{appId}/git-refresh` 是共享控制面操作，仅允许 `SUPER_ADMIN`，不要求超级管理员先加入目标应用或启动个人 OpenCode；其它应用工作区接口仍按下述成员规则校验。
 - 应用、模板、版本、切换最近使用等应用相关接口要求当前用户是 `application_members` 中的有效成员；不区分管理员和普通成员。
 - 个人工作区接口要求当前用户是个人工作区拥有者且属于对应应用。
 - 托管工作区成员校验失败返回 `FORBIDDEN`，message 固定包含当前加载上下文：`无该应用工作区权限：当前正在加载应用 {appName}({appId})，版本 {version/versionId/未确定}，工作区 {workspaceKind}:{workspaceName/workspaceId/未确定}`。`details` 仅放安全业务字段：`loadingStage`、`appId`、`appName`、`versionId`、`version`、`applicationWorkspaceId`、`workspaceKind`、`workspaceName`、`workspaceId`、`personalWorkspaceId`；无值字段不返回。
@@ -1308,6 +1309,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `GET` | `/applications` | 查询当前用户加入的启用应用。 |
+| `POST` | `/applications/{appId}/git-refresh` | 超级管理员按应用刷新全部物理 feature 仓库组，并触发相关个人 worktree 与应用 Agent 配置安全收敛。 |
 | `GET` | `/applications/{appId}/workspace-templates` | 查询应用工作空间切换模板，只返回 `application_workspaces.enabled=true` 的配置。 |
 | `GET` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 查询模板下已创建的应用版本工作区。 |
 | `POST` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 创建或接管应用版本工作区，并创建运行态 Workspace。 |
@@ -1337,6 +1339,36 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/publish-preview` | 发布前预检应用分支 HEAD、待合入提交数、A/M/D/R 汇总和样例路径；不修改个人 worktree。若个人 worktree 已处于未完成 merge，只返回已记录的应用 HEAD，不重复拉取远程。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/commit` | 仅在个人 worktree stage 并提交 `files` 白名单；不推送、不广播。请求包含 `.opencode/**` 时要求 `APP_ADMIN`（`SUPER_ADMIN` 继承）。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 要求 `files` 已在个人 worktree 本地提交，再从个人 `HEAD` 按白名单投影到应用 feature worktree，提交并推送；不 merge 整个个人分支。请求包含 `.opencode/**` 时要求 `APP_ADMIN`，响应包含 `currentStep/executedCommands`。 |
+
+`POST /applications/{appId}/git-refresh` 使用当前超级管理员保存的唯一 SSH Key，对应用下每个去重后的 `repositoryId + version + branch` 物理 feature 仓库组执行 fetch 和只允许快进的更新。feature 工作树存在未提交修改、远端发生分叉、SSH Key 缺失或 Git 不可用时，该组返回 `FAILED`，其它组继续执行；接口以 HTTP 成功响应返回完整汇总，调用方必须检查 `failedGroups`，不能把部分成功显示为全量成功。更新或已是最新的组都会重新发布固定目标并触发相关服务器个人 worktree 的原生 Git merge；非重叠 staged、unstaged 和 untracked 修改保留，可能被覆盖的 worktree 保持待处理，真实冲突保留三方 index，不执行 stash、reset 或强制覆盖个人内容。远端差异包含应用 `.opencode/**` 时复用既有应用 Agent rollout，仅在目标提交已进入对应个人 worktree 后等待该用户空闲并 dispose。该入口不要求超级管理员拥有 READY OpenCode 进程，也不发送 `X-Test-Agent-Linux-Server-Id` 首跳提示。
+
+响应示例：
+
+```json
+{
+  "appId": "app-demo",
+  "appName": "示例应用",
+  "totalGroups": 2,
+  "updatedGroups": 1,
+  "unchangedGroups": 0,
+  "failedGroups": 1,
+  "groups": [
+    {
+      "versionId": "awv_1",
+      "repositoryId": "repo_1",
+      "repositoryName": "测试工作库",
+      "version": "20260728",
+      "branch": "feature_testagent_20260728",
+      "workspaceCount": 2,
+      "previousCommitHash": "abc123",
+      "commitHash": "def456",
+      "status": "UPDATED",
+      "errorCode": null,
+      "message": "已刷新 feature，并触发相关 worktree 收敛"
+    }
+  ]
+}
+```
 
 `POST /applications/{appId}/workspace-templates/{templateId}/versions` 请求体：
 

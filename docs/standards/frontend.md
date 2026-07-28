@@ -162,6 +162,7 @@ corepack pnpm e2e:real
 - 改 API client：补请求、响应、错误、超时、取消、鉴权头和 agentId URL 测试。
 - 改 RunEvent SSE：补 agent-scoped URL、连接、断线、`Last-Event-ID`、重复事件、乱序事件和取消订阅测试。
 - 改工作台/文件树/编辑器/Diff/对话/测试面板：按对应交互场景补回归测试。
+- 改超级管理员共享控制面：组件测试必须覆盖角色可见性、确认交互、部分失败结果展示；backend-api 测试还要断言请求不误带用户进程服务器路由头。
 
 ### Mock 原则
 

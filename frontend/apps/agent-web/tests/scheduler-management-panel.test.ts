@@ -4,12 +4,15 @@ import { fireEvent, render, waitFor } from "@testing-library/vue";
 import type { Component } from "vue";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
 import type {
+  ApplicationDefinition,
+  ApplicationGitRefreshResult,
   CurrentUser,
   OpencodeRuntimeManagementOverview,
   PublicAgentRepositoryStatus
 } from "@test-agent/shared-types";
 import SystemManagementPanel from "../src/components/system/SystemManagementPanel.vue";
 import OpencodePublicConfigManagementPanel from "../src/components/system/OpencodePublicConfigManagementPanel.vue";
+import ApplicationGitRefreshManagementPanel from "../src/components/system/ApplicationGitRefreshManagementPanel.vue";
 
 function queryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -60,6 +63,34 @@ const publicRepository: PublicAgentRepositoryStatus = {
   message: "未初始化"
 };
 
+const application: ApplicationDefinition = {
+  appId: "app_gcms",
+  appName: "F-GCMS",
+  enabled: true
+};
+
+const applicationRefreshResult: ApplicationGitRefreshResult = {
+  appId: "app_gcms",
+  appName: "F-GCMS",
+  totalGroups: 1,
+  updatedGroups: 1,
+  unchangedGroups: 0,
+  failedGroups: 0,
+  groups: [{
+    versionId: "awv_1",
+    repositoryId: "repo_1",
+    repositoryName: "GCMS",
+    version: "20260707",
+    branch: "feature_testagent_20260707",
+    workspaceCount: 2,
+    previousCommitHash: "commit_before",
+    commitHash: "commit_after",
+    status: "UPDATED",
+    errorCode: null,
+    message: "已刷新 feature，并触发相关 worktree 收敛"
+  }]
+};
+
 function api(overrides: Partial<BackendApiClient> = {}) {
   return {
     createXxlJobSsoTicket: vi.fn().mockRejectedValue(new Error("XXL-JOB unavailable in navigation test")),
@@ -82,6 +113,8 @@ function api(overrides: Partial<BackendApiClient> = {}) {
       commitHash: "abc1234",
       message: "已初始化"
     }),
+    listApplications: vi.fn().mockResolvedValue([application]),
+    refreshApplicationGit: vi.fn().mockResolvedValue(applicationRefreshResult),
     ...overrides
   } as Partial<BackendApiClient> as BackendApiClient;
 }
@@ -164,6 +197,33 @@ describe("scheduler management panel", () => {
     expect(view.queryByRole("button", { name: "初始化" })).toBeNull();
     expect(view.queryByRole("button", { name: "拉取更新" })).toBeNull();
     expect(backendApi.listPublicAgentRepositories).not.toHaveBeenCalled();
+    view.queryClient.clear();
+  });
+
+  it("lets super admin refresh every feature and related worktree for one application", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const backendApi = api();
+    const view = renderWithApi(ApplicationGitRefreshManagementPanel, backendApi);
+
+    expect(await view.findByText("F-GCMS")).toBeTruthy();
+    await fireEvent.click(view.getByRole("button", { name: "刷新应用 Git：F-GCMS" }));
+
+    await waitFor(() => expect(backendApi.refreshApplicationGit).toHaveBeenCalledWith("app_gcms"));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("全部 feature 仓库组"));
+    expect(await view.findByText("共 1 组：成功 1，更新 1，已是最新 0，失败 0")).toBeTruthy();
+    await fireEvent.click(view.getByText("查看仓库组明细"));
+    expect(await view.findByText(/GCMS · 20260707 · feature_testagent_20260707 · 2 个 workspace/)).toBeTruthy();
+    view.queryClient.clear();
+  });
+
+  it("keeps application Git refresh unavailable to non-super-admin users", async () => {
+    const backendApi = api();
+    const appAdmin: CurrentUser = { ...currentUser, roles: ["APP_ADMIN"] };
+    const view = renderWithApi(ApplicationGitRefreshManagementPanel, backendApi, appAdmin);
+
+    expect(await view.findByText("当前账号无配置管理权限")).toBeTruthy();
+    expect(backendApi.listApplications).not.toHaveBeenCalled();
+    expect(backendApi.refreshApplicationGit).not.toHaveBeenCalled();
     view.queryClient.clear();
   });
 

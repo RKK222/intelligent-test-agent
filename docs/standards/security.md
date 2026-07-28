@@ -166,6 +166,7 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 
 - 公共 `workspace-git` Tool 禁止直接执行原生 Git 绕过平台；所有副作用必须调用 agent-scoped 专用入口并复用 workspace-management 的 owner、路径角色、`spec/**` 禁发布、应用同步和冲突规则。
 - 对话中的个人拉取仅能合并当前会话绑定 owner 在当前应用的个人 worktree；应用 workspace 和应用 Agent 统一使用 Git 原生合并保护，禁止自动 stash/reset，也不得把该凭据扩大为共享版本、其他用户或公共 Agent 的更新权限。
+- 超级管理员“应用 Git 刷新”是单独的共享控制面能力，必须在 HTTP 入口强校验 `SUPER_ADMIN`，不以应用成员或 READY OpenCode 进程替代鉴权。Git 远端访问只使用当前超级管理员保存的唯一 SSH Key；物理 feature 只允许快进，脏工作树或分叉必须按仓库组失败。向相关个人 worktree 收敛时继续使用原生 merge，禁止 stash、reset 或强制覆盖个人 staged、unstaged、untracked 内容；部分失败必须在响应中显式计数和列明，不能伪装为全部成功。
 - Tool 凭据由 `OpencodeProcessStartupService` 按用户签发，只允许专用 Git 端点使用，不能被通用用户 Token 过滤器接受，也不能访问其它平台 API；签名密钥不得注入 OpenCode 进程。凭据包含过期时间，验证时必须实时检查用户启用状态和角色。
 - 当前 workspace 必须由远端 session 经平台 agent binding 反查，禁止接受 Tool 传入 workspace ID、个人 workspace ID、物理路径或目标服务器。owner 不一致、非个人 workspace 或绑定缺失必须失败关闭。
 - `discard`、`publish`、冲突解决和取消合并必须先显示 OpenCode permission 确认；Tool 返回给模型的错误详情只保留原因、相对文件和并发提交等安全字段，不返回凭据、Git 命令或物理路径。

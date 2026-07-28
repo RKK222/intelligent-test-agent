@@ -1810,6 +1810,52 @@ describe("backend-api", () => {
     expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: "POST" }));
   });
 
+  it("refreshes all application Git groups through the super-admin control plane", async () => {
+    const result = {
+      appId: "app_gcms",
+      appName: "F-GCMS",
+      totalGroups: 1,
+      updatedGroups: 1,
+      unchangedGroups: 0,
+      failedGroups: 0,
+      groups: [{
+        versionId: "awv_1",
+        repositoryId: "repo_1",
+        repositoryName: "GCMS",
+        version: "20260707",
+        branch: "feature_testagent_20260707",
+        workspaceCount: 2,
+        previousCommitHash: "before",
+        commitHash: "after",
+        status: "UPDATED",
+        errorCode: null,
+        message: "已刷新 feature，并触发相关 worktree 收敛"
+      }]
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: result
+    }), { status: 200 }));
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      routeLinuxServerId: () => "linux-user-node"
+    });
+
+    await expect(client.refreshApplicationGit("app/gcms")).resolves.toMatchObject({
+      appId: "app_gcms",
+      updatedGroups: 1
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/workspace-management/applications/app%2Fgcms/git-refresh",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect((fetcher.mock.calls[0]?.[1]?.headers as Headers).get(LINUX_SERVER_ROUTE_HEADER)).toBeNull();
+  });
+
   it("checks version repository access before personal workspace creation", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({

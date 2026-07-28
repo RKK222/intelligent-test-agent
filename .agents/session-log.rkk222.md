@@ -2571,3 +2571,27 @@
 
 - 公共 Agent 的同一次保存/手动重载只触发一次 dispose，忙碌冲突只提示一次；个人拉取只会登记当前用户的有效运行进程。
 - 未改变应用 workspace、应用 Agent、公共 Agent 的角色与目录权限、stage/commit/push 白名单、共享 target、普通文件同步或既有 dispose 范围。无 HTTP/RunEvent、生产数据库结构或 migration、generated SDK、OpenCode 源码和环境配置变更；测试-only H2 fixture 不进入生产 Flyway。
+
+### 2026-07-28 - 新增超级管理员应用 Git 刷新
+
+### Why
+
+- 应用版本级 Git 拉取入口已停用，现有工作区“拉取远程”只更新当前用户，超级管理员缺少按应用刷新全部物理 feature 仓库组的页面入口。
+- 公共配置初始化与应用 Git 刷新属于不同生命周期；公共配置已初始化后应继续只显示“拉取更新”，不能借此替代应用仓库刷新。
+
+### What
+
+- 新增仅 `SUPER_ADMIN` 可调用的应用 Git 刷新接口和“系统管理 → 配置管理 → 应用 Git 刷新”页面，按代码仓库、版本和分支归并物理 feature 仓库组，逐组返回更新、跳过、失败、个人 worktree 合并及应用 Agent 重载统计。
+- 每组复用既有共享 target/服务器 replica 快进更新、原生 worktree 安全合并与应用 Agent rollout；任一组失败不阻断其他组，存在脏共享仓库、分支漂移、非快进或个人文件覆盖风险时不 stash、reset 或覆盖用户改动。
+- 保留个人“拉取远程”和公共配置初始化/拉取现有语义；已停用的旧版本级拉取接口不恢复。同步 HTTP API、事件说明、安全、模块图、前后端 README/PACKAGE、测试矩阵、共享类型和用户手册。
+
+### How
+
+- JDK 25 下后端完整 `mvn test` 的 20 个模块全部通过；定向 workspace service 73 项、controller 18 项均通过。
+- 前端全仓 lint、typecheck、test、build 通过，Vitest 为 97 个文件、1644 项通过、1 项跳过；`tools/verify-ai-docs.sh` 与 `git diff --check` 通过。
+- 使用未修改的 `.env.test`、test profile 和 JDK 25 完整重启 backend、opencode-manager、frontend；backend health/readiness 为 `UP`，前端与 CORS 预检返回 200。通过真实浏览器以超级管理员登录，确认新页面列出 3 个应用和对应刷新按钮；为避免改动现有测试仓库，未实际触发刷新。
+
+### Result
+
+- 超级管理员现在可从独立页面按应用刷新所有相关 feature 仓库组，并安全收敛相关个人 worktree 与应用 Agent 配置；普通管理员和普通用户无权调用。
+- HTTP API 为 additive 新增；未新增或变更 RunEvent/SSE、数据库/Flyway/SQL、generated SDK、OpenCode 源码或环境配置。安全面新增强制超级管理员鉴权，兼容性上不改变个人拉取和公共配置既有入口。

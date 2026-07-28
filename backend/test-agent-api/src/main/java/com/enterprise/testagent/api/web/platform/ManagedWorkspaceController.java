@@ -86,6 +86,18 @@ public class ManagedWorkspaceController {
                 RuntimeApiSupport.traceId(exchange)));
     }
 
+    /** 超级管理员刷新应用全部 feature 仓库组，并触发相关个人 worktree 安全收敛。 */
+    @PostMapping("/applications/{appId}/git-refresh")
+    public ApiResponse<Object> refreshApplicationGit(
+            @PathVariable String appId,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        return ok(exchange, service.refreshApplicationGit(
+                appId,
+                principal.userId(),
+                RuntimeApiSupport.traceId(exchange)));
+    }
+
     /** 拉取只作用于当前登录用户拥有的个人 worktree，不更新应用版本或其它用户。 */
     @PostMapping("/personal-workspaces/{personalWorkspaceId}/git-pull")
     public ApiResponse<Object> gitPullPersonalWorkspace(

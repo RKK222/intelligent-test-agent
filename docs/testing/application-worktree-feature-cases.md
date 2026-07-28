@@ -97,6 +97,9 @@ OPENCODE_CONFIG_DIR / manager configPath
 | 写入、暂存、提交、发布应用 Agent/Skill/JSONC | 禁止 | 允许 | 允许，且需为应用成员 |
 | 读取公共 Agent/Skill | 允许，读取共享运行副本 | 允许，读取共享运行副本 | 允许 |
 | 创建/写入/提交/推送公共个人 worktree | 禁止 | 禁止 | 允许，仅本人的 `public-{userId}` |
+| 系统管理按应用刷新全部 feature 与相关 worktree | 禁止 | 禁止 | 允许；不要求成为应用成员，但使用本人的 SSH Key |
+
+超级管理员应用刷新按 `repositoryId + version + branch` 去重物理 feature 组，逐组只允许快进；一组失败不阻断其它组，页面必须展示部分失败。成功组继续走固定 target、多服务器广播、个人 worktree 原生 merge 和应用 Agent rollout，不 stash/reset 个人内容。
 
 ## 3. 保存、提交和推送后的影响
 
@@ -275,6 +278,7 @@ tools/create-workspace-branch-model-test-data.sh
 | INT-04 spec 发布拒绝 | 1. 任意角色先把 `spec/test-data/local-only-{tag}.md` 提交到个人分支。<br>2. 单独选择该路径点击提交并推送。<br>3. 再用 `./spec/...` 或重复分隔符别名调用一次。<br>4. 检查个人 HEAD 和远程 feature。 | `spec/**` 正常路径及规范化别名。 | 本地提交保留；两次发布都返回 `FORBIDDEN`；远程 feature 不含路径且 HEAD 不前进。 |
 | INT-05 普通成员写应用配置拒绝 | 1. 用 `USER` 读取应用 Agent。<br>2. 分别调用写入、stage、commit、publish。<br>3. 检查文件、index、HEAD 和远程 ref。 | 应用 `.opencode/agents/**` 测试路径。 | 读取允许；所有写操作返回 `FORBIDDEN`；工作树、index、个人 HEAD 和远程 ref 均不变化。 |
 | INT-06 个人 workspace 独立拉取 | 1. 在远端 feature 准备普通文件和应用 `.opencode/agents/**` 提交。<br>2. A 保持 clean；C 先保留一个与远端不重叠的 dirty 文件，再另造一个会被远端覆盖的 dirty/untracked 文件。<br>3. A 从当前 workspace 标题栏“…”菜单点击“拉取远程”，核对确认文案后选择“不再提示”；再次操作应直接进入过程弹框。<br>4. C 分别在两种本地状态下点击“拉取远程”。<br>5. 检查弹框中的 fetch/merge 顺序、更新文件、`runtimeReloadStatus/runtimeReloadId`，并刷新或关闭页面后确认 dispose 仍会完成；再核对共享 target、A/B/C HEAD、远程 ref 和运行态。 | 专用 feature；同时覆盖 workspace 与应用 Agent 路径。 | A 拉取后应用 workspace 和应用 Agent 都更新，且只有 A HEAD 变化；结果列出实际远程更新文件。A 进程运行时返回 `SCHEDULED` 并只生成 A 的 PERSONAL_APPLICATION server/target，空闲后 dispose；未运行时返回 `NOT_RUNNING` 且不建任务。C 的不重叠改动原样保留且拉取成功，会被覆盖时返回 `LOCAL_CHANGES` 并只列实际阻塞文件。B、共享 target、远程 ref 和公共 Agent 不变；无 commit/push 或服务器广播。应用 Agent 差异只处理拉取成功者本人，APPLICATION/PUBLIC rollout 均不启动。 |
+| INT-07 超级管理员刷新整个应用 Git | 1. 用 `SUPER_ADMIN` 打开“系统管理 → 配置管理 → 应用 Git 刷新”，选择含同物理仓库多个目录、另一独立仓库组的专用测试应用。<br>2. 在远端准备普通文件和 `.opencode/**` 更新，并让一个个人 worktree 保留非重叠 dirty/staged/untracked 内容。<br>3. 确认刷新，展开逐组结果；再制造一组 feature 脏工作树或远端分叉后重试。<br>4. 用 `APP_ADMIN` 和 `USER` 直接请求同一接口。 | 专用测试应用；超级管理员自己的 SSH Key 对全部仓库有权限。 | 同一 `repositoryId + version + branch` 只执行一组，远端可快进组显示 `UPDATED` 或 `UP_TO_DATE`，target/replica 与相关个人 worktree 收敛，非重叠本地状态保留；`.opencode/**` 变化只在提交已合入对应 worktree 后触发其应用 rollout。失败组显示 `FAILED/errorCode` 且其它组继续，页面汇总 `failedGroups` 不误报全成功；无 stash/reset。非超管返回 `FORBIDDEN`；请求不要求发起人加入应用、READY OpenCode 或用户进程服务器路由头。 |
 
 ### 7.4 自动化回归入口
 

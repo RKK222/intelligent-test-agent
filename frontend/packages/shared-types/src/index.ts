@@ -2145,6 +2145,30 @@ export type ApplicationDefinition = {
   enabled: boolean;
 };
 
+export type ApplicationGitRefreshGroup = {
+  versionId: string;
+  repositoryId: string;
+  repositoryName: string;
+  version: string;
+  branch: string;
+  workspaceCount: number;
+  previousCommitHash?: string | null;
+  commitHash?: string | null;
+  status: "UPDATED" | "UP_TO_DATE" | "FAILED";
+  errorCode?: string | null;
+  message: string;
+};
+
+export type ApplicationGitRefreshResult = {
+  appId: string;
+  appName: string;
+  totalGroups: number;
+  updatedGroups: number;
+  unchangedGroups: number;
+  failedGroups: number;
+  groups: ApplicationGitRefreshGroup[];
+};
+
 export type CreateApplicationPayload = {
   appId: string;
   appName: string;
