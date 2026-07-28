@@ -356,6 +356,22 @@ class UserOpencodeBackendRoutingWebFilterTest {
     }
 
     @Test
+    void routesAppSourceLocalLifecycleEndpointsToTheUsersBoundJava() {
+        assertRequestIsForwardedGet(
+                "/api/internal/platform/workspace-management/applications/app_1/app-source-repositories");
+        assertRequestIsForwarded(
+                "/api/internal/platform/workspace-management/applications/app_1/app-source-repositories/repo_1/open");
+        assertRequestIsForwardedGet(
+                "/api/internal/platform/workspace-management/recent-app-source");
+    }
+
+    @Test
+    void routesAppSourceReplicaFileDiscoveryThroughTheCommonBackendForwarder() {
+        assertRequestIsForwarded(
+                "/api/internal/platform/workspace-management/workspaces/wrk_app_source_replica/file-ws-route");
+    }
+
+    @Test
     void routesSideQuestionRunStartToActiveBindingWithoutCallingLocalChain() {
         assertRequestIsForwarded(
                 "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/side-question/runs");

@@ -62,6 +62,8 @@ packages/shared-types
 
 `apps/agent-web` 的 activity rail 在代码/监控入口下方提供统一 Agent & Skill Hub。沉浸式页面采用能力市场结构，包含远端能力概览、发现/Agents/Skills、当前应用引用库、待更新收件箱、能力卡片和引用应用清单；分类目录展示能力发布状态、原创应用与归属工作区，应用引用状态只在“当前应用”板块展示。所有用户可读取远端精确快照，应用管理员可发布、引用、取消并重新引用，以及确认三方合并冲突；取消关系会立即退出应用引用库。`packages/backend-api` 统一承载 Hub HTTP 与平台文件 WebSocket 调用，`packages/shared-types` 保存兼容 DTO。
 
+应用源码快照的仓库、分支、目录树、物化、重试、打开、最近选择和持久化操作查询统一由 `packages/backend-api` 调用平台 workspace-management API；选择项使用 `{path,type}`，下载状态固定为 `NOT_DOWNLOADED/DOWNLOADED_ACTIVE/DOWNLOADED_EXPIRED/PERSONAL_OCCUPIED`。物化进度使用独立的一次性 ticket WebSocket，首次连接和重连均从数据库快照开始；client 不自动重连，关闭只停止观察，不取消后台任务。`packages/shared-types` 保存该安全 DTO/envelope，RunEvent union 不增加应用源码事件。
+
 ### 工具盒子
 
 `apps/agent-web` 在“编辑器”后为所有登录用户提供工具盒子活动栏入口和受保护 `/toolbox` 路由。工具盒子进入时保存并隐藏左右面板和底部抽屉，退出、浏览器前进/后退时精确恢复原布局；页面移除占空间的顶部 Hero，只保留屏幕阅读器标题，并从 `packages/backend-api` 读取 193 项离线目录。搜索、来源和 14 个固定分类标签组成吸顶控制区；分类数字随搜索词和来源实时联动，不受当前分类选择影响，移动端标签保持单行横向滚动。热门区仍展示正点击 Top 10。每张卡片是带 `target="_blank"`、`rel="noopener noreferrer"` 的原生具体工具链接，普通点击和中键会异步上报，失败不阻断打开或显示干扰提示。本地 Vite 默认把两个工具前缀分别代理到 `127.0.0.1:18120/18121` 并剥离公开前缀，套件根路径返回 `/toolbox`，因此使用 `restart-dev-services.sh` 时直接访问 3000 端口即可联调具体工具。

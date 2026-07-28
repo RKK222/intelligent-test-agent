@@ -7,6 +7,14 @@ import type {
   AgentConfigOperationTicketResponse,
   AgentConfigProgressEvent,
   AgentConfigStatus,
+  AppSourceMaterializationPayload,
+  AppSourceOpenResult,
+  AppSourceOperation,
+  AppSourceOperationTicketResponse,
+  AppSourceProgressEvent,
+  AppSourceRemoteTreeNode,
+  AppSourceReplicaRetryPayload,
+  AppSourceRepositorySummary,
   AgentSkillHubAsset,
   AgentSkillHubAssetDetail,
   AgentSkillHubAssetType,
@@ -185,6 +193,10 @@ type WorkspaceWebSocketLike = {
 
 export type WorkspaceWebSocketFactory = (url: string) => WorkspaceWebSocketLike;
 export type AgentConfigProgressHandler = (event: AgentConfigProgressEvent) => void;
+export type AppSourceProgressHandler = (event: AppSourceProgressEvent) => void;
+export type AppSourceProgressConnection = {
+  close: () => void;
+};
 export type FileUploadProgress = {
   uploadedBytes: number;
   totalBytes: number;
@@ -193,6 +205,7 @@ export type FileUploadProgressHandler = (progress: FileUploadProgress) => void;
 
 const WEBSOCKET_OPEN_STATE = 1;
 const AGENT_CONFIG_PROGRESS_OPEN_TIMEOUT_MS = 3000;
+const APP_SOURCE_PROGRESS_OPEN_TIMEOUT_MS = 3000;
 
 export type BackendApiClientOptions = {
   baseUrl?: string;
@@ -356,6 +369,9 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const commonParameterBase = `${configurationBase}/common-parameters`;
   const referenceRepositoryBase = (appId: string) =>
     `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/reference-repositories`;
+  const appSourceRepositoryBase = (appId: string) =>
+    `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/app-source-repositories`;
+  const appSourceOperationBase = `${workspaceManagementBase}/app-source-operations`;
   const fetcher = options.fetcher ?? fetch;
   const webSocketFactory: WorkspaceWebSocketFactory =
     options.webSocketFactory ??
@@ -1565,6 +1581,109 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
           });
       }
       return socket;
+    },
+    listAppSourceRepositories: (appId: string) =>
+      routedRequest<AppSourceRepositorySummary[]>(appSourceRepositoryBase(appId)),
+    listAppSourceBranches: (appId: string, repositoryId: string) =>
+      routedRequest<string[]>(
+        `${appSourceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/branches`
+      ),
+    listAppSourceTree: (
+      appId: string,
+      repositoryId: string,
+      branch: string,
+      path = "."
+    ) =>
+      routedRequest<AppSourceRemoteTreeNode[]>(
+        `${appSourceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/tree${query({ branch, path })}`
+      ),
+    materializeAppSource: (
+      appId: string,
+      repositoryId: string,
+      payload: AppSourceMaterializationPayload
+    ) =>
+      routedRequest<AppSourceOperation>(
+        `${appSourceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/materializations`,
+        { method: "POST", body: JSON.stringify(payload) }
+      ),
+    retryAppSourceReplicas: (
+      appId: string,
+      repositoryId: string,
+      payload: AppSourceReplicaRetryPayload
+    ) =>
+      routedRequest<AppSourceOperation>(
+        `${appSourceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/replica-retries`,
+        { method: "POST", body: JSON.stringify(payload) }
+      ),
+    openAppSource: (appId: string, repositoryId: string, generation: number) =>
+      routedRequest<AppSourceOpenResult>(
+        `${appSourceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/open`,
+        { method: "POST", body: JSON.stringify({ generation }) }
+      ),
+    getRecentAppSource: () =>
+      routedRequest<AppSourceOpenResult | null>(`${workspaceManagementBase}/recent-app-source`),
+    clearRecentAppSource: () =>
+      routedRequest<void>(`${workspaceManagementBase}/recent-app-source`, { method: "DELETE" }),
+    getAppSourceOperation: (operationId: string) =>
+      request<AppSourceOperation>(`${appSourceOperationBase}/${encodeURIComponent(operationId)}`),
+    createAppSourceOperationTicket: (operationId: string) =>
+      request<AppSourceOperationTicketResponse>(
+        `${appSourceOperationBase}/${encodeURIComponent(operationId)}/ticket`,
+        { method: "POST" }
+      ),
+    /**
+     * 单次调用只消费一个新 ticket 并建立一条连接；close 仅停止观察，重连策略与时机由调用方决定。
+     */
+    connectAppSourceProgress: async (
+      operationId: string,
+      onEvent: AppSourceProgressHandler
+    ): Promise<AppSourceProgressConnection> => {
+      const ticket = await request<AppSourceOperationTicketResponse>(
+        `${appSourceOperationBase}/${encodeURIComponent(operationId)}/ticket`,
+        { method: "POST" }
+      );
+      const socket = webSocketFactory(toWebSocketUrl(baseUrl, ticket.webSocketUrl));
+      socket.onmessage = (event) => {
+        try {
+          const parsed = JSON.parse(String(event.data)) as unknown;
+          if (!isAppSourceProgressEvent(parsed)) {
+            throw new Error("invalid app-source progress event");
+          }
+          onEvent(parsed);
+        } catch {
+          onEvent(appSourceClientFailure(
+            operationId,
+            "WEBSOCKET_MESSAGE_INVALID",
+            "应用源码进度消息格式无效"
+          ));
+        }
+      };
+      const connectionFailure = () =>
+        onEvent(appSourceClientFailure(
+          operationId,
+          "WEBSOCKET_ERROR",
+          "应用源码进度连接失败"
+        ));
+      socket.onerror = connectionFailure;
+      if (socket.readyState !== WEBSOCKET_OPEN_STATE) {
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            socket.close();
+            reject(new Error("应用源码进度连接超时"));
+          }, APP_SOURCE_PROGRESS_OPEN_TIMEOUT_MS);
+          socket.onopen = () => {
+            clearTimeout(timeout);
+            resolve();
+          };
+          socket.onerror = () => {
+            clearTimeout(timeout);
+            connectionFailure();
+            reject(new Error("应用源码进度连接失败"));
+          };
+        });
+        socket.onerror = connectionFailure;
+      }
+      return { close: () => socket.close() };
     },
     listAllSessions: (page = 1, size = 30, q?: string) =>
       routedRequest<PageResponse<Session>>(`${opencodeRuntimeBase}/sessions${query({ page, size, q })}`),
@@ -2898,6 +3017,27 @@ function normalizeFailure(body: unknown, fallbackTraceId: string, status: number
     traceId: fallbackTraceId,
     retryable: status >= 500 || status === 408 || status === 429,
     details: {}
+  };
+}
+
+function isAppSourceProgressEvent(value: unknown): value is AppSourceProgressEvent {
+  const candidate = record(value);
+  return candidate !== undefined
+    && typeof candidate.type === "string"
+    && ["snapshot", "step", "completed", "failed"].includes(candidate.type);
+}
+
+function appSourceClientFailure(
+  operationId: string,
+  errorCode: string,
+  errorMessage: string
+): AppSourceProgressEvent {
+  return {
+    type: "failed",
+    operationId,
+    status: "FAILED",
+    errorCode,
+    errorMessage
   };
 }
 

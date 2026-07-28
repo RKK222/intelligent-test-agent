@@ -16,6 +16,7 @@ import com.enterprise.testagent.common.git.GitWorkspaceService;
 import com.enterprise.testagent.common.git.SshKeyEncryptionService;
 import com.enterprise.testagent.domain.appsource.AppSourceOperation;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationStatus;
+import com.enterprise.testagent.domain.appsource.AppSourceOperationStep;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationType;
 import com.enterprise.testagent.domain.appsource.AppSourcePathType;
 import com.enterprise.testagent.domain.appsource.AppSourcePurpose;
@@ -27,6 +28,8 @@ import com.enterprise.testagent.domain.appsource.AppSourceRepositorySlot;
 import com.enterprise.testagent.domain.appsource.AppSourceSelectedPath;
 import com.enterprise.testagent.domain.appsource.AppSourceSnapshot;
 import com.enterprise.testagent.domain.appsource.AppSourceSnapshotStatus;
+import com.enterprise.testagent.domain.appsource.AppSourceStepScope;
+import com.enterprise.testagent.domain.appsource.AppSourceStepStatus;
 import com.enterprise.testagent.domain.configuration.ApplicationDefinition;
 import com.enterprise.testagent.domain.configuration.ApplicationId;
 import com.enterprise.testagent.domain.configuration.CodeRepository;
@@ -203,8 +206,12 @@ class AppSourceApplicationServiceTest {
 
         when(appSources.findActiveSnapshot(REPOSITORY_ID)).thenReturn(Optional.of(snapshot(
                 4L, AppSourcePurpose.PERSONAL, new UserId("usr_other"), NOW.minusSeconds(1))));
-        assertThat(service.listRepositories(APP_ID.value(), USER_ID, false).getFirst().occupied())
-                .isFalse();
+        AppSourceApplicationService.RepositorySummary expired =
+                service.listRepositories(APP_ID.value(), USER_ID, false).getFirst();
+        assertThat(expired.occupied()).isFalse();
+        assertThat(expired.downloadState()).isEqualTo(AppSourceApplicationService.DownloadState.DOWNLOADED_EXPIRED);
+        assertThat(expired.openable()).isFalse();
+        assertThat(expired.unavailableReason()).isEqualTo("SNAPSHOT_EXPIRED");
         when(registrar.register(any())).thenAnswer(invocation -> {
             AppSourceMaterializationRegistrar.RegistrationRequest request = invocation.getArgument(0);
             return new AppSourceMaterializationRegistrar.RegistrationResult(new AppSourceOperation(
@@ -242,6 +249,149 @@ class AppSourceApplicationServiceTest {
         assertThat(summary.ownerUserId()).isEqualTo(ownerId);
         assertThat(summary.ownerName()).isEqualTo("源码占用人");
         assertThat(summary.ownerUnifiedAuthId()).isEqualTo("OWNER001");
+        assertThat(summary.downloadState())
+                .isEqualTo(AppSourceApplicationService.DownloadState.PERSONAL_OCCUPIED);
+        assertThat(summary.openable()).isFalse();
+        assertThat(summary.unavailableReason()).isEqualTo("PERSONAL_OCCUPIED");
+    }
+
+    @Test
+    void repositorySummaryExposesAvailableSnapshotAndCurrentServerReadiness() {
+        AppSourceSnapshot active = snapshot(4L, AppSourcePurpose.TEAM, USER_ID, NOW.plusSeconds(3600));
+        when(appSources.findActiveSnapshot(REPOSITORY_ID)).thenReturn(Optional.of(active));
+        when(appSources.findSlot(REPOSITORY_ID)).thenReturn(Optional.of(new AppSourceRepositorySlot(
+                REPOSITORY_ID, 4L, null, 5L, "aso_latest", 2L, NOW.minusSeconds(60), NOW)));
+        when(appSources.findReplicas(REPOSITORY_ID, 4L)).thenReturn(List.of(
+                replica(4L, "server-a", AppSourceReplicaStatus.READY),
+                replica(4L, "server-b", AppSourceReplicaStatus.FAILED)));
+        AppSourceOperation latest = new AppSourceOperation(
+                "aso_latest", APP_ID, REPOSITORY_ID, null, 4L, USER_ID,
+                AppSourceOperationType.DOWNLOAD, "request-hash", AppSourceOperationStatus.PARTIAL_FAILED,
+                "trace_latest", NOW.minusSeconds(30), NOW.minusSeconds(10));
+        when(appSources.findLatestOperation(REPOSITORY_ID)).thenReturn(Optional.of(latest));
+        when(appSources.findSteps("aso_latest")).thenReturn(List.of());
+
+        AppSourceApplicationService.RepositorySummary summary =
+                service.listRepositories(APP_ID.value(), USER_ID, false, "server-a").getFirst();
+
+        assertThat(summary.downloadState()).isEqualTo(AppSourceApplicationService.DownloadState.DOWNLOADED_ACTIVE);
+        assertThat(summary.branch()).isEqualTo("main");
+        assertThat(summary.targetCommit()).isEqualTo(COMMIT);
+        assertThat(summary.openable()).isTrue();
+        assertThat(summary.unavailableReason()).isNull();
+        assertThat(summary.latestOperation().operationId()).isEqualTo("aso_latest");
+        assertThat(summary.serverSummaries()).extracting(AppSourceApplicationService.ServerSummary::linuxServerId)
+                .containsExactly("server-a", "server-b");
+    }
+
+    @Test
+    void repositoryWithoutSnapshotIsReportedAsNotDownloaded() {
+        AppSourceApplicationService.RepositorySummary summary =
+                service.listRepositories(APP_ID.value(), USER_ID, false, "server-a").getFirst();
+
+        assertThat(summary.downloadState()).isEqualTo(AppSourceApplicationService.DownloadState.NOT_DOWNLOADED);
+        assertThat(summary.generation()).isNull();
+        assertThat(summary.openable()).isFalse();
+        assertThat(summary.unavailableReason()).isEqualTo("NOT_DOWNLOADED");
+    }
+
+    @Test
+    void availableSnapshotIsNotOpenableWithoutAReadyReplicaOnTheCurrentServer() {
+        when(appSources.findActiveSnapshot(REPOSITORY_ID)).thenReturn(Optional.of(snapshot(
+                4L, AppSourcePurpose.TEAM, USER_ID, NOW.plusSeconds(3600))));
+        when(appSources.findReplicas(REPOSITORY_ID, 4L)).thenReturn(List.of(
+                replica(4L, "server-b", AppSourceReplicaStatus.READY),
+                replica(4L, "server-a", AppSourceReplicaStatus.FAILED)));
+
+        AppSourceApplicationService.RepositorySummary summary =
+                service.listRepositories(APP_ID.value(), USER_ID, true, "server-a").getFirst();
+
+        assertThat(summary.downloadState()).isEqualTo(AppSourceApplicationService.DownloadState.DOWNLOADED_ACTIVE);
+        assertThat(summary.openable()).isFalse();
+        assertThat(summary.manageable()).isTrue();
+        assertThat(summary.unavailableReason()).isEqualTo("CURRENT_SERVER_REPLICA_NOT_READY");
+    }
+
+    @Test
+    void operationSnapshotReturnsPersistedGlobalAndPerServerSafeTimeline() {
+        AppSourceOperation operation = new AppSourceOperation(
+                "aso_progress", APP_ID, REPOSITORY_ID, null, 4L, USER_ID,
+                AppSourceOperationType.DOWNLOAD, "request-hash", AppSourceOperationStatus.RUNNING,
+                "trace_progress", NOW.minusSeconds(30), null);
+        when(appSources.findOperation("aso_progress")).thenReturn(Optional.of(operation));
+        when(appSources.findSnapshot(REPOSITORY_ID, 4L)).thenReturn(Optional.of(snapshot(
+                4L, AppSourcePurpose.TEAM, USER_ID, NOW.plusSeconds(3600))));
+        when(appSources.findReplicas(REPOSITORY_ID, 4L)).thenReturn(List.of(
+                replica(4L, "server-a", AppSourceReplicaStatus.READY)));
+        when(appSources.findSteps("aso_progress")).thenReturn(List.of(
+                new AppSourceOperationStep(
+                        "step-global", "aso_progress", AppSourceStepScope.GLOBAL, null,
+                        "DISPATCHING", 1, AppSourceStepStatus.SUCCEEDED, "已登记目标服务器",
+                        NOW.minusSeconds(25), NOW.minusSeconds(20), NOW.minusSeconds(20)),
+                new AppSourceOperationStep(
+                        "step-server", "aso_progress", AppSourceStepScope.SERVER, new LinuxServerId("server-a"),
+                        "CHECKOUT", 2, AppSourceStepStatus.RUNNING, "正在检出固定提交",
+                        NOW.minusSeconds(10), null, NOW.minusSeconds(4))));
+
+        AppSourceApplicationService.OperationSnapshot snapshot =
+                service.getOperation("aso_progress", USER_ID, false);
+
+        assertThat(snapshot.traceId()).isEqualTo("trace_progress");
+        assertThat(snapshot.targetCommit()).isEqualTo(COMMIT);
+        assertThat(snapshot.globalSteps()).singleElement().satisfies(step -> {
+            assertThat(step.safeSummary()).isEqualTo("已登记目标服务器");
+            assertThat(step.elapsedMillis()).isEqualTo(5000L);
+        });
+        assertThat(snapshot.serverSummaries()).singleElement().satisfies(server -> {
+            assertThat(server.linuxServerId()).isEqualTo("server-a");
+            assertThat(server.targetCommit()).isEqualTo(COMMIT);
+            assertThat(server.steps()).singleElement().satisfies(step ->
+                    assertThat(step.elapsedMillis()).isEqualTo(6000L));
+        });
+    }
+
+    @Test
+    void operationSnapshotRejectsRevokedApplicationMemberEvenWhenTheyAreAppAdmin() {
+        AppSourceOperation operation = operation("aso_revoked", AppSourceOperationStatus.RUNNING);
+        when(appSources.findOperation("aso_revoked")).thenReturn(Optional.of(operation));
+        when(configuration.isActiveMember(APP_ID, USER_ID)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.getOperation("aso_revoked", USER_ID, true))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        verify(appSources, never()).findSnapshot(REPOSITORY_ID, 4L);
+    }
+
+    @Test
+    void personalOperationSnapshotRejectsCurrentMemberWhoIsNeitherOwnerNorAppAdmin() {
+        UserId ownerId = new UserId("usr_owner");
+        AppSourceOperation operation = operation("aso_personal_denied", AppSourceOperationStatus.RUNNING);
+        when(appSources.findOperation("aso_personal_denied")).thenReturn(Optional.of(operation));
+        when(appSources.findSnapshot(REPOSITORY_ID, 4L)).thenReturn(Optional.of(snapshot(
+                4L, AppSourcePurpose.PERSONAL, ownerId, NOW.plusSeconds(3600))));
+
+        assertThatThrownBy(() -> service.getOperation("aso_personal_denied", USER_ID, false))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        verify(appSources, never()).findSteps("aso_personal_denied");
+    }
+
+    @Test
+    void personalOperationSnapshotAllowsCurrentApplicationMemberWhoIsAppAdmin() {
+        UserId ownerId = new UserId("usr_owner");
+        AppSourceOperation operation = operation("aso_personal_admin", AppSourceOperationStatus.SUCCEEDED);
+        when(appSources.findOperation("aso_personal_admin")).thenReturn(Optional.of(operation));
+        when(appSources.findSnapshot(REPOSITORY_ID, 4L)).thenReturn(Optional.of(snapshot(
+                4L, AppSourcePurpose.PERSONAL, ownerId, NOW.plusSeconds(3600))));
+        when(appSources.findSteps("aso_personal_admin")).thenReturn(List.of());
+
+        AppSourceApplicationService.OperationSnapshot result =
+                service.getOperation("aso_personal_admin", USER_ID, true);
+
+        assertThat(result.operationId()).isEqualTo("aso_personal_admin");
+        assertThat(result.purpose()).isEqualTo(AppSourcePurpose.PERSONAL);
     }
 
     @Test
@@ -414,5 +564,15 @@ class AppSourceApplicationServiceTest {
         return new AppSourceReplica(
                 REPOSITORY_ID, generation, new LinuxServerId(serverId), null, status,
                 null, null, 1, null, null, null, NOW.minusSeconds(60), NOW);
+    }
+
+    private AppSourceOperation operation(
+            String operationId,
+            AppSourceOperationStatus status) {
+        return new AppSourceOperation(
+                operationId, APP_ID, REPOSITORY_ID, null, 4L, USER_ID,
+                AppSourceOperationType.DOWNLOAD, "request-hash", status,
+                "trace_" + operationId, NOW.minusSeconds(30),
+                status == AppSourceOperationStatus.SUCCEEDED ? NOW.minusSeconds(10) : null);
     }
 }

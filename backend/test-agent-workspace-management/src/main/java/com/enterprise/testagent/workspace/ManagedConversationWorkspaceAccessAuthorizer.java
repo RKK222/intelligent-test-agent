@@ -162,6 +162,12 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
         if (replica.status() != AppSourceReplicaStatus.READY) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "应用源码工作区副本未就绪");
         }
+        boolean currentGeneration = appSourceRepository.findSlot(replica.repositoryId())
+                .map(slot -> Objects.equals(slot.activeGeneration(), replica.generation()))
+                .orElse(false);
+        if (!currentGeneration) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "应用源码工作区已不是当前 generation");
+        }
         AppSourceSnapshot snapshot = appSourceRepository
                 .findSnapshot(replica.repositoryId(), replica.generation())
                 .orElseThrow(() -> new PlatformException(ErrorCode.FORBIDDEN, "应用源码工作区缺少快照映射"));

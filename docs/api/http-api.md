@@ -1193,6 +1193,92 @@ WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSoc
 
 `merge=true` 时，引用内容按 `sdd-folder-name` 合并进工作区同名一级目录：工作区已经存在的同名目录返回 `source=MIXED` 且保持普通颜色，纯引用文件或目录返回 `source=REFERENCE` 供前端显示为蓝色；同名文件不会覆盖工作区文件，冲突节点携带 `collision=true` 和稳定 `id`。工作区目录从纯 `WORKSPACE` 变为 `MIXED` 时沿用工作区路径生成的 `id`，前端刷新后以该稳定身份重新取得最新 `COMPOSITE` locator；各层 `warnings/truncated` 都会汇总展示。`merge=false` 时，以参考别名作为只读一级目录，展开后展示引用路径内容。组合视图的 `locator` 是后端签发的逻辑定位信息；读取时仍会重新解析当前配置和安全根，不能通过伪造 `referenceAlias/path` 绕过校验。详细字段见 `docs/api/event-stream.md`。
 
+### 应用源码快照 API
+
+应用源码入口统一位于 `/api/internal/platform/workspace-management`，只面向当前启用应用关联的 `APPLICATION_CODE_REPOSITORY`。所有入口要求登录用户仍是应用有效成员；`SUPER_ADMIN` 不旁路成员关系。仓库列表、打开和最近选择还要求当前用户存在 READY opencode 进程，并以该进程所在 Linux 服务器判断当前副本是否可用。
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/applications/{appId}/app-source-repositories` | 列出应用源码仓库、固定快照、最新操作及当前服务器可用性。 |
+| `GET` | `/applications/{appId}/app-source-repositories/{repositoryId}/branches` | 读取远端分支；只读访问使用当前用户的代码库凭据。 |
+| `GET` | `/applications/{appId}/app-source-repositories/{repositoryId}/tree?branch={branch}&path={path}` | 读取指定分支或固定 commit 下的安全目录树；`path` 默认 `.`。 |
+| `POST` | `/applications/{appId}/app-source-repositories/{repositoryId}/materializations` | 创建新的固定提交源码快照。 |
+| `POST` | `/applications/{appId}/app-source-repositories/{repositoryId}/replica-retries` | 对同一 generation 的失败或陈旧服务器副本重试。 |
+| `POST` | `/applications/{appId}/app-source-repositories/{repositoryId}/open` | 在当前用户进程服务器打开 READY 副本并返回 Runtime Workspace。 |
+| `GET` | `/recent-app-source` | 按当前用户和当前进程服务器解析最近一次仍有效的应用源码选择。 |
+| `DELETE` | `/recent-app-source` | 完整复核当前 generation、成员及本机 READY 副本后显式清除最近选择。 |
+| `GET` | `/app-source-operations/{operationId}` | 读取持久化操作、全局步骤和逐服务器步骤的安全快照。 |
+| `POST` | `/app-source-operations/{operationId}/ticket` | 为独立进度 WebSocket 创建短期、一次性 ticket。 |
+
+仓库列表的 `downloadState` 只允许以下四个 wire 值：
+
+| 值 | 说明 |
+|---|---|
+| `NOT_DOWNLOADED` | 没有 active snapshot。 |
+| `DOWNLOADED_ACTIVE` | active snapshot 未过期；`openable` 仍取决于当前用户进程服务器是否存在同 generation 的 READY replica。 |
+| `DOWNLOADED_EXPIRED` | active snapshot 已过期，不能打开。 |
+| `PERSONAL_OCCUPIED` | active snapshot 是其它用户的个人快照；返回低敏占用人 `ownerUserId/ownerName/ownerUnifiedAuthId` 供管理判断。 |
+
+列表响应条目包含 `repositoryId/name/englishName/downloadState/generation/purpose/ownerUserId/ownerName/ownerUnifiedAuthId/branch/targetCommit/selectedPaths/expiresAt/occupied/openable/manageable/unavailableReason/latestOperation/serverSummaries`。其中 `selectedPaths[]` 固定使用 `{ "path": "...", "type": "FILE|DIRECTORY" }`；响应允许尚未下载或旧数据对应的字段为 `null`，客户端必须容忍后续追加字段。
+
+物化请求示例：
+
+```json
+{
+  "operationId": "aso_0123456789abcdef",
+  "expectedGeneration": 3,
+  "branch": "main",
+  "expectedTreeCommit": "0123456789abcdef",
+  "selectedPaths": [
+    { "path": "src/main", "type": "DIRECTORY" },
+    { "path": "pom.xml", "type": "FILE" }
+  ],
+  "purpose": "PERSONAL",
+  "retentionHours": 24,
+  "confirmReplace": false
+}
+```
+
+`operationId` 是调用方生成的稳定幂等标识；`expectedTreeCommit` 防止用户选择目录后远端分支发生漂移。`purpose=PERSONAL` 固定当前用户进程服务器，`purpose=TEAM` 冻结受理时的在线服务器集合。已有 active snapshot 时，只有 owner 或仍是有效应用成员的 `APP_ADMIN` 能替换/重试；`TEAM -> PERSONAL` 拒绝，`PERSONAL -> TEAM` 建立新 generation。个人操作快照只允许 owner，或仍具 `APP_ADMIN` 角色且仍为有效成员的用户读取；团队操作允许当前有效成员读取。
+
+重试请求为 `{ "operationId": "aso_...", "expectedGeneration": 3 }`，打开请求为 `{ "generation": 3 }`。打开成功返回 `appId/repositoryId/generation/purpose/workspaceId/linuxServerId/expiresAt`。物化、重试和操作查询统一返回安全操作快照：
+
+```json
+{
+  "operationId": "aso_0123456789abcdef",
+  "appId": "app_demo",
+  "repositoryId": "repo_code",
+  "sourceGeneration": 2,
+  "targetGeneration": 3,
+  "operationType": "MATERIALIZE",
+  "status": "RUNNING",
+  "purpose": "TEAM",
+  "branch": "main",
+  "targetCommit": "0123456789abcdef",
+  "selectedPaths": [{ "path": "src", "type": "DIRECTORY" }],
+  "expiresAt": "2026-07-29T08:00:00Z",
+  "traceId": "trace_...",
+  "acceptedAt": "2026-07-28T08:00:00Z",
+  "completedAt": null,
+  "globalSteps": [],
+  "serverSummaries": [
+    {
+      "linuxServerId": "server-a",
+      "replicaStatus": "RUNNING",
+      "attemptCount": 1,
+      "safeErrorCode": null,
+      "safeErrorMessage": null,
+      "targetCommit": "0123456789abcdef",
+      "steps": []
+    }
+  ]
+}
+```
+
+步骤只返回 `stepCode/sequence/status/safeSummary/startedAt/completedAt/elapsedMillis/updatedAt`；不得返回物理源码根、SSH 私钥、原始 Git stderr、堆栈或其它敏感路径。进度 WebSocket 为 `/api/internal/platform/workspace-management/app-source-operations/{operationId}/ws?ticket=...`，消息协议和重连语义见 `docs/api/event-stream.md` 的“应用源码进度 WebSocket”。
+
+应用源码 Runtime Workspace 的 `file-ws-route`、ticket 和每条文件 RPC 继续使用平台文件 WebSocket：必须匹配 slot 当前 active generation、未过期 snapshot、目标服务器 READY replica、启用应用、代码库关联和实时成员。历史 Workspace 不允许本机回绑或本机降级；入口需要跨 Java 时复用 `BackendJavaRouteResolver` 与 `BackendHttpForwarder`，浏览器随后直连目标 Java 的文件 WebSocket，不新增 Java→Java HTTP 文件代理。
+
 ### 应用引用资产库 API
 
 Base URL：`/api/internal/platform/workspace-management/applications/{appId}/reference-repositories`。该能力只管理当前启用应用已关联、类型为 `APPLICATION_ASSET_REPOSITORY` 的代码库。所有接口要求全局角色 `APP_ADMIN`，`SUPER_ADMIN` 继承该权限；普通成员返回 `FORBIDDEN`。首次初始化时的分支下拉复用配置管理既有 `GET /api/internal/platform/configuration-management/repositories/{repositoryId}/branches`，不新增第二套分支接口。

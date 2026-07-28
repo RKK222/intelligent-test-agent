@@ -754,6 +754,52 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 - 客户端必须优先按 `eventId` 去重；缺失 `eventId` 的旧事件才回退按 `runId + seq` 去重，允许同一事件重复投递。
 - 客户端必须忽略未知 payload 字段和未知 event name。
 
+## 应用源码进度 WebSocket
+
+应用源码物化与副本重试使用独立 WebSocket，不属于 RunEvent、SSE 或 opencode raw event，也不向 RunEvent wire name 表追加类型。
+
+- 创建连接前调用 `POST /api/internal/platform/workspace-management/app-source-operations/{operationId}/ticket`。签票前必须按当前用户重新读取持久化操作并鉴权。
+- ticket 短期过期、一次性消费，绑定 `operationId/userId/APP_ADMIN` 事实、签发 `backendProcessId`、traceId；upgrade 同时校验 Origin 白名单和签发 JVM。任一校验失败只返回通用拒绝结果，不泄露操作是否存在。
+- WebSocket URL 为 `/api/internal/platform/workspace-management/app-source-operations/{operationId}/ws?ticket=...`；多 Java 部署时 ticket 响应返回签发 JVM 的绝对 WebSocket URL，不能由客户端重新拼接或二次编码。
+- 建连成功后首帧总是数据库权威 `snapshot`。非终态操作按持久化 operation、global step、replica 和 server step 的变化发送 `step`；`SUCCEEDED/PARTIAL_FAILED` 发送 `completed`，`FAILED` 发送 `failed`。
+- 每次数据库轮询都重新校验当前应用启用、代码库关联、成员关系及个人快照 owner/管理员规则；签票后撤权会以安全 `failed` 结束观察。
+- 客户端断开只取消当前数据库观察，不取消、重试或修改后台 operation。客户端需要恢复时必须重新申请 ticket，新连接从最新持久化 snapshot 开始；client 不自动重连。
+
+成功消息 envelope：
+
+```json
+{
+  "type": "snapshot",
+  "operationId": "aso_0123456789abcdef",
+  "operation": {
+    "status": "RUNNING",
+    "globalSteps": [],
+    "serverSummaries": []
+  },
+  "traceId": "trace_..."
+}
+```
+
+`type` 只允许 `snapshot/step/completed/failed`。成功 envelope 的 `operation` 与 HTTP 操作快照结构相同。连接、鉴权或内部读取失败时可返回不含 `operation` 的安全失败 envelope：
+
+```json
+{
+  "type": "failed",
+  "operationId": "aso_0123456789abcdef",
+  "status": "FAILED",
+  "errorCode": "FORBIDDEN",
+  "errorMessage": "应用源码进度 WebSocket 拒绝连接"
+}
+```
+
+进度 payload 不得包含物理源码根、repositoryPath、SSH 私钥、原始 stderr、文件正文、完整异常堆栈或其它敏感路径。跨服务器 worker 只写数据库步骤，签发 Java 从数据库汇聚全局与各服务器安全时间线；不使用本机内存事件总线作为事实源。
+
+对应测试：
+
+- `AppSourceOperationWebSocketHandlerTest`：持久化首帧、step/终态、`PARTIAL_FAILED -> completed`、新 ticket 重连、签票后撤权和敏感字段脱敏。
+- `AppSourceOperationTicketStoreTest` / `AppSourceOperationTicketServiceTest`：一次性、过期、operation/JVM/Origin 绑定、签票前鉴权和签发 JVM URL。
+- `AppSourceWebSocketConfigTest` / `AppSourceApiContextTest`：精确 URL 映射和 Spring WebFlux 装配。
+
 ## 工具盒子不新增事件
 
 工具盒子目录查询和点击上报都是普通 HTTP API，不创建 Run、Session 或 RunEvent，也不进入用户级 session-runtime SSE。点击成功后的累计与热门排名由当前页面本地更新，刷新时重新查询 `GET /api/internal/platform/toolbox/tools`；其它已打开页面不承诺实时同步。首版不提供点击趋势、明细查询、收藏或目录管理事件。后续如需跨页面实时刷新，必须另行设计稳定事件契约，不能复用 `tool.*`、`analytics.*` 或 opencode raw event。

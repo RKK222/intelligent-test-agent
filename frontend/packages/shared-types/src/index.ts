@@ -2509,6 +2509,154 @@ export type UpdateApplicationWorkspacePayload = {
   enabled?: boolean;
 };
 
+/** 应用源码列表稳定四态；异步执行进度由 latestOperation 独立表达。 */
+export type AppSourceDownloadState =
+  | "NOT_DOWNLOADED"
+  | "DOWNLOADED_ACTIVE"
+  | "DOWNLOADED_EXPIRED"
+  | "PERSONAL_OCCUPIED";
+
+export type AppSourcePurpose = "TEAM" | "PERSONAL";
+export type AppSourcePathType = "FILE" | "DIRECTORY";
+export type AppSourceOperationStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "PARTIAL_FAILED" | "FAILED";
+export type AppSourceOperationType =
+  | "DOWNLOAD"
+  | "UPDATE"
+  | "SWITCH_BRANCH"
+  | "CHANGE_SELECTION"
+  | "PROMOTE_TO_TEAM"
+  | "RETRY_REPLICAS"
+  | "CLEANUP"
+  | string;
+export type AppSourceReplicaStatus =
+  | "PENDING"
+  | "RUNNING"
+  | "READY"
+  | "FAILED"
+  | "STALE"
+  | "CLEANUP_PENDING"
+  | "CLEANED"
+  | string;
+export type AppSourceStepStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "SKIPPED" | string;
+
+export type AppSourceSelectedPath = {
+  path: string;
+  type: AppSourcePathType;
+};
+
+export type AppSourceStepSummary = {
+  stepCode: string;
+  sequence: number;
+  status: AppSourceStepStatus;
+  safeSummary?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  elapsedMillis?: number | null;
+  updatedAt: string;
+};
+
+export type AppSourceServerSummary = {
+  linuxServerId: string;
+  replicaStatus?: AppSourceReplicaStatus | null;
+  attemptCount: number;
+  safeErrorCode?: string | null;
+  safeErrorMessage?: string | null;
+  targetCommit?: string | null;
+  steps: AppSourceStepSummary[];
+};
+
+export type AppSourceOperation = {
+  operationId: string;
+  appId: string;
+  repositoryId: string;
+  sourceGeneration?: number | null;
+  targetGeneration: number;
+  operationType: AppSourceOperationType;
+  status: AppSourceOperationStatus;
+  purpose?: AppSourcePurpose | null;
+  branch?: string | null;
+  targetCommit?: string | null;
+  selectedPaths: AppSourceSelectedPath[];
+  expiresAt?: string | null;
+  traceId: string;
+  acceptedAt: string;
+  completedAt?: string | null;
+  globalSteps: AppSourceStepSummary[];
+  serverSummaries: AppSourceServerSummary[];
+};
+
+export type AppSourceRepositorySummary = {
+  repositoryId: string;
+  name: string;
+  englishName: string;
+  downloadState: AppSourceDownloadState;
+  generation?: number | null;
+  purpose?: AppSourcePurpose | null;
+  ownerUserId?: string | null;
+  ownerName?: string | null;
+  ownerUnifiedAuthId?: string | null;
+  branch?: string | null;
+  targetCommit?: string | null;
+  selectedPaths: AppSourceSelectedPath[];
+  expiresAt?: string | null;
+  occupied: boolean;
+  openable: boolean;
+  manageable: boolean;
+  unavailableReason?: string | null;
+  latestOperation?: AppSourceOperation | null;
+  serverSummaries: AppSourceServerSummary[];
+};
+
+export type AppSourceRemoteTreeNode = {
+  name: string;
+  path: string;
+  type: "directory" | "file";
+  children: AppSourceRemoteTreeNode[];
+};
+
+/** materialization 提交完整 exact-set，expectedGeneration 为首次下载时传 null。 */
+export type AppSourceMaterializationPayload = {
+  operationId: string;
+  expectedGeneration: number | null;
+  branch: string;
+  expectedTreeCommit: string;
+  selectedPaths: AppSourceSelectedPath[];
+  purpose: AppSourcePurpose;
+  retentionHours: number;
+  confirmReplace: boolean;
+};
+
+export type AppSourceReplicaRetryPayload = {
+  operationId: string;
+  expectedGeneration: number;
+};
+
+export type AppSourceOpenResult = {
+  appId: string;
+  repositoryId: string;
+  generation: number;
+  purpose: AppSourcePurpose;
+  workspaceId: string;
+  linuxServerId: string;
+  expiresAt: string;
+};
+
+export type AppSourceOperationTicketResponse = {
+  ticket: string;
+  expiresAt: string;
+  webSocketUrl: string;
+};
+
+export type AppSourceProgressEvent = {
+  type: "snapshot" | "step" | "completed" | "failed";
+  operationId?: string | null;
+  operation?: AppSourceOperation | null;
+  status?: AppSourceOperationStatus;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  traceId?: string | null;
+};
+
 export type AddSshKeyPayload = {
   name: string;
   encryptedPrivateKey: string;

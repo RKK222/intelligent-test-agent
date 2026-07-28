@@ -115,7 +115,7 @@ Token 校验流程：
 
 工作区文件与 Agent 配置文件操作属于受控 WebSocket 例外。前端不得直连 opencode server 或任意文件服务，必须先通过平台后端解析目标服务器，再使用目标后端的一次性 ticket 建立 WebSocket。实现和后续扩展必须满足：
 
-1. `file-ws-route` 必须基于当前登录用户的 opencode 进程解析目标后端，并强校验 `workspace.linuxServerId == opencodeProcess.linuxServerId == targetBackend.linuxServerId`；历史 `workspace.linuxServerId` 为空时只能在 root path 校验成功后回填。托管工作区在 route、workspace ticket 签发和每一条 `workspace.*` RPC 都必须实时校验当前用户仍是有效应用成员，`SUPER_ADMIN` 不旁路成员关系，不能依赖 ticket 签发时缓存的成员状态；非托管 Workspace 默认拒绝文件访问，仅服务器工作空间兼容链路可依据当前登录角色向 `SUPER_ADMIN` 放行，并把该角色写入 ticket 供每条 RPC 复核。
+1. `file-ws-route` 必须基于当前登录用户的 opencode 进程解析目标后端，并强校验 `workspace.linuxServerId == opencodeProcess.linuxServerId == targetBackend.linuxServerId`；历史 `workspace.linuxServerId` 为空时只能在 root path 校验成功后回填。应用源码 Runtime Workspace 例外地以数据库当前 active generation 的 READY replica 作为精确目标服务器，历史 Workspace 信息不得触发本机回绑或本机降级；目标 Java 继续由公共 `BackendJavaRouteResolver` 选择，入口转发只用 `BackendHttpForwarder`，文件内容不经过 Java→Java HTTP 代理。托管工作区在 route、workspace ticket 签发和每一条 `workspace.*` RPC 都必须实时校验当前用户仍是有效应用成员，`SUPER_ADMIN` 不旁路成员关系，不能依赖 ticket 签发时缓存的成员状态；非托管 Workspace 默认拒绝文件访问，仅服务器工作空间兼容链路可依据当前登录角色向 `SUPER_ADMIN` 放行，并把该角色写入 ticket 供每条 RPC 复核。
 2. Agent 配置文件必须通过 `agent-config/file-ws-route` 按 `scope/workspaceId/worktreeId/linuxServerId` 解析目标后端；公共 worktree 使用落库 `linuxServerId`，公共直接模式必须由前端传入已初始化公共配置服务器 ID。
 3. ticket 只能通过用户登录态创建，短期过期、一次性消费，并绑定 workspace、目标服务器、当前 agent 服务器、模式、Agent 配置 scope/worktree、traceId 和是否 `SUPER_ADMIN`；不得把长期 Bearer token 放入 WebSocket URL。
 4. WebSocket upgrade 必须校验 Origin 白名单、ticket 有效性和 ticket 模式；ticket 消费后无论连接成功与否都不能重复使用。
@@ -125,6 +125,16 @@ Token 校验流程：
 8. `directory.list` 只允许 `directory-picker` ticket；跨服务器目录浏览仅 `SUPER_ADMIN` 可创建 ticket，普通用户只能浏览当前 agent 同服务器目录。
 9. `workspace.create` 必须要求 `SUPER_ADMIN`，并且选择服务器与当前 agent 服务器一致；不一致时前端禁用输入，后端仍必须返回 `CONFLICT` 或 `FORBIDDEN`。
 10. 日志和错误响应不得输出 ticket、Authorization、Cookie、完整用户输入、完整文件内容或敏感路径片段；审计只记录 traceId、workspaceId、worktreeId、服务器 ID、操作类型、路径摘要和错误码等必要字段。
+
+## 应用源码进度 WebSocket 安全例外
+
+应用源码进度 WebSocket 是只读观察通道，不属于平台文件 RPC 或 RunEvent。实现和后续扩展必须满足：
+
+1. ticket 只能通过登录态创建，签发前先读取持久化 operation 并执行当前启用应用、有效成员、代码库关联和个人 snapshot owner/`APP_ADMIN` 规则；`SUPER_ADMIN` 不旁路成员关系。
+2. ticket 短期过期、一次性消费，并绑定 operationId、userId、签发时 `APP_ADMIN` 事实、签发 backendProcessId 和 traceId。WebSocket upgrade 必须校验 ticket path operationId、当前 JVM 和 Origin 白名单；失败统一返回通用拒绝，不能泄露 operation 是否存在。
+3. 建连首帧和后续轮询只读数据库权威 operation/step/replica 状态；每次轮询重新鉴权，不能只信任 ticket 中缓存的成员或 owner。断开连接只停止观察，不能取消或修改后台操作。
+4. payload 只返回逻辑 ID、固定 commit、状态、时间和安全步骤摘要；不得包含物理源码根、repositoryPath、SSH 私钥、原始 Git stderr、文件内容、完整异常堆栈或敏感路径。序列化及内部读取异常只返回安全错误码和固定消息。
+5. 多 Java 部署必须把 upgrade 固定回签发 JVM；其它服务器 worker 通过持久化步骤汇聚进度，不新增跨 Java 内存事件、Redis 原始错误广播或 Java→Java 文件代理。
 
 ## 服务器广播安全
 

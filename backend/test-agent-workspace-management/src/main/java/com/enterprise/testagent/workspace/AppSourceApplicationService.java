@@ -6,6 +6,7 @@ import com.enterprise.testagent.common.git.GitRemoteService;
 import com.enterprise.testagent.common.git.GitWorkspaceService;
 import com.enterprise.testagent.common.git.SshKeyEncryptionService;
 import com.enterprise.testagent.domain.appsource.AppSourceOperation;
+import com.enterprise.testagent.domain.appsource.AppSourceOperationStep;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationType;
 import com.enterprise.testagent.domain.appsource.AppSourcePathType;
 import com.enterprise.testagent.domain.appsource.AppSourcePurpose;
@@ -131,6 +132,20 @@ public class AppSourceApplicationService {
 
     /** 列出当前应用关联的应用代码库及其未过期占用状态。 */
     public List<RepositorySummary> listRepositories(String appId, UserId userId, boolean appAdmin) {
+        return listRepositories(appId, userId, appAdmin, null);
+    }
+
+    /**
+     * 列出当前应用关联的源码仓库，并按当前用户所在服务器计算能否打开。
+     *
+     * <p>四种 downloadState 只表达稳定生命周期；执行中的细节由 latestOperation 提供，避免把异步
+     * operation 状态误当成已经可打开的快照。
+     */
+    public List<RepositorySummary> listRepositories(
+            String appId,
+            UserId userId,
+            boolean appAdmin,
+            String currentLinuxServerId) {
         ApplicationId parsedAppId = applicationId(appId);
         requireMember(parsedAppId, userId);
         Instant now = clock.instant();
@@ -138,26 +153,172 @@ public class AppSourceApplicationService {
                 .filter(this::isApplicationCodeRepository)
                 .map(repository -> {
                     AppSourceSnapshot active = appSources.findActiveSnapshot(repository.repositoryId()).orElse(null);
+                    DownloadState downloadState = downloadState(active, userId, now);
                     boolean occupied = active != null && active.expiresAt().isAfter(now);
                     boolean manageable = occupied && (Objects.equals(active.ownerUserId(), userId) || appAdmin);
                     // 列表业务契约直接提供占用人展示身份，API 层不得再越过业务服务查询 UserRepository。
                     User owner = active == null || active.ownerUserId() == null
                             ? null
                             : users.findByUserId(active.ownerUserId()).orElse(null);
+                    List<ServerSummary> serverSummaries = active == null
+                            ? List.of()
+                            : serverSummaries(active, List.of());
+                    boolean openable = downloadState == DownloadState.DOWNLOADED_ACTIVE
+                            && currentLinuxServerId != null
+                            && serverSummaries.stream().anyMatch(server ->
+                                    server.linuxServerId().equals(currentLinuxServerId)
+                                            && server.replicaStatus() == AppSourceReplicaStatus.READY);
+                    String unavailableReason = unavailableReason(
+                            downloadState,
+                            openable,
+                            currentLinuxServerId);
+                    OperationSnapshot latestOperation = appSources.findLatestOperation(repository.repositoryId())
+                            .map(this::operationSnapshot)
+                            .orElse(null);
                     return new RepositorySummary(
                             repository.repositoryId().value(),
                             repository.name(),
                             repository.englishName(),
+                            downloadState,
                             active == null ? null : active.generation(),
                             active == null ? null : active.purpose(),
                             active == null ? null : active.ownerUserId(),
                             owner == null ? null : owner.username(),
                             owner == null ? null : owner.unifiedAuthId(),
+                            active == null ? null : active.branch(),
+                            active == null ? null : active.targetCommit(),
+                            active == null ? List.of() : active.selectedPaths(),
                             active == null ? null : active.expiresAt(),
                             occupied,
-                            manageable);
+                            openable,
+                            manageable,
+                            unavailableReason,
+                            latestOperation,
+                            serverSummaries);
                 })
                 .toList();
+    }
+
+    private DownloadState downloadState(AppSourceSnapshot active, UserId userId, Instant now) {
+        if (active == null) {
+            return DownloadState.NOT_DOWNLOADED;
+        }
+        if (active != null
+                && (active.status() != com.enterprise.testagent.domain.appsource.AppSourceSnapshotStatus.ACTIVE
+                        || !active.expiresAt().isAfter(now))) {
+            return DownloadState.DOWNLOADED_EXPIRED;
+        }
+        if (active != null
+                && active.purpose() == AppSourcePurpose.PERSONAL
+                && active.expiresAt().isAfter(now)
+                && !Objects.equals(active.ownerUserId(), userId)) {
+            return DownloadState.PERSONAL_OCCUPIED;
+        }
+        return DownloadState.DOWNLOADED_ACTIVE;
+    }
+
+    private String unavailableReason(
+            DownloadState downloadState,
+            boolean openable,
+            String currentLinuxServerId) {
+        return switch (downloadState) {
+            case NOT_DOWNLOADED -> "NOT_DOWNLOADED";
+            case DOWNLOADED_EXPIRED -> "SNAPSHOT_EXPIRED";
+            case PERSONAL_OCCUPIED -> "PERSONAL_OCCUPIED";
+            case DOWNLOADED_ACTIVE -> openable
+                    ? null
+                    : (currentLinuxServerId == null
+                            ? "CURRENT_SERVER_UNKNOWN"
+                            : "CURRENT_SERVER_REPLICA_NOT_READY");
+        };
+    }
+
+    private OperationSnapshot operationSnapshot(AppSourceOperation operation) {
+        AppSourceSnapshot snapshot = appSources
+                .findSnapshot(operation.repositoryId(), operation.targetGeneration())
+                .orElse(null);
+        List<AppSourceOperationStep> steps = appSources.findSteps(operation.operationId());
+        return new OperationSnapshot(
+                operation.operationId(),
+                operation.appId().value(),
+                operation.repositoryId().value(),
+                operation.sourceGeneration(),
+                operation.targetGeneration(),
+                operation.operationType(),
+                operation.status(),
+                snapshot == null ? null : snapshot.purpose(),
+                snapshot == null ? null : snapshot.branch(),
+                snapshot == null ? null : snapshot.targetCommit(),
+                snapshot == null ? List.of() : snapshot.selectedPaths(),
+                snapshot == null ? null : snapshot.expiresAt(),
+                operation.traceId(),
+                operation.acceptedAt(),
+                operation.completedAt(),
+                stepSummaries(steps.stream()
+                        .filter(step -> step.scope() == com.enterprise.testagent.domain.appsource.AppSourceStepScope.GLOBAL)
+                        .toList()),
+                snapshot == null ? List.of() : serverSummaries(snapshot, steps));
+    }
+
+    private List<ServerSummary> serverSummaries(
+            AppSourceSnapshot snapshot,
+            List<AppSourceOperationStep> steps) {
+        Map<String, AppSourceReplicaStatus> statuses = new LinkedHashMap<>();
+        Map<String, com.enterprise.testagent.domain.appsource.AppSourceReplica> replicas = new LinkedHashMap<>();
+        appSources.findReplicas(snapshot.repositoryId(), snapshot.generation()).stream()
+                .sorted(Comparator.comparing(replica -> replica.linuxServerId().value()))
+                .forEach(replica -> {
+                    statuses.put(replica.linuxServerId().value(), replica.status());
+                    replicas.put(replica.linuxServerId().value(), replica);
+                });
+        steps.stream()
+                .filter(step -> step.scope() == com.enterprise.testagent.domain.appsource.AppSourceStepScope.SERVER)
+                .map(step -> step.linuxServerId().value())
+                .sorted()
+                .forEach(serverId -> statuses.putIfAbsent(serverId, null));
+        return statuses.keySet().stream()
+                .sorted()
+                .map(serverId -> {
+                    var replica = replicas.get(serverId);
+                    List<AppSourceOperationStep> serverSteps = steps.stream()
+                            .filter(step -> step.scope()
+                                    == com.enterprise.testagent.domain.appsource.AppSourceStepScope.SERVER)
+                            .filter(step -> step.linuxServerId().value().equals(serverId))
+                            .toList();
+                    return new ServerSummary(
+                            serverId,
+                            statuses.get(serverId),
+                            replica == null ? 0 : replica.attemptCount(),
+                            replica == null ? null : replica.safeErrorCode(),
+                            replica == null ? null : replica.safeErrorMessage(),
+                            snapshot.targetCommit(),
+                            stepSummaries(serverSteps));
+                })
+                .toList();
+    }
+
+    private List<StepSummary> stepSummaries(List<AppSourceOperationStep> steps) {
+        return steps.stream()
+                .sorted(Comparator.comparingInt(AppSourceOperationStep::sequence)
+                        .thenComparing(AppSourceOperationStep::stepId))
+                .map(step -> new StepSummary(
+                        step.stepCode(),
+                        step.sequence(),
+                        step.status(),
+                        step.safeSummary(),
+                        step.startedAt(),
+                        step.completedAt(),
+                        elapsedMillis(step),
+                        step.updatedAt()))
+                .toList();
+    }
+
+    private Long elapsedMillis(AppSourceOperationStep step) {
+        if (step.startedAt() == null) {
+            return null;
+        }
+        Instant end = step.completedAt() == null ? step.updatedAt() : step.completedAt();
+        return Math.max(0L, java.time.Duration.between(step.startedAt(), end).toMillis());
     }
 
     /** 普通有效成员可使用自己的凭据列出远端分支。 */
@@ -295,6 +456,27 @@ public class AppSourceApplicationService {
                 hash, failedTargets, requireTraceId(traceId), acceptedAt));
         dispatcher.wake(operation, failedTargets);
         return operation;
+    }
+
+    /**
+     * 查询操作的数据库权威进度快照，并在每次 HTTP/WS 读取时重新执行当前授权。
+     *
+     * <p>TEAM 允许当前关联应用有效成员读取；PERSONAL 只允许 owner，或仍具应用管理员角色且仍是
+     * 当前关联应用有效成员的用户读取。该方法只返回安全摘要，不暴露物理路径或 Git 原始错误。
+     */
+    public OperationSnapshot getOperation(String operationId, UserId userId, boolean appAdmin) {
+        AppSourceOperation operation = appSources.findOperation(operationId)
+                .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "应用源码操作不存在"));
+        requireLinkedCodeRepository(operation.appId(), operation.repositoryId(), userId);
+        AppSourceSnapshot snapshot = appSources
+                .findSnapshot(operation.repositoryId(), operation.targetGeneration())
+                .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "应用源码操作缺少快照"));
+        if (snapshot.purpose() == AppSourcePurpose.PERSONAL
+                && !Objects.equals(snapshot.ownerUserId(), userId)
+                && !appAdmin) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "个人应用源码操作只允许拥有者或应用管理员查看");
+        }
+        return operationSnapshot(operation);
     }
 
     /** 实时授权并打开指定 generation 在当前服务器的 READY Workspace。 */
@@ -688,14 +870,74 @@ public class AppSourceApplicationService {
             String repositoryId,
             String name,
             String englishName,
+            DownloadState downloadState,
             Long generation,
             AppSourcePurpose purpose,
             UserId ownerUserId,
             String ownerName,
             String ownerUnifiedAuthId,
+            String branch,
+            String targetCommit,
+            List<AppSourceSelectedPath> selectedPaths,
             Instant expiresAt,
             boolean occupied,
-            boolean manageable) {
+            boolean openable,
+            boolean manageable,
+            String unavailableReason,
+            OperationSnapshot latestOperation,
+            List<ServerSummary> serverSummaries) {
+    }
+
+    /** 列表稳定四态；异步执行状态通过 latestOperation 独立表达。 */
+    public enum DownloadState {
+        NOT_DOWNLOADED,
+        DOWNLOADED_ACTIVE,
+        DOWNLOADED_EXPIRED,
+        PERSONAL_OCCUPIED
+    }
+
+    /** 进度 HTTP/WS 共用的数据库权威快照，不包含物理路径、凭据或原始 Git 错误。 */
+    public record OperationSnapshot(
+            String operationId,
+            String appId,
+            String repositoryId,
+            Long sourceGeneration,
+            long targetGeneration,
+            AppSourceOperationType operationType,
+            com.enterprise.testagent.domain.appsource.AppSourceOperationStatus status,
+            AppSourcePurpose purpose,
+            String branch,
+            String targetCommit,
+            List<AppSourceSelectedPath> selectedPaths,
+            Instant expiresAt,
+            String traceId,
+            Instant acceptedAt,
+            Instant completedAt,
+            List<StepSummary> globalSteps,
+            List<ServerSummary> serverSummaries) {
+    }
+
+    /** 单服务器低敏执行摘要；safeError 字段由 worker 在持久化前统一收敛。 */
+    public record ServerSummary(
+            String linuxServerId,
+            AppSourceReplicaStatus replicaStatus,
+            int attemptCount,
+            String safeErrorCode,
+            String safeErrorMessage,
+            String targetCommit,
+            List<StepSummary> steps) {
+    }
+
+    /** 全局/服务器步骤时间线，elapsedMillis 只由持久化时间戳派生。 */
+    public record StepSummary(
+            String stepCode,
+            int sequence,
+            com.enterprise.testagent.domain.appsource.AppSourceStepStatus status,
+            String safeSummary,
+            Instant startedAt,
+            Instant completedAt,
+            Long elapsedMillis,
+            Instant updatedAt) {
     }
 
     private record GitAccess(String url, String privateKey) {

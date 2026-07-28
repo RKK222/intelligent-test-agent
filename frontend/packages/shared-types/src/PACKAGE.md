@@ -9,6 +9,7 @@
 - `index.ts`：共享类型出口，包含 API/RunEvent/Diff、`NIGHT_WINDOW/ADMIN_CUSTOM` 定时模式、夜间时段/任务、`XxlJobSsoTicket`、`SideQuestionRequest` / `SideQuestionResponse` 以及 PromptPart、MessagePart、ToolPart、PermissionRequest、QuestionRequest、AgentInfo、ModelInfo、ProviderInfo、CommandInfo、RuntimeResourceInfo、RuntimeToolInfo、SessionDiff、TodoItem、RuntimeStatus、TerminalTicket、Workspace/Agent 配置文件 WebSocket route/ticket、用户 opencode 进程、用户管理、内部模型供应商和安全 Token 元数据等模型。任务 `scheduleMode` 保持可选以兼容旧后端响应；内部模型 Token 响应类型不包含明文，Provider 关联新增字段保持可选。`PermissionRequest.patterns` 与运行态 `permissionCount` 为可选兼容字段，attention 接受 `PERMISSION`；`XxlJobSsoTicket` 只用于瞬时表单 POST，不得进入 URL、持久化状态或日志。Session/SessionMessage/Run 等新增字段继续保持可选以兼容旧后端；RunEvent 仍只包含既有类型，本次定时模式变更不新增事件。
 - `UserOpencodeMessageGate` 独立表达轻量发布门禁响应；`messageSendAllowed` 必填，其余原因和 rollout ID 保持可空以兼容开放状态。
 - `WorkspaceView*` 类型表达工作区与引用目录的组合树、稳定节点身份、逻辑 locator、来源/只读/冲突和局部 warning；引用内容不复用可写 `FileTreeEntry.path` 作为唯一身份。
+- `AppSource*` 类型表达应用源码仓库、固定选择、操作/服务器/步骤安全快照、打开结果、一次性进度 ticket 和 `snapshot/step/completed/failed` WebSocket envelope；下载状态严格为 `NOT_DOWNLOADED/DOWNLOADED_ACTIVE/DOWNLOADED_EXPIRED/PERSONAL_OCCUPIED`。响应新增信息保持可空/可选兼容，选中路径稳定使用 `{ path, type }`；该进度协议独立于 RunEvent，不向 RunEvent union 增加 wire name。
 
 ## 允许依赖
 

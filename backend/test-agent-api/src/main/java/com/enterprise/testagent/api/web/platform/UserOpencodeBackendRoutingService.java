@@ -481,13 +481,19 @@ class UserOpencodeBackendRoutingService {
         if (suffix.startsWith("agent-config/workspaces/")) {
             return true;
         }
+        // 应用源码打开、最近选择和副本可打开性依赖用户进程所在服务器，统一复用用户绑定路由。
+        if (suffix.equals("recent-app-source")) {
+            return HttpMethod.GET.equals(method) || HttpMethod.DELETE.equals(method);
+        }
         if (suffix.startsWith("personal-workspaces/")
                 || suffix.startsWith("workspaces/")
                 || suffix.startsWith("workspace-versions/")) {
             return HttpMethod.GET.equals(method) || HttpMethod.POST.equals(method);
         }
         return suffix.startsWith("applications/")
-                && (suffix.contains("/workspace-templates/") || suffix.contains("/workspaces/"))
+                && (suffix.contains("/workspace-templates/")
+                        || suffix.contains("/workspaces/")
+                        || suffix.contains("/app-source-repositories"))
                 && (HttpMethod.GET.equals(method) || HttpMethod.POST.equals(method));
     }
 

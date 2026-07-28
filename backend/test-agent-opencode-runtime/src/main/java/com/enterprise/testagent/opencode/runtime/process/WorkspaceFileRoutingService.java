@@ -2,6 +2,7 @@ package com.enterprise.testagent.opencode.runtime.process;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.domain.appsource.AppSourceRepository;
 import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.enterprise.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServer;
@@ -43,6 +44,7 @@ public class WorkspaceFileRoutingService {
     private final Clock clock;
     private final ConversationContextStore conversationContextStore;
     private final ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer;
+    private final AppSourceRepository appSourceRepository;
 
     /**
      * 生产构造器使用系统时钟。
@@ -54,7 +56,8 @@ public class WorkspaceFileRoutingService {
             BackendJavaRouteResolver routeResolver,
             ManagedWorkspacePathResolver pathResolver,
             ConversationContextStore conversationContextStore,
-            ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer) {
+            ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer,
+            AppSourceRepository appSourceRepository) {
         this(
                 workspaceRepository,
                 assignmentService,
@@ -62,7 +65,8 @@ public class WorkspaceFileRoutingService {
                 pathResolver,
                 Clock.systemUTC(),
                 conversationContextStore,
-                workspaceAccessAuthorizer);
+                workspaceAccessAuthorizer,
+                appSourceRepository);
     }
 
     /**
@@ -99,7 +103,8 @@ public class WorkspaceFileRoutingService {
                 pathResolver,
                 clock,
                 conversationContextStore,
-                (userId, workspaceId) -> { });
+                (userId, workspaceId) -> { },
+                null);
     }
 
     public WorkspaceFileRoutingService(
@@ -110,6 +115,27 @@ public class WorkspaceFileRoutingService {
             Clock clock,
             ConversationContextStore conversationContextStore,
             ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer) {
+        this(
+                workspaceRepository,
+                assignmentService,
+                routeResolver,
+                pathResolver,
+                clock,
+                conversationContextStore,
+                workspaceAccessAuthorizer,
+                null);
+    }
+
+    /** 测试与生产共用的完整构造器，AppSource 映射用于禁止 replica Workspace 本机降级。 */
+    public WorkspaceFileRoutingService(
+            WorkspaceRepository workspaceRepository,
+            UserOpencodeProcessAssignmentService assignmentService,
+            BackendJavaRouteResolver routeResolver,
+            ManagedWorkspacePathResolver pathResolver,
+            Clock clock,
+            ConversationContextStore conversationContextStore,
+            ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer,
+            AppSourceRepository appSourceRepository) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.assignmentService = Objects.requireNonNull(assignmentService, "assignmentService must not be null");
         this.routeResolver = Objects.requireNonNull(routeResolver, "routeResolver must not be null");
@@ -119,6 +145,7 @@ public class WorkspaceFileRoutingService {
         this.workspaceAccessAuthorizer = Objects.requireNonNull(
                 workspaceAccessAuthorizer,
                 "workspaceAccessAuthorizer must not be null");
+        this.appSourceRepository = appSourceRepository;
     }
 
     /**
@@ -167,16 +194,14 @@ public class WorkspaceFileRoutingService {
         String agentLinuxServerId = readyLinuxServerId(process, workspaceId.value());
         String workspaceLinuxServerId = workspace.linuxServerId() == null ? agentLinuxServerId : workspace.linuxServerId();
         if (!workspaceLinuxServerId.equals(agentLinuxServerId)) {
+            if (isAppSourceReplicaWorkspace(workspaceId)) {
+                // AppSource workspace 身份固定到 replica/server/generation，禁止复用普通历史 Workspace 的本机回绑。
+                throw workspaceServerConflict(workspaceId, workspaceLinuxServerId, agentLinuxServerId);
+            }
             workspace = rebindStaleWorkspaceIfSafe(workspace, workspaceLinuxServerId, agentLinuxServerId, traceId);
             workspaceLinuxServerId = workspace.linuxServerId();
             if (!workspaceLinuxServerId.equals(agentLinuxServerId)) {
-                throw new PlatformException(
-                        ErrorCode.CONFLICT,
-                        "工作空间与 agent 不在同一服务器",
-                        Map.of(
-                                "workspaceId", workspaceId.value(),
-                                "workspaceLinuxServerId", workspaceLinuxServerId,
-                                "agentLinuxServerId", agentLinuxServerId));
+                throw workspaceServerConflict(workspaceId, workspaceLinuxServerId, agentLinuxServerId);
             }
         }
         BackendJavaProcess backend = backendFor(new LinuxServerId(workspaceLinuxServerId));
@@ -187,6 +212,24 @@ public class WorkspaceFileRoutingService {
                 WEB_SOCKET_PATH,
                 true,
                 null);
+    }
+
+    private boolean isAppSourceReplicaWorkspace(WorkspaceId workspaceId) {
+        return appSourceRepository != null
+                && appSourceRepository.findReplicaByRuntimeWorkspaceId(workspaceId.value()).isPresent();
+    }
+
+    private PlatformException workspaceServerConflict(
+            WorkspaceId workspaceId,
+            String workspaceLinuxServerId,
+            String agentLinuxServerId) {
+        return new PlatformException(
+                ErrorCode.CONFLICT,
+                "工作空间与 agent 不在同一服务器",
+                Map.of(
+                        "workspaceId", workspaceId.value(),
+                        "workspaceLinuxServerId", workspaceLinuxServerId,
+                        "agentLinuxServerId", agentLinuxServerId));
     }
 
     /**

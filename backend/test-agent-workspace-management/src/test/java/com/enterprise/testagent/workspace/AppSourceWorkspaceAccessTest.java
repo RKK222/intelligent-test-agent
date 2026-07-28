@@ -13,6 +13,7 @@ import com.enterprise.testagent.domain.appsource.AppSourcePurpose;
 import com.enterprise.testagent.domain.appsource.AppSourceReplica;
 import com.enterprise.testagent.domain.appsource.AppSourceReplicaStatus;
 import com.enterprise.testagent.domain.appsource.AppSourceRepository;
+import com.enterprise.testagent.domain.appsource.AppSourceRepositorySlot;
 import com.enterprise.testagent.domain.appsource.AppSourceSelectedPath;
 import com.enterprise.testagent.domain.appsource.AppSourceSnapshot;
 import com.enterprise.testagent.domain.appsource.AppSourceSnapshotStatus;
@@ -50,6 +51,7 @@ class AppSourceWorkspaceAccessTest {
         when(managed.findVersionReplicaByRuntimeWorkspace(WORKSPACE_ID)).thenReturn(Optional.empty());
         when(managed.findPersonalWorkspaceByRuntimeWorkspace(WORKSPACE_ID)).thenReturn(Optional.empty());
         when(appSources.findReplicaByRuntimeWorkspaceId(WORKSPACE_ID.value())).thenReturn(Optional.of(replica()));
+        when(appSources.findSlot(REPOSITORY_ID)).thenReturn(Optional.of(activeSlot()));
         when(appSources.findSnapshot(REPOSITORY_ID, 1L)).thenReturn(Optional.of(snapshot(AppSourcePurpose.TEAM)));
         when(configuration.findApplicationsByRepository(REPOSITORY_ID)).thenReturn(List.of(application()));
         when(configuration.findRepositoriesByApplication(APP_ID)).thenReturn(List.of(repository()));
@@ -70,6 +72,7 @@ class AppSourceWorkspaceAccessTest {
         ConfigurationManagementRepository configuration = mock(ConfigurationManagementRepository.class);
         AppSourceRepository appSources = mock(AppSourceRepository.class);
         when(appSources.findReplicaByRuntimeWorkspaceId(WORKSPACE_ID.value())).thenReturn(Optional.of(replica()));
+        when(appSources.findSlot(REPOSITORY_ID)).thenReturn(Optional.of(activeSlot()));
         when(appSources.findSnapshot(REPOSITORY_ID, 1L)).thenReturn(Optional.of(snapshot(AppSourcePurpose.TEAM)));
         when(configuration.findApplicationsByRepository(REPOSITORY_ID)).thenReturn(List.of(application()));
         when(configuration.findRepositoriesByApplication(APP_ID)).thenReturn(List.of(repository()));
@@ -87,6 +90,7 @@ class AppSourceWorkspaceAccessTest {
         ConfigurationManagementRepository configuration = mock(ConfigurationManagementRepository.class);
         AppSourceRepository appSources = mock(AppSourceRepository.class);
         when(appSources.findReplicaByRuntimeWorkspaceId(WORKSPACE_ID.value())).thenReturn(Optional.of(replica()));
+        when(appSources.findSlot(REPOSITORY_ID)).thenReturn(Optional.of(activeSlot()));
         when(appSources.findSnapshot(REPOSITORY_ID, 1L)).thenReturn(Optional.of(snapshot(AppSourcePurpose.PERSONAL)));
         ManagedConversationWorkspaceAccessAuthorizer authorizer =
                 new ManagedConversationWorkspaceAccessAuthorizer(
@@ -97,10 +101,57 @@ class AppSourceWorkspaceAccessTest {
                         exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
     }
 
+    @Test
+    void oldReadyReplicaIsRejectedAfterTheRepositorySlotMovesToANewerGeneration() {
+        ManagedWorkspaceRepository managed = mock(ManagedWorkspaceRepository.class);
+        ConfigurationManagementRepository configuration = mock(ConfigurationManagementRepository.class);
+        AppSourceRepository appSources = mock(AppSourceRepository.class);
+        when(appSources.findReplicaByRuntimeWorkspaceId(WORKSPACE_ID.value())).thenReturn(Optional.of(replica()));
+        when(appSources.findSlot(REPOSITORY_ID)).thenReturn(Optional.of(new AppSourceRepositorySlot(
+                REPOSITORY_ID, 2L, null, 3L, "aso_new", 2L, NOW.minusSeconds(60), NOW)));
+        when(appSources.findSnapshot(REPOSITORY_ID, 1L)).thenReturn(Optional.of(snapshot(AppSourcePurpose.TEAM)));
+        when(configuration.findApplicationsByRepository(REPOSITORY_ID)).thenReturn(List.of(application()));
+        when(configuration.findRepositoriesByApplication(APP_ID)).thenReturn(List.of(repository()));
+        when(configuration.isActiveMember(APP_ID, USER_ID)).thenReturn(true);
+        ManagedConversationWorkspaceAccessAuthorizer authorizer =
+                new ManagedConversationWorkspaceAccessAuthorizer(
+                        managed, configuration, appSources, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        assertThatThrownBy(() -> authorizer.requireFileAccess(USER_ID, WORKSPACE_ID, false))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+    }
+
+    @Test
+    void expiredSnapshotIsRejectedEvenWhenTheReplicaIsStillReadyAndCurrent() {
+        ManagedWorkspaceRepository managed = mock(ManagedWorkspaceRepository.class);
+        ConfigurationManagementRepository configuration = mock(ConfigurationManagementRepository.class);
+        AppSourceRepository appSources = mock(AppSourceRepository.class);
+        when(appSources.findReplicaByRuntimeWorkspaceId(WORKSPACE_ID.value())).thenReturn(Optional.of(replica()));
+        when(appSources.findSlot(REPOSITORY_ID)).thenReturn(Optional.of(activeSlot()));
+        when(appSources.findSnapshot(REPOSITORY_ID, 1L)).thenReturn(Optional.of(new AppSourceSnapshot(
+                REPOSITORY_ID, 1L, "billing-service", AppSourcePurpose.TEAM, USER_ID,
+                "main", "a".repeat(40), List.of(new AppSourceSelectedPath(".", AppSourcePathType.DIRECTORY)),
+                "b".repeat(64), NOW.minusSeconds(7200), NOW.minusSeconds(3600),
+                AppSourceSnapshotStatus.ACTIVE, NOW.minusSeconds(7200), NOW.minusSeconds(3600))));
+        ManagedConversationWorkspaceAccessAuthorizer authorizer =
+                new ManagedConversationWorkspaceAccessAuthorizer(
+                        managed, configuration, appSources, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        assertThatThrownBy(() -> authorizer.requireFileAccess(USER_ID, WORKSPACE_ID, false))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+    }
+
     private AppSourceReplica replica() {
         return new AppSourceReplica(
                 REPOSITORY_ID, 1L, new LinuxServerId("server-a"), WORKSPACE_ID, AppSourceReplicaStatus.READY,
                 null, null, 1, null, null, null, NOW, NOW);
+    }
+
+    private AppSourceRepositorySlot activeSlot() {
+        return new AppSourceRepositorySlot(
+                REPOSITORY_ID, 1L, null, 2L, "aso_active", 1L, NOW.minusSeconds(60), NOW);
     }
 
     private AppSourceSnapshot snapshot(AppSourcePurpose purpose) {
