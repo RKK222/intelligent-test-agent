@@ -15,18 +15,24 @@ type MaterializationRequest = Omit<AppSourceMaterializationPayload, "operationId
 
 const props = defineProps<{
   open: boolean;
+  repositories?: AppSourceRepositorySummary[];
   repository?: AppSourceRepositorySummary | null;
   branches?: string[];
   branchesLoading?: boolean;
+  branchesError?: string | null;
   treeSnapshot?: AppSourceTreeSnapshot | null;
+  treeBranch?: string | null;
   treeLoading?: boolean;
+  treeError?: string | null;
   operation?: AppSourceOperation | null;
   submitting?: boolean;
+  materializationError?: string | null;
   progressError?: string | null;
 }>();
 
 const emit = defineEmits<{
   close: [];
+  "select-repository": [repository: AppSourceRepositorySummary];
   "load-branches": [repository: AppSourceRepositorySummary];
   "load-tree": [branch: string, path: string];
   materialize: [payload: MaterializationRequest];
@@ -37,40 +43,71 @@ const step = ref(1);
 const branch = ref("");
 const selectedPathKeys = ref<string[]>([]);
 const purpose = ref<AppSourcePurpose>("TEAM");
-const retentionHours = ref(24);
+const retentionHours = ref(48);
 const confirmReplace = ref(false);
 
 const currentOperation = computed(() => props.operation ?? props.repository?.latestOperation ?? null);
 const needsReplaceConfirmation = computed(() => Boolean(props.repository?.generation));
+const teamPurposeLocked = computed(() => Boolean(
+  props.repository?.generation && props.repository.purpose === "TEAM"
+));
 const flattenedTree = computed(() => flattenTree(props.treeSnapshot?.nodes ?? []));
+const treeMatchesBranch = computed(() => Boolean(
+  branch.value
+  && props.treeSnapshot?.targetCommit
+  && props.treeBranch === branch.value
+));
 const indexedSelectionPaths = computed(() => new Set(
   (props.repository?.selectedPaths ?? []).map((item) => item.path)
 ));
+const visiblePathTypes = computed(() => new Map(
+  flattenedTree.value.map((item) => [item.node.path, item.node.type === "directory" ? "DIRECTORY" : "FILE"] as const)
+));
+const invalidSelectedPaths = computed(() => {
+  if (!treeMatchesBranch.value) return [];
+  return selectedPathKeys.value.filter((path) => !visiblePathTypes.value.has(path));
+});
 const selectedPaths = computed(() => {
-  const typeByPath = new Map(flattenedTree.value.map((item) => [item.node.path, item.node.type]));
-  const authorityTypes = new Map((props.repository?.selectedPaths ?? []).map((item) => [item.path, item.type]));
   return selectedPathKeys.value.map((path) => ({
     path,
-    type: (typeByPath.get(path) === "directory" ? "DIRECTORY" : typeByPath.has(path) ? "FILE" : authorityTypes.get(path)) as AppSourcePathType
+    type: visiblePathTypes.value.get(path) as AppSourcePathType
   })).filter((item) => Boolean(item.type));
 });
+const canProceedFromTree = computed(() => Boolean(
+  treeMatchesBranch.value
+  && !props.treeLoading
+  && !props.branchesError
+  && !props.treeError
+  && selectedPaths.value.length > 0
+  && invalidSelectedPaths.value.length === 0
+));
 
 watch(
   () => [props.open, props.repository?.repositoryId, props.repository?.generation] as const,
   ([open]) => {
-    if (!open || !props.repository) return;
+    if (!open) return;
+    if (!props.repository) {
+      step.value = 1;
+      branch.value = "";
+      selectedPathKeys.value = [];
+      purpose.value = "TEAM";
+      retentionHours.value = 48;
+      confirmReplace.value = false;
+      return;
+    }
     branch.value = props.repository.branch ?? props.branches?.[0] ?? "";
     selectedPathKeys.value = props.repository.selectedPaths.map((item) => item.path);
     purpose.value = props.repository.purpose ?? "TEAM";
-    retentionHours.value = 24;
+    retentionHours.value = 48;
     confirmReplace.value = false;
-    step.value = currentOperation.value ? 4 : 1;
+    step.value = operationRunning(currentOperation.value) ? 4 : 1;
   },
   { immediate: true }
 );
 
 watch(() => props.operation, (operation) => {
-  if (props.open && operation) step.value = 4;
+  if (!props.open || !operation) return;
+  if (operationRunning(operation)) step.value = 4;
 });
 
 watch(() => props.branches, (branches) => {
@@ -89,7 +126,25 @@ function moveNext() {
     emit("load-branches", props.repository);
     return;
   }
-  if (step.value === 2) step.value = 3;
+  if (step.value === 2 && canProceedFromTree.value) step.value = 3;
+}
+
+function selectRepository(repository: AppSourceRepositorySummary) {
+  if (!repository.manageable) return;
+  emit("select-repository", repository);
+}
+
+function viewHistory() {
+  if (currentOperation.value) step.value = 4;
+}
+
+function reconfigure() {
+  const refreshedRepository = props.repositories?.find(
+    (item) => item.repositoryId === props.repository?.repositoryId
+  );
+  // 终态后仓库列表可能已推进 generation；重配必须先切回最新服务端摘要，避免提交旧 expectedGeneration。
+  if (refreshedRepository?.manageable) emit("select-repository", refreshedRepository);
+  step.value = 1;
 }
 
 function changeBranch() {
@@ -111,11 +166,15 @@ function expandDirectory(node: AppSourceRemoteTreeNode) {
 
 function clampRetention() {
   const numeric = Number(retentionHours.value);
-  retentionHours.value = Number.isFinite(numeric) ? Math.min(72, Math.max(1, Math.round(numeric))) : 24;
+  retentionHours.value = Number.isFinite(numeric) ? Math.min(72, Math.max(1, Math.round(numeric))) : 48;
 }
 
 function submitMaterialization() {
-  if (!props.repository || !branch.value || !props.treeSnapshot?.targetCommit || selectedPaths.value.length === 0) return;
+  if (!props.repository || !canProceedFromTree.value || !props.treeSnapshot?.targetCommit) return;
+  if (teamPurposeLocked.value && purpose.value === "PERSONAL") {
+    purpose.value = "TEAM";
+    return;
+  }
   clampRetention();
   if (needsReplaceConfirmation.value && !confirmReplace.value) return;
   emit("materialize", {
@@ -137,6 +196,24 @@ function durationLabel(milliseconds?: number | null) {
 
 function operationRunning(operation: AppSourceOperation | null) {
   return operation?.status === "PENDING" || operation?.status === "RUNNING";
+}
+
+function operationTerminal(operation: AppSourceOperation | null) {
+  return Boolean(operation && ["SUCCEEDED", "PARTIAL_FAILED", "FAILED"].includes(operation.status));
+}
+
+function repositoryStateLabel(repository: AppSourceRepositorySummary) {
+  const labels: Record<AppSourceRepositorySummary["downloadState"], string> = {
+    NOT_DOWNLOADED: "未下载",
+    DOWNLOADED_ACTIVE: repository.purpose === "TEAM" ? "团队可用" : "个人可用",
+    DOWNLOADED_EXPIRED: "已过期",
+    PERSONAL_OCCUPIED: "个人占用"
+  };
+  return labels[repository.downloadState];
+}
+
+function repositoryOwnerLabel(repository: AppSourceRepositorySummary) {
+  return [repository.ownerName, repository.ownerUnifiedAuthId].filter(Boolean).join(" · ");
 }
 </script>
 
@@ -162,8 +239,36 @@ function operationRunning(operation: AppSourceOperation | null) {
         <main class="app-source-dialog-body">
           <section v-if="step === 1" class="app-source-step-panel">
             <h3>版本库状态</h3>
-            <div v-if="repository" class="app-source-status-card">
-              <div><strong>{{ repository.name }}</strong><span>{{ repository.downloadState }}</span></div>
+            <div class="app-source-repository-grid" role="list" aria-label="关联版本库">
+              <article
+                v-for="item in repositories ?? []"
+                :key="item.repositoryId"
+                :class="['app-source-repository-choice', { 'is-selected': item.repositoryId === repository?.repositoryId }]"
+                role="listitem"
+              >
+                <div>
+                  <strong>{{ item.name }}</strong>
+                  <span>{{ item.englishName }}</span>
+                  <b>{{ repositoryStateLabel(item) }}</b>
+                </div>
+                <dl>
+                  <div><dt>分支</dt><dd>{{ item.branch || "未选择" }}</dd></div>
+                  <div><dt>到期</dt><dd>{{ item.expiresAt || "—" }}</dd></div>
+                </dl>
+                <p v-if="repositoryOwnerLabel(item)" class="app-source-owner">{{ repositoryOwnerLabel(item) }}</p>
+                <p v-if="!item.manageable" class="app-source-repository-reason">
+                  {{ item.unavailableReason || "当前用户不能管理该版本库" }}
+                </p>
+                <button
+                  type="button"
+                  :aria-label="`选择${item.name}版本库`"
+                  :disabled="!item.manageable"
+                  @click="selectRepository(item)"
+                >{{ item.repositoryId === repository?.repositoryId ? "已选择" : "选择" }}</button>
+              </article>
+            </div>
+            <div v-if="repository" class="app-source-status-card app-source-selected-status">
+              <div><strong>当前配置 · {{ repository.name }}</strong><span>{{ repositoryStateLabel(repository) }}</span></div>
               <dl>
                 <div><dt>当前分支</dt><dd>{{ repository.branch || "未选择" }}</dd></div>
                 <div><dt>当前 generation</dt><dd>{{ repository.generation ?? "首次下载" }}</dd></div>
@@ -173,6 +278,13 @@ function operationRunning(operation: AppSourceOperation | null) {
               <p v-if="repository.ownerName || repository.ownerUnifiedAuthId" class="app-source-owner">
                 个人占用：{{ [repository.ownerName, repository.ownerUnifiedAuthId].filter(Boolean).join(" · ") }}
               </p>
+              <button
+                v-if="operationTerminal(currentOperation)"
+                type="button"
+                class="app-source-history-action"
+                aria-label="查看上次源码进度"
+                @click="viewHistory"
+              >查看上次进度</button>
             </div>
           </section>
 
@@ -184,12 +296,17 @@ function operationRunning(operation: AppSourceOperation | null) {
                 <option v-for="item in branches ?? []" :key="item" :value="item">{{ item }}</option>
               </select>
             </label>
+            <div v-if="branchesError" class="app-source-step-error"><AlertTriangle />{{ branchesError }}</div>
+            <div v-if="treeError" class="app-source-step-error"><AlertTriangle />{{ treeError }}</div>
             <p class="app-source-help">历史路径已按服务端索引镜像默认勾选；本次勾选会作为完整 exact set 提交。</p>
             <div class="app-source-tree" :aria-busy="treeLoading">
               <div v-if="treeLoading" class="app-source-tree-state"><LoaderCircle class="app-source-spin" />加载固定提交目录树…</div>
+              <div v-else-if="!treeMatchesBranch" class="app-source-tree-state">
+                等待 {{ branch || "所选" }} 分支的固定提交目录树
+              </div>
               <label
                 v-for="item in flattenedTree"
-                v-else
+                v-else-if="treeMatchesBranch"
                 :key="item.node.path"
                 :class="['app-source-tree-row', { 'is-indexed-selection': indexedSelectionPaths.has(item.node.path) }]"
                 :style="{ paddingLeft: `${8 + item.depth * 18}px` }"
@@ -211,7 +328,17 @@ function operationRunning(operation: AppSourceOperation | null) {
                 <small>{{ item.node.type === "directory" ? "目录" : "文件" }}</small>
               </label>
             </div>
-            <div v-if="treeSnapshot?.targetCommit" class="app-source-fixed-commit">固定提交：{{ treeSnapshot.targetCommit }}</div>
+            <div v-if="treeMatchesBranch" class="app-source-fixed-commit">固定提交：{{ treeSnapshot?.targetCommit }}</div>
+            <section v-if="invalidSelectedPaths.length" class="app-source-invalid-paths" aria-label="失效历史路径">
+              <strong>当前分支中不可见或已失效的历史路径</strong>
+              <p>这些路径不会静默提交；请展开目录确认，或从本次 exact set 中移除。</p>
+              <ul>
+                <li v-for="path in invalidSelectedPaths" :key="path">
+                  <code>{{ path }}</code>
+                  <button type="button" :aria-label="`移除失效路径 ${path}`" @click="togglePath(path, false)">移除</button>
+                </li>
+              </ul>
+            </section>
           </section>
 
           <section v-else-if="step === 3" class="app-source-step-panel">
@@ -219,8 +346,8 @@ function operationRunning(operation: AppSourceOperation | null) {
             <div class="app-source-purpose">
               <label><input v-model="purpose" type="radio" value="TEAM" aria-label="团队源码" />团队源码</label>
               <p>同一台服务器上的应用成员共享 READY 副本。</p>
-              <label><input v-model="purpose" type="radio" value="PERSONAL" aria-label="个人源码" />个人源码</label>
-              <p>仅当前用户占用，列表会展示姓名与 UCID。</p>
+              <label><input v-model="purpose" type="radio" value="PERSONAL" aria-label="个人源码" :disabled="teamPurposeLocked" />个人源码</label>
+              <p>{{ teamPurposeLocked ? "已有团队源码不能降级为个人源码；可继续更新团队配置。" : "仅当前用户占用，列表会展示姓名与 UCID。" }}</p>
             </div>
             <label class="app-source-field">
               <span>保留小时数（1–72）</span>
@@ -230,6 +357,7 @@ function operationRunning(operation: AppSourceOperation | null) {
               <input v-model="confirmReplace" type="checkbox" aria-label="确认覆盖当前源码" />
               我已确认用本次完整选择覆盖当前 generation
             </label>
+            <div v-if="materializationError" class="app-source-step-error"><AlertTriangle />{{ materializationError }}</div>
           </section>
 
           <section v-else class="app-source-step-panel app-source-timeline-panel">
@@ -305,23 +433,31 @@ function operationRunning(operation: AppSourceOperation | null) {
             v-else-if="step === 2"
             type="button"
             aria-label="下一步：用途与保留时间"
-            :disabled="!branch || selectedPaths.length === 0"
+            :disabled="!canProceedFromTree"
             @click="moveNext"
           >下一步</button>
           <button
             v-else-if="step === 3"
             type="button"
             aria-label="提交源码物化"
-            :disabled="submitting || !treeSnapshot?.targetCommit || selectedPaths.length === 0 || (needsReplaceConfirmation && !confirmReplace)"
+            :disabled="submitting || !canProceedFromTree || (needsReplaceConfirmation && !confirmReplace)"
             @click="submitMaterialization"
           >{{ submitting ? "正在提交…" : "开始下载" }}</button>
           <button
             v-else-if="currentOperation && ['PARTIAL_FAILED', 'FAILED'].includes(currentOperation.status)"
             type="button"
             aria-label="重试失败或缺失副本"
+            :disabled="submitting"
             @click="emit('retry', currentOperation)"
           ><RotateCcw />重试失败或缺失副本</button>
-          <span v-else-if="operationRunning(currentOperation)" class="app-source-running-note">后台任务执行中，不提供取消操作</span>
+          <button
+            v-if="step === 4 && operationTerminal(currentOperation)"
+            type="button"
+            class="is-secondary"
+            aria-label="重新下载或更新配置"
+            @click="reconfigure"
+          >重新下载/更新配置</button>
+          <span v-if="step === 4 && operationRunning(currentOperation)" class="app-source-running-note">后台任务执行中，不提供取消操作</span>
         </footer>
       </section>
     </div>
@@ -347,8 +483,22 @@ function operationRunning(operation: AppSourceOperation | null) {
 .app-source-dialog-body { min-height: 0; flex: 1; overflow: auto; padding: 16px; }
 .app-source-step-panel { max-width: 820px; margin: 0 auto; }
 .app-source-step-panel h3 { margin: 0 0 12px; font-size: 14px; font-weight: 600; }
+.app-source-repository-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.app-source-repository-choice { position: relative; display: grid; gap: 8px; border: 1px solid var(--ta-border, #e4e4e7); border-radius: 7px; background: #fff; padding: 11px; }
+.app-source-repository-choice.is-selected { border-color: #818cf8; box-shadow: inset 3px 0 #6366f1; }
+.app-source-repository-choice > div { display: flex; min-width: 0; align-items: baseline; gap: 6px; }
+.app-source-repository-choice > div span { overflow: hidden; color: #a1a1aa; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.app-source-repository-choice > div b { margin-left: auto; color: #52525b; font-size: 10px; }
+.app-source-repository-choice dl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0; }
+.app-source-repository-choice dt { color: #a1a1aa; font-size: 10px; }
+.app-source-repository-choice dd { overflow: hidden; margin: 2px 0 0; font-family: var(--ta-font-mono, monospace); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.app-source-repository-choice p { margin: 0; font-size: 10px; }
+.app-source-repository-reason { color: #a16207; }
+.app-source-repository-choice button, .app-source-history-action { justify-self: end; border: 1px solid #d4d4d8; border-radius: 5px; background: #fff; padding: 4px 9px; color: #3f3f46; font-size: 10px; cursor: pointer; }
+.app-source-repository-choice button:disabled { cursor: not-allowed; opacity: 0.45; }
 .app-source-status-card, .app-source-server-card { border: 1px solid var(--ta-border, #e4e4e7); border-radius: 7px; background: #fff; }
 .app-source-status-card { padding: 14px; }
+.app-source-selected-status { margin-top: 10px; }
 .app-source-status-card > div:first-child { display: flex; align-items: center; justify-content: space-between; }
 .app-source-status-card > div:first-child span { color: #047857; font-size: 11px; font-weight: 600; }
 .app-source-status-card dl { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 20px; margin: 14px 0 0; }
@@ -367,6 +517,13 @@ function operationRunning(operation: AppSourceOperation | null) {
 .app-source-tree-row button svg { width: 12px; }
 .app-source-tree-row small { margin-left: auto; margin-right: 10px; color: #a1a1aa; font-size: 10px; }
 .app-source-fixed-commit, .app-source-operation-summary { margin-top: 8px; color: #71717a; font-family: var(--ta-font-mono, monospace); font-size: 11px; }
+.app-source-step-error { display: flex; align-items: center; gap: 6px; margin: 7px 0; border-left: 2px solid #dc2626; background: #fef2f2; padding: 7px 9px; color: #b91c1c; font-size: 11px; }
+.app-source-step-error svg { width: 13px; flex: none; }
+.app-source-invalid-paths { margin-top: 10px; border: 1px solid #f59e0b; border-radius: 6px; background: #fffbeb; padding: 9px; color: #92400e; font-size: 11px; }
+.app-source-invalid-paths > p { margin: 3px 0 7px; }
+.app-source-invalid-paths ul { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.app-source-invalid-paths li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.app-source-invalid-paths button { border: 0; background: transparent; color: #b45309; font-size: 10px; text-decoration: underline; cursor: pointer; }
 .app-source-purpose { display: grid; grid-template-columns: max-content 1fr; gap: 8px 14px; margin-bottom: 14px; }
 .app-source-purpose label { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; }
 .app-source-purpose p { margin: 0; color: #71717a; font-size: 11px; }
@@ -404,5 +561,5 @@ function operationRunning(operation: AppSourceOperation | null) {
 .app-source-running-note { color: #71717a; font-size: 11px; }
 .app-source-spin { animation: source-dialog-spin 1s linear infinite; }
 @keyframes source-dialog-spin { to { transform: rotate(360deg); } }
-@media (max-width: 720px) { .app-source-dialog-layer { padding: 8px; } .app-source-dialog { width: 100%; height: 100%; } .app-source-steps li { font-size: 0; } .app-source-status-card dl { grid-template-columns: 1fr; } }
+@media (max-width: 720px) { .app-source-dialog-layer { padding: 8px; } .app-source-dialog { width: 100%; height: 100%; } .app-source-steps li { font-size: 0; } .app-source-repository-grid, .app-source-status-card dl { grid-template-columns: 1fr; } }
 </style>

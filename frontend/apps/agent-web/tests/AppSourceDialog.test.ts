@@ -94,13 +94,15 @@ describe("AppSourceDialog", () => {
     expect(wrapper.get('select[aria-label="源码分支"]').element).toHaveProperty("value", "main");
   });
 
-  it("submits an exact selection with the tree snapshot commit and replacement confirmation", async () => {
+  it("submits a PERSONAL to TEAM update with the branch-bound tree commit and 48-hour default", async () => {
     const wrapper = mount(AppSourceDialog, {
       props: {
         open: true,
-        repository,
+        repositories: [{ ...repository, purpose: "PERSONAL" }],
+        repository: { ...repository, purpose: "PERSONAL" },
         branches: ["main", "release"],
-        treeSnapshot
+        treeSnapshot,
+        treeBranch: "main"
       },
       global: { stubs: { Teleport: true } }
     });
@@ -111,9 +113,9 @@ describe("AppSourceDialog", () => {
     expect(indexedSelection.element.closest("label")?.classList).toContain("is-indexed-selection");
     await wrapper.get('select[aria-label="源码分支"]').setValue("release");
     expect(wrapper.emitted("load-tree")?.at(-1)).toEqual(["release", ""]);
+    await wrapper.setProps({ treeSnapshot, treeBranch: "release" });
     await wrapper.get('button[aria-label="下一步：用途与保留时间"]').trigger("click");
-    await wrapper.get('input[aria-label="个人源码"]').setValue(true);
-    await wrapper.get('input[aria-label="保留小时数"]').setValue(72);
+    await wrapper.get('input[aria-label="团队源码"]').setValue(true);
     await wrapper.get('input[aria-label="确认覆盖当前源码"]').setValue(true);
     await wrapper.get('button[aria-label="提交源码物化"]').trigger("click");
 
@@ -123,11 +125,160 @@ describe("AppSourceDialog", () => {
         branch: "release",
         expectedTreeCommit: "tree-snapshot-commit",
         selectedPaths: [{ path: "src", type: "DIRECTORY" }],
-        purpose: "PERSONAL",
-        retentionHours: 72,
+        purpose: "TEAM",
+        retentionHours: 48,
         confirmReplace: true
       }
     ]]);
+  });
+
+  it("prevents an existing TEAM generation from being downgraded to PERSONAL", async () => {
+    const wrapper = mount(AppSourceDialog, {
+      props: {
+        open: true,
+        repositories: [repository],
+        repository,
+        branches: ["main"],
+        treeSnapshot,
+        treeBranch: "main"
+      },
+      global: { stubs: { Teleport: true } }
+    });
+
+    await wrapper.get('button[aria-label="下一步：选择分支与目录"]').trigger("click");
+    await wrapper.get('button[aria-label="下一步：用途与保留时间"]').trigger("click");
+
+    const personal = wrapper.get('input[aria-label="个人源码"]');
+    expect(personal.attributes()).toHaveProperty("disabled");
+    expect(wrapper.text()).toContain("团队源码不能降级为个人源码");
+    await personal.setValue(true);
+    await wrapper.get('input[aria-label="确认覆盖当前源码"]').setValue(true);
+    await wrapper.get('button[aria-label="提交源码物化"]').trigger("click");
+    expect(wrapper.emitted("materialize")?.[0]?.[0]).toMatchObject({ purpose: "TEAM" });
+  });
+
+  it("lists every associated repository in step one and waits for an explicit manageable selection", async () => {
+    const occupied = {
+      ...repository,
+      repositoryId: "repo-occupied",
+      name: "个人占用库",
+      downloadState: "PERSONAL_OCCUPIED" as const,
+      manageable: false,
+      openable: false,
+      ownerName: "李四",
+      ownerUnifiedAuthId: "10000001",
+      unavailableReason: "由其他用户个人占用"
+    };
+    const notDownloaded = {
+      ...repository,
+      repositoryId: "repo-new",
+      name: "待下载库",
+      downloadState: "NOT_DOWNLOADED" as const,
+      generation: null,
+      purpose: null,
+      branch: null,
+      selectedPaths: [],
+      expiresAt: null
+    };
+    const wrapper = mount(AppSourceDialog, {
+      props: { open: true, repositories: [occupied, notDownloaded], repository: null },
+      global: { stubs: { Teleport: true } }
+    });
+
+    expect(wrapper.text()).toContain("个人占用库");
+    expect(wrapper.text()).toContain("李四 · 10000001");
+    expect(wrapper.text()).toContain("由其他用户个人占用");
+    expect(wrapper.text()).toContain("待下载库");
+    expect(wrapper.get('button[aria-label="下一步：选择分支与目录"]').attributes()).toHaveProperty("disabled");
+    expect(wrapper.get('button[aria-label="选择个人占用库版本库"]').attributes()).toHaveProperty("disabled");
+
+    await wrapper.get('button[aria-label="选择待下载库版本库"]').trigger("click");
+    expect(wrapper.emitted("select-repository")).toEqual([[notDownloaded]]);
+  });
+
+  it("keeps terminal history inspectable without locking configuration", async () => {
+    const succeeded = operation("SUCCEEDED");
+    const refreshedRepository = { ...repository, generation: 6, latestOperation: succeeded };
+    const wrapper = mount(AppSourceDialog, {
+      props: {
+        open: true,
+        repositories: [refreshedRepository],
+        repository: { ...repository, latestOperation: succeeded },
+        operation: succeeded
+      },
+      global: { stubs: { Teleport: true } }
+    });
+
+    expect(wrapper.get("h3").text()).toBe("版本库状态");
+    await wrapper.get('button[aria-label="查看上次源码进度"]').trigger("click");
+    expect(wrapper.text()).toContain("trace-source-1");
+    await wrapper.get('button[aria-label="重新下载或更新配置"]').trigger("click");
+    expect(wrapper.get("h3").text()).toBe("版本库状态");
+    expect(wrapper.emitted("select-repository")?.at(-1)).toEqual([refreshedRepository]);
+
+    await wrapper.setProps({ operation: { ...succeeded, operationId: "aso-running", status: "RUNNING", completedAt: null } });
+    expect(wrapper.text()).toContain("后台任务执行中");
+  });
+
+  it("shows low-sensitivity errors in the step where they occur", async () => {
+    const wrapper = mount(AppSourceDialog, {
+      props: {
+        open: true,
+        repositories: [repository],
+        repository,
+        branches: ["main"],
+        treeSnapshot,
+        treeBranch: "main",
+        branchesError: "CONFLICT: 分支暂时不可用（traceId: trace-branch）",
+        treeError: "NOT_FOUND: 目录不存在（traceId: trace-tree）",
+        materializationError: "VALIDATION_ERROR: exact set 无效（traceId: trace-submit）",
+        progressError: "连接中断（traceId: trace-ws）"
+      },
+      global: { stubs: { Teleport: true } }
+    });
+
+    await wrapper.get('button[aria-label="下一步：选择分支与目录"]').trigger("click");
+    expect(wrapper.text()).toContain("trace-branch");
+    expect(wrapper.text()).toContain("trace-tree");
+    expect(wrapper.text()).not.toContain("trace-submit");
+    await wrapper.setProps({ branchesError: null, treeError: null });
+    await wrapper.get('button[aria-label="下一步：用途与保留时间"]').trigger("click");
+    expect(wrapper.text()).toContain("trace-submit");
+    expect(wrapper.text()).not.toContain("trace-tree");
+    await wrapper.setProps({ operation: operation("RUNNING") });
+    expect(wrapper.text()).toContain("trace-ws");
+  });
+
+  it("blocks a stale branch commit and exposes invisible historical paths for removal", async () => {
+    const wrapper = mount(AppSourceDialog, {
+      props: {
+        open: true,
+        repositories: [repository],
+        repository,
+        branches: ["main", "release"],
+        treeSnapshot,
+        treeBranch: "main"
+      },
+      global: { stubs: { Teleport: true } }
+    });
+
+    await wrapper.get('button[aria-label="下一步：选择分支与目录"]').trigger("click");
+    await wrapper.get('select[aria-label="源码分支"]').setValue("release");
+    expect(wrapper.get('button[aria-label="下一步：用途与保留时间"]').attributes()).toHaveProperty("disabled");
+    expect(wrapper.text()).toContain("等待 release 分支的固定提交目录树");
+
+    await wrapper.setProps({
+      treeBranch: "release",
+      treeSnapshot: {
+        targetCommit: "release-commit",
+        nodes: [{ name: "README.md", path: "README.md", type: "file", children: [] }]
+      }
+    });
+    expect(wrapper.text()).toContain("当前分支中不可见或已失效的历史路径");
+    expect(wrapper.text()).toContain("src");
+    await wrapper.get('button[aria-label="移除失效路径 src"]').trigger("click");
+    await wrapper.get('input[aria-label="选择路径 README.md"]').setValue(true);
+    expect(wrapper.get('button[aria-label="下一步：用途与保留时间"]').attributes()).not.toHaveProperty("disabled");
   });
 
   it("shows a resumable server timeline without cancellation and retries partial replicas", async () => {
@@ -137,6 +288,7 @@ describe("AppSourceDialog", () => {
       global: { stubs: { Teleport: true } }
     });
 
+    await wrapper.get('button[aria-label="查看上次源码进度"]').trigger("click");
     expect(wrapper.text()).toContain("linux-a");
     expect(wrapper.text()).toContain("校验精确选区");
     expect(wrapper.text()).toContain("检出固定提交");

@@ -92,6 +92,23 @@ describe("AgentSkillHub", () => {
     expect(view.emitted().changed?.[0]).toEqual([[".opencode/agents/checkout.md"]]);
   });
 
+  it("rechecks management capability when an already-open mutation dialog is submitted", async () => {
+    const view = renderHub({ canManage: true });
+    await waitFor(() => expect(view.getByText("结账检查")).toBeTruthy());
+    await fireEvent.click(view.getByText("结账检查"));
+    await fireEvent.click(await view.findByText("引用到当前应用"));
+
+    await view.rerender({
+      selectedAppId: "app_pay",
+      workspaceId: "wrk_personal",
+      canManage: false
+    });
+    await fireEvent.click(view.getByText("写入引用"));
+
+    expect(api.createAgentSkillHubReference).not.toHaveBeenCalled();
+    expect(view.emitted().changed).toBeUndefined();
+  });
+
   it("keeps catalog status independent from the current application's reference state", async () => {
     const published = { ...hubAsset(), referenced: true, referenceStatus: "ACTIVE" };
     const pushed = {

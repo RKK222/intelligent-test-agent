@@ -24,8 +24,10 @@
 - 指针核验 UI 在刷新按钮左侧显示可空服务器绝对路径，并在 POST 前创建按仓库 ID/核验 generation 绑定的三阶段进度弹层；逐服务器映射等待、处理、完成、重试、阻塞和离线延后，活动期锁定父弹层与焦点，终态保留并在关闭后恢复当前刷新按钮焦点，后台状态读取临时失败继续按 2 秒轮询。
 - `components/reference-config-jsonc.ts`：使用 `jsonc-parser` 检查本地引用与权限结构，并对 `.opencode/opencode.jsonc` 的目标 alias 和 `permission.external_directory["{path}/*"]` 执行单次最小补丁；合法字符串简写展开后保留 `*` 兜底，精确 `allow` 保证为最后匹配项，非法结构用中文校验错误中止，重复补丁幂等。保存前由弹窗重新读取磁盘正文，文件读写统一委托 backend-api 工作区文件 WebSocket RPC。
 - `components/AgentWorkbench.vue` 的工作区文件编排：消费组合视图稳定 `id/locator/source/readonly/workspacePath`，按配置代次刷新已展开目录并丢弃迟到结果；引用文件以独立只读 tab 打开，可用 `references/<alias>/<relativePath>` 加入对话，但不进入搜索、Git Diff 或 requirements。
-- `components/AppSourcePicker.vue`：工作空间入口右侧的紧凑源码列表，按服务端四态展示 active、expired、个人占用与不可用原因；owner 姓名/UCID 只用于安全占用提示，打开按钮严格服从 `openable`，底部固定进入下载流程。
-- `components/AppSourceDialog.vue`：四步源码物化弹窗，提交完整 exact set、树快照 commit、purpose、1–72 小时 retention 与覆盖确认；执行页展示全局及逐服务器安全步骤、耗时、commit、摘要、traceId 和 partial failure 重试，关闭只停止观察且不提供取消。
+- `components/AppSourcePicker.vue`：工作空间入口右侧的紧凑源码列表，只展示可打开或曾下载的状态并隐藏 `NOT_DOWNLOADED`；本机没有 READY 的 active 不使用成功色，owner 姓名/UCID 与不可用原因仅作安全提示，底部固定进入全部版本库管理流程。
+- `components/AppSourceDialog.vue`：四步源码物化弹窗，第 1 步显式选择当前应用任一 manageable 版本库；branch、树 snapshot commit 与 exact set 必须同 authority，失效历史路径可见且可移除；默认 retention 48 小时，已有 TEAM generation 禁止降级。终态历史不锁死配置，步骤级错误、重试、关闭不取消与重开恢复均保留。
+- `components/app-source-workspace.ts`：集中定义来源工作区能力、TEAM purpose 转换、selection/recovery intent、tree/progress authority 与结构化失效错误判断；不得从异常 message 猜测 recent 是否失效。
+- `components/AgentWorkbench.vue`：统一编排源码 picker/dialog、应用/仓库/分支切换 teardown、能力双门禁及进度重连。PENDING/RUNNING 断线后串行读取 operation snapshot 并签发新 ticket，重连退避上限 4 秒；terminal、关闭、切换和卸载清连接/timer，旧响应不能回写当前应用或工作区。
 - `components/app-source-workspace.ts`：集中定义 `MANAGED/APP_SOURCE`、不含物理路径的 source context、普通 Workspace 写能力、目录树 authority、进度 observation authority 与终态一次性 claim 规则。
 - `components/AgentWorkbench.vue` 的源码编排只消费后端返回的逻辑 open 结果和真实 Workspace id；recent 恢复/focus 会重新 open 校验，失效后回退托管应用工作区。树首载与懒加载共享 app/repository/branch authority，切仓库或关闭弹窗使旧响应失效；进度帧同时校验 token、operationId、仓库 generation 和 target generation，终态只执行一次 open/fallback。源码模式保留普通文件编辑与结构写入、Session/Run、OpenCode 和终端，Git/应用 Agent 发布/版本选择在组件与 handler 双层禁用。
 - `AgentWorkbench` 的普通工作区文件入口统一使用带 workspace/路径请求代次的加载器：首次读取不挂载 Monaco，成功零字节文件也进入 loaded；后台响应只更新仍存在且内容修订代次未变化的所属 tab，关闭 tab、切 workspace、同路径后续请求或读取期间任何编辑都会使旧响应失效，即使编辑随后已保存/回退为 clean。稳定快照身份独立于瞬时 loading，刷新失败保留已有正文；批量磁盘刷新固定起始 workspace 上下文，不能跨 await 继续读取新 workspace。

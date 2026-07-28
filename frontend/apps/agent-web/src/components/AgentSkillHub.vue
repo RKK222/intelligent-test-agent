@@ -219,7 +219,7 @@ function closeDetail() {
 }
 
 async function openPublish() {
-  if (!selectedAsset.value) return;
+  if (!props.canManage || !selectedAsset.value) return;
   actionLoading.value = true;
   try {
     const [agents, skills] = await Promise.all([
@@ -242,7 +242,7 @@ function toggleDependency(assetId: string) {
 }
 
 async function publishSelected() {
-  if (!selectedAsset.value) return;
+  if (!props.canManage || !selectedAsset.value) return;
   actionLoading.value = true;
   try {
     await api.publishAgentSkillHubAsset(selectedAsset.value.assetId, [...selectedDependencies.value]);
@@ -257,13 +257,13 @@ async function publishSelected() {
 }
 
 function openReference() {
-  if (!selectedAsset.value) return;
+  if (!props.canManage || !selectedAsset.value) return;
   aliasTechnicalId.value = selectedAsset.value.technicalId;
   referenceDialog.value = true;
 }
 
 async function createReference() {
-  if (!selectedAsset.value || !props.workspaceId) return;
+  if (!props.canManage || !selectedAsset.value || !props.workspaceId) return;
   actionLoading.value = true;
   try {
     const result = await api.createAgentSkillHubReference(
@@ -283,7 +283,7 @@ async function createReference() {
 }
 
 async function removeReference() {
-  if (!selectedAsset.value || !props.workspaceId) return;
+  if (!props.canManage || !selectedAsset.value || !props.workspaceId) return;
   actionLoading.value = true;
   try {
     const result = await api.removeAgentSkillHubReference(props.workspaceId, selectedAsset.value.assetId);
@@ -299,6 +299,7 @@ async function removeReference() {
 }
 
 async function beginUpdate(update: AgentSkillHubUpdate) {
+  if (!props.canManage) return;
   if (!props.workspaceId) {
     ElMessage.warning("请先切换到该应用的个人工作区");
     return;
@@ -324,7 +325,7 @@ async function beginUpdate(update: AgentSkillHubUpdate) {
 }
 
 async function resolveConflict(payload: { resolution: string; content?: string | null }) {
-  if (!props.workspaceId || !updateOperation.value || !activeConflictPath.value) return;
+  if (!props.canManage || !props.workspaceId || !updateOperation.value || !activeConflictPath.value) return;
   actionLoading.value = true;
   try {
     const operation = await api.resolveAgentSkillHubUpdateConflict(
@@ -352,7 +353,7 @@ async function resolveConflict(payload: { resolution: string; content?: string |
 }
 
 async function abortConflict() {
-  if (!props.workspaceId || !updateOperation.value) return;
+  if (!props.canManage || !props.workspaceId || !updateOperation.value) return;
   await api.abortAgentSkillHubUpdate(props.workspaceId, updateOperation.value.operationId);
   updateOperation.value = null;
   activeConflictPath.value = null;

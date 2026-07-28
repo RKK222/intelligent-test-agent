@@ -1,13 +1,19 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import type { AppSourceRepositorySummary } from "@test-agent/shared-types";
 import { CloudDownload, CodeXml, LoaderCircle, X } from "lucide-vue-next";
 
-defineProps<{
+const props = defineProps<{
   open: boolean;
   repositories: AppSourceRepositorySummary[];
   loading?: boolean;
   error?: string | null;
 }>();
+
+// 紧凑入口只承担“打开已有快照”；首次下载仓库统一在管理弹窗第 1 步展示。
+const visibleRepositories = computed(() => props.repositories.filter(
+  (repository) => repository.downloadState !== "NOT_DOWNLOADED"
+));
 
 const emit = defineEmits<{
   close: [];
@@ -27,7 +33,9 @@ function stateLabel(repository: AppSourceRepositorySummary) {
 }
 
 function stateClass(repository: AppSourceRepositorySummary) {
-  if (repository.downloadState === "DOWNLOADED_ACTIVE") return "is-active";
+  if (repository.downloadState === "DOWNLOADED_ACTIVE") {
+    return repository.openable ? "is-active" : "is-unavailable";
+  }
   if (repository.downloadState === "DOWNLOADED_EXPIRED") return "is-expired";
   if (repository.downloadState === "PERSONAL_OCCUPIED") return "is-personal";
   return "is-empty";
@@ -58,11 +66,11 @@ function ownerLabel(repository: AppSourceRepositorySummary) {
             <span>{{ error }}</span>
             <button type="button" aria-label="重试加载应用源码" @click="emit('retry')">重试</button>
           </div>
-          <div v-else-if="repositories.length === 0" class="app-source-picker-state">
+          <div v-else-if="visibleRepositories.length === 0" class="app-source-picker-state">
             当前应用还没有可用源码。
           </div>
           <article
-            v-for="repository in repositories"
+            v-for="repository in visibleRepositories"
             v-else
             :key="repository.repositoryId"
             :data-source-state="repository.downloadState"
@@ -166,6 +174,7 @@ function ownerLabel(repository: AppSourceRepositorySummary) {
 .app-source-repository-meta { display: flex; flex-wrap: wrap; gap: 5px 9px; margin-top: 4px; color: #71717a; font-size: 11px; }
 .app-source-state-badge { font-weight: 600; }
 .is-active .app-source-state-badge { color: #047857; }
+.is-unavailable .app-source-state-badge, .is-unavailable .app-source-repository-icon { color: #a16207; }
 .is-expired .app-source-state-badge, .is-expired .app-source-repository-icon { color: #b45309; }
 .is-personal .app-source-state-badge, .is-personal .app-source-repository-icon { color: #7c3aed; }
 .app-source-unavailable { margin: 4px 0 0; color: #a16207; font-size: 11px; line-height: 1.4; }

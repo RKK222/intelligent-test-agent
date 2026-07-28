@@ -173,6 +173,25 @@ describe("app-source backend client", () => {
     expect(sockets.every((socket) => socket.closed)).toBe(true);
   });
 
+  it("reports an unexpected websocket close once but stays silent for caller close", async () => {
+    const sockets: FakeSocket[] = [];
+    const client = progressClient(sockets);
+    const events: AppSourceProgressEvent[] = [];
+    const connection = await client.connectAppSourceProgress("job_123", (event) => events.push(event));
+
+    sockets[0]?.disconnect();
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: "failed",
+        operationId: "job_123",
+        errorCode: "WEBSOCKET_DISCONNECTED"
+      })
+    ]);
+
+    connection.close();
+    expect(events).toHaveLength(1);
+  });
+
   it("rejects exact operation dot segments before REST or WebSocket routing", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       success: true,
@@ -386,5 +405,9 @@ class FakeSocket {
 
   message(data: string) {
     this.onmessage?.({ data });
+  }
+
+  disconnect() {
+    this.onclose?.({});
   }
 }

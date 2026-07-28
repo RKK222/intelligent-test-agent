@@ -74,7 +74,7 @@ Browser
 
 应用源码树的固定提交快照由 `test-agent-workspace-management` 在一次 Git 提交解析内生成，`test-agent-api` 在既有 tree URL 上兼容投影节点数组或 `{targetCommit,nodes}`；`packages/backend-api` 保留旧方法并新增 snapshot 方法，`packages/shared-types` 只承载两种稳定返回类型。
 
-应用源码工作台由 `apps/agent-web` 维护显式 `MANAGED/APP_SOURCE` 语义、源码列表、四步物化弹窗、recent 恢复和逐服务器进度 observation；只保存服务端返回的 app/repository/generation/workspace 等逻辑身份，不构造物理根目录。源码普通文件写入继续依赖 `packages/backend-api` 的 Workspace 文件 WebSocket route/ticket/RPC，Git、应用 Agent 发布和版本选择由页面能力层禁用；树与进度异步响应分别按 branch authority 和 operation/repository generation authority 收敛。
+应用源码工作台由 `apps/agent-web` 维护显式 `MANAGED/APP_SOURCE` 语义、紧凑打开列表、全关联版本库四步物化、recent 恢复和逐服务器进度 observation；只保存服务端返回的 app/repository/generation/workspace 等逻辑身份，不构造物理根目录。source selection/recovery 以 token/app/repository/generation/workspace kind 收敛，tree 额外绑定 branch 与 snapshot commit；切应用、撤权、返回托管工作区或卸载会统一失效入口、弹窗、树、进度连接和重连 timer。源码普通文件写入继续依赖 `packages/backend-api` 的 Workspace 文件 WebSocket route/ticket/RPC，Git、应用 Agent/Hub 发布、宠物应用配置重载和版本选择由统一能力在 UI 与 handler 双层禁用。进度断线由页面按有界退避串行执行数据库 snapshot、新 ticket 与新 WebSocket，主动关闭不取消后台任务。
 
 | 包 | 职责 |
 |---|---|

@@ -1658,6 +1658,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         { method: "POST" }
       );
       const socket = webSocketFactory(toWebSocketUrl(baseUrl, ticket.webSocketUrl));
+      let callerClosed = false;
+      let connectionFailureReported = false;
       socket.onmessage = (event) => {
         let parsed: AppSourceProgressEvent;
         try {
@@ -1677,16 +1679,24 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         // 调用方异常属于业务回调失败，不能被误判为协议消息格式错误并二次回调。
         onEvent(parsed);
       };
-      const connectionFailure = () =>
-        onEvent(appSourceClientFailure(
-          normalizedOperationId,
-          "WEBSOCKET_ERROR",
-          "应用源码进度连接失败"
-        ));
+      const reportConnectionFailure = (errorCode: string, errorMessage: string) => {
+        if (callerClosed || connectionFailureReported) return;
+        connectionFailureReported = true;
+        onEvent(appSourceClientFailure(normalizedOperationId, errorCode, errorMessage));
+      };
+      const connectionFailure = () => reportConnectionFailure(
+        "WEBSOCKET_ERROR",
+        "应用源码进度连接失败"
+      );
       socket.onerror = connectionFailure;
+      socket.onclose = () => reportConnectionFailure(
+        "WEBSOCKET_DISCONNECTED",
+        "应用源码进度连接已断开"
+      );
       if (socket.readyState !== WEBSOCKET_OPEN_STATE) {
         await new Promise<void>((resolve, reject) => {
           const timeout = setTimeout(() => {
+            callerClosed = true;
             socket.close();
             reject(new Error("应用源码进度连接超时"));
           }, APP_SOURCE_PROGRESS_OPEN_TIMEOUT_MS);
@@ -1702,7 +1712,12 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         });
         socket.onerror = connectionFailure;
       }
-      return { close: () => socket.close() };
+      return {
+        close: () => {
+          callerClosed = true;
+          socket.close();
+        }
+      };
     },
     listAllSessions: (page = 1, size = 30, q?: string) =>
       routedRequest<PageResponse<Session>>(`${opencodeRuntimeBase}/sessions${query({ page, size, q })}`),

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { BackendApiError } from "@test-agent/backend-api";
 import {
+  appSourceIntentAuthorityMatches,
+  appSourcePurposeUpdateAllowed,
+  appSourceRecoveryFailureInvalidatesRecent,
   appSourceWorkspaceCapabilities,
   appSourceProgressBelongsToObservation,
   appSourceTreeAuthorityMatches,
@@ -116,5 +120,44 @@ describe("app source workspace state", () => {
     const handled = new Set<string>();
     expect(claimAppSourceTerminalOperation(handled, "aso-12")).toBe(true);
     expect(claimAppSourceTerminalOperation(handled, "aso-12")).toBe(false);
+  });
+
+  it("allows TEAM promotion and update while rejecting only TEAM to PERSONAL downgrade", () => {
+    expect(appSourcePurposeUpdateAllowed({ generation: 5, purpose: "TEAM" }, "PERSONAL")).toBe(false);
+    expect(appSourcePurposeUpdateAllowed({ generation: 5, purpose: "TEAM" }, "TEAM")).toBe(true);
+    expect(appSourcePurposeUpdateAllowed({ generation: 5, purpose: "PERSONAL" }, "TEAM")).toBe(true);
+    expect(appSourcePurposeUpdateAllowed({ generation: null, purpose: null }, "PERSONAL")).toBe(true);
+  });
+
+  it("matches source intent only when token, app, repository, generation, and workspace kind stay current", () => {
+    const authority = {
+      token: 9,
+      appId: "app-a",
+      repositoryId: "repo-a",
+      generation: 3,
+      workspaceKind: "MANAGED" as const
+    };
+
+    expect(appSourceIntentAuthorityMatches(authority, authority)).toBe(true);
+    expect(appSourceIntentAuthorityMatches(authority, { ...authority, token: 10 })).toBe(false);
+    expect(appSourceIntentAuthorityMatches(authority, { ...authority, appId: "app-b" })).toBe(false);
+    expect(appSourceIntentAuthorityMatches(authority, { ...authority, repositoryId: "repo-b" })).toBe(false);
+    expect(appSourceIntentAuthorityMatches(authority, { ...authority, generation: 4 })).toBe(false);
+    expect(appSourceIntentAuthorityMatches(authority, { ...authority, workspaceKind: "APP_SOURCE" })).toBe(false);
+  });
+
+  it("invalidates recent only from the real BackendApiError code contract", () => {
+    const apiError = (status: number, code: string) => new BackendApiError(status, {
+      success: false,
+      code,
+      message: code,
+      traceId: `trace-${code.toLowerCase()}`
+    });
+
+    expect(appSourceRecoveryFailureInvalidatesRecent(apiError(403, "FORBIDDEN"))).toBe(true);
+    expect(appSourceRecoveryFailureInvalidatesRecent(apiError(404, "NOT_FOUND"))).toBe(true);
+    expect(appSourceRecoveryFailureInvalidatesRecent(apiError(409, "CONFLICT"))).toBe(true);
+    expect(appSourceRecoveryFailureInvalidatesRecent(apiError(503, "INTERNAL_ERROR"))).toBe(false);
+    expect(appSourceRecoveryFailureInvalidatesRecent(new Error("FORBIDDEN"))).toBe(false);
   });
 });

@@ -96,13 +96,17 @@ import FigmaFileExplorer from "./FigmaFileExplorer.vue";
 import AppSourceDialog from "./AppSourceDialog.vue";
 import AppSourcePicker from "./AppSourcePicker.vue";
 import {
+  appSourceIntentAuthorityMatches,
   appSourceProgressBelongsToObservation,
+  appSourcePurposeUpdateAllowed,
+  appSourceRecoveryFailureInvalidatesRecent,
   appSourceTreeAuthorityMatches,
   appSourceWorkspaceCapabilities,
   claimAppSourceTerminalOperation,
   ordinaryWorkspaceCanWrite,
   sourceContextFromOpen,
   type AppSourceProgressAuthority,
+  type AppSourceIntentAuthority,
   type AppSourceTreeAuthority,
   type AppSourceWorkspaceContext,
   type SelectedWorkspaceKind
@@ -589,6 +593,7 @@ async function toggleAgentSkillHub() {
 }
 
 function handleHubChanged(paths: string[]) {
+  if (!appSourceCapabilities.value.canPublishApplicationAgentConfig) return;
   handleAgentConfigMutation({
     scope: "WORKSPACE",
     paths,
@@ -632,15 +637,25 @@ const selectedAppSourceRepository = ref<AppSourceRepositorySummary | null>(null)
 const appSourceDialogOpen = ref(false);
 const appSourceBranches = shallowRef<string[]>([]);
 const appSourceBranchesLoading = ref(false);
+const appSourceBranchesError = ref<string | null>(null);
 const appSourceTreeSnapshot = ref<AppSourceTreeSnapshot | null>(null);
+const appSourceTreeBranch = ref<string | null>(null);
 const appSourceTreeLoading = ref(false);
+const appSourceTreeError = ref<string | null>(null);
 const appSourceOperation = ref<AppSourceOperation | null>(null);
 const appSourceSubmitting = ref(false);
+const appSourceMaterializationError = ref<string | null>(null);
 const appSourceProgressError = ref<string | null>(null);
 let appSourceProgressConnection: AppSourceProgressConnection | null = null;
+let appSourceProgressReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let appSourceProgressReconnectAttempt = 0;
+let appSourceProgressConnectInFlight = false;
+let appSourceIntentAuthorityToken = 0;
+let appSourceIntentAuthority: AppSourceIntentAuthority | null = null;
 let appSourceDialogAuthorityToken = 0;
 let appSourceTreeAuthorityToken = 0;
 let appSourceTreeAuthority: AppSourceTreeAuthority | null = null;
+let appSourceTreePendingRequests = 0;
 let appSourceProgressAuthorityToken = 0;
 let appSourceProgressAuthority: AppSourceProgressAuthority | null = null;
 const handledAppSourceTerminalOperations = new Set<string>();
@@ -800,7 +815,7 @@ onBeforeUnmount(() => {
   clearTerminalRunEventSubscriptionHold();
   window.removeEventListener("keydown", onWindowKeydown);
   window.removeEventListener("focus", refreshAppSourceAuthorizationOnFocus);
-  closeAppSourceProgressObservation();
+  teardownAppSourceInteractions();
   clearFileTreeRetryTimers();
   if (workspaceFileCandidateTimer) {
     clearTimeout(workspaceFileCandidateTimer);
@@ -2176,6 +2191,7 @@ watch(
       appSelectionSeq += 1;
       selectingAppId = undefined;
       invalidateConversationInteraction();
+      teardownAppSourceInteractions();
       resetWorkspaceState();
       selectedWorkspaceId.value = undefined;
       selectedAppId.value = undefined;
@@ -2512,7 +2528,7 @@ async function handlePersonalRuntimeReload(payload: {
   linuxServerId?: string;
   workspaceId?: string;
 }) {
-  if (selectedWorkspaceKind.value === "APP_SOURCE" && payload.scope === "WORKSPACE") {
+  if (!appSourceCapabilities.value.canPublishApplicationAgentConfig && payload.scope === "WORKSPACE") {
     feedback.value = { kind: "info", title: "源码快照不发布应用 Agent", description: "请先返回应用工作区再更新应用 Agent 配置。" };
     return;
   }
@@ -2735,7 +2751,7 @@ const agentConfigRevision = ref(0);
 
 /** Agents 树变更后刷新 Git Diff，并让目录定义复用保存动作的个人运行态热加载。 */
 function handleAgentConfigMutation(payload: AgentConfigMutation) {
-  if (selectedWorkspaceKind.value === "APP_SOURCE" && payload.scope === "WORKSPACE") return;
+  if (!appSourceCapabilities.value.canPublishApplicationAgentConfig && payload.scope === "WORKSPACE") return;
   if (payload.deleted) {
     const deletedPath = payload.deleted.path.replace(/\\/g, "/");
     for (const tab of [...workbench.tabs]) {
@@ -2800,6 +2816,9 @@ const saveMutation = useMutation({
     }
     if (isAgentFilePath(tab.path)) {
       const agent = agentFileInfo(tab.path);
+      if (agent.scope === "WORKSPACE" && !appSourceCapabilities.value.canPublishApplicationAgentConfig) {
+        throw new Error("源码快照不能保存或发布应用 Agent 配置");
+      }
       if (agent.scope === "PUBLIC") {
         await api.writePublicAgentFile(agent.path, tab.content, agent.worktreeId, agent.linuxServerId);
       } else {
@@ -3795,29 +3814,95 @@ function newAppSourceOperationId() {
 }
 
 function closeAppSourceProgressObservation() {
+  if (appSourceProgressReconnectTimer) clearTimeout(appSourceProgressReconnectTimer);
+  appSourceProgressReconnectTimer = null;
+  appSourceProgressReconnectAttempt = 0;
   appSourceProgressConnection?.close();
   appSourceProgressConnection = null;
   appSourceProgressAuthorityToken += 1;
   appSourceProgressAuthority = null;
 }
 
+function invalidateAppSourceIntentAuthority() {
+  appSourceIntentAuthorityToken += 1;
+  appSourceIntentAuthority = null;
+}
+
+function beginAppSourceIntent(
+  appId: string | undefined,
+  repositoryId: string | undefined,
+  generation: number | null | undefined,
+  workspaceKind: SelectedWorkspaceKind
+) {
+  const authority: AppSourceIntentAuthority = {
+    token: ++appSourceIntentAuthorityToken,
+    appId,
+    repositoryId,
+    generation,
+    workspaceKind
+  };
+  appSourceIntentAuthority = authority;
+  return authority;
+}
+
+function appSourceIntentIsCurrent(authority: AppSourceIntentAuthority) {
+  return appSourceIntentAuthorityMatches(authority, appSourceIntentAuthority);
+}
+
 function invalidateAppSourceTreeAuthority() {
   appSourceTreeAuthorityToken += 1;
   appSourceTreeAuthority = null;
   appSourceTreeSnapshot.value = null;
+  appSourceTreeBranch.value = null;
+  appSourceTreeLoading.value = false;
+  appSourceTreePendingRequests = 0;
+}
+
+/**
+ * 源码入口、四步弹窗与进度连接属于同一应用选择；切应用/撤权/返回托管工作区时一次性失效。
+ */
+function teardownAppSourceInteractions() {
+  appSourcePickerOpen.value = false;
+  appSourcePickerLoading.value = false;
+  appSourcePickerError.value = null;
+  appSourceDialogOpen.value = false;
+  appSourceDialogAuthorityToken += 1;
+  appSourceBranches.value = [];
+  appSourceBranchesLoading.value = false;
+  appSourceBranchesError.value = null;
+  appSourceTreeError.value = null;
+  appSourceMaterializationError.value = null;
+  appSourceProgressError.value = null;
+  appSourceRepositories.value = [];
+  selectedAppSourceRepository.value = null;
+  appSourceOperation.value = null;
+  appSourceSubmitting.value = false;
+  appSourceRecoveryInFlight = null;
+  invalidateAppSourceIntentAuthority();
+  invalidateAppSourceTreeAuthority();
+  closeAppSourceProgressObservation();
 }
 
 async function loadAppSourceRepositories() {
   const appId = selectedAppId.value;
   if (!appId) return;
+  const workspaceKind = selectedWorkspaceKind.value;
+  const authority = beginAppSourceIntent(appId, undefined, null, workspaceKind);
   appSourcePickerLoading.value = true;
   appSourcePickerError.value = null;
   try {
-    appSourceRepositories.value = await api.listAppSourceRepositories(appId);
+    const repositories = await api.listAppSourceRepositories(appId);
+    if (
+      !appSourceIntentIsCurrent(authority)
+      || selectedAppId.value !== appId
+      || selectedWorkspaceKind.value !== workspaceKind
+    ) return;
+    appSourceRepositories.value = repositories;
   } catch (error) {
+    if (!appSourceIntentIsCurrent(authority)) return;
     appSourcePickerError.value = errorFeedback("加载应用源码失败", error).description ?? "暂时无法读取源码状态";
   } finally {
-    appSourcePickerLoading.value = false;
+    if (appSourceIntentIsCurrent(authority)) appSourcePickerLoading.value = false;
   }
 }
 
@@ -3827,11 +3912,20 @@ function openAppSourcePicker() {
   void loadAppSourceRepositories();
 }
 
-async function activateAppSourceOpenResult(result: AppSourceOpenResult) {
+function closeAppSourcePicker() {
+  appSourcePickerOpen.value = false;
+  appSourcePickerLoading.value = false;
+  invalidateAppSourceIntentAuthority();
+}
+
+async function activateAppSourceOpenResult(
+  result: AppSourceOpenResult,
+  authority: AppSourceIntentAuthority
+) {
+  if (!appSourceIntentIsCurrent(authority)) return false;
   if (!applicationCatalog.value.some((app) => app.appId === result.appId)) {
     throw new Error("当前应用权限已失效");
   }
-  selectedAppId.value = result.appId;
   const context = sourceContextFromOpen(result);
   if (
     selectedWorkspaceKind.value === "APP_SOURCE"
@@ -3840,21 +3934,33 @@ async function activateAppSourceOpenResult(result: AppSourceOpenResult) {
   ) {
     // focus 校验命中同一服务端 generation 时只更新授权上下文，不重置文件、Session 或终端。
     appSourceContext.value = context;
-    return;
+    return true;
   }
   const workspace = await api.getWorkspace(result.workspaceId);
-  await switchWorkspace(workspace, { kind: "APP_SOURCE" });
-  selectedWorkspaceKind.value = "APP_SOURCE";
+  if (!appSourceIntentIsCurrent(authority)) return false;
+  selectedAppId.value = result.appId;
+  const workspaceSwitch = switchWorkspace(workspace, { kind: "APP_SOURCE" });
   appSourceContext.value = context;
+  await workspaceSwitch;
+  if (!appSourceIntentIsCurrent(authority)) return false;
   rememberPersonalWorkspace(undefined, undefined);
+  return true;
 }
 
 async function openAppSourceRepository(repository: AppSourceRepositorySummary, generation = repository.generation) {
   const appId = selectedAppId.value;
   if (!appId || generation === null || generation === undefined || !repository.openable) return;
+  const authority = beginAppSourceIntent(appId, repository.repositoryId, generation, "APP_SOURCE");
   try {
     const result = await api.openAppSource(appId, repository.repositoryId, generation);
-    await activateAppSourceOpenResult(result);
+    if (
+      !appSourceIntentIsCurrent(authority)
+      || result.appId !== appId
+      || result.repositoryId !== repository.repositoryId
+      || result.generation !== generation
+    ) return;
+    const activated = await activateAppSourceOpenResult(result, authority);
+    if (!activated || !appSourceIntentIsCurrent(authority)) return;
     appSourcePickerOpen.value = false;
     feedback.value = {
       kind: "info",
@@ -3862,6 +3968,7 @@ async function openAppSourceRepository(repository: AppSourceRepositorySummary, g
       description: `${repository.name} · generation ${result.generation}`
     };
   } catch (error) {
+    if (!appSourceIntentIsCurrent(authority)) return;
     feedback.value = errorFeedback("打开源码快照失败", error);
   }
 }
@@ -3871,6 +3978,8 @@ async function loadAppSourceBranches(repository = selectedAppSourceRepository.va
   if (!appId || !repository) return;
   const dialogAuthority = appSourceDialogAuthorityToken;
   appSourceBranchesLoading.value = true;
+  appSourceBranchesError.value = null;
+  appSourceTreeError.value = null;
   try {
     const branches = await api.listAppSourceBranches(appId, repository.repositoryId);
     if (
@@ -3884,7 +3993,7 @@ async function loadAppSourceBranches(repository = selectedAppSourceRepository.va
     if (targetBranch) await loadAppSourceTree(targetBranch, "");
   } catch (error) {
     if (dialogAuthority === appSourceDialogAuthorityToken) {
-      appSourceProgressError.value = errorFeedback("加载源码分支失败", error).description ?? "源码分支暂时不可用";
+      appSourceBranchesError.value = errorFeedback("加载源码分支失败", error).description ?? "源码分支暂时不可用";
     }
   } finally {
     if (dialogAuthority === appSourceDialogAuthorityToken) appSourceBranchesLoading.value = false;
@@ -3918,15 +4027,27 @@ async function loadAppSourceTree(branch: string, path: string) {
       branch
     };
     appSourceTreeSnapshot.value = null;
+    appSourceTreeBranch.value = null;
+    appSourceTreePendingRequests = 0;
+    appSourceTreeError.value = null;
   }
   // 同一 authority 同时覆盖根树与该分支的懒加载子目录；切 branch/repo/close 后整体失效。
   const requestAuthority = appSourceTreeAuthority;
+  appSourceTreePendingRequests += 1;
   appSourceTreeLoading.value = true;
+  appSourceTreeError.value = null;
   try {
     const snapshot = await api.getAppSourceTreeSnapshot(appId, repository.repositoryId, branch, path || ".");
     if (!appSourceTreeAuthorityMatches(requestAuthority, appSourceTreeAuthority)) return;
-    if (!path || !appSourceTreeSnapshot.value || appSourceTreeSnapshot.value.targetCommit !== snapshot.targetCommit) {
+    if (path && appSourceTreeSnapshot.value && appSourceTreeSnapshot.value.targetCommit !== snapshot.targetCommit) {
+      appSourceTreeSnapshot.value = null;
+      appSourceTreeBranch.value = null;
+      appSourceTreeError.value = "固定提交已变化，请重新加载当前分支目录树";
+      return;
+    }
+    if (!path || !appSourceTreeSnapshot.value) {
       appSourceTreeSnapshot.value = snapshot;
+      appSourceTreeBranch.value = branch;
     } else {
       appSourceTreeSnapshot.value = {
         targetCommit: snapshot.targetCommit,
@@ -3935,11 +4056,12 @@ async function loadAppSourceTree(branch: string, path: string) {
     }
   } catch (error) {
     if (appSourceTreeAuthorityMatches(requestAuthority, appSourceTreeAuthority)) {
-      appSourceProgressError.value = errorFeedback("加载源码目录失败", error).description ?? "源码目录暂时不可用";
+      appSourceTreeError.value = errorFeedback("加载源码目录失败", error).description ?? "源码目录暂时不可用";
     }
   } finally {
     if (appSourceTreeAuthorityMatches(requestAuthority, appSourceTreeAuthority)) {
-      appSourceTreeLoading.value = false;
+      appSourceTreePendingRequests = Math.max(0, appSourceTreePendingRequests - 1);
+      appSourceTreeLoading.value = appSourceTreePendingRequests > 0;
     }
   }
 }
@@ -3949,12 +4071,30 @@ async function applyCompletedAppSourceOperation(operation: AppSourceOperation) {
     selectedAppId.value !== operation.appId
     || selectedAppSourceRepository.value?.repositoryId !== operation.repositoryId
   ) return;
+  const authority = beginAppSourceIntent(
+    operation.appId,
+    operation.repositoryId,
+    operation.targetGeneration,
+    "APP_SOURCE"
+  );
   try {
     // PARTIAL_FAILED 也可能已包含本机 READY 副本；是否可打开必须由服务端 open 权威判断。
     const result = await api.openAppSource(operation.appId, operation.repositoryId, operation.targetGeneration);
-    await activateAppSourceOpenResult(result);
-  } catch {
-    await fallbackToManagedWorkspace("新 generation 在本机不可打开，已返回应用工作区。");
+    if (
+      !appSourceIntentIsCurrent(authority)
+      || result.appId !== operation.appId
+      || result.repositoryId !== operation.repositoryId
+      || result.generation !== operation.targetGeneration
+    ) return;
+    await activateAppSourceOpenResult(result, authority);
+  } catch (error) {
+    if (!appSourceIntentIsCurrent(authority)) return;
+    if (appSourceRecoveryFailureInvalidatesRecent(error)) {
+      await fallbackToManagedWorkspace("新 generation 在本机不可打开，已返回应用工作区。");
+      return;
+    }
+    appSourceProgressError.value = errorFeedback("打开新源码 generation 失败", error).description
+      ?? "服务暂时不可用，可稍后重试打开源码。";
   }
 }
 
@@ -3989,10 +4129,36 @@ function completeAppSourceOperationOnce(operation: AppSourceOperation, authority
     || !claimAppSourceTerminalOperation(handledAppSourceTerminalOperations, operation.operationId)
   ) return;
   closeAppSourceProgressObservation();
-  void loadAppSourceRepositories();
   if (["SUCCEEDED", "PARTIAL_FAILED"].includes(operation.status)) {
-    void applyCompletedAppSourceOperation(operation);
+    void applyCompletedAppSourceOperation(operation).finally(() => void loadAppSourceRepositories());
+  } else {
+    void loadAppSourceRepositories();
   }
+}
+
+function appSourceProgressAuthorityIsCurrent(authority: AppSourceProgressAuthority) {
+  return appSourceProgressAuthority?.token === authority.token
+    && appSourceProgressBelongsToObservation(authority, currentAppSourceProgressContext(), {
+      operationId: authority.operationId,
+      appId: authority.appId,
+      repositoryId: authority.repositoryId,
+      targetGeneration: authority.targetGeneration
+    });
+}
+
+function scheduleAppSourceProgressReconnect(authority: AppSourceProgressAuthority) {
+  if (!appSourceProgressAuthorityIsCurrent(authority) || appSourceProgressReconnectTimer) return;
+  const delay = Math.min(250 * (2 ** appSourceProgressReconnectAttempt), 4_000);
+  appSourceProgressReconnectAttempt += 1;
+  appSourceProgressReconnectTimer = setTimeout(() => {
+    appSourceProgressReconnectTimer = null;
+    if (!appSourceProgressAuthorityIsCurrent(authority)) return;
+    if (appSourceProgressConnectInFlight) {
+      scheduleAppSourceProgressReconnect(authority);
+      return;
+    }
+    void connectAppSourceProgressObservation(authority);
+  }, delay);
 }
 
 function handleAppSourceProgress(event: AppSourceProgressEvent, authority: AppSourceProgressAuthority) {
@@ -4006,9 +4172,13 @@ function handleAppSourceProgress(event: AppSourceProgressEvent, authority: AppSo
   ) return;
   if (event.type === "failed" && !event.operation) {
     appSourceProgressError.value = `${event.errorMessage}${event.traceId ? `（traceId: ${event.traceId}）` : ""}`;
+    appSourceProgressConnection?.close();
+    appSourceProgressConnection = null;
+    scheduleAppSourceProgressReconnect(authority);
     return;
   }
   if (event.operation) {
+    appSourceProgressReconnectAttempt = 0;
     appSourceOperation.value = event.operation;
     if (["SUCCEEDED", "PARTIAL_FAILED", "FAILED"].includes(event.operation.status)) {
       completeAppSourceOperationOnce(event.operation, authority);
@@ -4016,8 +4186,54 @@ function handleAppSourceProgress(event: AppSourceProgressEvent, authority: AppSo
   }
 }
 
+async function connectAppSourceProgressObservation(authority: AppSourceProgressAuthority) {
+  if (!appSourceProgressAuthorityIsCurrent(authority)) return;
+  if (appSourceProgressConnectInFlight) {
+    scheduleAppSourceProgressReconnect(authority);
+    return;
+  }
+  appSourceProgressConnectInFlight = true;
+  appSourceProgressConnection?.close();
+  appSourceProgressConnection = null;
+  try {
+    // 首连与每次重连都先串行读取数据库 snapshot，再申请一次性新 ticket。
+    const snapshot = await api.getAppSourceOperation(authority.operationId);
+    if (
+      !appSourceProgressAuthorityIsCurrent(authority)
+      || !appSourceProgressBelongsToObservation(authority, currentAppSourceProgressContext(), {
+        operationId: snapshot.operationId,
+        appId: snapshot.appId,
+        repositoryId: snapshot.repositoryId,
+        targetGeneration: snapshot.targetGeneration
+      })
+    ) return;
+    appSourceOperation.value = snapshot;
+    if (!["PENDING", "RUNNING"].includes(snapshot.status)) {
+      completeAppSourceOperationOnce(snapshot, authority);
+      return;
+    }
+    const connection = await api.connectAppSourceProgress(
+      authority.operationId,
+      (event) => handleAppSourceProgress(event, authority)
+    );
+    if (!appSourceProgressAuthorityIsCurrent(authority)) {
+      connection.close();
+      return;
+    }
+    appSourceProgressConnection = connection;
+    appSourceProgressReconnectAttempt = 0;
+    appSourceProgressError.value = null;
+  } catch (error) {
+    if (appSourceProgressAuthorityIsCurrent(authority)) {
+      appSourceProgressError.value = errorFeedback("恢复源码进度失败", error).description ?? "请关闭并重新打开后重试";
+      scheduleAppSourceProgressReconnect(authority);
+    }
+  } finally {
+    appSourceProgressConnectInFlight = false;
+  }
+}
+
 async function observeAppSourceOperation(operation: AppSourceOperation) {
-  closeAppSourceProgressObservation();
   const repository = selectedAppSourceRepository.value;
   if (
     !appSourceDialogOpen.value
@@ -4025,6 +4241,7 @@ async function observeAppSourceOperation(operation: AppSourceOperation) {
     || selectedAppId.value !== operation.appId
     || repository.repositoryId !== operation.repositoryId
   ) return;
+  closeAppSourceProgressObservation();
   const authority: AppSourceProgressAuthority = {
     token: ++appSourceProgressAuthorityToken,
     operationId: operation.operationId,
@@ -4040,56 +4257,48 @@ async function observeAppSourceOperation(operation: AppSourceOperation) {
     completeAppSourceOperationOnce(operation, authority);
     return;
   }
-  try {
-    // 每次重开都先读取数据库 snapshot，再申请新 ticket；authority 让关闭或切仓后的迟到响应失效。
-    const snapshot = await api.getAppSourceOperation(operation.operationId);
-    if (
-      appSourceProgressAuthority?.token !== authority.token
-      || !appSourceProgressBelongsToObservation(authority, currentAppSourceProgressContext(), {
-        operationId: snapshot.operationId,
-        appId: snapshot.appId,
-        repositoryId: snapshot.repositoryId,
-        targetGeneration: snapshot.targetGeneration
-      })
-    ) return;
-    appSourceOperation.value = snapshot;
-    if (!["PENDING", "RUNNING"].includes(snapshot.status)) {
-      completeAppSourceOperationOnce(snapshot, authority);
-      return;
-    }
-    const connection = await api.connectAppSourceProgress(
-      operation.operationId,
-      (event) => handleAppSourceProgress(event, authority)
-    );
-    if (appSourceProgressAuthority?.token !== authority.token) {
-      connection.close();
-      return;
-    }
-    appSourceProgressConnection = connection;
-  } catch (error) {
-    if (appSourceProgressAuthority?.token === authority.token) {
-      appSourceProgressError.value = errorFeedback("恢复源码进度失败", error).description ?? "请关闭并重新打开后重试";
-    }
-  }
+  await connectAppSourceProgressObservation(authority);
 }
 
 async function openAppSourceDownloadDialog() {
-  const repository = appSourceRepositories.value.find((item) => item.manageable && item.downloadState !== "DOWNLOADED_ACTIVE")
-    ?? appSourceRepositories.value.find((item) => item.manageable);
-  if (!repository) {
+  if (!appSourceRepositories.value.some((item) => item.manageable)) {
     feedback.value = { kind: "info", title: "没有可下载的版本库", description: "当前应用没有你可管理的源码版本库。" };
     return;
   }
+  closeAppSourcePicker();
   closeAppSourceProgressObservation();
   invalidateAppSourceTreeAuthority();
   appSourceDialogAuthorityToken += 1;
-  selectedAppSourceRepository.value = repository;
-  appSourcePickerOpen.value = false;
+  selectedAppSourceRepository.value = null;
   appSourceDialogOpen.value = true;
-  appSourceOperation.value = repository.latestOperation ?? null;
+  appSourceBranches.value = [];
+  appSourceBranchesError.value = null;
+  appSourceTreeError.value = null;
+  appSourceMaterializationError.value = null;
+  appSourceOperation.value = null;
+  appSourceSubmitting.value = false;
   appSourceProgressError.value = null;
-  void loadAppSourceBranches(repository);
-  if (repository.latestOperation) void observeAppSourceOperation(repository.latestOperation);
+}
+
+function selectAppSourceRepository(repository: AppSourceRepositorySummary) {
+  if (!appSourceDialogOpen.value || !repository.manageable) return;
+  const current = appSourceRepositories.value.find((item) => item.repositoryId === repository.repositoryId);
+  if (!current?.manageable) return;
+  closeAppSourceProgressObservation();
+  invalidateAppSourceTreeAuthority();
+  appSourceDialogAuthorityToken += 1;
+  selectedAppSourceRepository.value = current;
+  appSourceBranches.value = [];
+  appSourceBranchesError.value = null;
+  appSourceTreeError.value = null;
+  appSourceMaterializationError.value = null;
+  appSourceProgressError.value = null;
+  appSourceOperation.value = current.latestOperation ?? null;
+  appSourceSubmitting.value = false;
+  void loadAppSourceBranches(current);
+  if (current.latestOperation && ["PENDING", "RUNNING"].includes(current.latestOperation.status)) {
+    void observeAppSourceOperation(current.latestOperation);
+  }
 }
 
 function closeAppSourceDialog() {
@@ -4097,79 +4306,167 @@ function closeAppSourceDialog() {
   appSourceDialogAuthorityToken += 1;
   invalidateAppSourceTreeAuthority();
   closeAppSourceProgressObservation();
+  selectedAppSourceRepository.value = null;
+  appSourceBranches.value = [];
+  appSourceBranchesError.value = null;
+  appSourceTreeError.value = null;
+  appSourceMaterializationError.value = null;
+  appSourceOperation.value = null;
+  appSourceSubmitting.value = false;
 }
 
 async function materializeAppSource(payload: Omit<AppSourceMaterializationPayload, "operationId">) {
   const appId = selectedAppId.value;
   const repository = selectedAppSourceRepository.value;
-  if (!appId || !repository) return;
+  if (!appId || !repository || appSourceSubmitting.value) return;
+  if (!appSourcePurposeUpdateAllowed(repository, payload.purpose)) {
+    appSourceMaterializationError.value = "已有团队源码不能降级为个人源码";
+    return;
+  }
+  const visiblePathTypes = new Map<string, "FILE" | "DIRECTORY">();
+  const indexTree = (nodes: AppSourceTreeSnapshot["nodes"]) => {
+    for (const node of nodes) {
+      visiblePathTypes.set(node.path, node.type === "directory" ? "DIRECTORY" : "FILE");
+      indexTree(node.children ?? []);
+    }
+  };
+  indexTree(appSourceTreeSnapshot.value?.nodes ?? []);
+  const currentTree = appSourceTreeAuthority
+    && appSourceTreeAuthority.appId === appId
+    && appSourceTreeAuthority.repositoryId === repository.repositoryId
+    && appSourceTreeAuthority.branch === payload.branch
+    && appSourceTreeBranch.value === payload.branch
+    && appSourceTreeSnapshot.value?.targetCommit === payload.expectedTreeCommit
+    && payload.selectedPaths.length > 0
+    && payload.selectedPaths.every((item) => visiblePathTypes.get(item.path) === item.type);
+  if (!currentTree) {
+    appSourceMaterializationError.value = "分支、固定提交或目录选择已变化，请返回上一步重新确认。";
+    return;
+  }
+  appSourceMaterializationError.value = null;
+  const dialogAuthority = appSourceDialogAuthorityToken;
   appSourceSubmitting.value = true;
   try {
     const operation = await api.materializeAppSource(appId, repository.repositoryId, {
       operationId: newAppSourceOperationId(),
       ...payload
     });
+    if (
+      dialogAuthority !== appSourceDialogAuthorityToken
+      || selectedAppId.value !== appId
+      || selectedAppSourceRepository.value?.repositoryId !== repository.repositoryId
+    ) return;
     await observeAppSourceOperation(operation);
   } catch (error) {
-    appSourceProgressError.value = errorFeedback("提交源码任务失败", error).description ?? "请检查选择后重试";
+    if (dialogAuthority !== appSourceDialogAuthorityToken) return;
+    appSourceMaterializationError.value = errorFeedback("提交源码任务失败", error).description ?? "请检查选择后重试";
   } finally {
-    appSourceSubmitting.value = false;
+    if (dialogAuthority === appSourceDialogAuthorityToken) appSourceSubmitting.value = false;
   }
 }
 
 async function retryAppSourceOperation(operation: AppSourceOperation) {
+  if (
+    appSourceSubmitting.value
+    || !["PARTIAL_FAILED", "FAILED"].includes(operation.status)
+    || selectedAppId.value !== operation.appId
+    || selectedAppSourceRepository.value?.repositoryId !== operation.repositoryId
+  ) return;
+  const dialogAuthority = appSourceDialogAuthorityToken;
   appSourceSubmitting.value = true;
   try {
     const retry = await api.retryAppSourceReplicas(operation.appId, operation.repositoryId, {
       operationId: newAppSourceOperationId(),
       expectedGeneration: operation.targetGeneration
     });
+    if (
+      dialogAuthority !== appSourceDialogAuthorityToken
+      || selectedAppId.value !== operation.appId
+      || selectedAppSourceRepository.value?.repositoryId !== operation.repositoryId
+    ) return;
     await observeAppSourceOperation(retry);
   } catch (error) {
+    if (dialogAuthority !== appSourceDialogAuthorityToken) return;
     appSourceProgressError.value = errorFeedback("重试源码副本失败", error).description ?? "请稍后重试";
   } finally {
-    appSourceSubmitting.value = false;
+    if (dialogAuthority === appSourceDialogAuthorityToken) appSourceSubmitting.value = false;
   }
 }
 
 async function fallbackToManagedWorkspace(reason?: string) {
-  closeAppSourceProgressObservation();
-  try { await api.clearRecentAppSource(); } catch { /* 清理失败不阻止安全回退。 */ }
+  teardownAppSourceInteractions();
   selectedWorkspaceKind.value = "MANAGED";
   appSourceContext.value = null;
   const appId = selectedAppId.value;
+  const clearRecent = api.clearRecentAppSource().catch(() => undefined);
   if (appId) await handleSelectApp(appId);
   else trySelectDefaultApp();
+  await clearRecent;
   if (reason) feedback.value = { kind: "info", title: "源码工作区已失效", description: reason };
 }
 
 async function recoverRecentAppSource(force = false) {
   if (!authStore.token || (!force && appSourceRecoveryChecked)) return;
   if (appSourceRecoveryInFlight) return appSourceRecoveryInFlight;
-  appSourceRecoveryInFlight = (async () => {
+  const initialKind = selectedWorkspaceKind.value;
+  const initialContext = appSourceContext.value;
+  const lookupAuthority = beginAppSourceIntent(
+    initialContext?.appId ?? selectedAppId.value,
+    initialContext?.repositoryId,
+    initialContext?.generation ?? null,
+    initialKind
+  );
+  let activeRecoveryAuthority = lookupAuthority;
+  let recovery!: Promise<void>;
+  recovery = (async () => {
     try {
       const recent = await api.getRecentAppSource();
-      if (!recent) return;
+      if (!appSourceIntentIsCurrent(lookupAuthority)) return;
+      if (!recent) {
+        if (initialKind === "APP_SOURCE") {
+          await fallbackToManagedWorkspace("服务端已不再保留当前源码选择，已返回应用工作区。");
+        }
+        return;
+      }
       if (!applicationCatalog.value.some((app) => app.appId === recent.appId)) {
         await api.clearRecentAppSource();
         return;
       }
+      const openAuthority = beginAppSourceIntent(
+        recent.appId,
+        recent.repositoryId,
+        recent.generation,
+        "APP_SOURCE"
+      );
+      activeRecoveryAuthority = openAuthority;
       // recent 只提供逻辑身份；每次刷新/focus 必须重新 open，让服务端校验权限、expiry 与本机副本。
       const opened = await api.openAppSource(recent.appId, recent.repositoryId, recent.generation);
-      await activateAppSourceOpenResult(opened);
-    } catch {
-      if (selectedWorkspaceKind.value === "APP_SOURCE") {
-        await fallbackToManagedWorkspace("源码已过期、权限变化或本机副本不可用。");
+      if (
+        !appSourceIntentIsCurrent(openAuthority)
+        || opened.appId !== recent.appId
+        || opened.repositoryId !== recent.repositoryId
+        || opened.generation !== recent.generation
+      ) return;
+      await activateAppSourceOpenResult(opened, openAuthority);
+    } catch (error) {
+      if (!appSourceIntentIsCurrent(activeRecoveryAuthority)) return;
+      if (appSourceRecoveryFailureInvalidatesRecent(error)) {
+        if (selectedWorkspaceKind.value === "APP_SOURCE") {
+          await fallbackToManagedWorkspace("源码已过期、权限变化或本机副本不可用。");
+        } else {
+          try { await api.clearRecentAppSource(); } catch { /* recent 清理失败由下一次 focus 再校验。 */ }
+        }
       } else {
-        try { await api.clearRecentAppSource(); } catch { /* recent 清理失败由下一次 focus 再校验。 */ }
+        feedback.value = errorFeedback("源码工作区暂时无法校验", error);
       }
     } finally {
       appSourceRecoveryChecked = true;
-      appSourceRecoveryInFlight = null;
+      if (appSourceRecoveryInFlight === recovery) appSourceRecoveryInFlight = null;
       if (selectedWorkspaceKind.value !== "APP_SOURCE") trySelectDefaultApp();
     }
   })();
-  return appSourceRecoveryInFlight;
+  appSourceRecoveryInFlight = recovery;
+  return recovery;
 }
 
 function refreshAppSourceAuthorizationOnFocus() {
@@ -4264,7 +4561,9 @@ async function switchWorkspace(
   const nextKind = options.kind ?? "MANAGED";
   if (nextKind === "MANAGED" && selectedWorkspaceKind.value === "APP_SOURCE") {
     // 切回托管版本或非应用个人工作区必须清独立 recent；失败也不能继续暴露旧源码能力。
-    try { await api.clearRecentAppSource(); } catch { /* 下一次 focus 会再次按服务端状态校验。 */ }
+    teardownAppSourceInteractions();
+    void api.clearRecentAppSource().catch(() => undefined);
+    selectedWorkspaceKind.value = "MANAGED";
     appSourceContext.value = null;
   }
   if (!options.preserveConversationInteraction) {
@@ -4318,6 +4617,10 @@ function syncCurrentVersionFromWorkspace(workspace: Workspace) {
 // 切换到某个应用版本：先只读校验当前用户对关联 Git 版本库的访问权限，再通过
 // ensureDefaultPersonalWorkspace 确保用户拥有默认个人工作区。同一用户同一版本复用 default 空间，避免重复创建。
 async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemplate; version: ApplicationWorkspaceVersion }) {
+  if (!appSourceCapabilities.value.canSelectApplicationVersion) {
+    feedback.value = { kind: "info", title: "源码快照不能切换应用版本", description: "请先返回应用工作区。" };
+    return;
+  }
   try {
     const gitAccess = await api.checkWorkspaceVersionGitAccess(payload.version.versionId);
     if (!gitAccess.accessible) {
@@ -4575,6 +4878,7 @@ function confirmPersonalPull(doNotShowAgain: boolean) {
  * 每次仍展示 fetch → merge → 刷新 → 当前用户运行态处理的真实结果。
  */
 function handlePullPersonalWorkspace(personalWorkspaceId: string) {
+  if (!appSourceCapabilities.value.canUseGitPublication) return;
   if (
     pullingPersonalWorkspace.value
     || personalPullDialog.value.open
@@ -4650,6 +4954,10 @@ async function executePersonalWorkspacePull(personalWorkspaceId: string) {
 }
 
 async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemplate; version: string; branch?: string }) {
+  if (!appSourceCapabilities.value.canSelectApplicationVersion) {
+    feedback.value = { kind: "info", title: "源码快照不能新增应用版本", description: "请先返回应用工作区。" };
+    return;
+  }
   invalidateConversationInteraction();
   const appId = selectedAppId.value;
   if (!appId) {
@@ -4705,8 +5013,10 @@ async function handleSelectApp(appId: string) {
     return;
   }
   invalidateConversationInteraction();
-  if (selectedWorkspaceKind.value === "APP_SOURCE") {
-    try { await api.clearRecentAppSource(); } catch { /* 切应用仍必须先关闭源码能力。 */ }
+  const leavingAppSource = selectedWorkspaceKind.value === "APP_SOURCE";
+  teardownAppSourceInteractions();
+  if (leavingAppSource) {
+    void api.clearRecentAppSource().catch(() => undefined);
     selectedWorkspaceKind.value = "MANAGED";
     appSourceContext.value = null;
   }
@@ -8401,7 +8711,7 @@ async function handleLogout() {
     :current-user-role-labels="authStore.currentUser?.roleLabels"
     :can-play-pet-games="isSuperAdmin"
     :can-manage-public-agent-config="isSuperAdmin"
-    :can-manage-workspace-agent-config="isAppAdmin"
+    :can-manage-workspace-agent-config="isAppAdmin && appSourceCapabilities.canPublishApplicationAgentConfig"
     :personal-runtime-reloading="personalRuntimeReloading"
     :runtime-busy="runtimeReloadBusy"
     :opencode-process-status="opencodeProcessStatus"
@@ -8587,7 +8897,7 @@ async function handleLogout() {
           <AgentSkillHub
             :selected-app-id="selectedAppId"
             :workspace-id="selectedWorkspace?.workspaceId"
-            :can-manage="isAppAdmin"
+            :can-manage="isAppAdmin && appSourceCapabilities.canPublishApplicationAgentConfig"
             @update-count="hubUpdateCount = $event"
             @changed="handleHubChanged"
           />
@@ -8627,6 +8937,7 @@ async function handleLogout() {
             :loading-versions="loadingAppVersions"
             :creating-version="creatingVersion"
             :show-server-workspace-switch="isSuperAdmin"
+            :workspace-kind="selectedWorkspaceKind"
             show-save
             @save="() => diffViewerRef?.handleSave()"
             @locate="handleLocateFile"
@@ -8662,6 +8973,7 @@ async function handleLogout() {
           :loading-versions="loadingAppVersions"
           :creating-version="creatingVersion"
           :show-server-workspace-switch="isSuperAdmin"
+          :workspace-kind="selectedWorkspaceKind"
           :markdown-preview="markdownPreview"
           :markdown-preview-mode="markdownPreviewMode"
           @activate="activateEditorTab"
@@ -8983,7 +9295,7 @@ async function handleLogout() {
     :repositories="appSourceRepositories"
     :loading="appSourcePickerLoading"
     :error="appSourcePickerError"
-    @close="appSourcePickerOpen = false"
+    @close="closeAppSourcePicker"
     @retry="loadAppSourceRepositories"
     @download="openAppSourceDownloadDialog"
     @open-source="openAppSourceRepository"
@@ -8991,15 +9303,21 @@ async function handleLogout() {
 
   <AppSourceDialog
     :open="appSourceDialogOpen"
+    :repositories="appSourceRepositories"
     :repository="selectedAppSourceRepository"
     :branches="appSourceBranches"
     :branches-loading="appSourceBranchesLoading"
+    :branches-error="appSourceBranchesError"
     :tree-snapshot="appSourceTreeSnapshot"
+    :tree-branch="appSourceTreeBranch"
     :tree-loading="appSourceTreeLoading"
+    :tree-error="appSourceTreeError"
     :operation="appSourceOperation"
     :submitting="appSourceSubmitting"
+    :materialization-error="appSourceMaterializationError"
     :progress-error="appSourceProgressError"
     @close="closeAppSourceDialog"
+    @select-repository="selectAppSourceRepository"
     @load-branches="loadAppSourceBranches"
     @load-tree="loadAppSourceTree"
     @materialize="materializeAppSource"

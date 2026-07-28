@@ -58,6 +58,36 @@ describe("AppSourcePicker", () => {
     expect(wrapper.emitted("open-source")).toEqual([[ready]]);
   });
 
+  it("keeps download-only repositories out of the compact opener", () => {
+    const notDownloaded = repository({
+      repositoryId: "repo-new",
+      name: "新代码库",
+      downloadState: "NOT_DOWNLOADED",
+      generation: null,
+      branch: null,
+      openable: false,
+      manageable: true,
+      unavailableReason: "请先下载"
+    });
+    const missingLocalReplica = repository({
+      repositoryId: "repo-remote-ready",
+      name: "异机代码库",
+      openable: false,
+      unavailableReason: "当前服务器没有 READY 副本"
+    });
+    const wrapper = mount(AppSourcePicker, {
+      props: { open: true, repositories: [notDownloaded, missingLocalReplica] },
+      global: { stubs: { Teleport: true } }
+    });
+
+    expect(wrapper.text()).not.toContain("新代码库");
+    expect(wrapper.text()).toContain("异机代码库");
+    expect(wrapper.text()).toContain("当前服务器没有 READY 副本");
+    expect(wrapper.get('[data-source-state="DOWNLOADED_ACTIVE"]').classes()).not.toContain("is-active");
+    expect(wrapper.get('[data-source-state="DOWNLOADED_ACTIVE"]').classes()).toContain("is-unavailable");
+    expect(wrapper.get('button[aria-label="打开异机代码库源码"]').attributes()).toHaveProperty("disabled");
+  });
+
   it("keeps the download action fixed at the bottom", async () => {
     const wrapper = mount(AppSourcePicker, {
       props: { open: true, repositories: [] },

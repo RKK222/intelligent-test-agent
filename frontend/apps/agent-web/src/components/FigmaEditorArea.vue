@@ -6,6 +6,7 @@ import { FileIcon } from "@test-agent/file-explorer";
 import type { EditorTab as WorkbenchTab } from "@test-agent/workbench-shell";
 import { languageFromPath } from "@test-agent/editor";
 import WorkbenchFooter, { type AppWorkspaceTemplate, type AppWorkspaceVersion, type PreviewMode } from "./WorkbenchFooter.vue";
+import type { SelectedWorkspaceKind } from "./app-source-workspace";
 
 const props = withDefaults(
   defineProps<{
@@ -32,6 +33,8 @@ const props = withDefaults(
     creatingVersion?: boolean;
     showServerWorkspaceSwitch?: boolean;
     serverWorkspaceSwitchDisabled?: boolean;
+    /** 显式传递工作区语义，源码快照页脚不得暴露版本切换能力。 */
+    workspaceKind?: SelectedWorkspaceKind;
     /** Markdown 预览开关（受控），保持向下兼容 */
     markdownPreview?: boolean;
     /** Markdown 预览模式：off | full | split */
@@ -249,6 +252,7 @@ watch(
       :creating-version="creatingVersion"
       :show-server-workspace-switch="showServerWorkspaceSwitch"
       :server-workspace-switch-disabled="serverWorkspaceSwitchDisabled"
+      :workspace-kind="workspaceKind"
       :show-preview-button="activeIsMarkdown"
       :markdown-preview-mode="markdownPreviewMode"
       show-save

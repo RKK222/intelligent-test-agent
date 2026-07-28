@@ -9,8 +9,8 @@ Task 4 已完成。`agent-web` 已提供应用源码入口、四态紧凑列表�
 ## 页面与交互
 
 - `WorkbenchFooter` 在工作空间切换图标右侧新增源码图标，且保持源码、引用配置、服务器工作空间的固定顺序；源码模式改为“返回应用工作区”。
-- `AppSourcePicker` 按服务端稳定四态展示 active、expired、个人占用和未下载仓库。打开动作服从 `openable`，不可用原因直接展示，个人占用显示 owner 姓名与 UCID，底部固定“下载版本库”。
-- `AppSourceDialog` 使用四步宽弹窗：仓库状态；分支与固定提交精确树；TEAM/PERSONAL、1–72 小时 retention 和覆盖确认；全局及逐服务器安全步骤时间线。
+- `AppSourcePicker` 的紧凑入口只展示可打开或曾下载的 active、expired、个人占用状态；`NOT_DOWNLOADED` 只进入管理弹窗。打开动作服从 `openable`，不可用原因直接展示，个人占用显示 owner 姓名与 UCID，底部固定“下载版本库”。
+- `AppSourceDialog` 使用四步宽弹窗：全部关联仓库显式选择；分支与固定提交精确树；TEAM/PERSONAL、默认 48 小时且限制 1–72 小时的 retention 和覆盖确认；全局及逐服务器安全步骤时间线。
 - 服务端索引返回的最近 exact selection 默认勾选并以低强调成功色标记；提交始终发送完整 `{path,type}` 集合、`expectedGeneration` 和树 snapshot 的 `expectedTreeCommit`。
 - operation 执行后没有取消入口。关闭只停止当前 observation；重开从 `latestOperation` 数据库 snapshot 开始，再申请新 ticket。终态显示 safe summary、耗时、commit、traceId、服务器错误和 partial failure 重试。
 
@@ -26,7 +26,7 @@ Task 4 已完成。`agent-web` 已提供应用源码入口、四态紧凑列表�
 
 - 根树首载和同一分支的懒加载子目录共享 app/repository/branch authority；切 branch、切 repository 或关闭弹窗会使整组旧响应失效。迟到 catch/finally 不覆盖新请求的 snapshot、loading 或 error。
 - progress observation 绑定 token、operationId、app、repository、仓库 generation 和 target generation。关闭弹窗、切仓库、generation 变化或新 observation 都会拒绝旧 snapshot/WS 回调。
-- terminal operation 使用 operationId 集合一次性 claim；重复终帧不会重复执行 `open` 或 fallback。`SUCCEEDED/PARTIAL_FAILED` 仍由服务端 `open(targetGeneration)` 决定本机能否切入；失败则清 recent 并回退托管工作区。
+- terminal operation 使用 operationId 集合一次性 claim；重复终帧不会重复执行 `open` 或 fallback。`SUCCEEDED/PARTIAL_FAILED` 仍由服务端 `open(targetGeneration)` 决定本机能否切入；只有结构化失效错误清 recent 并回退，暂时服务错误保留当前能力和重试上下文。
 
 ## TDD RED / GREEN 证据
 
@@ -73,3 +73,42 @@ Task 4 已完成。`agent-web` 已提供应用源码入口、四态紧凑列表�
 - 本任务只接入前端，不改变后端物化和权限事实；多服务器真实 Git/副本联调沿用 Task 2/3 的后端验收。
 - Playwright 使用平台 API/File WebSocket mock 验证桌面与移动交互，没有执行真实多 Java 进度 WebSocket 联调。
 - 提交前已回顾全部 `.agents/session-log*.md` 近期条目，未发现覆盖、丢弃或误合并其它开发者成果的风险。按 Task 4 协作约束不更新 session log，由最终汇总任务统一决定是否记录会话信息。
+
+## Fix Round 1（2026-07-28）
+
+### 修复结果
+
+- 已有 TEAM generation 的 PERSONAL 选项禁用并说明原因，组件 submit 与 `AgentWorkbench` materialize handler 都拒绝伪造降级；PERSONAL→TEAM、TEAM→TEAM 保持可用。
+- 只有 PENDING/RUNNING latest operation 自动进入步骤 4 并恢复观察。SUCCEEDED/PARTIAL_FAILED/FAILED 可查看历史，也可用“重新下载/更新配置”回到步骤 1。
+- branches/tree、materialization、progress 分别使用独立低敏错误状态，只在发生步骤展示。branch、tree snapshot commit 与 exact set 在组件和父层共同校验；当前树不存在的历史路径显式列为失效并允许移除。
+- 四步第 1 步展示当前应用全部 repository summary 并要求显式选择；紧凑入口隐藏 `NOT_DOWNLOADED`。快速切仓库时旧 branches/tree response、catch 和 finally 都因 dialog/tree authority 失效。
+- 来源工作区能力统一覆盖文件树、编辑器与 Run Diff footer、FigmaShell 应用个人配置重载、Agent/Skill Hub mutation、版本选择/新增、Workspace Agent 文件保存与配置变更；UI 隐藏与 handler 首部拒绝同时生效，普通文件写、Session/Run、OpenCode 和终端不变。
+- source selection/recovery 使用 token、app、repository、generation、workspace kind 的完整 intent。切应用、撤权、返回 managed、关闭入口/弹窗或卸载统一清理 picker、dialog、tree、socket、重连 timer 与旧 authority；A 的迟到 list/open/getWorkspace 不能覆盖 B。
+- recent 只按 `BackendApiError.code` 的 `FORBIDDEN/NOT_FOUND/CONFLICT` 判断权威失效，不从 message 猜测。current source 收到空 recent 会回退；网络、超时及 5xx 保留 source/recent 并显示重试提示；初始 managed + 空 recent 保持静默。
+- PENDING/RUNNING observation 意外断线或 client failure 后，工作台以 250ms 起、4s 封顶的有界退避串行执行 operation snapshot、新 ticket 与新 WebSocket；连接中、timer、authority 和 terminal 都有单一所有权，主动关闭不发送 cancel。backend-api 会区分意外 close 与调用方 close，并将前者映射为一次安全 client failure。
+- 新下载和已有下载更新的 retention 默认值统一为 48 小时；仍在提交时父 handler 会拒绝重复 materialize/retry。
+- 同代码路径顺带修复 active 但本机无 READY 副本仍显示成功色的问题；该状态保留可见、禁用打开并显示原因。
+
+### Round 1 TDD 证据
+
+1. **Picker/Dialog RED：** 2 files / 11 tests 中 7 failed、4 passed；失败分别证明 `NOT_DOWNLOADED` 泄漏、24 小时默认值、TEAM 可降级、未列全仓库、终态锁步骤 4、步骤错误不可见、旧 branch commit/phantom path 仍可提交。实现后 11/11 GREEN。
+2. **Purpose/intent/error RED：** `app-source-workspace.test.ts` 9 tests 中 3 failed；缺少 purpose 转换、完整 intent equality 与结构化恢复错误判断。实现后 9/9 GREEN。
+3. **挂载/client RED：** `FigmaEditorArea` 未透传 `workspaceKind`、已打开的 Hub mutation 弹窗在权限撤销后仍写入、backend-api 意外 close 不报告失败，共 3 failed / 18 passed。实现后 3 files / 21 tests GREEN。
+4. **Workbench/Playwright RED：** 来源编辑器仍暴露版本 cascade；current source 的 503 被错误清 recent/fallback；A 的迟到 repository/getWorkspace 覆盖 B；下载弹窗没有父级 repository 选择；断线没有自动恢复；关闭重开残留步骤 4。修复后的真实 mock 流程覆盖 DB RUNNING snapshot、ticket1 首帧、断线、ticket2 step、关闭无 cancel、ticket3 重开 PARTIAL_FAILED、target generation 只 open 一次及 ticket4 retry。
+5. **同路径 Minor RED：** active 但 `openable=false` 的紧凑条目仍带 `is-active`；测试 1 failed / 2 passed。改为 `is-unavailable` 后 3/3 GREEN。
+
+### Round 1 最终验证
+
+- `corepack pnpm test apps/agent-web/tests/AppSourcePicker.test.ts apps/agent-web/tests/AppSourceDialog.test.ts apps/agent-web/tests/app-source-workspace.test.ts apps/agent-web/tests/FigmaEditorArea.test.ts apps/agent-web/tests/agent-skill-hub.test.ts packages/backend-api/tests/app-source.test.ts`：6 files / 41 tests，通过。
+- `corepack pnpm test apps/agent-web/tests`：57 files / 934 passed / 1 skipped，通过；仅输出既有 jsdom Canvas `getContext` 提示。
+- `corepack pnpm typecheck`：13 个 workspace package 范围通过。
+- `corepack pnpm --filter @test-agent/agent-web build`：用户手册与 agent-web 生产构建通过；仅输出既有大 chunk 提示。
+- `corepack pnpm playwright test apps/agent-web/tests/workbench.spec.ts --project=chromium --project=mobile --grep "application source|source progress|recent source|late source repository" --reporter=line`：12/12，通过。
+- `git diff --check` 与 `git diff --cached --check`：通过。
+
+### Round 1 影响与风险
+
+- HTTP API、RunEvent、数据库、SQL、Flyway、安全路由和 OpenCode 快照均未变化；backend-api 仅补充独立源码进度 WebSocket 的意外 close 安全通知，主动 close 的既有语义保持不变。
+- reconnect 同一时刻最多执行一个 snapshot/ticket/connection 链，退避上限为 4 秒；关闭、切换、终态和卸载清 timer，不增加轮询常驻负担。
+- Playwright 覆盖真实浏览器 WebSocket mock 与 Chromium/mobile，但仍未替代多 Java、多服务器实际 Git 副本联调。
+- 按 Fix Round 1 约束不更新本机 `.agents/session-log.{id}.md`；提交前再次回顾全部 session logs。

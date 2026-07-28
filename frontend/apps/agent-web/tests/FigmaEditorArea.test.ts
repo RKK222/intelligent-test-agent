@@ -157,4 +157,22 @@ describe("FigmaEditorArea", () => {
     expect(wrapper.getComponent({ name: "WorkbenchFooter" }).props("copyPath"))
       .toBe("/workspace/.opencode/agents/review.md");
   });
+
+  it("forwards source workspace semantics to the editor footer", () => {
+    const wrapper = mount(FigmaEditorArea, {
+      props: {
+        tabs,
+        activePath: "src/b.ts",
+        workspaceKind: "APP_SOURCE"
+      },
+      global: {
+        stubs: {
+          WorkbenchFooter: true
+        }
+      }
+    });
+
+    expect(wrapper.getComponent({ name: "WorkbenchFooter" }).props("workspaceKind"))
+      .toBe("APP_SOURCE");
+  });
 });

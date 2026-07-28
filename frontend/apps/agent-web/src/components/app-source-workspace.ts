@@ -1,4 +1,5 @@
 import type { AppSourceOpenResult, AppSourcePurpose } from "@test-agent/shared-types";
+import { BackendApiError } from "@test-agent/backend-api";
 
 export type SelectedWorkspaceKind = "MANAGED" | "APP_SOURCE";
 
@@ -49,6 +50,41 @@ export function ordinaryWorkspaceCanWrite(
   workspaceId?: string
 ) {
   return Boolean(workspaceId && (kind === "APP_SOURCE" || personalWorkspaceId));
+}
+
+/** 已存在的团队副本只允许保持 TEAM；个人副本仍可提升为团队共享。 */
+export function appSourcePurposeUpdateAllowed(
+  repository: { generation?: number | null; purpose?: AppSourcePurpose | null },
+  nextPurpose: AppSourcePurpose
+) {
+  return !(repository.generation && repository.purpose === "TEAM" && nextPurpose === "PERSONAL");
+}
+
+export type AppSourceIntentAuthority = {
+  token: number;
+  appId?: string;
+  repositoryId?: string;
+  generation?: number | null;
+  workspaceKind: SelectedWorkspaceKind;
+};
+
+/** 每段异步 selection/recovery 都必须命中完整逻辑身份，不能仅靠最后一次请求序号。 */
+export function appSourceIntentAuthorityMatches(
+  request: AppSourceIntentAuthority,
+  current: AppSourceIntentAuthority | null
+) {
+  return Boolean(current
+    && request.token === current.token
+    && request.appId === current.appId
+    && request.repositoryId === current.repositoryId
+    && request.generation === current.generation
+    && request.workspaceKind === current.workspaceKind);
+}
+
+/** 只按 backend-api 的结构化错误码判断权威失效，禁止从 message 猜测。 */
+export function appSourceRecoveryFailureInvalidatesRecent(error: unknown) {
+  return error instanceof BackendApiError
+    && ["FORBIDDEN", "NOT_FOUND", "CONFLICT"].includes(error.code);
 }
 
 export type AppSourceTreeAuthority = {
