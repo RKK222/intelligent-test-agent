@@ -36,11 +36,11 @@ export function useCopy({ source, text, createToast = true }: { source?: MaybeRe
           await copy(value);
         }
         catch {
-          if (!copyTextWithHttpFallback(value)) throw new Error('Clipboard write failed');
+          if (!copyTextWithHttpFallback(value)) throw new Error('CLIPBOARD_WRITE_FAILED');
         }
       }
       else {
-        if (!copyTextWithHttpFallback(value)) throw new Error('Clipboard write failed');
+        if (!copyTextWithHttpFallback(value)) throw new Error('CLIPBOARD_WRITE_FAILED');
       }
 
       if (createToast) {

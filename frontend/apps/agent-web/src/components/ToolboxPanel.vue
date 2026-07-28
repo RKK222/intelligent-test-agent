@@ -157,13 +157,13 @@ function normalize(value: string): string {
           <input v-model="search" type="search" placeholder="搜索中文、英文或关键词" />
         </label>
         <div class="toolbox-source-filter" aria-label="工具来源">
-          <button type="button" :class="{ active: source === 'ALL' }" aria-label="查看全部来源" @click="source = 'ALL'">
+          <button type="button" :class="{ active: source === 'ALL' }" aria-label="查看全部来源" :aria-pressed="source === 'ALL'" @click="source = 'ALL'">
             全部来源
           </button>
-          <button type="button" :class="{ active: source === 'IT_TOOLS' }" aria-label="仅看 IT-Tools" @click="source = 'IT_TOOLS'">
+          <button type="button" :class="{ active: source === 'IT_TOOLS' }" aria-label="仅看 IT-Tools" :aria-pressed="source === 'IT_TOOLS'" @click="source = 'IT_TOOLS'">
             IT-Tools
           </button>
-          <button type="button" :class="{ active: source === 'OMNI_TOOLS' }" aria-label="仅看 OmniTools" @click="source = 'OMNI_TOOLS'">
+          <button type="button" :class="{ active: source === 'OMNI_TOOLS' }" aria-label="仅看 OmniTools" :aria-pressed="source === 'OMNI_TOOLS'" @click="source = 'OMNI_TOOLS'">
             OmniTools
           </button>
         </div>

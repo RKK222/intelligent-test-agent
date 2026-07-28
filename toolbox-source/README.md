@@ -28,7 +28,7 @@ python3 toolbox-source/scripts/generate_catalog.py \
 deploy/internal/package-release.sh --toolbox-only --output-dir deploy/internal/dist
 ```
 
-构建平台固定 `linux/amd64`，两套 Dockerfile 的 Node 与 Nginx 基础镜像同时锁定版本标签和对应的 `linux/amd64` manifest digest。完整企业发布包同时携带两个镜像 tar、逐文件 SHA-256、本目录完整修改源码、许可证、资源说明和目录 JSON。`node_modules/` 与 `dist/` 只是本机构建缓存，不进入 Git 或源码归档。
+构建平台固定 `linux/amd64`，两套 Dockerfile 的 Node 与 Nginx 基础镜像同时锁定版本标签和对应的 `linux/amd64` manifest digest。工具应用镜像只允许增加企业 registry 前缀，IT-Tools/OmniTools tag 必须分别保持 `.platform.2`/`.platform.1`，发布、部署和诊断均会拒绝 `latest` 或旧 tag。完整企业发布包同时携带两个镜像 tar、逐文件 SHA-256、本目录完整修改源码、许可证、资源说明和目录 JSON。`node_modules/` 与 `dist/` 只是本机构建缓存，不进入 Git 或源码归档。
 
 OmniTools 的 IMG.LY 模型资源可按固定版本重新获取并逐块校验：
 

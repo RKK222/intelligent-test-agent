@@ -183,6 +183,16 @@ require_digest_pinned_image() {
   fi
 }
 
+require_platform_image() {
+  local variable_name="$1" image_reference="$2" repository="$3" version="$4"
+  # 企业 registry 前缀可配置，但源码、镜像 tag 与离线 tar 不能跨平台版本混用。
+  if [[ "${image_reference}" != "${repository}:${version}" \
+      && "${image_reference}" != */"${repository}:${version}" ]]; then
+    echo "${variable_name} must end with ${repository}:${version}: ${image_reference}" >&2
+    exit 1
+  fi
+}
+
 configure_java_home() {
   local detected_home="" java_version
   local versions=()
@@ -616,6 +626,8 @@ NODE_IMAGE="${NODE_IMAGE:-node@sha256:b042c6d46a90773b82ea3f95b05457ea93ee127a73
 VITE_TEST_AGENT_API_BASE_URL="${VITE_TEST_AGENT_API_BASE_URL:-}"
 
 if [[ "${PACKAGE_TOOLBOX}" -eq 1 ]]; then
+  require_platform_image "TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE" "${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}" "test-agent/it-tools" "2024.10.22-7ca5933-platform.2"
+  require_platform_image "TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE" "${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}" "test-agent/omni-tools" "0.6.0-platform.1"
   require_digest_pinned_image "TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE" "${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE}"
   require_digest_pinned_image "TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE" "${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE}"
 fi

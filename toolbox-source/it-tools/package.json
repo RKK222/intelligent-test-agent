@@ -21,10 +21,10 @@
     "developer-productivity"
   ],
   "scripts": {
-    "audit:zh-ui": "node scripts/audit-zh-ui-batch-a.mjs",
+    "audit:zh-ui": "node scripts/audit-zh-ui-batch-a.mjs && vitest --environment jsdom run src/router.test.ts src/ui/shared-i18n.test.ts src/plugins/i18n.plugin.test.ts",
     "audit:zh-ui:batch-a": "node scripts/audit-zh-ui-batch-a.mjs",
     "dev": "vite",
-    "build": "node scripts/audit-zh-ui-batch-a.mjs && vue-tsc --noEmit && NODE_OPTIONS=--max_old_space_size=4096 vite build && node scripts/copy-runtime-assets.mjs",
+    "build": "pnpm audit:zh-ui && vue-tsc --noEmit && NODE_OPTIONS=--max_old_space_size=4096 vite build && node scripts/copy-runtime-assets.mjs",
     "preview": "vite preview --port 5050",
     "test": "npm run test:unit",
     "test:unit": "vitest --environment jsdom",

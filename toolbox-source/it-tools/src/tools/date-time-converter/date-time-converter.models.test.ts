@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import {
   dateToExcelFormat,
   excelFormatToDate,
+  formatZhLocaleDate,
   isExcelFormat,
   isISO8601DateTimeString,
   isISO9075DateString,
@@ -14,6 +15,15 @@ import {
 } from './date-time-converter.models';
 
 describe('date-time-converter models', () => {
+  describe('formatZhLocaleDate', () => {
+    test('明确使用中文 locale，不依赖宿主默认语言', () => {
+      const formatted = formatZhLocaleDate(new Date('2024-01-02T03:04:05.000Z'));
+
+      expect(formatted).toContain('2024');
+      expect(formatted).not.toMatch(/\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/);
+    });
+  });
+
   describe('isISO8601DateTimeString', () => {
     test('should return true for valid ISO 8601 date strings', () => {
       expect(isISO8601DateTimeString('2021-01-01T00:00:00.000Z')).toBe(true);

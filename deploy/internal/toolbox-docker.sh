@@ -13,19 +13,35 @@ load_dotenv() {
   [[ -f "${file}" ]] || { echo "Toolbox env not found: ${file}" >&2; exit 1; }
   while IFS= read -r line || [[ -n "${line}" ]]; do
     line="${line%$'\r'}"
-    [[ -z "${line}" || "${line}" == \#* || "${line}" != *=* ]] && continue
+    [[ -z "${line}" || "${line}" == \#* ]] && continue
+    [[ "${line}" == export\ * ]] && line="${line#export }"
+    [[ "${line}" == *=* ]] || continue
     key="${line%%=*}"
     value="${line#*=}"
     key="${key//[[:space:]]/}"
     [[ "${key}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
     value="${value#"${value%%[![:space:]]*}"}"
     value="${value%"${value##*[![:space:]]}"}"
-    [[ "${value}" == \"*\" && "${value}" == *\" ]] && value="${value:1:${#value}-2}"
+    if [[ "${value}" == \"*\" && "${value}" == *\" ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ "${value}" == \'*\' && "${value}" == *\' ]]; then
+      value="${value:1:${#value}-2}"
+    fi
     if [[ -z "${!key+x}" ]]; then
       printf -v "${key}" '%s' "${value}"
       export "${key}"
     fi
   done <"${file}"
+}
+
+require_platform_image() {
+  local variable_name="$1" image_reference="$2" repository="$3" version="$4"
+  # 只允许变更企业 registry 前缀，派生仓库名与平台版本必须与本交付一致。
+  if [[ "${image_reference}" != "${repository}:${version}" \
+      && "${image_reference}" != */"${repository}:${version}" ]]; then
+    echo "${variable_name} must end with ${repository}:${version}: ${image_reference}" >&2
+    exit 1
+  fi
 }
 
 load_dotenv "${ENV_FILE}"
@@ -43,6 +59,8 @@ IT_ROLLBACK_IMAGE="test-agent/it-tools:toolbox-rollback"
 OMNI_ROLLBACK_IMAGE="test-agent/omni-tools:toolbox-rollback"
 ROLLBACK_AVAILABLE=0
 
+require_platform_image "TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE" "${IT_IMAGE}" "test-agent/it-tools" "2024.10.22-7ca5933-platform.2"
+require_platform_image "TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE" "${OMNI_IMAGE}" "test-agent/omni-tools" "0.6.0-platform.1"
 [[ "${BIND_ADDRESS}" =~ ^[0-9a-fA-F:.]+$ ]] || { echo "Invalid bind address: ${BIND_ADDRESS}" >&2; exit 1; }
 [[ "${NETWORK}" =~ ^[A-Za-z0-9_.-]+$ ]] || { echo "Invalid Docker network: ${NETWORK}" >&2; exit 1; }
 

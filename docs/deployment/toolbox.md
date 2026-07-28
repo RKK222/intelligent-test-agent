@@ -46,9 +46,11 @@ deploy/internal/package-release.sh --toolbox-only --output-dir /absolute/output
 - `toolbox-catalog-v1.json` 及 SHA-256。
 - `toolbox.env.example`、`toolbox-docker.sh`、`diagnose-toolbox.sh` 和本部署说明。
 
-IT-Tools Docker 构建显式锁定 Node 20.18.0、pnpm 8.15.3 和 Nginx 1.27.2；构建前必须执行全部 85 条路由的中文资源 key 对齐与可见英文审计。OmniTools 显式锁定 Node 20.18.0、`package-lock.json` 和 Nginx 1.27.2。两个 Dockerfile 的 Node/Nginx 基础镜像还锁定对应的 `linux/amd64` manifest digest，避免同名 tag 漂移。OmniTools 构建关闭 npm audit/fund 网络请求并使用 BuildKit npm 缓存，但依赖版本仍只由锁文件决定。上游 v0.6.0 的 npm 依赖审计目前仍报告既有漏洞，禁止对锁定源码直接运行 `npm audit fix`；升级必须作为独立上游版本评估，重新执行全部 193 路由和真实功能验收。
+IT-Tools Docker 构建显式锁定 Node 20.18.0、pnpm 8.15.3 和 Nginx 1.27.2；构建前必须执行全部 85 条路由的中文资源 key 对齐与可见英文审计，并让真实 `toolsByCategory` 注册表、Router 元数据和共享复制/输入/校验组件参与构建门禁。OmniTools 显式锁定 Node 20.18.0、`package-lock.json` 和 Nginx 1.27.2。两个 Dockerfile 的 Node/Nginx 基础镜像还锁定对应的 `linux/amd64` manifest digest，避免同名 tag 漂移。OmniTools 构建关闭 npm audit/fund 网络请求并使用 BuildKit npm 缓存，但依赖版本仍只由锁文件决定。上游 v0.6.0 的 npm 依赖审计目前仍报告既有漏洞，禁止对锁定源码直接运行 `npm audit fix`；升级必须作为独立上游版本评估，重新执行全部 193 路由和真实功能验收。
 
 若联网构建机必须直连经批准的镜像代理，可用 `TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE`、`TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE` 覆盖 registry 前缀，但值仍必须带上述同一 `linux/amd64` digest；禁止降级为仅 tag。发布脚本把这两个值作为 Docker build arg 传入，两套应用使用完全相同的基础层。
+
+平台应用镜像可在 `test-agent/it-tools` 和 `test-agent/omni-tools` 前增加企业 registry 前缀，但 tag 必须分别保持 `2024.10.22-7ca5933-platform.2` 和 `0.6.0-platform.1`。发布与部署脚本会拒绝 `latest`、旧 platform tag 或其它仓库名；诊断脚本还会对比容器 `Config.Image` 与配置值，避免节点残留旧镜像却误报健康。
 
 ## 工具节点部署
 
@@ -64,7 +66,7 @@ TEST_AGENT_TOOLBOX_ENV_FILE=/data/testagent/config/toolbox.env \
   /data/testagent/deploy/internal/diagnose-toolbox.sh
 ```
 
-脚本先校验 tar SHA-256 和镜像 `amd64` 架构，再用无宿主端口的预检容器等待健康；两个候选镜像都通过后才替换固定容器：
+脚本先校验平台 tag、tar SHA-256 和镜像 `amd64` 架构，再用无宿主端口的预检容器等待健康；两个候选镜像都通过后才替换固定容器：
 
 - `test-agent-it-tools`：`18120:80`。
 - `test-agent-omni-tools`：`18121:80`。
@@ -145,7 +147,7 @@ TEST_AGENT_TOOLBOX_OMNI_ORIGIN=http://127.0.0.1:3000 \
   node toolbox-source/scripts/smoke_toolbox_features.mjs
 ```
 
-最终镜像启动后还必须让真实功能冒烟经过容器 Nginx，以验证 CSP 响应头（包括 QR 工具所需的 `connect-src data:`）：
+最终镜像启动后还必须让真实功能冒烟经过容器 Nginx，以验证 CSP 响应头（包括 QR 工具所需的 `connect-src data:`）。两个容器均原生支持公开子路径，因此直连端口与前端 Nginx 代理使用同一 URL 结构：
 
 ```bash
 TEST_AGENT_TOOLBOX_IT_ORIGIN=http://127.0.0.1:18120 \

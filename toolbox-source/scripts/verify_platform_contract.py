@@ -29,6 +29,8 @@ FORBIDDEN_RUNTIME_ORIGINS = (
 )
 IT_PLATFORM_VERSION = "2024.10.22-7ca5933-platform.2"
 IT_PLATFORM_IMAGE = f"test-agent/it-tools:{IT_PLATFORM_VERSION}"
+OMNI_PLATFORM_VERSION = "0.6.0-platform.1"
+OMNI_PLATFORM_IMAGE = f"test-agent/omni-tools:{OMNI_PLATFORM_VERSION}"
 
 
 def sha256(path: Path) -> str:
@@ -123,7 +125,10 @@ def verify_source_boundaries(root: Path) -> None:
     for origin in FORBIDDEN_RUNTIME_ORIGINS:
         require(origin not in runtime_source, f"源码仍包含禁止的运行时资源地址: {origin}")
 
-    for app in (it, omni):
+    for app, public_prefix in (
+        (it, "/toolbox/apps/it-tools/"),
+        (omni, "/toolbox/apps/omni-tools/"),
+    ):
         nginx = (app / "nginx.conf").read_text(encoding="utf-8")
         dockerfile = (app / "Dockerfile").read_text(encoding="utf-8")
         require(
@@ -133,6 +138,11 @@ def verify_source_boundaries(root: Path) -> None:
             f"CSP 缺失或未包含离线运行时所需最小能力: {app.name}",
         )
         require(dockerfile.count("@sha256:") == 2, f"基础镜像 digest 未完整锁定: {app.name}")
+        require(
+            f"location ^~ {public_prefix}" in nginx
+            and f"rewrite ^{public_prefix}(.*)$ /$1 last;" in nginx,
+            f"容器 Nginx 缺少公开子路径直连映射: {app.name}",
+        )
         require((app / "LICENSE").is_file() and (app / "UPSTREAM.md").is_file(), f"许可证证据缺失: {app.name}")
 
 
@@ -143,8 +153,12 @@ def verify_it_tools_chinese_release(root: Path) -> None:
     scripts = package.get("scripts", {})
     audit_command = scripts.get("audit:zh-ui", "")
     build_command = scripts.get("build", "")
-    require(audit_command == "node scripts/audit-zh-ui-batch-a.mjs", "IT-Tools 中文审计命令缺失或漂移")
-    require(build_command.startswith(f"{audit_command} && "), "IT-Tools 生产构建未优先执行中文审计")
+    expected_audit = (
+        "node scripts/audit-zh-ui-batch-a.mjs && vitest --environment jsdom run "
+        "src/router.test.ts src/ui/shared-i18n.test.ts src/plugins/i18n.plugin.test.ts"
+    )
+    require(audit_command == expected_audit, "IT-Tools 中文审计命令缺失或漂移")
+    require(build_command.startswith("pnpm audit:zh-ui && "), "IT-Tools 生产构建未优先执行中文审计")
     require((it / "scripts/audit-zh-ui-batch-a.mjs").is_file(), "IT-Tools 中文审计脚本缺失")
 
     i18n_plugin = (it / "src/plugins/i18n.plugin.ts").read_text(encoding="utf-8")
@@ -157,6 +171,39 @@ def verify_it_tools_chinese_release(root: Path) -> None:
     require(IT_PLATFORM_VERSION in upstream and IT_PLATFORM_IMAGE in upstream, "IT-Tools 上游证据仍指向旧派生版本")
     require("85 条保留路由" in modifications and "中文界面审计" in modifications, "IT-Tools 平台中文化修改说明不完整")
     require(IT_PLATFORM_IMAGE in readme and "禁止使用" in readme and "latest" in readme, "IT-Tools 对应源码缺少派生构建警示")
+
+
+def verify_deployment_image_versions(root: Path) -> None:
+    """镜像版本不能只是默认值：发布、部署、诊断和示例必须共同锁定。"""
+    files = {
+        "package-release.sh": root / "deploy/internal/package-release.sh",
+        "toolbox-docker.sh": root / "deploy/internal/toolbox-docker.sh",
+        "diagnose-toolbox.sh": root / "deploy/internal/diagnose-toolbox.sh",
+        "toolbox.env.example": root / "deploy/internal/toolbox.env.example",
+        "toolbox.md": root / "docs/deployment/toolbox.md",
+    }
+    contents = {name: path.read_text(encoding="utf-8") for name, path in files.items()}
+    for name, content in contents.items():
+        require(IT_PLATFORM_IMAGE in content, f"{name} 未锁定 IT-Tools platform.2")
+        require(OMNI_PLATFORM_IMAGE in content, f"{name} 未锁定 OmniTools platform.1")
+
+    for name in ("package-release.sh", "toolbox-docker.sh", "diagnose-toolbox.sh"):
+        content = contents[name]
+        require(
+            'require_platform_image "TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE"' in content
+            and 'require_platform_image "TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE"' in content,
+            f"{name} 未阻止旧 tag/latest 覆盖平台版本",
+        )
+    require(
+        "verify_container_image test-agent-it-tools" in contents["diagnose-toolbox.sh"]
+        and "verify_container_image test-agent-omni-tools" in contents["diagnose-toolbox.sh"],
+        "工具诊断未核对容器实际镜像引用",
+    )
+    require(
+        f"test-agent_it-tools_{IT_PLATFORM_VERSION}-linux-amd64.tar" in contents["toolbox.env.example"]
+        and f"test-agent_omni-tools_{OMNI_PLATFORM_VERSION}-linux-amd64.tar" in contents["toolbox.env.example"],
+        "离线 tar 名与平台镜像版本不一致",
+    )
 
 
 def verify_build_outputs(root: Path) -> None:
@@ -187,6 +234,7 @@ def main() -> None:
     verify_runtime_assets(root)
     verify_source_boundaries(root)
     verify_it_tools_chinese_release(root)
+    verify_deployment_image_versions(root)
     verify_build_outputs(root)
     print("工具盒子 193 项离线目录、派生路由、许可证与资源校验通过")
 

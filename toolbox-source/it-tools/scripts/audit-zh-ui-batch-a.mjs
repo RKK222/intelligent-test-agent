@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import { extname, join, relative } from 'node:path';
 import process from 'node:process';
 import ts from 'typescript';
@@ -9,6 +9,15 @@ import { parse as parseYaml } from 'yaml';
 
 const PROJECT_ROOT = new URL('../', import.meta.url).pathname;
 const TOOLS_ROOT = join(PROJECT_ROOT, 'src/tools');
+const TOOL_REGISTRY = join(TOOLS_ROOT, 'index.ts');
+const SHARED_VISIBLE_FILES = [
+  join(PROJECT_ROOT, 'src/components/FormatTransformer.vue'),
+  join(PROJECT_ROOT, 'src/components/InputCopyable.vue'),
+  join(PROJECT_ROOT, 'src/components/SpanCopyable.vue'),
+  join(PROJECT_ROOT, 'src/components/TextareaCopyable.vue'),
+  join(PROJECT_ROOT, 'src/composable/copy.ts'),
+];
+const SHARED_UI_ROOT = join(PROJECT_ROOT, 'src/ui');
 
 // 目录路由与上游源码目录有四处历史命名差异，审计必须显式固定，避免误扫到后 42 条路由。
 const ROUTE_DIRECTORIES = new Map([
@@ -189,6 +198,7 @@ const EXACT_EXAMPLE_TEXT = new Set([
 const EXACT_TECHNICAL_TEXT = new Set([
   'INVALID_BINARY_STRING',
   'INVALID_SAFELINK_URL',
+  'CLIPBOARD_WRITE_FAILED',
   'A',
   'B',
   'C',
@@ -340,7 +350,7 @@ function isNonVisibleExpressionText(node) {
   return ts.isCallExpression(parent) && parent.expression.kind === ts.SyntaxKind.ImportKeyword;
 }
 
-function isUserVisibleScriptString(node, file, rootExpressionVisible) {
+function isUserVisibleScriptString(node, file, rootExpressionVisible, route) {
   const parent = node.parent;
 
   if (rootExpressionVisible && !isNonVisibleExpressionText(node)) {
@@ -359,7 +369,7 @@ function isUserVisibleScriptString(node, file, rootExpressionVisible) {
     return /(?:descriptions|details|formats|labels|languages|options|properties)/i.test(containingVariableName(node) ?? '');
   }
 
-  if (ts.isReturnStatement(parent)
+  if ((ts.isReturnStatement(parent) && route !== 'shared')
     || ts.isThrowStatement(parent)
     || (rootExpressionVisible && ts.isExpressionStatement(parent))) {
     return true;
@@ -565,7 +575,7 @@ function inspectTypescript(
       if (isStringLiteral && recordLocaleKey(route, file, source, node, offset)) {
         return;
       }
-      if (isUserVisibleScriptString(node, file, rootExpressionVisible) && containsNaturalEnglish(node.text)) {
+      if (isUserVisibleScriptString(node, file, rootExpressionVisible, route) && containsNaturalEnglish(node.text)) {
         addFinding(file, lineOf(source, node.getStart()) + offset, '脚本用户文案', node.text);
       }
     }
@@ -674,6 +684,68 @@ async function walk(directory) {
     }
   }
   return files;
+}
+
+async function pathExists(path) {
+  try {
+    await stat(path);
+    return true;
+  }
+  catch (error) {
+    if (error?.code === 'ENOENT') {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function validateToolRegistry() {
+  // 审计 fixture 可以只测语法分支；真实构建必须把清单与实际 toolsByCategory 双向对齐。
+  if (!await pathExists(TOOL_REGISTRY)) {
+    return;
+  }
+
+  const source = await readFile(TOOL_REGISTRY, 'utf8');
+  const imports = new Map();
+  for (const match of source.matchAll(/import\s*\{\s*tool\s+as\s+([A-Za-z0-9_$]+)\s*\}\s*from\s*['"]\.\/([^'"]+)['"]/g)) {
+    imports.set(match[1], match[2]);
+  }
+  const registryStart = source.indexOf('export const toolsByCategory');
+  const registryEnd = source.indexOf('export const tools =', registryStart);
+  const registryBody = registryStart >= 0 && registryEnd > registryStart
+    ? source.slice(registryStart, registryEnd)
+    : '';
+  const registeredDirectories = new Set(
+    [...imports].filter(([alias]) => new RegExp(`\\b${alias}\\b`).test(registryBody)).map(([, directory]) => directory),
+  );
+  const expectedDirectories = new Set([...ROUTE_DIRECTORIES.values(), 'camera-recorder']);
+  const missing = [...expectedDirectories].filter(directory => !registeredDirectories.has(directory));
+  const unexpected = [...registeredDirectories].filter(directory => !expectedDirectories.has(directory));
+
+  if (missing.length > 0 || unexpected.length > 0 || registeredDirectories.size !== expectedDirectories.size) {
+    addFinding(
+      TOOL_REGISTRY,
+      1,
+      '工具注册表与 85 条审计路由不一致',
+      `缺少: ${missing.join(', ') || '无'}; 多出: ${unexpected.join(', ') || '无'}`,
+    );
+  }
+}
+
+async function inspectSharedVisibleSources() {
+  const files = [];
+  for (const file of SHARED_VISIBLE_FILES) {
+    if (await pathExists(file)) {
+      files.push(file);
+    }
+  }
+  if (await pathExists(SHARED_UI_ROOT)) {
+    files.push(...(await walk(SHARED_UI_ROOT)).filter(file =>
+      file.endsWith('.vue') && !file.includes('/demo/') && !file.endsWith('.demo.vue')));
+  }
+  for (const file of new Set(files)) {
+    await inspectFile('shared', file);
+  }
 }
 
 async function inspectFile(route, file) {
@@ -785,12 +857,14 @@ if (ROUTE_DIRECTORIES.size !== 85) {
   throw new Error(`IT-Tools 路由数量必须为 85，实际为 ${ROUTE_DIRECTORIES.size}`);
 }
 
+await validateToolRegistry();
 for (const [route, directory] of ROUTE_DIRECTORIES) {
   const files = await walk(join(TOOLS_ROOT, directory));
   for (const file of files) {
     await inspectFile(route, file);
   }
 }
+await inspectSharedVisibleSources();
 await validateLocales();
 
 findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.kind.localeCompare(b.kind));

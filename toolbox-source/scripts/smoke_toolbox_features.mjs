@@ -64,10 +64,10 @@ async function smokeAsciiAndClipboard() {
   });
   await page.locator("textarea").first().fill("OFFLINE");
   await page.waitForFunction(() =>
-    document.body.innerText.includes("Ascii Art text:"),
+    document.body.innerText.includes("ASCII 艺术字"),
   );
   await page.waitForFunction(
-    () => !document.body.innerText.includes("Loading font..."),
+    () => !document.body.innerText.includes("正在加载字体…"),
   );
   requireRequest(
     requests,
@@ -78,7 +78,7 @@ async function smokeAsciiAndClipboard() {
   await page.goto(`${itOrigin}/toolbox/apps/it-tools/token-generator`, {
     waitUntil: "domcontentloaded",
   });
-  await page.getByRole("button", { name: "Copy", exact: true }).click();
+  await page.getByRole("button", { name: "复制", exact: true }).click();
   const fallbackCommand = await page.evaluate(() =>
     sessionStorage.getItem("toolbox-copy-command"),
   );

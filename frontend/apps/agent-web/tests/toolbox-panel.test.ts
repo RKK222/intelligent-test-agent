@@ -77,6 +77,9 @@ describe("ToolboxPanel", () => {
     const view = renderPanel();
     await view.findByTestId("tool-link-it-tools.hash-text");
 
+    expect(view.getByRole("button", { name: "查看全部来源" }).getAttribute("aria-pressed")).toBe("true");
+    expect(view.getByRole("button", { name: "仅看 IT-Tools" }).getAttribute("aria-pressed")).toBe("false");
+
     const search = view.getByPlaceholderText("搜索中文、英文或关键词");
     await fireEvent.update(search, "sha256");
     expect(view.getByTestId("tool-link-it-tools.hash-text")).toBeTruthy();
@@ -87,6 +90,8 @@ describe("ToolboxPanel", () => {
 
     await fireEvent.update(search, "");
     await fireEvent.click(view.getByRole("button", { name: "仅看 IT-Tools" }));
+    expect(view.getByRole("button", { name: "查看全部来源" }).getAttribute("aria-pressed")).toBe("false");
+    expect(view.getByRole("button", { name: "仅看 IT-Tools" }).getAttribute("aria-pressed")).toBe("true");
     expect(view.getByTestId("tool-link-it-tools.hash-text")).toBeTruthy();
     expect(view.queryByTestId("tool-link-omni-tools.text.word-counter")).toBeNull();
 

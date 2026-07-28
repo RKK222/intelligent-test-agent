@@ -16,6 +16,7 @@ import type { DateFormat, ToDateMapper } from './date-time-converter.types';
 import {
   dateToExcelFormat,
   excelFormatToDate,
+  formatZhLocaleDate,
   isExcelFormat,
   isISO8601DateTimeString,
   isISO9075DateString,
@@ -37,7 +38,7 @@ const toDate: ToDateMapper = date => new Date(date);
 const formats = computed<DateFormat[]>(() => [
   {
     name: t('tools.date-converter.ui.jsLocaleDate'),
-    fromDate: date => date.toString(),
+    fromDate: formatZhLocaleDate,
     toDate,
     formatMatcher: () => false,
   },

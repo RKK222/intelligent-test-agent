@@ -121,6 +121,12 @@ async function writeFixtureSource(root: string, relativePath: string, source: st
   await writeFile(target, source, 'utf8');
 }
 
+async function writeFixtureFile(root: string, relativePath: string, source: string) {
+  const target = join(root, relativePath);
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, source, 'utf8');
+}
+
 function runAudit(root: string) {
   return spawnSync(process.execPath, [join(root, 'scripts/audit-zh-ui-batch-a.mjs')], {
     cwd: root,
@@ -129,6 +135,34 @@ function runAudit(root: string) {
 }
 
 describe('Task 2B 中文 UI 审计器', () => {
+  it('扫描工具共用的可见组件文案', async () => {
+    const root = await createAuditFixture();
+    await writeFixtureFile(root, 'src/components/InputCopyable.vue', `
+<template>
+  <c-button tooltip="Copy result">Copy result</c-button>
+</template>
+`);
+
+    const result = runAudit(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Copy result');
+    expect(result.stderr).toContain('src/components/InputCopyable.vue');
+  });
+
+  it('拒绝审计清单与实际工具注册表漂移', async () => {
+    const root = await createAuditFixture();
+    await writeFixtureFile(root, 'src/tools/index.ts', `
+import { tool as tokenGenerator } from './token-generator';
+export const tools = [tokenGenerator];
+`);
+
+    const result = runAudit(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('工具注册表与 85 条审计路由不一致');
+  });
+
   it('检查动态可见属性和插值中的根级英文字符串', async () => {
     const root = await createAuditFixture();
     await writeFixtureSource(root, 'token-generator/dynamic-visible.vue', `

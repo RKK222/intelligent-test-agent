@@ -12,6 +12,7 @@ export {
   dateToExcelFormat,
   excelFormatToDate,
   isExcelFormat,
+  formatZhLocaleDate,
 };
 
 const ISO8601_REGEX
@@ -59,4 +60,9 @@ function dateToExcelFormat(date: Date) {
 
 function excelFormatToDate(excelFormat: string | number) {
   return new Date((Number(excelFormat) - 25569) * 86400 * 1000);
+}
+
+/** 平台固定中文 locale，避免宿主浏览器的默认英文渗入可见输出。 */
+function formatZhLocaleDate(date: Date) {
+  return date.toLocaleString('zh-CN');
 }

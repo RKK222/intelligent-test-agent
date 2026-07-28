@@ -1098,3 +1098,22 @@
 - Result:
   - 本地统一入口为 `http://127.0.0.1:3000/toolbox`，后端 readiness 为 `UP`，manager 已连接；工具点击既有 Flyway migration 已应用到本地 PostgreSQL。
   - 本次修复不新增或变更 HTTP/RunEvent 字段、数据库结构、MyBatis SQL、权限或 generated SDK；只补齐既有工具盒子的生产装配、本地代理、测试稳定性与文档。临时 4173 调试网关和 Playwright 快照已删除，无持久数据损失。
+
+### 2026-07-28 - 优化工具盒子布局并固定 IT-Tools 中文版
+
+- Why:
+  - 工具盒子顶部 Hero 占用空间，分类下拉不便于连续筛选；搜索、来源和分类在长列表滚动后也会离开视口。
+  - IT-Tools 虽有原生 `vue-i18n`，但工具页仍有大量英文控件和说明，需要在不恢复语言选择器的前提下固定为完整中文，并保证离线镜像不会误回退旧 tag。
+- What:
+  - 移除可见 Hero，仅保留屏幕阅读器标题；将“全部 + 13 类”改为常驻标签，数字随搜索词和来源实时联动，分类本身不影响计数，零结果保持既有选择语义；控制区绑定实际滚动容器吸顶，移动端标签单行横向滚动，来源与分类均补齐 `aria-pressed`。
+  - 固定 IT-Tools 默认/回退语言为中文，补齐 85 条路由的标题、说明、控件、错误与帮助文本；日期输出显式使用 `zh-CN`，纯计算错误改用稳定错误码。构建门禁同时校验真实 `toolsByCategory`、路由元数据、共享 UI/复制运行时代码及 1347 个实际 locale key。
+  - 重新生成 193 项目录的 IT-Tools 中文展示字段，`toolId/source/sourceVersion/category/categoryLabel/launchPath/catalogOrder`、数量和顺序不变；镜像升级并强制锁定为 `test-agent/it-tools:2024.10.22-7ca5933-platform.2`，部署、打包和诊断脚本拒绝 `latest`/旧版本且核对容器 `Config.Image`。
+  - 两套容器 Nginx 增加公开子路径直连映射；同步前端、源码区和离线部署说明，OmniTools 继续使用 `0.6.0-platform.1`。
+- How:
+  - IT-Tools 全量 40 个测试文件、183 项通过，生产构建通过；中文审计为 85 路由、1347 个 key。前端 4 个测试文件、16 项通过，类型检查通过，桌面/移动端 Playwright 8 项通过；后端 `ToolboxCatalogContractTest` 和 193 项平台契约通过。
+  - 最终两个 `linux/amd64` 镜像经 Nginx `-t`、只读根文件系统、`unless-stopped`、健康恢复和实际镜像标签检查；通过 3000 统一入口逐一加载 193 条深链且无非同源请求，ASCII、HTTP 复制降级、FFmpeg、Ghostscript、图片、QR、OCR 和 AI 抠图真实功能冒烟通过。
+  - 最终离线制品位于 `/private/tmp/test-agent-toolbox-platform2-final.PF2cgu`：IT-Tools tar SHA-256 为 `62d994dad770b89e68d922ecd6380c54281a7cb9d090f58ac68a6059ab8a7749`，OmniTools tar 为 `8d2dcfed8b5868186fd5929ace96bd6fdbdbaff56fc4da516e0049f429125235`，完整修改源码为 `f5f79248f859727e5b72f12c85e9503a56b3728460f474e62008be87946fc536`，目录为 `cb12b1ed4f7d61ee64299d4c15794c9b2ea463e53423bbf330ab79b09de56c38`。
+  - 使用 JDK 21 和未修改的 `.env.test` 完整执行 `restart-dev-services.sh --profile test --env-file .env.test`；独立复审最终为 Ready，无 Critical/Important，dotenv 引号兼容这一 Minor 也已修复并用真实容器回归。
+- Result:
+  - 本地测试入口为 `http://127.0.0.1:3000/toolbox`；后端 readiness 为 UP，两个工具容器均 healthy，直接深链、容器重启和统一入口代理正常。
+  - 本次不新增或变更公共 HTTP API、RunEvent/SSE、数据库/Flyway/MyBatis SQL、工具点击/热门排序、权限、generated SDK 或 OpenCode 源码；未修改 `.env.local`。现有点击事件表永久增长与单工具节点风险保持原交付约束。
