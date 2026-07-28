@@ -8,7 +8,7 @@ import type {
   ToolboxSource,
   ToolboxTool
 } from "@test-agent/shared-types";
-import { ExternalLink, Flame, MousePointerClick, Search } from "lucide-vue-next";
+import { Flame, MousePointerClick, Search } from "lucide-vue-next";
 
 const api = inject<BackendApiClient>("api")!;
 
@@ -252,11 +252,9 @@ function normalize(value: string): string {
                   {{ tool.categoryLabel }}
                 </span>
               </div>
-              <div class="toolbox-card__actions">
-                <span class="toolbox-card__clicks" :data-testid="`tool-count-${tool.toolId}`">
-                  {{ tool.clickCount }} 次点击
-                </span>
-                <ExternalLink :size="15" aria-label="在新标签页打开" class="toolbox-card__launch-icon" />
+              <div class="toolbox-card__clicks" :data-testid="`tool-count-${tool.toolId}`">
+                <Flame :size="13" aria-hidden="true" class="toolbox-card__flame-icon" />
+                <span>{{ tool.clickCount }}</span>
               </div>
             </div>
             <p class="toolbox-card__subtitle">{{ tool.nameEn }}</p>
@@ -361,10 +359,8 @@ function normalize(value: string): string {
 .toolbox-source-badge { padding: 2px 6px; border-radius: 4px; color: #31598c; font-size: 10px; font-weight: 750; background: #edf4fd; flex-shrink: 0; }
 .toolbox-source-badge--omni_tools { color: #76511e; background: #fff3dc; }
 .toolbox-category-badge { padding: 2px 6px; border-radius: 4px; color: #5a6678; font-size: 10px; font-weight: 500; background: #f0f3f7; border: 1px solid #e2e7ec; flex-shrink: 0; }
-.toolbox-card__actions { display: flex; align-items: center; gap: 6px; color: #828e9e; flex-shrink: 0; padding-top: 1px; }
-.toolbox-card__clicks { font-size: 10px; color: #828e9e; font-variant-numeric: tabular-nums; }
-.toolbox-card__launch-icon { flex-shrink: 0; color: #a0aec0; transition: color 150ms ease; }
-.toolbox-card:hover .toolbox-card__launch-icon { color: #31598c; }
+.toolbox-card__clicks { display: flex; align-items: center; gap: 3px; color: #64748b; font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; flex-shrink: 0; padding-top: 1px; }
+.toolbox-card__flame-icon { color: #f59e0b; flex-shrink: 0; }
 .toolbox-card__subtitle { margin: 3px 0 0; overflow: hidden; color: #778195; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .toolbox-card__description { display: -webkit-box; margin: 8px 0 0; overflow: hidden; color: #4d596b; font-size: 12px; line-height: 1.6; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .toolbox-state,
