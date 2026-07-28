@@ -2375,6 +2375,25 @@ async function refreshRuntimeCatalogAfterAgentConfigSave(
   return lastRuntimeReloadError;
 }
 
+/** 手动公共重载已完成同一次保存待办时，立即消费该代次，避免 finally 再触发第二次 dispose。 */
+function consumePendingPublicRuntimeReload(
+  targetRevision: number | null,
+  route: { worktreeId?: string; linuxServerId?: string }
+) {
+  if (targetRevision === null || targetRevision <= handledReferenceRuntimeReloadRevision) return;
+  const pendingTarget = pendingPublicRuntimeReloadTarget;
+  if (!pendingTarget?.worktreeId || pendingTarget.worktreeId !== route.worktreeId) return;
+  if (pendingTarget.linuxServerId && pendingTarget.linuxServerId !== route.linuxServerId) return;
+
+  handledReferenceRuntimeReloadRevision = targetRevision;
+  if (pendingReferenceRuntimeReloadRevision.value === targetRevision) {
+    pendingPublicRuntimeReloadTarget = null;
+  }
+  lastRuntimeReloadError = null;
+  runtimeReloadConflictWaitingForIdle.value = false;
+  clearRuntimeReloadConflictRetryTimer();
+}
+
 /**
  * 手动验证个人 Agent/Skill 配置的运行态重载。
  * 公共配置先切换当前用户的公共 worktree 指针；应用配置先合并 feature 固定提交；随后才 dispose 当前用户。
@@ -2419,6 +2438,14 @@ async function handlePersonalRuntimeReload(payload: {
     };
     return;
   }
+  const pendingPublicTargetAtStart = pendingPublicRuntimeReloadTarget;
+  const pendingPublicTargetMatches = pendingPublicTargetAtStart !== null
+    && pendingPublicTargetAtStart.worktreeId === publicRuntimeRoute?.worktreeId
+    && (!pendingPublicTargetAtStart.linuxServerId
+      || pendingPublicTargetAtStart.linuxServerId === publicRuntimeRoute?.linuxServerId);
+  const pendingPublicReloadRevision = payload.scope === "PUBLIC" && pendingPublicTargetMatches
+    ? pendingReferenceRuntimeReloadRevision.value
+    : null;
 
   runtimeReloadLock.value = payload.scope;
   try {
@@ -2447,6 +2474,8 @@ async function handlePersonalRuntimeReload(payload: {
       if (!result.reloaded) {
         throw new Error(result.message || "公共个人配置未重新加载");
       }
+      // 后端已完成指针切换和 dispose；即使后续目录刷新失败也不能再次释放同一运行态。
+      consumePendingPublicRuntimeReload(pendingPublicReloadRevision, publicRuntimeRoute!);
     } else {
       await api.disposeGlobal();
     }
@@ -2574,7 +2603,8 @@ function clearRuntimeReloadConflictRetryTimer() {
 function resumeRuntimeReloadAfterConflict() {
   clearRuntimeReloadConflictRetryTimer();
   runtimeReloadConflictWaitingForIdle.value = false;
-  void reloadReferenceRuntimeIfIdle();
+  // 首次冲突已经提示；后台空闲复核保持静默，避免每秒重复弹出同一 dispose 提示。
+  void reloadReferenceRuntimeIfIdle({ quiet: true });
 }
 
 function scheduleRuntimeReloadConflictRetry() {
@@ -2687,7 +2717,7 @@ const saveMutation = useMutation({
       : {
           kind: "success",
           title: "文件已保存",
-          description: userRuntimeBusy.value
+          description: (userRuntimeBusy.value || runtimeReloadConflictWaitingForIdle.value)
             && agentInfo
             && shouldReloadPersonalRuntimeCatalog(agentInfo.scope, agentInfo.path)
             ? `${tab.path}；当前用户任务结束后会自动重新加载运行态。`
@@ -7387,7 +7417,7 @@ const saveDiffFileMutation = useMutation({
       : {
           kind: "success",
           title: "文件已保存",
-          description: userRuntimeBusy.value
+          description: (userRuntimeBusy.value || runtimeReloadConflictWaitingForIdle.value)
             && agentInfo
             && shouldReloadPersonalRuntimeCatalog(agentInfo.scope, agentInfo.path)
             ? `${path}；当前用户任务结束后会自动重新加载运行态。`

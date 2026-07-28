@@ -2524,3 +2524,29 @@
 
 - 个人拉取应用 Agent 后的 dispose 现在由后台持久化续接，页面生命周期不再参与；只阻止和 dispose 发起者本人，其他用户、共享版本 target、公共 Agent 和应用级 rollout 均不受影响。
 - 原有应用 workspace、应用 Agent、公共 Agent 的角色与目录权限、stage/commit/push 白名单、普通文件自动同步和 dispose 时机未修改。HTTP 仅 additive 字段；无 RunEvent/SSE、新文件代理、generated SDK、OpenCode 源码、安全或环境配置变更。
+
+### 2026-07-28 - 收敛个人拉取边界并修复公共重载重复提示
+
+### Why
+
+- 个人应用拉取的后台单用户 rollout 只按历史 binding 查进程，失效绑定仍可能误命中；公共 Agent 手动重载成功后又会在保存收尾阶段重复消费同一待办，冲突轮询还会每秒重复弹出 dispose 提示。
+- 后端全量测试被 H2 无法解析的新 PostgreSQL 方言 migration、依赖生产开发数据的旧 fixture 和缺失的新上下文依赖阻断；配置软链接异常路径还存在递归删除普通目录的危险回退。
+
+### What
+
+- 个人 rollout 只接受 `ACTIVE` binding，并核对 binding 与运行进程的服务器、端口、用户和 RUNNING 状态；仍只处理发起用户，不枚举成员、不广播、不扩大目录权限。
+- 公共 Agent 手动重载成功后立即按 worktree/server/保存代次消费同一待办，后续目录刷新失败也不重复 dispose；冲突后的空闲轮询改为静默，仅首次显示等待提示，新一代保存不会被旧请求清掉。
+- 配置软链接创建失败改为失败关闭，普通文件或目录占用受管路径统一返回冲突，不再删除后复制。
+- H2 仓储测试固定到最后兼容 migration 基线，新增字段和历史数据用测试 fixture 补齐；PostgreSQL 专用 migration 继续由 Testcontainers 与真实启动验证。补齐应用上下文新增 dispatcher mock。
+- 同步 runtime、persistence、agent-web README/PACKAGE 与应用 worktree 测试矩阵。
+
+### How
+
+- JDK 25 下后端完整 `mvn test` 的 20 个模块全部通过；持久层 192 项为 0 失败/0 异常、18 项原有环境条件跳过，应用模块 36 项为 0 失败/0 异常、1 项原有 fixture 跳过。生产 `mvn clean package -Dmaven.test.skip=true` 通过。
+- 前端全仓 lint/typecheck/test/build 通过，Vitest 为 97 个文件、1640 项通过、1 项跳过；公共重载相关 3 个定向文件 93 项通过。`tools/verify-ai-docs.sh` 与 `git diff --check` 通过。
+- 使用未修改的 `.env.test`、test profile 和 JDK 25 完整重启 backend、opencode-manager、frontend；backend health/readiness 为 `UP`，前端与 CORS 预检返回 200，manager WebSocket 已连接且 OpenCode `/global/config` 返回成功。
+
+### Result
+
+- 公共 Agent 的同一次保存/手动重载只触发一次 dispose，忙碌冲突只提示一次；个人拉取只会登记当前用户的有效运行进程。
+- 未改变应用 workspace、应用 Agent、公共 Agent 的角色与目录权限、stage/commit/push 白名单、共享 target、普通文件同步或既有 dispose 范围。无 HTTP/RunEvent、生产数据库结构或 migration、generated SDK、OpenCode 源码和环境配置变更；测试-only H2 fixture 不进入生产 Flyway。

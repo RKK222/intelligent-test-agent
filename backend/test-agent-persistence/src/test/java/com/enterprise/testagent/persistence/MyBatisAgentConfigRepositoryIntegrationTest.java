@@ -45,7 +45,9 @@ class MyBatisAgentConfigRepositoryIntegrationTest {
                 "sa",
                 "",
                 true);
-        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
+                .target("20260715213000").load().migrate();
+        insertUser();
         insertWorkspace();
 
         SqlSessionFactory sqlSessionFactory = sqlSessionFactory();
@@ -197,6 +199,22 @@ class MyBatisAgentConfigRepositoryIntegrationTest {
                 .param("createdAt", Timestamp.from(NOW))
                 .param("updatedAt", Timestamp.from(NOW))
                 .param("linuxServerId", "10.0.0.8")
+                .update();
+    }
+
+    /** 测试用户属于 fixture，不再依赖生产 migration 写入个人开发数据。 */
+    private void insertUser() {
+        JdbcClient.create(dataSource)
+                .sql("""
+                        insert into users(
+                            user_id, unified_auth_id, username, password_hash,
+                            status, created_at, updated_at
+                        ) values (
+                            'usr_test_dev', 'auth_agentcfg_mybatis', 'agentcfg-mybatis', 'hash',
+                            'ACTIVE', :now, :now
+                        )
+                        """)
+                .param("now", Timestamp.from(NOW))
                 .update();
     }
 

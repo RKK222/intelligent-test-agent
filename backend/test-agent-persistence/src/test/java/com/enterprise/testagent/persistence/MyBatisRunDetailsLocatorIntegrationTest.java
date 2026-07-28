@@ -46,7 +46,8 @@ class MyBatisRunDetailsLocatorIntegrationTest {
                 "sa",
                 "",
                 true);
-        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
+                .target("20260715213000").load().migrate();
         jdbcClient = JdbcClient.create(dataSource);
         jdbcClient.sql("""
                         insert into workspaces(workspace_id, name, root_path, status, trace_id, created_at, updated_at)

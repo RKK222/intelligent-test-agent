@@ -19,6 +19,7 @@ import com.enterprise.testagent.persistence.mybatis.MyBatisReferenceRepositoryRe
 import com.enterprise.testagent.persistence.mybatis.ReferenceRepositoryMapper;
 import com.enterprise.testagent.workspace.ReferenceRepositoryApplicationService;
 import com.enterprise.testagent.workspace.ReferenceRepositoryReplicaReconciler;
+import com.enterprise.testagent.workspace.ReferenceRepositoryReplicaTaskDispatcher;
 import com.enterprise.testagent.workspace.WorkspaceServerIdentity;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -39,6 +40,8 @@ class ReferenceRepositoryContextTest {
                 .withBean(SshKeyEncryptionService.class, () -> mock(SshKeyEncryptionService.class))
                 .withBean(WorkspaceServerIdentity.class, () -> new WorkspaceServerIdentity("linux-test"))
                 .withBean(ServerBroadcastPublisher.class, () -> mock(ServerBroadcastPublisher.class))
+                .withBean(ReferenceRepositoryReplicaTaskDispatcher.class,
+                        () -> mock(ReferenceRepositoryReplicaTaskDispatcher.class))
                 .withBean(ReferenceRepositoryMapper.class, () -> mock(ReferenceRepositoryMapper.class))
                 .withBean(MyBatisReferenceRepositoryRepository.class)
                 .withBean(ConfigurationManagementApplicationService.class)
@@ -52,6 +55,7 @@ class ReferenceRepositoryContextTest {
                     assertThat(context).hasSingleBean(ReferenceRepositoryApplicationService.class);
                     assertThat(context).hasSingleBean(ReferenceRepositoryRepository.class);
                     assertThat(context).hasSingleBean(ReferenceRepositoryReplicaReconciler.class);
+                    assertThat(context).hasSingleBean(ReferenceRepositoryReplicaTaskDispatcher.class);
                 });
     }
 }

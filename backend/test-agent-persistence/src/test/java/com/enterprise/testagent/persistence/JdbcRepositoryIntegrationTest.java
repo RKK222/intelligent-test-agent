@@ -94,6 +94,7 @@ import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import com.enterprise.testagent.common.pagination.PageRequest;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
@@ -112,6 +113,7 @@ import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.mybatis.spring.SqlSessionFactoryBean;
 import org.mybatis.spring.SqlSessionTemplate;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -121,6 +123,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabase;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseBuilder;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType;
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 
 class JdbcRepositoryIntegrationTest {
 
@@ -143,6 +146,7 @@ class JdbcRepositoryIntegrationTest {
     private ScheduledTaskRepository scheduledTasks;
     private JdbcUserRepository users;
     private JdbcClient jdbcClient;
+    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
     @BeforeEach
     void setUp() throws Exception {
@@ -150,10 +154,12 @@ class JdbcRepositoryIntegrationTest {
                 .setType(EmbeddedDatabaseType.H2)
                 .setName("testagent;MODE=PostgreSQL;DATABASE_TO_UPPER=false")
                 .build();
-        Flyway.configure().dataSource(database).locations("classpath:db/migration").load().migrate();
+        Flyway.configure().dataSource(database).locations("classpath:db/migration")
+                .target("20260715213000").load().migrate();
 
         jdbcClient = JdbcClient.create(database);
-        ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+        // mapper 已写入 execution_affinity；H2 基线按旧 scheduler 测试所需结构补齐。
+        jdbcClient.sql("alter table scheduled_task_runs add column execution_affinity varchar(128)").update();
         workspaces = new JdbcWorkspaceRepository(jdbcClient);
         sessions = new JdbcSessionRepository(jdbcClient);
         runs = new JdbcRunRepository(jdbcClient);
@@ -386,7 +392,8 @@ class JdbcRepositoryIntegrationTest {
                     .param("pinned", false)
                     .update();
 
-            Flyway.configure().dataSource(migrationDatabase).locations("classpath:db/migration").load().migrate();
+            Flyway.configure().dataSource(migrationDatabase).locations("classpath:db/migration")
+                    .target("6").load().migrate();
 
             JdbcAgentSessionBindingRepository migratedBindings = new JdbcAgentSessionBindingRepository(jdbcClient);
             assertThat(migratedBindings.findBySessionIdAndAgentId(new SessionId("ses_1234567890abcdef"), "opencode"))
@@ -1113,7 +1120,7 @@ class JdbcRepositoryIntegrationTest {
     }
 
     @Test
-    void migrationGrantsDefaultUserSuperAdminRole() {
+    void migrationsDoNotSeedDefaultDevelopmentUserRole() {
         Integer roleCount = jdbcClient.sql("""
                         select count(*)
                         from user_roles ur
@@ -1126,7 +1133,7 @@ class JdbcRepositoryIntegrationTest {
                 .query(Integer.class)
                 .single();
 
-        assertThat(roleCount).isEqualTo(1);
+        assertThat(roleCount).isZero();
     }
 
     @Test
@@ -1198,7 +1205,7 @@ class JdbcRepositoryIntegrationTest {
     }
 
     @Test
-    void opencodeProcessManagementRepositoriesSaveAndReadTopology() {
+    void opencodeProcessManagementRepositoriesReadTopologyFromH2Fixture() {
         users.save(processUser("usr_process_user", "process-user"));
 
         LinuxServer linuxServer = linuxServer();
@@ -1209,11 +1216,11 @@ class JdbcRepositoryIntegrationTest {
         OpencodeServerProcess process = opencodeServerProcess("ocp_1234567890abcdef", "usr_process_user", 4096);
         UserOpencodeProcessBinding binding = userBinding("usr_process_user", "ocp_1234567890abcdef", 4096);
 
-        opencodeProcesses.saveLinuxServer(linuxServer);
-        opencodeProcesses.saveBackendJavaProcess(backendProcess);
-        opencodeProcesses.saveContainer(container);
-        opencodeProcesses.saveContainerManager(manager);
-        opencodeProcesses.saveManagerBackendConnection(connection);
+        insertLinuxServer(linuxServer);
+        insertBackendJavaProcess(backendProcess);
+        insertContainer(container);
+        insertContainerManager(manager);
+        insertManagerBackendConnection(connection);
         opencodeProcesses.saveOpencodeServerProcess(process);
         opencodeProcesses.saveUserBinding(binding);
 
@@ -1253,8 +1260,8 @@ class JdbcRepositoryIntegrationTest {
     @Test
     void opencodeProcessRepositoryNormalizesLegacyProcessUpdatedAtBeforeCreatedAt() {
         users.save(processUser("usr_process_user", "process-user"));
-        opencodeProcesses.saveLinuxServer(linuxServer());
-        opencodeProcesses.saveContainer(opencodeContainer());
+        insertLinuxServer(linuxServer());
+        insertContainer(opencodeContainer());
 
         Instant createdAt = NOW.plusSeconds(3600);
         Instant invalidUpdatedAt = NOW;
@@ -1300,10 +1307,10 @@ class JdbcRepositoryIntegrationTest {
     void opencodeProcessManagementPagesAndFiltersServerProcesses() {
         users.save(processUser("usr_process_user", "process-user"));
         users.save(processUser("usr_process_second", "process-second"));
-        opencodeProcesses.saveLinuxServer(linuxServer());
-        opencodeProcesses.saveBackendJavaProcess(backendJavaProcess());
-        opencodeProcesses.saveContainer(opencodeContainer());
-        opencodeProcesses.saveContainerManager(opencodeContainerManager());
+        insertLinuxServer(linuxServer());
+        insertBackendJavaProcess(backendJavaProcess());
+        insertContainer(opencodeContainer());
+        insertContainerManager(opencodeContainerManager());
         OpencodeServerProcess running = opencodeServerProcess(
                 "ocp_1234567890abcdef",
                 "usr_process_user",
@@ -1400,10 +1407,10 @@ class JdbcRepositoryIntegrationTest {
                 NOW,
                 NOW,
                 "trace_3234567890abcdef");
-        opencodeProcesses.saveLinuxServer(linuxServer);
-        opencodeProcesses.saveBackendJavaProcess(currentBackend);
-        opencodeProcesses.saveBackendJavaProcess(staleBackend);
-        opencodeProcesses.saveBackendJavaProcess(otherBackend);
+        insertLinuxServer(linuxServer);
+        insertBackendJavaProcess(currentBackend);
+        insertBackendJavaProcess(staleBackend);
+        insertBackendJavaProcess(otherBackend);
 
         assertThat(opencodeProcesses.findReadyBackendJavaProcesses(NOW.minusSeconds(5), 10))
                 .containsExactly(currentBackend, otherBackend);
@@ -1413,13 +1420,13 @@ class JdbcRepositoryIntegrationTest {
     void opencodeProcessManagementConstraintsProtectCurrentTopology() {
         users.save(processUser("usr_process_user", "process-user"));
         users.save(processUser("usr_process_second", "process-second"));
-        opencodeProcesses.saveLinuxServer(linuxServer());
-        opencodeProcesses.saveBackendJavaProcess(backendJavaProcess());
-        opencodeProcesses.saveContainer(opencodeContainer());
-        opencodeProcesses.saveContainerManager(opencodeContainerManager());
+        insertLinuxServer(linuxServer());
+        insertBackendJavaProcess(backendJavaProcess());
+        insertContainer(opencodeContainer());
+        insertContainerManager(opencodeContainerManager());
         opencodeProcesses.saveOpencodeServerProcess(opencodeServerProcess("ocp_1234567890abcdef", "usr_process_user", 4096));
 
-        assertThatThrownBy(() -> opencodeProcesses.saveContainerManager(new OpencodeContainerManager(
+        assertThatThrownBy(() -> insertContainerManager(new OpencodeContainerManager(
                         new ContainerManagerId("mgr_2234567890abcdef"),
                         new OpencodeContainerId("ctr_01"),
                         new LinuxServerId("10.8.0.12"),
@@ -1459,6 +1466,130 @@ class JdbcRepositoryIntegrationTest {
                         .param("updatedAt", Timestamp.from(NOW))
                         .update())
                 .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    /** H2 只负责查询和约束测试；生产 PostgreSQL upsert 已由 Testcontainers 用例覆盖。 */
+    private void insertLinuxServer(LinuxServer server) {
+        jdbcClient.sql("""
+                        insert into linux_servers(
+                            linux_server_id, name, status, capacity_summary_json,
+                            last_heartbeat_at, trace_id, created_at, updated_at
+                        ) values (
+                            :linuxServerId, :name, :status, :capacitySummaryJson,
+                            :lastHeartbeatAt, :traceId, :createdAt, :updatedAt
+                        )
+                        """)
+                .param("linuxServerId", server.linuxServerId().value())
+                .param("name", server.name())
+                .param("status", server.status().name())
+                .param("capacitySummaryJson", writeJson(server.capacitySummary()))
+                .param("lastHeartbeatAt", Timestamp.from(server.lastHeartbeatAt()))
+                .param("traceId", server.traceId())
+                .param("createdAt", Timestamp.from(server.createdAt()))
+                .param("updatedAt", Timestamp.from(server.updatedAt()))
+                .update();
+    }
+
+    private void insertBackendJavaProcess(BackendJavaProcess process) {
+        jdbcClient.sql("""
+                        insert into backend_java_processes(
+                            backend_process_id, linux_server_id, listen_url, status,
+                            started_at, last_heartbeat_at, trace_id, created_at, updated_at
+                        ) values (
+                            :backendProcessId, :linuxServerId, :listenUrl, :status,
+                            :startedAt, :lastHeartbeatAt, :traceId, :createdAt, :updatedAt
+                        )
+                        """)
+                .param("backendProcessId", process.backendProcessId().value())
+                .param("linuxServerId", process.linuxServerId().value())
+                .param("listenUrl", process.listenUrl())
+                .param("status", process.status().name())
+                .param("startedAt", Timestamp.from(process.startedAt()))
+                .param("lastHeartbeatAt", Timestamp.from(process.lastHeartbeatAt()))
+                .param("traceId", process.traceId())
+                .param("createdAt", Timestamp.from(process.createdAt()))
+                .param("updatedAt", Timestamp.from(process.updatedAt()))
+                .update();
+    }
+
+    private void insertContainer(OpencodeContainer container) {
+        jdbcClient.sql("""
+                        insert into opencode_containers(
+                            container_id, linux_server_id, container_name, port_start, port_end,
+                            max_processes, current_processes, status, last_heartbeat_at,
+                            trace_id, created_at, updated_at
+                        ) values (
+                            :containerId, :linuxServerId, :containerName, :portStart, :portEnd,
+                            :maxProcesses, :currentProcesses, :status, :lastHeartbeatAt,
+                            :traceId, :createdAt, :updatedAt
+                        )
+                        """)
+                .param("containerId", container.containerId().value())
+                .param("linuxServerId", container.linuxServerId().value())
+                .param("containerName", container.containerName())
+                .param("portStart", container.portStart())
+                .param("portEnd", container.portEnd())
+                .param("maxProcesses", container.maxProcesses())
+                .param("currentProcesses", container.currentProcesses())
+                .param("status", container.status().name())
+                .param("lastHeartbeatAt", Timestamp.from(container.lastHeartbeatAt()))
+                .param("traceId", container.traceId())
+                .param("createdAt", Timestamp.from(container.createdAt()))
+                .param("updatedAt", Timestamp.from(container.updatedAt()))
+                .update();
+    }
+
+    private void insertContainerManager(OpencodeContainerManager manager) {
+        jdbcClient.sql("""
+                        insert into opencode_container_managers(
+                            manager_id, container_id, linux_server_id, protocol_version,
+                            connection_status, capabilities_json, last_heartbeat_at,
+                            trace_id, created_at, updated_at
+                        ) values (
+                            :managerId, :containerId, :linuxServerId, :protocolVersion,
+                            :connectionStatus, :capabilitiesJson, :lastHeartbeatAt,
+                            :traceId, :createdAt, :updatedAt
+                        )
+                        """)
+                .param("managerId", manager.managerId().value())
+                .param("containerId", manager.containerId().value())
+                .param("linuxServerId", manager.linuxServerId().value())
+                .param("protocolVersion", manager.protocolVersion())
+                .param("connectionStatus", manager.connectionStatus().name())
+                .param("capabilitiesJson", writeJson(manager.capabilities()))
+                .param("lastHeartbeatAt", Timestamp.from(manager.lastHeartbeatAt()))
+                .param("traceId", manager.traceId())
+                .param("createdAt", Timestamp.from(manager.createdAt()))
+                .param("updatedAt", Timestamp.from(manager.updatedAt()))
+                .update();
+    }
+
+    private void insertManagerBackendConnection(OpencodeManagerBackendConnection connection) {
+        jdbcClient.sql("""
+                        insert into opencode_manager_backend_connections(
+                            manager_id, backend_process_id, status, connected_at,
+                            last_heartbeat_at, trace_id, updated_at
+                        ) values (
+                            :managerId, :backendProcessId, :status, :connectedAt,
+                            :lastHeartbeatAt, :traceId, :updatedAt
+                        )
+                        """)
+                .param("managerId", connection.managerId().value())
+                .param("backendProcessId", connection.backendProcessId().value())
+                .param("status", connection.status().name())
+                .param("connectedAt", Timestamp.from(connection.connectedAt()))
+                .param("lastHeartbeatAt", Timestamp.from(connection.lastHeartbeatAt()))
+                .param("traceId", connection.traceId())
+                .param("updatedAt", Timestamp.from(connection.updatedAt()))
+                .update();
+    }
+
+    private String writeJson(Map<String, ?> value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("测试 fixture JSON 序列化失败", exception);
+        }
     }
 
     private static Workspace workspace() {
@@ -1703,6 +1834,9 @@ class JdbcRepositoryIntegrationTest {
                     .target("17")
                     .load()
                     .migrate();
+            // V17 已按生产 migration 规范清空；历史拓扑作为测试 fixture 注入后再验证清理脚本。
+            new ResourceDatabasePopulator(new ClassPathResource(
+                    "db/fixture/V17__local_opencode_machine.sql")).execute(migrationDatabase);
             JdbcClient migrationJdbc = JdbcClient.create(migrationDatabase);
 
             assertThat(countRows(migrationJdbc, "select count(*) from linux_servers where linux_server_id = '127.0.0.1'"))
@@ -1787,6 +1921,7 @@ class JdbcRepositoryIntegrationTest {
             Flyway.configure()
                     .dataSource(migrationDatabase)
                     .locations("classpath:db/migration")
+                    .target("20260627000000")
                     .load()
                     .migrate();
 

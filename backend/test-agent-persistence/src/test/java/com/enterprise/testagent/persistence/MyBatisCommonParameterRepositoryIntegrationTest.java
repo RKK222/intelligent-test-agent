@@ -16,8 +16,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mybatis.spring.SqlSessionFactoryBean;
 import org.mybatis.spring.SqlSessionTemplate;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 
 /**
  * 验证 CommonParameter 试点仓储通过 MyBatis XML SQL 访问数据库。
@@ -35,7 +37,11 @@ class MyBatisCommonParameterRepositoryIntegrationTest {
                 "sa",
                 "",
                 true);
-        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
+                .target("20260715213000").load().migrate();
+        // 公共引用参数位于 PostgreSQL 专用 migration 之后；H2 只单独装载本用例需要的可兼容脚本。
+        new ResourceDatabasePopulator(new ClassPathResource(
+                "db/migration/V20260718100000__seed_references_params.sql")).execute(dataSource);
 
         SqlSessionFactory sqlSessionFactory = sqlSessionFactory();
         CommonParameterMapper mapper = new SqlSessionTemplate(sqlSessionFactory).getMapper(CommonParameterMapper.class);

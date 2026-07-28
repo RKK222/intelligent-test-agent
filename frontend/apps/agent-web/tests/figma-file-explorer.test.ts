@@ -25,6 +25,29 @@ describe("FigmaFileExplorer", () => {
     expect(agentWorkbenchSource).toContain("<PersonalWorkspacePullDialog");
   });
 
+  it("consumes a successful manual public reload and keeps conflict retries silent", () => {
+    expect(agentWorkbenchSource).toContain("function consumePendingPublicRuntimeReload(");
+    expect(agentWorkbenchSource).toContain(
+      "consumePendingPublicRuntimeReload(pendingPublicReloadRevision, publicRuntimeRoute!)"
+    );
+    const consumeIndex = agentWorkbenchSource.indexOf(
+      "consumePendingPublicRuntimeReload(pendingPublicReloadRevision, publicRuntimeRoute!)"
+    );
+    const catalogRefetchIndex = agentWorkbenchSource.indexOf(
+      "await Promise.all([agentsQuery.refetch(), commandsQuery.refetch()])",
+      consumeIndex
+    );
+    expect(consumeIndex).toBeGreaterThan(-1);
+    expect(catalogRefetchIndex).toBeGreaterThan(consumeIndex);
+
+    const resumeStart = agentWorkbenchSource.indexOf("function resumeRuntimeReloadAfterConflict()");
+    const scheduleStart = agentWorkbenchSource.indexOf("function scheduleRuntimeReloadConflictRetry()", resumeStart);
+    expect(resumeStart).toBeGreaterThan(-1);
+    expect(scheduleStart).toBeGreaterThan(resumeStart);
+    expect(agentWorkbenchSource.slice(resumeStart, scheduleStart))
+      .toContain("reloadReferenceRuntimeIfIdle({ quiet: true })");
+  });
+
   it("groups refresh and remote pull in one workspace more menu while keeping Git changes independent", async () => {
     const wrapper = shallowMount(FigmaFileExplorer, {
       props: {

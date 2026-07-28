@@ -29,6 +29,8 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessManagement
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcessFilter;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
+import com.enterprise.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
+import com.enterprise.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessConfigLinkService;
@@ -606,10 +608,16 @@ public class PublicAgentConfigRolloutService
             String linuxServerId,
             boolean rejectOtherServer) {
         UserId targetUser = new UserId(requireText(userId, "用户 ID 不能为空"));
-        Optional<OpencodeServerProcess> process = processRepository
+        Optional<UserOpencodeProcessBinding> binding = processRepository
                 .findUserBinding(targetUser, OPENCODE_AGENT_ID)
-                .flatMap(binding -> processRepository.findOpencodeServerProcessById(binding.processId()))
+                .filter(candidate -> candidate.status() == UserOpencodeProcessBindingStatus.ACTIVE);
+        Optional<OpencodeServerProcess> process = binding
+                .flatMap(candidate -> processRepository.findOpencodeServerProcessById(candidate.processId()))
                 .filter(candidate -> targetUser.equals(candidate.userId()))
+                .filter(candidate -> binding
+                        .filter(active -> active.linuxServerId().equals(candidate.linuxServerId()))
+                        .filter(active -> active.port() == candidate.port())
+                        .isPresent())
                 .filter(candidate -> candidate.status() == OpencodeServerProcessStatus.RUNNING);
         if (rejectOtherServer
                 && process.isPresent()

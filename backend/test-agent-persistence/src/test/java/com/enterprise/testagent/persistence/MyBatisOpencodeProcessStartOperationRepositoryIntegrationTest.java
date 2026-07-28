@@ -42,7 +42,8 @@ class MyBatisOpencodeProcessStartOperationRepositoryIntegrationTest {
                 "sa",
                 "",
                 true);
-        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
+                .target("20260715213000").load().migrate();
         insertUser(USER_ID);
         insertUser(OTHER_USER_ID);
 

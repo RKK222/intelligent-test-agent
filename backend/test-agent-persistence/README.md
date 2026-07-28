@@ -135,6 +135,7 @@
 
 ## 测试覆盖
 
+- 通用 H2 PostgreSQL 模式测试固定迁移到 `V20260715213000` 这一最后兼容基线；后续含 `timestamptz`、部分表达式索引和 `ON CONFLICT DO UPDATE` 的完整生产链由真实 PostgreSQL 集成测试与应用启动验证。旧 H2 用例只按 mapper 所需补列或单独执行可兼容 migration，历史 V17 本机种子改由 `src/test/resources/db/fixture` 注入；测试不会修改已发布 migration 及其 checksum，也不会依赖生产 migration 写入开发用户。
 - `JdbcRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖 Workspace（含 `linux_server_id`、历史脏 `updated_at < created_at` 归一化）、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision 的保存和读取。
 - `MyBatisCommonParameterRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖通用参数 MyBatis XML 查询、列表、按 ID 查询和仅更新 value。
 - `MyBatisUserDeletionRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式加载真实 MyBatis XML，覆盖无业务用户的角色、登录日志、应用成员清理和受保护业务引用阻断；`RedisTokenStoreTest` 覆盖增量扫描只删除目标用户 Token。

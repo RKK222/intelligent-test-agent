@@ -189,6 +189,37 @@ class PublicAgentConfigRolloutServiceTest {
     }
 
     @Test
+    void personalApplicationReloadIgnoresInactiveHistoricalBinding() {
+        UserOpencodeProcessBinding inactiveBinding = new UserOpencodeProcessBinding(
+                new UserId("usr-1"),
+                "opencode",
+                new OpencodeProcessId("ocp_1234567890abcdef"),
+                new LinuxServerId("linux-1"),
+                4096,
+                UserOpencodeProcessBindingStatus.INACTIVE,
+                PROCESS_STARTED_AT,
+                PROCESS_STARTED_AT,
+                "trace-rollout");
+        when(processRepository.findUserBinding(new UserId("usr-1"), "opencode"))
+                .thenReturn(Optional.of(inactiveBinding));
+        when(processRepository.findOpencodeServerProcessById(new OpencodeProcessId("ocp_1234567890abcdef")))
+                .thenReturn(Optional.of(targetProcess()));
+
+        Optional<String> rolloutId = service.schedulePersonalApplicationReload(
+                "pws_personal",
+                "feature_testagent_20260728",
+                "commit_personal",
+                "linux-1",
+                "usr-1",
+                "trace-personal");
+
+        assertThat(rolloutId).isEmpty();
+        verify(processRepository, never()).findOpencodeServerProcessById(any());
+        verify(repository, never()).createRollout(
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void personalApplicationReloadWorkerSnapshotsOnlyInitiatingUser() {
         PublicAgentConfigRolloutSyncRequest request = personalApplicationSyncRequest();
         when(repository.claimPendingSync(

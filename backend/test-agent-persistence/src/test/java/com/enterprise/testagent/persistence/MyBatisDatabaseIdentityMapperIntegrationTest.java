@@ -31,7 +31,8 @@ class MyBatisDatabaseIdentityMapperIntegrationTest {
                 "jdbc:h2:mem:testagent_mybatis_identity_%s;MODE=PostgreSQL;DATABASE_TO_UPPER=false"
                         .formatted(UUID.randomUUID().toString().replace("-", "")),
                 "sa", "", true);
-        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
+                .target("20260715213000").load().migrate();
         SqlSessionFactory factory = sqlSessionFactory();
         mapper = new SqlSessionTemplate(factory).getMapper(DatabaseIdentityMapper.class);
     }
