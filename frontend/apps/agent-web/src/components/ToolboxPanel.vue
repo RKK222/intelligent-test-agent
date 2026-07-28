@@ -357,7 +357,7 @@ function normalize(value: string): string {
   .toolbox-hot-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 760px) {
-  .toolbox-panel { padding: 16px 14px 36px; }
+  .toolbox-panel { padding: 0 14px 36px; }
   .toolbox-controls { padding-top: 0; }
   .toolbox-controls__primary { grid-template-columns: 1fr; }
   .toolbox-source-filter { overflow-x: auto; }
