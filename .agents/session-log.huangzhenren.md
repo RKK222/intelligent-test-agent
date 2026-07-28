@@ -1176,3 +1176,16 @@
   - completion 后遗留 backup 可由后续旧 cleanup 安全接管，重复更新不再累积；并发终态化后的 stale worker 无法重新制造 `RUNNING` 副本，过期 `RUNNING` 的旧 attempt 恢复语义仍保留。
   - 独立复审确认 backup 命名围栏、operation/step 原子领取门禁及 H2/PostgreSQL 回归覆盖均闭环，最终结论为 `APPROVED`。
   - 未新增或变更 HTTP/进度 WebSocket/RunEvent wire、数据库表或 migration；生产关系型 SQL 仅修改 `AppSourceMapper.xml`，未新增 JDBC Repository SQL，PostgreSQL 竞态测试沿用 `JdbcClient` fixture 建立隔离数据。未修改 `.env*`、generated SDK、OpenCode 源码或工具盒子。
+
+### 2026-07-29 - 整合远端主线并完成应用源码推送前复验
+
+- Why:
+  - 推送应用源码快照实现前，远端 `main` 已新增 12 个提交，本地已有交互式 rebase 停在 `frontend/apps/agent-web/components.d.ts` 冲突，必须保留双方组件声明并验证整合结果。
+- What:
+  - 在远端 `78534c1bb` 基线上继续既有 rebase；冲突文件同时保留远端 `ApplicationGitRefreshManagementPanel` 和本地 `AppSourceDialog/AppSourcePicker` 声明，其余 9 个应用源码提交自动重放完成，未使用 force push、skip、abort 或丢弃远端提交。
+  - rebase 后 `main` 相对 `origin/main` 为 `0 behind / 17 ahead`，组件生成文件无冲突标记，工作树干净。
+- How:
+  - JDK 21 后端根全量为 355 suites / 2270 tests / 0 failures / 0 errors / 19 conditional skips；真实 PostgreSQL、MySQL/Testcontainers 场景随根全量执行。
+  - 前端根 Vitest 为 104 files / 1698 passed / 1 skipped，全 workspace typecheck、生产 build 通过；应用源码相关 Chromium/mobile Playwright 22/22 通过。`tools/verify-ai-docs.sh`、`git diff --check` 和冲突标记检查通过。
+- Result:
+  - 当前 `main` 同时包含远端白盒分析、应用 Git 刷新等既有成果和完整应用源码快照实现，已具备普通非强制推送条件；本次整合未新增业务 API、事件、数据库、权限或环境配置变更。
