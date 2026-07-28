@@ -6,6 +6,7 @@ const str = ref('Lorem ipsum dolor sit amet');
 const keepFirst = ref(4);
 const keepLast = ref(4);
 const keepSpace = ref(true);
+const { t } = useI18n();
 
 const obfuscatedString = useObfuscateString(str, { keepFirst, keepLast, keepSpace });
 const { copy } = useCopy({ source: obfuscatedString });
@@ -13,22 +14,22 @@ const { copy } = useCopy({ source: obfuscatedString });
 
 <template>
   <div>
-    <c-input-text v-model:value="str" raw-text placeholder="Enter string to obfuscate" label="String to obfuscate:" clearable multiline />
+    <c-input-text v-model:value="str" raw-text :placeholder="t('tools.string-obfuscator.ui.placeholder')" :label="t('tools.string-obfuscator.ui.label')" clearable multiline />
 
     <div mt-4 flex gap-10px>
       <div>
-        <div>Keep first:</div>
+        <div>{{ t('tools.string-obfuscator.ui.keepFirst') }}</div>
         <n-input-number v-model:value="keepFirst" min="0" />
       </div>
 
       <div>
-        <div>Keep last:</div>
+        <div>{{ t('tools.string-obfuscator.ui.keepLast') }}</div>
         <n-input-number v-model:value="keepLast" min="0" />
       </div>
 
       <div>
         <div mb-5px>
-          Keep&nbsp;spaces:
+          {{ t('tools.string-obfuscator.ui.keepSpaces') }}
         </div>
         <n-switch v-model:value="keepSpace" />
       </div>

@@ -5,6 +5,7 @@ import type { UseValidationRule } from '@/composable/validation';
 const defaultValue = '<hello><world>foo</world><world>bar</world></hello>';
 const indentSize = useStorage('xml-formatter:indent-size', 2);
 const collapseContent = useStorage('xml-formatter:collapse-content', true);
+const { t } = useI18n();
 
 function transformer(value: string) {
   return formatXml(value, {
@@ -14,30 +15,30 @@ function transformer(value: string) {
   });
 }
 
-const rules: UseValidationRule<string>[] = [
+const rules = computed<UseValidationRule<string>[]>(() => [
   {
     validator: isValidXML,
-    message: 'Provided XML is not valid.',
+    message: t('tools.xml-formatter.ui.invalidXml'),
   },
-];
+]);
 </script>
 
 <template>
   <div important:flex-full important:flex-shrink-0 important:flex-grow-0>
     <div flex justify-center>
-      <n-form-item label="Collapse content:" label-placement="left">
+      <n-form-item :label="t('tools.xml-formatter.ui.collapseContent')" label-placement="left">
         <n-switch v-model:value="collapseContent" />
       </n-form-item>
-      <n-form-item label="Indent size:" label-placement="left" label-width="100" :show-feedback="false">
+      <n-form-item :label="t('tools.xml-formatter.ui.indentSize')" label-placement="left" label-width="100" :show-feedback="false">
         <n-input-number v-model:value="indentSize" min="0" max="10" w-100px />
       </n-form-item>
     </div>
   </div>
 
   <format-transformer
-    input-label="Your XML"
-    input-placeholder="Paste your XML here..."
-    output-label="Formatted XML from your XML"
+    :input-label="t('tools.xml-formatter.ui.inputLabel')"
+    :input-placeholder="t('tools.xml-formatter.ui.inputPlaceholder')"
+    :output-label="t('tools.xml-formatter.ui.outputLabel')"
     output-language="xml"
     :input-validation-rules="rules"
     :transformer="transformer"

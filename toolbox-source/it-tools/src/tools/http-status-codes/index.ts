@@ -12,7 +12,7 @@ export const tool = defineTool({
     'http',
     'status',
     'codes',
-    ...codesByCategories.flatMap(({ codes }) => codes.flatMap(({ code, name }) => [String(code), name])),
+    ...codesByCategories.flatMap(({ codes }) => codes.flatMap(({ code, nameKey }) => [String(code), translate(nameKey)])),
   ],
   component: () => import('./http-status-codes.vue'),
   icon: HttpRound,

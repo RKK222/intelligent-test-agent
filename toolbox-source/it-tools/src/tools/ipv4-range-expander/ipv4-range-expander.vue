@@ -8,43 +8,51 @@ import { useValidation } from '@/composable/validation';
 
 const rawStartAddress = useStorage('ipv4-range-expander:startAddress', '192.168.1.1');
 const rawEndAddress = useStorage('ipv4-range-expander:endAddress', '192.168.6.255');
+const { t } = useI18n();
 
 const result = computed(() => calculateCidr({ startIp: rawStartAddress.value, endIp: rawEndAddress.value }));
 
-const calculatedValues: {
+interface CalculatedValue {
   label: string
+  testId: string
   getOldValue: (result: Ipv4RangeExpanderResult | undefined) => string | undefined
   getNewValue: (result: Ipv4RangeExpanderResult | undefined) => string | undefined
-}[] = [
+}
+
+const calculatedValues = computed<CalculatedValue[]>(() => [
   {
-    label: 'Start address',
+    label: t('tools.ipv4-range-expander.ui.startAddress'),
+    testId: 'start-address',
     getOldValue: () => rawStartAddress.value,
     getNewValue: result => result?.newStart,
   },
   {
-    label: 'End address',
+    label: t('tools.ipv4-range-expander.ui.endAddress'),
+    testId: 'end-address',
     getOldValue: () => rawEndAddress.value,
     getNewValue: result => result?.newEnd,
   },
   {
-    label: 'Addresses in range',
-    getOldValue: result => result?.oldSize?.toLocaleString(),
-    getNewValue: result => result?.newSize?.toLocaleString(),
+    label: t('tools.ipv4-range-expander.ui.addressesInRange'),
+    testId: 'addresses-in-range',
+    getOldValue: result => result?.oldSize?.toLocaleString('zh-CN'),
+    getNewValue: result => result?.newSize?.toLocaleString('zh-CN'),
   },
   {
     label: 'CIDR',
+    testId: 'cidr',
     getOldValue: () => '',
     getNewValue: result => result?.newCidr,
   },
-];
+]);
 
-const startIpValidation = useValidation({
+const startIpValidation = useValidation<string>({
   source: rawStartAddress,
-  rules: [{ message: 'Invalid ipv4 address', validator: ip => isValidIpv4({ ip }) }],
+  rules: computed(() => [{ message: t('tools.ipv4-range-expander.ui.invalidIpv4'), validator: ip => isValidIpv4({ ip }) }]),
 });
-const endIpValidation = useValidation({
+const endIpValidation = useValidation<string>({
   source: rawEndAddress,
-  rules: [{ message: 'Invalid ipv4 address', validator: ip => isValidIpv4({ ip }) }],
+  rules: computed(() => [{ message: t('tools.ipv4-range-expander.ui.invalidIpv4'), validator: ip => isValidIpv4({ ip }) }]),
 });
 
 const showResult = computed(() => endIpValidation.isValid && startIpValidation.isValid && result.value !== undefined);
@@ -61,16 +69,16 @@ function onSwitchStartEndClicked() {
     <div mb-4 flex gap-4>
       <c-input-text
         v-model:value="rawStartAddress"
-        label="Start address"
-        placeholder="Start IPv4 address..."
+        :label="t('tools.ipv4-range-expander.ui.startAddress')"
+        :placeholder="t('tools.ipv4-range-expander.ui.startPlaceholder')"
         :validation="startIpValidation"
         clearable
       />
 
       <c-input-text
         v-model:value="rawEndAddress"
-        label="End address"
-        placeholder="End IPv4 address..."
+        :label="t('tools.ipv4-range-expander.ui.endAddress')"
+        :placeholder="t('tools.ipv4-range-expander.ui.endPlaceholder')"
         :validation="endIpValidation"
         clearable
       />
@@ -83,18 +91,19 @@ function onSwitchStartEndClicked() {
 &nbsp;
           </th>
           <th scope="col">
-            old value
+            {{ t('tools.ipv4-range-expander.ui.oldValue') }}
           </th>
           <th scope="col">
-            new value
+            {{ t('tools.ipv4-range-expander.ui.newValue') }}
           </th>
         </tr>
       </thead>
       <tbody>
         <ResultRow
-          v-for="{ label, getOldValue, getNewValue } in calculatedValues"
-          :key="label"
+          v-for="{ label, testId, getOldValue, getNewValue } in calculatedValues"
+          :key="testId"
           :label="label"
+          :test-id="testId"
           :old-value="getOldValue(result)"
           :new-value="getNewValue(result)"
         />
@@ -102,17 +111,16 @@ function onSwitchStartEndClicked() {
     </n-table>
     <n-alert
       v-else-if="startIpValidation.isValid && endIpValidation.isValid"
-      title="Invalid combination of start and end IPv4 address"
+      :title="t('tools.ipv4-range-expander.ui.invalidRangeTitle')"
       type="error"
     >
       <div my-3 op-70>
-        The end IPv4 address is lower than the start IPv4 address. This is not valid and no result could be calculated.
-        In the most cases the solution to solve this problem is to change start and end address.
+        {{ t('tools.ipv4-range-expander.ui.invalidRangeDescription') }}
       </div>
 
       <c-button @click="onSwitchStartEndClicked">
         <n-icon mr-2 :component="Exchange" depth="3" size="22" />
-        Switch start and end IPv4 address
+        {{ t('tools.ipv4-range-expander.ui.switchAddresses') }}
       </c-button>
     </n-alert>
   </div>

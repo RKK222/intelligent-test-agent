@@ -11,6 +11,7 @@ const emit = defineEmits(['update:values']);
 const refs = useTemplateRefsList<typeof NInputNumber>();
 
 const values = useVModel(props, 'values', emit);
+const { t } = useI18n();
 
 async function addValue() {
   values.value.push(null);
@@ -35,11 +36,11 @@ function onInputEnter(index: number) {
         :ref="refs.set"
         v-model:value="values[index]"
         :show-button="false"
-        placeholder="Set your measure..."
+        :placeholder="t('tools.benchmark-builder.ui.measurePlaceholder')"
         autofocus
         @keydown.enter="onInputEnter(index)"
       />
-      <c-tooltip tooltip="Delete this value">
+      <c-tooltip :tooltip="t('tools.benchmark-builder.ui.deleteValue')">
         <c-button circle variant="text" @click="values.splice(index, 1)">
           <n-icon :component="Trash" depth="3" size="18" />
         </c-button>
@@ -48,7 +49,7 @@ function onInputEnter(index: number) {
 
     <c-button @click="addValue">
       <n-icon :component="Plus" depth="3" mr-2 size="18" />
-      Add a measure
+      {{ t('tools.benchmark-builder.ui.addMeasure') }}
     </c-button>
   </div>
 </template>

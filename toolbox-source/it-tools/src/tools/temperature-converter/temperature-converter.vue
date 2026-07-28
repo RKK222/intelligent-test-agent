@@ -18,64 +18,65 @@ import {
 } from './temperature-converter.models';
 
 type TemperatureScale = 'kelvin' | 'celsius' | 'fahrenheit' | 'rankine' | 'delisle' | 'newton' | 'reaumur' | 'romer';
+const { t } = useI18n();
 
 const units = reactive<
   Record<
     string | TemperatureScale,
-    { title: string; unit: string; ref: number; toKelvin: (v: number) => number; fromKelvin: (v: number) => number }
+    { titleKey: string; unit: string; ref: number; toKelvin: (v: number) => number; fromKelvin: (v: number) => number }
   >
       >({
         kelvin: {
-          title: 'Kelvin',
+          titleKey: 'tools.temperature-converter.ui.kelvin',
           unit: 'K',
           ref: 0,
           toKelvin: _.identity,
           fromKelvin: _.identity,
         },
         celsius: {
-          title: 'Celsius',
+          titleKey: 'tools.temperature-converter.ui.celsius',
           unit: '°C',
           ref: 0,
           toKelvin: convertCelsiusToKelvin,
           fromKelvin: convertKelvinToCelsius,
         },
         fahrenheit: {
-          title: 'Fahrenheit',
+          titleKey: 'tools.temperature-converter.ui.fahrenheit',
           unit: '°F',
           ref: 0,
           toKelvin: convertFahrenheitToKelvin,
           fromKelvin: convertKelvinToFahrenheit,
         },
         rankine: {
-          title: 'Rankine',
+          titleKey: 'tools.temperature-converter.ui.rankine',
           unit: '°R',
           ref: 0,
           toKelvin: convertRankineToKelvin,
           fromKelvin: convertKelvinToRankine,
         },
         delisle: {
-          title: 'Delisle',
+          titleKey: 'tools.temperature-converter.ui.delisle',
           unit: '°De',
           ref: 0,
           toKelvin: convertDelisleToKelvin,
           fromKelvin: convertKelvinToDelisle,
         },
         newton: {
-          title: 'Newton',
+          titleKey: 'tools.temperature-converter.ui.newton',
           unit: '°N',
           ref: 0,
           toKelvin: convertNewtonToKelvin,
           fromKelvin: convertKelvinToNewton,
         },
         reaumur: {
-          title: 'Réaumur',
+          titleKey: 'tools.temperature-converter.ui.reaumur',
           unit: '°Ré',
           ref: 0,
           toKelvin: convertReaumurToKelvin,
           fromKelvin: convertKelvinToReaumur,
         },
         romer: {
-          title: 'Rømer',
+          titleKey: 'tools.temperature-converter.ui.romer',
           unit: '°Rø',
           ref: 0,
           toKelvin: convertRomerToKelvin,
@@ -101,9 +102,9 @@ update('kelvin');
 
 <template>
   <div>
-    <n-input-group v-for="[key, { title, unit }] in Object.entries(units)" :key="key" mb-3 w-full>
+    <n-input-group v-for="[key, { titleKey, unit }] in Object.entries(units)" :key="key" mb-3 w-full>
       <n-input-group-label style="width: 100px">
-        {{ title }}
+        {{ t(titleKey) }}
       </n-input-group-label>
 
       <n-input-number

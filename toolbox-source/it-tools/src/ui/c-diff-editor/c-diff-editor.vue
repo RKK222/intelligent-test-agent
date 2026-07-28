@@ -2,8 +2,16 @@
 import * as monaco from 'monaco-editor';
 import { useStyleStore } from '@/stores/style.store';
 
-const props = withDefaults(defineProps<{ options?: monaco.editor.IDiffEditorOptions }>(), { options: () => ({}) });
-const { options } = toRefs(props);
+const props = withDefaults(defineProps<{
+  options?: monaco.editor.IDiffEditorOptions
+  originalText?: string
+  modifiedText?: string
+}>(), {
+  options: () => ({}),
+  originalText: 'original text',
+  modifiedText: 'modified text',
+});
+const { options, originalText, modifiedText } = toRefs(props);
 
 const editorContainer = ref<HTMLElement | null>(null);
 let editor: monaco.editor.IStandaloneDiffEditor | null = null;
@@ -57,8 +65,8 @@ onMounted(() => {
   });
 
   editor.setModel({
-    original: monaco.editor.createModel('original text', 'txt'),
-    modified: monaco.editor.createModel('modified text', 'txt'),
+    original: monaco.editor.createModel(originalText.value, 'txt'),
+    modified: monaco.editor.createModel(modifiedText.value, 'txt'),
   });
 });
 </script>

@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { useThemeVars } from 'naive-ui';
-import Memo from './git-memo.content.md';
 
 const themeVars = useThemeVars();
+const { t } = useI18n();
 </script>
 
 <template>
   <div>
-    <Memo />
+    <c-markdown :markdown="t('tools.git-memo.ui.content')" />
   </div>
 </template>
 

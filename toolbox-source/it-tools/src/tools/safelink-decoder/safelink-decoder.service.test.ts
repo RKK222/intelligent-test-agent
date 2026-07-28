@@ -14,7 +14,7 @@ describe('safelink-decoder', () => {
       });
       it('throw on not outlook safelink urls', () => {
         expect(() => decodeSafeLinksURL('https://google.com'))
-          .toThrow('Invalid SafeLinks URL provided');
+          .toThrow('INVALID_SAFELINK_URL');
       });
     });
   });

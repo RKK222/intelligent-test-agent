@@ -7,10 +7,21 @@ import { arrayToMarkdownTable, computeAverage, computeVariance } from './benchma
 import DynamicValues from './dynamic-values.vue';
 import { useCopy } from '@/composable/copy';
 
+const { t } = useI18n();
+
+const suiteTitle = (number: number) => t('tools.benchmark-builder.ui.suiteNumber', { number });
+
 const suites = useStorage('benchmark-builder:suites', [
-  { title: 'Suite 1', data: [5, 10] },
-  { title: 'Suite 2', data: [8, 12] },
+  { title: suiteTitle(1), data: [5, 10] },
+  { title: suiteTitle(2), data: [8, 12] },
 ]);
+
+// 仅迁移上游默认名称，保留用户自定义的测试组名称。
+suites.value.forEach((suite, index) => {
+  if (suite.title === `Suite ${index + 1}`) {
+    suite.title = suiteTitle(index + 1);
+  }
+});
 
 const unit = useStorage('benchmark-builder:unit', '');
 
@@ -50,16 +61,16 @@ const results = computed(() => {
 
 const { copy } = useCopy({ createToast: false });
 
-const header = {
-  position: 'Position',
-  title: 'Suite',
-  size: 'Samples',
-  mean: 'Mean',
-  variance: 'Variance',
-};
+const header = computed(() => ({
+  position: t('tools.benchmark-builder.ui.position'),
+  title: t('tools.benchmark-builder.ui.suite'),
+  size: t('tools.benchmark-builder.ui.samples'),
+  mean: t('tools.benchmark-builder.ui.mean'),
+  variance: t('tools.benchmark-builder.ui.variance'),
+}));
 
 function copyAsMarkdown() {
-  copy(arrayToMarkdownTable({ data: results.value, headerMap: header }));
+  copy(arrayToMarkdownTable({ data: results.value, headerMap: header.value }));
 }
 
 function copyAsBulletList() {
@@ -68,7 +79,7 @@ function copyAsBulletList() {
       return [
         ` - ${title}`,
         ...Object.entries(sections).map(
-          ([key, value]) => `    - ${header[key as keyof typeof header] ?? key}: ${value}`,
+          ([key, value]) => `    - ${header.value[key as keyof typeof header.value] ?? key}: ${value}`,
         ),
       ];
     })
@@ -86,13 +97,13 @@ function copyAsBulletList() {
           <c-input-text
             v-model:value="suite.title"
             label-position="left"
-            label="Suite name"
-            placeholder="Suite name..."
+            :label="t('tools.benchmark-builder.ui.suiteName')"
+            :placeholder="t('tools.benchmark-builder.ui.suiteNamePlaceholder')"
             clearable
           />
 
           <n-divider />
-          <n-form-item label="Suite values" :show-feedback="false">
+          <n-form-item :label="t('tools.benchmark-builder.ui.suiteValues')" :show-feedback="false">
             <DynamicValues v-model:values="suite.data" />
           </n-form-item>
         </c-card>
@@ -100,14 +111,14 @@ function copyAsBulletList() {
         <div flex justify-center>
           <c-button v-if="suites.length > 1" variant="text" @click="suites.splice(index, 1)">
             <n-icon :component="Trash" depth="3" mr-2 size="18" />
-            Delete suite
+            {{ t('tools.benchmark-builder.ui.deleteSuite') }}
           </c-button>
           <c-button
             variant="text"
-            @click="suites.splice(index + 1, 0, { data: [0], title: `Suite ${suites.length + 1}` })"
+            @click="suites.splice(index + 1, 0, { data: [0], title: suiteTitle(suites.length + 1) })"
           >
             <n-icon :component="Plus" depth="3" mr-2 size="18" />
-            Add suite
+            {{ t('tools.benchmark-builder.ui.addSuite') }}
           </c-button>
         </div>
       </div>
@@ -117,17 +128,17 @@ function copyAsBulletList() {
   <div style="flex: 0 0 100%">
     <div style="max-width: 600px; margin: 0 auto">
       <div mx-auto max-w-sm flex justify-center gap-3>
-        <c-input-text v-model:value="unit" placeholder="Unit (eg: ms)" label="Unit" label-position="left" mb-4 />
+        <c-input-text v-model:value="unit" :placeholder="t('tools.benchmark-builder.ui.unitPlaceholder')" :label="t('tools.benchmark-builder.ui.unit')" label-position="left" mb-4 />
 
         <c-button
           @click="
             suites = [
-              { title: 'Suite 1', data: [] },
-              { title: 'Suite 2', data: [] },
+              { title: suiteTitle(1), data: [] },
+              { title: suiteTitle(2), data: [] },
             ]
           "
         >
-          Reset suites
+          {{ t('tools.benchmark-builder.ui.resetSuites') }}
         </c-button>
       </div>
 
@@ -135,10 +146,10 @@ function copyAsBulletList() {
 
       <div mt-5 flex justify-center gap-3>
         <c-button @click="copyAsMarkdown()">
-          Copy as markdown table
+          {{ t('tools.benchmark-builder.ui.copyMarkdown') }}
         </c-button>
         <c-button @click="copyAsBulletList()">
-          Copy as bullet list
+          {{ t('tools.benchmark-builder.ui.copyBulletList') }}
         </c-button>
       </div>
     </div>

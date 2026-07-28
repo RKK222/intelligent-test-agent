@@ -1,13 +1,18 @@
 <script setup lang="ts">
 import { useThemeVars } from 'naive-ui';
-import Memo from './regex-memo.content.md';
 
 const themeVars = useThemeVars();
+const { t } = useI18n();
+// Vue I18n 会把正则中的花括号和 Markdown 表格竖线解析为消息语法，渲染前再还原技术符号。
+const content = computed(() => t('tools.regex-memo.ui.content')
+  .split('¦').join('|')
+  .split('⦃').join('{')
+  .split('⦄').join('}'));
 </script>
 
 <template>
   <div>
-    <Memo />
+    <c-markdown :markdown="content" />
   </div>
 </template>
 

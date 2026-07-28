@@ -4,43 +4,44 @@ import { ipv4ToInt, ipv4ToIpv6, isValidIpv4 } from './ipv4-address-converter.ser
 import { useValidation } from '@/composable/validation';
 
 const rawIpAddress = useStorage('ipv4-converter:ip', '192.168.1.1');
+const { t } = useI18n();
 
 const convertedSections = computed(() => {
   const ipInDecimal = ipv4ToInt({ ip: rawIpAddress.value });
 
   return [
     {
-      label: 'Decimal: ',
+      label: t('tools.ipv4-address-converter.ui.decimal'),
       value: String(ipInDecimal),
     },
     {
-      label: 'Hexadecimal: ',
+      label: t('tools.ipv4-address-converter.ui.hexadecimal'),
       value: convertBase({ fromBase: 10, toBase: 16, value: String(ipInDecimal) }).toUpperCase(),
     },
     {
-      label: 'Binary: ',
+      label: t('tools.ipv4-address-converter.ui.binary'),
       value: convertBase({ fromBase: 10, toBase: 2, value: String(ipInDecimal) }),
     },
     {
-      label: 'Ipv6: ',
+      label: t('tools.ipv4-address-converter.ui.ipv6'),
       value: ipv4ToIpv6({ ip: rawIpAddress.value }),
     },
     {
-      label: 'Ipv6 (short): ',
+      label: t('tools.ipv4-address-converter.ui.ipv6Short'),
       value: ipv4ToIpv6({ ip: rawIpAddress.value, prefix: '::ffff:' }),
     },
   ];
 });
 
-const { attrs: validationAttrs } = useValidation({
+const { attrs: validationAttrs } = useValidation<string>({
   source: rawIpAddress,
-  rules: [{ message: 'Invalid ipv4 address', validator: ip => isValidIpv4({ ip }) }],
+  rules: computed(() => [{ message: t('tools.ipv4-address-converter.ui.invalidIpv4'), validator: ip => isValidIpv4({ ip }) }]),
 });
 </script>
 
 <template>
   <div>
-    <c-input-text v-model:value="rawIpAddress" label="The ipv4 address:" placeholder="The ipv4 address..." />
+    <c-input-text v-model:value="rawIpAddress" :label="t('tools.ipv4-address-converter.ui.inputLabel')" :placeholder="t('tools.ipv4-address-converter.ui.inputPlaceholder')" />
 
     <n-divider />
 
@@ -53,7 +54,7 @@ const { attrs: validationAttrs } = useValidation({
       label-align="right"
       mb-2
       :value="validationAttrs.validationStatus === 'error' ? '' : value"
-      placeholder="Set a correct ipv4 address"
+      :placeholder="t('tools.ipv4-address-converter.ui.correctAddress')"
     />
   </div>
 </template>

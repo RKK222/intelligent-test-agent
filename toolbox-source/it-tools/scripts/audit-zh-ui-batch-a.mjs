@@ -55,6 +55,48 @@ const ROUTE_DIRECTORIES = new Map([
   ['keycode-info', 'keycode-info'],
   ['slugify-string', 'slugify-string'],
   ['html-wysiwyg-editor', 'html-wysiwyg-editor'],
+  ['user-agent-parser', 'user-agent-parser'],
+  ['http-status-codes', 'http-status-codes'],
+  ['json-diff', 'json-diff'],
+  ['safelink-decoder', 'safelink-decoder'],
+  ['qrcode-generator', 'qr-code-generator'],
+  ['wifi-qrcode-generator', 'wifi-qr-code-generator'],
+  ['svg-placeholder-generator', 'svg-placeholder-generator'],
+  ['git-memo', 'git-memo'],
+  ['random-port-generator', 'random-port-generator'],
+  ['crontab-generator', 'crontab-generator'],
+  ['json-prettify', 'json-viewer'],
+  ['json-minify', 'json-minify'],
+  ['json-to-csv', 'json-to-csv'],
+  ['sql-prettify', 'sql-prettify'],
+  ['chmod-calculator', 'chmod-calculator'],
+  ['docker-run-to-docker-compose-converter', 'docker-run-to-docker-compose-converter'],
+  ['xml-formatter', 'xml-formatter'],
+  ['yaml-prettify', 'yaml-viewer'],
+  ['email-normalizer', 'email-normalizer'],
+  ['regex-tester', 'regex-tester'],
+  ['regex-memo', 'regex-memo'],
+  ['ipv4-subnet-calculator', 'ipv4-subnet-calculator'],
+  ['ipv4-address-converter', 'ipv4-address-converter'],
+  ['ipv4-range-expander', 'ipv4-range-expander'],
+  ['mac-address-lookup', 'mac-address-lookup'],
+  ['mac-address-generator', 'mac-address-generator'],
+  ['ipv6-ula-generator', 'ipv6-ula-generator'],
+  ['math-evaluator', 'math-evaluator'],
+  ['eta-calculator', 'eta-calculator'],
+  ['percentage-calculator', 'percentage-calculator'],
+  ['chronometer', 'chronometer'],
+  ['temperature-converter', 'temperature-converter'],
+  ['benchmark-builder', 'benchmark-builder'],
+  ['lorem-ipsum-generator', 'lorem-ipsum-generator'],
+  ['text-statistics', 'text-statistics'],
+  ['emoji-picker', 'emoji-picker'],
+  ['string-obfuscator', 'string-obfuscator'],
+  ['text-diff', 'text-diff'],
+  ['numeronym-generator', 'numeronym-generator'],
+  ['ascii-text-drawer', 'ascii-text-drawer'],
+  ['phone-parser-and-formatter', 'phone-parser-and-formatter'],
+  ['iban-validator-and-parser', 'iban-validator-and-parser'],
 ]);
 
 const USER_VISIBLE_ATTRIBUTES = new Set([
@@ -84,12 +126,12 @@ const USER_VISIBLE_PROPERTIES = new Set([
 
 // 这里只放无需汉化、且会真实展示给用户的协议/算法/格式名；普通英文单词不能加入。
 const TECHNICAL_TERMS = new Set([
-  'ace', 'aes', 'api', 'ascii', 'authorization', 'base32', 'base64', 'bcrypt', 'bip39', 'blowfish', 'cmyk', 'css', 'csv', 'des', 'ecdsa', 'excel', 'facebook',
-  'hex', 'hmac', 'hsl', 'html', 'http', 'https', 'hwb', 'id', 'isbn', 'iso', 'javascript', 'jcard', 'js', 'json', 'jwt', 'lch', 'linkedin',
-  'mac', 'markdown', 'md5', 'meta', 'mgf1', 'mime', 'mongo', 'nato', 'objectid', 'og', 'otp', 'p-256', 'p-384', 'p-521', 'passport', 'pdf', 'pem',
+  'ace', 'aes', 'api', 'ascii', 'authorization', 'base32', 'base64', 'bcrypt', 'bip39', 'blowfish', 'bban', 'cidr', 'chmod', 'cmyk', 'compose', 'cpu', 'cron', 'crontab', 'css', 'csv', 'des', 'docker', 'eap', 'ecdsa', 'emoji', 'eta', 'excel', 'facebook', 'feb',
+  'abs', 'apr', 'cos', 'get', 'git', 'hex', 'hmac', 'hsl', 'html', 'http', 'https', 'hwb', 'i18n', 'iban', 'id', 'ietf', 'internationalization', 'ip', 'ipsum', 'ipv4', 'ipv6', 'isbn', 'iso', 'javascript', 'jan', 'jcard', 'js', 'json', 'jwt', 'lch', 'linkedin', 'lorem',
+  'mac', 'mar', 'markdown', 'md5', 'mdn', 'meta', 'mgf1', 'mime', 'mon', 'mongo', 'ms', 'nato', 'numeronym', 'objectid', 'og', 'otp', 'p-256', 'p-384', 'p-521', 'passport', 'pdf', 'pem', 'qr', 'regexplained',
   'rabbit', 'rc4', 'rfc', 'rgb', 'rgba', 'ripemd-160', 'ripemd160', 'rsa', 'rsassa-pkcs1-v1', 'rsassa-pss', 'sha-1', 'sha-2', 'sha-3', 'sha-224', 'sha-256',
   'sha-384', 'sha-512', 'sha1', 'sha3', 'sha224', 'sha256', 'sha384', 'sha512', 'shaken', 'sip', 'slug', 'token', 'toml', 'totp', 'tripledes',
-  'twitter', 'ulid', 'unicode', 'unix', 'url', 'utc', 'utf8', 'uuid', 'w3c', 'wysiwyg', 'xml', 'yaml',
+  'sin', 'spark', 'sqrt', 'sql', 'sqlite', 'ssid', 'sun', 'svg', 'tls', 'twitter', 'ula', 'ulid', 'unicode', 'unix', 'uri', 'url', 'utc', 'utf8', 'uuid', 'voip', 'w3c', 'webdav', 'wep', 'wifi', 'wpa', 'wpa2', 'wysiwyg', 'xml', 'yaml', 'yml',
 ]);
 
 const TECHNICAL_PHRASES = [
@@ -104,6 +146,26 @@ const TECHNICAL_PHRASES = [
   'SIP From',
   'SIP Via',
   'User-Agent',
+  'QR-IBAN',
+  'Microsoft Outlook Safe Links',
+  'Outlook Safe Links',
+  'Safe Links',
+  'Docker Compose',
+  'docker run',
+  'GCP BigQuery',
+  'IBM DB2',
+  'Apache Hive',
+  'MariaDB',
+  'MySQL',
+  'Couchbase N1QL',
+  'Oracle PL/SQL',
+  'PostgreSQL',
+  'Amazon Redshift',
+  'Standard SQL',
+  'SQL Server Transact-SQL',
+  'docker-compose.yml',
+  'E.164',
+  'RFC3966',
 ];
 
 // 示例输入和生成数据按任务约束保持原样；每一项都必须是精确匹配，禁止泛化为英文白名单。
@@ -115,11 +177,59 @@ const EXACT_EXAMPLE_TEXT = new Set([
   '大写字母（ABC…）',
   '小写字母（abc…）',
   '输入 MIME 类型，例如 application/json',
+  '请输入前缀，例如 64:16:7F',
+  '请输入数学表达式，例如 2*sqrt(6)…',
+  '请输入单词，例如“internationalization”',
+  '缩写将在此显示，例如“i18n”',
 ]);
 
 // 服务边界的稳定错误码不会直接展示给用户，只允许逐项精确登记。
 const EXACT_TECHNICAL_TEXT = new Set([
   'INVALID_BINARY_STRING',
+  'INVALID_SAFELINK_URL',
+  'A',
+  'B',
+  'C',
+  'D',
+  'E',
+  'K',
+  '°C',
+  '°F',
+  '°R',
+  '°De',
+  '°N',
+  '°Ré',
+  '°Rø',
+  'u',
+  'g',
+  'o',
+  'X',
+  'Y',
+  'value',
+  'array',
+  'object',
+  'added',
+  'removed',
+  'unchanged',
+  'children-updated',
+  'updated',
+  'null',
+  'i',
+  'm',
+  's',
+  'v',
+  'WPA/WPA2',
+  'WPA2-EAP',
+  '1xx 信息响应',
+  '2xx 成功响应',
+  '3xx 重定向',
+  '4xx 客户端错误',
+  '5xx 服务器错误',
+  'jan,feb,mar,apr ...',
+  'sun,mon ...',
+  '(u)',
+  '(g)',
+  '(o)',
 ]);
 
 const findings = [];
@@ -140,7 +250,11 @@ function englishWords(value) {
   }
 
   // Vue I18n 插值参数不是最终展示文案，先精确移除再判断自然语言英文。
-  const withoutInterpolations = value.replace(/\{[A-Za-z_][A-Za-z0-9_]*\}/g, '');
+  const withoutInterpolations = value
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`[^`]*`/g, '')
+    .replace(/https?:\/\/[^\s)]+/g, '')
+    .replace(/\{[A-Za-z_][A-Za-z0-9_]*\}/g, '');
   const withoutTechnicalPhrases = TECHNICAL_PHRASES.reduce(
     (text, phrase) => text.replaceAll(new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), ''),
     withoutInterpolations,
@@ -428,8 +542,8 @@ async function validateLocales() {
   }
 }
 
-if (ROUTE_DIRECTORIES.size !== 43) {
-  throw new Error(`Task 2B 路由数量必须为 43，实际为 ${ROUTE_DIRECTORIES.size}`);
+if (ROUTE_DIRECTORIES.size !== 85) {
+  throw new Error(`IT-Tools 路由数量必须为 85，实际为 ${ROUTE_DIRECTORIES.size}`);
 }
 
 for (const [route, directory] of ROUTE_DIRECTORIES) {
@@ -443,14 +557,14 @@ await validateLocales();
 findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.kind.localeCompare(b.kind));
 
 if (findings.length > 0) {
-  console.error(`Task 2B 中文 UI 审计失败：发现 ${findings.length} 项。`);
+  console.error(`IT-Tools 中文 UI 审计失败：发现 ${findings.length} 项。`);
   for (const finding of findings) {
     console.error(`${finding.file}:${finding.line} [${finding.kind}] ${finding.value}`);
   }
   process.exitCode = 1;
 }
 else {
-  console.log(`Task 2B 中文 UI 审计通过：43 个路由，${usedLocaleKeys.size} 个已用 locale key。`);
+  console.log(`IT-Tools 中文 UI 审计通过：85 个路由，${usedLocaleKeys.size} 个已用 locale key。`);
   console.log(`技术词白名单（${TECHNICAL_TERMS.size}）：${[...TECHNICAL_TERMS].sort().join(', ')}`);
   console.log(`精确技术文本白名单（${EXACT_TECHNICAL_TEXT.size}）：${[...EXACT_TECHNICAL_TEXT].join(' | ')}`);
   console.log(`示例文本白名单（${EXACT_EXAMPLE_TEXT.size}）：${[...EXACT_EXAMPLE_TEXT].join(' | ')}`);

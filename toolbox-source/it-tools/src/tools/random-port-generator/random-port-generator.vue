@@ -4,8 +4,9 @@ import { computedRefreshable } from '@/composable/computedRefreshable';
 import { useCopy } from '@/composable/copy';
 
 const [port, refreshPort] = computedRefreshable(() => String(generatePort()));
+const { t } = useI18n();
 
-const { copy } = useCopy({ source: port, text: 'Port copied to the clipboard' });
+const { copy } = useCopy({ source: port, text: t('tools.random-port-generator.ui.copied') });
 </script>
 
 <template>
@@ -15,10 +16,10 @@ const { copy } = useCopy({ source: port, text: 'Port copied to the clipboard' })
     </div>
     <div flex justify-center gap-3>
       <c-button @click="copy()">
-        Copy
+        {{ t('common.copy') }}
       </c-button>
       <c-button @click="refreshPort">
-        Refresh
+        {{ t('tools.random-port-generator.ui.refresh') }}
       </c-button>
     </div>
   </c-card>

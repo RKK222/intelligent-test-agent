@@ -8,22 +8,24 @@ import TextareaCopyable from '@/components/TextareaCopyable.vue';
 const dockerRun = ref(
   'docker run -p 80:80 -v /var/run/docker.sock:/tmp/docker.sock:ro --restart always --log-opt max-size=1g nginx',
 );
+const { t } = useI18n();
 
 const conversionResult = computed(() =>
   withDefaultOnError(() => composerize(dockerRun.value.trim()), { yaml: '', messages: [] }),
 );
 const dockerCompose = computed(() => conversionResult.value.yaml);
-const notImplemented = computed(() =>
-  conversionResult.value.messages.filter(msg => msg.type === MessageType.notImplemented).map(msg => msg.value),
-);
-const notComposable = computed(() =>
-  conversionResult.value.messages.filter(msg => msg.type === MessageType.notTranslatable).map(msg => msg.value),
-);
-const errors = computed(() =>
-  conversionResult.value.messages
-    .filter(msg => msg.type === MessageType.errorDuringConversion)
-    .map(msg => msg.value),
-);
+function getOption(message: string) {
+  return message.match(/--[\w-]+(?:\/-[\w])?/)?.[0] ?? t('tools.docker-run-to-docker-compose-converter.ui.unknownOption');
+}
+const notImplemented = computed(() => conversionResult.value.messages
+  .filter(msg => msg.type === MessageType.notImplemented)
+  .map(msg => t('tools.docker-run-to-docker-compose-converter.ui.optionNotImplemented', { option: getOption(msg.value) })));
+const notComposable = computed(() => conversionResult.value.messages
+  .filter(msg => msg.type === MessageType.notTranslatable)
+  .map(msg => t('tools.docker-run-to-docker-compose-converter.ui.optionNotTranslatable', { option: getOption(msg.value) })));
+const errors = computed(() => conversionResult.value.messages
+  .filter(msg => msg.type === MessageType.errorDuringConversion)
+  .map(msg => t('tools.docker-run-to-docker-compose-converter.ui.conversionError', { option: getOption(msg.value) })));
 const dockerComposeBase64 = computed(() => `data:application/yaml;base64,${textToBase64(dockerCompose.value)}`);
 const { download } = useDownloadFileFromBase64({ source: dockerComposeBase64, filename: 'docker-compose.yml' });
 </script>
@@ -32,12 +34,12 @@ const { download } = useDownloadFileFromBase64({ source: dockerComposeBase64, fi
   <div>
     <c-input-text
       v-model:value="dockerRun"
-      label="Your docker run command:"
+      :label="t('tools.docker-run-to-docker-compose-converter.ui.inputLabel')"
       style="font-family: monospace"
       multiline
       raw-text
       monospace
-      placeholder="Your docker run command to convert..."
+      :placeholder="t('tools.docker-run-to-docker-compose-converter.ui.inputPlaceholder')"
       rows="3"
     />
 
@@ -47,12 +49,12 @@ const { download } = useDownloadFileFromBase64({ source: dockerComposeBase64, fi
 
     <div mt-5 flex justify-center>
       <c-button :disabled="dockerCompose === ''" secondary @click="download">
-        Download docker-compose.yml
+        {{ t('tools.docker-run-to-docker-compose-converter.ui.download') }}
       </c-button>
     </div>
 
     <div v-if="notComposable.length > 0">
-      <n-alert title="This options are not translatable to docker-compose" type="info" mt-5>
+      <n-alert :title="t('tools.docker-run-to-docker-compose-converter.ui.notTranslatableTitle')" type="info" mt-5>
         <ul>
           <li v-for="(message, index) of notComposable" :key="index">
             {{ message }}
@@ -63,7 +65,7 @@ const { download } = useDownloadFileFromBase64({ source: dockerComposeBase64, fi
 
     <div v-if="notImplemented.length > 0">
       <n-alert
-        title="This options are not yet implemented and therefore haven't been translated to docker-compose"
+        :title="t('tools.docker-run-to-docker-compose-converter.ui.notImplementedTitle')"
         type="warning"
         mt-5
       >
@@ -76,7 +78,7 @@ const { download } = useDownloadFileFromBase64({ source: dockerComposeBase64, fi
     </div>
 
     <div v-if="errors.length > 0">
-      <n-alert title="The following errors occured" type="error" mt-5>
+      <n-alert :title="t('tools.docker-run-to-docker-compose-converter.ui.errorsTitle')" type="error" mt-5>
         <ul>
           <li v-for="(message, index) of errors" :key="index">
             {{ message }}

@@ -6,29 +6,31 @@ import { useCopy } from '@/composable/copy';
 const getVendorValue = (address: string) => address.trim().replace(/[.:-]/g, '').toUpperCase().substring(0, 6);
 
 const macAddress = ref('20:37:06:12:34:56');
+const { t } = useI18n();
 const details = computed<string | undefined>(() => (db as Record<string, string>)[getVendorValue(macAddress.value)]);
 
-const { copy } = useCopy({ source: () => details.value ?? '', text: 'Vendor info copied to the clipboard' });
+const validationRules = computed(() => macAddressValidationRules.map(rule => ({ ...rule, message: t('tools.mac-address-lookup.ui.invalidMac') })));
+const { copy } = useCopy({ source: () => details.value ?? '', text: t('tools.mac-address-lookup.ui.copied') });
 </script>
 
 <template>
   <div>
     <c-input-text
       v-model:value="macAddress"
-      label="MAC address:"
+      :label="t('tools.mac-address-lookup.ui.inputLabel')"
       size="large"
-      placeholder="Type a MAC address"
+      :placeholder="t('tools.mac-address-lookup.ui.inputPlaceholder')"
       clearable
       autocomplete="off"
       autocorrect="off"
       autocapitalize="off"
       spellcheck="false"
-      :validation-rules="macAddressValidationRules"
+      :validation-rules="validationRules"
       mb-5
     />
 
     <div mb-5px>
-      Vendor info:
+      {{ t('tools.mac-address-lookup.ui.vendorInfo') }}
     </div>
     <c-card mb-5>
       <div v-if="details">
@@ -38,13 +40,13 @@ const { copy } = useCopy({ source: () => details.value ?? '', text: 'Vendor info
       </div>
 
       <div v-else italic op-60>
-        Unknown vendor for this address
+        {{ t('tools.mac-address-lookup.ui.unknownVendor') }}
       </div>
     </c-card>
 
     <div flex justify-center>
       <c-button :disabled="!details" @click="copy()">
-        Copy vendor info
+        {{ t('tools.mac-address-lookup.ui.copyVendor') }}
       </c-button>
     </div>
   </div>

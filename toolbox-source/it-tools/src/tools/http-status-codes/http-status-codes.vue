@@ -3,10 +3,19 @@ import { codesByCategories } from './http-status-codes.constants';
 import { useFuzzySearch } from '@/composable/fuzzySearch';
 
 const search = ref('');
+const { t } = useI18n();
+const localizedCodesByCategories = codesByCategories.map(({ categoryKey, codes }) => ({
+  category: t(categoryKey),
+  codes: codes.map(({ nameKey, descriptionKey, ...code }) => ({
+    ...code,
+    name: t(nameKey),
+    description: t(descriptionKey),
+  })),
+}));
 
 const { searchResult } = useFuzzySearch({
   search,
-  data: codesByCategories.flatMap(({ codes, category }) => codes.map(code => ({ ...code, category }))),
+  data: localizedCodesByCategories.flatMap(({ codes, category }) => codes.map(code => ({ ...code, category }))),
   options: {
     keys: [{ name: 'code', weight: 3 }, { name: 'name', weight: 2 }, 'description', 'category'],
   },
@@ -14,10 +23,10 @@ const { searchResult } = useFuzzySearch({
 
 const codesByCategoryFiltered = computed(() => {
   if (!search.value) {
-    return codesByCategories;
+    return localizedCodesByCategories;
   }
 
-  return [{ category: 'Search results', codes: searchResult.value }];
+  return [{ category: t('tools.http-status-codes.ui.searchResults'), codes: searchResult.value }];
 });
 </script>
 
@@ -25,7 +34,7 @@ const codesByCategoryFiltered = computed(() => {
   <div>
     <c-input-text
       v-model:value="search"
-      placeholder="Search http status..."
+      :placeholder="t('tools.http-status-codes.ui.searchPlaceholder')"
       autofocus raw-text mb-10
     />
 
@@ -39,7 +48,7 @@ const codesByCategoryFiltered = computed(() => {
           {{ code }} {{ name }}
         </div>
         <div op-70>
-          {{ description }} {{ type !== 'HTTP' ? `For ${type}.` : '' }}
+          {{ description }} {{ type !== 'HTTP' ? t('tools.http-status-codes.ui.forProtocol', { type }) : '' }}
         </div>
       </c-card>
     </div>
