@@ -1318,6 +1318,8 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 
 兼容策略：所有表和参数均为向后兼容新增，旧 Java 不访问这些表；回滚应用版本时保留 migration 和历史 cleanup。H2 使用等价时间函数验证可移植 mapper 行为；JSONB、整小时过期/十六进制摘要约束、步骤终态保护、部分唯一索引、完整 Flyway 链及 cleanup 第一写的延迟外键由 PostgreSQL 16 Testcontainers 原样验证。
 
+运行态只通过 `AppSourceMapper.xml` 访问这些关系表，不新增 JDBC SQL。物化/重试事务先对 `code_repositories` 执行 `SELECT FOR UPDATE`，cleanup task 是第一条持久化写；副本完成和 cleanup 完成分别用 generation、服务器、owner、绝对租约 fencing。Runtime Workspace 反查直接按受外键保护的 `runtime_workspace_id` 查询；旧 generation 提升为立即清理时，`makeCleanupDueNow` 只提前 `PENDING/RETRY_WAIT` 的绝对执行时间，不覆盖正在执行或终态任务；清理成功把 replica 单向推进到 `CLEANED`，同步归档 Workspace，并且只在 slot 仍指向该 generation 时清除 active。真实 H2 PostgreSQL 模式集成测试执行行锁、Workspace 反查、到期提前和清理终态 XML；PostgreSQL 16 Testcontainers 还原样执行生产 mapper 的行锁、due scan/提前、双 owner cleanup 租约 fencing 和生产约束。
+
 ### 字段注释原则
 
 - 业务ID字段均标注格式，如：`wks_xxx`、`ses_xxx`、`run_xxx`、`msg_xxx`

@@ -12,6 +12,9 @@ import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
+import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
+import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
+import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.run.ConversationContextStore;
 import com.enterprise.testagent.domain.run.ConversationContextWorkspaceMutation;
 import java.nio.file.Path;
@@ -142,6 +145,25 @@ class WorkspaceApplicationServiceTest {
         Mockito.verify(contextStore).beginWorkspaceMutation(workspaceId);
         Mockito.verify(contextStore).completeWorkspaceMutation(mutation);
         assertThat(repository.saved.getLast()).isEqualTo(resolved);
+    }
+
+    @Test
+    void workspaceWriteAlwaysUsesRealtimeAuthorizerEvenForAppAdmin() {
+        ConversationWorkspaceAccessAuthorizer authorizer =
+                Mockito.mock(ConversationWorkspaceAccessAuthorizer.class);
+        WorkspaceId workspaceId = new WorkspaceId("wrk_app_source");
+        UserId userId = new UserId("usr_revoked");
+        Mockito.doThrow(new PlatformException(ErrorCode.FORBIDDEN, "membership revoked"))
+                .when(authorizer).requireAccess(userId, workspaceId);
+        WorkspaceApplicationService service = new WorkspaceApplicationService(
+                new FakeWorkspaceRepository(), new WorkspaceFileService(),
+                new WorkspaceServerIdentity("server-a"), ManagedWorkspacePathResolver.legacyOnly(),
+                Mockito.mock(ConversationContextStore.class), Mockito.mock(ManagedWorkspaceRepository.class),
+                authorizer);
+
+        assertThatThrownBy(() -> service.requireWorkspaceWriteAccess(workspaceId, userId, true))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
     }
 
     private static final class FakeWorkspaceRepository implements WorkspaceRepository {

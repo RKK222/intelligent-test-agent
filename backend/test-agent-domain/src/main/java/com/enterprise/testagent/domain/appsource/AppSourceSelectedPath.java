@@ -15,14 +15,18 @@ public record AppSourceSelectedPath(String path, AppSourcePathType pathType) {
             throw new IllegalArgumentException("selected path must not be blank");
         }
         String normalizedText = path.trim().replace('\\', '/');
-        Path normalized = Path.of(normalizedText).normalize();
-        String normalizedValue = normalized.toString().replace('\\', '/');
-        if (normalized.isAbsolute()
-                || WINDOWS_ABSOLUTE.matcher(normalizedText).matches()
-                || normalizedValue.equals("..")
-                || normalizedValue.startsWith("../")) {
-            throw new IllegalArgumentException("selected path must stay inside repository");
+        if (".".equals(normalizedText)) {
+            path = ".";
+        } else {
+            Path normalized = Path.of(normalizedText).normalize();
+            String normalizedValue = normalized.toString().replace('\\', '/');
+            if (normalized.isAbsolute()
+                    || WINDOWS_ABSOLUTE.matcher(normalizedText).matches()
+                    || normalizedValue.equals("..")
+                    || normalizedValue.startsWith("../")) {
+                throw new IllegalArgumentException("selected path must stay inside repository");
+            }
+            path = normalizedValue;
         }
-        path = normalizedValue;
     }
 }

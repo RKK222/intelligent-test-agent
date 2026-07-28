@@ -36,7 +36,7 @@
 ## 测试
 
 - 单元测试覆盖 ticket 原子一次消费/过期、Redis 异常及平台 SSO 运行时异常返回自有 503 状态页、Cookie 安全模式、session marker、JIT 幂等/改名、原生入口禁用、参数校验、锁/续租/停止和异常脱敏；真实 Redis 5 容器验证不依赖 `GETDEL`。
-- MySQL 8.4 Testcontainers 覆盖 V1-V5 全新初始化、重复 migration、一个 executor 组、七条任务和无默认管理员；V5 把分发 Cron 更新为每分钟，任务继续固定使用 ROUND、DISCARD_LATER、DO_NOTHING、GLOBAL_MUTEX 和零 XXL 重试。
+- MySQL 8.4 Testcontainers 覆盖 V1-V6 全新初始化、重复 migration、一个 executor 组、八条任务和无默认管理员；V5 把夜间分发 Cron 更新为每分钟，V6 注册每分钟 `workspace-management.app-source-cleanup`，任务继续固定使用 ROUND、DISCARD_LATER、DO_NOTHING、GLOBAL_MUTEX 和零 XXL 重试。
 - `DefaultXxlJobAdminContextLauncherTest` 启动真实 Servlet/Tomcat 子上下文，验证 Flyway 先于 scheduler、原生登录 403、表单 SSO/JIT、安全 Cookie、上游 AdminLTE 与平台嵌入样式资源可访问，以及两个先注册节点在另一 Admin 新增第三节点后仍保留于共享 MySQL registry。
 - endpoint/readiness/lifecycle 测试验证 advertised IPv4/DNS 地址派生、本机 Admin context path 规整、非法监听地址安全拒绝、非 200 不启动、恢复后只启动一次，以及 Spring 自动装配使用派生地址且不会提前创建 executor 注册线程。
 - `TestAgentRuntimePropertiesBindingTest` 验证上游通用 `spring.datasource.*` 不会进入平台主上下文，launcher 集成测试同时验证重定位后的上游默认项仍在 Admin 子上下文生效。

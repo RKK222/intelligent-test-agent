@@ -64,7 +64,8 @@ Admin 响应固定设置 `Content-Security-Policy: frame-ancestors 'self'` 和 `
 - `V3` 新增自动注册执行器组 `test-agent-backend` 和首批六个周期任务。
 - `V4` 注册夜间数据库分发任务 `opencode-runtime.night-execution-dispatch`。
 - `V5` 把夜间数据库分发任务的 Cron 调整为每分钟，以支持超级管理员精确分钟测试定时；其它执行策略保持不变。
-- 后续新增任务必须新建 `V6`、`V7` 等版本 SQL，按 `platform_task_key` 插入；禁止启动时 upsert/覆盖页面已调整的启停或 Cron。
+- `V6` 注册每分钟应用源码到期清理唤醒任务 `workspace-management.app-source-cleanup`；XXL 只取得全局锁并广播空 payload，各 Java 再按本机服务器 ID 认领 PostgreSQL cleanup 租约。
+- 后续新增任务必须新建 `V7`、`V8` 等版本 SQL，按 `platform_task_key` 插入；禁止启动时 upsert/覆盖页面已调整的启停或 Cron。
 
 旧 PostgreSQL 的任务定义和运行历史只做保留，不复制到 MySQL，也不再被 runner 调度。短暂停机升级 migration 将旧夜间 `PENDING/RUNNING/STOPPING USER_PLAN` 全部标记为 `SKIPPED`，避免 runner 删除后残留永久活动记录；不删除历史审计，新夜间任务只写 `night_execution_tasks`。
 
@@ -99,6 +100,9 @@ Admin 响应固定设置 `Content-Security-Policy: frame-ancestors 'self'` 和 `
 | `opencode-runtime.terminal-projection-retry` | `0/5 * * * * ? *` | 30 秒 |
 | `opencode-runtime.side-question-orphan-cleanup` | `0 0/5 * * * ? *` | 5 分钟 |
 | `scheduler.run-retention-cleanup` | `0 0 8 * * ? *` | 5 分钟 |
+| `workspace-management.app-source-cleanup` | `0 0/1 * * * ? *` | 1 分钟 |
+
+应用源码清理采用 `GLOBAL_MUTEX` 只避免多个 XXL executor 重复广播；该锁不承担 Linux 服务器亲和或持久化执行保证。收到 `app-source.cleanup-requested` 的每台 Java 只扫描当前 `linuxServerId` 的到期任务，并以数据库绝对租约和本机文件锁执行；广播丢失、Java 重启或服务器离线不会丢任务，下一轮或恢复上线后继续认领。
 
 JVM 和 XXL 统一使用 `Asia/Shanghai`。运行记录清理在北京时间 08:00 执行，对应原 UTC 00:00；XXL 日志保留 30 天，旧 PostgreSQL scheduler 历史仍由任务清理 7 天。
 

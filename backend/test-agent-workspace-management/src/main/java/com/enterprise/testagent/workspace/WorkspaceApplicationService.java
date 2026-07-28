@@ -6,6 +6,7 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.workspace.Workspace;
+import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
@@ -42,6 +43,7 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
     private final ManagedWorkspacePathResolver pathResolver;
     private final ConversationContextStore conversationContextStore;
     private final ManagedWorkspaceRepository managedWorkspaceRepository;
+    private final ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer;
 
     /**
      * 构造 Workspace 应用服务，注入领域 Repository 端口和文件服务，避免 Controller 直接访问底层资源。
@@ -53,7 +55,8 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
             WorkspaceServerIdentity serverIdentity,
             ManagedWorkspacePathResolver pathResolver,
             ConversationContextStore conversationContextStore,
-            ManagedWorkspaceRepository managedWorkspaceRepository) {
+            ManagedWorkspaceRepository managedWorkspaceRepository,
+            ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.fileService = Objects.requireNonNull(fileService, "fileService must not be null");
         this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
@@ -64,6 +67,9 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
         this.managedWorkspaceRepository = Objects.requireNonNull(
                 managedWorkspaceRepository,
                 "managedWorkspaceRepository must not be null");
+        this.workspaceAccessAuthorizer = Objects.requireNonNull(
+                workspaceAccessAuthorizer,
+                "workspaceAccessAuthorizer must not be null");
     }
 
     public WorkspaceApplicationService(
@@ -77,6 +83,7 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
         this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
         this.conversationContextStore = null;
         this.managedWorkspaceRepository = null;
+        this.workspaceAccessAuthorizer = null;
     }
 
     /** 兼容带会话上下文的测试/嵌入式构造路径。 */
@@ -92,6 +99,7 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
         this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
         this.conversationContextStore = conversationContextStore;
         this.managedWorkspaceRepository = null;
+        this.workspaceAccessAuthorizer = null;
     }
 
     /**
@@ -116,6 +124,10 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
      * 应用版本副本是发布端只读输入，仅应用管理员可通过显式管理流程修改。
      */
     public void requireWorkspaceWriteAccess(WorkspaceId workspaceId, UserId userId, boolean appAdmin) {
+        if (workspaceAccessAuthorizer != null) {
+            // app-source PERSONAL/TEAM 的 owner/member 规则由同一实时授权器完成，SUPER_ADMIN 也不绕过。
+            workspaceAccessAuthorizer.requireAccess(userId, workspaceId);
+        }
         if (managedWorkspaceRepository == null) {
             return;
         }

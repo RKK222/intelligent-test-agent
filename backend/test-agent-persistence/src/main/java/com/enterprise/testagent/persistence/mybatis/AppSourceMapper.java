@@ -16,6 +16,8 @@ import org.apache.ibatis.annotations.Param;
 @Mapper
 public interface AppSourceMapper {
 
+    String lockRepositoryForAppSource(@Param("repositoryId") String repositoryId);
+
     boolean hasRepositoryHistory(@Param("repositoryId") String repositoryId);
 
     SlotRow findSlot(@Param("repositoryId") String repositoryId);
@@ -48,6 +50,8 @@ public interface AppSourceMapper {
     List<ReplicaRow> findReplicas(
             @Param("repositoryId") String repositoryId, @Param("generation") long generation);
 
+    ReplicaRow findReplicaByRuntimeWorkspaceId(@Param("runtimeWorkspaceId") String runtimeWorkspaceId);
+
     int insertReplicaIfAbsent(@Param("row") ReplicaRow row);
 
     int claimReplica(
@@ -61,6 +65,12 @@ public interface AppSourceMapper {
     int updateReplicaIfLease(
             @Param("row") ReplicaRow row,
             @Param("expectedLeaseOwner") String expectedLeaseOwner,
+            @Param("now") Instant now);
+
+    int markReplicaCleaned(
+            @Param("repositoryId") String repositoryId,
+            @Param("generation") long generation,
+            @Param("linuxServerId") String linuxServerId,
             @Param("now") Instant now);
 
     OperationRow findOperation(@Param("operationId") String operationId);
@@ -114,6 +124,11 @@ public interface AppSourceMapper {
             @Param("repositoryId") String repositoryId,
             @Param("generation") long generation,
             @Param("linuxServerId") String linuxServerId);
+
+    int makeCleanupDueNow(
+            @Param("repositoryId") String repositoryId,
+            @Param("generation") long generation,
+            @Param("now") Instant now);
 
     RecentRow findRecentSelection(@Param("userId") String userId);
 

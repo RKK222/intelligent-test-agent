@@ -24,6 +24,7 @@ import com.enterprise.testagent.domain.configuration.ApplicationId;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import java.time.Instant;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -127,6 +128,12 @@ class MyBatisAppSourceRepositoryIntegrationTest {
     }
 
     @Test
+    void repositoryLockUsesTheRealMyBatisSelectForUpdate() {
+        assertThat(repository.lockRepositoryForAppSource(REPOSITORY_ID)).isTrue();
+        assertThat(repository.lockRepositoryForAppSource(new CodeRepositoryId("repo_missing"))).isFalse();
+    }
+
+    @Test
     void snapshotSelectionRoundTripsAndStatusUpdateUsesExpectedState() {
         repository.insertSlotIfAbsent(slot(null, 0L, NOW));
         AppSourceSnapshot snapshot = snapshot("op-download", AppSourceSnapshotStatus.PENDING);
@@ -197,6 +204,29 @@ class MyBatisAppSourceRepositoryIntegrationTest {
     }
 
     @Test
+    void runtimeWorkspaceLookupAndCleanupStateUseTheRealMyBatisXml() {
+        repository.insertSlotIfAbsent(slot(null, 0L, NOW));
+        repository.saveSnapshot(snapshot("op-download", AppSourceSnapshotStatus.PENDING));
+        AppSourceReplica ready = new AppSourceReplica(
+                REPOSITORY_ID, 1L, SERVER_ID, new WorkspaceId("wrk_app_source"), AppSourceReplicaStatus.READY,
+                null, null, 1, null, null, null, NOW, NOW);
+        assertThat(repository.insertReplicaIfAbsent(ready)).isTrue();
+
+        assertThat(repository.findReplicaByRuntimeWorkspaceId("wrk_app_source")).contains(ready);
+        assertThat(repository.findReplicaByRuntimeWorkspaceId("wrk_missing")).isEmpty();
+        jdbcClient.sql("update app_source_replicas set status = 'PENDING', runtime_workspace_id = null "
+                        + "where repository_id = :repositoryId and generation = 1 and linux_server_id = :serverId")
+                .param("repositoryId", REPOSITORY_ID.value()).param("serverId", SERVER_ID.value()).update();
+        assertThat(repository.markReplicaCleaned(REPOSITORY_ID, 1L, SERVER_ID, NOW.plusSeconds(1))).isTrue();
+        assertThat(repository.findReplica(REPOSITORY_ID, 1L, SERVER_ID)).hasValueSatisfying(cleaned -> {
+            assertThat(cleaned.status()).isEqualTo(AppSourceReplicaStatus.CLEANED);
+            assertThat(cleaned.runtimeWorkspaceId()).isNull();
+            assertThat(cleaned.updatedAt()).isEqualTo(NOW.plusSeconds(1));
+        });
+        assertThat(repository.markReplicaCleaned(REPOSITORY_ID, 1L, SERVER_ID, NOW.plusSeconds(2))).isFalse();
+    }
+
+    @Test
     void operationStepsRecentSelectionAndHistoryUseStableKeys() {
         repository.insertSlotIfAbsent(slot(null, 0L, NOW));
         repository.saveSnapshot(snapshot("op-download", AppSourceSnapshotStatus.PENDING));
@@ -253,8 +283,13 @@ class MyBatisAppSourceRepositoryIntegrationTest {
 
         assertThat(repository.findCleanupTasks(REPOSITORY_ID, 1L, SERVER_ID))
                 .containsExactly(cleanupTask());
-        assertThat(repository.findDueCleanupTasks(SERVER_ID, NOW.plusSeconds(10), 10))
-                .containsExactly(cleanupTask());
+        assertThat(repository.findDueCleanupTasks(SERVER_ID, NOW, 10)).isEmpty();
+        assertThat(repository.makeCleanupDueNow(REPOSITORY_ID, 1L, NOW)).isOne();
+        assertThat(repository.findDueCleanupTasks(SERVER_ID, NOW, 10)).singleElement().satisfies(due -> {
+            assertThat(due.cleanupTaskId()).isEqualTo("cleanup-1");
+            assertThat(due.deleteAt()).isEqualTo(NOW);
+            assertThat(due.nextRetryAt()).isEqualTo(NOW);
+        });
         assertThat(repository.claimCleanupTask(
                 "cleanup-1", "cleaner-a", NOW.plusSeconds(40), NOW.plusSeconds(10))).isPresent();
         assertThat(repository.completeCleanupTask(
@@ -279,6 +314,10 @@ class MyBatisAppSourceRepositoryIntegrationTest {
                         + "last_heartbeat_at, trace_id, created_at, updated_at) "
                         + "values (:serverId, 'Server A', 'ONLINE', '{}', :now, 'trace-server-a', :now, :now)")
                 .param("serverId", SERVER_ID.value()).param("now", NOW).update();
+        jdbcClient.sql("insert into workspaces(workspace_id, name, root_path, status, trace_id, created_at, updated_at) "
+                        + "values ('wrk_app_source', 'appsource:source-repo', '/tmp/appsource/source-repo', "
+                        + "'ACTIVE', 'trace-app-source-workspace', :now, :now)")
+                .param("now", NOW).update();
     }
 
     private AppSourceRepositorySlot slot(Long activeGeneration, long lockVersion, Instant updatedAt) {

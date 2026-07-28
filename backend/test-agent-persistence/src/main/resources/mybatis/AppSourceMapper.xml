@@ -3,6 +3,11 @@
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.enterprise.testagent.persistence.mybatis.AppSourceMapper">
+
+    <!-- app-source 受理先锁既有代码库事实行；SELECT FOR UPDATE 不属于持久化写。 -->
+    <select id="lockRepositoryForAppSource" resultType="string">
+        select repository_id from code_repositories where repository_id = #{repositoryId} for update
+    </select>
     <resultMap id="SlotMap" type="com.enterprise.testagent.persistence.mybatis.AppSourceRows$SlotRow">
         <constructor>
             <arg column="repository_id" javaType="java.lang.String"/>
@@ -191,6 +196,10 @@
         select <include refid="ReplicaColumns"/> from app_source_replicas
         where repository_id = #{repositoryId} and generation = #{generation} order by linux_server_id
     </select>
+    <select id="findReplicaByRuntimeWorkspaceId" resultMap="ReplicaMap">
+        select <include refid="ReplicaColumns"/> from app_source_replicas
+        where runtime_workspace_id = #{runtimeWorkspaceId}
+    </select>
     <insert id="insertReplicaIfAbsent" databaseId="postgresql">
         insert into app_source_replicas(<include refid="ReplicaColumns"/>) values (
             #{row.repositoryId}, #{row.generation}, #{row.linuxServerId}, #{row.runtimeWorkspaceId}, #{row.status},
@@ -227,6 +236,14 @@
         where repository_id = #{row.repositoryId} and generation = #{row.generation}
           and linux_server_id = #{row.linuxServerId} and status = 'RUNNING'
           and lease_owner = #{expectedLeaseOwner} and lease_until &gt; #{now}
+    </update>
+    <update id="markReplicaCleaned">
+        update app_source_replicas set status = 'CLEANED', lease_owner = null, lease_until = null,
+            next_retry_at = null, safe_error_code = null, safe_error_message = null, updated_at = #{now}
+        where repository_id = #{repositoryId} and generation = #{generation}
+          and linux_server_id = #{linuxServerId}
+          and (status in ('PENDING', 'READY', 'FAILED', 'STALE', 'CLEANUP_PENDING')
+            or (status = 'RUNNING' and (lease_until is null or lease_until &lt;= #{now})))
     </update>
 
     <select id="findOperation" resultMap="OperationMap">
@@ -348,6 +365,14 @@
         where repository_id = #{repositoryId} and generation = #{generation} and linux_server_id = #{linuxServerId}
         order by cleanup_task_id
     </select>
+    <update id="makeCleanupDueNow">
+        update app_source_cleanup_tasks
+        set delete_at = case when delete_at &lt; #{now} then delete_at else #{now} end,
+            next_retry_at = case when next_retry_at is null or next_retry_at &gt; #{now} then #{now} else next_retry_at end,
+            updated_at = #{now}
+        where repository_id = #{repositoryId} and generation = #{generation}
+          and status in ('PENDING', 'RETRY_WAIT')
+    </update>
 
     <select id="findRecentSelection" resultMap="RecentMap">
         select user_id, app_id, repository_id, generation, updated_at

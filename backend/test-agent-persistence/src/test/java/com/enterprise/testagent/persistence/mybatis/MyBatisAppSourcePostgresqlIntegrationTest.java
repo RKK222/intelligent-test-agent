@@ -11,6 +11,8 @@ import com.enterprise.testagent.domain.appsource.AppSourceOperationStep;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationType;
 import com.enterprise.testagent.domain.appsource.AppSourcePathType;
 import com.enterprise.testagent.domain.appsource.AppSourcePurpose;
+import com.enterprise.testagent.domain.appsource.AppSourceReplica;
+import com.enterprise.testagent.domain.appsource.AppSourceReplicaStatus;
 import com.enterprise.testagent.domain.appsource.AppSourceRepositorySlot;
 import com.enterprise.testagent.domain.appsource.AppSourceSelectedPath;
 import com.enterprise.testagent.domain.appsource.AppSourceSnapshot;
@@ -75,6 +77,9 @@ class MyBatisAppSourcePostgresqlIntegrationTest {
 
     @Test
     void cleanupMayBeInsertedBeforeDeferredParentsAndStepsKeepScopeUniqueness() {
+        Boolean repositoryLocked = transactionTemplate.execute(
+                ignored -> repository.lockRepositoryForAppSource(REPOSITORY_ID));
+        assertThat(repositoryLocked).isTrue();
         assertThat(repository.insertSlotIfAbsent(slot())).isTrue();
         transactionTemplate.executeWithoutResult(transactionStatus -> {
             // 业务事务第一写先落 cleanup；operation/snapshot 在同一事务稍后补齐，提交时才校验延迟外键。
@@ -84,6 +89,23 @@ class MyBatisAppSourcePostgresqlIntegrationTest {
         });
 
         assertThat(repository.findCleanupTasks(REPOSITORY_ID, 1L, SERVER_ID)).containsExactly(cleanup());
+        assertThat(repository.insertReplicaIfAbsent(new AppSourceReplica(
+                REPOSITORY_ID, 1L, SERVER_ID, null, AppSourceReplicaStatus.PENDING,
+                null, null, 0, null, null, null, NOW, NOW))).isTrue();
+        assertThat(repository.markReplicaCleaned(REPOSITORY_ID, 1L, SERVER_ID, NOW.plusSeconds(1))).isTrue();
+        assertThat(repository.findReplica(REPOSITORY_ID, 1L, SERVER_ID))
+                .hasValueSatisfying(replica -> assertThat(replica.status()).isEqualTo(AppSourceReplicaStatus.CLEANED));
+        assertThat(repository.findDueCleanupTasks(SERVER_ID, NOW, 10)).isEmpty();
+        assertThat(repository.makeCleanupDueNow(REPOSITORY_ID, 1L, NOW)).isOne();
+        assertThat(repository.findDueCleanupTasks(SERVER_ID, NOW, 10)).singleElement().satisfies(due -> {
+            assertThat(due.cleanupTaskId()).isEqualTo("cleanup-app-source-pg");
+            assertThat(due.deleteAt()).isEqualTo(NOW);
+            assertThat(due.nextRetryAt()).isEqualTo(NOW);
+        });
+        assertThat(repository.claimCleanupTask(
+                "cleanup-app-source-pg", "cleaner-pg-a", NOW.plusSeconds(30), NOW)).isPresent();
+        assertThat(repository.claimCleanupTask(
+                "cleanup-app-source-pg", "cleaner-pg-b", NOW.plusSeconds(30), NOW)).isEmpty();
         assertThat(repository.upsertStep(step("step-global-a", AppSourceStepStatus.PENDING))).isTrue();
         assertThat(repository.upsertStep(step("step-global-a", AppSourceStepStatus.RUNNING))).isTrue();
         assertThat(repository.upsertStep(step("step-global-a", AppSourceStepStatus.SUCCEEDED))).isTrue();

@@ -36,6 +36,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,6 +52,7 @@ public class MyBatisAppSourceRepository implements AppSourceRepository {
     private final AppSourceMapper mapper;
     private final ObjectMapper objectMapper;
 
+    @Autowired
     public MyBatisAppSourceRepository(AppSourceMapper mapper) {
         this(mapper, new ObjectMapper());
     }
@@ -58,6 +60,11 @@ public class MyBatisAppSourceRepository implements AppSourceRepository {
     MyBatisAppSourceRepository(AppSourceMapper mapper, ObjectMapper objectMapper) {
         this.mapper = mapper;
         this.objectMapper = objectMapper;
+    }
+
+    @Override
+    public boolean lockRepositoryForAppSource(CodeRepositoryId repositoryId) {
+        return repositoryId.value().equals(mapper.lockRepositoryForAppSource(repositoryId.value()));
     }
 
     @Override
@@ -136,6 +143,11 @@ public class MyBatisAppSourceRepository implements AppSourceRepository {
     }
 
     @Override
+    public Optional<AppSourceReplica> findReplicaByRuntimeWorkspaceId(String runtimeWorkspaceId) {
+        return Optional.ofNullable(mapper.findReplicaByRuntimeWorkspaceId(runtimeWorkspaceId)).map(this::toReplica);
+    }
+
+    @Override
     public boolean insertReplicaIfAbsent(AppSourceReplica replica) {
         return mapper.insertReplicaIfAbsent(toRow(replica)) == 1;
     }
@@ -161,6 +173,15 @@ public class MyBatisAppSourceRepository implements AppSourceRepository {
             throw new IllegalArgumentException("invalid app-source replica status transition");
         }
         return mapper.updateReplicaIfLease(toRow(replica), expectedLeaseOwner, now) == 1;
+    }
+
+    @Override
+    public boolean markReplicaCleaned(
+            CodeRepositoryId repositoryId,
+            long generation,
+            LinuxServerId linuxServerId,
+            Instant now) {
+        return mapper.markReplicaCleaned(repositoryId.value(), generation, linuxServerId.value(), now) == 1;
     }
 
     @Override
@@ -256,6 +277,11 @@ public class MyBatisAppSourceRepository implements AppSourceRepository {
         return mapper.findCleanupTasks(repositoryId.value(), generation, linuxServerId.value()).stream()
                 .map(this::toCleanup)
                 .toList();
+    }
+
+    @Override
+    public int makeCleanupDueNow(CodeRepositoryId repositoryId, long generation, Instant now) {
+        return mapper.makeCleanupDueNow(repositoryId.value(), generation, now);
     }
 
     @Override

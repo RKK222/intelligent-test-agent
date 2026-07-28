@@ -119,7 +119,7 @@ Token 校验流程：
 2. Agent 配置文件必须通过 `agent-config/file-ws-route` 按 `scope/workspaceId/worktreeId/linuxServerId` 解析目标后端；公共 worktree 使用落库 `linuxServerId`，公共直接模式必须由前端传入已初始化公共配置服务器 ID。
 3. ticket 只能通过用户登录态创建，短期过期、一次性消费，并绑定 workspace、目标服务器、当前 agent 服务器、模式、Agent 配置 scope/worktree、traceId 和是否 `SUPER_ADMIN`；不得把长期 Bearer token 放入 WebSocket URL。
 4. WebSocket upgrade 必须校验 Origin 白名单、ticket 有效性和 ticket 模式；ticket 消费后无论连接成功与否都不能重复使用。
-5. 所有 `workspace.*` 操作必须绑定 ticket workspace，路径必须归一化在 workspace root 内；`rename` 只允许同一父目录内的普通文件或目录改名，目录树删除不跟随符号链接并拒绝根目录和任意层级 `.git`。`workspace.view.list/read/read.chunk` 的 locator 只能表达逻辑来源，后端必须从当前工作区最新 JSONC 重建允许挂载，重新校验当前应用关联、`APPLICATION_ASSET_REPOSITORY`、总体及本机副本 READY、当前平台 `OPENCODE_REFERENCES_DIR`、SDD 根目录白名单和路径安全，禁止接收物理路径或 repositoryId。引用内容只能读取，单引用错误以不含物理路径的局部 warning 返回。渐进读取每段都必须重新校验 ticket、成员关系、逻辑 locator 和文件快照，不能把首次解析出的物理路径保存在客户端。
+5. 所有 `workspace.*` 操作必须绑定 ticket workspace，路径必须归一化在 workspace root 内；`rename` 只允许同一父目录内的普通文件或目录改名，目录树删除不跟随符号链接并拒绝根目录和任意层级 `.git`。应用源码 Runtime Workspace 还必须在每条 RPC 实时复核 enabled 应用、当前成员、`APPLICATION_CODE_REPOSITORY` 关联、slot active generation、snapshot 未过期和本机 READY replica；`SUPER_ADMIN` 不旁路这些条件。固定索引 `.testagent-appsource-index.json` 不得出现在列表/搜索，也不得通过读取、分片、写入、上传、复制、移动、重命名、状态或删除访问。`workspace.view.list/read/read.chunk` 的 locator 只能表达逻辑来源，后端必须从当前工作区最新 JSONC 重建允许挂载，重新校验当前应用关联、`APPLICATION_ASSET_REPOSITORY`、总体及本机副本 READY、当前平台 `OPENCODE_REFERENCES_DIR`、SDD 根目录白名单和路径安全，禁止接收物理路径或 repositoryId。引用内容只能读取，单引用错误以不含物理路径的局部 warning 返回。渐进读取每段都必须重新校验 ticket、成员关系、逻辑 locator 和文件快照，不能把首次解析出的物理路径保存在客户端。
 6. `agent-config.list/read/read.chunk/write/upload.*/rename/delete` 必须绑定 ticket scope、workspaceId 和 worktreeId；读取允许登录用户，公共配置写入、上传、重命名和删除校验 `SUPER_ADMIN`，应用配置对应变更校验 `APP_ADMIN`（`SUPER_ADMIN` 继承）。分片上传的 begin/chunk/complete/abort 必须在同一 WebSocket 连接内复用 workspace-management 的分片顺序、声明大小、不覆盖和越界校验，每个分片继续复核 ticket 绑定和权限；应用上传、改名、复制、移动和删除必须统一限制在当前配置根对应的 `.opencode/**` 命名空间，不得枚举 agent/skill/tool 等子目录形成权限缺口。上传总大小不设应用层上限，但单分片必须有界，完成前只能写隐藏临时文件，取消、失败和连接关闭必须清理；改名只允许同目录文件，删除文件或目录树必须复用 root 归一化、根目录/`.git` 保护与不跟随符号链接语义。
 7. 应用 `.opencode/**` 与普通文件共用版本个人 worktree 时，个人 worktree的 `commit/publish` HTTP 入口也必须对规范化后的整个配置命名空间执行 `APP_ADMIN` 校验；不能只依赖前端 Tab 或 Agent 文件 WebSocket 权限。`spec/**` 禁止发布的服务层规则继续对所有角色生效。
 8. `directory.list` 只允许 `directory-picker` ticket；跨服务器目录浏览仅 `SUPER_ADMIN` 可创建 ticket，普通用户只能浏览当前 agent 同服务器目录。
@@ -134,6 +134,7 @@ Token 校验流程：
 2. Redis pub/sub 仅作为同一可信后端集群内的实时增强通道；生产必须使用受控内网 Redis，并通过外部配置开启 `test-agent.server-broadcast.enabled=true`，不得在代码或示例中硬编码 Redis 密码或生产地址。
 3. 消费端必须跳过本服务器来源事件，并在业务层做幂等校验；广播失败不能影响本机已完成的 Git/数据库主流程，漏消息由数据库目标 commit 与本机补偿扫描恢复。
 4. 日志只记录 `eventId`、`type`、`traceId`、`versionId`、`linuxServerId` 和错误码等低敏字段，不能输出私钥、token、完整路径中的敏感片段或原始第三方错误详情。
+5. 应用源码 `app-source.replica-requested` 只允许 repositoryId、generation 和目标服务器 ID，`app-source.cleanup-requested` 使用空 payload；SSH 私钥只在目标 worker 的 Git 命令期从操作人加密配置解析，禁止写入 snapshot、operation、step、广播、索引、错误响应或日志。广播只负责唤醒，数据库租约和本机有界 dispatcher 才是执行与幂等事实源。
 
 ## PTY WebSocket 安全例外
 

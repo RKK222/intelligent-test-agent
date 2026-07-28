@@ -38,6 +38,7 @@ public class WorkspaceFileService {
 
     private static final String FILE_TARGET_EXISTS_MESSAGE = "目标文件已存在";
     private static final String MOVE_TARGET_EXISTS_MESSAGE = "目标文件或目录已存在";
+    private static final String APP_SOURCE_INDEX_FILE_NAME = ".testagent-appsource-index.json";
     private static final String UPLOAD_TEMP_PREFIX = ".test-agent-upload-";
     private static final String UPLOAD_TEMP_SUFFIX = ".part";
     private static final int DEFAULT_UPLOAD_CHUNK_BYTES = 256 * 1024;
@@ -663,6 +664,12 @@ public class WorkspaceFileService {
                     "文件名无效",
                     Map.of("path", safePath(relativePath), "name", normalizedName));
         }
+        if (APP_SOURCE_INDEX_FILE_NAME.equals(normalizedName)) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "文件名属于平台源码索引",
+                    Map.of("path", safePath(relativePath)));
+        }
 
         Path source = resolveInsideRoot(rootPath, relativePath);
         if (!Files.exists(source)) {
@@ -805,7 +812,7 @@ public class WorkspaceFileService {
             throw new PlatformException(ErrorCode.NOT_FOUND, "目录不存在", Map.of("path", safePath(relativePath)));
         }
         try (var stream = Files.list(directory)) {
-            return stream.filter(path -> !isUploadTemporaryFile(path))
+            return stream.filter(path -> !isPlatformHiddenFile(path))
                     .sorted(Comparator.comparing(path -> path.getFileName().toString()))
                     .limit(limit)
                     .map(path -> entry(root, path))
@@ -842,6 +849,12 @@ public class WorkspaceFileService {
             throw new PlatformException(
                     ErrorCode.FORBIDDEN,
                     "文件路径属于平台上传临时区",
+                    Map.of("path", safePath(relativePath)));
+        }
+        if (containsAppSourceIndexSegment(normalizedPath)) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "文件路径属于平台源码索引",
                     Map.of("path", safePath(relativePath)));
         }
         Path target = root.resolve(normalizedPath).normalize();
@@ -1020,6 +1033,21 @@ public class WorkspaceFileService {
         return path.getFileName() != null && isUploadTemporaryName(path.getFileName().toString());
     }
 
+    /** 应用源码索引由平台维护，文件 RPC 的任意路径层级均不得将其暴露给用户。 */
+    private boolean containsAppSourceIndexSegment(String relativePath) {
+        for (String segment : relativePath.split("/")) {
+            if (APP_SOURCE_INDEX_FILE_NAME.equals(segment)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isPlatformHiddenFile(Path path) {
+        return isUploadTemporaryFile(path)
+                || path.getFileName() != null && APP_SOURCE_INDEX_FILE_NAME.equals(path.getFileName().toString());
+    }
+
     private boolean isUploadTemporaryName(String name) {
         return name.startsWith(UPLOAD_TEMP_PREFIX) && name.endsWith(UPLOAD_TEMP_SUFFIX);
     }
@@ -1080,7 +1108,7 @@ public class WorkspaceFileService {
                     return;
                 }
                 String name = path.getFileName().toString();
-                if (isUploadTemporaryFile(path)) {
+                if (isPlatformHiddenFile(path)) {
                     return;
                 }
                 // 跳过黑名单目录

@@ -10,6 +10,9 @@ import java.util.Optional;
 /** 应用源码快照持久化端口；关系型实现必须通过 MyBatis XML 并保留 CAS/fencing 条件。 */
 public interface AppSourceRepository extends AppSourceRepositoryHistory {
 
+    /** 锁定代码库事实行；这是物化事务中的只读加锁，不得产生持久化写。 */
+    boolean lockRepositoryForAppSource(CodeRepositoryId repositoryId);
+
     Optional<AppSourceRepositorySlot> findSlot(CodeRepositoryId repositoryId);
 
     Optional<AppSourceRepositorySlot> findSlotForUpdate(CodeRepositoryId repositoryId);
@@ -37,6 +40,9 @@ public interface AppSourceRepository extends AppSourceRepositoryHistory {
 
     List<AppSourceReplica> findReplicas(CodeRepositoryId repositoryId, long generation);
 
+    /** 按 generation 专属 Runtime Workspace 反查副本，供会话和文件入口实时授权。 */
+    Optional<AppSourceReplica> findReplicaByRuntimeWorkspaceId(String runtimeWorkspaceId);
+
     /** 只在该 generation/服务器副本不存在时建档，迟到初始化不得覆盖已有运行态。 */
     boolean insertReplicaIfAbsent(AppSourceReplica replica);
 
@@ -49,6 +55,10 @@ public interface AppSourceRepository extends AppSourceRepositoryHistory {
             Instant now);
 
     boolean updateReplicaIfLease(AppSourceReplica replica, String expectedLeaseOwner, Instant now);
+
+    /** 清理任务持有独立租约时把该 generation/server 副本收敛为 CLEANED。 */
+    boolean markReplicaCleaned(
+            CodeRepositoryId repositoryId, long generation, LinuxServerId linuxServerId, Instant now);
 
     Optional<AppSourceOperation> findOperation(String operationId);
 
@@ -89,6 +99,9 @@ public interface AppSourceRepository extends AppSourceRepositoryHistory {
 
     List<AppSourceCleanupTask> findCleanupTasks(
             CodeRepositoryId repositoryId, long generation, LinuxServerId linuxServerId);
+
+    /** 把旧 generation 的所有历史服务器清理任务提前到当前时刻。 */
+    int makeCleanupDueNow(CodeRepositoryId repositoryId, long generation, Instant now);
 
     Optional<AppSourceRecentSelection> findRecentSelection(UserId userId);
 
