@@ -2645,3 +2645,31 @@
 
 - 公共 Agent 现在与应用全局刷新保持同一批次语义，但个人 worktree 使用不覆盖本地内容的原生 merge，共享运行副本只允许明确确认后的固定 commit 覆盖；任何“放弃本地变更”都不会发生在全局锁之前。
 - HTTP API 与共享类型为 additive 变更；新增 PostgreSQL migration，无 RunEvent/SSE 类型、generated SDK、OpenCode 源码、环境配置或凭据变更。skill-creator 修复位于公共配置个人 worktree 的独立 Git 仓库，将单独提交。
+
+### 2026-07-28 - 接入 Codex 只读白盒分析 MCP
+
+### Why
+
+- 测试人员需要在应用对话中对白盒代码做证据化分析，同时必须固定当前 workspace、阻止写文件、越界读取和命令联网，并复用现有内部模型。
+- 企业现场仍是 Linux 4.19、Docker 18.09.7、x86_64；Codex 0.145.0 的 Linux 精细权限依赖 bubblewrap namespace，不能等部署后才发现宿主内核或 Docker 能力不兼容。
+
+### What
+
+- worker/programs 固定打包官方 Codex CLI 0.145.0 Linux amd64 musl、同标签官方静态 bubblewrap、Apache-2.0 LICENSE/NOTICE、bubblewrap COPYING 和 SHA-256 元数据；MCP SDK 精确锁定 1.29.0。官方 Codex 主归档不包含运行时 bubblewrap，必须另外携带同一 release 的 `bwrap-x86_64-unknown-linux-musl.tar.gz`。
+- 新增安全 stdio MCP 门面，只暴露 `whitebox_analyze` 与 `whitebox_reply`，固定 cwd、模型、approval=never、只读权限和开发者指令；隔离临时 CODEX_HOME，只接受本进程 threadId，失败/取消/超时回收子进程，审计日志只保留 traceId、耗时、状态和稳定错误码。
+- 内部模型代理新增 `/v1/responses` 流式子集，把 Codex 纯文本 message、function tool/call/output 转为现有 `/chat/completions`，再输出文本、工具参数、usage、完成或脱敏失败事件；图片、文件、内置 Web 工具与 reasoning 失败关闭，原 `/chat/completions` 不变。
+- 提供应用 MCP JSONC 样例和 `whitebox-code-analyst` Agent；用户选择该 Agent 后直接对话，工具自动调用。功能仍受既有应用 workspace 成员鉴权约束，超级管理员不旁路成员校验；应用代码库引用、挂载、同步和 ManagedWorkspace/Git 刷新链路不在本次范围。
+- 新增目标机预检：Linux/x86_64、kernel >=4.19、Docker >=18.09、linux/amd64 镜像、glibc 2.31、Codex/bwrap 摘要与真实 namespace/读/拒写/越界拒读/断网/Git 不变/续写必须全部通过，失败时禁止启用应用 MCP。
+
+### How
+
+- Responses 适配器 6 项、代理 Controller 13 项、转发服务 4 项定向测试通过；受管 workspace 成员鉴权与超级管理员成员撤销回归通过；后端相关模块主代码生产打包通过。
+- MCP 契约 4 项通过，覆盖安全工具列表、固定参数、未知 thread、配置失败关闭、日志脱敏、失败/取消/超时回收；`tools/verify-ai-docs.sh`、脚本语法、lockfile 版本与 `git diff --check` 通过。
+- `package-release.sh --opencode-only --no-save --no-zip` 成功构建 linux/amd64 worker 并自动完成 Codex 版本、摘要、License、原始/门面工具列表、配置失败关闭与 MCP 契约检查；最终 programs 包位于 `/tmp/test-agent-codex-release-check/test-agent-programs.tar.gz`，本次 SHA-256 为 `e5ec2975784da2a27de02ee3081090ec253770f8d96ec4a65f09ad97c29390e8`。
+- 提交后再以当前提交执行完整 `package-release.sh`，后端 JAR、前端生产包、859 MiB worker 镜像 tar、181 MiB programs 和 573 MiB 企业 ZIP 全部生成成功；`/tmp/test-agent-codex-full-release/test-agent-internal-release.zip` SHA-256 为 `712da6650567666e46df172c75fe8e0c4116c4dc095f58a6c43192cfa8a434a4`。
+- 当前构建机是 Apple Silicon、Docker Server aarch64 24.0.2；amd64 仿真无法创建 bubblewrap 嵌套 namespace，因此 native 沙箱 E2E 被明确跳过。现有 OpenCode worker 容器已启动并监听，但仿真内 Node health 探针不退出，完整旧 worker smoke 未完成；容器已清理。
+
+### Result
+
+- 本地实现、定向测试、镜像构建和离线 programs 封装完成；新增 HTTP API 为内部 additive 端点，无 RunEvent/SSE 类型、数据库/Flyway/SQL、前端业务接口、generated SDK 或 OpenCode 源码修改。
+- 真实企业节点验收尚未完成。发布前必须在每台原生 Linux 4.19 / Docker 18.09.7 x86_64 worker 节点运行 `deploy/internal/check-codex-whitebox-host.sh test-agent-opencode-worker:internal`；只有完整 E2E 通过后才能给应用启用 MCP/Agent 配置。

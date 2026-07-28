@@ -382,10 +382,22 @@ build_opencode_worker_image() {
     --build-arg "OPENCODE_ASSET_SHA256=${OPENCODE_ASSET_SHA256}" \
     --build-arg "OPENCODE_BINARY_SHA256=${OPENCODE_BINARY_SHA256}" \
     --build-arg "OPENCODE_RELEASE_BASE_URL=${OPENCODE_RELEASE_BASE_URL}" \
+    --build-arg "CODEX_VERSION=${CODEX_VERSION}" \
+    --build-arg "CODEX_ASSET_NAME=${CODEX_ASSET_NAME}" \
+    --build-arg "CODEX_ASSET_SIZE=${CODEX_ASSET_SIZE}" \
+    --build-arg "CODEX_ASSET_SHA256=${CODEX_ASSET_SHA256}" \
+    --build-arg "CODEX_BWRAP_ASSET_NAME=${CODEX_BWRAP_ASSET_NAME}" \
+    --build-arg "CODEX_BWRAP_ASSET_SIZE=${CODEX_BWRAP_ASSET_SIZE}" \
+    --build-arg "CODEX_BWRAP_ASSET_SHA256=${CODEX_BWRAP_ASSET_SHA256}" \
+    --build-arg "CODEX_BWRAP_BINARY_SHA256=${CODEX_BWRAP_BINARY_SHA256}" \
+    --build-arg "CODEX_RELEASE_BASE_URL=${CODEX_RELEASE_BASE_URL}" \
     --build-arg "OPENCODE_RUNTIME_PACKAGE_JSON=${OPENCODE_RUNTIME_PACKAGE_JSON}" \
     --build-arg "OPENCODE_RUNTIME_PACKAGE_LOCK=${OPENCODE_RUNTIME_PACKAGE_LOCK}" \
     "${ROOT_DIR}"
   docker image inspect "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" >/dev/null
+
+  # 构建机先验证固定版本、摘要、MCP 契约和失败关闭；native amd64 的 namespace E2E 由脚本自动执行。
+  "${ROOT_DIR}/tools/verify-codex-whitebox-worker-image.sh" "${TEST_AGENT_OPENCODE_WORKER_IMAGE}"
 
   export_worker_programs
 
@@ -571,10 +583,11 @@ export_worker_programs() {
   container_id="$(docker create --platform "${PLATFORM}" "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" true)"
 
   rm -rf "${programs_dir}"
-  mkdir -p "${programs_dir}/bin" "${programs_dir}/opencode"
+  mkdir -p "${programs_dir}/bin" "${programs_dir}/opencode" "${programs_dir}/codex"
 
   if ! docker cp "${container_id}:/usr/local/bin/opencode-manager" "${programs_dir}/bin/opencode-manager" \
-    || ! docker cp "${container_id}:/usr/local/lib/opencode/." "${programs_dir}/opencode/"; then
+    || ! docker cp "${container_id}:/usr/local/lib/opencode/." "${programs_dir}/opencode/" \
+    || ! docker cp "${container_id}:/usr/local/lib/codex/." "${programs_dir}/codex/"; then
     docker rm -f "${container_id}" >/dev/null 2>&1 || true
     return 1
   fi
@@ -582,12 +595,21 @@ export_worker_programs() {
 
   chmod +x "${programs_dir}/bin/opencode-manager" || true
   chmod +x "${programs_dir}/opencode/bin/opencode" || true
-  printf 'official opencode: %s\nasset: %s\narchive size: %s\narchive sha256: %s\nrelease commit: %s\n' \
+  chmod +x "${programs_dir}/codex/bin/codex-official" "${programs_dir}/codex/bin/codex-resources/bwrap" "${programs_dir}/codex/bin/test-agent-codex-mcp" || true
+  printf 'official opencode: %s\nasset: %s\narchive size: %s\narchive sha256: %s\nrelease commit: %s\nofficial codex: %s\ncodex asset: %s\ncodex archive size: %s\ncodex archive sha256: %s\ncodex bwrap asset: %s\ncodex bwrap archive size: %s\ncodex bwrap archive sha256: %s\ncodex bwrap binary sha256: %s\n' \
     "${OPENCODE_VERSION}" \
     "${OPENCODE_ASSET_NAME}" \
     "${OPENCODE_ASSET_SIZE}" \
     "${OPENCODE_ASSET_SHA256}" \
-    "${OPENCODE_RELEASE_COMMIT}" >"${programs_dir}/VERSION"
+    "${OPENCODE_RELEASE_COMMIT}" \
+    "${CODEX_VERSION}" \
+    "${CODEX_ASSET_NAME}" \
+    "${CODEX_ASSET_SIZE}" \
+    "${CODEX_ASSET_SHA256}" \
+    "${CODEX_BWRAP_ASSET_NAME}" \
+    "${CODEX_BWRAP_ASSET_SIZE}" \
+    "${CODEX_BWRAP_ASSET_SHA256}" \
+    "${CODEX_BWRAP_BINARY_SHA256}" >"${programs_dir}/VERSION"
   tar -C "${OUTPUT_DIR}" -czf "${OUTPUT_DIR}/test-agent-programs.tar.gz" programs
   ls -lh "${OUTPUT_DIR}/test-agent-programs.tar.gz"
 }
@@ -619,6 +641,15 @@ OPENCODE_ASSET_SIZE="${OPENCODE_ASSET_SIZE:-59265643}"
 OPENCODE_ASSET_SHA256="${OPENCODE_ASSET_SHA256:-4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc}"
 OPENCODE_BINARY_SHA256="${OPENCODE_BINARY_SHA256:-6ce6570e7db9a40e7bd3304ebdfff607920bde8cafd2eb5587bd7a26f89ba0b5}"
 OPENCODE_RELEASE_BASE_URL="${OPENCODE_RELEASE_BASE_URL:-https://github.com/anomalyco/opencode/releases/download}"
+CODEX_VERSION="${CODEX_VERSION:-0.145.0}"
+CODEX_ASSET_NAME="${CODEX_ASSET_NAME:-codex-x86_64-unknown-linux-musl.tar.gz}"
+CODEX_ASSET_SIZE="${CODEX_ASSET_SIZE:-113724150}"
+CODEX_ASSET_SHA256="${CODEX_ASSET_SHA256:-bfaf13c9ba34f2ad764e4a916c49cf7177aeba329cf0f719e2227566fc8d662a}"
+CODEX_BWRAP_ASSET_NAME="${CODEX_BWRAP_ASSET_NAME:-bwrap-x86_64-unknown-linux-musl.tar.gz}"
+CODEX_BWRAP_ASSET_SIZE="${CODEX_BWRAP_ASSET_SIZE:-261563}"
+CODEX_BWRAP_ASSET_SHA256="${CODEX_BWRAP_ASSET_SHA256:-bf829ae02652acdb13732e3b00b3e656baaa56be2a65d50309d676df2b5d7581}"
+CODEX_BWRAP_BINARY_SHA256="${CODEX_BWRAP_BINARY_SHA256:-77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c}"
+CODEX_RELEASE_BASE_URL="${CODEX_RELEASE_BASE_URL:-https://github.com/openai/codex/releases/download}"
 OPENCODE_RUNTIME_PACKAGE_JSON="${OPENCODE_RUNTIME_PACKAGE_JSON:-deploy/internal/opencode-node-runtime.package.json}"
 OPENCODE_RUNTIME_PACKAGE_LOCK="${OPENCODE_RUNTIME_PACKAGE_LOCK:-deploy/internal/opencode-node-runtime.package-lock.json}"
 GO_IMAGE="${GO_IMAGE:-golang@sha256:e87b2a5f6df2dff71ea330d55d54f4979eb380ae58a7e3aabc9d53121243e689}"

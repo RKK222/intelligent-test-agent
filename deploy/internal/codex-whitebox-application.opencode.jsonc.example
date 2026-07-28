@@ -1,0 +1,18 @@
+{
+  // 合并到“已启用白盒分析”的应用 workspace 下 .opencode/opencode.jsonc。
+  "mcp": {
+    "codex_whitebox": {
+      "type": "local",
+      "command": [
+        "/data/testagent/programs/codex/bin/test-agent-codex-mcp"
+      ],
+      "environment": {
+        "TEST_AGENT_CODEX_PROVIDER_ID": "qwen-prod",
+        "TEST_AGENT_CODEX_MODEL": "Qwen3.6-27B",
+        "TEST_AGENT_CODEX_CONTEXT_WINDOW": "131072"
+      },
+      "enabled": true,
+      "timeout": 600000
+    }
+  }
+}

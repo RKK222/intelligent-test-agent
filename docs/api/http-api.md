@@ -2818,6 +2818,28 @@ Token 列表及写入响应只返回 `{tokenId,name,referencedProviderCount,crea
 
 代理只接受 `Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}`；请求头 `X-Enterprise-Model-Provider` 指定内部供应商，`ucid` 由 opencode 配置从 `ENTERPRISE_UCID` 注入。Java 通过一次联表查询把启用供应商构造成不可变的 `providersById` 与 `authTokensByProviderId` 快照；单次代理请求在订阅请求体前完成代理密钥校验，并从同一代快照同时解析 `baseUrl` 和该 Provider 关联的 Token，无效凭据或供应商不会占用请求体聚合缓冲区；解析过程不访问数据库，也不会串用其它 Provider 的 Token。随后转发到对应 OpenAI-compatible 路径并注入 `ucid` 和 traceId。代理请求体上限固定为 `2 MiB`（`2097152` bytes），只在该内部端点按字节聚合，不放大全局 WebFlux codec 缓冲区；超限返回统一 `413 PAYLOAD_TOO_LARGE`，`details.maxBytes=2097152`，且不记录或回显模型请求内容。请求体的顶层 `model` 使用流式 JSON 扫描校验，不构建完整对象树，同时会消费完整文档并拒绝尾部畸形内容或额外根值。仅 `2xx + text/event-stream` 进入 SSE 语义转换，事件字段和 `[DONE]` 保留；没有 `reasoning_content` 时，`delta.content` 里的 `<think>...</think>` 会转换为 `delta.reasoning_content`，普通正文仍保留在 `delta.content`；已有 textual `reasoning_content` 时整个 delta 原样保留，不再解析 `content`。非 `2xx`（包括 `4xx + text/event-stream`）和非 SSE 响应原样透传状态码、Content-Type、Content-Encoding、错误正文、Retry-After 与 trace header；连接/首个响应/首个事件/事件空闲边界分别为 10 秒/30 秒/30 秒/120 秒，不设置整体 SSE 生命周期超时，下游取消会取消上游订阅。
 
+Codex `0.145.0` 使用固定子路径：
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `POST` | `/api/internal/platform/opencode-runtime/internal-model-proxy/v1/responses` | 将 Codex 所需的流式 Responses API 子集适配到选定供应商 `/chat/completions`。 |
+
+该路径必须携带与原代理相同的 Bearer、`X-Enterprise-Model-Provider` 和 `ucid`。请求只支持
+`stream=true`、纯文本 `message`、function tools、`function_call` 和
+`function_call_output`；`instructions` 转为 system message，连续 function call 转为 assistant
+tool calls，工具结果转为 tool message。图片、文件、内置 Web 工具、非 function tool、非纯
+文本格式、`previous_response_id` 和非流式请求返回统一 `VALIDATION_ERROR`。reasoning item、
+`reasoning`、加密 reasoning include 等字段不转发给供应商。
+
+供应商 `2xx text/event-stream` 被转换为 Codex 可消费的 `response.created`、
+`response.output_text.delta`、`response.function_call_arguments.delta`、
+`response.output_item.done`、`response.completed` 或脱敏 `response.failed` 事件；usage 映射为
+`input_tokens/output_tokens/total_tokens` 及缓存、reasoning token 明细。畸形上游事件只返回
+稳定错误码和通用说明，不回显上游 payload；上游在 `[DONE]` 前断流或事件超时同样转换为
+脱敏 `response.failed`。非 2xx 与非 SSE 仍沿用原代理的状态和正文透传，
+原 `/chat/completions` 转换行为保持不变。该端点仅供 Codex MCP 子进程使用，不新增前端接口、
+generated SDK 或 RunEvent。
+
 OpenCode 1.18.4 的 `/api/model`、`/api/provider` 即使配置了 `enabled_providers` 仍可能返回 Zen；平台不得据此重新引入数据库模型目录，而是通过上述实例级配置 GET 读取合并后的 Provider 白名单，再由前端按 Provider ID 同时过滤两个原生目录。白名单限制的是企业 Provider，不限制这些 Provider 内的模型数量。
 
 opencode 公共配置样例（企业单后端部署可直接使用 `deploy/internal/opencode.jsonc.example`）：

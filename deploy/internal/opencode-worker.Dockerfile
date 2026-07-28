@@ -88,6 +88,66 @@ RUN set -eux; \
     chmod +x /out/opencode; \
     test "$(/out/opencode --version)" = "${OPENCODE_VERSION}"
 
+# Codex 使用官方 Linux amd64 musl 发布包；摘要、许可证和 NOTICE 均固定到同一 0.145.0 标签。
+FROM ${GO_IMAGE} AS codex-download
+
+ARG CODEX_VERSION=0.145.0
+ARG CODEX_ASSET_NAME=codex-x86_64-unknown-linux-musl.tar.gz
+ARG CODEX_ASSET_SIZE=113724150
+ARG CODEX_ASSET_SHA256=bfaf13c9ba34f2ad764e4a916c49cf7177aeba329cf0f719e2227566fc8d662a
+ARG CODEX_BWRAP_ASSET_NAME=bwrap-x86_64-unknown-linux-musl.tar.gz
+ARG CODEX_BWRAP_ASSET_SIZE=261563
+ARG CODEX_BWRAP_ASSET_SHA256=bf829ae02652acdb13732e3b00b3e656baaa56be2a65d50309d676df2b5d7581
+ARG CODEX_BWRAP_BINARY_SHA256=77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c
+ARG CODEX_BWRAP_COPYING_SHA256=b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c
+ARG CODEX_RELEASE_BASE_URL=https://github.com/openai/codex/releases/download
+ARG CODEX_LICENSE_SHA256=d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc
+ARG CODEX_NOTICE_SHA256=9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915
+
+RUN set -eux; \
+    asset_url="${CODEX_RELEASE_BASE_URL}/rust-v${CODEX_VERSION}/${CODEX_ASSET_NAME}"; \
+    chunk_size=16777216; \
+    index=0; \
+    start=0; \
+    mkdir -p /tmp/codex-parts /tmp/codex-extract /tmp/bwrap-extract /out/codex-resources; \
+    while [ "${start}" -lt "${CODEX_ASSET_SIZE}" ]; do \
+      end=$((start + chunk_size - 1)); \
+      if [ "${end}" -ge "${CODEX_ASSET_SIZE}" ]; then \
+        end=$((CODEX_ASSET_SIZE - 1)); \
+      fi; \
+      part="$(printf '/tmp/codex-parts/part-%03d' "${index}")"; \
+      curl -fsSL --retry 3 --retry-delay 2 --range "${start}-${end}" "${asset_url}" -o "${part}" & \
+      index=$((index + 1)); \
+      start=$((end + 1)); \
+    done; \
+    wait; \
+    cat /tmp/codex-parts/part-* > /tmp/codex.tar.gz; \
+    test "$(stat -c '%s' /tmp/codex.tar.gz)" = "${CODEX_ASSET_SIZE}"; \
+    printf '%s  %s\n' "${CODEX_ASSET_SHA256}" /tmp/codex.tar.gz | sha256sum -c -; \
+    tar -xzf /tmp/codex.tar.gz -C /tmp/codex-extract; \
+    codex_binary="$(find /tmp/codex-extract -maxdepth 2 -type f -name 'codex*' -print -quit)"; \
+    test -n "${codex_binary}"; \
+    install -m 0755 "${codex_binary}" /out/codex-official; \
+    curl -fsSL --retry 3 --retry-delay 2 \
+      "${CODEX_RELEASE_BASE_URL}/rust-v${CODEX_VERSION}/${CODEX_BWRAP_ASSET_NAME}" -o /tmp/bwrap.tar.gz; \
+    test "$(stat -c '%s' /tmp/bwrap.tar.gz)" = "${CODEX_BWRAP_ASSET_SIZE}"; \
+    printf '%s  %s\n' "${CODEX_BWRAP_ASSET_SHA256}" /tmp/bwrap.tar.gz | sha256sum -c -; \
+    tar -xzf /tmp/bwrap.tar.gz -C /tmp/bwrap-extract; \
+    bwrap_binary="$(find /tmp/bwrap-extract -maxdepth 2 -type f -name 'bwrap*' -print -quit)"; \
+    test -n "${bwrap_binary}"; \
+    install -m 0755 "${bwrap_binary}" /out/codex-resources/bwrap; \
+    printf '%s  %s\n' "${CODEX_BWRAP_BINARY_SHA256}" /out/codex-resources/bwrap | sha256sum -c -; \
+    curl -fsSL --retry 3 --retry-delay 2 \
+      "https://raw.githubusercontent.com/openai/codex/rust-v${CODEX_VERSION}/LICENSE" -o /out/LICENSE; \
+    curl -fsSL --retry 3 --retry-delay 2 \
+      "https://raw.githubusercontent.com/openai/codex/rust-v${CODEX_VERSION}/NOTICE" -o /out/NOTICE; \
+    curl -fsSL --retry 3 --retry-delay 2 \
+      "https://raw.githubusercontent.com/openai/codex/rust-v${CODEX_VERSION}/codex-rs/vendor/bubblewrap/COPYING" -o /out/BWRAP-COPYING; \
+    printf '%s  %s\n' "${CODEX_LICENSE_SHA256}" /out/LICENSE | sha256sum -c -; \
+    printf '%s  %s\n' "${CODEX_NOTICE_SHA256}" /out/NOTICE | sha256sum -c -; \
+    printf '%s  %s\n' "${CODEX_BWRAP_COPYING_SHA256}" /out/BWRAP-COPYING | sha256sum -c -; \
+    test "$(/out/codex-official --version)" = "codex-cli ${CODEX_VERSION}"
+
 # 固定 bullseye/glibc 2.31，兼容企业 Docker 18.09 宿主环境。
 FROM ${NODE_IMAGE}
 
@@ -100,6 +160,14 @@ ARG OPENCODE_ASSET_NAME=opencode-linux-x64-baseline.tar.gz
 ARG OPENCODE_ASSET_SIZE=59265643
 ARG OPENCODE_ASSET_SHA256=4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc
 ARG OPENCODE_BINARY_SHA256=6ce6570e7db9a40e7bd3304ebdfff607920bde8cafd2eb5587bd7a26f89ba0b5
+ARG CODEX_VERSION=0.145.0
+ARG CODEX_ASSET_NAME=codex-x86_64-unknown-linux-musl.tar.gz
+ARG CODEX_ASSET_SIZE=113724150
+ARG CODEX_ASSET_SHA256=bfaf13c9ba34f2ad764e4a916c49cf7177aeba329cf0f719e2227566fc8d662a
+ARG CODEX_BWRAP_ASSET_NAME=bwrap-x86_64-unknown-linux-musl.tar.gz
+ARG CODEX_BWRAP_ASSET_SIZE=261563
+ARG CODEX_BWRAP_ASSET_SHA256=bf829ae02652acdb13732e3b00b3e656baaa56be2a65d50309d676df2b5d7581
+ARG CODEX_BWRAP_BINARY_SHA256=77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c
 ARG OPENCODE_RUNTIME_PACKAGE_JSON=deploy/internal/opencode-node-runtime.package.json
 ARG OPENCODE_RUNTIME_PACKAGE_LOCK=deploy/internal/opencode-node-runtime.package-lock.json
 
@@ -149,6 +217,7 @@ COPY --from=opencode-download /out/opencode ./bin/opencode-official
 COPY opencode-source/opencode-1.18.4/LICENSE ./LICENSE
 COPY deploy/internal/opencode-runtime.gitignore ./opencode-runtime.gitignore
 COPY deploy/internal/opencode-official-launcher.mjs ./bin/opencode
+COPY deploy/internal/codex-whitebox-mcp.mjs ./bin/codex-whitebox-mcp.mjs
 RUN set -eux; \
     printf '%s\n' "${OPENCODE_VERSION}" > ./VERSION; \
     printf 'version=%s\nasset=%s\narchive_size=%s\narchive_sha256=%s\nbinary_sha256=%s\nrelease_commit=%s\n' \
@@ -158,14 +227,43 @@ RUN set -eux; \
       "${OPENCODE_ASSET_SHA256}" \
       "${OPENCODE_BINARY_SHA256}" \
       "${OPENCODE_RELEASE_COMMIT}" > ./RELEASE; \
-    chmod +x ./bin/opencode ./bin/opencode-official; \
+    chmod +x ./bin/opencode ./bin/opencode-official ./bin/codex-whitebox-mcp.mjs; \
     ln -s /usr/local/lib/opencode/bin/opencode /usr/local/bin/opencode; \
     /usr/local/bin/opencode --version; \
-    node --input-type=module -e 'await Promise.all([import("@opencode-ai/plugin"), import("@opencode-ai/sdk"), import("effect"), import("zod")]); console.log("custom Tool runtime ok")'; \
+    node --input-type=module -e 'await Promise.all([import("@modelcontextprotocol/sdk/server/mcp.js"), import("@opencode-ai/plugin"), import("@opencode-ai/sdk"), import("effect"), import("zod")]); console.log("custom Tool and MCP runtime ok")'; \
     git --version; \
     ssh -V; \
     rg --version | head -n 1; \
     tini --version
+
+WORKDIR /usr/local/lib/codex
+
+COPY --from=codex-download /out/codex-official ./bin/codex-official
+COPY --from=codex-download /out/codex-resources ./bin/codex-resources
+COPY --from=codex-download /out/LICENSE ./LICENSE
+COPY --from=codex-download /out/NOTICE ./NOTICE
+COPY --from=codex-download /out/BWRAP-COPYING ./THIRD_PARTY_LICENSES/bubblewrap-COPYING
+COPY deploy/internal/codex-whitebox-mcp-launcher.sh ./bin/test-agent-codex-mcp
+COPY tools/probe-codex-whitebox-e2e.mjs ./tests/probe-codex-whitebox-e2e.mjs
+COPY deploy/internal/codex-whitebox-requirements.toml /etc/codex/requirements.toml
+RUN set -eux; \
+    printf '%s\n' "${CODEX_VERSION}" > ./VERSION; \
+    printf 'version=%s\nasset=%s\narchive_size=%s\narchive_sha256=%s\nbwrap_asset=%s\nbwrap_archive_size=%s\nbwrap_archive_sha256=%s\nbwrap_binary_sha256=%s\nlicense=Apache-2.0\n' \
+      "${CODEX_VERSION}" \
+      "${CODEX_ASSET_NAME}" \
+      "${CODEX_ASSET_SIZE}" \
+      "${CODEX_ASSET_SHA256}" \
+      "${CODEX_BWRAP_ASSET_NAME}" \
+      "${CODEX_BWRAP_ASSET_SIZE}" \
+      "${CODEX_BWRAP_ASSET_SHA256}" \
+      "${CODEX_BWRAP_BINARY_SHA256}" > ./RELEASE; \
+    chmod 0755 ./bin/codex-official ./bin/codex-resources/bwrap ./bin/test-agent-codex-mcp; \
+    chmod 0444 /etc/codex/requirements.toml; \
+    ln -s /usr/local/lib/codex/bin/test-agent-codex-mcp /usr/local/bin/test-agent-codex-mcp; \
+    test "$(./bin/codex-official --version)" = "codex-cli ${CODEX_VERSION}"; \
+    printf '%s  %s\n' "${CODEX_BWRAP_BINARY_SHA256}" ./bin/codex-resources/bwrap | sha256sum -c -; \
+    grep -Fx 'allowed_approval_policies = ["never"]' /etc/codex/requirements.toml; \
+    grep -Fx 'allowed_web_search_modes = ["disabled"]' /etc/codex/requirements.toml
 
 COPY --from=manager-build /out/opencode-manager /usr/local/bin/opencode-manager
 COPY deploy/internal/opencode-worker-entrypoint.sh /usr/local/bin/opencode-worker-entrypoint

@@ -1,0 +1,22 @@
+# Codex 白盒分析的系统级强制策略；该文件必须安装到 /etc/codex/requirements.toml。
+allowed_approval_policies = ["never"]
+allowed_web_search_modes = ["disabled"]
+default_permissions = "test-agent-whitebox-readonly"
+
+[allowed_permission_profiles]
+test-agent-whitebox-readonly = true
+
+[permissions.test-agent-whitebox-readonly]
+description = "TestAgent 当前 workspace 严格只读白盒分析"
+
+[permissions.test-agent-whitebox-readonly.filesystem]
+":root" = "deny"
+":minimal" = "read"
+":tmpdir" = "deny"
+":slash_tmp" = "deny"
+
+[permissions.test-agent-whitebox-readonly.filesystem.":workspace_roots"]
+"." = "read"
+
+[permissions.test-agent-whitebox-readonly.network]
+enabled = false
