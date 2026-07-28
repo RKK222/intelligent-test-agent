@@ -91,9 +91,52 @@ describe("ToolboxPanel", () => {
     expect(view.queryByTestId("tool-link-omni-tools.text.word-counter")).toBeNull();
 
     await fireEvent.click(view.getByRole("button", { name: "查看全部来源" }));
-    await fireEvent.update(view.getByLabelText("工具分类"), "TEXT");
+    await fireEvent.click(view.getByRole("button", { name: "文本处理 1" }));
     expect(view.getByTestId("tool-link-omni-tools.text.word-counter")).toBeTruthy();
     expect(view.queryByTestId("tool-link-it-tools.hash-text")).toBeNull();
+  });
+
+  it("keeps category counts scoped to search and source while selected zero-result categories remain operable", async () => {
+    const view = renderPanel();
+    await view.findByTestId("tool-link-it-tools.hash-text");
+
+    const security = view.getByRole("button", { name: "安全与加密 2" });
+    const text = view.getByRole("button", { name: "文本处理 1" });
+    const encoding = view.getByRole("button", { name: "编码与转换 0" });
+    expect(encoding.hasAttribute("disabled")).toBe(true);
+
+    await fireEvent.click(security);
+    expect(view.getByTestId("tool-link-it-tools.hash-text")).toBeTruthy();
+    expect(view.getByTestId("tool-link-omni-tools.crypto.hash-text")).toBeTruthy();
+    expect(view.queryByTestId("tool-link-omni-tools.text.word-counter")).toBeNull();
+    expect(security.getAttribute("aria-pressed")).toBe("true");
+    expect(text.textContent).toContain("文本处理 1");
+
+    await fireEvent.click(view.getByRole("button", { name: "仅看 IT-Tools" }));
+    expect(view.getByRole("button", { name: "安全与加密 1" }).getAttribute("aria-pressed")).toBe("true");
+    expect(view.getByRole("button", { name: "文本处理 0" }).hasAttribute("disabled")).toBe(true);
+
+    await fireEvent.update(view.getByPlaceholderText("搜索中文、英文或关键词"), "字数");
+    const selectedZero = view.getByRole("button", { name: "安全与加密 0" });
+    expect(selectedZero.hasAttribute("disabled")).toBe(false);
+    expect(selectedZero.getAttribute("aria-pressed")).toBe("true");
+    expect(view.getByText("没有匹配的离线工具")).toBeTruthy();
+  });
+
+  it("renders all fixed category chips and clears every filter", async () => {
+    const view = renderPanel();
+    await view.findByTestId("tool-link-it-tools.hash-text");
+
+    expect(view.getByRole("heading", { name: "工具盒子" }).classList).toContain("sr-only");
+    expect(view.getAllByRole("button", { name: /^(全部|安全与加密|编码与转换|文本处理|数据处理|Web 工具|网络工具|开发辅助|图片处理|音视频|PDF|日期与时间|数学与测量|其他) \d+$/ })).toHaveLength(14);
+
+    await fireEvent.update(view.getByPlaceholderText("搜索中文、英文或关键词"), "字数");
+    await fireEvent.click(view.getByRole("button", { name: "仅看 IT-Tools" }));
+    await fireEvent.click(view.container.querySelector(".toolbox-clear-filter") as HTMLButtonElement);
+
+    expect(view.getByTestId("tool-link-it-tools.hash-text")).toBeTruthy();
+    expect(view.getByTestId("tool-link-omni-tools.text.word-counter")).toBeTruthy();
+    expect((view.getByPlaceholderText("搜索中文、英文或关键词") as HTMLInputElement).value).toBe("");
   });
 
   it("uses native new-tab links and reports left, keyboard-compatible and middle clicks", async () => {

@@ -8,7 +8,7 @@ import type {
   ToolboxSource,
   ToolboxTool
 } from "@test-agent/shared-types";
-import { ExternalLink, Flame, MousePointerClick, Search, Wrench } from "lucide-vue-next";
+import { ExternalLink, Flame, MousePointerClick, Search } from "lucide-vue-next";
 
 const api = inject<BackendApiClient>("api")!;
 
@@ -16,7 +16,7 @@ type SourceFilter = "ALL" | ToolboxSource;
 type CategoryFilter = "ALL" | ToolboxCategory;
 
 const categoryOptions: Array<{ value: CategoryFilter; label: string }> = [
-  { value: "ALL", label: "全部分类" },
+  { value: "ALL", label: "全部" },
   { value: "SECURITY", label: "安全与加密" },
   { value: "ENCODING", label: "编码与转换" },
   { value: "TEXT", label: "文本处理" },
@@ -42,11 +42,10 @@ const category = ref<CategoryFilter>("ALL");
 const localRecency = ref<Record<string, number>>({});
 let launchSequence = 0;
 
-const filteredTools = computed(() => {
+const searchAndSourceTools = computed(() => {
   const query = normalize(search.value);
   return tools.value.filter((tool) => {
     if (source.value !== "ALL" && tool.source !== source.value) return false;
-    if (category.value !== "ALL" && tool.category !== category.value) return false;
     if (!query) return true;
     return normalize([
       tool.nameZh,
@@ -58,6 +57,20 @@ const filteredTools = computed(() => {
     ].join(" ")).includes(query);
   });
 });
+
+const categoryCounts = computed(() => {
+  // 分类数字只基于搜索词和来源：不能把已选分类带入统计，否则其它分类会被错误归零。
+  const counts = new Map<CategoryFilter, number>([["ALL", searchAndSourceTools.value.length]]);
+  for (const option of categoryOptions.slice(1)) counts.set(option.value, 0);
+  for (const tool of searchAndSourceTools.value) {
+    counts.set(tool.category, (counts.get(tool.category) ?? 0) + 1);
+  }
+  return counts;
+});
+
+const filteredTools = computed(() => category.value === "ALL"
+  ? searchAndSourceTools.value
+  : searchAndSourceTools.value.filter((tool) => tool.category === category.value));
 
 const hotTools = computed(() => tools.value
   .filter((tool) => tool.clickCount > 0)
@@ -91,6 +104,12 @@ function onLinkClick(tool: ToolboxTool, event: MouseEvent) {
 
 function onLinkAuxClick(tool: ToolboxTool, event: MouseEvent) {
   if (event.button === 1) void reportClick(tool);
+}
+
+function clearFilters() {
+  search.value = "";
+  source.value = "ALL";
+  category.value = "ALL";
 }
 
 /** 埋点永远不 preventDefault；即使后端不可用，浏览器仍按原生链接语义打开工具。 */
@@ -128,44 +147,41 @@ function normalize(value: string): string {
 
 <template>
   <section class="toolbox-panel" aria-labelledby="toolbox-title">
-    <header class="toolbox-hero">
-      <div class="toolbox-hero__mark" aria-hidden="true"><Wrench :size="22" :stroke-width="1.8" /></div>
-      <div class="toolbox-hero__copy">
-        <p class="toolbox-eyebrow">OFFLINE UTILITY BENCH</p>
-        <h1 id="toolbox-title">工具盒子</h1>
-        <p>所有工具均在企业内网运行。选择一个具体工具后，会在新标签页直接打开。</p>
-      </div>
-      <div class="toolbox-total" aria-live="polite">
-        <strong>{{ catalog?.total ?? 0 }}</strong>
-        <span>个离线工具</span>
-      </div>
-    </header>
+    <h1 id="toolbox-title" class="sr-only">工具盒子</h1>
 
     <div class="toolbox-controls">
-      <label class="toolbox-search">
-        <Search :size="17" aria-hidden="true" />
-        <span class="sr-only">搜索工具</span>
-        <input v-model="search" type="search" placeholder="搜索中文、英文或关键词" />
-      </label>
-      <div class="toolbox-source-filter" aria-label="工具来源">
-        <button type="button" :class="{ active: source === 'ALL' }" aria-label="查看全部来源" @click="source = 'ALL'">
-          全部来源
-        </button>
-        <button type="button" :class="{ active: source === 'IT_TOOLS' }" aria-label="仅看 IT-Tools" @click="source = 'IT_TOOLS'">
-          IT-Tools
-        </button>
-        <button type="button" :class="{ active: source === 'OMNI_TOOLS' }" aria-label="仅看 OmniTools" @click="source = 'OMNI_TOOLS'">
-          OmniTools
+      <div class="toolbox-controls__primary">
+        <label class="toolbox-search">
+          <Search :size="17" aria-hidden="true" />
+          <span class="sr-only">搜索工具</span>
+          <input v-model="search" type="search" placeholder="搜索中文、英文或关键词" />
+        </label>
+        <div class="toolbox-source-filter" aria-label="工具来源">
+          <button type="button" :class="{ active: source === 'ALL' }" aria-label="查看全部来源" @click="source = 'ALL'">
+            全部来源
+          </button>
+          <button type="button" :class="{ active: source === 'IT_TOOLS' }" aria-label="仅看 IT-Tools" @click="source = 'IT_TOOLS'">
+            IT-Tools
+          </button>
+          <button type="button" :class="{ active: source === 'OMNI_TOOLS' }" aria-label="仅看 OmniTools" @click="source = 'OMNI_TOOLS'">
+            OmniTools
+          </button>
+        </div>
+        <button class="toolbox-clear-filter" type="button" @click="clearFilters">清除筛选</button>
+      </div>
+      <div class="toolbox-category-filter" aria-label="工具分类">
+        <button
+          v-for="option in categoryOptions"
+          :key="option.value"
+          type="button"
+          :class="{ active: category === option.value }"
+          :aria-pressed="category === option.value"
+          :disabled="category !== option.value && (categoryCounts.get(option.value) ?? 0) === 0"
+          @click="category = option.value"
+        >
+          {{ option.label }} {{ categoryCounts.get(option.value) ?? 0 }}
         </button>
       </div>
-      <label class="toolbox-category">
-        <span>分类</span>
-        <select v-model="category" aria-label="工具分类">
-          <option v-for="option in categoryOptions" :key="option.value" :value="option.value">
-            {{ option.label }}
-          </option>
-        </select>
-      </label>
     </div>
 
     <div v-if="loading" class="toolbox-state">正在装配离线工具目录…</div>
@@ -246,7 +262,7 @@ function normalize(value: string): string {
         <div v-else class="toolbox-empty">
           <Search :size="24" aria-hidden="true" />
           <p>没有匹配的离线工具</p>
-          <button type="button" @click="search = ''; source = 'ALL'; category = 'ALL'">清除筛选</button>
+          <button type="button" @click="clearFilters">清除筛选</button>
         </div>
       </section>
     </template>
@@ -259,48 +275,10 @@ function normalize(value: string): string {
   min-height: 0;
   overflow: auto;
   box-sizing: border-box;
-  padding: 28px clamp(20px, 3vw, 48px) 52px;
+  padding: 0 clamp(20px, 3vw, 48px) 52px;
   background: #f3f5f7;
   color: #172033;
 }
-.toolbox-hero {
-  position: relative;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 18px;
-  align-items: center;
-  max-width: 1480px;
-  margin: 0 auto;
-  padding: 26px 28px;
-  overflow: hidden;
-  border: 1px solid #253149;
-  border-radius: 16px;
-  background: #172033;
-  color: #f8fafc;
-  box-shadow: 0 16px 34px rgb(23 32 51 / 14%);
-}
-.toolbox-hero::after {
-  position: absolute;
-  inset: 0 0 0 auto;
-  width: 36%;
-  content: "";
-  opacity: 0.16;
-  background-image: linear-gradient(90deg, transparent 49%, #fff 50%), linear-gradient(#fff 49%, transparent 50%);
-  background-size: 22px 22px;
-  pointer-events: none;
-}
-.toolbox-hero__mark {
-  display: grid;
-  width: 48px;
-  height: 48px;
-  place-items: center;
-  border: 1px solid rgb(255 255 255 / 20%);
-  border-radius: 12px;
-  background: #f2a93b;
-  color: #172033;
-}
-.toolbox-hero__copy { position: relative; z-index: 1; }
-.toolbox-eyebrow,
 .toolbox-section-kicker {
   display: flex;
   gap: 6px;
@@ -311,34 +289,33 @@ function normalize(value: string): string {
   font-weight: 800;
   letter-spacing: 0.14em;
 }
-.toolbox-hero h1 { margin: 0; font-size: clamp(24px, 3vw, 34px); line-height: 1.15; letter-spacing: -0.03em; }
-.toolbox-hero__copy > p:last-child { margin: 8px 0 0; color: #bfc8d8; font-size: 13px; }
-.toolbox-total { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: flex-end; padding-left: 28px; border-left: 1px solid rgb(255 255 255 / 16%); }
-.toolbox-total strong { font-variant-numeric: tabular-nums; font-size: 32px; line-height: 1; }
-.toolbox-total span { margin-top: 6px; color: #bfc8d8; font-size: 12px; }
 .toolbox-controls {
   position: sticky;
   z-index: 5;
-  top: -28px;
+  top: 0;
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) auto auto;
   gap: 12px;
   max-width: 1480px;
-  margin: 20px auto 0;
-  padding: 12px;
-  border: 1px solid #dde2e8;
-  border-radius: 12px;
+  margin: 0 auto;
+  padding: 14px 0 12px;
+  border-bottom: 1px solid #dde2e8;
   background: rgb(255 255 255 / 96%);
   box-shadow: 0 8px 24px rgb(36 46 66 / 8%);
 }
+.toolbox-controls__primary { display: grid; grid-template-columns: minmax(260px, 1fr) auto auto; gap: 12px; }
 .toolbox-search { display: flex; gap: 9px; align-items: center; min-height: 40px; padding: 0 13px; border: 1px solid #d8dee7; border-radius: 8px; color: #748094; background: #fff; }
 .toolbox-search:focus-within { border-color: #3967a8; box-shadow: 0 0 0 3px rgb(57 103 168 / 12%); }
 .toolbox-search input { width: 100%; border: 0; outline: 0; color: #172033; font: inherit; font-size: 13px; background: transparent; }
 .toolbox-source-filter { display: flex; align-items: center; padding: 3px; border: 1px solid #d8dee7; border-radius: 8px; background: #f4f6f8; }
 .toolbox-source-filter button { min-height: 32px; padding: 0 12px; border: 0; border-radius: 6px; color: #667085; font: inherit; font-size: 12px; background: transparent; cursor: pointer; }
 .toolbox-source-filter button.active { color: #172033; background: #fff; box-shadow: 0 1px 3px rgb(16 24 40 / 12%); }
-.toolbox-category { display: flex; gap: 8px; align-items: center; min-height: 40px; padding: 0 10px 0 12px; border: 1px solid #d8dee7; border-radius: 8px; color: #667085; font-size: 12px; background: #fff; }
-.toolbox-category select { min-width: 116px; border: 0; outline: 0; color: #172033; font: inherit; background: transparent; }
+.toolbox-clear-filter,
+.toolbox-category-filter button { min-height: 32px; padding: 0 12px; border: 1px solid #d8dee7; border-radius: 999px; color: #667085; font: inherit; font-size: 12px; background: #fff; cursor: pointer; }
+.toolbox-clear-filter:hover,
+.toolbox-category-filter button:hover:not(:disabled) { border-color: #8ea5c4; color: #172033; }
+.toolbox-category-filter { display: flex; flex-wrap: wrap; gap: 8px; }
+.toolbox-category-filter button.active { border-color: #31598c; color: #fff; background: #31598c; }
+.toolbox-category-filter button:disabled { cursor: not-allowed; opacity: 0.48; }
 .toolbox-hot,
 .toolbox-catalog { max-width: 1480px; margin: 28px auto 0; }
 .toolbox-section-heading { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 12px; }
@@ -378,16 +355,17 @@ function normalize(value: string): string {
 @media (max-width: 1180px) {
   .toolbox-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .toolbox-hot-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .toolbox-controls { grid-template-columns: 1fr auto; }
-  .toolbox-category { grid-column: 1 / -1; }
+  .toolbox-controls__primary { grid-template-columns: 1fr auto; }
+  .toolbox-clear-filter { grid-column: 1 / -1; justify-self: start; }
 }
 @media (max-width: 760px) {
   .toolbox-panel { padding: 16px 14px 36px; }
-  .toolbox-hero { grid-template-columns: auto 1fr; padding: 20px; }
-  .toolbox-total { grid-column: 1 / -1; align-items: flex-start; padding: 14px 0 0; border-top: 1px solid rgb(255 255 255 / 16%); border-left: 0; }
-  .toolbox-controls { position: static; grid-template-columns: 1fr; }
+  .toolbox-controls { padding-top: 0; }
+  .toolbox-controls__primary { grid-template-columns: 1fr; }
   .toolbox-source-filter { overflow-x: auto; }
-  .toolbox-category { grid-column: auto; }
+  .toolbox-clear-filter { grid-column: auto; }
+  .toolbox-category-filter { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
+  .toolbox-category-filter button { flex: 0 0 auto; }
   .toolbox-grid { grid-template-columns: 1fr; }
   .toolbox-hot-list { grid-template-columns: 1fr 1fr; }
 }
