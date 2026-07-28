@@ -7,6 +7,7 @@ import SpanCopyable from '@/components/SpanCopyable.vue';
 import CFileUpload from './c-file-upload/c-file-upload.vue';
 import CSelect from './c-select/c-select.vue';
 import CTooltip from './c-tooltip/c-tooltip.vue';
+import CKeyValueListItem from './c-key-value-list/c-key-value-list-item.vue';
 import { i18nPlugin } from '@/plugins/i18n.plugin';
 
 describe('共享组件中文文案', () => {
@@ -44,5 +45,14 @@ describe('共享组件中文文案', () => {
     await wrapper.get('.c-select-input').trigger('click');
     expect(wrapper.get('input').attributes('placeholder')).toBe('搜索…');
     expect(wrapper.text()).toContain('未找到结果');
+  });
+
+  it('键值列表的空值默认显示中文占位文案', () => {
+    const wrapper = mount(CKeyValueListItem, {
+      props: { item: { label: '测试字段', value: null } },
+      global: { plugins: [i18nPlugin] },
+    });
+
+    expect(wrapper.text()).toBe('暂无');
   });
 });

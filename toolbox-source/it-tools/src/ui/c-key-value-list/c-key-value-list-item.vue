@@ -20,7 +20,7 @@ const { t } = useI18n();
     <c-text-copyable :value="String(item.value)" :show-icon="item.showCopyButton ?? true" />
   </div>
   <div v-else-if="_.isNil(item.value) || item.value === ''" op-70>
-    {{ item.placeholder ?? 'N/A' }}
+    {{ item.placeholder ?? t('common.notAvailable') }}
   </div>
   <div v-else>
     <c-text-copyable :value="item.value" :show-icon="item.showCopyButton ?? true" />

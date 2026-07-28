@@ -15,6 +15,7 @@ common:
   output: Output
   yes: 'Yes'
   no: 'No'
+  notAvailable: Not available
   dataTable: Data table
   selectLanguage: Select a language
   commandSearch: Type to search a tool or a command…

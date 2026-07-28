@@ -15,6 +15,7 @@ common:
   output: 输出
   yes: 是
   no: 否
+  notAvailable: 暂无
   dataTable: 数据表格
   selectLanguage: 选择语言
   commandSearch: 搜索工具或命令…
