@@ -94,10 +94,18 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
 
     @Override
     public void requireFileAccess(UserId userId, WorkspaceId workspaceId, boolean allowUnmanagedWorkspace) {
-        requireManagedAccess(userId, workspaceId, allowUnmanagedWorkspace);
+        requireClassifiedFileAccess(userId, workspaceId, allowUnmanagedWorkspace);
     }
 
-    private void requireManagedAccess(
+    @Override
+    public FileWorkspaceKind requireClassifiedFileAccess(
+            UserId userId,
+            WorkspaceId workspaceId,
+            boolean allowUnmanagedWorkspace) {
+        return requireManagedAccess(userId, workspaceId, allowUnmanagedWorkspace);
+    }
+
+    private FileWorkspaceKind requireManagedAccess(
             UserId userId,
             WorkspaceId workspaceId,
             boolean allowUnmanagedWorkspace) {
@@ -124,10 +132,10 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
                         managedWorkspaceRepository.findPersonalWorkspaceByRuntimeWorkspace(workspaceId);
                 if (personal.isEmpty()) {
                     if (requireAppSourceAccessIfMapped(userId, workspaceId)) {
-                        return;
+                        return FileWorkspaceKind.APP_SOURCE;
                     }
                     if (allowUnmanagedWorkspace) {
-                        return;
+                        return FileWorkspaceKind.STANDARD;
                     }
                     throw new PlatformException(
                             ErrorCode.FORBIDDEN,
@@ -160,6 +168,7 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
                     "当前用户已不是应用有效成员，不能创建会话运行上下文",
                     Map.of("appId", appId.value(), "appName", application.appName()));
         }
+        return FileWorkspaceKind.STANDARD;
     }
 
     /**

@@ -1,7 +1,6 @@
 package com.enterprise.testagent.api.web.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -53,7 +52,7 @@ class AppSourceOperationTicketServiceTest {
     void materializationAcceptedOperationIdCanAlwaysBeUsedToCreateATicket() {
         AppSourceApplicationService.MaterializationCommand command =
                 new AppSourceApplicationService.MaterializationCommand(
-                        "release..1", null, "main", "b".repeat(40), List.of(),
+                        "\u00a0release..1\u00a0", null, "main", "b".repeat(40), List.of(),
                         AppSourcePurpose.TEAM, 1, false);
         AppSourceApplicationService appSources = mock(AppSourceApplicationService.class);
         when(appSources.getOperation("release..1", USER_ID, false)).thenReturn(operation());
@@ -67,9 +66,13 @@ class AppSourceOperationTicketServiceTest {
                 "token", USER_ID, "U001", "普通用户", List.of("USER"),
                 NOW.minusSeconds(60), NOW.plusSeconds(3600));
 
-        assertThatCode(() -> service.createTicket(
-                        principal, command.operationId(), "https://console.example", "trace_ticket"))
-                .doesNotThrowAnyException();
+        assertThat(command.operationId()).isEqualTo("release..1");
+        AppSourceDtos.TicketResponse response = service.createTicket(
+                principal, command.operationId(), "https://console.example", "trace_ticket");
+        assertThat(response.webSocketUrl()).contains("/app-source-operations/release..1/ws");
+        assertThat(service.consume(
+                response.ticket(), "\u00a0release..1\u00a0", "https://console.example").operationId())
+                .isEqualTo("release..1");
     }
 
     @Test

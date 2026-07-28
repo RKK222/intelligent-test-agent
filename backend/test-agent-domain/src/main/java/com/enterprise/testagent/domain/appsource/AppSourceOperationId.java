@@ -11,7 +11,7 @@ public record AppSourceOperationId(String value) {
 
     public AppSourceOperationId {
         String original = value;
-        value = value == null ? "" : value.trim();
+        value = value == null ? "" : trimEcmaScriptWhitespace(value);
         if (value.isEmpty()
                 || value.length() > MAX_LENGTH
                 || ".".equals(value)
@@ -27,6 +27,31 @@ public record AppSourceOperationId(String value) {
     /** 返回规范化字符串，便于仍以字符串持久化的端口复用相同校验。 */
     public static String normalize(String value) {
         return new AppSourceOperationId(value).value();
+    }
+
+    /**
+     * 与 ECMAScript TrimString 对齐，显式固定 WhiteSpace 与 LineTerminator 集合，避免 Java 版本或 locale 差异。
+     */
+    private static String trimEcmaScriptWhitespace(String value) {
+        int start = 0;
+        int end = value.length();
+        while (start < end && isEcmaScriptWhitespace(value.charAt(start))) {
+            start++;
+        }
+        while (end > start && isEcmaScriptWhitespace(value.charAt(end - 1))) {
+            end--;
+        }
+        return value.substring(start, end);
+    }
+
+    private static boolean isEcmaScriptWhitespace(char character) {
+        return switch (character) {
+            // 使用数值常量，避免 Java 在词法分析前展开 Unicode 行终止符转义。
+            case 0x0009, 0x000A, 0x000B, 0x000C, 0x000D,
+                    0x0020, 0x00A0, 0x1680, 0x2028, 0x2029,
+                    0x202F, 0x205F, 0x3000, 0xFEFF -> true;
+            default -> character >= 0x2000 && character <= 0x200A;
+        };
     }
 
     private static boolean containsUnsafePathCharacter(String value) {

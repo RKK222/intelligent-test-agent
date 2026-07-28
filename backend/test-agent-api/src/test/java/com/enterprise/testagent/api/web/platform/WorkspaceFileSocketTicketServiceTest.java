@@ -105,9 +105,8 @@ class WorkspaceFileSocketTicketServiceTest {
         WorkspaceFileSocketTicketService service = service(workspaceService, assignmentService, authorizer);
         WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
         when(workspaceService.currentLinuxServerId()).thenReturn("10.8.0.12");
-        Mockito.doThrow(new PlatformException(ErrorCode.FORBIDDEN, "成员关系已失效"))
-                .when(authorizer)
-                .requireFileAccess(USER_ID, workspaceId, true);
+        when(authorizer.requireClassifiedFileAccess(USER_ID, workspaceId, true))
+                .thenThrow(new PlatformException(ErrorCode.FORBIDDEN, "成员关系已失效"));
 
         assertThatThrownBy(() -> service.createTicket(
                         principal(List.of(Dictionary.ROLE_SUPER_ADMIN)),

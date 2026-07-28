@@ -8,6 +8,7 @@ import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
+import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer.FileWorkspaceKind;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessFileRoutingAffinity;
@@ -86,7 +87,7 @@ class WorkspaceFileSocketTicketService {
         }
         if (MODE_WORKSPACE.equals(mode)) {
             String workspaceId = requiredWorkspaceId(request);
-            workspaceAccessAuthorizer.requireFileAccess(
+            FileWorkspaceKind workspaceKind = workspaceAccessAuthorizer.requireClassifiedFileAccess(
                     principal.userId(),
                     new WorkspaceId(workspaceId),
                     superAdmin);
@@ -96,8 +97,18 @@ class WorkspaceFileSocketTicketService {
                     : null;
             requireReadyAgentOnCurrentServer(process, currentLinuxServerId, workspaceId);
             workspaceService.requireWorkspaceOnCurrentServer(new WorkspaceId(workspaceId), traceId);
-            return response(ticketStore.issue(workspaceId, currentLinuxServerId, agentLinuxServerId, superAdmin, appAdmin,
-                    principal.userId().value(), mode, null, null, traceId));
+            return response(ticketStore.issue(
+                    workspaceId,
+                    currentLinuxServerId,
+                    agentLinuxServerId,
+                    workspaceKind == FileWorkspaceKind.APP_SOURCE,
+                    superAdmin,
+                    appAdmin,
+                    principal.userId().value(),
+                    mode,
+                    null,
+                    null,
+                    traceId));
         }
         if (!MODE_DIRECTORY_PICKER.equals(mode)) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "文件 WebSocket ticket 模式无效", Map.of("mode", mode));
@@ -141,7 +152,12 @@ class WorkspaceFileSocketTicketService {
                 || !Objects.equals(currentLinuxServerId, currentAffinity.linuxServerId())) {
             throw workspaceRpcDenied();
         }
-        workspaceAccessAuthorizer.requireFileAccess(userId, workspaceId, ticket.superAdmin());
+        boolean allowUnmanagedWorkspace = ticket.superAdmin() && !ticket.appSourceWorkspace();
+        FileWorkspaceKind currentKind = workspaceAccessAuthorizer.requireClassifiedFileAccess(
+                userId, workspaceId, allowUnmanagedWorkspace);
+        if (ticket.appSourceWorkspace() && currentKind != FileWorkspaceKind.APP_SOURCE) {
+            throw workspaceRpcDenied();
+        }
         workspaceService.requireWorkspaceOnCurrentServer(workspaceId, ticket.traceId());
     }
 

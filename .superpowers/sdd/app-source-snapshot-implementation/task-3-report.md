@@ -166,3 +166,40 @@ Mockito/JDK 相关测试统一使用：
 - **安全：** 旧 socket 不再保留签票时服务器归属；binding 迁移、错误 JVM、Workspace/副本错服均在调用文件服务前失败关闭。
 - **兼容性：** 仅 trim 后精确 `.`/`..` 从历史可接受变为拒绝；普通合法 ID（包括 `release..1`）继续可查询、签票和连接。旧式语义错配或 optional 字段错型的进度帧会被客户端转换为安全失败。
 - **剩余风险：** 无本轮新增未完成事项。按 Task 3 协作约束不修改 `.agents/session-log.*.md`，由最终汇总任务统一更新。
+
+## 独立复审修复（Round 3）
+
+本轮基于 Round 2 提交 `a690cba90` 修复 1 个 Important，并在同一文件 WebSocket 安全边界内修复 1 个复审追加的失败关闭问题。没有修改 OpenCode 快照、generated SDK、数据库结构、SQL、Flyway 或 `.env.local`；本节所在提交即 Round 3 修复提交。
+
+### operationId ECMAScript 空白语义
+
+后端原先使用 Java `String.trim()`，只移除 `U+0000–U+0020`，而前端 ECMAScript `trim()` 还移除 NBSP、Unicode Zs、行分隔符和 BOM。结果是后端可把 NBSP 包裹的 `..` 当作普通 ID 持久化，前端却先规范化成危险点段并拒绝查询、签票或连接。现在领域值对象显式固定 ECMAScript WhiteSpace + LineTerminator 的 BMP 集合：`U+0009–U+000D`、`U+0020`、`U+00A0`、`U+1680`、`U+2000–U+200A`、`U+2028`、`U+2029`、`U+202F`、`U+205F`、`U+3000`、`U+FEFF`；不依赖 locale、Java 版本或 `trim/strip` 的不同定义。前端继续使用规范规定的原生 ECMAScript `trim()`。
+
+RED：`AppSourceOperationIdTest` 2 项均失败——NBSP 包裹的 `release..1` 没有规范化，NBSP 包裹的 `..` 没有拒绝。GREEN：领域测试覆盖上述完整集合、ASCII 空白、精确 `.`/`..` 和合法内部双点；物化/重试命令证明 NBSP 输入统一持久化为 `release..1`，API ticket 测试进一步证明同一规范值可用于后续 GET、签票和 consume/connect，前端测试覆盖 GET、ticket 与 WebSocket connect 的 NBSP/ASCII 边界。
+
+实现时还捕获到 Java 会在词法分析前展开 Unicode 转义，直接写 `U+000A` 字符字面量会使源码断行并编译失败；最终使用带中文说明的显式数值 switch 常量，集合仍保持可审计且不受运行环境影响。
+
+### APP_SOURCE 文件票防降级绑定
+
+根因是文件 ticket 只保存 `superAdmin`，每条 RPC 调用 `requireFileAccess(..., allowUnmanaged=ticket.superAdmin)`。若签票时存在的 AppSource replica 映射在同一 socket 生命周期中消失，超级管理员的下一条 RPC 会被误判成真实非托管服务器工作区并继续进入文件服务。
+
+现在 `ConversationWorkspaceAccessAuthorizer` 在同一次权威读取和授权判断中返回 `STANDARD/APP_SOURCE` 分类，避免分类与授权分两次读取产生 TOCTOU；JVM 本地 ticket 固定签票时的 `appSourceWorkspace` 事实。已绑定 APP_SOURCE 的票在每条 RPC 都关闭 unmanaged 兼容入口，并要求当前授权再次返回 APP_SOURCE；映射消失或变成其它工作区类型时统一在文件服务前 `FORBIDDEN`。真实未映射的服务器工作区仍可在签票和后续 RPC 中由 `SUPER_ADMIN` 按既有兼容路径访问。
+
+RED：真实 authorizer 驱动的 handler 用例中，同一超级管理员 socket 首条 RPC 成功，删除 replica 映射后第二条仍返回 result，文件服务被调用两次。GREEN：第二条改为 `FORBIDDEN`，文件服务只调用一次；独立正例证明真正的非托管超级管理员 ticket 仍返回 result。接口新增默认分类方法并保留旧构造/签发重载，减少既有实现和包内调用的兼容影响。
+
+### Round 3 分层验证
+
+- domain/workspace 定向：`AppSourceOperationIdTest` 2/2、`AppSourceApplicationServiceTest` 20/20、`AppSourceWorkspaceAccessTest` 6/6，共 28/28，通过。
+- API 定向：`WorkspaceFileWebSocketHandlerTest` 27/27、`WorkspaceFileSocketTicketServiceTest` 8/8、`AppSourceOperationTicketServiceTest` 3/3、`AppSourceApiContextTest` 1/1，共 39/39，通过。
+- frontend：`app-source.test.ts` 1 file / 7 tests；`@test-agent/backend-api` 与 `@test-agent/shared-types` typecheck，均通过。
+- 完整 `test-agent-api -am` 未重复执行；Round 1 已记录与本轮无关的 `RunRuntimeLossConvergenceSchedulerTest` 1 秒 Awaitility 既有波动，本轮按受影响领域、工作区、API 和前端边界执行定向回归。
+- `git diff --check` 在提交前执行；提交前按规范回顾全部 `.agents/session-log*.md` 并精确暂存 Round 3 文件。
+
+### Round 3 影响与剩余风险
+
+- **API/事件：** 未新增或修改 URL、DTO、RunEvent 或 WebSocket envelope；只统一既有 operationId 规范化，并加强 JVM 本地 workspace ticket 的内部授权事实。
+- **数据库：** 无结构、migration、SQL 或持久化模型变化。历史上若已存在 NBSP 包裹的 operationId，前端原本即无法按原值访问；本轮不新增自动数据迁移，后续新受理和重试统一写入规范值。
+- **性能：** operationId 只做两端线性边界扫描；文件授权分类来自原有同一次 Repository 判断，不新增第二次分类查询。每条 workspace RPC 仍执行 Round 2 已建立的实时授权和 affinity 复核。
+- **安全：** 修复超级管理员 APP_SOURCE 票在 replica 映射消失后降级为非托管工作区的授权绕过，且保留真正非托管服务器工作区的明确兼容入口。
+- **兼容性：** ASCII 空白和普通合法 ID 行为不变；ECMAScript 额外空白现在与浏览器统一规范化，精确 `.`/`..` 仍拒绝，`release..1` 继续合法。新增接口方法、ticket 构造器和 store 签发参数均保留最小兼容重载。
+- **剩余风险：** 无本轮新增未完成事项。按 Task 3 协作约束不修改 `.agents/session-log.*.md`，由最终汇总任务统一更新。

@@ -448,17 +448,17 @@ class AppSourceApplicationServiceTest {
     @Test
     void materializationAndRetryCommandsRejectOnlyExactDotSegmentOperationIds() {
         assertThatThrownBy(() -> new AppSourceApplicationService.MaterializationCommand(
-                        ".", null, "main", COMMIT,
+                        " \t.\r\n", null, "main", COMMIT,
                         List.of(new AppSourceApplicationService.SelectedPathCommand(
                                 "src", AppSourcePathType.DIRECTORY)),
                         AppSourcePurpose.TEAM, 2, false))
                 .isInstanceOfSatisfying(PlatformException.class,
                         exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
-        assertThatThrownBy(() -> new AppSourceApplicationService.RetryCommand(" .. ", 4L))
+        assertThatThrownBy(() -> new AppSourceApplicationService.RetryCommand("\u00a0..\u00a0", 4L))
                 .isInstanceOfSatisfying(PlatformException.class,
                         exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
 
-        assertThat(new AppSourceApplicationService.RetryCommand("release..1", 4L).operationId())
+        assertThat(new AppSourceApplicationService.RetryCommand("\u00a0release..1\u00a0", 4L).operationId())
                 .isEqualTo("release..1");
     }
 

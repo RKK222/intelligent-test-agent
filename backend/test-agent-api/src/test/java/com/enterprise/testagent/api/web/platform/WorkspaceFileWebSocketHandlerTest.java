@@ -7,13 +7,30 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.enterprise.testagent.domain.appsource.AppSourcePathType;
+import com.enterprise.testagent.domain.appsource.AppSourcePurpose;
+import com.enterprise.testagent.domain.appsource.AppSourceReplica;
+import com.enterprise.testagent.domain.appsource.AppSourceReplicaStatus;
+import com.enterprise.testagent.domain.appsource.AppSourceRepository;
+import com.enterprise.testagent.domain.appsource.AppSourceRepositorySlot;
+import com.enterprise.testagent.domain.appsource.AppSourceSelectedPath;
+import com.enterprise.testagent.domain.appsource.AppSourceSnapshot;
+import com.enterprise.testagent.domain.appsource.AppSourceSnapshotStatus;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
+import com.enterprise.testagent.domain.configuration.ApplicationDefinition;
+import com.enterprise.testagent.domain.configuration.ApplicationId;
+import com.enterprise.testagent.domain.configuration.CodeRepository;
+import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
+import com.enterprise.testagent.domain.configuration.CodeRepositoryType;
+import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
+import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.enterprise.testagent.workspace.FileContentResponse;
 import com.enterprise.testagent.workspace.FilePreviewChunkResponse;
 import com.enterprise.testagent.workspace.WorkspaceApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceDirectoryService;
 import com.enterprise.testagent.workspace.WorkspaceFileUpload;
 import com.enterprise.testagent.workspace.AgentConfigApplicationService;
+import com.enterprise.testagent.workspace.ManagedConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.workspace.WorkspaceViewApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceViewEntry;
 import com.enterprise.testagent.workspace.WorkspaceViewListResponse;
@@ -24,7 +41,10 @@ import com.enterprise.testagent.workspace.WorkspaceViewSource;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
+import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
+import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
@@ -38,6 +58,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -803,6 +824,91 @@ class WorkspaceFileWebSocketHandlerTest {
     }
 
     @Test
+    void sameSuperAdminSocketRejectsNextRpcWhenBoundAppSourceReplicaMappingDisappears() {
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
+        AppSourceRepository appSources = Mockito.mock(AppSourceRepository.class);
+        ConversationWorkspaceAccessAuthorizer authorizer = appSourceAuthorizer(workspaceId, appSources);
+        WorkspaceFileSocketTicketService ticketService = realWorkspaceTicketService(
+                workspaceService, assignmentService, authorizer);
+        when(workspaceService.currentLinuxServerId()).thenReturn("server-a");
+        when(workspaceService.listFiles(workspaceId, "")).thenReturn(List.of());
+        when(assignmentService.fileRoutingAffinity(
+                new UserId("usr_1234567890abcdef"), "opencode", TRACE_ID))
+                .thenReturn(readyAffinity("server-a"));
+        when(appSources.findReplicaByRuntimeWorkspaceId(workspaceId.value())).thenReturn(
+                Optional.of(appSourceReplica(workspaceId)),
+                Optional.of(appSourceReplica(workspaceId)),
+                Optional.empty());
+        ticketService.createTicket(
+                workspacePrincipal(true),
+                new WorkspaceFileSocketDtos.TicketRequest(workspaceId.value(), "server-a", "workspace"),
+                TRACE_ID);
+        WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_dynamic",
+                List.of(
+                        """
+                        {"id":"req_1","op":"workspace.list","params":{"workspaceId":"wrk_1234567890abcdef","path":""}}
+                        """,
+                        """
+                        {"id":"req_2","op":"workspace.list","params":{"workspaceId":"wrk_1234567890abcdef","path":""}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).hasSize(2);
+        assertThat(session.sentText().get(0)).contains("\"type\":\"result\"");
+        assertThat(session.sentText().get(1)).contains("\"type\":\"error\"", "\"code\":\"FORBIDDEN\"");
+        verify(workspaceService, times(1)).listFiles(workspaceId, "");
+    }
+
+    @Test
+    void superAdminUnmanagedWorkspaceTicketRemainsCompatible() {
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
+        ConversationWorkspaceAccessAuthorizer authorizer = appSourceAuthorizer(
+                workspaceId, Mockito.mock(AppSourceRepository.class));
+        WorkspaceFileSocketTicketService ticketService = realWorkspaceTicketService(
+                workspaceService, assignmentService, authorizer);
+        when(workspaceService.currentLinuxServerId()).thenReturn("server-a");
+        when(workspaceService.listFiles(workspaceId, "")).thenReturn(List.of());
+        when(assignmentService.fileRoutingAffinity(
+                new UserId("usr_1234567890abcdef"), "opencode", TRACE_ID))
+                .thenReturn(readyAffinity("server-a"));
+        ticketService.createTicket(
+                workspacePrincipal(true),
+                new WorkspaceFileSocketDtos.TicketRequest(workspaceId.value(), "server-a", "workspace"),
+                TRACE_ID);
+        WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_dynamic",
+                List.of("""
+                        {"id":"req_1","op":"workspace.list","params":{"workspaceId":"wrk_1234567890abcdef","path":""}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).singleElement().satisfies(message ->
+                assertThat(message).contains("\"type\":\"result\""));
+        verify(workspaceService).listFiles(workspaceId, "");
+    }
+
+    @Test
     void rejectsWorkspaceRpcWhenTicketServerNoLongerMatchesCurrentJvm() {
         WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
@@ -894,6 +1000,43 @@ class WorkspaceFileWebSocketHandlerTest {
                 authorizer);
     }
 
+    private static ConversationWorkspaceAccessAuthorizer appSourceAuthorizer(
+            WorkspaceId workspaceId,
+            AppSourceRepository appSources) {
+        ManagedWorkspaceRepository managed = Mockito.mock(ManagedWorkspaceRepository.class);
+        ConfigurationManagementRepository configuration = Mockito.mock(ConfigurationManagementRepository.class);
+        WorkspaceRepository workspaces = Mockito.mock(WorkspaceRepository.class);
+        ApplicationId appId = new ApplicationId("app_1");
+        CodeRepositoryId repositoryId = new CodeRepositoryId("repo_source");
+        Instant acceptedAt = Instant.parse("2099-01-01T00:00:00Z");
+        when(appSources.findSlot(repositoryId)).thenReturn(Optional.of(new AppSourceRepositorySlot(
+                repositoryId, 1L, null, 2L, "release..1", 1L, NOW, NOW)));
+        when(appSources.findSnapshot(repositoryId, 1L)).thenReturn(Optional.of(new AppSourceSnapshot(
+                repositoryId, 1L, "source", AppSourcePurpose.TEAM,
+                new UserId("usr_1234567890abcdef"), "main", "a".repeat(40),
+                List.of(new AppSourceSelectedPath(".", AppSourcePathType.DIRECTORY)),
+                "b".repeat(64), acceptedAt, acceptedAt.plusSeconds(3600),
+                AppSourceSnapshotStatus.ACTIVE, NOW, NOW)));
+        when(configuration.findApplicationsByRepository(repositoryId)).thenReturn(List.of(
+                new ApplicationDefinition(appId, "应用", true, NOW, NOW)));
+        when(configuration.findRepositoriesByApplication(appId)).thenReturn(List.of(new CodeRepository(
+                repositoryId, "https://git.example/source.git", "源码", "source",
+                CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(), false, NOW, NOW)));
+        when(configuration.isActiveMember(appId, new UserId("usr_1234567890abcdef"))).thenReturn(true);
+        when(workspaces.findById(workspaceId)).thenReturn(Optional.of(new Workspace(
+                workspaceId, "Source", "/source", WorkspaceStatus.ACTIVE,
+                NOW.minusSeconds(60), NOW, "server-a", TRACE_ID)));
+        return new ManagedConversationWorkspaceAccessAuthorizer(
+                managed, configuration, appSources, workspaces);
+    }
+
+    private static AppSourceReplica appSourceReplica(WorkspaceId workspaceId) {
+        return new AppSourceReplica(
+                new CodeRepositoryId("repo_source"), 1L, new LinuxServerId("server-a"), workspaceId,
+                AppSourceReplicaStatus.READY, null, null, 1, null, null, null,
+                NOW.minusSeconds(60), NOW);
+    }
+
     private static UserOpencodeProcessFileRoutingAffinity readyAffinity(String linuxServerId) {
         return new UserOpencodeProcessFileRoutingAffinity(
                 UserOpencodeProcessAvailability.READY,
@@ -908,12 +1051,16 @@ class WorkspaceFileWebSocketHandlerTest {
     }
 
     private static AuthPrincipal workspacePrincipal() {
+        return workspacePrincipal(false);
+    }
+
+    private static AuthPrincipal workspacePrincipal(boolean superAdmin) {
         return new AuthPrincipal(
                 "token_123",
                 new UserId("usr_1234567890abcdef"),
                 "tester",
                 "tester",
-                List.of(Dictionary.ROLE_USER),
+                List.of(superAdmin ? Dictionary.ROLE_SUPER_ADMIN : Dictionary.ROLE_USER),
                 NOW,
                 NOW.plusSeconds(3600));
     }

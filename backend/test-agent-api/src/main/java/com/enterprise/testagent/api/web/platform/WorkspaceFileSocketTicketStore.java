@@ -37,6 +37,7 @@ class WorkspaceFileSocketTicketStore {
             String workspaceId,
             String linuxServerId,
             String agentLinuxServerId,
+            boolean appSourceWorkspace,
             boolean superAdmin,
             boolean appAdmin,
             String userId,
@@ -49,6 +50,7 @@ class WorkspaceFileSocketTicketStore {
                 workspaceId,
                 linuxServerId,
                 agentLinuxServerId,
+                appSourceWorkspace,
                 superAdmin,
                 appAdmin,
                 userId,
@@ -66,11 +68,26 @@ class WorkspaceFileSocketTicketStore {
             String linuxServerId,
             String agentLinuxServerId,
             boolean superAdmin,
+            boolean appAdmin,
+            String userId,
             String mode,
             String scope,
             String worktreeId,
             String traceId) {
-        return issue(workspaceId, linuxServerId, agentLinuxServerId, superAdmin, superAdmin, null,
+        return issue(workspaceId, linuxServerId, agentLinuxServerId, false, superAdmin, appAdmin,
+                userId, mode, scope, worktreeId, traceId);
+    }
+
+    WorkspaceFileSocketTicket issue(
+            String workspaceId,
+            String linuxServerId,
+            String agentLinuxServerId,
+            boolean superAdmin,
+            String mode,
+            String scope,
+            String worktreeId,
+            String traceId) {
+        return issue(workspaceId, linuxServerId, agentLinuxServerId, false, superAdmin, superAdmin, null,
                 mode, scope, worktreeId, traceId);
     }
 

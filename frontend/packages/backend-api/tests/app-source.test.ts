@@ -46,8 +46,8 @@ describe("app-source backend client", () => {
     await client.openAppSource("app/demo", "repo/source", 4);
     await client.getRecentAppSource();
     await client.clearRecentAppSource();
-    await client.getAppSourceOperation("release..1");
-    await client.createAppSourceOperationTicket("release..1");
+    await client.getAppSourceOperation("\u00a0release..1\u00a0");
+    await client.createAppSourceOperationTicket(" release..1 ");
 
     expect(fetcher.mock.calls.map((call) => [call[0], call[1]?.method, call[1]?.body])).toEqual([
       [
@@ -129,7 +129,7 @@ describe("app-source backend client", () => {
     });
     const events: AppSourceProgressEvent[] = [];
 
-    const first = await client.connectAppSourceProgress("release..1", (event) => events.push(event));
+    const first = await client.connectAppSourceProgress("\u00a0release..1\u00a0", (event) => events.push(event));
     sockets[0]?.message(JSON.stringify(progressSnapshot("release..1")));
     first.close();
     const second = await client.connectAppSourceProgress("release..1", (event) => events.push(event));
@@ -180,7 +180,7 @@ describe("app-source backend client", () => {
     });
 
     await expect(client.getAppSourceOperation(".")).rejects.toThrow("operationId");
-    await expect(client.createAppSourceOperationTicket(" .. ")).rejects.toThrow("operationId");
+    await expect(client.createAppSourceOperationTicket("\u00a0..\u00a0")).rejects.toThrow("operationId");
     await expect(client.connectAppSourceProgress(".", () => undefined)).rejects.toThrow("operationId");
     expect(fetcher).not.toHaveBeenCalled();
     expect(sockets).toHaveLength(0);

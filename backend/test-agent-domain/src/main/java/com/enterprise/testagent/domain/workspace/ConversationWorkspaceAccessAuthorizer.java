@@ -7,6 +7,12 @@ import com.enterprise.testagent.domain.user.UserId;
  */
 public interface ConversationWorkspaceAccessAuthorizer {
 
+    /** 文件访问授权时识别的业务工作区类型；分类与授权必须来自同一次权威判断。 */
+    enum FileWorkspaceKind {
+        STANDARD,
+        APP_SOURCE
+    }
+
     /**
      * 托管 Workspace 必须属于已启用应用且当前用户仍是有效成员；非托管历史 Workspace 沿用 Session owner 规则。
      */
@@ -19,5 +25,18 @@ public interface ConversationWorkspaceAccessAuthorizer {
      */
     default void requireFileAccess(UserId userId, WorkspaceId workspaceId, boolean allowUnmanagedWorkspace) {
         requireAccess(userId, workspaceId);
+    }
+
+    /**
+     * 执行文件授权并返回同一次判断识别出的工作区类型，供短期 ticket 固定安全边界。
+     *
+     * <p>兼容实现默认视为普通工作区；托管实现必须在同一次 Repository 读取中返回精确分类。
+     */
+    default FileWorkspaceKind requireClassifiedFileAccess(
+            UserId userId,
+            WorkspaceId workspaceId,
+            boolean allowUnmanagedWorkspace) {
+        requireFileAccess(userId, workspaceId, allowUnmanagedWorkspace);
+        return FileWorkspaceKind.STANDARD;
     }
 }

@@ -10,6 +10,7 @@ record WorkspaceFileSocketTicket(
         String workspaceId,
         String linuxServerId,
         String agentLinuxServerId,
+        boolean appSourceWorkspace,
         boolean superAdmin,
         boolean appAdmin,
         String userId,
@@ -25,12 +26,29 @@ record WorkspaceFileSocketTicket(
             String linuxServerId,
             String agentLinuxServerId,
             boolean superAdmin,
+            boolean appAdmin,
+            String userId,
             String mode,
             String scope,
             String worktreeId,
             String traceId,
             Instant expiresAt) {
-        this(ticket, workspaceId, linuxServerId, agentLinuxServerId, superAdmin, superAdmin,
+        this(ticket, workspaceId, linuxServerId, agentLinuxServerId, false, superAdmin, appAdmin,
+                userId, mode, scope, worktreeId, traceId, expiresAt);
+    }
+
+    WorkspaceFileSocketTicket(
+            String ticket,
+            String workspaceId,
+            String linuxServerId,
+            String agentLinuxServerId,
+            boolean superAdmin,
+            String mode,
+            String scope,
+            String worktreeId,
+            String traceId,
+            Instant expiresAt) {
+        this(ticket, workspaceId, linuxServerId, agentLinuxServerId, false, superAdmin, superAdmin,
                 null, mode, scope, worktreeId, traceId, expiresAt);
     }
 }
