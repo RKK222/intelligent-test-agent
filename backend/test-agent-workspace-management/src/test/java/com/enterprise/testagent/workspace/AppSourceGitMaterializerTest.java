@@ -52,6 +52,43 @@ class AppSourceGitMaterializerTest {
     }
 
     @Test
+    void realMaterializerReportsEveryActionBoundaryBeforeCompletion() throws Exception {
+        GitFixture fixture = fixture();
+        Path target = tempDir.resolve("appsource/progress-source");
+        List<String> events = new java.util.ArrayList<>();
+        AppSourceGitMaterializer.Progress progress = new AppSourceGitMaterializer.Progress() {
+            @Override
+            public void started(String stepCode) {
+                events.add("RUNNING:" + stepCode);
+            }
+
+            @Override
+            public void succeeded(String stepCode) {
+                events.add("SUCCEEDED:" + stepCode);
+            }
+        };
+
+        new AppSourceGitMaterializer().materialize(
+                new AppSourceGitMaterializer.Request(
+                        target, fixture.remoteUri(), "main", fixture.commit(),
+                        List.of(new AppSourceSelectedPath("src", AppSourcePathType.DIRECTORY)),
+                        null, 3L, Instant.parse("2026-07-30T04:00:00Z")),
+                result -> events.add("COMPLETION"),
+                progress);
+
+        assertThat(events).containsExactly(
+                "RUNNING:STAGING", "SUCCEEDED:STAGING",
+                "RUNNING:SHALLOW_CLONE", "SUCCEEDED:SHALLOW_CLONE",
+                "RUNNING:FETCH_FIXED_COMMIT", "SUCCEEDED:FETCH_FIXED_COMMIT",
+                "RUNNING:SPARSE_CHECKOUT", "SUCCEEDED:SPARSE_CHECKOUT",
+                "RUNNING:VALIDATE", "SUCCEEDED:VALIDATE",
+                "RUNNING:REMOVE_GIT_METADATA", "SUCCEEDED:REMOVE_GIT_METADATA",
+                "RUNNING:WRITE_INDEX", "SUCCEEDED:WRITE_INDEX",
+                "RUNNING:ATOMIC_REPLACE", "SUCCEEDED:ATOMIC_REPLACE",
+                "COMPLETION");
+    }
+
+    @Test
     void noConeStdinTreatsFileAndDirectorySelectionsWithSpecialCharactersAsExactPaths() throws Exception {
         GitFixture fixture = fixture();
         Path target = tempDir.resolve("appsource/special-source");

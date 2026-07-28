@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -12,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.domain.appsource.AppSourceOperation;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationStatus;
+import com.enterprise.testagent.domain.appsource.AppSourceOperationStep;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationType;
 import com.enterprise.testagent.domain.appsource.AppSourcePathType;
 import com.enterprise.testagent.domain.appsource.AppSourcePurpose;
@@ -22,6 +24,8 @@ import com.enterprise.testagent.domain.appsource.AppSourceRepositorySlot;
 import com.enterprise.testagent.domain.appsource.AppSourceSelectedPath;
 import com.enterprise.testagent.domain.appsource.AppSourceSnapshot;
 import com.enterprise.testagent.domain.appsource.AppSourceSnapshotStatus;
+import com.enterprise.testagent.domain.appsource.AppSourceStepScope;
+import com.enterprise.testagent.domain.appsource.AppSourceStepStatus;
 import com.enterprise.testagent.domain.configuration.ApplicationId;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
@@ -35,6 +39,7 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 class AppSourceReplicaResultRecorderTest {
 
@@ -73,6 +78,13 @@ class AppSourceReplicaResultRecorderTest {
 
         recorder.recordSuccess(operation, claimed, "lease-a", newWorkspace, INDEX_SHA, NOW);
 
+        InOrder snapshotOrder = inOrder(appSources);
+        snapshotOrder.verify(appSources).updateSnapshotStatusAndIndex(
+                REPOSITORY_ID, 1L, AppSourceSnapshotStatus.ACTIVE,
+                AppSourceSnapshotStatus.EXPIRED, INDEX_SHA, NOW);
+        snapshotOrder.verify(appSources).updateSnapshotStatusAndIndex(
+                REPOSITORY_ID, 2L, AppSourceSnapshotStatus.PENDING,
+                AppSourceSnapshotStatus.ACTIVE, INDEX_SHA, NOW);
         verify(appSources).updateSnapshotStatusAndIndex(
                 REPOSITORY_ID, 1L, AppSourceSnapshotStatus.ACTIVE,
                 AppSourceSnapshotStatus.EXPIRED, INDEX_SHA, NOW);
@@ -99,6 +111,7 @@ class AppSourceReplicaResultRecorderTest {
         AppSourceOperation operation = operation();
         AppSourceReplica claimed = replica(2L, SERVER_B, AppSourceReplicaStatus.RUNNING, null);
         when(appSources.updateReplicaIfLease(any(), eq("lease-b"), eq(NOW))).thenReturn(true);
+        when(appSources.findSlotForUpdate(REPOSITORY_ID)).thenReturn(Optional.of(slot(2L, null, 9L)));
         when(appSources.findReplicas(REPOSITORY_ID, 2L)).thenReturn(List.of(
                 replica(2L, SERVER_A, AppSourceReplicaStatus.READY, new WorkspaceId("wrk_a")),
                 replica(2L, SERVER_B, AppSourceReplicaStatus.FAILED, null)));
@@ -110,6 +123,27 @@ class AppSourceReplicaResultRecorderTest {
                 AppSourceOperationStatus.PARTIAL_FAILED, NOW);
         verify(appSources, never()).updateSnapshotStatusAndIndex(
                 eq(REPOSITORY_ID), eq(2L), any(), eq(AppSourceSnapshotStatus.FAILED), any(), eq(NOW));
+    }
+
+    @Test
+    void failureLocksRepositorySlotAfterReplicaCasBeforeReadingAggregateState() {
+        AppSourceRepository appSources = mock(AppSourceRepository.class);
+        WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        AppSourceReplicaResultRecorder recorder = new AppSourceReplicaResultRecorder(appSources, workspaces);
+        AppSourceOperation operation = operation();
+        AppSourceReplica claimed = replica(2L, SERVER_B, AppSourceReplicaStatus.RUNNING, null);
+        when(appSources.updateReplicaIfLease(any(), eq("lease-b"), eq(NOW))).thenReturn(true);
+        when(appSources.findSlotForUpdate(REPOSITORY_ID)).thenReturn(Optional.of(slot(2L, null, 9L)));
+        when(appSources.findReplicas(REPOSITORY_ID, 2L)).thenReturn(List.of(
+                replica(2L, SERVER_A, AppSourceReplicaStatus.READY, new WorkspaceId("wrk_a")),
+                replica(2L, SERVER_B, AppSourceReplicaStatus.FAILED, null)));
+
+        recorder.recordFailure(operation, claimed, "lease-b", "GIT_FAILED", "源码同步失败", NOW);
+
+        InOrder order = inOrder(appSources);
+        order.verify(appSources).updateReplicaIfLease(any(), eq("lease-b"), eq(NOW));
+        order.verify(appSources).findSlotForUpdate(REPOSITORY_ID);
+        order.verify(appSources).findReplicas(REPOSITORY_ID, 2L);
     }
 
     @Test
@@ -139,6 +173,68 @@ class AppSourceReplicaResultRecorderTest {
         verify(appSources).updateOperationStatus(
                 operation.operationId(), AppSourceOperationStatus.RUNNING,
                 AppSourceOperationStatus.FAILED, NOW);
+    }
+
+    @Test
+    void recoveryClearsPendingGenerationWhenHistoricOperationHasOnlyFailedReplicas() {
+        AppSourceRepository appSources = mock(AppSourceRepository.class);
+        WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        AppSourceReplicaResultRecorder recorder = new AppSourceReplicaResultRecorder(appSources, workspaces);
+        AppSourceOperation operation = operation();
+        AppSourceRepositorySlot slot = slot(1L, 2L, 9L);
+        when(appSources.findOperation(operation.operationId())).thenReturn(Optional.of(operation));
+        when(appSources.findSlotForUpdate(REPOSITORY_ID)).thenReturn(Optional.of(slot));
+        when(appSources.findReplicas(REPOSITORY_ID, 2L)).thenReturn(List.of(
+                replica(2L, SERVER_A, AppSourceReplicaStatus.FAILED, null),
+                replica(2L, SERVER_B, AppSourceReplicaStatus.FAILED, null)));
+        when(appSources.findSteps(operation.operationId())).thenReturn(List.of(legacyPendingStep(SERVER_A)));
+        when(appSources.upsertStep(any())).thenReturn(true);
+        when(appSources.updateSlotIfVersion(any(), eq(9L))).thenReturn(true);
+
+        recorder.recoverTerminalOperation(operation.operationId(), NOW);
+
+        verify(appSources).updateSnapshotStatusAndIndex(
+                REPOSITORY_ID, 2L, AppSourceSnapshotStatus.PENDING,
+                AppSourceSnapshotStatus.FAILED, null, NOW);
+        verify(appSources).updateOperationStatus(
+                operation.operationId(), AppSourceOperationStatus.RUNNING,
+                AppSourceOperationStatus.FAILED, NOW);
+        ArgumentCaptor<AppSourceRepositorySlot> slotCaptor = ArgumentCaptor.forClass(AppSourceRepositorySlot.class);
+        verify(appSources).updateSlotIfVersion(slotCaptor.capture(), eq(9L));
+        assertThat(slotCaptor.getValue().pendingGeneration()).isNull();
+        assertThat(slotCaptor.getValue().activeGeneration()).isEqualTo(1L);
+        ArgumentCaptor<AppSourceOperationStep> legacyTerminal =
+                ArgumentCaptor.forClass(AppSourceOperationStep.class);
+        verify(appSources).upsertStep(legacyTerminal.capture());
+        assertThat(legacyTerminal.getValue().status()).isEqualTo(AppSourceStepStatus.FAILED);
+        assertThat(legacyTerminal.getValue().safeSummary()).isEqualTo("执行失败：兼容旧版服务器步骤");
+    }
+
+    @Test
+    void recoveryCompletesLegacyPendingStepWhenHistoricReplicaIsReady() {
+        AppSourceRepository appSources = mock(AppSourceRepository.class);
+        WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        AppSourceReplicaResultRecorder recorder = new AppSourceReplicaResultRecorder(appSources, workspaces);
+        AppSourceOperation operation = operation();
+        when(appSources.findOperation(operation.operationId())).thenReturn(Optional.of(operation));
+        when(appSources.findSlotForUpdate(REPOSITORY_ID)).thenReturn(Optional.of(slot(2L, null, 10L)));
+        when(appSources.findReplicas(REPOSITORY_ID, 2L)).thenReturn(List.of(
+                replica(2L, SERVER_A, AppSourceReplicaStatus.READY, new WorkspaceId("wrk_ready"))));
+        when(appSources.findSteps(operation.operationId())).thenReturn(List.of(legacyPendingStep(SERVER_A)));
+        when(appSources.upsertStep(any())).thenReturn(true);
+
+        recorder.recoverTerminalOperation(operation.operationId(), NOW);
+
+        ArgumentCaptor<AppSourceOperationStep> legacyTerminal =
+                ArgumentCaptor.forClass(AppSourceOperationStep.class);
+        verify(appSources, times(2)).upsertStep(legacyTerminal.capture());
+        assertThat(legacyTerminal.getAllValues()).extracting(AppSourceOperationStep::status)
+                .containsExactly(AppSourceStepStatus.RUNNING, AppSourceStepStatus.SUCCEEDED);
+        assertThat(legacyTerminal.getAllValues()).extracting(AppSourceOperationStep::safeSummary)
+                .containsExactly("正在执行：兼容旧版服务器步骤", "已完成：兼容旧版服务器步骤");
+        verify(appSources).updateOperationStatus(
+                operation.operationId(), AppSourceOperationStatus.RUNNING,
+                AppSourceOperationStatus.SUCCEEDED, NOW);
     }
 
     @Test
@@ -195,5 +291,12 @@ class AppSourceReplicaResultRecorderTest {
         return new Workspace(
                 new WorkspaceId(id), "orders", "appsource:orders", status,
                 NOW.minusSeconds(60), NOW.minusSeconds(60), SERVER_A.value(), "trace-1");
+    }
+
+    private AppSourceOperationStep legacyPendingStep(LinuxServerId serverId) {
+        return new AppSourceOperationStep(
+                "legacy:" + serverId.value(), "op-1", AppSourceStepScope.SERVER, serverId,
+                "RETRY_QUEUED", 0, AppSourceStepStatus.PENDING,
+                "等待旧版重试", null, null, NOW.minusSeconds(60));
     }
 }

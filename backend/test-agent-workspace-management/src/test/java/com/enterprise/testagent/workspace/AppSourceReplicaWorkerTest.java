@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
@@ -47,6 +48,8 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
+import static org.mockito.Mockito.inOrder;
 
 class AppSourceReplicaWorkerTest {
 
@@ -70,8 +73,11 @@ class AppSourceReplicaWorkerTest {
         when(fixture.configuration.findRepository(REPOSITORY_ID)).thenReturn(Optional.of(fixture.repository()));
         when(fixture.gitAccess.resolve(fixture.repository(), fixture.operation().actorUserId()))
                 .thenReturn(new AppSourceGitAccessResolver.GitAccess("ssh://git/orders.git", "secret-key"));
-        when(fixture.materializer.materialize(any(), any())).thenAnswer(invocation -> {
+        when(fixture.materializer.materialize(any(), any(), any())).thenAnswer(invocation -> {
             AppSourceGitMaterializer.Result result = new AppSourceGitMaterializer.Result("b".repeat(64), true);
+            AppSourceGitMaterializer.Progress progress = invocation.getArgument(2);
+            progress.started(AppSourceReplicaStepCatalog.STAGING);
+            progress.succeeded(AppSourceReplicaStepCatalog.STAGING);
             AppSourceGitMaterializer.Completion completion = invocation.getArgument(1);
             completion.complete(result);
             return result;
@@ -82,7 +88,7 @@ class AppSourceReplicaWorkerTest {
         assertThat(outcome).isEqualTo(AppSourceReplicaWorker.Outcome.SUCCEEDED);
         ArgumentCaptor<AppSourceGitMaterializer.Request> request =
                 ArgumentCaptor.forClass(AppSourceGitMaterializer.Request.class);
-        verify(fixture.materializer).materialize(request.capture(), any());
+        verify(fixture.materializer).materialize(request.capture(), any(), any());
         assertThat(request.getValue().targetRoot()).isEqualTo(appSourceRoot.resolve("orders"));
         assertThat(request.getValue().targetCommit()).isEqualTo("deadbeef");
         assertThat(request.getValue().selectedPaths()).isEqualTo(fixture.snapshot().selectedPaths());
@@ -91,6 +97,21 @@ class AppSourceReplicaWorkerTest {
                 eq(fixture.operation()), eq(claimed), any(), workspace.capture(), eq("b".repeat(64)), eq(NOW));
         assertThat(workspace.getValue().rootPath()).isEqualTo("appsource:orders");
         assertThat(workspace.getValue().linuxServerId()).isEqualTo(SERVER_ID.value());
+        InOrder progressOrder = inOrder(fixture.progress);
+        progressOrder.verify(fixture.progress).start(
+                eq(fixture.operation()), eq(claimed), any(), eq(AppSourceReplicaStepCatalog.QUEUED), eq(NOW));
+        progressOrder.verify(fixture.progress).succeed(
+                eq(fixture.operation()), eq(claimed), any(), eq(AppSourceReplicaStepCatalog.QUEUED), eq(NOW));
+        progressOrder.verify(fixture.progress).start(
+                eq(fixture.operation()), eq(claimed), any(), eq(AppSourceReplicaStepCatalog.LEASE_CLAIM), eq(NOW));
+        progressOrder.verify(fixture.progress).start(
+                eq(fixture.operation()), eq(claimed), any(), eq(AppSourceReplicaStepCatalog.LOCAL_LOCK), eq(NOW));
+        progressOrder.verify(fixture.progress).start(
+                eq(fixture.operation()), eq(claimed), any(), eq(AppSourceReplicaStepCatalog.STAGING), eq(NOW));
+        progressOrder.verify(fixture.progress).succeed(
+                eq(fixture.operation()), eq(claimed), any(), eq(AppSourceReplicaStepCatalog.STAGING), eq(NOW));
+        progressOrder.verify(fixture.progress).start(
+                eq(fixture.operation()), eq(claimed), any(), eq(AppSourceReplicaStepCatalog.REGISTER_WORKSPACE), eq(NOW));
     }
 
     @Test
@@ -105,7 +126,7 @@ class AppSourceReplicaWorkerTest {
         when(fixture.configuration.findRepository(REPOSITORY_ID)).thenReturn(Optional.of(fixture.repository()));
         when(fixture.gitAccess.resolve(any(), any()))
                 .thenReturn(new AppSourceGitAccessResolver.GitAccess("ssh://git/orders.git", "secret-key"));
-        when(fixture.materializer.materialize(any(), any())).thenThrow(new PlatformException(
+        when(fixture.materializer.materialize(any(), any(), any())).thenThrow(new PlatformException(
                 ErrorCode.GIT_UNAVAILABLE,
                 "raw git stderr contains secret-key /private/path",
                 Map.of("stderr", "secret-key")));
@@ -116,6 +137,8 @@ class AppSourceReplicaWorkerTest {
         verify(fixture.results).recordFailure(
                 eq(fixture.operation()), eq(claimed), any(), eq("GIT_UNAVAILABLE"),
                 eq("源码副本物化失败"), eq(NOW));
+        verify(fixture.progress).failCurrentAndSkipFollowing(
+                eq(fixture.operation()), eq(claimed), any(), eq(AppSourceReplicaStepCatalog.LOCAL_LOCK), eq(NOW));
     }
 
     @Test
@@ -135,7 +158,7 @@ class AppSourceReplicaWorkerTest {
         when(fixture.configuration.findRepository(REPOSITORY_ID)).thenReturn(Optional.of(fixture.repository()));
         when(fixture.gitAccess.resolve(fixture.repository(), serverOperation.actorUserId()))
                 .thenReturn(new AppSourceGitAccessResolver.GitAccess("ssh://git/orders.git", "secret-key"));
-        when(fixture.materializer.materialize(any(), any())).thenAnswer(invocation -> {
+        when(fixture.materializer.materialize(any(), any(), any())).thenAnswer(invocation -> {
             AppSourceGitMaterializer.Result result = new AppSourceGitMaterializer.Result("b".repeat(64), true);
             ((AppSourceGitMaterializer.Completion) invocation.getArgument(1)).complete(result);
             return result;
@@ -163,7 +186,7 @@ class AppSourceReplicaWorkerTest {
         when(fixture.configuration.findRepository(REPOSITORY_ID)).thenReturn(Optional.of(fixture.repository()));
         when(fixture.gitAccess.resolve(any(), any()))
                 .thenReturn(new AppSourceGitAccessResolver.GitAccess("ssh://git/orders.git", "secret-key"));
-        when(fixture.materializer.materialize(any(), any())).thenAnswer(invocation -> {
+        when(fixture.materializer.materialize(any(), any(), any())).thenAnswer(invocation -> {
             AppSourceGitMaterializer.Result result = new AppSourceGitMaterializer.Result("b".repeat(64), true);
             ((AppSourceGitMaterializer.Completion) invocation.getArgument(1)).complete(result);
             return result;
@@ -191,8 +214,35 @@ class AppSourceReplicaWorkerTest {
         assertThat(outcome).isEqualTo(AppSourceReplicaWorker.Outcome.SKIPPED_STALE);
         verify(fixture.appSources, never()).claimReplica(any(), anyLong(), any(), any(), any(), any());
         verify(fixture.gitAccess, never()).resolve(any(), any());
-        verify(fixture.materializer, never()).materialize(any(), any());
+        verify(fixture.materializer, never()).materialize(any(), any(), any());
         verify(fixture.results, never()).recordSuccess(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void leaseLostDuringAttemptResetStopsWithoutAnyLaterProgressOrReplicaResult() {
+        Fixture fixture = fixture();
+        AppSourceReplica claimed = fixture.claimed();
+        when(fixture.appSources.claimReplica(any(), eq(2L), eq(SERVER_ID), any(), any(), eq(NOW)))
+                .thenReturn(Optional.of(claimed));
+        when(fixture.appSources.findSnapshot(REPOSITORY_ID, 2L)).thenReturn(Optional.of(fixture.snapshot()));
+        when(fixture.appSources.findInFlightOperationForReplica(REPOSITORY_ID, 2L, SERVER_ID))
+                .thenReturn(Optional.of(fixture.operation()));
+        when(fixture.configuration.findRepository(REPOSITORY_ID)).thenReturn(Optional.of(fixture.repository()));
+        doThrow(new PlatformException(
+                        ErrorCode.CONFLICT, "应用源码步骤租约已失效",
+                        Map.of("failure", "REPLICA_LEASE_LOST")))
+                .when(fixture.progress).resetForAttempt(
+                        eq(fixture.operation()), eq(claimed), any(), eq(NOW));
+
+        assertThat(fixture.worker.run(REPOSITORY_ID, 2L, SERVER_ID, "trace-1"))
+                .isEqualTo(AppSourceReplicaWorker.Outcome.NOT_CLAIMED);
+
+        verify(fixture.progress, never()).start(any(), any(), any(), any(), any());
+        verify(fixture.progress, never()).succeed(any(), any(), any(), any(), any());
+        verify(fixture.progress, never()).failCurrentAndSkipFollowing(any(), any(), any(), any(), any());
+        verify(fixture.materializer, never()).materialize(any(), any(), any());
+        verify(fixture.results, never()).recordSuccess(any(), any(), any(), any(), any(), any());
+        verify(fixture.results, never()).recordFailure(any(), any(), any(), any(), any(), any());
     }
 
     private Fixture fixture() {
@@ -205,12 +255,13 @@ class AppSourceReplicaWorkerTest {
         AppSourceGitAccessResolver gitAccess = mock(AppSourceGitAccessResolver.class);
         AppSourceGitMaterializer materializer = mock(AppSourceGitMaterializer.class);
         AppSourceReplicaResultRecorder results = mock(AppSourceReplicaResultRecorder.class);
+        AppSourceReplicaProgressRecorder progress = mock(AppSourceReplicaProgressRecorder.class);
         ManagedWorkspacePathResolver paths = new ManagedWorkspacePathResolver(appSourceParameters());
         AppSourceReplicaWorker worker = new AppSourceReplicaWorker(
-                appSources, configuration, gitAccess, materializer, results, paths,
+                appSources, configuration, gitAccess, materializer, results, progress, paths,
                 new WorkspaceServerIdentity(SERVER_ID.value()),
                 clock, Duration.ofMinutes(10));
-        return new Fixture(appSources, configuration, gitAccess, materializer, results, worker);
+        return new Fixture(appSources, configuration, gitAccess, materializer, results, progress, worker);
     }
 
     private CommonParameterValues appSourceParameters() {
@@ -249,6 +300,7 @@ class AppSourceReplicaWorkerTest {
             AppSourceGitAccessResolver gitAccess,
             AppSourceGitMaterializer materializer,
             AppSourceReplicaResultRecorder results,
+            AppSourceReplicaProgressRecorder progress,
             AppSourceReplicaWorker worker) {
 
         private AppSourceReplica claimed() {

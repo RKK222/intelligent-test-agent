@@ -430,6 +430,14 @@ public class AppSourceApplicationService {
         Objects.requireNonNull(command, "command must not be null");
         ApplicationId parsedAppId = applicationId(appId);
         CodeRepository repository = requireLinkedCodeRepository(parsedAppId, repositoryId(repositoryId), userId);
+        AppSourceOperation existing = appSources.findOperation(command.operationId()).orElse(null);
+        if (existing != null) {
+            if (!matchesRetryIdentity(
+                    existing, parsedAppId, repository.repositoryId(), userId, command.expectedGeneration())) {
+                throw new PlatformException(ErrorCode.CONFLICT, "operationId 已被其它应用源码请求使用");
+            }
+            return existing;
+        }
         Instant acceptedAt = clock.instant();
         AppSourceSnapshot active = appSources.findActiveSnapshot(repository.repositoryId())
                 .filter(snapshot -> snapshot.generation() == command.expectedGeneration())
@@ -451,23 +459,26 @@ public class AppSourceApplicationService {
         if (failedTargets.isEmpty()) {
             throw new PlatformException(ErrorCode.CONFLICT, "当前 generation 没有可重试的失败副本");
         }
-        String hash = sha256(command.operationId() + "\n" + command.expectedGeneration() + "\n"
-                + failedTargets.stream().map(LinuxServerId::value).sorted().reduce((a, b) -> a + "\n" + b).orElse(""));
-        AppSourceOperation existing = appSources.findOperation(command.operationId()).orElse(null);
-        if (existing != null) {
-            if (!existing.appId().equals(parsedAppId)
-                    || !existing.repositoryId().equals(repository.repositoryId())
-                    || !existing.actorUserId().equals(userId)
-                    || !existing.requestHash().equals(hash)) {
-                throw new PlatformException(ErrorCode.CONFLICT, "operationId 已被其它应用源码请求使用");
-            }
-            return existing;
-        }
+        // retry 幂等身份只包含客户端不可变请求；运行中的动态失败服务器集合不能参与重放匹配。
+        String hash = sha256(command.operationId() + "\n" + command.expectedGeneration());
         AppSourceOperation operation = retryRegistrar.register(new AppSourceReplicaRetryRegistrar.RetryRequest(
                 command.operationId(), parsedAppId, repository.repositoryId(), active.generation(), userId,
                 hash, failedTargets, requireTraceId(traceId), acceptedAt));
         dispatcher.wake(operation, failedTargets);
         return operation;
+    }
+
+    private boolean matchesRetryIdentity(
+            AppSourceOperation operation,
+            ApplicationId appId,
+            CodeRepositoryId repositoryId,
+            UserId actorUserId,
+            long generation) {
+        return operation.appId().equals(appId)
+                && operation.repositoryId().equals(repositoryId)
+                && operation.actorUserId().equals(actorUserId)
+                && operation.operationType() == AppSourceOperationType.RETRY_REPLICAS
+                && operation.targetGeneration() == generation;
     }
 
     /**
@@ -480,7 +491,7 @@ public class AppSourceApplicationService {
         String normalizedOperationId = AppSourceOperationId.normalize(operationId);
         AppSourceOperation operation = appSources.findOperation(normalizedOperationId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "应用源码操作不存在"));
-        requireLinkedCodeRepository(operation.appId(), operation.repositoryId(), userId);
+        requireOperationRepositoryMember(operation.repositoryId(), userId);
         AppSourceSnapshot snapshot = appSources
                 .findSnapshot(operation.repositoryId(), operation.targetGeneration())
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "应用源码操作缺少快照"));
@@ -490,6 +501,21 @@ public class AppSourceApplicationService {
             throw new PlatformException(ErrorCode.FORBIDDEN, "个人应用源码操作只允许拥有者或应用管理员查看");
         }
         return operationSnapshot(operation);
+    }
+
+    /** operation 的 TEAM 进度属于 repository 当前关联应用集合，而不是仅属于最初 route app。 */
+    private void requireOperationRepositoryMember(CodeRepositoryId repositoryId, UserId userId) {
+        CodeRepository repository = configuration.findRepository(repositoryId)
+                .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "应用源码版本库不存在"));
+        if (!isApplicationCodeRepository(repository)) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "版本库类型不是应用代码库");
+        }
+        boolean currentMember = configuration.findApplicationsByRepository(repositoryId).stream()
+                .filter(ApplicationDefinition::enabled)
+                .anyMatch(application -> configuration.isActiveMember(application.appId(), userId));
+        if (!currentMember) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "当前用户不是版本库关联应用的有效成员");
+        }
     }
 
     /** 实时授权并打开指定 generation 在当前服务器的 READY Workspace。 */

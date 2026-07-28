@@ -4,22 +4,17 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.appsource.AppSourceOperation;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationStatus;
-import com.enterprise.testagent.domain.appsource.AppSourceOperationStep;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationType;
 import com.enterprise.testagent.domain.appsource.AppSourceReplicaStatus;
 import com.enterprise.testagent.domain.appsource.AppSourceRepository;
 import com.enterprise.testagent.domain.appsource.AppSourceRepositorySlot;
-import com.enterprise.testagent.domain.appsource.AppSourceStepScope;
-import com.enterprise.testagent.domain.appsource.AppSourceStepStatus;
 import com.enterprise.testagent.domain.configuration.ApplicationId;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.user.UserId;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Set;
-import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,18 +34,17 @@ public class AppSourceReplicaRetryRegistrar {
         if (!appSources.lockRepositoryForAppSource(request.repositoryId())) {
             throw new PlatformException(ErrorCode.NOT_FOUND, "应用源码版本库不存在");
         }
+        AppSourceOperation existing = appSources.findOperation(request.operationId()).orElse(null);
+        if (existing != null) {
+            if (!matchesImmutableIdentity(existing, request)) {
+                throw new PlatformException(ErrorCode.CONFLICT, "operationId 已被其它应用源码请求使用");
+            }
+            return existing;
+        }
         AppSourceRepositorySlot slot = appSources.findSlotForUpdate(request.repositoryId())
                 .orElseThrow(() -> new PlatformException(ErrorCode.CONFLICT, "应用源码 generation 槽位不存在"));
         if (!Objects.equals(slot.activeGeneration(), request.generation()) || slot.pendingGeneration() != null) {
             throw new PlatformException(ErrorCode.CONFLICT, "应用源码 generation 已变化或正在更新");
-        }
-        AppSourceOperation existing = appSources.findOperation(request.operationId()).orElse(null);
-        if (existing != null) {
-            if (!existing.repositoryId().equals(request.repositoryId())
-                    || !existing.requestHash().equals(request.requestHash())) {
-                throw new PlatformException(ErrorCode.CONFLICT, "operationId 已被其它应用源码请求使用");
-            }
-            return existing;
         }
         for (LinuxServerId serverId : request.targetServerIds()) {
             if (appSources.findInFlightOperationForReplica(
@@ -71,20 +65,19 @@ public class AppSourceReplicaRetryRegistrar {
                 request.generation(), request.actorUserId(), AppSourceOperationType.RETRY_REPLICAS,
                 request.requestHash(), AppSourceOperationStatus.PENDING, request.traceId(), request.acceptedAt(), null);
         appSources.saveOperation(operation);
-        int sequence = 0;
         for (LinuxServerId serverId : request.targetServerIds()) {
-            appSources.upsertStep(new AppSourceOperationStep(
-                    stepId(request.operationId(), serverId), request.operationId(), AppSourceStepScope.SERVER,
-                    serverId, "RETRY_QUEUED", sequence++, AppSourceStepStatus.PENDING,
-                    "等待失败副本重试", null, null, request.acceptedAt()));
+            AppSourceReplicaStepCatalog.pendingSteps(request.operationId(), serverId, request.acceptedAt())
+                    .forEach(appSources::upsertStep);
         }
         return operation;
     }
 
-    private String stepId(String operationId, LinuxServerId serverId) {
-        return "ass_" + UUID.nameUUIDFromBytes(
-                        (operationId + "\n" + serverId.value() + "\nRETRY_QUEUED").getBytes(StandardCharsets.UTF_8))
-                .toString().replace("-", "");
+    private boolean matchesImmutableIdentity(AppSourceOperation operation, RetryRequest request) {
+        return operation.appId().equals(request.appId())
+                && operation.repositoryId().equals(request.repositoryId())
+                && operation.actorUserId().equals(request.actorUserId())
+                && operation.operationType() == AppSourceOperationType.RETRY_REPLICAS
+                && operation.targetGeneration() == request.generation();
     }
 
     public record RetryRequest(

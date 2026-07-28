@@ -59,6 +59,14 @@ public interface AppSourceRepository extends AppSourceRepositoryHistory {
 
     boolean updateReplicaIfLease(AppSourceReplica replica, String expectedLeaseOwner, Instant now);
 
+    /** 锁定并核对当前副本活租约，使步骤推进与下一次 claim 在同一副本行上串行。 */
+    boolean lockReplicaLeaseForUpdate(
+            CodeRepositoryId repositoryId,
+            long generation,
+            LinuxServerId linuxServerId,
+            String expectedLeaseOwner,
+            Instant now);
+
     /** 清理任务持有独立租约时把该 generation/server 副本收敛为 CLEANED。 */
     boolean markReplicaCleaned(
             CodeRepositoryId repositoryId, long generation, LinuxServerId linuxServerId, Instant now);
@@ -71,6 +79,9 @@ public interface AppSourceRepository extends AppSourceRepositoryHistory {
     Optional<AppSourceOperation> findInFlightOperationForReplica(
             CodeRepositoryId repositoryId, long generation, LinuxServerId linuxServerId);
 
+    /** 扫描副本已全部终态但操作仍未终结的记录，供周期恢复在共享槽位锁下重算。 */
+    List<AppSourceOperation> findStrandedOperations(int limit);
+
     void saveOperation(AppSourceOperation operation);
 
     boolean updateOperationStatus(
@@ -81,6 +92,27 @@ public interface AppSourceRepository extends AppSourceRepositoryHistory {
 
     /** 插入步骤或向前推进非终态步骤；终态防回退未命中时返回 false。 */
     boolean upsertStep(AppSourceOperationStep step);
+
+    /**
+     * 仅当步骤绑定的 operation/repository/generation/server 与当前 RUNNING 副本活租约完全一致时推进。
+     * 旧 worker 或过期 attempt 必须返回 false，不能覆盖新 attempt 的时间线。
+     */
+    boolean updateStepIfReplicaLease(
+            AppSourceOperationStep step,
+            CodeRepositoryId repositoryId,
+            long generation,
+            LinuxServerId linuxServerId,
+            String expectedLeaseOwner,
+            Instant now);
+
+    /** 新 attempt 取得活租约后把同 operation/server 的稳定步骤重置为 PENDING；旧 owner 必须失败。 */
+    boolean resetStepIfReplicaLease(
+            AppSourceOperationStep pendingStep,
+            CodeRepositoryId repositoryId,
+            long generation,
+            LinuxServerId linuxServerId,
+            String expectedLeaseOwner,
+            Instant now);
 
     List<AppSourceOperationStep> findSteps(String operationId);
 

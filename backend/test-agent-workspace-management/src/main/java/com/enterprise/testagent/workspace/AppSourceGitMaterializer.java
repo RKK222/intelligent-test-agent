@@ -70,17 +70,26 @@ public class AppSourceGitMaterializer {
      * 在旧目录备份仍保留且文件锁仍由 worker 持有时执行数据库 completion；completion 失败会回滚目录。
      */
     public Result materialize(Request request, Completion completion) {
+        return materialize(request, completion, Progress.noop());
+    }
+
+    /** 以固定步骤码同步回报动作边界；回报失败会像动作失败一样终止物化并触发目录回滚。 */
+    public Result materialize(Request request, Completion completion, Progress progress) {
         Objects.requireNonNull(request, "request must not be null");
         Objects.requireNonNull(completion, "completion must not be null");
+        Objects.requireNonNull(progress, "progress must not be null");
         Path target = AppSourcePathGuard.requireSafe(request.targetRoot());
         Path parent = Objects.requireNonNull(target.getParent(), "target parent must not be null");
         Path staging = parent.resolve("." + target.getFileName() + ".g" + request.generation()
                 + "." + UUID.randomUUID() + ".staging");
         try {
+            progress.started(AppSourceReplicaStepCatalog.STAGING);
             Files.createDirectories(parent);
             AppSourcePathGuard.requireSafe(target);
             AppSourcePathGuard.requireSafe(staging);
-            shallowSparseClone(request, staging);
+            progress.succeeded(AppSourceReplicaStepCatalog.STAGING);
+            shallowSparseClone(request, staging, progress);
+            progress.started(AppSourceReplicaStepCatalog.VALIDATE);
             AppSourcePathGuard.requireSafe(staging);
             boolean shallow = "true".equals(git.execute(
                     List.of("git", "-C", staging.toString(), "rev-parse", "--is-shallow-repository"),
@@ -95,11 +104,20 @@ public class AppSourceGitMaterializer {
             }
             validateMaterializedPaths(staging, request.selectedPaths());
             validateSymlinksStayInside(staging);
+            progress.succeeded(AppSourceReplicaStepCatalog.VALIDATE);
+            progress.started(AppSourceReplicaStepCatalog.REMOVE_GIT_METADATA);
             deleteTree(staging.resolve(".git"));
+            progress.succeeded(AppSourceReplicaStepCatalog.REMOVE_GIT_METADATA);
+            progress.started(AppSourceReplicaStepCatalog.WRITE_INDEX);
             byte[] indexBytes = indexBytes(request);
             writeIndexAtomically(staging, indexBytes);
+            progress.succeeded(AppSourceReplicaStepCatalog.WRITE_INDEX);
             Result result = new Result(sha256(indexBytes), shallow);
-            publish(staging, target, result, completion);
+            progress.started(AppSourceReplicaStepCatalog.ATOMIC_REPLACE);
+            publish(staging, target, result, materialized -> {
+                progress.succeeded(AppSourceReplicaStepCatalog.ATOMIC_REPLACE);
+                completion.complete(materialized);
+            });
             return result;
         } catch (PlatformException exception) {
             throw exception;
@@ -116,7 +134,8 @@ public class AppSourceGitMaterializer {
         }
     }
 
-    private void shallowSparseClone(Request request, Path staging) throws IOException {
+    private void shallowSparseClone(Request request, Path staging, Progress progress) throws IOException {
+        progress.started(AppSourceReplicaStepCatalog.SHALLOW_CLONE);
         git.execute(
                 List.of(
                         "git", "clone",
@@ -130,7 +149,9 @@ public class AppSourceGitMaterializer {
                         staging.toString()),
                 request.privateKey(),
                 GIT_TIMEOUT);
+        progress.succeeded(AppSourceReplicaStepCatalog.SHALLOW_CLONE);
         // branch 在受理后可能前进；显式用同一临时凭据抓取冻结 SHA，不能依赖 depth=1 的新 tip。
+        progress.started(AppSourceReplicaStepCatalog.FETCH_FIXED_COMMIT);
         git.execute(
                 List.of(
                         "git", "-C", staging.toString(), "fetch",
@@ -139,6 +160,8 @@ public class AppSourceGitMaterializer {
                         "origin", request.targetCommit()),
                 request.privateKey(),
                 GIT_TIMEOUT);
+        progress.succeeded(AppSourceReplicaStepCatalog.FETCH_FIXED_COMMIT);
+        progress.started(AppSourceReplicaStepCatalog.SPARSE_CHECKOUT);
         git.execute(
                 List.of("git", "-C", staging.toString(), "sparse-checkout", "init", "--no-cone"),
                 request.privateKey(),
@@ -150,6 +173,7 @@ public class AppSourceGitMaterializer {
                 List.of("git", "-C", staging.toString(), "checkout", "--detach", request.targetCommit()),
                 request.privateKey(),
                 GIT_TIMEOUT);
+        progress.succeeded(AppSourceReplicaStepCatalog.SPARSE_CHECKOUT);
     }
 
     private byte[] sparsePatterns(List<AppSourceSelectedPath> selectedPaths) {
@@ -395,6 +419,25 @@ public class AppSourceGitMaterializer {
     @FunctionalInterface
     public interface Completion {
         void complete(Result result);
+    }
+
+    /** materializer 只回报固定步骤码，不携带路径、命令、凭据或 Git 输出。 */
+    public interface Progress {
+        void started(String stepCode);
+
+        void succeeded(String stepCode);
+
+        static Progress noop() {
+            return new Progress() {
+                @Override
+                public void started(String stepCode) {
+                }
+
+                @Override
+                public void succeeded(String stepCode) {
+                }
+            };
+        }
     }
 
     /** 原子目录移动测试边界；生产只使用同文件系统 ATOMIC_MOVE。 */

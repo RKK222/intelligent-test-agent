@@ -82,3 +82,46 @@ JDK 21 沙箱内 Mockito 5.23.0 不能自附加时，定向测试曾出现 28 �
 
 - 按生产实现修正进度帧契约说明：每个非法入站帧都会单独转换为安全的 `WEBSOCKET_MESSAGE_INVALID` 回调，原始 payload 和解析/校验错误细节不会暴露；未修改连接行为。
 - 修正 APP_SOURCE Run Diff 验收语义：普通源码路径仍写入 Workspace，只有 PUBLIC/WORKSPACE Agent 配置路径在 DiffViewer、父组件和 mutation 门禁被阻止并保持零条 `agent-config.write`；未修改生产代码。
+
+## 最终整功能审查修复波次
+
+最终整功能审查提出的 C1/I1/I2/I3 已在唯一一轮修复中闭环，范围只包含并发终态收敛、retry 幂等、跨关联应用进度授权、持久化执行时间线及其直接测试和稳定文档。
+
+### C1：终态串行收敛与 stranded 补偿
+
+- replica success/failure 先以 lease CAS 写入本服务器结果，再按一致锁序锁定 repository slot；全体 replica 聚合、snapshot/slot/operation 终态和 pending 清理在同一事务完成。
+- 首个 READY 提升时先失效旧 ACTIVE，再激活新 PENDING，避免 PostgreSQL 部分唯一约束冲突；并发失败、混合 READY/FAILED 和旧 generation/expiry 保留均有真实 PostgreSQL 断言。
+- dispatcher 扫描“operation 仍在途但 replica 已全终态”的 stranded 记录，并在相同 slot 锁下幂等重算，不重做 Git、不推进非终态 replica。新增 `(status, accepted_at, operation_id)` 索引支撑周期扫描。
+
+### I1：retry operationId 不可变身份幂等
+
+- service 在计算动态 FAILED/STALE targets 前查询既有 operation，并在完成当前 repository、关联应用和成员权限校验后，仅按 route app、repository、actor、类型和 expected generation 匹配重放。
+- registrar 在 repository 锁内使用同一不可变身份判断，覆盖两个首次请求都未看到 operation、但第二个请求落锁时 targets 已变化的竞态。
+- PENDING、已 claim RUNNING、SUCCEEDED、active generation 已替换/过期后的历史重放均返回原 operation；不同用户、仓库、应用、类型或 generation 仍返回冲突。
+
+### I2：按任一当前关联应用实时授权
+
+- TEAM operation 的 HTTP 查询、ticket 签发、ticket 消费、WebSocket 首帧和后续轮询，均允许 repository 任一当前启用关联应用的当前成员访问。
+- PERSONAL 仍限制 owner，或满足关联应用成员条件的 APP_ADMIN/SUPER_ADMIN；普通跨应用成员不可读取。
+- repository 解除关联、应用禁用或成员撤销后立即拒绝新 ticket，并使已签 ticket/既有 WebSocket 的后续实时复核失败。HTTP 和 WebSocket wire 均未改变。
+
+### I3：完整、低敏、可恢复的持久化步骤
+
+- materialization 与 retry 为每台目标服务器登记同一组 13 个稳定步骤：`QUEUED`、`LEASE_CLAIM`、`LOCAL_LOCK`、`STAGING`、`SHALLOW_CLONE`、`FETCH_FIXED_COMMIT`、`SPARSE_CHECKOUT`、`VALIDATE`、`REMOVE_GIT_METADATA`、`WRITE_INDEX`、`ATOMIC_REPLACE`、`REGISTER_WORKSPACE`、`COMPLETE`。
+- progress recorder 在持有当前 replica lease 时执行 attempt reset 和步骤 CAS；旧 attempt 失去 lease 后不能覆盖新 attempt。legacy `RETRY_QUEUED` 可被新 worker 接管，未知 legacy 非终态步骤会安全终结。
+- 失败步骤写固定低敏摘要，后续步骤 SKIPPED；result recorder 在 replica 终态 CAS 后同事务补齐剩余步骤，确保终态 operation 不残留 PENDING/RUNNING。真实 materializer 原始敏感 Git 错误不会进入持久化 summary。
+
+### 本波次验证
+
+- 后端跨模块定向 reactor 通过，覆盖 application service、registrar、worker、materializer、result/progress recorder、dispatcher、API/WebSocket、H2/MyBatis 和 SQL/Flyway 约束。
+- PostgreSQL 16 Testcontainers：持久层 2/2、应用层三服务器 barrier 收敛 2/2，均实际运行且 0 skipped；H2 migration 也验证新增索引和 lease-fenced reset SQL。
+- 前端 AppSource 定向 Vitest：9 files / 122 tests；全 workspace typecheck：13/14 scope 通过。wire 未变，按修复要求未重复执行全量 Playwright。
+- 后端根全量最终 `exit 0`，fresh Surefire 为 354 suites / 2225 tests / 0 failures / 0 errors / 19 conditional skips。诊断复跑期间，既有 `RunRuntimeLossConvergenceSchedulerTest` 曾在 1 秒窗口偶发只观察到一次重试；同一测试类在相同权限下隔离复跑 5/5、最终根全量再次通过，确认与本波次无关的时序抖动。
+- `tools/verify-ai-docs.sh`、SQL/Flyway 约束、`git diff --check`、禁止路径和冲突标记检查通过。
+
+### 影响、兼容性与剩余风险
+
+- API wire 与 RunEvent/SSE 均不变；进度仍使用独立只读 WebSocket，但授权语义扩展为 repository 任一当前关联应用的实时权限。
+- 数据库新增一条仅含索引的 Flyway migration，并新增/调整 MyBatis XML 查询与 CAS；没有新增 JDBC SQL 或测试数据 migration。
+- 并发聚合增加 repository slot 行锁，换取同一 repository 终态严格串行；扫描使用 status 前导索引，未扩大到全表无索引排序。
+- 未修改 OpenCode 快照、generated SDK、`.env*`、工具盒子或无关模块。真实双 Java/双 Linux 端到端部署验收仍按人工清单在上线前执行；既有 runtime scheduler 1 秒时序测试保留偶发风险，本波次未越界修改。

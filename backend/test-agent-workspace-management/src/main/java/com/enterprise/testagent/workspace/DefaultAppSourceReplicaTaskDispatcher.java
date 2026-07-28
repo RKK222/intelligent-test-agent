@@ -40,6 +40,7 @@ public class DefaultAppSourceReplicaTaskDispatcher
 
     private final AppSourceReplicaWorker worker;
     private final AppSourceRepository appSources;
+    private final AppSourceReplicaResultRecorder results;
     private final ServerBroadcastPublisher publisher;
     private final WorkspaceServerIdentity serverIdentity;
     private final int workerCount;
@@ -56,19 +57,21 @@ public class DefaultAppSourceReplicaTaskDispatcher
     public DefaultAppSourceReplicaTaskDispatcher(
             AppSourceReplicaWorker worker,
             AppSourceRepository appSources,
+            AppSourceReplicaResultRecorder results,
             ServerBroadcastPublisher publisher,
             WorkspaceServerIdentity serverIdentity,
             @Value("${test-agent.app-source.replica-worker-count:2}") int workerCount,
             @Value("${test-agent.app-source.replica-max-pending:256}") int maxPendingTasks,
             @Value("${test-agent.app-source.replica-recovery-interval-millis:5000}") long recoveryIntervalMillis,
             @Value("${test-agent.app-source.replica-recovery-batch-size:64}") int recoveryBatchSize) {
-        this(worker, appSources, publisher, serverIdentity, workerCount, maxPendingTasks, Clock.systemUTC(),
+        this(worker, appSources, results, publisher, serverIdentity, workerCount, maxPendingTasks, Clock.systemUTC(),
                 Duration.ofMillis(recoveryIntervalMillis), recoveryBatchSize);
     }
 
     DefaultAppSourceReplicaTaskDispatcher(
             AppSourceReplicaWorker worker,
             AppSourceRepository appSources,
+            AppSourceReplicaResultRecorder results,
             ServerBroadcastPublisher publisher,
             WorkspaceServerIdentity serverIdentity,
             int workerCount,
@@ -82,6 +85,7 @@ public class DefaultAppSourceReplicaTaskDispatcher
         }
         this.worker = Objects.requireNonNull(worker);
         this.appSources = Objects.requireNonNull(appSources);
+        this.results = Objects.requireNonNull(results);
         this.publisher = Objects.requireNonNull(publisher);
         this.serverIdentity = Objects.requireNonNull(serverIdentity);
         this.workerCount = workerCount;
@@ -203,6 +207,9 @@ public class DefaultAppSourceReplicaTaskDispatcher
     /** 数据库是副本执行事实；启动及短周期扫描补偿广播、队列和 JVM 生命周期造成的瞬时信号丢失。 */
     private void recoverClaimableSafely() {
         try {
+            for (AppSourceOperation operation : appSources.findStrandedOperations(recoveryBatchSize)) {
+                recoverStrandedOperationSafely(operation);
+            }
             LinuxServerId local = new LinuxServerId(serverIdentity.linuxServerId());
             for (var replica : appSources.findClaimableReplicas(local, clock.instant(), recoveryBatchSize)) {
                 dispatch(replica.repositoryId(), replica.generation(), local, RECOVERY_TRACE_ID);
@@ -211,6 +218,16 @@ public class DefaultAppSourceReplicaTaskDispatcher
             LOGGER.warn(
                     "event=app_source_replica_recovery_scan_failed linuxServerId={}",
                     serverIdentity.linuxServerId());
+        }
+    }
+
+    private void recoverStrandedOperationSafely(AppSourceOperation operation) {
+        try {
+            results.recoverTerminalOperation(operation.operationId(), clock.instant());
+        } catch (RuntimeException exception) {
+            LOGGER.warn(
+                    "event=app_source_operation_recovery_failed operationId={} traceId={}",
+                    operation.operationId(), operation.traceId());
         }
     }
 

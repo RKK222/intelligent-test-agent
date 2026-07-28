@@ -88,6 +88,9 @@ class MyBatisAppSourceRepositoryIntegrationTest {
         // H2 不支持 PostgreSQL 部分索引和延迟外键；完整生产 migration 由 PostgreSQL 集成测试原样执行。
         new ResourceDatabasePopulator(new ByteArrayResource(h2Migration.getBytes(StandardCharsets.UTF_8)))
                 .execute(schemaDataSource);
+        new ResourceDatabasePopulator(new ClassPathResource(
+                "db/migration/V20260728210000__index_in_flight_app_source_operations.sql"))
+                .execute(schemaDataSource);
         jdbcClient = JdbcClient.create(h2);
         insertBaseRows();
 
@@ -112,6 +115,9 @@ class MyBatisAppSourceRepositoryIntegrationTest {
         assertThat(jdbcClient.sql("select editable from common_parameters "
                         + "where parameter_english = 'OPENCODE_APP_SOURCE_ROOT' and platform = 'all'")
                 .query(Boolean.class).single()).isFalse();
+        assertThat(jdbcClient.sql("select count(*) from INFORMATION_SCHEMA.INDEXES "
+                        + "where lower(\"INDEX_NAME\") = 'idx_app_source_operations_in_flight'")
+                .query(Integer.class).single()).isOne();
     }
 
     @Test
@@ -186,6 +192,40 @@ class MyBatisAppSourceRepositoryIntegrationTest {
     }
 
     @Test
+    void serverStepTransitionIsFencedByExactOperationReplicaOwnerAndLiveLease() {
+        repository.insertSlotIfAbsent(slot(null, 0L, NOW));
+        repository.saveOperation(operation("op-step-lease", AppSourceOperationStatus.PENDING, null));
+        repository.saveSnapshot(snapshot("op-step-lease", AppSourceSnapshotStatus.PENDING));
+        assertThat(repository.insertReplicaIfAbsent(
+                replica(AppSourceReplicaStatus.PENDING, null, null, NOW))).isTrue();
+        AppSourceOperationStep pending = new AppSourceOperationStep(
+                "step-lease", "op-step-lease", AppSourceStepScope.SERVER, SERVER_ID,
+                "LOCAL_LOCK", 2, AppSourceStepStatus.PENDING, "等待：本机目录加锁",
+                null, null, NOW);
+        assertThat(repository.upsertStep(pending)).isTrue();
+        assertThat(repository.claimReplica(
+                REPOSITORY_ID, 1L, SERVER_ID, "worker-a", NOW.plusSeconds(30), NOW)).isPresent();
+        AppSourceOperationStep running = new AppSourceOperationStep(
+                pending.stepId(), pending.operationId(), pending.scope(), pending.linuxServerId(),
+                pending.stepCode(), pending.sequence(), AppSourceStepStatus.RUNNING, "正在执行：本机目录加锁",
+                NOW.plusSeconds(1), null, NOW.plusSeconds(1));
+
+        assertThat(repository.updateStepIfReplicaLease(
+                running, REPOSITORY_ID, 1L, SERVER_ID, "worker-b", NOW.plusSeconds(1))).isFalse();
+        assertThat(repository.updateStepIfReplicaLease(
+                running, REPOSITORY_ID, 1L, SERVER_ID, "worker-a", NOW.plusSeconds(1))).isTrue();
+        AppSourceOperationStep succeeded = new AppSourceOperationStep(
+                running.stepId(), running.operationId(), running.scope(), running.linuxServerId(),
+                running.stepCode(), running.sequence(), AppSourceStepStatus.SUCCEEDED, "已完成：本机目录加锁",
+                running.startedAt(), NOW.plusSeconds(31), NOW.plusSeconds(31));
+        assertThat(repository.updateStepIfReplicaLease(
+                succeeded, REPOSITORY_ID, 1L, SERVER_ID, "worker-a", NOW.plusSeconds(31))).isFalse();
+        assertThat(repository.findSteps("op-step-lease")).singleElement()
+                .extracting(AppSourceOperationStep::status)
+                .isEqualTo(AppSourceStepStatus.RUNNING);
+    }
+
+    @Test
     void claimableReplicaScanFindsPendingAndExpiredRunningOnlyOnTheRequestedServer() {
         repository.insertSlotIfAbsent(slot(null, 0L, NOW));
         repository.saveSnapshot(snapshot("op-download", AppSourceSnapshotStatus.PENDING));
@@ -250,6 +290,102 @@ class MyBatisAppSourceRepositoryIntegrationTest {
                 staleRetry.operationId(), AppSourceOperationStatus.RUNNING,
                 AppSourceOperationStatus.FAILED, NOW.plusSeconds(2))).isTrue();
         assertThat(repository.findClaimableReplicas(SERVER_ID, NOW, 10)).isEmpty();
+    }
+
+    @Test
+    void legacyRetryStepCanBeClaimedAndNewLeaseBackfillsStableTimelineWithExactFence() {
+        repository.insertSlotIfAbsent(slot(1L, 0L, NOW));
+        repository.saveSnapshot(snapshot("op-download", AppSourceSnapshotStatus.ACTIVE));
+        AppSourceReplica failed = replica(AppSourceReplicaStatus.FAILED, null, null, NOW);
+        assertThat(repository.insertReplicaIfAbsent(failed)).isTrue();
+        AppSourceOperation retry = retryOperation("op-legacy-retry", AppSourceOperationStatus.PENDING, null);
+        repository.saveOperation(retry);
+        AppSourceOperationStep legacy = new AppSourceOperationStep(
+                "step-legacy-retry", retry.operationId(), AppSourceStepScope.SERVER, SERVER_ID,
+                "RETRY_QUEUED", 0, AppSourceStepStatus.PENDING, "等待旧版重试", null, null, NOW);
+        assertThat(repository.upsertStep(legacy)).isTrue();
+
+        assertThat(repository.findClaimableReplicas(SERVER_ID, NOW, 10)).containsExactly(failed);
+        AppSourceReplica claimed = repository.claimReplica(
+                        REPOSITORY_ID, 1L, SERVER_ID, "worker-new", NOW.plusSeconds(30), NOW)
+                .orElseThrow();
+        assertThat(claimed.leaseOwner()).isEqualTo("worker-new");
+        assertThat(repository.lockReplicaLeaseForUpdate(
+                REPOSITORY_ID, 1L, SERVER_ID, "worker-old", NOW.plusSeconds(1))).isFalse();
+        assertThat(repository.lockReplicaLeaseForUpdate(
+                REPOSITORY_ID, 1L, SERVER_ID, "worker-new", NOW.plusSeconds(1))).isTrue();
+
+        AppSourceOperationStep stablePending = new AppSourceOperationStep(
+                "op-legacy-retry:server-a:QUEUED", retry.operationId(), AppSourceStepScope.SERVER, SERVER_ID,
+                "QUEUED", 0, AppSourceStepStatus.PENDING, "等待：目标服务器排队", null, null, NOW.plusSeconds(1));
+        assertThat(repository.resetStepIfReplicaLease(
+                stablePending, REPOSITORY_ID, 1L, SERVER_ID, "worker-old", NOW.plusSeconds(1))).isFalse();
+        assertThat(repository.resetStepIfReplicaLease(
+                stablePending, REPOSITORY_ID, 1L, SERVER_ID, "worker-new", NOW.plusSeconds(1))).isTrue();
+        assertThat(repository.findSteps(retry.operationId())).anySatisfy(step -> {
+            assertThat(step.stepCode()).isEqualTo("QUEUED");
+            assertThat(step.status()).isEqualTo(AppSourceStepStatus.PENDING);
+            assertThat(step.startedAt()).isNull();
+            assertThat(step.completedAt()).isNull();
+        });
+
+        AppSourceOperationStep legacySkipped = new AppSourceOperationStep(
+                legacy.stepId(), legacy.operationId(), legacy.scope(), legacy.linuxServerId(),
+                legacy.stepCode(), legacy.sequence(), AppSourceStepStatus.SKIPPED,
+                "已跳过：兼容旧版服务器步骤", null, NOW.plusSeconds(1), NOW.plusSeconds(1));
+        assertThat(repository.updateStepIfReplicaLease(
+                legacySkipped, REPOSITORY_ID, 1L, SERVER_ID, "worker-new", NOW.plusSeconds(1))).isTrue();
+        AppSourceOperationStep stableRunning = new AppSourceOperationStep(
+                stablePending.stepId(), stablePending.operationId(), stablePending.scope(), stablePending.linuxServerId(),
+                stablePending.stepCode(), stablePending.sequence(), AppSourceStepStatus.RUNNING,
+                "正在执行：目标服务器排队", NOW.plusSeconds(1), null, NOW.plusSeconds(1));
+        assertThat(repository.updateStepIfReplicaLease(
+                stableRunning, REPOSITORY_ID, 1L, SERVER_ID, "worker-new", NOW.plusSeconds(1))).isTrue();
+        AppSourceOperationStep stableSucceeded = new AppSourceOperationStep(
+                stableRunning.stepId(), stableRunning.operationId(), stableRunning.scope(), stableRunning.linuxServerId(),
+                stableRunning.stepCode(), stableRunning.sequence(), AppSourceStepStatus.SUCCEEDED,
+                "已完成：目标服务器排队", stableRunning.startedAt(), NOW.plusSeconds(2), NOW.plusSeconds(2));
+        assertThat(repository.updateStepIfReplicaLease(
+                stableSucceeded, REPOSITORY_ID, 1L, SERVER_ID, "worker-new", NOW.plusSeconds(2))).isTrue();
+
+        // lease 接管发生在旧 attempt 已全终态之后，仍须通过 server 绑定找回原 operation。
+        assertThat(repository.findInFlightOperationForReplica(REPOSITORY_ID, 1L, SERVER_ID))
+                .contains(retry);
+    }
+
+    @Test
+    void strandedOperationScanRequiresNonTerminalOperationAndAllReplicasTerminal() {
+        repository.insertSlotIfAbsent(slot(null, 0L, NOW));
+        repository.saveSnapshot(snapshot("op-stranded", AppSourceSnapshotStatus.PENDING));
+        AppSourceOperation operation = operation("op-stranded", AppSourceOperationStatus.PENDING, null);
+        repository.saveOperation(operation);
+        AppSourceOperationStep serverStep = new AppSourceOperationStep(
+                "step-stranded", operation.operationId(), AppSourceStepScope.SERVER, SERVER_ID,
+                "QUEUED", 0, AppSourceStepStatus.PENDING, "等待：目标服务器排队", null, null, NOW);
+        assertThat(repository.upsertStep(serverStep)).isTrue();
+        assertThat(repository.insertReplicaIfAbsent(
+                replica(AppSourceReplicaStatus.PENDING, null, null, NOW))).isTrue();
+
+        assertThat(repository.findStrandedOperations(10)).isEmpty();
+
+        jdbcClient.sql("update app_source_replicas set status = 'FAILED' "
+                        + "where repository_id = :repositoryId and generation = 1 and linux_server_id = :serverId")
+                .param("repositoryId", REPOSITORY_ID.value())
+                .param("serverId", SERVER_ID.value())
+                .update();
+        // 新登记 retry 在副本仍为 FAILED、服务器步骤尚待执行时不能被恢复扫描误判为历史 stranded。
+        assertThat(repository.findStrandedOperations(10)).isEmpty();
+        assertThat(repository.upsertStep(new AppSourceOperationStep(
+                serverStep.stepId(), serverStep.operationId(), serverStep.scope(), serverStep.linuxServerId(),
+                serverStep.stepCode(), serverStep.sequence(), AppSourceStepStatus.FAILED,
+                "执行失败：目标服务器排队", NOW.plusSeconds(1), NOW.plusSeconds(1), NOW.plusSeconds(1))))
+                .isTrue();
+        assertThat(repository.findStrandedOperations(10)).containsExactly(operation);
+
+        assertThat(repository.updateOperationStatus(
+                operation.operationId(), AppSourceOperationStatus.PENDING,
+                AppSourceOperationStatus.FAILED, NOW.plusSeconds(1))).isTrue();
+        assertThat(repository.findStrandedOperations(10)).isEmpty();
     }
 
     @Test
@@ -442,7 +578,7 @@ class MyBatisAppSourceRepositoryIntegrationTest {
             String stepId, String operationId, AppSourceStepStatus status) {
         return new AppSourceOperationStep(
                 stepId, operationId, AppSourceStepScope.SERVER, SERVER_ID,
-                "RETRY_QUEUED", 0, status, "等待失败副本重试",
+                "QUEUED", 0, status, "等待：目标服务器排队",
                 status == AppSourceStepStatus.PENDING ? null : NOW,
                 status == AppSourceStepStatus.SUCCEEDED ? NOW.plusSeconds(1) : null,
                 status == AppSourceStepStatus.SUCCEEDED ? NOW.plusSeconds(1) : NOW);

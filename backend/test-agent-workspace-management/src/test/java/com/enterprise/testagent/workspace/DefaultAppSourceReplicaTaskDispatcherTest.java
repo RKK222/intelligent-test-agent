@@ -49,7 +49,8 @@ class DefaultAppSourceReplicaTaskDispatcherTest {
             return AppSourceReplicaWorker.Outcome.SUCCEEDED;
         }).when(worker).run(any(), anyLong(), any(), any());
         DefaultAppSourceReplicaTaskDispatcher dispatcher = new DefaultAppSourceReplicaTaskDispatcher(
-                worker, appSources, publisher, new WorkspaceServerIdentity("server-a"), 1, 4,
+                worker, appSources, mock(AppSourceReplicaResultRecorder.class), publisher,
+                new WorkspaceServerIdentity("server-a"), 1, 4,
                 Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofHours(1), 32);
         dispatcher.start();
         try {
@@ -88,7 +89,8 @@ class DefaultAppSourceReplicaTaskDispatcherTest {
             }
         }).when(worker).run(any(), anyLong(), any(), any());
         DefaultAppSourceReplicaTaskDispatcher dispatcher = new DefaultAppSourceReplicaTaskDispatcher(
-                worker, appSources, publisher, new WorkspaceServerIdentity("server-a"), 1, 1,
+                worker, appSources, mock(AppSourceReplicaResultRecorder.class), publisher,
+                new WorkspaceServerIdentity("server-a"), 1, 1,
                 Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofHours(1), 32);
         dispatcher.start();
         try {
@@ -119,7 +121,8 @@ class DefaultAppSourceReplicaTaskDispatcherTest {
             return AppSourceReplicaWorker.Outcome.SUCCEEDED;
         }).when(worker).run(any(), anyLong(), any(), any());
         DefaultAppSourceReplicaTaskDispatcher dispatcher = new DefaultAppSourceReplicaTaskDispatcher(
-                worker, appSources, publisher, new WorkspaceServerIdentity("server-a"), 1, 1,
+                worker, appSources, mock(AppSourceReplicaResultRecorder.class), publisher,
+                new WorkspaceServerIdentity("server-a"), 1, 1,
                 Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofHours(1), 32);
         dispatcher.start();
         try {
@@ -150,7 +153,8 @@ class DefaultAppSourceReplicaTaskDispatcherTest {
             return AppSourceReplicaWorker.Outcome.SUCCEEDED;
         }).when(worker).run(any(), anyLong(), any(), any());
         DefaultAppSourceReplicaTaskDispatcher dispatcher = new DefaultAppSourceReplicaTaskDispatcher(
-                worker, appSources, publisher, new WorkspaceServerIdentity("server-a"), 1, 4,
+                worker, appSources, mock(AppSourceReplicaResultRecorder.class), publisher,
+                new WorkspaceServerIdentity("server-a"), 1, 4,
                 Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofHours(1), 32);
 
         dispatcher.start();
@@ -159,6 +163,26 @@ class DefaultAppSourceReplicaTaskDispatcherTest {
             verify(worker).run(
                     pending.repositoryId(), pending.generation(), pending.linuxServerId(),
                     DefaultAppSourceReplicaTaskDispatcher.RECOVERY_TRACE_ID);
+        } finally {
+            dispatcher.stop();
+        }
+    }
+
+    @Test
+    void startupRecoveryConvergesStrandedTerminalOperation() {
+        AppSourceReplicaWorker worker = mock(AppSourceReplicaWorker.class);
+        AppSourceRepository appSources = mock(AppSourceRepository.class);
+        AppSourceReplicaResultRecorder results = mock(AppSourceReplicaResultRecorder.class);
+        ServerBroadcastPublisher publisher = mock(ServerBroadcastPublisher.class);
+        AppSourceOperation stranded = operation("op-stranded", "repo_stranded");
+        when(appSources.findStrandedOperations(32)).thenReturn(java.util.List.of(stranded));
+        DefaultAppSourceReplicaTaskDispatcher dispatcher = new DefaultAppSourceReplicaTaskDispatcher(
+                worker, appSources, results, publisher, new WorkspaceServerIdentity("server-a"), 1, 4,
+                Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofHours(1), 32);
+
+        dispatcher.start();
+        try {
+            verify(results, timeout(2_000)).recoverTerminalOperation(stranded.operationId(), NOW);
         } finally {
             dispatcher.stop();
         }
@@ -190,7 +214,8 @@ class DefaultAppSourceReplicaTaskDispatcherTest {
             return AppSourceReplicaWorker.Outcome.SUCCEEDED;
         }).when(worker).run(any(), anyLong(), any(), any());
         DefaultAppSourceReplicaTaskDispatcher dispatcher = new DefaultAppSourceReplicaTaskDispatcher(
-                worker, appSources, publisher, new WorkspaceServerIdentity("server-a"), 1, 1,
+                worker, appSources, mock(AppSourceReplicaResultRecorder.class), publisher,
+                new WorkspaceServerIdentity("server-a"), 1, 1,
                 Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMillis(20), 32);
 
         dispatcher.start();

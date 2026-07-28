@@ -1333,7 +1333,11 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 
 兼容策略：所有表和参数均为向后兼容新增，旧 Java 不访问这些表；回滚应用版本时保留 migration 和历史 cleanup。H2 使用等价时间函数验证可移植 mapper 行为；JSONB、整小时过期/十六进制摘要约束、步骤终态保护、部分唯一索引、完整 Flyway 链及 cleanup 第一写的延迟外键由 PostgreSQL 16 Testcontainers 原样验证。
 
-运行态只通过 `AppSourceMapper.xml` 访问这些关系表，不新增 JDBC SQL。物化/重试事务先对 `code_repositories` 执行 `SELECT FOR UPDATE`，cleanup task 是第一条持久化写；副本完成和 cleanup 完成分别用 generation、服务器、owner、绝对租约 fencing。dispatcher 按服务器扫描 `PENDING` 和租约已到期的 `RUNNING` 副本，用数据库事实恢复队列拒绝、广播丢失与进程重启；worker 通过 repository/generation/server 对应的非终态 operation step 定位待完成操作，重试登记也在仓库行锁内拒绝同 generation/server 的重叠非终态操作。Runtime Workspace 反查直接按受外键保护的 `runtime_workspace_id` 查询；旧 generation 提升为立即清理时，`makeCleanupDueNow` 只提前 `PENDING/RETRY_WAIT` 的绝对执行时间，不覆盖正在执行或终态任务；清理成功把 replica 单向推进到 `CLEANED`，同步归档 Workspace，并且只在 slot 仍指向该 generation 时清除 active。真实 H2 PostgreSQL 模式集成测试执行行锁、claimable 副本扫描、operation step 精确绑定、Workspace 反查、到期提前和清理终态 XML；PostgreSQL 16 Testcontainers 还原样执行生产 mapper 的上述查询、due scan/提前、双 owner cleanup 租约 fencing 和生产约束。
+运行态只通过 `AppSourceMapper.xml` 访问这些关系表，不新增 JDBC SQL。物化/重试事务先对 `code_repositories` 执行 `SELECT FOR UPDATE`，cleanup task 是第一条持久化写；副本完成和 cleanup 完成分别用 generation、服务器、owner、绝对租约 fencing。每个服务器登记固定 13 步；步骤开始/完成、失败/跳过和新 attempt 全量重置都先对精确 RUNNING 副本活租约执行行锁校验，旧 owner 不能覆盖新 attempt。dispatcher 按服务器扫描 `PENDING`、租约已到期的 `RUNNING` 和仍有旧 `RETRY_QUEUED` 的失败副本，同时扫描全部 replica 已 `READY/FAILED` 但 operation 仍 `PENDING/RUNNING` 的 stranded 记录。副本结果 CAS 后，success/failure/recovery 使用一致锁序取得 repository slot 行锁，再重读全体副本并串行写 snapshot/slot/operation 终态；全失败清 pending 并保留旧 active/expiry，混合终态为 `PARTIAL_FAILED`，全 READY 为 `SUCCEEDED`。首台 READY 在同一事务内先把旧 ACTIVE 改为 EXPIRED，再激活 pending，以满足单 ACTIVE 唯一约束。Runtime Workspace 反查直接按受外键保护的 `runtime_workspace_id` 查询；旧 generation 提升为立即清理时，`makeCleanupDueNow` 只提前 `PENDING/RETRY_WAIT` 的绝对执行时间，不覆盖正在执行或终态任务；清理成功把 replica 单向推进到 `CLEANED`，同步归档 Workspace，并且只在 slot 仍指向该 generation 时清除 active。H2 集成测试覆盖旧步骤领取、attempt reset/upsert、stranded 扫描和恢复索引；PostgreSQL 16 Testcontainers 原样执行生产 reset SQL，并用三副本 last-two barrier 验证全失败与 READY/FAILED 混合收敛。
+
+## V20260728210000 应用源码在途恢复索引
+
+`V20260728210000__index_in_flight_app_source_operations.sql` 只新增 `app_source_operations(status, accepted_at, operation_id)` 复合索引，不写入或改写业务数据。`status` 前导列服务 dispatcher 的 `PENDING/RUNNING` stranded 有界扫描，后两列服务稳定顺序和 limit；该形式同时兼容 PostgreSQL 与 H2 验证环境。回滚旧 Java 时可保留该索引，不影响旧查询和 API wire。
 
 ### 字段注释原则
 

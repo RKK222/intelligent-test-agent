@@ -3,6 +3,7 @@ package com.enterprise.testagent.workspace;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.clearInvocations;
@@ -100,6 +101,9 @@ class AppSourceApplicationServiceTest {
                 new ApplicationDefinition(APP_ID, "Billing", true, NOW.minusSeconds(100), NOW)));
         when(configuration.isActiveMember(APP_ID, USER_ID)).thenReturn(true);
         when(configuration.findRepositoriesByApplication(APP_ID)).thenReturn(List.of(repository()));
+        when(configuration.findRepository(REPOSITORY_ID)).thenReturn(Optional.of(repository()));
+        when(configuration.findApplicationsByRepository(REPOSITORY_ID)).thenReturn(List.of(
+                new ApplicationDefinition(APP_ID, "Billing", true, NOW.minusSeconds(100), NOW)));
         when(appSources.findSlot(REPOSITORY_ID)).thenReturn(Optional.empty());
         when(appSources.findActiveSnapshot(REPOSITORY_ID)).thenReturn(Optional.empty());
         when(git.resolveRemoteBranchCommit("/git/repo.git", "main", null)).thenReturn(COMMIT);
@@ -382,6 +386,80 @@ class AppSourceApplicationServiceTest {
     }
 
     @Test
+    void teamOperationAllowsMemberOfAnotherCurrentlyLinkedApplication() {
+        ApplicationId appB = new ApplicationId("app_2");
+        UserId memberB = new UserId("usr_2");
+        AppSourceOperation operation = operation("aso_cross_app_team", AppSourceOperationStatus.RUNNING);
+        when(appSources.findOperation(operation.operationId())).thenReturn(Optional.of(operation));
+        when(configuration.findRepository(REPOSITORY_ID)).thenReturn(Optional.of(repository()));
+        when(configuration.findApplicationsByRepository(REPOSITORY_ID)).thenReturn(List.of(
+                new ApplicationDefinition(APP_ID, "Billing", true, NOW.minusSeconds(100), NOW),
+                new ApplicationDefinition(appB, "Orders", true, NOW.minusSeconds(100), NOW)));
+        when(configuration.isActiveMember(APP_ID, memberB)).thenReturn(false);
+        when(configuration.isActiveMember(appB, memberB)).thenReturn(true);
+        when(appSources.findSnapshot(REPOSITORY_ID, 4L)).thenReturn(Optional.of(snapshot(
+                4L, AppSourcePurpose.TEAM, USER_ID, NOW.plusSeconds(3600))));
+        when(appSources.findSteps(operation.operationId())).thenReturn(List.of());
+
+        AppSourceApplicationService.OperationSnapshot result =
+                service.getOperation(operation.operationId(), memberB, false);
+
+        assertThat(result.operationId()).isEqualTo(operation.operationId());
+        assertThat(result.purpose()).isEqualTo(AppSourcePurpose.TEAM);
+    }
+
+    @Test
+    void teamOperationRechecksUnlinkDisabledApplicationAndMembershipRevocation() {
+        ApplicationId appB = new ApplicationId("app_2");
+        UserId memberB = new UserId("usr_2");
+        ApplicationDefinition enabledB = new ApplicationDefinition(
+                appB, "Orders", true, NOW.minusSeconds(100), NOW);
+        ApplicationDefinition disabledB = new ApplicationDefinition(
+                appB, "Orders", false, NOW.minusSeconds(100), NOW);
+        AppSourceOperation operation = operation("aso_realtime_team", AppSourceOperationStatus.RUNNING);
+        when(appSources.findOperation(operation.operationId())).thenReturn(Optional.of(operation));
+        when(configuration.findApplicationsByRepository(REPOSITORY_ID))
+                .thenReturn(List.of(enabledB), List.of(), List.of(disabledB), List.of(enabledB));
+        when(configuration.isActiveMember(appB, memberB)).thenReturn(true, false);
+        when(appSources.findSnapshot(REPOSITORY_ID, 4L)).thenReturn(Optional.of(snapshot(
+                4L, AppSourcePurpose.TEAM, USER_ID, NOW.plusSeconds(3600))));
+
+        assertThat(service.getOperation(operation.operationId(), memberB, false).operationId())
+                .isEqualTo(operation.operationId());
+        for (String revokedFact : List.of("unlink", "disabled", "membership")) {
+            assertThatThrownBy(() -> service.getOperation(operation.operationId(), memberB, false))
+                    .as(revokedFact)
+                    .isInstanceOfSatisfying(PlatformException.class,
+                            exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        }
+    }
+
+    @Test
+    void personalOperationAcrossLinkedApplicationAllowsOwnerOrAdminButRejectsOrdinaryMember() {
+        ApplicationId appB = new ApplicationId("app_2");
+        UserId owner = new UserId("usr_owner");
+        UserId admin = new UserId("usr_admin");
+        UserId ordinary = new UserId("usr_ordinary");
+        AppSourceOperation operation = operation("aso_cross_app_personal", AppSourceOperationStatus.RUNNING);
+        when(appSources.findOperation(operation.operationId())).thenReturn(Optional.of(operation));
+        when(configuration.findApplicationsByRepository(REPOSITORY_ID)).thenReturn(List.of(
+                new ApplicationDefinition(appB, "Orders", true, NOW.minusSeconds(100), NOW)));
+        when(configuration.isActiveMember(appB, owner)).thenReturn(true);
+        when(configuration.isActiveMember(appB, admin)).thenReturn(true);
+        when(configuration.isActiveMember(appB, ordinary)).thenReturn(true);
+        when(appSources.findSnapshot(REPOSITORY_ID, 4L)).thenReturn(Optional.of(snapshot(
+                4L, AppSourcePurpose.PERSONAL, owner, NOW.plusSeconds(3600))));
+
+        assertThat(service.getOperation(operation.operationId(), owner, false).operationId())
+                .isEqualTo(operation.operationId());
+        assertThat(service.getOperation(operation.operationId(), admin, true).operationId())
+                .isEqualTo(operation.operationId());
+        assertThatThrownBy(() -> service.getOperation(operation.operationId(), ordinary, false))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+    }
+
+    @Test
     void operationSnapshotRejectsRevokedApplicationMemberEvenWhenTheyAreAppAdmin() {
         AppSourceOperation operation = operation("aso_revoked", AppSourceOperationStatus.RUNNING);
         when(appSources.findOperation("aso_revoked")).thenReturn(Optional.of(operation));
@@ -524,6 +602,57 @@ class AppSourceApplicationServiceTest {
         verify(git, never()).resolveRemoteBranchCommit(any(), any(), any());
         verify(remote, never()).listTree(any(), any(), any());
         verify(dispatcher).wake(retry, request.getValue().targetServerIds());
+    }
+
+    @Test
+    void retryReplayReturnsOriginalWhenPendingClaimedOrCompletedWithoutRecomputingTargets() {
+        AppSourceSnapshot active = snapshot(4L, AppSourcePurpose.TEAM, USER_ID, NOW.plusSeconds(3600));
+        when(appSources.findActiveSnapshot(REPOSITORY_ID)).thenReturn(Optional.of(active));
+        when(appSources.findReplicas(REPOSITORY_ID, 4L)).thenReturn(List.of(
+                replica(4L, "server-a", AppSourceReplicaStatus.RUNNING)));
+        for (AppSourceOperationStatus status : List.of(
+                AppSourceOperationStatus.PENDING,
+                AppSourceOperationStatus.RUNNING,
+                AppSourceOperationStatus.SUCCEEDED)) {
+            String operationId = "aso_retry_" + status.name().toLowerCase(java.util.Locale.ROOT);
+            AppSourceOperation original = new AppSourceOperation(
+                    operationId, APP_ID, REPOSITORY_ID, 4L, 4L, USER_ID,
+                    AppSourceOperationType.RETRY_REPLICAS, "original-request-hash",
+                    status, "trace_original", NOW.minusSeconds(30),
+                    status.terminal() ? NOW.minusSeconds(10) : null);
+            when(appSources.findOperation(operationId)).thenReturn(Optional.of(original));
+
+            AppSourceOperation replay = service.retry(
+                    APP_ID.value(), REPOSITORY_ID.value(),
+                    new AppSourceApplicationService.RetryCommand(operationId, 4L),
+                    USER_ID, false, "trace_replay");
+
+            assertThat(replay).isSameAs(original);
+        }
+        verify(appSources, never()).findReplicas(REPOSITORY_ID, 4L);
+        verify(retryRegistrar, never()).register(any());
+        verify(dispatcher, never()).wake(any(), any());
+    }
+
+    @Test
+    void retryReplayReturnsOriginalAfterGenerationWasReplacedOrSnapshotExpired() {
+        AppSourceOperation original = new AppSourceOperation(
+                "aso_retry_historic", APP_ID, REPOSITORY_ID, 4L, 4L, USER_ID,
+                AppSourceOperationType.RETRY_REPLICAS, "original-request-hash",
+                AppSourceOperationStatus.SUCCEEDED, "trace_original",
+                NOW.minusSeconds(120), NOW.minusSeconds(60));
+        when(appSources.findOperation(original.operationId())).thenReturn(Optional.of(original));
+        when(appSources.findActiveSnapshot(REPOSITORY_ID)).thenReturn(Optional.of(snapshot(
+                5L, AppSourcePurpose.TEAM, USER_ID, NOW.plusSeconds(3600))));
+
+        AppSourceOperation replay = service.retry(
+                APP_ID.value(), REPOSITORY_ID.value(),
+                new AppSourceApplicationService.RetryCommand(original.operationId(), 4L),
+                USER_ID, false, "trace_replay");
+
+        assertThat(replay).isSameAs(original);
+        verify(appSources, never()).findActiveSnapshot(REPOSITORY_ID);
+        verify(appSources, never()).findReplicas(any(), anyLong());
     }
 
     @Test

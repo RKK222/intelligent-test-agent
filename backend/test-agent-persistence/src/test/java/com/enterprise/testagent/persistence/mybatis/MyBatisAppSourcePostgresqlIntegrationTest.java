@@ -26,6 +26,9 @@ import com.enterprise.testagent.domain.user.UserId;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import javax.sql.DataSource;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.flywaydb.core.Flyway;
@@ -183,6 +186,26 @@ class MyBatisAppSourcePostgresqlIntegrationTest {
         assertThat(repository.findClaimableReplicas(SERVER_ID, NOW.plusSeconds(5), 10)).singleElement()
                 .extracting(AppSourceReplica::status)
                 .isEqualTo(AppSourceReplicaStatus.STALE);
+        assertThat(repository.claimReplica(
+                REPOSITORY_ID, 1L, SERVER_ID, "worker-reset-pg",
+                NOW.plusSeconds(60), NOW.plusSeconds(5))).isPresent();
+        AppSourceOperationStep resetPending = new AppSourceOperationStep(
+                "step-app-source-reset-pg", staleRetry.operationId(), AppSourceStepScope.SERVER, SERVER_ID,
+                "LOCAL_LOCK", 2, AppSourceStepStatus.PENDING, "等待：本机目录加锁",
+                null, null, NOW.plusSeconds(5));
+        assertThat(repository.resetStepIfReplicaLease(
+                resetPending, REPOSITORY_ID, 1L, SERVER_ID,
+                "worker-old-pg", NOW.plusSeconds(5))).isFalse();
+        assertThat(repository.resetStepIfReplicaLease(
+                resetPending, REPOSITORY_ID, 1L, SERVER_ID,
+                "worker-reset-pg", NOW.plusSeconds(5))).isTrue();
+        assertThat(repository.findSteps(staleRetry.operationId()))
+                .anySatisfy(step -> {
+                    assertThat(step.stepCode()).isEqualTo("LOCAL_LOCK");
+                    assertThat(step.status()).isEqualTo(AppSourceStepStatus.PENDING);
+                    assertThat(step.startedAt()).isNull();
+                    assertThat(step.completedAt()).isNull();
+                });
 
         JdbcClient jdbc = JdbcClient.create(dataSource);
         assertThat(jdbc.sql("select pg_typeof(selected_paths_json)::text from app_source_snapshots "
@@ -193,6 +216,10 @@ class MyBatisAppSourcePostgresqlIntegrationTest {
                         + "where parameter_english = 'OPENCODE_APP_SOURCE_ROOT' and platform = 'all'")
                 .query(String.class).single())
                 .isEqualTo("${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/appsource/");
+        assertThat(jdbc.sql("select indexdef from pg_indexes where schemaname = current_schema() "
+                        + "and indexname = 'idx_app_source_operations_in_flight'")
+                .query(String.class).single())
+                .contains("status", "accepted_at", "operation_id");
 
         assertThat(jdbc.sql("update app_source_snapshots set expires_at = :expiresAt "
                         + "where repository_id = :repositoryId and generation = 1")
@@ -217,6 +244,87 @@ class MyBatisAppSourcePostgresqlIntegrationTest {
                 .param("indexSha256", "g".repeat(64))
                 .param("repositoryId", REPOSITORY_ID.value()).update())
                 .isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
+    void repositorySlotSerializesLastTwoConcurrentFailuresAfterFirstReplicaReady() throws Exception {
+        CodeRepositoryId repositoryId = new CodeRepositoryId("repo_app_source_convergence_pg");
+        LinuxServerId serverA = new LinuxServerId("server-convergence-a");
+        LinuxServerId serverB = new LinuxServerId("server-convergence-b");
+        LinuxServerId serverC = new LinuxServerId("server-convergence-c");
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        jdbc.sql("""
+                insert into code_repositories(
+                    repository_id, git_url, name, english_name, repository_type,
+                    deployment_mode, standard, created_at, updated_at)
+                values (:repositoryId, 'https://git.example.test/convergence.git', '并发收敛', 'convergence',
+                    'APPLICATION_CODE_REPOSITORY', 'EXTERNAL', false, :now, :now)
+                """).param("repositoryId", repositoryId.value()).param("now", Timestamp.from(NOW)).update();
+        for (LinuxServerId serverId : List.of(serverA, serverB, serverC)) {
+            jdbc.sql("""
+                    insert into linux_servers(
+                        linux_server_id, name, status, capacity_summary_json, last_heartbeat_at,
+                        trace_id, created_at, updated_at)
+                    values (:serverId, :serverId, 'ONLINE', '{}', :now, 'trace-convergence', :now, :now)
+                    """).param("serverId", serverId.value()).param("now", Timestamp.from(NOW)).update();
+        }
+        repository.insertSlotIfAbsent(new AppSourceRepositorySlot(
+                repositoryId, null, 1L, 2L, "op-convergence", 0L, NOW, NOW));
+        repository.saveOperation(new AppSourceOperation(
+                "op-convergence", APP_ID, repositoryId, null, 1L, USER_ID,
+                AppSourceOperationType.DOWNLOAD, "request-convergence", AppSourceOperationStatus.RUNNING,
+                "trace-convergence", NOW, null));
+        repository.saveSnapshot(new AppSourceSnapshot(
+                repositoryId, 1L, "convergence", AppSourcePurpose.TEAM, USER_ID,
+                "main", "abcdef", List.of(new AppSourceSelectedPath("src", AppSourcePathType.DIRECTORY)),
+                null, NOW, NOW.plusSeconds(48L * 3600L), AppSourceSnapshotStatus.PENDING, NOW, NOW));
+        repository.insertReplicaIfAbsent(new AppSourceReplica(
+                repositoryId, 1L, serverA, null, AppSourceReplicaStatus.READY,
+                null, null, 1, null, null, null, NOW, NOW));
+        repository.insertReplicaIfAbsent(new AppSourceReplica(
+                repositoryId, 1L, serverB, null, AppSourceReplicaStatus.RUNNING,
+                "worker-b", NOW.plusSeconds(60), 1, null, null, null, NOW, NOW));
+        repository.insertReplicaIfAbsent(new AppSourceReplica(
+                repositoryId, 1L, serverC, null, AppSourceReplicaStatus.RUNNING,
+                "worker-c", NOW.plusSeconds(60), 1, null, null, null, NOW, NOW));
+        CyclicBarrier replicasUpdated = new CyclicBarrier(2);
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Future<Boolean> failureB = executor.submit(() -> failAndReadAfterSlotLock(
+                    repositoryId, serverB, "worker-b", replicasUpdated));
+            Future<Boolean> failureC = executor.submit(() -> failAndReadAfterSlotLock(
+                    repositoryId, serverC, "worker-c", replicasUpdated));
+
+            assertThat(List.of(failureB.get(), failureC.get())).containsExactlyInAnyOrder(false, true);
+        }
+        assertThat(repository.findReplicas(repositoryId, 1L))
+                .extracting(AppSourceReplica::status)
+                .containsExactlyInAnyOrder(
+                        AppSourceReplicaStatus.READY,
+                        AppSourceReplicaStatus.FAILED,
+                        AppSourceReplicaStatus.FAILED);
+    }
+
+    private boolean failAndReadAfterSlotLock(
+            CodeRepositoryId repositoryId,
+            LinuxServerId serverId,
+            String leaseOwner,
+            CyclicBarrier replicasUpdated) {
+        return Boolean.TRUE.equals(transactionTemplate.execute(ignored -> {
+            AppSourceReplica failed = new AppSourceReplica(
+                    repositoryId, 1L, serverId, null, AppSourceReplicaStatus.FAILED,
+                    null, null, 1, null, "GIT_FAILED", "源码同步失败", NOW, NOW.plusSeconds(1));
+            assertThat(repository.updateReplicaIfLease(failed, leaseOwner, NOW.plusSeconds(1))).isTrue();
+            try {
+                replicasUpdated.await();
+            } catch (Exception exception) {
+                throw new IllegalStateException(exception);
+            }
+            assertThat(repository.findSlotForUpdate(repositoryId)).isPresent();
+            return repository.findReplicas(repositoryId, 1L).stream()
+                    .allMatch(replica -> replica.status() == AppSourceReplicaStatus.READY
+                            || replica.status() == AppSourceReplicaStatus.FAILED);
+        }));
     }
 
     private static void insertBaseRows() {
@@ -274,7 +382,7 @@ class MyBatisAppSourcePostgresqlIntegrationTest {
             String stepId, String operationId, AppSourceStepStatus status) {
         return new AppSourceOperationStep(
                 stepId, operationId, AppSourceStepScope.SERVER, SERVER_ID,
-                "RETRY_QUEUED", 0, status, "等待失败副本重试",
+                "QUEUED", 0, status, "等待：目标服务器排队",
                 status == AppSourceStepStatus.PENDING ? null : NOW,
                 status == AppSourceStepStatus.SUCCEEDED ? NOW.plusSeconds(1) : null,
                 status == AppSourceStepStatus.SUCCEEDED ? NOW.plusSeconds(1) : NOW);

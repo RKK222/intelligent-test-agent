@@ -46,6 +46,7 @@ public class AppSourceReplicaWorker {
     private final AppSourceGitAccessResolver gitAccess;
     private final AppSourceGitMaterializer materializer;
     private final AppSourceReplicaResultRecorder results;
+    private final AppSourceReplicaProgressRecorder progress;
     private final ManagedWorkspacePathResolver paths;
     private final WorkspaceServerIdentity serverIdentity;
     private final Clock clock;
@@ -59,10 +60,11 @@ public class AppSourceReplicaWorker {
             AppSourceGitAccessResolver gitAccess,
             AppSourceGitMaterializer materializer,
             AppSourceReplicaResultRecorder results,
+            AppSourceReplicaProgressRecorder progress,
             ManagedWorkspacePathResolver paths,
             WorkspaceServerIdentity serverIdentity,
             @Value("${test-agent.app-source.replica-lease-seconds:600}") long leaseSeconds) {
-        this(appSources, configuration, gitAccess, materializer, results, paths, serverIdentity,
+        this(appSources, configuration, gitAccess, materializer, results, progress, paths, serverIdentity,
                 Clock.systemUTC(), Duration.ofSeconds(leaseSeconds));
     }
 
@@ -76,11 +78,27 @@ public class AppSourceReplicaWorker {
             WorkspaceServerIdentity serverIdentity,
             Clock clock,
             Duration leaseDuration) {
+        this(appSources, configuration, gitAccess, materializer, results,
+                new AppSourceReplicaProgressRecorder(appSources), paths, serverIdentity, clock, leaseDuration);
+    }
+
+    AppSourceReplicaWorker(
+            AppSourceRepository appSources,
+            ConfigurationManagementRepository configuration,
+            AppSourceGitAccessResolver gitAccess,
+            AppSourceGitMaterializer materializer,
+            AppSourceReplicaResultRecorder results,
+            AppSourceReplicaProgressRecorder progress,
+            ManagedWorkspacePathResolver paths,
+            WorkspaceServerIdentity serverIdentity,
+            Clock clock,
+            Duration leaseDuration) {
         this.appSources = Objects.requireNonNull(appSources);
         this.configuration = Objects.requireNonNull(configuration);
         this.gitAccess = Objects.requireNonNull(gitAccess);
         this.materializer = Objects.requireNonNull(materializer);
         this.results = Objects.requireNonNull(results);
+        this.progress = Objects.requireNonNull(progress);
         this.paths = Objects.requireNonNull(paths);
         this.serverIdentity = Objects.requireNonNull(serverIdentity);
         this.clock = Objects.requireNonNull(clock);
@@ -122,30 +140,70 @@ public class AppSourceReplicaWorker {
         if (claimed == null) {
             return Outcome.NOT_CLAIMED;
         }
+        String[] currentStep = {AppSourceReplicaStepCatalog.LEASE_CLAIM};
         try {
+            progress.resetForAttempt(operation, claimed, leaseOwner, claimTime);
+            progress.start(operation, claimed, leaseOwner, AppSourceReplicaStepCatalog.QUEUED, clock.instant());
+            progress.succeed(operation, claimed, leaseOwner, AppSourceReplicaStepCatalog.QUEUED, clock.instant());
+            progress.start(operation, claimed, leaseOwner, AppSourceReplicaStepCatalog.LEASE_CLAIM, claimTime);
+            progress.succeed(operation, claimed, leaseOwner, AppSourceReplicaStepCatalog.LEASE_CLAIM, clock.instant());
+            currentStep[0] = AppSourceReplicaStepCatalog.LOCAL_LOCK;
             AppSourceGitAccessResolver.GitAccess access = gitAccess.resolve(repository, operation.actorUserId());
             String logicalRoot = paths.appSourceValue(snapshot.repositoryEnglishName());
             Path targetRoot = paths.resolve(logicalRoot).toAbsolutePath().normalize();
-            withFileLock(targetRoot, () -> materializer.materialize(
-                    new AppSourceGitMaterializer.Request(
-                            targetRoot, access.gitUrl(), snapshot.branch(), snapshot.targetCommit(),
-                            snapshot.selectedPaths(), access.privateKey(), snapshot.generation(), snapshot.expiresAt()),
-                    materialized -> {
-                        // 租约按绝对时间 fencing，Git 完成后必须重新取时，不能复用认领时刻。
-                        Instant completedAt = clock.instant();
-                        Workspace workspace = new Workspace(
-                                new WorkspaceId(RuntimeIdGenerator.workspaceId()),
-                                snapshot.repositoryEnglishName(), logicalRoot, WorkspaceStatus.ACTIVE,
-                                completedAt, completedAt, linuxServerId.value(), operation.traceId());
-                        results.recordSuccess(
-                                operation, claimed, leaseOwner, workspace,
-                                materialized.indexSha256(), completedAt);
-                    }));
+            progress.start(operation, claimed, leaseOwner, AppSourceReplicaStepCatalog.LOCAL_LOCK, clock.instant());
+            withFileLock(targetRoot, () -> {
+                progress.succeed(
+                        operation, claimed, leaseOwner, AppSourceReplicaStepCatalog.LOCAL_LOCK, clock.instant());
+                return materializer.materialize(
+                        new AppSourceGitMaterializer.Request(
+                                targetRoot, access.gitUrl(), snapshot.branch(), snapshot.targetCommit(),
+                                snapshot.selectedPaths(), access.privateKey(), snapshot.generation(), snapshot.expiresAt()),
+                        materialized -> {
+                            currentStep[0] = AppSourceReplicaStepCatalog.REGISTER_WORKSPACE;
+                            progress.start(
+                                    operation, claimed, leaseOwner,
+                                    AppSourceReplicaStepCatalog.REGISTER_WORKSPACE, clock.instant());
+                            // 租约按绝对时间 fencing，Git 完成后必须重新取时，不能复用认领时刻。
+                            Instant completedAt = clock.instant();
+                            Workspace workspace = new Workspace(
+                                    new WorkspaceId(RuntimeIdGenerator.workspaceId()),
+                                    snapshot.repositoryEnglishName(), logicalRoot, WorkspaceStatus.ACTIVE,
+                                    completedAt, completedAt, linuxServerId.value(), operation.traceId());
+                            results.recordSuccess(
+                                    operation, claimed, leaseOwner, workspace,
+                                    materialized.indexSha256(), completedAt);
+                        },
+                        new AppSourceGitMaterializer.Progress() {
+                            @Override
+                            public void started(String stepCode) {
+                                currentStep[0] = stepCode;
+                                progress.start(operation, claimed, leaseOwner, stepCode, clock.instant());
+                            }
+
+                            @Override
+                            public void succeeded(String stepCode) {
+                                progress.succeed(operation, claimed, leaseOwner, stepCode, clock.instant());
+                            }
+                        });
+            });
             return Outcome.SUCCEEDED;
         } catch (RuntimeException exception) {
+            if (leaseLost(exception)) {
+                return Outcome.NOT_CLAIMED;
+            }
             Instant failedAt = clock.instant();
-            results.recordFailure(
-                    operation, claimed, leaseOwner, safeErrorCode(exception), "源码副本物化失败", failedAt);
+            try {
+                progress.failCurrentAndSkipFollowing(
+                        operation, claimed, leaseOwner, currentStep[0], failedAt);
+                results.recordFailure(
+                        operation, claimed, leaseOwner, safeErrorCode(exception), "源码副本物化失败", failedAt);
+            } catch (RuntimeException terminalFailure) {
+                if (leaseLost(terminalFailure)) {
+                    return Outcome.NOT_CLAIMED;
+                }
+                throw terminalFailure;
+            }
             return Outcome.FAILED;
         }
     }
@@ -194,6 +252,11 @@ public class AppSourceReplicaWorker {
             return platformException.errorCode().name();
         }
         return ErrorCode.INTERNAL_ERROR.name();
+    }
+
+    private boolean leaseLost(RuntimeException exception) {
+        return exception instanceof PlatformException platformException
+                && "REPLICA_LEASE_LOST".equals(platformException.details().get("failure"));
     }
 
     @FunctionalInterface

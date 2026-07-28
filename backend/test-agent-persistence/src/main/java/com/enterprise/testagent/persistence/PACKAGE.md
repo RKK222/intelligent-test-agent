@@ -33,7 +33,7 @@
 - `mybatis.NightExecutionTaskMapper` / `mybatis/NightExecutionTaskMapper.xml` / `mybatis.MyBatisNightExecutionTaskRepository`：定时任务、幂等创建、会话写锁、15 分钟夜间容量占位和 30 天清理的生产实现；`ADMIN_CUSTOM` 不创建容量记录。
 - `mybatis.ReferenceRepositoryMapper` / `mybatis/ReferenceRepositoryMapper.xml`：引用资产总体状态与服务器副本的全部关系型 SQL，包含操作类型、旧分支/generation CAS、保留实际指针的目标 upsert、离线 `DEFERRED`、租约认领/续期和带 fencing 条件的同步/核验写回。
 - `mybatis.MyBatisReferenceRepositoryRepository`：引用资产仓储领域端口的生产 Bean，负责行模型映射、分页上限和多目标事务边界。
-- `mybatis.AppSourceMapper` / `mybatis/AppSourceMapper.xml` / `mybatis.MyBatisAppSourceRepository`：应用源码 slot、不可变 snapshot JSONB、服务器副本租约、operation/step、延迟 cleanup 和 recent selection 的生产实现；slot CAS、replica 首次建档与 generation/owner/lease/状态 fencing、step 终态防回退及 cleanup 租约均在 SQL/仓储边界保护。
+- `mybatis.AppSourceMapper` / `mybatis/AppSourceMapper.xml` / `mybatis.MyBatisAppSourceRepository`：应用源码 slot、不可变 snapshot JSONB、服务器副本租约、operation/step、延迟 cleanup 和 recent selection 的生产实现；slot CAS、replica 首次建档与 generation/owner/lease/状态 fencing、step 活租约行锁/推进/整条 attempt 重置、stranded operation 有界扫描、终态防回退及 cleanup 租约均在 SQL/仓储边界保护。
 - `RedisRunRuntimeStore` / `RunRuntimeStoreConfig`：Run 运行数据面领域端口的 Redis 唯一生产实现和装配；单 Run key 使用 `{runId}` hash tag，durable `events` Stream 使用 `${seq}-0`，durable/transient `runtime-events` Stream 使用 `${runtimeVersion}-0`，snapshot 使用 Hash + order ZSET 物化当前实体状态，外部 snapshot 同时 CAS seq/runtimeVersion，动态 key registry 统一滑动 TTL；跨 slot active/history 索引在单 Run Lua 前按“active TTL + pending TTL”安全窗保守登记并由读路径清脏，避免任一事件 Lua 提交后 Java 退出造成恢复失联；用户级 dispose 以 `{userId}` slot 原子清理过期 active 索引、确认用户空闲并申请/续租 token 闸门，新 Run 则在同一用户 slot 原子检查闸门、登记 `active:user` 并以随机 owner 创建 `runtime-user` marker，闸门拒绝时在 marker 与其他外部索引写入前返回；owner 条件接管原子校验活跃 manifest 快照并提升 token，事件、远端 Session 绑定和 scope/dedup/pending Lua 在副作用前校验 owner + token，pending 同时原子计入/扣减统一详情字节预算；生产 32 MiB 中为关键快照固定预留 4 MiB，durable/runtime 事件或 snapshot 投影项超过 20,000 或总详情超限时显式截断旧 Stream、递增 reset generation，并保留专用 USER 输入、JSON role 为 assistant 的最新 message、对应最新可见 text part 和 run-status，tool/reasoning/非 assistant 实体只作为可淘汰投影。
 - `RedisRunTerminalRetryStore` / `RunTerminalRetryStoreConfig`：终态关系型事务故障后的独立 Redis 安全重试实现和装配；record/due 固定使用 `{terminal-retry}` hash tag，保存 Lua 按终态 outbox generation、事件序号和重试代次单调覆盖，删除 Lua 对完整白名单 JSON 执行 compare-and-delete，防止旧 worker 覆盖或删除晚到纠正版；悬空 due 自愈只在 record 仍不存在时移除索引；due ZSET 只含 runId/时间，记录 TTL 不超过 24 小时。
 - `RedisTokenStore` / `TokenStoreConfig`：平台 Token Redis 实现，同时提供 SHA-256 session marker；保存、单 Token 删除、按用户批量撤销和过期均与 marker 同步，供 XXL 会话逐请求失效校验。批量撤销使用 `SCAN test-agent:token:*` 兼容历史已签发 Token，仅解析认证主体匹配 userId，不输出包含 Token 的 key 或 value。
@@ -78,6 +78,7 @@
 - `db/migration/V20260718110000__create_reference_repository_replica_tables.sql`：创建引用资产总体状态/服务器副本表及认领、generation 查询索引。
 - `db/migration/V20260718143000__add_reference_repository_operations_and_verification.sql`：增加引用资产操作类型、实际指针可空语义与核验时间。
 - `db/migration/V20260728103000__create_app_source_snapshot_tables.sql`：创建七类应用源码表、JSONB 路径选择、snapshot 整小时过期与十六进制摘要检查、步骤部分唯一索引和 cleanup 延迟外键，并初始化只读应用源码根目录参数。
+- `db/migration/V20260728210000__index_in_flight_app_source_operations.sql`：为周期恢复增加 status 前导的 operation 排序索引，避免历史终态数据导致每实例全表扫描。
 - 后续可新增 SQL 查询、migration 相关适配、Redis 限流、缓存或运行心跳实现；Run 运行数据面不得新增 PostgreSQL 或 JVM 内存降级实现。
 - 新增 migration 禁止写入测试、演示、个人开发或环境专属数据；这类数据应进入 `test-agent-test-support`、测试 fixture、mock 数据或显式本地开发脚本。
 
@@ -124,7 +125,7 @@
 - CommonParameter 和 WorkspaceCreateOperation 测试必须覆盖平台优先级、默认路径 seed、进度步骤更新、成功/失败状态和按用户隔离查询。
 - UserDeletion 测试必须覆盖目标锁定、受保护业务引用阻断、账号附属表清理、批量原子边界和只撤销目标用户 Token。
 - ReferenceRepository 测试必须覆盖 Flyway 建表、MyBatis XML generation/CAS、同服务器租约互斥/续期、过期 worker fencing、离线 `DEFERRED`/恢复和稳定游标分页。
-- AppSource 测试必须覆盖 slot 乐观冲突、snapshot JSONB/整小时过期/十六进制摘要/状态 CAS、副本首次建档与 generation+owner+lease fencing、步骤作用域唯一与终态防回退、operation 历史守卫、cleanup 第一写的延迟外键和每用户 recent selection；PostgreSQL 专有约束必须使用真实 PostgreSQL 验证。
+- AppSource 测试必须覆盖 slot 乐观冲突、snapshot JSONB/整小时过期/十六进制摘要/状态 CAS、副本首次建档与 generation+owner+lease fencing、步骤作用域唯一/活租约更新/attempt reset/旧步骤回填与终态防回退、stranded operation 扫描、operation 历史守卫、cleanup 第一写的延迟外键和每用户 recent selection；PostgreSQL 专有约束及 reset SQL 必须使用真实 PostgreSQL 验证。
 - MyBatis 试点测试必须覆盖 XML mapper 查询和更新；源码约束测试必须阻止新增 JDBC SQL、MyBatis 注解 SQL，并固化 PostgreSQL 专有 SQL 兼容约束。
 - Druid 连接池配置测试；当前验证 `spring.datasource.druid.*` 可绑定为 Druid DataSource，且 Web 控制台默认关闭。
 - Flyway migration 命名测试必须覆盖版本唯一性和已落库历史文件仍可解析；V18 之后新增 migration 只能使用 `VyyyyMMddHHmmss__description.sql`。

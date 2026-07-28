@@ -130,7 +130,7 @@ Token 校验流程：
 
 应用源码进度 WebSocket 是只读观察通道，不属于平台文件 RPC 或 RunEvent。实现和后续扩展必须满足：
 
-1. ticket 只能通过登录态创建，签发前先读取持久化 operation 并执行当前启用应用、有效成员、代码库关联和个人 snapshot owner/`APP_ADMIN` 规则；`SUPER_ADMIN` 不旁路成员关系。
+1. ticket 只能通过登录态创建，签发前先读取持久化 operation 并确认 repository 仍是应用源码类型；TEAM 要求用户属于任一当前启用且仍关联该 repository 的应用，PERSONAL 只允许 owner 或同时满足上述成员条件的 `APP_ADMIN/SUPER_ADMIN`，管理员不旁路成员关系。
 2. ticket 短期过期、一次性消费，并绑定 operationId、userId、签发时 `APP_ADMIN` 事实、签发 backendProcessId 和 traceId。WebSocket upgrade 必须校验 ticket path operationId、当前 JVM 和 Origin 白名单；失败统一返回通用拒绝，不能泄露 operation 是否存在。
 3. 建连首帧和后续轮询只读数据库权威 operation/step/replica 状态；每次轮询重新鉴权，不能只信任 ticket 中缓存的成员或 owner。断开连接只停止观察，不能取消或修改后台操作。
 4. payload 只返回逻辑 ID、固定 commit、状态、时间和安全步骤摘要；不得包含物理源码根、repositoryPath、SSH 私钥、原始 Git stderr、文件内容、完整异常堆栈或敏感路径。序列化及内部读取异常只返回安全错误码和固定消息。

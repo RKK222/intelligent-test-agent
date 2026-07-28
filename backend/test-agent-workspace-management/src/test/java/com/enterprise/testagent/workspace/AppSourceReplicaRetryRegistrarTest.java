@@ -3,14 +3,19 @@ package com.enterprise.testagent.workspace;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.appsource.AppSourceOperation;
+import com.enterprise.testagent.domain.appsource.AppSourceOperationStatus;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationStep;
+import com.enterprise.testagent.domain.appsource.AppSourceOperationType;
 import com.enterprise.testagent.domain.appsource.AppSourceReplica;
 import com.enterprise.testagent.domain.appsource.AppSourceReplicaStatus;
 import com.enterprise.testagent.domain.appsource.AppSourceRepository;
@@ -65,6 +70,66 @@ class AppSourceReplicaRetryRegistrarTest {
                         exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
         assertThat(latest.get()).isEqualTo(first);
         assertThat(steps).extracting(AppSourceOperationStep::operationId).containsOnly(first.operationId());
+        assertThat(steps).extracting(AppSourceOperationStep::stepCode)
+                .containsExactlyElementsOf(AppSourceReplicaStepCatalog.codes());
+    }
+
+    @Test
+    void concurrentLateReplayUsesImmutableIdentityBeforeCurrentSlotAndTargets() {
+        AppSourceRepository repository = mock(AppSourceRepository.class);
+        AppSourceOperation original = new AppSourceOperation(
+                "op-retry-replay", new ApplicationId("app-1"), REPOSITORY_ID, 3L, 3L,
+                new UserId("user-1"), AppSourceOperationType.RETRY_REPLICAS, "original-hash",
+                AppSourceOperationStatus.RUNNING, "trace-original", NOW.minusSeconds(10), null);
+        when(repository.lockRepositoryForAppSource(REPOSITORY_ID)).thenReturn(true);
+        when(repository.findOperation(original.operationId())).thenReturn(Optional.of(original));
+        AppSourceReplicaRetryRegistrar registrar = new AppSourceReplicaRetryRegistrar(repository);
+
+        AppSourceOperation replay = registrar.register(request(original.operationId(), "different-dynamic-hash"));
+
+        assertThat(replay).isSameAs(original);
+        verify(repository, never()).findSlotForUpdate(REPOSITORY_ID);
+        verify(repository, never()).findReplica(any(), anyLong(), any());
+        verify(repository, never()).saveOperation(any());
+    }
+
+    @Test
+    void replayRejectsDifferentAppRepositoryActorTypeOrGeneration() {
+        List<AppSourceOperation> conflicts = List.of(
+                operation("op-app", new ApplicationId("app-2"), REPOSITORY_ID, new UserId("user-1"),
+                        AppSourceOperationType.RETRY_REPLICAS, 3L),
+                operation("op-repository", new ApplicationId("app-1"), new CodeRepositoryId("repo_other"),
+                        new UserId("user-1"), AppSourceOperationType.RETRY_REPLICAS, 3L),
+                operation("op-actor", new ApplicationId("app-1"), REPOSITORY_ID, new UserId("user-2"),
+                        AppSourceOperationType.RETRY_REPLICAS, 3L),
+                operation("op-type", new ApplicationId("app-1"), REPOSITORY_ID, new UserId("user-1"),
+                        AppSourceOperationType.DOWNLOAD, 3L),
+                operation("op-generation", new ApplicationId("app-1"), REPOSITORY_ID, new UserId("user-1"),
+                        AppSourceOperationType.RETRY_REPLICAS, 4L));
+
+        for (AppSourceOperation conflict : conflicts) {
+            AppSourceRepository repository = mock(AppSourceRepository.class);
+            when(repository.lockRepositoryForAppSource(REPOSITORY_ID)).thenReturn(true);
+            when(repository.findOperation(conflict.operationId())).thenReturn(Optional.of(conflict));
+            AppSourceReplicaRetryRegistrar registrar = new AppSourceReplicaRetryRegistrar(repository);
+
+            assertThatThrownBy(() -> registrar.register(request(conflict.operationId(), "replay-hash")))
+                    .isInstanceOfSatisfying(PlatformException.class,
+                            exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+        }
+    }
+
+    private AppSourceOperation operation(
+            String operationId,
+            ApplicationId appId,
+            CodeRepositoryId repositoryId,
+            UserId actorUserId,
+            AppSourceOperationType operationType,
+            long generation) {
+        return new AppSourceOperation(
+                operationId, appId, repositoryId, generation, generation, actorUserId, operationType,
+                "original-hash", AppSourceOperationStatus.RUNNING, "trace-original",
+                NOW.minusSeconds(10), null);
     }
 
     private AppSourceReplicaRetryRegistrar.RetryRequest request(String operationId, String requestHash) {

@@ -24,6 +24,7 @@ API 定义包，承载 HTTP/SSE/WebSocket 入口、请求响应 DTO、统一响�
 - `web.platform.UserManagementController`：超级管理员用户管理入口，校验 `SUPER_ADMIN` 后把用户查询、创建和单角色调整请求交给 system-management 服务。
 - `web.platform.ConfigurationManagementController`：应用配置管理入口，代码库 DTO 包含 `englishName`；设置页创建应用工作空间时根据当前用户 READY opencode 进程确定目标 Linux 服务器，并提供 `workspace-create-operations/{operationId}` 轮询接口。
 - `web.platform.ReferenceRepositoryController`、`web.platform.ReferenceRepositoryDtos`：应用引用资产库列表、初始化、同步、受控分支切换、只读指针核验、含可空 `repositoryPath` 的状态和单层树内部入口；只负责 `APP_ADMIN`（含 `SUPER_ADMIN`）鉴权、分支请求、traceId 和阻塞任务调度。
+- `web.platform.AppSourceController`、`web.platform.AppSourceOperationController`、`web.platform.AppSourceOperationWebSocketHandler`：应用源码列表/树/物化/重试/打开/最近选择、操作快照、一次性 ticket 与独立只读进度 WebSocket 入口；Controller 不访问 Repository，GET/ticket/upgrade/轮询均委托业务层按 repository 任一当前启用关联应用实时复核 TEAM/PERSONAL 权限，协议 wire 保持不变。
 - `web.platform.InternalModelProviderManagementController` / `web.platform.InternalModelTokenManagementController`：超级管理员维护内部模型供应商关联和外部 Token 记录的入口，Token API 响应不含明文；`InternalModelProxyController` 是仅供 opencode 子进程调用、按 Provider ID 注入对应 Token 的内部模型代理入口，代理密钥和供应商快照在订阅请求体前校验，请求体仅在该端点按 `2 MiB` 上限聚合并以 byte[] 转发，顶层 `model` 通过流式 JSON 扫描校验，避免放大全局 WebFlux 缓冲区、完整 JSON 对象树和额外 String 副本。
 - `web.platform.XxlJobSsoTicketController`：仅 `SUPER_ADMIN` 可用的 60 秒一次性 iframe 表单票据入口；业务签发与 Redis 消费属于 XXL integration。
 - `web.platform.SchedulerManagementController`：旧 `/scheduler-management/**` 兼容入口，所有方法统一返回 `410 API_GONE`，不再调用旧管理服务。
@@ -67,6 +68,7 @@ API 定义包，承载 HTTP/SSE/WebSocket 入口、请求响应 DTO、统一响�
 - 用户管理 API 测试必须覆盖 `SUPER_ADMIN` 查询、创建、角色调整、角色列表和非超级管理员/匿名拒绝。
 - Configuration 管理 API 测试必须覆盖代码库英文名 DTO、创建应用工作空间的用户 opencode 服务器透传、进度查询鉴权和统一错误格式。
 - 引用资产库 API 测试必须覆盖 7 个端点、请求/响应 DTO、traceId、`APP_ADMIN` 与 `SUPER_ADMIN` 成功和普通用户拒绝。
+- 应用源码 API 测试必须覆盖跨关联应用 TEAM 成员的 HTTP/ticket/WebSocket 成功，以及 ticket 签发后撤权、解除关联、禁用应用和 PERSONAL owner/成员管理员/普通成员边界。
 - Terminal WebSocket 测试必须覆盖 ticket 消费、origin 校验、单会话互斥、限流和超时。
 - Agent 配置 Controller 测试必须覆盖公共仓库初始化/显式拉取的 `SUPER_ADMIN` 权限与目标服务器路由，公共 worktree 列表的 `SUPER_ADMIN` 权限、`linuxServerId` 缺参校验和响应字段。
 - 入口公共工具测试覆盖 traceId、分页参数、统一错误、鉴权和限流。

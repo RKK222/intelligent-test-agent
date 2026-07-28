@@ -186,6 +186,17 @@ public class MyBatisAppSourceRepository implements AppSourceRepository {
     }
 
     @Override
+    public boolean lockReplicaLeaseForUpdate(
+            CodeRepositoryId repositoryId,
+            long generation,
+            LinuxServerId linuxServerId,
+            String expectedLeaseOwner,
+            Instant now) {
+        return mapper.lockReplicaLeaseForUpdate(
+                repositoryId.value(), generation, linuxServerId.value(), expectedLeaseOwner, now) != null;
+    }
+
+    @Override
     public boolean markReplicaCleaned(
             CodeRepositoryId repositoryId,
             long generation,
@@ -213,6 +224,14 @@ public class MyBatisAppSourceRepository implements AppSourceRepository {
     }
 
     @Override
+    public List<AppSourceOperation> findStrandedOperations(int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("limit must be positive");
+        }
+        return mapper.findStrandedOperations(limit).stream().map(this::toOperation).toList();
+    }
+
+    @Override
     public void saveOperation(AppSourceOperation operation) {
         mapper.insertOperation(toRow(operation));
     }
@@ -233,6 +252,50 @@ public class MyBatisAppSourceRepository implements AppSourceRepository {
     @Override
     public boolean upsertStep(AppSourceOperationStep step) {
         return mapper.upsertStep(toRow(step)) == 1;
+    }
+
+    @Override
+    public boolean updateStepIfReplicaLease(
+            AppSourceOperationStep step,
+            CodeRepositoryId repositoryId,
+            long generation,
+            LinuxServerId linuxServerId,
+            String expectedLeaseOwner,
+            Instant now) {
+        if (step.scope() != AppSourceStepScope.SERVER
+                || !step.linuxServerId().equals(linuxServerId)
+                || step.status() == AppSourceStepStatus.PENDING
+                || generation < 1L
+                || expectedLeaseOwner == null
+                || expectedLeaseOwner.isBlank()) {
+            throw new IllegalArgumentException("invalid lease-fenced app-source step transition");
+        }
+        return mapper.updateStepIfReplicaLease(
+                toRow(step), repositoryId.value(), generation, linuxServerId.value(),
+                expectedLeaseOwner, now) == 1;
+    }
+
+    @Override
+    public boolean resetStepIfReplicaLease(
+            AppSourceOperationStep pendingStep,
+            CodeRepositoryId repositoryId,
+            long generation,
+            LinuxServerId linuxServerId,
+            String expectedLeaseOwner,
+            Instant now) {
+        if (pendingStep.scope() != AppSourceStepScope.SERVER
+                || !pendingStep.linuxServerId().equals(linuxServerId)
+                || pendingStep.status() != AppSourceStepStatus.PENDING
+                || pendingStep.startedAt() != null
+                || pendingStep.completedAt() != null
+                || generation < 1L
+                || expectedLeaseOwner == null
+                || expectedLeaseOwner.isBlank()) {
+            throw new IllegalArgumentException("invalid lease-fenced app-source step reset");
+        }
+        return mapper.resetStepIfReplicaLease(
+                toRow(pendingStep), repositoryId.value(), generation, linuxServerId.value(),
+                expectedLeaseOwner, now) == 1;
     }
 
     @Override

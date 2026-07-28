@@ -212,7 +212,7 @@
                   and operation.status in ('PENDING', 'RUNNING')
                   and step.scope = 'SERVER'
                   and step.linux_server_id = replica.linux_server_id
-                  and step.step_code = 'RETRY_QUEUED'
+                  and step.step_code in ('QUEUED', 'RETRY_QUEUED')
                   and step.status in ('PENDING', 'RUNNING')
             ))
           )
@@ -260,6 +260,13 @@
           and linux_server_id = #{row.linuxServerId} and status = 'RUNNING'
           and lease_owner = #{expectedLeaseOwner} and lease_until &gt; #{now}
     </update>
+    <select id="lockReplicaLeaseForUpdate" resultType="string">
+        select repository_id from app_source_replicas
+        where repository_id = #{repositoryId} and generation = #{generation}
+          and linux_server_id = #{linuxServerId} and status = 'RUNNING'
+          and lease_owner = #{expectedLeaseOwner} and lease_until &gt; #{now}
+        for update
+    </select>
     <update id="markReplicaCleaned">
         update app_source_replicas set status = 'CLEANED', lease_owner = null, lease_until = null,
             next_retry_at = null, safe_error_code = null, safe_error_message = null, updated_at = #{now}
@@ -286,10 +293,32 @@
               and operation.target_generation = #{generation}
               and operation.status in ('PENDING', 'RUNNING')
               and step.linux_server_id = #{linuxServerId}
-              and step.status in ('PENDING', 'RUNNING')
+              and step.scope = 'SERVER'
             order by operation.accepted_at desc, operation.operation_id desc
             limit 1
         )
+    </select>
+    <select id="findStrandedOperations" resultMap="OperationMap">
+        select <include refid="OperationColumns"/> from app_source_operations operation
+        where operation.status in ('PENDING', 'RUNNING')
+          and (operation.status = 'RUNNING' or not exists (
+            select 1 from app_source_operation_steps step
+            where step.operation_id = operation.operation_id
+              and step.status in ('PENDING', 'RUNNING')
+          ))
+          and exists (
+            select 1 from app_source_replicas replica
+            where replica.repository_id = operation.repository_id
+              and replica.generation = operation.target_generation
+          )
+          and not exists (
+            select 1 from app_source_replicas replica
+            where replica.repository_id = operation.repository_id
+              and replica.generation = operation.target_generation
+              and replica.status not in ('READY', 'FAILED')
+          )
+        order by operation.accepted_at, operation.operation_id
+        limit #{limit}
     </select>
     <insert id="insertOperation">
         insert into app_source_operations(<include refid="OperationColumns"/>) values (
@@ -325,6 +354,91 @@
             (target.status = 'PENDING' and source.status in ('PENDING', 'RUNNING', 'FAILED', 'SKIPPED'))
             or (target.status = 'RUNNING' and source.status in ('RUNNING', 'SUCCEEDED', 'FAILED', 'SKIPPED'))
         ) then update set status = source.status, safe_summary = source.safe_summary,
+            started_at = source.started_at, completed_at = source.completed_at, updated_at = source.updated_at
+        when not matched then insert (<include refid="StepColumns"/>) values (
+            source.step_id, source.operation_id, source.scope, source.linux_server_id, source.step_code,
+            source.sequence, source.status, source.safe_summary, source.started_at, source.completed_at,
+            source.updated_at)
+    </insert>
+    <update id="updateStepIfReplicaLease">
+        update app_source_operation_steps step
+        set status = #{row.status}, safe_summary = #{row.safeSummary},
+            started_at = #{row.startedAt}, completed_at = #{row.completedAt}, updated_at = #{row.updatedAt}
+        where step.step_id = #{row.stepId}
+          and step.operation_id = #{row.operationId}
+          and step.scope = 'SERVER'
+          and step.linux_server_id = #{linuxServerId}
+          and ((step.status = 'PENDING' and #{row.status} in ('RUNNING', 'FAILED', 'SKIPPED'))
+            or (step.status = 'RUNNING' and #{row.status} in ('SUCCEEDED', 'FAILED', 'SKIPPED')))
+          and exists (
+            select 1
+            from app_source_operations operation
+            join app_source_replicas replica
+              on replica.repository_id = operation.repository_id
+             and replica.generation = operation.target_generation
+             and replica.linux_server_id = #{linuxServerId}
+            where operation.operation_id = #{row.operationId}
+              and operation.repository_id = #{repositoryId}
+              and operation.target_generation = #{generation}
+              and operation.status in ('PENDING', 'RUNNING')
+              and #{row.scope} = 'SERVER'
+              and #{row.linuxServerId} = #{linuxServerId}
+              and replica.status = 'RUNNING'
+              and replica.lease_owner = #{expectedLeaseOwner}
+              and replica.lease_until &gt; #{now}
+          )
+    </update>
+    <insert id="resetStepIfReplicaLease" databaseId="postgresql">
+        insert into app_source_operation_steps(<include refid="StepColumns"/>)
+        select #{row.stepId}, #{row.operationId}, #{row.scope}, #{row.linuxServerId}, #{row.stepCode},
+            #{row.sequence}, 'PENDING', #{row.safeSummary}, null, null, #{row.updatedAt}
+        where exists (
+            select 1
+            from app_source_operations operation
+            join app_source_replicas replica
+              on replica.repository_id = operation.repository_id
+             and replica.generation = operation.target_generation
+             and replica.linux_server_id = #{linuxServerId}
+            where operation.operation_id = #{row.operationId}
+              and operation.repository_id = #{repositoryId}
+              and operation.target_generation = #{generation}
+              and operation.status in ('PENDING', 'RUNNING')
+              and #{row.scope} = 'SERVER'
+              and #{row.linuxServerId} = #{linuxServerId}
+              and replica.status = 'RUNNING'
+              and replica.lease_owner = #{expectedLeaseOwner}
+              and replica.lease_until &gt; #{now}
+          )
+        on conflict (step_id) do update set status = 'PENDING', safe_summary = excluded.safe_summary,
+            started_at = null, completed_at = null, updated_at = excluded.updated_at
+    </insert>
+    <insert id="resetStepIfReplicaLease">
+        merge into app_source_operation_steps target using (
+            select cast(#{row.stepId} as varchar(128)) step_id,
+                cast(#{row.operationId} as varchar(128)) operation_id,
+                cast(#{row.scope} as varchar(16)) scope,
+                cast(#{row.linuxServerId} as varchar(128)) linux_server_id,
+                cast(#{row.stepCode} as varchar(64)) step_code,
+                cast(#{row.sequence} as integer) sequence,
+                cast('PENDING' as varchar(32)) status,
+                cast(#{row.safeSummary} as varchar(1000)) safe_summary,
+                cast(null as timestamp) started_at, cast(null as timestamp) completed_at,
+                cast(#{row.updatedAt} as timestamp) updated_at
+            from app_source_operations operation
+            join app_source_replicas replica
+              on replica.repository_id = operation.repository_id
+             and replica.generation = operation.target_generation
+             and replica.linux_server_id = #{linuxServerId}
+            where operation.operation_id = #{row.operationId}
+              and operation.repository_id = #{repositoryId}
+              and operation.target_generation = #{generation}
+              and operation.status in ('PENDING', 'RUNNING')
+              and replica.status = 'RUNNING'
+              and replica.lease_owner = #{expectedLeaseOwner}
+              and replica.lease_until &gt; #{now}
+        ) source
+        on target.step_id = source.step_id
+        when matched then update set status = source.status, safe_summary = source.safe_summary,
             started_at = source.started_at, completed_at = source.completed_at, updated_at = source.updated_at
         when not matched then insert (<include refid="StepColumns"/>) values (
             source.step_id, source.operation_id, source.scope, source.linux_server_id, source.step_code,

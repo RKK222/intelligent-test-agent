@@ -22,6 +22,7 @@ import com.enterprise.testagent.workspace.AppSourceGitMaterializer;
 import com.enterprise.testagent.workspace.AppSourceIndexManager;
 import com.enterprise.testagent.workspace.AppSourceMaterializationRegistrar;
 import com.enterprise.testagent.workspace.AppSourceReplicaResultRecorder;
+import com.enterprise.testagent.workspace.AppSourceReplicaProgressRecorder;
 import com.enterprise.testagent.workspace.AppSourceReplicaRetryRegistrar;
 import com.enterprise.testagent.workspace.AppSourceReplicaTaskDispatcher;
 import com.enterprise.testagent.workspace.AppSourceReplicaWorker;
@@ -54,6 +55,7 @@ class AppSourceContextTest {
                 .withBean(AppSourceReplicaRetryRegistrar.class)
                 .withBean(AppSourceGitAccessResolver.class)
                 .withBean(AppSourceGitMaterializer.class)
+                .withBean(AppSourceReplicaProgressRecorder.class)
                 .withBean(AppSourceReplicaResultRecorder.class)
                 .withBean(AppSourceIndexManager.class)
                 .withBean(AppSourceWorkspaceOpener.class)

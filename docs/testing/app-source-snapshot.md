@@ -9,7 +9,7 @@
 ```bash
 cd backend
 mvn -q -DappLogDir=target/log -pl test-agent-app -am \
-  -Dtest=AppSourceDomainTest,AppSourceOperationIdTest,ManagedWorkspacePathResolverTest,ConfigurationManagementApplicationServiceTest,MyBatisAppSourceRepositoryIntegrationTest,MyBatisAppSourcePostgresqlIntegrationTest,AppSourceApplicationServiceTest,AppSourceGitMaterializerTest,AppSourceWorkspaceAccessTest,AppSourceContextTest,AppSourceRetryRecoveryIntegrationTest,AppSourceControllerTest,AppSourceOperationControllerTest,AppSourceOperationTicketServiceTest,AppSourceOperationTicketStoreTest,AppSourceOperationWebSocketHandlerTest,AppSourceWebSocketOriginTest,AppSourceWebSocketConfigTest,AppSourceApiContextTest,XxlJobMysqlMigrationTest,PersistenceSqlConventionTest,FlywayMigrationNamingTest \
+  -Dtest=AppSourceDomainTest,AppSourceOperationIdTest,ManagedWorkspacePathResolverTest,ConfigurationManagementApplicationServiceTest,MyBatisAppSourceRepositoryIntegrationTest,MyBatisAppSourcePostgresqlIntegrationTest,AppSourceApplicationServiceTest,AppSourceGitMaterializerTest,AppSourceMaterializationRegistrarTest,AppSourceReplicaRetryRegistrarTest,AppSourceReplicaProgressRecorderTest,AppSourceReplicaResultRecorderTest,AppSourceReplicaWorkerTest,DefaultAppSourceReplicaTaskDispatcherTest,AppSourceWorkspaceAccessTest,AppSourceContextTest,AppSourceRetryRecoveryIntegrationTest,AppSourceReplicaConvergencePostgresqlIntegrationTest,AppSourceCrossApplicationProgressAuthorizationTest,AppSourceControllerTest,AppSourceOperationControllerTest,AppSourceOperationTicketServiceTest,AppSourceOperationTicketStoreTest,AppSourceOperationWebSocketHandlerTest,AppSourceWebSocketOriginTest,AppSourceWebSocketConfigTest,AppSourceApiContextTest,XxlJobMysqlMigrationTest,PersistenceSqlConventionTest,FlywayMigrationNamingTest \
   -Dsurefire.failIfNoSpecifiedTests=false test
 ```
 
@@ -41,12 +41,12 @@ corepack pnpm playwright test apps/agent-web/tests/workbench.spec.ts \
 
 | 维度 | 必须证明的事实 |
 | --- | --- |
-| 领域与幂等 | operationId 的 ECMAScript 空白规范化、1–128 长度和点段/路径分隔拒绝；保留期只接受 1–72 整小时且默认 48；状态、generation、lockVersion 和 lease 只前进。 |
-| 数据库 | 七类表、JSONB 结构化路径、固定提交和 64 位十六进制索引摘要；GLOBAL/SERVER 步骤唯一；cleanup 允许作为业务事务第一写；运行 SQL 仅在 `AppSourceMapper.xml`，无新增 JDBC 或注解 SQL。 |
-| 物化与恢复 | branch 与 tree 使用同一次固定 commit；浅克隆、冻结 SHA fetch、no-cone sparse checkout、删除 `.git`、原子替换与数据库写回失败回滚；广播丢失、队列拒绝、Java 重启、离线服务器恢复都由数据库扫描补偿。 |
-| 生命周期 | PERSONAL 固定当前用户服务器，TEAM 冻结受理时在线集合；至少一台 READY 才提升，部分失败可打开 READY 服务器，全失败保留旧 active；同 generation 只重试 `FAILED/STALE` 且拒绝重叠非终态步骤；TEAM 不可降为 PERSONAL。 |
+| 领域与幂等 | operationId 的 ECMAScript 空白规范化、1–128 长度和点段/路径分隔拒绝；retry 重放仅匹配 route app/repository/actor/type/expected generation，不依赖动态失败服务器；保留期只接受 1–72 整小时且默认 48；状态、generation、lockVersion 和 lease 只前进。 |
+| 数据库 | 七类表、JSONB 结构化路径、固定提交和 64 位十六进制索引摘要；GLOBAL/SERVER 步骤唯一；活租约步骤更新/reset、旧步骤领取、stranded 扫描及 status 前导索引；cleanup 允许作为业务事务第一写；运行 SQL 仅在 `AppSourceMapper.xml`，无新增 JDBC 或注解 SQL。 |
+| 物化与恢复 | 每服务器固定 13 步，动作前 RUNNING、动作后 SUCCEEDED，失败当前步 FAILED/后续 SKIPPED且摘要低敏；新 lease 清除旧 attempt 时间/终态，旧 owner 失租后零后续写；branch 与 tree 使用同一次固定 commit；浅克隆、冻结 SHA fetch、no-cone sparse checkout、删除 `.git`、原子替换与数据库写回失败回滚；广播丢失、队列拒绝、Java 重启、全副本终态 stranded 和离线服务器恢复都由数据库扫描补偿。 |
+| 生命周期 | PERSONAL 固定当前用户服务器，TEAM 冻结受理时在线集合；至少一台 READY 才提升，旧 ACTIVE 先失效再激活新代；三服务器最后两台并发以 slot 行锁串行收敛，部分失败可打开 READY 服务器，全失败保留旧 active/expiry；同 generation 只重试 `FAILED/STALE`；TEAM 不可降为 PERSONAL。 |
 | 文件安全 | 根目录及祖先/目标符号链接 fail closed；`.testagent-appsource-index.json` 不出现在列表/搜索且所有外部读写操作拒绝；缺失或损坏索引按数据库摘要原子修复；文件 ticket 和每条 RPC 都重新校验成员、generation、expiry、READY replica 和服务器 affinity。 |
-| API 与观察 | 普通成员、owner、APP_ADMIN 和撤权边界；tree 旧数组与 `includeCommit=true` envelope 兼容；ticket 一次性、60 秒、容量有界并绑定 operation/user/JVM/精确 Origin；重连首帧来自数据库 snapshot，断开观察不取消后台 operation，payload 不含物理路径、凭据或原始 Git stderr。 |
+| API 与观察 | TEAM 按 repository 任一当前启用关联应用成员跨 app 观察，PERSONAL 保留 owner/成员管理员边界，GET/ticket/WS 每次实时复核撤权/解除关联/禁用；tree 旧数组与 `includeCommit=true` envelope 兼容；ticket 一次性、60 秒、容量有界并绑定 operation/user/JVM/精确 Origin；重连首帧来自数据库 snapshot，断开观察不取消后台 operation，payload 不含物理路径、凭据或原始 Git stderr；API/WS wire 不变。 |
 | 前端并发 | 明确 `MANAGED/APP_SOURCE`、全仓库四步选择、默认 48 小时、四态颜色与 owner；source selection/tree/progress 分别使用 authority/epoch，迟到请求和旧 socket 帧不能覆盖新选择；250ms 至 4s 有界退避，CONNECTING 可由 AbortSignal 释放。 |
 | 能力与兼容 | 应用源码普通文件可写；APP_SOURCE Run Diff 的普通源码路径必须产生 Workspace 文件写，PUBLIC/WORKSPACE Agent 配置路径则在 DiffViewer `writable`、父组件 handler 和 mutation 门禁被阻止，并且必须产生零条 `agent-config.write`。Git、应用 Agent/Skill/Hub 发布、宠物配置重载和版本选择禁用；recent 的确定性失效清除与暂时错误保留；旧前端可忽略 additive 字段，旧 tree 方法保持数组。 |
 | 清理 | XXL V6 恰好注册第八条每分钟 `workspace-management.app-source-cleanup`；每服务器数据库租约、generation fence 和文件锁阻止旧清理误删新副本；离线任务保留，成功后归档 Runtime Workspace，失败安全退避。 |

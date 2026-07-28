@@ -9,9 +9,12 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
+import com.enterprise.testagent.common.error.ErrorCode;
+import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.appsource.AppSourceOperation;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationStatus;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationType;
+import com.enterprise.testagent.domain.appsource.AppSourceOperationStep;
 import com.enterprise.testagent.domain.appsource.AppSourcePathType;
 import com.enterprise.testagent.domain.appsource.AppSourcePurpose;
 import com.enterprise.testagent.domain.appsource.AppSourceReplica;
@@ -20,6 +23,8 @@ import com.enterprise.testagent.domain.appsource.AppSourceRepositorySlot;
 import com.enterprise.testagent.domain.appsource.AppSourceSelectedPath;
 import com.enterprise.testagent.domain.appsource.AppSourceSnapshot;
 import com.enterprise.testagent.domain.appsource.AppSourceSnapshotStatus;
+import com.enterprise.testagent.domain.appsource.AppSourceStepScope;
+import com.enterprise.testagent.domain.appsource.AppSourceStepStatus;
 import com.enterprise.testagent.domain.broadcast.ServerBroadcastPublisher;
 import com.enterprise.testagent.domain.configuration.ApplicationId;
 import com.enterprise.testagent.domain.configuration.CodeRepository;
@@ -79,6 +84,7 @@ class AppSourceRetryRecoveryIntegrationTest {
     Path tempDir;
 
     private SingleConnectionDataSource schemaDataSource;
+    private JdbcClient jdbc;
     private MyBatisAppSourceRepository repository;
     private AppSourceReplicaRetryRegistrar registrar;
     private ConfigurationManagementRepository configuration;
@@ -103,7 +109,7 @@ class AppSourceRetryRecoveryIntegrationTest {
                 .load()
                 .migrate();
         installAppSourceSchema(schemaDataSource);
-        JdbcClient jdbc = JdbcClient.create(h2);
+        jdbc = JdbcClient.create(h2);
         insertBaseRows(jdbc);
         SqlSessionFactory sqlSessionFactory = new MyBatisPersistenceConfig().sqlSessionFactory(h2);
         repository = new MyBatisAppSourceRepository(
@@ -149,10 +155,22 @@ class AppSourceRetryRecoveryIntegrationTest {
                     .get().extracting(AppSourceOperation::status)
                     .isEqualTo(AppSourceOperationStatus.PENDING);
             releaseBlocker.countDown();
-            assertThat(completed.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(completed.await(2, TimeUnit.SECONDS))
+                    .as("replica=%s operation=%s steps=%s",
+                            repository.findReplica(REPOSITORY_ID, 1L, SERVER_ID),
+                            repository.findOperation(retry.operationId()),
+                            repository.findSteps(retry.operationId()))
+                    .isTrue();
             assertThat(repository.findOperation(retry.operationId()))
                     .get().extracting(AppSourceOperation::status)
                     .isEqualTo(AppSourceOperationStatus.SUCCEEDED);
+            assertThat(repository.findSteps(retry.operationId()))
+                    .hasSize(AppSourceReplicaStepCatalog.codes().size())
+                    .allSatisfy(step -> {
+                        assertThat(step.status().name()).isEqualTo("SUCCEEDED");
+                        assertThat(step.safeSummary())
+                                .doesNotContain("/data/", "git@", "stderr", "privateKey");
+                    });
         } finally {
             releaseBlocker.countDown();
             dispatcher.stop();
@@ -194,27 +212,147 @@ class AppSourceRetryRecoveryIntegrationTest {
                 dispatcher(workerCompletingSuccessfully(completed));
         restartedDispatcher.start();
         try {
-            assertThat(completed.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(completed.await(2, TimeUnit.SECONDS))
+                    .as("replica=%s operation=%s steps=%s",
+                            repository.findReplica(REPOSITORY_ID, 1L, SERVER_ID),
+                            repository.findOperation(retry.operationId()),
+                            repository.findSteps(retry.operationId()))
+                    .isTrue();
             assertThat(repository.findOperation(retry.operationId()))
                     .get().extracting(AppSourceOperation::status)
                     .isEqualTo(AppSourceOperationStatus.SUCCEEDED);
+            assertThat(repository.findSteps(retry.operationId()))
+                    .hasSize(AppSourceReplicaStepCatalog.codes().size())
+                    .allSatisfy(step -> assertThat(step.status().name()).isEqualTo("SUCCEEDED"));
         } finally {
             restartedDispatcher.stop();
         }
     }
 
+    @Test
+    void expiredLeaseAfterTerminalFailureProgressIsReclaimedAndWholeTimelineIsReset() throws Exception {
+        CountDownLatch completed = new CountDownLatch(1);
+        AppSourceOperation retry = registerRetry(
+                AppSourceReplicaStatus.FAILED, "op-retry-after-result-cas-loss");
+        assertThat(repository.claimReplica(
+                REPOSITORY_ID, 1L, SERVER_ID, "worker-expired",
+                NOW.minusSeconds(1), NOW.minusSeconds(60))).isPresent();
+        // 模拟旧 worker 已写完失败步骤，但 result lease-CAS 因绝对到期未命中，副本仍为过期 RUNNING。
+        jdbc.sql("update app_source_operation_steps set status = case when step_code = 'SHALLOW_CLONE' "
+                        + "then 'FAILED' else 'SKIPPED' end, started_at = :startedAt, completed_at = :completedAt, "
+                        + "safe_summary = '旧 attempt 终态', updated_at = :completedAt where operation_id = :operationId")
+                .param("startedAt", NOW.minusSeconds(30))
+                .param("completedAt", NOW.minusSeconds(1))
+                .param("operationId", retry.operationId())
+                .update();
+
+        AppSourceReplicaWorker.Outcome outcome =
+                workerCompletingSuccessfully(completed).run(REPOSITORY_ID, 1L, SERVER_ID, retry.traceId());
+
+        assertThat(outcome).isEqualTo(AppSourceReplicaWorker.Outcome.SUCCEEDED);
+        assertThat(completed.await(2, TimeUnit.SECONDS)).isTrue();
+        assertThat(repository.findReplica(REPOSITORY_ID, 1L, SERVER_ID)).hasValueSatisfying(replica -> {
+            assertThat(replica.status()).isEqualTo(AppSourceReplicaStatus.READY);
+            assertThat(replica.attemptCount()).isEqualTo(3);
+        });
+        assertThat(repository.findSteps(retry.operationId()))
+                .hasSize(AppSourceReplicaStepCatalog.codes().size())
+                .allSatisfy(step -> {
+                    assertThat(step.status()).isEqualTo(AppSourceStepStatus.SUCCEEDED);
+                    assertThat(step.startedAt()).isEqualTo(NOW);
+                    assertThat(step.completedAt()).isEqualTo(NOW);
+                    assertThat(step.safeSummary()).doesNotContain("旧 attempt 终态");
+                });
+        assertThat(repository.findOperation(retry.operationId()))
+                .get().extracting(AppSourceOperation::status)
+                .isEqualTo(AppSourceOperationStatus.SUCCEEDED);
+    }
+
+    @Test
+    void legacyOnlyRetryTimelineIsBackfilledAndOldStepIsSafelySkipped() throws Exception {
+        CountDownLatch completed = new CountDownLatch(1);
+        AppSourceOperation retry = registerRetry(AppSourceReplicaStatus.FAILED, "op-legacy-only-retry");
+        jdbc.sql("delete from app_source_operation_steps where operation_id = :operationId")
+                .param("operationId", retry.operationId()).update();
+        assertThat(repository.upsertStep(new AppSourceOperationStep(
+                "legacy-retry-queued", retry.operationId(), AppSourceStepScope.SERVER, SERVER_ID,
+                "RETRY_QUEUED", 0, AppSourceStepStatus.PENDING,
+                "旧版等待摘要", null, null, NOW.minusSeconds(30)))).isTrue();
+
+        assertThat(workerCompletingSuccessfully(completed)
+                .run(REPOSITORY_ID, 1L, SERVER_ID, retry.traceId()))
+                .isEqualTo(AppSourceReplicaWorker.Outcome.SUCCEEDED);
+
+        assertThat(completed.await(2, TimeUnit.SECONDS)).isTrue();
+        assertThat(repository.findSteps(retry.operationId()))
+                .filteredOn(step -> "RETRY_QUEUED".equals(step.stepCode()))
+                .singleElement()
+                .satisfies(step -> {
+                    assertThat(step.status()).isEqualTo(AppSourceStepStatus.SKIPPED);
+                    assertThat(step.safeSummary()).isEqualTo("已跳过：兼容旧版服务器步骤");
+                });
+        assertThat(repository.findSteps(retry.operationId()))
+                .filteredOn(step -> AppSourceReplicaStepCatalog.codes().contains(step.stepCode()))
+                .hasSize(AppSourceReplicaStepCatalog.codes().size())
+                .allSatisfy(step -> assertThat(step.status()).isEqualTo(AppSourceStepStatus.SUCCEEDED));
+    }
+
+    @Test
+    void realMaterializerGitFailureLeavesEveryStableStepTerminalAndSafe() {
+        AppSourceOperation retry = registerRetry(AppSourceReplicaStatus.FAILED, "op-real-materializer-failure");
+        AppSourceGitMaterializer failingMaterializer = new AppSourceGitMaterializer(
+                (command, privateKey, timeout) -> {
+                    throw new PlatformException(
+                            ErrorCode.GIT_UNAVAILABLE,
+                            "raw git stderr /private/source secret-key");
+                },
+                new com.fasterxml.jackson.databind.ObjectMapper(),
+                AppSourceGitMaterializer.DirectoryMover.filesystem());
+
+        assertThat(worker(failingMaterializer).run(REPOSITORY_ID, 1L, SERVER_ID, retry.traceId()))
+                .isEqualTo(AppSourceReplicaWorker.Outcome.FAILED);
+
+        assertThat(repository.findOperation(retry.operationId()))
+                .get().extracting(AppSourceOperation::status)
+                .isEqualTo(AppSourceOperationStatus.FAILED);
+        assertThat(repository.findReplica(REPOSITORY_ID, 1L, SERVER_ID)).hasValueSatisfying(replica -> {
+            assertThat(replica.status()).isEqualTo(AppSourceReplicaStatus.FAILED);
+            assertThat(replica.safeErrorCode()).isEqualTo(ErrorCode.GIT_UNAVAILABLE.name());
+            assertThat(replica.safeErrorMessage()).isEqualTo("源码副本物化失败");
+        });
+        assertThat(repository.findSteps(retry.operationId()))
+                .hasSize(AppSourceReplicaStepCatalog.codes().size())
+                .allSatisfy(step -> {
+                    assertThat(step.status()).isIn(
+                            AppSourceStepStatus.SUCCEEDED,
+                            AppSourceStepStatus.FAILED,
+                            AppSourceStepStatus.SKIPPED);
+                    assertThat(step.safeSummary())
+                            .doesNotContain("/private/source", "secret-key", "stderr");
+                });
+        assertThat(repository.findSteps(retry.operationId()))
+                .filteredOn(step -> AppSourceReplicaStepCatalog.SHALLOW_CLONE.equals(step.stepCode()))
+                .singleElement()
+                .extracting(AppSourceOperationStep::status)
+                .isEqualTo(AppSourceStepStatus.FAILED);
+    }
+
     private AppSourceReplicaWorker workerCompletingSuccessfully(CountDownLatch completed) {
-        when(materializer.materialize(any(), any())).thenAnswer(invocation -> {
+        when(materializer.materialize(any(), any(), any())).thenAnswer(invocation -> {
             AppSourceGitMaterializer.Result result = new AppSourceGitMaterializer.Result(INDEX_SHA, true);
             ((AppSourceGitMaterializer.Completion) invocation.getArgument(1)).complete(result);
             completed.countDown();
             return result;
         });
+        return worker(materializer);
+    }
+
+    private AppSourceReplicaWorker worker(AppSourceGitMaterializer selectedMaterializer) {
         return new AppSourceReplicaWorker(
                 repository,
                 configuration,
                 gitAccess,
-                materializer,
+                selectedMaterializer,
                 new AppSourceReplicaResultRecorder(repository, workspaces),
                 paths,
                 new WorkspaceServerIdentity(SERVER_ID.value()),
@@ -226,7 +364,8 @@ class AppSourceRetryRecoveryIntegrationTest {
         ServerBroadcastPublisher publisher = mock(ServerBroadcastPublisher.class);
         when(publisher.instanceId()).thenReturn("instance-a");
         return new DefaultAppSourceReplicaTaskDispatcher(
-                worker, repository, publisher, new WorkspaceServerIdentity(SERVER_ID.value()),
+                worker, repository, new AppSourceReplicaResultRecorder(repository, workspaces), publisher,
+                new WorkspaceServerIdentity(SERVER_ID.value()),
                 1, 1, Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMillis(20), 32);
     }
 

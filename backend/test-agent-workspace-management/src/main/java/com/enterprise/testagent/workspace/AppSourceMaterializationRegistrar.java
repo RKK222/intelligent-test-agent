@@ -115,7 +115,6 @@ public class AppSourceMaterializationRegistrar {
                 null);
         repository.saveOperation(operation);
 
-        int sequence = 0;
         for (LinuxServerId serverId : request.targetServerIds()) {
             boolean inserted = repository.insertReplicaIfAbsent(new AppSourceReplica(
                     request.repositoryId(), generation, serverId, null, AppSourceReplicaStatus.PENDING,
@@ -124,18 +123,8 @@ public class AppSourceMaterializationRegistrar {
             if (!inserted) {
                 throw new PlatformException(ErrorCode.CONFLICT, "应用源码副本目标登记冲突");
             }
-            repository.upsertStep(new AppSourceOperationStep(
-                    stepId(request.operationId(), serverId.value(), "QUEUED"),
-                    request.operationId(),
-                    AppSourceStepScope.SERVER,
-                    serverId,
-                    "QUEUED",
-                    sequence++,
-                    AppSourceStepStatus.PENDING,
-                    "等待目标服务器处理",
-                    null,
-                    null,
-                    request.acceptedAt()));
+            AppSourceReplicaStepCatalog.pendingSteps(request.operationId(), serverId, request.acceptedAt())
+                    .forEach(repository::upsertStep);
         }
 
         AppSourceRepositorySlot nextSlot = new AppSourceRepositorySlot(
@@ -179,10 +168,6 @@ public class AppSourceMaterializationRegistrar {
 
     private String cleanupId(String operationId, String serverId) {
         return stableId("asc_", operationId + "\n" + serverId);
-    }
-
-    private String stepId(String operationId, String serverId, String stepCode) {
-        return stableId("ass_", operationId + "\n" + serverId + "\n" + stepCode);
     }
 
     private String stableId(String prefix, String source) {

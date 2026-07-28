@@ -72,6 +72,13 @@ public interface AppSourceMapper {
             @Param("expectedLeaseOwner") String expectedLeaseOwner,
             @Param("now") Instant now);
 
+    String lockReplicaLeaseForUpdate(
+            @Param("repositoryId") String repositoryId,
+            @Param("generation") long generation,
+            @Param("linuxServerId") String linuxServerId,
+            @Param("expectedLeaseOwner") String expectedLeaseOwner,
+            @Param("now") Instant now);
+
     int markReplicaCleaned(
             @Param("repositoryId") String repositoryId,
             @Param("generation") long generation,
@@ -87,6 +94,8 @@ public interface AppSourceMapper {
             @Param("generation") long generation,
             @Param("linuxServerId") String linuxServerId);
 
+    List<OperationRow> findStrandedOperations(@Param("limit") int limit);
+
     int insertOperation(@Param("row") OperationRow row);
 
     int updateOperationStatus(
@@ -96,6 +105,22 @@ public interface AppSourceMapper {
             @Param("completedAt") Instant completedAt);
 
     int upsertStep(@Param("row") StepRow row);
+
+    int updateStepIfReplicaLease(
+            @Param("row") StepRow row,
+            @Param("repositoryId") String repositoryId,
+            @Param("generation") long generation,
+            @Param("linuxServerId") String linuxServerId,
+            @Param("expectedLeaseOwner") String expectedLeaseOwner,
+            @Param("now") Instant now);
+
+    int resetStepIfReplicaLease(
+            @Param("row") StepRow row,
+            @Param("repositoryId") String repositoryId,
+            @Param("generation") long generation,
+            @Param("linuxServerId") String linuxServerId,
+            @Param("expectedLeaseOwner") String expectedLeaseOwner,
+            @Param("now") Instant now);
 
     List<StepRow> findSteps(@Param("operationId") String operationId);
 
