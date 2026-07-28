@@ -126,17 +126,18 @@ const USER_VISIBLE_PROPERTIES = new Set([
 
 // 这里只放无需汉化、且会真实展示给用户的协议/算法/格式名；普通英文单词不能加入。
 const TECHNICAL_TERMS = new Set([
-  'ace', 'aes', 'api', 'ascii', 'authorization', 'base32', 'base64', 'bcrypt', 'bip39', 'blowfish', 'bban', 'cidr', 'chmod', 'cmyk', 'compose', 'cpu', 'cron', 'crontab', 'css', 'csv', 'des', 'docker', 'eap', 'ecdsa', 'emoji', 'eta', 'excel', 'facebook', 'feb',
-  'abs', 'apr', 'cos', 'get', 'git', 'hex', 'hmac', 'hsl', 'html', 'http', 'https', 'hwb', 'i18n', 'iban', 'id', 'ietf', 'internationalization', 'ip', 'ipsum', 'ipv4', 'ipv6', 'isbn', 'iso', 'javascript', 'jan', 'jcard', 'js', 'json', 'jwt', 'lch', 'linkedin', 'lorem',
+  'ace', 'aes', 'api', 'ascii', 'base32', 'base64', 'bcrypt', 'bip39', 'blowfish', 'bban', 'cidr', 'chmod', 'cmyk', 'compose', 'cpu', 'cron', 'crontab', 'css', 'csv', 'des', 'docker', 'eap', 'ecdsa', 'emoji', 'eta', 'excel', 'facebook', 'feb',
+  'abs', 'apr', 'cos', 'git', 'hex', 'hmac', 'hsl', 'html', 'http', 'https', 'hwb', 'i18n', 'iban', 'id', 'ietf', 'internationalization', 'ip', 'ipsum', 'ipv4', 'ipv6', 'isbn', 'iso', 'javascript', 'jan', 'jcard', 'js', 'json', 'jwt', 'lch', 'linkedin', 'lorem',
   'mac', 'mar', 'markdown', 'md5', 'mdn', 'meta', 'mgf1', 'mime', 'mon', 'mongo', 'ms', 'nato', 'numeronym', 'objectid', 'og', 'otp', 'p-256', 'p-384', 'p-521', 'passport', 'pdf', 'pem', 'qr', 'regexplained',
   'rabbit', 'rc4', 'rfc', 'rgb', 'rgba', 'ripemd-160', 'ripemd160', 'rsa', 'rsassa-pkcs1-v1', 'rsassa-pss', 'sha-1', 'sha-2', 'sha-3', 'sha-224', 'sha-256',
-  'sha-384', 'sha-512', 'sha1', 'sha3', 'sha224', 'sha256', 'sha384', 'sha512', 'shaken', 'sip', 'slug', 'token', 'toml', 'totp', 'tripledes',
+  'sha-384', 'sha-512', 'sha1', 'sha3', 'sha224', 'sha256', 'sha384', 'sha512', 'shaken', 'sip', 'slug', 'toml', 'totp', 'tripledes',
   'sin', 'spark', 'sqrt', 'sql', 'sqlite', 'ssid', 'sun', 'svg', 'tls', 'twitter', 'ula', 'ulid', 'unicode', 'unix', 'uri', 'url', 'utc', 'utf8', 'uuid', 'voip', 'w3c', 'webdav', 'wep', 'wifi', 'wpa', 'wpa2', 'wysiwyg', 'xml', 'yaml', 'yml',
 ]);
 
 const TECHNICAL_PHRASES = [
   'Basic Authentication',
   'Basic Auth',
+  'HTTP GET',
   'Access Token',
   'ID Token',
   'Open Graph',
@@ -170,6 +171,7 @@ const TECHNICAL_PHRASES = [
 
 // 示例输入和生成数据按任务约束保持原样；每一项都必须是精确匹配，禁止泛化为英文白名单。
 const EXACT_EXAMPLE_TEXT = new Set([
+  'ASCII ART',
   'Lorem ipsum dolor sit amet',
   'The quick brown fox jumps over the lazy dog',
   '例如“Hello Avengers”',
@@ -375,10 +377,121 @@ function isUserVisibleScriptString(node, file, rootExpressionVisible) {
   return false;
 }
 
-function inspectTypescript(route, file, source, offset = 0, rootExpressionVisible = false) {
+function isIdentifierReference(node) {
+  const parent = node.parent;
+  return !(ts.isPropertyAccessExpression(parent) && parent.name === node)
+    && !(ts.isPropertyAssignment(parent) && parent.name === node)
+    && !(ts.isVariableDeclaration(parent) && parent.name === node)
+    && !(ts.isParameter(parent) && parent.name === node);
+}
+
+function inspectVisibleBindingInitializer(route, file, binding, visibleBindings, visitedBindings) {
+  const sourceFile = ts.createSourceFile(file, binding.source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const statement = sourceFile.statements[0];
+  if (!statement || !ts.isExpressionStatement(statement)) {
+    return;
+  }
+
+  function visitVisibleResult(node) {
+    if (ts.isStringLiteralLike(node) || ts.isTemplateLiteralToken(node)) {
+      if (!recordLocaleKey(route, file, binding.source, node, binding.offset)
+        && containsNaturalEnglish(node.text)) {
+        addFinding(file, lineOf(binding.source, node.getStart()) + binding.offset, '脚本用户文案', node.text);
+      }
+      return;
+    }
+
+    if (ts.isIdentifier(node)) {
+      const nestedBinding = visibleBindings.get(node.text);
+      if (nestedBinding && !visitedBindings.has(node.text)) {
+        const nextVisitedBindings = new Set(visitedBindings);
+        nextVisitedBindings.add(node.text);
+        inspectVisibleBindingInitializer(route, file, nestedBinding, visibleBindings, nextVisitedBindings);
+      }
+      return;
+    }
+
+    if (ts.isTemplateExpression(node)) {
+      visitVisibleResult(node.head);
+      node.templateSpans.forEach((span) => {
+        visitVisibleResult(span.expression);
+        visitVisibleResult(span.literal);
+      });
+      return;
+    }
+
+    if (ts.isConditionalExpression(node)) {
+      visitVisibleResult(node.whenTrue);
+      visitVisibleResult(node.whenFalse);
+      return;
+    }
+
+    if (ts.isBinaryExpression(node)
+      && [ts.SyntaxKind.PlusToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken].includes(node.operatorToken.kind)) {
+      visitVisibleResult(node.left);
+      visitVisibleResult(node.right);
+      return;
+    }
+
+    if (ts.isParenthesizedExpression(node)
+      || ts.isAsExpression(node)
+      || ts.isTypeAssertionExpression(node)
+      || ts.isNonNullExpression(node)
+      || ts.isAwaitExpression(node)) {
+      visitVisibleResult(node.expression);
+      return;
+    }
+
+    if (ts.isPropertyAccessExpression(node)) {
+      visitVisibleResult(node.expression);
+      return;
+    }
+
+    if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+      if (ts.isBlock(node.body)) {
+        node.body.statements.forEach((child) => {
+          if (ts.isReturnStatement(child) && child.expression) {
+            visitVisibleResult(child.expression);
+          }
+        });
+      }
+      else {
+        visitVisibleResult(node.body);
+      }
+      return;
+    }
+
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)
+      && ['computed', 'ref', 'shallowRef'].includes(node.expression.text)
+      && node.arguments[0]) {
+      visitVisibleResult(node.arguments[0]);
+    }
+  }
+
+  visitVisibleResult(statement.expression);
+}
+
+function inspectTypescript(
+  route,
+  file,
+  source,
+  offset = 0,
+  rootExpressionVisible = false,
+  visibleBindings = new Map(),
+  visitedBindings = new Set(),
+) {
   const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 
   function visit(node) {
+    if (rootExpressionVisible && ts.isIdentifier(node) && isIdentifierReference(node)) {
+      const binding = visibleBindings.get(node.text);
+      if (binding && !visitedBindings.has(node.text)) {
+        const nextVisitedBindings = new Set(visitedBindings);
+        nextVisitedBindings.add(node.text);
+        inspectVisibleBindingInitializer(route, file, binding, visibleBindings, nextVisitedBindings);
+      }
+    }
+
     const isStringLiteral = ts.isStringLiteralLike(node);
     const isTemplateFragment = ts.isTemplateLiteralToken(node);
     if (isStringLiteral || isTemplateFragment) {
@@ -395,7 +508,28 @@ function inspectTypescript(route, file, source, offset = 0, rootExpressionVisibl
   visit(sourceFile);
 }
 
-function inspectTemplate(route, file, source, template) {
+function collectVisibleBindings(file, source, offset = 0) {
+  const bindings = new Map();
+  const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+
+  // 模板只能访问模块/`script setup` 顶层绑定，不能让函数内部同名变量覆盖真实来源。
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) {
+      continue;
+    }
+    for (const declaration of statement.declarationList.declarations) {
+      if (ts.isIdentifier(declaration.name) && declaration.initializer) {
+        bindings.set(declaration.name.text, {
+          source: declaration.initializer.getText(sourceFile),
+          offset: offset + lineOf(source, declaration.initializer.getStart()) - 1,
+        });
+      }
+    }
+  }
+  return bindings;
+}
+
+function inspectTemplate(route, file, source, template, visibleBindings) {
   const result = compileTemplate({
     filename: file,
     id: file,
@@ -413,7 +547,14 @@ function inspectTemplate(route, file, source, template) {
       return;
     }
     const rootExpressionVisible = interpolation || USER_VISIBLE_ATTRIBUTES.has(visibleAttribute);
-    inspectTypescript(route, file, expressionSource, template.loc.start.line + line - 2, rootExpressionVisible);
+    inspectTypescript(
+      route,
+      file,
+      expressionSource,
+      template.loc.start.line + line - 2,
+      rootExpressionVisible,
+      visibleBindings,
+    );
   }
 
   function visit(node) {
@@ -479,13 +620,17 @@ async function inspectFile(route, file) {
   if (file.endsWith('.vue')) {
     const { descriptor, errors } = parseSfc(source, { filename: file });
     errors.forEach(error => addFinding(file, 1, 'SFC 解析错误', String(error)));
+    const visibleBindings = new Map();
     for (const script of [descriptor.script, descriptor.scriptSetup]) {
       if (script) {
+        for (const [name, binding] of collectVisibleBindings(file, script.content, script.loc.start.line - 1)) {
+          visibleBindings.set(name, binding);
+        }
         inspectTypescript(route, file, script.content, script.loc.start.line - 1);
       }
     }
     if (descriptor.template) {
-      inspectTemplate(route, file, source, descriptor.template);
+      inspectTemplate(route, file, source, descriptor.template, visibleBindings);
     }
     return;
   }
@@ -510,11 +655,38 @@ function getNestedValue(root, key) {
   return key.split('.').reduce((value, part) => value?.[part], root);
 }
 
+function collectLeafKeys(value, prefix = '', keys = new Set()) {
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    for (const [part, child] of Object.entries(value)) {
+      collectLeafKeys(child, prefix ? `${prefix}.${part}` : part, keys);
+    }
+  }
+  else if (prefix) {
+    keys.add(prefix);
+  }
+  return keys;
+}
+
 async function validateLocales() {
+  const enFile = join(PROJECT_ROOT, 'locales/en.yml');
+  const zhFile = join(PROJECT_ROOT, 'locales/zh.yml');
   const [en, zh] = await Promise.all([
-    readFile(join(PROJECT_ROOT, 'locales/en.yml'), 'utf8').then(parseYaml),
-    readFile(join(PROJECT_ROOT, 'locales/zh.yml'), 'utf8').then(parseYaml),
+    readFile(enFile, 'utf8').then(parseYaml),
+    readFile(zhFile, 'utf8').then(parseYaml),
   ]);
+
+  const enLeafKeys = collectLeafKeys(en);
+  const zhLeafKeys = collectLeafKeys(zh);
+  for (const key of enLeafKeys) {
+    if (!zhLeafKeys.has(key)) {
+      addFinding(enFile, 1, '中文 locale 缺失', key);
+    }
+  }
+  for (const key of zhLeafKeys) {
+    if (!enLeafKeys.has(key)) {
+      addFinding(zhFile, 1, '英文 locale 缺失', key);
+    }
+  }
 
   for (const [key, locations] of usedLocaleKeys) {
     for (const location of locations) {

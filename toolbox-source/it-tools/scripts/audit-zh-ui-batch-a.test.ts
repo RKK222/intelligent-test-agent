@@ -302,4 +302,57 @@ export const option = { label: 'tools.hash-text.ui.shared' };
     expect(result.stderr).toContain('src/tools/token-generator/early-invalid.ts');
     expect(result.stderr).toContain('[locale key 越界] tools.hash-text.ui.shared');
   });
+
+  it('比较 en 和 zh 的全量叶子 key，并双向报告未被源码使用的孤立差异', async () => {
+    const root = await createAuditFixture();
+    await writeFile(join(root, 'locales/en.yml'), `
+tools:
+  token-generator:
+    ui:
+      englishOnly: Orphan English value
+`, 'utf8');
+    await writeFile(join(root, 'locales/zh.yml'), `
+tools:
+  token-generator:
+    ui:
+      chineseOnly: 仅中文孤立值
+`, 'utf8');
+
+    const result = runAudit(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('[中文 locale 缺失] tools.token-generator.ui.englishOnly');
+    expect(result.stderr).toContain('[英文 locale 缺失] tools.token-generator.ui.chineseOnly');
+  });
+
+  it('沿模板可见标识符追溯脚本变量初始化文案', async () => {
+    const root = await createAuditFixture();
+    await writeFixtureSource(root, 'token-generator/visible-binding.vue', `
+<script setup lang="ts">
+const buttonLabel = 'Delete account';
+</script>
+<template>
+  <c-button :label="buttonLabel" />
+</template>
+`);
+
+    const result = runAudit(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Delete account');
+  });
+
+  it('不把普通授权令牌界面短语按逐词技术白名单放行', async () => {
+    const root = await createAuditFixture();
+    await writeFixtureSource(root, 'token-generator/ordinary-interface-words.vue', `
+<template>
+  <div>Get authorization token</div>
+</template>
+`);
+
+    const result = runAudit(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Get authorization token');
+  });
 });

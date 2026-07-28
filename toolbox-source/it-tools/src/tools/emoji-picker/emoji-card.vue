@@ -17,7 +17,7 @@ const { copy } = useCopy();
 
     <div min-w-0 flex-1>
       <div truncate font-bold>
-        {{ emojiInfo.codePoints }}
+        {{ emojiInfo.title }}
       </div>
 
       <!-- <div>

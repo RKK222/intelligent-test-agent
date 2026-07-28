@@ -149,7 +149,7 @@ tools:
       reset: 重置
 
   token-generator:
-    title: Token 生成器
+    title: 令牌生成器
     description: 按需使用大小写字母、数字和符号生成随机字符串。
 
     uppercase: '大写 (ABC...)'
@@ -168,8 +168,8 @@ tools:
       numbers: 数字（123…）
       symbols: 符号（!-;…）
       length: 长度
-      tokenPlaceholder: 生成的 Token…
-      copied: Token 已复制到剪贴板
+      tokenPlaceholder: 生成的令牌…
+      copied: 令牌已复制到剪贴板
       copy: 复制
       refresh: 刷新
   percentage-calculator:
@@ -393,7 +393,7 @@ tools:
           description: "资源临时位于另一个 URL。"
         '303':
           name: "查看其他位置"
-          description: "可使用 GET 方法从另一个 URI 获取请求结果。"
+          description: "可使用 HTTP GET 方法从另一个 URI 获取请求结果。"
         '304':
           name: "未修改"
           description: "自请求头指定的版本以来，资源没有变化。"
@@ -581,8 +581,8 @@ tools:
         设置全局配置
 
         ```shell
-        git config --global user.name "[姓名]"
-        git config --global user.email "[邮箱]"
+        git config --global user.name "[name]"
+        git config --global user.email "[email]"
         ```
 
         ## 开始使用
@@ -604,7 +604,7 @@ tools:
         提交所有已跟踪的更改
 
         ```shell
-        git commit -am "[提交信息]"
+        git commit -am "[commit message]"
         ```
 
         将新修改追加到上一次提交
@@ -643,7 +643,7 @@ tools:
 
         ```shell
         git fetch origin
-        git reset --hard origin/[分支名称]
+        git reset --hard origin/[branch-name]
         ```
 
         ## 其他操作
@@ -1567,7 +1567,7 @@ tools:
 
   string-obfuscator:
     title: 字符串混淆器
-    description: 对密钥、IBAN、Token 等敏感字符串进行可识别的脱敏处理。
+    description: 对密钥、IBAN、令牌等敏感字符串进行可识别的脱敏处理。
     ui:
       placeholder: 请输入要脱敏的字符串
       label: 待脱敏字符串
@@ -1658,12 +1658,12 @@ tools:
     title: Basic Auth 生成器
     description: 根据用户名和密码生成 Base64 编码的 Basic Authentication 请求头。
     ui:
-      copied: Authorization 请求头已复制到剪贴板
+      copied: 身份验证请求头已复制到剪贴板
       username: 用户名
       usernamePlaceholder: 请输入用户名…
       password: 密码
       passwordPlaceholder: 请输入密码…
-      header: Authorization 请求头
+      header: 身份验证请求头
       copyHeader: 复制请求头
 
   text-to-unicode:
@@ -1773,7 +1773,7 @@ tools:
     title: ASCII 艺术字生成器
     description: 使用多种字体和样式生成 ASCII 艺术字。
     ui:
-      defaultText: ASCII 艺术字
+      defaultText: ASCII ART
       inputLabel: 文本
       inputPlaceholder: 请输入要绘制的文本
       font: 字体
