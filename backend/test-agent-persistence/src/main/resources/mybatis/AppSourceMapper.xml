@@ -197,10 +197,26 @@
         where repository_id = #{repositoryId} and generation = #{generation} order by linux_server_id
     </select>
     <select id="findClaimableReplicas" resultMap="ReplicaMap">
-        select <include refid="ReplicaColumns"/> from app_source_replicas
-        where linux_server_id = #{linuxServerId}
-          and (status = 'PENDING' or (status = 'RUNNING' and lease_until &lt;= #{now}))
-        order by updated_at, repository_id, generation
+        select <include refid="ReplicaColumns"/> from app_source_replicas replica
+        where replica.linux_server_id = #{linuxServerId}
+          and (
+            replica.status = 'PENDING'
+            or (replica.status = 'RUNNING' and replica.lease_until &lt;= #{now})
+            or (replica.status in ('FAILED', 'STALE') and exists (
+                select 1
+                from app_source_operations operation
+                join app_source_operation_steps step on step.operation_id = operation.operation_id
+                where operation.repository_id = replica.repository_id
+                  and operation.target_generation = replica.generation
+                  and operation.operation_type = 'RETRY_REPLICAS'
+                  and operation.status in ('PENDING', 'RUNNING')
+                  and step.scope = 'SERVER'
+                  and step.linux_server_id = replica.linux_server_id
+                  and step.step_code = 'RETRY_QUEUED'
+                  and step.status in ('PENDING', 'RUNNING')
+            ))
+          )
+        order by replica.updated_at, replica.repository_id, replica.generation
         limit #{limit}
     </select>
     <select id="findReplicaByRuntimeWorkspaceId" resultMap="ReplicaMap">

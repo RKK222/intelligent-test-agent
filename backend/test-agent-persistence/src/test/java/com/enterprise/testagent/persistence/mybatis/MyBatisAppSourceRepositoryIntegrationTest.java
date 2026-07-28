@@ -204,6 +204,55 @@ class MyBatisAppSourceRepositoryIntegrationTest {
     }
 
     @Test
+    void claimableRetryScanRequiresMatchingNonTerminalOperationAndServerStep() {
+        repository.insertSlotIfAbsent(slot(1L, 0L, NOW));
+        repository.saveSnapshot(snapshot("op-download", AppSourceSnapshotStatus.ACTIVE));
+        AppSourceReplica failed = replica(AppSourceReplicaStatus.FAILED, null, null, NOW);
+        assertThat(repository.insertReplicaIfAbsent(failed)).isTrue();
+
+        assertThat(repository.findClaimableReplicas(SERVER_ID, NOW, 10)).isEmpty();
+
+        AppSourceOperation failedRetry = retryOperation("op-failed-retry", AppSourceOperationStatus.PENDING, null);
+        repository.saveOperation(failedRetry);
+        AppSourceOperationStep failedRetryStep = retryStep(
+                "step-failed-retry", failedRetry.operationId(), AppSourceStepStatus.PENDING);
+        assertThat(repository.upsertStep(failedRetryStep)).isTrue();
+        assertThat(repository.findClaimableReplicas(SERVER_ID, NOW, 10)).containsExactly(failed);
+
+        assertThat(repository.upsertStep(retryStep(
+                failedRetryStep.stepId(), failedRetry.operationId(), AppSourceStepStatus.RUNNING))).isTrue();
+        assertThat(repository.upsertStep(retryStep(
+                failedRetryStep.stepId(), failedRetry.operationId(), AppSourceStepStatus.SUCCEEDED))).isTrue();
+        assertThat(repository.findClaimableReplicas(SERVER_ID, NOW, 10)).isEmpty();
+
+        AppSourceOperation terminalOperation = retryOperation(
+                "op-terminal-retry", AppSourceOperationStatus.SUCCEEDED, NOW.plusSeconds(1));
+        repository.saveOperation(terminalOperation);
+        assertThat(repository.upsertStep(retryStep(
+                "step-terminal-retry", terminalOperation.operationId(), AppSourceStepStatus.PENDING))).isTrue();
+        assertThat(repository.findClaimableReplicas(SERVER_ID, NOW, 10)).isEmpty();
+
+        jdbcClient.sql("update app_source_replicas set status = 'STALE' "
+                        + "where repository_id = :repositoryId and generation = 1 and linux_server_id = :serverId")
+                .param("repositoryId", REPOSITORY_ID.value()).param("serverId", SERVER_ID.value()).update();
+        AppSourceOperation staleRetry = retryOperation("op-stale-retry", AppSourceOperationStatus.PENDING, null);
+        repository.saveOperation(staleRetry);
+        assertThat(repository.upsertStep(retryStep(
+                "step-stale-retry", staleRetry.operationId(), AppSourceStepStatus.RUNNING))).isTrue();
+        assertThat(repository.findClaimableReplicas(SERVER_ID, NOW, 10)).singleElement()
+                .extracting(AppSourceReplica::status)
+                .isEqualTo(AppSourceReplicaStatus.STALE);
+
+        assertThat(repository.updateOperationStatus(
+                staleRetry.operationId(), AppSourceOperationStatus.PENDING,
+                AppSourceOperationStatus.RUNNING, null)).isTrue();
+        assertThat(repository.updateOperationStatus(
+                staleRetry.operationId(), AppSourceOperationStatus.RUNNING,
+                AppSourceOperationStatus.FAILED, NOW.plusSeconds(2))).isTrue();
+        assertThat(repository.findClaimableReplicas(SERVER_ID, NOW, 10)).isEmpty();
+    }
+
+    @Test
     void replicaLeaseWriteRejectsIllegalStatusTransition() {
         repository.insertSlotIfAbsent(slot(null, 0L, NOW));
         repository.saveSnapshot(snapshot("op-download", AppSourceSnapshotStatus.PENDING));
@@ -379,6 +428,24 @@ class MyBatisAppSourceRepositoryIntegrationTest {
         return new AppSourceOperation(
                 operationId, APP_ID, REPOSITORY_ID, null, 1L, USER_ID,
                 AppSourceOperationType.DOWNLOAD, "request-hash", status, "trace-app-source", NOW, completedAt);
+    }
+
+    private AppSourceOperation retryOperation(
+            String operationId, AppSourceOperationStatus status, Instant completedAt) {
+        return new AppSourceOperation(
+                operationId, APP_ID, REPOSITORY_ID, 1L, 1L, USER_ID,
+                AppSourceOperationType.RETRY_REPLICAS, "request-" + operationId,
+                status, "trace-" + operationId, NOW, completedAt);
+    }
+
+    private AppSourceOperationStep retryStep(
+            String stepId, String operationId, AppSourceStepStatus status) {
+        return new AppSourceOperationStep(
+                stepId, operationId, AppSourceStepScope.SERVER, SERVER_ID,
+                "RETRY_QUEUED", 0, status, "等待失败副本重试",
+                status == AppSourceStepStatus.PENDING ? null : NOW,
+                status == AppSourceStepStatus.SUCCEEDED ? NOW.plusSeconds(1) : null,
+                status == AppSourceStepStatus.SUCCEEDED ? NOW.plusSeconds(1) : NOW);
     }
 
     private AppSourceCleanupTask cleanupTask() {

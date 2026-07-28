@@ -137,6 +137,53 @@ class MyBatisAppSourcePostgresqlIntegrationTest {
                 AppSourceOperationStatus.SUCCEEDED, NOW.plusSeconds(2))).isTrue();
         assertThat(repository.findInFlightOperationForReplica(REPOSITORY_ID, 1L, SERVER_ID)).isEmpty();
 
+        JdbcClient retryJdbc = JdbcClient.create(dataSource);
+        assertThat(retryJdbc.sql("update app_source_replicas set status = 'FAILED' "
+                        + "where repository_id = :repositoryId and generation = 1 and linux_server_id = :serverId")
+                .param("repositoryId", REPOSITORY_ID.value())
+                .param("serverId", SERVER_ID.value())
+                .update()).isOne();
+        assertThat(repository.findClaimableReplicas(SERVER_ID, NOW.plusSeconds(3), 10)).isEmpty();
+
+        AppSourceOperation failedRetry = retryOperation(
+                "op-app-source-failed-retry-pg", AppSourceOperationStatus.PENDING, null);
+        repository.saveOperation(failedRetry);
+        assertThat(repository.upsertStep(retryStep(
+                "step-app-source-failed-retry-pg", failedRetry.operationId(), AppSourceStepStatus.PENDING))).isTrue();
+        assertThat(repository.findClaimableReplicas(SERVER_ID, NOW.plusSeconds(3), 10)).singleElement()
+                .extracting(AppSourceReplica::status)
+                .isEqualTo(AppSourceReplicaStatus.FAILED);
+
+        assertThat(repository.updateOperationStatus(
+                failedRetry.operationId(), AppSourceOperationStatus.PENDING,
+                AppSourceOperationStatus.RUNNING, null)).isTrue();
+        assertThat(repository.updateOperationStatus(
+                failedRetry.operationId(), AppSourceOperationStatus.RUNNING,
+                AppSourceOperationStatus.SUCCEEDED, NOW.plusSeconds(4))).isTrue();
+        assertThat(repository.findClaimableReplicas(SERVER_ID, NOW.plusSeconds(4), 10)).isEmpty();
+
+        AppSourceOperation terminalStepRetry = retryOperation(
+                "op-app-source-terminal-step-pg", AppSourceOperationStatus.PENDING, null);
+        repository.saveOperation(terminalStepRetry);
+        assertThat(repository.upsertStep(retryStep(
+                "step-app-source-terminal-step-pg", terminalStepRetry.operationId(),
+                AppSourceStepStatus.SUCCEEDED))).isTrue();
+        assertThat(repository.findClaimableReplicas(SERVER_ID, NOW.plusSeconds(4), 10)).isEmpty();
+
+        assertThat(retryJdbc.sql("update app_source_replicas set status = 'STALE' "
+                        + "where repository_id = :repositoryId and generation = 1 and linux_server_id = :serverId")
+                .param("repositoryId", REPOSITORY_ID.value())
+                .param("serverId", SERVER_ID.value())
+                .update()).isOne();
+        AppSourceOperation staleRetry = retryOperation(
+                "op-app-source-stale-retry-pg", AppSourceOperationStatus.RUNNING, null);
+        repository.saveOperation(staleRetry);
+        assertThat(repository.upsertStep(retryStep(
+                "step-app-source-stale-retry-pg", staleRetry.operationId(), AppSourceStepStatus.RUNNING))).isTrue();
+        assertThat(repository.findClaimableReplicas(SERVER_ID, NOW.plusSeconds(5), 10)).singleElement()
+                .extracting(AppSourceReplica::status)
+                .isEqualTo(AppSourceReplicaStatus.STALE);
+
         JdbcClient jdbc = JdbcClient.create(dataSource);
         assertThat(jdbc.sql("select pg_typeof(selected_paths_json)::text from app_source_snapshots "
                         + "where repository_id = :repositoryId and generation = 1")
@@ -213,6 +260,24 @@ class MyBatisAppSourcePostgresqlIntegrationTest {
                 "op-app-source-pg", APP_ID, REPOSITORY_ID, null, 1L, USER_ID,
                 AppSourceOperationType.DOWNLOAD, "request-pg", AppSourceOperationStatus.PENDING,
                 "trace-app-source-pg", NOW, null);
+    }
+
+    private static AppSourceOperation retryOperation(
+            String operationId, AppSourceOperationStatus status, Instant completedAt) {
+        return new AppSourceOperation(
+                operationId, APP_ID, REPOSITORY_ID, 1L, 1L, USER_ID,
+                AppSourceOperationType.RETRY_REPLICAS, "request-" + operationId, status,
+                "trace-" + operationId, NOW, completedAt);
+    }
+
+    private static AppSourceOperationStep retryStep(
+            String stepId, String operationId, AppSourceStepStatus status) {
+        return new AppSourceOperationStep(
+                stepId, operationId, AppSourceStepScope.SERVER, SERVER_ID,
+                "RETRY_QUEUED", 0, status, "等待失败副本重试",
+                status == AppSourceStepStatus.PENDING ? null : NOW,
+                status == AppSourceStepStatus.SUCCEEDED ? NOW.plusSeconds(1) : null,
+                status == AppSourceStepStatus.SUCCEEDED ? NOW.plusSeconds(1) : NOW);
     }
 
     private static AppSourceCleanupTask cleanup() {

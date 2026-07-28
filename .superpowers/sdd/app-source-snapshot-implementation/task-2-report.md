@@ -101,3 +101,31 @@ Mockito 在当前 JDK 默认自附加不可用，相关命令显式使用：
 - 安全：SSH 私钥覆盖所有可能触网的固定提交 Git 阶段且不落盘；托管路径逐段拒绝运行态 symlink；recent 不再掩盖内部故障，clear 不再绕过授权。
 - 兼容性：已有数据库结构、广播 payload 和外部 API 不变；新增 repository 方法与 dispatcher 构造依赖由 Spring 自动装配，旧数据可由补偿扫描直接恢复。
 - 会话日志：按 Task 2 协作约束仍不更新 `.agents/session-log.*.md`，但提交前会重新回顾全部近期日志并把复审证据保存在本报告。
+
+## 独立复审修复（Round 2）
+
+Round 2 只处理剩余的一个 Critical：Round 1 的补偿扫描只选择初始 `PENDING` 和租约到期的 `RUNNING` 副本，而显式重试登记会保留副本原有的 `FAILED/STALE` 状态，仅新增 `RETRY_REPLICAS` operation 和 `RETRY_QUEUED` server step。因此队列满、广播丢失或 Java/dispatcher 重启后，瞬时唤醒一旦丢失，重试 operation 会永久停在非终态；同服务器重叠保护随后还会阻止用户再次重试。
+
+本轮对 `findClaimableReplicas` 做最小扩展：继续保留原有 `PENDING`、租约到期或恰好到期的 `RUNNING`；仅当副本为 `FAILED/STALE`，且存在同 repository、generation、server 的非终态 `RETRY_REPLICAS` operation 与 `RETRY_QUEUED` server step 时才纳入补偿扫描。operation 或 step 已终态、缺少匹配重试 step、异服务器或普通下载 operation 均不触发自动重试，避免无条件重放历史失败副本。
+
+### Round 2 TDD 与数据库证据
+
+1. App 聚合行为 RED：在生产 SQL 修改前执行 `AppSourceRetryRecoveryIntegrationTest`，队列容量占满后的 `FAILED` 重试和旧 dispatcher 停止后遗留的 `STALE` 重试均未被周期/启动扫描执行，两个完成等待断言均为 `expected true, actual false`（2 tests / 2 failures）。GREEN 后，前者在释放容量后由周期扫描执行并把对应 operation 推进为 `SUCCEEDED`；后者由新 dispatcher 启动恢复并终结 operation（2/2）。测试组合真实 H2、生产 MyBatis XML、dispatcher、worker 和结果记录器，只 mock 外部 Git 访问与受控阻塞 worker。
+2. H2 XML RED：新增 `claimableRetryScanRequiresMatchingNonTerminalOperationAndServerStep` 后，`FAILED + PENDING retry operation/step` 期望可认领，实际为空（1 test / 1 failure）。GREEN 后同时覆盖 `FAILED/STALE` 正例，以及无 retry、step 终态、operation 终态反例；完整 `MyBatisAppSourceRepositoryIntegrationTest` 通过。
+3. PostgreSQL XML RED：PostgreSQL 16 Testcontainers 执行同一生产 XML 时，`FAILED + PENDING retry operation/step` 期望 1 条、实际 0 条（1 test / 1 failure，0 skipped）。GREEN 后同一用例覆盖 `FAILED/STALE` 正例和 operation/step 终态排除，并继续通过原有生产方言、行锁与租约验证。
+
+### Round 2 影响评估
+
+- API、事件、数据库结构、安全与外部兼容性：无变化；未新增 migration，未修改 HTTP/RunEvent/广播 payload、generated SDK、OpenCode 快照或 `.env.local`。
+- 性能：只在本机有界补偿扫描遇到 `FAILED/STALE` 候选时增加 operation-step `exists` 过滤；扫描仍受批次上限、服务器和副本状态约束，并沿用既有 dispatcher 总容量与去重。
+- 文档：只更新本实施报告；稳定 API、事件和部署契约没有变化，无需改动对应文档。
+- 会话日志：按 Task 2 协作指令不更新 `.agents/session-log.*.md`；提交前仍回顾全部近期日志，精确暂存本轮文件。
+
+### Round 2 最终验证
+
+- `mvn -q -DappLogDir=target/log -DargLine=... -pl test-agent-app -am -Dtest=AppSourceRetryRecoveryIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test`：通过，2/2、0 skipped。
+- `mvn -q -DappLogDir=target/log -pl test-agent-persistence -am -Dtest=MyBatisAppSourceRepositoryIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test`：通过，H2 PostgreSQL 模式 12/12、0 skipped。
+- 沙箱外 `mvn -q -DappLogDir=target/log -pl test-agent-persistence -am -Dtest=MyBatisAppSourcePostgresqlIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test`：通过，PostgreSQL 16 Testcontainers 1/1、0 skipped。
+- `mvn -q -DappLogDir=target/log -DargLine=... -pl test-agent-workspace-management -am test`：通过。
+- `mvn -q -DappLogDir=target/log -DargLine=... -pl test-agent-app -am -Dtest=AppSourceContextTest -Dsurefire.failIfNoSpecifiedTests=false test`：通过，生产 Spring bean 图装配无回退。
+- `git diff --check`：通过。
