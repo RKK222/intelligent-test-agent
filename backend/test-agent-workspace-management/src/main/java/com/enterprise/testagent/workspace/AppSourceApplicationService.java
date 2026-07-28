@@ -304,6 +304,16 @@ public class AppSourceApplicationService {
             long generation,
             UserId userId,
             String linuxServerId) {
+        return openAuthorized(appId, repositoryId, generation, userId, linuxServerId, true);
+    }
+
+    private OpenResult openAuthorized(
+            String appId,
+            String repositoryId,
+            long generation,
+            UserId userId,
+            String linuxServerId,
+            boolean recordRecent) {
         ApplicationId parsedAppId = applicationId(appId);
         CodeRepository repository = requireLinkedCodeRepository(parsedAppId, repositoryId(repositoryId), userId);
         Instant now = clock.instant();
@@ -320,8 +330,10 @@ public class AppSourceApplicationService {
         }
         LinuxServerId serverId = new LinuxServerId(linuxServerId);
         Workspace workspace = workspaceOpener.open(snapshot, serverId);
-        appSources.upsertRecentSelection(new AppSourceRecentSelection(
-                userId, parsedAppId, repository.repositoryId(), generation, now));
+        if (recordRecent) {
+            appSources.upsertRecentSelection(new AppSourceRecentSelection(
+                    userId, parsedAppId, repository.repositoryId(), generation, now));
+        }
         return new OpenResult(
                 parsedAppId.value(), repository.repositoryId().value(), snapshot.generation(),
                 snapshot.purpose(), workspace.workspaceId().value(), serverId.value(), snapshot.expiresAt());
@@ -334,17 +346,34 @@ public class AppSourceApplicationService {
             return Optional.empty();
         }
         try {
-            return Optional.of(open(
+            return Optional.of(openAuthorized(
                     recent.appId().value(), recent.repositoryId().value(), recent.generation(),
-                    userId, linuxServerId));
+                    userId, linuxServerId, true));
         } catch (PlatformException exception) {
-            appSources.deleteRecentSelection(userId);
-            return Optional.empty();
+            if (isDeterministicallyInvalidRecent(exception.errorCode())) {
+                appSources.deleteRecentSelection(userId);
+                return Optional.empty();
+            }
+            throw exception;
         }
     }
 
-    public void clearRecent(UserId userId) {
+    /** clear 也先走 open 的完整实时授权，但不会在删除前重复写入 recent。 */
+    public void clearRecent(UserId userId, String linuxServerId) {
+        AppSourceRecentSelection recent = appSources.findRecentSelection(userId).orElse(null);
+        if (recent == null) {
+            return;
+        }
+        openAuthorized(
+                recent.appId().value(), recent.repositoryId().value(), recent.generation(),
+                userId, linuxServerId, false);
         appSources.deleteRecentSelection(userId);
+    }
+
+    private boolean isDeterministicallyInvalidRecent(ErrorCode errorCode) {
+        return errorCode == ErrorCode.FORBIDDEN
+                || errorCode == ErrorCode.NOT_FOUND
+                || errorCode == ErrorCode.CONFLICT;
     }
 
     private void requireLifecyclePermission(

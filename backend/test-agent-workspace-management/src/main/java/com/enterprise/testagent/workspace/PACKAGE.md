@@ -23,11 +23,11 @@ Workspace 和文件管理业务包，负责工作区注册、查询、服务器�
 - `ReferenceRepositoryReplicaTaskDispatcher`：以仓库 generation 去重的本机有界异步调度器，默认两个 worker、最多 256 个 key，支持立即和按退避时刻执行，避免 HTTP 与 Redis listener 线程承载阻塞 Git。
 - `ReferenceRepositoryReplicaReconciler`：默认 60 秒扫描数据库目标，恢复广播丢失、Java 重启和 `DEFERRED` 服务器重新上线。
 - `ReferenceRepositoryResponses`：引用资产库可空服务器路径、总体目标、内部操作类型、逐服务器在线/实际指针/匹配状态和目录树业务响应模型。
-- `AppSourceApplicationService`：应用源码仓库/分支/目录树查询、固定 commit 物化受理、同 generation 重试、打开与最近选择编排；所有入口实时复核应用、成员、关联、仓库类型与生命周期权限。
-- `AppSourceMaterializationRegistrar`、`AppSourceReplicaRetryRegistrar`、`AppSourceReplicaResultRecorder`：在 Spring 事务中实现仓库行锁、cleanup 第一写、generation/operation/replica/step 建档、租约结果 fencing，以及至少一台 READY 后的 active 提升和旧 generation 到期。
-- `DefaultAppSourceReplicaTaskDispatcher`、`AppSourceReplicaWorker`、`AppSourceGitAccessResolver`：本机总容量有界且按 repository/generation/server 去重的异步派发、低敏集群唤醒、当前服务器数据库租约，以及只在 Git 命令期使用的操作人 SSH 身份。
-- `AppSourceGitMaterializer`、`AppSourceIndexManager`、`AppSourceWorkspaceOpener`：浅克隆、no-cone sparse checkout、固定 commit、特殊路径/`.`/符号链接/子模块边界、无 `.git` 原子目录发布、数据库写回失败磁盘回滚、权威 SHA 索引修复，以及当前 generation/server Runtime Workspace 打开。
-- `AppSourceCleanupTaskHandler`、`AppSourceCleanupWorker`、`AppSourceCleanupResultRecorder`：XXL 每分钟全局唤醒、本机 cleanup 租约、同根文件锁、generation fence、保留/修复索引、Workspace 归档与失败退避。
+- `AppSourceApplicationService`：应用源码仓库/分支/目录树查询、固定 commit 物化受理、同 generation 重试、打开与最近选择编排；所有入口实时复核应用、成员、关联、仓库类型与生命周期权限，最近选择只对确定性失效删除偏好，显式清除先执行完整打开鉴权。
+- `AppSourceMaterializationRegistrar`、`AppSourceReplicaRetryRegistrar`、`AppSourceReplicaResultRecorder`：在 Spring 事务中实现仓库行锁、cleanup 第一写、generation/operation/replica/step 建档、同 generation/server 进行中步骤防重、租约结果 fencing，以及至少一台 READY 后的 active 提升和旧 generation 到期。
+- `DefaultAppSourceReplicaTaskDispatcher`、`AppSourceReplicaWorker`、`AppSourceGitAccessResolver`：本机总容量有界且按 repository/generation/server 去重的异步派发、低敏集群唤醒、启动及默认 5 秒数据库补偿扫描、当前服务器数据库租约、精确 operation step 绑定，以及只在 Git 命令期使用的操作人 SSH 身份。
+- `AppSourceGitMaterializer`、`AppSourceIndexManager`、`AppSourceWorkspaceOpener`：浅克隆、冻结 SHA 显式 fetch、no-cone sparse checkout、固定 commit、全程同一临时 SSH 凭据、特殊路径/`.`/符号链接/子模块边界、配置根下逐段 `NOFOLLOW_LINKS` 校验、无 `.git` 原子目录发布、数据库写回失败磁盘回滚、权威 SHA 索引修复，以及当前 generation/server Runtime Workspace 打开。
+- `AppSourceCleanupTaskHandler`、`AppSourceCleanupWorker`、`AppSourceCleanupResultRecorder`：XXL 每分钟全局唤醒、本机 cleanup 租约、同根文件锁、逐段不跟随链接的路径复核、generation fence、保留/修复索引、Workspace 归档与失败退避。
 - `WorkspaceViewApplicationService` 与 `WorkspaceView*` 模型：从最新 JSONC 建立可验证引用集合，按 `merge/sdd-folder-name` 生成稳定节点身份、来源、冲突、只读 locator 和局部 warning，并在读取时重新执行应用关联、本机 READY 副本、参数根目录和路径安全校验。
 - `GitPublishWorkflow`：封装高风险 Git 发布写入流程，统一 clean、fetch、pull --ff-only、merge、冲突文件收集、merge abort、push 和 headCommit 返回；可能生成 commit 的发布入口必须显式传入非空当前用户 Git 身份。
 - `AgentConfigResponses`、`AgentConfigProgressEvent`、`AgentConfigProgressSink`：Agent 配置 API 返回对象与 WebSocket 进度发布端口。

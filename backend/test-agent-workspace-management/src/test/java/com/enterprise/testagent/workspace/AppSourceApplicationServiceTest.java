@@ -360,6 +360,33 @@ class AppSourceApplicationServiceTest {
         verify(workspaceOpener, never()).open(any(), any());
     }
 
+    @Test
+    void recentSelectionPropagatesInternalFailureWithoutDeletingPreference() {
+        when(appSources.findRecentSelection(USER_ID)).thenReturn(Optional.of(
+                new AppSourceRecentSelection(USER_ID, APP_ID, REPOSITORY_ID, 4L, NOW.minusSeconds(60))));
+        when(configuration.findApplication(APP_ID))
+                .thenThrow(new PlatformException(ErrorCode.INTERNAL_ERROR, "configuration unavailable"));
+
+        assertThatThrownBy(() -> service.recent(USER_ID, "server-a"))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.INTERNAL_ERROR));
+
+        verify(appSources, never()).deleteRecentSelection(USER_ID);
+    }
+
+    @Test
+    void clearRecentRefusesRevokedMemberAndKeepsPreference() {
+        when(appSources.findRecentSelection(USER_ID)).thenReturn(Optional.of(
+                new AppSourceRecentSelection(USER_ID, APP_ID, REPOSITORY_ID, 4L, NOW.minusSeconds(60))));
+        when(configuration.isActiveMember(APP_ID, USER_ID)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.clearRecent(USER_ID, "server-a"))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        verify(appSources, never()).deleteRecentSelection(USER_ID);
+    }
+
     private AppSourceApplicationService.MaterializationCommand command(AppSourcePurpose purpose) {
         return new AppSourceApplicationService.MaterializationCommand(
                 "aso_1", null, "main", COMMIT,

@@ -97,8 +97,9 @@ public class AppSourceCleanupWorker {
         AppSourceSnapshot snapshot = appSources.findSnapshot(task.repositoryId(), task.generation())
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "应用源码清理快照不存在"));
         String logicalRoot = paths.appSourceValue(snapshot.repositoryEnglishName());
-        Path target = paths.resolve(logicalRoot).toAbsolutePath().normalize();
+        Path target = AppSourcePathGuard.requireSafe(paths.resolve(logicalRoot));
         withFileLock(target, () -> {
+            AppSourcePathGuard.requireSafe(target);
             Instant fenceTime = clock.instant();
             appSources.findReplica(task.repositoryId(), task.generation(), task.linuxServerId())
                     .filter(replica -> replica.status()
@@ -145,7 +146,8 @@ public class AppSourceCleanupWorker {
     }
 
     private void deleteSourceContentPreservingIndex(Path target) {
-        if (!Files.isDirectory(target)) {
+        AppSourcePathGuard.requireSafe(target);
+        if (!Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS)) {
             return;
         }
         try (var children = Files.list(target)) {
@@ -169,9 +171,10 @@ public class AppSourceCleanupWorker {
 
     private void cleanupSiblingMatches(Path target, String prefix, String suffix) {
         Path parent = target.getParent();
-        if (parent == null || !Files.isDirectory(parent)) {
+        if (parent == null || !Files.isDirectory(parent, LinkOption.NOFOLLOW_LINKS)) {
             return;
         }
+        AppSourcePathGuard.requireSafe(parent);
         try (var siblings = Files.list(parent)) {
             for (Path sibling : siblings.toList()) {
                 String name = sibling.getFileName().toString();
@@ -188,7 +191,10 @@ public class AppSourceCleanupWorker {
         Path parent = Objects.requireNonNull(target.getParent());
         Path lockPath = parent.resolve("." + target.getFileName() + ".app-source.lock");
         try {
+            AppSourcePathGuard.requireSafe(target);
+            AppSourcePathGuard.requireSafe(lockPath);
             Files.createDirectories(parent);
+            AppSourcePathGuard.requireSafe(lockPath);
             try (FileChannel channel = FileChannel.open(lockPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE)) {
                 FileLock acquired;
                 try {

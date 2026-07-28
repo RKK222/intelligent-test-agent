@@ -92,7 +92,16 @@ class MyBatisAppSourcePostgresqlIntegrationTest {
         assertThat(repository.insertReplicaIfAbsent(new AppSourceReplica(
                 REPOSITORY_ID, 1L, SERVER_ID, null, AppSourceReplicaStatus.PENDING,
                 null, null, 0, null, null, null, NOW, NOW))).isTrue();
-        assertThat(repository.markReplicaCleaned(REPOSITORY_ID, 1L, SERVER_ID, NOW.plusSeconds(1))).isTrue();
+        assertThat(repository.findClaimableReplicas(SERVER_ID, NOW, 10)).singleElement()
+                .extracting(AppSourceReplica::status)
+                .isEqualTo(AppSourceReplicaStatus.PENDING);
+        assertThat(repository.claimReplica(
+                REPOSITORY_ID, 1L, SERVER_ID, "worker-pg", NOW.plusSeconds(30), NOW)).isPresent();
+        assertThat(repository.findClaimableReplicas(SERVER_ID, NOW.plusSeconds(29), 10)).isEmpty();
+        assertThat(repository.findClaimableReplicas(SERVER_ID, NOW.plusSeconds(30), 10)).singleElement()
+                .extracting(AppSourceReplica::status)
+                .isEqualTo(AppSourceReplicaStatus.RUNNING);
+        assertThat(repository.markReplicaCleaned(REPOSITORY_ID, 1L, SERVER_ID, NOW.plusSeconds(30))).isTrue();
         assertThat(repository.findReplica(REPOSITORY_ID, 1L, SERVER_ID))
                 .hasValueSatisfying(replica -> assertThat(replica.status()).isEqualTo(AppSourceReplicaStatus.CLEANED));
         assertThat(repository.findDueCleanupTasks(SERVER_ID, NOW, 10)).isEmpty();
@@ -115,6 +124,18 @@ class MyBatisAppSourcePostgresqlIntegrationTest {
                 .isEqualTo(AppSourceStepStatus.SUCCEEDED);
         assertThatThrownBy(() -> repository.upsertStep(step("step-global-b")))
                 .isInstanceOf(RuntimeException.class);
+        assertThat(repository.upsertStep(new AppSourceOperationStep(
+                "step-server-pg", "op-app-source-pg", AppSourceStepScope.SERVER, SERVER_ID,
+                "MATERIALIZE", 20, AppSourceStepStatus.PENDING, "等待物化", null, null, NOW))).isTrue();
+        assertThat(repository.findInFlightOperationForReplica(REPOSITORY_ID, 1L, SERVER_ID))
+                .hasValueSatisfying(bound -> assertThat(bound.operationId()).isEqualTo("op-app-source-pg"));
+        assertThat(repository.updateOperationStatus(
+                "op-app-source-pg", AppSourceOperationStatus.PENDING,
+                AppSourceOperationStatus.RUNNING, null)).isTrue();
+        assertThat(repository.updateOperationStatus(
+                "op-app-source-pg", AppSourceOperationStatus.RUNNING,
+                AppSourceOperationStatus.SUCCEEDED, NOW.plusSeconds(2))).isTrue();
+        assertThat(repository.findInFlightOperationForReplica(REPOSITORY_ID, 1L, SERVER_ID)).isEmpty();
 
         JdbcClient jdbc = JdbcClient.create(dataSource);
         assertThat(jdbc.sql("select pg_typeof(selected_paths_json)::text from app_source_snapshots "

@@ -73,3 +73,31 @@ Mockito 在当前 JDK 默认自附加不可用，相关命令显式使用：
 - Task 3 的 HTTP/进度 WebSocket/DTO、文件路由入口集成以及前端不在本任务范围；当前已提供业务数据契约和 authorizer 能力供其接入。
 - 未执行全仓所有 Maven 模块测试；已执行 workspace 全模块依赖测试、真实 PostgreSQL/MySQL 集成、Spring 装配和 app 聚合编译。
 - 按 Task 2 协作指令未更新 `.agents/session-log.*.md`；会话日志留给最终汇总任务统一写入，未修改冻结的 `.agents/session-log.md`。
+
+## 独立复审修复（Round 1）
+
+独立复审提出 2 个 Critical、2 个 Important 和 1 个 Minor 问题。本轮逐项先复现行为缺口，再做最小修复；没有修改 OpenCode 快照、generated SDK、数据库结构、XXL migration 或 `.env.local`。
+
+1. **Critical：副本唤醒不是持久事实。** 根因是 dispatcher 只消费进程内队列与 Redis 唤醒，队列拒绝、广播丢失或 Java 退出后没有恢复入口。新增按本机服务器查询 `PENDING` 与租约已到期 `RUNNING` replica 的 MyBatis XML，dispatcher 启动即扫描并默认每 5 秒补偿，数据库租约继续负责最终并发控制。断言级 RED 在基线 `47c1c1879` 的独立临时 archive 中运行 `queueRejectedWakeMustEventuallyRunAfterCapacityBecomesAvailable`，结果为 `expected true, actual false`（1 test / 1 failure）；当前 `periodicRecoveryEventuallyDispatchesReplicaRejectedByFullQueue` GREEN 通过，并覆盖启动时恢复丢失广播。
+2. **Critical：托管根祖先 symlink 可重定向 IO。** 根因是原实现主要在 clone 后检查快照内部链接，没有固定检查 target/root/staging/backup/index/lock 的既有祖先。新增公共 `AppSourcePathGuard`：先解析配置根父级的受信真实锚点，再对配置根自身及其下路径逐段 `NOFOLLOW_LINKS` 校验，并在创建后、文件锁内和破坏性操作前复核；materializer、worker、opener/index 与 cleanup 共用。首轮 3 个行为测试在修复前分别证明物化会写出托管根、打开会在根外修复索引、清理会删除根外内容（3 tests / 3 failures）；自审再增加“配置根自身是 symlink、仓库目录尚未创建”用例，修复前同样断言失败。最终 4/4 GREEN 通过。macOS `/var -> /private/var` 只在配置根父级真实锚点解析阶段允许，不把系统链接误判为运行态可替换组件。
+3. **Important：浅克隆未保证冻结 SHA 可取，Git 凭据生命周期不完整。** 根因是只依赖受理分支的 depth=1 tip，分支推进后旧冻结提交可能不可达；后续 checkout 也没有显式沿用临时 key。现在 clone 后使用同一临时 SSH 凭据显式 `fetch --depth 1 --filter=blob:none origin <frozenCommit>`，checkout、rev-parse 与浅仓库校验继续复用该凭据；sparse pattern 写入是本地 stdin 命令。行为 RED 捕获网络阶段只有 `clone:key, checkout:null`，期待 `clone:key, fetch:key, checkout:key`；GREEN 后三阶段凭据相同、分支推进后仍物化旧冻结内容，且物化普通文件不含私钥。
+4. **Important：retry operation 与 server step 未精确绑定。** 根因是 worker 使用仓库级最新 operation，多个服务器/重试交错时可能完成错误操作；登记器也未阻止同 generation/server 的重叠非终态步骤。新增 repository/generation/server 到 `PENDING/RUNNING` operation step 的精确查询；worker 只写回该 operation，登记器在既有仓库行锁内拒绝重叠重试。RED 分别证明第二个同服务器重试未被拒绝、server-a worker 写回了 server-b 最新 operation（2 tests / 2 failures）；GREEN 后均通过。
+5. **Minor：recent/clear 把瞬时故障当失效并绕过当前授权。** 根因是 recent 捕获任意 `PlatformException` 后删偏好，clear 直接删除。现在 recent 只对 `FORBIDDEN/NOT_FOUND/CONFLICT` 删除确定性失效偏好，Git/文件系统/`INTERNAL_ERROR` 原样返回并保留；clear 必须携带当前服务器并复用完整 open 鉴权，成功后才删除。RED 证明内部错误仍被吞掉和撤权后仍可 clear（2 tests / 2 failures）；GREEN 后两项通过，既有撤权 recent 自动清理测试也继续通过。
+
+### Round 1 数据库与集成验证
+
+- `MyBatisAppSourceRepositoryIntegrationTest`：H2 PostgreSQL 模式 11/11，覆盖 claimable replica 的本机/PENDING/过期及等于当前时刻的 RUNNING、异机与有效租约排除，以及精确 in-flight operation step 查询和 operation 终态排除。
+- `MyBatisAppSourcePostgresqlIntegrationTest`：PostgreSQL 16 Testcontainers 1/1、0 skipped，生产 XML/方言覆盖上述 claimable 与 operation-step 查询，并保留行锁、cleanup 扫描/提前、双 owner 租约 fencing 与生产约束验证。
+- `test-agent-workspace-management -am test`：通过；含 dispatcher 周期恢复、路径守卫、冻结提交凭据、operation 绑定和 recent/clear 全部回归。
+- `AppSourceContextTest`：通过，使用生产 Spring bean 图验证 dispatcher 新 repository 依赖装配。
+- `XxlJobMysqlMigrationTest`：MySQL 8.4 Testcontainers 3/3、0 skipped；本轮未变更 XXL migration，确认 Task 2 既有注册不回退。
+
+### Round 1 影响评估
+
+- API：未新增或变更 HTTP/事件 DTO；内部 `clearRecent` 业务方法增加当前服务器参数，Task 3 接口接入时必须传 route 解析后的目标服务器。
+- 事件：广播结构不变，仍只是低敏唤醒；数据库周期扫描补齐广播丢失、队列拒绝与进程重启。
+- 数据库：无 migration；新增 MyBatis XML 的 claimable replica 和 in-flight operation-step 只读查询，H2/PG 均验证。
+- 性能：每实例默认 5 秒、64 条本机副本扫描，结果仍进入既有总容量有界且去重 dispatcher；索引范围限定服务器与状态/租约条件。
+- 安全：SSH 私钥覆盖所有可能触网的固定提交 Git 阶段且不落盘；托管路径逐段拒绝运行态 symlink；recent 不再掩盖内部故障，clear 不再绕过授权。
+- 兼容性：已有数据库结构、广播 payload 和外部 API 不变；新增 repository 方法与 dispatcher 构造依赖由 Spring 自动装配，旧数据可由补偿扫描直接恢复。
+- 会话日志：按 Task 2 协作约束仍不更新 `.agents/session-log.*.md`，但提交前会重新回顾全部近期日志并把复审证据保存在本报告。

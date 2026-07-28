@@ -13,18 +13,23 @@ import static org.mockito.Mockito.when;
 import com.enterprise.testagent.domain.appsource.AppSourceOperation;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationStatus;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationType;
+import com.enterprise.testagent.domain.appsource.AppSourceReplica;
+import com.enterprise.testagent.domain.appsource.AppSourceReplicaStatus;
+import com.enterprise.testagent.domain.appsource.AppSourceRepository;
 import com.enterprise.testagent.domain.broadcast.ServerBroadcastEvent;
 import com.enterprise.testagent.domain.broadcast.ServerBroadcastPublisher;
 import com.enterprise.testagent.domain.configuration.ApplicationId;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.user.UserId;
+import java.time.Duration;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -35,6 +40,7 @@ class DefaultAppSourceReplicaTaskDispatcherTest {
     @Test
     void wakeRunsOnlyLocalTargetAndBroadcastsFrozenTargetSet() throws Exception {
         AppSourceReplicaWorker worker = mock(AppSourceReplicaWorker.class);
+        AppSourceRepository appSources = mock(AppSourceRepository.class);
         ServerBroadcastPublisher publisher = mock(ServerBroadcastPublisher.class);
         when(publisher.instanceId()).thenReturn("instance-a");
         CountDownLatch executed = new CountDownLatch(1);
@@ -43,8 +49,8 @@ class DefaultAppSourceReplicaTaskDispatcherTest {
             return AppSourceReplicaWorker.Outcome.SUCCEEDED;
         }).when(worker).run(any(), anyLong(), any(), any());
         DefaultAppSourceReplicaTaskDispatcher dispatcher = new DefaultAppSourceReplicaTaskDispatcher(
-                worker, publisher, new WorkspaceServerIdentity("server-a"), 1, 4,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                worker, appSources, publisher, new WorkspaceServerIdentity("server-a"), 1, 4,
+                Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofHours(1), 32);
         dispatcher.start();
         try {
             AppSourceOperation operation = operation();
@@ -66,6 +72,7 @@ class DefaultAppSourceReplicaTaskDispatcherTest {
     @Test
     void duplicateWakeWhileSameServerGenerationRunsIsCoalesced() throws Exception {
         AppSourceReplicaWorker worker = mock(AppSourceReplicaWorker.class);
+        AppSourceRepository appSources = mock(AppSourceRepository.class);
         ServerBroadcastPublisher publisher = mock(ServerBroadcastPublisher.class);
         when(publisher.instanceId()).thenReturn("instance-a");
         CountDownLatch started = new CountDownLatch(1);
@@ -81,8 +88,8 @@ class DefaultAppSourceReplicaTaskDispatcherTest {
             }
         }).when(worker).run(any(), anyLong(), any(), any());
         DefaultAppSourceReplicaTaskDispatcher dispatcher = new DefaultAppSourceReplicaTaskDispatcher(
-                worker, publisher, new WorkspaceServerIdentity("server-a"), 1, 1,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                worker, appSources, publisher, new WorkspaceServerIdentity("server-a"), 1, 1,
+                Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofHours(1), 32);
         dispatcher.start();
         try {
             dispatcher.wake(operation(), Set.of(new LinuxServerId("server-a")));
@@ -99,6 +106,7 @@ class DefaultAppSourceReplicaTaskDispatcherTest {
     @Test
     void capacityLimitIncludesRunningKeyAndRejectsOnlyBestEffortWake() throws Exception {
         AppSourceReplicaWorker worker = mock(AppSourceReplicaWorker.class);
+        AppSourceRepository appSources = mock(AppSourceRepository.class);
         ServerBroadcastPublisher publisher = mock(ServerBroadcastPublisher.class);
         when(publisher.instanceId()).thenReturn("instance-a");
         CountDownLatch firstStarted = new CountDownLatch(1);
@@ -111,8 +119,8 @@ class DefaultAppSourceReplicaTaskDispatcherTest {
             return AppSourceReplicaWorker.Outcome.SUCCEEDED;
         }).when(worker).run(any(), anyLong(), any(), any());
         DefaultAppSourceReplicaTaskDispatcher dispatcher = new DefaultAppSourceReplicaTaskDispatcher(
-                worker, publisher, new WorkspaceServerIdentity("server-a"), 1, 1,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                worker, appSources, publisher, new WorkspaceServerIdentity("server-a"), 1, 1,
+                Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofHours(1), 32);
         dispatcher.start();
         try {
             dispatcher.wake(operation("op-first", "repo_first"), Set.of(new LinuxServerId("server-a")));
@@ -128,6 +136,78 @@ class DefaultAppSourceReplicaTaskDispatcherTest {
         }
     }
 
+    @Test
+    void startupRecoveryDispatchesPendingReplicaWhenBroadcastWasLost() throws Exception {
+        AppSourceReplicaWorker worker = mock(AppSourceReplicaWorker.class);
+        AppSourceRepository appSources = mock(AppSourceRepository.class);
+        ServerBroadcastPublisher publisher = mock(ServerBroadcastPublisher.class);
+        AppSourceReplica pending = pendingReplica("repo_recovered");
+        when(appSources.findClaimableReplicas(new LinuxServerId("server-a"), NOW, 32))
+                .thenReturn(java.util.List.of(pending));
+        CountDownLatch executed = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            executed.countDown();
+            return AppSourceReplicaWorker.Outcome.SUCCEEDED;
+        }).when(worker).run(any(), anyLong(), any(), any());
+        DefaultAppSourceReplicaTaskDispatcher dispatcher = new DefaultAppSourceReplicaTaskDispatcher(
+                worker, appSources, publisher, new WorkspaceServerIdentity("server-a"), 1, 4,
+                Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofHours(1), 32);
+
+        dispatcher.start();
+        try {
+            assertThat(executed.await(2, TimeUnit.SECONDS)).isTrue();
+            verify(worker).run(
+                    pending.repositoryId(), pending.generation(), pending.linuxServerId(),
+                    DefaultAppSourceReplicaTaskDispatcher.RECOVERY_TRACE_ID);
+        } finally {
+            dispatcher.stop();
+        }
+    }
+
+    @Test
+    void periodicRecoveryEventuallyDispatchesReplicaRejectedByFullQueue() throws Exception {
+        AppSourceReplicaWorker worker = mock(AppSourceReplicaWorker.class);
+        AppSourceRepository appSources = mock(AppSourceRepository.class);
+        ServerBroadcastPublisher publisher = mock(ServerBroadcastPublisher.class);
+        when(publisher.instanceId()).thenReturn("instance-a");
+        AtomicBoolean recoveryEnabled = new AtomicBoolean();
+        AppSourceReplica rejected = pendingReplica("repo_rejected");
+        when(appSources.findClaimableReplicas(new LinuxServerId("server-a"), NOW, 32))
+                .thenAnswer(invocation -> recoveryEnabled.get()
+                        ? java.util.List.of(rejected)
+                        : java.util.List.of());
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch rejectedExecuted = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            CodeRepositoryId repositoryId = invocation.getArgument(0);
+            if (repositoryId.value().equals("repo_first")) {
+                firstStarted.countDown();
+                releaseFirst.await(2, TimeUnit.SECONDS);
+            } else if (repositoryId.equals(rejected.repositoryId())) {
+                rejectedExecuted.countDown();
+            }
+            return AppSourceReplicaWorker.Outcome.SUCCEEDED;
+        }).when(worker).run(any(), anyLong(), any(), any());
+        DefaultAppSourceReplicaTaskDispatcher dispatcher = new DefaultAppSourceReplicaTaskDispatcher(
+                worker, appSources, publisher, new WorkspaceServerIdentity("server-a"), 1, 1,
+                Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMillis(20), 32);
+
+        dispatcher.start();
+        try {
+            dispatcher.wake(operation("op-first", "repo_first"), Set.of(new LinuxServerId("server-a")));
+            assertThat(firstStarted.await(2, TimeUnit.SECONDS)).isTrue();
+            recoveryEnabled.set(true);
+            dispatcher.wake(operation("op-rejected", "repo_rejected"), Set.of(new LinuxServerId("server-a")));
+            releaseFirst.countDown();
+
+            assertThat(rejectedExecuted.await(2, TimeUnit.SECONDS)).isTrue();
+        } finally {
+            releaseFirst.countDown();
+            dispatcher.stop();
+        }
+    }
+
     private AppSourceOperation operation() {
         return operation("op-dispatch", "repo_dispatch");
     }
@@ -137,5 +217,11 @@ class DefaultAppSourceReplicaTaskDispatcherTest {
                 operationId, new ApplicationId("app-1"), new CodeRepositoryId(repositoryId),
                 null, 1L, new UserId("user-1"), AppSourceOperationType.DOWNLOAD, "hash",
                 AppSourceOperationStatus.PENDING, "trace-1", NOW, null);
+    }
+
+    private AppSourceReplica pendingReplica(String repositoryId) {
+        return new AppSourceReplica(
+                new CodeRepositoryId(repositoryId), 1L, new LinuxServerId("server-a"), null,
+                AppSourceReplicaStatus.PENDING, null, null, 0, null, null, null, NOW, NOW);
     }
 }

@@ -42,14 +42,17 @@ public class AppSourceIndexManager {
         if (!expectedSha.equalsIgnoreCase(snapshot.indexSha256())) {
             throw new PlatformException(ErrorCode.CONFLICT, "应用源码数据库索引摘要不一致");
         }
-        Path index = root.resolve(AppSourceApplicationService.INDEX_FILE_NAME);
+        Path safeRoot = AppSourcePathGuard.requireSafe(root);
+        Path index = AppSourcePathGuard.requireSafe(
+                safeRoot.resolve(AppSourceApplicationService.INDEX_FILE_NAME));
         try {
             if (Files.isRegularFile(index) && expectedSha.equalsIgnoreCase(sha256(Files.readAllBytes(index)))) {
                 return;
             }
-            Files.createDirectories(root);
-            Path temporary = root.resolve("." + AppSourceApplicationService.INDEX_FILE_NAME
-                    + "." + UUID.randomUUID() + ".repair");
+            Files.createDirectories(safeRoot);
+            AppSourcePathGuard.requireSafe(safeRoot);
+            Path temporary = AppSourcePathGuard.requireSafe(safeRoot.resolve(
+                    "." + AppSourceApplicationService.INDEX_FILE_NAME + "." + UUID.randomUUID() + ".repair"));
             try {
                 Files.write(temporary, expected);
                 Files.move(temporary, index, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);

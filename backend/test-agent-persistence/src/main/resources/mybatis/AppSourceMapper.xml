@@ -196,6 +196,13 @@
         select <include refid="ReplicaColumns"/> from app_source_replicas
         where repository_id = #{repositoryId} and generation = #{generation} order by linux_server_id
     </select>
+    <select id="findClaimableReplicas" resultMap="ReplicaMap">
+        select <include refid="ReplicaColumns"/> from app_source_replicas
+        where linux_server_id = #{linuxServerId}
+          and (status = 'PENDING' or (status = 'RUNNING' and lease_until &lt;= #{now}))
+        order by updated_at, repository_id, generation
+        limit #{limit}
+    </select>
     <select id="findReplicaByRuntimeWorkspaceId" resultMap="ReplicaMap">
         select <include refid="ReplicaColumns"/> from app_source_replicas
         where runtime_workspace_id = #{runtimeWorkspaceId}
@@ -252,6 +259,21 @@
     <select id="findLatestOperation" resultMap="OperationMap">
         select <include refid="OperationColumns"/> from app_source_operations
         where repository_id = #{repositoryId} order by accepted_at desc, operation_id desc limit 1
+    </select>
+    <select id="findInFlightOperationForReplica" resultMap="OperationMap">
+        select <include refid="OperationColumns"/> from app_source_operations
+        where operation_id = (
+            select operation.operation_id
+            from app_source_operations operation
+            join app_source_operation_steps step on step.operation_id = operation.operation_id
+            where operation.repository_id = #{repositoryId}
+              and operation.target_generation = #{generation}
+              and operation.status in ('PENDING', 'RUNNING')
+              and step.linux_server_id = #{linuxServerId}
+              and step.status in ('PENDING', 'RUNNING')
+            order by operation.accepted_at desc, operation.operation_id desc
+            limit 1
+        )
     </select>
     <insert id="insertOperation">
         insert into app_source_operations(<include refid="OperationColumns"/>) values (

@@ -150,6 +150,39 @@ class AppSourceCleanupWorkerTest {
                 eq("CONFLICT"), eq("应用源码清理失败"), eq(NOW));
     }
 
+    @Test
+    void cleanupRejectsRootSymlinkWithoutDeletingOutsideManagedRoot() throws Exception {
+        AppSourceRepository appSources = mock(AppSourceRepository.class);
+        ManagedWorkspacePathResolver paths = mock(ManagedWorkspacePathResolver.class);
+        AppSourceIndexManager indexes = mock(AppSourceIndexManager.class);
+        AppSourceCleanupResultRecorder results = mock(AppSourceCleanupResultRecorder.class);
+        AppSourceCleanupTask due = cleanupTask(null, null, AppSourceCleanupStatus.PENDING);
+        when(appSources.findDueCleanupTasks(SERVER_ID, NOW, 32)).thenReturn(List.of(due));
+        when(appSources.claimCleanupTask(eq(due.cleanupTaskId()), any(), any(), eq(NOW)))
+                .thenAnswer(invocation -> Optional.of(cleanupTask(
+                        invocation.getArgument(1), NOW.plusSeconds(300), AppSourceCleanupStatus.RUNNING)));
+        when(appSources.findSnapshot(REPOSITORY_ID, 1L)).thenReturn(Optional.of(snapshot()));
+        when(paths.appSourceValue("orders")).thenReturn("appsource:orders");
+        Path managed = root.resolve("managed");
+        Path outside = root.resolve("outside-cleanup");
+        Files.createDirectories(managed);
+        Files.createDirectories(outside);
+        Path outsideMarker = outside.resolve("must-survive.txt");
+        Files.writeString(outsideMarker, "outside");
+        Path linkedTarget = managed.resolve("orders");
+        Files.createSymbolicLink(linkedTarget, outside);
+        when(paths.resolve("appsource:orders")).thenReturn(linkedTarget);
+        when(appSources.findSlot(REPOSITORY_ID)).thenReturn(Optional.of(new AppSourceRepositorySlot(
+                REPOSITORY_ID, 1L, null, 2L, "op-old", 1L, NOW.minusSeconds(600), NOW)));
+        AppSourceCleanupWorker worker = new AppSourceCleanupWorker(
+                appSources, paths, indexes, results, new WorkspaceServerIdentity(SERVER_ID.value()),
+                Clock.fixed(NOW, ZoneOffset.UTC), 300L, 32);
+
+        assertThat(worker.runDue()).isZero();
+        assertThat(outsideMarker).hasContent("outside");
+        verify(results, never()).complete(any(), any(), any());
+    }
+
     private AppSourceSnapshot snapshot() {
         return new AppSourceSnapshot(
                 REPOSITORY_ID, 1L, "orders", AppSourcePurpose.TEAM, new UserId("usr_downloader"),

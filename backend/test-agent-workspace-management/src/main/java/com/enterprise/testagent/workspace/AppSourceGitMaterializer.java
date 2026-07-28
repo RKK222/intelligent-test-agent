@@ -35,8 +35,8 @@ import org.springframework.stereotype.Component;
 /**
  * 把冻结的远端提交物化为不含 Git 元数据的源码目录。
  *
- * <p>clone 命令继续复用公共 Git 执行器处理 SSH 私钥；只有不需要凭据的本机 sparse-checkout
- * stdin 命令由本类受控执行。所有命令使用独立参数数组，禁止 shell 拼接。
+ * <p>clone、冻结提交 fetch、checkout 和校验命令复用公共 Git 执行器与同一临时 SSH 私钥；
+ * 不触网的本机 sparse-checkout stdin 命令由本类受控执行。所有命令使用独立参数数组，禁止 shell 拼接。
  */
 @Component
 public class AppSourceGitMaterializer {
@@ -72,20 +72,23 @@ public class AppSourceGitMaterializer {
     public Result materialize(Request request, Completion completion) {
         Objects.requireNonNull(request, "request must not be null");
         Objects.requireNonNull(completion, "completion must not be null");
-        Path target = request.targetRoot().toAbsolutePath().normalize();
+        Path target = AppSourcePathGuard.requireSafe(request.targetRoot());
         Path parent = Objects.requireNonNull(target.getParent(), "target parent must not be null");
         Path staging = parent.resolve("." + target.getFileName() + ".g" + request.generation()
                 + "." + UUID.randomUUID() + ".staging");
         try {
             Files.createDirectories(parent);
+            AppSourcePathGuard.requireSafe(target);
+            AppSourcePathGuard.requireSafe(staging);
             shallowSparseClone(request, staging);
+            AppSourcePathGuard.requireSafe(staging);
             boolean shallow = "true".equals(git.execute(
                     List.of("git", "-C", staging.toString(), "rev-parse", "--is-shallow-repository"),
-                    null,
+                    request.privateKey(),
                     GIT_TIMEOUT).stdoutText().trim());
             String actualCommit = git.execute(
                     List.of("git", "-C", staging.toString(), "rev-parse", "HEAD"),
-                    null,
+                    request.privateKey(),
                     GIT_TIMEOUT).stdoutText().trim();
             if (!request.targetCommit().equals(actualCommit)) {
                 throw new PlatformException(ErrorCode.CONFLICT, "源码 staging 提交与冻结提交不一致");
@@ -127,16 +130,25 @@ public class AppSourceGitMaterializer {
                         staging.toString()),
                 request.privateKey(),
                 GIT_TIMEOUT);
+        // branch 在受理后可能前进；显式用同一临时凭据抓取冻结 SHA，不能依赖 depth=1 的新 tip。
+        git.execute(
+                List.of(
+                        "git", "-C", staging.toString(), "fetch",
+                        "--depth", "1",
+                        "--filter=blob:none",
+                        "origin", request.targetCommit()),
+                request.privateKey(),
+                GIT_TIMEOUT);
         git.execute(
                 List.of("git", "-C", staging.toString(), "sparse-checkout", "init", "--no-cone"),
-                null,
+                request.privateKey(),
                 GIT_TIMEOUT);
         runWithInput(
                 List.of("git", "-C", staging.toString(), "sparse-checkout", "set", "--no-cone", "--stdin"),
                 sparsePatterns(request.selectedPaths()));
         git.execute(
                 List.of("git", "-C", staging.toString(), "checkout", "--detach", request.targetCommit()),
-                null,
+                request.privateKey(),
                 GIT_TIMEOUT);
     }
 
@@ -274,6 +286,8 @@ public class AppSourceGitMaterializer {
     }
 
     private void publish(Path staging, Path target, Result result, Completion completion) throws IOException {
+        AppSourcePathGuard.requireSafe(staging);
+        AppSourcePathGuard.requireSafe(target);
         if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
             directoryMover.moveAtomically(staging, target);
             try {

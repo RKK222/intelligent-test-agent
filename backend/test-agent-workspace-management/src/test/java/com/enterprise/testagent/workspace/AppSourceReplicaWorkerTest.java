@@ -65,7 +65,8 @@ class AppSourceReplicaWorkerTest {
                         eq(REPOSITORY_ID), eq(2L), eq(SERVER_ID), any(), eq(NOW.plus(Duration.ofMinutes(10))), eq(NOW)))
                 .thenReturn(Optional.of(claimed));
         when(fixture.appSources.findSnapshot(REPOSITORY_ID, 2L)).thenReturn(Optional.of(fixture.snapshot()));
-        when(fixture.appSources.findLatestOperation(REPOSITORY_ID)).thenReturn(Optional.of(fixture.operation()));
+        when(fixture.appSources.findInFlightOperationForReplica(REPOSITORY_ID, 2L, SERVER_ID))
+                .thenReturn(Optional.of(fixture.operation()));
         when(fixture.configuration.findRepository(REPOSITORY_ID)).thenReturn(Optional.of(fixture.repository()));
         when(fixture.gitAccess.resolve(fixture.repository(), fixture.operation().actorUserId()))
                 .thenReturn(new AppSourceGitAccessResolver.GitAccess("ssh://git/orders.git", "secret-key"));
@@ -99,7 +100,8 @@ class AppSourceReplicaWorkerTest {
         when(fixture.appSources.claimReplica(any(), eq(2L), eq(SERVER_ID), any(), any(), eq(NOW)))
                 .thenReturn(Optional.of(claimed));
         when(fixture.appSources.findSnapshot(REPOSITORY_ID, 2L)).thenReturn(Optional.of(fixture.snapshot()));
-        when(fixture.appSources.findLatestOperation(REPOSITORY_ID)).thenReturn(Optional.of(fixture.operation()));
+        when(fixture.appSources.findInFlightOperationForReplica(REPOSITORY_ID, 2L, SERVER_ID))
+                .thenReturn(Optional.of(fixture.operation()));
         when(fixture.configuration.findRepository(REPOSITORY_ID)).thenReturn(Optional.of(fixture.repository()));
         when(fixture.gitAccess.resolve(any(), any()))
                 .thenReturn(new AppSourceGitAccessResolver.GitAccess("ssh://git/orders.git", "secret-key"));
@@ -117,6 +119,36 @@ class AppSourceReplicaWorkerTest {
     }
 
     @Test
+    void workerCompletesOperationBoundToItsServerInsteadOfRepositoryWideLatestOperation() {
+        Fixture fixture = fixture();
+        AppSourceReplica claimed = fixture.claimed();
+        AppSourceOperation serverOperation = fixture.operation();
+        AppSourceOperation laterOtherServerOperation = new AppSourceOperation(
+                "op-other-server", new ApplicationId("app-1"), REPOSITORY_ID, 2L, 2L,
+                new UserId("user-2"), AppSourceOperationType.RETRY_REPLICAS, "other-hash",
+                AppSourceOperationStatus.PENDING, "trace-other", NOW.minusSeconds(30), null);
+        when(fixture.appSources.claimReplica(any(), eq(2L), eq(SERVER_ID), any(), any(), eq(NOW)))
+                .thenReturn(Optional.of(claimed));
+        when(fixture.appSources.findSnapshot(REPOSITORY_ID, 2L)).thenReturn(Optional.of(fixture.snapshot()));
+        when(fixture.appSources.findInFlightOperationForReplica(REPOSITORY_ID, 2L, SERVER_ID))
+                .thenReturn(Optional.of(serverOperation));
+        when(fixture.configuration.findRepository(REPOSITORY_ID)).thenReturn(Optional.of(fixture.repository()));
+        when(fixture.gitAccess.resolve(fixture.repository(), serverOperation.actorUserId()))
+                .thenReturn(new AppSourceGitAccessResolver.GitAccess("ssh://git/orders.git", "secret-key"));
+        when(fixture.materializer.materialize(any(), any())).thenAnswer(invocation -> {
+            AppSourceGitMaterializer.Result result = new AppSourceGitMaterializer.Result("b".repeat(64), true);
+            ((AppSourceGitMaterializer.Completion) invocation.getArgument(1)).complete(result);
+            return result;
+        });
+
+        assertThat(fixture.worker.run(REPOSITORY_ID, 2L, SERVER_ID, "trace-1"))
+                .isEqualTo(AppSourceReplicaWorker.Outcome.SUCCEEDED);
+
+        verify(fixture.results).recordSuccess(
+                eq(serverOperation), eq(claimed), any(), any(), eq("b".repeat(64)), eq(NOW));
+    }
+
+    @Test
     void successUsesFreshCompletionTimeForAbsoluteLeaseFencing() {
         Clock clock = mock(Clock.class);
         Instant completedAt = NOW.plusSeconds(5);
@@ -126,7 +158,8 @@ class AppSourceReplicaWorkerTest {
         when(fixture.appSources.claimReplica(any(), eq(2L), eq(SERVER_ID), any(), any(), eq(NOW)))
                 .thenReturn(Optional.of(claimed));
         when(fixture.appSources.findSnapshot(REPOSITORY_ID, 2L)).thenReturn(Optional.of(fixture.snapshot()));
-        when(fixture.appSources.findLatestOperation(REPOSITORY_ID)).thenReturn(Optional.of(fixture.operation()));
+        when(fixture.appSources.findInFlightOperationForReplica(REPOSITORY_ID, 2L, SERVER_ID))
+                .thenReturn(Optional.of(fixture.operation()));
         when(fixture.configuration.findRepository(REPOSITORY_ID)).thenReturn(Optional.of(fixture.repository()));
         when(fixture.gitAccess.resolve(any(), any()))
                 .thenReturn(new AppSourceGitAccessResolver.GitAccess("ssh://git/orders.git", "secret-key"));

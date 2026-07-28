@@ -3,6 +3,7 @@ package com.enterprise.testagent.workspace;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.enterprise.testagent.common.git.GitCommandExecutor;
 import com.enterprise.testagent.common.git.ProcessGitCommandExecutor;
 import com.enterprise.testagent.domain.appsource.AppSourcePathType;
 import com.enterprise.testagent.domain.appsource.AppSourceSelectedPath;
@@ -108,6 +109,59 @@ class AppSourceGitMaterializerTest {
     }
 
     @Test
+    void frozenCommitFetchAndCheckoutReuseTemporaryCredentialAfterBranchAdvances() throws Exception {
+        GitFixture fixture = fixture();
+        Path source = tempDir.resolve("fixture-source");
+        Files.writeString(source.resolve("src/Main.java"), "class AdvancedAgain {}\n");
+        git(source, "add", "src/Main.java");
+        git(source, "commit", "-m", "advance protected branch");
+        git(source, "push", fixture.remoteUri(), "main");
+        List<CredentialCall> calls = new java.util.ArrayList<>();
+        ProcessGitCommandExecutor delegate = new ProcessGitCommandExecutor();
+        GitCommandExecutor recording = (command, privateKey, timeout) -> {
+            calls.add(new CredentialCall(List.copyOf(command), privateKey));
+            return delegate.execute(command, privateKey, timeout);
+        };
+        String privateKey = "fixture-private-key-never-persisted";
+        Path target = tempDir.resolve("appsource/credential-frozen-commit");
+
+        new AppSourceGitMaterializer(recording, new ObjectMapper(),
+                AppSourceGitMaterializer.DirectoryMover.filesystem()).materialize(
+                        new AppSourceGitMaterializer.Request(
+                                target, fixture.remoteUri(), "main", fixture.commit(),
+                                List.of(new AppSourceSelectedPath("src", AppSourcePathType.DIRECTORY)),
+                                privateKey, 13L, Instant.parse("2026-07-30T04:00:00Z")));
+
+        assertThat(calls.stream()
+                        .filter(call -> call.command().contains("clone")
+                                || call.command().contains("fetch")
+                                || call.command().contains("checkout"))
+                        .map(call -> new CredentialCall(
+                                List.of(call.command().stream()
+                                        .filter(value -> value.equals("clone")
+                                                || value.equals("fetch")
+                                                || value.equals("checkout"))
+                                        .findFirst().orElseThrow()),
+                                call.privateKey())))
+                .containsExactly(
+                        new CredentialCall(List.of("clone"), privateKey),
+                        new CredentialCall(List.of("fetch"), privateKey),
+                        new CredentialCall(List.of("checkout"), privateKey));
+        assertThat(target.resolve("src/Main.java")).hasContent("class Main {}\n");
+        try (var materialized = Files.walk(target)) {
+            assertThat(materialized.filter(Files::isRegularFile)
+                            .map(path -> {
+                                try {
+                                    return Files.readString(path);
+                                } catch (IOException exception) {
+                                    throw new RuntimeException(exception);
+                                }
+                            }))
+                    .allMatch(content -> !content.contains(privateKey));
+        }
+    }
+
+    @Test
     void newGenerationReplacesExistingSourceDirectoryWithoutKeepingOldContent() throws Exception {
         GitFixture fixture = fixture();
         Path target = tempDir.resolve("appsource/replaced-source");
@@ -196,6 +250,53 @@ class AppSourceGitMaterializerTest {
     }
 
     @Test
+    void materializationRejectsTargetAncestorSymlinkWithoutWritingOutsideManagedRoot() throws Exception {
+        GitFixture fixture = fixture();
+        Path managedParent = tempDir.resolve("managed");
+        Path outside = tempDir.resolve("outside-materialization");
+        Path appSourceRoot = managedParent.resolve("appsource");
+        Files.createDirectories(appSourceRoot);
+        Files.createDirectories(outside);
+        Path linkedRoot = appSourceRoot.resolve("orders");
+        Files.createSymbolicLink(linkedRoot, outside);
+
+        assertThatThrownBy(() -> new AppSourceGitMaterializer().materialize(
+                        new AppSourceGitMaterializer.Request(
+                                linkedRoot, fixture.remoteUri(), "main", fixture.commit(),
+                                List.of(new AppSourceSelectedPath("src", AppSourcePathType.DIRECTORY)),
+                                null, 12L, Instant.parse("2026-07-30T04:00:00Z"))))
+                .isInstanceOfSatisfying(
+                        com.enterprise.testagent.common.error.PlatformException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(com.enterprise.testagent.common.error.ErrorCode.FORBIDDEN));
+
+        assertThat(outside).isEmptyDirectory();
+    }
+
+    @Test
+    void materializationRejectsConfiguredRootSymlinkBeforeCreatingRepositoryDirectory() throws Exception {
+        GitFixture fixture = fixture();
+        Path managedParent = tempDir.resolve("managed-config-root");
+        Path outside = tempDir.resolve("outside-config-root");
+        Files.createDirectories(managedParent);
+        Files.createDirectories(outside);
+        Path linkedConfigRoot = managedParent.resolve("appsource");
+        Files.createSymbolicLink(linkedConfigRoot, outside);
+
+        assertThatThrownBy(() -> new AppSourceGitMaterializer().materialize(
+                        new AppSourceGitMaterializer.Request(
+                                linkedConfigRoot.resolve("orders"), fixture.remoteUri(), "main", fixture.commit(),
+                                List.of(new AppSourceSelectedPath("src", AppSourcePathType.DIRECTORY)),
+                                null, 13L, Instant.parse("2026-07-30T04:00:00Z"))))
+                .isInstanceOfSatisfying(
+                        com.enterprise.testagent.common.error.PlatformException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(com.enterprise.testagent.common.error.ErrorCode.FORBIDDEN));
+
+        assertThat(outside).isEmptyDirectory();
+    }
+
+    @Test
     void gitlinkIsMaterializedWithoutRecursingIntoSubmoduleRepository() throws Exception {
         Path submodule = tempDir.resolve("submodule-source");
         Files.createDirectories(submodule);
@@ -269,5 +370,8 @@ class AppSourceGitMaterializerTest {
     }
 
     private record GitFixture(String remoteUri, String commit) {
+    }
+
+    private record CredentialCall(List<String> command, String privateKey) {
     }
 }

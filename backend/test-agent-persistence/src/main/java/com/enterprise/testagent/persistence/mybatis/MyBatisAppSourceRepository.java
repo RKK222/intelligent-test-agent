@@ -143,6 +143,16 @@ public class MyBatisAppSourceRepository implements AppSourceRepository {
     }
 
     @Override
+    public List<AppSourceReplica> findClaimableReplicas(LinuxServerId linuxServerId, Instant now, int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("limit must be positive");
+        }
+        return mapper.findClaimableReplicas(linuxServerId.value(), now, limit).stream()
+                .map(this::toReplica)
+                .toList();
+    }
+
+    @Override
     public Optional<AppSourceReplica> findReplicaByRuntimeWorkspaceId(String runtimeWorkspaceId) {
         return Optional.ofNullable(mapper.findReplicaByRuntimeWorkspaceId(runtimeWorkspaceId)).map(this::toReplica);
     }
@@ -192,6 +202,14 @@ public class MyBatisAppSourceRepository implements AppSourceRepository {
     @Override
     public Optional<AppSourceOperation> findLatestOperation(CodeRepositoryId repositoryId) {
         return Optional.ofNullable(mapper.findLatestOperation(repositoryId.value())).map(this::toOperation);
+    }
+
+    @Override
+    public Optional<AppSourceOperation> findInFlightOperationForReplica(
+            CodeRepositoryId repositoryId, long generation, LinuxServerId linuxServerId) {
+        return Optional.ofNullable(mapper.findInFlightOperationForReplica(
+                        repositoryId.value(), generation, linuxServerId.value()))
+                .map(this::toOperation);
     }
 
     @Override

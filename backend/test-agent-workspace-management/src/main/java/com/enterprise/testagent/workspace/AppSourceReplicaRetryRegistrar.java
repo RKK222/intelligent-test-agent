@@ -53,6 +53,11 @@ public class AppSourceReplicaRetryRegistrar {
             return existing;
         }
         for (LinuxServerId serverId : request.targetServerIds()) {
+            if (appSources.findInFlightOperationForReplica(
+                            request.repositoryId(), request.generation(), serverId)
+                    .isPresent()) {
+                throw new PlatformException(ErrorCode.CONFLICT, "该服务器已有进行中的源码副本重试");
+            }
             boolean failed = appSources.findReplica(request.repositoryId(), request.generation(), serverId)
                     .filter(replica -> replica.status() == AppSourceReplicaStatus.FAILED
                             || replica.status() == AppSourceReplicaStatus.STALE)

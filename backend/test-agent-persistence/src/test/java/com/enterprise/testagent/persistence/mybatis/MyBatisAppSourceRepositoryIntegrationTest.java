@@ -186,6 +186,24 @@ class MyBatisAppSourceRepositoryIntegrationTest {
     }
 
     @Test
+    void claimableReplicaScanFindsPendingAndExpiredRunningOnlyOnTheRequestedServer() {
+        repository.insertSlotIfAbsent(slot(null, 0L, NOW));
+        repository.saveSnapshot(snapshot("op-download", AppSourceSnapshotStatus.PENDING));
+        AppSourceReplica pending = replica(AppSourceReplicaStatus.PENDING, null, null, NOW);
+        assertThat(repository.insertReplicaIfAbsent(pending)).isTrue();
+
+        assertThat(repository.findClaimableReplicas(SERVER_ID, NOW, 10)).containsExactly(pending);
+        assertThat(repository.findClaimableReplicas(new LinuxServerId("server-b"), NOW, 10)).isEmpty();
+
+        assertThat(repository.claimReplica(
+                REPOSITORY_ID, 1L, SERVER_ID, "worker-a", NOW.plusSeconds(30), NOW)).isPresent();
+        assertThat(repository.findClaimableReplicas(SERVER_ID, NOW.plusSeconds(29), 10)).isEmpty();
+        assertThat(repository.findClaimableReplicas(SERVER_ID, NOW.plusSeconds(30), 10))
+                .singleElement()
+                .satisfies(replica -> assertThat(replica.status()).isEqualTo(AppSourceReplicaStatus.RUNNING));
+    }
+
+    @Test
     void replicaLeaseWriteRejectsIllegalStatusTransition() {
         repository.insertSlotIfAbsent(slot(null, 0L, NOW));
         repository.saveSnapshot(snapshot("op-download", AppSourceSnapshotStatus.PENDING));
@@ -257,6 +275,20 @@ class MyBatisAppSourceRepositoryIntegrationTest {
         assertThat(repository.findSteps(operation.operationId())).singleElement()
                 .extracting(AppSourceOperationStep::status)
                 .isEqualTo(AppSourceStepStatus.SUCCEEDED);
+
+        AppSourceOperationStep serverStep = new AppSourceOperationStep(
+                "step-server", operation.operationId(), AppSourceStepScope.SERVER, SERVER_ID,
+                "MATERIALIZE", 20, AppSourceStepStatus.PENDING, "等待物化", null, null, NOW);
+        assertThat(repository.upsertStep(serverStep)).isTrue();
+        assertThat(repository.findInFlightOperationForReplica(REPOSITORY_ID, 1L, SERVER_ID))
+                .hasValueSatisfying(bound -> {
+                    assertThat(bound.operationId()).isEqualTo(operation.operationId());
+                    assertThat(bound.status()).isEqualTo(AppSourceOperationStatus.RUNNING);
+                });
+        assertThat(repository.updateOperationStatus(
+                operation.operationId(), AppSourceOperationStatus.RUNNING,
+                AppSourceOperationStatus.SUCCEEDED, NOW.plusSeconds(3))).isTrue();
+        assertThat(repository.findInFlightOperationForReplica(REPOSITORY_ID, 1L, SERVER_ID)).isEmpty();
 
         AppSourceRecentSelection recent = new AppSourceRecentSelection(
                 USER_ID, APP_ID, REPOSITORY_ID, 1L, NOW);

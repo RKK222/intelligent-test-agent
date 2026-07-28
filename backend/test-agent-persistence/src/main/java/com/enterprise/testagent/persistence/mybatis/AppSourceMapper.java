@@ -50,6 +50,11 @@ public interface AppSourceMapper {
     List<ReplicaRow> findReplicas(
             @Param("repositoryId") String repositoryId, @Param("generation") long generation);
 
+    List<ReplicaRow> findClaimableReplicas(
+            @Param("linuxServerId") String linuxServerId,
+            @Param("now") Instant now,
+            @Param("limit") int limit);
+
     ReplicaRow findReplicaByRuntimeWorkspaceId(@Param("runtimeWorkspaceId") String runtimeWorkspaceId);
 
     int insertReplicaIfAbsent(@Param("row") ReplicaRow row);
@@ -76,6 +81,11 @@ public interface AppSourceMapper {
     OperationRow findOperation(@Param("operationId") String operationId);
 
     OperationRow findLatestOperation(@Param("repositoryId") String repositoryId);
+
+    OperationRow findInFlightOperationForReplica(
+            @Param("repositoryId") String repositoryId,
+            @Param("generation") long generation,
+            @Param("linuxServerId") String linuxServerId);
 
     int insertOperation(@Param("row") OperationRow row);
 

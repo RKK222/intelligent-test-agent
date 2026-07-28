@@ -81,6 +81,38 @@ class AppSourceWorkspaceOpenerTest {
                         exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
     }
 
+    @Test
+    void openerRejectsRootSymlinkWithoutRepairingIndexOutsideManagedRoot() throws Exception {
+        AppSourceRepository appSources = mock(AppSourceRepository.class);
+        WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        ManagedWorkspacePathResolver paths = mock(ManagedWorkspacePathResolver.class);
+        AppSourceIndexManager indexes = new AppSourceIndexManager();
+        AppSourceSnapshot snapshot = indexedSnapshot(indexes);
+        AppSourceReplica replica = new AppSourceReplica(
+                REPOSITORY_ID, 3L, SERVER_A, WORKSPACE_ID, AppSourceReplicaStatus.READY,
+                null, null, 1, null, null, null, NOW.minusSeconds(60), NOW);
+        Workspace workspace = new Workspace(
+                WORKSPACE_ID, "orders", "appsource:orders", WorkspaceStatus.ACTIVE,
+                NOW.minusSeconds(60), NOW, SERVER_A.value(), "trace-open");
+        when(appSources.findReplica(REPOSITORY_ID, 3L, SERVER_A)).thenReturn(Optional.of(replica));
+        when(workspaces.findById(WORKSPACE_ID)).thenReturn(Optional.of(workspace));
+        Path managed = root.resolve("managed");
+        Path outside = root.resolve("outside-open");
+        Files.createDirectories(managed);
+        Files.createDirectories(outside);
+        Path linkedTarget = managed.resolve("orders");
+        Files.createSymbolicLink(linkedTarget, outside);
+        when(paths.resolve("appsource:orders")).thenReturn(linkedTarget);
+        AppSourceWorkspaceOpener opener = new AppSourceWorkspaceOpener(
+                appSources, workspaces, paths, indexes, new WorkspaceServerIdentity(SERVER_A.value()));
+
+        assertThatThrownBy(() -> opener.open(snapshot, SERVER_A))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        assertThat(outside.resolve(AppSourceApplicationService.INDEX_FILE_NAME)).doesNotExist();
+    }
+
     private AppSourceSnapshot indexedSnapshot(AppSourceIndexManager indexes) {
         AppSourceSnapshot snapshot = new AppSourceSnapshot(
                 REPOSITORY_ID, 3L, "orders", AppSourcePurpose.TEAM, new UserId("usr_downloader"),

@@ -40,6 +40,9 @@ public interface AppSourceRepository extends AppSourceRepositoryHistory {
 
     List<AppSourceReplica> findReplicas(CodeRepositoryId repositoryId, long generation);
 
+    /** 扫描本服务器尚未认领或租约已过期的副本，作为瞬时唤醒丢失后的最终执行事实。 */
+    List<AppSourceReplica> findClaimableReplicas(LinuxServerId linuxServerId, Instant now, int limit);
+
     /** 按 generation 专属 Runtime Workspace 反查副本，供会话和文件入口实时授权。 */
     Optional<AppSourceReplica> findReplicaByRuntimeWorkspaceId(String runtimeWorkspaceId);
 
@@ -63,6 +66,10 @@ public interface AppSourceRepository extends AppSourceRepositoryHistory {
     Optional<AppSourceOperation> findOperation(String operationId);
 
     Optional<AppSourceOperation> findLatestOperation(CodeRepositoryId repositoryId);
+
+    /** 按 server step 绑定当前可执行 operation，禁止 worker 以版本库级 latest 猜测 attempt 归属。 */
+    Optional<AppSourceOperation> findInFlightOperationForReplica(
+            CodeRepositoryId repositoryId, long generation, LinuxServerId linuxServerId);
 
     void saveOperation(AppSourceOperation operation);
 

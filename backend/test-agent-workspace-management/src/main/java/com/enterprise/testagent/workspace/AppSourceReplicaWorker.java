@@ -109,8 +109,8 @@ public class AppSourceReplicaWorker {
                 || !snapshot.expiresAt().isAfter(claimTime)) {
             return Outcome.SKIPPED_STALE;
         }
-        AppSourceOperation operation = appSources.findLatestOperation(repositoryId)
-                .filter(candidate -> candidate.targetGeneration() == generation)
+        AppSourceOperation operation = appSources.findInFlightOperationForReplica(
+                        repositoryId, generation, linuxServerId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "应用源码操作不存在"));
         CodeRepository repository = configuration.findRepository(repositoryId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "应用源码版本库不存在"));
@@ -151,10 +151,13 @@ public class AppSourceReplicaWorker {
     }
 
     private <T> T withFileLock(Path targetRoot, LockedOperation<T> operation) {
+        AppSourcePathGuard.requireSafe(targetRoot);
         Path parent = Objects.requireNonNull(targetRoot.getParent(), "target root parent must not be null");
         Path lockPath = parent.resolve("." + targetRoot.getFileName() + ".app-source.lock");
         try {
+            AppSourcePathGuard.requireSafe(lockPath);
             Files.createDirectories(parent);
+            AppSourcePathGuard.requireSafe(lockPath);
             try (FileChannel channel = FileChannel.open(
                             lockPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
                     FileLock lock = tryLock(channel, targetRoot)) {
