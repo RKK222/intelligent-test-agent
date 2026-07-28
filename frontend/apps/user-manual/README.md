@@ -25,6 +25,6 @@ corepack pnpm --filter @test-agent/user-manual build
 - `docs/guide/conversation.md`：主对话、上下文、夜间执行时段、待执行任务、会话锁定、宠物旁路和历史对话的稳定用户操作说明。
 - `docs/guide/reference-config.md`：应用管理员在个人工作区初始化/同步/受控切换应用资产分支、主动核验各服务器实际 Git 指针、选择橙色 SDD 根目录、最小更新 JSONC 引用配置和处理错误的稳定操作说明；同时说明工作区文件树中的合并/非合并投影、蓝色引用来源、同名冲突、只读交互和局部告警，并明确已有进程只在下次启动或受管重启后获得引用目录环境。
 - `docs/guide/directory-mapping.md`：以当前落地的公共 Git、应用 Git 和个人 worktree 为事实源，将开发与测试目录按真实层级合并为一棵可逐级展开的工程树；目录、Agent/workagent/Skill 名称、两套物理 Git、实现状态和职责都在该 Markdown 顶部的 `directoryMapping` frontmatter 中维护，`DirectoryMapping.vue` 只负责通用展示。正文同步说明公共配置仅超级管理员可写、应用配置仅应用管理员及以上可写、`docs/**` 所有应用成员可发布、`spec/**` 仅个人本地提交，以及从个人 `HEAD` 按白名单投影到应用 feature worktree 的发布流程。
-- `docs/guide/troubleshooting.md`：按文件树、对话、Git、Agent/Skill、Hub、引用配置、定时任务和手册问答等现象提供排查顺序、敏感信息边界与管理员上报模板。
+- `docs/guide/faq.md`：把常见功能、权限问答和故障排查放在同一页，覆盖文件树、对话、Git、Agent/Skill、Hub、引用配置、定时任务和手册问答，并提供脱敏上报模板。
 - `docs/.vitepress/`：导航、搜索、主题和构建输出配置。
 - 产品行为发生变化时，应先同步对应章节，再调整上下文帮助入口。

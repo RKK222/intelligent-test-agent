@@ -15,11 +15,13 @@
 - 新增常见问题排查，覆盖文件树、发送门禁、Git、Agent/Skill、Hub、引用配置、定时任务和手册问答，并提供脱敏上报模板。
 - VitePress 与应用内 Help 同步注册功能总览、引用配置和排查章节，宠物问答继续直接读取同一 Markdown。
 - 按用户指定的 `op7418/humanizer-zh` 规则复查用户可见文案，删掉模板化开场、机械连接词和过度解释，保留按钮名、技术 ID、权限与生效规则。
+- 常见功能问答和故障排查最终合并到 `faq.md`，删除独立排查页；静态导航、应用内 Help 和所有章节链接只保留“常见问题与排查”入口。合并页约 5300 字，宠物问答仅对该主题把上下文上限从 2800 调到 5600 字。
 
 ### How
 - 根 workspace 定向 Vitest 11 项、user-manual 构建、agent-web typecheck 和生产 build 通过；VitePress preview 在 `127.0.0.1:3001/help/` 启动，新页面 HTTP 均为 200。
 - 包内直接 `vitest` 不会加载根 jsdom 配置；DOM 用例应从 `frontend/` 执行根 workspace 的 Vitest 入口。
 - `humanizer-zh` 已安装到本机 Codex skills 目录；润色后再次运行定向 Vitest 11 项和 agent-web 生产 build，预览页确认新文案已生效。
+- 合并后定向 Vitest 11 项和 agent-web 生产 build 再次通过，`faq.html` 预览返回 200 且包含问答、排查和上报模板。VitePress preview 请求刚删除的旧静态页会因 ENOENT 退出，已按最新产物重启预览。
 
 ### Result
 - 用户可从静态手册和应用内 Help 查看当前能力与排障路径，引用配置也可作为宠物问答事实来源；未修改 API、RunEvent、数据库/Flyway、SQL、环境配置、generated SDK 或 OpenCode 源码。

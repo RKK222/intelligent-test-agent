@@ -8,7 +8,6 @@ import gettingStartedManual from "../../../user-manual/docs/guide/getting-starte
 import processInitializationManual from "../../../user-manual/docs/guide/process-initialization.md?raw";
 import referenceConfigManual from "../../../user-manual/docs/guide/reference-config.md?raw";
 import settingsManual from "../../../user-manual/docs/guide/settings.md?raw";
-import troubleshootingManual from "../../../user-manual/docs/guide/troubleshooting.md?raw";
 import workspaceManual from "../../../user-manual/docs/guide/workspace.md?raw";
 
 export type HelpTopicId =
@@ -22,8 +21,7 @@ export type HelpTopicId =
   | "directory-mapping"
   | "conversation"
   | "agent-config"
-  | "faq"
-  | "troubleshooting";
+  | "faq";
 
 export type HelpTopic = {
   id: HelpTopicId;
@@ -111,17 +109,10 @@ export const HELP_TOPICS: HelpTopic[] = [
   },
   {
     id: "faq",
-    label: "常见问题",
-    description: "高频疑问快速解答",
+    label: "常见问题与排查",
+    description: "功能问答与故障处理",
     path: "guide/faq.html",
     content: faqManual
-  },
-  {
-    id: "troubleshooting",
-    label: "常见问题排查",
-    description: "按现象检查并收集定位信息",
-    path: "guide/troubleshooting.html",
-    content: troubleshootingManual
   }
 ];
 
@@ -159,7 +150,9 @@ export function stripMarkdownFrontmatter(content: string): string {
 export function buildManualQuestionPrompt(topic: HelpTopicId, question: string): string {
   const currentTopic = helpTopicById(topic);
   const normalizedQuestion = question.trim().slice(0, 500);
-  const manualContext = stripMarkdownFrontmatter(currentTopic.content).trim().slice(0, 2_800);
+  // 常见问题页合并了问答和排查，单独放宽到 5600 字，避免宠物只读到前半页。
+  const contextLimit = currentTopic.id === "faq" ? 5_600 : 2_800;
+  const manualContext = stripMarkdownFrontmatter(currentTopic.content).trim().slice(0, contextLimit);
   return [
     "你正在回答 MIMO 测试智能体用户手册问题。请只依据下方内置手册资料作答；资料没有覆盖时直接说明，并建议用户联系平台管理员，不要编造按钮或操作路径。",
     `【当前章节】${currentTopic.label}`,

@@ -13,8 +13,8 @@ hero:
       text: 功能总览
       link: /guide/feature-overview
     - theme: alt
-      text: 常见问题排查
-      link: /guide/troubleshooting
+      text: 常见问题与排查
+      link: /guide/faq
 
 features:
   - title: 先选中 workspace
