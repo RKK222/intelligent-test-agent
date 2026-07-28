@@ -9,6 +9,7 @@ record AppSourceOperationTicket(
         String userId,
         boolean appAdmin,
         String issuerBackendProcessId,
+        String origin,
         String traceId,
         Instant expiresAt) {
 }

@@ -8,6 +8,7 @@
 
 - 提供 `XxlJobSsoTicket`，只表达短期 `ticket/expiresAt/formAction` 响应；原始票据不得进入持久化状态、URL 或日志。
 - 定义 `ToolboxCatalogResponse`、`ToolboxTool` 与 `ToolboxClickResponse`，表达版本化离线目录、双语名称/说明、固定分类、来源版本、同源深链接、累计点击和可空热门排名；点击请求的 `eventId` 由页面每次打开动作生成，不包含客户端时间或用户身份。
+- 定义应用源码列表、固定提交选择、物化/重试/打开、持久化操作和独立进度 WebSocket DTO；`AppSourceProgressEvent` 是严格判别联合，`snapshot/step/completed` 必须携带完整操作与 traceId，`failed` 必须携带 `FAILED` 和非空安全错误。
 
 - 定义 API 响应、Workspace、WorkspaceDirectoryList、Session、SessionMessage、Run、RunEvent、Diff、AgentMessage 类型；Session、SessionMessage、Run 和 AgentMessage 可选携带 `sourceType/sourceRefId`，用于兼容并展示 `SCHEDULED_TASK` 来源。Workspace 可选携带 `linuxServerId`，用于前端文件 WebSocket 同服务器路由。`Session.workspaceContext` 可选携带历史会话所属 `appId/appName/applicationWorkspaceId/workspaceName/versionId/version`，旧后端或单会话详情缺失时前端必须兼容 `null/undefined`。
 - 定义 `NightExecutionScheduleMode`、`NightExecutionSlotsResponse`、`NightExecutionTask`、`NightExecutionTaskQueryResponse`，表达 `NIGHT_WINDOW/ADMIN_CUSTOM`、北京时间夜间窗口、15 分钟容量时段、待执行任务和当前会话可见失败卡；任务的 `scheduleMode` 保持可选以兼容旧后端响应，响应不包含完整 prompt/parts。

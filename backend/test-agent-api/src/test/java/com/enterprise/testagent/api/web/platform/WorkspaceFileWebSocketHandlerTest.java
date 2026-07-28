@@ -19,8 +19,19 @@ import com.enterprise.testagent.workspace.WorkspaceViewLocator;
 import com.enterprise.testagent.workspace.WorkspaceViewLocatorKind;
 import com.enterprise.testagent.workspace.WorkspaceViewReadResponse;
 import com.enterprise.testagent.workspace.WorkspaceViewSource;
+import com.enterprise.testagent.workspace.ManagedConversationWorkspaceAccessAuthorizer;
+import com.enterprise.testagent.domain.appsource.AppSourceReplica;
+import com.enterprise.testagent.domain.appsource.AppSourceReplicaStatus;
+import com.enterprise.testagent.domain.appsource.AppSourceRepository;
+import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
+import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
+import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
+import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
+import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
+import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import com.enterprise.testagent.domain.user.UserId;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -29,6 +40,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -719,6 +731,38 @@ class WorkspaceFileWebSocketHandlerTest {
     }
 
     @Test
+    void everyRpcRejectsWorkspaceOnServerBWhenReplicaIsOnServerA() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
+        when(ticketService.consume("wft_workspace", "http://localhost:3000"))
+                .thenReturn(new WorkspaceFileSocketTicket(
+                        "wft_workspace", workspaceId.value(), "server-b", "server-b",
+                        false, false, "usr_1234567890abcdef", "workspace",
+                        null, null, TRACE_ID, NOW.plusSeconds(60)));
+        WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                Mockito.mock(WorkspaceViewApplicationService.class),
+                mismatchedReplicaAuthorizer(workspaceId, "server-b", "server-a"),
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace",
+                List.of("""
+                        {"id":"req_1","op":"workspace.list","params":{"workspaceId":"wrk_1234567890abcdef","path":""}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).singleElement().satisfies(message ->
+                assertThat(message).contains("\"type\":\"error\"", "\"code\":\"FORBIDDEN\""));
+        verify(workspaceService, never()).listFiles(workspaceId, "");
+    }
+
+    @Test
     void rejectsViewWorkspaceIdSpoofAndPhysicalLocatorFieldsBeforeCallingViewService() {
         WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
         WorkspaceViewApplicationService viewService = Mockito.mock(WorkspaceViewApplicationService.class);
@@ -805,6 +849,27 @@ class WorkspaceFileWebSocketHandlerTest {
                 null,
                 TRACE_ID,
                 NOW.plusSeconds(60));
+    }
+
+    private static ConversationWorkspaceAccessAuthorizer mismatchedReplicaAuthorizer(
+            WorkspaceId workspaceId,
+            String workspaceServer,
+            String replicaServer) {
+        ManagedWorkspaceRepository managed = Mockito.mock(ManagedWorkspaceRepository.class);
+        ConfigurationManagementRepository configuration = Mockito.mock(ConfigurationManagementRepository.class);
+        AppSourceRepository appSources = Mockito.mock(AppSourceRepository.class);
+        WorkspaceRepository workspaces = Mockito.mock(WorkspaceRepository.class);
+        CodeRepositoryId repositoryId = new CodeRepositoryId("repo_source");
+        when(appSources.findReplicaByRuntimeWorkspaceId(workspaceId.value())).thenReturn(Optional.of(
+                new AppSourceReplica(
+                        repositoryId, 1L, new LinuxServerId(replicaServer), workspaceId,
+                        AppSourceReplicaStatus.READY, null, null, 1, null, null, null,
+                        NOW.minusSeconds(60), NOW)));
+        when(workspaces.findById(workspaceId)).thenReturn(Optional.of(new Workspace(
+                workspaceId, "Source", "/source", WorkspaceStatus.ACTIVE,
+                NOW.minusSeconds(60), NOW, workspaceServer, TRACE_ID)));
+        return new ManagedConversationWorkspaceAccessAuthorizer(
+                managed, configuration, appSources, workspaces);
     }
 
     private static WorkspaceFileSocketTicket workspaceAgentTicket(boolean appAdmin) {

@@ -6,6 +6,7 @@ import com.enterprise.testagent.common.git.GitRemoteService;
 import com.enterprise.testagent.common.git.GitWorkspaceService;
 import com.enterprise.testagent.common.git.SshKeyEncryptionService;
 import com.enterprise.testagent.domain.appsource.AppSourceOperation;
+import com.enterprise.testagent.domain.appsource.AppSourceOperationId;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationStep;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationType;
 import com.enterprise.testagent.domain.appsource.AppSourcePathType;
@@ -465,7 +466,8 @@ public class AppSourceApplicationService {
      * 当前关联应用有效成员的用户读取。该方法只返回安全摘要，不暴露物理路径或 Git 原始错误。
      */
     public OperationSnapshot getOperation(String operationId, UserId userId, boolean appAdmin) {
-        AppSourceOperation operation = appSources.findOperation(operationId)
+        String normalizedOperationId = AppSourceOperationId.normalize(operationId);
+        AppSourceOperation operation = appSources.findOperation(normalizedOperationId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "应用源码操作不存在"));
         requireLinkedCodeRepository(operation.appId(), operation.repositoryId(), userId);
         AppSourceSnapshot snapshot = appSources
@@ -830,9 +832,7 @@ public class AppSourceApplicationService {
             int retentionHours,
             boolean confirmReplace) {
         public MaterializationCommand {
-            if (operationId == null || operationId.isBlank()) {
-                throw new IllegalArgumentException("operationId must not be blank");
-            }
+            operationId = AppSourceOperationId.normalize(operationId);
             if (expectedTreeCommit == null || expectedTreeCommit.isBlank()) {
                 throw new IllegalArgumentException("expectedTreeCommit must not be blank");
             }
@@ -848,7 +848,8 @@ public class AppSourceApplicationService {
     /** 失败副本重试只需 operationId 和当前 generation，其他冻结字段从数据库读取。 */
     public record RetryCommand(String operationId, long expectedGeneration) {
         public RetryCommand {
-            if (operationId == null || operationId.isBlank() || expectedGeneration < 1L) {
+            operationId = AppSourceOperationId.normalize(operationId);
+            if (expectedGeneration < 1L) {
                 throw new IllegalArgumentException("retry command fields are invalid");
             }
         }

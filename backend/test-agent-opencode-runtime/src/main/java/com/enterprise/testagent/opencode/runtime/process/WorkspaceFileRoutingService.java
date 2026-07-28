@@ -3,6 +3,8 @@ package com.enterprise.testagent.opencode.runtime.process;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.appsource.AppSourceRepository;
+import com.enterprise.testagent.domain.appsource.AppSourceReplica;
+import com.enterprise.testagent.domain.appsource.AppSourceReplicaStatus;
 import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.enterprise.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServer;
@@ -193,11 +195,12 @@ public class WorkspaceFileRoutingService {
         UserOpencodeProcessFileRoutingAffinity process = assignmentService.fileRoutingAffinity(userId, agentId, traceId);
         String agentLinuxServerId = readyLinuxServerId(process, workspaceId.value());
         String workspaceLinuxServerId = workspace.linuxServerId() == null ? agentLinuxServerId : workspace.linuxServerId();
+        AppSourceReplica appSourceReplica = appSourceReplica(workspaceId);
+        if (appSourceReplica != null) {
+            return routeAppSourceReplica(
+                    workspaceId, workspaceLinuxServerId, agentLinuxServerId, appSourceReplica);
+        }
         if (!workspaceLinuxServerId.equals(agentLinuxServerId)) {
-            if (isAppSourceReplicaWorkspace(workspaceId)) {
-                // AppSource workspace 身份固定到 replica/server/generation，禁止复用普通历史 Workspace 的本机回绑。
-                throw workspaceServerConflict(workspaceId, workspaceLinuxServerId, agentLinuxServerId);
-            }
             workspace = rebindStaleWorkspaceIfSafe(workspace, workspaceLinuxServerId, agentLinuxServerId, traceId);
             workspaceLinuxServerId = workspace.linuxServerId();
             if (!workspaceLinuxServerId.equals(agentLinuxServerId)) {
@@ -214,9 +217,44 @@ public class WorkspaceFileRoutingService {
                 null);
     }
 
-    private boolean isAppSourceReplicaWorkspace(WorkspaceId workspaceId) {
-        return appSourceRepository != null
-                && appSourceRepository.findReplicaByRuntimeWorkspaceId(workspaceId.value()).isPresent();
+    private AppSourceReplica appSourceReplica(WorkspaceId workspaceId) {
+        return appSourceRepository == null
+                ? null
+                : appSourceRepository.findReplicaByRuntimeWorkspaceId(workspaceId.value()).orElse(null);
+    }
+
+    private WorkspaceFileRouteResponse routeAppSourceReplica(
+            WorkspaceId workspaceId,
+            String workspaceLinuxServerId,
+            String agentLinuxServerId,
+            AppSourceReplica replica) {
+        String replicaLinuxServerId = replica.linuxServerId().value();
+        boolean currentReadyGeneration = replica.status() == AppSourceReplicaStatus.READY
+                && appSourceRepository.findSlot(replica.repositoryId())
+                        .map(slot -> Objects.equals(slot.activeGeneration(), replica.generation()))
+                        .orElse(false);
+        if (!currentReadyGeneration
+                || !replicaLinuxServerId.equals(workspaceLinuxServerId)
+                || !replicaLinuxServerId.equals(agentLinuxServerId)) {
+            // AppSource 文件身份由 current generation 的 READY replica 决定，禁止按错误 Workspace 行或本机路径降级。
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "应用源码工作区副本路由不一致",
+                    Map.of(
+                            "workspaceId", workspaceId.value(),
+                            "workspaceLinuxServerId", workspaceLinuxServerId,
+                            "agentLinuxServerId", agentLinuxServerId,
+                            "replicaLinuxServerId", replicaLinuxServerId,
+                            "replicaGeneration", replica.generation()));
+        }
+        BackendJavaProcess backend = backendFor(replica.linuxServerId());
+        return new WorkspaceFileRouteResponse(
+                workspaceId.value(),
+                replicaLinuxServerId,
+                trimTrailingSlash(backend.listenUrl()),
+                WEB_SOCKET_PATH,
+                true,
+                null);
     }
 
     private PlatformException workspaceServerConflict(

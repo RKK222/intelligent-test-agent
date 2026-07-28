@@ -190,10 +190,36 @@ class AppSourceOperationWebSocketHandlerTest {
         assertThat(session.sentText().get(1)).contains("正在检出固定提交").doesNotContain("stderr", "/data/");
     }
 
+    @Test
+    void failedOperationFrameContainsStatusAndSafeErrorFields() throws Exception {
+        AppSourceOperationTicketService tickets = mock(AppSourceOperationTicketService.class);
+        AppSourceApplicationService appSources = mock(AppSourceApplicationService.class);
+        when(tickets.consume("ast_ticket", "aso_12345678", "http://localhost:3000"))
+                .thenReturn(ticket("ast_ticket"));
+        when(appSources.getOperation("aso_12345678", new UserId("usr_1"), false))
+                .thenReturn(operation(AppSourceOperationStatus.FAILED, List.of()));
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/app-source-operations/"
+                        + "aso_12345678/ws?ticket=ast_ticket");
+
+        new AppSourceOperationWebSocketHandler(
+                tickets, appSources, objectMapper, "http://localhost:3000", Duration.ofMillis(1))
+                .handle(session)
+                .block(Duration.ofSeconds(2));
+
+        JsonNode failed = objectMapper.readTree(session.sentText().get(1));
+        assertThat(failed.path("type").asText()).isEqualTo("failed");
+        assertThat(failed.path("status").asText()).isEqualTo("FAILED");
+        assertThat(failed.path("errorCode").asText()).isEqualTo("APP_SOURCE_OPERATION_FAILED");
+        assertThat(failed.path("errorMessage").asText()).isEqualTo("应用源码操作失败");
+        assertThat(failed.path("operation").path("operationId").asText()).isEqualTo("aso_12345678");
+        assertThat(failed.path("traceId").asText()).isEqualTo("trace_operation");
+    }
+
     private AppSourceOperationTicket ticket(String value) {
         return new AppSourceOperationTicket(
                 value, "aso_12345678", "usr_1", false, "bjp_server_a",
-                "trace_ticket", NOW.plusSeconds(60));
+                "http://localhost:3000", "trace_ticket", NOW.plusSeconds(60));
     }
 
     private AppSourceApplicationService.OperationSnapshot operation(

@@ -46,8 +46,8 @@ describe("app-source backend client", () => {
     await client.openAppSource("app/demo", "repo/source", 4);
     await client.getRecentAppSource();
     await client.clearRecentAppSource();
-    await client.getAppSourceOperation("aso/id");
-    await client.createAppSourceOperationTicket("aso/id");
+    await client.getAppSourceOperation("job:1");
+    await client.createAppSourceOperationTicket("job:1");
 
     expect(fetcher.mock.calls.map((call) => [call[0], call[1]?.method, call[1]?.body])).toEqual([
       [
@@ -91,12 +91,12 @@ describe("app-source backend client", () => {
         undefined
       ],
       [
-        "http://api/api/internal/platform/workspace-management/app-source-operations/aso%2Fid",
+        "http://api/api/internal/platform/workspace-management/app-source-operations/job%3A1",
         undefined,
         undefined
       ],
       [
-        "http://api/api/internal/platform/workspace-management/app-source-operations/aso%2Fid/ticket",
+        "http://api/api/internal/platform/workspace-management/app-source-operations/job%3A1/ticket",
         "POST",
         undefined
       ]
@@ -129,19 +129,15 @@ describe("app-source backend client", () => {
     });
     const events: AppSourceProgressEvent[] = [];
 
-    const first = await client.connectAppSourceProgress("aso/1", (event) => events.push(event));
-    sockets[0]?.message(JSON.stringify({
-      type: "snapshot",
-      operationId: "aso/1",
-      operation: { operationId: "aso/1", status: "RUNNING" }
-    }));
+    const first = await client.connectAppSourceProgress("job_1", (event) => events.push(event));
+    sockets[0]?.message(JSON.stringify(progressSnapshot("job_1")));
     first.close();
-    const second = await client.connectAppSourceProgress("aso/1", (event) => events.push(event));
-    sockets[1]?.message(JSON.stringify({
-      type: "completed",
-      operationId: "aso/1",
-      operation: { operationId: "aso/1", status: "SUCCEEDED" }
-    }));
+    const second = await client.connectAppSourceProgress("job_1", (event) => events.push(event));
+    const completed = progressSnapshot("job_1");
+    completed.type = "completed";
+    completed.operation.status = "SUCCEEDED";
+    completed.operation.completedAt = "2026-07-28T04:01:00Z";
+    sockets[1]?.message(JSON.stringify(completed));
     second.close();
 
     expect(sockets.map((socket) => socket.url)).toEqual([
@@ -151,17 +147,97 @@ describe("app-source backend client", () => {
     expect(events.map((event) => event.type)).toEqual(["snapshot", "completed"]);
     expect(fetcher.mock.calls.map((call) => [call[0], call[1]?.method])).toEqual([
       [
-        "http://api/api/internal/platform/workspace-management/app-source-operations/aso%2F1/ticket",
+        "http://api/api/internal/platform/workspace-management/app-source-operations/job_1/ticket",
         "POST"
       ],
       [
-        "http://api/api/internal/platform/workspace-management/app-source-operations/aso%2F1/ticket",
+        "http://api/api/internal/platform/workspace-management/app-source-operations/job_1/ticket",
         "POST"
       ]
     ]);
     expect(sockets.every((socket) => socket.closed)).toBe(true);
   });
+
+  it("turns an incomplete snapshot frame into WEBSOCKET_MESSAGE_INVALID", async () => {
+    const sockets: FakeSocket[] = [];
+    const client = progressClient(sockets);
+    const events: AppSourceProgressEvent[] = [];
+    await client.connectAppSourceProgress("job_123", (event) => events.push(event));
+
+    sockets[0]?.message(JSON.stringify({ type: "snapshot" }));
+    sockets[0]?.message(JSON.stringify({ type: "failed", status: "FAILED" }));
+
+    expect(events).toHaveLength(2);
+    expect(events).toEqual([
+      expect.objectContaining({ type: "failed", errorCode: "WEBSOCKET_MESSAGE_INVALID" }),
+      expect.objectContaining({ type: "failed", errorCode: "WEBSOCKET_MESSAGE_INVALID" })
+    ]);
+  });
+
+  it("does not reinterpret a caller callback exception as an invalid websocket message", async () => {
+    const sockets: FakeSocket[] = [];
+    const client = progressClient(sockets);
+    const callbackError = new Error("caller failed");
+    const onEvent = vi.fn(() => {
+      throw callbackError;
+    });
+    await client.connectAppSourceProgress("job_123", onEvent);
+
+    expect(() => sockets[0]?.message(JSON.stringify(progressSnapshot("job_123"))))
+      .toThrow(callbackError);
+    expect(onEvent).toHaveBeenCalledTimes(1);
+  });
 });
+
+function progressClient(sockets: FakeSocket[]) {
+  return createBackendApiClient({
+    baseUrl: "http://api",
+    fetcher: vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: {
+        ticket: "ast_1",
+        expiresAt: "2026-07-28T04:01:00Z",
+        webSocketUrl: "ws://server-a/progress?ticket=ast_1"
+      }
+    }), { status: 200 })),
+    webSocketFactory: (url) => {
+      const socket = new FakeSocket(url);
+      sockets.push(socket);
+      return socket;
+    },
+    traceIdFactory: () => "trace_fixed"
+  });
+}
+
+function progressSnapshot(
+  operationId: string
+): Extract<AppSourceProgressEvent, { type: "snapshot" | "step" | "completed" }> {
+  return {
+    type: "snapshot",
+    operationId,
+    traceId: "trace_operation",
+    operation: {
+      operationId,
+      appId: "app_1",
+      repositoryId: "repo_1",
+      sourceGeneration: null,
+      targetGeneration: 1,
+      operationType: "DOWNLOAD",
+      status: "RUNNING",
+      purpose: "TEAM",
+      branch: "main",
+      targetCommit: "b".repeat(40),
+      selectedPaths: [],
+      expiresAt: "2026-07-28T05:00:00Z",
+      traceId: "trace_operation",
+      acceptedAt: "2026-07-28T04:00:00Z",
+      completedAt: null,
+      globalSteps: [],
+      serverSummaries: []
+    }
+  };
+}
 
 class FakeSocket {
   onopen: ((event: unknown) => void) | null = null;

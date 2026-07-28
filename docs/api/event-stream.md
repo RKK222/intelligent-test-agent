@@ -758,8 +758,8 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 
 应用源码物化与副本重试使用独立 WebSocket，不属于 RunEvent、SSE 或 opencode raw event，也不向 RunEvent wire name 表追加类型。
 
-- 创建连接前调用 `POST /api/internal/platform/workspace-management/app-source-operations/{operationId}/ticket`。签票前必须按当前用户重新读取持久化操作并鉴权。
-- ticket 短期过期、一次性消费，绑定 `operationId/userId/APP_ADMIN` 事实、签发 `backendProcessId`、traceId；upgrade 同时校验 Origin 白名单和签发 JVM。任一校验失败只返回通用拒绝结果，不泄露操作是否存在。
+- 创建连接前调用 `POST /api/internal/platform/workspace-management/app-source-operations/{operationId}/ticket`。签票请求必须携带浏览器 `Origin`，签票前必须按当前用户重新读取持久化操作并鉴权。
+- ticket 短期过期、一次性消费，绑定 `operationId/userId/APP_ADMIN` 事实、签发 `backendProcessId`、canonical Origin 和 traceId；upgrade 必须同时命中 Origin 白名单、签票时的精确 Origin 与签发 JVM。Origin 只接受无 userinfo/path/query/fragment 的 `http(s)://host[:port]`，scheme/host 小写并折叠默认端口。任一校验失败只返回通用拒绝结果，不泄露操作是否存在；错误 Origin 不会烧毁正确来源随后要消费的票。未消费过期票会主动回收，有效票达到有界容量时新签发显式返回限流错误，不静默驱逐。
 - WebSocket URL 为 `/api/internal/platform/workspace-management/app-source-operations/{operationId}/ws?ticket=...`；多 Java 部署时 ticket 响应返回签发 JVM 的绝对 WebSocket URL，不能由客户端重新拼接或二次编码。
 - 建连成功后首帧总是数据库权威 `snapshot`。非终态操作按持久化 operation、global step、replica 和 server step 的变化发送 `step`；`SUCCEEDED/PARTIAL_FAILED` 发送 `completed`，`FAILED` 发送 `failed`。
 - 每次数据库轮询都重新校验当前应用启用、代码库关联、成员关系及个人快照 owner/管理员规则；签票后撤权会以安全 `failed` 结束观察。
@@ -780,7 +780,7 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 }
 ```
 
-`type` 只允许 `snapshot/step/completed/failed`。成功 envelope 的 `operation` 与 HTTP 操作快照结构相同。连接、鉴权或内部读取失败时可返回不含 `operation` 的安全失败 envelope：
+`type` 只允许 `snapshot/step/completed/failed`。`snapshot/step/completed` 必须完整携带 `operationId/operation/traceId`，其中 `operation` 与 HTTP 操作快照结构相同；`failed` 必须携带 `status=FAILED` 与非空安全 `errorCode/errorMessage`，持久化操作失败时还会携带完整 `operation/traceId`。连接、鉴权或内部读取失败时可返回不含 `operation` 的安全失败 envelope：
 
 ```json
 {
@@ -797,7 +797,7 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 对应测试：
 
 - `AppSourceOperationWebSocketHandlerTest`：持久化首帧、step/终态、`PARTIAL_FAILED -> completed`、新 ticket 重连、签票后撤权和敏感字段脱敏。
-- `AppSourceOperationTicketStoreTest` / `AppSourceOperationTicketServiceTest`：一次性、过期、operation/JVM/Origin 绑定、签票前鉴权和签发 JVM URL。
+- `AppSourceOperationTicketStoreTest` / `AppSourceOperationTicketServiceTest`：并发一次性、过期回收、容量上限、operation/JVM/精确 Origin 绑定、签票前鉴权和签发 JVM URL。
 - `AppSourceWebSocketConfigTest` / `AppSourceApiContextTest`：精确 URL 映射和 Spring WebFlux 装配。
 
 ## 工具盒子不新增事件

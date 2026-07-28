@@ -1,6 +1,7 @@
 package com.enterprise.testagent.api.web.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -36,7 +37,8 @@ class AppSourceOperationTicketServiceTest {
                 NOW.minusSeconds(60), NOW.plusSeconds(3600));
 
         AppSourceDtos.TicketResponse response =
-                service.createTicket(principal, "aso_12345678", "trace_ticket");
+                service.createTicket(
+                        principal, "aso_12345678", "https://Console.Example:443", "trace_ticket");
 
         assertThat(response.ticket()).isEqualTo("ast_ticket_1");
         assertThat(response.webSocketUrl()).isEqualTo(
@@ -45,6 +47,51 @@ class AppSourceOperationTicketServiceTest {
         assertThat(service.consume("ast_ticket_1", "aso_12345678", "https://console.example").userId())
                 .isEqualTo(USER_ID.value());
         verify(appSources).getOperation("aso_12345678", USER_ID, true);
+    }
+
+    @Test
+    void materializationAcceptedOperationIdCanAlwaysBeUsedToCreateATicket() {
+        AppSourceApplicationService.MaterializationCommand command =
+                new AppSourceApplicationService.MaterializationCommand(
+                        "job_123", null, "main", "b".repeat(40), List.of(),
+                        AppSourcePurpose.TEAM, 1, false);
+        AppSourceApplicationService appSources = mock(AppSourceApplicationService.class);
+        when(appSources.getOperation("job_123", USER_ID, false)).thenReturn(operation());
+        AppSourceOperationTicketService service = new AppSourceOperationTicketService(
+                new AppSourceOperationTicketStore(
+                        Clock.fixed(NOW, ZoneOffset.UTC), () -> "ast_ticket_job"),
+                appSources,
+                new CurrentBackendWebSocketUrlFactory(identity()),
+                identity());
+        AuthPrincipal principal = new AuthPrincipal(
+                "token", USER_ID, "U001", "普通用户", List.of("USER"),
+                NOW.minusSeconds(60), NOW.plusSeconds(3600));
+
+        assertThatCode(() -> service.createTicket(
+                        principal, command.operationId(), "https://console.example", "trace_ticket"))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void missingOriginCannotCreateATicket() {
+        AppSourceApplicationService appSources = mock(AppSourceApplicationService.class);
+        when(appSources.getOperation("job_123", USER_ID, false)).thenReturn(operation());
+        AppSourceOperationTicketService service = new AppSourceOperationTicketService(
+                new AppSourceOperationTicketStore(
+                        Clock.fixed(NOW, ZoneOffset.UTC), () -> "ast_ticket_missing_origin"),
+                appSources,
+                new CurrentBackendWebSocketUrlFactory(identity()),
+                identity());
+        AuthPrincipal principal = new AuthPrincipal(
+                "token", USER_ID, "U001", "普通用户", List.of("USER"),
+                NOW.minusSeconds(60), NOW.plusSeconds(3600));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                        service.createTicket(principal, "job_123", null, "trace_ticket"))
+                .isInstanceOfSatisfying(
+                        com.enterprise.testagent.common.error.PlatformException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(com.enterprise.testagent.common.error.ErrorCode.FORBIDDEN));
     }
 
     private AppSourceApplicationService.OperationSnapshot operation() {

@@ -31,6 +31,7 @@ class AppSourceOperationControllerTest {
         when(appSources.getOperation("aso_12345678", USER_ID, false)).thenReturn(operation());
         when(tickets.createTicket(
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("aso_12345678"),
+                org.mockito.ArgumentMatchers.eq("https://console.example"),
                 org.mockito.ArgumentMatchers.eq(TRACE_ID)))
                 .thenReturn(new AppSourceDtos.TicketResponse(
                         "ast_ticket", NOW.plusSeconds(60), "ws://server-a/ws?ticket=ast_ticket"));
@@ -48,6 +49,7 @@ class AppSourceOperationControllerTest {
         client.post()
                 .uri("/api/internal/platform/workspace-management/app-source-operations/aso_12345678/ticket")
                 .header("X-Trace-Id", TRACE_ID)
+                .header("Origin", "https://console.example")
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()

@@ -1,16 +1,14 @@
 package com.enterprise.testagent.api.web.platform;
 
 import com.enterprise.testagent.api.web.common.AuthWebSupport;
-import com.enterprise.testagent.common.error.ErrorCode;
-import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.domain.appsource.AppSourceOperationId;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
 import com.enterprise.testagent.workspace.AppSourceApplicationService;
-import java.util.Map;
 import java.util.Objects;
-import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
+import org.springframework.web.util.UriUtils;
 
 /**
  * 应用源码进度 ticket 签发服务。
@@ -20,7 +18,6 @@ import org.springframework.stereotype.Service;
 @Service
 class AppSourceOperationTicketService {
 
-    private static final Pattern OPERATION_ID_PATTERN = Pattern.compile("^aso_[A-Za-z0-9_-]{1,128}$");
     private static final String WS_BASE =
             "/api/internal/platform/workspace-management/app-source-operations/";
 
@@ -43,8 +40,10 @@ class AppSourceOperationTicketService {
     AppSourceDtos.TicketResponse createTicket(
             AuthPrincipal principal,
             String operationId,
+            String origin,
             String traceId) {
-        String normalizedOperationId = normalizeOperationId(operationId);
+        String normalizedOperationId = AppSourceOperationId.normalize(operationId);
+        String canonicalOrigin = AppSourceWebSocketOrigin.canonicalize(origin);
         boolean appAdmin = AuthWebSupport.hasRole(principal, Dictionary.ROLE_APP_ADMIN);
         appSources.getOperation(normalizedOperationId, principal.userId(), appAdmin);
         AppSourceOperationTicket ticket = ticketStore.issue(
@@ -52,8 +51,11 @@ class AppSourceOperationTicketService {
                 principal.userId().value(),
                 appAdmin,
                 backendIdentity.backendProcessId(),
+                canonicalOrigin,
                 traceId);
-        String path = WS_BASE + normalizedOperationId + "/ws?ticket=" + ticket.ticket();
+        String path = WS_BASE
+                + UriUtils.encodePathSegment(normalizedOperationId, java.nio.charset.StandardCharsets.UTF_8)
+                + "/ws?ticket=" + ticket.ticket();
         return new AppSourceDtos.TicketResponse(
                 ticket.ticket(),
                 ticket.expiresAt(),
@@ -66,20 +68,9 @@ class AppSourceOperationTicketService {
             String origin) {
         return ticketStore.consume(
                 ticket,
-                expectedOperationId,
+                AppSourceOperationId.normalize(expectedOperationId),
                 backendIdentity.backendProcessId(),
-                origin);
+                AppSourceWebSocketOrigin.canonicalize(origin));
     }
 
-    private String normalizeOperationId(String operationId) {
-        if (operationId == null
-                || operationId.isBlank()
-                || !OPERATION_ID_PATTERN.matcher(operationId.trim()).matches()) {
-            throw new PlatformException(
-                    ErrorCode.VALIDATION_ERROR,
-                    "operationId 格式无效",
-                    Map.of("operationId", operationId == null ? "" : operationId));
-        }
-        return operationId.trim();
-    }
 }

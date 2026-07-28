@@ -13,6 +13,8 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.appsource.AppSourceReplica;
 import com.enterprise.testagent.domain.appsource.AppSourceReplicaStatus;
 import com.enterprise.testagent.domain.appsource.AppSourceRepository;
+import com.enterprise.testagent.domain.appsource.AppSourceRepositorySlot;
+import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
 import com.enterprise.testagent.domain.opencodeprocess.BackendProcessId;
@@ -199,19 +201,68 @@ class WorkspaceFileRoutingServiceTest {
     }
 
     @Test
+    void rejectsReplicaWhenWorkspaceAndAgentAgreeButReplicaServerDiffers() {
+        WorkspaceRepository workspaceRepository = Mockito.mock(WorkspaceRepository.class);
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        OpencodeProcessHeartbeatStore heartbeatStore = Mockito.mock(OpencodeProcessHeartbeatStore.class);
+        AppSourceRepository appSources = Mockito.mock(AppSourceRepository.class);
+        CodeRepositoryId repositoryId = new CodeRepositoryId("repo_source");
+        when(workspaceRepository.findById(WORKSPACE_ID)).thenReturn(Optional.of(workspace("10.8.0.12")));
+        when(assignmentService.fileRoutingAffinity(USER_ID, "opencode", TRACE_ID))
+                .thenReturn(affinity("10.8.0.12"));
+        when(heartbeatStore.liveBackendSnapshots()).thenReturn(List.of(backendSnapshot("10.8.0.12")));
+        when(appSources.findReplicaByRuntimeWorkspaceId(WORKSPACE_ID.value())).thenReturn(Optional.of(
+                new AppSourceReplica(
+                        repositoryId, 4L, new LinuxServerId("10.8.0.13"), WORKSPACE_ID,
+                        AppSourceReplicaStatus.READY, null, null, 1, null, null, null,
+                        NOW.minusSeconds(60), NOW)));
+        when(appSources.findSlot(repositoryId)).thenReturn(Optional.of(new AppSourceRepositorySlot(
+                repositoryId, 4L, null, 5L, "job_123", 1L, NOW.minusSeconds(60), NOW)));
+
+        assertThatThrownBy(() -> new WorkspaceFileRoutingService(
+                        workspaceRepository,
+                        assignmentService,
+                        new BackendJavaRouteResolver(heartbeatStore, settings(), Clock.fixed(NOW, ZoneOffset.UTC)),
+                        ManagedWorkspacePathResolver.legacyOnly(),
+                        Clock.fixed(NOW, ZoneOffset.UTC),
+                        null,
+                        Mockito.mock(ConversationWorkspaceAccessAuthorizer.class),
+                        appSources)
+                .routeWorkspace(USER_ID, "opencode", WORKSPACE_ID, TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+    }
+
+    @Test
     void returnsTheBackendResolvedForTheRemoteReplicaServerWithoutLocalFallback() {
         WorkspaceRepository workspaceRepository = Mockito.mock(WorkspaceRepository.class);
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
         OpencodeProcessHeartbeatStore heartbeatStore = Mockito.mock(OpencodeProcessHeartbeatStore.class);
+        AppSourceRepository appSources = Mockito.mock(AppSourceRepository.class);
+        CodeRepositoryId repositoryId = new CodeRepositoryId("repo_source");
         when(workspaceRepository.findById(WORKSPACE_ID)).thenReturn(Optional.of(workspace("10.8.0.13")));
         when(assignmentService.fileRoutingAffinity(USER_ID, "opencode", TRACE_ID))
                 .thenReturn(affinity("10.8.0.13"));
         when(heartbeatStore.liveBackendSnapshots()).thenReturn(List.of(
                 backendSnapshot("10.8.0.12"),
                 backendSnapshot("10.8.0.13")));
+        when(appSources.findReplicaByRuntimeWorkspaceId(WORKSPACE_ID.value())).thenReturn(Optional.of(
+                new AppSourceReplica(
+                        repositoryId, 4L, new LinuxServerId("10.8.0.13"), WORKSPACE_ID,
+                        AppSourceReplicaStatus.READY, null, null, 1, null, null, null,
+                        NOW.minusSeconds(60), NOW)));
+        when(appSources.findSlot(repositoryId)).thenReturn(Optional.of(new AppSourceRepositorySlot(
+                repositoryId, 4L, null, 5L, "job_123", 1L, NOW.minusSeconds(60), NOW)));
 
-        WorkspaceFileRouteResponse response = service(
-                workspaceRepository, assignmentService, heartbeatStore)
+        WorkspaceFileRouteResponse response = new WorkspaceFileRoutingService(
+                workspaceRepository,
+                assignmentService,
+                new BackendJavaRouteResolver(heartbeatStore, settings(), Clock.fixed(NOW, ZoneOffset.UTC)),
+                ManagedWorkspacePathResolver.legacyOnly(),
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                null,
+                Mockito.mock(ConversationWorkspaceAccessAuthorizer.class),
+                appSources)
                 .routeWorkspace(USER_ID, "opencode", WORKSPACE_ID, TRACE_ID);
 
         assertThat(response.linuxServerId()).isEqualTo("10.8.0.13");

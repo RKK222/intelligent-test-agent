@@ -62,7 +62,7 @@ packages/shared-types
 
 `apps/agent-web` 的 activity rail 在代码/监控入口下方提供统一 Agent & Skill Hub。沉浸式页面采用能力市场结构，包含远端能力概览、发现/Agents/Skills、当前应用引用库、待更新收件箱、能力卡片和引用应用清单；分类目录展示能力发布状态、原创应用与归属工作区，应用引用状态只在“当前应用”板块展示。所有用户可读取远端精确快照，应用管理员可发布、引用、取消并重新引用，以及确认三方合并冲突；取消关系会立即退出应用引用库。`packages/backend-api` 统一承载 Hub HTTP 与平台文件 WebSocket 调用，`packages/shared-types` 保存兼容 DTO。
 
-应用源码快照的仓库、分支、目录树、物化、重试、打开、最近选择和持久化操作查询统一由 `packages/backend-api` 调用平台 workspace-management API；选择项使用 `{path,type}`，下载状态固定为 `NOT_DOWNLOADED/DOWNLOADED_ACTIVE/DOWNLOADED_EXPIRED/PERSONAL_OCCUPIED`。物化进度使用独立的一次性 ticket WebSocket，首次连接和重连均从数据库快照开始；client 不自动重连，关闭只停止观察，不取消后台任务。`packages/shared-types` 保存该安全 DTO/envelope，RunEvent union 不增加应用源码事件。
+应用源码快照的仓库、分支、目录树、物化、重试、打开、最近选择和持久化操作查询统一由 `packages/backend-api` 调用平台 workspace-management API；选择项使用 `{path,type}`，下载状态固定为 `NOT_DOWNLOADED/DOWNLOADED_ACTIVE/DOWNLOADED_EXPIRED/PERSONAL_OCCUPIED`。物化进度使用独立的一次性 ticket WebSocket，首次连接和重连均从数据库快照开始；client 不自动重连，关闭只停止观察，不取消后台任务。`packages/shared-types` 保存严格判别的安全 DTO/envelope：成功帧必须完整包含 operation/operationId/traceId，失败帧必须包含 `FAILED` 与安全错误；runtime validator 拒绝畸形消息，业务回调异常不会被二次包装为消息格式错误。RunEvent union 不增加应用源码事件。
 
 ### 工具盒子
 

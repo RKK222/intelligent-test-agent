@@ -22,7 +22,7 @@ public record AppSourceOperation(
         Instant completedAt) {
 
     public AppSourceOperation {
-        operationId = requireText(operationId, "operationId");
+        operationId = AppSourceOperationId.normalize(operationId);
         Objects.requireNonNull(appId, "appId must not be null");
         Objects.requireNonNull(repositoryId, "repositoryId must not be null");
         if ((sourceGeneration != null && sourceGeneration < 1L) || targetGeneration < 1L) {

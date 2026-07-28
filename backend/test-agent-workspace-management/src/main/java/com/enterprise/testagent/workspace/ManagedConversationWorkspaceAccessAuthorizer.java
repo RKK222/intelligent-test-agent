@@ -19,6 +19,8 @@ import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspace;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.domain.workspace.Workspace;
+import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -39,12 +41,13 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
     private final ManagedWorkspaceRepository managedWorkspaceRepository;
     private final ConfigurationManagementRepository configurationRepository;
     private final AppSourceRepository appSourceRepository;
+    private final WorkspaceRepository workspaceRepository;
     private final Clock clock;
 
     public ManagedConversationWorkspaceAccessAuthorizer(
             ManagedWorkspaceRepository managedWorkspaceRepository,
             ConfigurationManagementRepository configurationRepository) {
-        this(managedWorkspaceRepository, configurationRepository, null, Clock.systemUTC());
+        this(managedWorkspaceRepository, configurationRepository, null, null, Clock.systemUTC());
     }
 
     /** 生产构造器同时接入 generation 专属 app-source Runtime Workspace 反查。 */
@@ -52,8 +55,9 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
     public ManagedConversationWorkspaceAccessAuthorizer(
             ManagedWorkspaceRepository managedWorkspaceRepository,
             ConfigurationManagementRepository configurationRepository,
-            AppSourceRepository appSourceRepository) {
-        this(managedWorkspaceRepository, configurationRepository, appSourceRepository, Clock.systemUTC());
+            AppSourceRepository appSourceRepository,
+            WorkspaceRepository workspaceRepository) {
+        this(managedWorkspaceRepository, configurationRepository, appSourceRepository, workspaceRepository, Clock.systemUTC());
     }
 
     /** 测试构造器允许固定到期判断时间。 */
@@ -62,6 +66,16 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
             ConfigurationManagementRepository configurationRepository,
             AppSourceRepository appSourceRepository,
             Clock clock) {
+        this(managedWorkspaceRepository, configurationRepository, appSourceRepository, null, clock);
+    }
+
+    /** 测试构造器可同时验证 Workspace 行与 replica server 的交叉绑定。 */
+    ManagedConversationWorkspaceAccessAuthorizer(
+            ManagedWorkspaceRepository managedWorkspaceRepository,
+            ConfigurationManagementRepository configurationRepository,
+            AppSourceRepository appSourceRepository,
+            WorkspaceRepository workspaceRepository,
+            Clock clock) {
         this.managedWorkspaceRepository = Objects.requireNonNull(
                 managedWorkspaceRepository,
                 "managedWorkspaceRepository must not be null");
@@ -69,6 +83,7 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
                 configurationRepository,
                 "configurationRepository must not be null");
         this.appSourceRepository = appSourceRepository;
+        this.workspaceRepository = workspaceRepository;
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
@@ -161,6 +176,13 @@ public class ManagedConversationWorkspaceAccessAuthorizer implements Conversatio
         }
         if (replica.status() != AppSourceReplicaStatus.READY) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "应用源码工作区副本未就绪");
+        }
+        if (workspaceRepository != null) {
+            Workspace workspace = workspaceRepository.findById(workspaceId)
+                    .orElseThrow(() -> new PlatformException(ErrorCode.FORBIDDEN, "应用源码工作区记录不存在"));
+            if (!Objects.equals(workspace.linuxServerId(), replica.linuxServerId().value())) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "应用源码工作区服务器绑定不一致");
+            }
         }
         boolean currentGeneration = appSourceRepository.findSlot(replica.repositoryId())
                 .map(slot -> Objects.equals(slot.activeGeneration(), replica.generation()))

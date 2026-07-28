@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationStatus;
+import com.enterprise.testagent.domain.appsource.AppSourceOperationId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.workspace.AppSourceApplicationService;
 import java.net.URI;
@@ -59,16 +60,19 @@ public class AppSourceOperationWebSocketHandler implements WebSocketHandler {
         this.allowedOrigins = Set.copyOf(Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim)
                 .filter(origin -> !origin.isBlank())
+                .map(AppSourceWebSocketOrigin::canonicalize)
                 .toList());
         this.pollInterval = Objects.requireNonNull(pollInterval, "pollInterval must not be null");
     }
 
     @Override
     public Mono<Void> handle(WebSocketSession session) {
-        String operationId = operationId(session.getHandshakeInfo().getUri());
+        String operationId;
         AppSourceOperationTicket ticket;
         try {
-            String origin = session.getHandshakeInfo().getHeaders().getOrigin();
+            operationId = operationId(session.getHandshakeInfo().getUri());
+            String origin = AppSourceWebSocketOrigin.canonicalize(
+                    session.getHandshakeInfo().getHeaders().getOrigin());
             if (!allowedOrigins.contains(origin)) {
                 throw new PlatformException(ErrorCode.FORBIDDEN, "应用源码进度 WebSocket 拒绝连接");
             }
@@ -104,7 +108,7 @@ public class AppSourceOperationWebSocketHandler implements WebSocketHandler {
             UserId userId,
             AppSourceApplicationService.OperationSnapshot initial) {
         if (initial.status().terminal()) {
-            return Flux.just(write(message(terminalType(initial.status()), initial)));
+            return Flux.just(write(terminalMessage(initial)));
         }
         return Flux.defer(() -> Mono.delay(pollInterval)
                         .then(read(ticket.operationId(), userId, ticket.appAdmin())))
@@ -113,9 +117,9 @@ public class AppSourceOperationWebSocketHandler implements WebSocketHandler {
                 .distinctUntilChanged()
                 .skip(1)
                 .takeUntil(snapshot -> snapshot.status().terminal())
-                .map(snapshot -> write(message(
-                        snapshot.status().terminal() ? terminalType(snapshot.status()) : "step",
-                        snapshot)));
+                .map(snapshot -> write(snapshot.status().terminal()
+                        ? terminalMessage(snapshot)
+                        : message("step", snapshot)));
     }
 
     private Mono<AppSourceApplicationService.OperationSnapshot> read(
@@ -128,6 +132,26 @@ public class AppSourceOperationWebSocketHandler implements WebSocketHandler {
 
     private String terminalType(AppSourceOperationStatus status) {
         return status == AppSourceOperationStatus.FAILED ? "failed" : "completed";
+    }
+
+    private Map<String, Object> terminalMessage(
+            AppSourceApplicationService.OperationSnapshot operation) {
+        if (operation.status() != AppSourceOperationStatus.FAILED) {
+            return message(terminalType(operation.status()), operation);
+        }
+        Map<String, Object> failed = message("failed", operation);
+        failed.put("status", AppSourceOperationStatus.FAILED.name());
+        failed.put("errorCode", operation.serverSummaries().stream()
+                .map(AppSourceApplicationService.ServerSummary::safeErrorCode)
+                .filter(value -> value != null && !value.isBlank())
+                .findFirst()
+                .orElse("APP_SOURCE_OPERATION_FAILED"));
+        failed.put("errorMessage", operation.serverSummaries().stream()
+                .map(AppSourceApplicationService.ServerSummary::safeErrorMessage)
+                .filter(value -> value != null && !value.isBlank())
+                .findFirst()
+                .orElse("应用源码操作失败"));
+        return failed;
     }
 
     private Map<String, Object> message(
@@ -187,6 +211,6 @@ public class AppSourceOperationWebSocketHandler implements WebSocketHandler {
         if (start < 0 || end <= start) {
             return "";
         }
-        return path.substring(start + marker.length(), end);
+        return AppSourceOperationId.normalize(path.substring(start + marker.length(), end));
     }
 }

@@ -1228,7 +1228,7 @@ WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSoc
   "operationId": "aso_0123456789abcdef",
   "expectedGeneration": 3,
   "branch": "main",
-  "expectedTreeCommit": "0123456789abcdef",
+  "expectedTreeCommit": "0123456789abcdef0123456789abcdef01234567",
   "selectedPaths": [
     { "path": "src/main", "type": "DIRECTORY" },
     { "path": "pom.xml", "type": "FILE" }
@@ -1239,7 +1239,7 @@ WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSoc
 }
 ```
 
-`operationId` 是调用方生成的稳定幂等标识；`expectedTreeCommit` 防止用户选择目录后远端分支发生漂移。`purpose=PERSONAL` 固定当前用户进程服务器，`purpose=TEAM` 冻结受理时的在线服务器集合。已有 active snapshot 时，只有 owner 或仍是有效应用成员的 `APP_ADMIN` 能替换/重试；`TEAM -> PERSONAL` 拒绝，`PERSONAL -> TEAM` 建立新 generation。个人操作快照只允许 owner，或仍具 `APP_ADMIN` 角色且仍为有效成员的用户读取；团队操作允许当前有效成员读取。
+`operationId` 是调用方生成的稳定幂等标识，trim 后长度为 1–128，不限定 `aso_` 前缀，但禁止控制字符和 `/`、`\\` 路径分隔符；物化、重试、操作查询、ticket 与 WebSocket 使用同一校验。`expectedTreeCommit` 必须是远端解析得到的完整固定提交，防止用户选择目录后远端分支发生漂移。`purpose=PERSONAL` 固定当前用户进程服务器，`purpose=TEAM` 冻结受理时的在线服务器集合。已有 active snapshot 时，只有 owner 或仍是有效应用成员的 `APP_ADMIN` 能替换/重试；`TEAM -> PERSONAL` 拒绝，`PERSONAL -> TEAM` 建立新 generation。个人操作快照只允许 owner，或仍具 `APP_ADMIN` 角色且仍为有效成员的用户读取；团队操作允许当前有效成员读取。
 
 重试请求为 `{ "operationId": "aso_...", "expectedGeneration": 3 }`，打开请求为 `{ "generation": 3 }`。打开成功返回 `appId/repositoryId/generation/purpose/workspaceId/linuxServerId/expiresAt`。物化、重试和操作查询统一返回安全操作快照：
 
@@ -1250,11 +1250,11 @@ WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSoc
   "repositoryId": "repo_code",
   "sourceGeneration": 2,
   "targetGeneration": 3,
-  "operationType": "MATERIALIZE",
+  "operationType": "DOWNLOAD",
   "status": "RUNNING",
   "purpose": "TEAM",
   "branch": "main",
-  "targetCommit": "0123456789abcdef",
+  "targetCommit": "0123456789abcdef0123456789abcdef01234567",
   "selectedPaths": [{ "path": "src", "type": "DIRECTORY" }],
   "expiresAt": "2026-07-29T08:00:00Z",
   "traceId": "trace_...",
@@ -1268,7 +1268,7 @@ WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSoc
       "attemptCount": 1,
       "safeErrorCode": null,
       "safeErrorMessage": null,
-      "targetCommit": "0123456789abcdef",
+      "targetCommit": "0123456789abcdef0123456789abcdef01234567",
       "steps": []
     }
   ]

@@ -2647,15 +2647,22 @@ export type AppSourceOperationTicketResponse = {
   webSocketUrl: string;
 };
 
-export type AppSourceProgressEvent = {
-  type: "snapshot" | "step" | "completed" | "failed";
-  operationId?: string | null;
-  operation?: AppSourceOperation | null;
-  status?: AppSourceOperationStatus;
-  errorCode?: string | null;
-  errorMessage?: string | null;
-  traceId?: string | null;
-};
+export type AppSourceProgressEvent =
+  | {
+      type: "snapshot" | "step" | "completed";
+      operationId: string;
+      operation: AppSourceOperation;
+      traceId: string;
+    }
+  | {
+      type: "failed";
+      operationId?: string | null;
+      operation?: AppSourceOperation | null;
+      status: "FAILED";
+      errorCode: string;
+      errorMessage: string;
+      traceId?: string | null;
+    };
 
 export type AddSshKeyPayload = {
   name: string;

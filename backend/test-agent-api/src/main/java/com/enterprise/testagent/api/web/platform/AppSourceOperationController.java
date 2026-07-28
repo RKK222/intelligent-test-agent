@@ -49,6 +49,10 @@ public class AppSourceOperationController {
         AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
         return RuntimeApiSupport.blockingObjectResponse(
                 exchange,
-                traceId -> tickets.createTicket(principal, operationId, traceId));
+                traceId -> tickets.createTicket(
+                        principal,
+                        operationId,
+                        exchange.getRequest().getHeaders().getOrigin(),
+                        traceId));
     }
 }

@@ -27,6 +27,9 @@ import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceReposito
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.domain.workspace.Workspace;
+import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
+import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import java.time.Instant;
 import java.time.Clock;
 import java.time.ZoneOffset;
@@ -82,6 +85,28 @@ class AppSourceWorkspaceAccessTest {
                         managed, configuration, appSources, Clock.fixed(NOW, ZoneOffset.UTC));
 
         assertThatCode(() -> authorizer.requireAccess(USER_ID, WORKSPACE_ID)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void workspaceServerMismatchWithReplicaFailsTicketAndEveryRpcAuthorization() {
+        ManagedWorkspaceRepository managed = mock(ManagedWorkspaceRepository.class);
+        ConfigurationManagementRepository configuration = mock(ConfigurationManagementRepository.class);
+        AppSourceRepository appSources = mock(AppSourceRepository.class);
+        WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        when(appSources.findReplicaByRuntimeWorkspaceId(WORKSPACE_ID.value())).thenReturn(Optional.of(replica()));
+        when(workspaces.findById(WORKSPACE_ID)).thenReturn(Optional.of(new Workspace(
+                WORKSPACE_ID, "Source", "/source", WorkspaceStatus.ACTIVE,
+                NOW.minusSeconds(60), NOW, "server-b", "trace_workspace")));
+        ManagedConversationWorkspaceAccessAuthorizer authorizer =
+                new ManagedConversationWorkspaceAccessAuthorizer(
+                        managed, configuration, appSources, workspaces, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        // ticket 签发和每个 RPC 都复用该方法，因此错误历史 Workspace 行不能在任一阶段通过。
+        assertThatThrownBy(() -> authorizer.requireFileAccess(USER_ID, WORKSPACE_ID, false))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThatThrownBy(() -> authorizer.requireFileAccess(USER_ID, WORKSPACE_ID, false))
+                .isInstanceOf(PlatformException.class);
     }
 
     @Test

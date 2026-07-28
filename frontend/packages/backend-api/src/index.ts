@@ -1644,19 +1644,23 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       );
       const socket = webSocketFactory(toWebSocketUrl(baseUrl, ticket.webSocketUrl));
       socket.onmessage = (event) => {
+        let parsed: AppSourceProgressEvent;
         try {
-          const parsed = JSON.parse(String(event.data)) as unknown;
-          if (!isAppSourceProgressEvent(parsed)) {
+          const candidate = JSON.parse(String(event.data)) as unknown;
+          if (!isAppSourceProgressEvent(candidate)) {
             throw new Error("invalid app-source progress event");
           }
-          onEvent(parsed);
+          parsed = candidate;
         } catch {
           onEvent(appSourceClientFailure(
             operationId,
             "WEBSOCKET_MESSAGE_INVALID",
             "应用源码进度消息格式无效"
           ));
+          return;
         }
+        // 调用方异常属于业务回调失败，不能被误判为协议消息格式错误并二次回调。
+        onEvent(parsed);
       };
       const connectionFailure = () =>
         onEvent(appSourceClientFailure(
@@ -3022,9 +3026,84 @@ function normalizeFailure(body: unknown, fallbackTraceId: string, status: number
 
 function isAppSourceProgressEvent(value: unknown): value is AppSourceProgressEvent {
   const candidate = record(value);
+  if (candidate === undefined || typeof candidate.type !== "string") {
+    return false;
+  }
+  if (candidate.type === "failed") {
+    return candidate.status === "FAILED"
+      && text(candidate.errorCode) !== undefined
+      && text(candidate.errorMessage) !== undefined
+      && (candidate.operationId === undefined
+        || candidate.operationId === null
+        || text(candidate.operationId) !== undefined)
+      && (candidate.traceId === undefined
+        || candidate.traceId === null
+        || text(candidate.traceId) !== undefined)
+      && (candidate.operation === undefined
+        || candidate.operation === null
+        || isAppSourceOperation(candidate.operation));
+  }
+  if (!["snapshot", "step", "completed"].includes(candidate.type)) {
+    return false;
+  }
+  const operation = isAppSourceOperation(candidate.operation) ? candidate.operation : undefined;
+  return text(candidate.operationId) !== undefined
+    && text(candidate.traceId) !== undefined
+    && operation !== undefined
+    && candidate.operationId === operation.operationId
+    && candidate.traceId === operation.traceId;
+}
+
+function isAppSourceOperation(value: unknown): value is AppSourceOperation {
+  const candidate = record(value);
   return candidate !== undefined
-    && typeof candidate.type === "string"
-    && ["snapshot", "step", "completed", "failed"].includes(candidate.type);
+    && text(candidate.operationId) !== undefined
+    && text(candidate.appId) !== undefined
+    && text(candidate.repositoryId) !== undefined
+    && positiveInteger(candidate.targetGeneration)
+    && text(candidate.operationType) !== undefined
+    && ["PENDING", "RUNNING", "SUCCEEDED", "PARTIAL_FAILED", "FAILED"].includes(String(candidate.status))
+    && text(candidate.traceId) !== undefined
+    && text(candidate.acceptedAt) !== undefined
+    && isArrayOf(candidate.selectedPaths, isAppSourceSelectedPath)
+    && isArrayOf(candidate.globalSteps, isAppSourceStepSummary)
+    && isArrayOf(candidate.serverSummaries, isAppSourceServerSummary);
+}
+
+function isAppSourceSelectedPath(value: unknown) {
+  const candidate = record(value);
+  return candidate !== undefined
+    && text(candidate.path) !== undefined
+    && ["FILE", "DIRECTORY"].includes(String(candidate.type));
+}
+
+function isAppSourceStepSummary(value: unknown) {
+  const candidate = record(value);
+  return candidate !== undefined
+    && text(candidate.stepCode) !== undefined
+    && nonNegativeInteger(candidate.sequence)
+    && text(candidate.status) !== undefined
+    && text(candidate.updatedAt) !== undefined;
+}
+
+function isAppSourceServerSummary(value: unknown) {
+  const candidate = record(value);
+  return candidate !== undefined
+    && text(candidate.linuxServerId) !== undefined
+    && nonNegativeInteger(candidate.attemptCount)
+    && isArrayOf(candidate.steps, isAppSourceStepSummary);
+}
+
+function isArrayOf(value: unknown, predicate: (item: unknown) => boolean) {
+  return Array.isArray(value) && value.every(predicate);
+}
+
+function positiveInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function nonNegativeInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
 function appSourceClientFailure(

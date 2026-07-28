@@ -96,3 +96,42 @@ Mockito/JDK 相关测试统一使用：
 - ticket 保存在签发 JVM 内存中，因此滚动重启会使未消费 ticket 失效；这是短期一次性凭据的安全失败模式，客户端重新申请即可。
 - 高频同时观察大量 operation 会线性增加数据库轮询；当前串行 500ms 且连接由调用方显式关闭，后续若有大规模并发需求应基于持久化版本游标做批量查询，不能改用不可靠的本机内存事件作为事实源。
 - 按 Task 3 协作约束未更新 `.agents/session-log.*.md`；最终汇总任务统一处理会话日志。本次提交前仍会回顾全部近期 session log。
+
+## 独立复审修复（Round 1）
+
+本轮基于 Task 3 初始提交 `936eef86c` 逐项修复独立复审提出的 4 个 Important 和 3 个 Minor 问题。没有修改 OpenCode 快照、generated SDK、数据库结构、MyBatis SQL、Flyway 或 `.env.local`；本节所在提交即本轮修复提交，最终 SHA 由 `git log -1` 确认。
+
+### 四项 Important 证据
+
+1. **ticket 未精确绑定签票 Origin。** 根因是旧 ticket 只判断 upgrade 请求存在 Origin，攻击者从另一白名单 Origin 获取泄露票后仍可消费。现在 HTTP ticket 入口强制读取并 canonicalize `Origin`，ticket 持久绑定 canonical Origin；upgrade 必须同时命中服务白名单和票内精确 Origin。canonical 规则只接受无 userinfo/path/query/fragment 的 `http(s)://host[:port]`，统一 scheme/host 大小写和默认端口。错误或缺失 Origin 返回低敏 `FORBIDDEN`，且错误 Origin 不烧毁正确来源后续要消费的票。RED：`ticketCannotBeConsumedFromAnotherAllowedOrigin` 期望拒绝但旧实现未抛异常；GREEN：`AppSourceWebSocketOriginTest`、ticket store/service/controller/handler Origin 用例全部通过。
+2. **operationId 的业务、REST、ticket 与 WebSocket 规则不一致。** 根因是业务登记只要求非空，而 ticket 单独硬编码 `aso_` 正则，导致业务已接受的 `job_123` 永远无法签票。新增领域值对象 `AppSourceOperationId`，统一 trim、1–128 长度、拒绝控制字符和路径分隔符，但不要求 `aso_` 前缀；领域 operation、物化/重试命令、操作查询、ticket 和 WebSocket path 全部复用。ticket URL 对 ID path segment 显式编码。RED：`materializationAcceptedOperationIdCanAlwaysBeUsedToCreateATicket` 在旧实现得到 `VALIDATION_ERROR`；GREEN：领域 ID 2 项、ticket service 3 项和前端非 `aso_` ID 编码用例通过。
+3. **AppSource 文件 route/ticket/RPC 没有把 replica server 与 generation 当作完整权威。** 根因是 route 仅在 Workspace 与用户进程服务器冲突时禁止回绑；若二者错误地一致、但 replica 指向另一服务器，仍会路由错误。现在 route 先反查 replica，并要求 replica `READY`、slot `activeGeneration == replica.generation`、Workspace 行服务器、用户 agent 服务器与 replica 服务器四者一致；后端仍只通过公共 `BackendJavaRouteResolver` 解析，跨 Java 仍由现有 `BackendHttpForwarder` 转发。authorizer 同时交叉校验 Workspace 行服务器，因此 ticket 签发和每条 RPC 都失败关闭。RED：`rejectsReplicaWhenWorkspaceAndAgentAgreeButReplicaServerDiffers` 旧实现未抛冲突；GREEN：route 9/9、显式 ticket/RPC 错服反例、以及公共 forwarder 用例全部通过。
+4. **JVM 本地 ticket cache 无容量上限，消费也非并发原子。** 根因是无界 `ConcurrentHashMap` 加 `remove`/后置校验，未清理的票可持续增长，且没有明确验证并发唯一消费。现在默认硬上限 10,000，签发前清理过期票；达到上限显式返回 `RATE_LIMITED`，不静默驱逐有效票；`compute` 原子完成匹配与一次消费。RED：过期票未释放容量、10001 张有效票仍可签发、跨 Origin 仍可消费共 3 项失败；GREEN：store 8/8，包括 16 个并发消费者仅 1 个成功、过期回收和容量拒绝。
+
+### 三项 Minor 证据
+
+1. **进度事件类型和运行时校验过宽。** `AppSourceProgressEvent` 改为严格判别联合：`snapshot/step/completed` 必须携带一致的 `operationId/operation/traceId`，`failed` 必须携带 `status=FAILED` 与非空安全错误字段；服务端持久化 `FAILED` 终帧同步补齐这些字段。backend-api 运行时校验 operation、selected paths、steps 和 server summaries，不再只看 `type`。RED：`{"type":"snapshot"}` 与缺错误字段的 failed 帧被旧实现接受；GREEN：两者都归一为 `WEBSOCKET_MESSAGE_INVALID`，服务端 FAILED 终帧测试通过。
+2. **调用方回调异常被误判为协议错误并二次调用。** 根因是 JSON 解析、协议校验和 `onEvent` 位于同一 `try/catch`。现在只捕获解析/校验异常，`onEvent` 在 catch 外调用；调用方异常原样抛出且只调用一次。RED：回调抛错后旧实现调用 2 次；GREEN：`does not reinterpret a caller callback exception as an invalid websocket message` 验证只调用 1 次并抛回原异常。
+3. **稳定 API 文档示例与真实 wire 值不一致。** `docs/api/http-api.md` 将短提交示例改为完整 40 字符固定 commit，将不存在的 `MATERIALIZE` operation type 改为真实 `DOWNLOAD`，并记录统一 operationId 规则；`docs/api/event-stream.md` 补充 Origin 精确绑定、有界缓存和严格事件 envelope。模块 README 同步记录同一约束。
+
+### Round 1 RED / GREEN 与分层验证
+
+- RED 精确复现：Origin 越权 1 failure；业务已接受 ID 无法签票 1 failure；replica 错服 route 1 failure；ticket store 7 项中 3 failures；前端 4 项中不完整 payload、回调二次调用共 2 failures。
+- domain：全量测试通过；新增 `AppSourceOperationIdTest` 2/2。
+- persistence：沙箱外运行 `MyBatisAppSourcePostgresqlIntegrationTest,MyBatisAppSourceRepositoryIntegrationTest`，13/13，通过且 0 skipped。
+- workspace-management：全量 337/337，通过；包含 app-source generation、Workspace/replica server 交叉授权。
+- API：刷新当前 reactor 上游构件后单模块全量 417/417，通过；目标 13 类覆盖 Origin、ticket、FAILED envelope、context、文件 ticket/RPC 与公共 forwarder，全部通过。
+- runtime：`WorkspaceFileRoutingServiceTest` 9/9；`RunRuntimeLossConvergenceSchedulerTest` 隔离 5/5，均通过。
+- context：`AppSourceApiContextTest` 1/1、`AppSourceContextTest` 1/1，通过。
+- frontend：backend-api `app-source.test.ts` 1 file / 4 tests；`@test-agent/backend-api` 与 `@test-agent/shared-types` typecheck，均通过。
+- 完整 `test-agent-api -am` 在两次全链路高负载运行中均只出现既有 `RunRuntimeLossConvergenceSchedulerTest.keepsInMemoryRetryWhenNeitherDatabaseNorRedisAcceptedTerminal` 的 1 秒 Awaitility 时序波动（期望 converge 2、实际 1）；该类隔离 5/5 稳定通过。本轮未修改该调度器，按非任务范围风险保留，不以目标回归掩盖。
+- `git diff --check` 通过；提交前按规范回顾全部 `.agents/session-log*.md`，并仅精确暂存本轮文件。
+
+### Round 1 影响与剩余风险
+
+- **API/事件：** 未新增 URL 或 RunEvent；ticket 请求现在强制要求浏览器 Origin，进度 envelope 收紧为可运行时验证的稳定契约。缺 Origin 的非浏览器调用会由原先签票成功变为安全拒绝，这是有意的安全收紧。
+- **数据库：** 无结构、migration 或 SQL 变化；MyBatis PostgreSQL 集成回归通过。
+- **性能：** ticket 缓存从无界改为最多 10,000 张有效票，过期票在签发/消费时惰性回收；达到容量时返回 429，不驱逐仍有效连接凭据。
+- **安全：** 修复跨白名单 Origin 票据重放，文件 route/ticket/RPC 对 replica server/generation 错配全部失败关闭。
+- **兼容性：** operationId 不再被 ticket 层额外限制为 `aso_`；既有合法 ID 继续可用，包含路径分隔符或控制字符的危险 ID 统一拒绝。严格前端 validator 会把旧式不完整进度帧转换为安全 `failed` 事件。
+- **剩余风险：** 完整 reactor 的既有调度时序测试在高负载下仍可能波动；隔离回归通过，需由 runtime 后续任务单独放宽等待条件或改为确定性同步。本轮按任务边界未修改 `.agents/session-log.*.md`，由最终汇总任务统一更新。
