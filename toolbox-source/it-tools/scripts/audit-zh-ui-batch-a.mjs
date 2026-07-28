@@ -213,17 +213,12 @@ function containingVariableName(node) {
 function isNonVisibleExpressionText(node) {
   const parent = node.parent;
 
-  // 对象键、模块路径和动态 import 参数只参与程序寻址，不是表达式最终展示的文案。
-  if (ts.isObjectLiteralElementLike(parent) && parent.name === node) {
+  // JWT 视图只用确切前缀判断 locale key；禁止按方法名泛化跳过其它调用参数。
+  if (node.text === 'tools.') {
     return true;
   }
+  // 模块路径只参与程序寻址，不是表达式最终展示的文案。
   if ((ts.isImportDeclaration(parent) || ts.isExportDeclaration(parent)) && parent.moduleSpecifier === node) {
-    return true;
-  }
-  if (ts.isCallExpression(parent)
-    && parent.arguments.includes(node)
-    && ts.isPropertyAccessExpression(parent.expression)
-    && ['endsWith', 'includes', 'match', 'search', 'startsWith'].includes(parent.expression.name.text)) {
     return true;
   }
   return ts.isCallExpression(parent) && parent.expression.kind === ts.SyntaxKind.ImportKeyword;

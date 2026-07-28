@@ -151,7 +151,7 @@ describe('Task 2B 中文 UI 审计器', () => {
     expect(result.stderr).toContain('account');
   });
 
-  it('递归可见表达式时忽略对象键、import、稳定错误码和技术词', async () => {
+  it('递归可见表达式时忽略 import、稳定错误码、内部前缀和技术词', async () => {
     const root = await createAuditFixture();
     await writeFixtureSource(root, 'token-generator/non-visible-strings.vue', [
       '<script setup lang="ts">',
@@ -159,7 +159,7 @@ describe('Task 2B 中文 UI 审计器', () => {
       'const status = \'INVALID_BINARY_STRING\';',
       '</script>',
       '<template>',
-      '  <c-button :tooltip="status.startsWith(\'tools.\') ? formatter({ \'Delete account\': status }) : `PDF $' + '{name}`" />',
+      '  <c-button :tooltip="status.startsWith(\'tools.\') ? formatter({ internal_key: status }) : `PDF $' + '{name}`" />',
       '</template>',
       '',
     ].join('\n'));
@@ -168,6 +168,48 @@ describe('Task 2B 中文 UI 审计器', () => {
 
     expect(result.status).toBe(0);
     expect(result.stderr).toBe('');
+  });
+
+  it('检查通过 Object.keys 返回并展示的英文对象键', async () => {
+    const root = await createAuditFixture();
+    await writeFixtureSource(root, 'token-generator/visible-object-key.vue', `
+<template>
+  <span>{{ Object.keys({ 'Delete account': true })[0] }}</span>
+</template>
+`);
+
+    const result = runAudit(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Delete account');
+  });
+
+  it('检查可返回参数的自定义 includes 调用中的英文', async () => {
+    const root = await createAuditFixture();
+    await writeFixtureSource(root, 'token-generator/custom-includes.vue', `
+<template>
+  <span>{{ custom.includes('Unknown status') }}</span>
+</template>
+`);
+
+    const result = runAudit(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Unknown status');
+  });
+
+  it('检查可返回匹配文本的标准 match 调用中的英文', async () => {
+    const root = await createAuditFixture();
+    await writeFixtureSource(root, 'token-generator/standard-match.vue', `
+<template>
+  <span>{{ value.match('Visible match')[0] }}</span>
+</template>
+`);
+
+    const result = runAudit(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Visible match');
   });
 
   it('拒绝任意全大写英文和拆开的精确技术短语，同时保留明确技术名词', async () => {
