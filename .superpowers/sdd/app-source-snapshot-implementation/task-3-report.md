@@ -135,3 +135,34 @@ Mockito/JDK 相关测试统一使用：
 - **安全：** 修复跨白名单 Origin 票据重放，文件 route/ticket/RPC 对 replica server/generation 错配全部失败关闭。
 - **兼容性：** operationId 不再被 ticket 层额外限制为 `aso_`；既有合法 ID 继续可用，包含路径分隔符或控制字符的危险 ID 统一拒绝。严格前端 validator 会把旧式不完整进度帧转换为安全 `failed` 事件。
 - **剩余风险：** 完整 reactor 的既有调度时序测试在高负载下仍可能波动；隔离回归通过，需由 runtime 后续任务单独放宽等待条件或改为确定性同步。本轮按任务边界未修改 `.agents/session-log.*.md`，由最终汇总任务统一更新。
+
+## 独立复审修复（Round 2）
+
+本轮基于 Round 1 提交 `0d126ccfb` 修复复审追加的 2 个 Important 和 1 个 Minor 问题。没有修改 OpenCode 快照、generated SDK、数据库结构、SQL、Flyway 或 `.env.local`；本节所在提交即 Round 2 修复提交。
+
+### 两项 Important 证据
+
+1. **operationId 仍允许精确点路径段。** `AppSourceOperationId` 现在统一拒绝 trim 后精确的 `.` 和 `..`，但保留普通内部双点 `release..1`；物化、重试、REST 查询、ticket、WebSocket 路径和前端 client 共享等价边界。前端在任何 fetch 或 socket 创建前先完成校验，后端 ticket 测试同时证明业务可接受的 `release..1` 能签票。RED：领域 `AppSourceOperationIdTest` 2 项中 1 failure；临时 mutation 验证物化/重试测试 20 项中 1 failure；前端精确点路径用例旧实现仍发起请求。GREEN：domain/workspace 全量、API ticket 和 backend-api 连接用例均通过。
+2. **文件 WebSocket 只在建连/签票时固定用户服务器归属。** 在既有 `WorkspaceFileSocketTicketService` 增加每 RPC 动态授权，复用 `UserOpencodeProcessAssignmentService.fileRoutingAffinity`、`WorkspaceApplicationService.currentLinuxServerId()/requireWorkspaceOnCurrentServer` 和 `ConversationWorkspaceAccessAuthorizer`。每条 `workspace.*` RPC 都要求实时 affinity、ticket 目标/agent 服务器、Workspace/托管副本服务器和当前 JVM 完全一致；不扫描 Redis、不新增路由器、不做本机降级。RED：同一 socket 首次在 server-b 成功后把 assignment 改到 server-c，旧实现第二次仍返回 result；当前 JVM 与 ticket server 不一致时旧实现仍调用文件服务，`WorkspaceFileWebSocketHandlerTest` 25 项共 2 failures。GREEN：两项都返回 `FORBIDDEN`，前者文件服务仅调用 1 次、后者 0 次；ticket/handler/context 定向 34/34 通过。
+
+### 一项 Minor 证据
+
+1. **前端进度事件只校验结构、未校验事件语义和可选字段类型。** `AppSourceProgressEvent` 拆成严格状态判别联合：`snapshot` 可携带任一合法状态，`step` 只允许 `PENDING/RUNNING`，`completed` 只允许 `SUCCEEDED/PARTIAL_FAILED`，持久化 `failed` 的内外状态都必须是 `FAILED`。运行时 validator 还要求所有携带 operation 的 envelope 外内 `operationId/traceId` 一致，optional operation/step/server 字段存在时类型正确，`errorCode/errorMessage` trim 后非空；不含 operation 的连接失败仍允许合法可选 ID/trace。RED：旧 validator 接受状态错配、failed 身份错配、optional 数值/字符串错型和空白错误文本等 10 个 malformed frame，新增 7 项 Vitest 中 2 项失败。GREEN：所有 malformed frame 都归一为单次 `WEBSOCKET_MESSAGE_INVALID`，snapshot FAILED、step PENDING、completed PARTIAL_FAILED 和后端实际持久化 failed 帧继续通过，前端 7/7 与两个类型检查通过。
+
+### Round 2 分层验证
+
+- domain：全量 93/93，通过；精确 `.`/`..` 拒绝且 `release..1` 接受。
+- workspace-management：全量 338/338，通过；物化与重试命令复用同一 operationId 规则。
+- API：`WorkspaceFileSocketTicketServiceTest` 8/8、`WorkspaceFileWebSocketHandlerTest` 25/25、`AppSourceApiContextTest` 1/1、`AppSourceOperationTicketServiceTest` 3/3、`AppSourceOperationWebSocketHandlerTest` 6/6，共 43/43，通过；后端真实持久化 `FAILED` 终帧保持完整 operation/trace 与安全错误字段。
+- runtime：`WorkspaceFileRoutingServiceTest` 9/9，通过。
+- frontend：`app-source.test.ts` 1 file / 7 tests；`@test-agent/backend-api` 与 `@test-agent/shared-types` typecheck，均通过。
+- 完整 `test-agent-api -am` 未重复执行；Round 1 已记录与本轮无关的 `RunRuntimeLossConvergenceSchedulerTest` 1 秒 Awaitility 既有波动，本轮用 file ticket/RPC/context 和 runtime route 定向回归验证改动边界。
+- `git diff --check` 在提交前执行；提交前按规范回顾全部 `.agents/session-log*.md` 并精确暂存 Round 2 文件。
+
+### Round 2 影响与剩余风险
+
+- **API/事件：** 未新增 URL 或 RunEvent；operationId 新增精确点段拒绝，独立进度 WebSocket 的前端静态类型和运行时语义同步收紧。
+- **数据库/性能：** 无数据库、migration、SQL 或新轮询变化；文件 WebSocket 每条 workspace RPC 增加一次现有轻量 affinity 读取和既有 workspace/成员/副本复核，以换取连接后迁移立即失效。
+- **安全：** 旧 socket 不再保留签票时服务器归属；binding 迁移、错误 JVM、Workspace/副本错服均在调用文件服务前失败关闭。
+- **兼容性：** 仅 trim 后精确 `.`/`..` 从历史可接受变为拒绝；普通合法 ID（包括 `release..1`）继续可查询、签票和连接。旧式语义错配或 optional 字段错型的进度帧会被客户端转换为安全失败。
+- **剩余风险：** 无本轮新增未完成事项。按 Task 3 协作约束不修改 `.agents/session-log.*.md`，由最终汇总任务统一更新。

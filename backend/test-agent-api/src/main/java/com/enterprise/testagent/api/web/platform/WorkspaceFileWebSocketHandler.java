@@ -6,7 +6,6 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
-import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.observability.TraceConstants;
 import com.enterprise.testagent.observability.TraceIdSupport;
 import com.enterprise.testagent.workspace.AgentConfigApplicationService;
@@ -56,7 +55,6 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
     private final AgentConfigApplicationService agentConfigService;
     private final AgentSkillHubApplicationService agentSkillHubService;
     private final WorkspaceViewApplicationService workspaceViewService;
-    private final ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer;
     private final ObjectMapper objectMapper;
     private final Set<String> allowedOrigins;
 
@@ -71,7 +69,6 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
             AgentConfigApplicationService agentConfigService,
             AgentSkillHubApplicationService agentSkillHubService,
             WorkspaceViewApplicationService workspaceViewService,
-            ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer,
             ObjectMapper objectMapper,
             @Value("${test-agent.security.cors-allowed-origins:http://localhost:3000,http://127.0.0.1:3000,http://localhost:4173,http://127.0.0.1:4173,http://localhost:4177,http://127.0.0.1:4177,http://localhost:4187,http://127.0.0.1:4187,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}")
             String allowedOrigins) {
@@ -81,9 +78,6 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         this.agentConfigService = Objects.requireNonNull(agentConfigService, "agentConfigService must not be null");
         this.agentSkillHubService = Objects.requireNonNull(agentSkillHubService, "agentSkillHubService must not be null");
         this.workspaceViewService = Objects.requireNonNull(workspaceViewService, "workspaceViewService must not be null");
-        this.workspaceAccessAuthorizer = Objects.requireNonNull(
-                workspaceAccessAuthorizer,
-                "workspaceAccessAuthorizer must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.allowedOrigins = Set.copyOf(Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim)
@@ -105,7 +99,6 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         this.agentConfigService = Objects.requireNonNull(agentConfigService, "agentConfigService must not be null");
         this.agentSkillHubService = null;
         this.workspaceViewService = null;
-        this.workspaceAccessAuthorizer = (userId, workspaceId) -> { };
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.allowedOrigins = Set.copyOf(Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim)
@@ -120,7 +113,6 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
             WorkspaceDirectoryService directoryService,
             AgentConfigApplicationService agentConfigService,
             WorkspaceViewApplicationService workspaceViewService,
-            ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer,
             ObjectMapper objectMapper,
             String allowedOrigins) {
         this.ticketService = Objects.requireNonNull(ticketService, "ticketService must not be null");
@@ -129,8 +121,6 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         this.agentConfigService = Objects.requireNonNull(agentConfigService, "agentConfigService must not be null");
         this.agentSkillHubService = null;
         this.workspaceViewService = Objects.requireNonNull(workspaceViewService, "workspaceViewService must not be null");
-        this.workspaceAccessAuthorizer = Objects.requireNonNull(
-                workspaceAccessAuthorizer, "workspaceAccessAuthorizer must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.allowedOrigins = Set.copyOf(Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim)
@@ -402,13 +392,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
 
     private void authorizeWorkspaceRpc(WorkspaceFileSocketTicket ticket, JsonNode params) {
         WorkspaceId workspaceId = workspaceId(ticket, params);
-        if (ticket.userId() == null || ticket.userId().isBlank()) {
-            throw new PlatformException(ErrorCode.FORBIDDEN, "工作区文件 ticket 缺少用户身份");
-        }
-        workspaceAccessAuthorizer.requireFileAccess(
-                new com.enterprise.testagent.domain.user.UserId(ticket.userId()),
-                workspaceId,
-                ticket.superAdmin());
+        ticketService.authorizeWorkspaceRpc(ticket, workspaceId);
     }
 
     private WorkspaceViewLocator viewLocator(JsonNode params) {

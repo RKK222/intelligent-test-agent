@@ -2,10 +2,12 @@ package com.enterprise.testagent.api.web.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.workspace.FileContentResponse;
 import com.enterprise.testagent.workspace.FilePreviewChunkResponse;
 import com.enterprise.testagent.workspace.WorkspaceApplicationService;
@@ -19,28 +21,23 @@ import com.enterprise.testagent.workspace.WorkspaceViewLocator;
 import com.enterprise.testagent.workspace.WorkspaceViewLocatorKind;
 import com.enterprise.testagent.workspace.WorkspaceViewReadResponse;
 import com.enterprise.testagent.workspace.WorkspaceViewSource;
-import com.enterprise.testagent.workspace.ManagedConversationWorkspaceAccessAuthorizer;
-import com.enterprise.testagent.domain.appsource.AppSourceReplica;
-import com.enterprise.testagent.domain.appsource.AppSourceReplicaStatus;
-import com.enterprise.testagent.domain.appsource.AppSourceRepository;
-import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
-import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
-import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
+import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
-import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
-import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
-import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
+import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
+import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessFileRoutingAffinity;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.Principal;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -583,7 +580,6 @@ class WorkspaceFileWebSocketHandlerTest {
         WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
         WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
         WorkspaceViewApplicationService viewService = Mockito.mock(WorkspaceViewApplicationService.class);
-        ConversationWorkspaceAccessAuthorizer authorizer = Mockito.mock(ConversationWorkspaceAccessAuthorizer.class);
         when(ticketService.consume("wft_workspace", "http://localhost:3000"))
                 .thenReturn(workspaceTicket("wrk_1234567890abcdef"));
         WorkspaceViewLocator root = WorkspaceViewLocator.root();
@@ -610,7 +606,6 @@ class WorkspaceFileWebSocketHandlerTest {
                 Mockito.mock(WorkspaceDirectoryService.class),
                 Mockito.mock(AgentConfigApplicationService.class),
                 viewService,
-                authorizer,
                 new ObjectMapper().findAndRegisterModules(),
                 "http://localhost:3000");
         FakeWebSocketSession session = FakeWebSocketSession.allowed(
@@ -629,10 +624,9 @@ class WorkspaceFileWebSocketHandlerTest {
             assertThat(message).contains("\"id\":\"view_docs\"");
             assertThat(message).contains("\"source\":\"MIXED\"");
         });
-        verify(authorizer).requireFileAccess(
-                new UserId("usr_1234567890abcdef"),
-                new WorkspaceId("wrk_1234567890abcdef"),
-                false);
+        verify(ticketService).authorizeWorkspaceRpc(
+                workspaceTicket("wrk_1234567890abcdef"),
+                new WorkspaceId("wrk_1234567890abcdef"));
         verify(viewService).list(new WorkspaceId("wrk_1234567890abcdef"), root);
     }
 
@@ -640,7 +634,6 @@ class WorkspaceFileWebSocketHandlerTest {
     void readsReferenceFileThroughLogicalLocator() {
         WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
         WorkspaceViewApplicationService viewService = Mockito.mock(WorkspaceViewApplicationService.class);
-        ConversationWorkspaceAccessAuthorizer authorizer = Mockito.mock(ConversationWorkspaceAccessAuthorizer.class);
         WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
         WorkspaceViewLocator locator = new WorkspaceViewLocator(
                 WorkspaceViewLocatorKind.REFERENCE,
@@ -662,7 +655,6 @@ class WorkspaceFileWebSocketHandlerTest {
                 Mockito.mock(WorkspaceDirectoryService.class),
                 Mockito.mock(AgentConfigApplicationService.class),
                 viewService,
-                authorizer,
                 new ObjectMapper().findAndRegisterModules(),
                 "http://localhost:3000");
         FakeWebSocketSession session = FakeWebSocketSession.allowed(
@@ -681,7 +673,7 @@ class WorkspaceFileWebSocketHandlerTest {
             assertThat(message).contains("\"content\":\"reference-content\"");
             assertThat(message).doesNotContain("physicalPath", "rootPath", "repositoryId");
         });
-        verify(authorizer).requireFileAccess(new UserId("usr_1234567890abcdef"), workspaceId, false);
+        verify(ticketService).authorizeWorkspaceRpc(workspaceTicket(workspaceId.value()), workspaceId);
         verify(viewService).read(workspaceId, locator);
     }
 
@@ -690,25 +682,23 @@ class WorkspaceFileWebSocketHandlerTest {
         WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
         WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
         WorkspaceViewApplicationService viewService = Mockito.mock(WorkspaceViewApplicationService.class);
-        ConversationWorkspaceAccessAuthorizer authorizer = Mockito.mock(ConversationWorkspaceAccessAuthorizer.class);
         WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
-        UserId userId = new UserId("usr_1234567890abcdef");
+        WorkspaceFileSocketTicket ticket = workspaceTicket(workspaceId.value());
         when(ticketService.consume("wft_workspace", "http://localhost:3000"))
-                .thenReturn(workspaceTicket(workspaceId.value()));
+                .thenReturn(ticket);
         when(workspaceService.listFiles(workspaceId, "")).thenReturn(List.of());
         Mockito.doNothing()
                 .doThrow(new com.enterprise.testagent.common.error.PlatformException(
                         com.enterprise.testagent.common.error.ErrorCode.FORBIDDEN,
                         "成员关系已失效"))
-                .when(authorizer)
-                .requireFileAccess(userId, workspaceId, false);
+                .when(ticketService)
+                .authorizeWorkspaceRpc(ticket, workspaceId);
         WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
                 ticketService,
                 workspaceService,
                 Mockito.mock(WorkspaceDirectoryService.class),
                 Mockito.mock(AgentConfigApplicationService.class),
                 viewService,
-                authorizer,
                 new ObjectMapper().findAndRegisterModules(),
                 "http://localhost:3000");
         FakeWebSocketSession session = FakeWebSocketSession.allowed(
@@ -735,22 +725,108 @@ class WorkspaceFileWebSocketHandlerTest {
         WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
         WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
         WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
+        WorkspaceFileSocketTicket ticket = new WorkspaceFileSocketTicket(
+                "wft_workspace", workspaceId.value(), "server-b", "server-b",
+                false, false, "usr_1234567890abcdef", "workspace",
+                null, null, TRACE_ID, NOW.plusSeconds(60));
         when(ticketService.consume("wft_workspace", "http://localhost:3000"))
-                .thenReturn(new WorkspaceFileSocketTicket(
-                        "wft_workspace", workspaceId.value(), "server-b", "server-b",
-                        false, false, "usr_1234567890abcdef", "workspace",
-                        null, null, TRACE_ID, NOW.plusSeconds(60)));
+                .thenReturn(ticket);
+        Mockito.doThrow(new com.enterprise.testagent.common.error.PlatformException(
+                        com.enterprise.testagent.common.error.ErrorCode.FORBIDDEN,
+                        "应用源码工作区服务器绑定不一致"))
+                .when(ticketService)
+                .authorizeWorkspaceRpc(ticket, workspaceId);
         WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
                 ticketService,
                 workspaceService,
                 Mockito.mock(WorkspaceDirectoryService.class),
                 Mockito.mock(AgentConfigApplicationService.class),
                 Mockito.mock(WorkspaceViewApplicationService.class),
-                mismatchedReplicaAuthorizer(workspaceId, "server-b", "server-a"),
                 new ObjectMapper().findAndRegisterModules(),
                 "http://localhost:3000");
         FakeWebSocketSession session = FakeWebSocketSession.allowed(
                 "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace",
+                List.of("""
+                        {"id":"req_1","op":"workspace.list","params":{"workspaceId":"wrk_1234567890abcdef","path":""}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).singleElement().satisfies(message ->
+                assertThat(message).contains("\"type\":\"error\"", "\"code\":\"FORBIDDEN\""));
+        verify(workspaceService, never()).listFiles(workspaceId, "");
+    }
+
+    @Test
+    void sameSocketRejectsNextWorkspaceRpcAfterAgentBindingMovesToAnotherServer() {
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        ConversationWorkspaceAccessAuthorizer authorizer = Mockito.mock(ConversationWorkspaceAccessAuthorizer.class);
+        WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
+        WorkspaceFileSocketTicketService ticketService = realWorkspaceTicketService(
+                workspaceService, assignmentService, authorizer);
+        when(workspaceService.currentLinuxServerId()).thenReturn("server-b");
+        when(workspaceService.listFiles(workspaceId, "")).thenReturn(List.of());
+        when(assignmentService.fileRoutingAffinity(
+                new UserId("usr_1234567890abcdef"), "opencode", TRACE_ID))
+                .thenReturn(
+                        readyAffinity("server-b"),
+                        readyAffinity("server-b"),
+                        readyAffinity("server-c"));
+        ticketService.createTicket(
+                workspacePrincipal(),
+                new WorkspaceFileSocketDtos.TicketRequest(workspaceId.value(), "server-b", "workspace"),
+                TRACE_ID);
+        WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_dynamic",
+                List.of(
+                        """
+                        {"id":"req_1","op":"workspace.list","params":{"workspaceId":"wrk_1234567890abcdef","path":""}}
+                        """,
+                        """
+                        {"id":"req_2","op":"workspace.list","params":{"workspaceId":"wrk_1234567890abcdef","path":""}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).hasSize(2);
+        assertThat(session.sentText().get(0)).contains("\"type\":\"result\"");
+        assertThat(session.sentText().get(1)).contains("\"type\":\"error\"", "\"code\":\"FORBIDDEN\"");
+        verify(workspaceService, times(1)).listFiles(workspaceId, "");
+    }
+
+    @Test
+    void rejectsWorkspaceRpcWhenTicketServerNoLongerMatchesCurrentJvm() {
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        ConversationWorkspaceAccessAuthorizer authorizer = Mockito.mock(ConversationWorkspaceAccessAuthorizer.class);
+        WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
+        WorkspaceFileSocketTicketService ticketService = realWorkspaceTicketService(
+                workspaceService, assignmentService, authorizer);
+        when(workspaceService.currentLinuxServerId()).thenReturn("server-b", "server-c");
+        when(assignmentService.fileRoutingAffinity(
+                new UserId("usr_1234567890abcdef"), "opencode", TRACE_ID))
+                .thenReturn(readyAffinity("server-b"));
+        ticketService.createTicket(
+                workspacePrincipal(),
+                new WorkspaceFileSocketDtos.TicketRequest(workspaceId.value(), "server-b", "workspace"),
+                TRACE_ID);
+        WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_dynamic",
                 List.of("""
                         {"id":"req_1","op":"workspace.list","params":{"workspaceId":"wrk_1234567890abcdef","path":""}}
                         """));
@@ -774,7 +850,6 @@ class WorkspaceFileWebSocketHandlerTest {
                 Mockito.mock(WorkspaceDirectoryService.class),
                 Mockito.mock(AgentConfigApplicationService.class),
                 viewService,
-                Mockito.mock(ConversationWorkspaceAccessAuthorizer.class),
                 new ObjectMapper().findAndRegisterModules(),
                 "http://localhost:3000");
         FakeWebSocketSession session = FakeWebSocketSession.allowed(
@@ -805,6 +880,42 @@ class WorkspaceFileWebSocketHandlerTest {
                 agentConfigService,
                 new ObjectMapper().findAndRegisterModules(),
                 "http://localhost:3000");
+    }
+
+    private static WorkspaceFileSocketTicketService realWorkspaceTicketService(
+            WorkspaceApplicationService workspaceService,
+            UserOpencodeProcessAssignmentService assignmentService,
+            ConversationWorkspaceAccessAuthorizer authorizer) {
+        return new WorkspaceFileSocketTicketService(
+                workspaceService,
+                assignmentService,
+                new WorkspaceFileSocketTicketStore(
+                        Clock.fixed(NOW, ZoneOffset.UTC), () -> "wft_dynamic"),
+                authorizer);
+    }
+
+    private static UserOpencodeProcessFileRoutingAffinity readyAffinity(String linuxServerId) {
+        return new UserOpencodeProcessFileRoutingAffinity(
+                UserOpencodeProcessAvailability.READY,
+                false,
+                "ready",
+                "ocp_1234567890abcdef",
+                linuxServerId,
+                "ctr_01",
+                4096,
+                linuxServerId + ":4096",
+                NOW);
+    }
+
+    private static AuthPrincipal workspacePrincipal() {
+        return new AuthPrincipal(
+                "token_123",
+                new UserId("usr_1234567890abcdef"),
+                "tester",
+                "tester",
+                List.of(Dictionary.ROLE_USER),
+                NOW,
+                NOW.plusSeconds(3600));
     }
 
     private static String uploadId(String response) {
@@ -849,27 +960,6 @@ class WorkspaceFileWebSocketHandlerTest {
                 null,
                 TRACE_ID,
                 NOW.plusSeconds(60));
-    }
-
-    private static ConversationWorkspaceAccessAuthorizer mismatchedReplicaAuthorizer(
-            WorkspaceId workspaceId,
-            String workspaceServer,
-            String replicaServer) {
-        ManagedWorkspaceRepository managed = Mockito.mock(ManagedWorkspaceRepository.class);
-        ConfigurationManagementRepository configuration = Mockito.mock(ConfigurationManagementRepository.class);
-        AppSourceRepository appSources = Mockito.mock(AppSourceRepository.class);
-        WorkspaceRepository workspaces = Mockito.mock(WorkspaceRepository.class);
-        CodeRepositoryId repositoryId = new CodeRepositoryId("repo_source");
-        when(appSources.findReplicaByRuntimeWorkspaceId(workspaceId.value())).thenReturn(Optional.of(
-                new AppSourceReplica(
-                        repositoryId, 1L, new LinuxServerId(replicaServer), workspaceId,
-                        AppSourceReplicaStatus.READY, null, null, 1, null, null, null,
-                        NOW.minusSeconds(60), NOW)));
-        when(workspaces.findById(workspaceId)).thenReturn(Optional.of(new Workspace(
-                workspaceId, "Source", "/source", WorkspaceStatus.ACTIVE,
-                NOW.minusSeconds(60), NOW, workspaceServer, TRACE_ID)));
-        return new ManagedConversationWorkspaceAccessAuthorizer(
-                managed, configuration, appSources, workspaces);
     }
 
     private static WorkspaceFileSocketTicket workspaceAgentTicket(boolean appAdmin) {

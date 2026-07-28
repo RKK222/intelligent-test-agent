@@ -1624,11 +1624,11 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       routedRequest<AppSourceOpenResult | null>(`${workspaceManagementBase}/recent-app-source`),
     clearRecentAppSource: () =>
       routedRequest<void>(`${workspaceManagementBase}/recent-app-source`, { method: "DELETE" }),
-    getAppSourceOperation: (operationId: string) =>
-      request<AppSourceOperation>(`${appSourceOperationBase}/${encodeURIComponent(operationId)}`),
-    createAppSourceOperationTicket: (operationId: string) =>
+    getAppSourceOperation: async (operationId: string) =>
+      request<AppSourceOperation>(`${appSourceOperationBase}/${appSourceOperationPathSegment(operationId)}`),
+    createAppSourceOperationTicket: async (operationId: string) =>
       request<AppSourceOperationTicketResponse>(
-        `${appSourceOperationBase}/${encodeURIComponent(operationId)}/ticket`,
+        `${appSourceOperationBase}/${appSourceOperationPathSegment(operationId)}/ticket`,
         { method: "POST" }
       ),
     /**
@@ -1638,8 +1638,9 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       operationId: string,
       onEvent: AppSourceProgressHandler
     ): Promise<AppSourceProgressConnection> => {
+      const normalizedOperationId = normalizeAppSourceOperationId(operationId);
       const ticket = await request<AppSourceOperationTicketResponse>(
-        `${appSourceOperationBase}/${encodeURIComponent(operationId)}/ticket`,
+        `${appSourceOperationBase}/${encodeURIComponent(normalizedOperationId)}/ticket`,
         { method: "POST" }
       );
       const socket = webSocketFactory(toWebSocketUrl(baseUrl, ticket.webSocketUrl));
@@ -1653,7 +1654,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
           parsed = candidate;
         } catch {
           onEvent(appSourceClientFailure(
-            operationId,
+            normalizedOperationId,
             "WEBSOCKET_MESSAGE_INVALID",
             "应用源码进度消息格式无效"
           ));
@@ -1664,7 +1665,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       };
       const connectionFailure = () =>
         onEvent(appSourceClientFailure(
-          operationId,
+          normalizedOperationId,
           "WEBSOCKET_ERROR",
           "应用源码进度连接失败"
         ));
@@ -3030,41 +3031,64 @@ function isAppSourceProgressEvent(value: unknown): value is AppSourceProgressEve
     return false;
   }
   if (candidate.type === "failed") {
-    return candidate.status === "FAILED"
-      && text(candidate.errorCode) !== undefined
-      && text(candidate.errorMessage) !== undefined
-      && (candidate.operationId === undefined
-        || candidate.operationId === null
-        || text(candidate.operationId) !== undefined)
-      && (candidate.traceId === undefined
-        || candidate.traceId === null
-        || text(candidate.traceId) !== undefined)
-      && (candidate.operation === undefined
-        || candidate.operation === null
-        || isAppSourceOperation(candidate.operation));
+    if (candidate.status !== "FAILED"
+      || nonBlankText(candidate.errorCode) === undefined
+      || nonBlankText(candidate.errorMessage) === undefined) {
+      return false;
+    }
+    if (candidate.operation === undefined || candidate.operation === null) {
+      return isOptionalNonBlankText(candidate.operationId)
+        && isOptionalNonBlankText(candidate.traceId);
+    }
+    const operation = isAppSourceOperation(candidate.operation) ? candidate.operation : undefined;
+    return operation !== undefined
+      && operation.status === "FAILED"
+      && nonBlankText(candidate.operationId) !== undefined
+      && nonBlankText(candidate.traceId) !== undefined
+      && candidate.operationId === operation.operationId
+      && candidate.traceId === operation.traceId;
   }
   if (!["snapshot", "step", "completed"].includes(candidate.type)) {
     return false;
   }
   const operation = isAppSourceOperation(candidate.operation) ? candidate.operation : undefined;
-  return text(candidate.operationId) !== undefined
-    && text(candidate.traceId) !== undefined
-    && operation !== undefined
-    && candidate.operationId === operation.operationId
-    && candidate.traceId === operation.traceId;
+  if (nonBlankText(candidate.operationId) === undefined
+    || nonBlankText(candidate.traceId) === undefined
+    || operation === undefined
+    || candidate.operationId !== operation.operationId
+    || candidate.traceId !== operation.traceId) {
+    return false;
+  }
+  if (candidate.type === "step") {
+    return operation.status === "PENDING" || operation.status === "RUNNING";
+  }
+  if (candidate.type === "completed") {
+    return operation.status === "SUCCEEDED" || operation.status === "PARTIAL_FAILED";
+  }
+  return true;
 }
 
 function isAppSourceOperation(value: unknown): value is AppSourceOperation {
   const candidate = record(value);
   return candidate !== undefined
-    && text(candidate.operationId) !== undefined
-    && text(candidate.appId) !== undefined
-    && text(candidate.repositoryId) !== undefined
+    && nonBlankText(candidate.operationId) !== undefined
+    && nonBlankText(candidate.appId) !== undefined
+    && nonBlankText(candidate.repositoryId) !== undefined
+    && (candidate.sourceGeneration === undefined
+      || candidate.sourceGeneration === null
+      || positiveInteger(candidate.sourceGeneration))
     && positiveInteger(candidate.targetGeneration)
-    && text(candidate.operationType) !== undefined
+    && nonBlankText(candidate.operationType) !== undefined
     && ["PENDING", "RUNNING", "SUCCEEDED", "PARTIAL_FAILED", "FAILED"].includes(String(candidate.status))
-    && text(candidate.traceId) !== undefined
-    && text(candidate.acceptedAt) !== undefined
+    && (candidate.purpose === undefined
+      || candidate.purpose === null
+      || ["TEAM", "PERSONAL"].includes(String(candidate.purpose)))
+    && isOptionalNonBlankText(candidate.branch)
+    && isOptionalNonBlankText(candidate.targetCommit)
+    && isOptionalNonBlankText(candidate.expiresAt)
+    && nonBlankText(candidate.traceId) !== undefined
+    && nonBlankText(candidate.acceptedAt) !== undefined
+    && isOptionalNonBlankText(candidate.completedAt)
     && isArrayOf(candidate.selectedPaths, isAppSourceSelectedPath)
     && isArrayOf(candidate.globalSteps, isAppSourceStepSummary)
     && isArrayOf(candidate.serverSummaries, isAppSourceServerSummary);
@@ -3073,24 +3097,34 @@ function isAppSourceOperation(value: unknown): value is AppSourceOperation {
 function isAppSourceSelectedPath(value: unknown) {
   const candidate = record(value);
   return candidate !== undefined
-    && text(candidate.path) !== undefined
+    && nonBlankText(candidate.path) !== undefined
     && ["FILE", "DIRECTORY"].includes(String(candidate.type));
 }
 
 function isAppSourceStepSummary(value: unknown) {
   const candidate = record(value);
   return candidate !== undefined
-    && text(candidate.stepCode) !== undefined
+    && nonBlankText(candidate.stepCode) !== undefined
     && nonNegativeInteger(candidate.sequence)
-    && text(candidate.status) !== undefined
-    && text(candidate.updatedAt) !== undefined;
+    && nonBlankText(candidate.status) !== undefined
+    && isOptionalNonBlankText(candidate.safeSummary)
+    && isOptionalNonBlankText(candidate.startedAt)
+    && isOptionalNonBlankText(candidate.completedAt)
+    && (candidate.elapsedMillis === undefined
+      || candidate.elapsedMillis === null
+      || nonNegativeInteger(candidate.elapsedMillis))
+    && nonBlankText(candidate.updatedAt) !== undefined;
 }
 
 function isAppSourceServerSummary(value: unknown) {
   const candidate = record(value);
   return candidate !== undefined
-    && text(candidate.linuxServerId) !== undefined
+    && nonBlankText(candidate.linuxServerId) !== undefined
+    && isOptionalNonBlankText(candidate.replicaStatus)
     && nonNegativeInteger(candidate.attemptCount)
+    && isOptionalNonBlankText(candidate.safeErrorCode)
+    && isOptionalNonBlankText(candidate.safeErrorMessage)
+    && isOptionalNonBlankText(candidate.targetCommit)
     && isArrayOf(candidate.steps, isAppSourceStepSummary);
 }
 
@@ -3120,6 +3154,23 @@ function appSourceClientFailure(
   };
 }
 
+/** operationId 同时作为 REST/WS 路径段，必须与后端值对象保持同一套边界。 */
+function normalizeAppSourceOperationId(operationId: string) {
+  const normalized = operationId.trim();
+  if (normalized.length === 0
+    || normalized.length > 128
+    || normalized === "."
+    || normalized === ".."
+    || /[\u0000-\u001f\u007f-\u009f/\\]/u.test(normalized)) {
+    throw new Error("operationId 格式无效");
+  }
+  return normalized;
+}
+
+function appSourceOperationPathSegment(operationId: string) {
+  return encodeURIComponent(normalizeAppSourceOperationId(operationId));
+}
+
 function query(values: Record<string, string | number | boolean | null | undefined>) {
   const params = new URLSearchParams();
   Object.entries(values).forEach(([key, value]) => {
@@ -3145,6 +3196,14 @@ function normalizeStartRunPayload(sessionIdOrPayload: string | StartRunPayload, 
 
 function text(value: unknown) {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function nonBlankText(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function isOptionalNonBlankText(value: unknown) {
+  return value === undefined || value === null || nonBlankText(value) !== undefined;
 }
 
 function record(value: unknown) {

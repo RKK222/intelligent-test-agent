@@ -12,7 +12,11 @@ public record AppSourceOperationId(String value) {
     public AppSourceOperationId {
         String original = value;
         value = value == null ? "" : value.trim();
-        if (value.isEmpty() || value.length() > MAX_LENGTH || containsUnsafePathCharacter(value)) {
+        if (value.isEmpty()
+                || value.length() > MAX_LENGTH
+                || ".".equals(value)
+                || "..".equals(value)
+                || containsUnsafePathCharacter(value)) {
             throw new PlatformException(
                     ErrorCode.VALIDATION_ERROR,
                     "operationId 格式无效",

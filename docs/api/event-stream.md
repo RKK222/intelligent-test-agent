@@ -526,7 +526,7 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 /api/internal/platform/workspace-management/file/ws?ticket=wft_...
 ```
 
-route 响应已经包含目标 Java `baseUrl`，客户端必须在该目标地址申请 ticket 并建立 WebSocket，因此 ticket 的签发和消费始终位于同一 JVM；多后台部署需要浏览器可访问每台 Java 的 `listenUrl`，不新增 Java 到 Java 的 HTTP 文件代理。
+route 响应已经包含目标 Java `baseUrl`，客户端必须在该目标地址申请 ticket 并建立 WebSocket，因此 ticket 的签发和消费始终位于同一 JVM；多后台部署需要浏览器可访问每台 Java 的 `listenUrl`，不新增 Java 到 Java 的 HTTP 文件代理。连接建立后，每条 `workspace.*` RPC 仍会重新读取当前用户 `opencode` 文件路由 affinity，并要求 affinity、ticket 目标/agent 服务器、Workspace/托管副本服务器和当前 JVM 完全一致；binding 迁移或错误 JVM 上的旧连接从下一条 RPC 起返回 `FORBIDDEN`，文件服务不再执行。
 
 文件 RPC 的每条请求和响应仍是单条 JSON 文本消息，但上传和大文件预览都由多条有界 RPC 组成。目标 Java 的单帧上限同时覆盖 `test-agent.files.max-preview-bytes` 以内的一次性 UTF-8 读写、单个预览分段和单个 Base64 上传分片，并附加 RPC envelope 余量；它只限制单条消息，不代表整个上传文件或最终可预览内容的大小。默认一次性预览/可编辑阈值为 5 MiB，超过后前端改用固定约 512 KiB 的 UTF-8 渐进预览分段；用户可继续加载一段或确认加载到文件末尾，界面必须提示完整加载超大文件可能占用较多内存并导致 Monaco 卡顿，大文件始终只读，避免把部分内容误保存。默认上传分片为 256 KiB、可配置上限为 4 MiB。分片上传和渐进预览都不设置应用层文件总大小上限，实际可处理大小仍受浏览器、网络、磁盘空间和基础设施超时约束。
 
@@ -780,7 +780,7 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 }
 ```
 
-`type` 只允许 `snapshot/step/completed/failed`。`snapshot/step/completed` 必须完整携带 `operationId/operation/traceId`，其中 `operation` 与 HTTP 操作快照结构相同；`failed` 必须携带 `status=FAILED` 与非空安全 `errorCode/errorMessage`，持久化操作失败时还会携带完整 `operation/traceId`。连接、鉴权或内部读取失败时可返回不含 `operation` 的安全失败 envelope：
+`type` 只允许 `snapshot/step/completed/failed`。所有携带 operation 的 envelope 都必须保持外层 `operationId/traceId` 与内层一致；operation、step 与 server summary 的可选字段只要出现就必须符合声明类型。`snapshot` 是重连权威快照，可承载任一合法 operation 状态；`step` 只允许 `PENDING/RUNNING`，`completed` 只允许 `SUCCEEDED/PARTIAL_FAILED`。`failed` 外层必须是 `status=FAILED` 且 `errorCode/errorMessage` trim 后非空；持久化失败同时携带完整 `operation/traceId`，内层 operation 也必须是 `FAILED`。连接、鉴权或内部读取失败时可返回不含 `operation` 的安全失败 envelope，其可选 `operationId/traceId` 若出现也必须是非空字符串：
 
 ```json
 {

@@ -446,6 +446,23 @@ class AppSourceApplicationServiceTest {
     }
 
     @Test
+    void materializationAndRetryCommandsRejectOnlyExactDotSegmentOperationIds() {
+        assertThatThrownBy(() -> new AppSourceApplicationService.MaterializationCommand(
+                        ".", null, "main", COMMIT,
+                        List.of(new AppSourceApplicationService.SelectedPathCommand(
+                                "src", AppSourcePathType.DIRECTORY)),
+                        AppSourcePurpose.TEAM, 2, false))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+        assertThatThrownBy(() -> new AppSourceApplicationService.RetryCommand(" .. ", 4L))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+
+        assertThat(new AppSourceApplicationService.RetryCommand("release..1", 4L).operationId())
+                .isEqualTo("release..1");
+    }
+
+    @Test
     void retryKeepsFrozenGenerationAndTargetsOnlyFailedReplicas() {
         AppSourceSnapshot active = snapshot(4L, AppSourcePurpose.TEAM, USER_ID, NOW.plusSeconds(3600));
         when(appSources.findActiveSnapshot(REPOSITORY_ID)).thenReturn(Optional.of(active));

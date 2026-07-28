@@ -2647,21 +2647,45 @@ export type AppSourceOperationTicketResponse = {
   webSocketUrl: string;
 };
 
+type AppSourceOperationAtStatus<TStatus extends AppSourceOperationStatus> =
+  Omit<AppSourceOperation, "status"> & { status: TStatus };
+
 export type AppSourceProgressEvent =
   | {
-      type: "snapshot" | "step" | "completed";
+      type: "snapshot";
       operationId: string;
       operation: AppSourceOperation;
       traceId: string;
     }
   | {
+      type: "step";
+      operationId: string;
+      operation: AppSourceOperationAtStatus<"PENDING" | "RUNNING">;
+      traceId: string;
+    }
+  | {
+      type: "completed";
+      operationId: string;
+      operation: AppSourceOperationAtStatus<"SUCCEEDED" | "PARTIAL_FAILED">;
+      traceId: string;
+    }
+  | {
       type: "failed";
       operationId?: string | null;
-      operation?: AppSourceOperation | null;
+      operation?: null;
       status: "FAILED";
       errorCode: string;
       errorMessage: string;
       traceId?: string | null;
+    }
+  | {
+      type: "failed";
+      operationId: string;
+      operation: AppSourceOperationAtStatus<"FAILED">;
+      status: "FAILED";
+      errorCode: string;
+      errorMessage: string;
+      traceId: string;
     };
 
 export type AddSshKeyPayload = {

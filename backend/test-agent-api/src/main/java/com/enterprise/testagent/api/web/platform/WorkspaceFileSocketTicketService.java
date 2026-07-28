@@ -5,6 +5,7 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
+import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
@@ -113,6 +114,37 @@ class WorkspaceFileSocketTicketService {
         return ticketStore.consume(ticket, origin);
     }
 
+    /**
+     * 每条 workspace RPC 重新校验 ticket、当前 JVM、用户 agent、Workspace 与托管副本事实。
+     *
+     * <p>连接建立后的 binding 迁移不能继续沿用旧 socket；这里只复用公共 assignment 与 workspace
+     * 校验程序，不扫描 Redis、不自行选择路由，也不做本机降级。
+     */
+    void authorizeWorkspaceRpc(WorkspaceFileSocketTicket ticket, WorkspaceId workspaceId) {
+        if (ticket == null
+                || !MODE_WORKSPACE.equals(ticket.mode())
+                || ticket.userId() == null
+                || ticket.userId().isBlank()
+                || ticket.workspaceId() == null
+                || !ticket.workspaceId().equals(workspaceId.value())) {
+            throw workspaceRpcDenied();
+        }
+        String currentLinuxServerId = workspaceService.currentLinuxServerId();
+        if (!Objects.equals(currentLinuxServerId, ticket.linuxServerId())
+                || !Objects.equals(currentLinuxServerId, ticket.agentLinuxServerId())) {
+            throw workspaceRpcDenied();
+        }
+        UserId userId = new UserId(ticket.userId());
+        UserOpencodeProcessFileRoutingAffinity currentAffinity =
+                assignmentService.fileRoutingAffinity(userId, "opencode", ticket.traceId());
+        if (currentAffinity.status() != UserOpencodeProcessAvailability.READY
+                || !Objects.equals(currentLinuxServerId, currentAffinity.linuxServerId())) {
+            throw workspaceRpcDenied();
+        }
+        workspaceAccessAuthorizer.requireFileAccess(userId, workspaceId, ticket.superAdmin());
+        workspaceService.requireWorkspaceOnCurrentServer(workspaceId, ticket.traceId());
+    }
+
     private UserOpencodeProcessFileRoutingAffinity userProcessAffinity(AuthPrincipal principal, String traceId) {
         // 文件路由只需要用户进程的服务器归属，不触发强健康检查
         // 直接使用 fileRoutingAffinity，避免因瞬时健康检查失败导致文件树不可用
@@ -138,6 +170,10 @@ class WorkspaceFileSocketTicketService {
                             "agentLinuxServerId", process.linuxServerId(),
                             "currentLinuxServerId", currentLinuxServerId));
         }
+    }
+
+    private PlatformException workspaceRpcDenied() {
+        return new PlatformException(ErrorCode.FORBIDDEN, "工作区文件 ticket 运行路由已失效");
     }
 
     private WorkspaceFileSocketDtos.TicketResponse response(WorkspaceFileSocketTicket ticket) {

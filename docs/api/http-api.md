@@ -1239,7 +1239,7 @@ WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSoc
 }
 ```
 
-`operationId` 是调用方生成的稳定幂等标识，trim 后长度为 1–128，不限定 `aso_` 前缀，但禁止控制字符和 `/`、`\\` 路径分隔符；物化、重试、操作查询、ticket 与 WebSocket 使用同一校验。`expectedTreeCommit` 必须是远端解析得到的完整固定提交，防止用户选择目录后远端分支发生漂移。`purpose=PERSONAL` 固定当前用户进程服务器，`purpose=TEAM` 冻结受理时的在线服务器集合。已有 active snapshot 时，只有 owner 或仍是有效应用成员的 `APP_ADMIN` 能替换/重试；`TEAM -> PERSONAL` 拒绝，`PERSONAL -> TEAM` 建立新 generation。个人操作快照只允许 owner，或仍具 `APP_ADMIN` 角色且仍为有效成员的用户读取；团队操作允许当前有效成员读取。
+`operationId` 是调用方生成的稳定幂等标识，trim 后长度为 1–128，不限定 `aso_` 前缀，但禁止控制字符、`/`、`\\` 路径分隔符和精确的 `.`/`..` 路径段；普通内部双点如 `release..1` 合法。物化、重试、操作查询、ticket 与 WebSocket 使用同一校验，因此业务接受的 ID 必须始终可查询、签票并连接。`expectedTreeCommit` 必须是远端解析得到的完整固定提交，防止用户选择目录后远端分支发生漂移。`purpose=PERSONAL` 固定当前用户进程服务器，`purpose=TEAM` 冻结受理时的在线服务器集合。已有 active snapshot 时，只有 owner 或仍是有效应用成员的 `APP_ADMIN` 能替换/重试；`TEAM -> PERSONAL` 拒绝，`PERSONAL -> TEAM` 建立新 generation。个人操作快照只允许 owner，或仍具 `APP_ADMIN` 角色且仍为有效成员的用户读取；团队操作允许当前有效成员读取。
 
 重试请求为 `{ "operationId": "aso_...", "expectedGeneration": 3 }`，打开请求为 `{ "generation": 3 }`。打开成功返回 `appId/repositoryId/generation/purpose/workspaceId/linuxServerId/expiresAt`。物化、重试和操作查询统一返回安全操作快照：
 
@@ -1277,7 +1277,7 @@ WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSoc
 
 步骤只返回 `stepCode/sequence/status/safeSummary/startedAt/completedAt/elapsedMillis/updatedAt`；不得返回物理源码根、SSH 私钥、原始 Git stderr、堆栈或其它敏感路径。进度 WebSocket 为 `/api/internal/platform/workspace-management/app-source-operations/{operationId}/ws?ticket=...`，消息协议和重连语义见 `docs/api/event-stream.md` 的“应用源码进度 WebSocket”。
 
-应用源码 Runtime Workspace 的 `file-ws-route`、ticket 和每条文件 RPC 继续使用平台文件 WebSocket：必须匹配 slot 当前 active generation、未过期 snapshot、目标服务器 READY replica、启用应用、代码库关联和实时成员。历史 Workspace 不允许本机回绑或本机降级；入口需要跨 Java 时复用 `BackendJavaRouteResolver` 与 `BackendHttpForwarder`，浏览器随后直连目标 Java 的文件 WebSocket，不新增 Java→Java HTTP 文件代理。
+应用源码 Runtime Workspace 的 `file-ws-route`、ticket 和每条文件 RPC 继续使用平台文件 WebSocket：必须匹配 slot 当前 active generation、未过期 snapshot、目标服务器 READY replica、启用应用、代码库关联和实时成员。每条 `workspace.*` RPC 都重新读取用户 `opencode` 文件路由 affinity，并要求 affinity、ticket 目标/agent 服务器、Workspace/副本服务器和当前 JVM 一致；连接后 binding 迁移或请求落到其它 JVM 时立即返回 `FORBIDDEN`，且不调用文件服务。历史 Workspace 不允许本机回绑或本机降级；入口需要跨 Java 时复用 `BackendJavaRouteResolver` 与 `BackendHttpForwarder`，浏览器随后直连目标 Java 的文件 WebSocket，不新增 Java→Java HTTP 文件代理。
 
 ### 应用引用资产库 API
 

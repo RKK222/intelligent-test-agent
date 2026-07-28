@@ -53,10 +53,10 @@ class AppSourceOperationTicketServiceTest {
     void materializationAcceptedOperationIdCanAlwaysBeUsedToCreateATicket() {
         AppSourceApplicationService.MaterializationCommand command =
                 new AppSourceApplicationService.MaterializationCommand(
-                        "job_123", null, "main", "b".repeat(40), List.of(),
+                        "release..1", null, "main", "b".repeat(40), List.of(),
                         AppSourcePurpose.TEAM, 1, false);
         AppSourceApplicationService appSources = mock(AppSourceApplicationService.class);
-        when(appSources.getOperation("job_123", USER_ID, false)).thenReturn(operation());
+        when(appSources.getOperation("release..1", USER_ID, false)).thenReturn(operation());
         AppSourceOperationTicketService service = new AppSourceOperationTicketService(
                 new AppSourceOperationTicketStore(
                         Clock.fixed(NOW, ZoneOffset.UTC), () -> "ast_ticket_job"),

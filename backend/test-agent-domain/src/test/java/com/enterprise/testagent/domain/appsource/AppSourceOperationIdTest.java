@@ -12,12 +12,15 @@ class AppSourceOperationIdTest {
     @Test
     void acceptsCompatibleIdsAtTheLengthBoundary() {
         assertThat(AppSourceOperationId.normalize(" job_123 ")).isEqualTo("job_123");
+        assertThat(AppSourceOperationId.normalize("release..1")).isEqualTo("release..1");
         assertThat(AppSourceOperationId.normalize("x".repeat(AppSourceOperationId.MAX_LENGTH)))
                 .hasSize(AppSourceOperationId.MAX_LENGTH);
     }
 
     @Test
-    void rejectsControlCharactersPathSeparatorsAndOverlongIds() {
+    void rejectsDotSegmentsControlCharactersPathSeparatorsAndOverlongIds() {
+        assertInvalid(".");
+        assertInvalid(" .. ");
         assertInvalid("job_\n123");
         assertInvalid("job/123");
         assertInvalid("x".repeat(AppSourceOperationId.MAX_LENGTH + 1));
