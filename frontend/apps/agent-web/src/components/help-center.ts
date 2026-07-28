@@ -2,22 +2,28 @@ import agentConfigManual from "../../../user-manual/docs/guide/agent-config.md?r
 import conversationManual from "../../../user-manual/docs/guide/conversation.md?raw";
 import directoryMappingManual from "../../../user-manual/docs/guide/directory-mapping.md?raw";
 import faqManual from "../../../user-manual/docs/guide/faq.md?raw";
+import featureOverviewManual from "../../../user-manual/docs/guide/feature-overview.md?raw";
 import firstTimeSetupManual from "../../../user-manual/docs/guide/first-time-setup.md?raw";
 import gettingStartedManual from "../../../user-manual/docs/guide/getting-started.md?raw";
 import processInitializationManual from "../../../user-manual/docs/guide/process-initialization.md?raw";
+import referenceConfigManual from "../../../user-manual/docs/guide/reference-config.md?raw";
 import settingsManual from "../../../user-manual/docs/guide/settings.md?raw";
+import troubleshootingManual from "../../../user-manual/docs/guide/troubleshooting.md?raw";
 import workspaceManual from "../../../user-manual/docs/guide/workspace.md?raw";
 
 export type HelpTopicId =
   | "getting-started"
+  | "feature-overview"
   | "first-time-setup"
   | "process-initialization"
   | "settings"
   | "workspace"
+  | "reference-config"
   | "directory-mapping"
   | "conversation"
   | "agent-config"
-  | "faq";
+  | "faq"
+  | "troubleshooting";
 
 export type HelpTopic = {
   id: HelpTopicId;
@@ -41,11 +47,11 @@ export const HELP_TOPICS: HelpTopic[] = [
     content: gettingStartedManual
   },
   {
-    id: "process-initialization",
-    label: "初始化进程",
-    description: "分配、启动与失败处理",
-    path: "guide/process-initialization.html",
-    content: processInitializationManual
+    id: "feature-overview",
+    label: "功能总览",
+    description: "当前工作台能力与入口",
+    path: "guide/feature-overview.html",
+    content: featureOverviewManual
   },
   {
     id: "first-time-setup",
@@ -62,11 +68,25 @@ export const HELP_TOPICS: HelpTopic[] = [
     content: settingsManual
   },
   {
+    id: "process-initialization",
+    label: "初始化进程",
+    description: "分配、启动与失败处理",
+    path: "guide/process-initialization.html",
+    content: processInitializationManual
+  },
+  {
     id: "workspace",
     label: "应用与工作区",
     description: "版本、个人 worktree 与 Git",
     path: "guide/workspace.html",
     content: workspaceManual
+  },
+  {
+    id: "reference-config",
+    label: "引用配置",
+    description: "应用资产同步与只读引用",
+    path: "guide/reference-config.html",
+    content: referenceConfigManual
   },
   {
     id: "directory-mapping",
@@ -95,6 +115,13 @@ export const HELP_TOPICS: HelpTopic[] = [
     description: "高频疑问快速解答",
     path: "guide/faq.html",
     content: faqManual
+  },
+  {
+    id: "troubleshooting",
+    label: "常见问题排查",
+    description: "按现象检查并收集定位信息",
+    path: "guide/troubleshooting.html",
+    content: troubleshootingManual
   }
 ];
 

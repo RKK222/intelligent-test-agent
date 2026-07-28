@@ -50,7 +50,29 @@ describe("help center", () => {
     expect(helpDocumentUrl("process-initialization")).toBe("/help/guide/process-initialization.html");
     expect(helpDocumentUrl("settings")).toBe("/help/guide/settings.html");
     expect(helpDocumentUrl("directory-mapping")).toBe("/help/guide/directory-mapping.html");
+    expect(helpDocumentUrl("reference-config")).toBe("/help/guide/reference-config.html");
+    expect(helpDocumentUrl("troubleshooting")).toBe("/help/guide/troubleshooting.html");
     expect(normalizeHelpTopic("unknown")).toBe("getting-started");
+  });
+
+  it("keeps current features, reference configuration and troubleshooting in embedded Help", async () => {
+    const wrapper = mountHelpCenter();
+    const topicLabels = wrapper.findAll(".ta-help-center-topic").map((button) => button.text());
+
+    expect(topicLabels.some((label) => label.includes("功能总览"))).toBe(true);
+    expect(topicLabels.some((label) => label.includes("引用配置"))).toBe(true);
+    expect(topicLabels.some((label) => label.includes("常见问题排查"))).toBe(true);
+
+    const troubleshootingTopic = wrapper.findAll(".ta-help-center-topic")
+      .find((button) => button.text().includes("常见问题排查"));
+    await troubleshootingTopic!.trigger("click");
+
+    expect(wrapper.get('[data-testid="help-center-frame"]').attributes("src"))
+      .toBe("/help/guide/troubleshooting.html");
+    const prompt = buildManualQuestionPrompt("troubleshooting", "为什么输入框不能发送？");
+    expect(prompt).toContain("【当前章节】常见问题排查");
+    expect(prompt).toContain("对话输入框不可发送");
+    expect(prompt).toContain("traceId");
   });
 
   it("keeps the directory chapter synchronized with the embedded Help navigation", async () => {

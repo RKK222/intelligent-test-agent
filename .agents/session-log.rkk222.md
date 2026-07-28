@@ -5,6 +5,23 @@
 
 ## Entries
 
+### 2026-07-28 - 按当前功能更新用户手册与排查入口
+
+### Why
+- 现有手册缺少集中功能总览和按现象组织的排查流程，应用内 Help 也遗漏了已经存在的“引用配置”Markdown。
+
+### What
+- 新增功能总览，覆盖工作台、文件与 Mermaid、对话与定时任务、Git 助手、Agent/Skill Hub、应用资产引用和宠物帮助；首页与快速开始同步入口。
+- 新增常见问题排查，覆盖文件树、发送门禁、Git、Agent/Skill、Hub、引用配置、定时任务和手册问答，并提供脱敏上报模板。
+- VitePress 与应用内 Help 同步注册功能总览、引用配置和排查章节，宠物问答继续直接读取同一 Markdown。
+
+### How
+- 根 workspace 定向 Vitest 11 项、user-manual 构建、agent-web typecheck 和生产 build 通过；VitePress preview 在 `127.0.0.1:3001/help/` 启动，新页面 HTTP 均为 200。
+- 包内直接 `vitest` 不会加载根 jsdom 配置；DOM 用例应从 `frontend/` 执行根 workspace 的 Vitest 入口。
+
+### Result
+- 用户可从静态手册和应用内 Help 查看当前能力与排障路径，引用配置也可作为宠物问答事实来源；未修改 API、RunEvent、数据库/Flyway、SQL、环境配置、generated SDK 或 OpenCode 源码。
+
 ### 2026-07-27 - 展示个人拉取 merge 流程与 dispose 结果
 
 ### Why

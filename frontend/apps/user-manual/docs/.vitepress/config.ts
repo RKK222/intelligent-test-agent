@@ -36,13 +36,15 @@ export default defineConfig({
     },
     nav: [
       { text: "开始使用", link: "/guide/getting-started" },
-      { text: "常见问题", link: "/guide/faq" }
+      { text: "功能总览", link: "/guide/feature-overview" },
+      { text: "问题排查", link: "/guide/troubleshooting" }
     ],
     sidebar: [
       {
         text: "使用指南",
         items: [
           { text: "快速开始", link: "/guide/getting-started" },
+          { text: "功能总览", link: "/guide/feature-overview" },
           { text: "首次使用前准备", link: "/guide/first-time-setup" },
           { text: "设置与权限内操作", link: "/guide/settings" },
           { text: "初始化 TestAgent 进程", link: "/guide/process-initialization" },
@@ -51,7 +53,8 @@ export default defineConfig({
           { text: "开发与测试目录", link: "/guide/directory-mapping" },
           { text: "对话与上下文", link: "/guide/conversation" },
           { text: "Agent 与 Skill 配置", link: "/guide/agent-config" },
-          { text: "常见问题", link: "/guide/faq" }
+          { text: "常见问题", link: "/guide/faq" },
+          { text: "常见问题排查", link: "/guide/troubleshooting" }
         ]
       }
     ],
