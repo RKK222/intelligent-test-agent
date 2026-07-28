@@ -30,12 +30,12 @@ load_dotenv() {
 
 load_dotenv "${ENV_FILE}"
 
-IT_IMAGE="${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE:-test-agent/it-tools:2024.10.22-7ca5933-platform.1}"
+IT_IMAGE="${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE:-test-agent/it-tools:2024.10.22-7ca5933-platform.2}"
 OMNI_IMAGE="${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE:-test-agent/omni-tools:0.6.0-platform.1}"
 BIND_ADDRESS="${TEST_AGENT_TOOLBOX_BIND_ADDRESS:-127.0.0.1}"
 NETWORK="${TEST_AGENT_TOOLBOX_NETWORK:-test-agent-toolbox}"
 ARTIFACT_DIR="${TEST_AGENT_TOOLBOX_ARTIFACT_DIR:-/data/testagent/dist}"
-IT_TAR="${TEST_AGENT_TOOLBOX_IT_TOOLS_TAR:-${ARTIFACT_DIR}/test-agent_it-tools_2024.10.22-7ca5933-platform.1-linux-amd64.tar}"
+IT_TAR="${TEST_AGENT_TOOLBOX_IT_TOOLS_TAR:-${ARTIFACT_DIR}/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar}"
 OMNI_TAR="${TEST_AGENT_TOOLBOX_OMNI_TOOLS_TAR:-${ARTIFACT_DIR}/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar}"
 IT_CONTAINER="test-agent-it-tools"
 OMNI_CONTAINER="test-agent-omni-tools"

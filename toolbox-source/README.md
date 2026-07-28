@@ -2,10 +2,12 @@
 
 本目录保存企业工具盒子首版的两套锁定、可审计、可重复构建的派生源码，不加入平台前端 pnpm workspace：
 
-- `it-tools/`：IT-Tools `v2024.10.22-7ca5933`，GPL-3.0，平台镜像 `test-agent/it-tools:2024.10.22-7ca5933-platform.1`。
+- `it-tools/`：IT-Tools `v2024.10.22-7ca5933`，GPL-3.0，中文派生平台镜像 `test-agent/it-tools:2024.10.22-7ca5933-platform.2`。
 - `omni-tools/`：OmniTools `v0.6.0`，MIT，平台镜像 `test-agent/omni-tools:0.6.0-platform.1`。
 
 两套应用都只暴露具体工具页：根路径和未知路由返回平台 `/toolbox`，上游首页、导航、Logo、收藏、相关推荐、支持链接、统计器与页脚均不作为可访问入口。浏览器侧 CSP 禁止访问外部 CDN/API；容器使用关闭 IP masquerade 的专用 bridge，生产工具节点还必须通过离线网络或宿主防火墙限制出站访问。
+
+IT-Tools 派生应用沿用上游 `vue-i18n`，但运行时固定使用中文且不显示语言选择器；中英文 locale 叶子 key 必须保持一致。85 条目录路由的控件、校验、提示和说明文档受构建期可见英文审计保护，算法、协议、格式、单位、代码和生成内容等技术文本按精确白名单保留。
 
 ## 目录生成
 

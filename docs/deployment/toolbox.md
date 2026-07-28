@@ -6,7 +6,7 @@
 
 首版固定以下上游版本，禁止改用 `latest`：
 
-- `IT-Tools 2024.10.22-7ca5933`，内部镜像 `test-agent/it-tools:2024.10.22-7ca5933-platform.1`，GPL-3.0。
+- `IT-Tools 2024.10.22-7ca5933`，内部镜像 `test-agent/it-tools:2024.10.22-7ca5933-platform.2`，GPL-3.0；派生界面固定使用中文，保留同构英文 locale 仅用于资源完整性校验，不提供语言切换入口。
 - `OmniTools 0.6.0`，内部镜像 `test-agent/omni-tools:0.6.0-platform.1`，MIT。
 
 版本化目录位于 `backend/test-agent-integration/src/main/resources/toolbox/catalog-v1.json`，当前 `catalogVersion` 为 `2026-07-27.it-tools-2024.10.22-7ca5933.omni-tools-0.6.0`，共 193 项：IT-Tools 85 项、OmniTools 108 项。源码原始统计的 195 项中，以下两项不满足企业 HTTP 离线环境，禁止提供入口：
@@ -46,7 +46,7 @@ deploy/internal/package-release.sh --toolbox-only --output-dir /absolute/output
 - `toolbox-catalog-v1.json` 及 SHA-256。
 - `toolbox.env.example`、`toolbox-docker.sh`、`diagnose-toolbox.sh` 和本部署说明。
 
-IT-Tools Docker 构建显式锁定 Node 20.18.0、pnpm 8.15.3 和 Nginx 1.27.2；OmniTools 显式锁定 Node 20.18.0、`package-lock.json` 和 Nginx 1.27.2。两个 Dockerfile 的 Node/Nginx 基础镜像还锁定对应的 `linux/amd64` manifest digest，避免同名 tag 漂移。OmniTools 构建关闭 npm audit/fund 网络请求并使用 BuildKit npm 缓存，但依赖版本仍只由锁文件决定。上游 v0.6.0 的 npm 依赖审计目前仍报告既有漏洞，禁止对锁定源码直接运行 `npm audit fix`；升级必须作为独立上游版本评估，重新执行全部 193 路由和真实功能验收。
+IT-Tools Docker 构建显式锁定 Node 20.18.0、pnpm 8.15.3 和 Nginx 1.27.2；构建前必须执行全部 85 条路由的中文资源 key 对齐与可见英文审计。OmniTools 显式锁定 Node 20.18.0、`package-lock.json` 和 Nginx 1.27.2。两个 Dockerfile 的 Node/Nginx 基础镜像还锁定对应的 `linux/amd64` manifest digest，避免同名 tag 漂移。OmniTools 构建关闭 npm audit/fund 网络请求并使用 BuildKit npm 缓存，但依赖版本仍只由锁文件决定。上游 v0.6.0 的 npm 依赖审计目前仍报告既有漏洞，禁止对锁定源码直接运行 `npm audit fix`；升级必须作为独立上游版本评估，重新执行全部 193 路由和真实功能验收。
 
 若联网构建机必须直连经批准的镜像代理，可用 `TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE`、`TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE` 覆盖 registry 前缀，但值仍必须带上述同一 `linux/amd64` digest；禁止降级为仅 tag。发布脚本把这两个值作为 Docker build arg 传入，两套应用使用完全相同的基础层。
 
