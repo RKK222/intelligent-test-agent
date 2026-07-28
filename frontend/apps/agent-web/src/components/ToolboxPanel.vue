@@ -356,12 +356,12 @@ function normalize(value: string): string {
 .toolbox-card:hover,
 .toolbox-card:focus-visible { transform: translateY(-2px); border-color: #8ea5c4; outline: none; box-shadow: 0 8px 20px rgb(23 32 51 / 9%); }
 .toolbox-card__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-.toolbox-card__title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.toolbox-card__title-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .toolbox-card__title-row h3 { margin: 0; font-size: 14.5px; line-height: 1.3; font-weight: 700; color: #172033; }
-.toolbox-card__badges { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; flex-shrink: 0; }
-.toolbox-source-badge { padding: 1.5px 5px; border-radius: 3px; color: #31598c; font-size: 9.5px; font-weight: 750; background: #edf4fd; line-height: 1.25; }
+.toolbox-card__badges { display: flex; flex-direction: column; justify-content: center; gap: 1.5px; flex-shrink: 0; height: 19px; }
+.toolbox-source-badge { padding: 0 4px; border-radius: 2.5px; color: #31598c; font-size: 8.5px; font-weight: 750; background: #edf4fd; line-height: 1.15; }
 .toolbox-source-badge--omni_tools { color: #76511e; background: #fff3dc; }
-.toolbox-category-badge { padding: 1.5px 5px; border-radius: 3px; color: #5a6678; font-size: 9.5px; font-weight: 500; background: #f0f3f7; border: 1px solid #e2e7ec; line-height: 1.25; }
+.toolbox-category-badge { padding: 0 4px; border-radius: 2.5px; color: #5a6678; font-size: 8.5px; font-weight: 500; background: #f0f3f7; border: 1px solid #e2e7ec; line-height: 1.1; }
 .toolbox-card__clicks { display: flex; align-items: center; gap: 3px; color: #64748b; font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; flex-shrink: 0; padding-top: 1px; }
 .toolbox-card__flame-icon { color: #f59e0b; flex-shrink: 0; }
 .toolbox-card__subtitle { margin: 3px 0 0; overflow: hidden; color: #778195; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
