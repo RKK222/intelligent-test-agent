@@ -4207,6 +4207,8 @@ function handleAppSourceProgress(
     )
   ) return;
   if (event.type === "failed" && !event.operation) {
+    // 当前连接一旦失败就先作废其 epoch；重连退避和新 snapshot 等待期间也不能接收该 socket 的迟到帧。
+    activeAppSourceProgressConnectionEpoch = ++appSourceProgressConnectionEpoch;
     appSourceProgressError.value = `${event.errorMessage}${event.traceId ? `（traceId: ${event.traceId}）` : ""}`;
     appSourceProgressConnection?.close();
     appSourceProgressConnection = null;

@@ -66,7 +66,7 @@ packages/shared-types
 
 `apps/agent-web` 在工作空间切换入口右侧提供应用源码列表：紧凑入口只显示可打开或曾下载的副本，`NOT_DOWNLOADED` 只在四步管理弹窗第 1 步出现；用户必须从当前应用全部关联版本库中显式选择后，才加载其分支、固定提交目录树和运行中 operation。第 2–4 步完成 exact set、TEAM/PERSONAL、默认 48 小时且限制 1–72 小时的保留期，以及逐服务器安全步骤展示；已有 TEAM generation 不能降级为 PERSONAL。源码打开后使用显式 `APP_SOURCE` 工作区语义和后端返回的逻辑 `workspaceId/generation`，文件读取、保存、创建、复制、移动、上传、改名、删除及撤销继续走平台 Workspace 文件 WebSocket；前端不保存或推导物理路径。源码工作区保留 Session/Run、OpenCode、终端和普通文件写入，但编辑器/Run Diff 页脚、宠物应用配置重载、Hub mutation、应用 Agent 保存发布与版本选择统一隐藏并在 handler 再次拒绝。recent 源码选择在刷新或窗口聚焦时重新 `open` 校验；只有结构化 `FORBIDDEN/NOT_FOUND/CONFLICT` 或 current source 的空 recent 会清理并回退，网络、超时及 5xx 保留当前源码与 recent，并展示可重试提示。
 
-源码工作台的 managed/source 切换现共用一套完整 selection authority，repository 列表刷新不会抢占当前 open intent；任一 lazy child 发现 commit 漂移都会失效整棵树直到真实 root 重载。进度观察的每条 socket 使用独立 connection epoch，无有效 operation frame 的断线保持 250ms/500ms/1s 指数退避；关闭弹窗可立即中止 CONNECTING socket，不触发重连或后台 cancel。Run Diff 只放行 source 中的普通文件保存，PUBLIC/WORKSPACE Agent 保存在组件和父 handler 双门禁；Hub、配置重载、新增版本和个人 Git pull 弹窗会在能力失效时立即收敛。
+源码工作台的 managed/source 切换现共用一套完整 selection authority，repository 列表刷新不会抢占当前 open intent；任一 lazy child 发现 commit 漂移都会失效整棵树直到真实 root 重载。进度观察的每条 socket 使用独立 connection epoch；当前连接一旦失败会先作废 epoch，使 250ms 退避期和 replacement snapshot 等待期的所有旧帧失效，无有效 operation frame 的连续断线仍保持 250ms/500ms/1s 指数退避；关闭弹窗可立即中止 CONNECTING socket，不触发重连或后台 cancel。Run Diff 只放行 source 中的普通文件保存，PUBLIC/WORKSPACE Agent 保存在组件和父 handler 双门禁；Hub、配置重载、新增版本和个人 Git pull 弹窗会在能力失效时立即收敛。
 
 ### 工具盒子
 

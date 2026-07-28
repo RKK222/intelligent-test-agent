@@ -76,7 +76,7 @@ Browser
 
 应用源码工作台由 `apps/agent-web` 维护显式 `MANAGED/APP_SOURCE` 语义、紧凑打开列表、全关联版本库四步物化、recent 恢复和逐服务器进度 observation；只保存服务端返回的 app/repository/generation/workspace 等逻辑身份，不构造物理根目录。source selection/recovery 以 token/app/repository/generation/workspace kind 收敛，tree 额外绑定 branch 与 snapshot commit；切应用、撤权、返回托管工作区或卸载会统一失效入口、弹窗、树、进度连接和重连 timer。源码普通文件写入继续依赖 `packages/backend-api` 的 Workspace 文件 WebSocket route/ticket/RPC，Git、应用 Agent/Hub 发布、宠物应用配置重载和版本选择由统一能力在 UI 与 handler 双层禁用。进度断线由页面按有界退避串行执行数据库 snapshot、新 ticket 与新 WebSocket，主动关闭不取消后台任务。
 
-managed/source 选择共用完整 intent authority，旧 terminal 的 repository summary 刷新使用独立 list authority；child commit 漂移会失效整棵 tree authority。每次进度自动重连按 connection epoch 隔离，只有有效 operation frame 清零指数退避，`AbortSignal` 可在 CONNECTING 期间立即停止观察。source 中 Run Diff 的普通文件仍可写，PUBLIC/WORKSPACE Agent 保存由组件和父 handler 双重拒绝；已打开的 Hub、配置重载、新增版本和 Git pull 弹窗在能力失效时立即收敛。
+managed/source 选择共用完整 intent authority，旧 terminal 的 repository summary 刷新使用独立 list authority；child commit 漂移会失效整棵 tree authority。每次进度自动重连按 connection epoch 隔离，当前 socket 失败会先作废 epoch，使退避与 replacement snapshot 等待期的旧帧无效；只有有效 operation frame 清零指数退避，`AbortSignal` 可在 CONNECTING 期间立即停止观察。source 中 Run Diff 的普通文件仍可写，PUBLIC/WORKSPACE Agent 保存由组件和父 handler 双重拒绝；已打开的 Hub、配置重载、新增版本和 Git pull 弹窗在能力失效时立即收敛。
 
 | 包 | 职责 |
 |---|---|

@@ -154,3 +154,31 @@ Task 4 已完成。`agent-web` 已提供应用源码入口、四态紧凑列表�
 - **性能：** repository list 只保留常量级 authority，每个 observation 同时最多一条有效 socket；连续无帧断线避免 250ms 紧密重试。**安全：** 前端双门禁不替代后端文件授权，不保存物理路径、ticket 或凭据。**兼容性：** 新参数可选，managed 的普通文件、Agent 角色能力和 source 的普通写入语义保持不变。
 - 未修改 OpenCode 快照、generated SDK、`.env.local` 或环境配置。真实多 Java/多服务器副本联调仍属 Task 2/3 后端验收，本轮浏览器使用平台 HTTP/文件 WebSocket mock。
 - 按 Fix Round 2 约束不更新本机 `.agents/session-log.{id}.md`；提交前回顾全部 `.agents/session-log*.md` 近期条目。
+
+## Fix Round 3（2026-07-28）
+
+### 修复结果
+
+- 当前进度 socket 收到无 operation 的 failure/断线回调后，会在关闭连接、清理 current connection 和安排重连之前立即递增并激活一个失效 epoch。原 socket 随后即使在 250ms 退避期或 replacement operation snapshot 尚未返回时继续投递 `step`、`failed`、`completed`，也无法更新 operation、claim terminal、重置退避或触发 generation open。
+- source Run Diff 的保存实现继续保留 `DiffViewer.writable/readOnly`、父 `handleSaveDiffFile` 与 mutation 写入前复核三层门禁，没有新增 test-only 暴露。新增浏览器行为测试真实打开 APP_SOURCE workspace，以生产 `loadDiffSource("run")` 和 `handleRunEvent(diff.proposed)` 挂载 `DiffViewer`，再从组件发出真实 `saveFile`：PUBLIC/WORKSPACE Agent 路径保持零 `agent-config.write`，普通源码路径精确产生一次目标 source workspace 的 `workspace.write`。
+
+### Round 3 TDD 证据
+
+1. **失败 epoch 窗口 RED→GREEN：** socket1 在 20ms 断线，退避期投递旧 step，并在第二次 operation snapshot 被 gate 阻塞时投递旧 failed/completed。修复前终态实际触发一次 `open:app_gcms:repo-code:2`（期望 0）；失败分支先作废 epoch 后 focused Chromium GREEN，释放 snapshot gate 后仍按 fresh ticket 建立 socket2 并显示“新连接已恢复”。
+2. **source Diff 行为级 mutation RED→GREEN：** 正常生产代码下真实 source Run Diff emit 已 GREEN。为验证新增断言确实能捕获回归，临时同时移除父 handler 与 mutation 两层门禁；测试从期望 `agent-config.write=0` 变为实际 2 次写入（WORKSPACE、PUBLIC 各一次）并 RED。随后立即恢复原三层门禁，focused Chromium 再次 GREEN；临时 mutation 未保留在工作树或提交中。
+
+### Round 3 最终验证
+
+- `corepack pnpm exec vitest run packages/backend-api/tests/app-source.test.ts apps/agent-web/tests/AppSourcePicker.test.ts apps/agent-web/tests/AppSourceDialog.test.ts apps/agent-web/tests/app-source-workspace.test.ts apps/agent-web/tests/FigmaEditorArea.test.ts apps/agent-web/tests/agent-skill-hub.test.ts apps/agent-web/tests/FigmaShell.test.ts apps/agent-web/tests/WorkbenchFooter.test.ts apps/agent-web/tests/figma-file-explorer.test.ts`：9 files / 122 tests，通过。
+- `corepack pnpm playwright test apps/agent-web/tests/workbench.spec.ts --project=chromium --project=mobile --grep "drifting lazy|stale socket epoch|exponential backoff|connecting progress socket|stale terminal apply|pending managed version|starting a managed version|DiffViewer save emit|entering source mode closes|failed socket epoch|source Run Diff save dispatch" --reporter=line`：22/22，通过。
+- `corepack pnpm exec vitest run apps/agent-web/tests`：57 files / 937 passed / 1 skipped，通过；仅输出既有 jsdom Canvas `getContext` 提示。
+- `corepack pnpm typecheck`：13 个 workspace package 范围通过。
+- `corepack pnpm --filter @test-agent/agent-web build`：用户手册与 agent-web 生产构建通过；仅输出既有大 chunk 提示。
+- `tools/verify-ai-docs.sh`、`git diff --check` 与 `git diff --cached --check`：通过。
+
+### Round 3 文档、影响与风险
+
+- 已同步 `frontend/README.md`、`frontend/apps/agent-web/README.md`、`frontend/apps/agent-web/src/PACKAGE.md` 和 `docs/architecture/module-map.md` 的 failure epoch 窗口说明，并在本报告保留行为证据。
+- **API/事件：** 未修改 HTTP wire、RunEvent/SSE 或进度 WebSocket envelope。**数据库：** 无 SQL、MyBatis、Flyway 或字段变化。**性能：** 只在当前失败回调执行一次常量级 epoch 递增，不增加连接、轮询或缓存。**安全：** source Agent 保存继续由三层前端门禁和后端文件授权共同保护；测试明确证明普通源码仍路由到目标 source workspace。**兼容性：** Round 2 的 tree fencing、双向 selection authority、terminal refresh、CONNECTING abort、指数退避和 modal 收敛均通过桌面/移动回归。
+- 未修改 OpenCode 快照、generated SDK、`.env.local` 或环境配置。真实多 Java/多服务器副本联调仍属 Task 2/3 后端验收；本轮浏览器继续使用平台 HTTP/文件 WebSocket mock。
+- 按 Fix Round 3 约束不更新本机 `.agents/session-log.{id}.md`；提交前已回顾全部 `.agents/session-log*.md` 近期条目，未发现覆盖、丢弃或误合并其他开发者成果的风险。

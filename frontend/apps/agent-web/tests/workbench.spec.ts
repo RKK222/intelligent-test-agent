@@ -2103,6 +2103,109 @@ test("a stale socket epoch cannot fail or complete the replacement progress conn
   }).toHaveLength(1);
 });
 
+test("a failed socket epoch is invalid throughout reconnect backoff and replacement snapshot loading", async ({ page }) => {
+  let releaseReplacementSnapshot!: () => void;
+  const replacementSnapshotGate = new Promise<void>((resolve) => {
+    releaseReplacementSnapshot = resolve;
+  });
+  const appSourceRequests: string[] = [];
+  const appSourceTicketRequests: string[] = [];
+  const running = appSourceOperation("aso_epoch_gap", "RUNNING", { targetGeneration: 2 });
+  const staleBackoffStep = appSourceOperation("aso_epoch_gap", "RUNNING", {
+    targetGeneration: 2,
+    globalSteps: [{
+      stepCode: "STALE_BACKOFF",
+      sequence: 1,
+      status: "RUNNING",
+      safeSummary: "旧连接在退避期迟到",
+      updatedAt: "2026-07-28T10:00:01Z"
+    }]
+  });
+  const replacementStep = appSourceOperation("aso_epoch_gap", "RUNNING", {
+    targetGeneration: 2,
+    globalSteps: [{
+      stepCode: "REPLACEMENT",
+      sequence: 1,
+      status: "RUNNING",
+      safeSummary: "新连接已恢复",
+      updatedAt: "2026-07-28T10:00:02Z"
+    }]
+  });
+  const staleCompleted = appSourceOperation("aso_epoch_gap", "SUCCEEDED", {
+    targetGeneration: 2,
+    completedAt: "2026-07-28T10:01:00Z"
+  });
+  const sourceWorkspace = {
+    ...workspace(),
+    workspaceId: "wrk_source_epoch_gap",
+    name: "epoch gap 源码",
+    appId: "app_gcms"
+  };
+  await mockBackendApi(page, {
+    recentWorkspaces: { app_gcms: null },
+    appSourceRequests,
+    appSourceTicketRequests,
+    workspaces: [sourceWorkspace],
+    appSourceRepositories: {
+      app_gcms: [appSourceRepository({ generation: 1, latestOperation: running })]
+    },
+    appSourceOperationSnapshots: { aso_epoch_gap: [running, running] },
+    appSourceOperationRequestGates: {
+      aso_epoch_gap: [Promise.resolve(), replacementSnapshotGate]
+    },
+    appSourceOpenResults: {
+      "app_gcms:repo-code:2": appSourceOpenResult("wrk_source_epoch_gap", 2)
+    },
+    appSourceProgressSocketPlans: [
+      {
+        disconnectAfterMs: 20,
+        frames: [
+          { afterMs: 100, event: appSourceProgressEvent("step", staleBackoffStep) },
+          {
+            afterMs: 330,
+            event: {
+              type: "failed",
+              operationId: "aso_epoch_gap",
+              status: "FAILED",
+              errorCode: "OLD_SOCKET_FAILED",
+              errorMessage: "旧连接在 snapshot 等待期迟到失败"
+            }
+          },
+          { afterMs: 360, event: appSourceProgressEvent("completed", staleCompleted) }
+        ]
+      },
+      {
+        frames: [{ afterMs: 5, event: appSourceProgressEvent("step", replacementStep) }]
+      }
+    ]
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.locator(".figma-file-explorer").getByRole("button", { name: "打开应用源码" }).click();
+  await page.getByRole("button", { name: "下载版本库" }).click();
+  const dialog = page.getByRole("dialog", { name: "下载应用源码" });
+  await dialog.getByRole("button", { name: "选择应用代码库版本库" }).click();
+  await expect.poll(() => appSourceTicketRequests).toEqual(["aso_epoch_gap"]);
+
+  // 当前 socket 失败后必须立刻作废 epoch，退避期的旧 step 不能再投影到弹窗。
+  await page.waitForTimeout(150);
+  await expect(dialog.getByText("旧连接在退避期迟到")).toHaveCount(0);
+  await expect.poll(() => appSourceRequests.filter((request) => request === "operation:aso_epoch_gap"), {
+    timeout: 2_000
+  }).toHaveLength(2);
+
+  // 第二次 snapshot 尚未返回时仍没有 replacement epoch，旧 socket 的失败和终态也必须被拒绝。
+  await page.waitForTimeout(180);
+  expect(appSourceTicketRequests).toEqual(["aso_epoch_gap"]);
+  expect(appSourceRequests.filter((request) => request === "open:app_gcms:repo-code:2")).toHaveLength(0);
+  await expect(dialog.getByText("RUNNING", { exact: true })).toBeVisible();
+
+  releaseReplacementSnapshot();
+  await expect.poll(() => appSourceTicketRequests).toEqual(["aso_epoch_gap", "aso_epoch_gap"]);
+  await expect(dialog.getByText("新连接已恢复")).toBeVisible();
+  expect(appSourceRequests.filter((request) => request === "open:app_gcms:repo-code:2")).toHaveLength(0);
+});
+
 test("progress reconnect keeps exponential backoff across sockets that open without a valid frame", async ({ page }) => {
   const ticketRequests: string[] = [];
   const ticketTimes: number[] = [];
@@ -2571,6 +2674,76 @@ test("DiffViewer save emit reaches the managed Agent writer behind the capabilit
     "# managed public Agent"
   );
   await expect.poll(() => agentFileFrames.filter((frame) => frame.op === "agent-config.write")).toHaveLength(2);
+});
+
+test("source Run Diff save dispatch blocks Agent writers and writes an ordinary source file", async ({ page }) => {
+  const agentFileFrames: Array<{
+    op: string;
+    scope: string;
+    path: string;
+    workspaceId?: string;
+    content?: string;
+  }> = [];
+  const fileWriteRequests: Array<{ workspaceId: string; path: string; content: string }> = [];
+  const sourceWorkspace = {
+    ...workspace(),
+    workspaceId: "wrk_source_diff_save",
+    name: "Diff 保存源码",
+    rootPath: "/srv/test-agent/app-source/diff-save",
+    appId: "app_gcms"
+  };
+  const repository = appSourceRepository({ generation: 6, name: "Diff 保存源码库" });
+  await mockBackendApi(page, {
+    ...agentWorkspaceSetup(),
+    authRoles: ["SUPER_ADMIN", "APP_ADMIN"],
+    agentFileFrames,
+    fileWriteRequests,
+    fileContents: { "src/source.ts": "export const source = 'old';\n" },
+    workspaces: [workspace(), sourceWorkspace],
+    appSourceRepositories: { app_gcms: [repository] },
+    appSourceOpenResults: {
+      "app_gcms:repo-code:6": appSourceOpenResult("wrk_source_diff_save", 6)
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.locator(".figma-file-explorer").getByRole("button", { name: "打开应用源码" }).click();
+  await page.getByRole("button", { name: "打开Diff 保存源码库源码" }).click();
+  await expect(page.locator(".figma-file-explorer").getByText("源码快照", { exact: true })).toBeVisible();
+
+  // 真实 RunEvent 投影让 source 模式挂载 DiffViewer；后续直接走组件 save-file -> 父级保存调度。
+  await callAgentWorkbenchHandler(page, "loadDiffSource", ["run"]);
+  await callAgentWorkbenchHandler(page, "handleRunEvent", [event(1, "diff.proposed", {
+    files: [{
+      path: "src/source.ts",
+      status: "modified",
+      patch: "@@ -1 +1 @@\n-export const source = 'old';\n+export const source = 'new';",
+      additions: 1,
+      deletions: 1
+    }]
+  })]);
+  await expect(page.getByText("Run Diff", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "M source.ts" })).toBeVisible();
+
+  await emitDiffViewerSave(page,
+    "agent-workspace:wrk_source_diff_save:::agents%2Fsource-workspace.md",
+    "# source workspace Agent"
+  );
+  await emitDiffViewerSave(page,
+    "agent-public:::agents%2Fsource-public.md",
+    "# source public Agent"
+  );
+  await page.waitForTimeout(100);
+  expect(agentFileFrames.filter((frame) => frame.op === "agent-config.write")).toHaveLength(0);
+  expect(fileWriteRequests).toHaveLength(0);
+
+  await emitDiffViewerSave(page, "src/source.ts", "export const source = 'saved';\n");
+  await expect.poll(() => fileWriteRequests).toEqual([{
+    workspaceId: "wrk_source_diff_save",
+    path: "src/source.ts",
+    content: "export const source = 'saved';\n"
+  }]);
+  expect(agentFileFrames.filter((frame) => frame.op === "agent-config.write")).toHaveLength(0);
 });
 
 test("entering source mode closes an already-open managed personal pull dialog", async ({ page }) => {
@@ -7212,6 +7385,8 @@ async function mockBackendApi(
     appSourceMaterializationResults?: Record<string, Record<string, unknown>>;
     appSourceMaterializationRequests?: Array<{ key: string; payload: Record<string, unknown> }>;
     appSourceOperationSnapshots?: Record<string, Array<Record<string, unknown>> | Record<string, unknown>>;
+    /** 按 operationId 与 GET 次序阻塞 snapshot，用于覆盖重连 snapshot 尚未返回的代次窗口。 */
+    appSourceOperationRequestGates?: Record<string, Array<Promise<void> | undefined>>;
     appSourceTicketRequests?: string[];
     appSourceTicketRequestTimes?: number[];
     appSourceRetryResults?: Record<string, Record<string, unknown>>;
@@ -7703,6 +7878,7 @@ async function mockBackendApi(
   const nightTasks = capture.nightTasks ?? [];
   let currentProcessStatus = capture.processStatus ?? "READY";
   let sshKeys: Array<Record<string, unknown>> = [];
+  const appSourceOperationRequestCounts: Record<string, number> = {};
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     const method = route.request().method();
@@ -7967,6 +8143,9 @@ async function mockBackendApi(
         const operationId = decodeURIComponent(appSourceOperationMatch[1] ?? "");
         if (method === "GET" && !appSourceOperationMatch[2]) {
           capture.appSourceRequests?.push(`operation:${operationId}`);
+          const requestIndex = appSourceOperationRequestCounts[operationId] ?? 0;
+          appSourceOperationRequestCounts[operationId] = requestIndex + 1;
+          await capture.appSourceOperationRequestGates?.[operationId]?.[requestIndex];
           const configured = capture.appSourceOperationSnapshots?.[operationId];
           const snapshot = Array.isArray(configured)
             ? (configured.length > 1 ? configured.shift() : configured[0])
