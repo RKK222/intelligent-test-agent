@@ -1839,6 +1839,25 @@ test("ordinary user opens toolbox immersively and browser history restores panel
   await expect(rightPanel).toHaveCSS("width", "0px");
 });
 
+test("toolbox keeps search source and clear filters on one row at tablet width", async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 900 });
+  await mockBackendApi(page, { authRoles: ["USER"] });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "工具盒子" }).click();
+
+  const search = page.locator(".toolbox-search");
+  const source = page.locator(".toolbox-source-filter");
+  const clear = page.getByRole("button", { name: "清除筛选", exact: true });
+  await expect(search).toBeVisible();
+  await expect(source).toBeVisible();
+  await expect(clear).toBeVisible();
+
+  const controlTops = await Promise.all([search, source, clear].map((locator) => locator.evaluate((node) => node.getBoundingClientRect().top)));
+  expect(controlTops[0]).toBe(controlTops[1]);
+  expect(controlTops[1]).toBe(controlTops[2]);
+});
+
 test("settings dialog manages application context and SSH key metadata", async ({ page }) => {
   await mockBackendApi(page);
 
