@@ -1129,3 +1129,20 @@
   - 合并后确认无冲突标记且 `git diff --cached --check` 通过；JDK 21 后端跳过测试完整打包、前端全 workspace 类型检查、100 个测试文件 1655 passed / 1 skipped，以及工具盒子 193 项平台契约均通过。
 - Result:
   - 当前 `main` 同时包含远端既有成果和两份工具 Dockerfile/构建部署脚本，具备非强制推送条件；未使用 rebase、force push、stash 或工作树清理。
+
+### 2026-07-28 - 完成应用源码快照综合验收
+
+- Why:
+  - 应用源码固定提交、多服务器物化、独立进度 WebSocket 和工作台源码模式已分阶段落地，需要统一稳定部署/测试文档、审计仓库边界，并完成后端与前端根级验证。
+  - 后端根测试发现 AppSource 分支与远端主线自动合并后，同一 `ReferenceRepositoryReplicaTaskDispatcher` 测试 Bean 被语义重复注册，必须先定位根因再收尾。
+- What:
+  - 补充应用源码本机挂载、容量、worker/租约、XXL V6 清理与监控说明，新增综合自动化和双服务器人工验收文档，并完善 backend-api 的 operationId、AbortSignal 和严格进度帧契约。
+  - 审计功能提交 154 个唯一路径，确认未修改 OpenCode 快照、generated SDK、`.env*` 或工具盒子源码；新增关系型 SQL 只在 AppSource MyBatis XML/Flyway 和 XXL Flyway V6。
+  - 删除 `ReferenceRepositoryContextTest` 中自动合并产生的第二条重复 import 和重复 `.withBean`，保留 `AppSourceRepositoryHistory`，不改变生产 Bean 图。
+- How:
+  - 稳定红测 1/1 复现 `BeanDefinitionOverrideException`；对比合并提交两个父分支确认各自只有一份 dispatcher，最小删除重复注册后单测、`test-agent-app -am` 和后端根全量依次转绿。
+  - 后端根测试 fresh Surefire 为 351 suites / 2198 tests / 0 failures / 0 errors / 19 conditional skips；PostgreSQL AppSource 1/1、MySQL XXL 3/3 均实际运行且 0 skipped。
+  - 前端定向 Vitest 9 files / 122、Chromium/mobile Playwright 22/22、根 Vitest 104 files / 1691 passed / 1 skipped、全 workspace typecheck 和生产 build 全部通过；AI 文档校验与 diff check 通过。
+- Result:
+  - 应用源码快照形成从领域、数据库、物化恢复、API/独立进度 WebSocket、文件能力到清理运维的交付闭环；进度明确不产生 RunEvent/SSE，普通源码文件仍只走平台 Workspace 文件 WebSocket。
+  - 本次不新增 API wire、RunEvent、数据库结构或 SQL，不修改环境配置、generated SDK 和 OpenCode 源码。真实双 Java/双 Linux 的 Git/副本/磁盘清理仍需上线前按人工验收清单执行；前端大 chunk 与 jsdom Canvas 提示为既有非阻断输出。

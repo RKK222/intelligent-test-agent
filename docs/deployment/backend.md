@@ -34,7 +34,7 @@ Admin/MySQL 故障只让 `xxlJobAdmin` health 为 `DOWN`，Admin 生命周期按
 
 1. 创建共享 MySQL 库和账号并验证字符集/时区。
 2. 为所有 Java 配置相同 MySQL 凭据和强随机 `TEST_AGENT_XXL_JOB_ACCESS_TOKEN`，并确认每台 Linux 的 advertised host 可从所有 Admin 节点访问。
-3. 滚动部署 Java，确认 Flyway 到 V3、六条任务和各 executor 自动注册。
+3. 滚动部署 Java，确认 Admin 子上下文 Flyway 到 V6、八条任务和各 executor 自动注册。
 4. 开放 Admin 到所有 executor 的受控网络。
 5. 配置 Nginx `/xxl-job-admin/` 同源代理并执行 iframe SSO 验收。`TEST_AGENT_NGINX_XXL_JOB_ADMINS` 仅属于中央 Nginx，不是 Java 环境变量。
 
@@ -54,6 +54,7 @@ Admin/MySQL 故障只让 `xxlJobAdmin` health 为 `DOWN`，Admin 生命周期按
 /data/.testagent/agent-opencode/.config/             # 公共 Agent Git 仓库根目录，由 OPENCODE_PUBLIC_CONFIG_GIT_ROOT 控制
 /data/.testagent/agent-opencode/.configdev/          # 公共 Agent Git worktree 根目录
 /data/.testagent/agent-opencode/workspace/           # 应用版本工作区和个人 worktree 根目录
+/data/.testagent/agent-opencode/workspace/appsource/ # 应用源码快照副本根目录
 /data/.testagent/agent-opencode/references/          # 本服务器引用资产库副本根目录
 /data/.testagent/agent-opencode/manager              # manager 本地 state 和日志
 ```
@@ -138,6 +139,14 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端和前端展�
 补偿器默认启动 5 秒后执行，之后每 60 秒扫描一次（配置项 `test-agent.reference-repository.replica-reconciler.enabled`、`interval-seconds`，间隔最短 10 秒），用于恢复广播丢失、调度器拒绝、Java 重启和服务器重新上线，不承担正常请求的首轮唤醒。当前 generation 的离线非终态副本转为 `DEFERRED` 并清除旧租约；在线服务器可独立收敛为总体 `READY`，离线节点恢复心跳后重新转为待处理目标并补齐。Git 网络或超时失败从 5 秒开始指数退避、最高 5 分钟，状态写入成功后按 `nextRetryAt` 定向提交本机任务，Java 退出时仍由补偿扫描兜底；凭据、参数、目录安全、分支、origin、提交分叉和其它永久错误进入 `BLOCKED`，总体对在线服务器显示 `FAILED`，等待管理员修复后显式同步开启新 generation。
 
 引用资产 Git 操作使用发起应用管理员数据库中已加密保存的唯一 SSH key；内部部署按该用户统一认证号拼接有效 SSH URL。广播、状态表和日志不保存私钥或文件内容，错误只保留安全摘要与 traceId。所有 Java 必须连接同一 PostgreSQL/Redis 并开启 `TEST_AGENT_SERVER_BROADCAST_ENABLED=true` 才有低延迟广播；广播关闭或丢失时仍由数据库补偿扫描最终收敛。
+
+### 应用源码快照多服务器副本
+
+应用源码根目录来自只读通用参数 `OPENCODE_APP_SOURCE_ROOT=${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/appsource/`。每台承载后端 Java 的服务器都必须提供本机独立、与 staging/backup 同文件系统且 Java 运行用户可读写的目录；单个仓库固定使用 `{OPENCODE_APP_SOURCE_ROOT}/{repository.englishName}`，已产生源码历史后仓库英文名和类型冻结。该目录不能使用指向其它位置的符号链接，平台会在物化、索引修复、打开和清理前逐段执行 `NOFOLLOW_LINKS` 校验。容量规划必须同时计入 active 副本、替换期间同体量 staging、短时 backup 和失败后待清理文件，至少为预计 active 源码总量的三倍预留磁盘，并监控目录字节数、磁盘剩余空间、`FAILED/STALE` 副本及逾期 cleanup 数量。
+
+物化请求在数据库中冻结 generation、commit、结构化路径、保留期和目标服务器集合；数据库是任务事实源，Redis `app-source.replica-requested` 只负责低延迟唤醒。每台 Java 默认使用 2 个 worker、256 个 pending key，每 5 秒最多补偿扫描 64 个本机 `PENDING` 或租约过期的 `RUNNING` 副本；可分别通过 `test-agent.app-source.replica-worker-count`、`replica-max-pending`、`replica-recovery-interval-millis` 和 `replica-recovery-batch-size` 调整。单个副本默认租约 600 秒。队列满、广播丢失、Java 重启或服务器恢复后都由同一数据库扫描收敛，禁止改成 caller-runs、本机内存唯一事实或跨服务器共享源码目录。
+
+XXL V6 注册的 `workspace-management.app-source-cleanup` 每分钟以 `GLOBAL_MUTEX`、空 payload 唤醒集群；每台服务器只按本机 `linuxServerId` 认领到期任务，默认单轮 32 条、租约 300 秒，并用 generation、数据库租约和本地文件锁阻止旧任务删除新副本。XXL/Admin/MySQL 暂时不可用只会延迟周期唤醒；副本物化补偿不依赖 XXL，但到期磁盘回收会延迟，因此必须同时告警 XXL health、最后成功触发时间、cleanup backlog 和磁盘水位。清理失败进入数据库退避并只保存安全摘要，禁止运维直接删除未知目录；需要处置时先核对 slot active generation、snapshot、replica、cleanup 和 Runtime Workspace 状态。完整验收见 `docs/testing/app-source-snapshot.md`。
 
 启用用户进程模型后，未绑定用户的精确进程状态 GET 和初始化 POST 会按 Redis manager/backend 快照执行两级分配：先汇总每台服务器所有 manager CONNECTED 容器的 `currentProcesses`，在仍有本地可用容器且所选 Java 可达的服务器中选总进程最少者，再由目标 Java 复用本地最空容器、原子端口预留和公共启动流程；Redis 快照约 5 秒上报、10 秒 TTL，因此选服最终一致，并发容量仍由目标服务器原子预留保证。已有 ACTIVE binding 始终优先，远端初始化失败不自动改投其它服务器。已登录用户的 Run 和 opencode runtime 代理都会优先使用当前用户绑定的 `READY` 进程；用户未初始化或健康检测失败时返回平台 `OPENCODE_UNAVAILABLE`，由前端提示初始化。若请求落到任意 Java 且用户 ACTIVE binding 属于其他服务器，当前 Java 会通过 Redis Java 快照查找目标服务器 `listenUrl` 并把用户进程状态、初始化、Run 启动和 opencode runtime 代理请求转发到目标 Java，目标 Java 再控制本服务器 managers；目标后端不在线时返回 `OPENCODE_UNAVAILABLE`，不自动迁移 binding。无用户主体的 static-token 兼容调用仍可使用数据库中已有的固定 `execution_nodes`，用于旧集成或本地探测；应用不再从 yml 自动 seed 固定节点。Session 级 runtime 代理发现绑定节点不是当前用户进程节点时，会在当前进程上创建新的远端 session 并覆盖绑定，不会删除旧远端 session。
 
@@ -618,7 +627,7 @@ curl -fsS http://127.0.0.1:8080/actuator/health
 
 `DatabaseMigrationRunner` 会在启动时执行 Flyway migration；固定 opencode node yml 配置已作废，应用不再从配置自动写入 `execution_nodes`，历史兼容节点需由数据库已有数据或后续专门初始化流程维护。`TEST_AGENT_MODEL_CATALOG_SOURCE` 仅保留历史兼容，前端模型和供应商目录始终来自用户 opencode server 的公共配置。
 
-`ScheduledTaskRegistry` 只维护 handler 内存映射，不同步 PostgreSQL，应用内没有 `ScheduledTaskRunner`。Admin 子上下文 Flyway V1-V4 负责初始化七条周期任务；每个 Java 在本机 Admin readiness 就绪后才启动 executor，并使用平台 advertised host 自动注册地址，注册不带 Linux 亲和。超级管理员在同源 XXL 页面查看/修改/触发/停止周期任务和日志；夜间 15 分钟分发与 5 分钟补偿必须保持启用，清理任务在北京时间 08:00 删除 PostgreSQL 中超过 7 天的旧 scheduler 已结束记录。
+`ScheduledTaskRegistry` 只维护 handler 内存映射，不同步 PostgreSQL，应用内没有 `ScheduledTaskRunner`。Admin 子上下文 Flyway V1-V6 负责初始化八条周期任务；每个 Java 在本机 Admin readiness 就绪后才启动 executor，并使用平台 advertised host 自动注册地址，注册不带 Linux 亲和。超级管理员在同源 XXL 页面查看/修改/触发/停止周期任务和日志；夜间分发与应用源码清理保持每分钟启用，夜间补偿保持 5 分钟启用，scheduler 历史清理在北京时间 08:00 删除 PostgreSQL 中超过 7 天的旧已结束记录。
 
 ## 内部模型代理与模型目录配置
 
