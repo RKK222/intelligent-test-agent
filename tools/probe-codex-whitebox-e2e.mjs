@@ -7,6 +7,19 @@ import http from "node:http";
 import { Client } from "/usr/local/lib/opencode/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js";
 import { StdioClientTransport } from "/usr/local/lib/opencode/node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js";
 
+if (process.argv.includes("--verify-routing")) {
+  const decision = inspectFakeModelInput([
+    { type: "message", role: "user", content: "SCENARIO_READ" },
+    { type: "function_call_output", output: "WHITEBOX_MARKER=original" },
+    { type: "message", role: "user", content: "SCENARIO_REPLY 继续总结" },
+  ]);
+  assert.equal(decision.kind, "reply");
+  assert.equal(decision.toolOutputs.length, 1);
+  assert.match(decision.serialized, /SCENARIO_READ/);
+  process.stdout.write("whitebox-e2e-routing:reply-priority-ok\n");
+  process.exit(0);
+}
+
 const workspace = "/workspace/test-agent-whitebox-e2e-workspace";
 const outside = "/tmp/test-agent-whitebox-outside-secret.txt";
 await mkdir(workspace, { recursive: true });
@@ -39,25 +52,20 @@ const server = http.createServer(async (request, response) => {
   assert.equal(body.model, "smoke-model");
   assert.equal(body.stream, true);
 
-  const hasToolOutput = body.input.some((item) => item.type === "function_call_output");
-  if (hasToolOutput) {
-    for (const item of body.input.filter((candidate) => candidate.type === "function_call_output")) {
-      commandOutputs.push(String(item.output || ""));
-    }
+  const decision = inspectFakeModelInput(body.input);
+  // 续写请求包含前一轮 function_call_output；必须优先识别本轮提示，不能误回第一轮结果。
+  if (decision.kind === "reply") {
+    assert.match(decision.serialized, /SCENARIO_READ/);
+    assert.ok(decision.toolOutputs.length > 0, "reply request did not preserve prior tool output");
+    sendTextResponse(response, "follow-up observed");
+    return;
+  }
+  if (decision.kind === "tool-output") {
+    commandOutputs.push(...decision.toolOutputs);
     sendTextResponse(response, "command observed");
     return;
   }
-  const serialized = JSON.stringify(body.input);
-  const command = serialized.includes("SCENARIO_READ")
-    ? "pwd && rg -n WHITEBOX_MARKER source.txt"
-    : serialized.includes("SCENARIO_WRITE")
-      ? "printf 'hacked\\n' > source.txt"
-      : serialized.includes("SCENARIO_OUTSIDE")
-        ? `cat ${outside}`
-        : serialized.includes("SCENARIO_NETWORK")
-          ? "node -e \"fetch('http://127.0.0.1:18080/network-probe').then(r=>r.text()).then(console.log)\""
-          : null;
-  if (!command) {
+  if (decision.kind === "text") {
     sendTextResponse(response, "follow-up observed");
     return;
   }
@@ -65,7 +73,9 @@ const server = http.createServer(async (request, response) => {
     candidate.type === "function" && ["exec_command", "shell"].includes(candidate.name));
   assert.ok(tool, `missing shell tool: ${body.tools.map((item) => item.name).join(",")}`);
   const properties = tool.parameters?.properties || {};
-  const args = Object.hasOwn(properties, "cmd") ? { cmd: command } : { command };
+  const args = Object.hasOwn(properties, "cmd")
+    ? { cmd: decision.command }
+    : { command: decision.command };
   sendFunctionResponse(response, tool.name, args);
 });
 await new Promise((resolve, reject) => {
@@ -113,7 +123,7 @@ try {
 
   const reply = await client.callTool({
     name: "whitebox_reply",
-    arguments: { threadId: readResult.structuredContent.threadId, prompt: "继续总结" },
+    arguments: { threadId: readResult.structuredContent.threadId, prompt: "SCENARIO_REPLY 继续总结" },
   }, undefined, { timeout: 60_000, maxTotalTimeout: 60_000 });
   assert.equal(reply.isError, undefined);
   assert.match(reply.content[0].text, /follow-up observed/);
@@ -135,6 +145,31 @@ async function analyze(prompt) {
   );
   assert.equal(result.isError, undefined, JSON.stringify(result));
   return result;
+}
+
+function inspectFakeModelInput(input) {
+  const serialized = JSON.stringify(input);
+  const toolOutputs = input
+    .filter((candidate) => candidate.type === "function_call_output")
+    .map((item) => String(item.output || ""));
+  if (serialized.includes("SCENARIO_REPLY")) {
+    return { kind: "reply", serialized, toolOutputs };
+  }
+  if (toolOutputs.length > 0) {
+    return { kind: "tool-output", serialized, toolOutputs };
+  }
+  const command = serialized.includes("SCENARIO_READ")
+    ? "pwd && rg -n WHITEBOX_MARKER source.txt"
+    : serialized.includes("SCENARIO_WRITE")
+      ? "printf 'hacked\\n' > source.txt"
+      : serialized.includes("SCENARIO_OUTSIDE")
+        ? `cat ${outside}`
+        : serialized.includes("SCENARIO_NETWORK")
+          ? "node -e \"fetch('http://127.0.0.1:18080/network-probe').then(r=>r.text()).then(console.log)\""
+          : null;
+  return command
+    ? { kind: "command", command, serialized, toolOutputs }
+    : { kind: "text", serialized, toolOutputs };
 }
 
 function writeEvent(response, event, data) {

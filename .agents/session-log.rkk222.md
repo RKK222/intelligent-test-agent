@@ -2730,3 +2730,26 @@
 
 - 宿主预检现在可在企业 Docker 18.09.7 上进入真实能力探针，不再因版本解析或不存在的 `true` 路径产生伪失败。
 - 真实企业节点 namespace、只读、拒写、越界拒读、断网和续写验收仍未完成；必须在 `.114` 原生 Linux/x86_64 节点用修复后的脚本重跑并全部返回 0 后，才能继续 worker 部署。无 API、事件、数据库、性能、安全策略、运行时镜像、generated SDK、OpenCode 源码或环境配置变更。
+
+### 2026-07-28 - 修复白盒续写 E2E 伪模型误判
+
+### Why
+
+- `.114` 原生 Linux 节点已通过 bubblewrap 基础探针，但续写验收期望 `follow-up observed`、实际返回 `command observed`。
+- 续写请求正确保留了第一轮 `function_call_output`；本地伪模型却优先把任意历史工具输出识别成第一轮命令完成包，因此产生测试自身的伪失败，不是 Node、MCP SDK 或 Codex thread 恢复失败。
+
+### What
+
+- 复用既有 `probe-codex-whitebox-e2e.mjs`，用唯一 `SCENARIO_REPLY` 标记当前续写轮次，并在历史工具输出判定前优先处理；同时断言第一轮提示和工具输出仍存在，继续证明上下文被保留。
+- 给同一探针增加无需 namespace 的 `--verify-routing` 自检，既有 worker 镜像验证脚本在所有构建机上强制执行，覆盖“历史工具输出 + 新续写提示”的回归。
+- 同步 Codex 白盒部署文档；未新增平行探针、门面或运行时接口。
+
+### How
+
+- `node --check tools/probe-codex-whitebox-e2e.mjs`、相关 Shell `bash -n` 与 `git diff --check` 通过；把当前脚本只读挂载进旧镜像执行 `--verify-routing` 输出 `whitebox-e2e-routing:reply-priority-ok`。
+- `deploy/internal/package-release.sh --output-dir deploy/internal/dist --opencode-only --no-zip` 成功重建 linux/amd64 worker 和 programs；自动检查再次通过 Codex 0.145.0、Node/MCP 工具列表、配置失败关闭、MCP 契约 4 项和续写路由自检。Apple Silicon 仍按设计跳过 native namespace E2E。
+
+### Result
+
+- 企业探针现在能正确区分“上一轮工具输出”和“本轮续写提示”，不会把已成功恢复的 thread 误报为续写失败。
+- 真实 `.114` 节点尚未用新 worker 镜像重跑完整 E2E；新包加载后仍须先执行宿主检查，只有最终输出 `Codex whitebox host compatible` 才能继续部署。无 API、事件、数据库、性能、安全策略、生产门面、generated SDK、OpenCode 源码或环境配置变更。

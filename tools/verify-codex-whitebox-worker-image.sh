@@ -30,6 +30,11 @@ docker run --rm --platform linux/amd64 --network none --entrypoint sh "${IMAGE}"
   grep -F '\"@modelcontextprotocol/sdk\": \"1.29.0\"' /usr/local/lib/opencode/package-lock.json >/dev/null
 "
 
+# 构建机无需 native namespace 也必须验证续写提示优先于历史 function_call_output。
+docker run --rm --platform linux/amd64 --network none \
+  --entrypoint node "${IMAGE}" \
+  /usr/local/lib/codex/tests/probe-codex-whitebox-e2e.mjs --verify-routing
+
 docker run --rm --platform linux/amd64 --network none \
   --entrypoint node \
   --volume "${PROBE}:/tmp/probe-codex-mcp-tools.mjs:ro" \

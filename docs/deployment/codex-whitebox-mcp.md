@@ -132,6 +132,8 @@ deploy/internal/package-release.sh --output-dir deploy/internal/dist
 ```
 
 `package-release.sh` 会在 worker 镜像构建后自动运行构建机检查；检查不通过则不导出发布包。
+构建机检查还会构造“历史 `function_call_output` + 本轮续写提示”的输入，确认续写提示优先被
+识别并保留第一轮上下文；该项不依赖 native namespace，Apple Silicon 构建机也必须通过。
 
 `test-agent-programs.tar.gz` 与 worker 镜像同时包含 Codex、固定 bubblewrap、Apache-2.0
 LICENSE/NOTICE、bubblewrap COPYING、门面和版本/摘要元数据；企业服务器不下载 npm、Codex
