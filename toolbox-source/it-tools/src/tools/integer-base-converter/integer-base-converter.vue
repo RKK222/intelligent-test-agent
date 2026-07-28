@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import InputCopyable from '../../components/InputCopyable.vue';
-import { convertBase } from './integer-base-converter.model';
+import { InvalidDigitError, convertBase } from './integer-base-converter.model';
 
 const inputProps = {
   'labelPosition': 'left',
@@ -30,9 +30,8 @@ const error = computed(() => {
     return '';
   }
   catch (caught) {
-    const [code, digit, base] = (caught instanceof Error ? caught.message : '').split('|');
-    return code === 'INVALID_DIGIT'
-      ? t('tools.base-converter.ui.invalidDigit', { digit, base })
+    return caught instanceof InvalidDigitError
+      ? t('tools.base-converter.ui.invalidDigit', { digit: caught.digit, base: caught.base })
       : t('tools.base-converter.ui.conversionError');
   }
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { convertBase } from './integer-base-converter.model';
+import { InvalidDigitError, convertBase } from './integer-base-converter.model';
 
 describe('integer-base-converter', () => {
   describe('convertBase', () => {
@@ -14,6 +14,19 @@ describe('integer-base-converter', () => {
         expect(convertBase({ value: '42540766411283223938465490632011909384', fromBase: 10, toBase: 10 })).toEqual('42540766411283223938465490632011909384');
         expect(convertBase({ value: '42540766411283223938465490632011909384', fromBase: 10, toBase: 16 })).toEqual('20010db8000085a300000000ac1f8908');
         expect(convertBase({ value: '20010db8000085a300000000ac1f8908', fromBase: 16, toBase: 10 })).toEqual('42540766411283223938465490632011909384');
+      });
+
+      it('preserves an invalid pipe digit as structured error data', () => {
+        expect.assertions(4);
+        try {
+          convertBase({ value: '|', fromBase: 10, toBase: 16 });
+        }
+        catch (error) {
+          expect(error).toBeInstanceOf(InvalidDigitError);
+          expect(error).toMatchObject({ code: 'INVALID_DIGIT', digit: '|', base: 10 });
+          expect((error as Error).message).toBe('INVALID_DIGIT');
+          expect((error as Error).name).toBe('InvalidDigitError');
+        }
       });
     });
   });
