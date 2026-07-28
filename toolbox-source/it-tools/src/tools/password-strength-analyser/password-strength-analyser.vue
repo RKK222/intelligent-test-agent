@@ -1,24 +1,52 @@
 <script setup lang="ts">
-import { getPasswordCrackTimeEstimation } from './password-strength-analyser.service';
+import { type CrackDuration, getPasswordCrackTimeEstimation } from './password-strength-analyser.service';
 
 const password = ref('');
+const { t } = useI18n();
 const crackTimeEstimation = computed(() => getPasswordCrackTimeEstimation({ password: password.value }));
+const durationUnitKeys: Record<string, { singular: string; plural: string }> = {
+  MILLENNIUM: { singular: 'tools.password-strength-analyser.ui.duration.units.millennium.singular', plural: 'tools.password-strength-analyser.ui.duration.units.millennium.plural' },
+  CENTURY: { singular: 'tools.password-strength-analyser.ui.duration.units.century.singular', plural: 'tools.password-strength-analyser.ui.duration.units.century.plural' },
+  DECADE: { singular: 'tools.password-strength-analyser.ui.duration.units.decade.singular', plural: 'tools.password-strength-analyser.ui.duration.units.decade.plural' },
+  YEAR: { singular: 'tools.password-strength-analyser.ui.duration.units.year.singular', plural: 'tools.password-strength-analyser.ui.duration.units.year.plural' },
+  MONTH: { singular: 'tools.password-strength-analyser.ui.duration.units.month.singular', plural: 'tools.password-strength-analyser.ui.duration.units.month.plural' },
+  WEEK: { singular: 'tools.password-strength-analyser.ui.duration.units.week.singular', plural: 'tools.password-strength-analyser.ui.duration.units.week.plural' },
+  DAY: { singular: 'tools.password-strength-analyser.ui.duration.units.day.singular', plural: 'tools.password-strength-analyser.ui.duration.units.day.plural' },
+  HOUR: { singular: 'tools.password-strength-analyser.ui.duration.units.hour.singular', plural: 'tools.password-strength-analyser.ui.duration.units.hour.plural' },
+  MINUTE: { singular: 'tools.password-strength-analyser.ui.duration.units.minute.singular', plural: 'tools.password-strength-analyser.ui.duration.units.minute.plural' },
+  SECOND: { singular: 'tools.password-strength-analyser.ui.duration.units.second.singular', plural: 'tools.password-strength-analyser.ui.duration.units.second.plural' },
+};
+
+function formatDuration(duration: CrackDuration) {
+  if (duration.kind === 'INSTANT') {
+    return t('tools.password-strength-analyser.ui.duration.instant');
+  }
+  if (duration.kind === 'LESS_THAN_SECOND') {
+    return t('tools.password-strength-analyser.ui.duration.lessThanSecond');
+  }
+  return duration.parts.map(({ code, formattedQuantity, quantity }) => {
+    const keys = durationUnitKeys[code];
+    return `${formattedQuantity} ${t(quantity > 1 ? keys.plural : keys.singular)}`;
+  }).join(t('tools.password-strength-analyser.ui.duration.separator'));
+}
+
+const crackDurationFormatted = computed(() => formatDuration(crackTimeEstimation.value.crackDuration));
 
 const details = computed(() => [
   {
-    label: 'Password length:',
+    label: t('tools.password-strength-analyser.ui.passwordLength'),
     value: crackTimeEstimation.value.passwordLength,
   },
   {
-    label: 'Entropy:',
+    label: t('tools.password-strength-analyser.ui.entropy'),
     value: Math.round(crackTimeEstimation.value.entropy * 100) / 100,
   },
   {
-    label: 'Character set size:',
+    label: t('tools.password-strength-analyser.ui.charsetSize'),
     value: crackTimeEstimation.value.charsetLength,
   },
   {
-    label: 'Score:',
+    label: t('tools.password-strength-analyser.ui.score'),
     value: `${Math.round(crackTimeEstimation.value.score * 100)} / 100`,
   },
 ]);
@@ -29,7 +57,7 @@ const details = computed(() => [
     <c-input-text
       v-model:value="password"
       type="password"
-      placeholder="Enter a password..."
+      :placeholder="t('tools.password-strength-analyser.ui.passwordPlaceholder')"
       clearable
       autofocus
       raw-text
@@ -38,10 +66,10 @@ const details = computed(() => [
 
     <c-card text-center>
       <div op-60>
-        Duration to crack this password with brute force
+        {{ t('tools.password-strength-analyser.ui.crackDuration') }}
       </div>
       <div text-2xl data-test-id="crack-duration">
-        {{ crackTimeEstimation.crackDurationFormatted }}
+        {{ crackDurationFormatted }}
       </div>
     </c-card>
     <c-card>
@@ -55,8 +83,8 @@ const details = computed(() => [
       </div>
     </c-card>
     <div op-70>
-      <span font-bold>Note: </span>
-      The computed strength is based on the time it would take to crack the password using a brute force approach, it does not take into account the possibility of a dictionary attack.
+      <span font-bold>{{ t('tools.password-strength-analyser.ui.noteLabel') }}</span>
+      {{ t('tools.password-strength-analyser.ui.note') }}
     </div>
   </div>
 </template>

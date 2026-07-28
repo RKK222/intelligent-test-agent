@@ -1,29 +1,29 @@
 import type { OGSchemaType } from '../OGSchemaType.type';
 
 export const videoMovie: OGSchemaType = {
-  name: 'Movie details',
+  name: 'tools.og-meta-generator.ui.schema.videoMovie.name',
   elements: [
     {
       type: 'input-multiple',
-      label: 'Actor',
+      label: 'tools.og-meta-generator.ui.schema.videoMovie.actor',
       key: 'video:actor',
-      placeholder: 'Name of the actress/actor...',
+      placeholder: 'tools.og-meta-generator.ui.schema.videoMovie.actorPlaceholder',
     },
     // { type: 'input', label: 'Actor role', key: 'video:actor:role', placeholder: 'The role they played...' },
     {
       type: 'input-multiple',
-      label: 'Director',
+      label: 'tools.og-meta-generator.ui.schema.videoMovie.director',
       key: 'video:director',
-      placeholder: 'Name of the director...',
+      placeholder: 'tools.og-meta-generator.ui.schema.videoMovie.directorPlaceholder',
     },
-    { type: 'input-multiple', label: 'Writer', key: 'video:writer', placeholder: 'Writers of the movie...' },
-    { type: 'input', label: 'Duration', key: 'video:duration', placeholder: 'The movie\'s length in seconds...' },
+    { type: 'input-multiple', label: 'tools.og-meta-generator.ui.schema.videoMovie.writer', key: 'video:writer', placeholder: 'tools.og-meta-generator.ui.schema.videoMovie.writerPlaceholder' },
+    { type: 'input', label: 'tools.og-meta-generator.ui.schema.common.duration', key: 'video:duration', placeholder: 'tools.og-meta-generator.ui.schema.videoMovie.durationPlaceholder' },
     {
       type: 'input',
-      label: 'Release date',
+      label: 'tools.og-meta-generator.ui.schema.common.releaseDate',
       key: 'video:release_date',
-      placeholder: 'The date the movie was released...',
+      placeholder: 'tools.og-meta-generator.ui.schema.videoMovie.releaseDatePlaceholder',
     },
-    { type: 'input', label: 'Tag', key: 'video:tag', placeholder: 'Tag words associated with this movie...' },
+    { type: 'input', label: 'tools.og-meta-generator.ui.schema.common.tag', key: 'video:tag', placeholder: 'tools.og-meta-generator.ui.schema.videoMovie.tagPlaceholder' },
   ],
 };

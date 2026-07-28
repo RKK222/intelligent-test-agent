@@ -7,7 +7,7 @@ export function convertBase({ value, fromBase, toBase }: { value: string; fromBa
     .reverse()
     .reduce((carry: bigint, digit: string, index: number) => {
       if (!fromRange.includes(digit)) {
-        throw new Error(`Invalid digit "${digit}" for base ${fromBase}.`);
+        throw new Error(`INVALID_DIGIT|${digit}|${fromBase}`);
       }
       return (carry += BigInt(fromRange.indexOf(digit)) * BigInt(fromBase) ** BigInt(index));
     }, 0n);

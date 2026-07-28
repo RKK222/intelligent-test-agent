@@ -115,6 +115,30 @@ tools:
   password-strength-analyser:
     title: Password strength analyser
     description: Discover the strength of your password with this client-side-only password strength analyser and crack time estimation tool.
+    ui:
+      passwordPlaceholder: Enter a password…
+      crackDuration: Time required to brute-force this password
+      passwordLength: 'Password length:'
+      entropy: 'Entropy:'
+      charsetSize: 'Character set size:'
+      score: 'Score:'
+      noteLabel: 'Note: '
+      note: The calculation estimates brute-force time and does not account for dictionary attacks.
+      duration:
+        instant: Instantly
+        lessThanSecond: Less than a second
+        separator: ', '
+        units:
+          millennium: { singular: millennium, plural: millennia }
+          century: { singular: century, plural: centuries }
+          decade: { singular: decade, plural: decades }
+          year: { singular: year, plural: years }
+          month: { singular: month, plural: months }
+          week: { singular: week, plural: weeks }
+          day: { singular: day, plural: days }
+          hour: { singular: hour, plural: hours }
+          minute: { singular: minute, plural: minutes }
+          second: { singular: second, plural: seconds }
 
   chronometer:
     title: Chronometer
@@ -132,6 +156,16 @@ tools:
     tokenPlaceholder: 'The token...'
     copied: Token copied to the clipboard
     button:
+      copy: Copy
+      refresh: Refresh
+    ui:
+      uppercase: Uppercase (ABC…)
+      lowercase: Lowercase (abc…)
+      numbers: Numbers (123…)
+      symbols: Symbols (!-;…)
+      length: Length
+      tokenPlaceholder: The token…
+      copied: Token copied to the clipboard
       copy: Copy
       refresh: Refresh
   percentage-calculator:
@@ -153,6 +187,18 @@ tools:
   keycode-info:
     title: Keycode info
     description: Find the javascript keycode, code, location and modifiers of any pressed key.
+    ui:
+      key: 'Key:'
+      keyPlaceholder: Key name…
+      keycode: 'Keycode:'
+      keycodePlaceholder: Keycode…
+      code: 'Code:'
+      codePlaceholder: Code…
+      location: 'Location:'
+      locationPlaceholder: Location…
+      modifiers: 'Modifiers:'
+      none: None
+      instruction: Press a key on your keyboard to view its information
 
   emoji-picker:
     title: Emoji picker
@@ -161,10 +207,31 @@ tools:
   color-converter:
     title: Color converter
     description: Convert color between the different formats (hex, rgb, hsl and css name)
+    ui:
+      colorPicker: Color picker
+      name: Name
+      unknown: Unknown
+      example: 'e.g. {value}'
+      invalidColorPicker: Invalid color picker value.
+      invalidFormat: 'Invalid {format} format.'
+      invalidName: Invalid color name.
 
   bcrypt:
     title: Bcrypt
     description: Hash and compare text string using bcrypt. Bcrypt is a password-hashing function based on the Blowfish cipher.
+    ui:
+      hashTitle: Hash
+      hashPlaceholder: Your string to hash with Bcrypt…
+      stringLabel: 'Your string:'
+      saltLabel: 'Salt rounds:'
+      saltPlaceholder: Salt rounds…
+      copied: Hashed string copied to the clipboard
+      copyHash: Copy hash
+      compareTitle: Compare string with hash
+      compareStringPlaceholder: Your string to compare…
+      hashLabel: 'Your hash:'
+      compareHashPlaceholder: Your hash to compare…
+      matchLabel: 'Do they match?'
 
   crontab-generator:
     title: Crontab generator
@@ -189,10 +256,31 @@ tools:
   slugify-string:
     title: Slugify string
     description: Make a string url, filename and id safe.
+    ui:
+      copied: Slug copied to the clipboard
+      inputLabel: String to slugify
+      inputPlaceholder: Enter a string…
+      outputLabel: Slug
+      outputPlaceholder: The slug will appear here
+      copy: Copy slug
 
   encryption:
     title: Encrypt / decrypt text
     description: Encrypt clear text and decrypt ciphertext using crypto algorithms like AES, TripleDES, Rabbit or RC4.
+    ui:
+      encrypt: Encrypt
+      decrypt: Decrypt
+      plainText: 'Your text:'
+      plainTextPlaceholder: The string to encrypt
+      secretKey: 'Your secret key:'
+      algorithm: 'Encryption algorithm:'
+      encryptedText: 'Your encrypted text:'
+      encryptedInput: 'Encrypted text:'
+      encryptedInputPlaceholder: The string to decrypt
+      decryptedText: 'Your decrypted text:'
+      outputPlaceholder: The result will appear here
+      unableToDecrypt: Unable to decrypt your text
+      decryptErrorTitle: Error while decrypting
 
   random-port-generator:
     title: Random port generator
@@ -209,30 +297,130 @@ tools:
   roman-numeral-converter:
     title: Roman numeral converter
     description: Convert Roman numerals to numbers and convert numbers to Roman numerals.
+    ui:
+      rangeError: 'Only numbers between {min} and {max} can be converted'
+      invalidRoman: The input is not a valid Roman numeral
+      romanCopied: Roman numeral copied to the clipboard
+      arabicCopied: Arabic numeral copied to the clipboard
+      arabicToRoman: Arabic numeral to Roman numeral
+      romanToArabic: Roman numeral to Arabic numeral
 
   hmac-generator:
     title: Hmac generator
     description: Computes a hash-based message authentication code (HMAC) using a secret key and your favorite hashing function.
+    ui:
+      plainText: Plain text to authenticate
+      plainTextPlaceholder: Plain text to compute the HMAC…
+      secret: Secret key
+      secretPlaceholder: Enter the secret key…
+      hashFunction: Hash function
+      hashFunctionPlaceholder: Select a hash function…
+      outputEncoding: Output encoding
+      outputEncodingPlaceholder: Select the result encoding…
+      binary: Binary (base 2)
+      hexadecimal: Hexadecimal (base 16)
+      base64: Base64 (base 64)
+      base64Url: Base64 URL-safe (base 64)
+      outputLabel: HMAC of your text
+      outputPlaceholder: The HMAC result…
+      copy: Copy HMAC
 
   bip39-generator:
     title: BIP39 passphrase generator
     description: Generate a BIP39 passphrase from an existing or random mnemonic, or get the mnemonic from the passphrase.
+    ui:
+      language: 'Language:'
+      entropy: 'Entropy (seed):'
+      entropyPlaceholder: Your hexadecimal entropy…
+      passphrase: 'Passphrase (mnemonic):'
+      passphrasePlaceholder: Your mnemonic…
+      entropyLengthError: Entropy length must be from 16 to 32 and a multiple of 4
+      entropyHexError: Entropy must be a hexadecimal string
+      invalidMnemonic: Invalid mnemonic
+      entropyCopied: Entropy copied to the clipboard
+      passphraseCopied: Passphrase copied to the clipboard
+      languages:
+        english: English
+        chineseSimplified: Chinese (Simplified)
+        chineseTraditional: Chinese (Traditional)
+        czech: Czech
+        french: French
+        italian: Italian
+        japanese: Japanese
+        korean: Korean
+        portuguese: Portuguese
+        spanish: Spanish
 
   base64-file-converter:
     title: Base64 file converter
     description: Convert a string, file, or image into its base64 representation.
+    ui:
+      invalidBase64: Invalid Base64 string
+      copied: Base64 string copied to the clipboard
+      base64ToFile: Base64 to file
+      fileName: File name
+      fileNamePlaceholder: Download file name
+      extension: Extension
+      base64InputPlaceholder: Paste your Base64 file string here…
+      previewImage: Preview image
+      downloadFile: Download file
+      fileToBase64: File to Base64
+      upload: Drag and drop a file here, or click to select a file
+      outputPlaceholder: The Base64 file will appear here
 
   list-converter:
     title: List converter
     description: This tool can process column-based data and apply various changes (transpose, add prefix and suffix, reverse list, sort list, lowercase values, truncate values) to each row.
+    ui:
+      sortAscending: Sort ascending
+      sortDescending: Sort descending
+      trimItems: Trim list items
+      removeDuplicates: Remove duplicates
+      lowercase: Convert to lowercase
+      keepLineBreaks: Keep line breaks
+      sortList: Sort list
+      sortPlaceholder: Sort alphabetically
+      separator: Separator
+      wrapItem: Wrap item
+      itemPrefix: Item prefix
+      itemSuffix: Item suffix
+      wrapList: Wrap list
+      listPrefix: List prefix
+      listSuffix: List suffix
+      inputLabel: Your input data
+      inputPlaceholder: Paste your input data here…
+      outputLabel: Your transformed data
 
   base64-string-converter:
     title: Base64 string encoder/decoder
     description: Simply encode and decode strings into their base64 representation.
+    ui:
+      base64Copied: Base64 string copied to the clipboard
+      stringCopied: String copied to the clipboard
+      invalidBase64: Invalid Base64 string
+      stringToBase64: String to Base64
+      encodeUrlSafe: Encode using URL-safe characters
+      stringPlaceholder: Enter your string…
+      stringToEncode: String to encode
+      base64OfString: Base64 representation
+      base64OutputPlaceholder: The Base64 representation will appear here
+      copyBase64: Copy Base64
+      base64ToString: Base64 to string
+      decodeUrlSafe: Decode URL-safe characters
+      base64InputPlaceholder: Enter your Base64 string…
+      base64ToDecode: Base64 string to decode
+      decodedString: Decoded string
+      decodedPlaceholder: The decoded string will appear here
+      copyDecoded: Copy decoded string
 
   toml-to-yaml:
     title: TOML to YAML
     description: Parse and convert TOML to YAML.
+    ui:
+      invalidToml: Provided TOML is not valid.
+      inputLabel: Your TOML
+      inputPlaceholder: Paste your TOML here…
+      outputLabel: YAML from your TOML
 
   math-evaluator:
     title: Math evaluator
@@ -241,10 +429,26 @@ tools:
   json-to-yaml-converter:
     title: JSON to YAML converter
     description: Simply convert JSON to YAML with this online live converter.
+    ui:
+      invalidJson: Provided JSON is not valid.
+      inputLabel: Your JSON
+      inputPlaceholder: Paste your JSON here…
+      outputLabel: YAML from your JSON
 
   url-parser:
     title: URL parser
     description: Parse a URL into its separate constituent parts (protocol, origin, params, port, username-password, ...)
+    ui:
+      invalidUrl: Invalid URL
+      protocol: Protocol
+      username: Username
+      password: Password
+      hostname: Hostname
+      port: Port
+      path: Path
+      params: Query parameters
+      inputLabel: URL to parse
+      inputPlaceholder: Enter a URL…
 
   iban-validator-and-parser:
     title: IBAN validator and parser
@@ -261,10 +465,38 @@ tools:
   case-converter:
     title: Case converter
     description: Transform the case of a string and choose between different formats
+    ui:
+      inputLabel: 'Your string:'
+      inputPlaceholder: Your string…
+      lowercase: 'Lowercase:'
+      uppercase: 'Uppercase:'
+      camelCase: 'camelCase:'
+      capitalCase: 'Capital Case:'
+      constantCase: 'CONSTANT_CASE:'
+      dotCase: 'dot.case:'
+      headerCase: 'Header-Case:'
+      noCase: 'No case:'
+      paramCase: 'param-case:'
+      pascalCase: 'PascalCase:'
+      pathCase: 'path/case:'
+      sentenceCase: 'Sentence case:'
+      snakeCase: 'snake_case:'
+      mockingCase: 'mOcKiNg CaSe:'
 
   html-entities:
     title: Escape HTML entities
     description: Escape or unescape HTML entities (replace characters like <,>, &, " and \' with their HTML version)
+    ui:
+      escapeTitle: Escape HTML entities
+      inputString: 'Your string:'
+      escapePlaceholder: The string to escape
+      escapedString: 'Escaped string:'
+      escapedPlaceholder: The escaped string
+      unescapeTitle: Unescape HTML entities
+      escapedInput: 'Your escaped string:'
+      unescapePlaceholder: The string to unescape
+      unescapedString: 'Unescaped string:'
+      unescapedPlaceholder: The unescaped string
 
   json-prettify:
     title: JSON prettify and format
@@ -281,10 +513,26 @@ tools:
   mime-types:
     title: MIME types
     description: Convert MIME types to file extensions and vice-versa.
+    ui:
+      mimeToExtension: MIME type to extension
+      mimeToExtensionHelp: Enter a MIME type to list its file extensions.
+      mimePlaceholder: Enter a MIME type, for example application/json
+      extensionsFor: 'Extensions for {mime}:'
+      extensionToMime: Extension to MIME type
+      extensionToMimeHelp: Enter a file extension to find its MIME type.
+      extensionPlaceholder: Enter an extension, for example json
+      mimeForExtension: 'MIME type for .{extension}:'
+      mimeTypes: MIME types
+      extensions: Extensions
 
   toml-to-json:
     title: TOML to JSON
     description: Parse and convert TOML to JSON.
+    ui:
+      invalidToml: Provided TOML is not valid.
+      inputLabel: Your TOML
+      inputPlaceholder: Paste your TOML here…
+      outputLabel: JSON from your TOML
 
   lorem-ipsum-generator:
     title: Lorem ipsum generator
@@ -313,14 +561,42 @@ tools:
   rsa-key-pair-generator:
     title: RSA key pair generator
     description: Generate a new random RSA private and public pem certificate key pair.
+    ui:
+      bits: 'Bits:'
+      bitsError: Bits must be from 256 to 16384 and a multiple of 8
+      refresh: Regenerate key pair
+      publicKey: Public key
+      privateKey: Private key
 
   html-wysiwyg-editor:
     title: HTML WYSIWYG editor
     description: Online, feature-rich WYSIWYG HTML editor which generates the source code of the content immediately.
+    ui:
+      bold: Bold
+      italic: Italic
+      strike: Strikethrough
+      inlineCode: Inline code
+      heading1: Heading 1
+      heading2: Heading 2
+      heading3: Heading 3
+      heading4: Heading 4
+      bulletList: Bullet list
+      orderedList: Ordered list
+      codeBlock: Code block
+      blockquote: Blockquote
+      hardBreak: Hard break
+      clearFormat: Clear formatting
+      undo: Undo
+      redo: Redo
 
   yaml-to-toml:
     title: YAML to TOML
     description: Parse and convert YAML to TOML.
+    ui:
+      invalidYaml: Provided YAML is not valid.
+      inputLabel: Your YAML
+      inputPlaceholder: Paste your YAML here…
+      outputLabel: TOML from your YAML
 
   mac-address-generator:
     title: MAC address generator
@@ -333,10 +609,112 @@ tools:
   jwt-parser:
     title: JWT parser
     description: Parse and decode your JSON Web Token (jwt) and display its content.
+    ui:
+      inputLabel: JWT to decode
+      inputPlaceholder: Paste your JWT here…
+      invalidJwt: Invalid JWT
+      header: Header
+      payload: Payload
+      algorithms:
+        HS256: HMAC using SHA-256
+        HS384: HMAC using SHA-384
+        HS512: HMAC using SHA-512
+        RS256: RSASSA-PKCS1-v1_5 using SHA-256
+        RS384: RSASSA-PKCS1-v1_5 using SHA-384
+        RS512: RSASSA-PKCS1-v1_5 using SHA-512
+        ES256: ECDSA using P-256 and SHA-256
+        ES384: ECDSA using P-384 and SHA-384
+        ES512: ECDSA using P-521 and SHA-512
+        PS256: RSASSA-PSS using SHA-256 and MGF1 with SHA-256
+        PS384: RSASSA-PSS using SHA-384 and MGF1 with SHA-384
+        PS512: RSASSA-PSS using SHA-512 and MGF1 with SHA-512
+        none: No digital signature or MAC performed
+      claims:
+        typ: Type
+        alg: Algorithm
+        iss: Issuer
+        sub: Subject
+        aud: Audience
+        exp: Expiration time
+        nbf: Not before
+        iat: Issued at
+        jti: JWT ID
+        name: Full name
+        given_name: Given name or first name
+        family_name: Surname or last name
+        middle_name: Middle name
+        nickname: Casual name
+        preferred_username: Preferred shorthand username
+        profile: Profile page URL
+        picture: Profile picture URL
+        website: Web page or blog URL
+        email: Preferred email address
+        email_verified: Whether the email address has been verified
+        gender: Gender
+        birthdate: Birthday
+        zoneinfo: Time zone
+        locale: Locale
+        phone_number: Preferred telephone number
+        phone_number_verified: Whether the phone number has been verified
+        address: Preferred postal address
+        updated_at: Time the information was last updated
+        azp: Authorized party to which the ID Token was issued
+        nonce: Value associating a client session with an ID Token
+        auth_time: Time when authentication occurred
+        at_hash: Access Token hash value
+        c_hash: Code hash value
+        acr: Authentication Context Class Reference
+        amr: Authentication Methods References
+        sub_jwk: Public key used to check the signature of an ID Token
+        cnf: Confirmation
+        sip_from_tag: SIP From tag header field parameter value
+        sip_date: SIP Date header field value
+        sip_callid: SIP Call-Id header field value
+        sip_cseq_num: SIP CSeq numeric header field parameter value
+        sip_via_branch: SIP Via branch header field parameter value
+        orig: Originating identity string
+        dest: Destination identity string
+        mky: Media key fingerprint string
+        events: Security events
+        toe: Time of event
+        txn: Transaction identifier
+        rph: Resource Priority Header authorization
+        sid: Session ID
+        vot: Vector of Trust value
+        vtm: Vector of Trust trustmark URL
+        attest: Attestation level defined in the SHAKEN framework
+        origid: Originating identifier defined in the SHAKEN framework
+        act: Actor
+        scope: Scope values
+        client_id: Client identifier
+        may_act: Party authorized to become the actor
+        jcard: jCard data
+        at_use_nbr: Number of API requests allowed for the access token
+        div: Diverted target of a call
+        opt: Original PASSporT in full form
+        vc: Verifiable Credential specified by W3C
+        vp: Verifiable Presentation specified by W3C
+        sph: SIP Priority header field
+        ace_profile: ACE profile for which the token is intended
+        cnonce: Client nonce
+        exi: Expires in
+        roles: Roles
+        groups: Groups
+        entitlements: Entitlements
+        token_introspection: Token introspection response
 
   date-converter:
     title: Date-time converter
     description: Convert date and time into the various different formats
+    ui:
+      jsLocaleDate: JS locale date string
+      unixTimestamp: Unix timestamp
+      timestamp: Timestamp (milliseconds)
+      utcFormat: UTC format
+      excelDateTime: Excel date/time
+      invalidForFormat: This date is invalid for the selected format
+      inputPlaceholder: Enter your date string…
+      invalidDate: Invalid date…
 
   phone-parser-and-formatter:
     title: Phone parser and formatter
@@ -349,6 +727,127 @@ tools:
   og-meta-generator:
     title: Open graph meta generator
     description: Generate open-graph and socials HTML meta tags for your website.
+    ui:
+      metaTags: Generated Meta tags
+      schema:
+        common:
+          author: Author
+          creator: Creator
+          disc: Disc
+          discReversePlaceholder: The disc number on which the song appears…
+          duration: Duration
+          musician: Musician
+          musicianPlaceholder: The musician's profile URL…
+          releaseDate: Release date
+          song: Song
+          tag: Tag
+          track: Track
+          trackReversePlaceholder: The track number of the song…
+        article:
+          name: Article
+          publishingDate: Publishing date
+          publishingDatePlaceholder: When the article was first published…
+          modificationDate: Modification date
+          modificationDatePlaceholder: When the article was last changed…
+          expirationDate: Expiration date
+          expirationDatePlaceholder: When the article expires…
+          authorPlaceholder: The author's profile URL…
+          section: Section
+          sectionPlaceholder: A high-level section name…
+          tagPlaceholder: A word associated with the article…
+        book:
+          name: Book
+          authorPlaceholder: The author's profile URL…
+          isbnPlaceholder: The book's ISBN…
+          releaseDatePlaceholder: The book's release date…
+          tagPlaceholder: A word associated with the book…
+        image:
+          name: Image
+          url: Image URL
+          urlPlaceholder: The image URL…
+          alt: Alternative text
+          altPlaceholder: A description of the image…
+          width: Width
+          widthPlaceholder: The image width in pixels…
+          height: Height
+          heightPlaceholder: The image height in pixels…
+        musicAlbum:
+          name: Music album
+          songPlaceholder: A song URL on this album…
+          releaseDatePlaceholder: The album's release date…
+        musicPlaylist:
+          name: Music playlist
+          creatorPlaceholder: The creator's profile URL…
+        musicRadio:
+          name: Music radio station
+          creatorPlaceholder: The creator's profile URL…
+        musicSong:
+          name: Music song
+          durationPlaceholder: The song duration in seconds…
+          album: Album
+          albumPlaceholder: The album URL…
+          discPlaceholder: The disc number on the album…
+          trackPlaceholder: The track number on the album…
+        profile:
+          name: Profile
+          firstName: First name
+          firstNamePlaceholder: The person's first name…
+          lastName: Last name
+          lastNamePlaceholder: The person's last name…
+          username: Username
+          usernamePlaceholder: A short unique username…
+          gender: Gender
+          genderPlaceholder: The person's gender…
+        twitter:
+          summary: Summary
+          largeImage: Summary with large image
+          application: Application
+          player: Player
+          cardType: Card type
+          cardTypePlaceholder: Select a Twitter card type…
+          siteAccount: Site account
+          siteAccountPlaceholder: The website's Twitter account…
+          creatorAccount: Creator account
+          creatorAccountPlaceholder: The content creator's Twitter account…
+        videoEpisode:
+          name: Video episode
+          series: Series
+          seriesPlaceholder: The series this episode belongs to…
+        videoMovie:
+          name: Video movie
+          actor: Actor
+          actorPlaceholder: An actor's profile URL…
+          director: Director
+          directorPlaceholder: A director's profile URL…
+          writer: Writer
+          writerPlaceholder: A writer's profile URL…
+          durationPlaceholder: The video duration in seconds…
+          releaseDatePlaceholder: The video's release date…
+          tagPlaceholder: A word associated with the video…
+        videoOther:
+          name: Other video
+        videoTvShow:
+          name: TV show
+        website:
+          website: Website
+          music: Music
+          musicAlbum: Album
+          playlist: Playlist
+          radioStation: Radio station
+          video: Video
+          movie: Movie
+          episode: Episode
+          tvShow: TV show
+          otherVideo: Other video
+          generalInformation: General information
+          pageType: Page type
+          pageTypePlaceholder: Select the page type…
+          title: Title
+          titlePlaceholder: The page title…
+          description: Description
+          descriptionPlaceholder: A short description of the page…
+          pageUrl: Page URL
+          pageUrlPlaceholder: The canonical URL of the page…
 
   ipv6-ula-generator:
     title: IPv6 ULA generator
@@ -357,18 +856,63 @@ tools:
   hash-text:
     title: Hash text
     description: 'Hash a text string using the function you need : MD5, SHA1, SHA256, SHA224, SHA512, SHA384, SHA3 or RIPEMD160'
+    ui:
+      inputLabel: 'Your text to hash:'
+      inputPlaceholder: Enter the string to hash…
+      encodingLabel: Digest encoding
+      binary: Binary (base 2)
+      hexadecimal: Hexadecimal (base 16)
+      base64: Base64 (base 64)
+      base64Url: Base64 URL-safe (base 64)
 
   json-to-toml:
     title: JSON to TOML
     description: Parse and convert JSON to TOML.
+    ui:
+      invalidJson: Provided JSON is not valid.
+      inputLabel: Your JSON
+      inputPlaceholder: Paste your JSON here…
+      outputLabel: TOML from your JSON
 
   device-information:
     title: Device information
     description: Get information about your current device (screen size, pixel-ratio, user agent, ...)
+    ui:
+      screen: Screen
+      screenSize: Screen size
+      orientation: Orientation
+      orientationAngle: Orientation angle
+      colorDepth: Color depth
+      pixelRatio: Pixel ratio
+      windowSize: Window size
+      device: Device
+      browserVendor: Browser vendor
+      languages: Languages
+      platform: Platform
+      userAgent: User-Agent
+      unknown: Unknown
 
   pdf-signature-checker:
     title: PDF signature checker
     description: Verify the signatures of a PDF file. A signed PDF file contains one or more signatures that may be used to determine whether the contents of the file have been altered since the file was signed.
+    ui:
+      upload: Drag and drop a PDF file here, or click to select a file
+      noSignatures: No signatures were found in the provided file.
+      signatureCertificates: 'Certificates for signature {index}:'
+      validityPeriod: Validity period
+      issuedBy: Issued by
+      issuedTo: Issued to
+      pemCertificate: PEM certificate
+      notBefore: Not before
+      notAfter: Not after
+      commonName: Common name
+      organizationName: Organization name
+      countryName: Country name
+      localityName: Locality name
+      organizationalUnitName: Organizational unit name
+      stateOrProvinceName: State or province name
+      viewPem: View PEM certificate
+      certificate: 'Certificate {index}'
 
   json-minify:
     title: JSON minify
@@ -377,6 +921,12 @@ tools:
   ulid-generator:
     title: ULID generator
     description: Generate random Universally Unique Lexicographically Sortable Identifier (ULID).
+    ui:
+      raw: Raw
+      quantity: 'Quantity:'
+      format: 'Format:'
+      copied: ULIDs copied to the clipboard
+      refresh: Refresh
 
   string-obfuscator:
     title: String obfuscator
@@ -385,14 +935,47 @@ tools:
   base-converter:
     title: Integer base converter
     description: Convert a number between different bases (decimal, hexadecimal, binary, octal, base64, ...)
+    ui:
+      inputNumber: Input number
+      inputNumberPlaceholder: 'Enter your number (e.g. 42)'
+      inputBase: Input base
+      inputBasePlaceholder: 'Enter the input base (e.g. 10)'
+      invalidDigit: 'Invalid digit "{digit}" for base {base}.'
+      conversionError: Unable to convert this number.
+      binary: Binary (2)
+      binaryPlaceholder: The binary value will appear here…
+      octal: Octal (8)
+      octalPlaceholder: The octal value will appear here…
+      decimal: Decimal (10)
+      decimalPlaceholder: The decimal value will appear here…
+      hexadecimal: Hexadecimal (16)
+      hexadecimalPlaceholder: The hexadecimal value will appear here…
+      base64Placeholder: The Base64 value will appear here…
+      custom: 'Custom:'
+      customPlaceholder: 'The base {base} value will appear here…'
 
   yaml-to-json-converter:
     title: YAML to JSON converter
     description: Simply convert YAML to JSON with this online live converter.
+    ui:
+      invalidYaml: Provided YAML is not valid.
+      inputLabel: Your YAML
+      inputPlaceholder: Paste your YAML here…
+      outputLabel: JSON from your YAML
 
   uuid-generator:
     title: UUIDs generator
     description: A Universally Unique Identifier (UUID) is a 128-bit number used to identify information in computer systems. The number of possible UUIDs is 16^32, which is 2^128 or about 3.4x10^38 (which is a lot!).
+    ui:
+      invalidUuid: Invalid UUID
+      copied: UUIDs copied to the clipboard
+      version: UUID version
+      quantity: Quantity
+      quantityPlaceholder: UUID quantity
+      namespace: Namespace
+      name: Name
+      outputPlaceholder: Your UUIDs
+      refresh: Refresh
 
   ipv4-address-converter:
     title: IPv4 address converter
@@ -405,14 +988,41 @@ tools:
   text-to-nato-alphabet:
     title: Text to NATO alphabet
     description: Transform text into the NATO phonetic alphabet for oral transmission.
+    ui:
+      copied: NATO phonetic alphabet copied.
+      inputLabel: Text to convert to the NATO phonetic alphabet
+      inputPlaceholder: Enter your text here…
+      outputLabel: Your text in the NATO phonetic alphabet
+      copy: Copy NATO text
 
   basic-auth-generator:
     title: Basic auth generator
     description: Generate a base64 basic auth header from a username and password.
+    ui:
+      copied: Authorization header copied to the clipboard
+      username: Username
+      usernamePlaceholder: Enter a username…
+      password: Password
+      passwordPlaceholder: Enter a password…
+      header: Authorization header
+      copyHeader: Copy header
 
   text-to-unicode:
     title: Text to Unicode
     description: Parse and convert text to unicode and vice-versa
+    ui:
+      textToUnicode: Text to Unicode
+      textExample: "e.g. 'Hello Avengers'"
+      textInputLabel: Enter text to convert to Unicode
+      unicodeOutputLabel: Unicode from your text
+      unicodeOutputPlaceholder: The Unicode representation will appear here
+      copyUnicode: Copy Unicode to clipboard
+      unicodeToText: Unicode to text
+      unicodeInputPlaceholder: Enter Unicode
+      unicodeInputLabel: Enter Unicode to convert to text
+      textOutputLabel: Text from your Unicode
+      textOutputPlaceholder: The text representation will appear here
+      copyText: Copy text to clipboard
 
   ipv4-range-expander:
     title: IPv4 range expander
@@ -425,14 +1035,65 @@ tools:
   otp-generator:
     title: OTP code generator
     description: Generate and validate time-based OTP (one time password) for multi-factor authentication.
+    ui:
+      secretBase32Error: The secret must be a valid Base32 string
+      secretRequired: The secret is required
+      secret: Base32 secret
+      secretPlaceholder: Enter a Base32 secret…
+      generateSecret: Generate a new secret
+      nextIn: 'Next code in {seconds}s'
+      openKeyUri: Open OTP key URI
+      secretHex: Secret in hexadecimal
+      secretHexPlaceholder: The hexadecimal secret will appear here
+      epoch: Epoch
+      epochPlaceholder: Enter the Unix epoch in milliseconds
+      iteration: Iteration
+      count: Counter
+      countPlaceholder: Enter a counter value
+      paddedHex: Padded hexadecimal counter
+      paddedHexPlaceholder: The padded hexadecimal value will appear here
+      previous: Previous
+      current: Current
+      next: Next
+      copyPrevious: Copy previous code
+      copyCurrent: Copy current code
+      copyNext: Copy next code
 
   url-encoder:
     title: Encode/decode URL-formatted strings
     description: Encode text to URL-encoded format (also known as "percent-encoded"), or decode from it.
+    ui:
+      encodedCopied: Encoded string copied to the clipboard
+      parseError: This value is not valid URL-encoded text
+      decodedCopied: Decoded string copied to the clipboard
+      encode: Encode text
+      inputString: String to encode
+      encodePlaceholder: Enter the string to encode…
+      encodedString: Encoded string
+      encodedPlaceholder: The encoded string will appear here
+      decode: Decode text
+      encodedInput: String to decode
+      decodePlaceholder: Enter a URL-encoded string…
+      decodedString: Decoded string
+      decodedPlaceholder: The decoded string will appear here
 
   text-to-binary:
     title: Text to ASCII binary
     description: Convert text to its ASCII binary representation and vice-versa.
+    ui:
+      invalidBinary: Binary must be a valid ASCII binary string with groups of 8 bits
+      textToBinary: Text to ASCII binary
+      textExample: "e.g. 'Hello world'"
+      textInputLabel: Enter text to convert to binary
+      binaryOutputLabel: Binary from your text
+      binaryOutputPlaceholder: The binary representation will appear here
+      copyBinary: Copy binary to clipboard
+      binaryToText: ASCII binary to text
+      binaryExample: "e.g. '01001000 01100101 01101100 01101100 01101111'"
+      binaryInputLabel: Enter binary to convert to text
+      textOutputLabel: Text from your binary
+      textOutputPlaceholder: The text representation will appear here
+      copyText: Copy text to clipboard
 
   ascii-text-drawer:
     title: ASCII art text generator
@@ -445,10 +1106,20 @@ tools:
   json-to-xml:
     title: JSON to XML
     description: Convert JSON data to XML.
+    ui:
+      invalidJson: Provided JSON is not valid.
+      inputLabel: Your JSON content
+      inputPlaceholder: Paste your JSON content here…
+      outputLabel: Converted XML
 
   markdown-to-html:
     title: Markdown to HTML
     description: Convert Markdown to HTML and print the result as a PDF.
+    ui:
+      inputPlaceholder: Your Markdown content…
+      inputLabel: 'Markdown to convert:'
+      outputLabel: 'Output HTML:'
+      printPdf: Print as PDF
 
   regex-memo:
     title: Regular expression cheatsheet
@@ -465,3 +1136,8 @@ tools:
   xml-to-json:
     title: XML to JSON
     description: Convert XML data to JSON.
+    ui:
+      invalidXml: Provided XML is not valid.
+      inputLabel: Your XML content
+      inputPlaceholder: Paste your XML content here…
+      outputLabel: Converted JSON

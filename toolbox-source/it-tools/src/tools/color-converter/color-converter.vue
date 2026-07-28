@@ -9,49 +9,61 @@ import lchPlugin from 'colord/plugins/lch';
 import { buildColorFormat } from './color-converter.models';
 
 extend([cmykPlugin, hwbPlugin, namesPlugin, lchPlugin]);
+const { t } = useI18n();
 
-const formats = {
-  picker: buildColorFormat({
-    label: 'color picker',
-    format: (v: Colord) => v.toHex(),
-    type: 'color-picker',
-  }),
-  hex: buildColorFormat({
-    label: 'hex',
-    format: (v: Colord) => v.toHex(),
-    placeholder: 'e.g. #ff0000',
-  }),
-  rgb: buildColorFormat({
-    label: 'rgb',
-    format: (v: Colord) => v.toRgbString(),
-    placeholder: 'e.g. rgb(255, 0, 0)',
-  }),
-  hsl: buildColorFormat({
-    label: 'hsl',
-    format: (v: Colord) => v.toHslString(),
-    placeholder: 'e.g. hsl(0, 100%, 50%)',
-  }),
-  hwb: buildColorFormat({
-    label: 'hwb',
-    format: (v: Colord) => v.toHwbString(),
-    placeholder: 'e.g. hwb(0, 0%, 0%)',
-  }),
-  lch: buildColorFormat({
-    label: 'lch',
-    format: (v: Colord) => v.toLchString(),
-    placeholder: 'e.g. lch(53.24, 104.55, 40.85)',
-  }),
-  cmyk: buildColorFormat({
-    label: 'cmyk',
-    format: (v: Colord) => v.toCmykString(),
-    placeholder: 'e.g. cmyk(0, 100%, 100%, 0)',
-  }),
-  name: buildColorFormat({
-    label: 'name',
-    format: (v: Colord) => v.toName({ closest: true }) ?? 'Unknown',
-    placeholder: 'e.g. red',
-  }),
-};
+function createFormats() {
+  return {
+    picker: buildColorFormat({
+      label: t('tools.color-converter.ui.colorPicker'),
+      format: (v: Colord) => v.toHex(),
+      invalidMessage: t('tools.color-converter.ui.invalidColorPicker'),
+      type: 'color-picker',
+    }),
+    hex: buildColorFormat({
+      label: 'HEX',
+      format: (v: Colord) => v.toHex(),
+      placeholder: t('tools.color-converter.ui.example', { value: '#ff0000' }),
+      invalidMessage: t('tools.color-converter.ui.invalidFormat', { format: 'HEX' }),
+    }),
+    rgb: buildColorFormat({
+      label: 'rgb',
+      format: (v: Colord) => v.toRgbString(),
+      placeholder: t('tools.color-converter.ui.example', { value: 'rgb(255, 0, 0)' }),
+      invalidMessage: t('tools.color-converter.ui.invalidFormat', { format: 'RGB' }),
+    }),
+    hsl: buildColorFormat({
+      label: 'hsl',
+      format: (v: Colord) => v.toHslString(),
+      placeholder: t('tools.color-converter.ui.example', { value: 'hsl(0, 100%, 50%)' }),
+      invalidMessage: t('tools.color-converter.ui.invalidFormat', { format: 'HSL' }),
+    }),
+    hwb: buildColorFormat({
+      label: 'hwb',
+      format: (v: Colord) => v.toHwbString(),
+      placeholder: t('tools.color-converter.ui.example', { value: 'hwb(0, 0%, 0%)' }),
+      invalidMessage: t('tools.color-converter.ui.invalidFormat', { format: 'HWB' }),
+    }),
+    lch: buildColorFormat({
+      label: 'lch',
+      format: (v: Colord) => v.toLchString(),
+      placeholder: t('tools.color-converter.ui.example', { value: 'lch(53.24, 104.55, 40.85)' }),
+      invalidMessage: t('tools.color-converter.ui.invalidFormat', { format: 'LCH' }),
+    }),
+    cmyk: buildColorFormat({
+      label: 'cmyk',
+      format: (v: Colord) => v.toCmykString(),
+      placeholder: t('tools.color-converter.ui.example', { value: 'cmyk(0, 100%, 100%, 0)' }),
+      invalidMessage: t('tools.color-converter.ui.invalidFormat', { format: 'CMYK' }),
+    }),
+    name: buildColorFormat({
+      label: t('tools.color-converter.ui.name'),
+      format: (v: Colord) => v.toName({ closest: true }) ?? t('tools.color-converter.ui.unknown'),
+      placeholder: t('tools.color-converter.ui.example', { value: 'red' }),
+      invalidMessage: t('tools.color-converter.ui.invalidName'),
+    }),
+  };
+}
+const formats = createFormats();
 
 updateColorValue(colord('#1ea54c'));
 

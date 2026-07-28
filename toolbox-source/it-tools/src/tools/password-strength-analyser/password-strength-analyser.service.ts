@@ -2,6 +2,11 @@ import _ from 'lodash';
 
 export { getPasswordCrackTimeEstimation, getCharsetLength };
 
+export type CrackDuration =
+  | { kind: 'INSTANT' }
+  | { kind: 'LESS_THAN_SECOND' }
+  | { kind: 'PARTS'; parts: Array<{ code: string; quantity: number; formattedQuantity: string }> };
+
 function prettifyExponentialNotation(exponentialNotation: number) {
   const [base, exponent] = exponentialNotation.toString().split('e');
   const baseAsNumber = Number.parseFloat(base);
@@ -11,28 +16,28 @@ function prettifyExponentialNotation(exponentialNotation: number) {
 
 function getHumanFriendlyDuration({ seconds }: { seconds: number }) {
   if (seconds <= 0.001) {
-    return 'Instantly';
+    return { kind: 'INSTANT' } as const;
   }
 
   if (seconds <= 1) {
-    return 'Less than a second';
+    return { kind: 'LESS_THAN_SECOND' } as const;
   }
 
   const timeUnits = [
-    { unit: 'millenium', secondsInUnit: 31536000000, format: prettifyExponentialNotation, plural: 'millennia' },
-    { unit: 'century', secondsInUnit: 3153600000, plural: 'centuries' },
-    { unit: 'decade', secondsInUnit: 315360000, plural: 'decades' },
-    { unit: 'year', secondsInUnit: 31536000, plural: 'years' },
-    { unit: 'month', secondsInUnit: 2592000, plural: 'months' },
-    { unit: 'week', secondsInUnit: 604800, plural: 'weeks' },
-    { unit: 'day', secondsInUnit: 86400, plural: 'days' },
-    { unit: 'hour', secondsInUnit: 3600, plural: 'hours' },
-    { unit: 'minute', secondsInUnit: 60, plural: 'minutes' },
-    { unit: 'second', secondsInUnit: 1, plural: 'seconds' },
+    { code: 'MILLENNIUM', secondsInUnit: 31536000000, format: prettifyExponentialNotation },
+    { code: 'CENTURY', secondsInUnit: 3153600000 },
+    { code: 'DECADE', secondsInUnit: 315360000 },
+    { code: 'YEAR', secondsInUnit: 31536000 },
+    { code: 'MONTH', secondsInUnit: 2592000 },
+    { code: 'WEEK', secondsInUnit: 604800 },
+    { code: 'DAY', secondsInUnit: 86400 },
+    { code: 'HOUR', secondsInUnit: 3600 },
+    { code: 'MINUTE', secondsInUnit: 60 },
+    { code: 'SECOND', secondsInUnit: 1 },
   ];
 
-  return _.chain(timeUnits)
-    .map(({ unit, secondsInUnit, plural, format = _.identity }) => {
+  const parts = _.chain(timeUnits)
+    .map(({ code, secondsInUnit, format = _.identity }) => {
       const quantity = Math.floor(seconds / secondsInUnit);
       seconds %= secondsInUnit;
 
@@ -41,12 +46,13 @@ function getHumanFriendlyDuration({ seconds }: { seconds: number }) {
       }
 
       const formattedQuantity = format(quantity);
-      return `${formattedQuantity} ${quantity > 1 ? plural : unit}`;
+      return { code, quantity, formattedQuantity: String(formattedQuantity) };
     })
     .compact()
     .take(2)
-    .join(', ')
     .value();
+
+  return { kind: 'PARTS', parts } as const;
 }
 
 function getPasswordCrackTimeEstimation({ password, guessesPerSecond = 1e9 }: { password: string; guessesPerSecond?: number }) {
@@ -57,7 +63,7 @@ function getPasswordCrackTimeEstimation({ password, guessesPerSecond = 1e9 }: { 
 
   const secondsToCrack = 2 ** entropy / guessesPerSecond;
 
-  const crackDurationFormatted = getHumanFriendlyDuration({ seconds: secondsToCrack });
+  const crackDuration = getHumanFriendlyDuration({ seconds: secondsToCrack });
 
   const score = Math.min(entropy / 128, 1);
 
@@ -65,7 +71,7 @@ function getPasswordCrackTimeEstimation({ password, guessesPerSecond = 1e9 }: { 
     entropy,
     charsetLength,
     passwordLength,
-    crackDurationFormatted,
+    crackDuration,
     secondsToCrack,
     score,
   };

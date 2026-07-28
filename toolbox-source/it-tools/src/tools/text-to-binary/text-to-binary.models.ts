@@ -11,7 +11,7 @@ function convertAsciiBinaryToText(binary: string): string {
   const cleanBinary = binary.replace(/[^01]/g, '');
 
   if (cleanBinary.length % 8) {
-    throw new Error('Invalid binary string');
+    throw new Error('INVALID_BINARY_STRING');
   }
 
   return cleanBinary

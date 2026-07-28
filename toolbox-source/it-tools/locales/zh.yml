@@ -115,6 +115,30 @@ tools:
   password-strength-analyser:
     title: 密码强度分析器
     description: 在浏览器本地分析密码强度，并估算破解所需时间。
+    ui:
+      passwordPlaceholder: 请输入密码…
+      crackDuration: 暴力破解此密码所需时间
+      passwordLength: 密码长度：
+      entropy: 信息熵：
+      charsetSize: 字符集大小：
+      score: 评分：
+      noteLabel: 注意：
+      note: 此结果根据暴力破解所需时间估算，未考虑字典攻击。
+      duration:
+        instant: 瞬间
+        lessThanSecond: 不到 1 秒
+        separator: ，
+        units:
+          millennium: { singular: 千年, plural: 千年 }
+          century: { singular: 世纪, plural: 世纪 }
+          decade: { singular: 十年, plural: 十年 }
+          year: { singular: 年, plural: 年 }
+          month: { singular: 个月, plural: 个月 }
+          week: { singular: 周, plural: 周 }
+          day: { singular: 天, plural: 天 }
+          hour: { singular: 小时, plural: 小时 }
+          minute: { singular: 分钟, plural: 分钟 }
+          second: { singular: 秒, plural: 秒 }
 
   chronometer:
     title: 计时器
@@ -131,6 +155,16 @@ tools:
     tokenPlaceholder: '令牌...'
     copied: 复制到剪贴板
     button:
+      copy: 复制
+      refresh: 刷新
+    ui:
+      uppercase: 大写字母（ABC…）
+      lowercase: 小写字母（abc…）
+      numbers: 数字（123…）
+      symbols: 符号（!-;…）
+      length: 长度
+      tokenPlaceholder: 生成的 Token…
+      copied: Token 已复制到剪贴板
       copy: 复制
       refresh: 刷新
   percentage-calculator:
@@ -151,7 +185,19 @@ tools:
 
   keycode-info:
     title: 键盘按键信息
-    description: 查看所按按键的 JavaScript key、code、位置和修饰键等信息。
+    description: 查看所按按键的键值、物理代码、位置和修饰键等信息。
+    ui:
+      key: 按键：
+      keyPlaceholder: 按键名称…
+      keycode: 键码：
+      keycodePlaceholder: 键码…
+      code: 物理代码：
+      codePlaceholder: 物理代码…
+      location: 位置：
+      locationPlaceholder: 按键位置…
+      modifiers: 修饰键：
+      none: 无
+      instruction: 请按下要查看信息的键盘按键
 
   emoji-picker:
     title: Emoji 选择器
@@ -160,9 +206,30 @@ tools:
   color-converter:
     title: 颜色格式转换器
     description: 在 HEX、RGB、HSL 和 CSS 颜色名称之间转换。
+    ui:
+      colorPicker: 颜色选择器
+      name: 颜色名称
+      unknown: 未知
+      example: '例如 {value}'
+      invalidColorPicker: 颜色选择器的值无效。
+      invalidFormat: '{format} 格式无效。'
+      invalidName: 颜色名称无效。
   bcrypt:
     title: Bcrypt 哈希
     description: 使用基于 Blowfish 的 Bcrypt 算法对文本进行哈希，并校验文本与哈希值是否匹配。
+    ui:
+      hashTitle: 计算哈希
+      hashPlaceholder: 输入要使用 Bcrypt 哈希的字符串…
+      stringLabel: 字符串：
+      saltLabel: 盐轮数：
+      saltPlaceholder: 请输入盐轮数…
+      copied: 哈希值已复制到剪贴板
+      copyHash: 复制哈希值
+      compareTitle: 比较字符串与哈希值
+      compareStringPlaceholder: 输入要比较的字符串…
+      hashLabel: 哈希值：
+      compareHashPlaceholder: 输入要比较的哈希值…
+      matchLabel: 是否匹配？
 
   crontab-generator:
     title: Crontab 表达式生成器
@@ -187,10 +254,31 @@ tools:
   slugify-string:
     title: 字符串 Slug 转换器
     description: 将字符串转换为适合 URL、文件名和 ID 使用的安全格式。
+    ui:
+      copied: Slug 已复制到剪贴板
+      inputLabel: 待生成 Slug 的字符串
+      inputPlaceholder: 请输入字符串…
+      outputLabel: Slug
+      outputPlaceholder: Slug 将显示在此处
+      copy: 复制 Slug
 
   encryption:
     title: 加密/解密文本
     description: 使用 AES、TripleDES、Rabbit 或 RC4 等算法加密和解密文本。
+    ui:
+      encrypt: 加密
+      decrypt: 解密
+      plainText: 原文：
+      plainTextPlaceholder: 输入要加密的字符串
+      secretKey: 密钥：
+      algorithm: 加密算法：
+      encryptedText: 加密结果：
+      encryptedInput: 密文：
+      encryptedInputPlaceholder: 输入要解密的字符串
+      decryptedText: 解密结果：
+      outputPlaceholder: 结果将在此显示
+      unableToDecrypt: 无法解密此文本
+      decryptErrorTitle: 解密失败
 
   random-port-generator:
     title: 随机端口生成器
@@ -207,29 +295,129 @@ tools:
   roman-numeral-converter:
     title: 罗马数字转换器
     description: 将罗马数字转换为数字，并将数字转换为罗马数字。
+    ui:
+      rangeError: 仅支持转换 {min} 到 {max} 之间的数字
+      invalidRoman: 输入内容不是有效的罗马数字
+      romanCopied: 罗马数字已复制到剪贴板
+      arabicCopied: 阿拉伯数字已复制到剪贴板
+      arabicToRoman: 阿拉伯数字转罗马数字
+      romanToArabic: 罗马数字转阿拉伯数字
 
   hmac-generator:
     title: HMAC 生成器
     description: 使用密钥和选定的哈希函数计算消息认证码（HMAC）。
+    ui:
+      plainText: 待认证的原文
+      plainTextPlaceholder: 输入要计算 HMAC 的原文…
+      secret: 密钥
+      secretPlaceholder: 请输入密钥…
+      hashFunction: 哈希函数
+      hashFunctionPlaceholder: 请选择哈希函数…
+      outputEncoding: 输出编码
+      outputEncodingPlaceholder: 请选择结果编码…
+      binary: 二进制（2 进制）
+      hexadecimal: 十六进制（16 进制）
+      base64: Base64（64 进制）
+      base64Url: URL 安全 Base64（64 进制）
+      outputLabel: 文本的 HMAC
+      outputPlaceholder: HMAC 结果…
+      copy: 复制 HMAC
 
   bip39-generator:
     title: BIP39 助记词生成器
     description: 从现有或随机助记词生成 BIP39 密码短语，也可从密码短语还原助记词。
+    ui:
+      language: 语言：
+      entropy: 熵（种子）：
+      entropyPlaceholder: 输入十六进制熵…
+      passphrase: 密码短语（助记词）：
+      passphrasePlaceholder: 输入助记词…
+      entropyLengthError: 熵长度必须在 16 到 32 之间，且为 4 的倍数
+      entropyHexError: 熵必须是十六进制字符串
+      invalidMnemonic: 助记词无效
+      entropyCopied: 熵已复制到剪贴板
+      passphraseCopied: 密码短语已复制到剪贴板
+      languages:
+        english: 英语
+        chineseSimplified: 简体中文
+        chineseTraditional: 繁体中文
+        czech: 捷克语
+        french: 法语
+        italian: 意大利语
+        japanese: 日语
+        korean: 韩语
+        portuguese: 葡萄牙语
+        spanish: 西班牙语
 
   base64-file-converter:
     title: Base64 文件转换器
     description: 将字符串、文件或图像转换为其 Base64 表示形式。
+    ui:
+      invalidBase64: Base64 字符串无效
+      copied: Base64 字符串已复制到剪贴板
+      base64ToFile: Base64 转文件
+      fileName: 文件名
+      fileNamePlaceholder: 下载文件名
+      extension: 扩展名
+      base64InputPlaceholder: 在此粘贴文件的 Base64 字符串…
+      previewImage: 预览图片
+      downloadFile: 下载文件
+      fileToBase64: 文件转 Base64
+      upload: 将文件拖放到此处，或点击选择文件
+      outputPlaceholder: 文件的 Base64 将显示在此处
   list-converter:
     title: 列表转换器
     description: 对逐行数据执行转置、添加前后缀、反转、排序、转小写或截断等批量处理。
+    ui:
+      sortAscending: 升序排序
+      sortDescending: 降序排序
+      trimItems: 清除列表项首尾空白
+      removeDuplicates: 删除重复项
+      lowercase: 转换为小写
+      keepLineBreaks: 保留换行
+      sortList: 列表排序
+      sortPlaceholder: 按字母排序
+      separator: 分隔符
+      wrapItem: 包裹列表项
+      itemPrefix: 列表项前缀
+      itemSuffix: 列表项后缀
+      wrapList: 包裹列表
+      listPrefix: 列表前缀
+      listSuffix: 列表后缀
+      inputLabel: 输入数据
+      inputPlaceholder: 在此粘贴输入数据…
+      outputLabel: 转换结果
 
   base64-string-converter:
     title: Base64 字符串编码/解码
     description: 在普通字符串与 Base64 表示之间进行编码和解码。
+    ui:
+      base64Copied: Base64 字符串已复制到剪贴板
+      stringCopied: 字符串已复制到剪贴板
+      invalidBase64: Base64 字符串无效
+      stringToBase64: 字符串转 Base64
+      encodeUrlSafe: 使用 URL 安全字符编码
+      stringPlaceholder: 请输入字符串…
+      stringToEncode: 待编码字符串
+      base64OfString: Base64 表示
+      base64OutputPlaceholder: Base64 表示将显示在此处
+      copyBase64: 复制 Base64
+      base64ToString: Base64 转字符串
+      decodeUrlSafe: 解码 URL 安全字符
+      base64InputPlaceholder: 请输入 Base64 字符串…
+      base64ToDecode: 待解码 Base64 字符串
+      decodedString: 解码后的字符串
+      decodedPlaceholder: 解码后的字符串将显示在此处
+      copyDecoded: 复制解码结果
 
   toml-to-yaml:
     title: TOML 到 YAML
     description: 解析 TOML 并将其转换为 YAML。
+    ui:
+      invalidToml: 提供的 TOML 无效。
+      inputLabel: 您的 TOML
+      inputPlaceholder: 在此粘贴 TOML…
+      outputLabel: 由 TOML 转换的 YAML
 
   math-evaluator:
     title: 数学计算器
@@ -238,10 +426,26 @@ tools:
   json-to-yaml-converter:
     title: JSON 转 YAML
     description: 将 JSON 数据转换为 YAML。
+    ui:
+      invalidJson: 提供的 JSON 无效。
+      inputLabel: 您的 JSON
+      inputPlaceholder: 在此粘贴 JSON…
+      outputLabel: 由 JSON 转换的 YAML
 
   url-parser:
     title: URL 解析器
     description: 将 URL 解析为协议、来源、参数、端口和用户凭据等组成部分。
+    ui:
+      invalidUrl: URL 无效
+      protocol: 协议
+      username: 用户名
+      password: 密码
+      hostname: 主机名
+      port: 端口
+      path: 路径
+      params: 查询参数
+      inputLabel: 待解析 URL
+      inputPlaceholder: 请输入 URL…
 
   iban-validator-and-parser:
     title: IBAN 验证与解析器
@@ -258,10 +462,38 @@ tools:
   case-converter:
     title: 大小写转换
     description: 将字符串转换为多种大小写命名格式。
+    ui:
+      inputLabel: 字符串：
+      inputPlaceholder: 请输入字符串…
+      lowercase: 全小写：
+      uppercase: 全大写：
+      camelCase: 驼峰命名：
+      capitalCase: 首字母大写：
+      constantCase: 常量命名：
+      dotCase: 点号命名：
+      headerCase: 连字符标题命名：
+      noCase: 空格分词：
+      paramCase: 参数命名：
+      pascalCase: 帕斯卡命名：
+      pathCase: 路径命名：
+      sentenceCase: 句式命名：
+      snakeCase: 蛇形命名：
+      mockingCase: 交替大小写：
 
   html-entities:
     title: HTML 实体转义
     description: 在特殊字符与对应的 HTML 实体之间进行转义和反转义。
+    ui:
+      escapeTitle: HTML 实体转义
+      inputString: 字符串：
+      escapePlaceholder: 输入要转义的字符串
+      escapedString: 转义结果：
+      escapedPlaceholder: 转义后的字符串
+      unescapeTitle: HTML 实体反转义
+      escapedInput: 已转义字符串：
+      unescapePlaceholder: 输入要反转义的字符串
+      unescapedString: 反转义结果：
+      unescapedPlaceholder: 反转义后的字符串
 
   json-prettify:
     title: JSON 美化与格式化
@@ -278,10 +510,26 @@ tools:
   mime-types:
     title: MIME 类型查询
     description: 在 MIME 类型与文件扩展名之间双向查询。
+    ui:
+      mimeToExtension: MIME 类型转扩展名
+      mimeToExtensionHelp: 输入 MIME 类型以查询对应的文件扩展名。
+      mimePlaceholder: 输入 MIME 类型，例如 application/json
+      extensionsFor: '{mime} 对应的扩展名：'
+      extensionToMime: 扩展名转 MIME 类型
+      extensionToMimeHelp: 输入文件扩展名以查询对应的 MIME 类型。
+      extensionPlaceholder: 输入扩展名，例如 json
+      mimeForExtension: '.{extension} 对应的 MIME 类型：'
+      mimeTypes: MIME 类型
+      extensions: 扩展名
 
   toml-to-json:
     title: TOML 到 JSON
     description: 解析 TOML 并将其转换为 JSON。
+    ui:
+      invalidToml: 提供的 TOML 无效。
+      inputLabel: 您的 TOML
+      inputPlaceholder: 在此粘贴 TOML…
+      outputLabel: 由 TOML 转换的 JSON
 
   lorem-ipsum-generator:
     title: Lorem Ipsum 生成器
@@ -310,14 +558,42 @@ tools:
   rsa-key-pair-generator:
     title: RSA 密钥对生成器
     description: 生成随机的 RSA 私钥和公钥 PEM 文件。
+    ui:
+      bits: 位数：
+      bitsError: 位数必须在 256 到 16384 之间，且为 8 的倍数
+      refresh: 重新生成密钥对
+      publicKey: 公钥
+      privateKey: 私钥
 
   html-wysiwyg-editor:
     title: HTML 所见即所得编辑器
     description: 提供所见即所得的 HTML 编辑体验，并可查看生成的源代码。
+    ui:
+      bold: 粗体
+      italic: 斜体
+      strike: 删除线
+      inlineCode: 行内代码
+      heading1: 一级标题
+      heading2: 二级标题
+      heading3: 三级标题
+      heading4: 四级标题
+      bulletList: 无序列表
+      orderedList: 有序列表
+      codeBlock: 代码块
+      blockquote: 引用块
+      hardBreak: 强制换行
+      clearFormat: 清除格式
+      undo: 撤销
+      redo: 重做
 
   yaml-to-toml:
     title: YAML 到 TOML
     description: 解析 YAML 并将其转换为 TOML。
+    ui:
+      invalidYaml: 提供的 YAML 无效。
+      inputLabel: 您的 YAML
+      inputPlaceholder: 在此粘贴 YAML…
+      outputLabel: 由 YAML 转换的 TOML
 
   mac-address-generator:
     title: MAC 地址生成器
@@ -328,11 +604,113 @@ tools:
     description: 比较两个 JSON 对象并查看差异。
   jwt-parser:
     title: JWT 解析器
-    description: 解析并解码 JSON Web Token（JWT），查看其中的内容。
+    description: 解析并解码 JWT，查看其中的内容。
+    ui:
+      inputLabel: 待解码 JWT
+      inputPlaceholder: 在此粘贴 JWT…
+      invalidJwt: JWT 无效
+      header: 请求头
+      payload: 载荷
+      algorithms:
+        HS256: 使用 SHA-256 的 HMAC
+        HS384: 使用 SHA-384 的 HMAC
+        HS512: 使用 SHA-512 的 HMAC
+        RS256: 使用 SHA-256 的 RSASSA-PKCS1-v1_5
+        RS384: 使用 SHA-384 的 RSASSA-PKCS1-v1_5
+        RS512: 使用 SHA-512 的 RSASSA-PKCS1-v1_5
+        ES256: 使用 P-256 和 SHA-256 的 ECDSA
+        ES384: 使用 P-384 和 SHA-384 的 ECDSA
+        ES512: 使用 P-521 和 SHA-512 的 ECDSA
+        PS256: 使用 SHA-256 和 MGF1（SHA-256）的 RSASSA-PSS
+        PS384: 使用 SHA-384 和 MGF1（SHA-384）的 RSASSA-PSS
+        PS512: 使用 SHA-512 和 MGF1（SHA-512）的 RSASSA-PSS
+        none: 不使用数字签名或 MAC
+      claims:
+        typ: 类型
+        alg: 算法
+        iss: 签发者
+        sub: 主题
+        aud: 接收方
+        exp: 过期时间
+        nbf: 生效时间
+        iat: 签发时间
+        jti: JWT 标识符
+        name: 全名
+        given_name: 名
+        family_name: 姓
+        middle_name: 中间名
+        nickname: 昵称
+        preferred_username: 首选简称
+        profile: 资料页 URL
+        picture: 头像 URL
+        website: 网页或博客 URL
+        email: 首选电子邮箱地址
+        email_verified: 电子邮箱地址是否已验证
+        gender: 性别
+        birthdate: 出生日期
+        zoneinfo: 时区
+        locale: 语言区域
+        phone_number: 首选电话号码
+        phone_number_verified: 电话号码是否已验证
+        address: 首选邮寄地址
+        updated_at: 信息最后更新时间
+        azp: 获得此 ID Token 的授权方
+        nonce: 将客户端会话与 ID Token 关联的值
+        auth_time: 身份验证发生时间
+        at_hash: Access Token 哈希值
+        c_hash: 授权码哈希值
+        acr: 身份验证上下文类别引用
+        amr: 身份验证方法引用
+        sub_jwk: 用于验证 ID Token 签名的公钥
+        cnf: 确认信息
+        sip_from_tag: SIP From 标签请求头参数值
+        sip_date: SIP Date 请求头值
+        sip_callid: SIP Call-Id 请求头值
+        sip_cseq_num: SIP CSeq 数字请求头参数值
+        sip_via_branch: SIP Via 分支请求头参数值
+        orig: 主叫身份字符串
+        dest: 被叫身份字符串
+        mky: 媒体密钥指纹字符串
+        events: 安全事件
+        toe: 事件时间
+        txn: 事务标识符
+        rph: 资源优先级请求头授权
+        sid: 会话标识符
+        vot: 信任向量值
+        vtm: 信任向量信任标记 URL
+        attest: SHAKEN 框架定义的认证等级
+        origid: SHAKEN 框架定义的主叫标识符
+        act: 行为主体
+        scope: 权限范围值
+        client_id: 客户端标识符
+        may_act: 获准成为行为主体的一方
+        jcard: jCard 数据
+        at_use_nbr: Access Token 允许调用 API 的次数
+        div: 呼叫转移目标
+        opt: 完整形式的原始 PASSporT
+        vc: W3C 定义的可验证凭证
+        vp: W3C 定义的可验证陈述
+        sph: SIP 优先级请求头字段
+        ace_profile: 此令牌适用的 ACE 配置文件
+        cnonce: 客户端随机数
+        exi: 剩余有效时间
+        roles: 角色
+        groups: 用户组
+        entitlements: 权益
+        token_introspection: 令牌内省响应
 
   date-converter:
     title: 日期时间转换器
     description: 在多种日期、时间和时间戳格式之间转换。
+    ui:
+      jsLocaleDate: JS 本地日期字符串
+      unixTimestamp: Unix 时间戳
+      timestamp: 时间戳（毫秒）
+      utcFormat: UTC 格式
+      excelDateTime: Excel 日期/时间
+      invalidForFormat: 此日期不符合所选格式
+      inputPlaceholder: 请输入日期字符串…
+      invalidDate: 日期无效…
 
   phone-parser-and-formatter:
     title: 电话号码解析与格式化
@@ -345,6 +723,127 @@ tools:
   og-meta-generator:
     title: Open Graph Meta 生成器
     description: 为网站生成 Open Graph 和社交平台所需的 HTML Meta 标签。
+    ui:
+      metaTags: 您的 Meta 标签
+      schema:
+        common:
+          author: 作者
+          creator: 创建者
+          disc: 光盘编号
+          discReversePlaceholder: 歌曲所在的光盘编号…
+          duration: 时长
+          musician: 音乐人
+          musicianPlaceholder: 音乐人的资料页 URL…
+          releaseDate: 发布日期
+          song: 歌曲
+          tag: 标签
+          track: 音轨编号
+          trackReversePlaceholder: 歌曲的音轨编号…
+        article:
+          name: 文章
+          publishingDate: 发布时间
+          publishingDatePlaceholder: 文章首次发布的时间…
+          modificationDate: 修改时间
+          modificationDatePlaceholder: 文章最后修改的时间…
+          expirationDate: 失效时间
+          expirationDatePlaceholder: 文章失效的时间…
+          authorPlaceholder: 作者的资料页 URL…
+          section: 栏目
+          sectionPlaceholder: 文章所属的主要栏目…
+          tagPlaceholder: 与文章相关的关键词…
+        book:
+          name: 图书
+          authorPlaceholder: 作者的资料页 URL…
+          isbnPlaceholder: 图书的 ISBN…
+          releaseDatePlaceholder: 图书的发布日期…
+          tagPlaceholder: 与图书相关的关键词…
+        image:
+          name: 图片
+          url: 图片 URL
+          urlPlaceholder: 图片 URL…
+          alt: 替代文本
+          altPlaceholder: 图片内容说明…
+          width: 宽度
+          widthPlaceholder: 图片宽度（像素）…
+          height: 高度
+          heightPlaceholder: 图片高度（像素）…
+        musicAlbum:
+          name: 音乐专辑
+          songPlaceholder: 专辑中的歌曲 URL…
+          releaseDatePlaceholder: 专辑发布日期…
+        musicPlaylist:
+          name: 音乐播放列表
+          creatorPlaceholder: 创建者的资料页 URL…
+        musicRadio:
+          name: 音乐广播电台
+          creatorPlaceholder: 创建者的资料页 URL…
+        musicSong:
+          name: 歌曲
+          durationPlaceholder: 歌曲时长（秒）…
+          album: 专辑
+          albumPlaceholder: 专辑 URL…
+          discPlaceholder: 歌曲所在的光盘编号…
+          trackPlaceholder: 歌曲在专辑中的音轨编号…
+        profile:
+          name: 个人资料
+          firstName: 名
+          firstNamePlaceholder: 此人的名…
+          lastName: 姓
+          lastNamePlaceholder: 此人的姓…
+          username: 用户名
+          usernamePlaceholder: 简短且唯一的用户名…
+          gender: 性别
+          genderPlaceholder: 此人的性别…
+        twitter:
+          summary: 摘要
+          largeImage: 大图摘要
+          application: 应用
+          player: 播放器
+          cardType: 卡片类型
+          cardTypePlaceholder: 选择 Twitter 卡片类型…
+          siteAccount: 网站账号
+          siteAccountPlaceholder: 网站的 Twitter 账号…
+          creatorAccount: 创建者账号
+          creatorAccountPlaceholder: 内容创建者的 Twitter 账号…
+        videoEpisode:
+          name: 视频剧集
+          series: 系列
+          seriesPlaceholder: 此剧集所属的系列…
+        videoMovie:
+          name: 视频电影
+          actor: 演员
+          actorPlaceholder: 演员的资料页 URL…
+          director: 导演
+          directorPlaceholder: 导演的资料页 URL…
+          writer: 编剧
+          writerPlaceholder: 编剧的资料页 URL…
+          durationPlaceholder: 视频时长（秒）…
+          releaseDatePlaceholder: 视频发布日期…
+          tagPlaceholder: 与视频相关的关键词…
+        videoOther:
+          name: 其他视频
+        videoTvShow:
+          name: 电视节目
+        website:
+          website: 网站
+          music: 音乐
+          musicAlbum: 专辑
+          playlist: 播放列表
+          radioStation: 广播电台
+          video: 视频
+          movie: 电影
+          episode: 剧集
+          tvShow: 电视节目
+          otherVideo: 其他视频
+          generalInformation: 基本信息
+          pageType: 页面类型
+          pageTypePlaceholder: 选择页面类型…
+          title: 标题
+          titlePlaceholder: 页面标题…
+          description: 描述
+          descriptionPlaceholder: 页面简要描述…
+          pageUrl: 页面 URL
+          pageUrlPlaceholder: 页面的规范 URL…
 
   ipv6-ula-generator:
     title: IPv6 ULA 生成器
@@ -353,18 +852,63 @@ tools:
   hash-text:
     title: 文本哈希计算器
     description: 使用 MD5、SHA-1、SHA-2、SHA-3 或 RIPEMD-160 等算法计算文本摘要。
+    ui:
+      inputLabel: 待哈希文本：
+      inputPlaceholder: 请输入要哈希的字符串…
+      encodingLabel: 摘要编码
+      binary: 二进制（2 进制）
+      hexadecimal: 十六进制（16 进制）
+      base64: Base64（64 进制）
+      base64Url: URL 安全 Base64（64 进制）
 
   json-to-toml:
     title: JSON 转 TOML
     description: 解析 JSON 并将其转换为 TOML。
+    ui:
+      invalidJson: 提供的 JSON 无效。
+      inputLabel: 您的 JSON
+      inputPlaceholder: 在此粘贴 JSON…
+      outputLabel: 由 JSON 转换的 TOML
 
   device-information:
     title: 设备信息
     description: 查看当前设备的屏幕尺寸、像素比、User-Agent 等信息。
+    ui:
+      screen: 屏幕
+      screenSize: 屏幕尺寸
+      orientation: 屏幕方向
+      orientationAngle: 方向角度
+      colorDepth: 颜色深度
+      pixelRatio: 像素比
+      windowSize: 窗口尺寸
+      device: 设备
+      browserVendor: 浏览器厂商
+      languages: 语言
+      platform: 平台
+      userAgent: User-Agent
+      unknown: 未知
 
   pdf-signature-checker:
     title: PDF 签名检查器
     description: 验证 PDF 中的数字签名，并判断文件内容在签名后是否被修改。
+    ui:
+      upload: 将 PDF 文件拖放到此处，或点击选择文件
+      noSignatures: 提供的文件中未找到签名。
+      signatureCertificates: 签名 {index} 的证书：
+      validityPeriod: 有效期
+      issuedBy: 颁发者
+      issuedTo: 颁发对象
+      pemCertificate: PEM 证书
+      notBefore: 生效时间
+      notAfter: 失效时间
+      commonName: 通用名称
+      organizationName: 组织名称
+      countryName: 国家或地区
+      localityName: 地区名称
+      organizationalUnitName: 组织单位名称
+      stateOrProvinceName: 州或省名称
+      viewPem: 查看 PEM 证书
+      certificate: 证书 {index}
 
   json-minify:
     title: JSON 压缩
@@ -373,6 +917,12 @@ tools:
   ulid-generator:
     title: ULID 生成器
     description: 生成随机的通用唯一字典序可排序标识符（ULID）。
+    ui:
+      raw: 原始文本
+      quantity: 数量：
+      format: 格式：
+      copied: ULID 已复制到剪贴板
+      refresh: 刷新
 
   string-obfuscator:
     title: 字符串混淆器
@@ -381,14 +931,47 @@ tools:
   base-converter:
     title: 整数进制转换器
     description: 在十进制、十六进制、二进制、八进制和 Base64 等进制之间转换整数。
+    ui:
+      inputNumber: 输入数字
+      inputNumberPlaceholder: 输入数字（例如 42）
+      inputBase: 输入进制
+      inputBasePlaceholder: 输入原进制（例如 10）
+      invalidDigit: 字符“{digit}”不是 {base} 进制的有效数字。
+      conversionError: 无法转换此数字。
+      binary: 二进制（2）
+      binaryPlaceholder: 二进制结果将显示在此处…
+      octal: 八进制（8）
+      octalPlaceholder: 八进制结果将显示在此处…
+      decimal: 十进制（10）
+      decimalPlaceholder: 十进制结果将显示在此处…
+      hexadecimal: 十六进制（16）
+      hexadecimalPlaceholder: 十六进制结果将显示在此处…
+      base64Placeholder: Base64 结果将显示在此处…
+      custom: 自定义：
+      customPlaceholder: '{base} 进制结果将显示在此处…'
 
   yaml-to-json-converter:
     title: YAML 转 JSON
     description: 将 YAML 数据转换为 JSON。
+    ui:
+      invalidYaml: 提供的 YAML 无效。
+      inputLabel: 您的 YAML
+      inputPlaceholder: 在此粘贴 YAML…
+      outputLabel: 由 YAML 转换的 JSON
 
   uuid-generator:
     title: UUID 生成器
     description: 生成用于在计算机系统中唯一标识信息的 128 位 UUID。
+    ui:
+      invalidUuid: UUID 无效
+      copied: UUID 已复制到剪贴板
+      version: UUID 版本
+      quantity: 数量
+      quantityPlaceholder: UUID 数量
+      namespace: 命名空间
+      name: 名称
+      outputPlaceholder: 生成的 UUID
+      refresh: 刷新
 
   ipv4-address-converter:
     title: IPv4 地址转换器
@@ -401,14 +984,41 @@ tools:
   text-to-nato-alphabet:
     title: 文本转 NATO 音标字母
     description: 将文本转换为 NATO 音标字母，便于口头传达。
+    ui:
+      copied: NATO 音标字母已复制。
+      inputLabel: 要转换为 NATO 音标字母的文本
+      inputPlaceholder: 在此输入文本…
+      outputLabel: 文本对应的 NATO 音标字母
+      copy: 复制 NATO 文本
 
   basic-auth-generator:
     title: Basic Auth 生成器
     description: 根据用户名和密码生成 Base64 编码的 Basic Authentication 请求头。
+    ui:
+      copied: Authorization 请求头已复制到剪贴板
+      username: 用户名
+      usernamePlaceholder: 请输入用户名…
+      password: 密码
+      passwordPlaceholder: 请输入密码…
+      header: Authorization 请求头
+      copyHeader: 复制请求头
 
   text-to-unicode:
     title: 文本转 Unicode
     description: 在普通文本与 Unicode 转义序列之间双向转换。
+    ui:
+      textToUnicode: 文本转 Unicode
+      textExample: 例如“Hello Avengers”
+      textInputLabel: 输入要转换为 Unicode 的文本
+      unicodeOutputLabel: 文本对应的 Unicode
+      unicodeOutputPlaceholder: Unicode 表示将显示在此处
+      copyUnicode: 复制 Unicode 到剪贴板
+      unicodeToText: Unicode 转文本
+      unicodeInputPlaceholder: 输入 Unicode
+      unicodeInputLabel: 输入要转换为文本的 Unicode
+      textOutputLabel: Unicode 对应的文本
+      textOutputPlaceholder: 文本表示将显示在此处
+      copyText: 复制文本到剪贴板
 
   ipv4-range-expander:
     title: IPv4 地址范围展开器
@@ -421,14 +1031,65 @@ tools:
   otp-generator:
     title: OTP 验证码生成器
     description: 为多因素身份验证生成和校验基于时间的一次性密码（TOTP）。
+    ui:
+      secretBase32Error: 密钥必须是有效的 Base32 字符串
+      secretRequired: 密钥不能为空
+      secret: Base32 密钥
+      secretPlaceholder: 请输入 Base32 密钥…
+      generateSecret: 生成新密钥
+      nextIn: '{seconds} 秒后生成下一个验证码'
+      openKeyUri: 打开 OTP 密钥链接
+      secretHex: 十六进制密钥
+      secretHexPlaceholder: 十六进制密钥将显示在此处
+      epoch: 起始时间
+      epochPlaceholder: 输入 Unix 纪元时间（毫秒）
+      iteration: 迭代次数
+      count: 计数器
+      countPlaceholder: 输入计数器值
+      paddedHex: 补齐后的十六进制计数器
+      paddedHexPlaceholder: 补齐后的十六进制值将显示在此处
+      previous: 上一个
+      current: 当前
+      next: 下一个
+      copyPrevious: 复制上一个验证码
+      copyCurrent: 复制当前验证码
+      copyNext: 复制下一个验证码
 
   url-encoder:
     title: URL 编码/解码
     description: 在普通文本与 URL 百分号编码格式之间转换。
+    ui:
+      encodedCopied: 编码结果已复制到剪贴板
+      parseError: 该内容不是有效的 URL 编码文本
+      decodedCopied: 解码结果已复制到剪贴板
+      encode: 文本编码
+      inputString: 待编码字符串
+      encodePlaceholder: 请输入要编码的字符串…
+      encodedString: 编码结果
+      encodedPlaceholder: 编码结果将显示在此处
+      decode: 文本解码
+      encodedInput: 待解码字符串
+      decodePlaceholder: 请输入 URL 编码字符串…
+      decodedString: 解码结果
+      decodedPlaceholder: 解码结果将显示在此处
 
   text-to-binary:
     title: 文本与 ASCII 二进制转换
     description: 在普通文本与 ASCII 二进制表示之间双向转换。
+    ui:
+      invalidBinary: 二进制必须是按 8 位分组的有效 ASCII 二进制字符串
+      textToBinary: 文本转 ASCII 二进制
+      textExample: 例如“Hello world”
+      textInputLabel: 输入要转换为二进制的文本
+      binaryOutputLabel: 文本对应的二进制
+      binaryOutputPlaceholder: 二进制表示将显示在此处
+      copyBinary: 复制二进制到剪贴板
+      binaryToText: ASCII 二进制转文本
+      binaryExample: 例如“01001000 01100101 01101100 01101100 01101111”
+      binaryInputLabel: 输入要转换为文本的二进制
+      textOutputLabel: 二进制对应的文本
+      textOutputPlaceholder: 文本表示将显示在此处
+      copyText: 复制文本到剪贴板
 
   ascii-text-drawer:
     title: ASCII 艺术字生成器
@@ -441,10 +1102,20 @@ tools:
   json-to-xml:
     title: JSON 转 XML
     description: 将 JSON 数据转换为 XML。
+    ui:
+      invalidJson: 提供的 JSON 无效。
+      inputLabel: 您的 JSON 内容
+      inputPlaceholder: 在此粘贴 JSON 内容…
+      outputLabel: 转换后的 XML
 
   markdown-to-html:
     title: Markdown 转 HTML
     description: 将 Markdown 转换为 HTML，并可将结果打印为 PDF。
+    ui:
+      inputPlaceholder: 您的 Markdown 内容…
+      inputLabel: 待转换的 Markdown：
+      outputLabel: 输出 HTML：
+      printPdf: 打印为 PDF
 
   regex-memo:
     title: 正则表达式速查表
@@ -461,3 +1132,8 @@ tools:
   xml-to-json:
     title: XML 转 JSON
     description: 将 XML 数据转换为 JSON。
+    ui:
+      invalidXml: 提供的 XML 无效。
+      inputLabel: 您的 XML 内容
+      inputPlaceholder: 在此粘贴 XML 内容…
+      outputLabel: 转换后的 JSON

@@ -18,7 +18,7 @@ function decodeJwt({ jwt }: { jwt: string }) {
 }
 
 function parseClaims({ claim, value }: { claim: string; value: unknown }) {
-  const claimDescription = CLAIM_DESCRIPTIONS[claim];
+  const claimDescriptionKey = CLAIM_DESCRIPTIONS[claim];
   const formattedValue = _.isPlainObject(value) || _.isArray(value) ? JSON.stringify(value, null, 3) : _.toString(value);
   const friendlyValue = getFriendlyValue({ claim, value });
 
@@ -26,7 +26,7 @@ function parseClaims({ claim, value }: { claim: string; value: unknown }) {
     value: formattedValue,
     friendlyValue,
     claim,
-    claimDescription,
+    claimDescriptionKey,
   };
 }
 
@@ -48,5 +48,5 @@ function dateFormatter(value: unknown) {
   }
 
   const date = new Date(Number(value) * 1000);
-  return `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+  return date.toLocaleString('zh-CN');
 }

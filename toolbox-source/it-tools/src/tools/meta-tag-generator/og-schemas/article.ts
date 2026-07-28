@@ -1,33 +1,33 @@
 import type { OGSchemaType } from '../OGSchemaType.type';
 
 export const article: OGSchemaType = {
-  name: 'Article',
+  name: 'tools.og-meta-generator.ui.schema.article.name',
   elements: [
     {
       type: 'input',
-      label: 'Publishing date',
+      label: 'tools.og-meta-generator.ui.schema.article.publishingDate',
       key: 'article:published_time',
-      placeholder: 'When the article was first published...',
+      placeholder: 'tools.og-meta-generator.ui.schema.article.publishingDatePlaceholder',
     },
     {
       type: 'input',
-      label: 'Modification date',
+      label: 'tools.og-meta-generator.ui.schema.article.modificationDate',
       key: 'article:modified_time',
-      placeholder: 'When the article was last changed...',
+      placeholder: 'tools.og-meta-generator.ui.schema.article.modificationDatePlaceholder',
     },
     {
       type: 'input',
-      label: 'Expiration date',
+      label: 'tools.og-meta-generator.ui.schema.article.expirationDate',
       key: 'article:expiration_time',
-      placeholder: 'When the article is out of date after...',
+      placeholder: 'tools.og-meta-generator.ui.schema.article.expirationDatePlaceholder',
     },
-    { type: 'input', label: 'Author', key: 'article:author', placeholder: 'Writers of the article...' },
+    { type: 'input', label: 'tools.og-meta-generator.ui.schema.common.author', key: 'article:author', placeholder: 'tools.og-meta-generator.ui.schema.article.authorPlaceholder' },
     {
       type: 'input',
-      label: 'Section',
+      label: 'tools.og-meta-generator.ui.schema.article.section',
       key: 'article:section',
-      placeholder: 'A high-level section name. E.g. Technology..',
+      placeholder: 'tools.og-meta-generator.ui.schema.article.sectionPlaceholder',
     },
-    { type: 'input', label: 'Tag', key: 'article:tag', placeholder: 'Tag words associated with this article...' },
+    { type: 'input', label: 'tools.og-meta-generator.ui.schema.common.tag', key: 'article:tag', placeholder: 'tools.og-meta-generator.ui.schema.article.tagPlaceholder' },
   ],
 };

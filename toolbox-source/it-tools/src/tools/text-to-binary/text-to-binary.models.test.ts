@@ -25,8 +25,8 @@ describe('text-to-binary', () => {
     });
 
     it('throws an error if the given binary string as no complete octet', () => {
-      expect(() => convertAsciiBinaryToText('010000011')).toThrow('Invalid binary string');
-      expect(() => convertAsciiBinaryToText('1')).toThrow('Invalid binary string');
+      expect(() => convertAsciiBinaryToText('010000011')).toThrow('INVALID_BINARY_STRING');
+      expect(() => convertAsciiBinaryToText('1')).toThrow('INVALID_BINARY_STRING');
     });
   });
 });

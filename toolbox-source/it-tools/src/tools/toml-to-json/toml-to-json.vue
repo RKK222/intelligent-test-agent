@@ -5,20 +5,21 @@ import { isValidToml } from './toml.services';
 import type { UseValidationRule } from '@/composable/validation';
 
 const transformer = (value: string) => value === '' ? '' : withDefaultOnError(() => JSON.stringify(parseToml(value), null, 3), '');
+const { t } = useI18n();
 
-const rules: UseValidationRule<string>[] = [
+const rules = computed<UseValidationRule<string>[]>(() => [
   {
     validator: isValidToml,
-    message: 'Provided TOML is not valid.',
+    message: t('tools.toml-to-json.ui.invalidToml'),
   },
-];
+]);
 </script>
 
 <template>
   <format-transformer
-    input-label="Your TOML"
-    input-placeholder="Paste your TOML here..."
-    output-label="JSON from your TOML"
+    :input-label="t('tools.toml-to-json.ui.inputLabel')"
+    :input-placeholder="t('tools.toml-to-json.ui.inputPlaceholder')"
+    :output-label="t('tools.toml-to-json.ui.outputLabel')"
     output-language="json"
     :input-validation-rules="rules"
     :transformer="transformer"

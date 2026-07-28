@@ -19,62 +19,63 @@ const baseConfig = {
 };
 
 const input = ref('lorem ipsum dolor sit amet');
+const { t } = useI18n();
 
 const formats = computed(() => [
   {
-    label: 'Lowercase:',
+    label: t('tools.case-converter.ui.lowercase'),
     value: input.value.toLocaleLowerCase(),
   },
   {
-    label: 'Uppercase:',
+    label: t('tools.case-converter.ui.uppercase'),
     value: input.value.toLocaleUpperCase(),
   },
   {
-    label: 'Camelcase:',
+    label: t('tools.case-converter.ui.camelCase'),
     value: camelCase(input.value, baseConfig),
   },
   {
-    label: 'Capitalcase:',
+    label: t('tools.case-converter.ui.capitalCase'),
     value: capitalCase(input.value, baseConfig),
   },
   {
-    label: 'Constantcase:',
+    label: t('tools.case-converter.ui.constantCase'),
     value: constantCase(input.value, baseConfig),
   },
   {
-    label: 'Dotcase:',
+    label: t('tools.case-converter.ui.dotCase'),
     value: dotCase(input.value, baseConfig),
   },
   {
-    label: 'Headercase:',
+    label: t('tools.case-converter.ui.headerCase'),
     value: headerCase(input.value, baseConfig),
   },
   {
-    label: 'Nocase:',
+    label: t('tools.case-converter.ui.noCase'),
     value: noCase(input.value, baseConfig),
   },
   {
-    label: 'Paramcase:',
+    label: t('tools.case-converter.ui.paramCase'),
     value: paramCase(input.value, baseConfig),
   },
   {
-    label: 'Pascalcase:',
+    label: t('tools.case-converter.ui.pascalCase'),
     value: pascalCase(input.value, baseConfig),
   },
   {
-    label: 'Pathcase:',
+    label: t('tools.case-converter.ui.pathCase'),
     value: pathCase(input.value, baseConfig),
   },
   {
-    label: 'Sentencecase:',
+    label: t('tools.case-converter.ui.sentenceCase'),
     value: sentenceCase(input.value, baseConfig),
   },
   {
-    label: 'Snakecase:',
+    label: t('tools.case-converter.ui.snakeCase'),
     value: snakeCase(input.value, baseConfig),
   },
   {
-    label: 'Mockingcase:',
+    label: t('tools.case-converter.ui.mockingCase'),
     value: input.value
       .split('')
       .map((char, index) => (index % 2 === 0 ? char.toUpperCase() : char.toLowerCase()))
@@ -93,8 +94,8 @@ const inputLabelAlignmentConfig = {
   <c-card>
     <c-input-text
       v-model:value="input"
-      label="Your string:"
-      placeholder="Your string..."
+      :label="t('tools.case-converter.ui.inputLabel')"
+      :placeholder="t('tools.case-converter.ui.inputPlaceholder')"
       raw-text
       v-bind="inputLabelAlignmentConfig"
     />

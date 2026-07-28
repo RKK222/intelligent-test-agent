@@ -2,59 +2,60 @@
 import { useWindowSize } from '@vueuse/core';
 
 const { width, height } = useWindowSize();
+const { t } = useI18n();
 
-const sections = [
+const sections = computed(() => [
   {
-    name: 'Screen',
+    name: t('tools.device-information.ui.screen'),
     information: [
       {
-        label: 'Screen size',
+        label: t('tools.device-information.ui.screenSize'),
         value: computed(() => `${window.screen.availWidth} x ${window.screen.availHeight}`),
       },
       {
-        label: 'Orientation',
+        label: t('tools.device-information.ui.orientation'),
         value: computed(() => window.screen.orientation.type),
       },
       {
-        label: 'Orientation angle',
+        label: t('tools.device-information.ui.orientationAngle'),
         value: computed(() => `${window.screen.orientation.angle}°`),
       },
       {
-        label: 'Color depth',
+        label: t('tools.device-information.ui.colorDepth'),
         value: computed(() => `${window.screen.colorDepth} bits`),
       },
       {
-        label: 'Pixel ratio',
+        label: t('tools.device-information.ui.pixelRatio'),
         value: computed(() => `${window.devicePixelRatio} dppx`),
       },
       {
-        label: 'Window size',
+        label: t('tools.device-information.ui.windowSize'),
         value: computed(() => `${width.value} x ${height.value}`),
       },
     ],
   },
   {
-    name: 'Device',
+    name: t('tools.device-information.ui.device'),
     information: [
       {
-        label: 'Browser vendor',
+        label: t('tools.device-information.ui.browserVendor'),
         value: computed(() => navigator.vendor),
       },
       {
-        label: 'Languages',
+        label: t('tools.device-information.ui.languages'),
         value: computed(() => navigator.languages.join(', ')),
       },
       {
-        label: 'Platform',
+        label: t('tools.device-information.ui.platform'),
         value: computed(() => navigator.platform),
       },
       {
-        label: 'User agent',
+        label: t('tools.device-information.ui.userAgent'),
         value: computed(() => navigator.userAgent),
       },
     ],
   },
-];
+]);
 </script>
 
 <template>
@@ -70,7 +71,7 @@ const sections = [
             {{ value }}
           </n-ellipsis>
           <div v-else class="undefined-value">
-            unknown
+            {{ t('tools.device-information.ui.unknown') }}
           </div>
         </div>
       </n-gi>

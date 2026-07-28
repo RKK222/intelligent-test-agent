@@ -39,6 +39,13 @@ const plainText = ref('');
 const secret = ref('');
 const hashFunction = ref<keyof typeof algos>('SHA256');
 const encoding = ref<Encoding>('Hex');
+const { t } = useI18n();
+const encodingOptions = computed(() => [
+  { label: t('tools.hmac-generator.ui.binary'), value: 'Bin' },
+  { label: t('tools.hmac-generator.ui.hexadecimal'), value: 'Hex' },
+  { label: t('tools.hmac-generator.ui.base64'), value: 'Base64' },
+  { label: t('tools.hmac-generator.ui.base64Url'), value: 'Base64url' },
+]);
 const hmac = computed(() =>
   formatWithEncoding(algos[hashFunction.value](plainText.value, secret.value), encoding.value),
 );
@@ -47,44 +54,27 @@ const { copy } = useCopy({ source: hmac });
 
 <template>
   <div flex flex-col gap-4>
-    <c-input-text v-model:value="plainText" multiline raw-text placeholder="Plain text to compute the hash..." rows="3" autosize autofocus label="Plain text to compute the hash" />
-    <c-input-text v-model:value="secret" raw-text placeholder="Enter the secret key..." label="Secret key" clearable />
+    <c-input-text v-model:value="plainText" multiline raw-text :placeholder="t('tools.hmac-generator.ui.plainTextPlaceholder')" rows="3" autosize autofocus :label="t('tools.hmac-generator.ui.plainText')" />
+    <c-input-text v-model:value="secret" raw-text :placeholder="t('tools.hmac-generator.ui.secretPlaceholder')" :label="t('tools.hmac-generator.ui.secret')" clearable />
 
     <div flex gap-2>
       <c-select
-        v-model:value="hashFunction" label="Hashing function"
+        v-model:value="hashFunction" :label="t('tools.hmac-generator.ui.hashFunction')"
         flex-1
-        placeholder="Select an hashing function..."
+        :placeholder="t('tools.hmac-generator.ui.hashFunctionPlaceholder')"
         :options="Object.keys(algos).map((label) => ({ label, value: label }))"
       />
       <c-select
-        v-model:value="encoding" label="Output encoding"
+        v-model:value="encoding" :label="t('tools.hmac-generator.ui.outputEncoding')"
         flex-1
-        placeholder="Select the result encoding..."
-        :options="[
-          {
-            label: 'Binary (base 2)',
-            value: 'Bin',
-          },
-          {
-            label: 'Hexadecimal (base 16)',
-            value: 'Hex',
-          },
-          {
-            label: 'Base64 (base 64)',
-            value: 'Base64',
-          },
-          {
-            label: 'Base64-url (base 64 with url safe chars)',
-            value: 'Base64url',
-          },
-        ]"
+        :placeholder="t('tools.hmac-generator.ui.outputEncodingPlaceholder')"
+        :options="encodingOptions"
       />
     </div>
-    <input-copyable v-model:value="hmac" type="textarea" placeholder="The result of the HMAC..." label="HMAC of your text" />
+    <input-copyable v-model:value="hmac" type="textarea" :placeholder="t('tools.hmac-generator.ui.outputPlaceholder')" :label="t('tools.hmac-generator.ui.outputLabel')" />
     <div flex justify-center>
       <c-button @click="copy()">
-        Copy HMAC
+        {{ t('tools.hmac-generator.ui.copy') }}
       </c-button>
     </div>
   </div>

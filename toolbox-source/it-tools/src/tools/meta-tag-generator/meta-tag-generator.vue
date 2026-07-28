@@ -11,6 +11,34 @@ const metadata = ref<{ type: string; [k: string]: any }>({
   'type': 'website',
   'twitter:card': 'summary_large_image',
 });
+const { t } = useI18n();
+
+function localizeText(value: string) {
+  return value.startsWith('tools.') ? t(value) : value;
+}
+
+// schema 保留协议字段和值，只在组件边界把专属 locale key 解析成当前界面文案。
+function localizeSchema(schema: OGSchemaType): OGSchemaType {
+  return {
+    ...schema,
+    name: localizeText(schema.name),
+    elements: schema.elements.map((element) => {
+      if (element.type !== 'select') {
+        return { ...element, label: localizeText(element.label), placeholder: localizeText(element.placeholder) };
+      }
+      return {
+        ...element,
+        label: localizeText(element.label),
+        placeholder: localizeText(element.placeholder),
+        options: element.options.map((option: any) => ({
+          ...option,
+          label: localizeText(String(option.label)),
+          children: option.children?.map((child: any) => ({ ...child, label: localizeText(String(child.label)) })),
+        })),
+      };
+    }),
+  };
+}
 
 watch(
   () => ref(metadata.value.type),
@@ -28,11 +56,11 @@ watch(
 );
 
 const sections = computed(() => {
-  const secs: OGSchemaType[] = [website, image, twitter];
+  const secs: OGSchemaType[] = [website, image, twitter].map(localizeSchema);
   const additionalSchema = ogSchemas[metadata.value.type];
 
   if (additionalSchema) {
-    secs.push(additionalSchema);
+    secs.push(localizeSchema(additionalSchema));
   }
 
   return secs;
@@ -83,7 +111,7 @@ const metaTags = computed(() => {
     </div>
   </div>
   <div>
-    <n-form-item label="Your meta tags">
+    <n-form-item :label="t('tools.og-meta-generator.ui.metaTags')">
       <TextareaCopyable :value="metaTags" language="html" />
     </n-form-item>
   </div>
