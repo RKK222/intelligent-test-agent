@@ -6078,6 +6078,7 @@ function buildEnvContextPrefix(): string | undefined {
   const subitemId = extractSubitemIdFromContext();
 
   const lines = [
+    `<env_context>`,
     `当前应用信息：`,
     `- appId: ${appId}`,
     `- appName: ${appName}`,
@@ -6089,6 +6090,7 @@ function buildEnvContextPrefix(): string | undefined {
   lines.push("");
   lines.push(`当用户说的内容包含"自动化案例调度"时，你必须调用 auto_call 工具，传入上面的 appName、itemNo 和用户提供的 testCaseDirectory。`);
   lines.push(`当用户说的内容包含"一体化"时，你必须调用 db_operation_yth 工具，传入上面的 appId 和 version。`);
+  lines.push(`</env_context>`);
   lines.push("");
   return lines.join("\n");
 }

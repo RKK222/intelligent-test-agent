@@ -52,6 +52,14 @@ export function promptPartsForUserDisplay(parts: PromptPart[] | undefined): Prom
 // 后端持久化的 user prompt 可能包含前端拼接的工作区上下文；消息气泡只展示用户原始提问。
 export function displayTextFromUserPrompt(text: string): string {
   const normalized = text.replace(/\r\n/g, "\n");
+
+  // 过滤 <env_context>...</env_context> 环境上下文前缀
+  const envContextPattern = /<env_context>[\s\S]*?<\/env_context>\s*/;
+  const withoutEnvContext = normalized.replace(envContextPattern, "");
+  if (withoutEnvContext !== normalized) {
+    return withoutEnvContext.trim() || text;
+  }
+
   const prefixedPattern = new RegExp(
     `^${escapeRegExp(CONTEXT_PROMPT_PREFIX)}\\s*([\\s\\S]*?)\\s*${escapeRegExp(CONTEXT_PROMPT_MARKER)}\\s*[\\s\\S]*$`
   );
