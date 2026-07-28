@@ -104,6 +104,72 @@ describe('Task 2B 中文 UI 审计器', () => {
     expect(result.stderr).toContain('Visible English');
   });
 
+  it('递归检查动态可见属性逻辑表达式中的英文回退值', async () => {
+    const root = await createAuditFixture();
+    await writeFixtureSource(root, 'token-generator/logical-fallback.vue', [
+      '<template>',
+      '  <c-card :title="fallback || \'Delete account\'" :aria-label="fallback || `Archive record`" />',
+      '</template>',
+      '',
+    ].join('\n'));
+
+    const result = runAudit(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Delete account');
+    expect(result.stderr).toContain('Archive record');
+  });
+
+  it('递归检查插值逻辑表达式中的英文回退值', async () => {
+    const root = await createAuditFixture();
+    await writeFixtureSource(root, 'token-generator/interpolation-fallback.vue', `
+<template>
+  <div>{{ status || 'Unknown status' }}</div>
+</template>
+`);
+
+    const result = runAudit(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Unknown status');
+  });
+
+  it('递归检查动态 tooltip 模板字符串的头部、中部和尾部英文', async () => {
+    const root = await createAuditFixture();
+    await writeFixtureSource(root, 'token-generator/template-tooltip.vue', [
+      '<template>',
+      '  <c-button :tooltip="`Remove $' + '{name} from $' + '{group} account`" />',
+      '</template>',
+      '',
+    ].join('\n'));
+
+    const result = runAudit(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Remove');
+    expect(result.stderr).toContain('from');
+    expect(result.stderr).toContain('account');
+  });
+
+  it('递归可见表达式时忽略对象键、import、稳定错误码和技术词', async () => {
+    const root = await createAuditFixture();
+    await writeFixtureSource(root, 'token-generator/non-visible-strings.vue', [
+      '<script setup lang="ts">',
+      'import formatter from \'./Internal formatter\';',
+      'const status = \'INVALID_BINARY_STRING\';',
+      '</script>',
+      '<template>',
+      '  <c-button :tooltip="status.startsWith(\'tools.\') ? formatter({ \'Delete account\': status }) : `PDF $' + '{name}`" />',
+      '</template>',
+      '',
+    ].join('\n'));
+
+    const result = runAudit(root);
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+  });
+
   it('拒绝任意全大写英文和拆开的精确技术短语，同时保留明确技术名词', async () => {
     const root = await createAuditFixture();
     await writeFixtureSource(root, 'token-generator/allowlist.vue', `

@@ -210,8 +210,31 @@ function containingVariableName(node) {
   return undefined;
 }
 
+function isNonVisibleExpressionText(node) {
+  const parent = node.parent;
+
+  // 对象键、模块路径和动态 import 参数只参与程序寻址，不是表达式最终展示的文案。
+  if (ts.isObjectLiteralElementLike(parent) && parent.name === node) {
+    return true;
+  }
+  if ((ts.isImportDeclaration(parent) || ts.isExportDeclaration(parent)) && parent.moduleSpecifier === node) {
+    return true;
+  }
+  if (ts.isCallExpression(parent)
+    && parent.arguments.includes(node)
+    && ts.isPropertyAccessExpression(parent.expression)
+    && ['endsWith', 'includes', 'match', 'search', 'startsWith'].includes(parent.expression.name.text)) {
+    return true;
+  }
+  return ts.isCallExpression(parent) && parent.expression.kind === ts.SyntaxKind.ImportKeyword;
+}
+
 function isUserVisibleScriptString(node, file, rootExpressionVisible) {
   const parent = node.parent;
+
+  if (rootExpressionVisible && !isNonVisibleExpressionText(node)) {
+    return true;
+  }
 
   if (ts.isPropertyAssignment(parent)) {
     const propertyName = getStaticPropertyName(parent.name);
@@ -227,7 +250,7 @@ function isUserVisibleScriptString(node, file, rootExpressionVisible) {
 
   if (ts.isReturnStatement(parent)
     || ts.isThrowStatement(parent)
-    || (rootExpressionVisible && (ts.isExpressionStatement(parent) || ts.isConditionalExpression(parent)))) {
+    || (rootExpressionVisible && ts.isExpressionStatement(parent))) {
     return true;
   }
 
@@ -247,8 +270,10 @@ function inspectTypescript(route, file, source, offset = 0, rootExpressionVisibl
   const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 
   function visit(node) {
-    if (ts.isStringLiteralLike(node)) {
-      if (recordLocaleKey(route, file, source, node, offset)) {
+    const isStringLiteral = ts.isStringLiteralLike(node);
+    const isTemplateFragment = ts.isTemplateLiteralToken(node);
+    if (isStringLiteral || isTemplateFragment) {
+      if (isStringLiteral && recordLocaleKey(route, file, source, node, offset)) {
         return;
       }
       if (isUserVisibleScriptString(node, file, rootExpressionVisible) && containsNaturalEnglish(node.text)) {
@@ -274,11 +299,12 @@ function inspectTemplate(route, file, source, template) {
   }
 
   function inspectExpression(expression, line, { interpolation = false, visibleAttribute } = {}) {
-    if (!expression?.content) {
+    const expressionSource = expression?.loc?.source ?? expression?.content;
+    if (!expressionSource) {
       return;
     }
     const rootExpressionVisible = interpolation || USER_VISIBLE_ATTRIBUTES.has(visibleAttribute);
-    inspectTypescript(route, file, expression.content, template.loc.start.line + line - 2, rootExpressionVisible);
+    inspectTypescript(route, file, expressionSource, template.loc.start.line + line - 2, rootExpressionVisible);
   }
 
   function visit(node) {
