@@ -242,21 +242,25 @@ function normalize(value: string): string {
             @click="onLinkClick(tool, $event)"
             @auxclick="onLinkAuxClick(tool, $event)"
           >
-            <div class="toolbox-card__topline">
-              <span :class="['toolbox-source-badge', `toolbox-source-badge--${tool.source.toLowerCase()}`]">
-                {{ tool.sourceName }}
-              </span>
-              <ExternalLink :size="16" aria-label="在新标签页打开" />
+            <div class="toolbox-card__header">
+              <div class="toolbox-card__title-row">
+                <h3>{{ tool.nameZh }}</h3>
+                <span :class="['toolbox-source-badge', `toolbox-source-badge--${tool.source.toLowerCase()}`]">
+                  {{ tool.sourceName }}
+                </span>
+                <span class="toolbox-category-badge">
+                  {{ tool.categoryLabel }}
+                </span>
+              </div>
+              <div class="toolbox-card__actions">
+                <span class="toolbox-card__clicks" :data-testid="`tool-count-${tool.toolId}`">
+                  {{ tool.clickCount }} 次点击
+                </span>
+                <ExternalLink :size="15" aria-label="在新标签页打开" class="toolbox-card__launch-icon" />
+              </div>
             </div>
-            <div class="toolbox-card__title">
-              <h3>{{ tool.nameZh }}</h3>
-              <p>{{ tool.nameEn }}</p>
-            </div>
+            <p class="toolbox-card__subtitle">{{ tool.nameEn }}</p>
             <p class="toolbox-card__description">{{ tool.descriptionZh }}</p>
-            <div class="toolbox-card__footer">
-              <span>{{ tool.categoryLabel }}</span>
-              <span :data-testid="`tool-count-${tool.toolId}`">{{ tool.clickCount }} 次点击</span>
-            </div>
           </a>
         </div>
         <div v-else class="toolbox-empty">
@@ -323,28 +327,46 @@ function normalize(value: string): string {
 .toolbox-section-heading > span { color: #7c8798; font-size: 11px; }
 .toolbox-section-heading--catalog { margin-bottom: 14px; }
 .toolbox-section-kicker { color: #a76100; }
-.toolbox-hot-list { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
-.toolbox-hot-empty { display: flex; gap: 8px; align-items: center; min-height: 48px; padding: 0 14px; border: 1px dashed #d9d3c5; border-radius: 9px; color: #8c7960; font-size: 12px; background: #fffcf5; }
-.toolbox-hot-list a { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; min-width: 0; padding: 11px 12px; border: 1px solid #e2ded3; border-radius: 9px; color: inherit; background: #fffcf5; text-decoration: none; transition: transform 150ms ease, border-color 150ms ease; }
-.toolbox-hot-list a:hover { transform: translateY(-1px); border-color: #d39a3e; }
-.toolbox-hot-rank { color: #a76100; font-size: 11px; font-weight: 800; }
-.toolbox-hot-name { overflow: hidden; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
-.toolbox-hot-source { grid-column: 2; color: #8c7960; font-size: 10px; }
-.toolbox-hot-list strong { grid-row: 1 / span 2; grid-column: 3; font-variant-numeric: tabular-nums; font-size: 13px; }
+.toolbox-hot-list {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px 10px;
+}
+.toolbox-hot-empty { display: flex; gap: 8px; align-items: center; min-height: 40px; padding: 0 14px; border: 1px dashed #d9d3c5; border-radius: 8px; color: #8c7960; font-size: 12px; background: #fffcf5; }
+.toolbox-hot-list a {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid #e2ded3;
+  border-radius: 7px;
+  color: inherit;
+  background: #fffcf5;
+  text-decoration: none;
+  transition: transform 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+.toolbox-hot-list a:hover { transform: translateY(-1px); border-color: #d39a3e; box-shadow: 0 3px 8px rgb(211 154 62 / 12%); }
+.toolbox-hot-rank { flex-shrink: 0; color: #a76100; font-size: 11px; font-weight: 800; }
+.toolbox-hot-name { overflow: hidden; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; color: #172033; }
+.toolbox-hot-source { flex-shrink: 0; color: #8c7960; font-size: 10px; opacity: 0.85; }
+.toolbox-hot-list strong { margin-left: auto; flex-shrink: 0; font-variant-numeric: tabular-nums; font-size: 12px; color: #a76100; }
 .toolbox-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.toolbox-card { display: flex; min-height: 190px; flex-direction: column; box-sizing: border-box; padding: 16px; border: 1px solid #dfe4ea; border-radius: 11px; color: inherit; background: #fff; text-decoration: none; box-shadow: 0 3px 10px rgb(23 32 51 / 4%); transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease; }
+.toolbox-card { display: flex; min-height: 140px; flex-direction: column; box-sizing: border-box; padding: 14px 16px; border: 1px solid #dfe4ea; border-radius: 10px; color: inherit; background: #fff; text-decoration: none; box-shadow: 0 2px 8px rgb(23 32 51 / 4%); transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease; }
 .toolbox-card:hover,
-.toolbox-card:focus-visible { transform: translateY(-2px); border-color: #8ea5c4; outline: none; box-shadow: 0 10px 22px rgb(23 32 51 / 10%); }
-.toolbox-card__topline,
-.toolbox-card__footer { display: flex; align-items: center; justify-content: space-between; }
-.toolbox-card__topline { color: #718096; }
-.toolbox-source-badge { padding: 4px 7px; border-radius: 5px; color: #31598c; font-size: 10px; font-weight: 750; background: #edf4fd; }
+.toolbox-card:focus-visible { transform: translateY(-2px); border-color: #8ea5c4; outline: none; box-shadow: 0 8px 20px rgb(23 32 51 / 9%); }
+.toolbox-card__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.toolbox-card__title-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.toolbox-card__title-row h3 { margin: 0; font-size: 14.5px; line-height: 1.3; font-weight: 700; color: #172033; }
+.toolbox-source-badge { padding: 2px 6px; border-radius: 4px; color: #31598c; font-size: 10px; font-weight: 750; background: #edf4fd; flex-shrink: 0; }
 .toolbox-source-badge--omni_tools { color: #76511e; background: #fff3dc; }
-.toolbox-card__title { margin-top: 16px; }
-.toolbox-card__title h3 { margin: 0; font-size: 15px; line-height: 1.3; }
-.toolbox-card__title p { margin: 4px 0 0; overflow: hidden; color: #778195; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.toolbox-card__description { display: -webkit-box; margin: 13px 0 18px; overflow: hidden; color: #4d596b; font-size: 12px; line-height: 1.65; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.toolbox-card__footer { margin-top: auto; padding-top: 11px; border-top: 1px solid #edf0f3; color: #7a8594; font-size: 10px; }
+.toolbox-category-badge { padding: 2px 6px; border-radius: 4px; color: #5a6678; font-size: 10px; font-weight: 500; background: #f0f3f7; border: 1px solid #e2e7ec; flex-shrink: 0; }
+.toolbox-card__actions { display: flex; align-items: center; gap: 6px; color: #828e9e; flex-shrink: 0; padding-top: 1px; }
+.toolbox-card__clicks { font-size: 10px; color: #828e9e; font-variant-numeric: tabular-nums; }
+.toolbox-card__launch-icon { flex-shrink: 0; color: #a0aec0; transition: color 150ms ease; }
+.toolbox-card:hover .toolbox-card__launch-icon { color: #31598c; }
+.toolbox-card__subtitle { margin: 3px 0 0; overflow: hidden; color: #778195; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.toolbox-card__description { display: -webkit-box; margin: 8px 0 0; overflow: hidden; color: #4d596b; font-size: 12px; line-height: 1.6; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .toolbox-state,
 .toolbox-empty { display: grid; min-height: 220px; place-items: center; align-content: center; gap: 10px; max-width: 1480px; margin: 28px auto 0; border: 1px dashed #cfd6df; border-radius: 12px; color: #687386; background: #fff; }
 .toolbox-state--error { color: #9b3d33; }
@@ -365,6 +387,6 @@ function normalize(value: string): string {
   .toolbox-category-filter { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
   .toolbox-category-filter button { flex: 0 0 auto; }
   .toolbox-grid { grid-template-columns: 1fr; }
-  .toolbox-hot-list { grid-template-columns: 1fr 1fr; }
+  .toolbox-hot-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 </style>
