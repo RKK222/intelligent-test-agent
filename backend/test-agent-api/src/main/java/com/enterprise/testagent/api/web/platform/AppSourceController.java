@@ -69,14 +69,19 @@ public class AppSourceController {
             @PathVariable String repositoryId,
             @RequestParam String branch,
             @RequestParam(defaultValue = ".") String path,
+            @RequestParam(defaultValue = "false") boolean includeCommit,
             ServerWebExchange exchange) {
         AuthPrincipal principal = principal(exchange);
-        return RuntimeApiSupport.blockingObjectResponse(
-                exchange,
-                traceId -> service.listTree(appId, repositoryId, branch, path, principal.userId())
-                        .stream()
-                        .map(AppSourceDtos::treeNode)
-                        .toList());
+        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> {
+            if (includeCommit) {
+                return AppSourceDtos.treeSnapshot(
+                        service.getTreeSnapshot(appId, repositoryId, branch, path, principal.userId()));
+            }
+            return service.listTree(appId, repositoryId, branch, path, principal.userId())
+                    .stream()
+                    .map(AppSourceDtos::treeNode)
+                    .toList();
+        });
     }
 
     @PostMapping("/applications/{appId}/app-source-repositories/{repositoryId}/materializations")

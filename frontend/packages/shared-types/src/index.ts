@@ -2614,6 +2614,12 @@ export type AppSourceRemoteTreeNode = {
   children: AppSourceRemoteTreeNode[];
 };
 
+/** 目录节点及服务端同一次解析得到的固定提交；空目录的 nodes 可以为空。 */
+export type AppSourceTreeSnapshot = {
+  targetCommit: string;
+  nodes: AppSourceRemoteTreeNode[];
+};
+
 /** materialization 提交完整 exact-set，expectedGeneration 为首次下载时传 null。 */
 export type AppSourceMaterializationPayload = {
   operationId: string;

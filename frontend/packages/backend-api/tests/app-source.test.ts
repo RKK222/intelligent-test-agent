@@ -10,11 +10,13 @@ import type {
 
 describe("app-source backend client", () => {
   it("encodes every REST path/query and preserves the exact materialization payload", async () => {
+    const treeCommit = "0123456789abcdef0123456789abcdef01234567";
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
       const url = String(input);
       const data = url.endsWith("/recent-app-source") ? null
         : url.includes("/branches") ? ["main"]
-          : url.includes("/tree?") ? []
+          : url.includes("includeCommit=true") ? { targetCommit: treeCommit, nodes: [] }
+            : url.includes("/tree?") ? []
             : url.includes("/app-source-repositories") ? []
               : { operationId: "aso_1", status: "RUNNING" };
       return new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data }), { status: 200 });
@@ -38,6 +40,12 @@ describe("app-source backend client", () => {
     await client.listAppSourceRepositories("app/demo");
     await client.listAppSourceBranches("app/demo", "repo/source");
     await client.listAppSourceTree("app/demo", "repo/source", "feature/source", "src/api");
+    const treeSnapshot = await client.getAppSourceTreeSnapshot(
+      "app/demo",
+      "repo/source",
+      "feature/source",
+      "src/api"
+    );
     await client.materializeAppSource("app/demo", "repo/source", materialization);
     await client.retryAppSourceReplicas("app/demo", "repo/source", {
       operationId: "aso_retry",
@@ -48,6 +56,8 @@ describe("app-source backend client", () => {
     await client.clearRecentAppSource();
     await client.getAppSourceOperation("\u00a0release..1\u00a0");
     await client.createAppSourceOperationTicket(" release..1 ");
+
+    expect(treeSnapshot).toEqual({ targetCommit: treeCommit, nodes: [] });
 
     expect(fetcher.mock.calls.map((call) => [call[0], call[1]?.method, call[1]?.body])).toEqual([
       [
@@ -62,6 +72,11 @@ describe("app-source backend client", () => {
       ],
       [
         "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/app-source-repositories/repo%2Fsource/tree?branch=feature%2Fsource&path=src%2Fapi",
+        undefined,
+        undefined
+      ],
+      [
+        "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/app-source-repositories/repo%2Fsource/tree?branch=feature%2Fsource&path=src%2Fapi&includeCommit=true",
         undefined,
         undefined
       ],

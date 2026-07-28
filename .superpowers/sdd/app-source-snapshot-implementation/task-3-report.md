@@ -203,3 +203,30 @@ RED：真实 authorizer 驱动的 handler 用例中，同一超级管理员 sock
 - **安全：** 修复超级管理员 APP_SOURCE 票在 replica 映射消失后降级为非托管工作区的授权绕过，且保留真正非托管服务器工作区的明确兼容入口。
 - **兼容性：** ASCII 空白和普通合法 ID 行为不变；ECMAScript 额外空白现在与浏览器统一规范化，精确 `.`/`..` 仍拒绝，`release..1` 继续合法。新增接口方法、ticket 构造器和 store 签发参数均保留最小兼容重载。
 - **剩余风险：** 无本轮新增未完成事项。按 Task 3 协作约束不修改 `.agents/session-log.*.md`，由最终汇总任务统一更新。
+
+## Task 4 集成前契约修复（Round 4）
+
+本轮修复 tree 查询只返回节点数组、导致新下载或新分支无法取得物化必填 `expectedTreeCommit` 的阻塞契约。没有修改 OpenCode 快照、generated SDK、数据库结构、SQL、Flyway、`.env.local`、物化分支移动冲突逻辑、RunEvent 或任何事件协议；本节所在提交即 Round 4 修复提交。
+
+### 固定提交树快照与兼容入口
+
+- `AppSourceApplicationService.getTreeSnapshot` 在一次业务调用内只执行一次远端分支 commit 解析，并以该同一 commit 列树，返回低敏 `TreeSnapshot(targetCommit,nodes)`；指定目录为空时 `nodes` 为空，但完整 40 字符 commit 仍保留。已有 `listTree` 入口继续存在并委托 snapshot 的 `nodes`。
+- 既有 `GET .../tree?branch=&path=` URL 不变；不传 `includeCommit` 或传 `false` 时 wire `data` 仍是原节点数组，显式 `includeCommit=true` 时才返回 `{targetCommit,nodes}`。Controller 只在两种模式间委托 workspace-management 服务并映射 DTO，不接触 Git、Repository 或文件系统。
+- `@test-agent/shared-types` 新增 `AppSourceTreeSnapshot`；`@test-agent/backend-api` 保留 `listAppSourceTree()` 的数组语义，并新增 `getAppSourceTreeSnapshot()` 通过同一 URL 发送 `includeCommit=true`。调用方可把响应 `targetCommit` 原样作为物化 `expectedTreeCommit`。
+- `targetCommit/nodes` 不包含物理路径、凭据或 Git 错误；没有新增 endpoint、数据库字段、事件、WebSocket envelope 或后端轮询。
+
+### Round 4 RED / GREEN 与验证
+
+- RED：workspace/API testCompile 因缺少 `TreeSnapshot/getTreeSnapshot` 失败；frontend 7 项中 1 项以 `TypeError: client.getAppSourceTreeSnapshot is not a function` 失败，其余 6 项通过。
+- GREEN：服务 snapshot 测试证明分支只解析一次且节点来自同一固定 commit，空目录仍返回完整 commit；已有 `listTree` 通过委托该 snapshot 保留节点语义。Controller 测试同时证明默认数组与 `includeCommit=true` envelope；client 测试证明旧 URL/数组和新增查询参数/envelope 两种契约并存，并使用显式 40 字符 commit fixture。
+- workspace-management 全量：340/340，通过，0 failure/error/skip。
+- API 定向：`AppSourceControllerTest` 与 `AppSourceApiContextTest` 共 7/7，通过。
+- frontend：`app-source.test.ts` 1 file / 7 tests；`@test-agent/backend-api` 与 `@test-agent/shared-types` typecheck 均通过，无诊断。
+- 独立只读复审未发现 Critical、Important 或 Minor 问题，结论 Ready；`git diff --check` 通过。
+
+### Round 4 文档、影响与剩余风险
+
+- **文档：** 同步 workspace-management/API 模块 README、frontend README、backend-api/shared-types `PACKAGE.md`、HTTP API 和模块图；`docs/api/event-stream.md` 不变，因为本轮没有事件或 WebSocket 协议变化。
+- **API/兼容性：** 仅在原 URL 上增加可选查询参数和 opt-in envelope；旧 wire、旧 `listTree`、旧 `listAppSourceTree()` 均保持。物化继续独立解析当前分支并与 `expectedTreeCommit` 比较，分支移动仍返回 `CONFLICT`。
+- **数据库/性能/安全：** 无数据库、migration 或 SQL 变化；snapshot 模式与旧树查询一样各执行一次 commit 解析和一次列树，没有新增远端 Git 往返；响应只增加固定 commit 和已有逻辑节点，不暴露敏感数据。
+- **剩余风险：** 本轮契约已具备后续页面提交固定 `expectedTreeCommit` 的条件，页面接入由后续任务使用新增 client 方法完成。按协作约束未修改 `.agents/session-log.*.md`；提交前已回顾全部 session log 的近期条目并确认无覆盖、冲突或遗留合并标记。

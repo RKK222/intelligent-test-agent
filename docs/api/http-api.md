@@ -1201,7 +1201,7 @@ WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSoc
 |---|---|---|
 | `GET` | `/applications/{appId}/app-source-repositories` | 列出应用源码仓库、固定快照、最新操作及当前服务器可用性。 |
 | `GET` | `/applications/{appId}/app-source-repositories/{repositoryId}/branches` | 读取远端分支；只读访问使用当前用户的代码库凭据。 |
-| `GET` | `/applications/{appId}/app-source-repositories/{repositoryId}/tree?branch={branch}&path={path}` | 读取指定分支或固定 commit 下的安全目录树；`path` 默认 `.`。 |
+| `GET` | `/applications/{appId}/app-source-repositories/{repositoryId}/tree?branch={branch}&path={path}&includeCommit={boolean}` | 读取指定分支下的安全目录树；`path` 默认 `.`，`includeCommit` 默认 `false`。 |
 | `POST` | `/applications/{appId}/app-source-repositories/{repositoryId}/materializations` | 创建新的固定提交源码快照。 |
 | `POST` | `/applications/{appId}/app-source-repositories/{repositoryId}/replica-retries` | 对同一 generation 的失败或陈旧服务器副本重试。 |
 | `POST` | `/applications/{appId}/app-source-repositories/{repositoryId}/open` | 在当前用户进程服务器打开 READY 副本并返回 Runtime Workspace。 |
@@ -1209,6 +1209,19 @@ WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSoc
 | `DELETE` | `/recent-app-source` | 完整复核当前 generation、成员及本机 READY 副本后显式清除最近选择。 |
 | `GET` | `/app-source-operations/{operationId}` | 读取持久化操作、全局步骤和逐服务器步骤的安全快照。 |
 | `POST` | `/app-source-operations/{operationId}/ticket` | 为独立进度 WebSocket 创建短期、一次性 ticket。 |
+
+tree 的兼容模式（不传 `includeCommit` 或传 `false`）保持原 wire 响应，`data` 仍为节点数组。显式传 `includeCommit=true` 时，`data` 返回低敏 envelope：
+
+```json
+{
+  "targetCommit": "0123456789abcdef0123456789abcdef01234567",
+  "nodes": [
+    { "name": "src", "path": "src", "type": "directory", "children": [] }
+  ]
+}
+```
+
+`targetCommit` 是服务端在该次请求中只解析一次得到的完整 40 字符固定提交，`nodes` 必须由同一提交列出，不能再独立解析分支后拼装。目录为空时 `nodes=[]`，但 `targetCommit` 仍必须返回；调用方应把该值原样提交为物化请求的 `expectedTreeCommit`。分支随后移动时，既有物化入口仍返回 `CONFLICT`，不会静默下载新提交。
 
 仓库列表的 `downloadState` 只允许以下四个 wire 值：
 

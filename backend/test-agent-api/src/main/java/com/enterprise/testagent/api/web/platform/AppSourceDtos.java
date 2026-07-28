@@ -51,6 +51,11 @@ final class AppSourceDtos {
             List<TreeNodeResponse> children) {
     }
 
+    record TreeSnapshotResponse(
+            String targetCommit,
+            List<TreeNodeResponse> nodes) {
+    }
+
     record RepositoryResponse(
             String repositoryId,
             String name,
@@ -188,6 +193,12 @@ final class AppSourceDtos {
                 source.path(),
                 source.type(),
                 source.children().stream().map(AppSourceDtos::treeNode).toList());
+    }
+
+    static TreeSnapshotResponse treeSnapshot(AppSourceApplicationService.TreeSnapshot source) {
+        return new TreeSnapshotResponse(
+                source.targetCommit(),
+                source.nodes().stream().map(AppSourceDtos::treeNode).toList());
     }
 
     private static List<SelectedPathResponse> selectedPaths(

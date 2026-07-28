@@ -72,6 +72,8 @@ Browser
 
 引用资产指针展示仍由 `packages/backend-api` 透传既有 7 个 API 的可空服务器路径和状态，由 `apps/agent-web` 用 2 秒轮询驱动三阶段核验进度弹层；不新增事件流、数据库或 manager 边界。
 
+应用源码树的固定提交快照由 `test-agent-workspace-management` 在一次 Git 提交解析内生成，`test-agent-api` 在既有 tree URL 上兼容投影节点数组或 `{targetCommit,nodes}`；`packages/backend-api` 保留旧方法并新增 snapshot 方法，`packages/shared-types` 只承载两种稳定返回类型。
+
 | 包 | 职责 |
 |---|---|
 | `apps/agent-web` | 自研 Vue 3 + Vite 主应用，负责页面组合、Vue Query Provider、Pinia、工作空间选择、活动栏沉浸式 Agent & Skill Hub 浏览/发布/引用/更新角标和冲突确认、所有登录用户可见的沉浸式工具盒子目录/热门/吸顶搜索来源与动态计数分类标签/新标签页与静默点击上报、支持缩放/页面内全屏/真实 URL 新标签页且带超级管理员服务器终端视图的服务器工作空间选择（标签页状态通过同源会话存储交接）、应用管理员引用配置双栏/2 秒状态轮询/JSONC 最小补丁与空闲 dispose 热加载、工作区与引用目录组合文件树（合并引用蓝色、冲突红色、只读 tab 和局部告警）、带上下文/路径请求代次和 dirty 修订保护的普通文件及公共级/应用级 Agent 文件加载编排、Agent 合成 tab 路由与真实绝对复制路径隔离、`opencode.jsonc`/Agent/Skill 应用配置 Git 作用域、Agent 保存后的 Git Changes 修订刷新与变更面板可见期间的 5 秒核验、用户 opencode 进程状态提示/初始化入口（含已分配进程终止后的活动栏宠物单击启动与 READY 后唤出）、Run 启动、夜间任务时段选择/会话列表浮层内待执行列表/当前会话锁定/30 秒刷新、SSE 订阅编排、基于用户级摘要的后台运行会话历史计数与 question/permission 铃铛提醒、根 permission 快照 scope 替换、child task 精确铃铛、每 Session 最新 2000 条的前端原始报文内存查看器、七种图片宠物的本地轮换/随机/固定选择和一次性旁路问答、对话页中的公共级/应用级个人运行态重载入口、设置模态（含版本库英文名、版本库类型、工作空间创建进度、通用参数 JVM 内存值按需抽屉和用户管理页签，用户管理支持查询、创建测试用户和超管直接调角色）、超级管理员系统管理容器（XXL 同源 iframe 定时任务管理 + 运行管理最新指标与 ECharts 趋势 + 公共配置维护 + 应用 Git 全量安全刷新）和全局错误提示。 |

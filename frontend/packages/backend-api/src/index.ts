@@ -13,6 +13,7 @@ import type {
   AppSourceOperationTicketResponse,
   AppSourceProgressEvent,
   AppSourceRemoteTreeNode,
+  AppSourceTreeSnapshot,
   AppSourceReplicaRetryPayload,
   AppSourceRepositorySummary,
   AgentSkillHubAsset,
@@ -1596,6 +1597,19 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     ) =>
       routedRequest<AppSourceRemoteTreeNode[]>(
         `${appSourceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/tree${query({ branch, path })}`
+      ),
+    getAppSourceTreeSnapshot: (
+      appId: string,
+      repositoryId: string,
+      branch: string,
+      path = "."
+    ) =>
+      routedRequest<AppSourceTreeSnapshot>(
+        `${appSourceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/tree${query({
+          branch,
+          path,
+          includeCommit: true
+        })}`
       ),
     materializeAppSource: (
       appId: string,

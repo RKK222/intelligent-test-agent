@@ -124,6 +124,37 @@ class AppSourceApplicationServiceTest {
     }
 
     @Test
+    void treeSnapshotResolvesBranchOnceAndListsTheSameFixedCommit() {
+        AppSourceApplicationService.TreeSnapshot snapshot = service.getTreeSnapshot(
+                APP_ID.value(), REPOSITORY_ID.value(), "main", ".", USER_ID);
+
+        assertThat(snapshot.targetCommit()).isEqualTo(COMMIT);
+        assertThat(snapshot.nodes()).singleElement().satisfies(node -> {
+            assertThat(node.path()).isEqualTo("src");
+            assertThat(node.children()).singleElement()
+                    .extracting(GitRemoteService.RemoteTreeNode::path)
+                    .isEqualTo("src/Main.java");
+        });
+        verify(git).resolveRemoteBranchCommit("/git/repo.git", "main", null);
+        verify(remote).listTree("/git/repo.git", COMMIT, null);
+    }
+
+    @Test
+    void emptyDirectoryTreeSnapshotStillReturnsTheFullFixedCommit() {
+        when(remote.listTree("/git/repo.git", COMMIT, null)).thenReturn(List.of(
+                new GitRemoteService.RemoteTreeNode(
+                        "empty", "empty", GitRemoteService.NODE_TYPE_DIRECTORY, List.of())));
+
+        AppSourceApplicationService.TreeSnapshot snapshot = service.getTreeSnapshot(
+                APP_ID.value(), REPOSITORY_ID.value(), "main", "empty", USER_ID);
+
+        assertThat(snapshot.targetCommit()).isEqualTo(COMMIT).hasSize(40);
+        assertThat(snapshot.nodes()).isEmpty();
+        verify(git).resolveRemoteBranchCommit("/git/repo.git", "main", null);
+        verify(remote).listTree("/git/repo.git", COMMIT, null);
+    }
+
+    @Test
     void teamMaterializationFreezesOnlyServersLiveAtAcceptanceAndDispatchesAfterRegistration() {
         when(heartbeats.liveBackendServerIds()).thenReturn(Set.of(
                 new LinuxServerId("server-b"), new LinuxServerId("server-a")));

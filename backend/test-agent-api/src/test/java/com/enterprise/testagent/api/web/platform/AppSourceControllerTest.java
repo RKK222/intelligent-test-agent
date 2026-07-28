@@ -38,6 +38,7 @@ class AppSourceControllerTest {
 
     private static final UserId USER_ID = new UserId("usr_1234567890abcdef");
     private static final String TRACE_ID = "trace_1234567890abcdef";
+    private static final String TREE_COMMIT = "0123456789abcdef0123456789abcdef01234567";
     private static final Instant NOW = Instant.parse("2026-07-28T04:00:00Z");
 
     @Test
@@ -167,6 +168,51 @@ class AppSourceControllerTest {
                 .expectBody()
                 .jsonPath("$.data[0].path").isEqualTo("src/Main.java")
                 .jsonPath("$.data[0].type").isEqualTo("file");
+    }
+
+    @Test
+    void treeKeepsDefaultArrayAndReturnsCommitEnvelopeOnlyWhenRequested() {
+        AppSourceApplicationService service = mock(AppSourceApplicationService.class);
+        GitRemoteService.RemoteTreeNode node = new GitRemoteService.RemoteTreeNode(
+                "Main.java", "src/Main.java", GitRemoteService.NODE_TYPE_FILE, List.of());
+        when(service.listTree("app_1", "repo_1", "release/2026", "src", USER_ID))
+                .thenReturn(List.of(node));
+        when(service.getTreeSnapshot("app_1", "repo_1", "release/2026", "src", USER_ID))
+                .thenReturn(new AppSourceApplicationService.TreeSnapshot(TREE_COMMIT, List.of(node)));
+        WebTestClient client = client(service, List.of("USER"));
+
+        client.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/api/internal/platform/workspace-management/applications/app_1/"
+                                + "app-source-repositories/repo_1/tree")
+                        .queryParam("branch", "release/2026")
+                        .queryParam("path", "src")
+                        .build())
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data[0].path").isEqualTo("src/Main.java")
+                .jsonPath("$.data.targetCommit").doesNotExist();
+
+        client.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/api/internal/platform/workspace-management/applications/app_1/"
+                                + "app-source-repositories/repo_1/tree")
+                        .queryParam("branch", "release/2026")
+                        .queryParam("path", "src")
+                        .queryParam("includeCommit", true)
+                        .build())
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.targetCommit").isEqualTo(TREE_COMMIT)
+                .jsonPath("$.data.nodes[0].path").isEqualTo("src/Main.java")
+                .jsonPath("$.data.nodes[0].type").isEqualTo("file");
+
+        verify(service).listTree("app_1", "repo_1", "release/2026", "src", USER_ID);
+        verify(service).getTreeSnapshot("app_1", "repo_1", "release/2026", "src", USER_ID);
     }
 
     @Test

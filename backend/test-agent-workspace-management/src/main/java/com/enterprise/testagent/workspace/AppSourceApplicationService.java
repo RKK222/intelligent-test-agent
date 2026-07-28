@@ -332,6 +332,16 @@ public class AppSourceApplicationService {
     /** 普通有效成员可按提交/分支懒加载远端精确树；path 只用于返回指定目录的直接 children。 */
     public List<GitRemoteService.RemoteTreeNode> listTree(
             String appId, String repositoryId, String branch, String path, UserId userId) {
+        return getTreeSnapshot(appId, repositoryId, branch, path, userId).nodes();
+    }
+
+    /**
+     * 返回目录节点及其同一次远端解析得到的固定提交。
+     *
+     * <p>提交解析与列树必须保持在一次业务调用内，避免分支移动时把旧树节点与新提交组合后交给物化入口。
+     */
+    public TreeSnapshot getTreeSnapshot(
+            String appId, String repositoryId, String branch, String path, UserId userId) {
         CodeRepository repository = requireLinkedCodeRepository(applicationId(appId), repositoryId(repositoryId), userId);
         String normalizedBranch = normalizeBranch(branch);
         String normalizedPath = normalizeSelectedPath(path == null || path.isBlank() ? "." : path);
@@ -339,14 +349,15 @@ public class AppSourceApplicationService {
         String commit = git.resolveRemoteBranchCommit(access.url(), normalizedBranch, access.privateKey());
         List<GitRemoteService.RemoteTreeNode> tree = remote.listTree(access.url(), commit, access.privateKey());
         if (".".equals(normalizedPath)) {
-            return tree;
+            return new TreeSnapshot(commit, tree);
         }
-        return flatten(tree).stream()
+        List<GitRemoteService.RemoteTreeNode> nodes = flatten(tree).stream()
                 .filter(node -> node.path().equals(normalizedPath))
                 .filter(node -> GitRemoteService.NODE_TYPE_DIRECTORY.equals(node.type()))
                 .findFirst()
                 .map(GitRemoteService.RemoteTreeNode::children)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "远端源码目录不存在"));
+        return new TreeSnapshot(commit, nodes);
     }
 
     /** 校验不可变远端选择后登记 generation，并仅在事务提交返回后唤醒副本执行器。 */
@@ -864,6 +875,16 @@ public class AppSourceApplicationService {
             String workspaceId,
             String linuxServerId,
             Instant expiresAt) {
+    }
+
+    /** 远端树与固定提交的低敏快照；空目录仍保留 targetCommit 供后续物化并发校验。 */
+    public record TreeSnapshot(
+            String targetCommit,
+            List<GitRemoteService.RemoteTreeNode> nodes) {
+        public TreeSnapshot {
+            Objects.requireNonNull(targetCommit, "targetCommit must not be null");
+            nodes = nodes == null ? List.of() : List.copyOf(nodes);
+        }
     }
 
     /** 供 Task 3 映射列表 DTO 的业务摘要，不包含物理路径或凭据。 */
