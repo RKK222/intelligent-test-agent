@@ -2707,3 +2707,26 @@
 
 - 本地实现、定向测试、镜像构建和离线 programs 封装完成；新增 HTTP API 为内部 additive 端点，无 RunEvent/SSE 类型、数据库/Flyway/SQL、前端业务接口、generated SDK 或 OpenCode 源码修改。
 - 真实企业节点验收尚未完成。发布前必须在每台原生 Linux 4.19 / Docker 18.09.7 x86_64 worker 节点运行 `deploy/internal/check-codex-whitebox-host.sh test-agent-opencode-worker:internal`；只有完整 E2E 通过后才能给应用启用 MCP/Agent 配置。
+
+### 2026-07-28 - 修复企业 Docker 18.09 白盒宿主预检
+
+### Why
+
+- 企业 `.114` 节点首次执行白盒宿主预检时，Docker `18.09.7` 的小版本 `09` 被 Bash 算术表达式按八进制解释，脚本在能力检查前退出。
+- worker 镜像提供 `/bin/true` 但不提供 `/usr/bin/true`，基础 bubblewrap 探针硬编码后者会产生伪失败，不能据此判断宿主 namespace 不兼容。
+
+### What
+
+- Docker 与 Linux kernel 的主、次版本字段在数字校验后统一按十进制转换，兼容 `18.09.7`、`4.19.09` 等带前导零的企业版本格式。
+- bubblewrap 基础探针改为镜像内真实存在的 `/bin/true`；稳定部署文档同步说明这两个兼容边界。
+- 在既有 worker 镜像验收脚本中增加伪 `uname`/`docker` 回归，模拟企业 Docker `18.09.7` 和 kernel `4.19.09`，同时禁止重新引入 `/usr/bin/true`。
+
+### How
+
+- `bash -n deploy/internal/check-codex-whitebox-host.sh tools/verify-codex-whitebox-worker-image.sh` 与 `git diff --check` 通过。
+- `tools/verify-codex-whitebox-worker-image.sh test-agent-opencode-worker:internal` 通过 Codex 0.145.0、bubblewrap 摘要、原始/门面工具列表、配置失败关闭和 MCP 契约 4 项检查；新增 `18.09.7` 回归通过。Apple Silicon 构建机仍按设计跳过原生 namespace E2E。
+
+### Result
+
+- 宿主预检现在可在企业 Docker 18.09.7 上进入真实能力探针，不再因版本解析或不存在的 `true` 路径产生伪失败。
+- 真实企业节点 namespace、只读、拒写、越界拒读、断网和续写验收仍未完成；必须在 `.114` 原生 Linux/x86_64 节点用修复后的脚本重跑并全部返回 0 后，才能继续 worker 部署。无 API、事件、数据库、性能、安全策略、运行时镜像、generated SDK、OpenCode 源码或环境配置变更。

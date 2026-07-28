@@ -108,7 +108,8 @@ cd /data/0709/test-agent-internal-release/deploy/internal
 ./check-codex-whitebox-host.sh test-agent-opencode-worker:internal
 ```
 
-脚本兼容 Docker 18.09 CLI，并失败关闭检查：Linux/x86_64、Docker 不低于 18.09、镜像
+脚本兼容 Docker 18.09 CLI；`18.09.7` 等带前导零的版本字段按十进制比较，基础 namespace
+探针使用 worker 镜像内的 `/bin/true`。脚本失败关闭检查：Linux/x86_64、Docker 不低于 18.09、镜像
 linux/amd64、glibc 2.31、Codex 0.145.0、bubblewrap 摘要，以及真实的 `rg`/源码读取成功、
 文件拒写、workspace 外拒读、命令断网、Git 状态不变和会话续写。该探针用与正式 worker
 相同的 `--privileged` 和 `--network none`，模型服务是容器 loopback 内的本地伪服务，

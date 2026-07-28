@@ -24,6 +24,9 @@ version_rest="${version_core#*.}"
 version_minor="${version_rest%%.*}"
 [[ "${version_major}" =~ ^[0-9]+$ && "${version_minor}" =~ ^[0-9]+$ ]] \
   || fail "cannot parse Docker server version ${docker_server_version}"
+# Docker 18.09 等版本含前导零；显式按十进制转换，避免 Bash 将 09 当作非法八进制。
+version_major=$((10#${version_major}))
+version_minor=$((10#${version_minor}))
 if (( version_major < 18 || (version_major == 18 && version_minor < 9) )); then
   fail "Docker ${docker_server_version} is older than the supported 18.09 baseline"
 fi
@@ -35,6 +38,8 @@ kernel_rest="${kernel_core#*.}"
 kernel_minor="${kernel_rest%%.*}"
 [[ "${kernel_major}" =~ ^[0-9]+$ && "${kernel_minor}" =~ ^[0-9]+$ ]] \
   || fail "cannot parse Linux kernel version ${kernel_release}"
+kernel_major=$((10#${kernel_major}))
+kernel_minor=$((10#${kernel_minor}))
 if (( kernel_major < 4 || (kernel_major == 4 && kernel_minor < 19) )); then
   fail "Linux kernel ${kernel_release} is older than the supported 4.19 baseline"
 fi
@@ -46,7 +51,7 @@ docker run --rm --privileged --network none --entrypoint sh "${IMAGE}" -lc "
   test \"\$(getconf GNU_LIBC_VERSION)\" = 'glibc 2.31'
   test \"\$(/usr/local/lib/codex/bin/codex-official --version)\" = 'codex-cli 0.145.0'
   printf '%s  %s\\n' '${EXPECTED_BWRAP_SHA256}' /usr/local/lib/codex/bin/codex-resources/bwrap | sha256sum -c -
-  /usr/local/lib/codex/bin/codex-resources/bwrap --ro-bind / / --proc /proc --dev /dev /usr/bin/true
+  /usr/local/lib/codex/bin/codex-resources/bwrap --ro-bind / / --proc /proc --dev /dev /bin/true
 "
 
 # 版本号不能代替能力验证：这里真实执行读取、拒写、越界拒读、断网、Git 不变和续写测试。

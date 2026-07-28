@@ -8,6 +8,7 @@ EXPECTED_ASSET_SHA256="${EXPECTED_CODEX_ASSET_SHA256:-bfaf13c9ba34f2ad764e4a916c
 EXPECTED_BWRAP_SHA256="${EXPECTED_CODEX_BWRAP_BINARY_SHA256:-77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c}"
 PROBE="${SCRIPT_DIR}/probe-codex-mcp-tools.mjs"
 CONTRACT_TEST="${SCRIPT_DIR}/test-codex-whitebox-mcp.mjs"
+HOST_CHECK="${SCRIPT_DIR}/../deploy/internal/check-codex-whitebox-host.sh"
 
 version="$(docker run --rm --platform linux/amd64 \
   --entrypoint /usr/local/lib/codex/bin/codex-official "${IMAGE}" --version)"
@@ -72,5 +73,39 @@ case "${docker_server_arch}" in
     echo "Codex native sandbox E2E skipped: Docker server architecture is ${docker_server_arch:-unknown}; run deploy/internal/check-codex-whitebox-host.sh on every native linux/amd64 worker node" >&2
     ;;
 esac
+
+# 用企业现场版本格式回归宿主预检，避免 18.09 被 Bash 按八进制解释；同时校验镜像内真实 true 路径。
+host_check_fixture_dir="$(mktemp -d "${TMPDIR:-/tmp}/codex-host-check.XXXXXX")"
+trap 'rm -rf "${host_check_fixture_dir}"' EXIT
+mkdir -p "${host_check_fixture_dir}/bin"
+printf '%s\n' \
+  '#!/usr/bin/env sh' \
+  'case "${1:-}" in' \
+  '  -s) echo Linux ;;' \
+  '  -m) echo x86_64 ;;' \
+  '  -r) echo 4.19.09-enterprise ;;' \
+  '  *) exit 1 ;;' \
+  'esac' >"${host_check_fixture_dir}/bin/uname"
+printf '%s\n' \
+  '#!/usr/bin/env sh' \
+  'case "${1:-} ${2:-}" in' \
+  '  "version --format") echo 18.09.7 ;;' \
+  '  "image inspect") echo linux/amd64 ;;' \
+  '  run*) printf "%s\n" "$*" >>"${CODEX_HOST_CHECK_DOCKER_LOG}" ;;' \
+  '  *) exit 1 ;;' \
+  'esac' >"${host_check_fixture_dir}/bin/docker"
+chmod +x "${host_check_fixture_dir}/bin/uname" "${host_check_fixture_dir}/bin/docker"
+host_check_output="$(
+  PATH="${host_check_fixture_dir}/bin:${PATH}" \
+    CODEX_HOST_CHECK_DOCKER_LOG="${host_check_fixture_dir}/docker.log" \
+    bash "${HOST_CHECK}" "${IMAGE}"
+)"
+grep -Fq "Codex whitebox host compatible: kernel=4.19.09-enterprise docker=18.09.7 image=${IMAGE}" \
+  <<<"${host_check_output}"
+grep -Fq '/bin/true' "${host_check_fixture_dir}/docker.log"
+if grep -Fq '/usr/bin/true' "${host_check_fixture_dir}/docker.log"; then
+  echo "Codex host check still references missing /usr/bin/true" >&2
+  exit 1
+fi
 
 echo "Codex whitebox worker verified: image=${IMAGE} version=${version}"

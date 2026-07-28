@@ -20,7 +20,7 @@
 - 企业内部中转机的固定交付目录是 `~/Desktop/mimoagent/0709`；中转机不使用 `/data/0709`。`.20/.4/.114/.2` 等目标服务器的固定接收目录才是 `/data/0709`。
 - `opencode-worker-docker.sh` 固定为 worker 容器设置 `--pids-limit=8192`、`nofile=262144:262144` 和 `nproc=8192:8192`；这些值不从 `docker.env` 覆盖。脚本升级后必须重建容器才会生效。
 - Docker 18.09 发布 1000 个 worker 端口前必须在 daemon 中禁用 `userland-proxy`；脚本会在删除旧 worker 前拒绝不安全组合，避免启动中途耗尽 fork 资源。
-- worker 构建会自动检查 Codex 版本、摘要、MCP 契约和失败关闭；启用白盒分析前，每台 Linux 4.19 / Docker 18.09.7 worker 节点还必须执行 `./check-codex-whitebox-host.sh test-agent-opencode-worker:internal`。脚本用真实 Codex/bubblewrap 证明 namespace 可用、只读、越界拒读和断网，不以 Apple Silicon Mac 的 amd64 仿真结果代替现场内核验收；完整说明见 `docs/deployment/codex-whitebox-mcp.md`。
+- worker 构建会自动检查 Codex 版本、摘要、MCP 契约和失败关闭；启用白盒分析前，每台 Linux 4.19 / Docker 18.09.7 worker 节点还必须执行 `./check-codex-whitebox-host.sh test-agent-opencode-worker:internal`。脚本按十进制解析 `18.09.7`，并用镜像内的 `/bin/true` 和真实 Codex/bubblewrap 证明 namespace 可用、只读、越界拒读和断网；不以 Apple Silicon Mac 的 amd64 仿真结果代替现场内核验收。完整说明见 `docs/deployment/codex-whitebox-mcp.md`。
 - 企业内不使用 Docker Compose；worker 由 `opencode-worker-docker.sh` 管理，当前 XXL MySQL 直接使用外部实例，不在平台服务器部署 MySQL 容器。
 - Redis 仍是独立共享基础设施，不随平台 ZIP 部署；只有明确执行 Redis 专项升级时，才使用固定名 `test-agent-redis-offline.zip`。
 - `.20` 通过 Docker `-p 6379:6379` 提供共享 Redis 时必须持久化 `net.ipv4.ip_forward=1`；Redis `deploy/verify` 脚本会提前拒绝值为 `0` 的宿主机。容器本机 `healthy` 后仍必须从 `.4`、`.114` 分别验证 `.20:6379`，跨机超时不得通过反复重启 Java 处理。
