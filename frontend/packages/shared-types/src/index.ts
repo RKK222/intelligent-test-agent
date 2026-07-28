@@ -2145,6 +2145,34 @@ export type ApplicationDefinition = {
   enabled: boolean;
 };
 
+export type ApplicationGitRefreshScopeWorkspace = {
+  versionId: string;
+  applicationWorkspaceId: string;
+  workspaceName: string;
+  directoryPath: string;
+  enabled: boolean;
+};
+
+export type ApplicationGitRefreshScopeGroup = {
+  repositoryId: string;
+  repositoryName: string;
+  version: string;
+  branch: string;
+  workspaceCount: number;
+  workspaces: ApplicationGitRefreshScopeWorkspace[];
+};
+
+export type ApplicationGitRefreshScope = ApplicationDefinition & {
+  totalGroups: number;
+  groups: ApplicationGitRefreshScopeGroup[];
+};
+
+export type ApplicationGitRefreshGroupSelector = {
+  repositoryId: string;
+  version: string;
+  branch: string;
+};
+
 export type ApplicationGitRefreshGroup = {
   versionId: string;
   repositoryId: string;

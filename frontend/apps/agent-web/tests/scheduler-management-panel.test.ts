@@ -4,7 +4,7 @@ import { fireEvent, render, waitFor } from "@testing-library/vue";
 import type { Component } from "vue";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
 import type {
-  ApplicationDefinition,
+  ApplicationGitRefreshScope,
   ApplicationGitRefreshResult,
   CurrentUser,
   OpencodeRuntimeManagementOverview,
@@ -63,10 +63,38 @@ const publicRepository: PublicAgentRepositoryStatus = {
   message: "未初始化"
 };
 
-const application: ApplicationDefinition = {
+const applicationScope: ApplicationGitRefreshScope = {
   appId: "app_gcms",
   appName: "F-GCMS",
-  enabled: true
+  enabled: true,
+  totalGroups: 2,
+  groups: [{
+    repositoryId: "repo_1",
+    repositoryName: "GCMS",
+    version: "20260707",
+    branch: "feature_testagent_20260707",
+    workspaceCount: 1,
+    workspaces: [{
+      versionId: "awv_1",
+      applicationWorkspaceId: "aws_login",
+      workspaceName: "登录测试",
+      directoryPath: "F-GCMS/login",
+      enabled: true
+    }]
+  }, {
+    repositoryId: "repo_1",
+    repositoryName: "GCMS",
+    version: "20260708",
+    branch: "feature_testagent_20260708",
+    workspaceCount: 1,
+    workspaces: [{
+      versionId: "awv_2",
+      applicationWorkspaceId: "aws_order",
+      workspaceName: "订单测试",
+      directoryPath: "F-GCMS/order",
+      enabled: true
+    }]
+  }]
 };
 
 const applicationRefreshResult: ApplicationGitRefreshResult = {
@@ -113,8 +141,9 @@ function api(overrides: Partial<BackendApiClient> = {}) {
       commitHash: "abc1234",
       message: "已初始化"
     }),
-    listApplications: vi.fn().mockResolvedValue([application]),
+    listApplicationGitRefreshScopes: vi.fn().mockResolvedValue([applicationScope]),
     refreshApplicationGit: vi.fn().mockResolvedValue(applicationRefreshResult),
+    refreshApplicationGitGroup: vi.fn().mockResolvedValue(applicationRefreshResult),
     ...overrides
   } as Partial<BackendApiClient> as BackendApiClient;
 }
@@ -206,13 +235,37 @@ describe("scheduler management panel", () => {
     const view = renderWithApi(ApplicationGitRefreshManagementPanel, backendApi);
 
     expect(await view.findByText("F-GCMS")).toBeTruthy();
+    expect(await view.findByText("feature_testagent_20260707")).toBeTruthy();
+    expect(await view.findByText("feature_testagent_20260708")).toBeTruthy();
+    expect(await view.findByText("登录测试")).toBeTruthy();
+    expect(await view.findByText("订单测试")).toBeTruthy();
     await fireEvent.click(view.getByRole("button", { name: "刷新应用 Git：F-GCMS" }));
 
     await waitFor(() => expect(backendApi.refreshApplicationGit).toHaveBeenCalledWith("app_gcms"));
-    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("全部 feature 仓库组"));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("feature_testagent_20260707、feature_testagent_20260708"));
     expect(await view.findByText("共 1 组：成功 1，更新 1，已是最新 0，失败 0")).toBeTruthy();
     await fireEvent.click(view.getByText("查看仓库组明细"));
     expect(await view.findByText(/GCMS · 20260707 · feature_testagent_20260707 · 2 个 workspace/)).toBeTruthy();
+    view.queryClient.clear();
+  });
+
+  it("lets super admin refresh one feature branch without selecting other branches", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const backendApi = api();
+    const view = renderWithApi(ApplicationGitRefreshManagementPanel, backendApi);
+
+    await view.findByText("feature_testagent_20260707");
+    await fireEvent.click(view.getByRole("button", {
+      name: "刷新分支：F-GCMS / feature_testagent_20260707"
+    }));
+
+    await waitFor(() => expect(backendApi.refreshApplicationGitGroup).toHaveBeenCalledWith("app_gcms", {
+      repositoryId: "repo_1",
+      version: "20260707",
+      branch: "feature_testagent_20260707"
+    }));
+    expect(backendApi.refreshApplicationGit).not.toHaveBeenCalled();
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("不会影响同应用其它分支"));
     view.queryClient.clear();
   });
 
@@ -222,8 +275,9 @@ describe("scheduler management panel", () => {
     const view = renderWithApi(ApplicationGitRefreshManagementPanel, backendApi, appAdmin);
 
     expect(await view.findByText("当前账号无配置管理权限")).toBeTruthy();
-    expect(backendApi.listApplications).not.toHaveBeenCalled();
+    expect(backendApi.listApplicationGitRefreshScopes).not.toHaveBeenCalled();
     expect(backendApi.refreshApplicationGit).not.toHaveBeenCalled();
+    expect(backendApi.refreshApplicationGitGroup).not.toHaveBeenCalled();
     view.queryClient.clear();
   });
 

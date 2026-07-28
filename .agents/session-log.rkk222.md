@@ -2595,3 +2595,26 @@
 
 - 超级管理员现在可从独立页面按应用刷新所有相关 feature 仓库组，并安全收敛相关个人 worktree 与应用 Agent 配置；普通管理员和普通用户无权调用。
 - HTTP API 为 additive 新增；未新增或变更 RunEvent/SSE、数据库/Flyway/SQL、generated SDK、OpenCode 源码或环境配置。安全面新增强制超级管理员鉴权，兼容性上不改变个人拉取和公共配置既有入口。
+
+### 2026-07-28 - 展示应用 Git 刷新的工作空间与分支范围
+
+### Why
+
+- 不同工作空间版本可以绑定不同的实际 feature 分支；原页面只在执行后显示分组结果，超级管理员刷新前无法确认本次会覆盖哪些工作空间、版本和分支。
+
+### What
+
+- 新增强 `SUPER_ADMIN` 鉴权的应用 Git 刷新范围查询和单分支组刷新接口，复用实际刷新使用的 `repositoryId + version + branch` 分组程序；单分支请求必须精确命中三字段，只处理该组及其关联 worktree。
+- “应用 Git 刷新”页面新增“工作空间 / 版本 / 分支”列，每个物理组提供“刷新该分支”，应用行保留“刷新全部分支”；两类确认框分别说明精确范围。
+- 同步 HTTP API、事件说明、安全规范、模块图、测试矩阵、相关前后端 README/PACKAGE、共享类型和用户手册。
+
+### How
+
+- 后端 `ManagedWorkspaceApplicationServiceTest` 在 JDK 25 下 75 项通过，覆盖只 fetch 目标分支且只合并该组关联 worktree。最新 Controller 定向测试和全仓测试被同一工作区并行开发中的公共 Agent 配置发布测试编译错误及模块接口不一致阻断；未修改这些无关文件规避失败。
+- 本功能前端定向 99 项测试、lint、typecheck、生产构建通过。全仓 Vitest 共 1643 项通过、1 项跳过、5 项失败；失败位于 Mermaid 编辑器和并行修改的公共配置客户端，不涉及应用 Git 刷新。
+- 前一批次已使用未修改的 `.env.test`、test profile 和 JDK 25 完整重启并确认 backend readiness 为 `UP`、前端与 CORS 预检返回 200，真实页面确认 F-COSS 的两个工作空间与实际分支展示正确。本批单分支按钮由组件测试验证；因并行后端主代码当前无法编译，未把最新后端重启到运行态，也未实际刷新仓库。
+
+### Result
+
+- 超级管理员现在能在执行前核对应用下所有工作空间、版本与实际分支，并按需单独刷新一个分支或刷新整个应用；预览和两类执行使用同一分组来源。
+- HTTP API 为 additive 新增；未新增或变更 RunEvent/SSE、数据库/Flyway/SQL、generated SDK、OpenCode 源码或环境配置。

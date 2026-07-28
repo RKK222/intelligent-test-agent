@@ -35,6 +35,8 @@ import type {
   ApplicationWorkspaceTemplate,
   ApplicationWorkspaceVersion,
   ApplicationDefinition,
+  ApplicationGitRefreshScope,
+  ApplicationGitRefreshGroupSelector,
   ApplicationGitRefreshResult,
   CreateApplicationPayload,
   ApplicationMember,
@@ -908,11 +910,20 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         `${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/git-pull`,
         { method: "POST" }
       ),
+    /** 超级管理员只读查询每个应用将刷新的工作空间、版本和 feature 分支。 */
+    listApplicationGitRefreshScopes: () =>
+      request<ApplicationGitRefreshScope[]>(`${workspaceManagementBase}/applications/git-refresh-scopes`),
     /** 超级管理员刷新应用全部 feature 仓库组，并触发相关个人 worktree 安全收敛。 */
     refreshApplicationGit: (appId: string) =>
       request<ApplicationGitRefreshResult>(
         `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/git-refresh`,
         { method: "POST" }
+      ),
+    /** 超级管理员只刷新一个物理 feature 分支组及其关联 worktree。 */
+    refreshApplicationGitGroup: (appId: string, payload: ApplicationGitRefreshGroupSelector) =>
+      request<ApplicationGitRefreshResult>(
+        `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/git-refresh-groups`,
+        { method: "POST", body: JSON.stringify(payload) }
       ),
     getRecentManagedWorkspace: () => request<ManagedWorkspaceRuntime | null>(`${workspaceManagementBase}/recent-workspace`),
     getRecentManagedWorkspaceForApplication: (appId: string) =>

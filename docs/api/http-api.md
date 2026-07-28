@@ -1301,7 +1301,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 鉴权：
 
 - 所有接口要求已登录用户。
-- `POST /applications/{appId}/git-refresh` 是共享控制面操作，仅允许 `SUPER_ADMIN`，不要求超级管理员先加入目标应用或启动个人 OpenCode；其它应用工作区接口仍按下述成员规则校验。
+- `GET /applications/git-refresh-scopes`、`POST /applications/{appId}/git-refresh` 与 `POST /applications/{appId}/git-refresh-groups` 是共享控制面操作，仅允许 `SUPER_ADMIN`，不要求超级管理员先加入目标应用或启动个人 OpenCode；其它应用工作区接口仍按下述成员规则校验。
 - 应用、模板、版本、切换最近使用等应用相关接口要求当前用户是 `application_members` 中的有效成员；不区分管理员和普通成员。
 - 个人工作区接口要求当前用户是个人工作区拥有者且属于对应应用。
 - 托管工作区成员校验失败返回 `FORBIDDEN`，message 固定包含当前加载上下文：`无该应用工作区权限：当前正在加载应用 {appName}({appId})，版本 {version/versionId/未确定}，工作区 {workspaceKind}:{workspaceName/workspaceId/未确定}`。`details` 仅放安全业务字段：`loadingStage`、`appId`、`appName`、`versionId`、`version`、`applicationWorkspaceId`、`workspaceKind`、`workspaceName`、`workspaceId`、`personalWorkspaceId`；无值字段不返回。
@@ -1309,7 +1309,9 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `GET` | `/applications` | 查询当前用户加入的启用应用。 |
+| `GET` | `/applications/git-refresh-scopes` | 超级管理员查询全部应用实际将刷新的工作空间、版本和 feature 分支。 |
 | `POST` | `/applications/{appId}/git-refresh` | 超级管理员按应用刷新全部物理 feature 仓库组，并触发相关个人 worktree 与应用 Agent 配置安全收敛。 |
+| `POST` | `/applications/{appId}/git-refresh-groups` | 超级管理员按 `repositoryId + version + branch` 精确刷新一个物理 feature 仓库组及其关联 worktree。 |
 | `GET` | `/applications/{appId}/workspace-templates` | 查询应用工作空间切换模板，只返回 `application_workspaces.enabled=true` 的配置。 |
 | `GET` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 查询模板下已创建的应用版本工作区。 |
 | `POST` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 创建或接管应用版本工作区，并创建运行态 Workspace。 |
@@ -1340,7 +1342,42 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/commit` | 仅在个人 worktree stage 并提交 `files` 白名单；不推送、不广播。请求包含 `.opencode/**` 时要求 `APP_ADMIN`（`SUPER_ADMIN` 继承）。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 要求 `files` 已在个人 worktree 本地提交，再从个人 `HEAD` 按白名单投影到应用 feature worktree，提交并推送；不 merge 整个个人分支。请求包含 `.opencode/**` 时要求 `APP_ADMIN`，响应包含 `currentStep/executedCommands`。 |
 
+`GET /applications/git-refresh-scopes` 返回所有启用和停用应用。每个应用的 `groups[]` 按实际执行使用的 `repositoryId + version + branch` 去重，`workspaces[]` 列出该物理 feature 组对应的 `versionId/applicationWorkspaceId/workspaceName/directoryPath/enabled`；因此同一工作空间的不同版本、不同工作空间的不同分支都会逐项展示。该只读接口和执行接口复用同一分组程序，不访问 Git 远端，也不发送 `X-Test-Agent-Linux-Server-Id` 首跳提示。
+
+范围响应示例：
+
+```json
+[
+  {
+    "appId": "app-demo",
+    "appName": "示例应用",
+    "enabled": true,
+    "totalGroups": 1,
+    "groups": [
+      {
+        "repositoryId": "repo_1",
+        "repositoryName": "测试工作库",
+        "version": "20260728",
+        "branch": "feature_testagent_20260728",
+        "workspaceCount": 1,
+        "workspaces": [
+          {
+            "versionId": "awv_1",
+            "applicationWorkspaceId": "aws_1",
+            "workspaceName": "登录测试",
+            "directoryPath": "demo/login",
+            "enabled": true
+          }
+        ]
+      }
+    ]
+  }
+]
+```
+
 `POST /applications/{appId}/git-refresh` 使用当前超级管理员保存的唯一 SSH Key，对应用下每个去重后的 `repositoryId + version + branch` 物理 feature 仓库组执行 fetch 和只允许快进的更新。feature 工作树存在未提交修改、远端发生分叉、SSH Key 缺失或 Git 不可用时，该组返回 `FAILED`，其它组继续执行；接口以 HTTP 成功响应返回完整汇总，调用方必须检查 `failedGroups`，不能把部分成功显示为全量成功。更新或已是最新的组都会重新发布固定目标并触发相关服务器个人 worktree 的原生 Git merge；非重叠 staged、unstaged 和 untracked 修改保留，可能被覆盖的 worktree 保持待处理，真实冲突保留三方 index，不执行 stash、reset 或强制覆盖个人内容。远端差异包含应用 `.opencode/**` 时复用既有应用 Agent rollout，仅在目标提交已进入对应个人 worktree 后等待该用户空闲并 dispose。该入口不要求超级管理员拥有 READY OpenCode 进程，也不发送 `X-Test-Agent-Linux-Server-Id` 首跳提示。
+
+`POST /applications/{appId}/git-refresh-groups` 请求体为 `{"repositoryId":"repo_1","version":"20260728","branch":"feature_testagent_20260728"}`。三个字段必须精确命中范围查询中的同一个物理组；不存在时返回 `NOT_FOUND`，不能只凭分支名误选同名分支。命中后只复用上述执行程序处理该组，响应仍使用 `ApplicationGitRefreshResponse`，其中 `totalGroups=1`；同应用其它分支、target、replica 和个人 worktree 均不处理。
 
 响应示例：
 
