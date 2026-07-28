@@ -35,6 +35,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Pattern;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,6 +46,7 @@ public class MyBatisAppSourceRepository implements AppSourceRepository {
 
     private static final TypeReference<List<AppSourceSelectedPath>> SELECTED_PATHS_TYPE = new TypeReference<>() {
     };
+    private static final Pattern SHA256 = Pattern.compile("^[0-9a-fA-F]{64}$");
 
     private final AppSourceMapper mapper;
     private final ObjectMapper objectMapper;
@@ -114,6 +116,9 @@ public class MyBatisAppSourceRepository implements AppSourceRepository {
         if (!expectedStatus.canTransitionTo(nextStatus)) {
             throw new IllegalArgumentException("invalid app-source snapshot status transition");
         }
+        if (indexSha256 != null && !SHA256.matcher(indexSha256).matches()) {
+            throw new IllegalArgumentException("indexSha256 must be a SHA-256 hex value");
+        }
         return mapper.updateSnapshotStatusAndIndex(
                 repositoryId.value(), generation, expectedStatus.name(), nextStatus.name(), indexSha256, updatedAt) == 1;
     }
@@ -131,8 +136,8 @@ public class MyBatisAppSourceRepository implements AppSourceRepository {
     }
 
     @Override
-    public void saveReplica(AppSourceReplica replica) {
-        mapper.upsertReplica(toRow(replica));
+    public boolean insertReplicaIfAbsent(AppSourceReplica replica) {
+        return mapper.insertReplicaIfAbsent(toRow(replica)) == 1;
     }
 
     @Override
@@ -152,6 +157,9 @@ public class MyBatisAppSourceRepository implements AppSourceRepository {
 
     @Override
     public boolean updateReplicaIfLease(AppSourceReplica replica, String expectedLeaseOwner, Instant now) {
+        if (!AppSourceReplicaStatus.RUNNING.canTransitionTo(replica.status())) {
+            throw new IllegalArgumentException("invalid app-source replica status transition");
+        }
         return mapper.updateReplicaIfLease(toRow(replica), expectedLeaseOwner, now) == 1;
     }
 
@@ -184,8 +192,8 @@ public class MyBatisAppSourceRepository implements AppSourceRepository {
     }
 
     @Override
-    public void upsertStep(AppSourceOperationStep step) {
-        mapper.upsertStep(toRow(step));
+    public boolean upsertStep(AppSourceOperationStep step) {
+        return mapper.upsertStep(toRow(step)) == 1;
     }
 
     @Override

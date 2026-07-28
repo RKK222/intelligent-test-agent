@@ -84,7 +84,13 @@ class MyBatisAppSourcePostgresqlIntegrationTest {
         });
 
         assertThat(repository.findCleanupTasks(REPOSITORY_ID, 1L, SERVER_ID)).containsExactly(cleanup());
-        repository.upsertStep(step("step-global-a"));
+        assertThat(repository.upsertStep(step("step-global-a", AppSourceStepStatus.PENDING))).isTrue();
+        assertThat(repository.upsertStep(step("step-global-a", AppSourceStepStatus.RUNNING))).isTrue();
+        assertThat(repository.upsertStep(step("step-global-a", AppSourceStepStatus.SUCCEEDED))).isTrue();
+        assertThat(repository.upsertStep(step("step-global-a", AppSourceStepStatus.RUNNING))).isFalse();
+        assertThat(repository.findSteps("op-app-source-pg")).singleElement()
+                .extracting(AppSourceOperationStep::status)
+                .isEqualTo(AppSourceStepStatus.SUCCEEDED);
         assertThatThrownBy(() -> repository.upsertStep(step("step-global-b")))
                 .isInstanceOf(RuntimeException.class);
 
@@ -97,6 +103,30 @@ class MyBatisAppSourcePostgresqlIntegrationTest {
                         + "where parameter_english = 'OPENCODE_APP_SOURCE_ROOT' and platform = 'all'")
                 .query(String.class).single())
                 .isEqualTo("${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/appsource/");
+
+        assertThat(jdbc.sql("update app_source_snapshots set expires_at = :expiresAt "
+                        + "where repository_id = :repositoryId and generation = 1")
+                .param("expiresAt", Timestamp.from(NOW.plusSeconds(3600L)))
+                .param("repositoryId", REPOSITORY_ID.value()).update()).isOne();
+        assertThat(jdbc.sql("update app_source_snapshots set expires_at = :expiresAt "
+                        + "where repository_id = :repositoryId and generation = 1")
+                .param("expiresAt", Timestamp.from(NOW.plusSeconds(72L * 3600L)))
+                .param("repositoryId", REPOSITORY_ID.value()).update()).isOne();
+        assertThatThrownBy(() -> jdbc.sql("update app_source_snapshots set expires_at = :expiresAt "
+                        + "where repository_id = :repositoryId and generation = 1")
+                .param("expiresAt", Timestamp.from(NOW.plusSeconds(73L * 3600L)))
+                .param("repositoryId", REPOSITORY_ID.value()).update())
+                .isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> jdbc.sql("update app_source_snapshots set expires_at = :expiresAt "
+                        + "where repository_id = :repositoryId and generation = 1")
+                .param("expiresAt", Timestamp.from(NOW.plusSeconds(90L * 60L)))
+                .param("repositoryId", REPOSITORY_ID.value()).update())
+                .isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> jdbc.sql("update app_source_snapshots set index_sha256 = :indexSha256 "
+                        + "where repository_id = :repositoryId and generation = 1")
+                .param("indexSha256", "g".repeat(64))
+                .param("repositoryId", REPOSITORY_ID.value()).update())
+                .isInstanceOf(RuntimeException.class);
     }
 
     private static void insertBaseRows() {
@@ -150,8 +180,15 @@ class MyBatisAppSourcePostgresqlIntegrationTest {
     }
 
     private static AppSourceOperationStep step(String stepId) {
+        return step(stepId, AppSourceStepStatus.PENDING);
+    }
+
+    private static AppSourceOperationStep step(String stepId, AppSourceStepStatus status) {
         return new AppSourceOperationStep(
                 stepId, "op-app-source-pg", AppSourceStepScope.GLOBAL, null,
-                "RESOLVE_COMMIT", 10, AppSourceStepStatus.PENDING, null, null, null, NOW);
+                "RESOLVE_COMMIT", 10, status, null,
+                status == AppSourceStepStatus.PENDING ? null : NOW,
+                status == AppSourceStepStatus.SUCCEEDED ? NOW.plusSeconds(1) : null,
+                status == AppSourceStepStatus.SUCCEEDED ? NOW.plusSeconds(1) : NOW);
     }
 }

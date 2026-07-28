@@ -50,8 +50,11 @@ create table app_source_snapshots (
     constraint chk_app_source_snapshots_status
         check (status in ('PENDING', 'ACTIVE', 'FAILED', 'EXPIRED', 'CLEANED')),
     constraint chk_app_source_snapshots_index_sha
-        check (index_sha256 is null or char_length(index_sha256) = 64),
-    constraint chk_app_source_snapshots_expiry check (expires_at > accepted_at)
+        check (index_sha256 is null or index_sha256 ~ '^[0-9a-fA-F]{64}$'),
+    constraint chk_app_source_snapshots_expiry check (
+        expires_at >= accepted_at + interval '1 hour'
+        and expires_at <= accepted_at + interval '72 hours'
+        and mod(extract(epoch from (expires_at - accepted_at)), 3600) = 0)
 );
 
 create unique index uk_app_source_snapshots_active

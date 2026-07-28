@@ -125,6 +125,8 @@
             select repository_id from app_source_snapshots where repository_id = #{repositoryId}
             union all
             select repository_id from app_source_cleanup_tasks where repository_id = #{repositoryId}
+            union all
+            select repository_id from app_source_operations where repository_id = #{repositoryId}
         )
     </select>
     <select id="findSlot" resultMap="SlotMap">
@@ -189,19 +191,14 @@
         select <include refid="ReplicaColumns"/> from app_source_replicas
         where repository_id = #{repositoryId} and generation = #{generation} order by linux_server_id
     </select>
-    <insert id="upsertReplica" databaseId="postgresql">
+    <insert id="insertReplicaIfAbsent" databaseId="postgresql">
         insert into app_source_replicas(<include refid="ReplicaColumns"/>) values (
             #{row.repositoryId}, #{row.generation}, #{row.linuxServerId}, #{row.runtimeWorkspaceId}, #{row.status},
             #{row.leaseOwner}, #{row.leaseUntil}, #{row.attemptCount}, #{row.nextRetryAt}, #{row.safeErrorCode},
             #{row.safeErrorMessage}, #{row.createdAt}, #{row.updatedAt})
-        on conflict (repository_id, generation, linux_server_id) do update set
-            runtime_workspace_id = excluded.runtime_workspace_id, status = excluded.status,
-            lease_owner = excluded.lease_owner, lease_until = excluded.lease_until,
-            attempt_count = excluded.attempt_count, next_retry_at = excluded.next_retry_at,
-            safe_error_code = excluded.safe_error_code, safe_error_message = excluded.safe_error_message,
-            updated_at = excluded.updated_at
+        on conflict (repository_id, generation, linux_server_id) do nothing
     </insert>
-    <insert id="upsertReplica">
+    <insert id="insertReplicaIfAbsent">
         merge into app_source_replicas target using (values (
             #{row.repositoryId}, #{row.generation}, #{row.linuxServerId}, #{row.runtimeWorkspaceId}, #{row.status},
             #{row.leaseOwner}, cast(#{row.leaseUntil} as timestamp), #{row.attemptCount}, cast(#{row.nextRetryAt} as timestamp),
@@ -210,10 +207,6 @@
             attempt_count, next_retry_at, safe_error_code, safe_error_message, created_at, updated_at)
         on target.repository_id = source.repository_id and target.generation = source.generation
             and target.linux_server_id = source.linux_server_id
-        when matched then update set runtime_workspace_id = source.runtime_workspace_id, status = source.status,
-            lease_owner = source.lease_owner, lease_until = source.lease_until, attempt_count = source.attempt_count,
-            next_retry_at = source.next_retry_at, safe_error_code = source.safe_error_code,
-            safe_error_message = source.safe_error_message, updated_at = source.updated_at
         when not matched then insert (<include refid="ReplicaColumns"/>) values (
             source.repository_id, source.generation, source.linux_server_id, source.runtime_workspace_id, source.status,
             source.lease_owner, source.lease_until, source.attempt_count, source.next_retry_at, source.safe_error_code,
@@ -260,11 +253,28 @@
             #{row.status}, #{row.safeSummary}, #{row.startedAt}, #{row.completedAt}, #{row.updatedAt})
         on conflict (step_id) do update set status = excluded.status, safe_summary = excluded.safe_summary,
             started_at = excluded.started_at, completed_at = excluded.completed_at, updated_at = excluded.updated_at
+        where (app_source_operation_steps.status = 'PENDING'
+                and excluded.status in ('PENDING', 'RUNNING', 'FAILED', 'SKIPPED'))
+            or (app_source_operation_steps.status = 'RUNNING'
+                and excluded.status in ('RUNNING', 'SUCCEEDED', 'FAILED', 'SKIPPED'))
     </insert>
     <insert id="upsertStep">
-        merge into app_source_operation_steps key(step_id) values (
+        merge into app_source_operation_steps target using (values (
             #{row.stepId}, #{row.operationId}, #{row.scope}, #{row.linuxServerId}, #{row.stepCode}, #{row.sequence},
-            #{row.status}, #{row.safeSummary}, #{row.startedAt}, #{row.completedAt}, #{row.updatedAt})
+            #{row.status}, #{row.safeSummary}, cast(#{row.startedAt} as timestamp),
+            cast(#{row.completedAt} as timestamp), cast(#{row.updatedAt} as timestamp)
+        )) source(step_id, operation_id, scope, linux_server_id, step_code, sequence, status, safe_summary,
+            started_at, completed_at, updated_at)
+        on target.step_id = source.step_id
+        when matched and (
+            (target.status = 'PENDING' and source.status in ('PENDING', 'RUNNING', 'FAILED', 'SKIPPED'))
+            or (target.status = 'RUNNING' and source.status in ('RUNNING', 'SUCCEEDED', 'FAILED', 'SKIPPED'))
+        ) then update set status = source.status, safe_summary = source.safe_summary,
+            started_at = source.started_at, completed_at = source.completed_at, updated_at = source.updated_at
+        when not matched then insert (<include refid="StepColumns"/>) values (
+            source.step_id, source.operation_id, source.scope, source.linux_server_id, source.step_code,
+            source.sequence, source.status, source.safe_summary, source.started_at, source.completed_at,
+            source.updated_at)
     </insert>
     <select id="findSteps" resultMap="StepMap">
         select <include refid="StepColumns"/> from app_source_operation_steps

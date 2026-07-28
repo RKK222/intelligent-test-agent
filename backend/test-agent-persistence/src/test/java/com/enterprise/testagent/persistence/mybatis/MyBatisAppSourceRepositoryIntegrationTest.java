@@ -1,6 +1,7 @@
 package com.enterprise.testagent.persistence.mybatis;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.enterprise.testagent.domain.appsource.AppSourceCleanupStatus;
 import com.enterprise.testagent.domain.appsource.AppSourceCleanupTask;
@@ -76,6 +77,10 @@ class MyBatisAppSourceRepositoryIntegrationTest {
                 .getContentAsString(StandardCharsets.UTF_8)
                 .replace("jsonb", "json")
                 .replace("deferrable initially deferred", "")
+                .replace("accepted_at + interval '1 hour'", "dateadd('hour', 1, accepted_at)")
+                .replace("accepted_at + interval '72 hours'", "dateadd('hour', 72, accepted_at)")
+                .replace("mod(extract(epoch from (expires_at - accepted_at)), 3600)",
+                        "mod(datediff('second', accepted_at, expires_at), 3600)")
                 .replaceAll("(?s)create unique index uk_app_source_snapshots_active.*?;", "")
                 .replaceAll("(?s)create unique index uk_app_source_steps_global.*?;", "")
                 .replaceAll("(?s)create unique index uk_app_source_steps_server.*?;", "");
@@ -131,6 +136,10 @@ class MyBatisAppSourceRepositoryIntegrationTest {
         assertThat(repository.updateSnapshotStatusAndIndex(
                 REPOSITORY_ID, 1L, AppSourceSnapshotStatus.ACTIVE, AppSourceSnapshotStatus.EXPIRED,
                 "a".repeat(64), NOW.plusSeconds(1))).isFalse();
+        assertThatThrownBy(() -> repository.updateSnapshotStatusAndIndex(
+                REPOSITORY_ID, 1L, AppSourceSnapshotStatus.PENDING, AppSourceSnapshotStatus.ACTIVE,
+                "g".repeat(64), NOW.plusSeconds(1)))
+                .isInstanceOf(IllegalArgumentException.class);
         assertThat(repository.updateSnapshotStatusAndIndex(
                 REPOSITORY_ID, 1L, AppSourceSnapshotStatus.PENDING, AppSourceSnapshotStatus.ACTIVE,
                 "a".repeat(64), NOW.plusSeconds(1))).isTrue();
@@ -146,16 +155,45 @@ class MyBatisAppSourceRepositoryIntegrationTest {
     void replicaClaimAndTerminalWriteAreFencedByGenerationOwnerAndLease() {
         repository.insertSlotIfAbsent(slot(null, 0L, NOW));
         repository.saveSnapshot(snapshot("op-download", AppSourceSnapshotStatus.PENDING));
-        repository.saveReplica(replica(AppSourceReplicaStatus.PENDING, null, null, NOW));
+        assertThat(repository.insertReplicaIfAbsent(
+                replica(AppSourceReplicaStatus.PENDING, null, null, NOW))).isTrue();
 
         assertThat(repository.claimReplica(
                 REPOSITORY_ID, 1L, SERVER_ID, "worker-a", NOW.plusSeconds(30), NOW)).isPresent();
         assertThat(repository.claimReplica(
                 REPOSITORY_ID, 1L, SERVER_ID, "worker-b", NOW.plusSeconds(30), NOW)).isEmpty();
+        assertThat(repository.insertReplicaIfAbsent(
+                replica(AppSourceReplicaStatus.PENDING, null, null, NOW.plusSeconds(1)))).isFalse();
+        assertThat(repository.findReplica(REPOSITORY_ID, 1L, SERVER_ID)).hasValueSatisfying(running -> {
+            assertThat(running.status()).isEqualTo(AppSourceReplicaStatus.RUNNING);
+            assertThat(running.leaseOwner()).isEqualTo("worker-a");
+            assertThat(running.attemptCount()).isOne();
+        });
         AppSourceReplica ready = replica(AppSourceReplicaStatus.READY, null, null, NOW.plusSeconds(1));
         assertThat(repository.updateReplicaIfLease(ready, "worker-b", NOW.plusSeconds(1))).isFalse();
         assertThat(repository.updateReplicaIfLease(ready, "worker-a", NOW.plusSeconds(1))).isTrue();
         assertThat(repository.findReplica(REPOSITORY_ID, 1L, SERVER_ID)).contains(ready);
+        assertThat(repository.insertReplicaIfAbsent(
+                replica(AppSourceReplicaStatus.PENDING, null, null, NOW.plusSeconds(2)))).isFalse();
+        assertThat(repository.findReplica(REPOSITORY_ID, 1L, SERVER_ID)).contains(ready);
+    }
+
+    @Test
+    void replicaLeaseWriteRejectsIllegalStatusTransition() {
+        repository.insertSlotIfAbsent(slot(null, 0L, NOW));
+        repository.saveSnapshot(snapshot("op-download", AppSourceSnapshotStatus.PENDING));
+        assertThat(repository.insertReplicaIfAbsent(
+                replica(AppSourceReplicaStatus.PENDING, null, null, NOW))).isTrue();
+        assertThat(repository.claimReplica(
+                REPOSITORY_ID, 1L, SERVER_ID, "worker-a", NOW.plusSeconds(30), NOW)).isPresent();
+
+        AppSourceReplica regressed = replica(AppSourceReplicaStatus.PENDING, null, null, NOW.plusSeconds(1));
+        assertThatThrownBy(() -> repository.updateReplicaIfLease(regressed, "worker-a", NOW.plusSeconds(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(repository.findReplica(REPOSITORY_ID, 1L, SERVER_ID)).hasValueSatisfying(running -> {
+            assertThat(running.status()).isEqualTo(AppSourceReplicaStatus.RUNNING);
+            assertThat(running.leaseOwner()).isEqualTo("worker-a");
+        });
     }
 
     @Test
@@ -174,11 +212,18 @@ class MyBatisAppSourceRepositoryIntegrationTest {
         AppSourceOperationStep step = new AppSourceOperationStep(
                 "step-global", operation.operationId(), AppSourceStepScope.GLOBAL, null,
                 "RESOLVE_COMMIT", 10, AppSourceStepStatus.RUNNING, "正在解析", NOW, null, NOW);
-        repository.upsertStep(step);
-        repository.upsertStep(new AppSourceOperationStep(
+        assertThat(repository.upsertStep(step)).isTrue();
+        assertThat(repository.upsertStep(new AppSourceOperationStep(
                 "step-global", operation.operationId(), AppSourceStepScope.GLOBAL, null,
                 "RESOLVE_COMMIT", 10, AppSourceStepStatus.SUCCEEDED, "解析完成", NOW,
-                NOW.plusSeconds(1), NOW.plusSeconds(1)));
+                NOW.plusSeconds(1), NOW.plusSeconds(1)))).isTrue();
+        assertThat(repository.findSteps(operation.operationId())).singleElement()
+                .extracting(AppSourceOperationStep::status)
+                .isEqualTo(AppSourceStepStatus.SUCCEEDED);
+        assertThat(repository.upsertStep(new AppSourceOperationStep(
+                "step-global", operation.operationId(), AppSourceStepScope.GLOBAL, null,
+                "RESOLVE_COMMIT", 10, AppSourceStepStatus.RUNNING, "迟到执行者", NOW,
+                null, NOW.plusSeconds(2)))).isFalse();
         assertThat(repository.findSteps(operation.operationId())).singleElement()
                 .extracting(AppSourceOperationStep::status)
                 .isEqualTo(AppSourceStepStatus.SUCCEEDED);
@@ -190,6 +235,13 @@ class MyBatisAppSourceRepositoryIntegrationTest {
         assertThat(repository.hasRepositoryHistory(REPOSITORY_ID)).isTrue();
         repository.deleteRecentSelection(USER_ID);
         assertThat(repository.findRecentSelection(USER_ID)).isEmpty();
+    }
+
+    @Test
+    void historyGuardIncludesStandaloneOperationRows() {
+        repository.saveOperation(operation("op-history-only", AppSourceOperationStatus.PENDING, null));
+
+        assertThat(repository.hasRepositoryHistory(REPOSITORY_ID)).isTrue();
     }
 
     @Test

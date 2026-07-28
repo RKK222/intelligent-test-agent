@@ -1308,15 +1308,15 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260728103000__create_app_source_snapshot_tables.sql` 新增七类生产状态表，不写测试、演示或环境专属业务数据：
 
 - `app_source_repository_slots`：每个 repositoryId 唯一，保存 active/pending generation、下一代次、最近操作和 `lock_version`；分配流程使用 `SELECT FOR UPDATE` 或显式版本 CAS，旧执行者不能覆盖新槽位。
-- `app_source_snapshots`：以 `(repository_id, generation)` 为主键，冻结仓库英文名、`PERSONAL/TEAM` 用途、owner、分支、目标提交和 JSONB 结构化选择路径；`accepted_at + 1..72h` 由领域层计算为绝对 `expires_at`，默认 48 小时。每个仓库最多一个 `ACTIVE` 快照。
-- `app_source_replicas`：以 repository/generation/server 唯一，保存可空运行态 Workspace、状态、attempt、退避和绝对租约；写回同时校验 generation、owner 和未过期租约。
-- `app_source_operations` / `app_source_operation_steps`：保存用户操作、幂等摘要和全局/服务器步骤。部分唯一索引分别固定 `(operation_id, step_code)` 的 GLOBAL 步骤和 `(operation_id, linux_server_id, step_code)` 的 SERVER 步骤，避免 NULL 破坏全局幂等。
+- `app_source_snapshots`：以 `(repository_id, generation)` 为主键，冻结仓库英文名、`PERSONAL/TEAM` 用途、owner、分支、目标提交和 JSONB 结构化选择路径；领域对象和数据库都强制 `expires_at = accepted_at + 1..72` 整小时，默认 48 小时，`index_sha256` 非空时必须为 64 位十六进制。每个仓库最多一个 `ACTIVE` 快照。
+- `app_source_replicas`：以 repository/generation/server 唯一，保存可空运行态 Workspace、状态、attempt、退避和绝对租约；初始化使用 insert-if-absent，不覆盖已进入 `RUNNING/READY` 的行，后续写回同时校验 generation、owner、未过期租约和合法状态流转。
+- `app_source_operations` / `app_source_operation_steps`：保存用户操作、幂等摘要和全局/服务器步骤。部分唯一索引分别固定 `(operation_id, step_code)` 的 GLOBAL 步骤和 `(operation_id, linux_server_id, step_code)` 的 SERVER 步骤，避免 NULL 破坏全局幂等；步骤 upsert 只允许从 `PENDING/RUNNING` 向合法状态推进，终态行不再被更新。
 - `app_source_cleanup_tasks`：以 repository/generation/server 唯一，保存绝对 `delete_at`、认领租约和安全错误。到 operation 和 snapshot 的两个外键均为 `DEFERRABLE INITIALLY DEFERRED`，业务事务可以先插 cleanup，再补齐 operation/snapshot，提交时统一校验；其它服务器外键仍即时校验。
 - `app_source_recent_selections`：仅以 userId 唯一，保存 app/repository/generation，不保存 workspaceId；打开时按用户当前 opencode 进程服务器解析 READY 副本。
 
 同一 migration 初始化 `platform=all`、`editable=false` 的 `OPENCODE_APP_SOURCE_ROOT`，数据库值精确为 `${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/appsource/`。SQL 通过 `'$' || '{SYS_DATA_ROOT_DIR}/...'` 拼接规避 Flyway 占位符替换，运行态继续由通用参数解析器按当前或目标平台展开。
 
-兼容策略：所有表和参数均为向后兼容新增，旧 Java 不访问这些表；回滚应用版本时保留 migration 和历史 cleanup。H2 只验证可移植 mapper 行为；JSONB、部分唯一索引、完整 Flyway 链及 cleanup 第一写的延迟外键由 PostgreSQL 16 Testcontainers 原样验证。
+兼容策略：所有表和参数均为向后兼容新增，旧 Java 不访问这些表；回滚应用版本时保留 migration 和历史 cleanup。H2 使用等价时间函数验证可移植 mapper 行为；JSONB、整小时过期/十六进制摘要约束、步骤终态保护、部分唯一索引、完整 Flyway 链及 cleanup 第一写的延迟外键由 PostgreSQL 16 Testcontainers 原样验证。
 
 ### 字段注释原则
 

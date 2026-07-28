@@ -48,7 +48,7 @@ public interface AppSourceMapper {
     List<ReplicaRow> findReplicas(
             @Param("repositoryId") String repositoryId, @Param("generation") long generation);
 
-    int upsertReplica(@Param("row") ReplicaRow row);
+    int insertReplicaIfAbsent(@Param("row") ReplicaRow row);
 
     int claimReplica(
             @Param("repositoryId") String repositoryId,

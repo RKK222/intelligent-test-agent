@@ -6,6 +6,6 @@ import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 @FunctionalInterface
 public interface AppSourceRepositoryHistory {
 
-    /** slot、snapshot 或 cleanup 任一历史存在时均返回 true。 */
+    /** slot、snapshot、operation 或 cleanup 任一历史存在时均返回 true。 */
     boolean hasRepositoryHistory(CodeRepositoryId repositoryId);
 }

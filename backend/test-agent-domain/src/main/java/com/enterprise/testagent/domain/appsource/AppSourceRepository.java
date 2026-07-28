@@ -37,7 +37,8 @@ public interface AppSourceRepository extends AppSourceRepositoryHistory {
 
     List<AppSourceReplica> findReplicas(CodeRepositoryId repositoryId, long generation);
 
-    void saveReplica(AppSourceReplica replica);
+    /** 只在该 generation/服务器副本不存在时建档，迟到初始化不得覆盖已有运行态。 */
+    boolean insertReplicaIfAbsent(AppSourceReplica replica);
 
     Optional<AppSourceReplica> claimReplica(
             CodeRepositoryId repositoryId,
@@ -61,7 +62,8 @@ public interface AppSourceRepository extends AppSourceRepositoryHistory {
             AppSourceOperationStatus nextStatus,
             Instant completedAt);
 
-    void upsertStep(AppSourceOperationStep step);
+    /** 插入步骤或向前推进非终态步骤；终态防回退未命中时返回 false。 */
+    boolean upsertStep(AppSourceOperationStep step);
 
     List<AppSourceOperationStep> findSteps(String operationId);
 

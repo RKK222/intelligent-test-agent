@@ -52,6 +52,19 @@ class AppSourceDomainTest {
     }
 
     @Test
+    void snapshotExpiryMustBeWholeHoursWithinRetentionWindow() {
+        assertThat(snapshotWithExpiry(NOW.plus(Duration.ofHours(1))).expiresAt())
+                .isEqualTo(NOW.plus(Duration.ofHours(1)));
+        assertThat(snapshotWithExpiry(NOW.plus(Duration.ofHours(72))).expiresAt())
+                .isEqualTo(NOW.plus(Duration.ofHours(72)));
+
+        assertThatThrownBy(() -> snapshotWithExpiry(NOW.plus(Duration.ofHours(73))))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> snapshotWithExpiry(NOW.plus(Duration.ofMinutes(90))))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void statesAllowOnlyForwardBusinessTransitions() {
         assertThat(AppSourceSnapshotStatus.PENDING.canTransitionTo(AppSourceSnapshotStatus.ACTIVE)).isTrue();
         assertThat(AppSourceSnapshotStatus.ACTIVE.canTransitionTo(AppSourceSnapshotStatus.EXPIRED)).isTrue();
@@ -96,9 +109,25 @@ class AppSourceDomainTest {
             AppSourcePurpose purpose,
             UserId ownerUserId,
             List<AppSourceSelectedPath> selectedPaths) {
+        return snapshotWithExpiry(purpose, ownerUserId, selectedPaths, NOW.plus(Duration.ofHours(48)));
+    }
+
+    private static AppSourceSnapshot snapshotWithExpiry(Instant expiresAt) {
+        return snapshotWithExpiry(
+                AppSourcePurpose.PERSONAL,
+                new UserId("usr_owner"),
+                List.of(new AppSourceSelectedPath("src", AppSourcePathType.DIRECTORY)),
+                expiresAt);
+    }
+
+    private static AppSourceSnapshot snapshotWithExpiry(
+            AppSourcePurpose purpose,
+            UserId ownerUserId,
+            List<AppSourceSelectedPath> selectedPaths,
+            Instant expiresAt) {
         return new AppSourceSnapshot(
                 new CodeRepositoryId("repo_source"), 1L, "source-repo", purpose, ownerUserId,
-                "main", "0123456789abcdef", selectedPaths, null, NOW, NOW.plus(Duration.ofHours(48)),
+                "main", "0123456789abcdef", selectedPaths, null, NOW, expiresAt,
                 AppSourceSnapshotStatus.PENDING, NOW, NOW);
     }
 }

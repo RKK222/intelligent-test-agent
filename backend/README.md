@@ -39,7 +39,7 @@ OpenCode 源码快照 `opencode-source/opencode-1.18.4/` 只用于审计和行�
 | `test-agent-xxl-job-admin-upstream` | 原样保存 XXL-JOB Admin 3.4.2 源码/资源与 GPL-3.0 许可证，不承载平台补丁 |
 | `test-agent-xxl-job-integration` | 独立 Servlet Admin 子上下文、MySQL Flyway、Admin readiness 就绪后延迟启动的 executor、周期任务 adapter、平台一次性 SSO、JIT 用户和 XXL health |
 | `test-agent-api` | HTTP/SSE/WebSocket API 定义、DTO、鉴权、限流、traceId、按进程精确 Java->Java 聚合和统一异常入口 |
-| `test-agent-persistence` | 持久化、MyBatis XML mapper、迁移、Redis/PostgreSQL 访问，包括 Redis Run manifest/Stream/snapshot/active 索引、应用源码 slot/snapshot/replica/cleanup、legacy question/permission 待关注查询、Agent & Skill Hub 内容寻址制品与引用状态、opencode 用户进程管理表映射、scheduler/夜间任务/会话锁/时段容量、引用资产总体/副本表、工具点击明细/累计/用户窗口状态、AI 反馈表和运营分析 rollup 表 |
+| `test-agent-persistence` | 持久化、MyBatis XML mapper、迁移、Redis/PostgreSQL 访问，包括 Redis Run manifest/Stream/snapshot/active 索引、应用源码 slot/snapshot/replica/operation/step/cleanup/recent、legacy question/permission 待关注查询、Agent & Skill Hub 内容寻址制品与引用状态、opencode 用户进程管理表映射、scheduler/夜间任务/会话锁/时段容量、引用资产总体/副本表、工具点击明细/累计/用户窗口状态、AI 反馈表和运营分析 rollup 表 |
 | `test-agent-event` | 按 storage mode 分流的 RunEvent 追加、SSE、Redis/数据库回放，以及用户级运行态刷新所需的全局事件触发流 |
 | `test-agent-test-support` | 测试支撑、fixture、mock server |
 | `test-agent-app` | 唯一启动入口和唯一可部署后端服务包，不承载业务逻辑 |

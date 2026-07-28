@@ -7,12 +7,12 @@
 应用代码库的源码物化使用独立 `domain.appsource` 模型，不复用应用版本工作区或引用资产副本：
 
 - `AppSourceRepositorySlot` 每个 repositoryId 一行，通过 active/pending generation、`nextGeneration` 和 `lockVersion` 串行化代次分配。
-- `AppSourceSnapshot` 以 repositoryId+generation 标识，冻结仓库英文名、`PERSONAL/TEAM`、owner、分支、目标提交和 `List<AppSourceSelectedPath>`；接受后只允许状态与索引摘要推进，选择内容不修改。
-- `AppSourceReplica` 以 repositoryId+generation+linuxServerId 标识，generation、lease owner 和绝对 lease deadline 共同隔离过期 worker。
-- `AppSourceOperation` 记录用户意图与 target generation，全局/服务器 `AppSourceOperationStep` 分开投影进度；cleanup 以每服务器绝对 `deleteAt` 独立认领，失败可退避，旧任务可被新代次 supersede。
+- `AppSourceSnapshot` 以 repositoryId+generation 标识，冻结仓库英文名、`PERSONAL/TEAM`、owner、分支、目标提交和 `List<AppSourceSelectedPath>`；接受后只允许状态与 64 位十六进制索引摘要推进，选择内容不修改。
+- `AppSourceReplica` 以 repositoryId+generation+linuxServerId 标识，初始化只在记录不存在时插入，后续变更必须通过 generation、lease owner、绝对 lease deadline 和合法状态流转共同隔离过期 worker。
+- `AppSourceOperation` 记录用户意图与 target generation，全局/服务器 `AppSourceOperationStep` 分开投影进度且终态不可被迟到执行者回退；cleanup 以每服务器绝对 `deleteAt` 独立认领，失败可退避，旧任务可被新代次 supersede。
 - `AppSourceRecentSelection` 每用户唯一且不保存 workspaceId，避免用户进程换服务器后继续指向旧物理副本。
 
-物化保留时长只允许 1–72 小时，默认 48 小时；`expiresAt` 从服务端权威 `acceptedAt` 推导。数据库路径保存 `appsource:` 逻辑值，`ManagedWorkspacePathResolver` 通过只读 `OPENCODE_APP_SOURCE_ROOT` 解析当前服务器物理根，同时保留旧绝对/相对路径兼容。
+物化保留时长只允许 1–72 整小时，默认 48 小时；领域对象与 PostgreSQL 约束均强制 `expiresAt = acceptedAt + integerHours`。数据库路径保存 `appsource:` 逻辑值，`ManagedWorkspacePathResolver` 通过只读 `OPENCODE_APP_SOURCE_ROOT` 解析当前服务器物理根，同时保留旧绝对/相对路径兼容。
 
 ---
 

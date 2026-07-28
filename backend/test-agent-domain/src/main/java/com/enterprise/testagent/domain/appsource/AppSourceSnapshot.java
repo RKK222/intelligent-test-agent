@@ -2,6 +2,7 @@ package com.enterprise.testagent.domain.appsource;
 
 import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.user.UserId;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
@@ -53,8 +54,13 @@ public record AppSourceSnapshot(
         Objects.requireNonNull(status, "status must not be null");
         createdAt = Objects.requireNonNull(createdAt, "createdAt must not be null");
         updatedAt = Objects.requireNonNull(updatedAt, "updatedAt must not be null");
-        if (!expiresAt.isAfter(acceptedAt)) {
-            throw new IllegalArgumentException("expiresAt must be after acceptedAt");
+        Duration retention = Duration.between(acceptedAt, expiresAt);
+        long retentionHours = retention.toHours();
+        // snapshot 自身也校验权威时间，避免调用方绕过 AppSourceRetention 构造任意到期时间。
+        if (retentionHours < 1L
+                || retentionHours > 72L
+                || !retention.equals(Duration.ofHours(retentionHours))) {
+            throw new IllegalArgumentException("expiresAt must be acceptedAt plus 1 to 72 whole hours");
         }
         if (updatedAt.isBefore(createdAt)) {
             throw new IllegalArgumentException("updatedAt must not be before createdAt");
