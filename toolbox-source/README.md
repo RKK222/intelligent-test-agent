@@ -34,3 +34,7 @@ OmniTools 的 IMG.LY 模型资源可按固定版本重新获取并逐块校验�
 python3 toolbox-source/scripts/fetch_imgly_runtime.py \
   --output toolbox-source/omni-tools/runtime-assets/imgly
 ```
+
+## 本地统一入口验收
+
+两个工具容器监听本机 `18120/18121` 后，平台 Vite 开发服务器会代理完整公开前缀。使用 `restart-dev-services.sh` 启动平台后可让全目录和真实功能冒烟直接经过 `http://127.0.0.1:3000`，具体命令见 `docs/deployment/toolbox.md`。路由脚本对 Apple Silicon 模拟 `linux/amd64` 镜像的首次加载采用 60 秒导航和 30 秒工具渲染窗口，断言内容、路由数量和非同源请求限制保持不变。

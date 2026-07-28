@@ -21,12 +21,25 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 /** 工具目录和点击业务规则单元测试。 */
 class ToolboxCatalogServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-07-27T12:00:00Z");
     private static final UserId USER_ID = new UserId("usr_toolbox123456");
+
+    @Test
+    void productionSpringBeanUsesRepositoryConstructorAndLoadsCatalog() {
+        new ApplicationContextRunner()
+                .withBean(ToolboxClickRepository.class, InMemoryRepository::new)
+                .withBean(ToolboxCatalogService.class)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(ToolboxCatalogService.class);
+                    assertThat(context.getBean(ToolboxCatalogService.class).catalog().total()).isEqualTo(193);
+                });
+    }
 
     @Test
     void firstClickIncrementsAndRepeatWithinThirtySecondsOnlyKeepsEvent() {

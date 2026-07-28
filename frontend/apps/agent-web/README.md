@@ -126,8 +126,9 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 - `ToolboxPanel` 直接展示一个工具一张卡片，不增加二级工具门户。热门区只显示累计点击大于 0 的 Top 10；目录支持中文、英文和关键词搜索，以及 IT-Tools/OmniTools 来源和固定分类筛选。
 - 卡片使用原生新标签链接打开 `/toolbox/apps/it-tools/<route>` 或 `/toolbox/apps/omni-tools/<route>`，普通点击、键盘激活和中键均生成一次 `eventId` 后异步上报；失败不得 `preventDefault`、弹窗或回退到套件首页，成功则更新本地累计和热门排序。
 - 进入沉浸式工具盒子前保存左、右和底部面板可见性，离开时按快照精确恢复；工具盒子激活期间运行态事件和 SSE 导航不得把页面劫持回编辑器。
+- Vite 开发服务器默认把两个工具前缀代理到 `http://127.0.0.1:18120/18121`，可分别用 `TEST_AGENT_TOOLBOX_IT_TOOLS_URL`、`TEST_AGENT_TOOLBOX_OMNI_TOOLS_URL` 覆盖；代理剥离公开前缀，精确套件根路径返回 `308 /toolbox`，生产仍使用前端 Nginx。
 
-`tests/toolbox-panel.test.ts` 覆盖搜索/筛选、重复能力来源区分、热门与零点击空态、原生新标签属性、普通/中键上报和失败不阻断；`tests/toolbox-navigation.test.ts` 与 `tests/login-redirect.test.ts` 覆盖沉浸式布局状态机和 `/toolbox` 登录回跳，`tests/workbench.spec.ts` 真实浏览器场景覆盖普通用户入口、左右面板恢复、前进/后退和深链接刷新。
+`tests/toolbox-panel.test.ts` 覆盖搜索/筛选、重复能力来源区分、热门与零点击空态、原生新标签属性、普通/中键上报和失败不阻断；`tests/toolbox-navigation.test.ts` 与 `tests/login-redirect.test.ts` 覆盖沉浸式布局状态机和 `/toolbox` 登录回跳，`tests/toolbox-dev-proxy.test.ts` 锁定本地代理目标、路径改写与根路径守卫，`tests/workbench.spec.ts` 真实浏览器场景覆盖普通用户入口、左右面板恢复、前进/后退和深链接刷新。
 
 ## 禁止事项
 

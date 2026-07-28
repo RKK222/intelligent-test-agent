@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /** 工具目录查询与点击计数业务服务。 */
@@ -33,6 +34,7 @@ public class ToolboxCatalogService {
     private final int hotLimit;
 
     /** 生产构造器固定使用版本化 classpath 目录、UTC 服务端时间和 30 秒窗口。 */
+    @Autowired
     public ToolboxCatalogService(ToolboxClickRepository clickRepository) {
         this(
                 ToolboxCatalogLoader.loadDefault(),

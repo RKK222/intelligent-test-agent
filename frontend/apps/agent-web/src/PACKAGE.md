@@ -69,7 +69,7 @@
 - `components/workbench-utils.ts`：Diff payload 解析、RunEvent 三态投影门禁、session-tree 分轮 Todo 历史恢复、session Todo 保守校准、history/runtime status 派生、子 Agent 索引兜底、弱健康 ready、命令解析、跨阶段子条目路径聚合和工作空间根目录过滤等纯函数。
 - `components/workbench-utils.ts` 还负责 runtime-state 的 `QUESTION/PERMISSION` attention 投影、旧 `permissionCount` 兼容、`run.snapshot.reset` 内嵌 root 交互的 Session ID 投影和根 permission HTTP 快照的 scope 替换；两条恢复链都必须保留 child session/pending permission。
 - `styles/globals.css`：Tailwind 4 全局入口、theme token、dockview-vue/Monaco 视觉适配、滚动条、panel chrome 和工作台级动画。
-- `../vite.config.ts`：Vite 应用配置（Vue 插件、Tailwind 插件、workspace alias、dev server）。
+- `../vite.config.ts`、`../toolbox-dev-proxy.ts`：Vite 应用配置及仅用于本地开发的工具容器同源代理；生产工具流量仍由前端 Nginx 承载。
 - `AgentWorkbench.handleSend` 继续把完整 text/file parts 交给 Run 请求；本地乐观 user message 只接收经 `promptPartsForUserDisplay` 收敛后的文本和附件元数据。历史 session-tree 恢复会预先按 `sessionId + messageId` 建立首个非 synthetic text 索引，仅补齐同 Session、无正文的 OpenCode user envelope；`events` 与 `messagesBySessionId` 两次回放复用该索引后再交给原 reducer 归并 file part，避免后续用户文本落入上一条 assistant，且不改变 Timeline、实时事件投影和 OpenCode parts 协议。
 
 - `components/GitChangesPanel.vue` 的应用 Agent 与公共 Agent 未暂存分组均支持“全部暂存”；单文件与批量暂存共用同一状态和 API 链路，批量请求不逐文件发送，也不跨作用域混合路径。

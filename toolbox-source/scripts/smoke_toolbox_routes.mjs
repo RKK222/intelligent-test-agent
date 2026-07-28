@@ -19,6 +19,9 @@ const origins = {
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 const attemptedExternalRequests = [];
 const browserErrors = [];
+// Apple Silicon 本地环境通过 Docker 模拟 linux/amd64 镜像，首次解析按路由拆分的资源可能超过 10 秒。
+const toolNavigationTimeoutMs = 60_000;
+const toolRenderTimeoutMs = 30_000;
 
 try {
   for (const source of ['IT_TOOLS', 'OMNI_TOOLS']) {
@@ -52,9 +55,15 @@ try {
         ''
       );
       const target = new URL(upstreamPath, `${origin.href.replace(/\/$/, '')}/`).href;
-      const response = await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 20_000 });
+      const response = await page.goto(target, {
+        waitUntil: 'domcontentloaded',
+        timeout: toolNavigationTimeoutMs
+      });
       if (!response?.ok()) throw new Error(`${tool.toolId} 深链响应 ${response?.status() ?? 'none'}`);
-      await page.getByRole('link', { name: '工具盒子', exact: true }).first().waitFor({ timeout: 10_000 });
+      await page
+        .getByRole('link', { name: '工具盒子', exact: true })
+        .first()
+        .waitFor({ timeout: toolRenderTimeoutMs });
       const body = await page.locator('body').innerText();
       if (/Buy me a coffee|Support IT-Tools|OmniTools Home/i.test(body)) {
         throw new Error(`${tool.toolId} 仍显示上游门户或支持入口`);

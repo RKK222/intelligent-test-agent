@@ -1081,3 +1081,20 @@
   - 最终离线目录是 193 项而非初始预期的 194 项：除 HTTP 下不可用的摄像头外，OmniTools SimplePDF 依赖外部 iframe，按离线入口约束一并剔除。
   - 最终离线包位于 `/private/tmp/test-agent-toolbox-release-final`；点击明细永久增长需纳入容量监控，工具节点首版仍为单点；不新增 SSE，不修改 OpenCode、generated SDK 或 `.env.local`。
   - 本机 Docker 的 Aliyun mirror 存在 manifest 异常，构建时使用 Daocloud registry 前缀但保持官方 `linux/amd64` digest；发布脚本会拒绝仅使用 tag 的基础镜像。
+
+### 2026-07-28 - 部署工具盒子本地测试环境
+
+- Why:
+  - 用户日常通过 `restart-dev-services.sh` 启动本地环境；真实启动暴露 `ToolboxCatalogService` 存在两个构造器但生产构造器未显式注入，Spring context 因找不到默认构造器而失败。
+  - 生产 Nginx 已有工具前缀代理，但 Vite 开发服务器没有对应规则，3000 入口会把具体工具深链交给平台 SPA，无法完成本地统一入口联调。
+- What:
+  - 为 `ToolboxCatalogService` 的生产构造器增加显式 Spring 注入，并增加最小 `ApplicationContextRunner` 回归，确保真实仓储构造器能创建服务并加载 193 项目录。
+  - 增加 Vite 工具开发代理、套件根路径 `308 /toolbox` 守卫和配置单测；默认连接本机 `18120/18121`，支持命令行环境变量覆盖，不修改 `.env.test` 或 `.env.local`。
+  - 将全目录冒烟的导航/渲染等待调整为 60/30 秒，以容纳 Apple Silicon 模拟锁定 `linux/amd64` 镜像的首次懒加载；同步后端、前端、源码区和部署文档。
+- How:
+  - TDD 先复现 Spring Bean 创建失败与 Vite 代理模块缺失，再分别修复；integration 模块相关 Maven 测试通过，前端全量 99 个测试文件为 1638 passed / 1 skipped，agent-web typecheck、生产构建、Node 语法和 AI 文档校验通过。
+  - 从 `/private/tmp/test-agent-toolbox-release-final` 校验并加载两套离线镜像，固定容器 `test-agent-it-tools`、`test-agent-omni-tools` 均为 healthy、只读根文件系统和 `unless-stopped`；使用 JDK 21 和未修改的 `.env.test` 完整执行 `restart-dev-services.sh --profile test --env-file .env.test`。
+  - 通过 3000 统一入口逐项加载 IT-Tools 85、OmniTools 108、合计 193 条深链且无非同源请求；ASCII、HTTP 复制降级、FFmpeg、Ghostscript、图片、QR、OCR 和 AI 抠图真实功能冒烟通过，CSP/COEP、根路径守卫和未登录 API 401 均已检查。
+- Result:
+  - 本地统一入口为 `http://127.0.0.1:3000/toolbox`，后端 readiness 为 `UP`，manager 已连接；工具点击既有 Flyway migration 已应用到本地 PostgreSQL。
+  - 本次修复不新增或变更 HTTP/RunEvent 字段、数据库结构、MyBatis SQL、权限或 generated SDK；只补齐既有工具盒子的生产装配、本地代理、测试稳定性与文档。临时 4173 调试网关和 Playwright 快照已删除，无持久数据损失。

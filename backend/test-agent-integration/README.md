@@ -7,7 +7,7 @@
 ## 当前能力
 
 - 从 `src/main/resources/toolbox/catalog-v1.json` 加载锁定 IT-Tools / OmniTools 的版本化离线目录，启动时校验 193 项的稳定 ID、深链接、双语字段、分类和顺序。
-- `ToolboxCatalogService` 合并累计点击投影，按累计数、最后计数时间和目录顺序计算正点击 Top 10。
+- `ToolboxCatalogService` 通过显式生产构造器注入点击仓储，合并累计点击投影，并按累计数、最后计数时间和目录顺序计算正点击 Top 10。
 - 点击只信任当前登录用户、服务端时钟和 traceId；`eventId` 幂等、用户/工具 30 秒窗口竞争和累计原子更新由领域仓储端口完成。
 - 无效、已剔除或不在当前目录的 `toolId` 返回统一 `NOT_FOUND`，不为离线不可用工具提供入口。
 
@@ -30,6 +30,8 @@
 工具目录变更必须先修改两套锁定派生源码，再运行 `toolbox-source/scripts/generate_catalog.py` 和 `verify_platform_contract.py`；不能手工只改 JSON 数量或给需要公网/安全上下文的工具补入口。
 
 ## 验证
+
+`ToolboxCatalogServiceTest` 除点击窗口和热门排序外，还会用最小 Spring context 验证生产构造器装配，防止只在完整应用启动时暴露 Bean 创建失败。
 
 ```bash
 mvn -q -DappLogDir=target/log -pl test-agent-integration -am test

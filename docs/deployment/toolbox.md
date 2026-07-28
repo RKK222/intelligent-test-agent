@@ -82,6 +82,18 @@ TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=<toolbox-private-ip>:18121
 
 `configure-nginx.sh` 会要求并校验两个单一 `host:port` endpoint，不再默认回退到 `127.0.0.1`。`configure-single-deployment.sh frontend` 首次执行必须通过两个 `--toolbox-*-upstream` 参数提供地址，后续执行可从现有 `nginx.env` 保留；然后渲染 `nginx/gateway.conf.template`，执行 Nginx 配置检查后再 reload。两个 location 必须位于 SPA catch-all 前，不能把套件根路径代理到上游门户。
 
+## 本地开发联调
+
+本机加载并启动两个工具镜像后，继续按项目统一方式启动平台：
+
+```bash
+./restart-dev-services.sh --profile test --env-file .env.test
+```
+
+Vite 默认把 `/toolbox/apps/it-tools/*`、`/toolbox/apps/omni-tools/*` 分别代理到 `http://127.0.0.1:18120/18121`，并与生产 Nginx 一样剥离公开前缀和阻止套件根门户。因此本地统一入口是 `http://127.0.0.1:3000/toolbox`，不需要额外启动 Nginx。工具容器不在本机时，可在执行启动脚本前临时设置 `TEST_AGENT_TOOLBOX_IT_TOOLS_URL` 与 `TEST_AGENT_TOOLBOX_OMNI_TOOLS_URL`；不要为此修改含敏感信息的 `.env.local`。
+
+Apple Silicon 会模拟首版锁定的 `linux/amd64` 镜像，首次打开个别懒加载工具会比生产 amd64 主机慢。全目录浏览器冒烟已为该冷启动场景保留 60 秒导航、30 秒工具渲染窗口；这不会改变生产请求超时。
+
 ## 上线顺序与回滚
 
 固定上线顺序：
@@ -120,6 +132,17 @@ tools/verify-internal-nginx-config.sh
 ```
 
 两个 Node 冒烟脚本运行前要按 `toolbox-source/README.md` 启动已构建的本地预览服务。路由冒烟必须得到 IT-Tools 85、OmniTools 108、合计 193，且非同源请求数为零。真实功能冒烟覆盖 ASCII 字体、HTTP 文本复制降级、HTTP 二进制复制隐藏、两种图片压缩、图片编辑器、FFmpeg 音频处理、Ghostscript PDF、OCR 和 AI 抠图；仅看到页面可以打开不能替代这些功能验收。
+
+已通过 `restart-dev-services.sh` 启动 3000 统一入口时，可直接验证真实本地链路：
+
+```bash
+node toolbox-source/scripts/smoke_toolbox_routes.mjs \
+  --it-origin http://127.0.0.1:3000/toolbox/apps/it-tools/ \
+  --omni-origin http://127.0.0.1:3000/toolbox/apps/omni-tools/
+TEST_AGENT_TOOLBOX_IT_ORIGIN=http://127.0.0.1:3000 \
+TEST_AGENT_TOOLBOX_OMNI_ORIGIN=http://127.0.0.1:3000 \
+  node toolbox-source/scripts/smoke_toolbox_features.mjs
+```
 
 最终镜像启动后还必须让真实功能冒烟经过容器 Nginx，以验证 CSP 响应头（包括 QR 工具所需的 `connect-src data:`）：
 

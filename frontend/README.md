@@ -64,7 +64,7 @@ packages/shared-types
 
 ### 工具盒子
 
-`apps/agent-web` 在“编辑器”后为所有登录用户提供工具盒子活动栏入口和受保护 `/toolbox` 路由。工具盒子进入时保存并隐藏左右面板和底部抽屉，退出、浏览器前进/后退时精确恢复原布局；页面从 `packages/backend-api` 读取 193 项离线目录，支持中英/关键词搜索、来源和固定分类筛选、正点击 Top 10 热门区。每张卡片是带 `target="_blank"`、`rel="noopener noreferrer"` 的原生具体工具链接，普通点击和中键会异步上报，失败不阻断打开或显示干扰提示。
+`apps/agent-web` 在“编辑器”后为所有登录用户提供工具盒子活动栏入口和受保护 `/toolbox` 路由。工具盒子进入时保存并隐藏左右面板和底部抽屉，退出、浏览器前进/后退时精确恢复原布局；页面从 `packages/backend-api` 读取 193 项离线目录，支持中英/关键词搜索、来源和固定分类筛选、正点击 Top 10 热门区。每张卡片是带 `target="_blank"`、`rel="noopener noreferrer"` 的原生具体工具链接，普通点击和中键会异步上报，失败不阻断打开或显示干扰提示。本地 Vite 默认把两个工具前缀分别代理到 `127.0.0.1:18120/18121` 并剥离公开前缀，套件根路径返回 `/toolbox`，因此使用 `restart-dev-services.sh` 时直接访问 3000 端口即可联调具体工具。
 
 ## 本地命令
 
@@ -105,6 +105,8 @@ Agents 配置树的公共级、应用级根统一复用工作空间 `FileEntryCr
 ```bash
 ./restart-dev-services.sh
 ```
+
+工具镜像已在本机以 `18120/18121` 启动时，上述命令会让 `http://127.0.0.1:3000/toolbox/apps/...` 直接经过 Vite 代理访问具体工具。若容器位于其他地址，可在启动命令前临时设置 `TEST_AGENT_TOOLBOX_IT_TOOLS_URL` 和 `TEST_AGENT_TOOLBOX_OMNI_TOOLS_URL`；无需也不应为此修改 `.env.local`。
 
 Windows PowerShell 直接使用同名入口：
 
