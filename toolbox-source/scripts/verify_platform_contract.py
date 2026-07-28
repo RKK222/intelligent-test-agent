@@ -27,6 +27,8 @@ FORBIDDEN_RUNTIME_ORIGINS = (
     "api.iconify.design",
     "unpkg.com/figlet",
 )
+IT_PLATFORM_VERSION = "2024.10.22-7ca5933-platform.2"
+IT_PLATFORM_IMAGE = f"test-agent/it-tools:{IT_PLATFORM_VERSION}"
 
 
 def sha256(path: Path) -> str:
@@ -134,6 +136,29 @@ def verify_source_boundaries(root: Path) -> None:
         require((app / "LICENSE").is_file() and (app / "UPSTREAM.md").is_file(), f"许可证证据缺失: {app.name}")
 
 
+def verify_it_tools_chinese_release(root: Path) -> None:
+    """阻止跳过中文审计或误发旧派生版本。"""
+    it = root / "toolbox-source/it-tools"
+    package = json.loads((it / "package.json").read_text(encoding="utf-8"))
+    scripts = package.get("scripts", {})
+    audit_command = scripts.get("audit:zh-ui", "")
+    build_command = scripts.get("build", "")
+    require(audit_command == "node scripts/audit-zh-ui-batch-a.mjs", "IT-Tools 中文审计命令缺失或漂移")
+    require(build_command.startswith(f"{audit_command} && "), "IT-Tools 生产构建未优先执行中文审计")
+    require((it / "scripts/audit-zh-ui-batch-a.mjs").is_file(), "IT-Tools 中文审计脚本缺失")
+
+    i18n_plugin = (it / "src/plugins/i18n.plugin.ts").read_text(encoding="utf-8")
+    require("locale: 'zh'" in i18n_plugin, "IT-Tools 默认语言未固定为中文")
+    require("fallbackLocale: 'zh'" in i18n_plugin, "IT-Tools 回退语言未固定为中文")
+
+    upstream = (it / "UPSTREAM.md").read_text(encoding="utf-8")
+    modifications = (it / "PLATFORM_MODIFICATIONS.md").read_text(encoding="utf-8")
+    readme = (it / "README.md").read_text(encoding="utf-8")
+    require(IT_PLATFORM_VERSION in upstream and IT_PLATFORM_IMAGE in upstream, "IT-Tools 上游证据仍指向旧派生版本")
+    require("85 条保留路由" in modifications and "中文界面审计" in modifications, "IT-Tools 平台中文化修改说明不完整")
+    require(IT_PLATFORM_IMAGE in readme and "禁止使用" in readme and "latest" in readme, "IT-Tools 对应源码缺少派生构建警示")
+
+
 def verify_build_outputs(root: Path) -> None:
     it_dist = root / "toolbox-source/it-tools/dist"
     omni_dist = root / "toolbox-source/omni-tools/dist"
@@ -161,6 +186,7 @@ def main() -> None:
     verify_catalog(root)
     verify_runtime_assets(root)
     verify_source_boundaries(root)
+    verify_it_tools_chinese_release(root)
     verify_build_outputs(root)
     print("工具盒子 193 项离线目录、派生路由、许可证与资源校验通过")
 

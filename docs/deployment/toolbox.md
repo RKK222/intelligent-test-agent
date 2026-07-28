@@ -123,6 +123,7 @@ python3 toolbox-source/scripts/generate_catalog.py \
   --output /tmp/toolbox-catalog-v1.json
 cmp /tmp/toolbox-catalog-v1.json backend/test-agent-integration/src/main/resources/toolbox/catalog-v1.json
 python3 toolbox-source/scripts/verify_platform_contract.py
+(cd toolbox-source/it-tools && corepack pnpm audit:zh-ui)
 node toolbox-source/scripts/smoke_toolbox_routes.mjs
 node toolbox-source/scripts/smoke_toolbox_features.mjs
 bash -n deploy/internal/toolbox-docker.sh

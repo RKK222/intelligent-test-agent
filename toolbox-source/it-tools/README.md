@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> 本目录是平台派生版 `test-agent/it-tools:2024.10.22-7ca5933-platform.2` 的完整 GPL-3.0 对应源码，不是原版门户。派生界面固定使用中文，移除门户导航，并只通过 `/toolbox/apps/it-tools/<tool-route>` 提供具体工具。请使用本目录 Dockerfile 构建锁定镜像，禁止使用下文上游 README 中的 `latest` 示例；`pnpm build` 会先执行 85 条路由的中文界面审计。上游版本证据与修改清单分别见 [UPSTREAM.md](./UPSTREAM.md) 和 [PLATFORM_MODIFICATIONS.md](./PLATFORM_MODIFICATIONS.md)。
+
 <picture>
     <source srcset="./.github/logo-dark.png" media="(prefers-color-scheme: light)">
     <source srcset="./.github/logo-white.png" media="(prefers-color-scheme: dark)">
