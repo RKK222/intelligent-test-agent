@@ -1524,7 +1524,8 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     /**
      * 把固定远程 commit 原生合入本服务器所有有效公共个人 worktree。
      *
-     * <p>任何一棵个人 worktree 的冲突都只记录补偿任务，不阻止共享副本和其他服务器上线。</p>
+     * <p>该动作没有独立前端按钮，由公共全局 rollout 自动执行；页面只展示同步/补偿状态。
+     * 任何一棵个人 worktree 的冲突都只记录补偿任务，不阻止共享副本和其他服务器上线。</p>
      */
     private List<PublicAgentConfigWorktreePending> synchronizePublicPersonalWorktrees(
             PublicConfig config,

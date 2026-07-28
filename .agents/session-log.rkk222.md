@@ -5,6 +5,22 @@
 
 ## Entries
 
+### 2026-07-28 - 澄清公共个人 worktree 自动同步入口
+
+### Why
+- 复核公共全局刷新设计时，旧按服务器 pull 兼容路由和公共根节点的运行态重载按钮容易被误认为仍有个人 worktree Git 同步入口。
+
+### What
+- 在后端兼容 Controller 和 backend-api client 注明：当前前端没有调用 `/public/repositories/{linuxServerId}/pull`，`linuxServerId` 只保留旧路由形式，实际仍委托全局 rollout。
+- 在公共 worktree 同步 worker 和 Agent 配置树按钮旁注明：个人 worktree Git 同步没有独立按钮，由“刷新公共 Agent Git”自动推进；“Agent 配置更新（公共）”只重载当前超管运行态。
+
+### How
+- 仅补代码注释，不删除兼容接口、不新增按钮、不改变 API、Git、权限或 dispose 行为。后端 API reactor 跳过测试打包、agent-web typecheck 和 `git diff --check` 通过。
+- 使用 JDK 25、未修改的 `.env.test` 和 test profile 完整重启 backend、opencode-manager、frontend；health/readiness 为 UP、前端和 CORS 为 200、OpenCode 4104 收敛到 HEALTHY。
+
+### Result
+- 两类入口职责已在代码附近写清；现有稳定文档已经使用相同口径，无需再改。未涉及 RunEvent、数据库/Flyway、SQL、generated SDK、OpenCode 源码或环境配置。
+
 ### 2026-07-28 - 按当前功能更新用户手册与排查入口
 
 ### Why

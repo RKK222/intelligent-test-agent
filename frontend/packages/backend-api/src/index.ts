@@ -1203,6 +1203,10 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
           body: JSON.stringify({ branch, operationId })
         }
       ),
+    /**
+     * 仅保留给旧客户端的按服务器 URL 兼容方法；当前前端没有调用方。
+     * 后端实际委托公共全局 rollout，linuxServerId 不代表只更新一台服务器。
+     */
     pullPublicAgentRepository: (linuxServerId: string, branch: string, operationId?: string, discardLocalChanges = false) =>
       request<PublicAgentRepositoryStatus>(
         `${agentConfigBase}/public/repositories/${encodeURIComponent(linuxServerId)}/pull`,

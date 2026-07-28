@@ -112,6 +112,12 @@ public class AgentConfigController {
                         RuntimeApiSupport.traceId(exchange)), RuntimeApiSupport.traceId(exchange)));
     }
 
+    /**
+     * 旧版按服务器拉取兼容入口；当前前端没有调用方，新配置管理页统一调用 {@code /public/update}。
+     *
+     * <p>{@code linuxServerId} 只保留旧客户端的属地路由形式，不再限定更新范围；目标 Java 最终仍会
+     * 创建覆盖全部服务器的公共全局 rollout。</p>
+     */
     @PostMapping("/public/repositories/{linuxServerId}/pull")
     public ApiResponse<AgentConfigResponses.PublicRepositoryStatusResponse> pullPublicRepository(
             @PathVariable String linuxServerId,

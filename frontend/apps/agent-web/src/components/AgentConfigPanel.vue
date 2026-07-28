@@ -1918,6 +1918,10 @@ defineExpose({
               </button>
             </div>
           </div>
+          <!--
+            此按钮只把当前超管的公共配置指针切到本人 worktree 并重载运行态，不执行 Git 同步。
+            公共个人 worktree 的 Git 同步没有独立按钮，由系统管理中的“刷新公共 Agent Git”自动推进。
+          -->
           <button
             v-if="canWrite"
             type="button"
