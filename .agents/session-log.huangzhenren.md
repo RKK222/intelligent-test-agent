@@ -1171,7 +1171,8 @@
 - How:
   - TDD 先稳定复现旧 cleanup 留下多份 backup、终态 retry 后 claim 仍把副本改为 `RUNNING`，以及 operation 仍 RUNNING 但普通失败副本的服务器步骤全终态时仍可误领；再完成最小生产修改。
   - H2 AppSource mapper 20/20、worker/cleanup/materializer 26/26、真实 PostgreSQL mapper 3/3、三服务器收敛 4/4、retry recovery 6/6 均通过且 PostgreSQL/Testcontainers 为 0 skipped；SQL 约定、AI 文档、diff 和冲突标记检查通过。
-  - 后端根测试连续两次均只在既有 `RunRuntimeLossConvergenceSchedulerTest.keepsInMemoryRetryWhenNeitherDatabaseNorRedisAcceptedTerminal` 的 1 秒定时窗口失败（742 项中唯一失败），该用例单独重跑通过；本次不扩大范围修改无关 scheduler。
+  - 后端根测试前两次均只在既有 `RunRuntimeLossConvergenceSchedulerTest.keepsInMemoryRetryWhenNeitherDatabaseNorRedisAcceptedTerminal` 的 1 秒定时窗口失败（742 项中唯一失败），该用例单独重跑通过；最终在提交 `ae387b56b` 上重新执行后端根全量完整通过，fresh Surefire 为 354 suites / 2241 tests / 0 failures / 0 errors / 19 conditional skips，因此未扩大范围修改无关 scheduler。
 - Result:
   - completion 后遗留 backup 可由后续旧 cleanup 安全接管，重复更新不再累积；并发终态化后的 stale worker 无法重新制造 `RUNNING` 副本，过期 `RUNNING` 的旧 attempt 恢复语义仍保留。
+  - 独立复审确认 backup 命名围栏、operation/step 原子领取门禁及 H2/PostgreSQL 回归覆盖均闭环，最终结论为 `APPROVED`。
   - 未新增或变更 HTTP/进度 WebSocket/RunEvent wire、数据库表或 migration；生产关系型 SQL 仅修改 `AppSourceMapper.xml`，未新增 JDBC Repository SQL，PostgreSQL 竞态测试沿用 `JdbcClient` fixture 建立隔离数据。未修改 `.env*`、generated SDK、OpenCode 源码或工具盒子。
