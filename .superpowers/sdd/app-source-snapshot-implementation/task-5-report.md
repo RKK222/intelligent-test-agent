@@ -125,3 +125,33 @@ JDK 21 沙箱内 Mockito 5.23.0 不能自附加时，定向测试曾出现 28 �
 - 数据库新增一条仅含索引的 Flyway migration，并新增/调整 MyBatis XML 查询与 CAS；没有新增 JDBC SQL 或测试数据 migration。
 - 并发聚合增加 repository slot 行锁，换取同一 repository 终态严格串行；扫描使用 status 前导索引，未扩大到全表无索引排序。
 - 未修改 OpenCode 快照、generated SDK、`.env*`、工具盒子或无关模块。真实双 Java/双 Linux 端到端部署验收仍按人工清单在上线前执行；既有 runtime scheduler 1 秒时序测试保留偶发风险，本波次未越界修改。
+
+## 最终复审二次闭环
+
+独立复审在 `eeb2d1c95` 上发现的 C1/I1/I2 已按唯一一轮二次修复闭环；范围只包含 retry 终态门禁、磁盘 completion 不可逆点、materialization 并发 operationId 幂等及其直接测试和稳定文档。
+
+### C1：retry SERVER steps 终态门禁
+
+- `RETRY_REPLICAS` 不再用沿用旧状态的 generation replicas 单独判断本次 retry 已完成；result success/failure 和直接 stranded recovery 在 repository slot 锁内读取本 operation 的 SERVER steps，存在任一 `PENDING/RUNNING` 目标时保持 operation 非终态。
+- MyBatis stranded SQL 区分 operation 类型：DOWNLOAD/UPDATE 保留按全副本终态恢复历史脏状态；RETRY 必须存在 SERVER steps 且全部终态，离线目标跨多个扫描周期不会被提前补成失败或跳过。
+- H2/MyBatis、dispatcher 周期恢复和 PostgreSQL 三服务器 barrier 均覆盖 active A=READY、B/C=FAILED，retry B/C 时 B 完成而 C 离线；C 步骤保持 PENDING，恢复后可 claim 并最终收敛。
+
+### I1：completion 后 backup 清理 best-effort
+
+- target→backup、staging→target 或数据库 completion 失败仍尽力删除新 target 并恢复旧目录。
+- completion 成功返回成为不可逆发布点；之后 backup cleaner 的 I/O 或运行时失败被安全忽略，新 target 和新索引继续保留，遗留同级 `.backup` 交给既有 cleanup worker。
+- 文件系统失败注入断言 completion 只调用一次、物化成功返回、新 target 存在且旧 backup 可遗留；原 completion 失败回滚用例继续通过。
+
+### I2：materialization 并发 operationId 幂等
+
+- registrar 取得 repository 锁后先查询 existing operation，再读取 expected/pending generation 等可变 slot；existing 严格匹配 app、repository、actor、operation type、requestHash 和 source generation。
+- 相同重放返回原 operation，并从首请求持久化 SERVER steps（兼容同冻结 generation replicas）恢复目标服务器，不采用第二次请求实时观察到的 targets；缺少任何冻结目标时 fail closed。
+- PostgreSQL 真实事务 barrier 证明两个同 operationId 请求得到同 operation/generation/冻结目标，cleanup、snapshot、replica 和 13 步只写一次；不同 app/user/type/hash 的单元测试均冲突。
+
+### 二次闭环验证与影响
+
+- 组合后端定向 10 个测试类共 71/71，通过且 0 failures/errors/skips；其中 PostgreSQL 持久层 2/2、应用层 4/4 实际运行。
+- 后端根 `mvn -q -DappLogDir=target/log test` 最终 `exit 0`；fresh Surefire 为 354 suites / 2234 tests / 0 failures / 0 errors / 19 conditional skips。
+- 前端 wire 未变，按约定执行 AppSource 定向 Vitest 9 files / 122 tests 与全 workspace typecheck 13/14 scope，全部通过，未重复执行 Playwright。
+- `tools/verify-ai-docs.sh`、SQL/Flyway 约束、diff、冲突标记、禁止路径和日志审计通过。本轮只调整既有 MyBatis XML，不新增 migration、表、字段、JDBC SQL、HTTP/事件 wire 或前端代码。
+- completion 后短时遗留 backup 会增加有限磁盘占用，沿用既有每分钟 cleanup 和磁盘/backlog 告警；真实双 Java/双 Linux 的完整 Git、离线恢复和磁盘清理仍按人工验收清单在上线前执行。

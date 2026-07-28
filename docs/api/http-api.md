@@ -1256,6 +1256,8 @@ tree 的兼容模式（不传 `includeCommit` 或传 `false`）保持原 wire �
 
 `operationId` 是调用方生成的稳定幂等标识，首尾规范化固定为 ECMAScript WhiteSpace + LineTerminator 集合：`U+0009–U+000D`、`U+0020`、`U+00A0`、`U+1680`、`U+2000–U+200A`、`U+2028`、`U+2029`、`U+202F`、`U+205F`、`U+3000`、`U+FEFF`，不依赖 locale 或 Java `trim/strip`。规范化后长度为 1–128，不限定 `aso_` 前缀，但禁止控制字符、`/`、`\\` 路径分隔符和精确的 `.`/`..` 路径段；普通内部双点如 `release..1` 合法。物化、重试、操作查询、ticket 与 WebSocket 使用同一校验，因此业务接受的 ID（包括以 NBSP 包裹的普通 ID）必须始终以同一规范值查询、签票并连接。`expectedTreeCommit` 必须是远端解析得到的完整固定提交，防止用户选择目录后远端分支发生漂移。`purpose=PERSONAL` 固定当前用户进程服务器，`purpose=TEAM` 冻结受理时的在线服务器集合。已有 active snapshot 时，只有 owner 或仍是有效应用成员的 `APP_ADMIN` 能替换/重试；`TEAM -> PERSONAL` 拒绝，`PERSONAL -> TEAM` 建立新 generation。个人操作快照只允许 owner，或仍具 `APP_ADMIN` 角色且仍为有效成员的用户读取；团队操作允许当前有效成员读取。
 
+并发物化重放在 repository 锁内先于 expected/pending generation 等可变 slot 校验；相同 `operationId` 还必须匹配首请求的 app、repository、actor、operation type、不可变 requestHash 和 source generation，成功时返回原 operation 以及从首请求 SERVER steps/replicas 恢复的冻结目标，不使用第二次请求观察到的在线服务器。
+
 重试请求为 `{ "operationId": "aso_...", "expectedGeneration": 3 }`，打开请求为 `{ "generation": 3 }`。打开成功返回 `appId/repositoryId/generation/purpose/workspaceId/linuxServerId/expiresAt`。物化、重试和操作查询统一返回安全操作快照：
 
 ```json
@@ -1293,6 +1295,8 @@ tree 的兼容模式（不传 `includeCommit` 或传 `false`）保持原 wire �
 步骤只返回 `stepCode/sequence/status/safeSummary/startedAt/completedAt/elapsedMillis/updatedAt`；不得返回物理源码根、SSH 私钥、原始 Git stderr、堆栈或其它敏感路径。进度 WebSocket 为 `/api/internal/platform/workspace-management/app-source-operations/{operationId}/ws?ticket=...`，消息协议和重连语义见 `docs/api/event-stream.md` 的“应用源码进度 WebSocket”。
 
 每个服务器使用稳定的 13 步目录：`QUEUED`、`LEASE_CLAIM`、`LOCAL_LOCK`、`STAGING`、`SHALLOW_CLONE`、`FETCH_FIXED_COMMIT`、`SPARSE_CHECKOUT`、`VALIDATE`、`REMOVE_GIT_METADATA`、`WRITE_INDEX`、`ATOMIC_REPLACE`、`REGISTER_WORKSPACE`、`COMPLETE`。失败步骤为 `FAILED`，其后尚未执行的步骤为 `SKIPPED`；operation 终态时不残留 `PENDING/RUNNING`。这是既有步骤数组中的内容扩充，不改变 DTO 结构。
+
+`RETRY_REPLICAS` 的旧 replica 可以在新 operation 登记时仍为 `FAILED`，因此本次 retry 是否完成以该 operation 冻结目标的 SERVER steps 为权威：任一目标仍为 `PENDING/RUNNING` 时，正常结果聚合和补偿恢复都保持 operation 非终态，不能把离线目标提前补成失败/跳过。上述变化只收紧服务端终态时机，没有新增或修改 URL、请求/响应字段、枚举值或 WebSocket 事件。
 
 应用源码 Runtime Workspace 的 `file-ws-route`、ticket 和每条文件 RPC 继续使用平台文件 WebSocket：必须匹配 slot 当前 active generation、未过期 snapshot、目标服务器 READY replica、启用应用、代码库关联和实时成员。签票时授权器从同一次权威判断返回 AppSource 分类并写入 JVM 本地 ticket；此类 ticket 的每条 `workspace.*` RPC 都禁止非托管回退并要求再次识别为 AppSource，replica 映射消失时 `SUPER_ADMIN` 也返回 `FORBIDDEN`。真正的非托管服务器工作区仍保留超级管理员兼容访问。每条 RPC 同时重新读取用户 `opencode` 文件路由 affinity，并要求 affinity、ticket 目标/agent 服务器、Workspace/副本服务器和当前 JVM 一致；连接后 binding 迁移或请求落到其它 JVM 时立即返回 `FORBIDDEN`，且不调用文件服务。历史 Workspace 不允许本机回绑或本机降级；入口需要跨 Java 时复用 `BackendJavaRouteResolver` 与 `BackendHttpForwarder`，浏览器随后直连目标 Java 的文件 WebSocket，不新增 Java→Java HTTP 文件代理。
 

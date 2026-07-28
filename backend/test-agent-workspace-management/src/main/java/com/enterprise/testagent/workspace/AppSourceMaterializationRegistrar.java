@@ -23,7 +23,6 @@ import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.user.UserId;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -56,6 +55,11 @@ public class AppSourceMaterializationRegistrar {
         if (!repository.lockRepositoryForAppSource(request.repositoryId())) {
             throw new PlatformException(ErrorCode.NOT_FOUND, "应用源码版本库不存在");
         }
+        AppSourceOperation existing = repository.findOperation(request.operationId()).orElse(null);
+        if (existing != null) {
+            verifyReplayIdentity(existing, request);
+            return new RegistrationResult(existing, frozenTargetServerIds(existing));
+        }
         AppSourceRepositorySlot current = repository.findSlotForUpdate(request.repositoryId()).orElse(null);
         Long activeGeneration = current == null ? null : current.activeGeneration();
         if (!Objects.equals(activeGeneration, request.expectedGeneration())) {
@@ -68,14 +72,6 @@ public class AppSourceMaterializationRegistrar {
             throw new PlatformException(ErrorCode.CONFLICT, "应用源码已有进行中的物化操作");
         }
         long generation = current == null ? 1L : current.nextGeneration();
-        AppSourceOperation existing = repository.findOperation(request.operationId()).orElse(null);
-        if (existing != null) {
-            if (!existing.repositoryId().equals(request.repositoryId())
-                    || !existing.requestHash().equals(request.requestHash())) {
-                throw new PlatformException(ErrorCode.CONFLICT, "operationId 已被其它应用源码请求使用");
-            }
-            return new RegistrationResult(existing, request.targetServerIds());
-        }
 
         List<AppSourceCleanupTask> cleanupTasks = request.targetServerIds().stream()
                 .map(serverId -> cleanupTask(request, generation, serverId))
@@ -143,6 +139,41 @@ public class AppSourceMaterializationRegistrar {
             throw new PlatformException(ErrorCode.CONFLICT, "应用源码 generation 登记竞争失败");
         }
         return new RegistrationResult(operation, request.targetServerIds());
+    }
+
+    /**
+     * 幂等重放必须先于可变 slot 校验，并严格绑定首请求的不可变身份。
+     *
+     * <p>sourceGeneration 同时参与校验，避免调用方复用 operationId 跨 active generation 重放。
+     */
+    private void verifyReplayIdentity(AppSourceOperation existing, RegistrationRequest request) {
+        boolean sameIdentity = existing.appId().equals(request.appId())
+                && existing.repositoryId().equals(request.repositoryId())
+                && existing.actorUserId().equals(request.actorUserId())
+                && existing.operationType() == request.operationType()
+                && existing.requestHash().equals(request.requestHash())
+                && Objects.equals(existing.sourceGeneration(), request.expectedGeneration());
+        if (!sameIdentity) {
+            throw new PlatformException(ErrorCode.CONFLICT, "operationId 已被其它应用源码请求使用");
+        }
+    }
+
+    /** 从首请求已持久化的 SERVER 步骤恢复冻结目标，兼容仅保留 replica 的历史 operation。 */
+    private Set<LinuxServerId> frozenTargetServerIds(AppSourceOperation operation) {
+        LinkedHashSet<LinuxServerId> frozenTargets = new LinkedHashSet<>();
+        repository.findSteps(operation.operationId()).stream()
+                .filter(step -> step.scope() == AppSourceStepScope.SERVER)
+                .map(AppSourceOperationStep::linuxServerId)
+                .forEach(frozenTargets::add);
+        if (frozenTargets.isEmpty()) {
+            repository.findReplicas(operation.repositoryId(), operation.targetGeneration()).stream()
+                    .map(AppSourceReplica::linuxServerId)
+                    .forEach(frozenTargets::add);
+        }
+        if (frozenTargets.isEmpty()) {
+            throw new PlatformException(ErrorCode.CONFLICT, "应用源码幂等操作缺少已冻结的目标服务器");
+        }
+        return Set.copyOf(frozenTargets);
     }
 
     private AppSourceCleanupTask cleanupTask(

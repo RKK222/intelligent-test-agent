@@ -79,7 +79,7 @@ public interface AppSourceRepository extends AppSourceRepositoryHistory {
     Optional<AppSourceOperation> findInFlightOperationForReplica(
             CodeRepositoryId repositoryId, long generation, LinuxServerId linuxServerId);
 
-    /** 扫描副本已全部终态但操作仍未终结的记录，供周期恢复在共享槽位锁下重算。 */
+    /** 扫描可重算终态的操作；retry 还必须存在且全部 SERVER steps 已终态。 */
     List<AppSourceOperation> findStrandedOperations(int limit);
 
     void saveOperation(AppSourceOperation operation);

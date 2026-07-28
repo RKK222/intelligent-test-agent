@@ -1136,6 +1136,7 @@
   - 应用源码固定提交、多服务器物化、独立进度 WebSocket 和工作台源码模式已分阶段落地，需要统一稳定部署/测试文档、审计仓库边界，并完成后端与前端根级验证。
   - 后端根测试发现 AppSource 分支与远端主线自动合并后，同一 `ReferenceRepositoryReplicaTaskDispatcher` 测试 Bean 被语义重复注册，必须先定位根因再收尾。
   - 最终整功能审查继续发现并发终态聚合可能丢失最后一次收敛、retry 重放依赖动态 targets、跨关联应用进度授权过窄、生产步骤未形成完整可恢复时间线，需要在同一 AppSource 会话内完成唯一一轮修复。
+  - 最终复审二次发现 retry 可被旧 FAILED replicas 提前终结、completion 成功后的 backup 删除失败会错误回滚新目录，以及并发 materialization 相同 operationId 会被后到请求的可变 slot/targets 破坏幂等，继续合并在本条内完成唯一二次闭环。
 - What:
   - 补充应用源码本机挂载、容量、worker/租约、XXL V6 清理与监控说明，新增综合自动化和双服务器人工验收文档，并完善 backend-api 的 operationId、AbortSignal 和严格进度帧契约。
   - 审计功能提交 154 个唯一路径，确认未修改 OpenCode 快照、generated SDK、`.env*` 或工具盒子源码；新增关系型 SQL 只在 AppSource MyBatis XML/Flyway 和 XXL Flyway V6。
@@ -1143,13 +1144,17 @@
   - result recorder 统一采用 replica lease CAS 后锁 repository slot 的顺序聚合终态，并由 dispatcher 补偿 replica 已全终态的 stranded operation；READY 提升先失效旧 ACTIVE，避免 PostgreSQL 唯一约束冲突。
   - retry service/registrar 改用 route app、repository、actor、类型和 generation 的不可变身份幂等；进度授权按 repository 任一当前启用关联应用实时复核，并保留 PERSONAL owner/admin 边界，HTTP/WebSocket wire 不变。
   - 为每台服务器登记 13 个稳定步骤，新增 lease-fenced progress recorder、attempt reset、legacy `RETRY_QUEUED` 恢复、固定低敏摘要和终态步骤补齐；新增 status 前导扫描索引及对应 MyBatis SQL。
+  - 二次闭环把 retry operation 的 SERVER steps 作为本次完成权威，result/recovery 与 MyBatis stranded 扫描都拒绝仍有 PENDING/RUNNING 目标的候选；DOWNLOAD/UPDATE 历史恢复语义不变。
+  - materializer 将数据库 completion 成功固定为不可逆发布点，之后 backup 删除改为 best-effort；registrar 在仓库锁内先处理 existing，严格比对不可变身份并返回首请求 SERVER steps/replicas 冻结目标。
 - How:
   - 稳定红测 1/1 复现 `BeanDefinitionOverrideException`；对比合并提交两个父分支确认各自只有一份 dispatcher，最小删除重复注册后单测、`test-agent-app -am` 和后端根全量依次转绿。
   - 后端根测试 fresh Surefire 为 351 suites / 2198 tests / 0 failures / 0 errors / 19 conditional skips；PostgreSQL AppSource 1/1、MySQL XXL 3/3 均实际运行且 0 skipped。
   - 前端定向 Vitest 9 files / 122、Chromium/mobile Playwright 22/22、根 Vitest 104 files / 1691 passed / 1 skipped、全 workspace typecheck 和生产 build 全部通过；AI 文档校验与 diff check 通过。
   - 最终波次按 TDD 先补服务/H2/PostgreSQL/API/WebSocket 红测，再实现最小修复；真实 PostgreSQL 持久层 2/2 和应用层三服务器 barrier 2/2 均运行且 0 skipped，跨模块定向 reactor 通过。
   - 最终波次后端根测试最终 `exit 0`，fresh Surefire 为 354 suites / 2225 tests / 0 failures / 0 errors / 19 conditional skips；诊断复跑遇到的既有 runtime scheduler 1 秒时序偶发失败，在同类隔离复跑 5/5 和最终根全量中均通过。前端 AppSource 定向仍为 9 files / 122，全 workspace typecheck 13/14 scope 通过；AI docs、SQL/Flyway、diff 和冲突标记校验通过。
+  - 二次闭环严格 TDD：组合后端定向 10 类 71/71，真实 PostgreSQL 持久层 2/2、应用层 retry/并发 4/4 且 0 skipped；后端根 fresh Surefire 为 354 suites / 2234 tests / 0 failures / 0 errors / 19 conditional skips。前端 wire 未变，AppSource 9 files / 122 与 typecheck 13/14 scope 通过；未重复执行 Playwright。
 - Result:
   - 应用源码快照形成从领域、数据库、物化恢复、API/独立进度 WebSocket、文件能力到清理运维的交付闭环；进度明确不产生 RunEvent/SSE，普通源码文件仍只走平台 Workspace 文件 WebSocket。
   - 最终波次不新增 API wire、RunEvent 或表字段，新增一条扫描索引 migration 和 MyBatis XML SQL；终态聚合严格串行、retry 重放稳定、跨应用权限实时收敛、终态步骤无在途残留且摘要低敏。
+  - 二次闭环不新增 migration、表字段、JDBC SQL、HTTP/事件 wire 或前端代码；retry 离线目标不再提前终结，completion 后 cleanup 故障不再回滚已提交新目录，materialization 同 ID 并发只写一次并返回首请求冻结目标。
   - 未修改环境配置、generated SDK、OpenCode 源码和工具盒子。真实双 Java/双 Linux 的 Git/副本/磁盘清理仍需上线前按人工验收清单执行；前端大 chunk、jsdom Canvas 提示和既有 runtime scheduler 1 秒时序抖动为非本波次阻断项。

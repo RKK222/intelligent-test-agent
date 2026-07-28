@@ -47,6 +47,7 @@ public class AppSourceGitMaterializer {
     private final GitCommandExecutor git;
     private final ObjectMapper objectMapper;
     private final DirectoryMover directoryMover;
+    private final BackupCleaner backupCleaner;
 
     public AppSourceGitMaterializer() {
         this(new ProcessGitCommandExecutor(), new ObjectMapper(), DirectoryMover.filesystem());
@@ -56,9 +57,18 @@ public class AppSourceGitMaterializer {
             GitCommandExecutor git,
             ObjectMapper objectMapper,
             DirectoryMover directoryMover) {
+        this(git, objectMapper, directoryMover, BackupCleaner.filesystem());
+    }
+
+    AppSourceGitMaterializer(
+            GitCommandExecutor git,
+            ObjectMapper objectMapper,
+            DirectoryMover directoryMover,
+            BackupCleaner backupCleaner) {
         this.git = Objects.requireNonNull(git);
         this.objectMapper = Objects.requireNonNull(objectMapper);
         this.directoryMover = Objects.requireNonNull(directoryMover);
+        this.backupCleaner = Objects.requireNonNull(backupCleaner);
     }
 
     /** 在目标同根 staging 完成全部校验后才原子发布；失败时尽力恢复旧目录。 */
@@ -331,7 +341,6 @@ public class AppSourceGitMaterializer {
         try {
             directoryMover.moveAtomically(staging, target);
             completion.complete(result);
-            deleteTree(backup);
         } catch (RuntimeException | IOException publishFailure) {
             try {
                 if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
@@ -344,6 +353,12 @@ public class AppSourceGitMaterializer {
                 publishFailure.addSuppressed(rollbackFailure);
             }
             throw publishFailure;
+        }
+        try {
+            // completion 返回即表示数据库与新 target 已提交；backup 只由清理程序尽力回收，失败不可反向回滚。
+            backupCleaner.delete(backup);
+        } catch (RuntimeException | IOException ignored) {
+            // 遗留同级 .backup 由现有 AppSourceCleanupWorker 周期清理，不能把已提交发布改写成业务失败。
         }
     }
 
@@ -359,7 +374,7 @@ public class AppSourceGitMaterializer {
         }
     }
 
-    private void deleteTree(Path root) throws IOException {
+    private static void deleteTree(Path root) throws IOException {
         if (root == null || !Files.exists(root, LinkOption.NOFOLLOW_LINKS)) {
             return;
         }
@@ -447,6 +462,16 @@ public class AppSourceGitMaterializer {
 
         static DirectoryMover filesystem() {
             return (source, target) -> Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+        }
+    }
+
+    /** completion 后删除旧 backup 的可注入边界；生产失败时仅遗留待周期清理目录。 */
+    @FunctionalInterface
+    interface BackupCleaner {
+        void delete(Path backup) throws IOException;
+
+        static BackupCleaner filesystem() {
+            return AppSourceGitMaterializer::deleteTree;
         }
     }
 }

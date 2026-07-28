@@ -3,13 +3,17 @@ package com.enterprise.testagent.workspace;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.appsource.AppSourceOperation;
+import com.enterprise.testagent.domain.appsource.AppSourceOperationStep;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationStatus;
+import com.enterprise.testagent.domain.appsource.AppSourceOperationType;
 import com.enterprise.testagent.domain.appsource.AppSourceReplica;
 import com.enterprise.testagent.domain.appsource.AppSourceReplicaStatus;
 import com.enterprise.testagent.domain.appsource.AppSourceRepository;
 import com.enterprise.testagent.domain.appsource.AppSourceRepositorySlot;
 import com.enterprise.testagent.domain.appsource.AppSourceSnapshot;
 import com.enterprise.testagent.domain.appsource.AppSourceSnapshotStatus;
+import com.enterprise.testagent.domain.appsource.AppSourceStepScope;
+import com.enterprise.testagent.domain.appsource.AppSourceStepStatus;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
@@ -80,6 +84,9 @@ public class AppSourceReplicaResultRecorder {
                 operation.operationId(), AppSourceOperationStatus.PENDING, AppSourceOperationStatus.RUNNING, null);
         AppSourceRepositorySlot lockedSlot = requireLockedSlot(claimed.repositoryId());
         promoteIfPending(operation, claimed, indexSha256, now, lockedSlot);
+        if (!retryTargetsTerminal(operation)) {
+            return;
+        }
         finishOperationIfTerminal(operation, now);
     }
 
@@ -104,6 +111,9 @@ public class AppSourceReplicaResultRecorder {
                 operation.operationId(), AppSourceOperationStatus.PENDING, AppSourceOperationStatus.RUNNING, null);
 
         AppSourceRepositorySlot lockedSlot = requireLockedSlot(claimed.repositoryId());
+        if (!retryTargetsTerminal(operation)) {
+            return;
+        }
         List<AppSourceReplica> replicas = appSources.findReplicas(claimed.repositoryId(), claimed.generation());
         if (replicas.stream().anyMatch(this::notTerminal)) {
             return;
@@ -139,6 +149,10 @@ public class AppSourceReplicaResultRecorder {
         }
         List<AppSourceReplica> replicas = appSources.findReplicas(
                 operation.repositoryId(), operation.targetGeneration());
+        // retry 的副本保留旧 FAILED/READY，只有本 operation 的 SERVER steps 才能证明所有目标确已执行。
+        if (!retryTargetsTerminal(operation)) {
+            return;
+        }
         if (replicas.isEmpty() || replicas.stream().anyMatch(this::notTerminal)) {
             return;
         }
@@ -260,6 +274,23 @@ public class AppSourceReplicaResultRecorder {
                 operation.operationId(), AppSourceOperationStatus.RUNNING,
                 anyFailed ? AppSourceOperationStatus.PARTIAL_FAILED : AppSourceOperationStatus.SUCCEEDED,
                 now);
+    }
+
+    /** 非 retry 沿用 generation 副本聚合；retry 必须存在且全部服务器步骤均已终态。 */
+    private boolean retryTargetsTerminal(AppSourceOperation operation) {
+        if (operation.operationType() != AppSourceOperationType.RETRY_REPLICAS) {
+            return true;
+        }
+        List<AppSourceOperationStep> serverSteps = appSources.findSteps(operation.operationId()).stream()
+                .filter(step -> step.scope() == AppSourceStepScope.SERVER)
+                .toList();
+        return !serverSteps.isEmpty() && serverSteps.stream().allMatch(step -> terminal(step.status()));
+    }
+
+    private boolean terminal(AppSourceStepStatus status) {
+        return status == AppSourceStepStatus.SUCCEEDED
+                || status == AppSourceStepStatus.FAILED
+                || status == AppSourceStepStatus.SKIPPED;
     }
 
     private boolean notTerminal(AppSourceReplica replica) {

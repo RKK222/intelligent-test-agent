@@ -14,6 +14,7 @@ import com.enterprise.testagent.domain.appsource.AppSourceRepositorySlot;
 import com.enterprise.testagent.domain.appsource.AppSourceSelectedPath;
 import com.enterprise.testagent.domain.appsource.AppSourceSnapshot;
 import com.enterprise.testagent.domain.appsource.AppSourceSnapshotStatus;
+import com.enterprise.testagent.domain.appsource.AppSourceStepStatus;
 import com.enterprise.testagent.domain.configuration.ApplicationId;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
@@ -167,6 +168,103 @@ class AppSourceReplicaConvergencePostgresqlIntegrationTest {
         assertStableStepsTerminal(scenario);
     }
 
+    @Test
+    void retryWaitsForOfflineTargetAcrossConcurrentResultAndRecoveryBeforeFinalConvergence() throws Exception {
+        RetryScenario scenario = registerRetryScenario("retry-offline");
+        BarrierContext context = recorderWithLastTwoBarrier();
+
+        runLastTwoConcurrently(
+                () -> {
+                    context.lastTwo().set(true);
+                    try {
+                        transactions.executeWithoutResult(ignored -> context.recorder().recordFailure(
+                                scenario.operation(), claimed(scenario.repositoryId(), scenario.serverB(), 1L),
+                                "worker-b", "GIT_UNAVAILABLE", "源码副本物化失败", NOW.plusSeconds(1)));
+                    } finally {
+                        context.lastTwo().remove();
+                    }
+                },
+                () -> {
+                    context.lastTwo().set(true);
+                    try {
+                        transactions.executeWithoutResult(ignored -> context.recorder().recoverTerminalOperation(
+                                scenario.operation().operationId(), NOW.plusSeconds(1)));
+                    } finally {
+                        context.lastTwo().remove();
+                    }
+                });
+
+        assertThat(repository.findOperation(scenario.operation().operationId()))
+                .get().extracting(AppSourceOperation::status)
+                .isEqualTo(AppSourceOperationStatus.RUNNING);
+        assertThat(repository.findSteps(scenario.operation().operationId()))
+                .filteredOn(step -> step.linuxServerId().equals(scenario.serverC()))
+                .allSatisfy(step -> assertThat(step.status()).isEqualTo(AppSourceStepStatus.PENDING));
+        assertThat(repository.findStrandedOperations(10)).isEmpty();
+        assertThat(repository.findClaimableReplicas(scenario.serverC(), NOW.plusSeconds(2), 10))
+                .extracting(AppSourceReplica::linuxServerId)
+                .containsExactly(scenario.serverC());
+
+        AppSourceReplica claimedC = transactions.execute(ignored -> repository.claimReplica(
+                scenario.repositoryId(), 1L, scenario.serverC(), "worker-c",
+                NOW.plusSeconds(600), NOW.plusSeconds(2)).orElseThrow());
+        transactions.executeWithoutResult(ignored -> new AppSourceReplicaResultRecorder(repository, workspaces)
+                .recordFailure(
+                        scenario.operation(), claimedC, "worker-c",
+                        "GIT_UNAVAILABLE", "源码副本物化失败", NOW.plusSeconds(3)));
+
+        assertThat(repository.findOperation(scenario.operation().operationId()))
+                .get().extracting(AppSourceOperation::status)
+                .isEqualTo(AppSourceOperationStatus.PARTIAL_FAILED);
+        assertThat(repository.findSteps(scenario.operation().operationId()))
+                .allSatisfy(step -> assertThat(step.status()).isIn(
+                        AppSourceStepStatus.SUCCEEDED,
+                        AppSourceStepStatus.FAILED,
+                        AppSourceStepStatus.SKIPPED));
+    }
+
+    @Test
+    void concurrentSameMaterializationOperationIdWritesOnceAndReturnsFrozenWinnerTargets() throws Exception {
+        MaterializationScenario scenario = registerMaterializationScenario("materialize-idempotent");
+        Set<LinuxServerId> firstObservedTargets = Set.of(scenario.serverA(), scenario.serverB());
+        Set<LinuxServerId> secondObservedTargets = Set.of(scenario.serverA(), scenario.serverC());
+        CyclicBarrier startBarrier = new CyclicBarrier(2);
+        MaterializationAttempt first;
+        MaterializationAttempt second;
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Future<MaterializationAttempt> firstFuture = executor.submit(() -> registerAfterBarrier(
+                    materializationRequest(scenario, firstObservedTargets), startBarrier));
+            Future<MaterializationAttempt> secondFuture = executor.submit(() -> registerAfterBarrier(
+                    materializationRequest(scenario, secondObservedTargets), startBarrier));
+            first = firstFuture.get(10, TimeUnit.SECONDS);
+            second = secondFuture.get(10, TimeUnit.SECONDS);
+        }
+
+        assertThat(List.of(first, second)).allSatisfy(attempt -> assertThat(attempt.failure()).isNull());
+        assertThat(first.result().operation()).isEqualTo(second.result().operation());
+        assertThat(first.result().targetServerIds()).isEqualTo(second.result().targetServerIds());
+        Set<LinuxServerId> frozenTargets = Set.copyOf(repository.findReplicas(scenario.repositoryId(), 2L).stream()
+                .map(AppSourceReplica::linuxServerId)
+                .toList());
+        assertThat(first.result().targetServerIds()).isEqualTo(frozenTargets);
+        assertThat(frozenTargets).isIn(firstObservedTargets, secondObservedTargets);
+
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        assertThat(jdbc.sql("select count(*) from app_source_operations where operation_id = :operationId")
+                .param("operationId", scenario.operationId()).query(Integer.class).single()).isOne();
+        assertThat(jdbc.sql("select count(*) from app_source_snapshots "
+                        + "where repository_id = :repositoryId and generation = 2")
+                .param("repositoryId", scenario.repositoryId().value()).query(Integer.class).single()).isOne();
+        assertThat(jdbc.sql("select count(*) from app_source_cleanup_tasks where operation_id = :operationId")
+                .param("operationId", scenario.operationId()).query(Integer.class).single()).isEqualTo(2);
+        assertThat(jdbc.sql("select count(*) from app_source_replicas "
+                        + "where repository_id = :repositoryId and generation = 2")
+                .param("repositoryId", scenario.repositoryId().value()).query(Integer.class).single()).isEqualTo(2);
+        assertThat(jdbc.sql("select count(*) from app_source_operation_steps where operation_id = :operationId")
+                .param("operationId", scenario.operationId()).query(Integer.class).single())
+                .isEqualTo(2 * AppSourceReplicaStepCatalog.codes().size());
+    }
+
     private Scenario registerScenario(String suffix) {
         CodeRepositoryId repositoryId = new CodeRepositoryId("repo_convergence_" + suffix);
         LinuxServerId serverA = new LinuxServerId("server_" + suffix + "_a");
@@ -219,6 +317,118 @@ class AppSourceReplicaConvergencePostgresqlIntegrationTest {
         return new Scenario(repositoryId, registration.operation(), serverA, serverB, serverC);
     }
 
+    private RetryScenario registerRetryScenario(String suffix) {
+        CodeRepositoryId repositoryId = new CodeRepositoryId("repo_convergence_" + suffix);
+        LinuxServerId serverA = new LinuxServerId("server_" + suffix + "_a");
+        LinuxServerId serverB = new LinuxServerId("server_" + suffix + "_b");
+        LinuxServerId serverC = new LinuxServerId("server_" + suffix + "_c");
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        jdbc.sql("""
+                insert into code_repositories(
+                    repository_id, git_url, name, english_name, repository_type,
+                    deployment_mode, standard, created_at, updated_at)
+                values (:repositoryId, :gitUrl, '重试门禁', :englishName,
+                    'APPLICATION_CODE_REPOSITORY', 'EXTERNAL', false, :now, :now)
+                """).param("repositoryId", repositoryId.value())
+                .param("gitUrl", "https://git.example.test/convergence-" + suffix + ".git")
+                .param("englishName", "convergence-" + suffix)
+                .param("now", Timestamp.from(NOW)).update();
+        for (LinuxServerId serverId : List.of(serverA, serverB, serverC)) {
+            jdbc.sql("""
+                    insert into linux_servers(
+                        linux_server_id, name, status, capacity_summary_json, last_heartbeat_at,
+                        trace_id, created_at, updated_at)
+                    values (:serverId, :serverId, 'ONLINE', '{}', :now, 'trace-retry-gate', :now, :now)
+                    """).param("serverId", serverId.value()).param("now", Timestamp.from(NOW)).update();
+        }
+        repository.insertSlotIfAbsent(new AppSourceRepositorySlot(
+                repositoryId, 1L, null, 2L, "op-old-" + suffix, 0L, NOW.minusSeconds(3600), NOW));
+        repository.saveSnapshot(new AppSourceSnapshot(
+                repositoryId, 1L, "convergence-" + suffix, AppSourcePurpose.TEAM, USER_ID,
+                "main", "active-commit", List.of(new AppSourceSelectedPath("src", AppSourcePathType.DIRECTORY)),
+                INDEX_SHA, NOW.minusSeconds(3600), OLD_EXPIRY,
+                AppSourceSnapshotStatus.ACTIVE, NOW.minusSeconds(3600), NOW));
+        WorkspaceId readyWorkspaceId = new WorkspaceId("wrk_" + suffix + "_a");
+        workspaces.save(new Workspace(
+                readyWorkspaceId, "convergence-" + suffix, "appsource:convergence-" + suffix,
+                WorkspaceStatus.ACTIVE, NOW, NOW, serverA.value(), "trace-convergence-" + suffix));
+        repository.insertReplicaIfAbsent(new AppSourceReplica(
+                repositoryId, 1L, serverA, readyWorkspaceId,
+                AppSourceReplicaStatus.READY, null, null, 1, null, null, null, NOW, NOW));
+        for (LinuxServerId failedServer : List.of(serverB, serverC)) {
+            repository.insertReplicaIfAbsent(new AppSourceReplica(
+                    repositoryId, 1L, failedServer, null, AppSourceReplicaStatus.FAILED,
+                    null, null, 1, NOW, "GIT_UNAVAILABLE", "源码副本物化失败", NOW, NOW));
+        }
+        AppSourceOperation operation = transactions.execute(ignored -> new AppSourceReplicaRetryRegistrar(repository)
+                .register(new AppSourceReplicaRetryRegistrar.RetryRequest(
+                        "op-convergence-" + suffix, APP_ID, repositoryId, 1L, USER_ID,
+                        "request-convergence-" + suffix, Set.of(serverB, serverC),
+                        "trace-convergence-" + suffix, NOW)));
+        transactions.execute(ignored -> repository.claimReplica(
+                repositoryId, 1L, serverB, "worker-b", NOW.plusSeconds(600), NOW).orElseThrow());
+        return new RetryScenario(repositoryId, operation, serverA, serverB, serverC);
+    }
+
+    private MaterializationScenario registerMaterializationScenario(String suffix) {
+        CodeRepositoryId repositoryId = new CodeRepositoryId("repo_convergence_" + suffix);
+        LinuxServerId serverA = new LinuxServerId("server_" + suffix + "_a");
+        LinuxServerId serverB = new LinuxServerId("server_" + suffix + "_b");
+        LinuxServerId serverC = new LinuxServerId("server_" + suffix + "_c");
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        jdbc.sql("""
+                insert into code_repositories(
+                    repository_id, git_url, name, english_name, repository_type,
+                    deployment_mode, standard, created_at, updated_at)
+                values (:repositoryId, :gitUrl, '并发幂等', :englishName,
+                    'APPLICATION_CODE_REPOSITORY', 'EXTERNAL', false, :now, :now)
+                """).param("repositoryId", repositoryId.value())
+                .param("gitUrl", "https://git.example.test/convergence-" + suffix + ".git")
+                .param("englishName", "convergence-" + suffix)
+                .param("now", Timestamp.from(NOW)).update();
+        for (LinuxServerId serverId : List.of(serverA, serverB, serverC)) {
+            jdbc.sql("""
+                    insert into linux_servers(
+                        linux_server_id, name, status, capacity_summary_json, last_heartbeat_at,
+                        trace_id, created_at, updated_at)
+                    values (:serverId, :serverId, 'ONLINE', '{}', :now, 'trace-materialize-idempotent', :now, :now)
+                    """).param("serverId", serverId.value()).param("now", Timestamp.from(NOW)).update();
+        }
+        repository.insertSlotIfAbsent(new AppSourceRepositorySlot(
+                repositoryId, 1L, null, 2L, "op-old-" + suffix, 0L, NOW.minusSeconds(3600), NOW));
+        repository.saveSnapshot(new AppSourceSnapshot(
+                repositoryId, 1L, "convergence-" + suffix, AppSourcePurpose.TEAM, USER_ID,
+                "main", "active-commit", List.of(new AppSourceSelectedPath("src", AppSourcePathType.DIRECTORY)),
+                INDEX_SHA, NOW.minusSeconds(3600), OLD_EXPIRY,
+                AppSourceSnapshotStatus.ACTIVE, NOW.minusSeconds(3600), NOW));
+        return new MaterializationScenario(
+                repositoryId, "op-convergence-" + suffix, suffix, serverA, serverB, serverC);
+    }
+
+    private AppSourceMaterializationRegistrar.RegistrationRequest materializationRequest(
+            MaterializationScenario scenario, Set<LinuxServerId> targets) {
+        return new AppSourceMaterializationRegistrar.RegistrationRequest(
+                scenario.operationId(), APP_ID, scenario.repositoryId(),
+                "convergence-" + scenario.suffix(), USER_ID, AppSourceOperationType.UPDATE,
+                "request-convergence-" + scenario.suffix(), 1L, "main", "new-commit",
+                List.of(new AppSourceSelectedPath("src", AppSourcePathType.DIRECTORY)),
+                AppSourcePurpose.TEAM, NOW.plusSeconds(48 * 3600L), targets,
+                "trace-convergence-" + scenario.suffix(), NOW);
+    }
+
+    private MaterializationAttempt registerAfterBarrier(
+            AppSourceMaterializationRegistrar.RegistrationRequest request,
+            CyclicBarrier startBarrier) {
+        try {
+            startBarrier.await(5, TimeUnit.SECONDS);
+            AppSourceMaterializationRegistrar.RegistrationResult result = transactions.execute(ignored ->
+                    new AppSourceMaterializationRegistrar(repository).register(request));
+            return new MaterializationAttempt(result, null);
+        } catch (Throwable failure) {
+            return new MaterializationAttempt(null, failure);
+        }
+    }
+
     private BarrierContext recorderWithLastTwoBarrier() {
         CyclicBarrier barrier = new CyclicBarrier(2);
         ThreadLocal<Boolean> lastTwo = ThreadLocal.withInitial(() -> false);
@@ -269,6 +479,10 @@ class AppSourceReplicaConvergencePostgresqlIntegrationTest {
         return repository.findReplica(scenario.repositoryId(), 2L, serverId).orElseThrow();
     }
 
+    private AppSourceReplica claimed(CodeRepositoryId repositoryId, LinuxServerId serverId, long generation) {
+        return repository.findReplica(repositoryId, generation, serverId).orElseThrow();
+    }
+
     private void assertStableStepsTerminal(Scenario scenario) {
         assertThat(repository.findSteps(scenario.operation().operationId()))
                 .hasSize(3 * AppSourceReplicaStepCatalog.codes().size())
@@ -293,5 +507,27 @@ class AppSourceReplicaConvergencePostgresqlIntegrationTest {
             LinuxServerId serverA,
             LinuxServerId serverB,
             LinuxServerId serverC) {
+    }
+
+    private record RetryScenario(
+            CodeRepositoryId repositoryId,
+            AppSourceOperation operation,
+            LinuxServerId serverA,
+            LinuxServerId serverB,
+            LinuxServerId serverC) {
+    }
+
+    private record MaterializationScenario(
+            CodeRepositoryId repositoryId,
+            String operationId,
+            String suffix,
+            LinuxServerId serverA,
+            LinuxServerId serverB,
+            LinuxServerId serverC) {
+    }
+
+    private record MaterializationAttempt(
+            AppSourceMaterializationRegistrar.RegistrationResult result,
+            Throwable failure) {
     }
 }

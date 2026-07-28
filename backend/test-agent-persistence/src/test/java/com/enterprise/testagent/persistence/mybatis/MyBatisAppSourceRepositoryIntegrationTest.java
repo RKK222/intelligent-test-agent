@@ -389,6 +389,28 @@ class MyBatisAppSourceRepositoryIntegrationTest {
     }
 
     @Test
+    void runningRetryIsStrandedOnlyAfterItsServerStepsBecomeTerminal() {
+        repository.insertSlotIfAbsent(slot(1L, 0L, NOW));
+        repository.saveSnapshot(snapshot("op-retry-stranded", AppSourceSnapshotStatus.ACTIVE));
+        AppSourceReplica failed = replica(AppSourceReplicaStatus.FAILED, null, null, NOW);
+        assertThat(repository.insertReplicaIfAbsent(failed)).isTrue();
+        AppSourceOperation retry = retryOperation(
+                "op-retry-stranded", AppSourceOperationStatus.RUNNING, null);
+        repository.saveOperation(retry);
+        AppSourceOperationStep pending = retryStep(
+                "step-retry-stranded", retry.operationId(), AppSourceStepStatus.PENDING);
+        assertThat(repository.upsertStep(pending)).isTrue();
+
+        assertThat(repository.findStrandedOperations(10)).isEmpty();
+
+        assertThat(repository.upsertStep(new AppSourceOperationStep(
+                pending.stepId(), pending.operationId(), pending.scope(), pending.linuxServerId(),
+                pending.stepCode(), pending.sequence(), AppSourceStepStatus.FAILED,
+                "执行失败：目标服务器排队", NOW, NOW.plusSeconds(1), NOW.plusSeconds(1)))).isTrue();
+        assertThat(repository.findStrandedOperations(10)).containsExactly(retry);
+    }
+
+    @Test
     void replicaLeaseWriteRejectsIllegalStatusTransition() {
         repository.insertSlotIfAbsent(slot(null, 0L, NOW));
         repository.saveSnapshot(snapshot("op-download", AppSourceSnapshotStatus.PENDING));

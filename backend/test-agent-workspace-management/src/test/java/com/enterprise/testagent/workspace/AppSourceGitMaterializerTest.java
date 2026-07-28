@@ -264,6 +264,39 @@ class AppSourceGitMaterializerTest {
     }
 
     @Test
+    void backupCleanupFailureAfterCompletionKeepsNewTargetAndReturnsSuccess() throws Exception {
+        GitFixture fixture = fixture();
+        Path target = tempDir.resolve("appsource/cleanup-after-completion");
+        Files.createDirectories(target);
+        Files.writeString(target.resolve("old.txt"), "old generation\n");
+        AtomicInteger completions = new AtomicInteger();
+        java.util.concurrent.atomic.AtomicReference<Path> retainedBackup =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        AppSourceGitMaterializer.BackupCleaner failingCleaner = backup -> {
+            retainedBackup.set(backup);
+            throw new IOException("injected backup cleanup failure");
+        };
+        AppSourceGitMaterializer materializer = new AppSourceGitMaterializer(
+                new ProcessGitCommandExecutor(), new ObjectMapper(),
+                AppSourceGitMaterializer.DirectoryMover.filesystem(), failingCleaner);
+
+        AppSourceGitMaterializer.Result result = materializer.materialize(
+                new AppSourceGitMaterializer.Request(
+                        target, fixture.remoteUri(), "main", fixture.commit(),
+                        List.of(new AppSourceSelectedPath("src", AppSourcePathType.DIRECTORY)),
+                        null, 14L, Instant.parse("2026-07-30T04:00:00Z")),
+                ignored -> completions.incrementAndGet());
+
+        assertThat(completions).hasValue(1);
+        assertThat(result.indexSha256()).isEqualTo(sha256(Files.readAllBytes(
+                target.resolve(AppSourceApplicationService.INDEX_FILE_NAME))));
+        assertThat(target.resolve("src/Main.java")).isRegularFile();
+        assertThat(target.resolve("old.txt")).doesNotExist();
+        assertThat(retainedBackup.get()).isDirectory();
+        assertThat(retainedBackup.get().resolve("old.txt")).hasContent("old generation\n");
+    }
+
+    @Test
     void materializationRejectsSymlinkThatEscapesRepositoryRoot() throws Exception {
         Path source = tempDir.resolve("symlink-source");
         Files.createDirectories(source);

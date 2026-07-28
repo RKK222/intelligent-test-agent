@@ -47,6 +47,7 @@ class AppSourceReplicaResultRecorderTest {
     private static final CodeRepositoryId REPOSITORY_ID = new CodeRepositoryId("repo_1");
     private static final LinuxServerId SERVER_A = new LinuxServerId("server-a");
     private static final LinuxServerId SERVER_B = new LinuxServerId("server-b");
+    private static final LinuxServerId SERVER_C = new LinuxServerId("server-c");
     private static final String INDEX_SHA = "a".repeat(64);
 
     @Test
@@ -123,6 +124,35 @@ class AppSourceReplicaResultRecorderTest {
                 AppSourceOperationStatus.PARTIAL_FAILED, NOW);
         verify(appSources, never()).updateSnapshotStatusAndIndex(
                 eq(REPOSITORY_ID), eq(2L), any(), eq(AppSourceSnapshotStatus.FAILED), any(), eq(NOW));
+    }
+
+    @Test
+    void retryResultDoesNotFinishWhileAnotherTargetServerStepIsPending() {
+        AppSourceRepository appSources = mock(AppSourceRepository.class);
+        WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        AppSourceReplicaProgressRecorder progress = mock(AppSourceReplicaProgressRecorder.class);
+        AppSourceReplicaResultRecorder recorder = new AppSourceReplicaResultRecorder(appSources, workspaces, progress);
+        AppSourceOperation operation = retryOperation();
+        AppSourceReplica claimed = replica(2L, SERVER_B, AppSourceReplicaStatus.RUNNING, null);
+        when(appSources.updateReplicaIfLease(any(), eq("lease-b"), eq(NOW))).thenReturn(true);
+        when(appSources.findSlotForUpdate(REPOSITORY_ID)).thenReturn(Optional.of(slot(2L, null, 9L)));
+        when(appSources.findReplicas(REPOSITORY_ID, 2L)).thenReturn(List.of(
+                replica(2L, SERVER_A, AppSourceReplicaStatus.READY, new WorkspaceId("wrk_a")),
+                replica(2L, SERVER_B, AppSourceReplicaStatus.FAILED, null),
+                replica(2L, SERVER_C, AppSourceReplicaStatus.FAILED, null)));
+        when(appSources.findSteps(operation.operationId())).thenReturn(List.of(
+                retryStep(operation.operationId(), SERVER_B, AppSourceStepStatus.FAILED),
+                retryStep(operation.operationId(), SERVER_C, AppSourceStepStatus.PENDING)));
+
+        recorder.recordFailure(operation, claimed, "lease-b", "GIT_FAILED", "源码同步失败", NOW);
+
+        verify(progress).failAfterLeaseCas(operation, claimed, NOW);
+        verify(appSources, never()).updateOperationStatus(
+                operation.operationId(), AppSourceOperationStatus.RUNNING,
+                AppSourceOperationStatus.PARTIAL_FAILED, NOW);
+        verify(appSources, never()).updateOperationStatus(
+                operation.operationId(), AppSourceOperationStatus.RUNNING,
+                AppSourceOperationStatus.FAILED, NOW);
     }
 
     @Test
@@ -238,6 +268,36 @@ class AppSourceReplicaResultRecorderTest {
     }
 
     @Test
+    void retryRecoveryRechecksPendingTargetStepsUnderSlotLock() {
+        AppSourceRepository appSources = mock(AppSourceRepository.class);
+        WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        AppSourceReplicaProgressRecorder progress = mock(AppSourceReplicaProgressRecorder.class);
+        AppSourceReplicaResultRecorder recorder = new AppSourceReplicaResultRecorder(appSources, workspaces, progress);
+        AppSourceOperation operation = retryOperation();
+        when(appSources.findOperation(operation.operationId())).thenReturn(Optional.of(operation));
+        when(appSources.findSlotForUpdate(REPOSITORY_ID)).thenReturn(Optional.of(slot(2L, null, 10L)));
+        when(appSources.findReplicas(REPOSITORY_ID, 2L)).thenReturn(List.of(
+                replica(2L, SERVER_A, AppSourceReplicaStatus.READY, new WorkspaceId("wrk_a")),
+                replica(2L, SERVER_B, AppSourceReplicaStatus.FAILED, null),
+                replica(2L, SERVER_C, AppSourceReplicaStatus.FAILED, null)));
+        when(appSources.findSteps(operation.operationId())).thenReturn(List.of(
+                retryStep(operation.operationId(), SERVER_B, AppSourceStepStatus.FAILED),
+                retryStep(operation.operationId(), SERVER_C, AppSourceStepStatus.PENDING)));
+
+        recorder.recoverTerminalOperation(operation.operationId(), NOW);
+
+        verify(appSources).findSlotForUpdate(REPOSITORY_ID);
+        verify(progress, never()).completeAfterLeaseCas(any(), any(), any());
+        verify(progress, never()).failAfterLeaseCas(any(), any(), any());
+        verify(appSources, never()).updateOperationStatus(
+                operation.operationId(), AppSourceOperationStatus.RUNNING,
+                AppSourceOperationStatus.PARTIAL_FAILED, NOW);
+        verify(appSources, never()).updateOperationStatus(
+                operation.operationId(), AppSourceOperationStatus.RUNNING,
+                AppSourceOperationStatus.FAILED, NOW);
+    }
+
+    @Test
     void replicaFinishingAfterSnapshotExpiryCannotPublishWorkspaceOrPromoteGeneration() {
         AppSourceRepository appSources = mock(AppSourceRepository.class);
         WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
@@ -262,6 +322,13 @@ class AppSourceReplicaResultRecorderTest {
                 "op-1", new ApplicationId("app-1"), REPOSITORY_ID, 1L, 2L,
                 new UserId("user-1"), AppSourceOperationType.UPDATE, "hash",
                 AppSourceOperationStatus.RUNNING, "trace-1", NOW.minusSeconds(60), null);
+    }
+
+    private AppSourceOperation retryOperation() {
+        return new AppSourceOperation(
+                "op-retry", new ApplicationId("app-1"), REPOSITORY_ID, 2L, 2L,
+                new UserId("user-1"), AppSourceOperationType.RETRY_REPLICAS, "retry-hash",
+                AppSourceOperationStatus.RUNNING, "trace-retry", NOW.minusSeconds(60), null);
     }
 
     private AppSourceRepositorySlot slot(Long active, Long pending, long version) {
@@ -298,5 +365,14 @@ class AppSourceReplicaResultRecorderTest {
                 "legacy:" + serverId.value(), "op-1", AppSourceStepScope.SERVER, serverId,
                 "RETRY_QUEUED", 0, AppSourceStepStatus.PENDING,
                 "等待旧版重试", null, null, NOW.minusSeconds(60));
+    }
+
+    private AppSourceOperationStep retryStep(
+            String operationId, LinuxServerId serverId, AppSourceStepStatus status) {
+        Instant startedAt = status == AppSourceStepStatus.PENDING ? null : NOW.minusSeconds(1);
+        Instant completedAt = status == AppSourceStepStatus.PENDING ? null : NOW;
+        return new AppSourceOperationStep(
+                operationId + ":" + serverId.value(), operationId, AppSourceStepScope.SERVER, serverId,
+                "QUEUED", 0, status, "低敏步骤摘要", startedAt, completedAt, NOW);
     }
 }

@@ -301,11 +301,28 @@
     <select id="findStrandedOperations" resultMap="OperationMap">
         select <include refid="OperationColumns"/> from app_source_operations operation
         where operation.status in ('PENDING', 'RUNNING')
-          and (operation.status = 'RUNNING' or not exists (
-            select 1 from app_source_operation_steps step
-            where step.operation_id = operation.operation_id
-              and step.status in ('PENDING', 'RUNNING')
-          ))
+          and (
+            (operation.operation_type &lt;&gt; 'RETRY_REPLICAS' and (
+              operation.status = 'RUNNING' or not exists (
+                select 1 from app_source_operation_steps step
+                where step.operation_id = operation.operation_id
+                  and step.status in ('PENDING', 'RUNNING')
+              )
+            ))
+            or (operation.operation_type = 'RETRY_REPLICAS'
+              and exists (
+                select 1 from app_source_operation_steps step
+                where step.operation_id = operation.operation_id
+                  and step.scope = 'SERVER'
+              )
+              and not exists (
+                select 1 from app_source_operation_steps step
+                where step.operation_id = operation.operation_id
+                  and step.scope = 'SERVER'
+                  and step.status in ('PENDING', 'RUNNING')
+              )
+            )
+          )
           and exists (
             select 1 from app_source_replicas replica
             where replica.repository_id = operation.repository_id

@@ -93,7 +93,7 @@
 - `JdbcAgentSessionBindingRepository`：实现按 `(sessionId, agentId)` 和 `(agentId, remoteSessionId)` 查询、upsert 通用远端 session 绑定。
 - `JdbcSessionMessageRepository`：实现会话消息保存、按远端 messageId 幂等查询、分页和计数。
 - `MyBatisConfigurationManagementRepository`：通过 `ConfigurationManagementMapper.xml` 实现配置管理表的应用只读查询、成员逻辑删除、仓库关联、版本库类型、版本库部署模式、工作空间和个人 SSH key 元数据持久化，是当前生产 Spring Bean。
-- `MyBatisAppSourceRepository`：通过 `AppSourceMapper.xml` 实现 slot `SELECT FOR UPDATE`/乐观 CAS、snapshot JSONB、replica 只在不存在时建档并以 generation+owner+lease+合法状态流转 fencing、活租约行锁下的步骤推进和整条稳定 attempt 重置、全副本终态 stranded operation 扫描、延迟 cleanup 认领和 recent selection；旧 `RETRY_QUEUED` 可领取并在新 attempt 回填稳定步骤，终态步骤防回退。`hasRepositoryHistory` 同时检查 slot/snapshot/operation/cleanup，供配置管理冻结源码仓库磁盘身份。
+- `MyBatisAppSourceRepository`：通过 `AppSourceMapper.xml` 实现 slot `SELECT FOR UPDATE`/乐观 CAS、snapshot JSONB、replica 只在不存在时建档并以 generation+owner+lease+合法状态流转 fencing、活租约行锁下的步骤推进和整条稳定 attempt 重置、operation 类型感知的 stranded 扫描、延迟 cleanup 认领和 recent selection；DOWNLOAD/UPDATE 兼容按全副本终态恢复历史脏状态，RETRY 必须存在 SERVER steps 且全部终态、不得残留 `PENDING/RUNNING` 目标后才成为候选。旧 `RETRY_QUEUED` 可领取并在新 attempt 回填稳定步骤，终态步骤防回退。`hasRepositoryHistory` 同时检查 slot/snapshot/operation/cleanup，供配置管理冻结源码仓库磁盘身份。
 - `JdbcConfigurationManagementRepository`：配置管理存量 JDBC 实现已不再作为 Spring Bean，仅保留给旧集成测试和迁移窗口；其中 `repository_type` / `deployment_mode` 映射只为兼容新增非空列，后续配置管理 SQL 变更必须改 MyBatis XML。
 - `MyBatisCommonParameterRepository`：当前 MyBatis 试点实现，按参数英文名和平台读取、列出并更新通用参数；SQL 位于 `src/main/resources/mybatis/CommonParameterMapper.xml`。
 - `MyBatisAiRunFeedbackRepository`：通过 `AiRunFeedbackMapper.xml` 实现 Run 反馈保存与 `(user_id, run_id)` 单查/批查，新记录不写 `message_id`；`MyBatisAiMessageFeedbackRepository` 保留历史消息兼容。

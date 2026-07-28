@@ -77,6 +77,7 @@ class AppSourceRetryRecoveryIntegrationTest {
     private static final CodeRepositoryId REPOSITORY_ID = new CodeRepositoryId("repo_retry_recovery");
     private static final CodeRepositoryId BLOCKER_REPOSITORY_ID = new CodeRepositoryId("repo_retry_blocker");
     private static final LinuxServerId SERVER_ID = new LinuxServerId("server-a");
+    private static final LinuxServerId SERVER_B = new LinuxServerId("server-b");
     private static final UserId USER_ID = new UserId("usr_retry_recovery");
     private static final String INDEX_SHA = "b".repeat(64);
 
@@ -173,6 +174,43 @@ class AppSourceRetryRecoveryIntegrationTest {
                     });
         } finally {
             releaseBlocker.countDown();
+            dispatcher.stop();
+        }
+    }
+
+    @Test
+    void dispatcherRecoveryCyclesKeepRetryOpenUntilOfflineTargetCanRun() throws Exception {
+        AppSourceOperation retry = registerRetryAcrossTwoServers("op-retry-offline-server");
+        CountDownLatch serverACompleted = new CountDownLatch(1);
+        DefaultAppSourceReplicaTaskDispatcher dispatcher = dispatcher(
+                workerCompletingSuccessfully(serverACompleted, SERVER_ID));
+        dispatcher.start();
+        try {
+            dispatcher.wake(retry, Set.of(SERVER_ID, SERVER_B));
+            assertThat(serverACompleted.await(2, TimeUnit.SECONDS)).isTrue();
+
+            for (int scan = 0; scan < 4; scan++) {
+                TimeUnit.MILLISECONDS.sleep(30);
+                assertThat(repository.findOperation(retry.operationId()))
+                        .get().extracting(AppSourceOperation::status)
+                        .isEqualTo(AppSourceOperationStatus.RUNNING);
+                assertThat(repository.findSteps(retry.operationId()))
+                        .filteredOn(step -> step.linuxServerId().equals(SERVER_B))
+                        .allSatisfy(step -> assertThat(step.status()).isEqualTo(AppSourceStepStatus.PENDING));
+            }
+            assertThat(repository.findClaimableReplicas(SERVER_B, NOW, 10))
+                    .extracting(AppSourceReplica::linuxServerId)
+                    .containsExactly(SERVER_B);
+
+            CountDownLatch serverBCompleted = new CountDownLatch(1);
+            assertThat(workerCompletingSuccessfully(serverBCompleted, SERVER_B)
+                    .run(REPOSITORY_ID, 1L, SERVER_B, retry.traceId()))
+                    .isEqualTo(AppSourceReplicaWorker.Outcome.SUCCEEDED);
+            assertThat(serverBCompleted.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(repository.findOperation(retry.operationId()))
+                    .get().extracting(AppSourceOperation::status)
+                    .isEqualTo(AppSourceOperationStatus.SUCCEEDED);
+        } finally {
             dispatcher.stop();
         }
     }
@@ -338,16 +376,26 @@ class AppSourceRetryRecoveryIntegrationTest {
     }
 
     private AppSourceReplicaWorker workerCompletingSuccessfully(CountDownLatch completed) {
-        when(materializer.materialize(any(), any(), any())).thenAnswer(invocation -> {
+        return workerCompletingSuccessfully(completed, SERVER_ID);
+    }
+
+    private AppSourceReplicaWorker workerCompletingSuccessfully(
+            CountDownLatch completed, LinuxServerId serverId) {
+        doAnswer(invocation -> {
             AppSourceGitMaterializer.Result result = new AppSourceGitMaterializer.Result(INDEX_SHA, true);
             ((AppSourceGitMaterializer.Completion) invocation.getArgument(1)).complete(result);
             completed.countDown();
             return result;
-        });
-        return worker(materializer);
+        }).when(materializer).materialize(any(), any(), any());
+        return worker(materializer, serverId);
     }
 
     private AppSourceReplicaWorker worker(AppSourceGitMaterializer selectedMaterializer) {
+        return worker(selectedMaterializer, SERVER_ID);
+    }
+
+    private AppSourceReplicaWorker worker(
+            AppSourceGitMaterializer selectedMaterializer, LinuxServerId serverId) {
         return new AppSourceReplicaWorker(
                 repository,
                 configuration,
@@ -355,7 +403,7 @@ class AppSourceRetryRecoveryIntegrationTest {
                 selectedMaterializer,
                 new AppSourceReplicaResultRecorder(repository, workspaces),
                 paths,
-                new WorkspaceServerIdentity(SERVER_ID.value()),
+                new WorkspaceServerIdentity(serverId.value()),
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 Duration.ofMinutes(10));
     }
@@ -384,6 +432,26 @@ class AppSourceRetryRecoveryIntegrationTest {
         return registrar.register(new AppSourceReplicaRetryRegistrar.RetryRequest(
                 operationId, APP_ID, REPOSITORY_ID, 1L, USER_ID,
                 "request-" + operationId, Set.of(SERVER_ID), "trace-" + operationId, NOW));
+    }
+
+    private AppSourceOperation registerRetryAcrossTwoServers(String operationId) {
+        repository.insertSlotIfAbsent(new AppSourceRepositorySlot(
+                REPOSITORY_ID, 1L, null, 2L, null, 0L, NOW.minus(Duration.ofHours(1)), NOW));
+        repository.saveSnapshot(new AppSourceSnapshot(
+                REPOSITORY_ID, 1L, "source-repo", AppSourcePurpose.TEAM, USER_ID,
+                "main", "0123456789abcdef", List.of(
+                        new AppSourceSelectedPath("src", AppSourcePathType.DIRECTORY)),
+                INDEX_SHA, NOW.minus(Duration.ofHours(1)), NOW.plus(Duration.ofHours(47)),
+                AppSourceSnapshotStatus.ACTIVE, NOW.minus(Duration.ofHours(1)), NOW));
+        for (LinuxServerId serverId : List.of(SERVER_ID, SERVER_B)) {
+            repository.insertReplicaIfAbsent(new AppSourceReplica(
+                    REPOSITORY_ID, 1L, serverId, null, AppSourceReplicaStatus.FAILED,
+                    null, null, 1, NOW, "GIT_UNAVAILABLE", "源码副本物化失败",
+                    NOW.minus(Duration.ofHours(1)), NOW));
+        }
+        return registrar.register(new AppSourceReplicaRetryRegistrar.RetryRequest(
+                operationId, APP_ID, REPOSITORY_ID, 1L, USER_ID,
+                "request-" + operationId, Set.of(SERVER_ID, SERVER_B), "trace-" + operationId, NOW));
     }
 
     private AppSourceOperation blockerOperation() {
@@ -448,6 +516,10 @@ class AppSourceRetryRecoveryIntegrationTest {
                         + "last_heartbeat_at, trace_id, created_at, updated_at) "
                         + "values (:serverId, 'Server A', 'ONLINE', '{}', :now, 'trace-server-a', :now, :now)")
                 .param("serverId", SERVER_ID.value()).param("now", NOW).update();
+        jdbc.sql("insert into linux_servers(linux_server_id, name, status, capacity_summary_json, "
+                        + "last_heartbeat_at, trace_id, created_at, updated_at) "
+                        + "values (:serverId, 'Server B', 'ONLINE', '{}', :now, 'trace-server-b', :now, :now)")
+                .param("serverId", SERVER_B.value()).param("now", NOW).update();
     }
 
     private void installAppSourceSchema(SingleConnectionDataSource dataSource) throws Exception {

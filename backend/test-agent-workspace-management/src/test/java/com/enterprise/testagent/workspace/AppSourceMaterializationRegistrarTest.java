@@ -1,11 +1,16 @@
 package com.enterprise.testagent.workspace;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.enterprise.testagent.domain.appsource.AppSourceOperation;
+import com.enterprise.testagent.domain.appsource.AppSourceOperationStatus;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationType;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationStep;
 import com.enterprise.testagent.domain.appsource.AppSourcePathType;
@@ -105,6 +110,62 @@ class AppSourceMaterializationRegistrarTest {
         }
     }
 
+    @Test
+    void replayChecksExistingBeforeMutableSlotAndReturnsFrozenServerTargets() {
+        AppSourceRepository repository = mock(AppSourceRepository.class);
+        CodeRepositoryId repositoryId = new CodeRepositoryId("repo_source");
+        LinuxServerId serverA = new LinuxServerId("server-a");
+        LinuxServerId serverB = new LinuxServerId("server-b");
+        LinuxServerId serverC = new LinuxServerId("server-c");
+        AppSourceOperation existing = existingOperation(
+                new ApplicationId("app_1"), repositoryId, new UserId("usr_1"),
+                AppSourceOperationType.UPDATE, "a".repeat(64));
+        List<AppSourceOperationStep> frozenSteps = new ArrayList<>();
+        frozenSteps.addAll(AppSourceReplicaStepCatalog.pendingSteps(existing.operationId(), serverA, NOW));
+        frozenSteps.addAll(AppSourceReplicaStepCatalog.pendingSteps(existing.operationId(), serverB, NOW));
+        when(repository.lockRepositoryForAppSource(repositoryId)).thenReturn(true);
+        when(repository.findOperation(existing.operationId())).thenReturn(Optional.of(existing));
+        when(repository.findSteps(existing.operationId())).thenReturn(frozenSteps);
+        AppSourceMaterializationRegistrar registrar = new AppSourceMaterializationRegistrar(repository);
+
+        AppSourceMaterializationRegistrar.RegistrationResult replay = registrar.register(
+                request(new LinkedHashSet<>(List.of(serverA, serverC))));
+
+        assertThat(replay.operation()).isEqualTo(existing);
+        assertThat(replay.targetServerIds()).containsExactlyInAnyOrder(serverA, serverB);
+        verify(repository, never()).findSlotForUpdate(repositoryId);
+        verify(repository, never()).insertCleanupTasks(any());
+    }
+
+    @Test
+    void replayRejectsDifferentAppRepositoryActorTypeOrHash() {
+        AppSourceRepository repository = mock(AppSourceRepository.class);
+        CodeRepositoryId repositoryId = new CodeRepositoryId("repo_source");
+        when(repository.lockRepositoryForAppSource(repositoryId)).thenReturn(true);
+        when(repository.findSlotForUpdate(repositoryId)).thenReturn(Optional.of(new AppSourceRepositorySlot(
+                repositoryId, 2L, null, 3L, "op_old", 4L, NOW.minusSeconds(60), NOW.minusSeconds(30))));
+        AppSourceMaterializationRegistrar registrar = new AppSourceMaterializationRegistrar(repository);
+        List<AppSourceOperation> conflicts = List.of(
+                existingOperation(new ApplicationId("app_other"), repositoryId, new UserId("usr_1"),
+                        AppSourceOperationType.UPDATE, "a".repeat(64)),
+                existingOperation(new ApplicationId("app_1"), new CodeRepositoryId("repo_other"),
+                        new UserId("usr_1"), AppSourceOperationType.UPDATE, "a".repeat(64)),
+                existingOperation(new ApplicationId("app_1"), repositoryId, new UserId("usr_other"),
+                        AppSourceOperationType.UPDATE, "a".repeat(64)),
+                existingOperation(new ApplicationId("app_1"), repositoryId, new UserId("usr_1"),
+                        AppSourceOperationType.DOWNLOAD, "a".repeat(64)),
+                existingOperation(new ApplicationId("app_1"), repositoryId, new UserId("usr_1"),
+                        AppSourceOperationType.UPDATE, "b".repeat(64)));
+
+        for (AppSourceOperation conflict : conflicts) {
+            when(repository.findOperation(conflict.operationId())).thenReturn(Optional.of(conflict));
+            assertThatThrownBy(() -> registrar.register(request(
+                            new LinkedHashSet<>(List.of(new LinuxServerId("server-a"))))))
+                    .isInstanceOf(com.enterprise.testagent.common.error.PlatformException.class)
+                    .hasMessage("operationId 已被其它应用源码请求使用");
+        }
+    }
+
     private AppSourceMaterializationRegistrar.RegistrationRequest request(LinkedHashSet<LinuxServerId> targets) {
         return new AppSourceMaterializationRegistrar.RegistrationRequest(
                 "aso_new",
@@ -123,5 +184,17 @@ class AppSourceMaterializationRegistrarTest {
                 targets,
                 "trace_app_source",
                 NOW);
+    }
+
+    private AppSourceOperation existingOperation(
+            ApplicationId appId,
+            CodeRepositoryId repositoryId,
+            UserId actorUserId,
+            AppSourceOperationType operationType,
+            String requestHash) {
+        return new AppSourceOperation(
+                "aso_new", appId, repositoryId, 2L, 3L, actorUserId,
+                operationType, requestHash, AppSourceOperationStatus.PENDING,
+                "trace_app_source", NOW, null);
     }
 }
