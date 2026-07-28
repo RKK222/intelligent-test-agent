@@ -94,6 +94,7 @@
 - `JdbcSessionMessageRepository`：实现会话消息保存、按远端 messageId 幂等查询、分页和计数。
 - `MyBatisConfigurationManagementRepository`：通过 `ConfigurationManagementMapper.xml` 实现配置管理表的应用只读查询、成员逻辑删除、仓库关联、版本库类型、版本库部署模式、工作空间和个人 SSH key 元数据持久化，是当前生产 Spring Bean。
 - `MyBatisAppSourceRepository`：通过 `AppSourceMapper.xml` 实现 slot `SELECT FOR UPDATE`/乐观 CAS、snapshot JSONB、replica 只在不存在时建档并以 generation+owner+lease+合法状态流转 fencing、活租约行锁下的步骤推进和整条稳定 attempt 重置、operation 类型感知的 stranded 扫描、延迟 cleanup 认领和 recent selection；DOWNLOAD/UPDATE 兼容按全副本终态恢复历史脏状态，RETRY 必须存在 SERVER steps 且全部终态、不得残留 `PENDING/RUNNING` 目标后才成为候选。旧 `RETRY_QUEUED` 可领取并在新 attempt 回填稳定步骤，终态步骤防回退。`hasRepositoryHistory` 同时检查 slot/snapshot/operation/cleanup，供配置管理冻结源码仓库磁盘身份。
+- AppSource `claimReplica` 在单条 MyBatis UPDATE 中匹配 exact repository/generation/operation/server、operation `PENDING/RUNNING` 和 SERVER timeline。普通 `PENDING/FAILED/STALE` 副本只有存在任一 `PENDING/RUNNING` 步骤才可领取；step code 故意不限，使过期 lease 可从任一中途步骤接管。仅过期 `RUNNING` 副本允许以已有任意状态 SERVER step 作为旧 attempt 恢复锚点，领取后仍由统一 attempt reset 清理终态时间线；终态 operation 的迟到 worker 不能重新制造 `RUNNING` 副本。
 - `JdbcConfigurationManagementRepository`：配置管理存量 JDBC 实现已不再作为 Spring Bean，仅保留给旧集成测试和迁移窗口；其中 `repository_type` / `deployment_mode` 映射只为兼容新增非空列，后续配置管理 SQL 变更必须改 MyBatis XML。
 - `MyBatisCommonParameterRepository`：当前 MyBatis 试点实现，按参数英文名和平台读取、列出并更新通用参数；SQL 位于 `src/main/resources/mybatis/CommonParameterMapper.xml`。
 - `MyBatisAiRunFeedbackRepository`：通过 `AiRunFeedbackMapper.xml` 实现 Run 反馈保存与 `(user_id, run_id)` 单查/批查，新记录不写 `message_id`；`MyBatisAiMessageFeedbackRepository` 保留历史消息兼容。
@@ -159,6 +160,7 @@
 - `MyBatisPublicAgentConfigRolloutRepositoryTest` 固化目标认领生成用户/trace/lease token 快照，并验证过期 lease 不能把目标误写为重试或已 dispose；同时检查个人拉取门禁只通过 `PERSONAL_APPLICATION + initiated_by_user_id` 命中发起用户。
 - `MyBatisReferenceRepositoryRepositoryIntegrationTest` 使用真实 Flyway + MyBatis 覆盖两表、并发初始化/推进 generation 单胜者、同服务器租约互斥与续租、过期 token/generation 写回拒绝、离线 `DEFERRED`/恢复和状态游标分页；`MyBatisReferenceRepositoryPostgresqlIntegrationTest` 覆盖 PostgreSQL 方言下的副本 upsert、认领和总体状态写回。
 - `MyBatisAppSourceRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式覆盖 XML mapper 的 slot 乐观冲突、结构化路径往返、snapshot 状态/摘要 CAS、副本首次建档与租约 fencing、旧/新步骤领取和 attempt reset/upsert、全终态步骤 operation 绑定、stranded 扫描、恢复索引、recent/cleanup；`MyBatisAppSourcePostgresqlIntegrationTest` 原样执行完整 PostgreSQL Flyway 链和真实 reset/backfill SQL，验证 JSONB、整小时过期/十六进制摘要约束、步骤终态保护、global/server 部分唯一索引、在途索引和业务事务 cleanup 第一写的延迟外键。
+- AppSource mapper 认领测试额外覆盖 exact operation 绑定、非终态步骤门禁、过期 `RUNNING` attempt 接管，以及 PostgreSQL 并发屏障下“worker 读 operation 后暂停、另一事务先终态化步骤再终态化 operation、迟到 claim 被拒绝且副本不变”。
 - SessionMessage/Run 覆盖 V16 token/cost 字段读写、parts_json 兼容、按 `(sessionId, remoteMessageId)` 查询以及最近非终态 Run 查询。
 - RunEvent 覆盖 append-only seq 单调递增、并发追加唯一性、`runId + lastSeq` 增量读取、结构化 scope 列和 `(run_id, seq)` 唯一约束。
 - Session 覆盖远端 opencode 映射、全局搜索、置顶排序、工作区会话分页和归档过滤。

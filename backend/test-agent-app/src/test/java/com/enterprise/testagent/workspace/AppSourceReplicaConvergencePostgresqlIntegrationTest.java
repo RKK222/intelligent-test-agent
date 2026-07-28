@@ -206,7 +206,7 @@ class AppSourceReplicaConvergencePostgresqlIntegrationTest {
                 .containsExactly(scenario.serverC());
 
         AppSourceReplica claimedC = transactions.execute(ignored -> repository.claimReplica(
-                scenario.repositoryId(), 1L, scenario.serverC(), "worker-c",
+                scenario.repositoryId(), 1L, scenario.serverC(), scenario.operation().operationId(), "worker-c",
                 NOW.plusSeconds(600), NOW.plusSeconds(2)).orElseThrow());
         transactions.executeWithoutResult(ignored -> new AppSourceReplicaResultRecorder(repository, workspaces)
                 .recordFailure(
@@ -311,7 +311,8 @@ class AppSourceReplicaConvergencePostgresqlIntegrationTest {
             String owner = serverId.equals(serverA) ? "worker-a"
                     : serverId.equals(serverB) ? "worker-b" : "worker-c";
             AppSourceReplica claimedReplica = transactions.execute(ignored -> repository.claimReplica(
-                    repositoryId, 2L, serverId, owner, NOW.plusSeconds(600), NOW).orElseThrow());
+                    repositoryId, 2L, serverId, registration.operation().operationId(),
+                    owner, NOW.plusSeconds(600), NOW).orElseThrow());
             assertThat(claimedReplica).isNotNull();
         }
         return new Scenario(repositoryId, registration.operation(), serverA, serverB, serverC);
@@ -366,7 +367,8 @@ class AppSourceReplicaConvergencePostgresqlIntegrationTest {
                         "request-convergence-" + suffix, Set.of(serverB, serverC),
                         "trace-convergence-" + suffix, NOW)));
         transactions.execute(ignored -> repository.claimReplica(
-                repositoryId, 1L, serverB, "worker-b", NOW.plusSeconds(600), NOW).orElseThrow());
+                repositoryId, 1L, serverB, operation.operationId(),
+                "worker-b", NOW.plusSeconds(600), NOW).orElseThrow());
         return new RetryScenario(repositoryId, operation, serverA, serverB, serverC);
     }
 

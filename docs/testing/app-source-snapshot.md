@@ -42,8 +42,8 @@ corepack pnpm playwright test apps/agent-web/tests/workbench.spec.ts \
 | 维度 | 必须证明的事实 |
 | --- | --- |
 | 领域与幂等 | operationId 的 ECMAScript 空白规范化、1–128 长度和点段/路径分隔拒绝；retry 重放仅匹配 route app/repository/actor/type/expected generation，不依赖动态失败服务器；materialization 重放在 slot 校验前严格匹配 app/repository/actor/type/hash/source generation，并返回首请求 SERVER steps/replicas 冻结目标；并发同 ID 只写一组 cleanup/snapshot/replica/steps。保留期只接受 1–72 整小时且默认 48；状态、generation、lockVersion 和 lease 只前进。 |
-| 数据库 | 七类表、JSONB 结构化路径、固定提交和 64 位十六进制索引摘要；GLOBAL/SERVER 步骤唯一；活租约步骤更新/reset、旧步骤领取、DOWNLOAD/UPDATE stranded 兼容恢复与 RETRY SERVER steps 全终态门禁、status 前导索引；cleanup 允许作为业务事务第一写；运行 SQL 仅在 `AppSourceMapper.xml`，无新增 JDBC 或注解 SQL。 |
-| 物化与恢复 | 每服务器固定 13 步，动作前 RUNNING、动作后 SUCCEEDED，失败当前步 FAILED/后续 SKIPPED且摘要低敏；新 lease 清除旧 attempt 时间/终态，旧 owner 失租后零后续写；branch 与 tree 使用同一次固定 commit；浅克隆、冻结 SHA fetch、no-cone sparse checkout、删除 `.git`、原子替换与数据库 completion 前失败回滚，completion 后 backup 清理失败仍保留新 target 并成功返回；广播丢失、队列拒绝、Java 重启、普通 stranded 和离线 retry 目标恢复都由数据库扫描补偿，离线目标步骤终态前不得提前收敛。 |
+| 数据库 | 七类表、JSONB 结构化路径、固定提交和 64 位十六进制索引摘要；GLOBAL/SERVER 步骤唯一；副本 claim 单条 UPDATE 原子绑定精确 operationId、operation 非终态和同服务器可领取步骤，PG 并发屏障证明读取后 retry 终态化会拒绝迟到 claim 且副本不变；过期 `RUNNING` 旧 attempt 可在 operation 未终态时接管并统一 reset；活租约步骤更新/reset、旧步骤领取、DOWNLOAD/UPDATE stranded 兼容恢复与 RETRY SERVER steps 全终态门禁、status 前导索引；cleanup 允许作为业务事务第一写；运行 SQL 仅在 `AppSourceMapper.xml`，无新增 JDBC 或注解 SQL。 |
+| 物化与恢复 | 每服务器固定 13 步，动作前 RUNNING、动作后 SUCCEEDED，失败当前步 FAILED/后续 SKIPPED且摘要低敏；新 lease 清除旧 attempt 时间/终态，旧 owner 失租后零后续写；branch 与 tree 使用同一次固定 commit；浅克隆、冻结 SHA fetch、no-cone sparse checkout、删除 `.git`、原子替换与数据库 completion 前失败回滚，completion 后 backup 清理失败仍保留新 target 并成功返回；旧 cleanup 在新 READY generation 接管共享根后仍于同一文件锁内回收标准 UUID backup 残留，重复更新不累积且不触碰 target/staging/其它仓库、非 UUID 或相似后缀；广播丢失、队列拒绝、Java 重启、普通 stranded 和离线 retry 目标恢复都由数据库扫描补偿，离线目标步骤终态前不得提前收敛。 |
 | 生命周期 | PERSONAL 固定当前用户服务器，TEAM 冻结受理时在线集合；至少一台 READY 才提升，旧 ACTIVE 先失效再激活新代；三服务器最后两台并发以 slot 行锁串行收敛，部分失败可打开 READY 服务器，全失败保留旧 active/expiry；同 generation 只重试 `FAILED/STALE`；TEAM 不可降为 PERSONAL。 |
 | 文件安全 | 根目录及祖先/目标符号链接 fail closed；`.testagent-appsource-index.json` 不出现在列表/搜索且所有外部读写操作拒绝；缺失或损坏索引按数据库摘要原子修复；文件 ticket 和每条 RPC 都重新校验成员、generation、expiry、READY replica 和服务器 affinity。 |
 | API 与观察 | TEAM 按 repository 任一当前启用关联应用成员跨 app 观察，PERSONAL 保留 owner/成员管理员边界，GET/ticket/WS 每次实时复核撤权/解除关联/禁用；tree 旧数组与 `includeCommit=true` envelope 兼容；ticket 一次性、60 秒、容量有界并绑定 operation/user/JVM/精确 Origin；重连首帧来自数据库 snapshot，断开观察不取消后台 operation，payload 不含物理路径、凭据或原始 Git stderr；API/WS wire 不变。 |
@@ -58,7 +58,7 @@ corepack pnpm playwright test apps/agent-web/tests/workbench.spec.ts \
 3. 以 APP_ADMIN 创建 TEAM 快照，在两台服务器制造失败后对同 generation retry；先只恢复其中一台，让另一台保持离线并跨过多个 5 秒扫描周期，确认 operation 仍非终态、离线 SERVER steps 仍 PENDING。再恢复离线服务器，确认其可 claim 且最终两台 READY，commit/selection/expiry 不变；同时重复提交相同 materialization operationId，确认返回首请求 operation/generation/冻结目标且数据库没有第二组写入。
 4. 下载过程中关闭弹窗或断开 WebSocket，再重新打开操作；确认后台继续执行，新 ticket 首帧是最新数据库 snapshot，浏览器网络面板没有 RunEvent/SSE 请求因该操作新增。撤销成员权限后，已有观察和文件 socket 都必须安全失败。
 5. 在源码 Workspace 修改一个普通文件并保存，确认文件 WebSocket 成功；打开 APP_SOURCE Run Diff，保存普通源码路径并确认产生对应的 Workspace 文件写；分别尝试保存 PUBLIC/WORKSPACE Agent 配置路径，确认 DiffViewer `writable`、父组件 handler 和 mutation 门禁阻止写入，且 `agent-config.write` 始终为零。另尝试读取或改写保留索引、打开 Git Changes、应用 Agent/Hub 发布和宠物配置重载，确认这些不允许的能力均被拒绝且磁盘无越权变化。
-6. 把一台服务器停机至快照过期，确认在线服务器由每分钟 XXL 唤醒完成清理并归档 Workspace，离线服务器 cleanup 保持待处理；恢复该服务器后再次触发，确认旧源码、staging/backup 被清理，不删除随后建立的新 generation。
+6. 把一台服务器停机至快照过期，确认在线服务器由每分钟 XXL 唤醒完成清理并归档 Workspace，离线服务器 cleanup 保持待处理；恢复该服务器后再次触发，确认旧源码、generation staging 和多次更新遗留的标准 UUID backup 均被清理，不删除随后建立的新 generation、当前 target、其它仓库目录、非 UUID `.backup` 或 `.backup.tmp` 等相似名称。
 7. 在进度连接的 250ms/500ms/1s 退避窗口快速切换应用、仓库和托管工作区，确认旧 snapshot、step、terminal、tree 和 recent 响应都不能覆盖当前选择，且浏览器中不存在遗留 timer/socket。
 
 ## 数据、容量与日志检查

@@ -1158,3 +1158,20 @@
   - 最终波次不新增 API wire、RunEvent 或表字段，新增一条扫描索引 migration 和 MyBatis XML SQL；终态聚合严格串行、retry 重放稳定、跨应用权限实时收敛、终态步骤无在途残留且摘要低敏。
   - 二次闭环不新增 migration、表字段、JDBC SQL、HTTP/事件 wire 或前端代码；retry 离线目标不再提前终结，completion 后 cleanup 故障不再回滚已提交新目录，materialization 同 ID 并发只写一次并返回首请求冻结目标。
   - 未修改环境配置、generated SDK、OpenCode 源码和工具盒子。真实双 Java/双 Linux 的 Git/副本/磁盘清理仍需上线前按人工验收清单执行；前端大 chunk、jsdom Canvas 提示和既有 runtime scheduler 1 秒时序抖动为非本波次阻断项。
+
+### 2026-07-29 - 收口应用源码 backup 接管清理与 operation 原子认领
+
+- Why:
+  - materializer 在数据库 completion 成功后允许 backup best-effort 清理失败，但旧 generation cleanup 遇到本机新 READY generation 持有共享根时会跳过全部 backup 回收，重复更新可能持续积累残留。
+  - worker 先读取在途 operation 再认领副本，旧 claim CAS 未绑定精确 operation、非终态状态和同服务器可领取步骤；retry 并发终态化后，迟到 worker 仍可能把失败副本重新改为 `RUNNING`。
+- What:
+  - cleanup 在与发布共用的文件锁内始终回收名称匹配标准 UUID 的已完成发布 backup；新 generation READY 仍只阻止旧源码内容删除，不再阻止 backup 回收，且不会触碰当前 target、generation staging、其它仓库、非 UUID 或相似后缀。
+  - `claimReplica` 增加 operationId，并在单条 MyBatis UPDATE 中原子校验 exact repository/generation/operation/server 和 operation `PENDING/RUNNING`。普通 `PENDING/FAILED/STALE` 副本还要求同服务器存在任一 `PENDING/RUNNING` 步骤；step code 不限以允许过期 lease 从任一中途步骤接管。过期 `RUNNING` 副本允许以自身旧 attempt 的任意状态 SERVER step 作为恢复锚点，认领后继续走统一时间线 reset。
+  - 新增 H2 exact/终态/步骤门禁和过期 attempt 恢复测试、worker 未认领零副作用测试、PostgreSQL 双屏障竞态测试，以及 cleanup 重复 backup 与相似命名 fencing 测试；同步 domain、persistence、workspace-management README、领域模型和应用源码验收文档。
+- How:
+  - TDD 先稳定复现旧 cleanup 留下多份 backup、终态 retry 后 claim 仍把副本改为 `RUNNING`，以及 operation 仍 RUNNING 但普通失败副本的服务器步骤全终态时仍可误领；再完成最小生产修改。
+  - H2 AppSource mapper 20/20、worker/cleanup/materializer 26/26、真实 PostgreSQL mapper 3/3、三服务器收敛 4/4、retry recovery 6/6 均通过且 PostgreSQL/Testcontainers 为 0 skipped；SQL 约定、AI 文档、diff 和冲突标记检查通过。
+  - 后端根测试连续两次均只在既有 `RunRuntimeLossConvergenceSchedulerTest.keepsInMemoryRetryWhenNeitherDatabaseNorRedisAcceptedTerminal` 的 1 秒定时窗口失败（742 项中唯一失败），该用例单独重跑通过；本次不扩大范围修改无关 scheduler。
+- Result:
+  - completion 后遗留 backup 可由后续旧 cleanup 安全接管，重复更新不再累积；并发终态化后的 stale worker 无法重新制造 `RUNNING` 副本，过期 `RUNNING` 的旧 attempt 恢复语义仍保留。
+  - 未新增或变更 HTTP/进度 WebSocket/RunEvent wire、数据库表或 migration；生产关系型 SQL 仅修改 `AppSourceMapper.xml`，未新增 JDBC Repository SQL，PostgreSQL 竞态测试沿用 `JdbcClient` fixture 建立隔离数据。未修改 `.env*`、generated SDK、OpenCode 源码或工具盒子。

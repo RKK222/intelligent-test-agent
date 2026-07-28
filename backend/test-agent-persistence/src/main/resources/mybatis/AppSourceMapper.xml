@@ -244,12 +244,35 @@
             source.lease_owner, source.lease_until, source.attempt_count, source.next_retry_at, source.safe_error_code,
             source.safe_error_message, source.created_at, source.updated_at)
     </insert>
+    <!-- 普通副本绑定非终态 SERVER step；过期 RUNNING 以旧 attempt 为恢复锚点，认领后由 worker 统一 reset。 -->
     <update id="claimReplica">
         update app_source_replicas set status = 'RUNNING', lease_owner = #{leaseOwner}, lease_until = #{leaseUntil},
             attempt_count = attempt_count + 1, next_retry_at = null, safe_error_code = null,
             safe_error_message = null, updated_at = #{now}
         where repository_id = #{repositoryId} and generation = #{generation} and linux_server_id = #{linuxServerId}
-          and (status in ('PENDING', 'FAILED', 'STALE') or (status = 'RUNNING' and lease_until &lt;= #{now}))
+          and exists (
+            select 1
+            from app_source_operations operation
+            where operation.operation_id = #{operationId}
+              and operation.repository_id = #{repositoryId}
+              and operation.target_generation = #{generation}
+              and operation.status in ('PENDING', 'RUNNING')
+          )
+          and (
+            (status in ('PENDING', 'FAILED', 'STALE') and exists (
+                select 1 from app_source_operation_steps claimable_step
+                where claimable_step.operation_id = #{operationId}
+                  and claimable_step.scope = 'SERVER'
+                  and claimable_step.linux_server_id = #{linuxServerId}
+                  and claimable_step.status in ('PENDING', 'RUNNING')
+            ))
+            or (status = 'RUNNING' and lease_until &lt;= #{now} and exists (
+                select 1 from app_source_operation_steps attempt_step
+                where attempt_step.operation_id = #{operationId}
+                  and attempt_step.scope = 'SERVER'
+                  and attempt_step.linux_server_id = #{linuxServerId}
+            ))
+          )
     </update>
     <update id="updateReplicaIfLease">
         update app_source_replicas set runtime_workspace_id = #{row.runtimeWorkspaceId}, status = #{row.status},

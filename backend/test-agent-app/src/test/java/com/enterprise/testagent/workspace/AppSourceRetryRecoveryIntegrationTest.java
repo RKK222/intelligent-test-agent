@@ -273,7 +273,7 @@ class AppSourceRetryRecoveryIntegrationTest {
         AppSourceOperation retry = registerRetry(
                 AppSourceReplicaStatus.FAILED, "op-retry-after-result-cas-loss");
         assertThat(repository.claimReplica(
-                REPOSITORY_ID, 1L, SERVER_ID, "worker-expired",
+                REPOSITORY_ID, 1L, SERVER_ID, retry.operationId(), "worker-expired",
                 NOW.minusSeconds(1), NOW.minusSeconds(60))).isPresent();
         // 模拟旧 worker 已写完失败步骤，但 result lease-CAS 因绝对到期未命中，副本仍为过期 RUNNING。
         jdbc.sql("update app_source_operation_steps set status = case when step_code = 'SHALLOW_CLONE' "

@@ -14,6 +14,8 @@ import com.enterprise.testagent.domain.appsource.AppSourcePathType;
 import com.enterprise.testagent.domain.appsource.AppSourcePurpose;
 import com.enterprise.testagent.domain.appsource.AppSourceRepository;
 import com.enterprise.testagent.domain.appsource.AppSourceRepositorySlot;
+import com.enterprise.testagent.domain.appsource.AppSourceReplica;
+import com.enterprise.testagent.domain.appsource.AppSourceReplicaStatus;
 import com.enterprise.testagent.domain.appsource.AppSourceSelectedPath;
 import com.enterprise.testagent.domain.appsource.AppSourceSnapshot;
 import com.enterprise.testagent.domain.appsource.AppSourceSnapshotStatus;
@@ -21,13 +23,14 @@ import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
+import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
@@ -96,7 +99,8 @@ class AppSourceCleanupWorkerTest {
         Files.writeString(root.resolve(AppSourceApplicationService.INDEX_FILE_NAME), "corrupt");
         String targetName = root.getFileName().toString();
         Path staging = root.getParent().resolve("." + targetName + ".g1.fixture.staging");
-        Path backup = root.getParent().resolve("." + targetName + ".fixture.backup");
+        Path backup = root.getParent().resolve(
+                "." + targetName + ".00000000-0000-0000-0000-000000000003.backup");
         Files.createDirectories(staging);
         Files.createDirectories(backup);
         Files.writeString(staging.resolve("partial.txt"), "partial");
@@ -112,6 +116,59 @@ class AppSourceCleanupWorkerTest {
         assertThat(backup).doesNotExist();
         assertThat(sha256(Files.readAllBytes(root.resolve(AppSourceApplicationService.INDEX_FILE_NAME))))
                 .isEqualTo(indexedSnapshot.indexSha256());
+    }
+
+    @Test
+    void oldCleanupRemovesRepeatedCompletedBackupsWithoutTouchingNewReadyGenerationOrSimilarNames()
+            throws Exception {
+        AppSourceRepository appSources = mock(AppSourceRepository.class);
+        ManagedWorkspacePathResolver paths = mock(ManagedWorkspacePathResolver.class);
+        AppSourceIndexManager indexes = mock(AppSourceIndexManager.class);
+        AppSourceCleanupResultRecorder results = mock(AppSourceCleanupResultRecorder.class);
+        AppSourceCleanupTask due = cleanupTask(null, null, AppSourceCleanupStatus.PENDING);
+        when(appSources.findDueCleanupTasks(SERVER_ID, NOW, 32)).thenReturn(List.of(due));
+        when(appSources.claimCleanupTask(eq(due.cleanupTaskId()), any(), any(), eq(NOW)))
+                .thenAnswer(invocation -> Optional.of(cleanupTask(
+                        invocation.getArgument(1), NOW.plusSeconds(300), AppSourceCleanupStatus.RUNNING)));
+        when(appSources.findSnapshot(REPOSITORY_ID, 1L)).thenReturn(Optional.of(snapshot()));
+        when(paths.appSourceValue("orders")).thenReturn("appsource:orders");
+        when(paths.resolve("appsource:orders")).thenReturn(root);
+        when(appSources.findSlot(REPOSITORY_ID)).thenReturn(Optional.of(new AppSourceRepositorySlot(
+                REPOSITORY_ID, 3L, null, 4L, "op-new", 3L, NOW.minusSeconds(600), NOW)));
+        when(appSources.findReplica(REPOSITORY_ID, 3L, SERVER_ID)).thenReturn(Optional.of(new AppSourceReplica(
+                REPOSITORY_ID, 3L, SERVER_ID, new WorkspaceId("wrk_new"),
+                AppSourceReplicaStatus.READY, null, null, 1, null, null, null,
+                NOW.minusSeconds(60), NOW)));
+        Files.writeString(root.resolve("current-generation.txt"), "generation three");
+        String targetName = root.getFileName().toString();
+        Path firstRetainedBackup = root.getParent().resolve(
+                "." + targetName + ".00000000-0000-0000-0000-000000000001.backup");
+        Path secondRetainedBackup = root.getParent().resolve(
+                "." + targetName + ".00000000-0000-0000-0000-000000000002.backup");
+        Path currentStaging = root.getParent().resolve("." + targetName + ".g3.current.staging");
+        Path otherRepositoryBackup = root.getParent().resolve("." + targetName + "-other.first.backup");
+        Path similarSuffix = root.getParent().resolve("." + targetName + ".first.backup.tmp");
+        Path nonUuidBackup = root.getParent().resolve("." + targetName + ".not-a-uuid.backup");
+        for (Path directory : List.of(
+                firstRetainedBackup, secondRetainedBackup, currentStaging,
+                otherRepositoryBackup, similarSuffix, nonUuidBackup)) {
+            Files.createDirectories(directory);
+            Files.writeString(directory.resolve("marker.txt"), directory.getFileName().toString());
+        }
+        AppSourceCleanupWorker worker = new AppSourceCleanupWorker(
+                appSources, paths, indexes, results, new WorkspaceServerIdentity(SERVER_ID.value()),
+                Clock.fixed(NOW, ZoneOffset.UTC), 300L, 32);
+
+        assertThat(worker.runDue()).isEqualTo(1);
+
+        assertThat(firstRetainedBackup).doesNotExist();
+        assertThat(secondRetainedBackup).doesNotExist();
+        assertThat(root.resolve("current-generation.txt")).hasContent("generation three");
+        assertThat(currentStaging).isDirectory();
+        assertThat(otherRepositoryBackup).isDirectory();
+        assertThat(similarSuffix).isDirectory();
+        assertThat(nonUuidBackup).isDirectory();
+        verify(results).complete(any(AppSourceCleanupTask.class), any(), eq(NOW));
     }
 
     @Test

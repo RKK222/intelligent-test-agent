@@ -90,6 +90,9 @@ class MyBatisAppSourcePostgresqlIntegrationTest {
             repository.saveOperation(operation());
             repository.saveSnapshot(snapshot());
         });
+        assertThat(repository.upsertStep(new AppSourceOperationStep(
+                "step-server-claim-pg", "op-app-source-pg", AppSourceStepScope.SERVER, SERVER_ID,
+                "QUEUED", 0, AppSourceStepStatus.PENDING, "等待认领", null, null, NOW))).isTrue();
 
         assertThat(repository.findCleanupTasks(REPOSITORY_ID, 1L, SERVER_ID)).containsExactly(cleanup());
         assertThat(repository.insertReplicaIfAbsent(new AppSourceReplica(
@@ -99,7 +102,8 @@ class MyBatisAppSourcePostgresqlIntegrationTest {
                 .extracting(AppSourceReplica::status)
                 .isEqualTo(AppSourceReplicaStatus.PENDING);
         assertThat(repository.claimReplica(
-                REPOSITORY_ID, 1L, SERVER_ID, "worker-pg", NOW.plusSeconds(30), NOW)).isPresent();
+                REPOSITORY_ID, 1L, SERVER_ID, "op-app-source-pg",
+                "worker-pg", NOW.plusSeconds(30), NOW)).isPresent();
         assertThat(repository.findClaimableReplicas(SERVER_ID, NOW.plusSeconds(29), 10)).isEmpty();
         assertThat(repository.findClaimableReplicas(SERVER_ID, NOW.plusSeconds(30), 10)).singleElement()
                 .extracting(AppSourceReplica::status)
@@ -122,7 +126,9 @@ class MyBatisAppSourcePostgresqlIntegrationTest {
         assertThat(repository.upsertStep(step("step-global-a", AppSourceStepStatus.RUNNING))).isTrue();
         assertThat(repository.upsertStep(step("step-global-a", AppSourceStepStatus.SUCCEEDED))).isTrue();
         assertThat(repository.upsertStep(step("step-global-a", AppSourceStepStatus.RUNNING))).isFalse();
-        assertThat(repository.findSteps("op-app-source-pg")).singleElement()
+        assertThat(repository.findSteps("op-app-source-pg"))
+                .filteredOn(step -> step.scope() == AppSourceStepScope.GLOBAL)
+                .singleElement()
                 .extracting(AppSourceOperationStep::status)
                 .isEqualTo(AppSourceStepStatus.SUCCEEDED);
         assertThatThrownBy(() -> repository.upsertStep(step("step-global-b")))
@@ -187,7 +193,7 @@ class MyBatisAppSourcePostgresqlIntegrationTest {
                 .extracting(AppSourceReplica::status)
                 .isEqualTo(AppSourceReplicaStatus.STALE);
         assertThat(repository.claimReplica(
-                REPOSITORY_ID, 1L, SERVER_ID, "worker-reset-pg",
+                REPOSITORY_ID, 1L, SERVER_ID, staleRetry.operationId(), "worker-reset-pg",
                 NOW.plusSeconds(60), NOW.plusSeconds(5))).isPresent();
         AppSourceOperationStep resetPending = new AppSourceOperationStep(
                 "step-app-source-reset-pg", staleRetry.operationId(), AppSourceStepScope.SERVER, SERVER_ID,
@@ -244,6 +250,83 @@ class MyBatisAppSourcePostgresqlIntegrationTest {
                 .param("indexSha256", "g".repeat(64))
                 .param("repositoryId", REPOSITORY_ID.value()).update())
                 .isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
+    void staleWorkerCannotClaimAfterObservedRetryBecomesTerminal() throws Exception {
+        CodeRepositoryId repositoryId = new CodeRepositoryId("repo_app_source_claim_barrier_pg");
+        String operationId = "op-app-source-claim-barrier-pg";
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        jdbc.sql("""
+                insert into code_repositories(
+                    repository_id, git_url, name, english_name, repository_type,
+                    deployment_mode, standard, created_at, updated_at)
+                values (:repositoryId, 'https://git.example.test/claim-barrier.git',
+                    '认领屏障', 'claim-barrier', 'APPLICATION_CODE_REPOSITORY',
+                    'EXTERNAL', false, :now, :now)
+                """).param("repositoryId", repositoryId.value()).param("now", Timestamp.from(NOW)).update();
+        transactionTemplate.executeWithoutResult(ignored -> {
+            repository.insertSlotIfAbsent(new AppSourceRepositorySlot(
+                    repositoryId, 1L, null, 2L, operationId, 0L, NOW, NOW));
+            repository.saveOperation(new AppSourceOperation(
+                    operationId, APP_ID, repositoryId, 1L, 1L, USER_ID,
+                    AppSourceOperationType.RETRY_REPLICAS, "request-claim-barrier",
+                    AppSourceOperationStatus.RUNNING, "trace-claim-barrier", NOW, null));
+            repository.saveSnapshot(new AppSourceSnapshot(
+                    repositoryId, 1L, "claim-barrier", AppSourcePurpose.TEAM, USER_ID,
+                    "main", "abcdef", List.of(new AppSourceSelectedPath("src", AppSourcePathType.DIRECTORY)),
+                    "a".repeat(64), NOW, NOW.plusSeconds(48L * 3600L),
+                    AppSourceSnapshotStatus.ACTIVE, NOW, NOW));
+            repository.insertReplicaIfAbsent(new AppSourceReplica(
+                    repositoryId, 1L, SERVER_ID, null, AppSourceReplicaStatus.FAILED,
+                    null, null, 0, NOW, "GIT_UNAVAILABLE", "源码副本物化失败", NOW, NOW));
+            repository.upsertStep(new AppSourceOperationStep(
+                    "step-app-source-claim-barrier-pg", operationId,
+                    AppSourceStepScope.SERVER, SERVER_ID, "QUEUED", 0,
+                    AppSourceStepStatus.PENDING, "等待：目标服务器排队", null, null, NOW));
+        });
+        CyclicBarrier operationObserved = new CyclicBarrier(2);
+        CyclicBarrier operationTerminal = new CyclicBarrier(2);
+
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            Future<Boolean> staleClaimRejected = executor.submit(() -> {
+                AppSourceOperation observed = transactionTemplate.execute(ignored ->
+                        repository.findInFlightOperationForReplica(repositoryId, 1L, SERVER_ID).orElseThrow());
+                operationObserved.await();
+                operationTerminal.await();
+                return Boolean.TRUE.equals(transactionTemplate.execute(ignored -> repository.claimReplica(
+                        repositoryId, 1L, SERVER_ID, observed.operationId(), "worker-stale-pg",
+                        NOW.plusSeconds(30), NOW.plusSeconds(1)).isEmpty()));
+            });
+
+            operationObserved.await();
+            transactionTemplate.executeWithoutResult(ignored -> {
+                assertThat(repository.upsertStep(new AppSourceOperationStep(
+                        "step-app-source-claim-barrier-pg", operationId,
+                        AppSourceStepScope.SERVER, SERVER_ID, "QUEUED", 0,
+                        AppSourceStepStatus.FAILED, "执行失败：目标服务器排队",
+                        NOW, NOW.plusSeconds(1), NOW.plusSeconds(1)))).isTrue();
+            });
+            assertThat(repository.findOperation(operationId))
+                    .get().extracting(AppSourceOperation::status)
+                    .isEqualTo(AppSourceOperationStatus.RUNNING);
+            assertThat(repository.claimReplica(
+                    repositoryId, 1L, SERVER_ID, operationId, "worker-terminal-steps-pg",
+                    NOW.plusSeconds(30), NOW.plusSeconds(1))).isEmpty();
+            transactionTemplate.executeWithoutResult(ignored -> {
+                assertThat(repository.updateOperationStatus(
+                        operationId, AppSourceOperationStatus.RUNNING,
+                        AppSourceOperationStatus.FAILED, NOW.plusSeconds(1))).isTrue();
+            });
+            operationTerminal.await();
+
+            assertThat(staleClaimRejected.get()).isTrue();
+        }
+        assertThat(repository.findReplica(repositoryId, 1L, SERVER_ID)).hasValueSatisfying(replica -> {
+            assertThat(replica.status()).isEqualTo(AppSourceReplicaStatus.FAILED);
+            assertThat(replica.leaseOwner()).isNull();
+            assertThat(replica.attemptCount()).isZero();
+        });
     }
 
     @Test

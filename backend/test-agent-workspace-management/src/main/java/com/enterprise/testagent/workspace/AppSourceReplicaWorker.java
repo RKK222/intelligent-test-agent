@@ -134,7 +134,7 @@ public class AppSourceReplicaWorker {
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "应用源码版本库不存在"));
         String leaseOwner = "app-source-" + UUID.randomUUID();
         AppSourceReplica claimed = appSources.claimReplica(
-                        repositoryId, generation, linuxServerId, leaseOwner,
+                        repositoryId, generation, linuxServerId, operation.operationId(), leaseOwner,
                         claimTime.plus(leaseDuration), claimTime)
                 .orElse(null);
         if (claimed == null) {

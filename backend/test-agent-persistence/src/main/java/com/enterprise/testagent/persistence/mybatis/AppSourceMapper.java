@@ -63,6 +63,7 @@ public interface AppSourceMapper {
             @Param("repositoryId") String repositoryId,
             @Param("generation") long generation,
             @Param("linuxServerId") String linuxServerId,
+            @Param("operationId") String operationId,
             @Param("leaseOwner") String leaseOwner,
             @Param("leaseUntil") Instant leaseUntil,
             @Param("now") Instant now);

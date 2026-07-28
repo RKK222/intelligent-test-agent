@@ -168,13 +168,19 @@ class MyBatisAppSourceRepositoryIntegrationTest {
     void replicaClaimAndTerminalWriteAreFencedByGenerationOwnerAndLease() {
         repository.insertSlotIfAbsent(slot(null, 0L, NOW));
         repository.saveSnapshot(snapshot("op-download", AppSourceSnapshotStatus.PENDING));
+        AppSourceOperation operation = operation("op-download", AppSourceOperationStatus.PENDING, null);
+        repository.saveOperation(operation);
+        assertThat(repository.upsertStep(retryStep(
+                "step-download-claim", operation.operationId(), AppSourceStepStatus.PENDING))).isTrue();
         assertThat(repository.insertReplicaIfAbsent(
                 replica(AppSourceReplicaStatus.PENDING, null, null, NOW))).isTrue();
 
         assertThat(repository.claimReplica(
-                REPOSITORY_ID, 1L, SERVER_ID, "worker-a", NOW.plusSeconds(30), NOW)).isPresent();
+                REPOSITORY_ID, 1L, SERVER_ID, operation.operationId(),
+                "worker-a", NOW.plusSeconds(30), NOW)).isPresent();
         assertThat(repository.claimReplica(
-                REPOSITORY_ID, 1L, SERVER_ID, "worker-b", NOW.plusSeconds(30), NOW)).isEmpty();
+                REPOSITORY_ID, 1L, SERVER_ID, operation.operationId(),
+                "worker-b", NOW.plusSeconds(30), NOW)).isEmpty();
         assertThat(repository.insertReplicaIfAbsent(
                 replica(AppSourceReplicaStatus.PENDING, null, null, NOW.plusSeconds(1)))).isFalse();
         assertThat(repository.findReplica(REPOSITORY_ID, 1L, SERVER_ID)).hasValueSatisfying(running -> {
@@ -192,6 +198,95 @@ class MyBatisAppSourceRepositoryIntegrationTest {
     }
 
     @Test
+    void replicaClaimIsRejectedAfterItsRetryOperationBecomesTerminal() {
+        repository.insertSlotIfAbsent(slot(1L, 0L, NOW));
+        repository.saveSnapshot(snapshot("op-download", AppSourceSnapshotStatus.ACTIVE));
+        AppSourceReplica failed = replica(AppSourceReplicaStatus.FAILED, null, null, NOW);
+        assertThat(repository.insertReplicaIfAbsent(failed)).isTrue();
+        AppSourceOperation retry = retryOperation(
+                "op-terminal-before-claim", AppSourceOperationStatus.RUNNING, null);
+        repository.saveOperation(retry);
+        AppSourceOperationStep pending = retryStep(
+                "step-terminal-before-claim", retry.operationId(), AppSourceStepStatus.PENDING);
+        assertThat(repository.upsertStep(pending)).isTrue();
+
+        assertThat(repository.upsertStep(new AppSourceOperationStep(
+                pending.stepId(), pending.operationId(), pending.scope(), pending.linuxServerId(),
+                pending.stepCode(), pending.sequence(), AppSourceStepStatus.FAILED,
+                "执行失败：目标服务器排队", NOW, NOW.plusSeconds(1), NOW.plusSeconds(1)))).isTrue();
+        assertThat(repository.updateOperationStatus(
+                retry.operationId(), AppSourceOperationStatus.RUNNING,
+                AppSourceOperationStatus.FAILED, NOW.plusSeconds(1))).isTrue();
+
+        assertThat(repository.claimReplica(
+                REPOSITORY_ID, 1L, SERVER_ID, retry.operationId(),
+                "worker-stale", NOW.plusSeconds(30), NOW.plusSeconds(1)))
+                .isEmpty();
+        assertThat(repository.findReplica(REPOSITORY_ID, 1L, SERVER_ID)).contains(failed);
+    }
+
+    @Test
+    void replicaClaimIsRejectedWhileItsRunningOperationHasOnlyTerminalServerSteps() {
+        repository.insertSlotIfAbsent(slot(1L, 0L, NOW));
+        repository.saveSnapshot(snapshot("op-download", AppSourceSnapshotStatus.ACTIVE));
+        AppSourceReplica failed = replica(AppSourceReplicaStatus.FAILED, null, null, NOW);
+        assertThat(repository.insertReplicaIfAbsent(failed)).isTrue();
+        AppSourceOperation retry = retryOperation(
+                "op-terminal-steps-before-claim", AppSourceOperationStatus.RUNNING, null);
+        repository.saveOperation(retry);
+        assertThat(repository.upsertStep(retryStep(
+                "step-terminal-steps-before-claim", retry.operationId(), AppSourceStepStatus.FAILED))).isTrue();
+
+        assertThat(repository.claimReplica(
+                REPOSITORY_ID, 1L, SERVER_ID, retry.operationId(),
+                "worker-stale", NOW.plusSeconds(30), NOW.plusSeconds(1)))
+                .isEmpty();
+        assertThat(repository.findOperation(retry.operationId()))
+                .get().extracting(AppSourceOperation::status)
+                .isEqualTo(AppSourceOperationStatus.RUNNING);
+        assertThat(repository.findReplica(REPOSITORY_ID, 1L, SERVER_ID)).contains(failed);
+    }
+
+    @Test
+    void expiredRunningReplicaCanAnchorReclaimAfterItsTimelineBecomesTerminal() {
+        repository.insertSlotIfAbsent(slot(1L, 0L, NOW));
+        repository.saveSnapshot(snapshot("op-download", AppSourceSnapshotStatus.ACTIVE));
+        AppSourceOperation retry = retryOperation(
+                "op-expired-terminal-attempt", AppSourceOperationStatus.RUNNING, null);
+        repository.saveOperation(retry);
+        assertThat(repository.insertReplicaIfAbsent(replica(
+                AppSourceReplicaStatus.RUNNING, "worker-expired", NOW.minusSeconds(1), NOW)))
+                .isTrue();
+        AppSourceOperationStep terminal = retryStep(
+                "step-expired-terminal-attempt", retry.operationId(), AppSourceStepStatus.FAILED);
+        assertThat(repository.upsertStep(terminal)).isTrue();
+
+        assertThat(repository.claimReplica(
+                REPOSITORY_ID, 1L, SERVER_ID, retry.operationId(),
+                "worker-new", NOW.plusSeconds(30), NOW)).isPresent();
+        assertThat(repository.findSteps(retry.operationId())).containsExactly(terminal);
+    }
+
+    @Test
+    void replicaClaimRequiresTheExactOperationWithAServerTimeline() {
+        repository.insertSlotIfAbsent(slot(1L, 0L, NOW));
+        repository.saveSnapshot(snapshot("op-download", AppSourceSnapshotStatus.ACTIVE));
+        AppSourceReplica failed = replica(AppSourceReplicaStatus.FAILED, null, null, NOW);
+        assertThat(repository.insertReplicaIfAbsent(failed)).isTrue();
+        AppSourceOperation retry = retryOperation("op-exact-claim", AppSourceOperationStatus.PENDING, null);
+        repository.saveOperation(retry);
+        assertThat(repository.upsertStep(retryStep(
+                "step-exact-claim", retry.operationId(), AppSourceStepStatus.PENDING))).isTrue();
+
+        assertThat(repository.claimReplica(
+                REPOSITORY_ID, 1L, SERVER_ID, "op-stale-observation",
+                "worker-stale", NOW.plusSeconds(30), NOW)).isEmpty();
+        assertThat(repository.claimReplica(
+                REPOSITORY_ID, 1L, SERVER_ID, retry.operationId(),
+                "worker-current", NOW.plusSeconds(30), NOW)).isPresent();
+    }
+
+    @Test
     void serverStepTransitionIsFencedByExactOperationReplicaOwnerAndLiveLease() {
         repository.insertSlotIfAbsent(slot(null, 0L, NOW));
         repository.saveOperation(operation("op-step-lease", AppSourceOperationStatus.PENDING, null));
@@ -204,7 +299,8 @@ class MyBatisAppSourceRepositoryIntegrationTest {
                 null, null, NOW);
         assertThat(repository.upsertStep(pending)).isTrue();
         assertThat(repository.claimReplica(
-                REPOSITORY_ID, 1L, SERVER_ID, "worker-a", NOW.plusSeconds(30), NOW)).isPresent();
+                REPOSITORY_ID, 1L, SERVER_ID, pending.operationId(),
+                "worker-a", NOW.plusSeconds(30), NOW)).isPresent();
         AppSourceOperationStep running = new AppSourceOperationStep(
                 pending.stepId(), pending.operationId(), pending.scope(), pending.linuxServerId(),
                 pending.stepCode(), pending.sequence(), AppSourceStepStatus.RUNNING, "正在执行：本机目录加锁",
@@ -229,6 +325,10 @@ class MyBatisAppSourceRepositoryIntegrationTest {
     void claimableReplicaScanFindsPendingAndExpiredRunningOnlyOnTheRequestedServer() {
         repository.insertSlotIfAbsent(slot(null, 0L, NOW));
         repository.saveSnapshot(snapshot("op-download", AppSourceSnapshotStatus.PENDING));
+        AppSourceOperation operation = operation("op-download", AppSourceOperationStatus.PENDING, null);
+        repository.saveOperation(operation);
+        assertThat(repository.upsertStep(retryStep(
+                "step-download-scan", operation.operationId(), AppSourceStepStatus.PENDING))).isTrue();
         AppSourceReplica pending = replica(AppSourceReplicaStatus.PENDING, null, null, NOW);
         assertThat(repository.insertReplicaIfAbsent(pending)).isTrue();
 
@@ -236,7 +336,8 @@ class MyBatisAppSourceRepositoryIntegrationTest {
         assertThat(repository.findClaimableReplicas(new LinuxServerId("server-b"), NOW, 10)).isEmpty();
 
         assertThat(repository.claimReplica(
-                REPOSITORY_ID, 1L, SERVER_ID, "worker-a", NOW.plusSeconds(30), NOW)).isPresent();
+                REPOSITORY_ID, 1L, SERVER_ID, operation.operationId(),
+                "worker-a", NOW.plusSeconds(30), NOW)).isPresent();
         assertThat(repository.findClaimableReplicas(SERVER_ID, NOW.plusSeconds(29), 10)).isEmpty();
         assertThat(repository.findClaimableReplicas(SERVER_ID, NOW.plusSeconds(30), 10))
                 .singleElement()
@@ -307,7 +408,8 @@ class MyBatisAppSourceRepositoryIntegrationTest {
 
         assertThat(repository.findClaimableReplicas(SERVER_ID, NOW, 10)).containsExactly(failed);
         AppSourceReplica claimed = repository.claimReplica(
-                        REPOSITORY_ID, 1L, SERVER_ID, "worker-new", NOW.plusSeconds(30), NOW)
+                        REPOSITORY_ID, 1L, SERVER_ID, retry.operationId(),
+                        "worker-new", NOW.plusSeconds(30), NOW)
                 .orElseThrow();
         assertThat(claimed.leaseOwner()).isEqualTo("worker-new");
         assertThat(repository.lockReplicaLeaseForUpdate(
@@ -414,10 +516,15 @@ class MyBatisAppSourceRepositoryIntegrationTest {
     void replicaLeaseWriteRejectsIllegalStatusTransition() {
         repository.insertSlotIfAbsent(slot(null, 0L, NOW));
         repository.saveSnapshot(snapshot("op-download", AppSourceSnapshotStatus.PENDING));
+        AppSourceOperation operation = operation("op-download", AppSourceOperationStatus.PENDING, null);
+        repository.saveOperation(operation);
+        assertThat(repository.upsertStep(retryStep(
+                "step-download-transition", operation.operationId(), AppSourceStepStatus.PENDING))).isTrue();
         assertThat(repository.insertReplicaIfAbsent(
                 replica(AppSourceReplicaStatus.PENDING, null, null, NOW))).isTrue();
         assertThat(repository.claimReplica(
-                REPOSITORY_ID, 1L, SERVER_ID, "worker-a", NOW.plusSeconds(30), NOW)).isPresent();
+                REPOSITORY_ID, 1L, SERVER_ID, operation.operationId(),
+                "worker-a", NOW.plusSeconds(30), NOW)).isPresent();
 
         AppSourceReplica regressed = replica(AppSourceReplicaStatus.PENDING, null, null, NOW.plusSeconds(1));
         assertThatThrownBy(() -> repository.updateReplicaIfLease(regressed, "worker-a", NOW.plusSeconds(1)))

@@ -26,6 +26,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Predicate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -116,12 +117,13 @@ public class AppSourceCleanupWorker {
                     && (readyLocalReplica(task, slot.activeGeneration())
                             || readyLocalReplica(task, slot.pendingGeneration()));
             cleanupGenerationStaging(target, task.generation());
+            // cleanup 与发布共用同一文件锁；拿到锁后的 backup 只可能是已完成发布遗留，且名称不命中 target/staging。
+            cleanupBackups(target);
             if (!newerGenerationOwnsSharedRoot) {
                 deleteSourceContentPreservingIndex(target);
                 if (snapshot.indexSha256() != null) {
                     indexes.ensureAuthoritativeIndex(target, snapshot);
                 }
-                cleanupBackups(target);
             } else if (slot.activeGeneration() != null) {
                 appSources.findSnapshot(task.repositoryId(), slot.activeGeneration())
                         .filter(active -> active.indexSha256() != null)
@@ -162,14 +164,30 @@ public class AppSourceCleanupWorker {
     }
 
     private void cleanupGenerationStaging(Path target, long generation) {
-        cleanupSiblingMatches(target, "." + target.getFileName() + ".g" + generation + ".", ".staging");
+        cleanupSiblingMatches(
+                target, "." + target.getFileName() + ".g" + generation + ".", ".staging", ignored -> true);
     }
 
     private void cleanupBackups(Path target) {
-        cleanupSiblingMatches(target, "." + target.getFileName() + ".", ".backup");
+        String prefix = "." + target.getFileName() + ".";
+        String suffix = ".backup";
+        cleanupSiblingMatches(target, prefix, suffix, name -> hasGeneratedBackupId(name, prefix, suffix));
     }
 
-    private void cleanupSiblingMatches(Path target, String prefix, String suffix) {
+    /** 发布者只生成标准 UUID backup；相似业务目录即使同前后缀也不得由清理任务删除。 */
+    private boolean hasGeneratedBackupId(String name, String prefix, String suffix) {
+        if (name.length() != prefix.length() + 36 + suffix.length()) {
+            return false;
+        }
+        String candidate = name.substring(prefix.length(), name.length() - suffix.length());
+        try {
+            return UUID.fromString(candidate).toString().equals(candidate);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
+    }
+
+    private void cleanupSiblingMatches(Path target, String prefix, String suffix, Predicate<String> nameFence) {
         Path parent = target.getParent();
         if (parent == null || !Files.isDirectory(parent, LinkOption.NOFOLLOW_LINKS)) {
             return;
@@ -178,7 +196,7 @@ public class AppSourceCleanupWorker {
         try (var siblings = Files.list(parent)) {
             for (Path sibling : siblings.toList()) {
                 String name = sibling.getFileName().toString();
-                if (name.startsWith(prefix) && name.endsWith(suffix)) {
+                if (name.startsWith(prefix) && name.endsWith(suffix) && nameFence.test(name)) {
                     deleteTree(sibling);
                 }
             }

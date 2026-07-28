@@ -65,7 +65,8 @@ class AppSourceReplicaWorkerTest {
         Fixture fixture = fixture();
         AppSourceReplica claimed = fixture.claimed();
         when(fixture.appSources.claimReplica(
-                        eq(REPOSITORY_ID), eq(2L), eq(SERVER_ID), any(), eq(NOW.plus(Duration.ofMinutes(10))), eq(NOW)))
+                        eq(REPOSITORY_ID), eq(2L), eq(SERVER_ID), eq(fixture.operation().operationId()), any(),
+                        eq(NOW.plus(Duration.ofMinutes(10))), eq(NOW)))
                 .thenReturn(Optional.of(claimed));
         when(fixture.appSources.findSnapshot(REPOSITORY_ID, 2L)).thenReturn(Optional.of(fixture.snapshot()));
         when(fixture.appSources.findInFlightOperationForReplica(REPOSITORY_ID, 2L, SERVER_ID))
@@ -118,7 +119,8 @@ class AppSourceReplicaWorkerTest {
     void workerPersistsOnlySafeFailureCodeAndMessage() {
         Fixture fixture = fixture();
         AppSourceReplica claimed = fixture.claimed();
-        when(fixture.appSources.claimReplica(any(), eq(2L), eq(SERVER_ID), any(), any(), eq(NOW)))
+        when(fixture.appSources.claimReplica(
+                        any(), eq(2L), eq(SERVER_ID), eq(fixture.operation().operationId()), any(), any(), eq(NOW)))
                 .thenReturn(Optional.of(claimed));
         when(fixture.appSources.findSnapshot(REPOSITORY_ID, 2L)).thenReturn(Optional.of(fixture.snapshot()));
         when(fixture.appSources.findInFlightOperationForReplica(REPOSITORY_ID, 2L, SERVER_ID))
@@ -150,7 +152,8 @@ class AppSourceReplicaWorkerTest {
                 "op-other-server", new ApplicationId("app-1"), REPOSITORY_ID, 2L, 2L,
                 new UserId("user-2"), AppSourceOperationType.RETRY_REPLICAS, "other-hash",
                 AppSourceOperationStatus.PENDING, "trace-other", NOW.minusSeconds(30), null);
-        when(fixture.appSources.claimReplica(any(), eq(2L), eq(SERVER_ID), any(), any(), eq(NOW)))
+        when(fixture.appSources.claimReplica(
+                        any(), eq(2L), eq(SERVER_ID), eq(serverOperation.operationId()), any(), any(), eq(NOW)))
                 .thenReturn(Optional.of(claimed));
         when(fixture.appSources.findSnapshot(REPOSITORY_ID, 2L)).thenReturn(Optional.of(fixture.snapshot()));
         when(fixture.appSources.findInFlightOperationForReplica(REPOSITORY_ID, 2L, SERVER_ID))
@@ -178,7 +181,8 @@ class AppSourceReplicaWorkerTest {
         when(clock.instant()).thenReturn(NOW, completedAt);
         Fixture fixture = fixture(clock);
         AppSourceReplica claimed = fixture.claimed();
-        when(fixture.appSources.claimReplica(any(), eq(2L), eq(SERVER_ID), any(), any(), eq(NOW)))
+        when(fixture.appSources.claimReplica(
+                        any(), eq(2L), eq(SERVER_ID), eq(fixture.operation().operationId()), any(), any(), eq(NOW)))
                 .thenReturn(Optional.of(claimed));
         when(fixture.appSources.findSnapshot(REPOSITORY_ID, 2L)).thenReturn(Optional.of(fixture.snapshot()));
         when(fixture.appSources.findInFlightOperationForReplica(REPOSITORY_ID, 2L, SERVER_ID))
@@ -212,7 +216,7 @@ class AppSourceReplicaWorkerTest {
         AppSourceReplicaWorker.Outcome outcome = fixture.worker.run(REPOSITORY_ID, 2L, SERVER_ID, "trace-1");
 
         assertThat(outcome).isEqualTo(AppSourceReplicaWorker.Outcome.SKIPPED_STALE);
-        verify(fixture.appSources, never()).claimReplica(any(), anyLong(), any(), any(), any(), any());
+        verify(fixture.appSources, never()).claimReplica(any(), anyLong(), any(), any(), any(), any(), any());
         verify(fixture.gitAccess, never()).resolve(any(), any());
         verify(fixture.materializer, never()).materialize(any(), any(), any());
         verify(fixture.results, never()).recordSuccess(any(), any(), any(), any(), any(), any());
@@ -222,7 +226,8 @@ class AppSourceReplicaWorkerTest {
     void leaseLostDuringAttemptResetStopsWithoutAnyLaterProgressOrReplicaResult() {
         Fixture fixture = fixture();
         AppSourceReplica claimed = fixture.claimed();
-        when(fixture.appSources.claimReplica(any(), eq(2L), eq(SERVER_ID), any(), any(), eq(NOW)))
+        when(fixture.appSources.claimReplica(
+                        any(), eq(2L), eq(SERVER_ID), eq(fixture.operation().operationId()), any(), any(), eq(NOW)))
                 .thenReturn(Optional.of(claimed));
         when(fixture.appSources.findSnapshot(REPOSITORY_ID, 2L)).thenReturn(Optional.of(fixture.snapshot()));
         when(fixture.appSources.findInFlightOperationForReplica(REPOSITORY_ID, 2L, SERVER_ID))
@@ -240,6 +245,27 @@ class AppSourceReplicaWorkerTest {
         verify(fixture.progress, never()).start(any(), any(), any(), any(), any());
         verify(fixture.progress, never()).succeed(any(), any(), any(), any(), any());
         verify(fixture.progress, never()).failCurrentAndSkipFollowing(any(), any(), any(), any(), any());
+        verify(fixture.materializer, never()).materialize(any(), any(), any());
+        verify(fixture.results, never()).recordSuccess(any(), any(), any(), any(), any(), any());
+        verify(fixture.results, never()).recordFailure(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void rejectedBoundClaimStopsBeforeProgressAndMaterialization() {
+        Fixture fixture = fixture();
+        when(fixture.appSources.findSnapshot(REPOSITORY_ID, 2L)).thenReturn(Optional.of(fixture.snapshot()));
+        when(fixture.appSources.findInFlightOperationForReplica(REPOSITORY_ID, 2L, SERVER_ID))
+                .thenReturn(Optional.of(fixture.operation()));
+        when(fixture.configuration.findRepository(REPOSITORY_ID)).thenReturn(Optional.of(fixture.repository()));
+        when(fixture.appSources.claimReplica(
+                        any(), eq(2L), eq(SERVER_ID), eq(fixture.operation().operationId()), any(), any(), eq(NOW)))
+                .thenReturn(Optional.empty());
+
+        assertThat(fixture.worker.run(REPOSITORY_ID, 2L, SERVER_ID, "trace-1"))
+                .isEqualTo(AppSourceReplicaWorker.Outcome.NOT_CLAIMED);
+
+        verify(fixture.progress, never()).resetForAttempt(any(), any(), any(), any());
+        verify(fixture.progress, never()).start(any(), any(), any(), any(), any());
         verify(fixture.materializer, never()).materialize(any(), any(), any());
         verify(fixture.results, never()).recordSuccess(any(), any(), any(), any(), any(), any());
         verify(fixture.results, never()).recordFailure(any(), any(), any(), any(), any(), any());

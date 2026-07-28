@@ -49,10 +49,15 @@ public interface AppSourceRepository extends AppSourceRepositoryHistory {
     /** 只在该 generation/服务器副本不存在时建档，迟到初始化不得覆盖已有运行态。 */
     boolean insertReplicaIfAbsent(AppSourceReplica replica);
 
+    /**
+     * 原子认领指定操作绑定的副本；操作已终态或该服务器不存在执行步骤时拒绝迟到 worker。
+     * 普通副本还必须有可领取步骤，只有租约已过期的 RUNNING 副本可用旧 attempt 接管并在认领后重置时间线。
+     */
     Optional<AppSourceReplica> claimReplica(
             CodeRepositoryId repositoryId,
             long generation,
             LinuxServerId linuxServerId,
+            String operationId,
             String leaseOwner,
             Instant leaseUntil,
             Instant now);

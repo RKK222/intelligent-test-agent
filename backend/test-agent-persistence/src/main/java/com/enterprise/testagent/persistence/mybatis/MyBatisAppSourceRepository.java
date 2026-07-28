@@ -167,11 +167,13 @@ public class MyBatisAppSourceRepository implements AppSourceRepository {
             CodeRepositoryId repositoryId,
             long generation,
             LinuxServerId linuxServerId,
+            String operationId,
             String leaseOwner,
             Instant leaseUntil,
             Instant now) {
         if (mapper.claimReplica(
-                repositoryId.value(), generation, linuxServerId.value(), leaseOwner, leaseUntil, now) != 1) {
+                repositoryId.value(), generation, linuxServerId.value(), operationId,
+                leaseOwner, leaseUntil, now) != 1) {
             return Optional.empty();
         }
         return findReplica(repositoryId, generation, linuxServerId);

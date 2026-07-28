@@ -9,6 +9,7 @@
 - `AppSourceRepositorySlot` 每个 repositoryId 一行，通过 active/pending generation、`nextGeneration` 和 `lockVersion` 串行化代次分配。
 - `AppSourceSnapshot` 以 repositoryId+generation 标识，冻结仓库英文名、`PERSONAL/TEAM`、owner、分支、目标提交和 `List<AppSourceSelectedPath>`；接受后只允许状态与 64 位十六进制索引摘要推进，选择内容不修改。
 - `AppSourceReplica` 以 repositoryId+generation+linuxServerId 标识，初始化只在记录不存在时插入，后续变更必须通过 generation、lease owner、绝对 lease deadline 和合法状态流转共同隔离过期 worker。
+- 副本 claim 原子绑定精确 operationId、非终态 operation 和同服务器可领取步骤；过期 `RUNNING` 副本可作为旧 attempt 接管锚点，随后统一重置时间线，不需要先写步骤。
 - `AppSourceOperation` 记录用户意图与 target generation，全局/服务器 `AppSourceOperationStep` 分开投影进度且终态不可被迟到执行者回退；cleanup 以每服务器绝对 `deleteAt` 独立认领，失败可退避，旧任务可被新代次 supersede。
 - `AppSourceRecentSelection` 每用户唯一且不保存 workspaceId，避免用户进程换服务器后继续指向旧物理副本。
 
