@@ -417,6 +417,16 @@ watch(() => props.workspaceId, async () => {
   else await Promise.all([loadAssets(), refreshCount(), refreshOverview()]);
 });
 
+// 权限可能在弹窗打开期间被撤销；立即收敛 mutation 状态，避免保留旧确认入口。
+watch(() => props.canManage, (canManage) => {
+  if (canManage) return;
+  publishDialog.value = false;
+  referenceDialog.value = false;
+  removeDialog.value = false;
+  updateOperation.value = null;
+  activeConflictPath.value = null;
+});
+
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 watch(keyword, () => {
   if (searchTimer) clearTimeout(searchTimer);

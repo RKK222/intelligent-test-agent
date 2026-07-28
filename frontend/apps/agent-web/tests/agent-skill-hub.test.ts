@@ -103,7 +103,8 @@ describe("AgentSkillHub", () => {
       workspaceId: "wrk_personal",
       canManage: false
     });
-    await fireEvent.click(view.getByText("写入引用"));
+
+    expect(view.queryByText("写入引用")).toBeNull();
 
     expect(api.createAgentSkillHubReference).not.toHaveBeenCalled();
     expect(view.emitted().changed).toBeUndefined();

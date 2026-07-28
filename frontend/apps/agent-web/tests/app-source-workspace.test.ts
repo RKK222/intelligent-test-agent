@@ -8,10 +8,12 @@ import {
   appSourceProgressBelongsToObservation,
   appSourceTreeAuthorityMatches,
   claimAppSourceTerminalOperation,
+  diffFileCanWrite,
   ordinaryWorkspaceCanWrite,
   sourceContextFromOpen
 } from "../src/components/app-source-workspace";
 import agentWorkbenchSource from "../src/components/AgentWorkbench.vue?raw";
+import diffViewerSource from "../../../packages/diff-viewer/src/DiffViewer.vue?raw";
 
 describe("app source workspace state", () => {
   it("keeps ordinary workspace capabilities while blocking Git and application Agent publication", () => {
@@ -53,6 +55,32 @@ describe("app source workspace state", () => {
     expect(ordinaryWorkspaceCanWrite("MANAGED", "pws-personal", "wrk-personal")).toBe(true);
     expect(ordinaryWorkspaceCanWrite("MANAGED", undefined, "wrk-feature-readonly")).toBe(false);
     expect(ordinaryWorkspaceCanWrite("APP_SOURCE", undefined, undefined)).toBe(false);
+  });
+
+  it("double-gates Diff saves by workspace kind, file scope, and managed roles", () => {
+    const source = {
+      workspaceKind: "APP_SOURCE" as const,
+      ordinaryWorkspaceWritable: true,
+      isSuperAdmin: true,
+      isAppAdmin: true
+    };
+    expect(diffFileCanWrite({ ...source, agentScope: null })).toBe(true);
+    expect(diffFileCanWrite({ ...source, agentScope: "PUBLIC" })).toBe(false);
+    expect(diffFileCanWrite({ ...source, agentScope: "WORKSPACE" })).toBe(false);
+
+    const managed = {
+      workspaceKind: "MANAGED" as const,
+      ordinaryWorkspaceWritable: false
+    };
+    expect(diffFileCanWrite({ ...managed, agentScope: "PUBLIC", isSuperAdmin: true, isAppAdmin: true })).toBe(true);
+    expect(diffFileCanWrite({ ...managed, agentScope: "PUBLIC", isSuperAdmin: false, isAppAdmin: true })).toBe(false);
+    expect(diffFileCanWrite({ ...managed, agentScope: "WORKSPACE", isSuperAdmin: false, isAppAdmin: true })).toBe(true);
+    expect(diffFileCanWrite({ ...managed, agentScope: "WORKSPACE", isSuperAdmin: false, isAppAdmin: false })).toBe(false);
+
+    expect(agentWorkbenchSource).toContain(':writable="canSaveSelectedDiffFile"');
+    expect(agentWorkbenchSource.match(/canSaveDiffFile\(path\)/g)).toHaveLength(2);
+    expect(diffViewerSource).toContain("if (!props.writable || !isDirty.value || !selected.value) return;");
+    expect(diffViewerSource).toContain("readOnly: !isVcsOrAgent || !writable");
   });
 
   it("uses the shared ordinary-write guard in every structural mutation handler", () => {

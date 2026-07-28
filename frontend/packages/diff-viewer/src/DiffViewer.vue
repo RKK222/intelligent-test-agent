@@ -9,6 +9,8 @@ export type DiffViewerProps = {
   viewMode?: "split" | "unified";
   accepting?: boolean;
   rejecting?: boolean;
+  /** 父工作台按当前 workspace 与文件作用域计算的写能力；保存快捷键也必须服从该门禁。 */
+  writable?: boolean;
 };
 
 type FilePromptPart = Extract<PromptPart, { type: "file" }>;
@@ -23,7 +25,8 @@ import { parseUnifiedPatch } from "./unifiedPatch";
 
 const props = withDefaults(defineProps<DiffViewerProps>(), {
   source: "run",
-  viewMode: "split"
+  viewMode: "split",
+  writable: true
 });
 const emit = defineEmits<{
   selectFile: [path: string];
@@ -152,7 +155,7 @@ async function initMonaco(el: HTMLElement) {
   const isVcsOrAgent = props.source === "vcs" || props.source === "agent";
   const inst = monacoLib.editor.createDiffEditor(el, {
     theme: "ta-diff-light",
-    readOnly: !isVcsOrAgent,
+    readOnly: !isVcsOrAgent || !props.writable,
     originalEditable: false,
     renderSideBySide: isVcsOrAgent ? true : props.viewMode === "split",
     useInlineViewWhenSpaceIsLimited: false,
@@ -201,7 +204,7 @@ watch(
 );
 
 function handleSave() {
-  if (!isDirty.value || !selected.value) return;
+  if (!props.writable || !isDirty.value || !selected.value) return;
   emit("saveFile", selected.value.path, modifiedModel?.getValue() ?? "");
 }
 
@@ -235,11 +238,11 @@ watch(
 );
 
 watch(
-  () => [props.source, props.viewMode] as const,
-  ([src, mode]) => {
+  () => [props.source, props.viewMode, props.writable] as const,
+  ([src, mode, writable]) => {
     const isVcsOrAgent = src === "vcs" || src === "agent";
     diffEditor.value?.updateOptions({
-      readOnly: !isVcsOrAgent,
+      readOnly: !isVcsOrAgent || !writable,
       renderSideBySide: isVcsOrAgent ? true : mode === "split"
     });
   }
@@ -289,7 +292,7 @@ onBeforeUnmount(() => {
         </span>
         <span v-if="isDirty" class="h-1.5 w-1.5 rounded-full bg-amber-500" title="未保存的修改" />
         <Button 
-          v-if="isDirty" 
+          v-if="isDirty && writable"
           size="sm" 
           variant="primary" 
           class="bg-amber-600 hover:bg-amber-700 border-none text-white h-6 py-0 px-2 text-[10px] font-semibold flex items-center gap-1 shadow-sm transition-all"
@@ -366,13 +369,13 @@ onBeforeUnmount(() => {
           </span>
           <span class="text-slate-300 select-none">|</span>
           <span class="flex items-center gap-1 text-slate-700">
-            <span class="text-emerald-500 font-bold">▶</span> 本地修改 · 可编辑（Cmd+S 保存）
+            <span class="text-emerald-500 font-bold">▶</span> {{ writable ? "本地修改 · 可编辑（Cmd+S 保存）" : "本地修改 · 只读" }}
           </span>
         </div>
         <div v-else-if="(source === 'vcs' || source === 'agent') && viewMode === 'unified'" class="bg-[#fafafa] px-3 py-1 text-[11px] text-slate-700 font-semibold">
           <div class="flex items-center justify-center gap-2">
             <span class="flex items-center gap-1">
-              <span class="text-emerald-500 font-bold">▶</span> 统一视图 · 可直接编辑（Cmd+S 保存）
+              <span class="text-emerald-500 font-bold">▶</span> {{ writable ? "统一视图 · 可直接编辑（Cmd+S 保存）" : "统一视图 · 只读" }}
             </span>
           </div>
         </div>

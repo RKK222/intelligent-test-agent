@@ -103,6 +103,7 @@ import {
   appSourceTreeAuthorityMatches,
   appSourceWorkspaceCapabilities,
   claimAppSourceTerminalOperation,
+  diffFileCanWrite,
   ordinaryWorkspaceCanWrite,
   sourceContextFromOpen,
   type AppSourceProgressAuthority,
@@ -647,11 +648,16 @@ const appSourceSubmitting = ref(false);
 const appSourceMaterializationError = ref<string | null>(null);
 const appSourceProgressError = ref<string | null>(null);
 let appSourceProgressConnection: AppSourceProgressConnection | null = null;
+let appSourceProgressConnectAbortController: AbortController | null = null;
 let appSourceProgressReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let appSourceProgressReconnectAttempt = 0;
 let appSourceProgressConnectInFlight = false;
+let appSourceProgressConnectRequestToken = 0;
+let appSourceProgressConnectionEpoch = 0;
+let activeAppSourceProgressConnectionEpoch = 0;
 let appSourceIntentAuthorityToken = 0;
 let appSourceIntentAuthority: AppSourceIntentAuthority | null = null;
+let appSourceRepositoryListAuthorityToken = 0;
 let appSourceDialogAuthorityToken = 0;
 let appSourceTreeAuthorityToken = 0;
 let appSourceTreeAuthority: AppSourceTreeAuthority | null = null;
@@ -3817,6 +3823,11 @@ function closeAppSourceProgressObservation() {
   if (appSourceProgressReconnectTimer) clearTimeout(appSourceProgressReconnectTimer);
   appSourceProgressReconnectTimer = null;
   appSourceProgressReconnectAttempt = 0;
+  appSourceProgressConnectRequestToken += 1;
+  appSourceProgressConnectInFlight = false;
+  activeAppSourceProgressConnectionEpoch = ++appSourceProgressConnectionEpoch;
+  appSourceProgressConnectAbortController?.abort();
+  appSourceProgressConnectAbortController = null;
   appSourceProgressConnection?.close();
   appSourceProgressConnection = null;
   appSourceProgressAuthorityToken += 1;
@@ -3849,6 +3860,12 @@ function appSourceIntentIsCurrent(authority: AppSourceIntentAuthority) {
   return appSourceIntentAuthorityMatches(authority, appSourceIntentAuthority);
 }
 
+/** managed/source 共用同一 selection authority；新托管意图从入口处就取消所有 pending source。 */
+function beginManagedWorkspaceIntent(appId = selectedAppId.value) {
+  teardownAppSourceInteractions();
+  return beginAppSourceIntent(appId, undefined, null, "MANAGED");
+}
+
 function invalidateAppSourceTreeAuthority() {
   appSourceTreeAuthorityToken += 1;
   appSourceTreeAuthority = null;
@@ -3861,7 +3878,7 @@ function invalidateAppSourceTreeAuthority() {
 /**
  * 源码入口、四步弹窗与进度连接属于同一应用选择；切应用/撤权/返回托管工作区时一次性失效。
  */
-function teardownAppSourceInteractions() {
+function teardownAppSourceInteractions(options: { preserveWorkspaceSelectionIntent?: boolean } = {}) {
   appSourcePickerOpen.value = false;
   appSourcePickerLoading.value = false;
   appSourcePickerError.value = null;
@@ -3878,7 +3895,8 @@ function teardownAppSourceInteractions() {
   appSourceOperation.value = null;
   appSourceSubmitting.value = false;
   appSourceRecoveryInFlight = null;
-  invalidateAppSourceIntentAuthority();
+  appSourceRepositoryListAuthorityToken += 1;
+  if (!options.preserveWorkspaceSelectionIntent) invalidateAppSourceIntentAuthority();
   invalidateAppSourceTreeAuthority();
   closeAppSourceProgressObservation();
 }
@@ -3887,22 +3905,22 @@ async function loadAppSourceRepositories() {
   const appId = selectedAppId.value;
   if (!appId) return;
   const workspaceKind = selectedWorkspaceKind.value;
-  const authority = beginAppSourceIntent(appId, undefined, null, workspaceKind);
+  const authority = ++appSourceRepositoryListAuthorityToken;
   appSourcePickerLoading.value = true;
   appSourcePickerError.value = null;
   try {
     const repositories = await api.listAppSourceRepositories(appId);
     if (
-      !appSourceIntentIsCurrent(authority)
+      authority !== appSourceRepositoryListAuthorityToken
       || selectedAppId.value !== appId
       || selectedWorkspaceKind.value !== workspaceKind
     ) return;
     appSourceRepositories.value = repositories;
   } catch (error) {
-    if (!appSourceIntentIsCurrent(authority)) return;
+    if (authority !== appSourceRepositoryListAuthorityToken) return;
     appSourcePickerError.value = errorFeedback("加载应用源码失败", error).description ?? "暂时无法读取源码状态";
   } finally {
-    if (appSourceIntentIsCurrent(authority)) appSourcePickerLoading.value = false;
+    if (authority === appSourceRepositoryListAuthorityToken) appSourcePickerLoading.value = false;
   }
 }
 
@@ -3915,6 +3933,7 @@ function openAppSourcePicker() {
 function closeAppSourcePicker() {
   appSourcePickerOpen.value = false;
   appSourcePickerLoading.value = false;
+  appSourceRepositoryListAuthorityToken += 1;
   invalidateAppSourceIntentAuthority();
 }
 
@@ -3939,10 +3958,12 @@ async function activateAppSourceOpenResult(
   const workspace = await api.getWorkspace(result.workspaceId);
   if (!appSourceIntentIsCurrent(authority)) return false;
   selectedAppId.value = result.appId;
-  const workspaceSwitch = switchWorkspace(workspace, { kind: "APP_SOURCE" });
+  const switched = await switchWorkspace(workspace, {
+    kind: "APP_SOURCE",
+    isCurrent: () => appSourceIntentIsCurrent(authority)
+  });
+  if (!switched || !appSourceIntentIsCurrent(authority)) return false;
   appSourceContext.value = context;
-  await workspaceSwitch;
-  if (!appSourceIntentIsCurrent(authority)) return false;
   rememberPersonalWorkspace(undefined, undefined);
   return true;
 }
@@ -4040,8 +4061,8 @@ async function loadAppSourceTree(branch: string, path: string) {
     const snapshot = await api.getAppSourceTreeSnapshot(appId, repository.repositoryId, branch, path || ".");
     if (!appSourceTreeAuthorityMatches(requestAuthority, appSourceTreeAuthority)) return;
     if (path && appSourceTreeSnapshot.value && appSourceTreeSnapshot.value.targetCommit !== snapshot.targetCommit) {
-      appSourceTreeSnapshot.value = null;
-      appSourceTreeBranch.value = null;
+      // child 漂移会失效整棵树的 authority；其它并发 child 即使随后返回也不能伪装成 root。
+      invalidateAppSourceTreeAuthority();
       appSourceTreeError.value = "固定提交已变化，请重新加载当前分支目录树";
       return;
     }
@@ -4095,6 +4116,9 @@ async function applyCompletedAppSourceOperation(operation: AppSourceOperation) {
     }
     appSourceProgressError.value = errorFeedback("打开新源码 generation 失败", error).description
       ?? "服务暂时不可用，可稍后重试打开源码。";
+  } finally {
+    // 终态刷新只服务于本次 source selection；用户已开始打开其它源码/托管工作区后不得再抢占 intent。
+    if (appSourceIntentIsCurrent(authority)) await loadAppSourceRepositories();
   }
 }
 
@@ -4130,7 +4154,7 @@ function completeAppSourceOperationOnce(operation: AppSourceOperation, authority
   ) return;
   closeAppSourceProgressObservation();
   if (["SUCCEEDED", "PARTIAL_FAILED"].includes(operation.status)) {
-    void applyCompletedAppSourceOperation(operation).finally(() => void loadAppSourceRepositories());
+    void applyCompletedAppSourceOperation(operation);
   } else {
     void loadAppSourceRepositories();
   }
@@ -4144,6 +4168,14 @@ function appSourceProgressAuthorityIsCurrent(authority: AppSourceProgressAuthori
       repositoryId: authority.repositoryId,
       targetGeneration: authority.targetGeneration
     });
+}
+
+function appSourceProgressConnectionIsCurrent(
+  authority: AppSourceProgressAuthority,
+  connectionEpoch: number
+) {
+  return connectionEpoch === activeAppSourceProgressConnectionEpoch
+    && appSourceProgressAuthorityIsCurrent(authority);
 }
 
 function scheduleAppSourceProgressReconnect(authority: AppSourceProgressAuthority) {
@@ -4161,9 +4193,13 @@ function scheduleAppSourceProgressReconnect(authority: AppSourceProgressAuthorit
   }, delay);
 }
 
-function handleAppSourceProgress(event: AppSourceProgressEvent, authority: AppSourceProgressAuthority) {
+function handleAppSourceProgress(
+  event: AppSourceProgressEvent,
+  authority: AppSourceProgressAuthority,
+  connectionEpoch: number
+) {
   if (
-    appSourceProgressAuthority?.token !== authority.token
+    !appSourceProgressConnectionIsCurrent(authority, connectionEpoch)
     || !appSourceProgressBelongsToObservation(
       authority,
       currentAppSourceProgressContext(),
@@ -4192,9 +4228,9 @@ async function connectAppSourceProgressObservation(authority: AppSourceProgressA
     scheduleAppSourceProgressReconnect(authority);
     return;
   }
+  const connectRequestToken = ++appSourceProgressConnectRequestToken;
+  let connectionEpoch = 0;
   appSourceProgressConnectInFlight = true;
-  appSourceProgressConnection?.close();
-  appSourceProgressConnection = null;
   try {
     // 首连与每次重连都先串行读取数据库 snapshot，再申请一次性新 ticket。
     const snapshot = await api.getAppSourceOperation(authority.operationId);
@@ -4212,24 +4248,37 @@ async function connectAppSourceProgressObservation(authority: AppSourceProgressA
       completeAppSourceOperationOnce(snapshot, authority);
       return;
     }
+    connectionEpoch = ++appSourceProgressConnectionEpoch;
+    activeAppSourceProgressConnectionEpoch = connectionEpoch;
+    appSourceProgressConnectAbortController?.abort();
+    appSourceProgressConnectAbortController = new AbortController();
+    appSourceProgressConnection?.close();
+    appSourceProgressConnection = null;
     const connection = await api.connectAppSourceProgress(
       authority.operationId,
-      (event) => handleAppSourceProgress(event, authority)
+      (event) => handleAppSourceProgress(event, authority, connectionEpoch),
+      { signal: appSourceProgressConnectAbortController.signal }
     );
-    if (!appSourceProgressAuthorityIsCurrent(authority)) {
+    if (!appSourceProgressConnectionIsCurrent(authority, connectionEpoch)) {
       connection.close();
       return;
     }
     appSourceProgressConnection = connection;
-    appSourceProgressReconnectAttempt = 0;
     appSourceProgressError.value = null;
   } catch (error) {
-    if (appSourceProgressAuthorityIsCurrent(authority)) {
+    if (
+      (connectionEpoch === 0
+        ? appSourceProgressAuthorityIsCurrent(authority)
+        : appSourceProgressConnectionIsCurrent(authority, connectionEpoch))
+      && (error as { name?: string }).name !== "AbortError"
+    ) {
       appSourceProgressError.value = errorFeedback("恢复源码进度失败", error).description ?? "请关闭并重新打开后重试";
       scheduleAppSourceProgressReconnect(authority);
     }
   } finally {
-    appSourceProgressConnectInFlight = false;
+    if (connectRequestToken === appSourceProgressConnectRequestToken) {
+      appSourceProgressConnectInFlight = false;
+    }
   }
 }
 
@@ -4556,15 +4605,23 @@ async function switchWorkspace(
     preserveConversationInteraction?: boolean;
     awaitDirectory?: boolean;
     kind?: SelectedWorkspaceKind;
+    isCurrent?: () => boolean;
   } = {}
 ) {
+  const isCurrent = options.isCurrent ?? (() => true);
+  if (!isCurrent()) return false;
   const nextKind = options.kind ?? "MANAGED";
   if (nextKind === "MANAGED" && selectedWorkspaceKind.value === "APP_SOURCE") {
     // 切回托管版本或非应用个人工作区必须清独立 recent；失败也不能继续暴露旧源码能力。
-    teardownAppSourceInteractions();
+    teardownAppSourceInteractions({ preserveWorkspaceSelectionIntent: true });
     void api.clearRecentAppSource().catch(() => undefined);
     selectedWorkspaceKind.value = "MANAGED";
     appSourceContext.value = null;
+  }
+  if (!isCurrent()) return false;
+  if (nextKind === "APP_SOURCE") {
+    // 源码快照没有托管 Git pull 能力；切换边界立即移除旧确认/结果弹窗。
+    resetPersonalPullDialog();
   }
   if (!options.preserveConversationInteraction) {
     invalidateConversationInteraction();
@@ -4586,6 +4643,7 @@ async function switchWorkspace(
     // 历史正文不应被工作区文件树阻塞；目录仍使用同一 generation 后台加载。
     void directoryLoad.catch(() => undefined);
   }
+  return isCurrent();
 }
 
 // 根据当前选中的 workspace 匹配出对应的应用版本（用于两级菜单高亮）。
@@ -4621,8 +4679,11 @@ async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemp
     feedback.value = { kind: "info", title: "源码快照不能切换应用版本", description: "请先返回应用工作区。" };
     return;
   }
+  const selectionAuthority = beginManagedWorkspaceIntent(payload.version.appId ?? selectedAppId.value);
+  const selectionIsCurrent = () => appSourceIntentIsCurrent(selectionAuthority);
   try {
     const gitAccess = await api.checkWorkspaceVersionGitAccess(payload.version.versionId);
+    if (!selectionIsCurrent()) return;
     if (!gitAccess.accessible) {
       if (gitAccess.reason === "SSH_KEY_MISSING") {
         await ElMessageBox.alert(
@@ -4648,6 +4709,7 @@ async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemp
     }
     invalidateConversationInteraction();
     const defaultPw = await api.ensureDefaultPersonalWorkspace(payload.version.versionId);
+    if (!selectionIsCurrent()) return;
     const runtimeWorkspaceId = defaultPw.runtimeWorkspace?.workspaceId;
     if (!runtimeWorkspaceId) {
       feedback.value = { kind: "error", title: "该版本未关联运行态工作区", description: "请先在平台侧初始化版本。" };
@@ -4659,13 +4721,15 @@ async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemp
       return;
     }
     const workspace = await api.getWorkspace(runtimeWorkspaceId);
-    await applyManagedWorkspace(workspace, {
+    if (!selectionIsCurrent()) return;
+    const applied = await applyManagedWorkspace(workspace, selectionIsCurrent, {
       successTitle: "已切换应用版本",
       successDescription: `${payload.template.workspaceName} · ${payload.version.version} (个人空间: default)`
     });
+    if (!applied || !selectionIsCurrent()) return;
     rememberPersonalWorkspace(defaultPw.personalWorkspaceId, defaultPw.personalWorkspaceBranch);
   } catch (error) {
-    feedback.value = errorFeedback("切换应用版本失败", error);
+    if (selectionIsCurrent()) feedback.value = errorFeedback("切换应用版本失败", error);
   }
 }
 
@@ -4677,8 +4741,8 @@ async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemp
 // 非托管工作区（不属于任何应用）的 markRecent 会抛 NOT_FOUND，忽略该错误即可，不阻塞切换。
 async function applyManagedWorkspace(
   workspace: Workspace,
-  feedbackDetail?: { successTitle: string; successDescription: string },
-  isCurrent: () => boolean = () => true
+  isCurrent: () => boolean,
+  feedbackDetail?: { successTitle: string; successDescription: string }
 ) {
   let resolvedWorkspace = workspace;
   try {
@@ -4695,8 +4759,8 @@ async function applyManagedWorkspace(
   }
   // 应用目录刷新可能在 recent 请求期间撤销当前应用；迟到响应不得把已隐藏工作区重新挂回页面。
   if (!isCurrent()) return false;
-  await switchWorkspace(resolvedWorkspace);
-  if (!isCurrent()) return false;
+  const switched = await switchWorkspace(resolvedWorkspace, { isCurrent });
+  if (!switched || !isCurrent()) return false;
   if (feedbackDetail) {
     feedback.value = { kind: "info", title: feedbackDetail.successTitle, description: feedbackDetail.successDescription };
   }
@@ -4777,6 +4841,18 @@ const personalPullDialog = ref<PersonalPullDialogState>({
   errorTitle: "",
   errorDescription: ""
 });
+
+function resetPersonalPullDialog() {
+  personalPullDialog.value = {
+    open: false,
+    phase: "CONFIRM",
+    personalWorkspaceId: null,
+    pullResult: null,
+    result: null,
+    errorTitle: "",
+    errorDescription: ""
+  };
+}
 
 /** 后端返回仓库级阻塞文件；前端只做兼容归一化，不猜测其它用户或 workspace。 */
 function personalPullBlockers(error: unknown): WorkspaceGitUpdateBlocker[] {
@@ -4867,7 +4943,11 @@ function cancelPersonalPullDialog() {
 
 function confirmPersonalPull(doNotShowAgain: boolean) {
   const personalWorkspaceId = personalPullDialog.value.personalWorkspaceId;
-  if (!personalWorkspaceId || personalPullDialog.value.phase !== "CONFIRM") return;
+  if (
+    !appSourceCapabilities.value.canUseGitPublication
+    || !personalWorkspaceId
+    || personalPullDialog.value.phase !== "CONFIRM"
+  ) return;
   if (doNotShowAgain) dismissPersonalPullConfirm(authStore.currentUser?.userId);
   personalPullDialog.value.phase = "PULLING";
   void executePersonalWorkspacePull(personalWorkspaceId);
@@ -4964,12 +5044,15 @@ async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemp
     feedback.value = { kind: "error", title: "未选择应用", description: "请先选择要新增版本的应用。" };
     return;
   }
+  const selectionAuthority = beginManagedWorkspaceIntent(appId);
+  const selectionIsCurrent = () => appSourceIntentIsCurrent(selectionAuthority);
   creatingVersion.value = true;
   try {
     const response = await api.createWorkspaceVersion(appId, payload.template.workspaceId, {
       version: payload.version,
       branch: payload.branch
     });
+    if (!selectionIsCurrent()) return;
     // 失效版本查询：清掉缓存的 versionsByTemplateId 条目，并加入 loadedTemplateIds
     // 让 useQueries 在下一个 tick 重新发起 listWorkspaceVersions。
     const nextCache = { ...versionsByTemplateId.value };
@@ -4987,11 +5070,13 @@ async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemp
     }
     // 确保默认个人工作区存在，并切换到该个人工作区的运行态 workspace。
     const defaultPw = await api.ensureDefaultPersonalWorkspace(response.versionId);
+    if (!selectionIsCurrent()) return;
     if (defaultPw.runtimeWorkspace?.workspaceId) {
-      await applyManagedWorkspace(defaultPw.runtimeWorkspace, {
+      const applied = await applyManagedWorkspace(defaultPw.runtimeWorkspace, selectionIsCurrent, {
         successTitle: "已切换应用版本",
         successDescription: `${payload.template.workspaceName} · ${response.version}`
       });
+      if (!applied || !selectionIsCurrent()) return;
       rememberPersonalWorkspace(defaultPw.personalWorkspaceId, defaultPw.personalWorkspaceBranch);
     } else {
       rememberPersonalWorkspace(defaultPw.personalWorkspaceId, defaultPw.personalWorkspaceBranch);
@@ -5002,7 +5087,7 @@ async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemp
       };
     }
   } catch (error) {
-    feedback.value = errorFeedback("新增版本失败", error);
+    if (selectionIsCurrent()) feedback.value = errorFeedback("新增版本失败", error);
   } finally {
     creatingVersion.value = false;
   }
@@ -5026,19 +5111,21 @@ async function handleSelectApp(appId: string) {
   resetWorkspaceState();
   selectedWorkspaceId.value = undefined;
   selectedAppId.value = appId;
+  const workspaceSelectionAuthority = beginAppSourceIntent(appId, undefined, null, "MANAGED");
   const selectionIsCurrent = () =>
     selectionSeq === appSelectionSeq
     && selectedAppId.value === appId
-    && applicationCatalog.value.some((app) => app.appId === appId);
+    && applicationCatalog.value.some((app) => app.appId === appId)
+    && appSourceIntentIsCurrent(workspaceSelectionAuthority);
   try {
     // 只有当前用户当前应用 recent 能反查到 versionId 时，才加载对应 default 私人 worktree。
     // 无历史时只切应用并保持工作区空态，footer 仍可新增版本或选择私人工作区。
     const pick = await pickDefaultWorkspaceForApp(appId);
-    if (selectionSeq !== appSelectionSeq) {
+    if (!selectionIsCurrent()) {
       return;
     }
     if (pick) {
-      const applied = await applyManagedWorkspace(pick.workspace, undefined, selectionIsCurrent);
+      const applied = await applyManagedWorkspace(pick.workspace, selectionIsCurrent);
       if (!applied || !selectionIsCurrent()) {
         return;
       }
@@ -5048,7 +5135,9 @@ async function handleSelectApp(appId: string) {
     // 应用没有可用 recent/versionId 时保持空态，不回退到普通本机目录选择。
   } catch (error) {
     const currentApp = applicationCatalog.value.find((app) => app.appId === appId);
-    feedback.value = errorFeedback("切换应用失败", error, { appId, appName: currentApp?.appName });
+    if (selectionIsCurrent()) {
+      feedback.value = errorFeedback("切换应用失败", error, { appId, appName: currentApp?.appName });
+    }
   } finally {
     if (selectionSeq === appSelectionSeq) {
       selectingAppId = undefined;
@@ -5057,6 +5146,8 @@ async function handleSelectApp(appId: string) {
 }
 
 async function selectServerWorkspaceDirectory(payload: { server: WorkspaceBackendServer; path: string }) {
+  const selectionAuthority = beginManagedWorkspaceIntent();
+  const selectionIsCurrent = () => appSourceIntentIsCurrent(selectionAuthority);
   invalidateConversationInteraction();
   serverWorkspacePickerLoading.value = true;
   try {
@@ -5069,11 +5160,13 @@ async function selectServerWorkspaceDirectory(payload: { server: WorkspaceBacken
         name: workspaceNameFromPath(payload.path),
         rootPath: payload.path
       }));
-    await switchWorkspace(workspace);
+    if (!selectionIsCurrent()) return;
+    const switched = await switchWorkspace(workspace, { isCurrent: selectionIsCurrent });
+    if (!switched || !selectionIsCurrent()) return;
     serverWorkspacePickerOpen.value = false;
     serverWorkspaceDirectory.value = null;
   } catch (error) {
-    feedback.value = errorFeedback("切换服务器 Workspace 失败", error);
+    if (selectionIsCurrent()) feedback.value = errorFeedback("切换服务器 Workspace 失败", error);
   } finally {
     serverWorkspacePickerLoading.value = false;
   }
@@ -8236,8 +8329,25 @@ function generateEntireFilePatch(path: string, original: string, modified: strin
   return patch;
 }
 
+function canSaveDiffFile(path: string | undefined) {
+  if (!path) return false;
+  const agent = isAgentFilePath(path) ? agentFileInfo(path) : null;
+  return diffFileCanWrite({
+    workspaceKind: selectedWorkspaceKind.value,
+    ordinaryWorkspaceWritable: canWriteSelectedWorkspace.value,
+    agentScope: agent?.scope ?? null,
+    isSuperAdmin: isSuperAdmin.value,
+    isAppAdmin: isAppAdmin.value
+  });
+}
+
+const canSaveSelectedDiffFile = computed(() => canSaveDiffFile(selectedDiffPath.value));
+
 const saveDiffFileMutation = useMutation({
   mutationFn: async ({ path, content }: { path: string; content: string }) => {
+    if (!canSaveDiffFile(path)) {
+      throw new Error("当前 Workspace 不允许保存该 Diff 文件");
+    }
     if (workbench.useMockTestData) {
       const vcsFile = mockVcsDiffFiles.find((f) => f.path === path);
       if (vcsFile) {
@@ -8309,6 +8419,14 @@ const saveDiffFileMutation = useMutation({
 });
 
 function handleSaveDiffFile(path: string, content: string) {
+  if (!canSaveDiffFile(path)) {
+    feedback.value = {
+      kind: "info",
+      title: "当前文件不可保存",
+      description: "源码快照只允许保存普通源码文件，不能修改 Agent 配置。"
+    };
+    return;
+  }
   saveDiffFileMutation.mutate({ path, content });
 }
 
@@ -8513,15 +8631,17 @@ async function switchToHistorySessionWorkspace(
 ): Promise<string | null> {
   const expectedAppId = selected.workspaceContext?.appId?.trim();
   const requiresManagedWorkspace = Boolean(expectedAppId);
+  const selectionAuthority = beginManagedWorkspaceIntent(expectedAppId || selectedAppId.value);
+  const selectionIsCurrent = () => interactionIsCurrent() && appSourceIntentIsCurrent(selectionAuthority);
   try {
     let workspace = await api.getWorkspace(selected.workspaceId);
-    if (!interactionIsCurrent()) {
+    if (!selectionIsCurrent()) {
       return null;
     }
     try {
       // markRecentManagedWorkspace 会校验当前用户仍可进入历史会话所属应用，并回填版本/模板信息。
       const response = await api.markRecentManagedWorkspace(selected.workspaceId);
-      if (!interactionIsCurrent()) {
+      if (!selectionIsCurrent()) {
         return null;
       }
       if (response) {
@@ -8535,22 +8655,26 @@ async function switchToHistorySessionWorkspace(
       }
     }
     const nextAppId = workspace.appId || expectedAppId;
-    if (!interactionIsCurrent()) {
+    if (!selectionIsCurrent()) {
       return null;
     }
     if (nextAppId) {
       selectedAppId.value = nextAppId;
     }
     if (workspace.workspaceId !== selectedWorkspaceIdRef.value) {
-      if (!interactionIsCurrent()) {
+      if (!selectionIsCurrent()) {
         return null;
       }
-      await switchWorkspace(workspace, { preserveConversationInteraction: true, awaitDirectory: false });
-      if (!interactionIsCurrent()) {
+      const switched = await switchWorkspace(workspace, {
+        preserveConversationInteraction: true,
+        awaitDirectory: false,
+        isCurrent: selectionIsCurrent
+      });
+      if (!switched || !selectionIsCurrent()) {
         return null;
       }
     } else {
-      if (!interactionIsCurrent()) {
+      if (!selectionIsCurrent()) {
         return null;
       }
       cacheWorkspace(workspace);
@@ -8559,7 +8683,7 @@ async function switchToHistorySessionWorkspace(
     }
     return "";
   } catch (error) {
-    if (!interactionIsCurrent()) {
+    if (!selectionIsCurrent()) {
       return null;
     }
     feedback.value = errorFeedback("切换 Session 工作区失败", error);
@@ -8912,6 +9036,7 @@ async function handleLogout() {
               :view-mode="diffViewMode"
               :accepting="acceptDiffMutation.isPending.value"
               :rejecting="rejectDiffMutation.isPending.value"
+              :writable="canSaveSelectedDiffFile"
               @select-file="(path: string) => workbench.setSelectedDiffPath(path)"
               @source-change="(source: 'run' | 'session' | 'vcs' | 'agent') => loadDiffSource(source)"
               @view-mode-change="(mode: 'split' | 'unified') => (diffViewMode = mode)"
@@ -8929,6 +9054,7 @@ async function handleLogout() {
             :workspace-root-path="selectedWorkspace?.rootPath"
             :dirty="isDiffDirty"
             :saving="saveDiffFileMutation.isPending.value"
+            :readonly="!canSaveSelectedDiffFile"
             :app-name="selectedManagedApplication?.appName"
             :templates="appTemplatesWithVersions"
             :selected-version-id="selectedVersionId"

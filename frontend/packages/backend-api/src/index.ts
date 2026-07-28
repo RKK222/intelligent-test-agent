@@ -1650,16 +1650,35 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
      */
     connectAppSourceProgress: async (
       operationId: string,
-      onEvent: AppSourceProgressHandler
+      onEvent: AppSourceProgressHandler,
+      options: { signal?: AbortSignal } = {}
     ): Promise<AppSourceProgressConnection> => {
       const normalizedOperationId = normalizeAppSourceOperationId(operationId);
+      const abortError = () => {
+        const error = new Error("应用源码进度连接已取消");
+        error.name = "AbortError";
+        return error;
+      };
+      if (options.signal?.aborted) throw abortError();
       const ticket = await request<AppSourceOperationTicketResponse>(
         `${appSourceOperationBase}/${encodeURIComponent(normalizedOperationId)}/ticket`,
-        { method: "POST" }
+        { method: "POST", signal: options.signal }
       );
+      if (options.signal?.aborted) throw abortError();
       const socket = webSocketFactory(toWebSocketUrl(baseUrl, ticket.webSocketUrl));
       let callerClosed = false;
       let connectionFailureReported = false;
+      let rejectOpening: ((reason?: unknown) => void) | null = null;
+      let openingTimeout: ReturnType<typeof setTimeout> | null = null;
+      const abortConnection = () => {
+        callerClosed = true;
+        if (openingTimeout) clearTimeout(openingTimeout);
+        openingTimeout = null;
+        socket.close();
+        rejectOpening?.(abortError());
+        rejectOpening = null;
+      };
+      options.signal?.addEventListener("abort", abortConnection, { once: true });
       socket.onmessage = (event) => {
         let parsed: AppSourceProgressEvent;
         try {
@@ -1695,26 +1714,39 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       );
       if (socket.readyState !== WEBSOCKET_OPEN_STATE) {
         await new Promise<void>((resolve, reject) => {
-          const timeout = setTimeout(() => {
+          rejectOpening = reject;
+          openingTimeout = setTimeout(() => {
             callerClosed = true;
+            options.signal?.removeEventListener("abort", abortConnection);
+            rejectOpening = null;
             socket.close();
             reject(new Error("应用源码进度连接超时"));
           }, APP_SOURCE_PROGRESS_OPEN_TIMEOUT_MS);
           socket.onopen = () => {
-            clearTimeout(timeout);
+            if (openingTimeout) clearTimeout(openingTimeout);
+            openingTimeout = null;
+            rejectOpening = null;
             resolve();
           };
           socket.onerror = () => {
-            clearTimeout(timeout);
+            if (openingTimeout) clearTimeout(openingTimeout);
+            openingTimeout = null;
+            rejectOpening = null;
+            options.signal?.removeEventListener("abort", abortConnection);
             connectionFailure();
             reject(new Error("应用源码进度连接失败"));
           };
         });
         socket.onerror = connectionFailure;
       }
+      if (options.signal?.aborted) {
+        abortConnection();
+        throw abortError();
+      }
       return {
         close: () => {
           callerClosed = true;
+          options.signal?.removeEventListener("abort", abortConnection);
           socket.close();
         }
       };

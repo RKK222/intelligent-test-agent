@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ArrowLeftRight, CodeXml, Eye, EyeOff, LibraryBig, Plus, Save, ServerCog, Target } from "lucide-vue-next";
 import { ElDatePicker, ElDialog, ElTooltip, ElMessage } from "element-plus";
 import type { ApplicationWorkspaceTemplate, ApplicationWorkspaceVersion } from "@test-agent/shared-types";
@@ -176,6 +176,7 @@ const createVersionBranches = ref<string[]>([]);
 const createVersionLoadingBranches = ref(false);
 
 function openCreateVersionDialog(template: AppWorkspaceTemplate) {
+  if (props.workspaceKind === "APP_SOURCE") return;
   createVersionTarget.value = template;
   createVersionValue.value = "";
   createVersionBranch.value = "";
@@ -194,13 +195,14 @@ function openCreateVersionDialog(template: AppWorkspaceTemplate) {
   closeMenu();
   // 下一帧再开 dialog：保证前一次 closeMenu() 触发的 v-if 卸载先完成，避免和 dialog 共存出现 stacking 问题。
   void nextTick(() => {
+    if (props.workspaceKind === "APP_SOURCE") return;
     createVersionOpen.value = true;
   });
 }
 
 function confirmCreateVersion() {
   const target = createVersionTarget.value;
-  if (!target || !createVersionValue.value) return;
+  if (props.workspaceKind === "APP_SOURCE" || !target || !createVersionValue.value) return;
   // value-format 是 "YYYYMMDD"，直接使用日期字符串作为版本号（yyyyMMdd）。
   // 非标准库需要同时传递分支。
   const version = createVersionValue.value.replaceAll("-", "");
@@ -216,6 +218,12 @@ function confirmCreateVersion() {
 function cancelCreateVersion() {
   createVersionOpen.value = false;
 }
+
+watch(() => props.workspaceKind, (workspaceKind) => {
+  if (workspaceKind !== "APP_SOURCE") return;
+  createVersionOpen.value = false;
+  createVersionTarget.value = null;
+});
 
 // 计算一级菜单位置：固定在触发按钮正上方，6px 间隙。
 // 必须在 menuOpen 置 true 前调用（因为 fixed 定位依赖 cascadeMenuPos 的存在）。

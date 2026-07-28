@@ -1822,6 +1822,78 @@ test("application source snapshot opens a logical workspace and enforces source 
   });
 });
 
+test("a drifting lazy child invalidates every concurrent child until a real root snapshot reloads", async ({ page }) => {
+  let releaseDriftingChild!: () => void;
+  let releaseOldSibling!: () => void;
+  const driftingChildGate = new Promise<void>((resolve) => { releaseDriftingChild = resolve; });
+  const oldSiblingGate = new Promise<void>((resolve) => { releaseOldSibling = resolve; });
+  const appSourceRequests: string[] = [];
+  await mockBackendApi(page, {
+    appSourceRequests,
+    appSourceRepositories: {
+      app_gcms: [appSourceRepository({ generation: 9, branch: "main", selectedPaths: [{ path: "src", type: "DIRECTORY" }] })]
+    },
+    appSourceBranches: { "app_gcms:repo-code": ["main"] },
+    appSourceTreeGates: {
+      "app_gcms:repo-code:main:src": driftingChildGate,
+      "app_gcms:repo-code:main:docs": oldSiblingGate
+    },
+    appSourceTreeSnapshots: {
+      "app_gcms:repo-code:main:.": {
+        targetCommit: "commit-root",
+        nodes: [
+          { name: "src", path: "src", type: "directory", children: [] },
+          { name: "docs", path: "docs", type: "directory", children: [] }
+        ]
+      },
+      "app_gcms:repo-code:main:src": {
+        targetCommit: "commit-drift",
+        nodes: [{ name: "late.ts", path: "src/late.ts", type: "file", children: [] }]
+      },
+      // 旧 sibling 故意携带已选中的 src；错误实现会在 snapshot 被清空后把它安装成 root 并重新启用下一步。
+      "app_gcms:repo-code:main:docs": {
+        targetCommit: "commit-root",
+        nodes: [{ name: "src", path: "src", type: "directory", children: [] }]
+      }
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.locator(".figma-file-explorer").getByRole("button", { name: "打开应用源码" }).click();
+  await page.getByRole("button", { name: "下载版本库" }).click();
+  const dialog = page.getByRole("dialog", { name: "下载应用源码" });
+  await dialog.getByRole("button", { name: "选择应用代码库版本库" }).click();
+  await dialog.getByRole("button", { name: "下一步：选择分支与目录" }).click();
+  await expect(dialog.getByText("固定提交：commit-root")).toBeVisible();
+
+  const srcDirectory = dialog.getByRole("button", { name: "展开路径 src" });
+  const docsDirectory = dialog.getByRole("button", { name: "展开路径 docs" });
+  await expect(srcDirectory).toBeVisible();
+  await expect(docsDirectory).toBeVisible();
+  // 在同一个浏览器 task 内发出两次展开，避免首次 loading 重绘禁用同级按钮。
+  await page.evaluate(() => {
+    const src = document.querySelector('button[aria-label="展开路径 src"]') as HTMLButtonElement | null;
+    const docs = document.querySelector('button[aria-label="展开路径 docs"]') as HTMLButtonElement | null;
+    if (!src || !docs) throw new Error("源码目录展开按钮未挂载");
+    src.click();
+    docs.click();
+  });
+  await expect.poll(() => appSourceRequests).toEqual(expect.arrayContaining([
+    "tree:app_gcms:repo-code:main:src",
+    "tree:app_gcms:repo-code:main:docs"
+  ]));
+  releaseDriftingChild();
+  await expect(dialog.getByText("固定提交已变化，请重新加载当前分支目录树")).toBeVisible();
+  releaseOldSibling();
+
+  await expect(dialog.getByRole("button", { name: "下一步：用途与保留时间" })).toBeDisabled();
+  await expect(dialog.getByText("固定提交：commit-root")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "上一步" }).click();
+  await dialog.getByRole("button", { name: "下一步：选择分支与目录" }).click();
+  await expect(dialog.getByText("固定提交：commit-root")).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "下一步：用途与保留时间" })).toBeEnabled();
+});
+
 test("source progress reconnects with fresh snapshots and tickets without cancelling the task", async ({ page }) => {
   const appSourceRequests: string[] = [];
   const appSourceTicketRequests: string[] = [];
@@ -1956,6 +2028,211 @@ test("source progress reconnects with fresh snapshots and tickets without cancel
   ]);
   await dialog.getByRole("button", { name: "关闭源码弹窗" }).click();
   expect(appSourceRequests.some((request) => request.includes("cancel"))).toBe(false);
+});
+
+test("a stale socket epoch cannot fail or complete the replacement progress connection", async ({ page }) => {
+  const appSourceRequests: string[] = [];
+  const appSourceTicketRequests: string[] = [];
+  const running = appSourceOperation("aso_epoch", "RUNNING", { targetGeneration: 2 });
+  const socket2Running = appSourceOperation("aso_epoch", "RUNNING", {
+    targetGeneration: 2,
+    globalSteps: [{
+      stepCode: "SOCKET_2",
+      sequence: 1,
+      status: "RUNNING",
+      safeSummary: "新连接仍在工作",
+      updatedAt: "2026-07-28T10:00:02Z"
+    }]
+  });
+  const completed = appSourceOperation("aso_epoch", "SUCCEEDED", {
+    targetGeneration: 2,
+    completedAt: "2026-07-28T10:01:00Z"
+  });
+  const sourceWorkspace = { ...workspace(), workspaceId: "wrk_source_epoch", name: "epoch 源码", appId: "app_gcms" };
+  await mockBackendApi(page, {
+    recentWorkspaces: { app_gcms: null },
+    appSourceRequests,
+    appSourceTicketRequests,
+    workspaces: [sourceWorkspace],
+    appSourceRepositories: {
+      app_gcms: [appSourceRepository({ generation: 1, latestOperation: running })]
+    },
+    appSourceOperationSnapshots: { aso_epoch: [running, running] },
+    appSourceOpenResults: {
+      "app_gcms:repo-code:2": appSourceOpenResult("wrk_source_epoch", 2)
+    },
+    appSourceProgressSocketPlans: [
+      {
+        disconnectAfterMs: 20,
+        frames: [
+          {
+            afterMs: 380,
+            event: {
+              type: "failed",
+              operationId: "aso_epoch",
+              status: "FAILED",
+              errorCode: "OLD_SOCKET_FAILED",
+              errorMessage: "旧连接迟到失败"
+            }
+          },
+          { afterMs: 420, event: appSourceProgressEvent("completed", completed) }
+        ]
+      },
+      {
+        frames: [
+          { afterMs: 5, event: appSourceProgressEvent("step", socket2Running) },
+          { afterMs: 520, event: appSourceProgressEvent("completed", completed) }
+        ]
+      }
+    ]
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.locator(".figma-file-explorer").getByRole("button", { name: "打开应用源码" }).click();
+  await page.getByRole("button", { name: "下载版本库" }).click();
+  const dialog = page.getByRole("dialog", { name: "下载应用源码" });
+  await dialog.getByRole("button", { name: "选择应用代码库版本库" }).click();
+  await expect.poll(() => appSourceTicketRequests).toEqual(["aso_epoch", "aso_epoch"]);
+  await expect(dialog.getByText("新连接仍在工作")).toBeVisible();
+  await page.waitForTimeout(220);
+
+  await expect(dialog.getByText("RUNNING", { exact: true })).toBeVisible();
+  expect(appSourceRequests.filter((request) => request === "open:app_gcms:repo-code:2")).toHaveLength(0);
+  await expect.poll(() => appSourceRequests.filter((request) => request === "open:app_gcms:repo-code:2"), {
+    timeout: 2_000
+  }).toHaveLength(1);
+});
+
+test("progress reconnect keeps exponential backoff across sockets that open without a valid frame", async ({ page }) => {
+  const ticketRequests: string[] = [];
+  const ticketTimes: number[] = [];
+  const running = appSourceOperation("aso_backoff", "RUNNING");
+  await mockBackendApi(page, {
+    recentWorkspaces: { app_gcms: null },
+    appSourceTicketRequests: ticketRequests,
+    appSourceTicketRequestTimes: ticketTimes,
+    appSourceRepositories: {
+      app_gcms: [appSourceRepository({ latestOperation: running })]
+    },
+    appSourceOperationSnapshots: { aso_backoff: running },
+    appSourceProgressSocketPlans: [
+      { disconnectAfterMs: 5 },
+      { disconnectAfterMs: 5 },
+      { disconnectAfterMs: 5 },
+      { frames: [{ afterMs: 5, event: appSourceProgressEvent("snapshot", running) }] }
+    ]
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.locator(".figma-file-explorer").getByRole("button", { name: "打开应用源码" }).click();
+  await page.getByRole("button", { name: "下载版本库" }).click();
+  const dialog = page.getByRole("dialog", { name: "下载应用源码" });
+  await dialog.getByRole("button", { name: "选择应用代码库版本库" }).click();
+  await expect.poll(() => ticketRequests, { timeout: 5_000 }).toHaveLength(4);
+
+  const delays = ticketTimes.slice(1).map((time, index) => time - (ticketTimes[index] ?? time));
+  expect(delays[0]).toBeGreaterThanOrEqual(200);
+  expect(delays[1]).toBeGreaterThanOrEqual(430);
+  expect(delays[2]).toBeGreaterThanOrEqual(850);
+  await dialog.getByRole("button", { name: "关闭源码弹窗" }).click();
+});
+
+test("closing the source dialog releases a connecting progress socket without retrying", async ({ page }) => {
+  const appSourceRequests: string[] = [];
+  const ticketRequests: string[] = [];
+  const running = appSourceOperation("aso_connecting", "RUNNING");
+  await mockBackendApi(page, {
+    recentWorkspaces: { app_gcms: null },
+    appSourceRequests,
+    appSourceTicketRequests: ticketRequests,
+    appSourceRepositories: {
+      app_gcms: [appSourceRepository({ latestOperation: running })]
+    },
+    appSourceOperationSnapshots: { aso_connecting: running },
+    appSourceProgressSocketPlans: [{ openAfterMs: 1_500 }]
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.locator(".figma-file-explorer").getByRole("button", { name: "打开应用源码" }).click();
+  await page.getByRole("button", { name: "下载版本库" }).click();
+  const dialog = page.getByRole("dialog", { name: "下载应用源码" });
+  await dialog.getByRole("button", { name: "选择应用代码库版本库" }).click();
+  await expect.poll(() => ticketRequests).toEqual(["aso_connecting"]);
+  await dialog.getByRole("button", { name: "关闭源码弹窗" }).click();
+
+  await expect.poll(() => page.evaluate(() => (
+    window as Window & { __taClosedAppSourceTickets?: string[] }
+  ).__taClosedAppSourceTickets ?? [])).toContain("ast_1");
+  await page.waitForTimeout(350);
+  expect(ticketRequests).toEqual(["aso_connecting"]);
+  expect(appSourceRequests.some((request) => request.includes("cancel"))).toBe(false);
+});
+
+test("a stale terminal apply and its repository refresh cannot invalidate a newer source open", async ({ page }) => {
+  let releaseTerminalOpenA!: () => void;
+  let releaseWorkspaceB!: () => void;
+  const terminalOpenAGate = new Promise<void>((resolve) => { releaseTerminalOpenA = resolve; });
+  const workspaceBGate = new Promise<void>((resolve) => { releaseWorkspaceB = resolve; });
+  const appSourceRequests: string[] = [];
+  const workspaceRequests: string[] = [];
+  const fileRequests: Array<{ workspaceId: string; path: string }> = [];
+  const runningA = appSourceOperation("aso_terminal_a", "RUNNING", {
+    repositoryId: "repo-a",
+    sourceGeneration: 1,
+    targetGeneration: 2
+  });
+  const completedA = appSourceOperation("aso_terminal_a", "SUCCEEDED", {
+    repositoryId: "repo-a",
+    sourceGeneration: 1,
+    targetGeneration: 2,
+    completedAt: "2026-07-28T10:01:00Z"
+  });
+  const workspaceA = { ...workspace(), workspaceId: "wrk_source_a2", name: "终态源码 A", appId: "app_gcms" };
+  const workspaceB = { ...workspace(), workspaceId: "wrk_source_b5", name: "当前源码 B", appId: "app_gcms" };
+  await mockBackendApi(page, {
+    recentWorkspaces: { app_gcms: null },
+    appSourceRequests,
+    workspaceRequests,
+    fileRequests,
+    workspaceRequestGates: { wrk_source_b5: workspaceBGate },
+    workspaces: [workspaceA, workspaceB],
+    appSourceRepositories: {
+      app_gcms: [
+        appSourceRepository({ repositoryId: "repo-a", name: "源码 A", generation: 1, latestOperation: runningA }),
+        appSourceRepository({ repositoryId: "repo-b", name: "源码 B", generation: 5, latestOperation: null })
+      ]
+    },
+    appSourceOperationSnapshots: { aso_terminal_a: runningA },
+    appSourceOpenGates: { "app_gcms:repo-a:2": terminalOpenAGate },
+    appSourceOpenResults: {
+      "app_gcms:repo-a:2": { ...appSourceOpenResult("wrk_source_a2", 2), repositoryId: "repo-a" },
+      "app_gcms:repo-b:5": { ...appSourceOpenResult("wrk_source_b5", 5), repositoryId: "repo-b" }
+    },
+    appSourceProgressSocketPlans: [{
+      frames: [{ afterMs: 10, event: appSourceProgressEvent("completed", completedA) }]
+    }]
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  const fileExplorer = page.locator(".figma-file-explorer");
+  await fileExplorer.getByRole("button", { name: "打开应用源码" }).click();
+  await page.getByRole("button", { name: "下载版本库" }).click();
+  let dialog = page.getByRole("dialog", { name: "下载应用源码" });
+  await dialog.getByRole("button", { name: "选择源码 A版本库" }).click();
+  await expect.poll(() => appSourceRequests).toContain("open:app_gcms:repo-a:2");
+  await dialog.getByRole("button", { name: "关闭源码弹窗" }).click();
+
+  await fileExplorer.getByRole("button", { name: "打开应用源码" }).click();
+  await page.getByRole("button", { name: "打开源码 B源码" }).click();
+  await expect.poll(() => workspaceRequests).toContain("wrk_source_b5");
+  releaseTerminalOpenA();
+  await page.waitForTimeout(50);
+  releaseWorkspaceB();
+
+  await expect(fileExplorer.getByText("源码快照", { exact: true })).toBeVisible();
+  await expect.poll(() => fileRequests.filter((request) => request.path === "").at(-1)?.workspaceId)
+    .toBe("wrk_source_b5");
+  expect(appSourceRequests).toContain("list:app_gcms");
 });
 
 test("invalid recent application source falls back to the managed application workspace", async ({ page }) => {
@@ -2150,6 +2427,179 @@ test("late source repository and workspace responses cannot overwrite a newer ap
 
   await expect(page.getByRole("button", { name: "F-COSS" })).toBeVisible();
   await expect(fileExplorer.getByText("源码快照", { exact: true })).toHaveCount(0);
+});
+
+test("a pending managed version cannot reclaim the workspace after a newer source snapshot activates", async ({ page }) => {
+  let releaseManagedWorkspace!: () => void;
+  const managedWorkspaceGate = new Promise<void>((resolve) => { releaseManagedWorkspace = resolve; });
+  const sourceWorkspace = {
+    ...workspace(),
+    workspaceId: "wrk_source_newer",
+    name: "较新的源码 B",
+    rootPath: "/srv/test-agent/app-source/newer",
+    appId: "app_gcms"
+  };
+  const fileRequests: Array<{ workspaceId: string; path: string }> = [];
+  await mockBackendApi(page, {
+    ...agentWorkspaceSetup(),
+    recentWorkspaces: { app_gcms: null },
+    workspaces: [workspace(), sourceWorkspace],
+    fileRequests,
+    workspaceRequestGates: { wrk_personal_default: managedWorkspaceGate },
+    appSourceRepositories: { app_gcms: [appSourceRepository({ generation: 8, name: "源码 B" })] },
+    appSourceOpenResults: {
+      "app_gcms:repo-code:8": appSourceOpenResult("wrk_source_newer", 8)
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.locator(".ta-workbench-footer-branch").click();
+  await page.getByRole("menuitem", { name: /F-GCMS/ }).hover();
+  await page.getByRole("menuitem", { name: /2026年7月/ }).click();
+  await page.locator(".figma-file-explorer").getByRole("button", { name: "打开应用源码" }).click();
+  await page.getByRole("button", { name: "打开源码 B源码" }).click();
+  await expect(page.locator(".figma-file-explorer").getByText("源码快照", { exact: true })).toBeVisible();
+  await expect.poll(() => fileRequests.filter((request) => request.path === "").at(-1)?.workspaceId)
+    .toBe("wrk_source_newer");
+
+  releaseManagedWorkspace();
+  await page.waitForTimeout(150);
+
+  await expect(page.locator(".figma-file-explorer").getByText("源码快照", { exact: true })).toBeVisible();
+  expect(fileRequests.filter((request) => request.path === "").at(-1)?.workspaceId).toBe("wrk_source_newer");
+});
+
+test("starting a managed version immediately invalidates a source open that has not activated yet", async ({ page }) => {
+  let releaseSourceOpen!: () => void;
+  const sourceOpenGate = new Promise<void>((resolve) => { releaseSourceOpen = resolve; });
+  const sourceWorkspace = {
+    ...workspace(),
+    workspaceId: "wrk_source_old",
+    name: "迟到源码 A",
+    rootPath: "/srv/test-agent/app-source/old",
+    appId: "app_gcms"
+  };
+  const fileRequests: Array<{ workspaceId: string; path: string }> = [];
+  await mockBackendApi(page, {
+    ...agentWorkspaceSetup(),
+    recentWorkspaces: { app_gcms: null },
+    workspaces: [
+      workspace(),
+      { ...workspace(), workspaceId: "wrk_personal_default", name: "托管版本 B", appId: "app_gcms" },
+      sourceWorkspace
+    ],
+    fileRequests,
+    appSourceRepositories: { app_gcms: [appSourceRepository({ generation: 7, name: "源码 A" })] },
+    appSourceOpenGates: { "app_gcms:repo-code:7": sourceOpenGate },
+    appSourceOpenResults: {
+      "app_gcms:repo-code:7": appSourceOpenResult("wrk_source_old", 7)
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.locator(".figma-file-explorer").getByRole("button", { name: "打开应用源码" }).click();
+  await page.getByRole("button", { name: "打开源码 A源码" }).click();
+  await callAgentWorkbenchHandler(page, "handleSelectVersion", [{
+      template: {
+        workspaceId: "awp_1",
+        workspaceName: "F-GCMS",
+        appId: "app_gcms",
+        repositoryId: "repo_1",
+        defaultBranch: "main",
+        createdAt: "2026-06-19T00:00:00Z",
+        updatedAt: "2026-06-19T00:00:00Z"
+      },
+      version: {
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1",
+        appId: "app_gcms",
+        repositoryId: "repo_1",
+        version: "2026年7月",
+        branch: "feature_testagent_20260715",
+        repoRootPath: "/Users/huang/workspace/app-feature",
+        workspaceRootPath: "/Users/huang/workspace/app-feature/F-GCMS/workspace",
+        status: "ACTIVE",
+        createdAt: "2026-06-19T00:00:00Z",
+        updatedAt: "2026-06-19T00:00:00Z"
+      }
+    }]);
+  await expect(page.locator(".figma-file-explorer").getByRole("button", { name: "变更" })).toBeVisible();
+  await expect.poll(() => fileRequests.filter((request) => request.path === "").at(-1)?.workspaceId)
+    .toBe("wrk_personal_default");
+
+  releaseSourceOpen();
+  await page.waitForTimeout(150);
+
+  await expect(page.locator(".figma-file-explorer").getByText("源码快照", { exact: true })).toHaveCount(0);
+  await expect(page.locator(".figma-file-explorer").getByRole("button", { name: "变更" })).toBeVisible();
+  expect(fileRequests.filter((request) => request.path === "").at(-1)?.workspaceId).toBe("wrk_personal_default");
+});
+
+test("DiffViewer save emit reaches the managed Agent writer behind the capability guard", async ({ page }) => {
+  const agentFileFrames: Array<{
+    op: string;
+    scope: string;
+    path: string;
+    workspaceId?: string;
+    content?: string;
+  }> = [];
+  await mockBackendApi(page, {
+    ...agentWorkspaceSetup(),
+    authRoles: ["SUPER_ADMIN", "APP_ADMIN"],
+    agentFileFrames,
+    historyDiffFiles: [{
+      path: "tests/managed.ts",
+      status: "modified",
+      staged: false,
+      patch: "@@ -1 +1 @@\n-old\n+new",
+      additions: 1,
+      deletions: 1
+    }]
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.locator(".figma-file-explorer").getByRole("button", { name: "变更" }).click();
+  await page.locator('.git-file-row[title="tests/managed.ts"]').click();
+  await expect(page.getByText("基线版本（只读）")).toBeVisible();
+  await emitDiffViewerSave(page,
+    "agent-workspace:wrk_personal_default:::agents%2Fmanaged.md",
+    "# managed workspace Agent"
+  );
+  await expect.poll(() => agentFileFrames.filter((frame) => frame.op === "agent-config.write")).toHaveLength(1);
+  await emitDiffViewerSave(page,
+    "agent-public:::agents%2Fpublic.md",
+    "# managed public Agent"
+  );
+  await expect.poll(() => agentFileFrames.filter((frame) => frame.op === "agent-config.write")).toHaveLength(2);
+});
+
+test("entering source mode closes an already-open managed personal pull dialog", async ({ page }) => {
+  const sourceWorkspace = {
+    ...workspace(),
+    workspaceId: "wrk_source_pull",
+    name: "Pull 源码",
+    rootPath: "/srv/test-agent/app-source/pull",
+    appId: "app_gcms"
+  };
+  const repository = appSourceRepository({ generation: 4, name: "Pull 源码库" });
+  await mockBackendApi(page, {
+    ...agentWorkspaceSetup(),
+    workspaces: [workspace(), sourceWorkspace],
+    appSourceRepositories: { app_gcms: [repository] },
+    appSourceOpenResults: {
+      "app_gcms:repo-code:4": appSourceOpenResult("wrk_source_pull", 4)
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByLabel("更多工作空间操作").click();
+  await page.getByRole("button", { name: "拉取远程", exact: true }).click();
+  await expect(page.getByText("确认拉取远程更新", { exact: true })).toBeVisible();
+
+  await callAgentWorkbenchHandler(page, "openAppSourceRepository", [repository]);
+
+  await expect(page.locator(".figma-file-explorer").getByText("源码快照", { exact: true })).toBeVisible();
+  await expect(page.getByText("确认拉取远程更新", { exact: true })).toHaveCount(0);
 });
 
 test("workbench does not read a workspace file tree before an application is selected", async ({ page }) => {
@@ -6758,15 +7208,18 @@ async function mockBackendApi(
     appSourceBranches?: Record<string, string[]>;
     appSourceBranchGates?: Record<string, Promise<void>>;
     appSourceTreeSnapshots?: Record<string, Record<string, unknown>>;
+    appSourceTreeGates?: Record<string, Promise<void>>;
     appSourceMaterializationResults?: Record<string, Record<string, unknown>>;
     appSourceMaterializationRequests?: Array<{ key: string; payload: Record<string, unknown> }>;
     appSourceOperationSnapshots?: Record<string, Array<Record<string, unknown>> | Record<string, unknown>>;
     appSourceTicketRequests?: string[];
+    appSourceTicketRequestTimes?: number[];
     appSourceRetryResults?: Record<string, Record<string, unknown>>;
     appSourceRetryRequests?: Array<{ key: string; payload: Record<string, unknown> }>;
     appSourceProgressSocketPlans?: Array<{
       frames?: Array<{ afterMs: number; event: Record<string, unknown> }>;
       disconnectAfterMs?: number;
+      openAfterMs?: number;
     }>;
     appSourceRequests?: string[];
     clearedRecentAppSource?: string[];
@@ -6864,6 +7317,7 @@ async function mockBackendApi(
     const readAttempts: Record<string, number> = {};
     const agentReadAttempts: Record<string, number> = {};
     let workspaceMoveAttempt = 0;
+    (window as Window & { __taClosedAppSourceTickets?: string[] }).__taClosedAppSourceTickets = [];
     type ViewLocator = { kind?: string; path?: string; referenceAlias?: string };
     const viewKey = (locator: ViewLocator) =>
       `${locator.kind ?? "COMPOSITE"}:${locator.referenceAlias ?? ""}:${locator.path ?? ""}`;
@@ -6945,15 +7399,20 @@ async function mockBackendApi(
       onclose: ((event: CloseEvent) => void) | null = null;
       readyState = MockWorkspaceFileWebSocket.CONNECTING;
       constructor(readonly url: string) {
+        const appSourceTicket = url.includes("/mock/app-source-progress")
+          ? new URL(url, window.location.href).searchParams.get("ticket") ?? ""
+          : "";
+        const ticketIndex = Math.max(0, Number(appSourceTicket.replace("ast_", "")) - 1);
+        const plan = (appSourceProgressSocketPlans as Array<{
+          frames?: Array<{ afterMs: number; event: Record<string, unknown> }>;
+          disconnectAfterMs?: number;
+          openAfterMs?: number;
+        }>)[ticketIndex];
         window.setTimeout(() => {
+          if (this.readyState === MockWorkspaceFileWebSocket.CLOSED) return;
           this.readyState = MockWorkspaceFileWebSocket.OPEN;
           this.onopen?.(new Event("open"));
           if (!url.includes("/mock/app-source-progress")) return;
-          const ticketIndex = Math.max(0, Number(new URL(url, window.location.href).searchParams.get("ticket")?.replace("ast_", "")) - 1);
-          const plan = (appSourceProgressSocketPlans as Array<{
-            frames?: Array<{ afterMs: number; event: Record<string, unknown> }>;
-            disconnectAfterMs?: number;
-          }>)[ticketIndex];
           for (const frame of plan?.frames ?? []) {
             window.setTimeout(() => {
               // 故意允许关闭后的迟到帧到达，验证 UI authority 会忽略旧连接。
@@ -6966,7 +7425,7 @@ async function mockBackendApi(
               this.onclose?.(new CloseEvent("close"));
             }, plan.disconnectAfterMs);
           }
-        }, 0);
+        }, plan?.openAfterMs ?? 0);
       }
       send(payload: string) {
         const request = JSON.parse(payload) as { id: string; op: string; params?: Record<string, string | undefined> };
@@ -7196,6 +7655,12 @@ async function mockBackendApi(
       }
       close() {
         this.readyState = MockWorkspaceFileWebSocket.CLOSED;
+        if (this.url.includes("/mock/app-source-progress")) {
+          (window as Window & { __taClosedAppSourceTickets?: string[] })
+            .__taClosedAppSourceTickets?.push(
+              new URL(this.url, window.location.href).searchParams.get("ticket") ?? ""
+            );
+        }
         this.onclose?.(new CloseEvent("close"));
       }
     }
@@ -7515,6 +7980,7 @@ async function mockBackendApi(
         }
         if (method === "POST" && appSourceOperationMatch[2] === "ticket") {
           capture.appSourceTicketRequests?.push(operationId);
+          capture.appSourceTicketRequestTimes?.push(Date.now());
           const ticketNumber = capture.appSourceTicketRequests?.length ?? 1;
           await route.fulfill(json({
             ticket: `ast_${ticketNumber}`,
@@ -7543,6 +8009,7 @@ async function mockBackendApi(
           const path = url.searchParams.get("path") ?? ".";
           const treeKey = `${repositoryKey}:${branch}:${path}`;
           capture.appSourceRequests?.push(`tree:${treeKey}`);
+          await capture.appSourceTreeGates?.[treeKey];
           await route.fulfill(json(capture.appSourceTreeSnapshots?.[treeKey] ?? {
             targetCommit: "",
             nodes: []
@@ -8159,6 +8626,39 @@ async function mockBackendApi(
     }
     await route.fulfill(json({}));
   });
+}
+
+async function callAgentWorkbenchHandler(
+  page: Page,
+  handler: string,
+  args: unknown[] = []
+) {
+  await page.evaluate(async ({ handlerName, handlerArgs }) => {
+    type VueInternalInstance = {
+      parent?: VueInternalInstance | null;
+      setupState?: Record<string, unknown>;
+    };
+    let instance: VueInternalInstance | null | undefined = (document.querySelector(".managed-workspace-layout") as (HTMLElement & {
+      __vueParentComponent?: VueInternalInstance;
+    }) | null)?.__vueParentComponent;
+    while (instance && typeof instance.setupState?.[handlerName] !== "function") {
+      instance = instance.parent;
+    }
+    const target = instance?.setupState?.[handlerName];
+    if (typeof target !== "function") throw new Error(`AgentWorkbench.${handlerName} not found`);
+    await target(...handlerArgs);
+  }, { handlerName: handler, handlerArgs: args });
+}
+
+async function emitDiffViewerSave(page: Page, path: string, content: string) {
+  await page.evaluate(({ filePath, fileContent }) => {
+    type VueInternalInstance = { emit?: (event: string, ...args: unknown[]) => void };
+    const root = document.querySelector(".managed-editor-main > div.flex-1 > div") as (HTMLElement & {
+      __vueParentComponent?: VueInternalInstance;
+    }) | null;
+    if (!root?.__vueParentComponent?.emit) throw new Error("DiffViewer instance not found");
+    root.__vueParentComponent.emit("saveFile", filePath, fileContent);
+  }, { filePath: path, fileContent: content });
 }
 
 async function gotoWorkbench(page: Page, options: { selectConversation?: boolean } = {}) {

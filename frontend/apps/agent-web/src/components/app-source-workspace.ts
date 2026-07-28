@@ -52,6 +52,25 @@ export function ordinaryWorkspaceCanWrite(
   return Boolean(workspaceId && (kind === "APP_SOURCE" || personalWorkspaceId));
 }
 
+export type DiffSaveCapability = {
+  workspaceKind: SelectedWorkspaceKind;
+  ordinaryWorkspaceWritable: boolean;
+  agentScope: "PUBLIC" | "WORKSPACE" | null;
+  isSuperAdmin: boolean;
+  isAppAdmin: boolean;
+};
+
+/**
+ * Diff 保存权限不信任子组件的 emit：源码快照只允许普通文件，Agent 始终回到托管工作区角色门禁。
+ */
+export function diffFileCanWrite(capability: DiffSaveCapability) {
+  if (capability.agentScope === null) return capability.ordinaryWorkspaceWritable;
+  if (capability.workspaceKind === "APP_SOURCE") return false;
+  return capability.agentScope === "PUBLIC"
+    ? capability.isSuperAdmin
+    : capability.isAppAdmin;
+}
+
 /** 已存在的团队副本只允许保持 TEAM；个人副本仍可提升为团队共享。 */
 export function appSourcePurposeUpdateAllowed(
   repository: { generation?: number | null; purpose?: AppSourcePurpose | null },

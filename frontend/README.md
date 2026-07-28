@@ -66,6 +66,8 @@ packages/shared-types
 
 `apps/agent-web` 在工作空间切换入口右侧提供应用源码列表：紧凑入口只显示可打开或曾下载的副本，`NOT_DOWNLOADED` 只在四步管理弹窗第 1 步出现；用户必须从当前应用全部关联版本库中显式选择后，才加载其分支、固定提交目录树和运行中 operation。第 2–4 步完成 exact set、TEAM/PERSONAL、默认 48 小时且限制 1–72 小时的保留期，以及逐服务器安全步骤展示；已有 TEAM generation 不能降级为 PERSONAL。源码打开后使用显式 `APP_SOURCE` 工作区语义和后端返回的逻辑 `workspaceId/generation`，文件读取、保存、创建、复制、移动、上传、改名、删除及撤销继续走平台 Workspace 文件 WebSocket；前端不保存或推导物理路径。源码工作区保留 Session/Run、OpenCode、终端和普通文件写入，但编辑器/Run Diff 页脚、宠物应用配置重载、Hub mutation、应用 Agent 保存发布与版本选择统一隐藏并在 handler 再次拒绝。recent 源码选择在刷新或窗口聚焦时重新 `open` 校验；只有结构化 `FORBIDDEN/NOT_FOUND/CONFLICT` 或 current source 的空 recent 会清理并回退，网络、超时及 5xx 保留当前源码与 recent，并展示可重试提示。
 
+源码工作台的 managed/source 切换现共用一套完整 selection authority，repository 列表刷新不会抢占当前 open intent；任一 lazy child 发现 commit 漂移都会失效整棵树直到真实 root 重载。进度观察的每条 socket 使用独立 connection epoch，无有效 operation frame 的断线保持 250ms/500ms/1s 指数退避；关闭弹窗可立即中止 CONNECTING socket，不触发重连或后台 cancel。Run Diff 只放行 source 中的普通文件保存，PUBLIC/WORKSPACE Agent 保存在组件和父 handler 双门禁；Hub、配置重载、新增版本和个人 Git pull 弹窗会在能力失效时立即收敛。
+
 ### 工具盒子
 
 `apps/agent-web` 在“编辑器”后为所有登录用户提供工具盒子活动栏入口和受保护 `/toolbox` 路由。工具盒子进入时保存并隐藏左右面板和底部抽屉，退出、浏览器前进/后退时精确恢复原布局；页面移除占空间的顶部 Hero，只保留屏幕阅读器标题，并从 `packages/backend-api` 读取 193 项离线目录。搜索、来源和 14 个固定分类标签组成吸顶控制区；分类数字随搜索词和来源实时联动，不受当前分类选择影响，移动端标签保持单行横向滚动。热门区仍展示正点击 Top 10。每张卡片是带 `target="_blank"`、`rel="noopener noreferrer"` 的原生具体工具链接，普通点击和中键会异步上报，失败不阻断打开或显示干扰提示。本地 Vite 默认把两个工具前缀分别代理到 `127.0.0.1:18120/18121` 并剥离公开前缀，套件根路径返回 `/toolbox`，因此使用 `restart-dev-services.sh` 时直接访问 3000 端口即可联调具体工具。

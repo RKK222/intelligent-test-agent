@@ -173,6 +173,41 @@ describe("app-source backend client", () => {
     expect(sockets.every((socket) => socket.closed)).toBe(true);
   });
 
+  it("aborts and closes a still-CONNECTING progress socket without reporting a failure", async () => {
+    const sockets: FakeSocket[] = [];
+    const events: AppSourceProgressEvent[] = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher: vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: {
+          ticket: "ast_connecting",
+          expiresAt: "2026-07-28T04:01:00Z",
+          webSocketUrl: "ws://server-a/progress?ticket=ast_connecting"
+        }
+      }), { status: 200 })),
+      webSocketFactory: (url) => {
+        const socket = new FakeSocket(url, 0);
+        sockets.push(socket);
+        return socket;
+      }
+    });
+    const controller = new AbortController();
+
+    const connection = client.connectAppSourceProgress(
+      "job_connecting",
+      (event) => events.push(event),
+      { signal: controller.signal }
+    );
+    await vi.waitFor(() => expect(sockets).toHaveLength(1));
+    controller.abort();
+
+    await expect(connection).rejects.toMatchObject({ name: "AbortError" });
+    expect(sockets[0]?.closed).toBe(true);
+    expect(events).toEqual([]);
+  });
+
   it("reports an unexpected websocket close once but stays silent for caller close", async () => {
     const sockets: FakeSocket[] = [];
     const client = progressClient(sockets);
@@ -391,10 +426,12 @@ class FakeSocket {
   onmessage: ((event: { data: string }) => void) | null = null;
   onerror: ((event: unknown) => void) | null = null;
   onclose: ((event: unknown) => void) | null = null;
-  readyState = 1;
+  readyState: number;
   closed = false;
 
-  constructor(readonly url: string) {}
+  constructor(readonly url: string, readyState = 1) {
+    this.readyState = readyState;
+  }
 
   send() {}
 

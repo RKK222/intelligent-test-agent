@@ -146,6 +146,28 @@ describe("FigmaShell", () => {
     expect(wrapper.emitted("personal-runtime-reload")?.[0]).toEqual([{ scope: "PUBLIC" }]);
   });
 
+  it("closes a pending workspace runtime reload and rejects its stale confirm after capability revocation", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const wrapper = mountShell({
+      props: {
+        canManageWorkspaceAgentConfig: true
+      }
+    });
+    await summonRobot(wrapper);
+    await wrapper.get('[data-testid="figma-robot"]').trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await wrapper.vm.$nextTick();
+
+    await wrapper.get('button[aria-label="重载应用个人配置"]').trigger("click");
+    const staleConfirm = wrapper.get('[data-testid="pet-runtime-reload-confirm"] button.is-primary').element;
+    await wrapper.setProps({ canManageWorkspaceAgentConfig: false });
+
+    expect(wrapper.find('[data-testid="pet-runtime-reload-confirm"]').exists()).toBe(false);
+    staleConfirm.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(wrapper.emitted("personal-runtime-reload")).toBeUndefined();
+  });
+
   it("hides runtime controls while the pet selection page is open", async () => {
     vi.useFakeTimers();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);

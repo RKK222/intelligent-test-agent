@@ -1469,6 +1469,7 @@ function closeRobotQuestion() {
 
 function requestPetRuntimeReload(scope: "PUBLIC" | "WORKSPACE") {
   if (props.runtimeBusy || props.personalRuntimeReloading !== null) return;
+  if (scope === "PUBLIC" ? !props.canManagePublicAgentConfig : !props.canManageWorkspaceAgentConfig) return;
   pendingPetRuntimeReloadScope.value = scope;
 }
 
@@ -1479,9 +1480,25 @@ function cancelPetRuntimeReload() {
 function confirmPetRuntimeReload() {
   const scope = pendingPetRuntimeReloadScope.value;
   if (!scope || props.runtimeBusy || props.personalRuntimeReloading !== null) return;
+  if (scope === "PUBLIC" ? !props.canManagePublicAgentConfig : !props.canManageWorkspaceAgentConfig) {
+    pendingPetRuntimeReloadScope.value = null;
+    return;
+  }
   pendingPetRuntimeReloadScope.value = null;
   emit("personal-runtime-reload", { scope });
 }
+
+watch(
+  [() => props.canManagePublicAgentConfig, () => props.canManageWorkspaceAgentConfig],
+  ([canManagePublic, canManageWorkspace]) => {
+    if (
+      (pendingPetRuntimeReloadScope.value === "PUBLIC" && !canManagePublic)
+      || (pendingPetRuntimeReloadScope.value === "WORKSPACE" && !canManageWorkspace)
+    ) {
+      pendingPetRuntimeReloadScope.value = null;
+    }
+  }
+);
 
 function openRobotGames() {
   if (!props.canPlayPetGames) return;

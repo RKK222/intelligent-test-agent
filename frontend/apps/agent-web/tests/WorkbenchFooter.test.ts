@@ -195,6 +195,37 @@ describe("WorkbenchFooter", () => {
     expect(document.body.textContent).not.toContain("已停用工作空间");
   });
 
+  it("closes an already-open create-version dialog when source mode disables version selection", async () => {
+    const wrapper = mount(WorkbenchFooter, {
+      attachTo: document.body,
+      global: { provide: { api: { listRepositoryBranches: vi.fn() } } },
+      props: {
+        appName: "F-COSS",
+        templates: [template],
+        showSave: false,
+        workspaceKind: "MANAGED"
+      }
+    });
+
+    const setupState = (wrapper.vm.$ as unknown as { setupState: Record<string, unknown> }).setupState as {
+      openCreateVersionDialog: (value: typeof template) => void;
+      confirmCreateVersion: () => void;
+      createVersionOpen: boolean;
+      createVersionValue: string;
+    };
+    setupState.openCreateVersionDialog(template);
+    setupState.createVersionValue = "20260728";
+    await wrapper.vm.$nextTick();
+    expect(setupState.createVersionOpen).toBe(true);
+    const staleConfirm = setupState.confirmCreateVersion;
+
+    await wrapper.setProps({ workspaceKind: "APP_SOURCE" });
+
+    expect(setupState.createVersionOpen).toBe(false);
+    staleConfirm();
+    expect(wrapper.emitted("create-version")).toBeUndefined();
+  });
+
   it("handles preview button single click (full) and double click (split)", async () => {
     const wrapper = mount(WorkbenchFooter, {
       props: {
