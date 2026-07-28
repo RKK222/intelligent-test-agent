@@ -25,7 +25,7 @@ const localeOptions = computed(() =>
   <c-select
     v-model:value="locale"
     :options="localeOptions"
-    placeholder="Select a language"
+    :placeholder="$t('common.selectLanguage')"
     w-100px
   />
 </template>

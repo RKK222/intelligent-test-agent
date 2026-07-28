@@ -50,8 +50,6 @@ const tools = computed<ToolCategory[]>(() => [
 
       <div class="sider-content">
         <div v-if="styleStore.isSmallScreen" flex flex-col items-center>
-          <locale-selector w="90%" />
-
           <div flex justify-center>
             <NavbarButtons />
           </div>
@@ -113,8 +111,6 @@ const tools = computed<ToolCategory[]>(() => [
         </c-tooltip>
 
         <command-palette />
-
-        <locale-selector v-if="!styleStore.isSmallScreen" />
 
         <div>
           <NavbarButtons v-if="!styleStore.isSmallScreen" />

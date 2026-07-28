@@ -4,6 +4,7 @@ import { useCopy } from '@/composable/copy';
 const props = withDefaults(defineProps<{ value: string; label?: string; copyable?: boolean }>(), { label: undefined, copyable: true });
 const { value, label } = toRefs(props);
 
+const { t } = useI18n();
 const { copy, isJustCopied } = useCopy({ source: value });
 
 const isModalOpen = ref(false);
@@ -24,7 +25,7 @@ const toggleModal = useToggle(isModalOpen);
 
     <div mt-4 flex justify-center>
       <c-button class="w-full" @click="copy">
-        {{ isJustCopied ? 'Copied!' : 'Copy' }}
+        {{ isJustCopied ? t('common.copied') : t('common.copy') }}
       </c-button>
     </div>
   </c-modal>

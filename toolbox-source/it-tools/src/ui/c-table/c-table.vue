@@ -2,8 +2,10 @@
 import _ from 'lodash';
 import type { HeaderConfiguration } from './c-table.types';
 
-const props = withDefaults(defineProps<{ data?: Record<string, unknown>[]; headers?: HeaderConfiguration ; hideHeaders?: boolean; description?: string }>(), { data: () => [], headers: undefined, hideHeaders: false, description: 'Data table' });
+const props = withDefaults(defineProps<{ data?: Record<string, unknown>[]; headers?: HeaderConfiguration ; hideHeaders?: boolean; description?: string }>(), { data: () => [], headers: undefined, hideHeaders: false, description: undefined });
 const { data, headers: rawHeaders, hideHeaders } = toRefs(props);
+const { t } = useI18n();
+const displayedDescription = computed(() => props.description ?? t('common.dataTable'));
 
 const headers = computed(() => {
   if (rawHeaders.value) {
@@ -38,7 +40,7 @@ const headers = computed(() => {
 
 <template>
   <div class="relative overflow-x-auto rounded">
-    <table class="w-full border-collapse text-left text-sm text-gray-500 dark:text-gray-400" role="table" :aria-label="description">
+    <table class="w-full border-collapse text-left text-sm text-gray-500 dark:text-gray-400" role="table" :aria-label="displayedDescription">
       <thead v-if="!hideHeaders" class="bg-#ffffff uppercase text-gray-700 dark:bg-#333333 dark:text-gray-400" border-b="1px solid dark:transparent #efeff5">
         <tr>
           <th v-for="header in headers" :key="header.key" scope="col" class="px-6 py-3 text-xs">

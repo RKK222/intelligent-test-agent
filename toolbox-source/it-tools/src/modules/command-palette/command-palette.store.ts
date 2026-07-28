@@ -4,6 +4,7 @@ import type { PaletteOption } from './command-palette.types';
 import { useToolStore } from '@/tools/tools.store';
 import { useFuzzySearch } from '@/composable/fuzzySearch';
 import { useStyleStore } from '@/stores/style.store';
+import { translate } from '@/plugins/i18n.plugin';
 
 import SunIcon from '~icons/mdi/white-balance-sunny';
 import GithubIcon from '~icons/mdi/github';
@@ -21,52 +22,52 @@ export const useCommandPaletteStore = defineStore('command-palette', () => {
     ...tool,
     to: tool.path,
     toolCategory: tool.category,
-    category: 'Tools',
+    category: translate('common.commandPalette.categories.tools'),
   }));
 
   const searchOptions: PaletteOption[] = [
     ...toolsOptions,
     {
-      name: 'Random tool',
-      description: 'Get a random tool from the list.',
+      name: translate('common.commandPalette.randomTool.name'),
+      description: translate('common.commandPalette.randomTool.description'),
       action: () => {
         const { path } = _.sample(toolStore.tools)!;
         router.push(path);
       },
       icon: DiceIcon,
-      category: 'Tools',
+      category: translate('common.commandPalette.categories.tools'),
       keywords: ['random', 'tool', 'pick', 'choose', 'select'],
       closeOnSelect: true,
     },
     {
-      name: 'Toggle dark mode',
-      description: 'Toggle dark mode on or off.',
+      name: translate('common.commandPalette.toggleDarkMode.name'),
+      description: translate('common.commandPalette.toggleDarkMode.description'),
       action: () => styleStore.toggleDark(),
       icon: SunIcon,
-      category: 'Actions',
+      category: translate('common.commandPalette.categories.actions'),
       keywords: ['dark', 'theme', 'toggle', 'mode', 'light', 'system'],
     },
     {
-      name: 'Github repository',
+      name: translate('common.commandPalette.github.name'),
       href: 'https://github.com/CorentinTh/it-tools',
-      category: 'External',
-      description: 'View the source code of it-tools on Github.',
+      category: translate('common.commandPalette.categories.external'),
+      description: translate('common.commandPalette.github.description'),
       keywords: ['github', 'repo', 'repository', 'source', 'code'],
       icon: GithubIcon,
     },
     {
-      name: 'Report a bug or an issue',
-      description: 'Report a bug or an issue to help improve it-tools.',
+      name: translate('common.commandPalette.reportIssue.name'),
+      description: translate('common.commandPalette.reportIssue.description'),
       href: 'https://github.com/CorentinTh/it-tools/issues/new/choose',
-      category: 'Actions',
+      category: translate('common.commandPalette.categories.actions'),
       keywords: ['report', 'issue', 'bug', 'problem', 'error'],
       icon: BugIcon,
     },
     {
-      name: 'About',
-      description: 'Learn more about IT-Tools.',
+      name: translate('common.commandPalette.about.name'),
+      description: translate('common.commandPalette.about.description'),
       to: '/about',
-      category: 'Pages',
+      category: translate('common.commandPalette.categories.pages'),
       keywords: ['about', 'learn', 'more', 'info', 'information'],
       icon: InfoIcon,
     },

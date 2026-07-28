@@ -1,3 +1,44 @@
+common:
+  copy: Copy
+  copyToClipboard: Copy to clipboard
+  copied: Copied!
+  copiedToClipboard: Copied to the clipboard
+  dropFiles: Drag and drop files here, or click to select files
+  or: or
+  browseFiles: Browse files
+  selectOption: Select an option
+  search: Search…
+  noResults: No results found
+  inputText: Input text
+  input: Input
+  inputPlaceholder: Input…
+  output: Output
+  yes: 'Yes'
+  no: 'No'
+  dataTable: Data table
+  selectLanguage: Select a language
+  commandSearch: Type to search a tool or a command…
+  commandPalette:
+    categories:
+      tools: Tools
+      actions: Actions
+      external: External
+      pages: Pages
+    randomTool:
+      name: Random tool
+      description: Get a random tool from the list.
+    toggleDarkMode:
+      name: Toggle dark mode
+      description: Toggle dark mode on or off.
+    github:
+      name: GitHub repository
+      description: View the IT-Tools source code on GitHub.
+    reportIssue:
+      name: Report a bug or issue
+      description: Report a bug or issue to help improve IT-Tools.
+    about:
+      name: About
+      description: Learn more about IT-Tools.
 home:
   categories:
     newestTools: Newest tools
@@ -391,3 +432,35 @@ tools:
   text-to-binary:
     title: Text to ASCII binary
     description: Convert text to its ASCII binary representation and vice-versa.
+
+  ascii-text-drawer:
+    title: ASCII art text generator
+    description: Create ASCII art text with many fonts and styles.
+
+  email-normalizer:
+    title: Email normalizer
+    description: Normalize email addresses into a standard format for easier comparison, deduplication, and data cleaning.
+
+  json-to-xml:
+    title: JSON to XML
+    description: Convert JSON data to XML.
+
+  markdown-to-html:
+    title: Markdown to HTML
+    description: Convert Markdown to HTML and print the result as a PDF.
+
+  regex-memo:
+    title: Regular expression cheatsheet
+    description: Quickly look up common JavaScript regular expression syntax.
+
+  regex-tester:
+    title: Regular expression tester
+    description: Test regular expressions against sample text.
+
+  safelink-decoder:
+    title: Outlook Safe Links decoder
+    description: Decode links protected by Microsoft Outlook Safe Links.
+
+  xml-to-json:
+    title: XML to JSON
+    description: Convert XML data to JSON.

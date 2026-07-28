@@ -5,7 +5,8 @@ import { createI18n } from 'vue-i18n';
 
 const i18n = createI18n({
   legacy: false,
-  locale: 'en',
+  locale: 'zh',
+  fallbackLocale: 'zh',
   messages,
 });
 

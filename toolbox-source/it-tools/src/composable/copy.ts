@@ -17,13 +17,14 @@ export function copyTextWithHttpFallback(content: string): boolean {
   return copied;
 }
 
-export function useCopy({ source, text = 'Copied to the clipboard', createToast = true }: { source?: MaybeRefOrGetter<string>; text?: string; createToast?: boolean } = {}) {
+export function useCopy({ source, text, createToast = true }: { source?: MaybeRefOrGetter<string>; text?: string; createToast?: boolean } = {}) {
   const { copy, copied, ...rest } = useClipboard({
     source,
     legacy: true,
   });
 
   const message = useMessage();
+  const { t } = useI18n();
 
   return {
     ...rest,
@@ -43,7 +44,7 @@ export function useCopy({ source, text = 'Copied to the clipboard', createToast 
       }
 
       if (createToast) {
-        message.success(notificationMessage ?? text);
+        message.success(notificationMessage ?? text ?? t('common.copiedToClipboard'));
       }
     },
   };

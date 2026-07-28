@@ -3,6 +3,7 @@ import { useAppTheme } from '../theme/themes';
 import { useTheme } from './c-input-text.theme';
 import { generateRandomId } from '@/utils/random';
 import { type UseValidationRule, useValidation } from '@/composable/validation';
+import { translate } from '@/plugins/i18n.plugin';
 
 const props = withDefaults(
   defineProps<{
@@ -35,7 +36,7 @@ const props = withDefaults(
   {
     value: '',
     id: generateRandomId,
-    placeholder: 'Input text',
+    placeholder: undefined,
     label: undefined,
     readonly: false,
     disabled: false,
@@ -65,6 +66,7 @@ const value = useVModel(props, 'value', emit);
 const showPassword = ref(false);
 
 const { id, placeholder, label, validationRules, labelPosition, labelWidth, labelAlign, autosize, readonly, disabled, clearable, type, multiline, rows, rawText, autofocus, monospace } = toRefs(props);
+const displayedPlaceholder = computed(() => placeholder.value ?? translate('common.inputText'));
 
 const validation
   = props.validation
@@ -162,7 +164,7 @@ defineExpose({
           :class="{
             'leading-5 !font-mono': monospace,
           }"
-          :placeholder="placeholder"
+          :placeholder="displayedPlaceholder"
           :readonly="readonly"
           :disabled="disabled"
           :data-test-id="testId"
@@ -184,7 +186,7 @@ defineExpose({
             'leading-5 !font-mono': monospace,
           }"
           size="1"
-          :placeholder="placeholder"
+          :placeholder="displayedPlaceholder"
           :readonly="readonly"
           :disabled="disabled"
           :data-test-id="testId"

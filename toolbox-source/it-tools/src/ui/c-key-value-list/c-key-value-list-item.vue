@@ -4,6 +4,7 @@ import type { CKeyValueListItem } from './c-key-value-list.types';
 
 const props = defineProps<{ item: CKeyValueListItem }>();
 const { item } = toRefs(props);
+const { t } = useI18n();
 </script>
 
 <template>
@@ -13,7 +14,7 @@ const { item } = toRefs(props);
     </div>
   </div>
   <div v-else-if="_.isBoolean(item.value)">
-    <c-text-copyable :value="item.value ? 'true' : 'false'" :displayed-value="item.value ? 'Yes' : 'No'" :show-icon="item.showCopyButton ?? true" />
+    <c-text-copyable :value="item.value ? 'true' : 'false'" :displayed-value="item.value ? t('common.yes') : t('common.no')" :show-icon="item.showCopyButton ?? true" />
   </div>
   <div v-else-if="_.isNumber(item.value)" font-mono>
     <c-text-copyable :value="String(item.value)" :show-icon="item.showCopyButton ?? true" />
