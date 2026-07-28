@@ -5,6 +5,24 @@
 
 ## Entries
 
+### 2026-07-28 - 重建当日功能企业双后台完整包
+
+### Why
+- 上一版企业包早于当日应用 Git 刷新、公共 Agent 全局 rollout、两条 Flyway migration 和 Codex 只读白盒 MCP，单独替换 JAR 或前端会导致 Java、programs 与 worker 版本错配。
+- 复核交付链时发现自动节点部署夹具仍要求首台 `.4` 检查尚未启动的 `.114`，与现行停机升级顺序不一致。
+
+### What
+- 以业务源码提交 `fe980baa5df03710b63eeca201c4eff657196dcc` 完整重建后端、前端、programs、`linux/amd64` worker 和内层发布 ZIP，并复用已校验的 `.4/.114/.2` 节点配置重封固定名外层包。
+- 自动节点部署夹具改为验证 `.4 --skip-peer-check` 后再验证 `.114 --peer-host 122.233.30.4`；生产部署脚本和节点配置未修改。
+
+### How
+- `package-release.sh` 完整构建通过；JAR 内置 RSA、两条新 migration、Responses 适配器、白盒部署文件、内外层 ZIP 一致性和镜像 `linux/amd64` 均已校验。
+- Codex 白盒 MCP 合同测试 4 项、OpenCode 1.18.4/glibc 2.31 worker 容器冒烟、AI 文档、自动节点、多后台、Nginx 和完整包 fixture 均通过；Mac 为 arm64，Codex 原生 namespace 沙箱按设计留待两台企业 Linux 节点执行随包探针。
+
+### Result
+- 固定名交付物为 `deploy/internal/dist/test-agent-two-backend-complete.zip` 及同名 `.sha256`，需按 `.4 → .114 → .2` 整包滚动替换；白盒功能启用前必须在 `.4/.114` 分别通过宿主探针。
+- 本次只修改部署验收测试和本机追溯日志；未新增业务 API、RunEvent、数据库结构、生产 SQL、权限、环境配置、generated SDK 或 OpenCode 源码，既有部署与白盒稳定文档已覆盖现场操作。
+
 ### 2026-07-28 - 澄清公共个人 worktree 自动同步入口
 
 ### Why
