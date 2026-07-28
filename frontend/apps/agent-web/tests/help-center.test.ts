@@ -71,7 +71,7 @@ describe("help center", () => {
       .toBe("/help/guide/troubleshooting.html");
     const prompt = buildManualQuestionPrompt("troubleshooting", "为什么输入框不能发送？");
     expect(prompt).toContain("【当前章节】常见问题排查");
-    expect(prompt).toContain("对话输入框不可发送");
+    expect(prompt).toContain("对话输入框发不出去");
     expect(prompt).toContain("traceId");
   });
 
