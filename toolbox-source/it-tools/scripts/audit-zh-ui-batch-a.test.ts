@@ -355,4 +355,97 @@ const buttonLabel = 'Delete account';
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('Get authorization token');
   });
+
+  it('沿 computed 回调块的 return 标识符追溯同作用域局部初始化文案', async () => {
+    const root = await createAuditFixture();
+    await writeFixtureSource(root, 'token-generator/computed-local-binding.vue', `
+<script setup lang="ts">
+const buttonLabel = computed(() => {
+  const localLabel = 'Delete account';
+  return localLabel;
+});
+</script>
+<template>
+  <c-button :label="buttonLabel" />
+</template>
+`);
+
+    const result = runAudit(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Delete account');
+  });
+
+  it('递归追踪 computed 回调中的局部别名、条件、模板和 ref/computed 包装', async () => {
+    const root = await createAuditFixture();
+    await writeFixtureSource(root, 'token-generator/computed-local-wrappers.vue', `
+<script setup lang="ts">
+const buttonLabel = computed(() => {
+  const verb = ref('Delete');
+  const computedLabel = computed(() => \`\${verb.value} account\`);
+  const localLabel = flag ? computedLabel.value : 'Archive account';
+  return localLabel;
+});
+</script>
+<template>
+  <c-button :label="buttonLabel" />
+</template>
+`);
+
+    const result = runAudit(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Delete');
+    expect(result.stderr).toContain('Archive account');
+  });
+
+  it('不追踪 computed 回调中未返回的内部字符串或嵌套块同名变量', async () => {
+    const root = await createAuditFixture();
+    await writeFixtureSource(root, 'token-generator/computed-local-shadowing.vue', `
+<script setup lang="ts">
+const buttonLabel = computed(() => {
+  const localLabel = 'PDF';
+  const internalOptions = { internalStorageKey: 'Delete account' };
+  const storageKey = 'Delete storage record';
+  if (flag) {
+    const localLabel = 'Archive account';
+    void localLabel;
+  }
+  void internalOptions;
+  void storageKey;
+  return localLabel;
+});
+</script>
+<template>
+  <c-button :label="buttonLabel" />
+</template>
+`);
+
+    const result = runAudit(root);
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+  });
+
+  it('局部循环绑定不会穿透同名遮蔽并回退到顶层绑定', async () => {
+    const root = await createAuditFixture();
+    await writeFixtureSource(root, 'token-generator/computed-local-cycle.vue', `
+<script setup lang="ts">
+const localLabel = 'Delete account';
+const buttonLabel = computed(() => {
+  const localLabel = aliasLabel;
+  const aliasLabel = localLabel;
+  return localLabel;
+});
+</script>
+<template>
+  <c-button :label="buttonLabel" />
+</template>
+`);
+
+    const result = runAudit(root);
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+  });
 });

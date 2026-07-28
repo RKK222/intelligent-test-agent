@@ -392,7 +392,67 @@ function inspectVisibleBindingInitializer(route, file, binding, visibleBindings,
     return;
   }
 
-  function visitVisibleResult(node) {
+  function createLexicalScope(block, parent) {
+    const scope = { bindings: new Map(), parent };
+    for (const child of block.statements) {
+      if (!ts.isVariableStatement(child)) {
+        continue;
+      }
+      for (const declaration of child.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name) && declaration.initializer) {
+          scope.bindings.set(declaration.name.text, { initializer: declaration.initializer, scope });
+        }
+      }
+    }
+    return scope;
+  }
+
+  function findLocalBinding(scope, name) {
+    let current = scope;
+    while (current) {
+      const localBinding = current.bindings.get(name);
+      if (localBinding) {
+        return localBinding;
+      }
+      current = current.parent;
+    }
+    return undefined;
+  }
+
+  function visitReturnedExpressions(node, scope, visitedLocalBindings) {
+    if (ts.isReturnStatement(node)) {
+      if (node.expression) {
+        visitVisibleResult(node.expression, scope, visitedLocalBindings);
+      }
+      return;
+    }
+
+    // 内层函数的 return 不属于当前 computed/ref 回调，不能泄漏到外层可见结果。
+    if (ts.isArrowFunction(node)
+      || ts.isFunctionExpression(node)
+      || ts.isFunctionDeclaration(node)
+      || ts.isMethodDeclaration(node)
+      || ts.isGetAccessorDeclaration(node)
+      || ts.isSetAccessorDeclaration(node)
+      || ts.isConstructorDeclaration(node)) {
+      return;
+    }
+
+    if (ts.isBlock(node)) {
+      const childScope = createLexicalScope(node, scope);
+      node.statements.forEach(child => visitReturnedExpressions(child, childScope, visitedLocalBindings));
+      return;
+    }
+
+    ts.forEachChild(node, child => visitReturnedExpressions(child, scope, visitedLocalBindings));
+  }
+
+  function visitFunctionBody(block, parentScope, visitedLocalBindings) {
+    const scope = createLexicalScope(block, parentScope);
+    block.statements.forEach(child => visitReturnedExpressions(child, scope, visitedLocalBindings));
+  }
+
+  function visitVisibleResult(node, lexicalScope, visitedLocalBindings = new Set()) {
     if (ts.isStringLiteralLike(node) || ts.isTemplateLiteralToken(node)) {
       if (!recordLocaleKey(route, file, binding.source, node, binding.offset)
         && containsNaturalEnglish(node.text)) {
@@ -402,6 +462,17 @@ function inspectVisibleBindingInitializer(route, file, binding, visibleBindings,
     }
 
     if (ts.isIdentifier(node)) {
+      const localBinding = findLocalBinding(lexicalScope, node.text);
+      if (localBinding) {
+        if (!visitedLocalBindings.has(localBinding)) {
+          const nextVisitedLocalBindings = new Set(visitedLocalBindings);
+          nextVisitedLocalBindings.add(localBinding);
+          visitVisibleResult(localBinding.initializer, localBinding.scope, nextVisitedLocalBindings);
+        }
+        // 即使局部绑定形成循环，也不能穿透遮蔽继续解析同名顶层变量。
+        return;
+      }
+
       const nestedBinding = visibleBindings.get(node.text);
       if (nestedBinding && !visitedBindings.has(node.text)) {
         const nextVisitedBindings = new Set(visitedBindings);
@@ -412,24 +483,24 @@ function inspectVisibleBindingInitializer(route, file, binding, visibleBindings,
     }
 
     if (ts.isTemplateExpression(node)) {
-      visitVisibleResult(node.head);
+      visitVisibleResult(node.head, lexicalScope, visitedLocalBindings);
       node.templateSpans.forEach((span) => {
-        visitVisibleResult(span.expression);
-        visitVisibleResult(span.literal);
+        visitVisibleResult(span.expression, lexicalScope, visitedLocalBindings);
+        visitVisibleResult(span.literal, lexicalScope, visitedLocalBindings);
       });
       return;
     }
 
     if (ts.isConditionalExpression(node)) {
-      visitVisibleResult(node.whenTrue);
-      visitVisibleResult(node.whenFalse);
+      visitVisibleResult(node.whenTrue, lexicalScope, visitedLocalBindings);
+      visitVisibleResult(node.whenFalse, lexicalScope, visitedLocalBindings);
       return;
     }
 
     if (ts.isBinaryExpression(node)
       && [ts.SyntaxKind.PlusToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken].includes(node.operatorToken.kind)) {
-      visitVisibleResult(node.left);
-      visitVisibleResult(node.right);
+      visitVisibleResult(node.left, lexicalScope, visitedLocalBindings);
+      visitVisibleResult(node.right, lexicalScope, visitedLocalBindings);
       return;
     }
 
@@ -438,25 +509,21 @@ function inspectVisibleBindingInitializer(route, file, binding, visibleBindings,
       || ts.isTypeAssertionExpression(node)
       || ts.isNonNullExpression(node)
       || ts.isAwaitExpression(node)) {
-      visitVisibleResult(node.expression);
+      visitVisibleResult(node.expression, lexicalScope, visitedLocalBindings);
       return;
     }
 
     if (ts.isPropertyAccessExpression(node)) {
-      visitVisibleResult(node.expression);
+      visitVisibleResult(node.expression, lexicalScope, visitedLocalBindings);
       return;
     }
 
     if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
       if (ts.isBlock(node.body)) {
-        node.body.statements.forEach((child) => {
-          if (ts.isReturnStatement(child) && child.expression) {
-            visitVisibleResult(child.expression);
-          }
-        });
+        visitFunctionBody(node.body, lexicalScope, visitedLocalBindings);
       }
       else {
-        visitVisibleResult(node.body);
+        visitVisibleResult(node.body, lexicalScope, visitedLocalBindings);
       }
       return;
     }
@@ -464,11 +531,11 @@ function inspectVisibleBindingInitializer(route, file, binding, visibleBindings,
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)
       && ['computed', 'ref', 'shallowRef'].includes(node.expression.text)
       && node.arguments[0]) {
-      visitVisibleResult(node.arguments[0]);
+      visitVisibleResult(node.arguments[0], lexicalScope, visitedLocalBindings);
     }
   }
 
-  visitVisibleResult(statement.expression);
+  visitVisibleResult(statement.expression, undefined);
 }
 
 function inspectTypescript(
