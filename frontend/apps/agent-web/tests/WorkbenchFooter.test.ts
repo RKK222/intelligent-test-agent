@@ -67,6 +67,26 @@ describe("WorkbenchFooter", () => {
     expect(wrapper.emitted("open-reference-configuration")).toHaveLength(1);
   });
 
+  it("places the app source entry between workspace switching and configuration entries", async () => {
+    const wrapper = mount(WorkbenchFooter, {
+      props: {
+        appName: "F-COSS",
+        templates: [template],
+        showAppSource: true,
+        showReferenceConfiguration: true,
+        showServerWorkspaceSwitch: true,
+        showSave: false
+      }
+    });
+
+    const buttons = wrapper.find(".ta-workbench-footer-left").findAll("button");
+    expect(buttons.map((button) => button.attributes("aria-label") ?? button.attributes("data-onboarding")))
+      .toEqual(["workspace-selector", "打开应用源码", "打开引用配置", "切换服务器工作空间"]);
+
+    await buttons[1].trigger("click");
+    expect(wrapper.emitted("open-app-source")).toHaveLength(1);
+  });
+
   it("hides the reference configuration icon unless explicitly authorized by the parent", () => {
     const wrapper = mount(WorkbenchFooter, {
       props: { appName: "F-COSS", templates: [template], showSave: false }

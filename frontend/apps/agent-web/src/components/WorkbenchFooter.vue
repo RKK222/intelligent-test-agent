@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { ArrowLeftRight, Eye, EyeOff, LibraryBig, Plus, Save, ServerCog, Target } from "lucide-vue-next";
+import { ArrowLeftRight, CodeXml, Eye, EyeOff, LibraryBig, Plus, Save, ServerCog, Target } from "lucide-vue-next";
 import { ElDatePicker, ElDialog, ElTooltip, ElMessage } from "element-plus";
 import type { ApplicationWorkspaceTemplate, ApplicationWorkspaceVersion } from "@test-agent/shared-types";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import { copyTextToClipboard } from "@test-agent/ui-kit";
+import type { SelectedWorkspaceKind } from "./app-source-workspace";
 
 export type PreviewMode = "off" | "full" | "split";
 
@@ -55,8 +56,12 @@ const props = defineProps<{
   showServerWorkspaceSwitch?: boolean;
   /** 是否显示当前个人工作区的引用配置入口 */
   showReferenceConfiguration?: boolean;
+  /** 当前应用存在源码入口；由父层按已选择应用控制，不使用用户角色裁剪。 */
+  showAppSource?: boolean;
   /** 服务器工作空间切换入口是否禁用 */
   serverWorkspaceSwitchDisabled?: boolean;
+  /** 工作区语义显式区分托管应用与源码快照，源码模式不得暴露版本选择。 */
+  workspaceKind?: SelectedWorkspaceKind;
 }>();
 
 const emit = defineEmits<{
@@ -74,6 +79,9 @@ const emit = defineEmits<{
   (e: "open-server-workspace-picker"): void;
   // 应用管理员打开当前个人工作区的引用配置弹窗。
   (e: "open-reference-configuration"): void;
+  // 打开当前应用源码列表；具体权限与 generation 仍以服务端列表/open 响应为准。
+  (e: "open-app-source"): void;
+  (e: "return-managed-workspace"): void;
 }>();
 
 const updatedLabel = computed(() => {
@@ -136,10 +144,11 @@ const templates = computed(() => (props.templates ?? []).filter((template) => te
 // 模板列表尚未加载或为空时仍展示入口，用于直接暴露当前个人 worktree 分支；
 // 点击后菜单会展示加载/空态，不影响用户识别当前实际改动分支。
 const useCascadeMenu = computed(() =>
+  props.workspaceKind !== "APP_SOURCE" && (
   templates.value.length > 0 ||
   Boolean(props.appName) ||
   Boolean(props.personalWorkspaceBranch) ||
-  Boolean(props.loadingTemplates)
+  Boolean(props.loadingTemplates))
 );
 
 // ===== 两级菜单弹出状态 =====
@@ -458,6 +467,16 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
 <template>
   <footer class="ta-workbench-footer">
     <div class="ta-workbench-footer-left">
+      <button
+        v-if="!showSave && workspaceKind === 'APP_SOURCE'"
+        type="button"
+        class="ta-workbench-footer-branch"
+        title="返回应用工作区"
+        aria-label="返回应用工作区"
+        @click="emit('return-managed-workspace')"
+      >
+        <ArrowLeftRight class="ta-workbench-footer-icon" />
+      </button>
       <!--
         两级菜单：当归属应用存在工作空间模板时，展示「应用 → 工作空间 → 版本」选择器。
         一级菜单展示工作空间模板，二级菜单展示该模板下的应用版本。
@@ -582,6 +601,16 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
           </div>
         </Teleport>
       </div>
+      <button
+        v-if="!showSave && showAppSource"
+        type="button"
+        class="ta-workbench-app-source"
+        title="打开应用源码"
+        aria-label="打开应用源码"
+        @click="emit('open-app-source')"
+      >
+        <CodeXml class="ta-workbench-footer-icon" />
+      </button>
       <button
         v-if="!showSave && showReferenceConfiguration"
         type="button"
@@ -839,7 +868,8 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
 }
 
 .ta-workbench-server-switch,
-.ta-workbench-reference-configuration {
+.ta-workbench-reference-configuration,
+.ta-workbench-app-source {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -854,7 +884,8 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
 }
 
 .ta-workbench-server-switch:hover:not(:disabled),
-.ta-workbench-reference-configuration:hover:not(:disabled) {
+.ta-workbench-reference-configuration:hover:not(:disabled),
+.ta-workbench-app-source:hover:not(:disabled) {
   background: #f5f5f5;
   border-color: #b5b5b5;
 }

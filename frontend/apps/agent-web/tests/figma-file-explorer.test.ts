@@ -209,6 +209,41 @@ describe("FigmaFileExplorer", () => {
     expect(wrapper.emitted("openReferenceConfiguration")).toHaveLength(1);
   });
 
+  it("keeps source files writable while hiding Git, Agent publication, and application versions", async () => {
+    const wrapper = shallowMount(FigmaFileExplorer, {
+      props: {
+        workspaceId: "wrk_source",
+        appName: "F-COSS",
+        entriesByDirectory: { "": [] },
+        expandedDirectories: new Set<string>(),
+        changedFiles: [],
+        canWrite: true,
+        workspaceKind: "APP_SOURCE",
+        appSourceContext: {
+          appId: "app_fcoss",
+          repositoryId: "repo_code",
+          generation: 9,
+          purpose: "TEAM",
+          workspaceId: "wrk_source",
+          linuxServerId: "linux-a",
+          expiresAt: "2026-07-30T00:00:00Z"
+        }
+      }
+    });
+
+    expect(wrapper.text()).toContain("源码快照");
+    expect(wrapper.text()).toContain("无 Git");
+    expect(wrapper.text()).toContain("同机成员共享");
+    expect(wrapper.find('button[aria-label="变更"]').exists()).toBe(false);
+    expect(wrapper.findComponent(GitChangesPanel).exists()).toBe(false);
+    expect(wrapper.findComponent(AgentConfigPanel).exists()).toBe(false);
+    expect(wrapper.findComponent(FileExplorer).props("canWrite")).toBe(true);
+    expect(wrapper.findComponent(WorkbenchFooter).props("workspaceKind")).toBe("APP_SOURCE");
+
+    await wrapper.get('button[aria-label="返回应用工作区"]').trigger("click");
+    expect(wrapper.emitted("returnManagedWorkspace")).toHaveLength(1);
+  });
+
   it("forwards workspace view node navigation without collapsing it to a path", async () => {
     const wrapper = shallowMount(FigmaFileExplorer, {
       props: {

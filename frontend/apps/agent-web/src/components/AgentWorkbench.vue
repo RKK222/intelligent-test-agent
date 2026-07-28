@@ -15,6 +15,7 @@ import {
 import {
   BackendApiError,
   createBackendApiClient,
+  type AppSourceProgressConnection,
   type CreateNightExecutionTaskPayload,
   type RawHttpExchange
 } from "@test-agent/backend-api";
@@ -25,6 +26,12 @@ import { BookOpenText, Boxes, Code2, FileWarning, MessageSquare, Monitor, Wrench
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
+  AppSourceMaterializationPayload,
+  AppSourceOpenResult,
+  AppSourceOperation,
+  AppSourceProgressEvent,
+  AppSourceRepositorySummary,
+  AppSourceTreeSnapshot,
   AiRunFeedback,
   AiRunFeedbackPayload,
   ApplicationWorkspaceTemplate,
@@ -86,6 +93,20 @@ import {
 import FigmaShell, { type RuntimeInventoryItem, type RuntimeInventorySummary } from "./FigmaShell.vue";
 import FirstLoginGuide from "./FirstLoginGuide.vue";
 import FigmaFileExplorer from "./FigmaFileExplorer.vue";
+import AppSourceDialog from "./AppSourceDialog.vue";
+import AppSourcePicker from "./AppSourcePicker.vue";
+import {
+  appSourceProgressBelongsToObservation,
+  appSourceTreeAuthorityMatches,
+  appSourceWorkspaceCapabilities,
+  claimAppSourceTerminalOperation,
+  ordinaryWorkspaceCanWrite,
+  sourceContextFromOpen,
+  type AppSourceProgressAuthority,
+  type AppSourceTreeAuthority,
+  type AppSourceWorkspaceContext,
+  type SelectedWorkspaceKind
+} from "./app-source-workspace";
 import FigmaEditorArea from "./FigmaEditorArea.vue";
 import FileUploadOverlay from "./FileUploadOverlay.vue";
 import {
@@ -599,11 +620,42 @@ onBeforeUnmount(() => {
 });
 
 const selectedAppId = ref<string | undefined>(undefined);
+// 工作区语义不能再从 personalWorkspaceId 是否存在反推；源码快照也使用真实 Workspace。
+const selectedWorkspaceKind = ref<SelectedWorkspaceKind>("MANAGED");
+const appSourceContext = ref<AppSourceWorkspaceContext | null>(null);
+const appSourceCapabilities = computed(() => appSourceWorkspaceCapabilities(selectedWorkspaceKind.value));
+const appSourcePickerOpen = ref(false);
+const appSourcePickerLoading = ref(false);
+const appSourcePickerError = ref<string | null>(null);
+const appSourceRepositories = shallowRef<AppSourceRepositorySummary[]>([]);
+const selectedAppSourceRepository = ref<AppSourceRepositorySummary | null>(null);
+const appSourceDialogOpen = ref(false);
+const appSourceBranches = shallowRef<string[]>([]);
+const appSourceBranchesLoading = ref(false);
+const appSourceTreeSnapshot = ref<AppSourceTreeSnapshot | null>(null);
+const appSourceTreeLoading = ref(false);
+const appSourceOperation = ref<AppSourceOperation | null>(null);
+const appSourceSubmitting = ref(false);
+const appSourceProgressError = ref<string | null>(null);
+let appSourceProgressConnection: AppSourceProgressConnection | null = null;
+let appSourceDialogAuthorityToken = 0;
+let appSourceTreeAuthorityToken = 0;
+let appSourceTreeAuthority: AppSourceTreeAuthority | null = null;
+let appSourceProgressAuthorityToken = 0;
+let appSourceProgressAuthority: AppSourceProgressAuthority | null = null;
+const handledAppSourceTerminalOperations = new Set<string>();
+let appSourceRecoveryChecked = false;
+let appSourceRecoveryInFlight: Promise<void> | null = null;
 // null 表示成员应用目录尚未完成首次加载；加载完成后用于阻止撤权期间的迟到响应重新展示旧工作区。
 const visibleManagedApplicationIds = shallowRef<ReadonlySet<string> | null>(null);
 // 当前选中版本对应的默认个人工作区 ID，供 GitChangesPanel 调用 publishPersonalWorkspace。
 const currentPersonalWorkspaceId = ref<string | undefined>(undefined);
 const currentPersonalWorkspaceBranch = ref<string | undefined>(undefined);
+const canWriteSelectedWorkspace = computed(() => ordinaryWorkspaceCanWrite(
+  selectedWorkspaceKind.value,
+  currentPersonalWorkspaceId.value,
+  selectedWorkspaceId.value
+));
 const personalPullBlockState = ref<{
   personalWorkspaceId: string;
   files: WorkspaceGitUpdateBlocker[];
@@ -741,11 +793,14 @@ function onWindowKeydown(event: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener("keydown", onWindowKeydown);
+  window.addEventListener("focus", refreshAppSourceAuthorizationOnFocus);
 });
 onBeforeUnmount(() => {
   invalidateConversationInteraction();
   clearTerminalRunEventSubscriptionHold();
   window.removeEventListener("keydown", onWindowKeydown);
+  window.removeEventListener("focus", refreshAppSourceAuthorizationOnFocus);
+  closeAppSourceProgressObservation();
   clearFileTreeRetryTimers();
   if (workspaceFileCandidateTimer) {
     clearTimeout(workspaceFileCandidateTimer);
@@ -2095,6 +2150,10 @@ function trySelectDefaultApp() {
   if (selectedAppId.value) return;
   const apps = applicationCatalog.value;
   if (apps.length === 0 || !globalRecentLoaded.value) return;
+  if (!appSourceRecoveryChecked) {
+    void recoverRecentAppSource();
+    return;
+  }
   const preferredAppId =
     globalRecentAppId.value && apps.some((app) => app.appId === globalRecentAppId.value)
       ? globalRecentAppId.value
@@ -2120,6 +2179,9 @@ watch(
       resetWorkspaceState();
       selectedWorkspaceId.value = undefined;
       selectedAppId.value = undefined;
+      selectedWorkspaceKind.value = "MANAGED";
+      appSourceContext.value = null;
+      void api.clearRecentAppSource().catch(() => undefined);
       feedback.value = {
         kind: "info",
         title: "应用权限已变更",
@@ -2153,7 +2215,7 @@ watch(selectedWorkspaceIdRef, (id, previous) => {
   if (id) {
     workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [id]: false };
     void loadDirectory("", id);
-    void refreshWorkspaceGitDiff();
+    if (selectedWorkspaceKind.value === "MANAGED") void refreshWorkspaceGitDiff();
   }
 }, { immediate: true });
 watch(currentPersonalWorkspaceId, (id, previous) => {
@@ -2450,6 +2512,10 @@ async function handlePersonalRuntimeReload(payload: {
   linuxServerId?: string;
   workspaceId?: string;
 }) {
+  if (selectedWorkspaceKind.value === "APP_SOURCE" && payload.scope === "WORKSPACE") {
+    feedback.value = { kind: "info", title: "源码快照不发布应用 Agent", description: "请先返回应用工作区再更新应用 Agent 配置。" };
+    return;
+  }
   if (runtimeReloadLock.value) return;
   if (payload.scope === "WORKSPACE" && (!selectedWorkspaceIdRef.value || !currentPersonalWorkspaceId.value)) {
     feedback.value = {
@@ -2669,6 +2735,7 @@ const agentConfigRevision = ref(0);
 
 /** Agents 树变更后刷新 Git Diff，并让目录定义复用保存动作的个人运行态热加载。 */
 function handleAgentConfigMutation(payload: AgentConfigMutation) {
+  if (selectedWorkspaceKind.value === "APP_SOURCE" && payload.scope === "WORKSPACE") return;
   if (payload.deleted) {
     const deletedPath = payload.deleted.path.replace(/\\/g, "/");
     for (const tab of [...workbench.tabs]) {
@@ -2745,6 +2812,9 @@ const saveMutation = useMutation({
     }
     if (!selectedWorkspace.value) {
       throw new Error("未选择 Workspace");
+    }
+    if (!canWriteSelectedWorkspace.value) {
+      throw new Error("当前 Workspace 不允许写入");
     }
     await api.writeFile(selectedWorkspace.value.workspaceId, tab.path, tab.content);
     return tab;
@@ -3717,6 +3787,395 @@ function openReferenceConfiguration() {
   referenceConfigurationOpen.value = true;
 }
 
+function newAppSourceOperationId() {
+  const randomPart = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID().replace(/-/g, "").slice(0, 14)
+    : Math.random().toString(36).slice(2, 16);
+  return `aso_${Date.now().toString(36)}_${randomPart}`;
+}
+
+function closeAppSourceProgressObservation() {
+  appSourceProgressConnection?.close();
+  appSourceProgressConnection = null;
+  appSourceProgressAuthorityToken += 1;
+  appSourceProgressAuthority = null;
+}
+
+function invalidateAppSourceTreeAuthority() {
+  appSourceTreeAuthorityToken += 1;
+  appSourceTreeAuthority = null;
+  appSourceTreeSnapshot.value = null;
+}
+
+async function loadAppSourceRepositories() {
+  const appId = selectedAppId.value;
+  if (!appId) return;
+  appSourcePickerLoading.value = true;
+  appSourcePickerError.value = null;
+  try {
+    appSourceRepositories.value = await api.listAppSourceRepositories(appId);
+  } catch (error) {
+    appSourcePickerError.value = errorFeedback("加载应用源码失败", error).description ?? "暂时无法读取源码状态";
+  } finally {
+    appSourcePickerLoading.value = false;
+  }
+}
+
+function openAppSourcePicker() {
+  if (!selectedAppId.value) return;
+  appSourcePickerOpen.value = true;
+  void loadAppSourceRepositories();
+}
+
+async function activateAppSourceOpenResult(result: AppSourceOpenResult) {
+  if (!applicationCatalog.value.some((app) => app.appId === result.appId)) {
+    throw new Error("当前应用权限已失效");
+  }
+  selectedAppId.value = result.appId;
+  const context = sourceContextFromOpen(result);
+  if (
+    selectedWorkspaceKind.value === "APP_SOURCE"
+    && appSourceContext.value?.workspaceId === context.workspaceId
+    && appSourceContext.value.generation === context.generation
+  ) {
+    // focus 校验命中同一服务端 generation 时只更新授权上下文，不重置文件、Session 或终端。
+    appSourceContext.value = context;
+    return;
+  }
+  const workspace = await api.getWorkspace(result.workspaceId);
+  await switchWorkspace(workspace, { kind: "APP_SOURCE" });
+  selectedWorkspaceKind.value = "APP_SOURCE";
+  appSourceContext.value = context;
+  rememberPersonalWorkspace(undefined, undefined);
+}
+
+async function openAppSourceRepository(repository: AppSourceRepositorySummary, generation = repository.generation) {
+  const appId = selectedAppId.value;
+  if (!appId || generation === null || generation === undefined || !repository.openable) return;
+  try {
+    const result = await api.openAppSource(appId, repository.repositoryId, generation);
+    await activateAppSourceOpenResult(result);
+    appSourcePickerOpen.value = false;
+    feedback.value = {
+      kind: "info",
+      title: "已打开源码快照",
+      description: `${repository.name} · generation ${result.generation}`
+    };
+  } catch (error) {
+    feedback.value = errorFeedback("打开源码快照失败", error);
+  }
+}
+
+async function loadAppSourceBranches(repository = selectedAppSourceRepository.value) {
+  const appId = selectedAppId.value;
+  if (!appId || !repository) return;
+  const dialogAuthority = appSourceDialogAuthorityToken;
+  appSourceBranchesLoading.value = true;
+  try {
+    const branches = await api.listAppSourceBranches(appId, repository.repositoryId);
+    if (
+      dialogAuthority !== appSourceDialogAuthorityToken
+      || !appSourceDialogOpen.value
+      || selectedAppId.value !== appId
+      || selectedAppSourceRepository.value?.repositoryId !== repository.repositoryId
+    ) return;
+    appSourceBranches.value = branches;
+    const targetBranch = repository.branch ?? branches[0];
+    if (targetBranch) await loadAppSourceTree(targetBranch, "");
+  } catch (error) {
+    if (dialogAuthority === appSourceDialogAuthorityToken) {
+      appSourceProgressError.value = errorFeedback("加载源码分支失败", error).description ?? "源码分支暂时不可用";
+    }
+  } finally {
+    if (dialogAuthority === appSourceDialogAuthorityToken) appSourceBranchesLoading.value = false;
+  }
+}
+
+function replaceTreeChildren(
+  nodes: AppSourceTreeSnapshot["nodes"],
+  path: string,
+  children: AppSourceTreeSnapshot["nodes"]
+): AppSourceTreeSnapshot["nodes"] {
+  return nodes.map((node) => node.path === path
+    ? { ...node, children }
+    : { ...node, children: replaceTreeChildren(node.children, path, children) });
+}
+
+async function loadAppSourceTree(branch: string, path: string) {
+  const appId = selectedAppId.value;
+  const repository = selectedAppSourceRepository.value;
+  if (!appId || !repository) return;
+  if (
+    !appSourceTreeAuthority
+    || appSourceTreeAuthority.appId !== appId
+    || appSourceTreeAuthority.repositoryId !== repository.repositoryId
+    || appSourceTreeAuthority.branch !== branch
+  ) {
+    appSourceTreeAuthority = {
+      token: ++appSourceTreeAuthorityToken,
+      appId,
+      repositoryId: repository.repositoryId,
+      branch
+    };
+    appSourceTreeSnapshot.value = null;
+  }
+  // 同一 authority 同时覆盖根树与该分支的懒加载子目录；切 branch/repo/close 后整体失效。
+  const requestAuthority = appSourceTreeAuthority;
+  appSourceTreeLoading.value = true;
+  try {
+    const snapshot = await api.getAppSourceTreeSnapshot(appId, repository.repositoryId, branch, path || ".");
+    if (!appSourceTreeAuthorityMatches(requestAuthority, appSourceTreeAuthority)) return;
+    if (!path || !appSourceTreeSnapshot.value || appSourceTreeSnapshot.value.targetCommit !== snapshot.targetCommit) {
+      appSourceTreeSnapshot.value = snapshot;
+    } else {
+      appSourceTreeSnapshot.value = {
+        targetCommit: snapshot.targetCommit,
+        nodes: replaceTreeChildren(appSourceTreeSnapshot.value.nodes, path, snapshot.nodes)
+      };
+    }
+  } catch (error) {
+    if (appSourceTreeAuthorityMatches(requestAuthority, appSourceTreeAuthority)) {
+      appSourceProgressError.value = errorFeedback("加载源码目录失败", error).description ?? "源码目录暂时不可用";
+    }
+  } finally {
+    if (appSourceTreeAuthorityMatches(requestAuthority, appSourceTreeAuthority)) {
+      appSourceTreeLoading.value = false;
+    }
+  }
+}
+
+async function applyCompletedAppSourceOperation(operation: AppSourceOperation) {
+  if (
+    selectedAppId.value !== operation.appId
+    || selectedAppSourceRepository.value?.repositoryId !== operation.repositoryId
+  ) return;
+  try {
+    // PARTIAL_FAILED 也可能已包含本机 READY 副本；是否可打开必须由服务端 open 权威判断。
+    const result = await api.openAppSource(operation.appId, operation.repositoryId, operation.targetGeneration);
+    await activateAppSourceOpenResult(result);
+  } catch {
+    await fallbackToManagedWorkspace("新 generation 在本机不可打开，已返回应用工作区。");
+  }
+}
+
+function currentAppSourceProgressContext() {
+  return {
+    dialogOpen: appSourceDialogOpen.value,
+    appId: selectedAppId.value,
+    repositoryId: selectedAppSourceRepository.value?.repositoryId,
+    repositoryGeneration: selectedAppSourceRepository.value?.generation ?? null
+  };
+}
+
+function appSourceProgressIdentity(event: AppSourceProgressEvent) {
+  const operation = "operation" in event ? event.operation : undefined;
+  return {
+    operationId: event.operationId,
+    appId: operation?.appId,
+    repositoryId: operation?.repositoryId,
+    targetGeneration: operation?.targetGeneration
+  };
+}
+
+function completeAppSourceOperationOnce(operation: AppSourceOperation, authority: AppSourceProgressAuthority) {
+  if (
+    appSourceProgressAuthority?.token !== authority.token
+    || !appSourceProgressBelongsToObservation(authority, currentAppSourceProgressContext(), {
+      operationId: operation.operationId,
+      appId: operation.appId,
+      repositoryId: operation.repositoryId,
+      targetGeneration: operation.targetGeneration
+    })
+    || !claimAppSourceTerminalOperation(handledAppSourceTerminalOperations, operation.operationId)
+  ) return;
+  closeAppSourceProgressObservation();
+  void loadAppSourceRepositories();
+  if (["SUCCEEDED", "PARTIAL_FAILED"].includes(operation.status)) {
+    void applyCompletedAppSourceOperation(operation);
+  }
+}
+
+function handleAppSourceProgress(event: AppSourceProgressEvent, authority: AppSourceProgressAuthority) {
+  if (
+    appSourceProgressAuthority?.token !== authority.token
+    || !appSourceProgressBelongsToObservation(
+      authority,
+      currentAppSourceProgressContext(),
+      appSourceProgressIdentity(event)
+    )
+  ) return;
+  if (event.type === "failed" && !event.operation) {
+    appSourceProgressError.value = `${event.errorMessage}${event.traceId ? `（traceId: ${event.traceId}）` : ""}`;
+    return;
+  }
+  if (event.operation) {
+    appSourceOperation.value = event.operation;
+    if (["SUCCEEDED", "PARTIAL_FAILED", "FAILED"].includes(event.operation.status)) {
+      completeAppSourceOperationOnce(event.operation, authority);
+    }
+  }
+}
+
+async function observeAppSourceOperation(operation: AppSourceOperation) {
+  closeAppSourceProgressObservation();
+  const repository = selectedAppSourceRepository.value;
+  if (
+    !appSourceDialogOpen.value
+    || !repository
+    || selectedAppId.value !== operation.appId
+    || repository.repositoryId !== operation.repositoryId
+  ) return;
+  const authority: AppSourceProgressAuthority = {
+    token: ++appSourceProgressAuthorityToken,
+    operationId: operation.operationId,
+    appId: operation.appId,
+    repositoryId: operation.repositoryId,
+    repositoryGeneration: repository.generation ?? null,
+    targetGeneration: operation.targetGeneration
+  };
+  appSourceProgressAuthority = authority;
+  appSourceOperation.value = operation;
+  appSourceProgressError.value = null;
+  if (!["PENDING", "RUNNING"].includes(operation.status)) {
+    completeAppSourceOperationOnce(operation, authority);
+    return;
+  }
+  try {
+    // 每次重开都先读取数据库 snapshot，再申请新 ticket；authority 让关闭或切仓后的迟到响应失效。
+    const snapshot = await api.getAppSourceOperation(operation.operationId);
+    if (
+      appSourceProgressAuthority?.token !== authority.token
+      || !appSourceProgressBelongsToObservation(authority, currentAppSourceProgressContext(), {
+        operationId: snapshot.operationId,
+        appId: snapshot.appId,
+        repositoryId: snapshot.repositoryId,
+        targetGeneration: snapshot.targetGeneration
+      })
+    ) return;
+    appSourceOperation.value = snapshot;
+    if (!["PENDING", "RUNNING"].includes(snapshot.status)) {
+      completeAppSourceOperationOnce(snapshot, authority);
+      return;
+    }
+    const connection = await api.connectAppSourceProgress(
+      operation.operationId,
+      (event) => handleAppSourceProgress(event, authority)
+    );
+    if (appSourceProgressAuthority?.token !== authority.token) {
+      connection.close();
+      return;
+    }
+    appSourceProgressConnection = connection;
+  } catch (error) {
+    if (appSourceProgressAuthority?.token === authority.token) {
+      appSourceProgressError.value = errorFeedback("恢复源码进度失败", error).description ?? "请关闭并重新打开后重试";
+    }
+  }
+}
+
+async function openAppSourceDownloadDialog() {
+  const repository = appSourceRepositories.value.find((item) => item.manageable && item.downloadState !== "DOWNLOADED_ACTIVE")
+    ?? appSourceRepositories.value.find((item) => item.manageable);
+  if (!repository) {
+    feedback.value = { kind: "info", title: "没有可下载的版本库", description: "当前应用没有你可管理的源码版本库。" };
+    return;
+  }
+  closeAppSourceProgressObservation();
+  invalidateAppSourceTreeAuthority();
+  appSourceDialogAuthorityToken += 1;
+  selectedAppSourceRepository.value = repository;
+  appSourcePickerOpen.value = false;
+  appSourceDialogOpen.value = true;
+  appSourceOperation.value = repository.latestOperation ?? null;
+  appSourceProgressError.value = null;
+  void loadAppSourceBranches(repository);
+  if (repository.latestOperation) void observeAppSourceOperation(repository.latestOperation);
+}
+
+function closeAppSourceDialog() {
+  appSourceDialogOpen.value = false;
+  appSourceDialogAuthorityToken += 1;
+  invalidateAppSourceTreeAuthority();
+  closeAppSourceProgressObservation();
+}
+
+async function materializeAppSource(payload: Omit<AppSourceMaterializationPayload, "operationId">) {
+  const appId = selectedAppId.value;
+  const repository = selectedAppSourceRepository.value;
+  if (!appId || !repository) return;
+  appSourceSubmitting.value = true;
+  try {
+    const operation = await api.materializeAppSource(appId, repository.repositoryId, {
+      operationId: newAppSourceOperationId(),
+      ...payload
+    });
+    await observeAppSourceOperation(operation);
+  } catch (error) {
+    appSourceProgressError.value = errorFeedback("提交源码任务失败", error).description ?? "请检查选择后重试";
+  } finally {
+    appSourceSubmitting.value = false;
+  }
+}
+
+async function retryAppSourceOperation(operation: AppSourceOperation) {
+  appSourceSubmitting.value = true;
+  try {
+    const retry = await api.retryAppSourceReplicas(operation.appId, operation.repositoryId, {
+      operationId: newAppSourceOperationId(),
+      expectedGeneration: operation.targetGeneration
+    });
+    await observeAppSourceOperation(retry);
+  } catch (error) {
+    appSourceProgressError.value = errorFeedback("重试源码副本失败", error).description ?? "请稍后重试";
+  } finally {
+    appSourceSubmitting.value = false;
+  }
+}
+
+async function fallbackToManagedWorkspace(reason?: string) {
+  closeAppSourceProgressObservation();
+  try { await api.clearRecentAppSource(); } catch { /* 清理失败不阻止安全回退。 */ }
+  selectedWorkspaceKind.value = "MANAGED";
+  appSourceContext.value = null;
+  const appId = selectedAppId.value;
+  if (appId) await handleSelectApp(appId);
+  else trySelectDefaultApp();
+  if (reason) feedback.value = { kind: "info", title: "源码工作区已失效", description: reason };
+}
+
+async function recoverRecentAppSource(force = false) {
+  if (!authStore.token || (!force && appSourceRecoveryChecked)) return;
+  if (appSourceRecoveryInFlight) return appSourceRecoveryInFlight;
+  appSourceRecoveryInFlight = (async () => {
+    try {
+      const recent = await api.getRecentAppSource();
+      if (!recent) return;
+      if (!applicationCatalog.value.some((app) => app.appId === recent.appId)) {
+        await api.clearRecentAppSource();
+        return;
+      }
+      // recent 只提供逻辑身份；每次刷新/focus 必须重新 open，让服务端校验权限、expiry 与本机副本。
+      const opened = await api.openAppSource(recent.appId, recent.repositoryId, recent.generation);
+      await activateAppSourceOpenResult(opened);
+    } catch {
+      if (selectedWorkspaceKind.value === "APP_SOURCE") {
+        await fallbackToManagedWorkspace("源码已过期、权限变化或本机副本不可用。");
+      } else {
+        try { await api.clearRecentAppSource(); } catch { /* recent 清理失败由下一次 focus 再校验。 */ }
+      }
+    } finally {
+      appSourceRecoveryChecked = true;
+      appSourceRecoveryInFlight = null;
+      if (selectedWorkspaceKind.value !== "APP_SOURCE") trySelectDefaultApp();
+    }
+  })();
+  return appSourceRecoveryInFlight;
+}
+
+function refreshAppSourceAuthorizationOnFocus() {
+  if (appSourceRecoveryChecked) void recoverRecentAppSource(true);
+}
+
 async function refreshWorkspaceViewAfterReferenceSaved() {
   pendingRuntimeReloadKind = "reference";
   pendingReferenceRuntimeReloadRevision.value += 1;
@@ -3796,8 +4255,18 @@ function selectedServerWorkspaceServer() {
 
 async function switchWorkspace(
   workspace: Workspace,
-  options: { preserveConversationInteraction?: boolean; awaitDirectory?: boolean } = {}
+  options: {
+    preserveConversationInteraction?: boolean;
+    awaitDirectory?: boolean;
+    kind?: SelectedWorkspaceKind;
+  } = {}
 ) {
+  const nextKind = options.kind ?? "MANAGED";
+  if (nextKind === "MANAGED" && selectedWorkspaceKind.value === "APP_SOURCE") {
+    // 切回托管版本或非应用个人工作区必须清独立 recent；失败也不能继续暴露旧源码能力。
+    try { await api.clearRecentAppSource(); } catch { /* 下一次 focus 会再次按服务端状态校验。 */ }
+    appSourceContext.value = null;
+  }
   if (!options.preserveConversationInteraction) {
     invalidateConversationInteraction();
   }
@@ -3805,8 +4274,9 @@ async function switchWorkspace(
   cacheWorkspace(workspace);
   selectedWorkspaceId.value = workspace.workspaceId;
   selectedWorkspaceSnapshot.value = workspace;
+  selectedWorkspaceKind.value = nextKind;
   // 切到运行态 Workspace 后，反查当前 workspace 来自哪个应用版本，驱动两级菜单的高亮项。
-  syncCurrentVersionFromWorkspace(workspace);
+  if (nextKind === "MANAGED") syncCurrentVersionFromWorkspace(workspace);
   void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
   void queryClient.invalidateQueries({ queryKey: ["sessions"] });
   void queryClient.invalidateQueries({ queryKey: ["runtime"] });
@@ -4235,6 +4705,11 @@ async function handleSelectApp(appId: string) {
     return;
   }
   invalidateConversationInteraction();
+  if (selectedWorkspaceKind.value === "APP_SOURCE") {
+    try { await api.clearRecentAppSource(); } catch { /* 切应用仍必须先关闭源码能力。 */ }
+    selectedWorkspaceKind.value = "MANAGED";
+    appSourceContext.value = null;
+  }
   const selectionSeq = ++appSelectionSeq;
   selectingAppId = appId;
   // 切换应用时先清空旧 workspace 状态，避免文件树继续展示上一个应用的 workspace 内容
@@ -4751,7 +5226,7 @@ async function loadWorkspaceFile(path: string, options: WorkspaceFileLoadOptions
   }
 
   try {
-    const file = await api.readFile(workspaceId, path, !currentPersonalWorkspaceId.value);
+    const file = await api.readFile(workspaceId, path, !canWriteSelectedWorkspace.value);
     if (!workspaceFileReadIsCurrent(workspaceId, path, workspaceGeneration, requestGeneration)) {
       return;
     }
@@ -5161,7 +5636,7 @@ async function handleCreateEntry(directory: string, name: string, type: "file" |
   if (!selectedWorkspace.value) {
     return;
   }
-  if (!currentPersonalWorkspaceId.value) {
+  if (!canWriteSelectedWorkspace.value) {
     feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再修改应用文件。" };
     return;
   }
@@ -5201,7 +5676,7 @@ async function handleCopyEntry(
   targetDirectory: string,
   options: { quiet?: boolean } = {}
 ): Promise<boolean> {
-  if (!selectedWorkspace.value || !currentPersonalWorkspaceId.value) {
+  if (!selectedWorkspace.value || !canWriteSelectedWorkspace.value) {
     if (!options.quiet) {
       feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再复制文件。" };
     }
@@ -5249,7 +5724,7 @@ async function handleMoveEntry(
   targetDirectory: string,
   options: { quiet?: boolean } = {}
 ): Promise<boolean> {
-  if (!selectedWorkspace.value || !currentPersonalWorkspaceId.value) {
+  if (!selectedWorkspace.value || !canWriteSelectedWorkspace.value) {
     if (!options.quiet) {
       feedback.value = { kind: "info", title: "当前工作区条目只读", description: "请切换到个人 worktree 后再移动工作区条目。" };
     }
@@ -5388,7 +5863,7 @@ async function uploadWorkspaceFiles(
 }
 
 async function handleUploadFiles(directory: string, files: File[]) {
-  if (!selectedWorkspace.value || !currentPersonalWorkspaceId.value) {
+  if (!selectedWorkspace.value || !canWriteSelectedWorkspace.value) {
     feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再上传文件。" };
     return;
   }
@@ -5411,7 +5886,7 @@ async function handleUploadFiles(directory: string, files: File[]) {
 
 /** 聊天附件落到专用工作区目录，Run 只携带唯一物理路径和原始展示名。 */
 async function handleChatAttachmentUpload(files: File[]) {
-  if (!selectedWorkspace.value || !currentPersonalWorkspaceId.value) {
+  if (!selectedWorkspace.value || !canWriteSelectedWorkspace.value) {
     feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再上传聊天附件。" };
     return;
   }
@@ -5460,7 +5935,7 @@ function handleRemoveChatAttachment(id: string) {
 async function handleUndoWorkspaceFileOperation() {
   const workspace = selectedWorkspace.value;
   const operation = workspaceUndoStack.value.at(-1);
-  if (!workspace || !currentPersonalWorkspaceId.value || !operation) return;
+  if (!workspace || !canWriteSelectedWorkspace.value || !operation) return;
 
   try {
     if (operation.kind === "move") {
@@ -5588,7 +6063,7 @@ async function handleRenameEntry(path: string, name: string) {
   if (!selectedWorkspace.value) {
     return;
   }
-  if (!currentPersonalWorkspaceId.value) {
+  if (!canWriteSelectedWorkspace.value) {
     feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再修改应用文件。" };
     return;
   }
@@ -5628,7 +6103,7 @@ async function handleDeleteEntry(
   if (!selectedWorkspace.value) {
     return false;
   }
-  if (!currentPersonalWorkspaceId.value) {
+  if (!canWriteSelectedWorkspace.value) {
     if (!options.quiet) {
       feedback.value = { kind: "info", title: "当前工作区只读", description: "请切换到个人 worktree 后再修改应用文件。" };
     }
@@ -7242,6 +7717,7 @@ function applyToolChangeToDiff(part: Extract<MessagePart, { type: "tool" }>, raw
 }
 
 async function loadDiffSource(source: "run" | "session" | "vcs" | "agent") {
+  if (selectedWorkspaceKind.value === "APP_SOURCE" && (source === "vcs" || source === "agent")) return;
   diffSource.value = source;
   centerMode.value = "diff";
   try {
@@ -7363,6 +7839,11 @@ async function refreshWorkspaceGitDiff(options: {
   paths?: string[];
   files?: WorkspaceGitDiffFile[];
 } = {}) {
+  // handler 层与组件隐藏双重守卫，防止源码模式通过迟到事件或编程调用触发 Git API。
+  if (selectedWorkspaceKind.value === "APP_SOURCE") {
+    vcsDiffFiles.value = [];
+    return;
+  }
   const token = ++workspaceGitDiffRefreshToken;
   const workspaceId = selectedWorkspaceIdRef.value;
   try {
@@ -7401,6 +7882,7 @@ async function handleOpenDiff(payload: string | {
   scope?: "PUBLIC" | "WORKSPACE";
   file?: RunDiffFile;
 }) {
+  if (selectedWorkspaceKind.value === "APP_SOURCE") return;
   if (typeof payload === "string") {
     await loadDiffSource("vcs");
     workbench.setSelectedDiffPath(payload);
@@ -7479,6 +7961,9 @@ const saveDiffFileMutation = useMutation({
     }
     if (!selectedWorkspace.value) {
       throw new Error("未选择 Workspace");
+    }
+    if (!canWriteSelectedWorkspace.value) {
+      throw new Error("当前 Workspace 不允许写入");
     }
     await api.writeFile(selectedWorkspace.value.workspaceId, path, content);
     return { path, content };
@@ -8019,15 +8504,15 @@ async function handleLogout() {
           :loading-path="loadingPath"
           :app-name="selectedManagedApplication?.appName"
           :app-templates="appTemplatesWithVersions"
-          :selected-version-id="selectedVersionId"
+          :selected-version-id="selectedWorkspaceKind === 'MANAGED' ? selectedVersionId : undefined"
           :loading-app-templates="loadingAppTemplates"
           :loading-app-versions="loadingAppVersions"
           :creating-version="creatingVersion"
           :pulling-personal-workspace="pullingPersonalWorkspace"
-          :can-write="!!currentPersonalWorkspaceId"
+          :can-write="canWriteSelectedWorkspace"
           :can-undo="workspaceUndoStack.length > 0"
-          :can-manage-agent-config="isAppAdmin"
-          :can-manage-public-config="isSuperAdmin"
+          :can-manage-agent-config="appSourceCapabilities.canPublishApplicationAgentConfig && isAppAdmin"
+          :can-manage-public-config="selectedWorkspaceKind === 'MANAGED' && isSuperAdmin"
           :api-base-url="apiBaseUrl"
           :route-linux-server-id="routeLinuxServerId"
           :workspace-id="selectedWorkspace?.workspaceId"
@@ -8039,7 +8524,9 @@ async function handleLogout() {
           :personal-runtime-reloading="personalRuntimeReloading"
           :runtime-busy="runtimeReloadBusy"
           :show-server-workspace-switch="isSuperAdmin"
-          :show-reference-configuration="showReferenceConfiguration"
+          :show-reference-configuration="selectedWorkspaceKind === 'MANAGED' && showReferenceConfiguration"
+          :workspace-kind="selectedWorkspaceKind"
+          :app-source-context="appSourceContext"
           :search-results="searchResults"
           :search-loading="searchLoading"
           :search-keyword="searchKeyword"
@@ -8070,6 +8557,8 @@ async function handleLogout() {
           @open-agent-file="openAgentFile"
           @open-server-workspace-picker="openServerWorkspacePicker"
           @open-reference-configuration="openReferenceConfiguration"
+          @open-app-source="openAppSourcePicker"
+          @return-managed-workspace="fallbackToManagedWorkspace()"
           @search="handleFileSearch"
           @create-entry="handleCreateEntry"
           @delete-entry="handleDeleteEntry"
@@ -8488,6 +8977,34 @@ async function handleLogout() {
       </div>
     </template>
   </FigmaShell>
+
+  <AppSourcePicker
+    :open="appSourcePickerOpen"
+    :repositories="appSourceRepositories"
+    :loading="appSourcePickerLoading"
+    :error="appSourcePickerError"
+    @close="appSourcePickerOpen = false"
+    @retry="loadAppSourceRepositories"
+    @download="openAppSourceDownloadDialog"
+    @open-source="openAppSourceRepository"
+  />
+
+  <AppSourceDialog
+    :open="appSourceDialogOpen"
+    :repository="selectedAppSourceRepository"
+    :branches="appSourceBranches"
+    :branches-loading="appSourceBranchesLoading"
+    :tree-snapshot="appSourceTreeSnapshot"
+    :tree-loading="appSourceTreeLoading"
+    :operation="appSourceOperation"
+    :submitting="appSourceSubmitting"
+    :progress-error="appSourceProgressError"
+    @close="closeAppSourceDialog"
+    @load-branches="loadAppSourceBranches"
+    @load-tree="loadAppSourceTree"
+    @materialize="materializeAppSource"
+    @retry="retryAppSourceOperation"
+  />
 
   <PersonalWorkspacePullDialog
     :open="personalPullDialog.open"

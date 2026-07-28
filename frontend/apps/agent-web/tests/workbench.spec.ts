@@ -1611,6 +1611,217 @@ test("switching to an application without recent workspace clears the previous f
   await expect(page.locator(".ta-workbench-cascade-panel")).toContainText("应用：F-COSS");
 });
 
+test("application source snapshot opens a logical workspace and enforces source capabilities", async ({ page }) => {
+  const appSourceRequests: string[] = [];
+  const clearedRecentAppSource: string[] = [];
+  const appSourceMaterializationRequests: Array<{ key: string; payload: Record<string, unknown> }> = [];
+  const gitDiffRequests: string[] = [];
+  const fileWriteRequests: Array<{ workspaceId: string; path: string; content: string }> = [];
+  const sourceWorkspace = {
+    ...workspace(),
+    workspaceId: "wrk_source_generation_9",
+    name: "F-GCMS 源码快照",
+    rootPath: "/srv/test-agent/app-source/repo-code/generation-9",
+    appId: "app_gcms"
+  };
+  const updatedSourceWorkspace = {
+    ...sourceWorkspace,
+    workspaceId: "wrk_source_generation_10",
+    name: "F-GCMS 源码快照 generation 10",
+    rootPath: "/srv/test-agent/app-source/repo-code/generation-10"
+  };
+  await mockBackendApi(page, {
+    appSourceRequests,
+    clearedRecentAppSource,
+    gitDiffRequests,
+    appSourceMaterializationRequests,
+    fileWriteRequests,
+    fileContents: { "tests/checkout.spec.ts": "export const sourceGeneration = 9;" },
+    workspaces: [workspace(), sourceWorkspace, updatedSourceWorkspace],
+    appSourceRepositories: {
+      app_gcms: [
+        {
+          repositoryId: "repo-code",
+          name: "应用代码库",
+          englishName: "application-code",
+          downloadState: "DOWNLOADED_ACTIVE",
+          generation: 9,
+          purpose: "TEAM",
+          branch: "main",
+          targetCommit: "commit-9",
+          selectedPaths: [{ path: "src", type: "DIRECTORY" }],
+          expiresAt: "2026-07-30T00:00:00Z",
+          occupied: false,
+          openable: true,
+          manageable: true,
+          latestOperation: null,
+          serverSummaries: []
+        },
+        {
+          repositoryId: "repo-personal",
+          name: "个人占用库",
+          englishName: "personal-repository",
+          downloadState: "PERSONAL_OCCUPIED",
+          generation: 3,
+          purpose: "PERSONAL",
+          ownerName: "李四",
+          ownerUnifiedAuthId: "UCID-1002",
+          selectedPaths: [],
+          occupied: true,
+          openable: false,
+          manageable: false,
+          unavailableReason: "当前副本由其他成员占用",
+          latestOperation: null,
+          serverSummaries: []
+        }
+      ]
+    },
+    appSourceOpenResults: {
+      "app_gcms:repo-code:9": {
+        appId: "app_gcms",
+        repositoryId: "repo-code",
+        generation: 9,
+        purpose: "TEAM",
+        workspaceId: "wrk_source_generation_9",
+        linuxServerId: "10.8.0.12",
+        expiresAt: "2026-07-30T00:00:00Z"
+      },
+      "app_gcms:repo-code:10": {
+        appId: "app_gcms",
+        repositoryId: "repo-code",
+        generation: 10,
+        purpose: "TEAM",
+        workspaceId: "wrk_source_generation_10",
+        linuxServerId: "10.8.0.12",
+        expiresAt: "2026-07-31T00:00:00Z"
+      }
+    },
+    appSourceBranches: { "app_gcms:repo-code": ["main", "release"] },
+    appSourceTreeSnapshots: {
+      "app_gcms:repo-code:main:.": {
+        targetCommit: "commit-10",
+        nodes: [{ name: "src", path: "src", type: "directory", children: [] }]
+      }
+    },
+    appSourceMaterializationResults: {
+      "app_gcms:repo-code": {
+        operationId: "aso_materialize_10",
+        appId: "app_gcms",
+        repositoryId: "repo-code",
+        sourceGeneration: 9,
+        targetGeneration: 10,
+        operationType: "UPDATE",
+        status: "SUCCEEDED",
+        purpose: "TEAM",
+        branch: "main",
+        targetCommit: "commit-10",
+        selectedPaths: [{ path: "src", type: "DIRECTORY" }],
+        expiresAt: "2026-07-31T00:00:00Z",
+        traceId: "trace-materialize-10",
+        acceptedAt: "2026-07-28T00:00:00Z",
+        completedAt: "2026-07-28T00:01:00Z",
+        globalSteps: [],
+        serverSummaries: []
+      }
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  const fileExplorer = page.locator(".figma-file-explorer");
+  await fileExplorer.getByRole("button", { name: "打开应用源码" }).click();
+  await expect(page.getByRole("dialog", { name: "应用源码" })).toContainText("团队可用");
+  await expect(page.getByRole("dialog", { name: "应用源码" })).toContainText("李四 · UCID-1002");
+  await page.getByRole("button", { name: "打开应用代码库源码" }).click();
+
+  await expect(fileExplorer.getByText("源码快照", { exact: true })).toBeVisible();
+  await expect(fileExplorer.getByText("无 Git", { exact: true })).toBeVisible();
+  await expect(fileExplorer.getByRole("button", { name: "变更" })).toHaveCount(0);
+  await expect(fileExplorer.getByText("Agents", { exact: true })).toHaveCount(0);
+  expect(appSourceRequests).toContain("open:app_gcms:repo-code:9");
+  const sourceGitDiffCount = gitDiffRequests.length;
+  await page.waitForTimeout(100);
+  expect(gitDiffRequests).toHaveLength(sourceGitDiffCount);
+
+  await fileExplorer.getByRole("button", { name: "tests", exact: true }).click();
+  await fileExplorer.getByRole("button", { name: "checkout.spec.ts", exact: true }).click();
+  await expect(page.locator(".monaco-editor")).toContainText("sourceGeneration", { timeout: 10_000 });
+  await page.locator(".monaco-editor .view-line").first().click();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.type("export const sourceGeneration = 9; // edited");
+  await page.locator(".ta-workbench-footer-save").click();
+  await fileExplorer.getByRole("button", { name: "新建或上传到工作区根目录" }).click();
+  const createDialog = page.getByRole("dialog", { name: "新建或上传文件" });
+  await createDialog.getByLabel("文件名").fill("source-note.md");
+  await createDialog.getByRole("button", { name: "创建", exact: true }).click();
+  await expect.poll(() => fileWriteRequests).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      workspaceId: "wrk_source_generation_9",
+      path: "tests/checkout.spec.ts",
+      content: expect.stringContaining("// edited")
+    }),
+    {
+      workspaceId: "wrk_source_generation_9",
+      path: "source-note.md",
+      content: ""
+    }
+  ]));
+
+  await fileExplorer.locator(".app-source-mode-banner").getByRole("button", { name: "返回应用工作区" }).click();
+  await expect(fileExplorer.getByRole("button", { name: "变更" })).toBeVisible();
+  await expect(fileExplorer.getByText("源码快照", { exact: true })).toHaveCount(0);
+  expect(clearedRecentAppSource).toEqual(["DELETE"]);
+
+  await fileExplorer.getByRole("button", { name: "打开应用源码" }).click();
+  await page.getByRole("button", { name: "下载版本库" }).click();
+  const dialog = page.getByRole("dialog", { name: "下载应用源码" });
+  await dialog.getByRole("button", { name: "下一步：选择分支与目录" }).click();
+  await expect(dialog.getByLabel("源码分支")).toHaveValue("main");
+  await expect(dialog.getByLabel("选择路径 src")).toBeChecked();
+  await dialog.getByRole("button", { name: "下一步：用途与保留时间" }).click();
+  await dialog.getByLabel("确认覆盖当前源码").check();
+  await dialog.getByRole("button", { name: "提交源码物化" }).click();
+
+  await expect(fileExplorer.getByText("源码快照", { exact: true })).toBeVisible();
+  await expect.poll(() => appSourceRequests).toContain("open:app_gcms:repo-code:10");
+  expect(appSourceMaterializationRequests).toHaveLength(1);
+  expect(appSourceMaterializationRequests[0]).toMatchObject({
+    key: "app_gcms:repo-code",
+    payload: {
+      expectedGeneration: 9,
+      expectedTreeCommit: "commit-10",
+      selectedPaths: [{ path: "src", type: "DIRECTORY" }],
+      confirmReplace: true
+    }
+  });
+});
+
+test("invalid recent application source falls back to the managed application workspace", async ({ page }) => {
+  const appSourceRequests: string[] = [];
+  const clearedRecentAppSource: string[] = [];
+  await mockBackendApi(page, {
+    appSourceRequests,
+    clearedRecentAppSource,
+    recentAppSource: {
+      appId: "app_gcms",
+      repositoryId: "repo-expired",
+      generation: 4,
+      purpose: "TEAM",
+      workspaceId: "wrk_expired_source",
+      linuxServerId: "10.8.0.12",
+      expiresAt: "2026-07-27T00:00:00Z"
+    },
+    appSourceOpenResults: {}
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+
+  await expect(page.locator(".figma-file-explorer").getByRole("button", { name: "变更" })).toBeVisible();
+  await expect(page.locator(".figma-file-explorer").getByText("源码快照", { exact: true })).toHaveCount(0);
+  expect(appSourceRequests).toContain("recent:get");
+  expect(appSourceRequests).toContain("open:app_gcms:repo-expired:4");
+  expect(clearedRecentAppSource).toEqual(["DELETE"]);
+});
+
 test("workbench does not read a workspace file tree before an application is selected", async ({ page }) => {
   const fileRequests: Array<{ workspaceId: string; path: string }> = [];
   await mockBackendApi(page, {
@@ -6203,6 +6414,16 @@ async function mockBackendApi(
     sideQuestionRunIds?: string[];
     /** 记录应用个人配置更新的 Git 同步与运行态 dispose 顺序。 */
     runtimeReloadRequests?: string[];
+    /** 应用源码 mock 与请求记录；key 分别使用 appId 与 `appId:repositoryId:generation`。 */
+    appSourceRepositories?: Record<string, Array<Record<string, unknown>>>;
+    appSourceOpenResults?: Record<string, Record<string, unknown>>;
+    recentAppSource?: Record<string, unknown> | null;
+    appSourceBranches?: Record<string, string[]>;
+    appSourceTreeSnapshots?: Record<string, Record<string, unknown>>;
+    appSourceMaterializationResults?: Record<string, Record<string, unknown>>;
+    appSourceMaterializationRequests?: Array<{ key: string; payload: Record<string, unknown> }>;
+    appSourceRequests?: string[];
+    clearedRecentAppSource?: string[];
   } = {}
 ) {
   await page.exposeFunction("__taRecordWorkspaceFileRequest", (workspaceId: string, path: string) => {
@@ -6848,6 +7069,82 @@ async function mockBackendApi(
       if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/applications") {
         await route.fulfill(json(managedApplications));
         return;
+      }
+      if (url.pathname === "/api/internal/platform/workspace-management/recent-app-source") {
+        if (method === "GET") {
+          capture.appSourceRequests?.push("recent:get");
+          await route.fulfill(json(capture.recentAppSource ?? null));
+          return;
+        }
+        if (method === "DELETE") {
+          capture.clearedRecentAppSource?.push("DELETE");
+          capture.recentAppSource = null;
+          await route.fulfill({ status: 204, headers: corsHeaders() });
+          return;
+        }
+      }
+      const appSourceRepositoryListMatch = url.pathname.match(
+        /^\/api\/internal\/platform\/workspace-management\/applications\/([^/]+)\/app-source-repositories$/
+      );
+      if (method === "GET" && appSourceRepositoryListMatch) {
+        const appId = decodeURIComponent(appSourceRepositoryListMatch[1] ?? "");
+        capture.appSourceRequests?.push(`list:${appId}`);
+        await route.fulfill(json(capture.appSourceRepositories?.[appId] ?? []));
+        return;
+      }
+      const appSourceOpenMatch = url.pathname.match(
+        /^\/api\/internal\/platform\/workspace-management\/applications\/([^/]+)\/app-source-repositories\/([^/]+)\/open$/
+      );
+      if (method === "POST" && appSourceOpenMatch) {
+        const appId = decodeURIComponent(appSourceOpenMatch[1] ?? "");
+        const repositoryId = decodeURIComponent(appSourceOpenMatch[2] ?? "");
+        const body = JSON.parse(route.request().postData() ?? "{}") as { generation?: number };
+        const key = `${appId}:${repositoryId}:${body.generation ?? ""}`;
+        capture.appSourceRequests?.push(`open:${key}`);
+        const result = capture.appSourceOpenResults?.[key];
+        if (!result) {
+          await route.fulfill({ status: 404, ...jsonFailure("APP_SOURCE_NOT_FOUND", "源码 generation 不存在") });
+          return;
+        }
+        capture.recentAppSource = result;
+        await route.fulfill(json(result));
+        return;
+      }
+      const appSourceRepositoryActionMatch = url.pathname.match(
+        /^\/api\/internal\/platform\/workspace-management\/applications\/([^/]+)\/app-source-repositories\/([^/]+)\/(branches|tree|materializations)$/
+      );
+      if (appSourceRepositoryActionMatch) {
+        const appId = decodeURIComponent(appSourceRepositoryActionMatch[1] ?? "");
+        const repositoryId = decodeURIComponent(appSourceRepositoryActionMatch[2] ?? "");
+        const action = appSourceRepositoryActionMatch[3];
+        const repositoryKey = `${appId}:${repositoryId}`;
+        if (method === "GET" && action === "branches") {
+          capture.appSourceRequests?.push(`branches:${repositoryKey}`);
+          await route.fulfill(json(capture.appSourceBranches?.[repositoryKey] ?? []));
+          return;
+        }
+        if (method === "GET" && action === "tree") {
+          const branch = url.searchParams.get("branch") ?? "";
+          const path = url.searchParams.get("path") ?? ".";
+          const treeKey = `${repositoryKey}:${branch}:${path}`;
+          capture.appSourceRequests?.push(`tree:${treeKey}`);
+          await route.fulfill(json(capture.appSourceTreeSnapshots?.[treeKey] ?? {
+            targetCommit: "",
+            nodes: []
+          }));
+          return;
+        }
+        if (method === "POST" && action === "materializations") {
+          const payload = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+          capture.appSourceMaterializationRequests?.push({ key: repositoryKey, payload });
+          const operation = capture.appSourceMaterializationResults?.[repositoryKey];
+          if (!operation) {
+            await route.fulfill({ status: 409, ...jsonFailure("APP_SOURCE_OPERATION_REJECTED", "源码任务未配置") });
+            return;
+          }
+          await route.fulfill(json(operation));
+          return;
+        }
       }
       if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/recent-workspace") {
         await route.fulfill(json(null));

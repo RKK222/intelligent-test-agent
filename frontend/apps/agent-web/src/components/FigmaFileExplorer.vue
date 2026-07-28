@@ -8,6 +8,7 @@ import AgentConfigPanel from "./AgentConfigPanel.vue";
 import type { AgentConfigMutation, AgentFileLoadRequest } from "./agentFileLoad";
 import GitChangesPanel from "./GitChangesPanel.vue";
 import { ChevronDown, ChevronRight, CloudDownload, FolderTree, GitBranch, Globe, MoreHorizontal, Plus, RefreshCw, Search } from "lucide-vue-next";
+import type { AppSourceWorkspaceContext, SelectedWorkspaceKind } from "./app-source-workspace";
 
 const props = defineProps<FileExplorerProps & {
   workspaceRootPath?: string;
@@ -69,6 +70,9 @@ const props = defineProps<FileExplorerProps & {
   userId?: string;
   /** 后端 Java 服务器 IP 地址，用于构建 iframe URL */
   backendJavaServerIp?: string;
+  /** 源码快照模式只关闭 Git/Agent 发布能力，普通文件 WebSocket 写入继续开放。 */
+  workspaceKind?: SelectedWorkspaceKind;
+  appSourceContext?: AppSourceWorkspaceContext | null;
 }>();
 
 const emit = defineEmits<{
@@ -110,6 +114,8 @@ const emit = defineEmits<{
   openAgentFile: [payload: AgentFileLoadRequest];
   openServerWorkspacePicker: [];
   openReferenceConfiguration: [];
+  openAppSource: [];
+  returnManagedWorkspace: [];
   // 搜索事件
   search: [keyword: string];
   // 创建文件或文件夹
@@ -298,6 +304,7 @@ function refreshAgents() {
 }
 
 function refreshChanges() {
+  if (props.workspaceKind === "APP_SOURCE") return;
   gitChangesPanelRef.value?.refreshChanges();
 }
 
@@ -317,6 +324,10 @@ watch(tab, (nextTab) => {
   // Git Diff 没有服务端推送事件；进入面板先查一次，停留期间持续复用同一刷新程序感知磁盘变化。
   refreshChanges();
   diffAutoRefreshTimer = window.setInterval(refreshChanges, DIFF_AUTO_REFRESH_INTERVAL_MS);
+});
+
+watch(() => props.workspaceKind, (kind) => {
+  if (kind === "APP_SOURCE" && tab.value === "changes") tab.value = "explorer";
 });
 
 onUnmounted(stopDiffAutoRefresh);
@@ -375,6 +386,7 @@ defineExpose({
         <Search class="h-4 w-4" :stroke-width="1.5" />
       </button>
       <button
+        v-if="workspaceKind !== 'APP_SOURCE'"
         type="button"
         :class="['ta-icon-tab', tab === 'changes' && 'is-active']"
         title="变更"
@@ -386,9 +398,20 @@ defineExpose({
       </button>
     </div>
 
+    <div v-if="workspaceKind === 'APP_SOURCE' && appSourceContext" class="app-source-mode-banner" role="status">
+      <div>
+        <strong>源码快照</strong>
+        <span>无 Git</span>
+        <span>到期时间 {{ appSourceContext.expiresAt }}</span>
+        <span v-if="appSourceContext.purpose === 'TEAM'">同机成员共享</span>
+      </div>
+      <button type="button" aria-label="返回应用工作区" @click="emit('returnManagedWorkspace')">返回应用工作区</button>
+    </div>
+
     <!-- Sibling collapsible sections under the body -->
     <div class="figma-fe-body">
       <GitChangesPanel
+        v-if="workspaceKind !== 'APP_SOURCE'"
         v-show="tab === 'changes'"
         ref="gitChangesPanelRef"
         :workspace-id="workspaceId"
@@ -482,6 +505,7 @@ defineExpose({
                     <span>刷新文件树</span>
                   </button>
                   <button
+                    v-if="workspaceKind !== 'APP_SOURCE'"
                     type="button"
                     class="figma-fe-more-menu-item"
                     aria-label="拉取远程"
@@ -559,7 +583,7 @@ defineExpose({
 
         <!-- Resizer divider: only show if both sections are expanded -->
         <div
-          v-if="workspaceExpanded && agentsExpanded"
+          v-if="workspaceKind !== 'APP_SOURCE' && workspaceExpanded && agentsExpanded"
           class="figma-fe-resize-handle"
           @mousedown="onResizeStart"
           role="separator"
@@ -567,7 +591,7 @@ defineExpose({
         />
 
         <!-- Section 2: agents -->
-        <div class="figma-fe-section" :class="{ 'is-expanded': agentsExpanded }">
+        <div v-if="workspaceKind !== 'APP_SOURCE'" class="figma-fe-section" :class="{ 'is-expanded': agentsExpanded }">
           <div class="figma-fe-section-header">
             <button
               type="button"
@@ -622,11 +646,15 @@ defineExpose({
       :creating-version="creatingVersion"
       :show-server-workspace-switch="showServerWorkspaceSwitch"
       :show-reference-configuration="showReferenceConfiguration"
+      :show-app-source="Boolean(appName)"
+      :workspace-kind="workspaceKind"
       @select-version="(payload) => emit('selectVersion', payload)"
       @load-versions="(templateId: string) => emit('loadVersions', templateId)"
       @create-version="(payload) => emit('createVersion', payload)"
       @open-server-workspace-picker="emit('openServerWorkspacePicker')"
       @open-reference-configuration="emit('openReferenceConfiguration')"
+      @open-app-source="emit('openAppSource')"
+      @return-managed-workspace="emit('returnManagedWorkspace')"
     />
 
     <Teleport to="body">
@@ -660,6 +688,39 @@ defineExpose({
 </template>
 
 <style scoped>
+.app-source-mode-banner {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--ta-border);
+  background: #f5f3ff;
+  color: #5b21b6;
+  font-size: 10px;
+}
+
+.app-source-mode-banner > div {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 9px;
+}
+
+.app-source-mode-banner strong { color: #4c1d95; font-size: 11px; }
+.app-source-mode-banner button {
+  flex-shrink: 0;
+  border: 1px solid #c4b5fd;
+  border-radius: 4px;
+  background: #fff;
+  padding: 3px 6px;
+  color: #5b21b6;
+  font-size: 10px;
+  cursor: pointer;
+}
+
 .figma-file-explorer {
   display: flex;
   flex-direction: column;
