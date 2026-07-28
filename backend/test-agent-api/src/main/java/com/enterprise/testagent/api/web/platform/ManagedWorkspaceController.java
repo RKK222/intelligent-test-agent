@@ -11,6 +11,7 @@ import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.workspace.ManagedWorkspaceApplicationService;
+import com.enterprise.testagent.workspace.ManagedWorkspaceGitPathPolicy;
 import java.net.URI;
 import java.nio.file.Path;
 import java.util.List;
@@ -82,6 +83,17 @@ public class ManagedWorkspaceController {
                 versionId,
                 userId(exchange),
                 agentLinuxServerId(exchange),
+                RuntimeApiSupport.traceId(exchange)));
+    }
+
+    /** 拉取只作用于当前登录用户拥有的个人 worktree，不更新应用版本或其它用户。 */
+    @PostMapping("/personal-workspaces/{personalWorkspaceId}/git-pull")
+    public ApiResponse<Object> gitPullPersonalWorkspace(
+            @PathVariable String personalWorkspaceId,
+            ServerWebExchange exchange) {
+        return ok(exchange, service.gitPullPersonalWorkspace(
+                personalWorkspaceId,
+                userId(exchange),
                 RuntimeApiSupport.traceId(exchange)));
     }
 
@@ -345,15 +357,7 @@ public class ManagedWorkspaceController {
      */
     private AuthPrincipal requirePersonalWorkspacePathPermission(ServerWebExchange exchange, List<String> files) {
         AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
-        List<String> protectedFiles = files == null ? List.of() : files.stream()
-                .filter(this::isApplicationAgentConfigPath)
-                .toList();
-        if (!protectedFiles.isEmpty() && !AuthWebSupport.hasRole(principal, Dictionary.ROLE_APP_ADMIN)) {
-            throw new PlatformException(
-                    ErrorCode.FORBIDDEN,
-                    "应用 Agent 配置仅允许应用管理员提交或发布",
-                    Map.of("files", protectedFiles));
-        }
+        ManagedWorkspaceGitPathPolicy.requireWriteAccess(files, principal.roles());
         return principal;
     }
 
@@ -401,19 +405,7 @@ public class ManagedWorkspaceController {
     }
 
     private boolean isApplicationAgentConfigPath(String file) {
-        if (file == null || file.isBlank()) {
-            return false;
-        }
-        try {
-            String normalized = Path.of(file.replace('\\', '/')).normalize().toString().replace('\\', '/');
-            while (normalized.startsWith("./")) {
-                normalized = normalized.substring(2);
-            }
-            return normalized.equals(".opencode") || normalized.startsWith(".opencode/");
-        } catch (RuntimeException exception) {
-            // 非法路径由业务服务统一返回参数错误；权限判断不在此改变错误契约。
-            return false;
-        }
+        return ManagedWorkspaceGitPathPolicy.isApplicationConfigPath(file);
     }
 
     private UserId userId(ServerWebExchange exchange) {

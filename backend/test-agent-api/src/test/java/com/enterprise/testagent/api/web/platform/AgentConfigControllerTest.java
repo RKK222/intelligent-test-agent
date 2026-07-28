@@ -186,6 +186,38 @@ class AgentConfigControllerTest {
     }
 
     @Test
+    void nonSuperAdminCannotInitializeOrPullTargetPublicRepository() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_APP_ADMIN));
+
+        client.post()
+                .uri("/api/internal/platform/workspace-management/agent-config/public/repositories/127.0.0.1/initialize")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"branch":"main","operationId":"aco_init_12345678"}
+                        """)
+                .exchange()
+                .expectStatus().isForbidden()
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("FORBIDDEN");
+
+        client.post()
+                .uri("/api/internal/platform/workspace-management/agent-config/public/repositories/127.0.0.1/pull")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"branch":"main","operationId":"aco_pull_12345678"}
+                        """)
+                .exchange()
+                .expectStatus().isForbidden()
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("FORBIDDEN");
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
     void superAdminCanReadLocalPublicRepositoryStatus() {
         AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
         when(service.localPublicRepositoryStatus(USER_ID)).thenReturn(new PublicRepositoryStatusResponse(

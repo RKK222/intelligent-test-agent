@@ -121,6 +121,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "switch-menu", key: string): void;
+  (e: "workspace-catalog-changed"): void;
 }>();
 
 const api = inject<BackendApiClient>("api")!;
@@ -190,9 +191,12 @@ const treeErrorMessage = ref("");
 const workspaceName = ref(DEFAULT_WORKSPACE_ALIAS);
 const workspaceVersion = ref("");
 const workspaceCreateOperation = ref<WorkspaceCreateOperation | null>(null);
+const workspaceCatalogNotifiedOperationIds = new Set<string>();
 let workspaceCreatePollTimer: number | undefined;
 const loadingBranches = ref(false);
 const loadingDirectories = ref(false);
+let branchRequestToken = 0;
+let directoryRequestToken = 0;
 
 const selectedWorkspaceRepository = computed(() => workspaceRepositories.value.find((item) => item.repositoryId === workspaceRepositoryId.value) ?? null);
 const requiresWorkspaceVersion = computed(() => selectedWorkspaceRepository.value != null && !selectedWorkspaceRepository.value.standard);
@@ -200,9 +204,28 @@ const workspaceCreateSteps = computed(() => workspaceCreateOperation.value?.step
 const customBranchError = ref("");
 const selectedAppName = computed(() => selectedApp.value?.appName ?? "");
 const workspaceAlias = computed(() => workspaceName.value.trim());
+const matchingWorkspaceLocation = computed(() => workspaces.value.find((workspace) =>
+  workspace.repositoryId === workspaceRepositoryId.value
+  && workspace.branch === workspaceBranch.value
+  && workspace.directoryPath === workspaceDirectory.value
+) ?? null);
 const workspaceAliasDuplicate = computed(() => {
   const alias = workspaceAlias.value;
-  return Boolean(alias) && workspaces.value.some((workspace) => workspace.workspaceName.trim() === alias);
+  return Boolean(alias) && workspaces.value.some((workspace) =>
+    workspace.workspaceId !== matchingWorkspaceLocation.value?.workspaceId
+    && workspace.workspaceName.trim() === alias
+  );
+});
+const workspaceLocationReuseMessage = computed(() => {
+  const workspace = matchingWorkspaceLocation.value;
+  if (!workspace) return "";
+  return workspace.enabled === false
+    ? `该目录已有已停用工作空间“${workspace.workspaceName}”，保存后将重命名并重新启用，不会重复创建。`
+    : `该目录已有工作空间“${workspace.workspaceName}”，保存后将更新其名称，不会重复创建。`;
+});
+const workspaceSaveLabel = computed(() => {
+  if (matchingWorkspaceLocation.value?.enabled === false) return "保存并重新启用";
+  return matchingWorkspaceLocation.value ? "保存更新" : "保存";
 });
 const canAddWorkspaceDirectory = computed(() => {
   if (!isTestWorkRepository(selectedWorkspaceRepository.value)) return false;
@@ -451,7 +474,6 @@ async function removeMember(member: ApplicationMember) {
 }
 
 function cancelDangerAction() {
-  if (loading.value) return;
   pendingDangerAction.value = null;
 }
 
@@ -525,11 +547,29 @@ async function updateWorkspaceEnabled(workspace: ApplicationWorkspaceConfig, ena
   });
 }
 
-async function loadBranches() {
+async function loadBranches(changedRepositoryId?: string) {
+  const repositoryId = changedRepositoryId || workspaceRepositoryId.value;
+  const requestToken = ++branchRequestToken;
+  ++directoryRequestToken;
   loadingBranches.value = true;
-  await run(async () => {
-    const repositoryId = workspaceRepositoryId.value;
-    branches.value = workspaceRepositoryId.value ? await api.listRepositoryBranches(workspaceRepositoryId.value) : [];
+  loadingDirectories.value = false;
+  branches.value = [];
+  workspaceBranch.value = "";
+  repositoryTree.value = [];
+  workspaceDirectory.value = "";
+  workspaceDirectoryNew.value = false;
+  newDirectoryName.value = "";
+  treeErrorMessage.value = "";
+  customBranchError.value = "";
+  if (!repositoryId) {
+    loadingBranches.value = false;
+    return;
+  }
+  try {
+    const loadedBranches = await api.listRepositoryBranches(repositoryId);
+    // 用户快速切换版本库时，旧请求不得覆盖新版本库的分支和目录树。
+    if (requestToken !== branchRequestToken || repositoryId !== workspaceRepositoryId.value) return;
+    branches.value = loadedBranches;
 
     // 智能选择默认分支（基于排序后的列表）
     if (branches.value.length > 0) {
@@ -549,20 +589,19 @@ async function loadBranches() {
       }
     } else {
       workspaceBranch.value = "";
+      treeErrorMessage.value = "该版本库未返回可用分支，请确认远端仓库和访问权限";
     }
 
-    repositoryTree.value = [];
-    workspaceDirectory.value = "";
-    workspaceDirectoryNew.value = false;
-    newDirectoryName.value = "";
-    treeErrorMessage.value = "";
-    customBranchError.value = "";
     if (repositoryId && workspaceBranch.value) {
       await loadRepositoryTree();
     }
-  }).finally(() => {
-    loadingBranches.value = false;
-  });
+  } catch (error) {
+    if (requestToken === branchRequestToken && repositoryId === workspaceRepositoryId.value) {
+      treeErrorMessage.value = error instanceof Error ? `加载分支失败：${error.message}` : "加载分支失败";
+    }
+  } finally {
+    if (requestToken === branchRequestToken) loadingBranches.value = false;
+  }
 }
 
 async function loadRepositoryTree() {
@@ -572,17 +611,29 @@ async function loadRepositoryTree() {
     workspaceDirectoryNew.value = false;
     return;
   }
+  const repositoryId = workspaceRepositoryId.value;
+  const branch = workspaceBranch.value;
+  const appId = selectedAppId.value;
+  const requestToken = ++directoryRequestToken;
   loadingDirectories.value = true;
-  await run(async () => {
-    const response = await api.getRepositoryTree(selectedAppId.value, workspaceRepositoryId.value, workspaceBranch.value);
+  try {
+    const response = await api.getRepositoryTree(appId, repositoryId, branch);
+    if (requestToken !== directoryRequestToken
+      || repositoryId !== workspaceRepositoryId.value
+      || branch !== workspaceBranch.value
+      || appId !== selectedAppId.value) return;
     repositoryTree.value = filterRepositoryTree(response.nodes.map(cloneTreeNode));
     workspaceDirectory.value = "";
     workspaceDirectoryNew.value = false;
     newDirectoryName.value = "";
     treeErrorMessage.value = "";
-  }).finally(() => {
-    loadingDirectories.value = false;
-  });
+  } catch (error) {
+    if (requestToken === directoryRequestToken) {
+      treeErrorMessage.value = error instanceof Error ? `加载目录树失败：${error.message}` : "加载目录树失败";
+    }
+  } finally {
+    if (requestToken === directoryRequestToken) loadingDirectories.value = false;
+  }
 }
 
 function selectWorkspaceTreeNode(node: WorkspaceTreeNode) {
@@ -702,6 +753,10 @@ async function refreshWorkspaceCreateOperation(operationId: string) {
     if (operation.status === "SUCCEEDED" || operation.status === "FAILED") {
       stopWorkspaceCreatePolling();
       if (operation.status === "SUCCEEDED") {
+        if (!workspaceCatalogNotifiedOperationIds.has(operationId)) {
+          workspaceCatalogNotifiedOperationIds.add(operationId);
+          emit("workspace-catalog-changed");
+        }
         // 操作完成后刷新已有工作空间列表，确保刚创建的工作空间可见
         await loadWorkspaces();
       }
@@ -739,15 +794,6 @@ watch(selectedAppId, async (appId) => {
   if (!appId || !hasAppSettingsPermission.value) return;
   pendingDangerAction.value = null;
   await loadAppContext();
-});
-
-watch(workspaceRepositoryId, () => {
-  branches.value = [];
-  workspaceBranch.value = "";
-  repositoryTree.value = [];
-  workspaceDirectory.value = "";
-  workspaceDirectoryNew.value = false;
-  customBranchError.value = "";
 });
 
 watch(workspaceBranch, () => {
@@ -1043,10 +1089,13 @@ onBeforeUnmount(() => {
                 <el-button :disabled="loading || !newDirectoryName.trim()" @click="addWorkspaceDirectory">新增目录</el-button>
               </div>
               <div v-if="treeErrorMessage" class="ta-branch-error">{{ treeErrorMessage }}</div>
+              <div v-if="workspaceLocationReuseMessage" class="ta-workspace-location-hint">
+                {{ workspaceLocationReuseMessage }}
+              </div>
             </div>
 
             <div class="ta-workspace-form-actions">
-              <el-button type="primary" :disabled="!canSaveWorkspace" @click="createWorkspace">保存</el-button>
+              <el-button type="primary" :disabled="!canSaveWorkspace" @click="createWorkspace">{{ workspaceSaveLabel }}</el-button>
             </div>
           </div>
           <div v-if="workspaceCreateOperation" class="ta-workspace-progress">
@@ -1095,7 +1144,7 @@ onBeforeUnmount(() => {
           <h4 id="ta-danger-confirm-title" class="ta-danger-confirm-title">{{ pendingDangerTitle }}</h4>
           <p class="ta-danger-confirm-message">{{ pendingDangerMessage }}</p>
           <div class="ta-danger-confirm-actions">
-            <el-button :disabled="loading" @click="cancelDangerAction">取消</el-button>
+            <el-button @click="cancelDangerAction">取消</el-button>
             <el-button type="danger" :disabled="loading" @click="confirmDangerAction">{{ pendingDangerConfirmText }}</el-button>
           </div>
         </div>
@@ -1649,5 +1698,14 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: #f56c6c;
   line-height: 1.4;
+}
+.ta-workspace-location-hint {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #ecf5ff;
+  color: #337ecc;
+  font-size: 12px;
+  line-height: 1.5;
 }
 </style>

@@ -31,7 +31,8 @@ class RunSummaryMigrationIntegrationTest {
                 "sa",
                 "",
                 true);
-        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
+                .target("20260715213000").load().migrate();
         jdbcClient = JdbcClient.create(dataSource);
     }
 

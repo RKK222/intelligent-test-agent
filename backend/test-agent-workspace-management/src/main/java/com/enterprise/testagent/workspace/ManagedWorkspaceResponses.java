@@ -245,6 +245,19 @@ public final class ManagedWorkspaceResponses {
         }
     }
 
+    /** 当前用户个人 worktree 拉取远端 feature 分支后的结果；不会更新应用共享版本目标。 */
+    public record PersonalWorkspaceGitPullResponse(
+            String personalWorkspaceId,
+            String versionId,
+            String remoteBranch,
+            String commitHash,
+            boolean updated,
+            boolean agentConfigChanged,
+            String runtimeReloadStatus,
+            String runtimeReloadId,
+            List<String> changedFiles) {
+    }
+
     public record WorkspaceDiffFileResponse(String path, String status, boolean conflict) {
     }
 
@@ -358,17 +371,29 @@ public final class ManagedWorkspaceResponses {
      * 个人 worktree 的 Git 变更和应用 feature 同步状态。
      *
      * <p>新增字段保持 JSON 向后兼容：mergeInProgress 表示 Git 已进入待解决/待提交的 merge，
-     * applicationUpdatePending 表示当前个人 HEAD 尚未包含版本固定的 target commit。</p>
+     * applicationUpdatePending 表示当前个人 HEAD 尚未包含版本固定的 target commit；
+     * applicationUpdateBlockingFiles 单独返回整个个人仓库的阻塞文件，避免当前目录 pathspec
+     * 把同仓库其它工作空间的本地变更隐藏掉。</p>
      */
     public record WorkspaceGitDiffResponse(
             List<WorkspaceGitDiffFileResponse> files,
             boolean mergeInProgress,
             boolean applicationUpdatePending,
-            String applicationTargetCommit) {
+            String applicationTargetCommit,
+            List<WorkspaceGitUpdateBlockerResponse> applicationUpdateBlockingFiles) {
 
         public WorkspaceGitDiffResponse(List<WorkspaceGitDiffFileResponse> files) {
-            this(files, false, false, null);
+            this(files, false, false, null, List.of());
         }
+    }
+
+    /** 应用更新被个人仓库本地变更阻塞时的仓库级文件定位。 */
+    public record WorkspaceGitUpdateBlockerResponse(
+            String path,
+            String rawStatus,
+            String applicationWorkspaceId,
+            String workspaceName,
+            String directoryPath) {
     }
 
     public record WorkspaceGitMergeCompletionResponse(

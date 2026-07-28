@@ -43,7 +43,8 @@ class MyBatisAiRunFeedbackRepositoryIntegrationTest {
                 "jdbc:h2:mem:testagent_run_feedback_%s;MODE=PostgreSQL;DATABASE_TO_UPPER=false"
                         .formatted(UUID.randomUUID().toString().replace("-", "")),
                 "sa", "", true);
-        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
+                .target("20260715213000").load().migrate();
         jdbcClient = JdbcClient.create(dataSource);
         seedReferences();
         SqlSessionFactoryBean factory = new SqlSessionFactoryBean();

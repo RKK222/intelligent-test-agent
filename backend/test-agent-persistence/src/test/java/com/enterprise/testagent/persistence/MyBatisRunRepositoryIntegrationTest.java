@@ -50,8 +50,13 @@ class MyBatisRunRepositoryIntegrationTest {
                 "sa",
                 "",
                 true);
-        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
+                .target("20260715213000").load().migrate();
         jdbcClient = JdbcClient.create(dataSource);
+        // mapper 已使用夜间调度 fencing 列；H2 基线按测试所需结构显式补齐。
+        jdbcClient.sql("alter table runs add column scheduled_dispatch_attempt_id varchar(128)").update();
+        jdbcClient.sql("alter table runs add column scheduled_dispatch_lease_until timestamp with time zone").update();
+        jdbcClient.sql("alter table runs add column scheduled_dispatch_accepted_at timestamp with time zone").update();
         seedWorkspaceSessionAndUser();
 
         SqlSessionFactory sqlSessionFactory = sqlSessionFactory();

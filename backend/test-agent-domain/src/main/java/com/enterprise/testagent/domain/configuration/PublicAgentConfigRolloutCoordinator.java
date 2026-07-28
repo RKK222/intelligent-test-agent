@@ -27,6 +27,19 @@ public interface PublicAgentConfigRolloutCoordinator {
             String initiatedByUserId,
             String traceId);
 
+    /**
+     * 个人拉取已经合入应用 Agent 配置后，仅为当前用户登记持久化运行态重载。
+     *
+     * @return 已登记的 rolloutId；当前用户进程未运行时为空，下次启动直接读取最新磁盘配置
+     */
+    Optional<String> schedulePersonalApplicationReload(
+            String personalWorkspaceId,
+            String branch,
+            String commitHash,
+            String localLinuxServerId,
+            String userId,
+            String traceId);
+
     void activate(String rolloutId, String commitHash);
 
     void recordExpectedCommit(String rolloutId, String commitHash);

@@ -2,18 +2,22 @@ import agentConfigManual from "../../../user-manual/docs/guide/agent-config.md?r
 import conversationManual from "../../../user-manual/docs/guide/conversation.md?raw";
 import directoryMappingManual from "../../../user-manual/docs/guide/directory-mapping.md?raw";
 import faqManual from "../../../user-manual/docs/guide/faq.md?raw";
+import featureOverviewManual from "../../../user-manual/docs/guide/feature-overview.md?raw";
 import firstTimeSetupManual from "../../../user-manual/docs/guide/first-time-setup.md?raw";
 import gettingStartedManual from "../../../user-manual/docs/guide/getting-started.md?raw";
 import processInitializationManual from "../../../user-manual/docs/guide/process-initialization.md?raw";
+import referenceConfigManual from "../../../user-manual/docs/guide/reference-config.md?raw";
 import settingsManual from "../../../user-manual/docs/guide/settings.md?raw";
 import workspaceManual from "../../../user-manual/docs/guide/workspace.md?raw";
 
 export type HelpTopicId =
   | "getting-started"
+  | "feature-overview"
   | "first-time-setup"
   | "process-initialization"
   | "settings"
   | "workspace"
+  | "reference-config"
   | "directory-mapping"
   | "conversation"
   | "agent-config"
@@ -41,11 +45,11 @@ export const HELP_TOPICS: HelpTopic[] = [
     content: gettingStartedManual
   },
   {
-    id: "process-initialization",
-    label: "初始化进程",
-    description: "分配、启动与失败处理",
-    path: "guide/process-initialization.html",
-    content: processInitializationManual
+    id: "feature-overview",
+    label: "功能总览",
+    description: "当前工作台能力与入口",
+    path: "guide/feature-overview.html",
+    content: featureOverviewManual
   },
   {
     id: "first-time-setup",
@@ -62,11 +66,25 @@ export const HELP_TOPICS: HelpTopic[] = [
     content: settingsManual
   },
   {
+    id: "process-initialization",
+    label: "初始化进程",
+    description: "分配、启动与失败处理",
+    path: "guide/process-initialization.html",
+    content: processInitializationManual
+  },
+  {
     id: "workspace",
     label: "应用与工作区",
     description: "版本、个人 worktree 与 Git",
     path: "guide/workspace.html",
     content: workspaceManual
+  },
+  {
+    id: "reference-config",
+    label: "引用配置",
+    description: "应用资产同步与只读引用",
+    path: "guide/reference-config.html",
+    content: referenceConfigManual
   },
   {
     id: "directory-mapping",
@@ -91,8 +109,8 @@ export const HELP_TOPICS: HelpTopic[] = [
   },
   {
     id: "faq",
-    label: "常见问题",
-    description: "高频疑问快速解答",
+    label: "常见问题与排查",
+    description: "功能问答与故障处理",
     path: "guide/faq.html",
     content: faqManual
   }
@@ -132,7 +150,9 @@ export function stripMarkdownFrontmatter(content: string): string {
 export function buildManualQuestionPrompt(topic: HelpTopicId, question: string): string {
   const currentTopic = helpTopicById(topic);
   const normalizedQuestion = question.trim().slice(0, 500);
-  const manualContext = stripMarkdownFrontmatter(currentTopic.content).trim().slice(0, 2_800);
+  // 常见问题页合并了问答和排查，单独放宽到 5600 字，避免宠物只读到前半页。
+  const contextLimit = currentTopic.id === "faq" ? 5_600 : 2_800;
+  const manualContext = stripMarkdownFrontmatter(currentTopic.content).trim().slice(0, contextLimit);
   return [
     "你正在回答 MIMO 测试智能体用户手册问题。请只依据下方内置手册资料作答；资料没有覆盖时直接说明，并建议用户联系平台管理员，不要编造按钮或操作路径。",
     `【当前章节】${currentTopic.label}`,

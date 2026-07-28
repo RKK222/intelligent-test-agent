@@ -19,6 +19,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "switch-menu", key: string): void;
+  (e: "workspace-catalog-changed"): void;
 }>();
 
 const panels: Record<string, PanelDef> = {
@@ -56,6 +57,7 @@ const current = computed<PanelDef>(() => panels[effectiveKey.value] ?? panels.pe
         :initial-app-tab="props.initialAppTab"
         :refresh-key="props.refreshKey"
         @switch-menu="(key: string) => emit('switch-menu', key)"
+        @workspace-catalog-changed="emit('workspace-catalog-changed')"
       />
     </div>
   </div>

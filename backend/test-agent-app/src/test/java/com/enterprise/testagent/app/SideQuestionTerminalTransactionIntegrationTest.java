@@ -206,7 +206,8 @@ class SideQuestionTerminalTransactionIntegrationTest {
         @Bean
         DataSource dataSource() {
             DriverManagerDataSource dataSource = new DriverManagerDataSource(JDBC_URL, "sa", "");
-            Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+            Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
+                    .target("20260715213000").load().migrate();
             return dataSource;
         }
 

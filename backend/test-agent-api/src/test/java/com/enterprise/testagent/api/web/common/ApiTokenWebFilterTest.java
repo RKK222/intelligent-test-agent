@@ -52,4 +52,19 @@ class ApiTokenWebFilterTest {
 
         assertThat(called[0]).isTrue();
     }
+
+    @Test
+    void filterLeavesWorkspaceGitToolAuthenticationToDedicatedController() {
+        ApiTokenWebFilter filter = new ApiTokenWebFilter("secret-token");
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.post(
+                "/api/internal/agent/opencode/workspace-git-tool"));
+        final boolean[] called = {false};
+
+        filter.filter(exchange, currentExchange -> {
+            called[0] = true;
+            return Mono.empty();
+        }).block();
+
+        assertThat(called[0]).isTrue();
+    }
 }

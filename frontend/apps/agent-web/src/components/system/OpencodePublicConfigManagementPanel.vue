@@ -231,6 +231,7 @@ function newOperationId() {
           <RefreshCw v-else class="ta-opencode-config-icon" :stroke-width="1.6" />
           刷新
         </button>
+        <span class="ta-opencode-config-toolbar-hint">仅超级管理员可按服务器初始化或拉取公共 Agent</span>
       </div>
 
       <div v-if="errorMessage" class="ta-opencode-config-alert" role="alert">
@@ -254,7 +255,7 @@ function newOperationId() {
               <th>分支</th>
               <th>提交</th>
               <th>说明</th>
-              <th>操作</th>
+              <th class="ta-opencode-config-operation">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -287,9 +288,10 @@ function newOperationId() {
                   这是该服务器的共享运行副本，不是个人公共 worktree。请先按上述路径核对本机修改；确认无需保留后，可放弃已跟踪修改并重新拉取。
                 </small>
               </td>
-              <td>
+              <td class="ta-opencode-config-operation">
                 <div class="ta-opencode-config-actions">
                   <button
+                    v-if="!row.initialized"
                     type="button"
                     class="ta-opencode-config-btn"
                     :disabled="!row.initializationAllowed || initializing"
@@ -298,13 +300,14 @@ function newOperationId() {
                     初始化
                   </button>
                   <button
+                    v-else
                     type="button"
                     class="ta-opencode-config-btn"
-                    :disabled="!row.initialized || !row.currentBranch || pullingServerId !== null"
+                    :disabled="!row.currentBranch || pullingServerId !== null"
                     @click="pullRepository(row)"
                   >
                     <Loader2 v-if="pullingServerId === row.linuxServerId" class="ta-opencode-config-icon is-spin" />
-                    拉取
+                    拉取更新
                   </button>
                   <button
                     v-if="(row.status === 'CONFLICT' && row.initialized) || dirtyPullDiagnostics[row.linuxServerId]"
@@ -388,7 +391,8 @@ function newOperationId() {
 }
 .ta-opencode-config-actions {
   display: flex;
-  align-items: center;
+  align-items: stretch;
+  flex-direction: column;
   gap: 6px;
   white-space: nowrap;
 }
@@ -402,6 +406,10 @@ function newOperationId() {
   padding: 12px 14px;
   border-bottom: 1px solid #e5e7eb;
   background: #fff;
+}
+.ta-opencode-config-toolbar-hint {
+  color: #6b7280;
+  font-size: 12px;
 }
 .ta-opencode-config-btn {
   display: inline-flex;
@@ -475,6 +483,7 @@ function newOperationId() {
 }
 .ta-opencode-config-table {
   width: 100%;
+  min-width: 1120px;
   border-collapse: collapse;
   background: #fff;
   font-size: 12px;
@@ -491,6 +500,18 @@ function newOperationId() {
   color: #4b5563;
   font-weight: 600;
   white-space: nowrap;
+}
+.ta-opencode-config-operation {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  min-width: 124px;
+  background: #fff;
+  box-shadow: -10px 0 14px -14px rgb(15 23 42 / 55%);
+}
+.ta-opencode-config-table th.ta-opencode-config-operation {
+  z-index: 2;
+  background: #f9fafb;
 }
 .ta-opencode-config-server {
   font-weight: 600;

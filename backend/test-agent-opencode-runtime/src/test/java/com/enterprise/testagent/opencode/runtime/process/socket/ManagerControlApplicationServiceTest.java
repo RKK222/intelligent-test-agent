@@ -2,6 +2,8 @@ package com.enterprise.testagent.opencode.runtime.process.socket;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.common.pagination.PageResponse;
@@ -26,6 +28,7 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcessFilter;
 import com.enterprise.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessAutoRecoveryService;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -78,6 +81,72 @@ class ManagerControlApplicationServiceTest {
                     .containsExactly("bjp_1234567890abcdef", "bjp_2234567890abcdef");
             assertThat(snapshot.buildVersion()).isEqualTo("V20260715.090203");
         });
+    }
+
+    @Test
+    void configuredManagerHeartbeatSchedulesRunningProcessRecoveryAfterRecordingSnapshot() {
+        FakeRepository repository = new FakeRepository();
+        RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
+        BackendJavaProcessLifecycleService backendLifecycle = backendLifecycle(repository, heartbeatStore);
+        OpencodeProcessAutoRecoveryService recoveryService = mock(OpencodeProcessAutoRecoveryService.class);
+        ManagerControlApplicationService service = new ManagerControlApplicationService(
+                repository,
+                heartbeatStore,
+                backendLifecycle,
+                recoveryService,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        ManagerControlMessage heartbeat = ManagerControlMessage.managerHeartbeat(
+                "mgr_1234567890abcdef",
+                "ctr_01",
+                "10.8.0.12",
+                "opencode-a",
+                4096,
+                4100,
+                5,
+                0,
+                Map.of("commands", List.of("start", "health")),
+                List.of("bjp_1234567890abcdef"),
+                "trace_1234567890abcdef");
+
+        service.managerHeartbeatAndRecoverRunningProcesses(heartbeat);
+
+        assertThat(heartbeatStore.managerSnapshots).hasSize(1);
+        verify(recoveryService).requestPreparedRecovery(
+                new ContainerManagerId("mgr_1234567890abcdef"),
+                "trace_1234567890abcdef");
+    }
+
+    @Test
+    void registerFreezesRecoveryCandidatesBeforeManagerBecomesCommandAddressable() {
+        FakeRepository repository = new FakeRepository();
+        RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
+        BackendJavaProcessLifecycleService backendLifecycle = backendLifecycle(repository, heartbeatStore);
+        OpencodeProcessAutoRecoveryService recoveryService = mock(OpencodeProcessAutoRecoveryService.class);
+        ManagerControlApplicationService service = new ManagerControlApplicationService(
+                repository,
+                heartbeatStore,
+                backendLifecycle,
+                recoveryService,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        ManagerControlMessage register = ManagerControlMessage.register(
+                "mgr_1234567890abcdef",
+                "ctr_01",
+                "10.8.0.12",
+                "opencode-a",
+                4096,
+                4100,
+                5,
+                0,
+                Map.of("commands", List.of("start", "health")),
+                "trace_1234567890abcdef");
+
+        service.register(register);
+
+        verify(recoveryService).prepareRecovery(
+                new ContainerManagerId("mgr_1234567890abcdef"),
+                new LinuxServerId("10.8.0.12"),
+                new OpencodeContainerId("ctr_01"),
+                "trace_1234567890abcdef");
     }
 
     @Test

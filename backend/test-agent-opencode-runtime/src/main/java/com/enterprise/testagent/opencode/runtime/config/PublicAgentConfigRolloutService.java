@@ -28,6 +28,9 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatS
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcessFilter;
+import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
+import com.enterprise.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
+import com.enterprise.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessConfigLinkService;
@@ -49,12 +52,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 公共 Agent/Skill 配置发布协调器：持久化禁发、登记存量进程，并在 Session 空闲后 dispose。
+ * Agent 配置发布与个人拉取重载协调器：持久化禁发、登记存量进程，并在 Session 空闲后 dispose。
  */
 @Service
 public class PublicAgentConfigRolloutService
         implements PublicAgentConfigRolloutCoordinator, PublicAgentConfigMessageGate {
 
+    private static final String OPENCODE_AGENT_ID = "opencode";
     private static final int CLAIM_LIMIT = 1;
     /** 分页进程仓储单次查询硬上限；当前 manager 容量远低于该值。 */
     private static final int TOPOLOGY_LIMIT = PageRequest.MAX_SIZE;
@@ -136,6 +140,54 @@ public class PublicAgentConfigRolloutService
                 localLinuxServerId,
                 initiatedByUserId,
                 traceId);
+    }
+
+    /**
+     * 个人拉取不建立全应用服务器成员，只复用既有 server/target 租约链登记当前用户。
+     * server 行先持久化进程快照重试；成功后 target 继续复用统一空闲检查和 dispose。
+     */
+    @Override
+    @Transactional
+    public Optional<String> schedulePersonalApplicationReload(
+            String personalWorkspaceId,
+            String branch,
+            String commitHash,
+            String localLinuxServerId,
+            String userId,
+            String traceId) {
+        String targetServer = requireText(localLinuxServerId, "个人应用 Agent 重载缺少服务器归属");
+        if (!backendInstanceIdentity.linuxServerId().equals(targetServer)) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "个人应用 Agent 重载必须在当前用户进程所属服务器登记",
+                    Map.of("linuxServerId", targetServer));
+        }
+        if (runningUserProcess(userId, targetServer, true).isEmpty()) {
+            return Optional.empty();
+        }
+
+        String rolloutId = RuntimeIdGenerator.publicAgentConfigRolloutId();
+        Instant now = Instant.now();
+        repository.createRollout(
+                rolloutId,
+                AgentConfigRolloutScope.PERSONAL_APPLICATION,
+                requireText(personalWorkspaceId, "个人工作区 ID 不能为空"),
+                requireText(branch, "个人工作区分支不能为空"),
+                requireText(commitHash, "个人工作区提交不能为空"),
+                commitHash,
+                requireText(userId, "用户 ID 不能为空"),
+                targetServer,
+                traceId,
+                now);
+        // 单用户任务只登记当前服务器；不能复用 prepareApplication 的全成员枚举。
+        repository.addServer(rolloutId, targetServer, now);
+        if (!repository.activateRollout(rolloutId, commitHash, now)) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "个人应用 Agent 运行态重载登记失败",
+                    Map.of("rolloutId", rolloutId));
+        }
+        return Optional.of(rolloutId);
     }
 
     private String prepareRollout(
@@ -359,6 +411,44 @@ public class PublicAgentConfigRolloutService
         repository.completeReadyRollouts(now);
     }
 
+    /**
+     * 个人拉取的 Git merge 已在请求线程完成；此处只持久化捕获当前用户进程，不执行任何仓库同步。
+     */
+    @Scheduled(
+            fixedDelayString = "${test-agent.public-agent-config.rollout.poll-delay-ms:5000}",
+            initialDelayString = "${test-agent.public-agent-config.rollout.initial-delay-ms:5000}")
+    public void registerPersonalApplicationReloadTargets() {
+        repository.claimPendingSync(
+                        backendInstanceIdentity.linuxServerId(),
+                        AgentConfigRolloutScope.PERSONAL_APPLICATION,
+                        Instant.now(),
+                        Instant.now().plus(SERVER_SYNC_LEASE))
+                .ifPresent(this::registerPersonalApplicationReloadTarget);
+    }
+
+    private void registerPersonalApplicationReloadTarget(PublicAgentConfigRolloutSyncRequest request) {
+        try {
+            if (!renewServerSync(request)) {
+                return;
+            }
+            Instant now = Instant.now();
+            String userId = request.initiatedByUserId();
+            // 用户进程已停止或解绑时无需 dispose；下次受管启动会直接读取最新 worktree。
+            if (runningUserProcess(userId, backendInstanceIdentity.linuxServerId(), false).isPresent()) {
+                snapshotServerTargets(
+                        request.rolloutId(),
+                        AgentConfigRolloutScope.PERSONAL_APPLICATION,
+                        backendInstanceIdentity.linuxServerId(),
+                        request.traceId(),
+                        now,
+                        Set.of(userId));
+            }
+            markServerSyncedAfterSnapshot(request, now);
+        } catch (Exception exception) {
+            markServerSyncRetry(request, safeError(exception.getMessage()));
+        }
+    }
+
     @Override
     public void markServerSyncRetry(PublicAgentConfigRolloutSyncRequest request, String errorMessage) {
         Instant now = Instant.now();
@@ -510,6 +600,43 @@ public class PublicAgentConfigRolloutService
     }
 
     private record ProcessLocation(String containerId, int port) {
+    }
+
+    /** 个人拉取只认当前 ACTIVE binding 对应的 RUNNING 进程，不能扫描或 dispose 其他用户。 */
+    private Optional<OpencodeServerProcess> runningUserProcess(
+            String userId,
+            String linuxServerId,
+            boolean rejectOtherServer) {
+        UserId targetUser = new UserId(requireText(userId, "用户 ID 不能为空"));
+        Optional<UserOpencodeProcessBinding> binding = processRepository
+                .findUserBinding(targetUser, OPENCODE_AGENT_ID)
+                .filter(candidate -> candidate.status() == UserOpencodeProcessBindingStatus.ACTIVE);
+        Optional<OpencodeServerProcess> process = binding
+                .flatMap(candidate -> processRepository.findOpencodeServerProcessById(candidate.processId()))
+                .filter(candidate -> targetUser.equals(candidate.userId()))
+                .filter(candidate -> binding
+                        .filter(active -> active.linuxServerId().equals(candidate.linuxServerId()))
+                        .filter(active -> active.port() == candidate.port())
+                        .isPresent())
+                .filter(candidate -> candidate.status() == OpencodeServerProcessStatus.RUNNING);
+        if (rejectOtherServer
+                && process.isPresent()
+                && !linuxServerId.equals(process.get().linuxServerId().value())) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "个人工作区与当前用户 TestAgent 进程不在同一服务器",
+                    Map.of(
+                            "worktreeLinuxServerId", linuxServerId,
+                            "processLinuxServerId", process.get().linuxServerId().value()));
+        }
+        return process.filter(candidate -> linuxServerId.equals(candidate.linuxServerId().value()));
+    }
+
+    private String requireText(String value, String message) {
+        if (value == null || value.isBlank()) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, message);
+        }
+        return value.trim();
     }
 
     private boolean sameLegacyProcessIdentity(

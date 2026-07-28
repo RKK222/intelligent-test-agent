@@ -1117,3 +1117,15 @@
 - Result:
   - 本地测试入口为 `http://127.0.0.1:3000/toolbox`；后端 readiness 为 UP，两个工具容器均 healthy，直接深链、容器重启和统一入口代理正常。
   - 本次不新增或变更公共 HTTP API、RunEvent/SSE、数据库/Flyway/MyBatis SQL、工具点击/热门排序、权限、generated SDK 或 OpenCode 源码；未修改 `.env.local`。现有点击事件表永久增长与单工具节点风险保持原交付约束。
+
+### 2026-07-28 - 整合远端 main 以发布工具盒子源码
+
+- Why:
+  - 工具盒子 Dockerfile 和中文化提交只存在于本地 `main`，远端同时已有独立的新提交；直接推送会因分叉失败，且禁止用强制推送覆盖远端成果。
+- What:
+  - 获取远端 `main` 后执行普通 merge，只在 `backend/README.md`、`docs/architecture/module-map.md` 和 `frontend/apps/agent-web/src/PACKAGE.md` 出现说明冲突。
+  - 冲突处理同时保留工具盒子、应用源码多服务器物化、对话 Git Tool、个人拉取运行态重载和 manager 重连进程恢复说明；代码自动合并部分不做额外改写。
+- How:
+  - 合并后确认无冲突标记且 `git diff --cached --check` 通过；JDK 21 后端跳过测试完整打包、前端全 workspace 类型检查、100 个测试文件 1655 passed / 1 skipped，以及工具盒子 193 项平台契约均通过。
+- Result:
+  - 当前 `main` 同时包含远端既有成果和两份工具 Dockerfile/构建部署脚本，具备非强制推送条件；未使用 rebase、force push、stash 或工作树清理。

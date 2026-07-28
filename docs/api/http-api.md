@@ -143,7 +143,7 @@ Base URL：`/api/internal/agent/{agentId}/processes/me`，当前 `agentId` 只�
 
 `GET /health` 的三个 query 参数必须来自最近一次 `/processes/me` 响应中的 `linuxServerId`、`containerId`、`port`。请求到达非目标服务器时，入口 Java 会从 Redis 在线后端快照中随机选择目标 `linuxServerId` 的一个 Java 后端转发；已转发但仍未到达目标服务器或目标后端不可用时返回 HTTP 200 且 `healthy=false/status=BACKEND_UNAVAILABLE`，不返回 5xx。
 
-`GET /processes/me` 还返回公共配置发布闸门字段：`messageSendAllowed`、`messageSendBlockedReason`、`publicConfigRolloutId`。兼容旧前端时字段缺失等同允许；新前端登录后每 5 秒调用轻量 `GET /processes/me/message-gate`，该接口只读 rollout 门禁，不触发 manager health 或进程状态写回，因此页面在发布前已经打开也能在下一轮发现门禁，当前用户旧实例 dispose 后下一轮立即恢复，不等待其他用户。闸门按当前登录用户判断：`PREPARING` 或所有服务器尚未同步完成时全部用户禁发；服务器同步完成后，只阻止当前用户仍未 dispose 的旧 opencode 实例。无法映射用户归属的存量目标在完成前保持全员门禁。该字段只用于提前反馈；`POST /runs`、旁路问答以及 opencode command/shell Session 的后端入口都会读取同一持久化闸门强制拒绝新消息，避免绕过前端或轮询延迟产生竞态。
+`GET /processes/me` 还返回 Agent 配置排空闸门字段：`messageSendAllowed`、`messageSendBlockedReason`、`publicConfigRolloutId`。兼容旧前端时字段缺失等同允许；新前端登录后每 5 秒调用轻量 `GET /processes/me/message-gate`，该接口只读 rollout 门禁，不触发 manager health 或进程状态写回，因此页面在发布前已经打开也能在下一轮发现门禁，当前用户旧实例 dispose 后下一轮立即恢复，不等待其他用户。闸门按当前登录用户判断：PUBLIC 或 APPLICATION 发布处于准备/服务器同步窗口时阻止对应发布范围用户，服务器同步完成后只阻止当前用户仍未 dispose 的旧 opencode 实例；PERSONAL_APPLICATION 从建立起只按 `initiated_by_user_id` 阻止个人拉取发起者，不影响其他成员。无法映射用户归属的存量公共发布目标在完成前保持全员门禁。该字段只用于提前反馈；`POST /runs`、旁路问答以及 opencode command/shell Session 的后端入口都会读取同一持久化闸门强制拒绝新消息，避免绕过前端或轮询延迟产生竞态。
 
 `UserOpencodeProcessHealthResponse`：
 
@@ -322,7 +322,7 @@ Git 命令返回 `GIT_UNAVAILABLE` 或 `GIT_TIMEOUT` 时，错误 `details` 可�
 
 Base URL：`/api/internal/platform/workspace-management/agent-config`。该能力管理工作台左侧 Agent 栏目中的“公共级”和“工作空间级”opencode 配置文件。公共级 Git 根目录来自通用参数 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT`，opencode 运行时配置目录来自 `OPENCODE_PUBLIC_CONFIG_DIR`，文件树根为 Git 根目录下 `opencode/`；工作空间级文件树根为 `{workspace.rootPath}/.opencode/`。前端在该根下管理 `agents/` Agent Markdown 和 `skills/<skill-name>/SKILL.md` 技能包，写入路径必须显式带 `agents/` 或 `skills/` 前缀。
 
-工作空间级 Diff、暂存和回退白名单还精确包含根文件 `opencode.jsonc`，使引用运行态配置进入“应用 Agent”提交/发布链路；该文件仍通过 workspace 文件 WebSocket 写入。`package.json`、`node_modules/**` 等其它 `.opencode` 内容不会因为此白名单扩展而进入应用 Agent Git 作用域。
+工作空间级 Diff、暂存和回退以完整 `.opencode/**` 安全命名空间为边界，使 JSON/JSONC、agent、skill、command、plugin、tool、旧 mode 别名及辅助源码都进入“应用 Agent”提交/发布链路；文件仍通过 workspace/agent-config 文件 WebSocket 写入。运行依赖生成的 `node_modules`、package/lockfile 等应由 `.gitignore` 排除，但一旦已跟踪或实际出现在 Git status 中就必须进入应用 Agent Diff，不能形成不可见脏状态。
 
 鉴权：
 
@@ -356,9 +356,9 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 | `POST` | `/public/commit` | 提交当前暂存区。 |
 | `POST` | `/public/publish` | 在当前用户公共 worktree 中 fetch 并 merge `origin/{公共分支}`，把最终文件树投影为以远端当前提交为唯一父节点、由当前管理员企业身份签署的线性提交，避免长期个人分支的旧无效 committer 历史进入公共分支；远端 push 前建立持久化禁发任务，再以非强制 refspec 推送该固定提交。push 与 rollout 激活确认后即返回发布成功，请求线程不认领本机同步；成功后个人分支和发起服务器共享副本均重置到该干净提交。各服务器由广播或默认 5 秒补偿任务异步同步共享副本并登记本机 manager 进程，旧 Session 空闲后逐实例 dispose；某用户旧实例 dispose 后该用户立即恢复发送，个人 worktree 保持 `ACTIVE`。 |
 
-工作空间级接口把同名能力挂在 `/workspaces/{workspaceId}/...`，其中 `diff/stage/unstage/discard/commit/publish/worktrees/status` 的语义与公共级一致；文件读写与上传必须通过文件 WebSocket。物理目录为当前运行态 Workspace 或指定 worktree 下的 `.opencode/`，但普通工作空间文件树不重复展示根级 `.opencode`。工作空间级 `diff` 只返回根文件 `.opencode/opencode.jsonc` 以及 `.opencode/agents`、`.opencode/skills` 下的变更，响应 path 会去掉 `.opencode/` 前缀；其它 `.opencode` 内容继续排除。公共级和应用级根均支持按 OpenCode 模板创建 `agents/<name>.md`，或创建 `skills/<name>/SKILL.md`、`rules/README.md`、`templates/README.md`；前端同时保留普通文件、文件夹和上传入口。
+工作空间级接口把同名能力挂在 `/workspaces/{workspaceId}/...`，其中 `diff/stage/unstage/discard/commit/publish/worktrees/status` 的语义与公共级一致；文件读写与上传必须通过文件 WebSocket。物理目录为当前运行态 Workspace 或指定 worktree 下的 `.opencode/`，但普通工作空间文件树不重复展示根级 `.opencode`。工作空间级 `diff` 返回同一 Git 根全部 Git 可见的 `.opencode/**` 用户配置，响应 path 会去掉 `.opencode/` 前缀；后端是该范围的唯一事实源，前端不得再枚举子目录。公共级和应用级根均支持按 OpenCode 模板创建 `agents/<name>.md`，或创建 `skills/<name>/SKILL.md`、`rules/README.md`、`templates/README.md`；前端同时保留普通文件、文件夹和上传入口。
 
-应用 Agent `publish` 仍先提交当前个人分支，再把所选 `.opencode` 白名单投影并推送应用 feature。远端确认后，应用普通文件和 Agent/Skill 统一按版本 `targetCommitHash` 在各服务器相关个人 worktree 执行原生 `git merge --no-edit <targetCommit>`：clean 时快进或生成 merge commit；任意 dirty/staged/untracked 时不 stash、不 reset、不覆盖，Diff 返回待同步；冲突保留 `MERGE_HEAD` 和三方 index。应用配置主 rollout 只为已经包含固定提交的用户登记目标并调用原生 `/global/dispose`；未收敛 worktree 按业务 ID、用户、服务器、目标 commit 和稳定原因码持久化为 `AWAITING_USER`，主 rollout 完成后仍由独立租约补偿，收敛后再只登记该用户 dispose。公共活动发布单独互斥，应用活动发布按版本 ID 互斥，彼此不占用同一全局锁。OpenCode 不增加应用共享配置目录或覆盖层，也不修改 OpenCode 源码。应用个人 worktree 保存 Agent/Skill 目录定义或 JSONC 后直接只热加载当前用户；公共个人保存同类文件时调用 `/public/runtime-reload`，先切换本人受管公共配置软链接再只热加载本人。两者推送后才分别进入应用目标用户 rollout 或公共全用户 rollout。
+应用 Agent `publish` 仍先提交当前个人分支，再把所选 `.opencode` 白名单投影并推送应用 feature。远端确认后，应用普通文件和 Agent/Skill 统一按版本 `targetCommitHash` 在各服务器相关个人 worktree 执行原生 `git merge --no-edit <targetCommit>`，不以整仓 clean 作为前置条件：非重叠的 dirty/staged/untracked 内容保留并完成合并；只有 Git 判定本地文件会被覆盖时才不 stash、不 reset、不覆盖并由 Diff 返回待同步；真实冲突保留 `MERGE_HEAD` 和三方 index。应用配置主 rollout 只为已经包含固定提交的用户登记目标并调用原生 `/global/dispose`；未收敛 worktree 按业务 ID、用户、服务器、目标 commit 和稳定原因码持久化为 `AWAITING_USER`，主 rollout 完成后仍由独立租约补偿，收敛后再只登记该用户 dispose。公共活动发布单独互斥，应用活动发布按版本 ID 互斥，彼此不占用同一全局锁。OpenCode 不增加应用共享配置目录或覆盖层，也不修改 OpenCode 源码。应用个人 worktree 保存 Agent/Skill 目录定义或 JSONC 后直接只热加载当前用户；公共个人保存同类文件时调用 `/public/runtime-reload`，先切换本人受管公共配置软链接再只热加载本人。两者推送后才分别进入应用目标用户 rollout 或公共全用户 rollout。
 
 公共 publish 在个人 worktree 合并远端公共分支发生冲突时返回 HTTP 409、错误码 `CONFLICT`，`details.conflictFiles` 携带冲突文件，并保留个人 worktree 的 Git 原生 merge 现场；前端在统一 Git 变更面板中选择保留本地、保留远程、手工合并或取消合并，解决后提交并再次推送。工作空间级旧 worktree publish 的冲突语义保持不变。
 
@@ -366,7 +366,7 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 
 公共 `update`、`update-and-push`、`publish` 的同步广播携带内部 `rolloutId`。发布端在远端 push 或共享副本修改前先写 `PREPARING` 任务、发起人用户 ID 以及持久化服务器清单（包含发布瞬间离线的已登记服务器），远端提交确认后激活为 `DRAINING`，形成后端禁发硬闸门；一旦该任务建立，广播失败、服务器离线或 Java 重启都只会保留 `PENDING/DRAINING` 并由定时补偿继续处理，不允许以失败状态提前开闸。发布请求不再认领或执行本服务器同步，只在远端事实和 rollout 激活确认后发送低延迟广播并返回；本机与其它服务器均由广播消费者或默认每 5 秒运行的数据库补偿程序认领，因此 Git 同步、进程登记和旧 Session 排空不会占用发布 HTTP 请求。每台服务器使用发起人的已存 SSH 凭据把本机共享运行仓库 checkout/reset 到目标 commit；只有取得本服务器 manager 的实时进程清单、把已有 opencode 进程及其用户快照写入目标表后，才确认该服务器同步完成。凭据只在目标 Java 从数据库读取并解密，不进入广播 payload。
 
-所有服务器确认后，每台 Java 的固定延迟任务只认领 `target.linuxServerId=本机 linuxServerId` 的一条目标；租约 token 隔离过期 worker，发布端可以统一插表，但不能替其他服务器执行。公共发布登记本机全部存量进程；应用发布只登记已经成功同步相关个人 worktree 的用户进程。目标 Java 先用本机 manager 快照确认端口仍存在，再经本机 opencode 逐一对该进程历史绑定的所有 Workspace 目录调用 `GET /session/status`；任一目录出现 `busy/retry`、未知状态或非法响应都跳过 dispose、累计 `retryCount` 并按退避持续重试。全部目录明确空闲后，对这个用户专属 opencode 进程只调用一次 `POST /global/dispose`；明确返回布尔 `true` 才把目标置为 `DISPOSED`。该用户的全部目标完成后立即恢复发送，下一次请求重新创建 Instance 并加载已同步的 `opencode.jsonc`、Agent 和 Skill；不等待其他用户。manager 已明确确认目标进程不存在时按已释放处理；manager 清单不可用时继续重试。全部目标结束后主 rollout 原子变为 `COMPLETED`；公共范围同一时刻只允许一个活动任务，应用范围按应用版本 ID 各自只允许一个活动任务。已完成应用 rollout 后续补偿产生的用户目标仍由同一 target worker 处理，并在 dispose 完成前只阻止该用户发送。
+所有服务器确认后，每台 Java 的固定延迟任务只认领 `target.linuxServerId=本机 linuxServerId` 的一条目标；租约 token 隔离过期 worker，发布端可以统一插表，但不能替其他服务器执行。公共发布登记本机全部存量进程；应用发布只登记已经成功同步相关个人 worktree 的用户进程；个人拉取范围只登记发起用户当前服务器上的本人进程。目标 Java 先用本机 manager 快照确认端口仍存在，再经本机 opencode 逐一对该进程历史绑定的所有 Workspace 目录调用 `GET /session/status`；任一目录出现 `busy/retry`、未知状态或非法响应都跳过 dispose、累计 `retryCount` 并按退避持续重试。全部目录明确空闲后，对这个用户专属 opencode 进程只调用一次 `POST /global/dispose`；明确返回布尔 `true` 才把目标置为 `DISPOSED`。该用户的全部目标完成后立即恢复发送，下一次请求重新创建 Instance 并加载已同步的 `opencode.jsonc`、Agent 和 Skill；不等待其他用户。manager 已明确确认目标进程不存在时按已释放处理；manager 清单不可用时继续重试。全部目标结束后主 rollout 原子变为 `COMPLETED`；公共范围同一时刻只允许一个活动任务，应用范围按应用版本 ID 各自只允许一个活动任务，个人拉取范围不进入这两类唯一锁。已完成应用 rollout 后续补偿产生的用户目标仍由同一 target worker 处理，并在 dispose 完成前只阻止该用户发送。
 
 长操作进度：
 
@@ -780,8 +780,8 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 - 测试工作库的 `directoryPath` 必须是当前应用同名根目录的一级子目录，例如 `F-COSS/W1` 可选，`F-COSS/W1/F1` 只能浏览不能作为工作空间；非测试工作库不套用该限制。
 - 非标准代码库必须传入 `version`，格式为 `yyyyMMdd`；标准代码库传入的 `version` 会被分支解析结果覆盖。
 - 只有保存接口会触发 Git clone/fetch、分支 checkout 和本地目录准备；页面上的分支、远端树和新增目录操作均不落磁盘。
-- `directoryNew=true` 表示前端在远端树内存中新增了测试工作库应用根目录下的一级子目录。后端在 clone/checkout 后如果目标目录不存在，则在保存阶段创建该目录；不会向 Git 提交空目录。旧客户端不传该字段时行为不变。
-- 后端会先保存或复用 `应用 + 代码库 + 分支 + 目录路径` 对应的工作空间模板，再创建同版本的应用版本工作区并完成 Git clone/fetch、分支 checkout 和运行态 `Workspace` 创建。
+- `directoryNew=true` 表示前端在远端树内存中新增了测试工作库应用根目录下的一级子目录。后端在 clone/checkout 后如果目标目录不存在，则在保存阶段创建 `.gitkeep`，以当前用户身份提交并 push 当前 feature 分支；push 未确认时创建失败，避免只在单台服务器留下 Git 无法复制的空目录。旧客户端不传该字段时行为不变。
+- 后端会先保存或复用 `应用 + 代码库 + 分支 + 目录路径` 对应的工作空间模板，再创建同版本的应用版本工作区并完成 Git clone/fetch、分支 checkout 和运行态 `Workspace` 创建。命中已有位置时返回原 `workspaceId`，按本次请求更新别名；若原模板已停用则同时重新启用，避免异步操作显示成功但模板仍不可见。别名仍需满足同应用唯一约束。
 - 创建前会按当前用户 READY 的 opencode 进程确定目标 `linuxServerId`，确保初始运行态工作区落在当前用户 agent 所在服务器。
 - 应用版本工作区目录使用通用参数 `{OPENCODE_APP_WORKSPACE_ROOT}/{yyyymmdd}/{repository.englishName}/{directoryPath}`；缺少代码库英文名称时返回统一 `VALIDATION_ERROR`。
 - 删除配置记录只删除模板配置，不级联清理已创建的应用版本工作区、个人工作区或运行态 `Workspace`。
@@ -1311,10 +1311,11 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `GET` | `/applications/{appId}/workspace-templates` | 查询应用工作空间切换模板，只返回 `application_workspaces.enabled=true` 的配置。 |
 | `GET` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 查询模板下已创建的应用版本工作区。 |
 | `POST` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 创建或接管应用版本工作区，并创建运行态 Workspace。 |
-| `POST` | `/workspace-versions/{versionId}/git-pull` | 在当前用户 READY opencode agent 所在服务器对应用版本工作区执行 `git pull --ff-only`，成功后广播其他服务器同步到同一 commit。 |
+| `POST` | `/workspace-versions/{versionId}/git-pull` | 已停用的版本级拉取兼容入口；返回 `VALIDATION_ERROR`，不会修改共享版本、个人 worktree 或触发广播。 |
 | `GET` | `/workspace-versions/{versionId}/git-access` | 版本选择前以当前用户身份只读探测关联 Git 版本库，不创建或修改本地工作区。 |
 | `GET` | `/workspace-versions/{versionId}/personal-workspaces` | 查询当前用户基于某版本派生的个人工作区。 |
 | `POST` | `/workspace-versions/{versionId}/personal-workspaces` | 基于应用版本工作区创建 git worktree 个人工作区。 |
+| `POST` | `/personal-workspaces/{personalWorkspaceId}/git-pull` | 只为当前登录用户拥有的个人 worktree 拉取并合并远端版本；不更新共享版本目标，不影响其他用户，也不提交或推送。 |
 | `GET` | `/recent-workspace` | 查询当前用户全局最近使用且当前仍可见的托管运行态 Workspace；关联应用已撤权、停用或删除时返回 `null`。 |
 | `GET` | `/applications/{appId}/recent-workspace` | 查询当前用户在指定应用下最近使用的托管运行态 Workspace。 |
 | `POST` | `/workspaces/{workspaceId}/recent` | 标记某个托管运行态 Workspace 为最近使用。 |
@@ -1404,7 +1405,30 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 `accessible=true` 时 `reason=null`；缺少当前用户 SSH key 时返回 `accessible=false, reason=SSH_KEY_MISSING`；Git 认证失败或仓库不可访问时返回 `accessible=false, reason=REPOSITORY_PERMISSION_REQUIRED`，供前端展示对应版本库权限申请提示。网络、DNS、SSH 端口故障和超时仍返回统一 `GIT_UNAVAILABLE` / `GIT_TIMEOUT`，不得误报为用户没有版本库权限。应用成员校验与其它版本接口一致。
 
-`POST /workspace-versions/{versionId}/git-pull` 无请求体。后端先解析当前登录用户的 READY opencode agent 所在 `linuxServerId`，再在同服务器应用版本副本上执行 `git pull --ff-only origin {branch}`。工作树存在未提交变更、非 fast-forward、目标服务器副本缺失或 SSH key 不可用时返回统一错误；成功后更新 `targetCommitHash` 与本机副本 `replicaCommitHash`，并通过内部服务器广播要求其他服务器同步到同一 commit。
+`POST /personal-workspaces/{personalWorkspaceId}/git-pull` 无请求体，只允许个人工作区 owner 调用。后端在当前用户位于该应用的整棵个人 worktree 中显式 fetch `origin/{branch}` 并执行原生 merge；应用 workspace 文件和应用 Agent 文件使用相同规则。未完成 merge 会直接返回 `CONFLICT`；普通 unstaged、staged 或 untracked 改动不再先行阻止，Git 能安全合并时保留原改动并完成拉取。只有 Git 判定本地文件会被覆盖时返回 `CONFLICT`、`details.reason=LOCAL_CHANGES`，并在 `files/blockingFiles` 中列出实际阻塞文件。全程不 stash、reset 或覆盖本地内容。成功响应返回 `personalWorkspaceId/versionId/remoteBranch/commitHash/updated/agentConfigChanged/runtimeReloadStatus/runtimeReloadId/changedFiles`。该动作不更新版本 `targetCommitHash` 或共享副本，不广播，不扫描或同步其他成员的 worktree，也不执行 commit/push；前端入口与“刷新文件树”一起收纳在当前 workspace 标题栏的“…”菜单中。
+
+### 对话工作区 Git Tool
+
+`POST /api/internal/agent/opencode/workspace-git-tool` 仅供公共 `workspace-git` Tool 从当前用户 OpenCode 进程回调。请求使用进程启动时注入的七天有效专用 Bearer 凭据；该凭据只被本端点接受，不能替代用户登录 Token，也不能调用其它平台 API。当前个人 workspace 由请求中的远端 `sessionId` 经既有 agent session binding 反查，接口不接受客户端指定 workspace ID。
+
+请求体：
+
+```json
+{
+  "sessionId": "ses_remote_...",
+  "action": "status|pull|stage|unstage|discard|commit|publish_preview|publish|conflict|resolve_conflict|abort_merge|complete_merge",
+  "files": ["docs/design.md"],
+  "message": "更新设计说明",
+  "path": "docs/conflicted.md",
+  "resolution": "CURRENT|INCOMING|BOTH|MANUAL|DELETE",
+  "content": "resolution=MANUAL 时的完整正文",
+  "expectedApplicationHead": "publish_preview 返回的 applicationHead"
+}
+```
+
+Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有托管工作区服务：owner、`.opencode/**` 的 `APP_ADMIN`（含 `SUPER_ADMIN`）、`spec/**` 禁发布、个人提交、应用 feature 发布、成员同步和冲突规则均不变。`discard/publish/resolve_conflict/abort_merge` 等动作还会先由 OpenCode permission 卡向当前用户确认。凭据过期或用户状态失效返回 `UNAUTHENTICATED`；当前对话不是个人 workspace 返回 `CONFLICT`。
+
+若本次个人拉取差异包含同仓库任一应用目录的 `.opencode/opencode.jsonc`、`.opencode/opencode.json`、`.opencode/agents/**` 或 `.opencode/skills/**`，响应 `agentConfigChanged=true`。当前用户已有 RUNNING 进程时，Git merge 成功后后端创建 `PERSONAL_APPLICATION` 单用户持久化任务，`runtimeReloadStatus=SCHEDULED` 且 `runtimeReloadId` 为任务 ID；任务只登记发起用户所在服务器和本人进程，复用现有租约、Session 空闲检查、用户消息门禁与 `/global/dispose`，页面刷新或关闭不影响处理。进程未运行时返回 `NOT_RUNNING/null`，下次启动直接读取最新磁盘配置；没有 Agent 差异时返回 `NOT_REQUIRED/null`；Git 已写盘但登记异常时返回 `FAILED/null`，不把已完成 merge 误报为失败。新字段是 additive，滚动升级期间旧前端可忽略。其他用户、共享 APPLICATION rollout 和公共 Agent PUBLIC rollout 均不受影响，也不新增广播、后台 Git 或权限入口。提交并推送仍沿用个人提交、白名单投影 feature、更新共享目标以及多用户自动同步/rollout 的既有流程；普通文件 push 后，相关用户的 worktree 在无覆盖风险时自动 merge，无需逐人手工拉取，也不 dispose。旧 `POST /workspace-versions/{versionId}/git-pull` 固定返回 `VALIDATION_ERROR`，用于阻止旧客户端继续触发版本级全员拉取。
 
 `POST /workspace-versions/{versionId}/personal-workspaces` 请求体：
 
@@ -1425,7 +1449,9 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-`sync-to-application` 保留 `force` 字段用于兼容审计，但不再绕过权限和提交约束：后端要求所选文件在个人 worktree 已提交，读取个人 `HEAD`，再按白名单投影到应用 feature worktree，提交并推送。`spec/**` 是个人本地资产，任何角色都不能发布；请求只要包含规范化后位于 `spec/**` 的路径（包括 `./spec/**` 等别名）即返回 `FORBIDDEN`，`force` 不能绕过。其它未选文件也不会进入 feature 分支。成功后更新应用版本 `targetCommitHash` 与当前服务器副本 `replicaCommitHash`，并广播 `workspace.version.sync-requested`；本机与其他服务器随后把同一固定 commit 反向 merge 到相关个人 worktree。dirty worktree 保留原状并显示待同步，真实冲突进入既有三方 Diff；浏览器不新增 SSE，已打开的文件树/标签按现有刷新或重新进入机制重读磁盘。应用版本工作区与个人工作区同步不新增 RunEvent/SSE 事件。
+`sync-to-application` 保留 `force` 字段用于兼容审计，但不再绕过权限和提交约束：后端要求所选文件在个人 worktree 已提交，读取个人 `HEAD`，再按白名单投影到应用 feature worktree，提交并推送。`spec/**` 是个人本地资产，任何角色都不能发布；请求只要包含规范化后位于 `spec/**` 的路径（包括 `./spec/**` 等别名）即返回 `FORBIDDEN`，`force` 不能绕过。其它未选文件也不会进入 feature 分支。成功后更新应用版本 `targetCommitHash` 与当前服务器副本 `replicaCommitHash`，并广播 `workspace.version.sync-requested`；本机与其他服务器随后把同一固定 commit 反向 merge 到相关个人 worktree。非重叠的本地改动保留并继续合并；只有 Git 判定会被覆盖的文件才保持原状并显示待同步，真实冲突进入既有三方 Diff；浏览器不新增 SSE，已打开的文件树/标签按现有刷新或重新进入机制重读磁盘。应用版本工作区与个人工作区同步不新增 RunEvent/SSE 事件。
+
+应用 Agent 根节点的“配置更新”操作复用 `sync-from-application`，以空 `files` 请求合并整个固定 feature commit；成功后刷新文件树与 Diff，当前用户进程已就绪时再调用既有 `/global/dispose`，未就绪时由下次启动读取最新个人 worktree。该操作不是仅刷新 OpenCode 缓存，因此即使 Diff 没有可提交/回退文件，也能消除个人 `HEAD` 落后造成的待同步状态；dirty 或真实冲突仍保留现有保护和三方处理语义。
 
 ### 默认个人工作区显式创建/修复
 
@@ -1457,7 +1483,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 ### 工作区本地 Git Diff
 
-`GET /workspaces/{workspaceId}/git-diff` 无请求参数。后端通过 runtime workspace 反查 personal workspace、应用版本工作区副本或应用版本工作区记录，使用对应 `repoRootPath` 执行 `git status --porcelain` + `git diff`，应用模板子目录通过 pathspec 限定扫描范围，并复用公共解析逻辑处理路径反转义、rename 新路径、staged/unstaged patch 合并和 additions/deletions 统计。响应中的 `path` 始终是当前运行态工作区相对路径，例如仓库内 `F-GCMS/workspace/docs/app.md` 返回为 `docs/app.md`。`rawStatus` 是 Git porcelain 两字符状态码，`DD/AU/UD/UA/DU/AA/UU` 统一映射为 `status=conflict`。个人 worktree 还只读比较版本 `targetCommitHash` 与当前 `HEAD` 的祖先关系，返回 merge 是否进行中和 feature 是否待同步；Diff 查询本身不执行 fetch/merge。该接口不依赖 opencode `/vcs/diff`。
+`GET /workspaces/{workspaceId}/git-diff` 无请求参数。后端通过 runtime workspace 反查 personal workspace、应用版本工作区副本或应用版本工作区记录，使用对应 `repoRootPath` 执行 `git status --porcelain` + `git diff`，应用模板子目录通过 pathspec 限定扫描范围，并复用公共解析逻辑处理路径反转义、rename 新路径、staged/unstaged patch 合并和 additions/deletions 统计。响应中的 `files[].path` 始终是当前运行态工作区相对路径，例如仓库内 `F-GCMS/workspace/docs/app.md` 返回为 `docs/app.md`。`rawStatus` 是 Git porcelain 两字符状态码，`DD/AU/UD/UA/DU/AA/UU` 统一映射为 `status=conflict`。个人 worktree 还只读比较仓库版本组 `targetCommitHash` 与当前 `HEAD` 的祖先关系，返回 merge 是否进行中和 feature 是否待同步；待同步但尚未进入 merge 时，会额外执行仓库级 status 生成 `applicationUpdateBlockingFiles`，因此同一仓库其它目录视图的 staged/unstaged/untracked 文件不会被当前 pathspec 隐藏。Diff 查询本身不执行 fetch/merge。该接口不依赖 opencode `/vcs/diff`。
 
 响应 `WorkspaceGitDiffResponse`：
 
@@ -1466,6 +1492,15 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
   "mergeInProgress": false,
   "applicationUpdatePending": true,
   "applicationTargetCommit": "1234567890abcdef...",
+  "applicationUpdateBlockingFiles": [
+    {
+      "path": "F-GCMS/workspace-house/docs/design.md",
+      "rawStatus": "M ",
+      "applicationWorkspaceId": "awp_...",
+      "workspaceName": "psn-house",
+      "directoryPath": "F-GCMS/workspace-house"
+    }
+  ],
   "files": [
     {
       "path": "src/App.java",
@@ -1480,7 +1515,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-`mergeInProgress=true` 表示仓库存在 `MERGE_HEAD`；`applicationUpdatePending=true` 表示当前个人 `HEAD` 尚未包含版本固定提交。dirty 跳过、未完成冲突和冲突已解决但尚未点击“完成合并”都可保持 pending。非个人工作区或版本尚无目标提交时这些字段为 `false/false/null`，旧前端可忽略新增字段。
+`mergeInProgress=true` 表示仓库存在 `MERGE_HEAD`；`applicationUpdatePending=true` 表示当前个人 `HEAD` 尚未包含版本固定提交。`applicationUpdateBlockingFiles[].path` 是仓库相对路径，不受当前工作空间 pathspec 裁剪；能匹配同应用、同仓库、同分支目录视图时补充工作空间 ID、名称和目录，仓库根级文件则三个归属字段为 `null`。只有 Git 判定会覆盖本地文件、未完成冲突或冲突已解决但尚未点击“完成合并”时才保持 pending；非重叠 dirty/staged/untracked 内容会在原状态保留并完成 merge。非个人工作区或版本尚无目标提交时同步字段为 `false/false/null` 且阻塞列表为空，旧前端可忽略新增字段。
 
 `POST /workspaces/{workspaceId}/git-discard` 请求体：
 
@@ -1531,7 +1566,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 2. `publish` 校验个人 worktree 未处于 merge 状态，且 `files` 在个人 worktree 没有未提交变更；未先本地提交时返回 `CONFLICT`。
 3. 确保当前服务器的应用 feature worktree clean，`git fetch` + `git pull --ff-only {appVersionBranch}`，并校验可选 `expectedApplicationHead`。
 4. 读取个人仓库 `HEAD`，将 `files` 映射为 feature worktree 的仓库相对路径；存在的文件执行 checkout 投影，不存在的文件执行定点删除。
-5. 在 feature worktree 提交投影结果并 `git push origin {appVersionBranch}`；个人分支不 push。push 成功后更新版本目标并广播固定 commit；本机和远端服务器都在相关个人 worktree clean 时执行 `git merge --no-edit <targetCommit>`，dirty 时保留待同步，冲突时保留 Git 原生 merge 状态。应用 Agent 使用同一 Git merge；其持久化 rollout 等待相关个人 worktree 全部包含目标 commit 后才 dispose 目标用户。服务端在准备 feature worktree 前对所有角色强制拒绝 `spec/**`，`SUPER_ADMIN` 也不能绕过目录规则，其它未选文件仍不会泄漏。
+5. 在 feature worktree 提交投影结果并 `git push origin {appVersionBranch}`；个人分支不 push。push 成功后更新版本目标并广播固定 commit；本机和远端服务器都直接在相关个人 worktree 执行 `git merge --no-edit <targetCommit>`，非重叠本地改动保留并继续合并，只有 Git 判定会覆盖本地文件时才保留待同步，冲突时保留 Git 原生 merge 状态。应用 Agent 使用同一 Git merge；其持久化 rollout 只在相关个人 worktree 包含目标 commit 后 dispose 对应用户。服务端在准备 feature worktree 前对所有角色强制拒绝 `spec/**`，`SUPER_ADMIN` 也不能绕过目录规则，其它未选文件仍不会泄漏。
 
 发布结果：
 
@@ -1847,6 +1882,8 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 ```
 
 WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelope，稳定 `type` 包括 `register`、`registered`、`configRequest`、`configUpdate`、`managerHeartbeat`、`command`、`commandResult`、`error`；`backendListRequest`、`backendListResponse` 和旧 `heartbeat` 只作为兼容枚举保留，不作为新运行路径主入口，Java 收到 `backendListRequest` 会忽略。manager 发出的 `register` 与 `managerHeartbeat` 可带 `buildVersion?: string`，值为二进制构建时按北京时间注入的 `VyyyyMMdd.HHmmss`；旧 manager 缺字段时 Java 保持 `null`，不会阻断连接。`configUpdate` 首次由 manager 的 `configRequest` 拉取，完整帧返回 `maxProcesses`、`sessionRoot`、`configDir`，其中 `sessionRoot/configDir` 分别来自 `common_parameters.OPENCODE_SESSION_DIR` 与 `OPENCODE_PUBLIC_CONFIG_DIR`；后续最大进程数刷新帧只携带 `maxProcesses`，`sessionRoot/configDir` 为空表示路径不变。`start` command 在 `sessionPath` 外显式携带可选 `configPath`，已有 binding 精确恢复时还可携带 `bindingRecovery?: true`；新版 Java 固定传用户受管软链接，新版 manager 使用现有字段派生受保护的 `HOME`、XDG、TMP 和配置环境，不新增 wire 字段，旧命令缺失 `configPath` 时才兼容公共共享 `configDir`。企业部署要求运行用户的 `~/.config/opencode` 不维护模型或供应商。`managerHeartbeat` 每 5 秒由 manager 通过本服务器 Java socket 发送一次，后端写入 Redis manager 快照，TTL 为 10 秒，同时把容器资源指标追加到 Redis 48 小时历史 ZSET；资源指标可带 `metricsSource=cgroup|process|unavailable`。`managerHeartbeat.managedProcesses[]` 可选携带本 manager 管理的 opencode server 明细：`port`、`pid`、`baseUrl`、`sessionPath`、`configPath`、`startedAt`、`startCommand`、`traceId`，以及新增的 `unifiedAuthId?: string`、`managerStatus?: "PID_ALIVE"`；旧 manager、旧 state 或旧 Redis JSON 缺新增字段时保持 `null`/缺失。`startCommand` 是 manager 生成的安全展示命令，按固定顺序显示 `HOME`、全部 XDG、`TMPDIR` 和配置路径，不包含 manager token、用户 JWT、Cookie、prompt 或 API key；后端不从该字符串解析 UCID。manager 生成心跳前会清理 PID 已不存在的本地 stale state；删除前按端口和当前 PID 重新核验，避免旧心跳快照删除同端口重启后的新 state。后端命令使用 `commandId=mcmd_...`，manager 回包必须带同一 `commandId` 和 `traceId`；目标配置不可加载、用户目录冲突或健康旧进程路径与显式路径不一致时 `start` 返回失败，不会复用错误运行态。当前命令集合为 `start`、`health`、`stop`、`restart`、`stopOwned`；`stopOwned` 额外携带 expected UCID/PID，只有 manager state 同时匹配时才允许停止，旧 manager 不支持时 Java 不回退端口 `stop`。收到完整 `configUpdate` 前，`start`/`restart` 返回 `FAILED`。运行管理命令继续由统一 Java 路由转发到本机 manager；legacy `stop` 对 state 存在但 OS 进程已结束的端口幂等清理，SIGKILL 后也须确认 PID 退出才删除 state，成功的配置应用和进程命令都会立即补发 heartbeat。
+
+manager 注册时，Java 会在尚未把该 socket 暴露给业务健康探测前，同步冻结同容器内数据库为 `RUNNING/STARTING` 且 binding 为 `ACTIVE` 的原进程候选。完整 `configUpdate` 下发后的首个 `managerHeartbeat` 才登记可下发命令的控制连接，并在 Redis 快照写入后异步执行该连接的冻结计划；这样 manager state 尚为空时，前端并发 `GET /processes/me` 不会抢先把候选写成 `STOPPED`。每个连接只执行一次计划，单进程失败有界重试一次，注册前已经是 `STOPPED/FAILED/UNHEALTHY`、非活跃 binding 和无主进程不自动启动。恢复仍通过公共初始化、启动和健康检查程序完成，不新增 wire 字段，也不改变 `GET /processes/me` 本身“不自动启动”的接口语义。
 
 manager 对 start/stop/restart 串行化。`start` 的成功回包显式携带 `processCreated`：本次新建为 `true`，同端口、同 UCID、同 session/config 且健康的幂等复用为 `false`；旧 manager 缺字段时 Java 按未知处理且不执行冲突补偿。`bindingRecovery=true` 只由 ACTIVE binding 的原坐标恢复或运行管理受管重启发送，使该次原端口恢复不受 `maxProcesses` 过滤；首次分配与端口迁移不携带，容量不足仍失败且保留预留/binding。稳定拒绝类别为 `PORT_CONFLICT`、`PORT_OUT_OF_RANGE`、`IDENTITY_ALREADY_MANAGED`、`IDENTITY_CONFIG_MISMATCH`；只有前两类允许 Java 在已有 binding 恢复时进入原有空闲端口选择，身份/配置不匹配、未知错误、断连、超时和普通启动失败均保留原 binding。
 

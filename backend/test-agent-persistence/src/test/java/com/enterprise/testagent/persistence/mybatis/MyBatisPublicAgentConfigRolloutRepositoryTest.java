@@ -73,6 +73,8 @@ class MyBatisPublicAgentConfigRolloutRepositoryTest {
 
         assertThat(sql).contains("pw.app_workspace_version_id = v.version_id");
         assertThat(sql).doesNotContain("pw.version_id");
+        assertThat(sql).contains("r.config_scope = 'PERSONAL_APPLICATION'");
+        assertThat(sql).contains("r.initiated_by_user_id = ?");
     }
 
     @Test

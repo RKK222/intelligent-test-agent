@@ -2342,6 +2342,20 @@ export type PersonalWorkspace = {
   updatedAt: string;
 };
 
+/** 个人 worktree 拉取结果；该操作不会更新应用共享版本或其它用户。 */
+export type PersonalWorkspaceGitPullResult = {
+  personalWorkspaceId: string;
+  versionId: string;
+  remoteBranch: string;
+  commitHash: string;
+  updated: boolean;
+  agentConfigChanged: boolean;
+  /** 新后端持久化登记结果；缺失时前端兼容旧后端并仅在当前页面尝试重载。 */
+  runtimeReloadStatus?: "NOT_REQUIRED" | "SCHEDULED" | "NOT_RUNNING" | "FAILED";
+  runtimeReloadId?: string | null;
+  changedFiles: string[];
+};
+
 // 用户在 (appId, workspaceId) 维度下最近一次手动选择的 VCS 分支，
 // 用于工作区下分支选择按钮的"下次进入默认切换"持久化。
 export type WorkspaceBranchPreference = {
@@ -2516,6 +2530,16 @@ export type WorkspaceGitDiff = {
   /** 当前个人 HEAD 尚未包含应用版本固定的 target commit。 */
   applicationUpdatePending?: boolean;
   applicationTargetCommit?: string | null;
+  /** 整个个人仓库内阻塞应用更新的本地变更；可能属于同仓库的其它目录视图。 */
+  applicationUpdateBlockingFiles?: WorkspaceGitUpdateBlocker[];
+};
+
+export type WorkspaceGitUpdateBlocker = {
+  path: string;
+  rawStatus?: string;
+  applicationWorkspaceId?: string | null;
+  workspaceName?: string | null;
+  directoryPath?: string | null;
 };
 
 export type WorkspaceGitMergeCompletion = {

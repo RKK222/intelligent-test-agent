@@ -20,6 +20,7 @@ import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.BranchPrefer
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.GitRepositoryAccessResponse;
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.ManagedApplicationResponse;
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.PersonalWorkspacePublishPreviewResponse;
+import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.PersonalWorkspaceGitPullResponse;
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceRuntimeResponse;
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceGitConflictResponse;
 import com.enterprise.testagent.workspace.ManagedWorkspaceResponses.WorkspaceGitMergeCompletionResponse;
@@ -97,34 +98,31 @@ class ManagedWorkspaceControllerTest {
     }
 
     @Test
-    void gitPullVersionPassesAgentLinuxServerId() {
+    void gitPullPersonalWorkspacePassesCurrentOwner() {
         ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
-        UserOpencodeProcessAssignmentService assignmentService = readyAssignmentService("10.8.0.12");
-        WorkspaceRuntimeResponse runtime = runtimeWorkspace();
-        when(service.gitPullVersion(eq("awv_123"), eq(USER_ID), eq("10.8.0.12"), eq(TRACE_ID)))
-                .thenReturn(new ApplicationWorkspaceVersionResponse(
+        when(service.gitPullPersonalWorkspace(eq("pws_123"), eq(USER_ID), eq(TRACE_ID)))
+                .thenReturn(new PersonalWorkspaceGitPullResponse(
+                        "pws_123",
                         "awv_123",
-                        "aws_123",
-                        "app_gcms",
-                        "repo_123",
-                        "20260707",
                         "feature_testagent_20260707",
-                        "/data/appworkspace/20260707/repo",
-                        "/data/appworkspace/20260707/repo/F-GCMS/workspace",
-                        runtime,
-                        "ACTIVE",
-                        Instant.parse("2026-06-23T00:00:00Z"),
-                        Instant.parse("2026-06-23T00:00:00Z")));
+                        "commit_remote",
+                        true,
+                        false,
+                        "NOT_REQUIRED",
+                        null,
+                        List.of("F-GCMS/workspace/docs/design.md")));
 
-        client(service, assignmentService).post()
-                .uri("/api/internal/platform/workspace-management/workspace-versions/awv_123/git-pull")
+        client(service).post()
+                .uri("/api/internal/platform/workspace-management/personal-workspaces/pws_123/git-pull")
                 .header("X-Trace-Id", TRACE_ID)
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
-                .jsonPath("$.data.versionId").isEqualTo("awv_123");
+                .jsonPath("$.data.personalWorkspaceId").isEqualTo("pws_123")
+                .jsonPath("$.data.updated").isEqualTo(true)
+                .jsonPath("$.data.runtimeReloadStatus").isEqualTo("NOT_REQUIRED");
 
-        verify(service).gitPullVersion("awv_123", USER_ID, "10.8.0.12", TRACE_ID);
+        verify(service).gitPullPersonalWorkspace("pws_123", USER_ID, TRACE_ID);
     }
 
     @Test

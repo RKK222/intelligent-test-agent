@@ -36,7 +36,9 @@ import com.enterprise.testagent.domain.opencodeprocess.UserOpencodeProcessBindin
 import com.enterprise.testagent.domain.run.ConversationContextStore;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.process.socket.ManagerCommandNotDispatchedException;
+import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayDeque;
@@ -491,6 +493,41 @@ class OpencodeProcessStartupServiceTest {
         assertThat(gateway.startCommands).singleElement().satisfies(command ->
                 assertThat(command.environment())
                         .containsEntry("OPENCODE_REFERENCES_DIR", "/data/caller/references"));
+    }
+
+    @Test
+    void startAndVerifyInjectsScopedWorkspaceGitToolCredentials() {
+        FakeRepository repository = new FakeRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        InternalModelProxyRuntimeSettings proxySettings = Mockito.mock(InternalModelProxyRuntimeSettings.class);
+        Mockito.when(proxySettings.requireApiKey()).thenReturn("internal-model-key");
+        Mockito.when(proxySettings.sameNodeProxyBaseUrl())
+                .thenReturn("http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-model-proxy/v1");
+        Mockito.when(proxySettings.sameNodeBaseUrl()).thenReturn("http://127.0.0.1:8080");
+        WorkspaceGitToolTokenService tokenService = Mockito.mock(WorkspaceGitToolTokenService.class);
+        Mockito.when(tokenService.issue(USER_ID)).thenReturn("signed-workspace-token");
+        OpencodeProcessStartupService service = new OpencodeProcessStartupService(
+                repository,
+                repository,
+                gateway,
+                new RecordingHeartbeatStore(),
+                null,
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                Duration.ofSeconds(10),
+                Duration.ofMillis(1),
+                duration -> { },
+                proxySettings,
+                null,
+                null,
+                null);
+        service.setWorkspaceGitToolTokenService(tokenService);
+
+        service.startAndVerify(request(null, null, null));
+
+        assertThat(gateway.startCommands).singleElement().satisfies(command ->
+                assertThat(command.environment())
+                        .containsEntry("TEST_AGENT_PLATFORM_BASE_URL", "http://127.0.0.1:8080")
+                        .containsEntry("TEST_AGENT_WORKSPACE_GIT_TOOL_TOKEN", "signed-workspace-token"));
     }
 
     @Test

@@ -37,7 +37,8 @@ class AiRunFeedbackMigrationIntegrationTest {
 
     @Test
     void migrationBackfillsRunDeduplicatesAndAllowsNullMessageId() {
-        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
+                .target("20260715213000").load().migrate();
 
         assertThat(jdbc.sql("select feedback_id from ai_message_feedbacks where run_id = 'run_feedback_migration'")
                         .query(String.class).list())

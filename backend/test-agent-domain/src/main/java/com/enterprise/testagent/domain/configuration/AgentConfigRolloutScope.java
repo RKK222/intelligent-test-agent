@@ -1,7 +1,8 @@
 package com.enterprise.testagent.domain.configuration;
 
-/** 共享 Agent 配置发布排空范围。个人 worktree 热加载不进入该持久化全局链路。 */
+/** Agent 配置持久化排空范围；个人拉取只登记当前用户，不进入共享 Git 同步。 */
 public enum AgentConfigRolloutScope {
     PUBLIC,
-    APPLICATION
+    APPLICATION,
+    PERSONAL_APPLICATION
 }

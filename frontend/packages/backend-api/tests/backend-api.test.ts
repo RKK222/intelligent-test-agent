@@ -1759,9 +1759,26 @@ describe("backend-api", () => {
       createdAt: "2026-06-23T00:00:00Z",
       updatedAt: "2026-06-23T00:00:00Z"
     };
-    const fetcher = vi.fn<typeof fetch>().mockImplementation(() =>
+    const personalPullResponse = {
+      personalWorkspaceId: "pws_1",
+      versionId: "awv_1",
+      remoteBranch: "feature_testagent_20260707",
+      commitHash: "abc123",
+      updated: true,
+      agentConfigChanged: false,
+      runtimeReloadStatus: "NOT_REQUIRED",
+      runtimeReloadId: null,
+      changedFiles: ["F-GCMS/workspace/docs/design.md"]
+    };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) =>
       Promise.resolve(
-        new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: versionResponse }), {
+        new Response(JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: String(input).includes("/personal-workspaces/pws_1/git-pull")
+            ? personalPullResponse
+            : versionResponse
+        }), {
           status: 200
         })
       )
@@ -1781,13 +1798,14 @@ describe("backend-api", () => {
       branch: "feature_testagent_20260707"
     });
 
-    await expect(client.gitPullWorkspaceVersion("awv_1")).resolves.toMatchObject({
+    await expect(client.gitPullPersonalWorkspace("pws_1")).resolves.toMatchObject({
+      personalWorkspaceId: "pws_1",
       versionId: "awv_1",
-      targetCommitHash: "abc123",
-      replicaLinuxServerId: "10.8.0.12"
+      commitHash: "abc123",
+      updated: true
     });
     expect(fetcher.mock.calls[1]?.[0]).toBe(
-      "http://api/api/internal/platform/workspace-management/workspace-versions/awv_1/git-pull"
+      "http://api/api/internal/platform/workspace-management/personal-workspaces/pws_1/git-pull"
     );
     expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: "POST" }));
   });

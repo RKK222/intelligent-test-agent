@@ -91,6 +91,56 @@ class GitWorkspaceServiceRealGitTest {
     }
 
     @Test
+    void nativeMergeKeepsNonOverlappingLocalChanges() throws Exception {
+        Path repo = initializeRepository();
+        write(repo, "local.txt", "base local\n");
+        write(repo, "remote.txt", "base remote\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "base");
+        String base = git(repo, "rev-parse", "HEAD").stdoutText().trim();
+        git(repo, "checkout", "-b", "remote-change");
+        write(repo, "remote.txt", "remote update\n");
+        git(repo, "commit", "-am", "remote update");
+        String remoteCommit = git(repo, "rev-parse", "HEAD").stdoutText().trim();
+        git(repo, "checkout", "main");
+        assertThat(git(repo, "rev-parse", "HEAD").stdoutText().trim()).isEqualTo(base);
+        write(repo, "local.txt", "uncommitted local change\n");
+
+        new GitWorkspaceService().mergeCommit(repo, remoteCommit, null, TEST_IDENTITY);
+
+        assertThat(Files.readString(repo.resolve("local.txt"))).isEqualTo("uncommitted local change\n");
+        assertThat(Files.readString(repo.resolve("remote.txt"))).isEqualTo("remote update\n");
+        assertThat(new GitWorkspaceService().statusPorcelain(repo)).contains(" M local.txt");
+    }
+
+    @Test
+    void nativeMergeReportsOnlyOverlappingLocalChangesWithoutChangingWorktree() throws Exception {
+        Path repo = initializeRepository();
+        write(repo, "shared.txt", "base\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "base");
+        String base = git(repo, "rev-parse", "HEAD").stdoutText().trim();
+        git(repo, "checkout", "-b", "remote-change");
+        write(repo, "shared.txt", "remote update\n");
+        git(repo, "commit", "-am", "remote update");
+        String remoteCommit = git(repo, "rev-parse", "HEAD").stdoutText().trim();
+        git(repo, "checkout", "main");
+        write(repo, "shared.txt", "uncommitted local change\n");
+
+        GitWorkspaceService service = new GitWorkspaceService();
+        assertThatThrownBy(() -> service.mergeCommit(repo, remoteCommit, null, TEST_IDENTITY))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.details()).containsEntry("gitFailureType", "LOCAL_CHANGES");
+                    assertThat(exception.details().get("gitBlockingFiles"))
+                            .isEqualTo(List.of("shared.txt"));
+                });
+
+        assertThat(service.headCommit(repo)).isEqualTo(base);
+        assertThat(service.isMergeInProgress(repo)).isFalse();
+        assertThat(Files.readString(repo.resolve("shared.txt"))).isEqualTo("uncommitted local change\n");
+    }
+
+    @Test
     void commitStagedUsesExplicitIdentityWhenRepositoryHasNoConfiguredIdentity() throws Exception {
         Path repo = initializeRepository();
         git(repo, "config", "--unset-all", "user.name");
