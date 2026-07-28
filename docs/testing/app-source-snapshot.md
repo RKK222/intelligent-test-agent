@@ -48,7 +48,7 @@ corepack pnpm playwright test apps/agent-web/tests/workbench.spec.ts \
 | 文件安全 | 根目录及祖先/目标符号链接 fail closed；`.testagent-appsource-index.json` 不出现在列表/搜索且所有外部读写操作拒绝；缺失或损坏索引按数据库摘要原子修复；文件 ticket 和每条 RPC 都重新校验成员、generation、expiry、READY replica 和服务器 affinity。 |
 | API 与观察 | 普通成员、owner、APP_ADMIN 和撤权边界；tree 旧数组与 `includeCommit=true` envelope 兼容；ticket 一次性、60 秒、容量有界并绑定 operation/user/JVM/精确 Origin；重连首帧来自数据库 snapshot，断开观察不取消后台 operation，payload 不含物理路径、凭据或原始 Git stderr。 |
 | 前端并发 | 明确 `MANAGED/APP_SOURCE`、全仓库四步选择、默认 48 小时、四态颜色与 owner；source selection/tree/progress 分别使用 authority/epoch，迟到请求和旧 socket 帧不能覆盖新选择；250ms 至 4s 有界退避，CONNECTING 可由 AbortSignal 释放。 |
-| 能力与兼容 | 应用源码普通文件可写；Git、应用 Agent/Skill/Hub 发布、宠物配置重载、版本选择和 Run Diff 保存双层禁用；recent 的确定性失效清除与暂时错误保留；旧前端可忽略 additive 字段，旧 tree 方法保持数组。 |
+| 能力与兼容 | 应用源码普通文件可写；APP_SOURCE Run Diff 的普通源码路径必须产生 Workspace 文件写，PUBLIC/WORKSPACE Agent 配置路径则在 DiffViewer `writable`、父组件 handler 和 mutation 门禁被阻止，并且必须产生零条 `agent-config.write`。Git、应用 Agent/Skill/Hub 发布、宠物配置重载和版本选择禁用；recent 的确定性失效清除与暂时错误保留；旧前端可忽略 additive 字段，旧 tree 方法保持数组。 |
 | 清理 | XXL V6 恰好注册第八条每分钟 `workspace-management.app-source-cleanup`；每服务器数据库租约、generation fence 和文件锁阻止旧清理误删新副本；离线任务保留，成功后归档 Runtime Workspace，失败安全退避。 |
 
 ## 多服务器人工验收
@@ -57,7 +57,7 @@ corepack pnpm playwright test apps/agent-web/tests/workbench.spec.ts \
 2. 以普通应用成员选择 PERSONAL，移动远端分支后再提交旧 `expectedTreeCommit`，确认返回 `CONFLICT` 且磁盘、slot 和 operation 没有半成品；重新取 tree snapshot 后下载，只在当前用户 READY 进程服务器产生副本。
 3. 以 APP_ADMIN 创建 TEAM 快照，在一台服务器制造 Git 暂时失败，确认另一台 READY 后 operation 为 `PARTIAL_FAILED`、成功服务器可打开、失败服务器不可打开；修复后使用同 generation retry，最终两台都 READY 且 commit/selection/expiry 不变。
 4. 下载过程中关闭弹窗或断开 WebSocket，再重新打开操作；确认后台继续执行，新 ticket 首帧是最新数据库 snapshot，浏览器网络面板没有 RunEvent/SSE 请求因该操作新增。撤销成员权限后，已有观察和文件 socket 都必须安全失败。
-5. 在源码 Workspace 修改一个普通文件并保存，确认文件 WebSocket 成功；尝试读取或改写保留索引、打开 Git Changes、应用 Agent/Hub 发布、宠物配置重载和 Run Diff 保存，确认索引访问与不允许的能力均被拒绝且磁盘无越权变化。
+5. 在源码 Workspace 修改一个普通文件并保存，确认文件 WebSocket 成功；打开 APP_SOURCE Run Diff，保存普通源码路径并确认产生对应的 Workspace 文件写；分别尝试保存 PUBLIC/WORKSPACE Agent 配置路径，确认 DiffViewer `writable`、父组件 handler 和 mutation 门禁阻止写入，且 `agent-config.write` 始终为零。另尝试读取或改写保留索引、打开 Git Changes、应用 Agent/Hub 发布和宠物配置重载，确认这些不允许的能力均被拒绝且磁盘无越权变化。
 6. 把一台服务器停机至快照过期，确认在线服务器由每分钟 XXL 唤醒完成清理并归档 Workspace，离线服务器 cleanup 保持待处理；恢复该服务器后再次触发，确认旧源码、staging/backup 被清理，不删除随后建立的新 generation。
 7. 在进度连接的 250ms/500ms/1s 退避窗口快速切换应用、仓库和托管工作区，确认旧 snapshot、step、terminal、tree 和 recent 响应都不能覆盖当前选择，且浏览器中不存在遗留 timer/socket。
 

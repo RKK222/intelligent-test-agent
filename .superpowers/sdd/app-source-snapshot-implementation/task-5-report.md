@@ -77,3 +77,8 @@ JDK 21 沙箱内 Mockito 5.23.0 不能自附加时，定向测试曾出现 28 �
 - 根后端 19 项跳过属于现有条件化 fixture；AppSource PostgreSQL 与 XXL MySQL 关键验收均实际运行且没有跳过。
 - 前端构建的大 chunk 警告与 jsdom Canvas 提示为既有非阻断输出，本任务未扩大范围处理。
 - 本次只提交 AppSource 收尾文档、综合报告、会话日志和合并回归最小测试修复，不包含工具盒子源码或其它并行成果。
+
+## Fix Round 1
+
+- 按生产实现修正进度帧契约说明：每个非法入站帧都会单独转换为安全的 `WEBSOCKET_MESSAGE_INVALID` 回调，原始 payload 和解析/校验错误细节不会暴露；未修改连接行为。
+- 修正 APP_SOURCE Run Diff 验收语义：普通源码路径仍写入 Workspace，只有 PUBLIC/WORKSPACE Agent 配置路径在 DiffViewer、父组件和 mutation 门禁被阻止并保持零条 `agent-config.write`；未修改生产代码。
