@@ -1,7 +1,11 @@
 package com.enterprise.testagent.api.web.platform;
 
-import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.api.web.common.AuthWebSupport;
@@ -10,6 +14,8 @@ import com.enterprise.testagent.api.web.common.TraceIdWebFilter;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.configuration.PersonalAgentConfigRuntimeReloadResult;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutServerStatus;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutStatus;
 import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.workspace.AgentConfigApplicationService;
@@ -21,6 +27,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
@@ -54,6 +61,51 @@ class AgentConfigControllerTest {
                 .jsonPath("$.data.scope").isEqualTo("PUBLIC")
                 .jsonPath("$.data.writable").isEqualTo(false)
                 .jsonPath("$.data.gitUrl").isEqualTo("UNCONFIGURED");
+    }
+
+    @Test
+    void superAdminCanReadGlobalPublicRolloutServerErrors() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        when(service.latestPublicRolloutStatus()).thenReturn(Optional.of(new PublicAgentConfigRolloutStatus(
+                "acr_rollout",
+                "DRAINING",
+                "main",
+                "abc123",
+                null,
+                Instant.parse("2026-07-28T01:00:00Z"),
+                Instant.parse("2026-07-28T01:01:00Z"),
+                null,
+                List.of(new PublicAgentConfigRolloutServerStatus(
+                        "linux-2", "RETRY_WAIT", 2, 3, 1, 2, 0,
+                        "公共 Agent 运行副本存在未提交变更",
+                        null,
+                        Instant.parse("2026-07-28T01:01:00Z"))))));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.get()
+                .uri("/api/internal/platform/workspace-management/agent-config/public/rollout")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.status").isEqualTo("DRAINING")
+                .jsonPath("$.data.servers[0].linuxServerId").isEqualTo("linux-2")
+                .jsonPath("$.data.servers[0].targetPending").isEqualTo(1)
+                .jsonPath("$.data.servers[0].lastError").isEqualTo("公共 Agent 运行副本存在未提交变更");
+    }
+
+    @Test
+    void nonSuperAdminCannotReadGlobalPublicRollout() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_APP_ADMIN));
+
+        client.get()
+                .uri("/api/internal/platform/workspace-management/agent-config/public/rollout")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isForbidden();
+
+        verifyNoInteractions(service);
     }
 
     @Test
@@ -141,6 +193,47 @@ class AgentConfigControllerTest {
                 true,
                 USER_ID,
                 TRACE_ID);
+    }
+
+    @Test
+    void dirtySharedRuntimeIsRejectedBeforeStartingGlobalRolloutWithoutExplicitConfirmation() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        AgentConfigBackendRoutingService routingService = org.mockito.Mockito.mock(AgentConfigBackendRoutingService.class);
+        when(routingService.listPublicRepositories(any(), eq(TRACE_ID))).thenReturn(List.of(
+                new PublicRepositoryStatusResponse(
+                        "linux-2",
+                        "server-2",
+                        "/data/agent-opencode/.config",
+                        "/data/agent-opencode/.config/opencode",
+                        "/data/agent-opencode/.configdev",
+                        "CONFLICT",
+                        true,
+                        false,
+                        "main",
+                        "abc123",
+                        "Git 工作树存在未提交变更",
+                        true)));
+        WebTestClient client = client(
+                service,
+                ticketService(new AgentConfigOperationTicketStore()),
+                routingService,
+                org.mockito.Mockito.mock(AgentConfigFileRoutingService.class),
+                List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.post()
+                .uri("/api/internal/platform/workspace-management/agent-config/public/update")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"branch":"main","operationId":"aco_12345678","discardLocalChanges":false}
+                        """)
+                .exchange()
+                .expectStatus().isEqualTo(409)
+                .expectBody()
+                .jsonPath("$.details.linuxServerIds[0]").isEqualTo("linux-2")
+                .jsonPath("$.details.discardLocalChangesAllowed").isEqualTo(true);
+
+        verify(service, never()).updatePublicConfig(any(), any(), anyBoolean(), any(), any());
     }
 
     @Test

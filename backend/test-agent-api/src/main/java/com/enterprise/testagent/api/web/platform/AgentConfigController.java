@@ -86,6 +86,13 @@ public class AgentConfigController {
         return ApiResponse.ok(service.localPublicRepositoryStatus(principal.userId()), RuntimeApiSupport.traceId(exchange));
     }
 
+    /** 公共拉取是全局 rollout；所有服务器按钮共用这份权威同步与排空状态。 */
+    @GetMapping("/public/rollout")
+    public ApiResponse<Object> publicRollout(ServerWebExchange exchange) {
+        AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        return ok(exchange, service.latestPublicRolloutStatus().orElse(null));
+    }
+
     @PostMapping("/public/repositories/{linuxServerId}/initialize")
     public ApiResponse<AgentConfigResponses.PublicRepositoryStatusResponse> initializePublicRepository(
             @PathVariable String linuxServerId,
@@ -133,12 +140,39 @@ public class AgentConfigController {
             @RequestBody AgentConfigDtos.BranchRequest request,
             ServerWebExchange exchange) {
         AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        requireSharedRuntimeDiscardConfirmation(request, exchange);
         return ok(exchange, service.updatePublicConfig(
                 request.branch(),
                 request.operationId(),
                 Boolean.TRUE.equals(request.discardLocalChanges()),
                 principal.userId(),
                 RuntimeApiSupport.traceId(exchange)));
+    }
+
+    /**
+     * 全局刷新前聚合所有服务器的只读 Git 状态；未确认时不建立 rollout，更不修改任何工作树。
+     */
+    private void requireSharedRuntimeDiscardConfirmation(
+            AgentConfigDtos.BranchRequest request,
+            ServerWebExchange exchange) {
+        if (Boolean.TRUE.equals(request.discardLocalChanges())) {
+            return;
+        }
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        List<String> dirtyServers = routingService.listPublicRepositories(exchange, traceId).stream()
+                .filter(AgentConfigResponses.PublicRepositoryStatusResponse::localChangesPresent)
+                .map(AgentConfigResponses.PublicRepositoryStatusResponse::linuxServerId)
+                .distinct()
+                .toList();
+        if (!dirtyServers.isEmpty()) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "公共 Agent 共享运行副本存在本地变更，需要明确确认后才能全局恢复",
+                    Map.of(
+                            "linuxServerIds", dirtyServers,
+                            "repositoryKind", "SHARED_RUNTIME",
+                            "discardLocalChangesAllowed", true));
+        }
     }
 
     /**

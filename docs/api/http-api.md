@@ -338,9 +338,10 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 | `GET` | `/public/status` | 查询公共 Agent Git 是否启用、根目录、agent 目录、当前分支和 commit。 |
 | `GET` | `/public/branches` | 使用当前登录用户唯一 SSH key 实时查询公共 Agent Git 远端分支，不缓存；内部部署保存 `host[:port]/path` 片段时，后端会在执行 `git ls-remote` 前按当前用户统一认证号拼接 `ssh://{unifiedAuthId}@...`。 |
 | `GET` | `/public/repositories` | 查询 Redis 中当前仍在线的后端服务器及当前后端的公共配置仓库初始化状态；在线 Java 快照按 `linuxServerId` 合并，响应不包含目标后端 `listenUrl`。 |
+| `GET` | `/public/rollout` | 查询最近一次公共 Agent 全局刷新以及每台服务器的 Git 同步、进程排空、个人 worktree 补偿计数和 `lastError`；仅 `SUPER_ADMIN` 可读。 |
 | `GET` | `/public/repositories/local` | 目标后端本机状态查询入口，仅供后端到后端代理使用。 |
 | `POST` | `/public/repositories/{linuxServerId}/initialize` | 通过当前后端代理到目标服务器，用当前登录用户唯一 SSH key 初始化或刷新该服务器本地公共配置仓库。 |
-| `POST` | `/public/update` | 先把远端公共分支合并到当前管理员在本服务器的稳定个人 worktree，再按分支 clone/fetch/checkout/pull 共享运行副本并广播其他服务器同步；任一工作树有已跟踪修改时必须显式确认恢复。rollout 激活后即返回，不等待服务器同步和进程排空。 |
+| `POST` | `/public/update` | 读取所选远端分支的目标 commit，建立一次全局 rollout；所有服务器共享运行副本 checkout/reset 到同一 commit，所有有效公共个人 worktree 原生 merge 该 commit。rollout 激活后即返回，不等待服务器同步和进程排空。 |
 | `POST` | `/public/update-and-push` | 公共配置"提交并推送"复合操作：先 `fetch` 远端最新提交，再 stage/commit 本地变更，随后 merge `origin/{branch}` 并 push；`discardLocalChanges=true` 时先 `git reset --hard HEAD` 放弃受控仓库中的已跟踪修改。远端提交和 rollout 激活确认后即返回，服务器同步和进程排空在后台继续。 |
 | `POST` | `/file-ws-route` | 查询 Agent 配置文件 WebSocket 应连接的目标后端，body 包含 `scope`、`workspaceId?`、`worktreeId?`、`linuxServerId?`。 |
 | `POST` | `/public/worktrees` | 在请求指定且已初始化的 `linuxServerId` 上确保当前用户的长期公共配置 worktree；分支和目录按用户稳定命名、不包含应用版本，同一用户重复调用返回已有有效 worktree。目标服务器本地 Git 根目录未初始化时返回 `CONFLICT`，不在该接口 clone。 |
@@ -362,9 +363,9 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 
 公共 publish 在个人 worktree 合并远端公共分支发生冲突时返回 HTTP 409、错误码 `CONFLICT`，`details.conflictFiles` 携带冲突文件，并保留个人 worktree 的 Git 原生 merge 现场；前端在统一 Git 变更面板中选择保留本地、保留远程、手工合并或取消合并，解决后提交并再次推送。工作空间级旧 worktree publish 的冲突语义保持不变。
 
-公共仓库显式拉取会依次校验当前管理员在目标服务器的个人公共 worktree 和该服务器共享运行副本。任一副本脏时返回 HTTP 409、错误码 `CONFLICT`，安全 details 包含 `repositoryKind=PERSONAL_WORKTREE|SHARED_RUNTIME`、绝对 `path`、最多五个 `dirtyFiles` 和 `discardLocalChangesAllowed=true`；前端据此在目标服务器行展示真实副本与文件，不能仅依赖共享仓库列表状态推断。管理员显式确认放弃后只 reset 已跟踪内容，未跟踪文件不删除；其他管理员的个人 worktree 不受影响。
+公共 Git 刷新以远端分支解析出的 commit hash 为唯一目标，不把发起服务器当前 HEAD 当作目标。请求先聚合各服务器只读状态；共享运行副本存在 staged、unstaged 或 untracked 内容且未明确确认时返回 HTTP 409，安全 details 包含 `linuxServerIds`、`repositoryKind=SHARED_RUNTIME` 和 `discardLocalChangesAllowed=true`，且此时不会建立 rollout 或修改工作树。确认后先取得公共全局锁，再由各服务器 worker 将共享运行副本恢复并清理到目标 commit。确认只作用于共享运行副本；个人 worktree 永不 stash/reset/clean，而是执行原生 `git merge --no-edit <targetCommit>`，非重叠 staged、unstaged、untracked 内容原样保留。Git 判定会覆盖本地文件或产生真实冲突时，该 worktree 进入独立 `AWAITING_USER` 补偿，不能阻塞其它 worktree、共享副本或主 rollout。
 
-公共 `update`、`update-and-push`、`publish` 的同步广播携带内部 `rolloutId`。发布端在远端 push 或共享副本修改前先写 `PREPARING` 任务、发起人用户 ID 以及持久化服务器清单（包含发布瞬间离线的已登记服务器），远端提交确认后激活为 `DRAINING`，形成后端禁发硬闸门；一旦该任务建立，广播失败、服务器离线或 Java 重启都只会保留 `PENDING/DRAINING` 并由定时补偿继续处理，不允许以失败状态提前开闸。发布请求不再认领或执行本服务器同步，只在远端事实和 rollout 激活确认后发送低延迟广播并返回；本机与其它服务器均由广播消费者或默认每 5 秒运行的数据库补偿程序认领，因此 Git 同步、进程登记和旧 Session 排空不会占用发布 HTTP 请求。每台服务器使用发起人的已存 SSH 凭据把本机共享运行仓库 checkout/reset 到目标 commit；只有取得本服务器 manager 的实时进程清单、把已有 opencode 进程及其用户快照写入目标表后，才确认该服务器同步完成。凭据只在目标 Java 从数据库读取并解密，不进入广播 payload。
+公共 `update`、`update-and-push`、`publish` 的同步广播携带内部 `rolloutId`。发布端在远端 push 或任何工作树修改前先写 `PREPARING` 任务、发起人用户 ID、是否已确认恢复共享运行副本以及持久化服务器清单（包含发布瞬间离线的已登记服务器），远端提交确认后激活为 `DRAINING`，形成后端禁发硬闸门；一旦该任务建立，广播失败、服务器离线或 Java 重启都只会保留 `PENDING/DRAINING` 并由定时补偿继续处理，不允许以失败状态提前开闸。发布请求不再认领或执行本服务器同步，只在远端事实和 rollout 激活确认后发送低延迟广播并返回；本机与其它服务器均由广播消费者或默认每 5 秒运行的数据库补偿程序认领，因此 Git 同步、进程登记和旧 Session 排空不会占用发布 HTTP 请求。每台服务器使用发起人的已存 SSH 凭据把本机共享运行仓库 checkout/reset 到目标 commit，并尝试把同一 commit 原生合入本机所有有效公共个人 worktree；个人 worktree 的冲突只登记补偿任务。只有取得本服务器 manager 的实时进程清单、把已有 opencode 进程及其用户快照写入目标表后，才确认该服务器同步完成。凭据只在目标 Java 从数据库读取并解密，不进入广播 payload。前端在活动期每 2 秒轮询 `GET /public/rollout`，所有重复刷新入口禁用；终态保留各服务器同步/排空计数、个人 worktree 计数与 `lastError`。
 
 所有服务器确认后，每台 Java 的固定延迟任务只认领 `target.linuxServerId=本机 linuxServerId` 的一条目标；租约 token 隔离过期 worker，发布端可以统一插表，但不能替其他服务器执行。公共发布登记本机全部存量进程；应用发布只登记已经成功同步相关个人 worktree 的用户进程；个人拉取范围只登记发起用户当前服务器上的本人进程。目标 Java 先用本机 manager 快照确认端口仍存在，再经本机 opencode 逐一对该进程历史绑定的所有 Workspace 目录调用 `GET /session/status`；任一目录出现 `busy/retry`、未知状态或非法响应都跳过 dispose、累计 `retryCount` 并按退避持续重试。全部目录明确空闲后，对这个用户专属 opencode 进程只调用一次 `POST /global/dispose`；明确返回布尔 `true` 才把目标置为 `DISPOSED`。该用户的全部目标完成后立即恢复发送，下一次请求重新创建 Instance 并加载已同步的 `opencode.jsonc`、Agent 和 Skill；不等待其他用户。manager 已明确确认目标进程不存在时按已释放处理；manager 清单不可用时继续重试。全部目标结束后主 rollout 原子变为 `COMPLETED`；公共范围同一时刻只允许一个活动任务，应用范围按应用版本 ID 各自只允许一个活动任务，个人拉取范围不进入这两类唯一锁。已完成应用 rollout 后续补偿产生的用户目标仍由同一 target worker 处理，并在 dispose 完成前只阻止该用户发送。
 
@@ -390,9 +391,9 @@ ticket 响应中的 `webSocketUrl` 是签发 ticket 的当前 Java 绝对地址�
 }
 ```
 
-`discardLocalChanges` 可选且默认 `false`。公共仓库存在已跟踪文件修改（包括误删）时，默认返回 `CONFLICT`；只有超级管理员在页面明确勾选放弃本地修改并传 `true` 后，后端才执行 `git reset --hard HEAD` 再 fetch/checkout/pull。该操作不删除未跟踪文件。
+`discardLocalChanges` 可选且默认 `false`。任一服务器共享运行副本存在本地修改时，默认在任何工作树变更前返回 `CONFLICT`；只有超级管理员针对列出的服务器明确确认并传 `true` 后，各服务器 worker 才在持有全局 rollout 锁时恢复已跟踪内容并定点删除 Git status 枚举出的未跟踪文件，最终 reset 到远端目标 commit。个人 worktree 不受该参数影响。
 
-`POST /public/repositories/{linuxServerId}/pull` 请求体同 `/public/update`，用于超级管理员在“系统管理 → 配置管理 → opencode 公共配置管理”中对指定服务器执行显式拉取。该接口按 `linuxServerId` 路由到目标 Java 后端，使用当前登录管理员唯一 SSH key；如果该管理员在目标服务器已有稳定 `public-{userId}` 个人 worktree，后端先在个人 worktree 中 `fetch` 并合并 `origin/{branch}`，成功后才更新服务器共享运行副本的 `fetch/checkout/pull --ff-only`，避免接口返回成功但文件树仍读取旧 worktree。内部部署公共 Git 地址同样按当前用户统一认证号拼接实际 SSH URL。`discardLocalChanges` 可选且默认 `false`；个人 worktree 或共享副本有未提交修改时默认返回 `CONFLICT`，传 `true` 时只恢复已跟踪本地修改、不删除未跟踪文件。个人 worktree 合并冲突会保留冲突文件并返回既有 `conflictFiles`，共享副本不会继续更新。响应为最新的 `PublicRepositoryStatusResponse`。该接口只负责拉取远端最新提交，不主动提交本地业务修改、不 push。`configDirPath` 必须由公共配置 Git 仓库初始化后产生且非空，后端不会在 manager 启动时创建空配置目录。
+`POST /public/repositories/{linuxServerId}/pull` 保留给旧客户端兼容；请求仍按 `linuxServerId` 路由，但底层调用同一公共全局 rollout，不再表示“只拉这一台”。新版“系统管理 → 配置管理”只展示一个全局刷新按钮，不允许选择服务器。`configDirPath` 必须由公共配置 Git 仓库初始化后产生且非空，后端不会在 manager 启动时创建空配置目录。
 
 `POST /public/update-and-push` 请求体：
 

@@ -129,6 +129,7 @@ OPENCODE_CONFIG_DIR / manager configPath
 | 个人 workspace 拉取远程 | 从当前 workspace 标题栏“…”菜单确认应用 Agent 范围和直接 Git merge 后，在点击者的整棵应用个人 worktree fetch/merge 远端；确认可按用户在当前浏览器设为不再提示，但每次仍展示执行步骤和结果文件；同一分支的其它 workspace 目录与应用 Agent 一起更新；不提交、不推送、不修改共享 target | 其他用户、共享副本和公共 Agent 均不变化；应用 workspace 与应用 Agent 统一交给原生 Git，不重叠改动原样保留，只有实际会被覆盖的文件阻止拉取 | 结果弹框明确显示：普通文件无 dispose；成功合入应用 Agent/Skill/JSONC 且本人进程运行时，后端以 `PERSONAL_APPLICATION` 只登记当前用户并持久化等待空闲；刷新或关闭页面不丢任务，前端不保存待 dispose 标记。进程未运行时下次启动直接加载；不启动共享 APPLICATION 或 PUBLIC rollout |
 | 公共 Agent/Skill/JSONC 保存 | 只写当前超管公共个人 worktree并进入公共 Diff；目录定义保存后把本人的有效公共配置软链接切到该 worktree | 无 | 当前任务空闲时只 dispose 当前超管本人，下一次 bootstrap 读取个人 worktree；共享副本和别人不变 |
 | 公共 Agent/Skill/JSONC 本地提交 | 只更新 `public-{userId}` | 无 | 不新增 dispose；本人保存后的预览链接继续有效 |
+| 超管刷新公共 Agent Git | 从远端分支解析固定 commit；全服务器共享运行副本 checkout/reset 到该 commit，所有有效公共个人 worktree 原生 merge。共享副本 dirty 必须先聚合确认且锁内恢复；个人 worktree 不 stash/reset/clean | 非重叠 staged/unstaged/untracked 内容原样保留；覆盖风险或冲突只把对应 worktree 记为 `AWAITING_USER`，其它用户和服务器继续 | 主 rollout 按服务器同步并逐用户排空；页面活动期禁用重复刷新并展示每服务器 `lastError`。个人补偿不延长主 rollout，收敛后再处理该用户运行态 |
 | 公共 Agent/Skill/JSONC 提交并推送 | 先合并远端公共分支并推送，再把固定提交同步到所有服务器公共运行副本 | 所有用户最终读取同一共享固定提交 | 全局 rollout 逐用户等待旧任务空闲，先把有效指针恢复到共享副本，再调用原生 `/global/dispose` |
 
 普通 workspace 文件推送成功后，平台会主动把固定 feature 提交 merge 到相关用户的个人 worktree，其他用户不需要手工点击“拉取远程”。干净 worktree 和只有非重叠本地改动的 worktree 都会自动更新；只有 Git 判断会覆盖本地文件或产生真实冲突时才等待该用户处理。“拉取远程”是本人主动补拉或重试入口，不是跨用户更新的必经步骤；普通文件不进入 OpenCode 配置缓存，因此无论自动更新还是个人拉取都不 dispose。

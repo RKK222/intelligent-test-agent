@@ -106,6 +106,7 @@ import type {
   WorkspaceViewList,
   WorkspaceViewLocator,
   PublicAgentRepositoryStatus,
+  PublicAgentConfigRolloutStatus,
   ProviderInfo,
   RepositoryDeploymentOptions,
   RepositoryTreeResponse,
@@ -1190,6 +1191,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       routedRequest<AgentConfigStatus>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/status`),
     listPublicAgentBranches: () => request<string[]>(`${agentConfigBase}/public/branches`),
     listPublicAgentRepositories: () => request<PublicAgentRepositoryStatus[]>(`${agentConfigBase}/public/repositories`),
+    getPublicAgentConfigRollout: () =>
+      request<PublicAgentConfigRolloutStatus | null>(`${agentConfigBase}/public/rollout`),
     listPublicAgentWorktrees: (linuxServerId: string) =>
       request<AgentConfigWorktreeOption[]>(`${agentConfigBase}/public/worktrees${query({ linuxServerId })}`),
     initializePublicAgentRepository: (linuxServerId: string, branch: string, operationId?: string) =>

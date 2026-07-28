@@ -56,6 +56,31 @@ describe("public agent config update", () => {
     );
   });
 
+  it("reads the shared public rollout used to disable every server pull", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: { rolloutId: "acr_1", status: "DRAINING", servers: [] }
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(client.getPublicAgentConfigRollout())
+      .resolves.toEqual({ rolloutId: "acr_1", status: "DRAINING", servers: [] });
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/workspace-management/agent-config/public/rollout",
+      expect.not.objectContaining({ method: expect.anything() })
+    );
+  });
+
   it("reloads only the current user's public personal worktree runtime", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

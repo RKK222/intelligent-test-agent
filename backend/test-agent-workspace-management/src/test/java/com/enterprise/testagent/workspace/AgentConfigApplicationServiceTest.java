@@ -2,6 +2,9 @@ package com.enterprise.testagent.workspace;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -18,6 +21,7 @@ import com.enterprise.testagent.domain.broadcast.ServerBroadcastEvent;
 import com.enterprise.testagent.domain.broadcast.ServerBroadcastPublisher;
 import com.enterprise.testagent.domain.configuration.AgentConfigOperation;
 import com.enterprise.testagent.domain.configuration.AgentConfigOperationStatus;
+import com.enterprise.testagent.domain.configuration.AgentConfigRolloutScope;
 import com.enterprise.testagent.domain.configuration.AgentConfigRepository;
 import com.enterprise.testagent.domain.configuration.AgentConfigScope;
 import com.enterprise.testagent.domain.configuration.AgentConfigWorktree;
@@ -275,7 +279,7 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
-    void publicUpdateClonesSelectedBranchAndBroadcastsCommit() {
+    void publicUpdateResolvesRemoteCommitAndBroadcastsGlobalRollout() {
         RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
         RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
         InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
@@ -293,8 +297,8 @@ class AgentConfigApplicationServiceTest {
                 ADMIN,
                 "trace_update");
 
-        assertThat(git.clonedBranch).isEqualTo("main");
-        assertThat(git.clonedUrl).isEqualTo("git@gitee.com:test/agent-config.git");
+        assertThat(git.clonedBranch).isNull();
+        assertThat(git.clonedUrl).isNull();
         assertThat(git.privateKeyUsed).isEqualTo(PRIVATE_KEY);
         assertThat(response.status()).isEqualTo("SUCCEEDED");
         assertThat(response.commitHash()).isEqualTo("commit_base");
@@ -333,7 +337,7 @@ class AgentConfigApplicationServiceTest {
         service.retryPendingPublicConfigSync();
 
         assertThat(git.resetCommit).isEqualTo("commit_remote");
-        verify(coordinator).markServerSynced(request);
+        verify(coordinator).markPublicServerSynced(eq(request), anyList());
     }
 
     @Test
@@ -468,7 +472,7 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
-    void publicUpdateCanExplicitlyDiscardTrackedChangesBeforePull() throws Exception {
+    void publicUpdatePersistsDiscardConfirmationWithoutChangingRepositoryBeforeWorkersRun() throws Exception {
         Files.createDirectories(root.resolve(".config/.git"));
         Files.createDirectories(root.resolve(".config/opencode"));
         Files.writeString(root.resolve(".config/opencode/config.json"), "{}");
@@ -482,6 +486,10 @@ class AgentConfigApplicationServiceTest {
                 new InMemoryAgentConfigRepository(),
                 git,
                 new RecordingBroadcastPublisher());
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        when(coordinator.prepare(any(), any(), any(), anyBoolean(), any(), any(), any()))
+                .thenReturn("acr_global_refresh");
+        service.setPublicConfigRolloutCoordinator(coordinator);
 
         AgentConfigResponses.AgentConfigOperationResponse response = service.updatePublicConfig(
                 "main",
@@ -490,13 +498,17 @@ class AgentConfigApplicationServiceTest {
                 ADMIN,
                 "trace_update");
 
-        assertThat(git.resetCommit).isEqualTo("HEAD");
-        assertThat(git.pulledBranch).isEqualTo("main");
+        assertThat(git.resetCommit).isNull();
+        assertThat(git.pulledBranch).isNull();
+        verify(coordinator).prepare(
+                "main", null, "commit_base", true, "linux-1", ADMIN.value(), "trace_update");
+        verify(coordinator).recordExpectedCommit("acr_global_refresh", "commit_base");
+        verify(coordinator).activate("acr_global_refresh", "commit_base");
         assertThat(response.status()).isEqualTo("SUCCEEDED");
     }
 
     @Test
-    void publicUpdateMergesRemoteBranchIntoCurrentAdministratorsStableWorktree() throws Exception {
+    void publicUpdateOnlySchedulesGlobalWorkersAndDoesNotMergeOneSelectedWorktreeInline() throws Exception {
         Path sharedRoot = root.resolve(".config");
         Path personalRoot = root.resolve(".configdev/public-usr_admin");
         Files.createDirectories(sharedRoot.resolve(".git"));
@@ -537,14 +549,13 @@ class AgentConfigApplicationServiceTest {
                 "trace_pull_personal_worktree");
 
         assertThat(response.status()).isEqualTo("SUCCEEDED");
-        assertThat(git.mergedRepoRoot).isEqualTo(personalRoot);
-        assertThat(git.mergedBranch).isEqualTo("origin/main");
-        assertThat(git.pulledBranch).isEqualTo("main");
-        assertThat(git.fetchCallCount).isEqualTo(2);
+        assertThat(git.mergedRepoRoot).isNull();
+        assertThat(git.pulledBranch).isNull();
+        assertThat(git.fetchCallCount).isZero();
     }
 
     @Test
-    void publicUpdateRejectsDirtyPersonalWorktreeBeforeChangingSharedRuntimeCopy() throws Exception {
+    void publicWorkerLetsGitMergeNonOverlappingDirtyPersonalWorktree() throws Exception {
         Path sharedRoot = root.resolve(".config");
         Path personalRoot = root.resolve(".configdev/public-usr_admin");
         Files.createDirectories(sharedRoot.resolve(".git"));
@@ -578,25 +589,121 @@ class AgentConfigApplicationServiceTest {
                 git,
                 new RecordingBroadcastPublisher());
 
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        PublicAgentConfigRolloutSyncRequest request = new PublicAgentConfigRolloutSyncRequest(
+                "acr_public_dirty",
+                AgentConfigRolloutScope.PUBLIC,
+                null,
+                "main",
+                "commit_base",
+                false,
+                ADMIN.value(),
+                "trace_pull_dirty_personal",
+                0,
+                NOW.plusSeconds(180),
+                "acl_public_dirty");
+        when(coordinator.claimPendingSync("linux-1")).thenReturn(Optional.of(request));
+        when(coordinator.renewServerSync(request)).thenReturn(true);
+        service.setPublicConfigRolloutCoordinator(coordinator);
+
+        service.retryPendingPublicConfigSync();
+
+        assertThat(git.mergedRepoRoot).isEqualTo(personalRoot);
+        assertThat(git.mergedTargetCommit).isEqualTo("commit_base");
+        assertThat(git.resetCommitsByRoot).doesNotContainKey(personalRoot);
+        verify(coordinator).markPublicServerSynced(eq(request), anyList());
+    }
+
+    @Test
+    void publicUpdateChecksGlobalRolloutLockBeforeDiscardingPersonalChanges() throws Exception {
+        Path sharedRoot = root.resolve(".config");
+        Path personalRoot = root.resolve(".configdev/public-usr_admin");
+        Files.createDirectories(sharedRoot.resolve(".git"));
+        Files.createDirectories(sharedRoot.resolve("opencode"));
+        Files.createDirectories(personalRoot.resolve(".git"));
+        Files.createDirectories(personalRoot.resolve("opencode"));
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_public_admin_locked",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-1",
+                "public-usr_admin",
+                "public-usr_admin",
+                personalRoot.toString(),
+                ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW));
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.worktreeRoot = personalRoot;
+        git.worktreeBranch = "public-usr_admin";
+        git.worktreeCleanByRoot.put(personalRoot, false);
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", sharedRoot.toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                git,
+                new RecordingBroadcastPublisher());
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        when(coordinator.prepare(any(), any(), any(), anyBoolean(), any(), any(), any()))
+                .thenThrow(new PlatformException(ErrorCode.CONFLICT, "已有公共 Agent/Skill 配置发布正在排空", Map.of()));
+        service.setPublicConfigRolloutCoordinator(coordinator);
+
         assertThatThrownBy(() -> service.updatePublicConfig(
                 "main",
-                "aco_pull_dirty_personal",
-                false,
+                "aco_pull_locked_before_discard",
+                true,
                 ADMIN,
-                "trace_pull_dirty_personal"))
-                .isInstanceOfSatisfying(PlatformException.class, exception -> {
-                    assertThat(exception.getMessage())
-                            .contains("当前管理员公共 Agent 个人 worktree 存在未提交变更")
-                            .contains("opencode/agents/review.md")
-                            .contains(personalRoot.toString());
-                    assertThat(exception.details())
-                            .containsEntry("repositoryKind", "PERSONAL_WORKTREE")
-                            .containsEntry("path", personalRoot.toString())
-                            .containsEntry("discardLocalChangesAllowed", true);
-                });
+                "trace_pull_locked_before_discard"))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("正在排空");
 
-        assertThat(git.pulledBranch).isNull();
+        assertThat(git.resetCommitsByRoot).doesNotContainKey(personalRoot);
         assertThat(git.fetchCallCount).isZero();
+    }
+
+    @Test
+    void explicitDiscardRestoresSharedRuntimeIncludingEnumeratedUntrackedFiles() throws Exception {
+        Path sharedRoot = root.resolve(".config");
+        Files.createDirectories(sharedRoot.resolve(".git"));
+        Files.createDirectories(sharedRoot.resolve("opencode"));
+        Files.writeString(sharedRoot.resolve("opencode/config.json"), "{}");
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.worktreeClean = false;
+        git.stagedAfterAdd = " M opencode/agents/review.md\n?? opencode/skills/created-by-chat/SKILL.md";
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", sharedRoot.toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher());
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        PublicAgentConfigRolloutSyncRequest request = new PublicAgentConfigRolloutSyncRequest(
+                "acr_restore_shared",
+                AgentConfigRolloutScope.PUBLIC,
+                null,
+                "main",
+                "commit_base",
+                true,
+                ADMIN.value(),
+                "trace_restore_shared_runtime",
+                0,
+                NOW.plusSeconds(180),
+                "acl_restore_shared");
+        when(coordinator.claimPendingSync("linux-1")).thenReturn(Optional.of(request));
+        when(coordinator.renewServerSync(request)).thenReturn(true);
+        service.setPublicConfigRolloutCoordinator(coordinator);
+
+        service.retryPendingPublicConfigSync();
+
+        assertThat(git.resetCommitsByRoot).containsEntry(sharedRoot, "commit_base");
+        assertThat(git.cleanedUntrackedFiles)
+                .containsExactly("opencode/skills/created-by-chat/SKILL.md");
     }
 
     @Test
@@ -1418,7 +1525,7 @@ class AgentConfigApplicationServiceTest {
                 publisher);
         PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
         git.publicationCommit = "commit_publish";
-        when(coordinator.prepare("main", "commit_publish", "commit_base", "linux-1", ADMIN.value(), "trace_publish"))
+        when(coordinator.prepare("main", "commit_publish", "commit_base", false, "linux-1", ADMIN.value(), "trace_publish"))
                 .thenReturn("acr_publish");
         service.setPublicConfigRolloutCoordinator(coordinator);
 
@@ -1441,7 +1548,7 @@ class AgentConfigApplicationServiceTest {
                 .isEqualTo(AgentConfigWorktreeStatus.ACTIVE);
         assertThat(publisher.events).hasSize(1);
         assertThat(publisher.events.get(0).payload()).containsEntry("rolloutId", "acr_publish");
-        verify(coordinator).prepare("main", "commit_publish", "commit_base", "linux-1", ADMIN.value(), "trace_publish");
+        verify(coordinator).prepare("main", "commit_publish", "commit_base", false, "linux-1", ADMIN.value(), "trace_publish");
         verify(coordinator).activate("acr_publish", "commit_publish");
         verify(coordinator, never()).claimPendingSync("linux-1");
     }
@@ -1476,7 +1583,7 @@ class AgentConfigApplicationServiceTest {
                 git,
                 publisher);
         PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
-        when(coordinator.prepare("main", "commit_base", "commit_base", "linux-1", ADMIN.value(), "trace_publish"))
+        when(coordinator.prepare("main", "commit_base", "commit_base", false, "linux-1", ADMIN.value(), "trace_publish"))
                 .thenReturn("acr_publish");
         when(coordinator.claimPendingSync("linux-1"))
                 .thenThrow(new IllegalStateException("temporary rollout storage failure"));
@@ -2070,6 +2177,7 @@ class AgentConfigApplicationServiceTest {
         private String pushedBranch;
         private Boolean pushedForce;
         private String mergedBranch;
+        private String mergedTargetCommit;
         private Path mergedRepoRoot;
         private boolean mergeInProgress;
         private boolean failMergeWithConflict;
@@ -2083,6 +2191,7 @@ class AgentConfigApplicationServiceTest {
         private final List<String> diffFiles = new ArrayList<>();
         private List<String> stagedFiles = List.of();
         private List<String> discardedFiles = List.of();
+        private List<String> cleanedUntrackedFiles = List.of();
 
         @Override
         public void cloneBranch(String gitUrl, String branch, Path repoRoot, String privateKey) {
@@ -2122,6 +2231,12 @@ class AgentConfigApplicationServiceTest {
         @Override
         public String resolveCommit(Path repoRoot, String ref) {
             return resolvedCommitByRootAndRef.getOrDefault(repoRoot + "\n" + ref, remoteCommit);
+        }
+
+        @Override
+        public String resolveRemoteBranchCommit(String gitUrl, String branch, String privateKey) {
+            this.privateKeyUsed = privateKey;
+            return remoteCommit;
         }
 
         @Override
@@ -2167,6 +2282,16 @@ class AgentConfigApplicationServiceTest {
             this.lastMergeIdentity = identity;
             this.mergedRepoRoot = repoRoot;
             this.mergedBranch = branch;
+            if (failMergeWithConflict) {
+                throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "合并冲突", Map.of());
+            }
+        }
+
+        @Override
+        public void mergeCommit(Path repoRoot, String targetCommit, String privateKey, GitCommitIdentity identity) {
+            this.lastMergeIdentity = identity;
+            this.mergedRepoRoot = repoRoot;
+            this.mergedTargetCommit = targetCommit;
             if (failMergeWithConflict) {
                 throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "合并冲突", Map.of());
             }
@@ -2247,6 +2372,12 @@ class AgentConfigApplicationServiceTest {
         @Override
         public void discardFiles(Path repoRoot, List<String> files, String privateKey) {
             this.discardedFiles = List.copyOf(files);
+            this.privateKeyUsed = privateKey;
+        }
+
+        @Override
+        public void cleanUntrackedFiles(Path repoRoot, List<String> files, String privateKey) {
+            this.cleanedUntrackedFiles = List.copyOf(files);
             this.privateKeyUsed = privateKey;
         }
 

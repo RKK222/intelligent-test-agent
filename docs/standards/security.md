@@ -133,8 +133,9 @@ Token 校验流程：
 1. 广播 payload 只允许包含业务 ID、事件原因、服务器 ID、版本号、分支名、目标 commit hash 和 traceId 等必要字段；禁止携带 SSH 私钥、token、Authorization、Cookie、文件内容、完整用户输入或大段错误堆栈。
 2. Redis pub/sub 仅作为同一可信后端集群内的实时增强通道；生产必须使用受控内网 Redis，并通过外部配置开启 `test-agent.server-broadcast.enabled=true`，不得在代码或示例中硬编码 Redis 密码或生产地址。
 3. 消费端必须跳过本服务器来源事件，并在业务层做幂等校验；广播失败不能影响本机已完成的 Git/数据库主流程，漏消息由数据库目标 commit 与本机补偿扫描恢复。
-4. 日志只记录 `eventId`、`type`、`traceId`、`versionId`、`linuxServerId` 和错误码等低敏字段，不能输出私钥、token、完整路径中的敏感片段或原始第三方错误详情。
-5. 应用源码 `app-source.replica-requested` 只允许 repositoryId、generation 和目标服务器 ID，`app-source.cleanup-requested` 使用空 payload；SSH 私钥只在目标 worker 的 Git 命令期从操作人加密配置解析，clone、冻结提交 fetch、checkout 和提交校验复用同一临时凭据，禁止写入 snapshot、operation、step、广播、索引、错误响应、物化源码或日志。广播只负责唤醒，数据库租约、本机有界 dispatcher 及其启动/周期数据库补偿扫描才是执行与幂等事实源。应用源码物化、索引修复、打开和清理必须以可信配置根为边界逐段执行 `NOFOLLOW_LINKS` 校验，并在目录创建后、文件锁内或破坏性操作前复核，禁止祖先或目标符号链接把读写/删除重定向到托管根之外。
+4. 公共 Agent 全局刷新必须在任何 reset/clean/merge 前取得数据库活动 rollout 锁。共享运行副本存在本地内容时，恢复确认必须由 `SUPER_ADMIN` 在聚合真实服务器状态后显式提交并持久化；未确认不得修改工作树。确认范围只能覆盖共享运行副本，个人 worktree 禁止 stash/reset/clean，只允许 Git 原生 merge 和用户自行解决冲突。状态 API 可返回服务器 ID、计数、稳定原因和脱敏 `lastError`，不得返回 SSH key、内部凭据或文件正文。
+5. 日志只记录 `eventId`、`type`、`traceId`、`versionId`、`linuxServerId` 和错误码等低敏字段，不能输出私钥、token、完整路径中的敏感片段或原始第三方错误详情。
+6. 应用源码 `app-source.replica-requested` 只允许 repositoryId、generation 和目标服务器 ID，`app-source.cleanup-requested` 使用空 payload；SSH 私钥只在目标 worker 的 Git 命令期从操作人加密配置解析，clone、冻结提交 fetch、checkout 和提交校验复用同一临时凭据，禁止写入 snapshot、operation、step、广播、索引、错误响应、物化源码或日志。广播只负责唤醒，数据库租约、本机有界 dispatcher 及其启动/周期数据库补偿扫描才是执行与幂等事实源。应用源码物化、索引修复、打开和清理必须以可信配置根为边界逐段执行 `NOFOLLOW_LINKS` 校验，并在目录创建后、文件锁内或破坏性操作前复核，禁止祖先或目标符号链接把读写/删除重定向到托管根之外。
 
 ## PTY WebSocket 安全例外
 

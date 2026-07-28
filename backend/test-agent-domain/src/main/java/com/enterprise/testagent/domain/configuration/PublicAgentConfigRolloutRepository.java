@@ -16,6 +16,14 @@ public interface PublicAgentConfigRolloutRepository {
         return findActiveRolloutId(AgentConfigRolloutScope.PUBLIC, null);
     }
 
+    /** 查询指定作用域最近一次 rollout 主状态；服务器明细通过独立查询组合。 */
+    Optional<PublicAgentConfigRolloutStatus> findLatestRolloutStatus(
+            AgentConfigRolloutScope scope,
+            String scopeKey);
+
+    /** 查询一次 rollout 的全服务器 Git 同步、排空计数和最近错误。 */
+    List<PublicAgentConfigRolloutServerStatus> findRolloutServerStatuses(String rolloutId);
+
     /** 所有服务器同步前阻止全部用户；同步后仅阻止仍有未 dispose 旧实例的用户。 */
     Optional<String> findBlockingRolloutId(String userId);
 
@@ -28,10 +36,37 @@ public interface PublicAgentConfigRolloutRepository {
             String branch,
             String expectedCommitHash,
             String previousCommitHash,
+            boolean discardSharedRuntimeChanges,
             String initiatedByUserId,
             String initiatedLinuxServerId,
             String traceId,
             Instant now);
+
+    /** 存量应用与个人 rollout 不授权清理公共运行副本。 */
+    default void createRollout(
+            String rolloutId,
+            AgentConfigRolloutScope scope,
+            String scopeKey,
+            String branch,
+            String expectedCommitHash,
+            String previousCommitHash,
+            String initiatedByUserId,
+            String initiatedLinuxServerId,
+            String traceId,
+            Instant now) {
+        createRollout(
+                rolloutId,
+                scope,
+                scopeKey,
+                branch,
+                expectedCommitHash,
+                previousCommitHash,
+                false,
+                initiatedByUserId,
+                initiatedLinuxServerId,
+                traceId,
+                now);
+    }
 
     boolean activateRollout(String rolloutId, String commitHash, Instant now);
 
@@ -78,6 +113,35 @@ public interface PublicAgentConfigRolloutRepository {
             int retryCount,
             Instant nextRetryAt,
             String errorMessage,
+            Instant now);
+
+    void savePendingPublicWorktrees(
+            String rolloutId,
+            String linuxServerId,
+            String targetCommit,
+            String traceId,
+            List<PublicAgentConfigWorktreePending> pendingWorktrees,
+            Instant now);
+
+    Optional<PublicAgentConfigWorktreeClaim> claimPendingPublicWorktree(
+            String linuxServerId,
+            Instant now,
+            Instant leaseUntil);
+
+    boolean markPublicWorktreeRetry(
+            PublicAgentConfigWorktreeClaim claim,
+            int retryCount,
+            Instant nextRetryAt,
+            String reason,
+            Instant now);
+
+    boolean markPublicWorktreeSynchronized(
+            PublicAgentConfigWorktreeClaim claim,
+            Instant now);
+
+    boolean abandonPublicWorktree(
+            PublicAgentConfigWorktreeClaim claim,
+            String reason,
             Instant now);
 
     void savePendingApplicationWorktrees(

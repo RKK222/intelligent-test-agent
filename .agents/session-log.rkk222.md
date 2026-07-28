@@ -2618,3 +2618,30 @@
 
 - 超级管理员现在能在执行前核对应用下所有工作空间、版本与实际分支，并按需单独刷新一个分支或刷新整个应用；预览和两类执行使用同一分组来源。
 - HTTP API 为 additive 新增；未新增或变更 RunEvent/SSE、数据库/Flyway/SQL、generated SDK、OpenCode 源码或环境配置。
+
+### 2026-07-28 - 统一公共 Agent 全局 Git 刷新并修正 skill-creator 写入边界
+
+### Why
+
+- 公共 Agent 拉取在共享运行副本脏、跨服务器排空和个人 worktree 有本地改动时语义不一致；重复点击还可能在全局锁拒绝前先清理本地目录。
+- 对话调用 skill-creator 时曾把技能直接写入共享运行目录，导致个人 Diff、个人远端分支和其他服务器均看不到。
+
+### What
+
+- 公共 Agent 改为单一全局刷新：先取得全局 rollout 锁，再解析所选远端分支的固定 commit；各服务器共享副本只 reset 到该 commit，脏副本必须由超级管理员明确确认后才 reset/clean。
+- 每台服务器在后台把同一 commit 原生 merge 到本机全部有效公共个人 worktree，保留 staged、unstaged 和 untracked；单个 worktree 冲突进入持久化补偿，不阻断其他 worktree、共享副本或服务器排空。
+- 新增 rollout 查询 API 和持久化 worktree 状态，前端全局禁用重复刷新并展示每台服务器同步、排空、个人 worktree 进度、重试次数和 `lastError`；旧按服务器 pull API 仅保留兼容入口并委托同一全局语义。
+- skill-creator 1.2.0 强制先验证平台提供的当前用户个人 worktree，只在其 `skills/` 或 `.opencode/skills/` 写草稿；拒绝 `/data/**/.config/opencode`、共享运行副本、安装目录及无法证明身份的路径，并引导用户经公共 Agent Diff/提交/发布流程上线。
+- 同步 HTTP API、事件轮询说明、数据库、安全、测试矩阵、模块 README/PACKAGE、共享类型和用户手册；新增 Flyway `V20260728160000`。
+- 补齐前一应用 Git 提交中 `ManagedWorkspaceControllerTest` 使用 `Map.of` 所缺的 `java.util.Map` import，使当前提交可独立完成 API testCompile；不改变业务行为。
+
+### How
+
+- JDK 25 下后端完整 `mvn test` 的 20 个模块全部通过；真实 Git 测试覆盖 staged/unstaged/untracked 保留、锁先于清理、共享副本确认清理和个人冲突补偿。
+- 前端 lint、typecheck、97 个测试文件（1648 passed / 1 skipped）和生产 build 全部通过；skill-creator 校验与 `tools/verify-ai-docs.sh`、`git diff --check` 通过。
+- 使用未修改的 `.env.test` 和 test profile 完整重启 backend、opencode-manager、frontend；Flyway 实际应用新 migration，backend readiness 为 `UP`、前端 3000 返回 200，manager 启动后 OpenCode 4104 收敛到 `HEALTHY`。
+
+### Result
+
+- 公共 Agent 现在与应用全局刷新保持同一批次语义，但个人 worktree 使用不覆盖本地内容的原生 merge，共享运行副本只允许明确确认后的固定 commit 覆盖；任何“放弃本地变更”都不会发生在全局锁之前。
+- HTTP API 与共享类型为 additive 变更；新增 PostgreSQL migration，无 RunEvent/SSE 类型、generated SDK、OpenCode 源码、环境配置或凭据变更。skill-creator 修复位于公共配置个人 worktree 的独立 Git 仓库，将单独提交。

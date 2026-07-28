@@ -11,6 +11,7 @@ public record PublicAgentConfigRolloutSyncRequest(
         String scopeKey,
         String branch,
         String commitHash,
+        boolean discardSharedRuntimeChanges,
         String initiatedByUserId,
         String traceId,
         int retryCount,
@@ -33,6 +34,33 @@ public record PublicAgentConfigRolloutSyncRequest(
                 null,
                 branch,
                 commitHash,
+                false,
+                initiatedByUserId,
+                traceId,
+                retryCount,
+                leaseUntil,
+                leaseToken);
+    }
+
+    /** 兼容存量应用 rollout 构造，其不具有共享公共副本清理权限。 */
+    public PublicAgentConfigRolloutSyncRequest(
+            String rolloutId,
+            AgentConfigRolloutScope scope,
+            String scopeKey,
+            String branch,
+            String commitHash,
+            String initiatedByUserId,
+            String traceId,
+            int retryCount,
+            Instant leaseUntil,
+            String leaseToken) {
+        this(
+                rolloutId,
+                scope,
+                scopeKey,
+                branch,
+                commitHash,
+                false,
                 initiatedByUserId,
                 traceId,
                 retryCount,

@@ -387,6 +387,35 @@ export type PublicAgentRepositoryStatus = {
   currentBranch?: string | null;
   commitHash?: string | null;
   message?: string | null;
+  localChangesPresent?: boolean;
+};
+
+export type PublicAgentConfigRolloutServerStatus = {
+  linuxServerId: string;
+  syncStatus: string;
+  retryCount: number;
+  targetTotal: number;
+  targetPending: number;
+  targetDisposed: number;
+  targetAbandoned: number;
+  worktreeTotal?: number;
+  worktreePending?: number;
+  worktreeSynced?: number;
+  lastError?: string | null;
+  syncedAt?: string | null;
+  updatedAt: string;
+};
+
+export type PublicAgentConfigRolloutStatus = {
+  rolloutId: string;
+  status: string;
+  branch: string;
+  commitHash?: string | null;
+  failureReason?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+  servers: PublicAgentConfigRolloutServerStatus[];
 };
 
 export type AgentConfigWorktree = {

@@ -13,9 +13,28 @@ public interface PublicAgentConfigRolloutCoordinator {
             String branch,
             String expectedCommitHash,
             String previousCommitHash,
+            boolean discardSharedRuntimeChanges,
             String localLinuxServerId,
             String initiatedByUserId,
             String traceId);
+
+    /** 存量发布调用默认不放弃共享运行副本修改。 */
+    default String prepare(
+            String branch,
+            String expectedCommitHash,
+            String previousCommitHash,
+            String localLinuxServerId,
+            String initiatedByUserId,
+            String traceId) {
+        return prepare(
+                branch,
+                expectedCommitHash,
+                previousCommitHash,
+                false,
+                localLinuxServerId,
+                initiatedByUserId,
+                traceId);
+    }
 
     /** 应用共享 Agent 配置推送前建立同一持久化闸门；scopeKey 为应用版本 ID。 */
     String prepareApplication(
@@ -52,6 +71,9 @@ public interface PublicAgentConfigRolloutCoordinator {
         return preparing(linuxServerId, AgentConfigRolloutScope.PUBLIC);
     }
 
+    /** 超级管理员页面读取最近一次公共全局 rollout 及各服务器状态。 */
+    Optional<PublicAgentConfigRolloutStatus> latestPublicRolloutStatus();
+
     Optional<PublicAgentConfigRolloutSyncRequest> claimPendingSync(String linuxServerId, AgentConfigRolloutScope scope);
 
     default Optional<PublicAgentConfigRolloutSyncRequest> claimPendingSync(String linuxServerId) {
@@ -61,6 +83,21 @@ public interface PublicAgentConfigRolloutCoordinator {
     boolean renewServerSync(PublicAgentConfigRolloutSyncRequest request);
 
     void markServerSynced(PublicAgentConfigRolloutSyncRequest request);
+
+    /** 公共共享副本已同步；未合入的个人 worktree 转入独立补偿，不占用主 rollout。 */
+    default void markPublicServerSynced(
+            PublicAgentConfigRolloutSyncRequest request,
+            List<PublicAgentConfigWorktreePending> pendingWorktrees) {
+        markServerSynced(request);
+    }
+
+    Optional<PublicAgentConfigWorktreeClaim> claimPendingPublicWorktree(String linuxServerId);
+
+    void markPublicWorktreeRetry(PublicAgentConfigWorktreeClaim claim, String reason);
+
+    void markPublicWorktreeSynchronized(PublicAgentConfigWorktreeClaim claim);
+
+    void abandonPublicWorktree(PublicAgentConfigWorktreeClaim claim, String reason);
 
     /**
      * 应用级发布只登记已经同步个人 worktree 的用户进程；公共发布继续使用 {@link #markServerSynced} 覆盖全机进程。

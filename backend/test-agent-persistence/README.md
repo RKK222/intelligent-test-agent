@@ -62,6 +62,7 @@
 - `V20260717200000__harden_public_agent_config_rollout.sql`：为 rollout 保存发起人，为目标快照用户并增加认领 fencing token；历史目标按服务器、容器、端口回填用户归属，不写测试或演示数据。
 - `V20260721213000__isolate_agent_config_rollout_scopes.sql`：把活动发布唯一锁拆为公共单锁和应用版本维度锁，并新增应用个人 worktree `AWAITING_USER` 补偿表；本地修改或合并冲突不再无限占用公共/其它应用发布。
 - `V20260728100000__add_personal_application_rollout_scope.sql`：把 rollout 作用域约束扩展为 `PERSONAL_APPLICATION`，供个人拉取应用 Agent 后仅持久化当前用户的空闲检测与 dispose；不新增表、不写业务数据，也不加入公共/应用发布唯一锁。
+- `V20260728160000__extend_public_agent_config_refresh.sql`：为 rollout 持久化共享运行副本恢复确认，并创建以 `agent_config_worktrees` 为外键的公共个人 worktree 补偿表；公共冲突不占主 rollout，认领和终态更新使用 fencing token。
 - `V17__seed_local_opencode_machine_for_default_user.sql`：历史本地开发种子脚本，曾预置一台 `127.0.0.1` 的 opencode 机器并绑定默认开发用户；该版本已可能被历史库应用，禁止删除、重命名或直接改写。
 - `V20260627000000__cleanup_loopback_linux_server_seed.sql`：清理 V17 留下的 `127.0.0.1` loopback opencode 拓扑、用户进程、绑定和关联的 manager-backend 连接。
 - `V20260627010000__add_encrypted_aes_key_to_user_ssh_keys.sql`：为 `user_ssh_keys` 增加 `encrypted_aes_key` 列；V10 已被 F-COSS seed 占用，后续 schema 变更不得复用 V10。

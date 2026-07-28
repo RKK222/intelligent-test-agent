@@ -13,6 +13,7 @@
 - 引用资产状态的 `repositoryPath?: string | null` 只做兼容透传；缺字段时调用方显示不可用，client 不自行构造服务器路径。
 - 文件 WebSocket client 对 workspace 与 Agent 配置路由键分别维护 single-flight 连接 Promise；企业同源构建的空 API base 遇到相对 ticket URL 时，先按浏览器当前页面补全绝对 `ws://` / `wss://` 地址再建连。socket/error/close/send 只清理自身缓存与 pending，旧连接的迟到回调不得删除新连接，同步 send 失败完成原错误清理后安全关闭底层 socket。读取 RPC 只对内部传输错误重连重试一次，`BackendApiError`、`REQUEST_TIMEOUT` 和所有写操作原样返回。
 - `getMyOpencodeMessageGate()` 是公共配置发布期间的轻量只读门禁查询；它不替代后端 Run 入口校验，也不触发 manager/opencode 健康检查。
+- `updatePublicAgentConfig()` 只发起远端分支到固定 commit 的公共全局 rollout；`getPublicAgentConfigRollout()` 读取逐服务器 Git 同步、进程排空、公共个人 worktree 补偿和 `lastError`。两者使用普通共享控制面请求，不附加个人 OpenCode 服务器路由头；`pullPublicAgentRepository()` 仅为旧客户端兼容保留。
 - `getNightExecutionSlots/createNightExecutionTask/listNightExecutionTasks/adjustNightExecutionTask/cancelNightExecutionTask/dismissNightExecutionTask`：双模式定时时段和任务 HTTP client；创建 payload 的 `scheduleMode` 可选以兼容旧请求，调整请求不允许切换模式，完整输入只用于创建请求，任务响应使用 shared-types 的安全投影。
 - `createXxlJobSsoTicket()`：调用平台票据 API并返回同源表单动作；只允许组件把 ticket 写入瞬时隐藏表单，禁止拼接 URL。原始 HTTP observer 会对 ticket/token/authToken/tokenValue/cookie/password/secret/sessionDigest 递归脱敏。
 

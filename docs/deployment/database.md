@@ -59,6 +59,15 @@ PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审
 
 `V20260728100000__add_personal_application_rollout_scope.sql` 仅扩展 `public_agent_config_rollouts.config_scope` 的 CHECK 约束，允许 `PERSONAL_APPLICATION`。该范围在个人 `git-pull` 已完成 Git merge 后使用，`scope_key` 保存个人工作区 ID，`initiated_by_user_id` 保存唯一受影响用户；只为当前服务器创建 server 行，并复用既有 target 租约、进程身份、空闲检测和 dispose 状态机。它不进入 PUBLIC 单锁或 APPLICATION 按版本唯一索引，因此不会占用共享发布锁；门禁 SQL 只按 `initiated_by_user_id = 当前用户` 命中。迁移不新增表、不回填历史行，也不写测试、演示或个人数据。
 
+## V20260728160000 公共 Agent 全局刷新确认与个人 worktree 补偿
+
+`V20260728160000__extend_public_agent_config_refresh.sql` 为公共全局刷新增加两项持久化边界：
+
+- `public_agent_config_rollouts.discard_shared_runtime_changes` 记录超级管理员是否已明确确认恢复所有服务器共享运行副本的本地内容。默认 `false` 兼容旧 Java；worker 只能在该值为 `true` 且已取得服务器租约后 reset/clean，共享副本不会在全局锁建立前被修改。
+- 新增 `public_agent_config_rollout_public_worktrees`，按 `(rollout_id, worktree_id)` 保存公共个人 worktree 的用户、服务器、固定目标 commit、稳定原因码、重试次数与 fencing 租约。`worktree_id` 外键指向 `agent_config_worktrees`，不复用应用个人工作区外键表。
+
+公共主 rollout 在共享副本同步和本机进程快照完成后即可继续排空；某个个人 worktree 因覆盖风险、未完成 merge 或真实冲突而进入 `AWAITING_USER` 时，不占用主 rollout 锁。用户处理完成后独立 worker 原生 merge 同一目标 commit 并转为 `SYNCED`；删除 worktree 或服务器退役时转为级联删除或 `ABANDONED`。迁移只包含生产运行状态结构、索引和注释，不写测试、演示或个人数据。
+
 ## V1 核心表
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V1__create_core_tables.sql` 创建以下表：

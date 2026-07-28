@@ -114,6 +114,40 @@ class GitWorkspaceServiceRealGitTest {
     }
 
     @Test
+    void exactCommitMergeKeepsNonOverlappingStagedUnstagedAndUntrackedChanges() throws Exception {
+        Path repo = initializeRepository();
+        write(repo, "staged.txt", "base staged\n");
+        write(repo, "unstaged.txt", "base unstaged\n");
+        write(repo, "remote.txt", "base remote\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "base");
+        git(repo, "checkout", "-b", "remote-change");
+        write(repo, "remote.txt", "remote update\n");
+        git(repo, "commit", "-am", "remote update");
+        git(repo, "checkout", "main");
+        write(repo, "staged.txt", "local staged\n");
+        git(repo, "add", "staged.txt");
+        write(repo, "unstaged.txt", "local unstaged\n");
+        write(repo, "untracked.txt", "local untracked\n");
+
+        GitWorkspaceService service = new GitWorkspaceService();
+        service.mergeCommit(
+                repo,
+                git(repo, "rev-parse", "remote-change").stdoutText().trim(),
+                null,
+                TEST_IDENTITY);
+
+        assertThat(Files.readString(repo.resolve("staged.txt"))).isEqualTo("local staged\n");
+        assertThat(Files.readString(repo.resolve("unstaged.txt"))).isEqualTo("local unstaged\n");
+        assertThat(Files.readString(repo.resolve("untracked.txt"))).isEqualTo("local untracked\n");
+        assertThat(Files.readString(repo.resolve("remote.txt"))).isEqualTo("remote update\n");
+        assertThat(service.statusPorcelain(repo))
+                .contains("M  staged.txt")
+                .contains(" M unstaged.txt")
+                .contains("?? untracked.txt");
+    }
+
+    @Test
     void nativeMergeReportsOnlyOverlappingLocalChangesWithoutChangingWorktree() throws Exception {
         Path repo = initializeRepository();
         write(repo, "shared.txt", "base\n");

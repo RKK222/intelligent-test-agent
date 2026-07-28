@@ -9,6 +9,7 @@ public record PublicAgentConfigRolloutSyncRow(
         String scopeKey,
         String branch,
         String commitHash,
+        boolean discardSharedRuntimeChanges,
         String initiatedByUserId,
         String traceId,
         int retryCount,
