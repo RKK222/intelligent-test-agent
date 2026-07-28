@@ -6074,11 +6074,46 @@ function buildEnvContextPrefix(): string | undefined {
   const appName = app?.appName || appId;
   if (!versionStr) return undefined;
 
-  return `当前应用信息：
-- appId: ${appId}
-- version: ${versionStr}
+  // 从对话上下文中提取子条目ID（格式如 S20260611-000007）
+  const subitemId = extractSubitemIdFromContext();
 
-当用户说"一体化数据源"时，你必须调用 db_operation_yth 工具，传入上面的 appId 和 version。\n\n`;
+  const lines = [
+    `当前应用信息：`,
+    `- appId: ${appId}`,
+    `- appName: ${appName}`,
+    `- version: ${versionStr}`
+  ];
+  if (subitemId) {
+    lines.push(`- itemNo: ${subitemId}`);
+  }
+  lines.push("");
+  lines.push(`当用户说的内容包含"自动化案例调度"时，你必须调用 auto_call 工具，传入上面的 appName、itemNo 和用户提供的 testCaseDirectory。`);
+  lines.push(`当用户说的内容包含"一体化"时，你必须调用 db_operation_yth 工具，传入上面的 appId 和 version。`);
+  lines.push("");
+  return lines.join("\n");
+}
+
+/**
+ * 从当前对话上下文的文件路径中提取子条目ID。
+ * 子条目路径格式：spec/<需求项>/<阶段>/<子条目名称>/...
+ * 子条目名称格式：S20260611-000007-子条目中文名，只取 S20260611-000007 部分。
+ */
+function extractSubitemIdFromContext(): string | undefined {
+  const items = chatContextStore.items;
+  for (const item of items) {
+    const path = item.path.replace(/\\/g, "/");
+    const parts = path.split("/").filter(Boolean);
+    // spec/<需求项>/<阶段>/<子条目名称>
+    if (parts[0] === "spec" && parts.length >= 4) {
+      const subitemName = parts[3];
+      // 匹配 S + 8位日期 + - + 6位序号
+      const match = subitemName.match(/^(S\d{8}-\d{6})/);
+      if (match) {
+        return match[1];
+      }
+    }
+  }
+  return undefined;
 }
 
 function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {

@@ -137,3 +137,29 @@
 - 工具参数已更新并推送到公共配置仓库
 - 运行时目录已同步更新（`current-public-config/tools/db-operation.ts`）
 - 下次对话中使用工具时会自动要求用户提供 `sid` 和 `managed` 参数
+
+## 2026-07-28 清理受管公共配置软链接冲突（普通目录占用）
+
+### Why
+用户点击受管重启触发 [OpencodeProcessConfigLinkService](file:///d:/workspace/intelligent-test-agent/backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/process/OpencodeProcessConfigLinkService.java) 时报 `CONFLICT TestAgent 受管公共配置路径已被普通文件或目录占用，请清理冲突后受管重启`（traceId=trace_0e653f24dad145caa1e1bdcd9cbd6493）。
+- 后端排查路径 `<OPENCODE_SESSION_DIR>/users/<unifiedAuthId>/.testagent-runtime/current-public-config`
+- 实际定位：`d:\workspace\intelligent-test-agent\.tmp\data\agent-opencode\.session\users\superadmin20\.testagent-runtime\current-public-config`
+- 是个 2026-07-24 09:31 创建的**普通目录**（含 agents/skills/tools/AGENTS.md/opencode.jsonc/node_modules），不是软链接。
+- 目录内容与 `.configdev/public-usr_test_superadmin20/opencode` 完全一致，是 7-22 那次"软链接降级为目录复制"代码路径在 Windows 软链接权限不足时落下的副本。
+- 7-28 08:23 RKK222 提交 `6779d77e 修复公共重载重复释放并收敛后台测试` 把降级逻辑回退并改严，`rejectUnmanagedTarget` 现在拒绝普通目录占用，导致新代码无法再覆盖这个历史副本。
+
+### What
+不修改代码（避免范围扩大），直接清理文件系统：
+- 将冲突的普通目录重命名为 `current-public-config.bak-20260728-104405`（保留可恢复的副本），腾出受管路径。
+- 备份内容确认与 `.configdev/public-usr_test_superadmin20/opencode` 公共副本完全一致，仅多出 opencode 运行时自动生成的 `node_modules/` 与 `package-lock.json`，可由下次 opencode 启动自动重建。
+
+### How
+- 校验：备份目录 `Mode=d-----`、`Attributes` 不带 `ReparsePoint`，确认是普通目录后才重命名。
+- 操作：通过临时 PowerShell 脚本（已清理）执行 `Rename-Item`，重命名后 `.testagent-runtime/` 下只剩 `current-public-config.bak-*`。
+- 后续：用户需在受管面板再次点击"受管重启"或"初始化进程"，触发 `OpencodeProcessConfigLinkService.switchToShared` 重新创建软链接。
+- 如果未来 Windows 软链接权限长期不可用，应当评估是否再次引入"软链接失败 → 删除旧目录 → 复制内容"的降级路径，但前提是源配置目录为只读且复制前要校验不被外部修改。
+
+### Result
+- 冲突已清理，受管路径可被新代码写入。
+- 待用户在 UI 重新触发受管重启验证；若重启时仍报 `OPENCODE_UNAVAILABLE 当前平台不支持 TestAgent 受管公共配置软链接`，则需要排查 Windows 软链接权限（开发者模式 / SeCreateSymbolicLinkPrivilege）。
+- `.agents/session-log.guojq.md` 已更新本次坑点。
