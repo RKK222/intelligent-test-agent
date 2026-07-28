@@ -84,18 +84,19 @@ const USER_VISIBLE_PROPERTIES = new Set([
 
 // 这里只放无需汉化、且会真实展示给用户的协议/算法/格式名；普通英文单词不能加入。
 const TECHNICAL_TERMS = new Set([
-  'aes', 'ascii', 'authorization', 'base32', 'base64', 'bcrypt', 'bip39', 'blowfish', 'cmyk', 'css', 'csv', 'des', 'excel', 'facebook',
-  'hex', 'hmac', 'hsl', 'html', 'http', 'https', 'hwb', 'iso', 'javascript', 'js', 'json', 'jwt', 'lch', 'linkedin',
-  'jcard', 'markdown', 'md5', 'meta', 'mime', 'mongo', 'nato', 'objectid', 'og', 'open', 'graph', 'otp', 'passport', 'pdf', 'pem',
-  'rabbit', 'rc4', 'rfc', 'rgb', 'rgba', 'ripemd160', 'rsa', 'sha1', 'sha3', 'sha224', 'sha256',
-  'sha384', 'sha512', 'toml', 'totp', 'tripledes', 'twitter', 'ulid', 'unicode', 'unix', 'url', 'utf8',
-  'slug', 'token', 'utc', 'uuid', 'wysiwyg', 'xml', 'yaml',
+  'ace', 'aes', 'api', 'ascii', 'authorization', 'base32', 'base64', 'bcrypt', 'bip39', 'blowfish', 'cmyk', 'css', 'csv', 'des', 'ecdsa', 'excel', 'facebook',
+  'hex', 'hmac', 'hsl', 'html', 'http', 'https', 'hwb', 'id', 'isbn', 'iso', 'javascript', 'jcard', 'js', 'json', 'jwt', 'lch', 'linkedin',
+  'mac', 'markdown', 'md5', 'meta', 'mgf1', 'mime', 'mongo', 'nato', 'objectid', 'og', 'otp', 'p-256', 'p-384', 'p-521', 'passport', 'pdf', 'pem',
+  'rabbit', 'rc4', 'rfc', 'rgb', 'rgba', 'ripemd-160', 'ripemd160', 'rsa', 'rsassa-pkcs1-v1', 'rsassa-pss', 'sha-1', 'sha-2', 'sha-3', 'sha-224', 'sha-256',
+  'sha-384', 'sha-512', 'sha1', 'sha3', 'sha224', 'sha256', 'sha384', 'sha512', 'shaken', 'sip', 'slug', 'token', 'toml', 'totp', 'tripledes',
+  'twitter', 'ulid', 'unicode', 'unix', 'url', 'utc', 'utf8', 'uuid', 'w3c', 'wysiwyg', 'xml', 'yaml',
 ]);
 
 const TECHNICAL_PHRASES = [
   'Basic Authentication',
   'Basic Auth',
   'Access Token',
+  'ID Token',
   'Open Graph',
   'SIP Call-Id',
   'SIP CSeq',
@@ -111,8 +112,14 @@ const EXACT_EXAMPLE_TEXT = new Set([
   'The quick brown fox jumps over the lazy dog',
   '例如“Hello Avengers”',
   '例如“Hello world”',
+  '大写字母（ABC…）',
   '小写字母（abc…）',
   '输入 MIME 类型，例如 application/json',
+]);
+
+// 服务边界的稳定错误码不会直接展示给用户，只允许逐项精确登记。
+const EXACT_TECHNICAL_TEXT = new Set([
+  'INVALID_BINARY_STRING',
 ]);
 
 const findings = [];
@@ -128,7 +135,7 @@ function addFinding(file, line, kind, value) {
 }
 
 function englishWords(value) {
-  if (!value || EXACT_EXAMPLE_TEXT.has(value.trim())) {
+  if (!value || EXACT_EXAMPLE_TEXT.has(value.trim()) || EXACT_TECHNICAL_TEXT.has(value.trim())) {
     return [];
   }
 
@@ -141,10 +148,6 @@ function englishWords(value) {
   return (withoutTechnicalPhrases.match(/[A-Za-z][A-Za-z0-9'-]*/g) ?? []).filter((word) => {
     const normalized = word.toLowerCase();
     if (TECHNICAL_TERMS.has(normalized)) {
-      return false;
-    }
-    // 全大写缩写、带数字的格式名和单字符单位不视作自然语言。
-    if (word.length === 1 || /\d/.test(word) || (word === word.toUpperCase() && word.length > 1)) {
       return false;
     }
     return true;
@@ -162,9 +165,18 @@ function getStaticPropertyName(node) {
   return undefined;
 }
 
-function recordLocaleKey(route, file, source, node) {
+function recordLocaleOccurrence(key, occurrence) {
+  const occurrences = usedLocaleKeys.get(key) ?? [];
+  if (occurrences.some(({ route, file, line }) => route === occurrence.route && file === occurrence.file && line === occurrence.line)) {
+    return;
+  }
+  occurrences.push(occurrence);
+  usedLocaleKeys.set(key, occurrences);
+}
+
+function recordLocaleKey(route, file, source, node, offset) {
   if (LOCALE_KEY_PATTERN.test(node.text)) {
-    usedLocaleKeys.set(node.text, { route, file, line: lineOf(source, node.getStart()) });
+    recordLocaleOccurrence(node.text, { route, file, line: lineOf(source, node.getStart()) + offset });
     return true;
   }
 
@@ -183,7 +195,7 @@ function recordLocaleKey(route, file, source, node) {
     return false;
   }
 
-  usedLocaleKeys.set(node.text, { route, file, line: lineOf(source, node.getStart()) });
+  recordLocaleOccurrence(node.text, { route, file, line: lineOf(source, node.getStart()) + offset });
   return true;
 }
 
@@ -198,7 +210,7 @@ function containingVariableName(node) {
   return undefined;
 }
 
-function isUserVisibleScriptString(node, file, expressionOnly) {
+function isUserVisibleScriptString(node, file, rootExpressionVisible) {
   const parent = node.parent;
 
   if (ts.isPropertyAssignment(parent)) {
@@ -213,7 +225,9 @@ function isUserVisibleScriptString(node, file, expressionOnly) {
     return /(?:descriptions|details|formats|labels|languages|options|properties)/i.test(containingVariableName(node) ?? '');
   }
 
-  if (ts.isReturnStatement(parent) || ts.isThrowStatement(parent) || (expressionOnly && ts.isConditionalExpression(parent))) {
+  if (ts.isReturnStatement(parent)
+    || ts.isThrowStatement(parent)
+    || (rootExpressionVisible && (ts.isExpressionStatement(parent) || ts.isConditionalExpression(parent)))) {
     return true;
   }
 
@@ -229,15 +243,15 @@ function isUserVisibleScriptString(node, file, expressionOnly) {
   return false;
 }
 
-function inspectTypescript(route, file, source, offset = 0, expressionOnly = false) {
+function inspectTypescript(route, file, source, offset = 0, rootExpressionVisible = false) {
   const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 
   function visit(node) {
     if (ts.isStringLiteralLike(node)) {
-      if (recordLocaleKey(route, file, source, node)) {
+      if (recordLocaleKey(route, file, source, node, offset)) {
         return;
       }
-      if (isUserVisibleScriptString(node, file, expressionOnly) && containsNaturalEnglish(node.text)) {
+      if (isUserVisibleScriptString(node, file, rootExpressionVisible) && containsNaturalEnglish(node.text)) {
         addFinding(file, lineOf(source, node.getStart()) + offset, '脚本用户文案', node.text);
       }
     }
@@ -259,11 +273,12 @@ function inspectTemplate(route, file, source, template) {
     return;
   }
 
-  function inspectExpression(expression, line) {
+  function inspectExpression(expression, line, { interpolation = false, visibleAttribute } = {}) {
     if (!expression?.content) {
       return;
     }
-    inspectTypescript(route, file, expression.content, template.loc.start.line + line - 2, true);
+    const rootExpressionVisible = interpolation || USER_VISIBLE_ATTRIBUTES.has(visibleAttribute);
+    inspectTypescript(route, file, expression.content, template.loc.start.line + line - 2, rootExpressionVisible);
   }
 
   function visit(node) {
@@ -278,13 +293,16 @@ function inspectTemplate(route, file, source, template) {
         }
         // 动态绑定中还可能内联 options/items 等对象；由 TS AST 只检查其中的用户文案字段。
         if (prop.type === 7) {
-          inspectExpression(prop.exp, prop.loc.start.line);
+          const visibleAttribute = prop.name === 'bind' && prop.arg?.type === 4 && prop.arg.isStatic
+            ? prop.arg.content
+            : undefined;
+          inspectExpression(prop.exp, prop.loc.start.line, { visibleAttribute });
         }
       }
     }
 
     if (node.type === 5) {
-      inspectExpression(node.content, node.loc.start.line);
+      inspectExpression(node.content, node.loc.start.line, { interpolation: true });
     }
 
     for (const child of node.children ?? []) {
@@ -317,10 +335,10 @@ async function walk(directory) {
 
 async function inspectFile(route, file) {
   const source = await readFile(file, 'utf8');
-  // locale key 只做字面量收集；自然语言判断仍由 Vue/TS AST 完成。
+  // 先收集原文件中的全部字面量位置；AST 再负责识别可见文案，并按文件/行去重同一 key。
   for (const match of source.matchAll(/['"]((?:tools|common)\.[A-Za-z0-9_.-]+)['"]/g)) {
     if (LOCALE_KEY_PATTERN.test(match[1])) {
-      usedLocaleKeys.set(match[1], { route, file, line: lineOf(source, match.index) });
+      recordLocaleOccurrence(match[1], { route, file, line: lineOf(source, match.index) });
     }
   }
   if (file.endsWith('.vue')) {
@@ -363,15 +381,18 @@ async function validateLocales() {
     readFile(join(PROJECT_ROOT, 'locales/zh.yml'), 'utf8').then(parseYaml),
   ]);
 
-  for (const [key, location] of usedLocaleKeys) {
-    const allowedPrefix = key === `tools.${location.route}.title`
-      || key === `tools.${location.route}.description`
-      || key.startsWith(`tools.${location.route}.ui.`)
-      || key.startsWith('common.');
-    if (!allowedPrefix) {
-      addFinding(location.file, location.line, 'locale key 越界', key);
+  for (const [key, locations] of usedLocaleKeys) {
+    for (const location of locations) {
+      const allowedPrefix = key === `tools.${location.route}.title`
+        || key === `tools.${location.route}.description`
+        || key.startsWith(`tools.${location.route}.ui.`)
+        || key.startsWith('common.');
+      if (!allowedPrefix) {
+        addFinding(location.file, location.line, 'locale key 越界', key);
+      }
     }
 
+    const [location] = locations;
     const enValue = getNestedValue(en, key);
     const zhValue = getNestedValue(zh, key);
     if (typeof enValue !== 'string' || enValue.trim() === '') {
@@ -410,5 +431,6 @@ if (findings.length > 0) {
 else {
   console.log(`Task 2B 中文 UI 审计通过：43 个路由，${usedLocaleKeys.size} 个已用 locale key。`);
   console.log(`技术词白名单（${TECHNICAL_TERMS.size}）：${[...TECHNICAL_TERMS].sort().join(', ')}`);
+  console.log(`精确技术文本白名单（${EXACT_TECHNICAL_TEXT.size}）：${[...EXACT_TECHNICAL_TEXT].join(' | ')}`);
   console.log(`示例文本白名单（${EXACT_EXAMPLE_TEXT.size}）：${[...EXACT_EXAMPLE_TEXT].join(' | ')}`);
 }
