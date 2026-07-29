@@ -244,6 +244,7 @@ class AppSourceApplicationServiceTest {
         AppSourceApplicationService.RepositorySummary expired =
                 service.listRepositories(APP_ID.value(), USER_ID, false).getFirst();
         assertThat(expired.occupied()).isFalse();
+        assertThat(expired.manageable()).isTrue();
         assertThat(expired.downloadState()).isEqualTo(AppSourceApplicationService.DownloadState.DOWNLOADED_EXPIRED);
         assertThat(expired.openable()).isFalse();
         assertThat(expired.unavailableReason()).isEqualTo("SNAPSHOT_EXPIRED");
@@ -287,6 +288,7 @@ class AppSourceApplicationServiceTest {
         assertThat(summary.downloadState())
                 .isEqualTo(AppSourceApplicationService.DownloadState.PERSONAL_OCCUPIED);
         assertThat(summary.openable()).isFalse();
+        assertThat(summary.manageable()).isFalse();
         assertThat(summary.unavailableReason()).isEqualTo("PERSONAL_OCCUPIED");
     }
 
@@ -326,7 +328,9 @@ class AppSourceApplicationServiceTest {
 
         assertThat(summary.downloadState()).isEqualTo(AppSourceApplicationService.DownloadState.NOT_DOWNLOADED);
         assertThat(summary.generation()).isNull();
+        assertThat(summary.occupied()).isFalse();
         assertThat(summary.openable()).isFalse();
+        assertThat(summary.manageable()).isTrue();
         assertThat(summary.unavailableReason()).isEqualTo("NOT_DOWNLOADED");
     }
 

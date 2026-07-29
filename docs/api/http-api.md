@@ -1236,7 +1236,7 @@ tree 的兼容模式（不传 `includeCommit` 或传 `false`）保持原 wire �
 | `DOWNLOADED_EXPIRED` | active snapshot 已过期，不能打开。 |
 | `PERSONAL_OCCUPIED` | active snapshot 是其它用户的个人快照；返回低敏占用人 `ownerUserId/ownerName/ownerUnifiedAuthId` 供管理判断。 |
 
-列表响应条目包含 `repositoryId/name/englishName/downloadState/generation/purpose/ownerUserId/ownerName/ownerUnifiedAuthId/branch/targetCommit/selectedPaths/expiresAt/occupied/openable/manageable/unavailableReason/latestOperation/serverSummaries`。其中 `selectedPaths[]` 固定使用 `{ "path": "...", "type": "FILE|DIRECTORY" }`；响应允许尚未下载或旧数据对应的字段为 `null`，客户端必须容忍后续追加字段。
+列表响应条目包含 `repositoryId/name/englishName/downloadState/generation/purpose/ownerUserId/ownerName/ownerUnifiedAuthId/branch/targetCommit/selectedPaths/expiresAt/occupied/openable/manageable/unavailableReason/latestOperation/serverSummaries`。其中 `selectedPaths[]` 固定使用 `{ "path": "...", "type": "FILE|DIRECTORY" }`；响应允许尚未下载或旧数据对应的字段为 `null`，客户端必须容忍后续追加字段。`manageable` 与 `openable` 相互独立：没有 active snapshot 或 snapshot 已过期时，任一当前有效应用成员都可发起新 generation，因此返回 `manageable=true`；未过期 snapshot 仅对 owner 或当前有效应用成员中的 `APP_ADMIN` 返回 `manageable=true`。`openable=true` 仍要求当前服务器存在同 generation 的 READY replica。
 
 物化请求示例：
 

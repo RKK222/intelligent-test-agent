@@ -156,7 +156,11 @@ public class AppSourceApplicationService {
                     AppSourceSnapshot active = appSources.findActiveSnapshot(repository.repositoryId()).orElse(null);
                     DownloadState downloadState = downloadState(active, userId, now);
                     boolean occupied = active != null && active.expiresAt().isAfter(now);
-                    boolean manageable = occupied && (Objects.equals(active.ownerUserId(), userId) || appAdmin);
+                    // 未下载或已过期时没有有效占用，任一有效应用成员都可发起新的源码物化；
+                    // 未过期快照仍仅允许 owner 或应用管理员替换，避免普通成员覆盖有效源码。
+                    boolean manageable = !occupied
+                            || Objects.equals(active.ownerUserId(), userId)
+                            || appAdmin;
                     // 列表业务契约直接提供占用人展示身份，API 层不得再越过业务服务查询 UserRepository。
                     User owner = active == null || active.ownerUserId() == null
                             ? null

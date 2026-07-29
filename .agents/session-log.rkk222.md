@@ -5,6 +5,23 @@
 
 ## Entries
 
+### 2026-07-29 - 修复新关联应用源码无法首次下载
+
+### Why
+- 新增应用代码库并建立应用关联后，仓库没有 active snapshot，后端却返回 `manageable=false`；前端下载入口据此拒绝打开管理弹窗，导致首次源码物化无法发起。
+
+### What
+- 修正应用源码仓库列表的 `manageable` 语义：没有 active snapshot 或 snapshot 已过期时，任一当前有效应用成员均可发起新 generation；未过期 snapshot 仍仅允许 owner 或 `APP_ADMIN` 管理。
+- 补充未下载、已过期和他人有效个人占用三种回归断言，并同步 workspace-management 模块说明与 HTTP API 字段语义。
+
+### How
+- TDD 先以 2 个失败断言稳定复现，再实施单点业务修复；`AppSourceApplicationServiceTest` 27/27、workspace-management reactor 374/374、`AppSourceControllerTest` 6/6、前端定向 Vitest 11/11、agent-web typecheck 和 Chromium 应用源码工作台场景均通过。
+- 按 `.env.test` / `test` profile 完整重启 backend、opencode-manager、frontend；health/readiness 为 `UP`，前端与 CORS 预检为 200，manager WebSocket 连通且 OpenCode 健康状态稳定为 `HEALTHY`。
+
+### Result
+- 本地代码与运行实例已恢复首次下载入口；未下载仓库继续按设计不出现在只展示可打开快照的紧凑选择器，但会出现在“下载应用源码”弹窗。
+- 本次只调整既有 `manageable` 字段语义，不新增 HTTP/事件字段，不涉及数据库/Flyway、SQL、环境配置、性能、安全、generated SDK 或 OpenCode 源码；现有企业交付 ZIP 尚未重建，现场升级仍需用本提交重新打包部署。
+
 ### 2026-07-29 - 确认新关联应用源码首次下载被 manageable 门禁阻断
 
 ### Why
