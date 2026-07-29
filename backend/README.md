@@ -36,6 +36,7 @@ OpenCode 源码快照 `opencode-source/opencode-1.18.4/` 只用于审计和行�
 | `test-agent-configuration-management` | 应用、应用成员、代码库英文名与关联、已初始化引用资产库及已有应用源码历史的英文名/类型冻结、应用工作空间、个人 SSH key、可审计通用参数配置管理，以及显式 JVM 内存参数的本机注册/诊断状态 |
 | `test-agent-scheduler` | XXL adapter 复用的任务 handler/context/result、Redis 全局锁和旧运行记录清理；不再启动 PostgreSQL runner 或创建 `USER_PLAN` |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界；承载版本化工具盒子离线目录、热门排序和 30 秒点击计数服务 |
+| `test-agent-model-gateway` | 中立企业模型目录、能力探测、OpenAI-compatible 流式代理、上游错误脱敏和每日用量聚合，并向既有 OpenCode 内部代理提供共享安全支持 |
 | `test-agent-xxl-job-admin-upstream` | 原样保存 XXL-JOB Admin 3.4.2 源码/资源与 GPL-3.0 许可证，不承载平台补丁 |
 | `test-agent-xxl-job-integration` | 独立 Servlet Admin 子上下文、MySQL Flyway、Admin readiness 就绪后延迟启动的 executor、周期任务 adapter、平台一次性 SSO、JIT 用户和 XXL health |
 | `test-agent-api` | HTTP/SSE/WebSocket API 定义、DTO、鉴权、限流、traceId、按进程精确 Java->Java 聚合、应用源码快照/持久化进度入口和统一异常入口 |
@@ -129,6 +130,10 @@ cp .env.local.example .env.local
 | `EXTERNAL_API_KEY` | 外部 OpenAI-compatible API Key；变量名可通过 `TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV` 改为其他环境变量名。 |
 | `MODELSTUDIO_API_KEY` | `TEST_AGENT_MODEL_CATALOG_SOURCE=bailian` 时使用的 Model Studio API Key；该模式使用代码内置 `modelstudio` provider 和 qwen/kimi 模型清单。 |
 | `TEST_AGENT_INTERNAL_PROXY_API_KEY` | Java 内部模型代理鉴权 apikey；Java 校验 opencode 子进程请求，manager 启动用户 opencode server 时把同值注入子进程环境。 |
+| `TEST_AGENT_LOBEHUB_HMAC_SECRET` | LobeHub 服务兑换/撤销共享 HMAC secret，至少 32 字节；不得进入公共参数或日志。 |
+| `TEST_AGENT_LOBEHUB_CLIENT_ID` / `TEST_AGENT_LOBEHUB_TICKET_TTL` / `TEST_AGENT_LOBEHUB_GRANT_TTL` | 模型委托 client 与票据/委托生命周期；默认 `lobehub/60s/30d`。 |
+| `TEST_AGENT_LOBEHUB_HMAC_CLOCK_SKEW` / `TEST_AGENT_LOBEHUB_NONCE_TTL` | 服务 HMAC 时钟偏差和 nonce 防重放窗口；默认 `60s/120s`。 |
+| `TEST_AGENT_MODEL_GATEWAY_MULTIPART_DIRECTORY` / `TEST_AGENT_MODEL_GATEWAY_MAX_MULTIPART_PART_BYTES` | transcription 临时 part 隔离目录和单 part 上限；生产目录不得与平台/OpenCode 工作区重叠。 |
 | `ENTERPRISE_OPENAI_AUTH_TOKEN` | 历史兼容项；新实现不读取该环境变量，外部 Token 由前端“内部模型供应商”页面记录到 `internal_model_tokens` 并按 Provider 关联。 |
 | `TEST_AGENT_EXTERNAL_MODEL_BASE_URL` | 外部 OpenAI-compatible base URL，例如 `https://api.deepseek.com`。旧 `TEST_AGENT_BAILIAN_BASE_URL` 仍作为兼容兜底。 |
 | `TEST_AGENT_ENTERPRISE_OPENAI_BASE_URL` | 企业内 OpenAI-compatible base URL，默认与 openclaw 企业 patch 中的 `enterprise-openai` 地址一致。 |

@@ -20,6 +20,7 @@ PACKAGE_OPENCODE_WORKER=1
 PACKAGE_PYTHON_LIBS=0
 PACKAGE_TOOLBOX=1
 PACKAGE_MYSQL_IMAGE=0
+PACKAGE_LOBEHUB=0
 SAVE_TARBALL=1
 PACKAGE_ZIP=1
 PACKAGE_ZIP_ONLY=0
@@ -58,6 +59,8 @@ Options:
   --python-libs-only      Package only the independent Python third-party library bundle.
   --toolbox-only          Package only the two toolbox images and modified source.
   --mysql-only            Package only the standalone MySQL image.
+  --with-lobehub          Include the verified external LobeHub artifact set in a full release.
+  --lobehub-only          Package only the verified LobeHub offline artifact set and operations kit.
   --zip-only              Reassemble the release ZIP from current verified artifacts and component state.
   --include-all-components
                           Force worker runtime (Python/OpenCode Manager/Codex MCP) and toolbox into the ZIP.
@@ -95,6 +98,7 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_PYTHON_LIBS=0
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
+      PACKAGE_LOBEHUB=0
       shift
       ;;
     --frontend-only)
@@ -105,6 +109,7 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_PYTHON_LIBS=0
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
+      PACKAGE_LOBEHUB=0
       shift
       ;;
     --opencode-only)
@@ -125,6 +130,7 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_PYTHON_LIBS=1
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
+      PACKAGE_LOBEHUB=0
       shift
       ;;
     --toolbox-only)
@@ -135,6 +141,7 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_PYTHON_LIBS=0
       PACKAGE_TOOLBOX=1
       PACKAGE_MYSQL_IMAGE=0
+      PACKAGE_LOBEHUB=0
       shift
       ;;
     --mysql-only)
@@ -145,6 +152,21 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_PYTHON_LIBS=0
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=1
+      PACKAGE_LOBEHUB=0
+      shift
+      ;;
+    --with-lobehub)
+      PACKAGE_LOBEHUB=1
+      shift
+      ;;
+    --lobehub-only)
+      PACKAGE_MODE=lobehub-only
+      PACKAGE_BACKEND=0
+      PACKAGE_FRONTEND=0
+      PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_TOOLBOX=0
+      PACKAGE_MYSQL_IMAGE=0
+      PACKAGE_LOBEHUB=1
       shift
       ;;
     --zip-only)
@@ -710,6 +732,191 @@ package_mysql_image() {
   fi
 }
 
+verify_lobehub_artifact_set() {
+  local source_dir="$1" required_file path line checksum_line_pattern
+  local internal_version upstream_version upstream_commit image_ref
+  local expected_paths listed_paths client_sha signed_client_sha
+  local lock_file locked_internal_version locked_upstream_version locked_upstream_commit locked_postgres_major
+  local locked_contract_version
+  [[ -d "${source_dir}" ]] || {
+    echo "LobeHub artifact directory not found: ${source_dir}" >&2
+    exit 1
+  }
+  if [[ -n "$(find "${source_dir}" -type l -print -quit)" ]]; then
+    echo "LobeHub artifact set must not contain symbolic links" >&2
+    exit 1
+  fi
+  if [[ -n "$(find "${source_dir}" -type f -name '*[[:space:]]*' -print -quit)" ]]; then
+    echo "LobeHub artifact filenames must not contain whitespace" >&2
+    exit 1
+  fi
+  lock_file="${SCRIPT_DIR}/lobehub/version.env"
+  [[ -f "${lock_file}" ]] || { echo "LobeHub version lock is missing: ${lock_file}" >&2; exit 1; }
+  locked_internal_version="$(state_value "${lock_file}" LOBEHUB_INTERNAL_VERSION)"
+  locked_upstream_version="$(state_value "${lock_file}" LOBEHUB_UPSTREAM_VERSION)"
+  locked_upstream_commit="$(state_value "${lock_file}" LOBEHUB_UPSTREAM_COMMIT)"
+  locked_postgres_major="$(state_value "${lock_file}" LOBEHUB_PARADEDB_POSTGRES_MAJOR)"
+  locked_contract_version="$(state_value "${lock_file}" LOBEHUB_PLATFORM_CONTRACT_VERSION)"
+  [[ "${locked_internal_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-platform\.[0-9]+$ \
+    && "${locked_upstream_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ \
+    && "${locked_upstream_commit}" =~ ^[0-9a-f]{7}([0-9a-f]{33})?$ \
+    && "${locked_postgres_major}" =~ ^[0-9]+$ \
+    && "${locked_contract_version}" =~ ^[0-9]+$ ]] || {
+    echo "LobeHub version lock is malformed: ${lock_file}" >&2
+    exit 1
+  }
+  for required_file in \
+    release.env SHA256SUMS approved-resources.json LICENSES.txt windows-authenticode-verification.txt \
+    images/lobehub-image.tar images/paradedb-image.tar images/rustfs-image.tar \
+    clients/lobehub-windows-x64.exe clients/lobehub-linux-x86_64.tar.gz \
+    bin/mc-linux-amd64 sbom/lobehub.spdx.json \
+    "source/lobehub-${locked_internal_version}.tar.gz"; do
+    [[ -f "${source_dir}/${required_file}" ]] || {
+      echo "Required LobeHub artifact is missing: ${required_file}" >&2
+      exit 1
+    }
+  done
+
+  # SHA 清单只允许相对普通路径，禁止校验时逃出制品根目录；并且必须完整覆盖全部普通文件。
+  checksum_line_pattern='^([0-9a-f]{64})[[:space:]]+\*?([^[:space:]]+)$'
+  listed_paths=""
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ ! "${line}" =~ ${checksum_line_pattern} ]]; then
+      echo "Malformed line in LobeHub SHA256SUMS" >&2
+      exit 1
+    fi
+    path="${BASH_REMATCH[2]}"
+    if [[ -z "${path}" || "${path}" == /* || "${path}" == ../* || "${path}" == */../* ]]; then
+      echo "Unsafe path in LobeHub SHA256SUMS: ${path}" >&2
+      exit 1
+    fi
+    [[ "${path}" != SHA256SUMS && -f "${source_dir}/${path}" ]] || {
+      echo "LobeHub SHA256SUMS references a missing or forbidden file: ${path}" >&2
+      exit 1
+    }
+    listed_paths+="${path}"$'\n'
+  done <"${source_dir}/SHA256SUMS"
+  listed_paths="$(printf '%s' "${listed_paths}" | LC_ALL=C sort)"
+  if [[ -n "$(printf '%s\n' "${listed_paths}" | uniq -d)" ]]; then
+    echo "LobeHub SHA256SUMS contains duplicate paths" >&2
+    exit 1
+  fi
+  expected_paths="$(cd "${source_dir}" && find . -type f ! -name SHA256SUMS -print \
+    | sed 's#^\./##' | LC_ALL=C sort)"
+  if [[ "${listed_paths}" != "${expected_paths}" ]]; then
+    echo "LobeHub SHA256SUMS must cover every artifact exactly once" >&2
+    exit 1
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "${source_dir}" && sha256sum -c SHA256SUMS)
+  elif command -v shasum >/dev/null 2>&1; then
+    (cd "${source_dir}" && shasum -a 256 -c SHA256SUMS)
+  else
+    echo "Neither sha256sum nor shasum is available" >&2
+    exit 1
+  fi
+
+  internal_version="$(state_value "${source_dir}/release.env" LOBEHUB_INTERNAL_VERSION)"
+  upstream_version="$(state_value "${source_dir}/release.env" LOBEHUB_UPSTREAM_VERSION)"
+  upstream_commit="$(state_value "${source_dir}/release.env" LOBEHUB_UPSTREAM_COMMIT)"
+  [[ "${internal_version}" == "${locked_internal_version}" ]] || {
+    echo "Unexpected LobeHub internal version: ${internal_version}" >&2
+    exit 1
+  }
+  [[ "${upstream_version}" == "${locked_upstream_version}" ]] || {
+    echo "Unexpected LobeHub upstream version: ${upstream_version}" >&2
+    exit 1
+  }
+  if [[ "${#locked_upstream_commit}" -eq 7 ]]; then
+    [[ "${upstream_commit}" == "${locked_upstream_commit}" \
+      || "${upstream_commit}" =~ ^${locked_upstream_commit}[0-9a-f]{33}$ ]] || {
+      echo "Unexpected LobeHub upstream commit: ${upstream_commit}" >&2
+      exit 1
+    }
+  elif [[ "${upstream_commit}" != "${locked_upstream_commit}" ]]; then
+    echo "Unexpected LobeHub upstream commit: ${upstream_commit}" >&2
+    exit 1
+  fi
+  [[ "$(state_value "${source_dir}/release.env" LOBEHUB_PARADEDB_POSTGRES_MAJOR)" == "${locked_postgres_major}" ]] || {
+    echo "LobeHub ParadeDB artifact must use PostgreSQL major ${locked_postgres_major}" >&2
+    exit 1
+  }
+  [[ "$(state_value "${source_dir}/release.env" LOBEHUB_PLATFORM_CONTRACT_VERSION)" == "${locked_contract_version}" ]] || {
+    echo "LobeHub platform contract version does not match lock ${locked_contract_version}" >&2
+    exit 1
+  }
+  [[ "$(state_value "${source_dir}/release.env" LOBEHUB_WINDOWS_AUTHENTICODE_VERIFIED)" == true ]] || {
+    echo "Windows Authenticode verification is not recorded as successful" >&2
+    exit 1
+  }
+  [[ "$(state_value "${source_dir}/release.env" LOBEHUB_LINUX_EXECUTION_DEFAULT)" == false ]] || {
+    echo "Linux local execution must be disabled by default" >&2
+    exit 1
+  }
+  [[ "$(state_value "${source_dir}/windows-authenticode-verification.txt" AUTHENTICODE_STATUS)" == Valid ]] || {
+    echo "Windows Authenticode evidence status is not Valid" >&2
+    exit 1
+  }
+  [[ -n "$(state_value "${source_dir}/windows-authenticode-verification.txt" AUTHENTICODE_SUBJECT)" \
+    && -n "$(state_value "${source_dir}/windows-authenticode-verification.txt" AUTHENTICODE_THUMBPRINT)" ]] || {
+    echo "Windows Authenticode signer identity evidence is incomplete" >&2
+    exit 1
+  }
+  client_sha="$(sha256_file "${source_dir}/clients/lobehub-windows-x64.exe")"
+  signed_client_sha="$(state_value "${source_dir}/windows-authenticode-verification.txt" AUTHENTICODE_FILE_SHA256)"
+  [[ "${signed_client_sha}" == "${client_sha}" ]] || {
+    echo "Windows Authenticode evidence does not match the packaged client" >&2
+    exit 1
+  }
+  for image_ref in LOBEHUB_APP_IMAGE LOBEHUB_PARADEDB_IMAGE LOBEHUB_RUSTFS_IMAGE; do
+    require_digest_pinned_image "${image_ref}" "$(state_value "${source_dir}/release.env" "${image_ref}")"
+  done
+}
+
+package_lobehub_artifacts() {
+  local source_dir target_dir
+  [[ -d "${TEST_AGENT_LOBEHUB_ARTIFACT_DIR}" ]] || {
+    echo "LobeHub artifact directory not found: ${TEST_AGENT_LOBEHUB_ARTIFACT_DIR}" >&2
+    exit 1
+  }
+  source_dir="$(cd "${TEST_AGENT_LOBEHUB_ARTIFACT_DIR}" && pwd)"
+  target_dir="$(cd "${OUTPUT_DIR}" && pwd)/lobehub"
+  if [[ "${source_dir}" == "${target_dir}" || "${source_dir}" == "${target_dir}/"* ]]; then
+    echo "LobeHub input artifacts must be outside the package output directory" >&2
+    exit 1
+  fi
+  verify_lobehub_artifact_set "${source_dir}"
+  rm -rf "${target_dir}"
+  mkdir -p "${target_dir}"
+  cp -a "${source_dir}/." "${target_dir}/"
+  chmod 0755 "${target_dir}/bin/mc-linux-amd64"
+  echo "Verified LobeHub artifact set copied to ${target_dir}"
+}
+
+package_lobehub_zip() {
+  local staging_dir="${OUTPUT_DIR}/.lobehub-release-zip"
+  local zip_path="${OUTPUT_DIR}/test-agent-lobehub-offline.zip"
+  require_command zip
+  verify_lobehub_artifact_set "${OUTPUT_DIR}/lobehub"
+  rm -rf "${staging_dir}"
+  mkdir -p "${staging_dir}/dist/lobehub" "${staging_dir}/deploy/internal"
+  cp -a "${OUTPUT_DIR}/lobehub/." "${staging_dir}/dist/lobehub/"
+  for required_file in \
+    lobehub.env.example lobehub-docker.sh install-lobehub-offline.sh \
+    systemd/test-agent-lobehub.service lobehub/version.env nginx/lobehub.conf.template; do
+    mkdir -p "${staging_dir}/deploy/internal/$(dirname "${required_file}")"
+    cp -a "${SCRIPT_DIR}/${required_file}" "${staging_dir}/deploy/internal/${required_file}"
+  done
+  mkdir -p "${staging_dir}/docs/deployment" "${staging_dir}/docs/architecture"
+  cp -a "${ROOT_DIR}/docs/deployment/lobehub-offline.md" "${staging_dir}/docs/deployment/"
+  cp -a "${ROOT_DIR}/docs/architecture/lobehub-integration.md" "${staging_dir}/docs/architecture/"
+  rm -f "${zip_path}"
+  (cd "${staging_dir}" && zip -qr "${zip_path}" .)
+  rm -rf "${staging_dir}"
+  write_artifact_checksum "${zip_path}"
+  ls -lh "${zip_path}" "${zip_path}.sha256"
+}
+
 package_release_zip() {
   local staging_dir="${OUTPUT_DIR}/.release-zip"
   local zip_path session_log session_log_count=0
@@ -762,6 +969,9 @@ package_release_zip() {
       }
     done
   fi
+  if [[ "${PACKAGE_LOBEHUB}" -eq 1 ]]; then
+    verify_lobehub_artifact_set "${OUTPUT_DIR}/lobehub"
+  fi
 
   # 交付 zip 只放部署所需产物和脚本，避免把 deploy/internal/dist 自身递归打进去。
   mkdir -p "${staging_dir}/dist/backend"
@@ -778,6 +988,13 @@ package_release_zip() {
       "${OUTPUT_DIR}/toolbox-catalog-v1.json" \
       "${OUTPUT_DIR}/toolbox-catalog-v1.json.sha256" \
       "${staging_dir}/dist/"
+  fi
+  if [[ "${PACKAGE_LOBEHUB}" -eq 1 ]]; then
+    mkdir -p "${staging_dir}/dist/lobehub"
+    cp -a "${OUTPUT_DIR}/lobehub/." "${staging_dir}/dist/lobehub/"
+    mkdir -p "${staging_dir}/docs/deployment" "${staging_dir}/docs/architecture"
+    cp -a "${ROOT_DIR}/docs/deployment/lobehub-offline.md" "${staging_dir}/docs/deployment/"
+    cp -a "${ROOT_DIR}/docs/architecture/lobehub-integration.md" "${staging_dir}/docs/architecture/"
   fi
 
   if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 ]]; then
@@ -812,6 +1029,8 @@ package_release_zip() {
     printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=%s\n' "${WORKER_RUNTIME_FINGERPRINT}"
     printf 'TEST_AGENT_RELEASE_TOOLBOX=%s\n' "${TOOLBOX_COMPONENT_MODE}"
     printf 'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=%s\n' "${TOOLBOX_FINGERPRINT}"
+    printf 'TEST_AGENT_RELEASE_LOBEHUB=%s\n' "$([[ "${PACKAGE_LOBEHUB}" -eq 1 ]] && printf included || printf disabled)"
+    printf 'TEST_AGENT_RELEASE_LOBEHUB_VERSION=%s\n' "$([[ "${PACKAGE_LOBEHUB}" -eq 1 ]] && state_value "${OUTPUT_DIR}/lobehub/release.env" LOBEHUB_INTERNAL_VERSION || printf none)"
   } >"${staging_dir}/deploy/internal/release-components.env"
   chmod 0644 "${staging_dir}/deploy/internal/release-components.env"
   # 升级脚本和官方启动器共用这份忽略清单；任一文件漏包都会让存量节点或新增节点重新出现 Git 脏状态。
@@ -913,6 +1132,10 @@ TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE="${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE:-test
 TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE="${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE:-node:20.18.0-alpine3.20@sha256:a1d39fe127e43881c6770abf2f0843c955607fb56eb9b45bf6f103c992c5442a}"
 TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE="${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE:-nginx:1.27.2-alpine3.20@sha256:d213b2a02ef4e7ec85882e8955343cdd08ab49d6548995ad18623f47017c65ee}"
 TEST_AGENT_XXL_JOB_MYSQL_IMAGE="${TEST_AGENT_XXL_JOB_MYSQL_IMAGE:-mysql:8.4}"
+TEST_AGENT_LOBEHUB_ARTIFACT_DIR="${TEST_AGENT_LOBEHUB_ARTIFACT_DIR:-${ROOT_DIR}/lobehub-release-artifacts}"
+if [[ "${TEST_AGENT_LOBEHUB_ARTIFACT_DIR}" != /* ]]; then
+  TEST_AGENT_LOBEHUB_ARTIFACT_DIR="${ROOT_DIR}/${TEST_AGENT_LOBEHUB_ARTIFACT_DIR}"
+fi
 NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://mirrors.ustc.edu.cn/debian}"
@@ -943,6 +1166,14 @@ OPENCODE_RUNTIME_PACKAGE_LOCK="${OPENCODE_RUNTIME_PACKAGE_LOCK:-deploy/internal/
 GO_IMAGE="${GO_IMAGE:-golang@sha256:e87b2a5f6df2dff71ea330d55d54f4979eb380ae58a7e3aabc9d53121243e689}"
 NODE_IMAGE="${NODE_IMAGE:-node@sha256:b042c6d46a90773b82ea3f95b05457ea93ee127a73b1b47ad5ebbb1a08ec3df8}"
 VITE_TEST_AGENT_API_BASE_URL="${VITE_TEST_AGENT_API_BASE_URL:-}"
+
+if [[ "${PACKAGE_LOBEHUB}" -eq 1 \
+  && "${PACKAGE_MODE}" != full \
+  && "${PACKAGE_MODE}" != zip-only \
+  && "${PACKAGE_MODE}" != lobehub-only ]]; then
+  echo "--with-lobehub can only be combined with the full or --zip-only release mode" >&2
+  exit 2
+fi
 
 mkdir -p "${OUTPUT_DIR}"
 if [[ -z "${COMPONENT_STATE_FILE}" ]]; then
@@ -1014,6 +1245,14 @@ if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 ]]; then
   package_mysql_image
 fi
 
+if [[ "${PACKAGE_LOBEHUB}" -eq 1 && "${PACKAGE_MODE}" != zip-only ]]; then
+  package_lobehub_artifacts
+fi
+
+if [[ "${PACKAGE_MODE}" == lobehub-only && "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
+  package_lobehub_zip
+fi
+
 if [[ "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 \
   && ( "${PACKAGE_MODE}" == full || "${PACKAGE_MODE}" == zip-only ) ]]; then
   package_release_zip
@@ -1052,6 +1291,13 @@ fi
 if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo "  MySQL image tar: ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_XXL_JOB_MYSQL_IMAGE}" "${PLATFORM}")"
   echo "  MySQL target import: docker load -i ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_XXL_JOB_MYSQL_IMAGE}" "${PLATFORM}")"
+fi
+if [[ "${PACKAGE_LOBEHUB}" -eq 1 ]]; then
+  echo "  LobeHub verified artifacts: ${OUTPUT_DIR}/lobehub"
+fi
+if [[ "${PACKAGE_MODE}" == lobehub-only && "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
+  echo "  LobeHub offline zip: ${OUTPUT_DIR}/test-agent-lobehub-offline.zip"
+  echo "  LobeHub offline checksum: ${OUTPUT_DIR}/test-agent-lobehub-offline.zip.sha256"
 fi
 if [[ "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 \
   && ( "${PACKAGE_MODE}" == full || "${PACKAGE_MODE}" == zip-only ) ]]; then

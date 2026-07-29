@@ -57,6 +57,7 @@ Browser
 | `test-agent-configuration-management` | 应用定义只读消费、应用成员、代码库英文名与应用关联、已初始化引用资产库及已有应用源码历史的英文名/类型冻结、应用工作空间、个人 SSH key 和 Git 远端只读目录查询配置业务；通用参数数据库直读视图（`RepositoryCommonParameterValues`）、变量引用解析器、参数更新跨实例广播，以及只管理显式 SPI 条目的本机内存参数注册表/诊断响应。 |
 | `test-agent-scheduler` | 保留 `ScheduledTaskHandler`/context/result、Redis 全局锁与旧运行记录清理；不再启动 runner 或创建/执行 `USER_PLAN`，全部周期任务由 XXL adapter 调用业务 handler。 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界；当前承载 IT-Tools/OmniTools 版本化离线目录、193 项目录校验、热门 Top 10 和用户/工具 30 秒点击计数服务。 |
+| `test-agent-model-gateway` | 中立的企业模型目录投影、能力探测、OpenAI-compatible 请求准备/流式转发、上游错误脱敏和每日聚合调用；同时提供 OpenCode 内部代理复用的 URL/可信 Header/响应头安全支持，不承载 Controller 或 SQL。 |
 | `test-agent-xxl-job-admin-upstream` | 未做业务修改的 XXL-JOB Admin 3.4.2 源码与资源普通 JAR；只允许整体上游升级。 |
 | `test-agent-xxl-job-integration` | 进程内独立 Servlet Admin、独立 MySQL/Flyway/MyBatis、平台 advertised host 地址派生、由本机 Admin readiness 门控且不阻塞主服务的 executor、统一 handler adapter、一次性 SSO/JIT 用户、平台 session marker 校验和隔离 health。 |
 | `test-agent-api` | Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、含 `X-Test-Agent-Linux-Server-Id` 的 CORS 边界、RunEvent SSE 按生产 Java 流式转发入口、夜间时段/任务 HTTP 入口、工具盒子目录/点击 HTTP 入口、带 `permissionCount/PERMISSION` 的用户级会话运行态 HTTP/fetch SSE 入口、平台文件 WebSocket route/ticket/RPC 入口（含 workspace 原始文件、引用组合视图、Agent 配置文件及 Hub 制品/引用操作）、应用源码仓库/物化/打开/最近选择/持久化操作快照 HTTP 入口及独立一次性 ticket 进度 WebSocket、Agent & Skill Hub 浏览/发布/更新 HTTP 入口、应用引用资产库 7 个内部入口、工作空间创建进度轮询入口、manager 控制面入口、超级管理员运行管理 overview/指标历史、XXL 一次性 SSO 票据和显式 JVM 内存参数跨 Java 查询/刷新入口、trace Web 入口。 |
@@ -66,6 +67,23 @@ Browser
 | `test-agent-app` | 唯一启动入口和可部署服务包，强制 WebFlux 主上下文并装配 XXL Admin 子上下文/executor；只放启动、装配、profile、migration、health 和日志。 |
 
 新增后端文件前先按上表归属；没有合适工程时按业务边界新建 Maven module。
+
+### LobeHub 企业集成定位
+
+- `test-agent-domain`：只定义 LobeHub ticket/grant Redis 端口、模型目录/探测端口和每日聚合端口，不知道 HMAC、
+  HTTP、Redis key 或 MyBatis 行模型。
+- `test-agent-integration`：负责平台用户到一次性票据、部门规范化/摘要、虚拟邮箱、实例角色、HMAC 和模型委托的
+  业务编排；不实现 fork 内的用户或 Workspace 表。
+- `test-agent-configuration-management`：负责超级管理员维护供应商公开模型目录及触发固定样本能力探测。
+- `test-agent-model-gateway`：负责按已探测能力解析公开模型、改写上游模型 ID、流式代理、错误清洗和用量增量；
+  `OpenAiUpstreamSupport` 供既有 OpenCode 内部模型代理复用，不把 OpenCode Responses 转换搬入本模块。
+- `test-agent-persistence`：Redis 原子票据/nonce/委托，以及模型目录、探测和每日聚合的 MyBatis XML 实现与
+  Flyway；LobeHub 自身 ParadeDB 和 Workspace 数据不属于平台 persistence。
+- `test-agent-api`：只暴露当前用户签票、服务 HMAC 兑换/撤销、管理员模型目录/探测和固定模型网关端点。
+- `apps/agent-web`、`packages/backend-api`、`packages/shared-types`：分别承担入口/固定 launch、签票 client 与
+  短期 ticket DTO；票据不进入 Pinia、router state 或持久化。
+- 独立 LobeHub fork：负责 consume、Session、用户/部门 Workspace JIT、私有资源、企业模型适配器、离线开关与
+  Windows/Linux 设备策略，源码不放入当前仓库。
 
 ## 前端包职责
 

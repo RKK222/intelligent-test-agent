@@ -182,6 +182,10 @@ public class ApiLoggingAspect {
         for (Object arg : args) {
             if (arg == null) continue;
             if (arg instanceof ServerWebExchange) continue;
+            if (arg instanceof byte[] bytes) {
+                // 原始请求体可能包含一次性票据或委托，日志仅记录长度。
+                return "[binary:" + bytes.length + "]";
+            }
             if (arg instanceof FilePart) {
                 return "[file:" + ((FilePart) arg).filename() + "]";
             }

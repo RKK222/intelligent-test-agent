@@ -1247,3 +1247,22 @@
   - TDD 红测准确复现跨会话泄漏，最小修复后组件测试 143 passed / 1 skipped；前端全量 104 files / 1699 passed / 1 skipped，全 workspace typecheck 和生产 build 通过。
 - Result:
   - 跨会话错误展示已隔离；未修改 API、RunEvent、数据库、后端、安全、环境配置、generated SDK 或 OpenCode 源码。
+
+### 2026-07-30 - 集成 LobeHub 企业通用问答入口与模型网关
+
+- Why:
+  - 平台需要以 LobeHub OSS `v2.2.11` 作为测试和代码分析以外的通用聊天/问答入口，复用既有平台认证与模型供应商，并按规范化后的 `department` 名称聚合部门 Workspace。
+  - 企业现场完全离线且继续使用纯 HTTP，需要用一次性表单票据代替跨域读取 `sessionStorage`，并把浏览器会话、模型委托、Redis 前缀、独立数据库和对象存储边界固化为可验证部署合同。
+- What:
+  - 新增平台 SSO 换票、HMAC 服务兑换和委托撤销接口：票据与委托只在 Redis 保存 SHA-256 摘要，票据 60 秒且 Lua 原子消费，nonce 防重放，用户状态在签发及模型调用时重新校验；前端“通用问答”同步打开空白页后以隐藏表单 POST，票据不进入 URL、浏览器存储或日志。
+  - 新建中立 `test-agent-model-gateway` 模块，复用既有供应商解析、密钥/UCID 注入、流式转发和错误脱敏；增加平台模型目录、能力探测、九类 OpenAI 兼容端点和按日聚合用量，现有 OpenCode proxy 契约保持不变。
+  - 新增 `V20260730090000__add_lobehub_model_gateway.sql` 及 MyBatis XML，保存供应商模型目录、探测结果和每日聚合；Redis 继续使用 DB 0，但平台 SSO 固定 `test-agent:lobehub-sso:*`，LobeHub app 固定 `lobehub:app:*`。
+  - 扩展企业离线封包、安装、systemd/Docker、Nginx、Redis ACL、ParadeDB、RustFS、版本锁、SBOM/审批资源和配置校验合同，支持全量及 LobeHub-only 包；同步模块 README、HTTP API、事件、架构、安全、数据库、前后端和部署文档。
+- How:
+  - 按 TDD 覆盖票据过期/重放、HMAC/nonce、部门归一化、委托轮换/撤销、动态模型目录、错误脱敏、SSE 中断及 Netty buffer 释放、MyBatis H2/PostgreSQL 和真实 Redis 原子消费/前缀隔离；关系型 SQL 全部落在 MyBatis XML，未新增 JDBC Repository SQL。
+  - 后端最终执行带 Byte Buddy agent 的根目录 `mvn clean test` 完整通过；新增 PostgreSQL Testcontainers 2/2、Redis 5 集成 1/1 均 0 skipped，生产 `mvn package -DskipTests` 通过。首轮全量仅命中既有 `RunRuntimeLossConvergenceSchedulerTest` 一秒时序抖动，隔离 5/5 与最终 clean 全量均通过。
+  - 前端全量为 105 files / 1715 passed / 1 skipped，workspace typecheck 和生产 build 通过；离线包合同测试、三份 Shell 语法、`git diff --check`、冲突标记和敏感文件范围检查通过。
+- Result:
+  - 当前仓库的平台侧认证、模型网关、前端入口、数据库和离线部署合同已闭环；API 新增且已同步文档，未新增 RunEvent/SSE 事件类型。性能数据只做按日聚合，不保存 prompt、回答、UCID、原始错误或逐请求 trace。
+  - LobeHub fork 本体、部门 Workspace JIT、企业模型 UI/服务端适配、Windows 签名客户端和 Linux 真实沙箱不在本仓库，必须按版本/摘要合同外部构建并完成现场验收；在这些产物和目标环境 Flyway history 未核验前保持 `LOBEHUB_ENABLED=false`。
+  - 纯 HTTP 的同网段窃听与会话劫持风险仍存在，现阶段仅由网络隔离、一次性票据、短会话、委托 scope 和轮换降低；TLS 仍是后续升级项。未修改 `.env.local`、generated SDK 或 OpenCode 上游源码。

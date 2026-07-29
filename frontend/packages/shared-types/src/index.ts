@@ -1428,6 +1428,13 @@ export type XxlJobSsoTicket = {
   formAction: string;
 };
 
+/** 平台向独立 LobeHub 域名交接登录的一次性隐藏表单票据。 */
+export type LobehubSsoTicket = {
+  ticket: string;
+  expiresAt: string;
+  consumeUrl: string;
+};
+
 // ---- 定时任务管理类型 ----
 
 export type SchedulerRunStatus =
@@ -1655,6 +1662,49 @@ export type InternalModelProviderConfig = {
   tokenConfigured?: boolean;
   createdAt?: string;
   updatedAt?: string;
+};
+
+export type InternalModelCapability =
+  | "CHAT"
+  | "TOOLS"
+  | "VISION"
+  | "REASONING"
+  | "EMBEDDING"
+  | "RERANK"
+  | "IMAGE"
+  | "SPEECH"
+  | "TRANSCRIPTION";
+
+/** 超级管理员维护的公开模型 ID 与上游模型映射。 */
+export type InternalModelProviderModel = {
+  providerId: string;
+  modelId: string;
+  upstreamModelId: string;
+  displayName: string;
+  contextLimit?: number | null;
+  enabled: boolean;
+  declaredCapabilities: InternalModelCapability[];
+  probedCapabilities: InternalModelCapability[];
+  lastProbedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type InternalModelProviderModelUpdatePayload = {
+  models: Array<{
+    modelId: string;
+    upstreamModelId: string;
+    displayName: string;
+    contextLimit?: number | null;
+    enabled?: boolean;
+    capabilities: InternalModelCapability[];
+  }>;
+};
+
+export type InternalModelCapabilityProbeResult = {
+  capability: InternalModelCapability;
+  succeeded: boolean;
+  probedAt: string;
 };
 
 export type InternalModelTokenDefinition = {

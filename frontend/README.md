@@ -74,6 +74,15 @@ packages/shared-types
 
 `apps/agent-web` 在“编辑器”后为所有登录用户提供工具盒子活动栏入口和受保护 `/toolbox` 路由。工具盒子进入时保存并隐藏左右面板和底部抽屉，退出、浏览器前进/后退时精确恢复原布局；页面移除占空间的顶部 Hero，只保留屏幕阅读器标题，并从 `packages/backend-api` 读取 193 项离线目录。搜索、来源和 14 个固定分类标签组成吸顶控制区；分类数字随搜索词和来源实时联动，不受当前分类选择影响，移动端标签保持单行横向滚动。热门区仍展示正点击 Top 10。每张卡片是带 `target="_blank"`、`rel="noopener noreferrer"` 的原生具体工具链接，普通点击和中键会异步上报，失败不阻断打开或显示干扰提示。本地 Vite 默认把两个工具前缀分别代理到 `127.0.0.1:18120/18121` 并剥离公开前缀，套件根路径返回 `/toolbox`，因此使用 `restart-dev-services.sh` 时直接访问 3000 端口即可联调具体工具。
 
+### LobeHub 通用问答
+
+工作台 activity rail 的“通用问答”只承担安全登录交接，不嵌入或复制 LobeHub UI。点击处理器同步创建带
+`noopener` 语义的空白标签，再由 `packages/backend-api` 使用现有 Bearer Token 申请一次性票据，并向后端返回的
+固定 `consumeUrl` 创建隐藏表单 POST；ticket 不进入 URL、Pinia、router、Web Storage 或原始交换日志。
+
+独立聊天域名回到平台固定 `/lobehub/launch` 时，router 先复用现有登录保护；已有平台登录态会在当前标签自动
+换票，未登录则完成统一认证后恢复固定路由。前端不接收 return URL，也不尝试读取跨域 LobeHub Cookie。
+
 ## 本地命令
 
 ```bash

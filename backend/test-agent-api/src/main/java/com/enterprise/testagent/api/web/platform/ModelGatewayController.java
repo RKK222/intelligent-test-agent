@@ -1,0 +1,157 @@
+package com.enterprise.testagent.api.web.platform;
+
+import com.enterprise.testagent.api.web.common.AuthWebSupport;
+import com.enterprise.testagent.api.web.common.RuntimeApiSupport;
+import com.enterprise.testagent.common.error.ErrorCode;
+import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.integration.lobehub.LobehubModelIdentity;
+import com.enterprise.testagent.integration.lobehub.LobehubSsoService;
+import com.enterprise.testagent.model.gateway.ModelGatewayCaller;
+import com.enterprise.testagent.model.gateway.ModelGatewayCatalogService;
+import com.enterprise.testagent.model.gateway.ModelGatewayForwarder;
+import com.enterprise.testagent.model.gateway.ModelGatewayModelView;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import org.springframework.core.io.buffer.DataBufferLimitException;
+import org.springframework.core.io.buffer.DataBufferUtils;
+import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ServerWebExchange;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
+
+/** 仅供 LobeHub 服务端通过用户模型委托调用的 OpenAI-compatible 企业模型入口。 */
+@RestController
+public class ModelGatewayController {
+
+    public static final String BASE_PATH = "/api/internal/platform/model-gateway/v1";
+    public static final String MODELS_PATH = BASE_PATH + "/models";
+    static final int MAX_JSON_REQUEST_BODY_BYTES = 16 * 1024 * 1024;
+
+    private final LobehubSsoService ssoService;
+    private final ModelGatewayCatalogService catalogService;
+    private final ModelGatewayForwarder forwardingService;
+
+    public ModelGatewayController(
+            LobehubSsoService ssoService,
+            ModelGatewayCatalogService catalogService,
+            ModelGatewayForwarder forwardingService) {
+        this.ssoService = Objects.requireNonNull(ssoService);
+        this.catalogService = Objects.requireNonNull(catalogService);
+        this.forwardingService = Objects.requireNonNull(forwardingService);
+    }
+
+    /** 返回已启用且能力探测成功的动态目录，不暴露内部供应商路由。 */
+    @GetMapping(MODELS_PATH)
+    public Mono<OpenAiModelList> models(ServerWebExchange exchange) {
+        return Mono.fromCallable(() -> {
+                    authenticate(exchange);
+                    List<OpenAiModel> models = catalogService.listModels().stream()
+                            .map(ModelGatewayController::toOpenAiModel)
+                            .toList();
+                    return new OpenAiModelList("list", models);
+                })
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /** JSON 模态统一使用公开模型 ID；委托鉴权和目录快照均先于请求体聚合。 */
+    @PostMapping(path = {
+            BASE_PATH + "/chat/completions",
+            BASE_PATH + "/responses",
+            BASE_PATH + "/embeddings",
+            BASE_PATH + "/rerank",
+            BASE_PATH + "/images/generations",
+            BASE_PATH + "/audio/speech"
+    }, consumes = MediaType.APPLICATION_JSON_VALUE)
+    public Mono<Void> proxyJson(ServerWebExchange exchange) {
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        return Mono.fromCallable(() -> authenticate(exchange))
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMap(identity -> {
+                    long length = exchange.getRequest().getHeaders().getContentLength();
+                    if (length > MAX_JSON_REQUEST_BODY_BYTES) {
+                        return Mono.error(payloadTooLarge());
+                    }
+                    return readBody(exchange)
+                            .flatMap(body -> Mono.fromCallable(() -> forwardingService.prepare(exchange, body))
+                                    .subscribeOn(Schedulers.boundedElastic()))
+                            .flatMap(prepared -> forwardingService.forward(
+                                    exchange,
+                                    prepared,
+                                    new ModelGatewayCaller(identity.userId(), identity.unifiedAuthId(), "lobehub"),
+                                    traceId));
+                });
+    }
+
+    /** multipart 由 WebFlux 写入受限临时文件后流式转发，平台不持久化音频内容。 */
+    @PostMapping(path = BASE_PATH + "/audio/transcriptions", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Mono<Void> proxyTranscription(ServerWebExchange exchange) {
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        return Mono.fromCallable(() -> authenticate(exchange))
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMap(identity -> exchange.getMultipartData()
+                        .flatMap(parts -> Mono.fromCallable(() -> forwardingService.prepareMultipart(exchange, parts))
+                                .subscribeOn(Schedulers.boundedElastic()))
+                        .flatMap(prepared -> forwardingService.forwardMultipart(
+                                exchange,
+                                prepared,
+                                new ModelGatewayCaller(identity.userId(), identity.unifiedAuthId(), "lobehub"),
+                                traceId)));
+    }
+
+    private LobehubModelIdentity authenticate(ServerWebExchange exchange) {
+        return ssoService.authenticateModelGrant(AuthWebSupport.extractBearerToken(exchange));
+    }
+
+    private Mono<byte[]> readBody(ServerWebExchange exchange) {
+        return DataBufferUtils.join(exchange.getRequest().getBody(), MAX_JSON_REQUEST_BODY_BYTES)
+                .map(buffer -> {
+                    try {
+                        byte[] body = new byte[buffer.readableByteCount()];
+                        buffer.read(body);
+                        return body;
+                    } finally {
+                        DataBufferUtils.release(buffer);
+                    }
+                })
+                .onErrorMap(DataBufferLimitException.class, ignored -> payloadTooLarge())
+                .defaultIfEmpty(new byte[0]);
+    }
+
+    private PlatformException payloadTooLarge() {
+        return new PlatformException(
+                ErrorCode.PAYLOAD_TOO_LARGE,
+                "企业模型请求体超过 16 MiB 上限",
+                Map.of("maxBytes", MAX_JSON_REQUEST_BODY_BYTES));
+    }
+
+    private static OpenAiModel toOpenAiModel(ModelGatewayModelView model) {
+        return new OpenAiModel(
+                model.id(),
+                "model",
+                0L,
+                "enterprise",
+                model.displayName(),
+                model.contextLimit(),
+                model.capabilities().stream().map(capability -> capability.name().toLowerCase()).sorted().toList());
+    }
+
+    /** OpenAI 模型目录外壳，保持企业适配器可直接消费。 */
+    public record OpenAiModelList(String object, List<OpenAiModel> data) {
+    }
+
+    /** providerId 永不进入外部模型对象。 */
+    public record OpenAiModel(
+            String id,
+            String object,
+            long created,
+            @JsonProperty("owned_by") String ownedBy,
+            String name,
+            @JsonProperty("context_window") Long contextWindow,
+            List<String> capabilities) {
+    }
+}

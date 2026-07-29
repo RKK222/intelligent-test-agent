@@ -145,6 +145,17 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 
 `tests/toolbox-panel.test.ts` 覆盖 14 个标签常驻、数量联动、分类过滤不改变计数、零数量状态、隐藏标题、搜索/筛选、热门与零点击空态、原生新标签属性、普通/中键上报和失败不阻断；`tests/toolbox-navigation.test.ts` 与 `tests/login-redirect.test.ts` 覆盖沉浸式布局状态机和 `/toolbox` 登录回跳，`tests/toolbox-dev-proxy.test.ts` 锁定本地代理目标、路径改写与根路径守卫，`tests/workbench.spec.ts` 真实桌面 Chromium 场景覆盖普通用户入口、左右面板恢复、前进/后退和深链接刷新。
 
+### LobeHub 通用问答
+
+- activity rail 的入口对已登录用户可见；`launchLobehubInNewTab` 必须在 click 同步阶段先打开空白标签，避免
+  异步签票被浏览器拦截，并在失败时关闭该标签。
+- `submitLobehubTicket` 只接受 HTTP(S)、无 userinfo/query/fragment 且 path 精确为
+  `/api/auth/platform/consume` 的后端 `consumeUrl`，随后用临时隐藏表单 POST `ticket` 并立即清理 DOM。
+- `/lobehub/launch` 是聊天域名会话失效时唯一回跳入口；登录 guard 会保存这一固定路径，认证完成后在当前标签
+  换票。页面不读取 return URL，也不检查或同步 LobeHub Session。
+- `tests/lobehub-launch.test.ts` 覆盖同步开窗、隐藏 POST、固定 consume path、无 URL/存储泄漏和失败清理；
+  `tests/login-redirect.test.ts` 覆盖未登录 launch 的认证恢复。
+
 ## 禁止事项
 
 - 不直接拼接后端 URL。

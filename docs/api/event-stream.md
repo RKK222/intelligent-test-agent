@@ -824,6 +824,13 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 既有对话事件映射，因此前端可以展示 `test-execution-ui` 子 agent 卡片，但不把外部执行步骤冒充
 当前平台 RunEvent。后续若要实时转发外部浏览器步骤，必须单独设计稳定、可恢复、带归属的事件契约。
 
+## LobeHub 不新增平台事件
+
+LobeHub 登录票据签发、HMAC 兑换/撤销、模型目录维护与能力探测都是普通 HTTP API，不创建平台 Session、Run
+或 RunEvent。模型网关的 `text/event-stream` 只是上游 OpenAI-compatible 响应的逐块转发，不进入
+`event-stream-client`，不支持 `Last-Event-ID`，也不得映射或复用任何平台事件名。LobeHub 自身对话、知识索引
+和 Workspace 事件保留在独立 fork 与独立数据库中。
+
 ## 兼容性
 
 1. 新增事件字段必须保持旧前端可忽略。

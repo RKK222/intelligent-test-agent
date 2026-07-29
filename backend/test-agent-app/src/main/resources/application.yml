@@ -39,6 +39,12 @@ spring:
       port: ${TEST_AGENT_REDIS_PORT:6379}
       password: ${TEST_AGENT_REDIS_PASSWORD:}
       timeout: ${TEST_AGENT_REDIS_TIMEOUT:1s}
+  webflux:
+    multipart:
+      max-in-memory-size: 256KB
+      max-disk-usage-per-part: ${TEST_AGENT_MODEL_GATEWAY_MAX_MULTIPART_PART_BYTES:100MB}
+      max-parts: 32
+      file-storage-directory: ${TEST_AGENT_MODEL_GATEWAY_MULTIPART_DIRECTORY:${java.io.tmpdir}/testagent-model-gateway}
 
 mybatis:
   mapper-locations: classpath*:mybatis/**/*.xml
@@ -65,6 +71,13 @@ management:
       enabled: true
 
 test-agent:
+  lobehub:
+    hmac-secret: ${TEST_AGENT_LOBEHUB_HMAC_SECRET:}
+    client-id: ${TEST_AGENT_LOBEHUB_CLIENT_ID:lobehub}
+    ticket-ttl: ${TEST_AGENT_LOBEHUB_TICKET_TTL:60s}
+    grant-ttl: ${TEST_AGENT_LOBEHUB_GRANT_TTL:30d}
+    hmac-clock-skew: ${TEST_AGENT_LOBEHUB_HMAC_CLOCK_SKEW:60s}
+    nonce-ttl: ${TEST_AGENT_LOBEHUB_NONCE_TTL:120s}
   third-party-api:
     base-url: http://tcds-prod.sdc.icbc
   deployment:

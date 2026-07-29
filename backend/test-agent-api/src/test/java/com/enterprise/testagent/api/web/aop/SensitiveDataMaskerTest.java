@@ -91,6 +91,17 @@ class SensitiveDataMaskerTest {
         }
 
         @Test
+        @DisplayName("脱敏 LobeHub 模型委托")
+        void mask_lobehubModelGrant() {
+            String input = "{\"modelGrant\":\"server-side-grant\",\"department\":\"研发一部\"}";
+
+            String result = SensitiveDataMasker.mask(input);
+
+            assertTrue(result.contains("\"modelGrant\":\"***\""));
+            assertFalse(result.contains("server-side-grant"));
+        }
+
+        @Test
         @DisplayName("脱敏 JVM 通用参数源值和内存值")
         void mask_commonParameterMemoryValues() {
             String input = "{\"sourceValue\":\"database-secret-like-value\",\"memoryValue\":\"effective-value\"}";

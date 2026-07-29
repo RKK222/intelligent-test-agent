@@ -674,4 +674,33 @@ Tool 每次执行先使用 OpenCode 进程既有的 `TEST_AGENT_PLATFORM_BASE_UR
 直接输入，或由父 Agent 从用户明确指定路径读取后，作为每次 `ui_test_execute` 请求的必填
 `testEnvironment` 传入；部署配置不提供默认被测环境，缺失时必须中断执行。
 
+## LobeHub 平台侧配置
+
+LobeHub 使用独立聊天服务，但票据签发、兑换/撤销和企业模型网关都由当前 Java 后端提供。平台侧 secret 只写
+`/data/testagent/config/backend.env` 的安全引用，模板见 `deploy/internal/backend.env.example`：
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `TEST_AGENT_LOBEHUB_HMAC_SECRET` | 空 | 与 fork 相同的服务 HMAC 密钥，至少 32 字节；缺失时 HMAC 入口失败关闭。 |
+| `TEST_AGENT_LOBEHUB_CLIENT_ID` | `lobehub` | 固定委托 client，不允许请求方覆盖。 |
+| `TEST_AGENT_LOBEHUB_TICKET_TTL` | `60s` | 必须大于 0 且不超过 60 秒；一次性票据也不会越过平台会话。 |
+| `TEST_AGENT_LOBEHUB_GRANT_TTL` | `30d` | 必须大于 0 且不超过 30 天；服务端 opaque 模型委托上限。 |
+| `TEST_AGENT_LOBEHUB_HMAC_CLOCK_SKEW` | `60s` | 必须大于 0 且不超过 60 秒；timestamp 容忍窗口。 |
+| `TEST_AGENT_LOBEHUB_NONCE_TTL` | `120s` | 必须至少 120 秒，覆盖允许的前后时钟偏差，避免签名仍有效时 nonce 已过期。 |
+| `TEST_AGENT_MODEL_GATEWAY_MULTIPART_DIRECTORY` | Java 临时目录下的隔离子目录 | transcription 临时 part 目录；现场固定为 `/data/testagent/tmp/model-gateway`。 |
+| `TEST_AGENT_MODEL_GATEWAY_MAX_MULTIPART_PART_BYTES` | `100MB` | 单 multipart part 硬上限。 |
+
+功能开关、固定聊天基址、虚拟邮箱域和唯一 owner 统一维护在 `common_parameters` 的
+`LOBEHUB_ENABLED/LOBEHUB_BASE_URL/LOBEHUB_SSO_EMAIL_DOMAIN/LOBEHUB_INITIAL_OWNER_UNIFIED_AUTH_ID`，不新增
+环境变量旁路。`LOBEHUB_ENABLED=true` 时，基址必须是无 user-info/query/fragment/额外 path 的固定 HTTP(S)
+origin，邮箱域不能仍为 `disabled.invalid`，owner 不能仍为 `NOT_CONFIGURED`；签发票据前会一次性校验这些条件，
+任一错误都不会在 Redis 留下可兑换票据。启用前必须确保所有 Java 使用同一 Redis、同一 HMAC secret 和相同公共参数。平台 SSO 使用
+`test-agent:lobehub-sso:*`，不得授予 LobeHub app ACL 用户访问该前缀。
+
+LobeHub 的公开模型目录关联现有 `internal_model_providers` 与 Token；它不改变 OpenCode 对话框继续从自身公共
+配置读取 `/api/model`、`/api/provider` 的兼容契约。现有 OpenCode 内部代理和新模型网关仅复用安全的目标 URL
+拼接、供应商 Token/UCID/trace 注入与响应头白名单，URL 与 Responses 转换行为保持不变。
+
+独立 ParadeDB、RustFS、Redis ACL、启动顺序、备份和回滚见 `docs/deployment/lobehub-offline.md`。外部 fork
+未通过准入与目标环境验收前，必须保持 `LOBEHUB_ENABLED=false`。
 Spring Boot 唯一 Flyway Bean 会在启动早期完成 migration；历史工具盒子版本的解析由 `DatabaseMigrationCompatibilityCustomizer` 在 Flyway validate 前按已执行 version/checksum 选择隔离资源，企业正式 `V20260728160800/-1966404877` 保持主 migration 原始字节，未知 checksum 失败关闭，不使用乱序迁移或 `repair`。固定 opencode node yml 配置已作废，应用不再从配置自动写入 `execution_nodes` 作为兼容 Run 路由来源。启用用户进程模型后，`BackendJavaProcessLifecycleRunner` 会在启动和拓扑变化时写入 `linux_servers`、`backend_java_processes`，并每 5 秒按 `linuxServerId` 写入 Redis Java 快照、服务器资源指标历史和 JVM 指标历史；`backendProcessId` 仅表示当前 Java 实例和拓扑连接字段，不再作为 Java 心跳或 JVM 历史的唯一键；`opencode-manager` WebSocket 注册会保留容器、manager 和连接持久拓扑，`managerHeartbeat` 每 5 秒经 WebSocket 写入 Redis manager 快照和容器资源指标历史，latest snapshot TTL 为 10 秒，历史指标保留近 48 小时。

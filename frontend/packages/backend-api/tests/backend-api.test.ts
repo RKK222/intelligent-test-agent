@@ -1278,6 +1278,79 @@ describe("backend-api", () => {
     expect(exchanges[0]?.responseText).not.toContain("one-time-secret");
   });
 
+  it("posts for a LobeHub handoff ticket without exposing it to the URL or raw observer", async () => {
+    const exchanges: Array<Record<string, unknown>> = [];
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: {
+        ticket: "lobehub-one-time-secret",
+        expiresAt: "2026-07-30T08:00:00Z",
+        consumeUrl: "http://chat.internal/api/auth/platform/consume"
+      }
+    }), { status: 200 }));
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "token_123",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      rawExchangeObserver: (exchange) => exchanges.push(exchange)
+    });
+
+    await expect(client.createLobehubSsoTicket()).resolves.toMatchObject({
+      ticket: "lobehub-one-time-secret",
+      consumeUrl: "http://chat.internal/api/auth/platform/consume"
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/lobehub-sso/tickets",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(String(fetcher.mock.calls[0]?.[0])).not.toContain("lobehub-one-time-secret");
+    expect(exchanges[0]?.responseText).toContain('"ticket":"[REDACTED]"');
+    expect(exchanges[0]?.responseText).not.toContain("lobehub-one-time-secret");
+  });
+
+  it("manages and probes the internal provider model catalog", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: [{
+          providerId: "provider/a",
+          modelId: "enterprise-chat",
+          upstreamModelId: "upstream-chat",
+          displayName: "企业对话",
+          enabled: true,
+          declaredCapabilities: ["CHAT", "TOOLS"],
+          probedCapabilities: ["CHAT"]
+        }]
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: []
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: { providerId: "provider/a", modelId: "enterprise-chat", capability: "CHAT", succeeded: true }
+      }), { status: 200 }));
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.getInternalModelProviderModels("provider/a")).resolves.toHaveLength(1);
+    await client.updateInternalModelProviderModels("provider/a", { models: [] });
+    await expect(client.probeInternalModelProviderModel("provider/a", "enterprise-chat", "CHAT"))
+      .resolves.toMatchObject({ succeeded: true });
+
+    expect(fetcher.mock.calls.map((call) => [String(call[0]), (call[1] as RequestInit)?.method])).toEqual([
+      ["http://api/api/internal/platform/configuration-management/internal-model-providers/provider%2Fa/models", undefined],
+      ["http://api/api/internal/platform/configuration-management/internal-model-providers/provider%2Fa/models", "PUT"],
+      ["http://api/api/internal/platform/configuration-management/internal-model-providers/provider%2Fa/models/enterprise-chat/probe", "POST"]
+    ]);
+    expect((fetcher.mock.calls[2]?.[1] as RequestInit).body).toBe(JSON.stringify({ capability: "CHAT" }));
+  });
+
   it("maps scheduler management APIs through platform URL", async () => {
     const taskPage = {
       items: [

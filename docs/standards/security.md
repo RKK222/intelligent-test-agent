@@ -204,6 +204,35 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 - “测试步骤”是唯一操作流程，“测试数据”和“预期结果”只作为输入与验证上下文。外部响应堆栈不得透传，状态查询不回显原始案例内容。
 - 执行报告使用 executionId 绑定路径，禁止接受任意 report path；报告接口与执行接口使用相同的受信任网络边界。
 
+## LobeHub 登录交接与模型委托安全边界
+
+- LobeHub 不读取平台页面的 `sessionStorage`。平台前端只能用现有 Bearer Token 申请一次性票据，再以隐藏表单
+  POST 到配置生成的固定聊天地址；票据禁止进入 URL、router、Web Storage、剪贴板、错误详情和日志。
+- 票据和模型委托均为至少 32 字节随机 opaque 值，Redis 只保存 SHA-256 摘要。票据默认 60 秒、一次性原子
+  消费；模型委托绑定用户、`lobehub` client 和 `model-gateway` scope，最长 30 天且重新兑换时原子轮换。
+- 安全时限只能收紧，不能通过部署配置放宽：ticket 必须为 `(0,60s]`、grant 为 `(0,30d]`、HMAC 时钟偏差为
+  `(0,60s]`，nonce 摘要必须至少保留 120 秒。无效配置在 Spring 绑定阶段失败，不能静默回退到不安全值。
+- 兑换与撤销必须对 timestamp、nonce、HTTP method、精确 path 和原始 body digest 的五行 canonical string 做
+  HMAC-SHA256。共享密钥至少 32 字节；平台限制默认 ±60 秒时钟偏差并原子占用 nonce，比较签名时使用常量时间。
+  不得先解析并重新序列化 JSON 后再验签。
+- API 日志只把票据交换原始 bytes 记为长度占位；字段脱敏必须覆盖 `ticket`、`modelGrant`、Authorization、
+  Cookie、password、secret 和 token。上游模型错误不得回显 URL、响应正文、密钥、prompt、回答、UCID 或堆栈。
+- 模型委托只允许 LobeHub 服务端用外部密钥加密持久化，浏览器、Desktop、CLI 和设备 broker 不得获得。
+  网关每次调用重新检查平台用户状态，并覆盖客户端 Authorization、供应商选择、UCID 和 trace header。
+- LobeHub Redis 使用独立 ACL 用户，key 与 pub/sub channel 均限制为 `lobehub:app:*`，并拒绝管理命令和平台
+  前缀；平台 SSO key 固定在 `test-agent:lobehub-sso:*`。RustFS bucket 必须私有，初始化任务必须显式撤销匿名访问。
+- `LOBEHUB_ENABLED=true` 不是绕过配置校验的开关：固定聊天 origin、虚拟邮箱域和唯一 owner 必须同时脱离
+  migration 占位值，平台才允许落票据。现场 `validate-config` 还必须核对 digest 镜像、secret 长度、离线开关、
+  Cookie/Session 契约和执行能力门禁，任一不满足都禁止 migration 或启动 app。
+- 完全离线部署必须在 UI 和服务端同时关闭公网搜索、SaaS Connector、BYOK、自定义 Base URL、遥测、在线更新、
+  Marketplace、CDN 与运行期下载。Windows 永久拒绝本地执行；Linux 沙箱未在目标主机通过真实边界验收时
+  fail closed；即使开启，也必须提供 root 所有、mode `0600` 且绑定当前发行版/内核的通过证据。
+- 当前企业现场纯 HTTP 会使表单票据、Session Cookie 和服务端委托暴露于同网段窃听与劫持风险。网络隔离、
+  短票据、HMAC、nonce、短 Session 和 scope 只能缓解，不能替代 TLS；该剩余风险必须进入上线审批。
+
+稳定交接契约和部署门禁见 `docs/architecture/lobehub-integration.md` 与
+`docs/deployment/lobehub-offline.md`。
+
 ## 安全变更文档
 
 鉴权、限流、CORS、密钥、日志脱敏变更必须同步 `docs/standards/security.md`、`docs/api/http-api.md` 和相关 README。

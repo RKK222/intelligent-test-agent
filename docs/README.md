@@ -24,6 +24,7 @@
 - `docs/architecture/module-map.md`：后端模块与前端包职责速查，按功能定位代码位置。
 - `docs/architecture/dependency-rules.md`：模块归属与依赖方向，新增文件前必读。
 - `docs/architecture/xxl-job-integration.md`：XXL-JOB 3.4.2 集成、SSO、数据库、executor 与夜间任务分发边界的单一事实源。
+- `docs/architecture/lobehub-integration.md`：LobeHub 平台票据、部门 Workspace JIT、企业模型适配和独立 fork 交付契约。
 - `docs/architecture/domain-models.md`：核心领域模型说明，Session/Run 等模型概念与关系。
 - `backend/test-agent-*/README.md`：各后端模块职责与依赖边界。
 - `frontend/packages/*/README.md`、`frontend/apps/agent-web/README.md`：各前端包职责。
@@ -47,6 +48,7 @@
 - `docs/deployment/codex-whitebox-mcp.md`：官方 Codex 0.145.0 MCP、企业 DeepSeek 路由、无审批夜间分析、原生参数风险、Linux 4.19 / Docker 18.09.7 预检与回滚。
 - `docs/deployment/frontend.md`：前端 Vue + Vite 生产构建与部署。
 - `docs/deployment/toolbox.md`：IT-Tools + OmniTools 的 193 项离线目录、派生源码、双后台共置容器、Nginx、增量发布与回滚。
+- `docs/deployment/lobehub-offline.md`：LobeHub/ParadeDB/RustFS 独立离线制品、安装、Redis ACL、启动、验收和回滚。
 - `deploy/internal/SINGLE-BACKEND.md`：企业内单 Java 后台 + 单 worker 离线部署。
 - `deploy/internal/MULTI-BACKEND.md`：企业内两个或更多 Java/worker 节点部署与跨节点验收。
 - `deploy/internal/REDIS-OFFLINE.md`：当前本地 Redis 7.4.9 的独立 linux/amd64 离线封包、企业 Redis 5.0 停写备份、升级验证与回滚。

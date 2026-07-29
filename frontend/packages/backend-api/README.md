@@ -34,6 +34,9 @@
 - 暴露当前用户 opencode 进程强状态、公共配置轻量消息闸门、弱健康、初始化和初始化进度查询方法：`getMyOpencodeProcess()`、`getMyOpencodeMessageGate()`、`getMyOpencodeProcessHealth({ linuxServerId, containerId, port })`、`initializeMyOpencodeProcess(operationId?)`、`getOpencodeProcessStartOperation(operationId)`，统一走默认 `opencode` 的 agent-scoped URL；消息闸门只读共享 rollout 状态，不触发 manager health，供已打开页面固定轮询并在当前用户旧实例 dispose 后开闸。状态响应透传头像菜单使用的 `serviceStatus`、稳定服务器身份 `linuxServerId` 与当前解析地址 `serviceAddress` 字段，弱健康参数必须来自最近一次强状态响应，旧后端缺字段时由上层前端兼容推断。未传 `operationId` 时初始化请求不发送 body，保持旧调用兼容。
 - 暴露超级管理员运行管理方法：`getOpencodeRuntimeManagementOverview(params)`、`getOpencodeRuntimeManagementUserProcesses(params)`、`getOpencodeRuntimeContainerMetrics(containerId, params)`、`getOpencodeRuntimeBackendServerMetrics(linuxServerId, params)`、`restartOpencodeRuntimeManagedProcess(containerId, port)`、`stopOpencodeRuntimeManagedProcess(containerId, port)` 和 `createServerTerminalTicket(linuxServerId, payload)`，统一走 `/api/internal/platform/opencode-runtime/management/...`，自动携带用户 Bearer Token；服务器终端 payload 使用 `SERVER@linuxServerId` 绑定当前确认的目标服务器。overview 透传 `managers[].managedProcesses[]` 供前端合并容器/manager 行并按 `ownership=BOUND/UNBOUND` 展开有主/无主 opencode server 明细；底部用户进程列表通过 `getOpencodeRuntimeManagementUserProcesses({ keyword, page, size })` 按用户名、`userId` 或统一认证号查询，并透传 `managerStatus`、`healthStatus`、`restartable` 区分未运行、健康失败和检查失败；进程重启/停止只按容器和端口调用后端管理命令 API，具体 Java 后端路由由后端根据容器所属服务器完成，组件层在命令成功或失败后都应刷新当前用户进程查询；后端 Java 指标历史以稳定 `linuxServerId` 为主查询键，旧 `backendProcessId` 方法已停止导出；后端指标响应透传服务器 CPU/load/内存/swap/磁盘、Java 进程 CPU/RSS/FD、JVM heap/non-heap/direct/mapped/GC/线程字段，字段均可空并保留旧字段回退；指标历史主查询参数使用 `windowMinutes` / `maxPoints`，`hours` 仅保留旧客户端兼容，窗口上限由后端校验。
 - 暴露 `createXxlJobSsoTicket()`：仅用于超级管理员进入同源 XXL iframe，POST `/api/internal/platform/xxl-job/sso-tickets` 并返回 `ticket/expiresAt/formAction`。旧 scheduler client 方法仅保留源码兼容，不得用于新页面，服务端会返回 410。
+- 暴露 `createLobehubSsoTicket()`：使用当前用户 Bearer Token POST
+  `/api/internal/platform/lobehub-sso/tickets`，只返回短期 `ticket/expiresAt/consumeUrl`。client 不缓存、不重试、
+  不拼接 consume 地址，也不提供浏览器持久化辅助方法。
 - 可选 `rawExchangeObserver` 必须递归脱敏 ticket、token、cookie、password、secret 和 session digest，票据不得进入 URL 或调试面板。
 - 暴露当前用户定时执行方法：`getNightExecutionSlots`、`createNightExecutionTask`、`listNightExecutionTasks`、`adjustNightExecutionTask`、`cancelNightExecutionTask`、`dismissNightExecutionTask`，统一走 `/api/internal/platform/opencode-runtime/night-execution`；创建 payload 可复用 Run 的 prompt/parts/agent/model/command 输入并可选携带 `NIGHT_WINDOW/ADMIN_CUSTOM`，省略模式保持旧夜间请求，调整 payload 仍只发送 `slotStart`。查询响应只返回安全预览。
 - 暴露 Run 整体回复反馈方法：`putRunFeedback`、`getMyRunFeedback`、`queryMyRunFeedbacks`，历史批量查询每次最多 100 个 Run；旧消息反馈方法保留过渡兼容，均不提交 prompt/assistant 原文。
@@ -65,4 +68,7 @@ corepack pnpm --filter @test-agent/backend-api typecheck
 corepack pnpm test -- backend-api
 ```
 
-`backend-api.test.ts` 覆盖动态路由 ID 空值不发送、绑定请求携带修剪后的 `X-Test-Agent-Linux-Server-Id`、普通控制面不携带，OpenCode V2 模型 limit 与 Provider `all` envelope 映射，用户单个/批量删除与 TCDS 同步的方法/路径/body，以及 7 个引用资产端点的 app/repository/path 编码、初始化/切换 body、无 body同步/核验和响应透传、组合视图 list/read 的 locator/稳定身份/只读来源/局部 warning 映射、通用参数内存值四个接口的 URL 编码与 HTTP 方法；`night-execution.test.ts` 覆盖旧夜间请求不带模式、自定义请求携带 `ADMIN_CUSTOM`，以及查询/改期/取消/关闭的 URL、查询参数与请求体。
+`backend-api.test.ts` 覆盖 LobeHub 签票方法/路径/无请求体、动态路由 ID 空值不发送、绑定请求携带修剪后的
+`X-Test-Agent-Linux-Server-Id`、普通控制面不携带，OpenCode V2 模型 limit 与 Provider `all` envelope 映射，
+用户单个/批量删除与 TCDS 同步的方法/路径/body，以及引用资产端点和通用参数内存值接口；
+`night-execution.test.ts` 覆盖旧夜间请求不带模式、自定义请求携带 `ADMIN_CUSTOM`，以及查询/改期/取消/关闭。

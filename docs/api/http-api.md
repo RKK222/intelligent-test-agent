@@ -52,6 +52,9 @@
 | `/api/internal/platform/opencode-runtime/manager-backends` | 已作废，返回 `410 API_GONE`；运行管理请使用 `management/overview`。 |
 | `/api/internal/platform/opencode-runtime/management/overview` | 超级管理员只读运行管理入口，使用用户 JWT 且要求 `SUPER_ADMIN`。 |
 | `/api/internal/platform/xxl-job/sso-tickets` | 超级管理员进入同源 XXL iframe 前签发一次性票据，使用用户 JWT 且要求 `SUPER_ADMIN`。 |
+| `/api/internal/platform/lobehub-sso/tickets` | 当前登录用户签发 LobeHub 一次性隐藏表单票据。 |
+| `/api/internal/platform/lobehub-sso/tickets/redeem`、`/grants/revoke` | 仅 LobeHub 服务端以 timestamp/nonce/body digest/HMAC 调用。 |
+| `/api/internal/platform/model-gateway/v1/**` | 仅 LobeHub 服务端携带用户 opaque 模型委托调用。 |
 | `/api/internal/platform/scheduler-management/**` | 已作废，统一返回 `410 API_GONE`；周期任务在 XXL iframe 管理。 |
 | `/api/internal/platform/system-management` | 超级管理员用户管理入口，使用用户 JWT 且要求 `SUPER_ADMIN`。 |
 | `/api/public/...` | 其他系统调用平台的公开 API，当前预留；新增前必须完成鉴权、限流、安全和兼容性设计。 |
@@ -93,6 +96,8 @@
 | `analytics` | `/api/internal/platform/analytics/exceptions` | 无旧 URL |
 | `analytics` | `/api/internal/platform/analytics/export` | 无旧 URL |
 | `xxl-job` | `/api/internal/platform/xxl-job/sso-tickets` | 无旧 URL |
+| `integration/lobehub` | `/api/internal/platform/lobehub-sso/tickets`、`/tickets/redeem`、`/grants/revoke` | 无旧 URL |
+| `model-gateway` | `/api/internal/platform/model-gateway/v1/models`、`/chat/completions` 等固定端点 | 无旧 URL |
 | `scheduler-management` | `/api/internal/platform/scheduler-management/**` | 已作废，返回 `410 API_GONE` |
 | `system-management` | `/api/internal/platform/system-management/users` | 无旧 URL |
 | `system-management` | `/api/internal/platform/system-management/users/{userId}/roles` | 无旧 URL |
@@ -2979,6 +2984,159 @@ tool calls，工具结果转为 tool message。图片、文件、内置 Web 工�
 脱敏 `response.failed`。非 2xx 与非 SSE 仍沿用原代理的状态和正文透传，
 原 `/chat/completions` 转换行为保持不变。该端点仅供 Codex MCP 子进程使用，不新增前端接口、
 generated SDK 或 RunEvent。
+
+### LobeHub 登录交接 API
+
+平台和 LobeHub Session 相互独立。完整浏览器流程及 HMAC canonical string 见
+`docs/architecture/lobehub-integration.md`。
+
+#### 签发一次性票据
+
+`POST /api/internal/platform/lobehub-sso/tickets` 无请求体，使用当前平台用户 Bearer Token。成功使用统一
+`ApiResponse`：
+
+```json
+{
+  "data": {
+    "ticket": "43-char-base64url",
+    "expiresAt": "2026-07-30T08:00:00Z",
+    "consumeUrl": "http://chat.internal/api/auth/platform/consume"
+  },
+  "traceId": "trace_..."
+}
+```
+
+`ticket` 是 32 字节随机值，只能通过隐藏表单 POST；服务端 Redis 只保存 SHA-256 摘要。有效期默认 60 秒，
+且不会超过平台会话剩余时间。用户不存在/停用返回 `FORBIDDEN`，平台会话过期返回 `UNAUTHENTICATED`，部门
+为空返回 `VALIDATION_ERROR`，`LOBEHUB_ENABLED=false` 返回 `FORBIDDEN`。开关已启用但聊天基址、虚拟邮箱域
+或唯一 owner 仍缺失/为 migration 占位值时返回 `INTERNAL_ERROR`，且不会先保存票据。`consumeUrl` 只由固定
+公共参数生成，不接受 return URL。
+
+#### HMAC 兑换
+
+`POST /api/internal/platform/lobehub-sso/tickets/redeem` 请求体：
+
+```json
+{ "ticket": "opaque-one-time-ticket" }
+```
+
+必须携带 `X-LobeHub-Timestamp`、`X-LobeHub-Nonce`、`X-LobeHub-Signature`。签名无效、超出默认 ±60 秒、
+nonce 重放、票据过期或票据重放均返回 `401 UNAUTHENTICATED`，且不泄露哪一项失败。签名针对原始 body
+bytes，在 JSON 解析前完成。成功 `data`：
+
+```json
+{
+  "userId": "usr_...",
+  "unifiedAuthId": "AUTH001",
+  "username": "平台用户",
+  "email": "AUTH001@example.internal",
+  "department": "研发一部",
+  "departmentKey": "lowercase-sha256",
+  "instanceRole": "member",
+  "roles": ["USER"],
+  "modelGrant": "opaque-server-side-grant",
+  "grantExpiresAt": "2026-08-29T08:00:00Z"
+}
+```
+
+兑换会原子消费票据，并为同一用户轮换最长 30 天的 `lobehub/model-gateway` 委托。`modelGrant` 只能由
+LobeHub 服务端使用外部密钥加密保存；日志切面和原始交换观察器必须把 `ticket/modelGrant` 脱敏。
+
+#### 撤销模型委托
+
+`POST /api/internal/platform/lobehub-sso/grants/revoke` 使用相同 HMAC 头，请求：
+
+```json
+{ "modelGrant": "opaque-server-side-grant" }
+```
+
+成功 `data` 为 `{ "revoked": true }`，不存在的委托也幂等成功。空委托返回 `VALIDATION_ERROR`；签名或 nonce
+无效返回 `UNAUTHENTICATED`。LobeHub 显式退出、设备撤销或管理员操作调用该接口；平台退出不调用它。
+
+三个接口都生成/透传 `X-Trace-Id` 并使用统一错误 envelope。兑换和撤销路径由通用平台 Token filter 精确
+放行，Controller 内的 HMAC 是唯一服务鉴权；其它路径不获得该例外。
+
+### 内部供应商公开模型目录 API
+
+以下接口全部要求平台用户 Bearer Token 和 `SUPER_ADMIN`：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/api/internal/platform/configuration-management/internal-model-providers/{providerId}/models` | 查询该供应商公开模型、声明能力和已探测能力。 |
+| `PUT` | 同上 | 覆盖目录；任何变更都会删除该供应商旧探测结果。 |
+| `POST` | `.../{providerId}/models/{modelId}/probe` | 使用固定非敏感样本真实探测一项声明能力。 |
+
+PUT 请求：
+
+```json
+{
+  "models": [
+    {
+      "modelId": "enterprise-chat",
+      "upstreamModelId": "provider-model-id",
+      "displayName": "企业对话",
+      "contextLimit": 128000,
+      "enabled": true,
+      "capabilities": ["CHAT", "TOOLS", "VISION", "REASONING"]
+    }
+  ]
+}
+```
+
+`modelId` 是跨供应商全局唯一公开 ID；`upstreamModelId` 只在网关内使用。能力固定为
+`CHAT/TOOLS/VISION/REASONING/EMBEDDING/RERANK/IMAGE/SPEECH/TRANSCRIPTION`。模型至少声明一项能力，
+`contextLimit` 为空或正数；`providerId` 最长 128 字符，`modelId/upstreamModelId/displayName` 各最长 256
+字符。重复公开 ID 返回 `CONFLICT`，非法字段返回 `VALIDATION_ERROR`。
+
+探测请求为 `{ "capability": "CHAT" }`；网络、超时或非 2xx 不回显上游错误，而是以成功 envelope 返回
+`{capability,succeeded:false,probedAt}` 并保存最近结果。未启用或未声明能力返回 `VALIDATION_ERROR`。只有
+最近探测成功的能力能出现在模型网关目录并用于路由。
+
+### LobeHub 企业模型网关 API
+
+Base URL：`/api/internal/platform/model-gateway/v1`。所有请求使用
+`Authorization: Bearer {modelGrant}`；该委托由 LobeHub 服务端持有，浏览器和设备不得得到。网关每次调用
+重新检查委托 scope/client/过期和平台用户状态，不接受请求方选择供应商，忽略/覆盖客户端 Authorization、
+`X-Enterprise-Model-Provider`、`ucid` 和 trace header，并注入目录解析出的供应商 Token、当前用户
+`unifiedAuthId` 及平台 traceId。
+
+| 方法 | 路径 | 所需已探测能力 |
+|---|---|---|
+| `GET` | `/models` | 至少一项成功能力 |
+| `POST` | `/chat/completions` | `CHAT`；按请求额外要求 `TOOLS/VISION/REASONING` |
+| `POST` | `/responses` | `CHAT`；按请求额外要求 `TOOLS/VISION/REASONING` |
+| `POST` | `/embeddings` | `EMBEDDING` |
+| `POST` | `/rerank` | `RERANK` |
+| `POST` | `/images/generations` | `IMAGE` |
+| `POST` | `/audio/speech` | `SPEECH` |
+| `POST` | `/audio/transcriptions` | `TRANSCRIPTION` |
+
+`/models` 返回 OpenAI-compatible `{object:"list",data:[...]}`，模型项只含公开 `id`、显示名、
+`context_window`、成功 capabilities 和固定 `owned_by=enterprise`，不包含 providerId、上游 ID 或 Token。
+
+除 transcription 外，POST 请求体必须是 JSON 对象并含 textual `model`；上限 16 MiB。网关把公开模型 ID
+改写为上游 ID后流式转发。transcription 使用 multipart，必须包含 `model` 与 `file`，每个 part 上限
+100 MiB，临时文件目录由部署配置限定且不持久化。连接、响应头、首个响应 chunk 和相邻 chunk 空闲边界分别
+为 10/30/30/120 秒，不设置整体 SSE 生命周期超时；下游取消会取消上游订阅。
+
+上游非 2xx 保留 HTTP status，但丢弃原始正文并返回固定 JSON：
+
+```json
+{"error":{"type":"upstream_error","message":"企业模型供应商请求失败"}}
+```
+
+连接异常映射为统一 `OPENCODE_BAD_GATEWAY`，响应超时映射为 `OPENCODE_TIMEOUT`，不得包含供应商 URL、
+密钥、prompt、回答或原始错误。响应内容只在内存最多截取 1 MiB 以解析 usage；PostgreSQL 只按日期、client、
+用户、供应商、公开模型和端点原子累加请求/成功/失败、token 与耗时，不保存逐请求记录、UCID、traceId、
+prompt、回答或错误，也不实施配额。
+
+现有 OpenCode 内部代理 URL 和契约保持不变，但目标 URL 规范化、供应商 Token/UCID/trace 注入和安全响应头
+白名单已下沉复用 `test-agent-model-gateway`；OpenCode 的 `/responses` 转换仍留在原兼容入口。
+
+对应测试：`LobehubSsoApplicationServiceTest`、`LobehubHmacAuthenticatorTest`、
+`RedisLobehubSsoStoreTest`、`LobehubSsoControllerTest`、`InternalModelCatalogManagementControllerTest`、
+`ModelCapabilityProbeServiceTest`、`ModelGatewayForwardingServiceTest`、`ModelGatewayControllerTest`、
+`MyBatisModelGatewayRepositoryIntegrationTest` 和 PostgreSQL Testcontainers 并发测试。
 
 OpenCode 1.18.4 的 `/api/model`、`/api/provider` 即使配置了 `enabled_providers` 仍可能返回 Zen；平台不得据此重新引入数据库模型目录，而是通过上述实例级配置 GET 读取合并后的 Provider 白名单，再由前端按 Provider ID 同时过滤两个原生目录。白名单限制的是企业 Provider，不限制这些 Provider 内的模型数量。
 

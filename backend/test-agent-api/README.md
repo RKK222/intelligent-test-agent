@@ -59,6 +59,15 @@
 - Hub 正文由 `agent-skill-hub/HUB` 独立只读文件 ticket 获取；引用、取消引用与更新复用现有 `agent-config/WORKSPACE` ticket，并校验 `appAdmin`、绑定 workspace 和当前用户。目录和更新 HTTP 查询可携带个人运行 `targetWorkspaceId`；`referencedOnly` 返回当前应用引用清单，详情附带按状态收敛的引用方应用/工作空间。
 - Hub 不新增 SSE 或后端间文件 HTTP 代理；跨服务器引用始终由浏览器连接目标工作区所在 Java 的平台文件 WebSocket。
 
+### LobeHub 与企业模型入口
+
+- `LobehubSsoController` 为当前用户签票，并为 LobeHub 服务端提供精确 HMAC 兑换/撤销路径；兑换在 JSON parse
+  前读取有界原始 bytes 验签。只有这两个服务路径跳过通用平台 Token filter，其它路径不继承例外。
+- `InternalModelCatalogManagementController` 仅允许 `SUPER_ADMIN` 覆盖供应商模型目录和探测单项声明能力。
+- `ModelGatewayController` 只接受 Bearer 模型委托，提供 `/models` 和八个固定 OpenAI-compatible POST 端点；
+  JSON、SSE 和 multipart 转发都委托 `test-agent-model-gateway`，不在 Controller 解析供应商或访问 Repository。
+- API 日志对票据原始 bytes 只输出长度占位，并递归脱敏 `ticket/modelGrant`。LobeHub 模型流不创建 RunEvent。
+
 ## 允许依赖
 
 - `test-agent-common`。
@@ -71,6 +80,8 @@
 - `test-agent-configuration-management`。
 - `test-agent-scheduler`。
 - `test-agent-xxl-job-integration` 的票据服务接口。
+- `test-agent-integration` 的 LobeHub SSO 服务接口。
+- `test-agent-model-gateway` 的目录、探测与转发接口。
 - Spring WebFlux、Validation、Security。
 
 ## 禁止依赖
@@ -114,6 +125,8 @@
 - `AuthControllerRolesTest`、`ConfigurationManagementControllerTest` 覆盖认证响应 roles、`APP_ADMIN`/`SUPER_ADMIN` 鉴权、代码库英文名、版本库类型与部署模式 DTO、版本库类型/部署模式下拉接口、应用版本库远端树接口、工作空间创建进度轮询和 SSH key 不回显私钥。
 - `ApiTokenWebFilterTest`、`InMemoryRateLimitWebFilterTest`、`TraceIdWebFilterTest`、`GlobalExceptionHandlerTest`、`LegacyApiGoneWebFilterTest` 覆盖鉴权、限流、traceId、旧接口 410 和统一错误响应。
 - `InternalModelTokenManagementControllerTest` 覆盖 `SUPER_ADMIN` 鉴权、统一冲突错误和响应不泄露 Token；代理测试覆盖按 Provider ID 注入不同 Token、鉴权先于请求体聚合、`2 MiB` 定长及 chunked 上限和流式 JSON 完整性校验。`ApiLoggingAspectTest` / `ServiceLoggingAspectTest` / `WebSocketLoggingAspectTest` 覆盖 Controller、Service 与 WebSocket 日志切面在同步、响应式和错误路径下保留原调用语义；`SensitiveDataMaskerTest` 覆盖 `contextToken` 及内部模型 `authToken` 请求/响应字段脱敏。
+- `LobehubSsoControllerTest`、`InternalModelCatalogManagementControllerTest`、`ModelGatewayControllerTest` 和
+  `ApiLoggingSensitiveBodyTest` 覆盖身份边界、原始 body、固定端点、multipart、错误 envelope 与票据日志脱敏。
 
 ## 后续 AI 编码指引
 

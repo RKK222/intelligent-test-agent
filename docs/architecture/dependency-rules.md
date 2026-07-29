@@ -28,6 +28,8 @@ test-agent-api
   -> test-agent-configuration-management
   -> test-agent-scheduler
   -> test-agent-xxl-job-integration
+  -> test-agent-integration
+  -> test-agent-model-gateway
 
 test-agent-xxl-job-integration
   -> test-agent-common / test-agent-domain / test-agent-observability
@@ -68,6 +70,12 @@ test-agent-configuration-management
 
 test-agent-integration
   -> test-agent-common
+  -> test-agent-domain
+
+test-agent-model-gateway
+  -> test-agent-common
+  -> test-agent-domain
+  -> test-agent-observability
 
 test-agent-opencode-client
   -> test-agent-common
@@ -105,6 +113,12 @@ test-agent-event
 15. 涉及 opencode server 状态查询、健康探测、状态回写或 heartbeat 刷新时，不得在业务入口直接调用 `OpencodeProcessManagerGateway.checkHealth()` 并自行映射查询结果；必须复用 `OpencodeProcessStatusQueryService`。
 16. 禁止修改 `test-agent-xxl-job-admin-upstream` 的上游 Java/资源；平台 SSO、登录禁用、安全头、MySQL migration、executor 和 health 改造必须放在 `test-agent-xxl-job-integration`。
 17. XXL executor 注册地址、调度参数和 ROUND 路由不得绑定稳定 Linux 服务器；夜间扫描后的业务分发必须读取任务固化的 `target_linux_server_id`，并复用 `BackendJavaRouteResolver` 与 `BackendHttpForwarder` 调用目标 Java，不能把该目标改造成 executor affinity。
+18. `test-agent-model-gateway` 不得依赖 `test-agent-api`、`test-agent-persistence`、`test-agent-app` 或 generated SDK；
+    Controller 只做协议适配，不能重新实现模型解析、供应商 Header 注入、流式转发、错误清洗或用量聚合。
+19. LobeHub ticket、nonce 和 grant 只能通过 domain `LobehubSsoStore`；业务层不得直接拼 Redis key、执行 Lua 或
+    保存原始 opaque 值。LobeHub 独立数据库、Workspace JIT 和资源权限不能写入平台 persistence。
+20. LobeHub 浏览器入口不得读取跨域存储、把 ticket 放入 URL 或接受任意 return URL；模型网关不得接受客户端
+    供应商选择或把委托传给浏览器/设备。
 
 ## 业务工程归属
 
@@ -118,6 +132,11 @@ test-agent-event
 - 周期任务 Admin/executor/SSO/MySQL Flyway 与统一 handler adapter：`test-agent-xxl-job-integration`；未修改的上游代码只放 `test-agent-xxl-job-admin-upstream`。业务 handler 仍放所属业务模块。
 - `ScheduledTaskHandler`、`ScheduledTaskContext`、结果协议、Redis 锁和旧运行记录清理：`test-agent-scheduler`；不得恢复 PostgreSQL runner、`USER_PLAN` 服务或 scheduler worker 配置。
 - 非 opencode 的外部系统联动：`test-agent-integration`。
+- LobeHub 平台登录交接、部门身份映射和委托签发：`test-agent-integration`；fork 内 Session、Workspace 和私有
+  资源仍属于独立 fork。
+- 跨 LobeHub/OpenCode 可复用的模型解析、供应商密钥/可信 Header 注入、能力探测和 OpenAI-compatible 流式
+  代理：`test-agent-model-gateway`；管理员目录用例在 `test-agent-configuration-management`，HTTP 在
+  `test-agent-api`，SQL/Redis 在 `test-agent-persistence`。
 - Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、trace Web 入口：`test-agent-api`。
 - 启动、profile、migration、health、日志和运行装配：`test-agent-app`。
 - 平台 PostgreSQL 关系型 SQL：`test-agent-persistence` 的 MyBatis XML mapper；XXL 独立 MySQL 的平台扩展 SQL：`test-agent-xxl-job-integration` 的 MyBatis XML 与独立 Flyway location。存量 `Jdbc*Repository` 只保留迁移窗口，不承接新 SQL。
@@ -145,6 +164,9 @@ test-agent-event
 8. Phase 07 搜索只过滤已加载文件树的文件名；Phase 08 Diff 接受/拒绝只能通过平台 Run 级 API。
 9. 交互式 PTY 只能作为平台后端的受控 WebSocket 例外暴露；前端 terminal package 不得直连 opencode server、SSH、sidecar 或任意主机。
 10. XXL 管理页只允许同源 `/xxl-job-admin/` iframe；前端先经 `backend-api` 签发一次性票据，再以表单 POST，禁止把票据放入 URL、router 或持久存储。
+11. LobeHub 入口只允许先经 `backend-api` 使用平台 Bearer Token 签票，再由 `agent-web` 对服务端固定
+    `consumeUrl` 隐藏表单 POST；这是跨域登录交接，不是前端直连模型或 LobeHub API。禁止任意 return URL、
+    ticket 持久化或把模型委托交给浏览器。
 
 ## 文档要求
 

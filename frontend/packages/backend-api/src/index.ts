@@ -81,6 +81,10 @@ import type {
   GeneralParameterUpdatePayload,
   GitRepositoryAccess,
   InternalModelProviderManagementResponse,
+  InternalModelProviderModel,
+  InternalModelProviderModelUpdatePayload,
+  InternalModelCapability,
+  InternalModelCapabilityProbeResult,
   InternalModelProviderRefreshStatus,
   InternalModelProviderUpdatePayload,
   InternalModelTokenCreatePayload,
@@ -90,6 +94,7 @@ import type {
   InternalModelTokenUpdatePayload,
   LoginRequest,
   LoginResponse,
+  LobehubSsoTicket,
   ManagedApplication,
   ManagedWorkspaceRuntime,
   ModelInfo,
@@ -373,6 +378,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const opencodeRuntimeManagementBase = "/api/internal/platform/opencode-runtime/management";
   const schedulerManagementBase = "/api/internal/platform/scheduler-management";
   const xxlJobBase = "/api/internal/platform/xxl-job";
+  const lobehubSsoBase = "/api/internal/platform/lobehub-sso";
   const systemManagementBase = "/api/internal/platform/system-management";
   const toolboxBase = "/api/internal/platform/toolbox";
   const analyticsBase = "/api/internal/platform/analytics";
@@ -1942,6 +1948,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       requestCsv(`${analyticsBase}/export${query({ ...params, type })}`),
     createXxlJobSsoTicket: () =>
       request<XxlJobSsoTicket>(`${xxlJobBase}/sso-tickets`, { method: "POST" }),
+    createLobehubSsoTicket: () =>
+      request<LobehubSsoTicket>(`${lobehubSsoBase}/tickets`, { method: "POST" }),
     listScheduledTasks: (params: ScheduledTaskListParams = {}) =>
       request<PageResponse<ScheduledTaskManagementTask>>(
         `${schedulerManagementBase}/tasks${query({ page: params.page, size: params.size })}`
@@ -2008,6 +2016,23 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         method: "PUT",
         body: JSON.stringify(payload)
       }),
+    getInternalModelProviderModels: (providerId: string) =>
+      request<InternalModelProviderModel[]>(
+        `${configurationBase}/internal-model-providers/${encodeURIComponent(providerId)}/models`
+      ),
+    updateInternalModelProviderModels: (providerId: string, payload: InternalModelProviderModelUpdatePayload) =>
+      request<InternalModelProviderModel[]>(
+        `${configurationBase}/internal-model-providers/${encodeURIComponent(providerId)}/models`,
+        { method: "PUT", body: JSON.stringify(payload) }
+      ),
+    probeInternalModelProviderModel: (
+      providerId: string,
+      modelId: string,
+      capability: InternalModelCapability
+    ) => request<InternalModelCapabilityProbeResult>(
+      `${configurationBase}/internal-model-providers/${encodeURIComponent(providerId)}/models/${encodeURIComponent(modelId)}/probe`,
+      { method: "POST", body: JSON.stringify({ capability }) }
+    ),
     getInternalModelProviderRefreshStatus: () =>
       request<InternalModelProviderRefreshStatus>(`${configurationBase}/internal-model-providers/refresh-status`),
     refreshInternalModelProviders: () =>

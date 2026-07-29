@@ -65,7 +65,10 @@ Vite 构建产物为纯静态 SPA，用任意静态服务器托管 `apps/agent-w
 npx serve apps/agent-web/dist -l 3000
 ```
 
-或通过反向代理把静态资源指向 `dist/`、把 `/api` 转发到 `test-agent-app`。SPA 路由（`/`、`/toolbox`、`/s/:sessionId`）需配置 history fallback，所有非静态路径回退到 `dist/index.html`；两个 `/toolbox/apps/...` 前缀必须先代理到后台工具实例，不能被 history fallback 吞掉。生产监听端口由外部 Web server 决定。
+或通过反向代理把静态资源指向 `dist/`、把 `/api` 转发到 `test-agent-app`。SPA 路由（`/`、`/toolbox`、
+`/lobehub/launch`、`/s/:sessionId`）需配置 history fallback，所有非静态路径回退到 `dist/index.html`；两个
+`/toolbox/apps/...` 前缀必须先代理到后台工具实例，不能被 history fallback 吞掉。生产监听端口由外部 Web
+server 决定。
 
 ## 反向代理与 CORS
 
@@ -77,6 +80,11 @@ npx serve apps/agent-web/dist -l 3000
 - 多 Java 时，Nginx 可对 Admin 子端口负载均衡；所有节点必须共用 XXL MySQL 与 access token。iframe 登录 POST 与后续请求不依赖 ticket 重放，平台会话校验由共享 marker 完成。
 - SSE（`text/event-stream`）和 PTY WebSocket 升级路径需在反代层禁用缓冲、支持长连接和 `Upgrade` 头。
 - 浏览器报 `ERR_NAME_NOT_RESOLVED` 时应在浏览器所在终端检查 DNS；Nginx 配置不能修复客户端名称解析。DNS 只解析域名，不提供端口转换；外部入口使用 `9996`、实体 Nginx 使用 `80` 时，必须由企业网关或网络转发层明确承担端口映射。
+- `/lobehub/launch` 必须始终由平台 SPA origin 承载。它只在现有登录成功后申请新票据并对固定
+  `consumeUrl` 做当前标签隐藏表单 POST，不接受 return URL；聊天域名是独立 host，由
+  `deploy/internal/nginx/lobehub.conf.template` 代理，不把 LobeHub 页面并入平台静态构建。
+- 工作台“通用问答”在点击同步阶段先创建空白标签，异步签票成功后再对该标签 POST；浏览器必须允许用户点击
+  触发的新标签。失败时关闭空白标签并使用平台统一错误提示，ticket 不进入 router、Web Storage 或调试日志。
 
 ## 本地联调
 

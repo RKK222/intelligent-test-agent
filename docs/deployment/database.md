@@ -1154,6 +1154,41 @@ V18 及以前保留既有数字版本，已在共享或稳定数据库执行过�
 
 多台 Java 对同一套、已排好序的 migration 并发启动由 Flyway schema history 锁负责互斥，不是这里的问题；这里防的是不同开发者把较小的新版本晚合入，导致目标库已经执行更大版本后拒绝启动。
 
+## V20260730090000 LobeHub 企业模型目录与每日聚合
+
+`V20260730090000__add_lobehub_model_gateway.sql` 是开发期候选版本，创建以下平台 PostgreSQL 结构：
+
+| 表 | 口径与边界 |
+|---|---|
+| `internal_model_provider_models` | 关联现有 `internal_model_providers`，保存全局唯一公开模型 ID、仅网关可见的上游 ID、展示名、上下文限制、启用状态和九项声明能力。 |
+| `internal_model_provider_model_probes` | 按供应商、模型和能力覆盖保存最近一次成功/失败与时间；不保存固定探测输入、上游响应或原始错误。 |
+| `model_gateway_usage_daily` | 按日期、来源 client、用户、供应商、公开模型和端点原子累加请求/成功/失败、token 和总耗时；不保存逐请求、prompt、回答、UCID、traceId 或错误。 |
+
+关系型运行 SQL 全部位于 `InternalModelProviderModelMapper.xml` 和 `ModelGatewayUsageDailyMapper.xml`；能力探测
+使用 PostgreSQL `ON CONFLICT` 覆盖最近结果，每日聚合使用单条 upsert 增量，避免 JVM 先读后写造成并发丢失。
+`ai_model_configs` 保持历史兼容，不是 LobeHub 目录来源。
+
+同一 migration 只写入四个生产必需且默认禁用/不可用的公共参数：
+
+- `LOBEHUB_ENABLED=false`
+- `LOBEHUB_BASE_URL=http://127.0.0.1:3210`
+- `LOBEHUB_SSO_EMAIL_DOMAIN=disabled.invalid`
+- `LOBEHUB_INITIAL_OWNER_UNIFIED_AUTH_ID=NOT_CONFIGURED`
+
+HMAC、委托加密密钥、数据库密码和对象存储密钥不进入数据库 migration。票据、nonce 和模型委托是 Redis
+短期状态，也不创建关系型明细表。
+
+持久化测试先在 H2 PostgreSQL mode 覆盖完整 Flyway、目录替换、探测结果和聚合；
+`MyBatisModelGatewayRepositoryPostgresqlIntegrationTest` 使用 PostgreSQL 16 Testcontainers 模拟既有
+`V20260728210000` 基线升级到 HEAD，并以并发增量验证 upsert。没有可用 Docker 时该测试会显式 skip，不能把
+skip 当作正式发布验收。`RedisLobehubSsoStoreIntegrationTest` 另用真实 Redis 5.0.14 并发消费同一 ticket，
+验证只成功一次、nonce 防重放、grant 轮换/撤销、TTL 和全部 key 前缀；它不替代 fork 的 `lobehub:app:*`
+ACL/pubsub 全路径测试。正式合并/企业打包前仍必须读取每个目标环境的 `flyway_schema_history`，必要时只对
+尚未在任何共享库执行的候选版本重新编号，并完成“真实已部署基线 → 当前 HEAD”的 PostgreSQL 升级。
+
+LobeHub fork 使用独立 ParadeDB/PostgreSQL 17、独立账号、卷和自身 migration；平台 Flyway datasource 永远
+不得访问该库。详细安装和回滚见 `docs/deployment/lobehub-offline.md`。
+
 ## V20260628100000 通用参数修改日志表
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260628100000__add_common_parameter_change_logs.sql` 创建通用参数修改日志表，用于记录每次参数值修改的审计信息：

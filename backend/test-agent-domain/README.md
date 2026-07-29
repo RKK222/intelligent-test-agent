@@ -88,3 +88,14 @@
 新增业务概念、状态枚举、领域命令和值对象时改这里；如果需要访问数据库、HTTP 或 opencode server，应定义接口或模型后交给其他模块实现。
 Repository 端口只定义在 domain，具体 JDBC/Flyway 实现必须放在 `test-agent-persistence`。
 平台 Session ID 与远端 agent Session ID 不可混用；需要调用 agent 时应通过 domain 端口读取 `AgentSessionBinding`，并由业务模块选择 `AgentRuntime` 完成协议转换。
+
+## LobeHub 与模型网关领域端口
+
+- `LobehubSsoStore` 只表达一次性 ticket、nonce 和单用户模型 grant 的原子保存/消费/轮换/撤销；payload 只保存
+  用户、scope、client 和过期时间，不暴露 Redis key、Lua 或原始 opaque 值。
+- `InternalModelProviderModelRepository` 管理供应商公开模型、声明能力和最近探测结果；公开 `modelId` 跨供应商
+  唯一，`upstreamModelId` 只供模型网关解析。
+- `ModelGatewayUsageDailyRepository` 接受无正文的 `ModelGatewayUsageDelta`，只按稳定聚合维度累加计数、token
+  和耗时。
+
+LobeHub 自身用户、Session、部门 Workspace、资源与审计是独立 fork 的领域，不在本模块建模。

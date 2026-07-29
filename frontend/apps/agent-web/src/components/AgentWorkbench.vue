@@ -189,7 +189,8 @@ import {
   type WorkbenchCenterMode
 } from "./toolbox-navigation";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
-import { notifyFeedback } from "./notify";
+import { notifyError, notifyFeedback } from "./notify";
+import { launchLobehubInNewTab } from "./lobehub-launch";
 import { appendLatestRawOutputEntry, prepareRawOutputBody } from "./raw-output";
 import { formatBeijingDateTimeInput } from "../utils/night-execution-schedule";
 import { blobSha256Hex } from "../utils/sha256";
@@ -335,6 +336,19 @@ const isAppAdmin = computed(() =>
 const FIRST_LOGIN_GUIDE_STORAGE_VERSION = "v7";
 const PERSONAL_PULL_CONFIRM_STORAGE_VERSION = "v1";
 const firstLoginGuideActive = ref(true);
+const lobehubLaunching = ref(false);
+
+async function openLobehub() {
+  if (lobehubLaunching.value) return;
+  lobehubLaunching.value = true;
+  try {
+    await launchLobehubInNewTab(api);
+  } catch (error) {
+    notifyError("无法打开通用问答", error);
+  } finally {
+    lobehubLaunching.value = false;
+  }
+}
 
 function firstLoginGuideStorageKey(userId: string) {
   return `test-agent.onboarding.${FIRST_LOGIN_GUIDE_STORAGE_VERSION}:${userId}`;
@@ -9104,6 +9118,17 @@ async function handleLogout() {
             @click="toggleToolbox"
           >
             <Wrench class="figma-activity-icon" :stroke-width="1.5" />
+          </button>
+          <button
+            type="button"
+            class="figma-activity-btn"
+            aria-label="通用问答"
+            :title="lobehubLaunching ? '正在进入通用问答' : '通用问答'"
+            data-testid="lobehub-activity-button"
+            :disabled="lobehubLaunching"
+            @click="openLobehub"
+          >
+            <MessageSquare class="figma-activity-icon" :stroke-width="1.5" />
           </button>
           <button
             v-if="isSuperAdmin"

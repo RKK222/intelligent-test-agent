@@ -65,6 +65,30 @@ grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL
 
 ## Mac 打包
 
+LobeHub 外部 fork 通过准入后，可用同一脚本生成全量附带包或只包含 LobeHub 的离线包：
+
+```bash
+TEST_AGENT_LOBEHUB_ARTIFACT_DIR=/absolute/path/to/lobehub-release-artifacts \
+  deploy/internal/package-release.sh --with-lobehub
+
+TEST_AGENT_LOBEHUB_ARTIFACT_DIR=/absolute/path/to/lobehub-release-artifacts \
+  deploy/internal/package-release.sh --lobehub-only
+```
+
+脚本会核对上游/内部版本、PostgreSQL 17、三份 digest 镜像、完整且精确的 `SHA256SUMS`、源码、SBOM、许可证、
+资源审批清单、Windows Authenticode 证据及客户端摘要；任一缺失或不一致都会失败关闭。现场安装、systemd/Docker
+启停、共享 Redis ACL、HTTP 风险、备份和回滚见 [LobeHub 企业离线部署](../../docs/deployment/lobehub-offline.md)。
+
+现场填写 `/data/testagent/config/lobehub.env` 后必须先运行：
+
+```bash
+/data/testagent/deploy/internal/lobehub-docker.sh validate-config
+```
+
+该命令不访问 Docker，可先校验镜像 digest 与安装清单、全部 secret、固定 Redis 前缀、离线/认证/Cookie
+开关和 Windows/Linux 执行门禁。通过后再按文档顺序执行 Redis 检查、PostgreSQL 17 启动、migration、私有
+RustFS bucket 初始化和 app 启动；外部制品契约版本必须与本仓库 `deploy/internal/lobehub/version.env` 一致。
+
 企业包以执行命令时的本地工作树为准：已提交和未提交、但会被 Maven、前端或 Docker 构建实际读取的本地代码都属于本次构建输入。打包前先合并确认需要交付的相关分支并检查状态；这些命令用于记录输入范围，不要求 `git status --short` 为空，也不得为打包擅自清理、stash 或切换到另一份源码：
 
 所有企业 TAR/ZIP 统一通过 `archive-common.sh` 封装：保留部署所需的合法点文件，仅排除 `._*`、`.DS_Store`、`__MACOSX`、`.Spotlight-V100`、`.Trashes`、`.fseventsd` 等 macOS 自动元数据，并禁止 TAR 携带扩展属性、ACL 和 file flags。ZIP 关闭 extra fields，最终交付文件自身也会清除 xattr，避免复制到不支持扩展属性的介质时生成同名 `._*` 旁车文件；回归测试还会用目标侧 Linux GNU tar 检查成员和告警。新增归档流程必须复用该入口，不能直接调用 Mac `tar`/`zip` 生成交付包。

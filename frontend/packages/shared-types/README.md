@@ -7,6 +7,8 @@
 ## 主要职责
 
 - 提供 `XxlJobSsoTicket`，只表达短期 `ticket/expiresAt/formAction` 响应；原始票据不得进入持久化状态、URL 或日志。
+- 提供 `LobehubSsoTicket`，只表达当前用户签票得到的 `ticket/expiresAt/consumeUrl`；`consumeUrl` 必须由 launch
+  helper 再校验，类型本身不表达任意 return URL、模型委托或 LobeHub Session。
 - 定义 `ToolboxCatalogResponse`、`ToolboxTool` 与 `ToolboxClickResponse`，表达版本化离线目录、双语名称/说明、固定分类、来源版本、同源深链接、累计点击和可空热门排名；点击请求的 `eventId` 由页面每次打开动作生成，不包含客户端时间或用户身份。
 - 定义应用源码列表、固定提交选择、物化/保留期调整/重试/打开、持久化操作和独立进度 WebSocket DTO；列表以可选 additive 字段携带 `acceptedAt/maxRetentionHours`，续期 payload 使用 expected generation。`AppSourceProgressEvent` 是严格判别联合，`snapshot` 可承载任一合法状态，`step` 只承载 `PENDING/RUNNING`，`completed` 只承载 `SUCCEEDED/PARTIAL_FAILED`，持久化 `failed` 的内外状态都固定为 `FAILED`，失败分支必须携带非空安全错误。
 

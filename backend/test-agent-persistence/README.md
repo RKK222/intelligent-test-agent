@@ -201,7 +201,21 @@
 Flyway migration 只能承载表结构变更、历史数据兼容迁移和生产必需的基础字典/系统参数；禁止新增写入测试、演示、个人开发或环境专属数据的 seed migration。测试数据应放在 `test-agent-test-support`、测试 fixture、mock 数据或显式本地开发脚本中。
 新增或修改关系型 SQL 必须新增/调整 `mybatis/*.xml` 与 `com.enterprise.testagent.persistence.mybatis` 内部 mapper，不能继续扩展 `Jdbc*Repository` 或使用 MyBatis 注解 SQL；存量 JDBC 仓储后续按触点分批迁移。
 JSON payload/capabilities 当前以文本列保存，未来切换 PostgreSQL JSONB 必须同步兼容策略和测试。
-`ai_model_configs` 只保存平台托管的企业内模型目录，不保存模型调用密钥；密钥仍通过环境变量或配置中心注入，并由 runtime 模块同步到 opencode provider 配置引用。
+`ai_model_configs` 只保留旧平台模型目录兼容，不是 LobeHub 模型配置来源；LobeHub 使用
+`internal_model_provider_models` 关联现有供应商/Token，密钥不进入模型目录或每日聚合。
 `agent_session_bindings` 是新链路的 agent 远端 session 绑定主数据源；Session 的 `opencode_session_id` 与 `opencode_execution_node_id` 仅作为 `opencode` 兼容字段，新增 agent 不得继续扩展 `sessions` 列，新增查询或导出时不得默认暴露给前端 DTO；`pinned` 是平台 Session API 字段，默认旧数据未置顶。
 RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线程；修改 `MyBatisRunEventRepository` 时必须保留并发 append 下 seq 单调且不重复、scope 列写入、`raw_event_id` 缺失为 `NULL` 的测试。修改 SessionMessage/Run 映射时必须覆盖 token/cost、parts_json 和 active-run 查询。
 修改 `RedisRunRuntimeStore` 时必须使用真实 Redis 验证 Lua 原子性、durable seq 与 runtimeVersion 双 Stream、Hash/ZSET 物化、分页 tail、动态 key 滑动 TTL、7 天 attention/pending、active 索引清理、scope/dedup/pending、20,000 条/32 MiB 显式截断和 `run.snapshot.reset` 语义；禁止以 `MAXLEN`、LRU/LFU 或静默 eviction 代替显式截断。
+
+## LobeHub 与模型网关持久化
+
+- `RedisLobehubSsoStore` 把 ticket、nonce 和 grant 摘要限制在 `test-agent:lobehub-sso:*`，使用 Lua 原子消费、
+  nonce 占用、单用户 grant 轮换和撤销；Redis value 不保存原始 ticket/grant。
+- `InternalModelProviderModelMapper.xml` 覆盖保存公开模型并级联清理旧探测，按能力保存最近探测结果。
+- `ModelGatewayUsageDailyMapper.xml` 使用 PostgreSQL/H2 兼容 upsert 原子累加每日聚合，不先读后写。
+- `V20260730090000__add_lobehub_model_gateway.sql` 只创建上述平台表和四个生产必需公共参数；不触碰独立
+  LobeHub ParadeDB，也不写测试/演示数据。
+- H2 集成测试覆盖完整 Flyway 和 mapper；PostgreSQL Testcontainers 测试模拟既有基线并发累加，无 Docker
+  时显式 skip，正式发布仍需在真实目标基线上运行。
+- Redis Testcontainers 使用真实 Redis 5.0.14 让 8 个线程并发消费同一 ticket，锁定 Lua 只成功一次、nonce
+  防重放、grant 轮换/撤销、TTL 上限和 `test-agent:lobehub-sso:*` 前缀隔离。
