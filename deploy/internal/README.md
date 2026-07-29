@@ -359,6 +359,12 @@ test-agent-config-SENSITIVE-<role>-<node>-<timestamp>.tar.gz.sha256
 
 企业交付 JAR/ZIP 包含平台 RSA 私钥，必须按密钥交付物限制读取、复制和留存；替换内置密钥会让既有数据库 SSH key 密文无法解密，除非用户重新保存 SSH key。
 
+企业后端采用 `test-agent-app.jar` 瘦启动器与 `dist/backend/lib/` 外置依赖。Flyway migration
+实际打进 `test-agent-persistence-0.1.0-SNAPSHOT.jar`；打包、外层封装、节点预校验和安装后
+复验均锁定工具盒子企业 migration SHA-256
+`777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`，并比较发布包与安装后
+persistence JAR 的完整 SHA。只校验外层 ZIP 或 app JAR 不能证明数据库资源已更新。
+
 ## 首次部署与版本升级顺序
 
 首次部署时 Java 需要先写 `.serverid/.serverhost`，无论单后台还是多后台，每个后端节点都按以下顺序部署：

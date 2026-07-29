@@ -442,6 +442,23 @@ cd /data/0709/test-agent-two-backend-complete
 bash deploy-backend-node.sh
 ```
 
+一键脚本会在启动 Java 前连续输出以下三项门禁；缺少任一项或 SHA 不等于
+`777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2` 时立即停止：
+
+```text
+Release archive persistence JAR Flyway migration verified
+Installed persistence JAR Flyway migration verified
+Installed persistence JAR matches release archive
+```
+
+如现场仍报 `Resolved locally: -74327385`，说明运行目录仍是旧 persistence JAR。保持 Java
+停止，直接检查安装后的真实资源，禁止执行 Flyway `repair`：
+
+```bash
+unzip -p /data/testagent/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar \
+  db/migration/V20260728160800__create_toolbox_click_tracking.sql | sha256sum
+```
+
 部署后验证：
 
 ```bash
@@ -482,6 +499,9 @@ unzip -oq test-agent-two-backend-complete.zip
 cd /data/0709/test-agent-two-backend-complete
 bash deploy-backend-node.sh
 ```
+
+`.114` 同样必须看到发布包、安装后 migration 和完整 persistence JAR 三项校验通过；任一项
+失败时停止，不部署 `.2`。
 
 部署后验证：
 

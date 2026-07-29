@@ -79,7 +79,12 @@ EMPTY_ROOT="${TMP_ROOT}/empty-root"
 mkdir -p "${JAR_ROOT}/BOOT-INF/classes" "${EMPTY_ROOT}"
 printf 'fixture-rsa-private-key\n' >"${JAR_ROOT}/BOOT-INF/classes/rsa-private.key"
 (cd "${JAR_ROOT}" && zip -qr "${RELEASE_ROOT}/dist/backend/test-agent-app.jar" .)
-printf 'fixture external library\n' >"${RELEASE_ROOT}/dist/backend/lib/fixture.jar"
+PERSISTENCE_JAR_ROOT="${TMP_ROOT}/persistence-jar-root"
+mkdir -p "${PERSISTENCE_JAR_ROOT}/db/migration"
+cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260728160800__create_toolbox_click_tracking.sql" \
+  "${PERSISTENCE_JAR_ROOT}/db/migration/"
+(cd "${PERSISTENCE_JAR_ROOT}" && zip -qr \
+  "${RELEASE_ROOT}/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar" .)
 tar -C "${EMPTY_ROOT}" -czf "${RELEASE_ROOT}/dist/test-agent-frontend-dist.tar.gz" .
 tar -C "${EMPTY_ROOT}" -czf "${RELEASE_ROOT}/dist/test-agent-programs.tar.gz" .
 printf 'fixture worker image\n' >"${RELEASE_ROOT}/dist/test-agent-opencode-worker_internal-linux-amd64.tar"
@@ -124,6 +129,30 @@ validate_without_secret_output() {
 validate_without_secret_output backend "${CONFIG_4}" --backend-host 122.233.30.4
 validate_without_secret_output backend "${CONFIG_114}" --backend-host 122.233.30.114
 validate_without_secret_output frontend "${CONFIG_FRONTEND}"
+
+# Flyway SQL 位于外置 persistence JAR；即使 app JAR、ZIP 和节点配置都合法，错误字节也必须在启动前拒绝。
+BAD_RELEASE_ROOT="${TMP_ROOT}/bad-release-root"
+BAD_RELEASE_ARCHIVE="${TMP_ROOT}/test-agent-bad-flyway-release.zip"
+BAD_PERSISTENCE_ROOT="${TMP_ROOT}/bad-persistence-jar-root"
+cp -R "${RELEASE_ROOT}" "${BAD_RELEASE_ROOT}"
+mkdir -p "${BAD_PERSISTENCE_ROOT}/db/migration"
+printf 'wrong enterprise migration fixture\n' \
+  >"${BAD_PERSISTENCE_ROOT}/db/migration/V20260728160800__create_toolbox_click_tracking.sql"
+rm -f "${BAD_RELEASE_ROOT}/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar"
+(cd "${BAD_PERSISTENCE_ROOT}" && zip -qr \
+  "${BAD_RELEASE_ROOT}/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar" .)
+(cd "${BAD_RELEASE_ROOT}" && zip -qr "${BAD_RELEASE_ARCHIVE}" .)
+(cd "${TMP_ROOT}" && shasum -a 256 "$(basename "${BAD_RELEASE_ARCHIVE}")" \
+  >"$(basename "${BAD_RELEASE_ARCHIVE}").sha256")
+if bad_flyway_output="$(bash "${DEPLOY_SCRIPT}" backend \
+  --config-dir "${CONFIG_4}" \
+  --release-archive "${BAD_RELEASE_ARCHIVE}" \
+  --backend-host 122.233.30.4 \
+  --validate-only 2>&1)"; then
+  echo 'Validation unexpectedly accepted a persistence JAR with the wrong Flyway migration' >&2
+  exit 1
+fi
+grep -Fq 'contains the wrong enterprise Flyway migration' <<<"${bad_flyway_output}"
 
 # 未更新的 Manager/Codex/OpenCode runtime 由现场复用时，增量包不携带 programs 和 worker tar，
 # 但节点预校验仍必须接受清单明确声明的 reuse 模式。
@@ -221,11 +250,13 @@ fi
 VERIFY_INSTALL_ROOT="${TMP_ROOT}/verify-install"
 VERIFY_BIN="${TMP_ROOT}/verify-bin"
 mkdir -p "${VERIFY_INSTALL_ROOT}/config" "${VERIFY_INSTALL_ROOT}/data" \
-  "${VERIFY_INSTALL_ROOT}/dist/backend" "${VERIFY_BIN}"
+  "${VERIFY_INSTALL_ROOT}/dist/backend/lib" "${VERIFY_BIN}"
 cp "${CONFIG_4}/backend.env" "${VERIFY_INSTALL_ROOT}/config/backend.env"
 cp "${CONFIG_4}/docker.env" "${VERIFY_INSTALL_ROOT}/config/docker.env"
 cp "${RELEASE_ROOT}/dist/backend/test-agent-app.jar" \
   "${VERIFY_INSTALL_ROOT}/dist/backend/test-agent-app.jar"
+cp "${RELEASE_ROOT}/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar" \
+  "${VERIFY_INSTALL_ROOT}/dist/backend/lib/"
 printf 'test-agent-backend-122-233-30-4\n' >"${VERIFY_INSTALL_ROOT}/data/.serverid"
 printf '122.233.30.4\n' >"${VERIFY_INSTALL_ROOT}/data/.serverhost"
 
@@ -282,4 +313,4 @@ grep -Fq 'http://127.0.0.1/toolbox/apps/omni-tools/audio/change-speed' "${DEPLOY
 grep -Fq 'toolbox upstream health is unreachable from frontend node' "${DEPLOY_SCRIPT}"
 grep -Fq 'toolbox deep link is unreachable from frontend node' "${DEPLOY_SCRIPT}"
 
-echo 'Two-backend per-node validation, toolbox connectivity gates, embedded RSA, secret redaction and manager log compatibility verified'
+echo 'Two-backend per-node validation, Flyway persistence JAR gate, toolbox connectivity, embedded RSA, secret redaction and manager log compatibility verified'

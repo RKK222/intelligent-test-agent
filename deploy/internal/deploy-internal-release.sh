@@ -26,6 +26,10 @@ WORKER_RUNTIME_REUSE=0
 KEEP_EXTRACT=0
 VALIDATE_ONLY=0
 SYSTEMD_UNIT_DIR="${TEST_AGENT_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
+TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE="db/migration/V20260728160800__create_toolbox_click_tracking.sql"
+TOOLBOX_ENTERPRISE_MIGRATION_SHA256="777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2"
+RELEASE_PERSISTENCE_JAR=""
+RELEASE_PERSISTENCE_JAR_SHA256=""
 
 usage() {
   cat <<'USAGE'
@@ -197,6 +201,49 @@ require_file() {
     echo "Required file not found: $1" >&2
     exit 1
   fi
+}
+
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    echo "Neither sha256sum nor shasum is available" >&2
+    exit 1
+  fi
+}
+
+sha256_jar_resource() {
+  local jar="$1" resource="$2"
+  if command -v sha256sum >/dev/null 2>&1; then
+    unzip -p "${jar}" "${resource}" | sha256sum | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    unzip -p "${jar}" "${resource}" | shasum -a 256 | awk '{print $1}'
+  else
+    echo "Neither sha256sum nor shasum is available" >&2
+    exit 1
+  fi
+}
+
+find_unique_persistence_jar() {
+  local lib_dir="$1" count
+  count="$(find "${lib_dir}" -maxdepth 1 -type f -name 'test-agent-persistence-*.jar' | wc -l | tr -d '[:space:]')"
+  if [[ "${count}" != 1 ]]; then
+    echo "Expected exactly one test-agent-persistence JAR under ${lib_dir}, found ${count}" >&2
+    exit 1
+  fi
+  find "${lib_dir}" -maxdepth 1 -type f -name 'test-agent-persistence-*.jar' -print -quit
+}
+
+verify_toolbox_enterprise_migration_jar() {
+  local jar="$1" label="$2" actual
+  actual="$(sha256_jar_resource "${jar}" "${TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE}")"
+  if [[ "${actual}" != "${TOOLBOX_ENTERPRISE_MIGRATION_SHA256}" ]]; then
+    echo "${label} contains the wrong enterprise Flyway migration: jar=${jar} expected=${TOOLBOX_ENTERPRISE_MIGRATION_SHA256} actual=${actual}" >&2
+    exit 1
+  fi
+  printf '%s Flyway migration verified: sha256=%s\n' "${label}" "${actual}"
 }
 
 manifest_value() {
@@ -618,6 +665,9 @@ require_file "${BACKEND_JAR}"
   echo "backend external lib directory not found in archive" >&2
   exit 1
 }
+RELEASE_PERSISTENCE_JAR="$(find_unique_persistence_jar "${BACKEND_LIB_DIR}")"
+verify_toolbox_enterprise_migration_jar "${RELEASE_PERSISTENCE_JAR}" "Release archive persistence JAR"
+RELEASE_PERSISTENCE_JAR_SHA256="$(sha256_file "${RELEASE_PERSISTENCE_JAR}")"
 if [[ "${WORKER_RUNTIME_REUSE}" -eq 0 ]]; then
   require_file "${PROGRAMS_ARCHIVE}"
 fi
@@ -710,6 +760,14 @@ if [[ -d "${INSTALL_ROOT}/dist/backend/lib" ]]; then
 fi
 mv "${INSTALL_ROOT}/dist/backend/test-agent-app.jar.new" "${INSTALL_ROOT}/dist/backend/test-agent-app.jar"
 mv "${INSTALL_ROOT}/dist/backend/lib.new" "${INSTALL_ROOT}/dist/backend/lib"
+INSTALLED_PERSISTENCE_JAR="$(find_unique_persistence_jar "${INSTALL_ROOT}/dist/backend/lib")"
+verify_toolbox_enterprise_migration_jar "${INSTALLED_PERSISTENCE_JAR}" "Installed persistence JAR"
+INSTALLED_PERSISTENCE_JAR_SHA256="$(sha256_file "${INSTALLED_PERSISTENCE_JAR}")"
+if [[ "${INSTALLED_PERSISTENCE_JAR_SHA256}" != "${RELEASE_PERSISTENCE_JAR_SHA256}" ]]; then
+  echo "Installed persistence JAR differs from the release archive: expected=${RELEASE_PERSISTENCE_JAR_SHA256} actual=${INSTALLED_PERSISTENCE_JAR_SHA256}" >&2
+  exit 1
+fi
+printf 'Installed persistence JAR matches release archive: sha256=%s\n' "${INSTALLED_PERSISTENCE_JAR_SHA256}"
 
 if [[ "${WORKER_RUNTIME_REUSE}" -eq 0 ]]; then
   log "Extract external programs (OpenCode Manager, OpenCode runtime and Codex MCP)"

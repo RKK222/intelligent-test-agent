@@ -7,6 +7,8 @@ RELEASE_ARCHIVE="${SCRIPT_DIR}/dist/test-agent-internal-release.zip"
 NODES_DIR=""
 OUTPUT_DIR="${SCRIPT_DIR}/dist"
 BUNDLE_NAME="test-agent-two-backend-complete"
+TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE="db/migration/V20260728160800__create_toolbox_click_tracking.sql"
+TOOLBOX_ENTERPRISE_MIGRATION_SHA256="777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2"
 
 usage() {
   cat <<'USAGE'
@@ -81,6 +83,28 @@ sha256_digest() {
     echo "Neither sha256sum nor shasum is available" >&2
     exit 1
   fi
+}
+
+sha256_jar_resource() {
+  local jar="$1" resource="$2"
+  if command -v sha256sum >/dev/null 2>&1; then
+    unzip -p "${jar}" "${resource}" | sha256sum | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    unzip -p "${jar}" "${resource}" | shasum -a 256 | awk '{print $1}'
+  else
+    echo "Neither sha256sum nor shasum is available" >&2
+    exit 1
+  fi
+}
+
+verify_toolbox_enterprise_migration_jar() {
+  local jar="$1" actual
+  actual="$(sha256_jar_resource "${jar}" "${TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE}")"
+  if [[ "${actual}" != "${TOOLBOX_ENTERPRISE_MIGRATION_SHA256}" ]]; then
+    echo "Inner release contains the wrong enterprise Flyway migration: expected=${TOOLBOX_ENTERPRISE_MIGRATION_SHA256} actual=${actual}" >&2
+    exit 1
+  fi
+  printf 'Inner release Flyway migration verified: sha256=%s\n' "${actual}"
 }
 
 # SHA 文件必须指向同目录的实际文件名，避免误校验同目录中的历史版本。
@@ -166,6 +190,14 @@ require_archive_entry "${release_listing}" deploy/internal/toolbox.env.example
 require_archive_entry "${release_listing}" deploy/internal/toolbox-docker.sh
 require_archive_entry "${release_listing}" deploy/internal/diagnose-toolbox.sh
 require_archive_entry "${release_listing}" deploy/internal/deploy-multi-backend-node.sh
+persistence_entry_count="$(grep -Ec '^dist/backend/lib/test-agent-persistence-[^/]+\.jar$' <<<"${release_listing}" || true)"
+if [[ "${persistence_entry_count}" != 1 ]]; then
+  echo "Inner release must contain exactly one test-agent-persistence JAR, found ${persistence_entry_count}" >&2
+  exit 1
+fi
+persistence_entry="$(grep -E '^dist/backend/lib/test-agent-persistence-[^/]+\.jar$' <<<"${release_listing}")"
+unzip -p "${RELEASE_ARCHIVE}" "${persistence_entry}" >"${TMP_ROOT}/test-agent-persistence.jar"
+verify_toolbox_enterprise_migration_jar "${TMP_ROOT}/test-agent-persistence.jar"
 release_component_manifest="$(unzip -p "${RELEASE_ARCHIVE}" deploy/internal/release-components.env 2>/dev/null || true)"
 worker_component_mode="$(manifest_value "${release_component_manifest}" TEST_AGENT_RELEASE_WORKER_RUNTIME)"
 toolbox_component_mode="$(manifest_value "${release_component_manifest}" TEST_AGENT_RELEASE_TOOLBOX)"

@@ -25,6 +25,8 @@ INCLUDE_ALL_COMPONENTS=0
 COMPONENT_PLAN_ONLY=0
 COMPONENT_STATE_FILE=""
 OUTPUT_DIR_FROM_ENV_BEFORE_DOTENV="${TEST_AGENT_IMAGE_OUTPUT_DIR+x}"
+TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE="db/migration/V20260728160800__create_toolbox_click_tracking.sql"
+TOOLBOX_ENTERPRISE_MIGRATION_SHA256="777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2"
 
 usage() {
   cat <<'USAGE'
@@ -320,6 +322,38 @@ sha256_file() {
   fi
 }
 
+sha256_jar_resource() {
+  local jar="$1" resource="$2"
+  if command -v sha256sum >/dev/null 2>&1; then
+    unzip -p "${jar}" "${resource}" | sha256sum | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    unzip -p "${jar}" "${resource}" | shasum -a 256 | awk '{print $1}'
+  else
+    echo "Neither sha256sum nor shasum is available" >&2
+    exit 1
+  fi
+}
+
+find_unique_persistence_jar() {
+  local lib_dir="$1" count
+  count="$(find "${lib_dir}" -maxdepth 1 -type f -name 'test-agent-persistence-*.jar' | wc -l | tr -d '[:space:]')"
+  if [[ "${count}" != 1 ]]; then
+    echo "Expected exactly one test-agent-persistence JAR under ${lib_dir}, found ${count}" >&2
+    exit 1
+  fi
+  find "${lib_dir}" -maxdepth 1 -type f -name 'test-agent-persistence-*.jar' -print -quit
+}
+
+verify_toolbox_enterprise_migration_jar() {
+  local jar="$1" label="$2" actual
+  actual="$(sha256_jar_resource "${jar}" "${TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE}")"
+  if [[ "${actual}" != "${TOOLBOX_ENTERPRISE_MIGRATION_SHA256}" ]]; then
+    echo "${label} contains the wrong enterprise Flyway migration: jar=${jar} expected=${TOOLBOX_ENTERPRISE_MIGRATION_SHA256} actual=${actual}" >&2
+    exit 1
+  fi
+  printf '%s Flyway migration verified: sha256=%s\n' "${label}" "${actual}"
+}
+
 state_value() {
   local file="$1" key="$2"
   [[ -f "${file}" ]] || return 0
@@ -455,7 +489,7 @@ plan_release_components() {
 
 package_backend() {
   local backend_dir="${OUTPUT_DIR}/backend"
-  local backend_jar_path extract_dir manifest_dir manifest_file
+  local backend_jar_path extract_dir manifest_dir manifest_file persistence_jar
   require_command unzip
   require_command zip
   mkdir -p "${backend_dir}"
@@ -497,6 +531,8 @@ package_backend() {
     echo "External backend libraries were not extracted" >&2
     exit 1
   }
+  persistence_jar="$(find_unique_persistence_jar "${backend_dir}/lib")"
+  verify_toolbox_enterprise_migration_jar "${persistence_jar}" "Packaged persistence JAR"
   unzip -Z1 "${backend_dir}/test-agent-app.jar" | grep -Fx 'BOOT-INF/classes/rsa-private.key' >/dev/null || {
     echo "Backend jar is missing the embedded RSA private key resource" >&2
     exit 1
@@ -651,7 +687,7 @@ package_mysql_image() {
 package_release_zip() {
   local staging_dir="${OUTPUT_DIR}/.release-zip"
   local zip_path session_log session_log_count=0
-  local worker_tar it_tools_tar omni_tools_tar required_artifact
+  local worker_tar it_tools_tar omni_tools_tar required_artifact persistence_jar
 
   require_command zip
   require_command rsync
@@ -671,6 +707,8 @@ package_release_zip() {
       exit 1
     fi
   done
+  persistence_jar="$(find_unique_persistence_jar "${OUTPUT_DIR}/backend/lib")"
+  verify_toolbox_enterprise_migration_jar "${persistence_jar}" "Release ZIP input persistence JAR"
   if [[ "${WORKER_COMPONENT_MODE}" == included ]]; then
     require_artifact_fingerprint "${OUTPUT_DIR}/.worker-runtime-artifact.env" \
       TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT "${WORKER_RUNTIME_FINGERPRINT}"

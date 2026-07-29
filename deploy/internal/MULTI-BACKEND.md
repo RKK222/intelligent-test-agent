@@ -153,6 +153,13 @@ test "${inner_sha}" = "${embedded_sha}"
 
 最后一条必须返回 0，失败时停止分发并重新封装外层包。
 
+后端是瘦启动 JAR + 外置依赖目录结构；Flyway SQL 实际位于
+`dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar`，不是
+`dist/backend/test-agent-app.jar`。打包脚本、外层封装脚本和后台部署脚本都会强制校验企业
+原始 migration SHA-256 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`；
+后台部署还会比较发布包与安装后 persistence JAR 的完整文件 SHA，防止旧解压目录或旧
+`backend/lib` 被继续使用。
+
 Mac 只负责构建；U 盘导入企业网后，中转机固定在 `~/Desktop/mimoagent/0709` 校验和分发，不得在中转机使用 `/data/0709`。`/data/0709` 只是 `.4/.114/.2` 目标服务器的接收目录。当前固定名外层包在中转机执行：
 
 ```bash

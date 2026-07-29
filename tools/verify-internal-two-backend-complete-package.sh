@@ -28,7 +28,7 @@ RELEASE_ROOT="${TMP_ROOT}/release-root"
 RELEASE_ARCHIVE="${TMP_ROOT}/test-agent-internal-release.zip"
 NODES_DIR="${TMP_ROOT}/nodes"
 OUTPUT_DIR="${TMP_ROOT}/output"
-mkdir -p "${RELEASE_ROOT}/dist/backend" "${RELEASE_ROOT}/deploy/internal" \
+mkdir -p "${RELEASE_ROOT}/dist/backend/lib" "${RELEASE_ROOT}/deploy/internal" \
   "${RELEASE_ROOT}/.agents" \
   "${NODES_DIR}" "${OUTPUT_DIR}"
 
@@ -36,6 +36,12 @@ JAR_ROOT="${TMP_ROOT}/jar-root"
 mkdir -p "${JAR_ROOT}/BOOT-INF/classes"
 printf 'fixture-rsa-private-key\n' >"${JAR_ROOT}/BOOT-INF/classes/rsa-private.key"
 (cd "${JAR_ROOT}" && zip -qr "${RELEASE_ROOT}/dist/backend/test-agent-app.jar" .)
+PERSISTENCE_JAR_ROOT="${TMP_ROOT}/persistence-jar-root"
+mkdir -p "${PERSISTENCE_JAR_ROOT}/db/migration"
+cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260728160800__create_toolbox_click_tracking.sql" \
+  "${PERSISTENCE_JAR_ROOT}/db/migration/"
+(cd "${PERSISTENCE_JAR_ROOT}" && zip -qr \
+  "${RELEASE_ROOT}/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar" .)
 printf 'frontend\n' >"${RELEASE_ROOT}/dist/test-agent-frontend-dist.tar.gz"
 printf 'programs\n' >"${RELEASE_ROOT}/dist/test-agent-programs.tar.gz"
 printf 'worker\n' >"${RELEASE_ROOT}/dist/test-agent-opencode-worker_internal-linux-amd64.tar"
@@ -238,4 +244,21 @@ grep -Fxq 'TEST_AGENT_RELEASE_TOOLBOX=reuse' \
 run_package >/dev/null
 test "$(find "${OUTPUT_DIR}" -maxdepth 1 -type f -name 'test-agent-two-backend-complete*.zip' | wc -l | tr -d '[:space:]')" = 1
 
-echo 'Fixed-name platform bundle, session logs, node normalization, checksum, structure, MySQL separation, redaction and overwrite verified'
+# 外层封装不能只相信内层 ZIP SHA；内层 persistence JAR 的企业 migration 字节错误时必须拒绝。
+BAD_PERSISTENCE_ROOT="${TMP_ROOT}/bad-persistence-root"
+mkdir -p "${BAD_PERSISTENCE_ROOT}/db/migration"
+printf 'wrong enterprise migration fixture\n' \
+  >"${BAD_PERSISTENCE_ROOT}/db/migration/V20260728160800__create_toolbox_click_tracking.sql"
+rm -f "${RELEASE_ROOT}/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar"
+(cd "${BAD_PERSISTENCE_ROOT}" && zip -qr \
+  "${RELEASE_ROOT}/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar" .)
+rm -f "${RELEASE_ARCHIVE}" "${RELEASE_ARCHIVE}.sha256"
+(cd "${RELEASE_ROOT}" && zip -qr "${RELEASE_ARCHIVE}" .)
+write_checksum "${RELEASE_ARCHIVE}"
+if bad_flyway_output="$(run_package 2>&1)"; then
+  echo 'Complete package unexpectedly accepted the wrong enterprise Flyway migration' >&2
+  exit 1
+fi
+grep -Fq 'Inner release contains the wrong enterprise Flyway migration' <<<"${bad_flyway_output}"
+
+echo 'Fixed-name platform bundle, Flyway persistence JAR gate, session logs, node normalization, checksum, structure, MySQL separation, redaction and overwrite verified'

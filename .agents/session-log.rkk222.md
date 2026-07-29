@@ -3243,3 +3243,25 @@
 
 - 企业原始 checksum `-1966404877`、旧版本历史和误发 checksum `-74327385` 均有明确且字节精确的兼容路径；任何未知分叉仍会阻止启动，避免掩盖生产历史问题。
 - 本次未变更 HTTP API、RunEvent/SSE、数据库结构、性能策略、安全边界、generated SDK、OpenCode 上游源码或 `.env*`；变更仅涉及 Flyway 兼容装配、历史 SQL 归位、测试和会话记录。
+
+### 2026-07-29 - 阻止企业节点继续加载旧 persistence JAR
+
+### Why
+
+- `.4` 二次部署日志仍显示数据库 checksum `-1966404877`、本地解析 `-74327385`；本机最终外层包内 migration 已核验为 `777a96...51f2`，说明企业运行目录实际加载了旧 `test-agent-persistence` JAR，而既有门禁只检查外层 ZIP 和瘦 `test-agent-app.jar`，没有证明外置 `backend/lib` 已替换。
+
+### What
+
+- 扩展现有 Mac 打包、固定外层封装、标准后台部署和节点复验入口，统一要求恰好一个 `test-agent-persistence-*.jar`，锁定工具盒子企业 migration SHA-256 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`。
+- 标准部署在启动 Java 前同时校验发布 ZIP 内 migration、安装后 migration、发布与安装 persistence JAR 完整 SHA；旧包、旧解压内容或未替换的 `backend/lib` 均直接失败。
+- 修正企业部署技能和数据库/部署文档：Flyway SQL 位于外置 persistence JAR，不在 PropertiesLauncher 使用的瘦 app JAR 中。
+
+### How
+
+- Shell 语法、diff 检查、AI 文档、自动节点部署、双后台节点和固定外层包验证通过；后两项新增错误 migration 反例，确认错误 persistence JAR 会在启动前被拒绝。
+- JDK 25 后端独立封包实际输出 `Packaged persistence JAR Flyway migration verified`；使用未修改的 `.env.test` 重启 backend、manager、frontend，Flyway 校验 76 个 migration，health/readiness 为 `UP`、前端 3000 为 200、登录 CORS 正常，manager 探测恢复稳定健康。
+
+### Result
+
+- 新部署链路不再把“外层 ZIP SHA 正确”误当成“运行目录 Flyway 资源已更新”；现场仍需用外层包 SHA 和安装后 migration SHA 区分旧 U 盘包、旧解压目录或未替换运行目录，禁止修改数据库 history。
+- 本次只调整离线打包/部署校验、测试、技能和稳定文档；未变更 API、事件、数据库结构、性能策略、安全契约、generated SDK、OpenCode 源码或环境配置。

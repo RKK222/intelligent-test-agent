@@ -111,17 +111,23 @@ deploy/internal/package-release.sh --output-dir /path/to/dist
 2. 对照源码、上次交付包和 Git 历史。任何已执行 migration 必须保持原始文件名、注释、SQL 和字节；如果需要兼容另一套历史，增加隔离兼容资源并由现有 customizer 按 history 选择，不改主 migration。
 3. 用真实 PostgreSQL 至少验证空库、已部署企业基线和每套已知分叉历史。涉及工具盒子时必须覆盖四类：尚未执行工具盒子迁移的基线、企业 `V20260728160800/-1966404877`、旧 `V20260727203500` 且当前版本未执行、以及 `V20260728160800/-74327385` 过渡历史。
 4. 工具盒子企业正式 `V20260728160800` 的源码 SHA-256 必须为 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`。误改为幂等 SQL 后的 Flyway checksum 是 `-74327385`，它只能作为过渡历史的隔离兼容资源，不能成为主 migration。
-5. 产生正式 JAR 后直接校验包内字节：
+5. 产生正式 JAR 后直接校验包内字节。企业后端使用 `PropertiesLauncher`，业务依赖位于外置
+   `backend/lib/`；Flyway SQL 在 `test-agent-persistence` JAR 中，不在瘦身后的
+   `test-agent-app.jar` 中：
 
 ```bash
-unzip -p deploy/internal/dist/backend/test-agent-app.jar \
-  BOOT-INF/classes/db/migration/V20260728160800__create_toolbox_click_tracking.sql |
+unzip -p deploy/internal/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar \
+  db/migration/V20260728160800__create_toolbox_click_tracking.sql |
   shasum -a 256
 ```
 
 预期 SHA-256 为 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`。不匹配时删除“可部署”结论，修复源码和测试后重新构建内外层包。
 
 6. 任一目标库出现未知 checksum、失败记录或未知更高版本时停止发布；先制定显式兼容方案，不用 `repair`、`outOfOrder` 或手工改历史表让校验表面通过。
+7. 企业节点部署必须同时校验发布 ZIP 内和 `/data/testagent/dist/backend/lib/` 安装后的
+   `test-agent-persistence` JAR；两者完整 JAR SHA-256 必须一致，且上述 migration SHA-256
+   都必须为 `777a96...51f2`。只检查 `test-agent-app.jar` 或外层 ZIP SHA 不能证明 Flyway
+   资源已经替换成功。
 
 ## 打包产物
 

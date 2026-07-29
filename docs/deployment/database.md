@@ -1144,7 +1144,7 @@ V18 及以前保留既有数字版本，已在共享或稳定数据库执行过�
 2. 尚未进入任何共享或稳定数据库的 migration 可以在合并前统一调整候选时间戳；最终版本必须彼此严格递增，并全部高于发布基线。版本顺序应表达依赖顺序，不以提交先后或谁先部署为准。
 3. migration 一旦进入任何共享、稳定或企业数据库即视为字节不可变；SQL 改成幂等形式、只改注释或空白也会改变 checksum，不是兼容方案。已执行文件必须保留原始字节并用 SHA-256 回归锁定。若不同环境已经形成分叉，立即停止合并和发布，先盘点各环境历史，再通过现有 Flyway 兼容装配和隔离 location 制定显式方案；禁止新建第二套迁移器，也禁止用 `SPRING_FLYWAY_OUT_OF_ORDER=true`、Flyway `repair` 或手工修改 `flyway_schema_history` 让校验表面通过。
 4. 正式打包前必须用真实 PostgreSQL 分别模拟空库、已部署企业基线和每套已知分叉历史，再使用默认 Flyway 配置升级到当前 HEAD，覆盖“旧包已运行、新包首次启动”的现场路径；只验证空库全量建库不算通过。
-5. 正式 JAR/ZIP 产生后必须解出其中 migration 计算 SHA-256，与通过上述升级测试的源码比较。包内字节不同、目标库出现未知 checksum，或没有取得目标库 history 时，均不得进入部署。
+5. 正式 JAR/ZIP 产生后必须解出其中 migration 计算 SHA-256，与通过上述升级测试的源码比较。当前企业包使用瘦 `test-agent-app.jar` 和外置 `backend/lib/`，migration 位于 `test-agent-persistence-*.jar`；必须同时校验发布 ZIP 内与目标机 `/data/testagent/dist/backend/lib/` 安装后的 persistence JAR，且完整 JAR SHA 一致。包内字节不同、目标库出现未知 checksum，或没有取得目标库 history 时，均不得进入部署。
 
 多台 Java 对同一套、已排好序的 migration 并发启动由 Flyway schema history 锁负责互斥，不是这里的问题；这里防的是不同开发者把较小的新版本晚合入，导致目标库已经执行更大版本后拒绝启动。
 

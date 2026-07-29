@@ -11,6 +11,8 @@ BACKEND_HOST=""
 PEER_HOST=""
 MODE="deploy"
 SKIP_PEER_CHECK=0
+TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE="db/migration/V20260728160800__create_toolbox_click_tracking.sql"
+TOOLBOX_ENTERPRISE_MIGRATION_SHA256="777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2"
 
 usage() {
   cat <<'USAGE'
@@ -113,6 +115,30 @@ require_file() {
     echo "Required file not found: $1" >&2
     exit 1
   fi
+}
+
+find_unique_persistence_jar() {
+  local lib_dir="$1" count
+  count="$(find "${lib_dir}" -maxdepth 1 -type f -name 'test-agent-persistence-*.jar' | wc -l | tr -d '[:space:]')"
+  if [[ "${count}" != 1 ]]; then
+    echo "Expected exactly one test-agent-persistence JAR under ${lib_dir}, found ${count}" >&2
+    exit 1
+  fi
+  find "${lib_dir}" -maxdepth 1 -type f -name 'test-agent-persistence-*.jar' -print -quit
+}
+
+verify_toolbox_enterprise_migration_jar() {
+  local jar="$1" actual
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual="$(unzip -p "${jar}" "${TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE}" | sha256sum | awk '{print $1}')"
+  else
+    actual="$(unzip -p "${jar}" "${TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE}" | shasum -a 256 | awk '{print $1}')"
+  fi
+  if [[ "${actual}" != "${TOOLBOX_ENTERPRISE_MIGRATION_SHA256}" ]]; then
+    echo "Installed persistence JAR contains the wrong enterprise Flyway migration: jar=${jar} expected=${TOOLBOX_ENTERPRISE_MIGRATION_SHA256} actual=${actual}" >&2
+    exit 1
+  fi
+  printf 'Installed persistence Flyway migration verified: sha256=%s\n' "${actual}"
 }
 
 require_absolute_path() {
@@ -430,6 +456,7 @@ install_prepared_config() {
 verify_backend() {
   local installed_config="${INSTALL_ROOT}/config"
   local expected_server_id peer_host actual_id actual_host jar_digest worker_state worker_health worker_ports
+  local persistence_jar
 
   validate_backend_config "${installed_config}"
   expected_server_id="$(server_id_from_host "${BACKEND_HOST}")"
@@ -480,6 +507,8 @@ verify_backend() {
   else
     jar_digest="$(shasum -a 256 "${INSTALL_ROOT}/dist/backend/test-agent-app.jar" | awk '{print $1}')"
   fi
+  persistence_jar="$(find_unique_persistence_jar "${INSTALL_ROOT}/dist/backend/lib")"
+  verify_toolbox_enterprise_migration_jar "${persistence_jar}"
 
   worker_state="$(docker inspect -f '{{.State.Running}}' test-agent-opencode-worker 2>/dev/null || true)"
   worker_health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' test-agent-opencode-worker 2>/dev/null || true)"
