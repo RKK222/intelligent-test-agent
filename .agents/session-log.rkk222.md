@@ -5,6 +5,24 @@
 
 ## Entries
 
+### 2026-07-29 - 基于新合入会话终态隔离重建企业全组件包
+
+### Why
+- 用户在上一版企业包之后合入聊天会话终态隔离代码，要求以当前主干重新打包；旧包不包含真实会话 ID 被替换或清空时同步清除上一会话停止、完成、失败展示状态的修复。
+
+### What
+- 以业务代码基线 `c9fa4b429` 重新构建 backend、frontend、programs、`linux/amd64` worker、IT-Tools、OmniTools 和 toolbox，并继续通过 `--include-all-components` 强制携带全部可选组件。
+- 复用既有固定名双后台外层封包和节点敏感包规范化流程；本次新合入代码没有新增 Flyway migration、业务 API、RunEvent、关系型 SQL、企业部署配置、generated SDK 或 OpenCode 源码变更。
+
+### How
+- agent-web 定向 Vitest 143 项通过、1 项跳过，typecheck 与生产 build 通过；JDK 25 下 `WorkspaceFileWebSocketHandlerTest` 30/30 通过。
+- 使用 `.env.test` / `test` profile 完整重启 backend、opencode-manager、frontend；health/readiness 为 `UP`，前端与 CORS 预检为 200，Flyway schema 为 `20260728210000` 且无待执行 migration，manager WebSocket 与 OpenCode 健康状态正常。
+- 全组件封包、AI 文档、多后台节点、自动部署和开发脚本校验通过；应用 JAR、PostgreSQL 驱动及 Flyway `V20260727203500`、`V20260728160800`、`V20260728210000` 内容检查通过，内外层 ZIP 完整性与嵌入内层 SHA 一致性通过。
+
+### Result
+- 当前代码的全组件内层包和固定名双后台外层包预校验通过；本条日志提交后再以 `--zip-only --include-all-components` 重封内层和外层，最终 SHA-256 以交付结果为准。
+- 本地三服务保持运行，页面企业参数仍按每台后台 `OPENCODE_MANAGER_MAX_PROCESSES=30` 交付；Mac 为 arm64，Codex 原生 namespace 沙箱仍须在 `.4/.114` 的 Linux/amd64 worker 上执行随包探针。
+
 ### 2026-07-29 - 重建 Flyway 兼容企业双后台全组件包并提升单机进程上限
 
 ### Why
