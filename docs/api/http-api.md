@@ -134,10 +134,12 @@ Base URL：`/api/internal/agent/{agentId}/processes/me`，当前 `agentId` 只�
 |---|---|---|---|---|
 | `GET` | `/` | 查询当前用户 opencode 进程强健康状态，不自动启动。 | 无 | `UserOpencodeProcessResponse` |
 | `GET` | `/health?linuxServerId=&containerId=&port=` | 前端周期弱健康检查；只按 Redis 快照定位目标进程并直接调用 opencode `/global/health`，不读写数据库、不触发 manager 强健康检查。 | 无 | `UserOpencodeProcessHealthResponse` |
-| `POST` | `/initialize` | 初始化或重建当前用户 opencode 进程。 | 可空；可传 `{ "operationId": "opi_..." }` 开启进度记录。 | `UserOpencodeProcessResponse` |
+| `POST` | `/initialize` | 初始化或重建当前用户 opencode 进程；启动前自动选择同服有效公共个人配置，`SUPER_ADMIN` 进程健康检查成功后再幂等准备并自动加载本人公共个人 worktree。 | 可空；可传 `{ "operationId": "opi_..." }` 开启进度记录。 | `UserOpencodeProcessResponse` |
 | `GET` | `/initialize-operations/{operationId}` | 只读查询当前用户发起的初始化进度；不触发 manager health/start，不写 RunEvent。 | 无 | `OpencodeProcessStartOperationResponse` |
 
 `operationId` 由前端生成，格式为 `opi_` 开头，后续 8 到 120 位字母、数字、下划线或短横线；旧客户端不传 `operationId` 时 `POST /initialize` 保持同步返回兼容。
+
+`POST /initialize` 对 `SUPER_ADMIN` 可附加返回 `publicWorktreePreparation`：`ready/worktreeId/linuxServerId/message`。目标 Java 只在进程状态为 `READY` 后调用既有公共 worktree 程序，确保 `public-{userId}` 稳定分支位于进程的 `linuxServerId`，随后自动激活该目录；若进程启动前已加载同一路径则不重复 dispose。公共仓库未初始化、SSH Key 缺失或 Git 准备失败时返回 `ready=false`；自动激活失败则保留 `ready=true` 并在 `message` 提示手动更新，二者都不回滚已通过健康检查的进程。以后每次平台受管启动/重启只做一次同服 ACTIVE 稳定 worktree 查询和目录边界校验，有效时直接加载，失败回退共享配置；不轮询、不 fetch、不检查 Git 状态。普通用户及非初始化查询返回该字段为 `null`；该字段为 additive，旧客户端可忽略。
 
 未绑定用户的精确 `GET /processes/me` 和 `POST /initialize` 会先由入口 Java 在同一轮读取 TTL 10 秒的 Redis manager/backend 在线快照：按 `containerId` 保留最新心跳后，服务器负载为其全部 manager `CONNECTED` 容器的 `currentProcesses` 总和（包括已满容器）；服务器还必须有至少一个 READY、未满且与所选在线 Java 保持 CONNECTED 的容器。候选按进程总数、`linuxServerId` 升序稳定选择；选中当前 Java 时本地处理，选中远端时通过公共 forwarder 单次转发，失败不尝试其它服务器，用户重试会重新选服。已有 ACTIVE binding 始终按原服务器路由，不因负载变化迁移。请求到达目标 Java 后，`GET /processes/me` 的可初始化判断和 `POST /initialize` 的本地容器候选只读取 Redis manager 快照，不读取 PostgreSQL 中历史 `CONNECTED/READY/current_processes` 做候选或回退。同一容器有多份快照时取 `lastHeartbeatAt` 最新一份；候选必须同时满足 manager 已连接、容器 READY 且实时容量未满、连接列表包含当前 Java 的 `backendProcessId`、当前 Java 内存中仍持有该 manager WebSocket。Redis 正常但无候选返回既有 `OPENCODE_UNAVAILABLE`/不可初始化响应；Redis 访问异常返回 `503 RUNTIME_STATE_UNAVAILABLE`。候选按实时进程数、容器 ID 排序，端口占用仍查询数据库并受 `(linux_server_id, port)` 唯一约束保护；命令发送前连接断开时可尝试下一候选，命令超时或发送后失败不切换。
 
@@ -522,7 +524,7 @@ ticket 响应中的 `webSocketUrl` 是签发 ticket 的当前 Java 绝对地址�
 - 公共 Git origin 和 `opencode/` 配置目录有效时，即使工作树存在未提交变更，仓库仍返回 `initialized=true` 和 `status=CONFLICT`，文件树保持可浏览；更新操作按 `discardLocalChanges` 规则决定拒绝或恢复。
 - `OPENCODE_PUBLIC_CONFIG_GIT_ROOT` 缺失或为空目录时，只允许初始化/公共更新流程 clone；公共 worktree 创建只校验目标服务器已有 Git 仓库，未初始化返回 `CONFLICT`，提示 `服务器{linuxServerId}上公共配置仓库在{gitRootPath}目录中未初始化。`
 - 新建公共/工作空间 Agent worktree 均返回并保存 `linuxServerId`。公共 worktree 后续文件目录列表、读取、写入按落库服务器归属通过文件 WebSocket route/ticket/RPC 执行；diff/stage/unstage/discard/commit/publish 仍按现有 HTTP 后端代理执行，并在目标后端再次校验创建人。
-- 浏览器选择已初始化公共仓库服务器后，自动调用 `GET /public/worktrees` 并在缺失时调用 `POST /public/worktrees`，随后始终使用当前用户 worktree；“更多操作”同时提供显式创建和切换入口。创建仍只确保当前用户的 `public-{userId}` 稳定分支/worktree，不允许任意命名，也不提供切换他人 worktree 或回退共享直接目录编辑的入口。
+- 浏览器只有在 `GET /opencode/processes/me` 明确成功后，才把当前用户进程归属标记为已解析；查询失败或仍在请求中不能退化为“用户尚未分配”，也不能据此回退其它服务器。已有进程绑定时，以其 `linuxServerId` 复用或补建公共个人 worktree；成功查询但没有 binding 时不自动创建，等待用户点击初始化，由目标 Java 在进程健康检查成功后幂等准备同服 `public-{userId}` worktree。“更多操作”继续提供显式创建和切换入口。切换工作空间、服务器或刷新时使用请求代次隔离，旧服务器的迟到响应不得覆盖最新选择；其它服务器上的历史 worktree 和数据库记录始终保留，避免删除未提交内容。
 - 历史带日期或手工名称的公共 `ACTIVE` worktree 不再作为当前用户默认 worktree 返回；首次进入时创建并挂载 `public-{userId}` 稳定分支，旧记录和目录保留，避免自动删除尚未提交的历史改动。
 - 历史 `agent_config_worktrees.linux_server_id is null` 记录按当前服务器兼容执行；如果本地目录不存在，管理员应重新创建 worktree。
 - 公共 Git clone/fetch/pull/worktree 失败时仍返回统一 Git 错误码，但会在 `details.gitFailureHint` 中给出安全排查建议；浏览器可展示该提示和 `traceId`，不得展示原始 `stderr`、完整命令或内部路径。
@@ -1417,7 +1419,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `GET` | `/applications` | 查询当前用户加入的启用应用。 |
-| `GET` | `/applications/git-refresh-scopes` | 超级管理员查询全部应用实际将刷新的工作空间、版本和 feature 分支。 |
+| `GET` | `/applications/git-refresh-scopes` | 超级管理员查询已形成实际 feature 分支组的应用及其工作空间、版本和分支。 |
 | `POST` | `/applications/{appId}/git-refresh` | 超级管理员按应用刷新全部物理 feature 仓库组，并触发相关个人 worktree 与应用 Agent 配置安全收敛。 |
 | `POST` | `/applications/{appId}/git-refresh-groups` | 超级管理员按 `repositoryId + version + branch` 精确刷新一个物理 feature 仓库组及其关联 worktree。 |
 | `GET` | `/applications/{appId}/workspace-templates` | 查询应用工作空间切换模板，只返回 `application_workspaces.enabled=true` 的配置。 |
@@ -1450,7 +1452,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/commit` | 仅在个人 worktree stage 并提交 `files` 白名单；不推送、不广播。请求包含 `.opencode/**` 时要求 `APP_ADMIN`（`SUPER_ADMIN` 继承）。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 要求 `files` 已在个人 worktree 本地提交，再从个人 `HEAD` 按白名单投影到应用 feature worktree，提交并推送；不 merge 整个个人分支。请求包含 `.opencode/**` 时要求 `APP_ADMIN`，响应包含 `currentStep/executedCommands`。 |
 
-`GET /applications/git-refresh-scopes` 返回所有启用和停用应用。每个应用的 `groups[]` 按实际执行使用的 `repositoryId + version + branch` 去重，`workspaces[]` 列出该物理 feature 组对应的 `versionId/applicationWorkspaceId/workspaceName/directoryPath/enabled`；因此同一工作空间的不同版本、不同工作空间的不同分支都会逐项展示。该只读接口和执行接口复用同一分组程序，不访问 Git 远端，也不发送 `X-Test-Agent-Linux-Server-Id` 首跳提示。
+`GET /applications/git-refresh-scopes` 只返回已经形成至少一个实际 feature 分支组的应用，不返回尚未创建任何工作空间版本分支的空应用；满足该条件的启用和停用应用都会返回。每个应用的 `groups[]` 按实际执行使用的 `repositoryId + version + branch` 去重，`workspaces[]` 列出该物理 feature 组对应的 `versionId/applicationWorkspaceId/workspaceName/directoryPath/enabled`；因此同一工作空间的不同版本、不同工作空间的不同分支都会逐项展示。该只读接口和执行接口复用同一分组程序，不访问 Git 远端，也不发送 `X-Test-Agent-Linux-Server-Id` 首跳提示。
 
 范围响应示例：
 

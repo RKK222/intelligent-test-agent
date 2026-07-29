@@ -18,6 +18,7 @@ import com.enterprise.testagent.domain.run.TokenUsage;
 import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionHistoryItem;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.workspace.AgentConfigResponses;
 import com.enterprise.testagent.domain.session.SessionMessage;
 import com.enterprise.testagent.domain.session.SessionMessageRole;
 import com.enterprise.testagent.domain.session.SessionRuntimeState;
@@ -695,7 +696,8 @@ final class RuntimeDtos {
             String backendJavaServerIp,
             boolean messageSendAllowed,
             String messageSendBlockedReason,
-            String publicConfigRolloutId) {
+            String publicConfigRolloutId,
+            AgentConfigResponses.PublicWorktreePreparationResponse publicWorktreePreparation) {
 
         /**
          * 从应用层响应映射为 HTTP DTO，避免 Controller 泄露内部枚举对象。
@@ -716,7 +718,32 @@ final class RuntimeDtos {
                     response.backendJavaServerIp(),
                     response.messageSendAllowed(),
                     response.messageSendBlockedReason(),
-                    response.publicConfigRolloutId());
+                    response.publicConfigRolloutId(),
+                    null);
+        }
+
+        /** 初始化响应可附带超级管理员公共个人 worktree 的同服准备结果。 */
+        static UserOpencodeProcessResponse from(
+                UserOpencodeProcessStatusResponse response,
+                AgentConfigResponses.PublicWorktreePreparationResponse preparation) {
+            UserOpencodeProcessResponse base = from(response);
+            return new UserOpencodeProcessResponse(
+                    base.status(),
+                    base.initializable(),
+                    base.message(),
+                    base.processId(),
+                    base.linuxServerId(),
+                    base.containerId(),
+                    base.port(),
+                    base.baseUrl(),
+                    base.checkedAt(),
+                    base.serviceStatus(),
+                    base.serviceAddress(),
+                    base.backendJavaServerIp(),
+                    base.messageSendAllowed(),
+                    base.messageSendBlockedReason(),
+                    base.publicConfigRolloutId(),
+                    preparation);
         }
     }
 

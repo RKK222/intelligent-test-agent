@@ -5,6 +5,7 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.id.RuntimeIdGenerator;
 import com.enterprise.testagent.domain.configuration.CommonParameterValues;
 import com.enterprise.testagent.domain.configuration.ParameterPlatform;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigPreviewSourceResolver;
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.node.ExecutionNodeRepository;
@@ -36,6 +37,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -48,6 +51,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class OpencodeProcessStartupService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(OpencodeProcessStartupService.class);
     private static final String OPENCODE_AGENT_ID = "opencode";
     private static final String OPENCODE_REFERENCES_DIR_PARAM = "OPENCODE_REFERENCES_DIR";
     private static final Duration DEFAULT_STARTUP_HEALTH_TIMEOUT = Duration.ofSeconds(10);
@@ -70,13 +74,20 @@ public class OpencodeProcessStartupService {
     private final ConversationContextStore conversationContextStore;
     private final CommonParameterValues commonParameterValues;
     private OpencodeProcessConfigLinkService configLinkService;
+    private PublicAgentConfigPreviewSourceResolver publicPreviewSourceResolver;
     private OpencodeProcessStopService stopService;
     private WorkspaceGitToolTokenService workspaceGitToolTokenService;
 
-    /** 启动前把用户有效公共配置链接到共享运行副本；方法注入保持既有测试构造器兼容。 */
+    /** 启动前选择用户有效公共个人配置或共享运行副本；方法注入保持既有测试构造器兼容。 */
     @Autowired
     void setConfigLinkService(OpencodeProcessConfigLinkService configLinkService) {
         this.configLinkService = Objects.requireNonNull(configLinkService, "configLinkService must not be null");
+    }
+
+    /** 公共个人配置源由 workspace-management 校验；模块测试缺少实现时继续使用共享配置。 */
+    @Autowired(required = false)
+    void setPublicPreviewSourceResolver(PublicAgentConfigPreviewSourceResolver resolver) {
+        this.publicPreviewSourceResolver = Objects.requireNonNull(resolver, "resolver must not be null");
     }
 
     /** Spring 生产路径复用统一停止服务执行启动竞争补偿。 */
@@ -383,7 +394,7 @@ public class OpencodeProcessStartupService {
         try {
             resolvedProgress.step(OpencodeProcessStartOperationStep.STARTING_PROCESS);
             if (configLinkService != null) {
-                configLinkService.switchToShared(request.sessionPath(), request.configPath());
+                preparePublicConfigLink(request);
             }
             OpencodeProcessStartCommand command = startCommand(request);
             OpencodeProcessStartResult started = gateway.startProcess(command);
@@ -420,6 +431,32 @@ public class OpencodeProcessStartupService {
             resolvedProgress.failed(exception);
             throw exception;
         }
+    }
+
+    /**
+     * 启动前只解析当前用户在本服务器上的一个稳定公共个人配置目录；无记录或校验失败时回退共享副本。
+     *
+     * <p>解析仅发生在 start/restart，不进入健康轮询；个人目录不可用不能阻断进程启动。</p>
+     */
+    private void preparePublicConfigLink(OpencodeProcessStartupRequest request) {
+        if (publicPreviewSourceResolver != null) {
+            try {
+                Optional<String> personalConfig = publicPreviewSourceResolver.resolvePublicPersonalConfigPath(
+                        request.userId(),
+                        request.linuxServerId().value());
+                if (personalConfig.isPresent()) {
+                    configLinkService.switchTo(personalConfig.get(), request.configPath());
+                    return;
+                }
+            } catch (RuntimeException exception) {
+                LOGGER.warn(
+                        "event=opencode_public_preview_start_fallback linuxServerId={} userId={} exceptionType={}",
+                        request.linuxServerId().value(),
+                        request.userId().value(),
+                        exception.getClass().getSimpleName());
+            }
+        }
+        configLinkService.switchToShared(request.sessionPath(), request.configPath());
     }
 
     /**

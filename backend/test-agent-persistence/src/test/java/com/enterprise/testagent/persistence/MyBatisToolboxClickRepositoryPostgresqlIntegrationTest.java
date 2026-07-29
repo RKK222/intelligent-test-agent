@@ -62,6 +62,14 @@ class MyBatisToolboxClickRepositoryPostgresqlIntegrationTest {
         postgresDataSource.setUser(POSTGRES.getUsername());
         postgresDataSource.setPassword(POSTGRES.getPassword());
         dataSource = postgresDataSource;
+        // 先构造企业已应用到 V20260728160000 的存量库，再用默认顺序模式执行当前迁移，
+        // 防止首次交付前的迁移版本回退重新触发 Flyway out-of-order 启动失败。
+        Flyway.configure()
+                .dataSource(dataSource)
+                .locations("classpath:db/migration")
+                .target("20260728160000")
+                .load()
+                .migrate();
         Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
         jdbc = JdbcClient.create(dataSource);
         insertUser(CONCURRENT_USER_ID);

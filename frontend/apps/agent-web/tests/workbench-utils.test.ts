@@ -11,6 +11,7 @@ import {
   opencodeAvailabilityFromHealth,
   opencodeAvailabilityFromProcess,
   opencodeHealthRequestFromProcess,
+  opencodeProcessRouteResolution,
   publicConfigGateRefetchInterval,
   chatStateFromSessionTreeSnapshot,
   dedupeSessionMessages,
@@ -77,6 +78,26 @@ describe("filterWorkspaceRootEntries", () => {
       { path: "src", name: "src", type: "directory" }
     ]);
     expect(filterWorkspaceRootEntries("config", entries)).toEqual(entries);
+  });
+});
+
+describe("opencodeProcessRouteResolution", () => {
+  it("distinguishes a failed lookup from a successful unassigned response", () => {
+    expect(opencodeProcessRouteResolution(undefined, "error")).toEqual({
+      resolved: false,
+      linuxServerId: ""
+    });
+    expect(opencodeProcessRouteResolution(undefined, "success")).toEqual({
+      resolved: true,
+      linuxServerId: ""
+    });
+  });
+
+  it("normalizes the server id only after a successful lookup", () => {
+    expect(opencodeProcessRouteResolution({ linuxServerId: " linux-2 " }, "success"))
+      .toEqual({ resolved: true, linuxServerId: "linux-2" });
+    expect(opencodeProcessRouteResolution({ linuxServerId: "linux-2" }, "pending"))
+      .toEqual({ resolved: false, linuxServerId: "" });
   });
 });
 

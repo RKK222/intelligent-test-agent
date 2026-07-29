@@ -9,14 +9,39 @@ trap cleanup EXIT
 BUNDLE="${TMP_ROOT}/test-agent-two-backend-complete"
 FAKE_BIN="${TMP_ROOT}/bin"
 CALL_LOG="${TMP_ROOT}/calls.log"
-mkdir -p "${BUNDLE}/nodes" "${FAKE_BIN}"
+INSTALL_ROOT="${TMP_ROOT}/install-root"
+RELEASE_ROOT="${TMP_ROOT}/release-root"
+mkdir -p "${BUNDLE}/nodes" "${FAKE_BIN}" "${INSTALL_ROOT}/deploy/internal" \
+  "${RELEASE_ROOT}/deploy/internal" "${RELEASE_ROOT}/dist"
 export CALL_LOG
 
 for script in deploy-node-common.sh deploy-backend-node.sh deploy-frontend-node.sh \
   init-backend-node-config.sh register-backend-on-frontend.sh; do
   cp "${ROOT_DIR}/deploy/internal/${script}" "${BUNDLE}/${script}"
 done
-printf 'release fixture\n' >"${BUNDLE}/test-agent-internal-release.zip"
+printf '%s\n' \
+  'TEST_AGENT_RELEASE_COMPONENT_MANIFEST_VERSION=1' \
+  'TEST_AGENT_RELEASE_WORKER_RUNTIME=included' \
+  'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=fixture-worker' \
+  'TEST_AGENT_RELEASE_TOOLBOX=included' \
+  'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=fixture-toolbox' \
+  >"${RELEASE_ROOT}/deploy/internal/release-components.env"
+printf 'it-tools\n' >"${RELEASE_ROOT}/dist/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar"
+printf 'it-tools checksum\n' >"${RELEASE_ROOT}/dist/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar.sha256"
+printf 'omni-tools\n' >"${RELEASE_ROOT}/dist/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar"
+printf 'omni-tools checksum\n' >"${RELEASE_ROOT}/dist/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar.sha256"
+(cd "${RELEASE_ROOT}" && zip -qr "${BUNDLE}/test-agent-internal-release.zip" .)
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'printf "toolbox %s\n" "$*" >>"${CALL_LOG}"' \
+  'exit 0' >"${INSTALL_ROOT}/deploy/internal/toolbox-docker.sh"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'printf "toolbox diagnose\n" >>"${CALL_LOG}"' \
+  'echo "Toolbox containers, health endpoints and deep links verified"' \
+  'exit 0' >"${INSTALL_ROOT}/deploy/internal/diagnose-toolbox.sh"
+chmod +x "${INSTALL_ROOT}/deploy/internal/toolbox-docker.sh" \
+  "${INSTALL_ROOT}/deploy/internal/diagnose-toolbox.sh"
 
 printf '%s\n' '#!/usr/bin/env bash' '[[ "${1:-}" == "-I" ]] && printf "%s\n" "${TEST_AGENT_FIXTURE_IP}"' \
   >"${FAKE_BIN}/hostname"
@@ -50,6 +75,11 @@ create_backend_node() {
     >"${root}/${node}/config/backend.env"
   printf '%s\n' 'TEST_AGENT_OPENCODE_MANAGER_TOKEN=manager-must-not-print' \
     >"${root}/${node}/config/docker.env"
+  printf '%s\n' \
+    "TEST_AGENT_TOOLBOX_BIND_ADDRESS=${ip}" \
+    'TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE=test-agent/it-tools:2024.10.22-7ca5933-platform.2' \
+    'TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE=test-agent/omni-tools:0.6.0-platform.1' \
+    >"${root}/${node}/config/toolbox.env"
   printf '%s\n' \
     '#!/usr/bin/env bash' \
     'printf "%s\n" "$*" >>"${CALL_LOG}"' \
@@ -85,20 +115,53 @@ create_backend_node 122.233.30.114
 create_frontend_node
 
 backend_output="$(cd "${BUNDLE}" && PATH="${FAKE_BIN}:${PATH}" TEST_AGENT_FIXTURE_IP=122.233.30.4 \
-  bash deploy-backend-node.sh 2>&1)"
+  TEST_AGENT_INSTALL_ROOT="${INSTALL_ROOT}" bash deploy-backend-node.sh 2>&1)"
 grep -Fq 'Detected backend IP: 122.233.30.4' <<<"${backend_output}"
 grep -Fq 'Java and Docker started' <<<"${backend_output}"
 test "$(grep -c '^backend ' "${CALL_LOG}")" -eq 3
 grep -Fq -- '--skip-peer-check' "${CALL_LOG}"
 test -s "${TMP_ROOT}/deploy-122.233.30.4.log"
+grep -Fq 'toolbox deploy' "${CALL_LOG}"
+grep -Fq 'toolbox diagnose' "${CALL_LOG}"
+grep -Fxq 'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=fixture-toolbox' \
+  "${INSTALL_ROOT}/config/release-component-state.env"
 
 backend_output="$(cd "${BUNDLE}" && PATH="${FAKE_BIN}:${PATH}" TEST_AGENT_FIXTURE_IP=122.233.30.114 \
-  bash deploy-backend-node.sh 2>&1)"
+  TEST_AGENT_INSTALL_ROOT="${INSTALL_ROOT}" bash deploy-backend-node.sh 2>&1)"
 grep -Fq 'Detected backend IP: 122.233.30.114' <<<"${backend_output}"
 grep -Fq 'Java and Docker started' <<<"${backend_output}"
 test "$(grep -c '^backend ' "${CALL_LOG}")" -eq 6
 grep -Fq -- '--peer-host 122.233.30.4' "${CALL_LOG}"
 test -s "${TMP_ROOT}/deploy-122.233.30.114.log"
+
+# toolbox 未变化的增量包不再携带镜像 tar；入口必须在平台升级前后诊断现场容器，但不调用 deploy。
+sed -i.bak 's/TEST_AGENT_RELEASE_TOOLBOX=included/TEST_AGENT_RELEASE_TOOLBOX=reuse/' \
+  "${RELEASE_ROOT}/deploy/internal/release-components.env"
+rm -f "${RELEASE_ROOT}/deploy/internal/release-components.env.bak" \
+  "${RELEASE_ROOT}/dist/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar" \
+  "${RELEASE_ROOT}/dist/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar.sha256" \
+  "${RELEASE_ROOT}/dist/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar" \
+  "${RELEASE_ROOT}/dist/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar.sha256" \
+  "${BUNDLE}/test-agent-internal-release.zip"
+(cd "${RELEASE_ROOT}" && zip -qr "${BUNDLE}/test-agent-internal-release.zip" .)
+deploy_count_before="$(grep -c '^toolbox deploy$' "${CALL_LOG}")"
+reuse_output="$(cd "${BUNDLE}" && PATH="${FAKE_BIN}:${PATH}" TEST_AGENT_FIXTURE_IP=122.233.30.4 \
+  TEST_AGENT_INSTALL_ROOT="${INSTALL_ROOT}" bash deploy-backend-node.sh 2>&1)"
+grep -Fq 'Toolbox component unchanged; reuse existing images and containers' <<<"${reuse_output}"
+test "$(grep -c '^toolbox deploy$' "${CALL_LOG}")" -eq "${deploy_count_before}"
+test "$(grep -c '^backend ' "${CALL_LOG}")" -eq 9
+
+# 指纹不匹配必须在平台升级前失败，不能只凭旧容器仍健康就继续复用。
+sed -i.bak \
+  's/TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=fixture-toolbox/TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=wrong-toolbox/' \
+  "${INSTALL_ROOT}/config/release-component-state.env"
+rm -f "${INSTALL_ROOT}/config/release-component-state.env.bak"
+if mismatch_output="$(cd "${BUNDLE}" && PATH="${FAKE_BIN}:${PATH}" TEST_AGENT_FIXTURE_IP=122.233.30.4 \
+  TEST_AGENT_INSTALL_ROOT="${INSTALL_ROOT}" bash deploy-backend-node.sh 2>&1)"; then
+  echo 'Toolbox reuse unexpectedly accepted a mismatched installed fingerprint' >&2
+  exit 1
+fi
+grep -Fq 'toolbox fingerprint does not match the installed component' <<<"${mismatch_output}"
 
 frontend_output="$(cd "${BUNDLE}" && PATH="${FAKE_BIN}:${PATH}" TEST_AGENT_FIXTURE_IP=122.233.30.2 \
   bash deploy-frontend-node.sh 2>&1)"
@@ -127,4 +190,4 @@ updated_nginx_env="$(tar -xOzf "${BUNDLE}/nodes/test-agent-two-backend-122.233.3
 grep -Fq '122.233.30.115:8080' <<<"${updated_nginx_env}"
 grep -Fq 'test-agent-backend-122-233-30-115=122.233.30.115:8080' <<<"${updated_nginx_env}"
 
-echo 'Automatic node IP detection, full phase execution, new backend env initialization and frontend registration verified'
+echo 'Automatic node IP detection, toolbox component fingerprints, full phase execution, new backend env initialization and frontend registration verified'

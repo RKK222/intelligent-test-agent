@@ -1015,6 +1015,13 @@ export type UserOpencodeProcess = {
   messageSendAllowed?: boolean;
   messageSendBlockedReason?: string | null;
   publicConfigRolloutId?: string | null;
+  /** 超级管理员点击初始化后，同服务器公共个人 worktree 的附加准备结果。 */
+  publicWorktreePreparation?: {
+    ready: boolean;
+    worktreeId?: string | null;
+    linuxServerId?: string | null;
+    message: string;
+  } | null;
 };
 
 export type UserOpencodeMessageGate = {

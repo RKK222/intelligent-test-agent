@@ -5,7 +5,7 @@ import type { FileSearchResult, RunDiffFile, WorkspaceViewEntry, WorkspaceViewWa
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import AgentConfigPanel from "./AgentConfigPanel.vue";
-import type { AgentConfigMutation, AgentFileLoadRequest } from "./agentFileLoad";
+import type { AgentConfigMutation, AgentFileLoadRequest, PublicWorktreeMountRequest } from "./agentFileLoad";
 import GitChangesPanel from "./GitChangesPanel.vue";
 import { ChevronDown, ChevronRight, CloudDownload, FolderTree, GitBranch, Globe, MoreHorizontal, Plus, RefreshCw, Search } from "lucide-vue-next";
 import type { AppSourceWorkspaceContext, SelectedWorkspaceKind } from "./app-source-workspace";
@@ -34,8 +34,12 @@ const props = defineProps<FileExplorerProps & {
   canManagePublicConfig?: boolean;
   /** 后端 base url，透传给 AgentConfigPanel/GitChangesPanel */
   apiBaseUrl?: string;
-  /** 当前用户绑定服务器，仅用于工作区本地 HTTP 首跳提示。 */
+  /** 当前用户 OpenCode 进程绑定服务器，也用于公共个人 worktree 自动选服。 */
   routeLinuxServerId?: string;
+  /** 当前用户 OpenCode 进程归属是否已完成查询。 */
+  routeLinuxServerResolved?: boolean;
+  /** 初始化进程后，后端已准备完成的公共个人 worktree 精确挂载请求。 */
+  publicWorktreeMountRequest?: PublicWorktreeMountRequest | null;
   /** 当前运行态 Workspace ID，透传给 AgentConfigPanel */
   workspaceId?: string;
   /** 应用 Agent 配置使用当前版本的个人 worktree，与普通 workspace 文件共用 Git 根。 */
@@ -620,6 +624,8 @@ defineExpose({
               ref="agentConfigPanelRef"
               :base-url="apiBaseUrl ?? ''"
               :route-linux-server-id="routeLinuxServerId"
+              :route-linux-server-resolved="routeLinuxServerResolved"
+              :public-worktree-mount-request="publicWorktreeMountRequest"
               :workspace-id="agentConfigWorkspaceId"
               :can-write="canManagePublicConfig ?? !!canWrite"
               :can-manage-workspace-config="canManageAgentConfig ?? !!canWrite"

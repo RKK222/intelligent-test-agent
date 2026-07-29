@@ -10,7 +10,7 @@
 - [多后台部署](MULTI-BACKEND.md)：两个或更多 Java/worker 节点，包含 `.4 + .114` 各自的完整配置、部署和验收示例。
 - [Redis 7.4.9 独立离线升级](REDIS-OFFLINE.md)：将当前本地 Redis 版本和配置单独封包，用于企业 Redis 5.0 的受控备份、升级、验证与回滚；不修改业务代码，也不并入日常平台包。
 - [Redis 5 升级 + 双后台平台全量执行手册](FULL-UPGRADE-RUNBOOK.md)：按当前现场路径和 `.20 → .4 → .114 → .2` 顺序整合完整命令、成功条件、页面配置、脏数据边界与回滚。
-- [工具盒子离线部署](../../docs/deployment/toolbox.md)：IT-Tools + OmniTools 的 193 项目录、双镜像、独立工具节点、Nginx 切流和回滚。
+- [工具盒子离线部署](../../docs/deployment/toolbox.md)：IT-Tools + OmniTools 的 193 项目录、双镜像、双后台共置、Nginx 故障切换和回滚。
 
 底层 Java、manager、Redis 路由设计见 [后端部署说明](../../docs/deployment/backend.md)。
 
@@ -90,13 +90,33 @@ VITE_TEST_AGENT_API_BASE_URL="" \
 
 这样 `http://mimo.sdc.cs.icbc:9996` 和 `http://122.233.30.2:9996` 都请求各自同源 `/api`。入口策略变更后只修改服务器 `docker.env` 不会改变已经编译的静态文件，必须重新构建并替换前端产物。
 
-完整构建和制品验证已经通过、仅补充当前会话日志时，可复用刚生成的 backend/frontend/programs/worker 制品重新封装内层 ZIP，不重复编译二进制：
+完整构建和制品验证已经通过、仅补充当前会话日志时，可复用刚生成的制品重新封装内层 ZIP，不重复编译二进制；`--zip-only` 会保持现有 ZIP 的 `included/reuse` 选择，不会把同一批次刚生成但尚未部署的大组件删掉：
 
 ```bash
 deploy/internal/package-release.sh --zip-only --output-dir deploy/internal/dist
 ```
 
-`--zip-only` 会重新复制当前 `deploy/internal/` 和全部 `.agents/session-log*.md`，并强制检查四类二进制制品齐全；缺少任一文件都会失败，不会生成部分发布包。
+`package-release.sh` 默认使用输出目录下的 `.release-component-state.env` 分别判断两个大组件：
+
+- `worker runtime`：OpenCode Manager、OpenCode runtime、Codex MCP、Node/MCP SDK、bubblewrap、worker 镜像和 `test-agent-programs.tar.gz` 是一个不可拆分单元。
+- `toolbox`：IT-Tools、OmniTools、修改源码和目录文件是一个单元。
+
+首次构建、状态文件丢失或对应源码/版本/基础镜像指纹变化时，组件标记为 `included`，脚本重新构建并放入 ZIP；指纹未变化时标记为 `reuse`，ZIP 不再携带对应大文件。`--zip-only` 只允许复用带当前指纹戳的已验证制品，源码已变化但没有重新构建时会失败，不能把旧 tar 伪装成新组件。必须持续复用同一个输出目录，或通过 `--component-state-file <稳定路径>` 显式保存基线。迁移到本机制后第一次必须做全量部署：后台会把实际安装成功的组件指纹写入 `/data/testagent/config/release-component-state.env`；后续 `reuse` 包要求清单指纹与目标机指纹相同且组件健康，缺失或不一致都会停止部署。
+
+新装机、灾备全量包或状态不可信时强制携带全部组件：
+
+```bash
+VITE_TEST_AGENT_API_BASE_URL="" \
+  deploy/internal/package-release.sh --include-all-components \
+  --output-dir deploy/internal/dist
+```
+
+只查看本次会包含还是复用，不构建任何制品：
+
+```bash
+deploy/internal/package-release.sh --component-plan-only \
+  --output-dir deploy/internal/dist
+```
 
 仅构建工具盒子交付物时可执行：
 
@@ -104,7 +124,7 @@ deploy/internal/package-release.sh --zip-only --output-dir deploy/internal/dist
 deploy/internal/package-release.sh --toolbox-only --output-dir deploy/internal/dist-toolbox
 ```
 
-标准完整构建默认同时生成两个固定 `linux/amd64` 工具镜像 tar/SHA、完整修改源码/SHA、193 项目录/SHA，以及 `toolbox.env.example`、部署/诊断脚本和 `TOOLBOX.md`；完整 ZIP 会把这些工具制品放入 `dist/`，把脚本和说明放入 `deploy/internal/`。不能用 `--no-save` 生成企业离线交付。独立工具节点必须先按 `TOOLBOX.md` 健康，再发布后端 migration/API，最后替换前端静态资源并 reload Nginx。
+显式 `--toolbox-only` 总是重新构建两个固定 `linux/amd64` 工具镜像 tar/SHA、完整修改源码/SHA和 193 项目录/SHA，并更新本地工具制品指纹；完整发布只在工具源码或构建输入变化时把它们放进 ZIP。部署入口在 `included` 时自动加载并替换 `.4/.114` 的工具容器，在 `reuse` 时前后各诊断一次现有容器，健康失败即停止。不能用 `--no-save` 生成企业离线交付。
 
 当前外部 MySQL 不需要离线镜像包。标准发布 ZIP 和三台应用节点配置包齐全后，只生成一个固定平台
 U 盘交付包：
@@ -158,6 +178,17 @@ deploy/internal/dist/test-agent-programs.tar.gz
 deploy/internal/dist/test-agent-opencode-worker_internal-linux-amd64.tar
 deploy/internal/dist/frontend/
 ```
+
+公共 Agent/Skill 采用独立固定名完整替换包，不并入平台内层 ZIP：
+
+```text
+deploy/internal/dist/test-agent-public-agents-skills.zip
+deploy/internal/dist/test-agent-public-agents-skills.zip.sha256
+```
+
+该包从当前公共配置 Git 提交归档，包含公共 `opencode.jsonc`、全部 Agent、Skill、Tool 和说明，
+不包含 `.git`、`node_modules`、缓存或个人验收样例。通过“系统管理 → 配置管理 → opencode
+公共配置管理”的个人 worktree 导入、查看 Diff、提交并发布；不要直接覆盖共享运行目录。
 
 平台 ZIP 同时包含 `deploy/internal/` 下的配置模板、部署脚本、Nginx 模板、模型配置示例和本部署文档，并在 `.agents/` 下保留当前仓库全部 `session-log*.md` 会话日志作为交付追溯基线；外层完整包封装前会逐一校验这些日志均已进入内层 ZIP。
 仓库保留的 MySQL 容器脚本只作为其它隔离环境备用，不属于当前现场交付。企业服务器只执行校验、解压、`docker load` 和服务启停，不执行

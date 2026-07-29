@@ -30,7 +30,12 @@ import type {
   WorkspaceGitConflictResolution
 } from "@test-agent/shared-types";
 import { formatAgentConfigError } from "./agentConfigErrors";
-import { agentFileInfo, isAgentFilePath, type AgentFileLoadRequest } from "./agentFileLoad";
+import {
+  agentFileInfo,
+  isAgentFilePath,
+  type AgentFileLoadRequest,
+  type PublicWorktreeMountRequest
+} from "./agentFileLoad";
 import { notifyError, notifyInfo, notifySuccess } from "./notify";
 import AgentConfigTreeNode from "./AgentConfigTreeNode.vue";
 import FileUploadOverlay from "./FileUploadOverlay.vue";
@@ -49,8 +54,12 @@ type AgentClipboard = {
 
 const props = defineProps<{
   baseUrl: string;
-  /** 当前页面内存中的用户绑定服务器；公共配置 API 不使用该提示。 */
+  /** 当前页面内存中的用户 OpenCode 进程绑定服务器；同时作为公共个人 worktree 的自动挂载目标。 */
   routeLinuxServerId?: string;
+  /** 是否已经完成当前用户 OpenCode 进程查询；未完成时不得抢先创建公共个人 worktree。 */
+  routeLinuxServerResolved?: boolean;
+  /** 初始化进程成功后，按后端返回的同服 worktree ID 强制重新挂载。 */
+  publicWorktreeMountRequest?: PublicWorktreeMountRequest | null;
   workspaceId?: string;
   /** 公共配置 Git 写权限，仅超级管理员可用。 */
   canWrite: boolean;
@@ -118,6 +127,7 @@ const publicConfigLinuxServerId = computed<string | null>({
   get: () => workbench.publicConfigLinuxServerId,
   set: (val) => { workbench.publicConfigLinuxServerId = val; }
 });
+const selectedPublicLinuxServerId = ref("");
 
 const busy = ref(false);
 const selectedDiff = computed(() => diffFiles.value.find((file) => file.path === selectedDiffPath.value) ?? diffFiles.value[0]);
@@ -144,6 +154,8 @@ const activeAgentFile = computed(() => {
 });
 
 let refreshAllToken = 0;
+let handledPublicWorktreeMountRevision = 0;
+const preparedPublicWorktreeHint = ref<{ worktreeId: string; linuxServerId: string } | null>(null);
 const refreshing = ref(false);
 const panelBusy = computed(() => busy.value || refreshing.value);
 void refreshAll(false);
@@ -155,11 +167,53 @@ watch(
     dragSourcePathsByScope.value = { ...dragSourcePathsByScope.value, WORKSPACE: [] };
     if (agentClipboard.value?.scope === "WORKSPACE") agentClipboard.value = null;
     invalidateDirectoryCache("WORKSPACE", true);
-    void refreshStatus();
-    if (rootExpanded.value.has("WORKSPACE")) {
-      void loadDirectory("WORKSPACE", "");
-    }
+    void refreshAll(false);
   }
+);
+
+watch(
+  [() => props.routeLinuxServerId, () => props.routeLinuxServerResolved],
+  ([linuxServerId, resolved], [previousLinuxServerId, previousResolved]) => {
+    if (resolved !== true || (linuxServerId === previousLinuxServerId && previousResolved === true)) {
+      return;
+    }
+    // 进程查询通常晚于面板挂载；归属确定后重新选择，避免先在公共仓库列表首台服务器创建错误 worktree。
+    void refreshAll(false);
+  }
+);
+
+watch(
+  [
+    () => props.publicWorktreeMountRequest,
+    () => props.routeLinuxServerId,
+    () => props.routeLinuxServerResolved
+  ],
+  ([request, routeLinuxServerId, routeResolved]) => {
+    if (
+      !request
+      || request.revision === handledPublicWorktreeMountRevision
+      || routeResolved !== true
+      || routeLinuxServerId?.trim() !== request.linuxServerId
+    ) {
+      return;
+    }
+    handledPublicWorktreeMountRevision = request.revision;
+    preparedPublicWorktreeHint.value = {
+      worktreeId: request.worktreeId,
+      linuxServerId: request.linuxServerId
+    };
+    if (
+      publicWorktree.value?.worktreeId !== request.worktreeId
+      || publicWorktree.value?.linuxServerId !== request.linuxServerId
+    ) {
+      publicWorktree.value = null;
+    }
+    selectedPublicLinuxServerId.value = request.linuxServerId;
+    publicConfigLinuxServerId.value = request.linuxServerId;
+    // 进程可能在原服务器上重启，服务器监听不会触发；这里按初始化结果主动重挂载并刷新目录。
+    void refreshAll(false);
+  },
+  { immediate: true }
 );
 
 async function refreshAll(notifySkippedFile = true) {
@@ -174,10 +228,12 @@ async function refreshAll(notifySkippedFile = true) {
   invalidateDirectoryCache("PUBLIC");
   invalidateDirectoryCache("WORKSPACE");
   try {
-    await refreshStatus();
+    await refreshStatus(token);
     if (token !== refreshAllToken) return;
     const tasks: Promise<void>[] = [];
-    if (status.value.PUBLIC?.enabled !== false) tasks.push(loadDirectory("PUBLIC", "", true));
+    if (status.value.PUBLIC?.enabled !== false && publicFileTargetAvailable()) {
+      tasks.push(loadDirectory("PUBLIC", "", true));
+    }
     if (props.workspaceId) tasks.push(loadDirectory("WORKSPACE", "", true));
     await Promise.allSettled(tasks);
     if (token !== refreshAllToken) return;
@@ -194,27 +250,50 @@ async function refreshAll(notifySkippedFile = true) {
   }
 }
 
-async function refreshStatus() {
+async function refreshStatus(token: number) {
   const next: { PUBLIC?: AgentConfigStatus; WORKSPACE?: AgentConfigStatus } = {};
+  const workspaceId = props.workspaceId;
   const publicStatusPromise = withTimeout(api.getPublicAgentConfigStatus(), "加载公共 Agent 状态超时");
-  const workspaceStatusPromise = props.workspaceId
-    ? withTimeout(api.getWorkspaceAgentConfigStatus(props.workspaceId), "加载应用 Agent 状态超时")
+  const workspaceStatusPromise = workspaceId
+    ? withTimeout(api.getWorkspaceAgentConfigStatus(workspaceId), "加载应用 Agent 状态超时")
     : Promise.resolve<AgentConfigStatus | undefined>(undefined);
   const [publicResult, workspaceResult] = await Promise.allSettled([publicStatusPromise, workspaceStatusPromise]);
+  if (token !== refreshAllToken) return;
   if (publicResult.status === "fulfilled") {
     next.PUBLIC = publicResult.value;
     if (publicResult.value.enabled !== false) {
       try {
-        publicRepositories.value = await api.listPublicAgentRepositories();
-        const nextServer = preferredPublicServer(publicRepositories.value);
+        const repositories = await api.listPublicAgentRepositories();
+        if (token !== refreshAllToken) return;
+        publicRepositories.value = repositories;
+        const nextServer = automaticPublicServer(repositories);
         if (nextServer) {
           selectedPublicLinuxServerId.value = nextServer;
           publicConfigLinuxServerId.value = nextServer;
           if (props.canWrite) {
-            await ensureCurrentUserPublicWorktree(nextServer, publicResult.value.currentBranch);
+            const worktree = await ensureCurrentUserPublicWorktree(
+              nextServer,
+              repositories,
+              token,
+              publicResult.value.currentBranch
+            );
+            if (token !== refreshAllToken) return;
+            if (worktree) {
+              publicWorktree.value = worktree;
+            }
           }
+        } else if (props.routeLinuxServerResolved === true) {
+          // 已确认没有可用的同服目标时只解除页面挂载，不删除任何服务器上的历史 worktree。
+          selectedPublicLinuxServerId.value = "";
+          publicConfigLinuxServerId.value = null;
+          publicWorktree.value = null;
         }
       } catch (error) {
+        if (token !== refreshAllToken) return;
+        if (props.canWrite && !publicWorktree.value?.worktreeId) {
+          selectedPublicLinuxServerId.value = "";
+          publicConfigLinuxServerId.value = null;
+        }
         errorMessage.value = formatAgentConfigError(error, "加载公共配置仓库列表失败");
       }
     }
@@ -226,32 +305,55 @@ async function refreshStatus() {
   } else {
     errorMessage.value = formatAgentConfigError(workspaceResult.reason, "加载应用 Agent 状态失败");
   }
-  status.value = next;
+  if (token === refreshAllToken) {
+    status.value = next;
+  }
 }
 
 /**
  * 公共区与应用区保持相同的个人隔离语义：管理员进入后自动挂载自己在当前服务器上的长期 worktree。
  */
-async function ensureCurrentUserPublicWorktree(linuxServerId: string, fallbackBranch?: string | null) {
+async function ensureCurrentUserPublicWorktree(
+  linuxServerId: string,
+  repositories: PublicAgentRepositoryStatus[],
+  token: number,
+  fallbackBranch?: string | null
+): Promise<AgentConfigWorktree | undefined> {
   if (
     publicWorktree.value?.linuxServerId === linuxServerId
     && publicWorktree.value.worktreeId
+    && (
+      preparedPublicWorktreeHint.value?.linuxServerId !== linuxServerId
+      || preparedPublicWorktreeHint.value.worktreeId === publicWorktree.value.worktreeId
+    )
   ) {
-    return;
+    return { ...publicWorktree.value };
   }
   const existing = await api.listPublicAgentWorktrees(linuxServerId);
-  if (existing[0]) {
-    publicWorktree.value = { ...existing[0] };
-    return;
+  if (token !== refreshAllToken) return undefined;
+  const preparedWorktreeId = preparedPublicWorktreeHint.value?.linuxServerId === linuxServerId
+    ? preparedPublicWorktreeHint.value.worktreeId
+    : undefined;
+  const selectedExisting = preparedWorktreeId
+    ? existing.find((worktree) => worktree.worktreeId === preparedWorktreeId)
+    : existing[0];
+  if (selectedExisting) {
+    if (preparedWorktreeId) preparedPublicWorktreeHint.value = null;
+    return { ...selectedExisting };
   }
-  const repository = publicRepositories.value.find((item) => item.linuxServerId === linuxServerId);
+  if (preparedWorktreeId) {
+    throw new Error("初始化返回的公共个人 worktree 暂未出现在当前服务器列表中，请刷新后重试。");
+  }
+  const repository = repositories.find((item) => item.linuxServerId === linuxServerId);
   const branch = repository?.currentBranch?.trim() || fallbackBranch?.trim() || "main";
-  publicWorktree.value = await api.createPublicAgentWorktree({
+  if (token !== refreshAllToken) return undefined;
+  const created = await api.createPublicAgentWorktree({
     baseName: "public-personal",
     branch,
     linuxServerId,
     operationId: newOperationId()
   });
+  return token === refreshAllToken ? { ...created } : undefined;
 }
 
 function worktreeId(scope: Scope) {
@@ -662,6 +764,7 @@ async function deleteAgentEntries(entries: { path: string; type: "file" | "direc
 async function loadDirectory(scope: Scope, path: string, force = false) {
   if (scope === "WORKSPACE" && !props.workspaceId) return;
   if (scope === "PUBLIC" && status.value.PUBLIC?.enabled === false) return;
+  if (scope === "PUBLIC" && !publicFileTargetAvailable()) return;
   if (!force && (entriesByScope.value[scope][path] !== undefined || loadingByScope.value[scope].has(path))) return;
   const generation = directoryGeneration.value[scope];
   loadingByScope.value = { ...loadingByScope.value, [scope]: new Set([...loadingByScope.value[scope], path]) };
@@ -710,6 +813,7 @@ function invalidateDirectoryCache(scope: Scope, clearExpanded = false) {
 async function reloadExpandedDirectories(scope: Scope, expanded: Set<string>) {
   if (scope === "WORKSPACE" && !props.workspaceId) return;
   if (scope === "PUBLIC" && status.value.PUBLIC?.enabled === false) return;
+  if (scope === "PUBLIC" && !publicFileTargetAvailable()) return;
   const paths = [...expanded].sort((left, right) => pathDepth(left) - pathDepth(right));
   for (const path of paths) {
     const parent = parentDirectory(path);
@@ -825,15 +929,8 @@ async function refreshActiveEditorFile(scope?: Scope, notifySkippedFile = true) 
   }
 }
 
-async function refreshScope(scope: Scope) {
-  const expandedSnapshot = new Set(expandedByScope.value[scope]);
-  invalidateDirectoryCache(scope);
-  await refreshStatus();
-  if (scope !== "PUBLIC" || status.value.PUBLIC?.enabled !== false) {
-    await loadDirectory(scope, "", true);
-    await reloadExpandedDirectories(scope, expandedSnapshot);
-    await refreshActiveEditorFile(scope);
-  }
+async function refreshScope(_scope: Scope) {
+  await refreshAll();
 }
 
 const personalRuntimeReloadDisabled = computed(() =>
@@ -1143,7 +1240,6 @@ function handleDiffFileClick(file: AgentConfigDiffFile) {
 }
 
 const publicRepositories = ref<PublicAgentRepositoryStatus[]>([]);
-const selectedPublicLinuxServerId = ref("");
 const showSwitchWorktreeModal = ref(false);
 const switchWorktreeOptionsLoading = ref(false);
 const switchWorktreeOptionsError = ref("");
@@ -1159,9 +1255,7 @@ const initializedPublicRepositories = computed(() =>
 
 const activePublicRepository = computed(() => {
   const serverId = publicWorktree.value?.linuxServerId ?? publicConfigLinuxServerId.value ?? selectedPublicLinuxServerId.value;
-  return publicRepositories.value.find((repository) => repository.linuxServerId === serverId)
-    ?? initializedPublicRepositories.value[0]
-    ?? null;
+  return publicRepositories.value.find((repository) => repository.linuxServerId === serverId) ?? null;
 });
 
 const publicSource = computed(() => {
@@ -1245,34 +1339,74 @@ const canSubmitSwitchWorktree = computed(() =>
 );
 
 function preferredPublicServer(repositories: PublicAgentRepositoryStatus[]) {
+  const processServer = props.routeLinuxServerId?.trim();
   const activeServer = publicWorktree.value?.linuxServerId ?? publicConfigLinuxServerId.value;
   const initialized = repositories.filter((repository) => repository.initialized);
+  if (processServer && initialized.some((repository) => repository.linuxServerId === processServer)) {
+    return processServer;
+  }
   if (activeServer && initialized.some((repository) => repository.linuxServerId === activeServer)) {
     return activeServer;
   }
   return initialized[0]?.linuxServerId ?? "";
 }
 
+/**
+ * 自动挂载必须等进程归属查询结束；有绑定时只认进程服务器，保证本地配置软链接和 OpenCode 进程同服。
+ */
+function automaticPublicServer(repositories: PublicAgentRepositoryStatus[]) {
+  if (props.routeLinuxServerResolved !== true) {
+    return "";
+  }
+  const processServer = props.routeLinuxServerId?.trim();
+  if (processServer) {
+    return repositories.some((repository) => repository.initialized && repository.linuxServerId === processServer)
+      ? processServer
+      : "";
+  }
+  // 没有进程绑定时不再自动创建公共个人 worktree；初始化成功后由后端在目标服务器准备。
+  return "";
+}
+
+/** 公共文件树只有在个人 worktree 或已确认的进程同服目录存在时才允许发起文件请求。 */
+function publicFileTargetAvailable() {
+  if (publicWorktree.value?.worktreeId && publicWorktree.value.linuxServerId) {
+    return true;
+  }
+  // 超管只能编辑本人 worktree；准备失败时不能降级浏览共享目录，避免形成看似可写、实际保存失败的状态。
+  if (props.canWrite) {
+    return false;
+  }
+  if (props.routeLinuxServerResolved !== true) {
+    return false;
+  }
+  const processServer = props.routeLinuxServerId?.trim();
+  return Boolean(processServer && initializedPublicRepositories.value.some(
+    (repository) => repository.linuxServerId === processServer
+  ));
+}
+
 async function publicFileLinuxServerId() {
-  if (publicWorktree.value?.worktreeId) {
-    return publicWorktree.value.linuxServerId ?? undefined;
+  if (publicWorktree.value?.worktreeId && publicWorktree.value.linuxServerId) {
+    return publicWorktree.value.linuxServerId;
   }
   if (publicRepositories.value.length === 0) {
     publicRepositories.value = await api.listPublicAgentRepositories();
   }
-  const initialized = initializedPublicRepositories.value;
-  const rememberedServer = publicConfigLinuxServerId.value ?? selectedPublicLinuxServerId.value;
-  if (rememberedServer && initialized.some((repository) => repository.linuxServerId === rememberedServer)) {
-    publicConfigLinuxServerId.value = rememberedServer;
-    return rememberedServer;
+  if (props.canWrite) {
+    throw new Error("请先创建或重新挂载当前用户的公共个人 worktree。");
   }
-  const nextServer = preferredPublicServer(publicRepositories.value);
-  selectedPublicLinuxServerId.value = nextServer;
-  publicConfigLinuxServerId.value = nextServer || null;
-  if (!nextServer) {
-    throw new Error("没有已初始化服务器，请到系统管理 > 配置管理 > TestAgent公共配置管理初始化。");
+  const processServer = props.routeLinuxServerResolved === true ? props.routeLinuxServerId?.trim() : "";
+  if (processServer && initializedPublicRepositories.value.some(
+    (repository) => repository.linuxServerId === processServer
+  )) {
+    selectedPublicLinuxServerId.value = processServer;
+    publicConfigLinuxServerId.value = processServer;
+    return processServer;
   }
-  return nextServer;
+  throw new Error(props.routeLinuxServerResolved === true
+    ? "请先初始化 TestAgent 进程，再加载公共配置。"
+    : "正在确认 TestAgent 进程所在服务器，请稍后刷新。");
 }
 
 async function openSwitchWorktreeModal() {
@@ -1926,7 +2060,7 @@ defineExpose({
             v-if="canWrite"
             type="button"
             class="agent-icon-btn"
-            title="Agent 配置更新（公共）"
+            title="Agent 配置更新（公共）：加载本人 worktree，未提交内容不会删除"
             aria-label="Agent 配置更新（公共）"
             :disabled="personalRuntimeReloadDisabled || status.PUBLIC?.enabled === false || !publicWorktree?.worktreeId"
             @click="requestPersonalRuntimeReload('PUBLIC')"
@@ -2001,7 +2135,7 @@ defineExpose({
             v-if="workspaceCanWrite"
             type="button"
             class="agent-icon-btn"
-            title="Agent 配置更新（应用）"
+            title="Agent 配置更新（应用）：先合并 feature 分支，再刷新本人运行态"
             aria-label="Agent 配置更新（应用）"
             :disabled="personalRuntimeReloadDisabled || !workspaceId"
             @click="requestPersonalRuntimeReload('WORKSPACE')"

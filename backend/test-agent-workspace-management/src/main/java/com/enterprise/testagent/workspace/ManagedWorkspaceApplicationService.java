@@ -2825,14 +2825,15 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     /**
-     * 查询超级管理员应用 Git 刷新页的完整范围。
+     * 查询超级管理员应用 Git 刷新页的有效范围。
      *
      * <p>范围与实际刷新共用同一分组程序，避免页面展示的分支和真正执行的分支发生漂移。
-     * 这里返回所有应用，包括停用应用；是否执行仍由超级管理员显式确认。</p>
+     * 只返回已经形成实际 feature 分支组的应用；启用和停用应用都保留，是否执行仍由超级管理员显式确认。</p>
      */
     public List<ManagedWorkspaceResponses.ApplicationGitRefreshScopeResponse> listApplicationGitRefreshScopes() {
         return configurationRepository.findApplications(false).stream()
                 .map(this::applicationGitRefreshScope)
+                .filter(scope -> !scope.groups().isEmpty())
                 .toList();
     }
 

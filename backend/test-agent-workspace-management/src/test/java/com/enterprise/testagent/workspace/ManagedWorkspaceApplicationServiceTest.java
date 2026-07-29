@@ -1973,6 +1973,18 @@ class ManagedWorkspaceApplicationServiceTest {
         });
     }
 
+    @Test
+    void superAdminRefreshScopeOmitsApplicationWithoutFeatureBranch() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        ManagedWorkspaceApplicationService service = service(
+                configuration,
+                new FakeManagedWorkspaceRepository(),
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("F-GCMS/workspace"));
+
+        assertThat(service.listApplicationGitRefreshScopes()).isEmpty();
+    }
+
     private static ApplicationWorkspaceVersion versionForScope(
             String versionId,
             String applicationWorkspaceId,

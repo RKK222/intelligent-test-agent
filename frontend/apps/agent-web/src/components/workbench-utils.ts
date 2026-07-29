@@ -45,6 +45,24 @@ export type WorkspaceRequirementReference = {
   filePaths: string[];
 };
 
+export type OpencodeProcessQueryStatus = "pending" | "success" | "error";
+
+/**
+ * 只有进程查询明确成功时才能把服务器归属标记为已解析；查询失败不能退化成“用户尚未分配”。
+ */
+export function opencodeProcessRouteResolution(
+  process: Pick<UserOpencodeProcess, "linuxServerId"> | null | undefined,
+  queryStatus: OpencodeProcessQueryStatus
+): { resolved: boolean; linuxServerId: string } {
+  if (queryStatus !== "success") {
+    return { resolved: false, linuxServerId: "" };
+  }
+  return {
+    resolved: true,
+    linuxServerId: process?.linuxServerId?.trim() ?? ""
+  };
+}
+
 /**
  * `.opencode` 已由下方 Agent 配置树专门管理，普通工作空间根目录不重复展示。
  */

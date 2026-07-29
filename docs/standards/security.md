@@ -165,11 +165,11 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 
 ## Codex 白盒分析 MCP 安全边界
 
-1. 功能只在目标应用显式启用本地 `codex_whitebox` MCP 后出现；使用者必须仍是该应用有效成员，普通成员、应用管理员和已加入应用的 `SUPER_ADMIN` 权限相同，超级管理员不得旁路成员校验。
+1. 公共配置通过中性名称 `code_analysis` 注册本地 MCP，所有使用该公共配置的应用都会出现白盒分析 Agent；使用者必须仍是当前应用有效成员，普通成员、应用管理员和已加入应用的 `SUPER_ADMIN` 权限相同，超级管理员不得旁路成员校验。
 2. 对话只允许调用安全门面的 `whitebox_analyze({prompt})` 与 `whitebox_reply({threadId,prompt})`。不得暴露官方 MCP 的 cwd、模型、配置、沙箱、审批、基础指令或开发者指令参数；cwd 必须固定为当前已鉴权 workspace。
 3. 管理员级 `/etc/codex/requirements.toml` 必须固定 approval `never`、Web Search disabled、根文件系统 deny、Codex 最小运行文件和当前 workspace read、临时目录 deny、网络 disabled。策略缺失、被修改、bubblewrap 不可用或精细只读探针失败时必须拒绝启动，不能降级为普通只读提示词。
 4. 每个门面进程使用独立 `0700` 临时 `CODEX_HOME` 和 `0600` 配置，只接受本进程生成的 thread ID；取消、超时、stdin 断开和进程终止都必须回收 Codex 子进程并删除临时目录。
-5. 模型代理密钥、代理地址和用户 UCID 只复用 Java/manager 向该用户 OpenCode 进程注入的环境变量，不写入应用 JSONC。Codex shell 环境只允许 PATH/HOME，不能继承代理 key、UCID 或其它 Java/OpenCode 进程秘密。
+5. 模型代理密钥、代理地址和用户 UCID 只复用 Java/manager 向该用户 OpenCode 进程注入的环境变量，不写入公共或应用 JSONC。Codex shell 环境只允许 PATH/HOME，不能继承代理 key、UCID 或其它 Java/OpenCode 进程秘密。
 6. Responses 适配只接收纯文本与 function calling 子集，不透传图片、文件、Web 工具、reasoning 或加密思维链。日志只记录随机 traceId、耗时、结果状态和稳定错误码，不记录代码、提示词、工具参数、Token、供应商错误正文或敏感路径。
 7. 企业 Linux 节点必须在启用前执行 `deploy/internal/check-codex-whitebox-host.sh`，真实验证当前内核/Docker 上的读、拒写、越界拒读、断网和 Git 状态不变。当前现场基线为 Linux 4.19、Docker 18.09.7、x86_64、privileged worker；构建机验证不能替代逐节点能力验收。
 

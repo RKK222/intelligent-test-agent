@@ -988,6 +988,96 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
+    void processInitializationPreparesPublicWorktreeOnTheCurrentServer() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode"));
+        Files.writeString(root.resolve(".config/opencode/config.json"), "{}");
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                git,
+                new RecordingBroadcastPublisher());
+        PersonalAgentConfigRuntimeReloader reloader = mock(PersonalAgentConfigRuntimeReloader.class);
+        Path personalAgentRoot = root.resolve(".configdev/public-usr_admin/opencode");
+        when(reloader.activatePublicPreview(ADMIN, "linux-1", personalAgentRoot.toString(), "trace_process_init"))
+                .thenReturn(new PersonalAgentConfigRuntimeReloadResult(true, "activated"));
+        service.setPersonalRuntimeReloader(reloader);
+
+        AgentConfigResponses.PublicWorktreePreparationResponse response =
+                service.preparePublicWorktreeForInitializedProcess("linux-1", ADMIN, "trace_process_init");
+
+        assertThat(response.ready()).isTrue();
+        assertThat(response.linuxServerId()).isEqualTo("linux-1");
+        assertThat(response.worktreeId()).isNotBlank();
+        assertThat(response.message()).contains("自动加载").contains("未提交内容");
+        assertThat(agentConfigs.findWorktree(response.worktreeId())).isPresent();
+        assertThat(git.worktreeBranch).isEqualTo("public-usr_admin");
+        verify(reloader).activatePublicPreview(
+                ADMIN,
+                "linux-1",
+                personalAgentRoot.toString(),
+                "trace_process_init");
+    }
+
+    @Test
+    void resolvesOnlyTheActiveStablePublicPersonalConfigOnTheCurrentServer() throws Exception {
+        Path worktreeRoot = root.resolve(".configdev/public-usr_admin");
+        Files.createDirectories(worktreeRoot.resolve("opencode"));
+        Files.writeString(worktreeRoot.resolve("opencode/opencode.jsonc"), "{}");
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_public",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-1",
+                "public-usr_admin",
+                "public-usr_admin",
+                worktreeRoot.toString(),
+                ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW));
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                new RecordingGitWorkspaceService(),
+                new RecordingBroadcastPublisher());
+
+        assertThat(service.resolvePublicPersonalConfigPath(ADMIN, "linux-1"))
+                .contains(worktreeRoot.resolve("opencode").toAbsolutePath().normalize().toString());
+        assertThat(service.resolvePublicPersonalConfigPath(ADMIN, "linux-2")).isEmpty();
+    }
+
+    @Test
+    void processInitializationKeepsTheProcessUsableWhenPublicRepositoryIsNotInitialized() {
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher());
+
+        AgentConfigResponses.PublicWorktreePreparationResponse response =
+                service.preparePublicWorktreeForInitializedProcess("linux-1", ADMIN, "trace_process_init");
+
+        assertThat(response.ready()).isFalse();
+        assertThat(response.linuxServerId()).isEqualTo("linux-1");
+        assertThat(response.message()).contains("未初始化");
+        assertThat(git.worktreeRoot).isNull();
+    }
+
+    @Test
     void publicWorktreeDoesNotReuseLegacyVersionedBranch() throws Exception {
         Files.createDirectories(root.resolve(".config/.git"));
         Files.createDirectories(root.resolve(".config/opencode"));

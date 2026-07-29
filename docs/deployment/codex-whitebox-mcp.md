@@ -17,7 +17,7 @@
 
 ## 用户怎么使用
 
-管理员为应用完成启用后，用户在该应用的对话中选择 `whitebox-code-analyst` Agent，直接描述
+管理员发布公共配置后，用户在自己有权访问的应用对话中选择 `whitebox-code-analyst` Agent，直接描述
 要分析的问题即可，例如：
 
 ```text
@@ -35,21 +35,21 @@ Agent 会自动调用本地 MCP，用户不需要手写工具名、cwd 或模型
 
 使用条件同时包括：
 
-1. 目标应用的 `.opencode/opencode.jsonc` 已启用 `codex_whitebox` MCP，并发布
-   `whitebox-code-analyst` Agent；
+1. 公共 `opencode/opencode.jsonc` 已启用 `code_analysis` MCP，并发布
+   `opencode/agents/whitebox-code-analyst.md`；
 2. 当前用户仍是该应用的有效成员；
 3. 当前托管 workspace 属于该应用且通过既有会话/工作区鉴权。
 
 普通应用成员、应用管理员、已加入应用的超级管理员都可使用。超级管理员不绕过应用成员
-校验；未加入应用时不能取得该应用 workspace 上下文，也不能借本 MCP 分析代码。未配置或
-设置 `enabled: false` 的应用不会出现这两个工具。本期不新增 `TESTER` 角色，也不修改成员、
-Workspace、前端、数据库或 RunEvent 鉴权模型。
+校验；未加入应用时不能取得该应用 workspace 上下文，也不能借本 MCP 分析代码。当前公共
+配置会让使用该配置的所有应用都出现白盒分析 Agent，不再提供逐应用启用开关。本期不新增
+`TESTER` 角色，也不修改成员、Workspace、前端、数据库或 RunEvent 鉴权模型。
 
-## 应用启用
+## 公共配置启用
 
-先按“Java 后端 → programs/worker → 指定应用配置”的顺序升级。把
-`deploy/internal/codex-whitebox-application.opencode.jsonc.example` 中的 `mcp.codex_whitebox`
-合并进目标应用 `.opencode/opencode.jsonc`，并按应用实际模型填写：
+先按“Java 后端 → programs/worker → 公共配置”的顺序升级。把
+`deploy/internal/codex-whitebox-public.opencode.jsonc.example` 中的 `mcp.code_analysis`
+合并进公共配置仓库 `opencode/opencode.jsonc`，并按企业实际模型填写：
 
 - `TEST_AGENT_CODEX_PROVIDER_ID`：内部模型供应商路由 ID，例如 `qwen-prod`；
 - `TEST_AGENT_CODEX_MODEL`：该供应商下可靠支持 function calling 的模型；
@@ -60,10 +60,14 @@ Workspace、前端、数据库或 RunEvent 鉴权模型。
 进程注入 `TEST_AGENT_INTERNAL_PROXY_BASE_URL`、`TEST_AGENT_INTERNAL_PROXY_API_KEY` 和
 `ENTERPRISE_UCID`，门面缺少任一项时失败关闭。
 
-再把 `deploy/internal/whitebox-code-analyst.md` 发布到该应用 `.opencode/agents/`。该 Agent
-默认拒绝全部工具，只放行 `codex_whitebox_whitebox_analyze` 和
-`codex_whitebox_whitebox_reply`。应用配置变更沿用现有应用 Agent Git、发布和 OpenCode
-dispose 流程，不新增业务接口。
+再把 `deploy/internal/whitebox-code-analyst.md` 发布为公共
+`opencode/agents/whitebox-code-analyst.md`。该 Agent
+默认拒绝全部工具，只放行 `code_analysis_whitebox_analyze` 和
+`code_analysis_whitebox_reply`。公共配置变更沿用现有公共 Agent Git、发布、跨服务器同步和
+OpenCode dispose 流程，不新增业务接口。独立完整替换包固定为
+`deploy/internal/dist/test-agent-public-agents-skills.zip` 及同名 `.sha256`，包内同时携带当前
+公共 `opencode.jsonc`、全部公共 Agent、Skill、Tool 和说明；导入时不得只复制白盒文件而
+丢失既有公共配置。
 
 ## 只读与日志安全
 
@@ -115,7 +119,7 @@ linux/amd64、glibc 2.31、Codex 0.145.0、bubblewrap 摘要，以及真实的 `
 相同的 `--privileged` 和 `--network none`，模型服务是容器 loopback 内的本地伪服务，
 完全不访问外网。
 
-任何一项失败都不得启用应用 MCP。先保留完整输出并检查：worker 是否确由正式脚本重建为
+任何一项失败都不得发布公共 MCP 配置。先保留完整输出并检查：worker 是否确由正式脚本重建为
 privileged、宿主安全策略是否禁止 namespace、镜像/programs 是否来自同一批发布包。不得
 通过改成危险的宽权限 Codex 配置来绕过探针。Mac Docker Desktop 的 linux/amd64 仿真只能
 完成二进制、摘要、MCP 契约和失败关闭检查；Apple Silicon 仿真不能创建 Codex 所需的嵌套
@@ -135,6 +139,14 @@ deploy/internal/package-release.sh --output-dir deploy/internal/dist
 构建机检查还会构造“历史 `function_call_output` + 本轮续写提示”的输入，确认续写提示优先被
 识别并保留第一轮上下文；该项不依赖 native namespace，Apple Silicon 构建机也必须通过。
 
+OpenCode Manager、OpenCode runtime、Codex MCP、Node/MCP SDK、bubblewrap、worker 镜像和
+`test-agent-programs.tar.gz` 按一个 `worker runtime` 指纹单元发布。任一运行输入变化时全部重建并
+进入 ZIP；全部未变化时增量 ZIP 标记 `TEST_AGENT_RELEASE_WORKER_RUNTIME=reuse`，不再重复携带
+worker tar 或 programs。目标部署在替换 Java 前必须确认
+`/data/testagent/config/release-component-state.env` 中的实际安装指纹与清单一致，并确认现有
+Manager、OpenCode、Codex 文件及 worker 容器健康，否则拒绝使用增量包。新装机、灾备或迁移到
+本机制后的首包使用 `--include-all-components`。
+
 `test-agent-programs.tar.gz` 与 worker 镜像同时包含 Codex、固定 bubblewrap、Apache-2.0
 LICENSE/NOTICE、bubblewrap COPYING、门面和版本/摘要元数据；企业服务器不下载 npm、Codex
 或沙箱依赖。构建机验证命令：
@@ -148,6 +160,7 @@ tools/verify-codex-whitebox-worker-image.sh test-agent-opencode-worker:internal
 
 ## 回滚
 
-先从应用 `.opencode/opencode.jsonc` 移除/禁用 `codex_whitebox`，并撤下
-`whitebox-code-analyst`；等待应用配置发布和用户 OpenCode dispose 完成后，再按同一批次
+先从公共 `opencode/opencode.jsonc` 移除/禁用 `code_analysis`，并撤下
+`opencode/agents/whitebox-code-analyst.md`；等待公共配置发布、跨服务器同步和用户 OpenCode
+dispose 完成后，再按同一批次
 回退 Java、programs 与 worker 镜像。不涉及数据库、Flyway 或 RunEvent 回滚。

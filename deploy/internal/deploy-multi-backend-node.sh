@@ -282,6 +282,10 @@ validate_frontend_config() {
   require_one_key "${nginx_env}" TEST_AGENT_NGINX_BACKENDS
   require_one_key "${nginx_env}" TEST_AGENT_NGINX_SERVER_ROUTES
   require_one_key "${nginx_env}" TEST_AGENT_NGINX_XXL_JOB_ADMINS
+  require_exact_value "${nginx_env}" TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM \
+    122.233.30.4:18120,122.233.30.114:18120
+  require_exact_value "${nginx_env}" TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM \
+    122.233.30.4:18121,122.233.30.114:18121
   backends="$(env_value "${nginx_env}" TEST_AGENT_NGINX_BACKENDS)"
   routes="$(env_value "${nginx_env}" TEST_AGENT_NGINX_SERVER_ROUTES)"
   admins="$(env_value "${nginx_env}" TEST_AGENT_NGINX_XXL_JOB_ADMINS)"
@@ -498,11 +502,25 @@ verify_backend() {
     "${BACKEND_HOST}" "${expected_server_id}" "${peer_host}" "${jar_digest}"
 }
 
+probe_toolbox_upstream() {
+  local source="$1" endpoint="$2" deep_path="$3"
+  # 前端节点必须真实访问每个工具实例，避免只校验 Nginx 文本后把防火墙或端口故障带到线上。
+  if ! curl -fsS --connect-timeout 3 --max-time 10 "http://${endpoint}/healthz" >/dev/null; then
+    echo "${source} toolbox upstream health is unreachable from frontend node: ${endpoint}" >&2
+    return 1
+  fi
+  if ! curl -fsSI --connect-timeout 3 --max-time 10 "http://${endpoint}${deep_path}" >/dev/null; then
+    echo "${source} toolbox deep link is unreachable from frontend node: ${endpoint}${deep_path}" >&2
+    return 1
+  fi
+}
+
 verify_frontend() {
   local installed_config="${INSTALL_ROOT}/config"
   local nginx_env="${installed_config}/nginx.env"
   local nginx_bin nginx_prefix nginx_main_conf nginx_dump backends admins entry
-  local -a backend_entries=() admin_entries=()
+  local toolbox_it_tools toolbox_omni_tools it_headers omni_headers
+  local -a backend_entries=() admin_entries=() toolbox_it_tools_entries=() toolbox_omni_tools_entries=()
 
   validate_frontend_config "${installed_config}"
   require_command curl
@@ -515,6 +533,16 @@ verify_frontend() {
   IFS=',' read -r -a admin_entries <<<"${admins}"
   for entry in "${admin_entries[@]}"; do
     curl -fsS "http://${entry}/xxl-job-admin/actuator/health/readiness" >/dev/null
+  done
+  toolbox_it_tools="$(env_value "${nginx_env}" TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM)"
+  IFS=',' read -r -a toolbox_it_tools_entries <<<"${toolbox_it_tools}"
+  for entry in "${toolbox_it_tools_entries[@]}"; do
+    probe_toolbox_upstream IT-Tools "${entry}" /token-generator
+  done
+  toolbox_omni_tools="$(env_value "${nginx_env}" TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM)"
+  IFS=',' read -r -a toolbox_omni_tools_entries <<<"${toolbox_omni_tools}"
+  for entry in "${toolbox_omni_tools_entries[@]}"; do
+    probe_toolbox_upstream OmniTools "${entry}" /audio/change-speed
   done
 
   nginx_bin="$(env_value "${nginx_env}" TEST_AGENT_NGINX_BIN)"
@@ -529,12 +557,34 @@ verify_frontend() {
   for entry in "${backend_entries[@]}"; do
     grep -Fq "server ${entry} max_fails=3 fail_timeout=10s;" <<<"${nginx_dump}"
   done
+  grep -Fq 'server 122.233.30.4:18120 max_fails=2 fail_timeout=10s;' <<<"${nginx_dump}"
+  grep -Fq 'server 122.233.30.114:18120 backup max_fails=2 fail_timeout=10s;' <<<"${nginx_dump}"
+  grep -Fq 'server 122.233.30.4:18121 max_fails=2 fail_timeout=10s;' <<<"${nginx_dump}"
+  grep -Fq 'server 122.233.30.114:18121 backup max_fails=2 fail_timeout=10s;' <<<"${nginx_dump}"
   grep -Fq 'listen 80;' <<<"${nginx_dump}"
   grep -Fq 'listen 9996;' <<<"${nginx_dump}"
   curl -fsS http://127.0.0.1/health | grep -Fxq ok
   curl -fsS http://127.0.0.1:9996/health | grep -Fxq ok
-  printf 'Frontend verification passed: %s backends ready; Nginx listens on 80 and 9996\n' \
-    "${#backend_entries[@]}"
+  if ! it_headers="$(curl -fsSI --connect-timeout 3 --max-time 10 \
+    http://127.0.0.1/toolbox/apps/it-tools/token-generator | tr -d '\r')"; then
+    echo 'IT-Tools gateway deep link is unavailable on frontend Nginx' >&2
+    return 1
+  fi
+  grep -qi '^content-security-policy:' <<<"${it_headers}" || {
+    echo 'IT-Tools gateway response is missing Content-Security-Policy' >&2
+    return 1
+  }
+  if ! omni_headers="$(curl -fsSI --connect-timeout 3 --max-time 10 \
+    http://127.0.0.1/toolbox/apps/omni-tools/audio/change-speed | tr -d '\r')"; then
+    echo 'OmniTools gateway deep link is unavailable on frontend Nginx' >&2
+    return 1
+  fi
+  grep -qi '^cross-origin-embedder-policy: require-corp' <<<"${omni_headers}" || {
+    echo 'OmniTools gateway response is missing Cross-Origin-Embedder-Policy' >&2
+    return 1
+  }
+  printf 'Frontend verification passed: %s backends and %s toolbox upstreams ready; Nginx listens on 80 and 9996\n' \
+    "${#backend_entries[@]}" "$(( ${#toolbox_it_tools_entries[@]} + ${#toolbox_omni_tools_entries[@]} ))"
 }
 
 require_absolute_path "${RELEASE_ARCHIVE}" RELEASE_ARCHIVE

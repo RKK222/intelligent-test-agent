@@ -60,6 +60,8 @@ printf '%s\n' \
   'TEST_AGENT_NGINX_MODE=multi' \
   'TEST_AGENT_NGINX_BACKENDS=122.233.30.4:8080,122.233.30.114:8080' \
   'TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.4:18080,122.233.30.114:18080' \
+  'TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=122.233.30.4:18120,122.233.30.114:18120' \
+  'TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=122.233.30.4:18121,122.233.30.114:18121' \
   'TEST_AGENT_NGINX_SERVER_ROUTES=test-agent-backend-122-233-30-4=122.233.30.4:8080,test-agent-backend-122-233-30-114=122.233.30.114:8080' \
   'TEST_AGENT_NGINX_LISTEN_PORT=80' \
   'TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=9996' \
@@ -81,12 +83,24 @@ printf 'fixture external library\n' >"${RELEASE_ROOT}/dist/backend/lib/fixture.j
 tar -C "${EMPTY_ROOT}" -czf "${RELEASE_ROOT}/dist/test-agent-frontend-dist.tar.gz" .
 tar -C "${EMPTY_ROOT}" -czf "${RELEASE_ROOT}/dist/test-agent-programs.tar.gz" .
 printf 'fixture worker image\n' >"${RELEASE_ROOT}/dist/test-agent-opencode-worker_internal-linux-amd64.tar"
+printf 'fixture it-tools image\n' >"${RELEASE_ROOT}/dist/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar"
+printf 'fixture omni-tools image\n' >"${RELEASE_ROOT}/dist/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar"
 cp "${ROOT_DIR}/deploy/internal/deploy-internal-release.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/deploy-internal-frontend.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/opencode-worker-docker.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/ensure-opencode-runtime-gitignore.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/opencode-runtime.gitignore" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/configure-nginx.sh" "${RELEASE_ROOT}/deploy/internal/"
+cp "${ROOT_DIR}/deploy/internal/toolbox.env.example" "${RELEASE_ROOT}/deploy/internal/"
+cp "${ROOT_DIR}/deploy/internal/toolbox-docker.sh" "${RELEASE_ROOT}/deploy/internal/"
+cp "${ROOT_DIR}/deploy/internal/diagnose-toolbox.sh" "${RELEASE_ROOT}/deploy/internal/"
+printf '%s\n' \
+  'TEST_AGENT_RELEASE_COMPONENT_MANIFEST_VERSION=1' \
+  'TEST_AGENT_RELEASE_WORKER_RUNTIME=included' \
+  'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=fixture-worker' \
+  'TEST_AGENT_RELEASE_TOOLBOX=included' \
+  'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=fixture-toolbox' \
+  >"${RELEASE_ROOT}/deploy/internal/release-components.env"
 (cd "${RELEASE_ROOT}" && zip -qr "${RELEASE_ARCHIVE}" .)
 (cd "${TMP_ROOT}" && shasum -a 256 "$(basename "${RELEASE_ARCHIVE}")" \
   >"$(basename "${RELEASE_ARCHIVE}").sha256")
@@ -110,6 +124,52 @@ validate_without_secret_output() {
 validate_without_secret_output backend "${CONFIG_4}" --backend-host 122.233.30.4
 validate_without_secret_output backend "${CONFIG_114}" --backend-host 122.233.30.114
 validate_without_secret_output frontend "${CONFIG_FRONTEND}"
+
+# 未更新的 Manager/Codex/OpenCode runtime 由现场复用时，增量包不携带 programs 和 worker tar，
+# 但节点预校验仍必须接受清单明确声明的 reuse 模式。
+REUSE_RELEASE_ROOT="${TMP_ROOT}/reuse-release-root"
+REUSE_RELEASE_ARCHIVE="${TMP_ROOT}/test-agent-incremental-release.zip"
+cp -R "${RELEASE_ROOT}" "${REUSE_RELEASE_ROOT}"
+rm -f "${REUSE_RELEASE_ROOT}/dist/test-agent-programs.tar.gz" \
+  "${REUSE_RELEASE_ROOT}/dist/test-agent-opencode-worker_internal-linux-amd64.tar"
+sed -i.bak 's/TEST_AGENT_RELEASE_WORKER_RUNTIME=included/TEST_AGENT_RELEASE_WORKER_RUNTIME=reuse/' \
+  "${REUSE_RELEASE_ROOT}/deploy/internal/release-components.env"
+rm -f "${REUSE_RELEASE_ROOT}/deploy/internal/release-components.env.bak"
+(cd "${REUSE_RELEASE_ROOT}" && zip -qr "${REUSE_RELEASE_ARCHIVE}" .)
+(cd "${TMP_ROOT}" && shasum -a 256 "$(basename "${REUSE_RELEASE_ARCHIVE}")" \
+  >"$(basename "${REUSE_RELEASE_ARCHIVE}").sha256")
+reuse_output="$(bash "${DEPLOY_SCRIPT}" backend \
+  --config-dir "${CONFIG_4}" \
+  --release-archive "${REUSE_RELEASE_ARCHIVE}" \
+  --backend-host 122.233.30.4 \
+  --validate-only 2>&1)"
+grep -Fq 'worker runtime component: reuse' <<<"${reuse_output}"
+grep -Fq 'validation passed' <<<"${reuse_output}"
+
+# 真正升级前必须核对目标机已安装的 worker runtime 指纹，不能只凭旧容器仍在运行就复用。
+REUSE_INSTALL_ROOT="${TMP_ROOT}/reuse-install"
+REUSE_BIN="${TMP_ROOT}/reuse-bin"
+mkdir -p "${REUSE_INSTALL_ROOT}/config" "${REUSE_BIN}"
+printf 'fixture docker env\n' >"${REUSE_INSTALL_ROOT}/config/docker.env"
+printf '%s\n' \
+  'TEST_AGENT_RELEASE_COMPONENT_STATE_VERSION=1' \
+  'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=wrong-worker' \
+  >"${REUSE_INSTALL_ROOT}/config/release-component-state.env"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"${REUSE_BIN}/curl"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"${REUSE_BIN}/systemctl"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"${REUSE_BIN}/docker"
+chmod +x "${REUSE_BIN}/curl" "${REUSE_BIN}/systemctl" "${REUSE_BIN}/docker"
+if mismatch_output="$(PATH="${REUSE_BIN}:${PATH}" \
+  bash "${ROOT_DIR}/deploy/internal/deploy-internal-release.sh" \
+    --archive "${REUSE_RELEASE_ARCHIVE}" \
+    --extract-dir "${TMP_ROOT}/reuse-extract" \
+    --install-root "${REUSE_INSTALL_ROOT}" \
+    --docker-env "${REUSE_INSTALL_ROOT}/config/docker.env" \
+    --skip-frontend 2>&1)"; then
+  echo 'Worker runtime reuse unexpectedly accepted a mismatched installed fingerprint' >&2
+  exit 1
+fi
+grep -Fq 'worker runtime fingerprint does not match the installed component' <<<"${mismatch_output}"
 
 # 新后台沿用同一配置字段，只替换本机 advertised host 和稳定 server ID。
 cp "${CONFIG_4}/backend.env" "${CONFIG_115}/backend.env"
@@ -214,4 +274,12 @@ grep -Fq 'peer=deferred' <<<"${skip_output}"
 grep -Fq "grep -E 'event=manager_config_update status=applied|manager config update applied'" \
   "${ROOT_DIR}/deploy/internal/deploy-internal-release.sh"
 
-echo 'Two-backend per-node validation, embedded RSA, secret redaction and manager log compatibility verified'
+# 前端验收必须真实探测两类工具的每个 upstream 和统一入口深链，不能只检查 Nginx 配置文本。
+grep -Fq 'probe_toolbox_upstream IT-Tools "${entry}" /token-generator' "${DEPLOY_SCRIPT}"
+grep -Fq 'probe_toolbox_upstream OmniTools "${entry}" /audio/change-speed' "${DEPLOY_SCRIPT}"
+grep -Fq 'http://127.0.0.1/toolbox/apps/it-tools/token-generator' "${DEPLOY_SCRIPT}"
+grep -Fq 'http://127.0.0.1/toolbox/apps/omni-tools/audio/change-speed' "${DEPLOY_SCRIPT}"
+grep -Fq 'toolbox upstream health is unreachable from frontend node' "${DEPLOY_SCRIPT}"
+grep -Fq 'toolbox deep link is unreachable from frontend node' "${DEPLOY_SCRIPT}"
+
+echo 'Two-backend per-node validation, toolbox connectivity gates, embedded RSA, secret redaction and manager log compatibility verified'

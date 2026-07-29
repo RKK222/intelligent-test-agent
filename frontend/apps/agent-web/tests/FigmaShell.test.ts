@@ -139,11 +139,20 @@ describe("FigmaShell", () => {
     expect(wrapper.find('[data-testid="pet-runtime-reload-actions"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="pet-companion-settings"]').exists()).toBe(false);
     await wrapper.get('button[aria-label="重载公共个人配置"]').trigger("click");
-    expect(wrapper.get('[data-testid="pet-runtime-reload-confirm"]').text()).toContain("公共个人 worktree");
+    const publicConfirmation = wrapper.get('[data-testid="pet-runtime-reload-confirm"]').text();
+    expect(publicConfirmation).toContain("公共个人 worktree");
+    expect(publicConfirmation).toContain("未提交内容不会被删除");
+    expect(publicConfirmation).toContain("启动或重启");
     expect(wrapper.emitted("personal-runtime-reload")).toBeUndefined();
 
     await wrapper.get('[data-testid="pet-runtime-reload-confirm"] button.is-primary').trigger("click");
     expect(wrapper.emitted("personal-runtime-reload")?.[0]).toEqual([{ scope: "PUBLIC" }]);
+
+    await wrapper.get('button[aria-label="重载应用个人配置"]').trigger("click");
+    const applicationConfirmation = wrapper.get('[data-testid="pet-runtime-reload-confirm"]').text();
+    expect(applicationConfirmation).toContain("feature 固定提交");
+    expect(applicationConfirmation).toContain("不会 stash、reset");
+    expect(applicationConfirmation).toContain("未提交内容");
   });
 
   it("closes a pending workspace runtime reload and rejects its stale confirm after capability revocation", async () => {

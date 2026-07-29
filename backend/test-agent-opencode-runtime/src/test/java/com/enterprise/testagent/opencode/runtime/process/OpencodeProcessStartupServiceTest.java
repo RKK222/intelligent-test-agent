@@ -9,6 +9,7 @@ import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.configuration.CommonParameterValues;
 import com.enterprise.testagent.domain.configuration.ParameterPlatform;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigPreviewSourceResolver;
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.node.ExecutionNodeRepository;
@@ -106,6 +107,51 @@ class OpencodeProcessStartupServiceTest {
         Mockito.verify(configLinkService).switchToShared(request.sessionPath(), request.configPath());
         assertThat(gateway.startCommands).singleElement().satisfies(command ->
                 assertThat(command.configPath()).isEqualTo(request.configPath()));
+    }
+
+    @Test
+    void startAndVerifyLoadsValidPublicPersonalConfigBeforeManagerStart() {
+        FakeRepository repository = new FakeRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        OpencodeProcessStartupService service = service(repository, gateway, new RecordingHeartbeatStore());
+        OpencodeProcessConfigLinkService configLinkService = Mockito.mock(OpencodeProcessConfigLinkService.class);
+        PublicAgentConfigPreviewSourceResolver resolver = Mockito.mock(PublicAgentConfigPreviewSourceResolver.class);
+        OpencodeProcessStartupRequest request = request(null, null, null);
+        String personalConfigPath = "/worktrees/usr-1/opencode";
+        Mockito.when(resolver.resolvePublicPersonalConfigPath(USER_ID, SERVER_ID.value()))
+                .thenReturn(Optional.of(personalConfigPath));
+        service.setConfigLinkService(configLinkService);
+        service.setPublicPreviewSourceResolver(resolver);
+
+        service.startAndVerify(request);
+
+        Mockito.verify(configLinkService).switchTo(personalConfigPath, request.configPath());
+        Mockito.verify(configLinkService, Mockito.never())
+                .switchToShared(request.sessionPath(), request.configPath());
+        assertThat(gateway.startCommands).hasSize(1);
+    }
+
+    @Test
+    void startAndVerifyFallsBackToSharedWhenPersonalConfigCannotBeLinked() {
+        FakeRepository repository = new FakeRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        OpencodeProcessStartupService service = service(repository, gateway, new RecordingHeartbeatStore());
+        OpencodeProcessConfigLinkService configLinkService = Mockito.mock(OpencodeProcessConfigLinkService.class);
+        PublicAgentConfigPreviewSourceResolver resolver = Mockito.mock(PublicAgentConfigPreviewSourceResolver.class);
+        OpencodeProcessStartupRequest request = request(null, null, null);
+        String personalConfigPath = "/worktrees/usr-1/opencode";
+        Mockito.when(resolver.resolvePublicPersonalConfigPath(USER_ID, SERVER_ID.value()))
+                .thenReturn(Optional.of(personalConfigPath));
+        Mockito.doThrow(new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "personal config unavailable"))
+                .when(configLinkService)
+                .switchTo(personalConfigPath, request.configPath());
+        service.setConfigLinkService(configLinkService);
+        service.setPublicPreviewSourceResolver(resolver);
+
+        service.startAndVerify(request);
+
+        Mockito.verify(configLinkService).switchToShared(request.sessionPath(), request.configPath());
+        assertThat(gateway.startCommands).hasSize(1);
     }
 
     @Test

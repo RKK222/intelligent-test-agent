@@ -113,6 +113,20 @@ require_archive_entry() {
   fi
 }
 
+require_archive_absent() {
+  local listing="$1" entry="$2"
+  if grep -Fx "${entry}" <<<"${listing}" >/dev/null; then
+    echo "Reused component must not be embedded in incremental release: ${entry}" >&2
+    exit 1
+  fi
+}
+
+manifest_value() {
+  local content="$1" key="$2"
+  awk -F= -v wanted="${key}" '$1 == wanted { value=substr($0, index($0, "=") + 1) } END { print value }' \
+    <<<"${content}"
+}
+
 if [[ -z "${NODES_DIR}" ]]; then
   echo "--nodes-dir is required" >&2
   usage >&2
@@ -148,9 +162,50 @@ verify_checksum_pair "${NODE_2}"
 release_listing="$(unzip -Z1 "${RELEASE_ARCHIVE}")"
 require_archive_entry "${release_listing}" dist/backend/test-agent-app.jar
 require_archive_entry "${release_listing}" dist/test-agent-frontend-dist.tar.gz
-require_archive_entry "${release_listing}" dist/test-agent-programs.tar.gz
-require_archive_entry "${release_listing}" dist/test-agent-opencode-worker_internal-linux-amd64.tar
+require_archive_entry "${release_listing}" deploy/internal/toolbox.env.example
+require_archive_entry "${release_listing}" deploy/internal/toolbox-docker.sh
+require_archive_entry "${release_listing}" deploy/internal/diagnose-toolbox.sh
 require_archive_entry "${release_listing}" deploy/internal/deploy-multi-backend-node.sh
+release_component_manifest="$(unzip -p "${RELEASE_ARCHIVE}" deploy/internal/release-components.env 2>/dev/null || true)"
+worker_component_mode="$(manifest_value "${release_component_manifest}" TEST_AGENT_RELEASE_WORKER_RUNTIME)"
+toolbox_component_mode="$(manifest_value "${release_component_manifest}" TEST_AGENT_RELEASE_TOOLBOX)"
+# 没有组件清单的历史发布包按全量包处理，保持旧交付物可重新封装。
+worker_component_mode="${worker_component_mode:-included}"
+toolbox_component_mode="${toolbox_component_mode:-included}"
+[[ "${worker_component_mode}" == included || "${worker_component_mode}" == reuse ]] || {
+  echo "Invalid worker runtime component mode: ${worker_component_mode}" >&2
+  exit 1
+}
+[[ "${toolbox_component_mode}" == included || "${toolbox_component_mode}" == reuse ]] || {
+  echo "Invalid toolbox component mode: ${toolbox_component_mode}" >&2
+  exit 1
+}
+if [[ "${worker_component_mode}" == included ]]; then
+  require_archive_entry "${release_listing}" dist/test-agent-programs.tar.gz
+  require_archive_entry "${release_listing}" dist/test-agent-opencode-worker_internal-linux-amd64.tar
+else
+  require_archive_absent "${release_listing}" dist/test-agent-programs.tar.gz
+  require_archive_absent "${release_listing}" dist/test-agent-opencode-worker_internal-linux-amd64.tar
+fi
+if [[ "${toolbox_component_mode}" == included ]]; then
+  require_archive_entry "${release_listing}" dist/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar
+  require_archive_entry "${release_listing}" dist/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar.sha256
+  require_archive_entry "${release_listing}" dist/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar
+  require_archive_entry "${release_listing}" dist/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar.sha256
+  require_archive_entry "${release_listing}" dist/test-agent-toolbox-source.tar.gz
+  require_archive_entry "${release_listing}" dist/test-agent-toolbox-source.tar.gz.sha256
+  require_archive_entry "${release_listing}" dist/toolbox-catalog-v1.json
+  require_archive_entry "${release_listing}" dist/toolbox-catalog-v1.json.sha256
+else
+  require_archive_absent "${release_listing}" dist/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar
+  require_archive_absent "${release_listing}" dist/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar.sha256
+  require_archive_absent "${release_listing}" dist/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar
+  require_archive_absent "${release_listing}" dist/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar.sha256
+  require_archive_absent "${release_listing}" dist/test-agent-toolbox-source.tar.gz
+  require_archive_absent "${release_listing}" dist/test-agent-toolbox-source.tar.gz.sha256
+  require_archive_absent "${release_listing}" dist/toolbox-catalog-v1.json
+  require_archive_absent "${release_listing}" dist/toolbox-catalog-v1.json.sha256
+fi
 # 外层完整包只接受包含当前仓库全部会话日志的内层发布包，避免业务制品与交付追溯记录脱节。
 session_log_count=0
 for session_log in "${ROOT_DIR}"/.agents/session-log*.md; do
@@ -222,12 +277,14 @@ replace_or_append_env_value() {
 normalize_backend_node_archive() {
   local source="$1"
   local node_dir="$2"
+  local node_ip="$3"
   local node_root="${TMP_ROOT}/normalize-${node_dir}"
-  local backend_env docker_env target
+  local backend_env docker_env toolbox_env target
   mkdir -p "${node_root}"
   tar -C "${node_root}" -xzf "${source}"
   backend_env="${node_root}/${node_dir}/config/backend.env"
   docker_env="${node_root}/${node_dir}/config/docker.env"
+  toolbox_env="${node_root}/${node_dir}/config/toolbox.env"
 
   replace_or_append_env_value "${backend_env}" TEST_AGENT_XXL_JOB_COOKIE_SECURE false
   replace_or_append_env_value "${backend_env}" TEST_AGENT_MAX_PREVIEW_BYTES 5242880
@@ -235,6 +292,8 @@ normalize_backend_node_archive() {
   replace_or_append_env_value "${docker_env}" OPENCODE_WORKER_BACKEND_PORT 8080
   replace_or_append_env_value "${docker_env}" OPENCODE_WORKER_PORT_START 14096
   replace_or_append_env_value "${docker_env}" OPENCODE_WORKER_PORT_END 15095
+  install -m 0600 "${SCRIPT_DIR}/toolbox.env.example" "${toolbox_env}"
+  replace_or_append_env_value "${toolbox_env}" TEST_AGENT_TOOLBOX_BIND_ADDRESS "${node_ip}"
 
   target="${TMP_ROOT}/$(basename "${source}")"
   tar -C "${node_root}" -czf "${target}" "${node_dir}"
@@ -242,12 +301,14 @@ normalize_backend_node_archive() {
   printf '%s\n' "${target}"
 }
 
-NODE_4="$(normalize_backend_node_archive "${NODE_4}" test-agent-two-backend-122.233.30.4)"
-NODE_114="$(normalize_backend_node_archive "${NODE_114}" test-agent-two-backend-122.233.30.114)"
+NODE_4="$(normalize_backend_node_archive "${NODE_4}" test-agent-two-backend-122.233.30.4 122.233.30.4)"
+NODE_114="$(normalize_backend_node_archive "${NODE_114}" test-agent-two-backend-122.233.30.114 122.233.30.114)"
 validate_node_archive "${NODE_4}" test-agent-two-backend-122.233.30.4 backend.env
 validate_node_archive "${NODE_4}" test-agent-two-backend-122.233.30.4 docker.env
+validate_node_archive "${NODE_4}" test-agent-two-backend-122.233.30.4 toolbox.env
 validate_node_archive "${NODE_114}" test-agent-two-backend-122.233.30.114 backend.env
 validate_node_archive "${NODE_114}" test-agent-two-backend-122.233.30.114 docker.env
+validate_node_archive "${NODE_114}" test-agent-two-backend-122.233.30.114 toolbox.env
 
 # 完整包必须在封装前确认两台后台引用同一个外部 MySQL，且账号密码和 access token 一致。
 validate_mysql_cluster_config() {
@@ -283,6 +344,8 @@ validate_mysql_cluster_config() {
   grep -Fxq 'TEST_AGENT_XXL_JOB_COOKIE_SECURE=false' "${backend_4}"
   grep -Fxq 'TEST_AGENT_XXL_JOB_COOKIE_SECURE=false' "${backend_114}"
   grep -Fxq 'TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.4:18080,122.233.30.114:18080' "${frontend}"
+  grep -Fxq 'TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=122.233.30.4:18120,122.233.30.114:18120' "${frontend}"
+  grep -Fxq 'TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=122.233.30.4:18121,122.233.30.114:18121' "${frontend}"
 
   backend_password="$(sed -n 's/^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=//p' "${backend_4}")"
   backend_token="$(sed -n 's/^TEST_AGENT_XXL_JOB_ACCESS_TOKEN=//p' "${backend_4}")"
@@ -299,8 +362,6 @@ validate_mysql_cluster_config() {
     exit 1
   }
 }
-
-validate_mysql_cluster_config
 
 # 旧前端节点包可能仍只包含终端路由键。封装新交付包时在临时副本中完成一次性迁移，
 # 不修改源敏感包，也不把任何路由值或其它 env 内容打印到日志。
@@ -322,6 +383,29 @@ normalize_frontend_server_routes() {
   chmod --reference="${nginx_env}" "${migrated}" 2>/dev/null || chmod 0600 "${migrated}"
   mv -f "${migrated}" "${nginx_env}"
 }
+
+normalize_frontend_node_archive() {
+  local source="$1"
+  local node_dir="$2"
+  local node_root="${TMP_ROOT}/normalize-${node_dir}"
+  local nginx_env target
+  mkdir -p "${node_root}"
+  tar -C "${node_root}" -xzf "${source}"
+  nginx_env="${node_root}/${node_dir}/config/nginx.env"
+  normalize_frontend_server_routes "${nginx_env}"
+  replace_or_append_env_value "${nginx_env}" TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM \
+    '122.233.30.4:18120,122.233.30.114:18120'
+  replace_or_append_env_value "${nginx_env}" TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM \
+    '122.233.30.4:18121,122.233.30.114:18121'
+  target="${TMP_ROOT}/$(basename "${source}")"
+  tar -C "${node_root}" -czf "${target}" "${node_dir}"
+  chmod 0600 "${target}"
+  printf '%s\n' "${target}"
+}
+
+NODE_2="$(normalize_frontend_node_archive "${NODE_2}" test-agent-two-backend-122.233.30.2)"
+validate_node_archive "${NODE_2}" test-agent-two-backend-122.233.30.2 nginx.env
+validate_mysql_cluster_config
 
 BUNDLE_ROOT="${TMP_ROOT}/${BUNDLE_NAME}"
 mkdir -p "${BUNDLE_ROOT}/nodes" "${OUTPUT_DIR}"

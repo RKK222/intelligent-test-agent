@@ -37,11 +37,13 @@ class OpencodeProcessConfigLinkServiceTest {
         assertThat(Files.isSymbolicLink(managed)).isTrue();
         assertThat(Files.readSymbolicLink(managed)).isEqualTo(personal.toAbsolutePath().normalize());
         assertThat(Files.readString(managed.resolve("opencode.jsonc"))).isEqualTo("personal-v1");
+        assertThat(service.isLinkedTo(personal.toString(), managed.toString())).isTrue();
         Files.writeString(personal.resolve("opencode.jsonc"), "personal-v2");
         assertThat(Files.readString(managed.resolve("opencode.jsonc"))).isEqualTo("personal-v2");
 
         service.switchToShared(session.toString(), managed.toString());
         assertThat(Files.readSymbolicLink(managed)).isEqualTo(shared.toAbsolutePath().normalize());
+        assertThat(service.isLinkedTo(personal.toString(), managed.toString())).isFalse();
         try (var entries = Files.list(managed.getParent())) {
             assertThat(entries.map(path -> path.getFileName().toString()).toList())
                     .containsExactly("current-public-config");

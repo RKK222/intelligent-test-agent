@@ -15,4 +15,15 @@ public interface PersonalAgentConfigRuntimeReloader {
             String linuxServerId,
             String sourceConfigPath,
             String traceId);
+
+    /**
+     * 初始化完成后激活公共个人配置；若进程启动前已经直接加载同一路径，实现方可跳过重复 dispose。
+     */
+    default PersonalAgentConfigRuntimeReloadResult activatePublicPreview(
+            UserId userId,
+            String linuxServerId,
+            String sourceConfigPath,
+            String traceId) {
+        return reloadPublicPreview(userId, linuxServerId, sourceConfigPath, traceId);
+    }
 }

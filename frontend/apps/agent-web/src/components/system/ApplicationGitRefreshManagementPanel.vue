@@ -32,7 +32,9 @@ async function loadApplications() {
   loading.value = true;
   errorMessage.value = "";
   try {
-    applications.value = await api.listApplicationGitRefreshScopes();
+    const scopes = await api.listApplicationGitRefreshScopes();
+    // 滚动升级期间旧后端可能仍返回空分支应用；页面只展示确实可执行刷新的范围。
+    applications.value = scopes.filter((application) => application.groups.length > 0);
   } catch (error) {
     errorMessage.value = formatError(error, "加载应用失败");
   } finally {
@@ -142,7 +144,7 @@ function formatError(error: unknown, fallback: string) {
           </thead>
           <tbody>
             <tr v-if="applications.length === 0 && !loading">
-              <td colspan="5" class="ta-app-git-empty">暂无应用</td>
+              <td colspan="5" class="ta-app-git-empty">暂无已创建 feature 分支的应用</td>
             </tr>
             <tr v-for="application in applications" :key="application.appId">
               <td>

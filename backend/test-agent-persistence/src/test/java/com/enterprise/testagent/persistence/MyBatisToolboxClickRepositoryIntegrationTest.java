@@ -59,7 +59,7 @@ class MyBatisToolboxClickRepositoryIntegrationTest {
                 .load()
                 .migrate();
         new ResourceDatabasePopulator(
-                        new ClassPathResource("db/migration/V20260727203500__create_toolbox_click_tracking.sql"))
+                        new ClassPathResource("db/migration/V20260728160800__create_toolbox_click_tracking.sql"))
                 .execute(dataSource);
         jdbc = JdbcClient.create(dataSource);
         insertUser(USER_ID);

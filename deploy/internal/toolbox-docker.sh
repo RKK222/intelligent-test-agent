@@ -102,12 +102,13 @@ run_container() {
   # Bash 3.2 在 set -u 下展开空数组会报未绑定；预检容器用 --expose 保持无宿主端口且兼容联网 Mac 验收。
   [[ -n "${port}" ]] && publish=(--publish "${BIND_ADDRESS}:${port}:80")
   # 镜像已在 deploy/rollback 前显式 inspect 校验；不使用新版 --pull，兼容企业 Docker 18.09。
+  # Alpine 中 /var/run 是指向 /run 的软链接；旧 Docker 18.09 必须直接挂载真实目录。
   docker run -d \
     --name "${name}" \
     --network "${NETWORK}" \
     --read-only \
     --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=16m \
-    --tmpfs /var/run:rw,noexec,nosuid,size=1m \
+    --tmpfs /run:rw,noexec,nosuid,size=1m \
     --tmpfs /tmp:rw,noexec,nosuid,size=16m \
     --cap-drop ALL \
     --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add SETGID --cap-add SETUID --cap-add NET_BIND_SERVICE \

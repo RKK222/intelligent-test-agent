@@ -18,9 +18,9 @@ import org.springframework.stereotype.Service;
 /**
  * 用户 opencode 进程有效公共配置指针服务。
  *
- * <p>每个进程的 {@code OPENCODE_CONFIG_DIR} 固定指向 session 目录下的一个受管软链接：默认链接公共共享
- * 运行副本，公共个人 worktree 保存时只把当前用户链接切到个人 worktree。服务不复制配置、不创建 Git
- * worktree，也不修改 OpenCode 原生代码。
+ * <p>每个进程的 {@code OPENCODE_CONFIG_DIR} 固定指向 session 目录下的一个受管软链接：启动程序选择
+ * 当前用户有效公共个人 worktree 或共享运行副本，公共个人保存时也只切换当前用户链接。服务不复制配置、
+ * 不创建 Git worktree，也不修改 OpenCode 原生代码。
  */
 @Service
 public class OpencodeProcessConfigLinkService {
@@ -57,7 +57,7 @@ public class OpencodeProcessConfigLinkService {
         return managedConfigPath(sessionPath).equals(Path.of(configPath).toAbsolutePath().normalize());
     }
 
-    /** 启动或公共发布时，把指定用户的有效配置恢复到公共共享运行副本。 */
+    /** 启动无有效个人目录或公共发布时，把指定用户的有效配置恢复到公共共享运行副本。 */
     public void switchToShared(String sessionPath, String targetConfigPath) {
         requireManagedTarget(sessionPath, targetConfigPath);
         switchTo(sharedConfigPath().toString(), targetConfigPath);
@@ -69,6 +69,22 @@ public class OpencodeProcessConfigLinkService {
             return false;
         }
         return sharedConfigPath().equals(Path.of(configPath).toAbsolutePath().normalize());
+    }
+
+    /**
+     * 判断受管软链接是否已经指向指定配置目录，用于初始化后避免对刚启动的进程重复 dispose。
+     */
+    public boolean isLinkedTo(String sourceConfigPath, String targetConfigPath) {
+        Path source = requireSource(sourceConfigPath);
+        Path target = requireTarget(targetConfigPath);
+        Object lock = targetLocks.computeIfAbsent(target, ignored -> new Object());
+        synchronized (lock) {
+            try {
+                return pointsTo(target, source);
+            } catch (IOException exception) {
+                throw unsupportedLink(exception);
+            }
+        }
     }
 
     private Path sharedConfigPath() {

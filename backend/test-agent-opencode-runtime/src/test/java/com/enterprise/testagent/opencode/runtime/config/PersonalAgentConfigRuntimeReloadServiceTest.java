@@ -83,6 +83,23 @@ class PersonalAgentConfigRuntimeReloadServiceTest {
     }
 
     @Test
+    void activationSkipsDuplicateDisposeWhenFreshProcessAlreadyLoadedTheSameWorktree() {
+        String sourceConfigPath = "/worktrees/usr-1/opencode";
+        OpencodeServerProcess process = process("linux-1", "/session/usr-1/.testagent-runtime/current-public-config");
+        when(repository.findUserBinding(USER_ID, "opencode")).thenReturn(Optional.of(binding()));
+        when(repository.findOpencodeServerProcessById(PROCESS_ID)).thenReturn(Optional.of(process));
+        when(configLinkService.isManagedConfigPath(process.sessionPath(), process.configPath())).thenReturn(true);
+        when(configLinkService.isLinkedTo(sourceConfigPath, process.configPath())).thenReturn(true);
+
+        var result = service.activatePublicPreview(USER_ID, "linux-1", sourceConfigPath, "trace-1");
+
+        assertThat(result.reloaded()).isTrue();
+        assertThat(result.message()).contains("无需重复释放");
+        verify(configLinkService, never()).switchTo(any(), any());
+        verify(runtime, never()).runtime(any());
+    }
+
+    @Test
     void rejectsLegacySharedPathInsteadOfMutatingAllUsers() {
         OpencodeServerProcess process = process("linux-1", "/shared/opencode");
         when(repository.findUserBinding(USER_ID, "opencode")).thenReturn(Optional.of(binding()));

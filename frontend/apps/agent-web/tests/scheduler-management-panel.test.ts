@@ -97,6 +97,14 @@ const applicationScope: ApplicationGitRefreshScope = {
   }]
 };
 
+const applicationWithoutFeatureBranch: ApplicationGitRefreshScope = {
+  appId: "app_empty",
+  appName: "尚未创建分支的应用",
+  enabled: true,
+  totalGroups: 0,
+  groups: []
+};
+
 const applicationRefreshResult: ApplicationGitRefreshResult = {
   appId: "app_gcms",
   appName: "F-GCMS",
@@ -252,6 +260,20 @@ describe("scheduler management panel", () => {
     expect(await view.findByText("共 1 组：成功 1，更新 1，已是最新 0，失败 0")).toBeTruthy();
     await fireEvent.click(view.getByText("查看仓库组明细"));
     expect(await view.findByText(/GCMS · 20260707 · feature_testagent_20260707 · 2 个 workspace/)).toBeTruthy();
+    view.queryClient.clear();
+  });
+
+  it("only lists applications that have a concrete feature branch", async () => {
+    const backendApi = api({
+      listApplicationGitRefreshScopes: vi.fn().mockResolvedValue([
+        applicationWithoutFeatureBranch,
+        applicationScope
+      ])
+    });
+    const view = renderWithApi(ApplicationGitRefreshManagementPanel, backendApi);
+
+    expect(await view.findByText("F-GCMS")).toBeTruthy();
+    expect(view.queryByText("尚未创建分支的应用")).toBeNull();
     view.queryClient.clear();
   });
 

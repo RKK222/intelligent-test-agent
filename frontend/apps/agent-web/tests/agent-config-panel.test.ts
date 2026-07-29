@@ -159,6 +159,18 @@ describe("AgentConfigPanel", () => {
     expect(view.getByText("创建公共 worktree")).toBeTruthy();
   });
 
+  it("does not fall back to the shared public directory when the admin worktree cannot be prepared", async () => {
+    apiClientMock.listPublicAgentWorktrees.mockResolvedValue([]);
+    apiClientMock.createPublicAgentWorktree.mockRejectedValue(new Error("worktree create failed"));
+
+    const { view } = renderPanel();
+
+    await waitFor(() => expect(apiClientMock.createPublicAgentWorktree).toHaveBeenCalled());
+    expect(await view.findByText(/worktree create failed/)).toBeTruthy();
+    expect(apiClientMock.listPublicAgentFiles).not.toHaveBeenCalled();
+    expect(view.queryByText("直接 · 测试服务器")).toBeNull();
+  });
+
   it("loads public and workspace agent status plus root directories without serial blocking", async () => {
     let resolvePublicStatus!: (value: ReturnType<typeof publicStatus>) => void;
     let resolvePublicFiles!: (value: unknown[]) => void;
@@ -258,6 +270,151 @@ describe("AgentConfigPanel", () => {
     expect(view.queryByText("更新公共配置")).toBeNull();
     expect(view.getByText("创建公共 worktree")).toBeTruthy();
     expect(view.getByText("切换公共 worktree")).toBeTruthy();
+  });
+
+  it("automatically follows the current user's OpenCode process server", async () => {
+    const secondWorktree = {
+      ...publicWorktreeOption(),
+      worktreeId: "agw_public_linux_2",
+      linuxServerId: "linux-2",
+      worktreeName: "public-usr_admin",
+      branch: "public-usr_admin",
+      rootPath: "/data/public-worktrees-2/public-usr_admin"
+    };
+    apiClientMock.listPublicAgentRepositories.mockResolvedValue([
+      initializedRepository(),
+      initializedRepository("linux-2", "进程服务器")
+    ]);
+    apiClientMock.listPublicAgentWorktrees.mockImplementation(async (linuxServerId: string) =>
+      linuxServerId === "linux-2" ? [secondWorktree] : [publicWorktreeOption()]
+    );
+
+    const { workbench } = renderPanel(undefined, {
+      routeLinuxServerId: "linux-2",
+      routeLinuxServerResolved: true
+    });
+
+    await waitFor(() => expect(apiClientMock.listPublicAgentWorktrees).toHaveBeenCalledWith("linux-2"));
+    expect(apiClientMock.listPublicAgentWorktrees).not.toHaveBeenCalledWith("linux-1");
+    expect(workbench.publicWorktree?.worktreeId).toBe("agw_public_linux_2");
+    expect(workbench.publicConfigLinuxServerId).toBe("linux-2");
+  });
+
+  it("waits for the OpenCode process lookup before automatically mounting a public worktree", async () => {
+    apiClientMock.listPublicAgentRepositories.mockResolvedValue([
+      initializedRepository(),
+      initializedRepository("linux-2", "进程服务器")
+    ]);
+    const { view } = renderPanel(undefined, { routeLinuxServerResolved: false });
+
+    await waitFor(() => expect(apiClientMock.listPublicAgentRepositories).toHaveBeenCalled());
+    expect(apiClientMock.listPublicAgentWorktrees).not.toHaveBeenCalled();
+    expect(apiClientMock.createPublicAgentWorktree).not.toHaveBeenCalled();
+    expect(apiClientMock.listPublicAgentFiles).not.toHaveBeenCalled();
+    expect(view.queryByText("直接 · 测试服务器")).toBeNull();
+
+    await view.rerender({
+      routeLinuxServerId: "linux-2",
+      routeLinuxServerResolved: true
+    });
+
+    await waitFor(() => expect(apiClientMock.listPublicAgentWorktrees).toHaveBeenCalledWith("linux-2"));
+    expect(apiClientMock.listPublicAgentWorktrees).not.toHaveBeenCalledWith("linux-1");
+  });
+
+  it("does not create a public worktree when the process lookup succeeds without a binding", async () => {
+    const { view } = renderPanel(undefined, {
+      routeLinuxServerId: "",
+      routeLinuxServerResolved: true
+    });
+
+    await waitFor(() => expect(apiClientMock.listPublicAgentRepositories).toHaveBeenCalled());
+    expect(apiClientMock.listPublicAgentWorktrees).not.toHaveBeenCalled();
+    expect(apiClientMock.createPublicAgentWorktree).not.toHaveBeenCalled();
+    expect(apiClientMock.listPublicAgentFiles).not.toHaveBeenCalled();
+    expect(view.queryByText("直接 · 测试服务器")).toBeNull();
+  });
+
+  it("remounts the exact prepared worktree when initialization reuses the same server", async () => {
+    const staleWorktree: PublicWorktree = {
+      ...publicWorktreeOption(),
+      worktreeId: "agw_stale_same_server",
+      worktreeName: "stale-public-worktree",
+      rootPath: "/data/opencode-public-worktrees/stale-public-worktree"
+    };
+    const preparedWorktree: PublicWorktree = {
+      ...publicWorktreeOption(),
+      worktreeId: "agw_prepared_same_server",
+      worktreeName: "public-usr_admin",
+      rootPath: "/data/opencode-public-worktrees/public-usr_admin"
+    };
+    apiClientMock.listPublicAgentWorktrees.mockResolvedValue([staleWorktree, preparedWorktree]);
+    const { view, workbench } = renderPanel((store) => {
+      store.publicWorktree = staleWorktree;
+      store.publicConfigLinuxServerId = "linux-1";
+    });
+
+    await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalledWith(
+      "",
+      "agw_stale_same_server",
+      "linux-1"
+    ));
+    apiClientMock.listPublicAgentFiles.mockClear();
+
+    await view.rerender({
+      routeLinuxServerId: "linux-1",
+      routeLinuxServerResolved: true,
+      publicWorktreeMountRequest: {
+        revision: 1,
+        worktreeId: "agw_prepared_same_server",
+        linuxServerId: "linux-1"
+      }
+    });
+
+    await waitFor(() => expect(workbench.publicWorktree?.worktreeId).toBe("agw_prepared_same_server"));
+    expect(apiClientMock.listPublicAgentWorktrees).toHaveBeenCalledWith("linux-1");
+    expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalledWith(
+      "",
+      "agw_prepared_same_server",
+      "linux-1"
+    );
+  });
+
+  it("discards an older worktree lookup that completes after the process server changes", async () => {
+    let resolveOldWorktrees: ((value: PublicWorktree[]) => void) | undefined;
+    const oldWorktrees = new Promise<PublicWorktree[]>((resolve) => {
+      resolveOldWorktrees = resolve;
+    });
+    const linux2Worktree: PublicWorktree = {
+      ...publicWorktreeOption(),
+      worktreeId: "agw_public_linux_2",
+      linuxServerId: "linux-2",
+      rootPath: "/data/public-worktrees-2/public-usr_admin"
+    };
+    apiClientMock.listPublicAgentRepositories.mockResolvedValue([
+      initializedRepository(),
+      initializedRepository("linux-2", "进程服务器")
+    ]);
+    apiClientMock.listPublicAgentWorktrees.mockImplementation(async (linuxServerId: string) => {
+      if (linuxServerId === "linux-1") return oldWorktrees;
+      return [linux2Worktree];
+    });
+
+    const { view, workbench } = renderPanel(undefined, {
+      routeLinuxServerId: "linux-1",
+      routeLinuxServerResolved: true
+    });
+    await waitFor(() => expect(apiClientMock.listPublicAgentWorktrees).toHaveBeenCalledWith("linux-1"));
+
+    await view.rerender({
+      routeLinuxServerId: "linux-2",
+      routeLinuxServerResolved: true
+    });
+    await waitFor(() => expect(workbench.publicWorktree?.worktreeId).toBe("agw_public_linux_2"));
+
+    resolveOldWorktrees?.([publicWorktreeOption()]);
+    await waitFor(() => expect(workbench.publicWorktree?.worktreeId).toBe("agw_public_linux_2"));
+    expect(workbench.publicConfigLinuxServerId).toBe("linux-2");
   });
 
   it("keeps Agent config update buttons in the left tree for authorized scopes", async () => {
@@ -1070,7 +1227,19 @@ type WorkbenchStoreMock = {
 
 function renderPanel(
   setup?: (workbench: WorkbenchStoreMock) => void,
-  options?: { canWrite?: boolean; hideHeader?: boolean; activePath?: string; runtimeBusy?: boolean }
+  options?: {
+    canWrite?: boolean;
+    hideHeader?: boolean;
+    activePath?: string;
+    runtimeBusy?: boolean;
+    routeLinuxServerId?: string;
+    routeLinuxServerResolved?: boolean;
+    publicWorktreeMountRequest?: {
+      revision: number;
+      worktreeId: string;
+      linuxServerId: string;
+    } | null;
+  }
 ) {
   const pinia = createPinia();
   const workbench = currentWorkbenchStore();
@@ -1083,7 +1252,10 @@ function renderPanel(
       canManageWorkspaceConfig: options?.canWrite ?? true,
       hideHeader: options?.hideHeader ?? true,
       activePath: options?.activePath,
-      runtimeBusy: options?.runtimeBusy ?? false
+      runtimeBusy: options?.runtimeBusy ?? false,
+      routeLinuxServerId: options?.routeLinuxServerId !== undefined ? options.routeLinuxServerId : "linux-1",
+      routeLinuxServerResolved: options?.routeLinuxServerResolved ?? true,
+      publicWorktreeMountRequest: options?.publicWorktreeMountRequest
     },
     global: {
       plugins: [pinia]
@@ -1114,10 +1286,10 @@ function publicStatus(scope = "PUBLIC") {
   };
 }
 
-function initializedRepository() {
+function initializedRepository(linuxServerId = "linux-1", serverName = "测试服务器") {
   return {
-    linuxServerId: "linux-1",
-    serverName: "测试服务器",
+    linuxServerId,
+    serverName,
     gitRootPath: "/data/opencode-public-config",
     configDirPath: "/data/opencode-public-config/opencode",
     worktreeRootPath: "/data/opencode-public-worktrees",

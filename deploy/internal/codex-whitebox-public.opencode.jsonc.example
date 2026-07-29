@@ -1,7 +1,7 @@
 {
-  // 合并到“已启用白盒分析”的应用 workspace 下 .opencode/opencode.jsonc。
+  // 合并到公共配置仓库的 opencode/opencode.jsonc。
   "mcp": {
-    "codex_whitebox": {
+    "code_analysis": {
       "type": "local",
       "command": [
         "/data/testagent/programs/codex/bin/test-agent-codex-mcp"

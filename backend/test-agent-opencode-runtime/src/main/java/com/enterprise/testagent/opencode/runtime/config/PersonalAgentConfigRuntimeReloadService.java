@@ -69,6 +69,27 @@ public class PersonalAgentConfigRuntimeReloadService implements PersonalAgentCon
             String linuxServerId,
             String sourceConfigPath,
             String traceId) {
+        return reloadPublicPreview(userId, linuxServerId, sourceConfigPath, traceId, false);
+    }
+
+    /**
+     * 初始化完成后的自动激活允许幂等跳过 dispose：启动前已指向个人目录时，新进程已经直接读取该配置。
+     */
+    @Override
+    public PersonalAgentConfigRuntimeReloadResult activatePublicPreview(
+            UserId userId,
+            String linuxServerId,
+            String sourceConfigPath,
+            String traceId) {
+        return reloadPublicPreview(userId, linuxServerId, sourceConfigPath, traceId, true);
+    }
+
+    private PersonalAgentConfigRuntimeReloadResult reloadPublicPreview(
+            UserId userId,
+            String linuxServerId,
+            String sourceConfigPath,
+            String traceId,
+            boolean skipDisposeWhenAlreadyLinked) {
         Objects.requireNonNull(userId, "userId must not be null");
         String targetServer = requireText(linuxServerId, "公共 Agent worktree 缺少服务器归属");
         if (!targetServer.equals(backendIdentity.linuxServerId())) {
@@ -85,6 +106,12 @@ public class PersonalAgentConfigRuntimeReloadService implements PersonalAgentCon
             throw new PlatformException(
                     ErrorCode.CONFLICT,
                     "当前用户 TestAgent 进程仍使用旧版共享配置路径，请通过平台受管方式重启一次后再保存调试");
+        }
+        if (skipDisposeWhenAlreadyLinked
+                && configLinkService.isLinkedTo(sourceConfigPath, process.configPath())) {
+            return new PersonalAgentConfigRuntimeReloadResult(
+                    true,
+                    "TestAgent 进程启动时已直接加载公共个人 worktree 配置，无需重复释放运行态");
         }
 
         Runnable reload = () -> {

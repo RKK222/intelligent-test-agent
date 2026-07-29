@@ -33,6 +33,13 @@ export type AgentConfigMutation = {
   renamed?: { path: string; nextPath: string; type: "file" };
 };
 
+/** 初始化进程成功后，把后端已经准备好的公共个人 worktree 精确交给配置树重新挂载。 */
+export type PublicWorktreeMountRequest = {
+  revision: number;
+  worktreeId: string;
+  linuxServerId: string;
+};
+
 const AGENT_PUBLIC_FILE_PREFIX = "agent-public:";
 const AGENT_WORKSPACE_FILE_PREFIX = "agent-workspace:";
 

@@ -11,7 +11,7 @@
 | 公共远程分支 | 初始化公共仓库时明确选择的分支 | 公共配置发布事实源 | 否 |
 | 管理员公共个人 worktree | 稳定分支 `public-{userId}` | `SUPER_ADMIN` 编辑、暂存、提交和处理远端合并冲突 | 是，仅本人 |
 | 每服务器公共运行副本 | `OPENCODE_PUBLIC_CONFIG_DIR` 对应共享仓库 | 公共远程提交在本服务器的运行事实副本 | 否，发布程序同步 |
-| 每用户有效公共配置指针 | `{sessionPath}/.testagent-runtime/current-public-config` | `OPENCODE_CONFIG_DIR` 固定指向此软链接；默认链接共享副本，个人保存时临时链接本人的公共 worktree | 否，平台原子切换 |
+| 每用户有效公共配置指针 | `{sessionPath}/.testagent-runtime/current-public-config` | `OPENCODE_CONFIG_DIR` 固定指向此软链接；受管启动/重启优先加载同服有效公共个人 worktree，无有效记录时回退共享副本，个人保存时也只切换本人 | 否，平台原子切换 |
 
 公共配置不按应用或版本拆分。保存和本地提交只改变当前管理员的公共个人 worktree；其中 Agent 定义、Skill 定义或 JSONC 保存会把当前管理员本人的固定指针切到该 worktree 并只 dispose 本人进程，供推送前调试，不改共享副本。推送成功后，持久化 rollout 才把固定公共提交同步到每台服务器的共享运行副本；各用户旧任务空闲后先把其指针恢复到共享副本，再调用原生 `/global/dispose`。
 
@@ -56,7 +56,7 @@ flowchart LR
 | 来源 | 实际路径/选择方式 | 生效范围 |
 | --- | --- | --- |
 | 用户全局 OpenCode 配置 | 运行用户的 `~/.config/opencode` | OpenCode 原生全局层；企业环境不得在这里维护模型或供应商，避免污染公共事实源 |
-| 公共配置 | `OPENCODE_CONFIG_DIR={sessionPath}/.testagent-runtime/current-public-config` | 当前用户进程的公共层；软链接默认指向 `OPENCODE_PUBLIC_CONFIG_DIR`，公共个人保存时只对本人切到 `public-{userId}` worktree 的 `opencode/` |
+| 公共配置 | `OPENCODE_CONFIG_DIR={sessionPath}/.testagent-runtime/current-public-config` | 当前用户进程的公共层；受管启动/重启优先指向同服 ACTIVE `public-{userId}` worktree 的 `opencode/`，无有效个人目录时回退 `OPENCODE_PUBLIC_CONFIG_DIR`；公共个人保存只切换本人 |
 | 应用个人配置 | 本次请求 directory 对应的个人 worktree `.opencode/**` | OpenCode 按项目目录原生发现并与公共层组合；不存在平台自定义覆盖/复制规则，也不存在独立应用 Agent worktree |
 | 应用资产引用 | 应用个人 `.opencode/opencode.jsonc` 的 `references` 与所选目录精确 `permission.external_directory` allow，路径通过 `OPENCODE_REFERENCES_DIR` 展开 | 只记录和加载引用关系并授权当前所选根层 SDD 目录；资产库文件、分支不会复制或合并进应用 Git |
 
@@ -76,7 +76,9 @@ OPENCODE_CONFIG_DIR / manager configPath
 /Users/kaka/Desktop/intelligent-test-agent/.testagent/agent-opencode/.configdev/public-usr_test_dev/opencode
 ```
 
-前两项在同一用户进程整个生命周期内保持不变。启动和公共发布完成后，链接指向共享副本；当前超管保存可热加载的公共个人配置后，只把本人链接原子切到公共个人 worktree。应用个人配置始终由请求 directory 下的 `.opencode` 读取，不修改这条公共链接。
+前两项在同一用户进程整个生命周期内保持不变。受管启动/重启前，平台只查询一次当前用户在本服务器的 ACTIVE 稳定公共 worktree 并校验物理目录：有效时直接把链接指向个人目录，失败时回退共享副本；不轮询、不 fetch、不检查 Git 状态，也不需要启动后再次 dispose。公共发布完成后会把受影响进程链接恢复到共享副本；当前超管保存可热加载的公共个人配置后，只把本人链接原子切到公共个人 worktree。应用个人配置始终由请求 directory 下的 `.opencode` 读取，不修改这条公共链接。
+
+`SUPER_ADMIN` 点击进程初始化后，目标 Java 先通过公共启动程序完成 manager state/PID 与 OpenCode HTTP 健康检查，再幂等准备同一 `linuxServerId` 上本人的 `public-{userId}` worktree并自动加载；若启动前已经加载同一路径，则跳过重复 dispose。公共仓库未初始化或 Git 条件不足时只返回 `publicWorktreePreparation.ready=false`，进程继续保持 `READY` 并使用共享公共配置；自动加载失败不回滚健康进程，提示用户点击公共“Agent 配置更新”重试。其它服务器上的存量 worktree 不自动清理。
 
 公共个人 worktree 与应用个人 worktree 不是互相覆盖的 Git 分支：前者通过进程固定软链接提供公共配置，后者由请求所在项目目录的 `.opencode` 原生加载。`/global/dispose` 释放的是该用户 OpenCode 进程内已缓存的 workspace Instance；下一次访问某个工作区时，OpenCode 才按上述路径重新 bootstrap。
 
@@ -112,7 +114,7 @@ OPENCODE_CONFIG_DIR / manager configPath
 - 可热加载目录定义精确为 `opencode.jsonc`、`agents/**/*.md`、`skills/**/SKILL.md`。公共和应用个人作用域规则相同。
 - `skills/**/rules/**`、`skills/**/templates/**` 等资源文件只保存并刷新 Diff，不 dispose；它们提交并推送后仍会随对应 Git 发布同步。
 - 应用资产引用弹窗保存的是个人 `.opencode/opencode.jsonc`；保存前重读最新正文，以一次补丁和一次写盘同时更新当前 alias 与 `"{path}/*": "allow"`，成功后按 JSONC 规则只热加载当前用户。
-- 当前用户有运行中任务时，dispose 延迟到任务空闲；进程尚未初始化或不可用时不为了保存额外启动进程。应用个人 `.opencode` 会在后续首次启动或 workspace bootstrap 时直接读取磁盘最新配置；公共个人预览则不会跨进程启动保留，因为启动固定先把链接恢复到共享副本，超管需在进程 READY 后再次保存可热加载文件，或正式推送公共配置。
+- 当前用户有运行中任务时，dispose 延迟到任务空闲；进程尚未初始化或不可用时不为了保存额外启动进程。应用个人 `.opencode` 会在后续首次启动或 workspace bootstrap 时直接读取磁盘最新配置；有效公共个人 worktree 也会在后续受管启动/重启时自动恢复，staged、unstaged、untracked 内容均保留，不执行 stash/reset/clean。进程运行期间的新修改仍通过保存热加载或公共“Agent 配置更新”立即生效。
 - 文件已落盘但 dispose 失败时，界面明确提示“文件已保存，运行态刷新失败”，不会把磁盘写入误报为失败。
 
 ### 3.2 影响矩阵
@@ -137,6 +139,8 @@ OPENCODE_CONFIG_DIR / manager configPath
 应用资产引用本身仍由资产库 generation/副本程序维护；`opencode.jsonc` 只记录引用关系及当前所选根层 SDD 目录的精确外部目录 allow，不写仓库级或全局 `* allow`。保存引用 JSONC 只热加载本人；只有管理员明确把该 JSONC 提交并推送后，引用配置才随 feature 固定提交合并到其他个人 worktree，资产文件不会复制进应用仓库，也不会把资产库分支合并进 feature。
 
 表中的“全局 rollout”仍是逐用户进程执行，不存在所有用户共用的 OpenCode 进程。只对已有运行进程登记 dispose 目标；没有运行进程的用户在下次初始化时直接加载最新公共配置和个人 worktree 配置。
+
+前端验证需覆盖：进程归属查询失败时保持路由未解析，不能等同于成功返回的无 binding；查询未解析或无 binding 时既不自动创建公共个人 worktree，也不加载或展示首台服务器的公共直接目录；超级管理员 worktree 准备失败时同样不能降级读取共享直接目录；初始化成功后即使服务器 ID 不变，也必须按响应中的精确 `worktreeId/linuxServerId` 替换旧挂载并刷新目录；服务器或工作空间切换期间旧请求迟到不能覆盖最新挂载。
 
 ## 4. 代码与 Git 操作
 
@@ -264,7 +268,7 @@ tools/create-workspace-branch-model-test-data.sh
 | HOT-03 应用 `opencode.jsonc` 保存与 Diff 分类 | 1. 在现有个人 `.opencode/opencode.jsonc` 中对一个测试引用的 description 做可逆修改。<br>2. 保存前在浏览器网络面板记录请求。<br>3. 按 Command/Ctrl+S。<br>4. 打开应用 Agent Diff，并在验证后回退该测试改动。 | 只修改测试引用，不改 provider、model 或凭据。 | JSONC 出现在“应用 Agent”Diff，而不是普通工作区 Diff；保存成功后出现本人运行态刷新请求；不提交、不推送时别人不受影响。 |
 | HOT-REF-01 引用弹窗补齐目录权限 | 1. 在测试个人 worktree 预置同 path 引用并删除其精确外部目录权限，或把同路径动作改为 `ask`/`deny`。<br>2. 打开引用配置并选择该根层 SDD 目录，不修改描述。<br>3. 确认“更新”可用并点击，记录文件 WebSocket 写请求。<br>4. 再次选择同一目录。 | `references` 中使用 `{env:OPENCODE_REFERENCES_DIR}/{仓库英文名}/{目录名}`；权限目标为同路径 `/*`。 | 只发生一次写盘，正文同时含原引用与精确 `"{path}/*": "allow"`；精确 allow 位于所有后续匹配规则之后，不产生仓库级/全局 allow，注释与未知字段保留；再次选择时无字段变化则“更新”禁用，并只热加载当前用户。 |
 | HOT-04 rules 保存不 dispose | 1. 打开 `.opencode/skills/personal-hot-reload-20260719/rules/no-dispose.md`。<br>2. 把 marker 的 R1 改为 R2。<br>3. 清空浏览器网络面板后按 Command/Ctrl+S。<br>4. 打开应用 Agent Diff。 | `rules/no-dispose.md`。 | 文件写盘并进入应用 Agent Diff；没有 `/global/dispose` 或 workspace runtime reload 请求；后续选择 Agent/Skill 一起发布时该资源仍随 feature 同步。 |
-| HOT-05 公共个人 Agent 保存 | 1. 以 `SUPER_ADMIN` 进入自己的公共 worktree。<br>2. 先在当前用户 OpenCode `/agent` 清单确认共享态不含该测试 Agent，或确认 R1。<br>3. 把公共个人 Agent description 的 R1 改成 R2 并 Command/Ctrl+S。<br>4. 在网络面板确认 `POST /agent-config/public/runtime-reload` 返回 HTTP 200 且 `data.reloaded=true`；若先遇到运行中 Session，只出现一次等待提示，后续自动复核不重复弹框。<br>5. 保存待办仍存在时手动点击一次公共重载，确认成功后不再发出第二次同目标 dispose；即使模拟随后 Agent/Command refetch 失败，也只提示目录刷新结果。<br>6. 等任务空闲后再次查 `/agent`，并执行 `readlink {sessionPath}/.testagent-runtime/current-public-config`。<br>7. 在后端日志按本次 traceId 反查。 | `public-personal-hot-reload-20260719.md`。 | 当前超管读到 R2；软链接指向本人的 `public-{userId}/opencode`；同一保存代次最多成功 dispose 一次且等待提示不重复；共享公共副本和远程分支不变；其他用户不出现该测试 Agent；日志中没有 `block()/blockFirst()/blockLast() are blocking`。 |
+| HOT-05 公共个人 Agent 保存与重启恢复 | 1. 以 `SUPER_ADMIN` 进入自己的公共 worktree。<br>2. 先在当前用户 OpenCode `/agent` 清单确认共享态不含该测试 Agent，或确认 R1。<br>3. 把公共个人 Agent description 的 R1 改成 R2 并 Command/Ctrl+S，另保留一个 staged、unstaged 或 untracked 测试标记。<br>4. 在网络面板确认 `POST /agent-config/public/runtime-reload` 返回 HTTP 200 且 `data.reloaded=true`；若先遇到运行中 Session，只出现一次等待提示，后续自动复核不重复弹框。<br>5. 保存待办仍存在时手动点击一次公共更新，确认成功后不再发出第二次同目标 dispose；即使模拟随后 Agent/Command refetch 失败，也只提示目录刷新结果。<br>6. 等任务空闲后再次查 `/agent`，执行 `readlink {sessionPath}/.testagent-runtime/current-public-config`，再通过平台受管方式重启当前进程并重复两项检查。<br>7. 检查 Git 状态和后端日志。 | `public-personal-hot-reload-20260719.md`。 | 重启前后当前超管都读到 R2；软链接均指向本人的 `public-{userId}/opencode`；staged、unstaged、untracked 标记仍在；重启路径不 fetch、不跑 Git 状态检查、不额外 dispose；共享公共副本和远程分支不变；其他用户不出现该测试 Agent；日志中没有阻塞调用警告。 |
 | HOT-06 公共个人 Skill 保存 | 1. 先在当前用户 Skill 清单确认 R1。<br>2. 修改公共个人 `SKILL.md` 的 R1 为 R2 并保存。<br>3. 等任务空闲后复查 Skill 清单和公共 Diff。 | Skill name `public-personal-hot-reload-20260719`。 | 本人读取到 R2并进入公共 Diff；只有本人指针/进程变化，没有全局 rollout。 |
 | HOT-07 公共 rules 保存不 dispose | 1. 修改公共个人 `rules/no-dispose.md` marker。<br>2. 清空网络面板后保存。<br>3. 复查公共 Diff 和当前公共指针。 | 公共 Skill rules 文件。 | 文件写盘并进入 Diff；不切换指针、不 dispose；如果此前指针已因 Agent/Skill 保存切到个人 worktree，则保持原指向但不发生新的 reload。 |
 | HOT-08 运行中任务延迟热加载 | 1. 启动一个持续运行的当前用户 OpenCode 任务。<br>2. 在任务未结束时把应用 Agent R2 改为 R3 并保存。<br>3. 立即查状态，再结束任务。<br>4. 等待补偿执行后重新查询 Agent。 | 应用个人 Agent marker R2→R3。 | 保存先成功，运行态显示等待空闲；任务结束前不强杀、不重启；结束后自动 dispose 并读到 R3。 |
@@ -279,7 +283,7 @@ tools/create-workspace-branch-model-test-data.sh
 | INT-04 spec 发布拒绝 | 1. 任意角色先把 `spec/test-data/local-only-{tag}.md` 提交到个人分支。<br>2. 单独选择该路径点击提交并推送。<br>3. 再用 `./spec/...` 或重复分隔符别名调用一次。<br>4. 检查个人 HEAD 和远程 feature。 | `spec/**` 正常路径及规范化别名。 | 本地提交保留；两次发布都返回 `FORBIDDEN`；远程 feature 不含路径且 HEAD 不前进。 |
 | INT-05 普通成员写应用配置拒绝 | 1. 用 `USER` 读取应用 Agent。<br>2. 分别调用写入、stage、commit、publish。<br>3. 检查文件、index、HEAD 和远程 ref。 | 应用 `.opencode/agents/**` 测试路径。 | 读取允许；所有写操作返回 `FORBIDDEN`；工作树、index、个人 HEAD 和远程 ref 均不变化。 |
 | INT-06 个人 workspace 独立拉取 | 1. 在远端 feature 准备普通文件和应用 `.opencode/agents/**` 提交。<br>2. A 保持 clean；C 先保留一个与远端不重叠的 dirty 文件，再另造一个会被远端覆盖的 dirty/untracked 文件。<br>3. A 从当前 workspace 标题栏“…”菜单点击“拉取远程”，核对确认文案后选择“不再提示”；再次操作应直接进入过程弹框。<br>4. C 分别在两种本地状态下点击“拉取远程”。<br>5. 检查弹框中的 fetch/merge 顺序、更新文件、`runtimeReloadStatus/runtimeReloadId`，并刷新或关闭页面后确认 dispose 仍会完成；再核对共享 target、A/B/C HEAD、远程 ref 和运行态。 | 专用 feature；同时覆盖 workspace 与应用 Agent 路径。 | A 拉取后应用 workspace 和应用 Agent 都更新，且只有 A HEAD 变化；结果列出实际远程更新文件。A 进程运行时返回 `SCHEDULED` 并只生成 A 的 PERSONAL_APPLICATION server/target，空闲后 dispose；未运行时返回 `NOT_RUNNING` 且不建任务。C 的不重叠改动原样保留且拉取成功，会被覆盖时返回 `LOCAL_CHANGES` 并只列实际阻塞文件。B、共享 target、远程 ref 和公共 Agent 不变；无 commit/push 或服务器广播。应用 Agent 差异只处理拉取成功者本人，APPLICATION/PUBLIC rollout 均不启动。 |
-| INT-07 超级管理员刷新应用 Git | 1. 用 `SUPER_ADMIN` 打开“系统管理 → 配置管理 → 应用 Git 刷新”，选择含不同工作空间、不同版本/分支、同物理仓库多个目录和另一独立仓库组的专用测试应用。<br>2. 执行前核对页面列出的工作空间名称、版本和 feature 分支；先点击一个“刷新该分支”，确认其它分支未 fetch、target/replica/worktree 未变化。<br>3. 再点击“刷新全部分支”，展开逐组结果；制造一组 feature 脏工作树或远端分叉后重试。<br>4. 用 `APP_ADMIN` 和 `USER` 直接请求范围查询、单分支和全量刷新接口。 | 专用测试应用；超级管理员自己的 SSH Key 对全部仓库有权限。 | 页面预览与两类执行使用同一 `repositoryId + version + branch` 分组；每个工作空间版本显示实际分支。单分支请求只处理精确组选中的 feature 和相关 worktree，响应 `totalGroups=1`；全量请求中同组只执行一次，远端可快进组显示 `UPDATED` 或 `UP_TO_DATE`，非重叠本地状态保留；`.opencode/**` 变化只在提交已合入对应 worktree 后触发其应用 rollout。失败组显示 `FAILED/errorCode` 且其它组继续；无 stash/reset。非超管三个接口均返回 `FORBIDDEN`；请求不要求发起人加入应用、READY OpenCode 或用户进程服务器路由头。 |
+| INT-07 超级管理员刷新应用 Git | 1. 用 `SUPER_ADMIN` 打开“系统管理 → 配置管理 → 应用 Git 刷新”，准备一个尚未创建版本分支的空应用，以及一个含不同工作空间、不同版本/分支、同物理仓库多个目录和另一独立仓库组的专用测试应用。<br>2. 确认页面不展示空应用，再核对已展示应用的工作空间名称、版本和 feature 分支；先点击一个“刷新该分支”，确认其它分支未 fetch、target/replica/worktree 未变化。<br>3. 再点击“刷新全部分支”，展开逐组结果；制造一组 feature 脏工作树或远端分叉后重试。<br>4. 用 `APP_ADMIN` 和 `USER` 直接请求范围查询、单分支和全量刷新接口。 | 专用测试应用；超级管理员自己的 SSH Key 对全部仓库有权限。 | 范围接口和页面只列出至少具有一个实际 feature 分支组的应用；页面预览与两类执行使用同一 `repositoryId + version + branch` 分组，每个工作空间版本显示实际分支。单分支请求只处理精确组选中的 feature 和相关 worktree，响应 `totalGroups=1`；全量请求中同组只执行一次，远端可快进组显示 `UPDATED` 或 `UP_TO_DATE`，非重叠本地状态保留；`.opencode/**` 变化只在提交已合入对应 worktree 后触发其应用 rollout。失败组显示 `FAILED/errorCode` 且其它组继续；无 stash/reset。非超管三个接口均返回 `FORBIDDEN`；请求不要求发起人加入应用、READY OpenCode 或用户进程服务器路由头。 |
 
 ### 7.4 自动化回归入口
 

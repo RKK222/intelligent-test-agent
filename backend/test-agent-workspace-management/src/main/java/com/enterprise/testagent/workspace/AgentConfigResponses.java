@@ -96,6 +96,14 @@ public final class AgentConfigResponses {
         }
     }
 
+    /** 用户进程初始化后，超级管理员公共个人 worktree 的同服准备结果。 */
+    public record PublicWorktreePreparationResponse(
+            boolean ready,
+            String worktreeId,
+            String linuxServerId,
+            String message) {
+    }
+
     public record AgentConfigWorktreeOptionResponse(
             String worktreeId,
             String scope,

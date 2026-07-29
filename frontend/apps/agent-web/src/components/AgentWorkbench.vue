@@ -127,7 +127,8 @@ import {
   shouldReloadPersonalRuntimeCatalog,
   type AgentConfigMutation,
   type AgentFileTabInfo,
-  type AgentFileLoadRequest
+  type AgentFileLoadRequest,
+  type PublicWorktreeMountRequest
 } from "./agentFileLoad";
 import {
   isReferenceFilePath,
@@ -215,6 +216,7 @@ import {
   opencodeAvailabilityFromHealth,
   opencodeAvailabilityFromProcess,
   opencodeHealthRequestFromProcess,
+  opencodeProcessRouteResolution,
   parseCommand,
   prepareAutoRetryRun,
   promptFromParts,
@@ -254,6 +256,8 @@ const SCM_GMP_PERMISSION_APPLICATION_URL = "https://scm-gmp.sdc.cs.icbc/icbc/gmp
 // 只保存当前页面生命周期内的 binding 提示，避免刷新或切换用户后沿用旧服务器。
 const routeLinuxServerId = ref("");
 const routeLinuxServerResolved = ref(false);
+const publicWorktreeMountRequest = ref<PublicWorktreeMountRequest | null>(null);
+let publicWorktreeMountRevision = 0;
 const api = createBackendApiClient({
   baseUrl: apiBaseUrl,
   routeLinuxServerId: () => routeLinuxServerId.value,
@@ -1303,6 +1307,7 @@ watch(
       runtimeStateOutages.reset();
       routeLinuxServerId.value = "";
       routeLinuxServerResolved.value = false;
+      publicWorktreeMountRequest.value = null;
     }
     if (!token || !subscriptionRouteResolved) {
       sessionRuntimeState.value = null;
@@ -1420,13 +1425,13 @@ const opencodeProcessStatus = computed<UserOpencodeProcess | null>(() => {
     : process;
 });
 watch(
-  [opencodeProcessStatus, () => opencodeProcessQuery.isFetched.value],
-  ([process, isFetched]) => {
-    if (!isFetched) {
-      return;
+  [opencodeProcessStatus, () => opencodeProcessQuery.status.value],
+  ([process, queryStatus]) => {
+    const resolution = opencodeProcessRouteResolution(process, queryStatus);
+    routeLinuxServerResolved.value = resolution.resolved;
+    if (resolution.resolved) {
+      routeLinuxServerId.value = resolution.linuxServerId;
     }
-    routeLinuxServerId.value = process?.linuxServerId?.trim() ?? "";
-    routeLinuxServerResolved.value = true;
   },
   { immediate: true }
 );
@@ -1610,9 +1615,10 @@ const agentsQuery = useQuery({
   retry: false
 });
 const commandsQuery = useQuery({
-  queryKey: ["runtime", "commands", selectedWorkspaceIdRef],
+  queryKey: computed(() => ["runtime", "commands", selectedWorkspaceIdRef.value ?? ""] as const),
   enabled: opencodeCatalogReady,
-  queryFn: () => api.listCommands(selectedWorkspaceIdRef.value!),
+  // 请求使用 query key 固化的 workspace，避免应用切换后迟到请求读取到新的当前值。
+  queryFn: ({ queryKey }) => api.listCommands(String(queryKey[2])),
   retry: false
 });
 
@@ -2596,9 +2602,9 @@ async function handlePersonalRuntimeReload(payload: {
     if (!opencodeProcessReady.value) {
       feedback.value = {
         kind: "info",
-        title: payload.scope === "PUBLIC" ? "公共个人配置未重载" : "应用个人配置已同步",
+        title: payload.scope === "PUBLIC" ? "公共个人配置将在启动时加载" : "应用个人配置已同步",
         description: payload.scope === "PUBLIC"
-          ? "当前 TestAgent 进程未就绪，无需 dispose；下次启动会读取最新配置。"
+          ? "当前 TestAgent 进程未就绪；未提交内容已保留，下次受管启动会自动加载公共个人 worktree。"
           : "应用 feature 更新已合并；TestAgent 进程下次启动时会读取最新配置。"
       };
       return;
@@ -2616,7 +2622,7 @@ async function handlePersonalRuntimeReload(payload: {
     await Promise.all([agentsQuery.refetch(), commandsQuery.refetch()]);
     feedback.value = {
       kind: "success",
-      title: payload.scope === "PUBLIC" ? "公共个人配置已重载" : "应用个人配置已重载",
+      title: payload.scope === "PUBLIC" ? "公共个人配置已更新" : "应用个人配置已更新",
       description: "已只刷新当前用户的 OpenCode 运行态；其他用户不受影响。"
     };
   } catch (error) {
@@ -3097,6 +3103,24 @@ const initializeOpencodeProcessMutation = useMutation({
     if (status.status === "READY") {
       stopProcessStartupPolling();
       processStartupDialogOpen.value = false;
+      const preparation = status.publicWorktreePreparation;
+      const worktreeId = preparation?.worktreeId?.trim();
+      const linuxServerId = preparation?.linuxServerId?.trim();
+      if (preparation?.ready === true && worktreeId && linuxServerId) {
+        // 初始化可能复用原服务器，不能只依赖服务器 prop 变化；显式通知配置树按返回 ID 重新挂载。
+        publicWorktreeMountRequest.value = {
+          revision: ++publicWorktreeMountRevision,
+          worktreeId,
+          linuxServerId
+        };
+      }
+      if (status.publicWorktreePreparation?.ready === false) {
+        feedback.value = {
+          kind: "info",
+          title: "TestAgent 进程可用，公共个人 worktree 未准备完成",
+          description: status.publicWorktreePreparation.message
+        };
+      }
     }
   },
   onError: (error, operationId) => {
@@ -8845,6 +8869,8 @@ async function handleLogout() {
           :can-manage-public-config="selectedWorkspaceKind === 'MANAGED' && isSuperAdmin"
           :api-base-url="apiBaseUrl"
           :route-linux-server-id="routeLinuxServerId"
+          :route-linux-server-resolved="routeLinuxServerResolved"
+          :public-worktree-mount-request="publicWorktreeMountRequest"
           :workspace-id="selectedWorkspace?.workspaceId"
           :agent-config-workspace-id="selectedAgentConfigWorkspaceId"
           :personal-workspace-id="currentPersonalWorkspaceId"

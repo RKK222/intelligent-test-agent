@@ -2294,7 +2294,7 @@ function submitJoinApp() {
             type="button"
             class="figma-pet-runtime-action"
             aria-label="重载公共个人配置"
-            title="重载公共个人配置"
+            title="加载公共个人配置（平台启动或重启会自动恢复）"
             :disabled="runtimeBusy || personalRuntimeReloading !== null"
             @click="requestPetRuntimeReload('PUBLIC')"
           >
@@ -2306,7 +2306,7 @@ function submitJoinApp() {
             type="button"
             class="figma-pet-runtime-action"
             aria-label="重载应用个人配置"
-            title="重载应用个人配置"
+            title="合并应用 feature 分支并刷新个人配置"
             :disabled="runtimeBusy || personalRuntimeReloading !== null"
             @click="requestPetRuntimeReload('WORKSPACE')"
           >
@@ -2323,12 +2323,12 @@ function submitJoinApp() {
       >
           <p>
             {{ pendingPetRuntimeReloadScope === 'PUBLIC'
-              ? 'Agent 配置更新会切换到你的公共个人 worktree，并只释放你的 OpenCode 缓存。'
-              : 'Agent 配置更新会只释放你的应用 OpenCode 缓存，下一次请求会重新读取个人配置。' }}
+              ? '将加载你的公共个人 worktree，并只刷新当前用户的 OpenCode 缓存；未提交内容不会被删除，后续通过平台启动或重启会自动继续加载。'
+              : '将先把应用 feature 固定提交安全合入当前个人 worktree，再只刷新当前用户的 OpenCode 缓存；不会 stash、reset 或删除未提交内容。' }}
         </p>
         <div>
           <button type="button" @click="cancelPetRuntimeReload">取消</button>
-          <button type="button" class="is-primary" @click="confirmPetRuntimeReload">确认重载</button>
+          <button type="button" class="is-primary" @click="confirmPetRuntimeReload">确认更新</button>
         </div>
       </div>
       <section v-if="petSettingsOpen" class="figma-pet-roster" data-testid="pet-companion-settings" aria-label="小宠物显示方式">

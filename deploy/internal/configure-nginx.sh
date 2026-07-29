@@ -133,17 +133,48 @@ NGINX_SYSTEMD_SERVICE="${TEST_AGENT_NGINX_SYSTEMD_SERVICE:-nginx}"
   echo "TEST_AGENT_NGINX_MODE must be single or multi" >&2
   exit 1
 }
-for toolbox_endpoint in "${NGINX_TOOLBOX_IT_TOOLS_UPSTREAM}" "${NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM}"; do
-  [[ "${toolbox_endpoint}" =~ ^([A-Za-z0-9.-]+):([0-9]{1,5})$ ]] || {
-    echo "Invalid toolbox upstream endpoint: ${toolbox_endpoint}" >&2
+# 兼容旧现场的单地址配置；双后台现场按逗号声明同版本工具实例，首项主用、其余故障备用。
+parse_toolbox_upstreams() {
+  local configured="$1" name="$2" raw_endpoint endpoint port index=0
+  local -a raw_toolbox_endpoints=()
+  TOOLBOX_PARSED_DIRECTIVES=()
+  [[ -n "$(trim "${configured}")" ]] || {
+    echo "${name} must contain at least one endpoint" >&2
     exit 1
   }
-  toolbox_port="${BASH_REMATCH[2]}"
-  (( toolbox_port >= 1 && toolbox_port <= 65535 )) || {
-    echo "Invalid toolbox upstream port: ${toolbox_endpoint}" >&2
+  IFS=',' read -r -a raw_toolbox_endpoints <<<"${configured}"
+  for raw_endpoint in "${raw_toolbox_endpoints[@]}"; do
+    endpoint="$(trim "${raw_endpoint}")"
+    [[ "${endpoint}" =~ ^([A-Za-z0-9.-]+):([0-9]{1,5})$ ]] || {
+      echo "Invalid ${name} endpoint: ${endpoint}" >&2
+      exit 1
+    }
+    port="${BASH_REMATCH[2]}"
+    (( port >= 1 && port <= 65535 )) || {
+      echo "Invalid ${name} port: ${endpoint}" >&2
+      exit 1
+    }
+    if [[ "${index}" -eq 0 ]]; then
+      TOOLBOX_PARSED_DIRECTIVES+=("server ${endpoint} max_fails=2 fail_timeout=10s;")
+    else
+      TOOLBOX_PARSED_DIRECTIVES+=("server ${endpoint} backup max_fails=2 fail_timeout=10s;")
+    fi
+    index=$((index + 1))
+  done
+  [[ "${index}" -gt 0 ]] || {
+    echo "${name} must contain at least one endpoint" >&2
     exit 1
   }
-done
+}
+
+toolbox_it_tools_directives=()
+toolbox_omni_tools_directives=()
+parse_toolbox_upstreams "${NGINX_TOOLBOX_IT_TOOLS_UPSTREAM}" \
+  TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM
+toolbox_it_tools_directives=("${TOOLBOX_PARSED_DIRECTIVES[@]}")
+parse_toolbox_upstreams "${NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM}" \
+  TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM
+toolbox_omni_tools_directives=("${TOOLBOX_PARSED_DIRECTIVES[@]}")
 if [[ -n "${NGINX_SERVER_ROUTES}" && -n "${NGINX_LEGACY_TERMINAL_ROUTES}" ]]; then
   echo "Configure only TEST_AGENT_NGINX_SERVER_ROUTES; TEST_AGENT_NGINX_TERMINAL_ROUTES is a legacy fallback" >&2
   exit 1
@@ -345,8 +376,8 @@ tls_token='${TEST_AGENT_NGINX_TLS_DIRECTIVES}'
 terminal_token='${TEST_AGENT_TERMINAL_LOCATIONS}'
 server_upstreams_token='${TEST_AGENT_SERVER_UPSTREAMS}'
 server_route_map_token='${TEST_AGENT_SERVER_ROUTE_MAP}'
-toolbox_it_tools_token='${TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM}'
-toolbox_omni_tools_token='${TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM}'
+toolbox_it_tools_token='${TEST_AGENT_TOOLBOX_IT_TOOLS_SERVERS}'
+toolbox_omni_tools_token='${TEST_AGENT_TOOLBOX_OMNI_TOOLS_SERVERS}'
 listen_directive="listen ${NGINX_LISTEN_PORT};"
 additional_listen_directives=()
 tls_directives=""
@@ -364,6 +395,20 @@ if [[ -n "${NGINX_ADDITIONAL_LISTEN_PORTS}" ]]; then
   done
 fi
 while IFS= read -r line || [[ -n "${line}" ]]; do
+  if [[ "${line}" == *"${toolbox_it_tools_token}"* ]]; then
+    indent="${line%%"${toolbox_it_tools_token}"*}"
+    for directive in "${toolbox_it_tools_directives[@]}"; do
+      printf '%s%s\n' "${indent}" "${directive}" >>"${rendered}"
+    done
+    continue
+  fi
+  if [[ "${line}" == *"${toolbox_omni_tools_token}"* ]]; then
+    indent="${line%%"${toolbox_omni_tools_token}"*}"
+    for directive in "${toolbox_omni_tools_directives[@]}"; do
+      printf '%s%s\n' "${indent}" "${directive}" >>"${rendered}"
+    done
+    continue
+  fi
   if [[ "${line}" == *"${backends_token}"* ]]; then
     indent="${line%%"${backends_token}"*}"
     for directive in "${backend_directives[@]}"; do
@@ -438,8 +483,6 @@ while IFS= read -r line || [[ -n "${line}" ]]; do
   line="${line//${listen_token}/${listen_directive}}"
   line="${line//${tls_token}/${tls_directives}}"
   line="${line//${root_token}/${FRONTEND_ROOT}}"
-  line="${line//${toolbox_it_tools_token}/${NGINX_TOOLBOX_IT_TOOLS_UPSTREAM}}"
-  line="${line//${toolbox_omni_tools_token}/${NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM}}"
   printf '%s\n' "${line}" >>"${rendered}"
 done <"${TEMPLATE}"
 
@@ -455,7 +498,8 @@ if [[ "${VALIDATE_ONLY}" -eq 1 ]]; then
   printf 'backend count: %s\n' "${#backend_directives[@]}"
   printf 'server route count: %s\n' "${#server_route_ids[@]}"
   printf 'XXL-JOB Admin count: %s\n' "${#xxl_job_admin_directives[@]}"
-  printf 'toolbox upstreams: %s,%s\n' "${NGINX_TOOLBOX_IT_TOOLS_UPSTREAM}" "${NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM}"
+  printf 'toolbox upstream counts: it-tools=%s omni-tools=%s\n' \
+    "${#toolbox_it_tools_directives[@]}" "${#toolbox_omni_tools_directives[@]}"
   printf 'tls enabled: %s\n' "${NGINX_TLS_ENABLED}"
   exit 0
 fi

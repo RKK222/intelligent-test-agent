@@ -35,7 +35,10 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessStartOpera
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessStartOperationStep;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
+import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.opencode.runtime.session.SessionApplicationService;
+import com.enterprise.testagent.workspace.AgentConfigApplicationService;
+import com.enterprise.testagent.workspace.AgentConfigResponses;
 import com.enterprise.testagent.workspace.WorkspaceApplicationService;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.run.Run;
@@ -389,6 +392,63 @@ class RuntimeControllerTest {
                 .jsonPath("$.data.steps[0].code").isEqualTo("VALIDATING_REQUEST")
                 .jsonPath("$.data.steps[0].name").isEqualTo("校验请求")
                 .jsonPath("$.data.steps[7].status").isEqualTo("FAILED");
+    }
+
+    @Test
+    void opencodeProcessInitializationPreparesSuperAdminPublicWorktreeOnTheProcessServer() {
+        UserOpencodeProcessAssignmentService service = org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        OpencodeProcessStatusQueryService statusQueryService = org.mockito.Mockito.mock(OpencodeProcessStatusQueryService.class);
+        AgentConfigApplicationService agentConfigService = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        UserOpencodeProcessStatusResponse ready = new UserOpencodeProcessStatusResponse(
+                UserOpencodeProcessAvailability.READY,
+                false,
+                "TestAgent 进程可用",
+                "ocp_1234567890abcdef",
+                "server-a",
+                "ctr_01",
+                4096,
+                "http://10.8.0.12:4096",
+                NOW,
+                UserOpencodeServiceStatus.RUNNING,
+                "10.8.0.12:4096",
+                null);
+        when(service.initialize(
+                eq(new UserId("usr_1234567890abcdef")),
+                eq("opencode"),
+                eq("trace_1234567890abcdef"),
+                eq("opi_1234567890abcdef")))
+                .thenReturn(ready);
+        when(agentConfigService.preparePublicWorktreeForInitializedProcess(
+                eq("server-a"),
+                eq(new UserId("usr_1234567890abcdef")),
+                eq("trace_1234567890abcdef")))
+                .thenReturn(new AgentConfigResponses.PublicWorktreePreparationResponse(
+                        true,
+                        "agw_1234567890abcdef",
+                        "server-a",
+                        "公共个人 worktree 已准备完成"));
+        WebTestClient client = WebTestClient.bindToController(new UserOpencodeProcessController(
+                        service,
+                        statusQueryService,
+                        agentConfigService))
+                .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter(List.of(Dictionary.ROLE_SUPER_ADMIN)))
+                .build();
+
+        client.post()
+                .uri("/api/internal/agent/opencode/processes/me/initialize")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"operationId":"opi_1234567890abcdef"}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.status").isEqualTo("READY")
+                .jsonPath("$.data.publicWorktreePreparation.ready").isEqualTo(true)
+                .jsonPath("$.data.publicWorktreePreparation.worktreeId").isEqualTo("agw_1234567890abcdef")
+                .jsonPath("$.data.publicWorktreePreparation.linuxServerId").isEqualTo("server-a");
     }
 
     @Test
@@ -1011,13 +1071,17 @@ class RuntimeControllerTest {
     }
 
     private static org.springframework.web.server.WebFilter authenticatedUserFilter() {
+        return authenticatedUserFilter(List.of("APP_ADMIN"));
+    }
+
+    private static org.springframework.web.server.WebFilter authenticatedUserFilter(List<String> roles) {
         return (exchange, chain) -> {
             exchange.getAttributes().put(AuthWebSupport.AUTH_ATTR, new AuthPrincipal(
                     "token",
                     new UserId("usr_1234567890abcdef"),
                     "admin",
                     "admin",
-                    List.of("APP_ADMIN"),
+                    roles,
                     NOW,
                     NOW.plusSeconds(3600)));
             return chain.filter(exchange);

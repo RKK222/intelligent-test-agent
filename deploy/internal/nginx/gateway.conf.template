@@ -24,12 +24,12 @@ upstream test_agent_xxl_job_admin {
 }
 
 upstream test_agent_toolbox_it_tools {
-    server ${TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM} max_fails=2 fail_timeout=10s;
+    ${TEST_AGENT_TOOLBOX_IT_TOOLS_SERVERS}
     keepalive 8;
 }
 
 upstream test_agent_toolbox_omni_tools {
-    server ${TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM} max_fails=2 fail_timeout=10s;
+    ${TEST_AGENT_TOOLBOX_OMNI_TOOLS_SERVERS}
     keepalive 8;
 }
 
@@ -106,7 +106,7 @@ server {
         proxy_cache off;
     }
 
-    # 工具根路径不暴露上游门户；具体工具深链在 SPA catch-all 之前代理到独立工具节点。
+    # 工具根路径不暴露上游门户；具体工具深链在 SPA catch-all 之前代理到后台共置工具容器。
     location = /toolbox/apps/it-tools {
         return 308 /toolbox;
     }

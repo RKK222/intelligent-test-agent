@@ -5,11 +5,16 @@ import com.enterprise.testagent.api.web.common.RuntimeApiSupport;
 import com.enterprise.testagent.common.api.ApiResponse;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
+import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStatusQueryService;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessWeakHealthRequest;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
+import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
+import com.enterprise.testagent.workspace.AgentConfigApplicationService;
+import com.enterprise.testagent.workspace.AgentConfigResponses;
 import java.util.Objects;
 import java.util.function.Function;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,6 +36,7 @@ public class UserOpencodeProcessController {
 
     private final UserOpencodeProcessAssignmentService processAssignmentService;
     private final OpencodeProcessStatusQueryService statusQueryService;
+    private final AgentConfigApplicationService agentConfigService;
     private PublicAgentConfigMessageGate publicConfigMessageGate = ignored ->
             PublicAgentConfigMessageGate.MessageGateStatus.open();
 
@@ -40,8 +46,18 @@ public class UserOpencodeProcessController {
     public UserOpencodeProcessController(
             UserOpencodeProcessAssignmentService processAssignmentService,
             OpencodeProcessStatusQueryService statusQueryService) {
+        this(processAssignmentService, statusQueryService, null);
+    }
+
+    /** Spring 生产入口额外注入工作区服务，在进程目标 Java 上准备同服公共个人 worktree。 */
+    @Autowired
+    public UserOpencodeProcessController(
+            UserOpencodeProcessAssignmentService processAssignmentService,
+            OpencodeProcessStatusQueryService statusQueryService,
+            AgentConfigApplicationService agentConfigService) {
         this.processAssignmentService = Objects.requireNonNull(processAssignmentService, "processAssignmentService must not be null");
         this.statusQueryService = Objects.requireNonNull(statusQueryService, "statusQueryService must not be null");
+        this.agentConfigService = agentConfigService;
     }
 
     /** 注入持久化发布闸门，供强状态响应和独立轻量轮询接口复用。 */
@@ -104,10 +120,22 @@ public class UserOpencodeProcessController {
             @PathVariable String agentId,
             @RequestBody(required = false) RuntimeDtos.UserOpencodeProcessInitializeRequest request,
             ServerWebExchange exchange) {
-        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
+        UserId userId = principal.userId();
         String operationId = request == null ? null : request.operationId();
-        return blockingResponse(exchange, traceId -> RuntimeDtos.UserOpencodeProcessResponse.from(
-                processAssignmentService.initialize(userId, agentId, traceId, operationId)));
+        return blockingResponse(exchange, traceId -> {
+            var process = processAssignmentService.initialize(userId, agentId, traceId, operationId);
+            AgentConfigResponses.PublicWorktreePreparationResponse preparation = null;
+            if (process.status() == UserOpencodeProcessAvailability.READY
+                    && agentConfigService != null
+                    && AuthWebSupport.hasRole(principal, Dictionary.ROLE_SUPER_ADMIN)) {
+                preparation = agentConfigService.preparePublicWorktreeForInitializedProcess(
+                        process.linuxServerId(),
+                        userId,
+                        traceId);
+            }
+            return RuntimeDtos.UserOpencodeProcessResponse.from(process, preparation);
+        });
     }
 
     /**

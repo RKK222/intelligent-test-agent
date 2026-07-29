@@ -20,6 +20,10 @@ PACKAGE_MYSQL_IMAGE=0
 SAVE_TARBALL=1
 PACKAGE_ZIP=1
 PACKAGE_ZIP_ONLY=0
+PACKAGE_MODE=full
+INCLUDE_ALL_COMPONENTS=0
+COMPONENT_PLAN_ONLY=0
+COMPONENT_STATE_FILE=""
 OUTPUT_DIR_FROM_ENV_BEFORE_DOTENV="${TEST_AGENT_IMAGE_OUTPUT_DIR+x}"
 
 usage() {
@@ -47,7 +51,13 @@ Options:
   --opencode-only         Package only the opencode worker image.
   --toolbox-only          Package only the two toolbox images and modified source.
   --mysql-only            Package only the standalone MySQL image.
-  --zip-only              Reassemble the release ZIP from existing complete artifacts and current session logs.
+  --zip-only              Reassemble the release ZIP from current verified artifacts and component state.
+  --include-all-components
+                          Force worker runtime (OpenCode Manager/Codex MCP) and toolbox into the ZIP.
+                          Use for first installation, disaster recovery or a new build machine.
+  --component-state-file <path>
+                          Persistent component fingerprint state. Default: <output-dir>/.release-component-state.env.
+  --component-plan-only   Print include/reuse decisions and fingerprints without building or packaging.
   --no-save               Build/pull Docker images but do not export image tarballs.
   --no-zip                Do not create the complete enterprise release zip.
   -h, --help              Show this help.
@@ -71,6 +81,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --backend-only)
+      PACKAGE_MODE=backend-only
       PACKAGE_BACKEND=1
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
@@ -79,6 +90,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --frontend-only)
+      PACKAGE_MODE=frontend-only
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=1
       PACKAGE_OPENCODE_WORKER=0
@@ -87,6 +99,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --opencode-only)
+      PACKAGE_MODE=opencode-only
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=1
@@ -95,6 +108,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --toolbox-only)
+      PACKAGE_MODE=toolbox-only
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
@@ -103,6 +117,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --mysql-only)
+      PACKAGE_MODE=mysql-only
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
@@ -111,12 +126,25 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --zip-only)
+      PACKAGE_MODE=zip-only
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
       PACKAGE_ZIP_ONLY=1
+      shift
+      ;;
+    --include-all-components)
+      INCLUDE_ALL_COMPONENTS=1
+      shift
+      ;;
+    --component-state-file)
+      COMPONENT_STATE_FILE="$2"
+      shift 2
+      ;;
+    --component-plan-only)
+      COMPONENT_PLAN_ONLY=1
       shift
       ;;
     --no-save)
@@ -281,6 +309,150 @@ write_artifact_checksum() {
   fi
 }
 
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    echo "Neither sha256sum nor shasum is available" >&2
+    exit 1
+  fi
+}
+
+state_value() {
+  local file="$1" key="$2"
+  [[ -f "${file}" ]] || return 0
+  awk -F= -v wanted="${key}" '$1 == wanted { value=substr($0, index($0, "=") + 1) } END { print value }' "${file}"
+}
+
+# 组件指纹只读取 Git 已跟踪或未忽略的新文件内容，不使用 mtime，避免同一源码仅因复制时间变化而误打大包。
+component_fingerprint() {
+  local config="$1"
+  shift
+  local fingerprint_input file
+  fingerprint_input="$(mktemp "${OUTPUT_DIR}/.component-fingerprint.XXXXXX")"
+  printf 'config=%s\n' "${config}" >"${fingerprint_input}"
+  while IFS= read -r -d '' file; do
+    if [[ -f "${ROOT_DIR}/${file}" ]]; then
+      printf '%s  %s\n' "$(sha256_file "${ROOT_DIR}/${file}")" "${file}" >>"${fingerprint_input}"
+    fi
+  done < <(git -C "${ROOT_DIR}" ls-files -co --exclude-standard -z -- "$@")
+  sha256_file "${fingerprint_input}"
+  rm -f "${fingerprint_input}"
+}
+
+write_component_fingerprints() {
+  local target="$1" tmp
+  tmp="$(mktemp "${target}.new.XXXXXX")"
+  {
+    printf 'TEST_AGENT_RELEASE_COMPONENT_STATE_VERSION=1\n'
+    printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=%s\n' "${WORKER_RUNTIME_FINGERPRINT}"
+    printf 'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=%s\n' "${TOOLBOX_FINGERPRINT}"
+  } >"${tmp}"
+  chmod 0600 "${tmp}"
+  mv -f "${tmp}" "${target}"
+}
+
+write_worker_artifact_state() {
+  local target="${OUTPUT_DIR}/.worker-runtime-artifact.env" tmp
+  tmp="$(mktemp "${target}.new.XXXXXX")"
+  printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=%s\n' \
+    "${WORKER_RUNTIME_FINGERPRINT}" >"${tmp}"
+  chmod 0600 "${tmp}"
+  mv -f "${tmp}" "${target}"
+}
+
+write_toolbox_artifact_state() {
+  local target="${OUTPUT_DIR}/.toolbox-artifact.env" tmp
+  tmp="$(mktemp "${target}.new.XXXXXX")"
+  printf 'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=%s\n' \
+    "${TOOLBOX_FINGERPRINT}" >"${tmp}"
+  chmod 0600 "${tmp}"
+  mv -f "${tmp}" "${target}"
+}
+
+require_artifact_fingerprint() {
+  local file="$1" key="$2" expected="$3" actual
+  actual="$(state_value "${file}" "${key}")"
+  [[ "${actual}" == "${expected}" ]] || {
+    echo "Component artifacts are missing or stale for ${key}; run the normal build instead of --zip-only" >&2
+    exit 1
+  }
+}
+
+plan_release_components() {
+  local previous_worker previous_toolbox worker_config toolbox_config
+  local current_release current_manifest current_worker_mode current_worker_fingerprint
+  local current_toolbox_mode current_toolbox_fingerprint
+  worker_config="schema=1|platform=${PLATFORM}|image=${TEST_AGENT_OPENCODE_WORKER_IMAGE}|go=${GO_IMAGE}|node=${NODE_IMAGE}|opencode=${OPENCODE_VERSION}|opencodeCommit=${OPENCODE_RELEASE_COMMIT}|opencodeAsset=${OPENCODE_ASSET_SHA256}|opencodeBinary=${OPENCODE_BINARY_SHA256}|codex=${CODEX_VERSION}|codexAsset=${CODEX_ASSET_SHA256}|bwrap=${CODEX_BWRAP_ASSET_SHA256}|bwrapBinary=${CODEX_BWRAP_BINARY_SHA256}|runtimePackage=${OPENCODE_RUNTIME_PACKAGE_JSON}|runtimeLock=${OPENCODE_RUNTIME_PACKAGE_LOCK}"
+  toolbox_config="schema=1|platform=${PLATFORM}|it=${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}|omni=${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}|node=${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE}|nginx=${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE}"
+
+  WORKER_RUNTIME_FINGERPRINT="$(component_fingerprint "${worker_config}" \
+    opencode-manager/go.mod \
+    opencode-manager/go.sum \
+    opencode-manager/cmd \
+    opencode-manager/internal \
+    ':(exclude)opencode-manager/**/*_test.go' \
+    deploy/internal/opencode-worker.Dockerfile \
+    deploy/internal/opencode-worker.Dockerfile.dockerignore \
+    deploy/internal/opencode-worker-entrypoint.sh \
+    deploy/internal/opencode-node-runtime.package.json \
+    deploy/internal/opencode-node-runtime.package-lock.json \
+    deploy/internal/opencode-official-launcher.mjs \
+    deploy/internal/opencode-runtime.gitignore \
+    deploy/internal/codex-whitebox-mcp.mjs \
+    deploy/internal/codex-whitebox-mcp-launcher.sh \
+    deploy/internal/codex-whitebox-requirements.toml \
+    tools/probe-codex-whitebox-e2e.mjs \
+    opencode-source/opencode-1.18.4/LICENSE)"
+  TOOLBOX_FINGERPRINT="$(component_fingerprint "${toolbox_config}" \
+    toolbox-source \
+    backend/test-agent-integration/src/main/resources/toolbox/catalog-v1.json)"
+
+  previous_worker="$(state_value "${COMPONENT_STATE_FILE}" TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT)"
+  previous_toolbox="$(state_value "${COMPONENT_STATE_FILE}" TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT)"
+  WORKER_COMPONENT_MODE=reuse
+  TOOLBOX_COMPONENT_MODE=reuse
+  if [[ "${INCLUDE_ALL_COMPONENTS}" -eq 1 || -z "${previous_worker}" \
+    || "${previous_worker}" != "${WORKER_RUNTIME_FINGERPRINT}" ]]; then
+    WORKER_COMPONENT_MODE=included
+  fi
+  if [[ "${INCLUDE_ALL_COMPONENTS}" -eq 1 || -z "${previous_toolbox}" \
+    || "${previous_toolbox}" != "${TOOLBOX_FINGERPRINT}" ]]; then
+    TOOLBOX_COMPONENT_MODE=included
+  fi
+
+  # zip-only 用于同一发布批次补会话日志或重新封装，必须保持现有 ZIP 的组件选择；
+  # 源码指纹变化时不会命中，仍按持久化基线重新判断并要求当前制品指纹匹配。
+  current_release="${OUTPUT_DIR}/test-agent-internal-release.zip"
+  if [[ "${PACKAGE_MODE}" == zip-only && "${INCLUDE_ALL_COMPONENTS}" -eq 0 \
+    && -f "${current_release}" ]]; then
+    require_command unzip
+    current_manifest="$(unzip -p "${current_release}" deploy/internal/release-components.env 2>/dev/null || true)"
+    current_worker_mode="$(awk -F= '$1 == "TEST_AGENT_RELEASE_WORKER_RUNTIME" { print substr($0, index($0, "=") + 1) }' <<<"${current_manifest}")"
+    current_worker_fingerprint="$(awk -F= '$1 == "TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT" { print substr($0, index($0, "=") + 1) }' <<<"${current_manifest}")"
+    current_toolbox_mode="$(awk -F= '$1 == "TEST_AGENT_RELEASE_TOOLBOX" { print substr($0, index($0, "=") + 1) }' <<<"${current_manifest}")"
+    current_toolbox_fingerprint="$(awk -F= '$1 == "TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT" { print substr($0, index($0, "=") + 1) }' <<<"${current_manifest}")"
+    if [[ ( "${current_worker_mode}" == included || "${current_worker_mode}" == reuse ) \
+      && "${current_worker_fingerprint}" == "${WORKER_RUNTIME_FINGERPRINT}" ]]; then
+      WORKER_COMPONENT_MODE="${current_worker_mode}"
+    fi
+    if [[ ( "${current_toolbox_mode}" == included || "${current_toolbox_mode}" == reuse ) \
+      && "${current_toolbox_fingerprint}" == "${TOOLBOX_FINGERPRINT}" ]]; then
+      TOOLBOX_COMPONENT_MODE="${current_toolbox_mode}"
+    fi
+  fi
+  [[ "${PACKAGE_MODE}" != opencode-only ]] || WORKER_COMPONENT_MODE=included
+  [[ "${PACKAGE_MODE}" != toolbox-only ]] || TOOLBOX_COMPONENT_MODE=included
+
+  printf 'worker runtime component: %s\n' "${WORKER_COMPONENT_MODE}"
+  printf 'worker runtime fingerprint: %s\n' "${WORKER_RUNTIME_FINGERPRINT}"
+  printf 'toolbox component: %s\n' "${TOOLBOX_COMPONENT_MODE}"
+  printf 'toolbox fingerprint: %s\n' "${TOOLBOX_FINGERPRINT}"
+  printf 'component state: %s\n' "${COMPONENT_STATE_FILE}"
+}
+
 package_backend() {
   local backend_dir="${OUTPUT_DIR}/backend"
   local backend_jar_path extract_dir manifest_dir manifest_file
@@ -406,6 +578,7 @@ build_opencode_worker_image() {
     echo "Saving ${TEST_AGENT_OPENCODE_WORKER_IMAGE} to ${tar_path}"
     docker save -o "${tar_path}" "${TEST_AGENT_OPENCODE_WORKER_IMAGE}"
     ls -lh "${tar_path}"
+    write_worker_artifact_state
   fi
 }
 
@@ -453,6 +626,9 @@ package_toolbox() {
   install -m 0755 "${SCRIPT_DIR}/toolbox-docker.sh" "${OUTPUT_DIR}/toolbox-docker.sh"
   install -m 0755 "${SCRIPT_DIR}/diagnose-toolbox.sh" "${OUTPUT_DIR}/diagnose-toolbox.sh"
   install -m 0644 "${ROOT_DIR}/docs/deployment/toolbox.md" "${OUTPUT_DIR}/TOOLBOX.md"
+  if [[ "${SAVE_TARBALL}" -eq 1 ]]; then
+    write_toolbox_artifact_state
+  fi
 }
 
 package_mysql_image() {
@@ -486,40 +662,59 @@ package_release_zip() {
   it_tools_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}" "${PLATFORM}")"
   omni_tools_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}" "${PLATFORM}")"
 
-  # zip-only 复用刚完成验证的二进制制品，但不允许任何一层缺失后生成看似完整的发布包。
+  # 后端与前端每次交付；大体积 worker runtime 和 toolbox 只在指纹变化时加入。
   for required_artifact in \
     "${OUTPUT_DIR}/backend/test-agent-app.jar" \
-    "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" \
-    "${OUTPUT_DIR}/test-agent-programs.tar.gz" \
-    "${worker_tar}" \
-    "${it_tools_tar}" \
-    "${it_tools_tar}.sha256" \
-    "${omni_tools_tar}" \
-    "${omni_tools_tar}.sha256" \
-    "${OUTPUT_DIR}/test-agent-toolbox-source.tar.gz" \
-    "${OUTPUT_DIR}/test-agent-toolbox-source.tar.gz.sha256" \
-    "${OUTPUT_DIR}/toolbox-catalog-v1.json" \
-    "${OUTPUT_DIR}/toolbox-catalog-v1.json.sha256" \
-    "${OUTPUT_DIR}/TOOLBOX.md"; do
+    "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz"; do
     if [[ ! -f "${required_artifact}" ]]; then
       echo "Required release artifact not found: ${required_artifact}" >&2
       exit 1
     fi
   done
+  if [[ "${WORKER_COMPONENT_MODE}" == included ]]; then
+    require_artifact_fingerprint "${OUTPUT_DIR}/.worker-runtime-artifact.env" \
+      TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT "${WORKER_RUNTIME_FINGERPRINT}"
+    for required_artifact in "${OUTPUT_DIR}/test-agent-programs.tar.gz" "${worker_tar}"; do
+      [[ -f "${required_artifact}" ]] || {
+        echo "Required worker runtime artifact not found: ${required_artifact}" >&2
+        exit 1
+      }
+    done
+  fi
+  if [[ "${TOOLBOX_COMPONENT_MODE}" == included ]]; then
+    require_artifact_fingerprint "${OUTPUT_DIR}/.toolbox-artifact.env" \
+      TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT "${TOOLBOX_FINGERPRINT}"
+    for required_artifact in \
+      "${it_tools_tar}" "${it_tools_tar}.sha256" \
+      "${omni_tools_tar}" "${omni_tools_tar}.sha256" \
+      "${OUTPUT_DIR}/test-agent-toolbox-source.tar.gz" \
+      "${OUTPUT_DIR}/test-agent-toolbox-source.tar.gz.sha256" \
+      "${OUTPUT_DIR}/toolbox-catalog-v1.json" \
+      "${OUTPUT_DIR}/toolbox-catalog-v1.json.sha256" \
+      "${OUTPUT_DIR}/TOOLBOX.md"; do
+      [[ -f "${required_artifact}" ]] || {
+        echo "Required toolbox artifact not found: ${required_artifact}" >&2
+        exit 1
+      }
+    done
+  fi
 
   # 交付 zip 只放部署所需产物和脚本，避免把 deploy/internal/dist 自身递归打进去。
   mkdir -p "${staging_dir}/dist/backend"
   cp -a "${OUTPUT_DIR}/backend/." "${staging_dir}/dist/backend/"
   cp -a "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" "${staging_dir}/dist/"
-  cp -a "${OUTPUT_DIR}/test-agent-programs.tar.gz" "${staging_dir}/dist/"
-  cp -a "${worker_tar}" "${staging_dir}/dist/"
-  cp -a "${it_tools_tar}" "${it_tools_tar}.sha256" "${staging_dir}/dist/"
-  cp -a "${omni_tools_tar}" "${omni_tools_tar}.sha256" "${staging_dir}/dist/"
-  cp -a "${OUTPUT_DIR}/test-agent-toolbox-source.tar.gz" \
-    "${OUTPUT_DIR}/test-agent-toolbox-source.tar.gz.sha256" \
-    "${OUTPUT_DIR}/toolbox-catalog-v1.json" \
-    "${OUTPUT_DIR}/toolbox-catalog-v1.json.sha256" \
-    "${staging_dir}/dist/"
+  if [[ "${WORKER_COMPONENT_MODE}" == included ]]; then
+    cp -a "${OUTPUT_DIR}/test-agent-programs.tar.gz" "${worker_tar}" "${staging_dir}/dist/"
+  fi
+  if [[ "${TOOLBOX_COMPONENT_MODE}" == included ]]; then
+    cp -a "${it_tools_tar}" "${it_tools_tar}.sha256" "${staging_dir}/dist/"
+    cp -a "${omni_tools_tar}" "${omni_tools_tar}.sha256" "${staging_dir}/dist/"
+    cp -a "${OUTPUT_DIR}/test-agent-toolbox-source.tar.gz" \
+      "${OUTPUT_DIR}/test-agent-toolbox-source.tar.gz.sha256" \
+      "${OUTPUT_DIR}/toolbox-catalog-v1.json" \
+      "${OUTPUT_DIR}/toolbox-catalog-v1.json.sha256" \
+      "${staging_dir}/dist/"
+  fi
 
   if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 ]]; then
     local mysql_tar
@@ -531,7 +726,17 @@ package_release_zip() {
   local output_dir_name
   output_dir_name="$(basename "${OUTPUT_DIR}")"
   rsync -a --exclude 'dist' --exclude 'dist-*' --exclude "${output_dir_name}" --exclude '.env' "${SCRIPT_DIR}/" "${staging_dir}/deploy/internal/"
-  install -m 0644 "${OUTPUT_DIR}/TOOLBOX.md" "${staging_dir}/deploy/internal/TOOLBOX.md"
+  if [[ "${TOOLBOX_COMPONENT_MODE}" == included ]]; then
+    install -m 0644 "${OUTPUT_DIR}/TOOLBOX.md" "${staging_dir}/deploy/internal/TOOLBOX.md"
+  fi
+  {
+    printf 'TEST_AGENT_RELEASE_COMPONENT_MANIFEST_VERSION=1\n'
+    printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME=%s\n' "${WORKER_COMPONENT_MODE}"
+    printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=%s\n' "${WORKER_RUNTIME_FINGERPRINT}"
+    printf 'TEST_AGENT_RELEASE_TOOLBOX=%s\n' "${TOOLBOX_COMPONENT_MODE}"
+    printf 'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=%s\n' "${TOOLBOX_FINGERPRINT}"
+  } >"${staging_dir}/deploy/internal/release-components.env"
+  chmod 0644 "${staging_dir}/deploy/internal/release-components.env"
   # 升级脚本和官方启动器共用这份忽略清单；任一文件漏包都会让存量节点或新增节点重新出现 Git 脏状态。
   for required_artifact in \
     "${staging_dir}/deploy/internal/ensure-opencode-runtime-gitignore.sh" \
@@ -656,14 +861,36 @@ GO_IMAGE="${GO_IMAGE:-golang@sha256:e87b2a5f6df2dff71ea330d55d54f4979eb380ae58a7
 NODE_IMAGE="${NODE_IMAGE:-node@sha256:b042c6d46a90773b82ea3f95b05457ea93ee127a73b1b47ad5ebbb1a08ec3df8}"
 VITE_TEST_AGENT_API_BASE_URL="${VITE_TEST_AGENT_API_BASE_URL:-}"
 
+mkdir -p "${OUTPUT_DIR}"
+if [[ -z "${COMPONENT_STATE_FILE}" ]]; then
+  COMPONENT_STATE_FILE="${OUTPUT_DIR}/.release-component-state.env"
+fi
+mkdir -p "$(dirname "${COMPONENT_STATE_FILE}")"
+
+WORKER_COMPONENT_MODE=reuse
+TOOLBOX_COMPONENT_MODE=reuse
+WORKER_RUNTIME_FINGERPRINT=""
+TOOLBOX_FINGERPRINT=""
+if [[ "${PACKAGE_MODE}" == full || "${PACKAGE_MODE}" == zip-only \
+  || "${PACKAGE_MODE}" == opencode-only || "${PACKAGE_MODE}" == toolbox-only \
+  || "${COMPONENT_PLAN_ONLY}" -eq 1 ]]; then
+  require_command git
+  plan_release_components
+fi
+if [[ "${COMPONENT_PLAN_ONLY}" -eq 1 ]]; then
+  exit 0
+fi
+if [[ "${PACKAGE_MODE}" == full ]]; then
+  [[ "${WORKER_COMPONENT_MODE}" != reuse ]] || PACKAGE_OPENCODE_WORKER=0
+  [[ "${TOOLBOX_COMPONENT_MODE}" != reuse ]] || PACKAGE_TOOLBOX=0
+fi
+
 if [[ "${PACKAGE_TOOLBOX}" -eq 1 ]]; then
   require_platform_image "TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE" "${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}" "test-agent/it-tools" "2024.10.22-7ca5933-platform.2"
   require_platform_image "TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE" "${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}" "test-agent/omni-tools" "0.6.0-platform.1"
   require_digest_pinned_image "TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE" "${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE}"
   require_digest_pinned_image "TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE" "${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE}"
 fi
-
-mkdir -p "${OUTPUT_DIR}"
 
 echo "Using env file: ${ENV_FILE}"
 echo "Output dir: ${OUTPUT_DIR}"
@@ -696,10 +923,10 @@ if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 ]]; then
 fi
 
 if [[ "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 \
-  && ( "${PACKAGE_ZIP_ONLY}" -eq 1 \
-    || ( "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${PACKAGE_TOOLBOX}" -eq 1 ) ) ]]; then
+  && ( "${PACKAGE_MODE}" == full || "${PACKAGE_MODE}" == zip-only ) ]]; then
   package_release_zip
   write_release_checksum
+  write_component_fingerprints "${COMPONENT_STATE_FILE}"
 fi
 
 echo
@@ -731,8 +958,9 @@ if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo "  MySQL target import: docker load -i ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_XXL_JOB_MYSQL_IMAGE}" "${PLATFORM}")"
 fi
 if [[ "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 \
-  && ( "${PACKAGE_ZIP_ONLY}" -eq 1 \
-    || ( "${PACKAGE_BACKEND}" -eq 1 && "${PACKAGE_FRONTEND}" -eq 1 && "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${PACKAGE_TOOLBOX}" -eq 1 ) ) ]]; then
+  && ( "${PACKAGE_MODE}" == full || "${PACKAGE_MODE}" == zip-only ) ]]; then
   echo "  complete release zip: ${OUTPUT_DIR}/test-agent-internal-release.zip"
   echo "  release checksum: ${OUTPUT_DIR}/test-agent-internal-release.zip.sha256"
+  echo "  worker runtime component: ${WORKER_COMPONENT_MODE}"
+  echo "  toolbox component: ${TOOLBOX_COMPONENT_MODE}"
 fi

@@ -21,6 +21,8 @@ EXPECTED_SERVER_ID=""
 EXPECTED_SERVER_HOST=""
 SKIP_FRONTEND=0
 SKIP_WORKER=0
+SKIP_WORKER_EXPLICIT=0
+WORKER_RUNTIME_REUSE=0
 KEEP_EXTRACT=0
 VALIDATE_ONLY=0
 SYSTEMD_UNIT_DIR="${TEST_AGENT_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
@@ -139,6 +141,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-worker)
       SKIP_WORKER=1
+      SKIP_WORKER_EXPLICIT=1
       shift
       ;;
     --keep-extract)
@@ -194,6 +197,56 @@ require_file() {
     echo "Required file not found: $1" >&2
     exit 1
   fi
+}
+
+manifest_value() {
+  local file="$1" key="$2"
+  [[ -f "${file}" ]] || return 0
+  awk -F= -v wanted="${key}" '$1 == wanted { value=substr($0, index($0, "=") + 1) } END { print value }' "${file}"
+}
+
+write_installed_component_fingerprint() {
+  local key="$1" value="$2"
+  local state_file="${INSTALL_ROOT}/config/release-component-state.env"
+  local worker_fingerprint toolbox_fingerprint tmp
+  worker_fingerprint="$(manifest_value "${state_file}" TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT)"
+  toolbox_fingerprint="$(manifest_value "${state_file}" TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT)"
+  case "${key}" in
+    TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT) worker_fingerprint="${value}" ;;
+    TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT) toolbox_fingerprint="${value}" ;;
+    *) echo "Unsupported installed component key: ${key}" >&2; exit 1 ;;
+  esac
+  mkdir -p "$(dirname "${state_file}")"
+  tmp="$(mktemp "${state_file}.new.XXXXXX")"
+  {
+    printf 'TEST_AGENT_RELEASE_COMPONENT_STATE_VERSION=1\n'
+    [[ -z "${worker_fingerprint}" ]] || printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=%s\n' "${worker_fingerprint}"
+    [[ -z "${toolbox_fingerprint}" ]] || printf 'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=%s\n' "${toolbox_fingerprint}"
+  } >"${tmp}"
+  chmod 0600 "${tmp}"
+  mv -f "${tmp}" "${state_file}"
+}
+
+verify_reused_worker_runtime() {
+  local state health installed_fingerprint
+  installed_fingerprint="$(manifest_value \
+    "${INSTALL_ROOT}/config/release-component-state.env" \
+    TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT)"
+  [[ -n "${WORKER_COMPONENT_FINGERPRINT}" \
+    && "${installed_fingerprint}" == "${WORKER_COMPONENT_FINGERPRINT}" ]] || {
+    echo "Incremental release worker runtime fingerprint does not match the installed component; deploy a full component package" >&2
+    exit 1
+  }
+  require_file "${INSTALL_ROOT}/programs/bin/opencode-manager"
+  require_file "${INSTALL_ROOT}/programs/opencode/bin/opencode"
+  require_file "${INSTALL_ROOT}/programs/codex/bin/codex-official"
+  state="$(docker inspect -f '{{.State.Running}}' test-agent-opencode-worker 2>/dev/null || true)"
+  health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' test-agent-opencode-worker 2>/dev/null || true)"
+  [[ "${state}" == true && ( -z "${health}" || "${health}" == healthy ) ]] || {
+    echo "Incremental release reuses worker runtime, but existing worker is not healthy" >&2
+    exit 1
+  }
+  printf 'Existing worker runtime verified for reuse: OpenCode Manager, Codex MCP and container are present\n'
 }
 
 ssh_target() {
@@ -526,11 +579,6 @@ if [[ "${VALIDATE_ONLY}" -eq 0 && "${SKIP_FRONTEND}" -eq 0 ]]; then
   require_command ssh
   require_command scp
 fi
-if [[ "${VALIDATE_ONLY}" -eq 0 && "${SKIP_WORKER}" -eq 0 ]]; then
-  require_command docker
-  require_file "${DOCKER_ENV}"
-fi
-
 log "Extract release archive"
 rm -rf "${EXTRACT_DIR}"
 mkdir -p "${EXTRACT_DIR}"
@@ -547,15 +595,40 @@ if [[ -n "${DEPLOY_WORKER_SCRIPT}" ]]; then
   DEPLOY_INTERNAL_SRC="$(cd "$(dirname "${DEPLOY_WORKER_SCRIPT}")" && pwd)"
 fi
 
+COMPONENT_MANIFEST="${EXTRACT_DIR}/deploy/internal/release-components.env"
+WORKER_COMPONENT_MODE="$(manifest_value "${COMPONENT_MANIFEST}" TEST_AGENT_RELEASE_WORKER_RUNTIME)"
+WORKER_COMPONENT_FINGERPRINT="$(manifest_value "${COMPONENT_MANIFEST}" TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT)"
+WORKER_COMPONENT_MODE="${WORKER_COMPONENT_MODE:-included}"
+[[ "${WORKER_COMPONENT_MODE}" == included || "${WORKER_COMPONENT_MODE}" == reuse ]] || {
+  echo "Invalid TEST_AGENT_RELEASE_WORKER_RUNTIME: ${WORKER_COMPONENT_MODE}" >&2
+  exit 1
+}
+if [[ "${WORKER_COMPONENT_MODE}" == reuse ]]; then
+  WORKER_RUNTIME_REUSE=1
+  SKIP_WORKER=1
+fi
+if [[ "${VALIDATE_ONLY}" -eq 0 && ( "${SKIP_WORKER}" -eq 0 || "${WORKER_RUNTIME_REUSE}" -eq 1 ) ]]; then
+  require_command docker
+  require_file "${DOCKER_ENV}"
+fi
+
 require_file "${FRONTEND_ARCHIVE}"
 require_file "${BACKEND_JAR}"
 [[ -n "${BACKEND_LIB_DIR}" && -n "$(find "${BACKEND_LIB_DIR}" -maxdepth 1 -type f -name '*.jar' -print -quit)" ]] || {
   echo "backend external lib directory not found in archive" >&2
   exit 1
 }
-require_file "${PROGRAMS_ARCHIVE}"
+if [[ "${WORKER_RUNTIME_REUSE}" -eq 0 ]]; then
+  require_file "${PROGRAMS_ARCHIVE}"
+fi
 if [[ "${SKIP_WORKER}" -eq 0 ]]; then
   require_file "${WORKER_IMAGE_TAR}"
+fi
+if [[ "${WORKER_RUNTIME_REUSE}" -eq 1 ]]; then
+  [[ -z "${PROGRAMS_ARCHIVE}" && -z "${WORKER_IMAGE_TAR}" ]] || {
+    echo "Worker runtime reuse release must not embed programs or worker image tar" >&2
+    exit 1
+  }
 fi
 if [[ -z "${DEPLOY_INTERNAL_SRC}" || ! -d "${DEPLOY_INTERNAL_SRC}" ]]; then
   echo "deploy/internal directory not found in archive" >&2
@@ -569,7 +642,10 @@ if [[ "${VALIDATE_ONLY}" -eq 1 ]]; then
   printf 'frontend archive: %s\n' "${FRONTEND_ARCHIVE}"
   printf 'backend jar: %s\n' "${BACKEND_JAR}"
   printf 'backend lib: %s\n' "${BACKEND_LIB_DIR}"
-  printf 'programs archive: %s\n' "${PROGRAMS_ARCHIVE}"
+  printf 'worker runtime component: %s\n' "${WORKER_COMPONENT_MODE}"
+  if [[ "${WORKER_RUNTIME_REUSE}" -eq 0 ]]; then
+    printf 'programs archive: %s\n' "${PROGRAMS_ARCHIVE}"
+  fi
   if [[ "${SKIP_WORKER}" -eq 0 ]]; then
     printf 'worker image tar: %s\n' "${WORKER_IMAGE_TAR}"
   fi
@@ -578,6 +654,10 @@ if [[ "${VALIDATE_ONLY}" -eq 1 ]]; then
     rm -rf "${EXTRACT_DIR}"
   fi
   exit 0
+fi
+
+if [[ "${WORKER_RUNTIME_REUSE}" -eq 1 && "${SKIP_WORKER_EXPLICIT}" -eq 0 ]]; then
+  verify_reused_worker_runtime
 fi
 
 if [[ "${SKIP_FRONTEND}" -eq 0 ]]; then
@@ -591,7 +671,9 @@ mkdir -p "${INSTALL_ROOT}/dist/backend" "${INSTALL_ROOT}/dist" "${INSTALL_ROOT}/
 cp "${BACKEND_JAR}" "${INSTALL_ROOT}/dist/backend/test-agent-app.jar.new"
 rm -rf "${INSTALL_ROOT}/dist/backend/lib.new"
 cp -a "${BACKEND_LIB_DIR}" "${INSTALL_ROOT}/dist/backend/lib.new"
-cp "${PROGRAMS_ARCHIVE}" "${INSTALL_ROOT}/dist/test-agent-programs.tar.gz"
+if [[ "${WORKER_RUNTIME_REUSE}" -eq 0 ]]; then
+  cp "${PROGRAMS_ARCHIVE}" "${INSTALL_ROOT}/dist/test-agent-programs.tar.gz"
+fi
 if [[ "${SKIP_WORKER}" -eq 0 ]]; then
   cp "${WORKER_IMAGE_TAR}" "${INSTALL_ROOT}/dist/test-agent-opencode-worker_internal-linux-amd64.tar"
 fi
@@ -629,8 +711,12 @@ fi
 mv "${INSTALL_ROOT}/dist/backend/test-agent-app.jar.new" "${INSTALL_ROOT}/dist/backend/test-agent-app.jar"
 mv "${INSTALL_ROOT}/dist/backend/lib.new" "${INSTALL_ROOT}/dist/backend/lib"
 
-log "Extract external programs"
-tar -C "${INSTALL_ROOT}" -xzf "${INSTALL_ROOT}/dist/test-agent-programs.tar.gz"
+if [[ "${WORKER_RUNTIME_REUSE}" -eq 0 ]]; then
+  log "Extract external programs (OpenCode Manager, OpenCode runtime and Codex MCP)"
+  tar -C "${INSTALL_ROOT}" -xzf "${INSTALL_ROOT}/dist/test-agent-programs.tar.gz"
+else
+  log "Reuse existing worker runtime (OpenCode Manager, OpenCode runtime and Codex MCP)"
+fi
 
 if [[ "${SKIP_WORKER}" -eq 0 ]]; then
   log "Load opencode-worker docker image"
@@ -652,6 +738,10 @@ if [[ "${SKIP_WORKER}" -eq 0 ]]; then
   (cd "${INSTALL_ROOT}/deploy/internal" && ./opencode-worker-docker.sh --env-file "${DOCKER_ENV}" status)
   wait_worker_config_update 120
   docker logs --tail 120 test-agent-opencode-worker
+  if [[ -n "${WORKER_COMPONENT_FINGERPRINT}" ]]; then
+    write_installed_component_fingerprint \
+      TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT "${WORKER_COMPONENT_FINGERPRINT}"
+  fi
 fi
 
 if [[ "${SKIP_FRONTEND}" -eq 0 ]]; then

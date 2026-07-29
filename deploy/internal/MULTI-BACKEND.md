@@ -11,8 +11,8 @@
 | 浏览器域名入口 | `http://mimo.sdc.cs.icbc:9996`，企业入口继续转发到实体 Nginx `:80` |
 | 浏览器 IP 入口 | `http://122.233.30.2:9996`，直连实体 Nginx 新增监听 `:9996` |
 | 前端实体 Nginx | `122.233.30.2:80` + `122.233.30.2:9996`，安装目录 `/data/apps/nginx` |
-| 后台 A + worker A | `122.233.30.4` / `test-agent-backend-122-233-30-4` |
-| 后台 B + worker B | `122.233.30.114` / `test-agent-backend-122-233-30-114` |
+| 后台 A + worker A + 工具容器 A | `122.233.30.4` / `test-agent-backend-122-233-30-4` / `:18120,:18121` |
+| 后台 B + worker B + 工具容器 B | `122.233.30.114` / `test-agent-backend-122-233-30-114` / `:18120,:18121` |
 | Redis | `122.233.30.20:6379` |
 | PostgreSQL | `122.233.30.147:5432/postgres` |
 | XXL MySQL | `122.210.106.43:3306/xxl_job`（外部共享 MySQL，当前使用既有 `root` 账号） |
@@ -32,6 +32,9 @@ Java A <---------------- 互访 8080 ----------------> Java B
    +------------- 共享 PostgreSQL / Redis / XXL MySQL ----+
    |                                                     |
    `-> ai-code.sdc.enterprise:9070          ai-code.sdc.enterprise:9070 <-'
+
+.2 Nginx -> .4:18120/.114:18120(backup)   IT-Tools
+         `-> .4:18121/.114:18121(backup)   OmniTools
 ```
 
 必须同时满足：
@@ -55,6 +58,7 @@ Java A <---------------- 互访 8080 ----------------> Java B
 | 企业浏览器网段 | `mimo.sdc.cs.icbc:9996`、`.2:9996` | 同一版本前端的域名和 IP 双入口 |
 | `.2` | `.4:8080`、`.114:8080` | Nginx 负载均衡 |
 | `.2` | `.4:18080`、`.114:18080` | 同源 XXL Admin 负载均衡 |
+| `.2` | `.4:18120/18121`、`.114:18120/18121` | 工具静态页主用/备用代理 |
 | 企业浏览器网段 | `.4:8080`、`.114:8080` | PTY、Workspace/Agent 文件和 Agent 配置进度 WebSocket 按 ticket 签发节点直连 |
 | `.4` | `.114:8080` | Java A 转发到 Java B |
 | `.114` | `.4:8080` | Java B 转发到 Java A |
@@ -105,6 +109,26 @@ VITE_TEST_AGENT_API_BASE_URL="" \
 ```
 
 空值是有意配置：前端统一使用同源相对 `/api`，所以从域名打开时请求域名，从 IP 打开时请求 IP。不得固定成其中任一 origin，否则另一个入口会重新产生跨域或名称解析问题。
+
+发布脚本在输出目录保存组件指纹，只对两个大组件做增量判断：
+
+- `worker runtime` 把 OpenCode Manager、OpenCode runtime、Codex MCP、Node/MCP SDK、bubblewrap、worker 镜像和 `test-agent-programs.tar.gz` 视为一个不可拆分单元；其中任一项变化就全部重建并进入 ZIP。
+- `toolbox` 把 IT-Tools、OmniTools、完整修改源码和目录文件视为一个单元；其中任一项变化就全部重建并进入 ZIP。
+
+首次构建、指纹状态丢失或组件变化时，清单为 `included`；未变化时为 `reuse`，内层 ZIP 不再重复携带该组件的大文件。必须持续使用同一个输出目录，或用 `--component-state-file <稳定路径>` 保存基线。新装机、扩容新节点、灾备恢复和状态不可信的交付必须加 `--include-all-components`；增量包只允许升级已有且组件健康的 `.4/.114`，不能用于空机器。迁移到该机制后的第一次构建也应使用全量命令建立可信基线；部署成功后每台后台会把实际安装指纹写入 `/data/testagent/config/release-component-state.env`，后续复用时会同时校验指纹和健康状态：
+
+```bash
+VITE_TEST_AGENT_API_BASE_URL="" \
+  deploy/internal/package-release.sh --include-all-components \
+  --output-dir deploy/internal/dist
+```
+
+只查看本次组件计划而不构建可执行：
+
+```bash
+deploy/internal/package-release.sh --component-plan-only \
+  --output-dir deploy/internal/dist
+```
 
 交付：
 
@@ -458,7 +482,7 @@ bash /data/testagent/deploy/internal/configure-nginx.sh \
 
 预期输出 `backend count: 2`、`server route count: 2`。正式安装必须使用本次发布包中的前端部署入口；它会更新前端和部署脚本、渲染候选配置、执行实体 Nginx `-t/-T` 并 reload，失败自动回滚：
 
-若 Mac 重新封装时复用旧节点包，`package-two-backend-complete.sh` 只会在外层包的临时副本中处理固定非密钥字段：前端路由键迁移为 `TEST_AGENT_NGINX_SERVER_ROUTES`，两个后台补齐 HTTP Cookie、大文件预览/分片参数并将 worker 端口池固定为 `14096-15095`。源敏感节点包和其中的密码/token 不会被修改或输出；同一键重复定义时封装直接失败，不能继续交付。
+若 Mac 重新封装时复用旧节点包，`package-two-backend-complete.sh` 只会在外层包的临时副本中处理固定非密钥字段：前端路由键迁移为 `TEST_AGENT_NGINX_SERVER_ROUTES`，写入 `.4/.114` 两组工具 upstream；两个后台补齐 HTTP Cookie、大文件预览/分片参数、固定 worker 端口池，并分别生成绑定本机 IP 的 `toolbox.env`。源敏感节点包和其中的密码/token 不会被修改或输出；同一键重复定义时封装直接失败，不能继续交付。
 
 ```bash
 bash /tmp/deploy-internal-frontend.sh \
@@ -514,6 +538,10 @@ cd /data/0709/test-agent-two-backend-complete
 bash deploy-backend-node.sh
 ```
 
+`deploy-backend-node.sh` 会读取内层组件清单：工具箱为 `included` 时自动提取镜像 tar、安装本机 `toolbox.env`、部署并诊断；为 `reuse` 时不提取、不加载镜像，先核对目标机安装指纹，再在平台升级前后诊断现有工具容器，指纹不一致或任一容器不健康都会停止。无需再手工执行工具箱部署命令。
+
+worker runtime 为 `included` 时会同步替换 programs、OpenCode Manager 和 worker 镜像；为 `reuse` 时不携带这些大制品，部署前必须确认目标机安装指纹一致、现有 Manager/OpenCode/Codex 文件齐全且 worker 容器健康，否则立即停止。
+
 升级前应先停止 `.4`、`.114` 的旧 Java。`.4` 是固定首节点，入口会完整验证本机 Java、XXL Admin、
 worker、RSA 和身份文件，但把 peer 探测延后；随后 `.114` 会反查 `.4`，最后 `.2` 会同时检查两个
 Java 和两个 XXL Admin，因此不会再因首节点等待尚未启动的 peer 而产生 `verify_exit=1`。
@@ -528,6 +556,8 @@ cd /data/0709/test-agent-two-backend-complete
 bash deploy-backend-node.sh
 ```
 
+`.114` 使用同一个自动处理逻辑：`included` 自动部署本机工具容器和 worker runtime，`reuse` 只复用并验证已有组件；不需要额外手工解压或执行工具箱脚本。
+
 两台后台全部通过后，最后在 `.2` 执行：
 
 ```bash
@@ -537,6 +567,10 @@ unzip -oq test-agent-two-backend-complete.zip
 cd /data/0709/test-agent-two-backend-complete
 bash deploy-frontend-node.sh
 ```
+
+前端入口会在 reload 后同时验证两台 Java、两台 XXL Admin、`.4/.114` 上四个工具端口，
+并通过 `127.0.0.1` 请求 IT-Tools 与 OmniTools 的统一入口深链。只要 `.2` 到任一工具端口被防火墙阻断、
+容器未运行或 Nginx 仍使用旧配置，脚本就会失败并指出具体 upstream，不再等到浏览器点击后才暴露 502。
 
 正式部署必须由 `root` 执行。平台外层包内已有完整平台发布 ZIP，三台应用服务器不再另外复制内层 ZIP
 或逐机包；`.147` 不再参与本次部署。

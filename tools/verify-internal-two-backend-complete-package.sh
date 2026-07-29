@@ -39,7 +39,25 @@ printf 'fixture-rsa-private-key\n' >"${JAR_ROOT}/BOOT-INF/classes/rsa-private.ke
 printf 'frontend\n' >"${RELEASE_ROOT}/dist/test-agent-frontend-dist.tar.gz"
 printf 'programs\n' >"${RELEASE_ROOT}/dist/test-agent-programs.tar.gz"
 printf 'worker\n' >"${RELEASE_ROOT}/dist/test-agent-opencode-worker_internal-linux-amd64.tar"
+printf 'it-tools\n' >"${RELEASE_ROOT}/dist/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar"
+write_checksum "${RELEASE_ROOT}/dist/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar"
+printf 'omni-tools\n' >"${RELEASE_ROOT}/dist/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar"
+write_checksum "${RELEASE_ROOT}/dist/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar"
+printf 'toolbox-source\n' >"${RELEASE_ROOT}/dist/test-agent-toolbox-source.tar.gz"
+write_checksum "${RELEASE_ROOT}/dist/test-agent-toolbox-source.tar.gz"
+printf 'toolbox-catalog\n' >"${RELEASE_ROOT}/dist/toolbox-catalog-v1.json"
+write_checksum "${RELEASE_ROOT}/dist/toolbox-catalog-v1.json"
 printf '#!/usr/bin/env bash\n' >"${RELEASE_ROOT}/deploy/internal/deploy-multi-backend-node.sh"
+cp "${ROOT_DIR}/deploy/internal/toolbox.env.example" "${RELEASE_ROOT}/deploy/internal/toolbox.env.example"
+printf '#!/usr/bin/env bash\n' >"${RELEASE_ROOT}/deploy/internal/toolbox-docker.sh"
+printf '#!/usr/bin/env bash\n' >"${RELEASE_ROOT}/deploy/internal/diagnose-toolbox.sh"
+printf '%s\n' \
+  'TEST_AGENT_RELEASE_COMPONENT_MANIFEST_VERSION=1' \
+  'TEST_AGENT_RELEASE_WORKER_RUNTIME=included' \
+  'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=fixture-worker' \
+  'TEST_AGENT_RELEASE_TOOLBOX=included' \
+  'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=fixture-toolbox' \
+  >"${RELEASE_ROOT}/deploy/internal/release-components.env"
 for session_log in "${ROOT_DIR}"/.agents/session-log*.md; do
   cp "${session_log}" "${RELEASE_ROOT}/.agents/$(basename "${session_log}")"
 done
@@ -142,6 +160,10 @@ frontend_nginx_env="$(tar -xOzf "${FRONTEND_NODE_ARCHIVE}" \
   'test-agent-two-backend-122.233.30.2/config/nginx.env')"
 grep -Fq 'TEST_AGENT_NGINX_SERVER_ROUTES=server-a=122.233.30.4:8080,server-b=122.233.30.114:8080' \
   <<<"${frontend_nginx_env}"
+grep -Fxq 'TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=122.233.30.4:18120,122.233.30.114:18120' \
+  <<<"${frontend_nginx_env}"
+grep -Fxq 'TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=122.233.30.4:18121,122.233.30.114:18121' \
+  <<<"${frontend_nginx_env}"
 if grep -Fq 'TEST_AGENT_NGINX_TERMINAL_ROUTES=' <<<"${frontend_nginx_env}"; then
   echo "Complete package unexpectedly retained the legacy terminal route key" >&2
   exit 1
@@ -156,6 +178,8 @@ backend_env="$(tar -xOzf "${BACKEND_NODE_ARCHIVE}" \
   'test-agent-two-backend-122.233.30.4/config/backend.env')"
 docker_env="$(tar -xOzf "${BACKEND_NODE_ARCHIVE}" \
   'test-agent-two-backend-122.233.30.4/config/docker.env')"
+toolbox_env="$(tar -xOzf "${BACKEND_NODE_ARCHIVE}" \
+  'test-agent-two-backend-122.233.30.4/config/toolbox.env')"
 node_deploy_script="$(tar -xOzf "${BACKEND_NODE_ARCHIVE}" \
   'test-agent-two-backend-122.233.30.4/deploy-multi-backend-node.sh')"
 node_guide="$(tar -xOzf "${BACKEND_NODE_ARCHIVE}" \
@@ -165,11 +189,45 @@ grep -Fxq 'TEST_AGENT_MAX_PREVIEW_BYTES=5242880' <<<"${backend_env}"
 grep -Fxq 'TEST_AGENT_UPLOAD_CHUNK_BYTES=262144' <<<"${backend_env}"
 grep -Fxq 'OPENCODE_WORKER_PORT_START=14096' <<<"${docker_env}"
 grep -Fxq 'OPENCODE_WORKER_PORT_END=15095' <<<"${docker_env}"
+grep -Fxq 'TEST_AGENT_TOOLBOX_BIND_ADDRESS=122.233.30.4' <<<"${toolbox_env}"
 grep -Fq 'require_exact_value "${docker_env}" OPENCODE_WORKER_PORT_START 14096' \
   <<<"${node_deploy_script}"
 grep -Fq 'require_exact_value "${docker_env}" OPENCODE_WORKER_PORT_END 15095' \
   <<<"${node_deploy_script}"
 grep -Fq '14096-15095' <<<"${node_guide}"
+
+# 增量内层包省略未变化的 worker runtime（含 Manager/Codex/programs）和 toolbox 大制品时，
+# 外层封装仍应接受，并原样保留 reuse 清单，不能强制重新塞回历史 tar。
+rm -f \
+  "${RELEASE_ROOT}/dist/test-agent-programs.tar.gz" \
+  "${RELEASE_ROOT}/dist/test-agent-opencode-worker_internal-linux-amd64.tar" \
+  "${RELEASE_ROOT}/dist/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar" \
+  "${RELEASE_ROOT}/dist/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar.sha256" \
+  "${RELEASE_ROOT}/dist/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar" \
+  "${RELEASE_ROOT}/dist/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar.sha256" \
+  "${RELEASE_ROOT}/dist/test-agent-toolbox-source.tar.gz" \
+  "${RELEASE_ROOT}/dist/test-agent-toolbox-source.tar.gz.sha256" \
+  "${RELEASE_ROOT}/dist/toolbox-catalog-v1.json" \
+  "${RELEASE_ROOT}/dist/toolbox-catalog-v1.json.sha256"
+sed -i.bak \
+  -e 's/TEST_AGENT_RELEASE_WORKER_RUNTIME=included/TEST_AGENT_RELEASE_WORKER_RUNTIME=reuse/' \
+  -e 's/TEST_AGENT_RELEASE_TOOLBOX=included/TEST_AGENT_RELEASE_TOOLBOX=reuse/' \
+  "${RELEASE_ROOT}/deploy/internal/release-components.env"
+rm -f "${RELEASE_ROOT}/deploy/internal/release-components.env.bak" "${RELEASE_ARCHIVE}" "${RELEASE_ARCHIVE}.sha256"
+(cd "${RELEASE_ROOT}" && zip -qr "${RELEASE_ARCHIVE}" .)
+write_checksum "${RELEASE_ARCHIVE}"
+run_package >/dev/null
+REUSED_INNER="${TMP_ROOT}/reused-inner-release.zip"
+unzip -p "${BUNDLE}" 'test-agent-two-backend-complete/test-agent-internal-release.zip' >"${REUSED_INNER}"
+reused_listing="$(unzip -Z1 "${REUSED_INNER}")"
+if grep -Eq '^dist/(test-agent-programs|test-agent-opencode-worker|test-agent_(it|omni)-tools|test-agent-toolbox-source|toolbox-catalog)' <<<"${reused_listing}"; then
+  echo 'Outer bundle unexpectedly restored reused runtime/toolbox artifacts' >&2
+  exit 1
+fi
+grep -Fxq 'TEST_AGENT_RELEASE_WORKER_RUNTIME=reuse' \
+  < <(unzip -p "${REUSED_INNER}" deploy/internal/release-components.env)
+grep -Fxq 'TEST_AGENT_RELEASE_TOOLBOX=reuse' \
+  < <(unzip -p "${REUSED_INNER}" deploy/internal/release-components.env)
 
 # 第二次执行必须无交互覆盖固定文件名，不能生成日期或版本后缀的新包。
 run_package >/dev/null

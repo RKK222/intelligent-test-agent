@@ -48,6 +48,18 @@ describe("FigmaFileExplorer", () => {
       .toContain("reloadReferenceRuntimeIfIdle({ quiet: true })");
   });
 
+  it("binds the command catalog request to the workspace captured by its query key", () => {
+    expect(agentWorkbenchSource).toContain(
+      'queryKey: computed(() => ["runtime", "commands", selectedWorkspaceIdRef.value ?? ""] as const)'
+    );
+    expect(agentWorkbenchSource).toContain(
+      "queryFn: ({ queryKey }) => api.listCommands(String(queryKey[2]))"
+    );
+    expect(agentWorkbenchSource).not.toContain(
+      "queryFn: () => api.listCommands(selectedWorkspaceIdRef.value!)"
+    );
+  });
+
   it("groups refresh and remote pull in one workspace more menu while keeping Git changes independent", async () => {
     const wrapper = shallowMount(FigmaFileExplorer, {
       props: {
@@ -308,5 +320,24 @@ describe("FigmaFileExplorer", () => {
     await wrapper.vm.$nextTick();
 
     expect(wrapper.emitted("agent-config-mutated")).toEqual([[mutation]]);
+  });
+
+  it("forwards the initialized public worktree remount request to the Agent config panel", () => {
+    const request = {
+      revision: 3,
+      worktreeId: "agw_prepared",
+      linuxServerId: "linux-2"
+    };
+    const wrapper = shallowMount(FigmaFileExplorer, {
+      props: {
+        workspaceId: "wrk_personal",
+        entriesByDirectory: { "": [] },
+        expandedDirectories: new Set<string>(),
+        changedFiles: [],
+        publicWorktreeMountRequest: request
+      }
+    });
+
+    expect(wrapper.findComponent(AgentConfigPanel).props("publicWorktreeMountRequest")).toEqual(request);
   });
 });

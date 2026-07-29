@@ -2,7 +2,7 @@
 
 ## 交付边界
 
-工具盒子是平台左侧活动栏中的登录用户入口，平台目录页和点击 API 受现有登录认证保护；具体工具静态页面不再执行工具级鉴权，由前端 Nginx 直接代理到独立工具节点。工具卡片始终打开具体深链接，不暴露 IT-Tools 或 OmniTools 的上游首页、分类门户、Logo、菜单、收藏、推荐、支持链接或统计器。
+工具盒子是平台左侧活动栏中的登录用户入口，平台目录页和点击 API 受现有登录认证保护；具体工具静态页面不再执行工具级鉴权，由前端 Nginx 代理到两台后台节点上共置的工具容器。工具卡片始终打开具体深链接，不暴露 IT-Tools 或 OmniTools 的上游首页、分类门户、Logo、菜单、收藏、推荐、支持链接或统计器。
 
 首版固定以下上游版本，禁止改用 `latest`：
 
@@ -23,13 +23,13 @@ Browser
   -> frontend Nginx
       -> /toolbox                         agent-web SPA
       -> /api/internal/platform/toolbox  test-agent-app
-      -> /toolbox/apps/it-tools/*        toolbox node :18120
-      -> /toolbox/apps/omni-tools/*      toolbox node :18121
+      -> /toolbox/apps/it-tools/*        backend .4/.114 :18120
+      -> /toolbox/apps/omni-tools/*      backend .4/.114 :18121
 ```
 
 外层 Nginx 在 SPA catch-all 前匹配两个工具前缀，并把前缀剥离后代理到工具容器。派生应用自身仍以完整浏览器前缀配置 Vite base 和 Router base，因此静态资源请求、浏览器历史和直接刷新深链接保持一致。精确套件根路径 `/toolbox/apps/it-tools` 与 `/toolbox/apps/omni-tools` 返回 `308 /toolbox`；派生应用根路径及未知路由也只能回到平台工具盒子或显示工具不可用页。
 
-工具节点使用专用 Docker bridge，并关闭 `com.docker.network.bridge.enable_ip_masquerade`。不能使用 Docker 的 `--internal` 标志：它会同时阻断独立节点对宿主 `18120/18121` 的端口发布，使前端 Nginx 无法访问。容器只运行静态 Nginx，不注入平台密钥；浏览器侧 CSP 只允许同源、`blob:` 和 `data:`。独立节点还必须通过主机防火墙把 TCP 18120/18121 的来源限制为前端 Nginx 主机，并限制容器出站访问，不能只依赖 Docker 网络选项。Docker Desktop 的虚拟机网络实现可能不会按 Linux 生产主机的方式执行该 bridge 选项，因此 Mac 验收环境也不能把它视为出站隔离边界。
+每台后台上的工具容器使用专用 Docker bridge，并关闭 `com.docker.network.bridge.enable_ip_masquerade`。不能使用 Docker 的 `--internal` 标志：它会同时阻断宿主 `18120/18121` 的端口发布，使前端 Nginx 无法访问。容器只运行静态 Nginx，不注入平台密钥；浏览器侧 CSP 只允许同源、`blob:` 和 `data:`。两台后台还必须通过主机防火墙把 TCP 18120/18121 的来源限制为 `.2` 前端 Nginx，并限制容器出站访问，不能只依赖 Docker 网络选项。Docker Desktop 的虚拟机网络实现可能不会按 Linux 生产主机的方式执行该 bridge 选项，因此 Mac 验收环境也不能把它视为出站隔离边界。
 
 ## 离线产物
 
@@ -39,7 +39,7 @@ Browser
 deploy/internal/package-release.sh --toolbox-only --output-dir /absolute/output
 ```
 
-完整企业发布仍直接执行 `deploy/internal/package-release.sh`，工具产物会进入 `test-agent-internal-release.zip`。工具盒子产物包括：
+完整企业发布仍直接执行 `deploy/internal/package-release.sh`。脚本对工具源码、目录及固定构建输入计算指纹：首次/变化时工具产物进入 `test-agent-internal-release.zip`，未变化时清单标记 `reuse` 且不重复携带大文件；新装机使用 `--include-all-components`。工具盒子全量产物包括：
 
 - 两个 `linux/amd64` 镜像 tar 及各自 SHA-256。
 - `test-agent-toolbox-source.tar.gz` 及 SHA-256，包含完整修改源码、许可证、补丁说明和本地化资源清单，不包含 `node_modules`、`dist` 或上游 `.git`。
@@ -52,12 +52,12 @@ IT-Tools Docker 构建显式锁定 Node 20.18.0、pnpm 8.15.3 和 Nginx 1.27.2�
 
 平台应用镜像可在 `test-agent/it-tools` 和 `test-agent/omni-tools` 前增加企业 registry 前缀，但 tag 必须分别保持 `2024.10.22-7ca5933-platform.2` 和 `0.6.0-platform.1`。发布与部署脚本会拒绝 `latest`、旧 platform tag 或其它仓库名；诊断脚本还会对比容器 `Config.Image` 与配置值，避免节点残留旧镜像却误报健康。
 
-## 工具节点部署
+## 双后台共置部署
 
-1. 把两个镜像 tar、`.sha256`、部署脚本和 `toolbox.env.example` 放到工具节点，例如 `/data/testagent/dist` 与 `/data/testagent/deploy/internal`。
-2. 复制示例为 `/data/testagent/config/toolbox.env`。独立节点把 `TEST_AGENT_TOOLBOX_BIND_ADDRESS` 设置为该节点供前端 Nginx 访问的私网 IP；同机 Nginx 才使用 `127.0.0.1`。
-3. 配置主机防火墙，仅允许前端 Nginx 主机访问 18120/18121。
-4. 执行部署和诊断：
+1. 两台机器分别使用节点包内自己的 `toolbox.env`；`TEST_AGENT_TOOLBOX_BIND_ADDRESS` 必须是本机私网 IP。
+2. 两台主机防火墙均只允许 `.2` 访问 18120/18121。
+3. 使用外层包的 `deploy-backend-node.sh`：清单为 `included` 时自动提取 tar、部署并诊断，成功后记录实际安装指纹；为 `reuse` 时不提取、不加载镜像，但要求目标机 `/data/testagent/config/release-component-state.env` 指纹与清单一致，并在平台升级前后诊断现有容器。
+4. 下列命令只用于单独排障或人工回滚，不再是正常发布的额外步骤：
 
 ```bash
 TEST_AGENT_TOOLBOX_ENV_FILE=/data/testagent/config/toolbox.env \
@@ -71,18 +71,24 @@ TEST_AGENT_TOOLBOX_ENV_FILE=/data/testagent/config/toolbox.env \
 - `test-agent-it-tools`：`18120:80`。
 - `test-agent-omni-tools`：`18121:80`。
 
-容器使用只读根文件系统、受限 tmpfs、`cap-drop ALL` 后最小 Nginx 能力、`no-new-privileges`、日志轮转、健康检查和 `unless-stopped`。运行参数兼容企业现有 Docker 18.09；脚本先加载并校验镜像架构，不依赖较新版本的 `docker run --pull`。状态命令为 `toolbox-docker.sh status`，停止命令为 `toolbox-docker.sh stop`。
+容器使用只读根文件系统、受限 tmpfs、`cap-drop ALL` 后最小 Nginx 能力、`no-new-privileges`、日志轮转、健康检查和 `unless-stopped`。Alpine 的 `/var/run` 是指向 `/run` 的软链接，脚本直接为 `/run` 提供 tmpfs，避免企业 Docker 18.09 把 Nginx PID 文件留在只读根文件系统。运行参数兼容企业现有 Docker 18.09；脚本先加载并校验镜像架构，不依赖较新版本的 `docker run --pull`。状态命令为 `toolbox-docker.sh status`，停止命令为 `toolbox-docker.sh stop`。
 
 ## 前端 Nginx
 
 前端机 `/data/testagent/config/nginx.env` 必须配置：
 
+双后台现场固定配置为：
+
 ```dotenv
-TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=<toolbox-private-ip>:18120
-TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=<toolbox-private-ip>:18121
+TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=122.233.30.4:18120,122.233.30.114:18120
+TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=122.233.30.4:18121,122.233.30.114:18121
 ```
 
-`configure-nginx.sh` 会要求并校验两个单一 `host:port` endpoint，不再默认回退到 `127.0.0.1`。`configure-single-deployment.sh frontend` 首次执行必须通过两个 `--toolbox-*-upstream` 参数提供地址，后续执行可从现有 `nginx.env` 保留；然后渲染 `nginx/gateway.conf.template`，执行 Nginx 配置检查后再 reload。两个 location 必须位于 SPA catch-all 前，不能把套件根路径代理到上游门户。
+`configure-nginx.sh` 兼容一个或多个逗号分隔的 `host:port`，首项主用，其余渲染为 Nginx `backup`；不默认回退到 `127.0.0.1`。单后台 `configure-single-deployment.sh frontend` 仍可传一个地址。脚本渲染模板、执行 Nginx 配置检查后再 reload；两个 location 必须位于 SPA catch-all 前，不能把套件根路径代理到上游门户。
+
+双后台前端部署验收会从 `.2` 逐一访问 `.4/.114` 的 `18120/18121` 健康端点和真实工具深链，
+再通过本机 Nginx 访问 IT-Tools、OmniTools 两条统一入口深链并核对关键安全响应头。任一请求失败都会停止部署；
+此时先检查两台后台工具容器、端口绑定和仅允许 `.2` 访问的主机防火墙，不能把仅有 Nginx 配置文本通过视为工具盒子可用。
 
 ## 本地开发联调
 
@@ -100,12 +106,12 @@ Apple Silicon 会模拟首版锁定的 `linux/amd64` 镜像，首次打开个别
 
 固定上线顺序：
 
-1. 工具节点校验 tar、加载镜像、预检并确认两个容器健康，尚不修改前端 Nginx。
-2. 发布后端，Flyway 建表并确认目录/点击 API 正常。
-3. 发布 agent-web 静态资源，渲染前端 Nginx，执行配置检查、深链接探测后 reload。
+1. `.4` 发布后端，再校验 tar、加载两个工具镜像并确认容器健康。
+2. `.114` 重复同一流程，并确认能访问 `.4`。
+3. 两台后台均健康后，发布 agent-web 静态资源，渲染双工具 upstream；reload 后从 `.2` 逐个探测四个工具端口和两条统一入口深链接。
 4. 逐项验证 `/toolbox`、热门区、点击上报、两套工具深链接和浏览器前进/后退。
 
-工具部署前只有在两套当前容器都存在时才会成对保存 rollback 标签；仅存在一套容器会在替换前失败，首次部署则清除历史遗留的 rollback 标签。自动或人工回滚都要求两套镜像齐全且两个恢复容器均健康，任一失败会停止两者，禁止返回半套成功。人工回滚执行 `toolbox-docker.sh rollback`。前端切流失败时恢复上一版 agent-web/Nginx 配置，不能让 Nginx 指向未健康的新工具节点。数据库表和新增 API 均为向后兼容新增，回滚前端/工具镜像时无需回退 Flyway。
+每个后台节点上的工具部署都独立成对保存 rollback 标签；仅存在一套容器会在替换前失败。人工回滚在 `.4`、`.114` 分别执行 `toolbox-docker.sh rollback`。前端切流失败时恢复上一版 agent-web/Nginx 配置，不能让 Nginx 指向未健康的后台工具实例。数据库表和新增 API 均为向后兼容新增，回滚前端/工具镜像时无需回退 Flyway。
 
 ## 安全与可观测性
 

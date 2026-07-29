@@ -43,8 +43,8 @@ write_env() {
     printf 'TEST_AGENT_NGINX_MODE=%s\n' "${mode}"
     printf 'TEST_AGENT_NGINX_BACKENDS=%s\n' "${backends}"
     printf 'TEST_AGENT_NGINX_XXL_JOB_ADMINS=%s\n' "${admins}"
-    printf 'TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=122.233.30.20:18120\n'
-    printf 'TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=122.233.30.20:18121\n'
+    printf 'TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=122.233.30.4:18120,122.233.30.114:18120\n'
+    printf 'TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=122.233.30.4:18121,122.233.30.114:18121\n'
     printf 'TEST_AGENT_NGINX_LISTEN_PORT=80\n'
     printf 'TEST_AGENT_NGINX_ADDITIONAL_LISTEN_PORTS=%s\n' "${additional_listen_ports}"
     printf 'TEST_AGENT_FRONTEND_ROOT=/data/testagent/frontend\n'
@@ -63,13 +63,16 @@ run_configure
 grep -Fq 'server 122.233.30.114:8080 max_fails=3 fail_timeout=10s;' "${CONF_PATH}"
 grep -Fq 'server 122.233.30.114:18080 max_fails=3 fail_timeout=10s;' "${CONF_PATH}"
 grep -Fq 'location /xxl-job-admin/ {' "${CONF_PATH}"
-grep -Fq 'server 122.233.30.20:18120 max_fails=2 fail_timeout=10s;' "${CONF_PATH}"
-grep -Fq 'server 122.233.30.20:18121 max_fails=2 fail_timeout=10s;' "${CONF_PATH}"
+grep -Fq 'server 122.233.30.4:18120 max_fails=2 fail_timeout=10s;' "${CONF_PATH}"
+grep -Fq 'server 122.233.30.114:18120 backup max_fails=2 fail_timeout=10s;' "${CONF_PATH}"
+grep -Fq 'server 122.233.30.4:18121 max_fails=2 fail_timeout=10s;' "${CONF_PATH}"
+grep -Fq 'server 122.233.30.114:18121 backup max_fails=2 fail_timeout=10s;' "${CONF_PATH}"
 grep -Fq 'location ^~ /toolbox/apps/it-tools/ {' "${CONF_PATH}"
 grep -Fq 'location ^~ /toolbox/apps/omni-tools/ {' "${CONF_PATH}"
 test "$(grep -nF 'location ^~ /toolbox/apps/it-tools/' "${CONF_PATH}" | cut -d: -f1)" -lt \
   "$(grep -nF 'location / {' "${CONF_PATH}" | cut -d: -f1)"
 test "$(grep -Fc 'max_fails=3' "${CONF_PATH}")" = 2
+test "$(grep -Fc 'backup max_fails=2' "${CONF_PATH}")" = 2
 
 MISSING_TOOLBOX_ENV="${TMP_ROOT}/nginx-missing-toolbox.env"
 grep -v '^TEST_AGENT_NGINX_TOOLBOX_' "${ENV_FILE}" >"${MISSING_TOOLBOX_ENV}"

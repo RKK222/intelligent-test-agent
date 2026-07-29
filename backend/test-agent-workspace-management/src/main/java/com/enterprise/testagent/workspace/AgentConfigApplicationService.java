@@ -23,14 +23,15 @@ import com.enterprise.testagent.domain.configuration.AgentConfigWorktreeStatus;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryDeploymentMode;
 import com.enterprise.testagent.domain.configuration.CommonParameterValues;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
+import com.enterprise.testagent.domain.configuration.PersonalAgentConfigRuntimeReloadResult;
+import com.enterprise.testagent.domain.configuration.PersonalAgentConfigRuntimeReloader;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigPreviewSourceResolver;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutCoordinator;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutPreparation;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutStatus;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigWorktreeClaim;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigWorktreePending;
-import com.enterprise.testagent.domain.configuration.PersonalAgentConfigRuntimeReloadResult;
-import com.enterprise.testagent.domain.configuration.PersonalAgentConfigRuntimeReloader;
 import com.enterprise.testagent.domain.configuration.UserSshKey;
 import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserId;
@@ -74,7 +75,7 @@ import org.springframework.stereotype.Service;
  * Agent 配置应用服务：隔离公共级/工作空间级文件根目录、Git 操作和进度发布。
  */
 @Service
-public class AgentConfigApplicationService implements ServerBroadcastHandler {
+public class AgentConfigApplicationService implements ServerBroadcastHandler, PublicAgentConfigPreviewSourceResolver {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(AgentConfigApplicationService.class);
 
@@ -805,6 +806,48 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 traceId);
     }
 
+    /**
+     * 为公共启动程序解析当前用户同服的稳定公共个人配置目录。
+     *
+     * <p>该热路径只做一次带用户、服务器和状态条件的 worktree 查询及文件系统边界检查，不 fetch、
+     * 不检查 Git 状态，也不扫描其它用户；无有效目录时返回空，让启动程序继续使用共享配置。</p>
+     */
+    @Override
+    public Optional<String> resolvePublicPersonalConfigPath(UserId userId, String linuxServerId) {
+        Objects.requireNonNull(userId, "userId must not be null");
+        String targetServer = linuxServerId == null ? "" : linuxServerId.trim();
+        if (targetServer.isBlank() || !serverIdentity.linuxServerId().equals(targetServer)) {
+            return Optional.empty();
+        }
+        try {
+            String stableName = publicWorktreeName(userId);
+            Path managedRoot = publicConfig().worktreeRoot().toAbsolutePath().normalize();
+            Path expectedWorktreeRoot = managedRoot.resolve(stableName).normalize();
+            return agentConfigRepository.findWorktrees(
+                            AgentConfigScope.PUBLIC,
+                            null,
+                            userId,
+                            targetServer,
+                            AgentConfigWorktreeStatus.ACTIVE).stream()
+                    .filter(worktree -> stableName.equals(worktree.worktreeName()))
+                    .filter(worktree -> stableName.equals(worktree.branch()))
+                    .map(worktree -> Path.of(worktree.rootPath()).toAbsolutePath().normalize())
+                    .filter(expectedWorktreeRoot::equals)
+                    .filter(path -> Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS))
+                    .map(this::publicStandardAgentRoot)
+                    .filter(path -> Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS))
+                    .map(Path::toString)
+                    .findFirst();
+        } catch (RuntimeException exception) {
+            LOGGER.warn(
+                    "event=agent_config_public_preview_resolve_failed linuxServerId={} userId={} exceptionType={}",
+                    targetServer,
+                    userId.value(),
+                    exception.getClass().getSimpleName());
+            return Optional.empty();
+        }
+    }
+
     public List<FileTreeEntryResponse> listWorkspaceAgentFiles(String workspaceId, String relativePath, String worktreeId) {
         Path agentRoot = workspaceAgentRootForRead(workspaceId, worktreeId);
         // 工作区 agent 目录不存在时返回空列表，不自动创建。
@@ -1075,6 +1118,114 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 progress.failed(ErrorCode.INTERNAL_ERROR.name(), "创建公共 Agent worktree 失败");
                 throw new PlatformException(ErrorCode.INTERNAL_ERROR, "创建公共 Agent worktree 失败", Map.of(), exception);
             }
+        }
+    }
+
+    /**
+     * 用户 OpenCode 初始化成功后，在进程所在的当前服务器幂等准备超级管理员公共个人 worktree。
+     *
+     * <p>这一步属于配置编辑环境的附加准备；失败只返回降级结果，不能推翻已经通过健康检查的进程状态。</p>
+     */
+    public AgentConfigResponses.PublicWorktreePreparationResponse preparePublicWorktreeForInitializedProcess(
+            String linuxServerId,
+            UserId userId,
+            String traceId) {
+        String targetServer = linuxServerId == null ? "" : linuxServerId.trim();
+        if (targetServer.isBlank() || !serverIdentity.linuxServerId().equals(targetServer)) {
+            return new AgentConfigResponses.PublicWorktreePreparationResponse(
+                    false,
+                    null,
+                    targetServer.isBlank() ? null : targetServer,
+                    "OpenCode 进程服务器与当前配置服务器不一致，未准备公共个人 worktree");
+        }
+        try {
+            AgentConfigResponses.PublicRepositoryStatusResponse repository = localPublicRepositoryStatus(userId);
+            if (!repository.initialized()) {
+                String message = repository.message() == null || repository.message().isBlank()
+                        ? "当前服务器的公共配置仓库尚未初始化"
+                        : repository.message();
+                return new AgentConfigResponses.PublicWorktreePreparationResponse(false, null, targetServer, message);
+            }
+            String branch = repository.currentBranch();
+            if (branch == null || branch.isBlank()) {
+                return new AgentConfigResponses.PublicWorktreePreparationResponse(
+                        false,
+                        null,
+                        targetServer,
+                        "当前服务器的公共配置仓库缺少有效分支");
+            }
+            AgentConfigResponses.AgentConfigWorktreeResponse worktree = createPublicWorktree(
+                    "public-personal",
+                    branch,
+                    null,
+                    targetServer,
+                    userId,
+                    traceId);
+            String preparationMessage = activatePreparedPublicPreview(worktree, userId, traceId);
+            return new AgentConfigResponses.PublicWorktreePreparationResponse(
+                    true,
+                    worktree.worktreeId(),
+                    worktree.linuxServerId(),
+                    preparationMessage);
+        } catch (PlatformException exception) {
+            LOGGER.warn(
+                    "event=agent_config_public_worktree_process_prepare_failed linuxServerId={} userId={} errorCode={} message={}",
+                    targetServer,
+                    userId.value(),
+                    exception.errorCode(),
+                    safeErrorMessage(exception.getMessage()));
+            return new AgentConfigResponses.PublicWorktreePreparationResponse(
+                    false,
+                    null,
+                    targetServer,
+                    safeErrorMessage(exception.getMessage()));
+        } catch (RuntimeException exception) {
+            LOGGER.warn(
+                    "event=agent_config_public_worktree_process_prepare_failed linuxServerId={} userId={} errorCode={} message={}",
+                    targetServer,
+                    userId.value(),
+                    ErrorCode.INTERNAL_ERROR,
+                    exception.getClass().getSimpleName());
+            return new AgentConfigResponses.PublicWorktreePreparationResponse(
+                    false,
+                    null,
+                    targetServer,
+                    "公共个人 worktree 准备失败，请稍后重试");
+        }
+    }
+
+    /**
+     * 首次初始化在进程健康后才创建公共个人 worktree，因此这里自动激活一次；后续受管重启若已在
+     * 启动前直接加载同一路径，运行时端口会幂等跳过重复 dispose。
+     */
+    private String activatePreparedPublicPreview(
+            AgentConfigResponses.AgentConfigWorktreeResponse worktree,
+            UserId userId,
+            String traceId) {
+        if (personalRuntimeReloader == null) {
+            return "公共个人 worktree 已在 OpenCode 进程服务器准备完成";
+        }
+        try {
+            PersonalAgentConfigRuntimeReloadResult result = personalRuntimeReloader.activatePublicPreview(
+                    userId,
+                    worktree.linuxServerId(),
+                    worktree.agentDirectory(),
+                    traceId);
+            if (result != null && result.reloaded()) {
+                return "公共个人 worktree 已准备完成并自动加载；未提交内容会在平台受管启动或重启后继续保留并生效";
+            }
+            String reason = result == null ? null : safeErrorMessage(result.message());
+            return reason == null || reason.isBlank()
+                    ? "公共个人 worktree 已准备完成；自动加载未完成，可点击公共 Agent 配置更新重试"
+                    : "公共个人 worktree 已准备完成；自动加载未完成：" + reason;
+        } catch (RuntimeException exception) {
+            LOGGER.warn(
+                    "event=agent_config_public_preview_activate_failed linuxServerId={} userId={} worktreeId={} exceptionType={}",
+                    worktree.linuxServerId(),
+                    userId.value(),
+                    worktree.worktreeId(),
+                    exception.getClass().getSimpleName());
+            return "公共个人 worktree 已准备完成；自动加载未完成，可点击公共 Agent 配置更新重试";
         }
     }
 

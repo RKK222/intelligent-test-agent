@@ -200,6 +200,11 @@ def verify_deployment_image_versions(root: Path) -> None:
         "工具诊断未核对容器实际镜像引用",
     )
     require(
+        "--tmpfs /run:rw,noexec,nosuid,size=1m" in contents["toolbox-docker.sh"]
+        and "--tmpfs /var/run:" not in contents["toolbox-docker.sh"],
+        "工具箱必须为 Alpine 真实 /run 目录提供 tmpfs，以兼容企业 Docker 18.09",
+    )
+    require(
         f"test-agent_it-tools_{IT_PLATFORM_VERSION}-linux-amd64.tar" in contents["toolbox.env.example"]
         and f"test-agent_omni-tools_{OMNI_PLATFORM_VERSION}-linux-amd64.tar" in contents["toolbox.env.example"],
         "离线 tar 名与平台镜像版本不一致",

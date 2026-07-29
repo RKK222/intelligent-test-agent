@@ -5,6 +5,119 @@
 
 ## Entries
 
+### 2026-07-29 - 回退 guojq 对话应用版本上下文提交
+
+### Why
+- 用户要求仅撤回 guojq 于 2026-07-28 提交的“每次对话请求带应用和版本”代码，不能误回退同日合并提交带入的其他主干改动。
+
+### What
+- 反向应用 `dfd34a48f` 与 `a3876d239`，移除 `<env_context>` 应用/版本上下文扩展、子条目提取和对应的用户消息过滤；保留合并提交及后续公共工作树修复。
+- 同步撤回这两个提交追加到 `.agents/session-log.guojq.md` 的 2026-07-28 条目。
+
+### How
+- 通过 `git revert --no-commit` 按逆序回退两个目标提交，复核暂存差异为 3 个文件且仅含目标提交反向内容；保留既有未提交的 `.agents/session-log.md`。
+- 运行 agent-chat 定向 Vitest、agent-web typecheck 和 production build。
+
+### Result
+- 定向测试 7 项通过，agent-web 类型检查和生产构建通过；未涉及 API、事件、数据库、环境配置、安全或 generated SDK。
+
+### 2026-07-29 - 复核工具盒子企业自动部署边界
+
+### Why
+- 用户反馈当前企业部署时 toolbox 不再自动部署，需要重新核对 Mac 封包决策、外层逐机入口和底层通用发布脚本的真实调用链。
+
+### What
+- 确认完整打包自 `9ae639fb6` 起默认按 Mac 输出目录的 `.release-component-state.env` 判断 `included/reuse`；相同指纹会生成 `reuse` 包并省略 toolbox 镜像，即使该 Mac 包尚未在 `.4/.114` 真正部署。
+- toolbox 自动部署只位于外层 `deploy-backend-node.sh`；直接运行节点内的 `deploy-multi-backend-node.sh` 或通用 `deploy-internal-release.sh` 只处理平台/worker，不会启动工具容器。
+
+### How
+- 当前 `deploy/internal/dist` 的 16:21 外层包内清单为 `TEST_AGENT_RELEASE_TOOLBOX=included`，包含两张镜像 tar，且包内 `deploy-backend-node.sh` 与当前源码 SHA-256 相同；用同一目录执行 `--component-plan-only` 时下一包已变为 `reuse`。
+- `tools/verify-internal-incremental-components.sh`、`tools/verify-internal-auto-node-deploy.sh` 和四个相关 Shell `bash -n` 通过。
+
+### Result
+- 当前 16:21 固定名外层包通过正确入口应自动部署 toolbox；后续默认重打包不会再次携带它。首次部署、目标状态不确定或之前全量包未落到两台后台时必须使用 `--include-all-components`，现场只能运行外层 `deploy-backend-node.sh`。
+- 本次仅诊断和留痕，未修改部署脚本、业务代码、API、事件、数据库、SQL、环境配置、generated SDK 或 OpenCode 源码；尚未连接企业节点，现场结果仍需结合 `deploy-<本机IP>.log` 验证。
+
+### 2026-07-28 - 补齐公共目录选服与初始化后精确重挂载
+
+### Why
+- 前一提交虽阻止查询失败/无 binding 时自动创建 worktree，但公共目录读取和来源展示仍会回退首台已初始化服务器；初始化成功且服务器 ID 不变时，前端也不会消费返回的 worktree ID 重新挂载。
+
+### What
+- 公共目录只有存在当前个人 worktree，或进程归属已成功解析且同服公共仓库已初始化时才请求；未解析、未分配或超级管理员 worktree 准备失败时，不再加载或展示其它服务器的共享直接目录。
+- 初始化成功后把 `publicWorktreePreparation` 的精确 worktree/server 转成带修订号的挂载请求，清除不匹配的旧挂载、按返回 ID 重选并刷新目录；用户确认暂不处理手工切换的低概率并发覆盖问题。
+
+### How
+- 复用 `AgentWorkbench → FigmaFileExplorer → AgentConfigPanel` 既有组件链路和 `listPublicAgentWorktrees`，没有新增 HTTP API、后端服务或状态仓库；定向 Vitest 144 项、前端全量 1672 passed/1 skipped、lint、agent-web typecheck/生产 build、文档校验和 `git diff --check` 通过。
+
+### Result
+- 两项指定缺口已由回归测试覆盖；不清理任何存量 worktree/数据库数据，不涉及 API、RunEvent、数据库、SQL、generated SDK、安全或环境配置。`.env.test` 三服务重启时后端仍被既有 Flyway 分叉阻断：数据库已应用当前代码不存在的 `20260727203500`；未执行 repair 或修改历史表，前端现有 Vite 服务保持 HTTP 200。
+
+### 2026-07-28 - 收口公共个人 worktree 初始化与刷新路由
+
+### Why
+- 上一版只让前端在已有进程绑定时跟随服务器，仍把查询失败与成功无 binding 混在一起；无 binding 会先创建任意服务器 worktree，且并发刷新中的旧响应可能覆盖最新服务器结果。
+
+### What
+- 进程归属只有查询明确成功才标记已解析；成功但无 binding 时不再自动创建公共个人 worktree，等待用户点击初始化。
+- `SUPER_ADMIN` 初始化进程并通过公共健康检查后，由目标 Java 幂等准备同服 `public-{userId}` worktree；准备失败用 additive `publicWorktreePreparation` 单独提示，不推翻进程 `READY`。
+- Agent 配置刷新统一使用代次隔离服务器、工作空间和 worktree 请求；迟到响应不再挂载旧服务器。存量 worktree 和数据库记录不清理，显式创建/切换入口保留。
+
+### How
+- 复用 `BackendJavaRouteResolver` / `BackendHttpForwarder` 既有初始化路由和 `AgentConfigApplicationService.createPublicWorktree`，未新增路由扫描、跨 Java 文件 HTTP 代理、数据库 SQL 或 Flyway migration。
+- 前端相关 Vitest 128 项、agent-web typecheck、前端生产 build、后端 `AgentConfigApplicationServiceTest` 53 项和 `RuntimeControllerTest` 25 项、后端 20 模块 clean package、`git diff --check` 通过。
+
+### Result
+- 三条问题按原范围收口：查询错误不会误判未分配；点击初始化后进程和公共个人 worktree 同服；旧刷新结果不会覆盖最新路由。
+- 按本地启动规范用未修改的 `.env.test` / `test` profile 实际重启，构建成功但后端被既有 Flyway 分叉阻断：测试库已应用本仓库不存在的 `20260727203500`。未执行 repair、未修改历史表；前端 3000 返回 200，后端 8080 未启动，真实端到端仍待数据库基线由集成人处理后复验。
+
+### 2026-07-28 - 公共个人 worktree 自动跟随 OpenCode 进程服务器
+
+### Why
+- 公共个人 worktree 原先优先复用页面记忆或首个已初始化仓库服务器，与独立负载均衡的用户 OpenCode 进程可能跨服，导致个人配置热加载冲突。
+
+### What
+- 前端等待 `/processes/me` 归属查询完成；已有进程绑定时自动复用或创建同一 `linuxServerId` 的公共个人 worktree，没有绑定时才沿用旧回退规则。
+- 其它服务器上的历史 worktree 和数据库记录保留，避免删除可能存在的未提交内容；手工创建和切换能力不变。
+
+### How
+- 复用现有页面内存路由 ID、公共仓库列表及 worktree 查询/创建接口，没有新增后端路由、数据库结构或迁移。
+- Agent 配置面板和文件树定向测试 46 项、agent-web typecheck、前后端生产构建及 `git diff --check` 通过。
+
+### Result
+- 自动挂载不再在进程查询完成前抢先选服；当前进程服务器存在已初始化公共仓库时，公共个人配置与热加载进程保持同服。
+- `.env.test` 三服务重启受既有 Flyway 历史分叉阻断：测试库已应用 `20260727203500`，当前仓库只保留改号后的 `20260728160800`；未执行 repair 或手工改库。前端 3000 仍为 200，后端 8080 当前未启动。
+
+### 2026-07-28 - 阻断工具盒子上游不通的前端发布
+
+### Why
+- 企业部署后工具卡片能展示，但点击具体工具返回 Nginx 502；既有 `.2` 前端验收只核对 toolbox upstream 配置文本，没有真实访问四个工具端口或统一入口深链。
+
+### What
+- 复用现有 `deploy-multi-backend-node.sh` 前端验收，在 reload 后从 `.2` 逐一探测 `.4/.114:18120/18121` 的健康端点和真实工具路径，再请求本机 Nginx 两条统一入口并核对 CSP/COEP 响应头。
+- 同步多后台、工具盒子部署文档和脚本契约回归；失败信息携带具体工具来源和 endpoint，便于区分容器、端口绑定与防火墙问题。
+
+### How
+- `bash -n`、`tools/verify-internal-multi-backend-node.sh`、`tools/verify-internal-nginx-config.sh`、`tools/verify-internal-auto-node-deploy.sh`、`tools/verify-internal-two-backend-complete-package.sh`、`tools/verify-ai-docs.sh` 和 `git diff --check` 通过。
+
+### Result
+- 后续 `.2` 发布会在浏览器验收前阻断 toolbox 502；本次未接入企业服务器，现场仍需按 `.4 → .114 → .2` 检查容器和跨机端口。未修改 API、事件、数据库/Flyway、SQL、业务权限、环境配置、generated SDK 或 OpenCode 源码。
+
+### 2026-07-28 - 固化应用切换时的 Skill 目录查询上下文
+
+### Why
+- Command 查询在 query function 中闭包读取当前 workspaceId；应用切换期间旧请求可能使用新 workspace，造成 Skill 目录短暂缺失且刷新页面后才恢复。
+
+### What
+- `AgentWorkbench` 的 Command 查询改为与 Agent 查询一致的响应式 query key，并只使用 key 中固化的 workspaceId；补充源码契约回归，同步 agent-web README/PACKAGE。
+
+### How
+- TDD 先确认新增用例失败，修复后定向 Vitest 13 项、agent-web typecheck、生产 build、`git diff --check` 通过；JDK 25 下后端 20 模块跳过测试打包通过。
+- 使用未修改的 `.env.test` 和 test profile 完整重启 backend、opencode-manager、frontend；health/readiness 为 UP、前端和 CORS 为 200、OpenCode 4104 收敛到 HEALTHY。
+
+### Result
+- 应用切换后的迟到 Command 响应只能写回原 workspace 缓存，不会读取或覆盖新应用的 Skill 列表；未变更 API、RunEvent、数据库/Flyway、权限、环境配置、generated SDK 或 OpenCode 源码。
+
 ### 2026-07-28 - 重建当日功能企业双后台完整包
 
 ### Why
@@ -2754,6 +2867,219 @@
 - 企业探针现在能正确区分“上一轮工具输出”和“本轮续写提示”，不会把已成功恢复的 thread 误报为续写失败。
 - 真实 `.114` 节点尚未用新 worker 镜像重跑完整 E2E；新包加载后仍须先执行宿主检查，只有最终输出 `Codex whitebox host compatible` 才能继续部署。无 API、事件、数据库、性能、安全策略、生产门面、generated SDK、OpenCode 源码或环境配置变更。
 
+### 2026-07-28 - 合并最新主线并重打企业离线包与独立工具箱
+
+### Why
+
+- 企业现场需要基于当日最终代码重新生成可直接替换的双后端离线包，并把工具盒子作为独立部署单元交付。
+- 打包期间远端连续加入应用源码重试恢复、工具盒子布局和应用切换技能目录竞态修复；旧制品不能继续沿用，必须以最终提交重新组合并校验。
+
+### What
+
+- 将本地 9 个既有提交 rebase 到最新远端主线，冲突处理同时保留应用源码多服务器物化、工具盒子、超级管理员按应用/分支 Git 刷新、公共 Agent 全局刷新和 Codex 白盒宿主兼容修复；最终打包基线为 `cb7525eab`。
+- 生成平台内部发布包与包含 `.4`、`.114`、`.2` 三份既有节点配置的双后端外层包；Node.js 22.23.1、MCP SDK 1.29.0、Codex 0.145.0 与 bubblewrap 均继续封装在 worker 镜像中。
+- 另生成 `deploy/internal/dist-toolbox` 独立工具箱交付目录。当前稳定架构是一套原子部署单元下的两张固定 `linux/amd64` 镜像：IT-Tools `2024.10.22-7ca5933-platform.2` 与 OmniTools `0.6.0-platform.1`，不嵌入 backend/worker 进程。
+
+### How
+
+- 合并后后端相关 Maven 模块测试、前端全量类型检查/1662 passed + 1 skipped/生产构建、IT-Tools 中文 UI 审计与 9 项测试通过；最终新增竞态修复定向 13 项通过，应用源码重试恢复 3 组集成测试退出码 0。
+- worker 构建期通过 Node/MCP 依赖导入、白盒工具列表、续写路由、失败关闭、MCP 契约 4 项和 bwrap 摘要检查；Apple Silicon 构建机按设计跳过原生 namespace E2E。
+- 两张工具镜像以只读根文件系统、关闭外网 masquerade 的专用 bridge 和 `unless-stopped` 实际部署为 healthy；193 条深链逐项加载且无非同源请求，ASCII、HTTP 剪贴板降级、FFmpeg、Ghostscript、图片、QR、OCR 和 AI 抠图真实功能冒烟通过。
+- 内外 ZIP 逐项 SHA-256、`unzip -tq`、节点结构/脱敏/覆盖校验通过，外层嵌入内部 ZIP 的摘要完全一致。
+
+### Result
+
+- 最终平台内部包 `deploy/internal/dist/test-agent-internal-release.zip` SHA-256 为 `0404fb2ebbb9c73c57b64ef81c521982b0bee03cc4d872e5a76b34328d9b3e12`；双后端完整包 `deploy/internal/dist/test-agent-two-backend-complete.zip` 为 `c90e7cf10cd86c0ad18d440ed6a74f161610f1ff483987182674d699d6cc6add`。
+- 独立工具箱 IT-Tools tar SHA-256 为 `93b8d1436cffa5470330cf499c102cc020203c5ba144563dcf6ad9c422cac9e3`，OmniTools tar 为 `680b575afbe7acc6dcc6af5d5659664765e4dbd89a80dab2a430014ef4cde7f5`，修改源码为 `616752bbf58e1f572803ee192f17a361ffc373788a2988778fa0aa524640976a`，目录为 `cb12b1ed4f7d61ee64299d4c15794c9b2ea463e53423bbf330ab79b09de56c38`。
+- 本次仅处理合并、冲突说明与制品，没有新增 API、事件、数据库、SQL、安全策略或环境配置；最新主线自身包含既有 Flyway/API 能力，部署顺序仍须先工具节点、再后端、最后前端 Nginx。
+- `.114` 曾按用户反馈通过修复后的宿主预检，但最终新 worker 仍要求 `.4` 与 `.114` 各自执行同一原生 Linux/x86_64 白盒检查；任何节点未输出 `Codex whitebox host compatible` 时不得启用白盒 MCP。
+
+### 2026-07-28 - 工具箱改为双后台共置并重封企业包
+
+### Why
+
+- 企业现场不再提供独立工具节点，IT-Tools 与 OmniTools 需要直接运行在 `.4`、`.114` 两台后台机器，并由 `.2` 在其中一台不可用时切到另一台。
+- 旧 Nginx 渲染只接受单个工具 endpoint，旧逐机配置包也没有后台本机 `toolbox.env`，不能直接用于该拓扑。
+
+### What
+
+- 复用现有工具镜像、部署脚本和 Nginx 模板，把两个工具 upstream 扩展为兼容旧单地址的逗号列表；首项 `.4` 为主用，后续 `.114` 渲染为 `backup`。
+- 双后台完整包封装时为 `.4`、`.114` 节点包分别生成绑定本机 IP 的 `toolbox.env`，并把 `.2` 的两套工具 upstream 固定为 `.4/.114`；内层发布包必须同时包含两个镜像 tar/SHA 和部署/诊断脚本。
+- 部署文档改为 `.4 -> .114 -> .2`：两台后台各自加载同一对镜像并通过健康诊断，最后才让 `.2` reload 双 upstream Nginx；不再需要第三台工具服务器。
+
+### How
+
+- `configure-nginx.sh` 使用现有 dotenv、trim 和逐行模板渲染流程生成主/备 server 指令，没有新增平行配置器；旧单地址仍可使用。
+- Nginx、逐机多后台校验和完整外层包三个脚本测试通过，覆盖缺失地址失败关闭、单地址兼容、双地址主备、节点 `toolbox.env`、前端固定 upstream、制品结构、敏感配置不输出和固定名覆盖。
+- Shell 语法、`git diff --check` 通过；企业完整 ZIP 在本次记录纳入内层发布包后重新封装并校验。
+
+### Result
+
+- `.4` 和 `.114` 各运行 `test-agent-it-tools:18120`、`test-agent-omni-tools:18121`，`.2` 只承担统一入口和主备代理；工具镜像内容及 193 项离线功能口径没有改变。
+- MCP 依赖的 Node.js 22.23.1 与 MCP SDK 1.29.0 仍在 worker 镜像内，不依赖后台宿主额外安装 Node。
+- 本次只修改部署脚本、Nginx 配置、离线封装和部署文档；无 API、事件、数据库、SQL、generated SDK、OpenCode 源码或业务安全边界变更。企业节点仍需分别通过白盒宿主检查后才能启用 MCP。
+
+### 2026-07-28 - 企业发布按运行组件指纹增量封装
+
+### Why
+
+- 后续日常版本若工具箱、Codex MCP 和 OpenCode Manager 均未更新，不应在每个企业包中重复携带数百 MiB 镜像/programs；任一组件真实变化时又必须自动恢复完整交付，不能靠操作人手工删 tar。
+- 工具箱已经改为 `.4/.114` 双后台共置，正常后台部署入口需要同时处理工具容器，不能继续依赖部署 Java 后再执行一段独立手工命令。
+
+### What
+
+- `package-release.sh` 新增持久化内容指纹和组件清单：OpenCode Manager、OpenCode runtime、Codex MCP、Node/MCP SDK、bubblewrap、programs 与 worker 镜像作为一个原子 `worker runtime`；IT-Tools、OmniTools、修改源码与目录作为一个 `toolbox`。首次、变化或 `--include-all-components` 时标记 `included` 并构建/入包，未变化时标记 `reuse` 并省略对应大制品。
+- `--zip-only` 校验当前制品指纹并保持同一发布批次已有的组件选择，避免仅补会话日志时误删刚构建但尚未部署的全量组件；`--component-plan-only` 可只查看决策，`--component-state-file` 可把构建基线放到稳定路径。
+- 内外包校验和 `.4/.114` 部署脚本同步识别组件清单。全量部署成功后在各后台记录实际安装指纹；增量复用前必须同时满足目标指纹一致、Manager/OpenCode/Codex 文件齐全、worker 健康和两套工具容器诊断通过，缺失或不一致时在替换平台前失败。
+- `deploy-backend-node.sh` 在工具箱 `included` 时自动提取、部署和诊断，在 `reuse` 时只校验并复用；稳定部署文档删除 `.4/.114` 的重复手工工具箱步骤，并明确新装、扩容、灾备及机制迁移首包必须全量。
+
+### How
+
+- 新增增量组件夹具，覆盖首次全量、同批 `zip-only` 保持选择、下一发布无变化省略、仅 worker runtime 变化、清单和制品指纹戳；扩充外层包、双后台、自动节点测试，覆盖省略大文件、自动工具部署、目标安装指纹记录及错配拒绝。
+- `tools/verify-internal-incremental-components.sh`、`tools/verify-internal-two-backend-complete-package.sh`、`tools/verify-internal-multi-backend-node.sh`、`tools/verify-internal-auto-node-deploy.sh`、`tools/verify-internal-nginx-config.sh`、`tools/verify-dev-scripts.sh`、`tools/verify-ai-docs.sh`、相关 Shell `bash -n` 与 `git diff --check` 均通过。
+- 真实仓库执行 `package-release.sh --component-plan-only`，因本机尚无新机制状态基线，worker runtime 和 toolbox 均正确计划为 `included`；本批只实现并验证脚本，没有重新构建大型 Docker 镜像或最终企业 ZIP。
+
+### Result
+
+- 日常正常打包会自动跳过未更新的工具箱和包含 OpenCode Manager/Codex MCP/Node 的 worker runtime，大组件有任何输入变化时自动整组打回；`.4/.114` 使用同一后台命令完成平台与工具箱部署。
+- 兼容无组件清单的历史全量包；迁移后的第一次正式交付必须使用 `--include-all-components` 并在两台后台成功部署，之后才能使用 `reuse` 增量包。
+- 未修改 HTTP API、RunEvent/SSE、数据库/Flyway/SQL、generated SDK、OpenCode 上游源码或 `.env.local`；安全与兼容性变化仅限离线包组件完整性和目标指纹失败关闭。
+
+### 2026-07-28 - 修复企业首次工具箱发布的迁移顺序与旧 Docker PID 目录
+
+### Why
+
+- `.4` 用最新企业包启动时，平台 PostgreSQL 已应用 `V20260728160000`，新合入但版本较早的工具点击迁移 `V20260727203500` 被 Flyway 判定为未按顺序，Java 持续退出且 8080 不监听。
+- 两个工具镜像在企业 Docker 18.09 的只读根文件系统中启动时，Alpine `/var/run -> /run` 软链接没有被 `/var/run` tmpfs 正确覆盖，Nginx 无法写入 PID 文件。
+
+### What
+
+- 工具点击迁移在首次企业稳定交付前调整为 `V20260728160800`，排到当前已发布最高平台迁移之后；生产继续使用默认顺序 Flyway，不开启 `outOfOrder`，不修改 `flyway_schema_history`。
+- 真实 PostgreSQL 工具点击集成测试先迁移到企业存量基线 `V20260728160000`，再按默认配置升级到新迁移，固定现场升级路径；H2 定向测试和数据库文档同步新版本。
+- 工具箱容器把 PID tmpfs 从软链接路径 `/var/run` 改为真实目录 `/run`；平台契约校验同时要求 `/run` 且拒绝回退 `/var/run`，部署文档补充 Docker 18.09 原因。
+
+### How
+
+- `mvn -pl test-agent-persistence -am clean test -Dtest=FlywayMigrationNamingTest,MyBatisToolboxClickRepositoryIntegrationTest,MyBatisToolboxClickRepositoryPostgresqlIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false`：7 项通过，真实 PostgreSQL 存量升级成功。
+- `python3 toolbox-source/scripts/verify_platform_contract.py --root .`、四组企业封包/逐机脚本校验、`bash -n deploy/internal/toolbox-docker.sh` 和 `git diff --check` 通过。
+- IT-Tools 与 OmniTools 两张锁定的 `linux/amd64` 镜像分别使用只读根文件系统和 `/run` tmpfs 真实启动，`/run/nginx.pid` 可写且容器保持运行。
+
+### Result
+
+- 当前提交是重新生成企业内层发布 ZIP 和固定名双后台外层包的修复基线；制品 SHA-256 在提交后的真实打包与内外嵌套校验完成后交付。
+- 未修改 HTTP API、RunEvent/SSE、业务 MyBatis SQL、权限、密钥、generated SDK、OpenCode 上游源码或环境配置；数据库影响仅为尚未进入企业稳定库的新增迁移版本调整，表结构内容不变。
+
+### 2026-07-28 - 固化多人 Flyway 迁移发布门禁
+
+### Why
+
+- 14 位时间戳只能避免多人创建相同版本，不能防止较小版本在较大版本已经部署后才合并；企业现场已重复出现 Flyway validate 拒绝启动。
+
+### What
+
+- 在 `AGENTS.md`、数据库稳定文档和 persistence 模块说明中明确：开发时间戳只是候选版本，发布集成人必须同时对照目标库最高历史和本次全部新迁移统一排序。
+- 尚未进入共享库的迁移可在合并前改号；已进入任何共享或稳定库的迁移保持不可变。发现倒序或环境分叉时停止发布，禁止使用 `outOfOrder`、`repair` 或手改 `flyway_schema_history` 掩盖。
+
+### How
+
+- 正式打包前要求用真实数据库先迁移到已部署最高版本，再以默认 Flyway 配置升级到当前 HEAD；空库全量建库不能替代该升级路径。
+- 继续复用既有 `FlywayMigrationNamingTest` 做文件名和唯一性检查，不新增平行迁移框架。
+- 默认 JDK 17 首次运行无法加载已有 JDK 21 测试字节码；切换 JDK 25 并执行 `mvn -pl test-agent-persistence -am clean test -Dtest=FlywayMigrationNamingTest -Dsurefire.failIfNoSpecifiedTests=false` 后 2 项通过，`git diff --check` 通过。
+
+### Result
+
+- 多人 Flyway 变更从“各自生成时间戳”升级为“发布前统一编排 + 生产基线升级验证”的强制门禁；本次仅修改工程规范和文档，不新增或改写 migration、SQL、API、事件、环境配置或生产数据。
+
+### 2026-07-28 - 重打公共 Agent/Skill 完整替换包并公共启用白盒分析
+
+### Why
+
+- 用户确认白盒 MCP 注册应进入公共 `opencode.jsonc`，并要求把今天更新的公共 `skill-creator` 与需要替换的全部公共 Agent/Skill/Tool 一起打包。
+- 用户要求对外白盒 Agent 不出现 Codex 字样；旧文档仍写按应用启用和旧 MCP 名称，与最终公共启用口径不一致。
+
+### What
+
+- 公共个人配置分支提交 `b6247bd`、`e771bed`：注册中性名称 `code_analysis` MCP，新增 `whitebox-code-analyst`，并保证 Agent 描述、正文和工具权限名称均不含 Codex 字样；保留底层程序路径和模型环境变量的技术契约。
+- 以当前公共 `master` 提交 `b67700a` 为唯一底座，在一次性 detached worktree 只叠加 `skill-creator 1.2.0`、`skill-optimizer 1.1.0`、白盒配置和统一 `metadata.source: test-agent`，没有带入个人 worktree 的历史验收样例；归档集成提交为 `ca6e38c`。
+- 覆盖生成固定名 `deploy/internal/dist/test-agent-public-agents-skills.zip` 及 `.sha256`，包内包含完整公共 `opencode.jsonc`、6 个 Agent、15 个 Skill、6 个 Tool 和说明，共 653 个受 Git 跟踪文件。
+- 同步公共配置模板、白盒部署说明、企业部署入口和安全规范：当前公共配置会为所有使用该配置的应用展示白盒分析 Agent，实际代码访问仍必须通过当前应用成员和 workspace 鉴权，超级管理员不旁路成员校验。
+
+### How
+
+- 公共 `skill-creator`/`skill-optimizer` 及包内全部 15 个 Skill 通过 1.2.0 校验器；ZIP CRC、归档文件树与集成提交逐文件一致、禁止路径、历史验收样例、必需文件、Agent 中性名称、JSONC 模型参数和 SHA-256 校验全部通过。
+- OpenCode 1.18.4 从解压目录发现全部 15 个包内 Skill，成功加载 `whitebox-code-analyst` 和 `code_analysis` MCP；解析后的 Agent 不含 Codex 字样。运行时同时合并本机全局 Skill，因此校验按包内来源路径判断，不误用运行时总数。
+- `tools/test-codex-whitebox-mcp.mjs` 使用当前离线 programs runtime 执行 4/4 通过，覆盖两工具契约、固定 workspace/模型/审批策略、thread 所有权、失败关闭、日志脱敏和子客户端回收。
+
+### Result
+
+- 公共完整替换包 SHA-256 为 `5797954135302200d9e6fe4667ec2095059d76bfa7f656ad181185a6a32ac591`；企业现场应先部署配套 Java/programs/worker 并逐节点通过 Linux 宿主预检，再经公共 Agent 个人 worktree 导入、查看 Diff、提交和发布，禁止直接覆盖共享运行目录。
+- 本次没有修改 HTTP API、RunEvent/SSE、数据库/Flyway/SQL、generated SDK、OpenCode 上游源码、环境配置或密钥；权限模型未改变，但功能可见范围由原计划的逐应用配置调整为公共配置覆盖的全部应用。
+
+### 2026-07-28 - 应用 Git 刷新只展示已有 feature 分支的应用
+
+### Why
+
+- 超级管理员“应用 Git 刷新”页面此前会列出尚未创建任何工作空间版本分支的空应用；这些应用没有可刷新的物理 feature 仓库组，展示后只有空状态，和按钮的执行语义不一致。
+
+### What
+
+- 应用 Git 刷新范围服务继续复用既有 `repositoryId + version + branch` 分组程序，并过滤 `groups` 为空的应用；有实际分支的启用、停用应用仍然保留。
+- 前端对旧后端返回的数据增加同口径兼容过滤，并把空态改为“暂无已创建 feature 分支的应用”。
+- 同步 workspace-management、agent-web、用户手册、HTTP API 和集成测试设计，并补充前后端回归用例。
+
+### How
+
+- `ManagedWorkspaceApplicationServiceTest` 相关 76 项通过；前端定向 10 项、全量 100 个测试文件 1673 passed / 1 skipped，workspace 类型检查、生产构建、AI 文档检查和 `git diff --check` 通过。
+- 使用 JDK 25 执行 `restart-dev-services.sh` 时，后端与前端生产包均构建成功；真实后端启动被本机数据库已执行但当前工作树未解析的 migration `20260727203500` 按 Flyway 校验拒绝，未使用 `repair`、`outOfOrder` 或手工修改历史表绕过。
+
+### Result
+
+- 超级管理员刷新页面和范围 API 现在都只返回确实存在 feature 分支组、能够执行刷新的应用；刷新、合并个人 worktree 和 Agent rollout 的既有执行逻辑不变。
+- 本次只收窄既有 HTTP 查询响应集合，不修改路径、DTO、RunEvent、数据库、SQL、权限、安全、generated SDK、OpenCode 源码或环境配置；真实页面启动受现有本机 Flyway 历史分叉阻断，自动化与生产构建已完整通过。
+
+### 2026-07-29 - 公共个人配置在受管启动时自动恢复
+
+### Why
+
+- 公共个人 worktree 与用户 OpenCode 进程虽然在同服创建，但既有启动程序每次都会把受管软链接重置到共享副本，导致重启后个人预览消失；界面还把公共和应用“Agent 配置更新”都描述成简单重载，无法说明未提交内容和应用 feature 合并语义。
+
+### What
+
+- 公共启动程序在每次受管启动/重启前解析当前用户、当前服务器、`ACTIVE` 且稳定命名的 `public-{userId}` worktree，校验受管根与物理 `opencode/` 后直接切换链接；无有效目录或解析失败时回退共享配置，不阻断进程启动。
+- 首次初始化因健康检查后才创建公共个人 worktree，创建完成后自动激活；若启动前已经加载同一路径则跳过重复 `/global/dispose`。全程不提交、stash、reset、clean 或删除 staged、unstaged、untracked 内容。
+- 左侧 Agents 公共/应用根按钮和小宠物确认框同步说明：公共只加载本人 worktree 并在后续启动自动恢复；应用先安全合入当前应用 feature 固定提交，再刷新本人运行态。同步后端、前端、用户手册、HTTP、部署和测试文档。
+
+### How
+
+- 自动选择仅在受管 start/restart 路径执行一次同服本人状态过滤查询和少量文件系统检查；不增加轮询、定时任务、前端请求、Git fetch/pull 或 Git 状态扫描。失败日志使用结构化事件，只记录服务器、用户、worktree 标识与异常类型，不输出路径或异常正文。
+- 相关后端 86 项测试通过；前端全量 Vitest 为 1673 passed / 1 skipped，workspace typecheck、生产 build、AI 文档检查和 `git diff --check` 通过。完整 `mvn test` 的前 19 个模块通过，最后仅被既有 `ReferenceRepositoryContextTest` 重复注册 bean 失败阻断。
+- JDK 25 下真实启动的后端生产构建通过；readiness 被本地数据库已执行但当前代码未解析的 migration `20260727203500` 拒绝，未使用 `repair`、`outOfOrder`、手工修改历史表或环境文件绕过。
+
+### Result
+
+- 有效公共个人配置现在会跨受管启动/重启保留；公共按钮仍用于进程运行期间立即加载新修改，应用按钮保持“合入 feature 后刷新本人”的原语义，均不影响其他用户。
+- 未新增或变更 HTTP DTO、RunEvent、数据库/Flyway/SQL、权限、generated SDK、OpenCode 上游源码或环境配置；运行期开销只增加启动时一次窄查询和路径检查，真实页面联调仍受本机 Flyway 历史分叉阻断。
+
+### 2026-07-29 - 修复后端运行包缺失 PostgreSQL 驱动
+
+### Why
+
+- 合并 `origin/main` 并重新构建后，后端在 Druid 初始化阶段因 `ClassNotFoundException: org.postgresql.Driver` 退出；`test-agent-app` 新增的直接 `test` scope 声明覆盖了 persistence 模块传递的 `runtime` 依赖，导致测试编译和 Maven 打包成功但可执行 JAR 不含驱动。
+
+### What
+
+- 把 `test-agent-app` 对 `org.postgresql:postgresql` 的直接依赖恢复为 `runtime`，继续复用既有驱动版本和 persistence 数据访问链路，不新增依赖版本、配置项或业务实现。
+
+### How
+
+- JDK 25 下执行 `restart-dev-services.sh --profile test --env-file .env.test`，后端 20 模块打包、opencode-manager 构建、前端类型检查和生产构建通过；不可变运行 JAR 已确认包含 `BOOT-INF/lib/postgresql-42.7.11.jar`，启动日志不再出现驱动缺失。
+- 只读核对 `.env.test` 数据库的 Flyway 历史，确认其已按 installed rank 依次执行 `V20260728160000`、旧 `V20260727203500` 和 `V20260728103000`，而当前代码只解析改名后的 `V20260728160800`；未执行 `repair`、`outOfOrder`、历史表修改或环境文件替换。
+
+### Result
+
+- PostgreSQL 驱动已重新进入后端生产运行包；本次不修改 HTTP API、RunEvent、数据库结构/SQL、权限、安全、generated SDK、OpenCode 源码或环境配置。
+- 三服务仍未启动完成：后端被既有 Flyway 历史分叉 `Detected applied migration not resolved locally: 20260727203500` 拒绝，需先确定共享测试库与企业基线的显式兼容方案，不能以运行参数绕过。
+
 ### 2026-07-29 - 兼容工具盒子分叉迁移历史并恢复三服务
 
 ### Why
@@ -2778,3 +3104,24 @@
 - 本机旧 history 在 Boot validate 前成功解析，按默认顺序执行 `V20260728160800` 和后续待执行 migration 后启动完成；未清空数据库，未执行 `repair`、乱序迁移或手工修改 `flyway_schema_history`。
 - 未变更 HTTP API、RunEvent/SSE、权限、安全、generated SDK、OpenCode 源码或环境配置；只调整数据库迁移兼容装配、工具盒子幂等 migration、测试和稳定文档。
 - 用户把本地提交 mixed reset 到 `origin/main` 后仍保留了大量既有未提交改动；本次提交只暂存迁移兼容相关内容，其余工作树改动不覆盖、不丢弃。
+
+### 2026-07-29 - 恢复 mixed reset 内容并完成整体复验
+
+### Why
+
+- 默认 mixed reset 把 reset 前 16 个本地提交展开为 72 个未提交文件；这些文件包含公共个人配置、跨服 worktree、企业双后台与增量打包、工具盒子验收和前端兼容改动，需要在不丢失历史成果的前提下重新提交。
+
+### What
+
+- 对照 reflog、原提交链和全部近期会话日志确认 72 个文件的来源；保留既有模块边界、公共路由程序和文档，不新增平行 API、服务或临时兼容实现。
+- 将恢复内容与已提交的 Flyway 双历史兼容实现组合复核；API、共享类型、安全、部署与用户手册仍保持同步，未修改 `.env*`、generated SDK 或 OpenCode 上游源码。
+
+### How
+
+- JDK 25 下执行 19 模块 Maven 定向 reactor，workspace 130、runtime 32、API 25、persistence 8、Spring Boot/PostgreSQL Flyway 2，共 197 项测试通过。
+- agent-web 5 个定向 Vitest 文件 206 项通过，`vue-tsc` 类型检查通过；5 组企业部署验证脚本、Shell/Python 语法、工具盒子 193 项平台契约、`git diff --check` 和冲突标记检查通过。
+- 当前 backend health/readiness、frontend HTTP 和 backend/manager/frontend 三个 screen 进程在提交前再次复核。
+
+### Result
+
+- mixed reset 展开的既有成果已具备重新提交条件，没有发现测试失败、冲突标记、敏感环境文件或未记录的数据库绕过；本次不重写历史提交，也不推送远程。
