@@ -14,6 +14,7 @@
 | 对话相关 HTTP `响应`正文为空 | 异常 | 当前平台 JSON API 使用统一响应；即使 active Run 不存在，也应返回 `success=true,data=null`，不应是零字节。 |
 | SSE 记录存在，但报文体为空 | 异常 | 前端解析器会忽略纯注释心跳；能进入原始输出但为空，表示收到过空 `data:`。 |
 | SSE 有 `run.succeeded`，但没有 assistant 文本或 message part | 异常，但不是 HTTP 空响应 | Run 已到终态，重点查用户 OpenCode、模型流和消息投影。 |
+| 用户 OpenCode 出现 `prompt_async failed` 和 `errors building .../opencode/tools/*.ts` | 异常，且不是模型空响应 | 公共自定义工具在主模型调用前构建失败；先修复权威公共配置，不能用重发 Run 或重部署应用包掩盖。 |
 | `SSE connection error` | 连接诊断，不是上游响应正文 | 继续查 Network、Nginx、SSE 路由和最终 `run.*` 事件。 |
 
 只看到一条正常的空 GET 请求时可以停止；其余情况继续执行本手册。
@@ -60,7 +61,7 @@ Java buildVersion / manager buildVersion：
 影响范围：单用户 / 单节点 / 双节点 / 所有用户：
 ```
 
-原始输出已经对常见 token 字段脱敏，但仍可能包含用户问题、路径和业务数据，按敏感材料保管。HAR 可能包含 Authorization、Cookie 和一次性 ticket，不要直接外发；只提供脱敏后的上述字段和必要响应片段。
+原始输出已经对常见 token 字段脱敏，但仍可能包含用户问题、路径和业务数据，按敏感材料保管。HAR、手工 `curl` 输出和 shell 历史可能包含 Authorization、Cookie、上游 token 和一次性 ticket，不要直接外发；只提供脱敏后的上述字段和必要响应片段。若诊断材料已经暴露完整 Bearer/token，立即按企业密钥流程吊销或轮换，并按企业审计要求清理 shell 历史和诊断副本；不要继续复用该凭据，也不要让接收方回传它。
 
 ## 4. 先证明实际部署的是同一批包
 
@@ -434,9 +435,30 @@ find /data/testagent/data/agent-opencode/manager/worker/logs \
 
 ```bash
 tail -n 300 REPLACE_EXACT_USER_OPENCODE_LOG
+grep -nE \
+  'prompt_async failed|errors building|failed to add snapshot files|unknown option.*sparse|statusCode=' \
+  REPLACE_EXACT_USER_OPENCODE_LOG
 ```
 
-日志文件名包含统一认证号，外发前必须脱敏。重点查模型 HTTP 状态、上游正文、`data:data:`、`[DONE]` 缺失、连接超时、provider/model 不存在和配置读取失败。
+日志文件名包含统一认证号，外发前必须脱敏。先按当前 Session、消息 ID 和分钟级时间窗口精确过滤，不要用 provider 名称全盘搜索后把历史会话错误当成当前故障。重点查模型 HTTP 状态、上游正文、`data:data:`、`[DONE]` 缺失、连接超时、provider/model 不存在、配置读取失败和自定义工具构建失败。
+
+若同一当前会话出现下面的组合，可直接判定为“公共自定义工具构建失败”，不再把它归类为模型返回空报文：
+
+```text
+prompt_async failed
+AggregateError: ... errors building ".../opencode/tools/REPLACE_TOOL.ts"
+```
+
+OpenCode 1.18.4 会扫描配置目录下的 `tool/tools` JavaScript 和 TypeScript 文件，并在提示处理时加载全部匹配工具；任一文件存在语法、导入、依赖或导出结构错误，都可能在主模型调用前中止整个提示。此时常见伴随现象是 assistant 消息 token 全为 0、没有 assistant part，随后根 Session 又进入 idle，平台只观察终态后可能产生误导性的 `run.succeeded`。
+
+处置规则：
+
+1. 记录失败文件相对路径、公共配置提交/版本、文件 SHA-256 和完整的两条构建诊断；不得把源文件中的密钥或业务内容带入上报材料。
+2. 通过平台公共配置管理定位权威 Git 中的失败工具，回退到最近一次已验证版本，或在开发环境修复并通过工具加载验证后再发布。
+3. `/data/testagent/data/agent-opencode/.configdev/public-<UCID>/` 是逐用户生成投影，不是权威编辑源；禁止在生产机直接删除、改名或修改其中的工具文件。发布公共配置后，按运行管理的标准流程更新或重启受影响用户进程。
+4. 新建 Session 只复现一次，验收日志中不再出现 `errors building`，并且在 `run.succeeded` 前能看到非零 token 或 assistant message part。
+
+如果同一日志还出现 `failed to add snapshot files` 和 `git add --sparse` 的 `unknown option`，这是企业旧版 Git 不支持该参数的独立兼容告警。保留告警并安排 Git 兼容治理，但不能用它替代上面的工具构建首因，也不要因此绕过公共配置发布流程。
 
 再从同一 Java 宿主机检查企业模型网络：
 
@@ -489,6 +511,15 @@ REPLACE_JSON_REQUEST_BODY = {"model":"DeepSeek-V4-Flash-W8A8","messages":[{"role
 
 先测故障会话使用的 provider，再用另一 provider 做对照；`.4` 和 `.114` 都要各自执行。成功条件是持续收到单层 `data:`、无空 `data:`、无 `data:data:`，最后收到单层 `[DONE]`。当前 Java 对非 2xx 和非 SSE 响应会原样透传状态、Content-Type 和错误正文；如果这里收到 4xx/5xx 且正文仍为零字节，保留 headers、字节数和 Java traceId，交 Java 代理/企业模型负责人联合排查。
 
+若 Java 代理返回 `400` 且正文为 0 字节，而同宿主机使用企业批准方式直连同一 9070 上游能够得到 `200 text/event-stream`、有效 chunk 和 `[DONE]`，只能证明网络和上游模型服务可用；同时证明 Java 正式代理链仍有独立配置问题。依次核对：
+
+1. `internal_model_providers` 中故障 `provider_id` 的启用状态、准确模型 ID 和 `base_url`。`base_url` 应停在 OpenAI 兼容 API 根路径，不能已包含 `/chat/completions`，因为 Java 还会追加该 path。
+2. provider 关联的数据库 token 是否为当前有效版本；不得从 shell 历史或诊断文件回填已经暴露的旧 token。
+3. 两台 Java 的供应商内存快照是否已在配置保存后刷新，故障节点实际使用的 provider/token 版本是否一致。
+4. Java 注入的 UCID 和企业上游要求的 header 是否齐全且值域正确。只记录“存在/缺失”和脱敏摘要，不打印真实值。
+
+修正后重新执行 Java 代理测试；只有返回 `200 text/event-stream`、正文大于 0 字节、存在有效单层 `data:` 和 `[DONE]` 才算通过。直连 9070 成功不能替代这项验收。
+
 判断：
 
 - Java 代理测试正常、用户 OpenCode 仍为空：用户进程读取的是旧公共配置或旧注入环境，检查 `/api/provider`、`/api/model` 和用户端口日志；证据确认后只重启受影响用户进程。
@@ -509,7 +540,10 @@ REPLACE_JSON_REQUEST_BODY = {"model":"DeepSeek-V4-Flash-W8A8","messages":[{"role
 | Java API 日志已有完整 responseBody，直连客户端仍为零字节 | 保留 traceId 和 exact JAR SHA，交响应序列化/路由转发负责人；不要用重复 POST 继续探测。 |
 | SSE 直连正常、Nginx 断流 | 查 SSE 禁缓冲、长连接超时和中间网络设备。 |
 | SSE 到达 `run.succeeded` 但没有文本事件 | 查用户 OpenCode 日志、模型流、消息投影和 `[DONE]`。 |
+| 当前会话出现 `prompt_async failed` 和 `errors building .../opencode/tools/*.ts` | 在权威公共配置 Git 中回退或修复该工具并发布，再通过运行管理更新受影响用户进程；禁止修改逐用户生成投影，也无需重新打应用发布包。 |
+| 同时出现 `git add --sparse` 的 `unknown option` | 作为旧 Git 兼容告警单独治理；只有同时出现工具构建错误时，提示中止首因仍是失败工具。 |
 | Java 模型代理正常，只有旧用户 OpenCode 失败 | 在运行管理重启该用户进程，使其重新读取公共配置和逐用户注入环境；不需要重启所有 Java。 |
+| Java 模型代理 `400` 且 0 字节，批准的同机 9070 直连正常 | 核对 provider API 根路径、关联 token、Java 内存快照及 UCID/header；修复后必须以 Java 代理 `200 text/event-stream` 复验。 |
 | 一台模型代理失败 | 修复该节点 Java 快照、公共配置或 9070 网络；用户 binding 不自动迁移，不通过切换 Nginx 掩盖。 |
 | 两台模型代理都返回同一空响应 | 携带两台 headers、traceId、时间和零字节证据交企业模型上游；不提交 token、UCID 或用户提示词。 |
 

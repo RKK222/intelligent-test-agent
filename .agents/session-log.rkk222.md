@@ -5,6 +5,24 @@
 
 ## Entries
 
+### 2026-07-29 - 固化空回答的公共工具构建失败判定
+
+### Why
+- 企业现场原始输出显示全部关键 HTTP/SSE 正文非空，但 assistant token 为 0、没有 message part，平台随后仍产生 `run.succeeded`；继续统称“空报文体”会误导到 Nginx 或模型正文。
+- 精确用户 OpenCode 日志连续复现 `prompt_async failed` 和公共 `auto-call.ts` 的两条构建错误；另有 Java 模型代理 `400` 零字节、同机企业上游直连流式成功这一独立异常。
+
+### What
+- 更新企业空报文体手册，增加公共自定义工具构建失败的明确签名、逐用户投影不可直接修改、权威公共配置回退/修复发布、旧 Git `add --sparse` 告警隔离和恢复验收条件。
+- 增加“Java 代理 400 零字节但 9070 直连正常”的分层判断，要求核对 provider API 根路径、数据库 token、Java 内存快照及 UCID/header，并以正式 Java 代理返回有效 SSE 复验。
+- 加强诊断凭据处置：完整 Bearer/token 一旦进入原始输出、shell 历史或诊断文件，必须立即吊销/轮换并按企业审计要求清理，不得复用或回传。
+
+### How
+- 对照 OpenCode 1.18.4 只读源码确认配置目录的 `tool/tools` 脚本会被扫描并动态加载，单个工具构建失败可在主模型调用前中止整个提示；本地企业公共配置发布 ZIP 不含现场失败的 `auto-call.ts`，说明应从权威公共配置管理定位，而不是重打应用包或修改逐用户生成文件。
+- 对照 Java 内部模型代理转发实现确认其会在 provider `base_url` 后追加 `/chat/completions`，且非 2xx 响应状态和正文按上游返回透传，因此直连上游成功不能证明正式代理配置正确。
+
+### Result
+- 本次只更新排查文档和会话记录，不修改运行代码、生产公共配置、环境文件、HTTP/RunEvent 协议、数据库/Flyway、SQL、generated SDK 或 OpenCode 源码；企业现场仍需完成公共工具回退/修复、凭据轮换和 provider 配置复验后才能确认恢复。
+
 ### 2026-07-29 - 固化企业空报文体逐层排查手册
 
 ### Why
