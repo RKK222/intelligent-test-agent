@@ -625,7 +625,7 @@ docker run --rm -p 8080:8080 \
 curl -fsS http://127.0.0.1:8080/actuator/health
 ```
 
-`DatabaseMigrationRunner` 会在启动时执行 Flyway migration；固定 opencode node yml 配置已作废，应用不再从配置自动写入 `execution_nodes`，历史兼容节点需由数据库已有数据或后续专门初始化流程维护。`TEST_AGENT_MODEL_CATALOG_SOURCE` 仅保留历史兼容，前端模型和供应商目录始终来自用户 opencode server 的公共配置。
+Spring Boot 唯一 Flyway Bean 会在业务 Bean 和 ApplicationRunner 前完成 migration；`DatabaseMigrationCompatibilityCustomizer` 只在已应用 history 命中旧工具盒子版本时追加隔离兼容 location。固定 opencode node yml 配置已作废，应用不再从配置自动写入 `execution_nodes`，历史兼容节点需由数据库已有数据或后续专门初始化流程维护。`TEST_AGENT_MODEL_CATALOG_SOURCE` 仅保留历史兼容，前端模型和供应商目录始终来自用户 opencode server 的公共配置。
 
 `ScheduledTaskRegistry` 只维护 handler 内存映射，不同步 PostgreSQL，应用内没有 `ScheduledTaskRunner`。Admin 子上下文 Flyway V1-V6 负责初始化八条周期任务；每个 Java 在本机 Admin readiness 就绪后才启动 executor，并使用平台 advertised host 自动注册地址，注册不带 Linux 亲和。超级管理员在同源 XXL 页面查看/修改/触发/停止周期任务和日志；夜间分发与应用源码清理保持每分钟启用，夜间补偿保持 5 分钟启用，scheduler 历史清理在北京时间 08:00 删除 PostgreSQL 中超过 7 天的旧已结束记录。
 
@@ -654,4 +654,4 @@ ENTERPRISE_UCID=<current-user-unified-auth-id>
 | `TEST_AGENT_EXTERNAL_MODEL_DEFAULT_MODEL` | 空 | 外部模式同步给 opencode 的默认模型，例如 `deepseek-v4-pro`。旧 `TEST_AGENT_BAILIAN_DEFAULT_MODEL` 仍作为兼容兜底。 |
 | `MODELSTUDIO_API_KEY` | 空 | `TEST_AGENT_MODEL_CATALOG_SOURCE=bailian` 时使用的 Model Studio API Key；该模式使用代码内置的 `modelstudio` provider、`https://coding.dashscope.aliyuncs.com/v1` base URL 和 `qwen3.5-plus` 默认模型。 |
 | `TEST_AGENT_INTERNAL_PROXY_API_KEY` | 空 | 内部模型代理鉴权 apikey，Java 校验 opencode 子进程请求并注入用户 opencode server 环境；敏感，不得写入日志或 startCommand 明文。 |
-`DatabaseMigrationRunner` 会在启动时执行 Flyway migration；固定 opencode node yml 配置已作废，应用不再从配置自动写入 `execution_nodes` 作为兼容 Run 路由来源。启用用户进程模型后，`BackendJavaProcessLifecycleRunner` 会在启动和拓扑变化时写入 `linux_servers`、`backend_java_processes`，并每 5 秒按 `linuxServerId` 写入 Redis Java 快照、服务器资源指标历史和 JVM 指标历史；`backendProcessId` 仅表示当前 Java 实例和拓扑连接字段，不再作为 Java 心跳或 JVM 历史的唯一键；`opencode-manager` WebSocket 注册会保留容器、manager 和连接持久拓扑，`managerHeartbeat` 每 5 秒经 WebSocket 写入 Redis manager 快照和容器资源指标历史，latest snapshot TTL 为 10 秒，历史指标保留近 48 小时。
+Spring Boot 唯一 Flyway Bean 会在启动早期完成 migration；历史工具盒子版本的解析由 `DatabaseMigrationCompatibilityCustomizer` 在 Flyway validate 前选择，不使用乱序迁移。固定 opencode node yml 配置已作废，应用不再从配置自动写入 `execution_nodes` 作为兼容 Run 路由来源。启用用户进程模型后，`BackendJavaProcessLifecycleRunner` 会在启动和拓扑变化时写入 `linux_servers`、`backend_java_processes`，并每 5 秒按 `linuxServerId` 写入 Redis Java 快照、服务器资源指标历史和 JVM 指标历史；`backendProcessId` 仅表示当前 Java 实例和拓扑连接字段，不再作为 Java 心跳或 JVM 历史的唯一键；`opencode-manager` WebSocket 注册会保留容器、manager 和连接持久拓扑，`managerHeartbeat` 每 5 秒经 WebSocket 写入 Redis manager 快照和容器资源指标历史，latest snapshot TTL 为 10 秒，历史指标保留近 48 小时。

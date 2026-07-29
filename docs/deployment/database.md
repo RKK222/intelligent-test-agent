@@ -1136,7 +1136,16 @@ XXL MySQL 的独立 migration `xxl-job/db/migration/V5__schedule_night_execution
 
 ## 后续 migration 版本规则
 
-V18 及以前保留既有数字版本，已在本地或共享库执行过的 migration 禁止删除、重命名或改写。V18 之后新增 migration 必须使用 `VyyyyMMddHHmmss__description.sql`，时间戳按开发者创建迁移时的本地时间确定；多人并行开发时不得再抢占 `V19`、`V20` 这类顺序数字版本。提交前需运行持久化模块 migration 命名测试，确认版本唯一、历史已落库 migration 仍可解析且时间戳规则生效。
+V18 及以前保留既有数字版本，已在共享或稳定数据库执行过的 migration 禁止删除、重命名或改写。V18 之后新增 migration 必须使用 `VyyyyMMddHHmmss__description.sql`，开发分支创建时可先使用本地时间作为候选版本；多人并行开发时不得再抢占 `V19`、`V20` 这类顺序数字版本。提交前需运行持久化模块 migration 命名测试，确认版本唯一、历史已落库 migration 仍可解析且时间戳规则生效。
+
+14 位时间戳只能降低同号冲突，不能保证多个分支按相同顺序合并和部署。多人或多分支同时增加 migration 时，发布集成人必须执行以下门禁：
+
+1. 以本次所有目标环境 `flyway_schema_history` 的最高已执行版本为发布基线，同时列出自上次已部署提交以来所有待合并 migration，不能只检查自己分支的文件名。
+2. 尚未进入任何共享或稳定数据库的 migration 可以在合并前统一调整候选时间戳；最终版本必须彼此严格递增，并全部高于发布基线。版本顺序应表达依赖顺序，不以提交先后或谁先部署为准。
+3. migration 一旦进入任何共享或稳定数据库即视为不可变。若不同环境已经形成版本分叉，立即停止合并和发布，先盘点各环境历史并制定显式兼容方案；禁止通过 `SPRING_FLYWAY_OUT_OF_ORDER=true`、Flyway `repair` 或手工修改 `flyway_schema_history` 让校验表面通过。
+4. 正式打包前必须用真实数据库先迁移到已部署最高版本，再用默认 Flyway 配置升级到当前 HEAD，覆盖“旧包已运行、新包首次启动”的现场路径；只验证空库全量建库不算通过。
+
+多台 Java 对同一套、已排好序的 migration 并发启动由 Flyway schema history 锁负责互斥，不是这里的问题；这里防的是不同开发者把较小的新版本晚合入，导致目标库已经执行更大版本后拒绝启动。
 
 ## V20260628100000 通用参数修改日志表
 
@@ -1292,9 +1301,13 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260723145200__add_application_workspace_enabled.sql` 为 `application_workspaces` 增加非空布尔字段 `enabled`，默认值为 `true`。存量记录和新建记录因此默认继续出现在工作空间切换入口；设置页显式停用后只影响切换模板列表，不删除关联版本、个人工作区、运行态工作区或最近使用记录。
 
-## V20260727203500 工具盒子点击跟踪
+## V20260727203500 / V20260728160800 工具盒子点击跟踪兼容
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V20260727203500__create_toolbox_click_tracking.sql` 新增三个生产业务表，不写工具目录、测试点击或演示数据。目录继续由版本化 classpath JSON 管理。
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260728160800__create_toolbox_click_tracking.sql` 新增三个生产业务表，不写工具目录、测试点击或演示数据，目录继续由版本化 classpath JSON 管理。该版本位于企业已发布 `V20260728160000` 之后，表和索引使用 `IF NOT EXISTS`：企业顺序基线与空库由本版本建表；已经由旧版本建表的数据库执行本版本时幂等收敛。
+
+历史测试库曾在运行态开启乱序迁移时执行 `V20260727203500`，形成了与企业顺序基线不同的 Flyway history。旧脚本以原始字节保存在 `backend/test-agent-persistence/src/main/resources/db/migration-compat/toolbox/V20260727203500__create_toolbox_click_tracking.sql`，用于保持既有 checksum；`DatabaseMigrationCompatibilityCustomizer` 在 Spring Boot 创建唯一 Flyway Bean 时通过 `info().applied()` 判断该版本是否已执行，仅命中时追加兼容 location。未执行旧版本的企业基线和空库看不到该 migration，不会产生低版本待执行项。
+
+两条升级路径都使用 Flyway 默认顺序模式，不执行 `repair`，不手工修改 `flyway_schema_history`。`DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 使用真实 Spring Boot Flyway 初始化和 PostgreSQL 分别验证“企业 `V20260728160000` 基线未执行旧版本”和“旧 `V20260727203500` 已应用”两套历史升级到当前 HEAD；`FlywayMigrationNamingTest` 固定旧脚本 SHA-256，防止后续删除或改写。
 
 ### `toolbox_tool_click_events`
 

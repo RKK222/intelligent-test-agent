@@ -2753,3 +2753,28 @@
 
 - 企业探针现在能正确区分“上一轮工具输出”和“本轮续写提示”，不会把已成功恢复的 thread 误报为续写失败。
 - 真实 `.114` 节点尚未用新 worker 镜像重跑完整 E2E；新包加载后仍须先执行宿主检查，只有最终输出 `Codex whitebox host compatible` 才能继续部署。无 API、事件、数据库、性能、安全策略、生产门面、generated SDK、OpenCode 源码或环境配置变更。
+
+### 2026-07-29 - 兼容工具盒子分叉迁移历史并恢复三服务
+
+### Why
+
+- 本机测试库已经执行旧工具盒子 `V20260727203500`，当前企业顺序链只保留改名后的 `V20260728160800`，Spring Boot 自动 Flyway 在业务 Runner 前校验并拒绝启动。
+- 旧 `DatabaseMigrationRunner` 与 Boot 自动 Flyway 重复执行 migration，且 Java 与 `application-test.yml` 都启用了乱序模式，不符合已部署 migration 不可变和默认顺序升级规则。
+
+### What
+
+- 用 Spring Boot `FlywayConfigurationCustomizer` 替换重复的 ApplicationRunner 迁移器；在唯一 Flyway Bean 校验前读取已应用 history，仅命中旧工具盒子版本时追加隔离 compatibility location。
+- 旧脚本按原始字节和 checksum 保存在 `db/migration-compat/toolbox`；当前 `V20260728160800` 的建表和索引改为幂等，使旧历史与企业顺序基线都收敛到同一结构。
+- 删除 Java 和 test profile 的 `outOfOrder`，并同步 app/persistence/backend README、包说明、数据库与后端部署文档和后端数据规范。
+
+### How
+
+- 真实 Spring Boot Flyway 初始化 + PostgreSQL 16 Testcontainers 覆盖企业 `V20260728160000` 基线和旧版本已应用历史；旧脚本 SHA-256 固定为 `1bb00e2aec40e1eaf286e5351e474413fc5dba860b2bbe3a9b5b48c8ef615ec6`。
+- 迁移命名、H2/PostgreSQL 工具点击 Repository、Boot 双历史和内存参数 Runner 共 11 项测试通过；JDK 25 后端 20 模块生产打包通过。
+- 使用未修改的 `.env.test` 和 test profile 完整重启 backend、opencode-manager、frontend；health/readiness 均为 `UP`，前端 3000 与登录 CORS 正常，manager WebSocket 已连接并恢复用户进程。
+
+### Result
+
+- 本机旧 history 在 Boot validate 前成功解析，按默认顺序执行 `V20260728160800` 和后续待执行 migration 后启动完成；未清空数据库，未执行 `repair`、乱序迁移或手工修改 `flyway_schema_history`。
+- 未变更 HTTP API、RunEvent/SSE、权限、安全、generated SDK、OpenCode 源码或环境配置；只调整数据库迁移兼容装配、工具盒子幂等 migration、测试和稳定文档。
+- 用户把本地提交 mixed reset 到 `origin/main` 后仍保留了大量既有未提交改动；本次提交只暂存迁移兼容相关内容，其余工作树改动不覆盖、不丢弃。

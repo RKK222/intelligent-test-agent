@@ -1,7 +1,7 @@
 # test-agent-persistence
 
 - `V20260723145200__add_application_workspace_enabled.sql` 为应用工作空间配置增加默认启用的 `enabled` 字段；配置管理 MyBatis XML 负责该字段的查询、新增和更新，未新增 JDBC SQL。
-- `V20260727203500__create_toolbox_click_tracking.sql` 新增工具盒子永久点击明细、工具累计和用户/工具 30 秒窗口状态三张表；删除用户时明细匿名化、窗口状态级联删除，累计保留，不写生产演示数据。
+- `V20260728160800__create_toolbox_click_tracking.sql` 新增工具盒子永久点击明细、工具累计和用户/工具 30 秒窗口状态三张表；表和索引幂等兼容已执行旧版本的历史库。旧 `V20260727203500` 原文只保存在 `db/migration-compat/toolbox`，由 app 启动装配按已应用历史选择，不对企业顺序基线或空库可见；删除用户时明细匿名化、窗口状态级联删除，累计保留，不写生产演示数据。
 - `V20260728103000__create_app_source_snapshot_tables.sql` 新增应用源码 slot、不可变 snapshot、服务器 replica、operation/step、cleanup 和 recent 表，结构化选择使用 PostgreSQL JSONB；snapshot 在数据库约束 `expires_at = accepted_at + 1..72` 整小时且索引摘要必须为 64 位十六进制；cleanup 到 operation/snapshot 的外键为 `DEFERRABLE INITIALLY DEFERRED`，并初始化只读 `OPENCODE_APP_SOURCE_ROOT=${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/appsource/`。
 - `V20260728210000__index_in_flight_app_source_operations.sql` 为 dispatcher 周期恢复增加 `(status, accepted_at, operation_id)` 索引，使 `PENDING/RUNNING` stranded 扫描不随历史终态 operation 全表增长；迁移只新增索引，不写业务数据。
 
@@ -196,7 +196,7 @@
 
 ## 后续 AI 编码指引
 
-新增表结构、Repository、数据库映射和 migration 时改这里。V18 之后新增 migration 文件名必须使用 `VyyyyMMddHHmmss__description.sql`，时间戳按提交者创建迁移时的本地时间确定，不再使用顺序数字版本。不要把任务状态机或 HTTP API 编排逻辑放进本模块。
+新增表结构、Repository、数据库映射和 migration 时改这里。V18 之后新增 migration 文件名必须使用 `VyyyyMMddHHmmss__description.sql`，开发分支先使用创建时的本地时间作为候选版本，不再使用顺序数字版本。多人或多分支合并、打企业包前必须由发布集成人对照目标库最高 `flyway_schema_history` 和本次全部新 migration 统一排序：尚未进入共享库的候选版本可调整，但最终版本必须严格递增且全部高于已部署基线；已在任何共享或稳定库执行过的文件禁止删除、改名或改写。必须验证真实数据库从已部署基线按默认顺序升级，禁止用 `outOfOrder`、`repair` 或手改历史表绕过。不要把任务状态机或 HTTP API 编排逻辑放进本模块。
 Flyway migration 只能承载表结构变更、历史数据兼容迁移和生产必需的基础字典/系统参数；禁止新增写入测试、演示、个人开发或环境专属数据的 seed migration。测试数据应放在 `test-agent-test-support`、测试 fixture、mock 数据或显式本地开发脚本中。
 新增或修改关系型 SQL 必须新增/调整 `mybatis/*.xml` 与 `com.enterprise.testagent.persistence.mybatis` 内部 mapper，不能继续扩展 `Jdbc*Repository` 或使用 MyBatis 注解 SQL；存量 JDBC 仓储后续按触点分批迁移。
 JSON payload/capabilities 当前以文本列保存，未来切换 PostgreSQL JSONB 必须同步兼容策略和测试。

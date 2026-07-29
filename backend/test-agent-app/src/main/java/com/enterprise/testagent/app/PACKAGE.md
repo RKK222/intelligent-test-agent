@@ -16,8 +16,8 @@
 
 - `TestAgentApplication`：Spring Boot 启动类，强制 `WebApplicationType.REACTIVE`、扫描后端组件并统一 `Asia/Shanghai` 时区。
 - `config.TestAgentRuntimeProperties`：运行时配置绑定。
-- `config.DatabaseMigrationRunner`：运行态 Flyway migration 入口。
-- `config.CommonParameterMemoryStartupRunner`：紧随 Flyway migration 严格加载显式 JVM 内存通用参数，早于 scheduler 等业务 Runner。
+- `config.DatabaseMigrationCompatibilityCustomizer`：Spring Boot Flyway 初始化期的历史分叉兼容装配；只对已执行旧工具盒子版本的数据库追加隔离解析路径。
+- `config.CommonParameterMemoryStartupRunner`：Boot Flyway initializer 完成后严格加载显式 JVM 内存通用参数，早于 scheduler 等业务 Runner。
 - `config.RuntimeJsonConfig`：应用运行态共享 Jackson ObjectMapper 配置。
 - `config.RedisHealthIndicator`：Redis 必需依赖健康检查。
 

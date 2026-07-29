@@ -5,6 +5,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -16,6 +20,10 @@ class FlywayMigrationNamingTest {
 
     private static final Pattern MIGRATION_FILE = Pattern.compile("^V([^_]+)__(.+)\\.sql$");
     private static final Pattern TIMESTAMP_VERSION = Pattern.compile("^\\d{14}$");
+    private static final String APPLIED_TOOLBOX_COMPATIBILITY_MIGRATION =
+            "V20260727203500__create_toolbox_click_tracking.sql";
+    private static final String APPLIED_TOOLBOX_COMPATIBILITY_SHA256 =
+            "1bb00e2aec40e1eaf286e5351e474413fc5dba860b2bbe3a9b5b48c8ef615ec6";
     private static final List<String> APPLIED_LEGACY_SEED_MIGRATIONS = List.of(
             "V10__seed_fcoss_application.sql",
             "V13__seed_fcoss_more_workspaces.sql");
@@ -54,13 +62,32 @@ class FlywayMigrationNamingTest {
                 .doesNotContain("V10__add_encrypted_aes_key_to_user_ssh_keys.sql");
     }
 
+    @Test
+    void appliedToolboxCompatibilityMigrationRemainsByteExact()
+            throws IOException, NoSuchAlgorithmException {
+        Path migration = locateResourceDir("db/migration-compat/toolbox")
+                .resolve(APPLIED_TOOLBOX_COMPATIBILITY_MIGRATION);
+
+        assertThat(migration).exists();
+        String sha256 = HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(migration)));
+        assertThat(sha256)
+                .as("Applied toolbox compatibility migration must keep its original Flyway checksum content")
+                .isEqualTo(APPLIED_TOOLBOX_COMPATIBILITY_SHA256);
+    }
+
     private static List<String> migrationFileNames() throws IOException {
-        Path migrationDir = locateMigrationDir();
+        List<String> fileNames = new ArrayList<>();
+        fileNames.addAll(migrationFileNames(locateResourceDir("db/migration")));
+        fileNames.addAll(migrationFileNames(locateResourceDir("db/migration-compat/toolbox")));
+        return fileNames.stream().sorted().toList();
+    }
+
+    private static List<String> migrationFileNames(Path migrationDir) throws IOException {
         try (var stream = Files.list(migrationDir)) {
             return stream
                     .map(path -> path.getFileName().toString())
                     .filter(name -> name.startsWith("V") && name.endsWith(".sql"))
-                    .sorted()
                     .toList();
         }
     }
@@ -68,16 +95,17 @@ class FlywayMigrationNamingTest {
     /**
      * Maven 可能从 backend 根目录或模块目录执行测试；这里按两种入口定位源码 migration。
      */
-    private static Path locateMigrationDir() {
+    private static Path locateResourceDir(String relativePath) {
         Path cwd = Path.of("").toAbsolutePath();
         List<Path> candidates = List.of(
-                cwd.resolve("src/main/resources/db/migration"),
-                cwd.resolve("test-agent-persistence/src/main/resources/db/migration"),
-                cwd.resolve("backend/test-agent-persistence/src/main/resources/db/migration"));
+                cwd.resolve("src/main/resources").resolve(relativePath),
+                cwd.resolve("test-agent-persistence/src/main/resources").resolve(relativePath),
+                cwd.resolve("backend/test-agent-persistence/src/main/resources").resolve(relativePath));
         return candidates.stream()
                 .filter(Files::isDirectory)
                 .findFirst()
-                .orElseThrow(() -> new IllegalStateException("Cannot locate Flyway migration directory from " + cwd));
+                .orElseThrow(() -> new IllegalStateException(
+                        "Cannot locate Flyway migration resource directory from " + cwd + ": " + relativePath));
     }
 
     private static String versionOf(String fileName) {

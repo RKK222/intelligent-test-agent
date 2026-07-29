@@ -11,11 +11,11 @@ import org.springframework.stereotype.Component;
 /**
  * 数据库迁移完成后严格加载本 Java 进程的显式内存通用参数。
  *
- * <p>项目使用 {@link DatabaseMigrationRunner} 在 ApplicationRunner 阶段执行 Flyway，
- * 因此这里必须紧随迁移运行，并早于 scheduler 等默认业务 Runner。
+ * <p>Spring Boot Flyway initializer 在 ApplicationRunner 之前完成迁移；这里保持最高优先级，
+ * 确保内存参数早于 scheduler 等默认业务 Runner 加载。
  */
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE + 1)
+@Order(Ordered.HIGHEST_PRECEDENCE)
 public class CommonParameterMemoryStartupRunner implements ApplicationRunner {
 
     private final CommonParameterMemoryRegistry registry;

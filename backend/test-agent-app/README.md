@@ -32,7 +32,7 @@
 - `TestAgentApplication`：Spring Boot 启动类，强制 Reactive 并把 JVM 默认时区统一为 `Asia/Shanghai`。
 - XXL Admin lifecycle/health、Servlet 子上下文和 executor 由 `test-agent-xxl-job-integration` 装配；app 只提供配置与最终包依赖。
 - `config.TestAgentRuntimeProperties`：运行时配置绑定。
-- `config.DatabaseMigrationRunner`：启动时执行 `classpath:db/migration`，确保空库先完成 Flyway migration；`CommonParameterMemoryStartupRunner` 紧随迁移严格加载显式 JVM 内存通用参数，再进入 scheduler 等业务 Runner。
+- `config.DatabaseMigrationCompatibilityCustomizer`：在 Spring Boot 唯一 Flyway Bean 校验前读取已应用历史；仅当数据库已经执行旧工具盒子 `V20260727203500` 时追加其隔离兼容 location，正常企业基线和空库只加载主 migration，始终保持默认顺序模式。`CommonParameterMemoryStartupRunner` 在 Boot Flyway initializer 完成后以最高 Runner 优先级加载显式 JVM 内存通用参数。
 - `config.OpencodeManagerControlConfig`：绑定 manager 控制面 token，解析稳定服务器身份和 advertised host，按 advertised host 与 `server.port` 派生后端实例直连地址，提供 `SYS_DATA_ROOT_DIR/.serverid/.serverhost` 路径解析器、5 秒 Java 心跳、10 秒 Redis 快照 TTL 和命令超时；启动时注册后端实例心跳，并把服务器身份与可访问地址写入 `.serverid/.serverhost` 供 Go manager 读取，本地和生产都走 manager WebSocket 控制面。
 - `config.RedisHealthIndicator`：基于 Spring 标准 `spring.data.redis.*` 的运行态 Redis 健康检查。
 - `config.RuntimeJsonConfig`：应用运行态共享 Jackson 配置。
@@ -65,6 +65,7 @@
 - `RedisHealthIndicatorTest` 覆盖 Redis 必需依赖的 TCP 健康检查。
 - `LoggingFrameworkBindingTest` 覆盖运行态使用 Log4j2 作为 SLF4J 实际绑定。
 - `WebClientConfigTest` 覆盖运行态提供可构建的 `WebClient.Builder`。
+- `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 使用真实 Spring Boot Flyway 初始化和 PostgreSQL 分别验证企业顺序基线、旧工具盒子已应用历史都能升级到当前版本，且均未启用 `outOfOrder`。
 - `TestAgentApplicationTest` 覆盖即使 classpath 含 Servlet 依赖，平台主应用仍强制为 Reactive 并使用北京时间；integration 模块覆盖 Admin 独立端口、真实 MySQL Flyway、SSO 与故障退避。
 
 ## 允许依赖
@@ -83,6 +84,6 @@
 
 ## 后续 AI 编码指引
 
-新增可部署启动、profile、migration runner、health contributor、日志或运行装配时才改本模块。新增 API 先放 `test-agent-api`；新增业务逻辑先判断归属到 workspace-management、opencode-runtime、system-management 或 integration，没有合适工程时按业务新建 Maven module。
+新增可部署启动、profile、migration customizer、health contributor、日志或运行装配时才改本模块。新增 API 先放 `test-agent-api`；新增业务逻辑先判断归属到 workspace-management、opencode-runtime、system-management 或 integration，没有合适工程时按业务新建 Maven module。
 
 运行态安全、鉴权、限流、CORS、API URL 和事件流变化必须同步 `docs/standards/security.md`、`docs/api/http-api.md`、`docs/api/event-stream.md` 和相关模块 README/PACKAGE。

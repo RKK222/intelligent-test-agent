@@ -23,8 +23,7 @@ class CommonParameterMemoryStartupRunnerTest {
 
         verify(registry).loadOnStartup();
         assertThat(OrderUtils.getOrder(CommonParameterMemoryStartupRunner.class))
-                .isEqualTo(Ordered.HIGHEST_PRECEDENCE + 1)
-                .isGreaterThan(OrderUtils.getOrder(DatabaseMigrationRunner.class))
+                .isEqualTo(Ordered.HIGHEST_PRECEDENCE)
                 .isLessThan(0);
         assertThat(SmartInitializingSingleton.class.isAssignableFrom(CommonParameterMemoryRegistry.class))
                 .isFalse();

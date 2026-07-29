@@ -193,6 +193,8 @@ mvn test
 
 镜像构建、生产/测试 profile、dotenv、连接池和外部依赖配置见 `docs/deployment/backend.md`。
 
+平台数据库由 Spring Boot 唯一 Flyway Bean 按默认顺序迁移。工具盒子存在“旧 `V20260727203500` 已执行”和“企业基线未执行旧版本”两套历史：启动装配只在 history 已命中旧版本时追加隔离兼容 location；正常基线和空库只执行当前 `V20260728160800`，不使用 `outOfOrder`、`repair` 或手工历史表修改。
+
 ## 后续 AI 编码指引
 
 - 新增可部署入口只允许放在 `test-agent-app`。
