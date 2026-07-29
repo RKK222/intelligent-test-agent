@@ -1189,3 +1189,17 @@
   - 前端根 Vitest 为 104 files / 1698 passed / 1 skipped，全 workspace typecheck、生产 build 通过；应用源码相关 Chromium/mobile Playwright 22/22 通过。`tools/verify-ai-docs.sh`、`git diff --check` 和冲突标记检查通过。
 - Result:
   - 当前 `main` 同时包含远端白盒分析、应用 Git 刷新等既有成果和完整应用源码快照实现，已具备普通非强制推送条件；本次整合未新增业务 API、事件、数据库、权限或环境配置变更。
+
+### 2026-07-29 - 回退前端隐式 Tool 环境上下文注入
+
+- Why:
+  - 提交 `ad0bfdc000`、`dfd34a48f9`、`a3876d2395` 在普通用户 Prompt 中隐式注入应用、版本、需求子条目和强制 Tool 调用规则，并通过 `<env_context>` 在消息展示层隐藏；复核确认版本 ID 解析、模糊触发、定时任务不一致和选区正文回显均存在风险，用户要求完整回退。
+- What:
+  - 删除 `AgentWorkbench` 中版本格式化、环境前缀构造、子条目提取、Tool 强制规则、调试日志及发送链路注入，恢复直接使用原始用户 Prompt 与既有选区上下文序列化。
+  - 删除 `agent-chat` 对 `<env_context>` 的展示层过滤，并逆向移除 `dfd34a48f9` 同次写入 `.agents/session-log.guojq.md` 的无关 Windows 软链接条目；保留三个提交之后主线的其它改动。
+- How:
+  - 按 `a3876d2395 → dfd34a48f9 → ad0bfdc000` 的逆序核对并应用最小反向补丁，确认相关函数、Tool 名称和标签无残留，`git diff --check` 通过。
+  - 前端全 workspace typecheck、104 个 Vitest 文件（1698 passed / 1 skipped）及生产 build 均通过；测试仅有既有 jsdom Canvas 提示，构建仅有既有大 chunk 警告。
+- Result:
+  - 用户消息不再隐式携带应用/版本/子条目或自动 Tool 调用指令，历史展示也不再识别和隐藏 `<env_context>`；现有工作区附件与选区序列化链路保持不变。
+  - 未修改 HTTP API、RunEvent/SSE、数据库/Flyway、后端、权限、安全、环境配置、generated SDK 或 OpenCode 源码；稳定文档中没有该隐式行为说明，因此无需同步 API/README。

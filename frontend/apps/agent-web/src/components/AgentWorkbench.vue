@@ -6952,98 +6952,6 @@ function toggleWorkspaceViewDirectory(entry: WorkspaceViewEntry) {
   expandedDirectories.value = next;
 }
 
-/**
- * 将版本号格式化为 "xxxx年x月"，如 "20260718" → "2026年7月"。
- */
-function formatVersion(version: string): string {
-  if (!version || version.length !== 8) return version;
-  const year = version.slice(0, 4);
-  const month = parseInt(version.slice(4, 6));
-  return `${year}年${month}月`;
-}
-
-/**
- * 构建环境上下文前缀，注入当前应用ID和版本信息供模型自动提取。
- * 返回 undefined 表示当前未选中应用版本，不注入前缀。
- */
-function buildEnvContextPrefix(): string | undefined {
-  const app = selectedManagedApplication.value;
-  const ws = selectedWorkspace.value;
-  // versionId 优先用 currentVersionFromWorkspace，回退到 workspace.versionId
-  const versionId = selectedVersionId.value || ws?.versionId || undefined;
-  // appId 优先用 selectedAppId，回退到 workspace.appId
-  const appId = selectedAppId.value || ws?.appId || undefined;
-
-  if (!appId) return undefined;
-
-  // 尝试从已加载的版本列表中反查完整版本号
-  let versionStr: string | undefined;
-  if (versionId) {
-    for (const versions of Object.values(versionsByTemplateId.value)) {
-      const version = versions.find((v) => v.versionId === versionId);
-      if (version) {
-        versionStr = formatVersion(version.version);
-        break;
-      }
-    }
-  }
-
-  // 如果版本列表还没加载完，从 versionId（格式如 awv_20260718_xxx）或 workspace 信息中尝试提取
-  if (!versionStr && versionId) {
-    // versionId 可能包含日期信息，尝试提取
-    const dateMatch = versionId.match(/(\d{8})/);
-    if (dateMatch) {
-      versionStr = formatVersion(dateMatch[1]);
-    }
-  }
-
-  const appName = app?.appName || appId;
-  if (!versionStr) return undefined;
-
-  // 从对话上下文中提取子条目ID（格式如 S20260611-000007）
-  const subitemId = extractSubitemIdFromContext();
-
-  const lines = [
-    `<env_context>`,
-    `当前应用信息：`,
-    `- appId: ${appId}`,
-    `- appName: ${appName}`,
-    `- version: ${versionStr}`
-  ];
-  if (subitemId) {
-    lines.push(`- itemNo: ${subitemId}`);
-  }
-  lines.push("");
-  lines.push(`当用户说的内容包含"自动化案例调度"时，你必须调用 auto_call 工具，传入上面的 appName、itemNo 和用户提供的 testCaseDirectory。`);
-  lines.push(`当用户说的内容包含"一体化"时，你必须调用 db_operation_yth 工具，传入上面的 appId 和 version。`);
-  lines.push(`</env_context>`);
-  lines.push("");
-  return lines.join("\n");
-}
-
-/**
- * 从当前对话上下文的文件路径中提取子条目ID。
- * 子条目路径格式：spec/<需求项>/<阶段>/<子条目名称>/...
- * 子条目名称格式：S20260611-000007-子条目中文名，只取 S20260611-000007 部分。
- */
-function extractSubitemIdFromContext(): string | undefined {
-  const items = chatContextStore.items;
-  for (const item of items) {
-    const path = item.path.replace(/\\/g, "/");
-    const parts = path.split("/").filter(Boolean);
-    // spec/<需求项>/<阶段>/<子条目名称>
-    if (parts[0] === "spec" && parts.length >= 4) {
-      const subitemName = parts[3];
-      // 匹配 S + 8位日期 + - + 6位序号
-      const match = subitemName.match(/^(S\d{8}-\d{6})/);
-      if (match) {
-        return match[1];
-      }
-    }
-  }
-  return undefined;
-}
-
 function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   // 历史切换完成前，当前 session 仍可能是上一会话；父层再次设防，避免绕过按钮状态误发 Run。
   if (historySwitchingSessionId.value) {
@@ -7114,22 +7022,8 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   const displayParts = buildPromptParts(prompt, implicitEditorTab, attachments, [...chatContextParts, ...diffContextParts.value], implicitEditorSelection);
   const displayPrompt = prompt.trim() || promptFromParts(displayParts);
   const rawSubmitPrompt = prompt.trim() || displayPrompt;
-  // 注入当前应用和版本环境上下文，供模型在调用工具时自动提取参数
-  const envContext = buildEnvContextPrefix();
-  console.debug("env_context_inject", {
-    component: "AgentWorkbench",
-    action: "buildEnvContextPrefix",
-    hasEnvContext: Boolean(envContext),
-    envContext,
-    selectedAppId: selectedAppId.value,
-    selectedVersionId: selectedVersionId.value,
-    workspaceAppId: selectedWorkspace.value?.appId,
-    workspaceVersionId: selectedWorkspace.value?.versionId,
-    versionsLoaded: Object.keys(versionsByTemplateId.value).length
-  });
-  const promptWithEnv = envContext ? envContext + rawSubmitPrompt : rawSubmitPrompt;
   // 选区文本直接作为结构化 prompt 发送，避免 opencode 将其回放成整文件附件或触发原生文件读取。
-  const submitPrompt = selectionContexts.length > 0 ? serializeChatContexts(promptWithEnv, selectionContexts) : promptWithEnv;
+  const submitPrompt = selectionContexts.length > 0 ? serializeChatContexts(rawSubmitPrompt, selectionContexts) : rawSubmitPrompt;
   // prompt_async 有 parts 时只发送 parts；selection 必须进入 text part，不能只放在顶层 prompt。
   const parts = buildPromptParts(submitPrompt, implicitEditorTab, attachments, [...chatContextParts, ...diffContextParts.value], implicitEditorSelection);
   if (chatContextStore.items.length > 0) {
