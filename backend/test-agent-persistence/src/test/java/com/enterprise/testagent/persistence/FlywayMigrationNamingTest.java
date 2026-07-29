@@ -24,6 +24,12 @@ class FlywayMigrationNamingTest {
             "V20260727203500__create_toolbox_click_tracking.sql";
     private static final String APPLIED_TOOLBOX_COMPATIBILITY_SHA256 =
             "1bb00e2aec40e1eaf286e5351e474413fc5dba860b2bbe3a9b5b48c8ef615ec6";
+    private static final String APPLIED_TOOLBOX_ENTERPRISE_MIGRATION =
+            "V20260728160800__create_toolbox_click_tracking.sql";
+    private static final String APPLIED_TOOLBOX_ENTERPRISE_SHA256 =
+            "777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2";
+    private static final String APPLIED_TOOLBOX_IDEMPOTENT_SHA256 =
+            "e8b21da5fb7a8c286b86ded9c0d12691c7e8b6e5d170dc16c5ff76a044bdcdc8";
     private static final List<String> APPLIED_LEGACY_SEED_MIGRATIONS = List.of(
             "V10__seed_fcoss_application.sql",
             "V13__seed_fcoss_more_workspaces.sql");
@@ -65,21 +71,41 @@ class FlywayMigrationNamingTest {
     @Test
     void appliedToolboxCompatibilityMigrationRemainsByteExact()
             throws IOException, NoSuchAlgorithmException {
-        Path migration = locateResourceDir("db/migration-compat/toolbox")
-                .resolve(APPLIED_TOOLBOX_COMPATIBILITY_MIGRATION);
+        assertMigrationSha256(
+                "db/migration-compat/toolbox",
+                APPLIED_TOOLBOX_COMPATIBILITY_MIGRATION,
+                APPLIED_TOOLBOX_COMPATIBILITY_SHA256);
+    }
 
+    @Test
+    void appliedToolboxCurrentMigrationVariantsRemainByteExact()
+            throws IOException, NoSuchAlgorithmException {
+        assertMigrationSha256(
+                "db/migration",
+                APPLIED_TOOLBOX_ENTERPRISE_MIGRATION,
+                APPLIED_TOOLBOX_ENTERPRISE_SHA256);
+        assertMigrationSha256(
+                "db/migration-compat/toolbox-current-idempotent",
+                APPLIED_TOOLBOX_ENTERPRISE_MIGRATION,
+                APPLIED_TOOLBOX_IDEMPOTENT_SHA256);
+    }
+
+    private static void assertMigrationSha256(
+            String relativeDirectory,
+            String migrationFile,
+            String expectedSha256) throws IOException, NoSuchAlgorithmException {
+        Path migration = locateResourceDir(relativeDirectory).resolve(migrationFile);
         assertThat(migration).exists();
         String sha256 = HexFormat.of().formatHex(
                 MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(migration)));
         assertThat(sha256)
-                .as("Applied toolbox compatibility migration must keep its original Flyway checksum content")
-                .isEqualTo(APPLIED_TOOLBOX_COMPATIBILITY_SHA256);
+                .as("Applied toolbox migration must keep its original Flyway checksum content: %s", migration)
+                .isEqualTo(expectedSha256);
     }
 
     private static List<String> migrationFileNames() throws IOException {
         List<String> fileNames = new ArrayList<>();
         fileNames.addAll(migrationFileNames(locateResourceDir("db/migration")));
-        fileNames.addAll(migrationFileNames(locateResourceDir("db/migration-compat/toolbox")));
         return fileNames.stream().sorted().toList();
     }
 

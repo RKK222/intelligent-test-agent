@@ -3221,3 +3221,25 @@
 ### Result
 
 - 今后 Flyway 企业交付不再以空库或本地启动成功代替存量升级；已执行字节、源码测试与包内资源形成三层校验。禁止 `repair`、`outOfOrder`、手工改历史表或新建平行迁移器的边界已同步到企业部署技能。
+
+### 2026-07-29 - 修复企业工具盒子 Flyway checksum 分叉
+
+### Why
+
+- 企业 `.4` 后台启动日志确认 `V20260728160800` 已执行 checksum 为 `-1966404877`，当前包却携带 checksum `-74327385` 的幂等改写版本，Flyway 因已发布 migration 字节被改动而拒绝启动。
+
+### What
+
+- 将主目录 `V20260728160800` 恢复为企业已执行的原始字节，并把误发幂等版本按原始字节隔离到专用 compatibility location；两份文件分别锁定 SHA-256 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2` 和 `e8b21da5fb7a8c286b86ded9c0d12691c7e8b6e5d170dc16c5ff76a044bdcdc8`。
+- 扩展唯一 `FlywayConfigurationCustomizer`：按 history 中的版本和 checksum 选择原企业版本、旧版本或误发幂等版本；未知 checksum 不兼容、不绕过，继续交由 Flyway 失败关闭。
+- 增加 migration 字节锁定测试和真实 PostgreSQL 四类历史验证，不使用 `repair`、`outOfOrder` 或生产 history 改写。
+
+### How
+
+- JDK 25 下定向执行 `FlywayMigrationNamingTest` 4 项和 `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 5 项，全部通过；完整后端测试首轮仅命中已知的 `RunRuntimeLossConvergenceSchedulerTest` 一秒时序抖动，后续完整重跑未产生新的 Surefire 失败报告。
+- 使用未修改的 `.env.test` 完整重启 backend、opencode-manager、frontend；本机同时存在旧版本与 checksum `-74327385` 的真实 history，Flyway 成功校验 76 个 migration，health/readiness 为 `UP`，前端 3000 返回 200，manager 后续健康探测稳定。
+
+### Result
+
+- 企业原始 checksum `-1966404877`、旧版本历史和误发 checksum `-74327385` 均有明确且字节精确的兼容路径；任何未知分叉仍会阻止启动，避免掩盖生产历史问题。
+- 本次未变更 HTTP API、RunEvent/SSE、数据库结构、性能策略、安全边界、generated SDK、OpenCode 上游源码或 `.env*`；变更仅涉及 Flyway 兼容装配、历史 SQL 归位、测试和会话记录。

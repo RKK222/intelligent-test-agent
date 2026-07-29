@@ -1,6 +1,6 @@
--- 本迁移在首次企业交付前调整到已发布 V20260728160000 之后，避免存量库被 Flyway 判定为乱序。
+-- 当前正式版本位于企业基线之后；IF NOT EXISTS 兼容已执行旧 V20260727203500 的分叉数据库。
 -- 工具点击明细永久保留；删除用户时仅匿名化 user_id。
-create table toolbox_tool_click_events (
+create table if not exists toolbox_tool_click_events (
     event_id varchar(128) primary key,
     tool_id varchar(255) not null,
     source varchar(32) not null,
@@ -13,7 +13,7 @@ create table toolbox_tool_click_events (
 );
 
 -- 累计投影只在首次有效计数时产生，目录中的零点击工具无需占行。
-create table toolbox_tool_click_totals (
+create table if not exists toolbox_tool_click_totals (
     tool_id varchar(255) primary key,
     click_count bigint not null,
     last_counted_at timestamp with time zone not null,
@@ -22,7 +22,7 @@ create table toolbox_tool_click_totals (
 );
 
 -- 同一用户同一工具的最后有效计数时间，用于原子竞争 30 秒窗口。
-create table toolbox_tool_user_click_states (
+create table if not exists toolbox_tool_user_click_states (
     tool_id varchar(255) not null,
     user_id varchar(128) not null,
     last_counted_at timestamp with time zone not null,
@@ -30,11 +30,11 @@ create table toolbox_tool_user_click_states (
     constraint fk_toolbox_click_state_user foreign key (user_id) references users(user_id) on delete cascade
 );
 
-create index idx_toolbox_click_events_tool_time
+create index if not exists idx_toolbox_click_events_tool_time
     on toolbox_tool_click_events(tool_id, clicked_at desc);
-create index idx_toolbox_click_events_user_time
+create index if not exists idx_toolbox_click_events_user_time
     on toolbox_tool_click_events(user_id, clicked_at desc);
-create index idx_toolbox_click_totals_hot
+create index if not exists idx_toolbox_click_totals_hot
     on toolbox_tool_click_totals(click_count desc, last_counted_at desc);
 
 comment on table toolbox_tool_click_events is '工具盒子点击明细，永久保留并以event_id全局幂等';
