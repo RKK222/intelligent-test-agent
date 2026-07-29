@@ -373,7 +373,7 @@ test-agent-config-SENSITIVE-<role>-<node>-<timestamp>.tar.gz.sha256
 
 已有环境升级“用户绑定端口复用与无主进程展示”版本时，身份文件和 manager state 已存在，顺序改为“manager → Java 后端 → 前端”：先逐台更新 worker/manager 并确认 `stopOwned` capability 和心跳恢复，再滚动更新 Java，全部 Java 就绪后最后部署一次前端。混合版本中的未知命令或错误只允许报错并保留原 binding，不得迁移端口；不要在滚动窗口内同时对同一用户执行人工重启与初始化。该版本不变更 `backend.env`、`docker.env`、数据库结构、SSE 或 generated SDK，也不自动处理存量重复/无主进程。
 
-扩容时只在新 Linux 启动一套 Java/worker，将新节点同时加入 `TEST_AGENT_NGINX_BACKENDS` 和 `TEST_AGENT_NGINX_XXL_JOB_ADMINS` 后执行 Nginx 无停机 reload；这两个 Nginx upstream 变量不是 Java 配置，旧 Java 不需要修改环境或重启。当前 `.4 + .114` 双后台交付为每台 worker 发布 `14096-15095` 共 1000 个端口，并要求页面通用参数 `OPENCODE_MANAGER_MAX_PROCESSES=1000`，两者容量一致；其它部署仍按各自节点包配置。manager 异常时优先核对数据根目录、manager token、`.serverid/.serverhost` 和本机端口池。
+扩容时只在新 Linux 启动一套 Java/worker，将新节点同时加入 `TEST_AGENT_NGINX_BACKENDS` 和 `TEST_AGENT_NGINX_XXL_JOB_ADMINS` 后执行 Nginx 无停机 reload；这两个 Nginx upstream 变量不是 Java 配置，旧 Java 不需要修改环境或重启。当前 `.4 + .114` 双后台交付为每台 worker 发布 `14096-15095` 共 1000 个端口坐标；页面全局通用参数 `OPENCODE_MANAGER_MAX_PROCESSES=30` 会分别热推到两台 manager，使每台后台实际最多运行 30 个用户 OpenCode 进程。其它部署仍按各自节点包配置。manager 异常时优先核对数据根目录、manager token、`.serverid/.serverhost` 和本机端口池。
 
 首次部署不要先启动 worker 再修 Java 身份文件；上述 manager 优先顺序只适用于身份文件和 state 已存在的升级。
 

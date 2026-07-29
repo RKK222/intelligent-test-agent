@@ -261,7 +261,7 @@ verify_worker_log_format() {
 }
 
 verify_worker_log_format \
-  'event=manager_config_update status=applied traceId=fixture previousMaxProcesses=20 appliedMaxProcesses=1000 requestedMaxProcesses=1000'
+  'event=manager_config_update status=applied traceId=fixture previousMaxProcesses=20 appliedMaxProcesses=30 requestedMaxProcesses=30'
 verify_worker_log_format 'manager config update applied'
 skip_output="$(PATH="${VERIFY_BIN}:${PATH}" \
   TEST_AGENT_WORKER_LOG_LINE='event=manager_config_update status=applied' \

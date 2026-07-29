@@ -5,6 +5,26 @@
 
 ## Entries
 
+### 2026-07-29 - 重建 Flyway 兼容企业双后台全组件包并提升单机进程上限
+
+### Why
+- 用户要求基于当前代码重打企业完整包，必须携带本次 Flyway 兼容变更、规避早间本地启动暴露的 PostgreSQL 驱动与 WebSocket/CORS 装配问题，并确保 toolbox 不因本机增量指纹误判而缺包。
+- 页面通用参数原值为 `OPENCODE_MANAGER_MAX_PROCESSES=20`；该值会分别热推到两台 manager，因此“两后台各增加 10 个”应改为全局值 `30`，不是扩展 1000 端口池或预创建进程。
+
+### What
+- 双后台稳定文档、企业打包技能和部署夹具统一为每台 worker 继续发布 `14096-15095` 共 1000 个端口坐标、每台 manager 实际上限 30；明确页面保存后同时热推两台在线 manager。
+- 完整升级手册增加 Flyway 发布闸门：上线前只读核对 `flyway_schema_history`，覆盖企业顺序基线和旧测试库 `V20260727203500` 两类历史，首台 `.4` 验证 `V20260728160800`、`V20260728210000` 成功后才允许启动 `.114`；禁止 `outOfOrder`、`repair` 或手改历史表。
+- 使用 `--include-all-components` 重新构建 backend、frontend、programs、`linux/amd64` worker、IT-Tools、OmniTools 和 toolbox，不复用旧 toolbox 组件计划；节点敏感包只从既有固定名外层包复用并由外层封包程序重新规范化。
+
+### How
+- JDK 25 定向运行 Flyway 两套真实 PostgreSQL 历史、migration 命名、通用参数热推和应用源码 WebSocket 测试；API 8 项、persistence 3 项、app 3 项通过。AI 文档、多后台节点、固定名完整包和开发脚本校验通过。
+- 按 `.env.test` / `test` profile 完整重启 backend、opencode-manager、frontend；health/readiness 为 `UP`，前端和 CORS 预检为 200，当前日志没有 PostgreSQL 驱动缺失、构造器注入失败、Flyway 校验失败或应用启动失败，数据库 schema 已到 `20260728210000`。
+- 完整打包后检查应用 JAR 内置 RSA、兼容装配类，persistence JAR 同时包含正式迁移、旧 checksum 兼容脚本和在途恢复索引，`backend/lib` 包含 PostgreSQL 42.7.11；内层与外层校验和、嵌入内层 SHA 一致性均通过。
+
+### Result
+- 全组件构建和固定名双后台外层包预校验通过；本条日志提交后再用 `--zip-only --include-all-components` 重封内层及外层，确保最终交付包包含本次文档和会话记录，最终 SHA-256 在交付结果中给出。
+- 未新增或改写 Flyway migration、业务 API、RunEvent、关系型 SQL、环境配置、generated SDK 或 OpenCode 源码；Mac 为 arm64，Codex 原生 namespace 沙箱仍须在 `.4/.114` 的原生 Linux/amd64 worker 上执行随包探针。
+
 ### 2026-07-29 - 修复本地 worktree 文件树 wildcard Origin
 
 ### Why

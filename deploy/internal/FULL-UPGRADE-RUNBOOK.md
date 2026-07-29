@@ -144,6 +144,29 @@ curl -fsS http://127.0.0.1:8080/actuator/health/readiness
 
 PostgreSQL、外部 MySQL 或当前 Redis 不可达时先处理网络，不进入停机窗口。
 
+### 5.1 Flyway 发布闸门
+
+停机前由数据库管理员在 `122.233.30.147:5432/postgres` 只读查询并留存结果：
+
+```sql
+SELECT installed_rank, version, description, success
+FROM flyway_schema_history
+ORDER BY installed_rank DESC
+LIMIT 20;
+```
+
+本包支持两种既有历史：企业顺序基线没有 `V20260727203500`；早期测试库已经成功执行过
+`V20260727203500__create_toolbox_click_tracking.sql`。应用只在 history 已命中旧版本时加载原始
+checksum 的隔离兼容脚本；正常企业基线看不到该低版本。当前 HEAD 的正式顺序迁移包含
+`V20260728160800__create_toolbox_click_tracking.sql` 和
+`V20260728210000__index_in_flight_app_source_operations.sql`，两者都只做生产必需结构变更。
+
+存在失败记录、checksum 不一致、未知的更高版本或除上述两类之外的历史分叉时停止发布，先制定
+显式兼容方案。不得启用 Flyway `outOfOrder`，不得执行 `repair`，不得删除、重命名、改写 migration
+或手工修改 `flyway_schema_history`。后台必须严格按 `.4` 再 `.114` 的顺序启动：先确认 `.4`
+readiness 正常且上述两个正式版本均为 `success=true`，再部署 `.114`，避免把首台数据库升级失败
+误判为第二台 Java 的普通启动故障。
+
 ## 6. 停止两台 Java，阻断 Redis 写入
 
 当前机器：`122.233.30.4`。
@@ -442,6 +465,12 @@ journalctl -u test-agent-backend --since '-10 min' --no-pager |
 
 成功条件：Java/XXL readiness 通过；`.serverid=test-agent-backend-122-233-30-4`；`.serverhost=122.233.30.4`；worker 端口首尾为 14096/15095，映射数为 1000；`PidsLimit=8192`；无 Redis 认证错误。
 
+继续部署 `.114` 前，再由数据库管理员查询 `flyway_schema_history`：
+
+- `V20260728160800` 和 `V20260728210000` 都必须存在且 `success=true`；
+- 若升级前已有 `V20260727203500`，该记录及 checksum 必须保持不变；未曾执行旧版本的企业库不得新增该记录；
+- `.4` 日志不得出现 `FlywayValidateException`、`Validate failed`、`ClassNotFoundException: org.postgresql.Driver` 或 `Application run failed`。
+
 ## 14. 部署后台 B `.114`
 
 当前机器：`122.233.30.114`。
@@ -504,8 +533,8 @@ Nginx 配置必须通过，入口返回正常 HTTP 200/30x，且部署入口对�
 ## 16. 页面配置和存量进程重启
 
 1. 超级管理员进入“系统管理 → 配置管理 → 通用参数管理”。
-2. 将全局 `OPENCODE_MANAGER_MAX_PROCESSES` 改为 `1000`。
-3. 保存后进入运行管理，两台 manager 都必须显示 `portStart=14096`、`portEnd=15095`、`maxProcesses=1000`。
+2. 将全局 `OPENCODE_MANAGER_MAX_PROCESSES` 从 `20` 改为 `30`。
+3. 保存后进入运行管理，两台 manager 都必须显示 `portStart=14096`、`portEnd=15095`、`maxProcesses=30`。
 4. 进入“系统管理 → 配置管理 → TestAgent 公共配置管理”，确认 `.4`、`.114` 都已初始化，两台的公共 `opencode.jsonc` 都包含 `includeUsage=false`。
 5. 在运行管理中受控重启存量用户 OpenCode 进程；只重启 Java 不会让已运行子进程重新读取 OpenCode 1.18.4 配置和用户隔离环境。
 6. 现有内部模型供应商会继续使用迁移后的 Token；只有启用多供应商复用 Token 时才需要在页面新增/关联 Token。修改后点击“刷新 Java 内存”并确认两台 Java 都已配置。
@@ -516,7 +545,7 @@ Nginx 配置必须通过，入口返回正常 HTTP 200/30x，且部署入口对�
 2. 首页和系统管理正常。
 3. XXL-JOB 管理页正常打开。
 4. 运行管理能看到 `.4/.114` 两台 Java 和两个 manager。
-5. 两台 manager 都显示 `14096/15095/1000`。
+5. 两台 manager 都显示 `14096/15095/30`。
 6. 新建一个普通用户 OpenCode 进程并完成一次真实模型对话。
 7. 切换另一用户再初始化，确认能按集群负载分配。
 8. 后台无 `NOAUTH`、`WRONGPASS`、Redis 命令不支持、MySQL 或 PostgreSQL 连接错误。
@@ -603,7 +632,7 @@ docker ps -a --filter name=^/<升级前确认的Redis5容器名>$
 
 ## 21. 容量和安全边界
 
-- 每台 worker 映射 14096-15095 共 1000 个端口，与 `OPENCODE_MANAGER_MAX_PROCESSES=1000` 一致；CPU、内存、`PidsLimit=8192`、`nproc=8192`、文件句柄和模型并发都要另行压测。
+- 每台 worker 映射 14096-15095 共 1000 个端口坐标，当前 `OPENCODE_MANAGER_MAX_PROCESSES=30` 会分别限制两台 manager 各运行最多 30 个用户进程；CPU、内存、`PidsLimit=8192`、`nproc=8192`、文件句柄和模型并发都要另行压测。
 - Redis 离线包不含 TLS 证书；防火墙只允许 `.4`、`.114` 和授权运维源访问 6379。
 - 14096-15095 只对受信内网开放，浏览器不直连这些端口。
 - 平台 ZIP 含真实节点密码/token 和 JAR 内置 RSA 私钥，必须按敏感交付物限制读取、传输和留存。

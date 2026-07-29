@@ -68,7 +68,7 @@ Java A <---------------- 互访 8080 ----------------> Java B
 | 每台后台 | `ai-code.sdc.enterprise:9070` | 企业内部模型调用 |
 | Java 后台 | 每台后台 `14096-15095` | 访问本机或目标服务器上的用户 OpenCode 进程；浏览器不直连这些端口 |
 
-两个服务器可以重复使用 `14096-15095`，因为 IP 不同；同一台服务器的宿主机和容器端口必须同号。每台 worker 发布正好 1000 个端口，两台合计提供 2000 个端口坐标；全局 `OPENCODE_MANAGER_MAX_PROCESSES=1000` 与每台端口池容量一致。正式部署不使用 `--network host`、`19070` relay 或额外 model relay。域名和 IP 虽然都由浏览器访问 `9996`，但域名链路已有企业入口把 `9996` 转到实体 Nginx `80`；实体 Nginx 额外监听 `9996` 是为了让 IP 直连，不得删掉原来的 `listen 80`。
+两个服务器可以重复使用 `14096-15095`，因为 IP 不同；同一台服务器的宿主机和容器端口必须同号。每台 worker 发布正好 1000 个端口，两台合计提供 2000 个端口坐标；当前全局 `OPENCODE_MANAGER_MAX_PROCESSES=30` 会分别热推到两台 manager，因此每台实际最多运行 30 个用户 OpenCode 进程。正式部署不使用 `--network host`、`19070` relay 或额外 model relay。域名和 IP 虽然都由浏览器访问 `9996`，但域名链路已有企业入口把 `9996` 转到实体 Nginx `80`；实体 Nginx 额外监听 `9996` 是为了让 IP 直连，不得删掉原来的 `listen 80`。
 
 端口池容量不等于已经验证的并发承载能力。1000 个端口只表示 manager 可分配坐标上限；CPU、内存、Docker `PidsLimit=8192`、`nproc=8192`、文件句柄和外部模型容量仍需上线前压测，不能仅凭端口映射宣称容量达标。
 
@@ -406,7 +406,7 @@ TEST_AGENT_IMAGE_OUTPUT_DIR=/data/testagent/dist
 
 当前 worker 不读取旧的 `TEST_AGENT_BACKEND`，而是读取本机 Java 写出的 `.serverhost` 并结合 `OPENCODE_WORKER_BACKEND_PORT` 建立 manager WebSocket，所以不要恢复旧变量。Nginx 使用前端服务器独立的 `nginx.env`，不在每台 worker 的 `docker.env` 中维护 upstream。
 
-两台 worker 都重建并连接后，超级管理员必须在“系统管理 → 配置管理 → 通用参数管理”把全局 `OPENCODE_MANAGER_MAX_PROCESSES` 改为 `1000`。保存后 Java 会向两台在线 manager 热推；manager 按本机 1000 个端口池裁剪并立即回报心跳。运行管理页两台 manager 的 `portStart/portEnd/maxProcesses` 应分别显示 `14096/15095/1000`。若该参数仍是 `20` 或 `8`，即使已经发布 1000 个端口，实际新建进程上限仍是较小值。
+两台 worker 都重建并连接后，超级管理员必须在“系统管理 → 配置管理 → 通用参数管理”把全局 `OPENCODE_MANAGER_MAX_PROCESSES` 从 `20` 改为 `30`。保存后 Java 会向两台在线 manager 热推；manager 按本机 1000 个端口池裁剪并立即回报心跳。运行管理页两台 manager 的 `portStart/portEnd/maxProcesses` 应分别显示 `14096/15095/30`。若参数仍为 `20`，每台仍只能新建 20 个进程；端口池映射数量不会自动改变实际进程上限。
 
 每台 Java 启动后，本机身份文件分别应为：
 
@@ -527,6 +527,19 @@ grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL
 企业上午已经部署过旧包时，PostgreSQL 中可能已有 `V20260721213000`。本包把尚未交付的夜间 XXL
 迁移固定为更晚的 `V20260722130000`，Flyway 会正常顺序执行；不要在企业环境添加
 `SPRING_FLYWAY_OUT_OF_ORDER=true`，也不要手工修改 `flyway_schema_history`。
+
+本次平台库还包含工具盒子点击跟踪和应用源码在途恢复索引变更。部署前由数据库管理员只读查询
+`flyway_schema_history` 并留存最近 20 条记录：企业顺序基线应由
+`V20260728160800__create_toolbox_click_tracking.sql` 建表；只有早期测试库可能已经执行旧
+`V20260727203500__create_toolbox_click_tracking.sql`，应用会按已应用 history 加载其原始 checksum
+兼容脚本，不会让企业顺序基线看到低版本待执行项。随后
+`V20260728210000__index_in_flight_app_source_operations.sql` 只新增恢复扫描索引。
+
+任一记录失败、checksum 不一致、出现未知更高版本或其它历史分叉时停止发布；不得启用 Flyway
+`outOfOrder`、执行 `repair` 或手工修改历史表。必须先部署 `.4`，确认 readiness 正常且
+`V20260728160800`、`V20260728210000` 均为 `success=true`，再部署 `.114`；`.4` 日志出现
+`FlywayValidateException`、`ClassNotFoundException: org.postgresql.Driver` 或
+`Application run failed` 时不得继续滚动。
 
 外部 MySQL 端口验证通过后，在 `.4` 执行：
 
