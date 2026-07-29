@@ -114,6 +114,8 @@ packages/backend-api -> packages/shared-types
 packages/event-stream-client -> packages/shared-types
 ```
 
+`apps/agent-web` 负责把聊天面板本地失败、停止和完成标记绑定到当前 Session 生命周期：已有 Session 被替换或清空时清理旧标记，历史会话只按自身消息与 Run 状态恢复；空草稿首次生成真实 Session ID 不切断同一轮 Run。
+
 禁止方向：
 
 - `backend-api`、`event-stream-client` 不得依赖页面、工作台或具体业务组件。

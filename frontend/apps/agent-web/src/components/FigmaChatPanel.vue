@@ -2227,9 +2227,12 @@ const visibleQuestions = computed(() => {
 watch(
   () => props.currentSessionId,
   (sessionId, previousSessionId) => {
-    // 空草稿首次落成真实 Session 仍属于同一 root；已有真实 Session 被替换或清空才重置阅读上下文。
+    // 空草稿首次落成真实 Session 仍属于同一 root；已有真实 Session 被替换或清空才重置阅读上下文与终态展示。
     if (previousSessionId && sessionId !== previousSessionId) {
       resetScrollScopesForRootChange()
+      wasStopped.value = false
+      wasCompleted.value = false
+      wasFailed.value = false
     }
   }
 )

@@ -4011,6 +4011,52 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).not.toContain("任务完成");
   });
 
+  it("does not leak a failed terminal marker into another session", async () => {
+    const failedMessages = [{
+      id: "u-session-failed",
+      messageId: "u-session-failed",
+      role: "user" as const,
+      text: "触发失败",
+      createdAt: "2026-07-29T08:00:00.000Z"
+    }];
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        currentSessionId: "session_failed",
+        messages: failedMessages,
+        running: true,
+        runtimeStatus: "RUNNING",
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    await wrapper.setProps({ running: false, runtimeStatus: "FAILED" });
+    expect(wrapper.find(".figma-chat-retry-card").exists()).toBe(true);
+    expect(wrapper.text()).toContain("任务失败");
+
+    await wrapper.setProps({
+      currentSessionId: "session_healthy",
+      messages: [{
+        id: "u-session-healthy",
+        messageId: "u-session-healthy",
+        role: "user",
+        text: "正常会话",
+        createdAt: "2026-07-29T08:01:00.000Z"
+      }],
+      runtimeStatus: undefined
+    });
+    expect(wrapper.find(".figma-chat-retry-card").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("任务失败");
+
+    await wrapper.setProps({
+      currentSessionId: "session_failed",
+      messages: failedMessages,
+      runtimeStatus: "FAILED"
+    });
+    expect(wrapper.find(".figma-chat-retry-card").exists()).toBe(true);
+    expect(wrapper.text()).toContain("任务失败");
+  });
+
   it.each([
     ["SUCCEEDED", "任务完成"],
     ["FAILED", "任务失败"],

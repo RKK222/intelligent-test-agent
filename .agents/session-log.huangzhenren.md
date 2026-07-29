@@ -1218,3 +1218,14 @@
 - Result:
   - 本地后端及整套开发服务可正常启动。未变更 HTTP/WebSocket wire、RunEvent、数据库结构/Flyway、关系型 SQL、性能、generated SDK 或 OpenCode 源码，也未修改任何 `.env*`；单 `*` 仍限定受控本地/测试环境，生产必须使用显式来源。
   - macOS 下 Netty native DNS resolver 加载失败仍会记录既有非阻断 ERROR 并回退系统解析，当前不影响启动与 readiness。
+
+### 2026-07-29 - 隔离聊天会话终态展示
+
+- Why:
+  - `FigmaChatPanel` 在组件级保存失败终态，切换 Session 复用组件时会把失败卡片和页脚泄漏到正常会话。
+- What:
+  - 已建立 Session 身份变化时清理本地失败、停止和完成标记；空草稿首次生成真实 Session ID 保持同一 Run 语义，返回失败历史会话仍按其持久化状态恢复。
+- How:
+  - TDD 红测准确复现跨会话泄漏，最小修复后组件测试 143 passed / 1 skipped；前端全量 104 files / 1699 passed / 1 skipped，全 workspace typecheck 和生产 build 通过。
+- Result:
+  - 跨会话错误展示已隔离；未修改 API、RunEvent、数据库、后端、安全、环境配置、generated SDK 或 OpenCode 源码。
