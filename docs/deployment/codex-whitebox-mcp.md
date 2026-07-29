@@ -49,12 +49,18 @@ Agent 会自动调用本地 MCP，用户不需要手写工具名、cwd 或模型
 
 先按“Java 后端 → programs/worker → 公共配置”的顺序升级。把
 `deploy/internal/codex-whitebox-public.opencode.jsonc.example` 中的 `mcp.code_analysis`
-合并进公共配置仓库 `opencode/opencode.jsonc`，并按企业实际模型填写：
+合并进公共配置仓库 `opencode/opencode.jsonc`。默认使用企业内部 DeepSeek，三个模型参数必须保持
+同组配置：
 
-- `TEST_AGENT_CODEX_PROVIDER_ID`：内部模型供应商路由 ID，例如 `qwen-prod`；
-- `TEST_AGENT_CODEX_MODEL`：该供应商下可靠支持 function calling 的模型；
-- `TEST_AGENT_CODEX_CONTEXT_WINDOW`：模型真实上下文窗口，整数且不小于 4096；
+- `TEST_AGENT_CODEX_PROVIDER_ID=deepseek-prod`：Java 内部模型代理和数据库使用的供应商路由 ID，
+  不是 OpenCode 模型目录中的 `enterprise-deepseek` provider key；
+- `TEST_AGENT_CODEX_MODEL=DeepSeek-V4-Flash-W8A8`：企业 DeepSeek 的准确模型 ID；
+- `TEST_AGENT_CODEX_CONTEXT_WINDOW=65536`：该模型当前登记的真实上下文窗口；
 - `timeout`：默认 `600000` 毫秒。
+
+只有企业供应商配置发生正式变更时，才同时替换以上三个值；不得只改模型名、只改路由键或沿用
+Qwen 的 `131072` 上下文窗口。`deepseek-prod` 必须已在共享数据库启用、配置上游 Token，并完成
+Java 内存刷新。
 
 代理地址、代理密钥和当前用户 `ucid` 不写入应用配置。Java/manager 已为每个用户 OpenCode
 进程注入 `TEST_AGENT_INTERNAL_PROXY_BASE_URL`、`TEST_AGENT_INTERNAL_PROXY_API_KEY` 和

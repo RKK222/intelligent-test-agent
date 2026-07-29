@@ -3179,3 +3179,25 @@
 ### Result
 
 - mixed reset 展开的既有成果已具备重新提交条件，没有发现测试失败、冲突标记、敏感环境文件或未记录的数据库绕过；本次不重写历史提交，也不推送远程。
+
+### 2026-07-29 - 白盒分析 MCP 默认切换企业 DeepSeek
+
+### Why
+
+- 用户要求公共白盒分析 MCP 默认使用企业内部 DeepSeek，现有公共 JSONC 示例和完整替换包仍使用 `qwen-prod / Qwen3.6-27B / 131072`。
+
+### What
+
+- 公共 MCP 默认配置统一改为 Java 代理路由键 `deepseek-prod`、模型 `DeepSeek-V4-Flash-W8A8` 和真实上下文窗口 `65536`；明确 `deepseek-prod` 不能与 OpenCode provider key `enterprise-deepseek` 混用。
+- 同步白盒 MCP 契约测试夹具、部署说明和安全规范；不修改代理地址、密钥、用户 UCID、MCP 工具、Agent 权限或 `approval=never` 边界。
+- 以既有完整公共替换包为底座重打 `deploy/internal/dist/test-agent-public-agents-skills.zip`，只同步包内 `opencode/opencode.jsonc` 和 README 的默认模型说明，其余 Agent、Skill、Tool 与材料保持原样。
+
+### How
+
+- 使用离线 programs runtime 执行 `tools/test-codex-whitebox-mcp.mjs`，4/4 通过；ZIP CRC、包内三项 DeepSeek 配置、README 说明和 SHA-256 校验通过。
+- 新包归档提交为 `f61d3bf060e54d387d12ab71e3630b884184f176`，SHA-256 为 `2065ec162f3d419ae38442aefb15e28fb2c502f93fd79cb963690b25aea1472d`。
+
+### Result
+
+- 企业导入公共完整替换包后，`code_analysis` MCP 默认通过既有 Java 内部模型代理调用企业 DeepSeek；模型切换仍由公共 JSONC 配置表达，没有新增硬编码 provider 分支或平行代理链路。
+- 本次未修改 HTTP API、RunEvent/SSE、数据库/Flyway/SQL、generated SDK、OpenCode 上游源码、环境配置或密钥。

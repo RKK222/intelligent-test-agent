@@ -24,9 +24,9 @@ function configuration() {
     workspace: "/workspace/current",
     proxyBaseUrl: "http://backend:8080/api/internal/platform/opencode-runtime/internal-model-proxy/v1",
     proxyApiKey: "proxy-secret-value",
-    providerId: "qwen-prod",
-    model: "Qwen3.6-27B",
-    contextWindow: 131072,
+    providerId: "deepseek-prod",
+    model: "DeepSeek-V4-Flash-W8A8",
+    contextWindow: 65536,
     ucid: "001177621",
     codexBin: "/programs/codex/bin/codex-official",
   };
