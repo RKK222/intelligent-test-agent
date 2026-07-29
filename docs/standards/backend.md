@@ -128,7 +128,8 @@
 5. 新增表、字段、索引、约束必须有 migration 测试或集成验证；数据迁移脚本必须验证成功路径和关键失败场景；Repository 变更必须验证映射字段、查询条件、分页和排序。
 6. 当前 migration 清单与表结构见 `docs/deployment/database.md`。
 7. MyBatis mapper、行模型和 Repository 实现属于 `test-agent-persistence` 内部细节，业务模块只能依赖 `test-agent-domain` 的 Repository 端口。
-8. 已执行 migration 发生环境分叉时，必须保留旧版本原文与 checksum，并用隔离 compatibility location 和后续幂等 migration 显式收敛；compatibility location 只能在 Flyway 校验前根据已应用 history 选择，未分叉基线和空库不得加载。升级测试必须覆盖每套已存在历史，禁止开启 `outOfOrder`、执行 `repair` 或手工修改历史表。
+8. 已执行 migration 发生环境分叉时，必须保留每个已执行版本的原始字节与 checksum，并用隔离 compatibility location 和后续幂等 migration 显式收敛；不得为了兼容另一套历史，将已发布 SQL 改为 `IF NOT EXISTS` 或改写注释，因为 SQL 幂等不等于 Flyway checksum 兼容。compatibility location 只能在 Flyway 校验前根据已应用 history 选择，未分叉基线和空库不得加载；项目已有兼容装配时必须复用，禁止新建并行迁移器。
+9. Flyway 升级测试必须覆盖空库、已部署企业基线和每套已知分叉历史，历史 migration 的 SHA-256 必须有回归锁定；发布包还必须校验 JAR 内资源字节。禁止开启 `outOfOrder`、执行 `repair` 或手工修改历史表。
 
 ## 测试
 

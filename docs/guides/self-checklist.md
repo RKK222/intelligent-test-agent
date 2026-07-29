@@ -30,6 +30,9 @@
 
 - [ ] 数据库结构变更包含 Flyway migration，并更新 `docs/deployment/database.md`。
 - [ ] Flyway migration 未写入测试、演示、个人开发或环境专属数据；此类数据已放入测试 fixture、`test-agent-test-support`、mock 数据、显式本地开发脚本或人工初始化流程。
+- [ ] 已查询并留存所有目标环境 `flyway_schema_history` 的版本、checksum 和成功状态；已执行 migration 的 SQL、注释、文件名和字节均未改写。
+- [ ] 涉及 Flyway 时已用真实 PostgreSQL 验证空库、已部署企业基线和每套已知分叉历史；未使用 `outOfOrder`、`repair` 或手工改历史表。
+- [ ] 企业打包后已校验最终 JAR/ZIP 内 migration SHA-256 与通过升级测试的源码一致，未用“本地能启动”代替存量升级验证。
 - [ ] 新增或修改关系型数据库 SQL 已通过 MyBatis XML mapper 实现；未新增 JDBC SQL 或 MyBatis 注解 SQL。
 - [ ] 没有硬编码密钥、token、账号或环境特定地址。
 - [ ] 日志不输出密钥、token、个人信息或大段请求体。

@@ -11,6 +11,8 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 
 - 打包机是 Mac，允许联网，用来拉 Maven、pnpm、Docker base image、npm/opencode 包等构建依赖。
 - 企业包以执行命令时的当前本地工作树为源码输入；允许用户明确要交付的未提交改动参与构建。打包前合并已完成的相关分支、记录 `git rev-parse HEAD` 和 `git status --short`、确认没有冲突，不得为打包擅自清理、stash、丢弃本地改动或切换到另一份源码。
+- 企业打包不得只以编译成功或空库启动为准入。只要包含 Flyway 变更，必须先留存目标库的 `version/checksum/success`，验证每套已知历史的真实 PostgreSQL 升级，再检查最终 JAR 内 migration 字节。
+- 已执行 migration 是不可变交付物；把 SQL 改成 `IF NOT EXISTS` 仍会改变 Flyway checksum。历史分叉必须复用现有 `DatabaseMigrationCompatibilityCustomizer` 和隔离 compatibility location，不得新建第二套迁移器，不得执行 `repair`、开启 `outOfOrder` 或手工修改历史表。
 - 企业内部署环境完全不能联网，只能接收 Mac 打好的交付物。
 - 当前现场通过 U 盘把完整交付物导入企业内部中转机；中转机固定交付目录是 `~/Desktop/mimoagent/0709`，不得写成 `/data/0709`。后续 `scp` 从该目录发起；只有 `.20/.4/.114/.2` 等目标服务器的接收目录是 `/data/0709`。
 - Mac 只负责构建交付物。交付物已进入企业内部中转机后，不得再把现场传输步骤描述为“从 Mac scp”。
@@ -36,6 +38,7 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 5. 启动/升级顺序：先 Java，确认 `.serverid/.serverhost`，再 worker。
 6. 验证命令和预期现象。
 7. `opencode-manager` 端口或连接报错时的优先排查点。
+8. 涉及数据库升级时，包含停机前 `flyway_schema_history` 查询、已知 checksum 判定、首台 Java 升级后复查和“失败即停止后续节点”条件。
 
 ## 现场操作说明偏好
 
@@ -99,6 +102,26 @@ deploy/internal/package-release.sh --output-dir /path/to/dist
 
 标准发布 ZIP 与三台节点包齐全后，使用 `deploy/internal/package-two-backend-complete.sh` 生成固定外层完整包。企业内部中转机每次只接收固定名 ZIP 和配套 SHA，不再按日期或版本改变命令。
 内层 ZIP 每次重建后必须重建外层包，并比较当前内层 ZIP 与外层内嵌 ZIP 的 SHA256；不一致时禁止进入企业内部中转机。
+
+## Flyway 打包前强制闸门
+
+只要当前交付相对现网包含数据库变更，在执行企业打包前按以下顺序处理：
+
+1. 从每个目标 PostgreSQL 环境只读导出 `flyway_schema_history` 的 `installed_rank/version/description/checksum/success`，不得只记录最高版本。未取得目标历史时不声称企业包可部署。
+2. 对照源码、上次交付包和 Git 历史。任何已执行 migration 必须保持原始文件名、注释、SQL 和字节；如果需要兼容另一套历史，增加隔离兼容资源并由现有 customizer 按 history 选择，不改主 migration。
+3. 用真实 PostgreSQL 至少验证空库、已部署企业基线和每套已知分叉历史。涉及工具盒子时必须覆盖四类：尚未执行工具盒子迁移的基线、企业 `V20260728160800/-1966404877`、旧 `V20260727203500` 且当前版本未执行、以及 `V20260728160800/-74327385` 过渡历史。
+4. 工具盒子企业正式 `V20260728160800` 的源码 SHA-256 必须为 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`。误改为幂等 SQL 后的 Flyway checksum 是 `-74327385`，它只能作为过渡历史的隔离兼容资源，不能成为主 migration。
+5. 产生正式 JAR 后直接校验包内字节：
+
+```bash
+unzip -p deploy/internal/dist/backend/test-agent-app.jar \
+  BOOT-INF/classes/db/migration/V20260728160800__create_toolbox_click_tracking.sql |
+  shasum -a 256
+```
+
+预期 SHA-256 为 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`。不匹配时删除“可部署”结论，修复源码和测试后重新构建内外层包。
+
+6. 任一目标库出现未知 checksum、失败记录或未知更高版本时停止发布；先制定显式兼容方案，不用 `repair`、`outOfOrder` 或手工改历史表让校验表面通过。
 
 ## 打包产物
 
@@ -184,17 +207,18 @@ bash deploy/internal/configure-single-deployment.sh frontend --nginx-home /data/
 ## 标准部署顺序
 
 1. 中转机在 `~/Desktop/mimoagent/0709` 校验固定名 ZIP/SHA，然后分别 `scp` 到目标服务器 `/data/0709`。
-2. 若现网仍是 Redis 5，先在 `.20` 确认 `net.ipv4.ip_forward=1`，再停 `.4/.114` Java，完成盘点、最终 RDB、可恢复备份和 Redis 7.4.9 升级；原数据目录不删除。Redis 本机验证通过后，必须从 `.4`、`.114` 分别确认 `.20:6379` TCP 可达，任一失败不得启动 Java。
-3. 在 `.4` 执行后台一键入口，内部先启动 Java、写入身份文件，再导入 programs/worker 并启动 manager。
-4. 确认 `.4` Java 写出：
+2. 如果包含 Flyway 变更，停机前由数据库管理员只读查询 `installed_rank, version, description, checksum, success`；对照当前包已验证历史，任一未知值都停止。
+3. 若现网仍是 Redis 5，先在 `.20` 确认 `net.ipv4.ip_forward=1`，再停 `.4/.114` Java，完成盘点、最终 RDB、可恢复备份和 Redis 7.4.9 升级；原数据目录不删除。Redis 本机验证通过后，必须从 `.4`、`.114` 分别确认 `.20:6379` TCP 可达，任一失败不得启动 Java。
+4. 在 `.4` 执行后台一键入口，内部先启动 Java、写入身份文件，再导入 programs/worker 并启动 manager。
+5. 确认 `.4` Java 写出身份文件；若本次包含 Flyway 变更，同时复查 history 和 `.4` 日志，无 checksum/validate 异常后才可继续：
 
 ```bash
 cat /data/testagent/data/.serverid
 cat /data/testagent/data/.serverhost
 ```
 
-5. `.4` 全部通过后在 `.114` 执行后台入口，并确认本机 `.serverid/.serverhost`。
-6. 两台后台通过后，最后在 `.2` 部署前端并 reload Nginx。一键入口已封装下列 worker 操作，只在排障时手工执行：
+6. `.4` 全部通过后在 `.114` 执行后台入口，并确认本机 `.serverid/.serverhost`。
+7. 两台后台通过后，最后在 `.2` 部署前端并 reload Nginx。一键入口已封装下列 worker 操作，只在排障时手工执行：
 
 ```bash
 docker load -i /data/testagent/dist/test-agent-opencode-worker_internal-linux-amd64.tar
@@ -203,7 +227,7 @@ cd /data/testagent/deploy/internal
 ./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env restart
 ```
 
-7. 验证：
+8. 验证：
 
 ```bash
 curl -fsS http://<后端服务器>:8080/actuator/health
@@ -216,6 +240,7 @@ docker logs --tail 120 test-agent-opencode-worker
 
 ## 常见问题提醒
 
+- Java 启动报 `FlywayValidateException` / `Migration checksum mismatch`：立即保持首台失败节点停止，不继续第二台或前端。收集 `journalctl -u test-agent-backend` 和脱敏的 `flyway_schema_history version/checksum/success`，对照包内 migration；不运行 `repair`，不改历史表。
 - `opencode-manager` 报端口配置缺失：不要手工直接跑 `opencode-manager run`；生产用 `opencode-worker-docker.sh`。端口写在 `docker.env` 的 `OPENCODE_WORKER_PORT_START/END`。
 - Redis 部署报 `"--platform" is only supported on a Docker daemon with experimental features enabled`：先确认目标机为 `x86_64`、镜像检查为 `linux/amd64`、没有同名残留容器且数据目录仍只有原 `dump.rdb`；使用当前不带运行期 `--platform` 的 `deploy-redis.sh` 重试，不开启 daemon experimental features，不删除 RDB/AOF，不直接加 `--replace-existing`。
 - Redis 部署报 `can't open config file ... permission denied`：这是 Linux bind mount 读取 0600 宿主机配置的 UID 权限问题，不要把含密码的配置改成 0644；临时将配置复制为 `/data/testagent/redis/config/redis.conf`、设为 `0400` 并赋予镜像 `redis` UID/GID `999:1000` 后用该路径重试。新脚本会在容器内复制配置并用 `setpriv` 切换到 redis 用户，后续无需人工复制。

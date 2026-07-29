@@ -149,22 +149,21 @@ PostgreSQL、外部 MySQL 或当前 Redis 不可达时先处理网络，不进�
 停机前由数据库管理员在 `122.233.30.147:5432/postgres` 只读查询并留存结果：
 
 ```sql
-SELECT installed_rank, version, description, success
+SELECT installed_rank, version, description, checksum, success
 FROM flyway_schema_history
 ORDER BY installed_rank DESC
 LIMIT 20;
 ```
 
-本包支持两种既有历史：企业顺序基线没有 `V20260727203500`；早期测试库已经成功执行过
-`V20260727203500__create_toolbox_click_tracking.sql`。应用只在 history 已命中旧版本时加载原始
-checksum 的隔离兼容脚本；正常企业基线看不到该低版本。当前 HEAD 的正式顺序迁移包含
+工具盒子迁移必须区分四类已知历史：空库/企业基线尚未执行工具盒子迁移；企业库已执行 `V20260728160800` 且 checksum 为 `-1966404877`；早期测试库已执行
+`V20260727203500__create_toolbox_click_tracking.sql` 但尚未执行当前版本；以及少数过渡库已执行 `V20260728160800` 的 checksum `-74327385` 幂等变体。应用只在 history 命中时加载对应的原始字节隔离兼容资源；不得通过改写企业正式 migration 兼容其它库。当前 HEAD 的正式顺序迁移包含
 `V20260728160800__create_toolbox_click_tracking.sql` 和
 `V20260728210000__index_in_flight_app_source_operations.sql`，两者都只做生产必需结构变更。
 
-存在失败记录、checksum 不一致、未知的更高版本或除上述两类之外的历史分叉时停止发布，先制定
+存在失败记录、checksum 不一致、未知的更高版本或上述已知类型之外的历史分叉时停止发布，先制定
 显式兼容方案。不得启用 Flyway `outOfOrder`，不得执行 `repair`，不得删除、重命名、改写 migration
 或手工修改 `flyway_schema_history`。后台必须严格按 `.4` 再 `.114` 的顺序启动：先确认 `.4`
-readiness 正常且上述两个正式版本均为 `success=true`，再部署 `.114`，避免把首台数据库升级失败
+readiness 正常且 `V20260728210000` 为 `success=true`，并确认工具盒子记录仍符合升级前对应的已知类型，再部署 `.114`，避免把首台数据库升级失败
 误判为第二台 Java 的普通启动故障。
 
 ## 6. 停止两台 Java，阻断 Redis 写入
@@ -467,8 +466,8 @@ journalctl -u test-agent-backend --since '-10 min' --no-pager |
 
 继续部署 `.114` 前，再由数据库管理员查询 `flyway_schema_history`：
 
-- `V20260728160800` 和 `V20260728210000` 都必须存在且 `success=true`；
-- 若升级前已有 `V20260727203500`，该记录及 checksum 必须保持不变；未曾执行旧版本的企业库不得新增该记录；
+- `V20260728210000` 必须存在且 `success=true`；企业正式/新建历史中的 `V20260728160800` checksum 必须为 `-1966404877`，过渡历史必须仍为 `-74327385`；
+- 若升级前已有 `V20260727203500` 且没有当前版本，这两项状态及旧版本 checksum 必须保持不变；未曾执行旧版本的企业库不得新增该记录；
 - `.4` 日志不得出现 `FlywayValidateException`、`Validate failed`、`ClassNotFoundException: org.postgresql.Driver` 或 `Application run failed`。
 
 ## 14. 部署后台 B `.114`

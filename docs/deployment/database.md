@@ -1140,10 +1140,11 @@ V18 及以前保留既有数字版本，已在共享或稳定数据库执行过�
 
 14 位时间戳只能降低同号冲突，不能保证多个分支按相同顺序合并和部署。多人或多分支同时增加 migration 时，发布集成人必须执行以下门禁：
 
-1. 以本次所有目标环境 `flyway_schema_history` 的最高已执行版本为发布基线，同时列出自上次已部署提交以来所有待合并 migration，不能只检查自己分支的文件名。
+1. 以本次所有目标环境 `flyway_schema_history` 的全部已执行 `version/checksum/success` 为发布基线，同时列出自上次已部署提交以来所有待合并 migration，不能只检查自己分支的文件名或最高版本。
 2. 尚未进入任何共享或稳定数据库的 migration 可以在合并前统一调整候选时间戳；最终版本必须彼此严格递增，并全部高于发布基线。版本顺序应表达依赖顺序，不以提交先后或谁先部署为准。
-3. migration 一旦进入任何共享或稳定数据库即视为不可变。若不同环境已经形成版本分叉，立即停止合并和发布，先盘点各环境历史并制定显式兼容方案；禁止通过 `SPRING_FLYWAY_OUT_OF_ORDER=true`、Flyway `repair` 或手工修改 `flyway_schema_history` 让校验表面通过。
-4. 正式打包前必须用真实数据库先迁移到已部署最高版本，再用默认 Flyway 配置升级到当前 HEAD，覆盖“旧包已运行、新包首次启动”的现场路径；只验证空库全量建库不算通过。
+3. migration 一旦进入任何共享、稳定或企业数据库即视为字节不可变；SQL 改成幂等形式、只改注释或空白也会改变 checksum，不是兼容方案。已执行文件必须保留原始字节并用 SHA-256 回归锁定。若不同环境已经形成分叉，立即停止合并和发布，先盘点各环境历史，再通过现有 Flyway 兼容装配和隔离 location 制定显式方案；禁止新建第二套迁移器，也禁止用 `SPRING_FLYWAY_OUT_OF_ORDER=true`、Flyway `repair` 或手工修改 `flyway_schema_history` 让校验表面通过。
+4. 正式打包前必须用真实 PostgreSQL 分别模拟空库、已部署企业基线和每套已知分叉历史，再使用默认 Flyway 配置升级到当前 HEAD，覆盖“旧包已运行、新包首次启动”的现场路径；只验证空库全量建库不算通过。
+5. 正式 JAR/ZIP 产生后必须解出其中 migration 计算 SHA-256，与通过上述升级测试的源码比较。包内字节不同、目标库出现未知 checksum，或没有取得目标库 history 时，均不得进入部署。
 
 多台 Java 对同一套、已排好序的 migration 并发启动由 Flyway schema history 锁负责互斥，不是这里的问题；这里防的是不同开发者把较小的新版本晚合入，导致目标库已经执行更大版本后拒绝启动。
 
@@ -1303,11 +1304,11 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 
 ## V20260727203500 / V20260728160800 工具盒子点击跟踪兼容
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V20260728160800__create_toolbox_click_tracking.sql` 新增三个生产业务表，不写工具目录、测试点击或演示数据，目录继续由版本化 classpath JSON 管理。该版本位于企业已发布 `V20260728160000` 之后，表和索引使用 `IF NOT EXISTS`：企业顺序基线与空库由本版本建表；已经由旧版本建表的数据库执行本版本时幂等收敛。
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260728160800__create_toolbox_click_tracking.sql` 新增三个生产业务表，不写工具目录、测试点击或演示数据。该版本已在企业库执行，Flyway checksum 为 `-1966404877`，原始文件 SHA-256 为 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`；主 migration 必须永久保持这组原始字节。不得为兼容其它环境把它改成 `IF NOT EXISTS`，因为这会将 checksum 改成 `-74327385` 并直接阻断企业启动。
 
-历史测试库曾在运行态开启乱序迁移时执行 `V20260727203500`，形成了与企业顺序基线不同的 Flyway history。旧脚本以原始字节保存在 `backend/test-agent-persistence/src/main/resources/db/migration-compat/toolbox/V20260727203500__create_toolbox_click_tracking.sql`，用于保持既有 checksum；`DatabaseMigrationCompatibilityCustomizer` 在 Spring Boot 创建唯一 Flyway Bean 时通过 `info().applied()` 判断该版本是否已执行，仅命中时追加兼容 location。未执行旧版本的企业基线和空库看不到该 migration，不会产生低版本待执行项。
+已知历史共有四类：空库/企业基线尚未执行工具盒子迁移；企业库已执行 `V20260728160800` 且 checksum 为 `-1966404877`；早期测试库已执行 `V20260727203500` 但未执行当前版本；以及曾执行过 checksum `-74327385` 幂等变体的过渡库。旧 `V20260727203500` 原文和误发幂等变体都只能作为原始字节不变的隔离 compatibility 资源保留；`DatabaseMigrationCompatibilityCustomizer` 在 Spring Boot 唯一 Flyway Bean 校验前读取已应用版本和 checksum，只为命中的历史选择对应资源。未知 checksum 不降级、不自动修复，继续由 Flyway 失败关闭。
 
-两条升级路径都使用 Flyway 默认顺序模式，不执行 `repair`，不手工修改 `flyway_schema_history`。`DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 使用真实 Spring Boot Flyway 初始化和 PostgreSQL 分别验证“企业 `V20260728160000` 基线未执行旧版本”和“旧 `V20260727203500` 已应用”两套历史升级到当前 HEAD；`FlywayMigrationNamingTest` 固定旧脚本 SHA-256，防止后续删除或改写。
+四条路径都必须使用 Flyway 默认顺序模式，不执行 `repair`，不手工修改 `flyway_schema_history`。`DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 必须使用真实 Spring Boot Flyway 初始化和 PostgreSQL 覆盖上述四类历史；`FlywayMigrationNamingTest` 必须同时锁定企业主 migration、旧版本兼容资源和误发幂等变体的 SHA-256。企业打包后还要从 `test-agent-app.jar` 解出主 migration，确认 SHA-256 仍为 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`。
 
 ### `toolbox_tool_click_events`
 

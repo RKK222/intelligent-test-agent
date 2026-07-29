@@ -3201,3 +3201,23 @@
 
 - 企业导入公共完整替换包后，`code_analysis` MCP 默认通过既有 Java 内部模型代理调用企业 DeepSeek；模型切换仍由公共 JSONC 配置表达，没有新增硬编码 provider 分支或平行代理链路。
 - 本次未修改 HTTP API、RunEvent/SSE、数据库/Flyway/SQL、generated SDK、OpenCode 上游源码、环境配置或密钥。
+
+### 2026-07-29 - 固化 Flyway 企业交付闸门
+
+### Why
+
+- 为兼容本地旧 `V20260727203500` 而把企业已执行的 `V20260728160800` 改成幂等 SQL，导致企业 checksum 从 `-1966404877` 不匹配为 `-74327385`；既有“已执行 migration 不可改”经验未转化为打包和测试强制门禁。
+
+### What
+
+- 同步 `AGENTS.md`、研发工作流、自检清单、后端数据规范、数据库说明、企业多后台手册与完整升级执行单，明确主 migration 原始字节、四类已知历史和未知 checksum 失败关闭。
+- 更新 `enterprise-offline-deploy` 技能，将目标库 history 留存、真实 PostgreSQL 存量升级、历史 SHA-256 锁定和最终 JAR 内 migration 校验设为企业打包前强制步骤。
+
+### How
+
+- 工具盒子主 migration 锁定 Flyway checksum `-1966404877` 和 SHA-256 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`；`-74327385` 只允许作为隔离兼容变体。
+- 文档门禁要求空库、企业已执行基线、旧版本和误发幂等变体均经真实 PostgreSQL 验证，打包后用 `unzip -p ... | shasum -a 256` 再校验实际 JAR 资源。
+
+### Result
+
+- 今后 Flyway 企业交付不再以空库或本地启动成功代替存量升级；已执行字节、源码测试与包内资源形成三层校验。禁止 `repair`、`outOfOrder`、手工改历史表或新建平行迁移器的边界已同步到企业部署技能。

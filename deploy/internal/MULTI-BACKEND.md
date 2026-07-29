@@ -529,15 +529,14 @@ grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL
 `SPRING_FLYWAY_OUT_OF_ORDER=true`，也不要手工修改 `flyway_schema_history`。
 
 本次平台库还包含工具盒子点击跟踪和应用源码在途恢复索引变更。部署前由数据库管理员只读查询
-`flyway_schema_history` 并留存最近 20 条记录：企业顺序基线应由
-`V20260728160800__create_toolbox_click_tracking.sql` 建表；只有早期测试库可能已经执行旧
-`V20260727203500__create_toolbox_click_tracking.sql`，应用会按已应用 history 加载其原始 checksum
-兼容脚本，不会让企业顺序基线看到低版本待执行项。随后
+`flyway_schema_history` 并留存最近 20 条的 `version/checksum/success`。企业库若已执行
+`V20260728160800__create_toolbox_click_tracking.sql`，其 checksum 必须为 `-1966404877`；只有早期测试库可能已执行旧
+`V20260727203500__create_toolbox_click_tracking.sql`，少数过渡库可能执行过当前版本的 checksum `-74327385` 幂等变体。当前包必须按已应用 history 选择原始字节不变的隔离兼容资源，未知 checksum 必须失败关闭。随后
 `V20260728210000__index_in_flight_app_source_operations.sql` 只新增恢复扫描索引。
 
-任一记录失败、checksum 不一致、出现未知更高版本或其它历史分叉时停止发布；不得启用 Flyway
+除上述已知历史外，任一记录失败、checksum 不一致、出现未知更高版本或其它历史分叉时停止发布；不得启用 Flyway
 `outOfOrder`、执行 `repair` 或手工修改历史表。必须先部署 `.4`，确认 readiness 正常且
-`V20260728160800`、`V20260728210000` 均为 `success=true`，再部署 `.114`；`.4` 日志出现
+`V20260728210000` 为 `success=true`；企业正式/新建历史中的 `V20260728160800` 应为 `-1966404877`，过渡历史保持 `-74327385`，旧 `V20260727203500` 且当前版本原本缺失的历史不得新增当前版本。确认符合对应已知类型后再部署 `.114`；`.4` 日志出现
 `FlywayValidateException`、`ClassNotFoundException: org.postgresql.Driver` 或
 `Application run failed` 时不得继续滚动。
 

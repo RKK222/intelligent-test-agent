@@ -78,8 +78,9 @@
 - `db/migration/V20260718110000__create_reference_repository_replica_tables.sql`：创建引用资产总体状态/服务器副本表及认领、generation 查询索引。
 - `db/migration/V20260718143000__add_reference_repository_operations_and_verification.sql`：增加引用资产操作类型、实际指针可空语义与核验时间。
 - `db/migration/V20260728103000__create_app_source_snapshot_tables.sql`：创建七类应用源码表、JSONB 路径选择、snapshot 整小时过期与十六进制摘要检查、步骤部分唯一索引和 cleanup 延迟外键，并初始化只读应用源码根目录参数。
-- `db/migration/V20260728160800__create_toolbox_click_tracking.sql`：企业顺序基线的工具盒子点击表正式迁移；建表和索引幂等兼容旧历史已存在结构。
+- `db/migration/V20260728160800__create_toolbox_click_tracking.sql`：企业顺序基线的工具盒子点击表正式迁移；保持企业已执行的 `-1966404877` checksum 原始字节。
 - `db/migration-compat/toolbox/V20260727203500__create_toolbox_click_tracking.sql`：已执行旧工具盒子版本的原始 checksum 兼容脚本，只能由 app 根据 Flyway 已应用历史选择加载。
+- `db/migration-compat/toolbox-current-idempotent/V20260728160800__create_toolbox_click_tracking.sql`：曾误发并执行的当前版本 `-74327385` 幂等原文，只能由 app 在 checksum 命中时隔离加载。
 - `db/migration/V20260728210000__index_in_flight_app_source_operations.sql`：为周期恢复增加 status 前导的 operation 排序索引，避免历史终态数据导致每实例全表扫描。
 - 后续可新增 SQL 查询、migration 相关适配、Redis 限流、缓存或运行心跳实现；Run 运行数据面不得新增 PostgreSQL 或 JVM 内存降级实现。
 - 新增 migration 禁止写入测试、演示、个人开发或环境专属数据；这类数据应进入 `test-agent-test-support`、测试 fixture、mock 数据或显式本地开发脚本。

@@ -50,6 +50,8 @@
 2. 前端命令统一通过 Corepack 调用 pnpm（`corepack pnpm lint|typecheck|test|build|e2e`），详见 `docs/standards/frontend.md`。
 3. API、事件、数据库、前端交互改动按对应专题测试规范执行。
 4. 测试失败或未覆盖的风险必须在回复中说明。
+5. Flyway 改动不得只测空库。先留存所有目标环境 `flyway_schema_history` 的 `version/checksum/success`，再用真实 PostgreSQL 分别验证空库、已部署企业基线和每套已知分叉历史。已执行 migration 的原始字节和 checksum 必须由回归测试锁定。
+6. 企业包构建后必须从最终 JAR/ZIP 解出 migration 计算 SHA-256，确认与通过升级测试的源码完全一致。源码测试通过但包内资源未校验时，不得声称可部署。
 
 ## 7. 本地服务重启
 
