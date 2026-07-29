@@ -5,6 +5,23 @@
 
 ## Entries
 
+### 2026-07-29 - 固化企业空报文体逐层排查手册
+
+### Why
+- 企业双后台部署后仍出现“（空报文体）”，此前排查没有形成能区分正常空 GET、异常 HTTP 零字节响应、SSE 空 `data:` 和 Run 成功无 assistant 文本的统一现场执行单。
+
+### What
+- 新增 `deploy/internal/EMPTY-RESPONSE-BODY-TROUBLESHOOTING.md`，按浏览器、`.2` Nginx、`.4/.114` Java、RunEvent SSE、用户 OpenCode 和企业模型代理逐层采证，并固化 package/JAR/lib/frontend SHA、traceId/runId、只读直连对比和重部署停止条件。
+- 在部署总入口、单后台、多后台和 `docs/README.md` 增加索引；排查输出禁止携带 JWT、Cookie、内部代理 key、上游 token、UCID、未脱敏 HAR 和完整用户正文。
+
+### How
+- 复用现有原始输出捕获、统一 API 日志、SSE 日志、运行管理 buildVersion、manager 用户实例日志和固定外层包，不新增诊断 API、脚本或旁路。
+- `tools/verify-ai-docs.sh`、Markdown 围栏/尾随空格检查和 `git diff --check` 通过；当前内外层 ZIP SHA 与嵌入内层 SHA 一致，包内 `test-agent-api/opencode-runtime/event` JAR 与本地 dist SHA 对比命令实测一致。
+
+### Result
+- 手册和逐机命令已完成文档校验；尚未连接企业 `.2/.4/.114`，现场空报文首因仍需按手册取得具体 `traceId/runId/status/bytes` 后判断，不声称故障已修复。
+- 本次仅文档与会话记录，不变更运行代码、HTTP/RunEvent wire、数据库/Flyway、SQL、环境配置、generated SDK 或 OpenCode 源码；现有企业 ZIP 早于本手册生成，二进制未因此变化。
+
 ### 2026-07-29 - 基于新合入会话终态隔离重建企业全组件包
 
 ### Why

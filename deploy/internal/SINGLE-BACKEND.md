@@ -656,6 +656,8 @@ fi
 
 ## 10. 故障检查
 
+浏览器原始输出出现“（空报文体）”、HTTP 响应正文为零字节、SSE 空 `data:` 或 Run 成功但没有 assistant 文本时，先按 [空报文体排查手册](EMPTY-RESPONSE-BODY-TROUBLESHOOTING.md) 保全 `traceId/runId` 并逐层对比；不要先重启、重发 Run 或重新打包。
+
 | 现象 | 检查 |
 |---|---|
 | 浏览器 `ERR_NAME_NOT_RESOLVED` | 在实际浏览器终端执行 `nslookup mimo.sdc.cs.icbc`；名称解析失败需由企业 DNS/入口管理方处理。DNS 不负责端口映射，不能靠把实体 Nginx 改成 `9996` 修复。 |

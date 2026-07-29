@@ -840,6 +840,8 @@ docker exec test-agent-opencode-worker \
 
 ## 10. 故障定位与回滚
 
+浏览器原始输出出现“（空报文体）”、HTTP 响应正文为零字节、SSE 空 `data:` 或 Run 成功但没有 assistant 文本时，先按 [空报文体排查手册](EMPTY-RESPONSE-BODY-TROUBLESHOOTING.md) 保全 `traceId/runId` 并逐层对比；不要先重启、重发 Run 或切换用户 binding。
+
 | 现象 | 排查顺序 |
 |---|---|
 | 已知路由 ID 仍命中错误节点 | 检查浏览器请求头、`TEST_AGENT_NGINX_SERVER_ROUTES`、`nginx -T` 中的 `map` 和专用 upstream；确认映射 endpoint 与该服务器唯一 Java 一致。binding 已变化但静态表未变时先修正表并重新部署前端。 |
