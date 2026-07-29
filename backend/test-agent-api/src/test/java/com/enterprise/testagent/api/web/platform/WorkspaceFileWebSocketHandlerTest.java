@@ -81,6 +81,79 @@ class WorkspaceFileWebSocketHandlerTest {
     private static final Instant NOW = Instant.parse("2026-06-28T00:00:00Z");
 
     @Test
+    void wildcardOriginAllowsValidBrowserOrigin() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
+        when(ticketService.consume("wft_workspace", "http://127.0.0.1:3000"))
+                .thenReturn(workspaceTicket(workspaceId.value()));
+        when(workspaceService.listFiles(workspaceId, "")).thenReturn(List.of());
+        WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                new ObjectMapper().findAndRegisterModules(),
+                "*");
+        FakeWebSocketSession session = FakeWebSocketSession.withOrigin(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace",
+                List.of("""
+                        {"id":"req_1","op":"workspace.list","params":{"workspaceId":"wrk_1234567890abcdef","path":""}}
+                        """),
+                "http://127.0.0.1:3000");
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).singleElement().satisfies(message ->
+                assertThat(message).contains("\"id\":\"req_1\"", "\"type\":\"result\""));
+        verify(workspaceService).listFiles(workspaceId, "");
+    }
+
+    @Test
+    void wildcardOriginStillRejectsMalformedOrigin() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                Mockito.mock(WorkspaceApplicationService.class),
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                new ObjectMapper().findAndRegisterModules(),
+                "*");
+        FakeWebSocketSession session = FakeWebSocketSession.withOrigin(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace",
+                List.of(),
+                "file://127.0.0.1");
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).singleElement().satisfies(message ->
+                assertThat(message).contains("\"type\":\"error\"", "\"code\":\"FORBIDDEN\""));
+        verify(ticketService, never()).consume(Mockito.anyString(), Mockito.anyString());
+    }
+
+    @Test
+    void mixedWildcardDoesNotAllowUnlistedOrigin() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                Mockito.mock(WorkspaceApplicationService.class),
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                new ObjectMapper().findAndRegisterModules(),
+                "*,http://localhost:3000");
+        FakeWebSocketSession session = FakeWebSocketSession.withOrigin(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace",
+                List.of(),
+                "http://127.0.0.1:3000");
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).singleElement().satisfies(message ->
+                assertThat(message).contains("\"type\":\"error\"", "\"code\":\"FORBIDDEN\""));
+        verify(ticketService, never()).consume(Mockito.anyString(), Mockito.anyString());
+    }
+
+    @Test
     void readsPublicAgentConfigFileThroughWebSocketTicket() {
         WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
         AgentConfigApplicationService agentConfigService = Mockito.mock(AgentConfigApplicationService.class);
@@ -1141,8 +1214,16 @@ class WorkspaceFileWebSocketHandlerTest {
                 String path,
                 List<String> incoming,
                 Function<String, List<String>> afterFirstResponse) {
+            this(path, incoming, afterFirstResponse, "http://localhost:3000");
+        }
+
+        private FakeWebSocketSession(
+                String path,
+                List<String> incoming,
+                Function<String, List<String>> afterFirstResponse,
+                String origin) {
             HttpHeaders headers = new HttpHeaders();
-            headers.setOrigin("http://localhost:3000");
+            headers.setOrigin(origin);
             headers.set("X-Trace-Id", TRACE_ID);
             this.handshakeInfo = new HandshakeInfo(URI.create("ws://127.0.0.1:8080" + path), headers, Mono.<Principal>empty(), null);
             this.incoming = List.copyOf(incoming);
@@ -1151,6 +1232,10 @@ class WorkspaceFileWebSocketHandlerTest {
 
         static FakeWebSocketSession allowed(String path, List<String> incoming) {
             return new FakeWebSocketSession(path, incoming);
+        }
+
+        static FakeWebSocketSession withOrigin(String path, List<String> incoming, String origin) {
+            return new FakeWebSocketSession(path, incoming, null, origin);
         }
 
         static FakeWebSocketSession uploadFlow(

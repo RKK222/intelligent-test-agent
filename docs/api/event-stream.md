@@ -526,7 +526,7 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 /api/internal/platform/workspace-management/file/ws?ticket=wft_...
 ```
 
-route 响应已经包含目标 Java `baseUrl`，客户端必须在该目标地址申请 ticket 并建立 WebSocket，因此 ticket 的签发和消费始终位于同一 JVM；多后台部署需要浏览器可访问每台 Java 的 `listenUrl`，不新增 Java 到 Java 的 HTTP 文件代理。workspace ticket 还绑定签票授权同一次权威判断产生的 `STANDARD/APP_SOURCE` 事实；APP_SOURCE 票后续禁止 `SUPER_ADMIN` 非托管回退，每条 RPC 都必须再次识别为 APP_SOURCE，replica 映射消失即 `FORBIDDEN`，而真正的非托管超级管理员服务器工作区保持兼容。连接建立后，每条 `workspace.*` RPC 仍会重新读取当前用户 `opencode` 文件路由 affinity，并要求 affinity、ticket 目标/agent 服务器、Workspace/托管副本服务器和当前 JVM 完全一致；binding 迁移或错误 JVM 上的旧连接从下一条 RPC 起返回 `FORBIDDEN`，文件服务不再执行。
+route 响应已经包含目标 Java `baseUrl`，客户端必须在该目标地址申请 ticket 并建立 WebSocket，因此 ticket 的签发和消费始终位于同一 JVM；多后台部署需要浏览器可访问每台 Java 的 `listenUrl`，不新增 Java 到 Java 的 HTTP 文件代理。upgrade 必须校验 Origin；全局 CORS 恰好配置为单个 `*` 时可以接受任意格式合法的 canonical Origin，但缺失或畸形 Origin 仍拒绝，混合 wildcard 与显式来源不放宽。workspace ticket 还绑定签票授权同一次权威判断产生的 `STANDARD/APP_SOURCE` 事实；APP_SOURCE 票后续禁止 `SUPER_ADMIN` 非托管回退，每条 RPC 都必须再次识别为 APP_SOURCE，replica 映射消失即 `FORBIDDEN`，而真正的非托管超级管理员服务器工作区保持兼容。连接建立后，每条 `workspace.*` RPC 仍会重新读取当前用户 `opencode` 文件路由 affinity，并要求 affinity、ticket 目标/agent 服务器、Workspace/托管副本服务器和当前 JVM 完全一致；binding 迁移或错误 JVM 上的旧连接从下一条 RPC 起返回 `FORBIDDEN`，文件服务不再执行。
 
 文件 RPC 的每条请求和响应仍是单条 JSON 文本消息，但上传和大文件预览都由多条有界 RPC 组成。目标 Java 的单帧上限同时覆盖 `test-agent.files.max-preview-bytes` 以内的一次性 UTF-8 读写、单个预览分段和单个 Base64 上传分片，并附加 RPC envelope 余量；它只限制单条消息，不代表整个上传文件或最终可预览内容的大小。默认一次性预览/可编辑阈值为 5 MiB，超过后前端改用固定约 512 KiB 的 UTF-8 渐进预览分段；用户可继续加载一段或确认加载到文件末尾，界面必须提示完整加载超大文件可能占用较多内存并导致 Monaco 卡顿，大文件始终只读，避免把部分内容误保存。默认上传分片为 256 KiB、可配置上限为 4 MiB。分片上传和渐进预览都不设置应用层文件总大小上限，实际可处理大小仍受浏览器、网络、磁盘空间和基础设施超时约束。
 

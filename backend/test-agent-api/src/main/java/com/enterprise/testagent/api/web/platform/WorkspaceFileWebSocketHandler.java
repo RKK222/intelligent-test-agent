@@ -57,6 +57,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
     private final WorkspaceViewApplicationService workspaceViewService;
     private final ObjectMapper objectMapper;
     private final Set<String> allowedOrigins;
+    private final boolean allowAnyOrigin;
 
     /**
      * 装配文件 WebSocket handler 依赖和 Origin 白名单。
@@ -83,6 +84,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 .map(String::trim)
                 .filter(origin -> !origin.isBlank())
                 .toList());
+        this.allowAnyOrigin = this.allowedOrigins.size() == 1 && this.allowedOrigins.contains("*");
     }
 
     /** 兼容既有 handler 单元测试构造路径；生产装配始终使用带组合视图和实时鉴权的构造器。 */
@@ -104,6 +106,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 .map(String::trim)
                 .filter(origin -> !origin.isBlank())
                 .toList());
+        this.allowAnyOrigin = this.allowedOrigins.size() == 1 && this.allowedOrigins.contains("*");
     }
 
     /** 兼容既有组合视图单元测试构造路径；Hub RPC 测试应使用生产形状构造器显式注入服务。 */
@@ -126,6 +129,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 .map(String::trim)
                 .filter(origin -> !origin.isBlank())
                 .toList());
+        this.allowAnyOrigin = this.allowedOrigins.size() == 1 && this.allowedOrigins.contains("*");
     }
 
     /**
@@ -137,7 +141,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         WorkspaceFileSocketTicket ticket;
         try {
             String origin = session.getHandshakeInfo().getHeaders().getOrigin();
-            if (!allowedOrigins.contains(origin)) {
+            if (!originAllowed(origin)) {
                 return sendErrorAndClose(session, null, "FORBIDDEN", "origin denied", traceId, Map.of());
             }
             ticket = ticketService.consume(query(session.getHandshakeInfo().getUri(), "ticket"), origin);
@@ -163,6 +167,21 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 .then();
         Mono<Void> sender = session.send(outbound.asFlux().map(session::textMessage));
         return Mono.when(inbound, sender);
+    }
+
+    /**
+     * 单独配置通配符时仍校验浏览器 Origin 的协议、主机和 URI 结构，避免把缺失或畸形来源放进文件通道。
+     */
+    private boolean originAllowed(String origin) {
+        if (!allowAnyOrigin) {
+            return allowedOrigins.contains(origin);
+        }
+        try {
+            AppSourceWebSocketOrigin.canonicalize(origin);
+            return true;
+        } catch (PlatformException exception) {
+            return false;
+        }
     }
 
     private String handleMessage(

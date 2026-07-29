@@ -5,6 +5,22 @@
 
 ## Entries
 
+### 2026-07-29 - 修复本地 worktree 文件树 wildcard Origin
+
+### Why
+- `.env.test` 使用单独的 `TEST_AGENT_CORS_ALLOWED_ORIGINS=*`；HTTP 和应用源码进度通道支持该测试配置，但平台文件 WebSocket 仍把 `*` 当普通字符串精确匹配，导致 route/ticket 成功后 upgrade 立即以 `FORBIDDEN origin denied` 关闭，页面只显示 worktree 文件树加载失败。
+
+### What
+- `WorkspaceFileWebSocketHandler` 仅在 CORS 恰好为单个 `*` 时接受任意格式合法的浏览器 Origin，并继续拒绝缺失、畸形来源；混合 wildcard 不获得通配能力，显式白名单行为不变。
+- 新增 wildcard 成功、畸形 Origin 拒绝和混合 wildcard 不放宽回归；同步 API、Platform File WebSocket、安全规范及 API 模块测试说明。
+
+### How
+- 复用既有 `AppSourceWebSocketOrigin.canonicalize` 做 Origin 结构校验；TDD 红测先稳定得到 `FORBIDDEN origin denied`，修复后 `WorkspaceFileWebSocketHandlerTest` 30/30 通过。
+- 用 JDK 25、未修改的 `.env.test` 和 test profile 完整重启 backend、opencode-manager、frontend；health/readiness 为 `UP`、前端和 CORS 为 200、OpenCode 4104 为 `HEALTHY`，真实浏览器刷新后 worktree 根目录正常显示且无 console error。
+
+### Result
+- 小宠物健康但 worktree 文件树循环加载失败的问题已在真实本地三服务中恢复；未修改 `.env.test`、HTTP/事件字段、数据库/Flyway、SQL、generated SDK 或 OpenCode 源码。
+
 ### 2026-07-29 - 回退 guojq 对话应用版本上下文提交
 
 ### Why
