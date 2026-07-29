@@ -11,9 +11,11 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketHandler;
@@ -37,8 +39,11 @@ public class AppSourceOperationWebSocketHandler implements WebSocketHandler {
     private final AppSourceApplicationService appSources;
     private final ObjectMapper objectMapper;
     private final Set<String> allowedOrigins;
+    private final boolean allowAnyOrigin;
     private final Duration pollInterval;
 
+    /** 装配应用源码进度 WebSocket 的生产依赖和 Origin 白名单。 */
+    @Autowired
     public AppSourceOperationWebSocketHandler(
             AppSourceOperationTicketService tickets,
             AppSourceApplicationService appSources,
@@ -57,11 +62,16 @@ public class AppSourceOperationWebSocketHandler implements WebSocketHandler {
         this.tickets = Objects.requireNonNull(tickets, "tickets must not be null");
         this.appSources = Objects.requireNonNull(appSources, "appSources must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
-        this.allowedOrigins = Set.copyOf(Arrays.stream(allowedOrigins.split(","))
+        List<String> configuredOrigins = Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim)
                 .filter(origin -> !origin.isBlank())
-                .map(AppSourceWebSocketOrigin::canonicalize)
-                .toList());
+                .toList();
+        this.allowAnyOrigin = configuredOrigins.size() == 1 && "*".equals(configuredOrigins.getFirst());
+        this.allowedOrigins = allowAnyOrigin
+                ? Set.of()
+                : Set.copyOf(configuredOrigins.stream()
+                        .map(AppSourceWebSocketOrigin::canonicalize)
+                        .toList());
         this.pollInterval = Objects.requireNonNull(pollInterval, "pollInterval must not be null");
     }
 
@@ -73,7 +83,7 @@ public class AppSourceOperationWebSocketHandler implements WebSocketHandler {
             operationId = operationId(session.getHandshakeInfo().getUri());
             String origin = AppSourceWebSocketOrigin.canonicalize(
                     session.getHandshakeInfo().getHeaders().getOrigin());
-            if (!allowedOrigins.contains(origin)) {
+            if (!allowAnyOrigin && !allowedOrigins.contains(origin)) {
                 throw new PlatformException(ErrorCode.FORBIDDEN, "应用源码进度 WebSocket 拒绝连接");
             }
             ticket = tickets.consume(

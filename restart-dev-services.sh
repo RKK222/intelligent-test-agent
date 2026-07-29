@@ -265,6 +265,11 @@ apply_frontend_origin_defaults() {
   if [[ -z "${TEST_AGENT_CORS_ALLOWED_ORIGINS:-}" ]]; then
     TEST_AGENT_CORS_ALLOWED_ORIGINS="${default_origins}"
   fi
+  # 单独的通配值已经覆盖动态前端 Origin；继续追加会生成后端拒绝的混合配置。
+  if [[ "${TEST_AGENT_CORS_ALLOWED_ORIGINS}" == "*" ]]; then
+    export TEST_AGENT_CORS_ALLOWED_ORIGINS
+    return
+  fi
   case ",${TEST_AGENT_CORS_ALLOWED_ORIGINS}," in
     *",${frontend_url},"*) ;;
     *) TEST_AGENT_CORS_ALLOWED_ORIGINS="${TEST_AGENT_CORS_ALLOWED_ORIGINS},${frontend_url}" ;;

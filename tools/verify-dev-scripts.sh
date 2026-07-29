@@ -100,8 +100,9 @@ printf 'overwritten-build-output\n' >"${tmp_dir}/source.jar"
 jar tf "${staged_runtime_jar}" >/dev/null || fail "staged backend runtime jar changed after source overwrite"
 
 screen_calls="${tmp_dir}/screen.calls"
+cors_calls="${tmp_dir}/cors.calls"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${tmp_dir}/bin/ps"
-printf '#!/usr/bin/env bash\nif [[ "${1:-}" == "-list" ]]; then exit 1; fi\nprintf "%%s\\n" "$*" >>%q\nexit 0\n' "${screen_calls}" >"${tmp_dir}/bin/screen"
+printf '#!/usr/bin/env bash\nif [[ "${1:-}" == "-list" ]]; then exit 1; fi\nprintf "%%s\\n" "$*" >>%q\nprintf "%%s\\n" "${TEST_AGENT_CORS_ALLOWED_ORIGINS:-}" >>%q\nexit 0\n' "${screen_calls}" "${cors_calls}" >"${tmp_dir}/bin/screen"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${tmp_dir}/bin/curl"
 printf '#!/usr/bin/env bash\necho "   interface: en0"\n' >"${tmp_dir}/bin/route"
 printf '#!/usr/bin/env bash\nif [[ "${1:-}" == "getifaddr" && "${2:-}" == "en0" ]]; then echo "10.8.0.115"; exit 0; fi\nexit 1\n' >"${tmp_dir}/bin/ipconfig"
@@ -136,6 +137,21 @@ fi
 if [[ "${restart_output}" != *"Defaulting TEST_AGENT_BASE_URL to detected local IPv4 for browser access: http://10.8.0.115:8080"* ]]; then
   echo "${restart_output}" >&2
   fail "restart script did not default TEST_AGENT_BASE_URL to detected local IPv4"
+fi
+
+# 单独的通配 Origin 已覆盖动态前端地址，启动脚本不得再拼成既不合法也不等价的混合配置。
+printf 'TEST_AGENT_CORS_ALLOWED_ORIGINS=*\nTEST_AGENT_OPENCODE_BASE_URL=http://10.8.0.116:4096\nTEST_AGENT_START_OPENCODE_MANAGER=false\n' >"${tmp_dir}/env-wildcard-origin.local"
+: >"${cors_calls}"
+restart_wildcard_output="$(
+  PATH="${tmp_dir}/bin:${PATH}" sh "${ROOT_DIR}/restart-dev-services.sh" \
+    --skip-backend-build \
+    --skip-frontend-build \
+    --env-file "${tmp_dir}/env-wildcard-origin.local" \
+    --log-dir "${tmp_dir}/logs" 2>&1
+)"
+if [[ "$(sort -u "${cors_calls}")" != "*" ]]; then
+  echo "${restart_wildcard_output}" >&2
+  fail "restart script should preserve a sole wildcard CORS origin"
 fi
 
 # auto 模式必须把默认路由网卡的 IPv4 识别为本机地址；.env.test 使用局域网 IP 时也要启动 manager。

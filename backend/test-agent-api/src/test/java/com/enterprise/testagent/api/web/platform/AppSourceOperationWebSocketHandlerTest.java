@@ -2,6 +2,7 @@ package com.enterprise.testagent.api.web.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -136,6 +137,28 @@ class AppSourceOperationWebSocketHandlerTest {
             }
         });
         verifyNoInteractions(tickets, appSources);
+    }
+
+    @Test
+    void wildcardOriginAllowsCanonicalRequestOrigin() {
+        AppSourceOperationTicketService tickets = mock(AppSourceOperationTicketService.class);
+        AppSourceApplicationService appSources = mock(AppSourceApplicationService.class);
+        when(tickets.consume("ast_ticket", "aso_12345678", "https://trusted.example"))
+                .thenReturn(ticket("ast_ticket"));
+        when(appSources.getOperation("aso_12345678", new UserId("usr_1"), false))
+                .thenReturn(operation(AppSourceOperationStatus.SUCCEEDED, List.of()));
+        FakeWebSocketSession session = FakeWebSocketSession.withOrigin(
+                "/api/internal/platform/workspace-management/app-source-operations/"
+                        + "aso_12345678/ws?ticket=ast_ticket",
+                "HTTPS://Trusted.Example:443");
+
+        new AppSourceOperationWebSocketHandler(
+                tickets, appSources, objectMapper, "*", Duration.ofMillis(1))
+                .handle(session)
+                .block(Duration.ofSeconds(2));
+
+        verify(tickets).consume("ast_ticket", "aso_12345678", "https://trusted.example");
+        assertThat(session.sentText()).hasSize(2);
     }
 
     @Test

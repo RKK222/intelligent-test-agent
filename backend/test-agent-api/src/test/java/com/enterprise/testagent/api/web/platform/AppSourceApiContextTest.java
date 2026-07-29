@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.web.reactive.HandlerMapping;
 
 class AppSourceApiContextTest {
@@ -20,6 +21,7 @@ class AppSourceApiContextTest {
     void appSourceHttpTicketAndWebSocketBeansFormOneRunnableGraph() {
         new ApplicationContextRunner()
                 .withUserConfiguration(TestConfiguration.class, AppSourceWebSocketConfig.class)
+                .withPropertyValues("test-agent.security.cors-allowed-origins=*")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context).hasSingleBean(AppSourceController.class);
@@ -32,6 +34,7 @@ class AppSourceApiContextTest {
     }
 
     @Configuration(proxyBeanMethods = false)
+    @Import(AppSourceOperationWebSocketHandler.class)
     static class TestConfiguration {
 
         @Bean
@@ -92,15 +95,6 @@ class AppSourceApiContextTest {
                 CurrentBackendWebSocketUrlFactory urls,
                 BackendInstanceIdentity identity) {
             return new AppSourceOperationTicketService(store, appSources, urls, identity);
-        }
-
-        @Bean
-        AppSourceOperationWebSocketHandler appSourceOperationWebSocketHandler(
-                AppSourceOperationTicketService tickets,
-                AppSourceApplicationService appSources,
-                ObjectMapper objectMapper) {
-            return new AppSourceOperationWebSocketHandler(
-                    tickets, appSources, objectMapper, "http://localhost:3000");
         }
 
         @Bean

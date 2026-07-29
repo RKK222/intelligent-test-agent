@@ -46,7 +46,7 @@
 - `application.yml` 是默认、本地和企业生产的唯一运行配置；所有差异由 dotenv 或系统环境变量提供，不再保留 `local`、`guo`、`prod` profile。
 - 根目录 `restart-dev-services.sh` 默认读取 `.env.test` 并以 `test` profile 一键重启；本地直接使用 `tools/dev-backend-run.sh --env-file .env.local`，不设置 Spring profile。
 - `application-test.yml`：数据库使用 `TEST_AGENT_TEST_DB_*`；为避免共享测试库中的占位/跨机器 Git 地址被本机后台反复 clone，应用版本工作区副本补偿器在 test profile 默认关闭。
-- 企业 Java 运行时使用外置 `dist/backend/lib/` 加载全部依赖；PostgreSQL JDBC 驱动类使用 `TEST_AGENT_DB_DRIVER_CLASS_NAME`，默认 `org.postgresql.Driver`。
+- 本地 Spring Boot 可执行 JAR 以 runtime scope 打包 PostgreSQL JDBC 驱动；企业 Java 运行时使用外置 `dist/backend/lib/` 加载全部依赖。驱动类使用 `TEST_AGENT_DB_DRIVER_CLASS_NAME`，默认 `org.postgresql.Driver`。
 - `application.yml`：`test-agent.xxl-job.enabled` 默认 `true`；MySQL、access token、Admin/executor 端口和地址使用 `TEST_AGENT_XXL_JOB_*` 注入。readiness group 明确不包含 `xxlJobAdmin`。
 - 标准夜间执行每个 15 分钟时段容量不绑定环境变量，由全局通用参数 `NIGHT_EXECUTION_SLOT_CAPACITY` 提供；该显式内存参数在运行态 Flyway 完成后严格加载，缺失或非法会让应用启动失败。支持精确分钟测试定时后，分发改由 XXL 每分钟触发，补偿仍每 5 分钟触发。
 - 运营分析等周期 handler 不再由旧 runner 注册；任务定义由 XXL MySQL 版本 SQL 初始化，启停、Cron、手动触发和日志在 XXL 页面维护。

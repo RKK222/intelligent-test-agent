@@ -1203,3 +1203,18 @@
 - Result:
   - 用户消息不再隐式携带应用/版本/子条目或自动 Tool 调用指令，历史展示也不再识别和隐藏 `<env_context>`；现有工作区附件与选区序列化链路保持不变。
   - 未修改 HTTP API、RunEvent/SSE、数据库/Flyway、后端、权限、安全、环境配置、generated SDK 或 OpenCode 源码；稳定文档中没有该隐式行为说明，因此无需同步 API/README。
+
+### 2026-07-29 - 修复后端可执行包依赖与应用源码进度通道启动
+
+- Why:
+  - 本地 `test` profile 启动先因可执行 JAR 缺少 PostgreSQL JDBC 驱动失败；修复依赖后又依次暴露应用源码进度 WebSocket 多构造器未显式注入，以及启动脚本把单独 `*` CORS 配置拼成混合来源导致组件构造失败。
+- What:
+  - 将 `test-agent-app` 的 PostgreSQL 直接依赖恢复为 runtime scope，避免 Maven 依赖仲裁把 persistence 的运行时驱动降成 test scope 并从 Spring Boot JAR 排除。
+  - 为 `AppSourceOperationWebSocketHandler` 的生产构造器显式添加 Spring 注入；仅对恰好单独配置的 `*` 接受任意格式合法的 canonical Origin，ticket 仍绑定实际来源，混合 wildcard 与显式来源继续失败关闭。
+  - 根目录重启脚本在 CORS 值为单独 `*` 时不再追加动态前端 Origin，并增加隔离脚本回归；同步 backend/API/app README、HTTP/事件、安全与部署文档。
+- How:
+  - 先用缺少驱动的实际可执行 JAR、Spring 真实组件图和 wildcard Origin 单测分别复现三层故障，再做最小修复；`AppSourceApiContextTest` 与 `AppSourceOperationWebSocketHandlerTest` 8 项通过，`bash tools/verify-dev-scripts.sh` 通过，后端根目录 `mvn -q -DappLogDir=target/log package` 完整通过，产物确认包含 `postgresql-42.7.11.jar`。
+  - 使用未修改的 `.env.test`、JDK 21 和 test profile 完整重启 backend、opencode-manager、frontend，后端 readiness 返回 HTTP 200 / `UP`，启动日志不再出现缺少驱动、无默认构造器、Origin 无效或 `Application run failed`。
+- Result:
+  - 本地后端及整套开发服务可正常启动。未变更 HTTP/WebSocket wire、RunEvent、数据库结构/Flyway、关系型 SQL、性能、generated SDK 或 OpenCode 源码，也未修改任何 `.env*`；单 `*` 仍限定受控本地/测试环境，生产必须使用显式来源。
+  - macOS 下 Netty native DNS resolver 加载失败仍会记录既有非阻断 ERROR 并回退系统解析，当前不影响启动与 readiness。
