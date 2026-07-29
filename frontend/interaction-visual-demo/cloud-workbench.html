@@ -1,0 +1,1077 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>MIMO 工作台外层配色预览</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Geist", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+
+        /* 外层 shell token：主题切换只允许覆盖这一组变量。 */
+        --shell-page: #f1f4f5;
+        --shell-header: #f8fafb;
+        --shell-rail: #edf1f2;
+        --shell-left: #f6f8f8;
+        --shell-active: #b5162e;
+        --shell-active-strong: #941126;
+        --shell-active-bg: #f7e8ec;
+        --shell-hover: #e5eaec;
+        --shell-border: #dfe4e7;
+        --shell-muted: #6f7882;
+        --shell-text: #252a31;
+
+        /* 当前内部组件 token：固定值，不随预览主题变化。 */
+        --inner-surface: #ffffff;
+        --inner-panel: #f0f4fa;
+        --inner-hover: #eeeeee;
+        --inner-active: #e8e8e8;
+        --inner-border: #eaeaea;
+        --inner-border-strong: #cfcfcf;
+        --inner-text: #333333;
+        --inner-muted: #7a7a7a;
+        --inner-subtle: #555555;
+        --inner-chat-user: #f2f2f2;
+        --inner-blue: #3366ff;
+        --inner-green: #3f7a5a;
+      }
+
+      body[data-theme="snow"] {
+        --shell-page: #fbfbfd;
+        --shell-header: #ffffff;
+        --shell-rail: #fbfbfd;
+        --shell-left: #ffffff;
+        --shell-active: #b5162e;
+        --shell-active-strong: #941126;
+        --shell-active-bg: #f8eaed;
+        --shell-hover: #f0f1f3;
+        --shell-border: #e4e6e9;
+        --shell-muted: #737982;
+        --shell-text: #25282d;
+      }
+
+      body[data-theme="sage"] {
+        --shell-page: #eff3f1;
+        --shell-header: #f8faf9;
+        --shell-rail: #e5ede9;
+        --shell-left: #f2f6f4;
+        --shell-active: #198b72;
+        --shell-active-strong: #126c59;
+        --shell-active-bg: #dcefe8;
+        --shell-hover: #dce6e1;
+        --shell-border: #d6dfdb;
+        --shell-muted: #68756f;
+        --shell-text: #25302b;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        overflow: hidden;
+        background: var(--shell-page);
+        color: var(--shell-text);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      button,
+      input,
+      textarea {
+        font: inherit;
+      }
+
+      button {
+        color: inherit;
+      }
+
+      button:focus-visible,
+      input:focus-visible,
+      textarea:focus-visible {
+        outline: 2px solid var(--shell-active);
+        outline-offset: 2px;
+      }
+
+      svg {
+        width: 1em;
+        height: 1em;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.6;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .preview-toolbar {
+        display: flex;
+        height: 52px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        padding: 0 18px;
+        border-bottom: 1px solid var(--shell-border);
+        background: var(--inner-surface);
+      }
+
+      .preview-copy {
+        display: flex;
+        min-width: 0;
+        align-items: baseline;
+        gap: 12px;
+      }
+
+      .preview-copy strong {
+        flex-shrink: 0;
+        font-size: 13px;
+      }
+
+      .preview-copy span {
+        overflow: hidden;
+        color: var(--inner-muted);
+        font-size: 11px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .theme-switcher {
+        display: flex;
+        flex-shrink: 0;
+        gap: 3px;
+        padding: 3px;
+        border: 1px solid var(--inner-border);
+        border-radius: 9px;
+        background: #f5f5f5;
+      }
+
+      .theme-button {
+        display: inline-flex;
+        height: 28px;
+        align-items: center;
+        gap: 7px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--inner-muted);
+        cursor: pointer;
+        font-size: 11px;
+      }
+
+      .theme-button.is-active {
+        background: #fff;
+        color: #222;
+        box-shadow: 0 1px 4px rgba(33, 38, 45, 0.12);
+      }
+
+      .theme-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #b5162e;
+      }
+
+      [data-theme-choice="snow"] .theme-dot {
+        border: 1px solid #cfd3d8;
+        background: #fff;
+      }
+
+      [data-theme-choice="sage"] .theme-dot {
+        background: #198b72;
+      }
+
+      .stage {
+        height: calc(100vh - 52px);
+        padding: 10px;
+        background: var(--shell-page);
+        transition: background-color 180ms ease;
+      }
+
+      .workbench {
+        display: grid;
+        width: 100%;
+        height: 100%;
+        min-width: 1080px;
+        overflow: hidden;
+        grid-template-rows: 36px minmax(0, 1fr);
+        border: 1px solid var(--shell-border);
+        border-radius: 12px;
+        background: var(--inner-surface);
+        box-shadow: 0 10px 32px rgba(36, 43, 49, 0.07);
+      }
+
+      /* 顶栏保持当前 36px 高度和控件排布，只替换外层底色与强调色。 */
+      .app-header {
+        display: flex;
+        height: 36px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 0 10px;
+        border-bottom: 1px solid var(--shell-border);
+        background: var(--shell-header);
+        transition: background-color 180ms ease, border-color 180ms ease;
+      }
+
+      .header-left,
+      .header-right,
+      .brand,
+      .header-control,
+      .runtime-state {
+        display: flex;
+        align-items: center;
+      }
+
+      .header-left {
+        min-width: 0;
+        gap: 10px;
+      }
+
+      .header-right {
+        flex-shrink: 0;
+        gap: 7px;
+      }
+
+      .brand {
+        flex-shrink: 0;
+        gap: 7px;
+      }
+
+      .brand-mark {
+        display: grid;
+        width: 23px;
+        height: 23px;
+        place-items: center;
+        border: 1.8px solid var(--shell-active);
+        border-radius: 50%;
+        color: var(--shell-active);
+        font-size: 9px;
+        font-weight: 800;
+      }
+
+      .brand-copy {
+        display: grid;
+        gap: 0;
+        line-height: 1;
+      }
+
+      .brand-copy strong {
+        font-size: 11px;
+        letter-spacing: 0.02em;
+      }
+
+      .brand-copy small {
+        margin-top: 2px;
+        color: var(--shell-muted);
+        font-size: 6px;
+        letter-spacing: 0.06em;
+      }
+
+      .header-divider {
+        width: 1px;
+        height: 18px;
+        background: var(--shell-border);
+      }
+
+      .header-control {
+        height: 26px;
+        min-width: 0;
+        gap: 6px;
+        padding: 0 8px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--shell-text);
+        cursor: pointer;
+        font-size: 10px;
+      }
+
+      .header-control:hover {
+        border-color: var(--shell-border);
+        background: var(--shell-hover);
+      }
+
+      .header-control span {
+        overflow: hidden;
+        max-width: 165px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .capability-summary {
+        color: var(--shell-muted);
+        font-size: 9px;
+        white-space: nowrap;
+      }
+
+      .runtime-state {
+        gap: 5px;
+        color: var(--shell-muted);
+        font-size: 9px;
+      }
+
+      .runtime-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--inner-green);
+      }
+
+      .header-icon,
+      .avatar {
+        display: grid;
+        width: 26px;
+        height: 26px;
+        place-items: center;
+        border: 1px solid transparent;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--shell-muted);
+        cursor: pointer;
+      }
+
+      .header-icon:hover {
+        border-color: var(--shell-border);
+        background: var(--shell-hover);
+        color: var(--shell-text);
+      }
+
+      .avatar {
+        border: 0;
+        border-radius: 50%;
+        background: #e9edf0;
+        color: #4d5963;
+        font-size: 9px;
+        font-weight: 700;
+      }
+
+      .workbench-body {
+        display: grid;
+        min-width: 0;
+        min-height: 0;
+        grid-template-columns: 48px 262px minmax(280px, 1fr) 450px;
+      }
+
+      /* 活动栏仍为当前 48px，仅通过柔和选中底和品牌色替换 IDE 黑色竖条。 */
+      .activity-rail {
+        display: flex;
+        width: 48px;
+        min-height: 0;
+        flex-direction: column;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 0;
+        border-right: 1px solid var(--shell-border);
+        background: var(--shell-rail);
+        transition: background-color 180ms ease, border-color 180ms ease;
+      }
+
+      .activity-group {
+        display: grid;
+        gap: 8px;
+      }
+
+      .activity-button {
+        position: relative;
+        display: grid;
+        width: 38px;
+        height: 38px;
+        place-items: center;
+        border: 0;
+        border-radius: 12px;
+        background: transparent;
+        color: var(--shell-muted);
+        cursor: pointer;
+      }
+
+      .activity-button svg {
+        width: 20px;
+        height: 20px;
+      }
+
+      .activity-button:hover {
+        background: var(--shell-hover);
+        color: var(--shell-text);
+      }
+
+      .activity-button.is-active {
+        background: var(--shell-active-bg);
+        color: var(--shell-active-strong);
+      }
+
+      .activity-button.is-active::before {
+        position: absolute;
+        left: -5px;
+        width: 2px;
+        height: 22px;
+        border-radius: 0 999px 999px 0;
+        background: var(--shell-active);
+        content: "";
+      }
+
+      .pet-button::after {
+        position: absolute;
+        right: 7px;
+        bottom: 7px;
+        width: 7px;
+        height: 7px;
+        border: 2px solid var(--shell-rail);
+        border-radius: 50%;
+        background: var(--inner-green);
+        content: "";
+      }
+
+      /* 左区保持 262px 和当前紧凑树结构，主题只进入面板外壳。 */
+      .file-panel {
+        display: flex;
+        min-width: 0;
+        min-height: 0;
+        flex-direction: column;
+        overflow: hidden;
+        border-right: 1px solid var(--shell-border);
+        background: var(--shell-left);
+        color: var(--inner-text);
+        transition: background-color 180ms ease, border-color 180ms ease;
+      }
+
+      .icon-tabbar {
+        display: grid;
+        height: 30px;
+        flex: 0 0 30px;
+        grid-template-columns: repeat(3, 1fr);
+        padding-right: 36px;
+        border-bottom: 1px solid var(--inner-border);
+        background: var(--shell-left);
+      }
+
+      .icon-tab {
+        display: grid;
+        place-items: center;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        background: transparent;
+        color: var(--inner-muted);
+        cursor: pointer;
+      }
+
+      .icon-tab.is-active {
+        border-bottom-color: var(--shell-active);
+        color: var(--shell-active-strong);
+      }
+
+      .file-section {
+        display: flex;
+        min-height: 0;
+        flex-direction: column;
+        flex: 1;
+      }
+
+      .file-section.agent-section {
+        flex: 0 0 31%;
+        border-top: 1px solid var(--inner-border);
+      }
+
+      .section-title {
+        display: flex;
+        height: 24px;
+        flex: 0 0 24px;
+        align-items: center;
+        gap: 6px;
+        padding: 0 7px;
+        color: var(--inner-text);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .section-title .branch {
+        overflow: hidden;
+        color: var(--inner-muted);
+        font-size: 10px;
+        font-weight: 400;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .section-actions {
+        display: flex;
+        margin-left: auto;
+        gap: 2px;
+      }
+
+      .mini-button {
+        display: grid;
+        width: 20px;
+        height: 20px;
+        place-items: center;
+        border: 0;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--inner-muted);
+      }
+
+      .tree {
+        min-height: 0;
+        flex: 1;
+        overflow: auto;
+        padding: 3px 0;
+      }
+
+      .tree-row {
+        display: flex;
+        width: 100%;
+        height: 22px;
+        align-items: center;
+        gap: 4px;
+        padding: 0 6px 0 calc(7px + var(--depth, 0) * 14px);
+        border: 0;
+        background: transparent;
+        color: var(--inner-text);
+        cursor: pointer;
+        font-size: 12px;
+        text-align: left;
+      }
+
+      .tree-row:hover {
+        background: rgba(0, 0, 0, 0.035);
+      }
+
+      .tree-row.is-active {
+        background: var(--shell-active-bg);
+        color: var(--shell-active-strong);
+      }
+
+      .tree-row svg {
+        width: 14px;
+        height: 14px;
+        flex: 0 0 auto;
+      }
+
+      .tree-row span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .file-footer,
+      .chat-footer {
+        display: flex;
+        height: 30px;
+        flex: 0 0 30px;
+        align-items: center;
+        border-top: 1px solid var(--inner-border);
+        background: var(--inner-surface);
+        color: var(--inner-muted);
+        font-size: 10px;
+      }
+
+      .file-footer {
+        justify-content: space-between;
+        padding: 0 8px;
+      }
+
+      /* 中间编辑器完全使用固定 inner token，不参与三套主题。 */
+      .editor-panel {
+        display: flex;
+        min-width: 0;
+        min-height: 0;
+        flex-direction: column;
+        overflow: hidden;
+        border-right: 1px solid var(--inner-border);
+        background: var(--inner-surface);
+        color: var(--inner-text);
+      }
+
+      .editor-tabs {
+        display: flex;
+        height: 30px;
+        flex: 0 0 30px;
+        align-items: stretch;
+        border-bottom: 1px solid var(--inner-border);
+        background: #eaeaea;
+      }
+
+      .editor-tab {
+        display: flex;
+        min-width: 190px;
+        align-items: center;
+        gap: 6px;
+        padding: 0 10px;
+        border-right: 1px solid var(--inner-border);
+        background: var(--inner-surface);
+        font-size: 11px;
+      }
+
+      .editor-tab svg {
+        width: 13px;
+        height: 13px;
+      }
+
+      .editor-scroll {
+        min-height: 0;
+        flex: 1;
+        overflow: auto;
+        padding: 24px 36px 50px;
+        background: var(--inner-surface);
+      }
+
+      .editor-document {
+        width: min(760px, 100%);
+        margin: 0 auto;
+      }
+
+      .editor-document h1 {
+        margin: 8px 0 18px;
+        color: #252525;
+        font-size: 26px;
+        font-weight: 650;
+      }
+
+      .editor-document h2 {
+        margin: 27px 0 11px;
+        font-size: 17px;
+      }
+
+      .editor-document p,
+      .editor-document li {
+        color: #494949;
+        font-size: 13px;
+        line-height: 1.8;
+      }
+
+      .editor-document .path {
+        color: var(--inner-muted);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 10px;
+      }
+
+      .editor-document .note {
+        margin-top: 18px;
+        padding: 10px 12px;
+        border-left: 3px solid #777;
+        background: #f5f5f5;
+        font-size: 12px;
+        line-height: 1.65;
+      }
+
+      .editor-footer {
+        display: flex;
+        height: 30px;
+        flex: 0 0 30px;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 10px;
+        border-top: 1px solid var(--inner-border);
+        color: var(--inner-muted);
+        font-size: 10px;
+      }
+
+      /* 对话区按当前 450px、30px header、白色时间线和圆角输入卡固定，不读取 shell token。 */
+      .chat-panel {
+        display: flex;
+        width: 450px;
+        min-width: 0;
+        min-height: 0;
+        flex-direction: column;
+        overflow: hidden;
+        background: #fff;
+        color: #333;
+        font-family: "Geist", "Noto Sans SC", "PingFang SC", sans-serif;
+      }
+
+      .chat-header {
+        display: flex;
+        height: 30px;
+        flex: 0 0 30px;
+        align-items: center;
+        padding: 0 56px 0 16px;
+        border-bottom: 1px solid #eaeaea;
+        background: #fff;
+      }
+
+      .chat-header-left {
+        display: flex;
+        min-width: 0;
+        flex: 1;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .chat-title {
+        overflow: hidden;
+        min-width: 0;
+        flex: 1;
+        margin: 0;
+        color: #18181b;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.0143em;
+        line-height: 20px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .chat-header-button {
+        display: flex;
+        flex-shrink: 0;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        background: transparent;
+        color: #7a7a7a;
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .chat-header-button svg {
+        width: 15px;
+        height: 15px;
+      }
+
+      .chat-scroll {
+        display: flex;
+        min-height: 0;
+        flex: 1;
+        flex-direction: column;
+        gap: 14px;
+        overflow-y: auto;
+        padding: 12px 12px 6px;
+        background: #fff;
+      }
+
+      .timeline-user {
+        align-self: flex-end;
+        max-width: 88%;
+        padding: 8px 10px;
+        border-radius: 9px;
+        background: #f2f2f2;
+        color: #333;
+        font-size: 12px;
+        line-height: 1.6;
+      }
+
+      .timeline-answer {
+        color: #333;
+        font-size: 12px;
+        line-height: 1.7;
+      }
+
+      .timeline-answer p {
+        margin: 0 0 8px;
+      }
+
+      .timeline-process {
+        display: grid;
+        gap: 6px;
+        padding: 9px 10px;
+        border: 1px solid #eaeaea;
+        border-radius: 8px;
+        background: #f5f5f5;
+        color: #555;
+        font-size: 11px;
+      }
+
+      .timeline-process-row {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+
+      .check {
+        display: grid;
+        width: 16px;
+        height: 16px;
+        place-items: center;
+        border-radius: 50%;
+        background: #e7eee9;
+        color: #3f7a5a;
+      }
+
+      .chat-composer {
+        flex: 0 0 auto;
+        padding: 8px 10px 10px;
+        background: transparent;
+      }
+
+      .chat-input-card {
+        display: flex;
+        flex-direction: column;
+        overflow: visible;
+        border: 1px solid #d4d4d4;
+        border-radius: 16px;
+        background: #fff;
+      }
+
+      .chat-input-card:focus-within {
+        border-color: #3366ff;
+      }
+
+      .chat-textarea {
+        width: 100%;
+        min-height: 40px;
+        max-height: 260px;
+        padding: 8px 12px 4px;
+        resize: none;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: #111;
+        font-size: 14px;
+        line-height: 20px;
+      }
+
+      .chat-textarea::placeholder {
+        color: rgba(51, 51, 51, 0.38);
+      }
+
+      .chat-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 8px 8px;
+        border-top: 1px solid #f0f0f0;
+        border-radius: 0 0 15px 15px;
+      }
+
+      .chat-action-button {
+        display: inline-flex;
+        height: 28px;
+        align-items: center;
+        gap: 4px;
+        padding: 0 10px;
+        border: 1px solid transparent;
+        border-radius: 12px;
+        background: #f4f4f5;
+        color: #555;
+        font-size: 11px;
+        font-weight: 500;
+      }
+
+      .chat-action-button.icon-only {
+        width: 28px;
+        justify-content: center;
+        padding: 0;
+      }
+
+      .chat-action-button svg {
+        width: 12px;
+        height: 12px;
+      }
+
+      .chat-spacer {
+        flex: 1;
+      }
+
+      .chat-send {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        place-items: center;
+        border: 0;
+        border-radius: 50%;
+        background: #18181b;
+        color: #fff;
+      }
+
+      .chat-send svg {
+        width: 14px;
+        height: 14px;
+      }
+
+      .chat-footer {
+        padding: 0 16px;
+      }
+
+      .fixed-note {
+        margin-left: auto;
+        color: #9a9a9a;
+        font-size: 9px;
+      }
+
+      @media (max-width: 1260px) {
+        .workbench-body {
+          grid-template-columns: 48px 240px minmax(280px, 1fr) 390px;
+        }
+
+        .chat-panel {
+          width: 390px;
+        }
+
+        .capability-summary {
+          display: none;
+        }
+      }
+
+      @media (max-width: 1100px) {
+        .stage {
+          overflow-x: auto;
+        }
+      }
+
+      @media (max-width: 760px) {
+        .preview-copy span,
+        .theme-button span {
+          display: none;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body data-theme="cloud">
+    <div class="preview-toolbar">
+      <div class="preview-copy">
+        <strong>仅修改外层配色</strong>
+        <span>保持当前布局尺寸；中间编辑器与右侧对话样式固定，不参与主题切换</span>
+      </div>
+      <div class="theme-switcher" role="group" aria-label="切换外层配色">
+        <button class="theme-button is-active" type="button" data-theme-choice="cloud" aria-pressed="true"><i class="theme-dot"></i><span>云白工行红 · 推荐</span></button>
+        <button class="theme-button" type="button" data-theme-choice="snow" aria-pressed="false"><i class="theme-dot"></i><span>纯雪白</span></button>
+        <button class="theme-button" type="button" data-theme-choice="sage" aria-pressed="false"><i class="theme-dot"></i><span>鼠尾草灰 · 对照</span></button>
+      </div>
+    </div>
+
+    <main class="stage">
+      <section class="workbench" aria-label="当前布局外层配色预览">
+        <header class="app-header">
+          <div class="header-left">
+            <div class="brand"><span class="brand-mark">M</span><span class="brand-copy"><strong>MIMO</strong><small>智能测试智能体</small></span></div>
+            <span class="header-divider"></span>
+            <button class="header-control" type="button">
+              <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
+              <span>个人手机银行</span><svg viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"></path></svg>
+            </button>
+            <button class="header-control" type="button"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4Z"></path><path d="M8 9h8M8 13h8M8 17h5"></path></svg><span>默认个人工作区</span><svg viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"></path></svg></button>
+            <span class="capability-summary">Agents 4 · Skills 8 · MCP 3 · Plugins 2</span>
+          </div>
+          <div class="header-right">
+            <span class="runtime-state"><i class="runtime-dot"></i>服务可用</span>
+            <button class="header-icon" type="button" aria-label="用户手册"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M9.7 9a2.4 2.4 0 1 1 3.6 2.1c-.8.5-1.3 1-1.3 2.2M12 17h.01"></path></svg></button>
+            <button class="avatar" type="button" aria-label="用户菜单">K</button>
+          </div>
+        </header>
+
+        <div class="workbench-body">
+          <nav class="activity-rail" aria-label="工作台活动栏">
+            <div class="activity-group">
+              <button class="activity-button is-active" type="button" aria-label="编辑器" aria-pressed="true"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4Z"></path><path d="M8 8h8M8 12h6M8 16h4"></path></svg></button>
+              <button class="activity-button" type="button" aria-label="工具盒子" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M4 7h16v13H4Z"></path><path d="M9 7V4h6v3M8 12h8"></path></svg></button>
+              <button class="activity-button" type="button" aria-label="运行管理" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19V3"></path></svg></button>
+              <button class="activity-button" type="button" aria-label="Agent 与 Skill" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 5 3.4 8 8 9 4.6-1 8-4 8-9V7l-8-4Z"></path><path d="m9 12 2 2 4-4"></path></svg></button>
+            </div>
+            <div class="activity-group">
+              <button class="activity-button pet-button" type="button" aria-label="小宠物" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M8 11V7a4 4 0 0 1 8 0v4"></path><rect x="4" y="10" width="16" height="11" rx="5"></rect><path d="M8 15h.01M16 15h.01M9 18h6"></path></svg></button>
+              <button class="activity-button" type="button" aria-label="设置" aria-pressed="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3A1.7 1.7 0 0 0 14 21v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14h-.2v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"></path></svg></button>
+            </div>
+          </nav>
+
+          <aside class="file-panel" aria-label="当前文件面板布局">
+            <div class="icon-tabbar">
+              <button class="icon-tab is-active" type="button" aria-label="文件树"><svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3Z"></path></svg></button>
+              <button class="icon-tab" type="button" aria-label="搜索"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg></button>
+              <button class="icon-tab" type="button" aria-label="变更"><svg viewBox="0 0 24 24"><path d="M6 3v12M18 9v12"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="6" r="3"></circle></svg></button>
+            </div>
+            <section class="file-section">
+              <div class="section-title"><svg viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"></path></svg><span>工作空间</span><span class="branch">/ worktree: feature/payment</span><span class="section-actions"><button class="mini-button" type="button">＋</button><button class="mini-button" type="button">···</button></span></div>
+              <div class="tree">
+                <button class="tree-row" style="--depth: 0" type="button"><svg viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"></path></svg><svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3Z"></path></svg><span>docs</span></button>
+                <button class="tree-row" style="--depth: 1" type="button"><svg viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"></path></svg><svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3Z"></path></svg><span>测试设计</span></button>
+                <button class="tree-row is-active" style="--depth: 2" type="button"><svg viewBox="0 0 24 24"><path d="M14 2H6v20h12V6Z"></path><path d="M14 2v4h4"></path></svg><span>支付服务回归测试设计.md</span></button>
+                <button class="tree-row" style="--depth: 1" type="button"><svg viewBox="0 0 24 24"><path d="M14 2H6v20h12V6Z"></path><path d="M14 2v4h4"></path></svg><span>README.md</span></button>
+                <button class="tree-row" style="--depth: 0" type="button"><svg viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"></path></svg><svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3Z"></path></svg><span>requirements</span></button>
+                <button class="tree-row" style="--depth: 1" type="button"><svg viewBox="0 0 24 24"><path d="M14 2H6v20h12V6Z"></path><path d="M14 2v4h4"></path></svg><span>支付退款需求说明.md</span></button>
+                <button class="tree-row" style="--depth: 0" type="button"><svg viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"></path></svg><svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3Z"></path></svg><span>tests</span></button>
+                <button class="tree-row" style="--depth: 1" type="button"><svg viewBox="0 0 24 24"><path d="M14 2H6v20h12V6Z"></path><path d="M14 2v4h4"></path></svg><span>payment-regression.spec.ts</span></button>
+              </div>
+            </section>
+            <section class="file-section agent-section">
+              <div class="section-title"><svg viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"></path></svg><span>Agents</span><span class="section-actions"><button class="mini-button" type="button">↻</button></span></div>
+              <div class="tree">
+                <button class="tree-row" style="--depth: 0" type="button"><svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 5 3.4 8 8 9 4.6-1 8-4 8-9V7l-8-4Z"></path></svg><span>test-designer</span></button>
+                <button class="tree-row" style="--depth: 0" type="button"><svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 5 3.4 8 8 9 4.6-1 8-4 8-9V7l-8-4Z"></path></svg><span>regression-runner</span></button>
+              </div>
+            </section>
+            <footer class="file-footer"><span>个人手机银行</span><span>main ▾</span></footer>
+          </aside>
+
+          <section class="editor-panel" aria-label="当前编辑区样式未改">
+            <div class="editor-tabs"><div class="editor-tab"><svg viewBox="0 0 24 24"><path d="M14 2H6v20h12V6Z"></path><path d="M14 2v4h4"></path></svg><span>支付服务回归测试设计.md</span><span style="margin-left:auto">×</span></div></div>
+            <div class="editor-scroll">
+              <article class="editor-document">
+                <span class="path">docs/测试设计/支付服务回归测试设计.md</span>
+                <h1>支付服务回归测试设计</h1>
+                <p>覆盖转账、退款与异常补偿链路，聚焦账务一致性、幂等控制和跨系统超时恢复。</p>
+                <h2>测试范围</h2>
+                <ul><li>支付成功、失败、冲正与退款全链路状态流转。</li><li>重复提交、重复回调与消息乱序场景。</li><li>核心账务、支付中台和渠道流水的一致性校验。</li></ul>
+                <h2>评审结论</h2>
+                <p>当前设计已覆盖主要业务路径，异常补偿场景仍需补充次日对账与人工介入边界。</p>
+                <div class="note">提示：这里继续沿用当前编辑器和 Markdown 预览样式，不随上方主题切换。</div>
+              </article>
+            </div>
+            <footer class="editor-footer"><span>Markdown · UTF-8</span><span>Ln 18, Col 1</span></footer>
+          </section>
+
+          <aside class="chat-panel" aria-label="当前对话区样式未改">
+            <header class="chat-header">
+              <div class="chat-header-left"><h2 class="chat-title">支付服务回归测试设计</h2><button class="chat-header-button" type="button"><svg viewBox="0 0 24 24"><path d="M14 2H6v20h12V6Z"></path><path d="M14 2v4h4M8 12h8M8 16h6"></path></svg><span>原始输出</span></button><button class="chat-header-button" type="button"><svg viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z"></path></svg><span>会话列表</span></button></div>
+            </header>
+            <div class="chat-scroll">
+              <div class="timeline-user">检查一下当前测试设计，还有哪些关键场景没有覆盖？</div>
+              <div class="timeline-process"><div class="timeline-process-row"><span class="check">✓</span><span>读取需求与测试设计</span></div><div class="timeline-process-row"><span class="check">✓</span><span>对照现有用例与风险项</span></div></div>
+              <div class="timeline-answer"><p>我对照了需求说明和现有用例，建议优先补充两个场景：</p><p>1. 退款已受理但清算失败后的次日对账。<br />2. 支付结果重复回调与乱序通知下的幂等校验。</p><p>其他主要业务路径已经覆盖。</p></div>
+            </div>
+            <div class="chat-composer">
+              <div class="chat-input-card">
+                <textarea class="chat-textarea" rows="2" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+                <div class="chat-actions"><button class="chat-action-button icon-only" type="button" aria-label="附件"><svg viewBox="0 0 24 24"><path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 1 1-2.8-2.8l8.5-8.5"></path></svg></button><button class="chat-action-button" type="button">TestAgent⌄</button><button class="chat-action-button" type="button">默认模型⌄</button><span class="chat-spacer"></span><button class="chat-action-button icon-only" type="button" aria-label="新建对话">＋</button><button class="chat-send" type="button" aria-label="发送"><svg viewBox="0 0 24 24"><path d="m5 12 14-7-5 14-2-5Z"></path></svg></button></div>
+              </div>
+            </div>
+            <footer class="chat-footer"><span>上下文 24%</span><span class="fixed-note">当前对话样式 · 固定</span></footer>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const themeButtons = Array.from(document.querySelectorAll("[data-theme-choice]"));
+      const activityButtons = Array.from(document.querySelectorAll(".activity-button"));
+
+      // 主题只切换外层 shell token；编辑器和对话区使用固定的 inner token 与字面颜色。
+      themeButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          document.body.dataset.theme = button.dataset.themeChoice;
+          themeButtons.forEach((item) => {
+            const active = item === button;
+            item.classList.toggle("is-active", active);
+            item.setAttribute("aria-pressed", String(active));
+          });
+        });
+      });
+
+      activityButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          activityButtons.forEach((item) => {
+            const active = item === button;
+            item.classList.toggle("is-active", active);
+            item.setAttribute("aria-pressed", String(active));
+          });
+        });
+      });
+    </script>
+  </body>
+</html>

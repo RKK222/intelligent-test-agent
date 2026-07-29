@@ -3334,3 +3334,26 @@
 
 - 新部署链路不再把“外层 ZIP SHA 正确”误当成“运行目录 Flyway 资源已更新”；现场仍需用外层包 SHA 和安装后 migration SHA 区分旧 U 盘包、旧解压目录或未替换运行目录，禁止修改数据库 history。
 - 本次只调整离线打包/部署校验、测试、技能和稳定文档；未变更 API、事件、数据库结构、性能策略、安全契约、generated SDK、OpenCode 源码或环境配置。
+
+### 2026-07-29 - 增加仅外层换肤的工作台视觉预览
+
+### Why
+
+- 用户希望降低工作台的 IDE 感，但明确要求不调整现有整体布局，尤其不改变右侧 Agent 对话的尺寸、结构和样式，仅比较外层配色。
+
+### What
+
+- 在既有 `frontend/interaction-visual-demo` 参考目录新增独立 `cloud-workbench.html`，严格保留 36px 顶栏、48px 活动栏、262px 左栏、中间编辑区和 450px 对话区。
+- 将页面底色、顶栏、活动栏、左侧外壳、选中态和外层分隔线收口为单独 shell token，提供“云白工行红 / 纯雪白 / 鼠尾草灰”三套对照；编辑器和对话区使用固定 inner token 与字面颜色，不参与主题切换。
+- 补充视觉参考目录 README 和前端总览说明；该页面不加入 pnpm workspace、不调用后端，也不进入生产构建。
+
+### How
+
+- 对照 `FigmaShell.vue`、`FigmaFileExplorer.vue` 和 `FigmaChatPanel.vue` 的现有尺寸与关键样式制作静态预览，没有新增第二套生产组件或修改正式 Vue 页面。
+- 使用本地 HTTP server 在 `http://127.0.0.1:4173/cloud-workbench.html` 启动，并通过 Playwright 在 1440×980 视口依次截图检查三套主题；控制台 0 error / 0 warning。
+- 三套主题下重复读取对话根元素计算样式，均保持 `450px`、`rgb(255, 255, 255)` 背景、`rgb(51, 51, 51)` 文字和同一字体栈。
+
+### Result
+
+- 已形成只验证外层换肤的可交互 HTML 预览，默认云白工行红方案；不会把对话区改造成新的卡片或气泡体系。
+- 未修改生产前端代码、HTTP API、RunEvent/SSE、数据库/Flyway、性能、安全、兼容性、generated SDK、OpenCode 源码或环境配置。
