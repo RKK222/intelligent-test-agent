@@ -5,6 +5,23 @@
 
 ## Entries
 
+### 2026-07-29 - 确认新关联应用源码首次下载被 manageable 门禁阻断
+
+### Why
+- 企业部署后新增应用代码库并建立应用关联，但“应用源码”入口仍找不到该仓库；用户要求先只读定位，不修改业务代码。
+
+### What
+- 确认应用源码列表只保留 `APPLICATION_CODE_REPOSITORY`；正确类型的新仓库因没有 active snapshot 被标记为 `NOT_DOWNLOADED`，紧凑入口按设计隐藏该状态。
+- 确认后端把 `manageable` 写成 `occupied && (owner || appAdmin)`，导致从未下载或已过期仓库一律不可管理；前端“下载版本库”又要求至少一个 `manageable=true` 才打开管理弹窗，因此首次下载链路被完全阻断。
+
+### How
+- 沿 `AppSourcePicker -> AgentWorkbench -> AppSourceController -> AppSourceApplicationService -> ConfigurationManagementMapper.xml` 只读核对调用链，并反编译当前 `deploy/internal/dist/backend/lib/test-agent-workspace-management-0.1.0-SNAPSHOT.jar`、搜索当前前端 dist，确认交付物包含同一逻辑。
+- 前端 `AppSourcePicker`/`AppSourceDialog` 定向 Vitest 11/11 通过；JDK 25 下 `AppSourceApplicationServiceTest` 27/27 通过，现有后端无快照用例未断言 `manageable`，所以没有发现前后端契约断裂。
+
+### Result
+- 根因已确认但未修复；现场可用仓库列表 API 或只读查询核对 `repository_type`。重复关联、刷新或重复部署当前包不能解除首次下载门禁；后续应补后端 `manageable` 规则及跨层回归测试。
+- 本次不修改业务代码、HTTP/进度 WebSocket wire、数据库/Flyway、SQL、配置、部署产物、generated SDK 或 OpenCode 源码。
+
 ### 2026-07-29 - 固化空回答的公共工具构建失败判定
 
 ### Why
