@@ -10,7 +10,6 @@ import {
   promptPartsForUserDisplay,
   reduceAgentChatRuntime,
   routeWorkspaceAttachmentsForModel,
-  workspaceAttachmentSha256,
   workspaceFileToPromptAttachment,
   type ComposerAttachment
 } from "@test-agent/agent-chat";
@@ -182,6 +181,7 @@ import WorkbenchFooter from "./WorkbenchFooter.vue";
 import { notifyFeedback } from "./notify";
 import { appendLatestRawOutputEntry, prepareRawOutputBody } from "./raw-output";
 import { formatBeijingDateTimeInput } from "../utils/night-execution-schedule";
+import { blobSha256Hex } from "../utils/sha256";
 import {
   createRuntimeStateOutageTracker,
   type RuntimeStateFallbackLease
@@ -6342,7 +6342,7 @@ async function handleChatAttachmentUpload(files: File[]) {
     await api.createDirectory(workspaceId, CHAT_ATTACHMENT_DIRECTORY);
     const targetPaths = new Map<File, string>();
     for (const file of files) {
-      const sha256 = await workspaceAttachmentSha256(file);
+      const sha256 = await blobSha256Hex(file);
       targetPaths.set(
         file,
         workspaceAttachmentTargetPath(CHAT_ATTACHMENT_DIRECTORY, file.name, `sha256_${sha256}`)

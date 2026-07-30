@@ -83,15 +83,6 @@ export function routeWorkspaceAttachmentsForModel(
   });
 }
 
-/** 计算聊天附件的稳定内容指纹，供工作区物理文件复用。 */
-export async function workspaceAttachmentSha256(file: Blob): Promise<string> {
-  if (!globalThis.crypto?.subtle) {
-    throw new Error("当前浏览器不支持附件内容指纹计算");
-  }
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
 export function buildComposerPromptParts(prompt: string, attachments: ComposerAttachment[] = []): PromptPart[] {
   const parts: PromptPart[] = [];
   const trimmed = prompt.trim();

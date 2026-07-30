@@ -21,7 +21,6 @@ export {
   buildComposerPromptParts,
   fileToPromptAttachment,
   routeWorkspaceAttachmentsForModel,
-  workspaceAttachmentSha256,
   workspaceFileToPromptAttachment
 } from "./prompt-parts";
 export type { ComposerAttachment } from "./prompt-parts";

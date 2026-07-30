@@ -3,7 +3,6 @@ import {
   buildComposerPromptParts,
   fileToPromptAttachment,
   routeWorkspaceAttachmentsForModel,
-  workspaceAttachmentSha256,
   workspaceFileToPromptAttachment
 } from "../src/prompt-parts";
 
@@ -133,11 +132,5 @@ describe("prompt part attachments", () => {
       name: "Vision",
       capabilities: { input: { image: true, pdf: true } }
     })[0]?.part.source).toEqual({ contextType: "workspace_attachment" });
-  });
-
-  it("computes a stable SHA-256 content fingerprint", async () => {
-    await expect(workspaceAttachmentSha256(new Blob(["hello"]))).resolves.toBe(
-      "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
-    );
   });
 });

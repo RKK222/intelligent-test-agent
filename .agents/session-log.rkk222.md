@@ -5,6 +5,25 @@
 
 ## Entries
 
+### 2026-07-30 - 兼容内网 HTTP 附件内容指纹
+
+### Why
+
+- 聊天附件内容寻址直接依赖 `crypto.subtle.digest`；企业浏览器通过内网 HTTP 地址访问时可能没有 Web Crypto subtle，上传会被“当前浏览器不支持附件内容指纹计算”直接阻断。
+
+### What
+
+- 新增 `agent-web/src/utils/sha256.ts`：优先使用 Web Crypto SHA-256，subtle 缺失或执行失败时按 64 KiB 分块回退到项目已有的 node-forge；附件仍生成完全相同的十六进制哈希路径。
+- `AgentWorkbench` 改接兼容入口；SSH 私钥指纹的 node-forge 路径复用同一摘要核心，删除两套纯 JS SHA-256 实现。同步 agent-web README、PACKAGE 与 agent-chat 包说明。
+
+### How
+
+- 回归覆盖原生 subtle、subtle 缺失、digest 拒绝和跨 64 KiB 分块边界；定向 13 项通过。全量 Vitest 在默认高并发下触发既有 Mermaid 5 秒用例负载超时，相关文件单跑 12/12 通过，限制 `--maxWorkers=4` 后全量 105 文件、1723 项通过、1 项既有跳过；前端 lint 和生产 build 通过。
+
+### Result
+
+- 使用 JDK 25、`.env.test` 重启三服务；后端 health/readiness `UP`，前端 3000 返回 200，CORS 正常，manager 与用户 OpenCode 进程最终 `HEALTHY`。未修改 OpenCode 源码、后端、HTTP API、RunEvent、数据库/Flyway、鉴权或 `.env*`。
+
 ### 2026-07-30 - 基于 Python 工具运行时重建企业双后台交付
 
 ### Why

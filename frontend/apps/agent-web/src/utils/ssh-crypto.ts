@@ -1,4 +1,5 @@
 import forge from "node-forge";
+import { sha256BytesWithForge } from "./sha256";
 
 /**
  * SSH 私钥客户端混合加密工具：优先使用 Web Crypto API，不可用时使用纯 JS 加密回退。
@@ -193,9 +194,7 @@ function bytesToBinaryString(bytes: Uint8Array): string {
 
 /** 纯 JS SHA-256 指纹，用于 HTTP 内网缺少 Web Crypto subtle 的企业浏览器。 */
 function computeFingerprintWithForge(plaintext: string): string {
-  const digest = forge.md.sha256.create();
-  digest.update(plaintext, "utf8");
-  const bytes = Uint8Array.from(digest.digest().getBytes(), (char) => char.charCodeAt(0));
+  const bytes = sha256BytesWithForge(new TextEncoder().encode(plaintext));
   return `SHA256:${bytesToBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}`;
 }
 
