@@ -3550,3 +3550,25 @@
 - 新包会在 `.4/.114` 更新 Java、部署并诊断 toolbox、写入缺失的 toolbox 指纹，同时复用且不重启现有 worker runtime；`.2` 更新前端。
 - 企业实际部署仍需按 `.4 → .114 → .2` 顺序执行；`.4` 成功后必须确认两项指纹同时存在，再继续下一台。
 - 本次未修改业务代码、API、事件、数据库结构、Flyway SQL、安全配置、generated SDK、OpenCode 源码或 `.env*`。
+
+### 2026-07-30 - 固化测试工作库目录选择规则到用户手册
+
+### Why
+
+- 用户根据目录树截图排查工作空间无法选择问题，确认当前应用为 `F-APIP`，但仓库根目录使用了 `F-APIP.SUPPORT`，且候选路径存在三级目录。
+
+### What
+
+- 更新用户手册的设置、首次使用、工作区和 FAQ 章节，明确测试工作库只能选择 `应用名称/一级子目录`。
+- 补充应用名称大小写、连字符和点号必须完全匹配的规则，并加入 `F-APIP/f-apip-support`、`F-APIP.SUPPORT/workspace`、`F-APIP/f-apip-support/workspace` 对照示例。
+- 增加目录可展开但节点不可点击时的排查项，并同步说明测试工作库分支格式要求。
+
+### How
+
+- 依据前端目录节点选择条件和后端工作空间创建校验，采用最小范围 Markdown 修改；未修改业务代码、API、数据库、环境配置或生成产物。
+- 执行 `git diff --check`。
+- 执行 `corepack pnpm --filter @test-agent/user-manual build`，VitePress 构建成功。
+
+### Result
+
+- 手册已能直接解释本次目录命名问题及正确目录示例，构建产物生成流程通过。
