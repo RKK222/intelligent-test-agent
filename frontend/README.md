@@ -83,6 +83,12 @@ packages/shared-types
 独立聊天域名回到平台固定 `/lobehub/launch` 时，router 先复用现有登录保护；已有平台登录态会在当前标签自动
 换票，未登录则完成统一认证后恢复固定路由。前端不接收 return URL，也不尝试读取跨域 LobeHub Cookie。
 
+本地完整联调从仓库根目录显式执行
+`./restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`，聊天服务位于
+`http://127.0.0.1:3210`。默认重启命令不启动、不探测也不停止 LobeHub；独立 fork 默认位于同级
+`../lobehub-platform`，运行密钥只写入 `.tmp/dev-services/lobehub-dev.env`，本地定时任务由受保护的 loopback
+scheduler 触发。
+
 ## 本地命令
 
 ```bash

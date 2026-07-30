@@ -221,12 +221,21 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
   网关每次调用重新检查平台用户状态，并覆盖客户端 Authorization、供应商选择、UCID 和 trace header。
 - LobeHub Redis 使用独立 ACL 用户，key 与 pub/sub channel 均限制为 `lobehub:app:*`，并拒绝管理命令和平台
   前缀；平台 SSO key 固定在 `test-agent:lobehub-sso:*`。RustFS bucket 必须私有，初始化任务必须显式撤销匿名访问。
+- LobeHub app 默认只绑定 `127.0.0.1:3210`。跨机反向代理时只允许绑定获批的具体内网 IPv4，拒绝 wildcard，
+  并用主机防火墙把 3210 来源限制为代理主机；RustFS、ParadeDB 和 Redis 不得随之暴露。
+- `/data/testagent/config/lobehub.env` 必须是 root 控制的非符号链接 mode `0600` 文件，拒绝重复键和非法 dotenv。
+  启动脚本必须按容器生成临时最小 env：数据库和对象存储容器不得获得 HMAC、Session、模型委托或彼此密钥；
+  临时文件退出即删，secret 不放入 Docker 命令行。
 - `LOBEHUB_ENABLED=true` 不是绕过配置校验的开关：固定聊天 origin、虚拟邮箱域和唯一 owner 必须同时脱离
   migration 占位值，平台才允许落票据。现场 `validate-config` 还必须核对 digest 镜像、secret 长度、离线开关、
   Cookie/Session 契约和执行能力门禁，任一不满足都禁止 migration 或启动 app。
 - 完全离线部署必须在 UI 和服务端同时关闭公网搜索、SaaS Connector、BYOK、自定义 Base URL、遥测、在线更新、
-  Marketplace、CDN 与运行期下载。Windows 永久拒绝本地执行；Linux 沙箱未在目标主机通过真实边界验收时
-  fail closed；即使开启，也必须提供 root 所有、mode `0600` 且绑定当前发行版/内核的通过证据。
+  Marketplace、CDN 与运行期下载。`v2.2.11-platform.1` 对 Windows/Linux 都强制
+  `LOBEHUB_DEVICE_EXECUTION_MODE=disabled`，不存在通过旧变量放开的路径；后续 Linux 执行版本仍须在目标主机
+  通过真实边界验收并 fail closed，且提供 root 所有、mode `0600`、绑定当前发行版/内核的通过证据。
+- 企业离线版必须在代理与工作流 router 两层拒绝 `/api/workflows/*`，不得配置 QStash。定时任务只允许单一 app
+  实例使用至少 32 字节的独立 `ENTERPRISE_INTERNAL_SCHEDULER_SECRET` 调用 loopback 内部入口，并强制
+  `AGENT_RUNTIME_MODE=local`；该密钥不得进入浏览器、日志或进程命令行，queue 模式必须失败关闭。
 - 当前企业现场纯 HTTP 会使表单票据、Session Cookie 和服务端委托暴露于同网段窃听与劫持风险。网络隔离、
   短票据、HMAC、nonce、短 Session 和 scope 只能缓解，不能替代 TLS；该剩余风险必须进入上线审批。
 

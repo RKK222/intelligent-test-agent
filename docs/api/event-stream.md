@@ -829,7 +829,8 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 LobeHub 登录票据签发、HMAC 兑换/撤销、模型目录维护与能力探测都是普通 HTTP API，不创建平台 Session、Run
 或 RunEvent。模型网关的 `text/event-stream` 只是上游 OpenAI-compatible 响应的逐块转发，不进入
 `event-stream-client`，不支持 `Last-Event-ID`，也不得映射或复用任何平台事件名。LobeHub 自身对话、知识索引
-和 Workspace 事件保留在独立 fork 与独立数据库中。
+和 Workspace 事件保留在独立 fork 与独立数据库中。fork 的 loopback 定时调度 POST 及 `/api/workflows/*`
+离线拒绝同样不创建平台事件，也不进入平台 SSE。
 
 ## 兼容性
 

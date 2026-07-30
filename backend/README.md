@@ -98,6 +98,11 @@ Windows 开发人员若只需要 legacy guo profile，可直接使用已提交�
 
 该配置通过 `-Dspring.profiles.active=guo` 读取 `test-agent-app/src/main/resources/application-guo.yml`，不依赖 shell 启动脚本或 `.env.local`。`guo` profile 已内置 Java 进程需要的数据库、Redis、opencode、manager token、模型来源和模型 key 配置；`TEST_AGENT_OPENCODE_BIN`、`TEST_AGENT_START_OPENCODE` 等只服务于根目录启动编排脚本，不属于 Java 进程配置。当前本地联调默认改用 `test` profile 和 `.env.test`；Windows 用户要连同一测试环境时，可在 PowerShell 中执行 `powershell -ExecutionPolicy Bypass -File .\restart-dev-services.ps1 -Profile test -EnvFile .env.test`，WSL/Git Bash 中继续使用 `./restart-dev-services.sh --profile test --env-file .env.test`。仅启动 Java 后端时，仍可在 IDEA/PowerShell 中显式导入 `.env.test` 的数据库、Redis、模型和 `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 等变量，并用 `-Dspring.profiles.active=test` 启动 Java 后端。
 
+需要同时联调 LobeHub 时，macOS/Linux 从仓库根目录显式执行
+`./restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`。默认不启动 LobeHub；该模式从
+同级 `../lobehub-platform` 启动独立 dev server，开发密钥只写入 `.tmp/dev-services/lobehub-dev.env`，不修改
+`.env.local/.env.test`；fork 的 loopback scheduler 由同一 helper 独立启动和回收。
+
 ### 环境变量配置
 
 首次运行前，复制环境变量模板：

@@ -3,7 +3,15 @@
 本文是平台与独立 LobeHub fork 之间的稳定契约。首个内部版本固定为
 `v2.2.11-platform.1`，上游基线为 [LobeHub v2.2.11](https://github.com/lobehub/lobehub/releases/tag/v2.2.11)、
 commit `5b4cef6`。当前仓库承载平台认证、模型网关、前端入口、数据库 migration 和离线交付准入；
-LobeHub fork 源码不放入本仓库，必须在独立仓库完成本文标为“fork 责任”的功能后才能生成可被离线打包脚本接受的制品。
+LobeHub fork 源码不放入本仓库。本地开发默认从同级独立仓库 `../lobehub-platform` 读取，当前锁定 fork commit
+为 `7d16863c88b8acbacda6d9ee15df0840749e0aaa`；版本事实源为
+`deploy/internal/lobehub/version.env`。企业 Git 管理员仍须把该独立仓库推送到受控内部远端，本机 checkout
+不能替代内部源码托管。
+
+当前 fork 已实现平台票据消费/HMAC 兑换、24 小时 Session、用户和部门 Workspace JIT、委托加密、企业模型
+适配、后台模型身份继承、离线请求门禁、BYOK/本地身份源关闭、默认私有对象和全部设备执行失败关闭。平台仓库
+已提供真实镜像构建器、本地显式启动模式和现场 Docker/systemd 脚本。`v2.2.11-platform.1` 不开放 Linux 本地
+执行；目标发行版/内核的真实沙箱和逃逸验收属于后续可执行版本的上线前置项，不得通过环境变量提前开启。
 
 ## 边界与状态
 
@@ -14,11 +22,12 @@ LobeHub fork 源码不放入本仓库，必须在独立仓库完成本文标为�
 | 部门 Workspace | 规范化部门并返回摘要键 | 唯一映射、并发单创建、成员关系和结构化审计 |
 | 模型 | 管理公开模型目录、能力探测、密钥注入、流式代理和每日聚合 | 只显示“企业模型”适配器，服务端加密保存用户委托 |
 | 对象与资源 | 不承载 LobeHub 文件 | 私有 RustFS bucket、鉴权下载、默认私有资源和显式共享 |
-| 终端能力 | 不复用平台/OpenCode 工作区 | Windows 永久禁用执行；Linux 仅在真实沙箱验收后显式开启 |
+| 终端能力 | 不复用平台/OpenCode 工作区 | 当前版本 Windows/Linux 全部执行失败关闭；后续 Linux 沙箱另行设计验收 |
 | 离线 | 校验外部制品、版本、摘要、签名证据和许可证 | 禁止联网功能、遥测、运行期下载并输出 SBOM/白名单制品 |
 
-独立 fork 未通过本文件和 `docs/deployment/lobehub-offline.md` 的验收前，`LOBEHUB_ENABLED` 必须保持
-`false`。平台已实现的接口不代表 fork 已经完成或允许上线。
+完整介质未取得企业 Authenticode 签名的 Windows x64 客户端、批准的 Linux x86_64 客户端并通过本文和
+`docs/deployment/lobehub-offline.md` 的现场验收前，`LOBEHUB_ENABLED` 必须保持 `false`。已有服务端阶段介质
+只用于镜像、migration 和部署流程验证，不能冒充完整交付包。
 
 ## 浏览器登录交接
 
@@ -107,6 +116,18 @@ fork 必须用独立外部密钥加密委托后再写数据库。浏览器、Des
 该值。定时话题、标题、索引等后台任务使用创建者的委托；过期或用户失效时明确失败，不能回退 owner、系统
 账号或其他用户。
 
+### 离线后台调度
+
+企业离线镜像不部署 QStash，也不接受它的回调。fork 在 Next 代理和独立 Hono router 两层拒绝所有
+`/api/workflows/*` 请求，并把遗漏的 QStash client 出站地址固定到不可达 loopback。生产 launcher 每 60 秒
+向 `127.0.0.1` 的 `/api/agent/enterprise/schedule-dispatch` 发起一次非重叠 POST，使用至少 32 字节、仅服务端
+可见的 `ENTERPRISE_INTERNAL_SCHEDULER_SECRET` 进行 Bearer 认证；请求 30 秒超时，响应正文不进入日志。
+
+该内部 handler 仅在 `LOBEHUB_ENTERPRISE_OFFLINE=1` 时存在，并强制 `AGENT_RUNTIME_MODE=local`；queue 模式
+直接返回 503，不能回退 QStash。调度扫描从任务记录读取 `createdByUserId`，到期任务以内嵌
+`runScheduleTick(taskId, userId)` 执行，因此后续模型调用仍解析创建者委托。当前部署契约只允许一个 LobeHub
+app 实例；未来横向扩容前必须为 sweep 增加跨实例 leader/lock，不能直接复制 app 容器。
+
 fork 只暴露一个“企业模型”适配器，Base URL 固定为平台
 `/api/internal/platform/model-gateway/v1`。禁止 BYOK、自定义 Base URL、供应商 Header 和用户供应商设置。
 Linux 客户端如需调用模型，必须通过 loopback broker 到 LobeHub 服务端，再由服务端携带委托调用平台。
@@ -115,14 +136,16 @@ Linux 客户端如需调用模型，必须通过 loopback broker 到 LobeHub 服
 
 - 关闭公网搜索、SaaS Connector、在线 Marketplace、遥测、更新检查、CDN 资源和运行期插件/模型下载；
   UI 被隐藏的路径也必须在 server action、API、深链和 Labs 中拒绝。
+- 禁止 QStash 及公网 workflow 回调；定时任务只能通过上述带独立 Bearer 的 loopback 调度器以内嵌模式执行。
 - Skills、工具和静态资源只能来自审批白名单制品；记录来源、版本、SHA-256、许可证和审批结果。
 - RustFS bucket 保持私有，附件只通过 Workspace 鉴权的短期签名地址或受控下载代理访问。
 - Windows x64 安装包必须使用企业 Authenticode 证书签名；每个 Windows 账号使用独立应用数据和凭据目录。
   terminal、shell、代码 Agent、stdio MCP、设备执行和 Agent 浏览器控制永久禁用。
-- Linux 首期只交付 x86_64。默认禁用执行；仅专用单用户受管工作站在目标发行版/内核通过真实沙箱逃逸
-  验证后才能开启。所有 shell、CLI Agent 和后台进程入口共享一套显式 sandbox policy，默认拒绝外网、Unix
-  socket、Docker socket、SSH Agent、完整 HOME 和平台目录，只开放独立 LobeHub 工作区、临时目录及审批
-  内网地址；沙箱初始化失败必须 fail closed。
+- Linux 首期客户端目标为 x86_64，但 `v2.2.11-platform.1` 与 Windows 一样强制禁用全部本地/设备执行。
+  后续版本只有在专用单用户受管工作站的目标发行版/内核通过真实沙箱逃逸验证后才能另行设计开启；所有 shell、
+  CLI Agent 和后台进程入口必须共享一套显式 sandbox policy，默认拒绝外网、Unix socket、Docker socket、
+  SSH Agent、完整 HOME 和平台目录，只开放独立 LobeHub 工作区、临时目录及审批内网地址；沙箱初始化失败
+  必须 fail closed。当前版本不存在可绕过该限制的启用变量。
 - LobeHub 工作区不挂载或复用平台/OpenCode 工作区，不新增平台文件 WebSocket 集成。
 
 ## fork 合并和制品门禁
@@ -130,5 +153,6 @@ Linux 客户端如需调用模型，必须通过 loopback broker 到 LobeHub 服
 独立 fork 至少需要自动化覆盖：票据过期/重放、固定回跳、JIT 并发单 Workspace、同名部门合并、调动后
 双权限、默认私有资源、委托服务端加密、后台任务身份继承、离线断网、Windows 所有执行入口拒绝、Linux
 沙箱逃逸边界和私有对象访问。构建产物必须输出源码包、SPDX SBOM、许可证、审批白名单、三份摘要镜像、
-Windows/Linux 客户端及 Authenticode 证据；准入格式见部署文档。任何一项缺失时不得把 `LOBEHUB_ENABLED`
-切换为 `true`。
+Windows/Linux 客户端及 Authenticode 证据；准入格式见部署文档。镜像必须带
+`org.opencontainers.image.revision`，且与锁定 fork commit 完全一致。任何一项缺失时不得把
+`LOBEHUB_ENABLED` 切换为 `true`。

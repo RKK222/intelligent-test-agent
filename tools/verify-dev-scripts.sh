@@ -47,6 +47,47 @@ if [[ "${restart_help}" != *"backend env:     .env.test"* ]]; then
   echo "${restart_help}" >&2
   fail "restart script help should document .env.test as the default dotenv file"
 fi
+if [[ "${restart_help}" != *"--with-lobehub"* ]]; then
+  echo "${restart_help}" >&2
+  fail "restart script help should document the opt-in LobeHub development mode"
+fi
+if ! grep -Fq 'with_lobehub=false' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script must keep LobeHub disabled by default"
+fi
+LOBEHUB_DEV_SCRIPT="${ROOT_DIR}/tools/lobehub-dev-services.sh"
+LOBEHUB_DEV_COMPOSE="${ROOT_DIR}/deploy/dev/lobehub-compose.yml"
+[[ -f "${LOBEHUB_DEV_SCRIPT}" ]] || fail "LobeHub dev service helper missing: ${LOBEHUB_DEV_SCRIPT}"
+[[ -f "${LOBEHUB_DEV_COMPOSE}" ]] || fail "LobeHub dev Compose file missing: ${LOBEHUB_DEV_COMPOSE}"
+run_check "LobeHub dev service script bash syntax" bash -n "${LOBEHUB_DEV_SCRIPT}"
+run_check "LobeHub dev service script help" bash "${LOBEHUB_DEV_SCRIPT}" --help
+run_check "LobeHub dev service behavior" bash "${ROOT_DIR}/tools/lobehub-dev-services-test.sh"
+if grep -Eq 'image:.*:latest([^-]|$)|image:.*:latest-pg17' "${LOBEHUB_DEV_COMPOSE}"; then
+  fail "LobeHub dev dependencies must use the release-approved immutable digests"
+fi
+if grep -Fq 'source "${ENV_FILE}"' "${LOBEHUB_DEV_SCRIPT}"; then
+  fail "LobeHub dev helper must parse its generated dotenv as data instead of executing it"
+fi
+if grep -Eq 'compose up .*rustfs-init' "${LOBEHUB_DEV_SCRIPT}"; then
+  fail "LobeHub dev helper must not include the one-shot bucket init job in compose --wait"
+fi
+if ! grep -Fq 'compose run --rm rustfs-init' "${LOBEHUB_DEV_SCRIPT}"; then
+  fail "LobeHub dev helper must run the bucket init job separately after dependencies are healthy"
+fi
+if ! grep -Fq "printf 'DATABASE_DRIVER=node\\n'" "${LOBEHUB_DEV_SCRIPT}"; then
+  fail "LobeHub dev helper must select the node-postgres driver for local ParadeDB"
+fi
+if ! grep -Fq "printf 'AGENT_RUNTIME_MODE=local\\n'" "${LOBEHUB_DEV_SCRIPT}"; then
+  fail "LobeHub dev helper must fail closed to the non-QStash local runtime"
+fi
+if ! grep -Fq 'ENTERPRISE_INTERNAL_SCHEDULER_SECRET' "${LOBEHUB_DEV_SCRIPT}"; then
+  fail "LobeHub dev helper must generate a private loopback scheduler secret"
+fi
+if ! grep -Fq 'launcher.startEnterpriseOfflineScheduler()' "${LOBEHUB_DEV_SCRIPT}"; then
+  fail "LobeHub dev helper must reuse the fork loopback scheduler implementation"
+fi
+if ! grep -Fq 'lobehub-scheduler.pid' "${LOBEHUB_DEV_SCRIPT}"; then
+  fail "LobeHub dev helper must stop its scheduler process with the app"
+fi
 if ! grep -Fq 'export TEST_AGENT_ROOT="${TEST_AGENT_ROOT:-${ROOT_DIR}}"' "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script should default TEST_AGENT_ROOT without overriding an explicit value"
 fi

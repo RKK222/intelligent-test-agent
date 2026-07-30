@@ -8,6 +8,16 @@ DB_CONTAINER="test-agent-lobehub-db"
 RUSTFS_CONTAINER="test-agent-lobehub-rustfs"
 APP_CONTAINER="test-agent-lobehub-app"
 MC_BIN="${BASE_DIR}/lobehub/bin/mc-linux-amd64"
+TEMP_ENV_FILES=()
+
+cleanup_temp_env_files() {
+  local file
+  for file in "${TEMP_ENV_FILES[@]-}"; do
+    [[ -n "${file}" ]] && rm -f "${file}"
+  done
+  return 0
+}
+trap cleanup_temp_env_files EXIT
 
 usage() {
   echo "Usage: $0 {validate-config|check-redis|start-db|migrate|start-rustfs|init-bucket|start-app|start|stop|status}" >&2
@@ -15,7 +25,58 @@ usage() {
 
 env_value() {
   local key="$1"
-  awk -F= -v wanted="${key}" '$1 == wanted { print substr($0, index($0, "=") + 1); found=1 } END { if (!found) exit 1 }' "${ENV_FILE}"
+  awk -F= -v wanted="${key}" '$1 == wanted { print substr($0, index($0, "=") + 1); found=1; exit } END { if (!found) exit 1 }' "${ENV_FILE}"
+}
+
+validate_env_file_syntax() {
+  local line line_number=0 key seen_keys=$'\n'
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line_number=$((line_number + 1))
+    [[ "${line}" != *$'\r'* ]] || {
+      echo "LobeHub env contains CR characters at line ${line_number}" >&2
+      exit 1
+    }
+    [[ -z "${line}" || "${line}" == \#* ]] && continue
+    [[ "${line}" == *=* ]] || {
+      echo "Invalid LobeHub dotenv line ${line_number}" >&2
+      exit 1
+    }
+    key="${line%%=*}"
+    [[ "${key}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || {
+      echo "Invalid LobeHub dotenv key at line ${line_number}" >&2
+      exit 1
+    }
+    [[ "${seen_keys}" != *$'\n'"${key}"$'\n'* ]] || {
+      echo "Duplicate LobeHub dotenv key: ${key}" >&2
+      exit 1
+    }
+    seen_keys+="${key}"$'\n'
+  done <"${ENV_FILE}"
+}
+
+create_runtime_env_file() {
+  local output_variable="$1" runtime_env key value
+  shift
+  umask 077
+  runtime_env="$(mktemp "${TMPDIR:-/tmp}/test-agent-lobehub-env.XXXXXX")"
+  for key in "$@"; do
+    value="$(require_env "${key}")"
+    printf '%s=%s\n' "${key}" "${value}" >>"${runtime_env}"
+  done
+  chmod 0600 "${runtime_env}"
+  TEMP_ENV_FILES+=("${runtime_env}")
+  printf -v "${output_variable}" '%s' "${runtime_env}"
+}
+
+create_app_runtime_env_file() {
+  local output_variable="$1"
+  create_runtime_env_file "${output_variable}" \
+    APP_URL INTERNAL_APP_URL AUTH_SECRET KEY_VAULTS_SECRET \
+    ENTERPRISE_INTERNAL_SCHEDULER_SECRET DATABASE_URL DATABASE_DRIVER REDIS_URL REDIS_PREFIX \
+    S3_ENDPOINT S3_BUCKET S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY S3_ENABLE_PATH_STYLE S3_SET_ACL \
+    PLATFORM_SSO_ENABLED PLATFORM_LAUNCH_URL PLATFORM_SSO_REDEEM_URL PLATFORM_SSO_REVOKE_URL \
+    PLATFORM_MODEL_GATEWAY_BASE_URL PLATFORM_SSO_HMAC_SECRET PLATFORM_MODEL_GRANT_ENCRYPTION_KEY \
+    LOBEHUB_ENTERPRISE_OFFLINE AGENT_RUNTIME_MODE TELEMETRY_DISABLED LOBEHUB_DEVICE_EXECUTION_MODE
 }
 
 require_env() {
@@ -47,11 +108,80 @@ require_secret_bytes() {
   }
 }
 
-require_digest_image() {
-  local key="$1" value expected
+require_base64_secret_bytes() {
+  local key="$1" expected="$2" value bytes
   value="$(require_env "${key}")"
-  [[ "${value}" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] || {
-    echo "LobeHub image ${key} must be pinned by a lowercase SHA-256 digest" >&2
+  command -v openssl >/dev/null 2>&1 || {
+    echo "openssl is required to validate ${key}" >&2
+    exit 1
+  }
+  if ! bytes="$(printf '%s' "${value}" | openssl base64 -d -A 2>/dev/null | wc -c | tr -d '[:space:]')"; then
+    echo "LobeHub secret ${key} must be valid Base64" >&2
+    exit 1
+  fi
+  [[ "${bytes}" == "${expected}" ]] || {
+    echo "LobeHub secret ${key} must decode to exactly ${expected} bytes" >&2
+    exit 1
+  }
+}
+
+require_http_origin() {
+  local key="$1" value remainder
+  value="$(require_env "${key}")"
+  remainder="${value#http://}"
+  [[ "${value}" == http://* && -n "${remainder}" && "${remainder}" != */* \
+    && "${remainder}" != *\?* && "${remainder}" != *\#* && "${remainder}" != *@* ]] || {
+    echo "LobeHub setting ${key} must be a plain HTTP origin without credentials or path" >&2
+    exit 1
+  }
+}
+
+require_http_fixed_path() {
+  local key="$1" expected_path="$2" value remainder authority actual_path
+  value="$(require_env "${key}")"
+  remainder="${value#http://}"
+  authority="${remainder%%/*}"
+  actual_path="/${remainder#*/}"
+  [[ "${value}" == http://* && -n "${authority}" && "${remainder}" == */* \
+    && "${authority}" != *@* && "${actual_path}" == "${expected_path}" \
+    && "${value}" != *\?* && "${value}" != *\#* ]] || {
+    echo "LobeHub setting ${key} must use fixed HTTP path ${expected_path}" >&2
+    exit 1
+  }
+}
+
+require_ipv4_bind_address() {
+  local key="$1" value first second third fourth extra octet
+  value="$(require_env "${key}")"
+  IFS=. read -r first second third fourth extra <<<"${value}"
+  [[ -n "${first}" && -n "${second}" && -n "${third}" && -n "${fourth}" && -z "${extra}" ]] || {
+    echo "LobeHub setting ${key} must be a concrete IPv4 address" >&2
+    exit 1
+  }
+  for octet in "${first}" "${second}" "${third}" "${fourth}"; do
+    [[ "${octet}" =~ ^[0-9]{1,3}$ ]] || {
+      echo "LobeHub setting ${key} contains an invalid IPv4 octet" >&2
+      exit 1
+    }
+    ((10#${octet} <= 255)) || {
+      echo "LobeHub setting ${key} contains an invalid IPv4 octet" >&2
+      exit 1
+    }
+  done
+  [[ "${value}" != 0.0.0.0 && $((10#${first})) -ge 1 && $((10#${first})) -le 223 ]] || {
+    echo "LobeHub setting ${key} must not use wildcard, unspecified or multicast binding" >&2
+    exit 1
+  }
+}
+
+require_release_image() {
+  local key="$1" value expected leaf tag image_id
+  value="$(require_env "${key}")"
+  leaf="${value##*/}"
+  tag="${leaf#*:}"
+  [[ "${value}" =~ ^[A-Za-z0-9._:/-]+$ && "${value}" != *@* \
+    && "${leaf}" == *:* && -n "${tag}" && "${tag}" != latest ]] || {
+    echo "LobeHub image ${key} must use an immutable non-latest tag" >&2
     exit 1
   }
   if [[ -f "${BASE_DIR}/lobehub/release/release.env" ]]; then
@@ -62,15 +192,44 @@ require_digest_image() {
       echo "LobeHub image ${key} does not match the installed release manifest" >&2
       exit 1
     }
+    image_id="$(awk -F= -v wanted="${key}_ID" \
+      '$1 == wanted { print substr($0, index($0, "=") + 1) }' \
+      "${BASE_DIR}/lobehub/release/release.env")"
+    [[ "${image_id}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+      echo "LobeHub release manifest has an invalid ${key}_ID" >&2
+      exit 1
+    }
   fi
 }
 
+verify_loaded_release_images() {
+  local manifest="${BASE_DIR}/lobehub/release/release.env"
+  local key image_ref expected_id actual_id architecture
+  [[ -f "${manifest}" ]] || return 0
+  for key in LOBEHUB_APP_IMAGE LOBEHUB_PARADEDB_IMAGE LOBEHUB_RUSTFS_IMAGE; do
+    image_ref="$(require_env "${key}")"
+    expected_id="$(awk -F= -v wanted="${key}_ID" \
+      '$1 == wanted { print substr($0, index($0, "=") + 1) }' "${manifest}")"
+    actual_id="$(docker image inspect -f '{{.Id}}' "${image_ref}" 2>/dev/null || true)"
+    [[ -n "${actual_id}" && "${actual_id}" == "${expected_id}" ]] || {
+      echo "Loaded LobeHub image ID mismatch for ${image_ref}" >&2
+      exit 1
+    }
+    architecture="$(docker image inspect -f '{{.Architecture}}' "${image_ref}")"
+    [[ "${architecture}" == amd64 ]] || {
+      echo "LobeHub image must be linux/amd64, got ${architecture}: ${image_ref}" >&2
+      exit 1
+    }
+  done
+}
+
 validate_database_env() {
-  require_digest_image LOBEHUB_PARADEDB_IMAGE
+  require_release_image LOBEHUB_PARADEDB_IMAGE
   require_env POSTGRES_DB >/dev/null
   require_env POSTGRES_USER >/dev/null
   require_secret_bytes POSTGRES_PASSWORD 16
   require_env DATABASE_URL >/dev/null
+  require_exact_env DATABASE_DRIVER node
 }
 
 validate_redis_env() {
@@ -83,7 +242,7 @@ validate_redis_env() {
 }
 
 validate_rustfs_env() {
-  require_digest_image LOBEHUB_RUSTFS_IMAGE
+  require_release_image LOBEHUB_RUSTFS_IMAGE
   require_secret_bytes RUSTFS_ACCESS_KEY 16
   require_secret_bytes RUSTFS_SECRET_KEY 32
   require_env LOBEHUB_S3_BUCKET >/dev/null
@@ -91,83 +250,56 @@ validate_rustfs_env() {
   require_env S3_BUCKET >/dev/null
   require_env S3_ACCESS_KEY_ID >/dev/null
   require_secret_bytes S3_SECRET_ACCESS_KEY 32
+  require_exact_env S3_ENABLE_PATH_STYLE 1
   require_exact_env S3_SET_ACL 0
   require_env MC_HOST_lobehub >/dev/null
 }
 
 validate_app_env() {
-  local linux_execution approval_file
-  require_digest_image LOBEHUB_APP_IMAGE
+  require_release_image LOBEHUB_APP_IMAGE
   validate_database_env
   validate_redis_env
   validate_rustfs_env
-  for key in APP_URL NEXTAUTH_URL LOBEHUB_PLATFORM_BASE_URL LOBEHUB_PLATFORM_LAUNCH_URL \
-    LOBEHUB_PLATFORM_REDEEM_URL LOBEHUB_PLATFORM_REVOKE_URL \
-    LOBEHUB_ENTERPRISE_MODEL_BASE_URL; do
-    require_env "${key}" >/dev/null
-  done
-  require_secret_bytes LOBEHUB_PLATFORM_HMAC_SECRET 32
-  require_secret_bytes LOBEHUB_MODEL_GRANT_ENCRYPTION_KEY 32
-  require_secret_bytes KEY_VAULTS_SECRET 32
-  require_secret_bytes NEXT_AUTH_SECRET 32
-  require_exact_env LOBEHUB_SESSION_MAX_AGE_SECONDS 86400
-  require_exact_env LOBEHUB_COOKIE_SECURE false
-  require_exact_env LOBEHUB_COOKIE_SAME_SITE lax
-  require_exact_env LOBEHUB_COOKIE_HOST_ONLY true
-  require_exact_env LOBEHUB_ENTERPRISE_PROVIDER_ONLY true
-  require_exact_env LOBEHUB_ENTERPRISE_MODEL_GRANT_STORAGE server-encrypted
-  for key in LOBEHUB_OFFLINE_MODE LOBEHUB_DISABLE_PUBLIC_SEARCH LOBEHUB_DISABLE_SAAS_CONNECTORS \
-    LOBEHUB_DISABLE_BYOK LOBEHUB_DISABLE_TELEMETRY LOBEHUB_DISABLE_UPDATE_CHECK \
-    LOBEHUB_DISABLE_RUNTIME_DOWNLOADS LOBEHUB_DISABLE_LOCAL_REGISTRATION \
-    LOBEHUB_DISABLE_PASSWORD_LOGIN LOBEHUB_DISABLE_CUSTOM_IDENTITY_PROVIDERS; do
-    require_exact_env "${key}" true
-  done
-  # Windows 执行能力永远不可开启；Linux 开启时必须绑定本机真实逃逸边界验收证据。
-  require_exact_env LOBEHUB_WINDOWS_EXECUTION_ENABLED false
-  linux_execution="$(require_env LOBEHUB_LINUX_EXECUTION_ENABLED)"
-  if [[ "${linux_execution}" == true ]]; then
-    approval_file="$(require_env LOBEHUB_LINUX_SANDBOX_APPROVAL_FILE)"
-    [[ "${approval_file}" == /* && -f "${approval_file}" && ! -L "${approval_file}" ]] || {
-      echo "Linux execution approval must be an absolute regular file" >&2
-      exit 1
-    }
-    [[ "$(stat -c '%a' "${approval_file}" 2>/dev/null || stat -f '%Lp' "${approval_file}")" == 600 ]] || {
-      echo "Linux execution approval file must have mode 0600: ${approval_file}" >&2
-      exit 1
-    }
-    [[ "$(stat -c '%u' "${approval_file}" 2>/dev/null || stat -f '%u' "${approval_file}")" == 0 ]] || {
-      echo "Linux execution approval file must be owned by root: ${approval_file}" >&2
-      exit 1
-    }
-    grep -Fx 'LINUX_SANDBOX_STATUS=PASSED' "${approval_file}" >/dev/null || {
-      echo "Linux execution approval is not PASSED" >&2
-      exit 1
-    }
-    grep -Eq '^LINUX_SANDBOX_TARGET_DISTRIBUTION=.+$' "${approval_file}" || {
-      echo "Linux execution approval does not record the target distribution" >&2
-      exit 1
-    }
-    grep -Fx "LINUX_SANDBOX_KERNEL=$(uname -r)" "${approval_file}" >/dev/null || {
-      echo "Linux execution approval does not match the running kernel" >&2
-      exit 1
-    }
-  elif [[ "${linux_execution}" != false ]]; then
-    echo "LOBEHUB_LINUX_EXECUTION_ENABLED must be true or false" >&2
-    exit 1
-  fi
+  require_http_origin APP_URL
+  require_http_origin INTERNAL_APP_URL
+  require_ipv4_bind_address LOBEHUB_APP_BIND_ADDRESS
+  require_http_fixed_path PLATFORM_LAUNCH_URL /lobehub/launch
+  require_http_fixed_path PLATFORM_SSO_REDEEM_URL /api/internal/platform/lobehub-sso/tickets/redeem
+  require_http_fixed_path PLATFORM_SSO_REVOKE_URL /api/internal/platform/lobehub-sso/grants/revoke
+  require_http_fixed_path PLATFORM_MODEL_GATEWAY_BASE_URL /api/internal/platform/model-gateway/v1
+  require_secret_bytes PLATFORM_SSO_HMAC_SECRET 32
+  require_base64_secret_bytes PLATFORM_MODEL_GRANT_ENCRYPTION_KEY 32
+  require_base64_secret_bytes KEY_VAULTS_SECRET 32
+  require_secret_bytes ENTERPRISE_INTERNAL_SCHEDULER_SECRET 32
+  require_secret_bytes AUTH_SECRET 32
+  require_exact_env PLATFORM_SSO_ENABLED 1
+  require_exact_env LOBEHUB_ENTERPRISE_OFFLINE 1
+  require_exact_env AGENT_RUNTIME_MODE local
+  require_exact_env TELEMETRY_DISABLED 1
+  # 当前 fork 尚未交付目标内核沙箱，所有终端必须失败关闭；不能用旧布尔变量绕过。
+  require_exact_env LOBEHUB_DEVICE_EXECUTION_MODE disabled
 }
 
 ensure_env_file() {
+  local owner_uid
   [[ -f "${ENV_FILE}" ]] || { echo "LobeHub env file not found: ${ENV_FILE}" >&2; exit 1; }
+  [[ ! -L "${ENV_FILE}" ]] || { echo "LobeHub env file must not be a symbolic link: ${ENV_FILE}" >&2; exit 1; }
   [[ "$(stat -c '%a' "${ENV_FILE}" 2>/dev/null || stat -f '%Lp' "${ENV_FILE}")" == "600" ]] || {
     echo "LobeHub env file must have mode 0600: ${ENV_FILE}" >&2
     exit 1
   }
+  owner_uid="$(stat -c '%u' "${ENV_FILE}" 2>/dev/null || stat -f '%u' "${ENV_FILE}")"
+  [[ "${owner_uid}" == "$(id -u)" ]] || {
+    echo "LobeHub env file must be owned by the invoking service account" >&2
+    exit 1
+  }
+  validate_env_file_syntax
 }
 
 ensure_prerequisites() {
   ensure_env_file
   command -v docker >/dev/null 2>&1 || { echo "docker is required" >&2; exit 1; }
+  verify_loaded_release_images
   docker network inspect "${NETWORK}" >/dev/null 2>&1 || docker network create "${NETWORK}" >/dev/null
 }
 
@@ -205,18 +337,24 @@ check_redis() {
 }
 
 start_db() {
-  local image server_version
+  local image server_version db_env
   validate_database_env
   image="$(require_env LOBEHUB_PARADEDB_IMAGE)"
+  create_runtime_env_file db_env POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD
   mkdir -p "${BASE_DIR}/lobehub/paradedb"
   docker rm -f "${DB_CONTAINER}" >/dev/null 2>&1 || true
   docker run -d --name "${DB_CONTAINER}" --restart unless-stopped \
-    --network "${NETWORK}" --env-file "${ENV_FILE}" \
+    --network "${NETWORK}" --env-file "${db_env}" \
     -v "${BASE_DIR}/lobehub/paradedb:/var/lib/postgresql/data" \
     "${image}" >/dev/null
   local attempt
   for attempt in {1..60}; do
-    if docker exec "${DB_CONTAINER}" pg_isready -U "$(require_env POSTGRES_USER)" -d "$(require_env POSTGRES_DB)" >/dev/null 2>&1; then
+    # 官方 entrypoint 初始化时会短暂启动一个临时 PostgreSQL；只看 pg_isready 会在它
+    # 随后关闭、正式进程尚未 exec 成 PID 1 的窗口提前放行迁移。
+    if docker exec "${DB_CONTAINER}" sh -c \
+      'test "$(cat /proc/1/comm)" = postgres' >/dev/null 2>&1 \
+      && docker exec "${DB_CONTAINER}" pg_isready \
+        -U "$(require_env POSTGRES_USER)" -d "$(require_env POSTGRES_DB)" >/dev/null 2>&1; then
       server_version="$(docker exec "${DB_CONTAINER}" psql \
         -U "$(require_env POSTGRES_USER)" -d "$(require_env POSTGRES_DB)" \
         -Atqc 'show server_version_num')"
@@ -233,19 +371,24 @@ start_db() {
 }
 
 migrate() {
+  local app_env
   validate_app_env
-  docker run --rm --network "${NETWORK}" --env-file "${ENV_FILE}" \
-    "$(require_env LOBEHUB_APP_IMAGE)" pnpm db:migrate
+  create_app_runtime_env_file app_env
+  # 生产镜像是 scratch + Node，既不包含 pnpm 也不包含 shell；直接运行镜像内迁移入口。
+  docker run --rm --network "${NETWORK}" --env-file "${app_env}" \
+    "$(require_env LOBEHUB_APP_IMAGE)" /app/docker.cjs
 }
 
 start_rustfs() {
+  local rustfs_env
   validate_rustfs_env
+  create_runtime_env_file rustfs_env RUSTFS_ACCESS_KEY RUSTFS_SECRET_KEY
   mkdir -p "${BASE_DIR}/lobehub/rustfs/data" "${BASE_DIR}/lobehub/rustfs/logs"
   # RustFS official container uses UID 10001. Refuse to hide permission failures behind a root container.
   chown -R 10001:10001 "${BASE_DIR}/lobehub/rustfs/data" "${BASE_DIR}/lobehub/rustfs/logs"
   docker rm -f "${RUSTFS_CONTAINER}" >/dev/null 2>&1 || true
   docker run -d --name "${RUSTFS_CONTAINER}" --restart unless-stopped \
-    --network "${NETWORK}" --env-file "${ENV_FILE}" \
+    --network "${NETWORK}" --env-file "${rustfs_env}" \
     -p 127.0.0.1:9000:9000 -p 127.0.0.1:9001:9001 \
     -v "${BASE_DIR}/lobehub/rustfs/data:/data" \
     -v "${BASE_DIR}/lobehub/rustfs/logs:/logs" \
@@ -273,12 +416,29 @@ init_bucket() {
 }
 
 start_app() {
+  local bind_address attempt app_env
   validate_app_env
+  command -v curl >/dev/null 2>&1 || { echo "curl is required for the LobeHub app readiness check" >&2; exit 1; }
+  bind_address="$(require_env LOBEHUB_APP_BIND_ADDRESS)"
+  create_app_runtime_env_file app_env
   docker rm -f "${APP_CONTAINER}" >/dev/null 2>&1 || true
   docker run -d --name "${APP_CONTAINER}" --restart unless-stopped \
-    --network "${NETWORK}" --env-file "${ENV_FILE}" \
-    -p 127.0.0.1:3210:3210 \
+    --network "${NETWORK}" --env-file "${app_env}" \
+    -p "${bind_address}:3210:3210" \
     "$(require_env LOBEHUB_APP_IMAGE)" >/dev/null
+  for attempt in {1..120}; do
+    if curl -fs --max-time 3 -o /dev/null "http://${bind_address}:3210/"; then
+      echo "LobeHub app is ready on ${bind_address}:3210"
+      return
+    fi
+    if [[ "$(docker inspect -f '{{.State.Running}}' "${APP_CONTAINER}" 2>/dev/null || true)" != true ]]; then
+      break
+    fi
+    sleep 2
+  done
+  docker rm -f "${APP_CONTAINER}" >/dev/null 2>&1 || true
+  echo "LobeHub app did not become ready on ${bind_address}:3210" >&2
+  exit 1
 }
 
 start_all() {
@@ -295,7 +455,15 @@ stop_all() {
 }
 
 status_all() {
+  local bind_address
+  bind_address="$(require_env LOBEHUB_APP_BIND_ADDRESS)"
   docker ps --filter "name=test-agent-lobehub" --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+  command -v curl >/dev/null 2>&1 || { echo "curl is required for the LobeHub app status check" >&2; exit 1; }
+  curl -fsS --max-time 3 -o /dev/null "http://${bind_address}:3210/" || {
+    echo "LobeHub app readiness failed on ${bind_address}:3210" >&2
+    exit 1
+  }
+  echo "LobeHub app readiness passed on ${bind_address}:3210"
 }
 
 if [[ "${1:-}" == validate-config ]]; then

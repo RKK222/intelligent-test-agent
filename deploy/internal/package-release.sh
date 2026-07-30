@@ -256,6 +256,24 @@ require_digest_pinned_image() {
   fi
 }
 
+require_lobehub_loadable_image() {
+  local variable_name="$1" image_reference="$2" image_id="$3" leaf tag
+  leaf="${image_reference##*/}"
+  tag="${leaf#*:}"
+  # docker save/load 不恢复 Registry RepoDigest 映射，因此离线介质使用不可变 tag，
+  # 再以 Docker image ID 和镜像 tar 的 SHA256SUMS 双重校验内容。
+  if [[ ! "${image_reference}" =~ ^[A-Za-z0-9._:/-]+$ \
+      || "${image_reference}" == *@* || "${leaf}" != *:* \
+      || -z "${tag}" || "${tag}" == latest ]]; then
+    echo "${variable_name} must use an immutable non-latest image tag: ${image_reference}" >&2
+    exit 1
+  fi
+  if [[ ! "${image_id}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    echo "${variable_name}_ID must be a lowercase Docker image ID: ${image_id}" >&2
+    exit 1
+  fi
+}
+
 require_platform_image() {
   local variable_name="$1" image_reference="$2" repository="$3" version="$4"
   # 企业 registry 前缀可配置，但源码、镜像 tag 与离线 tar 不能跨平台版本混用。
@@ -734,9 +752,9 @@ package_mysql_image() {
 
 verify_lobehub_artifact_set() {
   local source_dir="$1" required_file path line checksum_line_pattern
-  local internal_version upstream_version upstream_commit image_ref
+  local internal_version upstream_version upstream_commit fork_commit image_ref image_id
   local expected_paths listed_paths client_sha signed_client_sha
-  local lock_file locked_internal_version locked_upstream_version locked_upstream_commit locked_postgres_major
+  local lock_file locked_internal_version locked_upstream_version locked_upstream_commit locked_fork_commit locked_postgres_major
   local locked_contract_version
   [[ -d "${source_dir}" ]] || {
     echo "LobeHub artifact directory not found: ${source_dir}" >&2
@@ -755,11 +773,13 @@ verify_lobehub_artifact_set() {
   locked_internal_version="$(state_value "${lock_file}" LOBEHUB_INTERNAL_VERSION)"
   locked_upstream_version="$(state_value "${lock_file}" LOBEHUB_UPSTREAM_VERSION)"
   locked_upstream_commit="$(state_value "${lock_file}" LOBEHUB_UPSTREAM_COMMIT)"
+  locked_fork_commit="$(state_value "${lock_file}" LOBEHUB_FORK_COMMIT)"
   locked_postgres_major="$(state_value "${lock_file}" LOBEHUB_PARADEDB_POSTGRES_MAJOR)"
   locked_contract_version="$(state_value "${lock_file}" LOBEHUB_PLATFORM_CONTRACT_VERSION)"
   [[ "${locked_internal_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-platform\.[0-9]+$ \
     && "${locked_upstream_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ \
     && "${locked_upstream_commit}" =~ ^[0-9a-f]{7}([0-9a-f]{33})?$ \
+    && "${locked_fork_commit}" =~ ^[0-9a-f]{40}$ \
     && "${locked_postgres_major}" =~ ^[0-9]+$ \
     && "${locked_contract_version}" =~ ^[0-9]+$ ]] || {
     echo "LobeHub version lock is malformed: ${lock_file}" >&2
@@ -819,6 +839,7 @@ verify_lobehub_artifact_set() {
   internal_version="$(state_value "${source_dir}/release.env" LOBEHUB_INTERNAL_VERSION)"
   upstream_version="$(state_value "${source_dir}/release.env" LOBEHUB_UPSTREAM_VERSION)"
   upstream_commit="$(state_value "${source_dir}/release.env" LOBEHUB_UPSTREAM_COMMIT)"
+  fork_commit="$(state_value "${source_dir}/release.env" LOBEHUB_FORK_COMMIT)"
   [[ "${internal_version}" == "${locked_internal_version}" ]] || {
     echo "Unexpected LobeHub internal version: ${internal_version}" >&2
     exit 1
@@ -837,6 +858,10 @@ verify_lobehub_artifact_set() {
     echo "Unexpected LobeHub upstream commit: ${upstream_commit}" >&2
     exit 1
   fi
+  [[ "${fork_commit}" == "${locked_fork_commit}" ]] || {
+    echo "Unexpected LobeHub fork commit: ${fork_commit}" >&2
+    exit 1
+  }
   [[ "$(state_value "${source_dir}/release.env" LOBEHUB_PARADEDB_POSTGRES_MAJOR)" == "${locked_postgres_major}" ]] || {
     echo "LobeHub ParadeDB artifact must use PostgreSQL major ${locked_postgres_major}" >&2
     exit 1
@@ -869,7 +894,9 @@ verify_lobehub_artifact_set() {
     exit 1
   }
   for image_ref in LOBEHUB_APP_IMAGE LOBEHUB_PARADEDB_IMAGE LOBEHUB_RUSTFS_IMAGE; do
-    require_digest_pinned_image "${image_ref}" "$(state_value "${source_dir}/release.env" "${image_ref}")"
+    image_id="$(state_value "${source_dir}/release.env" "${image_ref}_ID")"
+    require_lobehub_loadable_image \
+      "${image_ref}" "$(state_value "${source_dir}/release.env" "${image_ref}")" "${image_id}"
   done
 }
 

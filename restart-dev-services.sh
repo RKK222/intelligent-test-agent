@@ -22,11 +22,13 @@ BACKEND_SCREEN_SESSION="test-agent-backend"
 FRONTEND_SCREEN_SESSION="test-agent-frontend"
 OPENCODE_SCREEN_SESSION="test-agent-opencode"
 OPENCODE_MANAGER_SCREEN_SESSION="test-agent-opencode-manager"
+LOBEHUB_DEV_SCRIPT="${ROOT_DIR}/tools/lobehub-dev-services.sh"
 
 profile="test"
 env_file=""
 skip_backend_build=false
 skip_frontend_build=false
+with_lobehub=false
 frontend_dependencies_checked=false
 # 后端需要直连数据库和 Redis，显式清空 JVM 从系统继承的代理属性。
 BACKEND_JAVA_DIRECT_NETWORK_ARGS=(
@@ -43,11 +45,11 @@ BACKEND_JAVA_DIRECT_NETWORK_ARGS=(
 
 usage() {
   cat <<'USAGE'
-Usage: ./restart-dev-services.sh [--profile test|local] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--help]
+Usage: ./restart-dev-services.sh [--profile test|local] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--with-lobehub] [--help]
 
 Compile and restart the local platform services one by one. Each service is
 stopped (kill old process + screen session) before its new instance starts,
-in dependency order: backend -> opencode-manager -> frontend.
+in dependency order: backend -> opencode-manager -> frontend -> optional LobeHub.
 
 Services managed by this script:
   backend           Spring Boot test-agent-app (java -jar, profile from --profile).
@@ -57,6 +59,8 @@ Services managed by this script:
                     Standalone `opencode serve` is NOT started separately when the
                     manager runs, because the manager spawns opencode child processes.
   frontend          agent-web Vite dev server (corepack pnpm dev).
+  lobehub           Independent ../lobehub-platform fork plus dev-only ParadeDB/RustFS.
+                    It is started only when --with-lobehub is explicitly supplied.
 
 Defaults:
   backend profile: test
@@ -67,6 +71,7 @@ Defaults:
   process logs:    .tmp/dev-services/
   backend logs:    backend/logs/backend.log, backend/logs/sse.log, backend/logs/error.log
   manager logs:    <manager-state-dir>/logs/manager.log, <manager-state-dir>/logs/manager-error.log
+  LobeHub:         disabled unless --with-lobehub is supplied
   screen sessions: test-agent-backend, test-agent-frontend, test-agent-opencode-manager when screen is available
 
 Options:
@@ -75,6 +80,8 @@ Options:
   --log-dir              Service log directory. Relative paths are resolved from the repo root.
   --skip-backend-build   Restart backend without running Maven package first.
   --skip-frontend-build  Restart frontend without running pnpm build first.
+  --with-lobehub         Opt in to the independent LobeHub fork on http://127.0.0.1:3210.
+                         Reuses TEST_AGENT_REDIS_* with the lobehub:app: prefix.
   --help                 Show this help.
 
 Environment overrides:
@@ -82,6 +89,7 @@ Environment overrides:
   TEST_AGENT_OPENCODE_MANAGER_TOKEN  Shared secret between manager and backend. Defaults to local-manager-token.
   TEST_AGENT_ROOT                    Project root used by common parameter path expansion.
   TESTAGENT                          Compatibility alias for existing local common parameters.
+  TEST_AGENT_LOBEHUB_FORK_DIR        Independent fork directory; default is ../lobehub-platform.
 USAGE
 }
 
@@ -117,6 +125,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-frontend-build)
       skip_frontend_build=true
+      shift
+      ;;
+    --with-lobehub)
+      with_lobehub=true
       shift
       ;;
     --help|-h)
@@ -947,6 +959,18 @@ backend_url="${TEST_AGENT_BASE_URL:-${backend_url}}"
 frontend_url="${TEST_AGENT_FRONTEND_URL:-${frontend_url}}"
 OPENCODE_MANAGER_RUNTIME_STATE_DIR="${OPENCODE_MANAGER_STATE_DIR:-${LOG_DIR}/opencode-manager-state}"
 
+if [[ "${with_lobehub}" == "true" ]]; then
+  [[ -x "${LOBEHUB_DEV_SCRIPT}" ]] || {
+    echo "LobeHub development helper is missing or not executable: ${LOBEHUB_DEV_SCRIPT}" >&2
+    exit 1
+  }
+  export TEST_AGENT_DEV_LOG_DIR="${LOG_DIR}"
+  export LOBEHUB_DEV_ENV_FILE="${LOBEHUB_DEV_ENV_FILE:-${LOG_DIR}/lobehub-dev.env}"
+  "${LOBEHUB_DEV_SCRIPT}" prepare
+  # 同一份 HMAC 被加载到平台后端；文件由 helper 生成在 .tmp 且权限为 0600。
+  load_env_file "${LOBEHUB_DEV_ENV_FILE}"
+fi
+
 # 通用参数中的 $TEST_AGENT_ROOT 由 Java 进程展开；允许调用方显式覆盖以适配其他工作目录。
 # TESTAGENT 是早期本地测试库已使用的兼容别名，保留以避免公共配置路径下发给 manager 时变成字面量。
 export TEST_AGENT_ROOT="${TEST_AGENT_ROOT:-${ROOT_DIR}}"
@@ -1044,9 +1068,17 @@ start_opencode_manager
 stop_frontend_service
 start_frontend
 
+# 4) LobeHub 明确按需启动；默认路径不探测、不停止，也不改变既有开发环境。
+if [[ "${with_lobehub}" == "true" ]]; then
+  "${LOBEHUB_DEV_SCRIPT}" restart
+fi
+
 echo "Restart complete."
 echo "Backend:  ${backend_url}"
 echo "Frontend: ${frontend_url}"
+if [[ "${with_lobehub}" == "true" ]]; then
+  echo "LobeHub:  ${LOBEHUB_DEV_APP_URL:-http://127.0.0.1:3210}"
+fi
 echo "Process logs: ${LOG_DIR}"
 echo "Backend logs: ${BACKEND_APP_LOG_DIR}/backend.log, ${BACKEND_APP_LOG_DIR}/sse.log, ${BACKEND_APP_LOG_DIR}/error.log"
 if should_start_opencode_manager; then

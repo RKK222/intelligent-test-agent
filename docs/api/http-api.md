@@ -3056,6 +3056,17 @@ LobeHub 服务端使用外部密钥加密保存；日志切面和原始交换观
 三个接口都生成/透传 `X-Trace-Id` 并使用统一错误 envelope。兑换和撤销路径由通用平台 Token filter 精确
 放行，Controller 内的 HMAC 是唯一服务鉴权；其它路径不获得该例外。
 
+#### fork 离线调度内部 API
+
+`POST /api/agent/enterprise/schedule-dispatch` 属于独立 LobeHub fork，不是平台 Java API，也不通过企业反向
+代理对浏览器开放。生产 launcher 和本地开发 helper 只从 `127.0.0.1` 调用，并携带
+`Authorization: Bearer {ENTERPRISE_INTERNAL_SCHEDULER_SECRET}`；密钥未配置返回 `503`，不匹配返回 `401`，
+非企业离线模式返回 `404`，`AGENT_RUNTIME_MODE=queue` 返回 `503`。成功响应沿用 fork 的 schedule dispatch
+统计结构，任务以内嵌 local runtime 和记录中的创建者 userId 执行。
+
+企业离线模式下所有 `/api/workflows/*` 外部入口统一返回 `403 ENTERPRISE_OFFLINE_FEATURE_DISABLED`，不得用
+QStash 或伪造 Upstash header 绕过。当前部署只允许一个 app 实例；该内部接口不是横向扩容协调协议。
+
 ### 内部供应商公开模型目录 API
 
 以下接口全部要求平台用户 Bearer Token 和 `SUPER_ADMIN`：

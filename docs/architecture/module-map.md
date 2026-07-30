@@ -83,7 +83,8 @@ Browser
 - `apps/agent-web`、`packages/backend-api`、`packages/shared-types`：分别承担入口/固定 launch、签票 client 与
   短期 ticket DTO；票据不进入 Pinia、router state 或持久化。
 - 独立 LobeHub fork：负责 consume、Session、用户/部门 Workspace JIT、私有资源、企业模型适配器、离线开关与
-  Windows/Linux 设备策略，源码不放入当前仓库。
+  Windows/Linux 设备策略，源码不放入当前仓库；本地默认 checkout 为同级 `../lobehub-platform`，精确提交由
+  `deploy/internal/lobehub/version.env` 锁定。
 
 ## 前端包职责
 

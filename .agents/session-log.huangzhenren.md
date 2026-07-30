@@ -1266,3 +1266,19 @@
   - 当前仓库的平台侧认证、模型网关、前端入口、数据库和离线部署合同已闭环；API 新增且已同步文档，未新增 RunEvent/SSE 事件类型。性能数据只做按日聚合，不保存 prompt、回答、UCID、原始错误或逐请求 trace。
   - LobeHub fork 本体、部门 Workspace JIT、企业模型 UI/服务端适配、Windows 签名客户端和 Linux 真实沙箱不在本仓库，必须按版本/摘要合同外部构建并完成现场验收；在这些产物和目标环境 Flyway history 未核验前保持 `LOBEHUB_ENABLED=false`。
   - 纯 HTTP 的同网段窃听与会话劫持风险仍存在，现阶段仅由网络隔离、一次性票据、短会话、委托 scope 和轮换降低；TLS 仍是后续升级项。未修改 `.env.local`、generated SDK 或 OpenCode 上游源码。
+
+### 2026-07-30 - 完成 LobeHub fork、本地启动与真实服务端介质
+
+- Why:
+  - 前一阶段只完成平台侧合同，独立 fork、本地开发启动、可追溯的真实服务端镜像与现场安装门禁仍未闭环；同时完整上线介质不得在缺少 Windows 企业签名和审批 Linux 客户端时被伪造。
+- What:
+  - 在独立 `/Users/huang/workspace/lobehub-platform` fork 基于上游 `v2.2.11` 实现平台票据登录、部门 Workspace JIT、企业模型适配、离线/私有资源策略和客户端执行禁用；最终提交为 `7d16863c88b8acbacda6d9ee15df0840749e0aaa`，本地标签为 `v2.2.11-platform.1`。
+  - 增加 `build-lobehub-artifacts.sh`、真实镜像运行冒烟、安装器完整性/镜像 ID/AuthentiCode 门禁，并将平台版本锁定到该 fork 提交；构建实际 `linux/amd64` LobeHub、ParadeDB 17 和 RustFS 服务端阶段介质。
+  - `restart-dev-services.sh` 增加显式 `--with-lobehub`，默认仍不启动；新增开发用 Compose/helper，生成 `0600` 临时配置、复用独立 Redis 前缀、运行 migration/app/scheduler，并精确清理 macOS screen 会话及其包装进程组。
+- How:
+  - fork 的 CLI 99 项、Desktop 235 项、平台 SSO/离线 44 项、用户/策略 56 项、OpenAPI 5 项、tRPC 24 项测试通过；CLI/Desktop/服务端生产构建、根 typecheck 和变更文件 lint 通过。Docker 8 GiB 内存下用固定 2 worker 完成 Next 生产构建。
+  - 真实服务端介质在 `deploy/internal/dist-lobehub-server` 完成 SHA-256、OCI revision、PostgreSQL 17 migration、私有 RustFS bucket、应用 readiness、公网 workflow 403、内部 scheduler 鉴权与容器密钥隔离冒烟；完整封包因缺少签名客户端按预期失败关闭。
+  - 使用未修改的 `.env.test` 实际执行 `restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`；后端 readiness `UP`、前端 200、LobeHub 3210 固定回跳、ParadeDB/RustFS healthy。最终复跑开发脚本、构建器、安装器、封包合同测试、Shell 语法和 `git diff --check` 全部通过。
+- Result:
+  - 本地已可通过显式参数启动完整 LobeHub 开发环境；部署人员可依手册构建可追溯服务端阶段介质，并在客户端完备后构建完整离线包。未修改 `.env.local`、OpenCode 源码、generated SDK、既有 API/事件或数据库 migration。
+  - 仍需外部完成企业 Authenticode Windows 客户端、审批的 Linux x86_64 客户端与目标内核沙箱边界验证，以及目标环境 Flyway history、DNS/反代/网络隔离、备份恢复和回滚演练；完整上线介质在此前继续失败关闭。fork 目前仅配置 `upstream`，尚需企业内部 Git 远程才能发布提交与标签。

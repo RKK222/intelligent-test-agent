@@ -65,7 +65,21 @@ grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL
 
 ## Mac 打包
 
-LobeHub 外部 fork 通过准入后，可用同一脚本生成全量附带包或只包含 LobeHub 的离线包：
+LobeHub 独立 fork 默认位于平台仓库同级 `../lobehub-platform`，精确提交由 `lobehub/version.env` 锁定。先用
+`build-lobehub-artifacts.sh` 从锁定提交构建真实 `linux/amd64` 镜像、源码、SBOM、许可证和客户端制品集；
+完整构建必须提供企业签名 Windows x64 客户端、签名证据和批准的 Linux x86_64 客户端。无客户端时只允许
+使用 `--server-only` 做服务端部署演练，后续打包门禁会拒绝该阶段目录。Docker VM 至少分配 8 GiB 内存；
+fork 已将 Next.js 静态生成限制为两个 worker，以支持 10 CPU / 8 GiB 的已验证构建基线。
+
+服务端阶段目录生成后应在构建机执行一次真实镜像冒烟；它会实际运行 migration、Redis ACL、私有 RustFS 和
+LobeHub app，且拒绝覆盖已有同名容器。Apple Silicon 的 Docker 仿真结果不替代现场 Linux 验收：
+
+```bash
+TEST_AGENT_LOBEHUB_ARTIFACT_DIR=/absolute/path/to/lobehub-release-artifacts \
+  deploy/internal/tests/lobehub-runtime-smoke-test.sh
+```
+
+外部 fork 和完整制品通过准入后，可用同一脚本生成全量附带包或只包含 LobeHub 的离线包：
 
 ```bash
 TEST_AGENT_LOBEHUB_ARTIFACT_DIR=/absolute/path/to/lobehub-release-artifacts \
@@ -75,7 +89,8 @@ TEST_AGENT_LOBEHUB_ARTIFACT_DIR=/absolute/path/to/lobehub-release-artifacts \
   deploy/internal/package-release.sh --lobehub-only
 ```
 
-脚本会核对上游/内部版本、PostgreSQL 17、三份 digest 镜像、完整且精确的 `SHA256SUMS`、源码、SBOM、许可证、
+脚本会核对上游/内部版本和 fork commit、PostgreSQL 17、三份不可变 tag/image ID 镜像、完整且精确的
+`SHA256SUMS`、源码、SBOM、许可证、
 资源审批清单、Windows Authenticode 证据及客户端摘要；任一缺失或不一致都会失败关闭。现场安装、systemd/Docker
 启停、共享 Redis ACL、HTTP 风险、备份和回滚见 [LobeHub 企业离线部署](../../docs/deployment/lobehub-offline.md)。
 
@@ -85,9 +100,13 @@ TEST_AGENT_LOBEHUB_ARTIFACT_DIR=/absolute/path/to/lobehub-release-artifacts \
 /data/testagent/deploy/internal/lobehub-docker.sh validate-config
 ```
 
-该命令不访问 Docker，可先校验镜像 digest 与安装清单、全部 secret、固定 Redis 前缀、离线/认证/Cookie
-开关和 Windows/Linux 执行门禁。通过后再按文档顺序执行 Redis 检查、PostgreSQL 17 启动、migration、私有
+该命令不访问 Docker，可先校验镜像 tag 与安装清单、全部 secret、固定 Redis 前缀、离线/认证
+开关、`AGENT_RUNTIME_MODE=local`、独立 loopback scheduler 密钥和强制设备执行门禁。企业离线版不会部署
+QStash；单一 app 实例由镜像 launcher 每分钟以内嵌方式触发创建者身份的到期任务。通过后再按文档顺序执行 Redis 检查、PostgreSQL 17 启动、migration、私有
 RustFS bucket 初始化和 app 启动；外部制品契约版本必须与本仓库 `deploy/internal/lobehub/version.env` 一致。
+app 默认只绑定 `127.0.0.1:3210`；跨机 Nginx 必须改为具体内网 IPv4，并把主机防火墙来源限制为代理节点。
+运行脚本拒绝重复键、符号链接或非 0600 的 `lobehub.env`，并按 ParadeDB、RustFS、app 生成临时最小 env，
+避免把 HMAC、Session 和模型委托密钥横向注入无关容器。
 
 企业包以执行命令时的本地工作树为准：已提交和未提交、但会被 Maven、前端或 Docker 构建实际读取的本地代码都属于本次构建输入。打包前先合并确认需要交付的相关分支并检查状态；这些命令用于记录输入范围，不要求 `git status --short` 为空，也不得为打包擅自清理、stash 或切换到另一份源码：
 
