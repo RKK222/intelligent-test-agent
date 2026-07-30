@@ -688,6 +688,8 @@ if [[ -z "${DEPLOY_INTERNAL_SRC}" || ! -d "${DEPLOY_INTERNAL_SRC}" ]]; then
 fi
 require_file "${DEPLOY_INTERNAL_SRC}/ensure-opencode-runtime-gitignore.sh"
 require_file "${DEPLOY_INTERNAL_SRC}/opencode-runtime.gitignore"
+require_file "${DEPLOY_INTERNAL_SRC}/deploy-python-libs.sh"
+require_file "${DEPLOY_INTERNAL_SRC}/verify-python-libs.sh"
 require_file "${DEPLOY_INTERNAL_SRC}/opencode-node-runtime.package.json"
 require_file "${DEPLOY_INTERNAL_SRC}/verify-opencode-tool-runtime.sh"
 if [[ "${WORKER_RUNTIME_REUSE}" -eq 0 ]]; then
@@ -744,6 +746,8 @@ fi
 mv "${INSTALL_ROOT}/deploy/internal.new" "${INSTALL_ROOT}/deploy/internal"
 chmod +x \
   "${INSTALL_ROOT}/deploy/internal/opencode-worker-docker.sh" \
+  "${INSTALL_ROOT}/deploy/internal/deploy-python-libs.sh" \
+  "${INSTALL_ROOT}/deploy/internal/verify-python-libs.sh" \
   "${INSTALL_ROOT}/deploy/internal/ensure-opencode-runtime-gitignore.sh" \
   "${INSTALL_ROOT}/deploy/internal/verify-opencode-tool-runtime.sh" \
   || true

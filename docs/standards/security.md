@@ -173,6 +173,7 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
    公共 MCP 默认模型配置固定为 Java 路由键 `deepseek-prod`、模型 `DeepSeek-V4-Flash-W8A8` 和上下文窗口 `65536`；不得把 OpenCode provider key `enterprise-deepseek` 填入 Java 路由字段，也不得混用其它模型的上下文长度。
 6. Responses 适配只接收纯文本与 function calling 子集，不透传图片、文件、Web 工具、reasoning 或加密思维链。日志只记录随机 traceId、耗时、结果状态和稳定错误码，不记录代码、提示词、工具参数、Token、供应商错误正文或敏感路径。
 7. 企业 Linux 节点必须在启用前执行 `deploy/internal/check-codex-whitebox-host.sh`，真实验证当前内核/Docker 上的读、拒写、越界拒读、断网和 Git 状态不变。当前现场基线为 Linux 4.19、Docker 18.09.7、x86_64、privileged worker；构建机验证不能替代逐节点能力验收。
+8. worker 内 Python、pip、venv 和通用脚本工具属于镜像受控运行时，不得通过挂载宿主 `/usr/bin` 或继承宿主 PATH 补齐。生产镜像不保留业务 Python 包或编译工具链；获批的第三方依赖必须固定版本和逐 wheel 哈希，按目标 Python ABI 与 `linux/amd64` 单独打包、断网功能验证、只读挂载和独立升级，企业运行容器通过 `PIP_NO_INDEX=1` 禁止访问公网执行 `pip install`。
 
 详细启用、构建和回滚流程见 `docs/deployment/codex-whitebox-mcp.md`。
 

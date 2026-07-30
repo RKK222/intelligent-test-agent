@@ -47,6 +47,126 @@ RUN set -eux; \
     tini --version; \
     rg --version | head -n 1
 
+# Python 必须在与最终 worker 相同的 bullseye/glibc 2.31 基线上编译，
+# 避免直接复制 bookworm Python 后在企业旧容器环境中产生 glibc 版本不兼容。
+FROM ${NODE_IMAGE} AS python-runtime
+
+ARG DEBIAN_MIRROR=https://mirrors.ustc.edu.cn/debian
+ARG DEBIAN_SECURITY_MIRROR=https://mirrors.ustc.edu.cn/debian-security
+ARG PYTHON_VERSION=3.13.14
+ARG PYTHON_SOURCE_SIZE=23021880
+ARG PYTHON_SOURCE_SHA256=639e43243c620a308f968213df9e00f2f8f62332f7adbaa7a7eeb9783057c690
+ARG PYTHON_SOURCE_BASE_URL=https://mirrors.huaweicloud.com/python
+
+COPY --from=runtime-assets /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=runtime-assets /usr/share/ca-certificates /usr/share/ca-certificates
+
+ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV LANG=C.UTF-8
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV PIP_NO_CACHE_DIR=1
+
+# 复用 Python 官方 Docker 镜像的源码构建方式，但不启用 Tk/蓝牙等非脚本运行依赖。
+# 构建依赖在同一层完成后清理，只保留 ldd 解析出的运行库、pip、venv 和标准库。
+RUN set -eux; \
+    for file in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; do \
+      if [ -f "${file}" ]; then \
+        sed -i \
+          -e "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
+          -e "s|http://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+          -e "s|https://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
+          -e "s|https://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+          "${file}"; \
+      fi; \
+    done; \
+    apt-get \
+      -o Acquire::ForceIPv4=true \
+      -o Acquire::Languages=none \
+      -o Acquire::PDiffs=false \
+      update; \
+    apt-get install -y --no-install-recommends \
+      ca-certificates \
+      netbase \
+      tzdata; \
+    saved_apt_mark="$(apt-mark showmanual)"; \
+    apt-get install -y --no-install-recommends \
+      build-essential \
+      curl \
+      dpkg-dev \
+      libbz2-dev \
+      libffi-dev \
+      libgdbm-dev \
+      liblzma-dev \
+      libncursesw5-dev \
+      libreadline-dev \
+      libsqlite3-dev \
+      libssl-dev \
+      uuid-dev \
+      xz-utils \
+      zlib1g-dev; \
+    curl -fL --retry 3 --retry-delay 2 \
+      "${PYTHON_SOURCE_BASE_URL}/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tar.xz" \
+      -o /tmp/python.tar.xz; \
+    test "$(stat -c '%s' /tmp/python.tar.xz)" = "${PYTHON_SOURCE_SIZE}"; \
+    printf '%s  %s\n' "${PYTHON_SOURCE_SHA256}" /tmp/python.tar.xz | sha256sum -c -; \
+    mkdir -p /usr/src/python; \
+    tar -xJf /tmp/python.tar.xz -C /usr/src/python --strip-components=1; \
+    cd /usr/src/python; \
+    gnu_arch="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)"; \
+    ./configure \
+      --build="${gnu_arch}" \
+      --enable-loadable-sqlite-extensions \
+      --enable-option-checking=fatal \
+      --enable-shared \
+      --with-ensurepip=install; \
+    make -j "$(nproc)"; \
+    make install; \
+    mkdir -p /usr/local/share/licenses/python /usr/local/lib/python-runtime; \
+    install -m 0644 LICENSE /usr/local/share/licenses/python/LICENSE; \
+    printf 'version=%s\nsource_size=%s\nsource_sha256=%s\nsource_base_url=%s\n' \
+      "${PYTHON_VERSION}" \
+      "${PYTHON_SOURCE_SIZE}" \
+      "${PYTHON_SOURCE_SHA256}" \
+      "${PYTHON_SOURCE_BASE_URL}" \
+      > /usr/local/lib/python-runtime/RELEASE; \
+    cd /; \
+    rm -rf /tmp/python.tar.xz /usr/src/python; \
+    find /usr/local -depth \
+      \( \
+        \( -type d -a \( -name test -o -name tests -o -name idle_test \) \) \
+        -o \( -type f -a \( -name '*.pyc' -o -name '*.pyo' -o -name 'libpython*.a' \) \) \
+      \) -exec rm -rf '{}' +; \
+    ldconfig; \
+    apt-mark auto '.*' >/dev/null; \
+    apt-mark manual ${saved_apt_mark}; \
+    find /usr/local -type f -executable -not -name '*tkinter*' -exec ldd '{}' ';' \
+      | awk '/=>/ { so = $(NF-1); if (index(so, "/usr/local/") == 1) { next }; gsub("^/(usr/)?", "", so); printf "*%s\n", so }' \
+      | sort -u \
+      | xargs -rt dpkg-query --search \
+      | awk 'sub(":$", "", $1) { print $1 }' \
+      | sort -u \
+      | xargs -r apt-mark manual; \
+    apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \
+    rm -rf /var/lib/apt/lists/*; \
+    for source in idle3 pip3 pydoc3 python3 python3-config; do \
+      target="$(printf '%s' "${source}" | tr -d 3)"; \
+      test -s "/usr/local/bin/${source}"; \
+      test ! -e "/usr/local/bin/${target}"; \
+      ln -s "${source}" "/usr/local/bin/${target}"; \
+    done; \
+    python3 --version | grep -Fx "Python ${PYTHON_VERSION}"; \
+    python --version | grep -Fx "Python ${PYTHON_VERSION}"; \
+    python3 -m pip --version; \
+    python3 -m venv /tmp/python-smoke; \
+    /tmp/python-smoke/bin/python -c 'import csv, hashlib, json, pathlib, sqlite3, ssl, urllib.request, zipfile; print("python stdlib and venv ok")'; \
+    rm -rf /tmp/python-smoke
+
+# 运行容器禁用用户包目录与公网索引；独立依赖包只通过受控 PYTHONPATH 只读挂载。
+ENV PYTHONNOUSERSITE=1
+ENV PIP_NO_INDEX=1
+
 # 企业 worker 只接收上游官方 baseline 程序；源码快照用于审计和 SDK 对照，不参与二进制构建。
 FROM ${GO_IMAGE} AS opencode-download
 
@@ -148,8 +268,9 @@ RUN set -eux; \
     printf '%s  %s\n' "${CODEX_BWRAP_COPYING_SHA256}" /out/BWRAP-COPYING | sha256sum -c -; \
     test "$(/out/codex-official --version)" = "codex-cli ${CODEX_VERSION}"
 
-# 固定 bullseye/glibc 2.31，兼容企业 Docker 18.09 宿主环境。
-FROM ${NODE_IMAGE}
+# 固定 bullseye/glibc 2.31，兼容企业 Docker 18.09 宿主环境；
+# Python 同样来自这一基线编译，不从宿主机或更高版本 glibc 镜像复制。
+FROM python-runtime
 
 ARG DEBIAN_MIRROR=https://mirrors.ustc.edu.cn/debian
 ARG DEBIAN_SECURITY_MIRROR=https://mirrors.ustc.edu.cn/debian-security
@@ -192,12 +313,20 @@ RUN set -eux; \
       update; \
     apt-get install -y --no-install-recommends \
       ca-certificates \
+      curl \
       git \
+      jq \
       openssh-client \
-      procps; \
+      procps \
+      unzip \
+      zip; \
     rm -rf /var/lib/apt/lists/*; \
     test "$(getconf GNU_LIBC_VERSION)" = "glibc 2.31"; \
     git --version; \
+    curl --version | head -n 1; \
+    jq --version; \
+    python3 --version; \
+    python3 -m pip --version; \
     ssh -V; \
     ps --version | head -n 1
 

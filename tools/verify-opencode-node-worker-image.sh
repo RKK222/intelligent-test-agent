@@ -42,7 +42,7 @@ docker run -d \
 healthy=0
 for _ in {1..60}; do
   if docker exec "${CONTAINER}" node -e \
-    'fetch("http://127.0.0.1:4096/global/health").then((response) => { if (!response.ok) process.exit(1) }).catch(() => process.exit(1))' \
+    'fetch("http://127.0.0.1:4096/global/health", { signal: AbortSignal.timeout(1000) }).then((response) => { if (!response.ok) throw new Error(String(response.status)); process.exit(0) }).catch(() => process.exit(1))' \
     >/dev/null 2>&1; then
     healthy=1
     break
@@ -101,19 +101,19 @@ docker exec "${CONTAINER}" node -e '
     if (paths.home !== root) throw new Error(`unexpected home: ${JSON.stringify(paths.home)}`);
     if (paths.state !== `${root}/.local/state/opencode`) throw new Error(`unexpected state: ${JSON.stringify(paths.state)}`);
     if (paths.config !== `${root}/.config/opencode`) throw new Error(`unexpected config: ${JSON.stringify(paths.config)}`);
-  }).catch((error) => { console.error(error); process.exit(1) });
+  }).then(() => process.exit(0)).catch((error) => { console.error(error); process.exit(1) });
 '
 
 if [[ "${EXPECTED_OPENCODE_SUBAGENT_DEPTH}" == "unsupported" ]]; then
   docker exec "${CONTAINER}" node -e \
-    'fetch("http://127.0.0.1:4096/config?directory=%2Ftmp%2Fworkspace").then(async (response) => { if (!response.ok) throw new Error(`${response.status} ${await response.text()}`); const config = await response.json(); if (Object.hasOwn(config, "subagent_depth")) throw new Error(`unexpected subagent_depth: ${JSON.stringify(config.subagent_depth)}`) }).catch((error) => { console.error(error); process.exit(1) })'
+    'fetch("http://127.0.0.1:4096/config?directory=%2Ftmp%2Fworkspace").then(async (response) => { if (!response.ok) throw new Error(`${response.status} ${await response.text()}`); const config = await response.json(); if (Object.hasOwn(config, "subagent_depth")) throw new Error(`unexpected subagent_depth: ${JSON.stringify(config.subagent_depth)}`) }).then(() => process.exit(0)).catch((error) => { console.error(error); process.exit(1) })'
 else
   docker exec --env "EXPECTED_DEPTH=${EXPECTED_OPENCODE_SUBAGENT_DEPTH}" "${CONTAINER}" node -e \
-    'fetch("http://127.0.0.1:4096/config?directory=%2Ftmp%2Fworkspace").then(async (response) => { if (!response.ok) throw new Error(`${response.status} ${await response.text()}`); const config = await response.json(); if (config.subagent_depth !== Number(process.env.EXPECTED_DEPTH)) throw new Error(`unexpected subagent_depth: ${JSON.stringify(config.subagent_depth)}`) }).catch((error) => { console.error(error); process.exit(1) })'
+    'fetch("http://127.0.0.1:4096/config?directory=%2Ftmp%2Fworkspace").then(async (response) => { if (!response.ok) throw new Error(`${response.status} ${await response.text()}`); const config = await response.json(); if (config.subagent_depth !== Number(process.env.EXPECTED_DEPTH)) throw new Error(`unexpected subagent_depth: ${JSON.stringify(config.subagent_depth)}`) }).then(() => process.exit(0)).catch((error) => { console.error(error); process.exit(1) })'
 fi
 # 断网条件下同时加载公共区和项目区 Tool，并确认四个自定义 Tool 基线包都来自随 programs 交付的链接。
 docker exec "${CONTAINER}" node -e \
-  'fetch("http://127.0.0.1:4096/experimental/tool/ids?directory=%2Ftmp%2Fworkspace").then(async (response) => { if (!response.ok) throw new Error(`${response.status} ${await response.text()}`); const ids = await response.json(); for (const expected of ["public-probe", "workspace-probe"]) { if (!ids.includes(expected)) throw new Error(`missing custom Tool: ${expected}; ids=${JSON.stringify(ids)}`) } }).catch((error) => { console.error(error); process.exit(1) })'
+  'fetch("http://127.0.0.1:4096/experimental/tool/ids?directory=%2Ftmp%2Fworkspace").then(async (response) => { if (!response.ok) throw new Error(`${response.status} ${await response.text()}`); const ids = await response.json(); for (const expected of ["public-probe", "workspace-probe"]) { if (!ids.includes(expected)) throw new Error(`missing custom Tool: ${expected}; ids=${JSON.stringify(ids)}`) } }).then(() => process.exit(0)).catch((error) => { console.error(error); process.exit(1) })'
 docker exec "${CONTAINER}" sh -lc \
   'for dir in /tmp/opencode-config /tmp/workspace/.opencode; do test -L "$dir/node_modules/@opencode-ai/plugin"; test -L "$dir/node_modules/@opencode-ai/sdk"; test -L "$dir/node_modules/effect"; test -L "$dir/node_modules/zod"; test -L "$dir/package.json"; test -L "$dir/package-lock.json"; for rule in node_modules package.json package-lock.json bun.lock .gitignore; do grep -Fx "$rule" "$dir/.gitignore" >/dev/null; done; done'
 docker exec "${CONTAINER}" sh -lc \

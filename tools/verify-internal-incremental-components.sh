@@ -50,6 +50,8 @@ bash "${PACKAGE_SCRIPT}" --zip-only --output-dir "${OUTPUT_DIR}" \
 full_listing="$(unzip -Z1 "${OUTPUT_DIR}/test-agent-internal-release.zip")"
 grep -Fxq 'dist/test-agent-programs.tar.gz' <<<"${full_listing}"
 grep -Fxq 'dist/test-agent-opencode-worker_internal-linux-amd64.tar' <<<"${full_listing}"
+grep -Fxq 'deploy/internal/deploy-python-libs.sh' <<<"${full_listing}"
+grep -Fxq 'deploy/internal/verify-python-libs.sh' <<<"${full_listing}"
 grep -Fxq 'dist/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar' <<<"${full_listing}"
 grep -Fxq 'dist/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar' <<<"${full_listing}"
 grep -Fxq "TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=${worker_fingerprint}" "${STATE_FILE}"

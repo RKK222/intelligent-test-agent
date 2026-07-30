@@ -15,6 +15,7 @@ PLATFORM="linux/amd64"
 PACKAGE_BACKEND=1
 PACKAGE_FRONTEND=1
 PACKAGE_OPENCODE_WORKER=1
+PACKAGE_PYTHON_LIBS=0
 PACKAGE_TOOLBOX=1
 PACKAGE_MYSQL_IMAGE=0
 SAVE_TARBALL=1
@@ -36,6 +37,7 @@ Build enterprise internal delivery artifacts:
   - backend executable jar
   - frontend dist files and tar.gz
   - opencode-worker image and docker-loadable tar
+  - optional independent Python third-party library bundle
   - pinned IT-Tools and OmniTools images, checksums and complete modified source
   - repository session logs under .agents/
 
@@ -51,11 +53,12 @@ Options:
   --backend-only          Package only the backend jar.
   --frontend-only         Package only the frontend dist.
   --opencode-only         Package only the opencode worker image.
+  --python-libs-only      Package only the independent Python third-party library bundle.
   --toolbox-only          Package only the two toolbox images and modified source.
   --mysql-only            Package only the standalone MySQL image.
   --zip-only              Reassemble the release ZIP from current verified artifacts and component state.
   --include-all-components
-                          Force worker runtime (OpenCode Manager/Codex MCP) and toolbox into the ZIP.
+                          Force worker runtime (Python/OpenCode Manager/Codex MCP) and toolbox into the ZIP.
                           Use for first installation, disaster recovery or a new build machine.
   --component-state-file <path>
                           Persistent component fingerprint state. Default: <output-dir>/.release-component-state.env.
@@ -87,6 +90,7 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_BACKEND=1
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_PYTHON_LIBS=0
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
       shift
@@ -96,6 +100,7 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=1
       PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_PYTHON_LIBS=0
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
       shift
@@ -105,6 +110,17 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=1
+      PACKAGE_PYTHON_LIBS=0
+      PACKAGE_TOOLBOX=0
+      PACKAGE_MYSQL_IMAGE=0
+      shift
+      ;;
+    --python-libs-only)
+      PACKAGE_MODE=python-libs-only
+      PACKAGE_BACKEND=0
+      PACKAGE_FRONTEND=0
+      PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_PYTHON_LIBS=1
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
       shift
@@ -114,6 +130,7 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_PYTHON_LIBS=0
       PACKAGE_TOOLBOX=1
       PACKAGE_MYSQL_IMAGE=0
       shift
@@ -123,6 +140,7 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_PYTHON_LIBS=0
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=1
       shift
@@ -132,6 +150,7 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_BACKEND=0
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_PYTHON_LIBS=0
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
       PACKAGE_ZIP_ONLY=1
@@ -419,7 +438,7 @@ plan_release_components() {
   local previous_worker previous_toolbox worker_config toolbox_config
   local current_release current_manifest current_worker_mode current_worker_fingerprint
   local current_toolbox_mode current_toolbox_fingerprint
-  worker_config="schema=1|platform=${PLATFORM}|image=${TEST_AGENT_OPENCODE_WORKER_IMAGE}|go=${GO_IMAGE}|node=${NODE_IMAGE}|opencode=${OPENCODE_VERSION}|opencodeCommit=${OPENCODE_RELEASE_COMMIT}|opencodeAsset=${OPENCODE_ASSET_SHA256}|opencodeBinary=${OPENCODE_BINARY_SHA256}|codex=${CODEX_VERSION}|codexAsset=${CODEX_ASSET_SHA256}|bwrap=${CODEX_BWRAP_ASSET_SHA256}|bwrapBinary=${CODEX_BWRAP_BINARY_SHA256}|runtimePackage=${OPENCODE_RUNTIME_PACKAGE_JSON}|runtimeLock=${OPENCODE_RUNTIME_PACKAGE_LOCK}"
+  worker_config="schema=2|platform=${PLATFORM}|image=${TEST_AGENT_OPENCODE_WORKER_IMAGE}|go=${GO_IMAGE}|node=${NODE_IMAGE}|python=${PYTHON_VERSION}|pythonSourceSize=${PYTHON_SOURCE_SIZE}|pythonSourceSha=${PYTHON_SOURCE_SHA256}|pythonSourceBase=${PYTHON_SOURCE_BASE_URL}|opencode=${OPENCODE_VERSION}|opencodeCommit=${OPENCODE_RELEASE_COMMIT}|opencodeAsset=${OPENCODE_ASSET_SHA256}|opencodeBinary=${OPENCODE_BINARY_SHA256}|codex=${CODEX_VERSION}|codexAsset=${CODEX_ASSET_SHA256}|bwrap=${CODEX_BWRAP_ASSET_SHA256}|bwrapBinary=${CODEX_BWRAP_BINARY_SHA256}|runtimePackage=${OPENCODE_RUNTIME_PACKAGE_JSON}|runtimeLock=${OPENCODE_RUNTIME_PACKAGE_LOCK}"
   toolbox_config="schema=1|platform=${PLATFORM}|it=${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}|omni=${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}|node=${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE}|nginx=${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE}"
 
   WORKER_RUNTIME_FINGERPRINT="$(component_fingerprint "${worker_config}" \
@@ -583,6 +602,10 @@ build_opencode_worker_image() {
     --build-arg "GO_IMAGE=${GO_IMAGE}" \
     --build-arg "MANAGER_BUILD_VERSION=${manager_build_version}" \
     --build-arg "NODE_IMAGE=${NODE_IMAGE}" \
+    --build-arg "PYTHON_VERSION=${PYTHON_VERSION}" \
+    --build-arg "PYTHON_SOURCE_SIZE=${PYTHON_SOURCE_SIZE}" \
+    --build-arg "PYTHON_SOURCE_SHA256=${PYTHON_SOURCE_SHA256}" \
+    --build-arg "PYTHON_SOURCE_BASE_URL=${PYTHON_SOURCE_BASE_URL}" \
     --build-arg "OPENCODE_VERSION=${OPENCODE_VERSION}" \
     --build-arg "OPENCODE_RELEASE_COMMIT=${OPENCODE_RELEASE_COMMIT}" \
     --build-arg "OPENCODE_ASSET_NAME=${OPENCODE_ASSET_NAME}" \
@@ -605,7 +628,8 @@ build_opencode_worker_image() {
   docker image inspect "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" >/dev/null
 
   # 构建机先验证固定版本、摘要、MCP 契约和失败关闭；native amd64 的 namespace E2E 由脚本自动执行。
-  "${ROOT_DIR}/tools/verify-codex-whitebox-worker-image.sh" "${TEST_AGENT_OPENCODE_WORKER_IMAGE}"
+  EXPECTED_PYTHON_VERSION="${PYTHON_VERSION}" \
+    "${ROOT_DIR}/tools/verify-codex-whitebox-worker-image.sh" "${TEST_AGENT_OPENCODE_WORKER_IMAGE}"
 
   export_worker_programs
 
@@ -764,6 +788,8 @@ package_release_zip() {
   local output_dir_name
   output_dir_name="$(basename "${OUTPUT_DIR}")"
   rsync -a --exclude 'dist' --exclude 'dist-*' --exclude "${output_dir_name}" --exclude '.env' "${SCRIPT_DIR}/" "${staging_dir}/deploy/internal/"
+  install -m 0755 "${ROOT_DIR}/tools/verify-python-libs.sh" \
+    "${staging_dir}/deploy/internal/verify-python-libs.sh"
   if [[ "${TOOLBOX_COMPONENT_MODE}" == included ]]; then
     install -m 0644 "${OUTPUT_DIR}/TOOLBOX.md" "${staging_dir}/deploy/internal/TOOLBOX.md"
   fi
@@ -877,6 +903,11 @@ NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://mirrors.ustc.edu.cn/debian}"
 DEBIAN_SECURITY_MIRROR="${DEBIAN_SECURITY_MIRROR:-https://mirrors.ustc.edu.cn/debian-security}"
+PYTHON_VERSION="${PYTHON_VERSION:-3.13.14}"
+PYTHON_SOURCE_SIZE="${PYTHON_SOURCE_SIZE:-23021880}"
+PYTHON_SOURCE_SHA256="${PYTHON_SOURCE_SHA256:-639e43243c620a308f968213df9e00f2f8f62332f7adbaa7a7eeb9783057c690}"
+PYTHON_SOURCE_BASE_URL="${PYTHON_SOURCE_BASE_URL:-https://mirrors.huaweicloud.com/python}"
+PYTHON_PACKAGE_INDEX_URL="${PYTHON_PACKAGE_INDEX_URL:-https://mirrors.huaweicloud.com/repository/pypi/simple}"
 OPENCODE_VERSION="${OPENCODE_VERSION:-1.18.4}"
 OPENCODE_RELEASE_COMMIT="${OPENCODE_RELEASE_COMMIT:-49c69c5ed3ccf706b61b3febb43c8aaff7f8325e}"
 OPENCODE_ASSET_NAME="${OPENCODE_ASSET_NAME:-opencode-linux-x64-baseline.tar.gz}"
@@ -950,6 +981,15 @@ if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 ]]; then
   build_opencode_worker_image
 fi
 
+if [[ "${PACKAGE_PYTHON_LIBS}" -eq 1 ]]; then
+  require_command docker
+  PYTHON_PACKAGE_INDEX_URL="${PYTHON_PACKAGE_INDEX_URL}" \
+    "${SCRIPT_DIR}/package-python-libs.sh" \
+      --image "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" \
+      --output-dir "${OUTPUT_DIR}" \
+      --platform "${PLATFORM}"
+fi
+
 if [[ "${PACKAGE_TOOLBOX}" -eq 1 ]]; then
   require_command docker
   package_toolbox
@@ -983,6 +1023,10 @@ if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo
   echo "Target import:"
   echo "  docker load -i ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
+fi
+if [[ "${PACKAGE_PYTHON_LIBS}" -eq 1 ]]; then
+  echo "  Python libraries: ${OUTPUT_DIR}/test-agent-python-libs-py313-linux-amd64.tar.gz"
+  echo "  Python libraries checksum: ${OUTPUT_DIR}/test-agent-python-libs-py313-linux-amd64.tar.gz.sha256"
 fi
 if [[ "${PACKAGE_TOOLBOX}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo "  IT-Tools image tar: ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}" "${PLATFORM}")"

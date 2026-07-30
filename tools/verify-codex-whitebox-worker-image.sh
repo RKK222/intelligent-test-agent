@@ -6,9 +6,37 @@ IMAGE="${1:-test-agent-opencode-worker:internal}"
 EXPECTED_VERSION="${EXPECTED_CODEX_VERSION:-0.145.0}"
 EXPECTED_ASSET_SHA256="${EXPECTED_CODEX_ASSET_SHA256:-bfaf13c9ba34f2ad764e4a916c49cf7177aeba329cf0f719e2227566fc8d662a}"
 EXPECTED_BWRAP_SHA256="${EXPECTED_CODEX_BWRAP_BINARY_SHA256:-77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c}"
+EXPECTED_PYTHON_VERSION="${EXPECTED_PYTHON_VERSION:-3.13.14}"
 PROBE="${SCRIPT_DIR}/probe-codex-mcp-tools.mjs"
 CONTRACT_TEST="${SCRIPT_DIR}/test-codex-whitebox-mcp.mjs"
 HOST_CHECK="${SCRIPT_DIR}/../deploy/internal/check-codex-whitebox-host.sh"
+
+python_version="$(docker run --rm --platform linux/amd64 --network none \
+  --entrypoint python3 "${IMAGE}" --version)"
+[[ "${python_version}" == "Python ${EXPECTED_PYTHON_VERSION}" ]] || {
+  echo "Unexpected Python version: ${python_version}" >&2
+  exit 1
+}
+
+# 断网验证解释器、python 别名、pip、venv 和常用标准库均来自镜像，
+# 防止构建机或企业宿主机上的 Python 被误当成智能体运行时能力。
+docker run --rm --platform linux/amd64 --network none --entrypoint sh \
+  --env "EXPECTED_PYTHON_VERSION=${EXPECTED_PYTHON_VERSION}" \
+  "${IMAGE}" -lc '
+  set -eu
+  test "$(readlink -f "$(command -v python)")" = "$(readlink -f "$(command -v python3)")"
+  test "${PIP_NO_INDEX}" = 1
+  test "${PYTHONNOUSERSITE}" = 1
+  python3 -m pip --version >/dev/null
+  python3 -m venv /tmp/test-agent-python-smoke
+  /tmp/test-agent-python-smoke/bin/python -c '\''import csv, hashlib, json, pathlib, sqlite3, ssl, urllib.request, zipfile; print("python runtime ok")'\''
+  for command in bash curl git jq rg ssh tar unzip zip; do
+    command -v "${command}" >/dev/null
+  done
+  ! command -v gcc >/dev/null 2>&1
+  ! command -v make >/dev/null 2>&1
+  grep -Fx "version=${EXPECTED_PYTHON_VERSION}" /usr/local/lib/python-runtime/RELEASE >/dev/null
+'
 
 version="$(docker run --rm --platform linux/amd64 \
   --entrypoint /usr/local/lib/codex/bin/codex-official "${IMAGE}" --version)"
@@ -113,4 +141,4 @@ if grep -Fq '/usr/bin/true' "${host_check_fixture_dir}/docker.log"; then
   exit 1
 fi
 
-echo "Codex whitebox worker verified: image=${IMAGE} version=${version}"
+echo "Codex whitebox worker verified: image=${IMAGE} version=${version} ${python_version}"

@@ -5,6 +5,30 @@
 
 ## Entries
 
+### 2026-07-30 - 为智能体 worker 增加 Python 与独立 Office 数据处理库
+
+### Why
+
+- Agent 权限已允许 `bash`，但实际命令运行在隔离 worker 容器中；宿主服务器虽有 Python，旧 worker 镜像没有解释器，因此对话中会正确判断 `python3` 不可用。
+- 通用脚本还需要 pandas、Excel、Word 和 JSON 处理能力，但这些带原生扩展的依赖不适合烘焙进基础 worker 或在企业运行时联网安装。
+
+### What
+
+- worker 在 Debian 11 bullseye/glibc 2.31 基线上从官方源码构建 Python `3.13.14`，提供 `python3`/`python`、pip、venv、curl、jq、zip/unzip；运行镜像清除 gcc/make，并设置 `PIP_NO_INDEX=1`、`PYTHONNOUSERSITE=1`。
+- 新增独立 Python 库制品，固定 pandas `3.0.3`、openpyxl `3.1.5`、XlsxWriter `3.2.9`、python-docx `1.2.0`、jsonschema `4.26.0`、orjson `3.11.9` 及传递依赖；逐 wheel 锁定 SHA-256，只允许 Python 3.13 / Linux amd64 二进制 wheel。
+- 新增独立打包、断网功能校验和目标机原子部署脚本；库目录通过 `PYTHONPATH` 只读挂载进 worker，库升级无需重建 worker 或重启 Java。同步单/双后台、manager、后端部署和安全文档。
+
+### How
+
+- Python 源码校验官方大小和 SHA 后在 `linux/amd64` 镜像中编译；独立库包同时保留 requirements、wheel 来源哈希、部署文件哈希和版本元数据，并真实执行 pandas Excel 回读、XlsxWriter 写入、python-docx 生成、标准 `json`、orjson 与 JSON Schema 校验。
+- 华为 PyPI 镜像下载 numpy 时发生断流并被哈希构建门禁拒绝；最终制品改从官方 PyPI 下载同一组哈希锁 wheel。目标企业节点仍不需要网络，且部署强制校验外层 SHA 和包内全部文件。
+
+### Result
+
+- `linux/amd64` worker 镜像实际构建并通过 Python/Codex 断网验收及 OpenCode `1.18.4` 服务启动测试；确认 Python `3.13.14`、pip `26.1.2`、glibc `2.31`、无 gcc/make。独立库包实际构建并通过打包 smoke、归档解压、候选目录校验和 `--no-restart` 原子部署 smoke。
+- 生成 worker tar、programs tar 和约 32 MiB 的独立 Python 库 tar；企业 `.4/.114` 尚未实际部署，native amd64 Codex namespace 验收仍需按现场脚本执行。
+- 不涉及业务 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、generated SDK 或 OpenCode 源码；安全面新增受控 Python 执行能力与第三方库，只读挂载、无编译器、无公网 pip。未修改 `.env`/`.env.local`，只更新非敏感 `env.example`。
+
 ### 2026-07-30 - 修复聊天附件投递与重复落盘
 
 ### Why

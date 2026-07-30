@@ -70,6 +70,8 @@
 cd /Users/kaka/Desktop/intelligent-test-agent
 VITE_TEST_AGENT_API_BASE_URL= \
   deploy/internal/package-release.sh --output-dir deploy/internal/dist
+deploy/internal/package-release.sh --python-libs-only \
+  --output-dir deploy/internal/dist
 ```
 
 Mac 本地会生成以下产物：
@@ -82,10 +84,12 @@ deploy/internal/dist/backend/lib/
 deploy/internal/dist/test-agent-frontend-dist.tar.gz
 deploy/internal/dist/test-agent-programs.tar.gz
 deploy/internal/dist/test-agent-opencode-worker_internal-linux-amd64.tar
+deploy/internal/dist/test-agent-python-libs-py313-linux-amd64.tar.gz
+deploy/internal/dist/test-agent-python-libs-py313-linux-amd64.tar.gz.sha256
 deploy/internal/dist/frontend/
 ```
 
-完整 ZIP 已包含 Java JAR、`backend/lib/`、前端静态包、programs、worker 镜像、`deploy/internal/` 部署脚本和配置模板。内网只需传完整 ZIP 与 SHA 文件，分别复制到：
+完整 ZIP 已包含 Java JAR、`backend/lib/`、前端静态包、programs、worker 镜像、`deploy/internal/` 部署脚本和配置模板。Python 第三方库为独立升级单元，不进入完整 ZIP；把平台 ZIP、两个 SHA 文件和 Python 库 tar 一并复制到：
 
 ```text
 122.233.30.2:/data/0709/
@@ -97,6 +101,7 @@ deploy/internal/dist/frontend/
 ```bash
 cd /data/0709
 sha256sum -c test-agent-internal-release.zip.sha256
+sha256sum -c test-agent-python-libs-py313-linux-amd64.tar.gz.sha256
 unzip -t test-agent-internal-release.zip
 ```
 
@@ -212,6 +217,7 @@ TEST_AGENT_BASE_DIR=/data/testagent
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=REPLACE_MANAGER_TOKEN
 TEST_AGENT_DATA_ROOT=/data/testagent/data
 TEST_AGENT_PROGRAM_ROOT=/data/testagent/programs
+TEST_AGENT_PYTHON_LIBS_ROOT=/data/testagent/python-libs
 TEST_AGENT_OPENCODE_WORKER_IMAGE=test-agent-opencode-worker:internal
 
 VITE_TEST_AGENT_API_BASE_URL=
@@ -414,7 +420,14 @@ bash /tmp/deploy-internal-release.sh \
   --archive /data/0709/test-agent-internal-release.zip \
   --backend-host 122.233.30.114 \
   --skip-frontend
+
+/data/testagent/deploy/internal/deploy-python-libs.sh \
+  --archive /data/0709/test-agent-python-libs-py313-linux-amd64.tar.gz \
+  --checksum /data/0709/test-agent-python-libs-py313-linux-amd64.tar.gz.sha256 \
+  --env-file /data/testagent/config/docker.env
 ```
+
+Python 库部署脚本独立校验和替换 `/data/testagent/python-libs`，再重启 worker；后续只升级 pandas、Excel、Word 或 JSON 库时，不重载 worker 镜像，也不重启 Java。
 
 后台部署脚本在替换 JAR 前会校验已有 systemd unit 的 `ExecStart` 和 `EnvironmentFile`，执行 `systemctl stop` 后检查 `8080`。若端口仍由同一路径的 `test-agent-app.jar` 占用，脚本会先 TERM、超时后仅对仍匹配该 JAR 的 PID 执行 KILL；若是其他程序占用则拒绝误杀。启动后还会确认 systemd `MainPID` 正是 `8080` 的监听进程，避免旧手工 Java 让 health 误通过。
 

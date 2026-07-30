@@ -106,6 +106,8 @@ git status --short
 test -z "$(git diff --name-only --diff-filter=U)"
 VITE_TEST_AGENT_API_BASE_URL="" \
   deploy/internal/package-release.sh --output-dir deploy/internal/dist
+deploy/internal/package-release.sh --python-libs-only \
+  --output-dir deploy/internal/dist
 ```
 
 空值是有意配置：前端统一使用同源相对 `/api`，所以从域名打开时请求域名，从 IP 打开时请求 IP。不得固定成其中任一 origin，否则另一个入口会重新产生跨域或名称解析问题。
@@ -114,6 +116,8 @@ VITE_TEST_AGENT_API_BASE_URL="" \
 
 - `worker runtime` 把 OpenCode Manager、OpenCode runtime、Codex MCP、Node/MCP SDK、bubblewrap、worker 镜像和 `test-agent-programs.tar.gz` 视为一个不可拆分单元；其中任一项变化就全部重建并进入 ZIP。
 - `toolbox` 把 IT-Tools、OmniTools、完整修改源码和目录文件视为一个单元；其中任一项变化就全部重建并进入 ZIP。
+
+Python 的 pandas、Excel、Word 和 JSON 第三方库是第三个、完全独立的交付单元，不进入内层 ZIP，也不改变 worker 指纹。库升级只重新生成 `test-agent-python-libs-py313-linux-amd64.tar.gz` 及校验文件，然后分别部署到两台后台。
 
 首次构建、指纹状态丢失或组件变化时，清单为 `included`；未变化时为 `reuse`，内层 ZIP 不再重复携带该组件的大文件。必须持续使用同一个输出目录，或用 `--component-state-file <稳定路径>` 保存基线。新装机、扩容新节点、灾备恢复和状态不可信的交付必须加 `--include-all-components`；增量包只允许升级已有且组件健康的 `.4/.114`，不能用于空机器。迁移到该机制后的第一次构建也应使用全量命令建立可信基线；部署成功后每台后台会把实际安装指纹写入 `/data/testagent/config/release-component-state.env`，后续复用时会同时校验指纹和健康状态：
 
@@ -135,6 +139,8 @@ deploy/internal/package-release.sh --component-plan-only \
 ```text
 deploy/internal/dist/test-agent-internal-release.zip
 deploy/internal/dist/test-agent-internal-release.zip.sha256
+deploy/internal/dist/test-agent-python-libs-py313-linux-amd64.tar.gz
+deploy/internal/dist/test-agent-python-libs-py313-linux-amd64.tar.gz.sha256
 ```
 
 内层 ZIP 重建后必须立即用本次内层 ZIP 和三台节点包重建固定名外层包；不能只校验历史外层包自身 SHA 后继续交付：
@@ -380,6 +386,7 @@ TEST_AGENT_BASE_DIR=/data/testagent
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=REPLACE_MANAGER_TOKEN
 TEST_AGENT_DATA_ROOT=/data/testagent/data
 TEST_AGENT_PROGRAM_ROOT=/data/testagent/programs
+TEST_AGENT_PYTHON_LIBS_ROOT=/data/testagent/python-libs
 TEST_AGENT_OPENCODE_WORKER_IMAGE=test-agent-opencode-worker:internal
 
 VITE_TEST_AGENT_API_BASE_URL=
@@ -654,6 +661,11 @@ bash /tmp/deploy-internal-release.sh \
   --archive /data/0709/test-agent-internal-release.zip \
   --backend-host 122.233.30.4 \
   --skip-frontend
+
+/data/testagent/deploy/internal/deploy-python-libs.sh \
+  --archive /data/0709/test-agent-python-libs-py313-linux-amd64.tar.gz \
+  --checksum /data/0709/test-agent-python-libs-py313-linux-amd64.tar.gz.sha256 \
+  --env-file /data/testagent/config/docker.env
 ```
 
 再部署后台 B `.114`：
@@ -671,6 +683,11 @@ bash /tmp/deploy-internal-release.sh \
   --archive /data/0709/test-agent-internal-release.zip \
   --backend-host 122.233.30.114 \
   --skip-frontend
+
+/data/testagent/deploy/internal/deploy-python-libs.sh \
+  --archive /data/0709/test-agent-python-libs-py313-linux-amd64.tar.gz \
+  --checksum /data/0709/test-agent-python-libs-py313-linux-amd64.tar.gz.sha256 \
+  --env-file /data/testagent/config/docker.env
 ```
 
 两台后台都通过 health/readiness、身份文件和 worker 检查后，最后在前端 `.2` 部署一次，避免 Nginx 提前把流量分到尚未就绪的 `.4`：

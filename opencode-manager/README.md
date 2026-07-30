@@ -37,6 +37,8 @@ manager 先合并 WebSocket `command.environment`，再强制覆盖 `HOME`、`XD
 
 企业 Linux worker 中该兼容 CLI 由 Node 22 启动 OpenCode `1.18.4` server bundle，只实现 manager 实际依赖的 `--version` 与 `serve --hostname/--port/--cors/--print-logs` 接口，不使用上游 npm 包内嵌的 Bun 可执行文件。manager 的启动、健康探测、state 和停止语义保持不变。
 
+worker 镜像同时内置从官方源码构建的 Python `3.13.14`，并提供 `python3`/`python`、`pip`、`venv`、`curl`、`jq`、`zip` 和 `unzip`，供获得 `bash` 权限的 Agent 执行通用脚本。Python 与 OpenCode 子进程继承同一容器 `PATH`，不会读取宿主服务器的解释器。镜像不保留编译器，也不直接烘焙业务第三方包；pandas、openpyxl、XlsxWriter、python-docx、jsonschema、orjson 及其传递依赖由独立的 Python 3.13 / Linux amd64 哈希锁制品部署到宿主机，再以只读目录和 `PYTHONPATH` 挂载进 worker。运行时默认 `PIP_NO_INDEX=1`，禁止访问公网索引安装。
+
 > Windows 平台上若 `OPENCODE_BIN` 指向 PowerShell 包装脚本（`*.ps1`），manager 会自动改写为
 > `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <ps1> serve --hostname 0.0.0.0 --port {port} --print-logs`，
 > 避免 `os/exec` 直接 fork `.ps1` 触发 `%1 is not a valid Win32 application`。该解析对扩展名大小写不敏感。

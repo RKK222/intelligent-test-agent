@@ -21,7 +21,7 @@
 - 企业内部中转机的固定交付目录是 `~/Desktop/mimoagent/0709`；中转机不使用 `/data/0709`。`.20/.4/.114/.2` 等目标服务器的固定接收目录才是 `/data/0709`。
 - `opencode-worker-docker.sh` 固定为 worker 容器设置 `--pids-limit=8192`、`nofile=262144:262144` 和 `nproc=8192:8192`；这些值不从 `docker.env` 覆盖。脚本升级后必须重建容器才会生效。
 - Docker 18.09 发布 1000 个 worker 端口前必须在 daemon 中禁用 `userland-proxy`；脚本会在删除旧 worker 前拒绝不安全组合，避免启动中途耗尽 fork 资源。
-- worker 构建会自动检查 Codex 版本、摘要、MCP 契约和失败关闭；启用白盒分析前，每台 Linux 4.19 / Docker 18.09.7 worker 节点还必须执行 `./check-codex-whitebox-host.sh test-agent-opencode-worker:internal`。脚本按十进制解析 `18.09.7`，并用镜像内的 `/bin/true` 和真实 Codex/bubblewrap 证明 namespace 可用、只读、越界拒读和断网；不以 Apple Silicon Mac 的 amd64 仿真结果代替现场内核验收。完整说明见 `docs/deployment/codex-whitebox-mcp.md`。
+- worker 构建会自动检查 Python `3.13.14`、pip/venv/常用标准库与脚本工具、Codex 版本、摘要、MCP 契约和失败关闭；启用白盒分析前，每台 Linux 4.19 / Docker 18.09.7 worker 节点还必须执行 `./check-codex-whitebox-host.sh test-agent-opencode-worker:internal`。脚本按十进制解析 `18.09.7`，并用镜像内的 `/bin/true` 和真实 Codex/bubblewrap 证明 namespace 可用、只读、越界拒读和断网；不以 Apple Silicon Mac 的 amd64 仿真结果代替现场内核验收。完整说明见 `docs/deployment/codex-whitebox-mcp.md`。
 - 企业内不使用 Docker Compose；worker 由 `opencode-worker-docker.sh` 管理，当前 XXL MySQL 直接使用外部实例，不在平台服务器部署 MySQL 容器。
 - Redis 仍是独立共享基础设施，不随平台 ZIP 部署；只有明确执行 Redis 专项升级时，才使用固定名 `test-agent-redis-offline.zip`。
 - `.20` 通过 Docker `-p 6379:6379` 提供共享 Redis 时必须持久化 `net.ipv4.ip_forward=1`；Redis `deploy/verify` 脚本会提前拒绝值为 `0` 的宿主机。容器本机 `healthy` 后仍必须从 `.4`、`.114` 分别验证 `.20:6379`，跨机超时不得通过反复重启 Java 处理。
@@ -99,8 +99,15 @@ deploy/internal/package-release.sh --zip-only --output-dir deploy/internal/dist
 
 `package-release.sh` 默认使用输出目录下的 `.release-component-state.env` 分别判断两个大组件：
 
-- `worker runtime`：OpenCode Manager、OpenCode runtime、Codex MCP、Node/MCP SDK、bubblewrap、worker 镜像和 `test-agent-programs.tar.gz` 是一个不可拆分单元。
+- `worker runtime`：Python/通用脚本工具、OpenCode Manager、OpenCode runtime、Codex MCP、Node/MCP SDK、bubblewrap、worker 镜像和 `test-agent-programs.tar.gz` 是一个不可拆分单元。
 - `toolbox`：IT-Tools、OmniTools、修改源码和目录文件是一个单元。
+
+Python 第三方库不进入上述 worker 指纹，也不烘焙进 worker 镜像。它使用独立命令、独立 tar 和独立校验文件，升级 pandas/Office/JSON 库时不需要重建或重新加载 worker 镜像：
+
+```bash
+deploy/internal/package-release.sh --python-libs-only \
+  --output-dir deploy/internal/dist
+```
 
 首次构建、状态文件丢失或对应源码/版本/基础镜像指纹变化时，组件标记为 `included`，脚本重新构建并放入 ZIP；指纹未变化时标记为 `reuse`，ZIP 不再携带对应大文件。`--zip-only` 只允许复用带当前指纹戳的已验证制品，源码已变化但没有重新构建时会失败，不能把旧 tar 伪装成新组件。必须持续复用同一个输出目录，或通过 `--component-state-file <稳定路径>` 显式保存基线。迁移到本机制后第一次必须做全量部署：后台会把实际安装成功的组件指纹写入 `/data/testagent/config/release-component-state.env`；后续 `reuse` 包要求清单指纹与目标机指纹相同且组件健康，缺失或不一致都会停止部署。
 
@@ -177,6 +184,8 @@ deploy/internal/dist/backend/xxl-job-upstream/  # 3.4.2 源码、LICENSE、UPSTR
 deploy/internal/dist/test-agent-frontend-dist.tar.gz
 deploy/internal/dist/test-agent-programs.tar.gz
 deploy/internal/dist/test-agent-opencode-worker_internal-linux-amd64.tar
+deploy/internal/dist/test-agent-python-libs-py313-linux-amd64.tar.gz       # 独立交付
+deploy/internal/dist/test-agent-python-libs-py313-linux-amd64.tar.gz.sha256
 deploy/internal/dist/frontend/
 ```
 
@@ -213,6 +222,18 @@ deploy/internal/package-redis-offline.sh --zip-only --output-dir deploy/internal
 ## OpenCode worker 版本与回滚包
 
 当前 worker 固定 OpenCode `1.18.4` 官方 `opencode-linux-x64-baseline.tar.gz`。源码快照不参与程序构建，版本、release commit、asset 和两级 SHA 校验值由 `env.example` 与 Dockerfile 同时固定。标准构建会同时导出镜像 tar 和 `test-agent-programs.tar.gz`，两者必须成对升级。
+
+worker 还固定 Python `3.13.14`：外网 Mac 从 `PYTHON_SOURCE_BASE_URL` 指向的国内镜像下载官方源码，并校验 `23021880` 字节和 SHA-256 `639e43243c620a308f968213df9e00f2f8f62332f7adbaa7a7eeb9783057c690`，再在 Debian 11 bullseye/glibc 2.31 基线上编译。镜像提供 `python3`/`python`、pip、venv、curl、jq、zip/unzip；Git、OpenSSH、ripgrep、Node 和 procps 沿用既有能力。为控制镜像体积和供应链，镜像不保留 gcc/make 等编译器，也不直接烘焙业务第三方库，并通过 `PIP_NO_INDEX=1` 禁止默认访问公网索引。
+
+首批通用第三方库固定为 pandas `3.0.3`、openpyxl `3.1.5`、XlsxWriter `3.2.9`、python-docx `1.2.0`、jsonschema `4.26.0`、orjson `3.11.9` 及完整传递依赖。`deploy/internal/python-libs/requirements-linux-amd64.lock` 对每个 Python 3.13 / Linux amd64 wheel 固定 SHA-256；`package-python-libs.sh` 只下载二进制 wheel，断网安装到独立 `site-packages` 后执行 Excel、Word、pandas、标准 `json`、JSON Schema 和 orjson 功能 smoke，再生成 `FILES.sha256`。目标机使用下列命令独立部署，脚本先断网验证候选目录，再原子替换 `/data/testagent/python-libs`、只读挂载并重启 worker：
+
+```bash
+deploy/internal/deploy-python-libs.sh \
+  --archive /data/testagent/dist/test-agent-python-libs-py313-linux-amd64.tar.gz \
+  --checksum /data/testagent/dist/test-agent-python-libs-py313-linux-amd64.tar.gz.sha256
+```
+
+后续增加第三方包必须修改入口清单、重新生成全量哈希锁并重新运行独立打包和断网验收；企业目标机不得执行公网 `pip install`。
 
 同一 worker/programs 批次固定携带官方 Codex CLI `0.145.0` Linux amd64 musl 和官方同标签
 bubblewrap，分别校验归档/可执行文件 SHA-256，并包含 Codex Apache-2.0 LICENSE/NOTICE 与

@@ -124,6 +124,7 @@ stop_container() {
 }
 
 start_container() {
+  local -a python_library_args=()
   require_value TEST_AGENT_OPENCODE_MANAGER_TOKEN
   require_value TEST_AGENT_DATA_ROOT
   require_value TEST_AGENT_PROGRAM_ROOT
@@ -131,6 +132,15 @@ start_container() {
   require_large_port_range_compatibility
 
   mkdir -p "${TEST_AGENT_DATA_ROOT}" "${TEST_AGENT_PROGRAM_ROOT}"
+  if [[ -d "${TEST_AGENT_PYTHON_LIBS_ROOT}/site-packages" \
+    && -f "${TEST_AGENT_PYTHON_LIBS_ROOT}/VERSION" ]]; then
+    python_library_args=(
+      -e "PYTHONPATH=/opt/test-agent/python-libs/site-packages"
+      -v "${TEST_AGENT_PYTHON_LIBS_ROOT}:/opt/test-agent/python-libs:ro"
+    )
+  else
+    echo "Python library bundle not installed; starting with standard library only: ${TEST_AGENT_PYTHON_LIBS_ROOT}" >&2
+  fi
   stop_container
 
   # 企业现场 Docker 18.09 的默认 seccomp 会阻断 Node 运行时创建线程，按部署要求使用特权容器。
@@ -156,6 +166,7 @@ start_container() {
     -e "OPENCODE_MANAGER_RECONNECT_INTERVAL=${OPENCODE_MANAGER_RECONNECT_INTERVAL}" \
     -v "${TEST_AGENT_DATA_ROOT}:/data/testagent/data" \
     -v "${TEST_AGENT_PROGRAM_ROOT}:/data/testagent/programs:ro" \
+    ${python_library_args[@]+"${python_library_args[@]}"} \
     --health-cmd "pgrep -f 'opencode-manager run' >/dev/null" \
     --health-interval 10s \
     --health-timeout 3s \
@@ -172,6 +183,7 @@ OPENCODE_WORKER_PORT_START="${OPENCODE_WORKER_PORT_START:-4096}"
 OPENCODE_WORKER_PORT_END="${OPENCODE_WORKER_PORT_END:-5095}"
 TEST_AGENT_DATA_ROOT="${TEST_AGENT_DATA_ROOT:-/data/testagent/data}"
 TEST_AGENT_PROGRAM_ROOT="${TEST_AGENT_PROGRAM_ROOT:-/data/testagent/programs}"
+TEST_AGENT_PYTHON_LIBS_ROOT="${TEST_AGENT_PYTHON_LIBS_ROOT:-/data/testagent/python-libs}"
 OPENCODE_ALLOWED_CORS="${OPENCODE_ALLOWED_CORS:-}"
 OPENCODE_MANAGER_HEARTBEAT_INTERVAL="${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-5s}"
 OPENCODE_MANAGER_RECONNECT_INTERVAL="${OPENCODE_MANAGER_RECONNECT_INTERVAL:-10s}"
