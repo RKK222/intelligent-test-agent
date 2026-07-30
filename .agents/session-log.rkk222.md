@@ -5,6 +5,27 @@
 
 ## Entries
 
+### 2026-07-30 - 按十二点成功部署基线重打纯前后端包
+
+### Why
+
+- 用户补充确认 12:01 的 toolbox 定向包已经部署成功，说明 11:48 日志中的“toolbox 指纹缺失”已是旧状态；继续按旧状态打包会重复携带约 373 MiB toolbox 制品。
+
+### What
+
+- 以成功部署后的 worker、toolbox 两项安装指纹作为标准 `--component-state-file` 输入，重新构建 Java、外置依赖和生产前端；组件计划及最终清单均为 `worker runtime=reuse`、`toolbox=reuse`。
+- 固定名内外层 ZIP 不再包含 programs、worker 镜像、IT-Tools、OmniTools、toolbox 源码或目录，只保留当前前后端、部署脚本和三节点配置包；未修改任何部署 shell。
+
+### How
+
+- JDK 25 后端封包、前端 VitePress/typecheck/生产构建和 Flyway persistence JAR 字节门禁通过；增量组件、自动节点、固定外层、双后台节点、ZIP CRC、嵌入内层 SHA 及 `--validate-only` 均通过。
+- 本地 backend readiness、前端 3000、两套既有 toolbox 健康端点和深层页面正常，证明本轮制品构建未破坏运行态。
+
+### Result
+
+- 新包只更新并重启 `.4/.114` Java、更新 `.2` 前端；部署入口会前后校验现有 worker/toolbox 指纹和健康状态，但不加载、重建或重启这些复用组件。
+- 企业实际部署尚未执行；本次没有新增或改写 Flyway migration，也未变更业务代码、API、事件、数据库结构、安全配置、generated SDK、OpenCode 源码或 `.env*`。
+
 ### 2026-07-30 - 基于新合入应用源码交互重打企业定向包
 
 ### Why
