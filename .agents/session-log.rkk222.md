@@ -5,6 +5,25 @@
 
 ## Entries
 
+### 2026-07-30 - 交付九页智能测试技术专题汇报
+
+### Why
+
+- 既有 A6 原稿以能力进展、推广数据和非功能测试为主，需要压缩为 10 页以内，并基于当前项目补足 Dify 到灵犀 Code、现行架构、设计执行融合、Agent/Skill 和 `docs/` 资产融合细节。
+
+### What
+
+- 保留原稿封面、目录、测试智能体演进和结束页，删除推广、专班、非功能与资源规划页，生成 9 页技术版 PPT；内部汇报统一使用“灵犀 Code”，首次技术说明标注“基于 OpenCode”。
+- 新增可重复生成脚本和演示材料说明；当前架构内容以 Java 多模块、Agent Runtime、用户专属灵犀 Code 进程、RunEvent SSE、文件 WebSocket、Redis/PostgreSQL 及 Agent & Skill Hub 为依据，规划态 `docs/` 融合与已实现能力分开标注。
+
+### How
+
+- 复用 A6 母版和原有演进页，使用 python-pptx 生成新增技术图；执行 markitdown 内容检查、原稿基线 OOXML 校验，并用 Keynote 实际打开导出 9 页 PDF 后逐页检查文字溢出、遮挡和目录换行。
+
+### Result
+
+- `docs/presentations/智能测试专题汇报（杭州产品部）技术版A7.pptx` 可正常打开和渲染，校验全部通过；同名副本已输出到原稿目录。未修改业务代码、HTTP/RunEvent、数据库/Flyway、SQL、安全、环境配置、generated SDK 或 OpenCode 源码。
+
 ### 2026-07-30 - 优化应用源码分支检索、整目录选择与超时处理
 
 ### Why
