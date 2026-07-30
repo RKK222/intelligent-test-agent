@@ -5,6 +5,28 @@
 
 ## Entries
 
+### 2026-07-30 - 基于新合入应用源码交互重打企业定向包
+
+### Why
+
+- 当前主干在上一份 toolbox 定向包后合入应用源码分支选择与多版本库关联修复，用户要求重新打包；现场 `.4` 仍只有匹配的 worker 指纹、缺少 toolbox 指纹，不能退回纯增量包。
+
+### What
+
+- 以当前 HEAD 和工作树的实际前端输入重新构建 Java、外置依赖和生产前端，继续用标准 `--component-state-file` 表达现场基线；组件计划为 `worker runtime=reuse`、`toolbox=included`。
+- 重新生成两套 `linux/amd64` toolbox 镜像、修改源码和目录文件，并用既有三节点配置包重建固定名双后台外层 ZIP；没有修改部署 shell、伪造现场状态或重复携带未变化的 worker/programs。
+- 新合入代码没有新增或改写 Flyway migration，发布仍锁定企业 migration SHA-256 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`。
+
+### How
+
+- JDK 25 后端封包、前端 VitePress/typecheck/生产构建、两套 toolbox 镜像构建和 `linux/amd64` 架构检查通过；本机 backend readiness、前端、工具健康端点和深层页面均正常。
+- 增量组件、自动节点、固定外层、双后台节点、Flyway persistence JAR 门禁、内外层 ZIP CRC、嵌入内层 SHA 一致性和发布 `--validate-only` 均通过。
+
+### Result
+
+- 本包会在 `.4/.114` 更新 Java、部署 toolbox 并写入 toolbox 指纹，在 `.2` 更新前端；worker runtime 只做指纹和健康校验，不加载镜像或重启。
+- 企业实际部署尚未执行；`.114` 也必须已有同一 worker 指纹，否则应停止并改用携带 worker 的全量包。未变更业务 API、事件、数据库结构、Flyway SQL、安全配置、generated SDK、OpenCode 源码或 `.env*`。
+
 ### 2026-07-30 - 修复应用源码分支选择与多版本库关联交互
 
 ### Why
