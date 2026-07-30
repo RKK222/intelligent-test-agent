@@ -3378,3 +3378,24 @@
 
 - 增量包仅替换 Java 后端及标准小型发布内容；现场复用并前后诊断现有 manager/worker 与 toolbox，不重载镜像、不重建或主动重启这些容器。目标机组件指纹缺失、不一致或健康失败时会在替换 Java 前停止，必须改用全量包。
 - 未新增或改写 Flyway migration，未变更生产前端、HTTP API、RunEvent/SSE、数据库结构、性能、安全、generated SDK、OpenCode 源码或环境配置。
+
+### 2026-07-30 - 为企业节点重建全量组件基线包
+
+### Why
+
+- `.4` 使用增量包时在正式替换 Java 前被 toolbox 指纹门禁拒绝，证明现场尚未建立与当前组件指纹一致的可信全量部署基线；不能手写状态文件或强制跳过。
+
+### What
+
+- 基于当前干净 HEAD 强制生成 `worker runtime=included`、`toolbox=included` 的完整企业发布，重新携带 programs、manager/OpenCode/Codex、worker linux/amd64 镜像、IT-Tools、OmniTools 和固定节点包。
+- 继续复用同一套 `package-release.sh`、固定外层封装和节点部署入口，没有为本次现场状态新增临时参数或平行部署脚本。
+
+### How
+
+- Java、生产前端、manager linux/amd64、worker 镜像和两个 toolbox 镜像构建通过；Codex 白盒 MCP 4 项契约通过，Mac ARM 环境仅按既有规则跳过原生 amd64 sandbox。
+- 最终发布通过 Flyway persistence JAR 字节门禁、内外层 SHA 一致性、双后台节点、固定外层包、首次安装和已有 systemd 升级模拟。
+
+### Result
+
+- 新全量包可在 `.4`、`.114` 重新部署并写入 worker/toolbox 组件指纹，之后相同指纹版本才能安全使用增量包；企业实际部署仍需按 `.4 → .114 → .2` 顺序完成并验证。
+- 本次未修改业务代码、生产部署逻辑、API、事件、数据库结构、Flyway SQL、安全配置、generated SDK、OpenCode 源码或 `.env*`。
