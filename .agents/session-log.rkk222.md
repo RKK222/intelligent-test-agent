@@ -3357,3 +3357,24 @@
 
 - 已形成只验证外层换肤的可交互 HTML 预览，默认云白工行红方案；不会把对话区改造成新的卡片或气泡体系。
 - 未修改生产前端代码、HTTP API、RunEvent/SSE、数据库/Flyway、性能、安全、兼容性、generated SDK、OpenCode 源码或环境配置。
+
+### 2026-07-30 - 补齐企业增量封包的 persistence 测试夹具
+
+### Why
+
+- 当前 HEAD 相对上次全量企业包只需要更新 Java 后端，worker runtime 与 toolbox 指纹均未变化；增量回归首次经过新的 Flyway 包内门禁时，旧夹具因没有构造外置 `backend/lib/test-agent-persistence` JAR 而失败。
+
+### What
+
+- 复用现有多后台部署测试的主 migration 夹具，在增量组件回归中构造标准 persistence JAR；不放宽打包门禁，不新增部署路径，也不修改业务代码。
+- 使用既有组件状态生成 `worker runtime=reuse`、`toolbox=reuse` 的增量内外层包，未携带 programs、worker 镜像或 toolbox 镜像大制品。
+
+### How
+
+- `AppSourceApplicationServiceTest` 27 项、增量组件回归、自动节点部署回归、最终 ZIP/SHA/嵌套 SHA、组件清单、缺省大制品和包内 Flyway SHA 校验通过。
+- 使用 JDK 25、未修改的 `.env.test` 与 `test` profile 重启 backend、opencode-manager、frontend；health/readiness 为 `UP`，前端与登录 CORS 返回 200，manager 探测恢复为稳定健康。
+
+### Result
+
+- 增量包仅替换 Java 后端及标准小型发布内容；现场复用并前后诊断现有 manager/worker 与 toolbox，不重载镜像、不重建或主动重启这些容器。目标机组件指纹缺失、不一致或健康失败时会在替换 Java 前停止，必须改用全量包。
+- 未新增或改写 Flyway migration，未变更生产前端、HTTP API、RunEvent/SSE、数据库结构、性能、安全、generated SDK、OpenCode 源码或环境配置。

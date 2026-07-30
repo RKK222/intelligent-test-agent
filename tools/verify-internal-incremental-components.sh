@@ -12,8 +12,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "${OUTPUT_DIR}/backend"
+mkdir -p "${OUTPUT_DIR}/backend/lib"
 printf 'backend\n' >"${OUTPUT_DIR}/backend/test-agent-app.jar"
+# 增量封装也必须经过正式 Flyway 字节门禁，测试夹具复用主 migration 构造外置 persistence JAR。
+PERSISTENCE_JAR_ROOT="${TMP_ROOT}/persistence-jar-root"
+mkdir -p "${PERSISTENCE_JAR_ROOT}/db/migration"
+cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260728160800__create_toolbox_click_tracking.sql" \
+  "${PERSISTENCE_JAR_ROOT}/db/migration/"
+(cd "${PERSISTENCE_JAR_ROOT}" && zip -qr \
+  "${OUTPUT_DIR}/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar" .)
 printf 'frontend\n' >"${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz"
 printf 'programs\n' >"${OUTPUT_DIR}/test-agent-programs.tar.gz"
 printf 'worker\n' >"${OUTPUT_DIR}/test-agent-opencode-worker_internal-linux-amd64.tar"
