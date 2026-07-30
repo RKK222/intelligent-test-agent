@@ -15,7 +15,7 @@ mkdir -p "${BUNDLE}/nodes" "${FAKE_BIN}" "${INSTALL_ROOT}/deploy/internal" \
   "${RELEASE_ROOT}/deploy/internal" "${RELEASE_ROOT}/dist"
 export CALL_LOG
 
-for script in deploy-node-common.sh deploy-backend-node.sh deploy-frontend-node.sh \
+for script in archive-common.sh deploy-node-common.sh deploy-backend-node.sh deploy-frontend-node.sh \
   init-backend-node-config.sh register-backend-on-frontend.sh; do
   cp "${ROOT_DIR}/deploy/internal/${script}" "${BUNDLE}/${script}"
 done

@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=archive-common.sh
+source "${SCRIPT_DIR}/archive-common.sh"
 IMAGE="${TEST_AGENT_OPENCODE_WORKER_IMAGE:-test-agent-opencode-worker:internal}"
 OUTPUT_DIR="${TEST_AGENT_IMAGE_OUTPUT_DIR:-${SCRIPT_DIR}/dist}"
 PLATFORM="linux/amd64"
@@ -162,7 +164,45 @@ docker run --rm --platform "${PLATFORM}" --network none \
 artifact="${OUTPUT_DIR}/${ARTIFACT_NAME}"
 artifact_tmp="${artifact}.new.$$"
 checksum_tmp="${artifact}.sha256.new.$$"
-tar -C "${tmp_root}" -czf "${artifact_tmp}" python-libs
+archive_validation_stderr="${tmp_root}/archive-validation.stderr"
+
+# Mac 自带 bsdtar 会把扩展属性编码为 AppleDouble/PAX 成员，同时又在本机列表中自动隐藏；
+# 必须用交付镜像内的 Linux GNU tar 生成并复核，让检查视角与企业目标机完全一致。
+docker run --rm --platform "${PLATFORM}" --network none \
+  --volume "${tmp_root}:/build:ro" \
+  --entrypoint tar \
+  "${IMAGE}" -C /build -czf - python-libs >"${artifact_tmp}"
+
+archive_member_check="$(cat <<'CHECK'
+set -euo pipefail
+tar -tzf - | awk '
+  $0 == "python-libs" || $0 == "python-libs/" { root=1; next }
+  $0 ~ /^python-libs\// { next }
+  { print "Unsafe or unexpected archive entry: " $0 > "/dev/stderr"; bad=1 }
+  END {
+    if (!root) {
+      print "Python library archive root is missing: python-libs" > "/dev/stderr"
+      bad=1
+    }
+    if (bad) exit 1
+  }
+'
+CHECK
+)"
+if ! docker run --rm --platform "${PLATFORM}" --network none -i \
+  --entrypoint bash \
+  "${IMAGE}" -lc "${archive_member_check}" \
+  <"${artifact_tmp}" 2>"${archive_validation_stderr}"; then
+  cat "${archive_validation_stderr}" >&2
+  echo "Python library archive failed Linux target member validation" >&2
+  exit 1
+fi
+if grep -Eqi 'LIBARCHIVE|extended header|xattr|AppleDouble|(^|/)\._' \
+  "${archive_validation_stderr}"; then
+  cat "${archive_validation_stderr}" >&2
+  echo "Python library archive contains Mac metadata or extended headers" >&2
+  exit 1
+fi
 if command -v sha256sum >/dev/null 2>&1; then
   artifact_sha256="$(sha256sum "${artifact_tmp}" | awk '{print $1}')"
 else
@@ -171,6 +211,7 @@ fi
 printf '%s  %s\n' "${artifact_sha256}" "${ARTIFACT_NAME}" >"${checksum_tmp}"
 mv -f "${artifact_tmp}" "${artifact}"
 mv -f "${checksum_tmp}" "${artifact}.sha256"
+archive_strip_file_metadata "${artifact}" "${artifact}.sha256"
 
 ls -lh "${artifact}" "${artifact}.sha256"
 echo "Python library artifact: ${artifact}"

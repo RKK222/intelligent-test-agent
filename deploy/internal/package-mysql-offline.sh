@@ -2,6 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=archive-common.sh
+source "${SCRIPT_DIR}/archive-common.sh"
 IMAGE_TAR="${SCRIPT_DIR}/dist/mysql_8.4-linux-amd64.tar"
 NODES_DIR=""
 OUTPUT_DIR="${SCRIPT_DIR}/dist"
@@ -162,13 +164,13 @@ install -m 0755 "${SCRIPT_DIR}/deploy-xxl-job-mysql.sh" \
   "${NODE_ROOT}/${NODE_DIR}/deploy-xxl-job-mysql.sh"
 install -m 0644 "${SCRIPT_DIR}/MULTI-BACKEND.md" "${NODE_ROOT}/${NODE_DIR}/MULTI-BACKEND.md"
 TARGET_NODE="${BUNDLE_ROOT}/nodes/$(basename "${NODE_ARCHIVE}")"
-tar -C "${NODE_ROOT}" -czf "${TARGET_NODE}" "${NODE_DIR}"
+archive_create_tar_gz "${TARGET_NODE}" "${NODE_ROOT}" "${NODE_DIR}"
 chmod 0600 "${TARGET_NODE}"
 printf '%s  %s\n' "$(sha256_digest "${TARGET_NODE}")" "$(basename "${TARGET_NODE}")" \
   >"${TARGET_NODE}.sha256"
 
 TMP_ARCHIVE="${TMP_ROOT}/${BUNDLE_NAME}.zip"
-(cd "${TMP_ROOT}" && zip -qr "${TMP_ARCHIVE}" "${BUNDLE_NAME}")
+archive_create_zip "${TMP_ARCHIVE}" "${TMP_ROOT}" "${BUNDLE_NAME}"
 unzip -tq "${TMP_ARCHIVE}" >/dev/null
 
 OUTPUT_ARCHIVE="${OUTPUT_DIR}/${BUNDLE_NAME}.zip"
@@ -181,6 +183,7 @@ printf '%s  %s\n' "$(sha256_digest "${OUTPUT_ARCHIVE_TMP}")" "$(basename "${OUTP
 chmod 0600 "${OUTPUT_CHECKSUM_TMP}"
 mv -f "${OUTPUT_ARCHIVE_TMP}" "${OUTPUT_ARCHIVE}"
 mv -f "${OUTPUT_CHECKSUM_TMP}" "${OUTPUT_CHECKSUM}"
+archive_strip_file_metadata "${OUTPUT_ARCHIVE}" "${OUTPUT_CHECKSUM}"
 
 printf 'Standalone MySQL bundle: %s\n' "${OUTPUT_ARCHIVE}"
 printf 'Bundle checksum: %s\n' "${OUTPUT_CHECKSUM}"

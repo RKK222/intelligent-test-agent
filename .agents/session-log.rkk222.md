@@ -5,6 +5,29 @@
 
 ## Entries
 
+### 2026-07-30 - 修复 Mac 企业归档隐藏元数据污染并重打 Python 依赖包
+
+### Why
+
+- `.4` 平台包部署、readiness、worker health 和 Codex 白盒均已通过，但独立 Python 包在目标 Linux 上被 `deploy-python-libs.sh` 拒绝：Mac `bsdtar` 写入并在本机列表中隐藏了 `._python-libs`、嵌套 AppleDouble 成员和 `LIBARCHIVE.xattr.com.apple.provenance` 扩展头；原 SHA 校验成功只说明污染包未被篡改，不能证明归档安全。
+
+### What
+
+- Python 依赖归档改为直接在 `linux/amd64` worker 镜像内用 GNU tar 生成，并用相同目标侧实现执行严格成员检查，出现非 `python-libs/**` 成员或 Mac/PAX 扩展头即停止发布。
+- 新增公共 `archive-common.sh`，所有企业发布、双后台、节点配置、Redis、MySQL 和敏感上下文 TAR/ZIP 统一排除 macOS 自动生成的 `._*`、`.DS_Store`、`__MACOSX` 等元数据；保留合法点文件，bsdtar 禁止 xattr/ACL/file flags，ZIP 使用 `-X`，并清理可移除的交付文件 xattr。
+- 新增 Linux GNU tar 归档卫生回归，并同步企业部署 README、双后台文档和既有包结构测试夹具。
+
+### How
+
+- 真实复现同一旧归档在 Mac 列表不可见、Linux GNU tar 可见 AppleDouble 和扩展头；修复后归档卫生、固定外层 ZIP、自动节点、增量组件、Redis、MySQL、AI 文档及全部相关 shell 语法回归通过。
+- 使用锁定 wheel 从官方 PyPI 重建 Python 3.13/Linux amd64 包，功能 smoke 覆盖 pandas Excel 回读、openpyxl、XlsxWriter、python-docx、jsonschema 和 orjson；再按现场 `deploy-python-libs.sh --no-restart` 完整安装到临时根目录通过。
+- 最终归档 SHA-256 为 `02cd29afc667af4a336a509df925d0c4adc110335ba12daf772dec15609ef77c`；Linux GNU tar 列出 3604 个成员，Mac 元数据成员与扩展头告警均为 0。
+
+### Result
+
+- 现场只需丢弃旧 Python tar/校验文件并将新 tar 与 `.sha256` 分别部署到 `.4/.114`；已成功部署的平台 Java、前端、worker runtime、manager 和 toolbox 无需重新打包或重启，Flyway 也不执行。
+- 企业服务器实际 Python 侧车部署尚待现场执行。未修改业务 HTTP API、事件、数据库结构、Flyway SQL、关系型 SQL、安全策略、generated SDK、OpenCode 源码或 `.env*`。
+
 ### 2026-07-30 - 兼容内网 HTTP 附件内容指纹
 
 ### Why

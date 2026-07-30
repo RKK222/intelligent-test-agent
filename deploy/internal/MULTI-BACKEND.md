@@ -117,7 +117,7 @@ deploy/internal/package-release.sh --python-libs-only \
 - `worker runtime` 把 OpenCode Manager、OpenCode runtime、Codex MCP、Node/MCP SDK、bubblewrap、worker 镜像和 `test-agent-programs.tar.gz` 视为一个不可拆分单元；其中任一项变化就全部重建并进入 ZIP。
 - `toolbox` 把 IT-Tools、OmniTools、完整修改源码和目录文件视为一个单元；其中任一项变化就全部重建并进入 ZIP。
 
-Python 的 pandas、Excel、Word 和 JSON 第三方库是第三个、完全独立的交付单元，不进入内层 ZIP，也不改变 worker 指纹。库升级只重新生成 `test-agent-python-libs-py313-linux-amd64.tar.gz` 及校验文件，然后分别部署到两台后台。
+Python 的 pandas、Excel、Word 和 JSON 第三方库是第三个、完全独立的交付单元，不进入内层 ZIP，也不改变 worker 指纹。库升级只重新生成 `test-agent-python-libs-py313-linux-amd64.tar.gz` 及校验文件，然后分别部署到两台后台。该归档由 worker 内的 Linux GNU tar 生成并以相同实现复核，禁止使用会写入并隐藏 `._*` AppleDouble/PAX 成员的 Mac 归档结果；目标机出现 `Unsafe or unexpected archive entry` 时停止部署并更换原始归档，不得忽略成员或重新计算 SHA。
 
 首次构建、指纹状态丢失或组件变化时，清单为 `included`；未变化时为 `reuse`，内层 ZIP 不再重复携带该组件的大文件。必须持续使用同一个输出目录，或用 `--component-state-file <稳定路径>` 保存基线。新装机、扩容新节点、灾备恢复和状态不可信的交付必须加 `--include-all-components`；增量包只允许升级已有且组件健康的 `.4/.114`，不能用于空机器。迁移到该机制后的第一次构建也应使用全量命令建立可信基线；部署成功后每台后台会把实际安装指纹写入 `/data/testagent/config/release-component-state.env`，后续复用时会同时校验指纹和健康状态：
 

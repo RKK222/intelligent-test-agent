@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=deploy-node-common.sh
 source "${SCRIPT_DIR}/deploy-node-common.sh"
+# shellcheck source=archive-common.sh
+source "${SCRIPT_DIR}/archive-common.sh"
 
 if [[ $# -ne 1 || ! "$1" =~ ^122\.233\.30\.([1-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-4])$ ]]; then
   echo "Usage: register-backend-on-frontend.sh <122.233.30.x>" >&2
@@ -31,7 +33,7 @@ append_env_csv_value "${NGINX_ENV}" TEST_AGENT_NGINX_SERVER_ROUTES \
   "$(server_id_from_host "${BACKEND_IP}")=${BACKEND_IP}:8080"
 
 TARGET_TMP="$(mktemp "${SCRIPT_DIR}/nodes/.${NODE_NAME}.tar.gz.XXXXXX")"
-tar -C "${TMP_ROOT}" -czf "${TARGET_TMP}" "${NODE_NAME}"
+archive_create_tar_gz "${TARGET_TMP}" "${TMP_ROOT}" "${NODE_NAME}"
 chmod 0600 "${TARGET_TMP}"
 mv -f "${TARGET_TMP}" "${NODE_ARCHIVE}"
 printf '%s  %s\n' "$(sha256_digest "${NODE_ARCHIVE}")" "$(basename "${NODE_ARCHIVE}")" \

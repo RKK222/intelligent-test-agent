@@ -2,6 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=archive-common.sh
+source "${SCRIPT_DIR}/archive-common.sh"
 OUTPUT_DIR="${SCRIPT_DIR}/dist"
 BUNDLE_NAME="test-agent-redis-offline"
 IMAGE_TAR=""
@@ -99,7 +101,7 @@ write_bundle_archive() {
   local output_archive_tmp output_checksum_tmp
   bundle_parent="$(dirname "${bundle_root}")"
   tmp_archive="${TMP_ROOT}/${BUNDLE_NAME}.zip"
-  (cd "${bundle_parent}" && zip -qr "${tmp_archive}" "${BUNDLE_NAME}")
+  archive_create_zip "${tmp_archive}" "${bundle_parent}" "${BUNDLE_NAME}"
   unzip -tq "${tmp_archive}" >/dev/null
 
   output_archive="${OUTPUT_DIR}/${BUNDLE_NAME}.zip"
@@ -112,6 +114,7 @@ write_bundle_archive() {
   chmod 0600 "${output_checksum_tmp}"
   mv -f "${output_archive_tmp}" "${output_archive}"
   mv -f "${output_checksum_tmp}" "${output_checksum}"
+  archive_strip_file_metadata "${output_archive}" "${output_checksum}"
 
   printf 'Standalone Redis bundle: %s\n' "${output_archive}"
   printf 'Bundle checksum: %s\n' "${output_checksum}"

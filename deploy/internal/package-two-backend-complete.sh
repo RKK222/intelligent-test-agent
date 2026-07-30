@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=archive-common.sh
+source "${SCRIPT_DIR}/archive-common.sh"
 RELEASE_ARCHIVE="${SCRIPT_DIR}/dist/test-agent-internal-release.zip"
 NODES_DIR=""
 OUTPUT_DIR="${SCRIPT_DIR}/dist"
@@ -328,7 +330,7 @@ normalize_backend_node_archive() {
   replace_or_append_env_value "${toolbox_env}" TEST_AGENT_TOOLBOX_BIND_ADDRESS "${node_ip}"
 
   target="${TMP_ROOT}/$(basename "${source}")"
-  tar -C "${node_root}" -czf "${target}" "${node_dir}"
+  archive_create_tar_gz "${target}" "${node_root}" "${node_dir}"
   chmod 0600 "${target}"
   printf '%s\n' "${target}"
 }
@@ -430,7 +432,7 @@ normalize_frontend_node_archive() {
   replace_or_append_env_value "${nginx_env}" TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM \
     '122.233.30.4:18121,122.233.30.114:18121'
   target="${TMP_ROOT}/$(basename "${source}")"
-  tar -C "${node_root}" -czf "${target}" "${node_dir}"
+  archive_create_tar_gz "${target}" "${node_root}" "${node_dir}"
   chmod 0600 "${target}"
   printf '%s\n' "${target}"
 }
@@ -448,6 +450,7 @@ install -m 0755 "${SCRIPT_DIR}/deploy-frontend-node.sh" "${BUNDLE_ROOT}/deploy-f
 install -m 0755 "${SCRIPT_DIR}/init-backend-node-config.sh" "${BUNDLE_ROOT}/init-backend-node-config.sh"
 install -m 0755 "${SCRIPT_DIR}/register-backend-on-frontend.sh" \
   "${BUNDLE_ROOT}/register-backend-on-frontend.sh"
+install -m 0644 "${SCRIPT_DIR}/archive-common.sh" "${BUNDLE_ROOT}/archive-common.sh"
 install -m 0600 "${RELEASE_ARCHIVE}" "${BUNDLE_ROOT}/test-agent-internal-release.zip"
 printf '%s  %s\n' \
   "$(sha256_digest "${BUNDLE_ROOT}/test-agent-internal-release.zip")" \
@@ -469,7 +472,7 @@ repack_node() {
     "${node_root}/${node_dir}/deploy-multi-backend-node.sh"
   install -m 0644 "${SCRIPT_DIR}/MULTI-BACKEND.md" \
     "${node_root}/${node_dir}/MULTI-BACKEND.md"
-  tar -C "${node_root}" -czf "${target}" "${node_dir}"
+  archive_create_tar_gz "${target}" "${node_root}" "${node_dir}"
   chmod 0600 "${target}"
   printf '%s  %s\n' "$(sha256_digest "${target}")" "$(basename "${target}")" \
     >"${target}.sha256"
@@ -480,7 +483,7 @@ repack_node "${NODE_114}" test-agent-two-backend-122.233.30.114
 repack_node "${NODE_2}" test-agent-two-backend-122.233.30.2
 
 TMP_ARCHIVE="${TMP_ROOT}/${BUNDLE_NAME}.zip"
-(cd "${TMP_ROOT}" && zip -qr "${TMP_ARCHIVE}" "${BUNDLE_NAME}")
+archive_create_zip "${TMP_ARCHIVE}" "${TMP_ROOT}" "${BUNDLE_NAME}"
 unzip -tq "${TMP_ARCHIVE}" >/dev/null
 
 OUTPUT_ARCHIVE="${OUTPUT_DIR}/${BUNDLE_NAME}.zip"
@@ -495,6 +498,7 @@ chmod 0600 "${OUTPUT_CHECKSUM_TMP}"
 # 固定文件逐个原子替换，不生成日期或版本后缀，也不触发交互式覆盖。
 mv -f "${OUTPUT_ARCHIVE_TMP}" "${OUTPUT_ARCHIVE}"
 mv -f "${OUTPUT_CHECKSUM_TMP}" "${OUTPUT_CHECKSUM}"
+archive_strip_file_metadata "${OUTPUT_ARCHIVE}" "${OUTPUT_CHECKSUM}"
 
 printf 'Complete two-backend bundle: %s\n' "${OUTPUT_ARCHIVE}"
 printf 'Bundle checksum: %s\n' "${OUTPUT_CHECKSUM}"

@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=archive-common.sh
+source "${SCRIPT_DIR}/archive-common.sh"
 
 ENV_FILE="${SCRIPT_DIR}/.env"
 if [[ ! -f "${ENV_FILE}" ]]; then
@@ -328,6 +330,7 @@ write_artifact_checksum() {
     echo "Neither sha256sum nor shasum is available; cannot checksum ${artifact}" >&2
     exit 1
   fi
+  archive_strip_file_metadata "${artifact}" "${artifact}.sha256"
 }
 
 sha256_file() {
@@ -539,7 +542,7 @@ package_backend() {
     | sed 's#Main-Class: org.springframework.boot.loader.launch.JarLauncher#Main-Class: org.springframework.boot.loader.launch.PropertiesLauncher#' \
     | sed '${/^$/d;}' >"${manifest_file}"
   printf 'Loader-Path: /data/testagent/dist/backend/lib\n\n' >>"${manifest_file}"
-  (cd "${manifest_dir}" && zip -q -u "${backend_jar_path}" META-INF/MANIFEST.MF)
+  (cd "${manifest_dir}" && zip -X -q -u "${backend_jar_path}" META-INF/MANIFEST.MF)
   rm -rf "${manifest_dir}"
   unzip -p "${backend_dir}/test-agent-app.jar" META-INF/MANIFEST.MF | tr -d '\r' \
     | grep -Fx 'Loader-Path: /data/testagent/dist/backend/lib' >/dev/null || {
@@ -582,7 +585,7 @@ package_frontend() {
   rm -rf "${frontend_dir}"
   mkdir -p "${frontend_dir}"
   cp -R "${ROOT_DIR}/frontend/apps/agent-web/dist/." "${frontend_dir}/"
-  tar -C "${OUTPUT_DIR}" -czf "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" frontend
+  archive_create_tar_gz "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" "${OUTPUT_DIR}" frontend
   ls -lh "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz"
 }
 
@@ -671,13 +674,13 @@ package_toolbox() {
   build_toolbox_image "${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}" "${ROOT_DIR}/toolbox-source/omni-tools"
 
   # GPL/MIT 完整修改源码、锁定证据、许可证和已校验运行资源随离线包一起交付；构建缓存不入包。
-  tar -C "${ROOT_DIR}" \
+  archive_create_tar_gz "${source_archive}" "${ROOT_DIR}" \
     --exclude='toolbox-source/it-tools/node_modules' \
     --exclude='toolbox-source/it-tools/dist' \
     --exclude='toolbox-source/omni-tools/node_modules' \
     --exclude='toolbox-source/omni-tools/dist' \
     --exclude='toolbox-source/**/.git' \
-    -czf "${source_archive}" toolbox-source
+    toolbox-source
   write_artifact_checksum "${source_archive}"
   cp "${ROOT_DIR}/backend/test-agent-integration/src/main/resources/toolbox/catalog-v1.json" \
     "${OUTPUT_DIR}/toolbox-catalog-v1.json"
@@ -787,7 +790,18 @@ package_release_zip() {
   # 排除默认、当前及历史命名的 dist-* 输出目录，避免旧交付物递归进入新 zip。
   local output_dir_name
   output_dir_name="$(basename "${OUTPUT_DIR}")"
-  rsync -a --exclude 'dist' --exclude 'dist-*' --exclude "${output_dir_name}" --exclude '.env' "${SCRIPT_DIR}/" "${staging_dir}/deploy/internal/"
+  rsync -a \
+    --exclude 'dist' \
+    --exclude 'dist-*' \
+    --exclude "${output_dir_name}" \
+    --exclude '.env' \
+    --exclude '.DS_Store' \
+    --exclude '._*' \
+    --exclude '__MACOSX' \
+    --exclude '.Spotlight-V100' \
+    --exclude '.Trashes' \
+    --exclude '.fseventsd' \
+    "${SCRIPT_DIR}/" "${staging_dir}/deploy/internal/"
   install -m 0755 "${ROOT_DIR}/tools/verify-python-libs.sh" \
     "${staging_dir}/deploy/internal/verify-python-libs.sh"
   if [[ "${TOOLBOX_COMPONENT_MODE}" == included ]]; then
@@ -824,7 +838,7 @@ package_release_zip() {
   fi
 
   rm -f "${zip_path}"
-  (cd "${staging_dir}" && zip -qr "${zip_path}" .)
+  archive_create_zip "${zip_path}" "${staging_dir}" .
   rm -rf "${staging_dir}"
   ls -lh "${zip_path}"
 }
@@ -843,6 +857,7 @@ write_release_checksum() {
     echo "Neither sha256sum nor shasum is available; cannot create release checksum" >&2
     exit 1
   fi
+  archive_strip_file_metadata "${zip_path}" "${zip_path}.sha256"
   cat "${zip_path}.sha256"
 }
 
@@ -879,7 +894,7 @@ export_worker_programs() {
     "${CODEX_BWRAP_ASSET_SIZE}" \
     "${CODEX_BWRAP_ASSET_SHA256}" \
     "${CODEX_BWRAP_BINARY_SHA256}" >"${programs_dir}/VERSION"
-  tar -C "${OUTPUT_DIR}" -czf "${OUTPUT_DIR}/test-agent-programs.tar.gz" programs
+  archive_create_tar_gz "${OUTPUT_DIR}/test-agent-programs.tar.gz" "${OUTPUT_DIR}" programs
   ls -lh "${OUTPUT_DIR}/test-agent-programs.tar.gz"
 }
 

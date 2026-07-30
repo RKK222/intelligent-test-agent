@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=deploy-node-common.sh
 source "${SCRIPT_DIR}/deploy-node-common.sh"
+# shellcheck source=archive-common.sh
+source "${SCRIPT_DIR}/archive-common.sh"
 
 LOCAL_IP="$(detect_site_ip backend)"
 SEED_NAME="test-agent-two-backend-122.233.30.4"
@@ -35,7 +37,7 @@ replace_env_value "${BACKEND_ENV}" TEST_AGENT_SERVER_ADVERTISED_HOST "${LOCAL_IP
 replace_env_value "${BACKEND_ENV}" TEST_AGENT_LINUX_SERVER_ID "$(server_id_from_host "${LOCAL_IP}")"
 
 TARGET_TMP="$(mktemp "${SCRIPT_DIR}/nodes/.${NODE_NAME}.tar.gz.XXXXXX")"
-tar -C "${TMP_ROOT}" -czf "${TARGET_TMP}" "${NODE_NAME}"
+archive_create_tar_gz "${TARGET_TMP}" "${TMP_ROOT}" "${NODE_NAME}"
 if [[ "$(wc -c <"${TARGET_TMP}" | tr -d '[:space:]')" -gt 1048576 ]]; then
   echo "Generated node configuration exceeds 1 MiB" >&2
   exit 1

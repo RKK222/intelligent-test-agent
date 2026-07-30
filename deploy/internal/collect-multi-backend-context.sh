@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=archive-common.sh
+source "${SCRIPT_DIR}/archive-common.sh"
+
 ROLE=""
 OUTPUT_DIR="/data/0709"
 INSTALL_ROOT="/data/testagent"
@@ -222,7 +226,7 @@ find "${BUNDLE_ROOT}" -type f -print | sed "s#^${BUNDLE_ROOT}/##" | sort \
 
 timestamp="$(date '+%Y%m%d-%H%M%S')"
 archive="${OUTPUT_DIR}/test-agent-config-SENSITIVE-${ROLE}-${NODE_LABEL}-${timestamp}.tar.gz"
-tar -C "${BUNDLE_ROOT}" -czf "${archive}" .
+archive_create_tar_gz "${archive}" "${BUNDLE_ROOT}" .
 archive_bytes="$(file_size "${archive}")"
 if (( archive_bytes > MAX_ARCHIVE_BYTES )); then
   rm -f "${archive}"

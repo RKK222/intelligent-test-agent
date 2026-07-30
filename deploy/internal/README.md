@@ -67,6 +67,8 @@ grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL
 
 企业包以执行命令时的本地工作树为准：已提交和未提交、但会被 Maven、前端或 Docker 构建实际读取的本地代码都属于本次构建输入。打包前先合并确认需要交付的相关分支并检查状态；这些命令用于记录输入范围，不要求 `git status --short` 为空，也不得为打包擅自清理、stash 或切换到另一份源码：
 
+所有企业 TAR/ZIP 统一通过 `archive-common.sh` 封装：保留部署所需的合法点文件，仅排除 `._*`、`.DS_Store`、`__MACOSX`、`.Spotlight-V100`、`.Trashes`、`.fseventsd` 等 macOS 自动元数据，并禁止 TAR 携带扩展属性、ACL 和 file flags。ZIP 关闭 extra fields，最终交付文件自身也会清除 xattr，避免复制到不支持扩展属性的介质时生成同名 `._*` 旁车文件；回归测试还会用目标侧 Linux GNU tar 检查成员和告警。新增归档流程必须复用该入口，不能直接调用 Mac `tar`/`zip` 生成交付包。
+
 ```bash
 cd /Users/kaka/Desktop/intelligent-test-agent
 git rev-parse HEAD
@@ -225,7 +227,7 @@ deploy/internal/package-redis-offline.sh --zip-only --output-dir deploy/internal
 
 worker 还固定 Python `3.13.14`：外网 Mac 从 `PYTHON_SOURCE_BASE_URL` 指向的国内镜像下载官方源码，并校验 `23021880` 字节和 SHA-256 `639e43243c620a308f968213df9e00f2f8f62332f7adbaa7a7eeb9783057c690`，再在 Debian 11 bullseye/glibc 2.31 基线上编译。镜像提供 `python3`/`python`、pip、venv、curl、jq、zip/unzip；Git、OpenSSH、ripgrep、Node 和 procps 沿用既有能力。为控制镜像体积和供应链，镜像不保留 gcc/make 等编译器，也不直接烘焙业务第三方库，并通过 `PIP_NO_INDEX=1` 禁止默认访问公网索引。
 
-首批通用第三方库固定为 pandas `3.0.3`、openpyxl `3.1.5`、XlsxWriter `3.2.9`、python-docx `1.2.0`、jsonschema `4.26.0`、orjson `3.11.9` 及完整传递依赖。`deploy/internal/python-libs/requirements-linux-amd64.lock` 对每个 Python 3.13 / Linux amd64 wheel 固定 SHA-256；`package-python-libs.sh` 只下载二进制 wheel，断网安装到独立 `site-packages` 后执行 Excel、Word、pandas、标准 `json`、JSON Schema 和 orjson 功能 smoke，再生成 `FILES.sha256`。目标机使用下列命令独立部署，脚本先断网验证候选目录，再原子替换 `/data/testagent/python-libs`、只读挂载并重启 worker：
+首批通用第三方库固定为 pandas `3.0.3`、openpyxl `3.1.5`、XlsxWriter `3.2.9`、python-docx `1.2.0`、jsonschema `4.26.0`、orjson `3.11.9` 及完整传递依赖。`deploy/internal/python-libs/requirements-linux-amd64.lock` 对每个 Python 3.13 / Linux amd64 wheel 固定 SHA-256；`package-python-libs.sh` 只下载二进制 wheel，断网安装到独立 `site-packages` 后执行 Excel、Word、pandas、标准 `json`、JSON Schema 和 orjson 功能 smoke，再生成 `FILES.sha256`。归档必须由交付镜像内的 Linux GNU tar 生成并复核；Mac `bsdtar` 可能隐藏自身写入的 `._*` AppleDouble/PAX 成员，目标机出现 `Unsafe or unexpected archive entry` 时不得跳过校验或重算 SHA，必须换用原始、通过 Linux 成员检查的归档。目标机使用下列命令独立部署，脚本先断网验证候选目录，再原子替换 `/data/testagent/python-libs`、只读挂载并重启 worker：
 
 ```bash
 deploy/internal/deploy-python-libs.sh \
