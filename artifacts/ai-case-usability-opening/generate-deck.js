@@ -6,8 +6,8 @@ const pptx = new pptxgen();
 pptx.layout = 'LAYOUT_WIDE';
 pptx.author = 'MIMO 测试智能体课题组';
 pptx.company = '测试效能团队';
-pptx.subject = '面向开发变更的测试资产可用性、变更响应度评估与优化闭环';
-pptx.title = '面向开发变更的测试资产质量评估与优化｜开题汇报';
+pptx.subject = '面向开发变更的测试资产质量评估与优化 Agent 及 Skills';
+pptx.title = '测试资产质量评估与优化 Agent｜开题汇报';
 pptx.lang = 'zh-CN';
 pptx.theme = {
   headFontFace: 'Arial',
@@ -148,7 +148,7 @@ async function iconBadge(slide, name, x, y, color = C.teal, fill = C.mint, d = 0
 }
 
 function footer(slide, n, source = '') {
-  tx(slide, `MIMO 测试智能体 · 测试资产质量评估与优化`, 0.6, 7.12, 5.4, 0.2, { fontSize: 9, color: C.muted });
+  tx(slide, `MIMO 测试智能体 · 测试资产质量评估与优化 Agent`, 0.6, 7.12, 5.4, 0.2, { fontSize: 9, color: C.muted });
   if (source) tx(slide, source, 6.1, 7.12, 6.2, 0.2, { fontSize: 8.5, color: '8794AA', align: 'right' });
   tx(slide, String(n).padStart(2, '0'), 12.45, 7.08, 0.3, 0.25, { fontSize: 10, bold: true, color: C.slate, align: 'right' });
 }
@@ -181,8 +181,8 @@ async function buildDeck() {
     const slide = pptx.addSlide();
     darkSlide(slide);
     pill(slide, '新员工实战课题 · 开题汇报', 0.72, 0.58, 2.42, C.lime, C.ink, 10.5);
-    tx(slide, '面向开发变更的\n测试资产质量评估与优化', 0.72, 1.15, 7.65, 1.85, { fontSize: 38, bold: true, color: C.white, breakLine: true, valign: 'top' });
-    tx(slide, '既评估资产好不好，也关注资产有没有响应代码变化', 0.76, 3.18, 7.0, 0.5, { fontSize: 17.5, color: 'C9D3E7' });
+    tx(slide, '测试资产质量评估\n与优化 Agent', 0.72, 1.15, 7.65, 1.85, { fontSize: 40, bold: true, color: C.white, breakLine: true, valign: 'top' });
+    tx(slide, '面向开发变更，交付能真实运行的 Agent + Skills', 0.76, 3.18, 7.0, 0.5, { fontSize: 17.5, color: 'C9D3E7' });
     tx(slide, '基于现有 MIMO 测试智能体底座', 0.76, 3.72, 5.2, 0.35, { fontSize: 13, color: C.mint, bold: true });
 
     // Hero lens
@@ -207,13 +207,13 @@ async function buildDeck() {
       if (i < steps.length - 1) arrow(slide, 1.93 + i * 1.38, 5.87, 2.08 + i * 1.38, 5.87, '7C8DAA');
     });
     tx(slide, '2026.07', 11.65, 6.85, 0.9, 0.25, { fontSize: 10, color: '8FA1BE', align: 'right' });
-    addNotes(slide, '开场先讲清楚：这个课题不是再做一个案例生成器，而是评估现有测试资产的可用性和变更响应度，并把风险转成可执行的优化清单。');
+    addNotes(slide, '开场先讲清楚：本课题不交付看板或网页，而是在现有平台中建成一个能调用的测试资产质量评估与优化 Agent，以及它编排的可复用 Skills。');
   }
 
   // 02 One sentence
   {
     const slide = pptx.addSlide();
-    titleBlock(slide, '课题定义', '一句话：让测试资产及时响应开发变更', '既评价 AI 生成案例是否可用，也识别“代码已变、关联资产未响应”的风险。', 2);
+    titleBlock(slide, '课题定义', '一句话：让 Agent 把开发变更转成可用的测试资产', '输入代码变更和现有案例，输出有证据的质量结论与可直接复核的优化资产。', 2);
     card(slide, 0.72, 2.08, 11.9, 2.0, C.ink);
     tx(slide, '“', 0.98, 2.14, 0.6, 0.85, { fontSize: 54, bold: true, color: C.lime, valign: 'top' });
     tx(slide, '代码变了，资产不一定必须改；\n但必须能说明“为何无需改，或准备怎么改”。', 1.62, 2.39, 10.15, 1.18, { fontSize: 24, bold: true, color: C.white, breakLine: true, valign: 'mid' });
@@ -231,8 +231,8 @@ async function buildDeck() {
       tx(slide, qs[i][0], x + 0.86, 4.66, 1.66, 0.34, { fontSize: 16, bold: true });
       tx(slide, qs[i][1], x + 0.22, 5.22, 2.25, 0.36, { fontSize: 12.5, color: C.muted });
     }
-    pill(slide, '北极星：受影响变更的资产响应率持续提升', 4.25, 6.38, 4.85, C.limeSoft, C.green, 11.1);
-    addNotes(slide, '这里要避免简单地把“代码变了、资产没变”判定为缺陷。它首先是风险信号；测试人员需要确认无需调整，或选择更新、补充、重新生成。');
+    pill(slide, '北极星：真实样例的结论可采信、优化结果可直接复核', 3.85, 6.38, 5.65, C.limeSoft, C.green, 10.7);
+    addNotes(slide, '“能用”不是文件能被发现就算完成。Agent 必须在真实变更和案例上稳定运行，结论能追溯到代码证据，优化后案例能被测试人员直接复核。');
   }
 
   // 03 Existing base
@@ -261,8 +261,8 @@ async function buildDeck() {
     await iconBadge(slide, 'shield', 0.98, 5.84, C.lime, '21304D', 0.47);
     tx(slide, '公共地基', 1.57, 5.82, 1.05, 0.25, { fontSize: 11, bold: true, color: C.lime });
     tx(slide, '统一 API / traceId / 权限 · 只读源码快照身份 · 个人测试工作区 · 文件与版本治理', 2.58, 5.81, 8.9, 0.28, { fontSize: 12.4, color: C.white, bold: true });
-    pill(slide, '课题只补“评估 + 变更响应”', 9.88, 5.91, 2.4, C.lime, C.ink, 9.8);
-    addNotes(slide, '底座已覆盖工作区、上下文、运行、产物、版本和资产治理。新员工不重做聊天、编辑器、Git 或案例生成 Agent，只补测试资产评估、开发变更响应和优化闭环。');
+    pill(slide, '课题只补“1 Agent + 4 Skills”', 9.95, 5.91, 2.33, C.lime, C.ink, 9.8);
+    addNotes(slide, '底座已覆盖工作区、上下文、运行、文件与版本、Agent/Skill 发现与调用、Hub 发布与引用。新员工不做网页和平台 API，直接在现有配置与运行机制上交付 Agent 和 Skills。');
   }
 
   // 04 Existing case chain
@@ -297,14 +297,14 @@ async function buildDeck() {
   // 05 Reuse map
   {
     const slide = pptx.addSlide();
-    titleBlock(slide, '02 · 交付形态', '最终交付：不是新 Agent，而是平台内的测试资产质量模块', '复用现有案例生成/审核 Agent；新增资产评估、变更响应、优化处置和质量统计能力。', 4);
+    titleBlock(slide, '02 · 交付形态', '最终交付：1 个编排 Agent + 4 个可复用 Skill', '不建看板、网页或专用 API；直接复用现有 Agent/Skill 加载、对话运行、文件产物和 Hub 发布能力。', 4);
 
     const layers = [
-      ['直接复用', '测试案例生成 / 审核 Agent', '继续负责生成案例，不在本周新建 Agent', C.purpleSoft, C.purple],
-      ['网页一', '资产评估与优化页', '可用性、代码证据、响应确认、优化动作', C.mint, C.tealDark],
-      ['网页二', '测试资产质量看板', '可用性、资产响应率、风险清单、明细钻取', C.limeSoft, C.green],
-      ['服务能力', '评估 / 关联 / 统计 API', '保存评估、关联变更、查询风险、聚合统计', C.blueSoft, C.blue],
-      ['数据关联', '开发变更 + 资产版本 + 处置', '绑定 targetCommit、changedPaths、caseVersionId', C.coralSoft, C.red]
+      ['主 Agent', 'Test Asset Quality Optimizer', '理解任务、编排 Skills、汇总结论、写入产物', C.purpleSoft, C.purple],
+      ['Skill 01', 'change-impact-analysis', '读取版本与变更文件，提取影响模块、功能和证据', C.blueSoft, C.blue],
+      ['Skill 02', 'asset-change-alignment', '关联受影响测试资产，识别未响应或无需调整项', C.mint, C.tealDark],
+      ['Skill 03', 'test-asset-quality-review', '按准确性、完整性、可执行性和可维护性评估', C.amberSoft, '946A13'],
+      ['Skill 04', 'test-asset-optimization', '产出优化建议、修订后案例和可复核 Diff', C.limeSoft, C.green]
     ];
     for (let i = 0; i < layers.length; i++) {
       const y = 1.98 + i * 0.88;
@@ -317,10 +317,10 @@ async function buildDeck() {
     circle(slide, 10.02, 2.73, 1.64, '1D3151', C.teal);
     circle(slide, 10.39, 3.1, 0.9, C.teal);
     await iconBadge(slide, 'eye', 10.55, 3.26, C.ink, C.lime, 0.58);
-    tx(slide, 'Asset Quality', 9.72, 4.05, 2.2, 0.35, { fontSize: 16.5, color: C.white, bold: true, align: 'center' });
-    tx(slide, '网页产品模块', 9.98, 4.5, 1.68, 0.3, { fontSize: 10.8, color: C.lime, bold: true, align: 'center' });
-    pill(slide, '最终演示 = 代码变更 → 风险识别 → 资产处置 → 看板', 4.07, 6.42, 5.45, C.ink, C.white, 10.1);
-    addNotes(slide, '本周交付的主体是嵌入现有 agent-web 的两个网页，以及配套 API 和数据模型。现有案例生成/审核 Agent 直接复用，不新建 Agent；资产范围以测试案例为主，后续可扩展到脚本、数据和规约。');
+    tx(slide, 'Agent + Skills', 9.72, 4.05, 2.2, 0.35, { fontSize: 16.5, color: C.white, bold: true, align: 'center' });
+    tx(slide, '对话可调用 · 文件可落盘', 9.7, 4.5, 2.25, 0.3, { fontSize: 10.5, color: C.lime, bold: true, align: 'center' });
+    pill(slide, '最终运行 = 输入变更与资产 → Agent 编排 4 Skills → 评估报告 + 优化资产', 3.22, 6.42, 7.0, C.ink, C.white, 9.7);
+    addNotes(slide, '主 Agent 专注任务理解、调用顺序和产物收口；4 个 Skill 保持单一职责，既能被主 Agent 编排，也能被单独调用和测试。这样新员工的交付是可运行配置，不是原型或仅有提示词文档。');
   }
 
   // 06 Gap divider
@@ -396,7 +396,7 @@ async function buildDeck() {
   // 08 Evaluation workbench mockup
   {
     const slide = pptx.addSlide();
-    titleBlock(slide, '04 · 页面效果', '评价页：完成反馈', '同屏评价资产可用性、关联开发变更，并登记资产响应与优化动作。', 6);
+    titleBlock(slide, '04 · 运行效果', 'Agent 一次调用：产出评估报告和优化后资产', '用户在现有工作台选择 Agent、引入变更与案例；结果以 Markdown / JSON 文件落到测试工作区。', 6);
 
     // window shell
     card(slide, 0.55, 1.86, 12.23, 4.9, 'F8FAFD', C.grayLine);
@@ -404,17 +404,17 @@ async function buildDeck() {
     circle(slide, 0.77, 2.03, 0.11, C.coral);
     circle(slide, 0.96, 2.03, 0.11, C.amber);
     circle(slide, 1.15, 2.03, 0.11, C.teal);
-    tx(slide, '测试资产工作台 · 支付应用 / gen-42 / commit abc123', 1.48, 1.98, 6.3, 0.18, { fontSize: 10.5, color: 'DDE6F3', bold: true });
-    pill(slide, '待确认 1 项', 10.98, 1.94, 1.36, '203552', C.lime, 9.5);
+    tx(slide, '@Test Asset Quality Optimizer · 支付应用 / gen-42 / commit abc123', 1.48, 1.98, 6.3, 0.18, { fontSize: 10.5, color: 'DDE6F3', bold: true });
+    pill(slide, '4 Skills 已完成', 10.88, 1.94, 1.56, '203552', C.lime, 9.2);
 
     // left list
     rect(slide, 0.76, 2.53, 2.55, 3.92, C.white, 0.1, C.grayLine);
-    tx(slide, '案例列表', 0.98, 2.72, 0.9, 0.26, { fontSize: 13.2, bold: true });
-    pill(slide, '批量评价', 2.13, 2.68, 0.91, C.wash, C.slate, 9.2);
+    tx(slide, '输入资料', 0.98, 2.72, 0.9, 0.26, { fontSize: 13.2, bold: true });
+    pill(slide, '3 个文件', 2.13, 2.68, 0.91, C.wash, C.slate, 9.2);
     const cases = [
-      ['TC-001', '登录成功', 'A', C.green, 'E1F6EB'],
-      ['TC-002', '失败次数与锁定', 'B', C.blue, C.blueSoft],
-      ['TC-003', '解锁后再次登录', '—', C.muted, C.fog]
+      ['CHANGE', 'changed-files.md', '✓', C.green, 'E1F6EB'],
+      ['ASSET', 'TC-002.md', '✓', C.blue, C.blueSoft],
+      ['DESIGN', 'detailed-design.md', '✓', C.green, C.limeSoft]
     ];
     cases.forEach((c, i) => {
       const y = 3.17 + i * 0.86;
@@ -423,16 +423,16 @@ async function buildDeck() {
       tx(slide, c[1], 1.04, y + 0.31, 1.55, 0.22, { fontSize: 11.3, bold: i === 1 });
       pill(slide, c[2], 2.66, y + 0.17, 0.34, c[4], c[3], 9.2);
     });
-    tx(slide, '筛选：未评价 · C/D · 有问题标签', 0.98, 5.9, 2.0, 0.25, { fontSize: 9.4, color: C.muted });
+    tx(slide, '任务：分析锁定阈值变更，评估并优化关联案例。', 0.98, 5.72, 2.0, 0.52, { fontSize: 9.2, color: C.muted, valign: 'top' });
 
     // center case
     rect(slide, 3.47, 2.53, 5.2, 3.92, C.white, 0.1, C.grayLine);
-    pill(slide, '变更关注 · lock-service.ts', 3.71, 2.72, 2.18, C.coralSoft, C.red, 9.0);
-    tx(slide, 'TC-002  连续失败后锁定账户', 3.71, 3.08, 4.56, 0.36, { fontSize: 16.2, bold: true });
+    pill(slide, 'AGENT ORCHESTRATION', 3.71, 2.72, 1.82, C.blueSoft, C.blue, 8.8);
+    tx(slide, '锁定阈值变更影响分析', 3.71, 3.08, 4.56, 0.36, { fontSize: 16.2, bold: true });
     const fields = [
-      ['前置条件', '用户已注册，账户状态正常'],
-      ['测试步骤', '1. 连续输入错误密码 5 次\n2. 第 6 次输入正确密码'],
-      ['预期结果', '账户被锁定；正确密码仍禁止登录，并提示解锁方式']
+      ['变更证据', 'auth/lock-service.ts：失败阈值从 5 次调整为 3 次'],
+      ['资产评估', 'TC-002 仍使用 5 次阈值；核心场景正确，数据与断言过期'],
+      ['优化结果', '阈值更新为 3 次，补充第 4 次正确密码仍禁止登录的断言']
     ];
     fields.forEach((f, i) => {
       const y = 3.58 + i * 0.75;
@@ -440,28 +440,23 @@ async function buildDeck() {
       tx(slide, f[1], 4.53, y - 0.02, 3.73, 0.48, { fontSize: 10.8, color: C.slate, breakLine: true, valign: 'top' });
       if (i < 2) line(slide, 3.72, y + 0.55, 4.55, 0, C.fog, 1);
     });
-    pill(slide, '修改差异 3 处', 3.72, 5.98, 1.28, C.amberSoft, '946A13', 9.2);
-    tx(slide, '+ 补充锁定阈值  + 明确断言  + 增加解锁提示', 5.15, 5.98, 3.08, 0.25, { fontSize: 9.4, color: C.muted });
+    pill(slide, '结论 B · 小改可用', 3.72, 5.98, 1.56, C.amberSoft, '946A13', 9.0);
+    tx(slide, 'change-impact → alignment → review → optimization', 5.45, 5.98, 2.78, 0.25, { fontSize: 8.9, color: C.muted });
 
     // evaluation drawer
     rect(slide, 8.84, 2.53, 3.72, 3.92, 'F2F7FB', 0.1, C.grayLine);
-    tx(slide, '评估与处置', 9.08, 2.74, 1.4, 0.3, { fontSize: 14.5, bold: true });
-    pill(slide, '必填', 11.57, 2.71, 0.61, C.coralSoft, C.red, 9);
-    tx(slide, '可用性', 9.09, 3.19, 0.8, 0.22, { fontSize: 10.5, bold: true, color: C.slate });
-    const grades = [
-      ['A 直接', C.limeSoft, C.green], ['B 小改', C.blue, C.white],
-      ['C 大改', C.amberSoft, '946A13'], ['D 不可用', C.coralSoft, C.red]
-    ];
-    grades.forEach((g, i) => pill(slide, g[0], 9.09 + (i % 2) * 1.54, 3.49 + Math.floor(i / 2) * 0.46, 1.38, g[1], g[2], 9.5));
-    tx(slide, '变更响应', 9.09, 4.47, 1.0, 0.22, { fontSize: 10.5, bold: true, color: C.slate });
-    pill(slide, '已修改', 9.09, 4.76, 0.82, C.blueSoft, C.blue, 8.8);
-    pill(slide, '无需调整', 10.0, 4.76, 0.98, C.mint, C.tealDark, 8.8);
-    pill(slide, '待补充', 11.07, 4.76, 0.82, C.coralSoft, C.red, 8.8);
-    tx(slide, '优化动作', 9.09, 5.28, 0.82, 0.22, { fontSize: 10.5, bold: true, color: C.slate });
-    pill(slide, '补充案例 / 修正断言 / 重新生成', 9.91, 5.22, 2.15, C.wash, C.slate, 8.5);
-    tx(slide, '证据：auth/lock-service.ts 的锁定阈值已变更。', 9.09, 5.7, 2.9, 0.28, { fontSize: 9.1, color: C.muted });
-    pill(slide, '保存评价', 10.58, 6.01, 1.55, C.teal, C.white, 10.2);
-    addNotes(slide, '这是最终效果的核心示意。用户不仅评价案例能否使用，还需要对关联开发变更做出处置：确认无需调整，或更新、补充、重新生成资产。两类结论都要与当前资产版本和源码快照绑定。');
+    tx(slide, '产出文件', 9.08, 2.74, 1.4, 0.3, { fontSize: 14.5, bold: true });
+    pill(slide, '已落盘', 11.35, 2.71, 0.83, C.limeSoft, C.green, 9);
+    tx(slide, '质量评估报告.md', 9.09, 3.27, 2.5, 0.28, { fontSize: 11.2, bold: true, color: C.slate });
+    tx(slide, '等级、问题、代码证据、风险理由', 9.09, 3.61, 2.75, 0.32, { fontSize: 9.5, color: C.muted });
+    line(slide, 9.09, 4.03, 2.85, 0, C.grayLine, 1);
+    tx(slide, '优化后测试案例.md', 9.09, 4.18, 2.5, 0.28, { fontSize: 11.2, bold: true, color: C.slate });
+    tx(slide, '保留原场景，修正过期数据与断言', 9.09, 4.52, 2.75, 0.32, { fontSize: 9.5, color: C.muted });
+    line(slide, 9.09, 4.94, 2.85, 0, C.grayLine, 1);
+    tx(slide, '处理记录.json', 9.09, 5.09, 2.5, 0.28, { fontSize: 11.2, bold: true, color: C.slate });
+    tx(slide, '记录版本、Skill 结果、处置类型', 9.09, 5.43, 2.75, 0.32, { fontSize: 9.5, color: C.muted });
+    pill(slide, '打开结果', 10.58, 6.01, 1.55, C.teal, C.white, 10.2);
+    addNotes(slide, '这一页用一次真实调用说明“可用”。Agent 需要自动编排 4 个 Skill，将分析结论、代码证据和优化后案例写入测试工作区；不以聊天中有一段回答作为完成。');
   }
 
   // 09 Rubric
@@ -661,7 +656,7 @@ async function buildDeck() {
   // 14 Development repository relationship
   {
     const slide = pptx.addSlide();
-    titleBlock(slide, '03 · 变更关联', '开发变更与测试资产：建立“变更—资产—处置”关系', '代码变更且关联资产未响应时生成关注项，再由测试人员确认或优化。', 5, '结合 Codex 任务 019fae77… 的源码快照与人员工作区分析');
+    titleBlock(slide, '03 · Agent 判断', 'Agent 如何建立“变更—资产—优化”关系', '代码变更且关联资产未响应时生成关注项，再给出无需调整、更新、补充或重新生成建议。', 5, '结合 Codex 任务 019fae77… 的源码快照与人员工作区分析');
 
     // Development side
     card(slide, 0.66, 2.02, 3.32, 3.92, C.white, C.grayLine);
@@ -706,8 +701,8 @@ async function buildDeck() {
 
     rect(slide, 0.75, 6.25, 11.82, 0.54, C.ink, 0.14);
     tx(slide, '分析价值', 1.0, 6.39, 0.74, 0.2, { fontSize: 10.5, bold: true, color: C.lime });
-    tx(slide, '代码已变且资产未响应 → 生成关注项 → 人工选择无需调整 / 更新已有 / 补充 / 重新生成', 1.86, 6.36, 10.25, 0.24, { fontSize: 10.8, bold: true, color: C.white });
-    addNotes(slide, '关键口径：“代码变了、资产没变”只是需要注意的风险信号，不是自动判定资产有错。开发源码快照和测试工作区保持分离；MVP 通过版本身份、变更文件清单和代码证据关联资产。');
+    tx(slide, '代码已变且资产未响应 → Agent 给出风险理由 → 产出处置建议和优化后资产', 1.86, 6.36, 10.25, 0.24, { fontSize: 10.8, bold: true, color: C.white });
+    addNotes(slide, '关键口径：“代码变了、资产没变”是风险信号，不是自动判定资产有错。Agent 必须引用代码与资产证据，说明为何可以保留原资产，或生成可复核的修订结果。');
   }
 
   // 15 Feedback loop
@@ -746,14 +741,14 @@ async function buildDeck() {
   // 16 MVP scope
   {
     const slide = pptx.addSlide();
-    titleBlock(slide, '05 · 一周任务', '必须完成：拆成 6 个可并行、可验收的工作包', '每个工作包都有明确产物；周五必须串成“开发变更—资产评估—优化处置”链路。', 8);
+    titleBlock(slide, '04 · 一周任务', '必须完成：1 个 Agent、4 个 Skill、1 组真实验证', '每个能力都必须可发现、可调用、可独立测试；周五串成完整运行链路。', 7);
     const packages = [
-      ['01', '评估口径与样本', '确定 A–D、变更响应状态、问题/优化标签；准备 30 条样例。', 'target', C.tealDark, C.mint, '产品 + 测试'],
-      ['02', '关联数据模型', '固化开发变更、资产版本、响应结论、优化动作与审计字段。', 'database', C.purple, C.purpleSoft, '后端 + 产品'],
-      ['03', '评估与风险 API', '完成评估、变更关联、未响应风险列表与聚合统计。', 'link', C.blue, C.blueSoft, '后端'],
-      ['04', '资产评估页', '录入可用性、代码证据、资产响应结论和优化处置。', 'edit', C.green, C.limeSoft, '前端'],
-      ['05', '质量看板', '完成可用性、资产响应率、未响应风险和优化明细钻取。', 'chart', C.coral, C.coralSoft, '前端 + 后端'],
-      ['06', '联调与验收', '接口测试、页面测试、统计对账；准备一条变更响应演示链路。', 'check', '9B7217', C.amberSoft, '测试 + 全员']
+      ['01', '主 Agent', '定义角色、输入、编排顺序、失败处理、落盘目录和输出契约。', 'flow', C.purple, C.purpleSoft, 'Agent 组'],
+      ['02', '变更影响 Skill', '从版本身份与变更文件提取模块、功能、接口和代码证据。', 'search', C.blue, C.blueSoft, 'Skill A'],
+      ['03', '资产关联 Skill', '根据功能、路径、接口和语义关联案例，识别变更未响应项。', 'link', C.tealDark, C.mint, 'Skill B'],
+      ['04', '质量评估 Skill', '输出 A–D 等级、问题证据、影响面与处置建议。', 'check', C.green, C.limeSoft, 'Skill C'],
+      ['05', '资产优化 Skill', '在不破坏原始意图的前提下修正、补充或重新生成案例。', 'edit', C.coral, C.coralSoft, 'Skill D'],
+      ['06', '真实验证', '建立 30 组样例与期望结果，运行 Agent、回归 Skills、记录通过率。', 'target', '9B7217', C.amberSoft, '质量 + 全员']
     ];
     for (let i = 0; i < packages.length; i++) {
       const row = Math.floor(i / 3);
@@ -767,20 +762,20 @@ async function buildDeck() {
       tx(slide, packages[i][2], x + 0.2, y + 0.72, 3.05, 0.48, { fontSize: 10.6, color: C.muted, valign: 'top' });
       pill(slide, packages[i][6], x + 0.2, y + 1.28, 1.2, C.wash, C.slate, 8.6);
     }
-    pill(slide, '全部完成才算交付：2 个网页 + 评估/关联/统计 API + 数据模型 + 演示链路', 3.18, 6.27, 6.95, C.ink, C.white, 10.2);
-    addNotes(slide, '这一页只呈现六个必须完成的工作包。课题仍以测试案例为首批资产，但评估口径已扩展到变更响应度和优化处置。30 条样例用于一周内校准与演示，不代表生产统计门槛。');
+    pill(slide, '全部完成才算交付：1 Agent + 4 Skills + 评估/优化文件产物 + 30 组验证样例', 3.14, 6.27, 7.05, C.ink, C.white, 10.0);
+    addNotes(slide, '一周范围只包含这六个工作包。不建页面、不建专用 API、不建统计模型。必须使用平台实际 Agent/Skill 目录、真实模型和真实工作区运行，不把静态提示词或演示输出当成可用交付。');
   }
 
   // 17 Plan and team
   {
     const slide = pptx.addSlide();
-    titleBlock(slide, '05 · 一周任务', '任务拆分', '建议 5–7 人分成产品/质量、前端、后端数据、联调测试四条小线并行推进。', 9);
+    titleBlock(slide, '04 · 一周任务', '任务拆分', '建议 5–7 人分成 Agent 编排、变更/关联 Skills、评估/优化 Skills、质量验收四条小线。', 8);
     const phases = [
-      ['周一', '定规则', '可用性口径\n变更响应规则\n30 条样例', C.teal, C.mint],
-      ['周二', '搭骨架', '表 / API\n前端路由\nMock 联调', C.blue, C.blueSoft],
-      ['周三', '通评估', '保存评估\n变更—资产关联\n优化处置', C.green, C.limeSoft],
-      ['周四', '通看板', '响应率统计\n风险钻取\n数据对账', C.purple, C.purpleSoft],
-      ['周五', '验收', '真实试评\n回归测试\n演示答辩', C.coral, C.coralSoft]
+      ['周一', '定契约', 'Agent 输入输出\n评估口径\n30 组样例', C.teal, C.mint],
+      ['周二', '通前两技能', '变更影响\n资产关联\n独立调用', C.blue, C.blueSoft],
+      ['周三', '通后两技能', '质量评估\n资产优化\n文件落盘', C.green, C.limeSoft],
+      ['周四', '通 Agent', '编排 4 Skills\n真实模型运行\n修复失败样例', C.purple, C.purpleSoft],
+      ['周五', '验收', '30 组全量运行\nSkill 回归\n演示答辩', C.coral, C.coralSoft]
     ];
     line(slide, 1.1, 2.86, 11.05, 0, C.grayLine, 5);
     phases.forEach((p, i) => {
@@ -788,11 +783,11 @@ async function buildDeck() {
       circle(slide, x + 0.69, 2.47, 0.78, p[3]);
       tx(slide, p[0], x + 0.69, 2.7, 0.78, 0.18, { fontSize: 9.2, bold: true, color: C.white, align: 'center' });
       card(slide, x, 3.34, 2.15, 1.53, C.white, C.grayLine);
-      pill(slide, p[1], x + 0.22, 3.62, 0.66, p[4], p[3], 9.8);
+      pill(slide, p[1], x + 0.22, 3.62, 1.0, p[4], p[3], 9.2);
       tx(slide, p[2], x + 0.22, 4.03, 1.66, 0.61, { fontSize: 10.5, color: C.slate, breakLine: true, valign: 'top' });
     });
     const roles = [
-      ['产品 / 口径', '需求、原型、判例'], ['前端', '评价与看板'], ['后端 / 数据', 'API、模型、统计'], ['质量 / 测试', '样本、自动化、验收']
+      ['Agent 编排', '契约、调度、落盘'], ['Skills A/B', '变更与关联'], ['Skills C/D', '评估与优化'], ['质量 / 测试', '样例、评测、验收']
     ];
     roles.forEach((r, i) => {
       const x = 0.85 + i * 3.0;
@@ -802,19 +797,19 @@ async function buildDeck() {
     });
     pill(slide, '每日 17:00 集成演示', 4.45, 6.48, 1.95, C.limeSoft, C.green, 9.8);
     pill(slide, '周四晚冻结功能，周五只修问题', 6.7, 6.48, 2.86, C.blueSoft, C.blue, 9.8);
-    addNotes(slide, '一周实战每天 17 点集成一次，周二必须有前后端骨架，周三评估、变更关联和优化处置链路要通，周四看板与未响应风险钻取要通，周五用于真实试评、修复和答辩。');
+    addNotes(slide, '一周实战每天 17 点集成一次。周二、周三分别以独立 Skill 调用为验收门槛；周四必须用主 Agent 在真实模型和工作区中编排全链路；周五只做全量样例、修复和答辩。');
   }
 
   // 18 Acceptance
   {
     const slide = pptx.addSlide();
-    titleBlock(slide, '06 · 最终验收', '答辩现场：演示一次“开发变更触发资产优化”', '从生产版本变更开始，找到关联测试资产、生成风险、完成处置，并回到看板。', 10);
+    titleBlock(slide, '05 · 最终验收', '答辩现场：让 Agent 处理一次真实开发变更', '不演示原型图；现场选择 Agent、引入代码与案例，运行 4 个 Skill，并打开落盘产物。', 9);
     const demo = [
-      ['1', '导入变更', '选择生产版本与变更文件', C.blue],
-      ['2', '关联资产', '按代码证据找到关联案例', C.teal],
-      ['3', '生成风险', '识别代码已变但资产未响应', C.green],
-      ['4', '评估处置', '确认无需改或更新、补充资产', C.purple],
-      ['5', '看板验证', '返回指标、风险与优化明细', C.coral]
+      ['1', '准备输入', '版本身份、变更文件、现有案例', C.blue],
+      ['2', '调用 Agent', '用自然语言下达评估与优化任务', C.teal],
+      ['3', '编排 Skills', '展示变更、关联、评估和优化过程', C.green],
+      ['4', '查看产物', '打开评估报告、优化案例和处理记录', C.purple],
+      ['5', '人工复核', '校验代码证据、风险理由与案例可用性', C.coral]
     ];
     for (let i = 0; i < demo.length; i++) {
       const x = 0.71 + i * 2.48;
@@ -828,12 +823,12 @@ async function buildDeck() {
     card(slide, 0.72, 3.88, 11.86, 2.2, C.ink);
     tx(slide, '最小验收条件', 0.98, 4.15, 1.62, 0.3, { fontSize: 15.2, bold: true, color: C.lime });
     const checks = [
-      '资产评估页和质量看板均嵌入现有 agent-web',
-      '不新建 Agent，能接收现有生成案例',
-      '开发变更、资产版本和处置记录可追溯',
-      '代码已变但资产未响应时能生成关注项',
-      '支持无需调整、更新、补充和重新生成处置',
-      '完成 30 条试评及关键接口、页面测试'
+      '1 个主 Agent 能在平台被发现、选择和真实调用',
+      '4 个 Skill 均可独立发现、调用和回归测试',
+      '结论可追溯到变更文件、代码路径与资产版本',
+      '代码已变但资产未响应时，能说明风险而非简单报错',
+      '优化后案例以文件落盘，差异清晰且可人工复核',
+      '30 组真实样例运行完成，失败项有记录、修复与回归'
     ];
     checks.forEach((c, i) => {
       const col = i % 2;
@@ -844,8 +839,8 @@ async function buildDeck() {
       tx(slide, '✓', x, y + 0.07, 0.22, 0.12, { fontSize: 7.8, bold: true, color: C.ink, align: 'center' });
       tx(slide, c, x + 0.36, y, 5.02, 0.25, { fontSize: 11.3, color: C.white });
     });
-    pill(slide, '最终交付 = 2 个网页 + 评估/关联/统计 API + 数据模型 + 1 条变更响应演示链路', 2.95, 6.43, 7.45, C.limeSoft, C.green, 10.2);
-    addNotes(slide, '这一页必须回答“最终到底交付什么”。主体是现有平台中的资产评估与优化页、质量看板，不是一个新 Agent；同时交付支撑它们的评估/关联/统计 API、数据模型、测试和可运行的变更响应演示链路。');
+    pill(slide, '最终交付 = 1 Agent + 4 Skills + 3 类落盘产物 + 30 组验证样例 + 1 条真实演示链路', 2.85, 6.43, 7.65, C.limeSoft, C.green, 9.8);
+    addNotes(slide, '这一页必须回答“最终到底交付什么”。没有看板、网页、专用 API 和数据模型。交付的是可被平台加载和运行的 Agent/Skill 配置、落盘产物契约、真实样例评测结果和现场演示链路。');
   }
 
   // 19 Closing
@@ -874,8 +869,8 @@ async function buildDeck() {
     addNotes(slide, '收尾再次强调：看板只是闭环的可视化部分，真正的交付是统一评价口径、可追溯数据和可验证的智能体迭代机制。开题通过后，第一周立即开始样本与口径校准。');
   }
 
-  // 一周实战版只保留 10 页：背景、底座、交付形态、变更关联、两张页面、任务、排期和验收。
-  const compactSlideIndexes = [0, 1, 2, 4, 13, 7, 11, 15, 16, 17];
+  // 一周实战版只保留 9 页：背景、底座、Agent/Skills 交付形态、变更关联、运行效果、任务、排期和验收。
+  const compactSlideIndexes = [0, 1, 2, 4, 13, 7, 15, 16, 17];
   pptx._slides = compactSlideIndexes.map((index) => pptx._slides[index]);
   pptx._slides.forEach((slide, index) => {
     slide._name = `Slide ${index + 1}`;
