@@ -78,6 +78,63 @@ function operation(status: AppSourceOperation["status"]): AppSourceOperation {
 }
 
 describe("AppSourceDialog", () => {
+  it("renders a searchable virtualized selector for a large branch list", async () => {
+    const branches = ["main", ...Array.from({ length: 500 }, (_, index) => `feature/source-${index}`)];
+    const wrapper = mount(AppSourceDialog, {
+      props: { open: true, repositories: [repository], repository, branches },
+      global: { stubs: { Teleport: true } }
+    });
+
+    await wrapper.get('button[aria-label="下一步：选择分支与目录"]').trigger("click");
+    const selector = wrapper.findComponent({ name: "ElSelectV2" });
+
+    expect(selector.exists()).toBe(true);
+    expect(selector.props("filterable")).toBe(true);
+    expect(selector.props("options")).toEqual(branches.map((item) => ({ label: item, value: item })));
+  });
+
+  it("keeps large descendants collapsed and submits one directory instead of every child", async () => {
+    const largeTree: AppSourceTreeSnapshot = {
+      targetCommit: "large-tree-commit",
+      nodes: [{
+        name: "src",
+        path: "src",
+        type: "directory",
+        children: Array.from({ length: 1_000 }, (_, index) => ({
+          name: `File${index}.java`,
+          path: `src/File${index}.java`,
+          type: "file" as const,
+          children: []
+        }))
+      }]
+    };
+    const wrapper = mount(AppSourceDialog, {
+      props: {
+        open: true,
+        repositories: [{ ...repository, selectedPaths: [] }],
+        repository: { ...repository, selectedPaths: [] },
+        branches: ["main"],
+        treeSnapshot: largeTree,
+        treeBranch: "main"
+      },
+      global: { stubs: { Teleport: true } }
+    });
+
+    await wrapper.get('button[aria-label="下一步：选择分支与目录"]').trigger("click");
+    expect(wrapper.findAll('input[aria-label^="选择路径 "]')).toHaveLength(1);
+
+    await wrapper.get('input[aria-label="选择路径 src"]').setValue(true);
+    expect(wrapper.text()).toContain("整目录");
+    expect(wrapper.findAll('input[aria-label^="选择路径 "]')).toHaveLength(1);
+
+    await wrapper.get('button[aria-label="下一步：用途与保留时间"]').trigger("click");
+    await wrapper.get('input[aria-label="确认覆盖当前源码"]').setValue(true);
+    await wrapper.get('button[aria-label="提交源码物化"]').trigger("click");
+    expect(wrapper.emitted("materialize")?.[0]?.[0]).toMatchObject({
+      selectedPaths: [{ path: "src", type: "DIRECTORY" }]
+    });
+  });
+
   it("selects the first asynchronously loaded branch for a first download", async () => {
     const wrapper = mount(AppSourceDialog, {
       props: {
@@ -91,7 +148,7 @@ describe("AppSourceDialog", () => {
     await wrapper.get('button[aria-label="下一步：选择分支与目录"]').trigger("click");
     await wrapper.setProps({ branches: ["main", "release"] });
 
-    expect(wrapper.get('select[aria-label="源码分支"]').element).toHaveProperty("value", "main");
+    expect(wrapper.findComponent({ name: "ElSelectV2" }).props("modelValue")).toBe("main");
   });
 
   it("submits a PERSONAL to TEAM update with the branch-bound tree commit and 48-hour default", async () => {
@@ -111,7 +168,10 @@ describe("AppSourceDialog", () => {
     const indexedSelection = wrapper.get('input[aria-label="选择路径 src"]');
     expect(indexedSelection.element).toHaveProperty("checked", true);
     expect(indexedSelection.element.closest("label")?.classList).toContain("is-indexed-selection");
-    await wrapper.get('select[aria-label="源码分支"]').setValue("release");
+    const branchSelector = wrapper.findComponent({ name: "ElSelectV2" });
+    branchSelector.vm.$emit("update:modelValue", "release");
+    branchSelector.vm.$emit("change", "release");
+    await wrapper.vm.$nextTick();
     expect(wrapper.emitted("load-tree")?.at(-1)).toEqual(["release", ""]);
     await wrapper.setProps({ treeSnapshot, treeBranch: "release" });
     await wrapper.get('button[aria-label="下一步：用途与保留时间"]').trigger("click");
@@ -241,6 +301,8 @@ describe("AppSourceDialog", () => {
     expect(wrapper.text()).toContain("trace-branch");
     expect(wrapper.text()).toContain("trace-tree");
     expect(wrapper.text()).not.toContain("trace-submit");
+    await wrapper.get('button[aria-label="重试加载源码目录"]').trigger("click");
+    expect(wrapper.emitted("load-tree")?.at(-1)).toEqual(["main", ""]);
     await wrapper.setProps({ branchesError: null, treeError: null });
     await wrapper.get('button[aria-label="下一步：用途与保留时间"]').trigger("click");
     expect(wrapper.text()).toContain("trace-submit");
@@ -263,7 +325,10 @@ describe("AppSourceDialog", () => {
     });
 
     await wrapper.get('button[aria-label="下一步：选择分支与目录"]').trigger("click");
-    await wrapper.get('select[aria-label="源码分支"]').setValue("release");
+    const branchSelector = wrapper.findComponent({ name: "ElSelectV2" });
+    branchSelector.vm.$emit("update:modelValue", "release");
+    branchSelector.vm.$emit("change", "release");
+    await wrapper.vm.$nextTick();
     expect(wrapper.get('button[aria-label="下一步：用途与保留时间"]').attributes()).toHaveProperty("disabled");
     expect(wrapper.text()).toContain("等待 release 分支的固定提交目录树");
 

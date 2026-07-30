@@ -5,6 +5,30 @@
 
 ## Entries
 
+### 2026-07-30 - 优化应用源码分支检索、整目录选择与超时处理
+
+### Why
+
+- 企业内代码库分支较多时，应用源码分支只能滚动选择；分支请求成功后仍被目录读取占用加载态并出现 30 秒 `request timeout`。
+- 源码树一次展开并渲染全部后代，勾选目录时下级文件没有明确显示被覆盖，用户需要逐项勾选且大目录交互明显卡顿。
+
+### What
+
+- 为应用源码分支和目录读取分别设置 70 秒、130 秒局部超时，保持全局 30 秒默认值不变；分支列表完成后独立加载目录，目录超时不再锁住分支检索和切换。
+- 分支控件改用可检索、虚拟滚动的 `ElSelectV2`；源码树默认只渲染当前层，按需展开目录，并在读取失败时提供重试。
+- 勾选目录会以一个 `DIRECTORY` 路径包含全部后代并压缩已选子路径；被父目录覆盖的节点显示“已包含”，避免逐文件勾选和大规模 DOM 更新。
+- 同步 agent-web、backend-api 包说明、应用源码测试手册和后端部署超时排查手册，补充 `git ls-remote`、`git archive --remote` 与 traceId 排查方法。
+
+### How
+
+- 前端根 Vitest 104 个文件为 1715 passed / 1 skipped；全 workspace typecheck、生产 build、应用源码 Chromium 关键场景 3/3 通过。
+- 使用 JDK 25、未修改的 `.env.test` 和 `test` profile 重启 backend、opencode-manager、frontend；health/readiness 为 `UP`，前端和登录 CORS 为 200，manager/opencode 健康恢复成功。
+
+### Result
+
+- 大量分支可输入检索，目录请求慢或超时时仍可切换分支；整目录一次勾选即可覆盖后代，大树初始和勾选渲染量显著收敛。
+- 未变更 HTTP/事件 wire、数据库/Flyway/SQL、权限、安全、generated SDK、OpenCode 源码或环境配置；企业离线发布包尚未重建，现场升级前仍需按现有企业打包流程生成并验证新包。
+
 ### 2026-07-30 - 支持版本库类型安全编辑并置顶测试工作库
 
 ### Why

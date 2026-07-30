@@ -265,6 +265,11 @@ export type BackendApiClient = ReturnType<typeof createBackendApiClient>;
 
 export const LINUX_SERVER_ROUTE_HEADER = "X-Test-Agent-Linux-Server-Id";
 
+// 应用源码分支读取最多执行一次 60 秒 Git 命令，目录快照还会串行解析提交并读取远端树；
+// 这里仅放宽这两类慢 Git 读取，避免全局 30 秒超时先于后端的权威 Git 结果返回。
+const APP_SOURCE_BRANCH_REQUEST_TIMEOUT_MS = 70_000;
+const APP_SOURCE_TREE_REQUEST_TIMEOUT_MS = 130_000;
+
 // 统一读取环境变量：Vite 运行时（import.meta.env）优先，Node 运行时（process.env）兜底
 function readEnv(key: string): string | undefined {
   const viteEnv = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
@@ -1587,7 +1592,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       routedRequest<AppSourceRepositorySummary[]>(appSourceRepositoryBase(appId)),
     listAppSourceBranches: (appId: string, repositoryId: string) =>
       routedRequest<string[]>(
-        `${appSourceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/branches`
+        `${appSourceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/branches`,
+        { timeoutMs: APP_SOURCE_BRANCH_REQUEST_TIMEOUT_MS }
       ),
     listAppSourceTree: (
       appId: string,
@@ -1596,7 +1602,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       path = "."
     ) =>
       routedRequest<AppSourceRemoteTreeNode[]>(
-        `${appSourceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/tree${query({ branch, path })}`
+        `${appSourceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/tree${query({ branch, path })}`,
+        { timeoutMs: APP_SOURCE_TREE_REQUEST_TIMEOUT_MS }
       ),
     getAppSourceTreeSnapshot: (
       appId: string,
@@ -1609,7 +1616,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
           branch,
           path,
           includeCommit: true
-        })}`
+        })}`,
+        { timeoutMs: APP_SOURCE_TREE_REQUEST_TIMEOUT_MS }
       ),
     materializeAppSource: (
       appId: string,

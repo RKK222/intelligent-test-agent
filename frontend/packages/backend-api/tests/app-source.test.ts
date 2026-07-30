@@ -9,6 +9,40 @@ import type {
 } from "@test-agent/shared-types";
 
 describe("app-source backend client", () => {
+  it("allows remote Git branch and tree reads to outlive the global 30-second request timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          const data = String(input).includes("/branches")
+            ? ["main", "release"]
+            : { targetCommit: "a".repeat(40), nodes: [] };
+          resolve(new Response(JSON.stringify({ success: true, traceId: "trace_slow_git", data }), { status: 200 }));
+        }, 31_000);
+        init?.signal?.addEventListener("abort", () => {
+          clearTimeout(timer);
+          reject(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
+      }));
+      const client = createBackendApiClient({
+        baseUrl: "http://api",
+        fetcher,
+        requestTimeoutMs: 30_000,
+        traceIdFactory: () => "trace_slow_git"
+      });
+
+      const branches = client.listAppSourceBranches("app-demo", "repo-code");
+      await vi.advanceTimersByTimeAsync(31_000);
+      await expect(branches).resolves.toEqual(["main", "release"]);
+
+      const tree = client.getAppSourceTreeSnapshot("app-demo", "repo-code", "main", ".");
+      await vi.advanceTimersByTimeAsync(31_000);
+      await expect(tree).resolves.toEqual({ targetCommit: "a".repeat(40), nodes: [] });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("encodes every REST path/query and preserves the exact materialization payload", async () => {
     const treeCommit = "0123456789abcdef0123456789abcdef01234567";
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {

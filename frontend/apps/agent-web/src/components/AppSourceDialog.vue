@@ -42,6 +42,7 @@ const emit = defineEmits<{
 const step = ref(1);
 const branch = ref("");
 const selectedPathKeys = ref<string[]>([]);
+const expandedPathKeys = ref<string[]>([]);
 const purpose = ref<AppSourcePurpose>("TEAM");
 const retentionHours = ref(48);
 const confirmReplace = ref(false);
@@ -51,7 +52,10 @@ const needsReplaceConfirmation = computed(() => Boolean(props.repository?.genera
 const teamPurposeLocked = computed(() => Boolean(
   props.repository?.generation && props.repository.purpose === "TEAM"
 ));
-const flattenedTree = computed(() => flattenTree(props.treeSnapshot?.nodes ?? []));
+const completeTree = computed(() => flattenTree(props.treeSnapshot?.nodes ?? []));
+const expandedPathSet = computed(() => new Set(expandedPathKeys.value));
+const flattenedTree = computed(() => flattenVisibleTree(props.treeSnapshot?.nodes ?? [], expandedPathSet.value));
+const branchOptions = computed(() => (props.branches ?? []).map((item) => ({ label: item, value: item })));
 const treeMatchesBranch = computed(() => Boolean(
   branch.value
   && props.treeSnapshot?.targetCommit
@@ -60,18 +64,24 @@ const treeMatchesBranch = computed(() => Boolean(
 const indexedSelectionPaths = computed(() => new Set(
   (props.repository?.selectedPaths ?? []).map((item) => item.path)
 ));
-const visiblePathTypes = computed(() => new Map(
-  flattenedTree.value.map((item) => [item.node.path, item.node.type === "directory" ? "DIRECTORY" : "FILE"] as const)
+const treePathTypes = computed(() => new Map(
+  completeTree.value.map((item) => [item.node.path, item.node.type === "directory" ? "DIRECTORY" : "FILE"] as const)
+));
+const selectedDirectoryPaths = computed(() => new Set(
+  selectedPathKeys.value.filter((path) => treePathTypes.value.get(path) === "DIRECTORY")
 ));
 const invalidSelectedPaths = computed(() => {
   if (!treeMatchesBranch.value) return [];
-  return selectedPathKeys.value.filter((path) => !visiblePathTypes.value.has(path));
+  return selectedPathKeys.value.filter((path) => !treePathTypes.value.has(path));
 });
 const selectedPaths = computed(() => {
-  return selectedPathKeys.value.map((path) => ({
-    path,
-    type: visiblePathTypes.value.get(path) as AppSourcePathType
-  })).filter((item) => Boolean(item.type));
+  return selectedPathKeys.value
+    .filter((path) => !pathCoveredBySelectedDirectory(path))
+    .map((path) => ({
+      path,
+      type: treePathTypes.value.get(path) as AppSourcePathType
+    }))
+    .filter((item) => Boolean(item.type));
 });
 const canProceedFromTree = computed(() => Boolean(
   treeMatchesBranch.value
@@ -90,6 +100,7 @@ watch(
       step.value = 1;
       branch.value = "";
       selectedPathKeys.value = [];
+      expandedPathKeys.value = [];
       purpose.value = "TEAM";
       retentionHours.value = 48;
       confirmReplace.value = false;
@@ -97,6 +108,7 @@ watch(
     }
     branch.value = props.repository.branch ?? props.branches?.[0] ?? "";
     selectedPathKeys.value = props.repository.selectedPaths.map((item) => item.path);
+    expandedPathKeys.value = [];
     purpose.value = props.repository.purpose ?? "TEAM";
     retentionHours.value = 48;
     confirmReplace.value = false;
@@ -117,6 +129,19 @@ watch(() => props.branches, (branches) => {
 
 function flattenTree(nodes: AppSourceRemoteTreeNode[], depth = 0): Array<{ node: AppSourceRemoteTreeNode; depth: number }> {
   return nodes.flatMap((node) => [{ node, depth }, ...flattenTree(node.children ?? [], depth + 1)]);
+}
+
+function flattenVisibleTree(
+  nodes: AppSourceRemoteTreeNode[],
+  expanded: Set<string>,
+  depth = 0
+): Array<{ node: AppSourceRemoteTreeNode; depth: number }> {
+  return nodes.flatMap((node) => [
+    { node, depth },
+    ...(node.type === "directory" && expanded.has(node.path)
+      ? flattenVisibleTree(node.children ?? [], expanded, depth + 1)
+      : [])
+  ]);
 }
 
 function moveNext() {
@@ -149,19 +174,52 @@ function reconfigure() {
 
 function changeBranch() {
   // 历史 exact set 是服务端权威镜像；切分支时先保留，待新树回来后由可见节点与提交校验共同约束。
+  expandedPathKeys.value = [];
+  if (branch.value) emit("load-tree", branch.value, "");
+}
+
+function retryTree() {
   if (branch.value) emit("load-tree", branch.value, "");
 }
 
 function togglePath(path: string, checked: boolean) {
   const next = new Set(selectedPathKeys.value);
-  if (checked) next.add(path); else next.delete(path);
+  if (checked) {
+    if (pathCoveredBySelectedDirectory(path)) return;
+    if (treePathTypes.value.get(path) === "DIRECTORY") {
+      // 整目录选择是一个 exact path；压缩其下零散选择，避免用户逐文件勾选和提交冗余路径。
+      for (const selected of next) {
+        if (selected.startsWith(`${path}/`)) next.delete(selected);
+      }
+    }
+    next.add(path);
+  } else {
+    next.delete(path);
+  }
   selectedPathKeys.value = [...next];
 }
 
 function expandDirectory(node: AppSourceRemoteTreeNode) {
-  if (node.type === "directory" && node.children.length === 0 && branch.value) {
-    emit("load-tree", branch.value, node.path);
+  if (node.type !== "directory") return;
+  const next = new Set(expandedPathKeys.value);
+  if (next.has(node.path)) {
+    next.delete(node.path);
+  } else {
+    next.add(node.path);
+    if (node.children.length === 0 && branch.value) emit("load-tree", branch.value, node.path);
   }
+  expandedPathKeys.value = [...next];
+}
+
+function pathCoveredBySelectedDirectory(path: string) {
+  for (const selectedDirectory of selectedDirectoryPaths.value) {
+    if (selectedDirectory !== path && path.startsWith(`${selectedDirectory}/`)) return true;
+  }
+  return false;
+}
+
+function pathChecked(path: string) {
+  return selectedPathKeys.value.includes(path) || pathCoveredBySelectedDirectory(path);
 }
 
 function clampRetention() {
@@ -292,41 +350,57 @@ function repositoryOwnerLabel(repository: AppSourceRepositorySummary) {
             <h3>分支与精确目录</h3>
             <label class="app-source-field">
               <span>源码分支</span>
-              <select v-model="branch" aria-label="源码分支" :disabled="branchesLoading" @change="changeBranch">
-                <option v-for="item in branches ?? []" :key="item" :value="item">{{ item }}</option>
-              </select>
+              <el-select-v2
+                v-model="branch"
+                class="app-source-branch-select"
+                aria-label="源码分支"
+                :options="branchOptions"
+                :loading="branchesLoading"
+                :disabled="branchesLoading"
+                filterable
+                placeholder="输入分支名称检索"
+                @change="changeBranch"
+              />
             </label>
             <div v-if="branchesError" class="app-source-step-error"><AlertTriangle />{{ branchesError }}</div>
-            <div v-if="treeError" class="app-source-step-error"><AlertTriangle />{{ treeError }}</div>
-            <p class="app-source-help">历史路径已按服务端索引镜像默认勾选；本次勾选会作为完整 exact set 提交。</p>
+            <div v-if="treeError" class="app-source-step-error">
+              <AlertTriangle />
+              <span>{{ treeError }}</span>
+              <button type="button" aria-label="重试加载源码目录" :disabled="treeLoading || !branch" @click="retryTree">重试</button>
+            </div>
+            <p class="app-source-help">勾选目录即可包含整目录，无需逐个文件勾选；本次选择会作为完整 exact set 提交。</p>
             <div class="app-source-tree" :aria-busy="treeLoading">
-              <div v-if="treeLoading" class="app-source-tree-state"><LoaderCircle class="app-source-spin" />加载固定提交目录树…</div>
+              <div v-if="treeLoading && !treeMatchesBranch" class="app-source-tree-state"><LoaderCircle class="app-source-spin" />加载固定提交目录树…</div>
               <div v-else-if="!treeMatchesBranch" class="app-source-tree-state">
                 等待 {{ branch || "所选" }} 分支的固定提交目录树
               </div>
-              <label
-                v-for="item in flattenedTree"
-                v-else-if="treeMatchesBranch"
-                :key="item.node.path"
-                :class="['app-source-tree-row', { 'is-indexed-selection': indexedSelectionPaths.has(item.node.path) }]"
-                :style="{ paddingLeft: `${8 + item.depth * 18}px` }"
-              >
-                <button
-                  v-if="item.node.type === 'directory'"
-                  type="button"
-                  :aria-label="`展开路径 ${item.node.path}`"
-                  @click.prevent="expandDirectory(item.node)"
-                ><ChevronRight /></button>
-                <span v-else class="app-source-tree-spacer" />
-                <input
-                  type="checkbox"
-                  :aria-label="`选择路径 ${item.node.path}`"
-                  :checked="selectedPathKeys.includes(item.node.path)"
-                  @change="togglePath(item.node.path, ($event.target as HTMLInputElement).checked)"
-                />
-                <span>{{ item.node.name }}</span>
-                <small>{{ item.node.type === "directory" ? "目录" : "文件" }}</small>
-              </label>
+              <template v-else>
+                <label
+                  v-for="item in flattenedTree"
+                  :key="item.node.path"
+                  :class="['app-source-tree-row', { 'is-indexed-selection': indexedSelectionPaths.has(item.node.path) }]"
+                  :style="{ paddingLeft: `${8 + item.depth * 18}px` }"
+                >
+                  <button
+                    v-if="item.node.type === 'directory'"
+                    type="button"
+                    :class="{ 'is-expanded': expandedPathSet.has(item.node.path) }"
+                    :aria-label="`展开路径 ${item.node.path}`"
+                    @click.prevent="expandDirectory(item.node)"
+                  ><ChevronRight /></button>
+                  <span v-else class="app-source-tree-spacer" />
+                  <input
+                    type="checkbox"
+                    :aria-label="`选择路径 ${item.node.path}`"
+                    :checked="pathChecked(item.node.path)"
+                    :disabled="pathCoveredBySelectedDirectory(item.node.path)"
+                    @change="togglePath(item.node.path, ($event.target as HTMLInputElement).checked)"
+                  />
+                  <span>{{ item.node.name }}</span>
+                  <small>{{ item.node.type === "directory" && selectedPathKeys.includes(item.node.path) ? "整目录" : pathCoveredBySelectedDirectory(item.node.path) ? "已包含" : item.node.type === "directory" ? "目录" : "文件" }}</small>
+                </label>
+                <div v-if="treeLoading" class="app-source-tree-loading-more"><LoaderCircle class="app-source-spin" />正在加载展开目录…</div>
+              </template>
             </div>
             <div v-if="treeMatchesBranch" class="app-source-fixed-commit">固定提交：{{ treeSnapshot?.targetCommit }}</div>
             <section v-if="invalidSelectedPaths.length" class="app-source-invalid-paths" aria-label="失效历史路径">
@@ -507,18 +581,25 @@ function repositoryOwnerLabel(repository: AppSourceRepositorySummary) {
 .app-source-status-card dd { margin: 3px 0 0; font-family: var(--ta-font-mono, monospace); font-size: 12px; }
 .app-source-owner { color: #7c3aed; font-size: 11px; }
 .app-source-field { display: grid; gap: 6px; margin-bottom: 12px; color: #52525b; font-size: 11px; }
-.app-source-field select, .app-source-field input { height: 32px; border: 1px solid #d4d4d8; border-radius: 5px; background: #fff; padding: 0 9px; color: #27272a; font-size: 12px; }
+.app-source-field > select, .app-source-field > input { height: 32px; border: 1px solid #d4d4d8; border-radius: 5px; background: #fff; padding: 0 9px; color: #27272a; font-size: 12px; }
+.app-source-branch-select { width: 100%; }
 .app-source-help { margin: 0 0 8px; color: #71717a; font-size: 11px; }
 .app-source-tree { min-height: 180px; max-height: 330px; overflow: auto; border: 1px solid var(--ta-border, #e4e4e7); border-radius: 6px; }
 .app-source-tree-state { display: flex; min-height: 120px; align-items: center; justify-content: center; gap: 7px; color: #71717a; font-size: 12px; }
+.app-source-tree-loading-more { display: flex; height: 28px; align-items: center; justify-content: center; gap: 6px; color: #71717a; font-size: 11px; }
 .app-source-tree-row { display: flex; height: 28px; align-items: center; gap: 6px; border-bottom: 1px solid #f4f4f5; font-size: 12px; }
 .app-source-tree-row.is-indexed-selection { background: #f4f7f5; box-shadow: inset 2px 0 #16a34a; }
 .app-source-tree-row button, .app-source-tree-spacer { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; border: 0; background: transparent; padding: 0; }
-.app-source-tree-row button svg { width: 12px; }
+.app-source-tree-row button svg { width: 12px; transition: transform 120ms ease; }
+.app-source-tree-row button.is-expanded svg { transform: rotate(90deg); }
+.app-source-tree-row input:disabled { opacity: 0.65; }
 .app-source-tree-row small { margin-left: auto; margin-right: 10px; color: #a1a1aa; font-size: 10px; }
 .app-source-fixed-commit, .app-source-operation-summary { margin-top: 8px; color: #71717a; font-family: var(--ta-font-mono, monospace); font-size: 11px; }
 .app-source-step-error { display: flex; align-items: center; gap: 6px; margin: 7px 0; border-left: 2px solid #dc2626; background: #fef2f2; padding: 7px 9px; color: #b91c1c; font-size: 11px; }
 .app-source-step-error svg { width: 13px; flex: none; }
+.app-source-step-error span { min-width: 0; flex: 1; }
+.app-source-step-error button { flex: none; border: 0; background: transparent; color: #b91c1c; font-size: 11px; font-weight: 600; text-decoration: underline; cursor: pointer; }
+.app-source-step-error button:disabled { cursor: not-allowed; opacity: 0.5; }
 .app-source-invalid-paths { margin-top: 10px; border: 1px solid #f59e0b; border-radius: 6px; background: #fffbeb; padding: 9px; color: #92400e; font-size: 11px; }
 .app-source-invalid-paths > p { margin: 3px 0 7px; }
 .app-source-invalid-paths ul { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }

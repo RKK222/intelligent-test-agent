@@ -4035,7 +4035,8 @@ async function loadAppSourceBranches(repository = selectedAppSourceRepository.va
     ) return;
     appSourceBranches.value = branches;
     const targetBranch = repository.branch ?? branches[0];
-    if (targetBranch) await loadAppSourceTree(targetBranch, "");
+    // 分支已经可用时立即结束分支加载态；目录树是独立慢请求，不能继续锁住可检索的分支控件。
+    if (targetBranch) void loadAppSourceTree(targetBranch, "");
   } catch (error) {
     if (dialogAuthority === appSourceDialogAuthorityToken) {
       appSourceBranchesError.value = errorFeedback("加载源码分支失败", error).description ?? "源码分支暂时不可用";
@@ -4101,7 +4102,9 @@ async function loadAppSourceTree(branch: string, path: string) {
     }
   } catch (error) {
     if (appSourceTreeAuthorityMatches(requestAuthority, appSourceTreeAuthority)) {
-      appSourceTreeError.value = errorFeedback("加载源码目录失败", error).description ?? "源码目录暂时不可用";
+      appSourceTreeError.value = error instanceof BackendApiError && error.code === "REQUEST_TIMEOUT"
+        ? `源码目录读取超时，分支列表仍可检索和切换，请重试当前分支（traceId: ${error.traceId}）`
+        : errorFeedback("加载源码目录失败", error).description ?? "源码目录暂时不可用";
     }
   } finally {
     if (appSourceTreeAuthorityMatches(requestAuthority, appSourceTreeAuthority)) {

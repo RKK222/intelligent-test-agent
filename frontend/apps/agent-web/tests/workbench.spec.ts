@@ -1800,7 +1800,7 @@ test("application source snapshot opens a logical workspace and enforces source 
   await expect(dialog).toContainText("李四 · UCID-1002");
   await dialog.getByRole("button", { name: "选择应用代码库版本库" }).click();
   await dialog.getByRole("button", { name: "下一步：选择分支与目录" }).click();
-  await expect(dialog.getByLabel("源码分支")).toHaveValue("main");
+  await expect(dialog.locator(".app-source-branch-select")).toContainText("main");
   await expect(dialog.getByLabel("选择路径 src")).toBeChecked();
   await dialog.getByRole("button", { name: "下一步：用途与保留时间" }).click();
   await expect(dialog.getByLabel("个人源码")).toBeDisabled();
@@ -2443,6 +2443,8 @@ test("late source repository and workspace responses cannot overwrite a newer ap
   const sourceWorkspaceGate = new Promise<void>((resolve) => { releaseSourceWorkspace = resolve; });
   let releaseRepositoryBBranches!: () => void;
   const repositoryBBranchesGate = new Promise<void>((resolve) => { releaseRepositoryBBranches = resolve; });
+  let releaseRepositoryB2Tree!: () => void;
+  const repositoryB2TreeGate = new Promise<void>((resolve) => { releaseRepositoryB2Tree = resolve; });
   const workspaceRequests: string[] = [];
   const appSourceRequests: string[] = [];
   const sourceWorkspace = {
@@ -2467,6 +2469,7 @@ test("late source repository and workspace responses cannot overwrite a newer ap
     appSourceRequests,
     appSourceRepositoryListGates: { app_gcms: listAGate },
     appSourceBranchGates: { "app_coss:repo-b": repositoryBBranchesGate },
+    appSourceTreeGates: { "app_coss:repo-b2:release-b:.": repositoryB2TreeGate },
     appSourceRepositories: {
       app_gcms: [appSourceRepository({ name: "迟到仓库 A", generation: 8 })],
       app_coss: [
@@ -2509,10 +2512,12 @@ test("late source repository and workspace responses cannot overwrite a newer ap
   await expect.poll(() => appSourceRequests).toContain("branches:app_coss:repo-b");
   await sourceDialog.getByRole("button", { name: "选择备用仓库 B版本库" }).click();
   await sourceDialog.getByRole("button", { name: "下一步：选择分支与目录" }).click();
-  await expect(sourceDialog.getByLabel("源码分支")).toHaveValue("release-b");
+  await expect(sourceDialog.locator(".app-source-branch-select")).toContainText("release-b");
+  await expect(sourceDialog.getByLabel("源码分支")).toBeEnabled();
   releaseRepositoryBBranches();
   await page.waitForTimeout(100);
-  await expect(sourceDialog.getByLabel("源码分支")).toHaveValue("release-b");
+  await expect(sourceDialog.locator(".app-source-branch-select")).toContainText("release-b");
+  releaseRepositoryB2Tree();
   await expect(sourceDialog.getByText("固定提交：commit-b2")).toBeVisible();
   await sourceDialog.getByRole("button", { name: "关闭源码弹窗" }).click();
 
