@@ -102,6 +102,7 @@ function createApi(): Partial<BackendApiClient> {
     }),
     createRepository: vi.fn().mockResolvedValue(repositories[1]),
     updateRepository: vi.fn().mockResolvedValue(repositories[0]),
+    linkApplicationRepository: vi.fn().mockResolvedValue(repositories[1]),
     updateApplicationWorkspace: vi.fn().mockImplementation(async (_appId, _workspaceId, payload) => ({
       workspaceId: "ws_test",
       appId: "F-COSS",
@@ -382,26 +383,50 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
   });
 
   it("formats repository select options with name and URL and exposes create option", async () => {
-    const { findByText, getAllByLabelText, getByText } = renderPanel();
+    const { findByText, getByLabelText, getByText } = renderPanel();
 
     await findByText("应用人员管理");
     await fireEvent.click(getByText("应用与版本库关联"));
 
-    const repositorySelect = getAllByLabelText("选择版本库")[0];
-    expect(within(repositorySelect).getByText("F-WRTESTAPP 本地测试库(file:///Users/kaka/Desktop/intelligent-test-agent/test-workspaces/F-WRTESTAPP)")).toBeTruthy();
+    const repositorySelect = getByLabelText("选择未关联版本库");
+    expect(within(repositorySelect).queryByText("F-WRTESTAPP 本地测试库(file:///Users/kaka/Desktop/intelligent-test-agent/test-workspaces/F-WRTESTAPP)")).toBeNull();
     expect(within(repositorySelect).getByText("MIMO 示例库(https://gitee.com/mimo/demo.git)")).toBeTruthy();
     expect(within(repositorySelect).getByText("添加版本库")).toBeTruthy();
+    expect(getByText("一个应用可关联多个版本库；下拉仅显示当前应用尚未关联的版本库。")).toBeTruthy();
   });
 
   it("emits switch-menu event from the select create option", async () => {
-    const { findByText, getAllByLabelText, getByText, emitted } = renderPanel();
+    const { findByText, getByLabelText, getByText, emitted } = renderPanel();
 
     await findByText("应用人员管理");
     await fireEvent.click(getByText("应用与版本库关联"));
 
-    await fireEvent.update(getAllByLabelText("选择版本库")[0], selectCreateRepositoryValue);
+    await fireEvent.update(getByLabelText("选择未关联版本库"), selectCreateRepositoryValue);
     expect(emitted()["switch-menu"]).toBeTruthy();
     expect(emitted()["switch-menu"][0]).toEqual(["repository"]);
+  });
+
+  it("links another repository to an application and removes it from the remaining candidates", async () => {
+    const api = createApi();
+    const linkedRepositories = [repositories[0]];
+    api.listApplicationRepositories = vi.fn().mockImplementation(async () => [...linkedRepositories]);
+    api.linkApplicationRepository = vi.fn().mockImplementation(async (_appId, repositoryId) => {
+      const repository = repositories.find((item) => item.repositoryId === repositoryId)!;
+      linkedRepositories.push(repository);
+      return repository;
+    });
+    const view = renderPanel(api);
+
+    await view.findByText("应用人员管理");
+    await fireEvent.click(view.getByText("应用与版本库关联"));
+    const repositorySelect = view.getByLabelText("选择未关联版本库") as HTMLSelectElement;
+    await fireEvent.update(repositorySelect, "repo_mimo");
+    await fireEvent.click(view.getByText("关联"));
+
+    await waitFor(() => expect(api.linkApplicationRepository).toHaveBeenCalledWith("F-COSS", "repo_mimo"));
+    await waitFor(() => expect(view.getAllByText("MIMO 示例库").length).toBeGreaterThan(0));
+    expect(repositorySelect.value).toBe("");
+    expect(within(repositorySelect).queryByText("MIMO 示例库(https://gitee.com/mimo/demo.git)")).toBeNull();
   });
 
   it("shows workspace creation as a single form and automatically loads branches and tree", async () => {

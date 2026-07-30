@@ -46,6 +46,8 @@ const expandedPathKeys = ref<string[]>([]);
 const purpose = ref<AppSourcePurpose>("TEAM");
 const retentionHours = ref(48);
 const confirmReplace = ref(false);
+// 弹框本身使用 3700；虚拟分支下拉会 Teleport 到 body，必须显式高于弹框遮罩层。
+const branchPopperStyle = { zIndex: 3701 };
 
 const currentOperation = computed(() => props.operation ?? props.repository?.latestOperation ?? null);
 const needsReplaceConfirmation = computed(() => Boolean(props.repository?.generation));
@@ -357,6 +359,8 @@ function repositoryOwnerLabel(repository: AppSourceRepositorySummary) {
                 :options="branchOptions"
                 :loading="branchesLoading"
                 :disabled="branchesLoading"
+                :popper-style="branchPopperStyle"
+                default-first-option
                 filterable
                 placeholder="输入分支名称检索"
                 @change="changeBranch"

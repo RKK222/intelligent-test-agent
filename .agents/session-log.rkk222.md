@@ -5,6 +5,30 @@
 
 ## Entries
 
+### 2026-07-30 - 修复应用源码分支选择与多版本库关联交互
+
+### Why
+
+- 应用源码分支数据已返回，但 `ElSelectV2` 下拉没有显示在源码弹框之上；直接输入完整分支也无法提交选择，目录树保持旧分支。
+- 应用设置页关联成功后仍保留已关联版本库作为候选和当前值，重复提交会被后端幂等处理，造成“一个应用只能关联一个版本库”的误解。
+
+### What
+
+- 将源码分支 Teleported popper 显式设为 `z-index: 3701`，高于源码弹框遮罩的 `3700`，并启用 `default-first-option`，支持输入检索后回车选中首个匹配分支。
+- 应用关联下拉改为只展示当前应用尚未关联的版本库；关联成功或切换应用后清空旧选择，并明确提示应用与版本库为多对多关系。
+- 同步 agent-web README 与应用源码验收手册；本机忽略的 `.env.test` 显式设置 `TEST_AGENT_BASE_URL=http://127.0.0.1:8080`，使 Vite 请求固定走回环地址。
+
+### How
+
+- 使用 `openai/whisper` 的 16 个真实分支和真实 Git tree 作为浏览器拦截 fixture：修复后 popper 为 `3701 > 3700`，命中节点为分支 `LI`；鼠标选择 `jongwook/large-v3-turbo` 和输入后回车选择 `jongwook/large-v3` 均发出对应 tree 请求并更新固定提交。
+- 定向 Vitest 29/29、前端全量 Vitest 1716 passed / 1 skipped、agent-web typecheck 和 production build 均通过；只读检查本机 PostgreSQL，已有应用分别存在 3 条版本库关联，约束仅为 `(app_id, repository_id)`。
+- 使用 JDK 25、`test` profile 和 `.env.test` 完整重启 backend、opencode-manager、frontend；health/readiness 为 `UP`，前端与登录 CORS 为 200，manager 无重复解码或重连错误。
+
+### Result
+
+- 应用源码分支下拉可见、可点击，精确输入后可回车选择，分支变化会刷新固定提交和文件树；一个应用可连续关联多个版本库，已关联项不会再进入候选或被重复提交。
+- 未变更 HTTP/事件 wire、数据库/Flyway/SQL、权限、安全、generated SDK 或 OpenCode 源码；`.env.test` 为本机忽略配置，不进入提交，企业交付包尚未重建。
+
 ### 2026-07-30 - 交付九页智能测试技术专题汇报
 
 ### Why

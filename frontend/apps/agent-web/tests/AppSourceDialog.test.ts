@@ -90,6 +90,8 @@ describe("AppSourceDialog", () => {
 
     expect(selector.exists()).toBe(true);
     expect(selector.props("filterable")).toBe(true);
+    expect(selector.props("defaultFirstOption")).toBe(true);
+    expect(selector.props("popperStyle")).toEqual({ zIndex: 3701 });
     expect(selector.props("options")).toEqual(branches.map((item) => ({ label: item, value: item })));
   });
 

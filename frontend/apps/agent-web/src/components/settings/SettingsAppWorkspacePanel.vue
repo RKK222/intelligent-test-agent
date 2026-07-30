@@ -173,6 +173,11 @@ const selectedUser = ref<PlatformUserSummary | null>(null);
 // 版本库
 const repositories = ref<CodeRepositoryConfig[]>([]);
 const appRepositories = ref<CodeRepositoryConfig[]>([]);
+// 关联关系是多对多；候选只展示尚未关联当前应用的版本库，避免重复提交同一条幂等关系。
+const availableRepositories = computed(() => {
+  const linkedRepositoryIds = new Set(appRepositories.value.map((item) => item.repositoryId));
+  return repositories.value.filter((item) => !linkedRepositoryIds.has(item.repositoryId));
+});
 // 创建工作空间只允许使用测试工作库；standard=true 兼容尚未补齐 repositoryType 的历史数据。
 const workspaceRepositories = computed(() => appRepositories.value.filter(isTestWorkRepository));
 const linkRepositoryId = ref("");
@@ -504,6 +509,12 @@ async function loadRepositories() {
   ]);
   repositories.value = all.items;
   appRepositories.value = linked;
+  if (!availableRepositories.value.some((item) => item.repositoryId === linkRepositoryId.value)) {
+    linkRepositoryId.value = "";
+  }
+  if (!availableRepositories.value.some((item) => item.repositoryId === lastLinkRepositoryId.value)) {
+    lastLinkRepositoryId.value = "";
+  }
   if (!workspaceRepositoryId.value || !workspaceRepositories.value.some((item) => item.repositoryId === workspaceRepositoryId.value)) {
     workspaceRepositoryId.value = workspaceRepositories.value[0]?.repositoryId ?? "";
   }
@@ -524,8 +535,10 @@ function handleLinkRepositoryChange(repositoryId: string) {
 }
 
 async function linkRepository() {
+  const repositoryId = linkRepositoryId.value;
+  if (!repositoryId || !availableRepositories.value.some((item) => item.repositoryId === repositoryId)) return;
   await run(async () => {
-    await api.linkApplicationRepository(selectedAppId.value, linkRepositoryId.value);
+    await api.linkApplicationRepository(selectedAppId.value, repositoryId);
     await loadRepositories();
   });
 }
@@ -793,6 +806,8 @@ watch(() => props.initialAppId, (newAppId) => {
 watch(selectedAppId, async (appId) => {
   if (!appId || !hasAppSettingsPermission.value) return;
   pendingDangerAction.value = null;
+  linkRepositoryId.value = "";
+  lastLinkRepositoryId.value = "";
   await loadAppContext();
 });
 
@@ -985,14 +1000,15 @@ onBeforeUnmount(() => {
             <span v-if="selectedApp" class="ta-section-title-app">{{ selectedApp.appName }}</span>
           </div>
           <div class="ta-inline-form">
-            <el-select v-model="linkRepositoryId" placeholder="选择版本库" style="width: 360px" filterable @change="handleLinkRepositoryChange">
-              <el-option v-for="repo in repositories" :key="repo.repositoryId" :label="formatRepositoryOption(repo)" :value="repo.repositoryId" />
+            <el-select v-model="linkRepositoryId" placeholder="选择未关联版本库" aria-label="选择未关联版本库" style="width: 360px" filterable @change="handleLinkRepositoryChange">
+              <el-option v-for="repo in availableRepositories" :key="repo.repositoryId" :label="formatRepositoryOption(repo)" :value="repo.repositoryId" />
               <el-option :label="'添加版本库'" :value="ADD_REPOSITORY_OPTION_VALUE" />
             </el-select>
             <el-button type="primary" :disabled="loading || !linkRepositoryId" @click="linkRepository">
               <el-icon><Link /></el-icon> 关联
             </el-button>
           </div>
+          <p class="ta-form-hint">一个应用可关联多个版本库；下拉仅显示当前应用尚未关联的版本库。</p>
           <div class="ta-item-list">
             <div v-for="repo in appRepositories" :key="repo.repositoryId" class="ta-item-row">
               <div>
