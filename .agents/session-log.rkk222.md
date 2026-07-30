@@ -3441,3 +3441,25 @@
 
 - 新全量包可在 `.4`、`.114` 重新部署并写入 worker/toolbox 组件指纹，之后相同指纹版本才能安全使用增量包；企业实际部署仍需按 `.4 → .114 → .2` 顺序完成并验证。
 - 本次未修改业务代码、生产部署逻辑、API、事件、数据库结构、Flyway SQL、安全配置、generated SDK、OpenCode 源码或 `.env*`。
+
+### 2026-07-30 - 基于全量组件基线重建业务增量包
+
+### Why
+
+- 当前 `main` 在上次全量基线后新增 Java、前端和 HTTP API 业务变更，但 worker runtime 与 toolbox 构建输入没有变化；用户要求只交付需要更新的内容，避免再次传输约 1GB 全量组件。
+
+### What
+
+- 继续使用标准 `package-release.sh` 自动组件计划，生成 `worker runtime=reuse`、`toolbox=reuse` 的业务增量发布，只携带 Java、外置依赖、前端和部署脚本。
+- 重新使用固定三节点配置包封装 `test-agent-two-backend-complete.zip`；没有手改 shell、强制跳过指纹门禁或把历史大组件重新塞入增量 ZIP。
+
+### How
+
+- JDK 25 后端封包、前端 typecheck/生产构建、Flyway persistence JAR 字节门禁、增量组件清单、自动节点部署、双后台节点、固定外层包和最终 ZIP validate-only 均通过。
+- 通用空目录首次安装模拟因增量包缺少现场 `docker.env` 和组件基线而按设计失败；增量专用回归确认只有安装状态中的 worker/toolbox 指纹与清单完全一致且组件健康时才允许继续。
+
+### Result
+
+- 本包不会加载或重启未变化的 worker/toolbox 大组件；部署会替换并重启 Java，前端节点需要同步更新。
+- 只有 `.4/.114` 已成功部署上一批全量基线并保留匹配的 `/data/testagent/config/release-component-state.env` 时，本增量包才不会再出现组件指纹错误；状态缺失或不一致必须停止并重新部署全量包，不能伪造状态。
+- 本次打包未新增代码、API、事件、数据库结构、Flyway SQL、安全配置、generated SDK、OpenCode 源码或 `.env*` 修改。
