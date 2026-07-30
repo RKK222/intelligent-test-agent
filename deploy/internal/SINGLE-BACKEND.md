@@ -418,6 +418,8 @@ bash /tmp/deploy-internal-release.sh \
 
 后台部署脚本在替换 JAR 前会校验已有 systemd unit 的 `ExecStart` 和 `EnvironmentFile`，执行 `systemctl stop` 后检查 `8080`。若端口仍由同一路径的 `test-agent-app.jar` 占用，脚本会先 TERM、超时后仅对仍匹配该 JAR 的 PID 执行 KILL；若是其他程序占用则拒绝误杀。启动后还会确认 systemd `MainPID` 正是 `8080` 的监听进程，避免旧手工 Java 让 health 误通过。
 
+同一入口会在变更服务前校验 `test-agent-programs.tar.gz`，并在解压后再次校验 `/data/testagent/programs/opencode`；增量复用包则直接校验现有目录。runtime manifest、lockfile、固定依赖的包元数据或入口文件中任一项缺失、为空、未锁定或版本不符都会停止部署，其中 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 是自定义 Tool 的强制基线，不能在内网用 `npm install` 临时补齐。
+
 如果现场此前已经启用了 `.4` 双后台，最后在 `.4` 停止 worker 和 Java，但保留 `/data/testagent` 数据以便回滚：
 
 ```bash

@@ -76,7 +76,9 @@ printf '%s\n' \
 
 JAR_ROOT="${TMP_ROOT}/jar-root"
 EMPTY_ROOT="${TMP_ROOT}/empty-root"
-mkdir -p "${JAR_ROOT}/BOOT-INF/classes" "${EMPTY_ROOT}"
+PROGRAMS_ROOT="${TMP_ROOT}/programs-root"
+PROGRAMS_RUNTIME="${PROGRAMS_ROOT}/programs/opencode"
+mkdir -p "${JAR_ROOT}/BOOT-INF/classes" "${EMPTY_ROOT}" "${PROGRAMS_RUNTIME}/node_modules"
 printf 'fixture-rsa-private-key\n' >"${JAR_ROOT}/BOOT-INF/classes/rsa-private.key"
 (cd "${JAR_ROOT}" && zip -qr "${RELEASE_ROOT}/dist/backend/test-agent-app.jar" .)
 PERSISTENCE_JAR_ROOT="${TMP_ROOT}/persistence-jar-root"
@@ -86,7 +88,30 @@ cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V
 (cd "${PERSISTENCE_JAR_ROOT}" && zip -qr \
   "${RELEASE_ROOT}/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar" .)
 tar -C "${EMPTY_ROOT}" -czf "${RELEASE_ROOT}/dist/test-agent-frontend-dist.tar.gz" .
-tar -C "${EMPTY_ROOT}" -czf "${RELEASE_ROOT}/dist/test-agent-programs.tar.gz" .
+cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package.json" \
+  "${PROGRAMS_RUNTIME}/package.json"
+cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package-lock.json" \
+  "${PROGRAMS_RUNTIME}/package-lock.json"
+for dependency_entry in \
+  '@modelcontextprotocol/sdk|1.29.0|dist/esm/server/mcp.js' \
+  '@opencode-ai/plugin|1.18.4|dist/index.js' \
+  '@opencode-ai/sdk|1.18.4|dist/index.js' \
+  'effect|4.0.0-beta.83|dist/index.js' \
+  'jsonc-parser|3.3.1|lib/esm/main.js' \
+  'zod|4.1.8|index.js'; do
+  dependency="${dependency_entry%%|*}"
+  dependency_version="${dependency_entry#*|}"
+  dependency_version="${dependency_version%%|*}"
+  dependency_entrypoint="${dependency_entry##*|}"
+  mkdir -p "${PROGRAMS_RUNTIME}/node_modules/${dependency}"
+  printf '{\n  "name": "%s",\n  "version": "%s"\n}\n' \
+    "${dependency}" "${dependency_version}" \
+    >"${PROGRAMS_RUNTIME}/node_modules/${dependency}/package.json"
+  mkdir -p "$(dirname "${PROGRAMS_RUNTIME}/node_modules/${dependency}/${dependency_entrypoint}")"
+  printf 'export const fixture = true;\n' \
+    >"${PROGRAMS_RUNTIME}/node_modules/${dependency}/${dependency_entrypoint}"
+done
+tar -C "${PROGRAMS_ROOT}" -czf "${RELEASE_ROOT}/dist/test-agent-programs.tar.gz" programs
 printf 'fixture worker image\n' >"${RELEASE_ROOT}/dist/test-agent-opencode-worker_internal-linux-amd64.tar"
 printf 'fixture it-tools image\n' >"${RELEASE_ROOT}/dist/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar"
 printf 'fixture omni-tools image\n' >"${RELEASE_ROOT}/dist/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar"
@@ -95,6 +120,8 @@ cp "${ROOT_DIR}/deploy/internal/deploy-internal-frontend.sh" "${RELEASE_ROOT}/de
 cp "${ROOT_DIR}/deploy/internal/opencode-worker-docker.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/ensure-opencode-runtime-gitignore.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/opencode-runtime.gitignore" "${RELEASE_ROOT}/deploy/internal/"
+cp "${ROOT_DIR}/deploy/internal/verify-opencode-tool-runtime.sh" "${RELEASE_ROOT}/deploy/internal/"
+cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package.json" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/configure-nginx.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/toolbox.env.example" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/toolbox-docker.sh" "${RELEASE_ROOT}/deploy/internal/"
@@ -129,6 +156,28 @@ validate_without_secret_output() {
 validate_without_secret_output backend "${CONFIG_4}" --backend-host 122.233.30.4
 validate_without_secret_output backend "${CONFIG_114}" --backend-host 122.233.30.114
 validate_without_secret_output frontend "${CONFIG_FRONTEND}"
+
+# programs 包缺少 Tool 定义插件时必须在节点预校验阶段失败，不能等到 worker 重启后才暴露。
+BAD_TOOL_RUNTIME_ROOT="${TMP_ROOT}/bad-tool-runtime-root"
+BAD_TOOL_RELEASE_ROOT="${TMP_ROOT}/bad-tool-release-root"
+BAD_TOOL_RELEASE_ARCHIVE="${TMP_ROOT}/test-agent-bad-tool-runtime-release.zip"
+cp -R "${PROGRAMS_ROOT}" "${BAD_TOOL_RUNTIME_ROOT}"
+cp -R "${RELEASE_ROOT}" "${BAD_TOOL_RELEASE_ROOT}"
+rm -f "${BAD_TOOL_RUNTIME_ROOT}/programs/opencode/node_modules/@opencode-ai/plugin/package.json"
+tar -C "${BAD_TOOL_RUNTIME_ROOT}" -czf \
+  "${BAD_TOOL_RELEASE_ROOT}/dist/test-agent-programs.tar.gz" programs
+(cd "${BAD_TOOL_RELEASE_ROOT}" && zip -qr "${BAD_TOOL_RELEASE_ARCHIVE}" .)
+(cd "${TMP_ROOT}" && shasum -a 256 "$(basename "${BAD_TOOL_RELEASE_ARCHIVE}")" \
+  >"$(basename "${BAD_TOOL_RELEASE_ARCHIVE}").sha256")
+if bad_tool_output="$(bash "${DEPLOY_SCRIPT}" backend \
+  --config-dir "${CONFIG_4}" \
+  --release-archive "${BAD_TOOL_RELEASE_ARCHIVE}" \
+  --backend-host 122.233.30.4 \
+  --validate-only 2>&1)"; then
+  echo 'Validation unexpectedly accepted programs without @opencode-ai/plugin' >&2
+  exit 1
+fi
+grep -Fq 'missing required Tool runtime dependencies' <<<"${bad_tool_output}"
 
 # Flyway SQL 位于外置 persistence JAR；即使 app JAR、ZIP 和节点配置都合法，错误字节也必须在启动前拒绝。
 BAD_RELEASE_ROOT="${TMP_ROOT}/bad-release-root"
@@ -250,13 +299,19 @@ fi
 VERIFY_INSTALL_ROOT="${TMP_ROOT}/verify-install"
 VERIFY_BIN="${TMP_ROOT}/verify-bin"
 mkdir -p "${VERIFY_INSTALL_ROOT}/config" "${VERIFY_INSTALL_ROOT}/data" \
-  "${VERIFY_INSTALL_ROOT}/dist/backend/lib" "${VERIFY_BIN}"
+  "${VERIFY_INSTALL_ROOT}/dist/backend/lib" "${VERIFY_INSTALL_ROOT}/deploy/internal" \
+  "${VERIFY_INSTALL_ROOT}/programs" "${VERIFY_BIN}"
 cp "${CONFIG_4}/backend.env" "${VERIFY_INSTALL_ROOT}/config/backend.env"
 cp "${CONFIG_4}/docker.env" "${VERIFY_INSTALL_ROOT}/config/docker.env"
 cp "${RELEASE_ROOT}/dist/backend/test-agent-app.jar" \
   "${VERIFY_INSTALL_ROOT}/dist/backend/test-agent-app.jar"
 cp "${RELEASE_ROOT}/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar" \
   "${VERIFY_INSTALL_ROOT}/dist/backend/lib/"
+cp "${ROOT_DIR}/deploy/internal/verify-opencode-tool-runtime.sh" \
+  "${VERIFY_INSTALL_ROOT}/deploy/internal/"
+cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package.json" \
+  "${VERIFY_INSTALL_ROOT}/deploy/internal/"
+cp -R "${PROGRAMS_RUNTIME}" "${VERIFY_INSTALL_ROOT}/programs/opencode"
 printf 'test-agent-backend-122-233-30-4\n' >"${VERIFY_INSTALL_ROOT}/data/.serverid"
 printf '122.233.30.4\n' >"${VERIFY_INSTALL_ROOT}/data/.serverhost"
 

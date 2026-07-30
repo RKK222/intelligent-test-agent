@@ -561,6 +561,8 @@ bash deploy-backend-node.sh
 
 worker runtime 为 `included` 时会同步替换 programs、OpenCode Manager 和 worker 镜像；为 `reuse` 时不携带这些大制品，部署前必须确认目标机安装指纹一致、现有 Manager/OpenCode/Codex 文件齐全且 worker 容器健康，否则立即停止。
 
+后台入口还会调用 `verify-opencode-tool-runtime.sh`：`included` 包先核对 `test-agent-programs.tar.gz`，解压后再核对 `/data/testagent/programs/opencode`；`reuse` 包直接核对现有安装目录。校验覆盖 runtime `package.json`、lockfile、全部固定直接依赖的包元数据和入口文件，尤其要求 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 同名同版本存在。缺包、空文件、未锁定或版本不符都会在替换 Java、加载镜像或重启 worker 前停止，禁止在企业内临时执行 `npm install` 补齐。
+
 升级前应先停止 `.4`、`.114` 的旧 Java。`.4` 是固定首节点，入口会完整验证本机 Java、XXL Admin、
 worker、RSA 和身份文件，但把 peer 探测延后；随后 `.114` 会反查 `.4`，最后 `.2` 会同时检查两个
 Java 和两个 XXL Admin，因此不会再因首节点等待尚未启动的 peer 而产生 `verify_exit=1`。

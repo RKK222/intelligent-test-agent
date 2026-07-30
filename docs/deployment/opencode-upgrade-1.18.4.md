@@ -39,6 +39,7 @@
 - 1.18.2 起增加 `subagent_depth`，上游默认值为 1。平台启动器根据随包 `VERSION` 判断能力：1.18.2 及以上以 `OPENCODE_CONFIG_CONTENT` 强制设为 2，支持且仅要求 root → child → grandchild；1.17.8 回滚运行时会移除该版本不识别的字段。已有配置内容会合并，非法内容直接失败，避免静默丢配置。
 - `RunSessionScopeRouter` 现在按 task part 所属 session 建立 parent。root task 仍创建 child，child task 创建 grandchild；task part 保持在发起它的 scope，不再把 grandchild 错挂 root。
 - 官方单文件程序在完全断网时仍会检查配置目录依赖元数据。启动器会为 XDG 全局配置、`OPENCODE_CONFIG_DIR` 和当前工作区 `.opencode` 非覆盖式链接随包交付的 `package.json`、lockfile 和 Tool 依赖；内网运行不执行 npm 下载。
+- 企业后台部署入口通过 `verify-opencode-tool-runtime.sh` 对 programs 归档和目标机安装目录执行同一失败关闭校验：runtime manifest、lockfile 及 6 个固定直接依赖的包元数据和入口文件必须同名同版本存在，`@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 缺少任一项都不能继续替换 Java、加载镜像或重启 worker；增量 `reuse` 包同样核对现有目录。
 - 1.18.4 上游只在 `.gitignore` 不存在时一次性写入运行文件规则，已有但不完整的文件不会补齐。企业交付改为复用 `deploy/internal/opencode-runtime.gitignore`：节点升级先修复已经初始化的标准公共配置目录，新节点或尚未初始化的目录由官方启动器在创建依赖链接前幂等补齐；已有自定义规则保留，运行文件不会进入公共仓库脏状态，Agent/Skill/Tool 和用户配置仍正常参与 Git 检测。
 - `includeUsage=false` 仍须保留。1.18.4 对 openai-compatible provider 仍会在未显式关闭时设置 `includeUsage=true`，企业内部不支持该字段的接口会受影响。
 - 本次不修改平台 HTTP API、RunEvent SSE wire shape、数据库结构、Flyway、鉴权和密钥配置。
@@ -54,6 +55,7 @@
 ```bash
 node --test tools/test-opencode-official-launcher.mjs
 tools/verify-opencode-runtime-gitignore.sh
+tools/verify-opencode-tool-runtime-deploy.sh
 tools/generate-opencode-java-sdk.sh
 mvn -f backend/pom.xml -pl test-agent-opencode-client,test-agent-opencode-runtime -am test
 corepack pnpm --dir frontend vitest run packages/agent-chat/tests/opencode-like-state.test.ts

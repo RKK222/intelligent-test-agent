@@ -5,6 +5,25 @@
 
 ## Entries
 
+### 2026-07-30 - 增加 OpenCode Tool 离线依赖部署闸门
+
+### Why
+
+- worker 镜像构建期虽会导入自定义 Tool 依赖，但后台部署入口没有核对 programs 归档和目标机落盘目录；包缺失或增量复用目录损坏会到 OpenCode 启动后才暴露。
+
+### What
+
+- 新增共享 `verify-opencode-tool-runtime.sh`，以既有 runtime package 为版本单一来源，校验 manifest、lockfile、6 个直接依赖的包元数据和入口文件；`@opencode-ai/plugin`、SDK、Effect、Zod 缺失即失败。
+- 标准后台 `included` 包在解压前后校验，`reuse` 包在服务变更前校验现有目录；双后台 `--verify-only` 复用同一脚本。同步单/双后台手册、内部部署 README 和 OpenCode 升级文档。
+
+### How
+
+- programs 大归档只用一次 tar 流提取少量校验文件；专项回归覆盖归档/目录正向、缺 plugin、缺入口文件、错误 SDK 版本和双后台 `--validate-only` 失败关闭，并复跑自动节点、增量组件和固定双后台封装。
+
+### Result
+
+- 所有专项与部署回归退出 0，当前真实 `deploy/internal/dist/test-agent-programs.tar.gz` 通过；未重建企业 ZIP，未部署企业节点。未涉及 HTTP/RunEvent、数据库/Flyway、鉴权、安全凭据、generated SDK、OpenCode 源码或 `.env*`。
+
 ### 2026-07-30 - 重排智能测试汇报因果主线
 
 ### Why

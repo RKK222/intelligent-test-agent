@@ -509,6 +509,9 @@ verify_backend() {
   fi
   persistence_jar="$(find_unique_persistence_jar "${INSTALL_ROOT}/dist/backend/lib")"
   verify_toolbox_enterprise_migration_jar "${persistence_jar}"
+  require_file "${INSTALL_ROOT}/deploy/internal/verify-opencode-tool-runtime.sh"
+  bash "${INSTALL_ROOT}/deploy/internal/verify-opencode-tool-runtime.sh" \
+    --root "${INSTALL_ROOT}/programs/opencode"
 
   worker_state="$(docker inspect -f '{{.State.Running}}' test-agent-opencode-worker 2>/dev/null || true)"
   worker_health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' test-agent-opencode-worker 2>/dev/null || true)"

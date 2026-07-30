@@ -287,6 +287,8 @@ verify_reused_worker_runtime() {
   require_file "${INSTALL_ROOT}/programs/bin/opencode-manager"
   require_file "${INSTALL_ROOT}/programs/opencode/bin/opencode"
   require_file "${INSTALL_ROOT}/programs/codex/bin/codex-official"
+  bash "${DEPLOY_INTERNAL_SRC}/verify-opencode-tool-runtime.sh" \
+    --root "${INSTALL_ROOT}/programs/opencode"
   state="$(docker inspect -f '{{.State.Running}}' test-agent-opencode-worker 2>/dev/null || true)"
   health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' test-agent-opencode-worker 2>/dev/null || true)"
   [[ "${state}" == true && ( -z "${health}" || "${health}" == healthy ) ]] || {
@@ -686,6 +688,11 @@ if [[ -z "${DEPLOY_INTERNAL_SRC}" || ! -d "${DEPLOY_INTERNAL_SRC}" ]]; then
 fi
 require_file "${DEPLOY_INTERNAL_SRC}/ensure-opencode-runtime-gitignore.sh"
 require_file "${DEPLOY_INTERNAL_SRC}/opencode-runtime.gitignore"
+require_file "${DEPLOY_INTERNAL_SRC}/opencode-node-runtime.package.json"
+require_file "${DEPLOY_INTERNAL_SRC}/verify-opencode-tool-runtime.sh"
+if [[ "${WORKER_RUNTIME_REUSE}" -eq 0 ]]; then
+  bash "${DEPLOY_INTERNAL_SRC}/verify-opencode-tool-runtime.sh" --archive "${PROGRAMS_ARCHIVE}"
+fi
 
 if [[ "${VALIDATE_ONLY}" -eq 1 ]]; then
   log "Release archive validation passed"
@@ -738,6 +745,7 @@ mv "${INSTALL_ROOT}/deploy/internal.new" "${INSTALL_ROOT}/deploy/internal"
 chmod +x \
   "${INSTALL_ROOT}/deploy/internal/opencode-worker-docker.sh" \
   "${INSTALL_ROOT}/deploy/internal/ensure-opencode-runtime-gitignore.sh" \
+  "${INSTALL_ROOT}/deploy/internal/verify-opencode-tool-runtime.sh" \
   || true
 
 # 升级已初始化节点时立即消除 OpenCode 运行文件造成的 Git 脏状态；新节点尚未 clone 时不提前创建目录，
@@ -775,6 +783,8 @@ if [[ "${WORKER_RUNTIME_REUSE}" -eq 0 ]]; then
 else
   log "Reuse existing worker runtime (OpenCode Manager, OpenCode runtime and Codex MCP)"
 fi
+bash "${INSTALL_ROOT}/deploy/internal/verify-opencode-tool-runtime.sh" \
+  --root "${INSTALL_ROOT}/programs/opencode"
 
 if [[ "${SKIP_WORKER}" -eq 0 ]]; then
   log "Load opencode-worker docker image"
