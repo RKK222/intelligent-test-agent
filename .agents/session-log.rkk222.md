@@ -5,6 +5,31 @@
 
 ## Entries
 
+### 2026-07-30 - 基于 Python 工具运行时重建企业双后台交付
+
+### Why
+
+- 十二点成功部署基线已具备 worker `731ab9d...` 与 toolbox `35447da...` 指纹；当前主干新增 Python 3.13 worker 和独立 Office/数据处理库后，worker 已真实变化，不能继续发布纯前后端复用包。
+- 新部署器把 Python 库安装/校验脚本列为发布包必需文件，但双后台回归的模拟发布包未同步这两个文件，导致正式包内容正确时回归夹具仍在预校验阶段失败。
+
+### What
+
+- 复用十二点现场组件状态重新构建当前 HEAD 的 Java、外置依赖、生产前端、programs 和 `linux/amd64` worker；组件清单固定为 `worker runtime=included`、`toolbox=reuse`，不重复携带或部署 toolbox。
+- 独立生成 `test-agent-python-libs-py313-linux-amd64.tar.gz`，不将 Python 第三方库塞入平台内外层 ZIP；两个后台先升级平台 worker，再通过独立脚本原子安装 Python 库并重启 worker。
+- 补齐 `verify-internal-multi-backend-node.sh` 模拟发布包中的既有 `deploy-python-libs.sh` 与 `verify-python-libs.sh`，只修正测试夹具，不新增部署实现或平行入口。
+
+### How
+
+- 后端 JDK 25 封包、前端文档/typecheck/生产构建、worker Python/Codex 断网检查和独立 Python 库功能 smoke 通过；Python 库实际完成 pandas Excel 回读、XlsxWriter 写入、python-docx、jsonschema 与 orjson 验证。
+- 增量组件、自动节点、固定外层 ZIP、双后台节点、OpenCode Tool runtime、开发脚本回归和发布 `--validate-only` 通过；Flyway persistence JAR migration 字节仍锁定 SHA-256 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`。
+- 本地 backend readiness 为 `UP`，前端 3000 与既有 toolbox 18120/18121 可访问；包内确认存在 programs、worker 和 Python 部署脚本，且不存在 toolbox 制品或独立 Python 库归档。
+
+### Result
+
+- 本次两个后台节点必须更新 Java/programs/worker 并重启 worker，随后独立安装 Python 库；toolbox 继续复用十二点成功部署版本，不会重建、加载或重启。前端节点只更新前端。
+- 企业 `.4/.114/.2` 尚未实际部署；必须按 `.4 → .114 → .2` 顺序执行，并在每个后台运行 native `linux/amd64` Codex namespace probe 后再继续下一节点。
+- 当前主干未新增或改写 Flyway migration；本次夹具修复不涉及业务 HTTP API、RunEvent、数据库/SQL、鉴权、安全凭据、generated SDK、OpenCode 源码或 `.env*`。独立 Python 执行面保持只读挂载、无编译器、运行时禁止公网 pip。
+
 ### 2026-07-30 - 为智能体 worker 增加 Python 与独立 Office 数据处理库
 
 ### Why

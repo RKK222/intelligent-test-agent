@@ -118,6 +118,8 @@ printf 'fixture omni-tools image\n' >"${RELEASE_ROOT}/dist/test-agent_omni-tools
 cp "${ROOT_DIR}/deploy/internal/deploy-internal-release.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/deploy-internal-frontend.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/opencode-worker-docker.sh" "${RELEASE_ROOT}/deploy/internal/"
+cp "${ROOT_DIR}/deploy/internal/deploy-python-libs.sh" "${RELEASE_ROOT}/deploy/internal/"
+cp "${ROOT_DIR}/tools/verify-python-libs.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/ensure-opencode-runtime-gitignore.sh" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/opencode-runtime.gitignore" "${RELEASE_ROOT}/deploy/internal/"
 cp "${ROOT_DIR}/deploy/internal/verify-opencode-tool-runtime.sh" "${RELEASE_ROOT}/deploy/internal/"
