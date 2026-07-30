@@ -3485,3 +3485,25 @@
 - 当前纯增量包不能继续部署；本次失败发生在替换 Java 前，没有改变 `.4` 的 Java、worker 或 toolbox。
 - 当前固定部署日志会被下一次入口的 `tee` 覆盖，因此仅凭现有文件不能区分上一批全量包是未执行还是中途失败；后续必须以两项安装指纹均存在作为增量发布硬前提。
 - 本次仅完成诊断，未重打交付包，未修改业务代码、API、事件、数据库/Flyway、环境配置或部署逻辑。
+
+### 2026-07-30 - 按现场状态生成 toolbox 定向修复包
+
+### Why
+
+- `.4` 已有匹配的 worker runtime 指纹但缺少 toolbox 指纹；纯增量包不能继续，全量包又会重复携带无需更新的 worker/programs。
+
+### What
+
+- 复用标准 `--component-state-file` 参数表达现场已安装状态，生成 `worker runtime=reuse`、`toolbox=included` 的定向发布；同时携带当前 Java、外置依赖、前端、IT-Tools、OmniTools、toolbox 修改源码和 193 项目录。
+- 使用既有三节点配置包重新封装固定名外层 ZIP，没有修改或新增部署脚本，也没有伪造企业服务器状态文件。
+
+### How
+
+- JDK 25 后端封包、前端 typecheck/生产构建、两套 `linux/amd64` toolbox 镜像构建和 tar 校验通过；本机运行容器使用同一镜像 ID且均为 healthy，两个健康端点和深链返回 200。
+- 增量组件、自动节点、固定外层、双后台节点、Flyway persistence JAR 字节门禁和最终 ZIP validate-only 均通过；清单确认包含全部 toolbox 制品且不包含 programs/worker 镜像。
+
+### Result
+
+- 新包会在 `.4/.114` 更新 Java、部署并诊断 toolbox、写入缺失的 toolbox 指纹，同时复用且不重启现有 worker runtime；`.2` 更新前端。
+- 企业实际部署仍需按 `.4 → .114 → .2` 顺序执行；`.4` 成功后必须确认两项指纹同时存在，再继续下一台。
+- 本次未修改业务代码、API、事件、数据库结构、Flyway SQL、安全配置、generated SDK、OpenCode 源码或 `.env*`。
