@@ -297,30 +297,30 @@ async function buildDeck() {
   // 05 Reuse map
   {
     const slide = pptx.addSlide();
-    titleBlock(slide, '01 · 已有底座', '复用什么，新增什么', '新功能嵌入现有分层：浏览器只访问平台 API，评估数据进入平台持久化与权限体系。', 5);
+    titleBlock(slide, '02 · 交付形态', '最终交付：不是新 Agent，而是平台内的质量评估模块', '复用现有案例生成/审核 Agent；新增评价网页、质量看板以及配套 API 与数据存储。', 4);
 
     const layers = [
-      ['体验层', 'agent-web', '评价入口 · 案例详情 · 统计看板', C.blueSoft, C.blue],
-      ['平台 API', 'backend-api + test-agent-api', '统一响应 · 鉴权 · traceId · 分页筛选', C.mint, C.tealDark],
-      ['质量业务', '新增案例质量域', '评价口径 · 标签体系 · 指标计算 · 钻取', C.limeSoft, C.green],
-      ['运行与资产', 'Run / Workspace / Snapshot / Hub', '关联生成上下文、源码快照、个人空间与技能修订', C.purpleSoft, C.purple],
-      ['数据层', 'domain + persistence', 'MyBatis XML · Flyway · 审计字段', C.coralSoft, C.red]
+      ['直接复用', '测试案例生成 / 审核 Agent', '继续负责生成案例，不在本周新建 Agent', C.purpleSoft, C.purple],
+      ['网页一', '案例评价页 / 评价抽屉', 'A–D、问题标签、影响功能、补充说明', C.mint, C.tealDark],
+      ['网页二', '案例质量看板', '指标总览、问题分布、版本筛选、明细钻取', C.limeSoft, C.green],
+      ['服务能力', '评价与统计 API', '保存评价、查询明细、聚合统计、统一权限', C.blueSoft, C.blue],
+      ['数据关联', '案例 + 源码快照 + 评价', '绑定 caseVersionId、generation、targetCommit', C.coralSoft, C.red]
     ];
     for (let i = 0; i < layers.length; i++) {
       const y = 1.98 + i * 0.88;
       rect(slide, 0.78, y, 11.75, 0.67, i === 2 ? C.ink : C.white, 0.13, i === 2 ? C.ink : C.grayLine);
       pill(slide, layers[i][0], 0.98, y + 0.16, 1.05, layers[i][3], layers[i][4], 10.2);
       tx(slide, layers[i][1], 2.27, y + 0.13, 3.05, 0.28, { fontSize: 13.3, bold: true, color: i === 2 ? C.white : C.ink });
-      tx(slide, layers[i][2], 5.18, y + 0.13, 6.85, 0.3, { fontSize: 12.5, color: i === 2 ? 'CBD5E7' : C.muted });
+      tx(slide, layers[i][2], 5.18, y + 0.13, 3.98, 0.3, { fontSize: 11.8, color: i === 2 ? 'CBD5E7' : C.muted });
     }
-    rect(slide, 8.85, 2.2, 3.08, 3.02, C.ink2, 0.18);
-    circle(slide, 9.5, 2.72, 1.78, '1D3151', C.teal);
-    circle(slide, 9.89, 3.11, 1.0, C.teal);
-    await iconBadge(slide, 'eye', 10.1, 3.32, C.ink, C.lime, 0.58);
-    tx(slide, 'Case Quality', 9.24, 4.05, 2.26, 0.35, { fontSize: 17, color: C.white, bold: true, align: 'center' });
-    tx(slide, '新增核心', 9.65, 4.5, 1.42, 0.3, { fontSize: 11, color: C.lime, bold: true, align: 'center' });
-    tx(slide, '边界建议在详细设计评审后定版，避免把业务逻辑塞进 API 或 app 启动模块。', 0.83, 6.58, 10.8, 0.3, { fontSize: 11.5, color: C.muted, italic: true });
-    addNotes(slide, '这是给新员工看的边界提示。实现时优先复用现有前端 client、API 规范、领域模型和持久化规范；案例质量是独立业务概念，具体是否新增 Maven 模块，在详细设计阶段按 module-map 和 dependency-rules 决定。');
+    rect(slide, 9.48, 2.2, 2.72, 3.02, C.ink2, 0.18);
+    circle(slide, 10.02, 2.73, 1.64, '1D3151', C.teal);
+    circle(slide, 10.39, 3.1, 0.9, C.teal);
+    await iconBadge(slide, 'eye', 10.55, 3.26, C.ink, C.lime, 0.58);
+    tx(slide, 'Case Quality', 9.72, 4.05, 2.2, 0.35, { fontSize: 16.5, color: C.white, bold: true, align: 'center' });
+    tx(slide, '网页产品模块', 9.98, 4.5, 1.68, 0.3, { fontSize: 10.8, color: C.lime, bold: true, align: 'center' });
+    pill(slide, '最终演示 = 评价页 → 看板 → 案例明细', 4.48, 6.42, 4.62, C.ink, C.white, 10.2);
+    addNotes(slide, '必须明确告诉新员工：本周交付的主体是嵌入现有 agent-web 的两个网页能力，后面配一组平台 API 和数据表。现有案例生成/审核 Agent 直接复用，不新建 Agent，也不做自动评分 Agent。');
   }
 
   // 06 Gap divider
@@ -396,7 +396,7 @@ async function buildDeck() {
   // 08 Evaluation workbench mockup
   {
     const slide = pptx.addSlide();
-    titleBlock(slide, '03 · 目标产品', '目标体验：生成后 30 秒完成评价', '案例列表、案例正文和评价抽屉同屏；评价结果与当前生成版本绑定。', 8);
+    titleBlock(slide, '04 · 页面效果', '评价页：生成后 30 秒完成反馈', '案例列表、案例正文和评价抽屉同屏；评价结果与当前生成版本绑定。', 6);
 
     // window shell
     card(slide, 0.55, 1.86, 12.23, 4.9, 'F8FAFD', C.grayLine);
@@ -566,7 +566,7 @@ async function buildDeck() {
   // 12 Dashboard mockup
   {
     const slide = pptx.addSlide();
-    titleBlock(slide, '03 · 目标产品', '看板效果：从总览一路钻到案例证据', '下图为演示数据；核心是“指标 → 问题 → 功能 → 明细”的可钻取链路。', 12);
+    titleBlock(slide, '04 · 页面效果', '质量看板：从总览一路钻到案例证据', '下图为演示数据；核心是“指标 → 问题 → 功能 → 明细”的可钻取链路。', 7);
     card(slide, 0.55, 1.82, 12.23, 4.98, C.wash, C.grayLine);
     // filters
     rect(slide, 0.77, 2.02, 11.78, 0.48, C.white, 0.09, C.grayLine);
@@ -661,7 +661,7 @@ async function buildDeck() {
   // 14 Development repository relationship
   {
     const slide = pptx.addSlide();
-    titleBlock(slide, '04 · 版本库关联', '案例与开发版本库：双资产、只读关联、证据可追溯', '开发源码是被测事实，测试案例是测试资产；评价层用版本身份与代码证据把两者连接起来。', 14, '结合 Codex 任务 019fae77… 的源码快照与人员工作区分析');
+    titleBlock(slide, '03 · 版本库关联', '案例与开发版本库：双资产、只读关联、证据可追溯', '开发源码是被测事实，测试案例是测试资产；评价层用版本身份与代码证据把两者连接起来。', 5, '结合 Codex 任务 019fae77… 的源码快照与人员工作区分析');
 
     // Development side
     card(slide, 0.66, 2.02, 3.32, 3.92, C.white, C.grayLine);
@@ -670,9 +670,9 @@ async function buildDeck() {
     tx(slide, '应用源码快照', 0.92, 2.86, 1.85, 0.34, { fontSize: 17, bold: true });
     tx(slide, 'generation\ntargetCommit\nselectedPaths\nindexSha256', 0.92, 3.34, 1.45, 1.05, { fontSize: 11.2, color: C.muted, breakLine: true, valign: 'top' });
     pill(slide, '运行目录无 .git', 2.47, 3.42, 1.12, C.coralSoft, C.red, 8.8);
-    tx(slide, '读取代码、接口、模块和数据结构事实；\n需要版本差异时，使用物化阶段提前冻结的 ChangeSet。', 0.92, 4.72, 2.62, 0.76, { fontSize: 10.7, color: C.slate, breakLine: true, valign: 'top' });
+    tx(slide, '读取当前冻结版本的代码、接口、模块和数据结构事实；\n本周只做版本与证据关联，不开发版本间 Diff 引擎。', 0.92, 4.72, 2.62, 0.76, { fontSize: 10.7, color: C.slate, breakLine: true, valign: 'top' });
     pill(slide, '已存在：快照身份', 0.92, 5.48, 1.47, C.mint, C.tealDark, 8.6);
-    pill(slide, '扩展：ChangeSet', 2.48, 5.48, 1.25, C.purpleSoft, C.purple, 8.6);
+    pill(slide, '本周：证据关联', 2.48, 5.48, 1.25, C.limeSoft, C.green, 8.6);
 
     // Bridge
     circle(slide, 4.37, 2.78, 2.48, C.ink);
@@ -707,7 +707,7 @@ async function buildDeck() {
     rect(slide, 0.75, 6.25, 11.82, 0.54, C.ink, 0.14);
     tx(slide, '分析价值', 1.0, 6.39, 0.74, 0.2, { fontSize: 10.5, bold: true, color: C.lime });
     tx(slide, '验证案例可执行性与预期结果 · 识别代码已变但案例未覆盖 · 区分案例生成问题与代码 / 需求事实不清', 1.86, 6.36, 10.25, 0.24, { fontSize: 11.2, bold: true, color: C.white });
-    addNotes(slide, '这一页只讨论案例与开发版本库的分析关系，不把夜间回归纳入课题范围。开发源码快照和测试工作区保持分离；评价记录通过 sourceGeneration/targetCommit、代码路径/API/符号等证据关联案例。源码快照无 .git，若需要版本差异，应在快照物化阶段提前冻结 ChangeSet；该 ChangeSet 是扩展设计，不是当前已实现能力。');
+    addNotes(slide, '这一页只讨论案例与开发版本库的分析关系。开发源码快照和测试工作区保持分离；评价记录通过 sourceGeneration/targetCommit、代码路径/API/符号等证据关联案例。源码快照无 .git，本周不开发版本间 Diff 引擎，只关联当前冻结版本。');
   }
 
   // 15 Feedback loop
@@ -746,49 +746,50 @@ async function buildDeck() {
   // 16 MVP scope
   {
     const slide = pptx.addSlide();
-    titleBlock(slide, '05 · 实施范围', 'MVP：先闭环，再做“聪明”', '第一版只做能采集、能统计、能钻取、能对比的最小完整链路。', 16);
-    const cols = [
-      ['必须完成', C.green, C.limeSoft, [
-        '生成完成后的评价入口', '四级可用性 + 多选问题标签', '影响功能 + 补充说明', '案例 / 源码快照版本关联', '代码路径 / API 证据关联', '看板、钻取、权限与审计'
-      ]],
-      ['条件允许', C.blue, C.blueSoft, [
-        '自动计算修改差异', '批量评价与快捷键', '源码事实一致性辅助分析', 'Skill 修订前后对比', '冻结 ChangeSet 对接', '抽样复核 / 双人一致性'
-      ]],
-      ['本期不做', C.red, C.coralSoft, [
-        '用自动评分完全替代人工', '直接基于原始反馈自动训练', '一次覆盖所有测试对象标签', '恢复源码快照中的 .git', '混淆开发库与测试工作区', '跨系统大而全数据中台'
-      ]]
+    titleBlock(slide, '05 · 一周任务', '必须完成：拆成 6 个可并行、可验收的工作包', '每个工作包都有明确产物；周五必须能串成一条真实演示链路。', 8);
+    const packages = [
+      ['01', '评价口径与样本', '确定 A–D、8 类问题标签、功能标签；准备 30 条样例。', 'target', C.tealDark, C.mint, '产品 + 测试'],
+      ['02', '数据模型', '固化案例版本、源码 generation / commit、评价人与审计字段。', 'database', C.purple, C.purpleSoft, '后端 + 产品'],
+      ['03', '评价 API', '完成保存、修改、详情和列表查询，统一权限与错误格式。', 'link', C.blue, C.blueSoft, '后端'],
+      ['04', '案例评价页', '在现有工作台加入评价入口，完成等级、标签、功能和说明录入。', 'edit', C.green, C.limeSoft, '前端'],
+      ['05', '质量看板', '完成 4 个核心指标、问题分布、版本筛选和明细钻取。', 'chart', C.coral, C.coralSoft, '前端 + 后端'],
+      ['06', '联调与验收', '接口测试、页面测试、统计对账；准备一条 5 分钟演示脚本。', 'check', '9B7217', C.amberSoft, '测试 + 全员']
     ];
-    for (let c = 0; c < cols.length; c++) {
-      const x = 0.72 + c * 4.04;
-      card(slide, x, 1.99, 3.72, 4.55, C.white, C.grayLine);
-      pill(slide, cols[c][0], x + 0.24, 2.23, 1.17, cols[c][2], cols[c][1], 10.2);
-      cols[c][3].forEach((item, i) => {
-        circle(slide, x + 0.27, 2.92 + i * 0.53, 0.25, cols[c][2]);
-        tx(slide, c === 2 ? '×' : '✓', x + 0.27, 2.96 + i * 0.53, 0.25, 0.15, { fontSize: 8.5, bold: true, color: cols[c][1], align: 'center' });
-        tx(slide, item, x + 0.67, 2.86 + i * 0.53, 2.62, 0.3, { fontSize: 11.5, color: C.slate, bold: i === 0 });
-      });
+    for (let i = 0; i < packages.length; i++) {
+      const row = Math.floor(i / 3);
+      const col = i % 3;
+      const x = 0.72 + col * 4.04;
+      const y = 1.98 + row * 2.0;
+      card(slide, x, y, 3.72, 1.65, C.white, C.grayLine);
+      pill(slide, packages[i][0], x + 0.2, y + 0.21, 0.52, packages[i][5], packages[i][4], 9.5);
+      await iconBadge(slide, packages[i][3], x + 2.95, y + 0.19, packages[i][4], packages[i][5], 0.52);
+      tx(slide, packages[i][1], x + 0.86, y + 0.19, 1.9, 0.32, { fontSize: 15.5, bold: true });
+      tx(slide, packages[i][2], x + 0.2, y + 0.72, 3.05, 0.48, { fontSize: 10.6, color: C.muted, valign: 'top' });
+      pill(slide, packages[i][6], x + 0.2, y + 1.28, 1.2, C.wash, C.slate, 8.6);
     }
-    addNotes(slide, '对新员工来说，范围控制尤其重要。只有评价入口、数据模型、统计与证据钻取全部打通，才算最小完整产品；自动评分、自动训练和全域标签都留到后续。');
+    pill(slide, '全部完成才算交付：2 个网页 + 评价/统计 API + 数据模型 + 演示链路', 3.38, 6.27, 6.55, C.ink, C.white, 10.5);
+    addNotes(slide, '这一页只呈现六个必须完成的工作包。六个工作包可以并行，但任何一块缺失都不能形成完整交付。30 条样例用于一周内校准与演示，不代表生产统计门槛。');
   }
 
   // 17 Plan and team
   {
     const slide = pptx.addSlide();
-    titleBlock(slide, '05 · 实施范围', '8 周推进：每两周交付一次可演示增量', '建议 5–7 人小组按能力交叉协作；每个阶段都用真实案例验证。', 17);
+    titleBlock(slide, '05 · 一周任务', '一周推进：每天都要交出可运行成果', '建议 5–7 人分成产品/质量、前端、后端数据、联调测试四条小线并行推进。', 9);
     const phases = [
-      ['W1–2', '定义', '样本盘点\n口径校准\n案例—源码数据字典', C.teal, C.mint],
-      ['W3–4', '采集', '评价 API\n数据存储\n工作台入口', C.blue, C.blueSoft],
-      ['W5–6', '洞察', '指标查询\n看板与钻取\n版本 / 模块筛选', C.purple, C.purpleSoft],
-      ['W7–8', '验证', '联调 / E2E\n试点评价\n版本对比与答辩', C.coral, C.coralSoft]
+      ['周一', '定口径', '原型\n数据字典\n30 条样例', C.teal, C.mint],
+      ['周二', '搭骨架', '表 / API\n前端路由\nMock 联调', C.blue, C.blueSoft],
+      ['周三', '通评价', '保存评价\n案例版本关联\n页面可操作', C.green, C.limeSoft],
+      ['周四', '通看板', '聚合统计\n筛选钻取\n数据对账', C.purple, C.purpleSoft],
+      ['周五', '验收', '真实试评\n回归测试\n演示答辩', C.coral, C.coralSoft]
     ];
-    line(slide, 1.18, 2.91, 10.88, 0, C.grayLine, 5);
+    line(slide, 1.1, 2.86, 11.05, 0, C.grayLine, 5);
     phases.forEach((p, i) => {
-      const x = 0.84 + i * 3.04;
-      circle(slide, x + 0.84, 2.52, 0.78, p[3]);
-      tx(slide, p[0], x + 0.84, 2.75, 0.78, 0.18, { fontSize: 9.2, bold: true, color: C.white, align: 'center' });
-      card(slide, x, 3.4, 2.46, 1.58, C.white, C.grayLine);
+      const x = 0.65 + i * 2.48;
+      circle(slide, x + 0.69, 2.47, 0.78, p[3]);
+      tx(slide, p[0], x + 0.69, 2.7, 0.78, 0.18, { fontSize: 9.2, bold: true, color: C.white, align: 'center' });
+      card(slide, x, 3.34, 2.15, 1.53, C.white, C.grayLine);
       pill(slide, p[1], x + 0.22, 3.62, 0.66, p[4], p[3], 9.8);
-      tx(slide, p[2], x + 0.22, 4.08, 1.98, 0.67, { fontSize: 11, color: C.slate, breakLine: true, valign: 'top' });
+      tx(slide, p[2], x + 0.22, 4.03, 1.66, 0.61, { fontSize: 10.5, color: C.slate, breakLine: true, valign: 'top' });
     });
     const roles = [
       ['产品 / 口径', '需求、原型、判例'], ['前端', '评价与看板'], ['后端 / 数据', 'API、模型、统计'], ['质量 / 测试', '样本、自动化、验收']
@@ -799,21 +800,21 @@ async function buildDeck() {
       tx(slide, r[0], x + 0.18, 5.66, 0.98, 0.22, { fontSize: 10.7, bold: true, color: i === 0 ? C.lime : C.ink });
       tx(slide, r[1], x + 1.06, 5.66, 1.25, 0.22, { fontSize: 9.8, color: i === 0 ? C.white : C.muted });
     });
-    pill(slide, '每周一次口径校准', 4.53, 6.52, 1.87, C.limeSoft, C.green, 9.8);
-    pill(slide, '每两周一次产品演示', 6.72, 6.52, 2.05, C.blueSoft, C.blue, 9.8);
-    addNotes(slide, '按新员工人数可以合并角色，但产品口径、前端、后端数据和测试验收四个责任不能缺失。建议两周一个可演示增量，不要等到最后一周才首次集成。');
+    pill(slide, '每日 17:00 集成演示', 4.45, 6.48, 1.95, C.limeSoft, C.green, 9.8);
+    pill(slide, '周四晚冻结功能，周五只修问题', 6.7, 6.48, 2.86, C.blueSoft, C.blue, 9.8);
+    addNotes(slide, '一周实战不能采用长周期阶段制。每天 17 点集成一次，周二必须有前后端骨架，周三评价链路要通，周四看板要通并冻结功能，周五用于真实试评、修复和答辩。');
   }
 
   // 18 Acceptance
   {
     const slide = pptx.addSlide();
-    titleBlock(slide, '06 · 验收方式', '用一条真实生成任务，演示完整闭环', '验收不是看页面数量，而是看案例能否追溯到评价、开发版本与代码证据。', 18);
+    titleBlock(slide, '06 · 最终验收', '答辩现场：用 5 分钟演示一个完整网页产品', '从现有 Agent 生成案例开始，完成评价、源码关联、统计和明细钻取。', 10);
     const demo = [
-      ['1', '生成', '从需求与设计生成一批案例', C.blue],
-      ['2', '评价', '完成单条 / 批量 A–D 评价', C.teal],
-      ['3', '统计', '看直接可用率与问题分布', C.purple],
-      ['4', '钻取', '回到案例、源码版本与代码证据', C.coral],
-      ['5', '对比', '比较 Skill 修订前后变化', C.green]
+      ['1', '生成', '复用现有 Agent 生成案例', C.blue],
+      ['2', '评价', '在评价页提交 A–D 与标签', C.teal],
+      ['3', '关联', '绑定源码快照和代码证据', C.green],
+      ['4', '看板', '查看指标、问题和功能热区', C.purple],
+      ['5', '钻取', '从图表返回案例评价明细', C.coral]
     ];
     for (let i = 0; i < demo.length; i++) {
       const x = 0.71 + i * 2.48;
@@ -827,12 +828,12 @@ async function buildDeck() {
     card(slide, 0.72, 3.88, 11.86, 2.2, C.ink);
     tx(slide, '最小验收条件', 0.98, 4.15, 1.62, 0.3, { fontSize: 15.2, bold: true, color: C.lime });
     const checks = [
-      '评价绑定案例版本、源码快照与操作者',
-      '单次评价中位耗时不高于 30 秒',
-      '看板汇总与明细抽查结果一致',
-      '任意指标可钻取到原案例与反馈证据',
-      '至少 30 条案例完成双人校准试评',
-      '权限、审计、异常与兼容性完成验证'
+      '评价页和质量看板均嵌入现有 agent-web',
+      '不新建 Agent，能接收现有生成案例',
+      '评价记录可以保存、修改和查询',
+      '看板统计与评价明细抽查一致',
+      '案例可追溯到源码 generation / commit',
+      '完成 30 条试评及关键接口、页面测试'
     ];
     checks.forEach((c, i) => {
       const col = i % 2;
@@ -843,8 +844,8 @@ async function buildDeck() {
       tx(slide, '✓', x, y + 0.07, 0.22, 0.12, { fontSize: 7.8, bold: true, color: C.ink, align: 'center' });
       tx(slide, c, x + 0.36, y, 5.02, 0.25, { fontSize: 11.3, color: C.white });
     });
-    pill(slide, '成功 = 评价被使用，而不是页面被打开', 4.47, 6.48, 4.4, C.limeSoft, C.green, 10.5);
-    addNotes(slide, '验收演示要跑一条真实链路，不要只展示静态看板。30 条案例是首轮校准建议样本，不代表生产统计门槛；后续可按应用与案例类型扩大样本。');
+    pill(slide, '最终交付 = 2 个网页 + 评价/统计 API + 数据模型 + 1 条真实演示链路', 3.22, 6.43, 6.9, C.limeSoft, C.green, 10.5);
+    addNotes(slide, '这一页必须回答“最终到底交付什么”。主体是现有平台中的评价页和质量看板，不是一个新 Agent；同时交付支撑它们的评价/统计 API、数据模型、测试和可运行演示链路。');
   }
 
   // 19 Closing
@@ -872,6 +873,16 @@ async function buildDeck() {
     tx(slide, 'Q & A', 11.2, 6.7, 1.1, 0.32, { fontSize: 14, bold: true, color: C.lime, align: 'right' });
     addNotes(slide, '收尾再次强调：看板只是闭环的可视化部分，真正的交付是统一评价口径、可追溯数据和可验证的智能体迭代机制。开题通过后，第一周立即开始样本与口径校准。');
   }
+
+  // 一周实战版只保留 10 页：背景、底座、交付形态、版本库关系、两张页面、任务、排期和验收。
+  const compactSlideIndexes = [0, 1, 2, 4, 13, 7, 11, 15, 16, 17];
+  pptx._slides = compactSlideIndexes.map((index) => pptx._slides[index]);
+  pptx._slides.forEach((slide, index) => {
+    slide._name = `Slide ${index + 1}`;
+    slide._rId = index + 2;
+    slide._slideId = index + 256;
+    slide._slideNum = index + 1;
+  });
 
   const out = path.resolve(__dirname, 'AI案例可用性评估看板-开题汇报.pptx');
   await pptx.writeFile({ fileName: out });
