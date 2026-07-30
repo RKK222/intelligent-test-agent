@@ -20,6 +20,7 @@ import type {
   SubagentSession,
   TodoItem,
   UserOpencodeProcess,
+  UserOpencodeMessageGate,
   UserOpencodeProcessHealth,
   UserOpencodeProcessHealthRequest,
   Workspace
@@ -314,6 +315,20 @@ export function publicConfigGateRefetchInterval(
   _process: Partial<UserOpencodeProcess> | null | undefined
 ): number | false {
   return PUBLIC_CONFIG_GATE_REFETCH_INTERVAL_MS;
+}
+
+/**
+ * 应用 Agent 后台 dispose 收敛，或任一配置发布门禁从阻塞恢复时，需要重新读取 OpenCode 目录。
+ * pendingRolloutId 覆盖任务快于前端首次观察到阻塞态的窗口。
+ */
+export function shouldRefreshRuntimeCatalogAfterMessageGate(
+  previous: Partial<UserOpencodeMessageGate> | null | undefined,
+  current: Partial<UserOpencodeMessageGate> | null | undefined,
+  pendingRolloutId?: string | null
+): boolean {
+  if (current?.messageSendAllowed !== true) return false;
+  if (previous?.messageSendAllowed === false) return true;
+  return Boolean(pendingRolloutId && current.publicConfigRolloutId !== pendingRolloutId);
 }
 export const OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS = 300_000;
 export const OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS = 30_000;

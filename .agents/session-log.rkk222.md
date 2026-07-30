@@ -3833,3 +3833,25 @@
 ### Result
 
 - 开题 PPT 由 10 页压缩为 9 页，已删除看板交付并调整为 Agent/Skills 运行、产物和真实样例验收主线；未修改实际 Agent/Skill 配置、API、数据库、事件或业务代码。
+
+## 2026-07-30 - 修复应用 Agent 越权可见与模式目录滞留
+
+### Why
+
+- 应用 Agent 配置为 `primary` 后，非应用成员仍可能借旧 workspaceId 读取并选择该应用的运行态 Agent；个人拉取把 Agent 从 `primary` 改为 `subagent` 后，后台 dispose 虽成功，页面仍保留拉取前的 Agent 目录缓存，导致底部选择器和 `@` 候选同时出现。
+
+### What
+
+- Workspace 级 OpenCode 运行态目标解析在认证用户场景复用 `ConversationWorkspaceAccessAuthorizer`，先校验实时应用成员关系或个人工作区 owner，再访问用户进程和应用 `.opencode` 目录。
+- 工作台跟踪个人拉取返回的 `runtimeReloadId`；配置消息门禁恢复后统一刷新 Agent 与 Command 目录，并覆盖后台任务在首次 5 秒轮询前已完成的窗口。
+- 同步 runtime、agent-web、用户手册、HTTP API 与模块边界说明，补充后端越权拒绝和前端目录刷新回归测试。
+
+### How
+
+- JDK 25 下 `test-agent-opencode-runtime -am` 模块回归 756 项通过；前端相关 Vitest 3 files / 113 tests、全 workspace typecheck 和生产 build 通过。
+- 使用未修改的 `.env.test` 与 `test` profile 完整重启 backend、opencode-manager、frontend；后端 readiness 为 `UP`，前端 `http://127.0.0.1:3000` 返回 HTTP 200。
+
+### Result
+
+- 非应用成员不能再读取或选择应用 Agent；应用成员拉取 `primary -> subagent` 后，后台重载完成即从底部主 Agent 选择器移除，并保留在 `@` 子 Agent 候选。
+- 未新增或变更 HTTP wire、RunEvent、数据库/Flyway、性能逻辑、环境配置、generated SDK 或 OpenCode 源码；现有错误格式与 static-token 本地兼容链路保持不变。

@@ -241,6 +241,7 @@ import {
   sessionTitleFromFirstMessage,
   shouldResetAfterNightTaskClosure,
   shouldFailExhaustedRetry,
+  shouldRefreshRuntimeCatalogAfterMessageGate,
   syntheticEvent,
   text,
   workspaceRequirementReferences,
@@ -494,6 +495,7 @@ const pendingReferenceRuntimeReloadRevision = ref(0);
 let handledReferenceRuntimeReloadRevision = 0;
 let pendingRuntimeReloadKind: "reference" | "agent" = "reference";
 let pendingPublicRuntimeReloadTarget: Pick<AgentFileTabInfo, "worktreeId" | "linuxServerId"> | null = null;
+let pendingAgentCatalogReloadId: string | null = null;
 let lastRuntimeReloadError: unknown | null = null;
 const diffViewerRef = ref<InstanceType<typeof DiffViewer> | null>(null);
 const isDiffDirty = ref(false);
@@ -1668,6 +1670,21 @@ const agentsRefreshing = computed(() => opencodeCatalogReady.value && agentsQuer
 const agentsError = computed(() => agentCatalogErrorMessage(agentsQuery.error.value));
 const models = computed(() => modelsQuery.data.value ?? []);
 const providers = computed(() => providersQuery.data.value ?? []);
+
+/** 后台配置排空完成后统一刷新 Agent/Command，避免 primary/subagent 继续使用旧实例目录。 */
+function refreshRuntimeCatalogAfterMessageGate(
+  gate: typeof publicConfigMessageGateQuery.data.value,
+  previous?: typeof publicConfigMessageGateQuery.data.value
+) {
+  if (!shouldRefreshRuntimeCatalogAfterMessageGate(previous, gate, pendingAgentCatalogReloadId)) return;
+  pendingAgentCatalogReloadId = null;
+  void Promise.all([agentsQuery.refetch(), commandsQuery.refetch()]);
+}
+
+watch(publicConfigMessageGateQuery.data, (gate, previous) => {
+  refreshRuntimeCatalogAfterMessageGate(gate, previous);
+});
+
 const allModels = computed<ModelInfo[]>(() => {
   const byValue = new Map<string, ModelInfo>();
   for (const model of models.value) {
@@ -5031,6 +5048,13 @@ async function executePersonalWorkspacePull(personalWorkspaceId: string) {
     fileExplorerRef.value?.refreshAll();
     refreshCurrentWorkspacePanels();
     let runtimeOutcome: RuntimeReloadOutcome = "NO_PENDING";
+    if (response.runtimeReloadStatus === "SCHEDULED" && response.runtimeReloadId) {
+      pendingAgentCatalogReloadId = response.runtimeReloadId;
+      // 主动读取一次门禁，兼容后台任务在下一次 5 秒轮询前已经完成的情况。
+      void publicConfigMessageGateQuery.refetch().then((result) => {
+        refreshRuntimeCatalogAfterMessageGate(result.data);
+      });
+    }
     // 兼容滚动升级期间的旧后端；新版后端返回 runtimeReloadStatus 后由持久化 rollout 接管。
     if (response.agentConfigChanged && !response.runtimeReloadStatus) {
       pendingRuntimeReloadKind = "agent";

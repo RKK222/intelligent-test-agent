@@ -17,6 +17,7 @@ import com.enterprise.testagent.domain.session.SessionRepository;
 import com.enterprise.testagent.domain.session.ConversationSourceType;
 import com.enterprise.testagent.domain.session.SessionStatus;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
@@ -47,6 +48,7 @@ public class AgentRuntimeTargetResolver {
     private final AgentSessionBindingRepository agentSessionBindingRepository;
     private final UserOpencodeProcessAssignmentService userProcessAssignmentService;
     private final ManagedWorkspacePathResolver pathResolver;
+    private final ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer;
 
     /**
      * 注入 runtime 目标解析所需端口；用户进程服务仅在认证用户访问默认 opencode 时使用。
@@ -59,7 +61,8 @@ public class AgentRuntimeTargetResolver {
             AgentRuntimeRegistry agentRuntimeRegistry,
             AgentSessionBindingRepository agentSessionBindingRepository,
             UserOpencodeProcessAssignmentService userProcessAssignmentService,
-            ManagedWorkspacePathResolver pathResolver) {
+            ManagedWorkspacePathResolver pathResolver,
+            ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
         this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
@@ -67,6 +70,31 @@ public class AgentRuntimeTargetResolver {
         this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
         this.userProcessAssignmentService = userProcessAssignmentService;
         this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
+        this.workspaceAccessAuthorizer = Objects.requireNonNull(
+                workspaceAccessAuthorizer,
+                "workspaceAccessAuthorizer must not be null");
+    }
+
+    /**
+     * 兼容现有内部装配；生产注入必须使用上方构造器接入实时应用成员校验。
+     */
+    public AgentRuntimeTargetResolver(
+            WorkspaceRepository workspaceRepository,
+            SessionRepository sessionRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
+            UserOpencodeProcessAssignmentService userProcessAssignmentService,
+            ManagedWorkspacePathResolver pathResolver) {
+        this(
+                workspaceRepository,
+                sessionRepository,
+                executionNodeRepository,
+                agentRuntimeRegistry,
+                agentSessionBindingRepository,
+                userProcessAssignmentService,
+                pathResolver,
+                (userId, workspaceId) -> { });
     }
 
     public AgentRuntimeTargetResolver(
@@ -92,13 +120,20 @@ public class AgentRuntimeTargetResolver {
     public WorkspaceRuntimeTarget workspaceTarget(String agentId, UserId userId, String workspaceId, String traceId) {
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
         AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
+        WorkspaceId resolvedWorkspaceId = workspaceId == null || workspaceId.isBlank()
+                ? null
+                : new WorkspaceId(workspaceId);
+        if (resolvedWorkspaceId != null && userId != null) {
+            // Agent/Command 等运行态目录同样会暴露应用 `.opencode` 内容，必须先校验实时成员关系。
+            workspaceAccessAuthorizer.requireAccess(userId, resolvedWorkspaceId);
+        }
         ExecutionNode node = resolveUserProcessAssignment(userId, resolvedAgentId, traceId)
                 .map(UserOpencodeProcessAssignment::node)
                 .orElseGet(this::routableNode);
-        if (workspaceId == null || workspaceId.isBlank()) {
+        if (resolvedWorkspaceId == null) {
             return new WorkspaceRuntimeTarget(runtime, node, null);
         }
-        Workspace workspace = findWorkspace(new WorkspaceId(workspaceId));
+        Workspace workspace = findWorkspace(resolvedWorkspaceId);
         return new WorkspaceRuntimeTarget(runtime, node, workspaceRoot(workspace));
     }
 

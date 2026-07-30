@@ -5,9 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.never;
 
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
@@ -25,6 +25,8 @@ import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionRepository;
 import com.enterprise.testagent.domain.session.SessionStatus;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
+import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
@@ -133,6 +135,26 @@ class OpencodeRuntimeApplicationServiceTest {
         assertThat(command.path()).isEqualTo("/agent");
         assertThat(command.directory()).isEqualTo("/tmp/demo");
         assertThat(result).isInstanceOf(List.class);
+    }
+
+    @Test
+    void listAgentsRequiresCurrentApplicationWorkspaceAccessBeforeCallingRuntime() {
+        Fixture fixture = new Fixture();
+        UserId userId = new UserId("usr_1234567890abcdef");
+        doThrow(new PlatformException(ErrorCode.FORBIDDEN, "当前用户已不是应用有效成员"))
+                .when(fixture.workspaceAccessAuthorizer)
+                .requireAccess(userId, new WorkspaceId("wrk_1234567890abcdef"));
+
+        assertThatThrownBy(() -> fixture.service.withUser(
+                        userId,
+                        () -> fixture.service.listAgents(
+                                "wrk_1234567890abcdef",
+                                "trace_1234567890abcdef")))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        verify(fixture.assignmentService, never()).requireReadyProcess(any(), anyString(), anyString());
+        verify(fixture.facade, never()).runtime(any());
     }
 
     @Test
@@ -712,6 +734,8 @@ class OpencodeRuntimeApplicationServiceTest {
                 new AgentRuntimeRegistry(List.of(new OpencodeAgentRuntime(facade)));
         private final UserOpencodeProcessAssignmentService assignmentService =
                 org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        private final ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer =
+                org.mockito.Mockito.mock(ConversationWorkspaceAccessAuthorizer.class);
         private final RunApplicationService runApplicationService =
                 org.mockito.Mockito.mock(RunApplicationService.class);
         private final OpencodeRuntimeApplicationService service;
@@ -736,7 +760,9 @@ class OpencodeRuntimeApplicationServiceTest {
                             executionNodeRepository,
                             runtimeRegistry,
                             bindingRepository,
-                            assignmentService),
+                            assignmentService,
+                            ManagedWorkspacePathResolver.legacyOnly(),
+                            workspaceAccessAuthorizer),
                     new ObjectMapper(),
                     null,
                     runApplicationService);

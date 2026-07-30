@@ -13,6 +13,7 @@ import {
   opencodeHealthRequestFromProcess,
   opencodeProcessRouteResolution,
   publicConfigGateRefetchInterval,
+  shouldRefreshRuntimeCatalogAfterMessageGate,
   chatStateFromSessionTreeSnapshot,
   dedupeSessionMessages,
   diffFilesFromPayload,
@@ -622,6 +623,27 @@ describe("opencode readiness helpers", () => {
     expect(publicConfigGateRefetchInterval({ messageSendAllowed: false })).toBe(5_000);
     expect(publicConfigGateRefetchInterval({ messageSendAllowed: true })).toBe(5_000);
     expect(publicConfigGateRefetchInterval(null)).toBe(5_000);
+  });
+
+  it("refreshes runtime catalogs after the config gate opens or a scheduled pull has already settled", () => {
+    expect(shouldRefreshRuntimeCatalogAfterMessageGate(
+      { messageSendAllowed: false, publicConfigRolloutId: "acr_active" },
+      { messageSendAllowed: true, publicConfigRolloutId: null }
+    )).toBe(true);
+    expect(shouldRefreshRuntimeCatalogAfterMessageGate(
+      { messageSendAllowed: true, publicConfigRolloutId: null },
+      { messageSendAllowed: true, publicConfigRolloutId: null },
+      "acr_personal_pull"
+    )).toBe(true);
+    expect(shouldRefreshRuntimeCatalogAfterMessageGate(
+      { messageSendAllowed: true, publicConfigRolloutId: null },
+      { messageSendAllowed: false, publicConfigRolloutId: "acr_personal_pull" },
+      "acr_personal_pull"
+    )).toBe(false);
+    expect(shouldRefreshRuntimeCatalogAfterMessageGate(
+      { messageSendAllowed: true, publicConfigRolloutId: null },
+      { messageSendAllowed: true, publicConfigRolloutId: null }
+    )).toBe(false);
   });
 
   it("builds weak health request only after process assignment is known", () => {

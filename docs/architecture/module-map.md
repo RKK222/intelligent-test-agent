@@ -37,6 +37,7 @@ Browser
 - `test-agent-opencode-client` 是业务代码访问 opencode server 的唯一门面。
 - `test-agent-opencode-sdk-generated` 只保存生成代码，不承载业务逻辑。
 - XXL executor 注册不使用稳定 Linux 服务器亲和；夜间扫描取得任务后，由业务层按任务提交时固化的目标服务器通过公共 Java 路由分发。
+- Workspace 级 OpenCode 运行态目录由 `test-agent-opencode-runtime` 在目标解析前复用 `ConversationWorkspaceAccessAuthorizer` 校验应用成员与个人工作区 owner，不能只凭 workspaceId 读取其它应用的 `.opencode` 能力。
 
 ## 后端模块职责
 

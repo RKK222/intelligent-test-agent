@@ -2858,6 +2858,7 @@ opencode Web App 运行态能力统一由 `test-agent-api` 的 runtime Controlle
 
 运行态代理与 Run 使用同一套目标解析规则：
 
+- 已登录用户传入 `workspaceId` 时，所有 workspace 级运行态接口都会先复用 `ConversationWorkspaceAccessAuthorizer` 校验实时应用成员关系与个人工作区 owner；非成员不能借助旧 workspaceId 读取或选择该应用 `.opencode` 中的 Agent、Command、Skill 或其它运行态能力，校验失败返回统一 `FORBIDDEN`。
 - 已登录用户访问默认 `opencode` agent 时，workspace 级目录、文件、配置、provider、MCP 等接口会先校验当前用户已有 `READY` opencode 进程，并使用该进程投影出的 `executionNodeId = "node_" + processId` 与进程记录中的 `baseUrl` 调用 opencode；未初始化或健康检测失败返回 `OPENCODE_UNAVAILABLE`。
 - 无用户主体的兼容调用（例如 static API token、本地放行或旧系统集成）继续走固定 `execution_nodes` 路由，不要求用户进程。
 - Session 级运行态接口在已登录用户访问默认 `opencode` 时，会校验 `(sessionId, agentId)` 绑定是否指向当前用户进程节点；绑定缺失或节点不一致时，后端会在当前用户进程上创建新的远端 session，并覆盖 `agent_session_bindings` 与兼容 `sessions.opencode_*` 字段。旧远端 session 不由本接口删除。
