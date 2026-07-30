@@ -3463,3 +3463,25 @@
 - 本包不会加载或重启未变化的 worker/toolbox 大组件；部署会替换并重启 Java，前端节点需要同步更新。
 - 只有 `.4/.114` 已成功部署上一批全量基线并保留匹配的 `/data/testagent/config/release-component-state.env` 时，本增量包才不会再出现组件指纹错误；状态缺失或不一致必须停止并重新部署全量包，不能伪造状态。
 - 本次打包未新增代码、API、事件、数据库结构、Flyway SQL、安全配置、generated SDK、OpenCode 源码或 `.env*` 修改。
+
+### 2026-07-30 - 确认现场缺少 toolbox 全量基线指纹
+
+### Why
+
+- `.4` 新回传日志显示 worker 指纹完全匹配，但 toolbox 指纹查询无输出；随后纯增量包再次在替换 Java 前被 toolbox 门禁拒绝。
+
+### What
+
+- 对照最终 ZIP、现场输出和既有部署入口，确认外层传输 SHA、内层 Flyway 字节和 toolbox 容器健康均正常；问题不是 ZIP 损坏，而是安装状态未记录 toolbox 全量部署成功。
+- 未修改部署脚本；复用现有 `--component-state-file` 参数按现场实际状态重新计算组件计划。
+
+### How
+
+- 成功的全量 `deploy-backend-node.sh` 会在 worker 基线之后部署、诊断 toolbox 并原子合并写入 toolbox 指纹；现场只存在 worker 指纹，证明上一批全量流程没有完成该步骤。
+- 以现场状态执行 `--component-plan-only`，结果为 `worker runtime=reuse`、`toolbox=included`，说明下一份正确交付应是业务 Java/前端加 toolbox，而不是纯增量或再次携带 worker 的全量包。
+
+### Result
+
+- 当前纯增量包不能继续部署；本次失败发生在替换 Java 前，没有改变 `.4` 的 Java、worker 或 toolbox。
+- 当前固定部署日志会被下一次入口的 `tee` 覆盖，因此仅凭现有文件不能区分上一批全量包是未执行还是中途失败；后续必须以两项安装指纹均存在作为增量发布硬前提。
+- 本次仅完成诊断，未重打交付包，未修改业务代码、API、事件、数据库/Flyway、环境配置或部署逻辑。
