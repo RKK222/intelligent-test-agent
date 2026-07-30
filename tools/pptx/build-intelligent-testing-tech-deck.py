@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""基于 A6 原稿生成“智能测试技术专题汇报”版本。
+"""基于 A6 原稿生成“智能测试技术专题汇报”逻辑优化版。
 
 保留原稿的封面、目录、测试智能体演进页和结束页，复用原母版；
+以一项测试任务为主线串起底座演进、当前架构、设计执行融合和资产闭环；
 新增内容严格依据当前仓库稳定文档，规划态内容会在页面中显式标注。
 """
 
@@ -287,6 +288,22 @@ def find_text_shape(slide, exact: str):
     return walk(slide.shapes)
 
 
+def shape_texts(shape) -> list[str]:
+    """递归提取组合图形文字，用于识别原稿目录项。"""
+    texts: list[str] = []
+    if getattr(shape, "has_text_frame", False) and shape.text.strip():
+        texts.append(shape.text.strip())
+    if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+        for child in shape.shapes:
+            texts.extend(shape_texts(child))
+    return texts
+
+
+def remove_shape(shape) -> None:
+    """从页面中移除已确认的原稿图形。"""
+    shape._element.getparent().remove(shape._element)
+
+
 def delete_unwanted_original_slides(prs: Presentation, keep_indexes: set[int]):
     original_slides = list(prs.slides)
     original_ids = list(prs.slides._sldIdLst)
@@ -310,13 +327,13 @@ def reorder_slides(prs: Presentation, ordered_slides: list) -> None:
 
 def build_transition_slide(prs: Presentation, page: int):
     slide = prs.slides.add_slide(prs.slide_layouts[7])
-    add_title(slide, "1.2", "Dify → 灵犀 Code：底座更替的本质", page)
-    add_kicker(slide, "不是简单更换模型，而是把能力载体从固定工作流升级为“可读写工作区、可调用工具、可持续演进”的工程化 Agent。")
+    add_title(slide, "1.2", "为什么从 Dify 走向灵犀 Code", page)
+    add_kicker(slide, "以“读详细设计，完成 API/UI 测试并输出证据”为例：关键差别是任务路径由谁决定。")
 
     columns = [
-        (0.55, "Dify 工作流阶段", "流程画布", ["节点与顺序预先编排", "适合稳定、边界清晰的单点能力", "测试人员主要消费既有流程"], RED),
-        (4.55, "演进触发点", "复杂测试任务", ["需求、代码、接口与页面上下文分散", "设计和执行需要反复规划与工具调用", "资产必须跟随 Git 版本长期演进"], ORANGE),
-        (8.55, "灵犀 Code 阶段", "自主式 Agent", ["以个人 worktree 为真实工作现场", "Agent + Skill + Tool 按任务动态组合", "Session / Run / Diff / 事件全程可管控"], BLUE),
+        (0.55, "Dify：平台先画好流程", "固定路径", ["节点、顺序和输入输出预先编排", "新增工具或分支需要修改流程", "适合稳定、单点、边界清晰的任务"], RED),
+        (4.55, "真实测试任务会变化", "变化来源", ["文档、代码、接口、页面上下文不同", "执行中需要观察、判断、修正与重试", "过程会生成案例、脚本、日志和截图"], ORANGE),
+        (8.55, "灵犀 Code：Agent 决定路径", "动态规划", ["个人 worktree 是任务的真实现场", "按任务装配 Agent、Skill 与 Tool", "Session / Run / Diff / 事件让过程可控"], BLUE),
     ]
     for x, title, tag, body, color in columns:
         add_card(slide, x, 1.48, 3.65, 3.65, title, body, fill=WHITE, line=color, accent=color, tag=tag)
@@ -324,126 +341,136 @@ def build_transition_slide(prs: Presentation, page: int):
     add_arrow(slide, 8.22, 3.08, color=BLUE)
 
     add_rect(slide, 0.65, 5.42, 12.05, 1.08, fill=RED_PALE, line=RED_LIGHT)
-    items = [
-        (0.90, "能力定义", "Prompt → Agent / Skill"),
-        (3.85, "执行方式", "固定节点 → 自主规划 + 工具调用"),
-        (7.25, "资产形态", "平台配置 → Git 目录与版本"),
-        (10.30, "平台治理", "黑盒流程 → RunEvent / Diff / 审计"),
-    ]
-    for x, title, body in items:
-        add_text(slide, title, x, 5.64, 1.75, 0.25, size=12, color=RED, bold=True)
-        add_text(slide, body, x, 5.98, 2.45, 0.30, size=11.3, color=INK)
+    add_text(slide, "底座变化", 0.92, 5.66, 1.05, 0.28, size=12, color=RED, bold=True)
+    add_text(slide, "Dify：平台定义任务路径", 2.03, 5.60, 3.25, 0.40, size=14, color=INK, bold=True, align=PP_ALIGN.CENTER)
+    add_arrow(slide, 5.57, 5.69, w=0.52, h=0.24, color=RED)
+    add_text(slide, "灵犀 Code：平台定义边界，Agent 规划路径", 6.30, 5.60, 5.74, 0.40, size=14, color=BLUE, bold=True, align=PP_ALIGN.CENTER)
+    add_text(slide, "从“交付一个流程”变成“交付一套能在真实工程现场持续完成任务的能力”。", 1.54, 6.08, 10.28, 0.28, size=11.3, color=MUTED, align=PP_ALIGN.CENTER)
     return slide
 
 
 def build_architecture_slide(prs: Presentation, page: int):
     slide = prs.slides.add_slide(prs.slide_layouts[7])
-    add_title(slide, "2.1", "当前技术架构：平台管控 + Agent Runtime + 灵犀 Code 执行", page)
-    add_kicker(slide, "浏览器只访问平台后端；平台负责身份、路由、运行态与资产治理，灵犀 Code（基于 OpenCode）负责 Agent 推理和工具执行。")
+    add_title(slide, "2.1", "当前底座：四层分工，一条任务链", page)
+    add_kicker(slide, "工作台承接任务，平台守住边界，灵犀 Code（基于 OpenCode）完成推理和执行，数据层保证恢复与审计。")
 
     layer_specs = [
-        (1.38, "交互层", RED_LIGHT, RED, ["agent-web / frontend-opencode", "backend-api", "event-stream-client"]),
-        (2.34, "平台层", PANEL, INK, ["test-agent-api", "workspace / opencode runtime", "AgentRuntimeRegistry"]),
-        (3.30, "执行层", PURPLE_LIGHT, PURPLE, ["opencode-client + generated SDK", "灵犀 Code 用户进程", "个人 worktree"]),
-        (4.26, "数据层", GREEN_LIGHT, GREEN, ["Redis Stream / snapshot", "PostgreSQL / MyBatis", "manager / XXL-JOB"]),
+        (1.38, "用户工作台", RED_LIGHT, RED, "提交任务、选择应用与工作区、查看过程和结果", "agent-web · frontend-opencode · backend-api"),
+        (2.34, "平台控制面", PANEL, INK, "鉴权、路由、工作区、进程和运行态治理", "test-agent-api · workspace-management · opencode-runtime"),
+        (3.30, "Agent 执行面", PURPLE_LIGHT, PURPLE, "在个人 worktree 中规划步骤、加载能力、调用工具", "灵犀 Code 用户进程 · agents · skills · tools"),
+        (4.26, "运行支撑", GREEN_LIGHT, GREEN, "事件回传、文件访问、状态恢复、任务调度和审计", "RunEvent SSE · 文件 WS · Redis · PostgreSQL · manager"),
     ]
-    for y, label, fill, color, items in layer_specs:
-        add_pill(slide, label, 0.55, y + 0.18, 1.02, 0.36, fill=color, color=WHITE, size=10.6)
-        add_rect(slide, 1.76, y, 7.32, 0.76, fill=fill, line=color)
-        gap = 6.92 / len(items)
-        for index, item in enumerate(items):
-            x = 1.95 + index * gap
-            add_text(slide, item, x, y + 0.18, gap - 0.12, 0.38, size=10.8, color=color if index == 0 else INK, bold=index == 0, align=PP_ALIGN.CENTER, valign=MSO_ANCHOR.MIDDLE)
+    for y, label, fill, color, responsibility, modules in layer_specs:
+        add_pill(slide, label, 0.55, y + 0.18, 1.20, 0.36, fill=color, color=WHITE, size=10.2)
+        add_rect(slide, 1.93, y, 7.03, 0.76, fill=fill, line=color)
+        add_text(slide, responsibility, 2.14, y + 0.10, 4.30, 0.28, size=11.2, color=INK, bold=True)
+        add_text(slide, modules, 2.14, y + 0.42, 6.50, 0.23, size=9.3, color=color)
 
-    add_card(slide, 9.36, 1.38, 3.40, 3.64, "多服务器运行边界", ["用户绑定稳定 linuxServerId", "入口 Java 路由到目标 Java", "目标 Java 控制本机 manager", "manager 管理用户专属灵犀 Code 进程", "启动 / 停止 / 状态统一走公共服务"], fill=RED_PALE, line=RED, accent=RED, body_size=11.1)
+    add_rect(slide, 9.24, 1.38, 3.54, 3.64, fill=BLUE_LIGHT, line=BLUE)
+    add_text(slide, "一次任务怎样流动", 9.50, 1.63, 3.02, 0.32, size=16, color=BLUE, bold=True, align=PP_ALIGN.CENTER)
+    task_steps = ["提交任务", "校验并路由", "Agent 规划与执行", "事件 / 文件回传", "结果与 Diff"]
+    for index, item in enumerate(task_steps):
+        y = 2.12 + index * 0.54
+        add_pill(slide, str(index + 1), 9.62, y, 0.32, 0.30, fill=BLUE, color=WHITE, size=9.2)
+        add_text(slide, item, 10.12, y - 0.01, 2.12, 0.31, size=11.2, color=INK, bold=index in {0, 4}, valign=MSO_ANCHOR.MIDDLE)
+        if index < len(task_steps) - 1:
+            add_text(slide, "↓", 9.70, y + 0.31, 0.18, 0.18, size=10, color=BLUE, bold=True, align=PP_ALIGN.CENTER)
 
-    add_rect(slide, 0.65, 5.38, 12.00, 0.96, fill=BLUE_LIGHT, line=BLUE)
-    runtime = ["提交 Run", "鉴权与工作区校验", "路由目标 Java", "Agent / Skill / Tool 执行", "RunEvent SSE + Diff 回传"]
-    for index, item in enumerate(runtime):
-        x = 0.88 + index * 2.35
-        add_pill(slide, str(index + 1), x, 5.66, 0.30, 0.30, fill=BLUE, color=WHITE, size=9.4)
-        add_text(slide, item, x + 0.38, 5.58, 1.75, 0.44, size=10.3, color=INK, valign=MSO_ANCHOR.MIDDLE)
-        if index < len(runtime) - 1:
-            add_arrow(slide, x + 2.12, 5.70, w=0.20, h=0.16, color=BLUE)
+    add_rect(slide, 0.65, 5.38, 12.00, 0.96, fill=RED_PALE, line=RED_LIGHT)
+    add_text(slide, "三条硬边界", 0.90, 5.66, 1.20, 0.28, size=11.8, color=RED, bold=True)
+    boundaries = ["浏览器不直连灵犀 Code", "业务层不穿透 generated SDK", "文件访问只走 route / ticket / RPC"]
+    for index, item in enumerate(boundaries):
+        x = 2.30 + index * 3.35
+        add_pill(slide, str(index + 1), x, 5.65, 0.30, 0.30, fill=RED, color=WHITE, size=9.2)
+        add_text(slide, item, x + 0.40, 5.59, 2.70, 0.40, size=10.6, color=INK, bold=True, valign=MSO_ANCHOR.MIDDLE)
     return slide
 
 
 def build_agent_skill_combined_slide(prs: Presentation, page: int):
     slide = prs.slides.add_slide(prs.slide_layouts[7])
-    add_title(slide, "3.2", "Agent 与 Skill：职责分工与装配方式", page)
-    add_kicker(slide, "Agent 负责目标、上下文与协作；Skill 负责某一步的稳定工序。两者都由 Git 管理，并在灵犀 Code 运行时加载。")
+    add_title(slide, "3.2", "Agent、Skill、Tool、Docs 各司其职", page)
+    add_kicker(slide, "四者不是四套并列资产：Agent 做决策，Skill 给方法，Tool 执行动作，Docs 提供事实。")
 
-    add_card(slide, 0.55, 1.42, 5.82, 2.24, "Agent：两层模型", ["平台层：AgentRuntimeRegistry 选择 opencode 适配器", "任务层：.opencode/agents/<id>.md", "mode: primary / subagent / all", "主控 Agent 拆解任务，@ 子 Agent 分工并收敛结果"], fill=RED_PALE, line=RED, accent=RED, tag="WHO", body_size=11.3)
-    add_card(slide, 6.70, 1.42, 6.08, 2.24, "Skill：标准工序", ["目录：.opencode/skills/<id>/SKILL.md", "配套 rules/ 与 templates/", "定义适用条件、输入输出、步骤、失败边界、验证命令", "通过 Agent & Skill Hub 发布、固定版本引用并热加载"], fill=BLUE_LIGHT, line=BLUE, accent=BLUE, tag="HOW", body_size=11.3)
-
-    add_text(slide, "测试协作编队", 0.65, 3.98, 1.65, 0.32, size=15, color=INK, bold=True)
-    agents = [
-        (0.65, "主控", "任务拆解 / 收敛", RED),
-        (2.45, "测试设计", "案例契约 / 覆盖", ORANGE),
-        (4.25, "API / UI", "脚本生成 / 执行", BLUE),
-        (6.05, "数据", "造数 / Mock", PURPLE),
-        (7.85, "结果分析", "证据 / 归因", GREEN),
+    roles = [
+        (0.55, "Agent", "做决策", ["理解目标与上下文", "决定下一步与协作关系"], ".opencode/agents/*.md", RED),
+        (3.67, "Skill", "给方法", ["定义适用条件和步骤", "约束输入、输出与验证"], ".opencode/skills/*/SKILL.md", BLUE),
+        (6.79, "Tool", "执行动作", ["读写文件、调用 API", "浏览器、终端、MCP"], "built-in / MCP / custom", PURPLE),
+        (9.91, "Docs", "提供事实", ["业务、接口、数据规则", "历史案例与缺陷模式"], "docs/** + references", GREEN),
     ]
-    for x, title, body, color in agents:
-        add_rect(slide, x, 4.42, 1.55, 1.32, fill=WHITE, line=color)
-        add_pill(slide, title, x + 0.13, 4.59, 1.29, 0.32, fill=color, color=WHITE, size=9.6)
-        add_text(slide, body, x + 0.12, 5.05, 1.31, 0.38, size=9.8, color=INK, align=PP_ALIGN.CENTER)
+    for x, title, verb, body, path, color in roles:
+        add_rect(slide, x, 1.44, 2.82, 2.45, fill=WHITE, line=color)
+        add_pill(slide, title, x + 0.18, 1.63, 0.82, 0.34, fill=color, color=WHITE, size=10.5)
+        add_text(slide, verb, x + 1.14, 1.62, 1.42, 0.34, size=14.5, color=color, bold=True, align=PP_ALIGN.RIGHT)
+        add_paragraphs(slide, body, x + 0.18, 2.18, 2.46, 0.82, size=10.8, color=INK, bullet=True, gap=3)
+        add_text(slide, path, x + 0.18, 3.34, 2.46, 0.26, size=8.8, color=MUTED, font=MONO, align=PP_ALIGN.CENTER)
 
-    add_rect(slide, 9.68, 3.94, 3.10, 2.10, fill=CODE_BG, line=CODE_BG)
-    add_text(slide, "Skill 例", 9.94, 4.15, 2.58, 0.28, size=13.5, color=WHITE, bold=True, align=PP_ALIGN.CENTER)
-    add_paragraphs(slide, ["设计：边界场景生成", "执行：API 脚本生成", "执行：UI 元素定位", "闭环：证据采集 / 失败归因"], 9.92, 4.61, 2.62, 1.14, size=10.3, color=WHITE, gap=3)
+    add_text(slide, "放到同一项任务里", 0.65, 4.18, 1.85, 0.32, size=15, color=INK, bold=True)
+    add_rect(slide, 0.65, 4.62, 12.00, 0.82, fill=RED_PALE, line=RED_LIGHT)
+    design_flow = [
+        (0.90, 2.06, "测试设计 Agent", RED),
+        (3.35, 3.10, "需求解析 / 测试点 / 边界 Skill", ORANGE),
+        (6.92, 2.58, "Tool 读取 docs 与代码", PURPLE),
+        (9.98, 2.22, "输出案例契约", GREEN),
+    ]
+    for index, (x, width, text, color) in enumerate(design_flow):
+        add_pill(slide, text, x, 4.85, width, 0.35, fill=color, color=WHITE, size=9.7)
+        if index < len(design_flow) - 1:
+            next_x = design_flow[index + 1][0]
+            add_arrow(slide, x + width + 0.08, 4.93, w=max(0.18, next_x - (x + width) - 0.16), h=0.17, color=color)
 
-    add_text(slide, "主控 Agent", 0.72, 6.13, 1.18, 0.26, size=10.8, color=RED, bold=True)
-    add_arrow(slide, 1.91, 6.15, w=0.28, h=0.18, color=RED)
-    add_text(slide, "选择子 Agent", 2.22, 6.13, 1.24, 0.26, size=10.8, color=INK, bold=True)
-    add_arrow(slide, 3.48, 6.15, w=0.28, h=0.18, color=RED)
-    add_text(slide, "按需加载 Skill", 3.79, 6.13, 1.36, 0.26, size=10.8, color=BLUE, bold=True)
-    add_arrow(slide, 5.18, 6.15, w=0.28, h=0.18, color=BLUE)
-    add_text(slide, "调用 Tool", 5.50, 6.13, 1.02, 0.26, size=10.8, color=INK, bold=True)
-    add_arrow(slide, 6.54, 6.15, w=0.28, h=0.18, color=BLUE)
-    add_text(slide, "输出证据与 Diff", 6.85, 6.13, 1.58, 0.26, size=10.8, color=GREEN, bold=True)
+    add_rect(slide, 0.65, 5.68, 12.00, 0.82, fill=BLUE_LIGHT, line=BLUE)
+    execution_flow = [
+        (0.90, 2.06, "测试执行 Agent", BLUE),
+        (3.35, 3.10, "API / UI / 数据执行 Skill", PURPLE),
+        (6.92, 2.58, "Tool 执行并采证", ORANGE),
+        (9.98, 2.22, "输出报告与 Diff", GREEN),
+    ]
+    for index, (x, width, text, color) in enumerate(execution_flow):
+        add_pill(slide, text, x, 5.91, width, 0.35, fill=color, color=WHITE, size=9.7)
+        if index < len(execution_flow) - 1:
+            next_x = execution_flow[index + 1][0]
+            add_arrow(slide, x + width + 0.08, 5.99, w=max(0.18, next_x - (x + width) - 0.16), h=0.17, color=color)
     return slide
 
 
 def build_docs_combined_slide(prs: Presentation, page: int):
     slide = prs.slides.add_slide(prs.slide_layouts[7])
-    add_title(slide, "4.1", "规划：docs/ 资产如何进入测试闭环", page)
-    add_kicker(slide, "沿用当前 docs/** 的共享发布边界：原始过程留在 Run / spec，复核后的知识进入 docs，方法论沉淀为 Agent / Skill。")
+    add_title(slide, "4.1", "规划：让 docs 成为可复用测试资产", page)
+    add_kicker(slide, "先分清“本轮原始过程”“团队共享知识”“可执行方法”，再建立从执行结果到资产的晋级闭环。")
     add_pill(slide, "规划态", 11.72, 0.30, 0.80, 0.30, fill=ORANGE, color=WHITE, size=10)
 
-    add_rect(slide, 0.55, 1.38, 4.05, 4.90, fill=CODE_BG, line=CODE_BG)
-    tree = [
-        "docs/",
-        "├─ business/      # 业务规则 / 流程",
-        "├─ interfaces/    # 接口 / 字段 / 错误码",
-        "├─ data/          # 实体 / 字典 / 样例",
-        "├─ ui/            # 页面 / 路由 / 组件",
-        "├─ testing/",
-        "│  ├─ guides/     # 测试指引",
-        "│  ├─ cases/      # 复用案例",
-        "│  └─ defects/    # 缺陷模式",
-        "└─ _index.yaml    # 元数据索引",
+    tiers = [
+        (0.55, "Run / spec", "本轮原始过程", ["日志、截图、临时结论", "个人 / 会话范围，尚未复核"], ORANGE),
+        (4.55, "docs/", "团队共享知识", ["业务、接口、数据、案例、缺陷", "复核后进入 Git，带版本与来源"], GREEN),
+        (8.55, ".opencode/", "可执行方法", ["agents / skills / rules / templates", "把稳定做法变成下一次可执行步骤"], PURPLE),
     ]
-    add_paragraphs(slide, tree, 0.82, 1.69, 3.52, 3.55, size=10.9, color=WHITE, font=MONO, gap=2.4)
-    add_pill(slide, "asset_id · version · owner · source_commit · sensitivity", 0.82, 5.46, 3.52, 0.34, fill=RED, color=WHITE, size=8.8)
-    add_text(slide, "不新建平行 doc/；统一使用项目现有 docs/。", 0.82, 5.91, 3.52, 0.26, size=10.2, color="FFCFD1", align=PP_ALIGN.CENTER)
+    for x, path, title, body, color in tiers:
+        add_rect(slide, x, 1.42, 3.65, 2.14, fill=WHITE, line=color)
+        add_pill(slide, path, x + 0.18, 1.62, 1.20, 0.34, fill=color, color=WHITE, size=10.2)
+        add_text(slide, title, x + 1.52, 1.60, 1.87, 0.36, size=14.2, color=color, bold=True, align=PP_ALIGN.RIGHT)
+        add_paragraphs(slide, body, x + 0.18, 2.25, 3.29, 0.82, size=10.8, color=INK, bullet=True, gap=3)
 
-    flow = [
-        (4.92, 1.42, "1  治理入库", "文档转 Markdown\n补元数据、版本与权限", RED),
-        (8.93, 1.42, "2  上下文选择", "当前 worktree + 显式引用\n外部资产走 references", ORANGE),
-        (4.92, 3.36, "3  设计与执行消费", "设计 Agent 生成案例契约\n执行 Agent 调工具并采证", BLUE),
-        (8.93, 3.36, "4  复核与回流", "caseId + runId + commit 追溯\n案例入 docs，方法入 Skill", GREEN),
+    add_text(slide, "从一次执行到下一次复用", 0.65, 3.88, 3.45, 0.38, size=15, color=INK, bold=True)
+    loop_steps = [
+        (0.65, "执行产生证据", "Run / spec", ORANGE),
+        (3.08, "人工 / 规则复核", "确认事实与结论", RED),
+        (5.51, "晋级共享资产", "案例 / 缺陷入 docs", GREEN),
+        (7.94, "固化稳定方法", "必要时更新 Skill", PURPLE),
+        (10.37, "下一任务复用", "Agent 读取并执行", BLUE),
     ]
-    for x, y, title, body, color in flow:
-        add_card(slide, x, y, 3.50, 1.55, title, body, fill=WHITE, line=color, accent=color, body_size=11.2)
-    add_arrow(slide, 8.52, 2.02, w=0.30, h=0.20, color=ORANGE)
-    add_arrow(slide, 8.52, 3.96, w=0.30, h=0.20, color=GREEN)
+    for index, (x, title, body, color) in enumerate(loop_steps):
+        add_rect(slide, x, 4.32, 2.03, 1.18, fill=WHITE, line=color)
+        add_text(slide, title, x + 0.12, 4.49, 1.79, 0.28, size=11.2, color=color, bold=True, align=PP_ALIGN.CENTER)
+        add_text(slide, body, x + 0.12, 4.93, 1.79, 0.30, size=9.7, color=INK, align=PP_ALIGN.CENTER)
+        if index < len(loop_steps) - 1:
+            add_arrow(slide, x + 2.08, 4.79, w=0.28, h=0.19, color=color)
 
-    add_rect(slide, 4.92, 5.38, 7.51, 0.90, fill=PANEL, line=LINE)
-    add_text(slide, "当前复用", 5.17, 5.62, 0.82, 0.26, size=10.8, color=GREEN, bold=True)
-    add_text(slide, "docs Git 发布 / 文件通道 / Hub 引用 / RunEvent / Diff", 6.03, 5.60, 2.95, 0.30, size=9.9, color=INK)
-    add_text(slide, "后续补齐", 9.20, 5.62, 0.82, 0.26, size=10.8, color=ORANGE, bold=True)
-    add_text(slide, "资产索引检索 / 契约校验 / 证据晋级", 10.06, 5.60, 2.05, 0.30, size=9.9, color=INK)
+    add_rect(slide, 0.65, 5.82, 12.00, 0.78, fill=PANEL, line=LINE)
+    add_text(slide, "当前已有", 0.90, 6.05, 0.78, 0.26, size=10.8, color=GREEN, bold=True)
+    add_text(slide, "docs Git 发布 / 工作区文件通道 / Hub 引用 / RunEvent / Diff", 1.70, 6.02, 4.48, 0.30, size=9.8, color=INK)
+    add_text(slide, "后续补齐", 6.42, 6.05, 0.78, 0.26, size=10.8, color=ORANGE, bold=True)
+    add_text(slide, "资产索引与检索 / 案例契约校验 / 证据晋级流程", 7.24, 6.02, 4.62, 0.30, size=9.8, color=INK)
+    add_text(slide, "正式目录统一使用项目现有 docs/，不再新建平行 doc/。", 9.36, 6.72, 3.12, 0.22, size=8.6, color=MUTED, align=PP_ALIGN.RIGHT)
     return slide
 
 
@@ -526,31 +553,32 @@ def build_workspace_slide(prs: Presentation, page: int):
 
 def build_fusion_slide(prs: Presentation, page: int):
     slide = prs.slides.add_slide(prs.slide_layouts[7])
-    add_title(slide, "3.1", "测试设计与执行：共享一份可执行契约", page)
-    add_kicker(slide, "融合点不是“把两个流程拼在一起”，而是让设计输出天然成为执行输入，并让执行证据反向修正设计。")
+    add_title(slide, "3.1", "一项测试任务：从详细设计到执行报告", page)
+    add_kicker(slide, "设计和执行不是两套流程：前一阶段输出直接成为后一阶段输入，执行证据再反向修正设计。")
 
-    add_card(slide, 0.55, 1.52, 3.18, 4.58, "测试设计 Agent", ["理解详细设计、接口与代码变更", "识别功能点、路径、边界与风险", "调用设计类 Skill 补齐覆盖", "生成结构化 Test Case Contract"], fill=RED_PALE, line=RED, accent=RED, tag="PLAN", body_size=12)
-    add_card(slide, 9.60, 1.52, 3.18, 4.58, "测试执行 Agent", ["解析统一案例契约", "按 API / UI / 数据场景选择工具", "生成或复用脚本并执行", "收集日志、截图、响应与断言证据"], fill=BLUE_LIGHT, line=BLUE, accent=BLUE, tag="ACT", body_size=12)
-
-    add_rect(slide, 4.05, 1.42, 5.20, 3.35, fill=CODE_BG, line=CODE_BG)
-    add_text(slide, "Test Case Contract", 4.35, 1.68, 4.62, 0.34, size=17, color=WHITE, bold=True, font=MONO, align=PP_ALIGN.CENTER)
-    contract = [
-        "case_id: PAY-LOGIN-001",
-        "scenario: 密码连续错误后锁定",
-        "preconditions: [用户已注册]",
-        "steps: [登录×N, 再次登录]",
-        "test_data: {user, password}",
-        "expected: [锁定码, 审计日志]",
-        "target: [api, ui]",
-        "evidence: [response, screenshot, log]",
+    stages = [
+        (0.40, 1.42, 2.00, "任务输入", ["详细设计", "代码变更", "docs 资产", "存量案例"], PANEL, INK, "INPUT"),
+        (2.70, 1.42, 2.20, "测试设计 Agent", ["理解范围", "识别路径和风险", "调用设计类 Skill", "生成结构化案例"], RED_PALE, RED, "DESIGN"),
+        (5.20, 1.42, 2.62, "统一案例契约", ["case_id / scenario", "steps / test_data", "expected / target", "evidence 要求"], CODE_BG, WHITE, "CONTRACT"),
+        (8.12, 1.42, 2.20, "测试执行 Agent", ["按 target 选 Skill", "生成 / 复用脚本", "调用 API / UI Tool", "断言并采集证据"], BLUE_LIGHT, BLUE, "EXECUTE"),
+        (10.62, 1.42, 2.30, "任务输出", ["执行状态", "响应 / 截图", "日志 / Diff", "可追溯报告"], GREEN_LIGHT, GREEN, "OUTPUT"),
     ]
-    add_paragraphs(slide, contract, 4.50, 2.15, 4.20, 2.27, size=10.7, color=WHITE, font=MONO, gap=1.4)
-    add_arrow(slide, 3.77, 3.00, color=RED)
-    add_arrow(slide, 9.28, 3.00, color=BLUE)
+    for index, (x, y, w, title, body, fill, color, tag) in enumerate(stages):
+        add_rect(slide, x, y, w, 3.98, fill=fill, line=color if fill != CODE_BG else CODE_BG)
+        add_pill(slide, tag, x + 0.16, y + 0.18, min(0.98, w - 0.32), 0.30, fill=color if fill != CODE_BG else RED, color=WHITE, size=8.4)
+        add_text(slide, title, x + 0.15, y + 0.70, w - 0.30, 0.46, size=14.2, color=color, bold=True, align=PP_ALIGN.CENTER)
+        add_paragraphs(slide, body, x + 0.16, y + 1.42, w - 0.32, 1.82, size=10.4, color=WHITE if fill == CODE_BG else INK, bullet=True, gap=4)
+        if index < len(stages) - 1:
+            next_x = stages[index + 1][0]
+            add_arrow(slide, x + w + 0.08, 3.10, w=max(0.18, next_x - (x + w) - 0.16), h=0.23, color=color if fill != CODE_BG else RED)
 
-    add_rect(slide, 4.05, 5.08, 5.20, 1.25, fill=GREEN_LIGHT, line=GREEN)
-    add_text(slide, "Observe → Verify → Learn", 4.33, 5.27, 4.64, 0.32, size=15, color=GREEN, bold=True, align=PP_ALIGN.CENTER)
-    add_text(slide, "执行失败不是终点：区分脚本问题 / 环境问题 / 产品缺陷，并把已复核结论回写为案例、规则或资产。", 4.30, 5.68, 4.70, 0.42, size=10.8, color=INK, align=PP_ALIGN.CENTER)
+    add_rect(slide, 0.65, 5.72, 12.00, 0.86, fill=GREEN_LIGHT, line=GREEN)
+    add_text(slide, "结果回流", 0.90, 5.99, 0.92, 0.26, size=11.6, color=GREEN, bold=True)
+    add_text(slide, "失败归因：脚本问题 / 环境问题 / 产品缺陷", 1.92, 5.94, 3.18, 0.36, size=10.5, color=INK, bold=True, align=PP_ALIGN.CENTER)
+    add_arrow(slide, 5.18, 6.02, w=0.36, h=0.18, color=GREEN)
+    add_text(slide, "人工复核", 5.66, 5.94, 1.18, 0.36, size=10.5, color=INK, bold=True, align=PP_ALIGN.CENTER)
+    add_arrow(slide, 6.95, 6.02, w=0.36, h=0.18, color=GREEN)
+    add_text(slide, "更新案例 / docs / Skill，下一次任务直接复用", 7.46, 5.94, 4.22, 0.36, size=10.5, color=GREEN, bold=True, align=PP_ALIGN.CENTER)
     return slide
 
 
@@ -728,16 +756,29 @@ def update_retained_slides(cover, agenda, evolution) -> None:
     if title is not None:
         set_shape_text(title, "智能测试技术专题汇报")
 
-    agenda_updates = {
-        "整体情况概述": "底座演进",
-        "功能测试\n智能测试设计 智能测试执行": "当前架构\n平台、运行态与事件",
-        "非功能测试\n智能性能测试 智能安全测试": "设计 × 执行\nAgent / Skill 技术细节",
-        "后续规划": "资产融合",
+    # 原目录是栏目罗列，改为四个连续问题，让听众先看到整条因果主线。
+    old_agenda_labels = {
+        "整体情况概述",
+        "功能测试\n智能测试设计 智能测试执行",
+        "非功能测试\n智能性能测试 智能安全测试",
+        "后续规划",
     }
-    for original, replacement in agenda_updates.items():
-        shape = find_text_shape(agenda, original)
-        if shape is not None:
-            set_shape_text(shape, replacement)
+    for shape in list(agenda.shapes):
+        if old_agenda_labels.intersection(shape_texts(shape)):
+            remove_shape(shape)
+
+    add_pill(agenda, "一条主线", 5.38, 1.13, 1.05, 0.34, fill=RED, color=WHITE, size=10.4)
+    agenda_items = [
+        (1, "为什么换底座", "Dify 固定流程难以承接长程、变化多的测试任务"),
+        (2, "新底座解决什么", "灵犀 Code 让 Agent 在真实工作区持续规划并执行"),
+        (3, "设计与执行怎样串起来", "同一份结构化案例贯穿设计、脚本、执行与证据"),
+        (4, "能力怎样越用越强", "Agent 组织角色，Skill 固化方法，docs 沉淀知识"),
+    ]
+    for index, title, body in agenda_items:
+        y = 1.60 + (index - 1) * 1.22
+        add_pill(agenda, str(index), 5.42, y, 0.42, 0.42, fill=RED, color=WHITE, size=12)
+        add_text(agenda, title, 6.08, y - 0.03, 2.86, 0.34, size=16.5, color=INK, bold=True)
+        add_text(agenda, body, 6.08, y + 0.38, 5.70, 0.34, size=11.5, color=MUTED)
 
     evolution_updates = {
         "智能体阶段": "灵犀 Code 阶段",
