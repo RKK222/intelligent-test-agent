@@ -457,7 +457,6 @@ plan_release_components() {
     deploy/internal/opencode-node-runtime.package-lock.json \
     deploy/internal/opencode-official-launcher.mjs \
     deploy/internal/opencode-runtime.gitignore \
-    deploy/internal/codex-whitebox-mcp.mjs \
     deploy/internal/codex-whitebox-mcp-launcher.sh \
     deploy/internal/codex-whitebox-requirements.toml \
     tools/probe-codex-whitebox-e2e.mjs \

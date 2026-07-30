@@ -8,7 +8,6 @@ EXPECTED_ASSET_SHA256="${EXPECTED_CODEX_ASSET_SHA256:-bfaf13c9ba34f2ad764e4a916c
 EXPECTED_BWRAP_SHA256="${EXPECTED_CODEX_BWRAP_BINARY_SHA256:-77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c}"
 EXPECTED_PYTHON_VERSION="${EXPECTED_PYTHON_VERSION:-3.13.14}"
 PROBE="${SCRIPT_DIR}/probe-codex-mcp-tools.mjs"
-CONTRACT_TEST="${SCRIPT_DIR}/test-codex-whitebox-mcp.mjs"
 HOST_CHECK="${SCRIPT_DIR}/../deploy/internal/check-codex-whitebox-host.sh"
 
 python_version="$(docker run --rm --platform linux/amd64 --network none \
@@ -54,7 +53,8 @@ docker run --rm --platform linux/amd64 --network none --entrypoint sh "${IMAGE}"
   grep -Fx 'archive_sha256=${EXPECTED_ASSET_SHA256}' /usr/local/lib/codex/RELEASE >/dev/null
   printf '%s  %s\n' '${EXPECTED_BWRAP_SHA256}' /usr/local/lib/codex/bin/codex-resources/bwrap | sha256sum -c -
   grep -Fx 'allowed_approval_policies = [\"never\"]' /etc/codex/requirements.toml >/dev/null
-  grep -Fx 'allowed_web_search_modes = [\"disabled\"]' /etc/codex/requirements.toml >/dev/null
+  grep -Ev '^[[:space:]]*(#|$)' /etc/codex/requirements.toml | wc -l | grep -Fx '1' >/dev/null
+  test ! -e /usr/local/lib/opencode/bin/codex-whitebox-mcp.mjs
   grep -F '\"@modelcontextprotocol/sdk\": \"1.29.0\"' /usr/local/lib/opencode/package-lock.json >/dev/null
 "
 
@@ -62,6 +62,11 @@ docker run --rm --platform linux/amd64 --network none --entrypoint sh "${IMAGE}"
 docker run --rm --platform linux/amd64 --network none \
   --entrypoint node "${IMAGE}" \
   /usr/local/lib/codex/tests/probe-codex-whitebox-e2e.mjs --verify-routing
+
+# 不依赖 native namespace，真实覆盖启动器生成的企业 Responses 配置、正文、threadId 和续写。
+docker run --rm --platform linux/amd64 --network none \
+  --entrypoint node "${IMAGE}" \
+  /usr/local/lib/codex/tests/probe-codex-whitebox-e2e.mjs --protocol-only
 
 docker run --rm --platform linux/amd64 --network none \
   --entrypoint node \
@@ -77,24 +82,17 @@ docker run --rm --platform linux/amd64 --network none \
   --env TEST_AGENT_CODEX_MODEL=smoke-model \
   --env TEST_AGENT_CODEX_CONTEXT_WINDOW=131072 \
   --env ENTERPRISE_UCID=smoke-ucid \
-  "${IMAGE}" /tmp/probe-codex-mcp-tools.mjs facade
+  "${IMAGE}" /tmp/probe-codex-mcp-tools.mjs launcher
 
-docker run --rm --platform linux/amd64 --network none \
-  --entrypoint node \
-  --volume "${CONTRACT_TEST}:/tmp/test-codex-whitebox-mcp.mjs:ro" \
-  --env TEST_AGENT_OPENCODE_RUNTIME_ROOT=/usr/local/lib/opencode \
-  --env TEST_AGENT_CODEX_FACADE_PATH=/usr/local/lib/opencode/bin/codex-whitebox-mcp.mjs \
-  --env TEST_AGENT_CODEX_POLICY_PATH=/etc/codex/requirements.toml \
-  "${IMAGE}" /tmp/test-codex-whitebox-mcp.mjs
-
-# 配置缺失时门面必须在暴露工具前退出，不能退回官方原始 MCP。
+# 配置缺失时启动器必须在启动官方 MCP 前退出，不能静默使用其他模型配置。
 if docker run --rm --platform linux/amd64 --network none \
   --entrypoint /usr/local/bin/test-agent-codex-mcp "${IMAGE}" </dev/null >/dev/null 2>&1; then
-  echo "Codex whitebox facade unexpectedly started without required configuration" >&2
+  echo "Codex MCP launcher unexpectedly started without required configuration" >&2
   exit 1
 fi
 
 # 与企业启动脚本一致使用 privileged；假模型仅监听容器 loopback，整容器保持 --network none。
+# 测试显式使用官方 sandbox=read-only 和 approval-policy=never，不再断言自定义越界读取/联网策略。
 docker_server_arch="$(docker info --format '{{.Architecture}}' 2>/dev/null || true)"
 case "${docker_server_arch}" in
   amd64|x86_64)
@@ -133,7 +131,7 @@ host_check_output="$(
     CODEX_HOST_CHECK_DOCKER_LOG="${host_check_fixture_dir}/docker.log" \
     bash "${HOST_CHECK}" "${IMAGE}"
 )"
-grep -Fq "Codex whitebox host compatible: kernel=4.19.09-enterprise docker=18.09.7 image=${IMAGE}" \
+grep -Fq "Codex MCP host compatible: kernel=4.19.09-enterprise docker=18.09.7 image=${IMAGE}" \
   <<<"${host_check_output}"
 grep -Fq '/bin/true' "${host_check_fixture_dir}/docker.log"
 if grep -Fq '/usr/bin/true' "${host_check_fixture_dir}/docker.log"; then
@@ -141,4 +139,4 @@ if grep -Fq '/usr/bin/true' "${host_check_fixture_dir}/docker.log"; then
   exit 1
 fi
 
-echo "Codex whitebox worker verified: image=${IMAGE} version=${version} ${python_version}"
+echo "Codex official MCP worker verified: image=${IMAGE} version=${version} ${python_version}"

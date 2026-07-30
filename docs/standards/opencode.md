@@ -14,10 +14,12 @@
 
 ## Codex MCP 适配边界
 
-Codex 白盒分析使用 worker 内固定的官方 Codex CLI 和独立安全 MCP 门面，不修改
-`opencode-source/opencode-1.18.4/`。应用只在 `.opencode/opencode.jsonc` 注册本地 MCP，门面固定
-workspace、模型、审批与管理员级只读权限，不得直接向对话暴露官方 `codex`/`codex-reply`
-中的 cwd、模型、配置或沙箱参数。具体配置、企业兼容预检和回滚见
+Codex 白盒分析使用 worker 内固定的官方 Codex CLI，启动器直接执行官方 `codex mcp-server`，
+不修改 `opencode-source/opencode-1.18.4/`，也不增加协议门面、工具改名或参数过滤。公共
+`opencode/opencode.jsonc` 只注册本地 MCP 和企业模型路由环境变量；官方 `codex` /
+`codex-reply` 的 cwd、模型、配置、沙箱和指令参数保持原生可用。管理员级 requirements 仅固定
+`approval_policy=never`，夜间分析 Agent 默认请求官方 `sandbox=read-only`。具体配置、风险、
+企业兼容预检和回滚见
 `docs/deployment/codex-whitebox-mcp.md`。
 
 ## 生成 SDK 边界

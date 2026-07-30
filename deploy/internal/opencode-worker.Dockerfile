@@ -346,7 +346,6 @@ COPY --from=opencode-download /out/opencode ./bin/opencode-official
 COPY opencode-source/opencode-1.18.4/LICENSE ./LICENSE
 COPY deploy/internal/opencode-runtime.gitignore ./opencode-runtime.gitignore
 COPY deploy/internal/opencode-official-launcher.mjs ./bin/opencode
-COPY deploy/internal/codex-whitebox-mcp.mjs ./bin/codex-whitebox-mcp.mjs
 RUN set -eux; \
     printf '%s\n' "${OPENCODE_VERSION}" > ./VERSION; \
     printf 'version=%s\nasset=%s\narchive_size=%s\narchive_sha256=%s\nbinary_sha256=%s\nrelease_commit=%s\n' \
@@ -356,10 +355,10 @@ RUN set -eux; \
       "${OPENCODE_ASSET_SHA256}" \
       "${OPENCODE_BINARY_SHA256}" \
       "${OPENCODE_RELEASE_COMMIT}" > ./RELEASE; \
-    chmod +x ./bin/opencode ./bin/opencode-official ./bin/codex-whitebox-mcp.mjs; \
+    chmod +x ./bin/opencode ./bin/opencode-official; \
     ln -s /usr/local/lib/opencode/bin/opencode /usr/local/bin/opencode; \
     /usr/local/bin/opencode --version; \
-    node --input-type=module -e 'await Promise.all([import("@modelcontextprotocol/sdk/server/mcp.js"), import("@opencode-ai/plugin"), import("@opencode-ai/sdk"), import("effect"), import("zod")]); console.log("custom Tool and MCP runtime ok")'; \
+    node --input-type=module -e 'await Promise.all([import("@modelcontextprotocol/sdk/client/index.js"), import("@opencode-ai/plugin"), import("@opencode-ai/sdk"), import("effect"), import("zod")]); console.log("custom Tool and MCP client runtime ok")'; \
     git --version; \
     ssh -V; \
     rg --version | head -n 1; \
@@ -392,7 +391,7 @@ RUN set -eux; \
     test "$(./bin/codex-official --version)" = "codex-cli ${CODEX_VERSION}"; \
     printf '%s  %s\n' "${CODEX_BWRAP_BINARY_SHA256}" ./bin/codex-resources/bwrap | sha256sum -c -; \
     grep -Fx 'allowed_approval_policies = ["never"]' /etc/codex/requirements.toml; \
-    grep -Fx 'allowed_web_search_modes = ["disabled"]' /etc/codex/requirements.toml
+    test "$(grep -Ev '^[[:space:]]*(#|$)' /etc/codex/requirements.toml | wc -l)" -eq 1
 
 COPY --from=manager-build /out/opencode-manager /usr/local/bin/opencode-manager
 COPY deploy/internal/opencode-worker-entrypoint.sh /usr/local/bin/opencode-worker-entrypoint

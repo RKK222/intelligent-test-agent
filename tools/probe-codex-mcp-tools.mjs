@@ -9,9 +9,7 @@ const command = mode === "raw"
   ? "/usr/local/lib/codex/bin/codex-official"
   : "/usr/local/bin/test-agent-codex-mcp";
 const args = mode === "raw" ? ["mcp-server"] : [];
-const expected = mode === "raw"
-  ? ["codex", "codex-reply"]
-  : ["whitebox_analyze", "whitebox_reply"];
+const expected = ["codex", "codex-reply"];
 const transport = new StdioClientTransport({
   command,
   args,
@@ -25,13 +23,19 @@ try {
   await client.connect(transport);
   const listed = await client.listTools();
   assert.deepEqual(listed.tools.map((tool) => tool.name).sort(), expected.slice().sort());
-  if (mode === "facade") {
-    const schema = JSON.stringify(listed.tools);
-    for (const forbidden of ["cwd", "model", "config", "sandbox", "approval-policy", "developer-instructions"]) {
-      assert.equal(schema.includes(`\"${forbidden}\"`), false, forbidden);
-    }
+  const schema = JSON.stringify(listed.tools.find((tool) => tool.name === "codex")?.inputSchema);
+  for (const nativeInput of [
+    "cwd",
+    "model",
+    "config",
+    "sandbox",
+    "approval-policy",
+    "base-instructions",
+    "developer-instructions",
+  ]) {
+    assert.equal(schema.includes(`\"${nativeInput}\"`), true, nativeInput);
   }
-  process.stdout.write(`${mode}:${expected.join(",")}\n`);
+  process.stdout.write(`${mode}:official-contract:${expected.join(",")}\n`);
 } finally {
   await client.close().catch(() => {});
   await transport.close().catch(() => {});

@@ -163,16 +163,15 @@ Token 校验流程：
 
 ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 
-## Codex 白盒分析 MCP 安全边界
+## 官方 Codex MCP 安全边界
 
-1. 公共配置通过中性名称 `code_analysis` 注册本地 MCP，所有使用该公共配置的应用都会出现白盒分析 Agent；使用者必须仍是当前应用有效成员，普通成员、应用管理员和已加入应用的 `SUPER_ADMIN` 权限相同，超级管理员不得旁路成员校验。
-2. 对话只允许调用安全门面的 `whitebox_analyze({prompt})` 与 `whitebox_reply({threadId,prompt})`。不得暴露官方 MCP 的 cwd、模型、配置、沙箱、审批、基础指令或开发者指令参数；cwd 必须固定为当前已鉴权 workspace。
-3. 管理员级 `/etc/codex/requirements.toml` 必须固定 approval `never`、Web Search disabled、根文件系统 deny、Codex 最小运行文件和当前 workspace read、临时目录 deny、网络 disabled。策略缺失、被修改、bubblewrap 不可用或精细只读探针失败时必须拒绝启动，不能降级为普通只读提示词。
-4. 每个门面进程使用独立 `0700` 临时 `CODEX_HOME` 和 `0600` 配置，只接受本进程生成的 thread ID；取消、超时、stdin 断开和进程终止都必须回收 Codex 子进程并删除临时目录。
-5. 模型代理密钥、代理地址和用户 UCID 只复用 Java/manager 向该用户 OpenCode 进程注入的环境变量，不写入公共或应用 JSONC。Codex shell 环境只允许 PATH/HOME，不能继承代理 key、UCID 或其它 Java/OpenCode 进程秘密。
-   公共 MCP 默认模型配置固定为 Java 路由键 `deepseek-prod`、模型 `DeepSeek-V4-Flash-W8A8` 和上下文窗口 `65536`；不得把 OpenCode provider key `enterprise-deepseek` 填入 Java 路由字段，也不得混用其它模型的上下文长度。
-6. Responses 适配只接收纯文本与 function calling 子集，不透传图片、文件、Web 工具、reasoning 或加密思维链。日志只记录随机 traceId、耗时、结果状态和稳定错误码，不记录代码、提示词、工具参数、Token、供应商错误正文或敏感路径。
-7. 企业 Linux 节点必须在启用前执行 `deploy/internal/check-codex-whitebox-host.sh`，真实验证当前内核/Docker 上的读、拒写、越界拒读、断网和 Git 状态不变。当前现场基线为 Linux 4.19、Docker 18.09.7、x86_64、privileged worker；构建机验证不能替代逐节点能力验收。
+1. 公共配置通过中性名称 `code_analysis` 注册本地 MCP。使用者必须仍是当前应用有效成员；普通成员、应用管理员和已加入应用的 `SUPER_ADMIN` 权限相同，超级管理员不得旁路成员校验。
+2. 启动器直接执行官方 `codex mcp-server`，工具保持为 `codex` 与 `codex-reply`。官方 `cwd`、模型、配置、sandbox、审批、基础指令和开发者指令参数不做过滤；不得再把 MCP 描述为“只能读取当前 workspace”。应用和源码 workspace 的访问资格仍由平台既有入口鉴权，但 MCP 文件可见范围最终取决于容器挂载、操作系统权限与调用参数。
+3. 管理员级 `/etc/codex/requirements.toml` 只允许 `approval_policy=never`，避免夜间任务产生 permission 等待。白盒 Agent 默认显式传 `sandbox=read-only`；这是官方沙箱模式，不提供平台自定义的 workspace 外拒读、临时目录拒绝或工具级断网保证。
+4. 官方 MCP 自行管理会话、thread ID、取消、stderr 和进程生命周期。平台不再创建每进程临时 `CODEX_HOME`，而是在当前 OpenCode 用户 HOME 下维护持久化 `.testagent-codex-mcp/config.toml` 以提供企业模型默认值；文件不保存 API key。平台不维护 thread ID 白名单，也不重写提示词、工具参数、返回值或错误正文；调用与运行日志必须按现有 OpenCode、worker 和代理脱敏规则管控。
+5. 模型代理密钥、代理地址和用户 UCID 只复用 Java/manager 向该用户 OpenCode 进程注入的环境变量，不写入公共或应用 JSONC。公共 MCP 默认模型配置固定为 Java 路由键 `deepseek-prod`、模型 `DeepSeek-V4-Flash-W8A8` 和上下文窗口 `262144`；不得把 OpenCode provider key `enterprise-deepseek` 填入 Java 路由字段，也不得混用其他模型的上下文长度。
+6. Responses 适配只接收纯文本与 function calling 子集，不透传图片、文件、Web 工具、reasoning 或加密思维链。代理日志只记录 traceId、耗时、状态与稳定错误信息，不记录代码、提示词、Token 或密钥；官方 MCP 原生日志不经过平台门面二次过滤。
+7. 企业 Linux 节点必须在启用前执行 `deploy/internal/check-codex-whitebox-host.sh`，真实验证当前内核/Docker 上的官方工具契约、指定 cwd、读取、原生 read-only 拒写、Git 状态不变和续写。当前现场基线为 Linux 4.19、Docker 18.09.7、x86_64、privileged worker；构建机验证不能替代逐节点能力验收。
 8. worker 内 Python、pip、venv 和通用脚本工具属于镜像受控运行时，不得通过挂载宿主 `/usr/bin` 或继承宿主 PATH 补齐。生产镜像不保留业务 Python 包或编译工具链；获批的第三方依赖必须固定版本和逐 wheel 哈希，按目标 Python ABI 与 `linux/amd64` 单独打包、断网功能验证、只读挂载和独立升级，企业运行容器通过 `PIP_NO_INDEX=1` 禁止访问公网执行 `pip install`。
 
 详细启用、构建和回滚流程见 `docs/deployment/codex-whitebox-mcp.md`。

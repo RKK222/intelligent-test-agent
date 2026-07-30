@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 企业目标机启用 Codex 白盒分析前的失败关闭检查；兼容现场 Docker 18.09 CLI，不使用 --platform。
+# 企业目标机启用官方 Codex MCP 前的失败关闭检查；兼容现场 Docker 18.09 CLI，不使用 --platform。
 IMAGE="${1:-test-agent-opencode-worker:internal}"
 EXPECTED_BWRAP_SHA256="${EXPECTED_CODEX_BWRAP_BINARY_SHA256:-77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c}"
 
 fail() {
-  echo "Codex whitebox host check failed: $*" >&2
+  echo "Codex MCP host check failed: $*" >&2
   exit 1
 }
 
@@ -54,8 +54,8 @@ docker run --rm --privileged --network none --entrypoint sh "${IMAGE}" -lc "
   /usr/local/lib/codex/bin/codex-resources/bwrap --ro-bind / / --proc /proc --dev /dev /bin/true
 "
 
-# 版本号不能代替能力验证：这里真实执行读取、拒写、越界拒读、断网、Git 不变和续写测试。
+# 版本号不能代替能力验证：这里真实执行官方工具发现、指定 cwd、读取、原生只读拒写、Git 不变和续写测试。
 docker run --rm --privileged --network none --entrypoint node "${IMAGE}" \
   /usr/local/lib/codex/tests/probe-codex-whitebox-e2e.mjs
 
-echo "Codex whitebox host compatible: kernel=${kernel_release} docker=${docker_server_version} image=${IMAGE}"
+echo "Codex MCP host compatible: kernel=${kernel_release} docker=${docker_server_version} image=${IMAGE}"

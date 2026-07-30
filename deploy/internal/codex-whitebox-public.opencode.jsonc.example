@@ -9,7 +9,7 @@
       "environment": {
         "TEST_AGENT_CODEX_PROVIDER_ID": "deepseek-prod",
         "TEST_AGENT_CODEX_MODEL": "DeepSeek-V4-Flash-W8A8",
-        "TEST_AGENT_CODEX_CONTEXT_WINDOW": "65536"
+        "TEST_AGENT_CODEX_CONTEXT_WINDOW": "262144"
       },
       "enabled": true,
       "timeout": 600000

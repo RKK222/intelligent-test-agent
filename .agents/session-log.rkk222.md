@@ -3855,3 +3855,26 @@
 
 - 非应用成员不能再读取或选择应用 Agent；应用成员拉取 `primary -> subagent` 后，后台重载完成即从底部主 Agent 选择器移除，并保留在 `@` 子 Agent 候选。
 - 未新增或变更 HTTP wire、RunEvent、数据库/Flyway、性能逻辑、环境配置、generated SDK 或 OpenCode 源码；现有错误格式与 static-token 本地兼容链路保持不变。
+
+## 2026-07-30 - 恢复官方 Codex MCP 原生接口
+
+### Why
+
+- 用户确认此前的固定 workspace、安全工具门面和参数裁剪并非官方 Codex MCP 要求，要求全部恢复为官方原生行为；同时保留企业 DeepSeek 默认路由和夜间任务永不询问权限的明确需求。
+
+### What
+
+- 删除自定义 MCP 门面及其契约测试，启动器改为生成官方 `config.toml` 后直接执行 Codex `0.145.0` 的 `mcp-server --strict-config`；恢复官方 `codex`、`codex-reply` 工具名及 cwd、模型、配置、sandbox、审批和指令参数。
+- 管理员级 requirements 仅保留 `allowed_approval_policies = ["never"]`；公共 MCP 默认使用 `deepseek-prod`、`DeepSeek-V4-Flash-W8A8` 和 `262144` 上下文，白盒 Agent 显式请求官方 `approval-policy=never`、默认 `sandbox=read-only`。
+- 同步 worker 离线构建、镜像探针、Linux 宿主检查、公共 Agent/JSONC 整体包和部署/安全/OpenCode 文档，明确官方 MCP 不再提供固定 cwd、workspace 外拒读、工具级断网、threadId 白名单或日志重写保证。
+
+### How
+
+- 对照 Codex `0.145.0` 官方源码和实际 `tools/list` 契约；用本地伪 Responses 服务验证企业请求地址、Bearer、供应商/ucid header、模型、流式正文、threadId 与续写。
+- 最终 launcher 覆盖到已验证 worker 镜像后，`tools/verify-codex-whitebox-worker-image.sh test-agent-opencode-worker:codex-native-smoke` 通过；Apple Silicon 按设计跳过 amd64 nested namespace，只在企业 Linux/amd64 宿主执行原生 read-only E2E。
+- shell/Node/JSONC/diff/ZIP 完整性和 SHA-256 检查通过。完整干净 worker 构建已尝试，但 Debian 镜像源 TLS、连接和软件包下载超时导致未完成，未发现 Codex 构建错误。
+
+### Result
+
+- MCP 协议恢复为官方原生服务，企业层只保留离线固定版本、DeepSeek Responses 配置和 approval `never`；公共 Agent 名称仍不含 Codex。
+- 未修改 OpenCode 源码快照、HTTP API、RunEvent、数据库/Flyway、generated SDK 或环境配置。发布前仍需在目标 Linux 4.19 / Docker 18.09.7 / x86_64 节点完成宿主探针，并在网络稳定后重跑完整离线 worker 构建。

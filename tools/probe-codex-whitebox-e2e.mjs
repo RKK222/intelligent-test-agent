@@ -16,29 +16,22 @@ if (process.argv.includes("--verify-routing")) {
   assert.equal(decision.kind, "reply");
   assert.equal(decision.toolOutputs.length, 1);
   assert.match(decision.serialized, /SCENARIO_READ/);
-  process.stdout.write("whitebox-e2e-routing:reply-priority-ok\n");
+  process.stdout.write("codex-official-e2e-routing:reply-priority-ok\n");
   process.exit(0);
 }
 
-const workspace = "/workspace/test-agent-whitebox-e2e-workspace";
-const outside = "/tmp/test-agent-whitebox-outside-secret.txt";
+const protocolOnly = process.argv.includes("--protocol-only");
+
+const workspace = "/workspace/test-agent-codex-e2e-workspace";
 await mkdir(workspace, { recursive: true });
 await writeFile(`${workspace}/source.txt`, "WHITEBOX_MARKER=original\n", "utf8");
 await chmod(`${workspace}/source.txt`, 0o644);
-await writeFile(outside, "OUTSIDE_SECRET_MUST_NOT_LEAK\n", "utf8");
 execFileSync("git", ["init", "-q"], { cwd: workspace });
 execFileSync("git", ["add", "source.txt"], { cwd: workspace });
 const gitBefore = execFileSync("git", ["status", "--short"], { cwd: workspace, encoding: "utf8" });
 
-let networkProbeReached = false;
 const commandOutputs = [];
 const server = http.createServer(async (request, response) => {
-  if (request.url === "/network-probe") {
-    networkProbeReached = true;
-    response.writeHead(200, { "content-type": "text/plain" });
-    response.end("network reached");
-    return;
-  }
   if (request.method !== "POST" || request.url !== "/v1/responses") {
     response.writeHead(404).end();
     return;
@@ -55,8 +48,10 @@ const server = http.createServer(async (request, response) => {
   const decision = inspectFakeModelInput(body.input);
   // 续写请求包含前一轮 function_call_output；必须优先识别本轮提示，不能误回第一轮结果。
   if (decision.kind === "reply") {
-    assert.match(decision.serialized, /SCENARIO_READ/);
-    assert.ok(decision.toolOutputs.length > 0, "reply request did not preserve prior tool output");
+    assert.match(decision.serialized, /SCENARIO_(?:READ|TEXT)/);
+    if (decision.serialized.includes("SCENARIO_READ")) {
+      assert.ok(decision.toolOutputs.length > 0, "reply request did not preserve prior tool output");
+    }
     sendTextResponse(response, "follow-up observed");
     return;
   }
@@ -98,51 +93,69 @@ const transport = new StdioClientTransport({
   },
   stderr: "pipe",
 });
-transport.stderr?.on("data", () => {});
-const client = new Client({ name: "whitebox-e2e", version: "1.0.0" });
+transport.stderr?.on("data", (chunk) => {
+  if (process.env.TEST_AGENT_CODEX_E2E_DEBUG === "true") process.stderr.write(chunk);
+});
+const client = new Client({ name: "codex-official-e2e", version: "1.0.0" });
 
 try {
   await client.connect(transport);
-  const readResult = await analyze("SCENARIO_READ");
-  assert.match(readResult.content[0].text, /command observed/);
-  assert.equal(typeof readResult.structuredContent.threadId, "string");
-  assert.match(commandOutputs.at(-1), /WHITEBOX_MARKER=original/);
-  assert.match(commandOutputs.at(-1), /test-agent-whitebox-e2e-workspace/);
+  if (protocolOnly) {
+    // Apple Silicon 的 amd64 仿真无法运行嵌套 namespace；仍需真实覆盖企业 Responses 与续写链路。
+    const first = await analyze("SCENARIO_TEXT", "danger-full-access");
+    assert.match(first.content[0].text, /follow-up observed/);
+    assert.equal(typeof first.structuredContent.threadId, "string");
+    const reply = await replyTo(first.structuredContent.threadId);
+    assert.match(reply.content[0].text, /follow-up observed/);
+    process.stdout.write("codex-official-e2e:enterprise-responses-ok,thread-id-ok,reply-ok\n");
+    process.exitCode = 0;
+  } else {
+    const readResult = await analyze("SCENARIO_READ");
+    assert.match(readResult.content[0].text, /command observed/);
+    assert.equal(typeof readResult.structuredContent.threadId, "string");
+    assert.match(commandOutputs.at(-1), /WHITEBOX_MARKER=original/);
+    assert.match(commandOutputs.at(-1), /test-agent-codex-e2e-workspace/);
 
-  await analyze("SCENARIO_WRITE");
-  assert.equal(await readFile(`${workspace}/source.txt`, "utf8"), "WHITEBOX_MARKER=original\n");
-  assert.doesNotMatch(commandOutputs.at(-1), /hacked/);
+    await analyze("SCENARIO_WRITE");
+    assert.equal(await readFile(`${workspace}/source.txt`, "utf8"), "WHITEBOX_MARKER=original\n");
+    assert.doesNotMatch(commandOutputs.at(-1), /hacked/);
 
-  const outsideResult = await analyze("SCENARIO_OUTSIDE");
-  assert.equal(JSON.stringify(outsideResult).includes("OUTSIDE_SECRET_MUST_NOT_LEAK"), false);
-  assert.equal(commandOutputs.at(-1).includes("OUTSIDE_SECRET_MUST_NOT_LEAK"), false);
+    const reply = await replyTo(readResult.structuredContent.threadId);
+    assert.match(reply.content[0].text, /follow-up observed/);
 
-  await analyze("SCENARIO_NETWORK");
-  assert.equal(networkProbeReached, false);
-  assert.equal(commandOutputs.at(-1).includes("network reached"), false);
-
-  const reply = await client.callTool({
-    name: "whitebox_reply",
-    arguments: { threadId: readResult.structuredContent.threadId, prompt: "SCENARIO_REPLY 继续总结" },
-  }, undefined, { timeout: 60_000, maxTotalTimeout: 60_000 });
-  assert.equal(reply.isError, undefined);
-  assert.match(reply.content[0].text, /follow-up observed/);
-
-  const gitAfter = execFileSync("git", ["status", "--short"], { cwd: workspace, encoding: "utf8" });
-  assert.equal(gitAfter, gitBefore);
-  process.stdout.write("whitebox-e2e:read-ok,write-denied,outside-denied,network-denied,git-clean,reply-ok\n");
+    const gitAfter = execFileSync("git", ["status", "--short"], { cwd: workspace, encoding: "utf8" });
+    assert.equal(gitAfter, gitBefore);
+    process.stdout.write("codex-official-e2e:cwd-ok,read-ok,native-read-only-write-denied,git-clean,reply-ok\n");
+  }
 } finally {
   await client.close().catch(() => {});
   await transport.close().catch(() => {});
   await new Promise((resolve) => server.close(resolve));
 }
 
-async function analyze(prompt) {
+async function analyze(prompt, sandbox = "read-only") {
   const result = await client.callTool(
-    { name: "whitebox_analyze", arguments: { prompt } },
+    {
+      name: "codex",
+      arguments: {
+        prompt,
+        cwd: workspace,
+        sandbox,
+        "approval-policy": "never",
+      },
+    },
     undefined,
     { timeout: 60_000, maxTotalTimeout: 60_000 },
   );
+  assert.equal(result.isError, undefined, JSON.stringify(result));
+  return result;
+}
+
+async function replyTo(threadId) {
+  const result = await client.callTool({
+    name: "codex-reply",
+    arguments: { threadId, prompt: "SCENARIO_REPLY 继续总结" },
+  }, undefined, { timeout: 60_000, maxTotalTimeout: 60_000 });
   assert.equal(result.isError, undefined, JSON.stringify(result));
   return result;
 }
@@ -162,11 +175,7 @@ function inspectFakeModelInput(input) {
     ? "pwd && rg -n WHITEBOX_MARKER source.txt"
     : serialized.includes("SCENARIO_WRITE")
       ? "printf 'hacked\\n' > source.txt"
-      : serialized.includes("SCENARIO_OUTSIDE")
-        ? `cat ${outside}`
-        : serialized.includes("SCENARIO_NETWORK")
-          ? "node -e \"fetch('http://127.0.0.1:18080/network-probe').then(r=>r.text()).then(console.log)\""
-          : null;
+      : null;
   return command
     ? { kind: "command", command, serialized, toolOutputs }
     : { kind: "text", serialized, toolOutputs };
@@ -193,6 +202,11 @@ function sendTextResponse(response, text) {
   const id = `resp_${Date.now()}`;
   const itemId = `msg_${Date.now()}`;
   beginResponse(response, id);
+  writeEvent(response, "response.output_item.added", {
+    type: "response.output_item.added",
+    output_index: 0,
+    item: { type: "message", id: itemId, role: "assistant", content: [{ type: "output_text", text: "" }] },
+  });
   writeEvent(response, "response.output_text.delta", {
     type: "response.output_text.delta",
     item_id: itemId,
@@ -214,6 +228,11 @@ function sendFunctionResponse(response, name, args) {
   const callId = `call_${Date.now()}`;
   const argumentsText = JSON.stringify(args);
   beginResponse(response, id);
+  writeEvent(response, "response.output_item.added", {
+    type: "response.output_item.added",
+    output_index: 0,
+    item: { type: "function_call", id: itemId, call_id: callId, name, arguments: "" },
+  });
   writeEvent(response, "response.function_call_arguments.delta", {
     type: "response.function_call_arguments.delta",
     item_id: itemId,

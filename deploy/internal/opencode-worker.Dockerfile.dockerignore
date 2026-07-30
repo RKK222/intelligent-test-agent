@@ -5,7 +5,6 @@
 !deploy/internal/
 !deploy/internal/opencode-worker-entrypoint.sh
 !deploy/internal/opencode-official-launcher.mjs
-!deploy/internal/codex-whitebox-mcp.mjs
 !deploy/internal/codex-whitebox-mcp-launcher.sh
 !deploy/internal/codex-whitebox-requirements.toml
 !deploy/internal/opencode-runtime.gitignore

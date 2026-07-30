@@ -1,172 +1,148 @@
-# Codex 白盒分析 MCP
+# 官方 Codex MCP 企业接入
 
-## 用途与边界
+## 用途与当前边界
 
-平台在 OpenCode worker 内固定携带官方开源 Codex CLI `0.145.0`，通过本地 stdio MCP
-为应用成员提供严格只读的白盒代码分析。Codex 不直接暴露给对话模型；平台门面只提供：
+OpenCode worker 固定携带官方开源 Codex CLI `0.145.0`，公共配置通过本地 stdio 直接启动
+官方 `codex mcp-server`，用于应用源码白盒分析。平台不再在 MCP 协议前增加工具门面。
 
-- `whitebox_analyze({prompt})`：开始一次分析，返回正文和本 MCP 进程生成的 `threadId`。
-- `whitebox_reply({threadId,prompt})`：在同一 MCP 生命周期内继续分析。
+官方服务原生公开两个工具：
 
-工作目录永远是当前 OpenCode workspace。调用方不能指定 cwd、模型、配置、沙箱、审批策略、
-基础指令或开发者指令。MCP 生命周期结束后旧 `threadId` 失效。
+- `codex`：开始一次分析，输入除 `prompt` 外还原生支持 `cwd`、`model`、`config`、
+  `sandbox`、`approval-policy`、`base-instructions`、`developer-instructions` 和
+  `compact-prompt`，输出正文和 `threadId`。
+- `codex-reply`：使用 `threadId` 和 `prompt` 继续同一会话。
 
-本功能不实现应用代码库引用、挂载、同步、目录组合、ManagedWorkspace/worktree 创建或 Git
-刷新，也不以这些未来能力作为启用前置条件。Codex 只能读取当前 workspace 已存在的文件；
-业务源码尚未进入 workspace 时，分析结果必须明确报告源码缺失。
+下列行为不是官方 Codex MCP 的原生要求，当前接入不再实现：工具改名或参数过滤、固定 cwd、
+仅允许当前 workspace、进程内 thread ID 白名单、每进程临时 `CODEX_HOME`、stderr/结果重写、
+根文件系统默认拒绝、workspace 外拒读、临时目录拒绝和命令断网。官方 MCP 进程的生命周期、
+会话管理、取消与错误输出均使用 Codex 自身实现。
 
-## 用户怎么使用
+平台仍保留两项企业部署约束：启动器把现有内部模型代理写入官方 `config.toml`；管理员级
+`/etc/codex/requirements.toml` 只允许 `approval_policy=never`，确保夜间任务不会停在授权询问。
+代码分析 Agent 默认调用官方 `sandbox=read-only`，但这是官方参数，不是平台自定义文件边界。
 
-管理员发布公共配置后，用户在自己有权访问的应用对话中选择 `whitebox-code-analyst` Agent，直接描述
-要分析的问题即可，例如：
+## 应用源码与使用方式
+
+应用代码库引用、源码物化和应用源码 Runtime Workspace 已由平台现有功能负责。Codex 不自行
+clone、同步或组合仓库；运行夜间分析前，应让任务绑定到已经打开且可访问目标源码的 workspace，
+并把实际源码目录作为 `cwd`。如果源码尚未物化、挂载过期或路径不可读，Agent 必须报告证据
+缺口，不能假装完成分析。
+
+管理员发布公共配置后，用户在有权访问的应用对话或夜间任务中选择
+`whitebox-code-analyst` Agent，直接描述分析目标即可。例如：
 
 ```text
 分析登录接口从 Controller 到数据库的调用链，列出鉴权绕过风险和证据代码位置。
 ```
 
-Agent 会自动调用本地 MCP，用户不需要手写工具名、cwd 或模型参数。需要沿着同一证据继续
-追问时仍在当前对话里发送问题；Agent 会使用本次 MCP 返回的 `threadId` 调用
-`whitebox_reply`。worker、OpenCode 或 MCP 重启后会重新开始分析。
+Agent 首次调用 `code_analysis_codex`，显式传入 `approval-policy: never`，默认使用
+`sandbox: read-only` 和当前任务实际源码目录；继续追问时调用
+`code_analysis_codex-reply`。审批或命令失败只记录证据缺口，不发起 ask permission。
 
-最终输出固定包含结论边界、证据文件和关键位置、调用链、风险与待确认项。首期不会生成、
-修改或提交测试代码。
+最终输出包含结论边界、证据文件和关键位置、调用链、风险与待确认项。当前 Agent 不允许调用
+Codex MCP 以外的工具。
 
-## 权限
+## 权限说明
 
-使用条件同时包括：
+公共配置让加载它的 OpenCode 进程发现该 MCP 和 Agent。用户能否打开应用、应用源码或运行
+workspace，仍由平台现有应用成员、workspace/session 和源码 Runtime Workspace 鉴权决定：
 
-1. 公共 `opencode/opencode.jsonc` 已启用 `code_analysis` MCP，并发布
-   `opencode/agents/whitebox-code-analyst.md`；
-2. 当前用户仍是该应用的有效成员；
-3. 当前托管 workspace 属于该应用且通过既有会话/工作区鉴权。
+- 普通应用成员、应用管理员、已加入该应用的超级管理员均可使用；
+- 超级管理员不绕过应用成员校验；
+- 未加入应用的超级管理员不能通过平台取得该应用 workspace；
+- 本次不新增角色、前端接口、数据库、Flyway 或 RunEvent 类型。
 
-普通应用成员、应用管理员、已加入应用的超级管理员都可使用。超级管理员不绕过应用成员
-校验；未加入应用时不能取得该应用 workspace 上下文，也不能借本 MCP 分析代码。当前公共
-配置会让使用该配置的所有应用都出现白盒分析 Agent，不再提供逐应用启用开关。本期不新增
-`TESTER` 角色，也不修改成员、Workspace、前端、数据库或 RunEvent 鉴权模型。
+直接使用官方 MCP 后，MCP 本身不理解平台成员关系，也不会把 `cwd` 限制在当前 workspace。
+它能读取的范围取决于 worker 容器内操作系统权限与调用时的官方 sandbox 配置。因此不能把
+“应用成员鉴权”描述成 Codex 文件系统隔离；共享容器中若存在不应互读的路径，应通过容器挂载、
+进程隔离或调度边界解决。
 
-## 公共配置启用
+## 公共 JSONC 与 Agent
 
-先按“Java 后端 → programs/worker → 公共配置”的顺序升级。把
-`deploy/internal/codex-whitebox-public.opencode.jsonc.example` 中的 `mcp.code_analysis`
-合并进公共配置仓库 `opencode/opencode.jsonc`。默认使用企业内部 DeepSeek，三个模型参数必须保持
-同组配置：
+按“Java 后端 → programs/worker → 公共配置”的顺序升级。把
+`deploy/internal/codex-whitebox-public.opencode.jsonc.example` 的 `mcp.code_analysis` 合并到
+公共配置仓库 `opencode/opencode.jsonc`。默认企业模型为：
 
-- `TEST_AGENT_CODEX_PROVIDER_ID=deepseek-prod`：Java 内部模型代理和数据库使用的供应商路由 ID，
-  不是 OpenCode 模型目录中的 `enterprise-deepseek` provider key；
-- `TEST_AGENT_CODEX_MODEL=DeepSeek-V4-Flash-W8A8`：企业 DeepSeek 的准确模型 ID；
-- `TEST_AGENT_CODEX_CONTEXT_WINDOW=65536`：该模型当前登记的真实上下文窗口；
-- `timeout`：默认 `600000` 毫秒。
+- `TEST_AGENT_CODEX_PROVIDER_ID=deepseek-prod`；
+- `TEST_AGENT_CODEX_MODEL=DeepSeek-V4-Flash-W8A8`；
+- `TEST_AGENT_CODEX_CONTEXT_WINDOW=262144`；
+- MCP `timeout=600000` 毫秒。
 
-只有企业供应商配置发生正式变更时，才同时替换以上三个值；不得只改模型名、只改路由键或沿用
-Qwen 的 `131072` 上下文窗口。`deepseek-prod` 必须已在共享数据库启用、配置上游 Token，并完成
-Java 内存刷新。
+`deepseek-prod` 是 Java 内部模型代理的供应商路由 ID，不是 OpenCode provider key
+`enterprise-deepseek`。代理地址、密钥和用户 `ucid` 不写入 JSONC；继续复用 Java/manager
+注入的 `TEST_AGENT_INTERNAL_PROXY_BASE_URL`、`TEST_AGENT_INTERNAL_PROXY_API_KEY` 和
+`ENTERPRISE_UCID`。任一项缺失或 URL/上下文长度非法时，启动器在启动官方 MCP 前失败。
+由于官方 MCP 的每个 `codex` 调用都会重新加载配置，启动器使用当前 OpenCode 用户 HOME 下
+持久化的 `.testagent-codex-mcp/config.toml`，而不是仅传 `mcp-server -c`；该文件不保存 API key，
+只保存模型 ID、代理 URL 和环境变量名，并由 `--strict-config` 校验。它不隔离或清理官方会话状态。
 
-代理地址、代理密钥和当前用户 `ucid` 不写入应用配置。Java/manager 已为每个用户 OpenCode
-进程注入 `TEST_AGENT_INTERNAL_PROXY_BASE_URL`、`TEST_AGENT_INTERNAL_PROXY_API_KEY` 和
-`ENTERPRISE_UCID`，门面缺少任一项时失败关闭。
+把 `deploy/internal/whitebox-code-analyst.md` 发布为公共
+`opencode/agents/whitebox-code-analyst.md`。Agent 名称不包含 Codex；官方 MCP 工具经 OpenCode
+组合后的名称是 `code_analysis_codex` 和 `code_analysis_codex-reply`。
 
-再把 `deploy/internal/whitebox-code-analyst.md` 发布为公共
-`opencode/agents/whitebox-code-analyst.md`。该 Agent
-默认拒绝全部工具，只放行 `code_analysis_whitebox_analyze` 和
-`code_analysis_whitebox_reply`。公共配置变更沿用现有公共 Agent Git、发布、跨服务器同步和
-OpenCode dispose 流程，不新增业务接口。独立完整替换包固定为
-`deploy/internal/dist/test-agent-public-agents-skills.zip` 及同名 `.sha256`，包内同时携带当前
-公共 `opencode.jsonc`、全部公共 Agent、Skill、Tool 和说明；导入时不得只复制白盒文件而
-丢失既有公共配置。
-
-## 只读与日志安全
-
-worker 将管理员级策略安装为只读 `/etc/codex/requirements.toml`：审批固定 `never`，根文件
-系统默认拒绝，仅允许 Codex 最小运行文件和当前 workspace 读取，临时目录、文件写入、命令
-联网和 Web Search 均拒绝。Linux 精细文件系统策略由官方固定摘要的静态 bubblewrap 执行。
-
-每个门面进程创建隔离且权限为 `0700` 的临时 `CODEX_HOME`，配置文件权限为 `0600`；
-取消、超时、stdin 断开或进程终止时关闭 Codex 子进程并删除临时目录。续写只接受本进程
-生成的 thread ID。
-
-审计日志只输出随机 `traceId`、毫秒耗时、`SUCCESS/FAILED` 和稳定错误码，不输出提示词、
-代码、工具参数、Token、供应商错误正文或敏感路径。官方 Codex stderr 被消费但不转发。
+公共配置变更沿用现有公共 Agent Git、发布、跨服务器同步和 OpenCode dispose 流程。完整替换包
+固定为 `deploy/internal/dist/test-agent-public-agents-skills.zip` 及同名 `.sha256`；导入时应整体
+替换，避免丢失已有公共 Agent、Skill、Tool 或 JSONC 配置。
 
 ## 内部模型 Responses 适配
 
-Java 新增内部端点：
+官方 Codex 通过内部端点调用企业模型：
 
 ```text
 POST /api/internal/platform/opencode-runtime/internal-model-proxy/v1/responses
 ```
 
-它继续使用现有 Bearer 代理密钥、`X-Enterprise-Model-Provider` 和 `ucid`，把 Codex
-`0.145.0` 所需的流式 Responses 子集转换到既有供应商 `/chat/completions`：支持纯文本
-message、function tools、`function_call`、`function_call_output`、文本增量、工具参数、usage、
-完成和安全错误事件；reasoning 与加密思维链不透传。图片、文件、内置 Web 工具、非纯文本
-输出和非流式请求统一返回校验错误。原 `/chat/completions` 行为不变。
+端点继续使用 Bearer 代理密钥、`X-Enterprise-Model-Provider` 和 `ucid`，把 Codex `0.145.0`
+需要的流式 Responses 子集转换到供应商 `/chat/completions`。支持文本 message、function tools、
+`function_call`、`function_call_output`、文本增量、工具参数、usage、完成和错误事件；不透传
+reasoning 或加密思维链。图片、文件、内置 Web 工具、非纯文本输出和非流式请求返回校验错误。
+原 `/chat/completions` 行为不变。
 
 ## 企业 Linux / Docker 兼容基线
 
-当前企业现场基线是 Linux `4.19`、Docker Server `18.09.7`、`x86_64`，worker 由
-`opencode-worker-docker.sh` 以 `--privileged` 启动。镜像继续固定 Debian 11 bullseye / glibc
-`2.31`，Codex 与 bubblewrap 都使用官方 `x86_64-unknown-linux-musl` 资产并校验归档及可执行
-文件 SHA-256。目标机运行期不使用 Docker 19.03 才普及的 `docker run --platform` 参数。
+当前现场基线为 Linux `4.19`、Docker Server `18.09.7`、`x86_64`。worker 使用 Debian 11
+bullseye / glibc `2.31`，Codex 与 bubblewrap 固定为 `x86_64-unknown-linux-musl` 资产并校验
+SHA-256。目标机脚本兼容 Docker 18.09，不使用 `docker run --platform`。
 
-Codex 精细只读策略依赖 bubblewrap 创建 user、mount、PID 和 network namespace。内核版本
-只能作为基线，不能证明厂商内核、安全模块和 Docker 配置允许这些能力。因此每台 worker
-节点在替换线上容器前，先加载新镜像并执行：
+每台 worker 节点启用前执行：
 
 ```bash
 cd /data/0709/test-agent-internal-release/deploy/internal
 ./check-codex-whitebox-host.sh test-agent-opencode-worker:internal
 ```
 
-脚本兼容 Docker 18.09 CLI；`18.09.7` 等带前导零的版本字段按十进制比较，基础 namespace
-探针使用 worker 镜像内的 `/bin/true`。脚本失败关闭检查：Linux/x86_64、Docker 不低于 18.09、镜像
-linux/amd64、glibc 2.31、Codex 0.145.0、bubblewrap 摘要，以及真实的 `rg`/源码读取成功、
-文件拒写、workspace 外拒读、命令断网、Git 状态不变和会话续写。该探针用与正式 worker
-相同的 `--privileged` 和 `--network none`，模型服务是容器 loopback 内的本地伪服务，
-完全不访问外网。
+脚本检查 Linux/x86_64、Docker 不低于 18.09、镜像 linux/amd64、glibc 2.31、Codex 0.145.0、
+bubblewrap 摘要，并用本地伪模型验证官方工具发现、指定 cwd、源码读取、官方 read-only sandbox
+拒写、Git 状态不变和会话续写。它不再把 workspace 外拒读或命令断网作为验收项，因为那两项
+不是官方 MCP 的固定保证。
 
-任何一项失败都不得发布公共 MCP 配置。先保留完整输出并检查：worker 是否确由正式脚本重建为
-privileged、宿主安全策略是否禁止 namespace、镜像/programs 是否来自同一批发布包。不得
-通过改成危险的宽权限 Codex 配置来绕过探针。Mac Docker Desktop 的 linux/amd64 仿真只能
-完成二进制、摘要、MCP 契约和失败关闭检查；Apple Silicon 仿真不能创建 Codex 所需的嵌套
-namespace，构建脚本会明确显示 native sandbox E2E 已跳过。这不能替代每台 Linux 4.19 /
-Docker 18.09.7 目标节点验收。
+worker 仍以 `--privileged` 和 Docker `--network none` 运行；后者是现有 worker 容器部署边界，
+不等同于官方 MCP 的工具级网络策略。Apple Silicon 上的 amd64 仿真不能创建所需嵌套 namespace，
+构建检查会跳过 native sandbox E2E，必须在每台企业 Linux 节点补跑宿主检查。
 
 ## 构建与验收
 
-外网 Mac 使用既有命令构建完整离线包：
+外网 Mac 构建完整离线包：
 
 ```bash
 cd /Users/kaka/Desktop/intelligent-test-agent
 deploy/internal/package-release.sh --output-dir deploy/internal/dist
 ```
 
-`package-release.sh` 会在 worker 镜像构建后自动运行构建机检查；检查不通过则不导出发布包。
-构建机检查还会构造“历史 `function_call_output` + 本轮续写提示”的输入，确认续写提示优先被
-识别并保留第一轮上下文；该项不依赖 native namespace，Apple Silicon 构建机也必须通过。
-
-OpenCode Manager、OpenCode runtime、Codex MCP、Node/MCP SDK、bubblewrap、worker 镜像和
-`test-agent-programs.tar.gz` 按一个 `worker runtime` 指纹单元发布。任一运行输入变化时全部重建并
-进入 ZIP；全部未变化时增量 ZIP 标记 `TEST_AGENT_RELEASE_WORKER_RUNTIME=reuse`，不再重复携带
-worker tar 或 programs。目标部署在替换 Java 前必须确认
-`/data/testagent/config/release-component-state.env` 中的实际安装指纹与清单一致，并确认现有
-Manager、OpenCode、Codex 文件及 worker 容器健康，否则拒绝使用增量包。新装机、灾备或迁移到
-本机制后的首包使用 `--include-all-components`。
-
-`test-agent-programs.tar.gz` 与 worker 镜像同时包含 Codex、固定 bubblewrap、Apache-2.0
-LICENSE/NOTICE、bubblewrap COPYING、门面和版本/摘要元数据；企业服务器不下载 npm、Codex
-或沙箱依赖。构建机验证命令：
+`test-agent-programs.tar.gz` 与 worker 镜像同时携带 Codex、固定 bubblewrap、Apache-2.0
+LICENSE/NOTICE、bubblewrap COPYING、启动器、requirements 和版本/摘要元数据；企业服务器不
+下载 npm、Codex 或沙箱依赖。专项验证：
 
 ```bash
 tools/verify-codex-whitebox-worker-image.sh test-agent-opencode-worker:internal
 ```
 
-真实服务验收只分析当前 workspace 已存在的代码，不临时构造或依赖尚未实现的应用代码库
-引用。运行分析前后执行 `git status --short`，输出必须完全一致。
+验证必须看到官方 `codex` / `codex-reply` 完整输入契约，并通过本地伪 Responses 服务完成读取、
+官方只读拒写、Git 不变与续写。发布后再用已物化的真实应用源码执行一次夜间任务验收；任务
+全程不应产生 question/permission 等待。
 
 ## 回滚
 
-先从公共 `opencode/opencode.jsonc` 移除/禁用 `code_analysis`，并撤下
+先从公共 `opencode/opencode.jsonc` 移除或禁用 `code_analysis`，并撤下
 `opencode/agents/whitebox-code-analyst.md`；等待公共配置发布、跨服务器同步和用户 OpenCode
-dispose 完成后，再按同一批次
-回退 Java、programs 与 worker 镜像。不涉及数据库、Flyway 或 RunEvent 回滚。
+dispose 完成后，再按同一批次回退 Java、programs 与 worker 镜像。不涉及数据库或 Flyway 回滚。
