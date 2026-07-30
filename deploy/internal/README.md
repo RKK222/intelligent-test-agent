@@ -72,7 +72,8 @@ LobeHub 独立 fork 默认位于平台仓库同级 `../lobehub-platform`，精�
 fork 已将 Next.js 静态生成限制为两个 worker，以支持 10 CPU / 8 GiB 的已验证构建基线。
 
 服务端阶段目录生成后应在构建机执行一次真实镜像冒烟；它会实际运行 migration、Redis ACL、私有 RustFS 和
-LobeHub app，且拒绝覆盖已有同名容器。Apple Silicon 的 Docker 仿真结果不替代现场 Linux 验收：
+LobeHub app，再写入 PostgreSQL/RustFS 证明数据并完成停机冷备份、恢复和二次验收；它拒绝覆盖已有同名
+容器。Apple Silicon 的 Docker 仿真结果不替代现场 Linux 验收：
 
 ```bash
 TEST_AGENT_LOBEHUB_ARTIFACT_DIR=/absolute/path/to/lobehub-release-artifacts \
@@ -106,7 +107,19 @@ QStash；单一 app 实例由镜像 launcher 每分钟以内嵌方式触发创�
 RustFS bucket 初始化和 app 启动；外部制品契约版本必须与本仓库 `deploy/internal/lobehub/version.env` 一致。
 app 默认只绑定 `127.0.0.1:3210`；跨机 Nginx 必须改为具体内网 IPv4，并把主机防火墙来源限制为代理节点。
 运行脚本拒绝重复键、符号链接或非 0600 的 `lobehub.env`，并按 ParadeDB、RustFS、app 生成临时最小 env，
-避免把 HMAC、Session 和模型委托密钥横向注入无关容器。
+避免把 HMAC、Session 和模型委托密钥横向注入无关容器；它还会交叉核对 DB、Redis、S3、app 和四个
+平台 URL 的实际目标，防止格式合法但服务错接。
+
+启动、配置变更或恢复后必须执行完整运行态验收；升级前的冷备份输出必须位于 `/data/testagent` 外：
+
+```bash
+/data/testagent/deploy/internal/lobehub-docker.sh verify-deployment
+systemctl stop test-agent-lobehub
+/data/testagent/deploy/internal/lobehub-backup.sh create --output-dir /data/backup/lobehub/change-<change-id>
+```
+
+备份校验、显式恢复、rollback 保留和入口开放顺序以
+[LobeHub 企业离线部署](../../docs/deployment/lobehub-offline.md) 为准。
 
 企业包以执行命令时的本地工作树为准：已提交和未提交、但会被 Maven、前端或 Docker 构建实际读取的本地代码都属于本次构建输入。打包前先合并确认需要交付的相关分支并检查状态；这些命令用于记录输入范围，不要求 `git status --short` 为空，也不得为打包擅自清理、stash 或切换到另一份源码：
 

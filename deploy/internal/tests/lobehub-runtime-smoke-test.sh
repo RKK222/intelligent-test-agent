@@ -161,7 +161,7 @@ if [[ "$(uname -s)" == Darwin ]]; then
   printf '%s\n' \
     '#!/usr/bin/env bash' \
     'set -euo pipefail' \
-    'exec docker run --rm --network test-agent-lobehub -e "MC_HOST_lobehub=${MC_HOST_lobehub:-}" "${LOBEHUB_SMOKE_MC_IMAGE:?}" "$@"' \
+    'exec docker run --rm -i --network test-agent-lobehub -e "MC_HOST_lobehub=${MC_HOST_lobehub:-}" "${LOBEHUB_SMOKE_MC_IMAGE:?}" "$@"' \
     >"${BASE_DIR}/lobehub/bin/mc-linux-amd64"
   chmod 0755 "${BASE_DIR}/lobehub/bin/mc-linux-amd64"
   export LOBEHUB_SMOKE_MC_IMAGE="${mc_image}"
@@ -188,7 +188,7 @@ printf '%s\n' \
   "POSTGRES_PASSWORD=${postgres_password}" \
   "DATABASE_URL=postgresql://lobehub:${postgres_password}@test-agent-lobehub-db:5432/lobehub" \
   'DATABASE_DRIVER=node' \
-  'LOBEHUB_REDIS_HOST=127.0.0.1' \
+  "LOBEHUB_REDIS_HOST=${REDIS_CONTAINER}" \
   'LOBEHUB_REDIS_PORT=6379' \
   'LOBEHUB_REDIS_USERNAME=lobehub' \
   "LOBEHUB_REDIS_PASSWORD=${redis_password}" \
@@ -232,6 +232,8 @@ export PATH="${TEST_BIN_DIR}:${PATH}"
 "${INTERNAL_DIR}/lobehub-docker.sh" validate-config
 "${INTERNAL_DIR}/lobehub-docker.sh" start
 "${INTERNAL_DIR}/lobehub-docker.sh" status
+"${INTERNAL_DIR}/lobehub-docker.sh" verify-deployment \
+  | grep -Fx 'LobeHub deployment verification passed'
 
 body_file="${SMOKE_ROOT}/response.body"
 code="$(http_code "${body_file}" http://127.0.0.1:3210/)"
@@ -278,6 +280,58 @@ export MC_HOST_lobehub="http://${rustfs_access_key}:${rustfs_secret_key}@${mc_en
 bucket_policy="$(${BASE_DIR}/lobehub/bin/mc-linux-amd64 anonymous get lobehub/lobehub-private 2>&1)"
 printf '%s\n' "${bucket_policy}" | grep -Eiq 'private|none' || {
   echo "RustFS bucket is not reported as private: ${bucket_policy}" >&2
+  exit 1
+}
+
+# 在真实 PostgreSQL/RustFS 中写入证明数据，再做停机快照与恢复演练。
+docker exec test-agent-lobehub-db psql -U lobehub -d lobehub -v ON_ERROR_STOP=1 \
+  -c 'create table if not exists enterprise_backup_proof (value text primary key)' \
+  -c "insert into enterprise_backup_proof(value) values ('database-before-backup') on conflict do nothing" \
+  >/dev/null
+printf 'object-before-backup' \
+  | "${BASE_DIR}/lobehub/bin/mc-linux-amd64" pipe \
+    lobehub/lobehub-private/enterprise-backup-proof.txt >/dev/null
+
+"${INTERNAL_DIR}/lobehub-docker.sh" stop
+BACKUP_DIR="${SMOKE_ROOT}/backups"
+BACKUP_TEST_BIN="${SMOKE_ROOT}/backup-bin"
+mkdir -p "${BACKUP_TEST_BIN}"
+if [[ "$(uname -s)" == Darwin ]]; then
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'if [[ "${1:-}" == -u ]]; then echo 0; exit 0; fi' \
+    'exec /usr/bin/id "$@"' \
+    >"${BACKUP_TEST_BIN}/id"
+  chmod 0755 "${BACKUP_TEST_BIN}/id"
+fi
+PATH="${BACKUP_TEST_BIN}:${PATH}" "${INTERNAL_DIR}/lobehub-backup.sh" create \
+  --output-dir "${BACKUP_DIR}" >/dev/null
+backup_archive="$(find "${BACKUP_DIR}" -maxdepth 1 -type f \
+  -name 'test-agent-lobehub-backup-*.tar.gz' -print -quit)"
+[[ -n "${backup_archive}" ]] || { echo 'Runtime smoke backup archive was not created' >&2; exit 1; }
+PATH="${BACKUP_TEST_BIN}:${PATH}" "${INTERNAL_DIR}/lobehub-backup.sh" verify \
+  --archive "${backup_archive}" >/dev/null
+
+# 只移走冒烟临时目录，不删除任何宿主现有数据。
+mv "${BASE_DIR}/lobehub/paradedb" "${SMOKE_ROOT}/discarded-paradedb"
+mv "${BASE_DIR}/lobehub/rustfs" "${SMOKE_ROOT}/discarded-rustfs"
+PATH="${BACKUP_TEST_BIN}:${PATH}" "${INTERNAL_DIR}/lobehub-backup.sh" restore \
+  --archive "${backup_archive}" --confirm-restore >/dev/null
+"${INTERNAL_DIR}/lobehub-docker.sh" start
+"${INTERNAL_DIR}/lobehub-docker.sh" verify-deployment >/dev/null
+
+database_value="$(docker exec test-agent-lobehub-db psql -U lobehub -d lobehub -Atqc \
+  "select value from enterprise_backup_proof where value = 'database-before-backup'")"
+[[ "${database_value}" == database-before-backup ]] || {
+  echo 'Restored ParadeDB did not retain the runtime smoke proof row' >&2
+  exit 1
+}
+object_value="$("${BASE_DIR}/lobehub/bin/mc-linux-amd64" cat \
+  lobehub/lobehub-private/enterprise-backup-proof.txt)"
+[[ "${object_value}" == object-before-backup ]] || {
+  echo "Restored RustFS object mismatch; received ${#object_value} bytes" >&2
+  "${BASE_DIR}/lobehub/bin/mc-linux-amd64" stat \
+    lobehub/lobehub-private/enterprise-backup-proof.txt >&2 || true
   exit 1
 }
 

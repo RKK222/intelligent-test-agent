@@ -182,6 +182,7 @@ cp -a "${ARTIFACT_DIR}/release.env" "${ARTIFACT_DIR}/sbom" "${ARTIFACT_DIR}/sour
   "${ARTIFACT_DIR}/windows-authenticode-verification.txt" "${BASE_DIR}/lobehub/release/"
 
 install -m 0755 "${SCRIPT_DIR}/lobehub-docker.sh" "${BASE_DIR}/deploy/internal/lobehub-docker.sh"
+install -m 0755 "${SCRIPT_DIR}/lobehub-backup.sh" "${BASE_DIR}/deploy/internal/lobehub-backup.sh"
 if [[ ! -f "${ENV_FILE}" ]]; then
   install -m 0600 "${SCRIPT_DIR}/lobehub.env.example" "${ENV_FILE}"
   echo "Created ${ENV_FILE}; populate all REPLACE_ values before starting LobeHub." >&2

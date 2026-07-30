@@ -1282,3 +1282,19 @@
 - Result:
   - 本地已可通过显式参数启动完整 LobeHub 开发环境；部署人员可依手册构建可追溯服务端阶段介质，并在客户端完备后构建完整离线包。未修改 `.env.local`、OpenCode 源码、generated SDK、既有 API/事件或数据库 migration。
   - 仍需外部完成企业 Authenticode Windows 客户端、审批的 Linux x86_64 客户端与目标内核沙箱边界验证，以及目标环境 Flyway history、DNS/反代/网络隔离、备份恢复和回滚演练；完整上线介质在此前继续失败关闭。fork 目前仅配置 `upstream`，尚需企业内部 Git 远程才能发布提交与标签。
+
+### 2026-07-30 - 完成 LobeHub 现场验收与冷备份恢复闭环
+
+- Why:
+  - 服务端阶段介质此前只证明首次启动，现场仍缺少可执行的运行态验收命令和真实 ParadeDB/RustFS 冷备份恢复工具；配置 URL 也可能分别合法但交叉指向错误服务或凭据。
+- What:
+  - `lobehub-docker.sh` 新增 DB/Redis/S3/MC/app/平台同源及 URL 编码凭据交叉校验，并增加 `verify-deployment`，核对容器运行状态、restart policy、精确镜像、端口、PostgreSQL 17、Redis ACL、私有 bucket、HTTP 离线策略和容器密钥隔离。
+  - 新增 `lobehub-backup.sh` 的 `create/verify/restore` 冷备份流程；三个容器必须由运维显式停止，Docker 状态不可验证即拒绝，归档只允许固定路径和普通文件/目录，归档及 checksum 固定 `0600`，恢复需显式确认并保留原数据 rollback。
+  - 安装器和 LobeHub-only ZIP 纳入备份工具；部署手册补齐现场验收、冷备份、恢复、入口关闭和平台 PostgreSQL 独立备份边界。
+- How:
+  - TDD 覆盖配置错接/错凭据、URL 编码、缺少备份脚本、无确认恢复、容器运行、Docker daemon 不可验证、暴露 checksum、未知路径和符号链接；构建器、安装器、封包、开发 helper 与全部脚本语法回归通过。
+  - 使用现有约 2.1 GiB `linux/amd64` 真实服务端介质两次完成 PostgreSQL/RustFS 证明数据写入、停机归档、移走原临时数据、恢复、二次 migration/启动和数据存续验证；最终冒烟 exit 0。
+  - 本机只有 JDK 21，使用未修改的 `.env.test` 实际执行 `restart-dev-services.sh --profile test --env-file .env.test --skip-backend-build --skip-frontend-build --with-lobehub`；后端 readiness 200、前端 200、LobeHub 307 固定回平台，开发 ParadeDB/RustFS healthy。
+- Result:
+  - 服务端部署人员现在可按手册完成安装后验收和可回滚冷恢复；未新增 API、事件、数据库 migration/SQL、generated SDK 或 OpenCode 修改，也未修改 `.env*`。
+  - 客户端审计确认当前 Desktop/CLI 仍依赖 fork 内部 `/oidc/*`，而企业运行配置未提供 `JWKS_KEY`；直接启用会重新引入原计划删除的 JWKS/授权服务器，非 OIDC 浏览器确认与设备令牌协议需另行确认。因此完整签名客户端、完整上线介质、企业 Git 远端和真实现场验收仍未完成，`LOBEHUB_ENABLED` 继续保持关闭。

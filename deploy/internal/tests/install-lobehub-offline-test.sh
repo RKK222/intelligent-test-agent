@@ -16,6 +16,7 @@ mkdir -p "${ARTIFACT_DIR}"/{images,clients,bin,sbom,source} \
   "${FIXTURE_INTERNAL}/systemd" "${FAKE_BIN}"
 cp "${INTERNAL_DIR}/install-lobehub-offline.sh" "${FIXTURE_INTERNAL}/install-lobehub-offline.sh"
 cp "${INTERNAL_DIR}/lobehub-docker.sh" "${FIXTURE_INTERNAL}/lobehub-docker.sh"
+cp "${INTERNAL_DIR}/lobehub-backup.sh" "${FIXTURE_INTERNAL}/lobehub-backup.sh"
 cp "${INTERNAL_DIR}/lobehub.env.example" "${FIXTURE_INTERNAL}/lobehub.env.example"
 cp "${INTERNAL_DIR}/systemd/test-agent-lobehub.service" \
   "${FIXTURE_INTERNAL}/systemd/test-agent-lobehub.service"
@@ -127,6 +128,7 @@ TEST_AGENT_SYSTEMD_UNIT_DIR="${RUNTIME_ROOT}/systemd" \
   "${FIXTURE_INTERNAL}/install-lobehub-offline.sh" >/dev/null
 
 test -x "${RUNTIME_ROOT}/testagent/lobehub/bin/mc-linux-amd64"
+test -x "${RUNTIME_ROOT}/testagent/deploy/internal/lobehub-backup.sh"
 test -f "${RUNTIME_ROOT}/testagent/lobehub/clients/lobehub-windows-x64.exe"
 test -f "${RUNTIME_ROOT}/testagent/lobehub/clients/lobehub-linux-x86_64.tar.gz"
 test -f "${RUNTIME_ROOT}/testagent/lobehub/release/windows-authenticode-verification.txt"

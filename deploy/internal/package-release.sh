@@ -929,7 +929,7 @@ package_lobehub_zip() {
   mkdir -p "${staging_dir}/dist/lobehub" "${staging_dir}/deploy/internal"
   cp -a "${OUTPUT_DIR}/lobehub/." "${staging_dir}/dist/lobehub/"
   for required_file in \
-    lobehub.env.example lobehub-docker.sh install-lobehub-offline.sh \
+    lobehub.env.example lobehub-docker.sh lobehub-backup.sh install-lobehub-offline.sh \
     systemd/test-agent-lobehub.service lobehub/version.env nginx/lobehub.conf.template; do
     mkdir -p "${staging_dir}/deploy/internal/$(dirname "${required_file}")"
     cp -a "${SCRIPT_DIR}/${required_file}" "${staging_dir}/deploy/internal/${required_file}"

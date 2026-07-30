@@ -226,6 +226,12 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 - `/data/testagent/config/lobehub.env` 必须是 root 控制的非符号链接 mode `0600` 文件，拒绝重复键和非法 dotenv。
   启动脚本必须按容器生成临时最小 env：数据库和对象存储容器不得获得 HMAC、Session、模型委托或彼此密钥；
   临时文件退出即删，secret 不放入 Docker 命令行。
+- LobeHub 现场预检必须交叉校验连接目标：数据库 URL 与库用户、Redis URL 与 ACL 用户/DB 0、S3/MC 与私有
+  bucket、内部 app URL 与容器名保持一致，平台 launch/兑换/撤销/模型网关必须同源；只验证单个 URL 格式不算
+  通过。URL credential 必须编码，不能让未编码分隔符改变 authority、path 或 query。
+- LobeHub 冷备份必须在 app、RustFS 和 ParadeDB 全部停止后创建，归档及校验和使用 mode `0600` 并置于
+  `/data/testagent` 外的受控加密介质。恢复必须要求显式确认、先校验摘要和归档白名单路径，并保留被替换数据供
+  回滚；工具不得自动停服务或用整目录删除代替精确目标替换。
 - `LOBEHUB_ENABLED=true` 不是绕过配置校验的开关：固定聊天 origin、虚拟邮箱域和唯一 owner 必须同时脱离
   migration 占位值，平台才允许落票据。现场 `validate-config` 还必须核对 digest 镜像、secret 长度、离线开关、
   Cookie/Session 契约和执行能力门禁，任一不满足都禁止 migration 或启动 app。

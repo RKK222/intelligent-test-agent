@@ -20,7 +20,7 @@ cleanup_temp_env_files() {
 trap cleanup_temp_env_files EXIT
 
 usage() {
-  echo "Usage: $0 {validate-config|check-redis|start-db|migrate|start-rustfs|init-bucket|start-app|start|stop|status}" >&2
+  echo "Usage: $0 {validate-config|check-redis|start-db|migrate|start-rustfs|init-bucket|start-app|start|stop|status|verify-deployment}" >&2
 }
 
 env_value() {
@@ -94,6 +94,75 @@ require_exact_env() {
   actual="$(require_env "${key}")"
   [[ "${actual}" == "${expected}" ]] || {
     echo "Unsafe LobeHub setting in ${ENV_FILE}: ${key} must be ${expected}" >&2
+    exit 1
+  }
+}
+
+require_matching_env() {
+  local left_key="$1" right_key="$2" left_value right_value
+  left_value="$(require_env "${left_key}")"
+  right_value="$(require_env "${right_key}")"
+  [[ "${left_value}" == "${right_value}" ]] || {
+    echo "Cross-wired LobeHub settings in ${ENV_FILE}: ${left_key} must match ${right_key}" >&2
+    exit 1
+  }
+}
+
+url_encode_component() {
+  local value="$1" encoded="" char decimal hex index LC_ALL=C
+  for ((index = 0; index < ${#value}; index++)); do
+    char="${value:index:1}"
+    case "${char}" in
+      [A-Za-z0-9.~_-]) encoded+="${char}" ;;
+      *)
+        printf -v decimal '%d' "'${char}"
+        if ((decimal < 0)); then
+          decimal=$((decimal + 256))
+        fi
+        printf -v hex '%02X' "${decimal}"
+        encoded+="%${hex}"
+        ;;
+    esac
+  done
+  printf '%s' "${encoded}"
+}
+
+require_url_target() {
+  local key="$1" expected_prefix="$2" expected_suffix="$3" expected_credential="$4"
+  local value credential
+  value="$(require_env "${key}")"
+  [[ "${value}" == "${expected_prefix}"* && "${value}" == *"${expected_suffix}" ]] || {
+    echo "Cross-wired LobeHub URL in ${ENV_FILE}: ${key} must target the configured service" >&2
+    exit 1
+  }
+  credential="${value#"${expected_prefix}"}"
+  credential="${credential%"${expected_suffix}"}"
+  # 密码必须先 URL encode，否则 @/路径/查询字符会改变实际连接目标。
+  [[ -n "${credential}" && "${credential}" != *'@'* && "${credential}" != */* \
+    && "${credential}" != *'?'* && "${credential}" != *'#'* ]] || {
+    echo "Unsafe or empty URL-encoded credential in ${ENV_FILE}: ${key}" >&2
+    exit 1
+  }
+  [[ "${credential}" == "${expected_credential}" ]] || {
+    echo "Cross-wired LobeHub credential in ${ENV_FILE}: ${key}" >&2
+    exit 1
+  }
+}
+
+http_origin() {
+  local key="$1" value remainder authority
+  value="$(require_env "${key}")"
+  remainder="${value#http://}"
+  authority="${remainder%%/*}"
+  printf 'http://%s' "${authority}"
+}
+
+require_same_http_origin() {
+  local left_key="$1" right_key="$2" left_origin right_origin
+  left_origin="$(http_origin "${left_key}")"
+  right_origin="$(http_origin "${right_key}")"
+  [[ "${left_origin}" == "${right_origin}" ]] || {
+    echo "Cross-wired platform origins in ${ENV_FILE}: ${left_key} must match ${right_key}" >&2
     exit 1
   }
 }
@@ -224,24 +293,39 @@ verify_loaded_release_images() {
 }
 
 validate_database_env() {
+  local database_user database_name database_password
   require_release_image LOBEHUB_PARADEDB_IMAGE
   require_env POSTGRES_DB >/dev/null
   require_env POSTGRES_USER >/dev/null
   require_secret_bytes POSTGRES_PASSWORD 16
   require_env DATABASE_URL >/dev/null
   require_exact_env DATABASE_DRIVER node
+  database_user="$(require_env POSTGRES_USER)"
+  database_name="$(require_env POSTGRES_DB)"
+  database_password="$(require_env POSTGRES_PASSWORD)"
+  require_url_target DATABASE_URL "postgresql://$(url_encode_component "${database_user}"):" \
+    "@${DB_CONTAINER}:5432/$(url_encode_component "${database_name}")" \
+    "$(url_encode_component "${database_password}")"
 }
 
 validate_redis_env() {
+  local redis_host redis_port redis_username redis_password
   require_env LOBEHUB_REDIS_HOST >/dev/null
   require_env LOBEHUB_REDIS_PORT >/dev/null
   require_env LOBEHUB_REDIS_USERNAME >/dev/null
   require_secret_bytes LOBEHUB_REDIS_PASSWORD 16
   require_env REDIS_URL >/dev/null
   require_exact_env REDIS_PREFIX 'lobehub:app:'
+  redis_host="$(require_env LOBEHUB_REDIS_HOST)"
+  redis_port="$(require_env LOBEHUB_REDIS_PORT)"
+  redis_username="$(require_env LOBEHUB_REDIS_USERNAME)"
+  redis_password="$(require_env LOBEHUB_REDIS_PASSWORD)"
+  require_url_target REDIS_URL "redis://$(url_encode_component "${redis_username}"):" \
+    "@${redis_host}:${redis_port}/0" "$(url_encode_component "${redis_password}")"
 }
 
 validate_rustfs_env() {
+  local mc_credential
   require_release_image LOBEHUB_RUSTFS_IMAGE
   require_secret_bytes RUSTFS_ACCESS_KEY 16
   require_secret_bytes RUSTFS_SECRET_KEY 32
@@ -253,6 +337,14 @@ validate_rustfs_env() {
   require_exact_env S3_ENABLE_PATH_STYLE 1
   require_exact_env S3_SET_ACL 0
   require_env MC_HOST_lobehub >/dev/null
+  require_exact_env S3_ENDPOINT "http://${RUSTFS_CONTAINER}:9000"
+  require_matching_env S3_BUCKET LOBEHUB_S3_BUCKET
+  require_matching_env S3_ACCESS_KEY_ID RUSTFS_ACCESS_KEY
+  require_matching_env S3_SECRET_ACCESS_KEY RUSTFS_SECRET_KEY
+  mc_credential="$(url_encode_component "$(require_env RUSTFS_ACCESS_KEY)"):$(
+    url_encode_component "$(require_env RUSTFS_SECRET_KEY)"
+  )"
+  require_url_target MC_HOST_lobehub 'http://' "@${RUSTFS_CONTAINER}:9000" "${mc_credential}"
 }
 
 validate_app_env() {
@@ -262,11 +354,15 @@ validate_app_env() {
   validate_rustfs_env
   require_http_origin APP_URL
   require_http_origin INTERNAL_APP_URL
+  require_exact_env INTERNAL_APP_URL "http://${APP_CONTAINER}:3210"
   require_ipv4_bind_address LOBEHUB_APP_BIND_ADDRESS
   require_http_fixed_path PLATFORM_LAUNCH_URL /lobehub/launch
   require_http_fixed_path PLATFORM_SSO_REDEEM_URL /api/internal/platform/lobehub-sso/tickets/redeem
   require_http_fixed_path PLATFORM_SSO_REVOKE_URL /api/internal/platform/lobehub-sso/grants/revoke
   require_http_fixed_path PLATFORM_MODEL_GATEWAY_BASE_URL /api/internal/platform/model-gateway/v1
+  require_same_http_origin PLATFORM_LAUNCH_URL PLATFORM_SSO_REDEEM_URL
+  require_same_http_origin PLATFORM_LAUNCH_URL PLATFORM_SSO_REVOKE_URL
+  require_same_http_origin PLATFORM_LAUNCH_URL PLATFORM_MODEL_GATEWAY_BASE_URL
   require_secret_bytes PLATFORM_SSO_HMAC_SECRET 32
   require_base64_secret_bytes PLATFORM_MODEL_GRANT_ENCRYPTION_KEY 32
   require_base64_secret_bytes KEY_VAULTS_SECRET 32
@@ -466,6 +562,159 @@ status_all() {
   echo "LobeHub app readiness passed on ${bind_address}:3210"
 }
 
+require_running_container() {
+  local container="$1" running restart_policy
+  running="$(docker inspect -f '{{.State.Running}}' "${container}" 2>/dev/null || true)"
+  [[ "${running}" == true ]] || {
+    echo "Required LobeHub container is not running: ${container}" >&2
+    exit 1
+  }
+  restart_policy="$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "${container}")"
+  [[ "${restart_policy}" == unless-stopped ]] || {
+    echo "Unsafe restart policy for ${container}: ${restart_policy}" >&2
+    exit 1
+  }
+}
+
+require_container_image() {
+  local container="$1" image_key="$2" actual_id expected_id
+  actual_id="$(docker inspect -f '{{.Image}}' "${container}")"
+  expected_id="$(docker image inspect -f '{{.Id}}' "$(require_env "${image_key}")")"
+  [[ "${actual_id}" == "${expected_id}" ]] || {
+    echo "Running container image does not match ${image_key}: ${container}" >&2
+    exit 1
+  }
+}
+
+require_container_env_absent() {
+  local container="$1" key="$2"
+  if docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${container}" \
+    | grep -q "^${key}="; then
+    echo "Container ${container} unexpectedly received ${key}" >&2
+    exit 1
+  fi
+}
+
+require_container_env_exact() {
+  local container="$1" key="$2" expected="$3" actual
+  actual="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${container}" \
+    | awk -F= -v wanted="${key}" '$1 == wanted { print substr($0, index($0, "=") + 1); exit }')"
+  [[ "${actual}" == "${expected}" ]] || {
+    echo "Running container ${container} has an unsafe or stale ${key}" >&2
+    exit 1
+  }
+}
+
+require_host_binding() {
+  local container="$1" container_port="$2" expected_host="$3" actual_host
+  actual_host="$(docker inspect -f \
+    "{{with index .NetworkSettings.Ports \"${container_port}/tcp\"}}{{(index . 0).HostIp}}{{end}}" \
+    "${container}" 2>/dev/null || true)"
+  [[ "${actual_host}" == "${expected_host}" ]] || {
+    echo "Unsafe host binding for ${container}:${container_port}; expected ${expected_host}" >&2
+    exit 1
+  }
+}
+
+require_unpublished_port() {
+  local container="$1" container_port="$2" published
+  published="$(docker port "${container}" "${container_port}/tcp" 2>/dev/null || true)"
+  [[ -z "${published}" ]] || {
+    echo "Container port must remain unpublished: ${container}:${container_port}" >&2
+    exit 1
+  }
+}
+
+verify_database_runtime() {
+  local server_version
+  require_running_container "${DB_CONTAINER}"
+  require_container_image "${DB_CONTAINER}" LOBEHUB_PARADEDB_IMAGE
+  require_unpublished_port "${DB_CONTAINER}" 5432
+  docker exec "${DB_CONTAINER}" sh -c 'test "$(cat /proc/1/comm)" = postgres'
+  docker exec "${DB_CONTAINER}" pg_isready \
+    -U "$(require_env POSTGRES_USER)" -d "$(require_env POSTGRES_DB)" >/dev/null
+  server_version="$(docker exec "${DB_CONTAINER}" psql \
+    -U "$(require_env POSTGRES_USER)" -d "$(require_env POSTGRES_DB)" \
+    -Atqc 'show server_version_num')"
+  [[ "${server_version}" =~ ^17[0-9]{4}$ ]] || {
+    echo "LobeHub database verification expected PostgreSQL 17, got ${server_version}" >&2
+    exit 1
+  }
+}
+
+verify_rustfs_runtime() {
+  local bucket policy
+  require_running_container "${RUSTFS_CONTAINER}"
+  require_container_image "${RUSTFS_CONTAINER}" LOBEHUB_RUSTFS_IMAGE
+  require_host_binding "${RUSTFS_CONTAINER}" 9000 127.0.0.1
+  require_host_binding "${RUSTFS_CONTAINER}" 9001 127.0.0.1
+  [[ -x "${MC_BIN}" ]] || { echo "Offline mc binary not found: ${MC_BIN}" >&2; exit 1; }
+  export MC_HOST_lobehub
+  MC_HOST_lobehub="$(require_env MC_HOST_lobehub)"
+  bucket="lobehub/$(require_env LOBEHUB_S3_BUCKET)"
+  "${MC_BIN}" ls "${bucket}" >/dev/null
+  policy="$("${MC_BIN}" anonymous get "${bucket}" 2>&1)"
+  printf '%s\n' "${policy}" | grep -Eiq 'private|none' || {
+    echo "RustFS bucket is not private: ${bucket}" >&2
+    exit 1
+  }
+}
+
+require_http_status() {
+  local expected="$1" method="$2" url="$3" description="$4" actual
+  actual="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X "${method}" "${url}")"
+  [[ "${actual}" == "${expected}" ]] || {
+    echo "${description} expected HTTP ${expected}, got ${actual}" >&2
+    exit 1
+  }
+}
+
+verify_app_runtime() {
+  local bind_address
+  bind_address="$(require_env LOBEHUB_APP_BIND_ADDRESS)"
+  require_running_container "${APP_CONTAINER}"
+  require_container_image "${APP_CONTAINER}" LOBEHUB_APP_IMAGE
+  require_host_binding "${APP_CONTAINER}" 3210 "${bind_address}"
+  require_container_env_exact "${APP_CONTAINER}" PLATFORM_SSO_ENABLED 1
+  require_container_env_exact "${APP_CONTAINER}" LOBEHUB_ENTERPRISE_OFFLINE 1
+  require_container_env_exact "${APP_CONTAINER}" AGENT_RUNTIME_MODE local
+  require_container_env_exact "${APP_CONTAINER}" REDIS_PREFIX 'lobehub:app:'
+  require_container_env_exact "${APP_CONTAINER}" TELEMETRY_DISABLED 1
+  require_container_env_exact "${APP_CONTAINER}" LOBEHUB_DEVICE_EXECUTION_MODE disabled
+  status_all
+  require_http_status 403 POST \
+    "http://${bind_address}:3210/api/workflows/task/schedule-dispatch" \
+    'Public workflow endpoint offline policy'
+  require_http_status 401 POST \
+    "http://${bind_address}:3210/api/agent/enterprise/schedule-dispatch" \
+    'Internal scheduler authentication'
+}
+
+verify_container_secret_isolation() {
+  local key
+  for key in PLATFORM_SSO_HMAC_SECRET RUSTFS_SECRET_KEY \
+    ENTERPRISE_INTERNAL_SCHEDULER_SECRET AUTH_SECRET; do
+    require_container_env_absent "${DB_CONTAINER}" "${key}"
+  done
+  for key in POSTGRES_PASSWORD PLATFORM_SSO_HMAC_SECRET \
+    ENTERPRISE_INTERNAL_SCHEDULER_SECRET AUTH_SECRET; do
+    require_container_env_absent "${RUSTFS_CONTAINER}" "${key}"
+  done
+  for key in POSTGRES_PASSWORD RUSTFS_ACCESS_KEY RUSTFS_SECRET_KEY MC_HOST_lobehub; do
+    require_container_env_absent "${APP_CONTAINER}" "${key}"
+  done
+}
+
+verify_deployment() {
+  validate_app_env
+  check_redis
+  verify_database_runtime
+  verify_rustfs_runtime
+  verify_app_runtime
+  verify_container_secret_isolation
+  echo 'LobeHub deployment verification passed'
+}
+
 if [[ "${1:-}" == validate-config ]]; then
   ensure_env_file
   validate_app_env
@@ -484,5 +733,6 @@ case "${1:-}" in
   start) start_all ;;
   stop) stop_all ;;
   status) status_all ;;
+  verify-deployment) verify_deployment ;;
   *) usage; exit 2 ;;
 esac

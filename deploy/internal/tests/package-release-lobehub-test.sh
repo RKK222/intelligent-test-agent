@@ -67,6 +67,8 @@ test -f "${OUTPUT_DIR}/test-agent-lobehub-offline.zip.sha256"
 unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
   | grep -Fx 'deploy/internal/lobehub.env.example' >/dev/null
 unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
+  | grep -Fx 'deploy/internal/lobehub-backup.sh' >/dev/null
+unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
   | grep -Fx 'dist/lobehub/source/lobehub-v2.2.11-platform.1.tar.gz' >/dev/null
 unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
   | grep -Fx 'docs/architecture/lobehub-integration.md' >/dev/null
@@ -82,6 +84,10 @@ unzip -p "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" deploy/internal/lobehub-
   | grep -F 'LobeHub app did not become ready' >/dev/null
 unzip -p "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" deploy/internal/lobehub-docker.sh \
   | grep -F 'create_app_runtime_env_file' >/dev/null
+unzip -p "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" deploy/internal/lobehub-docker.sh \
+  | grep -F 'LobeHub deployment verification passed' >/dev/null
+unzip -p "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" deploy/internal/lobehub-backup.sh \
+  | grep -F 'Restore requires --confirm-restore' >/dev/null
 unzip -p "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" deploy/internal/nginx/lobehub.conf.template \
   | grep -F '__LOBEHUB_UPSTREAM__' >/dev/null
 if unzip -p "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" deploy/internal/lobehub-docker.sh \
@@ -107,13 +113,13 @@ LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.1
 POSTGRES_DB=lobehub
 POSTGRES_USER=lobehub
 POSTGRES_PASSWORD=database-password-32-bytes-minimum
-DATABASE_URL=postgresql://lobehub:database-password@test-agent-lobehub-db:5432/lobehub
+DATABASE_URL=postgresql://lobehub:database-password-32-bytes-minimum@test-agent-lobehub-db:5432/lobehub
 DATABASE_DRIVER=node
 LOBEHUB_REDIS_HOST=redis.internal
 LOBEHUB_REDIS_PORT=6379
 LOBEHUB_REDIS_USERNAME=lobehub
 LOBEHUB_REDIS_PASSWORD=redis-password-32-bytes-minimum
-REDIS_URL=redis://lobehub:redis-password@redis.internal:6379/0
+REDIS_URL=redis://lobehub:redis-password-32-bytes-minimum@redis.internal:6379/0
 REDIS_PREFIX=lobehub:app:
 RUSTFS_ACCESS_KEY=rustfs-access-key-32-bytes
 RUSTFS_SECRET_KEY=rustfs-secret-key-at-least-32-bytes
@@ -124,7 +130,7 @@ S3_ACCESS_KEY_ID=rustfs-access-key-32-bytes
 S3_SECRET_ACCESS_KEY=rustfs-secret-key-at-least-32-bytes
 S3_ENABLE_PATH_STYLE=1
 S3_SET_ACL=0
-MC_HOST_lobehub=http://access:secret@test-agent-lobehub-rustfs:9000
+MC_HOST_lobehub=http://rustfs-access-key-32-bytes:rustfs-secret-key-at-least-32-bytes@test-agent-lobehub-rustfs:9000
 APP_URL=http://chat.internal
 INTERNAL_APP_URL=http://test-agent-lobehub-app:3210
 LOBEHUB_APP_BIND_ADDRESS=127.0.0.1
@@ -152,6 +158,15 @@ if ! VALIDATE_OUTPUT="$(
   exit 1
 fi
 printf '%s\n' "${VALIDATE_OUTPUT}" | grep -Fx 'LobeHub configuration contract passed' >/dev/null
+
+ENCODED_CREDENTIAL_ENV="${OUTPUT_DIR}/lobehub-encoded-credential.env"
+sed \
+  -e 's#^POSTGRES_PASSWORD=.*$#POSTGRES_PASSWORD=database password@32-bytes!#' \
+  -e 's#^DATABASE_URL=.*$#DATABASE_URL=postgresql://lobehub:database%20password%4032-bytes%21@test-agent-lobehub-db:5432/lobehub#' \
+  "${VALID_ENV}" >"${ENCODED_CREDENTIAL_ENV}"
+chmod 0600 "${ENCODED_CREDENTIAL_ENV}"
+LOBEHUB_ENV_FILE="${ENCODED_CREDENTIAL_ENV}" TEST_AGENT_BASE_DIR="${OUTPUT_DIR}/runtime" \
+  "${INTERNAL_DIR}/lobehub-docker.sh" validate-config >/dev/null
 
 INVALID_DRIVER_ENV="${OUTPUT_DIR}/lobehub-invalid-driver.env"
 sed 's/^DATABASE_DRIVER=node$/DATABASE_DRIVER=neon/' "${VALID_ENV}" >"${INVALID_DRIVER_ENV}"
@@ -200,6 +215,52 @@ if LOBEHUB_ENV_FILE="${INVALID_DIGEST_REF_ENV}" TEST_AGENT_BASE_DIR="${OUTPUT_DI
   echo "Registry digest reference was unexpectedly accepted for docker-load media" >&2
   exit 1
 fi
+
+# 预检必须校验同一个实际目标，不能只分别验证每个 URL 的格式。
+assert_cross_wired_env_rejected() {
+  local name="$1" expression="$2" replacement="$3" description="$4" invalid_env
+  invalid_env="${OUTPUT_DIR}/lobehub-cross-wired-${name}.env"
+  sed "s#${expression}#${replacement}#" "${VALID_ENV}" >"${invalid_env}"
+  chmod 0600 "${invalid_env}"
+  if LOBEHUB_ENV_FILE="${invalid_env}" TEST_AGENT_BASE_DIR="${OUTPUT_DIR}/runtime" \
+    "${INTERNAL_DIR}/lobehub-docker.sh" validate-config >/dev/null 2>&1; then
+    echo "${description} was unexpectedly accepted" >&2
+    exit 1
+  fi
+}
+
+assert_cross_wired_env_rejected database \
+  '^DATABASE_URL=.*$' \
+  'DATABASE_URL=postgresql://lobehub:database-password-32-bytes-minimum@other-db:5432/lobehub' \
+  'Cross-wired LobeHub database URL'
+assert_cross_wired_env_rejected database-credential \
+  '^DATABASE_URL=.*$' \
+  'DATABASE_URL=postgresql://lobehub:wrong-password@test-agent-lobehub-db:5432/lobehub' \
+  'Cross-wired LobeHub database credential'
+assert_cross_wired_env_rejected redis \
+  '^REDIS_URL=.*$' \
+  'REDIS_URL=redis://lobehub:redis-password-32-bytes-minimum@other-redis.internal:6379/0' \
+  'Cross-wired LobeHub Redis URL'
+assert_cross_wired_env_rejected redis-credential \
+  '^REDIS_URL=.*$' \
+  'REDIS_URL=redis://lobehub:wrong-password@redis.internal:6379/0' \
+  'Cross-wired LobeHub Redis credential'
+assert_cross_wired_env_rejected s3-bucket \
+  '^S3_BUCKET=.*$' \
+  'S3_BUCKET=other-bucket' \
+  'Cross-wired LobeHub S3 bucket'
+assert_cross_wired_env_rejected internal-app \
+  '^INTERNAL_APP_URL=.*$' \
+  'INTERNAL_APP_URL=http://other-app:3210' \
+  'Cross-wired LobeHub internal app URL'
+assert_cross_wired_env_rejected mc-credential \
+  '^MC_HOST_lobehub=.*$' \
+  'MC_HOST_lobehub=http://wrong-access:wrong-secret@test-agent-lobehub-rustfs:9000' \
+  'Cross-wired LobeHub MC credential'
+assert_cross_wired_env_rejected platform-origin \
+  '^PLATFORM_MODEL_GATEWAY_BASE_URL=.*$' \
+  'PLATFORM_MODEL_GATEWAY_BASE_URL=http://other-platform.internal/api/internal/platform/model-gateway/v1' \
+  'Cross-wired platform model gateway origin'
 
 grep -v 'LICENSES.txt$' "${FIXTURE_DIR}/SHA256SUMS" >"${FIXTURE_DIR}/SHA256SUMS.incomplete"
 mv "${FIXTURE_DIR}/SHA256SUMS.incomplete" "${FIXTURE_DIR}/SHA256SUMS"

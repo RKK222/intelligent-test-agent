@@ -27,6 +27,7 @@ Docker Compose。默认目录：
 /data/testagent/
   config/lobehub.env                 # 0600，实际 secret
   deploy/internal/lobehub-docker.sh
+  deploy/internal/lobehub-backup.sh
   lobehub/paradedb/                  # 独立数据库卷
   lobehub/rustfs/data/               # UID 10001
   lobehub/rustfs/logs/
@@ -151,7 +152,9 @@ deploy/internal/build-lobehub-artifacts.sh \
 
 服务端阶段构建完成且三张镜像仍在本机时，执行真实运行时冒烟。脚本拒绝覆盖同名容器，临时创建带
 key/channel/command ACL 的 Redis，并实际完成 PostgreSQL 17 启动、LobeHub migration、私有 RustFS bucket、
-app readiness、离线工作流阻断、内部 scheduler 鉴权和容器密钥隔离检查；退出时只清理自己创建的资源：
+app readiness、离线工作流阻断、内部 scheduler 鉴权和容器密钥隔离检查。随后它向数据库和对象存储写入
+证明数据，执行停机冷备份、移走临时数据、恢复、再次启动和部署验收，并确认两类证明数据仍存在；退出时只
+清理自己创建的资源：
 
 ```bash
 TEST_AGENT_LOBEHUB_ARTIFACT_DIR=/absolute/path/to/lobehub-release-artifacts \
@@ -226,11 +229,13 @@ Windows x64 客户端、批准的 Linux x86_64 客户端及匹配证据为硬门
 5. 平台后台节点按现有企业发布手册升级 migration/backend，并确认 health、签票、兑换和模型网关端点已就绪；
    首台出现 Flyway 未知 checksum 或失败记录时立即停止，不继续其它后台或 LobeHub app。
 
-6. `<lobehub-host>` 启动 app 并检查三个容器，预期 app、db、rustfs 都为运行状态：
+6. `<lobehub-host>` 启动 app 并执行完整部署验收。预期 app、db、rustfs 都为运行状态，最后一条命令打印
+   `LobeHub deployment verification passed`：
 
    ```bash
    /data/testagent/deploy/internal/lobehub-docker.sh start-app
    /data/testagent/deploy/internal/lobehub-docker.sh status
+   /data/testagent/deploy/internal/lobehub-docker.sh verify-deployment
    ```
 
 7. `<proxy-host>` 根据包内 `deploy/internal/nginx/lobehub.conf.template` 配置固定聊天域名，替换
@@ -275,6 +280,11 @@ deploy/internal/install-lobehub-offline.sh
 `start-db` 还要求容器 PID 1 已从初始化临时服务器切换为正式 `postgres` 后才接受 `pg_isready` 和
 `server_version_num`，避免首次安装在 entrypoint 切换窗口提前启动 migration。
 
+预检还会交叉核对连接目标，而不是只分别检查 URL 格式：`DATABASE_URL` 必须指向固定 ParadeDB 容器及配置的
+库名/用户，`REDIS_URL` 必须与独立 Redis host/port/user 和 DB 0 一致，S3/MC 必须使用同一 RustFS 凭据与私有
+bucket，`INTERNAL_APP_URL` 必须指向固定 app 容器，平台 launch、兑换、撤销和模型网关必须同源。URL 中密码
+必须预先 URL encode；会改变 authority/path/query 的未编码 `@`、`/`、`?`、`#` 会被拒绝。
+
 `lobehub.env` 必须是非符号链接的单一 `KEY=value` 文件，mode 为 `0600`，禁止重复键、CRLF 和非法键名。
 启动脚本会在 mode `0600` 的临时文件中生成容器最小环境：ParadeDB 只得到三项 PostgreSQL 变量，RustFS 只
 得到自己的 access/secret，app/migration 只得到数据库 URL、Redis、S3、认证、模型委托和离线策略所需变量；
@@ -312,8 +322,10 @@ app 副本；在没有跨实例选主/锁前横向复制会导致重复 sweep。
 6. `lobehub-docker.sh start-rustfs` 和 `init-bucket`；初始化会显式执行 `anonymous set none`，bucket 保持私有。
 7. 升级平台 migration/backend，确认 health 和三类 SSO API。
 8. `lobehub-docker.sh start-app`，再配置 HTTP 反向代理/DNS。
-9. 管理员维护模型目录，对每一项声明能力执行探测；只有成功能力才进入 `/models`。
-10. 完成认证、部门 Workspace、模型、断网和客户端验收后，最后设置 `LOBEHUB_ENABLED=true`。
+9. 执行 `lobehub-docker.sh verify-deployment`，检查镜像、端口、restart policy、PostgreSQL 17、Redis ACL、
+   私有 bucket、HTTP 策略和容器密钥隔离；失败不得开放入口。
+10. 管理员维护模型目录，对每一项声明能力执行探测；只有成功能力才进入 `/models`。
+11. 完成认证、部门 Workspace、模型、断网和客户端验收后，最后设置 `LOBEHUB_ENABLED=true`。
 
 全部 LobeHub 容器的 systemd 启停入口：
 
@@ -323,7 +335,8 @@ systemctl status test-agent-lobehub
 ```
 
 `lobehub-docker.sh start` 只负责共享 Redis 检查、LobeHub DB/migration、RustFS/init 和 app；平台升级仍按上述
-外层顺序单独执行。
+外层顺序单独执行。每次配置变更、升级、恢复或主机重启后仍须单独执行 `verify-deployment`；`status` 不能替代
+完整验收。
 
 ## HTTP 现场配置与剩余风险
 
@@ -352,14 +365,48 @@ Redis、ParadeDB 或 RustFS console 暴露到非隔离网段。
 - Windows：RDS 多账号配置隔离；UI/API/深链/Labs 均无法开启任何本地执行；签名状态和文件摘要匹配。
 - Linux：在目标发行版/内核验证文件、环境、网络、socket、并发、进程终止和逃逸；未通过保持执行关闭。
 - 数据：H2、真实 PostgreSQL、完整 Flyway、已部署基线升级、共享 Redis ACL/前缀碰撞、备份恢复和回滚演练。
-- 部署：危险 app bind 被配置预检拒绝；`start-app/status` 通过真实 HTTP readiness；同机或跨机 Nginx upstream
-  与 bind 一致，跨机 3210 只允许代理源地址；外网构建机的真实镜像冒烟通过，现场仍重复逐机验收。
+- 部署：危险 app bind 和交叉错接的 DB/Redis/S3/app/平台 URL 被配置预检拒绝；`start-app/status` 通过真实
+  HTTP readiness；`verify-deployment` 复核运行镜像、端口、restart policy、PostgreSQL 17、Redis ACL、私有
+  bucket、HTTP 离线策略和密钥隔离；同机或跨机 Nginx upstream 与 bind 一致，跨机 3210 只允许代理源地址；
+  外网构建机的真实镜像冷备份恢复冒烟通过，现场仍重复逐机验收。
 - 密钥隔离：重复 dotenv key/符号链接/非 0600 配置被拒绝；`docker inspect` 确认 ParadeDB、RustFS 不含
   HMAC、Session、模型委托或其它容器凭据，临时 env 文件已删除。
 
 ## 备份与回滚
 
-升级前一致性备份 LobeHub ParadeDB、RustFS 数据和外部密钥，记录三个镜像 digest 与平台 JAR/前端版本。
-回滚优先设置 `LOBEHUB_ENABLED=false`、从反向代理摘除聊天入口并停止 LobeHub。只有新 schema 明确向后兼容时
-才回退镜像；否则恢复同一时点数据库快照、RustFS 和密钥。平台 migration 不做 down migration，不使用 Flyway
-`repair`、`outOfOrder` 或手工修改历史表。恢复后先保持入口关闭，重复完整验收再开放。
+`lobehub-backup.sh` 只备份 LobeHub 的 ParadeDB、RustFS、`lobehub.env` 和已安装 `release.env`；平台 PostgreSQL
+仍必须按平台发布手册单独备份。归档包含明文 secret，固定 mode `0600`，只能保存到 `/data/testagent` 以外的
+受控加密介质。工具不会替运维人员停服务，三个固定 LobeHub 容器中任一个仍运行都会失败关闭。
+
+升级前先关闭平台入口并从反向代理摘除聊天域名，然后执行一致性冷备份：
+
+```bash
+systemctl stop test-agent-lobehub
+install -d -m 0700 /data/backup/lobehub/change-<change-id>
+/data/testagent/deploy/internal/lobehub-backup.sh create \
+  --output-dir /data/backup/lobehub/change-<change-id>
+/data/testagent/deploy/internal/lobehub-backup.sh verify \
+  --archive /data/backup/lobehub/change-<change-id>/test-agent-lobehub-backup-<UTC>.tar.gz
+```
+
+必须同时保留 `.tar.gz` 和同名 `.sha256`，并把归档 SHA-256、三个镜像 ID、平台 JAR/前端版本和变更单关联。
+若只是备份而不升级，可重新启动并执行 `verify-deployment` 后再恢复入口。
+
+需要恢复时保持入口关闭和三个容器停止，先执行 `verify`，再用显式确认参数恢复：
+
+```bash
+/data/testagent/deploy/internal/lobehub-backup.sh restore \
+  --archive /data/backup/lobehub/change-<change-id>/test-agent-lobehub-backup-<UTC>.tar.gz \
+  --confirm-restore
+systemctl start test-agent-lobehub
+/data/testagent/deploy/internal/lobehub-docker.sh verify-deployment
+```
+
+恢复会先把当前四个目标保存在
+`/data/testagent/lobehub/restore-rollback/<UTC>/original/`，不会删除整个平台目录；替换中途失败会尽力自动放回
+原数据，并把失败的新文件保存在同一目录的 `failed-new/`。不要在验证完成前删除 rollback 目录。恢复后仍需完成
+认证、Workspace、模型和附件抽查，全部通过才恢复反向代理和 `LOBEHUB_ENABLED=true`。
+
+回滚优先关闭入口并停止 LobeHub。只有新 schema 明确向后兼容时才回退镜像；否则恢复同一时点的上述 LobeHub
+归档和平台 PostgreSQL 快照。平台 migration 不做 down migration，不使用 Flyway `repair`、`outOfOrder` 或
+手工修改历史表。
