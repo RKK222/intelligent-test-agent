@@ -5,6 +5,27 @@
 
 ## Entries
 
+### 2026-07-30 - 基于最新主线重建三节点企业交付
+
+### Why
+
+- 上次企业包后又合入应用 Agent 实时权限/模式刷新和官方 Codex MCP 原生接口；前者涉及 Java 与前端，后者改变 programs/worker，旧包不能继续代表当前主线。
+
+### What
+
+- 基于 `c3f463f3e` 重新构建后端 JAR、前端、programs、`linux/amd64` worker、内层发布 ZIP 和三节点固定外层 ZIP；组件清单为 `worker runtime=included`、`toolbox=reuse`。
+- 独立 Python 3.13 第三方库包和公共 Agent/Skill 完整替换包源码未变化，沿用现有固定名产物并用新 worker/当前白盒 Agent 再验证。
+
+### How
+
+- 后端封包、前端手册/typecheck/生产构建、Codex 官方 `codex/codex-reply` 契约、企业 Responses 路由、Python、归档卫生、组件指纹、三节点结构和 AI 文档校验通过；Mac arm64 按设计跳过 amd64 原生 namespace，要求两台企业 Linux 逐机补跑宿主白盒检查。
+- 最终发布 ZIP 的 Flyway persistence JAR migration 字节仍为固定 SHA-256 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`；相对上次交付没有新增、删除或改写 migration。
+
+### Result
+
+- `.4/.114` 都必须更新 Java、programs 和 worker，并保持现有 toolbox；两台后台全部通过后再更新 `.2` 前端，最后发布公共 Agent/Skill 配置。
+- 本地构建与包级验证完成，企业真实部署尚未执行；未修改 `.env*`、generated SDK 或 OpenCode 源码快照。
+
 ### 2026-07-30 - 基于附件指纹新提交重打企业增量包
 
 ### Why
