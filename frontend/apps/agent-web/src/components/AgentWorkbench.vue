@@ -9,6 +9,8 @@ import {
   createInitialAgentChatRuntimeState,
   promptPartsForUserDisplay,
   reduceAgentChatRuntime,
+  routeWorkspaceAttachmentsForModel,
+  workspaceAttachmentSha256,
   workspaceFileToPromptAttachment,
   type ComposerAttachment
 } from "@test-agent/agent-chat";
@@ -6221,6 +6223,7 @@ type WorkspaceUploadResult = {
 
 type WorkspaceUploadOptions = {
   resolveTargetPath?: (file: File, index: number) => string;
+  reuseExistingTarget?: (file: File, targetPath: string) => Promise<boolean>;
   onUploaded?: (file: File, targetPath: string) => Promise<void> | void;
 };
 
@@ -6260,21 +6263,30 @@ async function uploadWorkspaceFiles(
         // 浏览器通常只提供 basename；再次截断路径分隔符，避免构造 File 时夹带目录片段。
         const targetPath = options.resolveTargetPath?.(file, index)
           ?? workspacePathInDirectory(directory, fileNameOf(file.name));
-        await api.uploadWorkspaceFile(workspaceId, targetPath, file, (progress) => {
-          if (!workspaceUploadOverlay.value) return;
+        const reused = await options.reuseExistingTarget?.(file, targetPath) === true;
+        if (!reused) {
+          await api.uploadWorkspaceFile(workspaceId, targetPath, file, (progress) => {
+            if (!workspaceUploadOverlay.value) return;
+            workspaceUploadOverlay.value = {
+              ...workspaceUploadOverlay.value,
+              fileUploadedBytes: progress.uploadedBytes,
+              fileBytes: progress.totalBytes
+            };
+          });
+          uploaded += 1;
+          uploadedPaths.push(targetPath);
+        } else if (workspaceUploadOverlay.value) {
           workspaceUploadOverlay.value = {
             ...workspaceUploadOverlay.value,
-            fileUploadedBytes: progress.uploadedBytes,
-            fileBytes: progress.totalBytes
+            fileUploadedBytes: file.size,
+            fileBytes: file.size
           };
-        });
-        uploaded += 1;
-        uploadedPaths.push(targetPath);
+        }
         try {
           await options.onUploaded?.(file, targetPath);
         } catch (error) {
           const reason = error instanceof Error ? error.message : "附件处理失败";
-          failures.push(`${file.name}：文件已上传，但未能加入附件（${reason}）`);
+          failures.push(`${file.name}：文件${reused ? "已复用" : "已上传"}，但未能加入附件（${reason}）`);
         }
       } catch (error) {
         const reason = error instanceof Error ? error.message : "上传失败";
@@ -6325,14 +6337,28 @@ async function handleChatAttachmentUpload(files: File[]) {
   if (files.length === 0) return;
   const beforeCount = chatAttachments.value.length;
   try {
+    const workspaceId = selectedWorkspace.value.workspaceId;
     // 目录创建仍走现有工作区文件 WebSocket RPC；createDirectories 可安全处理已存在目录。
-    await api.createDirectory(selectedWorkspace.value.workspaceId, CHAT_ATTACHMENT_DIRECTORY);
+    await api.createDirectory(workspaceId, CHAT_ATTACHMENT_DIRECTORY);
+    const targetPaths = new Map<File, string>();
+    for (const file of files) {
+      const sha256 = await workspaceAttachmentSha256(file);
+      targetPaths.set(
+        file,
+        workspaceAttachmentTargetPath(CHAT_ATTACHMENT_DIRECTORY, file.name, `sha256_${sha256}`)
+      );
+    }
     const result = await uploadWorkspaceFiles(CHAT_ATTACHMENT_DIRECTORY, files, {
-      resolveTargetPath: (file) => workspaceAttachmentTargetPath(
-        CHAT_ATTACHMENT_DIRECTORY,
-        file.name,
-        createClientRequestId()
-      ),
+      resolveTargetPath: (file) => targetPaths.get(file)
+        ?? workspaceAttachmentTargetPath(CHAT_ATTACHMENT_DIRECTORY, file.name, "sha256_missing"),
+      reuseExistingTarget: async (file, targetPath) => {
+        const status = await api.fileStatus(workspaceId, targetPath);
+        if (status.exists !== true) return false;
+        if (status.directory === true || status.size !== file.size) {
+          throw new Error("附件内容指纹路径已存在，但文件状态不一致，请检查工作区附件目录");
+        }
+        return true;
+      },
       onUploaded: (file, targetPath) => {
         const attachment = workspaceFileToPromptAttachment(file, targetPath);
         if (!chatAttachments.value.some((item) => item.id === attachment.id)) {
@@ -7040,19 +7066,20 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     feedback.value = { kind: "info", title: "上下文过长", description: sendValidation.reason };
     return;
   }
+  const routedAttachments = routeWorkspaceAttachmentsForModel(attachments, selectedModelInfo.value);
   const chatContextParts = chatContextItemsToPromptParts(chatContextStore.items);
   // 显式上下文附件存在时，不再叠加旧的“当前活动编辑器/选区”隐式 PromptPart，
   // 避免同一选区或整个活动文件在本轮请求中重复进入模型上下文。
   const implicitEditorTab = chatContextStore.items.length === 0 ? activeTab.value : undefined;
   const implicitEditorSelection = chatContextStore.items.length === 0 ? editorSelection.value : undefined;
   const selectionContexts = chatContextStore.items.filter((item): item is Extract<ChatContextItem, { type: "selection" }> => item.type === "selection");
-  const displayParts = buildPromptParts(prompt, implicitEditorTab, attachments, [...chatContextParts, ...diffContextParts.value], implicitEditorSelection);
+  const displayParts = buildPromptParts(prompt, implicitEditorTab, routedAttachments, [...chatContextParts, ...diffContextParts.value], implicitEditorSelection);
   const displayPrompt = prompt.trim() || promptFromParts(displayParts);
   const rawSubmitPrompt = prompt.trim() || displayPrompt;
   // 选区文本直接作为结构化 prompt 发送，避免 opencode 将其回放成整文件附件或触发原生文件读取。
   const submitPrompt = selectionContexts.length > 0 ? serializeChatContexts(rawSubmitPrompt, selectionContexts) : rawSubmitPrompt;
   // prompt_async 有 parts 时只发送 parts；selection 必须进入 text part，不能只放在顶层 prompt。
-  const parts = buildPromptParts(submitPrompt, implicitEditorTab, attachments, [...chatContextParts, ...diffContextParts.value], implicitEditorSelection);
+  const parts = buildPromptParts(submitPrompt, implicitEditorTab, routedAttachments, [...chatContextParts, ...diffContextParts.value], implicitEditorSelection);
   if (chatContextStore.items.length > 0) {
     console.debug("workspace_context_send_prepared", {
       component: "AgentWorkbench",
@@ -7163,7 +7190,10 @@ async function handleScheduleNight(payload: {
   }
 
   const guard = captureConversationInteraction();
-  const attachments = payload.attachments ?? chatAttachments.value;
+  const attachments = routeWorkspaceAttachmentsForModel(
+    payload.attachments ?? chatAttachments.value,
+    selectedModelInfo.value
+  );
   const chatContextParts = chatContextItemsToPromptParts(chatContextStore.items);
   const implicitEditorTab = chatContextStore.items.length === 0 ? activeTab.value : undefined;
   const implicitEditorSelection = chatContextStore.items.length === 0 ? editorSelection.value : undefined;

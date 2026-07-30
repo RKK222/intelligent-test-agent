@@ -2745,6 +2745,8 @@ function toModelInfo(value: Record<string, unknown>): ModelInfo {
   const id = text(value.id) ?? text(value.modelId) ?? text(value.modelID) ?? "unknown";
   const variants = Array.isArray(value.variants) ? value.variants.filter((item): item is string => typeof item === "string") : undefined;
   const limit = record(value.limit);
+  const capabilities = record(value.capabilities);
+  const inputCapabilities = record(capabilities?.input);
   return compactObject({
     id,
     providerId: text(value.providerId) ?? text(value.providerID) ?? text(record(value.provider)?.id),
@@ -2753,7 +2755,21 @@ function toModelInfo(value: Record<string, unknown>): ModelInfo {
     outputLimit: number(value.outputLimit) ?? number(limit?.output),
     free: typeof value.free === "boolean" ? value.free : undefined,
     defaultModel: typeof value.defaultModel === "boolean" ? value.defaultModel : undefined,
-    variants
+    variants,
+    capabilities: capabilities
+      ? compactObject({
+          attachment: typeof capabilities.attachment === "boolean" ? capabilities.attachment : undefined,
+          input: inputCapabilities
+            ? compactObject({
+                text: typeof inputCapabilities.text === "boolean" ? inputCapabilities.text : undefined,
+                audio: typeof inputCapabilities.audio === "boolean" ? inputCapabilities.audio : undefined,
+                image: typeof inputCapabilities.image === "boolean" ? inputCapabilities.image : undefined,
+                video: typeof inputCapabilities.video === "boolean" ? inputCapabilities.video : undefined,
+                pdf: typeof inputCapabilities.pdf === "boolean" ? inputCapabilities.pdf : undefined
+              })
+            : undefined
+        })
+      : undefined
   });
 }
 

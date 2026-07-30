@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildComposerPromptParts,
   fileToPromptAttachment,
+  routeWorkspaceAttachmentsForModel,
+  workspaceAttachmentSha256,
   workspaceFileToPromptAttachment
 } from "../src/prompt-parts";
 
@@ -85,5 +87,57 @@ describe("prompt part attachments", () => {
     });
     expect(attachment.part).not.toHaveProperty("content");
     expect(attachment.part).not.toHaveProperty("url");
+  });
+
+  it("routes workspace code files through the native OpenCode Read path", () => {
+    const attachment = workspaceFileToPromptAttachment(
+      new File(["class Demo {}"], "Demo.java", { type: "application/octet-stream" }),
+      ".testagent/attachments/sha256_code.java"
+    );
+
+    expect(routeWorkspaceAttachmentsForModel([attachment], undefined)[0]?.part).toMatchObject({
+      path: ".testagent/attachments/sha256_code.java",
+      mimeType: "text/plain",
+      source: { contextType: "workspace_attachment", deliveryMode: "native" }
+    });
+  });
+
+  it("routes media natively only when the selected model supports its modality", () => {
+    const image = workspaceFileToPromptAttachment(
+      new File([new Uint8Array([1, 2, 3])], "screen.png", { type: "image/png" }),
+      ".testagent/attachments/sha256_image.png"
+    );
+    const supported = routeWorkspaceAttachmentsForModel([image], {
+      id: "vision",
+      name: "Vision",
+      capabilities: { input: { image: true } }
+    });
+    const unsupported = routeWorkspaceAttachmentsForModel([image], {
+      id: "text-only",
+      name: "Text only",
+      capabilities: { input: { image: false } }
+    });
+
+    expect(supported[0]?.part.source).toMatchObject({ deliveryMode: "native" });
+    expect(unsupported[0]?.part.source).toEqual({ contextType: "workspace_attachment" });
+  });
+
+  it("keeps Office files on the workspace-tool path", () => {
+    const excel = workspaceFileToPromptAttachment(
+      new File([new Uint8Array([1, 2, 3])], "cases.xls", { type: "application/vnd.ms-excel" }),
+      ".testagent/attachments/sha256_excel.xls"
+    );
+
+    expect(routeWorkspaceAttachmentsForModel([excel], {
+      id: "vision",
+      name: "Vision",
+      capabilities: { input: { image: true, pdf: true } }
+    })[0]?.part.source).toEqual({ contextType: "workspace_attachment" });
+  });
+
+  it("computes a stable SHA-256 content fingerprint", async () => {
+    await expect(workspaceAttachmentSha256(new Blob(["hello"]))).resolves.toBe(
+      "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    );
   });
 });

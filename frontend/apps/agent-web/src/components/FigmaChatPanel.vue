@@ -2817,7 +2817,7 @@ function selectChatAttachmentFiles(files: FileList | File[]) {
 function onAttachmentInputChange(event: Event) {
   const input = event.target as HTMLInputElement
   selectChatAttachmentFiles(input.files ?? [])
-  // 允许用户再次选择同名文件，后端会按工作区重名规则给出明确反馈。
+  // 允许用户再次选择同名文件；内容一致时复用既有工作区附件，内容变化时保留新版本。
   input.value = ''
 }
 
@@ -5931,7 +5931,7 @@ function onCompositionEnd() {
           <span class="figma-chat-attachment-drop-title"
             >选择或拖拽文件到这里</span
           >
-          <span class="figma-chat-attachment-drop-hint">支持多文件；同名文件可重复上传并分别保存。</span>
+          <span class="figma-chat-attachment-drop-hint">支持多文件；相同内容自动复用，修改后的文件保留新版本。</span>
         </button>
         <div class="figma-chat-attachment-note">
           <span class="figma-chat-attachment-disabled-dot" aria-hidden="true" />

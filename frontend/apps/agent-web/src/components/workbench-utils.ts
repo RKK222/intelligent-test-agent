@@ -1756,14 +1756,16 @@ export function modelIdOnly(value: string) {
 }
 
 /**
- * 聊天附件使用唯一物理文件名，展示名仍由 PromptPart.name 保留原始文件名。
- * storageId 只保留安全字符，避免把请求 ID 之外的分隔符带入工作区路径。
+ * 聊天附件使用内容指纹和扩展名组成稳定物理路径，展示名仍由 PromptPart.name 保留。
+ * 相同内容和扩展名复用同一路径，内容变化自然生成新路径，不覆盖历史消息引用。
  */
 export function workspaceAttachmentTargetPath(directory: string, fileName: string, storageId: string): string {
   const basename = fileName.split(/[\\/]/).filter(Boolean).at(-1) ?? "attachment";
   const safeStorageId = storageId.replace(/[^a-zA-Z0-9_-]/g, "") || "upload";
   const normalizedDirectory = directory.replace(/[\\/]+$/, "");
-  const storedName = `${safeStorageId}-${basename}`;
+  const extensionIndex = basename.lastIndexOf(".");
+  const extension = extensionIndex > 0 ? basename.slice(extensionIndex).replace(/[^a-zA-Z0-9._-]/g, "") : "";
+  const storedName = `${safeStorageId}${extension}`;
   return normalizedDirectory ? `${normalizedDirectory}/${storedName}` : storedName;
 }
 

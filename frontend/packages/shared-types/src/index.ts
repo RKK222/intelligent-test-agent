@@ -1814,6 +1814,7 @@ export type PromptPart =
         startLine?: number;
         endLine?: number;
         contextType?: "selection" | "file" | string;
+        deliveryMode?: "native" | "workspace" | string;
       };
     }
   | { type: "agent"; agentId: string; name?: string }
@@ -2005,6 +2006,16 @@ export type ModelInfo = ModelRef & {
   free?: boolean;
   defaultModel?: boolean;
   variants?: string[];
+  capabilities?: {
+    attachment?: boolean;
+    input?: {
+      text?: boolean;
+      audio?: boolean;
+      image?: boolean;
+      video?: boolean;
+      pdf?: boolean;
+    };
+  };
 };
 
 export type ProviderInfo = {

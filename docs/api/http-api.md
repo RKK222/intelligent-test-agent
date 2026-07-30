@@ -2695,8 +2695,8 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 - `clientRequestId` 由浏览器为一次发送生成；若 `contextToken` 失效，前端重新签发上下文并只重试一次，重试必须复用同一个 `clientRequestId`。服务端只以已成功写入 PostgreSQL 的唯一 Run 锚点确认幂等成功；Redis 中已声明但尚无锚点的 crash-window manifest 不会作为成功响应返回，短保护期后由恢复扫描清理。
 - 前端 HTTP 与 RunEvent SSE 原始报文观察副本在进入页面缓存前统一递归脱敏 `contextToken`，后端 API/Service 日志与错误详情也必须脱敏；`clientRequestId` 不是密钥，但不得被用来替代鉴权或 token 绑定校验。
 - `parts` 会下沉为当前 agent runtime 的 prompt parts；`opencode` 实现适配为 `prompt_async` 的 `text/file/agent` parts，`reference` part 会转换为可读 text part。
-- file part 带 `source.text` 或 `content` 时后端生成 `data:` URL；前端图片附件可直接提交 `url: "data:<mime>;base64,..."`。没有内联内容或 URL 的普通工作区上下文会把 workspace 内路径转为 `file://` URL，越出 workspace 的路径返回 `VALIDATION_ERROR`。`source.startLine/endLine/contextType` 是可选前端来源元数据，当前用于工作区选区和上传附件展示，旧客户端和旧后端可忽略。
-- 聊天上传附件固定提交 `source.contextType="workspace_attachment"`、工作区相对 `path`、原始 `name` 和 `mimeType`，不提交 `content` 或 `data:` URL。后端校验路径仍位于当前 Workspace 后，把它转换成包含文件名、MIME 和工作区相对路径的 text part，提示智能体使用工作区工具读取；不把 Excel 等二进制文件作为模型原生媒体输入。附件原始 file part 继续写入平台用户消息 `partsJson`，供实时和历史 Timeline 展示附件 chip。
+- file part 带 `source.text` 或 `content` 时后端生成 `data:` URL；前端图片附件可直接提交 `url: "data:<mime>;base64,..."`。没有内联内容或 URL 的普通工作区上下文会把 workspace 内路径转为 `file://` URL，越出 workspace 的路径返回 `VALIDATION_ERROR`。`source.startLine/endLine/contextType/deliveryMode` 是可选前端来源元数据，当前用于工作区选区、上传附件展示和原生/工具投递分流，旧客户端和旧后端可忽略新增字段。
+- 聊天上传附件固定提交 `source.contextType="workspace_attachment"`、工作区相对 `path`、原始 `name` 和 `mimeType`，不提交 `content` 或 `data:` URL。文本/代码统一声明 `mimeType="text/plain"` 并设置 `source.deliveryMode="native"`；图片、PDF、音频和视频仅在当前模型 `/api/model` 的 `capabilities.input` 对应模态为 `true` 时设置 native。后端对 native 附件校验路径仍位于当前 Workspace 后转为 `file://`，其余 Excel、Office、压缩包、未知二进制或模型不支持媒体转换成包含文件名、MIME 和精确工作区相对路径的 text part。提供 `command` 时，降级附件清单还会追加到 `arguments`，确保 OpenCode `/command` 的 file-only parts 约束不会丢失本轮附件路径。附件原始 file part 继续写入平台用户消息 `partsJson`，供实时和历史 Timeline 展示附件 chip。
 - `model` 使用 `providerId/modelId` 字符串格式；Java 端只解析并透传给 opencode，不再读取数据库模型目录做校验、默认模型回退或 `/global/config` provider 同步。前端模型和供应商下拉始终以 opencode 配置文件的 `/api/model`、`/api/provider` 原生结果为准。
 - Agent/Model/Variant/Mode 属于运行态选择，不代表 Provider/server/settings 配置；其中 `mode` 当前只保留为平台字段，opencode `PromptInput` 不支持该字段，因此 opencode runtime 不写入 `prompt_async` 请求体。
 
@@ -2903,7 +2903,7 @@ opencode Web App 运行态能力统一由 `test-agent-api` 的 runtime Controlle
 Model/Provider 目录兼容说明：
 
 - `/api/internal/platform/opencode-runtime/models` 和 `/api/internal/platform/opencode-runtime/providers` 始终代理当前用户 opencode server 的 `/api/model`、`/api/provider`，不再受 `ai_model_configs`、内部供应商表或 `test-agent.model-catalog.source` 影响。
-- 前端会把 opencode 原生 provider map 和 model map 归一化成已有 `ModelInfo` / `ProviderInfo`，但不新增数据库模型字段；浏览器历史偏好仍按当前 opencode 返回目录做前端侧清理。
+- 前端会把 opencode 原生 provider map 和 model map 归一化成已有 `ModelInfo` / `ProviderInfo`，并保留 `capabilities.attachment` 与 `capabilities.input.{text,audio,image,video,pdf}` 用于聊天附件投递分流，但不新增数据库模型字段；浏览器历史偏好仍按当前 opencode 返回目录做前端侧清理。
 
 内部模型 Token 与供应商配置 API（全部仅限 `SUPER_ADMIN`）：
 

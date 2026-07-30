@@ -31,6 +31,13 @@ public record AgentPromptPart(
     }
 
     /**
+     * 构造携带平台内部来源元数据的文本 part；适用于协议降级后仍需保留来源身份的上下文。
+     */
+    public static AgentPromptPart text(String text, Map<String, Object> source) {
+        return new AgentPromptPart("text", DomainValidation.requireText(text, "text"), null, null, null, null, source);
+    }
+
+    /**
      * 构造文件 part。
      */
     public static AgentPromptPart file(String url, String mime, String filename, Map<String, Object> source) {

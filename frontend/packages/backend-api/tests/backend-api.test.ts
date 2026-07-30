@@ -120,10 +120,20 @@ describe("backend-api", () => {
       const data = path.endsWith("/config")
         ? { enabled_providers: ["anthropic"] }
         : path.includes("/models")
-          ? [{ id: "claude-sonnet", providerID: "anthropic", name: "Claude Sonnet", limit: { context: 200_000, output: 64_000 } }]
+          ? [{
+              id: "claude-sonnet",
+              providerID: "anthropic",
+              name: "Claude Sonnet",
+              limit: { context: 200_000, output: 64_000 },
+              capabilities: { attachment: true, input: { text: true, image: true, pdf: false } }
+            }]
           : {
               all: [{ id: "anthropic", name: "Anthropic", models: {
-                "claude-sonnet": { name: "Claude Sonnet", limit: { context: 200_000, output: 64_000 } }
+                "claude-sonnet": {
+                  name: "Claude Sonnet",
+                  limit: { context: 200_000, output: 64_000 },
+                  capabilities: { attachment: true, input: { text: true, image: true, pdf: false } }
+                }
               } }],
               connected: ["anthropic"]
             };
@@ -136,14 +146,20 @@ describe("backend-api", () => {
         id: "claude-sonnet",
         providerId: "anthropic",
         contextLimit: 200_000,
-        outputLimit: 64_000
+        outputLimit: 64_000,
+        capabilities: { attachment: true, input: { text: true, image: true, pdf: false } }
       })
     ]);
     await expect(client.listProviders("wrk_1")).resolves.toEqual([
       expect.objectContaining({
         providerId: "anthropic",
         name: "Anthropic",
-        models: [expect.objectContaining({ id: "claude-sonnet", contextLimit: 200_000, outputLimit: 64_000 })]
+        models: [expect.objectContaining({
+          id: "claude-sonnet",
+          contextLimit: 200_000,
+          outputLimit: 64_000,
+          capabilities: { attachment: true, input: { text: true, image: true, pdf: false } }
+        })]
       })
     ]);
   });

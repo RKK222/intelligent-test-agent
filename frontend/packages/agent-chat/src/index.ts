@@ -17,7 +17,13 @@ export type {
   WorkStatusPartRef,
   WorkStatusState
 } from "./opencode-like";
-export { buildComposerPromptParts, fileToPromptAttachment, workspaceFileToPromptAttachment } from "./prompt-parts";
+export {
+  buildComposerPromptParts,
+  fileToPromptAttachment,
+  routeWorkspaceAttachmentsForModel,
+  workspaceAttachmentSha256,
+  workspaceFileToPromptAttachment
+} from "./prompt-parts";
 export type { ComposerAttachment } from "./prompt-parts";
 export {
   reduceAgentChatRuntime,

@@ -5,6 +5,30 @@
 
 ## Entries
 
+### 2026-07-30 - 修复聊天附件投递与重复落盘
+
+### Why
+
+- 聊天附件此前全部降级为工作区路径提示，导致 OpenCode 原生可读取的文本、代码和模型支持的媒体也无法稳定进入原生 `file` 链路；Slash Command 又会过滤降级文本 part，模型偶发找不到本轮附件。
+- 每次上传都用请求 ID 生成新物理名，同一内容跨多轮对话会在 `.testagent/attachments` 累积多个副本，并增加模型误选历史同名文件的概率。
+
+### What
+
+- 前端保留 OpenCode 模型 `capabilities.input`，发送时让文本/代码走原生 `file`，图片、PDF、音频、视频仅在当前模型明确支持对应模态时走原生 `file`；Office、压缩包、未知二进制及不受支持的媒体继续作为 `workspace_attachment` 交给工作区工具。
+- 聊天上传改为按内容 SHA-256 与扩展名生成稳定路径；目标存在且类型、大小一致时直接复用，内容变化生成新路径，不删除历史附件。Slash Command 会把本轮降级附件的精确 `workspacePath` 追加到 arguments，并明确禁止扫描附件目录或选择历史同名文件。
+- 后端保留附件投递来源元数据并继续执行工作区根路径校验；同步前后端单测、模块 README、HTTP API 文档和用户手册。
+
+### How
+
+- 复用现有工作区分片上传、`fileStatus`、PromptPart 与 Run 转换链路，仅增加内容寻址、模型能力分流和命令参数补偿；未新增文件代理、数据库结构、RunEvent 或 generated SDK 改动。
+- `opencode-source/opencode-1.18.4/` 只用于核对模型能力与 file part 契约；项目规范禁止修改 OpenCode 源码，本次该目录零改动。
+
+### Result
+
+- 前端 `lint`、`typecheck`、生产 `build` 通过；全量 Vitest 104 个文件、1720 项通过，1 项既有跳过。后端 `mvn -pl test-agent-opencode-runtime -am test` 共 755 项通过，零失败。
+- 使用 JDK 25、`.env.test` 和 `--skip-frontend-build` 完成三服务重启；后端 health/readiness 为 `UP`，前端 3000 返回 200，CORS 预检正确，manager 连接并将用户 OpenCode 进程拉起为 `HEALTHY`。无头浏览器确认登录首屏非空且无 console/page error；因无登录态，未执行真实附件对话写入。
+- 不涉及数据库/Flyway、RunEvent、鉴权、限流或密钥；HTTP 请求结构只增加可选 `source.deliveryMode` 与模型能力透传，旧客户端缺少标记时继续走原工作区工具路径。
+
 ### 2026-07-30 - 增加 OpenCode Tool 离线依赖部署闸门
 
 ### Why

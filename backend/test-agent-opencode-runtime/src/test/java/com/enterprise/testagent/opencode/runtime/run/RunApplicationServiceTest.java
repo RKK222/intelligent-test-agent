@@ -1538,6 +1538,105 @@ class RunApplicationServiceTest {
     }
 
     @Test
+    void nativeWorkspaceAttachmentUsesValidatedFileUrl() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository()),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
+
+        service.startRun(new StartRunInput(
+                        new SessionId("ses_1234567890abcdef"),
+                        "检查 Java 附件",
+                        List.of(new StartRunInput.PromptPart(
+                                "file",
+                                null,
+                                ".testagent/attachments/sha256_code.java",
+                                "Demo.java",
+                                "text/plain",
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                Map.of("contextType", "workspace_attachment", "deliveryMode", "native"),
+                                null)),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null),
+                "trace_1234567890abcdef");
+
+        OpencodeStartRunCommand command = facade.startRunCommands.getFirst();
+        assertThat(command.parts()).extracting(OpencodePromptPart::type)
+                .containsExactly("text", "file");
+        assertThat(command.parts().get(1)).satisfies(part -> {
+            assertThat(part.mime()).isEqualTo("text/plain");
+            assertThat(part.filename()).isEqualTo("Demo.java");
+            assertThat(part.url()).isEqualTo("file:///tmp/demo/.testagent/attachments/sha256_code.java");
+        });
+    }
+
+    @Test
+    void slashCommandIncludesOnlyCurrentWorkspaceAttachmentPathsInArguments() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository()),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
+
+        service.startRun(new StartRunInput(
+                        new SessionId("ses_1234567890abcdef"),
+                        "/legacy-interface-function-asset-to-md 生成说明",
+                        List.of(new StartRunInput.PromptPart(
+                                "file",
+                                null,
+                                ".testagent/attachments/sha256_cases.xls",
+                                "cases.xls",
+                                "application/vnd.ms-excel",
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                Map.of("contextType", "workspace_attachment"),
+                                null)),
+                        null,
+                        "build",
+                        "opencode/north-mini-code-free",
+                        null,
+                        "build",
+                        "legacy-interface-function-asset-to-md",
+                        "生成说明"),
+                "trace_1234567890abcdef");
+
+        assertThat(facade.startCommandCommands).singleElement().satisfies(command -> {
+            assertThat(command.arguments())
+                    .startsWith("生成说明\n\n以下是本轮用户明确选择的工作区附件")
+                    .contains("\"filename\":\"cases.xls\"")
+                    .contains("\"workspacePath\":\".testagent/attachments/sha256_cases.xls\"")
+                    .contains("不要扫描附件目录或选取历史同名文件");
+            assertThat(command.parts()).extracting(OpencodePromptPart::type)
+                    .containsExactly("text", "text");
+        });
+    }
+
+    @Test
     void legacyRunGeneratesOneDispatchMessageIdForRemoteUserAndRootScope() {
         FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
         FakeRunSessionScopeRepository scopes = new FakeRunSessionScopeRepository();

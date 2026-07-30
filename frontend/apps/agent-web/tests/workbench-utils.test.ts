@@ -102,21 +102,25 @@ describe("opencodeProcessRouteResolution", () => {
 });
 
 describe("workspaceAttachmentTargetPath", () => {
-  it("isolates repeated names under the attachment directory", () => {
+  it("reuses the same content fingerprint and extension under the attachment directory", () => {
     const first = workspaceAttachmentTargetPath(
       ".testagent/attachments",
       "cases.xlsx",
-      "req_first"
+      "sha256_same"
     );
     const second = workspaceAttachmentTargetPath(
       ".testagent/attachments",
-      "cases.xlsx",
-      "req_second"
+      "renamed.xlsx",
+      "sha256_same"
     );
 
-    expect(first).toBe(".testagent/attachments/req_first-cases.xlsx");
-    expect(second).toBe(".testagent/attachments/req_second-cases.xlsx");
-    expect(second).not.toBe(first);
+    expect(first).toBe(".testagent/attachments/sha256_same.xlsx");
+    expect(second).toBe(first);
+    expect(workspaceAttachmentTargetPath(
+      ".testagent/attachments",
+      "cases.xlsx",
+      "sha256_changed"
+    )).not.toBe(first);
   });
 
   it("drops browser-supplied directory segments and unsafe storage id characters", () => {
@@ -124,7 +128,7 @@ describe("workspaceAttachmentTargetPath", () => {
       ".testagent/attachments/",
       "nested\\cases.xlsx",
       "req:third/value"
-    )).toBe(".testagent/attachments/reqthirdvalue-cases.xlsx");
+    )).toBe(".testagent/attachments/reqthirdvalue.xlsx");
   });
 });
 

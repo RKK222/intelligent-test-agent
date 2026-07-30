@@ -1,4 +1,7 @@
-import type { PromptPart } from "@test-agent/shared-types";
+import type { ModelInfo, PromptPart } from "@test-agent/shared-types";
+
+const WORKSPACE_ATTACHMENT_CONTEXT_TYPE = "workspace_attachment";
+const NATIVE_DELIVERY_MODE = "native";
 
 export type ComposerAttachment = {
   id: string;
@@ -45,10 +48,48 @@ export function workspaceFileToPromptAttachment(file: File, workspacePath: strin
       name: file.name,
       mimeType,
       source: {
-        contextType: "workspace_attachment"
+        contextType: WORKSPACE_ATTACHMENT_CONTEXT_TYPE
       }
     }
   };
+}
+
+/**
+ * 根据当前模型的输入模态决定聊天上传附件是否交给 OpenCode 原生 file part。
+ * 文本统一声明为 text/plain 触发 OpenCode Read；Office、压缩包和未知二进制继续走工作区工具。
+ */
+export function routeWorkspaceAttachmentsForModel(
+  attachments: ComposerAttachment[],
+  model: ModelInfo | undefined
+): ComposerAttachment[] {
+  return attachments.map((attachment) => {
+    if (attachment.part.source?.contextType !== WORKSPACE_ATTACHMENT_CONTEXT_TYPE) {
+      return attachment;
+    }
+    const nativeMime = nativeAttachmentMime(attachment, model);
+    const source = { ...attachment.part.source };
+    delete source.deliveryMode;
+    if (nativeMime) {
+      source.deliveryMode = NATIVE_DELIVERY_MODE;
+    }
+    return {
+      ...attachment,
+      part: {
+        ...attachment.part,
+        mimeType: nativeMime ?? attachment.mimeType,
+        source
+      }
+    };
+  });
+}
+
+/** 计算聊天附件的稳定内容指纹，供工作区物理文件复用。 */
+export async function workspaceAttachmentSha256(file: Blob): Promise<string> {
+  if (!globalThis.crypto?.subtle) {
+    throw new Error("当前浏览器不支持附件内容指纹计算");
+  }
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 export function buildComposerPromptParts(prompt: string, attachments: ComposerAttachment[] = []): PromptPart[] {
@@ -61,8 +102,22 @@ export function buildComposerPromptParts(prompt: string, attachments: ComposerAt
   return parts;
 }
 
-function isInlineTextFile(file: File) {
-  if (file.type.startsWith("text/")) {
+function nativeAttachmentMime(attachment: ComposerAttachment, model: ModelInfo | undefined): string | undefined {
+  if (isInlineTextFile(attachment)) {
+    return "text/plain";
+  }
+  const mime = attachment.mimeType.toLowerCase();
+  const input = model?.capabilities?.input;
+  if (mime.startsWith("image/") && input?.image === true) return attachment.mimeType;
+  if (mime.startsWith("audio/") && input?.audio === true) return attachment.mimeType;
+  if (mime.startsWith("video/") && input?.video === true) return attachment.mimeType;
+  if (mime === "application/pdf" && input?.pdf === true) return attachment.mimeType;
+  return undefined;
+}
+
+function isInlineTextFile(file: Pick<File, "name" | "type"> | Pick<ComposerAttachment, "name" | "mimeType">) {
+  const mimeType = "type" in file ? file.type : file.mimeType;
+  if (mimeType.startsWith("text/")) {
     return true;
   }
   return /\.(md|markdown|txt|json|yaml|yml|xml|csv|ts|tsx|js|jsx|java|py|go|rs|css|html)$/i.test(file.name);

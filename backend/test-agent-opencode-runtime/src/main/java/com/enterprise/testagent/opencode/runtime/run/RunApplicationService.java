@@ -96,6 +96,8 @@ public class RunApplicationService {
     private static final int ROUTING_CANDIDATE_LIMIT = 50;
     private static final String DEFAULT_OPENCODE_AGENT = "build";
     private static final String WORKSPACE_ATTACHMENT_CONTEXT_TYPE = "workspace_attachment";
+    private static final String WORKSPACE_ATTACHMENT_DELIVERY_MODE = "deliveryMode";
+    private static final String NATIVE_ATTACHMENT_DELIVERY = "native";
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final Set<String> LIVE_DIFF_TOOLS = Set.of("write", "edit", "apply_patch");
     private static final Duration TRANSPORT_ERROR_TERMINAL_GRACE = Duration.ofMillis(300);
@@ -1079,13 +1081,14 @@ public class RunApplicationService {
                 // 查询失败或未穷尽时宁可等待下一次补偿，也不能把“不确定”当作未接收而重复发送。
                 throw new RunOwnershipLostException("legacy Scheduled Run 远端接收状态暂不可确认");
             }
+            List<AgentPromptPart> promptParts = toAgentPromptParts(input, workspace);
             AgentStartRunCommand command = new AgentStartRunCommand(
                     target.node(),
                     binding.remoteSessionId(),
                     workspaceRootPath(workspace),
                     null,
                     prompt,
-                    toAgentPromptParts(input, workspace),
+                    promptParts,
                     dispatchMessageId,
                     opencodeAgent,
                     null,
@@ -1093,7 +1096,7 @@ public class RunApplicationService {
                     modelSelection.modelId(),
                     input.variant(),
                     input.command(),
-                    input.arguments(),
+                    commandArguments(input, promptParts),
                     traceId);
             renewLegacyScheduledDispatchClaim(scheduledClaim, source, running.runId());
             // prompt_async/command 的 HTTP 结果不是 Run 终态，后台调用异常需给 root 终态留出到达窗口。
@@ -1318,13 +1321,14 @@ public class RunApplicationService {
                         titleWatchToken,
                         claimedOwnership,
                         dispatchMessageId);
+                List<AgentPromptPart> promptParts = toAgentPromptParts(input, workspace);
                 AgentStartRunCommand command = new AgentStartRunCommand(
                         target.node(),
                         binding.remoteSessionId(),
                         workspaceRootPath(workspace),
                         null,
                         prompt,
-                        toAgentPromptParts(input, workspace),
+                        promptParts,
                         dispatchMessageId,
                         opencodeAgent,
                         null,
@@ -1332,7 +1336,7 @@ public class RunApplicationService {
                         modelSelection.modelId(),
                         input.variant(),
                         input.command(),
-                        input.arguments(),
+                        commandArguments(input, promptParts),
                         traceId);
                 Mono.defer(() -> {
                             requireOwnedIfPresent(claimedOwnership);
@@ -2045,6 +2049,31 @@ public class RunApplicationService {
     }
 
     /**
+     * OpenCode command 只接受 file part，会过滤工作区工具型附件的 text part。
+     * 因此仅在 slash command 中把本轮降级附件提示追加到 arguments，兼容 $ARGUMENTS、位置参数和 subtask 命令。
+     */
+    private String commandArguments(StartRunInput input, List<AgentPromptPart> parts) {
+        if (input.command() == null) {
+            return input.arguments();
+        }
+        List<String> workspaceAttachments = parts.stream()
+                .filter(part -> "text".equals(part.type()))
+                .filter(part -> WORKSPACE_ATTACHMENT_CONTEXT_TYPE.equals(part.source().get("contextType")))
+                .map(AgentPromptPart::text)
+                .toList();
+        if (workspaceAttachments.isEmpty()) {
+            return input.arguments();
+        }
+        String prefix = input.arguments() == null || input.arguments().isBlank()
+                ? ""
+                : input.arguments() + "\n\n";
+        return prefix
+                + "以下是本轮用户明确选择的工作区附件。请只使用列出的精确 workspacePath，"
+                + "不要扫描附件目录或选取历史同名文件：\n"
+                + String.join("\n\n", workspaceAttachments);
+    }
+
+    /**
      * 按 part 类型分发到 opencode text/file/agent 表达，未知类型静默丢弃。
      */
     private AgentPromptPart toAgentPromptPart(StartRunInput.PromptPart part, Workspace workspace) {
@@ -2064,7 +2093,7 @@ public class RunApplicationService {
      * 将平台文件上下文转成 opencode part。聊天上传附件使用工作区路径文本，其他上下文继续保持原生 file part。
      */
     private AgentPromptPart toAgentFilePart(StartRunInput.PromptPart part, Workspace workspace) {
-        if (isWorkspaceAttachment(part)) {
+        if (isWorkspaceAttachment(part) && !usesNativeAttachmentDelivery(part)) {
             return toWorkspaceAttachmentTextPart(part, workspace);
         }
         String mime = firstText(part.mimeType(), "text/plain");
@@ -2104,14 +2133,23 @@ public class RunApplicationService {
         attachment.put("workspacePath", relativePath);
         attachment.put("mimeType", mime);
         String metadata = OBJECT_MAPPER.valueToTree(attachment).toString();
+        LinkedHashMap<String, Object> source = new LinkedHashMap<>(attachment);
+        source.put("contextType", WORKSPACE_ATTACHMENT_CONTEXT_TYPE);
+        source.put(WORKSPACE_ATTACHMENT_DELIVERY_MODE, "workspace");
         return AgentPromptPart.text(
                 "用户上传的附件已保存在当前工作区。附件信息：" + metadata
-                        + "\n请根据用户任务使用工作区工具读取或处理 workspacePath 指向的文件。该路径相对于当前工作目录。");
+                        + "\n请根据用户任务使用工作区工具读取或处理 workspacePath 指向的文件。该路径相对于当前工作目录。",
+                source);
     }
 
     /** 判断 file part 是否来自聊天附件上传入口。 */
     private boolean isWorkspaceAttachment(StartRunInput.PromptPart part) {
         return WORKSPACE_ATTACHMENT_CONTEXT_TYPE.equals(part.source().get("contextType"));
+    }
+
+    /** 原生投递标记只改变 OpenCode part 形态，工作区路径仍经过同一安全根校验。 */
+    private boolean usesNativeAttachmentDelivery(StartRunInput.PromptPart part) {
+        return NATIVE_ATTACHMENT_DELIVERY.equals(part.source().get(WORKSPACE_ATTACHMENT_DELIVERY_MODE));
     }
 
     /**
