@@ -296,6 +296,30 @@ class ConfigurationManagementApplicationServiceTest {
     }
 
     @Test
+    void listRepositoryTypesAlwaysPrioritizesTestWorkRepository() {
+        DictionaryRepository dictionaryRepository = org.mockito.Mockito.mock(DictionaryRepository.class);
+        when(dictionaryRepository.findByDictKey(Dictionary.DICT_KEY_REPOSITORY_TYPE)).thenReturn(List.of(
+                dictionary(CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(), "应用代码库", 1),
+                dictionary(CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value(), "应用资产库", 2),
+                dictionary(CodeRepositoryType.TEST_WORK_REPOSITORY.value(), "测试工作库", 99)));
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                org.mockito.Mockito.mock(ConfigurationManagementRepository.class),
+                dictionaryRepository,
+                org.mockito.Mockito.mock(UserRepository.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
+
+        assertThat(service.listRepositoryTypes())
+                .extracting(ConfigurationManagementResponses.RepositoryTypeOptionResponse::typeCode)
+                .containsExactly(
+                        CodeRepositoryType.TEST_WORK_REPOSITORY.value(),
+                        CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(),
+                        CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value());
+    }
+
+    @Test
     void createRepositoryRejectsUnknownRepositoryType() {
         ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
                 org.mockito.Mockito.mock(ConfigurationManagementRepository.class),
@@ -368,9 +392,148 @@ class ConfigurationManagementApplicationServiceTest {
                 org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
                 noReferenceRepositoryState());
 
-        assertThatThrownBy(() -> service.updateRepository("repo_123", "演示库", "Demo", false))
+        assertThatThrownBy(() -> service.updateRepository(
+                        "repo_123",
+                        "演示库",
+                        "Demo",
+                        false,
+                        CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value()))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+    }
+
+    @Test
+    void updateRepositoryAllowsAllExplicitTypeTransitionsWithoutTypeSpecificHistory() {
+        for (CodeRepositoryType currentType : CodeRepositoryType.values()) {
+            for (CodeRepositoryType targetType : CodeRepositoryType.values()) {
+                ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+                CodeRepository current = new CodeRepository(
+                        new CodeRepositoryId("repo_" + currentType.value().toLowerCase()),
+                        "https://gitee.com/demo/" + currentType.value().toLowerCase() + ".git",
+                        "演示库",
+                        "demo",
+                        currentType.value(),
+                        CodeRepositoryDeploymentMode.EXTERNAL.value(),
+                        currentType.standard(),
+                        NOW,
+                        NOW);
+                when(repository.findRepository(current.repositoryId())).thenReturn(Optional.of(current));
+                when(repository.findRepositoryByEnglishName(current.englishName())).thenReturn(Optional.of(current));
+                when(repository.updateRepositoryMetadata(any())).thenAnswer(invocation -> invocation.getArgument(0));
+                ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                        repository,
+                        repositoryTypeDictionaryRepository(),
+                        org.mockito.Mockito.mock(UserRepository.class),
+                        createTestCacheService(),
+                        sshKeyFixtures.encryptionService(),
+                        org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                        noReferenceRepositoryState());
+
+                ConfigurationManagementResponses.CodeRepositoryResponse response = service.updateRepository(
+                        current.repositoryId().value(),
+                        current.name(),
+                        current.englishName(),
+                        null,
+                        targetType.value());
+
+                assertThat(response.repositoryType()).isEqualTo(targetType.value());
+                assertThat(response.standard()).isEqualTo(targetType.standard());
+                verify(repository).updateRepositoryMetadata(argThat(updated ->
+                        targetType.value().equals(updated.repositoryType())
+                                && updated.standard() == targetType.standard()));
+            }
+        }
+    }
+
+    @Test
+    void updateRepositoryPrefersExplicitTypeOverLegacyStandard() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        CodeRepository current = codeRepository("https://gitee.com/demo/source.git");
+        when(repository.findRepository(current.repositoryId())).thenReturn(Optional.of(current));
+        when(repository.findRepositoryByEnglishName(current.englishName())).thenReturn(Optional.of(current));
+        when(repository.updateRepositoryMetadata(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                repositoryTypeDictionaryRepository(),
+                org.mockito.Mockito.mock(UserRepository.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
+
+        ConfigurationManagementResponses.CodeRepositoryResponse response = service.updateRepository(
+                current.repositoryId().value(),
+                current.name(),
+                current.englishName(),
+                true,
+                CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value());
+
+        assertThat(response.repositoryType()).isEqualTo(CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value());
+        assertThat(response.standard()).isFalse();
+    }
+
+    @Test
+    void updateRepositoryKeepsLegacyStandardCompatibilityWhenExplicitTypeIsMissing() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        CodeRepository current = codeRepository("https://gitee.com/demo/source.git");
+        when(repository.findRepository(current.repositoryId())).thenReturn(Optional.of(current));
+        when(repository.findRepositoryByEnglishName(current.englishName())).thenReturn(Optional.of(current));
+        when(repository.updateRepositoryMetadata(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                repositoryTypeDictionaryRepository(),
+                org.mockito.Mockito.mock(UserRepository.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
+
+        ConfigurationManagementResponses.CodeRepositoryResponse response = service.updateRepository(
+                current.repositoryId().value(),
+                current.name(),
+                current.englishName(),
+                true,
+                null);
+
+        assertThat(response.repositoryType()).isEqualTo(CodeRepositoryType.TEST_WORK_REPOSITORY.value());
+        assertThat(response.standard()).isTrue();
+    }
+
+    @Test
+    void updateRepositoryRejectsTypeChangeAfterCreatingApplicationWorkspace() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        CodeRepository current = new CodeRepository(
+                new CodeRepositoryId("repo_test_work"),
+                "https://gitee.com/demo/test-work.git",
+                "测试工作库",
+                "test-work",
+                CodeRepositoryType.TEST_WORK_REPOSITORY.value(),
+                CodeRepositoryDeploymentMode.EXTERNAL.value(),
+                true,
+                NOW,
+                NOW);
+        when(repository.findRepository(current.repositoryId())).thenReturn(Optional.of(current));
+        when(repository.hasApplicationWorkspaceHistory(current.repositoryId())).thenReturn(true);
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                repositoryTypeDictionaryRepository(),
+                org.mockito.Mockito.mock(UserRepository.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
+
+        assertThatThrownBy(() -> service.updateRepository(
+                        current.repositoryId().value(),
+                        current.name(),
+                        current.englishName(),
+                        null,
+                        CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value()))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.getMessage()).contains("工作空间");
+                });
+        verify(repository, org.mockito.Mockito.never()).updateRepositoryMetadata(any());
     }
 
     @Test
@@ -391,7 +554,11 @@ class ConfigurationManagementApplicationServiceTest {
                 referenceRepository);
 
         assertThatThrownBy(() -> service.updateRepository(
-                        current.repositoryId().value(), "资产库新名称", "assets-renamed", false))
+                        current.repositoryId().value(),
+                        "资产库新名称",
+                        "assets-renamed",
+                        null,
+                        CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value()))
                 .isInstanceOfSatisfying(PlatformException.class, exception -> {
                     assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
                     assertThat(exception.getMessage()).contains("英文名称");
@@ -417,7 +584,11 @@ class ConfigurationManagementApplicationServiceTest {
                 referenceRepository);
 
         assertThatThrownBy(() -> service.updateRepository(
-                        current.repositoryId().value(), "资产库新名称", current.englishName(), true))
+                        current.repositoryId().value(),
+                        "资产库新名称",
+                        current.englishName(),
+                        null,
+                        CodeRepositoryType.TEST_WORK_REPOSITORY.value()))
                 .isInstanceOfSatisfying(PlatformException.class, exception -> {
                     assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
                     assertThat(exception.getMessage()).contains("类型");
@@ -445,7 +616,11 @@ class ConfigurationManagementApplicationServiceTest {
                 referenceRepository);
 
         ConfigurationManagementResponses.CodeRepositoryResponse response = service.updateRepository(
-                current.repositoryId().value(), "资产库新名称", current.englishName(), false);
+                current.repositoryId().value(),
+                "资产库新名称",
+                current.englishName(),
+                null,
+                CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value());
 
         assertThat(response.name()).isEqualTo("资产库新名称");
         assertThat(response.englishName()).isEqualTo(current.englishName());
@@ -472,7 +647,11 @@ class ConfigurationManagementApplicationServiceTest {
         service.setAppSourceRepositoryHistory(repositoryId -> true);
 
         assertThatThrownBy(() -> service.updateRepository(
-                        current.repositoryId().value(), "源码库新名称", "source-renamed", false))
+                        current.repositoryId().value(),
+                        "源码库新名称",
+                        "source-renamed",
+                        null,
+                        CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value()))
                 .isInstanceOfSatisfying(PlatformException.class, exception -> {
                     assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
                     assertThat(exception.getMessage()).contains("英文名称");
@@ -496,7 +675,11 @@ class ConfigurationManagementApplicationServiceTest {
         service.setAppSourceRepositoryHistory(repositoryId -> true);
 
         assertThatThrownBy(() -> service.updateRepository(
-                        current.repositoryId().value(), "源码库新名称", current.englishName(), true))
+                        current.repositoryId().value(),
+                        "源码库新名称",
+                        current.englishName(),
+                        null,
+                        CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value()))
                 .isInstanceOfSatisfying(PlatformException.class, exception -> {
                     assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
                     assertThat(exception.getMessage()).contains("类型");
@@ -523,7 +706,11 @@ class ConfigurationManagementApplicationServiceTest {
         service.setAppSourceRepositoryHistory(history);
 
         ConfigurationManagementResponses.CodeRepositoryResponse response = service.updateRepository(
-                current.repositoryId().value(), "源码库新名称", current.englishName(), false);
+                current.repositoryId().value(),
+                "源码库新名称",
+                current.englishName(),
+                null,
+                CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value());
 
         assertThat(response.name()).isEqualTo("源码库新名称");
         assertThat(response.repositoryType()).isEqualTo(CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value());

@@ -407,6 +407,11 @@ public class JdbcConfigurationManagementRepository extends JdbcRepositorySupport
     }
 
     @Override
+    public boolean hasApplicationWorkspaceHistory(CodeRepositoryId repositoryId) {
+        throw new UnsupportedOperationException("版本库工作空间历史查询只允许通过 MyBatis 配置管理仓储执行");
+    }
+
+    @Override
     public ApplicationWorkspace saveWorkspace(ApplicationWorkspace workspace) {
         jdbcClient.sql("""
                         insert into application_workspaces(

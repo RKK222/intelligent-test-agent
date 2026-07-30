@@ -36,9 +36,9 @@ function createApi(): Partial<BackendApiClient> {
   return {
     listRepositories: vi.fn().mockResolvedValue({ items: repositories, page: 1, size: 100, total: repositories.length }),
     listRepositoryTypes: vi.fn().mockResolvedValue([
-      { typeCode: "TEST_WORK_REPOSITORY", typeLabel: "测试工作库" },
       { typeCode: "APPLICATION_CODE_REPOSITORY", typeLabel: "应用代码库" },
-      { typeCode: "APPLICATION_ASSET_REPOSITORY", typeLabel: "应用资产库" }
+      { typeCode: "APPLICATION_ASSET_REPOSITORY", typeLabel: "应用资产库" },
+      { typeCode: "TEST_WORK_REPOSITORY", typeLabel: "测试工作库" }
     ]),
     getRepositoryDeploymentOptions: vi.fn().mockResolvedValue({
       defaultDeploymentMode: "EXTERNAL",
@@ -198,6 +198,18 @@ describe("SettingsRepositoryPanel settings", () => {
       repositoryType: "TEST_WORK_REPOSITORY",
       standard: true
     }));
+  });
+
+  it("prioritizes the test work repository in type selectors", async () => {
+    const { findByText, getByLabelText, getByText } = renderPanel();
+
+    expect(await findByText("共 2 个版本库")).toBeTruthy();
+    await fireEvent.click(getByText("新增"));
+
+    const labels = within(getByLabelText("版本库类型"))
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+    expect(labels).toEqual(["测试工作库", "应用代码库", "应用资产库"]);
   });
 
   it("rejects invalid repository english names before calling the backend", async () => {
@@ -373,7 +385,7 @@ describe("SettingsRepositoryPanel settings", () => {
 
   it("edits repositories via edit dialog", async () => {
     const api = createApi();
-    const { findByText, getByPlaceholderText, getByText, getAllByText, container } = renderPanel(api);
+    const { findByText, getByLabelText, getByPlaceholderText, getByText, getAllByText, container } = renderPanel(api);
 
     expect(await findByText("共 2 个版本库")).toBeTruthy();
 
@@ -382,11 +394,13 @@ describe("SettingsRepositoryPanel settings", () => {
 
     await fireEvent.update(getByPlaceholderText("名称"), "新名称");
     await fireEvent.update(getByPlaceholderText("英文名称"), "newname");
+    await fireEvent.update(getByLabelText("编辑版本库类型"), "APPLICATION_ASSET_REPOSITORY");
     await fireEvent.click(within(container.querySelector(".el-dialog-stub")!).getByText("保存"));
 
     await waitFor(() => expect(api.updateRepository).toHaveBeenCalledWith("repo_wr", {
       name: "新名称",
-      englishName: "newname"
+      englishName: "newname",
+      repositoryType: "APPLICATION_ASSET_REPOSITORY"
     }));
   });
 

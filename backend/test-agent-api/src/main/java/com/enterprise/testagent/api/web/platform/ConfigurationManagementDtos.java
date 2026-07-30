@@ -17,7 +17,7 @@ final class ConfigurationManagementDtos {
     record CreateRepositoryRequest(String gitUrl, String name, String englishName, Boolean standard, String repositoryType, String deploymentMode) {
     }
 
-    record UpdateRepositoryRequest(String name, String englishName, Boolean standard) {
+    record UpdateRepositoryRequest(String name, String englishName, Boolean standard, String repositoryType) {
     }
 
     record LinkRepositoryRequest(String repositoryId) {

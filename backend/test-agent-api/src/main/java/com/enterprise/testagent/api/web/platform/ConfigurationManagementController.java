@@ -159,7 +159,12 @@ public class ConfigurationManagementController {
             @RequestBody ConfigurationManagementDtos.UpdateRepositoryRequest request,
             ServerWebExchange exchange) {
         requireAdmin(exchange);
-        return ok(exchange, service.updateRepository(repositoryId, request.name(), request.englishName(), request.standard()));
+        return ok(exchange, service.updateRepository(
+                repositoryId,
+                request.name(),
+                request.englishName(),
+                request.standard(),
+                request.repositoryType()));
     }
 
     @GetMapping("/applications/{appId}/repositories")

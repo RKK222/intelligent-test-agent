@@ -153,6 +153,9 @@ class MyBatisConfigurationManagementRepositoryIntegrationTest {
 
     @Test
     void workspaceEnabledMigrationDefaultsLegacyRowsAndMyBatisPersistsChanges() {
+        assertThat(repository.hasApplicationWorkspaceHistory(new CodeRepositoryId("repo_legacy_standard"))).isTrue();
+        assertThat(repository.hasApplicationWorkspaceHistory(new CodeRepositoryId("repo_legacy_application"))).isFalse();
+
         ApplicationWorkspace legacy = repository.findWorkspace(new ApplicationWorkspaceId("awp_legacy"))
                 .orElseThrow();
         assertThat(legacy.enabled()).isTrue();

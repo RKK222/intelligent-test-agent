@@ -175,6 +175,11 @@ public class MyBatisConfigurationManagementRepository implements ConfigurationMa
     }
 
     @Override
+    public boolean hasApplicationWorkspaceHistory(CodeRepositoryId repositoryId) {
+        return mapper.hasApplicationWorkspaceHistory(repositoryId.value());
+    }
+
+    @Override
     public ApplicationWorkspace saveWorkspace(ApplicationWorkspace workspace) {
         mapper.insertWorkspace(toRow(workspace));
         return workspace;

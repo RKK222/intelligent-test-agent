@@ -98,6 +98,8 @@ managed/source 选择共用完整 intent authority，旧 terminal 的 repository
 
 `apps/agent-web` 的 Git Changes 负责应用 Agent 与公共 Agent 当前作用域的逐文件和批量暂存；批量入口复用 `packages/backend-api` 既有 Agent stage 方法，不新增 API 或跨作用域状态。
 
+`apps/agent-web` 的版本库新增和编辑入口共用类型字典，并固定将“测试工作库”排在第一项；编辑通过 `packages/backend-api` 和 `packages/shared-types` 的可选 `repositoryType` 请求字段访问配置管理 PATCH API，旧 `standard` 只保留为后端协议兼容字段。
+
 ## 前端访问关系
 
 允许方向：

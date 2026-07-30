@@ -57,6 +57,11 @@ public interface ConfigurationManagementRepository {
 
     Optional<ApplicationWorkspace> findWorkspaceByName(ApplicationId appId, String workspaceName);
 
+    /**
+     * 判断版本库是否已经生成应用工作空间模板；类型变更用它保护既有分支、目录和版本语义。
+     */
+    boolean hasApplicationWorkspaceHistory(CodeRepositoryId repositoryId);
+
     ApplicationWorkspace saveWorkspace(ApplicationWorkspace workspace);
 
     ApplicationWorkspace updateWorkspace(ApplicationWorkspace workspace);

@@ -4,7 +4,7 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * 代码库配置。Git URL 创建后不可编辑，只允许改中文名称、英文名称和兼容的标准仓库标记。
+ * 代码库配置。Git URL 创建后不可编辑，可变元数据包含中文名称、英文名称和版本库类型。
  */
 public record CodeRepository(
         CodeRepositoryId repositoryId,

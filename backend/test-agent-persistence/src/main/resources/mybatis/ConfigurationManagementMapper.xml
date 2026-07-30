@@ -253,6 +253,14 @@
         limit 1
     </select>
 
+    <select id="hasApplicationWorkspaceHistory" resultType="boolean">
+        select exists(
+            select 1
+            from application_workspaces
+            where repository_id = #{repositoryId}
+        )
+    </select>
+
     <insert id="insertWorkspace" parameterType="com.enterprise.testagent.persistence.mybatis.ApplicationWorkspaceRow">
         insert into application_workspaces(
             workspace_id, app_id, repository_id, branch, directory_path, workspace_name, enabled, created_at, updated_at

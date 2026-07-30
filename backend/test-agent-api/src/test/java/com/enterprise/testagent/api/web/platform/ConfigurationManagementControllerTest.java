@@ -265,7 +265,12 @@ class ConfigurationManagementControllerTest {
     @Test
     void initializedReferenceRepositoryIdentityConflictIsReturnedAsConflict() {
         ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
-        when(service.updateRepository("repo_reference_assets", "资产库新名称", "assets-renamed", false))
+        when(service.updateRepository(
+                "repo_reference_assets",
+                "资产库新名称",
+                "assets-renamed",
+                false,
+                CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value()))
                 .thenThrow(new PlatformException(
                         ErrorCode.CONFLICT,
                         "引用资产库初始化后禁止修改版本库英文名称"));
@@ -276,7 +281,7 @@ class ConfigurationManagementControllerTest {
                 .header("X-Trace-Id", TRACE_ID)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
-                        {"name":"资产库新名称","englishName":"assets-renamed","standard":false}
+                        {"name":"资产库新名称","englishName":"assets-renamed","repositoryType":"APPLICATION_CODE_REPOSITORY","standard":false}
                         """)
                 .exchange()
                 .expectStatus().isEqualTo(409)
@@ -284,7 +289,11 @@ class ConfigurationManagementControllerTest {
                 .jsonPath("$.code").isEqualTo(ErrorCode.CONFLICT.name())
                 .jsonPath("$.message").isEqualTo("引用资产库初始化后禁止修改版本库英文名称");
         verify(service).updateRepository(
-                "repo_reference_assets", "资产库新名称", "assets-renamed", false);
+                "repo_reference_assets",
+                "资产库新名称",
+                "assets-renamed",
+                false,
+                CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value());
     }
 
     @Test

@@ -5,6 +5,24 @@
 
 ## Entries
 
+### 2026-07-30 - 支持版本库类型安全编辑并置顶测试工作库
+
+### Why
+- 版本库类型创建时选错后设置页只读，无法在尚未产生下游数据时修正；旧 `standard` 布尔字段又无法区分应用代码库和应用资产库。
+
+### What
+- 版本库 PATCH 新增可选 `repositoryType`，显式三态类型优先于旧 `standard`，并继续由领域模型派生 `standard`；旧客户端省略新字段时保持兼容。
+- 无类型专属历史时三种类型可互相切换；已有 `application_workspaces`、已初始化引用资产副本，或已有 app-source slot/snapshot/operation/cleanup 历史时，按原有分支、目录和磁盘身份返回 `CONFLICT`。工作空间历史查询新增在 MyBatis XML，未在存量 JDBC 实现继续添加 SQL。
+- 前端编辑弹窗改为类型下拉并只提交 `repositoryType`；后端字典响应和前端容错排序都固定将“测试工作库”放在第一项。
+
+### How
+- 回归覆盖 3×3 显式类型转换、显式类型优先级、旧 `standard` 兼容、三类历史冻结、MyBatis `exists` 查询、Controller DTO、前端选项顺序和 API 请求体；同步 HTTP API、模块图和前后端包 README。
+- JDK 21 目标 Maven reactor 测试通过：配置管理 32/32、Controller 17/17、持久层 12/12；前端定向 Vitest 104/104、全工作区 typecheck 和 production build 通过。一次接口扩展编译发现并补齐 workspace-management 测试 Fake 方法。
+
+### Result
+- 使用 JDK 25、`.env.test` 和 `test` profile 完整重启 backend、opencode-manager 和 frontend；health/readiness 为 `UP`，前端与 CORS 预检为 200，manager WebSocket 已连通且 OpenCode 达到 `HEALTHY`。
+- 本次变更 HTTP 请求 DTO 和关系型查询 SQL，但不改数据库结构、Flyway、RunEvent/进度事件、权限/安全边界、环境配置、generated SDK 或 OpenCode 源码；无未完成编码项，企业交付包未在本任务中重建。
+
 ### 2026-07-29 - 修复新关联应用源码无法首次下载
 
 ### Why

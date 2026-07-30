@@ -2494,6 +2494,7 @@ export type CreateRepositoryPayload = {
 export type UpdateRepositoryPayload = {
   name: string;
   englishName: string;
+  repositoryType?: string;
   standard?: boolean;
 };
 

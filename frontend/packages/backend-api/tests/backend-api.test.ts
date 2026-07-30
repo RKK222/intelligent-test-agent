@@ -1684,6 +1684,40 @@ describe("backend-api", () => {
     );
   });
 
+  it("sends explicit repository types when editing repositories", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: {
+        repositoryId: "repo_1",
+        gitUrl: "https://gitee.com/demo/repo.git",
+        name: "演示库",
+        englishName: "demo",
+        repositoryType: "APPLICATION_ASSET_REPOSITORY",
+        standard: false
+      }
+    }), { status: 200 }));
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await client.updateRepository("repo_1", {
+      name: "演示库",
+      englishName: "demo",
+      repositoryType: "APPLICATION_ASSET_REPOSITORY"
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/configuration-management/repositories/repo_1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          name: "演示库",
+          englishName: "demo",
+          repositoryType: "APPLICATION_ASSET_REPOSITORY"
+        })
+      })
+    );
+  });
+
   it("creates an enabled application through the configuration API", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       success: true,

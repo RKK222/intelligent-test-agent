@@ -3492,6 +3492,7 @@ class ManagedWorkspaceApplicationServiceTest {
         @Override public Optional<CodeRepository> findRepositoryByEnglishName(String englishName) { return Optional.of(repository); }
         @Override public CodeRepository saveRepository(CodeRepository repository) { return repository; }
         @Override public CodeRepository updateRepositoryMetadata(CodeRepository repository) { return repository; }
+        @Override public boolean hasApplicationWorkspaceHistory(CodeRepositoryId repositoryId) { return false; }
         @Override public List<CodeRepository> findRepositoriesByApplication(ApplicationId appId) { return List.of(repository); }
         @Override public List<ApplicationDefinition> findApplicationsByRepository(CodeRepositoryId repositoryId) { return List.of(app); }
         @Override public void linkRepository(ApplicationId appId, CodeRepositoryId repositoryId) {}

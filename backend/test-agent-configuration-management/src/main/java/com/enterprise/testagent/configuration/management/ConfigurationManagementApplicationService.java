@@ -271,7 +271,11 @@ public class ConfigurationManagementApplicationService {
 
     public List<RepositoryTypeOptionResponse> listRepositoryTypes() {
         return dictionaryRepository.findByDictKey(Dictionary.DICT_KEY_REPOSITORY_TYPE).stream()
-                .sorted(java.util.Comparator.comparingInt(Dictionary::sortOrder))
+                // 产品入口固定优先展示测试工作库，其余类型继续遵循字典维护的排序。
+                .sorted(java.util.Comparator
+                        .comparingInt((Dictionary dictionary) -> CodeRepositoryType.TEST_WORK_REPOSITORY.value()
+                                .equals(dictionary.dictValue()) ? 0 : 1)
+                        .thenComparingInt(Dictionary::sortOrder))
                 .map(dictionary -> new RepositoryTypeOptionResponse(dictionary.dictValue(), dictionary.dictLabel()))
                 .toList();
     }
@@ -330,12 +334,16 @@ public class ConfigurationManagementApplicationService {
         return repositoryResponse(configurationRepository.saveRepository(repository));
     }
 
-    public CodeRepositoryResponse updateRepository(String repositoryId, String name, String englishName, Boolean standard) {
+    public CodeRepositoryResponse updateRepository(
+            String repositoryId,
+            String name,
+            String englishName,
+            Boolean standard,
+            String repositoryType) {
         CodeRepository repository = existingRepository(new CodeRepositoryId(repositoryId));
         String normalizedEnglishName = normalizeRepositoryEnglishName(englishName);
-        String nextRepositoryType = standard == null || Boolean.TRUE.equals(standard) == repository.standard()
-                ? repository.repositoryType()
-                : CodeRepositoryType.fromStandard(Boolean.TRUE.equals(standard)).value();
+        String nextRepositoryType = normalizeRepositoryTypeForUpdate(repository, repositoryType, standard);
+        ensureWorkspaceIdentity(repository, nextRepositoryType);
         ensureInitializedReferenceIdentity(repository, normalizedEnglishName, nextRepositoryType);
         ensureAppSourceIdentity(repository, normalizedEnglishName, nextRepositoryType);
         ensureRepositoryEnglishNameUnique(normalizedEnglishName, repository.repositoryId());
@@ -345,6 +353,18 @@ public class ConfigurationManagementApplicationService {
                 nextRepositoryType,
                 Instant.now());
         return repositoryResponse(configurationRepository.updateRepositoryMetadata(updated));
+    }
+
+    /** 已创建测试工作空间后，版本库类型继续决定其分支、目录和版本规则，因此禁止切换类型。 */
+    private void ensureWorkspaceIdentity(CodeRepository repository, String nextRepositoryType) {
+        if (repository.repositoryType().equals(nextRepositoryType)
+                || !configurationRepository.hasApplicationWorkspaceHistory(repository.repositoryId())) {
+            return;
+        }
+        throw new PlatformException(
+                ErrorCode.CONFLICT,
+                "版本库已创建测试工作空间，禁止修改版本库类型",
+                Map.of("repositoryId", repository.repositoryId().value(), "field", "repositoryType"));
     }
 
     /** 引用资产初始化后磁盘目录身份由 englishName 固定，且状态行不能失去资产库配置归属。 */
@@ -737,6 +757,22 @@ public class ConfigurationManagementApplicationService {
                         "版本库类型无效",
                         Map.of("field", "repositoryType", "repositoryType", parsedType.value())));
         return parsedType.value();
+    }
+
+    /**
+     * 新客户端以三态 repositoryType 为准；旧客户端未传时继续按 standard 兼容推导。
+     */
+    private String normalizeRepositoryTypeForUpdate(
+            CodeRepository repository,
+            String repositoryType,
+            Boolean legacyStandard) {
+        if (repositoryType != null && !repositoryType.isBlank()) {
+            return normalizeRepositoryTypeForCreate(repositoryType, null);
+        }
+        if (legacyStandard == null || Boolean.TRUE.equals(legacyStandard) == repository.standard()) {
+            return repository.repositoryType();
+        }
+        return CodeRepositoryType.fromStandard(Boolean.TRUE.equals(legacyStandard)).value();
     }
 
     private void ensureRepositoryEnglishNameUnique(String englishName, CodeRepositoryId currentRepositoryId) {

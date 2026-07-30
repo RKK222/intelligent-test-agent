@@ -77,6 +77,8 @@ public interface ConfigurationManagementMapper {
             @Param("appId") String appId,
             @Param("workspaceName") String workspaceName);
 
+    boolean hasApplicationWorkspaceHistory(@Param("repositoryId") String repositoryId);
+
     int insertWorkspace(ApplicationWorkspaceRow workspace);
 
     int updateWorkspace(ApplicationWorkspaceRow workspace);

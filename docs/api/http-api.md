@@ -628,10 +628,10 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `GET` | `/repositories?page=&size=` | 分页查询代码库配置。 |
-| `GET` | `/repository-types` | 查询版本库类型下拉选项，来源 `dictionaries(REPOSITORY_TYPE)`。 |
+| `GET` | `/repository-types` | 查询版本库类型下拉选项，来源 `dictionaries(REPOSITORY_TYPE)`；“测试工作库”固定排在第一项。 |
 | `GET` | `/repository-deployment-options` | 查询版本库部署模式选项、默认模式和当前用户内部 SSH 前缀。 |
 | `POST` | `/repositories` | 新增代码库配置。 |
-| `PATCH` | `/repositories/{repoId}` | 编辑中文名称、英文名称；旧客户端传 `standard` 时继续兼容。 |
+| `PATCH` | `/repositories/{repoId}` | 编辑中文名称、英文名称和版本库类型；旧客户端传 `standard` 时继续兼容。 |
 | `GET` | `/applications/{appId}/repositories` | 按应用查询已关联代码库。 |
 | `POST` | `/applications/{appId}/repositories` | 当前应用关联代码库。 |
 | `DELETE` | `/applications/{appId}/repositories/{repoId}` | 删除应用与代码库关联。 |
@@ -686,9 +686,11 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 {
   "name": "中文名称",
   "englishName": "demo",
-  "standard": true
+  "repositoryType": "TEST_WORK_REPOSITORY"
 }
 ```
+
+新客户端应显式传 `repositoryType`；当 `repositoryType` 与 `standard` 同时出现时，以 `repositoryType` 为准，后端把 `TEST_WORK_REPOSITORY` 派生为 `standard=true`，其余两类派生为 `standard=false`。旧客户端省略 `repositoryType` 时，仍按 `standard` 兼容推导。
 
 `CodeRepositoryResponse`：
 
@@ -714,8 +716,9 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 - `INTERNAL` 模式下前端展示只读前缀 `ssh://{当前用户统一认证号}@`，用户输入后半段；后端保存和列表响应均只返回后半段。分支、目录、clone、fetch、pull、push 等 Git 操作会按当前操作人动态拼接 `ssh://{unifiedAuthId}@{gitUrl}`，并用当前用户 SSH key。
 - `INTERNAL` 模式下 `englishName` 为空时，后端按 Git 路径派生默认值：去掉可选 `.git`，把 `/` 替换为 `-` 并转小写，例如 `scm-share.sdc.cs.enterprise:29418/hzefficiencytools/interfaceplatform` 派生为 `hzefficiencytools-interfaceplatform`。
 - `englishName` 为必填英文名称，仅允许字母、数字和连字符，长度 1 到 128，且不能以连字符开头或结尾；后端统一按小写保存，非空值唯一。历史数据可能为 `null`，但缺少英文名称的历史代码库不能再创建新的应用版本工作区。
-- `repositoryType` 由通用字典 `REPOSITORY_TYPE` 管理；编辑区只展示类型，不提供修改入口。`standard` 字段保留给存量工作空间逻辑，语义统一由版本库类型派生。
-- 应用资产库首次初始化引用副本后，`englishName` 作为各服务器磁盘目录名永久冻结，代码库类型也必须保持 `APPLICATION_ASSET_REPOSITORY`。新客户端继续不提供类型编辑；旧客户端通过 `standard` 试图改变类型，或任意客户端试图改变 `englishName`，均返回 `409 CONFLICT`。尚未初始化的代码库沿用原有编辑兼容行为。
+- `repositoryType` 由通用字典 `REPOSITORY_TYPE` 管理；在没有工作空间或类型专属历史时，测试工作库、应用代码库、应用资产库可互相修改。`standard` 是旧协议遗留的布尔兼容字段，只能区分测试工作库和“非测试工作库”，无法区分两种应用库，因此新请求不应把它当作类型输入。
+- 版本库已被 `application_workspaces` 引用时，切换类型返回 `409 CONFLICT`；这是因为现有工作空间的分支、目录和版本规则已按原类型生成，仅更改配置会造成数据身份不一致。
+- 应用资产库首次初始化引用副本后，`englishName` 作为各服务器磁盘目录名冻结，且类型必须保持 `APPLICATION_ASSET_REPOSITORY`；应用代码库存在任意 app-source slot/snapshot/operation/cleanup 历史后，`englishName` 和 `APPLICATION_CODE_REPOSITORY` 类型同样冻结。试图改变这些磁盘身份均返回 `409 CONFLICT`。
 - HTTPS URL 不支持内嵌账号或 token；本期不做连通性校验。
 - Git 目录和远端树读取不直接写业务配置、不 clone 到本地磁盘；外部 SSH URL 和内部版本库会立即使用当前登录用户保存的唯一 SSH key。当前用户未配置 key 或远端不支持 `git archive --remote` 时返回统一 Git 错误。统一认证号不按敏感信息脱敏，SSH 私钥、token、Cookie、Authorization 仍不得出现在错误详情中。
 

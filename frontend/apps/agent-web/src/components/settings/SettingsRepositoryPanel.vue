@@ -59,7 +59,7 @@ const repoType = ref("");
 const editRepositoryId = ref("");
 const editRepositoryName = ref("");
 const editRepositoryEnglishName = ref("");
-const editRepositoryTypeLabel = ref("");
+const editRepositoryType = ref("");
 const editRepositoryDeploymentMode = ref(EXTERNAL_DEPLOYMENT_MODE);
 const editRepositoryGitUrl = ref("");
 const repoGitUrlInputRef = ref<{ focus: () => void } | null>(null);
@@ -100,10 +100,18 @@ async function loadRepositories() {
     ]);
     repositories.value = all.items;
     repositoryTotal.value = all.total;
-    repositoryTypes.value = types.length ? types : DEFAULT_REPOSITORY_TYPES;
+    repositoryTypes.value = prioritizeTestWorkRepository(types.length ? types : DEFAULT_REPOSITORY_TYPES);
     repositoryDeploymentOptions.value = deploymentOptions;
     repoDeploymentMode.value = deploymentOptions.defaultDeploymentMode || EXTERNAL_DEPLOYMENT_MODE;
   });
+}
+
+// 即使环境字典排序被误改，新增和编辑入口仍固定把测试工作库放在第一项。
+function prioritizeTestWorkRepository(types: RepositoryTypeOption[]) {
+  return [
+    ...types.filter((type) => type.typeCode === TEST_WORK_REPOSITORY_TYPE),
+    ...types.filter((type) => type.typeCode !== TEST_WORK_REPOSITORY_TYPE)
+  ];
 }
 
 function isTestWorkRepositoryType(typeCode: string) {
@@ -233,7 +241,8 @@ function startEditRepository(repository: CodeRepositoryConfig) {
   editRepositoryId.value = repository.repositoryId;
   editRepositoryName.value = repository.name;
   editRepositoryEnglishName.value = repository.englishName ?? "";
-  editRepositoryTypeLabel.value = repositoryTypeLabel(repository);
+  editRepositoryType.value = repository.repositoryType?.trim()
+    || (repository.standard ? TEST_WORK_REPOSITORY_TYPE : APPLICATION_CODE_REPOSITORY_TYPE);
   editRepositoryDeploymentMode.value = repository.deploymentMode || EXTERNAL_DEPLOYMENT_MODE;
   editRepositoryGitUrl.value = repository.gitUrl;
   editDialogVisible.value = true;
@@ -243,7 +252,7 @@ function cancelEditRepository() {
   editRepositoryId.value = "";
   editRepositoryName.value = "";
   editRepositoryEnglishName.value = "";
-  editRepositoryTypeLabel.value = "";
+  editRepositoryType.value = "";
   editRepositoryDeploymentMode.value = EXTERNAL_DEPLOYMENT_MODE;
   editRepositoryGitUrl.value = "";
   editDialogVisible.value = false;
@@ -255,10 +264,15 @@ async function saveRepository() {
     errorMessage.value = REPOSITORY_ENGLISH_NAME_ERROR;
     return;
   }
+  if (!editRepositoryType.value) {
+    errorMessage.value = "请选择版本库类型";
+    return;
+  }
   await run(async () => {
     await api.updateRepository(editRepositoryId.value, {
       name: editRepositoryName.value.trim(),
-      englishName
+      englishName,
+      repositoryType: editRepositoryType.value
     });
     cancelEditRepository();
     await loadRepositories();
@@ -411,7 +425,15 @@ function focusEditNameInput() {
               <span class="ta-readonly-field">{{ repositoryDeploymentModeLabel(editRepositoryDeploymentMode) }}</span>
             </el-form-item>
             <el-form-item label="版本库类型">
-              <span class="ta-readonly-field">{{ editRepositoryTypeLabel }}</span>
+              <el-select
+                v-model="editRepositoryType"
+                aria-label="编辑版本库类型"
+                placeholder="选择版本库类型"
+                style="width: 200px"
+                filterable
+              >
+                <el-option v-for="type in repositoryTypes" :key="type.typeCode" :label="type.typeLabel" :value="type.typeCode" />
+              </el-select>
             </el-form-item>
           </el-form>
           <template #footer>

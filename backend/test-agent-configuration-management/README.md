@@ -34,7 +34,7 @@
 - 不接入运行态 Workspace / Session / Run。
 - 不执行 clone、fetch 或启动会话；Git 目录和树读取只使用远端只读命令。
 - 不创建应用版本工作区或个人 worktree；这些运行编排属于 `test-agent-workspace-management`。
-- 版本库英文名称由本模块在新增/编辑时校验并统一小写保存；版本库类型读取通用字典 `REPOSITORY_TYPE`，新增时由类型派生旧 `standard` 兼容字段；版本库部署模式按每个代码库保存，内部模式只入库 `host[:port]/path`，分支/目录读取时用当前用户统一认证号动态拼接 `ssh://{unifiedAuthId}@`。应用资产库的引用状态一旦已写入初始化分支，`englishName` 和类型固定为磁盘身份；应用代码库一旦存在任意 app-source slot/snapshot/operation/cleanup 历史，同样禁止改变 `englishName` 或离开 `APPLICATION_CODE_REPOSITORY` 类型。旧客户端通过 `standard` 改类型或任意客户端改英文名均返回 `CONFLICT`；无相关历史的代码库保持原编辑兼容。设置页创建工作空间时的初始版本工作区 clone/checkout 由 `test-agent-api` 委托 `test-agent-workspace-management` 执行。
+- 版本库英文名称由本模块在新增/编辑时校验并统一小写保存；版本库类型读取通用字典 `REPOSITORY_TYPE`，新增和编辑都以三态 `repositoryType` 为准，再派生旧 `standard` 兼容字段；版本库部署模式按每个代码库保存，内部模式只入库 `host[:port]/path`，分支/目录读取时用当前用户统一认证号动态拼接 `ssh://{unifiedAuthId}@`。无类型专属历史时三种版本库类型可互相修改；已创建应用工作空间时禁止改类型，应用资产库已初始化引用副本或应用代码库存在 app-source slot/snapshot/operation/cleanup 历史时，其 `englishName` 和类型也按磁盘身份冻结。设置页创建工作空间时的初始版本工作区 clone/checkout 由 `test-agent-api` 委托 `test-agent-workspace-management` 执行。
 - 不定义 HTTP Controller，API 入口放在 `test-agent-api`。
 - 不实现 JDBC，持久化由 `test-agent-persistence` 通过领域 repository 端口提供。
 
@@ -58,8 +58,8 @@
 - `ConfigurationManagementApplicationService`：配置管理编排服务。
 - 工作空间更新接口支持按字段修改 `workspaceName` 和 `enabled`；停用只记录配置状态，模板切换入口的过滤由 workspace-management 负责。
 - `createApplication()` 校验应用 ID/名称非空和数据库字段长度，拒绝重复 ID，并通过 MyBatis 配置管理仓储写入默认启用的应用定义；API 层只允许 `SUPER_ADMIN` 调用。
-- 代码库新增/编辑会校验 `englishName` 为字母、数字、连字符 1 到 128 位，首尾不能是连字符，非空唯一，并统一小写；内部模式创建时 `englishName` 为空会从 Git 路径派生（去掉 `.git`，`/` 替换为 `-`）。新增代码库优先使用 `repositoryType`，`TEST_WORK_REPOSITORY` 写旧 `standard=true`，应用代码库和应用资产库写 `standard=false`，旧客户端未传 `repositoryType` 时仍按 `standard` 推导类型；历史数据允许英文名为空，但后续创建应用版本工作区会被 workspace-management 拒绝。编辑时通过 `ReferenceRepositoryRepository` 只读检查引用初始化状态，并通过 `AppSourceRepositoryHistory` 检查 slot/snapshot/operation/cleanup 任一历史；两类身份守卫只拒绝磁盘身份变化，不阻止中文名称更新，也不在配置模块执行副本 Git 或状态写入。
-- `listRepositoryTypes()` 从通用字典表返回版本库类型下拉选项，字典缺失会让新增请求返回统一 `VALIDATION_ERROR`，避免 API 和 DB 字典不一致；`repositoryDeploymentOptions()` 返回默认部署模式、内部 SSH 前缀和内外部模式选项，默认模式读取 `test-agent.deployment.mode`，不依赖 `test-agent-app` 配置类。
+- 代码库新增/编辑会校验 `englishName` 为字母、数字、连字符 1 到 128 位，首尾不能是连字符，非空唯一，并统一小写；内部模式创建时 `englishName` 为空会从 Git 路径派生（去掉 `.git`，`/` 替换为 `-`）。新增和新客户端编辑都优先使用 `repositoryType`，`TEST_WORK_REPOSITORY` 写旧 `standard=true`，应用代码库和应用资产库写 `standard=false`，旧客户端编辑时未传 `repositoryType` 仍按 `standard` 兼容推导；历史数据允许英文名为空，但后续创建应用版本工作区会被 workspace-management 拒绝。编辑时通过 MyBatis `ConfigurationManagementMapper.xml` 只读检查应用工作空间历史，通过 `ReferenceRepositoryRepository` 检查引用初始化状态，并通过 `AppSourceRepositoryHistory` 检查 slot/snapshot/operation/cleanup 任一历史；身份守卫只拒绝类型/磁盘身份变化，不阻止中文名称更新，也不在配置模块执行副本 Git 或状态写入。
+- `listRepositoryTypes()` 从通用字典表返回版本库类型下拉选项，并固定将 `TEST_WORK_REPOSITORY` 排在第一项，其余类型按字典顺序；字典缺失会让新增/编辑请求返回统一 `VALIDATION_ERROR`，避免 API 和 DB 字典不一致。`repositoryDeploymentOptions()` 返回默认部署模式、内部 SSH 前缀和内外部模式选项，默认模式读取 `test-agent.deployment.mode`，不依赖 `test-agent-app` 配置类。
 - `SshKeyEncryptionService`：包装 common 模块的 SSH 私钥 AES-256-GCM + RSA-OAEP/SHA-256 混合解密和 SHA-256 指纹生成能力，保持配置管理业务入口稳定。
 - `listRepositoryTree()`：返回已关联版本库指定分支的远端目录/文件树，测试工作库只暴露当前应用同名目录子树。
 - `CommonParameterManagementApplicationService`：通用参数管理编排服务，提供分页列表查询（可按平台过滤）与受控 value 更新；不提供新增/删除，参数不存在抛 `NOT_FOUND`，空值抛 `VALIDATION_ERROR`，只读参数（`editable=false`）抛 `VALIDATION_ERROR`「该通用参数为只读参数，修改后将影响系统正常运行」。前端只允许更新 `editable=true` 的通用参数，包括 `OPENCODE_MANAGER_MAX_PROCESSES`、公共 Git 地址 `OPENCODE_PUBLIC_AGENT_GIT_URL` 和全局夜间容量 `NIGHT_EXECUTION_SLOT_CAPACITY`；夜间容量在写库、审计和广播前额外校验为正整数并规范化十进制文本。其它通用参数为只读，必须通过部署配置、数据库迁移或对应初始化流程调整。公共 Git 地址不拆内部/外部两个参数；通用参数编辑弹窗复用 `repositoryDeploymentOptions()` 选项，内部模式展示当前用户 SSH 前缀但只保存 `host[:port]/path`，公共 Agent Git 操作由 workspace-management 按保存值形态决定是否拼接 SSH URL。
