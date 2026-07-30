@@ -5,6 +5,27 @@
 
 ## Entries
 
+### 2026-07-30 - 基于附件指纹新提交重打企业增量包
+
+### Why
+
+- Python 干净归档生成后，主线又合入 `296887a0d`，其运行时变更仅位于前端附件 SHA-256 兼容链路，旧企业平台包不包含该提交。
+
+### What
+
+- 在归档修复提交 `e432a5514` 上重新构建发布后端 JAR和最新前端，并用既有三节点敏感配置重打固定名 `test-agent-internal-release.zip` 与 `test-agent-two-backend-complete.zip`。
+- 组件计划及最终清单均为 `worker runtime=reuse`、`toolbox=reuse`；独立 Python 包仍沿用同批次干净归档，不进入平台 ZIP。
+
+### How
+
+- JDK 25 后端封包、前端手册/类型检查/生产构建、Flyway persistence JAR 字节门禁、后端和前端 `--validate-only`、外层 ZIP 结构/成员/校验和及 macOS 元数据扫描全部通过。
+- 内层发布 SHA-256 为 `5ee0e8c6ffeaf2fe3da419cf2d1fe4fdb3e33e53b23235d5f972563181fee166`，固定外层 ZIP SHA-256 为 `2c1b103e991a9f30b29dd536425f65cc4bb64e06a823623638a31cf9f33e4b38`。
+
+### Result
+
+- 本次新代码只需在 `.2` 前端节点执行前端部署；`.4/.114` 不需要部署该平台包，不重启 Java、manager、worker 或 toolbox，也不执行 Flyway。Python 独立包仍需按原计划分别安装到尚未安装成功的后台。
+- 未新增或修改业务 API、事件、数据库/Flyway SQL、安全配置、generated SDK、OpenCode 源码或 `.env*`；企业实际部署仍待现场执行。
+
 ### 2026-07-30 - 修复 Mac 企业归档隐藏元数据污染并重打 Python 依赖包
 
 ### Why
