@@ -3899,3 +3899,26 @@
 
 - MCP 协议恢复为官方原生服务，企业层只保留离线固定版本、DeepSeek Responses 配置和 approval `never`；公共 Agent 名称仍不含 Codex。
 - 未修改 OpenCode 源码快照、HTTP API、RunEvent、数据库/Flyway、generated SDK 或环境配置。发布前仍需在目标 Linux 4.19 / Docker 18.09.7 / x86_64 节点完成宿主探针，并在网络稳定后重跑完整离线 worker 构建。
+
+## 2026-07-31 - 诊断企业附件报错与交互回复提前终态
+
+### Why
+
+- 企业原始输出中，一次携带 Java、Excel 和 Markdown 附件的 Slash Command 在启动后约 0.6 秒以通用“TestAgent 服务响应异常”失败；另一次确认生成测试报文的 Run 在没有产出文件时显示执行不完。
+
+### What
+
+- 附件失败为平台适配缺陷：原生工作区路径附件被转换成含 `type/path/contextType`、但缺少必填 `text` 的 OpenCode `FileSource`；OpenCode 1.18.4 同时拒绝额外的 `contextType`。该非法 `source` 被直接写入 `/session/{sessionID}/command` 的 file part，符合远端请求在消息生成前立即失败的日志时序。Excel 按设计降级为工作区工具路径，不是本次直接故障点。
+- “执行不完”的主因也是平台缺陷：`interaction_reply_reconcile` 只凭最新 assistant 的 `finish=stop` 就把当前 active Run 写成成功，没有等待 root session idle，也没有排除工具调用后的中间 assistant 轮次。现场事件显示 `run.succeeded` 后约 119ms，同一 Run 又收到 root `busy` 并创建下一条 assistant 消息，且全部 `session.diff` 为空，任务实际未完成。
+- 前端进一步放大了第二个现象：终态后的 `session.status=busy` 会覆盖 reducer 状态，`isRuntimeBusy` 又优先采用 chat busy，因此已收到 `SUCCEEDED` 仍可能继续显示运行中。
+
+### How
+
+- 对照两份企业原始输出的 RunEvent 时间线、请求 PromptPart、OpenCode 1.18.4 `FilePartInput/FileSource` schema、后端 Run 转换/交互回复补偿逻辑和前端运行态 reducer。
+- 定向运行 `RunApplicationServiceTest` 的原生附件与交互回复补偿用例，2 项通过；现有附件用例只断言 URL/mime/filename，交互补偿用例把任意最新 `finish=stop` 直接视为最终消息，未覆盖上述真实时序。
+- 定向运行前端 `follow-up-queue` 与 `runtime-reducer` 测试，2 个文件、68 项通过；现有用例明确允许 `runStatus=SUCCEEDED` 与 `chatStatus=RUNNING` 时保持 busy，缺少同一 Run 晚到状态的身份/终态保护。
+
+### Result
+
+- 两个现象均判定为本项目 bug，当前只完成诊断，没有修改业务代码或宣称修复。第一个问题若需对企业现场做最后的 HTTP 状态闭环，应按 trace `trace_ms88ltcbkkwpk3r18ui` 核对后台 `startCommand` 的下游状态，预期为 OpenCode 请求校验类 4xx。
+- 本次未变更 HTTP API、RunEvent 契约、数据库/Flyway、关系型 SQL、性能、安全、环境配置、generated SDK 或 OpenCode 只读源码；工作区既有 `file-explorer` 修改保持未暂存、未纳入本次记录提交。
