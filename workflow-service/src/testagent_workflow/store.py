@@ -21,6 +21,10 @@ class WorkspaceNotReusable(RuntimeError):
     """历史任务的源码工作区已过期、被清理或不处于可恢复状态。"""
 
 
+class RunNotCancelable(RuntimeError):
+    """运行已经进入非取消终态，不能改写为CANCELED。"""
+
+
 @dataclass(frozen=True, slots=True)
 class Conversation:
     id: str
@@ -119,6 +123,13 @@ class WorkflowStore(Protocol):
         is_super_admin: bool = False,
     ) -> WorkflowRun: ...
 
+    async def transition_claimed_run(
+        self,
+        run_id: str,
+        worker_id: str,
+        status: RunStatus,
+    ) -> WorkflowRun | None: ...
+
     async def get_workspace_lease(self, task_id: str) -> dict[str, Any]: ...
 
     async def list_workspace_leases_due_for_cleanup(
@@ -141,6 +152,7 @@ class InMemoryWorkflowStore:
         self._event_dedup: dict[tuple[str, str], AgUiEvent] = {}
         self._submissions: dict[tuple[str, str], SubmissionResult] = {}
         self._reports: dict[str, list[ReportVersion]] = {}
+        self._run_workers: dict[str, str] = {}
         self._task_repositories: dict[str, list[Any]] = {}
         self._analyzer_results: dict[str, dict[str, dict[str, Any]]] = {}
         self._node_operation_results: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -425,10 +437,20 @@ class InMemoryWorkflowStore:
         return max(values, key=lambda value: value.created_at)
 
     async def request_cancel(self, run_id: str, actor_user_id: str) -> WorkflowRun:
-        run = await self.get_run(run_id, actor_user_id)
-        if not run.status.active:
-            return run
-        return await self.update_run_status(run_id, RunStatus.CANCELED)
+        async with self._lock:
+            run = self._runs.get(run_id)
+            if run is None:
+                raise KeyError("运行不存在")
+            if run.owner_user_id != actor_user_id:
+                raise PermissionError("无权访问该运行")
+            if run.status is RunStatus.CANCELED:
+                return run
+            if not run.status.active:
+                raise RunNotCancelable("运行已经结束，不能取消")
+            updated = self._with_run_status(run, RunStatus.CANCELED)
+            self._runs[run_id] = updated
+            self._run_workers.pop(run_id, None)
+            return updated
 
     async def claim_next_run(
         self,
@@ -436,7 +458,7 @@ class InMemoryWorkflowStore:
         *,
         lease_seconds: int,
     ) -> WorkflowRun | None:
-        del worker_id, lease_seconds
+        del lease_seconds
         async with self._lock:
             queued = sorted(
                 (value for value in self._runs.values() if value.status is RunStatus.QUEUED),
@@ -461,6 +483,7 @@ class InMemoryWorkflowStore:
                 checkpoint_namespace=run.checkpoint_namespace,
             )
             self._runs[run.id] = claimed
+            self._run_workers[run.id] = worker_id
             return claimed
 
     async def renew_run_lease(
@@ -470,8 +493,40 @@ class InMemoryWorkflowStore:
         *,
         lease_seconds: int,
     ) -> bool:
-        del worker_id, lease_seconds
-        return run_id in self._runs and self._runs[run_id].status is RunStatus.RUNNING
+        del lease_seconds
+        return (
+            run_id in self._runs
+            and self._runs[run_id].status is RunStatus.RUNNING
+            and self._run_workers.get(run_id) == worker_id
+        )
+
+    async def transition_claimed_run(
+        self,
+        run_id: str,
+        worker_id: str,
+        status: RunStatus,
+    ) -> WorkflowRun | None:
+        """仅当前租约owner可把RUNNING原子收敛到等待输入或终态。"""
+
+        if status not in {
+            RunStatus.WAITING_INPUT,
+            RunStatus.SUCCEEDED,
+            RunStatus.PARTIAL_FAILED,
+            RunStatus.FAILED,
+        }:
+            raise ValueError("Worker目标状态无效")
+        async with self._lock:
+            run = self._runs.get(run_id)
+            if (
+                run is None
+                or run.status is not RunStatus.RUNNING
+                or self._run_workers.get(run_id) != worker_id
+            ):
+                return None
+            updated = self._with_run_status(run, status)
+            self._runs[run_id] = updated
+            self._run_workers.pop(run_id, None)
+            return updated
 
     async def find_submission(
         self,
@@ -492,23 +547,29 @@ class InMemoryWorkflowStore:
     async def update_run_status(self, run_id: str, status: RunStatus) -> WorkflowRun:
         async with self._lock:
             run = self._runs[run_id]
-            updated = WorkflowRun(
-                id=run.id,
-                task_id=run.task_id,
-                conversation_id=run.conversation_id,
-                owner_user_id=run.owner_user_id,
-                workflow_id=run.workflow_id,
-                workflow_version=run.workflow_version,
-                input_data=run.input_data,
-                status=status,
-                created_at=run.created_at,
-                updated_at=utc_now(),
-                session_digest=run.session_digest,
-                run_kind=run.run_kind,
-                checkpoint_namespace=run.checkpoint_namespace,
-            )
+            updated = self._with_run_status(run, status)
             self._runs[run_id] = updated
+            if status is not RunStatus.RUNNING:
+                self._run_workers.pop(run_id, None)
             return updated
+
+    @staticmethod
+    def _with_run_status(run: WorkflowRun, status: RunStatus) -> WorkflowRun:
+        return WorkflowRun(
+            id=run.id,
+            task_id=run.task_id,
+            conversation_id=run.conversation_id,
+            owner_user_id=run.owner_user_id,
+            workflow_id=run.workflow_id,
+            workflow_version=run.workflow_version,
+            input_data=run.input_data,
+            status=status,
+            created_at=run.created_at,
+            updated_at=utc_now(),
+            session_digest=run.session_digest,
+            run_kind=run.run_kind,
+            checkpoint_namespace=run.checkpoint_namespace,
+        )
 
     async def append_event(
         self,
@@ -764,6 +825,9 @@ class InMemoryWorkflowStore:
             lease = dict(self._workspace_leases[task_id])
             lease["status"] = status
             lease["lastActivityAt"] = utc_now()
+            if status == "CLEANUP_FAILED":
+                # 主动取消可能发生在ACTIVE且无过期时间的工作区；立即进入持久重试队列。
+                lease["expiresAt"] = utc_now()
             if status == "EXPIRED":
                 lease["containerId"] = None
             self._workspace_leases[task_id] = lease

@@ -16,6 +16,7 @@ from testagent_workflow.runner_client import (
     RemoteRunnerAdapter,
     RunGrantManager,
     RunCancellationService,
+    RunnerApiError,
     RunnerAnalyzerAdapter,
     RunnerApiClient,
 )
@@ -93,6 +94,20 @@ class FakeRunner:
         self.canceled = (task_id, run_id)
 
 
+class FailingCancellationRunner(FakeRunner):
+    async def cancel(self, task_id: str, run_id: str) -> None:
+        self.canceled = (task_id, run_id)
+        raise RuntimeError("runner internal address must not escape")
+
+
+class FakeCancellationStore:
+    def __init__(self) -> None:
+        self.statuses: list[tuple[str, str]] = []
+
+    async def set_workspace_cleanup_status(self, task_id: str, status: str) -> None:
+        self.statuses.append((task_id, status))
+
+
 class FakeWorkspaceRunner(FakeRunner):
     runner_id = "runner-a"
 
@@ -138,8 +153,11 @@ class FakeStore:
 
 
 class FakeGrantManager:
+    def __init__(self) -> None:
+        self.revoke_calls = 0
+
     async def revoke(self) -> None:
-        return None
+        self.revoke_calls += 1
 
 
 @dataclass
@@ -152,14 +170,33 @@ class FakeRun:
 async def test_cancel_revokes_all_run_grants_and_removes_workspace() -> None:
     platform = FakePlatform()
     runner = FakeRunner()
+    store = FakeCancellationStore()
 
-    await RunCancellationService(platform, runner).cancel(  # type: ignore[arg-type]
+    await RunCancellationService(platform, runner, store).cancel(  # type: ignore[arg-type]
         FakeRun(),
         PlatformRequestIdentity("usr_owner", "a" * 64),
     )
 
     assert platform.revoked == ("usr_owner", "task_12345678", "run_12345678")
     assert runner.canceled == ("task_12345678", "run_12345678")
+    assert store.statuses == [("task_12345678", "EXPIRED")]
+
+
+@pytest.mark.asyncio
+async def test_cancel_schedules_durable_cleanup_when_runner_is_unavailable() -> None:
+    platform = FakePlatform()
+    runner = FailingCancellationRunner()
+    store = FakeCancellationStore()
+
+    with pytest.raises(RunnerApiError) as captured:
+        await RunCancellationService(platform, runner, store).cancel(  # type: ignore[arg-type]
+            FakeRun(),
+            PlatformRequestIdentity("usr_owner", "a" * 64),
+        )
+
+    assert captured.value.code == "RUN_CANCELLATION_INCOMPLETE"
+    assert platform.revoked == ("usr_owner", "task_12345678", "run_12345678")
+    assert store.statuses == [("task_12345678", "CLEANUP_FAILED")]
 
 
 @pytest.mark.asyncio
@@ -203,6 +240,22 @@ async def test_freeze_persists_runner_workspace_lease_without_credentials() -> N
         "PROVISIONING",
         "ACTIVE",
     ]
+
+
+@pytest.mark.asyncio
+async def test_lease_loss_cleanup_revokes_only_the_adapter_model_grant() -> None:
+    grants = FakeGrantManager()
+    adapter = RemoteRunnerAdapter(
+        FakePlatform(),  # type: ignore[arg-type]
+        FakeWorkspaceRunner(),  # type: ignore[arg-type]
+        "runner-public-key",
+        FakeStore(),
+        grants,  # type: ignore[arg-type]
+    )
+
+    await adapter.revoke_model_access()
+
+    assert grants.revoke_calls == 1
 
 
 class MultiRepositoryRunner:

@@ -6,11 +6,12 @@ USER root
 COPY test-agent-analysis.py /usr/local/bin/test-agent-analysis
 COPY test-agent-safe-shell /usr/local/bin/test-agent-safe-shell
 COPY test-agent-model-relay.py /usr/local/bin/test-agent-model-relay
+COPY test-agent-clean-output.py /usr/local/bin/test-agent-clean-output
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends python3; \
     rm -rf /var/lib/apt/lists/*; \
-    chmod 0555 /usr/local/bin/test-agent-analysis /usr/local/bin/test-agent-safe-shell /usr/local/bin/test-agent-model-relay; \
+    chmod 0555 /usr/local/bin/test-agent-analysis /usr/local/bin/test-agent-safe-shell /usr/local/bin/test-agent-model-relay /usr/local/bin/test-agent-clean-output; \
     if ! getent group 10001 >/dev/null; then groupadd --gid 10001 analysis; fi; \
     if ! getent group 10002 >/dev/null; then groupadd --gid 10002 analysis-relay; fi; \
     if ! getent group 10003 >/dev/null; then groupadd --gid 10003 analysis-output; fi; \
@@ -20,6 +21,7 @@ RUN set -eux; \
     python3 --version; \
     test -x /usr/local/bin/test-agent-safe-shell; \
     test -x /usr/local/bin/test-agent-model-relay; \
+    test -x /usr/local/bin/test-agent-clean-output; \
     test -x /usr/local/lib/codex/bin/codex-official; \
     test -x /usr/local/lib/opencode/bin/opencode-official
 

@@ -60,7 +60,8 @@ for expected in \
   sbom/workflow-service.spdx.json sbom/runner-controller.spdx.json sbom/analysis-task.spdx.json \
   licenses/workflow-service-python.json licenses/runner-controller-python.json licenses/README.txt \
   source/workflow-service.uv.lock source/runner-controller.uv.lock \
-  source/test-agent-analysis.py source/test-agent-model-relay.py source/test-agent-safe-shell \
+  source/test-agent-analysis.py source/test-agent-model-relay.py \
+  source/test-agent-clean-output.py source/test-agent-safe-shell \
   deploy/workflow-docker.sh deploy/analysis-network.sh deploy/bootstrap-workflow.sql \
   deploy/redis-workflow-acl.sh deploy/java-capability.env.example \
   docs/workflow-offline.md release.env SHA256SUMS; do
@@ -82,6 +83,8 @@ grep -Fq 'TEST_AGENT_WORKFLOW_ANALYSIS_MODEL_NAME=workflow-code-analysis' \
 grep -Fq '10001:10003' "${release_root}/source/analysis-task.Dockerfile"
 grep -Fq '10002' "${release_root}/source/analysis-task.Dockerfile"
 grep -Fq '127.0.0.1' "${release_root}/source/test-agent-model-relay.py"
+grep -Fq 'OUTPUT_ROOT = Path("/workspace/output")' \
+  "${release_root}/source/test-agent-clean-output.py"
 assert_unique_env_keys "${release_root}/deploy/workflow.env.example"
 grep -Fq 'CONTROL_ENV_FILE' "${release_root}/deploy/workflow-docker.sh"
 grep -Fq 'RUNNER_ENV_FILE' "${release_root}/deploy/workflow-docker.sh"

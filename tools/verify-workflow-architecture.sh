@@ -67,6 +67,8 @@ grep -Fq 'COPY test-agent-safe-shell /usr/local/bin/test-agent-safe-shell' \
   "${ROOT_DIR}/analysis-task/Dockerfile"
 grep -Fq 'COPY test-agent-model-relay.py /usr/local/bin/test-agent-model-relay' \
   "${ROOT_DIR}/analysis-task/Dockerfile"
+grep -Fq 'COPY test-agent-clean-output.py /usr/local/bin/test-agent-clean-output' \
+  "${ROOT_DIR}/analysis-task/Dockerfile"
 grep -Fq '"10002:10002"' \
   "${ROOT_DIR}/runner-controller/src/testagent_runner/model_relay.py"
 grep -Fq 'restart_clean' \

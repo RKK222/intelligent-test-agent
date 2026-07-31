@@ -7,6 +7,7 @@ from collections.abc import Callable
 from contextlib import suppress
 import logging
 from typing import Any
+from uuid import uuid4
 
 from testagent_workflow.agui import AgUiEventType
 from testagent_workflow.models import RunStatus
@@ -74,7 +75,9 @@ class WorkflowWorker:
         checkpointer: Any = None,
         lease_seconds: int = 60,
     ) -> None:
-        self._worker_id = worker_id
+        # 配置值只标识逻辑实例；每个进程追加随机owner token，防止重启后的新进程
+        # 与尚未退出的旧进程共享worker_id并错误续租同一run。
+        self._worker_id = f"{worker_id[:80]}:{uuid4().hex}"
         self._store = store
         self._registry = registry
         self._dependency_factory = dependency_factory
@@ -149,11 +152,17 @@ class WorkflowWorker:
             analyzer_outcomes = list(result.get("analyzer_outcomes", ()))
             if analyzer_outcomes:
                 await self._store.save_analyzer_results(run.id, analyzer_outcomes)
-            current = await self._store.get_run(run.id, run.owner_user_id)
-            if current.status is RunStatus.CANCELED:
-                return True
             final_status = RunStatus(str(result.get("final_status", "FAILED")))
-            await self._store.update_run_status(run.id, final_status)
+            transitioned = await self._store.transition_claimed_run(
+                run.id,
+                self._worker_id,
+                final_status,
+            )
+            if transitioned is None:
+                current = await self._store.get_run(run.id, run.owner_user_id)
+                if current.status is RunStatus.CANCELED:
+                    return True
+                raise RunLeaseLost("run终态写入时租约已丢失")
             if final_status is RunStatus.WAITING_INPUT:
                 baseline_input = list(result.get("required_baseline_input", []))
                 scope_input = list(result.get("required_scope_input", []))
@@ -182,37 +191,50 @@ class WorkflowWorker:
             )
         except RunLeaseLost:
             # 新Worker可能已经接管；旧Worker不得覆盖状态、发布失败事件或停止共享任务容器。
-            pass
+            await self._revoke_abandoned_model_access(graph_dependencies)
         except Exception:
-            current = await self._store.get_run(run.id, run.owner_user_id)
-            if current.status is not RunStatus.CANCELED:
-                cleanup_runner = getattr(graph_dependencies, "runner", None)
-                if cleanup_runner is not None:
-                    with suppress(Exception):
-                        await cleanup_runner.stop_and_retain(
-                            {
-                                "task_id": run.task_id,
-                                "run_id": run.id,
-                                "conversation_id": run.conversation_id,
-                                "owner_user_id": run.owner_user_id,
-                                "session_digest": run.session_digest,
-                                "run_kind": run.run_kind,
-                                "input_data": run.input_data,
-                            },
-                            f"{run.id}:workspace:failure-retain",
-                        )
-                await self._store.update_run_status(run.id, RunStatus.FAILED)
-                # 异常文本可能包含供应商响应或密钥，只发布固定错误码与trace关联事件。
-                await self._store.append_event(
-                    run.conversation_id,
-                    AgUiEventType.RUN_ERROR,
-                    {
-                        "runId": run.id,
-                        "taskId": run.task_id,
-                        "code": "WORKFLOW_EXECUTION_FAILED",
-                        "message": "工作流执行失败，请使用traceId联系管理员",
-                    },
-                )
+            try:
+                # 失败收敛同样是共享副作用；先续租形成短时栅栏，避免旧Worker停掉接管者容器。
+                await self._assert_lease(run.id)
+            except RunLeaseLost:
+                await self._revoke_abandoned_model_access(graph_dependencies)
+            else:
+                current = await self._store.get_run(run.id, run.owner_user_id)
+                if current.status is not RunStatus.CANCELED:
+                    cleanup_runner = getattr(graph_dependencies, "runner", None)
+                    if cleanup_runner is not None:
+                        with suppress(Exception):
+                            await cleanup_runner.stop_and_retain(
+                                {
+                                    "task_id": run.task_id,
+                                    "run_id": run.id,
+                                    "conversation_id": run.conversation_id,
+                                    "owner_user_id": run.owner_user_id,
+                                    "session_digest": run.session_digest,
+                                    "run_kind": run.run_kind,
+                                    "input_data": run.input_data,
+                                },
+                                f"{run.id}:workspace:failure-retain",
+                            )
+                    transitioned = await self._store.transition_claimed_run(
+                        run.id,
+                        self._worker_id,
+                        RunStatus.FAILED,
+                    )
+                    if transitioned is None:
+                        await self._revoke_abandoned_model_access(graph_dependencies)
+                        return True
+                    # 异常文本可能包含供应商响应或密钥，只发布固定错误码与trace关联事件。
+                    await self._store.append_event(
+                        run.conversation_id,
+                        AgUiEventType.RUN_ERROR,
+                        {
+                            "runId": run.id,
+                            "taskId": run.task_id,
+                            "code": "WORKFLOW_EXECUTION_FAILED",
+                            "message": "工作流执行失败，请使用traceId联系管理员",
+                        },
+                    )
         finally:
             heartbeat.cancel()
             with suppress(asyncio.CancelledError, RunLeaseLost):
@@ -243,3 +265,12 @@ class WorkflowWorker:
             raise RunLeaseLost("run租约续期失败") from exception
         if not renewed:
             raise RunLeaseLost("run租约已丢失")
+
+    @staticmethod
+    async def _revoke_abandoned_model_access(graph_dependencies: Any | None) -> None:
+        cleanup_runner = getattr(graph_dependencies, "runner", None)
+        revoke_model_access = getattr(cleanup_runner, "revoke_model_access", None)
+        if revoke_model_access is not None:
+            # 旧Worker自己的grant可安全精确撤销；这里只清理授权，不操作共享工作区。
+            with suppress(Exception):
+                await revoke_model_access()

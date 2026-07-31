@@ -26,6 +26,29 @@ class FakeGraph:
         return {**state, **(self.result or {})}
 
 
+@pytest.mark.asyncio
+async def test_each_worker_process_uses_a_distinct_lease_owner_token() -> None:
+    class ClaimRecordingStore:
+        def __init__(self) -> None:
+            self.worker_ids: list[str] = []
+
+        async def claim_next_run(self, worker_id, *, lease_seconds):  # type: ignore[no-untyped-def]
+            del lease_seconds
+            self.worker_ids.append(worker_id)
+            return None
+
+    store = ClaimRecordingStore()
+    registry = WorkflowRegistry([])
+    first = WorkflowWorker("worker-a", store, registry, lambda run: None)  # type: ignore[arg-type]
+    second = WorkflowWorker("worker-a", store, registry, lambda run: None)  # type: ignore[arg-type]
+
+    assert await first.run_once() is False
+    assert await second.run_once() is False
+    assert len(set(store.worker_ids)) == 2
+    assert all(value.startswith("worker-a:") for value in store.worker_ids)
+    assert all(len(value) <= 128 for value in store.worker_ids)
+
+
 def definition(graph: FakeGraph) -> WorkflowDefinition:
     return WorkflowDefinition(
         id="code-change-impact-analysis",
@@ -249,11 +272,25 @@ async def test_worker_that_loses_its_lease_does_not_overwrite_the_new_owner() ->
         workflow_version="1.0.0",
         input_data={},
     )
+
+    class LeaseLossCleanupRunner:
+        def __init__(self) -> None:
+            self.revoke_calls = 0
+            self.retain_calls = 0
+
+        async def revoke_model_access(self) -> None:
+            self.revoke_calls += 1
+
+        async def stop_and_retain(self, state, operation_key):  # type: ignore[no-untyped-def]
+            del state, operation_key
+            self.retain_calls += 1
+
+    cleanup = LeaseLossCleanupRunner()
     worker = WorkflowWorker(
         "worker-old",
         store,
         WorkflowRegistry([definition(FakeGraph({"final_status": "SUCCEEDED"}))]),
-        dependency_factory=lambda run: object(),
+        dependency_factory=lambda run: SimpleNamespace(runner=cleanup),
     )
 
     assert await worker.run_once() is True
@@ -261,6 +298,91 @@ async def test_worker_that_loses_its_lease_does_not_overwrite_the_new_owner() ->
     events = await store.list_events(conversation.id)
     assert all(event.type.value != "RUN_ERROR" for event in events)
     assert all(event.type.value != "RUN_FINISHED" for event in events)
+    assert cleanup.revoke_calls == 1
+    assert cleanup.retain_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_cancel_wins_when_it_races_with_worker_terminal_transition() -> None:
+    class CancelBeforeTransitionStore(InMemoryWorkflowStore):
+        async def transition_claimed_run(  # type: ignore[no-untyped-def]
+            self,
+            run_id,
+            worker_id,
+            status,
+        ):
+            await self.request_cancel(run_id, "usr_owner")
+            return await super().transition_claimed_run(run_id, worker_id, status)
+
+    store = CancelBeforeTransitionStore()
+    conversation = await store.create_conversation("usr_owner", "取消终态竞态")
+    queued = await store.create_run(
+        conversation.id,
+        "usr_owner",
+        workflow_id="code-change-impact-analysis",
+        workflow_version="1.0.0",
+        input_data={},
+    )
+    worker = WorkflowWorker(
+        "worker-racing",
+        store,
+        WorkflowRegistry([definition(FakeGraph({"final_status": "SUCCEEDED"}))]),
+        dependency_factory=lambda run: object(),
+    )
+
+    assert await worker.run_once() is True
+    assert (await store.get_run(queued.id, "usr_owner")).status is RunStatus.CANCELED
+    events = await store.list_events(conversation.id)
+    assert all(
+        event.payload.get("status") != RunStatus.SUCCEEDED.value
+        for event in events
+        if event.type.value == "RUN_FINISHED"
+    )
+
+
+@pytest.mark.asyncio
+async def test_graph_failure_after_lease_loss_is_fenced_from_shared_state_and_workspace() -> None:
+    class LeaseLosingStore(InMemoryWorkflowStore):
+        async def renew_run_lease(self, run_id, worker_id, *, lease_seconds):  # type: ignore[no-untyped-def]
+            del run_id, worker_id, lease_seconds
+            return False
+
+    store = LeaseLosingStore()
+    conversation = await store.create_conversation("usr_owner", "异常接管")
+    queued = await store.create_run(
+        conversation.id,
+        "usr_owner",
+        workflow_id="code-change-impact-analysis",
+        workflow_version="1.0.0",
+        input_data={},
+    )
+
+    class LeaseLossCleanupRunner:
+        def __init__(self) -> None:
+            self.revoke_calls = 0
+            self.retain_calls = 0
+
+        async def revoke_model_access(self) -> None:
+            self.revoke_calls += 1
+
+        async def stop_and_retain(self, state, operation_key):  # type: ignore[no-untyped-def]
+            del state, operation_key
+            self.retain_calls += 1
+
+    cleanup = LeaseLossCleanupRunner()
+    worker = WorkflowWorker(
+        "worker-old",
+        store,
+        WorkflowRegistry([definition(FakeGraph(error=RuntimeError("node failed")))]),
+        dependency_factory=lambda run: SimpleNamespace(runner=cleanup),
+    )
+
+    assert await worker.run_once() is True
+    assert (await store.get_run(queued.id, "usr_owner")).status is RunStatus.RUNNING
+    events = await store.list_events(conversation.id)
+    assert all(event.type.value != "RUN_ERROR" for event in events)
+    assert cleanup.revoke_calls == 1
+    assert cleanup.retain_calls == 0
 
 
 @pytest.mark.asyncio

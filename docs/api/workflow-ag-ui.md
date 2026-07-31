@@ -19,6 +19,7 @@
 - 每次连接先发送无 SSE `id` 的 `STATE_SNAPSHOT` 和 `MESSAGES_SNAPSHOT`，随后补发 sequence 大于 `Last-Event-ID` 的 durable 事件。
 - durable sequence 在每个 conversation 内从 1 单调递增；客户端只用 SSE `id` 推进游标，不能从 payload 猜测。
 - 代理必须关闭缓冲；服务发送 keepalive，客户端断线后使用最后 durable id 重连。
+- 客户端只对网络中断、HTTP 429 和 5xx 自动重连；401/403、其他确定性 4xx、不可解析协议帧与消费端 reducer 异常属于终止错误，并必须显式取消底层响应流。每次重连重新读取内存中的 Bearer，并携带最后一个已接收的 durable `Last-Event-ID`；重连定时器结束后必须移除 AbortSignal listener。
 
 帧示例：
 

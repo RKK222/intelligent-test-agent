@@ -131,6 +131,9 @@ async function refreshConversations(ownerUserId?: string) {
 
 async function loadOtherOwner() {
   if (!adminOwnerId.value.trim()) return;
+  // 切换所有者前先释放旧会话流，避免迟到事件污染新用户的空视图或后续选择。
+  connection?.close();
+  connection = undefined;
   await refreshConversations(adminOwnerId.value.trim());
   selectedConversation.value = undefined;
   resetView([]);

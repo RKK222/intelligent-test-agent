@@ -74,7 +74,7 @@ def build_app(settings: WorkflowSettings | None = None):  # type: ignore[no-unty
                 model_name=configuration.intent_model_name,
             ),
             platform=platform,
-            cancellation_service=RunCancellationService(platform, runner),
+            cancellation_service=RunCancellationService(platform, runner, store),
             question_answerer=PlatformGrantedReportQuestionAnswerer(
                 platform,
                 configuration.report_qa_model_name,

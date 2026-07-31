@@ -30,7 +30,7 @@
 | GET | `/workflow-api/v1/conversations/{conversationId}` | 会话及长期保存消息。 |
 | POST | `/workflow-api/v1/conversations/{conversationId}/messages` | 提交自然语言或结构化输入。 |
 | GET | `/workflow-api/v1/conversations/{conversationId}/events` | 带 Authorization 的原生 AG-UI SSE。 |
-| POST | `/workflow-api/v1/runs/{runId}/cancel` | 标记取消、写模型授权撤销墓碑并删除任务工作区。 |
+| POST | `/workflow-api/v1/runs/{runId}/cancel` | 标记取消、写模型授权撤销墓碑并删除任务工作区；对已取消 run 幂等，其他终态返回 `RUN_NOT_CANCELABLE`。 |
 | GET | `/workflow-api/v1/tasks/{taskId}/reports` | 不可变报告版本，当前版本标记 `current=true`。 |
 | GET | `/workflow-api/v1/reports/{reportVersionId}/download` | 下载 Markdown 报告。 |
 
@@ -77,8 +77,10 @@ run 状态：`QUEUED/RUNNING/WAITING_INPUT/SUCCEEDED/PARTIAL_FAILED/FAILED/CANCE
 - 空 diff 直接发布成功报告，不调用代码智能体。
 - Worker从部署配置选择平台模型网关公开模型ID，并随HMAC保护的Runner请求下发；平台grant到达Runner后只经stdin交给任务容器内独立UID的回环relay。Codex/OpenCode固定使用该模型ID、`127.0.0.1` relay和一次性本地token，不能直接持有平台grant或回退工具默认provider。
 - 至少一个分析器成功可发布报告；部分分析器失败或 AgentScope 综合连续失败时为 `PARTIAL_FAILED`。综合失败使用带 `analyzerId` 证据来源的确定性降级报告；全部代码分析器失败才为 `FAILED` 且不发布报告。
+- Worker 只有在持有并成功续租当前 run 租约时才能收敛状态、发布事件或停止工作区；终态更新以单条 PostgreSQL 条件更新原子校验 owner token、租约期限、`RUNNING` 和未取消状态，取消与终态并发时不能被 Worker 覆盖。每个 Worker 进程使用逻辑 ID 加随机 owner token，重启进程不能继承旧租约。丢失租约的旧 Worker 只撤销自己持有的精确模型 grant，不操作已由新 Worker 接管的容器。
 - 局部重分析复用原 task 和冻结坐标，创建新 run/checkpoint namespace/报告版本；多义范围进入 `WAITING_INPUT`。
 - 工作区从最后一次分析、局部重分析或报告追问成功结束后滚动保留 48 小时。已过期工作区不会因报告追问复活；过期后仍可基于报告问答，需要源码必须新建任务。
+- 主动取消成功删除后把持久工作区状态收敛为 `EXPIRED`；Runner 不可用或删除不完整时立即写 `CLEANUP_FAILED` 和到期时间，由 Worker 持久重试，不能因 HTTP 调用失败遗留永不过期的 `ACTIVE` 工作区。
 
 ## Java 窄能力 API
 

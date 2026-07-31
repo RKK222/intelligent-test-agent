@@ -526,7 +526,7 @@ class RemoteRunnerAdapter:
         }
 
     async def stop_and_retain(self, state: ImpactState, operation_key: str) -> None:
-        await self._grant_manager.revoke()
+        await self.revoke_model_access()
         response = await self._runner.retain(
             state["task_id"],
             state["run_id"],
@@ -534,6 +534,11 @@ class RemoteRunnerAdapter:
             operation_key,
         )
         await self._persist_workspace(state, response)
+
+    async def revoke_model_access(self) -> None:
+        """只终止当前Worker持有的模型委托，不触碰可能已被接管的任务容器。"""
+
+        await self._grant_manager.revoke()
 
     async def _persist_workspace(
         self,
@@ -642,9 +647,15 @@ class RunnerAnalyzerAdapter:
 class RunCancellationService:
     """用户取消时并行撤销run级模型委托并删除对应Runner工作区。"""
 
-    def __init__(self, platform: PlatformCapabilityClient, runner: RunnerApiClient) -> None:
+    def __init__(
+        self,
+        platform: PlatformCapabilityClient,
+        runner: RunnerApiClient,
+        store: Any,
+    ) -> None:
         self._platform = platform
         self._runner = runner
+        self._store = store
 
     async def cancel(self, run: Any, identity: PlatformRequestIdentity) -> None:
         results = await asyncio.gather(
@@ -657,6 +668,17 @@ class RunCancellationService:
             return_exceptions=True,
         )
         failures = [value for value in results if isinstance(value, BaseException)]
+        runner_failed = isinstance(results[1], BaseException)
+        try:
+            await self._store.set_workspace_cleanup_status(
+                run.task_id,
+                "CLEANUP_FAILED" if runner_failed else "EXPIRED",
+            )
+        except KeyError:
+            # QUEUED阶段取消时Runner尚未创建工作区，也不会存在租约。
+            pass
+        except Exception as exception:
+            failures.append(exception)
         if failures:
             # 不回显下游异常正文，避免内部URL或凭据上下文进入HTTP错误。
             raise RunnerApiError("RUN_CANCELLATION_INCOMPLETE", 502)

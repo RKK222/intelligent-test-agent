@@ -31,7 +31,12 @@ from testagent_workflow.platform import (
     PlatformCapabilityError,
     PlatformRequestIdentity,
 )
-from testagent_workflow.store import ActiveRunConflict, WorkflowStore, WorkspaceNotReusable
+from testagent_workflow.store import (
+    ActiveRunConflict,
+    RunNotCancelable,
+    WorkflowStore,
+    WorkspaceNotReusable,
+)
 
 
 API_PREFIX = "/workflow-api/v1"
@@ -124,6 +129,12 @@ def create_app(dependencies: AppDependencies) -> FastAPI:
             "WORKSPACE_EXPIRED_NEW_TASK_REQUIRED",
             str(exception),
         )
+
+    @app.exception_handler(RunNotCancelable)
+    async def run_not_cancelable_error(
+        request: Request, exception: RunNotCancelable
+    ) -> JSONResponse:
+        return _error(request, 409, "RUN_NOT_CANCELABLE", str(exception))
 
     @app.exception_handler(PlatformCapabilityError)
     async def platform_error(request: Request, exception: PlatformCapabilityError) -> JSONResponse:
@@ -400,6 +411,7 @@ def create_app(dependencies: AppDependencies) -> FastAPI:
             run.conversation_id,
             AgUiEventType.RUN_FINISHED,
             {"runId": run.id, "taskId": run.task_id, "status": "CANCELED"},
+            dedup_key=f"{run.id}:run:canceled",
         )
         await _audit(
             dependencies.store,

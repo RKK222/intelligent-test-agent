@@ -121,6 +121,8 @@ class AnalysisRunnerPort(Protocol):
 
     async def stop_and_retain(self, state: ImpactState, operation_key: str) -> None: ...
 
+    async def revoke_model_access(self) -> None: ...
+
 
 class AnalyzerPort(Protocol):
     async def analyze(

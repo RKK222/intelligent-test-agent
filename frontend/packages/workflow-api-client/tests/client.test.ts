@@ -46,4 +46,96 @@ describe("WorkflowApiClient", () => {
     expect(events).toEqual(["RUN_FINISHED"]);
     expect(connection.lastEventId()).toBe("8");
   });
+
+  it("reconnects after a transient stream failure and resumes from the last durable event", async () => {
+    const encoder = new TextEncoder();
+    let attempt = 0;
+    const seenHeaders: Array<string | null> = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      attempt += 1;
+      seenHeaders.push(new Headers(init?.headers).get("Last-Event-ID"));
+      if (attempt === 1) {
+        let sent = false;
+        return new Response(new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (!sent) {
+              sent = true;
+              controller.enqueue(encoder.encode(
+                "id: 8\nevent: STATE_DELTA\ndata: {\"type\":\"STATE_DELTA\"}\n\n",
+              ));
+              return;
+            }
+            controller.error(new TypeError("connection reset"));
+          },
+        }), { status: 200, headers: { "Content-Type": "text/event-stream" } });
+      }
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(
+            "id: 9\nevent: RUN_FINISHED\ndata: {\"type\":\"RUN_FINISHED\"}\n\n",
+          ));
+        },
+      }), { status: 200, headers: { "Content-Type": "text/event-stream" } });
+    });
+    const events: string[] = [];
+    const client = new WorkflowApiClient({ token: () => "platform-token", fetch: fetcher });
+    let connection: ReturnType<WorkflowApiClient["connectEvents"]>;
+
+    connection = client.connectEvents(
+      "conv_1",
+      (event) => {
+        events.push(String(event.type));
+        if (event.type === "RUN_FINISHED") connection.close();
+      },
+      { lastEventId: "7", reconnectDelayMs: 0 },
+    );
+    await connection.done;
+
+    expect(events).toEqual(["STATE_DELTA", "RUN_FINISHED"]);
+    expect(seenHeaders).toEqual(["7", "8"]);
+    expect(connection.lastEventId()).toBe("9");
+  });
+
+  it("does not retry an authentication failure", async () => {
+    const onUnauthorized = vi.fn();
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      code: "UNAUTHENTICATED",
+      message: "登录状态已失效",
+    }), { status: 401, headers: { "Content-Type": "application/json" } }));
+    const client = new WorkflowApiClient({
+      token: () => "expired-token",
+      fetch: fetcher,
+      onUnauthorized,
+    });
+
+    const connection = client.connectEvents("conv_1", () => undefined, {
+      reconnectDelayMs: 0,
+    });
+
+    await expect(connection.done).rejects.toMatchObject({ status: 401 });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not turn a consumer reducer failure into an endless reconnect", async () => {
+    const encoder = new TextEncoder();
+    const cancel = vi.fn();
+    const fetcher = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(
+          "id: 1\nevent: RUN_STARTED\ndata: {\"type\":\"RUN_STARTED\"}\n\n",
+        ));
+      },
+      cancel,
+    }), { status: 200, headers: { "Content-Type": "text/event-stream" } }));
+    const client = new WorkflowApiClient({ token: () => "platform-token", fetch: fetcher });
+
+    const connection = client.connectEvents("conv_1", () => {
+      throw new Error("reducer failed");
+    }, { reconnectDelayMs: 0 });
+
+    await expect(connection.done).rejects.toThrow("AG-UI事件消费失败");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
 });

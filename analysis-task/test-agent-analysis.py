@@ -366,5 +366,34 @@ def _safe_output_path(path: Path) -> Path:
     return resolved
 
 
+def _normalize_private_output(analyzer_id: str) -> None:
+    """任务正常或失败退出时恢复私有HOME权限，确保Runner后续能完整清理。"""
+
+    subprocess.run(
+        [
+            "/usr/local/bin/test-agent-clean-output",
+            f"/workspace/output/{analyzer_id}",
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=60,
+        check=False,
+    )
+
+
+def entrypoint() -> int:
+    analyzer_id = (
+        sys.argv[1]
+        if len(sys.argv) == 4 and sys.argv[1] in {"codex", "opencode"}
+        else None
+    )
+    try:
+        return main()
+    finally:
+        if analyzer_id is not None:
+            _normalize_private_output(analyzer_id)
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(entrypoint())

@@ -180,7 +180,8 @@ for required in \
   workflow-service/Dockerfile workflow-service/pyproject.toml workflow-service/uv.lock \
   runner-controller/Dockerfile runner-controller/pyproject.toml runner-controller/uv.lock \
   analysis-task/Dockerfile analysis-task/test-agent-analysis.py \
-  analysis-task/test-agent-model-relay.py analysis-task/test-agent-safe-shell; do
+  analysis-task/test-agent-model-relay.py analysis-task/test-agent-clean-output.py \
+  analysis-task/test-agent-safe-shell; do
   [[ -f "${ROOT_DIR}/${required}" ]] || {
     echo "Required workflow source is missing: ${required}" >&2
     exit 1
@@ -256,7 +257,7 @@ analysis_user="$(docker image inspect --format '{{.Config.User}}' "${analysis_im
 }
 docker run --rm --platform "${PLATFORM}" --network none --read-only --cap-drop ALL \
   --security-opt no-new-privileges --entrypoint /bin/sh "${analysis_image}" -c \
-  'test "$(getconf GNU_LIBC_VERSION)" = "glibc 2.31" && test -x /usr/local/lib/codex/bin/codex-official && test -x /usr/local/lib/opencode/bin/opencode-official && test -x /usr/local/bin/test-agent-analysis && test -x /usr/local/bin/test-agent-model-relay && test -x /usr/local/bin/test-agent-safe-shell && test "$(getent passwd 10002 | cut -d: -f3)" = "10002"'
+  'test "$(getconf GNU_LIBC_VERSION)" = "glibc 2.31" && test -x /usr/local/lib/codex/bin/codex-official && test -x /usr/local/lib/opencode/bin/opencode-official && test -x /usr/local/bin/test-agent-analysis && test -x /usr/local/bin/test-agent-model-relay && test -x /usr/local/bin/test-agent-clean-output && test -x /usr/local/bin/test-agent-safe-shell && test "$(getent passwd 10002 | cut -d: -f3)" = "10002"'
 
 workflow_id="$(docker image inspect --format '{{.Id}}' "${workflow_image}")"
 runner_id="$(docker image inspect --format '{{.Id}}' "${runner_image}")"
@@ -313,6 +314,8 @@ cp "${ROOT_DIR}/analysis-task/Dockerfile" "${STAGING_DIR}/source/analysis-task.D
 cp "${ROOT_DIR}/analysis-task/test-agent-analysis.py" "${STAGING_DIR}/source/test-agent-analysis.py"
 cp "${ROOT_DIR}/analysis-task/test-agent-model-relay.py" \
   "${STAGING_DIR}/source/test-agent-model-relay.py"
+cp "${ROOT_DIR}/analysis-task/test-agent-clean-output.py" \
+  "${STAGING_DIR}/source/test-agent-clean-output.py"
 cp "${ROOT_DIR}/analysis-task/test-agent-safe-shell" \
   "${STAGING_DIR}/source/test-agent-safe-shell"
 cp "${SCRIPT_DIR}/workflow/workflow.env.example" "${STAGING_DIR}/deploy/workflow.env.example"

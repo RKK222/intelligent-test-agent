@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager, suppress
 import asyncio
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
@@ -22,7 +22,11 @@ class PrepareRequest(BaseModel):
     run_id: str = Field(alias="runId", min_length=8, max_length=64)
     operation_key: str = Field(alias="operationKey", min_length=8, max_length=255)
     repositories: list[dict[str, Any]] = Field(min_length=1)
-    analyzer_ids: list[str] = Field(alias="analyzerIds", min_length=1, max_length=3)
+    analyzer_ids: list[Literal["codex", "opencode"]] = Field(
+        alias="analyzerIds",
+        min_length=1,
+        max_length=3,
+    )
 
 
 class RunRequest(BaseModel):

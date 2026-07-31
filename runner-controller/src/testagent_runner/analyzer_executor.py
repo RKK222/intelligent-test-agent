@@ -29,6 +29,7 @@ _DIRECTORY_FLAGS = (
     | getattr(os, "O_CLOEXEC", 0)
 )
 _FILE_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+_REGISTERED_ANALYZERS = ("codex", "opencode")
 
 
 def _ensure_directory_at(parent_fd: int, name: str) -> None:
@@ -46,6 +47,43 @@ def _ensure_directory_at(parent_fd: int, name: str) -> None:
         os.fchmod(descriptor, 0o770)
     finally:
         os.close(descriptor)
+
+
+def _activate_analyzer_directory(output_root: Path, analyzer_id: str) -> int:
+    """父目录仅允许穿越，并只开放当前智能体目录，阻断智能体之间读取或改名产物。"""
+
+    try:
+        root_fd = os.open(output_root, _DIRECTORY_FLAGS)
+    except OSError as exception:
+        raise AnalyzerExecutionError("智能体输出根目录不是安全的普通目录") from exception
+    try:
+        os.fchmod(root_fd, 0o710)
+        current_found = False
+        for candidate in _REGISTERED_ANALYZERS:
+            try:
+                metadata = os.stat(candidate, dir_fd=root_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            if not stat.S_ISDIR(metadata.st_mode):
+                raise AnalyzerExecutionError("智能体输出目录不是安全的普通目录")
+            # 父目录已不可由分析UID写入，lstat与chmod之间不存在分析进程改名竞态。
+            os.chmod(
+                candidate,
+                0o770 if candidate == analyzer_id else 0,
+                dir_fd=root_fd,
+                follow_symlinks=False,
+            )
+            current_found = current_found or candidate == analyzer_id
+        if not current_found:
+            raise AnalyzerExecutionError("智能体输出目录不存在")
+        try:
+            return os.open(analyzer_id, _DIRECTORY_FLAGS, dir_fd=root_fd)
+        except OSError as exception:
+            raise AnalyzerExecutionError("智能体输出目录不是安全的普通目录") from exception
+    except OSError as exception:
+        raise AnalyzerExecutionError("智能体输出目录权限隔离失败") from exception
+    finally:
+        os.close(root_fd)
 
 
 def _replace_file_at(parent_fd: int, name: str, value: bytes, mode: int) -> None:
@@ -160,11 +198,7 @@ class DockerAnalyzerExecutor:
             raise AnalyzerExecutionError("未注册的代码智能体")
         trusted_output_root = output_root.resolve(strict=True)
         analyzer_root = trusted_output_root / analyzer_id
-        analyzer_root.mkdir(exist_ok=True, mode=0o770)
-        try:
-            analyzer_fd = os.open(analyzer_root, _DIRECTORY_FLAGS)
-        except OSError as exception:
-            raise AnalyzerExecutionError("智能体输出目录不是安全的普通目录") from exception
+        analyzer_fd = _activate_analyzer_directory(trusted_output_root, analyzer_id)
         safe_payload = dict(payload)
         grant = str(safe_payload.pop("modelGrant"))
         upstream_url = str(safe_payload["modelGatewayUrl"])

@@ -1524,3 +1524,34 @@
   - 完整上线 ZIP 仍按设计等待企业 Authenticode Windows 客户端、原生 Linux x86_64 客户端及双人审批证据；
     企业 Git remote、目标 Linux/Redis、真实平台 Flyway history、DNS/反代/网络隔离和备份回滚仍需现场验收。
     完成前保持 `LOBEHUB_ENABLED=false`，不得把 server-only 或 Bundle 宣称为完整上线交付。
+
+### 2026-07-31 - 加固长程任务租约、取消与分析容器清理
+
+- Why:
+  - 对独立 Python 长程任务做交付前并发与清理审计时，发现 Worker 重启可能复用租约身份、取消与终态存在
+    先读后写竞态、Runner 失败会遗留无到期时间的活动租约；分析容器还需要证明恢复/执行前身份约束、智能体
+    输出互相隔离，并在私有目录拒绝宿主访问时仍能安全取消和到期删除。
+  - fetch SSE 对瞬时断线没有续传重试，消费端错误结束后也未显式取消响应流；超级管理员切换 owner 时旧会话流
+    可能发送迟到事件。
+- What:
+  - Worker 每进程使用逻辑 ID 加随机 owner token；运行终态改为单条 PostgreSQL 条件更新，原子校验 owner、
+    租约期限、`RUNNING` 与未取消状态。丢失租约只撤销本 Worker 的模型 grant。取消对 `CANCELED` 幂等、拒绝
+    改写其他终态，并将 Runner 删除结果持久收敛为 `EXPIRED/CLEANUP_FAILED` 供立即重试。
+  - Runner 在创建路径前白名单校验不重复的 `codex/opencode`，每次执行与恢复时复核镜像、精确 bind、网络及
+    资源/非特权约束；分析输出根不可列举，非当前智能体目录为 `000`。取消/到期清理先关闭活动状态和容器、
+    淘汰排队请求，再用镜像内固定非跟随链接助手恢复分析 UID 私有目录权限，并执行不忽略错误的整树删除。
+  - AG-UI fetch SSE 对网络、429、5xx 按 durable 游标重连，认证/协议/reducer 错误终止并取消底层流；owner
+    切换前关闭旧连接。同步 Python/Runner/analysis-task、前端、API/AG-UI、安全和企业离线部署文档及打包合同。
+- How:
+  - Python 工作流、Runner 与 analysis-task 合并回归 183 项通过，`compileall` 通过；后端 21 模块
+    `mvn test` 为 `BUILD SUCCESS`；前端 108 个测试文件 1730 passed / 1 skipped，串行 lint、typecheck 与
+    production build 均通过。
+  - 工作流架构隔离、离线包合同、Nginx 单/多后端路由与 `git diff --check` 通过；未修改依赖或 `uv.lock`，
+    本机未安装 `uv`，因此本轮无法额外执行 `uv lock --check`。
+- Result:
+  - 取消不能再被迟到 Worker 终态覆盖；旧 Worker、排队分析、容器约束漂移、跨智能体输出读取和私有目录清理
+    均有失败关闭与回归覆盖。未修改 Java 工作流边界、平台 Flyway/MyBatis SQL、generated SDK、OpenCode 源码、
+    LobeHub 改动或 `.env*`，也没有创建分支。
+  - 正式企业门禁仍未在本机满足：当前仅有 Docker `29.6.1/linux/arm64`，且现有工具镜像缺 Codex；仍须在真实
+    Docker 18.09/linux/amd64、企业 Redis/PostgreSQL、真实模型网关和至少两个跨应用仓库执行端到端验收。
+    WorkflowChat 路由生产 chunk 约 2.86 MiB 的既有性能告警仍保留。

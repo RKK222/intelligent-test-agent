@@ -175,4 +175,45 @@ describe("workflow reports and administration", () => {
 
     await waitFor(() => expect(conversations).toHaveBeenLastCalledWith("usr_owner"));
   });
+
+  it("closes the previous conversation stream before a super administrator changes owner", async () => {
+    const close = vi.fn();
+    const conversations = vi.fn(async (owner?: string) => owner ? [] : [{
+      id: "conv_current",
+      title: "当前用户对话",
+      ownerUserId: "usr_admin",
+      createdAt: "2026-07-31T00:00:00Z",
+    }]);
+    const api = {
+      me: vi.fn(async () => ({
+        userId: "usr_admin",
+        username: "管理员",
+        unifiedAuthId: "AUTH_ADMIN",
+        roles: ["SUPER_ADMIN"],
+      })),
+      repositories: vi.fn(async () => repositoryGroups),
+      conversations,
+      conversation: vi.fn(async () => ({
+        id: "conv_current",
+        title: "当前用户对话",
+        ownerUserId: "usr_admin",
+        createdAt: "2026-07-31T00:00:00Z",
+        messages: [],
+      })),
+      connectEvents: vi.fn(() => ({
+        close,
+        done: new Promise<void>(() => undefined),
+        lastEventId: () => undefined,
+      })),
+    } as unknown as WorkflowApiClient;
+
+    render(WorkflowChat, { props: { api } });
+    await waitFor(() => expect(api.connectEvents).toHaveBeenCalledTimes(1));
+    const ownerInput = screen.getByPlaceholderText("按用户 ID 查看");
+    await fireEvent.update(ownerInput, "usr_owner");
+    await fireEvent.keyDown(ownerInput, { key: "Enter" });
+
+    await waitFor(() => expect(conversations).toHaveBeenLastCalledWith("usr_owner"));
+    expect(close).toHaveBeenCalledTimes(1);
+  });
 });

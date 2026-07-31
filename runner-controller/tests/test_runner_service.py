@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 import json
 from contextlib import nullcontext
 from pathlib import Path
+import stat
 
 import pytest
 
@@ -26,6 +28,9 @@ class ReadyDocker:
         self.server_checks = 0
         self.network_checks: list[str] = []
         self.stop_calls: list[str] = []
+        self.quiesce_calls: list[str] = []
+        self.sanitize_calls: list[str] = []
+        self.verified_specs = []
 
     def verify_server(self) -> None:
         self.server_checks += 1
@@ -36,6 +41,15 @@ class ReadyDocker:
 
     def stop_retained(self, task_id: str) -> None:
         self.stop_calls.append(task_id)
+
+    def quiesce_for_cleanup(self, task_id: str) -> None:
+        self.quiesce_calls.append(task_id)
+
+    def verify_running(self, spec):  # type: ignore[no-untyped-def]
+        self.verified_specs.append(spec)
+
+    def sanitize_workspace(self, spec):  # type: ignore[no-untyped-def]
+        self.sanitize_calls.append(spec.task_id)
 
 
 class RecordingAnalyzers:
@@ -117,6 +131,31 @@ async def test_runner_readiness_rechecks_docker_network_and_disk(tmp_path: Path)
     assert result == {"status": "UP", "network": "test-agent-analysis-egress"}
     assert docker.server_checks == 1
     assert docker.network_checks == ["test-agent-analysis-egress"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("analyzer_ids", [["../../escape"], ["codex", "codex"], []])
+async def test_prepare_rejects_unregistered_duplicate_or_empty_analyzers_before_writing(
+    tmp_path: Path,
+    analyzer_ids: list[str],
+) -> None:
+    runner, _, _ = service(tmp_path)
+    configured = settings(tmp_path)
+
+    with pytest.raises(RunnerServiceError) as captured:
+        await runner.prepare(
+            "task_87654321",
+            {
+                "runId": "run_87654321",
+                "operationKey": "run_87654321:freeze",
+                "repositories": [],
+                "analyzerIds": analyzer_ids,
+            },
+        )
+
+    assert captured.value.code == "ANALYZER_SELECTION_INVALID"
+    assert not (configured.root / "task_87654321").exists()
+    assert not (configured.root / "escape").exists()
 
 
 @pytest.mark.asyncio
@@ -311,6 +350,7 @@ async def test_analyzer_operation_key_returns_cached_result_without_second_model
 
     assert first == second == {"result": {"summary": "ok"}}
     assert len(analyzers.calls) == 1
+    assert len(runner._docker.verified_specs) == 1  # noqa: SLF001 - 锁定容器使用前复核
     cached = list(
         (settings(tmp_path).root / "task_12345678/control/operations/codex").glob(
             "*.json"
@@ -428,6 +468,62 @@ async def test_retain_rolls_expiry_for_a_stopped_workspace_without_stopping_twic
 
 
 @pytest.mark.asyncio
+async def test_resume_rejects_non_retained_state_instead_of_rebinding_an_active_workspace(
+    tmp_path: Path,
+) -> None:
+    runner, _, _ = service(tmp_path)
+
+    with pytest.raises(RunnerServiceError, match="未处于可恢复状态"):
+        await runner.resume("task_12345678", "run_87654321")
+
+    state = json.loads(
+        (settings(tmp_path).root / "task_12345678/state.json").read_text(encoding="utf-8")
+    )
+    assert state["runId"] == "run_12345678"
+    assert state["status"] == "ACTIVE"
+
+
+@pytest.mark.asyncio
+async def test_expiry_cleanup_ignores_active_workspace_even_if_stale_expiry_is_present(
+    tmp_path: Path,
+) -> None:
+    class CleanupDocker(ReadyDocker):
+        def __init__(self) -> None:
+            super().__init__()
+            self.removed: list[str] = []
+
+        def remove(self, task_id: str) -> None:
+            self.removed.append(task_id)
+
+    configured = settings(tmp_path)
+    docker = CleanupDocker()
+    runner = RunnerService(
+        configured,
+        NeverUsedTickets(),  # type: ignore[arg-type]
+        NeverUsedCredentials(),  # type: ignore[arg-type]
+        docker,  # type: ignore[arg-type]
+        RecordingAnalyzers(),  # type: ignore[arg-type]
+    )
+    task_root = configured.root / "task_12345678"
+    task_root.mkdir(parents=True)
+    (task_root / "state.json").write_text(
+        json.dumps(
+            {
+                "taskId": "task_12345678",
+                "runId": "run_12345678",
+                "status": "ACTIVE",
+                "expiresAt": (datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert await runner.cleanup_expired() == []
+    assert docker.removed == []
+    assert task_root.exists()
+
+
+@pytest.mark.asyncio
 async def test_cleanup_preserves_state_when_container_removal_fails_then_retries(
     tmp_path: Path,
 ) -> None:
@@ -459,6 +555,8 @@ async def test_cleanup_preserves_state_when_container_removal_fails_then_retries
                 "taskId": "task_12345678",
                 "runId": "run_12345678",
                 "status": "CLEANUP_FAILED",
+                "analyzerIds": ["codex"],
+                "imageDigest": configured.analysis_image,
                 "repositories": [],
             }
         ),
@@ -474,4 +572,208 @@ async def test_cleanup_preserves_state_when_container_removal_fails_then_retries
     await runner.cleanup("task_12345678", "run_12345678")
 
     assert docker.attempts == 2
+    assert not task_root.exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_normalizes_analyzer_owned_private_directories_before_removal(
+    tmp_path: Path,
+) -> None:
+    class SanitizingDocker(ReadyDocker):
+        def __init__(self, root: Path) -> None:
+            super().__init__()
+            self.root = root
+            self.removed: list[str] = []
+
+        def sanitize_workspace(self, spec):  # type: ignore[no-untyped-def]
+            super().sanitize_workspace(spec)
+            private = self.root / spec.task_id / "workspace/output/codex/home/.codex"
+            private.chmod(0o770)
+
+        def remove(self, task_id: str) -> None:
+            self.removed.append(task_id)
+
+    configured = settings(tmp_path)
+    docker = SanitizingDocker(configured.root)
+    runner = RunnerService(
+        configured,
+        NeverUsedTickets(),  # type: ignore[arg-type]
+        NeverUsedCredentials(),  # type: ignore[arg-type]
+        docker,  # type: ignore[arg-type]
+        RecordingAnalyzers(),  # type: ignore[arg-type]
+    )
+    task_root = configured.root / "task_12345678"
+    private = task_root / "workspace/output/codex/home/.codex"
+    private.mkdir(parents=True)
+    private.chmod(0o000)
+    (task_root / "state.json").write_text(
+        json.dumps(
+            {
+                "taskId": "task_12345678",
+                "runId": "run_12345678",
+                "status": "STOPPED_RETAINED",
+                "analyzerIds": ["codex"],
+                "imageDigest": configured.analysis_image,
+                "repositories": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    await runner.cleanup("task_12345678", "run_12345678")
+
+    assert docker.sanitize_calls == ["task_12345678"]
+    assert docker.removed == ["task_12345678"]
+    assert not task_root.exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stops_untrusted_process_before_opening_private_output_directories(
+    tmp_path: Path,
+) -> None:
+    class OrderedCleanupDocker(ReadyDocker):
+        def __init__(self, output_root: Path) -> None:
+            super().__init__()
+            self.output_root = output_root
+            self.events: list[str] = []
+
+        def quiesce_for_cleanup(self, task_id: str) -> None:
+            super().quiesce_for_cleanup(task_id)
+            assert stat.S_IMODE(self.output_root.stat().st_mode) == 0o710
+            assert stat.S_IMODE((self.output_root / "codex").stat().st_mode) == 0
+            self.events.append("quiesced")
+
+        def sanitize_workspace(self, spec):  # type: ignore[no-untyped-def]
+            super().sanitize_workspace(spec)
+            assert stat.S_IMODE(self.output_root.stat().st_mode) == 0o750
+            assert stat.S_IMODE((self.output_root / "codex").stat().st_mode) == 0o770
+            self.events.append("sanitized")
+
+        def remove(self, task_id: str) -> None:
+            self.events.append("removed")
+
+    configured = settings(tmp_path)
+    task_root = configured.root / "task_12345678"
+    output_root = task_root / "workspace/output"
+    analyzer_root = output_root / "codex"
+    analyzer_root.mkdir(parents=True)
+    output_root.chmod(0o710)
+    analyzer_root.chmod(0o000)
+    (task_root / "state.json").write_text(
+        json.dumps(
+            {
+                "taskId": "task_12345678",
+                "runId": "run_12345678",
+                "status": "ACTIVE",
+                "analyzerIds": ["codex"],
+                "imageDigest": configured.analysis_image,
+                "repositories": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    docker = OrderedCleanupDocker(output_root)
+    runner = RunnerService(
+        configured,
+        NeverUsedTickets(),  # type: ignore[arg-type]
+        NeverUsedCredentials(),  # type: ignore[arg-type]
+        docker,  # type: ignore[arg-type]
+        RecordingAnalyzers(),  # type: ignore[arg-type]
+    )
+
+    await runner.cleanup("task_12345678", "run_12345678")
+
+    assert docker.events == ["quiesced", "quiesced", "sanitized", "removed"]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_fences_waiting_analysis_before_deleting_workspace(tmp_path: Path) -> None:
+    class BlockingAnalyzers(RecordingAnalyzers):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.finish = asyncio.Event()
+
+        async def execute(
+            self,
+            task_id: str,
+            analyzer_id: str,
+            output_root: Path,
+            payload: dict[str, object],
+        ) -> dict[str, object]:
+            self.calls.append((task_id, analyzer_id, payload))
+            self.started.set()
+            await self.finish.wait()
+            return {"summary": "ok"}
+
+    class CancelDocker(ReadyDocker):
+        def __init__(self, analyzers: BlockingAnalyzers) -> None:
+            super().__init__()
+            self.analyzers = analyzers
+            self.removed: list[str] = []
+
+        def quiesce_for_cleanup(self, task_id: str) -> None:
+            super().quiesce_for_cleanup(task_id)
+            self.analyzers.finish.set()
+
+        def remove(self, task_id: str) -> None:
+            self.removed.append(task_id)
+
+    configured = settings(tmp_path)
+    analyzers = BlockingAnalyzers()
+    docker = CancelDocker(analyzers)
+    runner = RunnerService(
+        configured,
+        NeverUsedTickets(),  # type: ignore[arg-type]
+        NeverUsedCredentials(),  # type: ignore[arg-type]
+        docker,  # type: ignore[arg-type]
+        analyzers,
+    )
+    task_root = configured.root / "task_12345678"
+    (task_root / "workspace/repos").mkdir(parents=True)
+    (task_root / "workspace/output/codex").mkdir(parents=True)
+    (task_root / "state.json").write_text(
+        json.dumps(
+            {
+                "taskId": "task_12345678",
+                "runId": "run_12345678",
+                "status": "ACTIVE",
+                "analyzerIds": ["codex"],
+                "imageDigest": configured.analysis_image,
+                "repositories": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    base = {
+        "runId": "run_12345678",
+        "modelGrant": "wfg_" + "x" * 32,
+        "modelGatewayUrl": configured.model_gateway_url,
+        "modelName": "workflow-code-analysis",
+        "outputSchema": {},
+    }
+    active = asyncio.create_task(
+        runner.analyze(
+            "task_12345678",
+            "codex",
+            {**base, "operationKey": "run_12345678:analyze:first"},
+        )
+    )
+    await analyzers.started.wait()
+    waiting = asyncio.create_task(
+        runner.analyze(
+            "task_12345678",
+            "codex",
+            {**base, "operationKey": "run_12345678:analyze:waiting"},
+        )
+    )
+
+    await runner.cleanup("task_12345678", "run_12345678")
+
+    assert await active == {"result": {"summary": "ok"}}
+    with pytest.raises(RunnerServiceError) as captured:
+        await waiting
+    assert captured.value.code == "WORKSPACE_NOT_ACTIVE"
+    assert len(analyzers.calls) == 1
+    assert docker.removed == ["task_12345678"]
     assert not task_root.exists()

@@ -7,6 +7,7 @@ from contextlib import ExitStack, suppress
 from datetime import UTC, datetime, timedelta
 import hashlib
 import json
+import logging
 from pathlib import Path
 import re
 import shutil
@@ -25,6 +26,9 @@ from testagent_runner.git_workspace import (
 from testagent_runner.settings import RunnerSettings
 from testagent_runner.scope_resolver import ScopeResolver
 from testagent_runner.tickets import CheckoutTicketClient
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class RunnerServiceError(RuntimeError):
@@ -70,6 +74,7 @@ class RunnerService:
             await close()
 
     async def prepare(self, task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        analyzer_ids = self._validated_analyzer_ids(payload.get("analyzerIds"))
         async with self._lock(task_id):
             self._ensure_capacity()
             task_root = self._task_root(task_id)
@@ -81,8 +86,9 @@ class RunnerService:
                 raise RunnerServiceError("WORKSPACE_ALREADY_EXISTS", "任务工作区已经存在")
             workspace_root = task_root / "workspace"
             output_root = workspace_root / "output"
-            output_root.mkdir(parents=True, exist_ok=False, mode=0o770)
-            output_root.chmod(0o770)
+            # 分析UID只能穿越输出根，不能列举、创建或改名其他智能体目录。
+            output_root.mkdir(parents=True, exist_ok=False, mode=0o710)
+            output_root.chmod(0o710)
             frozen: list[FrozenCheckout] = []
             container_started = False
             try:
@@ -129,10 +135,10 @@ class RunnerService:
                             ),
                         )
                     frozen.append(checkout)
-                for analyzer_id in payload.get("analyzerIds", []):
+                for analyzer_id in analyzer_ids:
                     analyzer_root = output_root / str(analyzer_id)
-                    analyzer_root.mkdir(mode=0o770)
-                    analyzer_root.chmod(0o770)
+                    analyzer_root.mkdir(mode=0o000)
+                    analyzer_root.chmod(0o000)
                 container_id = await asyncio.to_thread(
                     self._docker.create_and_start,
                     AnalysisContainerSpec(
@@ -141,7 +147,7 @@ class RunnerService:
                         repositories_path=git_workspace.repositories_root,
                         output_path=output_root,
                         network=self._settings.analysis_network,
-                        analyzer_ids=tuple(payload.get("analyzerIds", ["codex"])),
+                        analyzer_ids=analyzer_ids,
                     ),
                 )
                 container_started = True
@@ -151,7 +157,7 @@ class RunnerService:
                     "operationKey": payload.get("operationKey"),
                     "containerId": container_id,
                     "imageDigest": self._settings.analysis_image,
-                    "analyzerIds": list(payload.get("analyzerIds", ["codex"])),
+                    "analyzerIds": list(analyzer_ids),
                     "status": "ACTIVE",
                     "expiresAt": None,
                     "repositories": [self._repository_response(value) for value in frozen],
@@ -165,7 +171,8 @@ class RunnerService:
                     with suppress(Exception):
                         await asyncio.to_thread(self._docker.remove, task_id)
                 # 准备失败不保留可能含部分源码的目录；凭据上下文已先行擦除。
-                shutil.rmtree(task_root, ignore_errors=True)
+                self._restore_output_root_access(task_root)
+                self._remove_task_tree(task_root)
                 raise
 
     async def manifest(self, task_id: str, run_id: str) -> dict[str, Any]:
@@ -223,11 +230,18 @@ class RunnerService:
         cache_path = self._analyzer_cache_path(task_root, analyzer_id, operation_key)
         # 同任务智能体顺序执行；每次调用后Runner会重启容器，避免遗留后台进程污染下一智能体。
         async with self._analyzer_locks.setdefault(task_id, asyncio.Lock()):
+            # 请求可能在锁外通过校验后等待很久；取消/清理会先把状态改为非ACTIVE，
+            # 因此取得执行锁后必须重新读取，阻断已经排队的迟到分析。
+            state = self._active_state(task_root / "state.json", str(payload["runId"]))
+            if analyzer_id not in state.get("analyzerIds", []):
+                raise RunnerServiceError("ANALYZER_NOT_SELECTED", "智能体未在任务中注册")
             if cache_path.is_file():
                 cached = json.loads(cache_path.read_text(encoding="utf-8"))
                 if not isinstance(cached, dict):
                     raise RunnerServiceError("ANALYZER_CACHE_INVALID", "智能体幂等结果损坏")
                 return {"result": cached}
+            container_spec = self._container_spec(task_id, task_root, state)
+            await asyncio.to_thread(self._docker.verify_running, container_spec)
             enriched = {
                 **payload,
                 "repositories": state["repositories"],
@@ -283,15 +297,37 @@ class RunnerService:
         async with self._lock(task_id):
             state_path = self._task_root(task_id) / "state.json"
             state = self._read_state(state_path)
+            status = state.get("status")
+            if status == "ACTIVE" and state.get("runId") == run_id:
+                return self._state_response(state)
+            if status != "STOPPED_RETAINED":
+                raise RunnerServiceError(
+                    "WORKSPACE_NOT_RETAINED",
+                    "任务工作区未处于可恢复状态",
+                )
             expires_at = state.get("expiresAt")
             if expires_at and datetime.fromisoformat(expires_at) <= datetime.now(UTC):
                 raise RunnerServiceError("WORKSPACE_EXPIRED", "任务工作区已过期")
-            if state.get("status") == "STOPPED_RETAINED":
-                await asyncio.to_thread(self._docker.resume, task_id)
-            state["status"] = "ACTIVE"
-            state["runId"] = run_id
-            state["expiresAt"] = None
-            self._write_state(state_path, state)
+            resumed = False
+            try:
+                await asyncio.to_thread(
+                    self._docker.resume,
+                    self._container_spec(task_id, state_path.parent, state),
+                )
+                resumed = True
+                state["status"] = "ACTIVE"
+                state["runId"] = run_id
+                state["expiresAt"] = None
+                self._write_state(state_path, state)
+            except Exception:
+                if resumed:
+                    try:
+                        await asyncio.to_thread(self._docker.stop_retained, task_id)
+                    except Exception:
+                        # 无法恢复停止态时删除精确容器，优先保证源码不会暴露给失控进程。
+                        with suppress(Exception):
+                            await asyncio.to_thread(self._docker.remove, task_id)
+                raise
             return self._state_response(state)
 
     async def cancel(self, task_id: str, run_id: str) -> None:
@@ -302,32 +338,53 @@ class RunnerService:
 
         async with self._lock(task_id):
             task_root = self._task_root(task_id)
+            state: dict[str, Any] | None = None
             if task_root.exists():
                 state_path = task_root / "state.json"
                 if state_path.exists():
                     state = self._read_state(state_path)
                     if state.get("runId") != run_id:
                         raise RunnerServiceError("RUN_SCOPE_MISMATCH", "runId与工作区不匹配")
-            # 无论本地状态是否存在都精确检查并删除同名容器；只有Docker明确成功
-            # （含已不存在）后才删除状态与源码，使控制面CLEANUP_FAILED可以真实重试。
-            await asyncio.to_thread(self._docker.remove, task_id)
-            shutil.rmtree(task_root, ignore_errors=True)
+            await self._cleanup_workspace_locked(task_id, task_root, state)
 
     async def cleanup_expired(self) -> list[str]:
         cleaned: list[str] = []
-        for state_path in self._settings.root.glob("task_*/state.json"):
-            state = self._read_state(state_path)
-            expires_at = state.get("expiresAt")
-            if not expires_at or datetime.fromisoformat(expires_at) > datetime.now(UTC):
-                continue
-            task_id = str(state["taskId"])
+        for discovered_path in self._settings.root.glob("task_*/state.json"):
+            task_id = discovered_path.parent.name
             try:
-                await asyncio.to_thread(self._docker.remove, task_id)
-                shutil.rmtree(state_path.parent, ignore_errors=True)
-                cleaned.append(task_id)
+                # 与resume/retain/cleanup共用任务锁；获得锁后必须重新读取状态和期限。
+                async with self._lock(task_id):
+                    state_path = self._task_root(task_id) / "state.json"
+                    if not state_path.exists():
+                        continue
+                    state = self._read_state(state_path)
+                    if state.get("taskId") != task_id:
+                        raise RunnerServiceError(
+                            "WORKSPACE_STATE_INVALID",
+                            "任务工作区状态与目录不匹配",
+                        )
+                    if state.get("status") not in {"STOPPED_RETAINED", "CLEANUP_FAILED"}:
+                        continue
+                    expires_at = state.get("expiresAt")
+                    if (
+                        not expires_at
+                        or datetime.fromisoformat(expires_at) > datetime.now(UTC)
+                    ):
+                        continue
+                    try:
+                        await self._cleanup_workspace_locked(
+                            task_id,
+                            state_path.parent,
+                            state,
+                        )
+                        cleaned.append(task_id)
+                    except Exception:
+                        if state_path.exists():
+                            state["status"] = "CLEANUP_FAILED"
+                            self._write_state(state_path, state)
             except Exception:
-                state["status"] = "CLEANUP_FAILED"
-                self._write_state(state_path, state)
+                # 单个损坏工作区不能终止Runner全局清理循环；日志只含校验过的目录任务ID。
+                LOGGER.warning("任务工作区到期清理失败: taskId=%s", task_id)
         return cleaned
 
     def _task_root(self, task_id: str) -> Path:
@@ -337,6 +394,92 @@ class RunnerService:
         if path.parent != self._settings.root.resolve():
             raise RunnerServiceError("INVALID_TASK_ID", "task目录越界")
         return path
+
+    def _container_spec(
+        self,
+        task_id: str,
+        task_root: Path,
+        state: dict[str, Any],
+    ) -> AnalysisContainerSpec:
+        """从Runner私有状态重建不可由请求覆盖的容器身份预期。"""
+
+        image_digest = state.get("imageDigest")
+        analyzer_ids = state.get("analyzerIds")
+        if not isinstance(image_digest, str) or not isinstance(analyzer_ids, list):
+            raise RunnerServiceError("WORKSPACE_STATE_INVALID", "任务工作区缺少容器身份")
+        try:
+            return AnalysisContainerSpec(
+                task_id=task_id,
+                image=image_digest,
+                repositories_path=task_root / "workspace" / "repos",
+                output_path=task_root / "workspace" / "output",
+                network=self._settings.analysis_network,
+                analyzer_ids=tuple(str(value) for value in analyzer_ids),
+            )
+        except (OSError, TypeError, ValueError) as exception:
+            raise RunnerServiceError(
+                "WORKSPACE_STATE_INVALID",
+                "任务工作区容器身份无效",
+            ) from exception
+
+    @staticmethod
+    def _validated_analyzer_ids(value: object) -> tuple[str, ...]:
+        if not isinstance(value, list) or not 1 <= len(value) <= 3:
+            raise RunnerServiceError(
+                "ANALYZER_SELECTION_INVALID",
+                "必须选择1到最多3个已注册智能体",
+            )
+        analyzer_ids = tuple(item for item in value if isinstance(item, str))
+        if (
+            len(analyzer_ids) != len(value)
+            or len(set(analyzer_ids)) != len(analyzer_ids)
+            or any(item not in {"codex", "opencode"} for item in analyzer_ids)
+        ):
+            raise RunnerServiceError(
+                "ANALYZER_SELECTION_INVALID",
+                "智能体必须来自Runner注册表且不能重复",
+            )
+        return analyzer_ids
+
+    async def _cleanup_workspace_locked(
+        self,
+        task_id: str,
+        task_root: Path,
+        state: dict[str, Any] | None,
+    ) -> None:
+        """调用方持有任务锁；先隔离新分析，再强制收敛正在运行的分析。"""
+
+        container_spec = (
+            self._container_spec(task_id, task_root, state) if state is not None else None
+        )
+        if state is not None:
+            state["status"] = "CLEANUP_FAILED"
+            state["expiresAt"] = state.get("expiresAt") or datetime.now(UTC).isoformat()
+            self._write_state(task_root / "state.json", state)
+
+        # 第一次停止让当前docker exec尽快退出；其finally可能重启容器，因此必须等
+        # 执行锁释放后再停止一次，才能安全放宽输出权限并运行清理助手。
+        await asyncio.to_thread(self._docker.quiesce_for_cleanup, task_id)
+        analyzer_lock = self._analyzer_locks.setdefault(task_id, asyncio.Lock())
+        try:
+            await asyncio.wait_for(analyzer_lock.acquire(), timeout=60.0)
+        except TimeoutError as exception:
+            raise RunnerServiceError(
+                "WORKSPACE_CLEANUP_BUSY",
+                "分析进程未在停止后释放执行锁",
+            ) from exception
+        try:
+            await asyncio.to_thread(self._docker.quiesce_for_cleanup, task_id)
+            self._restore_output_root_access(task_root)
+            if container_spec is not None:
+                await asyncio.to_thread(self._docker.sanitize_workspace, container_spec)
+            # 无论本地状态是否存在都精确检查并删除同名容器；只有Docker明确成功
+            # （含已不存在）后才删除状态与源码，使控制面CLEANUP_FAILED可以真实重试。
+            await asyncio.to_thread(self._docker.remove, task_id)
+            self._restore_output_root_access(task_root)
+            self._remove_task_tree(task_root)
+        finally:
+            analyzer_lock.release()
 
     def _lock(self, task_id: str) -> asyncio.Lock:
         self._task_root(task_id)
@@ -350,6 +493,28 @@ class RunnerService:
     def _ensure_capacity(self) -> None:
         if shutil.disk_usage(self._settings.root).free < self._settings.minimum_free_bytes:
             raise RunnerServiceError("RUNNER_DISK_PRESSURE", "分析节点磁盘水位不足")
+
+    @staticmethod
+    def _restore_output_root_access(task_root: Path) -> None:
+        """只恢复Runner创建的固定层级；不跟随智能体可能创建的符号链接。"""
+
+        output_root = task_root / "workspace" / "output"
+        if not output_root.exists() or output_root.is_symlink() or not output_root.is_dir():
+            return
+        # 清理阶段没有不受信任分析进程；临时给分析组读取目录项，供固定helper遍历。
+        output_root.chmod(0o750)
+        for analyzer_id in ("codex", "opencode"):
+            analyzer_root = output_root / analyzer_id
+            if analyzer_root.exists() and not analyzer_root.is_symlink() and analyzer_root.is_dir():
+                analyzer_root.chmod(0o770)
+
+    @staticmethod
+    def _remove_task_tree(task_root: Path) -> None:
+        if not task_root.exists():
+            return
+        shutil.rmtree(task_root)
+        if task_root.exists():
+            raise RunnerServiceError("WORKSPACE_CLEANUP_FAILED", "任务工作区未完整删除")
 
     @staticmethod
     def _write_state(path: Path, value: dict[str, Any]) -> None:

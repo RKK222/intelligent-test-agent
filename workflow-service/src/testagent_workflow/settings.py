@@ -47,6 +47,13 @@ class WorkflowSettings(BaseSettings):
             raise ValueError("代码分析模型ID格式无效")
         return value
 
+    @field_validator("worker_id")
+    @classmethod
+    def validate_worker_id(cls, value: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", value):
+            raise ValueError("Worker ID格式无效")
+        return value
+
     def sync_database_url(self) -> str:
         return self.database_url.replace("postgresql+asyncpg://", "postgresql+psycopg://")
 

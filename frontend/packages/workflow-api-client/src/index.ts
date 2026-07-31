@@ -115,6 +115,13 @@ export class WorkflowApiError extends Error {
   }
 }
 
+class WorkflowSseConsumerError extends Error {
+  constructor(cause: unknown) {
+    super("AG-UI事件消费失败", { cause });
+    this.name = "WorkflowSseConsumerError";
+  }
+}
+
 export type WorkflowApiClientOptions = {
   baseUrl?: string;
   token: () => string | null;
@@ -222,24 +229,27 @@ export class WorkflowApiClient {
 
     const done = (async () => {
       while (!controller.signal.aborted) {
-        const headers: Record<string, string> = { Accept: "text/event-stream" };
-        const token = this.requiredToken();
-        headers.Authorization = `Bearer ${token}`;
-        if (cursor) headers["Last-Event-ID"] = cursor;
-        const response = await this.fetcher(path, { headers, signal: controller.signal });
-        await this.ensureResponse(response);
-        if (!response.body) throw new WorkflowApiError(502, { code: "SSE_BODY_MISSING" });
-        await consumeSse(response.body, (event, id) => {
-          if (id) cursor = id;
-          onEvent(event, id);
-        }, controller.signal);
+        try {
+          const headers: Record<string, string> = { Accept: "text/event-stream" };
+          const token = this.requiredToken();
+          headers.Authorization = `Bearer ${token}`;
+          if (cursor) headers["Last-Event-ID"] = cursor;
+          const response = await this.fetcher(path, { headers, signal: controller.signal });
+          await this.ensureResponse(response);
+          if (!response.body) throw new WorkflowApiError(502, { code: "SSE_BODY_MISSING" });
+          await consumeSse(response.body, (event, id) => {
+            if (id) cursor = id;
+            onEvent(event, id);
+          }, controller.signal);
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          // 网络断开和服务端瞬时故障按最后一个持久事件续传；认证、权限和协议错误立即上抛。
+          if (!reconnect || !isReconnectableSseFailure(error)) throw error;
+        }
         if (!reconnect || controller.signal.aborted) return;
         await abortableDelay(delay, controller.signal);
       }
-    })().catch((error: unknown) => {
-      if (controller.signal.aborted) return;
-      throw error;
-    });
+    })();
 
     return {
       close: () => controller.abort(),
@@ -298,7 +308,11 @@ export async function consumeSse(
   const dispatch = () => {
     if (data.length === 0) return;
     const parsed = JSON.parse(data.join("\n")) as WorkflowAgUiEvent;
-    onEvent(parsed, id);
+    try {
+      onEvent(parsed, id);
+    } catch (error) {
+      throw new WorkflowSseConsumerError(error);
+    }
     data = [];
     id = undefined;
   };
@@ -317,9 +331,21 @@ export async function consumeSse(
         boundary = buffer.indexOf("\n");
       }
     }
+    if (signal?.aborted) {
+      await reader.cancel();
+      return;
+    }
     buffer += decoder.decode();
     if (buffer.startsWith("data:")) data.push(buffer.slice(5).trimStart());
     dispatch();
+  } catch (error) {
+    // reducer或协议解析失败属于终止错误；显式取消响应体，避免只解锁reader后遗留连接。
+    try {
+      await reader.cancel(error);
+    } catch {
+      // 保留最初错误，取消失败不能遮蔽真正的终止原因。
+    }
+    throw error;
   } finally {
     reader.releaseLock();
   }
@@ -327,10 +353,26 @@ export async function consumeSse(
 
 function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
-    const timeout = window.setTimeout(resolve, milliseconds);
-    signal.addEventListener("abort", () => {
-      window.clearTimeout(timeout);
+    if (signal.aborted) {
       resolve();
-    }, { once: true });
+      return;
+    }
+    const onAbort = () => {
+      globalThis.clearTimeout(timeout);
+      resolve();
+    };
+    const timeout = globalThis.setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+function isReconnectableSseFailure(error: unknown): boolean {
+  if (error instanceof SyntaxError || error instanceof WorkflowSseConsumerError) return false;
+  if (error instanceof WorkflowApiError) {
+    return error.status === 429 || error.status >= 500;
+  }
+  return true;
 }

@@ -366,6 +366,84 @@ async def test_cancel_and_report_download_keep_workflow_data_in_python(
 
 
 @pytest.mark.asyncio
+async def test_cancel_is_idempotent_and_does_not_rewrite_completed_run(
+    client: httpx.AsyncClient,
+) -> None:
+    created = await client.post(
+        "/workflow-api/v1/conversations", headers=AUTHORIZATION, json={"title": "取消幂等"}
+    )
+    conversation_id = created.json()["data"]["id"]
+    started = await client.post(
+        f"/workflow-api/v1/conversations/{conversation_id}/messages",
+        headers=AUTHORIZATION,
+        json={
+            "clientRequestId": "req_cancel_idempotent_1234",
+            "text": "分析",
+            "structuredInput": {
+                "repositories": [
+                    {"repositoryId": "repo_1234567890abcdef", "targetBranch": "feature-a"}
+                ],
+                "mode": "SINGLE",
+                "analyzerIds": ["codex"],
+            },
+        },
+    )
+    run = started.json()["data"]
+
+    first = await client.post(
+        f"/workflow-api/v1/runs/{run['runId']}/cancel", headers=AUTHORIZATION
+    )
+    second = await client.post(
+        f"/workflow-api/v1/runs/{run['runId']}/cancel", headers=AUTHORIZATION
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    events = await client.workflow_store.list_events(conversation_id)  # type: ignore[attr-defined]
+    canceled = [
+        event
+        for event in events
+        if event.type.value == "RUN_FINISHED" and event.payload.get("status") == "CANCELED"
+    ]
+    assert len(canceled) == 1
+
+    completed_conversation = await client.post(
+        "/workflow-api/v1/conversations", headers=AUTHORIZATION, json={"title": "完成任务"}
+    )
+    completed_id = completed_conversation.json()["data"]["id"]
+    completed = await client.post(
+        f"/workflow-api/v1/conversations/{completed_id}/messages",
+        headers=AUTHORIZATION,
+        json={
+            "clientRequestId": "req_completed_cancel_1234",
+            "text": "分析",
+            "structuredInput": {
+                "repositories": [
+                    {"repositoryId": "repo_1234567890abcdef", "targetBranch": "feature-a"}
+                ],
+                "mode": "SINGLE",
+                "analyzerIds": ["codex"],
+            },
+        },
+    )
+    completed_run = completed.json()["data"]
+    await client.workflow_store.update_run_status(  # type: ignore[attr-defined]
+        completed_run["runId"], RunStatus.SUCCEEDED
+    )
+
+    rejected = await client.post(
+        f"/workflow-api/v1/runs/{completed_run['runId']}/cancel", headers=AUTHORIZATION
+    )
+    assert rejected.status_code == 409
+    assert rejected.json()["code"] == "RUN_NOT_CANCELABLE"
+    assert (
+        await client.workflow_store.get_run(  # type: ignore[attr-defined]
+            completed_run["runId"], "usr_1234567890abcdef"
+        )
+    ).status is RunStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
 async def test_scope_clarification_requeues_the_waiting_run_instead_of_creating_another(
     client: httpx.AsyncClient,
 ) -> None:

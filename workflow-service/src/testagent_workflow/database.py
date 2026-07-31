@@ -41,6 +41,7 @@ from testagent_workflow.store import (
     Conversation,
     Message,
     ReportVersion,
+    RunNotCancelable,
     SubmissionResult,
     WorkflowRun,
     WorkspaceNotReusable,
@@ -634,15 +635,28 @@ class PostgresWorkflowStore:
         return self._run(row)
 
     async def request_cancel(self, run_id: str, actor_user_id: str) -> WorkflowRun:
-        await self.get_run(run_id, actor_user_id)
         async with self._engine.begin() as connection:
+            current = (await connection.execute(
+                select(runs).where(runs.c.id == run_id).with_for_update()
+            )).mappings().first()
+            if current is None:
+                raise KeyError("运行不存在")
+            if current["owner_user_id"] != actor_user_id:
+                raise PermissionError("无权访问该运行")
+            status = RunStatus(str(current["status"]))
+            if status is RunStatus.CANCELED:
+                return self._run(current)
+            if not status.active:
+                raise RunNotCancelable("运行已经结束，不能取消")
             row = (await connection.execute(
                 update(runs)
                 .where(runs.c.id == run_id)
                 .values(
                     cancel_requested=True,
                     status=RunStatus.CANCELED.value,
+                    worker_id=None,
                     lease_expires_at=None,
+                    heartbeat_at=None,
                     updated_at=utc_now(),
                 )
                 .returning(runs)
@@ -684,6 +698,43 @@ class PostgresWorkflowStore:
                 .returning(runs)
             )).mappings().one()
         return self._run(row)
+
+    async def transition_claimed_run(
+        self,
+        run_id: str,
+        worker_id: str,
+        status: RunStatus,
+    ) -> WorkflowRun | None:
+        """以数据库条件更新同时校验租约owner、期限和取消状态。"""
+
+        if status not in {
+            RunStatus.WAITING_INPUT,
+            RunStatus.SUCCEEDED,
+            RunStatus.PARTIAL_FAILED,
+            RunStatus.FAILED,
+        }:
+            raise ValueError("Worker目标状态无效")
+        now = utc_now()
+        async with self._engine.begin() as connection:
+            row = (await connection.execute(
+                update(runs)
+                .where(
+                    runs.c.id == run_id,
+                    runs.c.worker_id == worker_id,
+                    runs.c.status == RunStatus.RUNNING.value,
+                    runs.c.cancel_requested.is_(False),
+                    runs.c.lease_expires_at > now,
+                )
+                .values(
+                    status=status.value,
+                    worker_id=None,
+                    lease_expires_at=None,
+                    heartbeat_at=None,
+                    updated_at=now,
+                )
+                .returning(runs)
+            )).mappings().first()
+        return self._run(row) if row is not None else None
 
     async def append_event(
         self,
@@ -1116,6 +1167,9 @@ class PostgresWorkflowStore:
         if status not in {"EXPIRED", "CLEANUP_FAILED"}:
             raise ValueError("工作区清理状态无效")
         values: dict[str, Any] = {"status": status, "last_activity_at": utc_now()}
+        if status == "CLEANUP_FAILED":
+            # ACTIVE工作区没有expires_at；失败后必须立即进入数据库驱动的清理重试。
+            values["expires_at"] = utc_now()
         if status == "EXPIRED":
             values["container_id"] = None
         async with self._engine.begin() as connection:

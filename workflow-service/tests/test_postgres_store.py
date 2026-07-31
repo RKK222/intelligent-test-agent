@@ -14,7 +14,7 @@ from testagent_workflow.agui import AgUiEventType
 from testagent_workflow.database import PostgresWorkflowStore, migrate_database
 from testagent_workflow.impact_engine import AnalyzerOutcome
 from testagent_workflow.models import RunStatus
-from testagent_workflow.store import ActiveRunConflict, WorkspaceNotReusable
+from testagent_workflow.store import ActiveRunConflict, RunNotCancelable, WorkspaceNotReusable
 
 
 EXPECTED_TABLES = {
@@ -362,3 +362,94 @@ async def test_postgres_workspace_cleanup_queue_and_status_are_durable(
     lease = await store.get_workspace_lease(run.task_id)
     assert lease["status"] == "EXPIRED"
     assert lease["containerId"] is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_cleanup_failure_makes_active_workspace_immediately_retryable(
+    engine: AsyncEngine,
+) -> None:
+    store = PostgresWorkflowStore(engine)
+    conversation = await store.create_conversation("usr_owner", "取消清理重试")
+    run = await store.create_run(
+        conversation.id,
+        "usr_owner",
+        workflow_id="code-change-impact-analysis",
+        workflow_version="1.0.0",
+        input_data={},
+    )
+    await store.upsert_workspace_lease(
+        run.task_id,
+        runner_id="runner-a",
+        container_id="container-a",
+        image_digest="analysis@sha256:" + "a" * 64,
+        status="ACTIVE",
+        expires_at=None,
+        metadata={"runId": run.id},
+    )
+
+    await store.set_workspace_cleanup_status(run.task_id, "CLEANUP_FAILED")
+
+    due = await store.list_workspace_leases_due_for_cleanup(limit=10)
+    assert [value["taskId"] for value in due] == [run.task_id]
+
+
+@pytest.mark.asyncio
+async def test_postgres_cancel_is_idempotent_but_cannot_rewrite_success_terminal_state(
+    engine: AsyncEngine,
+) -> None:
+    store = PostgresWorkflowStore(engine)
+    conversation = await store.create_conversation("usr_owner", "取消状态")
+    canceled_run = await store.create_run(
+        conversation.id,
+        "usr_owner",
+        workflow_id="code-change-impact-analysis",
+        workflow_version="1.0.0",
+        input_data={},
+    )
+    first = await store.request_cancel(canceled_run.id, "usr_owner")
+    second = await store.request_cancel(canceled_run.id, "usr_owner")
+    assert first.status is RunStatus.CANCELED
+    assert second.status is RunStatus.CANCELED
+
+    second_conversation = await store.create_conversation("usr_owner", "成功终态")
+    succeeded_run = await store.create_run(
+        second_conversation.id,
+        "usr_owner",
+        workflow_id="code-change-impact-analysis",
+        workflow_version="1.0.0",
+        input_data={},
+    )
+    await store.update_run_status(succeeded_run.id, RunStatus.SUCCEEDED)
+
+    with pytest.raises(RunNotCancelable):
+        await store.request_cancel(succeeded_run.id, "usr_owner")
+    assert (await store.get_run(succeeded_run.id, "usr_owner")).status is RunStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_postgres_claimed_transition_cannot_overwrite_concurrent_cancel(
+    engine: AsyncEngine,
+) -> None:
+    store = PostgresWorkflowStore(engine)
+    conversation = await store.create_conversation("usr_owner", "取消与终态竞态")
+    queued = await store.create_run(
+        conversation.id,
+        "usr_owner",
+        workflow_id="code-change-impact-analysis",
+        workflow_version="1.0.0",
+        input_data={},
+    )
+    claimed = await store.claim_next_run("worker-owner-token", lease_seconds=30)
+    assert claimed is not None and claimed.id == queued.id
+
+    await store.request_cancel(queued.id, "usr_owner")
+
+    assert (
+        await store.transition_claimed_run(
+            queued.id,
+            "worker-owner-token",
+            RunStatus.SUCCEEDED,
+        )
+        is None
+    )
+    assert (await store.get_run(queued.id, "usr_owner")).status is RunStatus.CANCELED

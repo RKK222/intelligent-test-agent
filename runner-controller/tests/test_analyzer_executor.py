@@ -61,19 +61,24 @@ class FakeRelayFactory:
 
 
 @pytest.mark.asyncio
-async def test_analyzer_uses_shared_group_without_exposing_grant_to_others(
+async def test_analyzer_isolates_each_output_directory_without_exposing_grant_to_others(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     output_root = tmp_path / "output"
     analyzer_root = output_root / "codex"
     analyzer_root.mkdir(parents=True, mode=0o770)
+    other_analyzer_root = output_root / "opencode"
+    other_analyzer_root.mkdir(mode=0o770)
     captured: list[str] = []
     relay_factory = FakeRelayFactory()
     ContainerNames.resets = []
 
     async def create_subprocess(*command: str, **_: object) -> CompletedProcess:
         captured.extend(command)
+        assert output_root.stat().st_mode & 0o777 == 0o710
+        assert analyzer_root.stat().st_mode & 0o777 == 0o770
+        assert other_analyzer_root.stat().st_mode & 0o777 == 0
         assert (analyzer_root / "request.json").stat().st_mode & 0o777 == 0o640
         assert (analyzer_root / ".model-relay-token").stat().st_mode & 0o777 == 0o640
         assert (analyzer_root / ".model-relay-token").read_text() == (
@@ -119,6 +124,9 @@ async def test_analyzer_uses_shared_group_without_exposing_grant_to_others(
     ]
     assert not (analyzer_root / ".model-relay-token").exists()
     assert ContainerNames.resets == ["task_12345678"]
+    # 测试进程不是容器内Runner，恢复临时目录权限，避免pytest清理被mode 000阻断。
+    other_analyzer_root.chmod(0o770)
+    output_root.chmod(0o770)
 
 
 @pytest.mark.asyncio
