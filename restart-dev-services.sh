@@ -81,7 +81,8 @@ Options:
   --skip-backend-build   Restart backend without running Maven package first.
   --skip-frontend-build  Restart frontend without running pnpm build first.
   --with-lobehub         Opt in to the independent LobeHub fork on http://127.0.0.1:3210.
-                         Reuses TEST_AGENT_REDIS_* with the lobehub:app: prefix.
+                         Reuses TEST_AGENT_REDIS_* with REDIS_PREFIX=lobehub:app;
+                         the fork appends ':' so actual keys use lobehub:app:*.
   --help                 Show this help.
 
 Environment overrides:

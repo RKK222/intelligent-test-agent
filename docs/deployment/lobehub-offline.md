@@ -1,6 +1,6 @@
 # LobeHub 企业离线部署
 
-本文描述 LobeHub `v2.2.11-platform.1` 的离线制品、安装、启动、备份和回滚。架构与 fork 必须实现的行为见
+本文描述 LobeHub `v2.2.11-platform.3` 的离线制品、安装、启动、备份和回滚。架构与 fork 必须实现的行为见
 `docs/architecture/lobehub-integration.md`。本仓库不包含独立 fork 源码，只有通过制品门禁的外部构建结果
 才能进入全量包或 LobeHub-only 包。
 
@@ -9,7 +9,7 @@
 | 组件 | 固定基线 | 说明 |
 |---|---|---|
 | LobeHub upstream | `v2.2.11` / `5b4cef6` | 独立内部 fork，不修改本仓库 OpenCode 快照 |
-| LobeHub internal | `v2.2.11-platform.1` / `7d16863c88b8acbacda6d9ee15df0840749e0aaa` | 平台契约版本 `1` |
+| LobeHub internal | `v2.2.11-platform.3` / `ccd0400fbe934ba929de637a315d25e969977c76` | 平台契约版本 `2` |
 | LobeHub database | ParadeDB / PostgreSQL 17 | 独立库、账号、密码、数据卷和 migration |
 | Redis | 现有企业实例 DB 0 | 独立 ACL 用户；LobeHub key/channel 仅 `lobehub:app:*` |
 | RustFS | `release.env` 中的不可变 tag、Docker image ID 和 tar SHA-256 | 私有 bucket，容器以 UID 10001 写数据 |
@@ -46,7 +46,8 @@ RustFS `9000/9001` 固定只绑定 `127.0.0.1`；app `3210` 默认同样绑定 l
 
 根目录脚本默认行为不变，不启动 LobeHub。需要完整联调时必须显式增加 `--with-lobehub`；脚本会使用同级
 `../lobehub-platform`、启动本地 ParadeDB/RustFS、复用 `.env.test` 指向的 Redis 并固定
-`REDIS_PREFIX=lobehub:app:`，再完成 fork migration 和 dev server 启动。它只在
+`REDIS_PREFIX=lobehub:app`（上游自动追加分隔冒号，实际 key 为 `lobehub:app:*`），再完成 fork migration
+和 dev server 启动。它只在
 `.tmp/dev-services/lobehub-dev.env` 生成 mode `0600` 的开发密钥，不修改 `.env.local` 或 `.env.test`。开发
 helper 还会启动单独的本地 scheduler 进程，复用 fork 的生产 loopback 实现；其 Bearer secret 不出现在命令行。
 本地 Compose 的 ParadeDB、RustFS 和 MC 默认值与企业介质使用相同的批准 digest，不使用浮动 `latest`；只有
@@ -73,6 +74,11 @@ tools/lobehub-dev-services.sh stop
 
 不带 `--with-lobehub` 时，根脚本既不探测也不停止 LobeHub，避免影响已有开发环境。
 
+该模式直接覆盖 Web、平台票据、Workspace、模型网关和服务端客户端认证 API 联调。已构建的企业 Desktop/CLI
+固定访问 `http://chat.internal`，不会读取本地环境变量或 `127.0.0.1:3210`；需要联调安装包时，开发机必须由
+运维显式把 `chat.internal` 解析到受控本地反向代理，并由该代理转发到 `127.0.0.1:3210`。启动脚本不修改
+`/etc/hosts`、不提权占用 80 端口，也不削弱客户端固定域名策略。
+
 ## 外部 fork 制品契约
 
 外网构建机输出目录必须至少包含：
@@ -90,26 +96,26 @@ clients/lobehub-windows-x64.exe
 clients/lobehub-linux-x86_64.tar.gz
 bin/mc-linux-amd64
 sbom/lobehub.spdx.json
-source/lobehub-v2.2.11-platform.1.tar.gz
+source/lobehub-v2.2.11-platform.3.tar.gz
 ```
 
 `SHA256SUMS` 必须恰好覆盖除自身外的全部普通文件，不允许绝对路径、`..`、空白文件名、重复项或符号链接。
 `release.env` 至少包含：
 
 ```dotenv
-LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.1
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.3
 LOBEHUB_UPSTREAM_VERSION=v2.2.11
 LOBEHUB_UPSTREAM_COMMIT=5b4cef6
-LOBEHUB_FORK_COMMIT=7d16863c88b8acbacda6d9ee15df0840749e0aaa
-LOBEHUB_PLATFORM_CONTRACT_VERSION=1
+LOBEHUB_FORK_COMMIT=ccd0400fbe934ba929de637a315d25e969977c76
+LOBEHUB_PLATFORM_CONTRACT_VERSION=2
 LOBEHUB_PARADEDB_POSTGRES_MAJOR=17
 LOBEHUB_WINDOWS_AUTHENTICODE_VERIFIED=true
 LOBEHUB_LINUX_EXECUTION_DEFAULT=false
-LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.1
+LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.3
 LOBEHUB_APP_IMAGE_ID=sha256:<64 lowercase hex>
-LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.1
+LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.3
 LOBEHUB_PARADEDB_IMAGE_ID=sha256:<64 lowercase hex>
-LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.1
+LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.3
 LOBEHUB_RUSTFS_IMAGE_ID=sha256:<64 lowercase hex>
 ```
 
@@ -294,21 +300,22 @@ app 镜像不创建公网 QStash schedule。单实例 launcher 每分钟只向�
 任务，单次 30 秒超时且不重叠；到期任务以内嵌方式继承 `createdByUserId` 的模型委托。当前手册禁止启动第二个
 app 副本；在没有跨实例选主/锁前横向复制会导致重复 sweep。
 
-`v2.2.11-platform.1` 对 Windows 和 Linux 都强制 `LOBEHUB_DEVICE_EXECUTION_MODE=disabled`，没有可用的
+`v2.2.11-platform.3` 对 Windows 和 Linux 都强制 `LOBEHUB_DEVICE_EXECUTION_MODE=disabled`，没有可用的
 “验收后改 true”路径。Linux 真实沙箱能力需在后续版本另行实现、测试和审批；当前版本修改其它旧布尔变量
 不会放开执行入口。
 
 ## Redis ACL
 
 为 fork 创建独立 Redis 用户，key pattern 和 channel pattern 都只允许 `lobehub:app:*`；按实际上游命令清单
-授予最小命令，至少禁止 `CONFIG`、`ACL`、`MODULE`、`KEYS`、`FLUSH*`、`EVAL`（除非 fork 有经过审计的
-固定脚本）以及其它管理命令。`lobehub-docker.sh check-redis` 会验证：
+授予最小命令，至少禁止 `CONFIG`、`ACL`、`MODULE`、`KEYS`、`FLUSH*` 以及其它管理命令。客户端认证的
+request/code/session 状态机使用仓库中经过测试的固定 Lua 脚本，因此必须允许 `EVAL`，但不得放宽 key/channel
+pattern，也不得允许任意管理命令。`lobehub-docker.sh check-redis` 会验证：
 
-- 当前账号能 PING、写删 `lobehub:app:*` 并发布 `lobehub:app:*` channel。
+- 当前账号能 PING、写删 `lobehub:app:*`、执行固定只读 Lua 预检并发布 `lobehub:app:*` channel。
 - 不能写 `test-agent:*` key，不能发布 `test-agent:*` channel，不能执行 `CONFIG GET`。
 
 平台票据、nonce 和委托使用现有平台 Redis 连接，固定前缀 `test-agent:lobehub-sso:*`。现场还必须通过 fork
-集成测试确认上游所有 key/pubsub 都遵守 `REDIS_PREFIX=lobehub:app:`，不存在无前缀旁路。
+集成测试确认上游所有 key/pubsub 都遵守 `REDIS_PREFIX=lobehub:app`，不存在无前缀旁路。
 
 ## 启动顺序
 

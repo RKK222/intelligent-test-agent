@@ -65,8 +65,11 @@ grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL
 
 ## Mac 打包
 
-LobeHub 独立 fork 默认位于平台仓库同级 `../lobehub-platform`，精确提交由 `lobehub/version.env` 锁定。先用
-`build-lobehub-artifacts.sh` 从锁定提交构建真实 `linux/amd64` 镜像、源码、SBOM、许可证和客户端制品集；
+LobeHub 独立 fork 默认位于平台仓库同级 `../lobehub-platform`，精确提交由 `lobehub/version.env` 锁定。当前
+锁定版本为 `v2.2.11-platform.3`；Desktop/CLI 使用 LobeHub 服务端浏览器确认、PKCE 和 24 小时 opaque Session，
+不再部署或兼容 OIDC Bridge。独立 fork 仍须由企业 Git 管理员推送到受控内部远端；同级本机 checkout 只用于
+构建和验证，不能作为企业源码托管。先用 `build-lobehub-artifacts.sh` 从锁定提交构建真实 `linux/amd64` 镜像、
+源码、SBOM、许可证和客户端制品集；
 完整构建必须提供企业签名 Windows x64 客户端、签名证据和批准的 Linux x86_64 客户端。无客户端时只允许
 使用 `--server-only` 做服务端部署演练，后续打包门禁会拒绝该阶段目录。Docker VM 至少分配 8 GiB 内存；
 fork 已将 Next.js 静态生成限制为两个 worker，以支持 10 CPU / 8 GiB 的已验证构建基线。

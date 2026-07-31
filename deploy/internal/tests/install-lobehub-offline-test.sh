@@ -26,25 +26,25 @@ for file in \
   images/lobehub-image.tar images/paradedb-image.tar images/rustfs-image.tar \
   clients/lobehub-windows-x64.exe clients/lobehub-linux-x86_64.tar.gz \
   bin/mc-linux-amd64 sbom/lobehub.spdx.json \
-  source/lobehub-v2.2.11-platform.1.tar.gz \
+  source/lobehub-v2.2.11-platform.3.tar.gz \
   approved-resources.json LICENSES.txt; do
   printf 'installer-fixture:%s\n' "${file}" >"${ARTIFACT_DIR}/${file}"
 done
 
 cat >"${ARTIFACT_DIR}/release.env" <<'EOF'
-LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.1
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.3
 LOBEHUB_UPSTREAM_VERSION=v2.2.11
 LOBEHUB_UPSTREAM_COMMIT=5b4cef6
-LOBEHUB_FORK_COMMIT=7d16863c88b8acbacda6d9ee15df0840749e0aaa
-LOBEHUB_PLATFORM_CONTRACT_VERSION=1
+LOBEHUB_FORK_COMMIT=ccd0400fbe934ba929de637a315d25e969977c76
+LOBEHUB_PLATFORM_CONTRACT_VERSION=2
 LOBEHUB_PARADEDB_POSTGRES_MAJOR=17
 LOBEHUB_WINDOWS_AUTHENTICODE_VERIFIED=true
 LOBEHUB_LINUX_EXECUTION_DEFAULT=false
-LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.1
+LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.3
 LOBEHUB_APP_IMAGE_ID=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.1
+LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.3
 LOBEHUB_PARADEDB_IMAGE_ID=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.1
+LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.3
 LOBEHUB_RUSTFS_IMAGE_ID=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 EOF
 

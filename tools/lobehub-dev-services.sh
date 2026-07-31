@@ -18,8 +18,8 @@ Manages the opt-in LobeHub local development service. `prepare` creates a
 0600 runtime env under .tmp without changing .env.local. `restart` starts the
 dev-only ParadeDB/RustFS dependencies, runs the fork migration, and starts the
 fork on http://127.0.0.1:3210. Redis is reused from TEST_AGENT_REDIS_* with the
-dedicated lobehub:app: prefix. The platform restart script calls this helper
-only when --with-lobehub is supplied.
+dedicated REDIS_PREFIX=lobehub:app setting (actual keys are lobehub:app:*).
+The platform restart script calls this helper only when --with-lobehub is supplied.
 
 Overrides:
   TEST_AGENT_LOBEHUB_FORK_DIR  Independent fork directory (default: ../lobehub-platform).
@@ -136,7 +136,8 @@ write_env_file() {
     printf 'DATABASE_URL=postgresql://lobehub:%s@127.0.0.1:%s/lobehub\n' "$(urlencode "${db_password}")" "${db_port}"
     printf 'DATABASE_DRIVER=node\n'
     printf 'REDIS_URL=%s\n' "${redis_url}"
-    printf 'REDIS_PREFIX=lobehub:app:\n'
+    # 上游 Redis 客户端会自动追加分隔冒号；这里不带尾冒号，实际 key 才是 lobehub:app:*。
+    printf 'REDIS_PREFIX=lobehub:app\n'
     printf 'S3_ENDPOINT=http://127.0.0.1:%s\n' "${s3_port}"
     printf 'S3_BUCKET=lobehub-private\n'
     printf 'S3_ACCESS_KEY_ID=%s\n' "${rustfs_access}"

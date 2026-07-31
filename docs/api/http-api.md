@@ -3056,6 +3056,50 @@ LobeHub 服务端使用外部密钥加密保存；日志切面和原始交换观
 三个接口都生成/透传 `X-Trace-Id` 并使用统一错误 envelope。兑换和撤销路径由通用平台 Token filter 精确
 放行，Controller 内的 HMAC 是唯一服务鉴权；其它路径不获得该例外。
 
+#### fork Desktop/CLI 浏览器确认 API
+
+以下接口属于独立 LobeHub fork，不是平台 Java API。企业 Desktop/CLI 固定访问聊天域名，禁止改用 OIDC、JWT、
+API Key、自定义 Server URL 或模型委托。除浏览器确认页面外，所有响应均携带 `Cache-Control: no-store`：
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `POST` | `/api/auth/platform/client/start` | 创建五分钟有效的客户端登录请求。 |
+| `GET/POST` | `/api/auth/platform/client/authorize` | 已登录浏览器显示验证码并显式允许或拒绝。 |
+| `POST` | `/api/auth/platform/client/poll` | 客户端用独立 poll secret 查询结果并一次性取得授权码。 |
+| `POST` | `/api/auth/platform/client/token` | 用授权码、客户端类型和 PKCE verifier 换取 opaque Session。 |
+| `POST` | `/api/auth/platform/client/revoke` | 撤销当前客户端 Session，并按用户撤销模型委托。 |
+
+`start` 请求为 `{ "client": "cli|desktop", "codeChallenge": "base64url-sha256" }`，成功响应：
+
+```json
+{
+  "requestId": "43-char-base64url",
+  "pollSecret": "43-char-base64url",
+  "userCode": "ABCD-EFGH",
+  "verificationUri": "http://chat.internal/api/auth/platform/client/authorize?request=...",
+  "expiresIn": 300,
+  "interval": 3
+}
+```
+
+`requestId`、`pollSecret`、授权码和最终 Session 都是独立 32 字节随机值，Redis 只保存 SHA-256 摘要。
+`authorize` 用限定到自身路径、最长五分钟的 host-only/HttpOnly/SameSite=Lax pending cookie 保存 request/CSRF；
+没有 LobeHub 浏览器 Session 时只跳平台固定 `/lobehub/launch`，不得接受 return URL。页面必须同时显示与客户端
+一致的 `userCode`，且只能经带 CSRF 的表单显式允许或拒绝。
+
+`poll` 请求为 `{ "requestId": "...", "pollSecret": "..." }`；pending 返回 `202 {"status":"pending"}`，
+拒绝返回 `403 {"status":"denied"}`，批准返回 `200 {"status":"approved","code":"..."}`。无效、过期或重放
+统一返回通用 `400 INVALID_REQUEST`。授权码最长 60 秒且只交付一次。
+
+`token` 请求为 `{ "client": "cli|desktop", "code": "...", "codeVerifier": "..." }`；授权码先原子消费，再
+校验客户端绑定和 PKCE S256，任一失败均不能重试旧码。成功返回
+`{"accessToken":"...","tokenType":"Bearer","expiresIn":86400}`，没有 refresh token。fork 的 Next
+middleware、tRPC 和 OpenAPI 每次校验 Redis Session 并复查用户状态；无效 Bearer 不能回退浏览器 Cookie。
+
+`revoke` 只接受标准 `Authorization: Bearer {accessToken}`，成功返回 `204`。它先撤销客户端 Session，再调用平台
+服务端撤销该用户模型委托；客户端即使遇到远端失败也必须清除本地凭据。Desktop 只保存到操作系统 safeStorage，
+CLI 凭据文件必须为 mode `0600`。所有错误使用通用低敏文案，不回显凭据、用户或 Redis 状态。
+
 #### fork 离线调度内部 API
 
 `POST /api/agent/enterprise/schedule-dispatch` 属于独立 LobeHub fork，不是平台 Java API，也不通过企业反向

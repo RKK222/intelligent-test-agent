@@ -1298,3 +1298,44 @@
 - Result:
   - 服务端部署人员现在可按手册完成安装后验收和可回滚冷恢复；未新增 API、事件、数据库 migration/SQL、generated SDK 或 OpenCode 修改，也未修改 `.env*`。
   - 客户端审计确认当前 Desktop/CLI 仍依赖 fork 内部 `/oidc/*`，而企业运行配置未提供 `JWKS_KEY`；直接启用会重新引入原计划删除的 JWKS/授权服务器，非 OIDC 浏览器确认与设备令牌协议需另行确认。因此完整签名客户端、完整上线介质、企业 Git 远端和真实现场验收仍未完成，`LOBEHUB_ENABLED` 继续保持关闭。
+
+### 2026-07-31 - 完成 LobeHub 非 OIDC 客户端认证与 v2.2.11-platform.3 交付复验
+
+- Why:
+  - 上一轮确认 Desktop/CLI 仍依赖 `/oidc/*`，与已确定的简化认证和完全离线边界冲突；同时 Redis wrapper 会在
+    `REDIS_PREFIX` 后自动追加冒号，原配置的尾冒号会产生 `lobehub:app::` 双分隔 key。
+  - fork、服务端介质、现场脚本和 `--with-lobehub` 需要在同一锁定提交上重新构建和运行验证，避免只更新合同而
+    继续交付旧镜像。
+- What:
+  - 独立 `/Users/huang/workspace/lobehub-platform` fork 新增 Desktop/CLI 浏览器确认协议：五分钟 request/poll
+    secret、用户验证码、HttpOnly pending cookie、CSRF、PKCE、一次性授权码和最长 24 小时 opaque Session；
+    Redis 只保存摘要，Desktop 使用系统 safeStorage，CLI 使用 mode `0600` 凭据文件，模型委托不下发客户端。
+  - Next middleware、tRPC 和 OpenAPI 统一校验 opaque Bearer 并复查用户状态；企业 Desktop/CLI 关闭 OIDC、JWT、
+    API Key、refresh token 和自定义服务地址，退出时撤销 Session/模型委托且先清本机凭据。离线 `/oidc/*` 门禁
+    调整到 Session 查询之前，使匿名请求直接返回 403 而不是被登录中间件改写为 307。
+  - fork 发布提交为 `ccd0400fbe934ba929de637a315d25e969977c76`，标签为 `v2.2.11-platform.3`；平台版本锁、
+    环境模板、测试夹具和文档统一升级到合同版本 2。`REDIS_PREFIX` 改为不带尾冒号的 `lobehub:app`，实际 key
+    仍为 `lobehub:app:*`；现场 ACL 仅为客户端固定 Lua 状态机开放 `EVAL`，key/channel 边界不放宽。
+  - 同步 HTTP API、事件、架构、安全、本地开发、离线部署和发布说明；开发脚本帮助明确默认关闭、显式启用及
+    Redis 实际 key 规则。
+- How:
+  - fork 服务端认证/离线/中间件定向 72 项、真实 Redis 原子状态机 3 项、OpenAPI 7 项、tRPC 27 项、CLI 企业
+    认证 21 项、Desktop 企业策略/认证 56 项通过；fork root typecheck、CLI bundle/man、Desktop typecheck 和
+    production main/renderer build通过。CLI 上游全量命令同时包含需预装 `lh` 和登录后端的 E2E，并存在与本次
+    认证无关的既有 type/test 失败，因此只把变更边界测试和可执行 bundle 作为本版本准入证据。
+  - 从锁定 commit 重新构建约 2.2 GiB 的真实 `linux/amd64` 服务端阶段介质
+    `deploy/internal/dist-lobehub-server`；全部 SHA-256、app OCI revision、三镜像 ID/架构通过。真实镜像演练完成
+    ParadeDB 17 migration、Redis ACL/前缀、RustFS 私有桶、readiness、离线策略、scheduler、密钥隔离及冷备份/
+    恢复；完整封包对缺少 Authenticode 证据按预期失败关闭。
+  - `build/package/install/backup` 四组合同测试、开发脚本验证和 Shell 语法通过。使用未修改的 `.env.test` 执行
+    `restart-dev-services.sh --profile test --env-file .env.test --skip-backend-build --skip-frontend-build --with-lobehub`，
+    后端 8080、前端 3000、LobeHub 3210 启动；运行探针确认 0600 env、固定回跳、pending 202、未认证票据 401
+    和匿名 OIDC 403。普通前端生产构建被工作树中无关的 `WorkflowChatView.vue` 缺失 TDesign style import 阻断，
+    未修改或纳入该并行工作。
+- Result:
+  - 本地开发环境和服务端离线部署路径已经在 `v2.2.11-platform.3` 真实镜像上闭环，运行服务保留启动状态；
+    本次平台提交不新增数据库 migration/MyBatis SQL，不改变既有平台 SSO/模型网关 wire，也不新增 RunEvent/SSE。
+  - 完整企业 ZIP 仍必须取得企业 Authenticode 签名的 Windows x64 客户端、匹配签名证据和获批 Linux x86_64
+    客户端；独立 fork 也仍缺企业内部 Git remote，目标 Linux/网络/DNS/反代/Flyway history 的现场验收不能由
+    Apple Silicon Docker 仿真替代。在这些外部条件完成前保持 `LOBEHUB_ENABLED=false`，不得把服务端阶段目录
+    标记为完整上线介质。未修改 `.env.local`、generated SDK 或 OpenCode 源码。

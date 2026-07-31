@@ -193,7 +193,7 @@ printf '%s\n' \
   'LOBEHUB_REDIS_USERNAME=lobehub' \
   "LOBEHUB_REDIS_PASSWORD=${redis_password}" \
   "REDIS_URL=redis://lobehub:${redis_password}@${REDIS_CONTAINER}:6379/0" \
-  'REDIS_PREFIX=lobehub:app:' \
+  'REDIS_PREFIX=lobehub:app' \
   "RUSTFS_ACCESS_KEY=${rustfs_access_key}" \
   "RUSTFS_SECRET_KEY=${rustfs_secret_key}" \
   'LOBEHUB_S3_BUCKET=lobehub-private' \

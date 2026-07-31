@@ -219,8 +219,18 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
   Cookie、password、secret 和 token。上游模型错误不得回显 URL、响应正文、密钥、prompt、回答、UCID 或堆栈。
 - 模型委托只允许 LobeHub 服务端用外部密钥加密持久化，浏览器、Desktop、CLI 和设备 broker 不得获得。
   网关每次调用重新检查平台用户状态，并覆盖客户端 Authorization、供应商选择、UCID 和 trace header。
+- 企业 Desktop/CLI 只能使用 fork 的浏览器确认协议，禁止 OIDC discovery/JWKS、Device Code Flow、JWT、API Key、
+  refresh token 和自定义 Server URL。request、poll secret、授权码和客户端 Session 都必须使用独立 32 字节随机值，
+  Redis 只保存摘要；浏览器 pending request 必须绑定 HttpOnly/SameSite=Lax cookie 和 CSRF，页面与客户端同时显示
+  同一验证码并要求显式确认。授权码必须在 PKCE 校验前原子消费，客户端 Session 最长 24 小时且每次请求复查用户状态。
+  企业离线 `/oidc/*` 拒绝必须先于 Session 查询和未登录跳转，确保匿名旧客户端也得到 `403`，不得跳回平台登录。
+- Desktop opaque Session 只进入操作系统 safeStorage，CLI 只进入 mode `0600` 的自身凭据文件；请求只使用标准
+  `Authorization: Bearer`。无效 Bearer 不得回退浏览器 Cookie，显式退出必须撤销服务端 Session 和模型委托，并在
+  远端失败时仍清除本机凭据。
 - LobeHub Redis 使用独立 ACL 用户，key 与 pub/sub channel 均限制为 `lobehub:app:*`，并拒绝管理命令和平台
-  前缀；平台 SSO key 固定在 `test-agent:lobehub-sso:*`。RustFS bucket 必须私有，初始化任务必须显式撤销匿名访问。
+  前缀；`REDIS_PREFIX` 配置为不带尾冒号的 `lobehub:app`，由上游 Redis wrapper 追加唯一分隔冒号。客户端认证
+  仅允许仓库内固定 Lua 状态机所需的 `EVAL`，ACL key pattern 不得因此放宽。平台 SSO key 固定在
+  `test-agent:lobehub-sso:*`。RustFS bucket 必须私有，初始化任务必须显式撤销匿名访问。
 - LobeHub app 默认只绑定 `127.0.0.1:3210`。跨机反向代理时只允许绑定获批的具体内网 IPv4，拒绝 wildcard，
   并用主机防火墙把 3210 来源限制为代理主机；RustFS、ParadeDB 和 Redis 不得随之暴露。
 - `/data/testagent/config/lobehub.env` 必须是 root 控制的非符号链接 mode `0600` 文件，拒绝重复键和非法 dotenv。
@@ -236,7 +246,7 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
   migration 占位值，平台才允许落票据。现场 `validate-config` 还必须核对 digest 镜像、secret 长度、离线开关、
   Cookie/Session 契约和执行能力门禁，任一不满足都禁止 migration 或启动 app。
 - 完全离线部署必须在 UI 和服务端同时关闭公网搜索、SaaS Connector、BYOK、自定义 Base URL、遥测、在线更新、
-  Marketplace、CDN 与运行期下载。`v2.2.11-platform.1` 对 Windows/Linux 都强制
+  Marketplace、CDN 与运行期下载。`v2.2.11-platform.3` 对 Windows/Linux 都强制
   `LOBEHUB_DEVICE_EXECUTION_MODE=disabled`，不存在通过旧变量放开的路径；后续 Linux 执行版本仍须在目标主机
   通过真实边界验收并 fail closed，且提供 root 所有、mode `0600`、绑定当前发行版/内核的通过证据。
 - 企业离线版必须在代理与工作流 router 两层拒绝 `/api/workflows/*`，不得配置 QStash。定时任务只允许单一 app

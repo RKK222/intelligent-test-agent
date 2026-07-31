@@ -40,9 +40,9 @@ grep -F 'LOBEHUB_FORK_COMMIT' "${ROOT_DIR}/deploy/internal/lobehub/version.env" 
 grep -F 'git -C "${FORK_DIR}" archive --format=tar "${FORK_COMMIT}"' "${BUILDER}" >/dev/null
 grep -F 'corepack pnpm@10.33.0 install --frozen-lockfile' \
   "${ROOT_DIR}/tools/lobehub-dev-services.sh" >/dev/null
-grep -F 'LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.1' \
+grep -F 'LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.3' \
   "${INTERNAL_DIR}/lobehub.env.example" >/dev/null
-grep -F 'LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.1' \
+grep -F 'LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.3' \
   "${INTERNAL_DIR}/lobehub.env.example" >/dev/null
 grep -F 'AGENT_RUNTIME_MODE=local' "${INTERNAL_DIR}/lobehub.env.example" >/dev/null
 

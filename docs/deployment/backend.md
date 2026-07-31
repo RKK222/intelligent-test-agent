@@ -425,7 +425,7 @@ tools/verify-opencode-process-deployment.sh --backend-url http://127.0.0.1:8080
 
 LobeHub 默认不参与上述重启。Bash 显式增加 `--with-lobehub` 时才在三项平台服务之后启动同级
 `../lobehub-platform`、本地 ParadeDB/RustFS 和 `3210` dev server，并复用 Redis 的
-`lobehub:app:` 独立前缀。生成的 LobeHub 开发 secret 仅位于
+`REDIS_PREFIX=lobehub:app` 独立配置（fork 自动追加分隔冒号，实际 key 为 `lobehub:app:*`）。生成的 LobeHub 开发 secret 仅位于
 `.tmp/dev-services/lobehub-dev.env`（0600），不修改 `.env.local/.env.test`；不带参数时脚本也不探测或停止
 已有 LobeHub。显式模式还会以独立进程复用 fork 的 Bearer 保护 loopback scheduler，并与 app 一同回收；
 Windows PowerShell 入口当前没有该选项。

@@ -315,7 +315,8 @@ validate_redis_env() {
   require_env LOBEHUB_REDIS_USERNAME >/dev/null
   require_secret_bytes LOBEHUB_REDIS_PASSWORD 16
   require_env REDIS_URL >/dev/null
-  require_exact_env REDIS_PREFIX 'lobehub:app:'
+  # LobeHub's Redis wrapper appends one ':' to REDIS_PREFIX.
+  require_exact_env REDIS_PREFIX 'lobehub:app'
   redis_host="$(require_env LOBEHUB_REDIS_HOST)"
   redis_port="$(require_env LOBEHUB_REDIS_PORT)"
   redis_username="$(require_env LOBEHUB_REDIS_USERNAME)"
@@ -413,6 +414,9 @@ check_redis() {
   }
   redis_call PING | grep -Fx PONG >/dev/null
   redis_call SET "lobehub:app:acl-preflight:$$" 1 EX 30 | grep -Fx OK >/dev/null
+  # 客户端认证的 request/code/session 状态机使用经过测试的固定 Lua 脚本做原子转换。
+  redis_call EVAL 'return redis.call("GET", KEYS[1])' 1 \
+    "lobehub:app:acl-preflight:$$" | grep -Fx 1 >/dev/null
   redis_call DEL "lobehub:app:acl-preflight:$$" >/dev/null
   redis_call PUBLISH "lobehub:app:acl-preflight" 1 >/dev/null
   outside_output="$(redis_call SET "test-agent:lobehub-acl-preflight:$$" 1 EX 30 2>&1 || true)"
@@ -678,7 +682,7 @@ verify_app_runtime() {
   require_container_env_exact "${APP_CONTAINER}" PLATFORM_SSO_ENABLED 1
   require_container_env_exact "${APP_CONTAINER}" LOBEHUB_ENTERPRISE_OFFLINE 1
   require_container_env_exact "${APP_CONTAINER}" AGENT_RUNTIME_MODE local
-  require_container_env_exact "${APP_CONTAINER}" REDIS_PREFIX 'lobehub:app:'
+  require_container_env_exact "${APP_CONTAINER}" REDIS_PREFIX 'lobehub:app'
   require_container_env_exact "${APP_CONTAINER}" TELEMETRY_DISABLED 1
   require_container_env_exact "${APP_CONTAINER}" LOBEHUB_DEVICE_EXECUTION_MODE disabled
   status_all

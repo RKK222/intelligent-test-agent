@@ -13,24 +13,24 @@ for file in \
   images/lobehub-image.tar images/paradedb-image.tar images/rustfs-image.tar \
   clients/lobehub-windows-x64.exe clients/lobehub-linux-x86_64.tar.gz \
   bin/mc-linux-amd64 sbom/lobehub.spdx.json \
-  source/lobehub-v2.2.11-platform.1.tar.gz \
+  source/lobehub-v2.2.11-platform.3.tar.gz \
   approved-resources.json LICENSES.txt windows-authenticode-verification.txt; do
   printf 'fixture:%s\n' "${file}" >"${FIXTURE_DIR}/${file}"
 done
 cat >"${FIXTURE_DIR}/release.env" <<'EOF'
-LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.1
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.3
 LOBEHUB_UPSTREAM_VERSION=v2.2.11
 LOBEHUB_UPSTREAM_COMMIT=5b4cef6
-LOBEHUB_FORK_COMMIT=7d16863c88b8acbacda6d9ee15df0840749e0aaa
-LOBEHUB_PLATFORM_CONTRACT_VERSION=1
+LOBEHUB_FORK_COMMIT=ccd0400fbe934ba929de637a315d25e969977c76
+LOBEHUB_PLATFORM_CONTRACT_VERSION=2
 LOBEHUB_PARADEDB_POSTGRES_MAJOR=17
 LOBEHUB_WINDOWS_AUTHENTICODE_VERIFIED=true
 LOBEHUB_LINUX_EXECUTION_DEFAULT=false
-LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.1
+LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.3
 LOBEHUB_APP_IMAGE_ID=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.1
+LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.3
 LOBEHUB_PARADEDB_IMAGE_ID=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.1
+LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.3
 LOBEHUB_RUSTFS_IMAGE_ID=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 EOF
 
@@ -69,7 +69,7 @@ unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
 unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
   | grep -Fx 'deploy/internal/lobehub-backup.sh' >/dev/null
 unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
-  | grep -Fx 'dist/lobehub/source/lobehub-v2.2.11-platform.1.tar.gz' >/dev/null
+  | grep -Fx 'dist/lobehub/source/lobehub-v2.2.11-platform.3.tar.gz' >/dev/null
 unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
   | grep -Fx 'docs/architecture/lobehub-integration.md' >/dev/null
 unzip -p "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" deploy/internal/lobehub-docker.sh \
@@ -107,9 +107,9 @@ fi
 
 VALID_ENV="${OUTPUT_DIR}/lobehub-valid.env"
 cat >"${VALID_ENV}" <<'EOF'
-LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.1
-LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.1
-LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.1
+LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.3
+LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.3
+LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.3
 POSTGRES_DB=lobehub
 POSTGRES_USER=lobehub
 POSTGRES_PASSWORD=database-password-32-bytes-minimum
@@ -120,7 +120,7 @@ LOBEHUB_REDIS_PORT=6379
 LOBEHUB_REDIS_USERNAME=lobehub
 LOBEHUB_REDIS_PASSWORD=redis-password-32-bytes-minimum
 REDIS_URL=redis://lobehub:redis-password-32-bytes-minimum@redis.internal:6379/0
-REDIS_PREFIX=lobehub:app:
+REDIS_PREFIX=lobehub:app
 RUSTFS_ACCESS_KEY=rustfs-access-key-32-bytes
 RUSTFS_SECRET_KEY=rustfs-secret-key-at-least-32-bytes
 LOBEHUB_S3_BUCKET=lobehub-private
