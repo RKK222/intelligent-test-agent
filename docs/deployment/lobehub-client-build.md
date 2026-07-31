@@ -12,14 +12,18 @@ Linux 的构建人与审批人必须分离。工具不会生成虚假的签名�
 ```bash
 deploy/internal/build-lobehub-client-kit.sh \
   --fork-dir /Users/huang/workspace/lobehub-platform \
-  --output-dir /Users/huang/Desktop/mimoagent/0709/client-build-kit
+  --output-dir /Users/huang/Desktop/mimoagent/0709/lobehub-client-build-kit
 ```
 
-输出为 `lobehub-client-build-kit-v2.2.11-platform.3.zip` 及同名 `.sha256`。工具包只含锁定 commit 的
+输出为 `lobehub-client-build-kit-v2.2.11-platform.4.zip` 及同名 `.sha256`。工具包只含锁定 commit 的
 `git archive`、版本锁、构建脚本、验收模板和自身完整性清单；不含 `.git`、`node_modules`、签名私钥、已签名
 客户端或预先通过的审批。把 ZIP 和 SHA 文件分别交给受控 Windows、Linux 构建机，解压前先校验外层 SHA，
 解压后再校验 `BUILD_KIT_SHA256SUMS`。构建机允许联网获取锁文件中的依赖，但不得叠加 LobeHub Cloud 仓库或
 替换源码、lockfile、Electron 运行时及构建脚本。
+
+当前外网 Mac 已生成并校验上述真实工具包，ZIP 大小为 `53454987` 字节，SHA-256 为
+`080f0d214748458fcd9266a9ae7c60bd835a5107e9de895a0a61076fee6a825c`；旧 `.3` 工具包只作为归档，不能
+继续用于 `.4` 客户端构建。
 
 ## 2. 固定构建环境
 
@@ -129,9 +133,10 @@ deploy/internal/finalize-lobehub-artifacts.sh \
 ```
 
 定稿脚本先核对 server-only 的完整 `SHA256SUMS`、版本锁、三张镜像 tag/ID、PostgreSQL 17 和执行禁用状态，
-然后用共享客户端契约验证正式签名/审批文件；输入目录保持不变，输出目录重新生成精确校验和。早期
-`v2.2.11-platform.3` server-only 介质可以缺少 `LOBEHUB_LINUX_CLIENT_APPROVED`，但字段存在时只能为
-`false`；只有全部客户端门禁通过后，输出才会记录 Windows/Linux 为 `true`。磁盘必须为新完整目录预留至少
+然后用共享客户端契约验证正式签名/审批文件；输入目录保持不变，输出目录重新生成精确校验和。当前
+`v2.2.11-platform.4` server-only 实物必须记录 `LOBEHUB_LINUX_CLIENT_APPROVED=false`；定稿器对早期构建器
+缺失该字段的兼容不能把状态提升为已批准。只有全部客户端门禁通过后，输出才会记录 Windows/Linux 为
+`true`。磁盘必须为新完整目录预留至少
 server-only 目录大小及 ZIP 打包余量。
 
 没有可复用的 server-only 目录时，才执行一次完整构件构建；`build-lobehub-artifacts.sh` 的客户端参数必须

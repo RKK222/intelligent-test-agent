@@ -1405,3 +1405,43 @@
   - 完整运行 ZIP 仍缺企业 Authenticode Windows x64 客户端及证据、原生 Linux x86_64 Approved 客户端与独立
     验收记录；企业 Git remote、目标 DNS/反代/网络/Flyway/备份回滚验收也仍需现场人员完成。上述外部结果完成
     前保持 `LOBEHUB_ENABLED=false`，不得把 server-only 或转运 Bundle 标记为完整上线交付。
+
+### 2026-07-31 - 限制 LobeHub 开发监听并升级 platform.4 真实介质
+
+- Why:
+  - 真实执行根目录 `--with-lobehub` 后发现 fork 的 Next.js dev server 虽然使用 loopback 访问 URL，实际仍监听
+    `*:3210`；这与本地开发合同及企业隔离边界不一致，也说明 platform.3 服务端、源码转运件和客户端构建工具包
+    需要在同一修复提交上整体重建，不能继续交付旧摘要。
+- What:
+  - 独立 `/Users/huang/workspace/lobehub-platform` fork 的启动序列新增显式 `LOBEHUB_DEV_HOST` 处理，存在时向
+    Next.js 传入 `-H`；平台开发 helper 固定生成 `LOBEHUB_DEV_HOST=127.0.0.1` 且继续保持临时 env mode `0600`。
+    fork 发布提交为 `306dad5dc0968ed008f011d7fc07f12a606b21e1`，annotated tag 为
+    `v2.2.11-platform.4`，平台版本锁、镜像 tag、测试夹具和稳定文档同步升级。
+  - 从干净锁定 fork 重新构建约 2.2 GB 的真实 server-only 目录 `deploy/internal/dist-lobehub-server`；重新生成
+    `.4` fork Git Bundle 转运 ZIP 和原生客户端构建工具包，并复制到固定
+    `~/Desktop/mimoagent/0709/lobehub-fork-transfer`、`lobehub-client-build-kit` 目录。旧 `.3` 实物只保留在
+    显式 archive 目录，禁止与当前版本锁混用。
+- How:
+  - TDD 先分别用 fork 单测和平台 Shell 合同复现缺少 hostname 参数/开发 env 的失败，再做最小修复。fork 检查
+    36 项、Redis 原子状态机 3 项、数据库部门 Workspace/私有对象 110 项通过且完整 typecheck 通过；平台
+    LobeHub/模型网关 Maven 定向测试 35 项、前端隐藏表单交接测试、开发脚本及 artifact/finalizer/client-kit/
+    transfer/package/installer/backup 八组合同回归通过。
+  - 使用未修改的 `.env.test`、JDK 21 真实执行完整
+    `restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`；后端 readiness 200、前端 200、
+    LobeHub 307 固定回平台，`lsof` 确认只监听 `127.0.0.1:3210`。真实 `.4` 镜像演练完成 PostgreSQL 17
+    migration、Redis ACL、私有 RustFS、readiness、离线/调度门禁、证明数据冷备恢复和二次部署验收。
+  - fork 转运 ZIP 为 295,015,450 字节，SHA-256
+    `e63e4cfa16ab7925d2298eb1e34312e362ec5237a361f4d1ffd5cc46c145dec7`；客户端构建工具包为
+    53,454,987 字节，SHA-256 `080f0d214748458fcd9266a9ae7c60bd835a5107e9de895a0a61076fee6a825c`；
+    server-only 的 `release.env` 与 `SHA256SUMS` 文件摘要分别为
+    `788b869b4228c56d164ec87c378828e39885ffc17b33a107d730c1711fac6c45`、
+    `ed1523efa8f4daaadc50b66a89dca47922c605fe9acdbe92ceb42b6c5550dc15`。
+- Result:
+  - 本地开发环境现可显式启动 LobeHub 且不暴露 wildcard 监听；部署人员已有同一 `.4` 锁定提交的真实服务端
+    阶段介质、源码转运件、原生客户端构建工具包和可执行手册。本次不新增或改变 HTTP API、RunEvent、数据库/
+    Flyway/MyBatis SQL、模型网关 wire、性能策略、generated SDK、OpenCode 源码或 `.env*`；安全变化仅为收紧
+    本地监听，兼容性变化为当前 fork/介质版本整体升级到 `.4`。
+  - 完整上线 ZIP 仍按设计失败关闭：尚需企业 Authenticode Windows x64 客户端及证据、原生 Linux x86_64
+    Approved 客户端及独立验收记录、企业内部 Git remote 导入，以及目标现场 DNS/反代/网络、真实 Flyway
+    history、备份恢复和回滚演练。Apple Silicon Docker 冒烟不能替代这些外部验收，完成前继续保持
+    `LOBEHUB_ENABLED=false`。

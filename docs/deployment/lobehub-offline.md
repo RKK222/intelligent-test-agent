@@ -1,6 +1,6 @@
 # LobeHub 企业离线部署
 
-本文描述 LobeHub `v2.2.11-platform.3` 的离线制品、安装、启动、备份和回滚。架构与 fork 必须实现的行为见
+本文描述 LobeHub `v2.2.11-platform.4` 的离线制品、安装、启动、备份和回滚。架构与 fork 必须实现的行为见
 `docs/architecture/lobehub-integration.md`。本仓库不包含独立 fork 源码，只有通过制品门禁的外部构建结果
 才能进入全量包或 LobeHub-only 包。独立 fork 的企业 Git 转运和导入见
 `docs/deployment/lobehub-fork-transfer.md`，不能用运行 ZIP 代替源码托管。
@@ -10,7 +10,7 @@
 | 组件 | 固定基线 | 说明 |
 |---|---|---|
 | LobeHub upstream | `v2.2.11` / `5b4cef6` | 独立内部 fork，不修改本仓库 OpenCode 快照 |
-| LobeHub internal | `v2.2.11-platform.3` / `ccd0400fbe934ba929de637a315d25e969977c76` | 平台契约版本 `2` |
+| LobeHub internal | `v2.2.11-platform.4` / `306dad5dc0968ed008f011d7fc07f12a606b21e1` | 平台契约版本 `2` |
 | LobeHub database | ParadeDB / PostgreSQL 17 | 独立库、账号、密码、数据卷和 migration |
 | Redis | 现有企业实例 DB 0 | 独立 ACL 用户；LobeHub key/channel 仅 `lobehub:app:*` |
 | RustFS | `release.env` 中的不可变 tag、Docker image ID 和 tar SHA-256 | 私有 bucket，容器以 UID 10001 写数据 |
@@ -51,6 +51,8 @@ RustFS `9000/9001` 固定只绑定 `127.0.0.1`；app `3210` 默认同样绑定 l
 和 dev server 启动。它只在
 `.tmp/dev-services/lobehub-dev.env` 生成 mode `0600` 的开发密钥，不修改 `.env.local` 或 `.env.test`。开发
 helper 还会启动单独的本地 scheduler 进程，复用 fork 的生产 loopback 实现；其 Bearer secret 不出现在命令行。
+helper 固定写入 `LOBEHUB_DEV_HOST=127.0.0.1`，fork 启动序列据此向 Next.js 传入 `-H 127.0.0.1`；只把访问
+URL 写成 loopback 不算通过，验收时还必须用 `lsof` 或等价命令确认 `3210` 没有监听 wildcard。
 本地 Compose 的 ParadeDB、RustFS 和 MC 默认值与企业介质使用相同的批准 digest，不使用浮动 `latest`；只有
 显式的 `LOBEHUB_DEV_*_IMAGE` 开发覆盖才会改变它们。
 
@@ -91,11 +93,11 @@ deploy/internal/build-lobehub-fork-transfer.sh \
   --output-dir deploy/internal/dist-lobehub-fork-transfer
 ```
 
-工具只发布 `refs/heads/main` 和 `refs/tags/v2.2.11-platform.3`，扫描 fork 增量全部可达对象中的高置信
+工具只发布 `refs/heads/main` 和 `refs/tags/v2.2.11-platform.4`，扫描 fork 增量全部可达对象中的高置信
 私钥/token 格式，并执行 Bundle verify、独立 clone、包内
 `SHA256SUMS` 和外层 ZIP SHA-256。当前真实转运件已复制到外网 Mac
 `~/Desktop/mimoagent/0709/lobehub-fork-transfer`，外层 SHA-256 为
-`a494d5a94b7db39fa584c2591b72fb01a1fa3bb61f426fbf59b93a2a4c2d0461`。这只表示可转运介质已就绪；企业 Git
+`e63e4cfa16ab7925d2298eb1e34312e362ec5237a361f4d1ffd5cc46c145dec7`。这只表示可转运介质已就绪；企业 Git
 管理员尚未提供内部远端并完成 push/`ls-remote` 验证，因此不能记为内部源码托管完成。完整导入、权限和失败
 处理见 [LobeHub 独立 fork 企业 Git 转运与导入](lobehub-fork-transfer.md)。
 
@@ -118,27 +120,27 @@ clients/lobehub-windows-x64.exe
 clients/lobehub-linux-x86_64.tar.gz
 bin/mc-linux-amd64
 sbom/lobehub.spdx.json
-source/lobehub-v2.2.11-platform.3.tar.gz
+source/lobehub-v2.2.11-platform.4.tar.gz
 ```
 
 `SHA256SUMS` 必须恰好覆盖除自身外的全部普通文件，不允许绝对路径、`..`、空白文件名、重复项或符号链接。
 `release.env` 至少包含：
 
 ```dotenv
-LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.3
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.4
 LOBEHUB_UPSTREAM_VERSION=v2.2.11
 LOBEHUB_UPSTREAM_COMMIT=5b4cef6
-LOBEHUB_FORK_COMMIT=ccd0400fbe934ba929de637a315d25e969977c76
+LOBEHUB_FORK_COMMIT=306dad5dc0968ed008f011d7fc07f12a606b21e1
 LOBEHUB_PLATFORM_CONTRACT_VERSION=2
 LOBEHUB_PARADEDB_POSTGRES_MAJOR=17
 LOBEHUB_WINDOWS_AUTHENTICODE_VERIFIED=true
 LOBEHUB_LINUX_CLIENT_APPROVED=true
 LOBEHUB_LINUX_EXECUTION_DEFAULT=false
-LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.3
+LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.4
 LOBEHUB_APP_IMAGE_ID=sha256:<64 lowercase hex>
-LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.3
+LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.4
 LOBEHUB_PARADEDB_IMAGE_ID=sha256:<64 lowercase hex>
-LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.3
+LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.4
 LOBEHUB_RUSTFS_IMAGE_ID=sha256:<64 lowercase hex>
 ```
 
@@ -239,8 +241,11 @@ TEST_AGENT_LOBEHUB_ARTIFACT_DIR=/absolute/path/to/lobehub-release-artifacts \
 再 `scp` 到目标服务器 `/data/0709`；不要在中转机创建 `/data/0709`，也不要描述为从外网 Mac 直接 scp。
 不得在现场联网补拉镜像、npm 包、Marketplace、Connector 或客户端。
 
-当前仓库已经验证约 2.2 GB 的真实 server-only 目录及其运行态/备份恢复，并已生成原生客户端构建工具包和
-可离线 clone 的独立 fork Git Bundle；server-only 目录也已再次通过完整 `SHA256SUMS` 校验，完整打包门禁确认
+当前 `.4` server-only 实物位于 `deploy/internal/dist-lobehub-server`，大小约 2.2 GB；其 `release.env`
+SHA-256 为 `788b869b4228c56d164ec87c378828e39885ffc17b33a107d730c1711fac6c45`，`SHA256SUMS` 文件自身 SHA-256 为
+`ed1523efa8f4daaadc50b66a89dca47922c605fe9acdbe92ceb42b6c5550dc15`。该目录已经从三张真实 tar 完成
+PostgreSQL 17 migration、Redis ACL、私有 RustFS、app readiness、离线/调度门禁、证明数据冷备恢复和二次
+部署验收，并已生成原生客户端构建工具包和可离线 clone 的独立 fork Git Bundle；完整打包门禁确认
 因缺少 Windows/Linux 正式客户端而失败关闭。完整 `test-agent-lobehub-offline.zip` 仍以企业签名 Windows x64
 客户端及证据、批准的 Linux x86_64 客户端、审批证据和独立验收记录为硬门禁。上述外部结果未提供前，运行
 介质状态只能记为“服务端阶段已验证”，不能记为“完整企业介质已完成”；fork 状态只能记为“转运介质已就绪”，
@@ -354,7 +359,7 @@ app 镜像不创建公网 QStash schedule。单实例 launcher 每分钟只向�
 任务，单次 30 秒超时且不重叠；到期任务以内嵌方式继承 `createdByUserId` 的模型委托。当前手册禁止启动第二个
 app 副本；在没有跨实例选主/锁前横向复制会导致重复 sweep。
 
-`v2.2.11-platform.3` 对 Windows 和 Linux 都强制 `LOBEHUB_DEVICE_EXECUTION_MODE=disabled`，没有可用的
+`v2.2.11-platform.4` 对 Windows 和 Linux 都强制 `LOBEHUB_DEVICE_EXECUTION_MODE=disabled`，没有可用的
 “验收后改 true”路径。Linux 真实沙箱能力需在后续版本另行实现、测试和审批；当前版本修改其它旧布尔变量
 不会放开执行入口。
 

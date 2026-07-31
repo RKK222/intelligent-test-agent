@@ -246,7 +246,7 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
   migration 占位值，平台才允许落票据。现场 `validate-config` 还必须核对 digest 镜像、secret 长度、离线开关、
   Cookie/Session 契约和执行能力门禁，任一不满足都禁止 migration 或启动 app。
 - 完全离线部署必须在 UI 和服务端同时关闭公网搜索、SaaS Connector、BYOK、自定义 Base URL、遥测、在线更新、
-  Marketplace、CDN 与运行期下载。`v2.2.11-platform.3` 对 Windows/Linux 都强制
+  Marketplace、CDN 与运行期下载。`v2.2.11-platform.4` 对 Windows/Linux 都强制
   `LOBEHUB_DEVICE_EXECUTION_MODE=disabled`，不存在通过旧变量放开的路径；后续 Linux 执行版本仍须在目标主机
   通过真实边界验收并 fail closed，且提供 root 所有、mode `0600`、绑定当前发行版/内核的通过证据。
 - 企业客户端必须从锁定 fork commit 的源码工具包在原生 Windows x64 / Linux x86_64 构建，仿真或交叉构建

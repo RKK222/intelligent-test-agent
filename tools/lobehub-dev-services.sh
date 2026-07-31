@@ -125,6 +125,8 @@ write_env_file() {
     printf 'LOBEHUB_DEV_DB_PORT=%s\n' "${db_port}"
     printf 'LOBEHUB_DEV_S3_PORT=%s\n' "${s3_port}"
     printf 'LOBEHUB_DEV_S3_CONSOLE_PORT=%s\n' "${LOBEHUB_DEV_S3_CONSOLE_PORT:-59001}"
+    # fork 启动序列据此向 Next.js 传 -H；仅修改访问 URL 不会阻止 0.0.0.0 监听。
+    printf 'LOBEHUB_DEV_HOST=127.0.0.1\n'
     printf 'RUSTFS_ACCESS_KEY=%s\n' "${rustfs_access}"
     printf 'RUSTFS_SECRET_KEY=%s\n' "${rustfs_secret}"
     printf 'APP_URL=%s\n' "${app_origin}"

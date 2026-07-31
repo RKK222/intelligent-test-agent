@@ -31,7 +31,7 @@ grep -F 'CLIENT_EXECUTION_MODE=disabled' "${WINDOWS_BUILDER}" >/dev/null
 
 "${KIT_BUILDER}" --fork-dir "${FORK_DIR}" --output-dir "${OUTPUT_DIR}" >/dev/null
 
-KIT_ZIP="${OUTPUT_DIR}/lobehub-client-build-kit-v2.2.11-platform.3.zip"
+KIT_ZIP="${OUTPUT_DIR}/lobehub-client-build-kit-v2.2.11-platform.4.zip"
 test -s "${KIT_ZIP}"
 test -s "${KIT_ZIP}.sha256"
 (
@@ -44,17 +44,17 @@ test -s "${KIT_ZIP}.sha256"
 ) >/dev/null
 
 unzip -q "${KIT_ZIP}" -d "${EXTRACT_DIR}"
-KIT_ROOT="${EXTRACT_DIR}/lobehub-client-build-kit-v2.2.11-platform.3"
+KIT_ROOT="${EXTRACT_DIR}/lobehub-client-build-kit-v2.2.11-platform.4"
 test -f "${KIT_ROOT}/version.env"
 test -f "${KIT_ROOT}/SOURCE_SHA256SUMS"
 test -f "${KIT_ROOT}/BUILD_KIT_SHA256SUMS"
-test -f "${KIT_ROOT}/source/lobehub-v2.2.11-platform.3.tar.gz"
+test -f "${KIT_ROOT}/source/lobehub-v2.2.11-platform.4.tar.gz"
 test -f "${KIT_ROOT}/scripts/Build-LobeHubWindowsClient.ps1"
 test -x "${KIT_ROOT}/scripts/build-lobehub-linux-client.sh"
 test -x "${KIT_ROOT}/scripts/approve-lobehub-linux-client.sh"
 test -f "${KIT_ROOT}/scripts/lobehub-client-artifact-contract.sh"
 test -f "${KIT_ROOT}/BUILDING.md"
-grep -Fx 'LOBEHUB_FORK_COMMIT=ccd0400fbe934ba929de637a315d25e969977c76' \
+grep -Fx 'LOBEHUB_FORK_COMMIT=306dad5dc0968ed008f011d7fc07f12a606b21e1' \
   "${KIT_ROOT}/version.env" >/dev/null
 (
   cd "${KIT_ROOT}"

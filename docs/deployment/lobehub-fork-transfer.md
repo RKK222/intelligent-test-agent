@@ -9,13 +9,13 @@ scanning，也不能把上游公开历史中的测试字符串解释为企业凭
 
 ## 当前锁定版本与介质
 
-- 内部版本：`v2.2.11-platform.3`；
-- fork commit：`ccd0400fbe934ba929de637a315d25e969977c76`；
+- 内部版本：`v2.2.11-platform.4`；
+- fork commit：`306dad5dc0968ed008f011d7fc07f12a606b21e1`；
 - 发布分支：`refs/heads/main`；
-- annotated tag：`refs/tags/v2.2.11-platform.3`；
+- annotated tag：`refs/tags/v2.2.11-platform.4`；
 - 当前外网 Mac 转运件：
-  `~/Desktop/mimoagent/0709/lobehub-fork-transfer/lobehub-fork-transfer-v2.2.11-platform.3.zip`；
-- 当前外层 SHA-256：`a494d5a94b7db39fa584c2591b72fb01a1fa3bb61f426fbf59b93a2a4c2d0461`。
+  `~/Desktop/mimoagent/0709/lobehub-fork-transfer/lobehub-fork-transfer-v2.2.11-platform.4.zip`；
+- 当前外层 SHA-256：`e63e4cfa16ab7925d2298eb1e34312e362ec5237a361f4d1ffd5cc46c145dec7`。
 
 上述路径和摘要描述当前已生成的真实介质，不代表企业 Git 远端已创建或已推送。远端 URL、访问控制、分支保护
 和仓库备份仍由企业 Git 管理员按变更单完成。
@@ -28,7 +28,7 @@ scanning，也不能把上游公开历史中的测试字符串解释为企业凭
 cd /Users/huang/workspace/intelligent-test-agent-gitee
 git -C /Users/huang/workspace/lobehub-platform status --short
 git -C /Users/huang/workspace/lobehub-platform rev-parse refs/heads/main
-git -C /Users/huang/workspace/lobehub-platform rev-parse 'refs/tags/v2.2.11-platform.3^{}'
+git -C /Users/huang/workspace/lobehub-platform rev-parse 'refs/tags/v2.2.11-platform.4^{}'
 
 deploy/internal/build-lobehub-fork-transfer.sh \
   --fork-dir /Users/huang/workspace/lobehub-platform \
@@ -42,8 +42,8 @@ fork checkout 或部署脚本，即使使用 `--force` 也不能删除这些输�
 ZIP 内包含：
 
 ```text
-lobehub-fork-transfer-v2.2.11-platform.3/
-  lobehub-platform-v2.2.11-platform.3.bundle
+lobehub-fork-transfer-v2.2.11-platform.4/
+  lobehub-platform-v2.2.11-platform.4.bundle
   refs.txt
   IMPORT.md
   SHA256SUMS
@@ -59,17 +59,17 @@ lobehub-fork-transfer-v2.2.11-platform.3/
 
 ```bash
 cd ~/Desktop/mimoagent/0709/lobehub-fork-transfer
-sha256sum -c lobehub-fork-transfer-v2.2.11-platform.3.zip.sha256
-unzip -q lobehub-fork-transfer-v2.2.11-platform.3.zip
-cd lobehub-fork-transfer-v2.2.11-platform.3
+sha256sum -c lobehub-fork-transfer-v2.2.11-platform.4.zip.sha256
+unzip -q lobehub-fork-transfer-v2.2.11-platform.4.zip
+cd lobehub-fork-transfer-v2.2.11-platform.4
 sha256sum -c SHA256SUMS
 grep -Fx 'FORK_DELTA_CREDENTIAL_SCAN=Passed' refs.txt
 
-git bundle list-heads lobehub-platform-v2.2.11-platform.3.bundle
+git bundle list-heads lobehub-platform-v2.2.11-platform.4.bundle
 ```
 
 `git bundle list-heads` 必须只显示两行：`refs/heads/main` 的 commit 必须是
-`ccd0400fbe934ba929de637a315d25e969977c76`，另一行为 `refs/tags/v2.2.11-platform.3`。tag 行显示的是
+`306dad5dc0968ed008f011d7fc07f12a606b21e1`，另一行为 `refs/tags/v2.2.11-platform.4`。tag 行显示的是
 annotated tag object，不要求等于 fork commit；clone 后必须再校验 tag 的解引用结果。
 
 ## 导入企业 Git
@@ -78,18 +78,18 @@ annotated tag object，不要求等于 fork commit；clone 后必须再校验 ta
 前提下执行：
 
 ```bash
-cd ~/Desktop/mimoagent/0709/lobehub-fork-transfer/lobehub-fork-transfer-v2.2.11-platform.3
-git clone lobehub-platform-v2.2.11-platform.3.bundle lobehub-platform
+cd ~/Desktop/mimoagent/0709/lobehub-fork-transfer/lobehub-fork-transfer-v2.2.11-platform.4
+git clone lobehub-platform-v2.2.11-platform.4.bundle lobehub-platform
 cd lobehub-platform
 
 test "$(git branch --show-current)" = main
-test "$(git rev-parse HEAD)" = ccd0400fbe934ba929de637a315d25e969977c76
-test "$(git rev-parse 'refs/tags/v2.2.11-platform.3^{}')" = ccd0400fbe934ba929de637a315d25e969977c76
+test "$(git rev-parse HEAD)" = 306dad5dc0968ed008f011d7fc07f12a606b21e1
+test "$(git rev-parse 'refs/tags/v2.2.11-platform.4^{}')" = 306dad5dc0968ed008f011d7fc07f12a606b21e1
 
 git remote rename origin transfer
 git remote add origin <enterprise-git-url>
 git push --set-upstream origin main
-git push origin refs/tags/v2.2.11-platform.3
+git push origin refs/tags/v2.2.11-platform.4
 ```
 
 `<enterprise-git-url>` 必须替换为现场审批的内部地址；HTTPS 使用企业 credential helper，SSH 使用企业 Git
@@ -98,8 +98,8 @@ git push origin refs/tags/v2.2.11-platform.3
 推送后用只读命令核对远端。预期 `main` 为锁定 fork commit，tag 解引用后也是同一 commit：
 
 ```bash
-git ls-remote origin refs/heads/main refs/tags/v2.2.11-platform.3 \
-  'refs/tags/v2.2.11-platform.3^{}'
+git ls-remote origin refs/heads/main refs/tags/v2.2.11-platform.4 \
+  'refs/tags/v2.2.11-platform.4^{}'
 ```
 
 把远端 URL 的脱敏标识、校验结果、管理员、时间和变更单写入企业运维记录。企业远端验证通过前，本机同级

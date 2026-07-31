@@ -10,8 +10,8 @@ trap 'rm -rf "${FIXTURE_DIR}"' EXIT
 # 客户端制品门禁由构建、汇集和现场安装共用；缺少实现时测试必须直接失败。
 source "${CONTRACT}"
 
-INTERNAL_VERSION="v2.2.11-platform.3"
-FORK_COMMIT="ccd0400fbe934ba929de637a315d25e969977c76"
+INTERNAL_VERSION="v2.2.11-platform.4"
+FORK_COMMIT="306dad5dc0968ed008f011d7fc07f12a606b21e1"
 WINDOWS_CLIENT="${FIXTURE_DIR}/lobehub-windows-x64.exe"
 WINDOWS_EVIDENCE="${FIXTURE_DIR}/windows-authenticode-verification.txt"
 LINUX_CLIENT="${FIXTURE_DIR}/lobehub-linux-x86_64.tar.gz"

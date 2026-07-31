@@ -42,9 +42,9 @@ grep -F 'LOBEHUB_FORK_COMMIT' "${ROOT_DIR}/deploy/internal/lobehub/version.env" 
 grep -F 'git -C "${FORK_DIR}" archive --format=tar "${FORK_COMMIT}"' "${BUILDER}" >/dev/null
 grep -F 'corepack pnpm@10.33.0 install --frozen-lockfile' \
   "${ROOT_DIR}/tools/lobehub-dev-services.sh" >/dev/null
-grep -F 'LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.3' \
+grep -F 'LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.4' \
   "${INTERNAL_DIR}/lobehub.env.example" >/dev/null
-grep -F 'LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.3' \
+grep -F 'LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.4' \
   "${INTERNAL_DIR}/lobehub.env.example" >/dev/null
 grep -F 'AGENT_RUNTIME_MODE=local' "${INTERNAL_DIR}/lobehub.env.example" >/dev/null
 
@@ -64,8 +64,8 @@ AUTHENTICODE_STATUS=Valid
 AUTHENTICODE_SUBJECT=CN=Enterprise Release Signing
 AUTHENTICODE_THUMBPRINT=0123456789ABCDEF0123456789ABCDEF01234567
 AUTHENTICODE_FILE_SHA256=${WINDOWS_SHA}
-LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.3
-LOBEHUB_FORK_COMMIT=ccd0400fbe934ba929de637a315d25e969977c76
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.4
+LOBEHUB_FORK_COMMIT=306dad5dc0968ed008f011d7fc07f12a606b21e1
 CLIENT_ARCHITECTURE=x64
 CLIENT_EXECUTION_MODE=disabled
 EOF
@@ -88,8 +88,8 @@ EOF
 LINUX_APPROVAL_STATUS=Approved
 LINUX_APPROVER=security-reviewer@example.internal
 LINUX_CLIENT_FILE_SHA256=${LINUX_SHA}
-LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.3
-LOBEHUB_FORK_COMMIT=ccd0400fbe934ba929de637a315d25e969977c76
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.4
+LOBEHUB_FORK_COMMIT=306dad5dc0968ed008f011d7fc07f12a606b21e1
 CLIENT_ARCHITECTURE=x86_64
 CLIENT_EXECUTION_MODE=disabled
 LINUX_VALIDATION_OS=Enterprise Linux 9.6

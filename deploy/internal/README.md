@@ -66,7 +66,7 @@ grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL
 ## Mac 打包
 
 LobeHub 独立 fork 默认位于平台仓库同级 `../lobehub-platform`，精确提交由 `lobehub/version.env` 锁定。当前
-锁定版本为 `v2.2.11-platform.3`；Desktop/CLI 使用 LobeHub 服务端浏览器确认、PKCE 和 24 小时 opaque Session，
+锁定版本为 `v2.2.11-platform.4`；Desktop/CLI 使用 LobeHub 服务端浏览器确认、PKCE 和 24 小时 opaque Session，
 不再部署或兼容 OIDC Bridge。独立 fork 仍须由企业 Git 管理员推送到受控内部远端；同级本机 checkout 只用于
 构建和验证，不能作为企业源码托管。外网 Mac 先用 `build-lobehub-fork-transfer.sh` 生成只发布 `main` 和内部
 版本 tag 的自包含 Git Bundle，企业管理员按
@@ -82,6 +82,14 @@ x64 证书构建机和 Linux x86_64 构建/审批人员；具体流程见
 `finalize-lobehub-artifacts.sh` 在无网络、无 Docker 条件下复制并定稿新目录；原 server-only 目录保持不变，
 客户端门禁未全部通过时不会生成完整目录。Docker VM 至少分配 8 GiB 内存；
 fork 已将 Next.js 静态生成限制为两个 worker，以支持 10 CPU / 8 GiB 的已验证构建基线。
+
+当前外网 Mac 的 `.4` 服务端阶段实物位于 `deploy/internal/dist-lobehub-server`，已经通过真实镜像启动、迁移、
+部署校验和冷备恢复；它仍因 Windows/Linux 客户端门禁为 `false` 而不能打成上线 ZIP。当前原生客户端构建工具包
+已复制到 `~/Desktop/mimoagent/0709/lobehub-client-build-kit`，SHA-256 为
+`080f0d214748458fcd9266a9ae7c60bd835a5107e9de895a0a61076fee6a825c`；fork 转运 ZIP 位于相邻的
+`lobehub-fork-transfer` 目录，SHA-256 为
+`e63e4cfa16ab7925d2298eb1e34312e362ec5237a361f4d1ffd5cc46c145dec7`。旧 `.3` 产物已移到显式归档目录，
+部署人员不得把归档件与 `.4` 版本锁混用。
 
 独立 fork 转运介质生成命令：
 
