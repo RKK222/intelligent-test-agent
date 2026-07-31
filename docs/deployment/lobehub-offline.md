@@ -89,6 +89,8 @@ SHA256SUMS
 approved-resources.json
 LICENSES.txt
 windows-authenticode-verification.txt
+linux-client-verification.txt
+linux-client-acceptance-record.txt
 images/lobehub-image.tar
 images/paradedb-image.tar
 images/rustfs-image.tar
@@ -110,6 +112,7 @@ LOBEHUB_FORK_COMMIT=ccd0400fbe934ba929de637a315d25e969977c76
 LOBEHUB_PLATFORM_CONTRACT_VERSION=2
 LOBEHUB_PARADEDB_POSTGRES_MAJOR=17
 LOBEHUB_WINDOWS_AUTHENTICODE_VERIFIED=true
+LOBEHUB_LINUX_CLIENT_APPROVED=true
 LOBEHUB_LINUX_EXECUTION_DEFAULT=false
 LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.3
 LOBEHUB_APP_IMAGE_ID=sha256:<64 lowercase hex>
@@ -119,8 +122,13 @@ LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.3
 LOBEHUB_RUSTFS_IMAGE_ID=sha256:<64 lowercase hex>
 ```
 
-`windows-authenticode-verification.txt` 使用 `KEY=value`，至少包含 `AUTHENTICODE_STATUS=Valid`、
-`AUTHENTICODE_SUBJECT`、`AUTHENTICODE_THUMBPRINT` 和与实际 EXE 一致的 `AUTHENTICODE_FILE_SHA256`。打包脚本
+`windows-authenticode-verification.txt` 使用 `KEY=value`，必须包含 `AUTHENTICODE_STATUS=Valid`、非占位
+`AUTHENTICODE_SUBJECT`、40/64 位十六进制 `AUTHENTICODE_THUMBPRINT`、与实际 EXE 一致的
+`AUTHENTICODE_FILE_SHA256`，以及匹配的内部版本、fork commit、`CLIENT_ARCHITECTURE=x64` 和
+`CLIENT_EXECUTION_MODE=disabled`。`linux-client-verification.txt` 必须为 `Approved`，绑定 Linux 客户端、
+`linux-client-acceptance-record.txt`、版本、commit、x86_64、实际目标 OS/内核和审批人。验收记录必须把登录、
+无公网依赖、运行期下载阻断、本地数据隔离和设备执行禁用全部记为成功，并关联真实变更单号。详细原生构建与
+双人审批步骤见 [LobeHub 企业客户端原生构建与审批](lobehub-client-build.md)。打包脚本
 会失败关闭校验上述契约；现场导入后还会用 `docker image inspect` 确认 tar 提供预期 tag、`linux/amd64`
 架构和精确 image ID。这里不使用 `repository@manifestDigest` 作为离线运行引用，因为 `docker save/load` 不恢复
 Registry `RepoDigest` 映射；镜像 tar 本身仍由 `SHA256SUMS` 锁定，app 镜像还必须以 OCI label 记录 fork commit。
@@ -140,6 +148,8 @@ deploy/internal/build-lobehub-artifacts.sh \
   --windows-client /absolute/path/to/lobehub-windows-x64.exe \
   --windows-signature-evidence /absolute/path/to/windows-authenticode-verification.txt \
   --linux-client /absolute/path/to/lobehub-linux-x86_64.tar.gz \
+  --linux-approval-evidence /absolute/path/to/linux-client-verification.txt \
+  --linux-acceptance-record /absolute/path/to/linux-client-acceptance-record.txt \
   --node-base-image node@sha256:d45d78e7929b46875bbd4e29bea672d5bc48186c6c3588306521c815e78352d6 \
   --busybox-base-image busybox@sha256:1cfa4e2b09e127b9c4ed43578d3f3c18e7d44ea47b9ea98475c0cbe9086525f8 \
   --paradedb-source-image paradedb/paradedb@sha256:ba45fac6b9b3bd5e91407c9c4b1657b8300b78beb24f60eb03b266120b26699c \
@@ -188,8 +198,9 @@ TEST_AGENT_LOBEHUB_ARTIFACT_DIR=/absolute/path/to/lobehub-release-artifacts \
 再 `scp` 到目标服务器 `/data/0709`；不要在中转机创建 `/data/0709`，也不要描述为从外网 Mac 直接 scp。
 不得在现场联网补拉镜像、npm 包、Marketplace、Connector 或客户端。
 
-当前仓库已经验证可生成约 2.2 GB 的真实服务端阶段目录；完整 `test-agent-lobehub-offline.zip` 仍以企业签名
-Windows x64 客户端、批准的 Linux x86_64 客户端及匹配证据为硬门禁。三项未提供前，介质状态只能记为
+当前仓库已经验证可生成约 2.2 GB 的真实服务端阶段目录，并能从锁定 fork 生成带完整校验和的原生客户端构建
+工具包；完整 `test-agent-lobehub-offline.zip` 仍以企业签名 Windows x64 客户端及证据、批准的 Linux x86_64
+客户端、审批证据和独立验收记录为硬门禁。上述外部结果未提供前，介质状态只能记为
 “服务端阶段已验证”，不能记为“完整企业介质已完成”。
 
 ## 企业现场逐机执行单

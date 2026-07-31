@@ -70,7 +70,10 @@ LobeHub 独立 fork 默认位于平台仓库同级 `../lobehub-platform`，精�
 不再部署或兼容 OIDC Bridge。独立 fork 仍须由企业 Git 管理员推送到受控内部远端；同级本机 checkout 只用于
 构建和验证，不能作为企业源码托管。先用 `build-lobehub-artifacts.sh` 从锁定提交构建真实 `linux/amd64` 镜像、
 源码、SBOM、许可证和客户端制品集；
-完整构建必须提供企业签名 Windows x64 客户端、签名证据和批准的 Linux x86_64 客户端。无客户端时只允许
+完整构建必须提供企业签名 Windows x64 客户端与签名证据，以及批准的 Linux x86_64 客户端、最终审批证据和
+独立验收记录。先由 Mac 运行 `build-lobehub-client-kit.sh` 导出锁定源码及原生构建工具包，再分别交给 Windows
+x64 证书构建机和 Linux x86_64 构建/审批人员；具体流程见
+[LobeHub 企业客户端原生构建与审批](../../docs/deployment/lobehub-client-build.md)。无客户端时只允许
 使用 `--server-only` 做服务端部署演练，后续打包门禁会拒绝该阶段目录。Docker VM 至少分配 8 GiB 内存；
 fork 已将 Next.js 静态生成限制为两个 worker，以支持 10 CPU / 8 GiB 的已验证构建基线。
 
@@ -95,7 +98,7 @@ TEST_AGENT_LOBEHUB_ARTIFACT_DIR=/absolute/path/to/lobehub-release-artifacts \
 
 脚本会核对上游/内部版本和 fork commit、PostgreSQL 17、三份不可变 tag/image ID 镜像、完整且精确的
 `SHA256SUMS`、源码、SBOM、许可证、
-资源审批清单、Windows Authenticode 证据及客户端摘要；任一缺失或不一致都会失败关闭。现场安装、systemd/Docker
+资源审批清单、Windows Authenticode 证据、Linux 审批/验收记录及客户端摘要；任一缺失或不一致都会失败关闭。现场安装、systemd/Docker
 启停、共享 Redis ACL、HTTP 风险、备份和回滚见 [LobeHub 企业离线部署](../../docs/deployment/lobehub-offline.md)。
 
 现场填写 `/data/testagent/config/lobehub.env` 后必须先运行：

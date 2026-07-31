@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck source=archive-common.sh
 source "${SCRIPT_DIR}/archive-common.sh"
+LOBEHUB_CLIENT_CONTRACT_FILE="${SCRIPT_DIR}/lobehub-client-artifact-contract.sh"
 
 ENV_FILE="${SCRIPT_DIR}/.env"
 if [[ ! -f "${ENV_FILE}" ]]; then
@@ -753,7 +754,7 @@ package_mysql_image() {
 verify_lobehub_artifact_set() {
   local source_dir="$1" required_file path line checksum_line_pattern
   local internal_version upstream_version upstream_commit fork_commit image_ref image_id
-  local expected_paths listed_paths client_sha signed_client_sha
+  local expected_paths listed_paths
   local lock_file locked_internal_version locked_upstream_version locked_upstream_commit locked_fork_commit locked_postgres_major
   local locked_contract_version
   [[ -d "${source_dir}" ]] || {
@@ -787,6 +788,7 @@ verify_lobehub_artifact_set() {
   }
   for required_file in \
     release.env SHA256SUMS approved-resources.json LICENSES.txt windows-authenticode-verification.txt \
+    linux-client-verification.txt linux-client-acceptance-record.txt \
     images/lobehub-image.tar images/paradedb-image.tar images/rustfs-image.tar \
     clients/lobehub-windows-x64.exe clients/lobehub-linux-x86_64.tar.gz \
     bin/mc-linux-amd64 sbom/lobehub.spdx.json \
@@ -874,25 +876,27 @@ verify_lobehub_artifact_set() {
     echo "Windows Authenticode verification is not recorded as successful" >&2
     exit 1
   }
+  [[ "$(state_value "${source_dir}/release.env" LOBEHUB_LINUX_CLIENT_APPROVED)" == true ]] || {
+    echo "Linux client approval is not recorded as successful" >&2
+    exit 1
+  }
   [[ "$(state_value "${source_dir}/release.env" LOBEHUB_LINUX_EXECUTION_DEFAULT)" == false ]] || {
     echo "Linux local execution must be disabled by default" >&2
     exit 1
   }
-  [[ "$(state_value "${source_dir}/windows-authenticode-verification.txt" AUTHENTICODE_STATUS)" == Valid ]] || {
-    echo "Windows Authenticode evidence status is not Valid" >&2
+  [[ -f "${LOBEHUB_CLIENT_CONTRACT_FILE}" ]] || {
+    echo "LobeHub client artifact contract is missing: ${LOBEHUB_CLIENT_CONTRACT_FILE}" >&2
     exit 1
   }
-  [[ -n "$(state_value "${source_dir}/windows-authenticode-verification.txt" AUTHENTICODE_SUBJECT)" \
-    && -n "$(state_value "${source_dir}/windows-authenticode-verification.txt" AUTHENTICODE_THUMBPRINT)" ]] || {
-    echo "Windows Authenticode signer identity evidence is incomplete" >&2
-    exit 1
-  }
-  client_sha="$(sha256_file "${source_dir}/clients/lobehub-windows-x64.exe")"
-  signed_client_sha="$(state_value "${source_dir}/windows-authenticode-verification.txt" AUTHENTICODE_FILE_SHA256)"
-  [[ "${signed_client_sha}" == "${client_sha}" ]] || {
-    echo "Windows Authenticode evidence does not match the packaged client" >&2
-    exit 1
-  }
+  # 最终打包不能信任外部阶段目录的自报状态，必须重新绑定两端客户端、版本和 fork commit。
+  source "${LOBEHUB_CLIENT_CONTRACT_FILE}"
+  lobehub_verify_client_artifacts \
+    "${source_dir}/clients/lobehub-windows-x64.exe" \
+    "${source_dir}/windows-authenticode-verification.txt" \
+    "${source_dir}/clients/lobehub-linux-x86_64.tar.gz" \
+    "${source_dir}/linux-client-verification.txt" \
+    "${source_dir}/linux-client-acceptance-record.txt" \
+    "${locked_internal_version}" "${locked_fork_commit}"
   for image_ref in LOBEHUB_APP_IMAGE LOBEHUB_PARADEDB_IMAGE LOBEHUB_RUSTFS_IMAGE; do
     image_id="$(state_value "${source_dir}/release.env" "${image_ref}_ID")"
     require_lobehub_loadable_image \
@@ -930,12 +934,14 @@ package_lobehub_zip() {
   cp -a "${OUTPUT_DIR}/lobehub/." "${staging_dir}/dist/lobehub/"
   for required_file in \
     lobehub.env.example lobehub-docker.sh lobehub-backup.sh install-lobehub-offline.sh \
+    lobehub-client-artifact-contract.sh \
     systemd/test-agent-lobehub.service lobehub/version.env nginx/lobehub.conf.template; do
     mkdir -p "${staging_dir}/deploy/internal/$(dirname "${required_file}")"
     cp -a "${SCRIPT_DIR}/${required_file}" "${staging_dir}/deploy/internal/${required_file}"
   done
   mkdir -p "${staging_dir}/docs/deployment" "${staging_dir}/docs/architecture"
   cp -a "${ROOT_DIR}/docs/deployment/lobehub-offline.md" "${staging_dir}/docs/deployment/"
+  cp -a "${ROOT_DIR}/docs/deployment/lobehub-client-build.md" "${staging_dir}/docs/deployment/"
   cp -a "${ROOT_DIR}/docs/architecture/lobehub-integration.md" "${staging_dir}/docs/architecture/"
   rm -f "${zip_path}"
   (cd "${staging_dir}" && zip -qr "${zip_path}" .)

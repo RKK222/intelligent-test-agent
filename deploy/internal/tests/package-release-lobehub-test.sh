@@ -14,7 +14,7 @@ for file in \
   clients/lobehub-windows-x64.exe clients/lobehub-linux-x86_64.tar.gz \
   bin/mc-linux-amd64 sbom/lobehub.spdx.json \
   source/lobehub-v2.2.11-platform.3.tar.gz \
-  approved-resources.json LICENSES.txt windows-authenticode-verification.txt; do
+  approved-resources.json LICENSES.txt; do
   printf 'fixture:%s\n' "${file}" >"${FIXTURE_DIR}/${file}"
 done
 cat >"${FIXTURE_DIR}/release.env" <<'EOF'
@@ -25,6 +25,7 @@ LOBEHUB_FORK_COMMIT=ccd0400fbe934ba929de637a315d25e969977c76
 LOBEHUB_PLATFORM_CONTRACT_VERSION=2
 LOBEHUB_PARADEDB_POSTGRES_MAJOR=17
 LOBEHUB_WINDOWS_AUTHENTICODE_VERIFIED=true
+LOBEHUB_LINUX_CLIENT_APPROVED=true
 LOBEHUB_LINUX_EXECUTION_DEFAULT=false
 LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.3
 LOBEHUB_APP_IMAGE_ID=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -36,14 +37,47 @@ EOF
 
 if command -v sha256sum >/dev/null 2>&1; then
   WINDOWS_SHA="$(sha256sum "${FIXTURE_DIR}/clients/lobehub-windows-x64.exe" | awk '{print $1}')"
+  LINUX_SHA="$(sha256sum "${FIXTURE_DIR}/clients/lobehub-linux-x86_64.tar.gz" | awk '{print $1}')"
 else
   WINDOWS_SHA="$(shasum -a 256 "${FIXTURE_DIR}/clients/lobehub-windows-x64.exe" | awk '{print $1}')"
+  LINUX_SHA="$(shasum -a 256 "${FIXTURE_DIR}/clients/lobehub-linux-x86_64.tar.gz" | awk '{print $1}')"
 fi
 cat >"${FIXTURE_DIR}/windows-authenticode-verification.txt" <<EOF
 AUTHENTICODE_STATUS=Valid
-AUTHENTICODE_SUBJECT=CN=TestAgent Fixture
-AUTHENTICODE_THUMBPRINT=0123456789ABCDEF
+AUTHENTICODE_SUBJECT=CN=Enterprise Release Signing
+AUTHENTICODE_THUMBPRINT=0123456789ABCDEF0123456789ABCDEF01234567
 AUTHENTICODE_FILE_SHA256=${WINDOWS_SHA}
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.3
+LOBEHUB_FORK_COMMIT=ccd0400fbe934ba929de637a315d25e969977c76
+CLIENT_ARCHITECTURE=x64
+CLIENT_EXECUTION_MODE=disabled
+EOF
+cat >"${FIXTURE_DIR}/linux-client-acceptance-record.txt" <<'EOF'
+VALIDATION_RESULT=Passed
+CLIENT_LOGIN_RESULT=Passed
+DEVICE_EXECUTION_RESULT=Disabled
+PUBLIC_NETWORK_DEPENDENCY_RESULT=None
+RUNTIME_DOWNLOAD_RESULT=Blocked
+LOCAL_DATA_ISOLATION_RESULT=Passed
+REVIEWER=security-reviewer@example.internal
+APPROVAL_CHANGE_ID=CHG-20260731-LOBEHUB
+EOF
+if command -v sha256sum >/dev/null 2>&1; then
+  ACCEPTANCE_SHA="$(sha256sum "${FIXTURE_DIR}/linux-client-acceptance-record.txt" | awk '{print $1}')"
+else
+  ACCEPTANCE_SHA="$(shasum -a 256 "${FIXTURE_DIR}/linux-client-acceptance-record.txt" | awk '{print $1}')"
+fi
+cat >"${FIXTURE_DIR}/linux-client-verification.txt" <<EOF
+LINUX_APPROVAL_STATUS=Approved
+LINUX_APPROVER=security-reviewer@example.internal
+LINUX_CLIENT_FILE_SHA256=${LINUX_SHA}
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.3
+LOBEHUB_FORK_COMMIT=ccd0400fbe934ba929de637a315d25e969977c76
+CLIENT_ARCHITECTURE=x86_64
+CLIENT_EXECUTION_MODE=disabled
+LINUX_VALIDATION_OS=Enterprise Linux 9.6
+LINUX_VALIDATION_KERNEL=5.14.0-570.26.1.el9_6.x86_64
+LINUX_ACCEPTANCE_RECORD_SHA256=${ACCEPTANCE_SHA}
 EOF
 
 (
@@ -69,9 +103,17 @@ unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
 unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
   | grep -Fx 'deploy/internal/lobehub-backup.sh' >/dev/null
 unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
+  | grep -Fx 'deploy/internal/lobehub-client-artifact-contract.sh' >/dev/null
+unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
+  | grep -Fx 'dist/lobehub/linux-client-verification.txt' >/dev/null
+unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
+  | grep -Fx 'dist/lobehub/linux-client-acceptance-record.txt' >/dev/null
+unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
   | grep -Fx 'dist/lobehub/source/lobehub-v2.2.11-platform.3.tar.gz' >/dev/null
 unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
   | grep -Fx 'docs/architecture/lobehub-integration.md' >/dev/null
+unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
+  | grep -Fx 'docs/deployment/lobehub-client-build.md' >/dev/null
 unzip -p "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" deploy/internal/lobehub-docker.sh \
   | grep -F "show server_version_num" >/dev/null
 unzip -p "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" deploy/internal/lobehub-docker.sh \
@@ -95,6 +137,30 @@ if unzip -p "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" deploy/internal/lobeh
   echo "LobeHub release still uses pnpm inside the scratch runtime image" >&2
   exit 1
 fi
+
+cp "${FIXTURE_DIR}/linux-client-verification.txt" "${OUTPUT_DIR}/linux-client-verification.valid"
+sed 's/^LINUX_APPROVAL_STATUS=Approved$/LINUX_APPROVAL_STATUS=Pending/' \
+  "${OUTPUT_DIR}/linux-client-verification.valid" >"${FIXTURE_DIR}/linux-client-verification.txt"
+(
+  cd "${FIXTURE_DIR}"
+  if command -v sha256sum >/dev/null 2>&1; then
+    find . -type f ! -name SHA256SUMS | LC_ALL=C sort | while IFS= read -r file; do
+      sha256sum "${file#./}"
+    done >SHA256SUMS
+  else
+    find . -type f ! -name SHA256SUMS | LC_ALL=C sort | while IFS= read -r file; do
+      shasum -a 256 "${file#./}"
+    done >SHA256SUMS
+  fi
+)
+if TEST_AGENT_LOBEHUB_ARTIFACT_DIR="${FIXTURE_DIR}" \
+  "${INTERNAL_DIR}/package-release.sh" --env-file /dev/null --lobehub-only \
+  --output-dir "${OUTPUT_DIR}/pending-linux" >/dev/null 2>&1; then
+  echo "LobeHub packager unexpectedly accepted pending Linux approval evidence" >&2
+  exit 1
+fi
+mv "${OUTPUT_DIR}/linux-client-verification.valid" \
+  "${FIXTURE_DIR}/linux-client-verification.txt"
 
 PLACEHOLDER_ENV="${OUTPUT_DIR}/lobehub-placeholder.env"
 cp "${INTERNAL_DIR}/lobehub.env.example" "${PLACEHOLDER_ENV}"

@@ -17,6 +17,8 @@ mkdir -p "${ARTIFACT_DIR}"/{images,clients,bin,sbom,source} \
 cp "${INTERNAL_DIR}/install-lobehub-offline.sh" "${FIXTURE_INTERNAL}/install-lobehub-offline.sh"
 cp "${INTERNAL_DIR}/lobehub-docker.sh" "${FIXTURE_INTERNAL}/lobehub-docker.sh"
 cp "${INTERNAL_DIR}/lobehub-backup.sh" "${FIXTURE_INTERNAL}/lobehub-backup.sh"
+cp "${INTERNAL_DIR}/lobehub-client-artifact-contract.sh" \
+  "${FIXTURE_INTERNAL}/lobehub-client-artifact-contract.sh"
 cp "${INTERNAL_DIR}/lobehub.env.example" "${FIXTURE_INTERNAL}/lobehub.env.example"
 cp "${INTERNAL_DIR}/systemd/test-agent-lobehub.service" \
   "${FIXTURE_INTERNAL}/systemd/test-agent-lobehub.service"
@@ -39,6 +41,7 @@ LOBEHUB_FORK_COMMIT=ccd0400fbe934ba929de637a315d25e969977c76
 LOBEHUB_PLATFORM_CONTRACT_VERSION=2
 LOBEHUB_PARADEDB_POSTGRES_MAJOR=17
 LOBEHUB_WINDOWS_AUTHENTICODE_VERIFIED=true
+LOBEHUB_LINUX_CLIENT_APPROVED=true
 LOBEHUB_LINUX_EXECUTION_DEFAULT=false
 LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.3
 LOBEHUB_APP_IMAGE_ID=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -70,11 +73,39 @@ write_checksums() {
 }
 
 windows_sha="$(sha256_file "${ARTIFACT_DIR}/clients/lobehub-windows-x64.exe")"
+linux_sha="$(sha256_file "${ARTIFACT_DIR}/clients/lobehub-linux-x86_64.tar.gz")"
 cat >"${ARTIFACT_DIR}/windows-authenticode-verification.txt" <<EOF
 AUTHENTICODE_STATUS=Valid
-AUTHENTICODE_SUBJECT=CN=TestAgent Installer Fixture
-AUTHENTICODE_THUMBPRINT=0123456789ABCDEF
+AUTHENTICODE_SUBJECT=CN=Enterprise Release Signing
+AUTHENTICODE_THUMBPRINT=0123456789ABCDEF0123456789ABCDEF01234567
 AUTHENTICODE_FILE_SHA256=${windows_sha}
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.3
+LOBEHUB_FORK_COMMIT=ccd0400fbe934ba929de637a315d25e969977c76
+CLIENT_ARCHITECTURE=x64
+CLIENT_EXECUTION_MODE=disabled
+EOF
+cat >"${ARTIFACT_DIR}/linux-client-acceptance-record.txt" <<'EOF'
+VALIDATION_RESULT=Passed
+CLIENT_LOGIN_RESULT=Passed
+DEVICE_EXECUTION_RESULT=Disabled
+PUBLIC_NETWORK_DEPENDENCY_RESULT=None
+RUNTIME_DOWNLOAD_RESULT=Blocked
+LOCAL_DATA_ISOLATION_RESULT=Passed
+REVIEWER=security-reviewer@example.internal
+APPROVAL_CHANGE_ID=CHG-20260731-LOBEHUB
+EOF
+acceptance_sha="$(sha256_file "${ARTIFACT_DIR}/linux-client-acceptance-record.txt")"
+cat >"${ARTIFACT_DIR}/linux-client-verification.txt" <<EOF
+LINUX_APPROVAL_STATUS=Approved
+LINUX_APPROVER=security-reviewer@example.internal
+LINUX_CLIENT_FILE_SHA256=${linux_sha}
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.3
+LOBEHUB_FORK_COMMIT=ccd0400fbe934ba929de637a315d25e969977c76
+CLIENT_ARCHITECTURE=x86_64
+CLIENT_EXECUTION_MODE=disabled
+LINUX_VALIDATION_OS=Enterprise Linux 9.6
+LINUX_VALIDATION_KERNEL=5.14.0-570.26.1.el9_6.x86_64
+LINUX_ACCEPTANCE_RECORD_SHA256=${acceptance_sha}
 EOF
 write_checksums
 
@@ -132,6 +163,8 @@ test -x "${RUNTIME_ROOT}/testagent/deploy/internal/lobehub-backup.sh"
 test -f "${RUNTIME_ROOT}/testagent/lobehub/clients/lobehub-windows-x64.exe"
 test -f "${RUNTIME_ROOT}/testagent/lobehub/clients/lobehub-linux-x86_64.tar.gz"
 test -f "${RUNTIME_ROOT}/testagent/lobehub/release/windows-authenticode-verification.txt"
+test -f "${RUNTIME_ROOT}/testagent/lobehub/release/linux-client-verification.txt"
+test -f "${RUNTIME_ROOT}/testagent/lobehub/release/linux-client-acceptance-record.txt"
 test -f "${RUNTIME_ROOT}/systemd/test-agent-lobehub.service"
 test "$(stat -c '%a' "${RUNTIME_ROOT}/testagent/config/lobehub.env" 2>/dev/null || \
   stat -f '%Lp' "${RUNTIME_ROOT}/testagent/config/lobehub.env")" = 600
@@ -155,6 +188,26 @@ test ! -e "${RUNTIME_ROOT}/incomplete"
 
 printf 'installer-fixture:clients/lobehub-linux-x86_64.tar.gz\n' \
   >"${ARTIFACT_DIR}/clients/lobehub-linux-x86_64.tar.gz"
+linux_sha="$(sha256_file "${ARTIFACT_DIR}/clients/lobehub-linux-x86_64.tar.gz")"
+sed "s/^LINUX_CLIENT_FILE_SHA256=.*$/LINUX_CLIENT_FILE_SHA256=${linux_sha}/" \
+  "${ARTIFACT_DIR}/linux-client-verification.txt" >"${FIXTURE_ROOT}/linux-client-verification.valid"
+sed 's/^LINUX_APPROVAL_STATUS=Approved$/LINUX_APPROVAL_STATUS=Pending/' \
+  "${FIXTURE_ROOT}/linux-client-verification.valid" \
+  >"${ARTIFACT_DIR}/linux-client-verification.txt"
+write_checksums
+if PATH="${FAKE_BIN}:${PATH}" \
+  LOBEHUB_ARTIFACT_DIR="${ARTIFACT_DIR}" \
+  TEST_AGENT_BASE_DIR="${RUNTIME_ROOT}/pending-linux" \
+  TEST_AGENT_SYSTEMD_UNIT_DIR="${RUNTIME_ROOT}/pending-linux-systemd" \
+    "${FIXTURE_INTERNAL}/install-lobehub-offline.sh" >/dev/null 2>&1; then
+  echo "Installer unexpectedly accepted pending Linux approval evidence" >&2
+  exit 1
+fi
+test "$(wc -l <"${DOCKER_CALLS}" | tr -d '[:space:]')" = "${docker_calls_before}"
+test ! -e "${RUNTIME_ROOT}/pending-linux"
+mv "${FIXTURE_ROOT}/linux-client-verification.valid" \
+  "${ARTIFACT_DIR}/linux-client-verification.txt"
+
 sed 's/^AUTHENTICODE_STATUS=Valid$/AUTHENTICODE_STATUS=Invalid/' \
   "${ARTIFACT_DIR}/windows-authenticode-verification.txt" \
   >"${ARTIFACT_DIR}/windows-authenticode-verification.invalid"

@@ -249,14 +249,19 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
   Marketplace、CDN 与运行期下载。`v2.2.11-platform.3` 对 Windows/Linux 都强制
   `LOBEHUB_DEVICE_EXECUTION_MODE=disabled`，不存在通过旧变量放开的路径；后续 Linux 执行版本仍须在目标主机
   通过真实边界验收并 fail closed，且提供 root 所有、mode `0600`、绑定当前发行版/内核的通过证据。
+- 企业客户端必须从锁定 fork commit 的源码工具包在原生 Windows x64 / Linux x86_64 构建，仿真或交叉构建
+  不能作为正式结果。Windows 证据必须由 `signtool` 和 `Get-AuthenticodeSignature=Valid` 产生，并绑定签名身份、
+  客户端 SHA、版本、commit、架构和执行禁用状态；Linux 构建人与审批人必须分离，最终审批证据必须绑定客户端和
+  独立验收记录 SHA，验收记录关联审批人、变更单及登录、无公网依赖、下载阻断、数据隔离和执行禁用结果。构件
+  汇集、Mac 打包和现场安装必须复用同一校验器，任一占位值、摘要或身份不一致都失败关闭。
 - 企业离线版必须在代理与工作流 router 两层拒绝 `/api/workflows/*`，不得配置 QStash。定时任务只允许单一 app
   实例使用至少 32 字节的独立 `ENTERPRISE_INTERNAL_SCHEDULER_SECRET` 调用 loopback 内部入口，并强制
   `AGENT_RUNTIME_MODE=local`；该密钥不得进入浏览器、日志或进程命令行，queue 模式必须失败关闭。
 - 当前企业现场纯 HTTP 会使表单票据、Session Cookie 和服务端委托暴露于同网段窃听与劫持风险。网络隔离、
   短票据、HMAC、nonce、短 Session 和 scope 只能缓解，不能替代 TLS；该剩余风险必须进入上线审批。
 
-稳定交接契约和部署门禁见 `docs/architecture/lobehub-integration.md` 与
-`docs/deployment/lobehub-offline.md`。
+稳定交接契约、客户端证据和部署门禁见 `docs/architecture/lobehub-integration.md`、
+`docs/deployment/lobehub-client-build.md` 与 `docs/deployment/lobehub-offline.md`。
 
 ## 安全变更文档
 

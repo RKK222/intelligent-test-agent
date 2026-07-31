@@ -1339,3 +1339,34 @@
     客户端；独立 fork 也仍缺企业内部 Git remote，目标 Linux/网络/DNS/反代/Flyway history 的现场验收不能由
     Apple Silicon Docker 仿真替代。在这些外部条件完成前保持 `LOBEHUB_ENABLED=false`，不得把服务端阶段目录
     标记为完整上线介质。未修改 `.env.local`、generated SDK 或 OpenCode 源码。
+
+### 2026-07-31 - 补齐 LobeHub 企业客户端原生构建与介质准入
+
+- Why:
+  - 服务端阶段和 fork 已验证，但此前只要求外部“提供”Windows/Linux 客户端，没有锁定源码工具包、原生构建
+    脚本、Linux 独立验收记录或三层统一校验；部署人员无法从现有仓库可复现地完成客户端介质，也容易把自报
+    `Approved` 文本误当成真实审批。
+- What:
+  - 新增可复现客户端构建工具包、Windows PowerShell x64 构建/企业 Authenticode 签名脚本、Linux x86_64
+    候选构建脚本和独立审批脚本；固定 Node `24.11.1`、Bun `1.3.2`、pnpm `10.33.0`、frozen lockfile 和 fork
+    企业策略测试，不叠加 Cloud 源码。Windows 私钥只从证书存储使用，Linux 构建阶段只能产生 Candidate，不能
+    自行产生 Approved。
+  - 新增共享客户端制品合同；Windows 证据绑定 Valid 签名身份、摘要、版本、commit、x64 和执行禁用，Linux
+    证据绑定客户端、目标 OS/内核、审批人及独立验收记录 SHA。验收记录强制登录、无公网依赖、运行期下载阻断、
+    本地数据隔离和设备执行禁用通过，并关联真实变更单号。
+  - `build-lobehub-artifacts.sh`、`package-release.sh` 与现场安装器复用同一门禁，完整介质新增 Linux 审批证据和
+    验收记录；同步部署 README、文档索引、客户端构建手册、离线手册和安全标准。
+- How:
+  - TDD 覆盖 Pending、重复键、占位审批人、错误版本/commit/架构、客户端或验收记录篡改及失败验收结果；客户端
+    合同、构建器、LobeHub-only ZIP、安装器、冷备份和 Shell 语法测试全部通过。使用 PowerShell `7.4` 官方
+    运行时解析 Windows 脚本语法通过；服务端 `--validate-only` 仍通过，现有 server-only 目录被完整打包门禁按
+    预期拒绝。
+  - 从干净锁定 fork `ccd0400fbe934ba929de637a315d25e969977c76` 生成实际 53,451,706 字节客户端构建工具包，
+    SHA-256 为 `e1c4bae1a315f246c3e4abe448a25e80d76186243661cb4e159fab284156fea9`；工作区制品和
+    `~/Desktop/mimoagent/0709/lobehub-client-build-kit` 转运副本均校验 `OK`。
+- Result:
+  - 部署人员已有可校验、可复现的原生客户端构建与审批介质；未新增或修改 HTTP API、事件、数据库/Flyway、
+    关系型 SQL、性能路径、fork 源码或本地环境文件。兼容性变化仅为完整离线包合同收紧，旧 server-only 阶段
+    目录仍可做服务端演练但不能进入完整包。
+  - 当前 Mac 没有企业 Authenticode 私钥，也不是原生 Linux x86_64 审批主机，因此尚未生成或伪造最终 Windows
+    EXE、Linux Approved 客户端和完整企业 ZIP；这些外部结果、企业 Git remote 和目标现场验收仍是明确未完成项。

@@ -4,12 +4,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 VERSION_FILE="${SCRIPT_DIR}/lobehub/version.env"
+CLIENT_CONTRACT_FILE="${SCRIPT_DIR}/lobehub-client-artifact-contract.sh"
 
 FORK_DIR="${TEST_AGENT_LOBEHUB_FORK_DIR:-${ROOT_DIR}/../lobehub-platform}"
 OUTPUT_DIR="${TEST_AGENT_LOBEHUB_ARTIFACT_DIR:-${ROOT_DIR}/lobehub-release-artifacts}"
 WINDOWS_CLIENT=""
 WINDOWS_SIGNATURE_EVIDENCE=""
 LINUX_CLIENT=""
+LINUX_APPROVAL_EVIDENCE=""
+LINUX_ACCEPTANCE_RECORD=""
 NODE_BASE_IMAGE=""
 BUSYBOX_BASE_IMAGE=""
 PARADEDB_SOURCE_IMAGE=""
@@ -31,7 +34,8 @@ usage() {
 Usage: deploy/internal/build-lobehub-artifacts.sh [options]
 
 Build the real linux/amd64 LobeHub server artifact set from the independent fork. A complete
-package also imports externally built Windows/Linux clients and validates Authenticode evidence.
+package also imports externally built Windows/Linux clients and validates Authenticode plus
+Linux reviewer evidence bound to an independent acceptance record.
 
 Required image inputs are approved digest references (repository@sha256:...). The output images
 use immutable internal tags plus Docker image IDs because docker save/load does not restore
@@ -43,6 +47,8 @@ Options:
   --windows-client <path>              Enterprise-signed Windows x64 EXE.
   --windows-signature-evidence <path>  KEY=value Authenticode verification evidence.
   --linux-client <path>                Approved Linux x86_64 client tar.gz.
+  --linux-approval-evidence <path>     KEY=value Linux validation and approval evidence.
+  --linux-acceptance-record <path>     Approved Linux validation checklist record.
   --node-base-image <digest-ref>       Approved Node build base.
   --busybox-base-image <digest-ref>    Approved BusyBox runtime base.
   --paradedb-source-image <digest-ref> Approved ParadeDB/PostgreSQL 17 source image.
@@ -68,6 +74,8 @@ while [[ $# -gt 0 ]]; do
     --windows-client) WINDOWS_CLIENT="$2"; shift 2 ;;
     --windows-signature-evidence) WINDOWS_SIGNATURE_EVIDENCE="$2"; shift 2 ;;
     --linux-client) LINUX_CLIENT="$2"; shift 2 ;;
+    --linux-approval-evidence) LINUX_APPROVAL_EVIDENCE="$2"; shift 2 ;;
+    --linux-acceptance-record) LINUX_ACCEPTANCE_RECORD="$2"; shift 2 ;;
     --node-base-image) NODE_BASE_IMAGE="$2"; shift 2 ;;
     --busybox-base-image) BUSYBOX_BASE_IMAGE="$2"; shift 2 ;;
     --paradedb-source-image) PARADEDB_SOURCE_IMAGE="$2"; shift 2 ;;
@@ -128,31 +136,12 @@ require_immutable_tag() {
   }
 }
 
-evidence_value() {
-  local key="$1"
-  awk -F= -v wanted="${key}" \
-    '$1 == wanted { print substr($0, index($0, "=") + 1); found=1 } END { if (!found) exit 1 }' \
-    "${WINDOWS_SIGNATURE_EVIDENCE}"
-}
-
 validate_clients() {
   [[ "${SERVER_ONLY}" -eq 1 ]] && return 0
-  require_file "${WINDOWS_CLIENT}"
-  require_file "${WINDOWS_SIGNATURE_EVIDENCE}"
-  require_file "${LINUX_CLIENT}"
-  [[ "$(evidence_value AUTHENTICODE_STATUS)" == Valid ]] || {
-    echo "Windows Authenticode status must be Valid" >&2
-    exit 1
-  }
-  [[ -n "$(evidence_value AUTHENTICODE_SUBJECT)" \
-    && -n "$(evidence_value AUTHENTICODE_THUMBPRINT)" ]] || {
-    echo "Windows Authenticode signer evidence is incomplete" >&2
-    exit 1
-  }
-  [[ "$(evidence_value AUTHENTICODE_FILE_SHA256)" == "$(sha256_file "${WINDOWS_CLIENT}")" ]] || {
-    echo "Windows Authenticode evidence does not match the client" >&2
-    exit 1
-  }
+  lobehub_verify_client_artifacts \
+    "${WINDOWS_CLIENT}" "${WINDOWS_SIGNATURE_EVIDENCE}" \
+    "${LINUX_CLIENT}" "${LINUX_APPROVAL_EVIDENCE}" \
+    "${LINUX_ACCEPTANCE_RECORD}" "${INTERNAL_VERSION}" "${LOCKED_FORK_COMMIT}"
 }
 
 validate_fork() {
@@ -218,6 +207,9 @@ verify_app_image_revision() {
 }
 
 require_file "${VERSION_FILE}"
+require_file "${CLIENT_CONTRACT_FILE}"
+# 构建机与后续离线安装器使用完全相同的客户端真实性门禁。
+source "${CLIENT_CONTRACT_FILE}"
 UPSTREAM_VERSION="$(state_value "${VERSION_FILE}" LOBEHUB_UPSTREAM_VERSION)"
 UPSTREAM_COMMIT="$(state_value "${VERSION_FILE}" LOBEHUB_UPSTREAM_COMMIT)"
 LOCKED_FORK_COMMIT="$(state_value "${VERSION_FILE}" LOBEHUB_FORK_COMMIT)"
@@ -328,6 +320,10 @@ if [[ "${SERVER_ONLY}" -ne 1 ]]; then
   cp "${LINUX_CLIENT}" "${STAGING_DIR}/clients/lobehub-linux-x86_64.tar.gz"
   cp "${WINDOWS_SIGNATURE_EVIDENCE}" \
     "${STAGING_DIR}/windows-authenticode-verification.txt"
+  cp "${LINUX_APPROVAL_EVIDENCE}" \
+    "${STAGING_DIR}/linux-client-verification.txt"
+  cp "${LINUX_ACCEPTANCE_RECORD}" \
+    "${STAGING_DIR}/linux-client-acceptance-record.txt"
 fi
 
 git -C "${FORK_DIR}" archive --format=tar.gz \
@@ -365,7 +361,9 @@ APP_IMAGE_ID="$(docker image inspect -f '{{.Id}}' "${APP_IMAGE}")"
 PARADEDB_IMAGE_ID="$(docker image inspect -f '{{.Id}}' "${PARADEDB_IMAGE}")"
 RUSTFS_IMAGE_ID="$(docker image inspect -f '{{.Id}}' "${RUSTFS_IMAGE}")"
 WINDOWS_VERIFIED=false
+LINUX_APPROVED=false
 [[ "${SERVER_ONLY}" -eq 1 ]] || WINDOWS_VERIFIED=true
+[[ "${SERVER_ONLY}" -eq 1 ]] || LINUX_APPROVED=true
 cat >"${STAGING_DIR}/release.env" <<EOF
 LOBEHUB_INTERNAL_VERSION=${INTERNAL_VERSION}
 LOBEHUB_UPSTREAM_VERSION=${UPSTREAM_VERSION}
@@ -374,6 +372,7 @@ LOBEHUB_FORK_COMMIT=${FORK_COMMIT}
 LOBEHUB_PLATFORM_CONTRACT_VERSION=${CONTRACT_VERSION}
 LOBEHUB_PARADEDB_POSTGRES_MAJOR=${POSTGRES_MAJOR}
 LOBEHUB_WINDOWS_AUTHENTICODE_VERIFIED=${WINDOWS_VERIFIED}
+LOBEHUB_LINUX_CLIENT_APPROVED=${LINUX_APPROVED}
 LOBEHUB_LINUX_EXECUTION_DEFAULT=false
 LOBEHUB_APP_IMAGE=${APP_IMAGE}
 LOBEHUB_APP_IMAGE_ID=${APP_IMAGE_ID}
