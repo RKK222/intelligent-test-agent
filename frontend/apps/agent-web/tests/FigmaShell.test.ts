@@ -1,6 +1,17 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import FigmaShell from "../src/components/FigmaShell.vue";
+
+const figmaShellSource = readFileSync(resolve(process.cwd(), "apps/agent-web/src/components/FigmaShell.vue"), "utf8");
+const figmaChatPanelSource = readFileSync(resolve(process.cwd(), "apps/agent-web/src/components/FigmaChatPanel.vue"), "utf8");
+const figmaFileExplorerSource = readFileSync(resolve(process.cwd(), "apps/agent-web/src/components/FigmaFileExplorer.vue"), "utf8");
+const figmaEditorAreaSource = readFileSync(resolve(process.cwd(), "apps/agent-web/src/components/FigmaEditorArea.vue"), "utf8");
+const agentConfigPanelSource = readFileSync(resolve(process.cwd(), "apps/agent-web/src/components/AgentConfigPanel.vue"), "utf8");
+const codeEditorSource = readFileSync(resolve(process.cwd(), "packages/editor/src/CodeEditor.vue"), "utf8");
+const globalStylesSource = readFileSync(resolve(process.cwd(), "apps/agent-web/src/styles/globals.css"), "utf8");
+const logoSource = readFileSync(resolve(process.cwd(), "apps/agent-web/src/assets/figma/logo.svg"), "utf8");
 
 const mountedWrappers: Array<{ unmount: () => void }> = [];
 const originalInnerWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
@@ -38,6 +49,55 @@ describe("FigmaShell", () => {
     window.localStorage.removeItem("figma-shell-robot-fixed");
     window.localStorage.removeItem("test-agent.pet-companion.v1");
     document.querySelector('[data-testid="pointer-event-blocker"]')?.remove();
+  });
+
+  it("isolates the ICBC palette to the outer shell and preserves the chat surface", () => {
+    expect(globalStylesSource).toContain("--ta-shell-accent: #c8161d");
+    expect(globalStylesSource).toContain("--ta-shell-canvas: #f0f4fa");
+    expect(globalStylesSource).toContain("--ta-shell-header: #ffffff");
+    expect(globalStylesSource).toContain("--ta-shell-header-text: #000000");
+    expect(globalStylesSource).toContain("--ta-shell-sidebar: #ffffff");
+    expect(globalStylesSource).toContain("--ta-shell-gap: 8px");
+    expect(globalStylesSource).toContain("--ta-shell-radius: 8px");
+    expect(globalStylesSource).toContain("--ta-accent: #333333");
+    expect(globalStylesSource).toContain("--ta-chat-user-bg: #f2f2f2");
+    expect(logoSource.match(/fill="#252A31"/g)).toHaveLength(4);
+    expect(figmaShellSource).toMatch(/\.figma-title\s*\{[^}]*color: var\(--ta-shell-header-text, #000000\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-subtitle\s*\{[^}]*color: var\(--ta-shell-header-text, #000000\)/s);
+    expect(figmaShellSource).toContain("--ta-tree-active: var(--ta-shell-accent-soft, #fdf2f2)");
+    expect(figmaShellSource).toMatch(/\.figma-activity-bar\s*\{[^}]*background: transparent[^}]*border-right: 0/s);
+    expect(figmaShellSource).toMatch(/\.figma-header\s*\{[^}]*background: var\(--ta-shell-canvas, #f0f4fa\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-body\s*\{[^}]*padding: var\(--ta-shell-gap, 8px\)[^}]*background: var\(--ta-shell-canvas, #f0f4fa\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-header-left\s*\{[^}]*transform: translateY\(2px\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-header-right\s*\{[^}]*position: absolute;[^}]*top: 6px;[^}]*left: 50%;[^}]*transform: translateX\(-50%\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-header-help\s*\{[^}]*border: 1px solid var\(--ta-shell-border, #e5e7eb\);[^}]*background: var\(--ta-shell-surface, #fff\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-header-help > svg\s*\{[^}]*display: block/s);
+    expect(figmaShellSource).toMatch(/\.figma-runtime-inventory-summary\s*\{[^}]*border: 0\.8px solid var\(--ta-shell-border, #e5e7eb\);[^}]*background: var\(--ta-shell-surface, #fff\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-app-menu-trigger\s*\{[^}]*border: 0\.8px solid var\(--ta-shell-border, #e5e7eb\);[^}]*background: var\(--ta-shell-surface, #fff\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-user-avatar-btn\s*\{[^}]*border: 1px solid var\(--ta-shell-border, #e5e7eb\);[^}]*background: var\(--ta-shell-surface, #fff\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-user-avatar\s*\{[^}]*background: var\(--ta-shell-hover, #f3f4f6\);[^}]*color: var\(--ta-shell-header-text, #000000\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-user-avatar--compact\s*\{[^}]*font-size: 12px/s);
+    expect(figmaShellSource).toContain('{{ userInitial }}</span>');
+    expect(figmaShellSource).toContain("--ta-tree-bg: var(--ta-shell-sidebar, #ffffff)");
+    expect(figmaFileExplorerSource).toMatch(/\.figma-file-explorer\s*\{[^}]*background: var\(--ta-tree-bg\)/s);
+    expect(figmaFileExplorerSource).toMatch(/\.figma-fe-body\s*\{[^}]*background: var\(--ta-tree-bg\)/s);
+    expect(agentConfigPanelSource).toContain("background: var(--ta-tree-bg");
+    expect(figmaEditorAreaSource).toMatch(/\.figma-editor-area\s*\{[^}]*background: #fff/s);
+    expect(figmaEditorAreaSource).toMatch(/\.figma-editor-tabs\s*\{[^}]*background: #fff/s);
+    expect(figmaEditorAreaSource).toMatch(/\.figma-editor-tab--active\s*\{[^}]*border-top-color: var\(--ta-shell-accent, #c8161d\)/s);
+    expect(codeEditorSource).toContain("bg-[var(--ta-panel-2)]");
+    expect(globalStylesSource).toContain("--ta-panel-2: #ffffff");
+    for (const panelClass of ["figma-panel-left", "figma-panel-center", "figma-panel-right"]) {
+      const panelRuleStart = figmaShellSource.indexOf(`.${panelClass} {`);
+      const panelRule = figmaShellSource.slice(panelRuleStart, figmaShellSource.indexOf("\n}", panelRuleStart) + 2);
+      expect(panelRule).toContain("border-radius: var(--ta-shell-radius, 8px)");
+      expect(panelRule).toContain("box-shadow: var(--ta-shell-shadow");
+    }
+
+    const chatBodyRule = figmaShellSource.match(/\.figma-chat-body\s*\{[^}]+\}/)?.[0];
+    expect(chatBodyRule).toContain("background: #ffffff");
+    expect(chatBodyRule).not.toContain("--ta-shell-");
+    expect(figmaChatPanelSource).not.toContain("--ta-shell-");
   });
 
   it("opens the built-in manual from the global help entry", async () => {

@@ -2461,7 +2461,7 @@ function submitJoinApp() {
   grid-template-columns: minmax(0, 1fr);
   width: 100%;
   height: 100vh;
-  background: #f5f5f5;
+  background: var(--ta-shell-canvas, #f0f4fa);
   overflow: hidden;
 }
 
@@ -2471,9 +2471,9 @@ function submitJoinApp() {
   align-items: center;
   justify-content: space-between;
   height: 36px;
-  border-bottom: 1px solid var(--ta-border, #eaeaea);
-  background: #fff;
-  padding: 0 10px;
+  border-bottom: 0;
+  background: var(--ta-shell-canvas, #f0f4fa);
+  padding: 0 12px;
   flex-shrink: 0;
   z-index: 50;
   position: relative;
@@ -2484,6 +2484,7 @@ function submitJoinApp() {
   align-items: center;
   gap: 0;
   height: 100%;
+  transform: translateY(2px);
 }
 
 .figma-sidebar-toggle {
@@ -2499,7 +2500,7 @@ function submitJoinApp() {
 }
 
 .figma-logo {
-  height: 20px;
+  height: 22px;
   width: auto;
   flex-shrink: 0;
 }
@@ -2520,20 +2521,20 @@ function submitJoinApp() {
 .figma-title {
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
   font-weight: 600;
-  font-size: 12px;
-  line-height: 14px;
+  font-size: 13px;
+  line-height: 15px;
   letter-spacing: 0.02em;
-  color: #333;
+  color: var(--ta-shell-header-text, #000000);
   white-space: nowrap;
 }
 
 .figma-subtitle {
   font-family: "Geist", "Noto Sans SC", sans-serif;
   font-weight: 500;
-  font-size: 7px;
-  line-height: 8px;
+  font-size: 8px;
+  line-height: 9px;
   letter-spacing: -0.01em;
-  color: #777;
+  color: var(--ta-shell-header-text, #000000);
   white-space: nowrap;
   transform: scale(0.9);
   transform-origin: center center;
@@ -2541,9 +2542,14 @@ function submitJoinApp() {
 
 /* ---- Header Right ---- */
 .figma-header-right {
+  position: absolute;
+  top: 6px;
+  left: 50%;
   display: flex;
   align-items: center;
   gap: 8px;
+  transform: translateX(-50%);
+  z-index: 1;
 }
 
 .figma-header-help {
@@ -2552,19 +2558,24 @@ function submitJoinApp() {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--ta-shell-border, #e5e7eb);
   border-radius: 7px;
-  background: #fff;
-  color: #5f6b7a;
+  background: var(--ta-shell-surface, #fff);
+  color: var(--ta-shell-header-text, #000000);
   cursor: pointer;
   padding: 0;
+  transition: all 0.14s ease;
+}
+
+.figma-header-help > svg {
+  display: block;
 }
 
 .figma-header-help:hover,
 .figma-header-help:focus-visible {
-  border-color: #cbd5e1;
-  background: #f8fafc;
-  color: #27384b;
+  border-color: var(--ta-shell-accent, #c8161d);
+  background: var(--ta-shell-accent-soft, #fdf2f2);
+  color: var(--ta-shell-accent, #c8161d);
   outline: none;
 }
 
@@ -2580,10 +2591,10 @@ function submitJoinApp() {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--ta-shell-border, #e5e7eb);
   border-radius: 7px;
-  background: #fff;
-  color: #475569;
+  background: var(--ta-shell-surface, #fff);
+  color: var(--ta-shell-muted, #6b7280);
   cursor: pointer;
   font-size: 14px;
   line-height: 1;
@@ -2592,12 +2603,12 @@ function submitJoinApp() {
 
 .figma-robot-visibility-toggle:hover,
 .figma-robot-visibility-toggle[aria-pressed='true'] {
-  border-color: #cbd5e1;
-  background: #f8fafc;
+  border-color: var(--ta-shell-border-strong, #d1d5db);
+  background: var(--ta-shell-hover, #f3f4f6);
 }
 
 .figma-robot-visibility-toggle:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--ta-shell-accent, #c8161d);
   outline-offset: 2px;
 }
 
@@ -2619,7 +2630,7 @@ function submitJoinApp() {
 .figma-robot-visibility-toggle--activity:hover,
 .figma-robot-visibility-toggle--activity[aria-pressed='true'] {
   border-color: transparent;
-  background: #e8e8e8;
+  background: var(--ta-shell-hover, #f3f4f6);
 }
 
 .figma-robot-visibility-toggle--activity.is-process-alert {
@@ -2994,9 +3005,9 @@ function submitJoinApp() {
 .figma-robot-side-question-header button {
   width: 20px;
   height: 20px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
+  border: 0.8px solid var(--ta-shell-border, #e5e7eb);
+  border-radius: 999px;
+  background: var(--ta-shell-surface, #fff);
   color: #718096;
   cursor: pointer;
   font-size: 16px;
@@ -3102,10 +3113,10 @@ function submitJoinApp() {
   gap: 5px;
   height: 24px;
   padding: 0 8px;
-  border: 0.8px solid #e5e7eb;
+  border: 0.8px solid var(--ta-shell-border, #e5e7eb);
   border-radius: 999px;
-  background: #f8fafc;
-  color: #4b5563;
+  background: var(--ta-shell-surface, #fff);
+  color: var(--ta-shell-header-text, #000000);
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 11px;
   font-weight: 600;
@@ -3115,10 +3126,18 @@ function submitJoinApp() {
 }
 
 .figma-runtime-inventory-summary:hover,
-.figma-runtime-inventory-summary[aria-expanded='true'] {
-  color: #111827;
-  border-color: #c7d2fe;
-  background: #eef2ff;
+.figma-runtime-inventory-summary:focus-visible {
+  color: var(--ta-shell-accent-strong, #991b1b);
+  border-color: var(--ta-shell-accent, #c8161d);
+  background: var(--ta-shell-accent-soft, #fdf2f2);
+  outline: none;
+}
+
+.figma-runtime-inventory-summary[aria-expanded='true'],
+.figma-runtime-inventory-summary:active {
+  color: var(--ta-shell-accent-strong, #991b1b);
+  border-color: var(--ta-shell-accent, #c8161d);
+  background: var(--ta-shell-accent-soft, #fdf2f2);
 }
 
 .figma-runtime-inventory-panel {
@@ -3287,18 +3306,30 @@ function submitJoinApp() {
   gap: 4px;
   height: 24px;
   padding: 0 6px;
-  border: 0.8px solid transparent;
+  border: 0.8px solid var(--ta-shell-border, #e5e7eb);
   border-radius: 6px;
-  background: transparent;
+  background: var(--ta-shell-surface, #fff);
   cursor: pointer;
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
   transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
 .figma-app-menu-trigger:hover,
-.figma-app-menu-trigger.is-open {
-  background: #f0f0f0;
-  border-color: #dfdfdf;
+.figma-app-menu-trigger:focus-visible {
+  background: var(--ta-shell-hover, #f3f4f6);
+  border-color: var(--ta-shell-border-strong, #d1d5db);
+  outline: none;
+}
+
+.figma-app-menu-trigger.is-open,
+.figma-app-menu-trigger:active {
+  background: var(--ta-shell-accent-soft, #fdf2f2);
+  border-color: var(--ta-shell-accent, #c8161d);
+}
+
+.figma-app-menu-trigger.is-open .figma-app-menu-name,
+.figma-app-menu-trigger.is-open .figma-app-menu-chevron {
+  color: var(--ta-shell-accent-strong, #991b1b);
 }
 
 .figma-app-menu-name {
@@ -3306,13 +3337,13 @@ function submitJoinApp() {
   font-size: 12px;
   line-height: 16px;
   letter-spacing: 0.0154em;
-  color: #18181b;
+  color: var(--ta-shell-header-text, #000000);
 }
 
 .figma-app-menu-chevron {
   width: 10px;
   height: 10px;
-  color: #565656;
+  color: var(--ta-shell-header-text, #000000);
   transition: transform 0.16s ease;
 }
 
@@ -3326,12 +3357,12 @@ function submitJoinApp() {
   right: 0;
   min-width: 240px;
   background: #fff;
-  border: 1px solid #e4e4e7;
+  border: 1px solid #e5e7eb;
   border-radius: 8px;
   padding: 4px;
   margin: 0;
   list-style: none;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
   z-index: 40;
 }
 
@@ -3348,16 +3379,16 @@ function submitJoinApp() {
 
 .figma-app-menu-item:hover,
 .figma-app-menu-item:focus {
-  background: #f4f4f5;
+  background: var(--ta-shell-hover, #f3f4f6);
 }
 
 .figma-app-menu-item.is-active {
-  background: #fafafa;
+  background: var(--ta-shell-accent-soft, #fdf2f2);
 }
 
 .figma-app-menu-divider {
   height: 1px;
-  background: #e4e4e7;
+  background: #e5e7eb;
   margin: 4px 0;
 }
 
@@ -3366,7 +3397,7 @@ function submitJoinApp() {
   flex-direction: row !important;
   align-items: center;
   gap: 8px;
-  color: #18a978;
+  color: var(--ta-shell-accent, #c8161d);
 }
 
 .figma-app-menu-add-icon {
@@ -3518,7 +3549,7 @@ function submitJoinApp() {
 }
 
 .figma-app-menu-item-check {
-  color: #18a978;
+  color: var(--ta-shell-accent, #c8161d);
   font-size: 14px;
   font-weight: 600;
 }
@@ -3532,19 +3563,27 @@ function submitJoinApp() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: 1px solid transparent;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--ta-shell-border, #e5e7eb);
   border-radius: 999px;
-  background: transparent;
+  background: var(--ta-shell-surface, #fff);
+  padding: 0;
   cursor: pointer;
   transition: background-color 0.14s ease, border-color 0.14s ease;
 }
 
 .figma-user-avatar-btn:hover,
-.figma-user-avatar-btn.is-open {
-  background: #f0f0f0;
-  border-color: #dfdfdf;
+.figma-user-avatar-btn:focus-visible {
+  background: var(--ta-shell-hover, #f3f4f6);
+  border-color: var(--ta-shell-border-strong, #d1d5db);
+  outline: none;
+}
+
+.figma-user-avatar-btn.is-open,
+.figma-user-avatar-btn:active {
+  background: var(--ta-shell-accent-soft, #fdf2f2);
+  border-color: var(--ta-shell-accent, #c8161d);
 }
 
 .figma-user-avatar {
@@ -3554,18 +3593,18 @@ function submitJoinApp() {
   width: 20px;
   height: 20px;
   border-radius: 999px;
-  background: #18181b;
-  color: #fff;
+  background: var(--ta-shell-hover, #f3f4f6);
+  color: var(--ta-shell-header-text, #000000);
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 1;
 }
 
 .figma-user-avatar--compact {
-  width: 16px;
-  height: 16px;
-  font-size: 8px;
+  width: 20px;
+  height: 20px;
+  font-size: 12px;
 }
 
 .figma-user-menu-dropdown {
@@ -3671,7 +3710,7 @@ function submitJoinApp() {
 }
 
 .figma-user-menu-summary {
-  color: #666;
+  color: var(--ta-shell-muted, #6b7280);
   border-bottom: 1px solid #f0f0f0;
   border-radius: 6px 6px 0 0;
 }
@@ -3712,14 +3751,14 @@ function submitJoinApp() {
   cursor: pointer;
   width: 24px;
   height: 24px;
-  color: #666;
+  color: var(--ta-shell-muted, #6b7280);
   box-shadow: none !important;
   transition: background-color 0.14s ease, color 0.14s ease;
 }
 
 .figma-icon-btn:hover {
-  background: rgba(0, 0, 0, 0.06) !important;
-  color: #111;
+  background: var(--ta-shell-hover, #f3f4f6) !important;
+  color: var(--ta-shell-text, #1f2937);
 }
 
 .figma-icon-btn-ghost {
@@ -3728,17 +3767,17 @@ function submitJoinApp() {
 }
 
 .figma-icon-btn-ghost--collapsed {
-  background: rgba(0, 0, 0, 0.04) !important;
+  background: var(--ta-shell-hover, #f3f4f6) !important;
 }
 
 .figma-icon-btn-secondary {
   width: 24px;
   height: 24px;
-  background: #f4f4f5 !important;
+  background: var(--ta-shell-sidebar, #ffffff) !important;
 }
 
 .figma-icon-btn-secondary:hover {
-  background: #e8e8e8 !important;
+  background: var(--ta-shell-hover, #f3f4f6) !important;
 }
 
 .figma-icon-16 {
@@ -3752,7 +3791,8 @@ function submitJoinApp() {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  padding: 0px;
+  padding: var(--ta-shell-gap, 8px) var(--ta-shell-gap, 8px) var(--ta-shell-gap, 8px) 0;
+  background: var(--ta-shell-canvas, #f0f4fa);
   position: relative;
 }
 
@@ -3760,8 +3800,8 @@ function submitJoinApp() {
   position: relative;
   width: 48px;
   flex-shrink: 0;
-  background: #fff;
-  border-right: 1px solid #eaeaea;
+  background: transparent;
+  border-right: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -3774,15 +3814,28 @@ function submitJoinApp() {
   min-height: 0;
   border: 0;
   border-radius: 0;
-  background: #ffffff;
+  background: transparent;
   box-shadow: none;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .figma-panel-left {
   /* 宽度由 :style="width: ${leftPanelWidth}px" 动态控制 */
   flex-shrink: 0;
-  background: #ffffff;
+  /* 文件树只在左侧壳层内映射主题，避免影响编辑器与右侧对话。 */
+  --ta-tree-bg: var(--ta-shell-sidebar, #ffffff);
+  --ta-tree-border: var(--ta-shell-border, #e5e7eb);
+  --ta-tree-border-strong: var(--ta-shell-border-strong, #d1d5db);
+  --ta-tree-text: var(--ta-shell-text, #1f2937);
+  --ta-tree-muted: var(--ta-shell-muted, #6b7280);
+  --ta-tree-hover: var(--ta-shell-hover, #f3f4f6);
+  --ta-tree-active: var(--ta-shell-accent-soft, #fdf2f2);
+  --ta-tree-active-text: var(--ta-shell-accent-strong, #c8161d);
+  --ta-tree-accent: var(--ta-shell-accent, #c8161d);
+  background: var(--ta-shell-sidebar, #ffffff);
+  border: 1px solid var(--ta-shell-border, #e5e7eb);
+  border-radius: var(--ta-shell-radius, 8px);
+  box-shadow: var(--ta-shell-shadow, 0 1px 2px rgba(15, 23, 42, 0.04));
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -3794,12 +3847,12 @@ function submitJoinApp() {
 }
 
 .figma-files-resize-handle {
-  width: 1px;
+  width: var(--ta-shell-gap, 8px);
   flex-shrink: 0;
   cursor: col-resize;
   position: relative;
   z-index: 5;
-  background: var(--ta-border, #eaeaea);
+  background: transparent;
   transition: background-color 0.14s ease;
 }
 
@@ -3809,10 +3862,10 @@ function submitJoinApp() {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 4px;
-  height: 36px;
+  width: 2px;
+  height: 32px;
   border-radius: 2px;
-  background: rgba(0, 0, 0, 0.1);
+  background: var(--ta-shell-border-strong, #d1d5db);
   transition: background-color 0.15s ease, height 0.15s ease;
 }
 
@@ -3821,18 +3874,18 @@ function submitJoinApp() {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -3px;
-  width: 7px;
+  left: 0;
+  width: 100%;
   background: transparent;
   cursor: col-resize;
 }
 
 .figma-files-resize-handle:hover {
-  background: #d8d8d8;
+  background: transparent;
 }
 
 .figma-files-resize-handle:hover::before {
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--ta-shell-accent, #c8161d);
   height: 48px;
 }
 
@@ -3849,8 +3902,8 @@ function submitJoinApp() {
   flex: 1;
   min-width: 0;
   display: flex;
-  background: #ffffff;
-  overflow: hidden;
+  background: transparent;
+  overflow: visible;
 }
 
 .figma-panel-center {
@@ -3859,6 +3912,10 @@ function submitJoinApp() {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  border: 1px solid var(--ta-shell-border, #e5e7eb);
+  border-radius: var(--ta-shell-radius, 8px);
+  background: #ffffff;
+  box-shadow: var(--ta-shell-shadow, 0 1px 2px rgba(15, 23, 42, 0.04));
   overflow: hidden;
 }
 
@@ -3868,7 +3925,8 @@ function submitJoinApp() {
   display: flex;
   min-height: 0;
   min-width: 0;
-  overflow: hidden;
+  margin-left: var(--ta-shell-gap, 8px);
+  overflow: visible;
   transition: width 0.25s ease, opacity 0.25s ease;
 }
 .figma-chat-panel-wrapper.is-resizing {
@@ -3881,6 +3939,10 @@ function submitJoinApp() {
   flex-direction: column;
   min-height: 0;
   min-width: 0;
+  border: 1px solid var(--ta-shell-border, #e5e7eb);
+  border-radius: var(--ta-shell-radius, 8px);
+  background: #ffffff;
+  box-shadow: var(--ta-shell-shadow, 0 1px 2px rgba(15, 23, 42, 0.04));
   overflow: hidden;
 }
 
@@ -3890,7 +3952,7 @@ function submitJoinApp() {
   cursor: col-resize;
   position: relative;
   z-index: 5;
-  background: var(--ta-border, #eaeaea);
+  background: transparent;
   transition: background-color 0.14s ease;
 }
 
@@ -3900,10 +3962,10 @@ function submitJoinApp() {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 4px;
-  height: 36px;
+  width: 2px;
+  height: 32px;
   border-radius: 2px;
-  background: rgba(0, 0, 0, 0.1);
+  background: var(--ta-shell-border-strong, #d1d5db);
   transition: background-color 0.15s ease, height 0.15s ease;
 }
 
@@ -3919,11 +3981,11 @@ function submitJoinApp() {
 }
 
 .figma-chat-resize-handle:hover {
-  background: #d8d8d8;
+  background: transparent;
 }
 
 .figma-chat-resize-handle:hover::before {
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--ta-shell-accent, #c8161d);
   height: 48px;
 }
 
@@ -3984,18 +4046,19 @@ function submitJoinApp() {
   border: none;
   border-radius: 12px;
   background: transparent;
-  color: #444;
+  color: var(--ta-shell-muted, #6b7280);
   cursor: pointer;
   transition: background-color 0.14s ease, color 0.14s ease;
 }
 
 :deep(.figma-activity-btn:hover) {
-  background: #e8e8e8;
-  color: #333;
+  background: var(--ta-shell-hover, #f3f4f6);
+  color: var(--ta-shell-text, #1f2937);
 }
 
 :deep(.figma-activity-btn--active) {
-  color: #333;
+  background: var(--ta-shell-accent-soft, #fdf2f2);
+  color: var(--ta-shell-accent-strong, #991b1b);
 }
 
 :deep(.figma-activity-btn--active::before) {
@@ -4003,10 +4066,10 @@ function submitJoinApp() {
   position: absolute;
   left: 0;
   top: 7px;
-  width: 2px;
+  width: 3px;
   height: 24px;
   border-radius: 0 999px 999px 0;
-  background: #333;
+  background: var(--ta-shell-accent, #c8161d);
 }
 
 :deep(.figma-activity-icon) {
@@ -4015,7 +4078,7 @@ function submitJoinApp() {
 }
 .figma-sidebar-toggle-floating {
   position: absolute;
-  top: 5px;
+  top: 13px;
   z-index: 40;
   transition: left 0.25s ease;
 }
@@ -4024,7 +4087,7 @@ function submitJoinApp() {
 }
 .figma-sidebar-toggle-floating--right {
   right: 8px;
-  top: 4px;
+  top: 13px;
 }
 .figma-icon-btn-floating-open {
   width: 24px;

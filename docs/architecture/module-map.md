@@ -99,6 +99,8 @@ managed/source 选择共用完整 intent authority，旧 terminal 的 repository
 | `packages/shared-types` | 跨包共享 TypeScript 类型和事件/DTO 模型；包含应用源码严格四态、固定选择、操作安全快照和独立进度 WebSocket envelope，以及工具盒子目录、工具项和点击响应，`PermissionRequest.patterns` 与 `SessionRuntimeStateSummary.permissionCount` 保持可选，attention 接受 `PERMISSION`，Session/SessionMessage/Run 来源、夜间时段/任务、代码库英文名、版本库类型、工作空间创建进度、平台文件 WebSocket route/ticket 等新增契约字段必须保持可选或按请求/响应兼容策略处理。 |
 | `../frontend-opencode` | 独立 Vue/TypeScript/Vite opencode IDE App 复刻工程；不加入 `frontend/pnpm-workspace.yaml`，通过 alias 复用 `backend-api`、`event-stream-client`、`shared-types` 源码。 |
 
+`apps/agent-web` 的视觉边界由应用层维护：`FigmaShell.vue` 组合外围壳层，并让顶栏与 8px 栏间间隔共用浅雾蓝画布色、左/中/右三栏各自形成纯白悬浮面板；左侧工作区/Agent 目录加载前后与中间未打开文件时的预览区均保持纯白，当前文件标签只用 2px 工行红上沿标记激活态。顶栏 Logo 保持左侧并下移 2px；手册、运行态数量、应用和单字用户名组成带白色底板与细线框的控件组，整体绝对定位在首行水平中间。首行默认文字为纯黑，单字用户名为 12px，打开/按下状态复用活动栏的柔红底与工行红定位反馈。`styles/globals.css` 提供隔离的 `--ta-shell-*` token。`FigmaChatPanel.vue` 和 `packages/agent-chat` 不消费 shell token，避免外围品牌色影响对话内容。
+
 `apps/agent-web` 的 Git Changes 负责应用 Agent 与公共 Agent 当前作用域的逐文件和批量暂存；批量入口复用 `packages/backend-api` 既有 Agent stage 方法，不新增 API 或跨作用域状态。
 
 `apps/agent-web` 的版本库新增和编辑入口共用类型字典，并固定将“测试工作库”排在第一项；编辑通过 `packages/backend-api` 和 `packages/shared-types` 的可选 `repositoryType` 请求字段访问配置管理 PATCH API，旧 `standard` 只保留为后端协议兼容字段。

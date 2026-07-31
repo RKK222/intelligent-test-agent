@@ -2,7 +2,9 @@
 
 ## 工程定位
 
-完全自研测试智能体 Web IDE 前端。`frontend/interaction-visual-demo` 只作为交互与视觉参考资料，不纳入 `pnpm-workspace.yaml` 构建；其中 `cloud-workbench.html` 保留当前 36px 顶部栏、48px 活动栏、262px 左栏、中间编辑区和 450px Agent 对话区布局，仅对照“云白工行红 / 纯雪白 / 鼠尾草灰”三套外层 shell 配色，中间编辑器与对话样式不参与主题切换，也不进入生产构建。顶层 `frontend-opencode` 是 opencode IDE App 的 Vue/TypeScript/Vite 复刻交付物，作为独立工程单独安装、构建和验收，不纳入 `frontend/pnpm-workspace.yaml`。
+完全自研测试智能体 Web IDE 前端。生产工作台的外围 shell 使用纯白、浅雾蓝与工行红配色：36px 顶部外层和三栏之间的 8px 间隔复用现有弹框常见的浅雾蓝画布，活动栏融入画布；左侧文件区、中间编辑区和右侧 Agent 区作为带 8px 圆角、发丝边框和轻阴影的纯白悬浮面板，三栏顶部、工作区/Agent 目录加载态以及中间无文件预览态也保持纯白。外围导航与选中态消费隔离的 `--ta-shell-*` token。Logo 与中文标题保持统一黑色，工行红只用于外围导航和交互选中态。中间编辑器与右侧 Agent 对话的内部样式继续消费原有变量，不跟随 shell 变色。`frontend/interaction-visual-demo` 只作为交互与视觉参考资料，不纳入 `pnpm-workspace.yaml` 构建；其中 `cloud-workbench.html` 保留当前布局并对照“云白工行红 / 纯雪白 / 鼠尾草灰”三套外层配色。顶层 `frontend-opencode` 是 opencode IDE App 的 Vue/TypeScript/Vite 复刻交付物，作为独立工程单独安装、构建和验收，不纳入 `frontend/pnpm-workspace.yaml`。
+
+顶部 Logo 保持左侧并下移 2px；手册、Agent/Skill/MCP/Plugin 数量、应用和单字用户名使用白色底板与细线框，作为一个控件组悬浮在首行水平中间。首行默认文字统一为纯黑，单字用户名为 12px；顶部可点击项的悬停、按下和展开状态复用最左活动栏的中性悬停、柔红选中底与工行红定位反馈，所有点击逻辑保持不变。
 
 公共或应用 Agent/Skill 发布进入存量 Session 排空期时，`/processes/me` 按当前用户返回 `messageSendAllowed=false` 和阻断原因。应用发布先把固定 feature commit 原生 merge 到各服务器相关个人 worktree；存在 dirty 或冲突时不覆盖个人内容，持久化 rollout 保持 retry，相关个人 worktree 全部包含目标 commit 后才登记 dispose 用户并进入排空。前端只在被阻断期间每 5 秒刷新状态，该用户旧 opencode target dispose 后下一轮立即恢复为 true。聊天面板禁用发送与新会话按钮、输入框展示排空提示，后端所有新 opencode 消息入口仍以同一持久化用户级门禁为准。
 
