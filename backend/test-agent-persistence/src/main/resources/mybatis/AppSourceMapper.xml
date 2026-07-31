@@ -187,6 +187,12 @@
         update app_source_snapshots set status = #{nextStatus}, index_sha256 = #{indexSha256}, updated_at = #{updatedAt}
         where repository_id = #{repositoryId} and generation = #{generation} and status = #{expectedStatus}
     </update>
+    <update id="updateActiveSnapshotRetention">
+        update app_source_snapshots
+        set expires_at = #{expiresAt}, index_sha256 = #{indexSha256}, updated_at = #{updatedAt}
+        where repository_id = #{repositoryId} and generation = #{generation}
+          and status = 'ACTIVE' and expires_at = #{expectedExpiresAt}
+    </update>
 
     <select id="findReplica" resultMap="ReplicaMap">
         select <include refid="ReplicaColumns"/> from app_source_replicas
@@ -557,6 +563,18 @@
         where repository_id = #{repositoryId} and generation = #{generation} and linux_server_id = #{linuxServerId}
         order by cleanup_task_id
     </select>
+    <select id="findCleanupTasksForUpdate" resultMap="CleanupMap">
+        select <include refid="CleanupColumns"/> from app_source_cleanup_tasks
+        where repository_id = #{repositoryId} and generation = #{generation}
+        order by linux_server_id, cleanup_task_id
+        for update
+    </select>
+    <update id="rescheduleCleanupTasks">
+        update app_source_cleanup_tasks
+        set delete_at = #{deleteAt}, next_retry_at = #{deleteAt}, updated_at = #{updatedAt}
+        where repository_id = #{repositoryId} and generation = #{generation}
+          and delete_at = #{expectedDeleteAt} and status in ('PENDING', 'RETRY_WAIT')
+    </update>
     <update id="makeCleanupDueNow">
         update app_source_cleanup_tasks
         set delete_at = case when delete_at &lt; #{now} then delete_at else #{now} end,

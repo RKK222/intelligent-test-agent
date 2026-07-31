@@ -2,7 +2,8 @@
 
 - `V20260723145200__add_application_workspace_enabled.sql` 为应用工作空间配置增加默认启用的 `enabled` 字段；配置管理 MyBatis XML 负责该字段的查询、新增和更新，未新增 JDBC SQL。
 - `V20260728160800__create_toolbox_click_tracking.sql` 新增工具盒子永久点击明细、工具累计和用户/工具 30 秒窗口状态三张表；主文件恢复并锁定企业已执行的 `-1966404877` 原始 checksum。旧 `V20260727203500` 原文保存在 `db/migration-compat/toolbox`，曾误发的当前版本 `-74327385` 幂等原文保存在 `db/migration-compat/toolbox-current-idempotent`，由 app 按已应用 version/checksum 隔离选择；删除用户时明细匿名化、窗口状态级联删除，累计保留，不写生产演示数据。
-- `V20260728103000__create_app_source_snapshot_tables.sql` 新增应用源码 slot、不可变 snapshot、服务器 replica、operation/step、cleanup 和 recent 表，结构化选择使用 PostgreSQL JSONB；snapshot 在数据库约束 `expires_at = accepted_at + 1..72` 整小时且索引摘要必须为 64 位十六进制；cleanup 到 operation/snapshot 的外键为 `DEFERRABLE INITIALLY DEFERRED`，并初始化只读 `OPENCODE_APP_SOURCE_ROOT=${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/appsource/`。
+- `V20260728103000__create_app_source_snapshot_tables.sql` 新增应用源码 slot、固定内容 snapshot、服务器 replica、operation/step、cleanup 和 recent 表，结构化选择使用 PostgreSQL JSONB；初始 snapshot 约束为 `expires_at = accepted_at + 1..72` 整小时且索引摘要必须为 64 位十六进制；cleanup 到 operation/snapshot 的外键为 `DEFERRABLE INITIALLY DEFERRED`，并初始化只读 `OPENCODE_APP_SOURCE_ROOT=${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/appsource/`。
+- `V20260731115520__extend_app_source_retention.sql` 保留已经执行的 365 天扩容原始字节，`V20260731123600__cap_app_source_retention_at_one_week.sql` 再把最终 snapshot 整小时上限收紧为 168 小时（7 天），两者均不改历史数据；续期运行 SQL 位于 `AppSourceMapper.xml`，通过快照 expiry CAS 同步更新权威索引摘要和全部未开始 cleanup 的 `delete_at/next_retry_at`。
 - `V20260728210000__index_in_flight_app_source_operations.sql` 为 dispatcher 周期恢复增加 `(status, accepted_at, operation_id)` 索引，使 `PENDING/RUNNING` stranded 扫描不随历史终态 operation 全表增长；迁移只新增索引，不写业务数据。
 
 ## 工程定位

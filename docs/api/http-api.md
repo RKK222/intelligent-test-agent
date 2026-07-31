@@ -1206,7 +1206,7 @@ WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSoc
 
 应用源码入口统一位于 `/api/internal/platform/workspace-management`，只面向当前启用应用关联的 `APPLICATION_CODE_REPOSITORY`。所有入口要求登录用户仍是应用有效成员；`SUPER_ADMIN` 不旁路成员关系。仓库列表、打开和最近选择还要求当前用户存在 READY opencode 进程，并以该进程所在 Linux 服务器判断当前副本是否可用。
 
-操作快照 GET 和进度 ticket 不固定在 operation 最初发起的 appId：先确认 repository 仍为应用源码类型，再要求当前用户属于任一当前启用且仍关联该 repository 的应用。TEAM 满足该成员条件即可读取；PERSONAL 仍仅 owner，或同时满足成员条件的 `APP_ADMIN/SUPER_ADMIN`。每次 HTTP/WS 读取都重新校验，解除关联、禁用应用或撤销成员立即拒绝。本轮未新增或修改请求/响应字段、URL、WebSocket event name，旧客户端 wire 保持兼容。
+操作快照 GET 和进度 ticket 不固定在 operation 最初发起的 appId：先确认 repository 仍为应用源码类型，再要求当前用户属于任一当前启用且仍关联该 repository 的应用。TEAM 满足该成员条件即可读取；PERSONAL 仍仅 owner，或同时满足成员条件的 `APP_ADMIN/SUPER_ADMIN`。每次 HTTP/WS 读取都重新校验，解除关联、禁用应用或撤销成员立即拒绝。保留期调整只新增 HTTP URL 和 additive 列表字段，不改变既有 URL、请求字段或 WebSocket event name，旧客户端 wire 保持兼容。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
@@ -1215,6 +1215,7 @@ WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSoc
 | `GET` | `/applications/{appId}/app-source-repositories/{repositoryId}/tree?branch={branch}&path={path}&includeCommit={boolean}` | 读取指定分支下的安全目录树；`path` 默认 `.`，`includeCommit` 默认 `false`。 |
 | `POST` | `/applications/{appId}/app-source-repositories/{repositoryId}/materializations` | 创建新的固定提交源码快照。 |
 | `POST` | `/applications/{appId}/app-source-repositories/{repositoryId}/replica-retries` | 对同一 generation 的失败或陈旧服务器副本重试。 |
+| `PATCH` | `/applications/{appId}/app-source-repositories/{repositoryId}/retention` | 调整当前未过期 generation 的总保留小时数。 |
 | `POST` | `/applications/{appId}/app-source-repositories/{repositoryId}/open` | 在当前用户进程服务器打开 READY 副本并返回 Runtime Workspace。 |
 | `GET` | `/recent-app-source` | 按当前用户和当前进程服务器解析最近一次仍有效的应用源码选择。 |
 | `DELETE` | `/recent-app-source` | 完整复核当前 generation、成员及本机 READY 副本后显式清除最近选择。 |
@@ -1243,7 +1244,7 @@ tree 的兼容模式（不传 `includeCommit` 或传 `false`）保持原 wire �
 | `DOWNLOADED_EXPIRED` | active snapshot 已过期，不能打开。 |
 | `PERSONAL_OCCUPIED` | active snapshot 是其它用户的个人快照；返回低敏占用人 `ownerUserId/ownerName/ownerUnifiedAuthId` 供管理判断。 |
 
-列表响应条目包含 `repositoryId/name/englishName/downloadState/generation/purpose/ownerUserId/ownerName/ownerUnifiedAuthId/branch/targetCommit/selectedPaths/expiresAt/occupied/openable/manageable/unavailableReason/latestOperation/serverSummaries`。其中 `selectedPaths[]` 固定使用 `{ "path": "...", "type": "FILE|DIRECTORY" }`；响应允许尚未下载或旧数据对应的字段为 `null`，客户端必须容忍后续追加字段。`manageable` 与 `openable` 相互独立：没有 active snapshot 或 snapshot 已过期时，任一当前有效应用成员都可发起新 generation，因此返回 `manageable=true`；未过期 snapshot 仅对 owner 或当前有效应用成员中的 `APP_ADMIN` 返回 `manageable=true`。`openable=true` 仍要求当前服务器存在同 generation 的 READY replica。
+列表响应条目包含 `repositoryId/name/englishName/downloadState/generation/purpose/ownerUserId/ownerName/ownerUnifiedAuthId/branch/targetCommit/selectedPaths/expiresAt/acceptedAt/maxRetentionHours/occupied/openable/manageable/unavailableReason/latestOperation/serverSummaries`。其中 `selectedPaths[]` 固定使用 `{ "path": "...", "type": "FILE|DIRECTORY" }`；`maxRetentionHours=168`，`acceptedAt` 是计算当前 generation 总保留时长的首次下载受理时间。响应允许尚未下载或旧数据对应的字段为 `null`，客户端必须容忍后续追加字段。`manageable` 与 `openable` 相互独立：没有 active snapshot 或 snapshot 已过期时，任一当前有效应用成员都可发起新 generation，因此返回 `manageable=true`；未过期 snapshot 仅对 owner 或当前有效应用成员中的 `APP_ADMIN` 返回 `manageable=true`。`openable=true` 仍要求当前服务器存在同 generation 的 READY replica。
 
 物化请求示例：
 
@@ -1264,6 +1265,8 @@ tree 的兼容模式（不传 `includeCommit` 或传 `false`）保持原 wire �
 ```
 
 `operationId` 是调用方生成的稳定幂等标识，首尾规范化固定为 ECMAScript WhiteSpace + LineTerminator 集合：`U+0009–U+000D`、`U+0020`、`U+00A0`、`U+1680`、`U+2000–U+200A`、`U+2028`、`U+2029`、`U+202F`、`U+205F`、`U+3000`、`U+FEFF`，不依赖 locale 或 Java `trim/strip`。规范化后长度为 1–128，不限定 `aso_` 前缀，但禁止控制字符、`/`、`\\` 路径分隔符和精确的 `.`/`..` 路径段；普通内部双点如 `release..1` 合法。物化、重试、操作查询、ticket 与 WebSocket 使用同一校验，因此业务接受的 ID（包括以 NBSP 包裹的普通 ID）必须始终以同一规范值查询、签票并连接。`expectedTreeCommit` 必须是远端解析得到的完整固定提交，防止用户选择目录后远端分支发生漂移。`purpose=PERSONAL` 固定当前用户进程服务器，`purpose=TEAM` 冻结受理时的在线服务器集合。已有 active snapshot 时，只有 owner 或仍是有效应用成员的 `APP_ADMIN` 能替换/重试；`TEAM -> PERSONAL` 拒绝，`PERSONAL -> TEAM` 建立新 generation。个人操作快照只允许 owner，或仍具 `APP_ADMIN` 角色且仍为有效成员的用户读取；团队操作允许当前有效成员读取。
+
+`retentionHours` 必须是 1–168 的整小时，默认 48。物化后的直接调整请求为 `{ "expectedGeneration": 3, "retentionHours": 120 }`；这里的 120 表示相对该 generation 首次 `acceptedAt` 的总保留小时数，而不是从调整时刻再增加 120 小时。成功返回 `repositoryId/generation/retentionHours/expiresAt`。服务端要求当前快照仍为 ACTIVE 且未过期、没有 pending generation，并仅允许 owner 或应用管理员操作；随后锁定全部 cleanup 行，在同一事务中更新快照到期时间、索引摘要和所有 `PENDING/RETRY_WAIT` 清理时间。generation 已变化、调整后已经到期、清理任务缺失或清理已进入 `RUNNING/CLEANED/SUPERSEDED` 时返回 `409 CONFLICT`。
 
 并发物化重放在 repository 锁内先于 expected/pending generation 等可变 slot 校验；相同 `operationId` 还必须匹配首请求的 app、repository、actor、operation type、不可变 requestHash 和 source generation，成功时返回原 operation 以及从首请求 SERVER steps/replicas 恢复的冻结目标，不使用第二次请求观察到的在线服务器。
 

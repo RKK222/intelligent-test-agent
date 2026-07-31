@@ -5,6 +5,7 @@ import com.enterprise.testagent.domain.appsource.AppSourceOperationType;
 import com.enterprise.testagent.domain.appsource.AppSourcePathType;
 import com.enterprise.testagent.domain.appsource.AppSourcePurpose;
 import com.enterprise.testagent.domain.appsource.AppSourceReplicaStatus;
+import com.enterprise.testagent.domain.appsource.AppSourceRetention;
 import com.enterprise.testagent.domain.appsource.AppSourceStepStatus;
 import com.enterprise.testagent.common.git.GitRemoteService;
 import com.enterprise.testagent.workspace.AppSourceApplicationService;
@@ -36,6 +37,16 @@ final class AppSourceDtos {
     }
 
     record RetryRequest(String operationId, long expectedGeneration) {
+    }
+
+    record RetentionUpdateRequest(long expectedGeneration, int retentionHours) {
+    }
+
+    record RetentionUpdateResponse(
+            String repositoryId,
+            long generation,
+            int retentionHours,
+            Instant expiresAt) {
     }
 
     record OpenRequest(long generation) {
@@ -70,6 +81,8 @@ final class AppSourceDtos {
             String targetCommit,
             List<SelectedPathResponse> selectedPaths,
             Instant expiresAt,
+            Instant acceptedAt,
+            int maxRetentionHours,
             boolean occupied,
             boolean openable,
             boolean manageable,
@@ -147,12 +160,22 @@ final class AppSourceDtos {
                 source.targetCommit(),
                 selectedPaths(source.selectedPaths()),
                 source.expiresAt(),
+                source.acceptedAt(),
+                AppSourceRetention.MAX_HOURS,
                 source.occupied(),
                 source.openable(),
                 source.manageable(),
                 source.unavailableReason(),
                 source.latestOperation() == null ? null : operation(source.latestOperation()),
                 servers(source.serverSummaries()));
+    }
+
+    static RetentionUpdateResponse retention(AppSourceApplicationService.RetentionUpdateResult source) {
+        return new RetentionUpdateResponse(
+                source.repositoryId(),
+                source.generation(),
+                source.retentionHours(),
+                source.expiresAt());
     }
 
     static OperationResponse operation(AppSourceApplicationService.OperationSnapshot source) {

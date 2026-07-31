@@ -35,6 +35,15 @@ public interface AppSourceRepository extends AppSourceRepositoryHistory {
             String indexSha256,
             Instant updatedAt);
 
+    /** 仅更新当前 ACTIVE generation 的保留期与对应权威索引摘要。 */
+    boolean updateActiveSnapshotRetention(
+            CodeRepositoryId repositoryId,
+            long generation,
+            Instant expectedExpiresAt,
+            Instant expiresAt,
+            String indexSha256,
+            Instant updatedAt);
+
     Optional<AppSourceReplica> findReplica(
             CodeRepositoryId repositoryId, long generation, LinuxServerId linuxServerId);
 
@@ -143,6 +152,17 @@ public interface AppSourceRepository extends AppSourceRepositoryHistory {
 
     List<AppSourceCleanupTask> findCleanupTasks(
             CodeRepositoryId repositoryId, long generation, LinuxServerId linuxServerId);
+
+    /** 锁定同 generation 的全部服务器清理任务，供保留期调整与 cleanup claim 串行。 */
+    List<AppSourceCleanupTask> findCleanupTasksForUpdate(CodeRepositoryId repositoryId, long generation);
+
+    /** 同步调整尚未执行的全部服务器清理时间；返回实际更新行数。 */
+    int rescheduleCleanupTasks(
+            CodeRepositoryId repositoryId,
+            long generation,
+            Instant expectedDeleteAt,
+            Instant deleteAt,
+            Instant updatedAt);
 
     /** 把旧 generation 的所有历史服务器清理任务提前到当前时刻。 */
     int makeCleanupDueNow(CodeRepositoryId repositoryId, long generation, Instant now);

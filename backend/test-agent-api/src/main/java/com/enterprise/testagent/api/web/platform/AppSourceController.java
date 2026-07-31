@@ -12,6 +12,7 @@ import java.util.Objects;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -138,6 +139,23 @@ public class AppSourceController {
             return AppSourceDtos.operation(
                     service.getOperation(operation.operationId(), principal.userId(), appAdmin));
         });
+    }
+
+    @PatchMapping("/applications/{appId}/app-source-repositories/{repositoryId}/retention")
+    public Mono<ApiResponse<Object>> updateRetention(
+            @PathVariable String appId,
+            @PathVariable String repositoryId,
+            @RequestBody AppSourceDtos.RetentionUpdateRequest request,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = principal(exchange);
+        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> AppSourceDtos.retention(
+                service.updateRetention(
+                        appId,
+                        repositoryId,
+                        new AppSourceApplicationService.RetentionUpdateCommand(
+                                request.expectedGeneration(), request.retentionHours()),
+                        principal.userId(),
+                        appAdmin(principal))));
     }
 
     @PostMapping("/applications/{appId}/app-source-repositories/{repositoryId}/open")

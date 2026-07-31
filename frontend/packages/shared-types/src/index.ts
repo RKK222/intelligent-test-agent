@@ -2635,6 +2635,8 @@ export type AppSourceRepositorySummary = {
   targetCommit?: string | null;
   selectedPaths: AppSourceSelectedPath[];
   expiresAt?: string | null;
+  acceptedAt?: string | null;
+  maxRetentionHours?: number;
   occupied: boolean;
   openable: boolean;
   manageable: boolean;
@@ -2671,6 +2673,19 @@ export type AppSourceMaterializationPayload = {
 export type AppSourceReplicaRetryPayload = {
   operationId: string;
   expectedGeneration: number;
+};
+
+/** 保留小时数按当前 generation 首次下载受理时间计算，避免续期调用不断漂移基准。 */
+export type AppSourceRetentionUpdatePayload = {
+  expectedGeneration: number;
+  retentionHours: number;
+};
+
+export type AppSourceRetentionUpdateResult = {
+  repositoryId: string;
+  generation: number;
+  retentionHours: number;
+  expiresAt: string;
 };
 
 export type AppSourceOpenResult = {

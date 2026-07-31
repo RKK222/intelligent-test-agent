@@ -537,5 +537,23 @@ class AppSourceRetryRecoveryIntegrationTest {
                 .replaceAll("(?s)create unique index uk_app_source_steps_server.*?;", "");
         new ResourceDatabasePopulator(new ByteArrayResource(h2Migration.getBytes(StandardCharsets.UTF_8)))
                 .execute(dataSource);
+        String h2RetentionExpansionMigration = new ClassPathResource(
+                "db/migration/V20260731115520__extend_app_source_retention.sql")
+                .getContentAsString(StandardCharsets.UTF_8)
+                .replace("accepted_at + interval '1 hour'", "dateadd('hour', 1, accepted_at)")
+                .replace("accepted_at + interval '8760 hours'", "dateadd('hour', 8760, accepted_at)")
+                .replace("mod(extract(epoch from (expires_at - accepted_at)), 3600)",
+                        "mod(datediff('second', accepted_at, expires_at), 3600)");
+        new ResourceDatabasePopulator(new ByteArrayResource(
+                h2RetentionExpansionMigration.getBytes(StandardCharsets.UTF_8))).execute(dataSource);
+        String h2RetentionCapMigration = new ClassPathResource(
+                "db/migration/V20260731123600__cap_app_source_retention_at_one_week.sql")
+                .getContentAsString(StandardCharsets.UTF_8)
+                .replace("accepted_at + interval '1 hour'", "dateadd('hour', 1, accepted_at)")
+                .replace("accepted_at + interval '168 hours'", "dateadd('hour', 168, accepted_at)")
+                .replace("mod(extract(epoch from (expires_at - accepted_at)), 3600)",
+                        "mod(datediff('second', accepted_at, expires_at), 3600)");
+        new ResourceDatabasePopulator(new ByteArrayResource(
+                h2RetentionCapMigration.getBytes(StandardCharsets.UTF_8))).execute(dataSource);
     }
 }

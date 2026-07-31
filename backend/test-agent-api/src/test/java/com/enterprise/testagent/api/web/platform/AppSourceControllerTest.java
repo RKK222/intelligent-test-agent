@@ -59,7 +59,8 @@ class AppSourceControllerTest {
                 .jsonPath("$.data[0].downloadState").isEqualTo("NOT_DOWNLOADED")
                 .jsonPath("$.data[1].downloadState").isEqualTo("DOWNLOADED_ACTIVE")
                 .jsonPath("$.data[2].downloadState").isEqualTo("DOWNLOADED_EXPIRED")
-                .jsonPath("$.data[3].downloadState").isEqualTo("PERSONAL_OCCUPIED");
+                .jsonPath("$.data[3].downloadState").isEqualTo("PERSONAL_OCCUPIED")
+                .jsonPath("$.data[0].maxRetentionHours").isEqualTo(168);
 
         verify(service).listRepositories("app_1", USER_ID, false, "server-a");
     }
@@ -136,6 +137,37 @@ class AppSourceControllerTest {
             org.assertj.core.api.Assertions.assertThat(value.retentionHours()).isEqualTo(6);
             org.assertj.core.api.Assertions.assertThat(value.confirmReplace()).isTrue();
         });
+    }
+
+    @Test
+    void retentionUpdateMapsGenerationAndReturnsTheNewExpiry() {
+        AppSourceApplicationService service = mock(AppSourceApplicationService.class);
+        when(service.updateRetention(
+                eq("app_1"), eq("repo_1"), org.mockito.ArgumentMatchers.any(), eq(USER_ID), eq(true)))
+                .thenReturn(new AppSourceApplicationService.RetentionUpdateResult(
+                        "repo_1", 4L, 120, NOW.plusSeconds(120L * 3600L)));
+
+        client(service, List.of("APP_ADMIN")).patch()
+                .uri("/api/internal/platform/workspace-management/applications/app_1/"
+                        + "app-source-repositories/repo_1/retention")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"expectedGeneration":4,"retentionHours":120}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.repositoryId").isEqualTo("repo_1")
+                .jsonPath("$.data.generation").isEqualTo(4)
+                .jsonPath("$.data.retentionHours").isEqualTo(120)
+                .jsonPath("$.data.expiresAt").isEqualTo(NOW.plusSeconds(120L * 3600L).toString());
+
+        ArgumentCaptor<AppSourceApplicationService.RetentionUpdateCommand> command =
+                ArgumentCaptor.forClass(AppSourceApplicationService.RetentionUpdateCommand.class);
+        verify(service).updateRetention(eq("app_1"), eq("repo_1"), command.capture(), eq(USER_ID), eq(true));
+        org.assertj.core.api.Assertions.assertThat(command.getValue().expectedGeneration()).isEqualTo(4L);
+        org.assertj.core.api.Assertions.assertThat(command.getValue().retentionHours()).isEqualTo(120);
     }
 
     @Test
@@ -308,7 +340,7 @@ class AppSourceControllerTest {
             AppSourceApplicationService.DownloadState state) {
         return new AppSourceApplicationService.RepositorySummary(
                 repositoryId, "源码库", "billing-service", state, null, null, null,
-                null, null, null, null, List.of(), null, false, false, false,
+                null, null, null, null, List.of(), null, null, false, false, false,
                 state.name(), null, List.of());
     }
 

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.clearInvocations;
@@ -15,6 +16,8 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.git.GitRemoteService;
 import com.enterprise.testagent.common.git.GitWorkspaceService;
 import com.enterprise.testagent.common.git.SshKeyEncryptionService;
+import com.enterprise.testagent.domain.appsource.AppSourceCleanupStatus;
+import com.enterprise.testagent.domain.appsource.AppSourceCleanupTask;
 import com.enterprise.testagent.domain.appsource.AppSourceOperation;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationStatus;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationStep;
@@ -124,6 +127,7 @@ class AppSourceApplicationServiceTest {
                 retryRegistrar,
                 dispatcher,
                 workspaceOpener,
+                new AppSourceIndexManager(),
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -660,6 +664,63 @@ class AppSourceApplicationServiceTest {
     }
 
     @Test
+    void retentionUpdateSynchronizesSnapshotIndexAndEveryPendingCleanupTask() {
+        Instant oldExpiry = NOW.plusSeconds(3600);
+        Instant acceptedAt = NOW;
+        AppSourceSnapshot active = new AppSourceSnapshot(
+                REPOSITORY_ID, 4L, "billing-service", AppSourcePurpose.TEAM, USER_ID, "main", COMMIT,
+                List.of(new AppSourceSelectedPath("src", AppSourcePathType.DIRECTORY)), "a".repeat(64),
+                acceptedAt, oldExpiry, AppSourceSnapshotStatus.ACTIVE, acceptedAt, acceptedAt);
+        Instant renewedExpiry = acceptedAt.plusSeconds(120L * 3600L);
+        when(appSources.lockRepositoryForAppSource(REPOSITORY_ID)).thenReturn(true);
+        when(appSources.findSlotForUpdate(REPOSITORY_ID)).thenReturn(Optional.of(new AppSourceRepositorySlot(
+                REPOSITORY_ID, 4L, null, 5L, "op-old", 2L, NOW.minusSeconds(60), NOW)));
+        when(appSources.findSnapshot(REPOSITORY_ID, 4L)).thenReturn(Optional.of(active));
+        when(appSources.findCleanupTasksForUpdate(REPOSITORY_ID, 4L)).thenReturn(List.of(
+                cleanupTask("cleanup-a", "server-a", oldExpiry, AppSourceCleanupStatus.PENDING),
+                cleanupTask("cleanup-b", "server-b", oldExpiry, AppSourceCleanupStatus.RETRY_WAIT)));
+        when(appSources.updateActiveSnapshotRetention(
+                any(), anyLong(), any(), any(), any(), any())).thenReturn(true);
+        when(appSources.rescheduleCleanupTasks(
+                any(), anyLong(), any(), any(), any())).thenReturn(2);
+
+        AppSourceApplicationService.RetentionUpdateResult result = service.updateRetention(
+                APP_ID.value(), REPOSITORY_ID.value(),
+                new AppSourceApplicationService.RetentionUpdateCommand(4L, 120),
+                USER_ID, false);
+
+        assertThat(result.retentionHours()).isEqualTo(120);
+        assertThat(result.expiresAt()).isEqualTo(renewedExpiry);
+        ArgumentCaptor<String> sha = ArgumentCaptor.forClass(String.class);
+        verify(appSources).updateActiveSnapshotRetention(
+                eq(REPOSITORY_ID), eq(4L), eq(oldExpiry), eq(renewedExpiry), sha.capture(), eq(NOW));
+        assertThat(sha.getValue()).matches("[0-9a-f]{64}");
+        verify(appSources).rescheduleCleanupTasks(
+                REPOSITORY_ID, 4L, oldExpiry, renewedExpiry, NOW);
+    }
+
+    @Test
+    void retentionUpdateRejectsCleanupThatHasAlreadyStarted() {
+        Instant oldExpiry = NOW.plusSeconds(3600);
+        AppSourceSnapshot active = snapshot(4L, AppSourcePurpose.TEAM, USER_ID, oldExpiry);
+        when(appSources.lockRepositoryForAppSource(REPOSITORY_ID)).thenReturn(true);
+        when(appSources.findSlotForUpdate(REPOSITORY_ID)).thenReturn(Optional.of(new AppSourceRepositorySlot(
+                REPOSITORY_ID, 4L, null, 5L, "op-old", 2L, NOW.minusSeconds(60), NOW)));
+        when(appSources.findSnapshot(REPOSITORY_ID, 4L)).thenReturn(Optional.of(active));
+        when(appSources.findCleanupTasksForUpdate(REPOSITORY_ID, 4L)).thenReturn(List.of(
+                cleanupTask("cleanup-a", "server-a", oldExpiry, AppSourceCleanupStatus.RUNNING)));
+
+        assertThatThrownBy(() -> service.updateRetention(
+                        APP_ID.value(), REPOSITORY_ID.value(),
+                        new AppSourceApplicationService.RetentionUpdateCommand(4L, 24),
+                        USER_ID, false))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+
+        verify(appSources, never()).updateActiveSnapshotRetention(any(), anyLong(), any(), any(), any(), any());
+    }
+
+    @Test
     void openRecordsRecentOnlyAfterRealtimeAuthorizationAndReadyWorkspaceResolution() {
         AppSourceSnapshot active = snapshot(4L, AppSourcePurpose.TEAM, USER_ID, NOW.plusSeconds(3600));
         Workspace workspace = new Workspace(
@@ -745,6 +806,17 @@ class AppSourceApplicationServiceTest {
         return new AppSourceReplica(
                 REPOSITORY_ID, generation, new LinuxServerId(serverId), null, status,
                 null, null, 1, null, null, null, NOW.minusSeconds(60), NOW);
+    }
+
+    private AppSourceCleanupTask cleanupTask(
+            String cleanupTaskId,
+            String serverId,
+            Instant deleteAt,
+            AppSourceCleanupStatus status) {
+        return new AppSourceCleanupTask(
+                cleanupTaskId, "aso_download", REPOSITORY_ID, 4L, new LinuxServerId(serverId), deleteAt,
+                status, null, null, 0, deleteAt, null, null, "trace_cleanup",
+                NOW.minusSeconds(60), NOW);
     }
 
     private AppSourceOperation operation(

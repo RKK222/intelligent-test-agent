@@ -4,14 +4,15 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 
-/** 源码物化保留时长，业务允许 1 到 72 小时，默认 48 小时。 */
+/** 源码物化保留时长，业务允许 1 小时到 7 天，默认 48 小时。 */
 public record AppSourceRetention(int hours) {
 
     public static final int DEFAULT_HOURS = 48;
+    public static final int MAX_HOURS = 7 * 24;
 
     public AppSourceRetention {
-        if (hours < 1 || hours > 72) {
-            throw new IllegalArgumentException("retention hours must be between 1 and 72");
+        if (hours < 1 || hours > MAX_HOURS) {
+            throw new IllegalArgumentException("retention hours must be between 1 and " + MAX_HOURS);
         }
     }
 

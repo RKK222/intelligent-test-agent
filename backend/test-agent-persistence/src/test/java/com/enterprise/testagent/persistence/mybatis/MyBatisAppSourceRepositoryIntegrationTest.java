@@ -91,6 +91,24 @@ class MyBatisAppSourceRepositoryIntegrationTest {
         new ResourceDatabasePopulator(new ClassPathResource(
                 "db/migration/V20260728210000__index_in_flight_app_source_operations.sql"))
                 .execute(schemaDataSource);
+        String h2RetentionExpansionMigration = new ClassPathResource(
+                "db/migration/V20260731115520__extend_app_source_retention.sql")
+                .getContentAsString(StandardCharsets.UTF_8)
+                .replace("accepted_at + interval '1 hour'", "dateadd('hour', 1, accepted_at)")
+                .replace("accepted_at + interval '8760 hours'", "dateadd('hour', 8760, accepted_at)")
+                .replace("mod(extract(epoch from (expires_at - accepted_at)), 3600)",
+                        "mod(datediff('second', accepted_at, expires_at), 3600)");
+        new ResourceDatabasePopulator(new ByteArrayResource(
+                h2RetentionExpansionMigration.getBytes(StandardCharsets.UTF_8))).execute(schemaDataSource);
+        String h2RetentionCapMigration = new ClassPathResource(
+                "db/migration/V20260731123600__cap_app_source_retention_at_one_week.sql")
+                .getContentAsString(StandardCharsets.UTF_8)
+                .replace("accepted_at + interval '1 hour'", "dateadd('hour', 1, accepted_at)")
+                .replace("accepted_at + interval '168 hours'", "dateadd('hour', 168, accepted_at)")
+                .replace("mod(extract(epoch from (expires_at - accepted_at)), 3600)",
+                        "mod(datediff('second', accepted_at, expires_at), 3600)");
+        new ResourceDatabasePopulator(new ByteArrayResource(
+                h2RetentionCapMigration.getBytes(StandardCharsets.UTF_8))).execute(schemaDataSource);
         jdbcClient = JdbcClient.create(h2);
         insertBaseRows();
 
@@ -642,6 +660,33 @@ class MyBatisAppSourceRepositoryIntegrationTest {
                 "cleanup-1", "cleaner-b", NOW.plusSeconds(11))).isFalse();
         assertThat(repository.completeCleanupTask(
                 "cleanup-1", "cleaner-a", NOW.plusSeconds(11))).isTrue();
+    }
+
+    @Test
+    void activeSnapshotRetentionAndPendingCleanupAreRescheduledWithCompareAndSet() {
+        repository.insertSlotIfAbsent(slot(1L, 0L, NOW));
+        repository.saveOperation(operation("op-download", AppSourceOperationStatus.SUCCEEDED, NOW));
+        repository.saveSnapshot(snapshot("op-download", AppSourceSnapshotStatus.ACTIVE));
+        repository.insertCleanupTasks(List.of(cleanupTask()));
+        Instant oldExpiry = NOW.plusSeconds(48L * 3600L);
+        Instant renewedExpiry = NOW.plusSeconds(168L * 3600L);
+        Instant updatedAt = NOW.plusSeconds(30);
+
+        assertThat(repository.findCleanupTasksForUpdate(REPOSITORY_ID, 1L)).containsExactly(cleanupTask());
+        assertThat(repository.updateActiveSnapshotRetention(
+                REPOSITORY_ID, 1L, oldExpiry, renewedExpiry, "b".repeat(64), updatedAt)).isTrue();
+        assertThat(repository.rescheduleCleanupTasks(
+                REPOSITORY_ID, 1L, NOW.plusSeconds(5), renewedExpiry, updatedAt)).isOne();
+        assertThat(repository.findSnapshot(REPOSITORY_ID, 1L)).get().satisfies(snapshot -> {
+            assertThat(snapshot.expiresAt()).isEqualTo(renewedExpiry);
+            assertThat(snapshot.indexSha256()).isEqualTo("b".repeat(64));
+        });
+        assertThat(repository.findCleanupTasks(REPOSITORY_ID, 1L, SERVER_ID)).singleElement().satisfies(task -> {
+            assertThat(task.deleteAt()).isEqualTo(renewedExpiry);
+            assertThat(task.nextRetryAt()).isEqualTo(renewedExpiry);
+        });
+        assertThat(repository.updateActiveSnapshotRetention(
+                REPOSITORY_ID, 1L, oldExpiry, NOW.plusSeconds(24L * 3600L), "c".repeat(64), updatedAt)).isFalse();
     }
 
     private void insertBaseRows() {

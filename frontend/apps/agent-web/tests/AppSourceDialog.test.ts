@@ -17,8 +17,10 @@ const repository: AppSourceRepositorySummary = {
   branch: "main",
   targetCommit: "stale-summary-commit",
   selectedPaths: [{ path: "src", type: "DIRECTORY" }],
-  expiresAt: "2026-07-30T00:00:00Z",
-  occupied: false,
+  acceptedAt: "2026-07-30T00:00:00Z",
+  expiresAt: "2026-08-01T00:00:00Z",
+  maxRetentionHours: 168,
+  occupied: true,
   openable: true,
   manageable: true,
   latestOperation: null,
@@ -93,6 +95,21 @@ describe("AppSourceDialog", () => {
     expect(selector.props("defaultFirstOption")).toBe(true);
     expect(selector.props("popperStyle")).toEqual({ zIndex: 3701 });
     expect(selector.props("options")).toEqual(branches.map((item) => ({ label: item, value: item })));
+  });
+
+  it("updates the active generation retention directly from step one", async () => {
+    const wrapper = mount(AppSourceDialog, {
+      props: { open: true, repositories: [repository], repository },
+      global: { stubs: { Teleport: true } }
+    });
+
+    const input = wrapper.get('input[aria-label="当前源码总保留小时数"]');
+    expect((input.element as HTMLInputElement).value).toBe("48");
+    expect(input.attributes("max")).toBe("168");
+    await input.setValue(120);
+    await wrapper.get('button[aria-label="更新当前源码保留期"]').trigger("click");
+
+    expect(wrapper.emitted("update-retention")).toEqual([[120]]);
   });
 
   it("keeps large descendants collapsed and submits one directory instead of every child", async () => {

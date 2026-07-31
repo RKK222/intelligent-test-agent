@@ -18,12 +18,12 @@ class AppSourceDomainTest {
     @Test
     void materializationRetentionAcceptsOneToSeventyTwoHoursAndDefaultsToFortyEight() {
         assertThat(new AppSourceRetention(1).expiresAt(NOW)).isEqualTo(NOW.plus(Duration.ofHours(1)));
-        assertThat(new AppSourceRetention(72).expiresAt(NOW)).isEqualTo(NOW.plus(Duration.ofHours(72)));
+        assertThat(new AppSourceRetention(168).expiresAt(NOW)).isEqualTo(NOW.plus(Duration.ofHours(168)));
         assertThat(AppSourceRetention.defaultRetention().hours()).isEqualTo(48);
         assertThat(AppSourceRetention.defaultRetention().expiresAt(NOW)).isEqualTo(NOW.plus(Duration.ofHours(48)));
 
         assertThatThrownBy(() -> new AppSourceRetention(0)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new AppSourceRetention(73)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new AppSourceRetention(169)).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -55,10 +55,10 @@ class AppSourceDomainTest {
     void snapshotExpiryMustBeWholeHoursWithinRetentionWindow() {
         assertThat(snapshotWithExpiry(NOW.plus(Duration.ofHours(1))).expiresAt())
                 .isEqualTo(NOW.plus(Duration.ofHours(1)));
-        assertThat(snapshotWithExpiry(NOW.plus(Duration.ofHours(72))).expiresAt())
-                .isEqualTo(NOW.plus(Duration.ofHours(72)));
+        assertThat(snapshotWithExpiry(NOW.plus(Duration.ofHours(168))).expiresAt())
+                .isEqualTo(NOW.plus(Duration.ofHours(168)));
 
-        assertThatThrownBy(() -> snapshotWithExpiry(NOW.plus(Duration.ofHours(73))))
+        assertThatThrownBy(() -> snapshotWithExpiry(NOW.plus(Duration.ofHours(169))))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> snapshotWithExpiry(NOW.plus(Duration.ofMinutes(90))))
                 .isInstanceOf(IllegalArgumentException.class);

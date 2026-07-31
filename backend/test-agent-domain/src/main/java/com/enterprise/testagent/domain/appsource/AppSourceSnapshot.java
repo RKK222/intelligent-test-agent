@@ -58,13 +58,34 @@ public record AppSourceSnapshot(
         long retentionHours = retention.toHours();
         // snapshot 自身也校验权威时间，避免调用方绕过 AppSourceRetention 构造任意到期时间。
         if (retentionHours < 1L
-                || retentionHours > 72L
+                || retentionHours > AppSourceRetention.MAX_HOURS
                 || !retention.equals(Duration.ofHours(retentionHours))) {
-            throw new IllegalArgumentException("expiresAt must be acceptedAt plus 1 to 72 whole hours");
+            throw new IllegalArgumentException(
+                    "expiresAt must be acceptedAt plus 1 to " + AppSourceRetention.MAX_HOURS + " whole hours");
         }
         if (updatedAt.isBefore(createdAt)) {
             throw new IllegalArgumentException("updatedAt must not be before createdAt");
         }
+    }
+
+    /** 保留期调整只改变到期时间；固定提交、选区、状态与原始受理时间保持不变。 */
+    public AppSourceSnapshot withRetention(AppSourceRetention retention, Instant updatedAt) {
+        Objects.requireNonNull(retention, "retention must not be null");
+        return new AppSourceSnapshot(
+                repositoryId,
+                generation,
+                repositoryEnglishName,
+                purpose,
+                ownerUserId,
+                branch,
+                targetCommit,
+                selectedPaths,
+                indexSha256,
+                acceptedAt,
+                retention.expiresAt(acceptedAt),
+                status,
+                createdAt,
+                Objects.requireNonNull(updatedAt, "updatedAt must not be null"));
     }
 
     private static String requireText(String value, String field) {

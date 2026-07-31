@@ -42,6 +42,14 @@ public interface AppSourceMapper {
             @Param("indexSha256") String indexSha256,
             @Param("updatedAt") Instant updatedAt);
 
+    int updateActiveSnapshotRetention(
+            @Param("repositoryId") String repositoryId,
+            @Param("generation") long generation,
+            @Param("expectedExpiresAt") Instant expectedExpiresAt,
+            @Param("expiresAt") Instant expiresAt,
+            @Param("indexSha256") String indexSha256,
+            @Param("updatedAt") Instant updatedAt);
+
     ReplicaRow findReplica(
             @Param("repositoryId") String repositoryId,
             @Param("generation") long generation,
@@ -160,6 +168,17 @@ public interface AppSourceMapper {
             @Param("repositoryId") String repositoryId,
             @Param("generation") long generation,
             @Param("linuxServerId") String linuxServerId);
+
+    List<CleanupRow> findCleanupTasksForUpdate(
+            @Param("repositoryId") String repositoryId,
+            @Param("generation") long generation);
+
+    int rescheduleCleanupTasks(
+            @Param("repositoryId") String repositoryId,
+            @Param("generation") long generation,
+            @Param("expectedDeleteAt") Instant expectedDeleteAt,
+            @Param("deleteAt") Instant deleteAt,
+            @Param("updatedAt") Instant updatedAt);
 
     int makeCleanupDueNow(
             @Param("repositoryId") String repositoryId,

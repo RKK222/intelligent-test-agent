@@ -16,6 +16,8 @@ import type {
   AppSourceTreeSnapshot,
   AppSourceReplicaRetryPayload,
   AppSourceRepositorySummary,
+  AppSourceRetentionUpdatePayload,
+  AppSourceRetentionUpdateResult,
   AgentSkillHubAsset,
   AgentSkillHubAssetDetail,
   AgentSkillHubAssetType,
@@ -1658,6 +1660,15 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       routedRequest<AppSourceOperation>(
         `${appSourceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/replica-retries`,
         { method: "POST", body: JSON.stringify(payload) }
+      ),
+    updateAppSourceRetention: (
+      appId: string,
+      repositoryId: string,
+      payload: AppSourceRetentionUpdatePayload
+    ) =>
+      routedRequest<AppSourceRetentionUpdateResult>(
+        `${appSourceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/retention`,
+        { method: "PATCH", body: JSON.stringify(payload) }
       ),
     openAppSource: (appId: string, repositoryId: string, generation: number) =>
       routedRequest<AppSourceOpenResult>(

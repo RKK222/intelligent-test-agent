@@ -33,6 +33,7 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessManagement
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.user.UserRepository;
 import com.enterprise.testagent.workspace.AppSourceApplicationService;
+import com.enterprise.testagent.workspace.AppSourceIndexManager;
 import com.enterprise.testagent.workspace.AppSourceMaterializationRegistrar;
 import com.enterprise.testagent.workspace.AppSourceReplicaRetryRegistrar;
 import com.enterprise.testagent.workspace.AppSourceReplicaTaskDispatcher;
@@ -163,7 +164,7 @@ class AppSourceCrossApplicationProgressAuthorizationTest {
                 mock(OpencodeProcessManagementRepository.class), mock(OpencodeProcessHeartbeatStore.class),
                 mock(SshKeyEncryptionService.class), mock(AppSourceMaterializationRegistrar.class),
                 mock(AppSourceReplicaRetryRegistrar.class), mock(AppSourceReplicaTaskDispatcher.class),
-                mock(AppSourceWorkspaceOpener.class));
+                mock(AppSourceWorkspaceOpener.class), new AppSourceIndexManager());
     }
 
     private AppSourceOperationTicketService tickets(

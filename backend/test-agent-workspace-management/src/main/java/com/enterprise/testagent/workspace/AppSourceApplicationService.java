@@ -5,6 +5,8 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.git.GitRemoteService;
 import com.enterprise.testagent.common.git.GitWorkspaceService;
 import com.enterprise.testagent.common.git.SshKeyEncryptionService;
+import com.enterprise.testagent.domain.appsource.AppSourceCleanupStatus;
+import com.enterprise.testagent.domain.appsource.AppSourceCleanupTask;
 import com.enterprise.testagent.domain.appsource.AppSourceOperation;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationId;
 import com.enterprise.testagent.domain.appsource.AppSourceOperationStep;
@@ -18,6 +20,7 @@ import com.enterprise.testagent.domain.appsource.AppSourceRepositorySlot;
 import com.enterprise.testagent.domain.appsource.AppSourceRetention;
 import com.enterprise.testagent.domain.appsource.AppSourceSelectedPath;
 import com.enterprise.testagent.domain.appsource.AppSourceSnapshot;
+import com.enterprise.testagent.domain.appsource.AppSourceSnapshotStatus;
 import com.enterprise.testagent.domain.configuration.ApplicationDefinition;
 import com.enterprise.testagent.domain.configuration.ApplicationId;
 import com.enterprise.testagent.domain.configuration.CodeRepository;
@@ -54,6 +57,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 应用源码快照入口业务服务。
@@ -81,6 +85,7 @@ public class AppSourceApplicationService {
     private final AppSourceReplicaRetryRegistrar retryRegistrar;
     private final AppSourceReplicaTaskDispatcher dispatcher;
     private final AppSourceWorkspaceOpener workspaceOpener;
+    private final AppSourceIndexManager indexes;
     private final Clock clock;
 
     /** 生产构造器统一注入权限、Git、事务登记和异步唤醒边界。 */
@@ -95,10 +100,11 @@ public class AppSourceApplicationService {
             AppSourceMaterializationRegistrar registrar,
             AppSourceReplicaRetryRegistrar retryRegistrar,
             AppSourceReplicaTaskDispatcher dispatcher,
-            AppSourceWorkspaceOpener workspaceOpener) {
+            AppSourceWorkspaceOpener workspaceOpener,
+            AppSourceIndexManager indexes) {
         this(configuration, appSources, users, processes, heartbeats, new GitRemoteService(),
                 new GitWorkspaceService(), sshKeyEncryption, registrar, retryRegistrar, dispatcher,
-                workspaceOpener, Clock.systemUTC());
+                workspaceOpener, indexes, Clock.systemUTC());
     }
 
     /** 测试构造器允许固定远端 Git 和权威时间。 */
@@ -115,6 +121,7 @@ public class AppSourceApplicationService {
             AppSourceReplicaRetryRegistrar retryRegistrar,
             AppSourceReplicaTaskDispatcher dispatcher,
             AppSourceWorkspaceOpener workspaceOpener,
+            AppSourceIndexManager indexes,
             Clock clock) {
         this.configuration = Objects.requireNonNull(configuration);
         this.appSources = Objects.requireNonNull(appSources);
@@ -128,6 +135,7 @@ public class AppSourceApplicationService {
         this.retryRegistrar = Objects.requireNonNull(retryRegistrar);
         this.dispatcher = Objects.requireNonNull(dispatcher);
         this.workspaceOpener = Objects.requireNonNull(workspaceOpener);
+        this.indexes = Objects.requireNonNull(indexes);
         this.clock = Objects.requireNonNull(clock);
     }
 
@@ -194,6 +202,7 @@ public class AppSourceApplicationService {
                             active == null ? null : active.targetCommit(),
                             active == null ? List.of() : active.selectedPaths(),
                             active == null ? null : active.expiresAt(),
+                            active == null ? null : active.acceptedAt(),
                             occupied,
                             openable,
                             manageable,
@@ -470,6 +479,68 @@ public class AppSourceApplicationService {
                 hash, failedTargets, requireTraceId(traceId), acceptedAt));
         dispatcher.wake(operation, failedTargets);
         return operation;
+    }
+
+    /**
+     * 原子调整当前 generation 的总保留小时数，并同步数据库权威索引摘要和全部服务器清理计划。
+     *
+     * <p>保留期始终相对首次下载受理时间计算；清理任务一旦开始执行便拒绝续期，避免已删除副本被误报为可用。
+     */
+    @Transactional
+    public RetentionUpdateResult updateRetention(
+            String appId,
+            String repositoryId,
+            RetentionUpdateCommand command,
+            UserId userId,
+            boolean appAdmin) {
+        Objects.requireNonNull(command, "command must not be null");
+        CodeRepository repository = requireLinkedCodeRepository(
+                applicationId(appId), repositoryId(repositoryId), userId);
+        Instant now = clock.instant();
+        if (!appSources.lockRepositoryForAppSource(repository.repositoryId())) {
+            throw new PlatformException(ErrorCode.NOT_FOUND, "应用源码版本库不存在");
+        }
+        AppSourceRepositorySlot slot = appSources.findSlotForUpdate(repository.repositoryId())
+                .orElseThrow(() -> new PlatformException(ErrorCode.CONFLICT, "应用源码尚未下载"));
+        if (slot.pendingGeneration() != null) {
+            throw new PlatformException(ErrorCode.CONFLICT, "应用源码已有进行中的物化操作");
+        }
+        if (!Objects.equals(slot.activeGeneration(), command.expectedGeneration())) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "应用源码 generation 已变化",
+                    Map.of("actualGeneration", slot.activeGeneration() == null ? 0L : slot.activeGeneration()));
+        }
+        AppSourceSnapshot active = appSources.findSnapshot(repository.repositoryId(), command.expectedGeneration())
+                .filter(snapshot -> snapshot.status() == AppSourceSnapshotStatus.ACTIVE)
+                .filter(snapshot -> snapshot.expiresAt().isAfter(now))
+                .orElseThrow(() -> new PlatformException(ErrorCode.CONFLICT, "应用源码快照不可调整或已到期"));
+        if (!Objects.equals(active.ownerUserId(), userId) && !appAdmin) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "应用源码仅允许下载者或应用管理员调整保留期");
+        }
+
+        AppSourceRetention retention = new AppSourceRetention(command.retentionHours());
+        AppSourceSnapshot renewed = active.withRetention(retention, now);
+        if (!renewed.expiresAt().isAfter(now)) {
+            throw new PlatformException(ErrorCode.CONFLICT, "调整后的应用源码到期时间必须晚于当前时间");
+        }
+        List<AppSourceCleanupTask> cleanupTasks = appSources.findCleanupTasksForUpdate(
+                repository.repositoryId(), active.generation());
+        if (cleanupTasks.isEmpty()
+                || cleanupTasks.stream().anyMatch(task -> task.status() != AppSourceCleanupStatus.PENDING
+                        && task.status() != AppSourceCleanupStatus.RETRY_WAIT)) {
+            throw new PlatformException(ErrorCode.CONFLICT, "应用源码清理已开始，不能再调整保留期");
+        }
+        String indexSha256 = indexes.canonicalSha256(renewed);
+        boolean snapshotUpdated = appSources.updateActiveSnapshotRetention(
+                repository.repositoryId(), active.generation(), active.expiresAt(), renewed.expiresAt(), indexSha256, now);
+        int cleanupUpdated = appSources.rescheduleCleanupTasks(
+                repository.repositoryId(), active.generation(), active.expiresAt(), renewed.expiresAt(), now);
+        if (!snapshotUpdated || cleanupUpdated != cleanupTasks.size()) {
+            throw new PlatformException(ErrorCode.CONFLICT, "应用源码保留期已被并发修改，请刷新后重试");
+        }
+        return new RetentionUpdateResult(
+                repository.repositoryId().value(), active.generation(), retention.hours(), renewed.expiresAt());
     }
 
     private boolean matchesRetryIdentity(
@@ -896,6 +967,23 @@ public class AppSourceApplicationService {
         }
     }
 
+    /** 续期采用 generation 乐观校验，retentionHours 表示自首次下载受理起的总保留时长。 */
+    public record RetentionUpdateCommand(long expectedGeneration, int retentionHours) {
+        public RetentionUpdateCommand {
+            if (expectedGeneration < 1L) {
+                throw new IllegalArgumentException("expectedGeneration must be positive");
+            }
+        }
+    }
+
+    /** 保留期调整结果只返回前端刷新当前上下文所需的稳定字段。 */
+    public record RetentionUpdateResult(
+            String repositoryId,
+            long generation,
+            int retentionHours,
+            Instant expiresAt) {
+    }
+
     /** 打开结果只暴露逻辑身份，不把物理根路径返回给 API。 */
     public record OpenResult(
             String appId,
@@ -932,6 +1020,7 @@ public class AppSourceApplicationService {
             String targetCommit,
             List<AppSourceSelectedPath> selectedPaths,
             Instant expiresAt,
+            Instant acceptedAt,
             boolean occupied,
             boolean openable,
             boolean manageable,

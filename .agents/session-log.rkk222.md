@@ -4128,3 +4128,25 @@
 ### Result
 
 - 未下载应用代码库现在灰色可点击并直达自身管理页面；已下载代码库直开和测试工作空间交互保持不变。本次未变更 HTTP/WebSocket/RunEvent、后端、数据库/Flyway、关系型 SQL、安全策略、环境配置、generated SDK 或 OpenCode 源码。
+
+## 2026-07-31 - 应用源码保留期上限调整为一周并支持前端直接修改
+
+### Why
+
+- 应用源码快照原来只允许保留 1–72 小时，用户需要最高一周，并希望既能临时用 SQL 调整已有 generation，也能在源码管理前端直接设置。
+
+### What
+
+- 领域与数据库最终上限改为 168 小时、默认仍为 48 小时；新增保留期 PATCH API，按原始 `acceptedAt` 计算总保留时长，并以 expected generation、owner/应用管理员权限和未过期 ACTIVE 状态做门禁。
+- 续期事务锁定代码库、slot 和同 generation cleanup 行，CAS 同步更新 snapshot `expires_at/index_sha256` 与全部 `delete_at/next_retry_at`；前端第 1 步显示当前总保留小时数并直接调整，物化页也使用服务端 `maxRetentionHours`。
+- 已在本地 test 库执行的 `V20260731115520` 365 天 migration 恢复并冻结原 checksum `1426353675`，新增 `V20260731123600` 把最终约束收紧到一周，未执行 `repair` 或修改历史表；同步 HTTP、事件、数据库、领域、测试和模块文档。
+
+### How
+
+- JDK 25 后端 20 模块全量 `mvn test` 为 BUILD SUCCESS；新增两段 migration 后，H2、PostgreSQL 16、已部署基线兼容与重试恢复定向 35 项通过。前端类型检查和生产 build 通过，保留期/backend-api 定向 21 项通过。
+- 前端全量独占重跑 1738 passed / 1 skipped / 1 个任务外 Figma 5 秒超时，失败用例独立重跑通过；首次高负载并发全量运行产生的 16 个分散超时未用于功能结论。
+- 参数化 PostgreSQL 临时 SQL 在 PostgreSQL 16 实际执行，验证两台 cleanup 同步及 canonical index SHA 与 JSON SHA-256 完全一致。test profile 三服务重启成功，health/readiness 为 `UP`、前端与登录 CORS 正常、manager 最终 `HEALTHY`；真实 history 为 `20260731115520|1426353675|true`、`20260731123600|104581879|true`。
+
+### Result
+
+- 新物化和当前未过期 generation 都可在 1–168 整小时内设置总保留期，前端、API、数据库约束、索引摘要和清理调度保持一致。新增 API 和 Flyway/MyBatis SQL；未修改 RunEvent wire、安全策略、环境配置、generated SDK 或 OpenCode 源码。

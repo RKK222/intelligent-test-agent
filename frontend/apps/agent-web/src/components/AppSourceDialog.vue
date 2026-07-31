@@ -26,6 +26,8 @@ const props = defineProps<{
   treeError?: string | null;
   operation?: AppSourceOperation | null;
   submitting?: boolean;
+  retentionUpdating?: boolean;
+  retentionError?: string | null;
   materializationError?: string | null;
   progressError?: string | null;
 }>();
@@ -35,6 +37,7 @@ const emit = defineEmits<{
   "select-repository": [repository: AppSourceRepositorySummary];
   "load-branches": [repository: AppSourceRepositorySummary];
   "load-tree": [branch: string, path: string];
+  "update-retention": [retentionHours: number];
   materialize: [payload: MaterializationRequest];
   retry: [operation: AppSourceOperation];
 }>();
@@ -45,11 +48,27 @@ const selectedPathKeys = ref<string[]>([]);
 const expandedPathKeys = ref<string[]>([]);
 const purpose = ref<AppSourcePurpose>("TEAM");
 const retentionHours = ref(48);
+const retentionUpdateHours = ref(48);
 const confirmReplace = ref(false);
 // 弹框本身使用 3700；虚拟分支下拉会 Teleport 到 body，必须显式高于弹框遮罩层。
 const branchPopperStyle = { zIndex: 3701 };
 
 const currentOperation = computed(() => props.operation ?? props.repository?.latestOperation ?? null);
+const maxRetentionHours = computed(() => props.repository?.maxRetentionHours ?? 72);
+const currentRetentionHours = computed(() => repositoryRetentionHours(props.repository));
+const currentRepositoryUnexpired = computed(() => {
+  const expiresAt = props.repository?.expiresAt ? Date.parse(props.repository.expiresAt) : Number.NaN;
+  return Number.isFinite(expiresAt) && expiresAt > Date.now();
+});
+const canUpdateCurrentRetention = computed(() => Boolean(
+  props.repository?.generation
+  && props.repository.acceptedAt
+  && props.repository.expiresAt
+  && currentRepositoryUnexpired.value
+  && props.repository.occupied
+  && props.repository.manageable
+  && !operationRunning(currentOperation.value)
+));
 const needsReplaceConfirmation = computed(() => Boolean(props.repository?.generation));
 const teamPurposeLocked = computed(() => Boolean(
   props.repository?.generation && props.repository.purpose === "TEAM"
@@ -105,6 +124,7 @@ watch(
       expandedPathKeys.value = [];
       purpose.value = "TEAM";
       retentionHours.value = 48;
+      retentionUpdateHours.value = 48;
       confirmReplace.value = false;
       return;
     }
@@ -113,6 +133,7 @@ watch(
     expandedPathKeys.value = [];
     purpose.value = props.repository.purpose ?? "TEAM";
     retentionHours.value = 48;
+    retentionUpdateHours.value = currentRetentionHours.value ?? 48;
     confirmReplace.value = false;
     step.value = operationRunning(currentOperation.value) ? 4 : 1;
   },
@@ -226,7 +247,31 @@ function pathChecked(path: string) {
 
 function clampRetention() {
   const numeric = Number(retentionHours.value);
-  retentionHours.value = Number.isFinite(numeric) ? Math.min(72, Math.max(1, Math.round(numeric))) : 48;
+  retentionHours.value = Number.isFinite(numeric)
+    ? Math.min(maxRetentionHours.value, Math.max(1, Math.round(numeric)))
+    : 48;
+}
+
+function repositoryRetentionHours(repository?: AppSourceRepositorySummary | null) {
+  if (!repository?.acceptedAt || !repository.expiresAt) return null;
+  const acceptedAt = Date.parse(repository.acceptedAt);
+  const expiresAt = Date.parse(repository.expiresAt);
+  if (!Number.isFinite(acceptedAt) || !Number.isFinite(expiresAt) || expiresAt <= acceptedAt) return null;
+  return Math.round((expiresAt - acceptedAt) / 3_600_000);
+}
+
+function clampRetentionUpdate() {
+  const numeric = Number(retentionUpdateHours.value);
+  retentionUpdateHours.value = Number.isFinite(numeric)
+    ? Math.min(maxRetentionHours.value, Math.max(1, Math.round(numeric)))
+    : currentRetentionHours.value ?? 48;
+}
+
+function submitRetentionUpdate() {
+  if (!canUpdateCurrentRetention.value || props.retentionUpdating) return;
+  clampRetentionUpdate();
+  if (retentionUpdateHours.value === currentRetentionHours.value) return;
+  emit("update-retention", retentionUpdateHours.value);
 }
 
 function submitMaterialization() {
@@ -345,6 +390,28 @@ function repositoryOwnerLabel(repository: AppSourceRepositorySummary) {
                 aria-label="查看上次源码进度"
                 @click="viewHistory"
               >查看上次进度</button>
+              <section v-if="canUpdateCurrentRetention" class="app-source-retention-update">
+                <div>
+                  <label for="app-source-retention-update-hours">总保留小时数（自首次下载受理起）</label>
+                  <small>可设置 1–{{ maxRetentionHours }} 小时；调整后仍须晚于当前时间。</small>
+                </div>
+                <input
+                  id="app-source-retention-update-hours"
+                  v-model.number="retentionUpdateHours"
+                  aria-label="当前源码总保留小时数"
+                  type="number"
+                  min="1"
+                  :max="maxRetentionHours"
+                  @change="clampRetentionUpdate"
+                />
+                <button
+                  type="button"
+                  aria-label="更新当前源码保留期"
+                  :disabled="retentionUpdating || retentionUpdateHours === currentRetentionHours"
+                  @click="submitRetentionUpdate"
+                >{{ retentionUpdating ? "更新中…" : "更新保留期" }}</button>
+              </section>
+              <div v-if="retentionError" class="app-source-step-error"><AlertTriangle />{{ retentionError }}</div>
             </div>
           </section>
 
@@ -428,8 +495,8 @@ function repositoryOwnerLabel(repository: AppSourceRepositorySummary) {
               <p>{{ teamPurposeLocked ? "已有团队源码不能降级为个人源码；可继续更新团队配置。" : "仅当前用户占用，列表会展示姓名与 UCID。" }}</p>
             </div>
             <label class="app-source-field">
-              <span>保留小时数（1–72）</span>
-              <input v-model.number="retentionHours" aria-label="保留小时数" type="number" min="1" max="72" @change="clampRetention" />
+              <span>保留小时数（1–{{ maxRetentionHours }}）</span>
+              <input v-model.number="retentionHours" aria-label="保留小时数" type="number" min="1" :max="maxRetentionHours" @change="clampRetention" />
             </label>
             <label v-if="needsReplaceConfirmation" class="app-source-replace-confirm">
               <input v-model="confirmReplace" type="checkbox" aria-label="确认覆盖当前源码" />
@@ -504,7 +571,7 @@ function repositoryOwnerLabel(repository: AppSourceRepositorySummary) {
             v-if="step === 1"
             type="button"
             aria-label="下一步：选择分支与目录"
-            :disabled="!repository"
+            :disabled="!repository || retentionUpdating"
             @click="moveNext"
           >下一步</button>
           <button
@@ -584,6 +651,13 @@ function repositoryOwnerLabel(repository: AppSourceRepositorySummary) {
 .app-source-status-card dt { color: #71717a; font-size: 11px; }
 .app-source-status-card dd { margin: 3px 0 0; font-family: var(--ta-font-mono, monospace); font-size: 12px; }
 .app-source-owner { color: #7c3aed; font-size: 11px; }
+.app-source-retention-update { display: grid; grid-template-columns: minmax(0, 1fr) 120px auto; align-items: end; gap: 8px; margin-top: 12px; border-top: 1px solid #e4e4e7; padding-top: 12px; }
+.app-source-retention-update > div { display: grid; gap: 3px; }
+.app-source-retention-update label { color: #3f3f46; font-size: 11px; font-weight: 600; }
+.app-source-retention-update small { color: #71717a; font-size: 10px; }
+.app-source-retention-update input { height: 30px; min-width: 0; border: 1px solid #d4d4d8; border-radius: 5px; padding: 0 8px; }
+.app-source-retention-update button { height: 30px; border: 0; border-radius: 5px; background: #4f46e5; padding: 0 11px; color: #fff; font-size: 11px; cursor: pointer; }
+.app-source-retention-update button:disabled { cursor: not-allowed; opacity: 0.45; }
 .app-source-field { display: grid; gap: 6px; margin-bottom: 12px; color: #52525b; font-size: 11px; }
 .app-source-field > select, .app-source-field > input { height: 32px; border: 1px solid #d4d4d8; border-radius: 5px; background: #fff; padding: 0 9px; color: #27272a; font-size: 12px; }
 .app-source-branch-select { width: 100%; }

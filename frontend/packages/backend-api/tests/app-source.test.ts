@@ -85,6 +85,10 @@ describe("app-source backend client", () => {
       operationId: "aso_retry",
       expectedGeneration: 4
     });
+    await client.updateAppSourceRetention("app/demo", "repo/source", {
+      expectedGeneration: 4,
+      retentionHours: 120
+    });
     await client.openAppSource("app/demo", "repo/source", 4);
     await client.getRecentAppSource();
     await client.clearRecentAppSource();
@@ -123,6 +127,11 @@ describe("app-source backend client", () => {
         "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/app-source-repositories/repo%2Fsource/replica-retries",
         "POST",
         JSON.stringify({ operationId: "aso_retry", expectedGeneration: 4 })
+      ],
+      [
+        "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/app-source-repositories/repo%2Fsource/retention",
+        "PATCH",
+        JSON.stringify({ expectedGeneration: 4, retentionHours: 120 })
       ],
       [
         "http://api/api/internal/platform/workspace-management/applications/app%2Fdemo/app-source-repositories/repo%2Fsource/open",

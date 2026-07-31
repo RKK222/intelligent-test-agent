@@ -131,6 +131,21 @@ public class MyBatisAppSourceRepository implements AppSourceRepository {
     }
 
     @Override
+    public boolean updateActiveSnapshotRetention(
+            CodeRepositoryId repositoryId,
+            long generation,
+            Instant expectedExpiresAt,
+            Instant expiresAt,
+            String indexSha256,
+            Instant updatedAt) {
+        if (indexSha256 == null || !SHA256.matcher(indexSha256).matches()) {
+            throw new IllegalArgumentException("indexSha256 must be a SHA-256 hex value");
+        }
+        return mapper.updateActiveSnapshotRetention(
+                repositoryId.value(), generation, expectedExpiresAt, expiresAt, indexSha256, updatedAt) == 1;
+    }
+
+    @Override
     public Optional<AppSourceReplica> findReplica(
             CodeRepositoryId repositoryId, long generation, LinuxServerId linuxServerId) {
         return Optional.ofNullable(mapper.findReplica(repositoryId.value(), generation, linuxServerId.value()))
@@ -360,6 +375,25 @@ public class MyBatisAppSourceRepository implements AppSourceRepository {
         return mapper.findCleanupTasks(repositoryId.value(), generation, linuxServerId.value()).stream()
                 .map(this::toCleanup)
                 .toList();
+    }
+
+    @Override
+    public List<AppSourceCleanupTask> findCleanupTasksForUpdate(
+            CodeRepositoryId repositoryId, long generation) {
+        return mapper.findCleanupTasksForUpdate(repositoryId.value(), generation).stream()
+                .map(this::toCleanup)
+                .toList();
+    }
+
+    @Override
+    public int rescheduleCleanupTasks(
+            CodeRepositoryId repositoryId,
+            long generation,
+            Instant expectedDeleteAt,
+            Instant deleteAt,
+            Instant updatedAt) {
+        return mapper.rescheduleCleanupTasks(
+                repositoryId.value(), generation, expectedDeleteAt, deleteAt, updatedAt);
     }
 
     @Override

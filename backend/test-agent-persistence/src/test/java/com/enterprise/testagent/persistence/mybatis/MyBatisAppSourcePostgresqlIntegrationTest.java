@@ -233,11 +233,11 @@ class MyBatisAppSourcePostgresqlIntegrationTest {
                 .param("repositoryId", REPOSITORY_ID.value()).update()).isOne();
         assertThat(jdbc.sql("update app_source_snapshots set expires_at = :expiresAt "
                         + "where repository_id = :repositoryId and generation = 1")
-                .param("expiresAt", Timestamp.from(NOW.plusSeconds(72L * 3600L)))
+                .param("expiresAt", Timestamp.from(NOW.plusSeconds(168L * 3600L)))
                 .param("repositoryId", REPOSITORY_ID.value()).update()).isOne();
         assertThatThrownBy(() -> jdbc.sql("update app_source_snapshots set expires_at = :expiresAt "
                         + "where repository_id = :repositoryId and generation = 1")
-                .param("expiresAt", Timestamp.from(NOW.plusSeconds(73L * 3600L)))
+                .param("expiresAt", Timestamp.from(NOW.plusSeconds(169L * 3600L)))
                 .param("repositoryId", REPOSITORY_ID.value()).update())
                 .isInstanceOf(RuntimeException.class);
         assertThatThrownBy(() -> jdbc.sql("update app_source_snapshots set expires_at = :expiresAt "

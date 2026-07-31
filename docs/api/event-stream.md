@@ -764,6 +764,8 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 
 应用源码物化与副本重试使用独立 WebSocket，不属于 RunEvent、SSE 或 opencode raw event，也不向 RunEvent wire name 表追加类型。
 
+应用源码保留期调整是同步 HTTP PATCH，不创建 operation，也不发送进度 WebSocket 事件；成功后的列表与当前工作区上下文直接使用响应中的新 `expiresAt`。
+
 - 创建连接前调用 `POST /api/internal/platform/workspace-management/app-source-operations/{operationId}/ticket`。签票请求必须携带浏览器 `Origin`，签票前必须按当前用户重新读取持久化操作并鉴权。TEAM 按 repository 任一当前启用关联应用的有效成员授权；PERSONAL 只允许 owner，或仍满足该成员条件的 `APP_ADMIN/SUPER_ADMIN`。签票、ticket 消费/首帧和后续轮询都重新执行该判断，解除关联、禁用应用或撤销成员后已有 ticket/连接立即拒绝。
 - `RETRY_REPLICAS` 的终态以本 operation 冻结目标的 SERVER steps 为权威；任一服务器步骤仍为 `PENDING/RUNNING` 时，数据库 snapshot 和后续进度帧必须继续显示非终态，离线目标不会因旧 replica 已是 `FAILED` 而被补偿扫描提前终结。本轮没有修改消息 envelope、event name、关闭码或重连协议。
 - ticket 短期过期、一次性消费，绑定 `operationId/userId/APP_ADMIN` 事实、签发 `backendProcessId`、canonical Origin 和 traceId；upgrade 必须同时命中 Origin 白名单、签票时的精确 Origin 与签发 JVM。Origin 只接受无 userinfo/path/query/fragment 的 `http(s)://host[:port]`，scheme/host 小写并折叠默认端口。仅当 CORS 配置恰好为单个 `*` 时可接受任意满足上述格式的 canonical Origin，ticket 仍绑定实际来源；生产必须使用显式来源白名单。任一校验失败只返回通用拒绝结果，不泄露操作是否存在；错误 Origin 不会烧毁正确来源随后要消费的票。未消费过期票会主动回收，有效票达到有界容量时新签发显式返回限流错误，不静默驱逐。

@@ -666,6 +666,8 @@ const appSourceTreeLoading = ref(false);
 const appSourceTreeError = ref<string | null>(null);
 const appSourceOperation = ref<AppSourceOperation | null>(null);
 const appSourceSubmitting = ref(false);
+const appSourceRetentionUpdating = ref(false);
+const appSourceRetentionError = ref<string | null>(null);
 const appSourceMaterializationError = ref<string | null>(null);
 const appSourceProgressError = ref<string | null>(null);
 let appSourceProgressConnection: AppSourceProgressConnection | null = null;
@@ -3947,11 +3949,13 @@ function teardownAppSourceInteractions(options: { preserveWorkspaceSelectionInte
   appSourceBranchesError.value = null;
   appSourceTreeError.value = null;
   appSourceMaterializationError.value = null;
+  appSourceRetentionError.value = null;
   appSourceProgressError.value = null;
   appSourceRepositories.value = [];
   selectedAppSourceRepository.value = null;
   appSourceOperation.value = null;
   appSourceSubmitting.value = false;
+  appSourceRetentionUpdating.value = false;
   appSourceRecoveryInFlight = null;
   appSourceRepositoryListAuthorityToken += 1;
   if (!options.preserveWorkspaceSelectionIntent) invalidateAppSourceIntentAuthority();
@@ -4388,8 +4392,10 @@ async function openAppSourceDownloadDialog(repository?: AppSourceRepositorySumma
   appSourceBranchesError.value = null;
   appSourceTreeError.value = null;
   appSourceMaterializationError.value = null;
+  appSourceRetentionError.value = null;
   appSourceOperation.value = null;
   appSourceSubmitting.value = false;
+  appSourceRetentionUpdating.value = false;
   appSourceProgressError.value = null;
   // 菜单点击某个未下载版本库时直接选中它；顶部“管理”入口仍保持无预选的全量管理页。
   if (repository) selectAppSourceRepository(repository);
@@ -4407,9 +4413,11 @@ function selectAppSourceRepository(repository: AppSourceRepositorySummary) {
   appSourceBranchesError.value = null;
   appSourceTreeError.value = null;
   appSourceMaterializationError.value = null;
+  appSourceRetentionError.value = null;
   appSourceProgressError.value = null;
   appSourceOperation.value = current.latestOperation ?? null;
   appSourceSubmitting.value = false;
+  appSourceRetentionUpdating.value = false;
   void loadAppSourceBranches(current);
   if (current.latestOperation && ["PENDING", "RUNNING"].includes(current.latestOperation.status)) {
     void observeAppSourceOperation(current.latestOperation);
@@ -4426,8 +4434,54 @@ function closeAppSourceDialog() {
   appSourceBranchesError.value = null;
   appSourceTreeError.value = null;
   appSourceMaterializationError.value = null;
+  appSourceRetentionError.value = null;
   appSourceOperation.value = null;
   appSourceSubmitting.value = false;
+  appSourceRetentionUpdating.value = false;
+}
+
+async function updateAppSourceRetention(retentionHours: number) {
+  const appId = selectedAppId.value;
+  const repository = selectedAppSourceRepository.value;
+  const generation = repository?.generation;
+  if (!appId || !repository || !generation || appSourceRetentionUpdating.value) return;
+  const dialogAuthority = appSourceDialogAuthorityToken;
+  appSourceRetentionUpdating.value = true;
+  appSourceRetentionError.value = null;
+  try {
+    const result = await api.updateAppSourceRetention(appId, repository.repositoryId, {
+      expectedGeneration: generation,
+      retentionHours
+    });
+    if (
+      dialogAuthority !== appSourceDialogAuthorityToken
+      || selectedAppId.value !== appId
+      || selectedAppSourceRepository.value?.repositoryId !== repository.repositoryId
+      || result.repositoryId !== repository.repositoryId
+      || result.generation !== generation
+    ) return;
+    const updatedRepository = { ...repository, expiresAt: result.expiresAt };
+    appSourceRepositories.value = appSourceRepositories.value.map((item) =>
+      item.repositoryId === repository.repositoryId ? updatedRepository : item);
+    selectedAppSourceRepository.value = updatedRepository;
+    if (
+      appSourceContext.value?.appId === appId
+      && appSourceContext.value.repositoryId === repository.repositoryId
+      && appSourceContext.value.generation === generation
+    ) {
+      appSourceContext.value = { ...appSourceContext.value, expiresAt: result.expiresAt };
+    }
+    feedback.value = {
+      kind: "info",
+      title: "源码保留期已更新",
+      description: `generation ${generation} 将于 ${result.expiresAt} 到期`
+    };
+  } catch (error) {
+    if (dialogAuthority !== appSourceDialogAuthorityToken) return;
+    appSourceRetentionError.value = errorFeedback("更新源码保留期失败", error).description ?? "请刷新后重试";
+  } finally {
+    if (dialogAuthority === appSourceDialogAuthorityToken) appSourceRetentionUpdating.value = false;
+  }
 }
 
 async function materializeAppSource(payload: Omit<AppSourceMaterializationPayload, "operationId">) {
@@ -9591,12 +9645,15 @@ async function handleLogout() {
     :tree-error="appSourceTreeError"
     :operation="appSourceOperation"
     :submitting="appSourceSubmitting"
+    :retention-updating="appSourceRetentionUpdating"
+    :retention-error="appSourceRetentionError"
     :materialization-error="appSourceMaterializationError"
     :progress-error="appSourceProgressError"
     @close="closeAppSourceDialog"
     @select-repository="selectAppSourceRepository"
     @load-branches="loadAppSourceBranches"
     @load-tree="loadAppSourceTree"
+    @update-retention="updateAppSourceRetention"
     @materialize="materializeAppSource"
     @retry="retryAppSourceOperation"
   />
