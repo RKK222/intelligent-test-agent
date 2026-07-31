@@ -6,7 +6,8 @@ commit `5b4cef6`。当前仓库承载平台认证、模型网关、前端入口�
 LobeHub fork 源码不放入本仓库。本地开发默认从同级独立仓库 `../lobehub-platform` 读取，当前锁定 fork commit
 为 `ccd0400fbe934ba929de637a315d25e969977c76`；版本事实源为
 `deploy/internal/lobehub/version.env`。企业 Git 管理员仍须把该独立仓库推送到受控内部远端，本机 checkout
-不能替代内部源码托管。
+不能替代内部源码托管。平台提供自包含、最小 ref 的 Git Bundle 转运工具，企业导入流程见
+`docs/deployment/lobehub-fork-transfer.md`。
 
 当前 fork 已实现平台票据消费/HMAC 兑换、24 小时 Session、用户和部门 Workspace JIT、委托加密、企业模型
 适配、后台模型身份继承、离线请求门禁、BYOK/本地身份源关闭、默认私有对象和全部设备执行失败关闭。平台仓库
@@ -172,6 +173,19 @@ Linux 客户端如需调用模型，必须通过 loopback broker 到 LobeHub 服
 - LobeHub 工作区不挂载或复用平台/OpenCode 工作区，不新增平台文件 WebSocket 集成。
 
 ## fork 合并和制品门禁
+
+独立 fork 的企业转运必须从干净 `main` 和锁定 annotated tag 生成自包含 Git Bundle；Bundle 只发布
+`refs/heads/main` 与当前内部版本 tag，不把上游其它 tag 作为可见 ref 带入。生成端必须执行 `git bundle
+verify` 和独立 clone，并用包内、包外两层 SHA-256 绑定 Bundle、ref 清单和导入说明。企业 Git URL 与凭据由
+现场管理员提供，不能写入转运包；生成前还必须扫描 fork 相对上游新增的全部可达 Git 对象及 annotated tag，
+命中高置信私钥/token 格式时失败关闭。该扫描不替代企业 Git 持续 secret scanning。推送后必须以
+`git ls-remote` 复核 main 和 tag 解引用 commit。转运包已生成
+但尚未完成企业远端推送时，只能记为“fork 转运介质已就绪”，不能记为“企业内部 fork 托管已完成”。
+
+已有 server-only 运行介质只能在完整清单校验通过后，由无网络定稿程序加入外部原生客户端。定稿程序不得修改原目录，
+不得自行生成签名/审批证据，也不得把缺失、`Pending`、占位身份或摘要不一致的客户端状态改成通过；最终
+`package-release.sh` 和现场安装器仍须重复共享客户端真实性门禁。即使显式 `--force`，定稿输出也不得等于或
+包含任何客户端、证据、版本锁、部署脚本、平台仓库或 server-only 输入。
 
 独立 fork 至少需要自动化覆盖：票据过期/重放、固定回跳、客户端 request/poll/code/session 摘要存储与
 一次性消费、PKCE 错配、验证码显示、OIDC 路径拒绝、JIT 并发单 Workspace、同名部门合并、调动后

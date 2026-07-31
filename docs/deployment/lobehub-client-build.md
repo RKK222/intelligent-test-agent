@@ -113,8 +113,29 @@ linux-client-acceptance-record.txt
 
 ## 5. Mac 汇集与完整介质准入
 
-通过受控通道把 Windows 两个文件、Linux 四个文件回收到外网 Mac；先按交接单核对来源和传输摘要，再执行完整
-构件构建。`build-lobehub-artifacts.sh` 的客户端参数必须全部提供：
+通过受控通道把 Windows 两个文件、Linux 四个文件回收到外网 Mac；先按交接单核对来源和传输摘要。若已经用
+`build-lobehub-artifacts.sh --server-only` 生成并完成真实运行时冒烟，可在不访问网络、不调用 Docker、也不
+重建约 2.2 GB 镜像 tar 的前提下定稿新目录：
+
+```bash
+deploy/internal/finalize-lobehub-artifacts.sh \
+  --server-artifact-dir /absolute/path/to/lobehub-server-only \
+  --output-dir /absolute/path/to/lobehub-release-artifacts \
+  --windows-client /path/to/lobehub-windows-x64.exe \
+  --windows-signature-evidence /path/to/windows-authenticode-verification.txt \
+  --linux-client /path/to/lobehub-linux-x86_64.tar.gz \
+  --linux-approval-evidence /path/to/linux-client-verification.txt \
+  --linux-acceptance-record /path/to/linux-client-acceptance-record.txt
+```
+
+定稿脚本先核对 server-only 的完整 `SHA256SUMS`、版本锁、三张镜像 tag/ID、PostgreSQL 17 和执行禁用状态，
+然后用共享客户端契约验证正式签名/审批文件；输入目录保持不变，输出目录重新生成精确校验和。早期
+`v2.2.11-platform.3` server-only 介质可以缺少 `LOBEHUB_LINUX_CLIENT_APPROVED`，但字段存在时只能为
+`false`；只有全部客户端门禁通过后，输出才会记录 Windows/Linux 为 `true`。磁盘必须为新完整目录预留至少
+server-only 目录大小及 ZIP 打包余量。
+
+没有可复用的 server-only 目录时，才执行一次完整构件构建；`build-lobehub-artifacts.sh` 的客户端参数必须
+全部提供：
 
 ```bash
 deploy/internal/build-lobehub-artifacts.sh \
@@ -129,4 +150,9 @@ deploy/internal/build-lobehub-artifacts.sh \
 汇集脚本、`package-release.sh` 和现场 `install-lobehub-offline.sh` 会分别重复相同门禁：文件必须为非空普通文件，
 Windows 必须 Authenticode Valid，Linux 必须 Approved，签名/审批身份不能是占位值，两端客户端、Linux 验收记录、
 内部版本、fork commit、架构和执行禁用状态必须全部匹配。任一检查失败时只能保留服务端阶段介质，不能宣称完整
-企业介质完成。
+企业介质完成。定稿成功后仍必须执行：
+
+```bash
+TEST_AGENT_LOBEHUB_ARTIFACT_DIR=/absolute/path/to/lobehub-release-artifacts \
+  deploy/internal/package-release.sh --lobehub-only
+```

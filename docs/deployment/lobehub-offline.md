@@ -2,7 +2,8 @@
 
 本文描述 LobeHub `v2.2.11-platform.3` 的离线制品、安装、启动、备份和回滚。架构与 fork 必须实现的行为见
 `docs/architecture/lobehub-integration.md`。本仓库不包含独立 fork 源码，只有通过制品门禁的外部构建结果
-才能进入全量包或 LobeHub-only 包。
+才能进入全量包或 LobeHub-only 包。独立 fork 的企业 Git 转运和导入见
+`docs/deployment/lobehub-fork-transfer.md`，不能用运行 ZIP 代替源码托管。
 
 ## 版本矩阵
 
@@ -78,6 +79,25 @@ tools/lobehub-dev-services.sh stop
 固定访问 `http://chat.internal`，不会读取本地环境变量或 `127.0.0.1:3210`；需要联调安装包时，开发机必须由
 运维显式把 `chat.internal` 解析到受控本地反向代理，并由该代理转发到 `127.0.0.1:3210`。启动脚本不修改
 `/etc/hosts`、不提权占用 80 端口，也不削弱客户端固定域名策略。
+
+## 独立 fork 企业转运
+
+外网 Mac 从干净、锁定的同级 fork 生成自包含 Git Bundle，不需要把完整开发工作目录或 GitHub credential
+转入内网：
+
+```bash
+deploy/internal/build-lobehub-fork-transfer.sh \
+  --fork-dir /Users/huang/workspace/lobehub-platform \
+  --output-dir deploy/internal/dist-lobehub-fork-transfer
+```
+
+工具只发布 `refs/heads/main` 和 `refs/tags/v2.2.11-platform.3`，扫描 fork 增量全部可达对象中的高置信
+私钥/token 格式，并执行 Bundle verify、独立 clone、包内
+`SHA256SUMS` 和外层 ZIP SHA-256。当前真实转运件已复制到外网 Mac
+`~/Desktop/mimoagent/0709/lobehub-fork-transfer`，外层 SHA-256 为
+`a494d5a94b7db39fa584c2591b72fb01a1fa3bb61f426fbf59b93a2a4c2d0461`。这只表示可转运介质已就绪；企业 Git
+管理员尚未提供内部远端并完成 push/`ls-remote` 验证，因此不能记为内部源码托管完成。完整导入、权限和失败
+处理见 [LobeHub 独立 fork 企业 Git 转运与导入](lobehub-fork-transfer.md)。
 
 ## 外部 fork 制品契约
 
@@ -166,6 +186,27 @@ deploy/internal/build-lobehub-artifacts.sh \
 `--server-only` 生成真实服务端阶段介质用于部署演练，但该目录会被下一步完整
 打包门禁明确拒绝。不得伪造客户端或 Authenticode 证据。
 
+已完成服务端构建和运行态冒烟后，不需要在正式客户端返回时重拉镜像或重建三份约 2.2 GB 的镜像 tar。使用
+无网络定稿工具创建新目录；它先验证原 server-only 清单、锁定版本、镜像身份和执行禁用状态，再调用与打包、
+安装相同的客户端门禁：
+
+```bash
+deploy/internal/finalize-lobehub-artifacts.sh \
+  --server-artifact-dir /absolute/path/to/lobehub-server-only \
+  --output-dir /absolute/path/to/lobehub-release-artifacts \
+  --windows-client /absolute/path/to/lobehub-windows-x64.exe \
+  --windows-signature-evidence /absolute/path/to/windows-authenticode-verification.txt \
+  --linux-client /absolute/path/to/lobehub-linux-x86_64.tar.gz \
+  --linux-approval-evidence /absolute/path/to/linux-client-verification.txt \
+  --linux-acceptance-record /absolute/path/to/linux-client-acceptance-record.txt
+```
+
+源目录不会被修改；输出已存在时默认拒绝，只有明确 `--force` 才替换该精确目录。输出不得等于或包含任一
+客户端、签名/审批证据、版本锁、部署脚本、平台仓库或 server-only 源目录。定稿需要为新目录预留至少
+server-only 大小和后续 ZIP 的磁盘空间。摘要篡改、符号链接或其它特殊文件、版本不符、原目录已声称客户端通过、Windows
+非 `Valid`、Linux 非 `Approved`、占位审批人或任一摘要不匹配都会失败，且不会生成输出目录。定稿成功后仍须
+用下一步 `package-release.sh` 完成独立的最终准入。
+
 服务端阶段构建完成且三张镜像仍在本机时，执行真实运行时冒烟。脚本拒绝覆盖同名容器，临时创建带
 key/channel/command ACL 的 Redis，并实际完成 PostgreSQL 17 启动、LobeHub migration、私有 RustFS bucket、
 app readiness、离线工作流阻断、内部 scheduler 鉴权和容器密钥隔离检查。随后它向数据库和对象存储写入
@@ -198,10 +239,12 @@ TEST_AGENT_LOBEHUB_ARTIFACT_DIR=/absolute/path/to/lobehub-release-artifacts \
 再 `scp` 到目标服务器 `/data/0709`；不要在中转机创建 `/data/0709`，也不要描述为从外网 Mac 直接 scp。
 不得在现场联网补拉镜像、npm 包、Marketplace、Connector 或客户端。
 
-当前仓库已经验证可生成约 2.2 GB 的真实服务端阶段目录，并能从锁定 fork 生成带完整校验和的原生客户端构建
-工具包；完整 `test-agent-lobehub-offline.zip` 仍以企业签名 Windows x64 客户端及证据、批准的 Linux x86_64
-客户端、审批证据和独立验收记录为硬门禁。上述外部结果未提供前，介质状态只能记为
-“服务端阶段已验证”，不能记为“完整企业介质已完成”。
+当前仓库已经验证约 2.2 GB 的真实 server-only 目录及其运行态/备份恢复，并已生成原生客户端构建工具包和
+可离线 clone 的独立 fork Git Bundle；server-only 目录也已再次通过完整 `SHA256SUMS` 校验，完整打包门禁确认
+因缺少 Windows/Linux 正式客户端而失败关闭。完整 `test-agent-lobehub-offline.zip` 仍以企业签名 Windows x64
+客户端及证据、批准的 Linux x86_64 客户端、审批证据和独立验收记录为硬门禁。上述外部结果未提供前，运行
+介质状态只能记为“服务端阶段已验证”，不能记为“完整企业介质已完成”；fork 状态只能记为“转运介质已就绪”，
+不能记为“企业内部 Git 已托管”。
 
 ## 企业现场逐机执行单
 

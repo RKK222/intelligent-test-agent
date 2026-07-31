@@ -254,6 +254,14 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
   客户端 SHA、版本、commit、架构和执行禁用状态；Linux 构建人与审批人必须分离，最终审批证据必须绑定客户端和
   独立验收记录 SHA，验收记录关联审批人、变更单及登录、无公网依赖、下载阻断、数据隔离和执行禁用结果。构件
   汇集、Mac 打包和现场安装必须复用同一校验器，任一占位值、摘要或身份不一致都失败关闭。
+- LobeHub server-only 介质只能由无网络定稿工具补入已签名/已审批客户端；工具必须先校验原目录的完整
+  `SHA256SUMS`、版本和镜像身份，不修改原目录，并在共享客户端门禁全部通过后才写入两个成功状态和新清单。
+  `--force` 只能替换经校验的精确输出，输出不得等于或包含任何客户端、证据、版本锁、部署脚本、平台仓库或
+  server-only 输入。
+  LobeHub fork 转运只能从干净、锁定的 `main` 与 annotated 内部 tag 生成自包含 Git Bundle，只发布这两个 ref，
+  并执行独立 clone、内外两层 SHA-256 校验；生成器必须扫描 fork 增量全部可达 blob/commit/tag 和当前 tag，
+  命中高置信私钥/token 格式时失败关闭。转运包不携带 Git 配置、企业 Git URL 或 credential helper 数据；历史
+  扫描不能替代企业 Git 持续 secret scanning。企业管理员推送后必须只读复核远端 branch/tag commit。
 - 企业离线版必须在代理与工作流 router 两层拒绝 `/api/workflows/*`，不得配置 QStash。定时任务只允许单一 app
   实例使用至少 32 字节的独立 `ENTERPRISE_INTERNAL_SCHEDULER_SECRET` 调用 loopback 内部入口，并强制
   `AGENT_RUNTIME_MODE=local`；该密钥不得进入浏览器、日志或进程命令行，queue 模式必须失败关闭。

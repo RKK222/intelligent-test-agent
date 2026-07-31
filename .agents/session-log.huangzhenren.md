@@ -1370,3 +1370,38 @@
     目录仍可做服务端演练但不能进入完整包。
   - 当前 Mac 没有企业 Authenticode 私钥，也不是原生 Linux x86_64 审批主机，因此尚未生成或伪造最终 Windows
     EXE、Linux Approved 客户端和完整企业 ZIP；这些外部结果、企业 Git remote 和目标现场验收仍是明确未完成项。
+
+### 2026-07-31 - 生成 LobeHub fork 转运介质并补齐 server-only 离线定稿
+
+- Why:
+  - 已验证的约 2.2 GB server-only 目录在正式客户端返回后只能重新执行完整联网镜像构建，缺少不重拉镜像、
+    不改原目录的离线定稿路径；独立 fork 也只有本机 checkout，没有可通过 U 盘导入企业 Git 的自包含介质。
+- What:
+  - 新增 `finalize-lobehub-artifacts.sh`：先验证 server-only 的精确 `SHA256SUMS`、版本锁、PostgreSQL 17、三张
+    镜像 tag/ID、客户端未通过状态、执行禁用及普通文件边界，再复用共享 Windows/Linux 客户端合同，复制到新
+    目录、写入成功状态并重建清单；兼容早期 platform.3 server-only 缺少 Linux 审批字段，原目录始终不修改。
+  - 新增 `build-lobehub-fork-transfer.sh`：从干净、锁定的 `main` 和 annotated 内部 tag 创建只发布两个 ref 的
+    自包含 Git Bundle，执行 fork 增量历史高置信凭据扫描、verify 与独立 clone，生成包内/包外双层 SHA-256、
+    ref 清单和不携带 Git 配置/企业凭据的导入说明。
+  - 新增两组 Shell 合同测试，并同步部署入口、架构、安全、客户端汇集、离线部署和独立 fork 企业导入手册。
+- How:
+  - TDD 先锁定旧 server-only 兼容、源目录不变、完整包二次准入、摘要篡改、Pending 审批、已通过状态、输出
+    覆盖、输出与正式客户端/证据重叠、FIFO/特殊文件拒绝；Git 合成仓库覆盖最小 ref、annotated tag、独立
+    clone、双层摘要、脏仓库、输出与版本锁重叠，以及“提交后删除但仍留在历史”的私钥拒绝。独立代码审查发现
+    两处 `--force` 删除输入风险和历史凭据边界，红测复现并修复后复审无剩余 Critical/Important；新增测试与既有
+    client contract、artifact builder、client kit、package、installer、backup 共八组通过。
+  - 真实 fork `ccd0400fbe934ba929de637a315d25e969977c76` 生成
+    `lobehub-fork-transfer-v2.2.11-platform.3.zip`（294,990,199 字节），SHA-256
+    `a494d5a94b7db39fa584c2591b72fb01a1fa3bb61f426fbf59b93a2a4c2d0461`，已复制到
+    `~/Desktop/mimoagent/0709/lobehub-fork-transfer`；从 ZIP 解包后的 Bundle 仅有 main/tag 两个 ref，并在无
+    checkout 上下文中独立 clone、校验 branch/tag 解引用 commit 成功。
+  - 真实 server-only 全部文件再次通过 SHA-256；`release.env` 与清单摘要分别为
+    `1afe00deb9bc288bb5cf292fac7b3e197845fc51f7b2bd03c386a14bb3934c77`、
+    `95c9ad0b4251fca29244a11cc3217bd911a1eb97bad1d8128a9a2afff469d038`，完整打包和缺客户端定稿均按预期失败，
+    原目录摘要不变。
+- Result:
+  - 部署人员现在可以先转运/导入独立 fork，并在正式客户端返回后离线复用已冒烟的 server-only 介质；未修改
+    HTTP API、RunEvent、数据库/Flyway/SQL、性能路径、fork 源码、`.env*`、generated SDK 或 OpenCode 源码。
+  - 完整运行 ZIP 仍缺企业 Authenticode Windows x64 客户端及证据、原生 Linux x86_64 Approved 客户端与独立
+    验收记录；企业 Git remote、目标 DNS/反代/网络/Flyway/备份回滚验收也仍需现场人员完成。上述外部结果完成
+    前保持 `LOBEHUB_ENABLED=false`，不得把 server-only 或转运 Bundle 标记为完整上线交付。

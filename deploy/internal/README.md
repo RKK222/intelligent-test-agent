@@ -68,14 +68,41 @@ grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL
 LobeHub 独立 fork 默认位于平台仓库同级 `../lobehub-platform`，精确提交由 `lobehub/version.env` 锁定。当前
 锁定版本为 `v2.2.11-platform.3`；Desktop/CLI 使用 LobeHub 服务端浏览器确认、PKCE 和 24 小时 opaque Session，
 不再部署或兼容 OIDC Bridge。独立 fork 仍须由企业 Git 管理员推送到受控内部远端；同级本机 checkout 只用于
-构建和验证，不能作为企业源码托管。先用 `build-lobehub-artifacts.sh` 从锁定提交构建真实 `linux/amd64` 镜像、
+构建和验证，不能作为企业源码托管。外网 Mac 先用 `build-lobehub-fork-transfer.sh` 生成只发布 `main` 和内部
+版本 tag 的自包含 Git Bundle，企业管理员按
+[LobeHub fork 企业 Git 转运手册](../../docs/deployment/lobehub-fork-transfer.md) 校验、导入和复核远端；转运包
+不预置 Git URL 或 credential helper 数据，fork 增量历史命中高置信私钥/token 格式时构建失败。再用
+`build-lobehub-artifacts.sh` 从锁定提交构建真实 `linux/amd64` 镜像、
 源码、SBOM、许可证和客户端制品集；
 完整构建必须提供企业签名 Windows x64 客户端与签名证据，以及批准的 Linux x86_64 客户端、最终审批证据和
 独立验收记录。先由 Mac 运行 `build-lobehub-client-kit.sh` 导出锁定源码及原生构建工具包，再分别交给 Windows
 x64 证书构建机和 Linux x86_64 构建/审批人员；具体流程见
 [LobeHub 企业客户端原生构建与审批](../../docs/deployment/lobehub-client-build.md)。无客户端时只允许
-使用 `--server-only` 做服务端部署演练，后续打包门禁会拒绝该阶段目录。Docker VM 至少分配 8 GiB 内存；
+使用 `--server-only` 做服务端部署演练，后续打包门禁会拒绝该阶段目录。正式客户端返回后用
+`finalize-lobehub-artifacts.sh` 在无网络、无 Docker 条件下复制并定稿新目录；原 server-only 目录保持不变，
+客户端门禁未全部通过时不会生成完整目录。Docker VM 至少分配 8 GiB 内存；
 fork 已将 Next.js 静态生成限制为两个 worker，以支持 10 CPU / 8 GiB 的已验证构建基线。
+
+独立 fork 转运介质生成命令：
+
+```bash
+deploy/internal/build-lobehub-fork-transfer.sh \
+  --fork-dir /Users/huang/workspace/lobehub-platform \
+  --output-dir deploy/internal/dist-lobehub-fork-transfer
+```
+
+正式客户端返回后，复用已验证 server-only 目录的定稿命令：
+
+```bash
+deploy/internal/finalize-lobehub-artifacts.sh \
+  --server-artifact-dir /absolute/path/to/lobehub-server-only \
+  --output-dir /absolute/path/to/lobehub-release-artifacts \
+  --windows-client /path/to/lobehub-windows-x64.exe \
+  --windows-signature-evidence /path/to/windows-authenticode-verification.txt \
+  --linux-client /path/to/lobehub-linux-x86_64.tar.gz \
+  --linux-approval-evidence /path/to/linux-client-verification.txt \
+  --linux-acceptance-record /path/to/linux-client-acceptance-record.txt
+```
 
 服务端阶段目录生成后应在构建机执行一次真实镜像冒烟；它会实际运行 migration、Redis ACL、私有 RustFS 和
 LobeHub app，再写入 PostgreSQL/RustFS 证明数据并完成停机冷备份、恢复和二次验收；它拒绝覆盖已有同名
