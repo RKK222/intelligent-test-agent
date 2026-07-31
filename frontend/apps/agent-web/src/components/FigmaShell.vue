@@ -1727,19 +1727,8 @@ onMounted(() => {
   
   const savedFixed = loadRobotFixed();
   robotFixed.value = savedFixed === true;
-  if (robotFixed.value) {
-    const position = savedPosition ?? clampRobotPosition(getBirthPosition());
-    robotX.value = position.x;
-    robotY.value = position.y;
-    robotHasSavedPosition.value = Boolean(savedPosition);
-    robotState.value = "idle";
-    robotDirection.value = "front";
-    robotTransition.value = "none";
-    robotCurrentLevel.value = position.y > window.innerHeight / 2 ? "bottom" : "top";
-  } else {
-    // 无论是否有保存位置，初次进入都保持隐藏，等连续一分钟无操作后再出现。
-    resetInactivityTimer();
-  }
+  // 每次进入页面都从收起态开始；固定偏好只在用户手动唤起后恢复，不直接改变初始显隐。
+  resetInactivityTimer();
 });
 
 onUnmounted(() => {

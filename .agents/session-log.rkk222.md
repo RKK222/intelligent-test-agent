@@ -5,6 +5,27 @@
 
 ## Entries
 
+### 2026-07-31 - 工作台进入页面默认收起小宠物
+
+### Why
+
+- 页面挂载时会恢复已保存的固定宠物为可见状态，导致用户每次进入工作台都直接看到展开的小宠物。
+
+### What
+
+- `FigmaShell` 挂载时保留固定和位置偏好，但不再将宠物状态直接恢复为 `idle`；每次进入页面从收起态开始，用户手动唤起后仍可恢复固定状态和保存位置。
+- 增加固定偏好已保存时的组件回归，并同步 agent-web README 与 `src/PACKAGE.md` 的行为说明。
+
+### How
+
+- 复用既有 `loadRobotFixed`、`loadSavedRobotPosition` 和 `toggleRobotVisibility` 链路，只移除挂载阶段的可见状态恢复分支。
+- 运行 `FigmaShell` 新增用例、agent-web typecheck、生产 build，并启动 `corepack pnpm --filter @test-agent/agent-web dev -- --host 127.0.0.1 --port 3001` 做 HTTP smoke。
+
+### Result
+
+- 新增行为用例通过；typecheck、生产构建和 `http://127.0.0.1:3001/` 返回 200。
+- 完整 `FigmaShell` 套件期间工作区另有并发 ICBC 配色改动反复更新 `globals.css` 与其源码断言，出现 1 个无关配色断言失败；宠物行为用例单独通过。未修改 API、事件、数据库、安全配置、generated SDK 或 OpenCode 源码。
+
 ### 2026-07-30 - 基于最新主线重建三节点企业交付
 
 ### Why

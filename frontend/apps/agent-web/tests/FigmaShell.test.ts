@@ -767,6 +767,22 @@ describe("FigmaShell", () => {
     expect(restored.find(".state-idle").exists()).toBe(true);
   });
 
+  it("starts collapsed on page entry even when the fixed pet preference was saved", async () => {
+    window.localStorage.setItem("figma-shell-robot-fixed", "true");
+    window.localStorage.setItem("figma-shell-robot-pos", JSON.stringify({ x: 140, y: 160 }));
+    const wrapper = mountShell();
+    await wrapper.vm.$nextTick();
+
+    const toggle = wrapper.get('[data-testid="robot-visibility-toggle"]');
+    expect(toggle.attributes("aria-label")).toBe("唤起小宠物");
+    expect(toggle.attributes("aria-pressed")).toBe("false");
+    expect(wrapper.find('[data-testid="figma-robot"]').exists()).toBe(false);
+
+    await toggle.trigger("click");
+    expect(toggle.attributes("aria-label")).toBe("收起小宠物");
+    expect(wrapper.get('[data-testid="figma-robot"]').attributes("style")).toContain("left: 140px");
+  });
+
   it("restarts the hidden pet timer after activity and only counts while focused and visible", async () => {
     vi.useFakeTimers();
     const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
