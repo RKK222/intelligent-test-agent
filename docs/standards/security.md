@@ -276,6 +276,24 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 稳定交接契约、客户端证据和部署门禁见 `docs/architecture/lobehub-integration.md`、
 `docs/deployment/lobehub-client-build.md` 与 `docs/deployment/lobehub-offline.md`。
 
+## 独立长程任务安全边界
+
+- 浏览器只把现有平台 Bearer 经同源 HTTPS 发给 Python。Python 不签发第二套 Cookie，不调用 Java 验证普通请求；每次 HTTP 请求必须精确 `GET test-agent:token:<完整token>` 和 `PTTL`，同时校验 Redis TTL、`AuthPrincipal.expiresAt`、原 Token 恒等、userId、统一认证号与角色。认证结果不得缓存。
+- Python Redis ACL 账号只能 `PING/GET/PTTL` 且 key pattern 仅为 `test-agent:token:*`；必须显式拒绝 `SCAN`、`KEYS`、写命令、pub/sub 和其他前缀。AG-UI 建连时执行相同校验并每30秒复核，Token 删除、过期或平台登出后立即断流。
+- Java共享能力请求只携带 userId、平台 Token SHA-256 session digest、timestamp、nonce、body digest 和 HMAC-SHA256；固定 client ID 为 `workflow`，密钥至少32字节。Java在签名通过后原子占用 nonce，并实时复核 session marker、用户状态、角色、应用成员、仓库类型/关联/启用状态。原始 Bearer不得在服务间传输。
+- checkout ticket 必须一次性、短期并绑定 user/session/repository/task/run/runner/Runner公钥/目标分支/基线分支。Java只在 Runner兑换时解密个人SSH Key，再以目标Runner公钥封装；Python不可看到明文或密文私钥。Runner只在tmpfs解密，Git完成后立即删除，并强制使用非空普通文件 `known_hosts`。
+- model grant 绑定 user/task/run/client/analyzer，网关覆盖供应商Authorization并隐藏真实Token。刷新必须重新检查当前session与用户；取消先原子写 run 级撤销墓碑，再撤销现存grant，后续并发签发/续期必须失败关闭。
+- 代码分析模型必须使用部署侧配置的模型网关公开ID。Codex配置固定`model_provider`与`responses`接口，OpenCode配置只启用唯一自定义provider并显式传入`--model`；工具默认provider、项目级OpenCode配置、自动更新和公网端点均不得参与选择。分析工具只配置容器内回环relay地址和一次性本地token，禁止直接配置平台grant或平台模型网关。
+- 平台grant只能经Runner控制的`docker exec -i` stdin进入容器内独立非root UID `10002`的relay，不得进入UID `10001`分析进程、挂载文件、环境、命令行、工具配置或日志。relay只绑定`127.0.0.1`，仅接受`models/chat/completions/responses`固定端点和本地token，覆盖Authorization后转发到Runner已复核的固定IPv4/base path；Runner关闭stdin、分析结束或取消时必须退出。Codex shell环境只能继承PATH/HOME；OpenCode必须默认拒绝外部目录、编辑、Web及未使用工具，并经镜像内`env -i`白名单shell。只清理子进程环境、但仍让智能体同UID父进程持有平台grant，不算隔离完成。
+- 同任务的多智能体请求必须在Runner按任务串行；每次智能体退出（成功或失败）后关闭relay并重启同一容器、再次复核用户/只读根/capabilities/no-new-privileges约束，确保模型启动的后台后代不能跨智能体或跨追问存活。不得用进程名匹配或同UID信号扫描替代容器级重启。
+- 只有独立 Runner可管理Docker；workflow API/Worker和分析容器都不得挂Docker Socket。任务容器必须非root、`cap-drop=ALL`、`no-new-privileges`、只读根、独立tmpfs及CPU/内存/PID/文件句柄限制，源码只读，每个analyzer独立HOME/缓存/输出。不得因Docker 18.09兼容问题降级为root或`--privileged`。
+- 分析容器的可写输出是不可信输入。Runner读写请求、本地relay token和结果必须以可信目录fd配合 `O_NOFOLLOW` 操作并只接受有界普通文件；幂等缓存、状态和其他控制数据必须放在未挂载进任务容器的私有目录，禁止跟随分析进程构造的符号链接。
+- 分析任务网络必须通过 `DOCKER-USER` 第一条跳转仅放行固定数字IPv4/CIDR模型网关和端口，拒绝其他出站及Runner管理面。Runner每次准备任务都复核私有bridge、subnet、labels和防火墙；已有任务容器时禁止重写规则。
+- `Authorization`、完整Token Redis键、AuthPrincipal原文、session digest、HMAC、nonce、checkout ticket、grant、SSH内容、远端credential、原始工具日志和下游异常正文不得进入访问日志、trace、错误详情、审计正文或Markdown报告。报告只保存结构化代码证据和安全摘要。
+- 主动取消必须撤销模型grant并删除工作区；保留工作区在最后活动48小时后由PostgreSQL驱动的清理任务删除容器、源码、输出和工具原始日志。清理失败记录 `CLEANUP_FAILED` 并重试，不得把失败伪装为已过期。
+
+完整部署、ACL和验收门禁见 `docs/deployment/workflow-offline.md`。
+
 ## 安全变更文档
 
 鉴权、限流、CORS、密钥、日志脱敏变更必须同步 `docs/standards/security.md`、`docs/api/http-api.md` 和相关 README。

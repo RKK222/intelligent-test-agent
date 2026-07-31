@@ -1446,6 +1446,44 @@
     history、备份恢复和回滚演练。Apple Silicon Docker 冒烟不能替代这些外部验收，完成前继续保持
     `LOBEHUB_ENABLED=false`。
 
+### 2026-07-31 - 实现独立 Python 长程任务框架与代码变动影响分析
+
+- Why:
+  - 平台需要新增一套完全独立于 OpenCode/LobeHub 会话的固定流程长程任务入口；浏览器必须经 Nginx 同源直连
+    Python，Java 只能复用认证权限、仓库/SSH 与模型网关能力，不能代理或持久化工作流业务。
+  - 首期需要完整落地多仓库代码变动影响分析、可恢复执行、AG-UI 实时事件、局部重分析和 48 小时受控工作区，
+    同时为后续场景保留注册扩展点但不能提前暴露未实现任务。
+- What:
+  - 新增 Python 3.12 `workflow-service`、`runner-controller`、`analysis-task`：AgentScope 白名单意图与综合、
+    LangGraph 固定图/checkpoint、独立 PostgreSQL/Alembic、原生 AG-UI SSE、租约 Worker、版本化报告、追问/局部
+    重分析以及到期清理；首版只注册 `code-change-impact-analysis`。
+  - Java 仅新增 HMAC/nonce/session marker 保护的仓库授权、分支、一次性 checkout ticket、短期模型 grant 与超级
+    管理员复核能力；模型网关接受 workflow grant，但未增加 conversation/message/task/run/report/event 对象或表。
+  - 新增 TDesign `workflow-api-client`/`workflow-chat` 与 `/workflow-chat` 懒加载入口；Nginx `/workflow-api/`
+    直达 Python。补齐固定 linux/amd64 三镜像、SBOM/许可证/摘要、纯 Docker 管理、Redis ACL、独立数据库及
+    `DOCKER-USER` 受限网络交付合同。
+  - 每任务一个非特权分析容器，源码只读，多智能体隔离 HOME/输出；Runner 使用目录 fd 与 `O_NOFOLLOW` 防止
+    可写输出符号链接劫持，控制幂等缓存不挂载进容器。真实模型 grant 只经 `docker exec -i` stdin 进入容器内
+    UID `10002` 的最小回环 relay；UID `10001` 的 Codex/OpenCode 仅持有本地 token。同任务智能体串行执行且每次
+    执行后重启容器，Codex shell 环境白名单与 OpenCode `env -i` shell 阻断平台 grant 泄露及后台后代污染。
+- How:
+  - Python 全量 156 项（workflow 90、Runner 57、analysis-task 9）通过，`compileall` 与两份 `uv lock --check`
+    通过；后端 21 模块 `mvn test` 全绿；前端
+    108 个 Vitest 文件为 1726 passed / 1 skipped，前端全 workspace typecheck 和 agent-web production build
+    通过。架构隔离、Nginx、离线包合同、Shell 语法和 `git diff --check` 通过。
+  - 使用 OpenCode 1.18.4 真实二进制验证受控配置只暴露
+    `test-agent-workflow/workflow-code-analysis`。本机尝试构建 analysis-task 时因已有工具镜像只含 OpenCode、
+    缺少 Codex 而按设计失败关闭，未放宽 Dockerfile 或安全约束。
+  - 在临时 Linux 容器中实测 relay 以 UID `10002` 持有 grant 时，UID `10001` 无法读取其 `/proc` 环境、内存、
+    stdin 或发送信号，未授权 HTTP 返回 401，关闭 stdin 后端口退出；该 Docker 29.6.1 探针只证明当前隔离机制，
+    不替代正式 Docker 18.09 门禁。
+- Result:
+  - 代码、HTTP/AG-UI 协议、模块/依赖/安全/数据库与企业离线部署文档已闭环；独立 Python 数据库不修改平台
+    Flyway 历史，现有 OpenCode/LobeHub 会话、generated SDK 和 OpenCode 上游源码均未修改。
+  - 正式发布仍必须在新工具镜像同时包含固定 Codex/OpenCode 后，于真实 Docker 18.09、真实模型网关、真实
+    PostgreSQL/Redis 和至少两个跨应用仓库完成端到端验收；当前 Apple Silicon 的 Docker 29.6.1 不能替代该
+    门禁。前端生产构建另保留工作流路由 chunk 约 2.86 MiB 的性能告警。
+
 ### 2026-07-31 - 收紧 LobeHub Redis、客户端证据与离线发布原子性并升级 platform.5
 
 - Why:

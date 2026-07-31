@@ -39,6 +39,11 @@ export const router = createRouter({
       component: () => import("./views/LobehubLaunchView.vue"),
     },
     {
+      path: "/workflow-chat",
+      name: "workflow-chat",
+      component: () => import("./views/WorkflowChatView.vue"),
+    },
+    {
       path: "/s/:sessionId",
       name: "transcript",
       component: () => import("./views/TranscriptView.vue"),
@@ -91,6 +96,7 @@ function isKnownLoginRedirectPath(pathname: string): boolean {
   return pathname === "/"
     || /^\/toolbox\/?$/.test(pathname)
     || pathname === "/lobehub/launch"
+    || pathname === "/workflow-chat"
     || /^\/s\/[^/]+$/.test(pathname);
 }
 

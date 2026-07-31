@@ -17,6 +17,7 @@
   时限只能在安全上限内收紧，nonce TTL 不得短于 120 秒的完整重放窗口。
 - `LobehubHmacAuthenticator` 对原始 body 的五行 canonical string 验证 HMAC-SHA256、时钟偏差和 nonce 防重放；
   只在签名通过后原子占用 nonce。
+- `WorkflowCapabilityHmacAuthenticator` / `WorkflowCapabilityApplicationService` 为Python workflow和Runner提供固定client/runner身份的HMAC防重放、平台session marker、当前用户/角色/应用成员/仓库复核、checkout票据与模型grant编排。Java只复用平台能力，不创建任何工作流业务对象；Runner兑换时才解密个人SSH Key并按Runner公钥重新封装。
 
 ## 允许依赖
 

@@ -6,6 +6,8 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.integration.lobehub.LobehubModelIdentity;
 import com.enterprise.testagent.integration.lobehub.LobehubSsoService;
+import com.enterprise.testagent.integration.workflow.WorkflowCapabilityApplicationService;
+import com.enterprise.testagent.integration.workflow.WorkflowModelIdentity;
 import com.enterprise.testagent.model.gateway.ModelGatewayCaller;
 import com.enterprise.testagent.model.gateway.ModelGatewayCatalogService;
 import com.enterprise.testagent.model.gateway.ModelGatewayForwarder;
@@ -14,6 +16,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.buffer.DataBufferLimitException;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.MediaType;
@@ -24,7 +27,7 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-/** 仅供 LobeHub 服务端通过用户模型委托调用的 OpenAI-compatible 企业模型入口。 */
+/** 供LobeHub及Python workflow使用各自短期用户委托调用的OpenAI-compatible企业模型入口。 */
 @RestController
 public class ModelGatewayController {
 
@@ -33,14 +36,29 @@ public class ModelGatewayController {
     static final int MAX_JSON_REQUEST_BODY_BYTES = 16 * 1024 * 1024;
 
     private final LobehubSsoService ssoService;
+    private final WorkflowCapabilityApplicationService workflowCapabilities;
     private final ModelGatewayCatalogService catalogService;
     private final ModelGatewayForwarder forwardingService;
 
+    @Autowired
     public ModelGatewayController(
+            LobehubSsoService ssoService,
+            WorkflowCapabilityApplicationService workflowCapabilities,
+            ModelGatewayCatalogService catalogService,
+            ModelGatewayForwarder forwardingService) {
+        this.ssoService = Objects.requireNonNull(ssoService);
+        this.workflowCapabilities = Objects.requireNonNull(workflowCapabilities);
+        this.catalogService = Objects.requireNonNull(catalogService);
+        this.forwardingService = Objects.requireNonNull(forwardingService);
+    }
+
+    /** 保留单元测试和旧装配构造器；workflow grant只在完整生产构造器启用。 */
+    ModelGatewayController(
             LobehubSsoService ssoService,
             ModelGatewayCatalogService catalogService,
             ModelGatewayForwarder forwardingService) {
         this.ssoService = Objects.requireNonNull(ssoService);
+        this.workflowCapabilities = null;
         this.catalogService = Objects.requireNonNull(catalogService);
         this.forwardingService = Objects.requireNonNull(forwardingService);
     }
@@ -82,7 +100,7 @@ public class ModelGatewayController {
                             .flatMap(prepared -> forwardingService.forward(
                                     exchange,
                                     prepared,
-                                    new ModelGatewayCaller(identity.userId(), identity.unifiedAuthId(), "lobehub"),
+                                    new ModelGatewayCaller(identity.userId(), identity.unifiedAuthId(), identity.source()),
                                     traceId));
                 });
     }
@@ -99,12 +117,21 @@ public class ModelGatewayController {
                         .flatMap(prepared -> forwardingService.forwardMultipart(
                                 exchange,
                                 prepared,
-                                new ModelGatewayCaller(identity.userId(), identity.unifiedAuthId(), "lobehub"),
+                                new ModelGatewayCaller(identity.userId(), identity.unifiedAuthId(), identity.source()),
                                 traceId)));
     }
 
-    private LobehubModelIdentity authenticate(ServerWebExchange exchange) {
-        return ssoService.authenticateModelGrant(AuthWebSupport.extractBearerToken(exchange));
+    private GatewayIdentity authenticate(ServerWebExchange exchange) {
+        String grant = AuthWebSupport.extractBearerToken(exchange);
+        if (grant != null && grant.startsWith("wfg_")) {
+            if (workflowCapabilities == null) {
+                throw new PlatformException(ErrorCode.UNAUTHENTICATED, "workflow模型委托不可用");
+            }
+            WorkflowModelIdentity identity = workflowCapabilities.authenticateModelGrant(grant);
+            return new GatewayIdentity(identity.userId(), identity.unifiedAuthId(), "workflow");
+        }
+        LobehubModelIdentity identity = ssoService.authenticateModelGrant(grant);
+        return new GatewayIdentity(identity.userId(), identity.unifiedAuthId(), "lobehub");
     }
 
     private Mono<byte[]> readBody(ServerWebExchange exchange) {
@@ -138,6 +165,9 @@ public class ModelGatewayController {
                 model.displayName(),
                 model.contextLimit(),
                 model.capabilities().stream().map(capability -> capability.name().toLowerCase()).sorted().toList());
+    }
+
+    private record GatewayIdentity(String userId, String unifiedAuthId, String source) {
     }
 
     /** OpenAI 模型目录外壳，保持企业适配器可直接消费。 */

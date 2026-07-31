@@ -94,6 +94,8 @@ test-agent-event
 
 `test-agent-app` 仍是唯一可部署 Spring Boot jar，但不承载业务逻辑。它强制启动 WebFlux 主上下文，并可为了启动、profile、migration、health、XXL 子上下文/executor 和 seed 依赖基础运行模块；平台 HTTP/SSE/WebSocket 入口属于 `test-agent-api`，XXL Servlet 页面入口只属于 integration 启动的子上下文。
 
+`workflow-service`、`runner-controller` 和 `analysis-task` 是 Java Maven 图之外的独立 Python/容器边界。Python 只能通过版本化 HTTP 端口调用 Java 的 workflow capabilities 和模型网关；Java 不能依赖 Python 包，也不能代理其浏览器 HTTP/SSE。只有 Runner 可挂 Docker Socket，API/Worker 和任务容器均禁止挂载。平台模型grant可到达Runner控制面，但只能经stdin进入任务容器内独立UID的回环relay；Codex/OpenCode进程只能持有短生命周期本地token，禁止直接依赖平台grant。
+
 ## 后端禁止关系
 
 1. Controller 不得直接访问持久化实现。
@@ -119,6 +121,8 @@ test-agent-event
     保存原始 opaque 值。LobeHub 独立数据库、Workspace JIT 和资源权限不能写入平台 persistence。
 20. LobeHub 浏览器入口不得读取跨域存储、把 ticket 放入 URL 或接受任意 return URL；模型网关不得接受客户端
     供应商选择或把委托传给浏览器/设备。
+21. Java workflow capability 代码不得定义 conversation、message、task、run、report、event 或 LangGraph checkpoint；这些对象只属于独立 Python 数据库。服务端接口固定 client ID 为 `workflow`，只能传 Token SHA-256 摘要并实时复核平台 session marker、用户、角色、应用成员与仓库状态。
+22. Python workflow 不得读取平台数据库、个人 SSH 私钥或供应商 Token，不得复用平台 RunEvent；普通请求认证只能精确读取当前 Bearer 对应 Redis Token 键，仓库/SSH/模型能力只能走 Java 白名单接口。
 
 ## 业务工程归属
 
@@ -132,6 +136,7 @@ test-agent-event
 - 周期任务 Admin/executor/SSO/MySQL Flyway 与统一 handler adapter：`test-agent-xxl-job-integration`；未修改的上游代码只放 `test-agent-xxl-job-admin-upstream`。业务 handler 仍放所属业务模块。
 - `ScheduledTaskHandler`、`ScheduledTaskContext`、结果协议、Redis 锁和旧运行记录清理：`test-agent-scheduler`；不得恢复 PostgreSQL runner、`USER_PLAN` 服务或 scheduler worker 配置。
 - 非 opencode 的外部系统联动：`test-agent-integration`。
+- Python workflow 所需的平台共享能力：领域端口放 `test-agent-domain`，HMAC/权限/票据编排放 `test-agent-integration`，Redis 原子状态放 `test-agent-persistence`，服务端 Controller 放 `test-agent-api`；工作流业务本身只放根目录 Python 工程。
 - LobeHub 平台登录交接、部门身份映射和委托签发：`test-agent-integration`；fork 内 Session、Workspace 和私有
   资源仍属于独立 fork。
 - 跨 LobeHub/OpenCode 可复用的模型解析、供应商密钥/可信 Header 注入、能力探测和 OpenAI-compatible 流式
@@ -149,14 +154,15 @@ test-agent-event
 - 前端调用平台自身能力优先使用 `/api/internal/platform/{business-project}/{business}/...`。
 - 与 agent 交互的新入口使用 `/api/internal/agent/{agentId}/...`；当前默认可用 agent 为 `opencode`，opencode 原 path 兼容形态为 `/api/internal/agent/opencode/{原 opencode path}`。
 - 给其他系统调用的公开 API 使用 `/api/public/...`，新增前必须先完成鉴权、限流和兼容性设计。
+- `/workflow-api/v1/**` 是 Nginx 同源直达 Python 的独立命名空间；Java 不实现、不转发。Java 给 Python/Runner 的服务端白名单固定为 `/api/internal/workflow-capabilities/v1/**`，不能作为浏览器 API。
 
 `test-agent-api` 可以为同一能力同时暴露旧 URL 和新 URL；两者必须共享 DTO、鉴权、traceId、错误格式和同一业务实现。
 
 ## 前端访问规则
 
 1. 前端不得直接访问 opencode server。
-2. 所有后端调用必须通过 `backend-api`。
-3. 所有实时事件必须通过 `event-stream-client` 消费平台 RunEvent SSE。
+2. 所有平台 Java 调用必须通过 `backend-api`。受控例外：`/workflow-chat` 只能通过 `workflow-api-client` 同源访问 Python `/workflow-api/v1/**`，不得由 `backend-api` 或页面组件转发。
+3. 所有平台实时事件必须通过 `event-stream-client` 消费平台 RunEvent SSE。受控例外：独立工作流只通过 `workflow-api-client` 的 fetch SSE 消费 Python 原生 AG-UI，不能映射为 RunEvent。
 4. `backend-api` 不得依赖页面、工作台、Monaco、Dockview 或具体业务组件。
 5. `event-stream-client` 不得直接修改 Vue 组件状态。
 6. `ui-kit` 和 `shared-types` 不得依赖业务 API 或事件流。
@@ -167,6 +173,7 @@ test-agent-event
 11. LobeHub 入口只允许先经 `backend-api` 使用平台 Bearer Token 签票，再由 `agent-web` 对服务端固定
     `consumeUrl` 隐藏表单 POST；这是跨域登录交接，不是前端直连模型或 LobeHub API。禁止任意 return URL、
     ticket 持久化或把模型委托交给浏览器。
+12. `workflow-chat` 只依赖 `workflow-api-client` 与展示组件，平台 Bearer 仍只保存在既有内存/sessionStorage；fetch SSE 必须支持 Authorization、`Last-Event-ID`、快照替换、durable 去重和取消订阅。
 
 ## 文档要求
 

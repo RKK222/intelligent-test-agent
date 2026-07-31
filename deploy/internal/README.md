@@ -12,8 +12,11 @@
 - [Redis 5 升级 + 双后台平台全量执行手册](FULL-UPGRADE-RUNBOOK.md)：按当前现场路径和 `.20 → .4 → .114 → .2` 顺序整合完整命令、成功条件、页面配置、脏数据边界与回滚。
 - [空报文体排查手册](EMPTY-RESPONSE-BODY-TROUBLESHOOTING.md)：部署后按浏览器、Nginx、双 Java、RunEvent SSE、用户 OpenCode 和企业模型代理逐层采证，区分正常空请求与异常空响应。
 - [工具盒子离线部署](../../docs/deployment/toolbox.md)：IT-Tools + OmniTools 的 193 项目录、双镜像、双后台共置、Nginx 故障切换和回滚。
+- [Python长程任务离线部署](../../docs/deployment/workflow-offline.md)：独立workflow数据库/Redis ACL、三镜像、Runner受限网络、Nginx直达、验收和回滚。
 
 底层 Java、manager、Redis 路由设计见 [后端部署说明](../../docs/deployment/backend.md)。
+
+独立长程任务使用 `package-workflow-offline.sh` 单独生成固定 `linux/amd64` 的 workflow-service、runner-controller、analysis-task 镜像tar及SBOM/许可证/锁文件/SHA256。它不并入Java JAR，也不使用Docker Compose；控制节点与分析节点由 `workflow/workflow-docker.sh` 分别管理。Nginx设置 `TEST_AGENT_NGINX_WORKFLOW_UPSTREAM` 后把 `/workflow-api/` 直接转发Python，禁止落入Java upstream。正式发布顺序固定为“workflow数据库与Redis只读ACL → Java窄能力/模型网关 → Python API/Worker → Runner/受限网络 → 前端与Nginx”。
 
 ## 共同前提
 
@@ -524,6 +527,7 @@ persistence JAR 的完整 SHA。只校验外层 ZIP 或 app JAR 不能证明数�
 - Java：[backend.env.example](backend.env.example)
 - worker/构建：[env.example](env.example)
 - 前端 Nginx：[nginx.env.example](nginx.env.example)、[configure-nginx.sh](configure-nginx.sh)
+- Python workflow：[workflow/build.env.example](workflow/build.env.example)、[workflow/workflow.env.example](workflow/workflow.env.example)、[workflow/java-capability.env.example](workflow/java-capability.env.example)、[package-workflow-offline.sh](package-workflow-offline.sh)
 - XXL MySQL：当前生产直接使用外部实例；[mysql.env.example](mysql.env.example) 和 [deploy-xxl-job-mysql.sh](deploy-xxl-job-mysql.sh) 仅作为其它隔离环境的容器备用方案
 
 当前企业浏览器入口固定为 HTTP，因此 Java 模板显式设置 `TEST_AGENT_XXL_JOB_COOKIE_SECURE=false`；基础应用默认仍为 `true`，HTTPS 环境不得复制该例外。两台后台必须保持一致，诊断脚本会输出脱敏的 `COOKIE_SECURE` 状态并拒绝缺失或错误值。

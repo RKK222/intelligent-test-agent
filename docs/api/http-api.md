@@ -26,6 +26,7 @@
 6. 旧 runtime/workspace `/api/...` URL 已强制作废，命中时统一返回 `410 API_GONE` 和 `ApiErrorResponse`；登录认证 `/api/auth/login|logout|me|refresh` 保留为稳定入口。
 7. CORS 本地默认仅覆盖主前端与 `frontend-opencode` 的 localhost/127.0.0.1 开发、预览和 real E2E 端口；生产必须通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 显式配置允许来源。
 8. 多 Java 同源部署允许前端在需要用户绑定服务器的请求上携带可选 `X-Test-Agent-Linux-Server-Id`。该头只是 Nginx 静态白名单的首跳性能提示，不参与鉴权，不替代数据库 binding、Session 归属、运行上下文或后端公共路由判断。
+9. 独立长程任务是受控例外：浏览器由 Nginx 同源直达 Python `/workflow-api/v1/**`，不经过 Java 或 `backend-api`。完整浏览器 API、Python 错误和 Java 服务端窄能力契约见 `docs/api/workflow-api.md`。
 
 ### 用户绑定服务器首跳提示
 
@@ -55,11 +56,15 @@
 | `/api/internal/platform/lobehub-sso/tickets` | 当前登录用户签发 LobeHub 一次性隐藏表单票据。 |
 | `/api/internal/platform/lobehub-sso/tickets/redeem`、`/grants/revoke` | 仅 LobeHub 服务端以 timestamp/nonce/body digest/HMAC 调用。 |
 | `/api/internal/platform/model-gateway/v1/**` | 仅 LobeHub 服务端携带用户 opaque 模型委托调用。 |
+| `/api/internal/workflow-capabilities/v1/**` | 仅 Python workflow/Runner 以固定 client/runner identity、timestamp、nonce、body digest 和 HMAC 调用；不承载工作流业务对象。 |
+| `/workflow-api/v1/**` | 独立 Python 浏览器 API；Nginx 直达，不属于 Java Controller URL。 |
 | `/api/internal/platform/scheduler-management/**` | 已作废，统一返回 `410 API_GONE`；周期任务在 XXL iframe 管理。 |
 | `/api/internal/platform/system-management` | 超级管理员用户管理入口，使用用户 JWT 且要求 `SUPER_ADMIN`。 |
 | `/api/public/...` | 其他系统调用平台的公开 API，当前预留；新增前必须完成鉴权、限流、安全和兼容性设计。 |
 
 当前已落地的新平台入口：
+
+独立 Python API 固定提供当前身份、定义、仓库/分支、会话/消息、AG-UI SSE、取消和报告版本/下载；Java 白名单只提供仓库授权、一次性 checkout ticket、模型 grant 及超级管理员复核。两套路径和签名字段以 `docs/api/workflow-api.md` 为单一事实源，禁止在本文件复制工作流 conversation/task/report DTO。
 
 | 业务工程 | 新 URL 示例 | 旧 URL 状态 |
 |---|---|---|

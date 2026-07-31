@@ -1,5 +1,6 @@
 package com.enterprise.testagent.domain.auth;
 
+import com.enterprise.testagent.domain.user.UserId;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -16,6 +17,11 @@ public interface TokenSessionMarkerStore {
 
     /** 校验摘要 marker 是否仍存在；登出、刷新和 Token TTL 到期都会使其失效。 */
     boolean isActive(String sessionDigest);
+
+    /** 校验marker仍有效且确实属于声明用户，防止有效摘要被替换到另一用户请求。 */
+    default boolean isActiveForUser(String sessionDigest, UserId userId) {
+        return false;
+    }
 
     /** 共享稳定摘要算法，避免签发端和校验端出现编码差异。 */
     static String sha256(String token) {

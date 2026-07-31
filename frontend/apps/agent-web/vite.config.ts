@@ -90,7 +90,9 @@ export default defineConfig({
       "@test-agent/agent-chat": pkgSrc("agent-chat"),
       "@test-agent/terminal": pkgSrc("terminal"),
       "@test-agent/test-runner": pkgSrc("test-runner"),
-      "@test-agent/workbench-shell": pkgSrc("workbench-shell")
+      "@test-agent/workbench-shell": pkgSrc("workbench-shell"),
+      "@test-agent/workflow-api-client": pkgSrc("workflow-api-client"),
+      "@test-agent/workflow-chat": pkgSrc("workflow-chat")
     }
   },
   server: {

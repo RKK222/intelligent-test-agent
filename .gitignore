@@ -70,6 +70,13 @@ output/playwright/
 .claude/
 .superpowers/
 
+# ===== Python 工作流 / Runner =====
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+
 # ===== opencode-manager 编译产物 =====
 opencode-manager/bin/
 

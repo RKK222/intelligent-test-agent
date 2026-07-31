@@ -23,6 +23,7 @@
 - lucide-vue-next
 - @vscode/codicons（仅文件浏览区使用）
 - jsonc-parser 3.3.1（引用配置对 `.opencode/opencode.jsonc` 做保留注释的最小字段补丁）
+- `@tdesign-vue-next/chat` 0.6.0（仅独立 `/workflow-chat` 路由懒加载）
 - pnpm workspace
 
 ## workspace
@@ -32,6 +33,8 @@ apps/agent-web
 apps/user-manual
 packages/backend-api
 packages/event-stream-client
+packages/workflow-api-client
+packages/workflow-chat
 packages/workbench-shell
 packages/file-explorer
 packages/editor
@@ -46,6 +49,8 @@ packages/shared-types
 `apps/user-manual` 使用 VitePress 1.6 构建内置用户手册，输出到 `agent-web/public/help/` 并随主应用一起打包。手册使用浏览器本地全文索引，不依赖公网搜索、独立服务或数据库；`agent-web` 的 `dev` / `build` 会先自动构建手册。目录设计章节以标准工程目录为事实源，把开发已有与测试扩展合并为一棵可逐级展开的工程树；目录、Agent/workagent/Skill 名称、物理 Git、实现状态和职责统一在 `directory-mapping.md` 的 frontmatter 中维护，Vue 组件只负责展示。测试公共 Config 已存在的 Agent/workagent/Skill 使用真实名称并标记“已实现”，没有对应定义的规划项标记“未实现”并灰显；应用专属测试 Agent/workagent 归入测试设计、测试执行等具体活动，测试设计应用规约按测试对象类型展开；测试 Agent 下的公共规约和应用规约都属于测试范围，仅由 Git 标签区分测试公共与应用归属。`skills/` 以同级 `coding/`、`test/` 分别收口开发和测试 Skill。`docs/应用架构/` 合并开发应用关系与测试概述、应用场景说明书等场景测试资产，`docs/技术架构/` 只保留开发技术资产。目录名使用中性色，范围标签区分开发、测试、开发与测试、个人本地，Agent 形态标签区分 Agent/workagent，最右侧标签标明开发 AI Git、测试公共 AI Git、测试 AI Git 以及开发业务代码 Git。`agents/`、`skills/`、`docs/` 是多 Git 逻辑合并视图，不是新的物理仓库；页面同时说明 `spec`、稳定测试资产和建设责任，并只保留“整体目录”“内容与责任”两个视图。应用内 Help 固定章节清单必须同步注册该 Markdown，保证首页入口、内嵌页面和宠物问答使用同一内容；宠物问答读取原始 Markdown 时会剥离仅供页面渲染的 frontmatter，只使用用户可见正文。
 
 `agent-web` 每次加载 Vite 配置时按北京时间生成 `VyyyyMMdd.HHmmss` 构建版本，并以只读编译常量固化到 bundle；设置弹窗左侧导航底部展示该版本。普通刷新或静态服务重启不会改变版本，只有重新构建前端产物才会变化。
+
+`/workflow-chat` 是与 OpenCode/LobeHub 对话隔离的长程任务入口，对所有登录用户可见。`packages/workflow-api-client` 直接访问同源 Python `/workflow-api/v1/**` 并使用带 Authorization/`Last-Event-ID` 的 fetch SSE；`packages/workflow-chat` 提供 TDesign Chat、结构化仓库/分支/模式/智能体输入、进度、取消、报告版本和局部重分析。两包不依赖 `backend-api`、`event-stream-client` 或现有 `agent-chat` 状态。
 
 `packages/editor` 在 Markdown 预览中支持 Mermaid `flowchart`/`graph`、`sequenceDiagram` 与 `stateDiagram`/`stateDiagram-v2` 可视化编辑。Flowchart 提供按“流程图 / 文档与显示”分组的 14 类共享 SVG 节点、轮廓分配的 8/12 个端口和不随画布缩放、可在视口边缘翻转的双列快捷建连菜单，选中备选图形后菜单立即收起；节点无论是否选中都可直接从可见连接点拖出连线，选中节点的连接点外围继续用于移动节点，选中连线可拖动绿色端点更换起止锚点。选中节点还可通过四角外置手柄在 50%–300% 范围内等比缩放，实际节点、端口、ELK 包围盒和路由端点共用缩放后的尺寸；双击节点或连线可就地编辑文字与文字颜色，右侧属性栏可设置节点文字、填充、边框颜色和连线文字颜色。Sequence 使用递归 AST、专用时序场景和“元素 / 结构 / 属性”单侧栏，支持参与者、消息、Note、生命周期和常用组合片段任意嵌套。State 使用递归 Scope/Region 模型和“概览 + 聚焦”画布，支持复合/嵌套状态、并发 Region、开始/结束、Choice、Fork/Join、Note、各层方向、标签转换、自循环、状态说明与限定直接样式；同一聚焦层展示全部并发 Region。三类图各自维护 parser、serializer、校验和布局，按连接规则复用画布拖线能力；应用后只回写当前 Markdown fence，并继续复用工作台 dirty、Git Diff 与 workspace 文件保存链路。
 
@@ -209,6 +214,7 @@ tools/dev-phase11-real-e2e.sh --start-services
 
 - 前端不得直连 opencode server。
 - HTTP 请求只能通过 `packages/backend-api`；Run/Diff/runtime 默认使用 `agentId=opencode` 的 `/api/internal/agent/{agentId}/...` 后端 URL。
+- 独立工作流是唯一受控例外：`/workflow-chat` 只能通过 `packages/workflow-api-client` 同源访问 Python `/workflow-api/v1/**`，不经过 Java；其原生 AG-UI 也不进入平台 RunEvent。
 - Model/Provider 目录由 `packages/backend-api` 读取 opencode 实例级 `/config` 合并有效配置；`enabled_providers` 非空时按 Provider ID 同时过滤两类目录，企业包只展示企业白名单 Provider 下的全部模型，不再混入 OpenCode Zen。未声明白名单或配置暂时不可读时保持原生目录兼容。前端在服务重启导致目录为空或请求失败时每 3 秒自动恢复查询，目录非空后停止短轮询，窗口重新聚焦也会刷新，无需整页刷新模型列表。
 - 设置页异步创建或重新启用应用工作空间后，以 operation 成功终态为准通知工作台失效模板目录；左下角工作空间选择器会自动拉取新目录，不依赖用户关闭设置时的过早刷新或整页刷新。
 - 工作台首次 `/processes/me` 不携带服务器路由头；响应包含 binding `linuxServerId` 后只在当前页面内存保存，后续用户 OpenCode、Session、Run、SSE 和本地工作区请求通过 backend-api/event-stream-client 携带 `X-Test-Agent-Linux-Server-Id`。退出、切换用户和刷新必须清空，禁止持久化；登录、用户管理、应用列表及其它共享控制面继续普通负载均衡。该头只优化 Nginx 首跳，不能替代后端归属校验。
@@ -219,6 +225,7 @@ tools/dev-phase11-real-e2e.sh --start-services
 - 企业内浏览器基线按 Chromium 108 兼容，`agent-web` 生产构建显式使用 `build.target=chrome108` 和 `build.cssTarget=chrome108`；涉及 Web Crypto、Clipboard 等安全上下文 API 时必须先做能力检测，内网 HTTP 访问不能直接假设这些 API 可用。个人 SSH key 加密优先使用 Web Crypto，HTTP 内网下 `crypto.subtle` 不可用时使用 node-forge 纯 JS AES-GCM + RSA-OAEP/SHA-256 回退，仍禁止明文提交。
 - 小宠物拖动在 Chromium 108 下使用 `window` 捕获阶段接收 `pointermove/up/cancel`，避免编辑器或工作台子组件停止事件冒泡后中断拖动；仍不依赖 pointer capture。
 - RunEvent SSE 和用户级运行态 fetch SSE 只能通过 `packages/event-stream-client`。单 Run SSE 的应用层身份固定为标量 `(runId, sessionId, token)`，同一 Run 的对象投影不得重建连接；终态先建立 500ms hold 再更新状态，标题待定继续复用原连接，legacy 终态反馈恢复按 runId 合并为一条、最多 3 轮的兼容链。连接内部的 durable 游标、事件去重和 transport reconnect 仍由公共 client 维护。用户级 runtime-state SSE 是运行恢复主入口，使用 `/api/internal/platform/opencode-runtime/sessions/runtime-state/events` 携带 Bearer Token，按 1/2/5/10/30 秒退避重连；连接期间不并行查询 runtime-state HTTP，也不做 1.5 秒 active-run 热轮询。摘要里的非终态 `runId/runStatus` 直接接管 RunEvent SSE；只有流不可用时，当前 Session 才执行一次 `backend-api.getActiveRun(sessionId)` fallback，短连接反复收到首帧后立即断开仍视为同一故障，连接稳定保持 5 秒后才允许后续新故障再次 fallback。收到 `run.snapshot.reset` 时，event client 只投递事件且不推进 durable 游标；agent-chat reducer 保留平台持久消息、清空当前 Run 实时投影并按 snapshot 顺序重放，Workbench 同步清空独立 Diff/实时跟随状态。运行中点击新建对话只清空当前视图和关闭当前 RunEvent SSE，不调用 cancel/abort；前端只把 RunEvent 应用到当前订阅且仍为页面活动态的 Run。`session.status.retry` 会在右侧时间线展示原因和 60 秒倒计时，等待期间仍视为运行中，第 1/2 次到期后用最近一次 Run 草稿自动重试，第 3 次后本地兜底为失败；同一 `runId` 已收到 `run.succeeded/run.failed/run.cancelled` 后，乱序到达的 `session.status.busy/retry` 不得覆盖终态，不同新 Run 的 busy 仍正常生效；新 Run 请求和后到成功/取消终态会清理上一轮 `run.failed` 失败卡与 SSE 连接错误提示，避免旧 `Streaming response failed` 覆盖后续轮次。
+- workflow AG-UI 只能通过 `workflow-api-client`；连接先应用 `STATE_SNAPSHOT/MESSAGES_SNAPSHOT`，再按 durable id 重放，重复事件与 toolCall 幂等，未知事件安全忽略。离开路由或认证变化必须取消 fetch、释放重连定时器并清空仅内存连接状态。
 - 聊天面板的失败、停止和完成标记按当前 Session 隔离；从已建立会话切换到另一会话或空白新对话时清理组件本地终态，返回历史会话时只根据该会话恢复出的消息和 Run 状态重建。空草稿首次落成真实 Session 仍属于同一轮 Run，不触发该清理。
 - 右侧 Agent 面板的“原始输出”只展示当前页面生命周期内，前端捕获的浏览器与平台后端 HTTP 请求/响应正文和 RunEvent SSE `MessageEvent.data`。HTTP 与 SSE 共用 `prepareRawOutputBody` 安全边界，在写入按 Session 划分的页面缓存前递归脱敏所有层级、大小写不敏感的 `contextToken`、XXL SSO ticket、token、cookie、password、secret 与 session digest，再执行长度截断；每个 Session 仅保留最新 2000 条，浮层展示、筛选和下载统一按 `occurredAt` 时间倒序派生，打开浮层或收到新记录时默认回到顶部显示最新内容，但不改变底层采集顺序。它不记录 opencode server 原始事件、不落库，刷新或换浏览器后不保留。
 - 右侧会话 footer 最左侧在真实根 Session 建立后显示 16px 上下文使用率圆环，悬浮只展示使用率、当前模型总上下文和已使用量；点击后参照会话列表效果，在对话栏外侧左边打开详情抽屉且不遮挡对话，再次点击圆环可关闭。圆环按使用率 0–59% 显示 normal 紫色、60–79% 显示 warning 橙色、80% 及以上显示 danger 红色；未知模型上限只显示空轨道，超过 100% 的文本使用率保持原值但 SVG 满环并为 danger。平台 Session ID 仅用于抽屉生命周期与缓存隔离，不能同 OpenCode message scope ID 比较；card、显式 child scope，以及未显式标记但 `sessionId/rootSessionId` 不同的 scope 不进入根统计，未带 scope 的平台历史仍兼容保留。抽屉展示会话、供应商、模型、可见对话消息数、限制及总/输入/输出 Token：每条 root user 消息计一次，连续 root assistant 原始消息只在出现非空 text/text part 后合并计为一次，reasoning/tool/file/retry/step-only 不计数。用量取最近一条有效根 assistant 快照的 input/output/reasoning/cache read/cache write 之和，后续全零/缺失 snapshot 不覆盖它；限制始终跟随当前所选模型，五类堆叠条以同一 root 过滤并校准到该快照 input。`payload.info` 的消息、模型、tokens 与远端 scope 由 reducer 保留，子 Agent 视图隐藏该入口。该能力只复用模型目录、历史消息和 RunEvent 数据，不新增 API、事件或持久化字段。

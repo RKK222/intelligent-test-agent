@@ -174,8 +174,11 @@ public class UserManagementApplicationService {
         ConversationContextUserMutation mutation = conversationContextStore == null
                 ? null
                 : conversationContextStore.beginUserMutation(user.userId());
-        boolean transactionCompletionRegistered = registerMutationCompletion(mutation);
+        List<UserId> affectedUsers = List.of(user.userId());
+        boolean transactionCompletionRegistered = registerRoleChangeCompletion(mutation, affectedUsers);
         try {
+            // 权限边界变化前先撤销平台Token，使Python直连认证和已有模型grant立即失效。
+            tokenStore.deleteByUserIds(affectedUsers);
             List<UserRole> existingRoles = userRoleRepository.findByUserId(user.userId());
             existingRoles.forEach(userRoleRepository::delete);
             userRoleRepository.save(UserRole.create(user.userId(), roleDictionary.dictId()));
@@ -185,8 +188,11 @@ public class UserManagementApplicationService {
             }
             throw exception;
         }
-        if (mutation != null && !transactionCompletionRegistered) {
-            conversationContextStore.completeUserMutation(mutation);
+        if (!transactionCompletionRegistered) {
+            if (mutation != null) {
+                conversationContextStore.completeUserMutation(mutation);
+            }
+            tokenStore.deleteByUserIds(affectedUsers);
         }
         return userResponse(user);
     }
@@ -273,14 +279,24 @@ public class UserManagementApplicationService {
     /**
      * 生产事务在真正 commit 后才原子完成 Redis gate；回滚时仅释放当前 gate。
      */
-    private boolean registerMutationCompletion(ConversationContextUserMutation mutation) {
-        if (mutation == null || !TransactionSynchronizationManager.isSynchronizationActive()) {
+    private boolean registerRoleChangeCompletion(
+            ConversationContextUserMutation mutation,
+            List<UserId> userIds) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             return false;
         }
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                conversationContextStore.completeUserMutation(mutation);
+                if (mutation != null) {
+                    conversationContextStore.completeUserMutation(mutation);
+                }
+                try {
+                    // 再次撤销以收敛角色事务期间极小的并发登录窗口。
+                    tokenStore.deleteByUserIds(userIds);
+                } catch (RuntimeException exception) {
+                    LOGGER.error("Failed to revoke concurrent tokens after user role commit", exception);
+                }
             }
 
             @Override
@@ -288,7 +304,9 @@ public class UserManagementApplicationService {
                 if (status == TransactionSynchronization.STATUS_COMMITTED) {
                     return;
                 }
-                conversationContextStore.abortUserMutation(mutation);
+                if (mutation != null) {
+                    conversationContextStore.abortUserMutation(mutation);
+                }
             }
         });
         return true;

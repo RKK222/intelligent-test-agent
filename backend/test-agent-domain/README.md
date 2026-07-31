@@ -16,6 +16,7 @@
 - Run 状态机、路由决策值对象、领域服务接口。
 - 保持业务规则与基础设施分离。
 - 认证领域端口 `TokenSessionMarkerStore` 只定义平台 Token 的 SHA-256 session marker 写入、删除、校验与摘要规则，供平台 Token 生命周期和 XXL 会话联动复用；不暴露 Redis key。
+- `WorkflowCapabilityStore` 只定义一次性 checkout ticket、HMAC nonce、短期模型 grant、run撤销墓碑的原子端口；payload绑定用户/session/task/run/runner/分支或analyzer，不包含Python工作流会话、任务、报告和事件。
 
 ## 已有模型
 

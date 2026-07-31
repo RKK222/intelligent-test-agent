@@ -23,7 +23,7 @@ import {
 import { DiffViewer, parseUnifiedPatch } from "@test-agent/diff-viewer";
 import { CodeEditor, languageFromPath, type EditorSelectionContext } from "@test-agent/editor";
 import { subscribeRunEvents, subscribeSessionRuntimeState, type RunEventRawMessage } from "@test-agent/event-stream-client";
-import { BookOpenText, Boxes, Code2, FileWarning, MessageSquare, Monitor, Wrench } from "lucide-vue-next";
+import { BookOpenText, Boxes, Code2, FileWarning, GitCompareArrows, MessageSquare, Monitor, Wrench } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
@@ -348,6 +348,10 @@ async function openLobehub() {
   } finally {
     lobehubLaunching.value = false;
   }
+}
+
+async function openWorkflowChat() {
+  await router.push({ name: "workflow-chat" });
 }
 
 function firstLoginGuideStorageKey(userId: string) {
@@ -9129,6 +9133,16 @@ async function handleLogout() {
             @click="openLobehub"
           >
             <MessageSquare class="figma-activity-icon" :stroke-width="1.5" />
+          </button>
+          <button
+            type="button"
+            class="figma-activity-btn"
+            aria-label="长程任务工作台"
+            title="长程任务工作台"
+            data-testid="workflow-chat-activity-button"
+            @click="openWorkflowChat"
+          >
+            <GitCompareArrows class="figma-activity-icon" :stroke-width="1.5" />
           </button>
           <button
             v-if="isSuperAdmin"

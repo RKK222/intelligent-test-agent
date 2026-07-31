@@ -13,6 +13,7 @@ describe("login redirect", () => {
     expect(resolveLoginRedirect("/toolbox?source=omni-tools")).toBe("/toolbox?source=omni-tools");
     expect(resolveLoginRedirect("/toolbox/?source=it-tools")).toBe("/toolbox/?source=it-tools");
     expect(resolveLoginRedirect("/lobehub/launch")).toBe("/lobehub/launch");
+    expect(resolveLoginRedirect("/workflow-chat")).toBe("/workflow-chat");
     expect(resolveLoginRedirect("/lobehub/launch?returnUrl=https://evil.example#ticket"))
       .toBe("/lobehub/launch");
   });

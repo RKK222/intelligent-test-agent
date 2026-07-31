@@ -6,6 +6,7 @@
 
 ## 主要职责
 
+- `WorkflowCapabilityController` 只暴露 `/api/internal/workflow-capabilities/v1/**` 服务端白名单：仓库/分支授权、一次性 checkout ticket、模型 grant 和超级管理员复核。入口校验固定 client/runner identity、原始 body digest、timestamp、nonce 与 HMAC；不定义工作流 conversation/message/task/run/report/event，也不代理 `/workflow-api/**` 或 AG-UI。
 - 当前用户 OpenCode 受管启动/重启会在公共启动程序中自动选择同服有效公共个人配置；初始化首次创建 `public-{userId}` worktree 后也会自动加载。API 只返回既有 `publicWorktreePreparation` 结果，不新增轮询接口；准备或加载异常不回滚已健康进程。
 - 暴露 `/api/internal/platform/...`、`/api/internal/agent/{agentId}/...` 和预留 `/api/public/...` URL。
 - 旧 runtime/workspace `/api/...` 兼容 URL 由 `LegacyApiGoneWebFilter` 在进入 Controller 前统一返回 `410 API_GONE`；登录认证 `/api/auth/login|logout|me|refresh` 保留为稳定入口。

@@ -9,6 +9,14 @@
 - 存量 `Jdbc*Repository` 仅保留迁移窗口，后续触及其 SQL 时迁移到 MyBatis XML。当前通用参数 `CommonParameterRepository`、Agent 配置 `AgentConfigRepository`、`RunEventRepository` 与 scheduler `ScheduledTaskRepository` 已迁移到 MyBatis XML；夜间任务从首版即只使用 MyBatis XML。
 - Flyway migration 只能承载表结构变更、历史数据兼容迁移和生产必需的基础字典/系统参数；禁止通过 Flyway 写入测试、演示、个人开发或环境专属数据（例如样例应用/工作区、默认开发账号、默认本地进程绑定）。此类数据必须放在测试 fixture、`test-agent-test-support`、mock 数据、显式本地开发脚本或人工初始化流程中。历史已存在的开发种子迁移仅为兼容已落库环境保留，后续不得新增同类迁移。
 
+## Python workflow 独立 PostgreSQL
+
+长程任务使用同一 PostgreSQL 集群中的独立 `test_agent_workflow` 数据库和最小权限账号，与平台主库及 XXL MySQL 完全隔离。业务表由 `workflow-service/migrations/` 的 Alembic 管理，LangGraph checkpoint 表由独立 `testagent-workflow checkpoint-setup` 命令初始化；不扫描 Java Flyway location、不写平台 `flyway_schema_history`，也不受 Java MyBatis XML 规则约束。
+
+业务库保存 `conversations/messages/tasks/task_repositories/runs/durable_events/analyzer_results/report_versions/workspace_leases/audit_logs/transactional_outbox`。活动run部分唯一约束保证同一会话只有一个 `QUEUED/RUNNING/WAITING_INPUT`；Worker通过 `FOR UPDATE SKIP LOCKED`、租约和心跳认领任务。源码、容器和工具原始日志不写数据库，48小时工作区过期由数据库租约驱动Runner清理，失败状态持久化为 `CLEANUP_FAILED` 并重试。
+
+建库、迁移账号、备份、发布顺序和回滚见 `docs/deployment/workflow-offline.md`。平台 Java migration不得创建、修改或兼容这些Python业务表。
+
 ## XXL-JOB 独立 MySQL migration
 
 XXL MySQL 与平台 PostgreSQL 完全分离。Admin 子上下文只扫描 `backend/test-agent-xxl-job-integration/src/main/resources/xxl-job/db/migration`，平台主 Flyway 的 `classpath:db/migration` 不会扫描该独立顶层目录。
