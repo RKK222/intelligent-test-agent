@@ -3969,3 +3969,26 @@
 
 - 前端交互已实现并运行验证；未新增或变更 HTTP API、平台文件 WebSocket/RunEvent wire、数据库/Flyway、关系型 SQL、性能、安全、环境配置、generated SDK 或 OpenCode 源码。
 - 下载内容受现有文件 WebSocket UTF-8 文本读取契约约束；二进制文件的原始字节下载仍需后续扩展二进制读取协议，当前未宣称已覆盖该场景。
+
+## 2026-07-31 - 基于最新代码重建企业三节点增量包
+
+### Why
+
+- 本地主线在上一企业包之后新增原生附件投递修复、工作区下载与统一切换入口，需要把当前代码重新交付到企业双后台和前端节点，同时避免重复携带未变化的 worker、toolbox、Python 和公共 Agent。
+
+### What
+
+- 以干净工作树提交 `f325c14c17536b061eae935b2c623bd3aca53992` 为输入重新构建后端、前端、内层标准发布 ZIP 和固定名三节点外层 ZIP；相对上一包没有新增或改写 Flyway migration。
+- 组件计划保持 `worker runtime=reuse`，指纹 `aa452daf700adfbabf01f1052f8eb8274daf3c7a0e95cd12152b1e39f1708000`；`toolbox=reuse`，指纹 `35447da08f477dd02e458e4344be9bd870452dba12ba6db32d250c56e9f15040`。
+- 新内层 `test-agent-internal-release.zip` SHA-256 为 `3359570c5f89bb918edbd13d1903e948410a6dc093d2b92eccf65191e1c68203`；新外层 `test-agent-two-backend-complete.zip` SHA-256 为 `313f378e8266d010ed046be2950a053edb49abfbadf6b3b59f232284d94478c3`，外层嵌入内层与当前内层摘要完全一致。
+
+### How
+
+- 执行标准 `deploy/internal/package-release.sh --output-dir deploy/internal/dist` 和 `package-two-backend-complete.sh`；后端企业 JAR、前端 typecheck/生产构建、发布 ZIP backend/frontend `--validate-only`、ZIP/TAR 归档卫生、内外层摘要、增量组件、三节点结构和自动部署入口回归全部通过。
+- 包内 `test-agent-persistence` 的正式工具盒子 migration SHA-256 为固定值 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`。
+- JDK 25 后端相关 reactor 全部通过，其中 opencode-runtime 756 项、opencode-client 67 项、agent-runtime 8 项；本次前端目标 4 文件 53 项通过。前端全量同时执行为 103 files / 1725 passed / 1 skipped，但 editor/Mermaid/FigmaChatPanel 有 4 项既有 DOM/超时波动，未影响目标测试、typecheck 或生产构建。
+
+### Result
+
+- 当前可交付外层固定名 ZIP 及 SHA 文件已生成并同步到 `deploy/internal/dist/0731/`；本次只需滚动更新 `.4`、`.114` 两台 Java 后端和 `.2` 前端，worker/toolbox/Python/公共 Agent 不需要随本包重装。
+- 未修改业务代码、API、RunEvent、数据库结构、Flyway SQL、关系型 SQL、环境配置、generated SDK 或 OpenCode 源码；企业现场仍需按 `.4 → .114 → .2` 执行，首台失败立即停止。
