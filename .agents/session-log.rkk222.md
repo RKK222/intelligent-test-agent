@@ -5,6 +5,73 @@
 
 ## Entries
 
+### 2026-08-01 - 审计并合并工作台界面与独立 UI 执行能力
+
+### Why
+
+- 用户要求在合入主线前确认本轮没有改动 OpenCode 对话相关逻辑，同时明确小宠物默认收起、工作台界面调整和独立 UI 执行能力均属于应合入范围。
+
+### What
+
+- 将工作台工行配色、悬浮三栏、顶栏应用/工作空间/版本选择、手册选中态、小宠物默认收起，以及独立 UI 执行控制器、客户端、短效令牌和 OpenCode 进程环境注入一并纳入主线候选。
+- 逐路径核对 `FigmaChatPanel.vue`、`useSideQuestionRun.ts` 和 `frontend/packages/agent-chat/**` 均无改动；未修改消息发送、Session/Run、RunEvent、Question/Permission 或对话状态归并逻辑，也未修改 `opencode-source` 快照。
+
+### How
+
+- 对完整合并差异执行文件清单、对话关键词、OpenCode 源码边界和冲突标记检查；保留主线与功能分支各自已有的会话记录。
+- 运行 `FigmaShell.test.ts` 54 个组件用例、agent-web typecheck/生产构建与用户手册构建；使用 JDK 25 运行 UI 执行控制器、鉴权过滤器、客户端、短效令牌和 OpenCode 启动环境注入相关 38 个后端用例，并执行 AI 文档校验。
+
+### Result
+
+- 合并候选的前后端定向测试、类型检查、生产构建和文档校验均通过；OpenCode 相关代码变化仅限独立 UI 执行所需的进程环境变量注入，不涉及对话链路。
+- 新增的是独立 UI 执行 HTTP 接口与短效鉴权能力；未变更 RunEvent、数据库/Flyway、关系型 SQL、generated SDK、OpenCode 源码或 `.env.local`。
+
+### 2026-07-31 - 调整工作台顶栏上下文布局与默认版本
+
+### Why
+
+- 用户要求手册打开时保持红色选中态，顶栏所有元素在首行与面板间隔组成的视觉带内上下居中；应用、工作空间、版本三个按钮要位于左右邻近元素之间的正中，并在选定工作空间后默认唯一版本或最新版本。
+- 用户同时反馈顶部和左下角版本切换都慢，需要区分新增 UI 开销、既有切换链路与本机性能压力。
+
+### What
+
+- `FigmaShell` 顶栏改为三列网格：Logo 左对齐，中间三个白底细框上下文按钮在 Logo 末端与右侧工具组起点之间保持左右等距，书本手册、透明底细框运行态摘要和单字头像依次固定在右侧；三组统一以 44px 视觉带的 `y=22px` 为中心线。
+- 手册问号替换为书本线框图标，并接入 `helpCenterOpen`，弹框打开期间保持柔红底、深红图标和 3px 工行红定位标记。
+- 顶部工作空间/版本直接复用 `appTemplatesWithVersions`、`handleLoadVersions` 和 `handleSelectVersion`；选定工作空间后，单版本直接选择该项，多版本复用后端 `version desc, updated_at desc` 的首项。左下角入口继续保留，对话逻辑未改。
+- 同步工程 README、模块图、前端规范、包说明、首次引导和用户手册，明确顶部与左下角入口关系、默认版本和书本手册图标。
+
+### How
+
+- 组件测试覆盖右侧顺序、手册持续选中态、三列等距 CSS、单版本懒加载和多版本最新项；类型检查继续复用现有前端类型，没有新增协议或依赖。
+- 浏览器实测中间组左右留白均为 `188.7265625px`、差值为 `0`，Logo/中间组/右侧组中心线均为 `y=22px`；选择“本地-测试”后顶部默认版本约 `0.37s` 显示，实际工作区和文件树约 `8.1s` 完成。
+- 性能采样时 10 核机器负载均值约 `15.07/16.19/18.02`、CPU 仅 `4.48%` 空闲、物理内存仅余约 `99MB` 且压缩内存约 `7.7GB`；版本切换本身还串行复用 Git 权限校验、默认个人工作区准备、工作区读取、最近记录和目录加载，因此两处入口都会受同一链路和本机负载影响。
+
+### Result
+
+- `FigmaShell.test.ts` 54/54、agent-web typecheck 和用户手册 VitePress build 通过；`http://127.0.0.1:3002/` 真实工作台已验证默认版本、实际文件树切换、等距/居中和手册红色打开态。
+- 不涉及 HTTP API、RunEvent、数据库/Flyway、关系型 SQL、鉴权、安全配置、generated SDK、OpenCode 源码或 `.env*`。未对既有版本切换后台链路做性能重构；本轮仅诊断并改善顶部即时反馈。
+
+### 2026-07-31 - 工作台进入页面默认收起小宠物
+
+### Why
+
+- 页面挂载时会恢复已保存的固定宠物为可见状态，导致用户每次进入工作台都直接看到展开的小宠物。
+
+### What
+
+- `FigmaShell` 挂载时保留固定和位置偏好，但不再将宠物状态直接恢复为 `idle`；每次进入页面从收起态开始，用户手动唤起后仍可恢复固定状态和保存位置。
+- 增加固定偏好已保存时的组件回归，并同步 agent-web README 与 `src/PACKAGE.md` 的行为说明。
+
+### How
+
+- 复用既有 `loadRobotFixed`、`loadSavedRobotPosition` 和 `toggleRobotVisibility` 链路，只移除挂载阶段的可见状态恢复分支。
+- 运行 `FigmaShell` 新增用例、agent-web typecheck、生产 build，并启动 `corepack pnpm --filter @test-agent/agent-web dev -- --host 127.0.0.1 --port 3001` 做 HTTP smoke。
+
+### Result
+
+- 新增行为用例通过；typecheck、生产构建和 `http://127.0.0.1:3001/` 返回 200。
+- 完整 `FigmaShell` 套件期间工作区另有并发 ICBC 配色改动反复更新 `globals.css` 与其源码断言，出现 1 个无关配色断言失败；宠物行为用例单独通过。未修改 API、事件、数据库、安全配置、generated SDK 或 OpenCode 源码。
+
 ### 2026-07-30 - 基于最新主线重建三节点企业交付
 
 ### Why
@@ -4174,3 +4241,52 @@
 
 - 企业包已构建并在 Mac 侧完成可重复校验，但因尚未取得目标企业 PostgreSQL 的完整 `flyway_schema_history`，部署准入仍待现场只读盘点。任一未知 checksum、失败记录、未知更高版本，或已执行 `20260731115520` 但存在 `expires_at > accepted_at + 168 hours` 的快照，都必须停止首台发布，禁止 `repair`、`outOfOrder` 或手工修改 history。
 - 现场必须按 `.4 → .114 → .2`：首台 Java 触发 migration 后复查 history、约束和日志，无异常才继续第二台；两台 Java 必须同批升级，worker/manager/toolbox/Python/公共 Agent 无需重启。
+## 2026-07-31 - 集成独立 uitest6 单次 UI 测试执行子智能体
+
+### Why
+
+- 用户需要在当前平台对话中唤起 UI 测试执行子智能体，把测试设计产出的一行 `案例名称 | 测试步骤 | 测试数据 | 预期结果` 交给独立 `uitest6` 平台执行一次；`测试步骤`是唯一操作流程，同时要求 `uitest6` 不进入当前仓库并继续独立运行。
+
+### What
+
+- 当前平台新增受控 `ui_test_execute` Tool、`test-execution-ui` 公共子智能体、同节点 Java 桥接、用户作用域专用 Token 和 `uitest6` integration client；外部服务 Token 只驻留 Java，Tool 只允许四列案例和服务端派生幂等键，提交一次后轮询同一 `executionId`。
+- `uitest6` 在独立 GitHub 仓库的 `wr` 分支新增带 Bearer 鉴权、幂等提交、状态查询和 executionId 绑定报告的 additive API，复用原有 BrowserUse session/runner；未改变原 `/api/agent/run`。提交 `4a0bdfbb` 已推送到 `origin/wr`。
+- 公共 OpenCode 配置基于最新远端 `master` 扩展现有 Test Execution 编排，新增 UI 子智能体和 Tool；保留原接口执行、脚本、报文和数据库校验规则。提交 `e98de0c` 已推送到公共配置远端 `master`。
+- 同步 integration、API、opencode-runtime 模块说明，以及 HTTP、RunEvent、部署、安全和对话验收文档；没有新增数据库/Flyway、关系型 SQL、前端协议或 OpenCode 源码修改。
+
+### How
+
+- JDK 25 定向 Java 测试覆盖外部四列请求、Bearer/trace、错误映射、专用 Token、进程环境注入、Controller 和鉴权过滤，共同命令退出 0；uitest6 契约测试 5 项、Ruff 和 compileall 通过；Bun Tool 冒烟确认一次 POST、一次 GET 后返回 `SUCCEEDED`，OpenCode debug 确认子智能体只可调用 `ui_test_execute`。
+- 相关后端全量 reactor 测试运行到无关 `test-agent-xxl-job-integration` 时，Testcontainers MySQL 两次超过 JDBC 就绪窗口并重复重试，人工中止为 exit 130；本次定向测试已独立通过，未把该环境故障计作功能通过。
+- 使用未修改的 `.env.test`、JDK 25 和 test profile 完整重启 backend、opencode-manager、frontend；health/readiness 为 `UP`、前端 3000 与登录 CORS 正常，新桥接无专用凭据时返回统一 401，manager 最终持续 `HEALTHY`。
+
+### Result
+
+- 对话可直接 `@test-execution-ui`，或由 Test Execution 按一行一次 Task 派发；四列整体传递，不把案例名称、测试数据或预期结果扩写成额外操作步骤。当前仓库只包含桥接与公共配置模板，没有包含、打包或提交 `uitest6` 源码。
+- 真实浏览器端到端执行尚未验证：本地 test 环境未配置可用的独立 `uitest6` 地址、服务 Token、目标站点及其模型/浏览器运行条件；上线前仍需按文档在两端配置同一 `UITEST6_INTEGRATION_TOKEN` 并执行一条真实四列案例验收。
+
+## 2026-07-31 - 补充 UI 执行被测环境门禁并完成百度真实自动化
+
+### Why
+
+- 用户进一步明确 UI 执行输入应为“案例 + 被测系统环境”，环境可由用户直接输入或由父 Agent 从用户指定路径读取；没有环境时必须中断，不能调用 Tool 或使用默认地址。
+- 首次百度真实运行中，执行智能体误把内容输入 `#chat-textarea`，BrowserUse Judge 已判失败，但 uitest6 集成层仍按智能体自报结果返回成功，需要消除该假阳性后再复测。
+
+### What
+
+- 当前平台的 Java command、桥接 DTO、外部请求、公共 Tool schema 和 UI 子智能体规约统一增加必填 `testEnvironment`；空白环境在 Tool 之前和 Java 边界均失败，四列案例继续整体结构化传递，只有测试步骤作为操作流程。
+- 独立 uitest6 `wr` 分支把 `test_environment` 传入 BrowserUse 任务，并在集成适配层读取 BrowserUse Judge；Judge 明确失败时强制终态失败并返回 failure reason，未启用 Judge 的旧运行保持兼容。环境提交 `28360add`、Judge 修正 `b5bdfc10` 均已推送 `origin/wr`。
+- 公共 OpenCode 配置的父编排、UI 子智能体、Tool 和说明同步环境门禁，提交 `9bd9562` 已推送公共配置远端 `master`。
+- 为本机用户预览，通过平台 Agent 配置 file-ws route/ticket/RPC 把上述已发布 Agent 和 Tool 精确写入公共个人 worktree；未直接修改运行目录。个人热加载被两条 2026-07-10/11 遗留、等待 QUESTION 的 RUNNING Session 正常阻断，未擅自取消历史 Run。
+
+### How
+
+- 当前平台 JDK 25 定向测试 6 项通过，覆盖环境序列化、空白环境拒绝及“不调用外部 client”；`tools/verify-ai-docs.sh`、`git diff --check` 以及仓内模板和公共远端文件逐字比对通过。
+- uitest6 契约测试 6 项、Ruff 和 compileall 通过；用真实 Chrome 访问百度生产环境，明确限定传统搜索框 `input#kw`，写入 `OpenAI` 后两次读取 value，BrowserUse Judge 判定成功。执行 `uiexec_abeaf1aa3243426183f588680d90eafc` 返回 `SUCCEEDED / success=true / errors=[]`，5 步、46.20 秒并生成报告。
+- 使用未修改的 `.env.test` 和瞬时 UI 平台环境变量重启当前 backend、manager、frontend；独立 uitest6 在 `127.0.0.1:7788` 启动。未修改 `.env.local`。
+
+### Result
+
+- 缺少被测系统环境时，UI 执行链路会中断且不创建外部自动化；提供环境和一行四列案例时，独立 uitest6 已完成百度搜索框输入的真实正向自动化，Judge 失败也不再可能被集成接口误报为成功。
+- 当前用户对话入口的最后一次真实派发尚未完成：公共个人运行态因两条遗留 RUNNING Session 无法 dispose；共享公共运行仓库另有 4 个仅本地、未被远端引用的提交，不能用全局 reset 覆盖。后续需先由用户确认是否取消这两条遗留 Run，并为共享仓库本地提交选择保留方式，再执行热加载/全局 rollout 和对话验收。
+- 本次没有新增数据库/Flyway、关系型 SQL、RunEvent/SSE、前端协议或 OpenCode 源码变更；uitest6 源码仍只存在独立仓库，不进入当前项目。

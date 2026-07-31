@@ -35,6 +35,25 @@
   --ta-del: rgba(158, 59, 52, 0.12);
   --ta-add: rgba(63, 122, 90, 0.12);
   --ta-line-numbers: #b5b5b5;
+
+  /* 仅用于工作台外围：复用弹框常见浅雾蓝底，配合 CloudStudio 式白色分区与工行红定位轴。 */
+  --ta-shell-canvas: #f0f4fa;
+  --ta-shell-header: #ffffff;
+  --ta-shell-sidebar: #ffffff;
+  --ta-shell-surface: #ffffff;
+  --ta-shell-header-text: #000000;
+  --ta-shell-border: #e5e7eb;
+  --ta-shell-border-strong: #d1d5db;
+  --ta-shell-text: #1f2937;
+  --ta-shell-muted: #6b7280;
+  --ta-shell-hover: #f3f4f6;
+  --ta-shell-accent: #c8161d;
+  --ta-shell-accent-strong: #991b1b;
+  --ta-shell-accent-soft: #fdf2f2;
+  --ta-shell-gap: 8px;
+  --ta-shell-radius: 8px;
+  --ta-shell-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 18px rgba(15, 23, 42, 0.035);
+
   --ta-tree-bg: #ffffff;
   --ta-tree-border: #e5e5e5;
   --ta-tree-border-strong: #d6d6d6;
@@ -364,7 +383,7 @@ h3 {
   display: flex;
   height: 30px;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--ta-border);
+  border-bottom: 1px solid var(--ta-tree-border);
   background: var(--ta-tree-bg);
   font-family: var(--ta-tree-font-family);
 }
@@ -384,8 +403,8 @@ h3 {
   color: var(--ta-tree-text);
 }
 .ta-icon-tab.is-active {
-  border-bottom-color: var(--ta-tree-text);
-  color: var(--ta-tree-text);
+  border-bottom-color: var(--ta-tree-accent, var(--ta-tree-text));
+  color: var(--ta-tree-active-text, var(--ta-tree-text));
 }
 
 .ta-file-browser {
@@ -446,7 +465,7 @@ h3 {
 .ta-file-tree-row.is-active,
 .ta-file-tree-row.active {
   background: var(--ta-tree-active);
-  color: var(--ta-tree-text);
+  color: var(--ta-tree-active-text, var(--ta-tree-text));
 }
 
 .ta-file-tree-row:focus-visible {

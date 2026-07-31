@@ -67,4 +67,19 @@ class ApiTokenWebFilterTest {
 
         assertThat(called[0]).isTrue();
     }
+
+    @Test
+    void filterLeavesUiTestExecutionAuthenticationToDedicatedController() {
+        ApiTokenWebFilter filter = new ApiTokenWebFilter("secret-token");
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get(
+                "/api/internal/agent/opencode/ui-test-executions/uiexec_abc"));
+        final boolean[] called = {false};
+
+        filter.filter(exchange, currentExchange -> {
+            called[0] = true;
+            return Mono.empty();
+        }).block();
+
+        assertThat(called[0]).isTrue();
+    }
 }

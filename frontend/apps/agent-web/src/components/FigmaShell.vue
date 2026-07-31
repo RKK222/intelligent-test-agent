@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, type CSSProperties } from "vue";
-import { CalendarDays, ChevronDown, CircleHelp, Dices, Gamepad2, LogOut, MousePointer2, PawPrint, RefreshCw, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
+import { BookOpen, CalendarDays, ChevronDown, Dices, Gamepad2, LogOut, MousePointer2, PawPrint, RefreshCw, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
 import type { UserOpencodeProcess } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.svg";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
 import PetMiniGames from "./PetMiniGames.vue";
 import PetCompanionAvatar from "./PetCompanionAvatar.vue";
+import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 import {
   PET_COMPANIONS,
   getPetCompanion,
@@ -51,6 +52,14 @@ const props = withDefaults(
     apps?: AppItem[];
     joinableApps?: { appId: string; appName: string }[];
     selectedAppId?: string;
+    /** 顶栏复用左下角工作空间选择器的数据源，不新增工作区切换链路。 */
+    appTemplates?: AppWorkspaceTemplate[];
+    selectedWorkspaceTemplateId?: string;
+    selectedVersionId?: string;
+    loadingAppTemplates?: boolean;
+    loadingAppVersions?: boolean;
+    /** 用户手册弹框是否打开，用于让入口保持与左侧活动按钮一致的选中态。 */
+    helpCenterOpen?: boolean;
     currentUserName?: string;
     currentUserRoleLabels?: string[];
     opencodeProcessStatus?: UserOpencodeProcess | null;
@@ -86,8 +95,10 @@ const props = withDefaults(
       { id: "gcms-2024", name: "GCMS-2024", description: "气相色谱质谱年度测试" },
       { id: "ms-runner", name: "MS-Runner", description: "质谱批量回归任务" }
     ],
+    appTemplates: () => [],
     joinableApps: () => [],
     selectedAppId: "fgcms-psn",
+    helpCenterOpen: false,
     showProcessStatusInPet: false,
     onboardingActive: false,
     sideQuestionAvailable: true,
@@ -131,6 +142,8 @@ const emit = defineEmits<{
   (e: "toggle-left-panel"): void;
   (e: "toggle-right-panel"): void;
   (e: "select-app", appId: string): void;
+  (e: "load-versions", templateId: string): void;
+  (e: "select-version", payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }): void;
   (e: "logout"): void;
   (e: "refresh-opencode-process"): void;
   (e: "initialize-process"): void;
@@ -142,8 +155,13 @@ const emit = defineEmits<{
 }>();
 
 const appMenuOpen = ref(false);
+const workspaceMenuOpen = ref(false);
+const versionMenuOpen = ref(false);
 const userMenuOpen = ref(false);
 const runtimeInventoryOpen = ref(false);
+const headerWorkspaceTemplateId = ref<string | null>(null);
+const headerVersionId = ref<string | null>(null);
+const pendingHeaderDefaultVersionTemplateId = ref<string | null>(null);
 
 function toggleLeftPanel() {
   leftPanelOpen.value = !leftPanelOpen.value;
@@ -156,6 +174,8 @@ function toggleRightPanel() {
 
 function toggleAppMenu() {
   appMenuOpen.value = !appMenuOpen.value;
+  workspaceMenuOpen.value = false;
+  versionMenuOpen.value = false;
   userMenuOpen.value = false;
   runtimeInventoryOpen.value = false;
 }
@@ -164,10 +184,40 @@ function closeAppMenu() {
   appMenuOpen.value = false;
 }
 
+function closeWorkspaceMenu() {
+  workspaceMenuOpen.value = false;
+}
+
+function closeVersionMenu() {
+  versionMenuOpen.value = false;
+}
+
+function toggleWorkspaceMenu() {
+  workspaceMenuOpen.value = !workspaceMenuOpen.value;
+  appMenuOpen.value = false;
+  versionMenuOpen.value = false;
+  userMenuOpen.value = false;
+  runtimeInventoryOpen.value = false;
+}
+
+function toggleVersionMenu() {
+  versionMenuOpen.value = !versionMenuOpen.value;
+  appMenuOpen.value = false;
+  workspaceMenuOpen.value = false;
+  userMenuOpen.value = false;
+  runtimeInventoryOpen.value = false;
+  const template = headerWorkspaceTemplate.value;
+  if (versionMenuOpen.value && template && !template.versions) {
+    emit("load-versions", template.workspaceId);
+  }
+}
+
 function toggleUserMenu() {
   const nextOpen = !userMenuOpen.value;
   userMenuOpen.value = nextOpen;
   appMenuOpen.value = false;
+  workspaceMenuOpen.value = false;
+  versionMenuOpen.value = false;
   runtimeInventoryOpen.value = false;
   if (nextOpen) {
     emit("refresh-opencode-process");
@@ -180,6 +230,8 @@ function closeUserMenu() {
 
 function closeHeaderMenus() {
   closeAppMenu();
+  closeWorkspaceMenu();
+  closeVersionMenu();
   closeUserMenu();
   closeRuntimeInventory();
   // 等待旁路答案时，工作台其它区域仍可正常操作，且不会误关掉结果承载浮层。
@@ -195,6 +247,80 @@ function logout() {
 function selectApp(app: AppItem) {
   emit("select-app", app.id);
   closeAppMenu();
+}
+
+const availableWorkspaceTemplates = computed(() => props.appTemplates.filter((template) => template.enabled !== false));
+const headerWorkspaceTemplate = computed(() => {
+  const templates = availableWorkspaceTemplates.value;
+  return templates.find((template) => template.workspaceId === headerWorkspaceTemplateId.value)
+    ?? templates.find((template) => template.workspaceId === props.selectedWorkspaceTemplateId)
+    ?? templates.find((template) => template.versions?.some((version) => version.versionId === props.selectedVersionId))
+    ?? templates[0]
+    ?? null;
+});
+const headerWorkspaceVersion = computed(() => {
+  const versions = headerWorkspaceTemplate.value?.versions ?? [];
+  return versions.find((version) => version.versionId === headerVersionId.value)
+    ?? versions.find((version) => version.versionId === props.selectedVersionId)
+    ?? null;
+});
+
+// 版本接口已按 version desc、updatedAt desc 返回；直接复用首项，避免前端复制另一套“最新”排序规则。
+function defaultHeaderVersion(template: AppWorkspaceTemplate) {
+  return template.versions?.[0] ?? null;
+}
+
+function syncHeaderWorkspaceTemplate() {
+  const templates = availableWorkspaceTemplates.value;
+  const selected = templates.find((template) => template.workspaceId === props.selectedWorkspaceTemplateId)
+    ?? templates.find((template) => template.versions?.some((version) => version.versionId === props.selectedVersionId))
+    ?? templates[0];
+  headerWorkspaceTemplateId.value = selected?.workspaceId ?? null;
+  headerVersionId.value = props.selectedVersionId ?? null;
+  pendingHeaderDefaultVersionTemplateId.value = null;
+}
+
+watch(
+  () => [props.selectedAppId, props.selectedWorkspaceTemplateId, props.selectedVersionId],
+  syncHeaderWorkspaceTemplate,
+  { immediate: true }
+);
+watch(availableWorkspaceTemplates, (templates) => {
+  if (templates.some((template) => template.workspaceId === headerWorkspaceTemplateId.value)) return;
+  syncHeaderWorkspaceTemplate();
+  pendingHeaderDefaultVersionTemplateId.value = null;
+}, { deep: true });
+
+watch(availableWorkspaceTemplates, (templates) => {
+  const templateId = pendingHeaderDefaultVersionTemplateId.value;
+  if (!templateId) return;
+  const template = templates.find((item) => item.workspaceId === templateId);
+  if (!template?.versions) return;
+  pendingHeaderDefaultVersionTemplateId.value = null;
+  const version = defaultHeaderVersion(template);
+  if (version) selectHeaderVersion(version, template);
+}, { deep: true });
+
+function selectHeaderWorkspace(template: AppWorkspaceTemplate) {
+  headerWorkspaceTemplateId.value = template.workspaceId;
+  headerVersionId.value = null;
+  closeWorkspaceMenu();
+  if (!template.versions) {
+    pendingHeaderDefaultVersionTemplateId.value = template.workspaceId;
+    emit("load-versions", template.workspaceId);
+    return;
+  }
+  pendingHeaderDefaultVersionTemplateId.value = null;
+  const version = defaultHeaderVersion(template);
+  if (version) selectHeaderVersion(version, template);
+}
+
+function selectHeaderVersion(version: AppWorkspaceVersion, explicitTemplate?: AppWorkspaceTemplate) {
+  const template = explicitTemplate ?? headerWorkspaceTemplate.value;
+  if (!template) return;
+  headerVersionId.value = version.versionId;
+  emit("select-version", { template, version });
+  closeVersionMenu();
 }
 
 const selectedApp = computed(
@@ -219,6 +345,8 @@ function toggleRuntimeInventory(event: MouseEvent) {
   event.stopPropagation();
   runtimeInventoryOpen.value = !runtimeInventoryOpen.value;
   appMenuOpen.value = false;
+  workspaceMenuOpen.value = false;
+  versionMenuOpen.value = false;
   userMenuOpen.value = false;
 }
 
@@ -366,6 +494,18 @@ function onAppMenuBlur(event: FocusEvent) {
   const next = event.relatedTarget as Node | null;
   if (next && (event.currentTarget as Node).contains(next)) return;
   setTimeout(closeAppMenu, 120);
+}
+
+function onWorkspaceMenuBlur(event: FocusEvent) {
+  const next = event.relatedTarget as Node | null;
+  if (next && (event.currentTarget as Node).contains(next)) return;
+  setTimeout(closeWorkspaceMenu, 120);
+}
+
+function onVersionMenuBlur(event: FocusEvent) {
+  const next = event.relatedTarget as Node | null;
+  if (next && (event.currentTarget as Node).contains(next)) return;
+  setTimeout(closeVersionMenu, 120);
 }
 
 function onUserMenuBlur(event: FocusEvent) {
@@ -1727,19 +1867,8 @@ onMounted(() => {
   
   const savedFixed = loadRobotFixed();
   robotFixed.value = savedFixed === true;
-  if (robotFixed.value) {
-    const position = savedPosition ?? clampRobotPosition(getBirthPosition());
-    robotX.value = position.x;
-    robotY.value = position.y;
-    robotHasSavedPosition.value = Boolean(savedPosition);
-    robotState.value = "idle";
-    robotDirection.value = "front";
-    robotTransition.value = "none";
-    robotCurrentLevel.value = position.y > window.innerHeight / 2 ? "bottom" : "top";
-  } else {
-    // 无论是否有保存位置，初次进入都保持隐藏，等连续一分钟无操作后再出现。
-    resetInactivityTimer();
-  }
+  // 每次进入页面都从收起态开始；固定偏好只在用户手动唤起后恢复，不直接改变初始显隐。
+  resetInactivityTimer();
 });
 
 onUnmounted(() => {
@@ -1802,19 +1931,133 @@ function submitJoinApp() {
         </div>
       </div>
 
+      <div class="figma-header-center" aria-label="应用、工作空间和版本">
+        <div class="figma-app-menu-wrapper" @click.stop>
+          <button
+            type="button"
+            :class="['figma-app-menu-trigger', appMenuOpen && 'is-open']"
+            data-onboarding="application"
+            aria-haspopup="listbox"
+            :aria-expanded="appMenuOpen"
+            :aria-label="`应用：${selectedApp?.name || '未选择'}`"
+            @click="toggleAppMenu"
+            @blur="onAppMenuBlur"
+          >
+            <span class="figma-context-menu-key">应用</span>
+            <span class="figma-app-menu-name figma-context-menu-value">{{ selectedApp?.name || "F-GCMS-PSN" }}</span>
+            <ChevronDown class="figma-app-menu-chevron" :class="{ 'is-open': appMenuOpen }" />
+          </button>
+          <ul v-if="appMenuOpen" class="figma-app-menu-dropdown" role="listbox">
+            <li
+              v-for="app in apps"
+              :key="app.id"
+              :class="['figma-app-menu-item', app.id === selectedApp?.id && 'is-active']"
+              role="option"
+              :aria-selected="app.id === selectedApp?.id"
+              tabindex="0"
+              @mousedown.prevent="selectApp(app)"
+            >
+              <div class="figma-app-menu-item-main">
+                <span class="figma-app-menu-item-name">{{ app.name }}</span>
+                <span v-if="app.description" class="figma-app-menu-item-desc">{{ app.description }}</span>
+              </div>
+              <span v-if="app.id === selectedApp?.id" class="figma-app-menu-item-check">✓</span>
+            </li>
+            <li class="figma-app-menu-divider" />
+            <li class="figma-app-menu-item is-add-app" role="option" tabindex="0" @mousedown.prevent="openAddApp">
+              <div class="figma-app-menu-item-main figma-app-menu-add-item">
+                <span class="figma-app-menu-add-icon">+</span>
+                <span class="figma-app-menu-add-text">加入其他应用</span>
+              </div>
+            </li>
+          </ul>
+        </div>
 
+        <div class="figma-workspace-menu-wrapper" @click.stop>
+          <button
+            type="button"
+            :class="['figma-context-menu-trigger', workspaceMenuOpen && 'is-open']"
+            data-testid="header-workspace-selector"
+            aria-haspopup="listbox"
+            :aria-expanded="workspaceMenuOpen"
+            :aria-label="`工作空间：${headerWorkspaceTemplate?.workspaceName || '未选择'}`"
+            @click="toggleWorkspaceMenu"
+            @blur="onWorkspaceMenuBlur"
+          >
+            <span class="figma-context-menu-key">工作空间</span>
+            <span class="figma-context-menu-value">{{ headerWorkspaceTemplate?.workspaceName || (loadingAppTemplates ? "加载中…" : "未选择") }}</span>
+            <ChevronDown class="figma-app-menu-chevron" :class="{ 'is-open': workspaceMenuOpen }" />
+          </button>
+          <ul v-if="workspaceMenuOpen" class="figma-app-menu-dropdown figma-context-menu-dropdown" role="listbox">
+            <li v-if="loadingAppTemplates && availableWorkspaceTemplates.length === 0" class="figma-context-menu-empty">工作空间加载中…</li>
+            <li v-else-if="availableWorkspaceTemplates.length === 0" class="figma-context-menu-empty">暂无测试工作空间</li>
+            <li
+              v-for="template in availableWorkspaceTemplates"
+              :key="template.workspaceId"
+              :class="['figma-app-menu-item', template.workspaceId === headerWorkspaceTemplate?.workspaceId && 'is-active']"
+              role="option"
+              :aria-selected="template.workspaceId === headerWorkspaceTemplate?.workspaceId"
+              tabindex="0"
+              @mousedown.prevent="selectHeaderWorkspace(template)"
+            >
+              <div class="figma-app-menu-item-main">
+                <span class="figma-app-menu-item-name">{{ template.workspaceName }}</span>
+                <span class="figma-app-menu-item-desc">{{ template.branch }}</span>
+              </div>
+              <span v-if="template.workspaceId === headerWorkspaceTemplate?.workspaceId" class="figma-app-menu-item-check">✓</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="figma-version-menu-wrapper" @click.stop>
+          <button
+            type="button"
+            :class="['figma-context-menu-trigger', versionMenuOpen && 'is-open']"
+            data-testid="header-version-selector"
+            aria-haspopup="listbox"
+            :aria-expanded="versionMenuOpen"
+            :aria-label="`版本：${headerWorkspaceVersion?.version || '未选择'}`"
+            @click="toggleVersionMenu"
+            @blur="onVersionMenuBlur"
+          >
+            <span class="figma-context-menu-key">版本</span>
+            <span class="figma-context-menu-value">{{ headerWorkspaceVersion?.version || (loadingAppVersions && !headerWorkspaceTemplate?.versions ? "加载中…" : "请选择") }}</span>
+            <ChevronDown class="figma-app-menu-chevron" :class="{ 'is-open': versionMenuOpen }" />
+          </button>
+          <ul v-if="versionMenuOpen" class="figma-app-menu-dropdown figma-context-menu-dropdown is-version" role="listbox">
+            <li v-if="loadingAppVersions && !headerWorkspaceTemplate?.versions" class="figma-context-menu-empty">版本加载中…</li>
+            <li v-else-if="!headerWorkspaceTemplate?.versions?.length" class="figma-context-menu-empty">暂无版本</li>
+            <li
+              v-for="version in headerWorkspaceTemplate?.versions || []"
+              :key="version.versionId"
+              :class="['figma-app-menu-item', version.versionId === selectedVersionId && 'is-active']"
+              role="option"
+              :aria-selected="version.versionId === selectedVersionId"
+              tabindex="0"
+              @mousedown.prevent="selectHeaderVersion(version)"
+            >
+              <div class="figma-app-menu-item-main">
+                <span class="figma-app-menu-item-name">{{ version.version }}</span>
+                <span class="figma-app-menu-item-desc">{{ version.branch }}</span>
+              </div>
+              <span v-if="version.versionId === selectedVersionId" class="figma-app-menu-item-check">✓</span>
+            </li>
+          </ul>
+        </div>
+      </div>
 
       <div class="figma-header-right">
         <button
           type="button"
-          class="figma-header-help"
+          :class="['figma-header-help', helpCenterOpen && 'is-open']"
           data-testid="help-center-open"
           data-onboarding="manual"
           aria-label="打开用户手册"
+          :aria-pressed="helpCenterOpen"
           title="用户手册"
           @click.stop="emit('open-help', 'getting-started')"
         >
-          <CircleHelp :size="16" />
+          <BookOpen :size="20" :stroke-width="1.5" />
         </button>
         <div class="figma-runtime-inventory-wrapper" @click.stop>
           <button
@@ -1912,45 +2155,6 @@ function submitJoinApp() {
             </div>
           </section>
         </div>
-        <div class="figma-app-menu-wrapper" @click.stop>
-          <button
-            type="button"
-            :class="['figma-app-menu-trigger', appMenuOpen && 'is-open']"
-            data-onboarding="application"
-            aria-haspopup="listbox"
-            :aria-expanded="appMenuOpen"
-            @click="toggleAppMenu"
-            @blur="onAppMenuBlur"
-          >
-            <span class="figma-app-menu-name">{{ selectedApp?.name || "F-GCMS-PSN" }}</span>
-            <ChevronDown class="figma-app-menu-chevron" :class="{ 'is-open': appMenuOpen }" />
-          </button>
-          <ul v-if="appMenuOpen" class="figma-app-menu-dropdown" role="listbox">
-            <li
-              v-for="app in apps"
-              :key="app.id"
-              :class="['figma-app-menu-item', app.id === selectedApp?.id && 'is-active']"
-              role="option"
-              :aria-selected="app.id === selectedApp?.id"
-              tabindex="0"
-              @mousedown.prevent="selectApp(app)"
-            >
-              <div class="figma-app-menu-item-main">
-                <span class="figma-app-menu-item-name">{{ app.name }}</span>
-                <span v-if="app.description" class="figma-app-menu-item-desc">{{ app.description }}</span>
-              </div>
-              <span v-if="app.id === selectedApp?.id" class="figma-app-menu-item-check">✓</span>
-            </li>
-            <li class="figma-app-menu-divider" />
-            <li class="figma-app-menu-item is-add-app" role="option" tabindex="0" @mousedown.prevent="openAddApp">
-              <div class="figma-app-menu-item-main figma-app-menu-add-item">
-                <span class="figma-app-menu-add-icon">+</span>
-                <span class="figma-app-menu-add-text">加入其他应用</span>
-              </div>
-            </li>
-          </ul>
-        </div>
-
         <!-- 加入应用弹窗 (弹出div) -->
         <div v-if="addAppVisible" class="figma-add-app-overlay" @click="closeAddApp">
           <div class="figma-add-app-card" @click.stop>
@@ -2472,19 +2676,19 @@ function submitJoinApp() {
   grid-template-columns: minmax(0, 1fr);
   width: 100%;
   height: 100vh;
-  background: #f5f5f5;
+  background: var(--ta-shell-canvas, #f0f4fa);
   overflow: hidden;
 }
 
 /* ---- Header ---- */
 .figma-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
   align-items: center;
-  justify-content: space-between;
   height: 36px;
-  border-bottom: 1px solid var(--ta-border, #eaeaea);
-  background: #fff;
-  padding: 0 10px;
+  border-bottom: 0;
+  background: var(--ta-shell-canvas, #f0f4fa);
+  padding: 0 12px;
   flex-shrink: 0;
   z-index: 50;
   position: relative;
@@ -2493,8 +2697,10 @@ function submitJoinApp() {
 .figma-header-left {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 0;
   height: 100%;
+  transform: translateY(calc(var(--ta-shell-gap, 8px) / 2));
 }
 
 .figma-sidebar-toggle {
@@ -2510,7 +2716,7 @@ function submitJoinApp() {
 }
 
 .figma-logo {
-  height: 20px;
+  height: 22px;
   width: auto;
   flex-shrink: 0;
 }
@@ -2524,59 +2730,94 @@ function submitJoinApp() {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  align-items: center;
+  align-items: flex-start;
   gap: 0px;
 }
 
 .figma-title {
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
   font-weight: 600;
-  font-size: 12px;
-  line-height: 14px;
+  font-size: 13px;
+  line-height: 15px;
   letter-spacing: 0.02em;
-  color: #333;
+  color: var(--ta-shell-header-text, #000000);
   white-space: nowrap;
 }
 
 .figma-subtitle {
   font-family: "Geist", "Noto Sans SC", sans-serif;
   font-weight: 500;
-  font-size: 7px;
-  line-height: 8px;
+  font-size: 8px;
+  line-height: 9px;
   letter-spacing: -0.01em;
-  color: #777;
+  color: var(--ta-shell-header-text, #000000);
   white-space: nowrap;
   transform: scale(0.9);
-  transform-origin: center center;
+  transform-origin: left center;
+}
+
+/* 中间只承载应用上下文，工具与用户入口固定在右侧，避免两类操作混在一起。 */
+.figma-header-center {
+  display: flex;
+  align-items: center;
+  justify-self: center;
+  gap: 6px;
+  transform: translateY(calc(var(--ta-shell-gap, 8px) / 2));
+  z-index: 2;
 }
 
 /* ---- Header Right ---- */
 .figma-header-right {
   display: flex;
   align-items: center;
+  justify-self: end;
   gap: 8px;
+  transform: translateY(calc(var(--ta-shell-gap, 8px) / 2));
+  z-index: 3;
 }
 
 .figma-header-help {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 28px;
   height: 28px;
-  border: 1px solid #e5e7eb;
-  border-radius: 7px;
-  background: #fff;
-  color: #5f6b7a;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ta-shell-muted, #6b7280);
   cursor: pointer;
   padding: 0;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.figma-header-help > svg {
+  display: block;
 }
 
 .figma-header-help:hover,
 .figma-header-help:focus-visible {
-  border-color: #cbd5e1;
-  background: #f8fafc;
-  color: #27384b;
+  background: var(--ta-shell-hover, #f3f4f6);
+  color: var(--ta-shell-text, #1f2937);
   outline: none;
+}
+
+.figma-header-help:active,
+.figma-header-help.is-open {
+  background: var(--ta-shell-accent-soft, #fdf2f2);
+  color: var(--ta-shell-accent-strong, #991b1b);
+}
+
+.figma-header-help.is-open::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  width: 3px;
+  height: 16px;
+  border-radius: 0 999px 999px 0;
+  background: var(--ta-shell-accent, #c8161d);
 }
 
 .figma-runtime-inventory-wrapper {
@@ -2591,10 +2832,10 @@ function submitJoinApp() {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--ta-shell-border, #e5e7eb);
   border-radius: 7px;
-  background: #fff;
-  color: #475569;
+  background: var(--ta-shell-surface, #fff);
+  color: var(--ta-shell-muted, #6b7280);
   cursor: pointer;
   font-size: 14px;
   line-height: 1;
@@ -2603,12 +2844,12 @@ function submitJoinApp() {
 
 .figma-robot-visibility-toggle:hover,
 .figma-robot-visibility-toggle[aria-pressed='true'] {
-  border-color: #cbd5e1;
-  background: #f8fafc;
+  border-color: var(--ta-shell-border-strong, #d1d5db);
+  background: var(--ta-shell-hover, #f3f4f6);
 }
 
 .figma-robot-visibility-toggle:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--ta-shell-accent, #c8161d);
   outline-offset: 2px;
 }
 
@@ -2630,7 +2871,7 @@ function submitJoinApp() {
 .figma-robot-visibility-toggle--activity:hover,
 .figma-robot-visibility-toggle--activity[aria-pressed='true'] {
   border-color: transparent;
-  background: #e8e8e8;
+  background: var(--ta-shell-hover, #f3f4f6);
 }
 
 .figma-robot-visibility-toggle--activity.is-process-alert {
@@ -3005,9 +3246,9 @@ function submitJoinApp() {
 .figma-robot-side-question-header button {
   width: 20px;
   height: 20px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
+  border: 0.8px solid var(--ta-shell-border, #e5e7eb);
+  border-radius: 999px;
+  background: var(--ta-shell-surface, #fff);
   color: #718096;
   cursor: pointer;
   font-size: 16px;
@@ -3111,12 +3352,12 @@ function submitJoinApp() {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 24px;
+  height: 28px;
   padding: 0 8px;
-  border: 0.8px solid #e5e7eb;
+  border: 1px solid var(--ta-shell-border, #e5e7eb);
   border-radius: 999px;
-  background: #f8fafc;
-  color: #4b5563;
+  background: transparent;
+  color: var(--ta-shell-header-text, #000000);
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 11px;
   font-weight: 600;
@@ -3126,10 +3367,18 @@ function submitJoinApp() {
 }
 
 .figma-runtime-inventory-summary:hover,
-.figma-runtime-inventory-summary[aria-expanded='true'] {
-  color: #111827;
-  border-color: #c7d2fe;
-  background: #eef2ff;
+.figma-runtime-inventory-summary:focus-visible {
+  color: var(--ta-shell-text, #1f2937);
+  border-color: var(--ta-shell-border-strong, #d1d5db);
+  background: var(--ta-shell-hover, #f3f4f6);
+  outline: none;
+}
+
+.figma-runtime-inventory-summary[aria-expanded='true'],
+.figma-runtime-inventory-summary:active {
+  color: var(--ta-shell-accent-strong, #991b1b);
+  border-color: var(--ta-shell-accent, #c8161d);
+  background: var(--ta-shell-accent-soft, #fdf2f2);
 }
 
 .figma-runtime-inventory-panel {
@@ -3287,43 +3536,107 @@ function submitJoinApp() {
   font-weight: 600;
 }
 
-/* ---- App Dropdown ---- */
-.figma-app-menu-wrapper {
+/* ---- Header Context Dropdowns ---- */
+.figma-app-menu-wrapper,
+.figma-workspace-menu-wrapper,
+.figma-version-menu-wrapper {
   position: relative;
 }
 
-.figma-app-menu-trigger {
+.figma-app-menu-trigger,
+.figma-context-menu-trigger {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 24px;
-  padding: 0 6px;
-  border: 0.8px solid transparent;
-  border-radius: 6px;
-  background: transparent;
+  height: 28px;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border: 1px solid var(--ta-shell-border, #e5e7eb);
+  border-radius: 7px;
+  background: var(--ta-shell-surface, #fff);
+  color: var(--ta-shell-header-text, #000000);
   cursor: pointer;
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
   transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
+.figma-header-center .figma-app-menu-trigger {
+  width: clamp(136px, 14vw, 164px);
+}
+
+.figma-workspace-menu-wrapper .figma-context-menu-trigger {
+  width: clamp(148px, 15vw, 176px);
+}
+
+.figma-version-menu-wrapper .figma-context-menu-trigger {
+  width: clamp(108px, 11vw, 128px);
+}
+
 .figma-app-menu-trigger:hover,
-.figma-app-menu-trigger.is-open {
-  background: #f0f0f0;
-  border-color: #dfdfdf;
+.figma-app-menu-trigger:focus-visible,
+.figma-context-menu-trigger:hover,
+.figma-context-menu-trigger:focus-visible {
+  background: var(--ta-shell-hover, #f3f4f6);
+  border-color: var(--ta-shell-border-strong, #d1d5db);
+  outline: none;
+}
+
+.figma-app-menu-trigger.is-open,
+.figma-app-menu-trigger:active,
+.figma-context-menu-trigger.is-open,
+.figma-context-menu-trigger:active {
+  background: var(--ta-shell-accent-soft, #fdf2f2);
+  border-color: var(--ta-shell-accent, #c8161d);
+}
+
+.figma-app-menu-trigger.is-open .figma-app-menu-name,
+.figma-app-menu-trigger.is-open .figma-app-menu-chevron,
+.figma-context-menu-trigger.is-open .figma-context-menu-value,
+.figma-context-menu-trigger.is-open .figma-app-menu-chevron {
+  color: var(--ta-shell-accent-strong, #991b1b);
+}
+
+.figma-context-menu-key {
+  flex: 0 0 auto;
+  color: var(--ta-shell-header-text, #000000);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.figma-context-menu-value {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--ta-shell-header-text, #000000);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .figma-app-menu-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
   font-weight: 600;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 16px;
-  letter-spacing: 0.0154em;
-  color: #18181b;
+  letter-spacing: 0;
+  color: var(--ta-shell-header-text, #000000);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .figma-app-menu-chevron {
   width: 10px;
   height: 10px;
-  color: #565656;
+  color: var(--ta-shell-header-text, #000000);
   transition: transform 0.16s ease;
 }
 
@@ -3337,13 +3650,30 @@ function submitJoinApp() {
   right: 0;
   min-width: 240px;
   background: #fff;
-  border: 1px solid #e4e4e7;
+  border: 1px solid #e5e7eb;
   border-radius: 8px;
   padding: 4px;
   margin: 0;
   list-style: none;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
   z-index: 40;
+}
+
+.figma-workspace-menu-wrapper .figma-app-menu-dropdown {
+  right: auto;
+  left: 0;
+}
+
+.figma-context-menu-dropdown.is-version {
+  min-width: 220px;
+}
+
+.figma-context-menu-empty {
+  padding: 12px 10px;
+  color: var(--ta-shell-muted, #6b7280);
+  font-size: 12px;
+  list-style: none;
+  white-space: nowrap;
 }
 
 .figma-app-menu-item {
@@ -3359,16 +3689,16 @@ function submitJoinApp() {
 
 .figma-app-menu-item:hover,
 .figma-app-menu-item:focus {
-  background: #f4f4f5;
+  background: var(--ta-shell-hover, #f3f4f6);
 }
 
 .figma-app-menu-item.is-active {
-  background: #fafafa;
+  background: var(--ta-shell-accent-soft, #fdf2f2);
 }
 
 .figma-app-menu-divider {
   height: 1px;
-  background: #e4e4e7;
+  background: #e5e7eb;
   margin: 4px 0;
 }
 
@@ -3377,7 +3707,7 @@ function submitJoinApp() {
   flex-direction: row !important;
   align-items: center;
   gap: 8px;
-  color: #18a978;
+  color: var(--ta-shell-accent, #c8161d);
 }
 
 .figma-app-menu-add-icon {
@@ -3516,20 +3846,25 @@ function submitJoinApp() {
 
 .figma-app-menu-item-name {
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
-  line-height: 18px;
-  color: #18181b;
+  line-height: 17px;
+  color: var(--ta-shell-header-text, #000000);
 }
 
 .figma-app-menu-item-desc {
-  font-size: 11px;
-  line-height: 14px;
-  color: #999;
+  font-size: 10px;
+  line-height: 13px;
+  color: var(--ta-shell-muted, #6b7280);
+}
+
+.figma-app-menu-item.is-active .figma-app-menu-item-name {
+  color: var(--ta-shell-accent-strong, #991b1b);
+  font-weight: 600;
 }
 
 .figma-app-menu-item-check {
-  color: #18a978;
+  color: var(--ta-shell-accent, #c8161d);
   font-size: 14px;
   font-weight: 600;
 }
@@ -3543,19 +3878,27 @@ function submitJoinApp() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: 1px solid transparent;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--ta-shell-border, #e5e7eb);
   border-radius: 999px;
-  background: transparent;
+  background: var(--ta-shell-surface, #fff);
+  padding: 0;
   cursor: pointer;
   transition: background-color 0.14s ease, border-color 0.14s ease;
 }
 
 .figma-user-avatar-btn:hover,
-.figma-user-avatar-btn.is-open {
-  background: #f0f0f0;
-  border-color: #dfdfdf;
+.figma-user-avatar-btn:focus-visible {
+  background: var(--ta-shell-hover, #f3f4f6);
+  border-color: var(--ta-shell-border-strong, #d1d5db);
+  outline: none;
+}
+
+.figma-user-avatar-btn.is-open,
+.figma-user-avatar-btn:active {
+  background: var(--ta-shell-accent-soft, #fdf2f2);
+  border-color: var(--ta-shell-accent, #c8161d);
 }
 
 .figma-user-avatar {
@@ -3565,18 +3908,18 @@ function submitJoinApp() {
   width: 20px;
   height: 20px;
   border-radius: 999px;
-  background: #18181b;
-  color: #fff;
+  background: var(--ta-shell-hover, #f3f4f6);
+  color: var(--ta-shell-header-text, #000000);
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 1;
 }
 
 .figma-user-avatar--compact {
-  width: 16px;
-  height: 16px;
-  font-size: 8px;
+  width: 20px;
+  height: 20px;
+  font-size: 12px;
 }
 
 .figma-user-menu-dropdown {
@@ -3682,7 +4025,7 @@ function submitJoinApp() {
 }
 
 .figma-user-menu-summary {
-  color: #666;
+  color: var(--ta-shell-muted, #6b7280);
   border-bottom: 1px solid #f0f0f0;
   border-radius: 6px 6px 0 0;
 }
@@ -3723,14 +4066,14 @@ function submitJoinApp() {
   cursor: pointer;
   width: 24px;
   height: 24px;
-  color: #666;
+  color: var(--ta-shell-muted, #6b7280);
   box-shadow: none !important;
   transition: background-color 0.14s ease, color 0.14s ease;
 }
 
 .figma-icon-btn:hover {
-  background: rgba(0, 0, 0, 0.06) !important;
-  color: #111;
+  background: var(--ta-shell-hover, #f3f4f6) !important;
+  color: var(--ta-shell-text, #1f2937);
 }
 
 .figma-icon-btn-ghost {
@@ -3739,17 +4082,17 @@ function submitJoinApp() {
 }
 
 .figma-icon-btn-ghost--collapsed {
-  background: rgba(0, 0, 0, 0.04) !important;
+  background: var(--ta-shell-hover, #f3f4f6) !important;
 }
 
 .figma-icon-btn-secondary {
   width: 24px;
   height: 24px;
-  background: #f4f4f5 !important;
+  background: var(--ta-shell-sidebar, #ffffff) !important;
 }
 
 .figma-icon-btn-secondary:hover {
-  background: #e8e8e8 !important;
+  background: var(--ta-shell-hover, #f3f4f6) !important;
 }
 
 .figma-icon-16 {
@@ -3763,7 +4106,8 @@ function submitJoinApp() {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  padding: 0px;
+  padding: var(--ta-shell-gap, 8px) var(--ta-shell-gap, 8px) var(--ta-shell-gap, 8px) 0;
+  background: var(--ta-shell-canvas, #f0f4fa);
   position: relative;
 }
 
@@ -3771,8 +4115,8 @@ function submitJoinApp() {
   position: relative;
   width: 48px;
   flex-shrink: 0;
-  background: #fff;
-  border-right: 1px solid #eaeaea;
+  background: transparent;
+  border-right: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -3785,15 +4129,28 @@ function submitJoinApp() {
   min-height: 0;
   border: 0;
   border-radius: 0;
-  background: #ffffff;
+  background: transparent;
   box-shadow: none;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .figma-panel-left {
   /* 宽度由 :style="width: ${leftPanelWidth}px" 动态控制 */
   flex-shrink: 0;
-  background: #ffffff;
+  /* 文件树只在左侧壳层内映射主题，避免影响编辑器与右侧对话。 */
+  --ta-tree-bg: var(--ta-shell-sidebar, #ffffff);
+  --ta-tree-border: var(--ta-shell-border, #e5e7eb);
+  --ta-tree-border-strong: var(--ta-shell-border-strong, #d1d5db);
+  --ta-tree-text: var(--ta-shell-text, #1f2937);
+  --ta-tree-muted: var(--ta-shell-muted, #6b7280);
+  --ta-tree-hover: var(--ta-shell-hover, #f3f4f6);
+  --ta-tree-active: var(--ta-shell-accent-soft, #fdf2f2);
+  --ta-tree-active-text: var(--ta-shell-accent-strong, #c8161d);
+  --ta-tree-accent: var(--ta-shell-accent, #c8161d);
+  background: var(--ta-shell-sidebar, #ffffff);
+  border: 1px solid var(--ta-shell-border, #e5e7eb);
+  border-radius: var(--ta-shell-radius, 8px);
+  box-shadow: var(--ta-shell-shadow, 0 1px 2px rgba(15, 23, 42, 0.04));
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -3805,12 +4162,12 @@ function submitJoinApp() {
 }
 
 .figma-files-resize-handle {
-  width: 1px;
+  width: var(--ta-shell-gap, 8px);
   flex-shrink: 0;
   cursor: col-resize;
   position: relative;
   z-index: 5;
-  background: var(--ta-border, #eaeaea);
+  background: transparent;
   transition: background-color 0.14s ease;
 }
 
@@ -3820,10 +4177,10 @@ function submitJoinApp() {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 4px;
-  height: 36px;
+  width: 2px;
+  height: 32px;
   border-radius: 2px;
-  background: rgba(0, 0, 0, 0.1);
+  background: var(--ta-shell-border-strong, #d1d5db);
   transition: background-color 0.15s ease, height 0.15s ease;
 }
 
@@ -3832,18 +4189,18 @@ function submitJoinApp() {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -3px;
-  width: 7px;
+  left: 0;
+  width: 100%;
   background: transparent;
   cursor: col-resize;
 }
 
 .figma-files-resize-handle:hover {
-  background: #d8d8d8;
+  background: transparent;
 }
 
 .figma-files-resize-handle:hover::before {
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--ta-shell-accent, #c8161d);
   height: 48px;
 }
 
@@ -3860,8 +4217,8 @@ function submitJoinApp() {
   flex: 1;
   min-width: 0;
   display: flex;
-  background: #ffffff;
-  overflow: hidden;
+  background: transparent;
+  overflow: visible;
 }
 
 .figma-panel-center {
@@ -3870,6 +4227,10 @@ function submitJoinApp() {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  border: 1px solid var(--ta-shell-border, #e5e7eb);
+  border-radius: var(--ta-shell-radius, 8px);
+  background: #ffffff;
+  box-shadow: var(--ta-shell-shadow, 0 1px 2px rgba(15, 23, 42, 0.04));
   overflow: hidden;
 }
 
@@ -3879,7 +4240,8 @@ function submitJoinApp() {
   display: flex;
   min-height: 0;
   min-width: 0;
-  overflow: hidden;
+  margin-left: var(--ta-shell-gap, 8px);
+  overflow: visible;
   transition: width 0.25s ease, opacity 0.25s ease;
 }
 .figma-chat-panel-wrapper.is-resizing {
@@ -3892,6 +4254,10 @@ function submitJoinApp() {
   flex-direction: column;
   min-height: 0;
   min-width: 0;
+  border: 1px solid var(--ta-shell-border, #e5e7eb);
+  border-radius: var(--ta-shell-radius, 8px);
+  background: #ffffff;
+  box-shadow: var(--ta-shell-shadow, 0 1px 2px rgba(15, 23, 42, 0.04));
   overflow: hidden;
 }
 
@@ -3901,7 +4267,7 @@ function submitJoinApp() {
   cursor: col-resize;
   position: relative;
   z-index: 5;
-  background: var(--ta-border, #eaeaea);
+  background: transparent;
   transition: background-color 0.14s ease;
 }
 
@@ -3911,10 +4277,10 @@ function submitJoinApp() {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 4px;
-  height: 36px;
+  width: 2px;
+  height: 32px;
   border-radius: 2px;
-  background: rgba(0, 0, 0, 0.1);
+  background: var(--ta-shell-border-strong, #d1d5db);
   transition: background-color 0.15s ease, height 0.15s ease;
 }
 
@@ -3930,11 +4296,11 @@ function submitJoinApp() {
 }
 
 .figma-chat-resize-handle:hover {
-  background: #d8d8d8;
+  background: transparent;
 }
 
 .figma-chat-resize-handle:hover::before {
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--ta-shell-accent, #c8161d);
   height: 48px;
 }
 
@@ -3995,18 +4361,19 @@ function submitJoinApp() {
   border: none;
   border-radius: 12px;
   background: transparent;
-  color: #444;
+  color: var(--ta-shell-muted, #6b7280);
   cursor: pointer;
   transition: background-color 0.14s ease, color 0.14s ease;
 }
 
 :deep(.figma-activity-btn:hover) {
-  background: #e8e8e8;
-  color: #333;
+  background: var(--ta-shell-hover, #f3f4f6);
+  color: var(--ta-shell-text, #1f2937);
 }
 
 :deep(.figma-activity-btn--active) {
-  color: #333;
+  background: var(--ta-shell-accent-soft, #fdf2f2);
+  color: var(--ta-shell-accent-strong, #991b1b);
 }
 
 :deep(.figma-activity-btn--active::before) {
@@ -4014,10 +4381,10 @@ function submitJoinApp() {
   position: absolute;
   left: 0;
   top: 7px;
-  width: 2px;
+  width: 3px;
   height: 24px;
   border-radius: 0 999px 999px 0;
-  background: #333;
+  background: var(--ta-shell-accent, #c8161d);
 }
 
 :deep(.figma-activity-icon) {
@@ -4026,7 +4393,7 @@ function submitJoinApp() {
 }
 .figma-sidebar-toggle-floating {
   position: absolute;
-  top: 5px;
+  top: 13px;
   z-index: 40;
   transition: left 0.25s ease;
 }
@@ -4035,7 +4402,7 @@ function submitJoinApp() {
 }
 .figma-sidebar-toggle-floating--right {
   right: 8px;
-  top: 4px;
+  top: 13px;
 }
 .figma-icon-btn-floating-open {
   width: 24px;
@@ -4050,6 +4417,74 @@ function submitJoinApp() {
   cursor: grab;
   transform: translate3d(0, 0, 0);
   opacity: 1;
+}
+
+@media (max-width: 900px) {
+  .figma-header {
+    padding-inline: 8px;
+  }
+
+  .figma-logo {
+    height: 20px;
+  }
+
+  .figma-logo-margin {
+    width: 6px;
+  }
+
+  .figma-title {
+    font-size: 12px;
+    line-height: 14px;
+  }
+
+  .figma-subtitle {
+    font-size: 7px;
+    line-height: 8px;
+  }
+
+  .figma-header-center {
+    gap: 4px;
+  }
+
+  .figma-header-center .figma-app-menu-trigger {
+    width: 92px;
+  }
+
+  .figma-workspace-menu-wrapper .figma-context-menu-trigger {
+    width: 112px;
+  }
+
+  .figma-version-menu-wrapper .figma-context-menu-trigger {
+    width: 86px;
+  }
+
+  .figma-app-menu-trigger,
+  .figma-context-menu-trigger {
+    gap: 3px;
+    padding-inline: 5px;
+  }
+
+  .figma-context-menu-key,
+  .figma-context-menu-value,
+  .figma-app-menu-name {
+    font-size: 10px;
+  }
+
+  .figma-header-right {
+    gap: 5px;
+  }
+
+  .figma-header-help {
+    width: 26px;
+    height: 26px;
+  }
+
+  .figma-runtime-inventory-summary {
+    height: 26px;
+    gap: 3px;
+    padding-inline: 6px;
+    font-size: 9px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

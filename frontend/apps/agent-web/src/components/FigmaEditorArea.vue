@@ -283,7 +283,7 @@ watch(
   flex-shrink: 0;
   overflow-x: auto;
   overflow-y: hidden !important;
-  background: #fafafa;
+  background: #fff;
   scrollbar-width: none;
   border-bottom: 1px solid var(--ta-border, #eaeaea);
 }
@@ -320,7 +320,7 @@ watch(
   height: 100%;
   flex-shrink: 0;
   cursor: pointer;
-  background: #eaeaea;
+  background: #fff;
   border-top: 2px solid transparent;
   border-right: 1px solid rgba(0, 0, 0, 0.08);
   margin-bottom: -1px;
@@ -329,7 +329,7 @@ watch(
 
 .figma-editor-tab--active {
   background: #fff;
-  border-top-color: #555;
+  border-top-color: var(--ta-shell-accent, #c8161d);
   border-top-width: 2px;
   border-bottom-color: #fff;
 }

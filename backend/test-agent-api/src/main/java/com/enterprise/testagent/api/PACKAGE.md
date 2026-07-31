@@ -31,6 +31,7 @@ API 定义包，承载 HTTP/SSE/WebSocket 入口、请求响应 DTO、统一响�
 - `web.platform.AgentConfigController`：Agent 配置 HTTP 元数据、Git 操作和进度 ticket 入口；公共仓库初始化和显式拉取按 `linuxServerId` 路由到目标后端，公共 update-and-push 合并冲突读取/解决/取消接口复用工作区冲突协议，公共 worktree 列表只返回指定服务器 `ACTIVE/PUBLIC` 元数据和创建人字段，文件内容操作继续走平台文件 WebSocket。
 - `web.agent.AgentOpencodeRuntimeController`：agent 侧 opencode 兼容代理入口，承载 `/api/internal/agent/{agentId}/...` 路径并把 agentId 与可选用户主体交给业务层选择 runtime。
 - `web.platform.RuntimeDtos`、`web.platform.AuthDtos`：平台 API 请求/响应 DTO；Session、SessionMessage、Run 可选暴露 `sourceType/sourceRefId`，Run、SessionMessage、Run 历史与 Session 历史响应的新存储/摘要元数据保持 nullable，并通过显式映射重载接入新模式投影，旧领域对象不会被误标记。
+- `web.platform.UiTestExecutionToolController`：公共 UI 执行子 agent 的专用回调入口，只映射必填的被测系统环境与单行四列案例并委托 `test-agent-integration`，不直接持有 `uitest6` Token；环境缺失时不调用外部平台。
 - `web.common.TraceIdWebFilter`、`web.common.JwtAuthWebFilter`、`web.common.ApiTokenWebFilter`、`web.common.InMemoryRateLimitWebFilter`、`web.common.GlobalExceptionHandler`：入口公共处理。
 - `web.common.RuntimeApiSupport`、`web.common.AuthWebSupport`：Controller 与 WebFilter 共用的 HTTP 边界工具。
 - `web.platform.WorkspaceFileWebSocketHandler`：受控平台文件 WebSocket upgrade 入口，覆盖 workspace 原始文件、引用组合视图、原始字节下载分段、服务器目录选择和 Agent 配置文件 RPC；每条 workspace RPC 使用 ticket 用户重新执行当前成员校验，非托管 Workspace 仅放行 ticket 中的 `SUPER_ADMIN` 兼容访问。

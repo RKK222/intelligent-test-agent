@@ -17,10 +17,13 @@ public enum ErrorCode {
     RATE_LIMITED(429, "请求过于频繁"),
     INTERNAL_ERROR(500, "服务器内部错误"),
     OPENCODE_BAD_GATEWAY(502, "TestAgent 服务响应异常"),
+    UI_TEST_BAD_GATEWAY(502, "UI 自动化平台响应异常"),
     OPENCODE_UNAVAILABLE(503, "TestAgent 服务不可用"),
+    UI_TEST_UNAVAILABLE(503, "UI 自动化平台不可用"),
     NIGHT_EXECUTION_UNAVAILABLE(503, "夜间执行功能不可用"),
     TERMINAL_UNAVAILABLE(503, "终端服务不可用"),
     OPENCODE_TIMEOUT(504, "TestAgent 服务超时"),
+    UI_TEST_TIMEOUT(504, "UI 自动化平台响应超时"),
     RUNTIME_STATE_UNAVAILABLE(503, "运行态存储不可用"),
     GIT_UNAVAILABLE(503, "Git 服务不可用"),
     GIT_TIMEOUT(504, "Git 操作超时");

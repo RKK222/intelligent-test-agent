@@ -183,7 +183,7 @@ defineExpose({ restart });
       :next-button-props="nextButton"
     >
       <template #header><div class="ta-onboarding-heading"><span>03</span><strong>一定要选中 workspace</strong></div></template>
-      <p>顶部选中应用后还不够。点击左下角双向箭头，先悬停选择工作空间，再选择右侧版本；按钮显示“工作空间 / 版本”后，左侧文件树才会加载。只选应用时文件区保持空白是正常的。</p>
+      <p>顶部选中应用后还不够。继续在顶部依次选择工作空间和版本，左侧文件树才会加载；左下角双向箭头仍保留同一套选择能力。单版本直接默认该项，多版本默认最新项。只选应用时文件区保持空白是正常的。</p>
     </ElTourStep>
     <ElTourStep
       target='[data-onboarding="workspace-reference"]'
@@ -289,7 +289,7 @@ defineExpose({ restart });
           <li>“工作空间别名”默认是 <code>ai-test</code>，同一应用下不能重名。</li>
           <li>“目录树”只选择当前应用同名目录下的一级子目录；文件不能选，必要时可新增一级目录。</li>
           <li>点击“保存”，等待校验、保存配置、解析版本、下载代码、创建运行态工作区和完成全部成功。</li>
-          <li>回工作台左下角，先选择 workspace，再选择版本；否则文件树仍为空白。</li>
+          <li>回到工作台顶部选择 workspace 并确认默认版本；也可使用左下角保留入口，否则文件树仍为空白。</li>
         </ol>
       </div>
     </ElTourStep>

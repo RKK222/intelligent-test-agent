@@ -765,6 +765,8 @@ defineExpose({
 .figma-file-explorer > .ta-icon-tabbar {
   padding-right: 36px; /* Make space for the absolutely-positioned sidebar toggle button */
   border-radius: 0;
+  background: var(--ta-shell-header, #ffffff);
+  border-bottom: 1px solid var(--ta-shell-border, #e5e7eb);
 }
 
 .figma-fe-body {

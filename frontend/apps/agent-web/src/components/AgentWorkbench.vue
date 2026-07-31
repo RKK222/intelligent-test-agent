@@ -9026,6 +9026,12 @@ async function handleLogout() {
     :apps="shellApps"
     :joinable-apps="joinableApps"
     :selected-app-id="selectedAppId"
+    :app-templates="appTemplatesWithVersions"
+    :selected-workspace-template-id="selectedWorkspaceKind === 'MANAGED' ? (selectedWorkspace?.applicationWorkspaceId ?? undefined) : undefined"
+    :selected-version-id="selectedWorkspaceKind === 'MANAGED' ? selectedVersionId : undefined"
+    :loading-app-templates="loadingAppTemplates"
+    :loading-app-versions="loadingAppVersions"
+    :help-center-open="helpCenterOpen"
     :current-user-name="authStore.currentUser?.username"
     :current-user-role-labels="authStore.currentUser?.roleLabels"
     :can-play-pet-games="isSuperAdmin"
@@ -9048,6 +9054,8 @@ async function handleLogout() {
     @toggle-left-panel="leftPanelOpen = !leftPanelOpen"
     @toggle-right-panel="rightPanelOpen = !rightPanelOpen"
     @select-app="handleSelectApp"
+    @load-versions="handleLoadVersions"
+    @select-version="handleSelectVersion"
     @refresh-opencode-process="refreshOpencodeProcessStatus"
     @initialize-process="beginInitializeOpencodeProcess"
     @logout="handleLogout"
@@ -9762,19 +9770,20 @@ async function handleLogout() {
 
 .hub-activity-badge {
   position: absolute;
-  top: 2px;
+  top: 1px;
   right: 1px;
   min-width: 14px;
   height: 14px;
-  border: 2px solid var(--ta-activity-bg, #f4f4f5);
+  border: 1.5px solid var(--ta-shell-canvas, #f0f4fa);
   border-radius: 999px;
-  background: #d94a4a;
-  padding: 0 2px;
-  color: #fff;
-  font-size: 8px;
+  background: var(--ta-shell-accent, #c8161d);
+  padding: 0 3px;
+  color: #ffffff;
+  font-size: 9px;
   font-weight: 700;
-  line-height: 10px;
+  line-height: 11px;
   text-align: center;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
 }
 
 .managed-chat-panel {

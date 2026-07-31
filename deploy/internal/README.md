@@ -201,6 +201,9 @@ deploy/internal/dist/test-agent-public-agents-skills.zip.sha256
 该包从当前公共配置 Git 提交归档，包含公共 `opencode.jsonc`、全部 Agent、Skill、Tool 和说明，
 不包含 `.git`、`node_modules`、缓存或个人验收样例。通过“系统管理 → 配置管理 → opencode
 公共配置管理”的个人 worktree 导入、查看 Diff、提交并发布；不要直接覆盖共享运行目录。
+`ui-test-execution-agent.md` 和 `ui_test_execute.ts` 是本仓库保存的 UI 执行公共配置模板；实际
+运行文件仍由独立公共配置 Git 管理。模板要求“被测系统环境 + 一行四列案例”，环境缺失时中断；
+模板只调用 Java 同节点桥接，不包含或打包 `uitest6` 源码。
 
 平台 ZIP 同时包含 `deploy/internal/` 下的配置模板、部署脚本、Nginx 模板、模型配置示例和本部署文档，并在 `.agents/` 下保留当前仓库全部 `session-log*.md` 会话日志作为交付追溯基线；外层完整包封装前会逐一校验这些日志均已进入内层 ZIP。
 仓库保留的 MySQL 容器脚本只作为其它隔离环境备用，不属于当前现场交付。企业服务器只执行校验、解压、`docker load` 和服务启停，不执行

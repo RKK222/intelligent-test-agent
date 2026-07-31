@@ -99,6 +99,8 @@ managed/source 选择共用完整 intent authority，旧 terminal 的 repository
 | `packages/shared-types` | 跨包共享 TypeScript 类型和事件/DTO 模型；包含应用源码严格四态、固定选择、操作安全快照和独立进度 WebSocket envelope，以及工具盒子目录、工具项和点击响应，`PermissionRequest.patterns` 与 `SessionRuntimeStateSummary.permissionCount` 保持可选，attention 接受 `PERMISSION`，Session/SessionMessage/Run 来源、夜间时段/任务、代码库英文名、版本库类型、工作空间创建进度、平台文件 WebSocket route/ticket 等新增契约字段必须保持可选或按请求/响应兼容策略处理。 |
 | `../frontend-opencode` | 独立 Vue/TypeScript/Vite opencode IDE App 复刻工程；不加入 `frontend/pnpm-workspace.yaml`，通过 alias 复用 `backend-api`、`event-stream-client`、`shared-types` 源码。 |
 
+`apps/agent-web` 的视觉边界由应用层维护：`FigmaShell.vue` 组合外围壳层，并让顶栏与 8px 栏间间隔共用浅雾蓝画布色、左/中/右三栏各自形成纯白悬浮面板；左侧工作区/Agent 目录加载前后与中间未打开文件时的预览区均保持纯白，当前文件标签只用 2px 工行红上沿标记激活态。顶栏按“36px 首行 + 8px 面板间隔”的 44px 视觉带统一上下居中：Logo 左对齐；应用、工作空间、版本三个白底细框按钮放在 Logo 末端与右侧工具组起点之间的网格列正中，使左右留白相等；书本手册、透明底细框运行态摘要和单字头像依次固定在右侧。手册入口默认透明无框，打开弹框后保持与活动栏一致的柔红底、深红图标和工行红定位标记。顶部工作空间/版本选择只复用 `AgentWorkbench` 既有数据和 `handleLoadVersions` / `handleSelectVersion` 回调，左下角 `WorkbenchFooter` 入口继续保留，两处不得各自新增切换链路；用户在顶部选定工作空间时，版本列表只有一项则直接默认该项，多项则复用后端倒序结果的首项（最新版本）。首行默认文字为纯黑，单字用户名为 12px。`styles/globals.css` 提供隔离的 `--ta-shell-*` token。`FigmaChatPanel.vue` 和 `packages/agent-chat` 不消费 shell token，避免外围品牌色影响对话内容。
+
 `apps/agent-web` 的 Git Changes 负责应用 Agent 与公共 Agent 当前作用域的逐文件和批量暂存；批量入口复用 `packages/backend-api` 既有 Agent stage 方法，不新增 API 或跨作用域状态。
 
 `apps/agent-web` 的版本库新增和编辑入口共用类型字典，并固定将“测试工作库”排在第一项；编辑通过 `packages/backend-api` 和 `packages/shared-types` 的可选 `repositoryType` 请求字段访问配置管理 PATCH API，旧 `standard` 只保留为后端协议兼容字段。
