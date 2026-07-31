@@ -4084,3 +4084,26 @@
 ### Result
 
 - 应用代码库与应用测试工作空间现在共用一个按钮；超级管理员服务器工作空间和 Terminal 保持原入口、权限与行为。本次未变更 HTTP/WebSocket/RunEvent、后端、数据库/Flyway、关系型 SQL、安全策略、环境配置、generated SDK 或 OpenCode 源码。
+
+## 2026-07-31 - 应用代码库在统一菜单直列并直接打开
+
+### Why
+
+- 用户进一步明确“应用代码库”不能先进入通用源码选择弹窗，而应在统一应用级菜单中直接列出具体版本库，点击对应版本库后立即打开；测试工作空间现有工作空间行与悬浮版本交互保持不变。
+
+### What
+
+- `WorkbenchFooter` 在菜单展开时刷新当前应用源码状态，将已下载版本库直接列在“应用代码库”分区下；可用项点击后复用既有精确 repository/generation `openAppSource` 链路，不再经过 picker，并高亮当前源码版本库。
+- `NOT_DOWNLOADED` 版本库继续隐藏在直接打开列表之外；已下载但当前服务器没有 READY 副本的版本库保留可见并禁用，展示服务端安全原因。“管理”入口继续承接首次下载、更新和其它不能直接打开的流程，避免交互调整丢失源码物化能力。
+- `FigmaFileExplorer` 与 `AgentWorkbench` 仅增加现有列表状态和直接打开事件透传；测试工作空间模板、版本悬浮子菜单、独立服务器工作空间按钮及“运行与终端”逻辑未修改。同步 agent-web README 与包级说明。
+
+### How
+
+- `WorkbenchFooter` Vitest 17/17 通过，覆盖菜单加载事件、具体仓库直开、管理入口、未下载隐藏、不可打开禁用和源码当前态；agent-web typecheck 与生产 build 通过。
+- 应用源码相关 Chromium Playwright 16/16 通过，其中 mock 后端的真实浏览器菜单点击指定仓库后直接进入源码快照且不打开 picker，其余首次下载、重连、切应用竞态和源码能力场景继续通过。
+- 使用未修改的 `.env.test`、JDK 25、test profile 完整重启 backend、opencode-manager、frontend；health/readiness 为 `UP`，前端 3000、登录 CORS 和 manager WebSocket 正常，用户 OpenCode 进程最终持续 `HEALTHY`。
+- 真实 Python Playwright 确认 F-COSS 菜单按“应用代码库 / 测试工作空间”分区；本机当前没有已下载源码，空态与“管理”正常。“本地-测试”仍可悬浮展开版本子菜单，服务器按钮保持菜单外独立，“运行与终端”入口仍存在。
+
+### Result
+
+- 已下载应用代码库现在直接列在统一菜单下并点击即打开；测试工作空间保持原交互，服务器和 Terminal 边界不变。本次未变更 HTTP/WebSocket/RunEvent、后端、数据库/Flyway、关系型 SQL、安全策略、环境配置、generated SDK 或 OpenCode 源码。

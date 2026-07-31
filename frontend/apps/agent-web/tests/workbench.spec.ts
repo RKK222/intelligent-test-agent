@@ -1756,7 +1756,9 @@ test("application source snapshot opens a logical workspace and enforces source 
   const sourceWorkspaceSwitch = fileExplorer.getByRole("button", { name: "切换应用代码库或测试工作空间" });
   await expect(sourceWorkspaceSwitch).toBeVisible();
   await sourceWorkspaceSwitch.click();
-  await expect(page.getByRole("menu").getByRole("button", { name: "应用代码库", exact: true })).toBeVisible();
+  await expect(page.getByRole("menu").locator(".ta-workbench-cascade-source-title").getByText("应用代码库", { exact: true }))
+    .toBeVisible();
+  await expect(page.getByRole("menu").getByRole("button", { name: "打开应用代码库源码" })).toBeVisible();
   await expect(page.getByRole("menu").getByRole("button", { name: "测试工作空间", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await page.getByTestId("robot-visibility-toggle").click();
@@ -2396,8 +2398,7 @@ test("a transient recent source validation failure keeps the current source work
 
   await gotoWorkbench(page, { selectConversation: false });
   const fileExplorer = page.locator(".figma-file-explorer");
-  await openAppSourceFromWorkspaceSwitch(page);
-  await page.getByRole("button", { name: "打开应用代码库源码" }).click();
+  await openAppSourceRepositoryFromWorkspaceSwitch(page, "应用代码库");
   await expect(fileExplorer.getByText("源码快照", { exact: true })).toBeVisible();
 
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
@@ -8864,11 +8865,18 @@ async function gotoWorkbench(page: Page, options: { selectConversation?: boolean
   }
 }
 
-/** 通过统一工作空间入口打开应用代码库，锁定底部按钮不再拆回独立源码入口。 */
+/** 通过统一工作空间入口打开源码管理弹窗，覆盖首次下载和更新等管理流程。 */
 async function openAppSourceFromWorkspaceSwitch(page: Page) {
   const fileExplorer = page.locator(".figma-file-explorer");
   await fileExplorer.getByRole("button", { name: "切换应用代码库或测试工作空间" }).click();
-  await page.getByRole("menu").getByRole("button", { name: "应用代码库", exact: true }).click();
+  await page.getByRole("menu").getByRole("button", { name: "管理应用代码库" }).click();
+}
+
+/** 菜单直列源码版本库；点击指定版本库必须直接打开，不经过源码选择弹窗。 */
+async function openAppSourceRepositoryFromWorkspaceSwitch(page: Page, repositoryName: string) {
+  const fileExplorer = page.locator(".figma-file-explorer");
+  await fileExplorer.getByRole("button", { name: "切换应用代码库或测试工作空间" }).click();
+  await page.getByRole("menu").getByRole("button", { name: `打开${repositoryName}源码` }).click();
 }
 
 function json(data: unknown) {

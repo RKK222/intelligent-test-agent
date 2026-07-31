@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { FileExplorer, type FileExplorerProps, type ExplorerTab } from "@test-agent/file-explorer";
-import type { FileSearchResult, FileTreeEntry, RunDiffFile, WorkspaceViewEntry, WorkspaceViewWarning } from "@test-agent/shared-types";
+import type {
+  AppSourceRepositorySummary,
+  FileSearchResult,
+  FileTreeEntry,
+  RunDiffFile,
+  WorkspaceViewEntry,
+  WorkspaceViewWarning
+} from "@test-agent/shared-types";
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import AgentConfigPanel from "./AgentConfigPanel.vue";
@@ -77,6 +84,10 @@ const props = defineProps<FileExplorerProps & {
   /** 源码快照模式只关闭 Git/Agent 发布能力，普通文件 WebSocket 写入继续开放。 */
   workspaceKind?: SelectedWorkspaceKind;
   appSourceContext?: AppSourceWorkspaceContext | null;
+  /** 当前应用源码版本库状态，供底部统一菜单直接列出并打开。 */
+  appSourceRepositories?: AppSourceRepositorySummary[];
+  loadingAppSourceRepositories?: boolean;
+  appSourceRepositoriesError?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -119,6 +130,8 @@ const emit = defineEmits<{
   openServerWorkspacePicker: [];
   openReferenceConfiguration: [];
   openAppSource: [];
+  loadAppSourceRepositories: [];
+  openAppSourceRepository: [repository: AppSourceRepositorySummary];
   returnManagedWorkspace: [];
   // 搜索事件
   search: [keyword: string];
@@ -657,12 +670,18 @@ defineExpose({
       :show-reference-configuration="showReferenceConfiguration"
       :show-app-source="Boolean(appName)"
       :workspace-kind="workspaceKind"
+      :app-source-repositories="appSourceRepositories"
+      :loading-app-source-repositories="loadingAppSourceRepositories"
+      :app-source-repositories-error="appSourceRepositoriesError"
+      :selected-app-source-repository-id="appSourceContext?.repositoryId"
       @select-version="(payload) => emit('selectVersion', payload)"
       @load-versions="(templateId: string) => emit('loadVersions', templateId)"
       @create-version="(payload) => emit('createVersion', payload)"
       @open-server-workspace-picker="emit('openServerWorkspacePicker')"
       @open-reference-configuration="emit('openReferenceConfiguration')"
       @open-app-source="emit('openAppSource')"
+      @load-app-source-repositories="emit('loadAppSourceRepositories')"
+      @open-app-source-repository="emit('openAppSourceRepository', $event)"
       @return-managed-workspace="emit('returnManagedWorkspace')"
     />
 

@@ -1,5 +1,6 @@
 import { mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AppSourceRepositorySummary } from "@test-agent/shared-types";
 import WorkbenchFooter from "../src/components/WorkbenchFooter.vue";
 
 describe("WorkbenchFooter", () => {
@@ -21,6 +22,21 @@ describe("WorkbenchFooter", () => {
     updatedAt: "2026-06-26T00:00:00Z",
     versions: []
   };
+
+  const appSourceRepository = {
+    repositoryId: "repo-code",
+    name: "应用代码库",
+    englishName: "app-code",
+    downloadState: "DOWNLOADED_ACTIVE",
+    generation: 3,
+    purpose: "TEAM",
+    branch: "main",
+    selectedPaths: [],
+    occupied: false,
+    openable: true,
+    manageable: true,
+    serverSummaries: []
+  } satisfies AppSourceRepositorySummary;
 
   it("keeps the super-admin server workspace switch as an independent button", async () => {
     const hidden = mount(WorkbenchFooter, {
@@ -77,6 +93,7 @@ describe("WorkbenchFooter", () => {
         appName: "F-COSS",
         templates: [template],
         showAppSource: true,
+        appSourceRepositories: [appSourceRepository],
         showReferenceConfiguration: true,
         showServerWorkspaceSwitch: true,
         showSave: false
@@ -91,13 +108,58 @@ describe("WorkbenchFooter", () => {
     expect(wrapper.emitted("open-server-workspace-picker")).toHaveLength(1);
 
     await wrapper.find('[data-onboarding="workspace-selector"]').trigger("click");
-    const appSourceSwitch = document.body.querySelector('[aria-label="应用代码库"]') as HTMLButtonElement | null;
+    expect(wrapper.emitted("load-app-source-repositories")).toHaveLength(1);
+    const appSourceSwitch = document.body.querySelector('[aria-label="打开应用代码库源码"]') as HTMLButtonElement | null;
     expect(appSourceSwitch).not.toBeNull();
+    expect(document.body.querySelector('[aria-label="管理应用代码库"]')).not.toBeNull();
     expect(document.body.textContent).toContain("测试工作空间");
     expect(document.body.textContent).toContain("主服务");
     appSourceSwitch?.click();
     await wrapper.vm.$nextTick();
+    expect(wrapper.emitted("open-app-source-repository")?.[0]).toEqual([appSourceRepository]);
+    expect(wrapper.emitted("open-app-source")).toBeUndefined();
+
+    await wrapper.find('[data-onboarding="workspace-selector"]').trigger("click");
+    (document.body.querySelector('[aria-label="管理应用代码库"]') as HTMLButtonElement).click();
+    await wrapper.vm.$nextTick();
     expect(wrapper.emitted("open-app-source")).toHaveLength(1);
+  });
+
+  it("keeps first-download repositories in management and disables stale or unavailable direct-open rows", async () => {
+    const wrapper = mount(WorkbenchFooter, {
+      attachTo: document.body,
+      props: {
+        appName: "F-COSS",
+        showAppSource: true,
+        showSave: false,
+        loadingAppSourceRepositories: true,
+        appSourceRepositories: [
+          appSourceRepository,
+          { ...appSourceRepository, repositoryId: "repo-new", name: "尚未下载", downloadState: "NOT_DOWNLOADED", generation: null },
+          {
+            ...appSourceRepository,
+            repositoryId: "repo-unavailable",
+            name: "副本未就绪",
+            openable: false,
+            unavailableReason: "当前服务器副本未就绪"
+          }
+        ]
+      }
+    });
+
+    await wrapper.find('[data-onboarding="workspace-selector"]').trigger("click");
+    expect(document.body.querySelector('[aria-label="打开尚未下载源码"]')).toBeNull();
+    const refreshing = document.body.querySelector('[aria-label="打开应用代码库源码"]') as HTMLButtonElement;
+    expect(refreshing.disabled).toBe(true);
+    expect(refreshing.title).toBe("正在刷新应用代码库状态…");
+    const unavailable = document.body.querySelector('[aria-label="打开副本未就绪源码"]') as HTMLButtonElement;
+    expect(unavailable.disabled).toBe(true);
+    expect(unavailable.title).toBe("正在刷新应用代码库状态…");
+    await wrapper.setProps({ loadingAppSourceRepositories: false });
+    expect(refreshing.disabled).toBe(false);
+    expect(unavailable.disabled).toBe(true);
+    expect(unavailable.title).toBe("当前服务器副本未就绪");
+    expect(document.body.querySelector('[aria-label="管理应用代码库"]')).not.toBeNull();
   });
 
   it("hides the reference configuration icon unless explicitly authorized by the parent", () => {
@@ -114,14 +176,17 @@ describe("WorkbenchFooter", () => {
       props: {
         appName: "F-COSS",
         showAppSource: true,
+        appSourceRepositories: [appSourceRepository],
         showServerWorkspaceSwitch: true,
         showSave: false,
-        workspaceKind: "APP_SOURCE"
+        workspaceKind: "APP_SOURCE",
+        selectedAppSourceRepositoryId: "repo-code"
       }
     });
 
     await wrapper.find('[data-onboarding="workspace-selector"]').trigger("click");
-    expect(document.body.querySelector('[aria-label="应用代码库"]')).not.toBeNull();
+    expect(document.body.querySelector('[aria-label="打开应用代码库源码"]')).not.toBeNull();
+    expect(document.body.querySelector(".ta-workbench-cascade-source-button.is-selected")).not.toBeNull();
     expect(document.body.querySelector('[aria-label="测试工作空间"]')).not.toBeNull();
     expect(wrapper.find('[aria-label="切换服务器工作空间"]').exists()).toBe(true);
     expect(document.querySelector('.ta-workbench-cascade-panel [aria-label="切换服务器工作空间"]')).toBeNull();

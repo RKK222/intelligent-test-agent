@@ -2,7 +2,11 @@
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ArrowLeftRight, CodeXml, Eye, EyeOff, LibraryBig, Plus, Save, ServerCog, Target } from "lucide-vue-next";
 import { ElDatePicker, ElDialog, ElTooltip, ElMessage } from "element-plus";
-import type { ApplicationWorkspaceTemplate, ApplicationWorkspaceVersion } from "@test-agent/shared-types";
+import type {
+  ApplicationWorkspaceTemplate,
+  ApplicationWorkspaceVersion,
+  AppSourceRepositorySummary
+} from "@test-agent/shared-types";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import { copyTextToClipboard } from "@test-agent/ui-kit";
 import type { SelectedWorkspaceKind } from "./app-source-workspace";
@@ -58,6 +62,14 @@ const props = defineProps<{
   showReferenceConfiguration?: boolean;
   /** 当前应用存在源码入口；由父层按已选择应用控制，不使用用户角色裁剪。 */
   showAppSource?: boolean;
+  /** 当前应用源码版本库状态；菜单只直列已经下载过的版本库。 */
+  appSourceRepositories?: AppSourceRepositorySummary[];
+  /** 应用源码版本库状态是否正在加载。 */
+  loadingAppSourceRepositories?: boolean;
+  /** 应用源码版本库状态加载失败时的安全提示。 */
+  appSourceRepositoriesError?: string | null;
+  /** 当前已打开源码快照所属版本库，用于菜单高亮。 */
+  selectedAppSourceRepositoryId?: string;
   /** 服务器工作空间切换入口是否禁用 */
   serverWorkspaceSwitchDisabled?: boolean;
   /** 工作区语义显式区分托管应用与源码快照，源码模式不得暴露版本选择。 */
@@ -79,8 +91,12 @@ const emit = defineEmits<{
   (e: "open-server-workspace-picker"): void;
   // 应用管理员打开当前个人工作区的引用配置弹窗。
   (e: "open-reference-configuration"): void;
-  // 打开当前应用源码列表；具体权限与 generation 仍以服务端列表/open 响应为准。
+  // 打开源码下载/管理列表；具体权限与 generation 仍以服务端列表/open 响应为准。
   (e: "open-app-source"): void;
+  // 菜单展开时刷新版本库状态，避免直接打开已失效 generation。
+  (e: "load-app-source-repositories"): void;
+  // 点击已就绪版本库后直接打开源码快照，不再经过源码选择弹窗。
+  (e: "open-app-source-repository", repository: AppSourceRepositorySummary): void;
   (e: "return-managed-workspace"): void;
 }>();
 
@@ -139,6 +155,11 @@ async function copyPath(textToCopy: string) {
 
 // 双端过滤保证旧后端响应仍可使用：只有显式停用的配置不展示。
 const templates = computed(() => (props.templates ?? []).filter((template) => template.enabled !== false));
+// 与原源码选择弹窗保持同一可见性边界：未下载版本库只能从“管理”入口执行首次下载，
+// 已下载版本库才作为可直接打开的菜单项展示。
+const visibleAppSourceRepositories = computed(() => (props.appSourceRepositories ?? []).filter(
+  (repository) => repository.downloadState !== "NOT_DOWNLOADED"
+));
 
 // ===== 应用工作空间两级菜单的弹出状态 =====
 // 模板列表尚未加载或为空时仍展示入口，用于直接暴露当前个人 worktree 分支；
@@ -353,6 +374,9 @@ function toggleMenu() {
     if (firstUnloaded) {
       emit("load-versions", firstUnloaded.workspaceId);
     }
+    if (props.showAppSource) {
+      emit("load-app-source-repositories");
+    }
   }
 }
 
@@ -482,9 +506,20 @@ function returnManagedWorkspaceFromMenu() {
   emit("return-managed-workspace");
 }
 
-function openAppSourceFromMenu() {
+function openAppSourceManagementFromMenu() {
   closeMenu();
   emit("open-app-source");
+}
+
+function retryAppSourceRepositoriesFromMenu() {
+  emit("load-app-source-repositories");
+}
+
+function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary) {
+  // 菜单每次展开都会刷新 generation；刷新完成前禁止点击缓存行，避免用旧 generation 发起 open。
+  if (props.loadingAppSourceRepositories || !repository.openable) return;
+  closeMenu();
+  emit("open-app-source-repository", repository);
 }
 </script>
 
@@ -542,19 +577,68 @@ function openAppSourceFromMenu() {
               <span>应用：{{ appName || "—" }}</span>
               <span v-if="loadingTemplates" class="ta-workbench-cascade-loading">加载中…</span>
             </div>
-            <div v-if="showAppSource" class="ta-workbench-cascade-mode-entry">
-              <button
-                type="button"
-                :class="['ta-workbench-cascade-mode-button', workspaceKind === 'APP_SOURCE' && 'is-selected']"
-                aria-label="应用代码库"
-                title="打开应用代码库"
-                @click="openAppSourceFromMenu"
-              >
-                <CodeXml class="ta-workbench-footer-icon" />
+            <template v-if="showAppSource">
+              <div class="ta-workbench-cascade-section-title ta-workbench-cascade-source-title">
                 <span>应用代码库</span>
-                <span v-if="workspaceKind === 'APP_SOURCE'" class="ta-workbench-cascade-mode-current">当前</span>
-              </button>
-            </div>
+                <button
+                  type="button"
+                  aria-label="管理应用代码库"
+                  title="下载或管理应用代码库"
+                  @click="openAppSourceManagementFromMenu"
+                >
+                  管理
+                </button>
+              </div>
+              <div
+                v-if="loadingAppSourceRepositories && visibleAppSourceRepositories.length === 0"
+                class="ta-workbench-cascade-source-state"
+                role="status"
+              >
+                加载中…
+              </div>
+              <div
+                v-else-if="appSourceRepositoriesError && visibleAppSourceRepositories.length === 0"
+                class="ta-workbench-cascade-source-state is-error"
+              >
+                <span>{{ appSourceRepositoriesError }}</span>
+                <button type="button" aria-label="重试加载应用代码库" @click="retryAppSourceRepositoriesFromMenu">重试</button>
+              </div>
+              <div
+                v-else-if="visibleAppSourceRepositories.length === 0"
+                class="ta-workbench-cascade-source-state"
+              >
+                暂无可打开代码库
+              </div>
+              <ul v-else class="ta-workbench-cascade-source-list" role="none">
+                <li v-for="repository in visibleAppSourceRepositories" :key="repository.repositoryId" role="none">
+                  <button
+                    type="button"
+                    :class="[
+                      'ta-workbench-cascade-source-button',
+                      repository.repositoryId === selectedAppSourceRepositoryId && 'is-selected'
+                    ]"
+                    :aria-label="`打开${repository.name}源码`"
+                    :title="loadingAppSourceRepositories
+                      ? '正在刷新应用代码库状态…'
+                      : repository.openable
+                      ? `打开${repository.name}源码${repository.branch ? ` · ${repository.branch}` : ''}`
+                      : (repository.unavailableReason || '当前服务器没有可打开的 READY 副本')"
+                    :disabled="loadingAppSourceRepositories || !repository.openable"
+                    @click="openAppSourceRepositoryFromMenu(repository)"
+                  >
+                    <CodeXml class="ta-workbench-footer-icon" />
+                    <span class="ta-workbench-cascade-source-name">{{ repository.name }}</span>
+                    <span v-if="repository.branch" class="ta-workbench-cascade-source-branch">{{ repository.branch }}</span>
+                    <span
+                      v-if="repository.repositoryId === selectedAppSourceRepositoryId"
+                      class="ta-workbench-cascade-mode-current"
+                    >
+                      当前
+                    </span>
+                  </button>
+                </li>
+              </ul>
+            </template>
             <div v-if="useCascadeMenu" class="ta-workbench-cascade-section-title">测试工作空间</div>
             <ul v-if="useCascadeMenu" class="ta-workbench-cascade-list" role="none">
               <li
@@ -1100,6 +1184,104 @@ function openAppSourceFromMenu() {
   color: #71717a;
   font-size: 11px;
   font-weight: 600;
+}
+
+.ta-workbench-cascade-source-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ta-workbench-cascade-source-title button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #2563eb;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+}
+
+.ta-workbench-cascade-source-title button:hover {
+  text-decoration: underline;
+}
+
+.ta-workbench-cascade-source-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ta-workbench-cascade-source-button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #3f3f46;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+.ta-workbench-cascade-source-button:hover:not(:disabled),
+.ta-workbench-cascade-source-button.is-selected {
+  background: #f4f4f5;
+  color: #1d4ed8;
+}
+
+.ta-workbench-cascade-source-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.ta-workbench-cascade-source-name {
+  min-width: 0;
+  overflow: hidden;
+  color: #18181b;
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ta-workbench-cascade-source-branch {
+  min-width: 0;
+  overflow: hidden;
+  color: #999;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ta-workbench-cascade-source-state {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 8px;
+  color: #999;
+  font-size: 11px;
+  text-align: center;
+}
+
+.ta-workbench-cascade-source-state.is-error {
+  color: #b91c1c;
+}
+
+.ta-workbench-cascade-source-state button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #2563eb;
+  cursor: pointer;
+  font: inherit;
 }
 
 .ta-workbench-cascade-mode-entry {

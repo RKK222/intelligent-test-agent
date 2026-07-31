@@ -3985,7 +3985,8 @@ async function loadAppSourceRepositories() {
 function openAppSourcePicker() {
   if (!selectedAppId.value) return;
   appSourcePickerOpen.value = true;
-  void loadAppSourceRepositories();
+  // 统一菜单展开时已经开始刷新列表；沿用该请求可避免用户紧接着点“管理”产生重复并发。
+  if (!appSourcePickerLoading.value) void loadAppSourceRepositories();
 }
 
 function closeAppSourcePicker() {
@@ -9102,6 +9103,9 @@ async function handleLogout() {
           :show-reference-configuration="selectedWorkspaceKind === 'MANAGED' && showReferenceConfiguration"
           :workspace-kind="selectedWorkspaceKind"
           :app-source-context="appSourceContext"
+          :app-source-repositories="appSourceRepositories"
+          :loading-app-source-repositories="appSourcePickerLoading"
+          :app-source-repositories-error="appSourcePickerError"
           :search-results="searchResults"
           :search-loading="searchLoading"
           :search-keyword="searchKeyword"
@@ -9133,6 +9137,8 @@ async function handleLogout() {
           @open-server-workspace-picker="openServerWorkspacePicker"
           @open-reference-configuration="openReferenceConfiguration"
           @open-app-source="openAppSourcePicker"
+          @load-app-source-repositories="loadAppSourceRepositories"
+          @open-app-source-repository="openAppSourceRepository"
           @return-managed-workspace="fallbackToManagedWorkspace()"
           @search="handleFileSearch"
           @create-entry="handleCreateEntry"
