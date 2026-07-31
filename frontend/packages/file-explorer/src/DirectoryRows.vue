@@ -24,6 +24,8 @@ export type DirectoryRowsProps = {
   changeStats?: Record<string, { additions: number; deletions: number }>;
   /** 文件树内部剪贴板，仅保存当前工作区的普通文件引用。 */
   clipboardEntry?: WorkspaceClipboardEntry;
+  /** 当前正在下载的节点稳定 ID；下载期间禁用同一行的重复请求。 */
+  downloadingEntryId?: string;
 };
 
 export type WorkspaceClipboardEntry = {
@@ -41,7 +43,7 @@ export type WorkspaceSelectionEntry = {
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { Plane, Plus, Trash2 } from "lucide-vue-next";
+import { Download, Plane, Plus, Trash2 } from "lucide-vue-next";
 import { cn } from "@test-agent/ui-kit";
 import FileEntryCreateDialog from "./FileEntryCreateDialog.vue";
 import FileEntryContextMenu from "./FileEntryContextMenu.vue";
@@ -69,6 +71,7 @@ const emit = defineEmits<{
   uploadFiles: [directory: string, files: File[]];
   requestUpload: [directory: string];
   cacheAndNavigate: [path: string, type: "file" | "directory"];
+  downloadEntry: [entry: FileTreeEntry];
   dragSourceChange: [paths: string[] | undefined];
   selectionChange: [entries: WorkspaceSelectionEntry[]];
 }>();
@@ -487,8 +490,8 @@ function submitRename() {
         :style="{
           paddingLeft: depth * 16 + 6 + 'px',
           paddingRight: canWrite
-            ? (entry.type === 'directory' ? (entry.name.includes('测试执行') ? '68px' : '48px') : '26px')
-            : (entry.type === 'directory' && entry.name.includes('测试执行') ? '26px' : '6px')
+            ? (entry.type === 'directory' ? (entry.name.includes('测试执行') ? '88px' : '68px') : '48px')
+            : '26px'
         }"
         @click="onRowClick($event, entry)"
         @contextmenu="openFileContextMenu($event, entry)"
@@ -539,6 +542,20 @@ function submitRename() {
       </button>
       <div class="ta-file-tree-actions">
         <button
+          type="button"
+          class="ta-file-tree-download-btn"
+          :disabled="downloadingEntryId === nodeId(entry)"
+          :title="entry.type === 'directory' ? '下载文件夹（ZIP）' : '下载文件'"
+          :aria-label="entry.type === 'directory' ? `下载文件夹 ${entry.name}` : `下载文件 ${entry.name}`"
+          @click.stop="emit('downloadEntry', entry)"
+        >
+          <Download
+            class="h-3.5 w-3.5"
+            :class="{ 'animate-pulse': downloadingEntryId === nodeId(entry) }"
+            :stroke-width="1.5"
+          />
+        </button>
+        <button
           v-if="canWriteChildren(entry)"
           type="button"
           class="ta-file-tree-add-btn"
@@ -585,6 +602,7 @@ function submitRename() {
         :drag-reset-token="dragResetToken"
         :drag-source-paths="dragSourcePaths"
         :selected-entries="selectedEntries"
+        :downloading-entry-id="downloadingEntryId"
         :clipboard-entry="clipboardEntry"
         :depth="depth + 1"
         @toggle-directory="emit('toggleDirectory', $event)"
@@ -606,6 +624,7 @@ function submitRename() {
         @upload-files="(directory, files) => emit('uploadFiles', directory, files)"
         @request-upload="emit('requestUpload', $event)"
         @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
+        @download-entry="emit('downloadEntry', $event)"
         @drag-source-change="emit('dragSourceChange', $event)"
         @selection-change="emit('selectionChange', $event)"
       />
@@ -1142,6 +1161,36 @@ function submitRename() {
 .ta-file-tree-actions > button {
   margin-left: 0;
   pointer-events: auto;
+}
+
+.ta-file-tree-download-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ta-tree-muted, #8b949e);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ta-file-tree-row-wrapper:hover > .ta-file-tree-actions .ta-file-tree-download-btn,
+.ta-file-tree-download-btn:focus-visible {
+  display: inline-flex;
+}
+
+.ta-file-tree-download-btn:hover:not(:disabled) {
+  background: var(--ta-hover, #f1f5f9);
+  color: var(--ta-accent, #3366ff);
+}
+
+.ta-file-tree-download-btn:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 .ta-file-tree-add-btn {

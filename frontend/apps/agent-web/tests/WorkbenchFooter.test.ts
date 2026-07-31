@@ -22,7 +22,7 @@ describe("WorkbenchFooter", () => {
     versions: []
   };
 
-  it("shows server workspace switch button only when requested", async () => {
+  it("puts the test workspace switch into the shared workspace menu", async () => {
     const hidden = mount(WorkbenchFooter, {
       props: {
         appName: "F-COSS",
@@ -31,7 +31,7 @@ describe("WorkbenchFooter", () => {
       }
     });
 
-    expect(hidden.find('[aria-label="切换服务器工作空间"]').exists()).toBe(false);
+    expect(hidden.find('[aria-label="切换测试工作区"]').exists()).toBe(false);
     expect(hidden.get('[data-onboarding="workspace-selector"]').attributes("data-onboarding")).toBe("workspace-selector");
 
     const shown = mount(WorkbenchFooter, {
@@ -43,7 +43,11 @@ describe("WorkbenchFooter", () => {
       }
     });
 
-    await shown.find('[aria-label="切换服务器工作空间"]').trigger("click");
+    await shown.find('[data-onboarding="workspace-selector"]').trigger("click");
+    const serverSwitch = document.body.querySelector('[aria-label="切换测试工作区"]') as HTMLButtonElement | null;
+    expect(serverSwitch).not.toBeNull();
+    serverSwitch?.click();
+    await shown.vm.$nextTick();
 
     expect(shown.emitted("open-server-workspace-picker")).toHaveLength(1);
   });
@@ -81,10 +85,17 @@ describe("WorkbenchFooter", () => {
 
     const buttons = wrapper.find(".ta-workbench-footer-left").findAll("button");
     expect(buttons.map((button) => button.attributes("aria-label") ?? button.attributes("data-onboarding")))
-      .toEqual(["workspace-selector", "打开应用源码", "打开引用配置", "切换服务器工作空间"]);
+      .toEqual(["workspace-selector", "打开应用源码", "打开引用配置"]);
 
     await buttons[1].trigger("click");
     expect(wrapper.emitted("open-app-source")).toHaveLength(1);
+
+    await wrapper.find('[data-onboarding="workspace-selector"]').trigger("click");
+    const serverSwitch = document.body.querySelector('[aria-label="切换测试工作区"]') as HTMLButtonElement | null;
+    expect(serverSwitch).not.toBeNull();
+    serverSwitch?.click();
+    await wrapper.vm.$nextTick();
+    expect(wrapper.emitted("open-server-workspace-picker")).toHaveLength(1);
   });
 
   it("hides the reference configuration icon unless explicitly authorized by the parent", () => {
@@ -93,6 +104,26 @@ describe("WorkbenchFooter", () => {
     });
 
     expect(wrapper.find('button[aria-label="打开引用配置"]').exists()).toBe(false);
+  });
+
+  it("keeps source return and test workspace switching in the same menu", async () => {
+    const wrapper = mount(WorkbenchFooter, {
+      attachTo: document.body,
+      props: {
+        appName: "F-COSS",
+        showServerWorkspaceSwitch: true,
+        showSave: false,
+        workspaceKind: "APP_SOURCE"
+      }
+    });
+
+    await wrapper.find('[data-onboarding="workspace-selector"]').trigger("click");
+    expect(document.body.querySelector('[aria-label="返回应用工作区"]')).not.toBeNull();
+    expect(document.body.querySelector('[aria-label="切换测试工作区"]')).not.toBeNull();
+
+    (document.body.querySelector('[aria-label="返回应用工作区"]') as HTMLButtonElement).click();
+    await wrapper.vm.$nextTick();
+    expect(wrapper.emitted("return-managed-workspace")).toHaveLength(1);
   });
 
   it("shows the active personal worktree branch in the switch trigger", () => {

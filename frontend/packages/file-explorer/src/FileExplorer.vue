@@ -21,6 +21,8 @@ export type FileExplorerProps = {
   searchResults?: FileSearchResult[];
   searchLoading?: boolean;
   searchKeyword?: string;
+  /** 当前正在下载的文件树节点稳定 ID；用于阻止重复点击并展示进行中状态。 */
+  downloadingEntryId?: string;
 };
 
 export type ExplorerTab = "explorer" | "search" | "changes";
@@ -60,6 +62,7 @@ const emit = defineEmits<{
   uploadFiles: [directory: string, files: File[]];
   undoEntry: [];
   cacheAndNavigate: [path: string, type: "file" | "directory"];
+  downloadEntry: [entry: FileTreeEntry];
 }>();
 
 const tab = ref<ExplorerTab>("explorer");
@@ -346,6 +349,7 @@ defineExpose({ openRootActions });
         :drag-reset-token="dragResetToken"
         :drag-source-paths="dragSourcePaths"
         :selected-entries="selectedEntries"
+        :downloading-entry-id="downloadingEntryId"
         :clipboard-entry="clipboardEntry"
         :depth="0"
         @toggle-directory="emit('toggleDirectory', $event)"
@@ -367,6 +371,7 @@ defineExpose({ openRootActions });
         @upload-files="(directory, files) => emit('uploadFiles', directory, files)"
         @request-upload="requestUpload"
         @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
+        @download-entry="emit('downloadEntry', $event)"
         @drag-source-change="setDragSources"
         @selection-change="selectedEntries = $event"
       />

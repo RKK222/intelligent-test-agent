@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { FileExplorer, type FileExplorerProps, type ExplorerTab } from "@test-agent/file-explorer";
-import type { FileSearchResult, RunDiffFile, WorkspaceViewEntry, WorkspaceViewWarning } from "@test-agent/shared-types";
+import type { FileSearchResult, FileTreeEntry, RunDiffFile, WorkspaceViewEntry, WorkspaceViewWarning } from "@test-agent/shared-types";
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import AgentConfigPanel from "./AgentConfigPanel.vue";
@@ -137,6 +137,7 @@ const emit = defineEmits<{
   undoEntry: [];
   // 缓存并跳转
   cacheAndNavigate: [path: string, type: "file" | "directory"];
+  downloadEntry: [entry: FileTreeEntry];
 }>();
 
 const workspaceExpanded = ref(true);
@@ -561,6 +562,7 @@ defineExpose({
               :search-results="searchResults"
               :search-loading="searchLoading"
               :search-keyword="searchKeyword"
+              :downloading-entry-id="downloadingEntryId"
               @toggle-directory="emit('toggleDirectory', $event)"
               @toggle-view-directory="emit('toggleViewDirectory', $event)"
               @open-file="emit('openFile', $event)"
@@ -581,6 +583,7 @@ defineExpose({
               @upload-files="(directory, files) => emit('uploadFiles', directory, files)"
               @undo-entry="emit('undoEntry')"
               @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
+              @download-entry="emit('downloadEntry', $event)"
             />
           </div>
         </div>

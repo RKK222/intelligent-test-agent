@@ -151,6 +151,10 @@ const useCascadeMenu = computed(() =>
   Boolean(props.loadingTemplates))
 );
 
+// 应用工作区和测试工作区共用同一个入口；源码快照模式下也保留同一入口，
+// 让“返回应用工作区”和“切换测试工作区”不再分散成两个按钮。
+const useWorkspaceSwitchMenu = computed(() => useCascadeMenu.value || props.showServerWorkspaceSwitch === true);
+
 // ===== 两级菜单弹出状态 =====
 // menuOpen: 一级菜单（工作空间列表）开关；hoveredTemplateId: 当前悬停的模板，控制二级菜单（版本）显隐。
 // cascadeButtonRef: 触发按钮 DOM 引用；cascadeMenuPos / cascadeSubmenuPos: 一级与二级菜单的 fixed 定位坐标。
@@ -470,13 +474,23 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   emit("select-version", { template, version });
   closeMenu();
 }
+
+function returnManagedWorkspaceFromMenu() {
+  closeMenu();
+  emit("return-managed-workspace");
+}
+
+function openServerWorkspacePickerFromMenu() {
+  closeMenu();
+  emit("open-server-workspace-picker");
+}
 </script>
 
 <template>
   <footer class="ta-workbench-footer">
     <div class="ta-workbench-footer-left">
       <button
-        v-if="!showSave && workspaceKind === 'APP_SOURCE'"
+        v-if="!showSave && workspaceKind === 'APP_SOURCE' && !useWorkspaceSwitchMenu"
         type="button"
         class="ta-workbench-footer-branch"
         title="返回应用工作区"
@@ -491,7 +505,7 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
         鼠标 hover 模板时触发子菜单；点击版本后由父组件切换运行态 Workspace。
       -->
       <div
-        v-if="!showSave && useCascadeMenu"
+        v-if="!showSave && useWorkspaceSwitchMenu"
         class="ta-workbench-cascade"
         :class="{ 'is-open': menuOpen }"
       >
@@ -521,11 +535,11 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
             :style="{ top: `${cascadeMenuPos.top}px`, left: `${cascadeMenuPos.left}px` }"
             @click.stop
           >
-            <div class="ta-workbench-cascade-header">
+            <div v-if="useCascadeMenu" class="ta-workbench-cascade-header">
               <span>应用：{{ appName || "—" }}</span>
               <span v-if="loadingTemplates" class="ta-workbench-cascade-loading">加载中…</span>
             </div>
-            <ul class="ta-workbench-cascade-list" role="none">
+            <ul v-if="useCascadeMenu" class="ta-workbench-cascade-list" role="none">
               <li
                 v-for="template in templates"
                 :key="template.workspaceId"
@@ -545,6 +559,31 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
                 <span class="ta-workbench-cascade-item-arrow" aria-hidden="true">›</span>
               </li>
             </ul>
+            <div v-if="workspaceKind === 'APP_SOURCE'" class="ta-workbench-cascade-server-entry">
+              <button
+                type="button"
+                class="ta-workbench-cascade-server-button"
+                aria-label="返回应用工作区"
+                title="返回应用工作区"
+                @click="returnManagedWorkspaceFromMenu"
+              >
+                <ArrowLeftRight class="ta-workbench-footer-icon" />
+                <span>返回应用工作区</span>
+              </button>
+            </div>
+            <div v-if="showServerWorkspaceSwitch" class="ta-workbench-cascade-server-entry">
+              <button
+                type="button"
+                class="ta-workbench-cascade-server-button"
+                :disabled="serverWorkspaceSwitchDisabled"
+                aria-label="切换测试工作区"
+                title="切换测试工作区"
+                @click="openServerWorkspacePickerFromMenu"
+              >
+                <ServerCog class="ta-workbench-footer-icon" />
+                <span>切换测试工作区</span>
+              </button>
+            </div>
           </div>
         </Teleport>
         <!--
@@ -628,17 +667,6 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
         @click="emit('open-reference-configuration')"
       >
         <LibraryBig class="ta-workbench-footer-icon" />
-      </button>
-      <button
-        v-if="!showSave && showServerWorkspaceSwitch"
-        type="button"
-        class="ta-workbench-server-switch"
-        :disabled="serverWorkspaceSwitchDisabled"
-        title="切换服务器工作空间"
-        aria-label="切换服务器工作空间"
-        @click="emit('open-server-workspace-picker')"
-      >
-        <ServerCog class="ta-workbench-footer-icon" />
       </button>
       <template v-else-if="showSave">
         <span class="ta-workbench-footer-path">
@@ -875,7 +903,6 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   color: #555;
 }
 
-.ta-workbench-server-switch,
 .ta-workbench-reference-configuration,
 .ta-workbench-app-source {
   display: inline-flex;
@@ -891,7 +918,6 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   transition: background-color 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
 }
 
-.ta-workbench-server-switch:hover:not(:disabled),
 .ta-workbench-reference-configuration:hover:not(:disabled),
 .ta-workbench-app-source:hover:not(:disabled) {
   background: #f5f5f5;
@@ -1062,6 +1088,39 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   padding: 0;
   list-style: none;
   /* 不再设 max-height，让子菜单自然延展；外层 panel 兜底 */
+}
+
+.ta-workbench-cascade-server-entry {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.ta-workbench-cascade-server-button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #3f3f46;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+.ta-workbench-cascade-server-button:hover:not(:disabled) {
+  background: #f4f4f5;
+  color: #1d4ed8;
+}
+
+.ta-workbench-cascade-server-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .ta-workbench-cascade-item {

@@ -110,7 +110,7 @@ describe("DirectoryRows", () => {
     expect(duplicateRows[1]?.title).toContain("引用来源：requirements");
     expect(duplicateRows[2]?.classList.contains("is-reference-collision")).toBe(true);
     expect(duplicateRows[2]?.title).toContain("引用冲突：legacy");
-    expect(view.getByRole("button", { name: /plain\.md/ }).classList.contains("is-reference-merged")).toBe(false);
+    expect(view.getByRole("button", { name: "plain.md" }).classList.contains("is-reference-merged")).toBe(false);
 
     await fireEvent.click(duplicateRows[1]!);
     expect(view.emitted("openViewFile")).toEqual([[entries[1]]]);

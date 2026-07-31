@@ -3946,3 +3946,26 @@
 - 原生附件不再生成非法 `FileSource`，非原生附件仍可由工作区工具按精确路径读取；平台历史仍保留原始附件元数据，现有路由和 Slash Command 语义兼容。
 - 本次未修改第二个“执行不完”问题的补偿终态或前端 busy 逻辑；该问题仅完成解释，后续需独立修复。
 - 未新增或变更 HTTP wire、RunEvent、数据库/Flyway、关系型 SQL、性能、安全、环境配置、generated SDK 或 OpenCode 只读源码；工作区内并行的前端文件浏览/下载改动未暂存、未纳入本次提交。
+
+## 2026-07-31 - 新增工作区下载与统一切换入口
+
+### Why
+
+- 用户需要在测试工作区文件树中直接下载文件或文件夹，并将应用工作区与测试工作区切换收敛到同一个入口。
+
+### What
+
+- 文件树文件/文件夹行增加悬停下载按钮；单文件按原文件名下载，文件夹递归读取后在浏览器生成带北京时间 `yyyyMMdd-HHmmss` 时间戳的 ZIP。
+- `AgentWorkbench` 复用现有 workspace / workspace-view 文件 WebSocket 及大文件 `read.chunk` 读取，下载过程中禁用同一节点重复点击，并在切换工作区时废弃旧下载结果。
+- `WorkbenchFooter` 将应用工作区级联菜单和测试工作区切换入口合并；源码快照模式也在同一菜单提供返回应用工作区和切换测试工作区。
+
+### How
+
+- 新增无外部依赖的 UTF-8 ZIP 生成器，补充文件夹名、中文文件名、时间戳和单文件 Blob 测试。
+- 文件树组件新增 `downloadEntry` 内部 Vue 事件及下载状态透传测试；前端定向测试 4 文件 53 项通过，根前端测试 106 文件 1729 passed / 1 skipped，agent-web typecheck 和生产构建通过。
+- 使用 test profile 重启 backend、opencode-manager、frontend；health/readiness 为 `UP`、前端 3000 返回 200，并用真实页面验证文件下载、文件夹 ZIP 解压（12 个文件）及测试工作区入口打开。
+
+### Result
+
+- 前端交互已实现并运行验证；未新增或变更 HTTP API、平台文件 WebSocket/RunEvent wire、数据库/Flyway、关系型 SQL、性能、安全、环境配置、generated SDK 或 OpenCode 源码。
+- 下载内容受现有文件 WebSocket UTF-8 文本读取契约约束；二进制文件的原始字节下载仍需后续扩展二进制读取协议，当前未宣称已覆盖该场景。

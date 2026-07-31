@@ -121,6 +121,13 @@ import {
 } from "./fileUploadOverlayState";
 import { formatPreviewBytes, progressivePreviewRequired } from "./fileProgressivePreview";
 import {
+  createWorkspaceFileBlob,
+  createZipBlob,
+  downloadBlob,
+  formatDownloadTimestamp,
+  type WorkspaceDownloadFile
+} from "./workspace-download";
+import {
   agentConfigMutationReloadTarget,
   agentFileInfo,
   agentTabPath,
@@ -397,6 +404,8 @@ const selectedWorkspaceId = ref<string | undefined>(undefined);
 const selectedWorkspaceSnapshot = shallowRef<Workspace | undefined>(undefined);
 const entriesByDirectory = ref<Record<string, FileTreeEntry[]>>({});
 const expandedDirectories = ref<Set<string>>(new Set());
+const downloadingEntryId = ref<string | undefined>();
+let workspaceDownloadSequence = 0;
 const workspaceViewDirectoryById = new Map<string, WorkspaceViewEntry>();
 const workspaceViewNodeIdByTabPath = new Map<string, string>();
 const workspaceViewWarningByDirectory = new Map<string, WorkspaceViewWarningSnapshot>();
@@ -3676,6 +3685,8 @@ function createServerTerminalTicket(linuxServerId: string, confirmationText: str
 function resetWorkspaceState() {
   // Workspace 切换后必须清掉旧根目录绑定的文件树、编辑器、Diff 与运行态，避免误操作旧路径。
   workspaceLoadGeneration++;
+  workspaceDownloadSequence++;
+  downloadingEntryId.value = undefined;
   latestWorkspaceFileReadByPath.clear();
   agentFileLoadGeneration++;
   latestAgentFileReadByPath.clear();
@@ -5831,6 +5842,169 @@ async function openWorkspaceViewFile(entry: WorkspaceViewEntry) {
     }
     const failure = errorFeedback("读取引用文件失败", error);
     workbench.updateTab(tabPath, referenceReadFailurePatch(hadLoadedCache, failure.description));
+  }
+}
+
+function isWorkspaceViewEntry(entry: FileTreeEntry): entry is WorkspaceViewEntry {
+  const candidate = entry as Partial<WorkspaceViewEntry>;
+  return typeof candidate.id === "string"
+    && Boolean(candidate.locator)
+    && typeof candidate.source === "string";
+}
+
+function relativeDownloadPath(path: string, rootPath: string): string {
+  const normalizedPath = path.replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
+  const normalizedRoot = rootPath.replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
+  if (normalizedRoot && normalizedPath.startsWith(`${normalizedRoot}/`)) {
+    return normalizedPath.slice(normalizedRoot.length + 1);
+  }
+  if (normalizedRoot && normalizedPath === normalizedRoot) {
+    return normalizedPath.split("/").at(-1) ?? normalizedPath;
+  }
+  return normalizedPath || path.split(/[\\/]+/).filter(Boolean).at(-1) || "file";
+}
+
+async function readWorkspaceFileForDownload(workspaceId: string, path: string): Promise<string> {
+  try {
+    return (await api.readFile(workspaceId, path, true)).content;
+  } catch (error) {
+    if (!progressivePreviewRequired(error)) throw error;
+    const chunks: string[] = [];
+    let offset = 0;
+    let expectedSize: number | undefined;
+    let expectedLastModifiedMillis: number | undefined;
+    while (true) {
+      const chunk = await api.readFilePreviewChunk(workspaceId, path, {
+        offset,
+        expectedSize,
+        expectedLastModifiedMillis
+      });
+      requireProgressivePreviewChunk(chunk, offset);
+      chunks.push(chunk.content);
+      expectedSize = chunk.size;
+      expectedLastModifiedMillis = chunk.lastModifiedMillis;
+      if (chunk.eof) return chunks.join("");
+      offset = chunk.nextOffset;
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    }
+  }
+}
+
+async function readWorkspaceViewFileForDownload(
+  workspaceId: string,
+  locator: WorkspaceViewEntry["locator"]
+): Promise<string> {
+  try {
+    return (await api.readWorkspaceViewFile(workspaceId, locator)).content;
+  } catch (error) {
+    if (!progressivePreviewRequired(error)) throw error;
+    const chunks: string[] = [];
+    let offset = 0;
+    let expectedSize: number | undefined;
+    let expectedLastModifiedMillis: number | undefined;
+    while (true) {
+      const chunk = await api.readWorkspaceViewFilePreviewChunk(workspaceId, locator, {
+        offset,
+        expectedSize,
+        expectedLastModifiedMillis
+      });
+      requireProgressivePreviewChunk(chunk, offset);
+      chunks.push(chunk.content);
+      expectedSize = chunk.size;
+      expectedLastModifiedMillis = chunk.lastModifiedMillis;
+      if (chunk.eof) return chunks.join("");
+      offset = chunk.nextOffset;
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    }
+  }
+}
+
+async function collectWorkspaceDownloadFiles(
+  workspaceId: string,
+  rootPath: string
+): Promise<WorkspaceDownloadFile[]> {
+  const files: WorkspaceDownloadFile[] = [];
+  const directories = [rootPath];
+  while (directories.length > 0) {
+    const directory = directories.shift()!;
+    const entries = await api.listFiles(workspaceId, directory);
+    for (const entry of entries) {
+      if (entry.type === "directory") {
+        directories.push(entry.path);
+        continue;
+      }
+      files.push({
+        path: relativeDownloadPath(entry.path, rootPath),
+        content: await readWorkspaceFileForDownload(workspaceId, entry.path)
+      });
+    }
+  }
+  return files;
+}
+
+async function collectWorkspaceViewDownloadFiles(
+  workspaceId: string,
+  root: WorkspaceViewEntry
+): Promise<WorkspaceDownloadFile[]> {
+  const files: WorkspaceDownloadFile[] = [];
+  const directories: WorkspaceViewEntry["locator"][] = [root.locator];
+  while (directories.length > 0) {
+    const locator = directories.shift()!;
+    const response = await api.listWorkspaceView(workspaceId, locator);
+    for (const entry of response.entries) {
+      if (entry.type === "directory") {
+        directories.push(entry.locator);
+        continue;
+      }
+      files.push({
+        path: relativeDownloadPath(entry.path, root.path),
+        content: await readWorkspaceViewFileForDownload(workspaceId, entry.locator)
+      });
+    }
+  }
+  return files;
+}
+
+async function handleDownloadEntry(entry: FileTreeEntry) {
+  const workspace = selectedWorkspace.value;
+  if (!workspace) return;
+  if (downloadingEntryId.value) return;
+  const viewEntry = isWorkspaceViewEntry(entry) ? entry : undefined;
+  const entryId = viewEntry?.id ?? entry.path;
+  const downloadSequence = ++workspaceDownloadSequence;
+  const isCurrentDownload = () => downloadSequence === workspaceDownloadSequence
+    && selectedWorkspace.value?.workspaceId === workspace.workspaceId;
+  downloadingEntryId.value = entryId;
+  try {
+    if (entry.type === "directory") {
+      const files = viewEntry
+        ? await collectWorkspaceViewDownloadFiles(workspace.workspaceId, viewEntry)
+        : await collectWorkspaceDownloadFiles(workspace.workspaceId, entry.path);
+      if (!isCurrentDownload()) return;
+      downloadBlob(
+        createZipBlob(files),
+        `${entry.name}-${formatDownloadTimestamp()}.zip`
+      );
+      feedback.value = {
+        kind: "success",
+        title: "文件夹已下载",
+        description: `${entry.name}（${files.length} 个文件）`
+      };
+      return;
+    }
+
+    const content = viewEntry
+      ? await readWorkspaceViewFileForDownload(workspace.workspaceId, viewEntry.locator)
+      : await readWorkspaceFileForDownload(workspace.workspaceId, entry.path);
+    if (!isCurrentDownload()) return;
+    downloadBlob(createWorkspaceFileBlob(content), entry.name);
+    feedback.value = { kind: "success", title: "文件已下载", description: entry.name };
+  } catch (error) {
+    if (isCurrentDownload()) feedback.value = errorFeedback("下载工作区条目失败", error);
+  } finally {
+    if (downloadSequence === workspaceDownloadSequence && downloadingEntryId.value === entryId) {
+      downloadingEntryId.value = undefined;
+    }
   }
 }
 
@@ -8913,6 +9087,7 @@ async function handleLogout() {
           :active-path="activeWorkspaceViewNodeId"
           :changed-files="vcsDiffFiles"
           :loading-path="loadingPath"
+          :downloading-entry-id="downloadingEntryId"
           :app-name="selectedManagedApplication?.appName"
           :app-templates="appTemplatesWithVersions"
           :selected-version-id="selectedWorkspaceKind === 'MANAGED' ? selectedVersionId : undefined"
@@ -8978,6 +9153,7 @@ async function handleLogout() {
           @delete-entries="handleDeleteEntries"
           @rename-entry="handleRenameEntry"
           @copy-entry="handleCopyEntry"
+          @download-entry="handleDownloadEntry"
           @copy-entries="handleCopyEntries"
           @move-entry="handleMoveEntry"
           @move-entries="handleMoveEntries"

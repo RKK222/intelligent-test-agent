@@ -3,6 +3,25 @@ import { describe, expect, it } from "vitest";
 import FileExplorer from "../src/FileExplorer.vue";
 
 describe("FileExplorer", () => {
+  it("emits download events for files and directories", async () => {
+    const entries = [
+      { type: "directory" as const, path: "docs", name: "docs" },
+      { type: "file" as const, path: "README.md", name: "README.md" }
+    ];
+    const view = render(FileExplorer, {
+      props: {
+        entriesByDirectory: { "": entries },
+        expandedDirectories: new Set<string>(),
+        changedFiles: []
+      }
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "下载文件夹 docs" }));
+    await fireEvent.click(view.getByRole("button", { name: "下载文件 README.md" }));
+
+    expect(view.emitted("downloadEntry")).toEqual([[entries[0]], [entries[1]]]);
+  });
+
   it("forwards view entries so duplicate logical paths keep their locator identity", async () => {
     const reference = {
       id: "reference:requirements:guide",
