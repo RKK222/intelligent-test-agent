@@ -554,6 +554,29 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                 maxPreviewBytes);
     }
 
+    /** 引用资产二进制下载复用相同的挂载、相对路径和符号链接安全校验。 */
+    public FileBinaryChunkResponse readViewBinaryChunk(
+            String appId,
+            String repositoryEnglishName,
+            String folder,
+            String path,
+            long offset,
+            Long expectedSize,
+            Long expectedLastModifiedMillis) {
+        ViewRoot viewRoot = requireReadyViewRoot(appId, repositoryEnglishName, folder);
+        String normalizedPath = normalizeRelativePath(path);
+        if (normalizedPath.isEmpty()) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "引用资产文件路径不能为空");
+        }
+        Path target = resolveSafeEntry(viewRoot.folderRoot(), normalizedPath);
+        return BinaryFileChunkReader.read(
+                target,
+                normalizedPath,
+                offset,
+                expectedSize,
+                expectedLastModifiedMillis);
+    }
+
     @Override
     public boolean supports(String type) {
         return SYNC_REQUESTED_EVENT.equals(type);

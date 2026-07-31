@@ -121,11 +121,15 @@ import {
 } from "./fileUploadOverlayState";
 import { formatPreviewBytes, progressivePreviewRequired } from "./fileProgressivePreview";
 import {
+  assertCompleteWorkspaceViewDownload,
+  concatWorkspaceDownloadChunks,
   createWorkspaceFileBlob,
   createZipBlob,
+  decodeWorkspaceBinaryChunk,
   downloadBlob,
+  finalizeWorkspaceDownloadFiles,
   formatDownloadTimestamp,
-  type WorkspaceDownloadFile
+  type WorkspaceDownloadCandidate
 } from "./workspace-download";
 import {
   agentConfigMutationReloadTarget,
@@ -5864,105 +5868,83 @@ function relativeDownloadPath(path: string, rootPath: string): string {
   return normalizedPath || path.split(/[\\/]+/).filter(Boolean).at(-1) || "file";
 }
 
-async function readWorkspaceFileForDownload(workspaceId: string, path: string): Promise<string> {
-  try {
-    return (await api.readFile(workspaceId, path, true)).content;
-  } catch (error) {
-    if (!progressivePreviewRequired(error)) throw error;
-    const chunks: string[] = [];
-    let offset = 0;
-    let expectedSize: number | undefined;
-    let expectedLastModifiedMillis: number | undefined;
-    while (true) {
-      const chunk = await api.readFilePreviewChunk(workspaceId, path, {
-        offset,
-        expectedSize,
-        expectedLastModifiedMillis
-      });
-      requireProgressivePreviewChunk(chunk, offset);
-      chunks.push(chunk.content);
-      expectedSize = chunk.size;
-      expectedLastModifiedMillis = chunk.lastModifiedMillis;
-      if (chunk.eof) return chunks.join("");
-      offset = chunk.nextOffset;
-      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
-    }
+async function readWorkspaceFileForDownload(
+  workspaceId: string,
+  path: string
+): Promise<Uint8Array<ArrayBuffer>> {
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  let offset = 0;
+  let expectedSize: number | undefined;
+  let expectedLastModifiedMillis: number | undefined;
+  while (true) {
+    const chunk = await api.readFileBinaryChunk(workspaceId, path, {
+      offset,
+      expectedSize,
+      expectedLastModifiedMillis
+    });
+    chunks.push(decodeWorkspaceBinaryChunk(chunk, offset));
+    expectedSize = chunk.size;
+    expectedLastModifiedMillis = chunk.lastModifiedMillis;
+    if (chunk.eof) return concatWorkspaceDownloadChunks(chunks, chunk.size);
+    offset = chunk.nextOffset;
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
   }
 }
 
 async function readWorkspaceViewFileForDownload(
   workspaceId: string,
   locator: WorkspaceViewEntry["locator"]
-): Promise<string> {
-  try {
-    return (await api.readWorkspaceViewFile(workspaceId, locator)).content;
-  } catch (error) {
-    if (!progressivePreviewRequired(error)) throw error;
-    const chunks: string[] = [];
-    let offset = 0;
-    let expectedSize: number | undefined;
-    let expectedLastModifiedMillis: number | undefined;
-    while (true) {
-      const chunk = await api.readWorkspaceViewFilePreviewChunk(workspaceId, locator, {
-        offset,
-        expectedSize,
-        expectedLastModifiedMillis
-      });
-      requireProgressivePreviewChunk(chunk, offset);
-      chunks.push(chunk.content);
-      expectedSize = chunk.size;
-      expectedLastModifiedMillis = chunk.lastModifiedMillis;
-      if (chunk.eof) return chunks.join("");
-      offset = chunk.nextOffset;
-      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
-    }
+): Promise<Uint8Array<ArrayBuffer>> {
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  let offset = 0;
+  let expectedSize: number | undefined;
+  let expectedLastModifiedMillis: number | undefined;
+  while (true) {
+    const chunk = await api.readWorkspaceViewFileBinaryChunk(workspaceId, locator, {
+      offset,
+      expectedSize,
+      expectedLastModifiedMillis
+    });
+    chunks.push(decodeWorkspaceBinaryChunk(chunk, offset));
+    expectedSize = chunk.size;
+    expectedLastModifiedMillis = chunk.lastModifiedMillis;
+    if (chunk.eof) return concatWorkspaceDownloadChunks(chunks, chunk.size);
+    offset = chunk.nextOffset;
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
   }
 }
 
-async function collectWorkspaceDownloadFiles(
-  workspaceId: string,
-  rootPath: string
-): Promise<WorkspaceDownloadFile[]> {
-  const files: WorkspaceDownloadFile[] = [];
-  const directories = [rootPath];
-  while (directories.length > 0) {
-    const directory = directories.shift()!;
-    const entries = await api.listFiles(workspaceId, directory);
-    for (const entry of entries) {
-      if (entry.type === "directory") {
-        directories.push(entry.path);
-        continue;
-      }
-      files.push({
-        path: relativeDownloadPath(entry.path, rootPath),
-        content: await readWorkspaceFileForDownload(workspaceId, entry.path)
-      });
-    }
-  }
-  return files;
-}
+type WorkspaceDownloadRoot = Pick<WorkspaceViewEntry, "path" | "locator"> & { collision?: boolean };
 
 async function collectWorkspaceViewDownloadFiles(
   workspaceId: string,
-  root: WorkspaceViewEntry
-): Promise<WorkspaceDownloadFile[]> {
-  const files: WorkspaceDownloadFile[] = [];
+  root: WorkspaceDownloadRoot
+): Promise<ReturnType<typeof finalizeWorkspaceDownloadFiles>> {
+  const files: WorkspaceDownloadCandidate[] = [];
   const directories: WorkspaceViewEntry["locator"][] = [root.locator];
+  let collisionDetected = root.collision === true;
   while (directories.length > 0) {
     const locator = directories.shift()!;
     const response = await api.listWorkspaceView(workspaceId, locator);
+    assertCompleteWorkspaceViewDownload(response);
     for (const entry of response.entries) {
+      collisionDetected ||= entry.collision;
       if (entry.type === "directory") {
         directories.push(entry.locator);
         continue;
       }
+      if (entry.locator.kind === "COMPOSITE") {
+        throw new Error("组合目录定位器不能作为文件下载");
+      }
       files.push({
         path: relativeDownloadPath(entry.path, root.path),
-        content: await readWorkspaceViewFileForDownload(workspaceId, entry.locator)
+        content: await readWorkspaceViewFileForDownload(workspaceId, entry.locator),
+        source: entry.locator.kind,
+        referenceAlias: entry.locator.referenceAlias
       });
     }
   }
-  return files;
+  return finalizeWorkspaceDownloadFiles(files, collisionDetected);
 }
 
 async function handleDownloadEntry(entry: FileTreeEntry) {
@@ -5977,9 +5959,14 @@ async function handleDownloadEntry(entry: FileTreeEntry) {
   downloadingEntryId.value = entryId;
   try {
     if (entry.type === "directory") {
-      const files = viewEntry
-        ? await collectWorkspaceViewDownloadFiles(workspace.workspaceId, viewEntry)
-        : await collectWorkspaceDownloadFiles(workspace.workspaceId, entry.path);
+      const files = await collectWorkspaceViewDownloadFiles(
+        workspace.workspaceId,
+        viewEntry ?? {
+          path: entry.path,
+          locator: { kind: "WORKSPACE", path: entry.path },
+          collision: false
+        }
+      );
       if (!isCurrentDownload()) return;
       downloadBlob(
         createZipBlob(files),

@@ -2762,7 +2762,17 @@ describe("backend-api", () => {
                     warnings: [{ alias: "legacy", code: "REFERENCE_UNAVAILABLE", message: "副本不可用" }],
                     truncated: false
                   }
-                : {
+                : message.op === "workspace.view.read.binary.chunk"
+                  ? {
+                      path: "docs/guide.bin",
+                      contentBase64: "AP+AQA==",
+                      offset: 0,
+                      nextOffset: 4,
+                      size: 4,
+                      eof: true,
+                      lastModifiedMillis: 1234
+                    }
+                  : {
                     path: "docs/guide.md",
                     content: "reference",
                     size: 9,
@@ -2807,6 +2817,19 @@ describe("backend-api", () => {
       source: "REFERENCE",
       referenceAlias: "requirements"
     });
+    await expect(client.readWorkspaceViewFileBinaryChunk("wrk_view", {
+      kind: "REFERENCE",
+      path: "docs/guide.bin",
+      referenceAlias: "requirements"
+    }, { offset: 0 })).resolves.toEqual({
+      path: "docs/guide.bin",
+      contentBase64: "AP+AQA==",
+      offset: 0,
+      nextOffset: 4,
+      size: 4,
+      eof: true,
+      lastModifiedMillis: 1234
+    });
 
     expect(sockets[0]?.sentMessages).toEqual([
       expect.objectContaining({
@@ -2818,6 +2841,14 @@ describe("backend-api", () => {
         params: {
           workspaceId: "wrk_view",
           locator: { kind: "REFERENCE", path: "docs/guide.md", referenceAlias: "requirements" }
+        }
+      }),
+      expect.objectContaining({
+        op: "workspace.view.read.binary.chunk",
+        params: {
+          workspaceId: "wrk_view",
+          locator: { kind: "REFERENCE", path: "docs/guide.bin", referenceAlias: "requirements" },
+          offset: 0
         }
       })
     ]);
@@ -2996,6 +3027,19 @@ describe("backend-api", () => {
       warningThresholdBytes: 5242880,
       lastModifiedMillis: 1234
     });
+    await expect(client.readFileBinaryChunk(
+      "wrk_1234567890abcdef",
+      "assets/icon.bin",
+      { offset: 0 }
+    )).resolves.toEqual({
+      path: "assets/icon.bin",
+      contentBase64: "AP+AQA==",
+      offset: 0,
+      nextOffset: 4,
+      size: 4,
+      eof: true,
+      lastModifiedMillis: 1234
+    });
     await client.renameWorkspaceFile("wrk_1234567890abcdef", "docs/design.md", "详细设计.md");
     await client.copyWorkspaceFile("wrk_1234567890abcdef", "docs/design.md", "backup/design.md");
     await client.moveWorkspaceFile("wrk_1234567890abcdef", "docs/design.md", "archive/design.md");
@@ -3020,6 +3064,14 @@ describe("backend-api", () => {
           offset: 524288,
           expectedSize: 1048576,
           expectedLastModifiedMillis: 1234
+        }
+      }),
+      expect.objectContaining({
+        op: "workspace.read.binary.chunk",
+        params: {
+          workspaceId: "wrk_1234567890abcdef",
+          path: "assets/icon.bin",
+          offset: 0
         }
       }),
       expect.objectContaining({
@@ -4023,7 +4075,17 @@ class FakeWorkspaceWebSocket {
           id: message.id,
           type: "result",
           data:
-            message.op.endsWith(".read.chunk")
+            message.op.endsWith(".read.binary.chunk")
+              ? {
+                  path: String(message.params?.path ?? "assets/icon.bin"),
+                  contentBase64: "AP+AQA==",
+                  offset: Number(message.params?.offset ?? 0),
+                  nextOffset: Number(message.params?.offset ?? 0) + 4,
+                  size: 4,
+                  eof: true,
+                  lastModifiedMillis: 1234
+                }
+              : message.op.endsWith(".read.chunk")
               ? {
                   path: String(message.params?.path ?? "docs/large.log"),
                   content: "preview chunk",

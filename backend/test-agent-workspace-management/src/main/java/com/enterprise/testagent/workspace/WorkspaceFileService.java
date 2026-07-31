@@ -156,7 +156,7 @@ public class WorkspaceFileService {
             long offset,
             Long expectedSize,
             Long expectedLastModifiedMillis) {
-        Path target = resolveReadablePreviewFile(rootPath, relativePath);
+        Path target = resolveReadableFile(rootPath, relativePath);
         return Utf8FilePreviewReader.read(
                 target,
                 normalizeRelativePath(relativePath),
@@ -166,15 +166,31 @@ public class WorkspaceFileService {
                 maxPreviewBytes);
     }
 
-    /** 渐进预览不得通过末端或中间符号链接逃逸工作区真实根目录。 */
-    private Path resolveReadablePreviewFile(String rootPath, String relativePath) {
+    /** 原始字节下载复用渐进预览的安全路径校验，但不执行 UTF-8 解码或预览大小限制。 */
+    public FileBinaryChunkResponse readBinaryChunk(
+            String rootPath,
+            String relativePath,
+            long offset,
+            Long expectedSize,
+            Long expectedLastModifiedMillis) {
+        Path target = resolveReadableFile(rootPath, relativePath);
+        return BinaryFileChunkReader.read(
+                target,
+                normalizeRelativePath(relativePath),
+                offset,
+                expectedSize,
+                expectedLastModifiedMillis);
+    }
+
+    /** 渐进预览和下载都不得通过末端或中间符号链接逃逸工作区真实根目录。 */
+    private Path resolveReadableFile(String rootPath, String relativePath) {
         Path root = rootRealPath(rootPath);
         Path target = resolveInsideRoot(rootPath, relativePath);
         try {
             if (Files.isSymbolicLink(target)) {
                 throw new PlatformException(
                         ErrorCode.FORBIDDEN,
-                        "大文件预览不支持符号链接",
+                        "文件读取不支持符号链接",
                         Map.of("path", safePath(relativePath)));
             }
             Path realTarget = target.toRealPath();

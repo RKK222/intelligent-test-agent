@@ -1077,6 +1077,8 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 
 旧 `/api/workspaces/**`、旧 HTTP 文件接口以及内部平台 HTTP 文件 `workspaces/{workspaceId}/files*` 已作废，返回 `410 API_GONE`。工作区文件列表、读取、写入、上传、复制、移动、状态和删除必须走 `file-ws-route`、目标后端 ticket 和文件 WebSocket RPC。工作台文件树使用同一通道的 `workspace.view.list` / `workspace.view.read` 读取“工作区 + 已配置引用”的只读组合视图；原始 `workspace.list` / `workspace.read` 继续保留给配置文件等明确只访问工作区物理内容的调用方。
 
+文件下载通过同一通道的 `workspace.read.binary.chunk` / `workspace.view.read.binary.chunk` 读取 Base64 原始字节分段；这两项是 WebSocket RPC，不新增 HTTP 文件代理。
+
 普通前端不再通过 HTTP 传入物理目录注册 Workspace。应用版本工作区和个人工作区由后端根据应用、模板、版本、个人工作区等 id 读取通用参数并派生物理目录；仅超级管理员服务器工作空间选择器可通过目标后端文件 WebSocket ticket 在目标服务器上创建运行态 Workspace。
 
 `WorkspaceResponse`：
@@ -1188,11 +1190,13 @@ WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSoc
 
 服务器目录选择器只通过短期 ticket 建立的文件 WebSocket 使用；缺失、不可访问或非目录返回 `VALIDATION_ERROR`。创建服务器工作空间仍要求 `SUPER_ADMIN`，且目标服务器必须与当前 agent 服务器一致。
 
-应用源码 Runtime Workspace 的 `.testagent-appsource-index.json` 属于平台保留元数据：`workspace.list/search` 不返回，`read/read.chunk/write/upload/copy/move/rename/delete/status` 一律拒绝；服务端用数据库 snapshot 的权威 SHA-256 发现缺失或损坏后原子修复。应用源码 Workspace 的 route、ticket 和每条 RPC 还必须实时复核当前 active generation、snapshot 未过期、本机 READY replica、应用启用/仓库关联与成员关系。
+应用源码 Runtime Workspace 的 `.testagent-appsource-index.json` 属于平台保留元数据：`workspace.list/search` 不返回，`read/read.chunk/read.binary.chunk/write/upload/copy/move/rename/delete/status` 一律拒绝；服务端用数据库 snapshot 的权威 SHA-256 发现缺失或损坏后原子修复。应用源码 Workspace 的 route、ticket 和每条 RPC 还必须实时复核当前 active generation、snapshot 未过期、本机 READY replica、应用启用/仓库关联与成员关系。
 
 应用源码最近选择解析只在可确定的 `FORBIDDEN`、`NOT_FOUND` 或 `CONFLICT` 失效场景删除偏好；Git、文件系统或内部服务故障返回原错误并保留偏好，避免瞬时故障被误当成用户选择失效。显式清除最近选择也必须带当前 Linux 服务器上下文，先按与打开工作区相同的 active generation、未过期 snapshot、本机 READY replica、应用关联和成员规则完成鉴权，再删除偏好。
 
 文件 WebSocket RPC 的 `path` / `sourcePath` / `targetPath` 必须解析在 workspace root 内，越权路径返回 `FORBIDDEN`。目录列表为单层、不递归，默认最多 1000 项；`workspace.search` 按工作区相对路径递归匹配，空 query 可返回受深度、数量和超时保护的文件目录，默认最多 200 项、20 层、5 秒，并跳过 `.git`、`node_modules` 等黑名单目录。文件读取和文本写入只支持 UTF-8，默认一次性预览/可编辑阈值为 5 MiB，可通过 `test-agent.files.max-preview-bytes` / `TEST_AGENT_MAX_PREVIEW_BYTES` 配置；普通读取超出阈值时返回 `VALIDATION_ERROR`，`details.reason=PREVIEW_TOO_LARGE` 与 `size/maxPreviewBytes`，前端随即改用 `workspace.read.chunk`、`workspace.view.read.chunk` 或 `agent-config.read.chunk`，按约 512 KiB 分段形成只读预览。渐进预览没有应用层总量上限，用户可逐段或加载到 EOF；界面必须提示完整加载可能占用大量内存并导致编辑器卡顿。每段响应含 UTF-8 字节 `nextOffset`、`size`、`lastModifiedMillis` 和 `eof`，后续请求回传大小/修改时间快照；加载期间文件变化返回 `CONFLICT + PREVIEW_CHANGED`，禁止混合拼接。新建二进制文件使用同一连接上的 `workspace.upload.begin/chunk/complete`，取消时调用 `workspace.upload.abort`；默认上传分片 256 KiB，可通过 `test-agent.files.upload-chunk-bytes` / `TEST_AGENT_UPLOAD_CHUNK_BYTES` 调整，最大 4 MiB。分片上传不设置应用层文件总大小上限，临时文件在完成并校验声明大小前不会作为目标文件出现，失败、取消或连接关闭时清理。WebSocket 单帧上限只覆盖一次性预览文本、一个渐进预览分段或一个 Base64 上传分片及 RPC envelope，不等于上传或最终预览总大小。旧 `workspace.upload` 单帧 Base64 操作仅为兼容保留，仍受一次性阈值约束。上传、`workspace.copy`、`workspace.move` 都不覆盖已有目标；`workspace.move` 保持 `workspaceId/sourcePath/targetPath` 请求与 `null` 成功响应，在同一工作区以一次原子文件系统重命名整体移动普通文件或普通目录（包括非空目录），不递归拆分；Linux 使用从 `/` 逐段打开的目录句柄和内核 `renameat2(RENAME_NOREPLACE)`，macOS 使用逐段目录句柄和 `renameatx_np(RENAME_EXCL | RENAME_NOFOLLOW_ANY)`，Windows 使用已核对最终路径的源条目、目标父目录句柄和不替换的 `SetFileInformationByHandle`，目标父目录替换或目标并发创建都失败关闭。同路径幂等成功；缺失源为 `NOT_FOUND`，目标存在为 `CONFLICT`，根、符号链接/特殊文件或目录自身后代目标为 `VALIDATION_ERROR`，路径越界为 `FORBIDDEN`。它仍是文件 WebSocket RPC，不新增 HTTP API 或 RunEvent SSE；应用配置源与目标路径都对完整 `.opencode/**` 命名空间执行 `APP_ADMIN` 保护校验。
+
+上文 UTF-8 限制只适用于文本读取/写入与编辑器预览；下载使用 `workspace.read.binary.chunk` / `workspace.view.read.binary.chunk` 按约 512 KiB 返回 Base64 原始字节，支持任意二进制文件。首次响应提供 `size/lastModifiedMillis`，后续请求回传快照并继续使用 `nextOffset`；下载期间文件变化返回 `CONFLICT + DOWNLOAD_CHANGED`。每段重新校验 ticket、成员、工作区安全路径或组合视图 locator。该能力为 additive WebSocket 协议扩展：旧客户端不受影响，新前端必须在所有目标 Java 节点完成后端升级后再启用下载。
 
 组合视图只消费当前工作区 `.opencode/opencode.jsonc` 中平台可验证的本地引用对象。后端会重新校验引用别名、`path`、`merge`、`sdd-folder-name`、当前应用关联的 `APPLICATION_ASSET_REPOSITORY`、总体和本机副本 `READY` 状态，以及当前平台解析后的 `OPENCODE_REFERENCES_DIR`；配置不能把视图指向任意绝对路径、其它应用仓库、`.git` 或符号链接。单个引用失效时 `workspace.view.list` 仍返回可用工作区内容，并在 `warnings` 中说明被跳过的别名；每层组合结果最多 1000 项，超限通过 `truncated=true` 显式标记。
 

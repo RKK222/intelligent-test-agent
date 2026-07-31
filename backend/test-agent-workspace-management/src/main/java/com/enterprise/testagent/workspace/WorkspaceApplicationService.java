@@ -317,6 +317,18 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
                 workspace.rootPath(), path, offset, expectedSize, expectedLastModifiedMillis);
     }
 
+    /** 分段读取工作区文件原始字节；每段沿用文件服务的路径和快照校验。 */
+    public FileBinaryChunkResponse readFileBinaryChunk(
+            WorkspaceId workspaceId,
+            String path,
+            long offset,
+            Long expectedSize,
+            Long expectedLastModifiedMillis) {
+        Workspace workspace = getWorkspace(workspaceId);
+        return fileService.readBinaryChunk(
+                workspace.rootPath(), path, offset, expectedSize, expectedLastModifiedMillis);
+    }
+
     /**
      * 写入工作区内 UTF-8 文本文件；缺失父目录会按文件服务规则自动创建。
      */

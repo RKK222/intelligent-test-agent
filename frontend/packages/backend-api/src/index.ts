@@ -69,6 +69,8 @@ import type {
   FileContent,
   FilePreviewChunk,
   FilePreviewChunkRequest,
+  FileBinaryChunk,
+  FileBinaryChunkRequest,
   FileSearchResult,
   FileStatus,
   FileTreeEntry,
@@ -1117,6 +1119,16 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       { locator, ...preview },
       true
     )),
+    readWorkspaceViewFileBinaryChunk: async (
+      workspaceId: string,
+      locator: WorkspaceViewLocator,
+      request: FileBinaryChunkRequest
+    ): Promise<FileBinaryChunk> => mapFileBinaryChunk(await workspaceFileRpc<BackendFileBinaryChunk>(
+      workspaceId,
+      "workspace.view.read.binary.chunk",
+      { locator, ...request },
+      true
+    )),
     readFile: async (workspaceId: string, path: string, readonly = false) => {
       // 工作区文件读取与列表、写入保持同一条平台 WebSocket 路由，避免旧 OpenCode
       // HTTP 代理在跨服务器或响应格式变化时把真实 Markdown 内容丢在前端之外。
@@ -1137,6 +1149,16 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       workspaceId,
       "workspace.read.chunk",
       { path, ...preview },
+      true
+    )),
+    readFileBinaryChunk: async (
+      workspaceId: string,
+      path: string,
+      request: FileBinaryChunkRequest
+    ): Promise<FileBinaryChunk> => mapFileBinaryChunk(await workspaceFileRpc<BackendFileBinaryChunk>(
+      workspaceId,
+      "workspace.read.binary.chunk",
+      { path, ...request },
       true
     )),
     writeFile: (workspaceId: string, path: string, content: string) =>
@@ -2329,6 +2351,16 @@ type BackendFilePreviewChunk = {
   lastModifiedMillis: number;
 };
 
+type BackendFileBinaryChunk = {
+  path: string;
+  contentBase64: string;
+  offset: number;
+  nextOffset: number;
+  size: number;
+  eof: boolean;
+  lastModifiedMillis: number;
+};
+
 type BackendWorkspaceViewEntry = {
   id: string;
   path: string;
@@ -2398,6 +2430,18 @@ function mapFilePreviewChunk(chunk: BackendFilePreviewChunk): FilePreviewChunk {
     size: chunk.size,
     eof: chunk.eof === true,
     warningThresholdBytes: chunk.warningThresholdBytes,
+    lastModifiedMillis: chunk.lastModifiedMillis
+  };
+}
+
+function mapFileBinaryChunk(chunk: BackendFileBinaryChunk): FileBinaryChunk {
+  return {
+    path: chunk.path,
+    contentBase64: typeof chunk.contentBase64 === "string" ? chunk.contentBase64 : "",
+    offset: chunk.offset,
+    nextOffset: chunk.nextOffset,
+    size: chunk.size,
+    eof: chunk.eof === true,
     lastModifiedMillis: chunk.lastModifiedMillis
   };
 }

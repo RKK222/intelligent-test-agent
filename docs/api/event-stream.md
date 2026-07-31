@@ -528,11 +528,13 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 
 route 响应已经包含目标 Java `baseUrl`，客户端必须在该目标地址申请 ticket 并建立 WebSocket，因此 ticket 的签发和消费始终位于同一 JVM；多后台部署需要浏览器可访问每台 Java 的 `listenUrl`，不新增 Java 到 Java 的 HTTP 文件代理。upgrade 必须校验 Origin；全局 CORS 恰好配置为单个 `*` 时可以接受任意格式合法的 canonical Origin，但缺失或畸形 Origin 仍拒绝，混合 wildcard 与显式来源不放宽。workspace ticket 还绑定签票授权同一次权威判断产生的 `STANDARD/APP_SOURCE` 事实；APP_SOURCE 票后续禁止 `SUPER_ADMIN` 非托管回退，每条 RPC 都必须再次识别为 APP_SOURCE，replica 映射消失即 `FORBIDDEN`，而真正的非托管超级管理员服务器工作区保持兼容。连接建立后，每条 `workspace.*` RPC 仍会重新读取当前用户 `opencode` 文件路由 affinity，并要求 affinity、ticket 目标/agent 服务器、Workspace/托管副本服务器和当前 JVM 完全一致；binding 迁移或错误 JVM 上的旧连接从下一条 RPC 起返回 `FORBIDDEN`，文件服务不再执行。
 
-文件 RPC 的每条请求和响应仍是单条 JSON 文本消息，但上传和大文件预览都由多条有界 RPC 组成。目标 Java 的单帧上限同时覆盖 `test-agent.files.max-preview-bytes` 以内的一次性 UTF-8 读写、单个预览分段和单个 Base64 上传分片，并附加 RPC envelope 余量；它只限制单条消息，不代表整个上传文件或最终可预览内容的大小。默认一次性预览/可编辑阈值为 5 MiB，超过后前端改用固定约 512 KiB 的 UTF-8 渐进预览分段；用户可继续加载一段或确认加载到文件末尾，界面必须提示完整加载超大文件可能占用较多内存并导致 Monaco 卡顿，大文件始终只读，避免把部分内容误保存。默认上传分片为 256 KiB、可配置上限为 4 MiB。分片上传和渐进预览都不设置应用层文件总大小上限，实际可处理大小仍受浏览器、网络、磁盘空间和基础设施超时约束。
+文件 RPC 的每条请求和响应仍是单条 JSON 文本消息，但上传、大文件预览和原始字节下载都由多条有界 RPC 组成。目标 Java 的单帧上限同时覆盖 `test-agent.files.max-preview-bytes` 以内的一次性 UTF-8 读写、单个预览/下载分段和单个 Base64 上传分片，并附加 RPC envelope 余量；它只限制单条消息，不代表整个上传、下载文件或最终可预览内容的大小。默认一次性预览/可编辑阈值为 5 MiB，超过后前端改用固定约 512 KiB 的 UTF-8 渐进预览分段；用户可继续加载一段或确认加载到文件末尾，界面必须提示完整加载超大文件可能占用较多内存并导致 Monaco 卡顿，大文件始终只读，避免把部分内容误保存。原始字节下载同样使用约 512 KiB 分段并通过 Base64 放入 JSON，支持任意二进制内容。默认上传分片为 256 KiB、可配置上限为 4 MiB。分片上传、渐进预览和原始字节下载都不设置应用层文件总大小上限，实际可处理大小仍受浏览器、网络、磁盘空间和基础设施超时约束。
 
 上传必须在同一条文件 WebSocket 连接上依次执行 `begin → chunk* → complete`；服务端为每条连接最多保留 4 个活动上传，并按连接串行处理 RPC，不同连接可由 WebFlux 并发调度。`begin` 在目标同目录创建隐藏临时文件，`chunk` 只解码当前有界分片，`complete` 校验累计字节数后以不覆盖方式安全发布目标文件；完成前目录和搜索接口看不到目标文件。`abort`、连接关闭或分片失败会删除临时文件，超过 24 小时的残留由后续上传尽力清理。
 
 渐进预览使用 UTF-8 字节偏移：首次请求 `offset=0`，后续使用上次响应的 `nextOffset`，并回传首次响应的 `size/lastModifiedMillis` 作为快照栅栏。服务端每段在 UTF-8 字符边界结束，因此中文等多字节字符不会跨段乱码；文件在加载过程中变化时返回 `CONFLICT` 与 `details.reason=PREVIEW_CHANGED`，客户端停止拼接并提示重新打开。每条预览请求仍重新执行 workspace、Agent scope/worktree 或引用 locator 的权限和安全路径校验。
+
+原始字节下载同样从 `offset=0` 开始，后续使用 `nextOffset` 并回传首段 `size/lastModifiedMillis`；响应 `contentBase64` 只包含当前有界字节段，不进行 UTF-8 解码。文件在下载期间变化时返回 `CONFLICT` 与 `details.reason=DOWNLOAD_CHANGED`。每条下载请求仍重新执行 workspace 或引用 locator 的成员权限、安全路径与来源校验。
 
 客户端请求 envelope：
 
@@ -580,8 +582,10 @@ route 响应已经包含目标 Java `baseUrl`，客户端必须在该目标地�
 | `workspace.search` | `workspaceId`, `query` | `FileSearchResultResponse[]`；递归搜索工作区相对路径（不区分大小写子串匹配），空 query 返回受限文件目录；跳过黑名单目录，结果按文件名排序并限制数量 |
 | `workspace.read` | `workspaceId`, `path` | `FileContentResponse` |
 | `workspace.read.chunk` | `workspaceId`, `path`, `offset`, `expectedSize?`, `expectedLastModifiedMillis?` | `FilePreviewChunkResponse`；渐进读取完整 UTF-8 文件，响应含 `content/nextOffset/size/eof/warningThresholdBytes/lastModifiedMillis` |
+| `workspace.read.binary.chunk` | `workspaceId`, `path`, `offset`, `expectedSize?`, `expectedLastModifiedMillis?` | `FileBinaryChunkResponse`；读取工作区普通文件的 Base64 原始字节分段，响应含 `contentBase64/offset/nextOffset/size/eof/lastModifiedMillis` |
 | `workspace.view.read` | `workspaceId`, `locator` | `WorkspaceViewFileContentResponse`；读取工作区或引用视图中的 UTF-8 普通文件，引用内容固定只读 |
 | `workspace.view.read.chunk` | `workspaceId`, `locator`, `offset`, `expectedSize?`, `expectedLastModifiedMillis?` | `FilePreviewChunkResponse`；每段重新解析和校验逻辑 locator，不接收物理路径 |
+| `workspace.view.read.binary.chunk` | `workspaceId`, `locator`, `offset`, `expectedSize?`, `expectedLastModifiedMillis?` | `FileBinaryChunkResponse`；读取组合视图文件的 Base64 原始字节分段，每段重新解析和校验逻辑 locator，不接收物理路径 |
 | `workspace.write` | `workspaceId`, `path`, `content` | `null` |
 | `workspace.upload.begin` | `workspaceId`, `path`, `size` | `{ uploadId, chunkBytes, totalBytes }`；开始不限制总大小的分片上传，目标已存在返回 `CONFLICT` |
 | `workspace.upload.chunk` | `workspaceId`, `uploadId`, `index`, `contentBase64` | `{ uploadedBytes, totalBytes }`；`index` 必须从 0 连续递增，单片不得超过服务端返回的 `chunkBytes` |

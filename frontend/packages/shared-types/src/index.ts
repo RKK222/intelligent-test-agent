@@ -196,6 +196,23 @@ export type FilePreviewChunkRequest = {
   expectedLastModifiedMillis?: number;
 };
 
+/** 文件原始字节下载分段；contentBase64 解码后长度必须等于 nextOffset - offset。 */
+export type FileBinaryChunk = {
+  path: string;
+  contentBase64: string;
+  offset: number;
+  nextOffset: number;
+  size: number;
+  eof: boolean;
+  lastModifiedMillis: number;
+};
+
+export type FileBinaryChunkRequest = {
+  offset: number;
+  expectedSize?: number;
+  expectedLastModifiedMillis?: number;
+};
+
 export type FileStatus = {
   path: string;
   exists?: boolean;

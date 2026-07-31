@@ -157,6 +157,43 @@ public class WorkspaceViewApplicationService {
                 chunk.lastModifiedMillis());
     }
 
+    /** 组合视图原始字节下载；每段都重新解析逻辑 locator 和引用挂载，不暴露物理路径。 */
+    public FileBinaryChunkResponse readBinaryChunk(
+            WorkspaceId workspaceId,
+            WorkspaceViewLocator locator,
+            long offset,
+            Long expectedSize,
+            Long expectedLastModifiedMillis) {
+        Workspace workspace = workspaceService.getWorkspace(requireWorkspaceId(workspaceId));
+        WorkspaceViewLocator normalized = normalizeLocator(locator, false);
+        if (normalized.kind() == WorkspaceViewLocatorKind.COMPOSITE) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "组合定位器不能作为文件读取");
+        }
+        if (normalized.kind() == WorkspaceViewLocatorKind.WORKSPACE) {
+            return fileService.readBinaryChunk(
+                    workspace.rootPath(), normalized.path(), offset, expectedSize, expectedLastModifiedMillis);
+        }
+        MountSnapshot snapshot = rebuildMounts(workspaceId, workspace);
+        Mount mount = requireMount(snapshot, normalized.referenceAlias());
+        FileBinaryChunkResponse chunk = referenceService.readViewBinaryChunk(
+                mount.appId().value(),
+                mount.repositoryEnglishName(),
+                mount.folder(),
+                normalized.path(),
+                offset,
+                expectedSize,
+                expectedLastModifiedMillis);
+        String logicalPath = join(mount.merge() ? mount.folder() : mount.alias(), chunk.path());
+        return new FileBinaryChunkResponse(
+                logicalPath,
+                chunk.contentBase64(),
+                chunk.offset(),
+                chunk.nextOffset(),
+                chunk.size(),
+                chunk.eof(),
+                chunk.lastModifiedMillis());
+    }
+
     private List<Candidate> compositeCandidates(
             Workspace workspace,
             String path,

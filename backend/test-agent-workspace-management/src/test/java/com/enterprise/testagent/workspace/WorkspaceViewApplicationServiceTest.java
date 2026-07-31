@@ -35,6 +35,7 @@ import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -201,6 +202,31 @@ class WorkspaceViewApplicationServiceTest {
         assertThat(first.eof()).isFalse();
         assertThat(second.eof()).isTrue();
         assertThat(first.content() + second.content()).isEqualTo(content);
+    }
+
+    @Test
+    void readsMergedReferenceBinaryChunkWithoutTextDecoding() throws Exception {
+        writeConfig("""
+                { "references": { "docs-requirements": {
+                  "path": "{env:OPENCODE_REFERENCES_DIR}/requirements/docs",
+                  "merge": true,
+                  "sdd-folder-name": "docs"
+                } } }
+                """);
+        Path docs = Files.createDirectories(referencesRoot.resolve("requirements/docs"));
+        byte[] content = new byte[] {0, (byte) 0xff, 1, (byte) 0x80};
+        Files.write(docs.resolve("asset.bin"), content);
+        WorkspaceViewLocator locator = new WorkspaceViewLocator(
+                WorkspaceViewLocatorKind.REFERENCE,
+                "asset.bin",
+                "docs-requirements");
+
+        FileBinaryChunkResponse chunk = service.readBinaryChunk(
+                WORKSPACE_ID, locator, 0L, null, null);
+
+        assertThat(chunk.path()).isEqualTo("docs/asset.bin");
+        assertThat(chunk.eof()).isTrue();
+        assertThat(Base64.getDecoder().decode(chunk.contentBase64())).containsExactly(content);
     }
 
     @Test

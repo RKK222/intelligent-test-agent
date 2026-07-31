@@ -25,6 +25,7 @@ import com.enterprise.testagent.domain.configuration.CodeRepositoryType;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.enterprise.testagent.workspace.FileContentResponse;
+import com.enterprise.testagent.workspace.FileBinaryChunkResponse;
 import com.enterprise.testagent.workspace.FilePreviewChunkResponse;
 import com.enterprise.testagent.workspace.WorkspaceApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceDirectoryService;
@@ -769,6 +770,50 @@ class WorkspaceFileWebSocketHandlerTest {
         });
         verify(ticketService).authorizeWorkspaceRpc(workspaceTicket(workspaceId.value()), workspaceId);
         verify(viewService).read(workspaceId, locator);
+    }
+
+    @Test
+    void readsWorkspaceAndReferenceBinaryChunksThroughLogicalRoutes() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        WorkspaceViewApplicationService viewService = Mockito.mock(WorkspaceViewApplicationService.class);
+        WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
+        WorkspaceViewLocator locator = new WorkspaceViewLocator(
+                WorkspaceViewLocatorKind.REFERENCE,
+                "asset.bin",
+                "docs-requirements");
+        when(ticketService.consume("wft_workspace", "http://localhost:3000"))
+                .thenReturn(workspaceTicket(workspaceId.value()));
+        when(workspaceService.readFileBinaryChunk(workspaceId, "asset.bin", 0L, null, null))
+                .thenReturn(new FileBinaryChunkResponse("asset.bin", "AP8=", 0L, 2L, 2L, true, 1234L));
+        when(viewService.readBinaryChunk(workspaceId, locator, 0L, null, null))
+                .thenReturn(new FileBinaryChunkResponse("docs/asset.bin", "AYA=", 0L, 2L, 2L, true, 1234L));
+        WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                viewService,
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace",
+                List.of(
+                        """
+                        {"id":"req_workspace","op":"workspace.read.binary.chunk","params":{"workspaceId":"wrk_1234567890abcdef","path":"asset.bin","offset":0}}
+                        """,
+                        """
+                        {"id":"req_reference","op":"workspace.view.read.binary.chunk","params":{"workspaceId":"wrk_1234567890abcdef","locator":{"kind":"REFERENCE","path":"asset.bin","referenceAlias":"docs-requirements"},"offset":0}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).hasSize(2);
+        assertThat(session.sentText().get(0)).contains("\"contentBase64\":\"AP8=\"");
+        assertThat(session.sentText().get(1)).contains("\"contentBase64\":\"AYA=\"", "\"path\":\"docs/asset.bin\"");
+        verify(ticketService, times(2)).authorizeWorkspaceRpc(workspaceTicket(workspaceId.value()), workspaceId);
+        verify(workspaceService).readFileBinaryChunk(workspaceId, "asset.bin", 0L, null, null);
+        verify(viewService).readBinaryChunk(workspaceId, locator, 0L, null, null);
     }
 
     @Test

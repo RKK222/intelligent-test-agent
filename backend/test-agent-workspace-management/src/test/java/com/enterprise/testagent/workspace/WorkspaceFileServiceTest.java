@@ -77,6 +77,12 @@ class WorkspaceFileServiceTest {
         assertThatThrownBy(() -> service.readContent(root.toString(), APP_SOURCE_INDEX))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThatThrownBy(() -> service.readContentChunk(root.toString(), APP_SOURCE_INDEX, 0, null, null))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThatThrownBy(() -> service.readBinaryChunk(root.toString(), APP_SOURCE_INDEX, 0, null, null))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
         assertThatThrownBy(() -> service.writeContent(root.toString(), APP_SOURCE_INDEX, "tampered"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
@@ -156,6 +162,55 @@ class WorkspaceFileServiceTest {
                 .isInstanceOfSatisfying(PlatformException.class, exception -> {
                     assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
                     assertThat(exception.details()).containsEntry("reason", "PREVIEW_CHANGED");
+                });
+    }
+
+    @Test
+    void serviceReadsBinaryFileInSnapshotCheckedChunks() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(4, 1000);
+        byte[] content = new byte[Utf8FilePreviewReader.CHUNK_BYTES + 3];
+        content[0] = 0;
+        content[1] = (byte) 0xff;
+        content[content.length - 1] = (byte) 0x80;
+        Files.write(root.resolve("asset.bin"), content);
+
+        FileBinaryChunkResponse first = service.readBinaryChunk(
+                root.toString(), "asset.bin", 0L, null, null);
+        FileBinaryChunkResponse second = service.readBinaryChunk(
+                root.toString(),
+                "asset.bin",
+                first.nextOffset(),
+                first.size(),
+                first.lastModifiedMillis());
+
+        byte[] downloaded = new byte[content.length];
+        byte[] firstBytes = Base64.getDecoder().decode(first.contentBase64());
+        byte[] secondBytes = Base64.getDecoder().decode(second.contentBase64());
+        System.arraycopy(firstBytes, 0, downloaded, 0, firstBytes.length);
+        System.arraycopy(secondBytes, 0, downloaded, firstBytes.length, secondBytes.length);
+        assertThat(downloaded).containsExactly(content);
+        assertThat(first.eof()).isFalse();
+        assertThat(second.eof()).isTrue();
+        assertThat(second.nextOffset()).isEqualTo(content.length);
+    }
+
+    @Test
+    void serviceRejectsContinuingBinaryDownloadAfterFileChanges() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(4, 1000);
+        Files.write(root.resolve("asset.bin"), new byte[Utf8FilePreviewReader.CHUNK_BYTES + 2]);
+        FileBinaryChunkResponse first = service.readBinaryChunk(
+                root.toString(), "asset.bin", 0L, null, null);
+        Files.write(root.resolve("asset.bin"), new byte[] {1, 2, 3});
+
+        assertThatThrownBy(() -> service.readBinaryChunk(
+                root.toString(),
+                "asset.bin",
+                first.nextOffset(),
+                first.size(),
+                first.lastModifiedMillis()))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.details()).containsEntry("reason", "DOWNLOAD_CHANGED");
                 });
     }
 

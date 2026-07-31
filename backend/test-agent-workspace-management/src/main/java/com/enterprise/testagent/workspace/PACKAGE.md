@@ -16,6 +16,7 @@ Workspace 和文件管理业务包，负责工作区注册、查询、服务器�
 - `WorkspaceApplicationService`：工作区注册、分页查询、详情查询和文件服务编排。
 - `WorkspaceFileService`：文件系统访问、root 归一化、一次性读写阈值、渐进预览和越权路径拦截；`WorkspaceFileUpload` 管理有界分片上传会话。
 - `Utf8FilePreviewReader`、`FilePreviewChunkResponse`：以固定约 512 KiB 内存按 UTF-8 字符边界读取大文件，返回字节偏移、EOF、大小和修改时间快照，允许安全渐进到文件末尾。
+- `BinaryFileChunkReader`、`FileBinaryChunkResponse`：以固定约 512 KiB 内存按原始字节读取 Base64 下载分段，返回偏移、EOF、大小和修改时间快照，文件变化时拒绝继续拼接。
 - `WorkspaceDirectoryService`：列出目标后端服务器上的一层子目录，仅供超级管理员服务器工作空间选择器使用。
 - `ManagedWorkspaceApplicationService`：应用成员校验、版本选择前按当前用户身份执行 Git 远端只读访问预检、设置页工作空间模板 + 初始版本工作区创建、进度表更新、应用版本工作区 clone/接管、通用参数路径根目录读取、每服务器版本副本、目标 commit 广播同步、个人 git worktree、最近使用、diff、同步和版本工作区 git pull 编排；个人发布先本地提交，再按白名单从个人 HEAD 投影到应用 feature worktree 后提交、推送和广播，不合并个人分支。
 - `AgentConfigApplicationService`：公共级/工作空间级 Agent 配置目录选择、读写、文件目标服务器归属查询、公共 worktree 切换列表、公共 Git 更新、worktree 创建、diff、stage/unstage、commit、publish、进度快照和公共配置广播同步；直接发布和 worktree 合并发布复用 `GitPublishWorkflow`。
@@ -32,7 +33,7 @@ Workspace 和文件管理业务包，负责工作区注册、查询、服务器�
 - `GitPublishWorkflow`：封装高风险 Git 发布写入流程，统一 clean、fetch、pull --ff-only、merge、冲突文件收集、merge abort、push 和 headCommit 返回；可能生成 commit 的发布入口必须显式传入非空当前用户 Git 身份。
 - `AgentConfigResponses`、`AgentConfigProgressEvent`、`AgentConfigProgressSink`：Agent 配置 API 返回对象与 WebSocket 进度发布端口。
 - `ManagedWorkspaceResponses`：应用版本工作区 API 使用的业务响应模型，由 API 层统一包装。
-- `FileTreeEntryResponse`、`FileContentResponse`、`FilePreviewChunkResponse`、`FileStatusResponse`：原始工作区文件业务返回模型，由 API 层包装；引用组合视图使用独立返回模型，避免把只读引用路径误当作可写 workspace path。
+- `FileTreeEntryResponse`、`FileContentResponse`、`FilePreviewChunkResponse`、`FileBinaryChunkResponse`、`FileStatusResponse`：原始工作区文件业务返回模型，由 API 层包装；引用组合视图使用独立返回模型，避免把只读引用路径误当作可写 workspace path。
 
 ## 允许依赖
 

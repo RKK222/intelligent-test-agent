@@ -3992,3 +3992,26 @@
 
 - 当前可交付外层固定名 ZIP 及 SHA 文件已生成并同步到 `deploy/internal/dist/0731/`；本次只需滚动更新 `.4`、`.114` 两台 Java 后端和 `.2` 前端，worker/toolbox/Python/公共 Agent 不需要随本包重装。
 - 未修改业务代码、API、RunEvent、数据库结构、Flyway SQL、关系型 SQL、环境配置、generated SDK 或 OpenCode 源码；企业现场仍需按 `.4 → .114 → .2` 执行，首台失败立即停止。
+
+## 2026-07-31 - 收口工作区下载完整性、二进制与重名风险
+
+### Why
+
+- 初版文件夹下载在 `workspace.view.list` 截断或局部引用告警时仍可能生成不完整 ZIP；下载继续使用 UTF-8 文本读取，无法覆盖图片、Office 等二进制文件；组合视图同展示路径冲突时还可能产生重复 ZIP 条目。
+
+### What
+
+- 平台文件 WebSocket 新增 `workspace.read.binary.chunk` 与 `workspace.view.read.binary.chunk`，后端按约 512 KiB 返回 Base64 原始字节；后续分段回传首段大小/修改时间，文件变化返回 `DOWNLOAD_CHANGED`。每段继续复核 ticket、成员、工作区安全路径或引用 locator，并拒绝平台保留索引。
+- 前端单文件和目录 ZIP 都改用原始字节分段；目录每层统一走 `workspace.view.list`，任一 `truncated=true` 或 warning 立即中止。组合冲突或逻辑路径重复时，归档统一改为 `workspace/**` 与 `references/<alias>/**` 来源分区，并再次校验最终路径唯一。
+- 同步 workspace-management、API、backend-api、shared-types、agent-web 及 HTTP/WebSocket/模块文档；新协议为 additive 扩展，新前端必须在所有目标 Java 节点升级后再启用。
+
+### How
+
+- JDK 25 下后端三类定向测试通过，覆盖任意二进制字节、文件变化、保留索引、引用 locator 和 WebSocket 每条 RPC 重新鉴权；前端下载/backend-api 两文件 100 项通过，agent-web 类型检查和 development build 通过。
+- 使用未修改的 `.env.test` 与 `test` profile 完整重启 backend、opencode-manager、frontend；health/readiness 为 `UP`，前端和登录 CORS 正常，用户 OpenCode 进程最终持续 `HEALTHY`。
+- 真实 Chromium 验证统一按钮同时展示应用工作空间和“切换测试工作区”，版本子菜单可展开；实际下载 `README.md` 与 `spec-20260731-110557.zip`，ZIP 21 个文件完整性通过，Python 按 `0x0800` UTF-8 标志解析中文文件名正确。
+
+### Result
+
+- 已关闭目录静默不完整、二进制转码失败和组合来源重名覆盖三项风险；未新增 HTTP 文件代理、RunEvent、数据库/Flyway、关系型 SQL、环境配置、generated SDK 或 OpenCode 源码修改。
+- 仍保留后续可单独处理的风险：浏览器会在内存中汇总整个 ZIP 且使用 ZIP32、切换工作区只废弃结果而不取消在途请求、悬停下载按钮的键盘可达性不足、空目录不会写入 ZIP。

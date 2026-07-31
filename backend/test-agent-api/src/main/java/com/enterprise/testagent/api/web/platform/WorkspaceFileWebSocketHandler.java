@@ -208,6 +208,12 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                         requiredNonNegativeLong(params, "offset"),
                         optionalNonNegativeLong(params, "expectedSize"),
                         optionalNonNegativeLong(params, "expectedLastModifiedMillis"));
+                case "workspace.read.binary.chunk" -> workspaceService.readFileBinaryChunk(
+                        workspaceId(ticket, params),
+                        requiredText(params, "path"),
+                        requiredNonNegativeLong(params, "offset"),
+                        optionalNonNegativeLong(params, "expectedSize"),
+                        optionalNonNegativeLong(params, "expectedLastModifiedMillis"));
                 case "workspace.write" -> {
                     WorkspaceId workspaceId = workspaceId(ticket, params);
                     String path = requiredText(params, "path");
@@ -279,6 +285,12 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                         workspaceId(ticket, params),
                         viewLocator(params));
                 case "workspace.view.read.chunk" -> workspaceViewService.readChunk(
+                        workspaceId(ticket, params),
+                        viewLocator(params),
+                        requiredNonNegativeLong(params, "offset"),
+                        optionalNonNegativeLong(params, "expectedSize"),
+                        optionalNonNegativeLong(params, "expectedLastModifiedMillis"));
+                case "workspace.view.read.binary.chunk" -> workspaceViewService.readBinaryChunk(
                         workspaceId(ticket, params),
                         viewLocator(params),
                         requiredNonNegativeLong(params, "offset"),

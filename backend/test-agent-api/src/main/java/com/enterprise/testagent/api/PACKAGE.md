@@ -33,7 +33,7 @@ API 定义包，承载 HTTP/SSE/WebSocket 入口、请求响应 DTO、统一响�
 - `web.platform.RuntimeDtos`、`web.platform.AuthDtos`：平台 API 请求/响应 DTO；Session、SessionMessage、Run 可选暴露 `sourceType/sourceRefId`，Run、SessionMessage、Run 历史与 Session 历史响应的新存储/摘要元数据保持 nullable，并通过显式映射重载接入新模式投影，旧领域对象不会被误标记。
 - `web.common.TraceIdWebFilter`、`web.common.JwtAuthWebFilter`、`web.common.ApiTokenWebFilter`、`web.common.InMemoryRateLimitWebFilter`、`web.common.GlobalExceptionHandler`：入口公共处理。
 - `web.common.RuntimeApiSupport`、`web.common.AuthWebSupport`：Controller 与 WebFilter 共用的 HTTP 边界工具。
-- `web.platform.WorkspaceFileWebSocketHandler`：受控平台文件 WebSocket upgrade 入口，覆盖 workspace 原始文件、引用组合视图、服务器目录选择和 Agent 配置文件 RPC；每条 workspace RPC 使用 ticket 用户重新执行当前成员校验，非托管 Workspace 仅放行 ticket 中的 `SUPER_ADMIN` 兼容访问。
+- `web.platform.WorkspaceFileWebSocketHandler`：受控平台文件 WebSocket upgrade 入口，覆盖 workspace 原始文件、引用组合视图、原始字节下载分段、服务器目录选择和 Agent 配置文件 RPC；每条 workspace RPC 使用 ticket 用户重新执行当前成员校验，非托管 Workspace 仅放行 ticket 中的 `SUPER_ADMIN` 兼容访问。
 - `web.platform.TerminalWebSocketHandler`：受控 PTY WebSocket upgrade 入口。
 - `config.RuntimeSecurityConfig`、`config.TerminalWebSocketConfig`：API 层安全和 WebSocket mapping；CORS 允许可选 `X-Test-Agent-Linux-Server-Id` 首跳提示头，但不把它作为后端鉴权或路由事实源。
 - 本地默认 CORS 覆盖主前端和 `frontend-opencode` 的 Vite dev/preview/real E2E 端口；生产必须由部署配置显式指定。
