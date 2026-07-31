@@ -9,6 +9,7 @@ import stat
 
 import pytest
 
+from testagent_runner.analyzer_executor import AnalyzerExecutionError
 from testagent_runner.service import RunnerService, RunnerServiceError
 from testagent_runner.settings import RunnerSettings
 from testagent_runner.tickets import CheckoutMaterial
@@ -62,7 +63,10 @@ class RecordingAnalyzers:
         analyzer_id: str,
         output_root: Path,
         payload: dict[str, object],
+        *,
+        container_spec: object,
     ) -> dict[str, object]:
+        del output_root, container_spec
         self.calls.append((task_id, analyzer_id, payload))
         return {"summary": "ok"}
 
@@ -361,6 +365,49 @@ async def test_analyzer_operation_key_returns_cached_result_without_second_model
 
 
 @pytest.mark.asyncio
+async def test_unsafe_container_reset_marks_workspace_for_immediate_cleanup(
+    tmp_path: Path,
+) -> None:
+    class UnsafeAnalyzers(RecordingAnalyzers):
+        async def execute(
+            self,
+            task_id: str,
+            analyzer_id: str,
+            output_root: Path,
+            payload: dict[str, object],
+            *,
+            container_spec: object,
+        ) -> dict[str, object]:
+            del task_id, analyzer_id, output_root, payload, container_spec
+            raise AnalyzerExecutionError(
+                "分析容器无法恢复到干净进程状态",
+                container_unsafe=True,
+            )
+
+    runner, _, _ = service(tmp_path)
+    runner._analyzers = UnsafeAnalyzers()  # noqa: SLF001 - 锁定异常后的Runner状态收敛
+    payload = {
+        "runId": "run_12345678",
+        "operationKey": "run_12345678:analyze:codex",
+        "modelGrant": "wfg_" + "x" * 32,
+        "modelGatewayUrl": (
+            "http://10.20.30.40:8080/api/internal/platform/model-gateway/v1"
+        ),
+        "modelName": "workflow-code-analysis",
+        "outputSchema": {},
+    }
+
+    with pytest.raises(AnalyzerExecutionError, match="干净进程状态"):
+        await runner.analyze("task_12345678", "codex", payload)
+
+    state = json.loads(
+        (settings(tmp_path).root / "task_12345678/state.json").read_text(encoding="utf-8")
+    )
+    assert state["status"] == "CLEANUP_FAILED"
+    assert datetime.fromisoformat(state["expiresAt"]) <= datetime.now(UTC)
+
+
+@pytest.mark.asyncio
 async def test_multi_analyzer_calls_are_serialized_per_task_before_container_reset(
     tmp_path: Path,
 ) -> None:
@@ -376,7 +423,10 @@ async def test_multi_analyzer_calls_are_serialized_per_task_before_container_res
             analyzer_id: str,
             output_root: Path,
             payload: dict[str, object],
+            *,
+            container_spec: object,
         ) -> dict[str, object]:
+            del output_root, container_spec
             self.calls.append((task_id, analyzer_id, payload))
             self.active += 1
             self.maximum_active = max(self.maximum_active, self.active)
@@ -700,7 +750,10 @@ async def test_cleanup_fences_waiting_analysis_before_deleting_workspace(tmp_pat
             analyzer_id: str,
             output_root: Path,
             payload: dict[str, object],
+            *,
+            container_spec: object,
         ) -> dict[str, object]:
+            del output_root, container_spec
             self.calls.append((task_id, analyzer_id, payload))
             self.started.set()
             await self.finish.wait()

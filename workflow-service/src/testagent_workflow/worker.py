@@ -203,7 +203,7 @@ class WorkflowWorker:
                 if current.status is not RunStatus.CANCELED:
                     cleanup_runner = getattr(graph_dependencies, "runner", None)
                     if cleanup_runner is not None:
-                        with suppress(Exception):
+                        try:
                             await cleanup_runner.stop_and_retain(
                                 {
                                     "task_id": run.task_id,
@@ -216,6 +216,29 @@ class WorkflowWorker:
                                 },
                                 f"{run.id}:workspace:failure-retain",
                             )
+                        except Exception:
+                            # Runner拒绝保留通常意味着容器或控制状态已不安全；控制库必须进入可重试清理态。
+                            converged, updated = await self._converge_workspace_cleanup_failure(
+                                run.task_id
+                            )
+                            if not converged:
+                                # 不终态化run，停止心跳后由租约接管重放幂等图并再次收敛控制状态。
+                                return True
+                            if updated:
+                                with suppress(Exception):
+                                    await self._store.append_event(
+                                        run.conversation_id,
+                                        AgUiEventType.CUSTOM,
+                                        {
+                                            "name": "workflow.workspace_state",
+                                            "value": {
+                                                "taskId": run.task_id,
+                                                "runId": run.id,
+                                                "status": "CLEANUP_FAILED",
+                                                "expiresAt": None,
+                                            },
+                                        },
+                                    )
                     transitioned = await self._store.transition_claimed_run(
                         run.id,
                         self._worker_id,
@@ -240,6 +263,28 @@ class WorkflowWorker:
             with suppress(asyncio.CancelledError, RunLeaseLost):
                 await heartbeat
         return True
+
+    async def _converge_workspace_cleanup_failure(
+        self,
+        task_id: str,
+    ) -> tuple[bool, bool]:
+        """短暂重试控制库状态；持续失败时保留RUNNING租约供接管重试。"""
+
+        for attempt in range(3):
+            try:
+                await self._store.set_workspace_cleanup_status(
+                    task_id,
+                    "CLEANUP_FAILED",
+                )
+                return True, True
+            except KeyError:
+                # QUEUED早期失败时Runner尚未创建工作区，不存在孤立ACTIVE租约。
+                return True, False
+            except Exception:
+                if attempt < 2:
+                    await asyncio.sleep(0.05 * (2**attempt))
+        LOGGER.warning("工作区清理状态写入失败，保留运行租约等待接管重试")
+        return False, False
 
     async def run_forever(self, *, idle_seconds: float = 1.0) -> None:
         while True:

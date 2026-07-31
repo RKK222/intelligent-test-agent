@@ -3,11 +3,15 @@ import type { ScopeSelector, WorkflowRepositoryGroup } from "@test-agent/workflo
 import { computed, ref } from "vue";
 import { ScanSearch } from "lucide-vue-next";
 
-const props = defineProps<{ repositoryGroups: WorkflowRepositoryGroup[]; disabled?: boolean }>();
+const props = defineProps<{
+  repositoryGroups: WorkflowRepositoryGroup[];
+  disabled?: boolean;
+  initialSelector?: ScopeSelector;
+}>();
 const emit = defineEmits<{ submit: [selector: ScopeSelector] }>();
-const repositoryId = ref("");
-const kind = ref<ScopeSelector["kind"]>("SYMBOL");
-const value = ref("");
+const repositoryId = ref(props.initialSelector?.repositoryId ?? "");
+const kind = ref<ScopeSelector["kind"]>(props.initialSelector?.kind ?? "SYMBOL");
+const value = ref(props.initialSelector?.value ?? "");
 const valid = computed(() => repositoryId.value && value.value.trim() && !props.disabled);
 
 function submit() {

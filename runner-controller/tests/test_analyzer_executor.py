@@ -11,6 +11,7 @@ from testagent_runner.analyzer_executor import (
     AnalyzerExecutionError,
     DockerAnalyzerExecutor,
 )
+from testagent_runner.docker_runtime import AnalysisContainerSpec
 from testagent_runner.model_relay import ModelRelayAccess
 
 
@@ -22,8 +23,8 @@ class ContainerNames:
         return f"container-{task_id}"
 
     @classmethod
-    def restart_clean(cls, task_id: str) -> None:
-        cls.resets.append(task_id)
+    def restart_clean(cls, spec: AnalysisContainerSpec) -> None:
+        cls.resets.append(spec.task_id)
 
 
 class CompletedProcess:
@@ -58,6 +59,17 @@ class FakeRelayFactory:
     ) -> FakeRelay:
         self.calls.append((task_id, analyzer_id, upstream_url, upstream_grant))
         return FakeRelay()
+
+
+def container_spec(tmp_path: Path) -> AnalysisContainerSpec:
+    return AnalysisContainerSpec(
+        task_id="task_12345678",
+        image="test-agent-analysis@sha256:" + "a" * 64,
+        repositories_path=tmp_path / "repos",
+        output_path=tmp_path / "output",
+        network="test-agent-analysis-egress",
+        analyzer_ids=("codex",),
+    )
 
 
 @pytest.mark.asyncio
@@ -108,6 +120,7 @@ async def test_analyzer_isolates_each_output_directory_without_exposing_grant_to
             "modelGatewayUrl": "http://10.20.30.40:8080/model/v1",
             "outputSchema": {},
         },
+        container_spec=container_spec(tmp_path),
     )
 
     assert result == {"summary": "ok"}
@@ -161,6 +174,7 @@ async def test_analyzer_rejects_a_result_that_cannot_fit_the_synthesis_gateway(
                 "modelGatewayUrl": "http://10.20.30.40:8080/model/v1",
                 "outputSchema": {},
             },
+            container_spec=container_spec(tmp_path),
         )
 
     assert not (analyzer_root / ".model-relay-token").exists()
@@ -198,6 +212,7 @@ async def test_analyzer_does_not_follow_result_symlink_created_by_container(
                 "modelGatewayUrl": "http://10.20.30.40:8080/model/v1",
                 "outputSchema": {},
             },
+            container_spec=container_spec(tmp_path),
         )
 
 
@@ -237,6 +252,7 @@ async def test_analyzer_grant_cleanup_does_not_follow_container_symlink(
             "modelGatewayUrl": "http://10.20.30.40:8080/model/v1",
             "outputSchema": {},
         },
+        container_spec=container_spec(tmp_path),
     )
 
     assert result == {"summary": "ok"}
@@ -252,7 +268,8 @@ async def test_analyzer_removes_container_when_clean_restart_cannot_be_proved(
         removed: list[str] = []
 
         @classmethod
-        def restart_clean(cls, task_id: str) -> None:
+        def restart_clean(cls, spec: AnalysisContainerSpec) -> None:
+            del spec
             raise RuntimeError("constraint verification failed")
 
         @classmethod
@@ -286,6 +303,102 @@ async def test_analyzer_removes_container_when_clean_restart_cannot_be_proved(
                 "modelGatewayUrl": "http://10.20.30.40:8080/model/v1",
                 "outputSchema": {},
             },
+            container_spec=container_spec(tmp_path),
         )
 
     assert UnsafeContainer.removed == ["task_12345678"]
+
+
+@pytest.mark.asyncio
+async def test_analyzer_does_not_hide_container_removal_failure_after_unsafe_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class UnremovableContainer(ContainerNames):
+        @classmethod
+        def restart_clean(cls, spec: AnalysisContainerSpec) -> None:
+            del spec
+            raise RuntimeError("constraint verification failed")
+
+        @classmethod
+        def remove(cls, task_id: str) -> None:
+            del task_id
+            raise RuntimeError("container removal failed")
+
+    output_root = tmp_path / "output"
+    analyzer_root = output_root / "codex"
+    analyzer_root.mkdir(parents=True, mode=0o770)
+
+    async def create_subprocess(*_command: str, **_options: object) -> CompletedProcess:
+        (analyzer_root / "result.json").write_text(
+            json.dumps({"summary": "must-not-return"}),
+            encoding="utf-8",
+        )
+        return CompletedProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", create_subprocess)
+
+    with pytest.raises(AnalyzerExecutionError, match="干净进程状态") as caught:
+        await DockerAnalyzerExecutor(  # type: ignore[arg-type]
+            UnremovableContainer(),
+            relay_factory=FakeRelayFactory(),
+        ).execute(
+            "task_12345678",
+            "codex",
+            output_root,
+            {
+                "modelGrant": "wfg_secret_credential",
+                "modelGatewayUrl": "http://10.20.30.40:8080/model/v1",
+                "outputSchema": {},
+            },
+            container_spec=container_spec(tmp_path),
+        )
+
+    assert caught.value.container_unsafe is True
+    assert str(caught.value.__cause__) == "container removal failed"
+
+
+@pytest.mark.asyncio
+async def test_analyzer_passes_frozen_spec_to_post_execution_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SpecRecordingContainer(ContainerNames):
+        reset_specs: list[AnalysisContainerSpec] = []
+
+        @classmethod
+        def restart_clean(cls, spec: AnalysisContainerSpec) -> None:
+            cls.reset_specs.append(spec)
+
+    output_root = tmp_path / "output"
+    analyzer_root = output_root / "codex"
+    analyzer_root.mkdir(parents=True, mode=0o770)
+    spec = container_spec(tmp_path)
+
+    async def create_subprocess(*_command: str, **_options: object) -> CompletedProcess:
+        (analyzer_root / "result.json").write_text(
+            json.dumps({"summary": "ok"}),
+            encoding="utf-8",
+        )
+        return CompletedProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", create_subprocess)
+    SpecRecordingContainer.reset_specs = []
+
+    result = await DockerAnalyzerExecutor(  # type: ignore[arg-type]
+        SpecRecordingContainer(),
+        relay_factory=FakeRelayFactory(),
+    ).execute(
+        "task_12345678",
+        "codex",
+        output_root,
+        {
+            "modelGrant": "wfg_secret_credential",
+            "modelGatewayUrl": "http://10.20.30.40:8080/model/v1",
+            "outputSchema": {},
+        },
+        container_spec=spec,
+    )
+
+    assert result == {"summary": "ok"}
+    assert SpecRecordingContainer.reset_specs == [spec]

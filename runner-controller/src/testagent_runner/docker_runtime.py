@@ -229,22 +229,26 @@ class DockerRuntime:
                 "docker",
                 "inspect",
                 "--format",
-                "{{.Config.User}}|{{.HostConfig.Privileged}}|{{.HostConfig.ReadonlyRootfs}}|"
-                "{{.HostConfig.CapDrop}}|{{.HostConfig.SecurityOpt}}",
+                "{{.State.Running}}|{{.Config.User}}|{{.HostConfig.Privileged}}|"
+                "{{.HostConfig.ReadonlyRootfs}}|{{.HostConfig.CapDrop}}|"
+                "{{.HostConfig.SecurityOpt}}",
                 name,
             ]
         )
-        parts = inspection.strip().split("|", 4)
+        parts = inspection.strip().split("|", 5)
         safe = (
-            len(parts) == 5
-            and parts[0] == "10001:10003"
-            and parts[1].lower() == "false"
-            and parts[2].lower() == "true"
-            and "ALL" in parts[3].upper()
-            and "no-new-privileges" in parts[4].lower()
+            len(parts) == 6
+            and parts[0].lower() == "true"
+            and parts[1] == "10001:10003"
+            and parts[2].lower() == "false"
+            and parts[3].lower() == "true"
+            and "ALL" in parts[4].upper()
+            and "no-new-privileges" in parts[5].lower()
         )
         if not safe:
-            raise DockerRuntimeError("Docker未保持要求的非特权安全约束，阻断任务交付")
+            raise DockerRuntimeError(
+                "Docker运行状态或非特权安全约束不符合要求，阻断任务交付"
+            )
 
         if spec is not None:
             self._verify_container_identity(name, spec)
@@ -359,12 +363,14 @@ class DockerRuntime:
             self._executor.run(["docker", "rm", "-f", name])
             raise
 
-    def restart_clean(self, task_id: str) -> None:
-        """每次智能体调用后重启同一容器，确保后台后代不能污染下一次分析。"""
+    def restart_clean(self, task: str | AnalysisContainerSpec) -> None:
+        """重启后复核冻结身份，确保后台后代和容器漂移不能污染后续分析。"""
 
+        spec = task if isinstance(task, AnalysisContainerSpec) else None
+        task_id = spec.task_id if spec is not None else task
         name = self.container_name(task_id)
         self._executor.run(["docker", "restart", "--time", "20", name])
-        self._verify_container_constraints(name)
+        self._verify_container_constraints(name, spec)
 
     def quiesce_for_cleanup(self, task_id: str) -> None:
         """确认精确容器存在后先停止所有不可信进程，宿主才可放宽输出目录权限。"""

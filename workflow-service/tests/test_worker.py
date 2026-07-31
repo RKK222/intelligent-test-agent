@@ -158,6 +158,147 @@ async def test_worker_failure_revokes_grants_and_retains_any_created_workspace()
 
 
 @pytest.mark.asyncio
+async def test_worker_marks_workspace_cleanup_failed_when_failure_retention_is_rejected() -> None:
+    store = InMemoryWorkflowStore()
+    conversation = await store.create_conversation("usr_owner", "failure cleanup retry")
+    queued = await store.create_run(
+        conversation.id,
+        "usr_owner",
+        workflow_id="code-change-impact-analysis",
+        workflow_version="1.0.0",
+        input_data={},
+    )
+    await store.upsert_workspace_lease(
+        queued.task_id,
+        runner_id="runner-a",
+        container_id="container-a",
+        image_digest="analysis@sha256:" + "a" * 64,
+        status="ACTIVE",
+        expires_at=None,
+        metadata={"runId": queued.id},
+    )
+
+    class FailedRetentionRunner:
+        async def stop_and_retain(self, state, operation_key):  # type: ignore[no-untyped-def]
+            del state, operation_key
+            raise RuntimeError("runner rejected retention")
+
+    worker = WorkflowWorker(
+        "worker-a",
+        store,
+        WorkflowRegistry([definition(FakeGraph(error=RuntimeError("analysis failed")))]),
+        dependency_factory=lambda run: SimpleNamespace(runner=FailedRetentionRunner()),
+    )
+
+    await worker.run_once()
+
+    lease = await store.get_workspace_lease(queued.task_id)
+    assert lease["status"] == "CLEANUP_FAILED"
+    assert (await store.get_run(queued.id, "usr_owner")).status is RunStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_worker_retries_cleanup_state_before_terminalizing_failed_run() -> None:
+    class FlakyCleanupStore(InMemoryWorkflowStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.cleanup_status_calls = 0
+
+        async def set_workspace_cleanup_status(self, task_id: str, status: str) -> None:
+            self.cleanup_status_calls += 1
+            if self.cleanup_status_calls == 1:
+                raise RuntimeError("transient database failure")
+            await super().set_workspace_cleanup_status(task_id, status)
+
+    store = FlakyCleanupStore()
+    conversation = await store.create_conversation("usr_owner", "cleanup state retry")
+    queued = await store.create_run(
+        conversation.id,
+        "usr_owner",
+        workflow_id="code-change-impact-analysis",
+        workflow_version="1.0.0",
+        input_data={},
+    )
+    await store.upsert_workspace_lease(
+        queued.task_id,
+        runner_id="runner-a",
+        container_id="container-a",
+        image_digest="analysis@sha256:" + "a" * 64,
+        status="ACTIVE",
+        expires_at=None,
+        metadata={"runId": queued.id},
+    )
+
+    class FailedRetentionRunner:
+        async def stop_and_retain(self, state, operation_key):  # type: ignore[no-untyped-def]
+            del state, operation_key
+            raise RuntimeError("runner rejected retention")
+
+    worker = WorkflowWorker(
+        "worker-a",
+        store,
+        WorkflowRegistry([definition(FakeGraph(error=RuntimeError("analysis failed")))]),
+        dependency_factory=lambda run: SimpleNamespace(runner=FailedRetentionRunner()),
+    )
+
+    await worker.run_once()
+
+    assert store.cleanup_status_calls == 2
+    assert (await store.get_workspace_lease(queued.task_id))["status"] == "CLEANUP_FAILED"
+    assert (await store.get_run(queued.id, "usr_owner")).status is RunStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_worker_does_not_terminalize_run_when_cleanup_state_cannot_persist() -> None:
+    class UnavailableCleanupStore(InMemoryWorkflowStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.cleanup_status_calls = 0
+
+        async def set_workspace_cleanup_status(self, task_id: str, status: str) -> None:
+            del task_id, status
+            self.cleanup_status_calls += 1
+            raise RuntimeError("database remains unavailable")
+
+    store = UnavailableCleanupStore()
+    conversation = await store.create_conversation("usr_owner", "cleanup state unavailable")
+    queued = await store.create_run(
+        conversation.id,
+        "usr_owner",
+        workflow_id="code-change-impact-analysis",
+        workflow_version="1.0.0",
+        input_data={},
+    )
+    await store.upsert_workspace_lease(
+        queued.task_id,
+        runner_id="runner-a",
+        container_id="container-a",
+        image_digest="analysis@sha256:" + "a" * 64,
+        status="ACTIVE",
+        expires_at=None,
+        metadata={"runId": queued.id},
+    )
+
+    class FailedRetentionRunner:
+        async def stop_and_retain(self, state, operation_key):  # type: ignore[no-untyped-def]
+            del state, operation_key
+            raise RuntimeError("runner rejected retention")
+
+    worker = WorkflowWorker(
+        "worker-a",
+        store,
+        WorkflowRegistry([definition(FakeGraph(error=RuntimeError("analysis failed")))]),
+        dependency_factory=lambda run: SimpleNamespace(runner=FailedRetentionRunner()),
+    )
+
+    await worker.run_once()
+
+    assert store.cleanup_status_calls == 3
+    assert (await store.get_workspace_lease(queued.task_id))["status"] == "ACTIVE"
+    assert (await store.get_run(queued.id, "usr_owner")).status is RunStatus.RUNNING
+
+
+@pytest.mark.asyncio
 async def test_worker_persists_each_analyzer_outcome_before_finishing_run() -> None:
     store = InMemoryWorkflowStore()
     conversation = await store.create_conversation("usr_owner", "worker")

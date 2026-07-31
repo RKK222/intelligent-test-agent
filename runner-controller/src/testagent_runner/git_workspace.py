@@ -109,7 +109,7 @@ class GitWorkspace:
             target_head = self._rev_parse(repository_path, f"origin/{spec.target_branch}", environment)
             merge_base = self._merge_base(repository_path, default_head, target_head, environment)
             self._run(repository_path, ["git", "checkout", "--detach", target_head], environment)
-            self._pull_lfs_if_required(repository_path, spec.target_branch, environment)
+            self._pull_lfs_if_required(repository_path, target_head, environment)
             missing_dependencies = self._checkout_submodules(
                 repository_path,
                 spec.remote_url,
@@ -278,14 +278,34 @@ class GitWorkspace:
     def _pull_lfs_if_required(
         self,
         repository: Path,
-        target_branch: str,
+        target_head: str,
         environment: dict[str, str],
     ) -> None:
-        attributes = repository / ".gitattributes"
-        if not attributes.exists() or "filter=lfs" not in attributes.read_text(errors="ignore"):
+        # 只读取冻结提交内受Git跟踪的属性文件，既覆盖嵌套目录，也不跟随工作树符号链接。
+        attributes = self._run(
+            repository,
+            ["git", "ls-files", "-z", "--", ":(glob)**/.gitattributes", ".gitattributes"],
+            environment,
+        ).stdout.split("\0")
+        uses_lfs = any(
+            "filter=lfs"
+            in self._run(
+                repository,
+                ["git", "show", f"{target_head}:{path}"],
+                environment,
+            ).stdout
+            for path in attributes
+            if path
+        )
+        if not uses_lfs:
             return
         self._run(repository, ["git", "lfs", "version"], environment)
-        self._run(repository, ["git", "lfs", "pull", "origin", target_branch], environment)
+        # pull只接受一个remote；当前HEAD已经detach到冻结SHA，清空include/exclude后完整拉取该ref。
+        self._run(
+            repository,
+            ["git", "lfs", "pull", "--include=", "--exclude=", "origin"],
+            environment,
+        )
 
     def _checkout_submodules(
         self,

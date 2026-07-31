@@ -49,6 +49,7 @@ const adminOwnerId = ref("");
 const sidebarOpen = ref(true);
 const view = reactive(initialWorkflowViewState());
 let connection: WorkflowEventConnection | undefined;
+let workflowProjectionRevision = 0;
 
 const isSuperAdmin = computed(() => currentUser.value?.roles.includes("SUPER_ADMIN") ?? false);
 const active = computed(() => ["QUEUED", "RUNNING", "WAITING_INPUT"].includes(view.runStatus ?? ""));
@@ -58,6 +59,9 @@ const workspaceUnavailable = computed(() =>
 );
 const needsInitialInput = computed(() =>
   view.requiredInput.some((value) => ["repositories", "mode", "analysisMode", "analyzerIds", "intent"].includes(value)),
+);
+const hasScopeCandidates = computed(() =>
+  view.scopeInput.some((item) => Array.isArray(item.candidatePaths) && item.candidatePaths.length > 0),
 );
 const statusLabel = computed(() => ({
   QUEUED: "等待调度", RUNNING: "分析中", WAITING_INPUT: "等待补充", SUCCEEDED: "已完成",
@@ -118,7 +122,19 @@ async function selectConversation(conversation: WorkflowConversation) {
 
 function handleEvent(event: WorkflowAgUiEvent) {
   reduceAgUiEvent(view, event);
+  if (isWorkflowProjectionEvent(event)) workflowProjectionRevision += 1;
   if (event.type === "RUN_STARTED") void refreshConversations();
+}
+
+function isWorkflowProjectionEvent(event: WorkflowAgUiEvent) {
+  if (["STATE_SNAPSHOT", "RUN_STARTED", "RUN_FINISHED", "RUN_ERROR"].includes(event.type)) {
+    return true;
+  }
+  return event.type === "CUSTOM" && [
+    "workflow.input_required",
+    "workflow.workspace_state",
+    "workflow.report_published",
+  ].includes(String(event.name ?? ""));
 }
 
 function resetView(messages: WorkflowMessage[]) {
@@ -164,13 +180,57 @@ async function submitLocal(selector: ScopeSelector) {
   });
 }
 
-async function submitCandidate(item: Record<string, unknown>, path: string) {
-  const selector = (item.selector ?? {}) as Record<string, unknown>;
-  await submitLocal({
-    repositoryId: String(selector.repositoryId),
-    kind: "FILE",
+async function submitScopeCorrection(index: number, selector: ScopeSelector) {
+  const pending = view.scopeInput.map((item) => scopeSelectorFrom(item.selector));
+  if (!pending[index]) {
+    errorMessage.value = "待补充的代码范围无效，请刷新会话后重试";
+    return;
+  }
+  // currentInput可能同时含已解析项和原始待消歧项；先剔除后者，再逐项替换本次纠正值。
+  const pendingKeys = new Set(pending.flatMap((value) => value ? [scopeSelectorKey(value)] : []));
+  const resolved: ScopeSelector[] = [];
+  for (const value of view.currentInput?.scopeSelectors ?? []) {
+    const selectorValue = scopeSelectorFrom(value);
+    if (selectorValue && !pendingKeys.has(scopeSelectorKey(selectorValue))) resolved.push(selectorValue);
+  }
+  const corrected = pending.flatMap((value, itemIndex) => {
+    if (!value) return [];
+    return [itemIndex === index ? selector : value];
+  });
+  await submitMessage(`请按补充范围继续分析 ${selector.kind}：${selector.value}`, {
+    scopeSelectors: [...resolved, ...corrected],
+  });
+}
+
+async function submitCandidate(item: Record<string, unknown>, index: number, path: string) {
+  const selector = scopeSelectorFrom(item.selector);
+  if (!selector) return;
+  await submitScopeCorrection(index, {
+    repositoryId: selector.repositoryId,
+    kind: selector.kind === "SYMBOL" ? "FILE" : selector.kind,
     value: path,
   });
+}
+
+function scopeSelectorFrom(value: unknown): ScopeSelector | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as Record<string, unknown>;
+  const repositoryId = typeof candidate.repositoryId === "string" ? candidate.repositoryId : "";
+  const kind = typeof candidate.kind === "string" ? candidate.kind : "";
+  const selectorValue = typeof candidate.value === "string" ? candidate.value.trim() : "";
+  if (!repositoryId || !selectorValue || !["PROGRAM", "MODULE", "DIRECTORY", "FILE", "SYMBOL"].includes(kind)) {
+    return undefined;
+  }
+  return { repositoryId, kind: kind as ScopeSelector["kind"], value: selectorValue };
+}
+
+function scopeSelectorKey(value: ScopeSelector) {
+  return `${value.repositoryId}\u0000${value.kind}\u0000${value.value}`;
+}
+
+function scopeInputKey(item: Record<string, unknown>, index: number) {
+  const selector = scopeSelectorFrom(item.selector);
+  return selector ? `${scopeSelectorKey(selector)}\u0000${index}` : `invalid-scope-${index}`;
 }
 
 async function submitMessage(text: string, structuredInput?: WorkflowStructuredInput) {
@@ -178,20 +238,27 @@ async function submitMessage(text: string, structuredInput?: WorkflowStructuredI
   sending.value = true;
   try {
     const conversation = await ensureConversation();
+    const revisionAtSubmission = workflowProjectionRevision;
     const result = await props.api.submitMessage(conversation.id, {
       clientRequestId: requestId(),
       text,
       ...(structuredInput ? { structuredInput } : {}),
     });
     composer.value = "";
-    view.requiredInput = result.requiredInput;
+    // SSE是运行状态权威源；不能用较晚返回的POST响应抹掉Worker已发布的下一轮输入请求。
+    const hasNewerProjection = workflowProjectionRevision > revisionAtSubmission;
     if (result.runId) {
       view.runId = result.runId;
-      view.taskId = result.taskId ?? undefined;
-      view.runStatus = result.status ?? undefined;
-      view.scopeInput = [];
-      view.baselineInput = [];
-      view.currentInput = undefined;
+      view.taskId = result.taskId ?? view.taskId;
+    }
+    if (!hasNewerProjection) {
+      view.requiredInput = result.requiredInput;
+      if (result.runId) {
+        view.runStatus = result.status ?? undefined;
+        view.scopeInput = [];
+        view.baselineInput = [];
+        view.currentInput = undefined;
+      }
     }
     selectedConversation.value = await props.api.conversation(conversation.id);
     view.messages = [...(selectedConversation.value.messages ?? [])];
@@ -349,15 +416,26 @@ function safeMessage(error: unknown) {
           />
 
           <section v-if="view.scopeInput.length" class="workflow-scope-ambiguity">
-            <p class="workflow-kicker">需要补充范围</p><h3>找到了多个可能的代码位置</h3>
-            <div v-for="(item, index) in view.scopeInput" :key="index">
-              <p>{{ (item.selector as Record<string, unknown>)?.value }} · 请选择准确文件</p>
+            <p class="workflow-kicker">需要补充范围</p>
+            <h3>{{ hasScopeCandidates ? "请选择或补充准确的代码位置" : "未找到唯一代码位置，请重新补充范围" }}</h3>
+            <div v-for="(item, index) in view.scopeInput" :key="scopeInputKey(item, index)">
+              <p>
+                {{ (item.selector as Record<string, unknown>)?.value }} ·
+                {{ (item.candidatePaths as string[] ?? []).length ? "请选择准确文件" : "没有匹配候选" }}
+              </p>
               <button
                 v-for="path in (item.candidatePaths as string[] ?? [])"
                 :key="path"
                 type="button"
-                @click="submitCandidate(item, path)"
+                class="workflow-scope-candidate"
+                @click="submitCandidate(item, index, path)"
               >{{ path }}</button>
+              <LocalReanalysisCard
+                :repository-groups="repositoryGroups"
+                :initial-selector="scopeSelectorFrom(item.selector)"
+                :disabled="sending"
+                @submit="submitScopeCorrection(index, $event)"
+              />
             </div>
           </section>
 

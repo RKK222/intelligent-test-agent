@@ -13,6 +13,8 @@
 - PostgreSQL 业务持久化、带 fencing 的 Worker 租约与 48 小时工作区清理。
 - 调用 Java 窄平台能力接口与独立 Analysis Runner；本进程不持有 Docker Socket、个人 SSH 私钥或供应商 Token。
 
+AG-UI durable 投影在 `RUN_STARTED/RUN_FINISHED/RUN_ERROR` 时清理旧的待输入状态；因此实时消费和断线快照都不会在 run 已前进或终止后继续暴露失效的恢复卡片。
+
 首个且唯一注册的工作流是 `code-change-impact-analysis`。场景 2～4 只能通过新增 `WorkflowDefinition` 和对应图实现扩展，当前不注册、不暴露可执行入口。
 
 ## 进程
@@ -29,6 +31,10 @@ PostgreSQL 同时校验 owner token、租约期限、`RUNNING` 和未取消状�
 丢失租约时只精确撤销自己持有的模型 grant，不得停止、保留或改写已由新 Worker
 接管的共享工作区。部署配置的 Worker ID 只作逻辑前缀，每个进程会追加随机 owner
 token；进程重启不能复用旧进程的租约身份。
+Runner 失败保留被拒绝时，Worker 必须先把工作区租约写成带立即到期时间的
+`CLEANUP_FAILED`，再把 run 写入失败终态。控制库写入会做有界短暂重试；仍不可用时保持
+`RUNNING` 且停止心跳，由租约到期后的 Worker 接管依靠节点幂等再次收敛，禁止留下
+`ACTIVE + expiresAt=NULL` 后仍终态化 run。
 
 ## 数据边界
 

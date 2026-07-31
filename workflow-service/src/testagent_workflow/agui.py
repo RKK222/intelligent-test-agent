@@ -142,6 +142,12 @@ def _project_durable_state(events: list[AgUiEvent], run_id: str | None) -> dict[
             current_input = None
             report_published = False
             tools = {}
+        elif event.type in {AgUiEventType.RUN_FINISHED, AgUiEventType.RUN_ERROR}:
+            # 断线重连也不能把终态前的WAITING_INPUT卡片重新投影给用户。
+            required_input = []
+            scope_input = []
+            baseline_input = []
+            current_input = None
         elif event.type is AgUiEventType.TOOL_CALL_START:
             identifier = str(event.payload.get("toolCallId", ""))
             if identifier:

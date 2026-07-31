@@ -92,7 +92,7 @@ Java的Runner ID、公钥路径和返回给分析容器的模型网关URL也必�
 其中analysis模型会同时固定给Codex与OpenCode：Codex使用`responses`，OpenCode使用
 OpenAI-compatible接口；工具配置只保存回环relay地址和一次性本地token，不保存平台grant。上线前必须分别验证两种接口与该模型兼容。
 真实分析容器验收还必须确认relay以UID `10002`运行、智能体以UID `10001`运行：平台grant只经relay stdin传入，智能体的环境、请求文件、命令行、`/proc`读取、工具日志和结果都不能出现grant；relay仅监听`127.0.0.1`，停止生命线stdin后端口立即关闭。OpenCode必须实际使用镜像内`test-agent-safe-shell`，不得回退到系统默认shell；任一探针失败都阻断交付。
-双/三智能体验收需证明同任务调用按顺序进入容器，并在每次调用后执行容器重启；前一智能体刻意遗留的后台进程必须消失，未执行智能体的输出目录不可列举、读取或改名，而冻结源码挂载、当前智能体独立HOME/输出和后续综合仍可继续。每次重启后立即复核非root、只读根、cap-drop与no-new-privileges；创建后、每次模型执行前及保留恢复后还要复核冻结镜像digest、精确源码/输出挂载、受限网络和CPU/内存/PID/nofile/tmpfs，任一约束丢失都阻断任务。
+双/三智能体验收需证明同任务调用按顺序进入容器，并在每次调用后执行容器重启；前一智能体刻意遗留的后台进程必须消失，未执行智能体的输出目录不可列举、读取或改名，而冻结源码挂载、当前智能体独立HOME/输出和后续综合仍可继续。创建后、每次模型执行前、每次调用后重启及保留恢复后都要立即复核容器处于运行态、冻结镜像digest、精确源码/输出挂载、受限网络、CPU/内存/PID/nofile/tmpfs、非root、只读根、cap-drop与no-new-privileges，任一约束丢失都阻断任务。重启复核与后续强制删除同时失败时，Runner本地状态及Python控制库租约必须收敛为可重试的`CLEANUP_FAILED`，不能遗留`ACTIVE`。
 
 dotenv 与密钥不进入离线包、Git、命令行或日志。`workflow-docker.sh` 把 env、release manifest、公私钥和 known_hosts 的哈希纳入容器配置摘要；任何信任材料变化都会重建精确容器。
 
@@ -163,7 +163,8 @@ deploy/internal/tests/workflow-offline-test.sh
 - 真实 Docker 18.09 的非root、只读根、cap-drop、no-new-privileges、资源限制、只读源码、无Docker Socket与网络阻断。
 - 真实 Docker 18.09 上验证智能体间输出隔离，以及正常退出、强制取消和到期清理都能删除含 `0700/000` 私有目录的源码、session与原始日志；任何残留必须得到 `CLEANUP_FAILED`，不能报告成功。
 - 真实模型网关上的 Codex、OpenCode、双/三智能体和单智能体失败场景。
-- 至少两个跨应用仓库的联合分析、LFS、授权/未授权submodule、空diff与局部重分析。
+- 注入一次及持续的 workflow PostgreSQL 工作区状态写入失败：一次失败必须重试后收敛；持续失败不得终态化 run，租约到期接管后必须最终写入 `CLEANUP_FAILED` 并进入清理队列。
+- 至少两个跨应用仓库的联合分析、根目录及嵌套 `.gitattributes` 的 LFS（必须基于已冻结的当前 detached ref 完整拉取）、授权/未授权submodule、空diff与局部重分析。
 - 浏览器 Authorization fetch SSE、快照、Last-Event-ID续传、登出断流和Markdown报告。
 
 若真实 Docker 18.09 下 Codex/OpenCode 无法在非特权容器稳定运行，必须阻断交付，不能切换到 root、`--privileged`、开放网络或挂载Docker Socket。

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 import errno
 import json
 import os
@@ -11,7 +10,7 @@ from pathlib import Path
 import stat
 from typing import Any
 
-from testagent_runner.docker_runtime import DockerRuntime
+from testagent_runner.docker_runtime import AnalysisContainerSpec, DockerRuntime
 from testagent_runner.model_relay import DockerModelRelay, ModelRelayError, ModelRelayFactory
 
 
@@ -19,7 +18,10 @@ MAX_ANALYZER_RESULT_BYTES = 3 * 1024 * 1024
 
 
 class AnalyzerExecutionError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, container_unsafe: bool = False) -> None:
+        super().__init__(message)
+        # 该标志只表达Runner必须立即隔离并清理工作区，不向外暴露Docker异常正文。
+        self.container_unsafe = container_unsafe
 
 
 _DIRECTORY_FLAGS = (
@@ -193,6 +195,8 @@ class DockerAnalyzerExecutor:
         analyzer_id: str,
         output_root: Path,
         payload: dict[str, Any],
+        *,
+        container_spec: AnalysisContainerSpec,
     ) -> dict[str, Any]:
         if analyzer_id not in {"codex", "opencode"}:
             raise AnalyzerExecutionError("未注册的代码智能体")
@@ -271,10 +275,18 @@ class DockerAnalyzerExecutor:
             _wipe_and_unlink_at(analyzer_fd, ".model-relay-token")
             try:
                 if not isinstance(execution_failure, asyncio.CancelledError):
-                    await asyncio.to_thread(self._docker.restart_clean, task_id)
-            except Exception as exception:
-                with suppress(Exception):
+                    await asyncio.to_thread(self._docker.restart_clean, container_spec)
+            except Exception as restart_exception:
+                try:
                     await asyncio.to_thread(self._docker.remove, task_id)
-                raise AnalyzerExecutionError("分析容器无法恢复到干净进程状态") from exception
+                except Exception as removal_exception:
+                    raise AnalyzerExecutionError(
+                        "分析容器无法恢复到干净进程状态",
+                        container_unsafe=True,
+                    ) from removal_exception
+                raise AnalyzerExecutionError(
+                    "分析容器无法恢复到干净进程状态",
+                    container_unsafe=True,
+                ) from restart_exception
             finally:
                 os.close(analyzer_fd)

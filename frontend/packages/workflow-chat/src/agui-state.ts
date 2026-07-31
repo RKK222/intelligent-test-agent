@@ -94,16 +94,17 @@ export function reduceAgUiEvent(state: WorkflowViewState, event: WorkflowAgUiEve
       state.taskId = String(event.taskId);
       state.runStatus = String(event.status ?? "RUNNING");
       state.reportPublished = false;
-      state.baselineInput = [];
-      state.currentInput = undefined;
+      clearPendingInput(state);
       return;
     case "RUN_FINISHED":
       state.runId = String(event.runId);
       state.taskId = String(event.taskId);
       state.runStatus = String(event.status);
+      clearPendingInput(state);
       return;
     case "RUN_ERROR":
       state.runStatus = "FAILED";
+      clearPendingInput(state);
       return;
     case "TOOL_CALL_START":
       {
@@ -137,6 +138,14 @@ export function reduceAgUiEvent(state: WorkflowViewState, event: WorkflowAgUiEve
     default:
       return;
   }
+}
+
+function clearPendingInput(state: WorkflowViewState): void {
+  // 生命周期前进或终止后，旧输入卡不能继续触发已经失效的恢复请求。
+  state.requiredInput = [];
+  state.scopeInput = [];
+  state.baselineInput = [];
+  state.currentInput = undefined;
 }
 
 function reduceCustomEvent(state: WorkflowViewState, event: WorkflowAgUiEvent): void {

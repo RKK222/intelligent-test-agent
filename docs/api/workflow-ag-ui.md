@@ -65,7 +65,9 @@ requiredInput, scopeInput, baselineInput, currentInput, tools, reportPublished
 | `workflow.workspace_state` | `taskId/runId/status/expiresAt`。 |
 | `workflow.report_published` | `taskId/runId/reportVersionId/version/operationKey`。 |
 
-`kind` 当前为 `BASELINE_SELECTION` 或 `SCOPE_DISAMBIGUATION`。输入完整后通过消息 API 恢复原 run；不得在前端创建伪 run。
+`kind` 当前为 `BASELINE_SELECTION` 或 `SCOPE_DISAMBIGUATION`。输入完整后通过消息 API 恢复原 run；不得在前端创建伪 run。`SCOPE_DISAMBIGUATION` 的 `candidatePaths` 可以为空：此时前端仍须按待消歧项展示仓库、范围类型和范围值输入卡，并以 `structuredInput.scopeSelectors` 补充范围，不能只依赖候选路径按钮。一次事件包含多个待消歧项时，提交其中一项必须合并 `currentInput` 中已解析的范围及其余待补充范围，禁止用单项数组静默覆盖整组选择。
+
+AG-UI SSE 是运行投影的权威源，消息 POST 响应只用于在尚未收到对应事件时补全状态。若 Worker 的下一轮 `workflow.input_required` 或生命周期终态先于在途 POST 回包到达，前端必须保留较新的投影，不得再用 POST 中较旧的 `QUEUED` 状态覆盖。`RUN_STARTED`、`RUN_FINISHED` 和 `RUN_ERROR` 都必须按事件顺序清空上一轮待输入状态；服务端快照投影执行同一规则，避免重连后恢复已失效的输入卡。
 
 ## 前端约束
 

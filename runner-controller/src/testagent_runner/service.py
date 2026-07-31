@@ -13,7 +13,7 @@ import re
 import shutil
 from typing import Any
 
-from testagent_runner.analyzer_executor import DockerAnalyzerExecutor
+from testagent_runner.analyzer_executor import AnalyzerExecutionError, DockerAnalyzerExecutor
 from testagent_runner.credentials import RunnerCredentialDecryptor
 from testagent_runner.docker_runtime import AnalysisContainerSpec, DockerRuntime
 from testagent_runner.git_workspace import (
@@ -248,12 +248,21 @@ class RunnerService:
                 "taskId": task_id,
                 "imageDigest": state["imageDigest"],
             }
-            result = await self._analyzers.execute(
-                task_id,
-                analyzer_id,
-                task_root / "workspace" / "output",
-                enriched,
-            )
+            try:
+                result = await self._analyzers.execute(
+                    task_id,
+                    analyzer_id,
+                    task_root / "workspace" / "output",
+                    enriched,
+                    container_spec=container_spec,
+                )
+            except AnalyzerExecutionError as exception:
+                if exception.container_unsafe:
+                    # 删除失败时不能继续把工作区标为ACTIVE；到期循环会立即重试精确停止与删除。
+                    state["status"] = "CLEANUP_FAILED"
+                    state["expiresAt"] = datetime.now(UTC).isoformat()
+                    self._write_state(task_root / "state.json", state)
+                raise
             # 幂等缓存属于Runner控制状态，不能放在分析容器可写的output挂载中。
             cache_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             cache_path.parent.chmod(0o700)

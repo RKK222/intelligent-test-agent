@@ -157,3 +157,52 @@ async def test_snapshot_projects_waiting_input_tools_and_report_even_after_curso
         }
     ]
     assert snapshot["baselineInput"][0]["repositoryId"] == "repo_a"
+
+
+@pytest.mark.asyncio
+async def test_terminal_snapshot_does_not_restore_stale_waiting_input() -> None:
+    store = InMemoryWorkflowStore()
+    conversation = await store.create_conversation("usr_owner", "终态投影")
+    run = await store.create_run(
+        conversation.id,
+        "usr_owner",
+        workflow_id="code-change-impact-analysis",
+        workflow_version="1.0.0",
+        input_data={},
+    )
+    await store.append_event(
+        conversation.id,
+        AgUiEventType.CUSTOM,
+        {
+            "name": "workflow.input_required",
+            "value": {
+                "runId": run.id,
+                "kind": "SCOPE_DISAMBIGUATION",
+                "scope": [
+                    {
+                        "selector": {
+                            "repositoryId": "repo_a",
+                            "kind": "FILE",
+                            "value": "a.py",
+                        }
+                    }
+                ],
+                "currentInput": {"scopeSelectors": []},
+            },
+        },
+    )
+    await store.append_event(
+        conversation.id,
+        AgUiEventType.RUN_FINISHED,
+        {"runId": run.id, "taskId": run.task_id, "status": "SUCCEEDED"},
+    )
+
+    snapshot = (await EventReplayService(store).replay(
+        conversation.id,
+        "usr_owner",
+    ))[0].payload["snapshot"]
+
+    assert snapshot["requiredInput"] == []
+    assert snapshot["scopeInput"] == []
+    assert snapshot["baselineInput"] == []
+    assert snapshot["currentInput"] is None

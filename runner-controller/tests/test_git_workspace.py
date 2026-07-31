@@ -113,6 +113,48 @@ def test_unrelated_histories_fail_closed(tmp_path: Path, source_repo: Path) -> N
         )
 
 
+def test_lfs_pull_detects_nested_attributes_and_uses_the_frozen_current_ref(
+    tmp_path: Path,
+) -> None:
+    class RecordingLfsWorkspace(GitWorkspace):
+        def __init__(self, root: Path) -> None:
+            super().__init__(root)
+            self.commands: list[list[str]] = []
+
+        def _run(  # type: ignore[override]
+            self,
+            directory: Path,
+            command: list[str],
+            environment: dict[str, str],
+        ) -> subprocess.CompletedProcess[str]:
+            del directory, environment
+            self.commands.append(command)
+            if command[1:3] == ["ls-files", "-z"]:
+                return subprocess.CompletedProcess(command, 0, "assets/.gitattributes\0", "")
+            if command[1] == "show":
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    "*.bin filter=lfs diff=lfs merge=lfs -text\n",
+                    "",
+                )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    workspace = RecordingLfsWorkspace(tmp_path / "workspace-lfs")
+    frozen_head = "a" * 40
+
+    workspace._pull_lfs_if_required(repository, frozen_head, {})
+
+    assert workspace.commands == [
+        ["git", "ls-files", "-z", "--", ":(glob)**/.gitattributes", ".gitattributes"],
+        ["git", "show", f"{frozen_head}:assets/.gitattributes"],
+        ["git", "lfs", "version"],
+        ["git", "lfs", "pull", "--include=", "--exclude=", "origin"],
+    ]
+
+
 def submodule_parent(tmp_path: Path) -> tuple[Path, Path]:
     dependency = tmp_path / "dependency-origin"
     dependency.mkdir()

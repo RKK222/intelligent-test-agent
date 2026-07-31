@@ -22,7 +22,7 @@ class RecordingExecutor:
         network_inspection: str | None = None,
     ) -> None:
         self.version = version
-        self.inspection = inspection or "10001:10003|false|true|[ALL]|[no-new-privileges]"
+        self.inspection = inspection or "true|10001:10003|false|true|[ALL]|[no-new-privileges]"
         self.network_inspection = network_inspection or """[{
           "Name": "test-agent-analysis-egress",
           "Driver": "bridge",
@@ -259,6 +259,65 @@ def test_runtime_blocks_delivery_if_docker_drops_non_privileged_constraints(tmp_
     assert ["docker", "rm", "-f", "test-agent-analysis-12345678"] in executor.commands
 
 
+def test_running_verification_rejects_a_stopped_container(tmp_path: Path) -> None:
+    repositories = tmp_path / "repos"
+    output = tmp_path / "output"
+
+    class StoppedContainerExecutor(RecordingExecutor):
+        def run(self, command: list[str]) -> str:
+            if command[1:3] == ["inspect", "--format"] and ".Mounts" not in command[3]:
+                self.commands.append(command)
+                if ".State.Running" in command[3]:
+                    return "false|10001:10003|false|true|[ALL]|[no-new-privileges]"
+            if command[1:3] == ["inspect", "--format"] and ".Mounts" in command[3]:
+                self.commands.append(command)
+                mounts = [
+                    {
+                        "Type": "bind",
+                        "Source": str(repositories.resolve()),
+                        "Destination": "/workspace/repos",
+                        "RW": False,
+                    },
+                    {
+                        "Type": "bind",
+                        "Source": str(output.resolve()),
+                        "Destination": "/workspace/output",
+                        "RW": True,
+                    },
+                ]
+                tmpfs = {
+                    "/tmp": "rw,noexec,nosuid,nodev,size=2g,uid=10001,gid=10003,mode=1700",
+                    "/run": "rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10003,mode=1700",
+                }
+                return "|".join(
+                    [
+                        "image@sha256:" + "a" * 64,
+                        "test-agent-analysis-egress",
+                        json.dumps(mounts),
+                        "1024",
+                        str(8 * 1024**3),
+                        "4000000000",
+                        json.dumps([{"Name": "nofile", "Soft": 65536, "Hard": 65536}]),
+                        json.dumps(tmpfs),
+                    ]
+                )
+            return super().run(command)
+
+    repositories.mkdir()
+    output.mkdir()
+    spec = AnalysisContainerSpec(
+        task_id="task_12345678",
+        image="image@sha256:" + "a" * 64,
+        repositories_path=repositories,
+        output_path=output,
+        network="test-agent-analysis-egress",
+        analyzer_ids=("codex",),
+    )
+
+    with pytest.raises(DockerRuntimeError, match="运行状态"):
+        DockerRuntime(StoppedContainerExecutor()).verify_running(spec)
+
+
 def test_runtime_verifies_restricted_network_before_creating_container(tmp_path: Path) -> None:
     executor = RecordingExecutor()
     runtime = DockerRuntime(
@@ -361,6 +420,31 @@ def test_analyzer_reset_restarts_the_container_and_rechecks_constraints() -> Non
         "test-agent-analysis-12345678",
     ] in executor.commands
     assert any(command[1:3] == ["inspect", "--format"] for command in executor.commands)
+
+
+def test_analyzer_reset_rechecks_the_complete_frozen_container_identity(tmp_path: Path) -> None:
+    class DriftedContainerExecutor(RecordingExecutor):
+        def run(self, command: list[str]) -> str:
+            if command[1:3] == ["inspect", "--format"] and ".Mounts" in command[3]:
+                self.commands.append(command)
+                return "wrong-image@sha256:" + "b" * 64 + "|bridge|[]|0|0|0|[]|{}"
+            return super().run(command)
+
+    repositories = tmp_path / "repos"
+    output = tmp_path / "output"
+    repositories.mkdir()
+    output.mkdir()
+    spec = AnalysisContainerSpec(
+        task_id="task_12345678",
+        image="image@sha256:" + "a" * 64,
+        repositories_path=repositories,
+        output_path=output,
+        network="test-agent-analysis-egress",
+        analyzer_ids=("codex",),
+    )
+
+    with pytest.raises(DockerRuntimeError, match="镜像、网络、挂载或资源限制"):
+        DockerRuntime(DriftedContainerExecutor()).restart_clean(spec)
 
 
 def test_retained_container_resume_rechecks_non_privileged_constraints() -> None:

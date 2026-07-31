@@ -1555,3 +1555,35 @@
   - 正式企业门禁仍未在本机满足：当前仅有 Docker `29.6.1/linux/arm64`，且现有工具镜像缺 Codex；仍须在真实
     Docker 18.09/linux/amd64、企业 Redis/PostgreSQL、真实模型网关和至少两个跨应用仓库执行端到端验收。
     WorkflowChat 路由生产 chunk 约 2.86 MiB 的既有性能告警仍保留。
+
+### 2026-07-31 - 补齐分析容器重启复核、冻结 LFS 与范围补充闭环
+
+- Why:
+  - 继续按原方案审计时发现：智能体结束后的容器重启只复核基础非特权参数，未携带冻结 spec 复核镜像、挂载、
+    网络和资源，也未拒绝重启后仍为停止态；Git LFS 使用了多余分支参数且只检查根 `.gitattributes`；局部重分析
+    找不到候选时前端处于 `WAITING_INPUT`，但既没有可用输入卡，普通发送框也被禁用。最终复核还发现单项范围纠正
+    会覆盖其余范围，SSE 新投影会被较晚的 POST 回包覆盖且终态/重连仍残留旧输入卡，以及重启复核和强制删除
+    同时失败后两侧工作区仍可能遗留 `ACTIVE`。
+- What:
+  - Runner 将冻结 `AnalysisContainerSpec` 从 service 传到 analyzer executor，并在每次工具结束重启后复核运行态、
+    镜像、精确 bind、网络、CPU/内存/PID/nofile/tmpfs 和非特权约束；漂移时删除精确容器并失败关闭。
+  - LFS 从冻结提交读取根目录及嵌套的受跟踪 `.gitattributes`，在 detached `targetHead` 上按 `git lfs pull`
+    的单 remote 语法完整拉取当前 ref。工作流前端在 `SCOPE_DISAMBIGUATION` 无候选或候选不准确时保留范围输入卡，
+    通过 `structuredInput.scopeSelectors` 恢复原 run，并隔离候选按钮样式；逐项纠正时合并已解析项和其余待补充项。
+  - 容器重启复核失败后强制删除；删除也失败时保留不可忽略的危险标记，Runner 本地状态立即到期并转为
+    `CLEANUP_FAILED`，Worker 保留失败后同步收敛 PostgreSQL 租约和 durable 工作区事件，供两侧清理循环重试。
+    控制库短暂失败最多重试三次；持续失败不终态化 run，停止心跳后由租约接管重放幂等流程。
+  - 前端以 AG-UI 投影 revision 保护所有生命周期事件，输入请求或终态先于 POST 回包时不回退状态；实时 reducer
+    与 Python 断线快照均在开始、完成或失败时清空失效输入，终态后不能再次提交旧恢复卡。
+  - 同步 Runner、analysis-task、AG-UI、前端包、安全和企业离线验收文档；没有修改 Java 工作流边界、数据库结构、
+    HTTP 路径、事件类型、依赖锁、generated SDK、OpenCode 源码或 `.env*`。
+- How:
+  - 按 TDD 先复现停止容器未拒绝、重启未携带冻结 spec、嵌套 LFS 未执行和无候选输入死路，再补实现；Python
+    三模块 193 项、`compileall`、两份 `uv lock --check` 通过。
+  - 前端工作流 12 项及全量 108 个文件 1733 passed / 1 skipped，workspace lint/typecheck 和 agent-web 生产构建
+    通过；后端 21 模块 Maven 测试、工作流架构、Nginx 直连和离线打包合同校验通过。
+- Result:
+  - 本机可完成的代码、契约和自动化验证已闭环；没有覆盖当前并行的 LobeHub/工具箱未提交改动，也未创建分支。
+  - 正式企业验收仍未完成：本机是 Docker `29.6.2/linux/arm64`，现有 `linux/amd64` 工具镜像只有 OpenCode、
+    缺少 Codex；仍需真实 Docker 18.09、企业 Redis/PostgreSQL/模型网关和至少两个跨应用仓库端到端验收。
+    WorkflowChat 路由约 2.86 MiB 的生产 chunk 告警继续作为性能风险保留。
