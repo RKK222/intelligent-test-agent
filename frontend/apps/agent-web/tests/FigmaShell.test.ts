@@ -66,14 +66,21 @@ describe("FigmaShell", () => {
     expect(figmaShellSource).toMatch(/\.figma-subtitle\s*\{[^}]*color: var\(--ta-shell-header-text, #000000\)/s);
     expect(figmaShellSource).toContain("--ta-tree-active: var(--ta-shell-accent-soft, #fdf2f2)");
     expect(figmaShellSource).toMatch(/\.figma-activity-bar\s*\{[^}]*background: transparent[^}]*border-right: 0/s);
-    expect(figmaShellSource).toMatch(/\.figma-header\s*\{[^}]*background: var\(--ta-shell-canvas, #f0f4fa\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-header\s*\{[^}]*display: grid;[^}]*grid-template-columns: max-content minmax\(0, 1fr\) max-content;[^}]*background: var\(--ta-shell-canvas, #f0f4fa\)/s);
     expect(figmaShellSource).toMatch(/\.figma-body\s*\{[^}]*padding: var\(--ta-shell-gap, 8px\)[^}]*background: var\(--ta-shell-canvas, #f0f4fa\)/s);
-    expect(figmaShellSource).toMatch(/\.figma-header-left\s*\{[^}]*transform: translateY\(2px\)/s);
-    expect(figmaShellSource).toMatch(/\.figma-header-right\s*\{[^}]*position: absolute;[^}]*top: 6px;[^}]*left: 50%;[^}]*transform: translateX\(-50%\)/s);
-    expect(figmaShellSource).toMatch(/\.figma-header-help\s*\{[^}]*border: 1px solid var\(--ta-shell-border, #e5e7eb\);[^}]*background: var\(--ta-shell-surface, #fff\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-header-left\s*\{[^}]*align-items: center;[^}]*justify-content: flex-start;[^}]*height: 100%;[^}]*transform: translateY\(calc\(var\(--ta-shell-gap, 8px\) \/ 2\)\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-title-group\s*\{[^}]*justify-content: center;[^}]*align-items: flex-start/s);
+    expect(figmaShellSource).toMatch(/\.figma-header-center\s*\{[^}]*justify-self: center;[^}]*transform: translateY\(calc\(var\(--ta-shell-gap, 8px\) \/ 2\)\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-header-right\s*\{[^}]*justify-self: end;[^}]*transform: translateY\(calc\(var\(--ta-shell-gap, 8px\) \/ 2\)\)/s);
+    expect(figmaShellSource).not.toContain("left: 150px");
+    expect(figmaShellSource).toMatch(/\.figma-header-help\s*\{[^}]*border: 0;[^}]*background: transparent;[^}]*color: var\(--ta-shell-muted, #6b7280\)/s);
     expect(figmaShellSource).toMatch(/\.figma-header-help > svg\s*\{[^}]*display: block/s);
-    expect(figmaShellSource).toMatch(/\.figma-runtime-inventory-summary\s*\{[^}]*border: 0\.8px solid var\(--ta-shell-border, #e5e7eb\);[^}]*background: var\(--ta-shell-surface, #fff\)/s);
-    expect(figmaShellSource).toMatch(/\.figma-app-menu-trigger\s*\{[^}]*border: 0\.8px solid var\(--ta-shell-border, #e5e7eb\);[^}]*background: var\(--ta-shell-surface, #fff\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-header-help:active,[\s\S]*?\.figma-header-help\.is-open\s*\{[^}]*background: var\(--ta-shell-accent-soft, #fdf2f2\);[^}]*color: var\(--ta-shell-accent-strong, #991b1b\)/s);
+    expect(figmaShellSource).toContain('<BookOpen :size="20" :stroke-width="1.5" />');
+    expect(figmaShellSource).toMatch(/\.figma-runtime-inventory-summary\s*\{[^}]*border: 1px solid var\(--ta-shell-border, #e5e7eb\);[^}]*background: transparent/s);
+    expect(figmaShellSource).toMatch(/\.figma-app-menu-trigger,[\s\S]*?\.figma-context-menu-trigger\s*\{[^}]*border: 1px solid var\(--ta-shell-border, #e5e7eb\);[^}]*background: var\(--ta-shell-surface, #fff\)/s);
+    expect(figmaShellSource).toContain('data-testid="header-workspace-selector"');
+    expect(figmaShellSource).toContain('data-testid="header-version-selector"');
     expect(figmaShellSource).toMatch(/\.figma-user-avatar-btn\s*\{[^}]*border: 1px solid var\(--ta-shell-border, #e5e7eb\);[^}]*background: var\(--ta-shell-surface, #fff\)/s);
     expect(figmaShellSource).toMatch(/\.figma-user-avatar\s*\{[^}]*background: var\(--ta-shell-hover, #f3f4f6\);[^}]*color: var\(--ta-shell-header-text, #000000\)/s);
     expect(figmaShellSource).toMatch(/\.figma-user-avatar--compact\s*\{[^}]*font-size: 12px/s);
@@ -879,10 +886,11 @@ describe("FigmaShell", () => {
     expect(wrapper.find(".figma-app-menu-dropdown").exists()).toBe(true);
   });
 
-  it("shows runtime inventory before the application switch and opens details", async () => {
+  it("keeps application context centered and places manual, runtime inventory, and user on the right", async () => {
     const wrapper = mountShell({
       props: {
         currentUserName: "developer",
+        helpCenterOpen: true,
         apps: [{ id: "app_coss", name: "F-COSS", description: "已启用" }],
         selectedAppId: "app_coss",
         runtimeInventory: {
@@ -902,11 +910,22 @@ describe("FigmaShell", () => {
       } as any
     });
 
+    const headerCenter = wrapper.get(".figma-header-center");
     const headerRight = wrapper.get(".figma-header-right");
+    const help = wrapper.get('[data-testid="help-center-open"]');
     const summary = wrapper.get('[data-testid="runtime-inventory-summary"]');
     const appSwitch = wrapper.get(".figma-app-menu-wrapper");
-    expect(headerRight.element.compareDocumentPosition(summary.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(summary.element.compareDocumentPosition(appSwitch.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const workspaceSwitch = wrapper.get('[data-testid="header-workspace-selector"]');
+    const versionSwitch = wrapper.get('[data-testid="header-version-selector"]');
+    const userSwitch = wrapper.get(".figma-user-avatar-btn");
+    expect(headerCenter.element.contains(appSwitch.element)).toBe(true);
+    expect(appSwitch.element.compareDocumentPosition(workspaceSwitch.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(workspaceSwitch.element.compareDocumentPosition(versionSwitch.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(headerRight.element.contains(help.element)).toBe(true);
+    expect(help.classes()).toContain("is-open");
+    expect(help.attributes("aria-pressed")).toBe("true");
+    expect(help.element.compareDocumentPosition(summary.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(summary.element.compareDocumentPosition(userSwitch.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(summary.text()).toContain("Agent 2");
     expect(summary.text()).toContain("Skill 1");
     expect(summary.text()).toContain("MCP 2");
@@ -921,6 +940,76 @@ describe("FigmaShell", () => {
     expect(wrapper.text()).toContain("read_file");
     expect(wrapper.text()).toContain("Repository");
     expect(wrapper.text()).toContain("当前运行态未提供独立 Plugin 目录");
+  });
+
+  it("reuses the existing workspace version loading and selection callbacks from the header", async () => {
+    const workspaceA = {
+      workspaceId: "workspace-a",
+      workspaceName: "核心服务",
+      branch: "main",
+      enabled: true,
+      versions: [{ versionId: "version-a", version: "20260701", branch: "release/a" }]
+    };
+    const latestWorkspaceBVersion = { versionId: "version-b-latest", version: "20260715", branch: "release/b-latest" };
+    const workspaceB = {
+      workspaceId: "workspace-b",
+      workspaceName: "批量回归",
+      branch: "develop",
+      enabled: true,
+      versions: [latestWorkspaceBVersion, { versionId: "version-b-old", version: "20260701", branch: "release/b-old" }]
+    };
+    const workspaceC = {
+      workspaceId: "workspace-c",
+      workspaceName: "待加载空间",
+      branch: "feature/c",
+      enabled: true
+    };
+    const wrapper = mountShell({
+      props: {
+        appTemplates: [workspaceA, workspaceB, workspaceC],
+        selectedWorkspaceTemplateId: workspaceA.workspaceId,
+        selectedVersionId: "version-a"
+      } as any
+    });
+
+    const workspaceButton = wrapper.get('[data-testid="header-workspace-selector"]');
+    const versionButton = wrapper.get('[data-testid="header-version-selector"]');
+    expect(workspaceButton.text()).toContain("核心服务");
+    expect(versionButton.text()).toContain("20260701");
+
+    await workspaceButton.trigger("click");
+    const workspaceBItem = wrapper.findAll(".figma-workspace-menu-wrapper .figma-app-menu-item")
+      .find((item) => item.text().includes("批量回归"));
+    expect(workspaceBItem).toBeTruthy();
+    await workspaceBItem!.trigger("mousedown");
+    expect(workspaceButton.text()).toContain("批量回归");
+    expect(versionButton.text()).toContain("20260715");
+    expect(wrapper.emitted("select-version")?.[0]?.[0]).toEqual({ template: workspaceB, version: latestWorkspaceBVersion });
+
+    await versionButton.trigger("click");
+    const versionBItem = wrapper.findAll(".figma-version-menu-wrapper .figma-app-menu-item")
+      .find((item) => item.text().includes("20260701"));
+    expect(versionBItem).toBeTruthy();
+    await versionBItem!.trigger("mousedown");
+    expect(wrapper.emitted("select-version")?.[1]?.[0]).toEqual({ template: workspaceB, version: workspaceB.versions[1] });
+
+    await workspaceButton.trigger("click");
+    const workspaceCItem = wrapper.findAll(".figma-workspace-menu-wrapper .figma-app-menu-item")
+      .find((item) => item.text().includes("待加载空间"));
+    expect(workspaceCItem).toBeTruthy();
+    await workspaceCItem!.trigger("mousedown");
+    expect(wrapper.emitted("load-versions")?.[0]).toEqual(["workspace-c"]);
+
+    const latestWorkspaceCVersion = { versionId: "version-c-latest", version: "20260731", branch: "release/c-latest" };
+    await wrapper.setProps({
+      appTemplates: [workspaceA, workspaceB, { ...workspaceC, versions: [latestWorkspaceCVersion] }]
+    } as any);
+    await wrapper.vm.$nextTick();
+    expect(versionButton.text()).toContain("20260731");
+    expect(wrapper.emitted("select-version")?.[2]?.[0]).toEqual({
+      template: expect.objectContaining({ workspaceId: "workspace-c" }),
+      version: latestWorkspaceCVersion
+    });
   });
 
   it("shows process status with server name and resolved address", async () => {
