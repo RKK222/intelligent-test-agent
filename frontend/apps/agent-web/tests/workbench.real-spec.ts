@@ -57,7 +57,7 @@ test.describe("phase 11 real service integration", () => {
         }));
 
       // PTY probe 只需要稳定的同源浏览器上下文；未注入登录态时根路由会异步跳转并销毁 evaluate。
-      await page.goto("/login");
+      await page.goto("/985211");
       await page.waitForLoadState("networkidle");
       const terminalResult = await connectTerminalAndEcho(page, ticket.webSocketUrl, "phase11-real-e2e");
 

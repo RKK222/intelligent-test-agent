@@ -25,6 +25,9 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
+    // Mermaid、Monaco 与多组件异步用例并发过高时会争抢 CPU/计时器，限制 worker 避免全量回归随机超时。
+    maxWorkers: 4,
+    testTimeout: 20_000,
     include: [
       "packages/*/tests/**/*.test.ts",
       "apps/*/tests/**/*.test.ts"

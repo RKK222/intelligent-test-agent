@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, within } from "@testing-library/vue";
+import { fireEvent, render, waitFor, within } from "@testing-library/vue";
 import { nextTick } from "vue";
 import type { AgentMessage, MessagePart, PromptPart } from "@test-agent/shared-types";
 import OpencodeTimeline from "../src/opencode-like/components/OpencodeTimeline.vue";
@@ -328,7 +328,7 @@ describe("OpencodeTimeline", () => {
     expect(exploreButton.querySelector(".oc-work-status__event-count")?.textContent).toBe("2");
     expect(container.querySelector(".oc-text-part")).toBeTruthy();
     expect(container.querySelector(".oc-text-part .oc-icon-button")).toBeTruthy();
-    expect(getByText("定位到 checkout 表单校验失败。")).toBeTruthy();
+    await waitFor(() => expect(getByText("定位到 checkout 表单校验失败。")).toBeTruthy(), { timeout: 5_000 });
     await fireEvent.click(container.querySelector(".oc-diff-summary__header") as HTMLElement);
     expect(getByText("checkout.ts")).toBeTruthy();
 

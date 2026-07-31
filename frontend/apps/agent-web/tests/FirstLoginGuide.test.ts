@@ -78,7 +78,7 @@ describe("FirstLoginGuide", () => {
     expect(workspacesStep.text()).toContain("工作空间别名");
     expect(workspacesStep.text()).toContain("目录树");
     expect(workspacesStep.text()).toContain("feature_testagent_yyyymmdd");
-    expect(workspacesStep.text()).toContain("先选择 workspace，再选择版本");
+    expect(workspacesStep.text()).toContain("回到工作台顶部选择 workspace 并确认默认版本");
 
     wrapper.getComponent(tourStub).vm.$emit("update:current", 6);
     await wrapper.vm.$nextTick();

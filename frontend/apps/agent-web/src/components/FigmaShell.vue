@@ -4215,6 +4215,8 @@ function submitJoinApp() {
 
 .figma-main-card {
   flex: 1;
+  /* flex 子项必须允许收缩，否则工具盒子内容会把整块工作区撑出视口，无法在自身容器滚动。 */
+  min-height: 0;
   min-width: 0;
   display: flex;
   background: transparent;

@@ -88,6 +88,10 @@ corepack pnpm e2e
 corepack pnpm e2e:real
 ```
 
+Vitest 全量回归统一限制为最多 4 个 worker，并使用 20 秒单测超时，避免 Mermaid、Monaco 与多组件异步测试在高并发机器上因 CPU/计时器争抢产生随机假失败；直接执行默认 `corepack pnpm test` 即可使用这套稳定配置。
+
+Playwright 当前仅覆盖桌面 Chromium（项目没有移动端产品内容），统一单 worker 顺序执行，并将单例上限设为 60 秒、断言等待设为 10 秒。工作台 E2E 会加载 Monaco、Mermaid 与内嵌手册，避免额外视口把非产品范围纳入交付门槛。
+
 完整前端检查也可以从仓库根目录执行：
 
 ```bash
