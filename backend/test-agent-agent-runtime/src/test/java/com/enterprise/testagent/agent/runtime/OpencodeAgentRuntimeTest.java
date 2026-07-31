@@ -61,6 +61,41 @@ class OpencodeAgentRuntimeTest {
         assertThat(command.getValue().parts()).extracting("type").containsExactly("text");
     }
 
+    @Test
+    void startRunDoesNotForwardInternalTextSourceMetadata() {
+        OpencodeClientFacade facade = mock(OpencodeClientFacade.class);
+        when(facade.startRun(any())).thenReturn(Mono.just(new OpencodeStartRunResult(true)));
+        OpencodeAgentRuntime runtime = new OpencodeAgentRuntime(facade);
+
+        runtime.startRun(new AgentStartRunCommand(
+                        node(),
+                        "ses_remote1234567890abcdef",
+                        "/tmp/demo",
+                        null,
+                        "分析附件",
+                        List.of(
+                                AgentPromptPart.text("分析附件"),
+                                AgentPromptPart.text(
+                                        "用户上传的附件已保存在当前工作区",
+                                        Map.of("contextType", "workspace_attachment", "deliveryMode", "workspace"))),
+                        null,
+                        "build",
+                        null,
+                        null,
+                        null,
+                        null,
+                        Map.of(),
+                        null,
+                        null,
+                        "trace_1234567890abcdef"))
+                .block();
+
+        ArgumentCaptor<OpencodeStartRunCommand> command = ArgumentCaptor.forClass(OpencodeStartRunCommand.class);
+        verify(facade).startRun(command.capture());
+        assertThat(command.getValue().parts()).extracting("type").containsExactly("text", "text");
+        assertThat(command.getValue().parts()).allSatisfy(part -> assertThat(part.source()).isEmpty());
+    }
+
     private static ExecutionNode node() {
         Instant now = Instant.parse("2026-07-11T00:00:00Z");
         return new ExecutionNode(

@@ -2090,7 +2090,7 @@ public class RunApplicationService {
     }
 
     /**
-     * 将平台文件上下文转成 opencode part。聊天上传附件使用工作区路径文本，其他上下文继续保持原生 file part。
+     * 将平台文件上下文转成 opencode part。聊天上传附件按 deliveryMode 分流，平台来源元数据只用于分流和用户消息历史。
      */
     private AgentPromptPart toAgentFilePart(StartRunInput.PromptPart part, Workspace workspace) {
         if (isWorkspaceAttachment(part) && !usesNativeAttachmentDelivery(part)) {
@@ -2105,11 +2105,12 @@ public class RunApplicationService {
             return AgentPromptPart.file(url, mime, filename, fileSource(part, text));
         }
         if (part.url() != null) {
-            return AgentPromptPart.file(part.url(), mime, filename, normalizedSource(part.source()));
+            // OpenCode 的 FilePartInput.source 可选，但一旦存在就必须同时包含 text/type/path。
+            return AgentPromptPart.file(part.url(), mime, filename, Map.of());
         }
         if (part.path() != null) {
-            // 只允许把 workspace 内路径转成 file:// URL，防止前端构造任意宿主机路径交给 opencode 读取。
-            return AgentPromptPart.file(workspaceFileUrl(workspace, part.path()), mime, filename, fileSource(part, null));
+            // 路径型原生附件不内联正文，因此省略可选 source；路径仍先经过 Workspace 根边界校验。
+            return AgentPromptPart.file(workspaceFileUrl(workspace, part.path()), mime, filename, Map.of());
         }
         return null;
     }
@@ -2175,29 +2176,19 @@ public class RunApplicationService {
         return AgentPromptPart.text("Reference: " + label + suffix);
     }
 
-    /**
-     * 构造文件 source 元数据，保留路径和选区文本范围供 opencode Web 投影使用。
-     */
+    /** 构造 OpenCode 1.18.4 允许的完整 FileSource；平台 contextType/行号元数据不进入远端协议。 */
     private Map<String, Object> fileSource(StartRunInput.PromptPart part, String text) {
         String path = firstText(part.path(), part.name());
-        if (path == null && text == null) {
+        if (path == null || text == null) {
             return Map.of();
         }
-        LinkedHashMap<String, Object> source = new LinkedHashMap<>();
-        source.put("type", "file");
-        if (path != null) {
-            source.put("path", path);
-        }
-        copySourceValue(part.source(), source, "contextType");
-        copySourceValue(part.source(), source, "startLine");
-        copySourceValue(part.source(), source, "endLine");
-        if (text != null) {
-            source.put("text", Map.of(
-                    "value", text,
-                    "start", sourceNumber(part.source(), "start", 0),
-                    "end", sourceNumber(part.source(), "end", text.length())));
-        }
-        return Map.copyOf(source);
+        return Map.of(
+                "type", "file",
+                "path", path,
+                "text", Map.of(
+                        "value", text,
+                        "start", sourceNumber(part.source(), "start", 0),
+                        "end", sourceNumber(part.source(), "end", text.length())));
     }
 
     /**
@@ -2212,30 +2203,6 @@ public class RunApplicationService {
                 "value", value,
                 "start", sourceNumber(part.source(), "start", 0),
                 "end", sourceNumber(part.source(), "end", value.length()));
-    }
-
-    /**
-     * 透传平台工作区上下文来源字段，避免 opencode 回放 file part 时选区被还原成整文件附件。
-     */
-    private void copySourceValue(Map<String, Object> source, LinkedHashMap<String, Object> target, String key) {
-        if (source == null) {
-            return;
-        }
-        Object value = source.get(key);
-        if (value instanceof String stringValue && !stringValue.isBlank()) {
-            target.put(key, stringValue);
-            return;
-        }
-        if (value instanceof Number) {
-            target.put(key, value);
-        }
-    }
-
-    /**
-     * 固化 source Map，null source 按空上下文处理。
-     */
-    private Map<String, Object> normalizedSource(Map<String, Object> source) {
-        return source == null ? Map.of() : Map.copyOf(source);
     }
 
     /**

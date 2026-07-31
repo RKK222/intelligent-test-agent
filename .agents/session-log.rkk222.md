@@ -3922,3 +3922,27 @@
 
 - 两个现象均判定为本项目 bug，当前只完成诊断，没有修改业务代码或宣称修复。第一个问题若需对企业现场做最后的 HTTP 状态闭环，应按 trace `trace_ms88ltcbkkwpk3r18ui` 核对后台 `startCommand` 的下游状态，预期为 OpenCode 请求校验类 4xx。
 - 本次未变更 HTTP API、RunEvent 契约、数据库/Flyway、关系型 SQL、性能、安全、环境配置、generated SDK 或 OpenCode 只读源码；工作区既有 `file-explorer` 修改保持未暂存、未纳入本次记录提交。
+
+## 2026-07-31 - 修复原生与工具型附件投递契约
+
+### Why
+
+- 原生上传附件被平台组装成缺少必填 `text`、同时携带平台扩展字段的 OpenCode `FileSource`，导致 `/session/{sessionID}/command` 在生成消息前校验失败；修复还必须保持不支持原生读取的附件继续通过工作区工具路径投递。
+
+### What
+
+- 工作区路径或 URL 形式的原生附件继续发送 OpenCode `file` part，但省略可选 `source`；有内联内容时只发送 OpenCode 允许的 `type/path/text`，不再把 `contextType`、`deliveryMode`、行号等平台元数据透传到下游。
+- 不支持原生读取的附件继续转成内部文本 part，并在 Slash Command 参数中追加精确工作区路径；内部 `source` 仅用于平台分流和用户消息历史，进入 OpenCode `TextPartInput` 前按既有边界丢弃。
+- 为原生路径、内联内容、非原生工具路径、混合 Slash Command 和最终 generated SDK 请求体补充回归测试；同步 runtime/client README、HTTP API 和 OpenCode 升级契约文档。
+
+### How
+
+- JDK 25 下执行 `mvn -f backend/pom.xml -pl test-agent-opencode-client,test-agent-agent-runtime,test-agent-opencode-runtime -am test`，相关 reactor 全部通过，其中 opencode-runtime 756 项、opencode-client 67 项、agent-runtime 8 项通过。
+- `tools/verify-ai-docs.sh` 与 `git diff --check` 通过；使用未修改的 `.env.test` 按 `test` profile 执行 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build`，backend、manager、frontend 均重启成功。
+- 后端 health/readiness 为 `UP`，前端 `http://127.0.0.1:3000` 返回 200，登录 CORS 正常；Manager 已连接，用户 OpenCode 进程恢复为 `HEALTHY`。
+
+### Result
+
+- 原生附件不再生成非法 `FileSource`，非原生附件仍可由工作区工具按精确路径读取；平台历史仍保留原始附件元数据，现有路由和 Slash Command 语义兼容。
+- 本次未修改第二个“执行不完”问题的补偿终态或前端 busy 逻辑；该问题仅完成解释，后续需独立修复。
+- 未新增或变更 HTTP wire、RunEvent、数据库/Flyway、关系型 SQL、性能、安全、环境配置、generated SDK 或 OpenCode 只读源码；工作区内并行的前端文件浏览/下载改动未暂存、未纳入本次提交。

@@ -172,7 +172,13 @@ class GeneratedOpencodeSdkGatewayTest {
                             null,
                             "test-design-path",
                             "对车贷的开发文档，生成路径图",
-                            List.of(),
+                            List.of(
+                                    OpencodePromptPart.text("工作区工具附件只存在于 command arguments"),
+                                    OpencodePromptPart.file(
+                                            "file:///tmp/demo/.testagent/attachments/sha256_code.java",
+                                            "text/plain",
+                                            "Demo.java",
+                                            Map.of())),
                             null,
                             "build",
                             "opencode",
@@ -186,7 +192,12 @@ class GeneratedOpencodeSdkGatewayTest {
             assertThat(request.get().body()).contains(
                     "\"command\":\"test-design-path\"",
                     "\"arguments\":\"对车贷的开发文档，生成路径图\"",
-                    "\"model\":\"opencode/north-mini-code-free\"");
+                    "\"model\":\"opencode/north-mini-code-free\"",
+                    "\"type\":\"file\"",
+                    "\"mime\":\"text/plain\"",
+                    "\"filename\":\"Demo.java\"",
+                    "\"url\":\"file:///tmp/demo/.testagent/attachments/sha256_code.java\"")
+                    .doesNotContain("工作区工具附件只存在于 command arguments", "\"source\"");
         } finally {
             server.stop(0);
         }

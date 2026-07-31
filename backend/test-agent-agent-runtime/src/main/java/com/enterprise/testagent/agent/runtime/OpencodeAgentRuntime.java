@@ -238,6 +238,7 @@ public class OpencodeAgentRuntime implements AgentRuntime {
 
     private OpencodePromptPart toOpencodePromptPart(AgentPromptPart part) {
         return switch (part.type()) {
+            // text source 仅供平台在 dispatch 前识别降级附件，OpenCode TextPartInput 不支持该字段。
             case "text" -> OpencodePromptPart.text(part.text());
             case "file" -> OpencodePromptPart.file(part.url(), part.mime(), part.filename(), part.source());
             case "agent" -> OpencodePromptPart.agent(part.agentName(), part.source());

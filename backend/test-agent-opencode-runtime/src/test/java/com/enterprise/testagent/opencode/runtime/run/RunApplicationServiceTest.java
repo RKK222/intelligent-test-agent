@@ -1468,9 +1468,17 @@ class RunApplicationServiceTest {
         assertThat(command.parts().get(0).type()).isEqualTo("text");
         assertThat(command.parts().get(1).type()).isEqualTo("file");
         assertThat(command.parts().get(1).url()).startsWith("data:text/plain");
-        assertThat(command.parts().get(1).source()).containsEntry("contextType", "selection");
-        assertThat(command.parts().get(1).source()).containsEntry("startLine", 20);
-        assertThat(command.parts().get(1).source()).containsEntry("endLine", 35);
+        assertThat(command.parts().get(1).source())
+                .containsOnlyKeys("type", "path", "text")
+                .containsEntry("type", "file")
+                .containsEntry("path", "src/App.tsx");
+        assertThat(command.parts().get(1).source().get("text"))
+                .isInstanceOfSatisfying(Map.class, sourceText -> {
+                    Map<?, ?> sourceTextMap = (Map<?, ?>) sourceText;
+                    assertThat(sourceTextMap.get("value")).isEqualTo("export function App() { return null; }");
+                    assertThat(sourceTextMap.get("start")).isEqualTo(0);
+                    assertThat(sourceTextMap.get("end")).isEqualTo(37);
+                });
         assertThat(command.parts().get(2).type()).isEqualTo("agent");
         assertThat(command.parts().get(2).name()).isEqualTo("Build");
         assertThat(messages.saved).hasSize(1);
@@ -1531,6 +1539,7 @@ class RunApplicationServiceTest {
                 .contains("\"filename\":\"cases.xlsx\"")
                 .contains("\"workspacePath\":\".testagent/attachments/req_123-cases.xlsx\"")
                 .contains("使用工作区工具读取或处理");
+        assertThat(command.parts().get(1).source()).isEmpty();
         assertThat(command.parts()).noneMatch(part -> "file".equals(part.type()));
         assertThat(messages.saved.getFirst().partsJson())
                 .contains("\"type\":\"file\"")
@@ -1540,11 +1549,12 @@ class RunApplicationServiceTest {
     @Test
     void nativeWorkspaceAttachmentUsesValidatedFileUrl() {
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
         RunApplicationService service = new RunApplicationService(
                 new FakeWorkspaceRepository(),
                 new FakeSessionRepository(session()),
                 new FakeRunRepository(),
-                new FakeSessionMessageRepository(),
+                messages,
                 new FakeExecutionNodeRepository(),
                 new FakeRoutingDecisionRepository(),
                 new RunEventAppender(new FakeRunEventRepository()),
@@ -1582,7 +1592,11 @@ class RunApplicationServiceTest {
             assertThat(part.mime()).isEqualTo("text/plain");
             assertThat(part.filename()).isEqualTo("Demo.java");
             assertThat(part.url()).isEqualTo("file:///tmp/demo/.testagent/attachments/sha256_code.java");
+            assertThat(part.source()).isEmpty();
         });
+        assertThat(messages.saved.getFirst().partsJson())
+                .contains("\"contextType\":\"workspace_attachment\"")
+                .contains("\"deliveryMode\":\"native\"");
     }
 
     @Test
@@ -1602,20 +1616,35 @@ class RunApplicationServiceTest {
         service.startRun(new StartRunInput(
                         new SessionId("ses_1234567890abcdef"),
                         "/legacy-interface-function-asset-to-md 生成说明",
-                        List.of(new StartRunInput.PromptPart(
-                                "file",
-                                null,
-                                ".testagent/attachments/sha256_cases.xls",
-                                "cases.xls",
-                                "application/vnd.ms-excel",
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                Map.of("contextType", "workspace_attachment"),
-                                null)),
+                        List.of(
+                                new StartRunInput.PromptPart(
+                                        "file",
+                                        null,
+                                        ".testagent/attachments/sha256_cases.xls",
+                                        "cases.xls",
+                                        "application/vnd.ms-excel",
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        Map.of("contextType", "workspace_attachment"),
+                                        null),
+                                new StartRunInput.PromptPart(
+                                        "file",
+                                        null,
+                                        ".testagent/attachments/sha256_code.java",
+                                        "Demo.java",
+                                        "text/plain",
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        Map.of("contextType", "workspace_attachment", "deliveryMode", "native"),
+                                        null)),
                         null,
                         "build",
                         "opencode/north-mini-code-free",
@@ -1630,9 +1659,11 @@ class RunApplicationServiceTest {
                     .startsWith("生成说明\n\n以下是本轮用户明确选择的工作区附件")
                     .contains("\"filename\":\"cases.xls\"")
                     .contains("\"workspacePath\":\".testagent/attachments/sha256_cases.xls\"")
-                    .contains("不要扫描附件目录或选取历史同名文件");
+                    .contains("不要扫描附件目录或选取历史同名文件")
+                    .doesNotContain("Demo.java", "sha256_code.java");
             assertThat(command.parts()).extracting(OpencodePromptPart::type)
-                    .containsExactly("text", "text");
+                    .containsExactly("text", "text", "file");
+            assertThat(command.parts().get(2).source()).isEmpty();
         });
     }
 
