@@ -4039,3 +4039,26 @@
 
 - 中间 `finish=stop` 不再越过 root busy 提前结束 Run，旧回复轮询也不会误完成同 Session 的新 Run；前端不会再把同一 Run 的已知终态翻回运行中。
 - 本次没有新增或变更 HTTP/RunEvent wire、数据库/Flyway、关系型 SQL、鉴权、安全策略、环境配置、generated SDK 或 OpenCode 只读源码；仅在低频终态补偿探测中增加一次受控 `/session/status` 查询。
+
+## 2026-07-31 - 基于本地最新代码重建企业三节点包
+
+### Why
+
+- 用户明确要求不再只按远程主线，而是把本地已经完成并提交的工作区二进制下载和交互回复终态竞态修复一起打入企业包。
+
+### What
+
+- 以干净本地主线提交 `df725d514307f2a46a824b827d25741874a8ed0d` 为输入，重新构建后端、前端、内层标准发布 ZIP 和固定名三节点外层 ZIP。
+- 本次没有 Flyway、worker runtime、toolbox、Python 或公共 Agent 变更；组件清单保持 worker `reuse`，指纹 `aa452daf700adfbabf01f1052f8eb8274daf3c7a0e95cd12152b1e39f1708000`，toolbox `reuse`，指纹 `35447da08f477dd02e458e4344be9bd870452dba12ba6db32d250c56e9f15040`。
+- 新内层 `test-agent-internal-release.zip` SHA-256 为 `86960b3a04f2cb1546dc9a04cd8e2edc029d3889e7f347f4e7c4d0385e65c913`；新外层 `test-agent-two-backend-complete.zip` SHA-256 为 `49bea24f87a48c0526ce605cfcecfa6b07dd0c908492c33c64faf07ec043cd24`，外层嵌入内层与当前内层摘要完全一致。
+
+### How
+
+- 执行标准 `package-release.sh` 与 `package-two-backend-complete.sh`；后端企业 JAR、前端 typecheck/生产构建、内外层 SHA、ZIP/TAR 归档卫生、backend/frontend `--validate-only`、固定名三节点结构和 Flyway persistence JAR 门禁全部通过。
+- 包内正式工具盒子 migration SHA-256 仍为 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`，相对上一企业包没有新增或改写 migration。
+- JDK 25 定向后端测试共 161 项通过：workspace 文件/视图 57、Run 终态 73、文件 WebSocket 31；前端下载、backend-api 和 runtime reducer 三文件 165 项通过。`tools/verify-ai-docs.sh` 与 `git diff --check` 通过。
+
+### Result
+
+- 固定名外层 ZIP/SHA 已同步到 `deploy/internal/dist/0731/`；本包要求 `.4`、`.114` 两台 Java 全部升级后再升级 `.2` 前端，不能只升级其中一台后台，因为新增文件 WebSocket RPC 需要每个目标 Java 都支持。
+- worker、manager、toolbox、Python 和公共 Agent 无需随本包重新部署或重启；未修改数据库结构、Flyway SQL、关系型 SQL、环境配置、generated SDK 或 OpenCode 源码。
