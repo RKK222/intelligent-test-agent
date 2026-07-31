@@ -77,7 +77,6 @@ public class OpencodeProcessStartupService {
     private PublicAgentConfigPreviewSourceResolver publicPreviewSourceResolver;
     private OpencodeProcessStopService stopService;
     private WorkspaceGitToolTokenService workspaceGitToolTokenService;
-    private UiTestExecutionToolTokenService uiTestExecutionToolTokenService;
 
     /** 启动前选择用户有效公共个人配置或共享运行副本；方法注入保持既有测试构造器兼容。 */
     @Autowired
@@ -102,13 +101,6 @@ public class OpencodeProcessStartupService {
     void setWorkspaceGitToolTokenService(WorkspaceGitToolTokenService workspaceGitToolTokenService) {
         this.workspaceGitToolTokenService = Objects.requireNonNull(
                 workspaceGitToolTokenService, "workspaceGitToolTokenService must not be null");
-    }
-
-    /** 启动时为 UI 执行 Tool 注入带用户身份和固定 audience 的专用凭据。 */
-    @Autowired
-    void setUiTestExecutionToolTokenService(UiTestExecutionToolTokenService tokenService) {
-        this.uiTestExecutionToolTokenService = Objects.requireNonNull(
-                tokenService, "uiTestExecutionToolTokenService must not be null");
     }
 
     /**
@@ -911,14 +903,6 @@ public class OpencodeProcessStartupService {
             environment.put(
                     WorkspaceGitToolTokenService.TOKEN_ENV_NAME,
                     workspaceGitToolTokenService.issue(request.userId()));
-        }
-        if (uiTestExecutionToolTokenService != null && internalProxySettings != null) {
-            environment.put(
-                    WorkspaceGitToolTokenService.BASE_URL_ENV_NAME,
-                    internalProxySettings.sameNodeBaseUrl());
-            environment.put(
-                    UiTestExecutionToolTokenService.TOKEN_ENV_NAME,
-                    uiTestExecutionToolTokenService.issue(request.userId()));
         }
         return Map.copyOf(environment);
     }

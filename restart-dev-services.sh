@@ -80,6 +80,7 @@ Options:
 Environment overrides:
   TEST_AGENT_START_OPENCODE_MANAGER  auto|true|false. Set false to skip the Go manager.
   TEST_AGENT_OPENCODE_MANAGER_TOKEN  Shared secret between manager and backend. Defaults to local-manager-token.
+  UITEST6_BASE_URL                   Independent UI platform HTTP/HTTPS address inherited by OpenCode processes.
   TEST_AGENT_ROOT                    Project root used by common parameter path expansion.
   TESTAGENT                          Compatibility alias for existing local common parameters.
 USAGE
@@ -889,8 +890,8 @@ start_opencode_manager() {
   : >"${LOG_DIR}/opencode-manager.log"
   if command -v screen >/dev/null 2>&1; then
     local manager_cmd
-    printf -v manager_cmd 'cd %q && export OPENCODE_MANAGER_BACKEND_PORT=%q OPENCODE_MANAGER_PORT_START=%q OPENCODE_MANAGER_PORT_END=%q OPENCODE_MANAGER_TOKEN="$TEST_AGENT_OPENCODE_MANAGER_TOKEN" OPENCODE_MANAGER_STATE_DIR=%q OPENCODE_BIN=%q SYS_DATA_ROOT_DIR=%q OPENCODE_ALLOWED_CORS=%q OPENCODE_MANAGER_HEARTBEAT_INTERVAL="${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-5s}" OPENCODE_MANAGER_RECONNECT_INTERVAL="${OPENCODE_MANAGER_RECONNECT_INTERVAL:-10s}" && exec ./opencode-manager/bin/opencode-manager run >>%q 2>&1' \
-      "${ROOT_DIR}" "${backend_port}" "${port_start}" "${port_end}" "${manager_state_dir}" "${bin}" "${SYS_DATA_ROOT_DIR}" "http://localhost:${frontend_port},http://127.0.0.1:${frontend_port}" "${LOG_DIR}/opencode-manager.log"
+    printf -v manager_cmd 'cd %q && export OPENCODE_MANAGER_BACKEND_PORT=%q OPENCODE_MANAGER_PORT_START=%q OPENCODE_MANAGER_PORT_END=%q OPENCODE_MANAGER_TOKEN="$TEST_AGENT_OPENCODE_MANAGER_TOKEN" OPENCODE_MANAGER_STATE_DIR=%q OPENCODE_BIN=%q SYS_DATA_ROOT_DIR=%q OPENCODE_ALLOWED_CORS=%q UITEST6_BASE_URL=%q OPENCODE_MANAGER_HEARTBEAT_INTERVAL="${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-5s}" OPENCODE_MANAGER_RECONNECT_INTERVAL="${OPENCODE_MANAGER_RECONNECT_INTERVAL:-10s}" && exec ./opencode-manager/bin/opencode-manager run >>%q 2>&1' \
+      "${ROOT_DIR}" "${backend_port}" "${port_start}" "${port_end}" "${manager_state_dir}" "${bin}" "${SYS_DATA_ROOT_DIR}" "http://localhost:${frontend_port},http://127.0.0.1:${frontend_port}" "${UITEST6_BASE_URL:-}" "${LOG_DIR}/opencode-manager.log"
     screen -dmS "${OPENCODE_MANAGER_SCREEN_SESSION}" bash -lc "${manager_cmd}"
   else
     (
@@ -903,6 +904,7 @@ start_opencode_manager() {
       export OPENCODE_BIN="${bin}"
       export SYS_DATA_ROOT_DIR="${SYS_DATA_ROOT_DIR}"
       export OPENCODE_ALLOWED_CORS="http://localhost:${frontend_port},http://127.0.0.1:${frontend_port}"
+      export UITEST6_BASE_URL="${UITEST6_BASE_URL:-}"
       export OPENCODE_MANAGER_HEARTBEAT_INTERVAL="${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-5s}"
       export OPENCODE_MANAGER_RECONNECT_INTERVAL="${OPENCODE_MANAGER_RECONNECT_INTERVAL:-10s}"
       nohup ./opencode-manager/bin/opencode-manager run >>"${LOG_DIR}/opencode-manager.log" 2>&1 &

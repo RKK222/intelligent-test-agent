@@ -816,8 +816,9 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 
 ## UI 测试执行不新增事件
 
-`ui_test_execute` Tool 通过普通 HTTP 提交必填的被测系统环境和一条案例，并轮询同一个 `executionId`
-到终态；环境缺失时在创建请求前中断。平台不为
+`ui_test_execute` Tool 使用 OpenCode worker 启动配置中的 `UITEST6_BASE_URL` 直连独立 UI 平台，
+通过普通 HTTP 提交必填的被测系统环境和一条案例，并轮询同一个 `executionId` 到终态；环境缺失时
+在创建请求前中断。当前 Java 后端不参与提交或状态查询。平台不为
 `uitest6` 新增 RunEvent、SSE 或 WebSocket 事件。OpenCode 自身的 tool part 和 child Session 仍沿用
 既有对话事件映射，因此前端可以展示 `test-execution-ui` 子 agent 卡片，但不把外部执行步骤冒充
 当前平台 RunEvent。后续若要实时转发外部浏览器步骤，必须单独设计稳定、可恢复、带归属的事件契约。

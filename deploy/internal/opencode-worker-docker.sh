@@ -164,6 +164,7 @@ start_container() {
     -e "OPENCODE_ALLOWED_CORS=${OPENCODE_ALLOWED_CORS}" \
     -e "OPENCODE_MANAGER_HEARTBEAT_INTERVAL=${OPENCODE_MANAGER_HEARTBEAT_INTERVAL}" \
     -e "OPENCODE_MANAGER_RECONNECT_INTERVAL=${OPENCODE_MANAGER_RECONNECT_INTERVAL}" \
+    -e "UITEST6_BASE_URL=${UITEST6_BASE_URL:-}" \
     -v "${TEST_AGENT_DATA_ROOT}:/data/testagent/data" \
     -v "${TEST_AGENT_PROGRAM_ROOT}:/data/testagent/programs:ro" \
     ${python_library_args[@]+"${python_library_args[@]}"} \

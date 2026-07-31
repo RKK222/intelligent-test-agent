@@ -659,32 +659,22 @@ ENTERPRISE_UCID=<current-user-unified-auth-id>
 
 ## 独立 uitest6 平台配置
 
-UI 测试执行采用 `OpenCode ui_test_execute Tool → 同节点 Java → 独立 uitest6`。Java 节点配置：
+UI 测试执行采用 `OpenCode ui_test_execute Tool → 独立 uitest6`，不经过 Java 后端。平台地址放在
+OpenCode Manager/worker 的启动配置中；企业部署写入 `docker.env`，本地一键启动写入所选 dotenv：
 
 ```bash
 UITEST6_BASE_URL=http://<uitest6-host>:7788
-UITEST6_INTEGRATION_TOKEN=<shared-service-token>
-UITEST6_REQUEST_TIMEOUT_SECONDS=15
-UITEST6_MAX_STEPS=25
 ```
 
-`UITEST6_INTEGRATION_TOKEN` 必须与 `uitest6` 自身配置相同，只能进入 Java 的 `backend.env`；禁止写入
-`docker.env`、公共 Agent/Tool、OpenCode 配置或对话内容。`UITEST6_BASE_URL` 必须从每个 Java 节点
-可达，允许 HTTP/HTTPS，禁止 URL user-info。Java 未配置地址或 Token 时集成失败关闭，不影响
-`uitest6` 原平台 `/api/agent/run` 和当前平台其它执行方式。
+Manager 启动的 OpenCode 子进程继承该变量，Tool 只读取环境变量，不允许调用方在对话或参数中覆盖。
+`UITEST6_BASE_URL` 必须从每个 worker 可达，允许 HTTP/HTTPS，禁止 URL user-info。未配置时只有 UI
+执行 Tool 失败，不影响当前平台其它能力。独立 UI 平台接口依赖内网/防火墙访问控制，不得把端口
+暴露到不可信网络。
 
 这里的 `UITEST6_BASE_URL` 是独立执行平台地址，不是案例归属的被测系统环境。被测系统环境由用户
 直接输入，或由父 Agent 从用户明确指定路径读取后，作为每次 `ui_test_execute` 请求的必填
 `testEnvironment` 传入；部署配置不提供默认被测环境，缺失时必须中断执行。
 
-用户 OpenCode 进程启动时，公共启动程序另外注入：
-
-```bash
-TEST_AGENT_PLATFORM_BASE_URL=http://<same-node-java>
-TEST_AGENT_UI_TEST_TOOL_TOKEN=<user-scoped-signed-token>
-```
-
-后一个 Token 由 manager 控制密钥签名，带固定 audience、用户和七天有效期，不是外部平台 Token。
-升级后必须按现有公共停止/启动流程重启需要使用 UI 子 agent 的用户进程，使新 Agent/Tool 配置和
-专用环境变量同时生效；不得直接修改 manager state 或进程环境。
+修改地址后必须重启 worker/Manager 及其托管的用户 OpenCode 进程，使新启动环境生效；不得直接
+修改 manager state 或运行中进程环境。
 Spring Boot 唯一 Flyway Bean 会在启动早期完成 migration；历史工具盒子版本的解析由 `DatabaseMigrationCompatibilityCustomizer` 在 Flyway validate 前按已执行 version/checksum 选择隔离资源，企业正式 `V20260728160800/-1966404877` 保持主 migration 原始字节，未知 checksum 失败关闭，不使用乱序迁移或 `repair`。固定 opencode node yml 配置已作废，应用不再从配置自动写入 `execution_nodes` 作为兼容 Run 路由来源。启用用户进程模型后，`BackendJavaProcessLifecycleRunner` 会在启动和拓扑变化时写入 `linux_servers`、`backend_java_processes`，并每 5 秒按 `linuxServerId` 写入 Redis Java 快照、服务器资源指标历史和 JVM 指标历史；`backendProcessId` 仅表示当前 Java 实例和拓扑连接字段，不再作为 Java 心跳或 JVM 历史的唯一键；`opencode-manager` WebSocket 注册会保留容器、manager 和连接持久拓扑，`managerHeartbeat` 每 5 秒经 WebSocket 写入 Redis manager 快照和容器资源指标历史，latest snapshot TTL 为 10 秒，历史指标保留近 48 小时。

@@ -628,7 +628,7 @@ bash deploy-backend-node.sh
 
 ```text
 backend.env：复用数据库、Redis、CORS、manager token、内部代理 key，只改本机 IP 和稳定 server ID
-docker.env：复用数据目录、programs、worker 镜像、端口池及与 backend.env 相同的 manager token
+docker.env：复用数据目录、programs、worker 镜像、端口池、独立 UI 平台地址及与 backend.env 相同的 manager token
 ```
 
 新后台 readiness 通过后，在前端 `.2` 的已解压外层目录登记一次新后台 IP，再重新运行前端入口。

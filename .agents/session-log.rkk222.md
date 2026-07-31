@@ -4317,3 +4317,26 @@
 
 - 色系外围、测试和稳定文档已同步，桌面回归及 Vitest、类型检查、生产构建均通过。
 - 未涉及 HTTP API、事件/SSE、数据库/Flyway、关系型 SQL、性能、安全、环境配置、generated SDK 或 OpenCode 源码。
+
+## 2026-08-01 - UI 执行改为通过启动配置直连独立平台
+
+### Why
+
+- 用户确认 `UITEST6_INTEGRATION_TOKEN` 不是 uitest6 原有能力，要求删除新增的长期 Token 和当前项目 Java 转发，改为 UI 子智能体的 Tool 直接调用独立 UI 平台 IP；平台地址只从启动配置注入，案例输入仍保持“被测系统环境 + 四列案例”，缺少被测环境时继续中断。
+
+### What
+
+- 公共 `ui_test_execute` Tool 改读 `UITEST6_BASE_URL`，直接调用 uitest6 的 `/api/integration/v1/ui-executions`，完成 snake_case 请求、终态轮询、结果归一和外部错误 URL/控制字符脱敏；Agent/Tool 不接收或保存平台地址，不再发送 Authorization。
+- 当前项目删除 UI Java Controller、integration client/DTO/settings、专用 Token 服务、鉴权白名单、错误码和 Spring 配置；本地启动脚本把 `UITEST6_BASE_URL` 注入 manager，企业 worker 从 `docker.env` 透传，OpenCode 子进程按既有 manager 环境继承机制获得该值。
+- 独立 uitest6 `wr` 分支删除新加的 Bearer 鉴权和 Token 配置，保留既有幂等单次执行 API、被测环境门禁和 Judge 失败收敛；同步当前仓库、公共 Agent 仓库和 uitest6 的 README/API/部署/安全/对话验收文档。uitest6 源码仍未进入当前仓库。
+
+### How
+
+- 当前项目相关 Maven package、`ApiTokenWebFilterTest`、`OpencodeProcessStartupServiceTest`、`tools/verify-dev-scripts.sh`、Shell 语法和 diff 检查通过；uitest6 6 项契约测试、Ruff、compileall 通过；公共 Tool Bun 构建及无 Authorization、snake_case 传输、错误 URL 脱敏的 mock 冒烟通过。
+- 使用 JDK 25 和瞬时 `UITEST6_BASE_URL=http://127.0.0.1:7788` 完整重启 backend、manager、OpenCode 与 frontend；readiness 为 UP，OpenCode 子进程环境只读核验得到同一 URL。真实 OpenCode 对话由 `test-execution-ui` 调用新 Tool，执行 `uiexec_0bdaac756654423b8dcfec72918a8c27`，证明请求直接到达 uitest6 且无 Java/Token；当前终态为 FAILED，因为 uitest6 默认模型网关返回 502。运行态切换既有备用模型成功，但备用配置缺少模型 API key，执行 `uiexec_af3c50eb5cf24bfd8da25b26bd0029ba` 同样失败。
+
+### Result
+
+- 集成边界已简化为 `UI 子智能体 → Tool → 独立 uitest6 IP`；当前 Java 不再承担 UI 执行协议或凭据。未配置 `UITEST6_BASE_URL` 时 Tool 在创建外部执行前中断；未提供被测系统环境时 Agent/Tool 的原门禁保持不变。
+- 本批真实对话直连已验证，但百度正向浏览器结果未在当前批次重现，阻塞点是独立 uitest6 的现有模型运行配置，不是本次直连协议。此前执行 `uiexec_abeaf1aa3243426183f588680d90eafc` 的百度 `SUCCEEDED` 证据仍有效；模型恢复或平台运维修正默认配置后需再做一次正向复测。
+- 未修改数据库/Flyway、关系型 SQL、RunEvent/SSE、前端协议、generated SDK 或 OpenCode 源码；没有修改 `.env.local/.env.test`，实际 UI 平台 IP 仍需由部署方写入对应启动 dotenv 或企业 `docker.env`。

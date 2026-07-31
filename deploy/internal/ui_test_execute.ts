@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { tool } from "@opencode-ai/plugin"
 
-const ENDPOINT_PATH = "/api/internal/agent/opencode/ui-test-executions"
+const ENDPOINT_PATH = "/api/integration/v1/ui-executions"
 const POLL_INTERVAL_MS = 2_000
 const POLL_TIMEOUT_MS = 930_000
 const HTTP_TIMEOUT_MS = 20_000
@@ -20,10 +20,17 @@ type ExecutionData = {
   reportUrl: string | null
 }
 
-type PlatformResponse = {
-  success: boolean
-  data: ExecutionData
-  traceId: string
+type UiPlatformExecution = {
+  execution_id: string
+  request_id: string
+  case_name: string
+  status: string
+  success: boolean | null
+  message: string
+  errors: string[]
+  step_count: number
+  duration_seconds: number
+  report_url: string | null
 }
 
 export default tool({
@@ -36,8 +43,7 @@ export default tool({
     expectedResult: tool.schema.string().max(20_000).optional().default("").describe("预期结果，仅用于验证"),
   },
   async execute(args, context) {
-    const baseUrl = requiredEnvironment("TEST_AGENT_PLATFORM_BASE_URL").replace(/\/+$/, "")
-    const token = requiredEnvironment("TEST_AGENT_UI_TEST_TOOL_TOKEN")
+    const baseUrl = requiredBaseUrl("UITEST6_BASE_URL")
     const requestId = buildRequestId(context.sessionID, context.messageID, args)
     context.metadata({
       title: `执行 UI 案例：${args.caseName || "未命名案例"}`,
@@ -45,22 +51,21 @@ export default tool({
     })
 
     // 该 POST 是一次 Tool 调用中唯一会创建外部自动化的请求。
-    let execution = await platformRequest<PlatformResponse>(
+    let execution = await uiPlatformRequest<UiPlatformExecution>(
       `${baseUrl}${ENDPOINT_PATH}`,
-      token,
       context.abort,
       {
         method: "POST",
         body: JSON.stringify({
-          requestId,
-          testEnvironment: args.testEnvironment,
-          caseName: args.caseName,
-          testSteps: args.testSteps,
-          testData: args.testData,
-          expectedResult: args.expectedResult,
+          request_id: requestId,
+          test_environment: args.testEnvironment,
+          case_name: args.caseName,
+          test_steps: args.testSteps,
+          test_data: args.testData,
+          expected_result: args.expectedResult,
         }),
       },
-    ).then((response) => response.data)
+    ).then((response) => normalizeExecution(response, baseUrl))
 
     context.metadata({
       title: `执行 UI 案例：${args.caseName || "未命名案例"}`,
@@ -73,12 +78,11 @@ export default tool({
         throw new Error(`UI 测试执行状态等待超时，executionId=${execution.executionId}`)
       }
       await abortableDelay(POLL_INTERVAL_MS, context.abort)
-      execution = await platformRequest<PlatformResponse>(
+      execution = await uiPlatformRequest<UiPlatformExecution>(
         `${baseUrl}${ENDPOINT_PATH}/${encodeURIComponent(execution.executionId)}`,
-        token,
         context.abort,
         { method: "GET" },
-      ).then((response) => response.data)
+      ).then((response) => normalizeExecution(response, baseUrl))
       context.metadata({
         title: `执行 UI 案例：${args.caseName || "未命名案例"}`,
         metadata: { executionId: execution.executionId, status: execution.status },
@@ -98,12 +102,20 @@ export default tool({
   },
 })
 
-function requiredEnvironment(name: string): string {
+function requiredBaseUrl(name: string): string {
   const value = process.env[name]?.trim()
   if (!value) {
     throw new Error(`UI 测试执行尚未配置：缺少 ${name}`)
   }
-  return value
+  try {
+    const parsed = new URL(value)
+    if (!["http:", "https:"].includes(parsed.protocol) || !parsed.hostname || parsed.username || parsed.password) {
+      throw new Error("invalid UI platform URL")
+    }
+  } catch {
+    throw new Error(`UI 测试执行配置无效：${name} 必须是 HTTP/HTTPS 地址`)
+  }
+  return value.replace(/\/+$/, "")
 }
 
 function buildRequestId(
@@ -125,9 +137,8 @@ function safeIdPart(value: string): string {
   return normalized || "unknown"
 }
 
-async function platformRequest<T>(
+async function uiPlatformRequest<T>(
   url: string,
-  token: string,
   parentSignal: AbortSignal,
   init: { method: "GET" | "POST"; body?: string },
 ): Promise<T> {
@@ -139,7 +150,6 @@ async function platformRequest<T>(
     const response = await fetch(url, {
       method: init.method,
       headers: {
-        Authorization: `Bearer ${token}`,
         Accept: "application/json",
         ...(init.body ? { "Content-Type": "application/json" } : {}),
       },
@@ -148,9 +158,9 @@ async function platformRequest<T>(
     })
     const text = await response.text()
     const payload = text ? JSON.parse(text) : null
-    if (!response.ok || !payload?.success || !payload?.data) {
-      const code = typeof payload?.code === "string" ? `，code=${payload.code}` : ""
-      throw new Error(`UI 测试执行桥接调用失败（HTTP ${response.status}${code}）`)
+    if (!response.ok || !payload) {
+      const detail = typeof payload?.detail === "string" ? `，${payload.detail}` : ""
+      throw new Error(`UI 平台调用失败（HTTP ${response.status}${detail}）`)
     }
     return payload as T
   } catch (error) {
@@ -158,13 +168,45 @@ async function platformRequest<T>(
       throw new Error("UI 测试执行已取消")
     }
     if (controller.signal.aborted) {
-      throw new Error("UI 测试执行桥接请求超时")
+      throw new Error("UI 平台请求超时")
     }
     throw error
   } finally {
     clearTimeout(timer)
     parentSignal.removeEventListener("abort", onAbort)
   }
+}
+
+function normalizeExecution(source: UiPlatformExecution, baseUrl: string): ExecutionData {
+  if (!source.execution_id || !source.request_id || !source.status) {
+    throw new Error("UI 平台返回的执行结果格式无效")
+  }
+  return {
+    executionId: source.execution_id,
+    requestId: source.request_id,
+    caseName: source.case_name || "",
+    status: source.status,
+    success: source.success,
+    message: sanitizeExecutionDetail(source.message),
+    errors: Array.isArray(source.errors)
+      ? source.errors.map(sanitizeExecutionDetail).filter(Boolean).slice(0, 20)
+      : [],
+    stepCount: Number(source.step_count || 0),
+    durationSeconds: Number(source.duration_seconds || 0),
+    reportUrl: source.report_url ? new URL(source.report_url, `${baseUrl}/`).toString() : null,
+  }
+}
+
+function sanitizeExecutionDetail(value: unknown): string {
+  if (typeof value !== "string") {
+    return ""
+  }
+  return value
+    .replace(/https?:\/\/[^\s"'<>]+/giu, "[URL]")
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 1_000)
 }
 
 function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {

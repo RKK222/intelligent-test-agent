@@ -209,12 +209,15 @@ fi
 
 ## 4. 配置 worker
 
-在 `.114` 创建 `/data/testagent/config/docker.env`。下面是可整文件替换的完整配置；只需把 `REPLACE_MANAGER_TOKEN` 替换成 `backend.env` 中的同一个值：
+在 `.114` 创建 `/data/testagent/config/docker.env`。下面是可整文件替换的完整配置；把
+`REPLACE_MANAGER_TOKEN` 替换成 `backend.env` 中的同一个值，并把 `REPLACE_UITEST6_HOST` 替换成
+worker 可访问的独立 UI 平台地址：
 
 ```dotenv
 TEST_AGENT_BASE_DIR=/data/testagent
 
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=REPLACE_MANAGER_TOKEN
+UITEST6_BASE_URL=http://REPLACE_UITEST6_HOST:7788
 TEST_AGENT_DATA_ROOT=/data/testagent/data
 TEST_AGENT_PROGRAM_ROOT=/data/testagent/programs
 TEST_AGENT_PYTHON_LIBS_ROOT=/data/testagent/python-libs
