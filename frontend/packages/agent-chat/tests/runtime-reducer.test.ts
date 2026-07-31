@@ -1880,6 +1880,51 @@ describe("agent-chat runtime reducer", () => {
     expect(cancelled.status).toBe("CANCELLED");
   });
 
+  it("keeps a terminal run stable when the same run receives a late busy status", () => {
+    const succeeded = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: runEvent("run.succeeded", "run_terminal_1", { status: "SUCCEEDED" })
+    });
+
+    const lateBusy = reduceAgentChatRuntime(succeeded, {
+      type: "event",
+      event: runEvent("session.status", "run_terminal_1", { status: { type: "busy" } })
+    });
+
+    expect(lateBusy.status).toBe("SUCCEEDED");
+    expect(lateBusy.runtimeStatus).toEqual({ type: "idle" });
+  });
+
+  it("keeps a terminal run stable when the same run receives a late retry status", () => {
+    const failed = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: runEvent("run.failed", "run_terminal_2", { status: "FAILED" })
+    });
+
+    const lateRetry = reduceAgentChatRuntime(failed, {
+      type: "event",
+      event: runEvent("session.status", "run_terminal_2", { status: { type: "retry", attempt: 1 } })
+    });
+
+    expect(lateRetry.status).toBe("FAILED");
+    expect(lateRetry.runtimeStatus).toMatchObject({ type: "failed" });
+  });
+
+  it("allows a different run to become busy after the previous run reached terminal", () => {
+    const succeeded = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: runEvent("run.succeeded", "run_previous", { status: "SUCCEEDED" })
+    });
+
+    const nextBusy = reduceAgentChatRuntime(succeeded, {
+      type: "event",
+      event: runEvent("session.status", "run_next", { status: { type: "busy" } })
+    });
+
+    expect(nextBusy.status).toBe("BUSY");
+    expect(nextBusy.runtimeStatus).toMatchObject({ type: "busy" });
+  });
+
   it("normalizes object session.status retry payloads and keeps the run active", () => {
     const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "event",

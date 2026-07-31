@@ -4015,3 +4015,27 @@
 
 - 已关闭目录静默不完整、二进制转码失败和组合来源重名覆盖三项风险；未新增 HTTP 文件代理、RunEvent、数据库/Flyway、关系型 SQL、环境配置、generated SDK 或 OpenCode 源码修改。
 - 仍保留后续可单独处理的风险：浏览器会在内存中汇总整个 ZIP 且使用 ZIP32、切换工作区只废弃结果而不取消在途请求、悬停下载按钮的键盘可达性不足、空目录不会写入 ZIP。
+
+## 2026-07-31 - 修复交互回复提前终态与迟到 busy 竞态
+
+### Why
+
+- 企业现场在 question 回复后出现中间 assistant `finish=stop`，平台补偿逻辑随即把 Run 写成成功；约 119ms 后同一 root session 又进入 busy 并继续生成消息，导致任务未真正结束却提前终态，前端又被迟到的 busy/retry 覆盖为运行中。
+
+### What
+
+- 后端终态补偿改为绑定最初的精确 runId，并复用既有 dispatch user 锚点、父子轮次筛选和有界分页；只有该轮最新 assistant 为 `finish=stop`、精确 Run 仍为 RUNNING，且 OpenCode `/session/status` 已不再包含 root session 时才允许成功收敛，状态缺失、格式异常、轮次冲突或 root busy/retry 均失败关闭。
+- Redis summary 路径按精确 manifest 条件接管 owner lease，以 fenced transient/terminal append 收敛终态；legacy 路径改为按 runId CAS，不再通过 Session 的“最新 active Run”误完成后续新 Run。
+- 前端 reducer 以 runId 保存的终态为不可逆事实：同一 Run 终态后的迟到 busy/retry 被忽略，不同 Run 的新 busy 仍正常生效。
+- 同步 runtime、agent-chat、前端总 README、HTTP/RunEvent 与 OpenCode 1.18.4 升级契约文档；没有修改 wire 格式。
+
+### How
+
+- TDD 先在旧实现稳定复现后端 3 项和前端 2 项竞态失败，再补充 root busy、同 Session 新 Run、同 Run 迟到 busy/retry 及新 Run busy 回归。
+- JDK 25 下执行 `mvn -pl test-agent-opencode-runtime -am test`，runtime 模块 758 项及依赖 reactor 全部通过；前端全量 106 个测试文件为 1737 passed / 1 skipped，agent-chat typecheck 和生产 build 通过；`tools/verify-ai-docs.sh`、`git diff --check` 通过。
+- 使用未修改的 `.env.test` 按 test profile 完整重启 backend、opencode-manager、frontend；health/readiness 为 `UP`，前端 3000 返回 200，登录 CORS 正常，manager 稳定连接且用户 OpenCode 进程持续 `HEALTHY`。
+
+### Result
+
+- 中间 `finish=stop` 不再越过 root busy 提前结束 Run，旧回复轮询也不会误完成同 Session 的新 Run；前端不会再把同一 Run 的已知终态翻回运行中。
+- 本次没有新增或变更 HTTP/RunEvent wire、数据库/Flyway、关系型 SQL、鉴权、安全策略、环境配置、generated SDK 或 OpenCode 只读源码；仅在低频终态补偿探测中增加一次受控 `/session/status` 查询。

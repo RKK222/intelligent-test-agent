@@ -9,10 +9,9 @@ import com.enterprise.testagent.agent.runtime.AgentCreateSessionCommand;
 import com.enterprise.testagent.agent.runtime.AgentCreateSessionResult;
 import com.enterprise.testagent.agent.runtime.AgentPromptPart;
 import com.enterprise.testagent.agent.runtime.AgentRuntime;
+import com.enterprise.testagent.agent.runtime.AgentRuntimeCommand;
 import com.enterprise.testagent.agent.runtime.AgentRuntimeRegistry;
 import com.enterprise.testagent.agent.runtime.AgentSessionMessage;
-import com.enterprise.testagent.agent.runtime.AgentSessionMessagesCommand;
-import com.enterprise.testagent.agent.runtime.AgentSessionMessagesResult;
 import com.enterprise.testagent.agent.runtime.AgentStartRunCommand;
 import com.enterprise.testagent.agent.runtime.AgentStreamEventsCommand;
 import com.enterprise.testagent.domain.agent.AgentSessionBinding;
@@ -2482,14 +2481,14 @@ public class RunApplicationService {
                 return;
             }
             AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
-            latestFinishedAssistant(
+            finishedAssistantAfterRootIdle(
                             runtime,
                             node.get(),
                             binding.get().remoteSessionId(),
-                            activeRun.traceId(),
-                            activeRun.createdAt())
+                            activeRun,
+                            activeRun.traceId())
                     .ifPresent(finalMessage -> completeActiveRunAfterInteraction(
-                            activeRun.sessionId(),
+                            activeRun,
                             binding.get().remoteSessionId(),
                             resolvedAgentId,
                             finalMessage,
@@ -2519,8 +2518,8 @@ public class RunApplicationService {
 
     /**
      * question/permission 回复成功后兜底观察远端最终 assistant 消息。
-     * 部分 OpenCode 版本不会把 ask 恢复后的 message/idle 推送到既有事件订阅；这里只在最新消息明确
-     * {@code finish=stop} 且平台 Run 仍非终态时补写成功事实，避免仅凭 HTTP 回复成功误判 Run 完成。
+     * 部分 OpenCode 版本不会把 ask 恢复后的 message/idle 推送到既有事件订阅；这里只在精确 Run 轮次的
+     * 最新 assistant 已 {@code finish=stop}、root session 当前确实 idle 且该 Run 仍非终态时补写成功事实。
      */
     public void reconcileAfterInteractionReply(SessionId sessionId, String agentId, String traceId) {
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
@@ -2541,10 +2540,11 @@ public class RunApplicationService {
         Mono.delay(TITLE_WAIT_RECONNECT_DELAY)
                 .repeat(INTERACTION_RECONCILE_ATTEMPTS - 1L)
                 .publishOn(Schedulers.boundedElastic())
-                .concatMap(ignored -> Mono.fromCallable(() -> latestFinishedAssistant(
+                .concatMap(ignored -> Mono.fromCallable(() -> finishedAssistantAfterRootIdle(
                                 runtime,
                                 node.get(),
                                 binding.get().remoteSessionId(),
+                                activeRun.orElseThrow(),
                                 traceId))
                         .onErrorReturn(Optional.empty()))
                 .filter(Optional::isPresent)
@@ -2552,7 +2552,7 @@ public class RunApplicationService {
                 .next()
                 .subscribe(
                         finalMessage -> completeActiveRunAfterInteraction(
-                                sessionId,
+                                activeRun.orElseThrow(),
                                 binding.get().remoteSessionId(),
                                 resolvedAgentId,
                                 finalMessage,
@@ -2597,115 +2597,103 @@ public class RunApplicationService {
                 storageMode);
     }
 
-    private Optional<AgentSessionMessage> latestFinishedAssistant(
-            AgentRuntime runtime,
-            ExecutionNode node,
-            String remoteSessionId,
-            String traceId) {
-        return latestFinishedAssistant(runtime, node, remoteSessionId, traceId, null);
-    }
-
     /**
-     * 只用本 Run 之后产生的最终消息收敛历史 Run，避免把上一轮 assistant 的 finish=stop 误当成本轮结果。
+     * 终态补偿必须同时满足精确轮次消息和 root idle；任一远端投影缺失或格式异常都失败关闭。
      */
-    private Optional<AgentSessionMessage> latestFinishedAssistant(
+    private Optional<AgentSessionMessage> finishedAssistantAfterRootIdle(
             AgentRuntime runtime,
             ExecutionNode node,
             String remoteSessionId,
-            String traceId,
-            Instant notBefore) {
-        AgentSessionMessagesResult result = runtime.sessionMessages(new AgentSessionMessagesCommand(
+            Run expectedRun,
+            String traceId) {
+        Optional<Run> currentRun = findCurrentReconcileRun(expectedRun);
+        if (currentRun.isEmpty()) {
+            return Optional.empty();
+        }
+        Run current = currentRun.orElseThrow();
+        RunDispatchMessageAnchorResolver.Anchor anchor = RunDispatchMessageAnchorResolver.resolve(
+                sessionMessageRepository, current.sessionId(), current.runId());
+        if (runRuntimeStore != null) {
+            Optional<RunRuntimeManifest> manifest = runRuntimeStore.findManifest(current.runId())
+                    .filter(candidate -> candidate.storageMode() == RunStorageMode.REDIS_SUMMARY);
+            if (manifest.isPresent()) {
+                RunRuntimeManifest runtimeManifest = manifest.orElseThrow();
+                if (!runtimeManifest.active()
+                        || !current.sessionId().equals(runtimeManifest.sessionId())
+                        || (runtimeManifest.rootRemoteSessionId() != null
+                                && !runtimeManifest.rootRemoteSessionId().equals(remoteSessionId))) {
+                    return Optional.empty();
+                }
+                anchor = RunDispatchMessageAnchorResolver.merge(anchor, runtimeManifest.dispatchMessageId());
+            }
+        }
+        if (anchor.conflicted()) {
+            return Optional.empty();
+        }
+        RunTurnMessageSelector.Selection selection = RunMessageRecoveryService.loadRunTurnMessages(
+                runtime,
+                node,
+                remoteSessionId,
+                traceId,
+                anchor.dispatchMessageId(),
+                current.createdAt(),
+                current.updatedAt());
+        if (!selection.resolved()) {
+            return Optional.empty();
+        }
+        AgentSessionMessage latestAssistant = null;
+        for (AgentSessionMessage message : selection.messages()) {
+            if ("assistant".equals(textValue(message.message().get("role")).orElse(null))) {
+                latestAssistant = message;
+            }
+        }
+        if (latestAssistant == null
+                || !"stop".equals(textValue(latestAssistant.message().get("finish")).orElse(null))) {
+            return Optional.empty();
+        }
+        Workspace workspace = findWorkspace(current.workspaceId());
+        var statusResult = runtime.runtime(new AgentRuntimeCommand(
                         node,
-                        remoteSessionId,
-                        1,
-                        "desc",
+                        "GET",
+                        "/session/status",
+                        workspaceRootPath(workspace),
+                        null,
+                        Map.of(),
                         null,
                         traceId))
                 .block();
-        if (result == null || result.messages().isEmpty()) {
+        if (statusResult == null || !statusResult.body().isObject()) {
             return Optional.empty();
         }
-        AgentSessionMessage latest = result.messages().getFirst();
-        if (!"assistant".equals(textValue(latest.message().get("role")).orElse(null))
-                || !"stop".equals(textValue(latest.message().get("finish")).orElse(null))) {
-            return Optional.empty();
-        }
-        if (notBefore != null) {
-            Optional<Instant> messageCreatedAt = messageCreatedAt(latest.message());
-            // OpenCode 消息时间以毫秒保存，Run.createdAt 可能带纳秒；允许 1 秒精度误差但不接受无时间的旧快照。
-            if (messageCreatedAt.isEmpty()
-                    || messageCreatedAt.get().toEpochMilli() < notBefore.minusSeconds(1).toEpochMilli()) {
-                return Optional.empty();
-            }
-        }
-        return Optional.of(latest);
-    }
-
-    private Optional<Instant> messageCreatedAt(Map<String, Object> message) {
-        Map<String, Object> time = mapValue(message.get("time")).orElse(Map.of());
-        return epochMillisValue(time.get("completed"))
-                .or(() -> epochMillisValue(time.get("created")))
-                .or(() -> epochMillisValue(message.get("completedAt")))
-                .or(() -> epochMillisValue(message.get("createdAt")))
-                .map(Instant::ofEpochMilli);
-    }
-
-    private Optional<Long> epochMillisValue(Object value) {
-        if (value instanceof Number number) {
-            return Optional.of(number.longValue());
-        }
-        if (value instanceof String text && !text.isBlank()) {
-            try {
-                return Optional.of(Long.parseLong(text));
-            } catch (NumberFormatException ignored) {
-                return Optional.empty();
-            }
-        }
-        return Optional.empty();
+        // OpenCode 1.18.4 的 status map 只保留 busy/retry；idle 会删除对应 session key。
+        return statusResult.body().has(remoteSessionId)
+                ? Optional.empty()
+                : Optional.of(latestAssistant);
     }
 
     private void completeActiveRunAfterInteraction(
-            SessionId sessionId,
+            Run expectedRun,
             String remoteSessionId,
             String agentId,
             AgentSessionMessage finalMessage,
             String traceId) {
         if (runRuntimeStore != null) {
-            Optional<RunRuntimeManifest> runtimeManifest = runRuntimeStore.findActiveBySession(sessionId)
+            Optional<RunRuntimeManifest> runtimeManifest = runRuntimeStore.findManifest(expectedRun.runId())
                     .filter(manifest -> manifest.storageMode() == RunStorageMode.REDIS_SUMMARY);
             if (runtimeManifest.isPresent()) {
-                Run current = runtimeRun(runtimeManifest.orElseThrow());
-                Instant occurredAt = Instant.now();
-                Run succeeded = current.succeed(occurredAt);
-                publishRecoveredFinalMessage(
-                        succeeded,
+                completeRedisSummaryRunAfterInteraction(
+                        expectedRun,
+                        runtimeManifest.orElseThrow(),
                         remoteSessionId,
                         finalMessage,
-                        traceId,
-                        occurredAt,
-                        RunStorageMode.REDIS_SUMMARY);
-                append(
-                        succeeded.runId(),
-                        RunEventType.RUN_SUCCEEDED,
-                        traceId,
-                        occurredAt,
-                        Map.of(
-                                "status", RunStatus.SUCCEEDED.name(),
-                                "source", "interaction_reply_reconcile",
-                                "sessionID", remoteSessionId),
-                        RunStorageMode.REDIS_SUMMARY);
-                runTerminalProjectionService.project(
-                        succeeded.runId(),
-                        RunStatus.SUCCEEDED,
-                        "INTERACTION_REPLY_RECONCILE",
-                        "COMPLETED",
-                        null,
-                        false,
                         traceId);
                 return;
             }
         }
-        runRepository.findLatestActiveBySessionId(sessionId).ifPresent(current -> {
+        runRepository.findById(expectedRun.runId())
+                .filter(current -> current.sessionId().equals(expectedRun.sessionId()))
+                .filter(current -> current.status() == RunStatus.RUNNING)
+                .ifPresent(current -> {
             Instant occurredAt = Instant.now();
             RunStorageMode storageMode = runRuntimeStore == null
                     ? RunStorageMode.LEGACY_FULL
@@ -2735,6 +2723,98 @@ public class RunApplicationService {
         });
     }
 
+    /** 精确按 runId 完成 Redis Run；有 owner 监督器时先原子接管，阻断旧事件订阅的竞态写入。 */
+    private void completeRedisSummaryRunAfterInteraction(
+            Run expectedRun,
+            RunRuntimeManifest expectedManifest,
+            String remoteSessionId,
+            AgentSessionMessage finalMessage,
+            String traceId) {
+        if (!expectedManifest.active()
+                || expectedManifest.status() != RunStatus.RUNNING
+                || !expectedManifest.sessionId().equals(expectedRun.sessionId())
+                || (expectedManifest.rootRemoteSessionId() != null
+                        && !expectedManifest.rootRemoteSessionId().equals(remoteSessionId))) {
+            return;
+        }
+        RunOwnerLeaseSupervisor.OwnershipHandle ownership = null;
+        try {
+            if (ownerLeaseSupervisor != null) {
+                ownership = runRuntimeStore
+                        .claimOwnerLeaseIfUnchanged(expectedManifest, backendInstanceIdentity.backendProcessId())
+                        .flatMap(ownerLeaseSupervisor::adopt)
+                        .orElse(null);
+                if (ownership == null) {
+                    return;
+                }
+                ownerLeaseSupervisor.requireOwned(ownership);
+            }
+            RunRuntimeManifest currentManifest = runRuntimeStore.findManifest(expectedRun.runId()).orElse(null);
+            if (currentManifest == null
+                    || !currentManifest.active()
+                    || currentManifest.status() != RunStatus.RUNNING
+                    || !currentManifest.sessionId().equals(expectedRun.sessionId())) {
+                return;
+            }
+            Instant occurredAt = Instant.now();
+            Run succeeded = runtimeRun(currentManifest).succeed(occurredAt);
+            publishRecoveredFinalMessage(
+                    succeeded,
+                    remoteSessionId,
+                    finalMessage,
+                    traceId,
+                    occurredAt,
+                    RunStorageMode.REDIS_SUMMARY,
+                    ownership);
+            append(
+                    succeeded.runId(),
+                    RunEventType.RUN_SUCCEEDED,
+                    traceId,
+                    occurredAt,
+                    RunTerminalProjectionOutboxPayload.payload(
+                            Map.of(
+                                    "status", RunStatus.SUCCEEDED.name(),
+                                    "source", "interaction_reply_reconcile",
+                                    "sessionID", remoteSessionId),
+                            "INTERACTION_REPLY_RECONCILE",
+                            "COMPLETED",
+                            null,
+                            false),
+                    RunStorageMode.REDIS_SUMMARY,
+                    ownership);
+            runTerminalProjectionService.project(
+                    succeeded.runId(),
+                    RunStatus.SUCCEEDED,
+                    "INTERACTION_REPLY_RECONCILE",
+                    "COMPLETED",
+                    null,
+                    false,
+                    traceId);
+        } finally {
+            if (ownership != null) {
+                releaseOwnershipBestEffort(ownership, expectedRun.runId(), traceId);
+            }
+        }
+    }
+
+    /** 轮询始终绑定最初的 runId，Run 已终态或被替换后不得转而完成同 Session 的新 Run。 */
+    private Optional<Run> findCurrentReconcileRun(Run expectedRun) {
+        if (runRuntimeStore != null) {
+            Optional<RunRuntimeManifest> manifest = runRuntimeStore.findManifest(expectedRun.runId())
+                    .filter(candidate -> candidate.storageMode() == RunStorageMode.REDIS_SUMMARY);
+            if (manifest.isPresent()) {
+                RunRuntimeManifest current = manifest.orElseThrow();
+                return current.status() == RunStatus.RUNNING
+                                && current.sessionId().equals(expectedRun.sessionId())
+                        ? Optional.of(runtimeRun(current))
+                        : Optional.empty();
+            }
+        }
+        return runRepository.findById(expectedRun.runId())
+                .filter(current -> current.sessionId().equals(expectedRun.sessionId()))
+                .filter(current -> current.status() == RunStatus.RUNNING);
+    }
+
     /** 新模式的 ask 恢复先读 Redis active 索引，legacy 才回查关系型 Run。 */
     private Optional<Run> findLatestActiveRunForInteraction(SessionId sessionId) {
         if (runRuntimeStore != null) {
@@ -2756,6 +2836,18 @@ public class RunApplicationService {
             String traceId,
             Instant occurredAt,
             RunStorageMode storageMode) {
+        publishRecoveredFinalMessage(
+                run, remoteSessionId, finalMessage, traceId, occurredAt, storageMode, null);
+    }
+
+    private void publishRecoveredFinalMessage(
+            Run run,
+            String remoteSessionId,
+            AgentSessionMessage finalMessage,
+            String traceId,
+            Instant occurredAt,
+            RunStorageMode storageMode,
+            RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
         LinkedHashMap<String, Object> message = new LinkedHashMap<>(finalMessage.message());
         String messageId = textValue(message.get("id")).orElse(null);
         if (messageId != null) {
@@ -2769,7 +2861,7 @@ public class RunApplicationService {
         LinkedHashMap<String, Object> messagePayload = new LinkedHashMap<>(scope);
         messagePayload.put("message", Map.copyOf(message));
         publishTransient(new RunEventDraft(
-                run.runId(), RunEventType.MESSAGE_UPDATED, traceId, occurredAt, Map.copyOf(messagePayload)), storageMode);
+                run.runId(), RunEventType.MESSAGE_UPDATED, traceId, occurredAt, Map.copyOf(messagePayload)), storageMode, ownership);
         for (Map<String, Object> originalPart : finalMessage.parts()) {
             LinkedHashMap<String, Object> part = new LinkedHashMap<>(originalPart);
             if (messageId != null) {
@@ -2787,13 +2879,20 @@ public class RunApplicationService {
                 partPayload.put("messageId", messageId);
             }
             publishTransient(new RunEventDraft(
-                    run.runId(), RunEventType.MESSAGE_PART_UPDATED, traceId, occurredAt, Map.copyOf(partPayload)), storageMode);
+                    run.runId(), RunEventType.MESSAGE_PART_UPDATED, traceId, occurredAt, Map.copyOf(partPayload)), storageMode, ownership);
         }
     }
 
     private void publishTransient(RunEventDraft draft, RunStorageMode storageMode) {
+        publishTransient(draft, storageMode, null);
+    }
+
+    private void publishTransient(
+            RunEventDraft draft,
+            RunStorageMode storageMode,
+            RunOwnerLeaseSupervisor.OwnershipHandle ownership) {
         RunEventDraft sanitized = runEventPersistencePolicy.sanitizeForPersistence(draft);
-        if (!runEventAppender.publishTransient(sanitized, storageMode)) {
+        if (!runEventAppender.publishTransient(sanitized, storageMode, ownerLeaseIfPresent(ownership))) {
             runEventLiveBus.publishTransient(sanitized);
         }
     }

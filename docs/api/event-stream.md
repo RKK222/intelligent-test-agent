@@ -401,6 +401,7 @@ scope 发现与缓存规则：
 - 若历史 live payload 同时携带 `sessionId=child`、`sessionID=root`、`isChildSession=true` 和 root `part.sessionID`，前端按 root task part 兼容处理，避免同一个 root message scope 被覆盖成 child。
 - `session.child.discovered` 和 `session.scope.updated` 到达时，前端用 payload 中的 `sessionId`、`parentSessionId`、`taskMessageId`、`taskPartId`、`taskCallId` 补全子会话索引和 `taskPartId -> sessionId` 映射。
 - `session.status` 的 `payload.status` 可能是字符串，也可能是 opencode 原生对象。当前已知对象形态包含 `type`、`attempt`、`message`、`action` 和 `next`；当 `status.type=retry` 时，前端必须把它归一为运行期 `runtimeStatus.type=retry`，用平台 `eventId` 作为本地 retry key，并在第一次收到该 retry 事件时启动固定 60 秒倒计时。时间线展示“重试中 N 秒后 - 第 X 次 / 共 3 次”、上游 `message` 和可选 `action.link`，等待期间不能继续只显示普通“思考中”。
+- Run 终态按事件自己的 `runId` 记录；同一 Run 已收到 `run.succeeded/run.failed/run.cancelled` 后，乱序到达的 `session.status.busy/retry` 必须忽略，不得回退全局运行态。不同 `runId` 的新轮 `session.status` 仍可正常进入 busy/retry。
 - 原生两阶段场景下，未绑定的 root task part 会先显示为不可点击“智能体 / 准备中”；收到带 `taskPartId` 的 child discovery 后，同一个入口转为 `Explore + title` 并可点击。
 - 主 Agent 视图过滤 `messageScopesById[messageId].isChildSession=true` 的 user/assistant 输出，只保留 root 输出和 root task tool part 卡片；task 子 Agent 卡片始终独立展示，不参与普通 `tool-group` 折叠；点击 task 卡片后切到对应 child session 视图。若后续 `message.part.removed`、`message.removed` 或 snapshot 缺少原始 task part，但 `subagentsBySessionId/subagentByTaskPartId` 仍有绑定索引，前端会在主视图合成一个导航入口，避免子 Agent 卡片短暂出现后消失。
 - 子 Agent 视图只展示 `messageScopesById[messageId].sessionId` 等于当前 child session 的完整时间线，不展示 composer 和 Todo；permission/question 仅展示 `request.sessionId` 精确等于当前 child session 的请求。主视图中的 task 子智能体卡片收到匹配的 pending permission 时，在“进行中”等状态文字前显示动态、可访问的铃铛，回复后随 reducer 清除；并行 child 不得互相串铃铛。缺少 scope 的历史消息按 root 消息兼容处理。
@@ -413,6 +414,7 @@ scope 发现与缓存规则：
 - root `session.error` 额外派生 `run.failed`；child `session.error` 只发送 `session.error`。
 - `session.next.step.ended` 不再派生 `run.succeeded`，只作为兼容未知事件保留上下文。
 - 后端处理 root 终态时必须先读取当前 Run，并把 root 终态作为最终事实保存；后到 root 终态可以纠正旧服务先落的临时失败并刷新终态快照。后台 dispatch 的响应异常（包括本地化 `PlatformException`）统一给 root 终态 300ms 到达窗口，不再依赖 `Streaming response failed` 等英文字面量；窗口内没有 root 终态时才在 Run 仍非终态的前提下收敛为一次 `run.failed`，并在 payload 中保留单行、长度受限的安全错误说明。`REDIS_SUMMARY` 在该窗口内继续持有原 owner lease 和原事件订阅；根终态沿既有生命周期释放 owner，无根终态时以原 fencing token 追加失败、完成投影再释放，owner 已转移或 manifest 已终态的旧执行者不得写失败。真正的事件流错误仍走运行态丢失与 owner 重新竞争链路。
+- question/permission 回复后的丢事件补偿不是新的终态事实源：它必须锁定回复时的精确 `runId`，按该 Run 的 USER dispatch 锚点筛选直接子 assistant，并且只有该轮最新 assistant 为 `finish=stop`、OpenCode `/session/status` 中 root session key 已消失且 Run 仍为 `RUNNING` 时，才合成既有 `run.succeeded`。busy/retry、异常状态响应、锚点冲突或旧 Run 已终态都继续等待；迟到回调不得改写同 Session 的新 Run。
 
 ## 内部模型代理 SSE
 

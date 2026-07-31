@@ -439,6 +439,12 @@ function reduceEventOnly(
   }
   if (event.type === "session.status") {
     const runtimeStatus = runtimeStatusFromSessionStatus(event);
+    const incomingType = runtimeStatus?.type ?? sessionStatusType(event);
+    if (isTerminalRunStatus(state.runStatusesByRunId[event.runId])
+      && (incomingType === "busy" || incomingType === "retry")) {
+      // 同一 Run 的终态是不可逆事实；网络乱序产生的迟到 busy/retry 不能重新点亮运行态。
+      return state;
+    }
     return {
       ...state,
       status: runtimeStatus?.type.toUpperCase() ?? text(event.payload.status) ?? state.status,
@@ -523,6 +529,16 @@ function runtimeStatusFromSessionStatus(event: RunEvent): OpencodeLikeRuntimeSta
         }
       : undefined
   };
+}
+
+function sessionStatusType(event: RunEvent): string | undefined {
+  const status = event.payload.status ?? event.payload;
+  const statusRecord = record(status);
+  return (text(statusRecord?.type) ?? text(status))?.toLowerCase();
+}
+
+function isTerminalRunStatus(status: string | undefined): boolean {
+  return status !== undefined && ["SUCCEEDED", "FAILED", "CANCELLED", "CANCELED"].includes(status.toUpperCase());
 }
 
 function retryKeyFromEvent(event: RunEvent): string {

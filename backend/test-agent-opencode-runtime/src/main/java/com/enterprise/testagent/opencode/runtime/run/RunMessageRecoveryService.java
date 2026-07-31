@@ -816,7 +816,7 @@ public class RunMessageRecoveryService {
         return List.copyOf(scopesBySessionId.values());
     }
 
-    private AgentSessionMessagesResult loadMessages(
+    private static AgentSessionMessagesResult loadMessages(
             AgentRuntime runtime,
             ExecutionNode node,
             String remoteSessionId,
@@ -841,6 +841,27 @@ public class RunMessageRecoveryService {
             String remoteSessionId,
             String traceId,
             RunTurnContext ownership) {
+        return loadRunTurnMessages(
+                runtime,
+                node,
+                remoteSessionId,
+                traceId,
+                ownership.dispatchMessageId(),
+                ownership.runCreatedAt(),
+                ownership.runUpdatedAt());
+    }
+
+    /**
+     * 共享同一套有界分页与轮次锚点选择规则，供消息恢复和丢失终态补偿共同使用。
+     */
+    static RunTurnMessageSelector.Selection loadRunTurnMessages(
+            AgentRuntime runtime,
+            ExecutionNode node,
+            String remoteSessionId,
+            String traceId,
+            String dispatchMessageId,
+            Instant runCreatedAt,
+            Instant runUpdatedAt) {
         List<AgentSessionMessage> collected = new ArrayList<>();
         Set<String> seenCursors = new HashSet<>();
         String cursor = null;
@@ -860,10 +881,10 @@ public class RunMessageRecoveryService {
             }
             RunTurnMessageSelector.Selection selection = RunTurnMessageSelector.select(
                     collected,
-                    ownership.dispatchMessageId(),
-                    ownership.runCreatedAt(),
-                    ownership.runUpdatedAt());
-            if (selection.resolved() && ownership.dispatchMessageId() != null) {
+                    dispatchMessageId,
+                    runCreatedAt,
+                    runUpdatedAt);
+            if (selection.resolved() && dispatchMessageId != null) {
                 return selection;
             }
             String nextCursor = result.nextCursor();

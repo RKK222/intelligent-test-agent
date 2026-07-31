@@ -47,6 +47,7 @@ import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionMessage;
 import com.enterprise.testagent.domain.session.SessionMessageId;
 import com.enterprise.testagent.domain.session.SessionMessageRepository;
+import com.enterprise.testagent.domain.session.SessionMessageRole;
 import com.enterprise.testagent.domain.session.SessionStatus;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.Workspace;
@@ -2967,18 +2968,19 @@ class RunApplicationServiceTest {
                         Instant.now(),
                         Map.of("requestId", "question_1")))
                 .concatWith(Flux.never());
-        facade.sessionMessagesResult = new OpencodeSessionMessagesResult(
-                List.of(new OpencodeSessionMessage(
-                        Map.of(
-                                "id", "msg_final_1234567890abcdef",
-                                "role", "assistant",
-                                "finish", "stop"),
-                        List.of(Map.of(
-                                "id", "part_final_1234567890abcdef",
-                                "type", "text",
-                                "text", "A")))),
-                null,
-                null);
+        facade.sessionMessagesResult = completedRunMessages(
+                RUNTIME_DISPATCH_MESSAGE_ID,
+                "msg_final_1234567890abcdef",
+                "part_final_1234567890abcdef",
+                "A");
+        java.util.concurrent.atomic.AtomicBoolean rootIdle = new java.util.concurrent.atomic.AtomicBoolean(false);
+        facade.runtime = ignored -> {
+            ObjectNode statuses = JsonNodeFactory.instance.objectNode();
+            if (!rootIdle.get()) {
+                statuses.set(REMOTE_SESSION_ID, JsonNodeFactory.instance.objectNode().put("type", "busy"));
+            }
+            return Mono.just(new OpencodeRuntimeResult(statuses));
+        };
         RecordingRunEventLiveBus liveBus = new RecordingRunEventLiveBus();
         RunApplicationService service = new RunApplicationService(
                 new FakeWorkspaceRepository(),
@@ -2988,7 +2990,7 @@ class RunApplicationServiceTest {
                 new FakeExecutionNodeRepository(),
                 new FakeRoutingDecisionRepository(),
                 new RunEventAppender(events),
-                runtimeRegistry(facade),
+                runtimeRegistry(facade, RUNTIME_DISPATCH_MESSAGE_ID),
                 new FakeAgentSessionBindingRepository(),
                 liveBus,
                 new RunEventPersistencePolicy());
@@ -3002,6 +3004,11 @@ class RunApplicationServiceTest {
                 "opencode",
                 "trace_1234567890abcdef");
 
+        awaitRuntimeCalls(facade, 1);
+        assertThat(service.getRun(run.runId()).status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(events.events).extracting(RunEvent::type).doesNotContain(RunEventType.RUN_SUCCEEDED);
+
+        rootIdle.set(true);
         awaitRunStatus(service, run.runId(), RunStatus.SUCCEEDED);
         awaitEventTypes(
                 events,
@@ -3015,6 +3022,99 @@ class RunApplicationServiceTest {
                 .containsExactly("message.updated", "message.part.updated");
         assertThat(liveBus.transientPayloads.get(1).payload())
                 .containsEntry("messageID", "msg_final_1234567890abcdef");
+    }
+
+    @Test
+    void activeRunLookupDoesNotConvergeWhileRootSessionIsBusy() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.streamEvents = ignored -> Flux.never();
+        facade.sessionMessagesResult = completedRunMessages(
+                RUNTIME_DISPATCH_MESSAGE_ID,
+                "msg_intermediate_1234567890",
+                "part_intermediate_1234567890",
+                "阶段结果");
+        ObjectNode statuses = JsonNodeFactory.instance.objectNode();
+        statuses.set(REMOTE_SESSION_ID, JsonNodeFactory.instance.objectNode().put("type", "busy"));
+        facade.runtime = ignored -> Mono.just(new OpencodeRuntimeResult(statuses));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade, RUNTIME_DISPATCH_MESSAGE_ID),
+                new FakeAgentSessionBindingRepository());
+        Run run = service.startRun(
+                new SessionId("ses_1234567890abcdef"),
+                "continue after intermediate stop",
+                "trace_busy_root_123456");
+
+        Optional<Run> activeRun = service.findActiveRun(run.sessionId());
+
+        assertThat(activeRun).contains(service.getRun(run.runId()));
+        assertThat(service.getRun(run.runId()).status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(events.events).extracting(RunEvent::type).doesNotContain(RunEventType.RUN_SUCCEEDED);
+        assertThat(facade.runtimeCommands).singleElement().satisfies(command -> {
+            assertThat(command.method()).isEqualTo("GET");
+            assertThat(command.path()).isEqualTo("/session/status");
+        });
+    }
+
+    @Test
+    void interactionReconcileCannotCompleteANewerRunFromTheSameSession() throws InterruptedException {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.streamEvents = ignored -> Flux.never();
+        CountDownLatch messageFetchStarted = new CountDownLatch(1);
+        CountDownLatch releaseMessageFetch = new CountDownLatch(1);
+        facade.sessionMessages = ignored -> Mono.fromCallable(() -> {
+            messageFetchStarted.countDown();
+            if (!releaseMessageFetch.await(2, TimeUnit.SECONDS)) {
+                throw new AssertionError("timed out waiting to replace the active Run");
+            }
+            return completedRunMessages(
+                    RUNTIME_DISPATCH_MESSAGE_ID,
+                    "msg_stale_reconcile_123456",
+                    "part_stale_reconcile_123456",
+                    "旧轮结果");
+        });
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade, RUNTIME_DISPATCH_MESSAGE_ID),
+                new FakeAgentSessionBindingRepository());
+        Run original = service.startRun(
+                new SessionId("ses_1234567890abcdef"),
+                "old run",
+                "trace_stale_reconcile_123");
+
+        service.reconcileAfterInteractionReply(original.sessionId(), "opencode", original.traceId());
+        assertThat(messageFetchStarted.await(2, TimeUnit.SECONDS)).isTrue();
+        runs.save(original.applyTerminalFact(RunStatus.CANCELLED, Instant.now()));
+        Run newer = new Run(
+                new RunId("run_newer_1234567890"),
+                original.sessionId(),
+                original.workspaceId(),
+                RunStatus.RUNNING,
+                Instant.now(),
+                Instant.now(),
+                "trace_newer_1234567890").withRuntimeSelection("build", null);
+        runs.save(newer);
+        releaseMessageFetch.countDown();
+
+        awaitRuntimeCalls(facade, 1);
+        assertThat(service.getRun(newer.runId()).status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(events.events).extracting(RunEvent::type).doesNotContain(RunEventType.RUN_SUCCEEDED);
     }
 
     @Test
@@ -3074,24 +3174,17 @@ class RunApplicationServiceTest {
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
         FakeAgentSessionBindingRepository bindings = new FakeAgentSessionBindingRepository();
         facade.streamEvents = ignored -> Flux.never();
-        facade.sessionMessagesResult = new OpencodeSessionMessagesResult(
-                List.of(new OpencodeSessionMessage(
-                        Map.of(
-                                "id", "msg_final_lookup_1234567890",
-                                "role", "assistant",
-                                "finish", "stop",
-                                "time", Map.of("created", NOW.plusSeconds(1).toEpochMilli(), "completed", NOW.plusSeconds(2).toEpochMilli())),
-                        List.of(Map.of(
-                                "id", "part_final_lookup_1234567890",
-                                "type", "text",
-                                "text", "已完成")))),
-                null,
-                null);
+        facade.sessionMessagesResult = completedRunMessages(
+                RUNTIME_DISPATCH_MESSAGE_ID,
+                "msg_final_lookup_1234567890",
+                "part_final_lookup_1234567890",
+                "已完成");
+        FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
         RunApplicationService service = new RunApplicationService(
                 new FakeWorkspaceRepository(),
                 new FakeSessionRepository(session()),
                 runs,
-                new FakeSessionMessageRepository(),
+                messages,
                 new FakeExecutionNodeRepository(),
                 new FakeRoutingDecisionRepository(),
                 new RunEventAppender(events),
@@ -3106,6 +3199,7 @@ class RunApplicationServiceTest {
                 NOW,
                 "trace_1234567890abcdef").withRuntimeSelection("build", null);
         runs.save(run);
+        messages.save(runUserMessage(run, RUNTIME_DISPATCH_MESSAGE_ID));
         bindings.save(new AgentSessionBinding(
                 run.sessionId(),
                 "opencode",
@@ -3117,7 +3211,7 @@ class RunApplicationServiceTest {
 
         Optional<Run> activeRun = service.findActiveRun(run.sessionId());
         assertThat(facade.sessionMessagesCommands).extracting(OpencodeSessionMessagesCommand::order)
-                .contains("desc", "asc");
+                .contains("asc");
         assertThat(runs.saved).extracting(Run::status).contains(RunStatus.SUCCEEDED);
         assertThat(activeRun).isEmpty();
         assertThat(service.getRun(run.runId()).status()).isEqualTo(RunStatus.SUCCEEDED);
@@ -3548,6 +3642,64 @@ class RunApplicationServiceTest {
             sleepBriefly();
         }
         assertThat(service.getRun(runId).status()).isEqualTo(expected);
+    }
+
+    private static void awaitRuntimeCalls(FakeOpencodeFacade facade, int expected) {
+        long deadline = System.nanoTime() + 2_000_000_000L;
+        while (System.nanoTime() < deadline) {
+            if (facade.runtimeCommands.size() >= expected) {
+                return;
+            }
+            sleepBriefly();
+        }
+        assertThat(facade.runtimeCommands).hasSizeGreaterThanOrEqualTo(expected);
+    }
+
+    private static OpencodeSessionMessagesResult completedRunMessages(
+            String dispatchMessageId,
+            String assistantMessageId,
+            String partId,
+            String text) {
+        return new OpencodeSessionMessagesResult(
+                List.of(
+                        new OpencodeSessionMessage(
+                                Map.of(
+                                        "id", dispatchMessageId,
+                                        "role", "user",
+                                        "time", Map.of("created", NOW.toEpochMilli())),
+                                List.of()),
+                        new OpencodeSessionMessage(
+                                Map.of(
+                                        "id", assistantMessageId,
+                                        "parentID", dispatchMessageId,
+                                        "role", "assistant",
+                                        "finish", "stop",
+                                        "time", Map.of(
+                                                "created", NOW.plusSeconds(1).toEpochMilli(),
+                                                "completed", NOW.plusSeconds(2).toEpochMilli())),
+                                List.of(Map.of(
+                                        "id", partId,
+                                        "type", "text",
+                                        "text", text)))),
+                null,
+                null);
+    }
+
+    private static SessionMessage runUserMessage(Run run, String remoteMessageId) {
+        return new SessionMessage(
+                new SessionMessageId("msg_platform_" + run.runId().value()),
+                run.sessionId(),
+                SessionMessageRole.USER,
+                "prompt",
+                run.createdAt(),
+                run.traceId(),
+                run.runId(),
+                "opencode",
+                remoteMessageId,
+                null,
+                TokenUsage.empty(),
+                null,
+                run.updatedAt());
     }
 
     private static void awaitEventTypes(FakeRunEventRepository events, RunEventType... expected) {
@@ -4282,6 +4434,7 @@ class RunApplicationServiceTest {
 
         @Override
         public Mono<OpencodeRuntimeResult> runtime(OpencodeRuntimeCommand command) {
+            runtimeCommands.add(command);
             return runtime.apply(command);
         }
 

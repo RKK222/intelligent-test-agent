@@ -3132,7 +3132,7 @@ permission 列表中的 `PermissionRequest` 保留 `pattern/title/description` �
 
 `REDIS_SUMMARY` 的 `run.created` 事件还会携带 `assistantSummaryMessageId`，格式为稳定的 `msg_` + 32 位十六进制；终态 ASSISTANT 摘要复用同一 ID。反馈目标已经统一为 `runId`，该消息 ID 只保留摘要定位和旧消息反馈接口兼容用途。
 
-`GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/active-run` 返回最近的 `PENDING`、`RUNNING` 或 `CANCELLING` Run，供 runtime-state 流不可用时做一次恢复 fallback；历史会话切换后若摘要标记为运行中，前端也会在正文展示后后台调用一次该接口校准终态，不阻塞历史首屏。查询 legacy active Run 时会读取远端最新 assistant 消息，只有本 Run 创建之后且明确 `finish=stop` 才补写 `RUN_SUCCEEDED`。用户已有 Redis 运行态 marker 时只读取 `active:session` 索引并回读 manifest 校验用户/Session/状态，即使索引为空也不回查 PostgreSQL；legacy 用户继续使用最近非终态 Run 查询。没有非终态 Run 时响应仍为 `success=true` 且 `data=null`。
+`GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/active-run` 返回最近的 `PENDING`、`RUNNING` 或 `CANCELLING` Run，供 runtime-state 流不可用时做一次恢复 fallback；历史会话切换后若摘要标记为运行中，前端也会在正文展示后后台调用一次该接口校准终态，不阻塞历史首屏。查询 legacy active Run 时，终态补偿会按该 Run 的平台 USER dispatch 锚点分页筛选直接子 assistant；只有最新 assistant 明确 `finish=stop`、OpenCode `/session/status` 中 root session key 已消失且精确 Run 仍为 `RUNNING` 才补写 `RUN_SUCCEEDED`。busy/retry、状态响应异常、锚点冲突或 Run 已终态时保守返回原 active 状态，异步交互补偿也不得转而结束同 Session 的新 Run。用户已有 Redis 运行态 marker 时只读取 `active:session` 索引并回读 manifest 校验用户/Session/状态，即使索引为空也不回查 PostgreSQL；legacy 用户继续使用最近非终态 Run 查询。没有非终态 Run 时响应仍为 `success=true` 且 `data=null`。
 
 Java 重启后恢复调度器会立即扫描当前服务器的 `LEGACY_FULL` active Run，并低频重试远端终态补偿；OpenCode 子进程尚未恢复或远端不可达时只保守保留 `RUNNING`，不会把未确认的慢模型误判为成功，也不会重新发送 prompt。进程恢复后，后台扫描或历史 `active-run` 查询会再次收敛已完成 Run。
 

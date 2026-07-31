@@ -43,6 +43,7 @@
 - 1.18.4 上游只在 `.gitignore` 不存在时一次性写入运行文件规则，已有但不完整的文件不会补齐。企业交付改为复用 `deploy/internal/opencode-runtime.gitignore`：节点升级先修复已经初始化的标准公共配置目录，新节点或尚未初始化的目录由官方启动器在创建依赖链接前幂等补齐；已有自定义规则保留，运行文件不会进入公共仓库脏状态，Agent/Skill/Tool 和用户配置仍正常参与 Git 检测。
 - `includeUsage=false` 仍须保留。1.18.4 对 openai-compatible provider 仍会在未显式关闭时设置 `includeUsage=true`，企业内部不支持该字段的接口会受影响。
 - `FilePartInput.source` 在 1.18.4 中仍为可选，但一旦提供，`FileSource` 必须完整包含 `text/type/path` 且不能混入平台字段。平台路径型原生附件因此只发送已校验的 `file://`、mime 和 filename，不发送 source；只有内联正文生成完整 FileSource。非原生工作区附件的 `contextType/deliveryMode` 仅用于平台分流和历史展示，转换为 OpenCode text part 时移除。
+- 1.18.4 的 `GET /session/status` 返回当前 busy/retry session map；session 进入 idle 时上游发布 idle 事件并从 map 删除该 key。平台的交互回复终态补偿据此只把“root key 不存在”视为 idle，空值、非对象、请求异常或 root key 仍存在均失败关闭，不能仅凭某条 assistant `finish=stop` 判定整轮结束。
 - 本次不修改平台 HTTP API、RunEvent SSE wire shape、数据库结构、Flyway、鉴权和密钥配置。
 
 ## 交付、升级与回滚
