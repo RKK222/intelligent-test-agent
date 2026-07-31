@@ -4062,3 +4062,25 @@
 
 - 固定名外层 ZIP/SHA 已同步到 `deploy/internal/dist/0731/`；本包要求 `.4`、`.114` 两台 Java 全部升级后再升级 `.2` 前端，不能只升级其中一台后台，因为新增文件 WebSocket RPC 需要每个目标 Java 都支持。
 - worker、manager、toolbox、Python 和公共 Agent 无需随本包重新部署或重启；未修改数据库结构、Flyway SQL、关系型 SQL、环境配置、generated SDK 或 OpenCode 源码。
+
+## 2026-07-31 - 纠正应用代码库与测试工作空间切换入口
+
+### Why
+
+- 上一版误把 `SUPER_ADMIN` 服务器工作空间能力收进应用工作空间菜单，并将其标成“切换测试工作区”；真正需要合并的是“应用代码库”和当前应用的“测试工作空间”，服务器读取与 Terminal 必须保持独立。
+
+### What
+
+- `WorkbenchFooter` 的统一按钮菜单改为展示“应用代码库”和“测试工作空间”：托管模式继续展示测试工作空间/版本，并从同一菜单打开应用代码库；源码快照模式显示代码库当前态并可切回测试工作空间。
+- 恢复独立的 `ServerCog`“切换服务器工作空间”按钮，继续只由 `showServerWorkspaceSwitch` 控制；Terminal 入口及实现未修改。源码 E2E 的 19 个旧独立入口点击统一改走新菜单。
+- 同步 agent-web README 与包级说明，明确应用级切换、服务器工作空间和 Terminal 的边界。
+
+### How
+
+- `WorkbenchFooter`/源码能力 Vitest 2 文件 26 项通过，agent-web typecheck 与 development build 通过；应用源码 Chromium 相关 16 个场景全部通过，覆盖源码打开、返回测试工作空间、并发 authority、重连和 Diff 保存。
+- 使用未修改的 `.env.test`、JDK 25、test profile 完整重启 backend、opencode-manager、frontend；health/readiness 为 `UP`，前端 3000 与登录 CORS 正常，manager 最终持续 `HEALTHY`。
+- 真实 Python Playwright 登录后确认菜单内容为“应用代码库 / 测试工作空间 / wrtest / 本地-测试”；应用代码库弹窗可打开，独立服务器按钮可打开“选择服务器工作空间”，服务器工具和“运行与终端”入口仍可见。
+
+### Result
+
+- 应用代码库与应用测试工作空间现在共用一个按钮；超级管理员服务器工作空间和 Terminal 保持原入口、权限与行为。本次未变更 HTTP/WebSocket/RunEvent、后端、数据库/Flyway、关系型 SQL、安全策略、环境配置、generated SDK 或 OpenCode 源码。

@@ -151,9 +151,11 @@ const useCascadeMenu = computed(() =>
   Boolean(props.loadingTemplates))
 );
 
-// 应用工作区和测试工作区共用同一个入口；源码快照模式下也保留同一入口，
-// 让“返回应用工作区”和“切换测试工作区”不再分散成两个按钮。
-const useWorkspaceSwitchMenu = computed(() => useCascadeMenu.value || props.showServerWorkspaceSwitch === true);
+// 应用代码库与应用测试工作空间共用同一个入口；服务器工作空间属于超级管理员能力，
+// 必须继续使用独立按钮，不能混入应用级工作空间菜单。
+const useWorkspaceSwitchMenu = computed(() =>
+  useCascadeMenu.value || props.showAppSource === true || props.workspaceKind === "APP_SOURCE"
+);
 
 // ===== 两级菜单弹出状态 =====
 // menuOpen: 一级菜单（工作空间列表）开关；hoveredTemplateId: 当前悬停的模板，控制二级菜单（版本）显隐。
@@ -480,9 +482,9 @@ function returnManagedWorkspaceFromMenu() {
   emit("return-managed-workspace");
 }
 
-function openServerWorkspacePickerFromMenu() {
+function openAppSourceFromMenu() {
   closeMenu();
-  emit("open-server-workspace-picker");
+  emit("open-app-source");
 }
 </script>
 
@@ -514,6 +516,7 @@ function openServerWorkspacePickerFromMenu() {
           type="button"
           class="ta-workbench-footer-branch"
           data-onboarding="workspace-selector"
+          aria-label="切换应用代码库或测试工作空间"
           :title="triggerTitle"
           :aria-expanded="menuOpen"
           aria-haspopup="menu"
@@ -535,10 +538,24 @@ function openServerWorkspacePickerFromMenu() {
             :style="{ top: `${cascadeMenuPos.top}px`, left: `${cascadeMenuPos.left}px` }"
             @click.stop
           >
-            <div v-if="useCascadeMenu" class="ta-workbench-cascade-header">
+            <div class="ta-workbench-cascade-header">
               <span>应用：{{ appName || "—" }}</span>
               <span v-if="loadingTemplates" class="ta-workbench-cascade-loading">加载中…</span>
             </div>
+            <div v-if="showAppSource" class="ta-workbench-cascade-mode-entry">
+              <button
+                type="button"
+                :class="['ta-workbench-cascade-mode-button', workspaceKind === 'APP_SOURCE' && 'is-selected']"
+                aria-label="应用代码库"
+                title="打开应用代码库"
+                @click="openAppSourceFromMenu"
+              >
+                <CodeXml class="ta-workbench-footer-icon" />
+                <span>应用代码库</span>
+                <span v-if="workspaceKind === 'APP_SOURCE'" class="ta-workbench-cascade-mode-current">当前</span>
+              </button>
+            </div>
+            <div v-if="useCascadeMenu" class="ta-workbench-cascade-section-title">测试工作空间</div>
             <ul v-if="useCascadeMenu" class="ta-workbench-cascade-list" role="none">
               <li
                 v-for="template in templates"
@@ -559,29 +576,16 @@ function openServerWorkspacePickerFromMenu() {
                 <span class="ta-workbench-cascade-item-arrow" aria-hidden="true">›</span>
               </li>
             </ul>
-            <div v-if="workspaceKind === 'APP_SOURCE'" class="ta-workbench-cascade-server-entry">
+            <div v-if="workspaceKind === 'APP_SOURCE'" class="ta-workbench-cascade-mode-entry">
               <button
                 type="button"
-                class="ta-workbench-cascade-server-button"
-                aria-label="返回应用工作区"
-                title="返回应用工作区"
+                class="ta-workbench-cascade-mode-button"
+                aria-label="测试工作空间"
+                title="返回应用的测试工作空间"
                 @click="returnManagedWorkspaceFromMenu"
               >
                 <ArrowLeftRight class="ta-workbench-footer-icon" />
-                <span>返回应用工作区</span>
-              </button>
-            </div>
-            <div v-if="showServerWorkspaceSwitch" class="ta-workbench-cascade-server-entry">
-              <button
-                type="button"
-                class="ta-workbench-cascade-server-button"
-                :disabled="serverWorkspaceSwitchDisabled"
-                aria-label="切换测试工作区"
-                title="切换测试工作区"
-                @click="openServerWorkspacePickerFromMenu"
-              >
-                <ServerCog class="ta-workbench-footer-icon" />
-                <span>切换测试工作区</span>
+                <span>测试工作空间</span>
               </button>
             </div>
           </div>
@@ -649,16 +653,6 @@ function openServerWorkspacePickerFromMenu() {
         </Teleport>
       </div>
       <button
-        v-if="!showSave && showAppSource"
-        type="button"
-        class="ta-workbench-app-source"
-        title="打开应用源码"
-        aria-label="打开应用源码"
-        @click="emit('open-app-source')"
-      >
-        <CodeXml class="ta-workbench-footer-icon" />
-      </button>
-      <button
         v-if="!showSave && showReferenceConfiguration"
         type="button"
         class="ta-workbench-reference-configuration"
@@ -667,6 +661,17 @@ function openServerWorkspacePickerFromMenu() {
         @click="emit('open-reference-configuration')"
       >
         <LibraryBig class="ta-workbench-footer-icon" />
+      </button>
+      <button
+        v-if="!showSave && showServerWorkspaceSwitch"
+        type="button"
+        class="ta-workbench-server-switch"
+        :disabled="serverWorkspaceSwitchDisabled"
+        title="切换服务器工作空间"
+        aria-label="切换服务器工作空间"
+        @click="emit('open-server-workspace-picker')"
+      >
+        <ServerCog class="ta-workbench-footer-icon" />
       </button>
       <template v-else-if="showSave">
         <span class="ta-workbench-footer-path">
@@ -903,8 +908,8 @@ function openServerWorkspacePickerFromMenu() {
   color: #555;
 }
 
-.ta-workbench-reference-configuration,
-.ta-workbench-app-source {
+.ta-workbench-server-switch,
+.ta-workbench-reference-configuration {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -918,8 +923,8 @@ function openServerWorkspacePickerFromMenu() {
   transition: background-color 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
 }
 
-.ta-workbench-reference-configuration:hover:not(:disabled),
-.ta-workbench-app-source:hover:not(:disabled) {
+.ta-workbench-server-switch:hover:not(:disabled),
+.ta-workbench-reference-configuration:hover:not(:disabled) {
   background: #f5f5f5;
   border-color: #b5b5b5;
 }
@@ -1090,13 +1095,20 @@ function openServerWorkspacePickerFromMenu() {
   /* 不再设 max-height，让子菜单自然延展；外层 panel 兜底 */
 }
 
-.ta-workbench-cascade-server-entry {
+.ta-workbench-cascade-section-title {
+  padding: 8px 8px 4px;
+  color: #71717a;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ta-workbench-cascade-mode-entry {
   margin-top: 6px;
   padding-top: 4px;
   border-top: 1px solid #f0f0f0;
 }
 
-.ta-workbench-cascade-server-button {
+.ta-workbench-cascade-mode-button {
   display: flex;
   width: 100%;
   align-items: center;
@@ -1113,14 +1125,16 @@ function openServerWorkspacePickerFromMenu() {
   transition: background-color 0.1s ease, color 0.1s ease;
 }
 
-.ta-workbench-cascade-server-button:hover:not(:disabled) {
+.ta-workbench-cascade-mode-button:hover,
+.ta-workbench-cascade-mode-button.is-selected {
   background: #f4f4f5;
   color: #1d4ed8;
 }
 
-.ta-workbench-cascade-server-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
+.ta-workbench-cascade-mode-current {
+  margin-left: auto;
+  color: #2563eb;
+  font-size: 11px;
 }
 
 .ta-workbench-cascade-item {

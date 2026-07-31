@@ -1742,7 +1742,7 @@ test("application source snapshot opens a logical workspace and enforces source 
 
   await gotoWorkbench(page, { selectConversation: false });
   const fileExplorer = page.locator(".figma-file-explorer");
-  await fileExplorer.getByRole("button", { name: "打开应用源码" }).click();
+  await openAppSourceFromWorkspaceSwitch(page);
   const picker = page.getByRole("dialog", { name: "应用源码" });
   await expect(picker).toContainText("团队可用");
   await expect(picker).toContainText("李四 · UCID-1002");
@@ -1753,7 +1753,12 @@ test("application source snapshot opens a logical workspace and enforces source 
   await expect(fileExplorer.getByText("无 Git", { exact: true })).toBeVisible();
   await expect(fileExplorer.getByRole("button", { name: "变更" })).toHaveCount(0);
   await expect(fileExplorer.getByText("Agents", { exact: true })).toHaveCount(0);
-  await expect(page.locator(".ta-workbench-cascade")).toHaveCount(0);
+  const sourceWorkspaceSwitch = fileExplorer.getByRole("button", { name: "切换应用代码库或测试工作空间" });
+  await expect(sourceWorkspaceSwitch).toBeVisible();
+  await sourceWorkspaceSwitch.click();
+  await expect(page.getByRole("menu").getByRole("button", { name: "应用代码库", exact: true })).toBeVisible();
+  await expect(page.getByRole("menu").getByRole("button", { name: "测试工作空间", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
   await page.getByTestId("robot-visibility-toggle").click();
   await expect(page.getByTestId("figma-robot")).toBeVisible();
   await page.getByTestId("figma-robot").click();
@@ -1793,7 +1798,7 @@ test("application source snapshot opens a logical workspace and enforces source 
   await expect(fileExplorer.getByText("源码快照", { exact: true })).toHaveCount(0);
   expect(clearedRecentAppSource).toEqual(["DELETE"]);
 
-  await fileExplorer.getByRole("button", { name: "打开应用源码" }).click();
+  await openAppSourceFromWorkspaceSwitch(page);
   await page.getByRole("button", { name: "下载版本库" }).click();
   const dialog = page.getByRole("dialog", { name: "下载应用源码" });
   await expect(dialog).toContainText("尚未下载库");
@@ -1859,7 +1864,7 @@ test("a drifting lazy child invalidates every concurrent child until a real root
   });
 
   await gotoWorkbench(page, { selectConversation: false });
-  await page.locator(".figma-file-explorer").getByRole("button", { name: "打开应用源码" }).click();
+  await openAppSourceFromWorkspaceSwitch(page);
   await page.getByRole("button", { name: "下载版本库" }).click();
   const dialog = page.getByRole("dialog", { name: "下载应用源码" });
   await dialog.getByRole("button", { name: "选择应用代码库版本库" }).click();
@@ -1995,7 +2000,7 @@ test("source progress reconnects with fresh snapshots and tickets without cancel
 
   await gotoWorkbench(page, { selectConversation: false });
   const fileExplorer = page.locator(".figma-file-explorer");
-  await fileExplorer.getByRole("button", { name: "打开应用源码" }).click();
+  await openAppSourceFromWorkspaceSwitch(page);
   await expect(page.getByRole("dialog", { name: "应用源码" })).toContainText("应用代码库");
   await page.getByRole("button", { name: "下载版本库" }).click();
   let dialog = page.getByRole("dialog", { name: "下载应用源码" });
@@ -2006,7 +2011,7 @@ test("source progress reconnects with fresh snapshots and tickets without cancel
 
   await dialog.getByRole("button", { name: "关闭源码弹窗" }).click();
   expect(appSourceRequests.some((request) => request.includes("cancel"))).toBe(false);
-  await fileExplorer.getByRole("button", { name: "打开应用源码" }).click();
+  await openAppSourceFromWorkspaceSwitch(page);
   await page.getByRole("button", { name: "下载版本库" }).click();
   dialog = page.getByRole("dialog", { name: "下载应用源码" });
   await dialog.getByRole("button", { name: "选择应用代码库版本库" }).click();
@@ -2088,7 +2093,7 @@ test("a stale socket epoch cannot fail or complete the replacement progress conn
   });
 
   await gotoWorkbench(page, { selectConversation: false });
-  await page.locator(".figma-file-explorer").getByRole("button", { name: "打开应用源码" }).click();
+  await openAppSourceFromWorkspaceSwitch(page);
   await page.getByRole("button", { name: "下载版本库" }).click();
   const dialog = page.getByRole("dialog", { name: "下载应用源码" });
   await dialog.getByRole("button", { name: "选择应用代码库版本库" }).click();
@@ -2181,7 +2186,7 @@ test("a failed socket epoch is invalid throughout reconnect backoff and replacem
   });
 
   await gotoWorkbench(page, { selectConversation: false });
-  await page.locator(".figma-file-explorer").getByRole("button", { name: "打开应用源码" }).click();
+  await openAppSourceFromWorkspaceSwitch(page);
   await page.getByRole("button", { name: "下载版本库" }).click();
   const dialog = page.getByRole("dialog", { name: "下载应用源码" });
   await dialog.getByRole("button", { name: "选择应用代码库版本库" }).click();
@@ -2227,7 +2232,7 @@ test("progress reconnect keeps exponential backoff across sockets that open with
   });
 
   await gotoWorkbench(page, { selectConversation: false });
-  await page.locator(".figma-file-explorer").getByRole("button", { name: "打开应用源码" }).click();
+  await openAppSourceFromWorkspaceSwitch(page);
   await page.getByRole("button", { name: "下载版本库" }).click();
   const dialog = page.getByRole("dialog", { name: "下载应用源码" });
   await dialog.getByRole("button", { name: "选择应用代码库版本库" }).click();
@@ -2256,7 +2261,7 @@ test("closing the source dialog releases a connecting progress socket without re
   });
 
   await gotoWorkbench(page, { selectConversation: false });
-  await page.locator(".figma-file-explorer").getByRole("button", { name: "打开应用源码" }).click();
+  await openAppSourceFromWorkspaceSwitch(page);
   await page.getByRole("button", { name: "下载版本库" }).click();
   const dialog = page.getByRole("dialog", { name: "下载应用源码" });
   await dialog.getByRole("button", { name: "选择应用代码库版本库" }).click();
@@ -2318,14 +2323,14 @@ test("a stale terminal apply and its repository refresh cannot invalidate a newe
 
   await gotoWorkbench(page, { selectConversation: false });
   const fileExplorer = page.locator(".figma-file-explorer");
-  await fileExplorer.getByRole("button", { name: "打开应用源码" }).click();
+  await openAppSourceFromWorkspaceSwitch(page);
   await page.getByRole("button", { name: "下载版本库" }).click();
   let dialog = page.getByRole("dialog", { name: "下载应用源码" });
   await dialog.getByRole("button", { name: "选择源码 A版本库" }).click();
   await expect.poll(() => appSourceRequests).toContain("open:app_gcms:repo-a:2");
   await dialog.getByRole("button", { name: "关闭源码弹窗" }).click();
 
-  await fileExplorer.getByRole("button", { name: "打开应用源码" }).click();
+  await openAppSourceFromWorkspaceSwitch(page);
   await page.getByRole("button", { name: "打开源码 B源码" }).click();
   await expect.poll(() => workspaceRequests).toContain("wrk_source_b5");
   releaseTerminalOpenA();
@@ -2391,7 +2396,7 @@ test("a transient recent source validation failure keeps the current source work
 
   await gotoWorkbench(page, { selectConversation: false });
   const fileExplorer = page.locator(".figma-file-explorer");
-  await fileExplorer.getByRole("button", { name: "打开应用源码" }).click();
+  await openAppSourceFromWorkspaceSwitch(page);
   await page.getByRole("button", { name: "打开应用代码库源码" }).click();
   await expect(fileExplorer.getByText("源码快照", { exact: true })).toBeVisible();
 
@@ -2425,7 +2430,7 @@ test("a null recent source on focus invalidates the current source capability an
 
   await gotoWorkbench(page, { selectConversation: false });
   const fileExplorer = page.locator(".figma-file-explorer");
-  await fileExplorer.getByRole("button", { name: "打开应用源码" }).click();
+  await openAppSourceFromWorkspaceSwitch(page);
   await page.getByRole("button", { name: "打开应用代码库源码" }).click();
   await expect(fileExplorer.getByText("源码快照", { exact: true })).toBeVisible();
 
@@ -2495,13 +2500,13 @@ test("late source repository and workspace responses cannot overwrite a newer ap
 
   await gotoWorkbench(page, { selectConversation: false });
   const fileExplorer = page.locator(".figma-file-explorer");
-  await fileExplorer.getByRole("button", { name: "打开应用源码" }).click();
+  await openAppSourceFromWorkspaceSwitch(page);
   await expect.poll(() => appSourceRequests).toContain("list:app_gcms");
   await page.getByRole("button", { name: "关闭源码列表" }).click();
   await page.getByRole("button", { name: "F-GCMS" }).click();
   await page.getByRole("option", { name: /F-COSS/ }).click();
   await expect(page.getByRole("button", { name: "F-COSS" })).toBeVisible();
-  await fileExplorer.getByRole("button", { name: "打开应用源码" }).click();
+  await openAppSourceFromWorkspaceSwitch(page);
   await expect(page.getByRole("dialog", { name: "应用源码" })).toContainText("当前仓库 B");
   releaseListA();
   await page.waitForTimeout(100);
@@ -2523,7 +2528,7 @@ test("late source repository and workspace responses cannot overwrite a newer ap
 
   await page.getByRole("button", { name: "F-COSS" }).click();
   await page.getByRole("option", { name: /F-GCMS/ }).click();
-  await fileExplorer.getByRole("button", { name: "打开应用源码" }).click();
+  await openAppSourceFromWorkspaceSwitch(page);
   await page.getByRole("button", { name: "打开迟到仓库 A源码" }).click();
   await expect.poll(() => workspaceRequests).toContain("wrk_source_race_a");
   await page.getByRole("button", { name: "关闭源码列表" }).click();
@@ -2564,7 +2569,7 @@ test("a pending managed version cannot reclaim the workspace after a newer sourc
   await page.locator(".ta-workbench-footer-branch").click();
   await page.getByRole("menuitem", { name: /F-GCMS/ }).hover();
   await page.getByRole("menuitem", { name: /2026年7月/ }).click();
-  await page.locator(".figma-file-explorer").getByRole("button", { name: "打开应用源码" }).click();
+  await openAppSourceFromWorkspaceSwitch(page);
   await page.getByRole("button", { name: "打开源码 B源码" }).click();
   await expect(page.locator(".figma-file-explorer").getByText("源码快照", { exact: true })).toBeVisible();
   await expect.poll(() => fileRequests.filter((request) => request.path === "").at(-1)?.workspaceId)
@@ -2605,7 +2610,7 @@ test("starting a managed version immediately invalidates a source open that has 
   });
 
   await gotoWorkbench(page, { selectConversation: false });
-  await page.locator(".figma-file-explorer").getByRole("button", { name: "打开应用源码" }).click();
+  await openAppSourceFromWorkspaceSwitch(page);
   await page.getByRole("button", { name: "打开源码 A源码" }).click();
   await callAgentWorkbenchHandler(page, "handleSelectVersion", [{
       template: {
@@ -2712,7 +2717,7 @@ test("source Run Diff save dispatch blocks Agent writers and writes an ordinary 
   });
 
   await gotoWorkbench(page, { selectConversation: false });
-  await page.locator(".figma-file-explorer").getByRole("button", { name: "打开应用源码" }).click();
+  await openAppSourceFromWorkspaceSwitch(page);
   await page.getByRole("button", { name: "打开Diff 保存源码库源码" }).click();
   await expect(page.locator(".figma-file-explorer").getByText("源码快照", { exact: true })).toBeVisible();
 
@@ -8857,6 +8862,13 @@ async function gotoWorkbench(page: Page, options: { selectConversation?: boolean
   if (buttonVisible && await newConversationButton.isEnabled()) {
     await newConversationButton.click();
   }
+}
+
+/** 通过统一工作空间入口打开应用代码库，锁定底部按钮不再拆回独立源码入口。 */
+async function openAppSourceFromWorkspaceSwitch(page: Page) {
+  const fileExplorer = page.locator(".figma-file-explorer");
+  await fileExplorer.getByRole("button", { name: "切换应用代码库或测试工作空间" }).click();
+  await page.getByRole("menu").getByRole("button", { name: "应用代码库", exact: true }).click();
 }
 
 function json(data: unknown) {
