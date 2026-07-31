@@ -542,7 +542,7 @@ class OpencodeProcessStartupServiceTest {
     }
 
     @Test
-    void startAndVerifyInjectsScopedWorkspaceGitToolCredentials() {
+    void startAndVerifyInjectsScopedPublicToolCredentials() {
         FakeRepository repository = new FakeRepository();
         RecordingGateway gateway = new RecordingGateway();
         InternalModelProxyRuntimeSettings proxySettings = Mockito.mock(InternalModelProxyRuntimeSettings.class);
@@ -552,6 +552,8 @@ class OpencodeProcessStartupServiceTest {
         Mockito.when(proxySettings.sameNodeBaseUrl()).thenReturn("http://127.0.0.1:8080");
         WorkspaceGitToolTokenService tokenService = Mockito.mock(WorkspaceGitToolTokenService.class);
         Mockito.when(tokenService.issue(USER_ID)).thenReturn("signed-workspace-token");
+        UiTestExecutionToolTokenService uiTokenService = Mockito.mock(UiTestExecutionToolTokenService.class);
+        Mockito.when(uiTokenService.issue(USER_ID)).thenReturn("signed-ui-test-token");
         OpencodeProcessStartupService service = new OpencodeProcessStartupService(
                 repository,
                 repository,
@@ -567,13 +569,15 @@ class OpencodeProcessStartupServiceTest {
                 null,
                 null);
         service.setWorkspaceGitToolTokenService(tokenService);
+        service.setUiTestExecutionToolTokenService(uiTokenService);
 
         service.startAndVerify(request(null, null, null));
 
         assertThat(gateway.startCommands).singleElement().satisfies(command ->
                 assertThat(command.environment())
                         .containsEntry("TEST_AGENT_PLATFORM_BASE_URL", "http://127.0.0.1:8080")
-                        .containsEntry("TEST_AGENT_WORKSPACE_GIT_TOOL_TOKEN", "signed-workspace-token"));
+                        .containsEntry("TEST_AGENT_WORKSPACE_GIT_TOOL_TOKEN", "signed-workspace-token")
+                        .containsEntry("TEST_AGENT_UI_TEST_TOOL_TOKEN", "signed-ui-test-token"));
     }
 
     @Test

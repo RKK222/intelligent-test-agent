@@ -20,6 +20,7 @@
 | question | `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`：`renders a single-choice question with option descriptions and emits selected labels` | 单选、多选、选项描述、提交/拒绝 |
 | subagent | `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`：`keeps native pending task visible and converts it to a clickable subagent card` | task part、child Session、子 Agent 卡片和点击进入 |
 | 历史 subagent | `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`：`makes historical subagent cards clickable from session tree snapshot indexes` | 历史树恢复、子 Agent 导航、子时间线 |
+| UI 执行 subagent | `UiTestExecutionToolControllerTest`、`UiTestExecutionClientTest`、公共配置 `test-execution-ui.md` / `ui_test_execute.ts` | 单行四列传递、一次提交、同 executionId 轮询、专用鉴权、终态结果 |
 | 宠物旁路成功 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`pet side-question streams progress, survives outside clicks, and calibrates replayed deltas` |旁路 Run、阶段进度、增量、最终答案、重放去重 |
 | 宠物旁路失败/重试 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`pet side-question keeps a failure editable and starts a fresh run on retry` | 失败弹层、问题保留、重新提交 |
 | 宠物形象策略 | `frontend/apps/agent-web/tests/pet-companions.test.ts` 与 `FigmaShell.test.ts`：`lets the user choose a companion and persists the selected mode` | 本地日期轮换、每日随机稳定、异常存储回退、固定角色与名册交互 |
@@ -45,3 +46,19 @@ corepack pnpm exec playwright test apps/agent-web/tests/workbench.spec.ts \
 每轮都要从原始事件或消息接口确认对应 USER、至少一个新的 ASSISTANT message/part，以及最后的 root idle / `run.succeeded`。第二、三轮不得在任何 assistant 输出前直接 `busy → idle → run.succeeded`。包含 Todo 的提示还要确认 Todo 只归属各自 Run；最后刷新 Session 消息接口时应恢复三轮全部 user/assistant，不能把旧轮 parts 重新归给最新 Run。验收只覆盖部署后的新 Run，不迁移已经产生空回复的历史 Run。
 
 每个入口内都包含可直接复用的 prompt、RunEvent、远端消息/Part、Todo、pending question/permission、子 Agent 树和旁路 SSE 回包；这些 fixture 是“可重复造数模板”，不会污染生产数据库。需要验证真实 OpenCode pending request 时，应在服务重启后重新发起对应 prompt；OpenCode 的 question/permission request 属于进程内存态，重启前 requestId 不能继续回复。历史回放只展示当前远端仍 pending 的交互，已经失效的旧事件会被过滤；permission/question 列表按绑定的 remote session 过滤，不会把 A Session 的 ask 泄漏到 B Session。Todo 必须同时验证 Run ID、用户消息 ID 和 root/child scope，无法归属的 session 快照不得赋给最新轮。后端 Run 级 SSE/HTTP/终态快照必须用稳定 dispatch user 选择当前轮，无法确认时返回空投影；Session 级历史仍保留完整多轮，且普通刷新不能改写已有 `runId`。验收应使用修复后新建会话，已污染的历史数据不做懒修复或迁移。历史切换先渲染分页正文，树快照、Todo、工作区目录和 active-run 终态校准在后台增强。
+
+## UI 子 agent 真实验收
+
+先确认独立 `uitest6` 配置了与 Java 相同的 `UITEST6_INTEGRATION_TOKEN`，再重启当前用户 OpenCode
+进程以取得 `TEST_AGENT_UI_TEST_TOOL_TOKEN`。在对话中直接 `@test-execution-ui`，提供且只提供一行：
+
+```text
+案例名称：功能测试-登录-正常登录-首页展示
+测试步骤：1. 打开登录页；2. 输入用户名和密码；3. 点击登录
+测试数据：用户名=tester；密码=<测试账号密码>
+预期结果：进入首页并显示欢迎语
+```
+
+验收必须同时确认：子 agent 只调用一次 `ui_test_execute`；Java 到 `uitest6` 只有一个 POST；后续
+请求均查询同一个 `executionId`；终态与 `uitest6` 一致。没有可用的 `uitest6` 真实环境时只能报告
+契约测试通过，不能声称真实浏览器自动化已执行。

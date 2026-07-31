@@ -814,6 +814,13 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 
 工具盒子目录查询和点击上报都是普通 HTTP API，不创建 Run、Session 或 RunEvent，也不进入用户级 session-runtime SSE。点击成功后的累计与热门排名由当前页面本地更新，刷新时重新查询 `GET /api/internal/platform/toolbox/tools`；其它已打开页面不承诺实时同步。首版不提供点击趋势、明细查询、收藏或目录管理事件。后续如需跨页面实时刷新，必须另行设计稳定事件契约，不能复用 `tool.*`、`analytics.*` 或 opencode raw event。
 
+## UI 测试执行不新增事件
+
+`ui_test_execute` Tool 通过普通 HTTP 提交一条案例，并轮询同一个 `executionId` 到终态；平台不为
+`uitest6` 新增 RunEvent、SSE 或 WebSocket 事件。OpenCode 自身的 tool part 和 child Session 仍沿用
+既有对话事件映射，因此前端可以展示 `test-execution-ui` 子 agent 卡片，但不把外部执行步骤冒充
+当前平台 RunEvent。后续若要实时转发外部浏览器步骤，必须单独设计稳定、可恢复、带归属的事件契约。
+
 ## 兼容性
 
 1. 新增事件字段必须保持旧前端可忽略。

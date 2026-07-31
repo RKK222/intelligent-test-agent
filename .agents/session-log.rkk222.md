@@ -4150,3 +4150,27 @@
 ### Result
 
 - 新物化和当前未过期 generation 都可在 1–168 整小时内设置总保留期，前端、API、数据库约束、索引摘要和清理调度保持一致。新增 API 和 Flyway/MyBatis SQL；未修改 RunEvent wire、安全策略、环境配置、generated SDK 或 OpenCode 源码。
+
+## 2026-07-31 - 集成独立 uitest6 单次 UI 测试执行子智能体
+
+### Why
+
+- 用户需要在当前平台对话中唤起 UI 测试执行子智能体，把测试设计产出的一行 `案例名称 | 测试步骤 | 测试数据 | 预期结果` 交给独立 `uitest6` 平台执行一次；`测试步骤`是唯一操作流程，同时要求 `uitest6` 不进入当前仓库并继续独立运行。
+
+### What
+
+- 当前平台新增受控 `ui_test_execute` Tool、`test-execution-ui` 公共子智能体、同节点 Java 桥接、用户作用域专用 Token 和 `uitest6` integration client；外部服务 Token 只驻留 Java，Tool 只允许四列案例和服务端派生幂等键，提交一次后轮询同一 `executionId`。
+- `uitest6` 在独立 GitHub 仓库的 `wr` 分支新增带 Bearer 鉴权、幂等提交、状态查询和 executionId 绑定报告的 additive API，复用原有 BrowserUse session/runner；未改变原 `/api/agent/run`。提交 `4a0bdfbb` 已推送到 `origin/wr`。
+- 公共 OpenCode 配置基于最新远端 `master` 扩展现有 Test Execution 编排，新增 UI 子智能体和 Tool；保留原接口执行、脚本、报文和数据库校验规则。提交 `e98de0c` 已推送到公共配置远端 `master`。
+- 同步 integration、API、opencode-runtime 模块说明，以及 HTTP、RunEvent、部署、安全和对话验收文档；没有新增数据库/Flyway、关系型 SQL、前端协议或 OpenCode 源码修改。
+
+### How
+
+- JDK 25 定向 Java 测试覆盖外部四列请求、Bearer/trace、错误映射、专用 Token、进程环境注入、Controller 和鉴权过滤，共同命令退出 0；uitest6 契约测试 5 项、Ruff 和 compileall 通过；Bun Tool 冒烟确认一次 POST、一次 GET 后返回 `SUCCEEDED`，OpenCode debug 确认子智能体只可调用 `ui_test_execute`。
+- 相关后端全量 reactor 测试运行到无关 `test-agent-xxl-job-integration` 时，Testcontainers MySQL 两次超过 JDBC 就绪窗口并重复重试，人工中止为 exit 130；本次定向测试已独立通过，未把该环境故障计作功能通过。
+- 使用未修改的 `.env.test`、JDK 25 和 test profile 完整重启 backend、opencode-manager、frontend；health/readiness 为 `UP`、前端 3000 与登录 CORS 正常，新桥接无专用凭据时返回统一 401，manager 最终持续 `HEALTHY`。
+
+### Result
+
+- 对话可直接 `@test-execution-ui`，或由 Test Execution 按一行一次 Task 派发；四列整体传递，不把案例名称、测试数据或预期结果扩写成额外操作步骤。当前仓库只包含桥接与公共配置模板，没有包含、打包或提交 `uitest6` 源码。
+- 真实浏览器端到端执行尚未验证：本地 test 环境未配置可用的独立 `uitest6` 地址、服务 Token、目标站点及其模型/浏览器运行条件；上线前仍需按文档在两端配置同一 `UITEST6_INTEGRATION_TOKEN` 并执行一条真实四列案例验收。

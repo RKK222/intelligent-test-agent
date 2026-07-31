@@ -195,6 +195,14 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 - 当前 workspace 必须由远端 session 经平台 agent binding 反查，禁止接受 Tool 传入 workspace ID、个人 workspace ID、物理路径或目标服务器。owner 不一致、非个人 workspace 或绑定缺失必须失败关闭。
 - `discard`、`publish`、冲突解决和取消合并必须先显示 OpenCode permission 确认；Tool 返回给模型的错误详情只保留原因、相对文件和并发提交等安全字段，不返回凭据、Git 命令或物理路径。
 
+## UI 测试执行 Tool 安全边界
+
+- 独立 `uitest6` 的服务 Token 只允许保存在 Java 后端环境，由 integration client 注入 Bearer 头；禁止下发到 OpenCode、公共配置、前端、Tool 参数、日志或错误响应。
+- 用户进程只获得带 `ui-test-execution` audience、用户 ID 和过期时间的签名 Tool Token；签名密钥仍只驻留 Java，桥接入口验签后必须实时检查用户启用状态。该 Token 不能用于登录、工作区 Git 或直接访问 `uitest6`。
+- Tool 请求只允许一行四列案例和服务端派生的幂等键，不允许调用方指定外部地址、外部 Token、浏览器参数、物理路径或批量任务；一轮 Tool 执行最多发送一个创建请求。
+- “测试步骤”是唯一操作流程，“测试数据”和“预期结果”只作为输入与验证上下文。外部响应正文、堆栈和凭据不得透传，状态查询不回显原始案例内容。
+- 执行报告使用 executionId 绑定路径，禁止接受任意 report path。当前返回的外部报告地址仍受 `uitest6` Bearer 认证保护，不得为了便于点击改为匿名文件接口。
+
 ## 安全变更文档
 
 鉴权、限流、CORS、密钥、日志脱敏变更必须同步 `docs/standards/security.md`、`docs/api/http-api.md` 和相关 README。

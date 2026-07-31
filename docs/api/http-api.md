@@ -291,8 +291,11 @@ Base URL：`/api/internal/platform/analytics`。所有接口要求 `SUPER_ADMIN`
 | `RATE_LIMITED` | 429 | 请求过于频繁 |
 | `INTERNAL_ERROR` | 500 | 服务器内部错误 |
 | `OPENCODE_BAD_GATEWAY` | 502 | opencode 服务响应异常 |
+| `UI_TEST_BAD_GATEWAY` | 502 | UI 自动化平台响应异常 |
 | `OPENCODE_UNAVAILABLE` | 503 | opencode 服务不可用 |
+| `UI_TEST_UNAVAILABLE` | 503 | UI 自动化平台不可用 |
 | `OPENCODE_TIMEOUT` | 504 | opencode 服务超时 |
+| `UI_TEST_TIMEOUT` | 504 | UI 自动化平台响应超时 |
 | `RUNTIME_STATE_UNAVAILABLE` | 503 | 运行态存储不可用 |
 | `NIGHT_EXECUTION_UNAVAILABLE` | 503 | 夜间执行功能不可用 |
 | `GIT_UNAVAILABLE` | 503 | Git 服务不可用 |
@@ -3371,6 +3374,61 @@ Base URL：`/api/internal/platform/toolbox`。两个接口都要求平台登录�
 兼容性：两个 API、字段和路径均为新增；工具字段可 additive 扩展，前端必须忽略未知字段。稳定工具 ID 在同一工具后续目录版本中不能复用给其它能力；目录数量和 `catalogVersion` 可随经过离线验收的上游升级变化。不新增 RunEvent SSE 事件。
 
 对应测试：`ToolboxControllerTest`、`ToolboxCatalogServiceTest`、`ToolboxCatalogContractTest`、`MyBatisToolboxClickRepositoryIntegrationTest` 和 PostgreSQL Testcontainers 并发/用户删除测试。
+
+### UI 测试执行 Tool 桥接
+
+以下入口只供用户 OpenCode 进程中的公共 `ui_test_execute` Tool 调用，不面向浏览器前端：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `POST` | `/api/internal/agent/opencode/ui-test-executions` | 向独立 `uitest6` 平台提交一行四列案例，返回 `202`。 |
+| `GET` | `/api/internal/agent/opencode/ui-test-executions/{executionId}` | 查询同一次执行的状态，不创建新任务。 |
+
+请求使用 `OpencodeProcessStartupService` 注入的 `TEST_AGENT_UI_TEST_TOOL_TOKEN`。该 Token 包含固定
+`ui-test-execution` audience、当前用户 ID 和七天有效期，只由本入口接受；Controller 验签后还会
+实时确认用户可登录。`uitest6` 的 `UITEST6_INTEGRATION_TOKEN` 只由 Java integration client 持有，
+不会进入 OpenCode 进程、Tool 参数或响应。
+
+提交请求体：
+
+```json
+{
+  "requestId": "opencode:ses_...:msg_...:3d2f...",
+  "caseName": "功能测试-登录-正常登录-首页展示",
+  "testSteps": "1. 打开登录页\n2. 输入用户名和密码\n3. 点击登录",
+  "testData": "用户名=tester；密码=******",
+  "expectedResult": "进入首页并显示欢迎语"
+}
+```
+
+`testSteps` 必填且是唯一操作流程；另外三列可为空，分别只作为标识、输入和验证标准。请求不允许
+指定外部 URL、Token、浏览器配置、`maxSteps` 或多行案例。Tool 在一次调用内只发送一个 POST，
+后续仅轮询返回的 `executionId`。`requestId` 在 `uitest6` 侧保证幂等；同键不同请求返回
+`409 CONFLICT`。
+
+成功 `data` 使用 `UiTestExecutionResult`：
+
+```json
+{
+  "executionId": "uiexec_0123456789abcdef",
+  "requestId": "opencode:ses_...:msg_...:3d2f...",
+  "caseName": "功能测试-登录-正常登录-首页展示",
+  "status": "QUEUED|RUNNING|SUCCEEDED|FAILED",
+  "success": true,
+  "message": "执行成功",
+  "errors": [],
+  "stepCount": 3,
+  "durationSeconds": 18.5,
+  "reportUrl": "http://uitest6/api/integration/v1/ui-executions/uiexec_.../report",
+  "createdAt": "2026-07-31T00:00:00Z",
+  "startedAt": "2026-07-31T00:00:01Z",
+  "completedAt": "2026-07-31T00:00:19Z"
+}
+```
+
+外部鉴权、网络、超时和非法响应分别映射为 `UI_TEST_UNAVAILABLE`、`UI_TEST_TIMEOUT` 和
+`UI_TEST_BAD_GATEWAY`，不回显外部响应正文或 Token。该集成不上传或打包 `uitest6` 源码，也不在
+当前 worker 启动 BrowserUse/Chromium。
 
 ### 健康检查
 
