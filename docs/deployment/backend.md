@@ -673,6 +673,10 @@ UITEST6_MAX_STEPS=25
 可达，允许 HTTP/HTTPS，禁止 URL user-info。Java 未配置地址或 Token 时集成失败关闭，不影响
 `uitest6` 原平台 `/api/agent/run` 和当前平台其它执行方式。
 
+这里的 `UITEST6_BASE_URL` 是独立执行平台地址，不是案例归属的被测系统环境。被测系统环境由用户
+直接输入，或由父 Agent 从用户明确指定路径读取后，作为每次 `ui_test_execute` 请求的必填
+`testEnvironment` 传入；部署配置不提供默认被测环境，缺失时必须中断执行。
+
 用户 OpenCode 进程启动时，公共启动程序另外注入：
 
 ```bash

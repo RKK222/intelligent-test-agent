@@ -30,7 +30,7 @@ class UiTestExecutionClientTest {
     }
 
     @Test
-    void submitForwardsFourColumnsAndKeepsExternalTokenInJava() throws Exception {
+    void submitForwardsEnvironmentAndFourColumnsAndKeepsExternalTokenInJava() throws Exception {
         AtomicReference<String> authorization = new AtomicReference<>();
         AtomicReference<String> traceId = new AtomicReference<>();
         AtomicReference<JsonNode> body = new AtomicReference<>();
@@ -46,6 +46,7 @@ class UiTestExecutionClientTest {
         UiTestExecutionClient client = client("integration-secret");
         UiTestExecutionResult result = client.submit(new UiTestExecutionCommand(
                         "session-1:case-1",
+                        "F-COSS SIT：https://sit.example.test",
                         "登录成功",
                         "1. 打开登录页\n2. 点击登录",
                         "用户名=tester",
@@ -54,6 +55,8 @@ class UiTestExecutionClientTest {
 
         assertThat(authorization).hasValue("Bearer integration-secret");
         assertThat(traceId).hasValue("trace_ui_test_123456");
+        assertThat(body.get().get("test_environment").asText())
+                .isEqualTo("F-COSS SIT：https://sit.example.test");
         assertThat(body.get().get("case_name").asText()).isEqualTo("登录成功");
         assertThat(body.get().get("test_steps").asText()).isEqualTo("1. 打开登录页\n2. 点击登录");
         assertThat(body.get().get("test_data").asText()).isEqualTo("用户名=tester");
@@ -71,7 +74,8 @@ class UiTestExecutionClientTest {
         server.start();
 
         assertThatThrownBy(() -> client("wrong-token").submit(new UiTestExecutionCommand(
-                        "session-1:case-1", "", "点击登录", "", ""), "trace_ui_test_123456")
+                        "session-1:case-1", "F-COSS SIT", "", "点击登录", "", ""),
+                        "trace_ui_test_123456")
                 .block())
                 .isInstanceOfSatisfying(PlatformException.class, exception -> {
                     assertThat(exception.errorCode()).isEqualTo(ErrorCode.UI_TEST_UNAVAILABLE);

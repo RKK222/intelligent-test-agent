@@ -37,11 +37,12 @@ public class UiTestExecutionClient {
         this.webClient = Objects.requireNonNull(webClient, "webClient must not be null");
     }
 
-    /** 提交一行四列案例；requestId 由 uitest6 用于保证只创建一次。 */
+    /** 提交被测系统环境和一行四列案例；requestId 由 uitest6 用于保证只创建一次。 */
     public Mono<UiTestExecutionResult> submit(UiTestExecutionCommand command, String traceId) {
         Objects.requireNonNull(command, "command must not be null");
         ExternalSubmitRequest body = new ExternalSubmitRequest(
                 command.requestId(),
+                command.testEnvironment(),
                 command.caseName(),
                 command.testSteps(),
                 command.testData(),
@@ -154,6 +155,7 @@ public class UiTestExecutionClient {
 
     private record ExternalSubmitRequest(
             @JsonProperty("request_id") String requestId,
+            @JsonProperty("test_environment") String testEnvironment,
             @JsonProperty("case_name") String caseName,
             @JsonProperty("test_steps") String testSteps,
             @JsonProperty("test_data") String testData,

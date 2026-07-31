@@ -212,7 +212,7 @@ mvn test
 - 用户、角色、权限等平台内部管理放在 `test-agent-system-management`。
 - 应用配置、应用人员、代码库英文名与关联、应用工作空间模板和个人 SSH key 管理放在 `test-agent-configuration-management`；应用版本工作区运行编排和工作空间创建进度放在 `test-agent-workspace-management`。
 - 周期任务的 XXL Admin、executor、MySQL Flyway、iframe SSO 与统一 handler 适配放在 `test-agent-xxl-job-integration`；XXL executor 本身不携带稳定 Linux 亲和。`test-agent-scheduler` 只提供 `ScheduledTaskHandler`、context/result、Redis 锁和历史清理能力。定时任务直接保存在 `night_execution_tasks`，支持标准夜间窗口与仅 `SUPER_ADMIN` 可用的未来 24 小时精确分钟测试模式；XXL 每分钟扫描并通过公共 Java 路由转发到任务创建时固定的目标服务器。目标 Java 复用普通 Run 受理链路，不建立夜间专属队列，自定义模式不占夜间容量。
-- 非 opencode 外部系统联动放在 `test-agent-integration`；独立 `uitest6` 的地址和服务 Token 只由该模块客户端通过 Java 配置读取，不下发到 OpenCode Tool。
+- 非 opencode 外部系统联动放在 `test-agent-integration`；独立 `uitest6` 的地址和服务 Token 只由该模块客户端通过 Java 配置读取，不下发到 OpenCode Tool。每次 UI 执行的被测系统环境由用户输入或父 Agent 从用户指定路径读取后显式传入，平台不配置默认被测环境。
 - 工具盒子目录固定从 `test-agent-integration` 的版本化 classpath JSON 读取，当前离线口径为 193 项；点击明细、累计和用户 30 秒窗口通过 `test-agent-domain` 端口与 `test-agent-persistence` MyBatis XML 实现，API 层只做登录主体、traceId 和 DTO 转换。
 - 业务模块不要直接依赖 `test-agent-opencode-sdk-generated`，应通过 `test-agent-opencode-client`。
 - 领域模型保持在 `test-agent-domain`，不要依赖 Spring Web 或持久化技术。

@@ -27,8 +27,9 @@ type PlatformResponse = {
 }
 
 export default tool({
-  description: "将一行四列测试案例提交给独立 uitest6 平台执行一次，并等待最终结果。",
+  description: "将被测系统环境和一行四列测试案例提交给独立 uitest6 平台执行一次，并等待最终结果。",
   args: {
+    testEnvironment: tool.schema.string().min(1).max(20_000).describe("被测系统环境；由用户提供或父 Agent 从用户指定路径读取，不得补造"),
     caseName: tool.schema.string().max(500).optional().default("").describe("案例名称，仅用于标识"),
     testSteps: tool.schema.string().min(1).max(20_000).describe("测试步骤，唯一操作流程"),
     testData: tool.schema.string().max(20_000).optional().default("").describe("测试数据，仅用于步骤输入"),
@@ -52,6 +53,7 @@ export default tool({
         method: "POST",
         body: JSON.stringify({
           requestId,
+          testEnvironment: args.testEnvironment,
           caseName: args.caseName,
           testSteps: args.testSteps,
           testData: args.testData,

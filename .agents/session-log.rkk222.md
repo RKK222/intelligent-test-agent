@@ -4195,3 +4195,29 @@
 
 - 对话可直接 `@test-execution-ui`，或由 Test Execution 按一行一次 Task 派发；四列整体传递，不把案例名称、测试数据或预期结果扩写成额外操作步骤。当前仓库只包含桥接与公共配置模板，没有包含、打包或提交 `uitest6` 源码。
 - 真实浏览器端到端执行尚未验证：本地 test 环境未配置可用的独立 `uitest6` 地址、服务 Token、目标站点及其模型/浏览器运行条件；上线前仍需按文档在两端配置同一 `UITEST6_INTEGRATION_TOKEN` 并执行一条真实四列案例验收。
+
+## 2026-07-31 - 补充 UI 执行被测环境门禁并完成百度真实自动化
+
+### Why
+
+- 用户进一步明确 UI 执行输入应为“案例 + 被测系统环境”，环境可由用户直接输入或由父 Agent 从用户指定路径读取；没有环境时必须中断，不能调用 Tool 或使用默认地址。
+- 首次百度真实运行中，执行智能体误把内容输入 `#chat-textarea`，BrowserUse Judge 已判失败，但 uitest6 集成层仍按智能体自报结果返回成功，需要消除该假阳性后再复测。
+
+### What
+
+- 当前平台的 Java command、桥接 DTO、外部请求、公共 Tool schema 和 UI 子智能体规约统一增加必填 `testEnvironment`；空白环境在 Tool 之前和 Java 边界均失败，四列案例继续整体结构化传递，只有测试步骤作为操作流程。
+- 独立 uitest6 `wr` 分支把 `test_environment` 传入 BrowserUse 任务，并在集成适配层读取 BrowserUse Judge；Judge 明确失败时强制终态失败并返回 failure reason，未启用 Judge 的旧运行保持兼容。环境提交 `28360add`、Judge 修正 `b5bdfc10` 均已推送 `origin/wr`。
+- 公共 OpenCode 配置的父编排、UI 子智能体、Tool 和说明同步环境门禁，提交 `9bd9562` 已推送公共配置远端 `master`。
+- 为本机用户预览，通过平台 Agent 配置 file-ws route/ticket/RPC 把上述已发布 Agent 和 Tool 精确写入公共个人 worktree；未直接修改运行目录。个人热加载被两条 2026-07-10/11 遗留、等待 QUESTION 的 RUNNING Session 正常阻断，未擅自取消历史 Run。
+
+### How
+
+- 当前平台 JDK 25 定向测试 6 项通过，覆盖环境序列化、空白环境拒绝及“不调用外部 client”；`tools/verify-ai-docs.sh`、`git diff --check` 以及仓内模板和公共远端文件逐字比对通过。
+- uitest6 契约测试 6 项、Ruff 和 compileall 通过；用真实 Chrome 访问百度生产环境，明确限定传统搜索框 `input#kw`，写入 `OpenAI` 后两次读取 value，BrowserUse Judge 判定成功。执行 `uiexec_abeaf1aa3243426183f588680d90eafc` 返回 `SUCCEEDED / success=true / errors=[]`，5 步、46.20 秒并生成报告。
+- 使用未修改的 `.env.test` 和瞬时 UI 平台环境变量重启当前 backend、manager、frontend；独立 uitest6 在 `127.0.0.1:7788` 启动。未修改 `.env.local`。
+
+### Result
+
+- 缺少被测系统环境时，UI 执行链路会中断且不创建外部自动化；提供环境和一行四列案例时，独立 uitest6 已完成百度搜索框输入的真实正向自动化，Judge 失败也不再可能被集成接口误报为成功。
+- 当前用户对话入口的最后一次真实派发尚未完成：公共个人运行态因两条遗留 RUNNING Session 无法 dispose；共享公共运行仓库另有 4 个仅本地、未被远端引用的提交，不能用全局 reset 覆盖。后续需先由用户确认是否取消这两条遗留 Run，并为共享仓库本地提交选择保留方式，再执行热加载/全局 rollout 和对话验收。
+- 本次没有新增数据库/Flyway、关系型 SQL、RunEvent/SSE、前端协议或 OpenCode 源码变更；uitest6 源码仍只存在独立仓库，不进入当前项目。

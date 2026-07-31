@@ -6,7 +6,7 @@
 
 ## 当前能力
 
-- `UiTestExecutionClient` 把单行四列案例结构化提交到独立 `uitest6` 平台，并用 `requestId` 复用外部幂等语义；提交和状态查询都是短 HTTP 请求，不在 Java 内持有浏览器执行线程。
+- `UiTestExecutionClient` 把必填的被测系统环境和单行四列案例结构化提交到独立 `uitest6` 平台，并用 `requestId` 复用外部幂等语义；环境缺失时在出站前失败关闭，提交和状态查询都是短 HTTP 请求，不在 Java 内持有浏览器执行线程。
 - `UiTestExecutionSettings` 只从 Java 配置读取外部地址和 Bearer Token；未配置时失败关闭，Token 不进入 OpenCode Tool、响应或日志。
 - 从 `src/main/resources/toolbox/catalog-v1.json` 加载锁定 IT-Tools / OmniTools 的版本化离线目录，启动时校验 193 项的稳定 ID、深链接、双语字段、分类和顺序。
 - `ToolboxCatalogService` 通过显式生产构造器注入点击仓储，合并累计点击投影，并按累计数、最后计数时间和目录顺序计算正点击 Top 10。

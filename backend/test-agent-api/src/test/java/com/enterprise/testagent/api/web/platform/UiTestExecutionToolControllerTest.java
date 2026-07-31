@@ -1,9 +1,11 @@
 package com.enterprise.testagent.api.web.platform;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.api.web.common.GlobalExceptionHandler;
@@ -27,7 +29,7 @@ class UiTestExecutionToolControllerTest {
     private static final String TRACE_ID = "trace_ui_tool_123456";
 
     @Test
-    void validToolCredentialSubmitsOneFourColumnCase() {
+    void validToolCredentialSubmitsEnvironmentAndOneFourColumnCase() {
         UiTestExecutionToolTokenService tokenService = mock(UiTestExecutionToolTokenService.class);
         when(tokenService.authenticate("Bearer signed-ui-token"))
                 .thenReturn(new UserId("usr_ui_tool_123456"));
@@ -42,6 +44,7 @@ class UiTestExecutionToolControllerTest {
                 .bodyValue("""
                         {
                           "requestId": "session-1:case-1",
+                          "testEnvironment": "F-COSS SIT：https://sit.example.test",
                           "caseName": "登录成功",
                           "testSteps": "点击登录",
                           "testData": "用户名=tester",
@@ -55,7 +58,8 @@ class UiTestExecutionToolControllerTest {
                 .jsonPath("$.data.status").isEqualTo("RUNNING")
                 .jsonPath("$.traceId").isEqualTo(TRACE_ID);
 
-        verify(executionClient).submit(any(), eq(TRACE_ID));
+        verify(executionClient).submit(argThat(command ->
+                command.testEnvironment().equals("F-COSS SIT：https://sit.example.test")), eq(TRACE_ID));
     }
 
     @Test
@@ -84,12 +88,33 @@ class UiTestExecutionToolControllerTest {
                 .uri(UiTestExecutionToolTokenService.ENDPOINT_PATH)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
-                        {"requestId":"session-1:case-1","testSteps":"   "}
+                        {"requestId":"session-1:case-1","testEnvironment":"F-COSS SIT","testSteps":"   "}
                         """)
                 .exchange()
                 .expectStatus().isBadRequest()
                 .expectBody()
                 .jsonPath("$.code").isEqualTo("VALIDATION_ERROR");
+
+        verifyNoInteractions(executionClient);
+    }
+
+    @Test
+    void blankTestEnvironmentStopsBeforeCallingExternalClient() {
+        UiTestExecutionToolTokenService tokenService = mock(UiTestExecutionToolTokenService.class);
+        UiTestExecutionClient executionClient = mock(UiTestExecutionClient.class);
+
+        client(tokenService, executionClient).post()
+                .uri(UiTestExecutionToolTokenService.ENDPOINT_PATH)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"requestId":"session-1:case-1","testEnvironment":"   ","testSteps":"点击登录"}
+                        """)
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("VALIDATION_ERROR");
+
+        verifyNoInteractions(executionClient);
     }
 
     private WebTestClient client(

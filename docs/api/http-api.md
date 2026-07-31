@@ -3381,7 +3381,7 @@ Base URL：`/api/internal/platform/toolbox`。两个接口都要求平台登录�
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| `POST` | `/api/internal/agent/opencode/ui-test-executions` | 向独立 `uitest6` 平台提交一行四列案例，返回 `202`。 |
+| `POST` | `/api/internal/agent/opencode/ui-test-executions` | 向独立 `uitest6` 平台提交被测系统环境和一行四列案例，返回 `202`。 |
 | `GET` | `/api/internal/agent/opencode/ui-test-executions/{executionId}` | 查询同一次执行的状态，不创建新任务。 |
 
 请求使用 `OpencodeProcessStartupService` 注入的 `TEST_AGENT_UI_TEST_TOOL_TOKEN`。该 Token 包含固定
@@ -3394,6 +3394,7 @@ Base URL：`/api/internal/platform/toolbox`。两个接口都要求平台登录�
 ```json
 {
   "requestId": "opencode:ses_...:msg_...:3d2f...",
+  "testEnvironment": "F-COSS SIT：https://sit.example.test",
   "caseName": "功能测试-登录-正常登录-首页展示",
   "testSteps": "1. 打开登录页\n2. 输入用户名和密码\n3. 点击登录",
   "testData": "用户名=tester；密码=******",
@@ -3401,8 +3402,10 @@ Base URL：`/api/internal/platform/toolbox`。两个接口都要求平台登录�
 }
 ```
 
+`testEnvironment` 必填，内容只能来自用户输入，或父 Agent 从用户明确指定路径读取后的原文；缺失、
+空白或路径未成功读取时返回 `400 VALIDATION_ERROR`，不会调用 `uitest6` 或回退默认环境。
 `testSteps` 必填且是唯一操作流程；另外三列可为空，分别只作为标识、输入和验证标准。请求不允许
-指定外部 URL、Token、浏览器配置、`maxSteps` 或多行案例。Tool 在一次调用内只发送一个 POST，
+指定 `uitest6` 服务地址、Token、浏览器配置、`maxSteps`、未读取的物理路径或多行案例。Tool 在一次调用内只发送一个 POST，
 后续仅轮询返回的 `executionId`。`requestId` 在 `uitest6` 侧保证幂等；同键不同请求返回
 `409 CONFLICT`。
 

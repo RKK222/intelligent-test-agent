@@ -36,7 +36,7 @@ public class UiTestExecutionToolController {
         this.client = Objects.requireNonNull(client, "client must not be null");
     }
 
-    /** 接收一行四列案例并只提交一次，202 不表示 UI 自动化已经完成。 */
+    /** 接收被测系统环境和一行四列案例并只提交一次，202 不表示 UI 自动化已经完成。 */
     @PostMapping(UiTestExecutionToolTokenService.ENDPOINT_PATH)
     @ResponseStatus(HttpStatus.ACCEPTED)
     public Mono<ApiResponse<UiTestExecutionResult>> submit(
@@ -46,6 +46,7 @@ public class UiTestExecutionToolController {
         String traceId = RuntimeApiSupport.traceId(exchange);
         return client.submit(new UiTestExecutionCommand(
                         request.requestId(),
+                        request.testEnvironment(),
                         request.caseName(),
                         request.testSteps(),
                         request.testData(),
@@ -68,12 +69,13 @@ public class UiTestExecutionToolController {
         tokenService.authenticate(exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION));
     }
 
-    /** Tool 只暴露四列案例和幂等键，不允许选择外部地址、Token 或执行引擎参数。 */
+    /** Tool 只暴露被测系统环境、四列案例和幂等键，不允许选择外部 Token 或执行引擎参数。 */
     public record UiTestExecutionRequest(
             @NotBlank
             @Size(max = 200)
             @Pattern(regexp = "[A-Za-z0-9_.:-]+")
             String requestId,
+            @NotBlank @Size(max = 20_000) String testEnvironment,
             @Size(max = 500) String caseName,
             @NotBlank @Size(max = 20_000) String testSteps,
             @Size(max = 20_000) String testData,

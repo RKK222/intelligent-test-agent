@@ -4,9 +4,10 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import java.util.regex.Pattern;
 
-/** 一行四列测试案例；每个 command 只能创建一次 UI 自动化。 */
+/** 被测系统环境与一行四列测试案例；每个 command 只能创建一次 UI 自动化。 */
 public record UiTestExecutionCommand(
         String requestId,
+        String testEnvironment,
         String caseName,
         String testSteps,
         String testData,
@@ -16,6 +17,7 @@ public record UiTestExecutionCommand(
 
     public UiTestExecutionCommand {
         requestId = normalize(requestId);
+        testEnvironment = normalize(testEnvironment);
         caseName = normalize(caseName);
         testSteps = normalize(testSteps);
         testData = normalize(testData);
@@ -23,9 +25,13 @@ public record UiTestExecutionCommand(
         if (!REQUEST_ID.matcher(requestId).matches()) {
             throw invalid("requestId 格式无效");
         }
+        if (testEnvironment.isBlank()) {
+            throw invalid("被测系统环境不能为空");
+        }
         if (testSteps.isBlank()) {
             throw invalid("测试步骤不能为空");
         }
+        requireLength(testEnvironment, 20_000, "被测系统环境");
         requireLength(caseName, 500, "案例名称");
         requireLength(testSteps, 20_000, "测试步骤");
         requireLength(testData, 20_000, "测试数据");

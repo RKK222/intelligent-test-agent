@@ -20,7 +20,7 @@
 | question | `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`：`renders a single-choice question with option descriptions and emits selected labels` | 单选、多选、选项描述、提交/拒绝 |
 | subagent | `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`：`keeps native pending task visible and converts it to a clickable subagent card` | task part、child Session、子 Agent 卡片和点击进入 |
 | 历史 subagent | `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`：`makes historical subagent cards clickable from session tree snapshot indexes` | 历史树恢复、子 Agent 导航、子时间线 |
-| UI 执行 subagent | `UiTestExecutionToolControllerTest`、`UiTestExecutionClientTest`、公共配置 `test-execution-ui.md` / `ui_test_execute.ts` | 单行四列传递、一次提交、同 executionId 轮询、专用鉴权、终态结果 |
+| UI 执行 subagent | `UiTestExecutionToolControllerTest`、`UiTestExecutionClientTest`、公共配置 `test-execution-ui.md` / `ui_test_execute.ts` | 必填被测系统环境、单行四列传递、缺环境中断、一次提交、同 executionId 轮询、专用鉴权、终态结果 |
 | 宠物旁路成功 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`pet side-question streams progress, survives outside clicks, and calibrates replayed deltas` |旁路 Run、阶段进度、增量、最终答案、重放去重 |
 | 宠物旁路失败/重试 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`pet side-question keeps a failure editable and starts a fresh run on retry` | 失败弹层、问题保留、重新提交 |
 | 宠物形象策略 | `frontend/apps/agent-web/tests/pet-companions.test.ts` 与 `FigmaShell.test.ts`：`lets the user choose a companion and persists the selected mode` | 本地日期轮换、每日随机稳定、异常存储回退、固定角色与名册交互 |
@@ -50,15 +50,20 @@ corepack pnpm exec playwright test apps/agent-web/tests/workbench.spec.ts \
 ## UI 子 agent 真实验收
 
 先确认独立 `uitest6` 配置了与 Java 相同的 `UITEST6_INTEGRATION_TOKEN`，再重启当前用户 OpenCode
-进程以取得 `TEST_AGENT_UI_TEST_TOOL_TOKEN`。在对话中直接 `@test-execution-ui`，提供且只提供一行：
+进程以取得 `TEST_AGENT_UI_TEST_TOOL_TOKEN`。在对话中直接 `@test-execution-ui`，提供被测系统环境和一行案例：
 
 ```text
+被测系统环境：F-COSS SIT，https://sit.example.test
 案例名称：功能测试-登录-正常登录-首页展示
 测试步骤：1. 打开登录页；2. 输入用户名和密码；3. 点击登录
 测试数据：用户名=tester；密码=<测试账号密码>
 预期结果：进入首页并显示欢迎语
 ```
 
-验收必须同时确认：子 agent 只调用一次 `ui_test_execute`；Java 到 `uitest6` 只有一个 POST；后续
+环境也可以由用户明确指定材料或文件路径，再由父 `test-execution-agent` 使用现有读取能力取得原文后
+传给 UI 子 agent；UI 子 agent 不增加文件权限。只提供路径但未成功读取、环境为空或未提供环境时，
+必须返回 `BLOCKED` 且不得出现 `ui_test_execute` 调用。
+
+验收必须同时确认：环境文本与四列案例均原样到达；子 agent 只调用一次 `ui_test_execute`；Java 到 `uitest6` 只有一个 POST；后续
 请求均查询同一个 `executionId`；终态与 `uitest6` 一致。没有可用的 `uitest6` 真实环境时只能报告
 契约测试通过，不能声称真实浏览器自动化已执行。
