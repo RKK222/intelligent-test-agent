@@ -15,15 +15,15 @@ deploy/internal/build-lobehub-client-kit.sh \
   --output-dir /Users/huang/Desktop/mimoagent/0709/lobehub-client-build-kit
 ```
 
-输出为 `lobehub-client-build-kit-v2.2.11-platform.4.zip` 及同名 `.sha256`。工具包只含锁定 commit 的
+输出为 `lobehub-client-build-kit-v2.2.11-platform.5.zip` 及同名 `.sha256`。工具包只含锁定 commit 的
 `git archive`、版本锁、构建脚本、验收模板和自身完整性清单；不含 `.git`、`node_modules`、签名私钥、已签名
 客户端或预先通过的审批。把 ZIP 和 SHA 文件分别交给受控 Windows、Linux 构建机，解压前先校验外层 SHA，
 解压后再校验 `BUILD_KIT_SHA256SUMS`。构建机允许联网获取锁文件中的依赖，但不得叠加 LobeHub Cloud 仓库或
 替换源码、lockfile、Electron 运行时及构建脚本。
 
-当前外网 Mac 已生成并校验上述真实工具包，ZIP 大小为 `53454987` 字节，SHA-256 为
-`080f0d214748458fcd9266a9ae7c60bd835a5107e9de895a0a61076fee6a825c`；旧 `.3` 工具包只作为归档，不能
-继续用于 `.4` 客户端构建。
+当前外网 Mac 已生成并校验上述 `.5` 真实工具包，ZIP 大小为 `53453544` 字节，SHA-256 为
+`10fba3e98938252eb0ca7a3a40d0425d8f043ebe268ee267c2e019f3e2210ee1`；旧 `.3`/`.4` 工具包只作为归档，不能
+继续用于 `.5` 客户端构建。
 
 ## 2. 固定构建环境
 
@@ -73,7 +73,9 @@ windows-authenticode-verification.txt
 在原生目标 Linux x86_64 构建机执行：
 
 ```bash
-./scripts/build-lobehub-linux-client.sh --output-dir /var/tmp/lobehub-client-output
+./scripts/build-lobehub-linux-client.sh \
+  --output-dir /var/tmp/lobehub-client-output \
+  --builder builder@example.internal
 ```
 
 成功只会生成候选件和 `Pending` 构建证据：
@@ -105,12 +107,13 @@ linux-client-build-evidence.txt
   --output-evidence /var/tmp/lobehub-client-output/linux-client-verification.txt
 ```
 
-审批脚本会重算候选件和验收记录 SHA，拒绝归档路径穿越，确认包内存在 x86-64 ELF，并把实际 OS、内核、审批人、
-版本和 commit 写入最终证据。它不会替审批人执行人工登录、多账号隔离或断公网测试。正式回传四个 Linux 文件：
+审批脚本会重算候选件、构建证据和验收记录 SHA，拒绝归档路径穿越，确认包内存在 x86-64 ELF，要求构建人与
+审批人是大小写无关比较后仍不同的稳定身份，并把构建证据摘要、实际 OS、内核、审批人、版本和 commit 写入
+最终证据。它不会替审批人执行人工登录、多账号隔离或断公网测试。正式回传四个 Linux 文件：
 
 ```text
 lobehub-linux-x86_64.tar.gz
-linux-client-build-evidence.txt                 # 归档留存，不是打包准入文件
+linux-client-build-evidence.txt                 # 正式打包准入文件
 linux-client-verification.txt
 linux-client-acceptance-record.txt
 ```
@@ -128,13 +131,16 @@ deploy/internal/finalize-lobehub-artifacts.sh \
   --windows-client /path/to/lobehub-windows-x64.exe \
   --windows-signature-evidence /path/to/windows-authenticode-verification.txt \
   --linux-client /path/to/lobehub-linux-x86_64.tar.gz \
+  --linux-build-evidence /path/to/linux-client-build-evidence.txt \
   --linux-approval-evidence /path/to/linux-client-verification.txt \
   --linux-acceptance-record /path/to/linux-client-acceptance-record.txt
 ```
 
 定稿脚本先核对 server-only 的完整 `SHA256SUMS`、版本锁、三张镜像 tag/ID、PostgreSQL 17 和执行禁用状态，
-然后用共享客户端契约验证正式签名/审批文件；输入目录保持不变，输出目录重新生成精确校验和。当前
-`v2.2.11-platform.4` server-only 实物必须记录 `LOBEHUB_LINUX_CLIENT_APPROVED=false`；定稿器对早期构建器
+然后用共享客户端契约验证正式签名/审批文件；输入目录保持不变，输出目录重新生成精确校验和。输出父目录必须
+预先存在；工具使用相邻锁并在复制前后复核服务端清单、六项客户端/证据摘要和输出 inode，检测到输入变化或
+并发替换时失败关闭。当前
+`v2.2.11-platform.5` server-only 实物必须记录 `LOBEHUB_LINUX_CLIENT_APPROVED=false`；定稿器对早期构建器
 缺失该字段的兼容不能把状态提升为已批准。只有全部客户端门禁通过后，输出才会记录 Windows/Linux 为
 `true`。磁盘必须为新完整目录预留至少
 server-only 目录大小及 ZIP 打包余量。
@@ -147,13 +153,15 @@ deploy/internal/build-lobehub-artifacts.sh \
   --windows-client /path/to/lobehub-windows-x64.exe \
   --windows-signature-evidence /path/to/windows-authenticode-verification.txt \
   --linux-client /path/to/lobehub-linux-x86_64.tar.gz \
+  --linux-build-evidence /path/to/linux-client-build-evidence.txt \
   --linux-approval-evidence /path/to/linux-client-verification.txt \
   --linux-acceptance-record /path/to/linux-client-acceptance-record.txt \
   ...其余已批准 digest 镜像参数
 ```
 
 汇集脚本、`package-release.sh` 和现场 `install-lobehub-offline.sh` 会分别重复相同门禁：文件必须为非空普通文件，
-Windows 必须 Authenticode Valid，Linux 必须 Approved，签名/审批身份不能是占位值，两端客户端、Linux 验收记录、
+Windows 必须 Authenticode Valid，Linux 必须 Approved，签名/构建/审批身份不能是占位值，两端客户端、Linux
+构建证据与验收记录、
 内部版本、fork commit、架构和执行禁用状态必须全部匹配。任一检查失败时只能保留服务端阶段介质，不能宣称完整
 企业介质完成。定稿成功后仍必须执行：
 

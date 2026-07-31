@@ -8,6 +8,7 @@ DB_CONTAINER="test-agent-lobehub-db"
 RUSTFS_CONTAINER="test-agent-lobehub-rustfs"
 APP_CONTAINER="test-agent-lobehub-app"
 MC_BIN="${BASE_DIR}/lobehub/bin/mc-linux-amd64"
+PLATFORM_PROBE="${BASE_DIR}/deploy/internal/lobehub-platform-probe.mjs"
 TEMP_ENV_FILES=()
 
 cleanup_temp_env_files() {
@@ -20,7 +21,7 @@ cleanup_temp_env_files() {
 trap cleanup_temp_env_files EXIT
 
 usage() {
-  echo "Usage: $0 {validate-config|check-redis|start-db|migrate|start-rustfs|init-bucket|start-app|start|stop|status|verify-deployment}" >&2
+  echo "Usage: $0 {validate-config|check-redis|start-db|migrate|start-rustfs|init-bucket|start-app|start|stop|status|verify-platform|verify-deployment}" >&2
 }
 
 env_value() {
@@ -77,6 +78,13 @@ create_app_runtime_env_file() {
     PLATFORM_SSO_ENABLED PLATFORM_LAUNCH_URL PLATFORM_SSO_REDEEM_URL PLATFORM_SSO_REVOKE_URL \
     PLATFORM_MODEL_GATEWAY_BASE_URL PLATFORM_SSO_HMAC_SECRET PLATFORM_MODEL_GRANT_ENCRYPTION_KEY \
     LOBEHUB_ENTERPRISE_OFFLINE AGENT_RUNTIME_MODE TELEMETRY_DISABLED LOBEHUB_DEVICE_EXECUTION_MODE
+}
+
+create_platform_probe_env_file() {
+  local output_variable="$1"
+  # 只把探针必需的目标地址和服务密钥放入临时 0600 env 文件，禁止通过 argv 泄漏。
+  create_runtime_env_file "${output_variable}" \
+    PLATFORM_SSO_REVOKE_URL PLATFORM_SSO_HMAC_SECRET
 }
 
 require_env() {
@@ -412,6 +420,15 @@ check_redis() {
     REDISCLI_AUTH="${password}" redis-cli --no-auth-warning --user "${username}" \
       -h "${host}" -p "${port}" "$@"
   }
+  require_redis_noperm() {
+    local description="$1"
+    shift
+    outside_output="$(redis_call "$@" 2>&1 || true)"
+    [[ "${outside_output}" == *NOPERM* ]] || {
+      echo "LobeHub Redis ACL unexpectedly permits ${description}" >&2
+      exit 1
+    }
+  }
   redis_call PING | grep -Fx PONG >/dev/null
   redis_call SET "lobehub:app:acl-preflight:$$" 1 EX 30 | grep -Fx OK >/dev/null
   # 客户端认证的 request/code/session 状态机使用经过测试的固定 Lua 脚本做原子转换。
@@ -419,21 +436,18 @@ check_redis() {
     "lobehub:app:acl-preflight:$$" | grep -Fx 1 >/dev/null
   redis_call DEL "lobehub:app:acl-preflight:$$" >/dev/null
   redis_call PUBLISH "lobehub:app:acl-preflight" 1 >/dev/null
-  outside_output="$(redis_call SET "test-agent:lobehub-acl-preflight:$$" 1 EX 30 2>&1 || true)"
-  [[ "${outside_output}" == *NOPERM* ]] || {
-    echo "LobeHub Redis ACL unexpectedly permits keys outside lobehub:app:*" >&2
-    exit 1
-  }
-  outside_output="$(redis_call PUBLISH "test-agent:lobehub-acl-preflight" 1 2>&1 || true)"
-  [[ "${outside_output}" == *NOPERM* ]] || {
-    echo "LobeHub Redis ACL unexpectedly permits channels outside lobehub:app:*" >&2
-    exit 1
-  }
-  outside_output="$(redis_call CONFIG GET '*' 2>&1 || true)"
-  [[ "${outside_output}" == *NOPERM* ]] || {
-    echo "LobeHub Redis ACL unexpectedly permits CONFIG" >&2
-    exit 1
-  }
+  require_redis_noperm 'keys outside lobehub:app:*' \
+    SET "test-agent:lobehub-acl-preflight:$$" 1 EX 30
+  require_redis_noperm 'Lua access outside lobehub:app:*' \
+    EVAL 'return redis.call("GET", KEYS[1])' 1 "test-agent:lobehub-acl-preflight:$$"
+  require_redis_noperm 'channels outside lobehub:app:*' \
+    PUBLISH "test-agent:lobehub-acl-preflight" 1
+  require_redis_noperm 'CONFIG' CONFIG GET '*'
+  require_redis_noperm 'ACL administration' ACL WHOAMI
+  require_redis_noperm 'MODULE administration' MODULE LIST
+  require_redis_noperm 'database flush' FLUSHDB
+  require_redis_noperm 'unscoped KEYS' KEYS '*'
+  require_redis_noperm 'SCRIPT FLUSH' SCRIPT FLUSH
 }
 
 start_db() {
@@ -709,6 +723,25 @@ verify_container_secret_isolation() {
   done
 }
 
+verify_platform_integration() {
+  local probe_env
+  validate_app_env
+  [[ -f "${PLATFORM_PROBE}" && ! -L "${PLATFORM_PROBE}" ]] || {
+    echo "Installed LobeHub platform probe must be a regular non-symlink file: ${PLATFORM_PROBE}" >&2
+    exit 1
+  }
+  create_platform_probe_env_file probe_env
+  docker run --rm --read-only \
+    --network "${NETWORK}" \
+    --env-file "${probe_env}" \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --pids-limit 64 \
+    -v "${PLATFORM_PROBE}:/app/lobehub-platform-probe.mjs:ro" \
+    "$(require_env LOBEHUB_APP_IMAGE)" \
+    /app/lobehub-platform-probe.mjs
+}
+
 verify_deployment() {
   validate_app_env
   check_redis
@@ -716,6 +749,7 @@ verify_deployment() {
   verify_rustfs_runtime
   verify_app_runtime
   verify_container_secret_isolation
+  verify_platform_integration
   echo 'LobeHub deployment verification passed'
 }
 
@@ -737,6 +771,7 @@ case "${1:-}" in
   start) start_all ;;
   stop) stop_all ;;
   status) status_all ;;
+  verify-platform) verify_platform_integration ;;
   verify-deployment) verify_deployment ;;
   *) usage; exit 2 ;;
 esac

@@ -1445,3 +1445,44 @@
     Approved 客户端及独立验收记录、企业内部 Git remote 导入，以及目标现场 DNS/反代/网络、真实 Flyway
     history、备份恢复和回滚演练。Apple Silicon Docker 冒烟不能替代这些外部验收，完成前继续保持
     `LOBEHUB_ENABLED=false`。
+
+### 2026-07-31 - 收紧 LobeHub Redis、客户端证据与离线发布原子性并升级 platform.5
+
+- Why:
+  - 复核企业部署边界时发现 Agent Runtime 的直接 ioredis 连接绕过上游 `REDIS_PREFIX`，最小 ACL 下可能产生
+    无前缀 key；Linux 最终审批也只绑定候选件和验收记录，未把原生构建人证据纳入完整介质。
+  - server-only 定稿与 fork 转运虽然保护了显式输入路径，但仍需拒绝复制期间输入变化、协作发布并发和目标
+    inode 被替换；现场还缺少可直接执行的最小 Redis ACL 创建程序及平台 HMAC/nonce 运行探针。
+- What:
+  - 独立 fork 为 Agent Runtime ioredis 增加 `lobehub:app:` 物理 key 前缀，返回业务 ID 时剥离前缀，并用游标
+    `SCAN` 替代阻塞式 `KEYS`；发布提交为 `57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c`，annotated tag 为
+    `v2.2.11-platform.5`。
+  - 新增 `lobehub-redis-acl.sh`，从 `-@all` 开始显式授权运行命令，同时限制 key/channel；`check-redis` 证明
+    前缀外 key/channel、Lua 越权和 `CONFIG/ACL/MODULE/FLUSHDB/KEYS/SCRIPT FLUSH` 均被拒绝。新增服务端
+    `lobehub-platform-probe.mjs`，以固定撤销端点验证有效 HMAC 和同 nonce 重放 401，并纳入现场完整验收。
+  - Linux 构建脚本强制稳定构建人身份，最终审批证据绑定构建证据 SHA 且构建人与审批人必须不同；构建、定稿、
+    封包和安装统一要求 `linux-client-build-evidence.txt`。定稿与 fork 转运增加预存在父目录、相邻锁、复制前后
+    摘要及输出 inode 复核；安装/封包拒绝符号链接及 FIFO/socket/device，并严格核对包内版本锁。
+  - 平台版本锁、环境模板、测试夹具、部署入口、架构、安全、客户端构建、fork 转运和现场执行手册同步升级到
+    `.5`，明确 ACL 管理员密码只进入 `REDISCLI_AUTH`、应用密码经 stdin 传给 `redis-cli -x`。
+- How:
+  - fork 定向 39 项、lint/check 和完整 typecheck 通过；平台 Redis ACL、HMAC 探针、客户端合同、构建工具包、
+    artifact builder、定稿、fork 转运、封包、安装和冷备份合同测试全部通过。
+  - 从干净锁定 fork 重建 2.2 GiB `linux/amd64` server-only 介质；应用镜像 ID 为
+    `sha256:7f504fb3723402bd6b17165db02937964799beefc96ae22b34bd8ef60c5ce866`，`release.env` 与
+    `SHA256SUMS` 文件摘要分别为 `3c94d96377fc192301be0851dbd3eeaf15965108eb20fa67e069e2ed9919cc03`、
+    `39c17085322d130045bdbe94d969be9b32ca6abc758ce37b6597ec35a4c4dccf`。真实镜像烟测完成 PostgreSQL 17
+    migration、显式 ACL/越权拒绝、HMAC nonce 重放、私有 RustFS、离线 scheduler、密钥隔离及冷备恢复。
+  - `.5` fork 转运 ZIP 为 294,993,231 字节、SHA-256
+    `2cbca71e90d0fa5925363c530538506e019227a56f0caeae8cf89e0d677843a2`；客户端工具包为 53,453,544 字节、
+    SHA-256 `10fba3e98938252eb0ca7a3a40d0425d8f043ebe268ee267c2e019f3e2210ee1`，均复制到固定 0709 目录并校验。
+  - 使用未修改的 `.env.test` 执行完整 `restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`；
+    后端 8080、前端 3000、LobeHub 3210 启动，真实平台 HMAC/nonce 探针通过，完整封包因缺正式客户端按预期
+    失败关闭。
+- Result:
+  - 本地开发与服务端离线部署现使用同一 `.5` fork/镜像/手册，Redis 前缀和最小权限 ACL、平台服务身份以及
+    原生 Linux 构建来源都形成可执行证据链。本次不新增或改变 HTTP API、RunEvent、数据库/Flyway/MyBatis SQL、
+    模型网关 wire 或性能策略，未修改 `.env.local`、generated SDK 或 OpenCode 源码；兼容性仅收紧完整介质合同。
+  - 完整上线 ZIP 仍按设计等待企业 Authenticode Windows 客户端、原生 Linux x86_64 客户端及双人审批证据；
+    企业 Git remote、目标 Linux/Redis、真实平台 Flyway history、DNS/反代/网络隔离和备份回滚仍需现场验收。
+    完成前保持 `LOBEHUB_ENABLED=false`，不得把 server-only 或 Bundle 宣称为完整上线交付。

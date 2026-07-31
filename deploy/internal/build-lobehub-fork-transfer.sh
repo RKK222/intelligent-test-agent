@@ -8,6 +8,10 @@ VERSION_FILE="${SCRIPT_DIR}/lobehub/version.env"
 OUTPUT_DIR="${ROOT_DIR}/lobehub-fork-transfer"
 FORCE=0
 STAGING_DIR=""
+LOCK_DIR=""
+LOCK_ACQUIRED=0
+OUTPUT_EXISTED=0
+OUTPUT_IDENTITY=""
 
 usage() {
   cat <<'USAGE'
@@ -82,6 +86,14 @@ sha256_file() {
   fi
 }
 
+path_identity() {
+  if stat -c '%d:%i:%F' "$1" >/dev/null 2>&1; then
+    stat -c '%d:%i:%F' "$1"
+  else
+    stat -f '%d:%i:%HT' "$1"
+  fi
+}
+
 scan_fork_delta_for_credentials() {
   local oid object_type
   # 只使用高置信格式，避免把示例中的普通 password/token 字样误判为真实凭据；命中时不输出原文或路径。
@@ -108,7 +120,7 @@ scan_fork_delta_for_credentials() {
   fi
 }
 
-for command_name in git node zip awk find grep mktemp; do
+for command_name in git node zip awk find grep mktemp stat; do
   require_command "${command_name}"
 done
 validate_state_file "${VERSION_FILE}"
@@ -158,7 +170,8 @@ OUTPUT_BASENAME="$(basename "${OUTPUT_DIR}")"
 [[ -n "${OUTPUT_BASENAME}" && "${OUTPUT_BASENAME}" != . && "${OUTPUT_BASENAME}" != .. ]] ||
   fail "unsafe output directory: ${OUTPUT_DIR}"
 OUTPUT_PARENT="$(dirname "${OUTPUT_DIR}")"
-mkdir -p "${OUTPUT_PARENT}"
+[[ -d "${OUTPUT_PARENT}" && ! -L "${OUTPUT_PARENT}" ]] ||
+  fail "output parent must already be a real directory: ${OUTPUT_PARENT}"
 OUTPUT_PARENT="$(cd "${OUTPUT_PARENT}" && pwd -P)"
 OUTPUT_DIR="${OUTPUT_PARENT}/${OUTPUT_BASENAME}"
 case "${OUTPUT_DIR}" in
@@ -185,13 +198,26 @@ esac
 if [[ -e "${OUTPUT_DIR}" && "${FORCE}" -ne 1 ]]; then
   fail "output already exists; use --force for this exact directory: ${OUTPUT_DIR}"
 fi
+if [[ -e "${OUTPUT_DIR}" ]]; then
+  [[ -d "${OUTPUT_DIR}" && ! -L "${OUTPUT_DIR}" ]] ||
+    fail 'existing output must be a real directory'
+  OUTPUT_EXISTED=1
+  OUTPUT_IDENTITY="$(path_identity "${OUTPUT_DIR}")"
+fi
 
 TRANSFER_NAME="lobehub-fork-transfer-${INTERNAL_VERSION}"
 BUNDLE_NAME="lobehub-platform-${INTERNAL_VERSION}.bundle"
 ZIP_NAME="${TRANSFER_NAME}.zip"
+LOCK_DIR="${OUTPUT_PARENT}/.${OUTPUT_BASENAME}.lobehub-fork-transfer.lock"
+mkdir "${LOCK_DIR}" 2>/dev/null ||
+  fail "another transfer builder is already publishing this output: ${OUTPUT_DIR}"
+LOCK_ACQUIRED=1
 STAGING_DIR="$(mktemp -d "${OUTPUT_PARENT}/.lobehub-fork-transfer.XXXXXX")"
 cleanup() {
   [[ -n "${STAGING_DIR}" && -d "${STAGING_DIR}" ]] && rm -rf "${STAGING_DIR}"
+  if [[ "${LOCK_ACQUIRED}" -eq 1 && -d "${LOCK_DIR}" && ! -L "${LOCK_DIR}" ]]; then
+    rmdir "${LOCK_DIR}" >/dev/null 2>&1 || true
+  fi
 }
 trap cleanup EXIT
 CONTENT_DIR="${STAGING_DIR}/${TRANSFER_NAME}"
@@ -278,12 +304,22 @@ ZIP_SHA="$(sha256_file "${PUBLISH_DIR}/${ZIP_NAME}")"
 printf '%s  %s\n' "${ZIP_SHA}" "${ZIP_NAME}" >"${PUBLISH_DIR}/${ZIP_NAME}.sha256"
 rm -rf "${CONTENT_DIR}"
 
-if [[ -e "${OUTPUT_DIR}" ]]; then
+if [[ "${OUTPUT_EXISTED}" -eq 1 ]]; then
+  [[ -d "${OUTPUT_DIR}" && ! -L "${OUTPUT_DIR}" \
+    && "$(path_identity "${OUTPUT_DIR}")" == "${OUTPUT_IDENTITY}" ]] ||
+    fail 'forced output object changed while transfer media was being built'
   rm -rf "${OUTPUT_DIR}"
+else
+  [[ ! -e "${OUTPUT_DIR}" && ! -L "${OUTPUT_DIR}" ]] ||
+    fail 'output appeared while transfer media was being built'
 fi
 mv "${PUBLISH_DIR}" "${OUTPUT_DIR}"
 rm -rf "${STAGING_DIR}"
 STAGING_DIR=""
+if [[ "${LOCK_ACQUIRED}" -eq 1 ]]; then
+  rmdir "${LOCK_DIR}"
+  LOCK_ACQUIRED=0
+fi
 trap - EXIT
 
 echo "LobeHub fork transfer media built at ${OUTPUT_DIR}/${ZIP_NAME}."

@@ -1,6 +1,6 @@
 # LobeHub 企业离线部署
 
-本文描述 LobeHub `v2.2.11-platform.4` 的离线制品、安装、启动、备份和回滚。架构与 fork 必须实现的行为见
+本文描述 LobeHub `v2.2.11-platform.5` 的离线制品、安装、启动、备份和回滚。架构与 fork 必须实现的行为见
 `docs/architecture/lobehub-integration.md`。本仓库不包含独立 fork 源码，只有通过制品门禁的外部构建结果
 才能进入全量包或 LobeHub-only 包。独立 fork 的企业 Git 转运和导入见
 `docs/deployment/lobehub-fork-transfer.md`，不能用运行 ZIP 代替源码托管。
@@ -10,7 +10,7 @@
 | 组件 | 固定基线 | 说明 |
 |---|---|---|
 | LobeHub upstream | `v2.2.11` / `5b4cef6` | 独立内部 fork，不修改本仓库 OpenCode 快照 |
-| LobeHub internal | `v2.2.11-platform.4` / `306dad5dc0968ed008f011d7fc07f12a606b21e1` | 平台契约版本 `2` |
+| LobeHub internal | `v2.2.11-platform.5` / `57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c` | 平台契约版本 `2` |
 | LobeHub database | ParadeDB / PostgreSQL 17 | 独立库、账号、密码、数据卷和 migration |
 | Redis | 现有企业实例 DB 0 | 独立 ACL 用户；LobeHub key/channel 仅 `lobehub:app:*` |
 | RustFS | `release.env` 中的不可变 tag、Docker image ID 和 tar SHA-256 | 私有 bucket，容器以 UID 10001 写数据 |
@@ -29,6 +29,8 @@ Docker Compose。默认目录：
   config/lobehub.env                 # 0600，实际 secret
   deploy/internal/lobehub-docker.sh
   deploy/internal/lobehub-backup.sh
+  deploy/internal/lobehub-redis-acl.sh
+  deploy/internal/lobehub-platform-probe.mjs
   lobehub/paradedb/                  # 独立数据库卷
   lobehub/rustfs/data/               # UID 10001
   lobehub/rustfs/logs/
@@ -93,11 +95,11 @@ deploy/internal/build-lobehub-fork-transfer.sh \
   --output-dir deploy/internal/dist-lobehub-fork-transfer
 ```
 
-工具只发布 `refs/heads/main` 和 `refs/tags/v2.2.11-platform.4`，扫描 fork 增量全部可达对象中的高置信
+工具只发布 `refs/heads/main` 和 `refs/tags/v2.2.11-platform.5`，扫描 fork 增量全部可达对象中的高置信
 私钥/token 格式，并执行 Bundle verify、独立 clone、包内
 `SHA256SUMS` 和外层 ZIP SHA-256。当前真实转运件已复制到外网 Mac
 `~/Desktop/mimoagent/0709/lobehub-fork-transfer`，外层 SHA-256 为
-`e63e4cfa16ab7925d2298eb1e34312e362ec5237a361f4d1ffd5cc46c145dec7`。这只表示可转运介质已就绪；企业 Git
+`2cbca71e90d0fa5925363c530538506e019227a56f0caeae8cf89e0d677843a2`。这只表示可转运介质已就绪；企业 Git
 管理员尚未提供内部远端并完成 push/`ls-remote` 验证，因此不能记为内部源码托管完成。完整导入、权限和失败
 处理见 [LobeHub 独立 fork 企业 Git 转运与导入](lobehub-fork-transfer.md)。
 
@@ -113,6 +115,7 @@ LICENSES.txt
 windows-authenticode-verification.txt
 linux-client-verification.txt
 linux-client-acceptance-record.txt
+linux-client-build-evidence.txt
 images/lobehub-image.tar
 images/paradedb-image.tar
 images/rustfs-image.tar
@@ -120,35 +123,37 @@ clients/lobehub-windows-x64.exe
 clients/lobehub-linux-x86_64.tar.gz
 bin/mc-linux-amd64
 sbom/lobehub.spdx.json
-source/lobehub-v2.2.11-platform.4.tar.gz
+source/lobehub-v2.2.11-platform.5.tar.gz
 ```
 
 `SHA256SUMS` 必须恰好覆盖除自身外的全部普通文件，不允许绝对路径、`..`、空白文件名、重复项或符号链接。
 `release.env` 至少包含：
 
 ```dotenv
-LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.4
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.5
 LOBEHUB_UPSTREAM_VERSION=v2.2.11
 LOBEHUB_UPSTREAM_COMMIT=5b4cef6
-LOBEHUB_FORK_COMMIT=306dad5dc0968ed008f011d7fc07f12a606b21e1
+LOBEHUB_FORK_COMMIT=57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c
 LOBEHUB_PLATFORM_CONTRACT_VERSION=2
 LOBEHUB_PARADEDB_POSTGRES_MAJOR=17
 LOBEHUB_WINDOWS_AUTHENTICODE_VERIFIED=true
 LOBEHUB_LINUX_CLIENT_APPROVED=true
 LOBEHUB_LINUX_EXECUTION_DEFAULT=false
-LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.4
+LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.5
 LOBEHUB_APP_IMAGE_ID=sha256:<64 lowercase hex>
-LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.4
+LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.5
 LOBEHUB_PARADEDB_IMAGE_ID=sha256:<64 lowercase hex>
-LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.4
+LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.5
 LOBEHUB_RUSTFS_IMAGE_ID=sha256:<64 lowercase hex>
 ```
 
 `windows-authenticode-verification.txt` 使用 `KEY=value`，必须包含 `AUTHENTICODE_STATUS=Valid`、非占位
 `AUTHENTICODE_SUBJECT`、40/64 位十六进制 `AUTHENTICODE_THUMBPRINT`、与实际 EXE 一致的
 `AUTHENTICODE_FILE_SHA256`，以及匹配的内部版本、fork commit、`CLIENT_ARCHITECTURE=x64` 和
-`CLIENT_EXECUTION_MODE=disabled`。`linux-client-verification.txt` 必须为 `Approved`，绑定 Linux 客户端、
-`linux-client-acceptance-record.txt`、版本、commit、x86_64、实际目标 OS/内核和审批人。验收记录必须把登录、
+`CLIENT_EXECUTION_MODE=disabled`。`linux-client-build-evidence.txt` 必须绑定 Linux 候选件、版本、commit、
+x86_64、执行禁用状态、真实构建 OS/内核以及稳定的非占位构建人身份；`linux-client-verification.txt` 必须为
+`Approved`，同时绑定候选件、构建证据摘要、`linux-client-acceptance-record.txt`、版本、commit、x86_64、
+实际目标 OS/内核和审批人。构建人与审批人必须是大小写无关比较后仍不同的身份。验收记录必须把登录、
 无公网依赖、运行期下载阻断、本地数据隔离和设备执行禁用全部记为成功，并关联真实变更单号。详细原生构建与
 双人审批步骤见 [LobeHub 企业客户端原生构建与审批](lobehub-client-build.md)。打包脚本
 会失败关闭校验上述契约；现场导入后还会用 `docker image inspect` 确认 tar 提供预期 tag、`linux/amd64`
@@ -170,6 +175,7 @@ deploy/internal/build-lobehub-artifacts.sh \
   --windows-client /absolute/path/to/lobehub-windows-x64.exe \
   --windows-signature-evidence /absolute/path/to/windows-authenticode-verification.txt \
   --linux-client /absolute/path/to/lobehub-linux-x86_64.tar.gz \
+  --linux-build-evidence /absolute/path/to/linux-client-build-evidence.txt \
   --linux-approval-evidence /absolute/path/to/linux-client-verification.txt \
   --linux-acceptance-record /absolute/path/to/linux-client-acceptance-record.txt \
   --node-base-image node@sha256:d45d78e7929b46875bbd4e29bea672d5bc48186c6c3588306521c815e78352d6 \
@@ -199,19 +205,24 @@ deploy/internal/finalize-lobehub-artifacts.sh \
   --windows-client /absolute/path/to/lobehub-windows-x64.exe \
   --windows-signature-evidence /absolute/path/to/windows-authenticode-verification.txt \
   --linux-client /absolute/path/to/lobehub-linux-x86_64.tar.gz \
+  --linux-build-evidence /absolute/path/to/linux-client-build-evidence.txt \
   --linux-approval-evidence /absolute/path/to/linux-client-verification.txt \
   --linux-acceptance-record /absolute/path/to/linux-client-acceptance-record.txt
 ```
 
-源目录不会被修改；输出已存在时默认拒绝，只有明确 `--force` 才替换该精确目录。输出不得等于或包含任一
+源目录不会被修改；输出父目录必须预先存在，工具不会在受保护输入内隐式创建路径。输出已存在时默认拒绝，
+只有明确 `--force` 才替换该精确目录。工具使用相邻发布锁，并在校验前后重新核对 server-only 清单、六项
+客户端/证据输入和输出 inode；协作发布冲突、输入在复制期间变化或目标被并发替换都会失败，且不会删除并发
+创建的目标。输出不得等于或包含任一
 客户端、签名/审批证据、版本锁、部署脚本、平台仓库或 server-only 源目录。定稿需要为新目录预留至少
 server-only 大小和后续 ZIP 的磁盘空间。摘要篡改、符号链接或其它特殊文件、版本不符、原目录已声称客户端通过、Windows
 非 `Valid`、Linux 非 `Approved`、占位审批人或任一摘要不匹配都会失败，且不会生成输出目录。定稿成功后仍须
 用下一步 `package-release.sh` 完成独立的最终准入。
 
-服务端阶段构建完成且三张镜像仍在本机时，执行真实运行时冒烟。脚本拒绝覆盖同名容器，临时创建带
-key/channel/command ACL 的 Redis，并实际完成 PostgreSQL 17 启动、LobeHub migration、私有 RustFS bucket、
-app readiness、离线工作流阻断、内部 scheduler 鉴权和容器密钥隔离检查。随后它向数据库和对象存储写入
+服务端阶段构建完成且三张镜像仍在本机时，执行真实运行时冒烟。脚本拒绝覆盖同名容器，临时创建从
+`-@all` 开始、显式列出命令且同时限制 key/channel 的 Redis ACL，并实际完成 PostgreSQL 17 启动、LobeHub
+migration、私有 RustFS bucket、app readiness、平台 HMAC 成功请求与同 nonce 重放拒绝、离线工作流阻断、
+内部 scheduler 鉴权和容器密钥隔离检查。随后它向数据库和对象存储写入
 证明数据，执行停机冷备份、移走临时数据、恢复、再次启动和部署验收，并确认两类证明数据仍存在；退出时只
 清理自己创建的资源：
 
@@ -241,11 +252,14 @@ TEST_AGENT_LOBEHUB_ARTIFACT_DIR=/absolute/path/to/lobehub-release-artifacts \
 再 `scp` 到目标服务器 `/data/0709`；不要在中转机创建 `/data/0709`，也不要描述为从外网 Mac 直接 scp。
 不得在现场联网补拉镜像、npm 包、Marketplace、Connector 或客户端。
 
-当前 `.4` server-only 实物位于 `deploy/internal/dist-lobehub-server`，大小约 2.2 GB；其 `release.env`
-SHA-256 为 `788b869b4228c56d164ec87c378828e39885ffc17b33a107d730c1711fac6c45`，`SHA256SUMS` 文件自身 SHA-256 为
-`ed1523efa8f4daaadc50b66a89dca47922c605fe9acdbe92ceb42b6c5550dc15`。该目录已经从三张真实 tar 完成
-PostgreSQL 17 migration、Redis ACL、私有 RustFS、app readiness、离线/调度门禁、证明数据冷备恢复和二次
-部署验收，并已生成原生客户端构建工具包和可离线 clone 的独立 fork Git Bundle；完整打包门禁确认
+当前 `.5` server-only 实物位于 `deploy/internal/dist-lobehub-server`，大小约 2.2 GB；其 `release.env`
+SHA-256 为 `3c94d96377fc192301be0851dbd3eeaf15965108eb20fa67e069e2ed9919cc03`，`SHA256SUMS` 文件自身 SHA-256 为
+`39c17085322d130045bdbe94d969be9b32ca6abc758ce37b6597ec35a4c4dccf`，应用镜像 ID 为
+`sha256:7f504fb3723402bd6b17165db02937964799beefc96ae22b34bd8ef60c5ce866`。该目录已经从三张真实 tar 完成
+PostgreSQL 17 migration、显式 Redis ACL 与越权拒绝、平台 HMAC/nonce 重放探测、私有 RustFS、app readiness、
+离线/调度门禁、证明数据冷备恢复和二次部署验收。`.5` 原生客户端构建工具包 SHA-256 为
+`10fba3e98938252eb0ca7a3a40d0425d8f043ebe268ee267c2e019f3e2210ee1`，独立 fork 转运 ZIP SHA-256 为
+`2cbca71e90d0fa5925363c530538506e019227a56f0caeae8cf89e0d677843a2`；完整打包门禁确认
 因缺少 Windows/Linux 正式客户端而失败关闭。完整 `test-agent-lobehub-offline.zip` 仍以企业签名 Windows x64
 客户端及证据、批准的 Linux x86_64 客户端、审批证据和独立验收记录为硬门禁。上述外部结果未提供前，运行
 介质状态只能记为“服务端阶段已验证”，不能记为“完整企业介质已完成”；fork 状态只能记为“转运介质已就绪”，
@@ -279,10 +293,20 @@ PostgreSQL 17 migration、Redis ACL、私有 RustFS、app readiness、离线/调
    写入命令行。平台后台的 `TEST_AGENT_LOBEHUB_HMAC_SECRET` 必须与该文件的
    `PLATFORM_SSO_HMAC_SECRET` 一致。
 
-4. Redis 管理员为 LobeHub 创建仅允许 `lobehub:app:*` key/channel 的独立 ACL 用户后，`<lobehub-host>`
-   逐项预检并只启动数据依赖。预期分别看到配置通过、Redis 检查零退出码、PostgreSQL 17 ready 和 migration 成功：
+4. Redis 管理员在 `<lobehub-host>` 通过随包脚本创建最小权限用户。管理员密码只用交互式静默输入进入
+   `REDISCLI_AUTH`，应用密码由 mode `0600` 的 `lobehub.env` 经 stdin 交给 `redis-cli -x`；两者都不得进入
+   argv 或日志。脚本从 `-@all` 开始，只允许固定命令及 `lobehub:app:*` key/channel。随后逐项预检并只启动
+   数据依赖。预期看到 ACL applied、配置通过、Redis 检查零退出码、PostgreSQL 17 ready 和 migration 成功：
 
    ```bash
+   read -r -s -p 'Redis administrator password: ' REDISCLI_AUTH
+   printf '\n'
+   export REDISCLI_AUTH
+   /data/testagent/deploy/internal/lobehub-redis-acl.sh apply \
+     --env-file /data/testagent/config/lobehub.env \
+     --admin-user <redis-admin-user>
+   unset REDISCLI_AUTH
+
    /data/testagent/deploy/internal/lobehub-docker.sh validate-config
    /data/testagent/deploy/internal/lobehub-docker.sh check-redis
    /data/testagent/deploy/internal/lobehub-docker.sh start-db
@@ -294,7 +318,8 @@ PostgreSQL 17 migration、Redis ACL、私有 RustFS、app readiness、离线/调
 5. 平台后台节点按现有企业发布手册升级 migration/backend，并确认 health、签票、兑换和模型网关端点已就绪；
    首台出现 Flyway 未知 checksum 或失败记录时立即停止，不继续其它后台或 LobeHub app。
 
-6. `<lobehub-host>` 启动 app 并执行完整部署验收。预期 app、db、rustfs 都为运行状态，最后一条命令打印
+6. `<lobehub-host>` 启动 app 并执行完整部署验收。预期 app、db、rustfs 都为运行状态；验收还会以只读挂载的
+   探针调用固定平台撤销端点，证明有效 HMAC 可用且同 nonce 重放为 401，最后打印
    `LobeHub deployment verification passed`：
 
    ```bash
@@ -319,8 +344,9 @@ PostgreSQL 17 migration、Redis ACL、私有 RustFS、app readiness、离线/调
 deploy/internal/install-lobehub-offline.sh
 ```
 
-安装器复核内部清单、导入三份镜像、验证 tag/image ID/架构、安装客户端/来源/SBOM、创建 systemd unit，并在不存在时
-创建 mode `0600` 的 `/data/testagent/config/lobehub.env` 模板。它不会覆盖既有实际配置。
+安装器复核内部清单及包内版本锁、拒绝符号链接和 FIFO/socket/device 等特殊文件、导入三份镜像、验证
+tag/image ID/架构、安装客户端/来源/SBOM、ACL/平台探针和 systemd unit，并在不存在时创建 mode `0600` 的
+`/data/testagent/config/lobehub.env` 模板。它不会覆盖既有实际配置。
 
 根据 `deploy/internal/lobehub.env.example` 配置独立数据库密码、共享 Redis ACL 账号、RustFS 密钥、固定平台
 地址、HMAC、委托加密密钥、Key Vault、Session 密钥和独立内部 scheduler 密钥。后者使用
@@ -359,19 +385,22 @@ app 镜像不创建公网 QStash schedule。单实例 launcher 每分钟只向�
 任务，单次 30 秒超时且不重叠；到期任务以内嵌方式继承 `createdByUserId` 的模型委托。当前手册禁止启动第二个
 app 副本；在没有跨实例选主/锁前横向复制会导致重复 sweep。
 
-`v2.2.11-platform.4` 对 Windows 和 Linux 都强制 `LOBEHUB_DEVICE_EXECUTION_MODE=disabled`，没有可用的
+`v2.2.11-platform.5` 对 Windows 和 Linux 都强制 `LOBEHUB_DEVICE_EXECUTION_MODE=disabled`，没有可用的
 “验收后改 true”路径。Linux 真实沙箱能力需在后续版本另行实现、测试和审批；当前版本修改其它旧布尔变量
 不会放开执行入口。
 
 ## Redis ACL
 
-为 fork 创建独立 Redis 用户，key pattern 和 channel pattern 都只允许 `lobehub:app:*`；按实际上游命令清单
-授予最小命令，至少禁止 `CONFIG`、`ACL`、`MODULE`、`KEYS`、`FLUSH*` 以及其它管理命令。客户端认证的
+使用 `lobehub-redis-acl.sh apply` 为 fork 创建独立 Redis 用户，key pattern 和 channel pattern 都只允许
+`lobehub:app:*`；命令权限必须从 `-@all` 开始使用脚本内固定白名单，不得用 `+@all`。Agent Runtime 的物理 key
+也由 ioredis `keyPrefix` 约束；列表操作只允许游标 `SCAN`，明确禁止阻塞式 `KEYS`。至少禁止 `CONFIG`、`ACL`、
+`MODULE`、`KEYS`、`SCRIPT FLUSH`、`FLUSH*` 以及其它管理命令。客户端认证的
 request/code/session 状态机使用仓库中经过测试的固定 Lua 脚本，因此必须允许 `EVAL`，但不得放宽 key/channel
 pattern，也不得允许任意管理命令。`lobehub-docker.sh check-redis` 会验证：
 
-- 当前账号能 PING、写删 `lobehub:app:*`、执行固定只读 Lua 预检并发布 `lobehub:app:*` channel。
-- 不能写 `test-agent:*` key，不能发布 `test-agent:*` channel，不能执行 `CONFIG GET`。
+- 当前账号能 PING、写删 `lobehub:app:*`、执行受 key pattern 约束的 Lua 并发布 `lobehub:app:*` channel。
+- 不能写 `test-agent:*` key，Lua 不能访问前缀外 key，不能发布 `test-agent:*` channel，不能执行
+  `CONFIG`、`ACL`、`MODULE`、`FLUSHDB`、`KEYS` 或 `SCRIPT FLUSH`。
 
 平台票据、nonce 和委托使用现有平台 Redis 连接，固定前缀 `test-agent:lobehub-sso:*`。现场还必须通过 fork
 集成测试确认上游所有 key/pubsub 都遵守 `REDIS_PREFIX=lobehub:app`，不存在无前缀旁路。
@@ -389,7 +418,7 @@ pattern，也不得允许任意管理命令。`lobehub-docker.sh check-redis` �
 7. 升级平台 migration/backend，确认 health 和三类 SSO API。
 8. `lobehub-docker.sh start-app`，再配置 HTTP 反向代理/DNS。
 9. 执行 `lobehub-docker.sh verify-deployment`，检查镜像、端口、restart policy、PostgreSQL 17、Redis ACL、
-   私有 bucket、HTTP 策略和容器密钥隔离；失败不得开放入口。
+   私有 bucket、HTTP 策略、容器密钥隔离，以及平台 HMAC 成功请求与 nonce 重放拒绝；失败不得开放入口。
 10. 管理员维护模型目录，对每一项声明能力执行探测；只有成功能力才进入 `/models`。
 11. 完成认证、部门 Workspace、模型、断网和客户端验收后，最后设置 `LOBEHUB_ENABLED=true`。
 
@@ -433,7 +462,7 @@ Redis、ParadeDB 或 RustFS console 暴露到非隔离网段。
 - 数据：H2、真实 PostgreSQL、完整 Flyway、已部署基线升级、共享 Redis ACL/前缀碰撞、备份恢复和回滚演练。
 - 部署：危险 app bind 和交叉错接的 DB/Redis/S3/app/平台 URL 被配置预检拒绝；`start-app/status` 通过真实
   HTTP readiness；`verify-deployment` 复核运行镜像、端口、restart policy、PostgreSQL 17、Redis ACL、私有
-  bucket、HTTP 离线策略和密钥隔离；同机或跨机 Nginx upstream 与 bind 一致，跨机 3210 只允许代理源地址；
+  bucket、HTTP 离线策略、密钥隔离和平台 HMAC/nonce 重放拒绝；同机或跨机 Nginx upstream 与 bind 一致，跨机 3210 只允许代理源地址；
   外网构建机的真实镜像冷备份恢复冒烟通过，现场仍重复逐机验收。
 - 密钥隔离：重复 dotenv key/符号链接/非 0600 配置被拒绝；`docker inspect` 确认 ParadeDB、RustFS 不含
   HMAC、Session、模型委托或其它容器凭据，临时 env 文件已删除。

@@ -11,6 +11,7 @@ trap 'rm -rf "${FIXTURE_DIR}"' EXIT
 "${BUILDER}" --help | grep -F -- '--validate-only' >/dev/null
 "${BUILDER}" --help | grep -F -- '--linux-approval-evidence' >/dev/null
 "${BUILDER}" --help | grep -F -- '--linux-acceptance-record' >/dev/null
+"${BUILDER}" --help | grep -F -- '--linux-build-evidence' >/dev/null
 
 if "${BUILDER}" --validate-only >/dev/null 2>&1; then
   echo "LobeHub artifact builder accepted missing release inputs" >&2
@@ -42,9 +43,9 @@ grep -F 'LOBEHUB_FORK_COMMIT' "${ROOT_DIR}/deploy/internal/lobehub/version.env" 
 grep -F 'git -C "${FORK_DIR}" archive --format=tar "${FORK_COMMIT}"' "${BUILDER}" >/dev/null
 grep -F 'corepack pnpm@10.33.0 install --frozen-lockfile' \
   "${ROOT_DIR}/tools/lobehub-dev-services.sh" >/dev/null
-grep -F 'LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.4' \
+grep -F 'LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.5' \
   "${INTERNAL_DIR}/lobehub.env.example" >/dev/null
-grep -F 'LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.4' \
+grep -F 'LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.5' \
   "${INTERNAL_DIR}/lobehub.env.example" >/dev/null
 grep -F 'AGENT_RUNTIME_MODE=local' "${INTERNAL_DIR}/lobehub.env.example" >/dev/null
 
@@ -59,13 +60,27 @@ if [[ -d "${FORK_DIR}/.git" ]]; then
     WINDOWS_SHA="$(shasum -a 256 "${FIXTURE_DIR}/lobehub-windows-x64.exe" | awk '{print $1}')"
     LINUX_SHA="$(shasum -a 256 "${FIXTURE_DIR}/lobehub-linux-x86_64.tar.gz" | awk '{print $1}')"
   fi
+  cat >"${FIXTURE_DIR}/linux-client-build-evidence.txt" <<EOF
+LINUX_BUILD_STATUS=Candidate
+LINUX_BUILDER=linux-builder@example.internal
+LINUX_CLIENT_FILE_SHA256=${LINUX_SHA}
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.5
+LOBEHUB_FORK_COMMIT=57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c
+CLIENT_ARCHITECTURE=x86_64
+CLIENT_EXECUTION_MODE=disabled
+BUILD_OS=Enterprise Linux Builder 9.6
+BUILD_KERNEL=5.14.0-builder.x86_64
+BUILD_NODE_VERSION=v24.11.1
+BUILD_BUN_VERSION=1.3.2
+SOURCE_ARCHIVE_SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+EOF
   cat >"${FIXTURE_DIR}/windows-authenticode-verification.txt" <<EOF
 AUTHENTICODE_STATUS=Valid
 AUTHENTICODE_SUBJECT=CN=Enterprise Release Signing
 AUTHENTICODE_THUMBPRINT=0123456789ABCDEF0123456789ABCDEF01234567
 AUTHENTICODE_FILE_SHA256=${WINDOWS_SHA}
-LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.4
-LOBEHUB_FORK_COMMIT=306dad5dc0968ed008f011d7fc07f12a606b21e1
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.5
+LOBEHUB_FORK_COMMIT=57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c
 CLIENT_ARCHITECTURE=x64
 CLIENT_EXECUTION_MODE=disabled
 EOF
@@ -88,13 +103,20 @@ EOF
 LINUX_APPROVAL_STATUS=Approved
 LINUX_APPROVER=security-reviewer@example.internal
 LINUX_CLIENT_FILE_SHA256=${LINUX_SHA}
-LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.4
-LOBEHUB_FORK_COMMIT=306dad5dc0968ed008f011d7fc07f12a606b21e1
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.5
+LOBEHUB_FORK_COMMIT=57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c
 CLIENT_ARCHITECTURE=x86_64
 CLIENT_EXECUTION_MODE=disabled
 LINUX_VALIDATION_OS=Enterprise Linux 9.6
 LINUX_VALIDATION_KERNEL=5.14.0-570.26.1.el9_6.x86_64
 LINUX_ACCEPTANCE_RECORD_SHA256=${ACCEPTANCE_SHA}
+LINUX_BUILD_EVIDENCE_SHA256=$(
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "${FIXTURE_DIR}/linux-client-build-evidence.txt" | awk '{print $1}'
+  else
+    shasum -a 256 "${FIXTURE_DIR}/linux-client-build-evidence.txt" | awk '{print $1}'
+  fi
+)
 EOF
 
   "${BUILDER}" --validate-only --allow-dirty \
@@ -104,6 +126,7 @@ EOF
     --linux-client "${FIXTURE_DIR}/lobehub-linux-x86_64.tar.gz" \
     --linux-approval-evidence "${FIXTURE_DIR}/linux-client-verification.txt" \
     --linux-acceptance-record "${FIXTURE_DIR}/linux-client-acceptance-record.txt" \
+    --linux-build-evidence "${FIXTURE_DIR}/linux-client-build-evidence.txt" \
     --node-base-image "node@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
     --busybox-base-image "busybox@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" \
     --paradedb-source-image "paradedb/paradedb@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" \
@@ -121,6 +144,7 @@ EOF
     --linux-client "${FIXTURE_DIR}/lobehub-linux-x86_64.tar.gz" \
     --linux-approval-evidence "${FIXTURE_DIR}/linux-client-verification.txt" \
     --linux-acceptance-record "${FIXTURE_DIR}/linux-client-acceptance-record.txt" \
+    --linux-build-evidence "${FIXTURE_DIR}/linux-client-build-evidence.txt" \
     --node-base-image "node@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
     --busybox-base-image "busybox@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" \
     --paradedb-source-image "paradedb/paradedb@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" \
@@ -141,6 +165,7 @@ EOF
     --linux-client "${FIXTURE_DIR}/lobehub-linux-x86_64.tar.gz" \
     --linux-approval-evidence "${FIXTURE_DIR}/linux-client-verification-pending.txt" \
     --linux-acceptance-record "${FIXTURE_DIR}/linux-client-acceptance-record.txt" \
+    --linux-build-evidence "${FIXTURE_DIR}/linux-client-build-evidence.txt" \
     --node-base-image "node@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
     --busybox-base-image "busybox@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" \
     --paradedb-source-image "paradedb/paradedb@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" \

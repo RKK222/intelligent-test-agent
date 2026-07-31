@@ -13,25 +13,25 @@ for file in \
   images/lobehub-image.tar images/paradedb-image.tar images/rustfs-image.tar \
   clients/lobehub-windows-x64.exe clients/lobehub-linux-x86_64.tar.gz \
   bin/mc-linux-amd64 sbom/lobehub.spdx.json \
-  source/lobehub-v2.2.11-platform.4.tar.gz \
+  source/lobehub-v2.2.11-platform.5.tar.gz \
   approved-resources.json LICENSES.txt; do
   printf 'fixture:%s\n' "${file}" >"${FIXTURE_DIR}/${file}"
 done
 cat >"${FIXTURE_DIR}/release.env" <<'EOF'
-LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.4
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.5
 LOBEHUB_UPSTREAM_VERSION=v2.2.11
 LOBEHUB_UPSTREAM_COMMIT=5b4cef6
-LOBEHUB_FORK_COMMIT=306dad5dc0968ed008f011d7fc07f12a606b21e1
+LOBEHUB_FORK_COMMIT=57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c
 LOBEHUB_PLATFORM_CONTRACT_VERSION=2
 LOBEHUB_PARADEDB_POSTGRES_MAJOR=17
 LOBEHUB_WINDOWS_AUTHENTICODE_VERIFIED=true
 LOBEHUB_LINUX_CLIENT_APPROVED=true
 LOBEHUB_LINUX_EXECUTION_DEFAULT=false
-LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.4
+LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.5
 LOBEHUB_APP_IMAGE_ID=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.4
+LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.5
 LOBEHUB_PARADEDB_IMAGE_ID=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.4
+LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.5
 LOBEHUB_RUSTFS_IMAGE_ID=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 EOF
 
@@ -42,13 +42,27 @@ else
   WINDOWS_SHA="$(shasum -a 256 "${FIXTURE_DIR}/clients/lobehub-windows-x64.exe" | awk '{print $1}')"
   LINUX_SHA="$(shasum -a 256 "${FIXTURE_DIR}/clients/lobehub-linux-x86_64.tar.gz" | awk '{print $1}')"
 fi
+cat >"${FIXTURE_DIR}/linux-client-build-evidence.txt" <<EOF
+LINUX_BUILD_STATUS=Candidate
+LINUX_BUILDER=linux-builder@example.internal
+LINUX_CLIENT_FILE_SHA256=${LINUX_SHA}
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.5
+LOBEHUB_FORK_COMMIT=57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c
+CLIENT_ARCHITECTURE=x86_64
+CLIENT_EXECUTION_MODE=disabled
+BUILD_OS=Enterprise Linux Builder 9.6
+BUILD_KERNEL=5.14.0-builder.x86_64
+BUILD_NODE_VERSION=v24.11.1
+BUILD_BUN_VERSION=1.3.2
+SOURCE_ARCHIVE_SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+EOF
 cat >"${FIXTURE_DIR}/windows-authenticode-verification.txt" <<EOF
 AUTHENTICODE_STATUS=Valid
 AUTHENTICODE_SUBJECT=CN=Enterprise Release Signing
 AUTHENTICODE_THUMBPRINT=0123456789ABCDEF0123456789ABCDEF01234567
 AUTHENTICODE_FILE_SHA256=${WINDOWS_SHA}
-LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.4
-LOBEHUB_FORK_COMMIT=306dad5dc0968ed008f011d7fc07f12a606b21e1
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.5
+LOBEHUB_FORK_COMMIT=57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c
 CLIENT_ARCHITECTURE=x64
 CLIENT_EXECUTION_MODE=disabled
 EOF
@@ -71,13 +85,20 @@ cat >"${FIXTURE_DIR}/linux-client-verification.txt" <<EOF
 LINUX_APPROVAL_STATUS=Approved
 LINUX_APPROVER=security-reviewer@example.internal
 LINUX_CLIENT_FILE_SHA256=${LINUX_SHA}
-LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.4
-LOBEHUB_FORK_COMMIT=306dad5dc0968ed008f011d7fc07f12a606b21e1
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.5
+LOBEHUB_FORK_COMMIT=57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c
 CLIENT_ARCHITECTURE=x86_64
 CLIENT_EXECUTION_MODE=disabled
 LINUX_VALIDATION_OS=Enterprise Linux 9.6
 LINUX_VALIDATION_KERNEL=5.14.0-570.26.1.el9_6.x86_64
 LINUX_ACCEPTANCE_RECORD_SHA256=${ACCEPTANCE_SHA}
+LINUX_BUILD_EVIDENCE_SHA256=$(
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "${FIXTURE_DIR}/linux-client-build-evidence.txt" | awk '{print $1}'
+  else
+    shasum -a 256 "${FIXTURE_DIR}/linux-client-build-evidence.txt" | awk '{print $1}'
+  fi
+)
 EOF
 
 (
@@ -103,13 +124,19 @@ unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
 unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
   | grep -Fx 'deploy/internal/lobehub-backup.sh' >/dev/null
 unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
+  | grep -Fx 'deploy/internal/lobehub-platform-probe.mjs' >/dev/null
+unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
+  | grep -Fx 'deploy/internal/lobehub-redis-acl.sh' >/dev/null
+unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
   | grep -Fx 'deploy/internal/lobehub-client-artifact-contract.sh' >/dev/null
 unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
   | grep -Fx 'dist/lobehub/linux-client-verification.txt' >/dev/null
 unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
   | grep -Fx 'dist/lobehub/linux-client-acceptance-record.txt' >/dev/null
 unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
-  | grep -Fx 'dist/lobehub/source/lobehub-v2.2.11-platform.4.tar.gz' >/dev/null
+  | grep -Fx 'dist/lobehub/linux-client-build-evidence.txt' >/dev/null
+unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
+  | grep -Fx 'dist/lobehub/source/lobehub-v2.2.11-platform.5.tar.gz' >/dev/null
 unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
   | grep -Fx 'docs/architecture/lobehub-integration.md' >/dev/null
 unzip -Z1 "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" \
@@ -137,6 +164,16 @@ if unzip -p "${OUTPUT_DIR}/test-agent-lobehub-offline.zip" deploy/internal/lobeh
   echo "LobeHub release still uses pnpm inside the scratch runtime image" >&2
   exit 1
 fi
+
+# 打包边界只允许目录和普通文件，不能把 FIFO、socket 或设备文件复制进离线包。
+mkfifo "${FIXTURE_DIR}/unexpected.pipe"
+if TEST_AGENT_LOBEHUB_ARTIFACT_DIR="${FIXTURE_DIR}" \
+  "${INTERNAL_DIR}/package-release.sh" --env-file /dev/null --lobehub-only --no-zip \
+  --output-dir "${OUTPUT_DIR}/special-file-output" >/dev/null 2>&1; then
+  echo "LobeHub packager unexpectedly accepted a non-regular artifact" >&2
+  exit 1
+fi
+rm "${FIXTURE_DIR}/unexpected.pipe"
 
 cp "${FIXTURE_DIR}/linux-client-verification.txt" "${OUTPUT_DIR}/linux-client-verification.valid"
 sed 's/^LINUX_APPROVAL_STATUS=Approved$/LINUX_APPROVAL_STATUS=Pending/' \
@@ -173,9 +210,9 @@ fi
 
 VALID_ENV="${OUTPUT_DIR}/lobehub-valid.env"
 cat >"${VALID_ENV}" <<'EOF'
-LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.4
-LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.4
-LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.4
+LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.5
+LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.5
+LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.5
 POSTGRES_DB=lobehub
 POSTGRES_USER=lobehub
 POSTGRES_PASSWORD=database-password-32-bytes-minimum

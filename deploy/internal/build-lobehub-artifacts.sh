@@ -13,6 +13,7 @@ WINDOWS_SIGNATURE_EVIDENCE=""
 LINUX_CLIENT=""
 LINUX_APPROVAL_EVIDENCE=""
 LINUX_ACCEPTANCE_RECORD=""
+LINUX_BUILD_EVIDENCE=""
 NODE_BASE_IMAGE=""
 BUSYBOX_BASE_IMAGE=""
 PARADEDB_SOURCE_IMAGE=""
@@ -49,6 +50,7 @@ Options:
   --linux-client <path>                Approved Linux x86_64 client tar.gz.
   --linux-approval-evidence <path>     KEY=value Linux validation and approval evidence.
   --linux-acceptance-record <path>     Approved Linux validation checklist record.
+  --linux-build-evidence <path>        Native Linux candidate build evidence.
   --node-base-image <digest-ref>       Approved Node build base.
   --busybox-base-image <digest-ref>    Approved BusyBox runtime base.
   --paradedb-source-image <digest-ref> Approved ParadeDB/PostgreSQL 17 source image.
@@ -76,6 +78,7 @@ while [[ $# -gt 0 ]]; do
     --linux-client) LINUX_CLIENT="$2"; shift 2 ;;
     --linux-approval-evidence) LINUX_APPROVAL_EVIDENCE="$2"; shift 2 ;;
     --linux-acceptance-record) LINUX_ACCEPTANCE_RECORD="$2"; shift 2 ;;
+    --linux-build-evidence) LINUX_BUILD_EVIDENCE="$2"; shift 2 ;;
     --node-base-image) NODE_BASE_IMAGE="$2"; shift 2 ;;
     --busybox-base-image) BUSYBOX_BASE_IMAGE="$2"; shift 2 ;;
     --paradedb-source-image) PARADEDB_SOURCE_IMAGE="$2"; shift 2 ;;
@@ -141,7 +144,8 @@ validate_clients() {
   lobehub_verify_client_artifacts \
     "${WINDOWS_CLIENT}" "${WINDOWS_SIGNATURE_EVIDENCE}" \
     "${LINUX_CLIENT}" "${LINUX_APPROVAL_EVIDENCE}" \
-    "${LINUX_ACCEPTANCE_RECORD}" "${INTERNAL_VERSION}" "${LOCKED_FORK_COMMIT}"
+    "${LINUX_ACCEPTANCE_RECORD}" "${LINUX_BUILD_EVIDENCE}" \
+    "${INTERNAL_VERSION}" "${LOCKED_FORK_COMMIT}"
 }
 
 validate_fork() {
@@ -324,6 +328,8 @@ if [[ "${SERVER_ONLY}" -ne 1 ]]; then
     "${STAGING_DIR}/linux-client-verification.txt"
   cp "${LINUX_ACCEPTANCE_RECORD}" \
     "${STAGING_DIR}/linux-client-acceptance-record.txt"
+  cp "${LINUX_BUILD_EVIDENCE}" \
+    "${STAGING_DIR}/linux-client-build-evidence.txt"
 fi
 
 git -C "${FORK_DIR}" archive --format=tar.gz \

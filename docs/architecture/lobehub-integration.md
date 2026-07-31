@@ -1,17 +1,17 @@
 # LobeHub 企业集成契约
 
 本文是平台与独立 LobeHub fork 之间的稳定契约。当前内部版本固定为
-`v2.2.11-platform.4`，上游基线为 [LobeHub v2.2.11](https://github.com/lobehub/lobehub/releases/tag/v2.2.11)、
+`v2.2.11-platform.5`，上游基线为 [LobeHub v2.2.11](https://github.com/lobehub/lobehub/releases/tag/v2.2.11)、
 commit `5b4cef6`。当前仓库承载平台认证、模型网关、前端入口、数据库 migration 和离线交付准入；
 LobeHub fork 源码不放入本仓库。本地开发默认从同级独立仓库 `../lobehub-platform` 读取，当前锁定 fork commit
-为 `306dad5dc0968ed008f011d7fc07f12a606b21e1`；版本事实源为
+为 `57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c`；版本事实源为
 `deploy/internal/lobehub/version.env`。企业 Git 管理员仍须把该独立仓库推送到受控内部远端，本机 checkout
 不能替代内部源码托管。平台提供自包含、最小 ref 的 Git Bundle 转运工具，企业导入流程见
 `docs/deployment/lobehub-fork-transfer.md`。
 
 当前 fork 已实现平台票据消费/HMAC 兑换、24 小时 Session、用户和部门 Workspace JIT、委托加密、企业模型
 适配、后台模型身份继承、离线请求门禁、BYOK/本地身份源关闭、默认私有对象和全部设备执行失败关闭。平台仓库
-已提供真实镜像构建器、本地显式启动模式和现场 Docker/systemd 脚本。`v2.2.11-platform.4` 不开放 Linux 本地
+已提供真实镜像构建器、本地显式启动模式和现场 Docker/systemd 脚本。`v2.2.11-platform.5` 不开放 Linux 本地
 执行；目标发行版/内核的真实沙箱和逃逸验收属于后续可执行版本的上线前置项，不得通过环境变量提前开启。
 
 ## 边界与状态
@@ -140,6 +140,11 @@ fork 必须用独立外部密钥加密委托后再写数据库。浏览器、Des
 该值。定时话题、标题、索引等后台任务使用创建者的委托；过期或用户失效时明确失败，不能回退 owner、系统
 账号或其他用户。
 
+fork 的共享 Redis wrapper 与 Agent Runtime 直接使用的 ioredis 都必须把物理 key 限制在
+`lobehub:app:*`；后者显式配置 `keyPrefix`，返回给业务层时再剥离物理前缀。枚举只能使用有界游标 `SCAN`，
+不得使用阻塞式 `KEYS`。部署 ACL 必须从 `-@all` 开始显式授予运行命令，并同时限制 key 和 pub/sub channel；
+平台 `test-agent:*` 前缀、管理命令和 Lua 跨前缀访问都必须被 Redis 自身拒绝。
+
 ### 离线后台调度
 
 企业离线镜像不部署 QStash，也不接受它的回调。fork 在 Next 代理和独立 Hono router 两层拒绝所有
@@ -165,7 +170,7 @@ Linux 客户端如需调用模型，必须通过 loopback broker 到 LobeHub 服
 - RustFS bucket 保持私有，附件只通过 Workspace 鉴权的短期签名地址或受控下载代理访问。
 - Windows x64 安装包必须使用企业 Authenticode 证书签名；每个 Windows 账号使用独立应用数据和凭据目录。
   terminal、shell、代码 Agent、stdio MCP、设备执行和 Agent 浏览器控制永久禁用。
-- Linux 首期客户端目标为 x86_64，但 `v2.2.11-platform.4` 与 Windows 一样强制禁用全部本地/设备执行。
+- Linux 首期客户端目标为 x86_64，但 `v2.2.11-platform.5` 与 Windows 一样强制禁用全部本地/设备执行。
   后续版本只有在专用单用户受管工作站的目标发行版/内核通过真实沙箱逃逸验证后才能另行设计开启；所有 shell、
   CLI Agent 和后台进程入口必须共享一套显式 sandbox policy，默认拒绝外网、Unix socket、Docker socket、
   SSH Agent、完整 HOME 和平台目录，只开放独立 LobeHub 工作区、临时目录及审批内网地址；沙箱初始化失败
@@ -182,15 +187,18 @@ verify` 和独立 clone，并用包内、包外两层 SHA-256 绑定 Bundle、re
 `git ls-remote` 复核 main 和 tag 解引用 commit。转运包已生成
 但尚未完成企业远端推送时，只能记为“fork 转运介质已就绪”，不能记为“企业内部 fork 托管已完成”。
 
-已有 server-only 运行介质只能在完整清单校验通过后，由无网络定稿程序加入外部原生客户端。定稿程序不得修改原目录，
-不得自行生成签名/审批证据，也不得把缺失、`Pending`、占位身份或摘要不一致的客户端状态改成通过；最终
+已有 server-only 运行介质只能在完整清单校验通过后，由无网络定稿程序加入外部原生客户端。Linux 最终证据
+必须绑定候选件、原生构建证据和独立验收记录，构建人与审批人必须不同。定稿程序不得修改原目录，不得自行
+生成签名/审批证据，也不得把缺失、`Pending`、占位身份或摘要不一致的客户端状态改成通过；最终
 `package-release.sh` 和现场安装器仍须重复共享客户端真实性门禁。即使显式 `--force`，定稿输出也不得等于或
-包含任何客户端、证据、版本锁、部署脚本、平台仓库或 server-only 输入。
+包含任何客户端、证据、版本锁、部署脚本、平台仓库或 server-only 输入；输出父目录须预先存在，发布锁和
+复制前后摘要/inode 复核必须使并发输入或目标替换失败关闭。
 
 独立 fork 至少需要自动化覆盖：票据过期/重放、固定回跳、客户端 request/poll/code/session 摘要存储与
 一次性消费、PKCE 错配、验证码显示、OIDC 路径拒绝、JIT 并发单 Workspace、同名部门合并、调动后
 双权限、默认私有资源、委托服务端加密、后台任务身份继承、离线断网、Windows 所有执行入口拒绝、Linux
 沙箱逃逸边界和私有对象访问。构建产物必须输出源码包、SPDX SBOM、许可证、审批白名单、三份摘要镜像、
-Windows/Linux 客户端及 Authenticode 证据；准入格式见部署文档。镜像必须带
+Windows/Linux 客户端、Authenticode 证据、Linux 原生构建证据、最终审批证据和独立验收记录；准入格式见
+部署文档。镜像必须带
 `org.opencontainers.image.revision`，且与锁定 fork commit 完全一致。任何一项缺失时不得把
 `LOBEHUB_ENABLED` 切换为 `true`。

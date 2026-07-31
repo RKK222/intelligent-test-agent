@@ -101,6 +101,37 @@ if "${BUILDER}" --force --fork-dir "${FORK_DIR}" --version-file "${VERSION_FILE}
 fi
 test -f "${VERSION_FILE}"
 
+NESTED_OUTPUT="${FORK_DIR}/must-not-be-created/transfer"
+if "${BUILDER}" --fork-dir "${FORK_DIR}" --version-file "${VERSION_FILE}" \
+  --output-dir "${NESTED_OUTPUT}" >/dev/null 2>&1; then
+  echo 'Fork transfer builder unexpectedly accepted output inside the fork' >&2
+  exit 1
+fi
+test ! -e "${FORK_DIR}/must-not-be-created"
+
+RACE_BIN="${FIXTURE_ROOT}/race-bin"
+RACE_PRESERVED="${FIXTURE_ROOT}/output-original"
+mkdir "${RACE_BIN}"
+cat >"${RACE_BIN}/zip" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+"${LOBEHUB_TRANSFER_REAL_ZIP:?}" "$@"
+mv "${LOBEHUB_TRANSFER_RACE_OUTPUT:?}" "${LOBEHUB_TRANSFER_RACE_PRESERVED:?}"
+mkdir "${LOBEHUB_TRANSFER_RACE_OUTPUT}"
+printf 'concurrent\n' >"${LOBEHUB_TRANSFER_RACE_OUTPUT}/concurrent-marker"
+EOF
+chmod 0755 "${RACE_BIN}/zip"
+if env PATH="${RACE_BIN}:${PATH}" LOBEHUB_TRANSFER_REAL_ZIP="$(command -v zip)" \
+  LOBEHUB_TRANSFER_RACE_OUTPUT="${OUTPUT_DIR}" \
+  LOBEHUB_TRANSFER_RACE_PRESERVED="${RACE_PRESERVED}" \
+  "${BUILDER}" --force --fork-dir "${FORK_DIR}" --version-file "${VERSION_FILE}" \
+  --output-dir "${OUTPUT_DIR}" >/dev/null 2>&1; then
+  echo 'Fork transfer builder unexpectedly replaced a concurrent output object' >&2
+  exit 1
+fi
+test -f "${OUTPUT_DIR}/concurrent-marker"
+test -f "${RACE_PRESERVED}/$(basename "${ZIP_PATH}")"
+
 # 删除工作树中的密钥不等于从 Git 历史删除；转运前必须检查 fork 增量的全部可达 blob。
 SECRET_FORK="${FIXTURE_ROOT}/secret-fork"
 SECRET_VERSION_FILE="${FIXTURE_ROOT}/secret-version.env"

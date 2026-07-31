@@ -7,6 +7,7 @@ REPOSITORY_ROOT="$(cd "${INTERNAL_DIR}/../.." && pwd)"
 ARTIFACT_DIR="${TEST_AGENT_LOBEHUB_ARTIFACT_DIR:-${REPOSITORY_ROOT}/deploy/internal/dist-lobehub-server}"
 REDIS_IMAGE="${LOBEHUB_SMOKE_REDIS_IMAGE:-redis:7.4-alpine}"
 REDIS_CONTAINER="test-agent-lobehub-smoke-redis"
+PLATFORM_CONTAINER="test-agent-lobehub-smoke-platform"
 NETWORK="test-agent-lobehub"
 TEMP_ROOT="${TMPDIR:-/tmp}"
 TEMP_ROOT="${TEMP_ROOT%/}"
@@ -19,7 +20,8 @@ SMOKE_ROOT=""
 NETWORK_CREATED=false
 
 cleanup() {
-  docker rm -f "${RUNTIME_CONTAINERS[@]}" "${REDIS_CONTAINER}" >/dev/null 2>&1 || true
+  docker rm -f "${RUNTIME_CONTAINERS[@]}" "${REDIS_CONTAINER}" \
+    "${PLATFORM_CONTAINER}" >/dev/null 2>&1 || true
   if [[ "${NETWORK_CREATED}" == true ]]; then
     docker network rm "${NETWORK}" >/dev/null 2>&1 || true
   fi
@@ -82,6 +84,9 @@ docker info >/dev/null 2>&1 || { echo "Docker daemon is not available" >&2; exit
 
 require_file "${ARTIFACT_DIR}/release.env"
 require_file "${ARTIFACT_DIR}/bin/mc-linux-amd64"
+require_file "${INTERNAL_DIR}/lobehub-platform-probe.mjs"
+require_file "${INTERNAL_DIR}/lobehub-redis-acl.sh"
+require_file "${SCRIPT_DIR}/lobehub-platform-smoke-server.mjs"
 for image_key in LOBEHUB_APP_IMAGE LOBEHUB_PARADEDB_IMAGE LOBEHUB_RUSTFS_IMAGE; do
   image_ref="$(release_value "${image_key}")"
   expected_id="$(release_value "${image_key}_ID")"
@@ -96,7 +101,7 @@ docker image inspect "${REDIS_IMAGE}" >/dev/null 2>&1 || {
   exit 1
 }
 
-for name in "${RUNTIME_CONTAINERS[@]}" "${REDIS_CONTAINER}"; do
+for name in "${RUNTIME_CONTAINERS[@]}" "${REDIS_CONTAINER}" "${PLATFORM_CONTAINER}"; do
   require_free_container_name "${name}"
 done
 for port in 3210 9000 9001; do
@@ -111,6 +116,9 @@ install -d -m 0700 "${TEST_BIN_DIR}" "${BASE_DIR}/config" \
   "${BASE_DIR}/lobehub/bin" "${BASE_DIR}/lobehub/release"
 install -m 0755 "${ARTIFACT_DIR}/bin/mc-linux-amd64" "${BASE_DIR}/lobehub/bin/mc-linux-amd64"
 install -m 0644 "${ARTIFACT_DIR}/release.env" "${BASE_DIR}/lobehub/release/release.env"
+install -d -m 0755 "${BASE_DIR}/deploy/internal"
+install -m 0644 "${INTERNAL_DIR}/lobehub-platform-probe.mjs" \
+  "${BASE_DIR}/deploy/internal/lobehub-platform-probe.mjs"
 
 if ! docker network inspect "${NETWORK}" >/dev/null 2>&1; then
   docker network create "${NETWORK}" >/dev/null
@@ -119,6 +127,8 @@ fi
 
 redis_admin_password="$(openssl rand -hex 32)"
 redis_password="$(openssl rand -hex 32)"
+# shellcheck source=/dev/null
+source "${INTERNAL_DIR}/lobehub-redis-acl.sh"
 docker run -d --name "${REDIS_CONTAINER}" --network "${NETWORK}" \
   "${REDIS_IMAGE}" redis-server --appendonly no --save '' \
   --requirepass "${redis_admin_password}" >/dev/null
@@ -130,10 +140,11 @@ for attempt in {1..30}; do
   [[ "${attempt}" -lt 30 ]] || { echo "Smoke Redis did not become ready" >&2; exit 1; }
   sleep 1
 done
-docker exec -e "REDISCLI_AUTH=${redis_admin_password}" "${REDIS_CONTAINER}" \
-  redis-cli --no-auth-warning ACL SETUSER lobehub reset on \
-  ">${redis_password}" '~lobehub:app:*' '&lobehub:app:*' \
-  '+@all' '-acl' '-config' '-module' '-flushall' '-flushdb' >/dev/null
+printf '%s' ">${redis_password}" \
+  | docker exec -i -e "REDISCLI_AUTH=${redis_admin_password}" "${REDIS_CONTAINER}" \
+    redis-cli --no-auth-warning -x ACL SETUSER lobehub reset on \
+    '~lobehub:app:*' '&lobehub:app:*' -@all \
+    "${LOBEHUB_REDIS_ACL_COMMANDS[@]}" >/dev/null
 
 # The production preflight intentionally requires redis-cli on the host. This wrapper only lets the
 # same command contract target the isolated smoke Redis from macOS Docker Desktop.
@@ -178,6 +189,30 @@ key_vault_secret="$(openssl rand -base64 32 | tr -d '\n')"
 scheduler_secret="$(openssl rand -hex 32)"
 model_grant_secret="$(openssl rand -base64 32 | tr -d '\n')"
 hmac_secret="$(openssl rand -hex 32)"
+platform_env="${SMOKE_ROOT}/platform.env"
+printf '%s\n' \
+  "PLATFORM_SSO_HMAC_SECRET=${hmac_secret}" \
+  'SMOKE_PLATFORM_PORT=8080' \
+  >"${platform_env}"
+chmod 0600 "${platform_env}"
+docker run -d --name "${PLATFORM_CONTAINER}" --network "${NETWORK}" \
+  --env-file "${platform_env}" --read-only --cap-drop ALL \
+  --security-opt no-new-privileges --pids-limit 64 \
+  -v "${SCRIPT_DIR}/lobehub-platform-smoke-server.mjs:/app/lobehub-platform-smoke-server.mjs:ro" \
+  "$(release_value LOBEHUB_APP_IMAGE)" \
+  /app/lobehub-platform-smoke-server.mjs >/dev/null
+for attempt in {1..30}; do
+  if docker logs "${PLATFORM_CONTAINER}" 2>&1 \
+    | grep -Fx 'LobeHub smoke platform is ready' >/dev/null; then
+    break
+  fi
+  [[ "${attempt}" -lt 30 ]] || {
+    echo 'Smoke platform did not become ready' >&2
+    docker logs "${PLATFORM_CONTAINER}" >&2 || true
+    exit 1
+  }
+  sleep 1
+done
 
 printf '%s\n' \
   "LOBEHUB_APP_IMAGE=$(release_value LOBEHUB_APP_IMAGE)" \
@@ -213,10 +248,10 @@ printf '%s\n' \
   'PLATFORM_SSO_ENABLED=1' \
   'LOBEHUB_ENTERPRISE_OFFLINE=1' \
   'AGENT_RUNTIME_MODE=local' \
-  'PLATFORM_LAUNCH_URL=http://host.docker.internal:8080/lobehub/launch' \
-  'PLATFORM_SSO_REDEEM_URL=http://host.docker.internal:8080/api/internal/platform/lobehub-sso/tickets/redeem' \
-  'PLATFORM_SSO_REVOKE_URL=http://host.docker.internal:8080/api/internal/platform/lobehub-sso/grants/revoke' \
-  'PLATFORM_MODEL_GATEWAY_BASE_URL=http://host.docker.internal:8080/api/internal/platform/model-gateway/v1' \
+  "PLATFORM_LAUNCH_URL=http://${PLATFORM_CONTAINER}:8080/lobehub/launch" \
+  "PLATFORM_SSO_REDEEM_URL=http://${PLATFORM_CONTAINER}:8080/api/internal/platform/lobehub-sso/tickets/redeem" \
+  "PLATFORM_SSO_REVOKE_URL=http://${PLATFORM_CONTAINER}:8080/api/internal/platform/lobehub-sso/grants/revoke" \
+  "PLATFORM_MODEL_GATEWAY_BASE_URL=http://${PLATFORM_CONTAINER}:8080/api/internal/platform/model-gateway/v1" \
   "PLATFORM_SSO_HMAC_SECRET=${hmac_secret}" \
   "PLATFORM_MODEL_GRANT_ENCRYPTION_KEY=${model_grant_secret}" \
   'TELEMETRY_DISABLED=1' \

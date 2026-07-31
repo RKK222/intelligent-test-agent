@@ -123,15 +123,20 @@ lobehub_verify_windows_client_artifact() {
 }
 
 lobehub_verify_linux_client_artifact() {
-  local client="$1" evidence="$2" acceptance_record="$3" internal_version="$4" fork_commit="$5"
+  local client="$1" evidence="$2" acceptance_record="$3" build_evidence="$4"
+  local internal_version="$5" fork_commit="$6"
   local status approver evidence_sha actual_sha evidence_version evidence_commit
   local architecture execution_mode validation_os validation_kernel record_sha actual_record_sha
   local record_reviewer change_id validation_result login_result execution_result
   local network_result download_result isolation_result
+  local build_evidence_sha actual_build_evidence_sha build_status builder build_client_sha
+  local build_version build_commit build_architecture build_execution_mode build_os build_kernel
+  local build_node_version build_bun_version source_archive_sha builder_normalized approver_normalized
 
   lobehub_client_require_file "${client}" 'Linux x86_64 client' || return 1
   lobehub_client_validate_evidence_syntax "${evidence}" 'Linux client approval evidence' || return 1
   lobehub_client_validate_evidence_syntax "${acceptance_record}" 'Linux client acceptance record' || return 1
+  lobehub_client_validate_evidence_syntax "${build_evidence}" 'Linux client build evidence' || return 1
 
   status="$(lobehub_client_require_value "${evidence}" LINUX_APPROVAL_STATUS 'Linux client approval evidence')" || return 1
   approver="$(lobehub_client_require_value "${evidence}" LINUX_APPROVER 'Linux client approval evidence')" || return 1
@@ -143,6 +148,20 @@ lobehub_verify_linux_client_artifact() {
   validation_os="$(lobehub_client_require_value "${evidence}" LINUX_VALIDATION_OS 'Linux client approval evidence')" || return 1
   validation_kernel="$(lobehub_client_require_value "${evidence}" LINUX_VALIDATION_KERNEL 'Linux client approval evidence')" || return 1
   record_sha="$(lobehub_client_require_value "${evidence}" LINUX_ACCEPTANCE_RECORD_SHA256 'Linux client approval evidence')" || return 1
+  build_evidence_sha="$(lobehub_client_require_value "${evidence}" LINUX_BUILD_EVIDENCE_SHA256 'Linux client approval evidence')" || return 1
+
+  build_status="$(lobehub_client_require_value "${build_evidence}" LINUX_BUILD_STATUS 'Linux client build evidence')" || return 1
+  builder="$(lobehub_client_require_value "${build_evidence}" LINUX_BUILDER 'Linux client build evidence')" || return 1
+  build_client_sha="$(lobehub_client_require_value "${build_evidence}" LINUX_CLIENT_FILE_SHA256 'Linux client build evidence')" || return 1
+  build_version="$(lobehub_client_require_value "${build_evidence}" LOBEHUB_INTERNAL_VERSION 'Linux client build evidence')" || return 1
+  build_commit="$(lobehub_client_require_value "${build_evidence}" LOBEHUB_FORK_COMMIT 'Linux client build evidence')" || return 1
+  build_architecture="$(lobehub_client_require_value "${build_evidence}" CLIENT_ARCHITECTURE 'Linux client build evidence')" || return 1
+  build_execution_mode="$(lobehub_client_require_value "${build_evidence}" CLIENT_EXECUTION_MODE 'Linux client build evidence')" || return 1
+  build_os="$(lobehub_client_require_value "${build_evidence}" BUILD_OS 'Linux client build evidence')" || return 1
+  build_kernel="$(lobehub_client_require_value "${build_evidence}" BUILD_KERNEL 'Linux client build evidence')" || return 1
+  build_node_version="$(lobehub_client_require_value "${build_evidence}" BUILD_NODE_VERSION 'Linux client build evidence')" || return 1
+  build_bun_version="$(lobehub_client_require_value "${build_evidence}" BUILD_BUN_VERSION 'Linux client build evidence')" || return 1
+  source_archive_sha="$(lobehub_client_require_value "${build_evidence}" SOURCE_ARCHIVE_SHA256 'Linux client build evidence')" || return 1
 
   record_reviewer="$(lobehub_client_require_value "${acceptance_record}" REVIEWER 'Linux client acceptance record')" || return 1
   change_id="$(lobehub_client_require_value "${acceptance_record}" APPROVAL_CHANGE_ID 'Linux client acceptance record')" || return 1
@@ -155,8 +174,20 @@ lobehub_verify_linux_client_artifact() {
 
   [[ "${status}" == Approved ]] || lobehub_client_contract_error 'Linux client approval status must be Approved' || return 1
   ! lobehub_client_is_placeholder "${approver}" || lobehub_client_contract_error 'Linux approver is a placeholder' || return 1
+  [[ "${approver}" =~ ^[A-Za-z0-9][A-Za-z0-9@._+-]{2,127}$ ]] ||
+    lobehub_client_contract_error 'Linux approver must be a stable internal identity' || return 1
+  [[ "${build_status}" == Candidate ]] || lobehub_client_contract_error 'Linux build status must be Candidate' || return 1
+  ! lobehub_client_is_placeholder "${builder}" || lobehub_client_contract_error 'Linux builder is a placeholder' || return 1
+  [[ "${builder}" =~ ^[A-Za-z0-9][A-Za-z0-9@._+-]{2,127}$ ]] ||
+    lobehub_client_contract_error 'Linux builder must be a stable internal identity' || return 1
+  builder_normalized="$(printf '%s' "${builder}" | tr '[:upper:]' '[:lower:]')"
+  approver_normalized="$(printf '%s' "${approver}" | tr '[:upper:]' '[:lower:]')"
+  [[ "${builder_normalized}" != "${approver_normalized}" ]] ||
+    lobehub_client_contract_error 'Linux builder and approver must be different identities' || return 1
   ! lobehub_client_is_placeholder "${validation_os}" || lobehub_client_contract_error 'Linux validation OS is a placeholder' || return 1
   ! lobehub_client_is_placeholder "${validation_kernel}" || lobehub_client_contract_error 'Linux validation kernel is a placeholder' || return 1
+  ! lobehub_client_is_placeholder "${build_os}" || lobehub_client_contract_error 'Linux build OS is a placeholder' || return 1
+  ! lobehub_client_is_placeholder "${build_kernel}" || lobehub_client_contract_error 'Linux build kernel is a placeholder' || return 1
   ! lobehub_client_is_placeholder "${change_id}" || lobehub_client_contract_error 'Linux approval change ID is a placeholder' || return 1
   [[ "${record_reviewer}" == "${approver}" ]] ||
     lobehub_client_contract_error 'Linux acceptance record reviewer does not match the approver' || return 1
@@ -168,6 +199,10 @@ lobehub_verify_linux_client_artifact() {
     lobehub_client_contract_error 'Linux client SHA-256 must be lowercase hexadecimal' || return 1
   [[ "${record_sha}" =~ ^[0-9a-f]{64}$ ]] ||
     lobehub_client_contract_error 'Linux acceptance record SHA-256 must be lowercase hexadecimal' || return 1
+  [[ "${build_evidence_sha}" =~ ^[0-9a-f]{64}$ ]] ||
+    lobehub_client_contract_error 'Linux build evidence SHA-256 must be lowercase hexadecimal' || return 1
+  [[ "${source_archive_sha}" =~ ^[0-9a-f]{64}$ ]] ||
+    lobehub_client_contract_error 'Linux source archive SHA-256 must be lowercase hexadecimal' || return 1
   [[ "${evidence_version}" == "${internal_version}" ]] ||
     lobehub_client_contract_error 'Linux evidence internal version does not match the release lock' || return 1
   [[ "${evidence_commit}" == "${fork_commit}" ]] ||
@@ -175,6 +210,14 @@ lobehub_verify_linux_client_artifact() {
   [[ "${architecture}" == x86_64 ]] || lobehub_client_contract_error 'Linux client architecture must be x86_64' || return 1
   [[ "${execution_mode}" == disabled ]] ||
     lobehub_client_contract_error 'Linux device execution must remain disabled' || return 1
+  [[ "${build_client_sha}" == "${evidence_sha}" \
+    && "${build_version}" == "${internal_version}" \
+    && "${build_commit}" == "${fork_commit}" \
+    && "${build_architecture}" == x86_64 \
+    && "${build_execution_mode}" == disabled \
+    && "${build_node_version}" == v24.11.1 \
+    && "${build_bun_version}" == 1.3.2 ]] ||
+    lobehub_client_contract_error 'Linux build evidence does not match the approved release contract' || return 1
 
   actual_sha="$(lobehub_client_sha256_file "${client}")" || return 1
   [[ "${actual_sha}" == "${evidence_sha}" ]] ||
@@ -182,11 +225,14 @@ lobehub_verify_linux_client_artifact() {
   actual_record_sha="$(lobehub_client_sha256_file "${acceptance_record}")" || return 1
   [[ "${actual_record_sha}" == "${record_sha}" ]] ||
     lobehub_client_contract_error 'Linux approval evidence does not match the acceptance record' || return 1
+  actual_build_evidence_sha="$(lobehub_client_sha256_file "${build_evidence}")" || return 1
+  [[ "${actual_build_evidence_sha}" == "${build_evidence_sha}" ]] ||
+    lobehub_client_contract_error 'Linux approval evidence does not match the build evidence' || return 1
 }
 
 lobehub_verify_client_artifacts() {
   local windows_client="$1" windows_evidence="$2" linux_client="$3" linux_evidence="$4"
-  local linux_acceptance_record="$5" internal_version="$6" fork_commit="$7"
+  local linux_acceptance_record="$5" linux_build_evidence="$6" internal_version="$7" fork_commit="$8"
 
   [[ "${internal_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-platform\.[0-9]+$ ]] ||
     lobehub_client_contract_error 'expected internal version is malformed' || return 1
@@ -197,5 +243,5 @@ lobehub_verify_client_artifacts() {
     "${windows_client}" "${windows_evidence}" "${internal_version}" "${fork_commit}" || return 1
   lobehub_verify_linux_client_artifact \
     "${linux_client}" "${linux_evidence}" "${linux_acceptance_record}" \
-    "${internal_version}" "${fork_commit}" || return 1
+    "${linux_build_evidence}" "${internal_version}" "${fork_commit}" || return 1
 }

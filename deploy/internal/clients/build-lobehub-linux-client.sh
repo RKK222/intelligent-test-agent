@@ -5,8 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KIT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 VERSION_FILE="${KIT_ROOT}/version.env"
 SOURCE_CHECKSUM_FILE="${KIT_ROOT}/SOURCE_SHA256SUMS"
+CONTRACT_FILE="${SCRIPT_DIR}/lobehub-client-artifact-contract.sh"
 SOURCE_ARCHIVE=""
 OUTPUT_DIR="${PWD}/lobehub-linux-client-output"
+BUILDER=""
 FORCE=0
 BUILD_DIR=""
 
@@ -22,6 +24,7 @@ Options:
   --version-file <path>     Version lock (default: ../version.env).
   --source-checksums <path> Source checksum manifest (default: ../SOURCE_SHA256SUMS).
   --output-dir <path>       Candidate output directory.
+  --builder <internal-id>   Stable identity of the native Linux builder (required).
   --force                   Replace only the two known candidate output files.
   -h, --help                Show this help.
 USAGE
@@ -33,6 +36,7 @@ while [[ $# -gt 0 ]]; do
     --version-file) VERSION_FILE="$2"; shift 2 ;;
     --source-checksums) SOURCE_CHECKSUM_FILE="$2"; shift 2 ;;
     --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
+    --builder) BUILDER="$2"; shift 2 ;;
     --force) FORCE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -78,6 +82,16 @@ for command_name in awk bun corepack find node openssl sha256sum tar; do
 done
 require_regular_file "${VERSION_FILE}"
 require_regular_file "${SOURCE_CHECKSUM_FILE}"
+require_regular_file "${CONTRACT_FILE}"
+source "${CONTRACT_FILE}"
+[[ "${BUILDER}" =~ ^[A-Za-z0-9][A-Za-z0-9@._+-]{2,127}$ ]] || {
+  echo "Builder must be a stable internal identity without whitespace" >&2
+  exit 1
+}
+! lobehub_client_is_placeholder "${BUILDER}" || {
+  echo "Builder identity must not be a placeholder" >&2
+  exit 1
+}
 
 INTERNAL_VERSION="$(state_value "${VERSION_FILE}" LOBEHUB_INTERNAL_VERSION)"
 FORK_COMMIT="$(state_value "${VERSION_FILE}" LOBEHUB_FORK_COMMIT)"
@@ -189,6 +203,7 @@ OS_NAME="$(. /etc/os-release && printf '%s' "${PRETTY_NAME:-${ID:-Linux}}")"
 OS_NAME="$(printf '%s' "${OS_NAME}" | tr '\r\n' '  ')"
 cat >"${BUILD_EVIDENCE_OUTPUT}" <<EOF
 LINUX_BUILD_STATUS=Candidate
+LINUX_BUILDER=${BUILDER}
 LINUX_CLIENT_FILE_SHA256=$(sha256_file "${CLIENT_OUTPUT}")
 LOBEHUB_INTERNAL_VERSION=${INTERNAL_VERSION}
 LOBEHUB_FORK_COMMIT=${FORK_COMMIT}

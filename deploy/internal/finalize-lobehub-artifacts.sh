@@ -13,8 +13,13 @@ WINDOWS_SIGNATURE_EVIDENCE=""
 LINUX_CLIENT=""
 LINUX_APPROVAL_EVIDENCE=""
 LINUX_ACCEPTANCE_RECORD=""
+LINUX_BUILD_EVIDENCE=""
 FORCE=0
 STAGING_DIR=""
+LOCK_DIR=""
+LOCK_ACQUIRED=0
+OUTPUT_EXISTED=0
+OUTPUT_IDENTITY=""
 
 usage() {
   cat <<'USAGE'
@@ -31,6 +36,7 @@ Required options:
   --linux-client <path>                Approved Linux x86_64 client tar.gz.
   --linux-approval-evidence <path>     KEY=value Linux approval evidence.
   --linux-acceptance-record <path>     Independent Linux acceptance record.
+  --linux-build-evidence <path>        Native builder identity and candidate evidence.
 
 Other options:
   --force                              Replace only the exact output directory after validation.
@@ -47,6 +53,7 @@ while [[ $# -gt 0 ]]; do
     --linux-client) LINUX_CLIENT="$2"; shift 2 ;;
     --linux-approval-evidence) LINUX_APPROVAL_EVIDENCE="$2"; shift 2 ;;
     --linux-acceptance-record) LINUX_ACCEPTANCE_RECORD="$2"; shift 2 ;;
+    --linux-build-evidence) LINUX_BUILD_EVIDENCE="$2"; shift 2 ;;
     --force) FORCE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -66,6 +73,30 @@ require_regular_file() {
   local path="$1" description="$2"
   [[ -f "${path}" && ! -L "${path}" && -s "${path}" ]] ||
     fail "${description} must be a non-empty regular file: ${path}"
+}
+
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    fail 'neither sha256sum nor shasum is available'
+  fi
+}
+
+require_sha256_matches() {
+  local path="$1" expected="$2" description="$3"
+  [[ "$(sha256_file "${path}")" == "${expected}" ]] ||
+    fail "${description} changed after initial verification"
+}
+
+path_identity() {
+  if stat -c '%d:%i:%F' "$1" >/dev/null 2>&1; then
+    stat -c '%d:%i:%F' "$1"
+  else
+    stat -f '%d:%i:%HT' "$1"
+  fi
 }
 
 canonicalize_input_file() {
@@ -173,13 +204,14 @@ verify_locked_value() {
 }
 
 for value in SERVER_ARTIFACT_DIR OUTPUT_DIR WINDOWS_CLIENT WINDOWS_SIGNATURE_EVIDENCE \
-  LINUX_CLIENT LINUX_APPROVAL_EVIDENCE LINUX_ACCEPTANCE_RECORD; do
+  LINUX_CLIENT LINUX_APPROVAL_EVIDENCE LINUX_ACCEPTANCE_RECORD LINUX_BUILD_EVIDENCE; do
   [[ -n "${!value}" ]] || fail "missing required option for ${value}"
 done
 require_command awk
 require_command find
 require_command cp
 require_command mktemp
+require_command stat
 require_regular_file "${VERSION_FILE}" 'LobeHub version lock'
 require_regular_file "${CLIENT_CONTRACT_FILE}" 'LobeHub client artifact contract'
 validate_state_file "${VERSION_FILE}" 'LobeHub version lock'
@@ -188,6 +220,7 @@ canonicalize_input_file WINDOWS_SIGNATURE_EVIDENCE 'Windows Authenticode evidenc
 canonicalize_input_file LINUX_CLIENT 'Linux x86_64 client'
 canonicalize_input_file LINUX_APPROVAL_EVIDENCE 'Linux approval evidence'
 canonicalize_input_file LINUX_ACCEPTANCE_RECORD 'Linux acceptance record'
+canonicalize_input_file LINUX_BUILD_EVIDENCE 'Linux build evidence'
 
 [[ -d "${SERVER_ARTIFACT_DIR}" && ! -L "${SERVER_ARTIFACT_DIR}" ]] ||
   fail "server artifact source must be a real directory: ${SERVER_ARTIFACT_DIR}"
@@ -206,7 +239,8 @@ OUTPUT_BASENAME="$(basename "${OUTPUT_DIR}")"
 [[ "${OUTPUT_BASENAME}" != . && "${OUTPUT_BASENAME}" != .. && -n "${OUTPUT_BASENAME}" ]] ||
   fail "unsafe output directory: ${OUTPUT_DIR}"
 OUTPUT_PARENT="$(dirname "${OUTPUT_DIR}")"
-mkdir -p "${OUTPUT_PARENT}"
+[[ -d "${OUTPUT_PARENT}" && ! -L "${OUTPUT_PARENT}" ]] ||
+  fail "output parent must already be a real directory: ${OUTPUT_PARENT}"
 OUTPUT_PARENT="$(cd "${OUTPUT_PARENT}" && pwd -P)"
 OUTPUT_DIR="${OUTPUT_PARENT}/${OUTPUT_BASENAME}"
 case "${OUTPUT_DIR}" in
@@ -222,6 +256,7 @@ esac
 for protected_input in \
   "${WINDOWS_CLIENT}" "${WINDOWS_SIGNATURE_EVIDENCE}" \
   "${LINUX_CLIENT}" "${LINUX_APPROVAL_EVIDENCE}" "${LINUX_ACCEPTANCE_RECORD}" \
+  "${LINUX_BUILD_EVIDENCE}" \
   "${VERSION_FILE}" "${CLIENT_CONTRACT_FILE}" "${BASH_SOURCE[0]}"; do
   case "${protected_input}" in
     "${OUTPUT_DIR}"|"${OUTPUT_DIR}"/*)
@@ -237,6 +272,12 @@ esac
 [[ ! -L "${OUTPUT_DIR}" ]] || fail 'output directory must not be a symbolic link'
 if [[ -e "${OUTPUT_DIR}" && "${FORCE}" -ne 1 ]]; then
   fail "output already exists; use --force for this exact directory: ${OUTPUT_DIR}"
+fi
+if [[ -e "${OUTPUT_DIR}" ]]; then
+  [[ -d "${OUTPUT_DIR}" && ! -L "${OUTPUT_DIR}" ]] ||
+    fail 'existing output must be a real directory'
+  OUTPUT_EXISTED=1
+  OUTPUT_IDENTITY="$(path_identity "${OUTPUT_DIR}")"
 fi
 
 LOCKED_INTERNAL_VERSION="$(state_value "${VERSION_FILE}" LOBEHUB_INTERNAL_VERSION 'version lock')"
@@ -262,7 +303,7 @@ done
 for forbidden_file in \
   clients/lobehub-windows-x64.exe clients/lobehub-linux-x86_64.tar.gz \
   windows-authenticode-verification.txt linux-client-verification.txt \
-  linux-client-acceptance-record.txt; do
+  linux-client-acceptance-record.txt linux-client-build-evidence.txt; do
   [[ ! -e "${SERVER_ARTIFACT_DIR}/${forbidden_file}" ]] ||
     fail "server-only source already contains client artifact ${forbidden_file}"
 done
@@ -272,7 +313,10 @@ if [[ -d "${SERVER_ARTIFACT_DIR}/clients" \
 fi
 
 validate_state_file "${SERVER_ARTIFACT_DIR}/release.env" 'server release manifest'
+SERVER_MANIFEST_SHA256="$(sha256_file "${SERVER_ARTIFACT_DIR}/SHA256SUMS")"
 verify_checksum_manifest "${SERVER_ARTIFACT_DIR}"
+[[ "$(sha256_file "${SERVER_ARTIFACT_DIR}/SHA256SUMS")" == "${SERVER_MANIFEST_SHA256}" ]] ||
+  fail 'server SHA256SUMS changed while it was being verified'
 verify_locked_value LOBEHUB_INTERNAL_VERSION "${LOCKED_INTERNAL_VERSION}"
 verify_locked_value LOBEHUB_UPSTREAM_VERSION "${LOCKED_UPSTREAM_VERSION}"
 RELEASE_UPSTREAM_COMMIT="$(state_value "${SERVER_ARTIFACT_DIR}/release.env" \
@@ -309,23 +353,63 @@ done
 
 # 外部构建客户端必须先通过与最终打包、现场安装完全相同的真实性门禁。
 source "${CLIENT_CONTRACT_FILE}"
+WINDOWS_CLIENT_SHA256="$(sha256_file "${WINDOWS_CLIENT}")"
+WINDOWS_EVIDENCE_SHA256="$(sha256_file "${WINDOWS_SIGNATURE_EVIDENCE}")"
+LINUX_CLIENT_SHA256="$(sha256_file "${LINUX_CLIENT}")"
+LINUX_EVIDENCE_SHA256="$(sha256_file "${LINUX_APPROVAL_EVIDENCE}")"
+LINUX_ACCEPTANCE_SHA256="$(sha256_file "${LINUX_ACCEPTANCE_RECORD}")"
+LINUX_BUILD_EVIDENCE_SHA256="$(sha256_file "${LINUX_BUILD_EVIDENCE}")"
 lobehub_verify_client_artifacts \
   "${WINDOWS_CLIENT}" "${WINDOWS_SIGNATURE_EVIDENCE}" \
   "${LINUX_CLIENT}" "${LINUX_APPROVAL_EVIDENCE}" \
-  "${LINUX_ACCEPTANCE_RECORD}" "${LOCKED_INTERNAL_VERSION}" "${LOCKED_FORK_COMMIT}"
+  "${LINUX_ACCEPTANCE_RECORD}" "${LINUX_BUILD_EVIDENCE}" \
+  "${LOCKED_INTERNAL_VERSION}" "${LOCKED_FORK_COMMIT}"
+require_sha256_matches "${WINDOWS_CLIENT}" "${WINDOWS_CLIENT_SHA256}" 'Windows client'
+require_sha256_matches "${WINDOWS_SIGNATURE_EVIDENCE}" "${WINDOWS_EVIDENCE_SHA256}" \
+  'Windows signature evidence'
+require_sha256_matches "${LINUX_CLIENT}" "${LINUX_CLIENT_SHA256}" 'Linux client'
+require_sha256_matches "${LINUX_APPROVAL_EVIDENCE}" "${LINUX_EVIDENCE_SHA256}" \
+  'Linux approval evidence'
+require_sha256_matches "${LINUX_ACCEPTANCE_RECORD}" "${LINUX_ACCEPTANCE_SHA256}" \
+  'Linux acceptance record'
+require_sha256_matches "${LINUX_BUILD_EVIDENCE}" "${LINUX_BUILD_EVIDENCE_SHA256}" \
+  'Linux build evidence'
 
+LOCK_DIR="${OUTPUT_PARENT}/.${OUTPUT_BASENAME}.lobehub-finalize.lock"
+mkdir "${LOCK_DIR}" 2>/dev/null ||
+  fail "another finalizer is already publishing this output: ${OUTPUT_DIR}"
+LOCK_ACQUIRED=1
 STAGING_DIR="$(mktemp -d "${OUTPUT_PARENT}/.lobehub-finalize.XXXXXX")"
 cleanup() {
   [[ -n "${STAGING_DIR}" && -d "${STAGING_DIR}" ]] && rm -rf "${STAGING_DIR}"
+  if [[ "${LOCK_ACQUIRED}" -eq 1 && -d "${LOCK_DIR}" && ! -L "${LOCK_DIR}" ]]; then
+    rmdir "${LOCK_DIR}" >/dev/null 2>&1 || true
+  fi
 }
 trap cleanup EXIT
 cp -a "${SERVER_ARTIFACT_DIR}/." "${STAGING_DIR}/"
+[[ "$(sha256_file "${STAGING_DIR}/SHA256SUMS")" == "${SERVER_MANIFEST_SHA256}" ]] ||
+  fail 'copied server SHA256SUMS changed after source verification'
+verify_checksum_manifest "${STAGING_DIR}"
 mkdir -p "${STAGING_DIR}/clients"
 cp "${WINDOWS_CLIENT}" "${STAGING_DIR}/clients/lobehub-windows-x64.exe"
 cp "${LINUX_CLIENT}" "${STAGING_DIR}/clients/lobehub-linux-x86_64.tar.gz"
 cp "${WINDOWS_SIGNATURE_EVIDENCE}" "${STAGING_DIR}/windows-authenticode-verification.txt"
 cp "${LINUX_APPROVAL_EVIDENCE}" "${STAGING_DIR}/linux-client-verification.txt"
 cp "${LINUX_ACCEPTANCE_RECORD}" "${STAGING_DIR}/linux-client-acceptance-record.txt"
+cp "${LINUX_BUILD_EVIDENCE}" "${STAGING_DIR}/linux-client-build-evidence.txt"
+require_sha256_matches "${STAGING_DIR}/clients/lobehub-windows-x64.exe" \
+  "${WINDOWS_CLIENT_SHA256}" 'copied Windows client'
+require_sha256_matches "${STAGING_DIR}/windows-authenticode-verification.txt" \
+  "${WINDOWS_EVIDENCE_SHA256}" 'copied Windows signature evidence'
+require_sha256_matches "${STAGING_DIR}/clients/lobehub-linux-x86_64.tar.gz" \
+  "${LINUX_CLIENT_SHA256}" 'copied Linux client'
+require_sha256_matches "${STAGING_DIR}/linux-client-verification.txt" \
+  "${LINUX_EVIDENCE_SHA256}" 'copied Linux approval evidence'
+require_sha256_matches "${STAGING_DIR}/linux-client-acceptance-record.txt" \
+  "${LINUX_ACCEPTANCE_SHA256}" 'copied Linux acceptance record'
+require_sha256_matches "${STAGING_DIR}/linux-client-build-evidence.txt" \
+  "${LINUX_BUILD_EVIDENCE_SHA256}" 'copied Linux build evidence'
 
 REWRITTEN_RELEASE="${STAGING_DIR}/release.env.new"
 awk -v has_linux_key="$([[ -n "${LINUX_APPROVED}" ]] && printf 1 || printf 0)" '
@@ -356,13 +440,24 @@ lobehub_verify_client_artifacts \
   "${STAGING_DIR}/clients/lobehub-linux-x86_64.tar.gz" \
   "${STAGING_DIR}/linux-client-verification.txt" \
   "${STAGING_DIR}/linux-client-acceptance-record.txt" \
+  "${STAGING_DIR}/linux-client-build-evidence.txt" \
   "${LOCKED_INTERNAL_VERSION}" "${LOCKED_FORK_COMMIT}"
 
-if [[ -e "${OUTPUT_DIR}" ]]; then
+if [[ "${OUTPUT_EXISTED}" -eq 1 ]]; then
+  [[ -d "${OUTPUT_DIR}" && ! -L "${OUTPUT_DIR}" \
+    && "$(path_identity "${OUTPUT_DIR}")" == "${OUTPUT_IDENTITY}" ]] ||
+    fail 'forced output object changed while artifacts were being finalized'
   rm -rf "${OUTPUT_DIR}"
+else
+  [[ ! -e "${OUTPUT_DIR}" && ! -L "${OUTPUT_DIR}" ]] ||
+    fail 'output appeared while artifacts were being finalized'
 fi
 mv "${STAGING_DIR}" "${OUTPUT_DIR}"
 STAGING_DIR=""
+if [[ "${LOCK_ACQUIRED}" -eq 1 ]]; then
+  rmdir "${LOCK_DIR}"
+  LOCK_ACQUIRED=0
+fi
 trap - EXIT
 
 echo "Complete LobeHub artifact set finalized at ${OUTPUT_DIR}."

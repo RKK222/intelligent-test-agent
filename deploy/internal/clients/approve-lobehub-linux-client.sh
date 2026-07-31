@@ -91,6 +91,17 @@ state_value() {
 
 INTERNAL_VERSION="$(state_value "${VERSION_FILE}" LOBEHUB_INTERNAL_VERSION 'version lock')"
 FORK_COMMIT="$(state_value "${VERSION_FILE}" LOBEHUB_FORK_COMMIT 'version lock')"
+BUILDER="$(state_value "${BUILD_EVIDENCE}" LINUX_BUILDER 'Linux candidate build evidence')"
+[[ "${BUILDER}" =~ ^[A-Za-z0-9][A-Za-z0-9@._+-]{2,127}$ ]] \
+  && ! lobehub_client_is_placeholder "${BUILDER}" || {
+  echo "Linux builder must be a stable non-placeholder internal identity" >&2
+  exit 1
+}
+if [[ "$(printf '%s' "${BUILDER}" | tr '[:upper:]' '[:lower:]')" \
+  == "$(printf '%s' "${APPROVER}" | tr '[:upper:]' '[:lower:]')" ]]; then
+  echo "Linux builder and approver must be different identities" >&2
+  exit 1
+fi
 [[ "$(state_value "${BUILD_EVIDENCE}" LINUX_BUILD_STATUS 'Linux candidate build evidence')" == Candidate ]] || {
   echo "Linux build evidence status must be Candidate" >&2
   exit 1
@@ -183,7 +194,8 @@ LINUX_BUILD_EVIDENCE_SHA256=$(lobehub_client_sha256_file "${BUILD_EVIDENCE}")
 EOF
 
 lobehub_verify_linux_client_artifact \
-  "${CLIENT}" "${EVIDENCE_TMP}" "${ACCEPTANCE_RECORD}" "${INTERNAL_VERSION}" "${FORK_COMMIT}"
+  "${CLIENT}" "${EVIDENCE_TMP}" "${ACCEPTANCE_RECORD}" "${BUILD_EVIDENCE}" \
+  "${INTERNAL_VERSION}" "${FORK_COMMIT}"
 chmod 0644 "${EVIDENCE_TMP}"
 mv "${EVIDENCE_TMP}" "${OUTPUT_EVIDENCE}"
 

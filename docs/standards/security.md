@@ -229,7 +229,10 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
   远端失败时仍清除本机凭据。
 - LobeHub Redis 使用独立 ACL 用户，key 与 pub/sub channel 均限制为 `lobehub:app:*`，并拒绝管理命令和平台
   前缀；`REDIS_PREFIX` 配置为不带尾冒号的 `lobehub:app`，由上游 Redis wrapper 追加唯一分隔冒号。客户端认证
-  仅允许仓库内固定 Lua 状态机所需的 `EVAL`，ACL key pattern 不得因此放宽。平台 SSO key 固定在
+  仅允许仓库内固定 Lua 状态机所需的 `EVAL`，ACL key pattern 不得因此放宽。Agent Runtime 的直接 ioredis
+  连接也必须设置同一 `keyPrefix`，枚举只允许游标 `SCAN`，不得使用 `KEYS`。现场 ACL 从 `-@all` 开始按固定
+  命令白名单授权，并验证 Lua 跨前缀、前缀外 channel、`CONFIG/ACL/MODULE/FLUSH*/KEYS/SCRIPT FLUSH` 均被拒绝。
+  平台 SSO key 固定在
   `test-agent:lobehub-sso:*`。RustFS bucket 必须私有，初始化任务必须显式撤销匿名访问。
 - LobeHub app 默认只绑定 `127.0.0.1:3210`。跨机反向代理时只允许绑定获批的具体内网 IPv4，拒绝 wildcard，
   并用主机防火墙把 3210 来源限制为代理主机；RustFS、ParadeDB 和 Redis 不得随之暴露。
@@ -246,18 +249,20 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
   migration 占位值，平台才允许落票据。现场 `validate-config` 还必须核对 digest 镜像、secret 长度、离线开关、
   Cookie/Session 契约和执行能力门禁，任一不满足都禁止 migration 或启动 app。
 - 完全离线部署必须在 UI 和服务端同时关闭公网搜索、SaaS Connector、BYOK、自定义 Base URL、遥测、在线更新、
-  Marketplace、CDN 与运行期下载。`v2.2.11-platform.4` 对 Windows/Linux 都强制
+  Marketplace、CDN 与运行期下载。`v2.2.11-platform.5` 对 Windows/Linux 都强制
   `LOBEHUB_DEVICE_EXECUTION_MODE=disabled`，不存在通过旧变量放开的路径；后续 Linux 执行版本仍须在目标主机
   通过真实边界验收并 fail closed，且提供 root 所有、mode `0600`、绑定当前发行版/内核的通过证据。
 - 企业客户端必须从锁定 fork commit 的源码工具包在原生 Windows x64 / Linux x86_64 构建，仿真或交叉构建
   不能作为正式结果。Windows 证据必须由 `signtool` 和 `Get-AuthenticodeSignature=Valid` 产生，并绑定签名身份、
-  客户端 SHA、版本、commit、架构和执行禁用状态；Linux 构建人与审批人必须分离，最终审批证据必须绑定客户端和
-  独立验收记录 SHA，验收记录关联审批人、变更单及登录、无公网依赖、下载阻断、数据隔离和执行禁用结果。构件
+  客户端 SHA、版本、commit、架构和执行禁用状态；Linux 构建人与审批人必须分离，原生构建证据必须绑定
+  构建身份、客户端、版本、commit、OS/内核和执行禁用状态，最终审批证据必须绑定客户端、构建证据和独立验收
+  记录 SHA。验收记录关联审批人、变更单及登录、无公网依赖、下载阻断、数据隔离和执行禁用结果。构件
   汇集、Mac 打包和现场安装必须复用同一校验器，任一占位值、摘要或身份不一致都失败关闭。
 - LobeHub server-only 介质只能由无网络定稿工具补入已签名/已审批客户端；工具必须先校验原目录的完整
   `SHA256SUMS`、版本和镜像身份，不修改原目录，并在共享客户端门禁全部通过后才写入两个成功状态和新清单。
   `--force` 只能替换经校验的精确输出，输出不得等于或包含任何客户端、证据、版本锁、部署脚本、平台仓库或
-  server-only 输入。
+  server-only 输入。输出父目录必须预先存在；相邻锁、复制前后摘要与 inode 复核必须拒绝输入变化和并发目标
+  替换，且不得删除并发方创建的目录。
   LobeHub fork 转运只能从干净、锁定的 `main` 与 annotated 内部 tag 生成自包含 Git Bundle，只发布这两个 ref，
   并执行独立 clone、内外两层 SHA-256 校验；生成器必须扫描 fork 增量全部可达 blob/commit/tag 和当前 tag，
   命中高置信私钥/token 格式时失败关闭。转运包不携带 Git 配置、企业 Git URL 或 credential helper 数据；历史

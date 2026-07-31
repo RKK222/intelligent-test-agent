@@ -15,13 +15,16 @@ trap 'rm -rf "${OUTPUT_DIR}" "${EXTRACT_DIR}"' EXIT
 
 "${KIT_BUILDER}" --help | grep -F -- '--fork-dir' >/dev/null
 "${LINUX_BUILDER}" --help | grep -F -- '--output-dir' >/dev/null
+"${LINUX_BUILDER}" --help | grep -F -- '--builder' >/dev/null
 "${LINUX_APPROVER}" --help | grep -F -- '--acceptance-record' >/dev/null
 grep -F 'pnpm@10.33.0 install --frozen-lockfile --node-linker=hoisted' \
   "${LINUX_BUILDER}" >/dev/null
 grep -F 'LINUX_BUILD_STATUS=Candidate' "${LINUX_BUILDER}" >/dev/null
+grep -F 'LINUX_BUILDER=' "${LINUX_BUILDER}" >/dev/null
 grep -F -- '--linux tar.gz --x64' "${LINUX_BUILDER}" >/dev/null
 grep -F -- '--confirm-device-execution-disabled' "${LINUX_APPROVER}" >/dev/null
 grep -F 'lobehub_verify_linux_client_artifact' "${LINUX_APPROVER}" >/dev/null
+grep -F 'Linux builder and approver must be different identities' "${LINUX_APPROVER}" >/dev/null
 grep -F 'Get-AuthenticodeSignature' "${WINDOWS_BUILDER}" >/dev/null
 grep -F 'signtool.exe' "${WINDOWS_BUILDER}" >/dev/null
 grep -F "'--frozen-lockfile', '--node-linker=hoisted'" "${WINDOWS_BUILDER}" >/dev/null
@@ -31,7 +34,7 @@ grep -F 'CLIENT_EXECUTION_MODE=disabled' "${WINDOWS_BUILDER}" >/dev/null
 
 "${KIT_BUILDER}" --fork-dir "${FORK_DIR}" --output-dir "${OUTPUT_DIR}" >/dev/null
 
-KIT_ZIP="${OUTPUT_DIR}/lobehub-client-build-kit-v2.2.11-platform.4.zip"
+KIT_ZIP="${OUTPUT_DIR}/lobehub-client-build-kit-v2.2.11-platform.5.zip"
 test -s "${KIT_ZIP}"
 test -s "${KIT_ZIP}.sha256"
 (
@@ -44,17 +47,17 @@ test -s "${KIT_ZIP}.sha256"
 ) >/dev/null
 
 unzip -q "${KIT_ZIP}" -d "${EXTRACT_DIR}"
-KIT_ROOT="${EXTRACT_DIR}/lobehub-client-build-kit-v2.2.11-platform.4"
+KIT_ROOT="${EXTRACT_DIR}/lobehub-client-build-kit-v2.2.11-platform.5"
 test -f "${KIT_ROOT}/version.env"
 test -f "${KIT_ROOT}/SOURCE_SHA256SUMS"
 test -f "${KIT_ROOT}/BUILD_KIT_SHA256SUMS"
-test -f "${KIT_ROOT}/source/lobehub-v2.2.11-platform.4.tar.gz"
+test -f "${KIT_ROOT}/source/lobehub-v2.2.11-platform.5.tar.gz"
 test -f "${KIT_ROOT}/scripts/Build-LobeHubWindowsClient.ps1"
 test -x "${KIT_ROOT}/scripts/build-lobehub-linux-client.sh"
 test -x "${KIT_ROOT}/scripts/approve-lobehub-linux-client.sh"
 test -f "${KIT_ROOT}/scripts/lobehub-client-artifact-contract.sh"
 test -f "${KIT_ROOT}/BUILDING.md"
-grep -Fx 'LOBEHUB_FORK_COMMIT=306dad5dc0968ed008f011d7fc07f12a606b21e1' \
+grep -Fx 'LOBEHUB_FORK_COMMIT=57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c' \
   "${KIT_ROOT}/version.env" >/dev/null
 (
   cd "${KIT_ROOT}"

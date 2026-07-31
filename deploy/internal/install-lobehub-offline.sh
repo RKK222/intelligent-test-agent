@@ -8,6 +8,9 @@ BASE_DIR="${TEST_AGENT_BASE_DIR:-/data/testagent}"
 ENV_FILE="${BASE_DIR}/config/lobehub.env"
 SYSTEMD_UNIT_DIR="${TEST_AGENT_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 CLIENT_CONTRACT_FILE="${SCRIPT_DIR}/lobehub-client-artifact-contract.sh"
+PLATFORM_PROBE_FILE="${SCRIPT_DIR}/lobehub-platform-probe.mjs"
+REDIS_ACL_FILE="${SCRIPT_DIR}/lobehub-redis-acl.sh"
+VERSION_FILE="${SCRIPT_DIR}/lobehub/version.env"
 
 require_file() {
   [[ -f "$1" ]] || { echo "Required LobeHub artifact not found: $1" >&2; exit 1; }
@@ -15,8 +18,18 @@ require_file() {
 
 release_value() {
   local key="$1"
-  awk -F= -v wanted="${key}" '$1 == wanted { print substr($0, index($0, "=") + 1); found=1 } END { if (!found) exit 1 }' \
+  awk -F= -v wanted="${key}" \
+    '$1 == wanted { value=substr($0, index($0, "=") + 1); count++ } \
+     END { if (count != 1 || value == "") exit 1; print value }' \
     "${ARTIFACT_DIR}/release.env"
+}
+
+version_value() {
+  local key="$1"
+  awk -F= -v wanted="${key}" \
+    '$1 == wanted { value=substr($0, index($0, "=") + 1); count++ } \
+     END { if (count != 1 || value == "") exit 1; print value }' \
+    "${VERSION_FILE}"
 }
 
 sha256_file() {
@@ -31,7 +44,9 @@ sha256_file() {
 }
 
 verify_artifact_contract() {
-  local internal_version fork_commit required_file line path listed_paths expected_paths
+  local internal_version upstream_version upstream_commit fork_commit contract_version postgres_major
+  local locked_internal_version locked_upstream_version locked_upstream_commit locked_fork_commit
+  local locked_contract_version locked_postgres_major required_file line path listed_paths expected_paths
   local checksum_line_pattern
 
   [[ -d "${ARTIFACT_DIR}" && ! -L "${ARTIFACT_DIR}" ]] || {
@@ -42,25 +57,66 @@ verify_artifact_contract() {
     echo "LobeHub artifact set must not contain symbolic links" >&2
     exit 1
   fi
+  if [[ -n "$(find "${ARTIFACT_DIR}" ! -type d ! -type f -print -quit)" ]]; then
+    echo "LobeHub artifact set may contain only directories and regular files" >&2
+    exit 1
+  fi
   if [[ -n "$(find "${ARTIFACT_DIR}" -type f -name '*[[:space:]]*' -print -quit)" ]]; then
     echo "LobeHub artifact filenames must not contain whitespace" >&2
     exit 1
   fi
 
+  [[ -f "${VERSION_FILE}" && ! -L "${VERSION_FILE}" && -s "${VERSION_FILE}" ]] || {
+    echo "LobeHub version lock must be a non-empty regular file: ${VERSION_FILE}" >&2
+    exit 1
+  }
+
+  locked_internal_version="$(version_value LOBEHUB_INTERNAL_VERSION)"
+  locked_upstream_version="$(version_value LOBEHUB_UPSTREAM_VERSION)"
+  locked_upstream_commit="$(version_value LOBEHUB_UPSTREAM_COMMIT)"
+  locked_fork_commit="$(version_value LOBEHUB_FORK_COMMIT)"
+  locked_contract_version="$(version_value LOBEHUB_PLATFORM_CONTRACT_VERSION)"
+  locked_postgres_major="$(version_value LOBEHUB_PARADEDB_POSTGRES_MAJOR)"
+  [[ "${locked_internal_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-platform\.[0-9]+$ \
+    && "${locked_upstream_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ \
+    && "${locked_upstream_commit}" =~ ^[0-9a-f]{7}([0-9a-f]{33})?$ \
+    && "${locked_fork_commit}" =~ ^[0-9a-f]{40}$ \
+    && "${locked_contract_version}" =~ ^[0-9]+$ \
+    && "${locked_postgres_major}" == 17 ]] || {
+    echo "LobeHub packaged version lock is malformed or unsupported" >&2
+    exit 1
+  }
+
   internal_version="$(release_value LOBEHUB_INTERNAL_VERSION)"
-  [[ "${internal_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-platform\.[0-9]+$ ]] || {
-    echo "LobeHub release manifest contains an invalid internal version" >&2
-    exit 1
-  }
+  upstream_version="$(release_value LOBEHUB_UPSTREAM_VERSION)"
+  upstream_commit="$(release_value LOBEHUB_UPSTREAM_COMMIT)"
   fork_commit="$(release_value LOBEHUB_FORK_COMMIT)"
-  [[ "${fork_commit}" =~ ^[0-9a-f]{40}$ ]] || {
-    echo "LobeHub release manifest contains an invalid fork commit" >&2
+  contract_version="$(release_value LOBEHUB_PLATFORM_CONTRACT_VERSION)"
+  postgres_major="$(release_value LOBEHUB_PARADEDB_POSTGRES_MAJOR)"
+  [[ "${internal_version}" == "${locked_internal_version}" \
+    && "${upstream_version}" == "${locked_upstream_version}" \
+    && "${fork_commit}" == "${locked_fork_commit}" \
+    && "${contract_version}" == "${locked_contract_version}" \
+    && "${postgres_major}" == "${locked_postgres_major}" ]] || {
+    echo "LobeHub release manifest does not match the packaged version lock" >&2
     exit 1
   }
+  if [[ "${#locked_upstream_commit}" -eq 7 ]]; then
+    [[ "${upstream_commit}" == "${locked_upstream_commit}" \
+      || "${upstream_commit}" =~ ^${locked_upstream_commit}[0-9a-f]{33}$ ]] || {
+      echo "LobeHub release upstream commit does not match the packaged version lock" >&2
+      exit 1
+    }
+  else
+    [[ "${upstream_commit}" == "${locked_upstream_commit}" ]] || {
+      echo "LobeHub release upstream commit does not match the packaged version lock" >&2
+      exit 1
+    }
+  fi
   for required_file in \
     release.env SHA256SUMS approved-resources.json LICENSES.txt \
     windows-authenticode-verification.txt linux-client-verification.txt \
-    linux-client-acceptance-record.txt \
+    linux-client-acceptance-record.txt linux-client-build-evidence.txt \
     images/lobehub-image.tar images/paradedb-image.tar images/rustfs-image.tar \
     clients/lobehub-windows-x64.exe clients/lobehub-linux-x86_64.tar.gz \
     bin/mc-linux-amd64 sbom/lobehub.spdx.json \
@@ -84,11 +140,13 @@ verify_artifact_contract() {
     echo "Linux local execution must be disabled by default" >&2
     exit 1
   }
-  [[ "$(release_value LOBEHUB_PARADEDB_POSTGRES_MAJOR)" == 17 ]] || {
+  [[ "${postgres_major}" == 17 ]] || {
     echo "LobeHub offline deployment requires PostgreSQL 17" >&2
     exit 1
   }
   require_file "${CLIENT_CONTRACT_FILE}"
+  require_file "${PLATFORM_PROBE_FILE}"
+  require_file "${REDIS_ACL_FILE}"
   # 现场安装前再次执行与外网汇集、Mac 打包相同的双客户端真实性门禁。
   source "${CLIENT_CONTRACT_FILE}"
   lobehub_verify_client_artifacts \
@@ -97,6 +155,7 @@ verify_artifact_contract() {
     "${ARTIFACT_DIR}/clients/lobehub-linux-x86_64.tar.gz" \
     "${ARTIFACT_DIR}/linux-client-verification.txt" \
     "${ARTIFACT_DIR}/linux-client-acceptance-record.txt" \
+    "${ARTIFACT_DIR}/linux-client-build-evidence.txt" \
     "${internal_version}" "${fork_commit}"
 
   # 现场安装器再次要求清单完整覆盖，不能用只列出少数未篡改文件的清单绕过校验。
@@ -182,10 +241,15 @@ cp -a "${ARTIFACT_DIR}/release.env" "${ARTIFACT_DIR}/sbom" "${ARTIFACT_DIR}/sour
   "${ARTIFACT_DIR}/approved-resources.json" "${ARTIFACT_DIR}/LICENSES.txt" \
   "${ARTIFACT_DIR}/windows-authenticode-verification.txt" \
   "${ARTIFACT_DIR}/linux-client-verification.txt" \
-  "${ARTIFACT_DIR}/linux-client-acceptance-record.txt" "${BASE_DIR}/lobehub/release/"
+  "${ARTIFACT_DIR}/linux-client-acceptance-record.txt" \
+  "${ARTIFACT_DIR}/linux-client-build-evidence.txt" "${BASE_DIR}/lobehub/release/"
 
 install -m 0755 "${SCRIPT_DIR}/lobehub-docker.sh" "${BASE_DIR}/deploy/internal/lobehub-docker.sh"
 install -m 0755 "${SCRIPT_DIR}/lobehub-backup.sh" "${BASE_DIR}/deploy/internal/lobehub-backup.sh"
+install -m 0644 "${PLATFORM_PROBE_FILE}" \
+  "${BASE_DIR}/deploy/internal/lobehub-platform-probe.mjs"
+install -m 0755 "${REDIS_ACL_FILE}" \
+  "${BASE_DIR}/deploy/internal/lobehub-redis-acl.sh"
 install -m 0644 "${CLIENT_CONTRACT_FILE}" \
   "${BASE_DIR}/deploy/internal/lobehub-client-artifact-contract.sh"
 if [[ ! -f "${ENV_FILE}" ]]; then

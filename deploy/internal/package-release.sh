@@ -765,6 +765,10 @@ verify_lobehub_artifact_set() {
     echo "LobeHub artifact set must not contain symbolic links" >&2
     exit 1
   fi
+  if [[ -n "$(find "${source_dir}" ! -type d ! -type f -print -quit)" ]]; then
+    echo "LobeHub artifact set may contain only directories and regular files" >&2
+    exit 1
+  fi
   if [[ -n "$(find "${source_dir}" -type f -name '*[[:space:]]*' -print -quit)" ]]; then
     echo "LobeHub artifact filenames must not contain whitespace" >&2
     exit 1
@@ -789,6 +793,7 @@ verify_lobehub_artifact_set() {
   for required_file in \
     release.env SHA256SUMS approved-resources.json LICENSES.txt windows-authenticode-verification.txt \
     linux-client-verification.txt linux-client-acceptance-record.txt \
+    linux-client-build-evidence.txt \
     images/lobehub-image.tar images/paradedb-image.tar images/rustfs-image.tar \
     clients/lobehub-windows-x64.exe clients/lobehub-linux-x86_64.tar.gz \
     bin/mc-linux-amd64 sbom/lobehub.spdx.json \
@@ -896,6 +901,7 @@ verify_lobehub_artifact_set() {
     "${source_dir}/clients/lobehub-linux-x86_64.tar.gz" \
     "${source_dir}/linux-client-verification.txt" \
     "${source_dir}/linux-client-acceptance-record.txt" \
+    "${source_dir}/linux-client-build-evidence.txt" \
     "${locked_internal_version}" "${locked_fork_commit}"
   for image_ref in LOBEHUB_APP_IMAGE LOBEHUB_PARADEDB_IMAGE LOBEHUB_RUSTFS_IMAGE; do
     image_id="$(state_value "${source_dir}/release.env" "${image_ref}_ID")"
@@ -934,7 +940,7 @@ package_lobehub_zip() {
   cp -a "${OUTPUT_DIR}/lobehub/." "${staging_dir}/dist/lobehub/"
   for required_file in \
     lobehub.env.example lobehub-docker.sh lobehub-backup.sh install-lobehub-offline.sh \
-    lobehub-client-artifact-contract.sh \
+    lobehub-client-artifact-contract.sh lobehub-platform-probe.mjs lobehub-redis-acl.sh \
     systemd/test-agent-lobehub.service lobehub/version.env nginx/lobehub.conf.template; do
     mkdir -p "${staging_dir}/deploy/internal/$(dirname "${required_file}")"
     cp -a "${SCRIPT_DIR}/${required_file}" "${staging_dir}/deploy/internal/${required_file}"
