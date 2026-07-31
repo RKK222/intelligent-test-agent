@@ -4150,3 +4150,27 @@
 ### Result
 
 - 新物化和当前未过期 generation 都可在 1–168 整小时内设置总保留期，前端、API、数据库约束、索引摘要和清理调度保持一致。新增 API 和 Flyway/MyBatis SQL；未修改 RunEvent wire、安全策略、环境配置、generated SDK 或 OpenCode 源码。
+
+## 2026-07-31 - 基于 main 重建含 Flyway 更新的企业三节点包
+
+### Why
+
+- 用户要求以当前本地 `main` 重新生成企业三节点包，并特别关注两条应用源码保留期 Flyway 在企业存量库升级时的风险。
+- 打包期间共享工作目录被另一任务切到 `codex/ui-icbc-shell-theme` 并出现未提交 UI 修改；为避免把并行改动或中间文件误混入交付，最终构建改用固定在 `main@014bbb1af7a8d65acc5536952741956a7f94c371` 的隔离 worktree。
+
+### What
+
+- 重新构建后端、前端、内层标准发布 ZIP 和固定名三节点外层 ZIP；最终内层 SHA-256 为 `e2af88b5a192830ebcf4e1858c86f39e1b0c1df5f771d40219ef6e86d97810e1`，外层 SHA-256 为 `bcb1960f09d8481d3c10ee251439ba6567fce86da752e9c5b6bbf5bf57dff4b7`，外层内嵌内层摘要完全一致。
+- 本次 worker runtime/manager 与 toolbox 都是 `reuse`：指纹分别为 `aa452daf700adfbabf01f1052f8eb8274daf3c7a0e95cd12152b1e39f1708000`、`35447da08f477dd02e458e4344be9bd870452dba12ba6db32d250c56e9f15040`；Python 和公共 Agent 无变化，不随包重部署。
+- 包含 `V20260731115520` 和 `V20260731123600` 两条新 migration。源码与最终 persistence JAR 的 SHA-256 分别锁定为 `b88b285257025919ca496d247afcfc60ecc24733373639830473294f6dec1bd2`、`e6c3143c0d301119a3cc71164145ec09c0828b552a34b2238934af7a8a73ff7e`；工具盒子正式 migration 仍为 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`。
+
+### How
+
+- JDK 25 + PostgreSQL 16/Testcontainers 重新执行 Flyway 命名/固定字节、应用源码完整生产 migration、企业基线与四类已知 toolbox 历史升级，共 12 项通过；当前源码记录的 Flyway checksum 为 `20260731115520/1426353675` 和 `20260731123600/104581879`。
+- 前端保留期/菜单/backend-api 定向 3 文件 38 项通过；企业后端和前端 `--validate-only`、三节点外层脚本、内外 ZIP 完整性、SHA、归档卫生和包内 migration 字节全部通过。
+- 最终固定名外层 ZIP/SHA 已同步到 `deploy/internal/dist/0731/`；隔离 worktree 与敏感节点临时解压目录已删除，未触碰并行 UI 分支的未提交文件。
+
+### Result
+
+- 企业包已构建并在 Mac 侧完成可重复校验，但因尚未取得目标企业 PostgreSQL 的完整 `flyway_schema_history`，部署准入仍待现场只读盘点。任一未知 checksum、失败记录、未知更高版本，或已执行 `20260731115520` 但存在 `expires_at > accepted_at + 168 hours` 的快照，都必须停止首台发布，禁止 `repair`、`outOfOrder` 或手工修改 history。
+- 现场必须按 `.4 → .114 → .2`：首台 Java 触发 migration 后复查 history、约束和日志，无异常才继续第二台；两台 Java 必须同批升级，worker/manager/toolbox/Python/公共 Agent 无需重启。
