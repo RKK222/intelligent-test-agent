@@ -4107,3 +4107,24 @@
 ### Result
 
 - 已下载应用代码库现在直接列在统一菜单下并点击即打开；测试工作空间保持原交互，服务器和 Terminal 边界不变。本次未变更 HTTP/WebSocket/RunEvent、后端、数据库/Flyway、关系型 SQL、安全策略、环境配置、generated SDK 或 OpenCode 源码。
+
+## 2026-07-31 - 未下载应用代码库灰色直达管理页面
+
+### Why
+
+- 用户要求未下载的开发代码库也在统一菜单中显示为灰色可点击项，点击后直接打开该代码库的管理页面；测试工作空间交互不变。
+
+### What
+
+- `WorkbenchFooter` 不再过滤 `NOT_DOWNLOADED` 版本库；未下载项使用灰色样式和独立无障碍标签，加载完成后保持可点击，已下载可用项仍直接打开源码，已下载但不可用项仍禁用。
+- 未下载项点击事件经 `FigmaFileExplorer` 透传至 `AgentWorkbench`，复用既有源码管理弹窗与版本库选择逻辑，打开后自动选中对应版本库；标题右侧“管理”入口继续打开全部版本库管理页。
+- 测试工作空间行前增加试管图标，用于和代码库行的代码图标区分；工作空间行、悬浮版本菜单、独立服务器工作空间按钮和 Terminal 的交互均未修改。同步 agent-web README 与包级说明。
+
+### How
+
+- `WorkbenchFooter` Vitest 17/17、agent-web typecheck、生产 build 均通过；应用源码 Chromium 主流程 1/1 通过，覆盖灰色未下载项点击后进入并选中对应管理项，随后首次下载流程继续正常。
+- 使用已运行的本地 test profile 服务和前端 HMR 做真实 Playwright 验证：F-COSS 的 `springbootDemo` 显示为灰色、非禁用，点击后打开“下载应用源码”管理页并显示“当前配置 · springbootDemo”；`wrtest` 与“本地-测试”两行均显示试管图标，且测试工作空间交互仍可用。
+
+### Result
+
+- 未下载应用代码库现在灰色可点击并直达自身管理页面；已下载代码库直开和测试工作空间交互保持不变。本次未变更 HTTP/WebSocket/RunEvent、后端、数据库/Flyway、关系型 SQL、安全策略、环境配置、generated SDK 或 OpenCode 源码。

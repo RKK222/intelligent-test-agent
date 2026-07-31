@@ -4373,7 +4373,7 @@ async function observeAppSourceOperation(operation: AppSourceOperation) {
   await connectAppSourceProgressObservation(authority);
 }
 
-async function openAppSourceDownloadDialog() {
+async function openAppSourceDownloadDialog(repository?: AppSourceRepositorySummary) {
   if (!appSourceRepositories.value.some((item) => item.manageable)) {
     feedback.value = { kind: "info", title: "没有可下载的版本库", description: "当前应用没有你可管理的源码版本库。" };
     return;
@@ -4391,6 +4391,8 @@ async function openAppSourceDownloadDialog() {
   appSourceOperation.value = null;
   appSourceSubmitting.value = false;
   appSourceProgressError.value = null;
+  // 菜单点击某个未下载版本库时直接选中它；顶部“管理”入口仍保持无预选的全量管理页。
+  if (repository) selectAppSourceRepository(repository);
 }
 
 function selectAppSourceRepository(repository: AppSourceRepositorySummary) {
@@ -9139,6 +9141,7 @@ async function handleLogout() {
           @open-app-source="openAppSourcePicker"
           @load-app-source-repositories="loadAppSourceRepositories"
           @open-app-source-repository="openAppSourceRepository"
+          @manage-app-source-repository="openAppSourceDownloadDialog"
           @return-managed-workspace="fallbackToManagedWorkspace()"
           @search="handleFileSearch"
           @create-entry="handleCreateEntry"

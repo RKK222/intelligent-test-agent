@@ -1800,10 +1800,10 @@ test("application source snapshot opens a logical workspace and enforces source 
   await expect(fileExplorer.getByText("源码快照", { exact: true })).toHaveCount(0);
   expect(clearedRecentAppSource).toEqual(["DELETE"]);
 
-  await openAppSourceFromWorkspaceSwitch(page);
-  await page.getByRole("button", { name: "下载版本库" }).click();
+  await openAppSourceManagementForRepository(page, "尚未下载库");
   const dialog = page.getByRole("dialog", { name: "下载应用源码" });
   await expect(dialog).toContainText("尚未下载库");
+  await expect(dialog).toContainText("当前配置 · 尚未下载库");
   await expect(dialog).toContainText("李四 · UCID-1002");
   await dialog.getByRole("button", { name: "选择应用代码库版本库" }).click();
   await dialog.getByRole("button", { name: "下一步：选择分支与目录" }).click();
@@ -8877,6 +8877,13 @@ async function openAppSourceRepositoryFromWorkspaceSwitch(page: Page, repository
   const fileExplorer = page.locator(".figma-file-explorer");
   await fileExplorer.getByRole("button", { name: "切换应用代码库或测试工作空间" }).click();
   await page.getByRole("menu").getByRole("button", { name: `打开${repositoryName}源码` }).click();
+}
+
+/** 未下载版本库在菜单中保持灰色可点击，点击后直接进入并选中对应管理项。 */
+async function openAppSourceManagementForRepository(page: Page, repositoryName: string) {
+  const fileExplorer = page.locator(".figma-file-explorer");
+  await fileExplorer.getByRole("button", { name: "切换应用代码库或测试工作空间" }).click();
+  await page.getByRole("menu").getByRole("button", { name: `管理${repositoryName}源码` }).click();
 }
 
 function json(data: unknown) {

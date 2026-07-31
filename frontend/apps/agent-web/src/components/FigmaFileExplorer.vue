@@ -132,6 +132,7 @@ const emit = defineEmits<{
   openAppSource: [];
   loadAppSourceRepositories: [];
   openAppSourceRepository: [repository: AppSourceRepositorySummary];
+  manageAppSourceRepository: [repository: AppSourceRepositorySummary];
   returnManagedWorkspace: [];
   // 搜索事件
   search: [keyword: string];
@@ -682,6 +683,7 @@ defineExpose({
       @open-app-source="emit('openAppSource')"
       @load-app-source-repositories="emit('loadAppSourceRepositories')"
       @open-app-source-repository="emit('openAppSourceRepository', $event)"
+      @manage-app-source-repository="emit('manageAppSourceRepository', $event)"
       @return-managed-workspace="emit('returnManagedWorkspace')"
     />
 

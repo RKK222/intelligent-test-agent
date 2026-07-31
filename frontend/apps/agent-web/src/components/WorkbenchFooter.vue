@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowLeftRight, CodeXml, Eye, EyeOff, LibraryBig, Plus, Save, ServerCog, Target } from "lucide-vue-next";
+import { ArrowLeftRight, CodeXml, Eye, EyeOff, FlaskConical, LibraryBig, Plus, Save, ServerCog, Target } from "lucide-vue-next";
 import { ElDatePicker, ElDialog, ElTooltip, ElMessage } from "element-plus";
 import type {
   ApplicationWorkspaceTemplate,
@@ -62,7 +62,7 @@ const props = defineProps<{
   showReferenceConfiguration?: boolean;
   /** 当前应用存在源码入口；由父层按已选择应用控制，不使用用户角色裁剪。 */
   showAppSource?: boolean;
-  /** 当前应用源码版本库状态；菜单只直列已经下载过的版本库。 */
+  /** 当前应用源码版本库状态；已下载项直接打开，未下载项进入管理页。 */
   appSourceRepositories?: AppSourceRepositorySummary[];
   /** 应用源码版本库状态是否正在加载。 */
   loadingAppSourceRepositories?: boolean;
@@ -97,6 +97,8 @@ const emit = defineEmits<{
   (e: "load-app-source-repositories"): void;
   // 点击已就绪版本库后直接打开源码快照，不再经过源码选择弹窗。
   (e: "open-app-source-repository", repository: AppSourceRepositorySummary): void;
+  // 点击未下载版本库后直接进入该版本库的下载/管理页面。
+  (e: "manage-app-source-repository", repository: AppSourceRepositorySummary): void;
   (e: "return-managed-workspace"): void;
 }>();
 
@@ -155,11 +157,8 @@ async function copyPath(textToCopy: string) {
 
 // 双端过滤保证旧后端响应仍可使用：只有显式停用的配置不展示。
 const templates = computed(() => (props.templates ?? []).filter((template) => template.enabled !== false));
-// 与原源码选择弹窗保持同一可见性边界：未下载版本库只能从“管理”入口执行首次下载，
-// 已下载版本库才作为可直接打开的菜单项展示。
-const visibleAppSourceRepositories = computed(() => (props.appSourceRepositories ?? []).filter(
-  (repository) => repository.downloadState !== "NOT_DOWNLOADED"
-));
+// 当前应用关联的版本库全部在菜单中直列：已下载项打开快照，未下载项以灰色入口进入管理页。
+const visibleAppSourceRepositories = computed(() => props.appSourceRepositories ?? []);
 
 // ===== 应用工作空间两级菜单的弹出状态 =====
 // 模板列表尚未加载或为空时仍展示入口，用于直接暴露当前个人 worktree 分支；
@@ -517,7 +516,13 @@ function retryAppSourceRepositoriesFromMenu() {
 
 function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary) {
   // 菜单每次展开都会刷新 generation；刷新完成前禁止点击缓存行，避免用旧 generation 发起 open。
-  if (props.loadingAppSourceRepositories || !repository.openable) return;
+  if (props.loadingAppSourceRepositories) return;
+  if (repository.downloadState === "NOT_DOWNLOADED") {
+    closeMenu();
+    emit("manage-app-source-repository", repository);
+    return;
+  }
+  if (!repository.openable) return;
   closeMenu();
   emit("open-app-source-repository", repository);
 }
@@ -607,7 +612,7 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
                 v-else-if="visibleAppSourceRepositories.length === 0"
                 class="ta-workbench-cascade-source-state"
               >
-                暂无可打开代码库
+                暂无应用代码库
               </div>
               <ul v-else class="ta-workbench-cascade-source-list" role="none">
                 <li v-for="repository in visibleAppSourceRepositories" :key="repository.repositoryId" role="none">
@@ -615,15 +620,21 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
                     type="button"
                     :class="[
                       'ta-workbench-cascade-source-button',
+                      repository.downloadState === 'NOT_DOWNLOADED' && 'is-not-downloaded',
                       repository.repositoryId === selectedAppSourceRepositoryId && 'is-selected'
                     ]"
-                    :aria-label="`打开${repository.name}源码`"
+                    :aria-label="repository.downloadState === 'NOT_DOWNLOADED'
+                      ? `管理${repository.name}源码`
+                      : `打开${repository.name}源码`"
                     :title="loadingAppSourceRepositories
                       ? '正在刷新应用代码库状态…'
+                      : repository.downloadState === 'NOT_DOWNLOADED'
+                      ? `下载或管理${repository.name}源码`
                       : repository.openable
                       ? `打开${repository.name}源码${repository.branch ? ` · ${repository.branch}` : ''}`
                       : (repository.unavailableReason || '当前服务器没有可打开的 READY 副本')"
-                    :disabled="loadingAppSourceRepositories || !repository.openable"
+                    :disabled="loadingAppSourceRepositories
+                      || (repository.downloadState !== 'NOT_DOWNLOADED' && !repository.openable)"
                     @click="openAppSourceRepositoryFromMenu(repository)"
                   >
                     <CodeXml class="ta-workbench-footer-icon" />
@@ -654,6 +665,10 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
                 @mouseenter="onTemplateEnter(template, $event)"
                 @mouseleave="onTemplateLeave"
               >
+                <FlaskConical
+                  class="ta-workbench-footer-icon ta-workbench-cascade-workspace-icon"
+                  aria-hidden="true"
+                />
                 <div class="ta-workbench-cascade-item-main">
                   <span class="ta-workbench-cascade-item-name">{{ template.workspaceName }}</span>
                 </div>
@@ -1238,6 +1253,17 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
 .ta-workbench-cascade-source-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.ta-workbench-cascade-source-button.is-not-downloaded,
+.ta-workbench-cascade-source-button.is-not-downloaded .ta-workbench-footer-icon,
+.ta-workbench-cascade-source-button.is-not-downloaded .ta-workbench-cascade-source-name {
+  color: #a1a1aa;
+}
+
+.ta-workbench-cascade-source-button.is-not-downloaded:hover:not(:disabled) {
+  background: #f4f4f5;
+  color: #71717a;
 }
 
 .ta-workbench-cascade-source-name {

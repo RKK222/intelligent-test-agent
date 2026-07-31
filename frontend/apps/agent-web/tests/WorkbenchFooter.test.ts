@@ -114,6 +114,7 @@ describe("WorkbenchFooter", () => {
     expect(document.body.querySelector('[aria-label="管理应用代码库"]')).not.toBeNull();
     expect(document.body.textContent).toContain("测试工作空间");
     expect(document.body.textContent).toContain("主服务");
+    expect(document.body.querySelector(".ta-workbench-cascade-item .ta-workbench-cascade-workspace-icon")).not.toBeNull();
     appSourceSwitch?.click();
     await wrapper.vm.$nextTick();
     expect(wrapper.emitted("open-app-source-repository")?.[0]).toEqual([appSourceRepository]);
@@ -125,7 +126,14 @@ describe("WorkbenchFooter", () => {
     expect(wrapper.emitted("open-app-source")).toHaveLength(1);
   });
 
-  it("keeps first-download repositories in management and disables stale or unavailable direct-open rows", async () => {
+  it("shows first-download repositories as gray management links while disabling stale or unavailable rows", async () => {
+    const notDownloaded = {
+      ...appSourceRepository,
+      repositoryId: "repo-new",
+      name: "尚未下载",
+      downloadState: "NOT_DOWNLOADED" as const,
+      generation: null
+    };
     const wrapper = mount(WorkbenchFooter, {
       attachTo: document.body,
       props: {
@@ -135,7 +143,7 @@ describe("WorkbenchFooter", () => {
         loadingAppSourceRepositories: true,
         appSourceRepositories: [
           appSourceRepository,
-          { ...appSourceRepository, repositoryId: "repo-new", name: "尚未下载", downloadState: "NOT_DOWNLOADED", generation: null },
+          notDownloaded,
           {
             ...appSourceRepository,
             repositoryId: "repo-unavailable",
@@ -148,18 +156,26 @@ describe("WorkbenchFooter", () => {
     });
 
     await wrapper.find('[data-onboarding="workspace-selector"]').trigger("click");
-    expect(document.body.querySelector('[aria-label="打开尚未下载源码"]')).toBeNull();
     const refreshing = document.body.querySelector('[aria-label="打开应用代码库源码"]') as HTMLButtonElement;
     expect(refreshing.disabled).toBe(true);
     expect(refreshing.title).toBe("正在刷新应用代码库状态…");
+    const firstDownload = document.body.querySelector('[aria-label="管理尚未下载源码"]') as HTMLButtonElement;
+    expect(firstDownload.disabled).toBe(true);
+    expect(firstDownload.classList).toContain("is-not-downloaded");
+    expect(firstDownload.title).toBe("正在刷新应用代码库状态…");
     const unavailable = document.body.querySelector('[aria-label="打开副本未就绪源码"]') as HTMLButtonElement;
     expect(unavailable.disabled).toBe(true);
     expect(unavailable.title).toBe("正在刷新应用代码库状态…");
     await wrapper.setProps({ loadingAppSourceRepositories: false });
     expect(refreshing.disabled).toBe(false);
+    expect(firstDownload.disabled).toBe(false);
+    expect(firstDownload.title).toBe("下载或管理尚未下载源码");
     expect(unavailable.disabled).toBe(true);
     expect(unavailable.title).toBe("当前服务器副本未就绪");
     expect(document.body.querySelector('[aria-label="管理应用代码库"]')).not.toBeNull();
+    firstDownload.click();
+    await wrapper.vm.$nextTick();
+    expect(wrapper.emitted("manage-app-source-repository")?.[0]).toEqual([notDownloaded]);
   });
 
   it("hides the reference configuration icon unless explicitly authorized by the parent", () => {
