@@ -4246,3 +4246,28 @@
 - 缺少被测系统环境时，UI 执行链路会中断且不创建外部自动化；提供环境和一行四列案例时，独立 uitest6 已完成百度搜索框输入的真实正向自动化，Judge 失败也不再可能被集成接口误报为成功。
 - 当前用户对话入口的最后一次真实派发尚未完成：公共个人运行态因两条遗留 RUNNING Session 无法 dispose；共享公共运行仓库另有 4 个仅本地、未被远端引用的提交，不能用全局 reset 覆盖。后续需先由用户确认是否取消这两条遗留 Run，并为共享仓库本地提交选择保留方式，再执行热加载/全局 rollout 和对话验收。
 - 本次没有新增数据库/Flyway、关系型 SQL、RunEvent/SSE、前端协议或 OpenCode 源码变更；uitest6 源码仍只存在独立仓库，不进入当前项目。
+
+## 2026-07-31 - 收口工行外围主题并同步桌面回归门槛
+
+### Why
+
+- 用户要求以当前项目代码为准完成外围色系收口，保持对话区域和隐藏的退出入口不变；项目没有移动端产品内容，后续验证不应把移动端视口纳入交付门槛。
+
+### What
+
+- 保留现有工行风格外围主题与黑色 Logo，给 `FigmaShell` 主卡片补充可收缩约束，避免工具盒子把工作区撑出视口；对话 DOM 和样式未改。
+- Playwright 改为单桌面 Chromium 项目，修正当前路由、会话、模型、工具盒子、历史、附件、Mermaid、日期选择等真实规格与现行实现的断言/fixture；锁定退出菜单项继续隐藏。
+- 同步前端规范、应用/包 README、Vitest/Playwright 配置和异步测试稳定性说明；未加入移动端内容。
+
+### How
+
+- `corepack pnpm e2e`：131 passed（单桌面 Chromium，1 worker）。
+- `corepack pnpm test`：106 个测试文件通过，1742 passed、1 skipped。
+- `corepack pnpm typecheck`：全 workspace 通过。
+- `corepack pnpm build`：文档与 agent-web 生产构建通过；仅保留既有 Canvas 与大 chunk 非阻断警告。
+- 按用户最新要求未执行手动点击或截图。
+
+### Result
+
+- 色系外围、测试和稳定文档已同步，桌面回归及 Vitest、类型检查、生产构建均通过。
+- 未涉及 HTTP API、事件/SSE、数据库/Flyway、关系型 SQL、性能、安全、环境配置、generated SDK 或 OpenCode 源码。

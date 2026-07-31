@@ -1033,6 +1033,7 @@ describe("FigmaShell", () => {
     await wrapper.get(".figma-user-avatar-btn").trigger("click");
 
     expect(wrapper.get(".figma-user-menu-service-text").text()).toBe("未运行(server-a / 192.168.100.171:82)");
+    expect(wrapper.find('[role="menuitem"]').exists()).toBe(false);
   });
 
   it("opens the focused side-question input directly when the process and main session are ready", async () => {
