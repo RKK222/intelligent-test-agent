@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { WorkflowApiClient } from "../src";
+import { WorkflowApiClient, WorkflowApiError } from "../src";
 
 describe("WorkflowApiClient", () => {
   it("calls Python directly with the platform bearer token", async () => {
@@ -15,6 +15,71 @@ describe("WorkflowApiClient", () => {
 
     await expect(client.conversations()).resolves.toEqual([]);
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("turns a successful SPA HTML fallback into a safe workflow routing error", async () => {
+    const fetcher = vi.fn(async () => new Response("<!doctype html><title>agent-web</title>", {
+      status: 200,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    }));
+    const client = new WorkflowApiClient({ token: () => "platform-token", fetch: fetcher });
+
+    const failure = await client.me().catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(WorkflowApiError);
+    expect(failure).toMatchObject({
+      status: 502,
+      code: "WORKFLOW_API_INVALID_RESPONSE",
+      details: {
+        upstreamStatus: 200,
+        contentType: "text/html; charset=utf-8",
+      },
+    });
+    expect((failure as Error).message).toBe("工作流服务响应格式异常，请检查 /workflow-api/ 路由和 Python 服务");
+    expect((failure as Error).message).not.toContain("<!doctype");
+  });
+
+  it("turns a non-JSON proxy failure into a safe availability error", async () => {
+    const fetcher = vi.fn(async () => new Response("Bad Gateway", {
+      status: 502,
+      headers: { "Content-Type": "text/plain" },
+    }));
+    const client = new WorkflowApiClient({ token: () => "platform-token", fetch: fetcher });
+
+    await expect(client.repositories()).rejects.toMatchObject({
+      status: 502,
+      code: "WORKFLOW_API_UNAVAILABLE",
+      message: "工作流服务暂不可用（HTTP 502）",
+      details: { contentType: "text/plain" },
+    });
+  });
+
+  it("rejects an SPA HTML fallback from report download", async () => {
+    const fetcher = vi.fn(async () => new Response("<!doctype html>", {
+      status: 200,
+      headers: { "Content-Type": "text/html" },
+    }));
+    const client = new WorkflowApiClient({ token: () => "platform-token", fetch: fetcher });
+
+    await expect(client.downloadReport("report_1")).rejects.toMatchObject({
+      status: 502,
+      code: "WORKFLOW_API_INVALID_RESPONSE",
+    });
+  });
+
+  it("rejects an SPA HTML fallback from the AG-UI event endpoint", async () => {
+    const fetcher = vi.fn(async () => new Response("<!doctype html>", {
+      status: 200,
+      headers: { "Content-Type": "text/html" },
+    }));
+    const client = new WorkflowApiClient({ token: () => "platform-token", fetch: fetcher });
+
+    const connection = client.connectEvents("conv_1", () => undefined, { reconnect: false });
+
+    await expect(connection.done).rejects.toMatchObject({
+      status: 502,
+      code: "WORKFLOW_API_INVALID_RESPONSE",
+    });
   });
 
   it("uses fetch SSE with Authorization and Last-Event-ID", async () => {

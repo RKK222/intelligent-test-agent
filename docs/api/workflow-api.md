@@ -4,6 +4,8 @@
 
 `/workflow-api/v1/**` 由 Nginx 同源直接转发到 Python `workflow-service`，不经过 Java。Java 不定义或保存 workflow conversation、message、task、run、report、event。
 
+本地Vite开发服务器遵循同一边界，把`/workflow-api/**`直接代理到独立Python（默认`http://127.0.0.1:8090`，可由`TEST_AGENT_WORKFLOW_API_URL`覆盖）。该开发代理不得回退SPA `index.html`或Java；浏览器客户端会把非JSON/缺少`data`信封的成功响应作为上游协议错误处理，且不回显正文。
+
 浏览器请求使用平台原 Bearer Token。Python 不签发第二套登录 Cookie；每次请求对平台 Redis 做精确 `GET test-agent:token:<token>` 和 `PTTL`，并校验 `AuthPrincipal`。成功响应使用 `{ "data": ... }`，失败响应固定为：
 
 ```json

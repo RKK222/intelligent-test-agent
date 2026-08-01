@@ -213,6 +213,7 @@ export class WorkflowApiClient {
   async downloadReport(reportId: string): Promise<string> {
     const response = await this.authorizedFetch(this.reportDownloadUrl(reportId));
     await this.ensureResponse(response);
+    this.ensureNotHtmlResponse(response);
     return response.text();
   }
 
@@ -236,6 +237,7 @@ export class WorkflowApiClient {
           if (cursor) headers["Last-Event-ID"] = cursor;
           const response = await this.fetcher(path, { headers, signal: controller.signal });
           await this.ensureResponse(response);
+          this.ensureEventStreamResponse(response);
           if (!response.body) throw new WorkflowApiError(502, { code: "SSE_BODY_MISSING" });
           await consumeSse(response.body, (event, id) => {
             if (id) cursor = id;
@@ -263,8 +265,11 @@ export class WorkflowApiClient {
     if (init.body !== undefined) headers.set("Content-Type", "application/json");
     const response = await this.authorizedFetch(`${this.baseUrl}${path}`, { ...init, headers });
     await this.ensureResponse(response);
-    const envelope = await response.json() as { data: T };
-    return envelope.data;
+    const envelope = await this.parseJsonResponse(response);
+    if (!isRecord(envelope) || !Object.hasOwn(envelope, "data")) {
+      throw this.invalidResponse(response);
+    }
+    return envelope.data as T;
   }
 
   private authorizedFetch(url: string, init: RequestInit = {}): Promise<Response> {
@@ -287,12 +292,51 @@ export class WorkflowApiClient {
     if (response.status === 401) this.onUnauthorized?.();
     let failure: Partial<WorkflowApiFailure> = {};
     try {
-      failure = await response.json() as Partial<WorkflowApiFailure>;
+      const payload = await response.json() as unknown;
+      if (isRecord(payload)) failure = payload;
     } catch {
-      failure = { code: "WORKFLOW_API_FAILED", message: `HTTP ${response.status}` };
+      failure = {
+        code: "WORKFLOW_API_UNAVAILABLE",
+        message: `工作流服务暂不可用（HTTP ${response.status}）`,
+        details: { contentType: response.headers.get("Content-Type") ?? "" },
+      };
     }
     throw new WorkflowApiError(response.status, failure);
   }
+
+  private async parseJsonResponse(response: Response): Promise<unknown> {
+    try {
+      return await response.json() as unknown;
+    } catch {
+      throw this.invalidResponse(response);
+    }
+  }
+
+  private ensureEventStreamResponse(response: Response): void {
+    const contentType = response.headers.get("Content-Type")?.toLowerCase() ?? "";
+    if (!contentType.startsWith("text/event-stream")) throw this.invalidResponse(response);
+  }
+
+  private ensureNotHtmlResponse(response: Response): void {
+    // 反向代理误路由和Vite SPA fallback都可能以2xx返回HTML，下载接口不能把它保存成Markdown。
+    const contentType = response.headers.get("Content-Type")?.toLowerCase() ?? "";
+    if (contentType.startsWith("text/html")) throw this.invalidResponse(response);
+  }
+
+  private invalidResponse(response: Response): WorkflowApiError {
+    return new WorkflowApiError(502, {
+      code: "WORKFLOW_API_INVALID_RESPONSE",
+      message: "工作流服务响应格式异常，请检查 /workflow-api/ 路由和 Python 服务",
+      details: {
+        upstreamStatus: response.status,
+        contentType: response.headers.get("Content-Type") ?? "",
+      },
+    });
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 export async function consumeSse(

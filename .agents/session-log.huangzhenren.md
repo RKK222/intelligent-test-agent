@@ -1587,3 +1587,30 @@
   - 正式企业验收仍未完成：本机是 Docker `29.6.2/linux/arm64`，现有 `linux/amd64` 工具镜像只有 OpenCode、
     缺少 Codex；仍需真实 Docker 18.09、企业 Redis/PostgreSQL/模型网关和至少两个跨应用仓库端到端验收。
     WorkflowChat 路由约 2.86 MiB 的生产 chunk 告警继续作为性能风险保留。
+
+### 2026-08-01 - 修复工作流开发路由误回退 SPA HTML
+
+- Why:
+  - 本地访问`/workflow-chat`时，Vite没有注册`/workflow-api/**`代理，请求被SPA fallback以
+    `200 text/html`返回`index.html`；`workflow-api-client`随后直接执行JSON解析，页面暴露
+    `Unexpected token '<'`。同时，本机独立Python 8090未监听时，Vite默认返回纯文本502，也缺少稳定诊断。
+- What:
+  - 新增`workflow-dev-proxy.ts`并接入Vite，开发态默认把工作流前缀直接转给
+    `http://127.0.0.1:8090`，支持`TEST_AGENT_WORKFLOW_API_URL`覆盖，仍不经过Java。
+  - `workflow-api-client`统一校验JSON成功信封，并拒绝JSON接口、Markdown下载和AG-UI SSE收到的
+    HTML fallback；纯文本网关失败收敛为稳定`WorkflowApiError`。错误只携带HTTP状态和Content-Type，
+    不回显响应正文、Bearer或原生JSON解析异常。
+  - 同步前端README/包边界、模块图、前端规范和workflow HTTP边界文档；新增开发代理、HTML fallback、
+    纯文本502、报告下载及SSE协议回归。
+- How:
+  - 按TDD先复现两个失败：Vite代理模块缺失，以及`200 text/html`抛出原生`SyntaxError`；扩展到报告下载
+    和AG-UI SSE后再次确认旧实现错误接受HTML，再补实现。
+  - 工作流前端定向20项、客户端/代理10项通过；全量前端109个测试文件为1738 passed / 1 skipped，
+    agent-web typecheck、production build、AI文档门禁和`git diff --check`通过。
+  - 用临时8090 JSON上游经真实运行中的Vite访问`/workflow-api/v1/me`，确认返回
+    `200 application/json`与`data`信封；停止临时上游后真实路由返回502，不再回退HTML。
+- Result:
+  - 截图中的JSON解析错误已消除；开发态路由边界与生产Nginx一致。独立Python未启动时页面会明确显示
+    `工作流服务暂不可用（HTTP 502）`，启动8090后请求可正常直达Python。
+  - 本次不修改HTTP路径、AG-UI事件类型、Python/Java服务、数据库、依赖锁、`.env*`、generated SDK、
+    OpenCode源码或LobeHub改动；仍需按`workflow-service/README.md`独立启动Python API/Worker/Runner以执行任务。

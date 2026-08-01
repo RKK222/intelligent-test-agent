@@ -52,6 +52,8 @@ packages/shared-types
 
 `/workflow-chat` 是与 OpenCode/LobeHub 对话隔离的长程任务入口，对所有登录用户可见。`packages/workflow-api-client` 直接访问同源 Python `/workflow-api/v1/**` 并使用带 Authorization/`Last-Event-ID` 的 fetch SSE；`packages/workflow-chat` 提供 TDesign Chat、结构化仓库/分支/模式/智能体输入、进度、取消、报告版本和局部重分析。两包不依赖 `backend-api`、`event-stream-client` 或现有 `agent-chat` 状态。
 
+本地Vite把`/workflow-api/**`直接代理到独立Python，默认目标为`http://127.0.0.1:8090`，可用`TEST_AGENT_WORKFLOW_API_URL`覆盖；Python仍按`workflow-service/README.md`独立启动，不经过Java。代理未配置或Python未启动时，客户端只展示脱敏的路由/服务诊断，不解析或回显SPA HTML正文。
+
 `packages/editor` 在 Markdown 预览中支持 Mermaid `flowchart`/`graph`、`sequenceDiagram` 与 `stateDiagram`/`stateDiagram-v2` 可视化编辑。Flowchart 提供按“流程图 / 文档与显示”分组的 14 类共享 SVG 节点、轮廓分配的 8/12 个端口和不随画布缩放、可在视口边缘翻转的双列快捷建连菜单，选中备选图形后菜单立即收起；节点无论是否选中都可直接从可见连接点拖出连线，选中节点的连接点外围继续用于移动节点，选中连线可拖动绿色端点更换起止锚点。选中节点还可通过四角外置手柄在 50%–300% 范围内等比缩放，实际节点、端口、ELK 包围盒和路由端点共用缩放后的尺寸；双击节点或连线可就地编辑文字与文字颜色，右侧属性栏可设置节点文字、填充、边框颜色和连线文字颜色。Sequence 使用递归 AST、专用时序场景和“元素 / 结构 / 属性”单侧栏，支持参与者、消息、Note、生命周期和常用组合片段任意嵌套。State 使用递归 Scope/Region 模型和“概览 + 聚焦”画布，支持复合/嵌套状态、并发 Region、开始/结束、Choice、Fork/Join、Note、各层方向、标签转换、自循环、状态说明与限定直接样式；同一聚焦层展示全部并发 Region。三类图各自维护 parser、serializer、校验和布局，按连接规则复用画布拖线能力；应用后只回写当前 Markdown fence，并继续复用工作台 dirty、Git Diff 与 workspace 文件保存链路。
 
 工作台中间 Monaco 源码区默认按可视宽度自动换行。编辑器页脚“复制路径”只复制文件在目标服务器上的真实绝对路径；公共级/应用级 Agent tab 的 `agent-public:`、`agent-workspace:` 合成路径只用于前端身份和路由，不进入剪贴板。左侧个人工作区普通文件支持 Ctrl/Cmd+C/X/V/Z、右键复制/剪切/粘贴/撤销和拖放到目录或根目录；工作区标题与目录行的 `+` 统一按明确目标路径新建或上传一个或多个本机文件，文件/目录行尾 `−` 与 Delete/Del 键共用删除确认，目录删除会递归清理内容；拖放结束后清除目标高亮。文件操作弹框统一使用紧凑工作台面板样式。所有落盘和撤销操作继续走 backend-api 的目标后端文件 WebSocket route/ticket/RPC，只读应用版本副本不展示这些入口。

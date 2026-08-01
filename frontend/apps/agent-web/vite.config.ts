@@ -9,6 +9,7 @@ import {
   createToolboxDevProxyOptions,
   toolboxSuiteRootGuard
 } from "./toolbox-dev-proxy";
+import { createWorkflowDevProxyOptions } from "./workflow-dev-proxy";
 
 // 统一通过 import.meta.url 解析 workspace 包源码，避免硬编码绝对路径
 const pkgSrc = (name: string): string =>
@@ -99,6 +100,9 @@ export default defineConfig({
     host: devServerHost,
     port: 3000,
     proxy: {
+      ...createWorkflowDevProxyOptions(
+        process.env.TEST_AGENT_WORKFLOW_API_URL ?? "http://127.0.0.1:8090"
+      ),
       ...createToolboxDevProxyOptions({
         itToolsTarget:
           process.env.TEST_AGENT_TOOLBOX_IT_TOOLS_URL ?? "http://127.0.0.1:18120",
