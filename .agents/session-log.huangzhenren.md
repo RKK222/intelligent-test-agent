@@ -1614,3 +1614,22 @@
     `工作流服务暂不可用（HTTP 502）`，启动8090后请求可正常直达Python。
   - 本次不修改HTTP路径、AG-UI事件类型、Python/Java服务、数据库、依赖锁、`.env*`、generated SDK、
     OpenCode源码或LobeHub改动；仍需按`workflow-service/README.md`独立启动Python API/Worker/Runner以执行任务。
+
+### 2026-08-01 - 固化本地工作流控制面启动设计
+
+- Why:
+  - 开发代理修复后真实暴露 Python 8090 未监听；进一步诊断确认本地还缺独立工作流数据库/角色、Redis 只读
+    ACL、Java/Python 配对 HMAC、Runner 公钥和 API/Worker 进程，既有交付只有 Linux 企业部署链路。
+  - 当前 macOS Docker Desktop 无法证明 Runner 要求的宿主机 `DOCKER-USER`/`iptables` 出站隔离，不能通过
+    启动本机分析容器或伪造网络标签来消除 502。
+- What:
+  - 与用户确认采用“本地工作流控制面 + 可选外部 Linux Runner”：默认重启初始化 PostgreSQL、Redis ACL、
+    临时密钥并启动 Python API/Worker，Runner 缺失不影响控制面就绪，分析 run 明确失败关闭。
+  - 设计规定所有生成凭据只写 `.tmp/dev-services/workflow/`，不修改 `.env.test/.env.local`；保留
+    `--without-workflow` 兼容开关，外部 Runner 配置必须成组提供且本地不读取其私钥。
+- How:
+  - 核对 workflow-service、runner-controller、analysis-task、数据库 bootstrap、Redis ACL 和分析网络脚本，确认
+    生产安全约束与本机能力差异；完成占位符、矛盾、范围和歧义自检并形成书面规格。
+- Result:
+  - 设计已固化于 `docs/superpowers/specs/2026-08-01-workflow-local-control-plane-design.md`，等待用户书面复核后
+    再进入实施计划和测试驱动实现。本次未修改 API、事件、数据库 migration、生产部署、`.env*` 或现有并行改动。
