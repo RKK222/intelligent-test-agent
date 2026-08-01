@@ -4340,3 +4340,23 @@
 - 集成边界已简化为 `UI 子智能体 → Tool → 独立 uitest6 IP`；当前 Java 不再承担 UI 执行协议或凭据。未配置 `UITEST6_BASE_URL` 时 Tool 在创建外部执行前中断；未提供被测系统环境时 Agent/Tool 的原门禁保持不变。
 - 本批真实对话直连已验证，但百度正向浏览器结果未在当前批次重现，阻塞点是独立 uitest6 的现有模型运行配置，不是本次直连协议。此前执行 `uiexec_abeaf1aa3243426183f588680d90eafc` 的百度 `SUCCEEDED` 证据仍有效；模型恢复或平台运维修正默认配置后需再做一次正向复测。
 - 未修改数据库/Flyway、关系型 SQL、RunEvent/SSE、前端协议、generated SDK 或 OpenCode 源码；没有修改 `.env.local/.env.test`，实际 UI 平台 IP 仍需由部署方写入对应启动 dotenv 或企业 `docker.env`。
+
+## 2026-08-01 - 首页 Logo 收口为初版耳机图形与暗红实色
+
+### Why
+
+- 用户否决了 M 形与高饱和红方案，确认保留最初的耳机/拱形轮廓，并最终选择渐变中上部的暗红实色作为完整图形填充。
+
+### What
+
+- `agent-web` 顶栏和 favicon 改用用户确认轮廓清理后的透明 PNG；图形全填充低饱和暗红 `#7f1e2b`，中文品牌字标保持黑色，英文副标题使用同系深红。
+- 复用 `FigmaShell` 既有图片引用位与 shell token，移除旧 SVG 资源；同步应用 README、包说明、前端规范和模块图。
+
+### How
+
+- 从用户提供的初版图形提取透明轮廓并生成高分辨率 PNG 与 favicon，只调整色彩，不改动图形识别结构；真实首页通过 Playwright 读取最新 PNG、28px 尺寸和字标计算颜色。
+- 品牌顶栏定向 Vitest 通过；`agent-web` 生产构建通过，构建包含类型检查；backend readiness 为 `UP`，前端 3000 返回 200。整套 `FigmaShell` 测试另有运行态资源面板 600px/520px 宽度断言失败，属于同工作区并行改动，未纳入本次范围。
+
+### Result
+
+- 用户确认采用暗红实色版本；未修改 API、事件/SSE、数据库/Flyway、性能、安全、环境配置、generated SDK 或 OpenCode 源码。

@@ -11,7 +11,7 @@ const figmaEditorAreaSource = readFileSync(resolve(process.cwd(), "apps/agent-we
 const agentConfigPanelSource = readFileSync(resolve(process.cwd(), "apps/agent-web/src/components/AgentConfigPanel.vue"), "utf8");
 const codeEditorSource = readFileSync(resolve(process.cwd(), "packages/editor/src/CodeEditor.vue"), "utf8");
 const globalStylesSource = readFileSync(resolve(process.cwd(), "apps/agent-web/src/styles/globals.css"), "utf8");
-const logoSource = readFileSync(resolve(process.cwd(), "apps/agent-web/src/assets/figma/logo.svg"), "utf8");
+const logoAsset = readFileSync(resolve(process.cwd(), "apps/agent-web/src/assets/figma/logo.png"));
 
 const mountedWrappers: Array<{ unmount: () => void }> = [];
 const originalInnerWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
@@ -61,9 +61,11 @@ describe("FigmaShell", () => {
     expect(globalStylesSource).toContain("--ta-shell-radius: 8px");
     expect(globalStylesSource).toContain("--ta-accent: #333333");
     expect(globalStylesSource).toContain("--ta-chat-user-bg: #f2f2f2");
-    expect(logoSource.match(/fill="#252A31"/g)).toHaveLength(4);
-    expect(figmaShellSource).toMatch(/\.figma-title\s*\{[^}]*color: var\(--ta-shell-header-text, #000000\)/s);
-    expect(figmaShellSource).toMatch(/\.figma-subtitle\s*\{[^}]*color: var\(--ta-shell-header-text, #000000\)/s);
+    expect(logoAsset.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    expect(logoAsset.length).toBeGreaterThan(1_000);
+    expect(figmaShellSource).toContain('import logoUrl from "../assets/figma/logo.png";');
+    expect(figmaShellSource).toMatch(/\.figma-title\s*\{[^}]*color: var\(--ta-shell-brand, #111827\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-subtitle\s*\{[^}]*color: var\(--ta-shell-brand-strong, #7f1e2b\)/s);
     expect(figmaShellSource).toContain("--ta-tree-active: var(--ta-shell-accent-soft, #fdf2f2)");
     expect(figmaShellSource).toMatch(/\.figma-activity-bar\s*\{[^}]*background: transparent[^}]*border-right: 0/s);
     expect(figmaShellSource).toMatch(/\.figma-header\s*\{[^}]*display: grid;[^}]*grid-template-columns: max-content minmax\(0, 1fr\) max-content;[^}]*background: var\(--ta-shell-canvas, #f0f4fa\)/s);

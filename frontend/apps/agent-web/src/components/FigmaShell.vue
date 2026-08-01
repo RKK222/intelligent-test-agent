@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, type CSSProperties } from "vue";
 import { BookOpen, CalendarDays, ChevronDown, Dices, Gamepad2, LogOut, MousePointer2, PawPrint, RefreshCw, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
 import type { UserOpencodeProcess } from "@test-agent/shared-types";
-import logoUrl from "../assets/figma/logo.svg";
+import logoUrl from "../assets/figma/logo.png";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
 import PetMiniGames from "./PetMiniGames.vue";
 import PetCompanionAvatar from "./PetCompanionAvatar.vue";
@@ -2716,13 +2716,13 @@ function submitJoinApp() {
 }
 
 .figma-logo {
-  height: 22px;
+  height: 28px;
   width: auto;
   flex-shrink: 0;
 }
 
 .figma-logo-margin {
-  width: 8px;
+  width: 10px;
   flex-shrink: 0;
 }
 
@@ -2740,7 +2740,7 @@ function submitJoinApp() {
   font-size: 13px;
   line-height: 15px;
   letter-spacing: 0.02em;
-  color: var(--ta-shell-header-text, #000000);
+  color: var(--ta-shell-brand, #111827);
   white-space: nowrap;
 }
 
@@ -2750,7 +2750,7 @@ function submitJoinApp() {
   font-size: 8px;
   line-height: 9px;
   letter-spacing: -0.01em;
-  color: var(--ta-shell-header-text, #000000);
+  color: var(--ta-shell-brand-strong, #7f1e2b);
   white-space: nowrap;
   transform: scale(0.9);
   transform-origin: left center;
@@ -4427,11 +4427,11 @@ function submitJoinApp() {
   }
 
   .figma-logo {
-    height: 20px;
+    height: 24px;
   }
 
   .figma-logo-margin {
-    width: 6px;
+    width: 8px;
   }
 
   .figma-title {

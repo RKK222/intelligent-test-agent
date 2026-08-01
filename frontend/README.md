@@ -2,7 +2,7 @@
 
 ## 工程定位
 
-完全自研测试智能体 Web IDE 前端。生产工作台的外围 shell 使用纯白、浅雾蓝与工行红配色：36px 顶部外层和三栏之间的 8px 间隔复用现有弹框常见的浅雾蓝画布，活动栏融入画布；左侧文件区、中间编辑区和右侧 Agent 区作为带 8px 圆角、发丝边框和轻阴影的纯白悬浮面板，三栏顶部、工作区/Agent 目录加载态以及中间无文件预览态也保持纯白。外围导航与选中态消费隔离的 `--ta-shell-*` token。Logo 与中文标题保持统一黑色，工行红只用于外围导航和交互选中态。中间编辑器与右侧 Agent 对话的内部样式继续消费原有变量，不跟随 shell 变色。`frontend/interaction-visual-demo` 只作为交互与视觉参考资料，不纳入 `pnpm-workspace.yaml` 构建；其中 `cloud-workbench.html` 保留当前布局并对照“云白工行红 / 纯雪白 / 鼠尾草灰”三套外层配色。顶层 `frontend-opencode` 是 opencode IDE App 的 Vue/TypeScript/Vite 复刻交付物，作为独立工程单独安装、构建和验收，不纳入 `frontend/pnpm-workspace.yaml`。
+完全自研测试智能体 Web IDE 前端。生产工作台的外围 shell 使用纯白、浅雾蓝与工行红配色：36px 顶部外层和三栏之间的 8px 间隔复用现有弹框常见的浅雾蓝画布，活动栏融入画布；左侧文件区、中间编辑区和右侧 Agent 区作为带 8px 圆角、发丝边框和轻阴影的纯白悬浮面板，三栏顶部、工作区/Agent 目录加载态以及中间无文件预览态也保持纯白。外围导航与选中态消费隔离的 `--ta-shell-*` token。Logo 直接使用已确认的初版耳机/拱形品牌图形 PNG，保留原图轮廓和比例，图形使用低饱和暗红实色 #7f1e2b，中文品牌字标使用黑色，英文副标题使用深红以呼应图形。中间编辑器与右侧 Agent 对话的内部样式继续消费原有变量，不跟随 shell 变色。`frontend/interaction-visual-demo` 只作为交互与视觉参考资料，不纳入 `pnpm-workspace.yaml` 构建；其中 `cloud-workbench.html` 保留当前布局并对照“云白工行红 / 纯雪白 / 鼠尾草灰”三套外层配色。顶层 `frontend-opencode` 是 opencode IDE App 的 Vue/TypeScript/Vite 复刻交付物，作为独立工程单独安装、构建和验收，不纳入 `frontend/pnpm-workspace.yaml`。
 
 顶部按“36px 首行 + 8px 面板间隔”的 44px 视觉带统一上下居中：Logo 左对齐；应用、工作空间、版本三个白底细框按钮放在 Logo 末端与右侧工具组起点之间的网格列正中，左右留白相等；书本手册、透明底细框的 Agent/Skill/MCP/Plugin 数量摘要和单字用户名依次固定在右侧。手册默认透明无框，弹框打开期间保持与最左活动栏一致的柔红底、深红图标和工行红定位标记；单字用户名为 12px。顶部工作空间/版本与左下角保留入口复用同一数据和切换回调；顶部选定工作空间后，单版本默认选中该项，多版本默认选中最新项，不改变对话逻辑。
 
