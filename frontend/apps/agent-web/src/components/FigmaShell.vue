@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, type CSSProperties } from "vue";
 import { BookOpen, CalendarDays, ChevronDown, Dices, Gamepad2, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, RefreshCw, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
+import { CodeXml, FlaskConical } from "lucide-vue-next";
+import type { AppSourceRepositorySummary } from "@test-agent/shared-types";
 import type { UserOpencodeProcess } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.png";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
 import PetMiniGames from "./PetMiniGames.vue";
 import PetCompanionAvatar from "./PetCompanionAvatar.vue";
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
+import type { SelectedWorkspaceKind } from "./app-source-workspace";
 import {
   PET_COMPANIONS,
   getPetCompanion,
@@ -54,6 +57,13 @@ const props = withDefaults(
     selectedAppId?: string;
     /** 顶栏复用左下角工作空间选择器的数据源，不新增工作区切换链路。 */
     appTemplates?: AppWorkspaceTemplate[];
+    /** 顶栏与左下角共用应用代码库目录和 MANAGED/APP_SOURCE 选择语义。 */
+    showAppSource?: boolean;
+    workspaceKind?: SelectedWorkspaceKind;
+    appSourceRepositories?: AppSourceRepositorySummary[];
+    loadingAppSourceRepositories?: boolean;
+    appSourceRepositoriesError?: string | null;
+    selectedAppSourceRepositoryId?: string;
     selectedWorkspaceTemplateId?: string;
     selectedVersionId?: string;
     loadingAppTemplates?: boolean;
@@ -96,6 +106,10 @@ const props = withDefaults(
       { id: "ms-runner", name: "MS-Runner", description: "质谱批量回归任务" }
     ],
     appTemplates: () => [],
+    showAppSource: false,
+    appSourceRepositories: () => [],
+    loadingAppSourceRepositories: false,
+    appSourceRepositoriesError: null,
     joinableApps: () => [],
     selectedAppId: "fgcms-psn",
     helpCenterOpen: false,
@@ -144,6 +158,11 @@ const emit = defineEmits<{
   (e: "select-app", appId: string): void;
   (e: "load-versions", templateId: string): void;
   (e: "select-version", payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }): void;
+  (e: "open-app-source"): void;
+  (e: "load-app-source-repositories"): void;
+  (e: "open-app-source-repository", repository: AppSourceRepositorySummary): void;
+  (e: "manage-app-source-repository", repository: AppSourceRepositorySummary): void;
+  (e: "return-managed-workspace"): void;
   (e: "logout"): void;
   (e: "refresh-opencode-process"): void;
   (e: "initialize-process"): void;
@@ -196,14 +215,18 @@ function closeVersionMenu() {
 }
 
 function toggleWorkspaceMenu() {
-  workspaceMenuOpen.value = !workspaceMenuOpen.value;
+  const opening = !workspaceMenuOpen.value;
+  workspaceMenuOpen.value = opening;
   appMenuOpen.value = false;
   versionMenuOpen.value = false;
   userMenuOpen.value = false;
   closeRuntimeInventory();
+  // 与左下角统一入口一致：每次展开都刷新代码库 generation，避免打开已经失效的缓存副本。
+  if (opening && props.showAppSource) emit("load-app-source-repositories");
 }
 
 function toggleVersionMenu() {
+  if (props.workspaceKind === "APP_SOURCE") return;
   versionMenuOpen.value = !versionMenuOpen.value;
   appMenuOpen.value = false;
   workspaceMenuOpen.value = false;
@@ -253,7 +276,12 @@ function selectApp(app: AppItem) {
 }
 
 const availableWorkspaceTemplates = computed(() => props.appTemplates.filter((template) => template.enabled !== false));
+const visibleAppSourceRepositories = computed(() => props.appSourceRepositories ?? []);
+const selectedAppSourceRepository = computed(() => visibleAppSourceRepositories.value.find(
+  (repository) => repository.repositoryId === props.selectedAppSourceRepositoryId
+) ?? null);
 const headerWorkspaceTemplate = computed(() => {
+  if (props.workspaceKind === "APP_SOURCE") return null;
   const templates = availableWorkspaceTemplates.value;
   return templates.find((template) => template.workspaceId === headerWorkspaceTemplateId.value)
     ?? templates.find((template) => template.workspaceId === props.selectedWorkspaceTemplateId)
@@ -267,6 +295,9 @@ const headerWorkspaceVersion = computed(() => {
     ?? versions.find((version) => version.versionId === props.selectedVersionId)
     ?? null;
 });
+const headerWorkspaceLabel = computed(() => props.workspaceKind === "APP_SOURCE"
+  ? selectedAppSourceRepository.value?.name ?? props.workspaceName ?? "应用代码库"
+  : headerWorkspaceTemplate.value?.workspaceName ?? (props.loadingAppTemplates ? "加载中…" : "未选择"));
 
 // 版本接口已按 version desc、updatedAt desc 返回；直接复用首项，避免前端复制另一套“最新”排序规则。
 function defaultHeaderVersion(template: AppWorkspaceTemplate) {
@@ -324,6 +355,33 @@ function selectHeaderVersion(version: AppWorkspaceVersion, explicitTemplate?: Ap
   headerVersionId.value = version.versionId;
   emit("select-version", { template, version });
   closeVersionMenu();
+}
+
+function openHeaderAppSourceManagement() {
+  closeWorkspaceMenu();
+  emit("open-app-source");
+}
+
+function retryHeaderAppSourceRepositories() {
+  emit("load-app-source-repositories");
+}
+
+function openHeaderAppSourceRepository(repository: AppSourceRepositorySummary) {
+  // 与左下角共用同一门禁：刷新期间不使用旧 generation；未拉取项仍可进入原管理页。
+  if (props.loadingAppSourceRepositories) return;
+  if (repository.downloadState === "NOT_DOWNLOADED") {
+    closeWorkspaceMenu();
+    emit("manage-app-source-repository", repository);
+    return;
+  }
+  if (!repository.openable) return;
+  closeWorkspaceMenu();
+  emit("open-app-source-repository", repository);
+}
+
+function returnHeaderManagedWorkspace() {
+  closeWorkspaceMenu();
+  emit("return-managed-workspace");
 }
 
 const selectedApp = computed(
@@ -2074,17 +2132,124 @@ function submitJoinApp() {
             data-testid="header-workspace-selector"
             aria-haspopup="listbox"
             :aria-expanded="workspaceMenuOpen"
-            :aria-label="`工作空间：${headerWorkspaceTemplate?.workspaceName || '未选择'}`"
+            :aria-label="`工作空间：${headerWorkspaceLabel}`"
             @click="toggleWorkspaceMenu"
             @blur="onWorkspaceMenuBlur"
           >
             <span class="figma-context-menu-key">工作空间</span>
-            <span class="figma-context-menu-value">{{ headerWorkspaceTemplate?.workspaceName || (loadingAppTemplates ? "加载中…" : "未选择") }}</span>
+            <CodeXml
+              v-if="workspaceKind === 'APP_SOURCE'"
+              class="figma-context-trigger-type-icon"
+              aria-hidden="true"
+            />
+            <FlaskConical v-else class="figma-context-trigger-type-icon" aria-hidden="true" />
+            <span class="figma-context-menu-value">{{ headerWorkspaceLabel }}</span>
             <ChevronDown class="figma-app-menu-chevron" :class="{ 'is-open': workspaceMenuOpen }" />
           </button>
-          <ul v-if="workspaceMenuOpen" class="figma-app-menu-dropdown figma-context-menu-dropdown" role="listbox">
-            <li v-if="loadingAppTemplates && availableWorkspaceTemplates.length === 0" class="figma-context-menu-empty">工作空间加载中…</li>
-            <li v-else-if="availableWorkspaceTemplates.length === 0" class="figma-context-menu-empty">暂无测试工作空间</li>
+          <ul
+            v-if="workspaceMenuOpen"
+            class="figma-app-menu-dropdown figma-context-menu-dropdown is-workspace-combined"
+            role="listbox"
+          >
+            <template v-if="showAppSource">
+              <li class="figma-context-menu-section-title" role="presentation">
+                <span class="figma-context-menu-section-label">
+                  <CodeXml class="figma-context-menu-type-icon" aria-hidden="true" />
+                  应用代码库
+                </span>
+                <button
+                  type="button"
+                  class="figma-context-menu-section-action"
+                  aria-label="管理应用代码库"
+                  title="下载或管理应用代码库"
+                  @mousedown.prevent="openHeaderAppSourceManagement"
+                >
+                  管理
+                </button>
+              </li>
+              <li
+                v-if="loadingAppSourceRepositories && visibleAppSourceRepositories.length === 0"
+                class="figma-context-menu-empty is-section-state"
+                role="presentation"
+              >
+                应用代码库加载中…
+              </li>
+              <li
+                v-else-if="appSourceRepositoriesError && visibleAppSourceRepositories.length === 0"
+                class="figma-context-menu-empty is-section-state is-error"
+                role="presentation"
+              >
+                <span>{{ appSourceRepositoriesError }}</span>
+                <button type="button" aria-label="重试加载应用代码库" @mousedown.prevent="retryHeaderAppSourceRepositories">重试</button>
+              </li>
+              <li
+                v-else-if="visibleAppSourceRepositories.length === 0"
+                class="figma-context-menu-empty is-section-state"
+                role="presentation"
+              >
+                暂无应用代码库
+              </li>
+              <li v-for="repository in visibleAppSourceRepositories" :key="repository.repositoryId" role="presentation">
+                <button
+                  type="button"
+                  :class="[
+                    'figma-app-menu-item',
+                    'figma-context-source-item',
+                    repository.downloadState === 'NOT_DOWNLOADED' && 'is-not-downloaded',
+                    repository.repositoryId === selectedAppSourceRepositoryId && 'is-active'
+                  ]"
+                  role="option"
+                  :aria-selected="repository.repositoryId === selectedAppSourceRepositoryId"
+                  :aria-label="repository.downloadState === 'NOT_DOWNLOADED'
+                    ? `管理${repository.name}源码`
+                    : `打开${repository.name}源码`"
+                  :title="loadingAppSourceRepositories
+                    ? '正在刷新应用代码库状态…'
+                    : repository.downloadState === 'NOT_DOWNLOADED'
+                    ? `下载或管理${repository.name}源码`
+                    : repository.openable
+                    ? `打开${repository.name}源码${repository.branch ? ` · ${repository.branch}` : ''}`
+                    : (repository.unavailableReason || '当前服务器没有可打开的 READY 副本')"
+                  :disabled="loadingAppSourceRepositories
+                    || (repository.downloadState !== 'NOT_DOWNLOADED' && !repository.openable)"
+                  @mousedown.prevent="openHeaderAppSourceRepository(repository)"
+                >
+                  <CodeXml class="figma-context-menu-type-icon" aria-hidden="true" />
+                  <div class="figma-app-menu-item-main">
+                    <span class="figma-app-menu-item-name">{{ repository.name }}</span>
+                    <span class="figma-app-menu-item-desc">
+                      {{ repository.downloadState === 'NOT_DOWNLOADED' ? '尚未拉取' : (repository.branch || '源码快照') }}
+                    </span>
+                  </div>
+                  <span
+                    v-if="repository.repositoryId === selectedAppSourceRepositoryId"
+                    class="figma-app-menu-item-check"
+                  >✓</span>
+                </button>
+              </li>
+              <li class="figma-app-menu-divider" role="presentation" />
+            </template>
+
+            <li class="figma-context-menu-section-title is-test-workspace" role="presentation">
+              <span class="figma-context-menu-section-label">
+                <FlaskConical class="figma-context-menu-type-icon" aria-hidden="true" />
+                测试工作空间
+              </span>
+            </li>
+            <li
+              v-if="loadingAppTemplates && availableWorkspaceTemplates.length === 0"
+              class="figma-context-menu-empty is-section-state"
+              role="presentation"
+            >
+              工作空间加载中…
+            </li>
+            <li
+              v-else-if="availableWorkspaceTemplates.length === 0"
+              class="figma-context-menu-empty is-section-state"
+              role="presentation"
+            >
+              暂无测试工作空间
+            </li>
             <li
               v-for="template in availableWorkspaceTemplates"
               :key="template.workspaceId"
@@ -2094,11 +2259,24 @@ function submitJoinApp() {
               tabindex="0"
               @mousedown.prevent="selectHeaderWorkspace(template)"
             >
+              <FlaskConical class="figma-context-menu-type-icon" aria-hidden="true" />
               <div class="figma-app-menu-item-main">
                 <span class="figma-app-menu-item-name">{{ template.workspaceName }}</span>
                 <span class="figma-app-menu-item-desc">{{ template.branch }}</span>
               </div>
               <span v-if="template.workspaceId === headerWorkspaceTemplate?.workspaceId" class="figma-app-menu-item-check">✓</span>
+            </li>
+            <li
+              v-if="workspaceKind === 'APP_SOURCE' && availableWorkspaceTemplates.length === 0"
+              class="figma-app-menu-item"
+              role="option"
+              tabindex="0"
+              @mousedown.prevent="returnHeaderManagedWorkspace"
+            >
+              <FlaskConical class="figma-context-menu-type-icon" aria-hidden="true" />
+              <div class="figma-app-menu-item-main">
+                <span class="figma-app-menu-item-name">返回测试工作空间</span>
+              </div>
             </li>
           </ul>
         </div>
@@ -2110,13 +2288,20 @@ function submitJoinApp() {
             data-testid="header-version-selector"
             aria-haspopup="listbox"
             :aria-expanded="versionMenuOpen"
-            :aria-label="`版本：${headerWorkspaceVersion?.version || '未选择'}`"
+            :aria-label="workspaceKind === 'APP_SOURCE' ? '版本：源码快照' : `版本：${headerWorkspaceVersion?.version || '未选择'}`"
+            :disabled="workspaceKind === 'APP_SOURCE'"
             @click="toggleVersionMenu"
             @blur="onVersionMenuBlur"
           >
             <span class="figma-context-menu-key">版本</span>
-            <span class="figma-context-menu-value">{{ headerWorkspaceVersion?.version || (loadingAppVersions && !headerWorkspaceTemplate?.versions ? "加载中…" : "请选择") }}</span>
-            <ChevronDown class="figma-app-menu-chevron" :class="{ 'is-open': versionMenuOpen }" />
+            <span class="figma-context-menu-value">
+              {{ workspaceKind === 'APP_SOURCE' ? '源码快照' : (headerWorkspaceVersion?.version || (loadingAppVersions && !headerWorkspaceTemplate?.versions ? "加载中…" : "请选择")) }}
+            </span>
+            <ChevronDown
+              v-if="workspaceKind !== 'APP_SOURCE'"
+              class="figma-app-menu-chevron"
+              :class="{ 'is-open': versionMenuOpen }"
+            />
           </button>
           <ul v-if="versionMenuOpen" class="figma-app-menu-dropdown figma-context-menu-dropdown is-version" role="listbox">
             <li v-if="loadingAppVersions && !headerWorkspaceTemplate?.versions" class="figma-context-menu-empty">版本加载中…</li>
@@ -3830,6 +4015,13 @@ function submitJoinApp() {
   transform: rotate(180deg);
 }
 
+.figma-context-trigger-type-icon {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  color: var(--ta-shell-muted, #6b7280);
+}
+
 .figma-app-menu-dropdown {
   position: absolute;
   top: calc(100% + 6px);
@@ -3854,12 +4046,79 @@ function submitJoinApp() {
   min-width: 220px;
 }
 
+.figma-context-menu-dropdown.is-workspace-combined {
+  width: max-content;
+  min-width: 276px;
+  max-width: min(340px, calc(100vw - 24px));
+  max-height: min(520px, calc(100vh - 72px));
+  overflow-y: auto;
+}
+
+.figma-context-menu-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 8px 5px;
+  color: var(--ta-shell-header-text, #000000);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.figma-context-menu-section-label {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.figma-context-menu-section-action,
+.figma-context-menu-empty button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ta-shell-accent-strong, #991b1b);
+  cursor: pointer;
+  font: inherit;
+}
+
+.figma-context-menu-section-action:hover,
+.figma-context-menu-section-action:focus-visible,
+.figma-context-menu-empty button:hover,
+.figma-context-menu-empty button:focus-visible {
+  color: var(--ta-shell-accent, #c8161d);
+  outline: none;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.figma-context-menu-type-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: var(--ta-shell-muted, #6b7280);
+}
+
 .figma-context-menu-empty {
   padding: 12px 10px;
   color: var(--ta-shell-muted, #6b7280);
   font-size: 12px;
   list-style: none;
   white-space: nowrap;
+}
+
+.figma-context-menu-empty.is-section-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  white-space: normal;
+}
+
+.figma-context-menu-empty.is-error {
+  color: var(--ta-shell-accent-strong, #991b1b);
 }
 
 .figma-app-menu-item {
@@ -3873,6 +4132,26 @@ function submitJoinApp() {
   outline: none;
 }
 
+.figma-context-source-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.figma-context-source-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.figma-context-source-item.is-not-downloaded:not(:disabled) .figma-app-menu-item-name,
+.figma-context-source-item.is-not-downloaded:not(:disabled) .figma-app-menu-item-desc,
+.figma-context-source-item.is-not-downloaded:not(:disabled) .figma-context-menu-type-icon {
+  color: var(--ta-shell-muted, #6b7280);
+}
+
 .figma-app-menu-item:hover,
 .figma-app-menu-item:focus {
   background: var(--ta-shell-hover, #f3f4f6);
@@ -3880,6 +4159,18 @@ function submitJoinApp() {
 
 .figma-app-menu-item.is-active {
   background: var(--ta-shell-accent-soft, #fdf2f2);
+}
+
+.figma-app-menu-item.is-active .figma-context-menu-type-icon {
+  color: var(--ta-shell-accent, #c8161d);
+}
+
+.figma-version-menu-wrapper .figma-context-menu-trigger:disabled {
+  border-color: var(--ta-shell-border, #e5e7eb);
+  background: var(--ta-shell-surface, #ffffff);
+  color: var(--ta-shell-muted, #6b7280);
+  cursor: default;
+  opacity: 0.72;
 }
 
 .figma-app-menu-divider {

@@ -4384,3 +4384,25 @@
 
 - 左下 Hub 的产品含义已统一为 Agent / Skill / MCP / Tool，运行态 MCP/Tool 不会被误包装成可发布资产；详情拉伸和全屏在单测与真实页面均通过。
 - 未修改 HTTP API、事件/SSE、数据库/Flyway、关系型 SQL、权限、安全、环境配置、generated SDK 或 OpenCode 源码。
+
+## 2026-08-01 - 顶部工作空间菜单纳入应用代码库
+
+### Why
+
+- 用户希望把左下角已有的应用代码库入口同步到顶部“工作空间”菜单，并用图标区分开发代码库和测试工作空间；尚未在设置中拉取的开发代码库需要灰显但可点击进入管理。
+
+### What
+
+- 顶部菜单复用 `AgentWorkbench` 已有的应用代码库列表、刷新、打开、管理和返回托管工作区处理器，按“应用代码库 / 测试工作空间”分组，并分别使用代码与烧瓶图标。
+- 已拉取且可打开的代码库直接进入源码工作区；`NOT_DOWNLOADED` 项灰显但点击后进入既有下载/管理弹框；刷新期间和已下载但当前不可用的副本保持禁用。源码模式下顶部版本按钮只读显示“源码快照”。
+- 补充 `FigmaShell` 与左下角入口的联合回归测试，并同步 agent-web README 和用户手册工作空间章节。
+
+### How
+
+- `corepack pnpm exec vitest run apps/agent-web/tests/FigmaShell.test.ts apps/agent-web/tests/WorkbenchFooter.test.ts`：74/74 通过。
+- `corepack pnpm --filter @test-agent/agent-web typecheck` 与生产 `build` 通过，用户手册预构建同步通过；构建仅有既有大 chunk 非阻断警告。
+- 在独立端口启动 Vite，`http://127.0.0.1:3013/` 返回 200 和真实首页 HTML。
+
+### Result
+
+- 顶部与左下角现在共享同一套应用源码/测试工作空间交互，不新增 API、数据库、RunEvent/SSE 或 OpenCode 调用，也未修改对话逻辑、环境配置和 generated SDK。

@@ -1046,6 +1046,112 @@ describe("FigmaShell", () => {
     });
   });
 
+  it("groups app code repositories and test workspaces in the header workspace menu", async () => {
+    const downloadedRepository = {
+      repositoryId: "repo-code",
+      name: "应用代码库",
+      englishName: "app-code",
+      downloadState: "DOWNLOADED_ACTIVE",
+      generation: 3,
+      purpose: "TEAM",
+      branch: "main",
+      selectedPaths: [],
+      occupied: false,
+      openable: true,
+      manageable: true,
+      serverSummaries: []
+    };
+    const notDownloadedRepository = {
+      ...downloadedRepository,
+      repositoryId: "repo-new",
+      name: "尚未拉取",
+      downloadState: "NOT_DOWNLOADED",
+      generation: null
+    };
+    const unavailableRepository = {
+      ...downloadedRepository,
+      repositoryId: "repo-unavailable",
+      name: "副本未就绪",
+      openable: false,
+      unavailableReason: "当前服务器副本未就绪"
+    };
+    const testWorkspace = {
+      workspaceId: "workspace-test",
+      workspaceName: "测试工作空间",
+      branch: "feature/test",
+      enabled: true,
+      versions: [{ versionId: "version-test", version: "20260731", branch: "feature/test" }]
+    };
+    const wrapper = mountShell({
+      props: {
+        showAppSource: true,
+        appSourceRepositories: [downloadedRepository, notDownloadedRepository, unavailableRepository],
+        appTemplates: [testWorkspace],
+        selectedWorkspaceTemplateId: testWorkspace.workspaceId,
+        selectedVersionId: "version-test"
+      } as any
+    });
+
+    const workspaceButton = wrapper.get('[data-testid="header-workspace-selector"]');
+    await workspaceButton.trigger("click");
+
+    expect(wrapper.emitted("load-app-source-repositories")).toHaveLength(1);
+    const sectionTitles = wrapper.findAll(".figma-context-menu-section-title");
+    expect(sectionTitles[0].text()).toContain("应用代码库");
+    expect(sectionTitles[0].text()).toContain("管理");
+    expect(sectionTitles[1].text()).toBe("测试工作空间");
+    expect(sectionTitles.every((title) => title.find(".figma-context-menu-type-icon").exists())).toBe(true);
+    expect(wrapper.get('[aria-label="管理尚未拉取源码"]').classes()).toContain("is-not-downloaded");
+    expect(wrapper.get('[aria-label="管理尚未拉取源码"]').attributes("disabled")).toBeUndefined();
+    expect(wrapper.get('[aria-label="打开副本未就绪源码"]').attributes("disabled")).toBe("");
+    expect(wrapper.get('[aria-label="打开副本未就绪源码"]').attributes("title")).toBe("当前服务器副本未就绪");
+    expect(wrapper.findAll(".figma-workspace-menu-wrapper .figma-app-menu-item")
+      .some((item) => item.text().includes("测试工作空间"))).toBe(true);
+
+    await wrapper.get('[aria-label="管理尚未拉取源码"]').trigger("mousedown");
+    expect(wrapper.emitted("manage-app-source-repository")?.[0]).toEqual([notDownloadedRepository]);
+
+    await workspaceButton.trigger("click");
+    await wrapper.get('[aria-label="打开应用代码库源码"]').trigger("mousedown");
+    expect(wrapper.emitted("open-app-source-repository")?.[0]).toEqual([downloadedRepository]);
+  });
+
+  it("shows the active code repository and source snapshot state in the header", async () => {
+    const repository = {
+      repositoryId: "repo-code",
+      name: "应用代码库",
+      englishName: "app-code",
+      downloadState: "DOWNLOADED_ACTIVE",
+      generation: 3,
+      purpose: "TEAM",
+      branch: "main",
+      selectedPaths: [],
+      occupied: false,
+      openable: true,
+      manageable: true,
+      serverSummaries: []
+    };
+    const wrapper = mountShell({
+      props: {
+        showAppSource: true,
+        workspaceKind: "APP_SOURCE",
+        appSourceRepositories: [repository],
+        selectedAppSourceRepositoryId: repository.repositoryId,
+        workspaceName: "应用代码库工作区"
+      } as any
+    });
+
+    const workspaceButton = wrapper.get('[data-testid="header-workspace-selector"]');
+    const versionButton = wrapper.get('[data-testid="header-version-selector"]');
+    expect(workspaceButton.text()).toContain("应用代码库");
+    expect(workspaceButton.find(".figma-context-trigger-type-icon").exists()).toBe(true);
+    expect(versionButton.text()).toContain("源码快照");
+    expect(versionButton.attributes("disabled")).toBe("");
+
+    await workspaceButton.trigger("click");
+    expect(wrapper.get('[aria-label="打开应用代码库源码"]').classes()).toContain("is-active");
+  });
+
   it("shows process status with server name and resolved address", async () => {
     const wrapper = mountShell({
       props: {
