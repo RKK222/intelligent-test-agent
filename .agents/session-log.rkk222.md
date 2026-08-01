@@ -5,6 +5,31 @@
 
 ## Entries
 
+### 2026-08-01 - 基于最新改造重打企业三节点与公共配置交付包
+
+### Why
+
+- 用户要求针对最近合入的动态 UI 执行地址、工作台界面和公共 UI 执行 Agent/Tool 改造，重新生成企业双后台、前端和公共 Agent 配置交付物，并给出企业内再次部署与验收口径。
+- 上一版企业包早于 `V20260801093854`、`V20260801104000` 两条通用参数 migration 和公共配置提交 `8b81dc4`；继续使用旧包会缺少 `UITEST_BASE_URL` 数据库配置及 UI 执行 Tool 的动态读取链路。
+
+### What
+
+- 从主仓库代码基线 `a4679524b1b6803561b95a60d976cae690faeca8` 全量重建平台内层 ZIP，并用上一批已验证的 `.4/.114/.2` 敏感节点配置重新封装固定名三节点外层 ZIP；worker runtime 与 toolbox 指纹未变化，组件清单继续为 `reuse`。
+- 以既有企业完整公共配置为底座，叠加已推送公共配置 `8b81dc4` 的 UI 执行 Agent/Tool 变更，保留白盒 Agent、`code_analysis` MCP、skill-creator、skill-optimizer 和工作区 Git Tool；固定名公共配置包包含 7 个 Agent、15 个 Skill、7 个 TypeScript Tool。
+- 公共配置 Git 还跟踪顶层 `agents/**` 运行态会话和 OAuth access/refresh profile；本次交付按 `README.md + .gitignore + opencode/**` 白名单归档，明确排除这些运行态与认证文件。该独立仓库中的既有凭据和历史应另行清理、轮换，本次未修改或推送外部仓库。
+
+### How
+
+- 使用 JDK 25 和真实 PostgreSQL Testcontainers 执行 Flyway 命名/不可变字节、通用参数 seed、已知历史兼容升级及 MyBatis PostgreSQL 集成测试，共 18 项通过；前端 typecheck、用户手册与 Vite 生产构建通过。
+- 执行企业 ZIP 元数据、增量组件、双后台完整包、自动节点部署、多后台节点、Nginx 和 AI 文档 7 组验证脚本；后端和前端部署脚本分别以 `--validate-only` 解压并验证当前内层包。
+- 逐字节核对内层 persistence JAR 中 `V20260728160800`、`V20260731115520`、`V20260731123600`、`V20260801093854`、`V20260801104000` 与源码一致，确认外层嵌入的内层 ZIP 完全相同、应用 JAR 保留 RSA 私钥、公共包 CRC/禁带路径/敏感特征扫描通过；再以 OpenCode 1.18.4 实际启动并查询 Agent、Skill 和 Tool 清单，包内 7/15/7 项全部加载成功。
+
+### Result
+
+- 本机平台构建、真实 PostgreSQL 已知历史升级和离线部署脚本校验通过；最终平台 ZIP 在本条记录提交后重新封装并以交付目录中的 `.sha256` 为唯一校验值。公共配置包 SHA-256 为 `a29f0d3a4a49bad3476f8bb5bb9cf99616365569bbb9ad3cb8a6220537b7636d`。
+- 当前包新增/包含数据库 Flyway 变更和内部窄字段配置 API，但不变更 RunEvent/SSE、generated SDK、OpenCode 上游源码或 `.env.local`；worker/manager、toolbox 和独立 Python 组件无需随本次增量包重装。
+- 企业目标 PostgreSQL 的完整 `flyway_schema_history` 尚未取得，交付只完成本机构建与已知历史验证；现场必须先由 DBA 对照全量 history，任一失败、未知 checksum、未知更高版本或分叉都停止发布，禁止 `repair`、`outOfOrder` 或手改历史表。
+
 ### 2026-08-01 - 审计并合并工作台界面与独立 UI 执行能力
 
 ### Why
