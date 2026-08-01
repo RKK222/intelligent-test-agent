@@ -200,7 +200,7 @@ describe("AgentSkillHub", () => {
     });
     const view = renderHub({ canManage: true });
 
-    await fireEvent.click(await view.findByRole("button", { name: "Skills" }));
+    await fireEvent.click(await view.findByRole("button", { name: "Skill" }));
     await waitFor(() => expect(view.getByText("接口检查")).toBeTruthy());
     expect(view.getByText("已发布")).toBeTruthy();
     expect(view.getByText("归属工作区：支付服务")).toBeTruthy();
@@ -266,9 +266,47 @@ describe("AgentSkillHub", () => {
     expect(view.getByText("报表服务 · checkout-reviewer")).toBeTruthy();
     expect(view.getByText("2 个应用已生效")).toBeTruthy();
   });
+
+  it("keeps MCP and Tool aligned with the runtime inventory and supports resizable fullscreen detail", async () => {
+    const view = renderHub({
+      canManage: true,
+      runtimeMcp: [{ id: "filesystem", name: "filesystem", status: "connected", description: "文件能力" }],
+      runtimeTools: [{ id: "read", name: "read", status: "builtin", description: "读取文件" }]
+    });
+
+    await waitFor(() => expect(view.getByLabelText("Hub 概览").textContent).toContain("1 MCP"));
+    expect(view.getByLabelText("Hub 概览").textContent).toContain("1 Tool");
+    await fireEvent.click(view.getByRole("button", { name: "MCP" }));
+    const mcpLabels = await view.findAllByText("filesystem");
+    expect(mcpLabels.length).toBeGreaterThan(0);
+    expect(view.emitted().refreshRuntime).toBeTruthy();
+
+    await fireEvent.click(mcpLabels[0]!);
+    const drawer = view.getByTestId("hub-detail-drawer");
+    const resizeHandle = view.getByRole("button", { name: "调整 Hub 详情宽度" });
+    expect(drawer.getAttribute("data-layout-mode")).toBe("window");
+    expect((drawer.querySelector(".hub-detail-panel") as HTMLElement).style.width).toBe("640px");
+
+    await fireEvent.keyDown(resizeHandle, { key: "ArrowLeft" });
+    expect((drawer.querySelector(".hub-detail-panel") as HTMLElement).style.width).toBe("656px");
+    await fireEvent.click(view.getByRole("button", { name: "进入全屏" }));
+    expect(view.getByTestId("hub-detail-drawer").getAttribute("data-layout-mode")).toBe("fullscreen");
+    expect((view.getByTestId("hub-detail-drawer").querySelector(".hub-detail-panel") as HTMLElement).style.width).toBe("100vw");
+    expect(view.queryByRole("button", { name: "调整 Hub 详情宽度" })).toBeNull();
+
+    await fireEvent.click(view.getByRole("button", { name: "退出全屏" }));
+    await fireEvent.click(view.getByRole("button", { name: "关闭 Hub 详情" }));
+    await fireEvent.click(view.getByRole("button", { name: "Tool" }));
+    expect(await view.findByText("读取文件")).toBeTruthy();
+    expect(view.getAllByText("read").length).toBeGreaterThan(0);
+  });
 });
 
-function renderHub(props: { canManage: boolean }) {
+function renderHub(props: {
+  canManage: boolean;
+  runtimeMcp?: Array<{ id: string; name: string; status?: string; description?: string }>;
+  runtimeTools?: Array<{ id: string; name: string; status?: string; description?: string }>;
+}) {
   return render(AgentSkillHub, {
     props: {
       selectedAppId: "app_pay",

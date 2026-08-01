@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onMounted, ref, watch } from "vue";
+import { computed, inject, onMounted, onUnmounted, ref, watch, type CSSProperties } from "vue";
 import { ElMessage } from "element-plus";
 import { CodeEditor } from "@test-agent/editor";
 import { MergeConflictEditor } from "@test-agent/diff-viewer";
@@ -24,30 +24,44 @@ import {
   GitCommitHorizontal,
   Library,
   Loader2,
+  Maximize2,
+  Minimize2,
   PackageOpen,
+  PlugZap,
   RefreshCw,
   Search,
   Sparkles,
   UploadCloud,
   UsersRound,
+  Wrench,
   X
 } from "lucide-vue-next";
+
+type RuntimeHubItem = {
+  id: string;
+  name: string;
+  description?: string;
+  status?: string;
+};
 
 const props = defineProps<{
   selectedAppId?: string;
   workspaceId?: string;
   canManage: boolean;
+  runtimeMcp?: RuntimeHubItem[];
+  runtimeTools?: RuntimeHubItem[];
 }>();
 
 const emit = defineEmits<{
   updateCount: [count: number];
   changed: [paths: string[]];
+  refreshRuntime: [];
 }>();
 
 const api = inject<BackendApiClient>("api")!;
 if (!api) throw new Error("AgentSkillHub requires backend api");
 
-type HubTab = "DISCOVER" | "AGENT" | "SKILL" | "REFERENCED" | "UPDATES";
+type HubTab = "DISCOVER" | "AGENT" | "SKILL" | "MCP" | "TOOL" | "REFERENCED" | "UPDATES";
 const tab = ref<HubTab>("DISCOVER");
 const keyword = ref("");
 const loading = ref(false);
@@ -59,6 +73,7 @@ const agentTotal = ref(0);
 const skillTotal = ref(0);
 const referencedTotal = ref(0);
 const selectedAsset = ref<AgentSkillHubAsset | null>(null);
+const selectedRuntimeItem = ref<RuntimeHubItem | null>(null);
 const detail = ref<AgentSkillHubAssetDetail | null>(null);
 const selectedFile = ref<string | null>(null);
 const fileContent = ref("");
@@ -72,6 +87,95 @@ const dependencyCandidates = ref<AgentSkillHubAsset[]>([]);
 const selectedDependencies = ref<Set<string>>(new Set());
 const updateOperation = ref<AgentSkillHubUpdateOperation | null>(null);
 const activeConflictPath = ref<string | null>(null);
+const detailPanelWidth = ref(640);
+const detailFullscreen = ref(false);
+const detailResizing = ref(false);
+
+const runtimeItems = computed(() => {
+  const source = tab.value === "MCP" ? props.runtimeMcp ?? [] : tab.value === "TOOL" ? props.runtimeTools ?? [] : [];
+  const normalizedKeyword = keyword.value.trim().toLowerCase();
+  if (!normalizedKeyword) return source;
+  return source.filter((item) => [item.id, item.name, item.description, item.status]
+    .some((value) => value?.toLowerCase().includes(normalizedKeyword)));
+});
+const isRuntimeTab = computed(() => tab.value === "MCP" || tab.value === "TOOL");
+const detailPanelStyle = computed<CSSProperties>(() => detailFullscreen.value
+  ? { width: "100vw", height: "100vh" }
+  : { width: `${detailPanelWidth.value}px` });
+
+const DETAIL_MIN_WIDTH = 420;
+const DETAIL_VIEWPORT_MARGIN = 16;
+
+/** Hub 详情固定在右侧，普通模式宽度始终限制在当前视口内。 */
+function clampDetailPanelWidth() {
+  const maxWidth = Math.max(320, window.innerWidth - DETAIL_VIEWPORT_MARGIN * 2);
+  const minWidth = Math.min(DETAIL_MIN_WIDTH, maxWidth);
+  detailPanelWidth.value = Math.min(maxWidth, Math.max(minWidth, detailPanelWidth.value));
+}
+
+type DetailResizeSnapshot = {
+  pointerId: number;
+  startX: number;
+  width: number;
+  bodyCursor: string;
+  bodyUserSelect: string;
+};
+
+let detailResizeSnapshot: DetailResizeSnapshot | null = null;
+
+/** 面板从右侧展开，因此向左拖动左边缘代表放大。 */
+function startDetailResize(event: PointerEvent) {
+  if (detailFullscreen.value) return;
+  (event.currentTarget as HTMLElement | null)?.focus();
+  detailResizeSnapshot = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    width: detailPanelWidth.value,
+    bodyCursor: document.body.style.cursor,
+    bodyUserSelect: document.body.style.userSelect
+  };
+  detailResizing.value = true;
+  document.body.style.cursor = "ew-resize";
+  document.body.style.userSelect = "none";
+  window.addEventListener("pointermove", resizeDetailPanel);
+  window.addEventListener("pointerup", stopDetailResize);
+  window.addEventListener("pointercancel", stopDetailResize);
+}
+
+function resizeDetailPanel(event: PointerEvent) {
+  if (!detailResizeSnapshot || event.pointerId !== detailResizeSnapshot.pointerId) return;
+  detailPanelWidth.value = detailResizeSnapshot.width + detailResizeSnapshot.startX - event.clientX;
+  clampDetailPanelWidth();
+}
+
+function stopDetailResize(event?: PointerEvent) {
+  if (event && detailResizeSnapshot && event.pointerId !== detailResizeSnapshot.pointerId) return;
+  if (detailResizeSnapshot) {
+    document.body.style.cursor = detailResizeSnapshot.bodyCursor;
+    document.body.style.userSelect = detailResizeSnapshot.bodyUserSelect;
+  }
+  detailResizeSnapshot = null;
+  detailResizing.value = false;
+  window.removeEventListener("pointermove", resizeDetailPanel);
+  window.removeEventListener("pointerup", stopDetailResize);
+  window.removeEventListener("pointercancel", stopDetailResize);
+}
+
+/** 键盘在左边缘调整宽度，Shift 把步长从 16px 提升到 48px。 */
+function resizeDetailByKeyboard(event: KeyboardEvent) {
+  const step = event.shiftKey ? 48 : 16;
+  if (event.key === "ArrowLeft") detailPanelWidth.value += step;
+  else if (event.key === "ArrowRight") detailPanelWidth.value -= step;
+  else return;
+  event.preventDefault();
+  clampDetailPanelWidth();
+}
+
+function toggleDetailFullscreen() {
+  stopDetailResize();
+  detailFullscreen.value = !detailFullscreen.value;
+  if (!detailFullscreen.value) clampDetailPanelWidth();
+}
 
 const activeConflict = computed(() => {
   const file = updateOperation.value?.files.find((item) => item.path === activeConflictPath.value);
@@ -112,6 +216,12 @@ async function loadAssets() {
   loading.value = true;
   error.value = "";
   try {
+    if (requestedTab === "MCP" || requestedTab === "TOOL") {
+      assets.value = [];
+      closeDetail();
+      emit("refreshRuntime");
+      return;
+    }
     if (requestedTab === "REFERENCED" && !requestedWorkspaceId) {
       assets.value = [];
       selectedAsset.value = null;
@@ -186,12 +296,33 @@ async function refreshCount() {
   }
 }
 
+function refreshCurrentTab() {
+  if (tab.value === "UPDATES") {
+    void loadUpdates();
+    return;
+  }
+  if (isRuntimeTab.value) {
+    emit("refreshRuntime");
+    return;
+  }
+  void loadAssets();
+}
+
 async function selectAsset(asset: AgentSkillHubAsset) {
+  selectedRuntimeItem.value = null;
   selectedAsset.value = asset;
+  clampDetailPanelWidth();
   detail.value = await api.getAgentSkillHubAsset(asset.assetId, undefined, props.workspaceId);
   selectedFile.value = detail.value.files[0]?.path ?? null;
   if (selectedFile.value) await readFile(selectedFile.value);
   else fileContent.value = "";
+}
+
+function selectRuntimeItem(item: RuntimeHubItem) {
+  selectedAsset.value = null;
+  clearDetail();
+  selectedRuntimeItem.value = item;
+  clampDetailPanelWidth();
 }
 
 async function readFile(path: string) {
@@ -214,7 +345,10 @@ function clearDetail() {
 }
 
 function closeDetail() {
+  stopDetailResize();
   selectedAsset.value = null;
+  selectedRuntimeItem.value = null;
+  detailFullscreen.value = false;
   clearDetail();
 }
 
@@ -412,6 +546,11 @@ watch(tab, async (value) => {
   else await loadAssets();
 });
 
+watch([() => props.runtimeMcp, () => props.runtimeTools], () => {
+  if (!selectedRuntimeItem.value || !isRuntimeTab.value) return;
+  selectedRuntimeItem.value = runtimeItems.value.find((item) => item.id === selectedRuntimeItem.value?.id) ?? null;
+}, { deep: true });
+
 watch(() => props.workspaceId, async () => {
   if (tab.value === "UPDATES") await loadUpdates();
   else await Promise.all([loadAssets(), refreshCount(), refreshOverview()]);
@@ -431,13 +570,15 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null;
 watch(keyword, () => {
   if (searchTimer) clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
-    if (tab.value !== "UPDATES") void loadAssets();
+    if (tab.value !== "UPDATES" && !isRuntimeTab.value) void loadAssets();
   }, 250);
 });
 
 onMounted(async () => {
   await Promise.all([loadAssets(), refreshCount(), refreshOverview()]);
 });
+
+onUnmounted(stopDetailResize);
 </script>
 
 <template>
@@ -471,20 +612,20 @@ onMounted(async () => {
           <span class="hub-brand-icon"><Boxes :size="16" /></span>
           <div class="hub-brand-text">
             <div class="hub-title-row">
-              <h1>Agent &amp; Skill Hub</h1>
+              <h1>Agent · Skill · MCP · Tool Hub</h1>
               <span class="hub-kicker-tag">共享能力中心</span>
             </div>
-            <p>发现、发布并追踪来自所有应用远端提交的可复用能力。</p>
+            <p>发现和复用 Agent / Skill，并盘点当前运行态的 MCP / Tool。</p>
           </div>
         </div>
         <div class="hub-header-actions">
           <div class="hub-overview" aria-label="Hub 概览">
-            <div class="hub-overview-item"><Bot :size="13" /><span><b>{{ agentTotal }}</b> Agents</span></div>
-            <div class="hub-overview-item"><Sparkles :size="13" /><span><b>{{ skillTotal }}</b> Skills</span></div>
-            <div class="hub-overview-item"><Library :size="13" /><span><b>{{ referencedTotal }}</b> 当前应用引用</span></div>
-            <div class="hub-overview-item" :class="{ 'is-alert': updateCount > 0 }"><Clock3 :size="13" /><span><b>{{ updateCount }}</b> 待处理</span></div>
+            <div class="hub-overview-item"><Bot :size="13" /><span><b>{{ agentTotal }}</b> Agent</span></div>
+            <div class="hub-overview-item"><Sparkles :size="13" /><span><b>{{ skillTotal }}</b> Skill</span></div>
+            <div class="hub-overview-item"><PlugZap :size="13" /><span><b>{{ runtimeMcp?.length ?? 0 }}</b> MCP</span></div>
+            <div class="hub-overview-item"><Wrench :size="13" /><span><b>{{ runtimeTools?.length ?? 0 }}</b> Tool</span></div>
           </div>
-          <button class="hub-refresh-btn" type="button" @click="tab === 'UPDATES' ? loadUpdates() : loadAssets()">
+          <button class="hub-refresh-btn" type="button" @click="refreshCurrentTab">
             <RefreshCw :size="13" :class="loading && 'hub-spin'" />刷新目录
           </button>
         </div>
@@ -493,8 +634,10 @@ onMounted(async () => {
 
     <nav class="hub-tabs" aria-label="Hub 分类">
       <button :class="tab === 'DISCOVER' && 'is-active'" @click="tab = 'DISCOVER'"><Compass :size="14" />发现</button>
-      <button :class="tab === 'AGENT' && 'is-active'" @click="tab = 'AGENT'"><Bot :size="14" />Agents</button>
-      <button :class="tab === 'SKILL' && 'is-active'" @click="tab = 'SKILL'"><Sparkles :size="14" />Skills</button>
+      <button :class="tab === 'AGENT' && 'is-active'" @click="tab = 'AGENT'"><Bot :size="14" />Agent</button>
+      <button :class="tab === 'SKILL' && 'is-active'" @click="tab = 'SKILL'"><Sparkles :size="14" />Skill</button>
+      <button :class="tab === 'MCP' && 'is-active'" @click="tab = 'MCP'"><PlugZap :size="14" />MCP</button>
+      <button :class="tab === 'TOOL' && 'is-active'" @click="tab = 'TOOL'"><Wrench :size="14" />Tool</button>
       <span class="hub-tabs-divider" />
       <button :class="tab === 'REFERENCED' && 'is-active'" @click="tab = 'REFERENCED'">
         <Library :size="14" />当前应用<span class="hub-nav-note">{{ referencedTotal }}</span>
@@ -534,13 +677,34 @@ onMounted(async () => {
       <main class="hub-catalog">
         <div class="hub-catalog-head">
           <div>
-            <span>{{ tab === 'REFERENCED' ? 'CURRENT APPLICATION' : 'CAPABILITY CATALOG' }}</span>
-            <h2>{{ tab === 'REFERENCED' ? '当前应用的能力' : tab === 'AGENT' ? 'Agent 目录' : tab === 'SKILL' ? 'Skill 目录' : '探索全部能力' }}</h2>
-            <p>{{ tab === 'REFERENCED' ? '展示当前应用已生效、待推送和更新冲突的引用。' : '展示远端能力、原创应用和归属工作区；每个版本均为成功 push 的不可变快照。' }}</p>
+            <span>{{ tab === 'REFERENCED' ? 'CURRENT APPLICATION' : isRuntimeTab ? 'RUNTIME CATALOG' : 'CAPABILITY CATALOG' }}</span>
+            <h2>{{ tab === 'REFERENCED' ? '当前应用的能力' : tab === 'AGENT' ? 'Agent 目录' : tab === 'SKILL' ? 'Skill 目录' : tab === 'MCP' ? 'MCP 目录' : tab === 'TOOL' ? 'Tool 目录' : '探索全部能力' }}</h2>
+            <p>{{ tab === 'REFERENCED' ? '展示当前应用已生效、待推送和更新冲突的引用。' : isRuntimeTab ? '与顶栏运行态资源盘点使用同一份已加载目录；仅展示当前工作区真实可用内容。' : '展示远端能力、原创应用和归属工作区；每个版本均为成功 push 的不可变快照。' }}</p>
           </div>
           <label class="hub-search"><Search :size="14" /><input v-model="keyword" placeholder="搜索名称、应用或技术 ID" /></label>
         </div>
-        <div v-if="loading" class="hub-loading"><Loader2 class="hub-spin" :size="18" />正在读取远端快照</div>
+        <div v-if="loading" class="hub-loading"><Loader2 class="hub-spin" :size="18" />{{ isRuntimeTab ? '正在同步运行态目录' : '正在读取远端快照' }}</div>
+        <div v-else-if="isRuntimeTab && runtimeItems.length" class="hub-card-grid">
+          <button
+            v-for="item in runtimeItems"
+            :key="item.id"
+            :class="['hub-asset-card', selectedRuntimeItem?.id === item.id && 'is-active']"
+            @click="selectRuntimeItem(item)"
+          >
+            <span class="hub-card-top">
+              <span class="hub-asset-avatar" :data-type="tab"><PlugZap v-if="tab === 'MCP'" :size="18" /><Wrench v-else :size="18" /></span>
+              <span class="hub-card-type">{{ tab }}</span>
+              <span class="hub-asset-status builtin"><CheckCircle2 :size="11" />当前已加载</span>
+            </span>
+            <strong>{{ item.name }}</strong>
+            <code>{{ item.id }}</code>
+            <p>{{ item.description || (tab === 'MCP' ? '该 MCP 当前未提供说明。' : '该 Tool 当前未提供说明。') }}</p>
+            <span class="hub-card-meta">
+              <span class="hub-card-origin"><Building2 :size="12" />当前工作区运行态</span>
+              <span v-if="item.status"><CheckCircle2 :size="12" />{{ item.status }}</span>
+            </span>
+          </button>
+        </div>
         <div v-else-if="assets.length" class="hub-card-grid">
           <button
             v-for="asset in assets"
@@ -570,32 +734,62 @@ onMounted(async () => {
         </div>
         <div v-else class="hub-empty compact">
           <Library v-if="tab === 'REFERENCED'" :size="28" /><PackageOpen v-else :size="28" />
-          <strong>{{ tab === 'REFERENCED' ? (workspaceId ? '当前应用还没有引用能力' : '请先选择个人工作区') : '没有匹配的远端快照' }}</strong>
-          <span>{{ tab === 'REFERENCED' ? '从发现、Agent 或 Skill 目录中选择已发布能力即可引用。' : '可调整搜索条件后重试。' }}</span>
+          <strong>{{ isRuntimeTab ? `当前没有可用的 ${tab}` : tab === 'REFERENCED' ? (workspaceId ? '当前应用还没有引用能力' : '请先选择个人工作区') : '没有匹配的远端快照' }}</strong>
+          <span>{{ isRuntimeTab ? '请确认当前工作区运行态已经就绪，或刷新目录后重试。' : tab === 'REFERENCED' ? '从发现、Agent 或 Skill 目录中选择已发布能力即可引用。' : '可调整搜索条件后重试。' }}</span>
         </div>
       </main>
 
-      <Transition name="hub-slide">
-        <aside v-if="selectedAsset" class="hub-drawer">
+      <Teleport to="body" :disabled="!detailFullscreen">
+        <Transition name="hub-slide">
+        <aside
+          v-if="selectedAsset || selectedRuntimeItem"
+          :class="['hub-drawer', detailFullscreen && 'is-fullscreen']"
+          :data-layout-mode="detailFullscreen ? 'fullscreen' : 'window'"
+          data-testid="hub-detail-drawer"
+        >
           <div class="hub-drawer-overlay" @click="closeDetail" />
-          <div class="hub-detail-panel">
+          <div :class="['hub-detail-panel', detailResizing && 'is-resizing']" :style="detailPanelStyle">
+            <button
+              v-if="!detailFullscreen"
+              type="button"
+              class="hub-detail-resize-handle"
+              :class="{ 'is-resizing': detailResizing }"
+              aria-label="调整 Hub 详情宽度"
+              title="向左拖动展开；聚焦后可使用左右方向键"
+              @pointerdown.prevent="startDetailResize"
+              @keydown="resizeDetailByKeyboard"
+            />
             <div class="hub-detail-head-bar">
               <div class="hub-drawer-brand">
-                <span class="hub-asset-avatar" :data-type="selectedAsset.type">
-                  <Bot v-if="selectedAsset.type === 'AGENT'" :size="17" />
-                  <Sparkles v-else :size="17" />
+                <span class="hub-asset-avatar" :data-type="selectedAsset?.type || tab">
+                  <Bot v-if="selectedAsset?.type === 'AGENT'" :size="17" />
+                  <Sparkles v-else-if="selectedAsset?.type === 'SKILL'" :size="17" />
+                  <PlugZap v-else-if="tab === 'MCP'" :size="17" />
+                  <Wrench v-else :size="17" />
                 </span>
                 <div>
-                  <span class="hub-card-type">{{ selectedAsset.type }}</span>
-                  <h2>{{ selectedAsset.displayName || selectedAsset.technicalId }}</h2>
+                  <span class="hub-card-type">{{ selectedAsset?.type || tab }}</span>
+                  <h2>{{ selectedAsset ? (selectedAsset.displayName || selectedAsset.technicalId) : selectedRuntimeItem?.name }}</h2>
                 </div>
               </div>
-              <button class="hub-close-btn" type="button" title="关闭详情" @click="closeDetail">
-                <X :size="18" />
-              </button>
+              <div class="hub-detail-head-actions">
+                <button
+                  class="hub-close-btn"
+                  type="button"
+                  :title="detailFullscreen ? '退出全屏' : '进入全屏'"
+                  :aria-label="detailFullscreen ? '退出全屏' : '进入全屏'"
+                  @click="toggleDetailFullscreen"
+                >
+                  <Minimize2 v-if="detailFullscreen" :size="17" />
+                  <Maximize2 v-else :size="17" />
+                </button>
+                <button class="hub-close-btn" type="button" title="关闭详情" aria-label="关闭 Hub 详情" @click="closeDetail">
+                  <X :size="18" />
+                </button>
+              </div>
             </div>
 
-            <div class="hub-origin-banner">
+            <div v-if="selectedAsset" class="hub-origin-banner">
               <Building2 :size="15" />
               <div class="hub-origin-info">
                 <span class="hub-origin-label">原创应用</span>
@@ -604,7 +798,7 @@ onMounted(async () => {
               </div>
             </div>
 
-            <div v-if="detail" class="hub-detail-content">
+            <div v-if="selectedAsset && detail" class="hub-detail-content">
               <div class="hub-detail-top">
                 <div>
                   <code>{{ selectedAsset.technicalId }}</code>
@@ -662,14 +856,33 @@ onMounted(async () => {
                 </div>
               </div>
             </div>
+            <div v-else-if="selectedRuntimeItem" class="hub-detail-content hub-runtime-detail">
+              <div class="hub-detail-top">
+                <div>
+                  <code>{{ selectedRuntimeItem.id }}</code>
+                  <p>{{ selectedRuntimeItem.description || '当前运行态未提供详细说明。' }}</p>
+                </div>
+                <span class="hub-asset-status builtin"><CheckCircle2 :size="11" />当前已加载</span>
+              </div>
+              <section class="hub-runtime-summary">
+                <div><strong>能力类型</strong><span>{{ tab }}</span></div>
+                <div><strong>运行状态</strong><span>{{ selectedRuntimeItem.status || '已加载' }}</span></div>
+                <div><strong>数据来源</strong><span>当前工作区 OpenCode 运行态</span></div>
+              </section>
+              <div class="hub-runtime-notice">
+                <PlugZap v-if="tab === 'MCP'" :size="16" /><Wrench v-else :size="16" />
+                <div><strong>只读运行态目录</strong><p>MCP / Tool 与顶栏资源盘点共用同一数据，不进入 Agent / Skill 的发布、引用和更新流程。</p></div>
+              </div>
+            </div>
             <div v-else class="hub-loading overlay"><Loader2 class="hub-spin" :size="18" />正在加载资产详情...</div>
             <div class="hub-drawer-footer">
-              <span class="hub-drawer-footer-note">不可变版本快照 · 只读模式</span>
+              <span class="hub-drawer-footer-note">{{ selectedAsset ? '不可变版本快照 · 只读模式' : '当前运行态目录 · 只读模式' }}</span>
               <button class="hub-secondary" type="button" @click="closeDetail">关闭详情</button>
             </div>
           </div>
         </aside>
-      </Transition>
+        </Transition>
+      </Teleport>
     </div>
 
     <div v-if="publishDialog" class="hub-modal-backdrop" @click.self="publishDialog = false">
@@ -751,6 +964,8 @@ onMounted(async () => {
 .hub-card-top{display:flex;align-items:center}
 .hub-asset-avatar{display:grid;height:34px;width:34px;place-items:center;border-radius:9px;background:#eff6ff;color:#2563eb}
 .hub-asset-avatar[data-type="SKILL"]{background:#ccfbf1;color:#0d9488}
+.hub-asset-avatar[data-type="MCP"]{background:#f3e8ff;color:#7e22ce}
+.hub-asset-avatar[data-type="TOOL"]{background:#fff7ed;color:#c2410c}
 .hub-card-type{margin-left:8px;color:#64748b;font-family:var(--font-mono);font-size:9px;letter-spacing:.09em;font-weight:600}
 .hub-card-top .hub-asset-status{margin-left:auto}
 .hub-asset-card>strong{overflow:hidden;margin-top:10px;text-overflow:ellipsis;font-size:14px;white-space:nowrap;color:#0f172a;font-weight:700}
@@ -767,11 +982,17 @@ onMounted(async () => {
 
 /* Drawer / Slide out detail panel */
 .hub-drawer{position:absolute;inset:0;z-index:20;display:flex;justify-content:flex-end;overflow:hidden}
+.hub-drawer.is-fullscreen{position:fixed;z-index:10030}
 .hub-drawer-overlay{position:absolute;inset:0;background:rgba(15,23,42,.32);backdrop-filter:blur(2px)}
 .hub-detail-panel{position:relative;z-index:1;display:flex;width:min(640px,88vw);height:100%;flex-direction:column;background:#fff;box-shadow:-8px 0 30px rgba(0,0,0,.12);overflow:hidden}
+.hub-detail-resize-handle{position:absolute;inset:0 auto 0 0;z-index:3;width:10px;padding:0;border:0;background:transparent;cursor:ew-resize;touch-action:none}
+.hub-detail-resize-handle::after{content:"";position:absolute;top:50%;left:2px;width:3px;height:48px;border-radius:999px;background:#cbd5e1;opacity:0;transform:translateY(-50%);transition:opacity .14s ease,background-color .14s ease}
+.hub-detail-resize-handle:hover::after,.hub-detail-resize-handle:focus-visible::after,.hub-detail-resize-handle.is-resizing::after{background:var(--hub-blue);opacity:1}
+.hub-detail-resize-handle:focus-visible{outline:2px solid var(--hub-blue);outline-offset:-2px}
 .hub-detail-head-bar{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid #e2e8f0;background:#f8fafc}
 .hub-drawer-brand{display:flex;align-items:center;gap:10px}
 .hub-drawer-brand h2{margin:0;font-size:16px;letter-spacing:-.02em;color:#0f172a}
+.hub-detail-head-actions{display:flex;align-items:center;gap:6px}
 .hub-close-btn{display:grid;height:32px;width:32px;place-items:center;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#475569;transition:all .15s ease;cursor:pointer}
 .hub-close-btn:hover{background:#f1f5f9;color:#0f172a;border-color:#94a3b8}
 
@@ -786,6 +1007,14 @@ onMounted(async () => {
 .hub-detail-top>div:first-child{min-width:0}
 .hub-detail-top code{color:#64748b;font-size:10px;font-family:var(--font-mono)}
 .hub-detail-top p{margin:6px 0 0;color:var(--hub-muted);font-size:11px;line-height:1.6}
+.hub-runtime-detail{display:flex;flex-direction:column;gap:16px}
+.hub-runtime-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.hub-runtime-summary>div{display:flex;min-width:0;flex-direction:column;gap:5px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;padding:12px}
+.hub-runtime-summary strong{color:#64748b;font-size:9px;text-transform:uppercase;letter-spacing:.08em}
+.hub-runtime-summary span{overflow:hidden;color:#0f172a;font-size:11px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+.hub-runtime-notice{display:flex;align-items:flex-start;gap:10px;border:1px solid #bfdbfe;border-radius:9px;background:#eff6ff;padding:13px;color:#1d4ed8}
+.hub-runtime-notice>svg{flex:none;margin-top:1px}
+.hub-runtime-notice div{min-width:0}.hub-runtime-notice strong{font-size:11px}.hub-runtime-notice p{margin:3px 0 0;color:#475569;font-size:10px;line-height:1.55}
 .hub-actions{display:flex;flex:none;flex-wrap:wrap;justify-content:flex-end;gap:6px}
 .hub-primary,.hub-secondary,.hub-danger{display:inline-flex;align-items:center;justify-content:center;gap:5px;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;transition:all .15s ease}
 .hub-primary{border:1px solid var(--hub-blue);background:var(--hub-blue);color:#fff}.hub-primary:hover{background:#244fc4}
@@ -878,5 +1107,5 @@ onMounted(async () => {
 .hub-binary-conflict p{color:#64748b;font-size:11px;line-height:1.6}
 .hub-binary-conflict section>div{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
 
-@media (max-width:760px){.hub-header-main{flex-direction:column;align-items:stretch}.hub-header-actions{flex-direction:column;align-items:stretch}.hub-overview{flex-wrap:wrap}.hub-tabs{overflow:auto;padding:0 12px}.hub-tabs button{flex:none}.hub-catalog-head{align-items:stretch;flex-direction:column}.hub-search{width:100%}.hub-detail-panel{width:100%}}
+@media (max-width:760px){.hub-header-main{flex-direction:column;align-items:stretch}.hub-header-actions{flex-direction:column;align-items:stretch}.hub-overview{flex-wrap:wrap}.hub-tabs{overflow:auto;padding:0 12px}.hub-tabs button{flex:none}.hub-catalog-head{align-items:stretch;flex-direction:column}.hub-search{width:100%}.hub-detail-panel{width:100%!important}.hub-runtime-summary{grid-template-columns:1fr}.hub-detail-resize-handle{display:none}}
 </style>

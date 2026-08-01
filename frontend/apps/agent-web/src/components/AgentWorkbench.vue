@@ -1785,6 +1785,13 @@ const runtimeInventoryForShell = computed<RuntimeInventorySummary>(() => ({
       name: command.name,
       description: command.description
     })),
+  // `/experimental/tool` 返回当前模型可用的完整 runtime tool 目录，并非仅 MCP tool。
+  tools: mcpToolsData.value.map((tool) => ({
+    id: tool.toolId,
+    name: tool.name,
+    status: tool.source,
+    description: tool.description
+  })),
   mcp: runtimeMcpItems(mcpStatusData.value),
   plugins: commands.value
     .filter((command) => command.source === "plugin")
@@ -1793,12 +1800,6 @@ const runtimeInventoryForShell = computed<RuntimeInventorySummary>(() => ({
       name: command.name,
       description: command.description
     })),
-  mcpTools: mcpToolsData.value.map((tool) => ({
-    id: tool.toolId,
-    name: tool.name,
-    status: tool.source,
-    description: tool.description
-  })),
   mcpResources: (mcpResourcesData.value ?? []).map((resource) => ({
     id: resource.id,
     name: resource.name,
@@ -1806,6 +1807,11 @@ const runtimeInventoryForShell = computed<RuntimeInventorySummary>(() => ({
     description: resource.uri
   }))
 }));
+
+/** 左侧 Hub 与顶栏资源盘点复用相同查询，只在用户显式刷新时重新拉取运行态目录。 */
+function refreshRuntimeHubCatalog() {
+  void Promise.all([mcpStatusQuery.refetch(), mcpToolsQuery.refetch(), mcpResourcesQuery.refetch()]);
+}
 // 只在首个状态响应回来前展示"正在检查"，避免 READY 数据后台刷新时把对话区重新置为阻塞态。
 const opencodeProcessInitialLoading = computed(
   () => opencodeProcessEnabled.value && !opencodeProcessStatus.value && (opencodeProcessQuery.isPending.value || opencodeProcessQuery.isFetching.value)
@@ -9101,8 +9107,8 @@ async function handleLogout() {
           <button
             type="button"
             :class="['figma-activity-btn hub-activity-button', centerMode === 'hub' && 'figma-activity-btn--active']"
-            aria-label="Agent 与 Skill Hub"
-            title="Agent 与 Skill Hub"
+            aria-label="Agent、Skill、MCP 与 Tool Hub"
+            title="Agent、Skill、MCP 与 Tool Hub"
             data-testid="agent-skill-hub-button"
             @click="toggleAgentSkillHub"
           >
@@ -9235,8 +9241,11 @@ async function handleLogout() {
             :selected-app-id="selectedAppId"
             :workspace-id="selectedWorkspace?.workspaceId"
             :can-manage="isAppAdmin && appSourceCapabilities.canPublishApplicationAgentConfig"
+            :runtime-mcp="runtimeInventoryForShell.mcp"
+            :runtime-tools="runtimeInventoryForShell.tools"
             @update-count="hubUpdateCount = $event"
             @changed="handleHubChanged"
+            @refresh-runtime="refreshRuntimeHubCatalog"
           />
         </template>
         <template v-else-if="centerMode === 'diff'">

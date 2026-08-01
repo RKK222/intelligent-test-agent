@@ -4360,3 +4360,27 @@
 ### Result
 
 - 用户确认采用暗红实色版本；未修改 API、事件/SSE、数据库/Flyway、性能、安全、环境配置、generated SDK 或 OpenCode 源码。
+
+## 2026-08-01 - 扩展左下 Hub 为 Agent / Skill / MCP / Tool
+
+### Why
+
+- 用户明确左侧底部 `Boxes` 按钮代表的 Hub 应与顶部资源口径一致，包含 Agent、Skill、MCP、Tool；同时要求展开详情可拉伸和全屏。
+
+### What
+
+- Hub 保留 Agent/Skill 的远端资产发布、引用和更新流程，新增 MCP/Tool 运行态只读页签与详情，直接复用工作台已加载的 MCP status 和完整 `/experimental/tool` 目录，不新增服务端资产类型。
+- Hub 详情与顶部运行态资源详情都支持左边缘拖拽、方向键调宽和页面内全屏；顶部摘要把 Tool 独立于 MCP 展示，并保留 Plugin。
+- 同步前端 README、应用/包说明、模块图和用户手册，锁定左下入口的四类语义、只读边界和交互方式。
+
+### How
+
+- `agent-web` 类型检查通过；Hub 与顶栏两个定向 Vitest 文件 64/64 通过；`agent-web` 与用户手册生产构建通过。
+- 前端根 Vitest 为 105 个测试文件通过、1 个失败（1744 passed / 1 skipped）；唯一失败是同工作区既有 `AppSourceDialog.test.ts` 仍查找已被其它改动移除的“当前源码总保留小时数”输入框，与本次 Hub 文件和行为无关。
+- 使用未修改的 `.env.test`、JDK 25 和 test profile 重启本地服务；启动脚本的首次 readiness 等待提前超时，但进程随后就绪，health/readiness 为 `UP`、前端 3000 和登录 CORS 正常、manager 最终 `HEALTHY`。
+- 真实 Chromium 登录后关闭首次引导，验证 Hub 四个页签；详情宽度从 640px 调整到 656px，全屏面板覆盖 1440×900 视口。
+
+### Result
+
+- 左下 Hub 的产品含义已统一为 Agent / Skill / MCP / Tool，运行态 MCP/Tool 不会被误包装成可发布资产；详情拉伸和全屏在单测与真实页面均通过。
+- 未修改 HTTP API、事件/SSE、数据库/Flyway、关系型 SQL、权限、安全、环境配置、generated SDK 或 OpenCode 源码。

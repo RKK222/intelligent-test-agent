@@ -4,7 +4,7 @@ layout: home
 hero:
   name: MIMO 测试智能体
   text: 用户手册
-  tagline: 工作区、对话、Git、Agent、Skill、Hub 和引用配置，都能在这里查到。
+  tagline: 工作区、对话、Git、Agent、Skill、MCP、Tool、Hub 和引用配置，都能在这里查到。
   actions:
     - theme: brand
       text: 快速开始
@@ -21,8 +21,8 @@ features:
     details: 解释应用和 workspace 的区别，说明为什么只选应用时左侧文件树仍然是空白。
   - title: 操作路径可检索
     details: 使用右上角搜索框输入按钮文字、错误提示或功能名称，即可定位对应章节。
-  - title: Agent 与 Skill Hub
-    details: 在 Hub 里查找和发布可复用能力，也可以引用到当前应用；改动 push 成功后才会正式生效。
+  - title: Agent / Skill / MCP / Tool Hub
+    details: 在 Hub 里查找和发布 Agent/Skill、查看运行态 MCP/Tool，也可以把已发布能力引用到当前应用。
   - title: Markdown 与 Mermaid 编辑
     details: Markdown 可以整体预览或分屏编辑，流程图、时序图和状态图还能直接用画布修改。
   - title: 开发与测试目录对齐

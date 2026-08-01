@@ -905,8 +905,8 @@ describe("FigmaShell", () => {
             { id: "filesystem", name: "filesystem", status: "connected" },
             { id: "github", name: "github", status: "failed" }
           ],
+          tools: [{ id: "read-file", name: "read_file", status: "mcp" }],
           plugins: [],
-          mcpTools: [{ id: "read-file", name: "read_file", status: "mcp" }],
           mcpResources: [{ id: "repo", name: "Repository", status: "git" }]
         }
       } as any
@@ -931,6 +931,7 @@ describe("FigmaShell", () => {
     expect(summary.text()).toContain("Agent 2");
     expect(summary.text()).toContain("Skill 1");
     expect(summary.text()).toContain("MCP 2");
+    expect(summary.text()).toContain("Tool 1");
     expect(summary.text()).toContain("Plugin 0");
 
     await summary.trigger("click");
@@ -942,6 +943,37 @@ describe("FigmaShell", () => {
     expect(wrapper.text()).toContain("read_file");
     expect(wrapper.text()).toContain("Repository");
     expect(wrapper.text()).toContain("当前运行态未提供独立 Plugin 目录");
+  });
+
+  it("resizes the runtime inventory from its left edge and supports page fullscreen", async () => {
+    const wrapper = mountShell({
+      props: {
+        runtimeInventory: { agents: [], skills: [], mcp: [], tools: [], plugins: [] }
+      }
+    });
+
+    await wrapper.get('[data-testid="runtime-inventory-summary"]').trigger("click");
+    const panel = wrapper.get('[data-testid="runtime-inventory-panel"]');
+    const handle = wrapper.get('button[aria-label="调整运行态资源详情宽度"]');
+    expect(panel.attributes("data-layout-mode")).toBe("window");
+    expect(panel.element.getAttribute("style")).toContain("width: 520px");
+
+    dispatchPointer(handle.element, "pointerdown", 91, 500, 100, "mouse");
+    dispatchPointer(window, "pointermove", 91, 420, 100, "mouse");
+    dispatchPointer(window, "pointerup", 91, 420, 100, "mouse");
+    await wrapper.vm.$nextTick();
+    expect(panel.element.getAttribute("style")).toContain("width: 600px");
+
+    await wrapper.get('button[aria-label="进入全屏"]').trigger("click");
+    await wrapper.vm.$nextTick();
+    const fullscreenPanel = document.body.querySelector<HTMLElement>('[data-testid="runtime-inventory-panel"]');
+    expect(fullscreenPanel?.dataset.layoutMode).toBe("fullscreen");
+    expect(fullscreenPanel?.style.width).toBe("100vw");
+    expect(document.body.querySelector('button[aria-label="调整运行态资源详情宽度"]')).toBeNull();
+
+    (document.body.querySelector('button[aria-label="退出全屏"]') as HTMLButtonElement).click();
+    await wrapper.vm.$nextTick();
+    expect(wrapper.get('[data-testid="runtime-inventory-panel"]').element.getAttribute("style")).toContain("width: 600px");
   });
 
   it("reuses the existing workspace version loading and selection callbacks from the header", async () => {

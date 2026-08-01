@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, type CSSProperties } from "vue";
-import { BookOpen, CalendarDays, ChevronDown, Dices, Gamepad2, LogOut, MousePointer2, PawPrint, RefreshCw, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
+import { BookOpen, CalendarDays, ChevronDown, Dices, Gamepad2, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, RefreshCw, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
 import type { UserOpencodeProcess } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.png";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
@@ -39,9 +39,9 @@ export type RuntimeInventoryItem = {
 export type RuntimeInventorySummary = {
   agents: RuntimeInventoryItem[];
   skills: RuntimeInventoryItem[];
+  tools: RuntimeInventoryItem[];
   mcp: RuntimeInventoryItem[];
   plugins: RuntimeInventoryItem[];
-  mcpTools?: RuntimeInventoryItem[];
   mcpResources?: RuntimeInventoryItem[];
 };
 
@@ -159,6 +159,9 @@ const workspaceMenuOpen = ref(false);
 const versionMenuOpen = ref(false);
 const userMenuOpen = ref(false);
 const runtimeInventoryOpen = ref(false);
+const runtimeInventoryFullscreen = ref(false);
+const runtimeInventoryWidth = ref(520);
+const runtimeInventoryResizing = ref(false);
 const headerWorkspaceTemplateId = ref<string | null>(null);
 const headerVersionId = ref<string | null>(null);
 const pendingHeaderDefaultVersionTemplateId = ref<string | null>(null);
@@ -177,7 +180,7 @@ function toggleAppMenu() {
   workspaceMenuOpen.value = false;
   versionMenuOpen.value = false;
   userMenuOpen.value = false;
-  runtimeInventoryOpen.value = false;
+  closeRuntimeInventory();
 }
 
 function closeAppMenu() {
@@ -197,7 +200,7 @@ function toggleWorkspaceMenu() {
   appMenuOpen.value = false;
   versionMenuOpen.value = false;
   userMenuOpen.value = false;
-  runtimeInventoryOpen.value = false;
+  closeRuntimeInventory();
 }
 
 function toggleVersionMenu() {
@@ -205,7 +208,7 @@ function toggleVersionMenu() {
   appMenuOpen.value = false;
   workspaceMenuOpen.value = false;
   userMenuOpen.value = false;
-  runtimeInventoryOpen.value = false;
+  closeRuntimeInventory();
   const template = headerWorkspaceTemplate.value;
   if (versionMenuOpen.value && template && !template.versions) {
     emit("load-versions", template.workspaceId);
@@ -218,7 +221,7 @@ function toggleUserMenu() {
   appMenuOpen.value = false;
   workspaceMenuOpen.value = false;
   versionMenuOpen.value = false;
-  runtimeInventoryOpen.value = false;
+  closeRuntimeInventory();
   if (nextOpen) {
     emit("refresh-opencode-process");
   }
@@ -326,24 +329,105 @@ function selectHeaderVersion(version: AppWorkspaceVersion, explicitTemplate?: Ap
 const selectedApp = computed(
   () => props.apps.find((a) => a.id === props.selectedAppId) ?? props.apps[0] ?? { id: "", name: "未选择应用" }
 );
-const runtimeInventory = computed<RuntimeInventorySummary>(() => props.runtimeInventory ?? {
-  agents: [],
-  skills: [],
-  mcp: [],
-  plugins: [],
-  mcpTools: [],
-  mcpResources: []
-});
+// 逐字段兼容旧调用方，避免新增 Tool 目录后旧快照缺字段导致详情面板失效。
+const runtimeInventory = computed<RuntimeInventorySummary>(() => ({
+  agents: props.runtimeInventory?.agents ?? [],
+  skills: props.runtimeInventory?.skills ?? [],
+  tools: props.runtimeInventory?.tools ?? [],
+  mcp: props.runtimeInventory?.mcp ?? [],
+  plugins: props.runtimeInventory?.plugins ?? [],
+  mcpResources: props.runtimeInventory?.mcpResources ?? []
+}));
 const runtimeInventoryCounts = computed(() => ({
   agents: runtimeInventory.value.agents.length,
   skills: runtimeInventory.value.skills.length,
+  tools: runtimeInventory.value.tools.length,
   mcp: runtimeInventory.value.mcp.length,
   plugins: runtimeInventory.value.plugins.length
 }));
 
+const runtimeInventoryPanelStyle = computed<CSSProperties>(() => runtimeInventoryFullscreen.value
+  ? { width: "100vw", height: "100vh" }
+  : { width: `${runtimeInventoryWidth.value}px` });
+
+const RUNTIME_INVENTORY_MIN_WIDTH = 360;
+const RUNTIME_INVENTORY_VIEWPORT_MARGIN = 12;
+
+/** 详情面板始终留在视口内；窄屏时最小宽度随可用空间同步收缩。 */
+function clampRuntimeInventoryWidth() {
+  const maxWidth = Math.max(320, window.innerWidth - RUNTIME_INVENTORY_VIEWPORT_MARGIN * 2);
+  const minWidth = Math.min(RUNTIME_INVENTORY_MIN_WIDTH, maxWidth);
+  runtimeInventoryWidth.value = Math.min(maxWidth, Math.max(minWidth, runtimeInventoryWidth.value));
+}
+
+type RuntimeInventoryResizeSnapshot = {
+  pointerId: number;
+  startX: number;
+  width: number;
+  bodyCursor: string;
+  bodyUserSelect: string;
+};
+
+let runtimeInventoryResizeSnapshot: RuntimeInventoryResizeSnapshot | null = null;
+
+/** 面板固定在右侧，左边缘向左拖动时增加宽度。 */
+function startRuntimeInventoryResize(event: PointerEvent) {
+  if (runtimeInventoryFullscreen.value) return;
+  (event.currentTarget as HTMLElement | null)?.focus();
+  runtimeInventoryResizeSnapshot = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    width: runtimeInventoryWidth.value,
+    bodyCursor: document.body.style.cursor,
+    bodyUserSelect: document.body.style.userSelect
+  };
+  runtimeInventoryResizing.value = true;
+  document.body.style.cursor = "ew-resize";
+  document.body.style.userSelect = "none";
+  window.addEventListener("pointermove", resizeRuntimeInventory);
+  window.addEventListener("pointerup", stopRuntimeInventoryResize);
+  window.addEventListener("pointercancel", stopRuntimeInventoryResize);
+}
+
+function resizeRuntimeInventory(event: PointerEvent) {
+  if (!runtimeInventoryResizeSnapshot || event.pointerId !== runtimeInventoryResizeSnapshot.pointerId) return;
+  runtimeInventoryWidth.value = runtimeInventoryResizeSnapshot.width
+    + runtimeInventoryResizeSnapshot.startX - event.clientX;
+  clampRuntimeInventoryWidth();
+}
+
+function stopRuntimeInventoryResize(event?: PointerEvent) {
+  if (event && runtimeInventoryResizeSnapshot && event.pointerId !== runtimeInventoryResizeSnapshot.pointerId) return;
+  if (runtimeInventoryResizeSnapshot) {
+    document.body.style.cursor = runtimeInventoryResizeSnapshot.bodyCursor;
+    document.body.style.userSelect = runtimeInventoryResizeSnapshot.bodyUserSelect;
+  }
+  runtimeInventoryResizeSnapshot = null;
+  runtimeInventoryResizing.value = false;
+  window.removeEventListener("pointermove", resizeRuntimeInventory);
+  window.removeEventListener("pointerup", stopRuntimeInventoryResize);
+  window.removeEventListener("pointercancel", stopRuntimeInventoryResize);
+}
+
+/** 键盘在左边缘调整宽度；向左扩展、向右收窄，Shift 使用更大步长。 */
+function resizeRuntimeInventoryByKeyboard(event: KeyboardEvent) {
+  const step = event.shiftKey ? 48 : 16;
+  if (event.key === "ArrowLeft") runtimeInventoryWidth.value += step;
+  else if (event.key === "ArrowRight") runtimeInventoryWidth.value -= step;
+  else return;
+  event.preventDefault();
+  clampRuntimeInventoryWidth();
+}
+
 function toggleRuntimeInventory(event: MouseEvent) {
   event.stopPropagation();
-  runtimeInventoryOpen.value = !runtimeInventoryOpen.value;
+  if (runtimeInventoryOpen.value) {
+    closeRuntimeInventory();
+    return;
+  }
+  clampRuntimeInventoryWidth();
+  runtimeInventoryFullscreen.value = false;
+  runtimeInventoryOpen.value = true;
   appMenuOpen.value = false;
   workspaceMenuOpen.value = false;
   versionMenuOpen.value = false;
@@ -351,7 +435,15 @@ function toggleRuntimeInventory(event: MouseEvent) {
 }
 
 function closeRuntimeInventory() {
+  stopRuntimeInventoryResize();
   runtimeInventoryOpen.value = false;
+  runtimeInventoryFullscreen.value = false;
+}
+
+function toggleRuntimeInventoryFullscreen() {
+  stopRuntimeInventoryResize();
+  runtimeInventoryFullscreen.value = !runtimeInventoryFullscreen.value;
+  if (!runtimeInventoryFullscreen.value) clampRuntimeInventoryWidth();
 }
 const userName = computed(() => props.currentUserName?.trim() || "未登录");
 // 右上角用户菜单顶部的「角色」灰显行：来自后端 /api/auth/me 的 roleLabels（dictionaries.dict_label）。
@@ -546,6 +638,7 @@ function onResizeEnd() {
 }
 
 onUnmounted(() => {
+  stopRuntimeInventoryResize();
   document.removeEventListener("mousemove", onResizeMove);
   document.removeEventListener("mouseup", onResizeEnd);
   document.body.style.cursor = "";
@@ -1552,6 +1645,7 @@ function handleUserActivity(event?: Event) {
 }
 
 function handleWindowResize() {
+  clampRuntimeInventoryWidth();
   if (robotHasSavedPosition.value) {
     const position = clampRobotPosition({ x: robotX.value, y: robotY.value });
     robotX.value = position.x;
@@ -2071,27 +2165,57 @@ function submitJoinApp() {
             <span>Agent {{ runtimeInventoryCounts.agents }}</span>
             <span>Skill {{ runtimeInventoryCounts.skills }}</span>
             <span>MCP {{ runtimeInventoryCounts.mcp }}</span>
+            <span>Tool {{ runtimeInventoryCounts.tools }}</span>
             <span>Plugin {{ runtimeInventoryCounts.plugins }}</span>
           </button>
-          <section
-            v-if="runtimeInventoryOpen"
-            class="figma-runtime-inventory-panel"
-            data-testid="runtime-inventory-panel"
-            role="dialog"
-            aria-label="运行态资源详情"
-            @click.stop
-          >
-            <header class="figma-runtime-inventory-header">
-              <div>
-                <div class="figma-runtime-inventory-title">运行态资源</div>
-                <div class="figma-runtime-inventory-subtitle">当前已加载目录的只读盘点</div>
-              </div>
-              <button type="button" class="figma-runtime-inventory-close" aria-label="关闭运行态资源详情" @click="closeRuntimeInventory">
-                <X :size="14" />
-              </button>
-            </header>
-            <div class="figma-runtime-inventory-body">
-              <section class="figma-runtime-inventory-section">
+          <Teleport to="body" :disabled="!runtimeInventoryFullscreen">
+            <section
+              v-if="runtimeInventoryOpen"
+              :class="[
+                'figma-runtime-inventory-panel',
+                runtimeInventoryFullscreen && 'is-fullscreen',
+                runtimeInventoryResizing && 'is-resizing'
+              ]"
+              :style="runtimeInventoryPanelStyle"
+              :data-layout-mode="runtimeInventoryFullscreen ? 'fullscreen' : 'window'"
+              data-testid="runtime-inventory-panel"
+              role="dialog"
+              aria-label="运行态资源详情"
+              @click.stop
+            >
+              <button
+                v-if="!runtimeInventoryFullscreen"
+                type="button"
+                class="figma-runtime-inventory-resize-handle"
+                :class="{ 'is-resizing': runtimeInventoryResizing }"
+                aria-label="调整运行态资源详情宽度"
+                title="向左拖动展开；聚焦后可使用左右方向键"
+                @pointerdown.prevent="startRuntimeInventoryResize"
+                @keydown="resizeRuntimeInventoryByKeyboard"
+              />
+              <header class="figma-runtime-inventory-header">
+                <div>
+                  <div class="figma-runtime-inventory-title">运行态资源</div>
+                  <div class="figma-runtime-inventory-subtitle">当前已加载的 Agent、Skill、MCP、Tool 与 Plugin</div>
+                </div>
+                <div class="figma-runtime-inventory-header-actions">
+                  <button
+                    type="button"
+                    class="figma-runtime-inventory-close"
+                    :aria-label="runtimeInventoryFullscreen ? '退出全屏' : '进入全屏'"
+                    :title="runtimeInventoryFullscreen ? '退出全屏' : '进入全屏'"
+                    @click="toggleRuntimeInventoryFullscreen"
+                  >
+                    <Minimize2 v-if="runtimeInventoryFullscreen" :size="14" />
+                    <Maximize2 v-else :size="14" />
+                  </button>
+                  <button type="button" class="figma-runtime-inventory-close" aria-label="关闭运行态资源详情" @click="closeRuntimeInventory">
+                    <X :size="14" />
+                  </button>
+                </div>
+              </header>
+              <div class="figma-runtime-inventory-body">
+                <section class="figma-runtime-inventory-section">
                 <div class="figma-runtime-inventory-section-title">Agent <span>{{ runtimeInventoryCounts.agents }}</span></div>
                 <ul v-if="runtimeInventory.agents.length" class="figma-runtime-inventory-list">
                   <li v-for="agent in runtimeInventory.agents" :key="agent.id" class="figma-runtime-inventory-row">
@@ -2123,24 +2247,29 @@ function submitJoinApp() {
                 </ul>
                 <div v-else class="figma-runtime-inventory-empty">暂无 MCP 状态条目</div>
                 <div class="figma-runtime-inventory-subsection">
-                  <span>MCP tools {{ runtimeInventory.mcpTools?.length ?? 0 }}</span>
                   <span>MCP resources {{ runtimeInventory.mcpResources?.length ?? 0 }}</span>
                 </div>
                 <ul
-                  v-if="(runtimeInventory.mcpTools?.length ?? 0) || (runtimeInventory.mcpResources?.length ?? 0)"
+                  v-if="runtimeInventory.mcpResources?.length"
                   class="figma-runtime-inventory-list is-compact"
                 >
-                  <li v-for="tool in runtimeInventory.mcpTools" :key="`tool:${tool.id}`" class="figma-runtime-inventory-row">
-                    <span class="figma-runtime-inventory-name">{{ tool.name }}</span>
-                    <span class="figma-runtime-inventory-tag">tool</span>
-                    <span v-if="tool.description" class="figma-runtime-inventory-desc">{{ tool.description }}</span>
-                  </li>
                   <li v-for="resource in runtimeInventory.mcpResources" :key="`resource:${resource.id}`" class="figma-runtime-inventory-row">
                     <span class="figma-runtime-inventory-name">{{ resource.name }}</span>
                     <span class="figma-runtime-inventory-tag">resource</span>
                     <span v-if="resource.description" class="figma-runtime-inventory-desc">{{ resource.description }}</span>
                   </li>
                 </ul>
+              </section>
+              <section class="figma-runtime-inventory-section">
+                <div class="figma-runtime-inventory-section-title">Tool <span>{{ runtimeInventoryCounts.tools }}</span></div>
+                <ul v-if="runtimeInventory.tools.length" class="figma-runtime-inventory-list">
+                  <li v-for="tool in runtimeInventory.tools" :key="tool.id" class="figma-runtime-inventory-row">
+                    <span class="figma-runtime-inventory-name">{{ tool.name }}</span>
+                    <span v-if="tool.status" class="figma-runtime-inventory-tag">{{ tool.status }}</span>
+                    <span v-if="tool.description" class="figma-runtime-inventory-desc">{{ tool.description }}</span>
+                  </li>
+                </ul>
+                <div v-else class="figma-runtime-inventory-empty">暂无已加载 Tool</div>
               </section>
               <section class="figma-runtime-inventory-section">
                 <div class="figma-runtime-inventory-section-title">Plugin <span>{{ runtimeInventoryCounts.plugins }}</span></div>
@@ -2152,8 +2281,9 @@ function submitJoinApp() {
                 </ul>
                 <div v-else class="figma-runtime-inventory-empty">当前运行态未提供独立 Plugin 目录</div>
               </section>
-            </div>
-          </section>
+              </div>
+            </section>
+          </Teleport>
         </div>
         <!-- 加入应用弹窗 (弹出div) -->
         <div v-if="addAppVisible" class="figma-add-app-overlay" @click="closeAddApp">
@@ -3386,6 +3516,7 @@ function submitJoinApp() {
   top: calc(100% + 7px);
   right: 0;
   z-index: 100;
+  box-sizing: border-box;
   width: min(520px, calc(100vw - 24px));
   max-height: min(520px, calc(100vh - 72px));
   display: flex;
@@ -3397,6 +3528,54 @@ function submitJoinApp() {
   box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
 }
 
+.figma-runtime-inventory-panel.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 10020;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.figma-runtime-inventory-resize-handle {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 2;
+  width: 9px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.figma-runtime-inventory-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 3px;
+  height: 44px;
+  border-radius: 999px;
+  background: #cbd5e1;
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity 0.14s ease, background-color 0.14s ease;
+}
+
+.figma-runtime-inventory-resize-handle:hover::after,
+.figma-runtime-inventory-resize-handle:focus-visible::after,
+.figma-runtime-inventory-resize-handle.is-resizing::after {
+  background: var(--ta-shell-accent, #c8161d);
+  opacity: 1;
+}
+
+.figma-runtime-inventory-resize-handle:focus-visible {
+  outline: 2px solid var(--ta-shell-accent, #c8161d);
+  outline-offset: -2px;
+}
+
 .figma-runtime-inventory-header {
   display: flex;
   align-items: center;
@@ -3405,6 +3584,13 @@ function submitJoinApp() {
   padding: 10px 12px;
   border-bottom: 1px solid var(--ta-border, #e5e7eb);
   background: #f8fafc;
+}
+
+.figma-runtime-inventory-header-actions {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
 }
 
 .figma-runtime-inventory-title {
