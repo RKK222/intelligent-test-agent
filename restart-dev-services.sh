@@ -23,12 +23,14 @@ FRONTEND_SCREEN_SESSION="test-agent-frontend"
 OPENCODE_SCREEN_SESSION="test-agent-opencode"
 OPENCODE_MANAGER_SCREEN_SESSION="test-agent-opencode-manager"
 LOBEHUB_DEV_SCRIPT="${ROOT_DIR}/tools/lobehub-dev-services.sh"
+WORKFLOW_DEV_SCRIPT="${ROOT_DIR}/tools/workflow-dev-services.sh"
 
 profile="test"
 env_file=""
 skip_backend_build=false
 skip_frontend_build=false
 with_lobehub=false
+with_workflow=true
 frontend_dependencies_checked=false
 # 后端需要直连数据库和 Redis，显式清空 JVM 从系统继承的代理属性。
 BACKEND_JAVA_DIRECT_NETWORK_ARGS=(
@@ -45,11 +47,11 @@ BACKEND_JAVA_DIRECT_NETWORK_ARGS=(
 
 usage() {
   cat <<'USAGE'
-Usage: ./restart-dev-services.sh [--profile test|local] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--with-lobehub] [--help]
+Usage: ./restart-dev-services.sh [--profile test|local] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--without-workflow] [--with-lobehub] [--help]
 
 Compile and restart the local platform services one by one. Each service is
 stopped (kill old process + screen session) before its new instance starts,
-in dependency order: backend -> opencode-manager -> frontend -> optional LobeHub.
+in dependency order: backend -> workflow API/Worker -> opencode-manager -> frontend -> optional LobeHub.
 
 Services managed by this script:
   backend           Spring Boot test-agent-app (java -jar, profile from --profile).
@@ -59,6 +61,7 @@ Services managed by this script:
                     Standalone `opencode serve` is NOT started separately when the
                     manager runs, because the manager spawns opencode child processes.
   frontend          agent-web Vite dev server (corepack pnpm dev).
+  workflow          Python workflow API/Worker; Analysis Runner is never started locally.
   lobehub           Independent ../lobehub-platform fork plus dev-only ParadeDB/RustFS.
                     It is started only when --with-lobehub is explicitly supplied.
 
@@ -72,6 +75,7 @@ Defaults:
   backend logs:    backend/logs/backend.log, backend/logs/sse.log, backend/logs/error.log
   manager logs:    <manager-state-dir>/logs/manager.log, <manager-state-dir>/logs/manager-error.log
   LobeHub:         disabled unless --with-lobehub is supplied
+  workflow:        enabled; use --without-workflow to retain the legacy three-service restart
   screen sessions: test-agent-backend, test-agent-frontend, test-agent-opencode-manager when screen is available
 
 Options:
@@ -80,6 +84,7 @@ Options:
   --log-dir              Service log directory. Relative paths are resolved from the repo root.
   --skip-backend-build   Restart backend without running Maven package first.
   --skip-frontend-build  Restart frontend without running pnpm build first.
+  --without-workflow     Do not prepare, stop, or start the Python workflow control plane.
   --with-lobehub         Opt in to the independent LobeHub fork on http://127.0.0.1:3210.
                          Reuses TEST_AGENT_REDIS_* with REDIS_PREFIX=lobehub:app;
                          the fork appends ':' so actual keys use lobehub:app:*.
@@ -91,6 +96,7 @@ Environment overrides:
   TEST_AGENT_ROOT                    Project root used by common parameter path expansion.
   TESTAGENT                          Compatibility alias for existing local common parameters.
   TEST_AGENT_LOBEHUB_FORK_DIR        Independent fork directory; default is ../lobehub-platform.
+  TEST_AGENT_WORKFLOW_*              Complete external Linux Runner settings override local placeholders.
 USAGE
 }
 
@@ -130,6 +136,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --with-lobehub)
       with_lobehub=true
+      shift
+      ;;
+    --without-workflow)
+      with_workflow=false
       shift
       ;;
     --help|-h)
@@ -1030,6 +1040,17 @@ require_command curl
 require_command java
 require_command mvn
 
+if [[ "${with_workflow}" == "true" ]]; then
+  [[ -x "${WORKFLOW_DEV_SCRIPT}" ]] || {
+    echo "Workflow development helper is missing or not executable: ${WORKFLOW_DEV_SCRIPT}" >&2
+    exit 1
+  }
+  export TEST_AGENT_DEV_LOG_DIR="${LOG_DIR}"
+  export TEST_AGENT_BASE_URL="${backend_url}"
+  "${WORKFLOW_DEV_SCRIPT}" prepare
+  load_env_file "${TEST_AGENT_WORKFLOW_DEV_ENV_FILE:-${LOG_DIR}/workflow/workflow-dev.env}"
+fi
+
 seed_demo_workspaces
 
 # 清理旧的日志文件，避免日志累积过大
@@ -1052,24 +1073,33 @@ prepare_backend_runtime_jar
 build_opencode_manager
 build_frontend
 
-# 逐个服务「先 kill 原进程再启动」，按依赖顺序：后端 -> opencode-manager -> 前端。
-# 后端最先：opencode-manager 要发现后端实例，前端要调用后端 API。
+# 逐个服务「先 kill 原进程再启动」，按依赖顺序：后端 -> workflow -> opencode-manager -> 前端。
+# 后端最先：workflow和opencode-manager都需要平台能力，前端再连接两个控制面。
+
+if [[ "${with_workflow}" == "true" ]]; then
+  "${WORKFLOW_DEV_SCRIPT}" stop
+fi
 
 # 1) 后端
 stop_backend_service
 cleanup_stale_backend_runtime_jars
 start_backend
 
-# 2) opencode-manager（Go 管理进程）。非本地环境 should_start_opencode_manager 为 false 时自动跳过，
+# 2) Python工作流控制面。Analysis Runner只能由合规Linux节点单独提供，本脚本永不本地启动。
+if [[ "${with_workflow}" == "true" ]]; then
+  "${WORKFLOW_DEV_SCRIPT}" start
+fi
+
+# 3) opencode-manager（Go 管理进程）。非本地环境 should_start_opencode_manager 为 false 时自动跳过，
 #    start_opencode_manager 内部也会跳过；stop 步骤仍会清理残留 manager 与 standalone opencode serve。
 stop_opencode_manager_service
 start_opencode_manager
 
-# 3) 前端
+# 4) 前端
 stop_frontend_service
 start_frontend
 
-# 4) LobeHub 明确按需启动；默认路径不探测、不停止，也不改变既有开发环境。
+# 5) LobeHub 明确按需启动；默认路径不探测、不停止，也不改变既有开发环境。
 if [[ "${with_lobehub}" == "true" ]]; then
   "${LOBEHUB_DEV_SCRIPT}" restart
 fi
@@ -1077,6 +1107,10 @@ fi
 echo "Restart complete."
 echo "Backend:  ${backend_url}"
 echo "Frontend: ${frontend_url}"
+if [[ "${with_workflow}" == "true" ]]; then
+  echo "Workflow: http://127.0.0.1:8090/workflow-api/v1"
+  echo "Workflow logs: ${LOG_DIR}/workflow/workflow-api.log, ${LOG_DIR}/workflow/workflow-worker.log"
+fi
 if [[ "${with_lobehub}" == "true" ]]; then
   echo "LobeHub:  ${LOBEHUB_DEV_APP_URL:-http://127.0.0.1:3210}"
 fi

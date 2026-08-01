@@ -20,6 +20,8 @@ run_check() {
 run_check "restart script bash syntax" bash -n "${ROOT_DIR}/restart-dev-services.sh"
 run_check "restart script sh parse guard" sh -n "${ROOT_DIR}/restart-dev-services.sh"
 run_check "restart script sh help entry" sh "${ROOT_DIR}/restart-dev-services.sh" --help
+run_check "workflow dev service script bash syntax" bash -n "${ROOT_DIR}/tools/workflow-dev-services.sh"
+run_check "workflow dev service behavior" bash "${ROOT_DIR}/tools/workflow-dev-services-test.sh"
 WINDOWS_RESTART_SCRIPT="${ROOT_DIR}/win-restart-dev-services-fixed-v4.ps1"
 [[ -f "${WINDOWS_RESTART_SCRIPT}" ]] || fail "windows restart script missing: ${WINDOWS_RESTART_SCRIPT}"
 powershell_bin=""
@@ -50,6 +52,16 @@ fi
 if [[ "${restart_help}" != *"--with-lobehub"* ]]; then
   echo "${restart_help}" >&2
   fail "restart script help should document the opt-in LobeHub development mode"
+fi
+if [[ "${restart_help}" != *"--without-workflow"* ]]; then
+  echo "${restart_help}" >&2
+  fail "restart script help should document the workflow opt-out"
+fi
+if ! grep -Fq 'with_workflow=true' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script must start the workflow control plane by default"
+fi
+if ! grep -Fq '"${WORKFLOW_DEV_SCRIPT}" prepare' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script must prepare workflow settings before Java starts"
 fi
 if ! grep -Fq 'with_lobehub=false' "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script must keep LobeHub disabled by default"
@@ -156,6 +168,7 @@ printf 'PLACEHOLDER=1\n' >"${tmp_dir}/env.local"
 set +e
 restart_output="$(
   PATH="${tmp_dir}/bin:${PATH}" sh "${ROOT_DIR}/restart-dev-services.sh" \
+    --without-workflow \
     --skip-backend-build \
     --skip-frontend-build \
     --env-file "${tmp_dir}/env.local" \
@@ -185,6 +198,7 @@ printf 'TEST_AGENT_CORS_ALLOWED_ORIGINS=*\nTEST_AGENT_OPENCODE_BASE_URL=http://1
 : >"${cors_calls}"
 restart_wildcard_output="$(
   PATH="${tmp_dir}/bin:${PATH}" sh "${ROOT_DIR}/restart-dev-services.sh" \
+    --without-workflow \
     --skip-backend-build \
     --skip-frontend-build \
     --env-file "${tmp_dir}/env-wildcard-origin.local" \
@@ -202,6 +216,7 @@ printf 'TEST_AGENT_BASE_URL=http://10.8.0.115:8080\nTEST_AGENT_FRONTEND_URL=http
 set +e
 restart_local_ip_output="$(
   PATH="${tmp_dir}/bin:${PATH}" sh "${ROOT_DIR}/restart-dev-services.sh" \
+    --without-workflow \
     --skip-backend-build \
     --skip-frontend-build \
     --env-file "${tmp_dir}/env-local-ip.local" \
@@ -261,6 +276,7 @@ fi
 printf 'TEST_AGENT_BASE_URL=http://10.8.0.115:8080\nTEST_AGENT_FRONTEND_URL=http://10.8.0.115:3000\nTEST_AGENT_OPENCODE_BASE_URL=http://10.8.0.115:4096\nTEST_AGENT_START_OPENCODE_MANAGER=false\n' >"${tmp_dir}/env-frontend-host.local"
 restart_frontend_output="$(
   PATH="${tmp_dir}/bin:${PATH}" sh "${ROOT_DIR}/restart-dev-services.sh" \
+    --without-workflow \
     --skip-backend-build \
     --skip-frontend-build \
     --env-file "${tmp_dir}/env-frontend-host.local" \
@@ -275,6 +291,7 @@ printf 'TEST_AGENT_OPENCODE_BASE_URL=http://10.8.0.116:4096\n' >"${tmp_dir}/env-
 set +e
 restart_remote_opencode_output="$(
   PATH="${tmp_dir}/bin:${PATH}" sh "${ROOT_DIR}/restart-dev-services.sh" \
+    --without-workflow \
     --skip-backend-build \
     --skip-frontend-build \
     --env-file "${tmp_dir}/env-remote-opencode.local" \
