@@ -2,6 +2,8 @@ import { createHash } from "node:crypto"
 import { tool } from "@opencode-ai/plugin"
 
 const ENDPOINT_PATH = "/api/integration/v1/ui-executions"
+const CONFIG_ENDPOINT_PATH = "/api/internal/agent/opencode/ui-test-tool/config"
+const PLATFORM_BASE_URL_ENV = "TEST_AGENT_PLATFORM_BASE_URL"
 const POLL_INTERVAL_MS = 2_000
 const POLL_TIMEOUT_MS = 930_000
 const HTTP_TIMEOUT_MS = 20_000
@@ -33,8 +35,19 @@ type UiPlatformExecution = {
   report_url: string | null
 }
 
+type PlatformApiResponse<T> = {
+  success: boolean
+  data: T
+  traceId: string
+}
+
+type UiTestToolConfig = {
+  configured: boolean
+  baseUrl: string | null
+}
+
 export default tool({
-  description: "将被测系统环境和一行四列测试案例提交给独立 uitest6 平台执行一次，并等待最终结果。",
+  description: "将被测系统环境和一行四列测试案例提交给独立 UI 平台执行一次，并等待最终结果。",
   args: {
     testEnvironment: tool.schema.string().min(1).max(20_000).describe("被测系统环境；由用户提供或父 Agent 从用户指定路径读取，不得补造"),
     caseName: tool.schema.string().max(500).optional().default("").describe("案例名称，仅用于标识"),
@@ -43,7 +56,7 @@ export default tool({
     expectedResult: tool.schema.string().max(20_000).optional().default("").describe("预期结果，仅用于验证"),
   },
   async execute(args, context) {
-    const baseUrl = requiredBaseUrl("UITEST6_BASE_URL")
+    const baseUrl = await resolveUiPlatformBaseUrl(context.abort)
     const requestId = buildRequestId(context.sessionID, context.messageID, args)
     context.metadata({
       title: `执行 UI 案例：${args.caseName || "未命名案例"}`,
@@ -102,20 +115,50 @@ export default tool({
   },
 })
 
-function requiredBaseUrl(name: string): string {
+async function resolveUiPlatformBaseUrl(signal: AbortSignal): Promise<string> {
+  const platformBaseUrl = requiredEnvironmentBaseUrl(PLATFORM_BASE_URL_ENV)
+  const response = await platformConfigRequest<PlatformApiResponse<UiTestToolConfig>>(
+    `${platformBaseUrl}${CONFIG_ENDPOINT_PATH}`,
+    signal,
+  )
+  if (response.success !== true || !response.data || typeof response.data.configured !== "boolean") {
+    throw new Error("UI 测试执行配置查询返回格式无效")
+  }
+  if (!response.data.configured) {
+    throw new Error("UI 测试执行尚未配置：请超级管理员在系统管理的通用参数中配置 UITEST_BASE_URL")
+  }
+  if (typeof response.data.baseUrl !== "string" || !response.data.baseUrl.trim()) {
+    throw new Error("UI 测试执行配置查询返回格式无效")
+  }
+  return normalizeBaseUrl(response.data.baseUrl, "超级管理员配置的 UITEST_BASE_URL 无效")
+}
+
+function requiredEnvironmentBaseUrl(name: string): string {
   const value = process.env[name]?.trim()
   if (!value) {
-    throw new Error(`UI 测试执行尚未配置：缺少 ${name}`)
+    throw new Error(`UI 测试执行无法读取平台配置：缺少 ${name}`)
   }
+  return normalizeBaseUrl(value, `UI 测试执行平台回调配置无效：${name} 必须是 HTTP/HTTPS 地址`)
+}
+
+function normalizeBaseUrl(value: string, invalidMessage: string): string {
+  const normalized = value.trim()
   try {
-    const parsed = new URL(value)
-    if (!["http:", "https:"].includes(parsed.protocol) || !parsed.hostname || parsed.username || parsed.password) {
+    const parsed = new URL(normalized)
+    if (
+      !["http:", "https:"].includes(parsed.protocol)
+      || !parsed.hostname
+      || parsed.username
+      || parsed.password
+      || parsed.search
+      || parsed.hash
+    ) {
       throw new Error("invalid UI platform URL")
     }
   } catch {
-    throw new Error(`UI 测试执行配置无效：${name} 必须是 HTTP/HTTPS 地址`)
+    throw new Error(invalidMessage)
   }
-  return value.replace(/\/+$/, "")
+  return normalized.replace(/\/+$/, "")
 }
 
 function buildRequestId(
@@ -169,6 +212,48 @@ async function uiPlatformRequest<T>(
     }
     if (controller.signal.aborted) {
       throw new Error("UI 平台请求超时")
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
+    parentSignal.removeEventListener("abort", onAbort)
+  }
+}
+
+async function platformConfigRequest<T>(url: string, parentSignal: AbortSignal): Promise<T> {
+  const controller = new AbortController()
+  const onAbort = () => controller.abort()
+  parentSignal.addEventListener("abort", onAbort, { once: true })
+  const timer = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS)
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    })
+    const text = await response.text()
+    let payload: unknown = null
+    try {
+      payload = text ? JSON.parse(text) : null
+    } catch {
+      throw new Error("UI 测试执行配置查询返回的 JSON 无效")
+    }
+    if (!response.ok || !payload) {
+      const message = payload && typeof payload === "object" && "message" in payload
+        ? (payload as { message?: unknown }).message
+        : null
+      const reason = typeof message === "string"
+        ? `，${sanitizeExecutionDetail(message)}`
+        : ""
+      throw new Error(`UI 测试执行配置查询失败（HTTP ${response.status}${reason}）`)
+    }
+    return payload as T
+  } catch (error) {
+    if (parentSignal.aborted) {
+      throw new Error("UI 测试执行已取消")
+    }
+    if (controller.signal.aborted) {
+      throw new Error("UI 测试执行配置查询超时")
     }
     throw error
   } finally {

@@ -66,6 +66,11 @@ server {
         proxy_cache off;
     }
 
+    # UI Tool 配置不使用应用层凭据，只允许 OpenCode worker 直连同节点 Java；公共入口精确拒绝。
+    location = /api/internal/agent/opencode/ui-test-tool/config {
+        return 404;
+    }
+
     # 服务器终端 ticket 保存在目标 Java 内存，复用同一 linuxServerId 静态路由表定向代理 WebSocket。
     ${TEST_AGENT_TERMINAL_LOCATIONS}
 

@@ -197,9 +197,10 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 
 ## UI 测试执行 Tool 安全边界
 
-- `ui_test_execute` 只从 OpenCode worker 启动环境读取 `UITEST6_BASE_URL` 并直连独立 UI 平台；地址不进入 Tool 参数、Agent prompt 或案例内容，当前 Java 后端不代理该请求。
-- 独立 UI 平台接口不使用本次集成新增的长期 Token，访问控制依赖受信任内网、主机防火墙或网关白名单；不得将执行端口暴露到不可信网络。需要跨安全域时必须重新设计独立平台鉴权，不能在公共 Tool 中硬编码共享密钥。
-- Tool 请求只允许必填的被测系统环境文本、一行四列案例和调用上下文派生的幂等键；环境只能来自用户输入或父 Agent 从用户明确指定路径读取后的原文，缺失时失败关闭。只传已读取内容，不向 UI 子 agent 或 `uitest6` 传物理路径；调用方不得指定 UI 平台地址、浏览器参数或批量任务；一轮 Tool 执行最多发送一个创建请求。
+- `ui_test_execute` 每次先通过 `TEST_AGENT_PLATFORM_BASE_URL` 直连同节点 Java 的精确只读接口，读取超级管理员维护的 `UITEST_BASE_URL`，再直连独立 UI 平台；地址不进入 Tool 参数、Agent prompt 或案例内容，Java 不代理 UI 请求。
+- UI 配置查询和独立 UI 平台请求均不携带应用层凭据。配置查询只允许受信任 OpenCode worker 内网直连，公共 Nginx 必须对精确路径 `/api/internal/agent/opencode/ui-test-tool/config` 返回 `404`；Java 只返回 `configured/baseUrl`，API Token 过滤器只豁免该精确路径，相邻路径仍鉴权。独立 UI 平台端口也不得暴露到不可信网络；需要跨安全域时必须重新设计平台鉴权，不能在公共 Tool 中硬编码共享密钥。
+- `UITEST_BASE_URL` 只允许无 user-info、query 和 fragment 的 HTTP/HTTPS 地址；管理端写入和 Tool 消费两端都校验，错误与日志不得回显非法原值。Tool 不读取 UI 平台地址进程环境，也不把现有 Workspace Git Tool Token 扩展到 UI 链路。
+- Tool 请求只允许必填的被测系统环境文本、一行四列案例和调用上下文派生的幂等键；环境只能来自用户输入或父 Agent 从用户明确指定路径读取后的原文，缺失时失败关闭。只传已读取内容，不向 UI 子 agent 或独立 UI 平台传物理路径；调用方不得指定 UI 平台地址、浏览器参数或批量任务；一轮 Tool 执行最多发送一个创建请求。
 - “测试步骤”是唯一操作流程，“测试数据”和“预期结果”只作为输入与验证上下文。外部响应堆栈不得透传，状态查询不回显原始案例内容。
 - 执行报告使用 executionId 绑定路径，禁止接受任意 report path；报告接口与执行接口使用相同的受信任网络边界。
 

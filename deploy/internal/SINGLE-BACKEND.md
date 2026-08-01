@@ -210,14 +210,12 @@ fi
 ## 4. 配置 worker
 
 在 `.114` 创建 `/data/testagent/config/docker.env`。下面是可整文件替换的完整配置；把
-`REPLACE_MANAGER_TOKEN` 替换成 `backend.env` 中的同一个值，并把 `REPLACE_UITEST6_HOST` 替换成
-worker 可访问的独立 UI 平台地址：
+`REPLACE_MANAGER_TOKEN` 替换成 `backend.env` 中的同一个值：
 
 ```dotenv
 TEST_AGENT_BASE_DIR=/data/testagent
 
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=REPLACE_MANAGER_TOKEN
-UITEST6_BASE_URL=http://REPLACE_UITEST6_HOST:7788
 TEST_AGENT_DATA_ROOT=/data/testagent/data
 TEST_AGENT_PROGRAM_ROOT=/data/testagent/programs
 TEST_AGENT_PYTHON_LIBS_ROOT=/data/testagent/python-libs
@@ -255,6 +253,11 @@ TEST_AGENT_IMAGE_OUTPUT_DIR=/data/testagent/dist
 `TEST_AGENT_DATA_ROOT` 必须与 Java 的 `SYS_DATA_ROOT_DIR` 完全一致；每个稳定服务器身份只运行一个 worker。当前 worker 不读取旧的 `TEST_AGENT_BACKEND`，而是读取 Java 写出的 `.serverhost` 再结合 `OPENCODE_WORKER_BACKEND_PORT` 连接本机 Java，因此不要恢复旧变量。
 
 端口池扩容后还要由超级管理员在“系统管理 → 通用参数”把 `OPENCODE_MANAGER_MAX_PROCESSES` 调整为 `20`。该参数是实际并发上限；如果仍为 `8`，即使已经映射 20 个端口，manager 也只允许 8 个进程。保存后会热推给在线 manager，无需重启 Java；运行管理中的 manager `maxProcesses` 应显示 `20`。
+
+独立 UI 自动化平台地址同样不写入 `docker.env`。平台启动并完成 Flyway 后，由超级管理员把
+`UITEST_BASE_URL/all` 从 `UNCONFIGURED` 修改为 worker 可达地址；下一次 `ui_test_execute` 调用即时
+读取新值，无需重启 worker、Manager 或用户 OpenCode。公共 Nginx 会拒绝配置查询路径，worker 通过
+同节点 Java 内网地址读取；不得向非受信任网段开放 Java `:8080` 或独立 UI 平台执行端口。
 
 ### 4.1 worker 容器访问动态外部接口
 

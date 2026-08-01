@@ -38,18 +38,19 @@ public class CommonParameterManagementController {
     }
 
     /**
-     * 列出通用参数，支持按平台过滤与分页。
+     * 列出通用参数，支持按平台、变量名过滤与分页。
      */
     @GetMapping
     public Mono<ApiResponse<Object>> list(
             @RequestParam(required = false) String platform,
+            @RequestParam(required = false) String englishName,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
             ServerWebExchange exchange) {
         requireSuperAdmin(exchange);
         String traceId = RuntimeApiSupport.traceId(exchange);
         PageRequest pageRequest = RuntimeApiSupport.pageRequest(page, size);
-        CommonParameterFilter filter = CommonParameterFilter.parse(platform);
+        CommonParameterFilter filter = CommonParameterFilter.parse(platform, englishName);
         return blocking(traceId, () -> service.find(filter, pageRequest));
     }
 

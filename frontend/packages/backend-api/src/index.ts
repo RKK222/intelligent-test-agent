@@ -1974,7 +1974,12 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<ScheduledTaskManagementRun>(`${schedulerManagementBase}/runs/${encodeURIComponent(taskRunId)}/stop`, { method: "POST" }),
     listGeneralParameters: (params: GeneralParameterListParams = {}) =>
       request<PageResponse<GeneralParameter>>(
-        `${commonParameterBase}${query({ platform: params.platform, page: params.page, size: params.size })}`
+        `${commonParameterBase}${query({
+          platform: params.platform,
+          englishName: params.englishName,
+          page: params.page,
+          size: params.size
+        })}`
       ),
     updateGeneralParameter: (parameterId: string, payload: GeneralParameterUpdatePayload) =>
       request<GeneralParameter>(`${commonParameterBase}/${encodeURIComponent(parameterId)}`, {

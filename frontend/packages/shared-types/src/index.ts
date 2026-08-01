@@ -1588,6 +1588,7 @@ export type GeneralParameter = {
 
 export type GeneralParameterListParams = {
   platform?: string;
+  englishName?: string;
   page?: number;
   size?: number;
 };

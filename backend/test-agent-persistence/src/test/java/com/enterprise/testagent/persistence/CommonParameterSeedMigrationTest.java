@@ -53,4 +53,30 @@ class CommonParameterSeedMigrationTest {
                 "'all'",
                 "true");
     }
+
+    @Test
+    void uiTestPlatformAddressSeedIsEditableAndDisabledByDefault() throws Exception {
+        String sql = Files.readString(Path.of(
+                "src/main/resources/db/migration/V20260801093854__seed_ui_test_platform_base_url.sql"));
+
+        assertThat(sql).contains(
+                "'param_uitest6_base_url_all'",
+                "'UITEST6_BASE_URL'",
+                "'UI测试执行平台地址'",
+                "'UNCONFIGURED'",
+                "'all'",
+                "true");
+    }
+
+    @Test
+    void uiTestPlatformAddressIsRenamedWithoutLosingAuditLogs() throws Exception {
+        String sql = Files.readString(Path.of(
+                "src/main/resources/db/migration/V20260801104000__rename_ui_test_platform_parameter.sql"));
+
+        assertThat(sql).contains(
+                "'param_uitest_base_url_all'",
+                "'UITEST_BASE_URL'",
+                "update common_parameter_change_logs",
+                "delete from common_parameters");
+    }
 }

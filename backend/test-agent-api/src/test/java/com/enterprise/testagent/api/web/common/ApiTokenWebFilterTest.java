@@ -68,4 +68,24 @@ class ApiTokenWebFilterTest {
         assertThat(called[0]).isTrue();
     }
 
+    @Test
+    void filterExemptsOnlyExactUiTestToolConfigPath() {
+        ApiTokenWebFilter filter = new ApiTokenWebFilter("secret-token");
+        MockServerWebExchange exact = MockServerWebExchange.from(MockServerHttpRequest.get(
+                "/api/internal/agent/opencode/ui-test-tool/config"));
+        final boolean[] exactCalled = {false};
+
+        filter.filter(exact, currentExchange -> {
+            exactCalled[0] = true;
+            return Mono.empty();
+        }).block();
+
+        MockServerWebExchange child = MockServerWebExchange.from(MockServerHttpRequest.get(
+                "/api/internal/agent/opencode/ui-test-tool/config/extra"));
+        filter.filter(child, currentExchange -> Mono.empty()).block();
+
+        assertThat(exactCalled[0]).isTrue();
+        assertThat(child.getResponse().getStatusCode().value()).isEqualTo(401);
+    }
+
 }

@@ -20,7 +20,7 @@
 | question | `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`：`renders a single-choice question with option descriptions and emits selected labels` | 单选、多选、选项描述、提交/拒绝 |
 | subagent | `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`：`keeps native pending task visible and converts it to a clickable subagent card` | task part、child Session、子 Agent 卡片和点击进入 |
 | 历史 subagent | `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`：`makes historical subagent cards clickable from session tree snapshot indexes` | 历史树恢复、子 Agent 导航、子时间线 |
-| UI 执行 subagent | 公共配置 `test-execution-ui.md` / `ui_test_execute.ts` 与独立 `uitest6` 契约测试 | 必填被测系统环境、单行四列传递、缺环境中断、Tool 直连、一次提交、同 executionId 轮询和终态结果 |
+| UI 执行 subagent | 公共配置 `test-execution-ui.md` / `ui_test_execute.ts` 与独立 UI 平台契约测试 | 必填被测系统环境、单行四列传递、缺环境中断、Tool 直连、一次提交、同 executionId 轮询和终态结果 |
 | 宠物旁路成功 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`pet side-question streams progress, survives outside clicks, and calibrates replayed deltas` |旁路 Run、阶段进度、增量、最终答案、重放去重 |
 | 宠物旁路失败/重试 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`pet side-question keeps a failure editable and starts a fresh run on retry` | 失败弹层、问题保留、重新提交 |
 | 宠物形象策略 | `frontend/apps/agent-web/tests/pet-companions.test.ts` 与 `FigmaShell.test.ts`：`lets the user choose a companion and persists the selected mode` | 本地日期轮换、每日随机稳定、异常存储回退、固定角色与名册交互 |
@@ -49,8 +49,9 @@ corepack pnpm exec playwright test apps/agent-web/tests/workbench.spec.ts \
 
 ## UI 子 agent 真实验收
 
-先在 OpenCode Manager/worker 启动配置中设置可达的 `UITEST6_BASE_URL`，再重启 Manager 和当前
-用户 OpenCode 进程。在对话中直接 `@test-execution-ui`，提供被测系统环境和一行案例：
+先由超级管理员在“系统管理 → 通用参数管理”把 `UITEST_BASE_URL` 设置为 worker 可达的独立 UI
+平台地址；无需重启 Manager 或当前用户 OpenCode 进程。在对话中直接 `@test-execution-ui`，提供被测
+系统环境和一行案例：
 
 ```text
 被测系统环境：F-COSS SIT，https://sit.example.test
@@ -65,5 +66,7 @@ corepack pnpm exec playwright test apps/agent-web/tests/workbench.spec.ts \
 必须返回 `BLOCKED` 且不得出现 `ui_test_execute` 调用。
 
 验收必须同时确认：环境文本与四列案例均原样到达；子 agent 只调用一次 `ui_test_execute`；Tool
-直连 `uitest6` 且只有一个 POST；后续请求均查询同一个 `executionId`；终态与 `uitest6` 一致。没有可用的 `uitest6` 真实环境时只能报告
+先读取最新地址，再直连独立 UI 平台且只有一个创建执行的 POST；后续请求均查询同一个 `executionId`；
+终态与独立 UI 平台一致。修改通用参数后还需记录 OpenCode PID，确认不重启同一进程时下一次调用已命中
+新地址。没有可用的独立 UI 平台真实环境时只能报告
 契约测试通过，不能声称真实浏览器自动化已执行。

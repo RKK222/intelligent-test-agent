@@ -926,6 +926,12 @@ XXL MySQL 的独立 migration `xxl-job/db/migration/V5__schedule_night_execution
 
 该参数由 `SUPER_ADMIN` 通过既有通用参数管理 API 修改；服务端只接受正整数。每个 Java 实例启动时从数据库加载到 `NightExecutionCapacityRegistry`，缺失或非法时启动失败；修改后通过既有 `common-parameter.refresh-requested` 广播触发各实例查库并原子替换内存快照，广播 payload 不携带参数值。运行中刷新失败保留上一有效值。调低容量不删除既有任务或容量占位，只阻止已达到新上限的时段继续预约；调高后后续查询和占位立即使用新值。旧部署容量环境变量不再读取。
 
+## V20260801093854 / V20260801104000 UI 平台地址通用参数
+
+`V20260801093854__seed_ui_test_platform_base_url.sql` 是已经执行过的早期种子 migration，SHA-256 固定为 `aa08c1cedc64bd0b8dd230227f9dcb7a0ef6a33572473d8a14795f5f6b93e6e5`，原始参数名和业务 ID 必须保持字节不变，避免破坏既有 Flyway checksum。`V20260801104000__rename_ui_test_platform_parameter.sql` 的 SHA-256 固定为 `0e306671eda36a9bb8881cf3d85b4e87b5373e00770dcd6503693b11d008e45c`；它在后一版本把该行迁移为 `UITEST_BASE_URL/all` 和 `param_uitest_base_url_all`，保留原参数值、创建时间、可编辑状态及已有修改日志关联。新环境顺序执行两条 migration 后也只保留新名称，两条已执行文件均由 `FlywayMigrationNamingTest` 锁定原始字节。
+
+`UITEST_BASE_URL` 初始值为 `UNCONFIGURED`，由超级管理员在通用参数管理页面修改。它是生产 UI 自动化调用所需的系统参数，不是测试或个人环境数据。消费方每次调用前直接从数据库读取，不写入 JVM 或 Redis 缓存；地址修改后下一次调用即时生效。管理 API 只接受无 user-info、query 和 fragment 的 HTTP/HTTPS 地址，或显式停用值 `UNCONFIGURED`。
+
 ## V20260625192100 scheduler 停止字段与状态字典
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260625192100__extend_scheduler_management_stop_and_dicts.sql` 是旧 scheduler 管理页的兼容 schema。迁移后字段和字典保留历史，不再由已作废的管理 API 写入：

@@ -882,7 +882,7 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 
 ## 通用参数管理 API
 
-通用参数（`common_parameters`）保存跨模块共享的稳定运行参数（如 `SYS_DATA_ROOT_DIR`、`OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PUBLIC_AGENT_GIT_URL` 等路径与 Git 参数）。本接口只允许已认证用户且角色包含 `SUPER_ADMIN` 访问：未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`，非法平台值或空参数值返回 `VALIDATION_ERROR`，参数不存在返回 `NOT_FOUND`。**接口仅提供列表查询与「仅修改 value」的更新，不提供新增/删除**，保证通用参数集合稳定。
+通用参数（`common_parameters`）保存跨模块共享的稳定运行参数（如 `SYS_DATA_ROOT_DIR`、`OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PUBLIC_AGENT_GIT_URL`、`UITEST_BASE_URL` 等路径、Git 与外部平台地址参数）。管理接口只允许已认证用户且角色包含 `SUPER_ADMIN` 访问：未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`，非法平台值或空参数值返回 `VALIDATION_ERROR`，参数不存在返回 `NOT_FOUND`。**接口仅提供列表查询与「仅修改 value」的更新，不提供新增/删除**，保证通用参数集合稳定。
 
 公共 Agent Git 地址只保留 `OPENCODE_PUBLIC_AGENT_GIT_URL` 一个参数。前端通用参数页复用 `GET /api/internal/platform/configuration-management/repository-deployment-options` 展示当前默认部署模式，修改弹窗允许选择外部/内部模式；内部模式输入框展示当前管理员 `ssh://{unifiedAuthId}@` 前缀，但实际只保存 `host[:port]/path`。Java 后端按该参数保存值形态判断：完整 SSH/HTTPS Git URL 直接使用，`host[:port]/path` 片段在公共 Agent Git 操作时按当前管理员统一认证号拼接 `ssh://{unifiedAuthId}@...`，不通过新增 `OPENCODE_PUBLIC_AGENT_GIT_URL_INTERNAL` 参数选择。
 
@@ -892,7 +892,7 @@ Base URL：`/api/internal/platform/configuration-management/common-parameters`
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| `GET` | `/` | 分页查询全部通用参数（原始值），可按平台过滤。 |
+| `GET` | `/` | 分页查询全部通用参数（原始值），可按变量名和平台过滤。 |
 | `PATCH` | `/{parameterId}` | 仅更新指定参数的 `value`，不修改其他字段。 |
 | `GET` | `/{parameterId}/change-logs` | 查询指定参数的修改历史记录。 |
 
@@ -900,6 +900,7 @@ Base URL：`/api/internal/platform/configuration-management/common-parameters`
 
 | 参数 | 说明 |
 |---|---|
+| `englishName` | 可选变量名过滤；忽略大小写并按包含关系匹配，缺失或空白表示不过滤。 |
 | `platform` | 可选平台过滤值：`windows`、`linux`、`macos`、`all`；缺失表示不过滤。非法值返回 `VALIDATION_ERROR`。 |
 | `page` | 页码，默认 `1`。 |
 | `size` | 分页大小，默认 `50`，上限沿用平台 `PageRequest` 的 `200`。 |
@@ -934,7 +935,7 @@ Base URL：`/api/internal/platform/configuration-management/common-parameters`
 }
 ```
 
-`value` 为空或空白返回 `VALIDATION_ERROR`；`NIGHT_EXECUTION_SLOT_CAPACITY` 还必须是 `int` 范围内的正整数，服务端在写库前规范化并校验，非法值不记录修改日志、不发布刷新事件；`parameterId` 不存在返回 `NOT_FOUND`；只读参数（`editable=false`）返回 `VALIDATION_ERROR`「该通用参数为只读参数，修改后将影响系统正常运行」。成功返回更新后的 `CommonParameterResponse`（单条，非分页）。响应中的 `parameterId` 为业务 ID（如 `param_opencode_app_workspace_root_linux`），不暴露数据库代理主键。修改成功后自动记录修改日志，包含修改前后的值、修改用户和修改时间。
+`value` 为空或空白返回 `VALIDATION_ERROR`；`NIGHT_EXECUTION_SLOT_CAPACITY` 还必须是 `int` 范围内的正整数。`UITEST_BASE_URL` 只接受无 user-info、query 和 fragment 的 HTTP/HTTPS 地址，写入时去除首尾空白和末尾 `/`；`UNCONFIGURED` 是显式停用值。服务端在写库前完成规范化和校验，非法值不记录修改日志、不发布刷新事件；`parameterId` 不存在返回 `NOT_FOUND`；只读参数（`editable=false`）返回 `VALIDATION_ERROR`「该通用参数为只读参数，修改后将影响系统正常运行」。成功返回更新后的 `CommonParameterResponse`（单条，非分页）。响应中的 `parameterId` 为业务 ID（如 `param_opencode_app_workspace_root_linux`），不暴露数据库代理主键。修改成功后自动记录修改日志，包含修改前后的值、修改用户和修改时间。
 
 兼容性：新增接口，对既有按 `findByEnglishNameAndPlatform` 读取的消费方无影响。
 
@@ -956,6 +957,25 @@ Base URL：`/api/internal/platform/configuration-management/common-parameters`
 ```
 
 `oldValue` 为修改前的值，首次修改或历史数据迁移时可能为 `null`；`newValue` 为修改后的值。`changedByUserId` 和 `changedByUsername` 为修改用户的 ID 和用户名，static token 或本地开发场景可能为 `null`。该接口仅用于审计追溯，不产生 RunEvent/SSE。
+
+### UI Tool 平台地址查询
+
+`GET /api/internal/agent/opencode/ui-test-tool/config` 仅供 `ui_test_execute` 从受信任 OpenCode worker 内网直连同节点 Java。该接口不使用应用层凭据，精确路径由通用 API Token 过滤器放行；公共部署的 Nginx 必须在通用 `/api/` 代理之前对该路径直接返回 `404`，不能暴露给浏览器入口。Java 每次请求都通过 `CommonParameterValues` 从数据库读取 `UITEST_BASE_URL/all`，不建立 JVM、Redis、Manager 或 OpenCode 环境缓存，也不代理任何 UI 平台请求。
+
+配置有效时：
+
+```json
+{
+  "success": true,
+  "data": {
+    "configured": true,
+    "baseUrl": "http://uitest.internal:7788"
+  },
+  "traceId": "trace_..."
+}
+```
+
+参数缺失或值为 `UNCONFIGURED` 时仍返回 HTTP 200，`data` 为 `{"configured":false,"baseUrl":null}`，由 Tool 中断并提示用户联系超级管理员配置。数据库中存在绕过管理 API 写入的非法地址时返回安全的 `OPENCODE_UNAVAILABLE`，不回显原值。该接口不接受 query、body、用户 Token、Tool Token 或 UI 平台 Token；相邻路径不在过滤器例外范围内。
 
 ### JVM 内存通用参数查询与手工刷新
 

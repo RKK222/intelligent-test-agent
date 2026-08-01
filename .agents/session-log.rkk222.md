@@ -4406,3 +4406,30 @@
 ### Result
 
 - 顶部与左下角现在共享同一套应用源码/测试工作空间交互，不新增 API、数据库、RunEvent/SSE 或 OpenCode 调用，也未修改对话逻辑、环境配置和 generated SDK。
+
+## 2026-08-01 - UI 平台地址改为实时通用参数并补变量名搜索
+
+### Why
+
+- 用户要求 UI 执行平台地址可由超级管理员在线修改，下一次 UI 自动化调用即时生效且不重启 OpenCode；不增加凭据，由 Nginx/受信任网络控制访问。
+- 用户进一步要求产品和配置名不再带 `6`，移除页面上的即时生效/`UNCONFIGURED` 说明文案，并在通用参数页增加“变量名”搜索框。
+
+### What
+
+- 新增 `UITEST_BASE_URL/all` 数据库直读服务和窄字段配置 API；Tool 每次先用既有 `TEST_AGENT_PLATFORM_BASE_URL` 读取 `{configured, baseUrl}`，再直连独立 UI 平台。Java 不代理 UI 请求，两段请求都不增加凭据；公共 Nginx 对配置接口精确返回 404，相邻 Java 路径仍由既有 API Token 过滤器保护。
+- 通用参数列表增加忽略大小写的变量名包含过滤；前端增加“变量名”搜索/重置，UI 参数使用独立地址 placeholder，并移除额外运行机制提示。公共 Agent、部署模板、HTTP/事件/数据库/安全/验收文档统一使用不带版本号的 UI 平台口径，报告地址非空时要求 Agent 返回可点击 Markdown 链接。
+- 早期种子 migration 已在本地执行，保留其原始字节；新增后续 migration 把参数和审计引用迁移为 `UITEST_BASE_URL`。两条已执行 migration 的 SHA-256 分别锁定为 `aa08c1cedc64bd0b8dd230227f9dcb7a0ef6a33572473d8a14795f5f6b93e6e5`、`0e306671eda36a9bb8881cf3d85b4e87b5373e00770dcd6503693b11d008e45c`。
+- 独立 UI 仓库修正当前 browser-use Ollama 适配器的 `host/ollama_options` 参数，并让启动/执行异常的实际原因进入安全长度受限的终态结果；源码仍位于当前项目之外。
+
+### How
+
+- 后端配置/管理/API/migration 定向 Maven 测试通过；前端通用参数组件 12/12、类型检查和生产构建通过；公共 Tool Bun 构建、Nginx 渲染验证、Shell 语法、migration 源码与 persistence JAR 字节对比均通过。独立 UI 本次相关 pytest 8/8、compileall 和 Ruff F 级检查通过；该仓库整文件运行仍有 2 个与本次无关的旧 `task_id/get_info` 断言失败。
+- 使用未修改的 `.env.test` 执行 `./restart-dev-services.sh --profile test --env-file .env.test`，backend readiness 为 `UP`、前端 3000 返回 200、OpenCode 监听 4104；真实 PostgreSQL 顺序执行两条 UI 参数 migration。
+- 从用户可见 `test-execution-agent` 发起百度四列案例，子 Agent 只创建一次 `uiexec_7123f836f2254600b7d00dac2bc7f267`，环境和四列内容完整到达，后续只轮询同一 ID，报告接口返回 200。链路取得 `FAILED` 真实终态：本地 `qwen3:1.7b` 在已输入 `OpenAI` 后继续漂移，生成无效选择器 `[index>50]` 并被 BrowserUse Judge 判失败；没有自动重试或绕过平台。
+- 验收后停止临时 UI 进程并确认 7788 无监听；把本地测试参数恢复为 `UNCONFIGURED`，配置 API 立即返回 `configured=false/baseUrl=null`，前后 OpenCode PID 均为 14817，证明无需重启即可读取新值。
+
+### Result
+
+- 公共 Agent 仓库 `master` 已推送 `8b81dc4`，独立 UI 仓库 `wr` 已推送 `9248294b`；当前仓库不包含独立 UI 项目源码。
+- 新链路已完成真实对话、动态配置、单次提交、终态失败原因和可点击报告的端到端验证；本次百度案例本身未通过，原因在独立 UI 平台的小模型执行/判定质量，不能表述为正向案例成功。
+- 新增一个内部 HTTP 配置接口、一个列表 query 参数和两条 Flyway migration；不新增 RunEvent/SSE、关系型业务 SQL、generated SDK、OpenCode 源码或凭据。企业发布前仍需对照目标库 `flyway_schema_history` 做完整基线升级验证。

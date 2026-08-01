@@ -65,11 +65,18 @@ class CommonParameterManagementApplicationServiceTest {
 
         PageResponse<CommonParameterResponse> allSecondPage = service.find(new CommonParameterFilter(null), new PageRequest(2, 2));
         assertThat(allSecondPage.items()).hasSize(2);
+
+        PageResponse<CommonParameterResponse> namePage = service.find(
+                new CommonParameterFilter(null, "workspace"), new PageRequest(1, 10));
+        assertThat(namePage.total()).isEqualTo(3);
+        assertThat(namePage.items()).extracting(CommonParameterResponse::englishName)
+                .containsOnly("OPENCODE_WORKSPACE_ROOT");
     }
 
     @Test
     void parsePlatformFilterAcceptsMacosAndRejectsUnknownValue() {
         assertThat(CommonParameterFilter.parse("macos").platform()).isEqualTo(ParameterPlatform.MACOS);
+        assertThat(CommonParameterFilter.parse(null, "  UiTest  ").englishName()).isEqualTo("uitest");
         assertThatThrownBy(() -> CommonParameterFilter.parse("solaris"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
@@ -182,6 +189,62 @@ class CommonParameterManagementApplicationServiceTest {
         assertThat(response.editable()).isTrue();
         verify(repository).updateValue("param_opencode_public_agent_git_url_all", "https://new.git", UPDATED_AT);
         verify(publisher).publishEvent(any(CommonParameterUpdatedEvent.class));
+    }
+
+    @Test
+    void updateValueNormalizesUiTestPlatformAddress() {
+        CommonParameterRepository repository = mock(CommonParameterRepository.class);
+        CommonParameter existing = parameter(
+                "param_uitest_base_url_all",
+                UiTestPlatformConfigurationService.PARAMETER_ENGLISH_NAME,
+                UiTestPlatformConfigurationService.UNCONFIGURED,
+                ParameterPlatform.ALL,
+                true);
+        CommonParameter updated = existing.withValue("https://ui.example.test:7788", UPDATED_AT);
+        when(repository.findByParameterId(existing.parameterId()))
+                .thenReturn(Optional.of(existing))
+                .thenReturn(Optional.of(updated));
+        when(repository.updateValue(existing.parameterId(), "https://ui.example.test:7788", UPDATED_AT)).thenReturn(1);
+        CommonParameterChangeLogRepository changeLogRepository = mock(CommonParameterChangeLogRepository.class);
+        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        CommonParameterManagementApplicationService service = newService(repository, changeLogRepository, publisher);
+
+        CommonParameterResponse response = service.updateValue(
+                existing.parameterId(), " https://ui.example.test:7788/ ",
+                "trace_ui", "usr_test", "testuser");
+
+        assertThat(response.parameterValue()).isEqualTo("https://ui.example.test:7788");
+        verify(repository).updateValue(existing.parameterId(), "https://ui.example.test:7788", UPDATED_AT);
+        verify(changeLogRepository).save(any(CommonParameterChangeLog.class));
+        verify(publisher).publishEvent(any(CommonParameterUpdatedEvent.class));
+    }
+
+    @Test
+    void updateValueRejectsInvalidUiTestPlatformAddressBeforeWriting() {
+        for (String invalidValue : List.of(
+                "ftp://ui.example.test", "http://user:secret@ui.example.test", "http://ui.example.test?x=1")) {
+            CommonParameterRepository repository = mock(CommonParameterRepository.class);
+            CommonParameter existing = parameter(
+                    "param_uitest_base_url_all",
+                    UiTestPlatformConfigurationService.PARAMETER_ENGLISH_NAME,
+                    UiTestPlatformConfigurationService.UNCONFIGURED,
+                    ParameterPlatform.ALL,
+                    true);
+            when(repository.findByParameterId(existing.parameterId())).thenReturn(Optional.of(existing));
+            CommonParameterChangeLogRepository changeLogRepository = mock(CommonParameterChangeLogRepository.class);
+            ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+            CommonParameterManagementApplicationService service = newService(repository, changeLogRepository, publisher);
+
+            assertThatThrownBy(() -> service.updateValue(
+                            existing.parameterId(), invalidValue, "trace_ui", "usr_test", "testuser"))
+                    .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR);
+                        assertThat(exception.getMessage()).doesNotContain(invalidValue);
+                    });
+            verify(repository, org.mockito.Mockito.never()).updateValue(any(), any(), any());
+            verify(changeLogRepository, org.mockito.Mockito.never()).save(any());
+            verify(publisher, org.mockito.Mockito.never()).publishEvent(any());
+        }
     }
 
     @Test

@@ -108,6 +108,22 @@ class CommonParameterManagementControllerTest {
     }
 
     @Test
+    void englishNameCanBeQueriedIgnoringCase() {
+        CommonParameterManagementApplicationService service = org.mockito.Mockito.mock(CommonParameterManagementApplicationService.class);
+        when(service.find(eq(new CommonParameterFilter(null, "uitest")), eq(new PageRequest(1, 50))))
+                .thenReturn(new PageResponse<>(List.of(response("http://ui.internal", "all")), 1, 50, 1));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.get()
+                .uri("/api/internal/platform/configuration-management/common-parameters?englishName=UiTest")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.total").isEqualTo(1);
+    }
+
+    @Test
     void invalidPlatformUsesUnifiedValidationError() {
         CommonParameterManagementApplicationService service = org.mockito.Mockito.mock(CommonParameterManagementApplicationService.class);
         WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));

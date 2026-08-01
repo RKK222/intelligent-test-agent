@@ -30,6 +30,14 @@ class FlywayMigrationNamingTest {
             "777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2";
     private static final String APPLIED_TOOLBOX_IDEMPOTENT_SHA256 =
             "e8b21da5fb7a8c286b86ded9c0d12691c7e8b6e5d170dc16c5ff76a044bdcdc8";
+    private static final String APPLIED_UI_TEST_PLATFORM_SEED_MIGRATION =
+            "V20260801093854__seed_ui_test_platform_base_url.sql";
+    private static final String APPLIED_UI_TEST_PLATFORM_SEED_SHA256 =
+            "aa08c1cedc64bd0b8dd230227f9dcb7a0ef6a33572473d8a14795f5f6b93e6e5";
+    private static final String APPLIED_UI_TEST_PLATFORM_RENAME_MIGRATION =
+            "V20260801104000__rename_ui_test_platform_parameter.sql";
+    private static final String APPLIED_UI_TEST_PLATFORM_RENAME_SHA256 =
+            "0e306671eda36a9bb8881cf3d85b4e87b5373e00770dcd6503693b11d008e45c";
     private static final List<String> APPLIED_LEGACY_SEED_MIGRATIONS = List.of(
             "V10__seed_fcoss_application.sql",
             "V13__seed_fcoss_more_workspaces.sql");
@@ -90,6 +98,19 @@ class FlywayMigrationNamingTest {
                 APPLIED_TOOLBOX_IDEMPOTENT_SHA256);
     }
 
+    @Test
+    void appliedUiTestPlatformMigrationsRemainByteExact()
+            throws IOException, NoSuchAlgorithmException {
+        assertMigrationSha256(
+                "db/migration",
+                APPLIED_UI_TEST_PLATFORM_SEED_MIGRATION,
+                APPLIED_UI_TEST_PLATFORM_SEED_SHA256);
+        assertMigrationSha256(
+                "db/migration",
+                APPLIED_UI_TEST_PLATFORM_RENAME_MIGRATION,
+                APPLIED_UI_TEST_PLATFORM_RENAME_SHA256);
+    }
+
     private static void assertMigrationSha256(
             String relativeDirectory,
             String migrationFile,
@@ -99,7 +120,7 @@ class FlywayMigrationNamingTest {
         String sha256 = HexFormat.of().formatHex(
                 MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(migration)));
         assertThat(sha256)
-                .as("Applied toolbox migration must keep its original Flyway checksum content: %s", migration)
+                .as("Applied migration must keep its original Flyway checksum content: %s", migration)
                 .isEqualTo(expectedSha256);
     }
 

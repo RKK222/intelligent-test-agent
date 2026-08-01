@@ -69,6 +69,8 @@ grep -Fq 'server 122.233.30.4:18121 max_fails=2 fail_timeout=10s;' "${CONF_PATH}
 grep -Fq 'server 122.233.30.114:18121 backup max_fails=2 fail_timeout=10s;' "${CONF_PATH}"
 grep -Fq 'location ^~ /toolbox/apps/it-tools/ {' "${CONF_PATH}"
 grep -Fq 'location ^~ /toolbox/apps/omni-tools/ {' "${CONF_PATH}"
+grep -Fq 'location = /api/internal/agent/opencode/ui-test-tool/config {' "${CONF_PATH}"
+grep -A1 -F 'location = /api/internal/agent/opencode/ui-test-tool/config {' "${CONF_PATH}" | grep -Fq 'return 404;'
 test "$(grep -nF 'location ^~ /toolbox/apps/it-tools/' "${CONF_PATH}" | cut -d: -f1)" -lt \
   "$(grep -nF 'location / {' "${CONF_PATH}" | cut -d: -f1)"
 test "$(grep -Fc 'max_fails=3' "${CONF_PATH}")" = 2

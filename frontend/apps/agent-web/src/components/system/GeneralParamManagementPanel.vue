@@ -15,6 +15,7 @@ import type {
 } from "@test-agent/shared-types";
 
 const PUBLIC_AGENT_GIT_PARAM = "OPENCODE_PUBLIC_AGENT_GIT_URL";
+const UI_TEST_PLATFORM_BASE_URL_PARAM = "UITEST_BASE_URL";
 const EXTERNAL_DEPLOYMENT_MODE = "EXTERNAL";
 const INTERNAL_DEPLOYMENT_MODE = "INTERNAL";
 const DEFAULT_REPOSITORY_DEPLOYMENT_OPTIONS: RepositoryDeploymentOptions = {
@@ -38,6 +39,8 @@ const page = ref(1);
 const size = ref(50);
 const draftPlatform = ref("");
 const activePlatform = ref("");
+const draftEnglishName = ref("");
+const activeEnglishName = ref("");
 
 // 编辑通用参数相关状态
 const editDialogOpen = ref(false);
@@ -58,12 +61,19 @@ const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_A
 
 const params = computed(() => ({
   platform: activePlatform.value || undefined,
+  englishName: activeEnglishName.value || undefined,
   page: page.value,
   size: size.value
 }));
 
 const query = useQuery({
-  queryKey: computed(() => ["common-parameters", page.value, size.value, activePlatform.value]),
+  queryKey: computed(() => [
+    "common-parameters",
+    page.value,
+    size.value,
+    activePlatform.value,
+    activeEnglishName.value
+  ]),
   enabled: () => hasSuperAdmin.value,
   retry: false,
   queryFn: () => api.listGeneralParameters(params.value)
@@ -270,12 +280,15 @@ function refresh() {
 
 function applyFilter() {
   activePlatform.value = draftPlatform.value;
+  activeEnglishName.value = draftEnglishName.value.trim();
   page.value = 1;
 }
 
 function clearFilter() {
   draftPlatform.value = "";
   activePlatform.value = "";
+  draftEnglishName.value = "";
+  activeEnglishName.value = "";
   page.value = 1;
 }
 
@@ -304,6 +317,16 @@ function isPublicAgentGitParam(param?: GeneralParameter | null) {
 
 function publicAgentGitHint(param?: GeneralParameter | null) {
   return isPublicAgentGitParam(param) ? publicAgentGitValueRule.value : "";
+}
+
+function isUiTestPlatformBaseUrlParam(param?: GeneralParameter | null) {
+  return param?.englishName === UI_TEST_PLATFORM_BASE_URL_PARAM;
+}
+
+function editValuePlaceholder(param?: GeneralParameter | null) {
+  if (isUiTestPlatformBaseUrlParam(param)) return "http://uitest-host:7788";
+  if (isPublicAgentGitParam(param)) return "Git URL";
+  return "请输入参数值";
 }
 
 function isInternalPublicAgentGitValue(value: string) {
@@ -446,6 +469,14 @@ function formatError(error: unknown) {
         <el-button size="small" :icon="Refresh" :loading="isFetching" @click="refresh">刷新</el-button>
         <el-button size="small" :icon="Monitor" plain @click="openMemoryValuesDrawer">查看内存加载值</el-button>
         <div class="ta-common-param-filter">
+          <el-input
+            v-model="draftEnglishName"
+            placeholder="变量名"
+            size="small"
+            clearable
+            style="width: 220px"
+            @keyup.enter="applyFilter"
+          />
           <el-select v-model="draftPlatform" placeholder="平台" size="small" clearable filterable style="width: 140px" @change="applyFilter">
             <el-option label="全部" value="" />
             <el-option label="linux" value="linux" />
@@ -453,6 +484,7 @@ function formatError(error: unknown) {
             <el-option label="macos" value="macos" />
             <el-option label="all" value="all" />
           </el-select>
+          <el-button size="small" @click="applyFilter">搜索</el-button>
           <el-button size="small" text @click="clearFilter">重置</el-button>
         </div>
         <span class="ta-common-param-toolbar-note">通用参数为系统级配置，仅可修改参数值，不可新增或删除；标记为只读的参数不可在前端修改。</span>
@@ -574,7 +606,7 @@ function formatError(error: unknown) {
                 <el-input
                   v-else
                   v-model="editingValue"
-                  placeholder="Git URL"
+                  :placeholder="editValuePlaceholder(editingParam)"
                   :disabled="saving || !editingParam?.editable"
                 />
                 <el-tag v-if="editingParam && !editingParam.editable" size="small" type="info">只读参数</el-tag>

@@ -19,6 +19,7 @@ API 定义包，承载 HTTP/SSE/WebSocket 入口、请求响应 DTO、统一响�
 - `web.platform.UserOpencodeBackendRoutingWebFilter` / `UserOpencodeBackendRoutingService`：用户已有 ACTIVE opencode binding 属于远端服务器时，在 Controller 前把用户进程状态、初始化、Run 启动和 opencode runtime 代理请求转发到 binding 所属服务器 Java；透传用户 Authorization/traceId/body，并用内部路由头防止循环。
 - `web.platform.RuntimeManagementController`：超级管理员运行管理入口，校验 `SUPER_ADMIN` 后把筛选、分页、命令参数和 traceId 交给 runtime 查询/命令服务；manager 进程明细可空透传 `unifiedAuthId/managerStatus`，旧载荷缺字段保持兼容，UCID 不进入普通用户响应或日志。API 层不实现 opencode server 启动、停止、状态查询或健康确认。
 - `web.platform.CommonParameterMemoryController` / `CommonParameterMemoryBackendRoutingService`：超级管理员显式 JVM 内存参数查询与手工刷新入口；按 `backendProcessId` 精确聚合全部或单个在线 Java，跨 Java 复用公共 resolver/forwarder，部分失败保留逐进程结果。
+- `web.platform.UiTestToolConfigController`：仅供受信任 OpenCode worker 内网直连的 UI 平台地址查询入口；不使用应用层凭据，只返回 `configured/baseUrl`，公共 Nginx 必须精确拒绝该路径。
 - `web.platform.NightExecutionController`、`web.platform.NightExecutionDtos`：当前用户夜间时段和双模式任务创建/查询/改期/取消/失败卡关闭入口；`ADMIN_CUSTOM` 创建/改期传递后端认证的 `SUPER_ADMIN` 权限事实，响应返回调度模式但完整 Run 输入不进入 DTO。
 - `web.platform.NightExecutionInternalDispatchController`、`web.platform.HttpNightExecutionDispatchGateway`：标准 XXL token 保护的目标 Java 批量分发入口，以及复用公共 Java resolver/forwarder 的系统调用；先按目标服务器选出精确 backendProcessId，避免同服务器多 JVM 误走当前进程，跨 Java 只传固定目标和最多 50 个任务 ID。
 - `web.platform.UserManagementController`：超级管理员用户管理入口，校验 `SUPER_ADMIN` 后把用户查询、创建和单角色调整请求交给 system-management 服务。
@@ -64,6 +65,7 @@ API 定义包，承载 HTTP/SSE/WebSocket 入口、请求响应 DTO、统一响�
 - RunEvent SSE 测试必须覆盖 Last-Event-ID/query resume、opencode projected messages snapshot 合流、按 Run 生产 Java 路由、流式转发 header/query 保留和目标缺失时本机 DB replay 降级；Session API 测试必须覆盖 active-run 和新增 token/cost DTO 字段。
 - XXL 票据 API 测试必须覆盖 `SUPER_ADMIN`、非超级管理员/匿名拒绝、统一响应和 ticket 不进入 URL；旧 scheduler 管理入口测试必须覆盖任意后缀 `410 API_GONE`。
 - JVM 内存通用参数 API 测试必须覆盖四个 `SUPER_ADMIN` 接口、同服务器多 Java、当前/远端进程、部分失败、离线、超时和防二次转发。
+- UI Tool 配置 API 测试必须覆盖无凭据窄字段响应、精确 API Token 过滤器例外和相邻路径不放行。
 - 定时任务 API 测试必须覆盖认证、owner 隔离、旧请求默认夜间模式、超级管理员自定义模式权限、输入校验、完整输入不回显、写入口用户 binding 路由和统一错误格式；内部批量入口还必须覆盖精确 token、固定目标、同服务器多 JVM 的 backendProcessId 选择、50 条上限、trace/防循环 header 和逐任务结果。
 - 用户管理 API 测试必须覆盖 `SUPER_ADMIN` 查询、创建、角色调整、角色列表和非超级管理员/匿名拒绝。
 - Configuration 管理 API 测试必须覆盖代码库英文名 DTO、创建应用工作空间的用户 opencode 服务器透传、进度查询鉴权和统一错误格式。

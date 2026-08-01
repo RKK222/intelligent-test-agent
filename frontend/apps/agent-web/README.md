@@ -107,7 +107,7 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 - activity rail 中仅 `SUPER_ADMIN` 显示“系统管理”入口；“定时任务管理”通过 `createXxlJobSsoTicket()` 申请一次性票据，再用隐藏表单 POST 到同源 XXL Admin iframe。票据不进入 URL，进入和刷新都重新签发；iframe 仅在 Admin 成功页发回同源 `ready` 握手后进入就绪态，普通 load/502 保持故障超时。真实 XXL shell 会启用白底蓝色选中态的单行横向导航，映射账号在右侧只读展示，窄屏菜单横向滚动；SSO/错误页不会被装饰。任务启停、Cron、手动触发、停止和日志均使用 XXL 原生页面；平台不再渲染旧 scheduler 任务表。运行管理、通用参数、配置管理和运营分析继续使用各自既有平台 API 与交互。
 - 运行管理后端趋势图现按“服务器 CPU / Load”“服务器内存 / Swap / 磁盘”“Java 进程 CPU”“Java 进程内存 / RSS”“JVM Heap / Non-Heap / Direct”“GC / 线程 / FD”分组展示；旧响应缺失新增字段时表格显示 `-` 或回退旧字段，图表保留断点。
 - 通用参数管理中的公共 Git 参数 `OPENCODE_PUBLIC_AGENT_GIT_URL` 额外复用 `getRepositoryDeploymentOptions()` 显示当前默认部署模式，修改弹窗可选择外部/内部模式，不展示第二个内部地址参数；内部模式输入框默认展示 `ssh://{unifiedAuthId}@` 前缀但只保存 `host[:port]/path`，外部模式保存用户输入的完整 Git URL。
-- 通用参数 `UITEST6_BASE_URL` 在列表和编辑弹窗明确提示“下一次 UI 自动化调用即时生效，无需重启”，并使用独立 HTTP 地址 placeholder；`UNCONFIGURED` 表示停用。地址格式由后端统一校验，前端不维护第二套 URL 规则。
+- 通用参数管理支持按变量名和平台筛选；`UITEST_BASE_URL` 使用独立 HTTP 地址 placeholder，地址格式由后端统一校验，前端不展示额外运行机制说明，也不维护第二套 URL 规则。
 - 通用参数内存值抽屉不轮询、不展示未注册参数；源值与内存值仅对 `SUPER_ADMIN` 可见。全部/单 Java 刷新只调用 additive memory API，不写数据库参数值或修改历史。
 - 设置模态"应用人员管理"tab 的"添加成员"区使用 `el-autocomplete` 懒加载搜索：`trigger-on-focus="false"`，初始进入/聚焦输入框都不查后端；只有键入内容时（Element Plus 自带 300ms 防抖）才异步触发 `/configuration-management/users?keyword=`，下拉展示按 `userId` / `unifiedAuthId` / `username` 任一字段大小写不敏感 LIKE 命中的候选（每项单行展示 `userId · userName`）；选中后主按钮文案由"搜索"切换为"添加"，再点击即把该用户加入当前应用并刷新成员列表；"搜索"按钮在空输入时禁用，作为精确 userId 单条命中场景的兜底。
 - 应用与版本库是多对多关系，一个应用可连续关联多个不同类型的版本库；关联下拉只展示当前应用尚未关联的版本库，关联成功或切换应用后清空旧选择，避免重复提交同一条幂等关系造成“只能关联一个”的误解。

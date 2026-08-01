@@ -34,6 +34,8 @@ public class ApiTokenWebFilter implements WebFilter {
             "/api/internal/platform/opencode-runtime/night-execution/internal-dispatch";
     private static final String WORKSPACE_GIT_TOOL_PATH =
             "/api/internal/agent/opencode/workspace-git-tool";
+    private static final String UI_TEST_TOOL_CONFIG_PATH =
+            "/api/internal/agent/opencode/ui-test-tool/config";
 
     private final String apiToken;
     private final ObjectMapper objectMapper;
@@ -65,6 +67,7 @@ public class ApiTokenWebFilter implements WebFilter {
                 || path.startsWith(INTERNAL_MODEL_PROXY_PATH)
                 || path.equals(NIGHT_EXECUTION_INTERNAL_DISPATCH_PATH)
                 || path.equals(WORKSPACE_GIT_TOOL_PATH)
+                || path.equals(UI_TEST_TOOL_CONFIG_PATH)
                 || apiToken == null) {
             return chain.filter(exchange);
         }

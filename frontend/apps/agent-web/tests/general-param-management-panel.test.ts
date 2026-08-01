@@ -43,6 +43,17 @@ const editableParameter: GeneralParameter = {
   updatedAt: "2026-06-29T00:00:00Z"
 };
 
+const uiTestPlatformParameter: GeneralParameter = {
+  parameterId: "param_uitest_base_url_all",
+  englishName: "UITEST_BASE_URL",
+  chineseName: "UI测试执行平台地址",
+  parameterValue: "UNCONFIGURED",
+  platform: "all",
+  editable: true,
+  createdAt: "2026-08-01T00:00:00Z",
+  updatedAt: "2026-08-01T00:00:00Z"
+};
+
 const externalDeploymentOptions: RepositoryDeploymentOptions = {
   defaultDeploymentMode: "EXTERNAL",
   internalSshPrefix: "ssh://AUTH_1@",
@@ -123,7 +134,11 @@ function renderPanel(backendApi: BackendApiClient) {
           emits: ["update:modelValue", "close"],
           template: `<section v-if="modelValue" role="dialog" :aria-label="title"><slot /></section>`
         },
-        ElInput: { template: `<input />` },
+        ElInput: {
+          props: ["modelValue", "placeholder", "disabled"],
+          emits: ["update:modelValue"],
+          template: `<input :value="modelValue" :placeholder="placeholder" :disabled="disabled" @input="$emit('update:modelValue', $event.target.value)" />`
+        },
         ElForm: { template: `<form><slot /></form>` },
         ElFormItem: { template: `<div><slot /></div>` },
         ElEmpty: { props: ["description"], template: `<div>{{ description }}<slot /></div>` },
@@ -155,6 +170,7 @@ describe("general parameter management panel", () => {
 
     await waitFor(() => expect(listGeneralParameters).toHaveBeenCalledWith({
       platform: undefined,
+      englishName: undefined,
       page: 1,
       size: 50
     }));
@@ -164,6 +180,7 @@ describe("general parameter management panel", () => {
 
     await waitFor(() => expect(listGeneralParameters).toHaveBeenCalledWith({
       platform: "macos",
+      englishName: undefined,
       page: 1,
       size: 50
     }));
@@ -338,6 +355,59 @@ describe("general parameter management panel", () => {
 
     expect(view.queryByText("只读参数")).toBeNull();
     expect(view.queryByText(/修改后将影响系统正常运行/)).toBeNull();
+    view.queryClient.clear();
+  });
+
+  it("edits the UI platform address without showing operational hints", async () => {
+    const backendApi = backendApiWith({
+      listGeneralParameters: vi.fn().mockResolvedValue({
+        items: [uiTestPlatformParameter],
+        page: 1,
+        size: 50,
+        total: 1
+      } satisfies PageResponse<GeneralParameter>)
+    });
+    const view = renderPanel(backendApi);
+
+    expect(await view.findByText("UITEST_BASE_URL")).toBeTruthy();
+    expect(view.queryByText(/下一次 UI 自动化调用即时生效/)).toBeNull();
+    await fireEvent.click(view.getByText("UNCONFIGURED"));
+
+    expect(view.getByPlaceholderText("http://uitest-host:7788")).toBeTruthy();
+    expect(view.queryByText(/无需重启 Java、Manager 或 OpenCode/)).toBeNull();
+    expect(view.queryByText(/填写 UNCONFIGURED 可停用/)).toBeNull();
+    view.queryClient.clear();
+  });
+
+  it("searches by variable name and resets the filter", async () => {
+    const listGeneralParameters = vi.fn(async (params: GeneralParameterListParams = {}) => ({
+      items: params.englishName === "uitest" ? [uiTestPlatformParameter] : [],
+      page: 1,
+      size: 50,
+      total: params.englishName === "uitest" ? 1 : 0
+    } satisfies PageResponse<GeneralParameter>));
+    const backendApi = backendApiWith({ listGeneralParameters });
+    const view = renderPanel(backendApi);
+
+    await waitFor(() => expect(listGeneralParameters).toHaveBeenCalled());
+    await fireEvent.update(view.getByPlaceholderText("变量名"), " uitest ");
+    await fireEvent.click(view.getByRole("button", { name: "搜索" }));
+
+    await waitFor(() => expect(listGeneralParameters).toHaveBeenCalledWith({
+      platform: undefined,
+      englishName: "uitest",
+      page: 1,
+      size: 50
+    }));
+    expect(await view.findByText("UITEST_BASE_URL")).toBeTruthy();
+
+    await fireEvent.click(view.getByRole("button", { name: "重置" }));
+    await waitFor(() => expect(listGeneralParameters).toHaveBeenCalledWith({
+      platform: undefined,
+      englishName: undefined,
+      page: 1,
+      size: 50
+    }));
     view.queryClient.clear();
   });
 

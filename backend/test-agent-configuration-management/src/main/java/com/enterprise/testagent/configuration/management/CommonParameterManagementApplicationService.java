@@ -15,6 +15,7 @@ import com.enterprise.testagent.domain.configuration.ParameterPlatform;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -73,6 +74,8 @@ public class CommonParameterManagementApplicationService {
         Objects.requireNonNull(pageRequest, "pageRequest must not be null");
         List<CommonParameter> filtered = repository.findAll().stream()
                 .filter(parameter -> filter.platform() == null || parameter.platform() == filter.platform())
+                .filter(parameter -> filter.englishName() == null
+                        || parameter.englishName().toLowerCase(Locale.ROOT).contains(filter.englishName()))
                 .toList();
         long total = filtered.size();
         int from = (int) Math.min(pageRequest.offset(), total);
@@ -163,6 +166,9 @@ public class CommonParameterManagementApplicationService {
 
     /** 夜间容量是运行时可调整数；在写库和广播前校验，避免集群加载到非法值。 */
     private static String validateManagedValue(CommonParameter parameter, String rawValue) {
+        if (UiTestPlatformConfigurationService.PARAMETER_ENGLISH_NAME.equals(parameter.englishName())) {
+            return UiTestPlatformConfigurationService.normalizeManagedValue(rawValue);
+        }
         if (!NIGHT_EXECUTION_SLOT_CAPACITY.equals(parameter.englishName())) {
             return rawValue;
         }
@@ -189,19 +195,34 @@ public class CommonParameterManagementApplicationService {
     }
 
     /**
-     * 通用参数列表过滤条件；platform 为 null 表示不按平台过滤。
+     * 通用参数列表过滤条件；platform 或 englishName 为 null 表示不按对应字段过滤。
      */
-    public record CommonParameterFilter(ParameterPlatform platform) {
+    public record CommonParameterFilter(ParameterPlatform platform, String englishName) {
+
+        /** 兼容仅按平台过滤的既有调用。 */
+        public CommonParameterFilter(ParameterPlatform platform) {
+            this(platform, null);
+        }
 
         /**
          * 解析平台过滤字符串；null/空白返回不过滤，非法值抛 {@link ErrorCode#VALIDATION_ERROR}。
          */
         public static CommonParameterFilter parse(String rawPlatform) {
+            return parse(rawPlatform, null);
+        }
+
+        /**
+         * 解析平台和变量名过滤；变量名采用忽略大小写的包含匹配。
+         */
+        public static CommonParameterFilter parse(String rawPlatform, String rawEnglishName) {
+            String englishName = rawEnglishName == null || rawEnglishName.isBlank()
+                    ? null
+                    : rawEnglishName.trim().toLowerCase(Locale.ROOT);
             if (rawPlatform == null || rawPlatform.isBlank()) {
-                return new CommonParameterFilter(null);
+                return new CommonParameterFilter(null, englishName);
             }
             try {
-                return new CommonParameterFilter(ParameterPlatform.fromValue(rawPlatform));
+                return new CommonParameterFilter(ParameterPlatform.fromValue(rawPlatform), englishName);
             } catch (IllegalArgumentException exception) {
                 throw new PlatformException(
                         ErrorCode.VALIDATION_ERROR, "平台参数无效", Map.of("platform", rawPlatform), exception);
