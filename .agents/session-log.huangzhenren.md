@@ -1633,3 +1633,29 @@
 - Result:
   - 设计已固化于 `docs/superpowers/specs/2026-08-01-workflow-local-control-plane-design.md`，等待用户书面复核后
     再进入实施计划和测试驱动实现。本次未修改 API、事件、数据库 migration、生产部署、`.env*` 或现有并行改动。
+
+### 2026-08-01 - 修复 LobeHub 本地入口未启用并补齐失败关闭
+
+- Why:
+  - `restart-dev-services.sh --with-lobehub` 只生成平台 HMAC 并启动 fork，没有初始化平台数据库中的四项
+    LobeHub 公共参数，导致已登录用户点击“通用问答”仍收到 `FORBIDDEN：通用问答功能未启用`。
+  - 复核还发现 owner 解析或审计失败、fork readiness 失败时，既有 `LOBEHUB_ENABLED=true` 可能残留。
+- What:
+  - 新增仅在 `test/local` profile 且显式开发开关下装配的公共参数 bootstrap；严格拒绝非回环 PostgreSQL 和
+    非固定 HTTP 回环聊天 origin，通过既有通用参数管理服务审计写入 base URL、虚拟邮箱域和唯一 owner。
+  - 新增开发 owner 解析器：优先校验显式/已有 owner，否则只选择唯一的状态正常、部门非空超级管理员；零个或
+    多个候选失败关闭。入口每次先关闭、配置完成后最后启用，异常时按当前值补偿关闭。
+  - LobeHub helper 生成 bootstrap 配置但不修改 `.env.test/.env.local`；fork 启动失败时根重启脚本以仅关闭模式
+    重启一次后端并留下审计。同步后端、前端、架构与开发流程文档。
+- How:
+  - TDD 先复现缺少 helper bootstrap、占位值未替换、非回环误写、IPv6 回环、owner 不唯一、启用审计失败和
+    已启用状态 owner 失败，再补实现；`test-agent-app -am test`、`test-agent-integration -am test`、开发脚本
+    校验与 Shell 语法均通过。
+  - 使用未修改的 `.env.test` 和 JDK 21 执行完整 `restart-dev-services.sh --profile test --env-file .env.test
+    --with-lobehub`；后端 readiness 为 UP，LobeHub 3210 返回 307 到固定 `/lobehub/launch`，临时 env 权限为
+    0600。真实本地 PostgreSQL 中四项参数正确，启用审计顺序为 `true→false→true`。
+- Result:
+  - 本地显式 LobeHub 模式会自动开放可用入口，初始化、owner、审计或 fork 启动失败时不会保留已启用入口；
+    默认重启仍不启动 LobeHub，prod/企业公共参数门禁不变。
+  - 本次不新增/变更 HTTP API、事件或数据库结构/Flyway/MyBatis SQL，不修改 `.env*`、generated SDK、
+    OpenCode 源码或企业离线介质；只改变本地开发启动行为和对应审计数据。

@@ -89,6 +89,11 @@ test-agent:
     grant-ttl: ${TEST_AGENT_LOBEHUB_GRANT_TTL:30d}
     hmac-clock-skew: ${TEST_AGENT_LOBEHUB_HMAC_CLOCK_SKEW:60s}
     nonce-ttl: ${TEST_AGENT_LOBEHUB_NONCE_TTL:120s}
+    dev-bootstrap-enabled: ${TEST_AGENT_LOBEHUB_DEV_BOOTSTRAP_ENABLED:false}
+    dev-owner-unified-auth-id: ${TEST_AGENT_LOBEHUB_DEV_OWNER_UNIFIED_AUTH_ID:}
+    dev-base-url: ${TEST_AGENT_LOBEHUB_DEV_BASE_URL:http://127.0.0.1:3210}
+    dev-email-domain: ${TEST_AGENT_LOBEHUB_DEV_EMAIL_DOMAIN:lobehub.local}
+    dev-target-enabled: ${TEST_AGENT_LOBEHUB_DEV_TARGET_ENABLED:true}
   third-party-api:
     base-url: http://tcds-prod.sdc.icbc
   deployment:

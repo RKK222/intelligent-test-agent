@@ -66,6 +66,9 @@ fi
 if ! grep -Fq 'with_lobehub=false' "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script must keep LobeHub disabled by default"
 fi
+if ! grep -Fq 'TEST_AGENT_LOBEHUB_DEV_TARGET_ENABLED=false' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script must compensate a failed LobeHub start by disabling the local entry"
+fi
 LOBEHUB_DEV_SCRIPT="${ROOT_DIR}/tools/lobehub-dev-services.sh"
 LOBEHUB_DEV_COMPOSE="${ROOT_DIR}/deploy/dev/lobehub-compose.yml"
 [[ -f "${LOBEHUB_DEV_SCRIPT}" ]] || fail "LobeHub dev service helper missing: ${LOBEHUB_DEV_SCRIPT}"

@@ -20,11 +20,15 @@ dev-only ParadeDB/RustFS dependencies, runs the fork migration, and starts the
 fork on http://127.0.0.1:3210. Redis is reused from TEST_AGENT_REDIS_* with the
 dedicated REDIS_PREFIX=lobehub:app setting (actual keys are lobehub:app:*).
 The platform restart script calls this helper only when --with-lobehub is supplied.
+The generated env also opts test/local backend profiles into an audited common-
+parameter bootstrap; that bootstrap rejects non-loopback platform PostgreSQL.
 
 Overrides:
   TEST_AGENT_LOBEHUB_FORK_DIR  Independent fork directory (default: ../lobehub-platform).
   LOBEHUB_DEV_ENV_FILE         Generated runtime env path.
   LOBEHUB_DEV_APP_URL          Local LobeHub URL (default: http://127.0.0.1:3210).
+  TEST_AGENT_LOBEHUB_DEV_OWNER_UNIFIED_AUTH_ID
+                               Explicit local owner when no unique eligible super admin exists.
 USAGE
 }
 
@@ -156,6 +160,10 @@ write_env_file() {
     printf 'PLATFORM_SSO_HMAC_SECRET=%s\n' "${hmac}"
     printf 'PLATFORM_MODEL_GRANT_ENCRYPTION_KEY=%s\n' "${encryption}"
     printf 'TEST_AGENT_LOBEHUB_HMAC_SECRET=%s\n' "${hmac}"
+    # 仅供 test/local 后端 Runner 使用；Runner 仍会拒绝非回环 PostgreSQL，不能影响共享数据库。
+    printf 'TEST_AGENT_LOBEHUB_DEV_BOOTSTRAP_ENABLED=true\n'
+    printf 'TEST_AGENT_LOBEHUB_DEV_BASE_URL=%s\n' "${app_origin}"
+    printf 'TEST_AGENT_LOBEHUB_DEV_EMAIL_DOMAIN=lobehub.local\n'
     printf 'TELEMETRY_DISABLED=1\n'
     printf 'LOBEHUB_DEVICE_EXECUTION_MODE=disabled\n'
     printf 'PORT=%s\n' "${app_origin##*:}"

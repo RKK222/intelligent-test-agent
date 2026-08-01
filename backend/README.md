@@ -103,7 +103,12 @@ Windows 开发人员若只需要 legacy guo profile，可直接使用已提交�
 需要同时联调 LobeHub 时，macOS/Linux 从仓库根目录显式执行
 `./restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`。默认不启动 LobeHub；该模式从
 同级 `../lobehub-platform` 启动独立 dev server，开发密钥只写入 `.tmp/dev-services/lobehub-dev.env`，不修改
-`.env.local/.env.test`；fork 的 loopback scheduler 由同一 helper 独立启动和回收。
+`.env.local/.env.test`；fork 的 loopback scheduler 由同一 helper 独立启动和回收。显式模式还会在后端启动时
+初始化同一本机回环 PostgreSQL 中的四项 LobeHub 公共参数并留下修改审计，配置项完成后才把
+`LOBEHUB_ENABLED` 设为 `true`。平台数据库不是回环地址时会拒绝启动，防止误改共享库；未显式指定 owner 时
+必须恰好能自动找到一名状态正常、部门非空的超级管理员，否则可在命令前设置
+`TEST_AGENT_LOBEHUB_DEV_OWNER_UNIFIED_AUTH_ID=<统一认证号>` 明确本地 owner。owner 解析、参数审计或 LobeHub
+启动失败时会补偿关闭入口，避免残留可点击但不可用的“通用问答”。
 
 ### 环境变量配置
 

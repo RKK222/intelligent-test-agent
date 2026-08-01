@@ -94,7 +94,9 @@ packages/shared-types
 `./restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`，聊天服务位于
 `http://127.0.0.1:3210`。默认重启命令不启动、不探测也不停止 LobeHub；独立 fork 默认位于同级
 `../lobehub-platform`，运行密钥只写入 `.tmp/dev-services/lobehub-dev.env`，本地定时任务由受保护的 loopback
-scheduler 触发。
+scheduler 触发。显式模式仅允许连接回环平台 PostgreSQL，并通过后端现有审计入口自动替换本地公共参数占位值、
+最后启用入口；若可用超级管理员不是唯一候选，启动前设置
+`TEST_AGENT_LOBEHUB_DEV_OWNER_UNIFIED_AUTH_ID=<统一认证号>`。初始化或聊天服务启动失败会自动审计并关闭入口。
 
 ## 本地命令
 

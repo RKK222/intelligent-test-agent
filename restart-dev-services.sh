@@ -1101,7 +1101,18 @@ start_frontend
 
 # 5) LobeHub 明确按需启动；默认路径不探测、不停止，也不改变既有开发环境。
 if [[ "${with_lobehub}" == "true" ]]; then
-  "${LOBEHUB_DEV_SCRIPT}" restart
+  if "${LOBEHUB_DEV_SCRIPT}" restart; then
+    :
+  else
+    lobehub_restart_status=$?
+    echo "LobeHub failed to start; restarting backend once to audit and disable the local entry." >&2
+    export TEST_AGENT_LOBEHUB_DEV_TARGET_ENABLED=false
+    stop_backend_service
+    if ! start_backend; then
+      echo "Failed to restart backend while disabling the LobeHub local entry." >&2
+    fi
+    exit "${lobehub_restart_status}"
+  fi
 fi
 
 echo "Restart complete."

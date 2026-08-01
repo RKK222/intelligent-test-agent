@@ -30,6 +30,12 @@ LobeHub fork 源码不放入本仓库。本地开发默认从同级独立仓库 
 `docs/deployment/lobehub-offline.md` 的现场验收前，`LOBEHUB_ENABLED` 必须保持 `false`。已有服务端阶段介质
 只用于镜像、migration 和部署流程验证，不能冒充完整交付包。
 
+上述生产门禁不禁止显式本地联调：`restart-dev-services.sh --with-lobehub` 只在 `test/local` profile 且平台
+PostgreSQL 为回环地址时启用开发 bootstrap。它通过既有通用参数管理服务留下审计，依次设置固定回环聊天
+origin、`lobehub.local` 虚拟邮箱域和唯一 owner，最后才把本地库的 `LOBEHUB_ENABLED` 设为 `true`；非回环库、
+零个或多个自动 owner 候选均失败关闭。参数初始化/审计异常会补偿关闭，fork 启动或 readiness 失败时启动脚本会
+以仅关闭模式重启一次后端并留下审计。该机制不装配到 prod，也不能作为企业验收或介质准入的替代。
+
 ## 浏览器登录交接
 
 1. 工作台“通用问答”点击处理器同步执行 `window.open("about:blank", 唯一窗口名)`，并切断 `opener`。
