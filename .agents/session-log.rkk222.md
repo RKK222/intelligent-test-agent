@@ -4481,3 +4481,25 @@
 
 - 当前工作区干净；8080、3000、8090 均无监听，也没有残留 restart/backend/manager/frontend 进程。
 - 后续要恢复完整本地环境，需先由具备权限的数据库管理员处理工作流 bootstrap 角色权限，并按目标库 `flyway_schema_history` 基线解决 `20260730090000` 的历史分叉；不可通过临时替代环境文件规避。
+
+## 2026-08-02 - 核对 LobeHub fork 并复验本地重启阻塞
+
+### Why
+
+- 用户询问 `huangzhenren/lobehub` 是否为当前本地重启所需源码，并要求继续基于本地代码恢复开发环境。
+
+### What
+
+- 确认默认 `.env.test` 重启不依赖 LobeHub fork；只有显式 `--with-lobehub` 才需要 sibling `../lobehub-platform`。远程 fork 的 `main` 与 `v2.2.11-platform.5` 均指向锁定提交 `57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c`，但 sibling 目录当前不存在，未擅自克隆。
+- 使用现有 `deploy/internal/workflow/bootstrap-workflow.sql`，以本机 Docker PostgreSQL 管理员角色完成 `test_agent_workflow` 本地数据库/最小权限角色 bootstrap；未修改 `.env.test`、`.env.local`、源码或 migration，未向业务账号授予 `CREATEROLE`。
+
+### How
+
+- 用显式 workflow runtime/migration URL 和 `.env.test` 的 Redis `127.0.0.1:16379` 执行 `./tools/workflow-dev-services.sh prepare`，exit 0。
+- 按 JDK 25 和项目默认命令执行 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build`；后端 21 模块构建成功，但 readiness 仍因 `V20260730090000` 已解析未执行且数据库已有更晚 migration 而失败。
+- 未使用 `outOfOrder`、`repair`、ignore migration、手工改 `flyway_schema_history` 或重命名候选 migration；精确停止 4104 端口残留 opencode，并确认失败后无 backend、manager、workflow、frontend 或 opencode 残留进程。
+
+### Result
+
+- 工作流权限阻塞已解决；当前唯一启动阻塞是平台 PostgreSQL 的 Flyway 历史分叉，LobeHub 源码不是修复路径。
+- 若要继续恢复服务，需要保留数据并由集成人确认该候选 migration 是否已进入共享/稳定库，或先明确授权重建本地测试库；在此之前不能诚实宣称整套服务已启动。
