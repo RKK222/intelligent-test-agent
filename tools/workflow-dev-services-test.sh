@@ -99,7 +99,7 @@ set -euo pipefail
 printf '%s\n' "$*" >>"${WORKFLOW_TEST_CAPTURE_DIR}/uv.argv"
 EOF
 
-cat >"${tmp_dir}/venv/bin/python" <<'EOF'
+cat >"${tmp_dir}/venv/bin/python-real" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"${WORKFLOW_TEST_CAPTURE_DIR}/python.argv"
@@ -114,6 +114,7 @@ if [[ "${1:-}" == "-" ]]; then
 fi
 exit 0
 EOF
+ln -s python-real "${tmp_dir}/venv/bin/python"
 
 cat >"${tmp_dir}/bin/curl" <<'EOF'
 #!/usr/bin/env bash
@@ -121,7 +122,7 @@ exit 0
 EOF
 
 chmod +x "${tmp_dir}/bin/openssl" "${tmp_dir}/bin/psql" "${tmp_dir}/bin/curl" \
-  "${tmp_dir}/venv/bin/uv" "${tmp_dir}/venv/bin/python"
+  "${tmp_dir}/venv/bin/uv" "${tmp_dir}/venv/bin/python-real"
 
 common_env=(
   env

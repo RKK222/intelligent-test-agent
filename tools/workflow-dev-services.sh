@@ -423,12 +423,54 @@ prepare() {
   echo "Workflow development control plane prepared."
 }
 
+# macOS venv 的 bin/python 可能被 ps 展开为 Python.app；这里解析符号链接，供 PID 身份校验复用。
+resolve_executable_path() {
+  local path="$1" link base_dir
+  [[ -n "${path}" ]] || return 1
+  if [[ "${path}" != /* ]]; then
+    path="$(command -v "${path}")" || return 1
+  fi
+  while [[ -L "${path}" ]]; do
+    link="$(readlink "${path}")" || return 1
+    if [[ "${link}" == /* ]]; then
+      path="${link}"
+    else
+      base_dir="$(cd -P "$(dirname "${path}")" 2>/dev/null && pwd -P)" || return 1
+      path="${base_dir}/${link}"
+    fi
+  done
+  base_dir="$(cd -P "$(dirname "${path}")" 2>/dev/null && pwd -P)" || return 1
+  printf '%s/%s\n' "${base_dir}" "$(basename "${path}")"
+}
+
 process_matches() {
-  local pid="$1" role="$2" python_path="$3" command
+  local pid="$1" role="$2" python_path="$3" command resolved_python_path runtime_python_path
+  local python_framework_root
+  local python_matches=false
   [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
   kill -0 "${pid}" >/dev/null 2>&1 || return 1
   command="$(ps -p "${pid}" -o command= 2>/dev/null || true)"
-  [[ "${command}" == *"${python_path}"* \
+  if [[ "${command}" == *"${python_path}"* ]]; then
+    python_matches=true
+  else
+    # 优先使用解释器自报的基础路径，兼容 macOS 将 venv Python 显示为系统启动器的情况。
+    runtime_python_path="$("${python_path}" -c "import sys; print(getattr(sys, '_base_executable', sys.executable))" 2>/dev/null \
+      | awk 'NF {value = $0} END {print value}' || true)"
+    if [[ -n "${runtime_python_path}" && "${command}" == *"${runtime_python_path}"* ]]; then
+      python_matches=true
+    fi
+  fi
+  if [[ "${python_matches}" != true ]]; then
+    resolved_python_path="$(resolve_executable_path "${python_path}" 2>/dev/null || true)"
+    [[ -n "${resolved_python_path}" && "${command}" == *"${resolved_python_path}"* ]] \
+      && python_matches=true
+    if [[ "${python_matches}" != true && "${resolved_python_path}" == */bin/* ]]; then
+      python_framework_root="${resolved_python_path%/bin/*}"
+      [[ -n "${python_framework_root}" && "${command}" == *"${python_framework_root}/"* ]] \
+        && python_matches=true
+    fi
+  fi
+  [[ "${python_matches}" == true \
     && "${command}" == *"testagent_workflow.cli"* \
     && " ${command} " == *" ${role} "* ]]
 }

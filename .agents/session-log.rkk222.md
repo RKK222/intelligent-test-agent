@@ -4503,3 +4503,27 @@
 
 - 工作流权限阻塞已解决；当前唯一启动阻塞是平台 PostgreSQL 的 Flyway 历史分叉，LobeHub 源码不是修复路径。
 - 若要继续恢复服务，需要保留数据并由集成人确认该候选 migration 是否已进入共享/稳定库，或先明确授权重建本地测试库；在此之前不能诚实宣称整套服务已启动。
+
+## 2026-08-02 - 修复 macOS 工作流 PID 误判并完成隔离库重启验证
+
+### Why
+
+- 继续验证本地完整重启时，工作流 API/Worker 实际已启动，但 macOS `ps` 展示的是 Python.app 启动器路径，helper 仅按 venv `bin/python` 路径匹配，误报 Worker 启动失败。
+- 原 `.env.test` 指向的 `testagent` 数据库仍存在 `V20260730090000` 已解析但未执行、后续 migration 已执行的历史分叉；不能用 `outOfOrder`、`repair` 或手改 Flyway 历史掩盖。
+
+### What
+
+- `tools/workflow-dev-services.sh` 新增 Python 符号链接解析、解释器自报基础路径和 framework root 兼容匹配，并补充中文注释。
+- `tools/workflow-dev-services-test.sh` 将 fake venv Python 改为真实文件加符号链接，覆盖回归路径；`docs/guides/ai-workflow.md` 补充 macOS 启动校验说明。
+- 新建非破坏性的本地数据库 `testagent_restart_20260802` 作为本次验证目标；未修改 `.env.test`、`.env.local`、migration、OpenCode 源码或 generated SDK，原 `testagent` 数据库保留。
+
+### How
+
+- 以 JDK 25、`test` profile、`.env.test` 和一次性进程环境变量覆盖 Druid datasource 指向隔离库，执行完整 `restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build`；在 detached screen 中运行以避免当前 Codex exec 回收工作流子进程。
+- 后端构建 21 个 Maven module 成功；隔离库 80 条 Flyway 成功记录，包含 `20260730090000`、`20260801104000` 和四张模型网关相关平台表。后端 readiness、工作流 ready、前端 HTTP 200、manager screen 均通过，用户 OpenCode 端口未按默认策略自动启动。
+- `tools/verify-dev-scripts.sh` 通过；其中 PowerShell 解析因当前 macOS 无 `pwsh/powershell` 跳过。`git diff --check` 通过。
+
+### Result
+
+- 当前本地代码已在隔离库上完整运行 backend、workflow API/Worker、opencode-manager 和 frontend；原 `.env.test` 默认数据库的 Flyway 历史分叉仍未修复，因此不宣称默认数据库路径已完成。
+- LobeHub fork 仍非默认重启依赖，只有显式 `--with-lobehub` 才需要 `../lobehub-platform`；本次未克隆或启动该源码。
