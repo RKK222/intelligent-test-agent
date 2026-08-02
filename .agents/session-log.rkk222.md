@@ -4640,3 +4640,34 @@
 
 - 新标签页成功到达 `http://127.0.0.1:3210/onboarding`，不再停留在 `INVALID_ORIGIN`；8080、3000、
   8090 和 3210 均已由完整重启脚本拉起。
+
+## 2026-08-02 - 核对 LobeHub 在线模板授权与离线预置方案
+
+### Why
+
+- LobeHub 本地离线模式的 onboarding 页面无法加载推荐 Agent，用户要求切换在线模式，并确认后续企业离线
+  交付应如何携带预置模板。
+
+### What
+
+- 确认推荐模板由 LobeHub 前端经 `market.agent.getOnboardingFull` 请求在线 Marketplace；企业离线策略会按
+  设计拒绝全部 `market.*` 路由，fork 内当前没有可替代 Marketplace 的完整 Agent 模板目录。
+- 当前进程以 `PLATFORM_SSO_ENABLED=0`、`LOBEHUB_ENTERPRISE_OFFLINE=0` 临时切换为独立在线开发模式，未修改
+  `.env.test/.env.local`、生成 dotenv 或源码；离线 scheduler 未启动。
+- 明确离线预置模板应作为版本化、可校验的完整 Agent 定义和本地静态资源提交到锁定 LobeHub fork，并复用
+  现有 Agent 创建服务实现本地安装；构建制品需补充模板来源、版本、SHA-256、许可证和审批清单。
+
+### How
+
+- 检查 onboarding hook、Market tRPC、Marketplace 安装服务、企业离线路由门禁、平台 SSO 配置约束，以及
+  `build-lobehub-artifacts.sh`、`package-release.sh` 和离线部署文档的制品契约。
+- 运行检查确认 backend readiness 为 `UP`、frontend 为 HTTP 200、LobeHub 独立在线入口为 302 登录跳转；
+  已登录 Chrome 页面能够进入 onboarding，但在线 Marketplace 返回 `Unauthorized`。
+
+### Result
+
+- 在线 LobeHub 进程已启动，但推荐模板仍未加载成功：当前没有 Market OIDC token，也没有已注册的
+  `MARKET_TRUSTED_CLIENT_ID/SECRET`；下一步需由用户完成 Marketplace 授权或提供受控 trusted-client 配置。
+- 平台 SSO 适配当前显式要求企业离线模式，因此本次在线启动是直接访问 LobeHub 的临时运行态；再次执行标准
+  `restart-dev-services.sh --with-lobehub` 会恢复离线模式。离线模板方案尚未编码实现，也未改动 API、事件、
+  数据库、Flyway、generated SDK 或 OpenCode 源码。
