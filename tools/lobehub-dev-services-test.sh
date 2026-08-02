@@ -41,6 +41,64 @@ grep -Fx 'TEST_AGENT_LOBEHUB_DEV_EMAIL_DOMAIN=lobehub.local' "${GENERATED_ENV}" 
   exit 1
 }
 
+# prepare 必须在读取或写入前拒绝软链接，避免覆盖链接指向的任意文件。
+SYMLINK_TARGET="${TEST_ROOT}/symlink-target"
+SYMLINK_ENV="${TEST_ROOT}/symlink.env"
+printf '%s\n' 'sentinel-content' >"${SYMLINK_TARGET}"
+ln -s "${SYMLINK_TARGET}" "${SYMLINK_ENV}"
+set +e
+symlink_output="$(TEST_AGENT_DEV_LOG_DIR="${TEST_ROOT}/logs" \
+  LOBEHUB_DEV_ENV_FILE="${SYMLINK_ENV}" bash "${HELPER}" prepare 2>&1)"
+symlink_status=$?
+set -e
+[[ ${symlink_status} -ne 0 ]] || {
+  echo 'LobeHub dev helper must reject a symbolic-link environment file.' >&2
+  exit 1
+}
+[[ "${symlink_output}" == *'must not be a symbolic link'* ]] || {
+  echo 'LobeHub dev helper must explain the symbolic-link rejection.' >&2
+  exit 1
+}
+[[ "$(cat "${SYMLINK_TARGET}")" == 'sentinel-content' ]] || {
+  echo 'LobeHub dev helper must not overwrite the symbolic-link target.' >&2
+  exit 1
+}
+
+# restart 必须使用仓库 shim 支持的 `corepack pnpm` 形式，并在拉起容器前校验 fork 锁定的版本。
+FAKE_FORK="${TEST_ROOT}/lobehub-platform"
+DOCKER_CALLS="${TEST_ROOT}/docker.calls"
+mkdir -p "${FAKE_FORK}/.git"
+printf '%s\n' '{"packageManager":"pnpm@10.33.0+sha512-test"}' >"${FAKE_FORK}/package.json"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'if [[ "$*" == "pnpm --version" ]]; then printf "%s\n" "9.0.0"; exit 0; fi' \
+  'printf "%s\n" "unexpected corepack arguments: $*" >&2' \
+  'exit 97' \
+  >"${TEST_ROOT}/bin/corepack"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'printf "%s\n" "$*" >>"${TEST_DOCKER_CALLS:?}"' \
+  'exit 98' \
+  >"${TEST_ROOT}/bin/docker"
+chmod 0755 "${TEST_ROOT}/bin/corepack" "${TEST_ROOT}/bin/docker"
+set +e
+pnpm_output="$(PATH="${TEST_ROOT}/bin:${PATH}" \
+  TEST_DOCKER_CALLS="${DOCKER_CALLS}" \
+  TEST_AGENT_LOBEHUB_FORK_DIR="${FAKE_FORK}" \
+  TEST_AGENT_DEV_LOG_DIR="${TEST_ROOT}/logs" \
+  LOBEHUB_DEV_ENV_FILE="${TEST_ROOT}/pnpm-version.env" \
+  bash "${HELPER}" restart 2>&1)"
+pnpm_status=$?
+set -e
+[[ ${pnpm_status} -ne 0 && "${pnpm_output}" == *'requires pnpm 10.33.0, but Corepack resolved 9.0.0'* ]] || {
+  echo 'LobeHub dev helper must reject a pnpm version that differs from packageManager.' >&2
+  exit 1
+}
+[[ ! -e "${DOCKER_CALLS}" ]] || {
+  echo 'LobeHub dev helper must validate pnpm before starting Docker dependencies.' >&2
+  exit 1
+}
+
 # 同时伪造主会话、重复 scheduler 和相似前缀，验证 stop 只按完整 screen ID 清理目标。
 printf '%s\n' \
   '#!/usr/bin/env bash' \

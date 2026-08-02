@@ -76,7 +76,8 @@ Defaults:
   manager logs:    <manager-state-dir>/logs/manager.log, <manager-state-dir>/logs/manager-error.log
   LobeHub:         disabled unless --with-lobehub is supplied
   workflow:        enabled; use --without-workflow to retain the legacy three-service restart
-  screen sessions: test-agent-backend, test-agent-frontend, test-agent-opencode-manager when screen is available
+  screen sessions: test-agent-backend, test-agent-frontend, test-agent-opencode-manager,
+                   test-agent-workflow-api, test-agent-workflow-worker when screen is available
 
 Options:
   --profile              test or local; default is test. local 默认读取 .env.local。
@@ -1131,5 +1132,9 @@ if should_start_opencode_manager; then
   echo "Manager logs: ${OPENCODE_MANAGER_RUNTIME_STATE_DIR}/logs/manager.log, ${OPENCODE_MANAGER_RUNTIME_STATE_DIR}/logs/manager-error.log"
 fi
 if command -v screen >/dev/null 2>&1; then
-  echo "Screen:   ${BACKEND_SCREEN_SESSION}, ${OPENCODE_MANAGER_SCREEN_SESSION}, ${FRONTEND_SCREEN_SESSION}"
+  screen_sessions="${BACKEND_SCREEN_SESSION}, ${OPENCODE_MANAGER_SCREEN_SESSION}, ${FRONTEND_SCREEN_SESSION}"
+  if [[ "${with_workflow}" == "true" ]]; then
+    screen_sessions+=", test-agent-workflow-api, test-agent-workflow-worker"
+  fi
+  echo "Screen:   ${screen_sessions}"
 fi

@@ -3,8 +3,14 @@ package com.enterprise.testagent.app.config;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.Arrays;
+import java.util.Collection;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.ResourceProvider;
+import org.flywaydb.core.api.configuration.FluentConfiguration;
+import org.flywaydb.core.api.migration.JavaMigration;
+import org.flywaydb.core.api.resource.LoadableResource;
+import org.flywaydb.core.internal.scanner.Scanner;
 import org.junit.jupiter.api.Test;
 import org.postgresql.ds.PGSimpleDataSource;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -32,6 +38,10 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             DatabaseMigrationCompatibilityCustomizer.LEGACY_TOOLBOX_MIGRATION_VERSION;
     private static final String CURRENT_TOOLBOX_VERSION =
             DatabaseMigrationCompatibilityCustomizer.CURRENT_TOOLBOX_MIGRATION_VERSION;
+    private static final String LOBEHUB_COMPATIBILITY_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.LOBEHUB_FORWARD_COMPATIBILITY_LOCATION;
+    private static final String LOBEHUB_MAIN_RESOURCE =
+            "db/migration/V20260730090000__add_lobehub_model_gateway.sql";
 
     @Container
     private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
@@ -118,6 +128,37 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
         });
     }
 
+    @Test
+    void missingLobehubMigrationAfterLaterVersionUsesForwardCompatibilityMigration() {
+        DataSource dataSource = dataSource("lobehub_missing_migration");
+        migrateTo(dataSource, "20260728210000", MAIN_LOCATION);
+        migrateLatestWithoutResource(dataSource, LOBEHUB_MAIN_RESOURCE);
+
+        assertThat(applied(
+                dataSource,
+                DatabaseMigrationCompatibilityCustomizer.LOBEHUB_MODEL_GATEWAY_MIGRATION_VERSION))
+                .isFalse();
+        assertThat(applied(
+                dataSource,
+                DatabaseMigrationCompatibilityCustomizer.LOBEHUB_SPLIT_MARKER_VERSION))
+                .isTrue();
+        assertLobehubTablesAndParameters(dataSource, 0L);
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(locationDescriptors(flyway)).contains(LOBEHUB_COMPATIBILITY_LOCATION);
+            assertThat(applied(
+                    dataSource,
+                    DatabaseMigrationCompatibilityCustomizer.LOBEHUB_MODEL_GATEWAY_MIGRATION_VERSION))
+                    .isFalse();
+            assertThat(applied(
+                    dataSource,
+                    DatabaseMigrationCompatibilityCustomizer.LOBEHUB_FORWARD_COMPATIBILITY_VERSION))
+                    .isTrue();
+            assertLobehubTablesAndParameters(dataSource, 3L);
+        });
+    }
+
     /** 为每套历史创建独立 schema，避免测试之间共享 Flyway history。 */
     private static DataSource dataSource(String schema) {
         PGSimpleDataSource admin = postgresDataSource();
@@ -142,6 +183,30 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                 .target(target)
                 .load()
                 .migrate();
+    }
+
+    /** 仅在测试库构造“后续版本已执行但目标 migration 缺失”的真实 Flyway history。 */
+    private static void migrateLatestWithoutResource(DataSource dataSource, String excludedResource) {
+        FluentConfiguration configuration = Flyway.configure()
+                .dataSource(dataSource)
+                .locations(MAIN_LOCATION);
+        ResourceProvider defaultProvider = new Scanner<>(
+                JavaMigration.class, configuration, configuration.getLocations());
+        configuration.resourceProvider(new ResourceProvider() {
+            @Override
+            public LoadableResource getResource(String name) {
+                LoadableResource resource = defaultProvider.getResource(name);
+                return resource != null && matches(resource, excludedResource) ? null : resource;
+            }
+
+            @Override
+            public Collection<LoadableResource> getResources(String prefix, String[] suffixes) {
+                return defaultProvider.getResources(prefix, suffixes).stream()
+                        .filter(resource -> !matches(resource, excludedResource))
+                        .toList();
+            }
+        });
+        configuration.load().migrate();
     }
 
     private static void runBootFlyway(
@@ -210,6 +275,51 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                 .query(Long.class)
                 .single();
         assertThat(tableCount).isEqualTo(3L);
+    }
+
+    private static void assertLobehubTablesAndParameters(DataSource dataSource, long expectedTableCount) {
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        Long tableCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.tables
+                        where table_schema = current_schema()
+                          and table_name in (
+                              'internal_model_provider_models',
+                              'internal_model_provider_model_probes',
+                              'model_gateway_usage_daily'
+                          )
+                        """)
+                .query(Long.class)
+                .single();
+        Long parameterCount = jdbc.sql("""
+                        select count(*)
+                        from common_parameters
+                        where parameter_id in (
+                            'param_lobehub_enabled_all',
+                            'param_lobehub_base_url_all',
+                            'param_lobehub_email_domain_all',
+                            'param_lobehub_owner_auth_all'
+                        )
+                        """)
+                .query(Long.class)
+                .single();
+        assertThat(tableCount).isEqualTo(expectedTableCount);
+        assertThat(parameterCount).isEqualTo(expectedTableCount == 0L ? 0L : 4L);
+    }
+
+    private static boolean matches(LoadableResource resource, String expectedResource) {
+        String relativePath = normalize(resource.getRelativePath());
+        String absolutePath = normalize(resource.getAbsolutePath());
+        String absolutePathOnDisk = normalize(resource.getAbsolutePathOnDisk());
+        return expectedResource.equals(relativePath)
+                || absolutePath.endsWith("/" + expectedResource)
+                || absolutePath.contains("!/" + expectedResource)
+                || absolutePathOnDisk.endsWith("/" + expectedResource)
+                || absolutePathOnDisk.contains("!/" + expectedResource);
+    }
+
+    private static String normalize(String path) {
+        return path == null ? "" : path.replace('\\', '/');
     }
 
     @Configuration(proxyBeanMethods = false)

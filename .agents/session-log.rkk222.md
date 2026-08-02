@@ -4527,3 +4527,45 @@
 
 - 当前本地代码已在隔离库上完整运行 backend、workflow API/Worker、opencode-manager 和 frontend；原 `.env.test` 默认数据库的 Flyway 历史分叉仍未修复，因此不宣称默认数据库路径已完成。
 - LobeHub fork 仍非默认重启依赖，只有显式 `--with-lobehub` 才需要 `../lobehub-platform`；本次未克隆或启动该源码。
+
+## 2026-08-02 - 修复默认库完整重启并启动 Workflow/LobeHub
+
+### Why
+
+- 用户按 JDK 25、`test` profile 和未修改的 `.env.test` 执行标准重启仍报错，并要求检查 Shell、启动独立
+  LobeHub fork，同时确认 Workflow 的实际使用方式。
+- 真实链路依次暴露四个问题：Workflow 重复要求业务库账号执行管理员 bootstrap、默认平台库缺失较早
+  LobeHub migration、仓库临时 Corepack shim 不接受 `pnpm@version` 参数，以及 Workflow 子进程会随启动终端
+  退出；登录后又确认 Python 只接受 ISO 时间，无法解析平台 Redis 中 Jackson 写入的 Unix 秒。
+
+### What
+
+- Workflow helper 先用稳定 owner/runtime 密钥验证既有独立数据库角色，只有首次建库才要求
+  `CREATEROLE/CREATEDB`；API/Worker 在 macOS 由两个独立 Screen 会话托管，仍用 PID 与完整命令校验安全停止。
+- Workflow Token 认证兼容平台 Unix 秒和历史 ISO 两种 `AuthPrincipal.issuedAt/expiresAt`，统一转为 UTC 校验。
+- 对已执行 `V20260801093854`、却漏掉 `V20260730090000` 的已知平台库分叉，复用唯一 Flyway 兼容装配，
+  隐藏无法顺序执行的旧候选并加载高版本 `V20260802173416` 补偿；未启用 `outOfOrder/repair`，两份 migration
+  均增加 SHA-256 锁定测试。
+- LobeHub helper 改用兼容临时 shim 的 `corepack pnpm` 并核对 fork `packageManager` 版本；生成 dotenv 在读取/
+  写入前拒绝软链接，使用同目录 0600 临时文件原子替换。同步 app/persistence/workflow README、数据库、Workflow
+  API 和本地启动文档。
+
+### How
+
+- LobeHub fork 克隆到仓库同级 `/Users/kaka/Desktop/lobehub-platform`，锁定干净提交
+  `57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c`（`v2.2.11-platform.5`）；未修改 fork 源码。
+- Flyway 命名/SHA 测试 6 项和真实 PostgreSQL 兼容测试 6 项通过；Workflow 非 PostgreSQL 测试 92 项、真实
+  PostgreSQL 测试 12 项通过；Workflow/LobeHub helper 与 `tools/verify-dev-scripts.sh` 通过。完整 Python 首轮因
+  Testcontainers Ryuk 被 Docker 提前移除统一报 404，随后禁用 Ryuk 分组重跑全部通过。
+- 使用显式本地 owner `DEV_888888888` 真实执行 `restart-dev-services.sh --profile test --env-file .env.test
+  --with-lobehub`；后端、前端、Workflow、manager、ParadeDB、RustFS 和 LobeHub 就绪。真实平台登录 Token 成功
+  访问 Workflow `/me`/`definitions`，LobeHub 一次性票据 43 字符并完成 302 消费及 Session Cookie 签发。
+
+### Result
+
+- 默认平台库已顺序应用兼容 migration，三张模型网关表存在，LobeHub 四个参数初始化为本地 origin、邮箱域、
+  owner 并启用。当前 8080、3000、8090、3210 均可用，Workflow API/Worker 在重启命令退出后持续运行。
+- 本地仅启动 Workflow 控制面，不启动 macOS Analysis Runner；没有合规外部 Linux Runner 时页面可用，但提交
+  代码影响分析会明确返回 Runner 不可用，不会创建本机分析容器。
+- 未修改 `.env.test/.env.local`、generated SDK 或 OpenCode 源码；未新增 RunEvent。HTTP 路径不变，Workflow
+  认证只增加平台现有 Redis 序列化格式兼容；数据库变更仅为已知历史分叉的隔离高版本补偿。

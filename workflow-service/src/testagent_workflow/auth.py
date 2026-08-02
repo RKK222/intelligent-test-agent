@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import hmac
 import json
+import math
 from typing import Protocol
 
 
@@ -63,8 +64,8 @@ class RedisTokenAuthenticator:
                 user_id = self._required_text(user_id_value, "value")
             else:
                 user_id = self._required_text(payload, "userId")
-            issued_at = self._parse_time(self._required_text(payload, "issuedAt"))
-            expires_at = self._parse_time(self._required_text(payload, "expiresAt"))
+            issued_at = self._parse_time(payload.get("issuedAt"))
+            expires_at = self._parse_time(payload.get("expiresAt"))
             if expires_at <= datetime.now(UTC):
                 raise AuthenticationError("登录凭证已过期")
             roles_value = payload.get("roles")
@@ -115,7 +116,17 @@ class RedisTokenAuthenticator:
         return value.strip()
 
     @staticmethod
-    def _parse_time(value: str) -> datetime:
+    def _parse_time(value: object) -> datetime:
+        # 平台 Jackson 当前把 Instant 序列化为带小数的 Unix 秒；保留 ISO 文本兼容历史值与测试夹具。
+        if isinstance(value, bool):
+            raise ValueError("timestamp invalid")
+        if isinstance(value, (int, float)):
+            numeric_value = float(value)
+            if not math.isfinite(numeric_value):
+                raise ValueError("timestamp invalid")
+            return datetime.fromtimestamp(numeric_value, tz=UTC)
+        if not isinstance(value, str):
+            raise ValueError("timestamp invalid")
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if parsed.tzinfo is None:
             raise ValueError("timestamp must carry timezone")

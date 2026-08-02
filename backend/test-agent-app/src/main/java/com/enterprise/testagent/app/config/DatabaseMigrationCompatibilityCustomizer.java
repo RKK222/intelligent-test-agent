@@ -35,11 +35,18 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
     static final int CURRENT_TOOLBOX_IDEMPOTENT_CHECKSUM = -74327385;
     static final String CURRENT_TOOLBOX_IDEMPOTENT_LOCATION =
             "classpath:db/migration-compat/toolbox-current-idempotent";
+    static final String LOBEHUB_MODEL_GATEWAY_MIGRATION_VERSION = "20260730090000";
+    static final String LOBEHUB_SPLIT_MARKER_VERSION = "20260801093854";
+    static final String LOBEHUB_FORWARD_COMPATIBILITY_VERSION = "20260802173416";
+    static final String LOBEHUB_FORWARD_COMPATIBILITY_LOCATION =
+            "classpath:db/migration-compat/lobehub-missing";
 
     private static final String CURRENT_TOOLBOX_MIGRATION_FILE =
             "V20260728160800__create_toolbox_click_tracking.sql";
     private static final String CURRENT_TOOLBOX_MAIN_RESOURCE =
             "db/migration/" + CURRENT_TOOLBOX_MIGRATION_FILE;
+    private static final String LOBEHUB_MODEL_GATEWAY_MAIN_RESOURCE =
+            "db/migration/V20260730090000__add_lobehub_model_gateway.sql";
 
     private static final Logger LOGGER =
             LoggerFactory.getLogger(DatabaseMigrationCompatibilityCustomizer.class);
@@ -54,6 +61,12 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
                 appliedMigrations, LEGACY_TOOLBOX_MIGRATION_VERSION);
         Integer currentMigrationChecksum = appliedChecksum(
                 appliedMigrations, CURRENT_TOOLBOX_MIGRATION_VERSION);
+        boolean lobehubModelGatewayMigrationApplied = isMigrationApplied(
+                appliedMigrations, LOBEHUB_MODEL_GATEWAY_MIGRATION_VERSION);
+        boolean lobehubSplitMarkerApplied = isMigrationApplied(
+                appliedMigrations, LOBEHUB_SPLIT_MARKER_VERSION);
+        boolean missingLobehubMigrationHistory = !lobehubModelGatewayMigrationApplied
+                && lobehubSplitMarkerApplied;
 
         List<String> locations = new ArrayList<>(Arrays.stream(configuration.getLocations())
                 .map(location -> location.getDescriptor())
@@ -66,17 +79,27 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
         if (idempotentCurrentMigrationApplied) {
             addLocationIfAbsent(locations, CURRENT_TOOLBOX_IDEMPOTENT_LOCATION);
         }
+        if (missingLobehubMigrationHistory) {
+            addLocationIfAbsent(locations, LOBEHUB_FORWARD_COMPATIBILITY_LOCATION);
+        }
         configuration.locations(locations.toArray(String[]::new));
 
         boolean legacyWithoutCurrentMigration = legacyMigrationApplied
                 && currentMigrationChecksum == null;
+        List<String> filteredMainResources = new ArrayList<>();
         if (legacyWithoutCurrentMigration || idempotentCurrentMigrationApplied) {
+            filteredMainResources.add(CURRENT_TOOLBOX_MAIN_RESOURCE);
+        }
+        if (missingLobehubMigrationHistory) {
+            filteredMainResources.add(LOBEHUB_MODEL_GATEWAY_MAIN_RESOURCE);
+        }
+        if (!filteredMainResources.isEmpty()) {
             // Flyway 没有公开“排除单个 classpath migration”的配置入口；这里包装唯一默认扫描器，
-            // 只隐藏 checksum 与当前历史不匹配的主目录副本，其余 SQL 和 Java migration 保持原样。
+            // 只隐藏与已知历史分叉不匹配的主目录副本，其余 SQL 和 Java migration 保持原样。
             ResourceProvider defaultProvider = new Scanner<>(
                     JavaMigration.class, configuration, configuration.getLocations());
             configuration.resourceProvider(
-                    new CurrentToolboxMigrationFilteringResourceProvider(defaultProvider));
+                    new MigrationFilteringResourceProvider(defaultProvider, filteredMainResources));
         }
 
         if (legacyMigrationApplied) {
@@ -86,6 +109,12 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
         if (idempotentCurrentMigrationApplied) {
             LOGGER.warn("检测到已执行的工具盒子幂等迁移变体，按原 checksum 启用隔离兼容路径: version={}, checksum={}",
                     CURRENT_TOOLBOX_MIGRATION_VERSION, currentMigrationChecksum);
+        }
+        if (missingLobehubMigrationHistory) {
+            LOGGER.warn("检测到 LobeHub 模型网关迁移缺失且后续迁移已执行，启用顺序补偿路径: missingVersion={}, markerVersion={}, forwardVersion={}",
+                    LOBEHUB_MODEL_GATEWAY_MIGRATION_VERSION,
+                    LOBEHUB_SPLIT_MARKER_VERSION,
+                    LOBEHUB_FORWARD_COMPATIBILITY_VERSION);
         }
     }
 
@@ -122,38 +151,43 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
         }
     }
 
-    /** 过滤主目录中的当前迁移，保留按数据库历史选中的隔离副本。 */
-    private static final class CurrentToolboxMigrationFilteringResourceProvider
+    /** 过滤主目录中与已知数据库历史不匹配的迁移，保留按 history 选择的隔离补偿资源。 */
+    private static final class MigrationFilteringResourceProvider
             implements ResourceProvider {
 
         private final ResourceProvider delegate;
+        private final List<String> filteredMainResources;
 
-        private CurrentToolboxMigrationFilteringResourceProvider(ResourceProvider delegate) {
+        private MigrationFilteringResourceProvider(
+                ResourceProvider delegate,
+                List<String> filteredMainResources) {
             this.delegate = delegate;
+            this.filteredMainResources = List.copyOf(filteredMainResources);
         }
 
         @Override
         public LoadableResource getResource(String name) {
             LoadableResource resource = delegate.getResource(name);
-            return resource != null && isMainCurrentToolboxMigration(resource) ? null : resource;
+            return resource != null && isFilteredMainMigration(resource) ? null : resource;
         }
 
         @Override
         public Collection<LoadableResource> getResources(String prefix, String[] suffixes) {
             return delegate.getResources(prefix, suffixes).stream()
-                    .filter(resource -> !isMainCurrentToolboxMigration(resource))
+                    .filter(resource -> !isFilteredMainMigration(resource))
                     .toList();
         }
 
-        private static boolean isMainCurrentToolboxMigration(LoadableResource resource) {
+        private boolean isFilteredMainMigration(LoadableResource resource) {
             String relativePath = normalize(resource.getRelativePath());
             String absolutePath = normalize(resource.getAbsolutePath());
             String absolutePathOnDisk = normalize(resource.getAbsolutePathOnDisk());
-            return CURRENT_TOOLBOX_MAIN_RESOURCE.equals(relativePath)
-                    || absolutePath.endsWith("/" + CURRENT_TOOLBOX_MAIN_RESOURCE)
-                    || absolutePath.contains("!/" + CURRENT_TOOLBOX_MAIN_RESOURCE)
-                    || absolutePathOnDisk.endsWith("/" + CURRENT_TOOLBOX_MAIN_RESOURCE)
-                    || absolutePathOnDisk.contains("!/" + CURRENT_TOOLBOX_MAIN_RESOURCE);
+            return filteredMainResources.stream().anyMatch(filteredResource ->
+                    filteredResource.equals(relativePath)
+                            || absolutePath.endsWith("/" + filteredResource)
+                            || absolutePath.contains("!/" + filteredResource)
+                            || absolutePathOnDisk.endsWith("/" + filteredResource)
+                            || absolutePathOnDisk.contains("!/" + filteredResource));
         }
 
         private static String normalize(String path) {

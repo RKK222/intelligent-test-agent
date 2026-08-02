@@ -18,6 +18,8 @@ API_LOG_FILE="${STATE_DIR}/workflow-api.log"
 WORKER_LOG_FILE="${STATE_DIR}/workflow-worker.log"
 PREPARE_LOG_FILE="${STATE_DIR}/workflow-prepare.log"
 WORKFLOW_VENV="${TEST_AGENT_WORKFLOW_VENV:-${ROOT_DIR}/.tmp/workflow-venv}"
+API_SCREEN_SESSION="${TEST_AGENT_WORKFLOW_API_SCREEN_SESSION:-test-agent-workflow-api}"
+WORKER_SCREEN_SESSION="${TEST_AGENT_WORKFLOW_WORKER_SCREEN_SESSION:-test-agent-workflow-worker}"
 
 usage() {
   cat <<'USAGE'
@@ -34,6 +36,7 @@ Commands:
   status   Print process states without credentials.
 
 State and logs default to .tmp/dev-services/workflow/ with mode 0700/0600.
+When GNU Screen is available, API and Worker run in dedicated detached sessions.
 USAGE
 }
 
@@ -243,6 +246,13 @@ postgres_url_host() {
   esac
 }
 
+workflow_postgres_role_can_connect() {
+  local host="$1" port="$2" user="$3" password="$4"
+  PGCONNECT_TIMEOUT=3 PGPASSWORD="${password}" \
+    psql --no-psqlrc -qAt -h "${host}" -p "${port}" -U "${user}" \
+      -d test_agent_workflow -c 'SELECT 1' >/dev/null 2>&1
+}
+
 bootstrap_postgres() {
   local explicit_runtime="${TEST_AGENT_WORKFLOW_DATABASE_URL:-}"
   local explicit_migration="${TEST_AGENT_WORKFLOW_MIGRATION_DATABASE_URL:-}"
@@ -262,18 +272,26 @@ bootstrap_postgres() {
     validate_safe_db_value PostgreSQL用户名 "${admin_user}"
     require_command psql
 
+    local url_host
+    url_host="$(postgres_url_host "${host}")"
+    WORKFLOW_DATABASE_URL="postgresql+asyncpg://test_agent_workflow:${WORKFLOW_DEV_DB_RUNTIME_PASSWORD}@${url_host}:${port}/test_agent_workflow"
+    WORKFLOW_MIGRATION_DATABASE_URL="postgresql+asyncpg://test_agent_workflow_owner:${WORKFLOW_DEV_DB_OWNER_PASSWORD}@${url_host}:${port}/test_agent_workflow"
+
+    # 首次初始化才需要管理员权限；后续重启先用稳定密钥验证既有最小权限角色，避免重复要求 CREATEROLE。
+    if workflow_postgres_role_can_connect "${host}" "${port}" test_agent_workflow_owner \
+      "${WORKFLOW_DEV_DB_OWNER_PASSWORD}" \
+      && workflow_postgres_role_can_connect "${host}" "${port}" test_agent_workflow \
+        "${WORKFLOW_DEV_DB_RUNTIME_PASSWORD}"; then
+      return
+    fi
+
     local escaped_bootstrap="${BOOTSTRAP_SQL//\'/\'\'}"
     printf "\\set workflow_owner_password '%s'\n\\set workflow_runtime_password '%s'\n\\i '%s'\n" \
       "${WORKFLOW_DEV_DB_OWNER_PASSWORD}" "${WORKFLOW_DEV_DB_RUNTIME_PASSWORD}" "${escaped_bootstrap}" \
       | PGPASSWORD="${TEST_AGENT_TEST_DB_PASSWORD:-}" psql --no-psqlrc --set ON_ERROR_STOP=on \
         -h "${host}" -p "${port}" -U "${admin_user}" -d "${admin_database}" \
         >>"${PREPARE_LOG_FILE}" 2>&1 \
-      || fail "工作流PostgreSQL初始化失败；详见${PREPARE_LOG_FILE}"
-
-    local url_host
-    url_host="$(postgres_url_host "${host}")"
-    WORKFLOW_DATABASE_URL="postgresql+asyncpg://test_agent_workflow:${WORKFLOW_DEV_DB_RUNTIME_PASSWORD}@${url_host}:${port}/test_agent_workflow"
-    WORKFLOW_MIGRATION_DATABASE_URL="postgresql+asyncpg://test_agent_workflow_owner:${WORKFLOW_DEV_DB_OWNER_PASSWORD}@${url_host}:${port}/test_agent_workflow"
+      || fail "工作流PostgreSQL首次初始化失败；请使用具备CREATEROLE和CREATEDB权限的本地管理员，详见${PREPARE_LOG_FILE}"
   fi
 }
 
@@ -475,6 +493,30 @@ process_matches() {
     && " ${command} " == *" ${role} "* ]]
 }
 
+screen_session_exists() {
+  local session="$1"
+  screen -list 2>/dev/null | awk -v session="${session}" '
+    $0 ~ ("[0-9]+\\." session "[[:space:]]") { found = 1 }
+    END { exit found ? 0 : 1 }
+  '
+}
+
+stop_screen_session() {
+  local session="$1"
+  if command -v screen >/dev/null 2>&1 && screen_session_exists "${session}"; then
+    screen -S "${session}" -X quit >/dev/null 2>&1 || true
+  fi
+}
+
+wait_pid_file() {
+  local label="$1" pid_file="$2" attempt
+  for ((attempt = 1; attempt <= 50; attempt++)); do
+    [[ -s "${pid_file}" ]] && return 0
+    sleep 0.1
+  done
+  fail "${label}未写入PID文件"
+}
+
 stop_process() {
   local label="$1" role="$2" pid_file="$3" python_path="$4" pid i
   [[ -f "${pid_file}" ]] || return 0
@@ -507,8 +549,16 @@ stop() {
   fi
   [[ -n "${python_path}" ]] || python_path="${WORKFLOW_VENV}/bin/python"
   local failed=0
-  stop_process "workflow Worker" worker "${WORKER_PID_FILE}" "${python_path}" || failed=1
-  stop_process "workflow API" api "${API_PID_FILE}" "${python_path}" || failed=1
+  if stop_process "workflow Worker" worker "${WORKER_PID_FILE}" "${python_path}"; then
+    stop_screen_session "${WORKER_SCREEN_SESSION}"
+  else
+    failed=1
+  fi
+  if stop_process "workflow API" api "${API_PID_FILE}" "${python_path}"; then
+    stop_screen_session "${API_SCREEN_SESSION}"
+  else
+    failed=1
+  fi
   return "${failed}"
 }
 
@@ -539,11 +589,22 @@ start() {
     rm -f "${API_PID_FILE}"
     : >"${API_LOG_FILE}"
     chmod 0600 "${API_LOG_FILE}"
-    PYTHONPATH="${WORKFLOW_DIR}/src" nohup "${WORKFLOW_PYTHON}" \
-      -m testagent_workflow.cli api --host 127.0.0.1 --port 8090 \
-      >>"${API_LOG_FILE}" 2>&1 &
-    printf '%s\n' "$!" >"${API_PID_FILE}"
-    chmod 0600 "${API_PID_FILE}"
+    if command -v screen >/dev/null 2>&1; then
+      local api_command
+      stop_screen_session "${API_SCREEN_SESSION}"
+      printf -v api_command \
+        'cd %q && printf "%%s\\n" "$$" >%q && chmod 0600 %q && exec env PYTHONPATH=%q %q -m testagent_workflow.cli api --host 127.0.0.1 --port 8090 >>%q 2>&1' \
+        "${WORKFLOW_DIR}" "${API_PID_FILE}" "${API_PID_FILE}" "${WORKFLOW_DIR}/src" \
+        "${WORKFLOW_PYTHON}" "${API_LOG_FILE}"
+      screen -dmS "${API_SCREEN_SESSION}" bash -lc "${api_command}"
+    else
+      PYTHONPATH="${WORKFLOW_DIR}/src" nohup "${WORKFLOW_PYTHON}" \
+        -m testagent_workflow.cli api --host 127.0.0.1 --port 8090 \
+        >>"${API_LOG_FILE}" 2>&1 &
+      printf '%s\n' "$!" >"${API_PID_FILE}"
+      chmod 0600 "${API_PID_FILE}"
+    fi
+    wait_pid_file "workflow API" "${API_PID_FILE}"
   fi
   if ! wait_ready "http://127.0.0.1:8090/workflow-api/v1/ready" "${API_LOG_FILE}"; then
     stop_process "workflow API" api "${API_PID_FILE}" "${WORKFLOW_PYTHON}" || true
@@ -556,10 +617,21 @@ start() {
     rm -f "${WORKER_PID_FILE}"
     : >"${WORKER_LOG_FILE}"
     chmod 0600 "${WORKER_LOG_FILE}"
-    PYTHONPATH="${WORKFLOW_DIR}/src" nohup "${WORKFLOW_PYTHON}" \
-      -m testagent_workflow.cli worker >>"${WORKER_LOG_FILE}" 2>&1 &
-    printf '%s\n' "$!" >"${WORKER_PID_FILE}"
-    chmod 0600 "${WORKER_PID_FILE}"
+    if command -v screen >/dev/null 2>&1; then
+      local worker_command
+      stop_screen_session "${WORKER_SCREEN_SESSION}"
+      printf -v worker_command \
+        'cd %q && printf "%%s\\n" "$$" >%q && chmod 0600 %q && exec env PYTHONPATH=%q %q -m testagent_workflow.cli worker >>%q 2>&1' \
+        "${WORKFLOW_DIR}" "${WORKER_PID_FILE}" "${WORKER_PID_FILE}" "${WORKFLOW_DIR}/src" \
+        "${WORKFLOW_PYTHON}" "${WORKER_LOG_FILE}"
+      screen -dmS "${WORKER_SCREEN_SESSION}" bash -lc "${worker_command}"
+    else
+      PYTHONPATH="${WORKFLOW_DIR}/src" nohup "${WORKFLOW_PYTHON}" \
+        -m testagent_workflow.cli worker >>"${WORKER_LOG_FILE}" 2>&1 &
+      printf '%s\n' "$!" >"${WORKER_PID_FILE}"
+      chmod 0600 "${WORKER_PID_FILE}"
+    fi
+    wait_pid_file "workflow Worker" "${WORKER_PID_FILE}"
     sleep 1
   fi
   process_matches "$(cat "${WORKER_PID_FILE}")" worker "${WORKFLOW_PYTHON}" \

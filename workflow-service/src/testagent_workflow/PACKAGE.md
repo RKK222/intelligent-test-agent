@@ -1,7 +1,7 @@
 # testagent_workflow 包边界
 
 - `api.py` / `agui.py`：独立 HTTP、SSE、快照与回放协议。
-- `auth.py`：平台 Token Redis 精确读取，不暴露扫描或写入接口。
+- `auth.py`：平台 Token Redis 精确读取，不暴露扫描或写入接口；兼容平台 Unix 秒与历史 ISO 两种 `Instant` 序列化格式。
 - `application.py` / `intent.py` / `registry.py`：对话输入、AgentScope 结构化分类和代码注册白名单。
 - `impact_engine.py` / `workflows/`：场景 1 的固定 LangGraph 图和外部能力端口。
 - `platform.py`：Python 到 Java 窄能力 HMAC 客户端。

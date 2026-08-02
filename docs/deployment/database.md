@@ -1172,6 +1172,16 @@ V18 及以前保留既有数字版本，已在共享或稳定数据库执行过�
 | `internal_model_provider_model_probes` | 按供应商、模型和能力覆盖保存最近一次成功/失败与时间；不保存固定探测输入、上游响应或原始错误。 |
 | `model_gateway_usage_daily` | 按日期、来源 client、用户、供应商、公开模型和端点原子累加请求/成功/失败、token 和总耗时；不保存逐请求、prompt、回答、UCID、traceId 或错误。 |
 
+已知一套本地库先执行了 `V20260801093854`，但 history 中缺失后来合入的 `V20260730090000`，因此默认
+Flyway 顺序校验会失败。该分叉由现有 `DatabaseMigrationCompatibilityCustomizer` 在校验前精确识别：隐藏主
+目录中无法再顺序执行的旧候选，只为该 history 加载
+`db/migration-compat/lobehub-missing/V20260802173416__backfill_lobehub_model_gateway.sql`。补偿 migration
+以更高版本幂等创建同样三张表和四个生产必需参数；正常顺序库和空库不加载该 location，仍执行原始
+`V20260730090000`。两份文件分别锁定 SHA-256
+`0f16f1b2f3108e60580cfeb00102e10ac21e20220be255fae77bad9871f0bcb7` 与
+`4f773e35e55380592f094c03cc5a66fb69b7dee4a2799e1c9ab5d0b9d8f1634a`，所有路径保持
+`outOfOrder=false`，禁止 `repair` 或手工修改 history。
+
 关系型运行 SQL 全部位于 `InternalModelProviderModelMapper.xml` 和 `ModelGatewayUsageDailyMapper.xml`；能力探测
 使用 PostgreSQL `ON CONFLICT` 覆盖最近结果，每日聚合使用单条 upsert 增量，避免 JVM 先读后写造成并发丢失。
 `ai_model_configs` 保持历史兼容，不是 LobeHub 目录来源。

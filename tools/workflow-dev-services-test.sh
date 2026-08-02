@@ -28,9 +28,14 @@ tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/test-agent-workflow-dev.XXXXXX")"
 api_pid=""
 worker_pid=""
 mismatched_pid=""
+api_screen_session="ta-wf-api-$$"
+worker_screen_session="ta-wf-worker-$$"
 cleanup() {
   if [[ -x "${HELPER}" ]]; then
-    TEST_AGENT_DEV_LOG_DIR="${tmp_dir}/logs" bash "${HELPER}" stop >/dev/null 2>&1 || true
+    TEST_AGENT_DEV_LOG_DIR="${tmp_dir}/logs" \
+      TEST_AGENT_WORKFLOW_API_SCREEN_SESSION="${api_screen_session}" \
+      TEST_AGENT_WORKFLOW_WORKER_SCREEN_SESSION="${worker_screen_session}" \
+      bash "${HELPER}" stop >/dev/null 2>&1 || true
   fi
   for pid in "${api_pid}" "${worker_pid}" "${mismatched_pid}"; do
     if [[ -n "${pid}" ]]; then
@@ -90,7 +95,14 @@ cat >"${tmp_dir}/bin/psql" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"${WORKFLOW_TEST_CAPTURE_DIR}/psql.argv"
+if [[ " $* " == *" -U test_agent_workflow_owner "* \
+  || " $* " == *" -U test_agent_workflow "* ]]; then
+  [[ -f "${WORKFLOW_TEST_CAPTURE_DIR}/postgres.ready" ]] || exit 1
+  printf '1\n'
+  exit 0
+fi
 cat >>"${WORKFLOW_TEST_CAPTURE_DIR}/psql.stdin"
+touch "${WORKFLOW_TEST_CAPTURE_DIR}/postgres.ready"
 EOF
 
 cat >"${tmp_dir}/venv/bin/uv" <<'EOF'
@@ -131,6 +143,8 @@ common_env=(
   "TEST_AGENT_DEV_LOG_DIR=${tmp_dir}/logs"
   "TEST_AGENT_WORKFLOW_VENV=${tmp_dir}/venv"
   "TEST_AGENT_WORKFLOW_PYTHON=${tmp_dir}/venv/bin/python"
+  "TEST_AGENT_WORKFLOW_API_SCREEN_SESSION=${api_screen_session}"
+  "TEST_AGENT_WORKFLOW_WORKER_SCREEN_SESSION=${worker_screen_session}"
   "TEST_AGENT_BASE_URL=http://127.0.0.1:8080"
   "TEST_AGENT_TEST_DB_HOST=127.0.0.1"
   "TEST_AGENT_TEST_DB_PORT=5432"
@@ -179,6 +193,9 @@ first_checksum="$(shasum -a 256 "${platform_env}" "${runtime_env}" "${secrets_en
 "${common_env[@]}" bash "${HELPER}" prepare >/dev/null
 second_checksum="$(shasum -a 256 "${platform_env}" "${runtime_env}" "${secrets_env}")"
 [[ "${first_checksum}" == "${second_checksum}" ]] || fail "repeated prepare must reuse stable local secrets"
+admin_bootstrap_count="$(grep -Fc -- '-U test_agent -d test_agent' "${tmp_dir}/captured/psql.argv" || true)"
+[[ "${admin_bootstrap_count}" == "1" ]] \
+  || fail "repeated prepare must reuse initialized workflow roles without administrator bootstrap"
 
 set +e
 partial_runner_output="$({
@@ -205,8 +222,16 @@ set -e
 "${common_env[@]}" bash "${HELPER}" start >/dev/null
 api_pid="$(cat "${state_dir}/workflow-api.pid")"
 worker_pid="$(cat "${state_dir}/workflow-worker.pid")"
+/bin/sleep 1
 kill -0 "${api_pid}" >/dev/null 2>&1 || fail "workflow API process did not stay running"
 kill -0 "${worker_pid}" >/dev/null 2>&1 || fail "workflow Worker process did not stay running"
+if command -v screen >/dev/null 2>&1; then
+  screen_list="$(screen -list 2>/dev/null || true)"
+  grep -F ".${api_screen_session}" >/dev/null <<<"${screen_list}" \
+    || fail "workflow API screen session did not stay running"
+  grep -F ".${worker_screen_session}" >/dev/null <<<"${screen_list}" \
+    || fail "workflow Worker screen session did not stay running"
+fi
 
 status_output="$("${common_env[@]}" bash "${HELPER}" status)"
 [[ "${status_output}" == *"workflow-api: RUNNING"* && "${status_output}" == *"workflow-worker: RUNNING"* ]] \
@@ -220,6 +245,13 @@ fi
 "${common_env[@]}" bash "${HELPER}" stop >/dev/null
 if kill -0 "${api_pid}" >/dev/null 2>&1 || kill -0 "${worker_pid}" >/dev/null 2>&1; then
   fail "stop must terminate both managed processes"
+fi
+if command -v screen >/dev/null 2>&1; then
+  screen_list="$(screen -list 2>/dev/null || true)"
+  if grep -E "\.(${api_screen_session}|${worker_screen_session})[[:space:]]" \
+    >/dev/null <<<"${screen_list}"; then
+    fail "stop must terminate both workflow screen sessions"
+  fi
 fi
 api_pid=""
 worker_pid=""

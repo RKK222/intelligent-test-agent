@@ -47,6 +47,7 @@ Runner 失败保留被拒绝时，Worker 必须先把工作区租约写成带立
 ## 认证与共享能力
 
 - 普通 HTTP/SSE 请求只读取 `test-agent:token:<完整Bearer>` 与其 `PTTL`，每次请求都重新校验；SSE 每 30 秒复核。
+  平台 Jackson 当前把 `AuthPrincipal.issuedAt/expiresAt` 写为 Unix 秒数，认证器同时兼容该格式和历史 ISO 时间文本。
 - Python 调 Java 时只发送用户 ID、Bearer SHA-256 摘要、请求体摘要、时间戳、nonce 和 HMAC；不发送原始 Bearer。
 - Java 只提供仓库授权/分支、一次性 checkout ticket、模型 grant 和超级管理员角色复核。
 - `TEST_AGENT_WORKFLOW_ANALYSIS_MODEL_NAME` 是平台模型网关公开模型 ID。Worker 将它随受签名 Runner 请求下发；Runner把真实grant隔离在任务容器内独立UID的回环relay，Codex/OpenCode只使用本地token并固定到该模型，不能使用工具默认 provider 或公网端点。

@@ -68,6 +68,10 @@ write_env_file() {
   require_command node
   require_command openssl
   mkdir -p "${LOG_DIR}"
+  [[ ! -L "${ENV_FILE}" ]] || {
+    echo "LobeHub development env must not be a symbolic link: ${ENV_FILE}" >&2
+    exit 1
+  }
 
   local hmac encryption auth_secret vault_secret scheduler_secret db_password rustfs_access rustfs_secret
   if [[ -f "${ENV_FILE}" ]]; then
@@ -123,6 +127,10 @@ write_env_file() {
     validate_generated_value "${pair%%=*}" "${pair#*=}"
   done
 
+  local env_dir temporary
+  env_dir="$(cd "$(dirname "${ENV_FILE}")" && pwd -P)"
+  temporary="$(mktemp "${env_dir}/.lobehub-dev.XXXXXX")"
+  chmod 0600 "${temporary}"
   umask 077
   {
     printf 'LOBEHUB_DEV_DB_PASSWORD=%s\n' "${db_password}"
@@ -167,7 +175,8 @@ write_env_file() {
     printf 'TELEMETRY_DISABLED=1\n'
     printf 'LOBEHUB_DEVICE_EXECUTION_MODE=disabled\n'
     printf 'PORT=%s\n' "${app_origin##*:}"
-  } >"${ENV_FILE}"
+  } >"${temporary}"
+  mv -f "${temporary}" "${ENV_FILE}"
   chmod 0600 "${ENV_FILE}"
   echo "Prepared LobeHub development environment: ${ENV_FILE}"
 }
@@ -202,6 +211,25 @@ load_runtime_env() {
 
 compose() {
   docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" "$@"
+}
+
+verify_pnpm_version() {
+  local package_manager expected_version actual_version
+  package_manager="$(cd "${FORK_DIR}" && node -p 'require("./package.json").packageManager || ""')"
+  [[ "${package_manager}" == pnpm@* ]] || {
+    echo "LobeHub fork packageManager must pin pnpm: ${package_manager:-missing}" >&2
+    exit 1
+  }
+  expected_version="${package_manager#pnpm@}"
+  expected_version="${expected_version%%+*}"
+  actual_version="$(cd "${FORK_DIR}" && corepack pnpm --version)" || {
+    echo "Unable to run pnpm through Corepack for the LobeHub fork" >&2
+    exit 1
+  }
+  [[ "${actual_version}" == "${expected_version}" ]] || {
+    echo "LobeHub fork requires pnpm ${expected_version}, but Corepack resolved ${actual_version}" >&2
+    exit 1
+  }
 }
 
 stop_app() {
@@ -279,22 +307,24 @@ restart_all() {
   require_command docker
   write_env_file
   load_runtime_env
+  # 统一使用 `corepack pnpm`，既兼容仓库的临时 shim，也由 fork 的 packageManager 锁定版本。
+  verify_pnpm_version
   compose up -d --wait paradedb rustfs
   # one-shot 任务成功退出是预期状态，不能交给 compose --wait 当成长运行服务判断。
   compose run --rm rustfs-init
-  (cd "${FORK_DIR}" && corepack pnpm@10.33.0 install --frozen-lockfile)
-  (cd "${FORK_DIR}" && corepack pnpm@10.33.0 db:migrate)
+  (cd "${FORK_DIR}" && corepack pnpm install --frozen-lockfile)
+  (cd "${FORK_DIR}" && corepack pnpm db:migrate)
   stop_app
   : >"${LOG_DIR}/lobehub.log"
   if command -v screen >/dev/null 2>&1; then
     local command_line
-    printf -v command_line 'cd %q && exec corepack pnpm@10.33.0 dev >>%q 2>&1' \
+    printf -v command_line 'cd %q && exec corepack pnpm dev >>%q 2>&1' \
       "${FORK_DIR}" "${LOG_DIR}/lobehub.log"
     screen -dmS "${SCREEN_SESSION}" bash -lc "${command_line}"
   else
     (
       cd "${FORK_DIR}"
-      nohup corepack pnpm@10.33.0 dev >>"${LOG_DIR}/lobehub.log" 2>&1 &
+      nohup corepack pnpm dev >>"${LOG_DIR}/lobehub.log" 2>&1 &
       echo "$!" >"${LOG_DIR}/lobehub.pid"
     )
   fi

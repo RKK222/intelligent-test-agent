@@ -38,6 +38,23 @@ def principal_json(token: str, *, expires_at: datetime | None = None) -> str:
     )
 
 
+def platform_principal_json(token: str) -> str:
+    """模拟平台 ObjectMapper 对 AuthPrincipal.Instant 的 Unix 秒序列化结果。"""
+    now = datetime.now(UTC)
+    return json.dumps(
+        {
+            "token": token,
+            "userId": {"value": "usr_1234567890abcdef"},
+            "username": "测试用户",
+            "unifiedAuthId": "001177621",
+            "roles": ["USER"],
+            "issuedAt": (now - timedelta(minutes=1)).timestamp(),
+            "expiresAt": (now + timedelta(hours=1)).timestamp(),
+            "expired": False,
+        }
+    )
+
+
 @pytest.mark.asyncio
 async def test_authenticate_reads_only_the_exact_platform_token_key() -> None:
     redis = FakeRedis(
@@ -53,6 +70,20 @@ async def test_authenticate_reads_only_the_exact_platform_token_key() -> None:
         ("get", "test-agent:token:secret-token"),
         ("pttl", "test-agent:token:secret-token"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_authenticate_accepts_platform_unix_second_timestamps() -> None:
+    redis = FakeRedis(
+        {"test-agent:token:secret-token": platform_principal_json("secret-token")},
+        {"test-agent:token:secret-token": 3_600_000},
+    )
+
+    principal = await RedisTokenAuthenticator(redis).authenticate("Bearer secret-token")
+
+    assert principal.username == "测试用户"
+    assert principal.issued_at.tzinfo is UTC
+    assert principal.expires_at > datetime.now(UTC)
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,7 @@
 - `V20260728103000__create_app_source_snapshot_tables.sql` 新增应用源码 slot、固定内容 snapshot、服务器 replica、operation/step、cleanup 和 recent 表，结构化选择使用 PostgreSQL JSONB；初始 snapshot 约束为 `expires_at = accepted_at + 1..72` 整小时且索引摘要必须为 64 位十六进制；cleanup 到 operation/snapshot 的外键为 `DEFERRABLE INITIALLY DEFERRED`，并初始化只读 `OPENCODE_APP_SOURCE_ROOT=${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/appsource/`。
 - `V20260731115520__extend_app_source_retention.sql` 保留已经执行的 365 天扩容原始字节，`V20260731123600__cap_app_source_retention_at_one_week.sql` 再把最终 snapshot 整小时上限收紧为 168 小时（7 天），两者均不改历史数据；续期运行 SQL 位于 `AppSourceMapper.xml`，通过快照 expiry CAS 同步更新权威索引摘要和全部未开始 cleanup 的 `delete_at/next_retry_at`。
 - `V20260728210000__index_in_flight_app_source_operations.sql` 为 dispatcher 周期恢复增加 `(status, accepted_at, operation_id)` 索引，使 `PENDING/RUNNING` stranded 扫描不随历史终态 operation 全表增长；迁移只新增索引，不写业务数据。
+- `db/migration-compat/lobehub-missing/V20260802173416__backfill_lobehub_model_gateway.sql` 只对已执行 `V20260801093854`、却漏掉 `V20260730090000` 的已知分叉加载；通过高版本幂等补偿创建模型目录、探测、每日聚合表和四个默认禁用参数，正常顺序库与空库不可见。
 
 ## 工程定位
 
@@ -216,6 +217,9 @@ RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线�
 - `ModelGatewayUsageDailyMapper.xml` 使用 PostgreSQL/H2 兼容 upsert 原子累加每日聚合，不先读后写。
 - `V20260730090000__add_lobehub_model_gateway.sql` 只创建上述平台表和四个生产必需公共参数；不触碰独立
   LobeHub ParadeDB，也不写测试/演示数据。
+- 已知本地历史若存在 `V20260801093854`、但缺少 `V20260730090000`，app 兼容装配会隐藏无法再顺序执行的
+  旧候选文件，只加载隔离的 `V20260802173416` 高版本补偿。两份 migration 都由 SHA-256 测试锁定；不启用
+  `outOfOrder`、不执行 `repair`、不修改 `flyway_schema_history`。
 - H2 集成测试覆盖完整 Flyway 和 mapper；PostgreSQL Testcontainers 测试模拟既有基线并发累加，无 Docker
   时显式 skip，正式发布仍需在真实目标基线上运行。
 - Redis Testcontainers 使用真实 Redis 5.0.14 让 8 个线程并发消费同一 ticket，锁定 Lua 只成功一次、nonce
