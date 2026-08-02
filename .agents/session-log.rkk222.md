@@ -4613,3 +4613,30 @@
 ### Result
 
 - 生成的 PPTX 为自包含单页，PowerPoint 可打开，结构校验通过；未修改 API、事件、数据库、安全、环境配置或业务代码。
+
+## 2026-08-02 - 修复 LobeHub 平台票据跨 origin 被拒绝
+
+### Why
+
+- 用户在真实 Chrome 中从平台点击“通用问答”后，新标签页停留在
+  `/api/auth/platform/consume`，页面返回 `INVALID_ORIGIN`；LobeHub 日志确认 Better Auth 以 403 拒绝
+  `http://127.0.0.1:3000` 发起的一次性票据表单 POST。
+
+### What
+
+- LobeHub 本地开发 helper 生成运行环境时，将聊天自身 origin 和 `TEST_AGENT_FRONTEND_URL` 对应的平台
+  前端 origin 一并写入 `AUTH_TRUSTED_ORIGINS`；保留 Better Auth 配置覆盖默认值时所需的聊天自身来源。
+- helper 行为测试锁定两个可信 origin，并同步本地研发流程与 LobeHub 部署文档；未修改独立 LobeHub fork、
+  `.env.test/.env.local`、HTTP API、事件、数据库、generated SDK 或 OpenCode 源码。
+
+### How
+
+- `tools/verify-dev-scripts.sh` 与 `git diff --check` 通过。
+- 使用 JDK 25、`test` profile、未修改的 `.env.test` 和 `--with-lobehub` 完整重启 backend、Workflow
+  API/Worker、opencode-manager、frontend、ParadeDB、RustFS、LobeHub 与 scheduler。
+- 在用户现有 Chrome 平台页刷新后点击“通用问答”，真实票据消费返回 302、平台兑换接口返回 200。
+
+### Result
+
+- 新标签页成功到达 `http://127.0.0.1:3210/onboarding`，不再停留在 `INVALID_ORIGIN`；8080、3000、
+  8090 和 3210 均已由完整重启脚本拉起。

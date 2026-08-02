@@ -144,6 +144,8 @@ write_env_file() {
     printf 'APP_URL=%s\n' "${app_origin}"
     printf 'INTERNAL_APP_URL=%s\n' "${app_origin}"
     printf 'NEXTAUTH_URL=%s/api/auth\n' "${app_origin}"
+    # Better Auth 配置该变量后会覆盖默认 origin，必须同时保留聊天自身与平台前端来源。
+    printf 'AUTH_TRUSTED_ORIGINS=%s,%s\n' "${app_origin}" "${platform_frontend%/}"
     printf 'AUTH_SECRET=%s\n' "${auth_secret}"
     printf 'KEY_VAULTS_SECRET=%s\n' "${vault_secret}"
     printf 'ENTERPRISE_INTERNAL_SCHEDULER_SECRET=%s\n' "${scheduler_secret}"

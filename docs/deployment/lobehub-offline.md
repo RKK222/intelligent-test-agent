@@ -54,7 +54,9 @@ RustFS `9000/9001` 固定只绑定 `127.0.0.1`；app `3210` 默认同样绑定 l
 `.tmp/dev-services/lobehub-dev.env` 生成 mode `0600` 的开发密钥，不修改 `.env.local` 或 `.env.test`。开发
 helper 还会启动单独的本地 scheduler 进程，复用 fork 的生产 loopback 实现；其 Bearer secret 不出现在命令行。
 helper 固定写入 `LOBEHUB_DEV_HOST=127.0.0.1`，fork 启动序列据此向 Next.js 传入 `-H 127.0.0.1`；只把访问
-URL 写成 loopback 不算通过，验收时还必须用 `lsof` 或等价命令确认 `3210` 没有监听 wildcard。
+URL 写成 loopback 不算通过，验收时还必须用 `lsof` 或等价命令确认 `3210` 没有监听 wildcard。生成的运行环境
+同时将聊天自身 origin 和 `TEST_AGENT_FRONTEND_URL` 对应的平台前端 origin 写入 `AUTH_TRUSTED_ORIGINS`；缺少
+平台 origin 时 Better Auth 会以 `INVALID_ORIGIN` 拒绝 `/api/auth/platform/consume` 的跨 origin 表单 POST。
 本地 Compose 的 ParadeDB、RustFS 和 MC 默认值与企业介质使用相同的批准 digest，不使用浮动 `latest`；只有
 显式的 `LOBEHUB_DEV_*_IMAGE` 开发覆盖才会改变它们。
 

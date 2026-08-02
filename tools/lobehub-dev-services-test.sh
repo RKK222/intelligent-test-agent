@@ -24,6 +24,10 @@ grep -Fx 'LOBEHUB_DEV_HOST=127.0.0.1' "${GENERATED_ENV}" >/dev/null || {
   echo 'LobeHub dev helper must bind the fork server to 127.0.0.1.' >&2
   exit 1
 }
+grep -Fx 'AUTH_TRUSTED_ORIGINS=http://127.0.0.1:3210,http://127.0.0.1:3000' "${GENERATED_ENV}" >/dev/null || {
+  echo 'LobeHub dev helper must trust both the chat origin and platform frontend origin.' >&2
+  exit 1
+}
 grep -Fx 'TEST_AGENT_LOBEHUB_DEV_BOOTSTRAP_ENABLED=true' "${GENERATED_ENV}" >/dev/null || {
   echo 'LobeHub dev helper must opt the platform backend into local parameter bootstrap.' >&2
   exit 1

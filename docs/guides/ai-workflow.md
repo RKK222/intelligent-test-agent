@@ -67,7 +67,9 @@ LobeHub 默认不参与本地重启；只有需要企业问答联调时显式执
 helper 会同时启动并在停止时回收 fork 自带的 loopback 定时调度进程。显式模式只接受回环平台 PostgreSQL，
 通过后端现有通用参数审计服务初始化本地 origin、邮箱域和唯一 owner，最后启用入口；候选 owner 不唯一时使用
 `TEST_AGENT_LOBEHUB_DEV_OWNER_UNIFIED_AUTH_ID` 明确指定。helper 使用兼容仓库临时 shim 的 `corepack pnpm`
-调用形式，并在启动容器前核对 fork `packageManager` 锁定的 pnpm 版本。参数初始化或 fork readiness 失败时会审计并补偿关闭入口。
+调用形式，并在启动容器前核对 fork `packageManager` 锁定的 pnpm 版本。生成的运行环境会把聊天自身 origin 与
+`TEST_AGENT_FRONTEND_URL` 对应的平台前端 origin 一并写入 Better Auth 的可信来源，保证平台 POST 一次性票据时不被
+origin 校验拒绝。参数初始化或 fork readiness 失败时会审计并补偿关闭入口。
 
 Workflow 使用独立的 `test_agent_workflow` PostgreSQL 数据库。数据库尚不存在时，首次执行重启脚本所用的
 `TEST_AGENT_TEST_DB_USERNAME` 必须具备本地 `CREATEROLE` 和 `CREATEDB` 权限；初始化完成后，helper 会先用
