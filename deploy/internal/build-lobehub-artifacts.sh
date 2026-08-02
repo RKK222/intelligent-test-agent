@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 VERSION_FILE="${SCRIPT_DIR}/lobehub/version.env"
 CLIENT_CONTRACT_FILE="${SCRIPT_DIR}/lobehub-client-artifact-contract.sh"
+COMMUNITY_SNAPSHOT_VERIFIER="${SCRIPT_DIR}/verify-lobehub-community-snapshot.mjs"
 
 FORK_DIR="${TEST_AGENT_LOBEHUB_FORK_DIR:-${ROOT_DIR}/../lobehub-platform}"
 OUTPUT_DIR="${TEST_AGENT_LOBEHUB_ARTIFACT_DIR:-${ROOT_DIR}/lobehub-release-artifacts}"
@@ -29,6 +30,7 @@ SKIP_APP_BUILD=0
 FORCE=0
 FORK_COMMIT=""
 BUILD_CONTEXT_DIR=""
+COMMUNITY_METADATA=""
 
 usage() {
   cat <<'USAGE'
@@ -190,6 +192,35 @@ validate_fork() {
   fi
 }
 
+community_metadata_value() {
+  local key="$1"
+  printf '%s\n' "${COMMUNITY_METADATA}" | awk -F= -v wanted="${key}" \
+    '$1 == wanted { print substr($0, index($0, "=") + 1); found=1 } END { if (!found) exit 1 }'
+}
+
+validate_community_snapshot() {
+  require_file "${COMMUNITY_SNAPSHOT_VERIFIER}"
+  git -C "${FORK_DIR}" ls-files --error-unmatch \
+    scripts/community-agent-snapshot.selection.json \
+    src/services/communityAgentSnapshot.snapshot.json >/dev/null 2>&1 || {
+      echo "Community snapshot manifest and selection must be tracked" >&2
+      exit 1
+    }
+  [[ -n "$(git -C "${FORK_DIR}" ls-files 'public/community-agent-snapshot/avatars/*')" ]] || {
+    echo "Community snapshot avatars must be tracked" >&2
+    exit 1
+  }
+  COMMUNITY_METADATA="$(node "${COMMUNITY_SNAPSHOT_VERIFIER}" "${FORK_DIR}")"
+  COMMUNITY_AGENT_COUNT="$(community_metadata_value COMMUNITY_AGENT_COUNT)"
+  COMMUNITY_SNAPSHOT_FETCHED_AT="$(community_metadata_value COMMUNITY_SNAPSHOT_FETCHED_AT)"
+  COMMUNITY_SNAPSHOT_SHA256="$(community_metadata_value COMMUNITY_SNAPSHOT_SHA256)"
+  COMMUNITY_SELECTION_SHA256="$(community_metadata_value COMMUNITY_SELECTION_SHA256)"
+  COMMUNITY_ASSET_SET_SHA256="$(community_metadata_value COMMUNITY_ASSET_SET_SHA256)"
+  COMMUNITY_SOURCE_REPOSITORY="$(community_metadata_value COMMUNITY_SOURCE_REPOSITORY)"
+  COMMUNITY_SOURCE_LICENSE="$(community_metadata_value COMMUNITY_SOURCE_LICENSE)"
+  COMMUNITY_SOURCE_LICENSE_URL="$(community_metadata_value COMMUNITY_SOURCE_LICENSE_URL)"
+}
+
 verify_linux_amd64_image() {
   local image="$1" architecture os
   architecture="$(docker image inspect -f '{{.Architecture}}' "${image}")"
@@ -230,6 +261,7 @@ require_command node
 require_command shasum
 require_command tar
 validate_fork
+validate_community_snapshot
 require_digest_ref NODE_BASE_IMAGE "${NODE_BASE_IMAGE}"
 require_digest_ref BUSYBOX_BASE_IMAGE "${BUSYBOX_BASE_IMAGE}"
 require_digest_ref PARADEDB_SOURCE_IMAGE "${PARADEDB_SOURCE_IMAGE}"
@@ -344,6 +376,10 @@ docker scout sbom --format spdx --output "${STAGING_DIR}/sbom/lobehub.spdx.json"
   # Corepack 自身的默认 pnpm 版本不一定服从目标仓库的 packageManager；这里显式锁定
   # 与 fork 一致的版本，避免许可证清单阶段在完整镜像构建完成后才因版本漂移失败。
   corepack pnpm@10.33.0 --dir "${FORK_DIR}" licenses list --prod --json
+  printf '\nCommunity Agent snapshot source: %s\n' "${COMMUNITY_SOURCE_REPOSITORY}"
+  printf 'Community Agent snapshot license: %s (%s)\n' \
+    "${COMMUNITY_SOURCE_LICENSE}" "${COMMUNITY_SOURCE_LICENSE_URL}"
+  printf 'Community Agent snapshot SHA-256: %s\n' "${COMMUNITY_SNAPSHOT_SHA256}"
 } >"${STAGING_DIR}/LICENSES.txt"
 
 cat >"${STAGING_DIR}/approved-resources.json" <<EOF
@@ -353,6 +389,7 @@ cat >"${STAGING_DIR}/approved-resources.json" <<EOF
   "resources": [
     {"type":"source","name":"lobehub/lobehub","version":"${UPSTREAM_VERSION}","commit":"${UPSTREAM_COMMIT}","approved":true},
     {"type":"fork-source","name":"lobehub-platform","version":"${INTERNAL_VERSION}","commit":"${FORK_COMMIT}","approved":true},
+    {"type":"community-agent-snapshot","source":"${COMMUNITY_SOURCE_REPOSITORY}","license":"${COMMUNITY_SOURCE_LICENSE}","licenseUrl":"${COMMUNITY_SOURCE_LICENSE_URL}","fetchedAt":"${COMMUNITY_SNAPSHOT_FETCHED_AT}","agentCount":${COMMUNITY_AGENT_COUNT},"snapshotSha256":"${COMMUNITY_SNAPSHOT_SHA256}","selectionSha256":"${COMMUNITY_SELECTION_SHA256}","assetSetSha256":"${COMMUNITY_ASSET_SET_SHA256}","approved":true},
     {"type":"container-base","reference":"${NODE_BASE_IMAGE}","approved":true},
     {"type":"container-base","reference":"${BUSYBOX_BASE_IMAGE}","approved":true},
     {"type":"container","reference":"${PARADEDB_SOURCE_IMAGE}","approved":true},

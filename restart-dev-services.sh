@@ -30,6 +30,7 @@ env_file=""
 skip_backend_build=false
 skip_frontend_build=false
 with_lobehub=false
+lobehub_mode="offline"
 with_workflow=true
 frontend_dependencies_checked=false
 # 后端需要直连数据库和 Redis，显式清空 JVM 从系统继承的代理属性。
@@ -47,7 +48,7 @@ BACKEND_JAVA_DIRECT_NETWORK_ARGS=(
 
 usage() {
   cat <<'USAGE'
-Usage: ./restart-dev-services.sh [--profile test|local] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--without-workflow] [--with-lobehub] [--help]
+Usage: ./restart-dev-services.sh [--profile test|local] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--without-workflow] [--with-lobehub] [--lobehub-mode offline|online] [--help]
 
 Compile and restart the local platform services one by one. Each service is
 stopped (kill old process + screen session) before its new instance starts,
@@ -89,6 +90,8 @@ Options:
   --with-lobehub         Opt in to the independent LobeHub fork on http://127.0.0.1:3210.
                          Reuses TEST_AGENT_REDIS_* with REDIS_PREFIX=lobehub:app;
                          the fork appends ':' so actual keys use lobehub:app:*.
+  --lobehub-mode         offline (default) keeps platform SSO and enterprise network policy;
+                         online uses LobeHub's own login and the live Community catalog.
   --help                 Show this help.
 
 Environment overrides:
@@ -139,6 +142,14 @@ while [[ $# -gt 0 ]]; do
       with_lobehub=true
       shift
       ;;
+    --lobehub-mode)
+      [[ $# -ge 2 ]] || {
+        echo "--lobehub-mode requires offline or online." >&2
+        exit 2
+      }
+      lobehub_mode="$2"
+      shift 2
+      ;;
     --without-workflow)
       with_workflow=false
       shift
@@ -160,6 +171,14 @@ case "${profile}" in
     ;;
   *)
     echo "Unsupported profile: ${profile}. Expected test or local." >&2
+    exit 2
+    ;;
+esac
+
+case "${lobehub_mode}" in
+  offline|online) ;;
+  *)
+    echo "Unsupported LobeHub development mode: ${lobehub_mode}. Expected offline or online." >&2
     exit 2
     ;;
 esac
@@ -978,6 +997,7 @@ if [[ "${with_lobehub}" == "true" ]]; then
   }
   export TEST_AGENT_DEV_LOG_DIR="${LOG_DIR}"
   export LOBEHUB_DEV_ENV_FILE="${LOBEHUB_DEV_ENV_FILE:-${LOG_DIR}/lobehub-dev.env}"
+  export TEST_AGENT_LOBEHUB_DEV_MODE="${lobehub_mode}"
   "${LOBEHUB_DEV_SCRIPT}" prepare
   # 同一份 HMAC 被加载到平台后端；文件由 helper 生成在 .tmp 且权限为 0600。
   load_env_file "${LOBEHUB_DEV_ENV_FILE}"

@@ -18,7 +18,7 @@ printf 'DATABASE_URL=secret\n' >"${BASE_DIR}/config/lobehub.env"
 chmod 0600 "${BASE_DIR}/config/lobehub.env"
 printf 'db-before-backup\n' >"${BASE_DIR}/lobehub/paradedb/base/proof.txt"
 printf 'object-before-backup\n' >"${BASE_DIR}/lobehub/rustfs/data/proof.txt"
-printf 'LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.5\nLOBEHUB_FORK_COMMIT=57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c\n' \
+printf 'LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.7\nLOBEHUB_FORK_COMMIT=bf73f5f2c1e7f3309ecc1eb874ef58ca587b3a04\n' \
   >"${BASE_DIR}/lobehub/release/release.env"
 
 cat >"${FAKE_BIN}/id" <<'EOF'

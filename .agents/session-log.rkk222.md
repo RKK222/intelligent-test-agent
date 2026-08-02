@@ -4742,3 +4742,44 @@
   也尚未初始化，因此尚未生成最终影响报告；仓库只有 `main`，后续还需有实际变更分支才有非空 diff。
 - 未修改 `.env*`、数据库结构/Flyway、RunEvent 类型、HTTP 路径、generated SDK 或 OpenCode 源码；HTTP 请求
   结构保持兼容，仅补充唯一固定工作流的结构化路由语义。并行 LobeHub 脚本和文档改动未纳入本次范围。
+
+## 2026-08-03 - 接入真实 Community Agent 目录与离线快照
+
+### Why
+
+- LobeHub 是通用工作与生活能力入口，既有测试领域自造模板方向不符合产品定位；用户要求在线展示 Community
+  当前已有、可选择的内容，并让企业离线包能够携带经过选择和审计的真实社区 Agent。
+- 原在线 onboarding 还要求单独 Marketplace 授权；自动 M2M 接入初版沿用 GET query 交换 `clientSecret`，
+  会让凭据进入 Next.js 访问日志，不能作为安全交付。
+
+### What
+
+- 独立 fork 在 `bf73f5f2c1e7f3309ecc1eb874ef58ca587b3a04` 锁定为
+  `v2.2.11-platform.7`：在线 onboarding 自动建立短期 Marketplace M2M 会话并读取实时 Community，凭据改由
+  tRPC mutation 的 POST body 交换；用户不再执行 Community OAuth。在线安装仍保持 Community fork 语义。
+- 离线模式从 fork 内版本化快照读取，当前冻结 13 个通用类别、118 个官方且已验证 Agent 及 118 个本地头像；
+  安装直接创建本地 Agent，不访问 Marketplace、创建 Community 组织或上报事件。选择清单默认同步精选目录，
+  额外条目使用 Community 真实 identifier，不允许手工编造生成 JSON。
+- 平台本地启动增加 `--lobehub-mode online|offline`；在线模式关闭平台 SSO/企业离线网络策略和不兼容的平台入口，
+  默认离线行为保持不变。企业构建器新增快照来源、许可证、自包含依赖、头像集合和 SHA-256 校验，并把元数据
+  写入 `approved-resources.json` 与 `LICENSES.txt`。
+
+### How
+
+- 快照同步器只调用 Community 公开只读接口，有界重试，只接收官方、已验证、配置完整且没有在线 Plugin /
+  Knowledge Base 依赖的 Agent；记录 Community 页面、作者、官方 `lobehub/lobe-chat-agents` 仓库及 MIT 许可证。
+- fork 相关 Community 测试 14 项、tRPC 上下文 28 项、Marketplace/MCP 回归 44 项通过，`bun run check --type`
+  与定向 ESLint 通过。平台快照防篡改、构建、客户端契约/工具包、定稿、安装、备份、探针、发布和开发脚本测试
+  全部通过。
+- 使用 JDK 25、未修改的 `.env.test` 和 `--lobehub-mode online` 完整构建后重启一次，并在安全修正后再次重启；
+  8080、3000、8090 为 HTTP 200，3210 正常跳转。真实 Community 接口返回 200，浏览器渲染 13 类/118 项，
+  “战略顾问”选择后“继续 (1)”启用；未点击继续，未产生 Community fork 写操作。新日志不含 `clientSecret`
+  或 GET `registerM2MToken`。
+
+### Result
+
+- 本地在线模式可自动加载并选择 Community 当前真实目录；离线发布可从同一社区内容生成可审计、自包含快照。
+  后续新增内容先在 Community 选择 identifier，更新选择清单并重新运行 `bun run community:snapshot`、测试、
+  版本提交和企业打包；贡献新社区内容仍走官方 `lobehub/lobe-chat-agents` 仓库审核。
+- 本次不修改平台 HTTP API、事件、数据库/Flyway/MyBatis SQL、generated SDK、OpenCode 源码或 `.env*`。
+  `.7` 完整企业服务端/客户端介质和 fork 转运 ZIP 尚未构建；既有 `.5` 介质仅为历史证据，不能复用或改名。

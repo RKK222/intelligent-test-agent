@@ -196,9 +196,9 @@ test('offline deployment helper runs the real platform probe in the locked app i
     await writeFile(
       envFile,
       [
-        'LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.5',
-        'LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.5',
-        'LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.5',
+        'LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.7',
+        'LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.7',
+        'LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.7',
         'POSTGRES_DB=lobehub',
         'POSTGRES_USER=lobehub',
         'POSTGRES_PASSWORD=database-password-at-least-32-bytes',
@@ -244,11 +244,11 @@ test('offline deployment helper runs the real platform probe in the locked app i
     await writeFile(
       path.join(releaseDir, 'release.env'),
       [
-        'LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.5',
+        'LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.7',
         `LOBEHUB_APP_IMAGE_ID=sha256:${'a'.repeat(64)}`,
-        'LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.5',
+        'LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.7',
         `LOBEHUB_PARADEDB_IMAGE_ID=sha256:${'b'.repeat(64)}`,
-        'LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.5',
+        'LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.7',
         `LOBEHUB_RUSTFS_IMAGE_ID=sha256:${'c'.repeat(64)}`,
         '',
       ].join('\n'),

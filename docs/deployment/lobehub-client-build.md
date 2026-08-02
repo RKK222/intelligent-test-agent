@@ -15,15 +15,15 @@ deploy/internal/build-lobehub-client-kit.sh \
   --output-dir /Users/huang/Desktop/mimoagent/0709/lobehub-client-build-kit
 ```
 
-输出为 `lobehub-client-build-kit-v2.2.11-platform.5.zip` 及同名 `.sha256`。工具包只含锁定 commit 的
+输出为 `lobehub-client-build-kit-v2.2.11-platform.7.zip` 及同名 `.sha256`。工具包只含锁定 commit 的
 `git archive`、版本锁、构建脚本、验收模板和自身完整性清单；不含 `.git`、`node_modules`、签名私钥、已签名
 客户端或预先通过的审批。把 ZIP 和 SHA 文件分别交给受控 Windows、Linux 构建机，解压前先校验外层 SHA，
 解压后再校验 `BUILD_KIT_SHA256SUMS`。构建机允许联网获取锁文件中的依赖，但不得叠加 LobeHub Cloud 仓库或
 替换源码、lockfile、Electron 运行时及构建脚本。
 
-当前外网 Mac 已生成并校验上述 `.5` 真实工具包，ZIP 大小为 `53453544` 字节，SHA-256 为
+当前外网 Mac 已生成并校验的 `.5` 真实工具包，ZIP 大小为 `53453544` 字节，SHA-256 为
 `10fba3e98938252eb0ca7a3a40d0425d8f043ebe268ee267c2e019f3e2210ee1`；旧 `.3`/`.4` 工具包只作为归档，不能
-继续用于 `.5` 客户端构建。
+继续使用。`.6` 工具包尚未生成，必须从当前锁定 commit 重新构建并登记新摘要。
 
 ## 2. 固定构建环境
 
@@ -140,7 +140,8 @@ deploy/internal/finalize-lobehub-artifacts.sh \
 然后用共享客户端契约验证正式签名/审批文件；输入目录保持不变，输出目录重新生成精确校验和。输出父目录必须
 预先存在；工具使用相邻锁并在复制前后复核服务端清单、六项客户端/证据摘要和输出 inode，检测到输入变化或
 并发替换时失败关闭。当前
-`v2.2.11-platform.5` server-only 实物必须记录 `LOBEHUB_LINUX_CLIENT_APPROVED=false`；定稿器对早期构建器
+既有 `v2.2.11-platform.5` server-only 实物必须记录 `LOBEHUB_LINUX_CLIENT_APPROVED=false`，且不能在 `.6`
+版本锁下定稿；定稿器对早期构建器
 缺失该字段的兼容不能把状态提升为已批准。只有全部客户端门禁通过后，输出才会记录 Windows/Linux 为
 `true`。磁盘必须为新完整目录预留至少
 server-only 目录大小及 ZIP 打包余量。

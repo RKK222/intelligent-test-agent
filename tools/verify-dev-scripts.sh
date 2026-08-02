@@ -53,6 +53,10 @@ if [[ "${restart_help}" != *"--with-lobehub"* ]]; then
   echo "${restart_help}" >&2
   fail "restart script help should document the opt-in LobeHub development mode"
 fi
+if [[ "${restart_help}" != *"--lobehub-mode"* ]]; then
+  echo "${restart_help}" >&2
+  fail "restart script help should document LobeHub online/offline selection"
+fi
 if [[ "${restart_help}" != *"--without-workflow"* ]]; then
   echo "${restart_help}" >&2
   fail "restart script help should document the workflow opt-out"

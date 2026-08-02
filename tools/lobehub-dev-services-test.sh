@@ -32,6 +32,18 @@ grep -Fx 'TEST_AGENT_LOBEHUB_DEV_BOOTSTRAP_ENABLED=true' "${GENERATED_ENV}" >/de
   echo 'LobeHub dev helper must opt the platform backend into local parameter bootstrap.' >&2
   exit 1
 }
+grep -Fx 'TEST_AGENT_LOBEHUB_DEV_TARGET_ENABLED=true' "${GENERATED_ENV}" >/dev/null || {
+  echo 'LobeHub offline dev mode must keep the platform entry enabled.' >&2
+  exit 1
+}
+grep -Fx 'PLATFORM_SSO_ENABLED=1' "${GENERATED_ENV}" >/dev/null || {
+  echo 'LobeHub offline dev mode must keep platform SSO enabled.' >&2
+  exit 1
+}
+grep -Fx 'LOBEHUB_ENTERPRISE_OFFLINE=1' "${GENERATED_ENV}" >/dev/null || {
+  echo 'LobeHub offline dev mode must keep the enterprise network policy enabled.' >&2
+  exit 1
+}
 grep -Fx 'TEST_AGENT_LOBEHUB_DEV_BASE_URL=http://127.0.0.1:3210' "${GENERATED_ENV}" >/dev/null || {
   echo 'LobeHub dev helper must pass the fixed loopback chat origin to the platform bootstrap.' >&2
   exit 1
@@ -42,6 +54,29 @@ grep -Fx 'TEST_AGENT_LOBEHUB_DEV_EMAIL_DOMAIN=lobehub.local' "${GENERATED_ENV}" 
 }
 [[ "$(stat -c '%a' "${GENERATED_ENV}" 2>/dev/null || stat -f '%Lp' "${GENERATED_ENV}")" == 600 ]] || {
   echo 'Generated LobeHub dev environment must keep mode 0600.' >&2
+  exit 1
+}
+
+# 在线模式只切换认证与网络策略，不改写任何用户 dotenv，并关闭不可用的平台票据入口。
+ONLINE_ENV="${TEST_ROOT}/lobehub-online.env"
+TEST_AGENT_LOBEHUB_DEV_MODE=online \
+  TEST_AGENT_DEV_LOG_DIR="${TEST_ROOT}/logs" \
+  LOBEHUB_DEV_ENV_FILE="${ONLINE_ENV}" \
+  bash "${HELPER}" prepare >/dev/null
+grep -Fx 'TEST_AGENT_LOBEHUB_DEV_MODE=online' "${ONLINE_ENV}" >/dev/null || {
+  echo 'LobeHub online dev mode must be recorded in its generated runtime environment.' >&2
+  exit 1
+}
+grep -Fx 'PLATFORM_SSO_ENABLED=0' "${ONLINE_ENV}" >/dev/null || {
+  echo 'LobeHub online dev mode must disable platform SSO.' >&2
+  exit 1
+}
+grep -Fx 'LOBEHUB_ENTERPRISE_OFFLINE=0' "${ONLINE_ENV}" >/dev/null || {
+  echo 'LobeHub online dev mode must allow the live Community catalog.' >&2
+  exit 1
+}
+grep -Fx 'TEST_AGENT_LOBEHUB_DEV_TARGET_ENABLED=false' "${ONLINE_ENV}" >/dev/null || {
+  echo 'LobeHub online dev mode must disable the incompatible platform ticket entry.' >&2
   exit 1
 }
 

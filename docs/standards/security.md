@@ -248,8 +248,12 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 - `LOBEHUB_ENABLED=true` 不是绕过配置校验的开关：固定聊天 origin、虚拟邮箱域和唯一 owner 必须同时脱离
   migration 占位值，平台才允许落票据。现场 `validate-config` 还必须核对 digest 镜像、secret 长度、离线开关、
   Cookie/Session 契约和执行能力门禁，任一不满足都禁止 migration 或启动 app。
+- 本地在线模式自动申请 Marketplace M2M 会话时，`clientSecret` 只能通过 POST body 发送；禁止使用 query
+  procedure，避免凭据进入 URL、Next.js 访问日志、反向代理历史或浏览器历史。
 - 完全离线部署必须在 UI 和服务端同时关闭公网搜索、SaaS Connector、BYOK、自定义 Base URL、遥测、在线更新、
-  Marketplace、CDN 与运行期下载。`v2.2.11-platform.5` 对 Windows/Linux 都强制
+  Marketplace、CDN 与运行期下载。离线可选 Agent 只能来自锁定 fork 中经过来源、许可证、官方/验证状态、
+  自包含依赖和本地头像 SHA-256 校验的 Community 快照；安装不得产生 Marketplace 写请求。`v2.2.11-platform.7`
+  对 Windows/Linux 都强制
   `LOBEHUB_DEVICE_EXECUTION_MODE=disabled`，不存在通过旧变量放开的路径；后续 Linux 执行版本仍须在目标主机
   通过真实边界验收并 fail closed，且提供 root 所有、mode `0600`、绑定当前发行版/内核的通过证据。
 - 企业客户端必须从锁定 fork commit 的源码工具包在原生 Windows x64 / Linux x86_64 构建，仿真或交叉构建

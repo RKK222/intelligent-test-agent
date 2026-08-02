@@ -27,9 +27,21 @@ Overrides:
   TEST_AGENT_LOBEHUB_FORK_DIR  Independent fork directory (default: ../lobehub-platform).
   LOBEHUB_DEV_ENV_FILE         Generated runtime env path.
   LOBEHUB_DEV_APP_URL          Local LobeHub URL (default: http://127.0.0.1:3210).
+  TEST_AGENT_LOBEHUB_DEV_MODE  offline (default) or online. Online mode uses the
+                               live LobeHub Community and disables platform SSO.
   TEST_AGENT_LOBEHUB_DEV_OWNER_UNIFIED_AUTH_ID
                                Explicit local owner when no unique eligible super admin exists.
 USAGE
+}
+
+validate_dev_mode() {
+  case "${TEST_AGENT_LOBEHUB_DEV_MODE:-offline}" in
+    offline|online) ;;
+    *)
+      echo "Unsupported LobeHub development mode: ${TEST_AGENT_LOBEHUB_DEV_MODE}. Expected offline or online." >&2
+      exit 2
+      ;;
+  esac
 }
 
 require_command() {
@@ -65,6 +77,7 @@ validate_generated_value() {
 }
 
 write_env_file() {
+  validate_dev_mode
   require_command node
   require_command openssl
   mkdir -p "${LOG_DIR}"
@@ -109,12 +122,21 @@ write_env_file() {
     redis_url="redis://${redis_host}:${redis_port}/0"
   fi
 
-  local app_origin platform_frontend platform_backend db_port s3_port
+  local app_origin platform_frontend platform_backend db_port s3_port platform_sso enterprise_offline target_enabled
   app_origin="${APP_URL%/}"
   platform_frontend="${TEST_AGENT_FRONTEND_URL:-http://127.0.0.1:3000}"
   platform_backend="${TEST_AGENT_BASE_URL:-http://127.0.0.1:8080}"
   db_port="${LOBEHUB_DEV_DB_PORT:-55432}"
   s3_port="${LOBEHUB_DEV_S3_PORT:-59000}"
+  if [[ "${TEST_AGENT_LOBEHUB_DEV_MODE:-offline}" == "online" ]]; then
+    platform_sso=0
+    enterprise_offline=0
+    target_enabled=false
+  else
+    platform_sso=1
+    enterprise_offline=1
+    target_enabled=true
+  fi
 
   local pair
   for pair in \
@@ -160,8 +182,9 @@ write_env_file() {
     printf 'S3_SECRET_ACCESS_KEY=%s\n' "${rustfs_secret}"
     printf 'S3_ENABLE_PATH_STYLE=1\n'
     printf 'S3_SET_ACL=0\n'
-    printf 'PLATFORM_SSO_ENABLED=1\n'
-    printf 'LOBEHUB_ENTERPRISE_OFFLINE=1\n'
+    printf 'TEST_AGENT_LOBEHUB_DEV_MODE=%s\n' "${TEST_AGENT_LOBEHUB_DEV_MODE:-offline}"
+    printf 'PLATFORM_SSO_ENABLED=%s\n' "${platform_sso}"
+    printf 'LOBEHUB_ENTERPRISE_OFFLINE=%s\n' "${enterprise_offline}"
     printf 'AGENT_RUNTIME_MODE=local\n'
     printf 'PLATFORM_LAUNCH_URL=%s/lobehub/launch\n' "${platform_frontend%/}"
     printf 'PLATFORM_SSO_REDEEM_URL=%s/api/internal/platform/lobehub-sso/tickets/redeem\n' "${platform_backend%/}"
@@ -172,6 +195,8 @@ write_env_file() {
     printf 'TEST_AGENT_LOBEHUB_HMAC_SECRET=%s\n' "${hmac}"
     # 仅供 test/local 后端 Runner 使用；Runner 仍会拒绝非回环 PostgreSQL，不能影响共享数据库。
     printf 'TEST_AGENT_LOBEHUB_DEV_BOOTSTRAP_ENABLED=true\n'
+    # 在线模式使用 LobeHub 自身登录，平台一次性票据不可用，因此显式关闭平台入口避免误导用户。
+    printf 'TEST_AGENT_LOBEHUB_DEV_TARGET_ENABLED=%s\n' "${target_enabled}"
     printf 'TEST_AGENT_LOBEHUB_DEV_BASE_URL=%s\n' "${app_origin}"
     printf 'TEST_AGENT_LOBEHUB_DEV_EMAIL_DOMAIN=lobehub.local\n'
     printf 'TELEMETRY_DISABLED=1\n'
@@ -331,7 +356,9 @@ restart_all() {
     )
   fi
   wait_for_app
-  start_scheduler
+  if [[ "${TEST_AGENT_LOBEHUB_DEV_MODE:-offline}" == "offline" ]]; then
+    start_scheduler
+  fi
 }
 
 status_all() {

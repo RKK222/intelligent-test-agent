@@ -32,26 +32,26 @@ for file in \
   images/lobehub-image.tar images/paradedb-image.tar images/rustfs-image.tar \
   clients/lobehub-windows-x64.exe clients/lobehub-linux-x86_64.tar.gz \
   bin/mc-linux-amd64 sbom/lobehub.spdx.json \
-  source/lobehub-v2.2.11-platform.5.tar.gz \
+  source/lobehub-v2.2.11-platform.7.tar.gz \
   approved-resources.json LICENSES.txt; do
   printf 'installer-fixture:%s\n' "${file}" >"${ARTIFACT_DIR}/${file}"
 done
 
 cat >"${ARTIFACT_DIR}/release.env" <<'EOF'
-LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.5
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.7
 LOBEHUB_UPSTREAM_VERSION=v2.2.11
 LOBEHUB_UPSTREAM_COMMIT=5b4cef6
-LOBEHUB_FORK_COMMIT=57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c
+LOBEHUB_FORK_COMMIT=bf73f5f2c1e7f3309ecc1eb874ef58ca587b3a04
 LOBEHUB_PLATFORM_CONTRACT_VERSION=2
 LOBEHUB_PARADEDB_POSTGRES_MAJOR=17
 LOBEHUB_WINDOWS_AUTHENTICODE_VERIFIED=true
 LOBEHUB_LINUX_CLIENT_APPROVED=true
 LOBEHUB_LINUX_EXECUTION_DEFAULT=false
-LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.5
+LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.7
 LOBEHUB_APP_IMAGE_ID=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.5
+LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.7
 LOBEHUB_PARADEDB_IMAGE_ID=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.5
+LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.7
 LOBEHUB_RUSTFS_IMAGE_ID=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 EOF
 
@@ -82,8 +82,8 @@ cat >"${ARTIFACT_DIR}/linux-client-build-evidence.txt" <<EOF
 LINUX_BUILD_STATUS=Candidate
 LINUX_BUILDER=linux-builder@example.internal
 LINUX_CLIENT_FILE_SHA256=${linux_sha}
-LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.5
-LOBEHUB_FORK_COMMIT=57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.7
+LOBEHUB_FORK_COMMIT=bf73f5f2c1e7f3309ecc1eb874ef58ca587b3a04
 CLIENT_ARCHITECTURE=x86_64
 CLIENT_EXECUTION_MODE=disabled
 BUILD_OS=Enterprise Linux Builder 9.6
@@ -97,8 +97,8 @@ AUTHENTICODE_STATUS=Valid
 AUTHENTICODE_SUBJECT=CN=Enterprise Release Signing
 AUTHENTICODE_THUMBPRINT=0123456789ABCDEF0123456789ABCDEF01234567
 AUTHENTICODE_FILE_SHA256=${windows_sha}
-LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.5
-LOBEHUB_FORK_COMMIT=57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.7
+LOBEHUB_FORK_COMMIT=bf73f5f2c1e7f3309ecc1eb874ef58ca587b3a04
 CLIENT_ARCHITECTURE=x64
 CLIENT_EXECUTION_MODE=disabled
 EOF
@@ -117,8 +117,8 @@ cat >"${ARTIFACT_DIR}/linux-client-verification.txt" <<EOF
 LINUX_APPROVAL_STATUS=Approved
 LINUX_APPROVER=security-reviewer@example.internal
 LINUX_CLIENT_FILE_SHA256=${linux_sha}
-LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.5
-LOBEHUB_FORK_COMMIT=57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.7
+LOBEHUB_FORK_COMMIT=bf73f5f2c1e7f3309ecc1eb874ef58ca587b3a04
 CLIENT_ARCHITECTURE=x86_64
 CLIENT_EXECUTION_MODE=disabled
 LINUX_VALIDATION_OS=Enterprise Linux 9.6

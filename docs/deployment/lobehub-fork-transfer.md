@@ -9,16 +9,17 @@ scanning，也不能把上游公开历史中的测试字符串解释为企业凭
 
 ## 当前锁定版本与介质
 
-- 内部版本：`v2.2.11-platform.5`；
-- fork commit：`57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c`；
-- 发布分支：`refs/heads/main`；
-- annotated tag：`refs/tags/v2.2.11-platform.5`；
-- 当前外网 Mac 转运件：
-  `~/Desktop/mimoagent/0709/lobehub-fork-transfer/lobehub-fork-transfer-v2.2.11-platform.5.zip`；
-- 当前外层 SHA-256：`2cbca71e90d0fa5925363c530538506e019227a56f0caeae8cf89e0d677843a2`。
+- 内部版本：`v2.2.11-platform.7`；
+- fork commit：`bf73f5f2c1e7f3309ecc1eb874ef58ca587b3a04`；
+- 发布分支：正式生成前必须由仓库管理员确认 `refs/heads/main` 已指向上述 commit；当前本地 checkout 为
+  detached HEAD，不得由自动化擅自新建或移动分支；
+- annotated tag：`refs/tags/v2.2.11-platform.7`；
+- `.6` 转运件尚未生成，因此当前不存在可登记的 `.6` 外层 SHA-256；
+- 既有 `.5` 转运 ZIP 的历史 SHA-256 为
+  `2cbca71e90d0fa5925363c530538506e019227a56f0caeae8cf89e0d677843a2`，不得改名或复用为 `.6`。
 
-上述路径和摘要描述当前已生成的真实介质，不代表企业 Git 远端已创建或已推送。远端 URL、访问控制、分支保护
-和仓库备份仍由企业 Git 管理员按变更单完成。
+`.6` 的 tag 已锁定源码，但转运介质和企业远端均未交付。远端 URL、`main` ref、访问控制、分支保护和仓库备份
+仍由企业 Git 管理员按变更单完成；生成新 ZIP 后必须把真实路径和摘要补入交付记录，不能沿用 `.5` 证据。
 
 ## 外网 Mac 生成
 
@@ -28,7 +29,7 @@ scanning，也不能把上游公开历史中的测试字符串解释为企业凭
 cd /Users/huang/workspace/intelligent-test-agent-gitee
 git -C /Users/huang/workspace/lobehub-platform status --short
 git -C /Users/huang/workspace/lobehub-platform rev-parse refs/heads/main
-git -C /Users/huang/workspace/lobehub-platform rev-parse 'refs/tags/v2.2.11-platform.5^{}'
+git -C /Users/huang/workspace/lobehub-platform rev-parse 'refs/tags/v2.2.11-platform.7^{}'
 
 deploy/internal/build-lobehub-fork-transfer.sh \
   --fork-dir /Users/huang/workspace/lobehub-platform \
@@ -44,8 +45,8 @@ deploy/internal/build-lobehub-fork-transfer.sh \
 ZIP 内包含：
 
 ```text
-lobehub-fork-transfer-v2.2.11-platform.5/
-  lobehub-platform-v2.2.11-platform.5.bundle
+lobehub-fork-transfer-v2.2.11-platform.7/
+  lobehub-platform-v2.2.11-platform.7.bundle
   refs.txt
   IMPORT.md
   SHA256SUMS
@@ -61,17 +62,17 @@ lobehub-fork-transfer-v2.2.11-platform.5/
 
 ```bash
 cd ~/Desktop/mimoagent/0709/lobehub-fork-transfer
-sha256sum -c lobehub-fork-transfer-v2.2.11-platform.5.zip.sha256
-unzip -q lobehub-fork-transfer-v2.2.11-platform.5.zip
-cd lobehub-fork-transfer-v2.2.11-platform.5
+sha256sum -c lobehub-fork-transfer-v2.2.11-platform.7.zip.sha256
+unzip -q lobehub-fork-transfer-v2.2.11-platform.7.zip
+cd lobehub-fork-transfer-v2.2.11-platform.7
 sha256sum -c SHA256SUMS
 grep -Fx 'FORK_DELTA_CREDENTIAL_SCAN=Passed' refs.txt
 
-git bundle list-heads lobehub-platform-v2.2.11-platform.5.bundle
+git bundle list-heads lobehub-platform-v2.2.11-platform.7.bundle
 ```
 
 `git bundle list-heads` 必须只显示两行：`refs/heads/main` 的 commit 必须是
-`57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c`，另一行为 `refs/tags/v2.2.11-platform.5`。tag 行显示的是
+`bf73f5f2c1e7f3309ecc1eb874ef58ca587b3a04`，另一行为 `refs/tags/v2.2.11-platform.7`。tag 行显示的是
 annotated tag object，不要求等于 fork commit；clone 后必须再校验 tag 的解引用结果。
 
 ## 导入企业 Git
@@ -80,18 +81,18 @@ annotated tag object，不要求等于 fork commit；clone 后必须再校验 ta
 前提下执行：
 
 ```bash
-cd ~/Desktop/mimoagent/0709/lobehub-fork-transfer/lobehub-fork-transfer-v2.2.11-platform.5
-git clone lobehub-platform-v2.2.11-platform.5.bundle lobehub-platform
+cd ~/Desktop/mimoagent/0709/lobehub-fork-transfer/lobehub-fork-transfer-v2.2.11-platform.7
+git clone lobehub-platform-v2.2.11-platform.7.bundle lobehub-platform
 cd lobehub-platform
 
 test "$(git branch --show-current)" = main
-test "$(git rev-parse HEAD)" = 57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c
-test "$(git rev-parse 'refs/tags/v2.2.11-platform.5^{}')" = 57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c
+test "$(git rev-parse HEAD)" = bf73f5f2c1e7f3309ecc1eb874ef58ca587b3a04
+test "$(git rev-parse 'refs/tags/v2.2.11-platform.7^{}')" = bf73f5f2c1e7f3309ecc1eb874ef58ca587b3a04
 
 git remote rename origin transfer
 git remote add origin <enterprise-git-url>
 git push --set-upstream origin main
-git push origin refs/tags/v2.2.11-platform.5
+git push origin refs/tags/v2.2.11-platform.7
 ```
 
 `<enterprise-git-url>` 必须替换为现场审批的内部地址；HTTPS 使用企业 credential helper，SSH 使用企业 Git
@@ -100,8 +101,8 @@ git push origin refs/tags/v2.2.11-platform.5
 推送后用只读命令核对远端。预期 `main` 为锁定 fork commit，tag 解引用后也是同一 commit：
 
 ```bash
-git ls-remote origin refs/heads/main refs/tags/v2.2.11-platform.5 \
-  'refs/tags/v2.2.11-platform.5^{}'
+git ls-remote origin refs/heads/main refs/tags/v2.2.11-platform.7 \
+  'refs/tags/v2.2.11-platform.7^{}'
 ```
 
 把远端 URL 的脱敏标识、校验结果、管理员、时间和变更单写入企业运维记录。企业远端验证通过前，本机同级

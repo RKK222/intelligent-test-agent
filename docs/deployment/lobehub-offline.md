@@ -1,6 +1,6 @@
 # LobeHub 企业离线部署
 
-本文描述 LobeHub `v2.2.11-platform.5` 的离线制品、安装、启动、备份和回滚。架构与 fork 必须实现的行为见
+本文描述 LobeHub `v2.2.11-platform.7` 的离线制品、安装、启动、备份和回滚。架构与 fork 必须实现的行为见
 `docs/architecture/lobehub-integration.md`。本仓库不包含独立 fork 源码，只有通过制品门禁的外部构建结果
 才能进入全量包或 LobeHub-only 包。独立 fork 的企业 Git 转运和导入见
 `docs/deployment/lobehub-fork-transfer.md`，不能用运行 ZIP 代替源码托管。
@@ -10,7 +10,7 @@
 | 组件 | 固定基线 | 说明 |
 |---|---|---|
 | LobeHub upstream | `v2.2.11` / `5b4cef6` | 独立内部 fork，不修改本仓库 OpenCode 快照 |
-| LobeHub internal | `v2.2.11-platform.5` / `57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c` | 平台契约版本 `2` |
+| LobeHub internal | `v2.2.11-platform.7` / `bf73f5f2c1e7f3309ecc1eb874ef58ca587b3a04` | 平台契约版本 `2` |
 | LobeHub database | ParadeDB / PostgreSQL 17 | 独立库、账号、密码、数据卷和 migration |
 | Redis | 现有企业实例 DB 0 | 独立 ACL 用户；LobeHub key/channel 仅 `lobehub:app:*` |
 | RustFS | `release.env` 中的不可变 tag、Docker image ID 和 tar SHA-256 | 私有 bucket，容器以 UID 10001 写数据 |
@@ -71,6 +71,64 @@ export PATH="${JAVA_HOME}/bin:/Users/huang/workspace/intelligent-test-agent-gite
 
 本机未安装 JDK 25 时才把 `JAVA_VERSION` 改为 `21`；解析不到 25/21 时停止，不使用 Java 17。
 
+若本次目标是查看和选择 LobeHub Community 当前在线 Agent，而不是验证企业断网策略，则执行：
+
+```bash
+./restart-dev-services.sh --profile test --env-file .env.test --with-lobehub --lobehub-mode online
+```
+
+`online` 使用 LobeHub 自身登录与 Marketplace 短期 M2M 会话，不启用平台 SSO，也不会启动企业离线 scheduler；
+M2M 客户端凭据只经 tRPC mutation 的 POST body 交换，不能进入 URL 或访问日志。平台侧本地入口会被审计关闭，
+避免一次性票据跳转到不兼容的在线认证模式。该开关只用于本地联调，企业发布物仍必须使用默认 `offline` 策略。
+
+## Community Agent 快照与扩充
+
+在线模式展示的是 LobeHub Community 当前实时精选目录；`.6` 当前同步结果为 13 个通用工作/生活类别、118 个
+Agent，不使用测试平台领域的自造模板。企业离线模式读取 fork 内随版本提交的
+`src/services/communityAgentSnapshot.snapshot.json` 和 `public/community-agent-snapshot/avatars/`，安装时直接
+创建本地 Agent，并保留 Community identifier 用于去重和溯源；不会访问 Marketplace、创建 Community 组织、
+fork 在线资源或上报事件。
+
+需要在下一版离线包增加内容时，先在 [LobeHub Agent Market](https://lobehub.com/agent) 选择已经存在的 Agent，
+取得页面 URL 最后一段 `identifier`。在联网、受控构建机编辑独立 fork 的
+`scripts/community-agent-snapshot.selection.json`：默认 `includeCuratedOnboarding=true` 会带入当前精选目录；
+额外条目写入 `additionalAgents`。详情返回旧分类（例如 `office`）时，必须显式映射到当前 13 类之一：
+
+```json
+{
+  "schemaVersion": 1,
+  "includeCuratedOnboarding": true,
+  "additionalAgents": [
+    {
+      "identifier": "agent-template-strategy-consultant",
+      "category": "business-strategy"
+    }
+  ]
+}
+```
+
+随后执行：
+
+```bash
+cd /path/to/lobehub-platform
+bun run community:snapshot
+bun run check --type
+bunx vitest run --silent='passed-only' \
+  scripts/syncCommunityAgentSnapshot.test.ts \
+  src/services/communityAgentSnapshot.test.ts
+```
+
+同步器只调用 Community 公开只读接口，具备有界重试；它只接受官方、已验证、配置完整且不依赖在线 Plugin /
+Knowledge Base 的 Agent，下载头像并记录内容哈希、作者、Community 页面、官方源仓库和 MIT 许可证。生成的
+JSON 与头像禁止手改，必须与选择清单一起提交并升级 fork 版本/tag/平台 `version.env`。若希望把新内容贡献给
+社区本身，应在官方 [lobehub/lobe-chat-agents](https://github.com/lobehub/lobe-chat-agents) 仓库按模板提交；
+进入当前 Community 并通过发布审核后，才能按上述流程选入企业快照。
+
+`build-lobehub-artifacts.sh` 会在构建前逐项复核选择清单、来源、官方/验证状态、离线依赖、头像集合和 SHA-256；
+任何手工篡改都会失败关闭。通过后，锁定 commit 的 `git archive` 会把快照编入应用镜像和源码包，并把 Agent
+数量、抓取时间、快照/选择清单/头像集合摘要、源仓库和许可证写入 `approved-resources.json` 与
+`LICENSES.txt`。因此现场无需也禁止联网补拉模板。
+
 成功条件是脚本依次打印 backend、frontend 和 `LobeHub: http://127.0.0.1:3210`；直接请求聊天根路径在没有
 LobeHub Session 时应返回到平台固定 `/lobehub/launch` 的 307。状态和停止依赖可分别执行：
 
@@ -97,13 +155,13 @@ deploy/internal/build-lobehub-fork-transfer.sh \
   --output-dir deploy/internal/dist-lobehub-fork-transfer
 ```
 
-工具只发布 `refs/heads/main` 和 `refs/tags/v2.2.11-platform.5`，扫描 fork 增量全部可达对象中的高置信
+工具只发布 `refs/heads/main` 和 `refs/tags/v2.2.11-platform.7`，扫描 fork 增量全部可达对象中的高置信
 私钥/token 格式，并执行 Bundle verify、独立 clone、包内
-`SHA256SUMS` 和外层 ZIP SHA-256。当前真实转运件已复制到外网 Mac
-`~/Desktop/mimoagent/0709/lobehub-fork-transfer`，外层 SHA-256 为
-`2cbca71e90d0fa5925363c530538506e019227a56f0caeae8cf89e0d677843a2`。这只表示可转运介质已就绪；企业 Git
-管理员尚未提供内部远端并完成 push/`ls-remote` 验证，因此不能记为内部源码托管完成。完整导入、权限和失败
-处理见 [LobeHub 独立 fork 企业 Git 转运与导入](lobehub-fork-transfer.md)。
+`SHA256SUMS` 和外层 ZIP SHA-256。当前 `.6` checkout 为 detached HEAD，自动化不得擅自新建或移动
+`refs/heads/main`，因此 `.6` 转运件尚未生成；既有 `.5` ZIP 的历史 SHA-256
+`2cbca71e90d0fa5925363c530538506e019227a56f0caeae8cf89e0d677843a2` 不能沿用。仓库管理员确认 `main` 后应重新
+生成、登记新摘要并完成企业远端 push/`ls-remote` 验证。完整导入、权限和失败处理见
+[LobeHub 独立 fork 企业 Git 转运与导入](lobehub-fork-transfer.md)。
 
 ## 外部 fork 制品契约
 
@@ -125,27 +183,27 @@ clients/lobehub-windows-x64.exe
 clients/lobehub-linux-x86_64.tar.gz
 bin/mc-linux-amd64
 sbom/lobehub.spdx.json
-source/lobehub-v2.2.11-platform.5.tar.gz
+source/lobehub-v2.2.11-platform.7.tar.gz
 ```
 
 `SHA256SUMS` 必须恰好覆盖除自身外的全部普通文件，不允许绝对路径、`..`、空白文件名、重复项或符号链接。
 `release.env` 至少包含：
 
 ```dotenv
-LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.5
+LOBEHUB_INTERNAL_VERSION=v2.2.11-platform.7
 LOBEHUB_UPSTREAM_VERSION=v2.2.11
 LOBEHUB_UPSTREAM_COMMIT=5b4cef6
-LOBEHUB_FORK_COMMIT=57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c
+LOBEHUB_FORK_COMMIT=bf73f5f2c1e7f3309ecc1eb874ef58ca587b3a04
 LOBEHUB_PLATFORM_CONTRACT_VERSION=2
 LOBEHUB_PARADEDB_POSTGRES_MAJOR=17
 LOBEHUB_WINDOWS_AUTHENTICODE_VERIFIED=true
 LOBEHUB_LINUX_CLIENT_APPROVED=true
 LOBEHUB_LINUX_EXECUTION_DEFAULT=false
-LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.5
+LOBEHUB_APP_IMAGE=test-agent/lobehub:v2.2.11-platform.7
 LOBEHUB_APP_IMAGE_ID=sha256:<64 lowercase hex>
-LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.5
+LOBEHUB_PARADEDB_IMAGE=test-agent/paradedb:pg17-v2.2.11-platform.7
 LOBEHUB_PARADEDB_IMAGE_ID=sha256:<64 lowercase hex>
-LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.5
+LOBEHUB_RUSTFS_IMAGE=test-agent/rustfs:v2.2.11-platform.7
 LOBEHUB_RUSTFS_IMAGE_ID=sha256:<64 lowercase hex>
 ```
 
@@ -254,12 +312,13 @@ TEST_AGENT_LOBEHUB_ARTIFACT_DIR=/absolute/path/to/lobehub-release-artifacts \
 再 `scp` 到目标服务器 `/data/0709`；不要在中转机创建 `/data/0709`，也不要描述为从外网 Mac 直接 scp。
 不得在现场联网补拉镜像、npm 包、Marketplace、Connector 或客户端。
 
-当前 `.5` server-only 实物位于 `deploy/internal/dist-lobehub-server`，大小约 2.2 GB；其 `release.env`
+现存 `.5` server-only 实物位于 `deploy/internal/dist-lobehub-server`，大小约 2.2 GB；其 `release.env`
 SHA-256 为 `3c94d96377fc192301be0851dbd3eeaf15965108eb20fa67e069e2ed9919cc03`，`SHA256SUMS` 文件自身 SHA-256 为
 `39c17085322d130045bdbe94d969be9b32ca6abc758ce37b6597ec35a4c4dccf`，应用镜像 ID 为
 `sha256:7f504fb3723402bd6b17165db02937964799beefc96ae22b34bd8ef60c5ce866`。该目录已经从三张真实 tar 完成
 PostgreSQL 17 migration、显式 Redis ACL 与越权拒绝、平台 HMAC/nonce 重放探测、私有 RustFS、app readiness、
-离线/调度门禁、证明数据冷备恢复和二次部署验收。`.5` 原生客户端构建工具包 SHA-256 为
+离线/调度门禁、证明数据冷备恢复和二次部署验收。它不含 `.6` Community 快照且已不匹配当前版本锁，只能
+作为历史验证证据。`.5` 原生客户端构建工具包 SHA-256 为
 `10fba3e98938252eb0ca7a3a40d0425d8f043ebe268ee267c2e019f3e2210ee1`，独立 fork 转运 ZIP SHA-256 为
 `2cbca71e90d0fa5925363c530538506e019227a56f0caeae8cf89e0d677843a2`；完整打包门禁确认
 因缺少 Windows/Linux 正式客户端而失败关闭。完整 `test-agent-lobehub-offline.zip` 仍以企业签名 Windows x64
@@ -387,7 +446,7 @@ app 镜像不创建公网 QStash schedule。单实例 launcher 每分钟只向�
 任务，单次 30 秒超时且不重叠；到期任务以内嵌方式继承 `createdByUserId` 的模型委托。当前手册禁止启动第二个
 app 副本；在没有跨实例选主/锁前横向复制会导致重复 sweep。
 
-`v2.2.11-platform.5` 对 Windows 和 Linux 都强制 `LOBEHUB_DEVICE_EXECUTION_MODE=disabled`，没有可用的
+`v2.2.11-platform.7` 对 Windows 和 Linux 都强制 `LOBEHUB_DEVICE_EXECUTION_MODE=disabled`，没有可用的
 “验收后改 true”路径。Linux 真实沙箱能力需在后续版本另行实现、测试和审批；当前版本修改其它旧布尔变量
 不会放开执行入口。
 

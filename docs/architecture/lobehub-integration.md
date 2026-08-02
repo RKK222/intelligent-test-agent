@@ -1,17 +1,17 @@
 # LobeHub 企业集成契约
 
 本文是平台与独立 LobeHub fork 之间的稳定契约。当前内部版本固定为
-`v2.2.11-platform.5`，上游基线为 [LobeHub v2.2.11](https://github.com/lobehub/lobehub/releases/tag/v2.2.11)、
+`v2.2.11-platform.7`，上游基线为 [LobeHub v2.2.11](https://github.com/lobehub/lobehub/releases/tag/v2.2.11)、
 commit `5b4cef6`。当前仓库承载平台认证、模型网关、前端入口、数据库 migration 和离线交付准入；
 LobeHub fork 源码不放入本仓库。本地开发默认从同级独立仓库 `../lobehub-platform` 读取，当前锁定 fork commit
-为 `57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c`；版本事实源为
+为 `bf73f5f2c1e7f3309ecc1eb874ef58ca587b3a04`；版本事实源为
 `deploy/internal/lobehub/version.env`。企业 Git 管理员仍须把该独立仓库推送到受控内部远端，本机 checkout
 不能替代内部源码托管。平台提供自包含、最小 ref 的 Git Bundle 转运工具，企业导入流程见
 `docs/deployment/lobehub-fork-transfer.md`。
 
 当前 fork 已实现平台票据消费/HMAC 兑换、24 小时 Session、用户和部门 Workspace JIT、委托加密、企业模型
 适配、后台模型身份继承、离线请求门禁、BYOK/本地身份源关闭、默认私有对象和全部设备执行失败关闭。平台仓库
-已提供真实镜像构建器、本地显式启动模式和现场 Docker/systemd 脚本。`v2.2.11-platform.5` 不开放 Linux 本地
+已提供真实镜像构建器、本地显式启动模式和现场 Docker/systemd 脚本。`v2.2.11-platform.7` 不开放 Linux 本地
 执行；目标发行版/内核的真实沙箱和逃逸验收属于后续可执行版本的上线前置项，不得通过环境变量提前开启。
 
 ## 边界与状态
@@ -171,12 +171,17 @@ Linux 客户端如需调用模型，必须通过 loopback broker 到 LobeHub 服
 
 - 关闭公网搜索、SaaS Connector、在线 Marketplace、遥测、更新检查、CDN 资源和运行期插件/模型下载；
   UI 被隐藏的路径也必须在 server action、API、深链和 Labs 中拒绝。
+- 在线本地联调通过短期 Marketplace M2M 会话读取实时 Community 目录；客户端凭据必须经 POST body 交换，
+  禁止进入 URL、访问日志或代理历史。企业离线模式只读取随 fork commit 冻结的 Community 快照。快照必须来自
+  官方已验证目录、保留 Community 页面和 MIT 来源信息、下载头像并锁定
+  SHA-256，且不得包含在线 Plugin 或 Knowledge Base 依赖。离线安装直接创建本地 Agent 并保留来源标识用于
+  去重，不得调用 Marketplace fork、组织创建或事件上报。
 - 禁止 QStash 及公网 workflow 回调；定时任务只能通过上述带独立 Bearer 的 loopback 调度器以内嵌模式执行。
 - Skills、工具和静态资源只能来自审批白名单制品；记录来源、版本、SHA-256、许可证和审批结果。
 - RustFS bucket 保持私有，附件只通过 Workspace 鉴权的短期签名地址或受控下载代理访问。
 - Windows x64 安装包必须使用企业 Authenticode 证书签名；每个 Windows 账号使用独立应用数据和凭据目录。
   terminal、shell、代码 Agent、stdio MCP、设备执行和 Agent 浏览器控制永久禁用。
-- Linux 首期客户端目标为 x86_64，但 `v2.2.11-platform.5` 与 Windows 一样强制禁用全部本地/设备执行。
+- Linux 首期客户端目标为 x86_64，但 `v2.2.11-platform.7` 与 Windows 一样强制禁用全部本地/设备执行。
   后续版本只有在专用单用户受管工作站的目标发行版/内核通过真实沙箱逃逸验证后才能另行设计开启；所有 shell、
   CLI Agent 和后台进程入口必须共享一套显式 sandbox policy，默认拒绝外网、Unix socket、Docker socket、
   SSH Agent、完整 HOME 和平台目录，只开放独立 LobeHub 工作区、临时目录及审批内网地址；沙箱初始化失败

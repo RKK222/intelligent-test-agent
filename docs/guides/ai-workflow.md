@@ -71,6 +71,12 @@ helper 会同时启动并在停止时回收 fork 自带的 loopback 定时调度
 `TEST_AGENT_FRONTEND_URL` 对应的平台前端 origin 一并写入 Better Auth 的可信来源，保证平台 POST 一次性票据时不被
 origin 校验拒绝。参数初始化或 fork readiness 失败时会审计并补偿关闭入口。
 
+需要联调 LobeHub Community 当前在线 Agent 时，改用
+`./restart-dev-services.sh --profile test --env-file .env.test --with-lobehub --lobehub-mode online`。
+在线模式使用 LobeHub 自身登录并开放 Marketplace 网络请求，同时关闭只适用于企业离线模式的平台票据入口；
+生成设置仍只写入 `.tmp/dev-services/lobehub-dev.env`。完成在线联调后，企业交付验收必须重新以默认
+`offline` 模式启动。
+
 Workflow 使用独立的 `test_agent_workflow` PostgreSQL 数据库。数据库尚不存在时，首次执行重启脚本所用的
 `TEST_AGENT_TEST_DB_USERNAME` 必须具备本地 `CREATEROLE` 和 `CREATEDB` 权限；初始化完成后，helper 会先用
 `.tmp/dev-services/workflow/` 中稳定保存的 owner/runtime 密钥验证既有角色并直接复用，后续重启不再要求平台
