@@ -4458,3 +4458,26 @@
 - 公共 Agent 仓库 `master` 已推送 `8b81dc4`，独立 UI 仓库 `wr` 已推送 `9248294b`；当前仓库不包含独立 UI 项目源码。
 - 新链路已完成真实对话、动态配置、单次提交、终态失败原因和可点击报告的端到端验证；本次百度案例本身未通过，原因在独立 UI 平台的小模型执行/判定质量，不能表述为正向案例成功。
 - 新增一个内部 HTTP 配置接口、一个列表 query 参数和两条 Flyway migration；不新增 RunEvent/SSE、关系型业务 SQL、generated SDK、OpenCode 源码或凭据。企业发布前仍需对照目标库 `flyway_schema_history` 做完整基线升级验证。
+
+## 2026-08-02 - 本地重启被工作流权限与 Flyway 历史阻塞
+
+### Why
+
+- 用户要求基于当前本地代码重启开发环境，需要确认 `.env.test`/`test` profile 下的真实启动状态。
+
+### What
+
+- 未修改源码、migration、`.env.test` 或 `.env.local`。默认重启和兼容三服务重启均使用 JDK 25、`.env.test`。
+- 默认启动在工作流 PostgreSQL bootstrap 阶段失败：`bootstrap-workflow.sql:21` 的 `CREATE ROLE` 返回当前连接用户没有 `CREATEROLE` 权限。
+- 使用项目已有 `--without-workflow` 继续重启后端、opencode-manager、前端；Maven 后端构建成功，但后端启动时 Flyway 校验失败，提示已解析但数据库未执行 `20260730090000`，数据库已有更晚 migration。
+
+### How
+
+- 执行：`./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build`，随后执行同命令追加 `--without-workflow`。
+- 按规范未使用 `outOfOrder`、`repair`、忽略 migration 或手工修改 `flyway_schema_history` 掩盖历史分叉；读取 `.tmp/dev-services/workflow/workflow-prepare.log` 和 `.tmp/dev-services/backend.log` 定位原因。
+- 脚本失败后停止了遗留的 manager/frontend screen 会话，避免留下后端未启动而前端/manager仍在运行的半启动状态。
+
+### Result
+
+- 当前工作区干净；8080、3000、8090 均无监听，也没有残留 restart/backend/manager/frontend 进程。
+- 后续要恢复完整本地环境，需先由具备权限的数据库管理员处理工作流 bootstrap 角色权限，并按目标库 `flyway_schema_history` 基线解决 `20260730090000` 的历史分叉；不可通过临时替代环境文件规避。
