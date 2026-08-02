@@ -57,8 +57,19 @@ const canCancel = computed(() => ["QUEUED", "RUNNING", "WAITING_INPUT"].includes
 const workspaceUnavailable = computed(() =>
   ["EXPIRED", "CLEANUP_FAILED"].includes(view.workspaceStatus ?? ""),
 );
+const freshConversation = computed(() =>
+  Boolean(selectedConversation.value)
+  && view.messages.length === 0
+  && view.requiredInput.length === 0
+  && view.scopeInput.length === 0
+  && view.baselineInput.length === 0
+  && !view.taskId
+  && !view.runId
+  && !view.runStatus,
+);
 const needsInitialInput = computed(() =>
-  view.requiredInput.some((value) => ["repositories", "mode", "analysisMode", "analyzerIds", "intent"].includes(value)),
+  freshConversation.value
+  || view.requiredInput.some((value) => ["repositories", "mode", "analysisMode", "analyzerIds", "intent"].includes(value)),
 );
 const hasScopeCandidates = computed(() =>
   view.scopeInput.some((item) => Array.isArray(item.candidatePaths) && item.candidatePaths.length > 0),
@@ -172,6 +183,10 @@ async function sendText(value: string) {
 
 async function submitStructured(input: WorkflowStructuredInput) {
   await submitMessage(composer.value.trim() || "开始代码变动影响分析", input);
+}
+
+function loadRepositoryBranches(repositoryId: string) {
+  return props.api.branches(repositoryId);
 }
 
 async function submitLocal(selector: ScopeSelector) {
@@ -401,7 +416,7 @@ function safeMessage(error: unknown) {
           <WorkflowInputCard
             v-if="needsInitialInput"
             :repository-groups="repositoryGroups"
-            :load-branches="api.branches.bind(api)"
+            :load-branches="loadRepositoryBranches"
             :disabled="sending || active"
             @submit="submitStructured"
           />

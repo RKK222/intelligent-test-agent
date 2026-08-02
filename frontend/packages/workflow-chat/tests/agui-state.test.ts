@@ -2,6 +2,23 @@ import { describe, expect, it } from "vitest";
 import { initialWorkflowViewState, reduceAgUiEvent } from "../src/agui-state";
 
 describe("workflow AG-UI state", () => {
+  it("clears optional run projection fields when a conversation view is reset", () => {
+    const state = initialWorkflowViewState();
+    state.runId = "run_failed";
+    state.taskId = "task_failed";
+    state.runStatus = "FAILED";
+    state.workspaceStatus = "CLEANUP_FAILED";
+    state.currentInput = { mode: "SINGLE" };
+
+    Object.assign(state, initialWorkflowViewState());
+
+    expect(state.runId).toBeUndefined();
+    expect(state.taskId).toBeUndefined();
+    expect(state.runStatus).toBeUndefined();
+    expect(state.workspaceStatus).toBeUndefined();
+    expect(state.currentInput).toBeUndefined();
+  });
+
   it("restores the latest run and workspace from STATE_SNAPSHOT", () => {
     const state = initialWorkflowViewState();
 

@@ -17,6 +17,8 @@ AG-UI durable 投影在 `RUN_STARTED/RUN_FINISHED/RUN_ERROR` 时清理旧的待�
 
 首个且唯一注册的工作流是 `code-change-impact-analysis`。场景 2～4 只能通过新增 `WorkflowDefinition` 和对应图实现扩展，当前不注册、不暴露可执行入口。
 
+当前固定场景的结构化输入卡已经限定唯一注册工作流，服务端直接按注册表路由并校验输入，不重复调用意图模型；只有自然语言输入、报告追问和自然语言局部重分析继续使用 AgentScope。这样仓库和分支选择不依赖模型供应商是否已经初始化，真实代码分析与报告综合仍必须使用平台模型 grant。
+
 ## 进程
 
 - `testagent-workflow api`：HTTP/AG-UI 服务。

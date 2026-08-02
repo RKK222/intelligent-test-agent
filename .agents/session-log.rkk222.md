@@ -4701,3 +4701,44 @@
 - “代码变动影响分析”场景加载已恢复，内部 HMAC 和票据请求不再受宿主机 HTTP(S)/SOCKS 代理环境影响。
 - 本机 8091 按设计无 Runner 监听，因此未执行真实代码分析任务；这不影响页面与控制面加载，但正式分析仍需
   配置合规 Linux Runner。未修改 API 路径、事件、数据库、依赖锁、`.env*`、generated SDK 或 OpenCode 源码。
+
+## 2026-08-03 - 初始化 Bytebase 测试仓库并修复影响分析结构化入口
+
+### Why
+
+- 用户要求把私有 Gitee `wrui233/bytebase-java` 配置为应用代码库并执行真实页面验证。原页面的新对话没有
+  直接展示结构化输入卡，手工发送“开始代码变动影响分析”会先调用尚未初始化的意图模型并返回 500。
+- 真实浏览器复测又发现：从失败任务新建对话时，reactive 投影保留旧 `FAILED/runId` 等可选字段，导致新对话
+  仍显示失败且输入卡被遮蔽。
+
+### What
+
+- 在本地平台创建 `Bytebase Java / bytebase-java` 应用代码库，记录 ID
+  `repo_fe8dba411c2b4a0a8e3af5726e879bb2`，SSH 地址为 `git@gitee.com:wrui233/bytebase-java.git`，类型为
+  `APPLICATION_CODE_REPOSITORY`，并关联到 `F-COSS / app_fcoss`；该仓库当前只有 `main`。
+- 新建空对话直接展示仓库、分支、模式与智能体输入卡；仅当注册表中只有一个工作流且请求携带
+  `structuredInput` 时确定性路由，不再重复调用意图模型，自然语言分类和真实代码分析仍保持模型边界。
+- 初始 AG-UI 投影显式清空所有可选运行字段，修复失败任务切换到新对话后的状态残留；补充前后端回归并同步
+  Workflow API、模块图、前端规范和相关 README。
+
+### How
+
+- HTTPS `git ls-remote` 因私有仓库认证失败，平台/本机 SSH 成功读取 `main`，远端 HEAD 为
+  `e87c82adf3900ae50eec5d0d00bc48edae84018d`。真实 `/repositories/{id}/branches` 返回 200 并展示
+  `main（默认）`。
+- Workflow 全量 106 项通过；本机 Docker 24.0.2 的 Ryuk 容器会被提前移除，使用
+  `TESTCONTAINERS_RYUK_DISABLED=true` 后 PostgreSQL 集成 12 项及全量均通过。`workflow-chat` 14 项、全仓
+  TypeScript/Vue typecheck 通过。前端全量另有一项既有 `AppSourceDialog` 保留时长输入断言失败，与本次文件无关。
+- 使用 JDK 25 和未修改的 `.env.test` 完整重启；8080 health/readiness、3000、8090 health/ready 与 CORS 预检
+  通过。真实 Chrome 提交 Bytebase `main` 后，仓库权限复核成功，结构化消息 POST 200，任务
+  `run_043b0442686e509804727c7895b39197` 进入 Worker。
+
+### Result
+
+- 页面入口、仓库初始化、SSH 分支读取、结构化提交及失败任务后新建对话均已验证；当前浏览器保留
+  Bytebase Java / `main` 的可操作输入页。
+- 真实任务在“冻结提交并准备隔离工作区”按设计失败：本机是 `linux/arm64` Docker 且 8091 无合规
+  Linux Runner，不能绕过宿主 `linux/amd64`、`DOCKER-USER/iptables` 等边界。平台内部模型 provider/token/model
+  也尚未初始化，因此尚未生成最终影响报告；仓库只有 `main`，后续还需有实际变更分支才有非空 diff。
+- 未修改 `.env*`、数据库结构/Flyway、RunEvent 类型、HTTP 路径、generated SDK 或 OpenCode 源码；HTTP 请求
+  结构保持兼容，仅补充唯一固定工作流的结构化路由语义。并行 LobeHub 脚本和文档改动未纳入本次范围。

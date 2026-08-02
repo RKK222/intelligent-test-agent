@@ -27,9 +27,15 @@ export type WorkflowViewState = {
 export function initialWorkflowViewState(): WorkflowViewState {
   return {
     messages: [],
+    // resetView 通过 Object.assign 复用 reactive 对象，显式清空可选字段，避免切换会话后残留旧运行态。
+    runId: undefined,
+    taskId: undefined,
+    runStatus: undefined,
+    workspaceStatus: undefined,
     requiredInput: [],
     scopeInput: [],
     baselineInput: [],
+    currentInput: undefined,
     tools: [],
     reportPublished: false,
   };

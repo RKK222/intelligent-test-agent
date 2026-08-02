@@ -375,6 +375,40 @@ async def test_complete_agentscope_slots_start_without_a_second_confirmation() -
 
 
 @pytest.mark.asyncio
+async def test_structured_input_for_the_only_registered_workflow_skips_intent_model() -> None:
+    store = InMemoryWorkflowStore()
+    conversation = await store.create_conversation("usr_owner", "结构化输入")
+    registry = WorkflowRegistry([impact_analysis_definition()])
+
+    async def unavailable_classifier(message, allowed, context):  # type: ignore[no-untyped-def]
+        del message, allowed, context
+        raise AssertionError("固定场景结构化输入不应调用意图模型")
+
+    result = await ConversationApplicationService(
+        store,
+        registry,
+        RegisteredIntentRouter(registry, unavailable_classifier),
+    ).submit(
+        conversation.id,
+        "usr_owner",
+        MessageSubmission(
+            "req_structured_without_intent_model",
+            "开始代码变动影响分析",
+            {
+                "repositories": [
+                    {"repositoryId": "repo_12345678", "targetBranch": "feature/a"}
+                ],
+                "mode": "SINGLE",
+                "analyzerIds": ["codex"],
+            },
+        ),
+    )
+
+    assert result.status == "QUEUED"
+    assert result.required_input == ()
+
+
+@pytest.mark.asyncio
 async def test_natural_follow_up_can_start_local_reanalysis_instead_of_report_qa() -> None:
     store = InMemoryWorkflowStore()
     conversation = await store.create_conversation("usr_owner", "自然语言局部重分析")

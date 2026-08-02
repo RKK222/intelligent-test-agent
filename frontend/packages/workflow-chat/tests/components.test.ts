@@ -219,6 +219,37 @@ describe("workflow reports and administration", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("shows the structured input card immediately for a fresh conversation", async () => {
+    const conversation = {
+      id: "conv_fresh",
+      title: "代码变动影响分析",
+      ownerUserId: "usr_owner",
+      createdAt: "2026-08-02T00:00:00Z",
+      messages: [],
+    };
+    const api = {
+      me: vi.fn(async () => ({
+        userId: "usr_owner",
+        username: "分析用户",
+        unifiedAuthId: "AUTH_OWNER",
+        roles: [],
+      })),
+      repositories: vi.fn(async () => repositoryGroups),
+      conversations: vi.fn(async () => [conversation]),
+      conversation: vi.fn(async () => conversation),
+      connectEvents: vi.fn(() => ({
+        close: vi.fn(),
+        done: new Promise<void>(() => undefined),
+        lastEventId: () => undefined,
+      })),
+    } as unknown as WorkflowApiClient;
+
+    render(WorkflowChat, { props: { api } });
+
+    expect(await screen.findByRole("heading", { name: "选择要冻结比较的代码分支" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "开始影响分析" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("lets a waiting scope run submit a corrected selector when no candidate was found", async () => {
     let publishEvent: ((event: WorkflowAgUiEvent) => void) | undefined;
     const submitMessage = vi.fn(async () => ({

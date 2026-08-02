@@ -58,7 +58,7 @@
 6. `test-runner` 负责测试运行视图，测试状态来源必须是后端 API 或 RunEvent SSE。
 7. `terminal` 负责 ticket WebSocket 连接、输入、resize、关闭和输出渲染，不创建 ticket、不直连 opencode server。
 8. 文件搜索只过滤已加载文件树的文件名，不在前端自行扫描工作区，也不绕过后端新增搜索能力。
-9. `workflow-api-client` 只负责独立Python协议与fetch SSE；`workflow-chat` 只负责TDesign Chat、输入卡、进度和报告展示。两者不得依赖 `backend-api`、`event-stream-client`、OpenCode SDK或工作台内部状态。
+9. `workflow-api-client` 只负责独立Python协议与fetch SSE；`workflow-chat` 只负责TDesign Chat、输入卡、进度和报告展示。新建空对话必须直接展示固定场景结构化输入卡，不得为了显示表单先发送自然语言意图请求。两者不得依赖 `backend-api`、`event-stream-client`、OpenCode SDK或工作台内部状态。
 
 ## UI 与交互
 

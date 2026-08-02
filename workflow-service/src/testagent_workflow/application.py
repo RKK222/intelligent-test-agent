@@ -11,6 +11,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from testagent_workflow.models import ImpactAnalysisInput, ScopeSelector
 from testagent_workflow.registry import (
+    IntentDecision,
     IntentInvocationContext,
     RegisteredIntentRouter,
     WorkflowRegistry,
@@ -84,15 +85,26 @@ class ConversationApplicationService:
             client_request_id=submission.client_request_id,
         )
         intent_scope_id = user_message.id.removeprefix("msg_")
-        decision = await self._router.classify(
-            submission.text,
-            IntentInvocationContext(
-                user_id=actor_user_id,
-                session_digest=session_digest,
-                task_id=f"intent_task_{intent_scope_id}",
-                run_id=f"intent_run_{intent_scope_id}",
-            ),
-        )
+        registered_workflows = self._registry.ids()
+        if submission.structured_input is not None and len(registered_workflows) == 1:
+            # 当前页面已经由固定场景的结构化表单限定了工作流；此时继续调用意图模型只会
+            # 重复判定同一白名单 ID，并让代码库/分支选择无谓依赖模型供应商可用性。
+            decision = IntentDecision(
+                registered_workflows[0],
+                1.0,
+                {},
+                (),
+            )
+        else:
+            decision = await self._router.classify(
+                submission.text,
+                IntentInvocationContext(
+                    user_id=actor_user_id,
+                    session_digest=session_digest,
+                    task_id=f"intent_task_{intent_scope_id}",
+                    run_id=f"intent_run_{intent_scope_id}",
+                ),
+            )
         definition = self._registry.get(decision.intent_id)
         structured_input = submission.structured_input
         interaction_type = str(decision.slots.get("interactionType", "")).upper()
