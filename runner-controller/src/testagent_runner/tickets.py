@@ -41,7 +41,8 @@ class CheckoutTicketClient:
         self._base_url = base_url.rstrip("/")
         self._runner_id = runner_id
         self._secret = secret
-        self._http = http_client or httpx.AsyncClient(timeout=60)
+        # Java能力地址来自受信任部署配置；一次性票据不得经宿主机代理兑换。
+        self._http = http_client or httpx.AsyncClient(timeout=60, trust_env=False)
 
     async def consume(self, ticket_id: str, task_id: str, run_id: str) -> CheckoutMaterial:
         path = f"/api/internal/workflow-capabilities/v1/checkout-tickets/{ticket_id}/consume"

@@ -51,9 +51,10 @@ class RunnerApiClient:
         self._base_url = base_url.rstrip("/")
         self.runner_id = runner_id
         self._secret = hmac_secret
-        # 代码分析不设总读取时长；连接、写入与连接池等待仍保持故障保护。
+        # 代码分析不设总读取时长；内部Runner请求也不得被宿主机代理转发。
         self._http = http_client or httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=30.0, read=None, write=60.0, pool=30.0)
+            timeout=httpx.Timeout(connect=30.0, read=None, write=60.0, pool=30.0),
+            trust_env=False,
         )
 
     async def prepare(self, task_id: str, payload: dict[str, Any]) -> dict[str, Any]:

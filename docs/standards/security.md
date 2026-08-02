@@ -281,6 +281,7 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 - 浏览器只把现有平台 Bearer 经同源 HTTPS 发给 Python。Python 不签发第二套 Cookie，不调用 Java 验证普通请求；每次 HTTP 请求必须精确 `GET test-agent:token:<完整token>` 和 `PTTL`，同时校验 Redis TTL、`AuthPrincipal.expiresAt`、原 Token 恒等、userId、统一认证号与角色。认证结果不得缓存。
 - Python Redis ACL 账号只能 `PING/GET/PTTL` 且 key pattern 仅为 `test-agent:token:*`；必须显式拒绝 `SCAN`、`KEYS`、写命令、pub/sub 和其他前缀。AG-UI 建连时执行相同校验并每30秒复核，Token 删除、过期或平台登出后立即断流。
 - Java共享能力请求只携带 userId、平台 Token SHA-256 session digest、timestamp、nonce、body digest 和 HMAC-SHA256；固定 client ID 为 `workflow`，密钥至少32字节。Java在签名通过后原子占用 nonce，并实时复核 session marker、用户状态、角色、应用成员、仓库类型/关联/启用状态。原始 Bearer不得在服务间传输。
+- Workflow 到 Java、Worker 到 Runner、Runner 到 Java 的固定内部 HTTP 客户端必须禁用环境代理继承；受签名请求只能按部署配置的内部地址直接发送，不能被宿主机 HTTP(S)/SOCKS 代理或 PAC 路由到第三方。
 - checkout ticket 必须一次性、短期并绑定 user/session/repository/task/run/runner/Runner公钥/目标分支/基线分支。Java只在 Runner兑换时解密个人SSH Key，再以目标Runner公钥封装；Python不可看到明文或密文私钥。Runner只在tmpfs解密，Git完成后立即删除，并强制使用非空普通文件 `known_hosts`。
 - model grant 绑定 user/task/run/client/analyzer，网关覆盖供应商Authorization并隐藏真实Token。刷新必须重新检查当前session与用户；取消先原子写 run 级撤销墓碑，再撤销现存grant，后续并发签发/续期必须失败关闭。
 - 代码分析模型必须使用部署侧配置的模型网关公开ID。Codex配置固定`model_provider`与`responses`接口，OpenCode配置只启用唯一自定义provider并显式传入`--model`；工具默认provider、项目级OpenCode配置、自动更新和公网端点均不得参与选择。分析工具只配置容器内回环relay地址和一次性本地token，禁止直接配置平台grant或平台模型网关。

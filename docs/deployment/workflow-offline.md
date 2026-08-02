@@ -86,6 +86,9 @@ Java的Runner ID、公钥路径和返回给分析容器的模型网关URL也必�
 `backend.env` 中显式配置，示例见 `deploy/internal/backend.env.example`；独立workflow
 离线包同时携带可追加到Java配置的 `deploy/java-capability.env.example` 片段。
 
+Workflow 到 Java、Worker 到 Runner、Runner 到 Java 的固定控制面 HTTP 调用不会继承宿主机的
+HTTP(S)/SOCKS 代理配置。部署必须为这些地址提供直接路由、DNS 和 TLS 信任，不能依赖系统代理转发内部签名请求。
+
 `workflow.env`中的`TEST_AGENT_WORKFLOW_INTENT_MODEL_NAME`、
 `TEST_AGENT_WORKFLOW_SYNTHESIS_MODEL_NAME`、`TEST_AGENT_WORKFLOW_REPORT_QA_MODEL_NAME`和
 `TEST_AGENT_WORKFLOW_ANALYSIS_MODEL_NAME`都必须是平台模型网关`/models`返回的公开模型ID。

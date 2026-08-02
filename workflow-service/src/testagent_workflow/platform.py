@@ -49,7 +49,8 @@ class PlatformCapabilityClient:
             raise ValueError("workflow HMAC密钥至少需要32字节")
         self._base_url = base_url.rstrip("/")
         self._secret = hmac_secret
-        self._http = http_client or httpx.AsyncClient(timeout=30.0)
+        # 平台地址来自受信任部署配置；内部HMAC请求不得被宿主机代理转发。
+        self._http = http_client or httpx.AsyncClient(timeout=30.0, trust_env=False)
         self._clock = clock
         self._nonce_factory = nonce_factory
 

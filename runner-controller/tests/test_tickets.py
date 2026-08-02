@@ -7,6 +7,18 @@ from testagent_runner.tickets import CheckoutTicketClient
 
 
 @pytest.mark.asyncio
+async def test_checkout_ticket_default_client_ignores_environment_proxy() -> None:
+    client = CheckoutTicketClient(
+        "http://platform.test",
+        "runner-a",
+        b"0123456789abcdef0123456789abcdef",
+    )
+
+    assert client._http._trust_env is False  # noqa: SLF001 - 锁定内部调用不继承宿主代理
+    await client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_checkout_material_carries_the_java_bound_target_branch() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         assert "Authorization" not in request.headers

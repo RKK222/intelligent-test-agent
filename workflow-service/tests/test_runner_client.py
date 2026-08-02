@@ -58,6 +58,7 @@ async def test_runner_client_does_not_impose_a_total_analysis_read_timeout() -> 
     )
 
     assert client._http.timeout.read is None  # noqa: SLF001 - 锁定无总分析时长限制
+    assert client._http._trust_env is False  # noqa: SLF001 - 锁定内部调用不继承宿主代理
     await client.aclose()
 
 

@@ -7,6 +7,7 @@
 ## 责任
 
 - 用一次性 checkout ticket 向 Java 兑换 Runner 公钥加密的 Git 凭据。
+- Runner 到 Java 的固定票据兑换调用显式忽略宿主机 HTTP(S)/SOCKS 代理，平台内部地址必须由分析节点直接访问。
 - 在 tmpfs 中解密个人 SSH 私钥，Git 完成后立即擦除。
 - 冻结默认/基线与目标提交，计算 merge-base；从冻结提交读取根目录及嵌套的受跟踪 `.gitattributes`，对当前 detached ref 使用同一授权完整拉取 Git LFS，并只检出已映射且当前用户有权访问的 submodule。
 - 为每个任务创建一个固定镜像 digest 的非特权分析容器；多智能体共享只读源码，使用相互不可列举、读取或改名的独立 HOME、cache 和输出目录。

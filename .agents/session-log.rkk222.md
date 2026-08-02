@@ -4671,3 +4671,33 @@
 - 平台 SSO 适配当前显式要求企业离线模式，因此本次在线启动是直接访问 LobeHub 的临时运行态；再次执行标准
   `restart-dev-services.sh --with-lobehub` 会恢复离线模式。离线模板方案尚未编码实现，也未改动 API、事件、
   数据库、Flyway、generated SDK 或 OpenCode 源码。
+
+## 2026-08-02 - 修复代码变动影响分析内部请求被代理劫持
+
+### Why
+
+- 已登录页面能够进入 Workflow，但 Python 调 Java 的平台共享能力请求继承了宿主机代理环境，回环地址被代理
+  转发并返回 502，导致用户身份、仓库和会话加载失败，页面显示“平台共享能力调用失败”。
+
+### What
+
+- Workflow 到 Java、Worker 到 Runner、Runner 到 Java 的三个固定内部 HTTP 客户端统一关闭 HTTPX 环境代理
+  继承，保留现有超时、签名和依赖注入边界；补充默认客户端回归测试。
+- 同步 Workflow、Runner、企业离线部署和安全规范，明确内部签名请求必须直达部署配置地址；不修改本地 Runner
+  启动策略，macOS 仍只启动控制面，分析执行继续要求合规 Linux Runner。
+
+### How
+
+- Workflow 全量 105 项、Runner 全量 80 项和 `tools/verify-workflow-architecture.sh` 通过；Workflow PostgreSQL
+  测试使用 `TESTCONTAINERS_RYUK_DISABLED=true` 避开本机 Docker 提前移除 Ryuk 的既有问题。
+- 使用 JDK 25、`test` profile、未修改的 `.env.test` 完整执行
+  `restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build`；backend、frontend、Workflow
+  API/Worker 和 opencode-manager 均正常启动，健康与 readiness 为 UP。
+- 在用户现有已登录 Chrome 页面刷新 `/workflow-chat`，确认身份 `DEV_888888888`、两条最近任务和场景标题可见，
+  且不再出现共享能力错误；Workflow 日志确认 `/me`、`/repositories`、`/conversations` 均返回 200。
+
+### Result
+
+- “代码变动影响分析”场景加载已恢复，内部 HMAC 和票据请求不再受宿主机 HTTP(S)/SOCKS 代理环境影响。
+- 本机 8091 按设计无 Runner 监听，因此未执行真实代码分析任务；这不影响页面与控制面加载，但正式分析仍需
+  配置合规 Linux Runner。未修改 API 路径、事件、数据库、依赖锁、`.env*`、generated SDK 或 OpenCode 源码。

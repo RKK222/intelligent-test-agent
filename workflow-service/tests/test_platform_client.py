@@ -11,6 +11,17 @@ from testagent_workflow.platform import PlatformCapabilityClient, PlatformReques
 
 
 @pytest.mark.asyncio
+async def test_platform_capability_default_client_ignores_environment_proxy() -> None:
+    client = PlatformCapabilityClient(
+        "http://platform.test",
+        b"0123456789abcdef0123456789abcdef",
+    )
+
+    assert client._http._trust_env is False  # noqa: SLF001 - 锁定内部调用不继承宿主代理
+    await client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_platform_capability_request_uses_fixed_client_and_never_forwards_bearer() -> None:
     observed: dict[str, object] = {}
 
