@@ -4602,17 +4602,17 @@
 
 ### What
 
-- 新增单页 `docs/presentations/开发测试协同知识沉淀方法论.pptx` 与对应源图 `docs/presentations/assets/开发测试协同知识沉淀方法论.png`。
-- 新增可重复执行的 `tools/pptx/build-knowledge-methodology-slide.js`，并在 `docs/presentations/README.md` 记录图稿用途、源图与重建命令。
+- 新增单页 `docs/presentations/开发测试协同知识沉淀方法论.pptx` 与对应视觉参考图 `docs/presentations/assets/开发测试协同知识沉淀方法论.png`。
+- 新增可重复执行的 `tools/pptx/build-knowledge-methodology-slide.js`，并在 `docs/presentations/README.md` 记录图稿用途、可编辑范围、参考图与重建命令。
 
 ### How
 
-- 使用 PptxGenJS 按 16:9 画布全页嵌入经确认的图稿，加入讲稿备注；左侧为目录、右侧为留白案例区，开发整理资产为蓝色字体，其余资产为黑色。
+- 使用 PptxGenJS 按 16:9 画布原生生成标题、目录、文件夹图标、树形线条、图例和右侧留白案例区；视觉参考图不嵌入 PPT。左侧为目录、右侧为留白案例区，开发整理资产为蓝色字体，其余资产为黑色。
 - 已运行 PPTX 结构校验、内容提取和 macOS Quick Look 缩略图渲染检查。环境缺少 LibreOffice.app，因此未能执行 LibreOffice PDF 渲染，但 Quick Look 的 PPTX 缩略图与源图一致。
 
 ### Result
 
-- 生成的 PPTX 为自包含单页，PowerPoint 可打开，结构校验通过；未修改 API、事件、数据库、安全、环境配置或业务代码。
+- 生成的 PPTX 为自包含单页，标题、目录、图例、线条和留白区域均可编辑，结构校验通过；未修改 API、事件、数据库、安全、环境配置或业务代码。
 
 ## 2026-08-02 - 修复 LobeHub 平台票据跨 origin 被拒绝
 
