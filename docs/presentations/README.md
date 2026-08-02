@@ -9,6 +9,12 @@
 
 当前逻辑版共 9 页；A7 技术版保留用于对照，A8 重点优化汇报顺序和每页结论，不增加页数。
 
+另有单页图稿 `开发测试协同知识沉淀方法论.pptx`，用于说明开发测试共同使用的知识资产、测试深度参与的功能/数据架构资产，以及预留的测试实际案例区域。源图位于 `assets/开发测试协同知识沉淀方法论.png`，可通过以下命令重新生成：
+
+```bash
+node tools/pptx/build-knowledge-methodology-slide.js
+```
+
 稳定事实依据为 `docs/architecture/module-map.md`、`docs/architecture/dependency-rules.md`、`docs/architecture/domain-models.md`、`backend/README.md`、`frontend/README.md` 与 `frontend/apps/user-manual/docs/guide/agent-config.md`、`workspace.md`。规划内容在页面中显式标注为“规划态”。
 
 重新生成：
