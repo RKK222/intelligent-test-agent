@@ -149,12 +149,13 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 ### LobeHub 通用问答
 
 - activity rail 的入口对已登录用户可见；`launchLobehubInNewTab` 必须在 click 同步阶段先打开空白标签，避免
-  异步签票被浏览器拦截，并在失败时关闭该标签。
+  异步签票被浏览器拦截；签票后在该空白标签自身创建临时表单并用 `_self` 提交，避免切断 `opener` 后再依赖
+  命名窗口查找。失败时关闭该标签。
 - `submitLobehubTicket` 只接受 HTTP(S)、无 userinfo/query/fragment 且 path 精确为
   `/api/auth/platform/consume` 的后端 `consumeUrl`，随后用临时隐藏表单 POST `ticket` 并立即清理 DOM。
 - `/lobehub/launch` 是聊天域名会话失效时唯一回跳入口；登录 guard 会保存这一固定路径，认证完成后在当前标签
   换票。页面不读取 return URL，也不检查或同步 LobeHub Session。
-- `tests/lobehub-launch.test.ts` 覆盖同步开窗、隐藏 POST、固定 consume path、无 URL/存储泄漏和失败清理；
+- `tests/lobehub-launch.test.ts` 覆盖同步开窗、弹窗自身隐藏 POST、固定 consume path、无 URL/存储泄漏和失败清理；
   `tests/login-redirect.test.ts` 覆盖未登录 launch 的认证恢复。
 
 ## 禁止事项

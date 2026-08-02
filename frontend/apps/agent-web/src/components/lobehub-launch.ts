@@ -5,7 +5,7 @@ type TicketApi = Pick<BackendApiClient, "createLobehubSsoTicket">;
 
 type LobehubPopup = {
   close: () => void;
-  name: string;
+  document: Document;
   opener: unknown;
 };
 
@@ -28,13 +28,15 @@ export async function launchLobehubInNewTab(
   if (!popup) {
     throw new Error("浏览器阻止了通用问答标签页，请允许本站打开新窗口");
   }
-  popup.name = target;
+  // 先保留同源 about:blank 的 document 引用，再切断 opener；后续让弹窗自行 POST，
+  // 避免依赖命名窗口查找导致票据已签发却没有任何页面接收。
+  const popupDocument = popup.document;
   // 提交到跨域页面前切断 opener，降低反向标签页劫持风险。
   popup.opener = null;
 
   try {
     const issue = await api.createLobehubSsoTicket();
-    submitLobehubTicket(environment.document, issue, target);
+    submitLobehubTicket(popupDocument, issue, "_self");
   } catch (error) {
     popup.close();
     throw error;

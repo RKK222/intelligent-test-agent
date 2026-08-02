@@ -4569,3 +4569,27 @@
   代码影响分析会明确返回 Runner 不可用，不会创建本机分析容器。
 - 未修改 `.env.test/.env.local`、generated SDK 或 OpenCode 源码；未新增 RunEvent。HTTP 路径不变，Workflow
   认证只增加平台现有 Redis 序列化格式兼容；数据库变更仅为已知历史分叉的隔离高版本补偿。
+
+## 2026-08-02 - 修复 LobeHub 新标签页票据未投递
+
+### Why
+
+- 已登录用户点击工作台“通用问答”后，平台能够签发一次性票据，但新标签页没有继续请求 LobeHub；直接访问
+  固定 `/lobehub/launch` 则能完成 SSO，说明故障位于前端空白标签页交接而非账号、后端或 LobeHub 服务。
+
+### What
+
+- `launchLobehubInNewTab` 在同步打开 `about:blank` 后保留该标签自身的 `document`，切断 `opener`，再把隐藏
+  票据表单创建在弹窗 document 中并以 `_self` 提交，不再从平台页面依赖命名窗口查找。
+- 补充单测锁定表单所属 document 和 `_self` 目标，并同步前端根 README 与 agent-web README。
+
+### How
+
+- 定向 Vitest 3 项、agent-web typecheck/lint、`git diff --check` 通过。
+- 使用 Playwright 真实登录 `888888888` 后点击工作台入口，确认浏览器保持平台页并新建第二个页面，票据消费
+  返回 302，最终到达 `http://127.0.0.1:3210/onboarding`。
+
+### Result
+
+- LobeHub 新标签页入口已恢复；现有 8080、3000、8090、3210 服务保持运行。
+- 未修改 HTTP API、事件、数据库、依赖锁、`.env*`、generated SDK、OpenCode 源码或独立 LobeHub fork。

@@ -25,13 +25,15 @@ describe("LobeHub login handoff", () => {
       expiresAt: string;
       consumeUrl: string;
     }>((resolve) => { resolveIssue = resolve; });
-    const popup = { close: vi.fn(), opener: window, name: "" };
+    const popupDocument = document.implementation.createHTMLDocument("LobeHub handoff");
+    const popup = { close: vi.fn(), document: popupDocument, opener: window };
     const openWindow = vi.fn((_url: string, _target: string): typeof popup => popup);
     let submitted: Record<string, string> | undefined;
     vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(function submit(this: HTMLFormElement) {
       const ticket = this.querySelector<HTMLInputElement>('input[name="ticket"]');
       submitted = {
         action: this.action,
+        document: this.ownerDocument === popupDocument ? "popup" : "platform",
         method: this.method,
         target: this.target,
         ticket: ticket?.value ?? ""
@@ -54,8 +56,9 @@ describe("LobeHub login handoff", () => {
 
     expect(submitted).toEqual({
       action: "http://chat.internal/api/auth/platform/consume",
+      document: "popup",
       method: "post",
-      target: "lobehub-target",
+      target: "_self",
       ticket: "one-time-ticket"
     });
     expect(String(openWindow.mock.calls[0]?.[0])).not.toContain("one-time-ticket");
@@ -65,7 +68,11 @@ describe("LobeHub login handoff", () => {
   });
 
   it("closes the blank tab when the server returns an unsafe consume URL", async () => {
-    const popup = { close: vi.fn(), opener: window, name: "" };
+    const popup = {
+      close: vi.fn(),
+      document: document.implementation.createHTMLDocument("LobeHub handoff"),
+      opener: window
+    };
     const submit = vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(() => {});
 
     await expect(launchLobehubInNewTab(

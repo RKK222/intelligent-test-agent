@@ -85,7 +85,8 @@ packages/shared-types
 
 工作台 activity rail 的“通用问答”只承担安全登录交接，不嵌入或复制 LobeHub UI。点击处理器同步创建带
 `noopener` 语义的空白标签，再由 `packages/backend-api` 使用现有 Bearer Token 申请一次性票据，并向后端返回的
-固定 `consumeUrl` 创建隐藏表单 POST；ticket 不进入 URL、Pinia、router、Web Storage 或原始交换日志。
+固定 `consumeUrl` 在空白标签自身创建隐藏表单并用 `_self` POST；ticket 不进入 URL、Pinia、router、Web Storage
+或原始交换日志，也不依赖切断 `opener` 后的命名窗口查找。
 
 独立聊天域名回到平台固定 `/lobehub/launch` 时，router 先复用现有登录保护；已有平台登录态会在当前标签自动
 换票，未登录则完成统一认证后恢复固定路由。前端不接收 return URL，也不尝试读取跨域 LobeHub Cookie。
