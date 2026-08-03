@@ -23,11 +23,14 @@
 
 - JDK 25 下运行 `FlywayMigrationNamingTest` 7 项和 `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 真实 PostgreSQL 7 项全部通过。
 - 前端 typecheck 通过；发布开关与登录回跳 Vitest 7 项、超级管理员入口 Chromium 1 项通过；企业增量组件和固定名双后台封包 verifier 均通过，修改脚本 Bash 语法与 `git diff --check` 通过。
+- 以代码提交 `d907d4f72` 执行 `package-release.sh --include-all-components`，全量重建 backend、frontend、programs、`linux/amd64` worker、IT-Tools、OmniTools 和 toolbox；worker 指纹为 `bf7b8e1d7c4e996c815a4c7dcf5ec163fe70707be385e0467cfa731170a0639a`，toolbox 指纹为 `35447da08f477dd02e458e4344be9bd870452dba12ba6db32d250c56e9f15040`，两项均为 `included`，Workflow/LobeHub 均为 `disabled`。
+- 内层 backend/frontend `--validate-only`、外层五项 Flyway JAR 字节门禁、内外层 SHA 一致性和前端节点空 Workflow upstream 校验通过；Mac 上 worker 的 Python/OpenCode/Codex MCP 契约通过，原生 sandbox E2E 按设计留给企业 `linux/amd64` 两台后台逐机执行。
+- 公共 Agent 完整替换包继续使用企业集成底座叠加独立仓库提交 `8b81dc4`，其中 UI 执行 Agent/Tool 三个运行文件与该提交逐字节一致；包内 7 个 Agent、15 个 Skill、7 个 TypeScript Tool，无 Git、依赖目录、会话或 OAuth 运行态路径，SHA-256 为 `a29f0d3a4a49bad3476f8bb5bb9cf99616365569bbb9ad3cb8a6220537b7636d`。
 - 提交前已回顾全部 `.agents/session-log*.md` 近期条目并确认无冲突标记；没有修改 `.env.local`、generated SDK 或 OpenCode 只读源码。
 
 ### Result
 
-- 当前代码与打包门禁已经限定本次 release 不启用 Workflow/LobeHub，并覆盖今早精确企业基线的已知 Flyway 升级路径；正式内外层介质将在本条代码提交后全量构建，最终摘要以交付目录配套 `.sha256` 为准。
+- 当前代码与打包门禁已经限定本次 release 不启用 Workflow/LobeHub，并覆盖今早精确企业基线的已知 Flyway 升级路径；全量内外层介质已经完成构建和预校验，本条追溯记录提交后只复用已验证二进制执行 `--zip-only` 重封，再重建外层包，最终摘要以交付目录配套 `.sha256` 为准。
 - 本次未新增 HTTP/RunEvent wire；数据库 SQL 本身来自当前分支既有提交，本轮只新增不可变校验和精确基线升级测试。现场仍必须在停机前取得完整 `flyway_schema_history`；发现失败记录、未知 checksum、未知更高版本或分叉时停止发布，禁止 `repair`、`outOfOrder` 和手工改历史表。
 
 ### 2026-08-03 - 补充 OpenCode 进程分配冲突现场排查
