@@ -429,6 +429,9 @@ export type PublicAgentConfigRolloutStatus = {
   branch: string;
   commitHash?: string | null;
   failureReason?: string | null;
+  supersedesRolloutId?: string | null;
+  supersededByRolloutId?: string | null;
+  supersedeReason?: string | null;
   createdAt: string;
   updatedAt: string;
   completedAt?: string | null;

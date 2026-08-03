@@ -24,6 +24,9 @@ public interface PublicAgentConfigRolloutRepository {
     /** 查询一次 rollout 的全服务器 Git 同步、排空计数和最近错误。 */
     List<PublicAgentConfigRolloutServerStatus> findRolloutServerStatuses(String rolloutId);
 
+    /** 查询 rollout 中尚未退役的服务器，用于纠错发布完整继承原发布覆盖范围。 */
+    List<String> findRolloutServerIds(String rolloutId);
+
     /** 所有服务器同步前阻止全部用户；同步后仅阻止仍有未 dispose 旧实例的用户。 */
     Optional<String> findBlockingRolloutId(String userId);
 
@@ -73,6 +76,24 @@ public interface PublicAgentConfigRolloutRepository {
     boolean recordExpectedCommit(String rolloutId, String commitHash, Instant now);
 
     boolean abortPreparation(String rolloutId, String reason, Instant now);
+
+    /**
+     * CAS 封存指定 DRAINING 公共发布、清除其全部在途租约并创建已激活的新发布。
+     * 实现必须保证旧发布退出活动态和新发布进入活动态在同一数据库事务提交。
+     */
+    boolean supersedePublicRollout(
+            String activeRolloutId,
+            String replacementRolloutId,
+            String branch,
+            String commitHash,
+            String previousCommitHash,
+            boolean discardSharedRuntimeChanges,
+            String initiatedByUserId,
+            String initiatedLinuxServerId,
+            String traceId,
+            String reason,
+            List<String> serverIds,
+            Instant now);
 
     void registerServerMembership(String linuxServerId, Instant now);
 

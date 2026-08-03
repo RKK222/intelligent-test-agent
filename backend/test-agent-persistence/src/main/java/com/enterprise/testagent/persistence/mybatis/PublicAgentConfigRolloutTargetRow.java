@@ -19,5 +19,6 @@ public record PublicAgentConfigRolloutTargetRow(
         int retryCount,
         Instant leaseUntil,
         String leaseToken,
-        String traceId) {
+        String traceId,
+        boolean forceStop) {
 }

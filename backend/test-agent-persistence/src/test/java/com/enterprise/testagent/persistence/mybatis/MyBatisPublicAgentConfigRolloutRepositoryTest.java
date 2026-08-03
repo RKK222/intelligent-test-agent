@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -18,6 +19,7 @@ import org.apache.ibatis.mapping.ResultMap;
 import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 /** 公共配置 rollout 仓储的租约 fencing 与用户快照映射测试。 */
 class MyBatisPublicAgentConfigRolloutRepositoryTest {
@@ -51,6 +53,11 @@ class MyBatisPublicAgentConfigRolloutRepositoryTest {
         assertThat(targetRow.getResultMappings())
                 .filteredOn(mapping -> List.of("port", "retry_count").contains(mapping.getColumn()))
                 .allSatisfy(mapping -> assertThat(mapping.getJavaType()).isEqualTo(int.class));
+        assertThat(targetRow.getResultMappings())
+                .filteredOn(mapping -> "force_stop".equals(mapping.getColumn()))
+                .singleElement()
+                .extracting(mapping -> mapping.getJavaType())
+                .isEqualTo(boolean.class);
         assertThat(worktreeRow.getResultMappings())
                 .filteredOn(mapping -> "retry_count".equals(mapping.getColumn()))
                 .singleElement()
@@ -112,7 +119,8 @@ class MyBatisPublicAgentConfigRolloutRepositoryTest {
                 2,
                 null,
                 null,
-                "trace_rollout");
+                "trace_rollout",
+                false);
         when(mapper.findClaimableTargets("linux-1", NOW, 1)).thenReturn(List.of(row));
         when(mapper.markTargetProcessing(eq("act_target"), any(), any(), eq(NOW))).thenReturn(1);
 
@@ -156,6 +164,9 @@ class MyBatisPublicAgentConfigRolloutRepositoryTest {
                 "DRAINING",
                 "main",
                 "abc123",
+                null,
+                null,
+                null,
                 null,
                 NOW,
                 NOW.plusSeconds(5),
@@ -231,6 +242,42 @@ class MyBatisPublicAgentConfigRolloutRepositoryTest {
         ArgumentCaptor<String> token = ArgumentCaptor.forClass(String.class);
         verify(mapper).markTargetDisposed(eq("act_target"), token.capture(), eq(NOW));
         assertThat(token.getValue()).isEqualTo("acl_current");
+    }
+
+    @Test
+    void supersedeFencesOldLeasesBeforeCreatingReplacementRollout() {
+        PublicAgentConfigRolloutMapper mapper = mock(PublicAgentConfigRolloutMapper.class);
+        MyBatisPublicAgentConfigRolloutRepository repository = new MyBatisPublicAgentConfigRolloutRepository(mapper);
+        when(mapper.markPublicRolloutSuperseded("acr_old", "坏配置阻塞排空", NOW)).thenReturn(1);
+        when(mapper.linkSupersededPublicRollout("acr_old", "acr_new", NOW)).thenReturn(1);
+
+        boolean replaced = repository.supersedePublicRollout(
+                "acr_old",
+                "acr_new",
+                "feature_config",
+                "commit_fixed",
+                "commit_bad",
+                false,
+                "usr-admin",
+                "linux-1",
+                "trace-fix",
+                "坏配置阻塞排空",
+                List.of("linux-1", "linux-2"),
+                NOW);
+
+        assertThat(replaced).isTrue();
+        InOrder order = inOrder(mapper);
+        order.verify(mapper).markPublicRolloutSuperseded("acr_old", "坏配置阻塞排空", NOW);
+        order.verify(mapper).abandonSupersededRolloutServers("acr_old", NOW);
+        order.verify(mapper).abandonSupersededRolloutTargets("acr_old", NOW);
+        order.verify(mapper).abandonSupersededRolloutWorktrees("acr_old", NOW);
+        order.verify(mapper).abandonSupersededPublicRolloutWorktrees("acr_old", NOW);
+        order.verify(mapper).insertSupersedingPublicRollout(
+                "acr_new", "acr_old", "feature_config", "commit_fixed", "commit_bad", false,
+                "usr-admin", "linux-1", "trace-fix", "坏配置阻塞排空", NOW);
+        order.verify(mapper).insertServer("acr_new", "linux-1", NOW);
+        order.verify(mapper).insertServer("acr_new", "linux-2", NOW);
+        order.verify(mapper).linkSupersededPublicRollout("acr_old", "acr_new", NOW);
     }
 
     @Test

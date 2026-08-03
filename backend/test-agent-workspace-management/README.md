@@ -47,6 +47,8 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 - 所有平台用户触发的 Git commit 以及可能产生 commit 的 merge 都必须显式传入当前用户身份，并注入命令级作者/提交者；提交与发布程序不再提供缺省身份兼容入口，也不依赖公共仓库或全局 Git 配置中的默认身份。平台没有邮箱字段时由 common Git 工具按统一认证号生成企业 SCM 已登记的 `mails.icbc` email，避免 invalid committer 拒绝。公共发布额外使用 `commit-tree` 从最终文件树生成单父提交，远端只新增当前管理员身份的提交，不要求企业 SCM 接受个人分支中的旧历史身份。
 - `checkVersionGitAccess()` 在用户显式选择应用版本、创建或修复个人 worktree 前复用 `GitRemoteService.listBranches()`、当前用户唯一 SSH key 和内部仓库有效 URL 做只读预检。认证失败/仓库不可访问返回稳定的权限申请结果，缺少 SSH key 单独返回配置提示；网络和超时继续抛统一 Git 异常。
 
+- `AgentConfigApplicationService.supersedePublicConfigRollout` 只处理公共发布纠错的 Git 编排：校验共享运行副本恢复风险、使用当前超级管理员 SSH key 解析远端修正分支 commit，再把精确旧 rolloutId、修正 commit 和必填原因交给 `PublicAgentConfigRolloutCoordinator` 原子替换并广播新 rollout。该模块不直接更新 rollout 表、不接受前端自报强停目标，也不控制 manager。
+
 ## Agent & Skill Hub
 
 - `AgentSkillHubApplicationService` 在应用 feature push 成功后从精确 Git commit 扫描 `.opencode/agents/*.md` 与完整 `.opencode/skills/{id}/**`，生成不可变压缩快照；定时对账本机 READY 副本补偿漏记。
@@ -61,7 +63,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 - `WorkspaceDirectoryServiceTest` 覆盖服务器工作空间选择器的默认目录、只返回子目录、排序、父目录、条目上限和缺失目录错误码。
 - `GitPublishWorkflowTest` 覆盖直接发布、worktree 合并发布、冲突文件收集、merge abort、abort 失败保护，以及同步文件时先 clean/pull 再复制提交推送。
 - `ManagedWorkspaceApplicationServiceTest` 覆盖应用成员校验及 `FORBIDDEN` 加载上下文、托管逻辑路径、个人 worktree 创建、Git diff、个人拉取 Agent 差异只登记当前用户 `PERSONAL_APPLICATION` 重载及进程未运行返回、个人 worktree 本地提交、从个人 `HEAD` 按白名单投影并推送 feature、所有角色 spec 禁推、应用 Agent 发布后的版本 HEAD 更新、feature 固定提交反向 merge、非重叠 dirty 改动继续合并并 dispose、Git 原生覆盖保护进入持久化 retry、同仓库兄弟目录的物理 worktree/replica 同步但不误 dispose、单仓库单工作空间兼容、真实冲突进入 Diff 并通过专用接口完成，以及应用副本只读 Git 操作及失败阶段命令透传。`GitWorkspaceServiceRealGitTest` 使用真实临时 Git 仓库验证固定提交 merge、非重叠本地修改保留、覆盖阻塞文件识别、三方冲突、解决和提交完成。
-- `AgentConfigApplicationServiceTest` 覆盖公共仓库初始化/更新、锁前不修改工作树、共享副本明确确认后恢复和定点清理、全服务器固定 commit、公共个人 worktree 冲突不阻塞主同步、clean worktree 的待发布提交识别、当前用户长期公共 worktree 的稳定命名与复用、进程初始化后的同服幂等准备及仓库未初始化降级、按服务器和创建人过滤、跨用户操作拒绝、公共/应用配置文件回退路径映射、Agent/Skill 双语展示名解析与历史标题回退、公共最终文件树生成干净线性提交后以 refspec 推送、冲突保留在个人 worktree、共享运行时副本同步与广播、push 成功后请求线程不认领本机同步且持久化补偿仍可执行，以及工作空间级 `.opencode/**` 配置读写、文件/目录删除、任意 Git 可见子路径 diff 和普通工作区路径排除。`GitWorkspaceServiceRealGitTest` 使用真实临时 Git 仓库验证污染个人历史不会成为发布提交祖先，并验证固定 commit 原生 merge 时非重叠 staged、unstaged、untracked 内容保持原状态。
+- `AgentConfigApplicationServiceTest` 覆盖公共仓库初始化/更新、锁前不修改工作树、共享副本明确确认后恢复和定点清理、全服务器固定 commit、公共个人 worktree 冲突不阻塞主同步、clean worktree 的待发布提交识别、当前用户长期公共 worktree 的稳定命名与复用、进程初始化后的同服幂等准备及仓库未初始化降级、按服务器和创建人过滤、跨用户操作拒绝、公共/应用配置文件回退路径映射、Agent/Skill 双语展示名解析与历史标题回退、公共最终文件树生成干净线性提交后以 refspec 推送、冲突保留在个人 worktree、共享运行时副本同步与广播、纠错入口先解析远端 commit 再原子替换并广播新 rollout、push 成功后请求线程不认领本机同步且持久化补偿仍可执行，以及工作空间级 `.opencode/**` 配置读写、文件/目录删除、任意 Git 可见子路径 diff 和普通工作区路径排除。`GitWorkspaceServiceRealGitTest` 使用真实临时 Git 仓库验证污染个人历史不会成为发布提交祖先，并验证固定 commit 原生 merge 时非重叠 staged、unstaged、untracked 内容保持原状态。
 
 - `ReferenceRepositoryApplicationServiceTest`、`ReferenceRepositoryRealGitSafetyTest`、`ReferenceRepositoryReplicaTaskDispatcherTest`、`ReferenceRepositoryReplicaReconcilerTest` 覆盖分支一次性初始化、generation/CAS、本机即时/广播异步唤醒、有界并发与去重、按时退避、队列拒绝、租约丢失、离线 `DEFERRED`/恢复、本机文件锁、临时 clone + 原子移动、已对齐 HEAD 无操作快速路径、已有仓库脏状态/origin/分支/分叉保护、树路径穿越/`.git`/符号链接/1000 项上限和补偿器生命周期。
 - 其中 `ReferenceRepositoryApplicationServiceTest` 还覆盖服务器展示路径规范化、引用根参数缺失和历史非法英文名兼容。

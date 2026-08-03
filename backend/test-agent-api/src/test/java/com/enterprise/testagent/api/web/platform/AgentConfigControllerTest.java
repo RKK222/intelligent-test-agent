@@ -72,6 +72,9 @@ class AgentConfigControllerTest {
                 "main",
                 "abc123",
                 null,
+                "acr_previous",
+                null,
+                "修复错误配置",
                 Instant.parse("2026-07-28T01:00:00Z"),
                 Instant.parse("2026-07-28T01:01:00Z"),
                 null,
@@ -89,6 +92,8 @@ class AgentConfigControllerTest {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.data.status").isEqualTo("DRAINING")
+                .jsonPath("$.data.supersedesRolloutId").isEqualTo("acr_previous")
+                .jsonPath("$.data.supersedeReason").isEqualTo("修复错误配置")
                 .jsonPath("$.data.servers[0].linuxServerId").isEqualTo("linux-2")
                 .jsonPath("$.data.servers[0].targetPending").isEqualTo(1)
                 .jsonPath("$.data.servers[0].lastError").isEqualTo("公共 Agent 运行副本存在未提交变更");
@@ -126,6 +131,55 @@ class AgentConfigControllerTest {
                 .jsonPath("$.code").isEqualTo("FORBIDDEN");
 
         verifyNoInteractions(service);
+    }
+
+    @Test
+    void nonSuperAdminCannotSupersedePublicRollout() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_APP_ADMIN));
+
+        client.post()
+                .uri("/api/internal/platform/workspace-management/agent-config/public/rollout/supersede")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"activeRolloutId":"acr_stuck","branch":"feature_config","reason":"修复错误配置"}
+                        """)
+                .exchange()
+                .expectStatus().isForbidden();
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void superAdminCanForceStopAndSupersedeExpectedPublicRollout() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.post()
+                .uri("/api/internal/platform/workspace-management/agent-config/public/rollout/supersede")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {
+                          "activeRolloutId":"acr_stuck",
+                          "branch":"feature_config",
+                          "operationId":"aco_supersede_12345678",
+                          "discardLocalChanges":true,
+                          "reason":"修复 description 为空"
+                        }
+                        """)
+                .exchange()
+                .expectStatus().isOk();
+
+        verify(service).supersedePublicConfigRollout(
+                "acr_stuck",
+                "feature_config",
+                "aco_supersede_12345678",
+                true,
+                "修复 description 为空",
+                USER_ID,
+                TRACE_ID);
     }
 
     @Test

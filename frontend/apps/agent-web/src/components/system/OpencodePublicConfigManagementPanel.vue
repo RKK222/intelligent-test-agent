@@ -19,21 +19,37 @@ const rollout = ref<PublicAgentConfigRolloutStatus | null>(null);
 const loading = ref(false);
 const initializing = ref(false);
 const pulling = ref(false);
+const superseding = ref(false);
 const errorMessage = ref("");
 const successMessage = ref("");
 const dialogOpen = ref(false);
 const pullDialogOpen = ref(false);
+const supersedeDialogOpen = ref(false);
 const branchesLoading = ref(false);
 const branches = ref<string[]>([]);
 const selectedBranch = ref("");
 const targetRepository = ref<PublicAgentRepositoryStatus | null>(null);
 const initErrorMessage = ref("");
+const supersedeBranch = ref("");
+const supersedeBranches = ref<string[]>([]);
+const supersedeReason = ref("");
+const supersedeErrorMessage = ref("");
+const supersedeBranchesLoading = ref(false);
 let rolloutTimer: number | null = null;
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 const canSubmitInitialize = computed(() => !!targetRepository.value && !!selectedBranch.value && !initializing.value && !branchesLoading.value);
 const rolloutActive = computed(() => rollout.value?.status === "PREPARING" || rollout.value?.status === "DRAINING");
 const canSubmitPull = computed(() => !!selectedBranch.value && !pulling.value && !branchesLoading.value && !rolloutActive.value);
+const forceStopTargetCount = computed(() => rollout.value?.servers.reduce((total, server) => total + server.targetPending, 0) ?? 0);
+const canSubmitSupersede = computed(() =>
+  rollout.value?.status === "DRAINING"
+  && !!supersedeBranch.value
+  && supersedeReason.value.trim().length > 0
+  && supersedeReason.value.trim().length <= 500
+  && !superseding.value
+  && !supersedeBranchesLoading.value
+);
 const dirtyServers = computed(() => rows.value.filter((row) => row.localChangesPresent || row.status === "CONFLICT"));
 
 onMounted(() => {
@@ -209,6 +225,81 @@ async function submitGlobalPull() {
   }
 }
 
+async function openSupersedeDialog() {
+  if (rollout.value?.status !== "DRAINING" || superseding.value) {
+    return;
+  }
+  supersedeDialogOpen.value = true;
+  supersedeReason.value = "";
+  supersedeErrorMessage.value = "";
+  supersedeBranches.value = [];
+  supersedeBranch.value = rollout.value.branch;
+  supersedeBranchesLoading.value = true;
+  try {
+    supersedeBranches.value = await api.listPublicAgentBranches();
+    supersedeBranch.value = supersedeBranches.value.includes(rollout.value.branch)
+      ? rollout.value.branch
+      : preferredGlobalBranch(rows.value, supersedeBranches.value);
+  } catch (error) {
+    supersedeErrorMessage.value = formatError(error, "加载远端修正分支失败");
+  } finally {
+    supersedeBranchesLoading.value = false;
+  }
+}
+
+function closeSupersedeDialog() {
+  if (superseding.value) {
+    return;
+  }
+  supersedeDialogOpen.value = false;
+  supersedeBranch.value = "";
+  supersedeBranches.value = [];
+  supersedeReason.value = "";
+  supersedeErrorMessage.value = "";
+}
+
+async function submitSupersede() {
+  const current = rollout.value;
+  const reason = supersedeReason.value.trim();
+  if (!current || current.status !== "DRAINING" || !supersedeBranch.value || !reason || superseding.value) {
+    return;
+  }
+  const confirmed = window.confirm(
+    `该操作会用远端修正提交替换发布 ${current.rolloutId}，并强制停止其中仍未排空的 ${forceStopTargetCount.value} 个精确匹配进程，不等待会话空闲。是否继续？`
+  );
+  if (!confirmed) {
+    return;
+  }
+  const discardSharedRuntimeChanges = dirtyServers.value.length > 0;
+  if (discardSharedRuntimeChanges) {
+    const serverIds = dirtyServers.value.map((row) => row.linuxServerId).join("、");
+    if (!window.confirm(`服务器 ${serverIds} 的共享运行副本存在本地变更，继续会恢复到远端修正提交。是否继续？`)) {
+      return;
+    }
+  }
+  superseding.value = true;
+  supersedeErrorMessage.value = "";
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const operation = await api.supersedePublicAgentConfigRollout({
+      activeRolloutId: current.rolloutId,
+      branch: supersedeBranch.value,
+      operationId: newOperationId(),
+      discardLocalChanges: discardSharedRuntimeChanges,
+      reason
+    });
+    successMessage.value = `已用修正提交 ${shortHash(operation.commitHash)} 替换旧发布；旧发布剩余目标将被强制停止`;
+    supersedeDialogOpen.value = false;
+    rollout.value = await api.getPublicAgentConfigRollout();
+    scheduleRolloutPolling();
+  } catch (error) {
+    supersedeErrorMessage.value = formatError(error, "强制终止并替换公共发布失败");
+  } finally {
+    superseding.value = false;
+  }
+}
+
 function preferredBranch(repository: PublicAgentRepositoryStatus, remoteBranches: string[]) {
   const current = repository.currentBranch?.trim();
   if (current && remoteBranches.includes(current)) {
@@ -230,7 +321,8 @@ function rolloutStatusText(status: string) {
     PREPARING: "准备全局刷新",
     DRAINING: "正在同步并排空",
     COMPLETED: "已完成",
-    ABORTED: "已终止"
+    ABORTED: "已终止",
+    SUPERSEDED: "已被纠错发布替换"
   } as Record<string, string>)[status] ?? status;
 }
 
@@ -348,9 +440,28 @@ function newOperationId() {
             <strong>{{ rolloutStatusText(rollout.status) }}</strong>
             <span>{{ rollout.branch }} · {{ shortHash(rollout.commitHash) }}</span>
           </div>
-          <span class="ta-opencode-config-muted">{{ rollout.rolloutId }}</span>
+          <div>
+            <span class="ta-opencode-config-muted">{{ rollout.rolloutId }}</span>
+            <button
+              v-if="rollout.status === 'DRAINING'"
+              type="button"
+              class="ta-opencode-config-btn is-danger"
+              :disabled="superseding"
+              @click="openSupersedeDialog"
+            >
+              <Loader2 v-if="superseding" class="ta-opencode-config-icon is-spin" />
+              <AlertTriangle v-else class="ta-opencode-config-icon" :stroke-width="1.6" />
+              强制终止并替换发布
+            </button>
+          </div>
         </header>
         <div v-if="rollout.failureReason" class="ta-opencode-config-diagnostic">{{ rollout.failureReason }}</div>
+        <div v-if="rollout.supersedesRolloutId" class="ta-opencode-config-diagnostic">
+          本次纠错替换：{{ rollout.supersedesRolloutId }}
+        </div>
+        <div v-if="rollout.supersedeReason" class="ta-opencode-config-diagnostic">
+          替换原因：{{ rollout.supersedeReason }}
+        </div>
         <table class="ta-opencode-config-rollout-table">
           <thead>
             <tr>
@@ -500,6 +611,57 @@ function newOperationId() {
             <button type="button" class="ta-opencode-config-btn is-primary" :disabled="!canSubmitPull" @click="submitGlobalPull">
               <Loader2 v-if="pulling" class="ta-opencode-config-icon is-spin" />
               开始全局刷新
+            </button>
+          </footer>
+        </section>
+      </div>
+
+      <div v-if="supersedeDialogOpen" class="ta-opencode-config-dialog-backdrop" @keydown.esc="closeSupersedeDialog">
+        <section role="dialog" aria-modal="true" aria-label="强制终止并替换公共发布" class="ta-opencode-config-dialog">
+          <header class="ta-opencode-config-dialog-header">
+            <h2>强制终止并替换公共发布</h2>
+            <span>{{ rollout?.rolloutId }}</span>
+          </header>
+
+          <div class="ta-opencode-config-dialog-body">
+            <div class="ta-opencode-config-alert" role="alert">
+              <AlertTriangle class="ta-opencode-config-icon" :stroke-width="1.6" />
+              <span>
+                当前剩余 {{ forceStopTargetCount }} 个目标。修正提交同步完成后，系统会按原 PID 和启动时间精确匹配并强制停止这些进程，不等待会话空闲；其它目标仍按普通排空处理。
+              </span>
+            </div>
+            <div v-if="supersedeErrorMessage" class="ta-opencode-config-alert" role="alert">
+              <AlertTriangle class="ta-opencode-config-icon" :stroke-width="1.6" />
+              <span>{{ supersedeErrorMessage }}</span>
+            </div>
+            <div class="ta-opencode-config-field">
+              <label for="public-config-supersede-branch">远端修正分支</label>
+              <div class="ta-opencode-config-select-wrap">
+                <GitBranch class="ta-opencode-config-icon" :stroke-width="1.6" />
+                <select id="public-config-supersede-branch" v-model="supersedeBranch" :disabled="supersedeBranchesLoading || superseding">
+                  <option v-for="branch in supersedeBranches" :key="branch" :value="branch">{{ branch }}</option>
+                </select>
+              </div>
+              <span v-if="supersedeBranchesLoading" class="ta-opencode-config-muted">正在读取远端修正提交</span>
+            </div>
+            <div class="ta-opencode-config-field">
+              <label for="public-config-supersede-reason">操作原因（必填，最多 500 字）</label>
+              <textarea
+                id="public-config-supersede-reason"
+                v-model="supersedeReason"
+                maxlength="500"
+                rows="3"
+                :disabled="superseding"
+                placeholder="例如：上一提交的 Agent description 无效，导致 session/status 无法解析"
+              />
+            </div>
+          </div>
+
+          <footer class="ta-opencode-config-dialog-footer">
+            <button type="button" class="ta-opencode-config-btn" :disabled="superseding" @click="closeSupersedeDialog">取消</button>
+            <button type="button" class="ta-opencode-config-btn is-danger" :disabled="!canSubmitSupersede" @click="submitSupersede">
+              <Loader2 v-if="superseding" class="ta-opencode-config-icon is-spin" />
+              确认强制终止并替换
             </button>
           </footer>
         </section>
@@ -743,6 +905,11 @@ function newOperationId() {
 .ta-opencode-config-dialog-footer {
   padding: 14px;
 }
+.ta-opencode-config-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 .ta-opencode-config-dialog-header {
   border-bottom: 1px solid #e5e7eb;
 }
@@ -781,6 +948,17 @@ function newOperationId() {
   color: #111827;
   font-size: 13px;
   outline: none;
+}
+.ta-opencode-config-field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  resize: vertical;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 8px 9px;
+  color: #111827;
+  font: inherit;
+  line-height: 1.5;
 }
 @keyframes ta-spin {
   to {

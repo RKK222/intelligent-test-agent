@@ -9,6 +9,9 @@ public record PublicAgentConfigRolloutStatusRow(
         String branch,
         String commitHash,
         String failureReason,
+        String supersedesRolloutId,
+        String supersededByRolloutId,
+        String supersedeReason,
         Instant createdAt,
         Instant updatedAt,
         Instant completedAt) {

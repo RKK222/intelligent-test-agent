@@ -14,6 +14,15 @@ final class AgentConfigDtos {
     record BranchRequest(String branch, String operationId, Boolean discardLocalChanges) {
     }
 
+    /** 超管纠错替换请求；activeRolloutId 是防止误操作新任务的 CAS 前置条件。 */
+    record SupersedePublicRolloutRequest(
+            String activeRolloutId,
+            String branch,
+            String operationId,
+            Boolean discardLocalChanges,
+            String reason) {
+    }
+
     /**
      * 公共配置"更新+提交并推送"复合请求：先 fetch 远端，再 stage/commit 本地修改、merge 远端分支并 push。
      * discardLocalChanges 为 true 时才允许覆盖受控仓库中的已跟踪修改。

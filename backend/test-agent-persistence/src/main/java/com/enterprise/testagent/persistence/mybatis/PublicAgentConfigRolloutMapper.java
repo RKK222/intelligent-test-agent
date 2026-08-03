@@ -22,6 +22,8 @@ public interface PublicAgentConfigRolloutMapper {
     List<PublicAgentConfigRolloutServerStatusRow> findRolloutServerStatuses(
             @Param("rolloutId") String rolloutId);
 
+    List<String> findRolloutServerIds(@Param("rolloutId") String rolloutId);
+
     String findBlockingRolloutId(@Param("userId") String userId);
 
     PublicAgentConfigRolloutPreparationRow findPreparing(
@@ -58,6 +60,45 @@ public interface PublicAgentConfigRolloutMapper {
     int abortPreparation(
             @Param("rolloutId") String rolloutId,
             @Param("reason") String reason,
+            @Param("now") Instant now);
+
+    int markPublicRolloutSuperseded(
+            @Param("activeRolloutId") String activeRolloutId,
+            @Param("reason") String reason,
+            @Param("now") Instant now);
+
+    void abandonSupersededRolloutServers(
+            @Param("activeRolloutId") String activeRolloutId,
+            @Param("now") Instant now);
+
+    void abandonSupersededRolloutTargets(
+            @Param("activeRolloutId") String activeRolloutId,
+            @Param("now") Instant now);
+
+    void abandonSupersededRolloutWorktrees(
+            @Param("activeRolloutId") String activeRolloutId,
+            @Param("now") Instant now);
+
+    void abandonSupersededPublicRolloutWorktrees(
+            @Param("activeRolloutId") String activeRolloutId,
+            @Param("now") Instant now);
+
+    void insertSupersedingPublicRollout(
+            @Param("rolloutId") String rolloutId,
+            @Param("supersedesRolloutId") String supersedesRolloutId,
+            @Param("branch") String branch,
+            @Param("commitHash") String commitHash,
+            @Param("previousCommitHash") String previousCommitHash,
+            @Param("discardSharedRuntimeChanges") boolean discardSharedRuntimeChanges,
+            @Param("initiatedByUserId") String initiatedByUserId,
+            @Param("initiatedLinuxServerId") String initiatedLinuxServerId,
+            @Param("traceId") String traceId,
+            @Param("reason") String reason,
+            @Param("now") Instant now);
+
+    int linkSupersededPublicRollout(
+            @Param("activeRolloutId") String activeRolloutId,
+            @Param("replacementRolloutId") String replacementRolloutId,
             @Param("now") Instant now);
 
     void upsertServerMembership(

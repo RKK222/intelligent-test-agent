@@ -18,6 +18,21 @@ public interface PublicAgentConfigRolloutCoordinator {
             String initiatedByUserId,
             String traceId);
 
+    /**
+     * 用已确认的远端修正提交原子替换一个仍在排空的公共发布。
+     * 旧任务及其租约在同一事务内封存，新任务直接进入 DRAINING，消息门禁没有可见空窗。
+     */
+    String supersede(
+            String activeRolloutId,
+            String branch,
+            String commitHash,
+            String previousCommitHash,
+            boolean discardSharedRuntimeChanges,
+            String reason,
+            String localLinuxServerId,
+            String initiatedByUserId,
+            String traceId);
+
     /** 存量发布调用默认不放弃共享运行副本修改。 */
     default String prepare(
             String branch,

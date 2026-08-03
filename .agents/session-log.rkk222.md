@@ -4480,3 +4480,27 @@
 
 - 新失败不再产生只有模板没有版本的记录，历史数据可按全库 SQL 在维护窗口审计和清理；F-APIP 同类 `PREPARING_REPOSITORY / 应用工作区目录不存在` 记录属于该补偿范围。
 - 未修改 `.env*`、OpenCode 源码或 generated SDK；运维 SQL 是显式人工修复脚本，不是运行时 JDBC SQL 或自动业务数据 migration。
+
+## 2026-08-03 - 增加公共 Agent 卡死发布的强制终止替换能力
+
+### Why
+
+- 公共 Agent 提交中的无效 `description` 会让 OpenCode `/session/status` 持续返回 `ConfigInvalidError`，使旧发布目标永久停在 `RETRY_WAIT`；后续公共提交又被唯一活动 rollout 门禁阻止，无法通过普通排空自行恢复。
+- 企业现场已有一个 `DRAINING` 发布在两台服务器各剩两个目标，用户明确要求跳过会话检查并强制终止这些旧进程，再让修正提交接管发布。
+
+### What
+
+- 新增仅 `SUPER_ADMIN` 可用的“强制终止并替换发布”接口和前端操作：用精确旧 rolloutId 做 CAS，把旧任务置为 `SUPERSEDED`、清空旧租约并原子创建新 `DRAINING` 任务；替换原因和双向 rollout 关系持久化审计。
+- 新任务先在原覆盖服务器同步远端修正 commit；只有与旧未排空目标的用户、服务器、容器、端口、PID、manager 启动时间完全匹配的新目标才由 MyBatis SQL 派生 `force_stop=true`。这类目标跳过 `/session/status`，复用 `OpencodeProcessStopService` 做 tracked owned-stop；manager 先 TERM，超时后 SIGKILL，并在 health 确认不可达后写 `DISPOSED`。其它目标继续走普通空闲排空。
+- 新增 Flyway 迁移、真实 PostgreSQL/MyBatis 集成测试、后端/前端专项测试，并同步 API、事件、数据库、安全、模块图及各相关模块 README；没有新增 RunEvent/SSE、generated SDK 或 OpenCode 源码修改。
+
+### How
+
+- JDK 25 下 API、workspace、runtime、persistence 定向 Maven 测试通过；PostgreSQL 16 Testcontainers 执行完整当前源码 Flyway 链并验证原子替换、门禁和 `force_stop` 映射。前端 backend-api/管理面板 16 项 Vitest、三个包 typecheck、前后端生产构建均通过，`git diff --check` 通过。
+- 最终应用 JAR 内新 migration 与源码 SHA-256 均为 `8b3cbad538f856d5daa06d15f118554ecefb2380a249287cdfe291eb71199022`。
+- 按 `.env.test`/`test` profile 执行整套重启时，构建成功，但本地存量测试库含已执行且当前分支未解析的 migration `20260802173416`，Flyway 校验失败并在 90 秒 readiness 等待后退出；未使用 `repair`、`outOfOrder` 或手工改历史表绕过。
+
+### Result
+
+- 代码路径已实现并通过专项/构建验证；企业现场四个目标尚未被本机操作，需先部署本提交和 migration，再由超级管理员对旧 rollout 执行一次替换动作才会强制终止。
+- 运行验证为部分完成：真实整套服务启动受本地历史 migration 分叉阻塞；企业内外网不通，因此目标库 `flyway_schema_history`、存量基线升级和现场四目标最终收敛仍须在企业部署前后核验。

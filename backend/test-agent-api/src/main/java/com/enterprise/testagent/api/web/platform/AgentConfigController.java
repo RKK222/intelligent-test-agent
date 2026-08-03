@@ -146,7 +146,7 @@ public class AgentConfigController {
             @RequestBody AgentConfigDtos.BranchRequest request,
             ServerWebExchange exchange) {
         AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
-        requireSharedRuntimeDiscardConfirmation(request, exchange);
+        requireSharedRuntimeDiscardConfirmation(request.discardLocalChanges(), exchange);
         return ok(exchange, service.updatePublicConfig(
                 request.branch(),
                 request.operationId(),
@@ -156,12 +156,31 @@ public class AgentConfigController {
     }
 
     /**
+     * 高风险纠错入口：原子替换指定 DRAINING 发布，并强制停止其中仍未排空的精确进程身份。
+     */
+    @PostMapping("/public/rollout/supersede")
+    public ApiResponse<Object> supersedePublicRollout(
+            @RequestBody AgentConfigDtos.SupersedePublicRolloutRequest request,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        requireSharedRuntimeDiscardConfirmation(request.discardLocalChanges(), exchange);
+        return ok(exchange, service.supersedePublicConfigRollout(
+                request.activeRolloutId(),
+                request.branch(),
+                request.operationId(),
+                Boolean.TRUE.equals(request.discardLocalChanges()),
+                request.reason(),
+                principal.userId(),
+                RuntimeApiSupport.traceId(exchange)));
+    }
+
+    /**
      * 全局刷新前聚合所有服务器的只读 Git 状态；未确认时不建立 rollout，更不修改任何工作树。
      */
     private void requireSharedRuntimeDiscardConfirmation(
-            AgentConfigDtos.BranchRequest request,
+            Boolean discardLocalChanges,
             ServerWebExchange exchange) {
-        if (Boolean.TRUE.equals(request.discardLocalChanges())) {
+        if (Boolean.TRUE.equals(discardLocalChanges)) {
             return;
         }
         String traceId = RuntimeApiSupport.traceId(exchange);

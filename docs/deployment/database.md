@@ -68,6 +68,16 @@ PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审
 
 公共主 rollout 在共享副本同步和本机进程快照完成后即可继续排空；某个个人 worktree 因覆盖风险、未完成 merge 或真实冲突而进入 `AWAITING_USER` 时，不占用主 rollout 锁。用户处理完成后独立 worker 原生 merge 同一目标 commit 并转为 `SYNCED`；删除 worktree 或服务器退役时转为级联删除或 `ABANDONED`。迁移只包含生产运行状态结构、索引和注释，不写测试、演示或个人数据。
 
+## V20260803133000 公共 Agent 纠错替换与强停标记
+
+`V20260803133000__support_public_agent_config_rollout_supersede.sql` 为无法通过普通会话空闲检查收敛的公共发布增加可审计纠错链：
+
+- `public_agent_config_rollouts.supersedes_rollout_id/superseded_by_rollout_id` 建立一对一双向替换关系，自引用外键、非自身 CHECK 和部分唯一索引共同防止重复替换或错误回链；历史行保持 `NULL`。
+- `public_agent_config_rollouts.supersede_reason` 保存超级管理员必填原因；旧任务使用新增终态 `SUPERSEDED`，新任务保持既有 `DRAINING -> COMPLETED` 状态机。
+- `public_agent_config_rollout_targets.force_stop` 非空且默认 `false`，旧 Java 和历史目标继续走原有空闲检查。只有新纠错 rollout 中与旧批次 `ABANDONED/ROLLOUT_SUPERSEDED` 目标的用户、服务器、容器、端口、PID、启动时间全部一致的目标才由插入 SQL 派生为 `true`。
+
+纠错仓储必须在同一个 PostgreSQL 事务内 CAS 更新指定 `DRAINING` 旧任务、清除其 server/target/worktree fencing 租约、创建唯一的新活动任务并写入双向关系；任一步失败都整体回滚，因此消息门禁没有可见空窗。迁移不改写现有 `DRAINING` 数据，也不会自动停止现场进程；升级后仍需超级管理员从公共配置管理页对精确旧 rollout 执行一次“强制终止并替换发布”。该 migration 一旦在共享或企业数据库执行即不可改写；发布集成时仍须按根规范核对 `flyway_schema_history` 版本和 checksum，并从各已知企业基线升级验证。
+
 ## V1 核心表
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V1__create_core_tables.sql` 创建以下表：

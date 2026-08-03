@@ -65,6 +65,8 @@ Browser
 | `test-agent-test-support` | 测试 fixture、mock server、集成测试支撑。 |
 | `test-agent-app` | 唯一启动入口和可部署服务包，强制 WebFlux 主上下文并装配 XXL Admin 子上下文/executor；只放启动、装配、profile、migration、health 和日志。 |
 
+公共 Agent 卡死 rollout 的纠错编排仍沿用现有边界：`test-agent-workspace-management.AgentConfigApplicationService` 解析远端修正 commit 并广播新任务，`test-agent-opencode-runtime.PublicAgentConfigRolloutService` 负责原子替换协调、精确目标强停和排空，`test-agent-persistence` 的 MyBatis XML/Flyway 保存替换审计链与 `force_stop` 派生标记，`test-agent-api.AgentConfigController` 仅暴露 `SUPER_ADMIN` DTO/鉴权入口。停止进程必须继续复用 `OpencodeProcessStopService`，不在 workspace、API 或 persistence 层直接控制 manager。
+
 新增后端文件前先按上表归属；没有合适工程时按业务边界新建 Maven module。
 
 ## 前端包职责

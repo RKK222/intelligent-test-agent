@@ -1239,6 +1239,16 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     listPublicAgentRepositories: () => request<PublicAgentRepositoryStatus[]>(`${agentConfigBase}/public/repositories`),
     getPublicAgentConfigRollout: () =>
       request<PublicAgentConfigRolloutStatus | null>(`${agentConfigBase}/public/rollout`),
+    supersedePublicAgentConfigRollout: (payload: {
+      activeRolloutId: string;
+      branch: string;
+      operationId?: string;
+      discardLocalChanges?: boolean;
+      reason: string;
+    }) => request<AgentConfigOperation>(`${agentConfigBase}/public/rollout/supersede`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
     listPublicAgentWorktrees: (linuxServerId: string) =>
       request<AgentConfigWorktreeOption[]>(`${agentConfigBase}/public/worktrees${query({ linuxServerId })}`),
     initializePublicAgentRepository: (linuxServerId: string, branch: string, operationId?: string) =>

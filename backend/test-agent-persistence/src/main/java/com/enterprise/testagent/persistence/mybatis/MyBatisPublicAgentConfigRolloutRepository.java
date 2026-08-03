@@ -45,6 +45,9 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
                         row.branch(),
                         row.commitHash(),
                         row.failureReason(),
+                        row.supersedesRolloutId(),
+                        row.supersededByRolloutId(),
+                        row.supersedeReason(),
                         row.createdAt(),
                         row.updatedAt(),
                         row.completedAt(),
@@ -69,6 +72,11 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
                         row.syncedAt(),
                         row.updatedAt()))
                 .toList();
+    }
+
+    @Override
+    public List<String> findRolloutServerIds(String rolloutId) {
+        return mapper.findRolloutServerIds(rolloutId);
     }
 
     @Override
@@ -128,6 +136,48 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
     @Override
     public boolean abortPreparation(String rolloutId, String reason, Instant now) {
         return mapper.abortPreparation(rolloutId, reason, now) == 1;
+    }
+
+    @Override
+    @Transactional
+    public boolean supersedePublicRollout(
+            String activeRolloutId,
+            String replacementRolloutId,
+            String branch,
+            String commitHash,
+            String previousCommitHash,
+            boolean discardSharedRuntimeChanges,
+            String initiatedByUserId,
+            String initiatedLinuxServerId,
+            String traceId,
+            String reason,
+            List<String> serverIds,
+            Instant now) {
+        if (mapper.markPublicRolloutSuperseded(activeRolloutId, reason, now) != 1) {
+            return false;
+        }
+        // 先封存旧租约，再建立新活动记录；整个方法受同一事务保护，对其它请求没有门禁空窗。
+        mapper.abandonSupersededRolloutServers(activeRolloutId, now);
+        mapper.abandonSupersededRolloutTargets(activeRolloutId, now);
+        mapper.abandonSupersededRolloutWorktrees(activeRolloutId, now);
+        mapper.abandonSupersededPublicRolloutWorktrees(activeRolloutId, now);
+        mapper.insertSupersedingPublicRollout(
+                replacementRolloutId,
+                activeRolloutId,
+                branch,
+                commitHash,
+                previousCommitHash,
+                discardSharedRuntimeChanges,
+                initiatedByUserId,
+                initiatedLinuxServerId,
+                traceId,
+                reason,
+                now);
+        serverIds.forEach(serverId -> mapper.insertServer(replacementRolloutId, serverId, now));
+        if (mapper.linkSupersededPublicRollout(activeRolloutId, replacementRolloutId, now) != 1) {
+            throw new IllegalStateException("Failed to link superseded public Agent config rollout");
+        }
+        return true;
     }
 
     @Override
@@ -402,7 +452,7 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
                             row.targetId(), row.rolloutId(), AgentConfigRolloutScope.valueOf(row.configScope()),
                             row.userId(), row.linuxServerId(), row.containerId(),
                             row.port(), row.processPid(), row.processStartedAt(), row.baseUrl(), row.retryCount(),
-                            leaseUntil, leaseToken, row.traceId());
+                            leaseUntil, leaseToken, row.traceId(), row.forceStop());
                 })
                 .filter(java.util.Objects::nonNull)
                 .toList();
@@ -443,6 +493,6 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
                 target.targetId(), target.rolloutId(), target.configScope().name(),
                 target.userId(), target.linuxServerId(), target.containerId(),
                 target.port(), target.processPid(), target.processStartedAt(), target.baseUrl(), target.retryCount(),
-                target.leaseUntil(), target.leaseToken(), target.traceId());
+                target.leaseUntil(), target.leaseToken(), target.traceId(), target.forceStop());
     }
 }

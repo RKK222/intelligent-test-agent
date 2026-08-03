@@ -37,6 +37,8 @@ import com.enterprise.testagent.domain.opencodeprocess.UserOpencodeProcessBindin
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessConfigLinkService;
+import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStopRequest;
+import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStopService;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Duration;
 import java.time.Instant;
@@ -68,6 +70,7 @@ public class PublicAgentConfigRolloutService
     private static final Duration TARGET_LEASE = Duration.ofSeconds(60);
     private static final Duration SERVER_SYNC_LEASE = Duration.ofMinutes(3);
     private static final Duration RUNTIME_TIMEOUT = Duration.ofSeconds(10);
+    private static final int MAX_SUPERSEDE_REASON_LENGTH = 500;
     /** 兼容旧 Java 用回包观察时间落库造成的毫秒级偏差；超过该窗口仍按替换进程失败关闭。 */
     private static final Duration LEGACY_PROCESS_START_TIME_SKEW = Duration.ofSeconds(1);
 
@@ -79,11 +82,18 @@ public class PublicAgentConfigRolloutService
     private final ManagedWorkspacePathResolver workspacePathResolver;
     private final Duration retryDelay;
     private OpencodeProcessConfigLinkService configLinkService;
+    private OpencodeProcessStopService stopService;
 
     /** 公共发布排空时把个人预览指针恢复到共享运行副本；方法注入保持既有测试构造器兼容。 */
     @Autowired
     void setConfigLinkService(OpencodeProcessConfigLinkService configLinkService) {
         this.configLinkService = Objects.requireNonNull(configLinkService, "configLinkService must not be null");
+    }
+
+    /** 纠错发布强制终止目标时必须复用公共停止程序，保持 manager、数据库和 heartbeat 状态一致。 */
+    @Autowired
+    void setStopService(OpencodeProcessStopService stopService) {
+        this.stopService = Objects.requireNonNull(stopService, "stopService must not be null");
     }
 
     public PublicAgentConfigRolloutService(
@@ -124,6 +134,64 @@ public class PublicAgentConfigRolloutService
                 localLinuxServerId,
                 initiatedByUserId,
                 traceId);
+    }
+
+    @Override
+    @Transactional
+    public String supersede(
+            String activeRolloutId,
+            String branch,
+            String commitHash,
+            String previousCommitHash,
+            boolean discardSharedRuntimeChanges,
+            String reason,
+            String localLinuxServerId,
+            String initiatedByUserId,
+            String traceId) {
+        String expectedActiveRolloutId = requireText(activeRolloutId, "待替换 rolloutId 不能为空");
+        String normalizedBranch = requireText(branch, "纠错发布分支不能为空");
+        String normalizedCommitHash = requireText(commitHash, "纠错发布目标提交不能为空");
+        String normalizedReason = requireText(reason, "纠错发布原因不能为空");
+        if (normalizedReason.length() > MAX_SUPERSEDE_REASON_LENGTH) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "纠错发布原因不能超过 " + MAX_SUPERSEDE_REASON_LENGTH + " 个字符");
+        }
+        String targetServer = requireText(localLinuxServerId, "纠错发布缺少发起服务器");
+        String replacementRolloutId = RuntimeIdGenerator.publicAgentConfigRolloutId();
+        Instant now = Instant.now();
+
+        Set<String> serverIds = new LinkedHashSet<>(repository.findRolloutServerIds(expectedActiveRolloutId));
+        serverIds.add(targetServer);
+        serverIds.addAll(repository.findActiveServerMembershipIds());
+        Set<LinuxServerId> liveBackendServerIds = heartbeatStore.liveBackendServerIds();
+        if (liveBackendServerIds != null) {
+            liveBackendServerIds.forEach(serverId -> serverIds.add(serverId.value()));
+        }
+        heartbeatStore.liveManagerSnapshots()
+                .forEach(snapshot -> serverIds.add(snapshot.container().linuxServerId().value()));
+        serverIds.forEach(serverId -> repository.registerServerMembership(serverId, now));
+
+        boolean replaced = repository.supersedePublicRollout(
+                expectedActiveRolloutId,
+                replacementRolloutId,
+                normalizedBranch,
+                normalizedCommitHash,
+                previousCommitHash,
+                discardSharedRuntimeChanges,
+                requireText(initiatedByUserId, "纠错发布发起用户不能为空"),
+                targetServer,
+                traceId,
+                normalizedReason,
+                List.copyOf(serverIds),
+                now);
+        if (!replaced) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "待替换的公共 Agent/Skill 发布已变化或不再处于排空状态",
+                    Map.of("rolloutId", expectedActiveRolloutId));
+        }
+        return replacementRolloutId;
     }
 
     @Override
@@ -778,6 +846,10 @@ public class PublicAgentConfigRolloutService
                 repository.markTargetDisposed(target.targetId(), target.leaseToken(), Instant.now());
                 return;
             }
+            if (target.forceStop()) {
+                forceStopSupersededTarget(target, now);
+                return;
+            }
             ExecutionNode node = targetNode(target, now);
             List<String> rootPaths = repository.findTargetWorkspaceRootPaths(target.targetId());
             if (!renewTargetLease(target)) {
@@ -838,6 +910,24 @@ public class PublicAgentConfigRolloutService
         Instant now = Instant.now();
         return repository.renewTargetLease(
                 target.targetId(), target.leaseToken(), now.plus(TARGET_LEASE), now);
+    }
+
+    /**
+     * 只强制停止被替换发布中仍未排空、且 PID/startedAt 与新快照精确一致的进程。
+     * 不调用 /session/status；公共停止服务会再次固定数据库代次、按 owner+PID 停止并确认 health 已不可达。
+     */
+    private void forceStopSupersededTarget(PublicAgentConfigRolloutTarget target, Instant now) {
+        if (stopService == null) {
+            retry(target, "PROCESS_STOP_SERVICE_UNAVAILABLE", now);
+            return;
+        }
+        Optional<OpencodeServerProcess> process = exactTargetProcess(target);
+        if (process.isEmpty()) {
+            retry(target, "PROCESS_IDENTITY_CHANGED", now);
+            return;
+        }
+        stopService.stopAndVerify(OpencodeProcessStopRequest.tracked(process.get(), target.traceId()));
+        repository.markTargetDisposed(target.targetId(), target.leaseToken(), Instant.now());
     }
 
     /** 应用发布不触碰公共配置指针；公共发布必须在 dispose 前把本人预览切回共享副本。 */

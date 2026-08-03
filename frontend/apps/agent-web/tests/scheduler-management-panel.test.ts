@@ -139,6 +139,11 @@ function api(overrides: Partial<BackendApiClient> = {}) {
       status: "SUCCEEDED",
       commitHash: "def5678"
     }),
+    supersedePublicAgentConfigRollout: vi.fn().mockResolvedValue({
+      operationId: "aco_supersede",
+      status: "SUCCEEDED",
+      commitHash: "commit_fixed"
+    }),
     pullPublicAgentRepository: vi.fn().mockResolvedValue({
       ...publicRepository,
       status: "READY",
@@ -404,6 +409,59 @@ describe("scheduler management panel", () => {
     expect(await view.findByText("git fetch 超时")).toBeTruthy();
     expect(await view.findByText(/补偿已收敛 1\/2，待用户处理 1/)).toBeTruthy();
     expect(view.getByRole("button", { name: "刷新公共 Agent Git" }).hasAttribute("disabled")).toBe(true);
+    view.queryClient.clear();
+  });
+
+  it("requires confirmation and supersedes a draining rollout with forced exact-process stop", async () => {
+    const latestRollout = {
+      rolloutId: "acr_stuck",
+      status: "DRAINING",
+      branch: "feature_config",
+      commitHash: "commit_bad",
+      failureReason: null,
+      createdAt: "2026-08-03T04:46:14Z",
+      updatedAt: "2026-08-03T04:46:19Z",
+      completedAt: null,
+      servers: [{
+        linuxServerId: "linux-1",
+        syncStatus: "SYNCED",
+        retryCount: 0,
+        targetTotal: 15,
+        targetPending: 4,
+        targetDisposed: 11,
+        targetAbandoned: 0,
+        worktreeTotal: 0,
+        worktreePending: 0,
+        worktreeSynced: 0,
+        lastError: "TestAgent 服务响应异常",
+        syncedAt: "2026-08-03T04:46:15Z",
+        updatedAt: "2026-08-03T04:46:15Z"
+      }]
+    };
+    const backendApi = api({
+      getPublicAgentConfigRollout: vi.fn().mockResolvedValue(latestRollout),
+      listPublicAgentBranches: vi.fn().mockResolvedValue(["main", "feature_config"])
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const view = renderWithApi(OpencodePublicConfigManagementPanel, backendApi);
+
+    await view.findByText("正在同步并排空");
+    await fireEvent.click(view.getByRole("button", { name: "强制终止并替换发布" }));
+    await fireEvent.update(
+      await view.findByLabelText("操作原因（必填，最多 500 字）"),
+      "修复 description 为空"
+    );
+    await fireEvent.click(view.getByRole("button", { name: "确认强制终止并替换" }));
+
+    await waitFor(() => expect(backendApi.supersedePublicAgentConfigRollout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activeRolloutId: "acr_stuck",
+        branch: "feature_config",
+        reason: "修复 description 为空",
+        discardLocalChanges: false
+      })
+    ));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("强制停止其中仍未排空的 4 个"));
     view.queryClient.clear();
   });
 });

@@ -59,6 +59,8 @@
 - Hub 正文由 `agent-skill-hub/HUB` 独立只读文件 ticket 获取；引用、取消引用与更新复用现有 `agent-config/WORKSPACE` ticket，并校验 `appAdmin`、绑定 workspace 和当前用户。目录和更新 HTTP 查询可携带个人运行 `targetWorkspaceId`；`referencedOnly` 返回当前应用引用清单，详情附带按状态收敛的引用方应用/工作空间。
 - Hub 不新增 SSE 或后端间文件 HTTP 代理；跨服务器引用始终由浏览器连接目标工作区所在 Java 的平台文件 WebSocket。
 
+- `AgentConfigController` 的 `POST /public/rollout/supersede` 只负责 `SUPER_ADMIN` 鉴权、共享运行副本恢复确认、请求 DTO 和 traceId 透传；`activeRolloutId` 作为业务层 CAS 前置条件，前端不能提交 `forceStop`。响应沿用 Agent 配置 operation DTO，状态轮询通过 `GET /public/rollout` 的可选替换审计字段完成。
+
 ## 允许依赖
 
 - `test-agent-common`。
@@ -104,7 +106,7 @@
 - `ReferenceRepositoryControllerTest` 覆盖 7 个内部端点、`repositoryPath` JSON 字段、初始化 body/traceId/当前用户透传、`APP_ADMIN` 成功、`SUPER_ADMIN` 继承和普通用户在调用业务服务前被拒绝。
 - `CurrentBackendWebSocketUrlFactoryTest`、`TerminalControllerTest`、`TerminalWebSocketHandlerTest` 覆盖 workspace 绝对 URL、服务器终端强制 WSS、PTY ticket、origin 拒绝、单目标互斥、输入限流、关闭和超时；服务器 ticket POST 复用 `BackendJavaRouteResolver`/`BackendHttpForwarder` 跨 Java 路由。
 - Workspace 文件 WebSocket 入口应覆盖 route、ticket、显式 Origin 白名单、单独 wildcard 仅放行合法 Origin、同服务器和实时应用成员校验、ticket 在归属未 READY 时复查强状态、RPC 成功/错误 envelope、组合视图 list/read 与 locator 防伪造、上传/复制/移动、普通文件/目录树删除和受保护 `.opencode` 根目录拒绝；对应 HTTP/协议契约同步维护在 `docs/api/http-api.md` 与 `docs/api/event-stream.md`。
-- Agent 配置入口应覆盖公共/工作空间 status、公共仓库列表、公共仓库初始化、当前用户公共 worktree 的服务器路由和所有权校验、公共个人 `runtime-reload` 离开 WebFlux 事件线程执行、文件 WebSocket route/ticket/op、文件读写改名复制移动删除权限、Git stage/unstage/discard/冲突操作鉴权、operation ticket、Origin 拒绝和进度 envelope；对应契约同步维护在 `docs/api/http-api.md` 与 `docs/api/event-stream.md`。
+- Agent 配置入口应覆盖公共/工作空间 status、公共仓库列表、公共仓库初始化、当前用户公共 worktree 的服务器路由和所有权校验、公共个人 `runtime-reload` 离开 WebFlux 事件线程执行、文件 WebSocket route/ticket/op、文件读写改名复制移动删除权限、Git stage/unstage/discard/冲突操作鉴权、纠错替换的超管成功与非超管拒绝、operation ticket、Origin 拒绝和进度 envelope；对应契约同步维护在 `docs/api/http-api.md` 与 `docs/api/event-stream.md`。
 - `RuntimeApiSupportTest` 覆盖分页默认值和非法分页参数转换为统一 `VALIDATION_ERROR`。
 - `ManagedWorkspaceControllerTest` 覆盖应用版本工作区入口的认证主体、traceId、当前用户 opencode 服务器透传、请求体转换、版本 `git pull`、工作区 Git stage/unstage、冲突解决、最近使用接口，以及普通成员绕过 Agent API 提交 `.opencode/**` 时的拒绝。
 - `WorkspaceGitToolControllerTest`、`ApiTokenWebFilterTest` 覆盖专用 Tool 凭据入口的身份透传和精确过滤器例外；其它 API 路径仍要求原有用户或静态 Token。

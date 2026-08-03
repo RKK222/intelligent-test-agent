@@ -46,6 +46,8 @@
 - 把后端文件 DTO 转换为前端稳定展示模型。
 - SSH key 新增方法只发送私钥给平台后端，响应类型只包含 key 元信息，不包含明文或密文。
 
+- `supersedePublicAgentConfigRollout({ activeRolloutId, branch, operationId?, discardLocalChanges?, reason })` 调用公共纠错入口；client 只发送旧任务 CAS 标识、修正分支和原因，不暴露 target `forceStop` 开关。新状态字段 `supersedesRolloutId/supersededByRolloutId/supersedeReason` 由共享类型以可选字段透传，轮询方式与普通公共 rollout 一致。
+
 ### Agent & Skill Hub client
 
 - Hub 目录、详情、发布、更新列表和角标使用 `/workspace-management/agent-skill-hub` HTTP API；目录可携带 `referencedOnly + targetWorkspaceId` 获取当前应用引用清单，详情返回引用方应用/工作空间，更新请求按同一目标工作区统计。

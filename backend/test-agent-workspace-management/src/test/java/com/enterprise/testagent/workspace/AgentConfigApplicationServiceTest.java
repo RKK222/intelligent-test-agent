@@ -508,6 +508,48 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
+    void publicSupersedeResolvesRemoteCommitBeforeAtomicReplacementAndBroadcastsNewRollout() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode"));
+        Files.writeString(root.resolve(".config/opencode/config.json"), "{}");
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                publisher);
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        when(coordinator.supersede(
+                "acr_stuck", "feature_config", "commit_base", "commit_base", false,
+                "修复 description 为空", "linux-1", ADMIN.value(), "trace_fix"))
+                .thenReturn("acr_replacement");
+        service.setPublicConfigRolloutCoordinator(coordinator);
+
+        AgentConfigResponses.AgentConfigOperationResponse response = service.supersedePublicConfigRollout(
+                "acr_stuck",
+                "feature_config",
+                "aco_supersede_12345678",
+                false,
+                "修复 description 为空",
+                ADMIN,
+                "trace_fix");
+
+        assertThat(response.status()).isEqualTo("SUCCEEDED");
+        assertThat(response.commitHash()).isEqualTo("commit_base");
+        verify(coordinator).supersede(
+                "acr_stuck", "feature_config", "commit_base", "commit_base", false,
+                "修复 description 为空", "linux-1", ADMIN.value(), "trace_fix");
+        assertThat(publisher.events).singleElement().satisfies(event ->
+                assertThat(event.payload())
+                        .containsEntry("rolloutId", "acr_replacement")
+                        .containsEntry("reason", "supersede"));
+    }
+
+    @Test
     void publicUpdateOnlySchedulesGlobalWorkersAndDoesNotMergeOneSelectedWorktreeInline() throws Exception {
         Path sharedRoot = root.resolve(".config");
         Path personalRoot = root.resolve(".configdev/public-usr_admin");

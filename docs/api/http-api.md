@@ -344,6 +344,7 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 | `GET` | `/public/repositories/local` | 目标后端本机状态查询入口，仅供后端到后端代理使用。 |
 | `POST` | `/public/repositories/{linuxServerId}/initialize` | 通过当前后端代理到目标服务器，用当前登录用户唯一 SSH key 初始化或刷新该服务器本地公共配置仓库。 |
 | `POST` | `/public/update` | 读取所选远端分支的目标 commit，建立一次全局 rollout；所有服务器共享运行副本 checkout/reset 到同一 commit，所有有效公共个人 worktree 原生 merge 该 commit。rollout 激活后即返回，不等待服务器同步和进程排空。 |
+| `POST` | `/public/rollout/supersede` | `SUPER_ADMIN` 用远端修正提交原子替换指定的 `DRAINING` 公共 rollout；旧批次剩余进程在新提交同步完成后按精确身份强制停止，不再等待 `/session/status`。 |
 | `POST` | `/public/update-and-push` | 公共配置"提交并推送"复合操作：先 `fetch` 远端最新提交，再 stage/commit 本地变更，随后 merge `origin/{branch}` 并 push；`discardLocalChanges=true` 时先 `git reset --hard HEAD` 放弃受控仓库中的已跟踪修改。远端提交和 rollout 激活确认后即返回，服务器同步和进程排空在后台继续。 |
 | `POST` | `/file-ws-route` | 查询 Agent 配置文件 WebSocket 应连接的目标后端，body 包含 `scope`、`workspaceId?`、`worktreeId?`、`linuxServerId?`。 |
 | `POST` | `/public/worktrees` | 在请求指定且已初始化的 `linuxServerId` 上确保当前用户的长期公共配置 worktree；分支和目录按用户稳定命名、不包含应用版本，同一用户重复调用返回已有有效 worktree。目标服务器本地 Git 根目录未初始化时返回 `CONFLICT`，不在该接口 clone。 |
@@ -370,6 +371,22 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 公共 `update`、`update-and-push`、`publish` 的同步广播携带内部 `rolloutId`。发布端在远端 push 或任何工作树修改前先写 `PREPARING` 任务、发起人用户 ID、是否已确认恢复共享运行副本以及持久化服务器清单（包含发布瞬间离线的已登记服务器），远端提交确认后激活为 `DRAINING`，形成后端禁发硬闸门；一旦该任务建立，广播失败、服务器离线或 Java 重启都只会保留 `PENDING/DRAINING` 并由定时补偿继续处理，不允许以失败状态提前开闸。发布请求不再认领或执行本服务器同步，只在远端事实和 rollout 激活确认后发送低延迟广播并返回；本机与其它服务器均由广播消费者或默认每 5 秒运行的数据库补偿程序认领，因此 Git 同步、进程登记和旧 Session 排空不会占用发布 HTTP 请求。每台服务器使用发起人的已存 SSH 凭据把本机共享运行仓库 checkout/reset 到目标 commit，并尝试把同一 commit 原生合入本机所有有效公共个人 worktree；个人 worktree 的冲突只登记补偿任务。只有取得本服务器 manager 的实时进程清单、把已有 opencode 进程及其用户快照写入目标表后，才确认该服务器同步完成。凭据只在目标 Java 从数据库读取并解密，不进入广播 payload。前端在活动期每 2 秒轮询 `GET /public/rollout`，所有重复刷新入口禁用；终态保留各服务器同步/排空计数、个人 worktree 计数与 `lastError`。
 
 所有服务器确认后，每台 Java 的固定延迟任务只认领 `target.linuxServerId=本机 linuxServerId` 的一条目标；租约 token 隔离过期 worker，发布端可以统一插表，但不能替其他服务器执行。公共发布登记本机全部存量进程；应用发布只登记已经成功同步相关个人 worktree 的用户进程；个人拉取范围只登记发起用户当前服务器上的本人进程。目标 Java 先用本机 manager 快照确认端口仍存在，再经本机 opencode 逐一对该进程历史绑定的所有 Workspace 目录调用 `GET /session/status`；任一目录出现 `busy/retry`、未知状态或非法响应都跳过 dispose、累计 `retryCount` 并按退避持续重试。全部目录明确空闲后，对这个用户专属 opencode 进程只调用一次 `POST /global/dispose`；明确返回布尔 `true` 才把目标置为 `DISPOSED`。该用户的全部目标完成后立即恢复发送，下一次请求重新创建 Instance 并加载已同步的 `opencode.jsonc`、Agent 和 Skill；不等待其他用户。manager 已明确确认目标进程不存在时按已释放处理；manager 清单不可用时继续重试。全部目标结束后主 rollout 原子变为 `COMPLETED`；公共范围同一时刻只允许一个活动任务，应用范围按应用版本 ID 各自只允许一个活动任务，个人拉取范围不进入这两类唯一锁。已完成应用 rollout 后续补偿产生的用户目标仍由同一 target worker 处理，并在 dispose 完成前只阻止该用户发送。
+
+`POST /public/rollout/supersede` 是公共配置纠错入口，请求体如下：
+
+```json
+{
+  "activeRolloutId": "acr_stuck",
+  "branch": "feature_config",
+  "operationId": "aco_supersede_12345678",
+  "discardLocalChanges": false,
+  "reason": "上一提交的 Agent description 无效"
+}
+```
+
+该入口只接受调用时仍为 `DRAINING` 的精确 `activeRolloutId`；批次已完成、已被替换或 ID 过期时返回 HTTP 409，不能误操作后来创建的发布。后端先解析远端分支的修正 commit，并按普通公共刷新规则完成共享运行副本 dirty 确认；随后在一个数据库事务内把旧 rollout 置为 `SUPERSEDED`、清除旧任务租约并将未终态目标置为 `ABANDONED/ROLLOUT_SUPERSEDED`，同时创建唯一的新 `DRAINING` rollout 和双向替换审计链。新 rollout 必须先在各服务器同步修正 commit，之后才认领进程目标。
+
+新批次登记目标时，只有用户、服务器、容器、端口、PID 和 manager 权威启动时间都与旧批次未排空目标一致的进程才标记 `forceStop=true`。这类目标跳过 `/session/status` 和会话空闲等待，复用 `OpencodeProcessStopService` 再次校验平台进程代次，以权威 UCID + PID 向本机 manager 下发 owned stop；manager 在普通终止超时后升级到强制终止，后端还需确认该实例 health 已不可达才写 `DISPOSED`。身份已变化、manager 快照不可用或停止结果不确定时继续重试，禁止按端口盲停替换实例。新批次中的其它进程仍走普通空闲检测与 `/global/dispose`。`GET /public/rollout` 以可选 additive 字段返回 `supersedesRolloutId`、`supersededByRolloutId` 和 `supersedeReason`，旧客户端可忽略。
 
 长操作进度：
 

@@ -3,6 +3,8 @@ package com.enterprise.testagent.opencode.runtime.config;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
@@ -43,6 +45,8 @@ import com.enterprise.testagent.domain.opencodeprocess.UserOpencodeProcessBindin
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessConfigLinkService;
+import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStopRequest;
+import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStopService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.nio.file.Path;
@@ -109,6 +113,50 @@ class PublicAgentConfigRolloutServiceTest {
     }
 
     @Test
+    void supersedeAtomicallyReplacesDrainingRolloutAndInheritsItsServers() {
+        when(repository.findRolloutServerIds("acr_stuck")).thenReturn(List.of("linux-1", "linux-2"));
+        when(repository.findActiveServerMembershipIds()).thenReturn(List.of("linux-2", "linux-3"));
+        when(repository.supersedePublicRollout(
+                eq("acr_stuck"), any(), eq("feature_config"), eq("commit_fixed"), eq("commit_bad"),
+                eq(false), eq("usr-admin"), eq("linux-1"), eq("trace-fix"), eq("修复无效 description"),
+                any(), any())).thenReturn(true);
+
+        String replacement = service.supersede(
+                "acr_stuck",
+                "feature_config",
+                "commit_fixed",
+                "commit_bad",
+                false,
+                "修复无效 description",
+                "linux-1",
+                "usr-admin",
+                "trace-fix");
+
+        assertThat(replacement).startsWith("acr_").isNotEqualTo("acr_stuck");
+        verify(repository).supersedePublicRollout(
+                eq("acr_stuck"), eq(replacement), eq("feature_config"), eq("commit_fixed"), eq("commit_bad"),
+                eq(false), eq("usr-admin"), eq("linux-1"), eq("trace-fix"), eq("修复无效 description"),
+                argThat(serverIds -> serverIds.size() == 3
+                        && serverIds.containsAll(List.of("linux-1", "linux-2", "linux-3"))),
+                any(Instant.class));
+    }
+
+    @Test
+    void supersedeRejectsStaleActiveRolloutId() {
+        when(repository.findRolloutServerIds("acr_stale")).thenReturn(List.of("linux-1"));
+        when(repository.findActiveServerMembershipIds()).thenReturn(List.of("linux-1"));
+        when(repository.supersedePublicRollout(
+                eq("acr_stale"), any(), any(), any(), any(), anyBoolean(),
+                any(), any(), any(), any(), any(), any())).thenReturn(false);
+
+        assertThatThrownBy(() -> service.supersede(
+                "acr_stale", "main", "commit_fixed", "commit_bad", false,
+                "修复错误配置", "linux-1", "usr-admin", "trace-fix"))
+                .isInstanceOf(com.enterprise.testagent.common.error.PlatformException.class)
+                .hasMessageContaining("已变化");
+    }
+
+    @Test
     void applicationPreparePersistsVersionScopeBeforeGitMutation() {
         when(repository.findActiveRolloutId(
                 AgentConfigRolloutScope.APPLICATION, "awv_1234567890abcdef"))
@@ -147,6 +195,9 @@ class PublicAgentConfigRolloutServiceTest {
                 "DRAINING",
                 "main",
                 "abc123",
+                null,
+                null,
+                null,
                 null,
                 PROCESS_STARTED_AT,
                 PROCESS_STARTED_AT,
@@ -626,6 +677,29 @@ class PublicAgentConfigRolloutServiceTest {
         service.drainTargets();
 
         verify(configLinkService).switchToShared(process.sessionPath(), process.configPath());
+        verify(repository).markTargetDisposed(eq("act_target"), eq("acl_lease"), any());
+    }
+
+    @Test
+    void supersedingRolloutForceStopsOnlyFlaggedExactProcessWithoutSessionStatus() {
+        PublicAgentConfigRolloutTarget target = new PublicAgentConfigRolloutTarget(
+                "act_target", "acr_replacement", AgentConfigRolloutScope.PUBLIC,
+                "usr-1", "linux-1", "container-1", 4096,
+                123L, PROCESS_STARTED_AT, "http://127.0.0.1:4096", 0,
+                Instant.now().plusSeconds(60), "acl_lease", "trace-rollout", true);
+        OpencodeProcessStopService stopService = mock(OpencodeProcessStopService.class);
+        service.setStopService(stopService);
+        when(repository.claimTargets(eq("linux-1"), any(), any(), eq(1))).thenReturn(List.of(target));
+        when(processRepository.findUserBinding(new UserId("usr-1"), "opencode"))
+                .thenReturn(Optional.of(targetBinding()));
+        when(processRepository.findOpencodeServerProcessById(new OpencodeProcessId("ocp_1234567890abcdef")))
+                .thenReturn(Optional.of(targetProcess()));
+        useManagerPorts(4096);
+
+        service.drainTargets();
+
+        verify(stopService).stopAndVerify(any(OpencodeProcessStopRequest.class));
+        verify(runtime, never()).runtime(any(AgentRuntimeCommand.class));
         verify(repository).markTargetDisposed(eq("act_target"), eq("acl_lease"), any());
     }
 

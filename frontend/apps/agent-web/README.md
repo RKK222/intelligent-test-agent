@@ -145,6 +145,8 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 
 `tests/toolbox-panel.test.ts` 覆盖 14 个标签常驻、数量联动、分类过滤不改变计数、零数量状态、隐藏标题、搜索/筛选、热门与零点击空态、原生新标签属性、普通/中键上报和失败不阻断；`tests/toolbox-navigation.test.ts` 与 `tests/login-redirect.test.ts` 覆盖沉浸式布局状态机和 `/toolbox` 登录回跳，`tests/toolbox-dev-proxy.test.ts` 锁定本地代理目标、路径改写与根路径守卫，`tests/workbench.spec.ts` 真实桌面 Chromium 场景覆盖普通用户入口、左右面板恢复、前进/后退和深链接刷新。
 
+- 系统管理的公共配置 rollout 卡片在状态为 `DRAINING` 时向 `SUPER_ADMIN` 提供“强制终止并替换发布”：弹窗重新读取远端修正分支，要求最多 500 字的非空原因，并二次确认将跳过剩余目标的会话空闲等待；共享运行副本 dirty 时沿用现有恢复确认。页面只提交精确旧 rolloutId 并轮询后端新批次，强停目标由后端按进程身份派生，前端不选择用户、不传 PID，也不直接调用运行管理 stop API。
+
 ## 禁止事项
 
 - 不直接拼接后端 URL。
@@ -154,7 +156,7 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 
 ## 验证
 
-`tests/xxl-job-management-panel.test.ts` 覆盖隐藏表单 POST/URL 无票据、刷新重签、403/503、票据或平台会话失效、登出清空 iframe，以及横向 shell 装饰幂等、只读账号、错误页跳过和菜单滚动；`tests/scheduler-management-panel.test.ts` 只保留系统管理导航回归。
+`tests/xxl-job-management-panel.test.ts` 覆盖隐藏表单 POST/URL 无票据、刷新重签、403/503、票据或平台会话失效、登出清空 iframe，以及横向 shell 装饰幂等、只读账号、错误页跳过和菜单滚动；`tests/scheduler-management-panel.test.ts` 覆盖系统管理导航及公共配置卡死 rollout 的分支/原因/二次确认/纠错请求回归。
 
 `tests/internal-model-provider-panel.test.ts` 覆盖 Token 新增/改名轮换/删除冲突、Provider Token 下拉关联、启用校验和失败请求后的密钥草稿清理；`tests/raw-output.test.ts` 覆盖内部模型 `authToken/tokenValue` 原始报文脱敏。
 

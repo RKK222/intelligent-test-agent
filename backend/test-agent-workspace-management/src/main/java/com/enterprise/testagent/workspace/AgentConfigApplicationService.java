@@ -480,6 +480,57 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
     }
 
     /**
+     * 用远端修正提交替换一个无法排空的公共发布。
+     * 远端 commit 和共享副本风险在事务前确认；旧/新 rollout 的活动态切换由协调器原子完成。
+     */
+    public AgentConfigResponses.AgentConfigOperationResponse supersedePublicConfigRollout(
+            String activeRolloutId,
+            String branch,
+            String operationId,
+            boolean discardLocalChanges,
+            String reason,
+            UserId userId,
+            String traceId) {
+        String expectedRolloutId = requireText(activeRolloutId, "待替换 rolloutId 不能为空", "activeRolloutId");
+        String normalizedBranch = requireText(branch, "分支不能为空", "branch");
+        String normalizedReason = requireText(reason, "纠错发布原因不能为空", "reason");
+        AgentConfigProgress progress = startProgress(
+                operationId, AgentConfigScope.PUBLIC, null, "supersede", normalizedBranch, traceId);
+        try {
+            PublicConfig config = requireEnabledPublicConfig(userId);
+            String privateKey = decryptSingleSshKey(userId);
+            progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
+            String previousCommitHash = existingRepositoryHead(config.gitRoot());
+            validatePublicRuntimeRepositoryBeforeRollout(config, discardLocalChanges);
+            progress.step(AgentConfigOperationStep.MERGING);
+            String commitHash = gitWorkspaceService.resolveRemoteBranchCommit(
+                    publicGitCommandUrl(config, userId), normalizedBranch, privateKey);
+            if (publicConfigRolloutCoordinator == null) {
+                throw new PlatformException(ErrorCode.INTERNAL_ERROR, "公共 Agent 发布协调器不可用");
+            }
+            String replacementRolloutId = publicConfigRolloutCoordinator.supersede(
+                    expectedRolloutId,
+                    normalizedBranch,
+                    commitHash,
+                    previousCommitHash,
+                    discardLocalChanges,
+                    normalizedReason,
+                    serverIdentity.linuxServerId(),
+                    userId.value(),
+                    traceId);
+            progress.step(AgentConfigOperationStep.BROADCASTING);
+            broadcastPublicSync(normalizedBranch, commitHash, "supersede", replacementRolloutId, traceId);
+            return progress.succeeded(commitHash);
+        } catch (PlatformException exception) {
+            progress.failed(exception.errorCode().name(), safeErrorMessage(exception.getMessage()));
+            throw exception;
+        } catch (Exception exception) {
+            progress.failed(ErrorCode.INTERNAL_ERROR.name(), "公共 Agent 纠错发布失败");
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "公共 Agent 纠错发布失败", Map.of(), exception);
+        }
+    }
+
+    /**
      * "更新公共配置 + 提交并推送"复合操作：fetch 远端最新提交后提交本地变更，合并远端分支，再 push 并广播同步。
      * <p>
      * 工作区有未提交修改时按以下语义处理：
