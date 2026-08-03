@@ -249,6 +249,200 @@ git --git-dir=/exact/application/repository/.git worktree prune
 - `OPENCODE_MANAGER_STATE_DIR/processes/{port}.json` 是 manager 运行态 state，不是普通日志；不要在 worker 运行中直接删除。需要清理坏 state 时，先通过运行管理停止对应用户进程，或停 worker 后再处理。
 - 对外排障日志必须脱敏 token、Authorization、Cookie、完整 prompt、私钥和用户完整输入；优先提供 traceId、linuxServerId、containerId、port、错误码和最近 200 行上下文。
 
+<a id="opencode-process-assignment-conflict-troubleshooting"></a>
+
+### `进程分配已变化，拒绝旧启动结果回写` 现场排查
+
+该错误表示公共启动程序用启动前读取的 `process_id/user_id/linux_server_id/container_id/port/status/pid/trace_id`
+执行条件更新时，数据库当前行已经不再完全匹配。它不等同于用户一定迁移到了另一台服务器：服务器、容器和端口均未变化时，
+另一个初始化、自动恢复、运行管理命令或强状态查询只要改写了同一行的 `status/pid/trace_id`，也会触发该保护。
+
+现场排查只要求 PostgreSQL 客户端以及 Linux 常见的 `journalctl`、`docker logs`、`grep`、`sed`、`find`、`curl`，
+不依赖 `rg`、`jd` 或 JSON 专用查看工具。故障仍在发生时，先记录页面 `operationId/traceId`、统一认证号和发生时间，
+再采集数据库与日志；不要把清浏览器缓存、重新初始化、重启 Java/worker 或手工修改 binding 当作第一步，
+因为后续强状态查询和成功启动会覆盖进程当前快照。
+
+#### 1. 先区分历史操作与当前快照
+
+清理浏览器缓存不会删除 PostgreSQL 中的用户、初始化操作、binding 或进程记录。即使系统管理页面暂时搜索不到用户，
+仍可先按统一认证号确认数据库用户是否存在：
+
+```sql
+select user_id, unified_auth_id, username, status, created_at, updated_at
+from users
+where unified_auth_id = '000857009';
+```
+
+再查询指定用户和时间窗口内的全部初始化操作，不能只筛选 `FAILED`，否则会遗漏同期成功操作：
+
+```sql
+select
+    o.operation_id,
+    o.status,
+    o.current_step,
+    o.error_code,
+    o.error_message,
+    o.process_id,
+    o.service_address,
+    o.trace_id,
+    round(extract(epoch from (o.updated_at - o.created_at)) * 1000)::bigint as duration_ms,
+    o.created_at,
+    o.updated_at
+from opencode_process_start_operations o
+where o.requested_by_user_id = (
+    select u.user_id
+    from users u
+    where u.unified_auth_id = '000857009'
+)
+  and o.created_at between timestamp '2026-08-03 13:43:30'
+                       and timestamp '2026-08-03 13:52:00'
+order by o.created_at;
+```
+
+已知 traceId 时可绕过页面和用户关键字直接查历史操作：
+
+```sql
+select operation_id, status, current_step, error_code, error_message,
+       process_id, service_address, trace_id, created_at, updated_at
+from opencode_process_start_operations
+where trace_id in (
+    'trace_msct07xnv0erih6jabn',
+    'trace_msct0la29vnptojkpku',
+    'trace_msct142b4o59rixmjng',
+    'trace_msct86tqm3ohxd6uq',
+    'trace_msct8oihua1wkcee94'
+)
+order by created_at;
+```
+
+最后查看该用户所有进程记录和当前 binding，不要只按 binding 内的 `process_id` 查一行，否则会漏掉旧进程候选：
+
+```sql
+select
+    u.user_id,
+    u.unified_auth_id,
+    u.username,
+    u.status as user_status,
+    b.process_id as binding_process_id,
+    b.linux_server_id as binding_linux_server_id,
+    b.port as binding_port,
+    b.status as binding_status,
+    b.trace_id as binding_trace_id,
+    b.updated_at as binding_updated_at,
+    p.process_id,
+    p.linux_server_id,
+    p.container_id,
+    p.port,
+    p.pid,
+    p.status as process_status,
+    p.trace_id as process_trace_id,
+    p.started_at,
+    p.last_health_check_at,
+    p.health_message,
+    p.updated_at as process_updated_at
+from users u
+left join user_opencode_process_bindings b
+       on b.user_id = u.user_id and b.agent_id = 'opencode'
+left join opencode_server_processes p
+       on p.user_id = u.user_id
+where u.unified_auth_id = '000857009'
+order by p.updated_at desc nulls last;
+```
+
+`opencode_process_start_operations` 是每个显式 `operationId` 的进度结果，可在现场消失后继续查；
+`opencode_server_processes` 和 `user_opencode_process_bindings` 是当前快照，后续健康查询、停止、重启或成功恢复均可能覆盖
+其中的状态、PID、traceId 和更新时间。因此 SQL 能确认冲突阶段、次数、时间与最终落点，但仅凭当前快照通常不能还原具体抢写者。
+
+#### 2. 按步骤和耗时缩小竞争位置
+
+| 操作结果 | 解释 | 优先核对 |
+|---|---|---|
+| `FAILED / SAVING_CANDIDATE`，通常不到 1 秒 | manager health 前的候选状态条件更新已经失败 | 同期重复初始化、自动恢复、运行管理 restart/stop、强状态查询 |
+| `FAILED / HEALTH_CHECKING`，耗时接近一次 health 等待 | 候选已进入健康检查，但写入最终 `RUNNING` 前当前行被改写 | `GET /processes/me`、运行管理 `user-processes` 本机探测、另一条启动/恢复链路 |
+| 多条显式操作均失败，稍后进程却为 `RUNNING` | 可能存在未写本表的自动恢复或运行管理启动，也可能有查询窗口外的成功操作 | 先扩展 SQL 时间窗并包含 `SUCCEEDED`，再查“自动恢复”和 restart 日志 |
+
+manager 的常规 5 秒 `managerHeartbeat` 只更新 Redis manager 快照，不直接写 `opencode_server_processes`；
+不能仅凭失败耗时约 5 秒就把它认定为数据库抢写者。manager 重新注册并首次完成配置/心跳后可能触发异步自动恢复，
+应在 Java 日志中单独核对。强 `GET /processes/me` 和运行管理 `user-processes` 的本机健康探测会走公共状态查询并可能更新当前进程快照；
+弱 `GET /processes/me/health` 本身不落进程表。
+
+#### 3. 不使用 `rg`/`jd` 的日志采证
+
+在每个 Java 节点执行同一时间窗查询，至少保留错误前 5 秒到最后一次后续成功启动后 10 秒：
+
+```bash
+journalctl -u test-agent-backend \
+  --since '2026-08-03 13:43:45' \
+  --until '2026-08-03 13:51:40' \
+  --no-pager -o short-iso | \
+grep -n -C 20 -E \
+  'trace_msct07xnv0erih6jabn|trace_msct0la29vnptojkpku|trace_msct142b4o59rixmjng|trace_msct86tqm3ohxd6uq|trace_msct8oihua1wkcee94|ocp_c1f9bd7841334e4fb1857b28650c088f|opencode 自动恢复|进程分配已变化'
+```
+
+如果 Java 不是 systemd 服务，对实际 stdout/stderr 日志文件执行相同的 `grep -n -C 20 -E '...' <日志文件>`。
+同时在进程所属 worker 节点检查 manager 命令顺序：
+
+```bash
+docker logs \
+  --since '2026-08-03T13:43:45+08:00' \
+  --until '2026-08-03T13:51:40+08:00' \
+  test-agent-opencode-worker 2>&1 | \
+grep -n -C 10 -E \
+  'trace_msct07xnv0erih6jabn|trace_msct0la29vnptojkpku|trace_msct142b4o59rixmjng|trace_msct86tqm3ohxd6uq|trace_msct8oihua1wkcee94|manager_command_entry|manager_command_exit'
+```
+
+重点还原同一 traceId 下的 `start -> health -> stopOwned -> health` 次序、端口、manager `commandId`、PID 和结果。
+`SAVING_CANDIDATE` 冲突可能在 Java 调用 health 前结束；`HEALTH_CHECKING` 冲突通常已有 manager health 记录。
+
+Nginx access log 用于判断是否有重复初始化、状态查询或管理员命令。当前日志可直接执行：
+
+```bash
+grep -n -E '03/Aug/2026:13:(43|44|50|51):' /data/apps/nginx/logs/access.log | \
+grep -E 'processes/me/initialize|processes/me([? /]|$)|management/user-processes|/restart|/stop'
+```
+
+日志已经轮转时，先用 `find /data/apps/nginx/logs -maxdepth 1 -type f -name 'access.log*' -print` 定位文件；
+普通文件用 `grep`，`.gz` 文件用 `zgrep`。access log 若没有 traceId，仍可按秒级时间、客户端 IP、HTTP 方法和路径与操作表对齐。
+
+受管用户进程日志可按统一认证号和文件时间定位：
+
+```bash
+find /data/testagent/data/agent-opencode/manager/worker/logs \
+  -maxdepth 1 -type f -name '000857009-*.log' \
+  -newermt '2026-08-03 13:43:30' ! -newermt '2026-08-03 13:52:00' \
+  -exec grep -nH -E 'error|failed|health|listen|address already in use' {} +
+```
+
+manager 当前 state 不需要 JSON 工具，可直接只读查看：
+
+```bash
+sed -n '1,220p' \
+  /data/testagent/data/agent-opencode/manager/worker/processes/14097.json
+ss -lntp | grep -E ':14097[[:space:]]'
+ps -p 728981 -o pid,lstart,etime,args
+curl -sS --max-time 5 -o /dev/null -w '%{http_code}\n' \
+  http://122.233.30.114:14097/global/config
+```
+
+state、端口、PID 和 HTTP 只说明采集时刻的现状，不是历史审计；结果与 SQL 的 `started_at/pid/port` 不一致时，
+记录差异并继续查 manager 日志，不要直接删除 state 或杀进程。
+
+#### 4. 页面看不到用户时绕过前端缓存
+
+运行管理的用户进程列表只有输入非空关键字后才查询，且不随上方 overview 的 5 秒刷新自动重查。
+当前页面在相同关键字、页码和分页大小均未变化时再次点击查询，不一定产生新的网络请求；清缓存或重开页面后“恢复”只能说明前端重新发起了请求，
+不能证明数据库用户或进程曾经消失。
+
+先在浏览器开发者工具 Network 打开 `Preserve log`，按统一认证号查询并检查
+`GET /api/internal/platform/opencode-runtime/management/user-processes?keyword=...&page=1&size=20`：
+
+- 没有新请求：属于页面查询缓存/触发问题，先改变关键字或页码再查，保留截图和前端构建版本。
+- HTTP 200 且 `data.items` 有记录，但页面为空：属于前端展示问题，保存响应正文并按前端缺陷处理。
+- HTTP 200 且 `data.items` 为空，但上面的 SQL 能查到用户和进程：记录响应 `traceId`，到命中的 Java 节点查后端查询日志。
+- HTTP 401/403：确认当前账号确有 `SUPER_ADMIN`，运行管理 API 不向普通系统管理员开放。
+
+完成上述采证后再清缓存或恢复服务。严禁用 SQL 直接改 `status/pid/trace_id`、删除 binding 或修改 Flyway 历史来消除报错。
+
 当前企业交付使用同一份离线 zip：单后台按 `deploy/internal/SINGLE-BACKEND.md` 执行；两个或更多后台按 `deploy/internal/MULTI-BACKEND.md` 执行。多后台每个节点都使用本机 `--backend-host <advertised-host> --skip-frontend` 部署，共享 PostgreSQL/Redis，但分别维护稳定 `linuxServerId`、本机数据目录、worker、公共配置和 9070 出站链路；前端只部署一次。页面首次查询 `/processes/me` 不携带路由信息，按默认 upstream 进入任意 Java；用户未绑定时，入口 Java 会按集群进程总数选择可初始化服务器并在必要时转发，目标 Java 继续完成本地容器选择。得到用户 binding 后，仅在页面内存保存 `linuxServerId`，后续用户 OpenCode、会话、Run、SSE 和本地工作区请求通过 `X-Test-Agent-Linux-Server-Id` 提示 Nginx 精确首跳。统一的 `TEST_AGENT_NGINX_SERVER_ROUTES` 静态白名单同时服务普通 HTTP、SSE 和服务器终端；已知 ID 进入对应 Java primary，连接失败时尝试其它 Java backup，缺失或未知 ID 走默认 `least_conn`。Nginx 转发前删除该提示头和外部传入的 `X-Test-Agent-Backend-Routed`，后端仍以 binding、Session 归属和运行上下文为权威并在提示过期时转发兜底。
 
 workspace PTY 和 Agent 配置进度仍返回签发 Java 地址。标准生产服务器终端必须走 HTTPS Nginx，并由同一 `TEST_AGENT_NGINX_SERVER_ROUTES` 按服务器 ID 定向到签票 JVM，不使用 sticky 或 Redis 共享 ticket；旧 `TEST_AGENT_NGINX_TERMINAL_ROUTES` 只作为已有现场升级兼容，新配置必须改名且不能同时定义两个键。当前明确接受 HTTP 风险的企业现场例外按对应内部署文档显式设置空公开 WSS 基址和 `TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true`，由浏览器直连签发 Java `ws://...:8080`。

@@ -741,9 +741,9 @@ V10 种子数据对 F-COSS 的影响：
 | `opencode_containers` | opencode worker 容器持久拓扑，记录所属 Linux 服务器、可读容器名称、独立端口池以及历史容量/状态；用户进程候选的在线状态和实时 `currentProcesses` 以 Redis manager 快照为准；`container_id` 是由稳定 `linux_server_id` 自动派生的 68 字符 SHA-256 ID。 |
 | `opencode_container_managers` | 容器管理进程，每个容器最多一个 manager，`manager_id` 由 `container_id` 自动派生，记录协议版本、连接状态、能力 JSON 和历史心跳字段；在线状态以 Redis manager 快照为准。 |
 | `opencode_manager_backend_connections` | manager 与后端 Java 实例的持久 WebSocket 连接拓扑，按 `(manager_id, backend_process_id)` 唯一；在线连接视图以 Redis manager 快照中的连接列表为准。 |
-| `opencode_server_processes` | 用户专属 opencode server 进程，记录用户、Linux 服务器、容器、主机直通端口、PID、`base_url`、启动路径和健康状态。 |
-| `user_opencode_process_bindings` | 用户到 opencode 进程的当前绑定，按 `(user_id, agent_id)` 唯一，首期 `agent_id='opencode'`。 |
-| `opencode_process_start_operations` | 当前用户 opencode 进程初始化进度快照，供前端按 `operationId` 轮询展示启动步骤和失败原因。 |
+| `opencode_server_processes` | 用户专属 opencode server 进程的当前快照，记录用户、Linux 服务器、容器、主机直通端口、PID、`base_url`、启动路径和健康状态；后续状态查询、停止、重启或恢复可能覆盖状态、PID、traceId 和更新时间。 |
+| `user_opencode_process_bindings` | 用户到 opencode 进程的当前绑定快照，按 `(user_id, agent_id)` 唯一，首期 `agent_id='opencode'`；不保存 binding 变更历史。 |
+| `opencode_process_start_operations` | 每个显式 `operationId` 的当前用户 opencode 进程初始化进度结果，供前端轮询展示启动步骤和失败原因，也可在页面缓存清理或现场恢复后按用户、traceId 和时间继续排查。 |
 
 关键约束：
 
@@ -767,6 +767,12 @@ V10 种子数据对 F-COSS 的影响：
 ## V20260702120000 opencode 进程初始化进度表
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260702120000__create_opencode_process_start_operations.sql` 创建 `opencode_process_start_operations`，只保存当前用户初始化 opencode 进程的一次进度快照，不写测试、演示或本地开发数据。
+
+该表一行对应一个显式 `operationId`，操作结束后保留最后步骤和结果；浏览器清缓存不影响该表。
+它不是 `opencode_server_processes` 的逐次变更审计日志：旧客户端、自动恢复或未携带 `operationId` 的运行管理启动不会产生对应操作行，
+同一进程后续被强状态查询、停止、重启或恢复改写时，也不会在本表追加进程状态历史。排查
+“进程分配已变化，拒绝旧启动结果回写”时，应先用本表确定显式操作的阶段与时间，再按
+[后端部署说明的现场排查流程](backend.md#opencode-process-assignment-conflict-troubleshooting)关联当前进程快照、Java/manager 和 access log。
 
 | 字段 | 说明 |
 |---|---|

@@ -5,6 +5,25 @@
 
 ## Entries
 
+### 2026-08-03 - 补充 OpenCode 进程分配冲突现场排查
+
+### Why
+
+- 现场连续出现 `OPENCODE_UNAVAILABLE: TestAgent 进程分配已变化，拒绝旧启动结果回写`，同时运行管理页偶发搜索不到用户、清缓存后恢复；现场不能使用 `rg` 或 `jd`，需要保留一套仅依赖基础系统工具的可执行排查口径。
+
+### What
+
+- 在后端部署文档新增该 CAS 冲突的历史 SQL、当前快照边界、步骤/耗时判读，以及基于 `journalctl`、`docker logs`、`grep`、`sed`、`find`、`curl` 和浏览器 Network 的采证流程。
+- 数据库文档明确初始化操作行可在清缓存后继续查询，但进程与 binding 只保存当前快照；企业多后台手册增加统一入口，不复制完整流程。
+
+### How
+
+- 对照公共启动条件更新、强/弱状态查询、自动恢复、manager heartbeat、运行管理查询和 MyBatis CAS 字段确认排查结论；使用 `tools/verify-ai-docs.sh`、Markdown 链接检查和 `git diff --check` 校验文档。
+
+### Result
+
+- 现场无需 `rg`、`jd` 或 JSON 专用工具即可按 traceId、统一认证号和时间窗区分显式初始化、当前进程快照、自动恢复及管理命令；未修改代码、API、事件、数据库结构、Flyway、环境配置、generated SDK 或 OpenCode 源码。
+
 ### 2026-08-01 - 基于最新改造重打企业三节点与公共配置交付包
 
 ### Why

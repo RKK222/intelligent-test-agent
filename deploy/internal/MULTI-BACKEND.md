@@ -871,6 +871,7 @@ docker exec test-agent-opencode-worker \
 | WebSocket 报 ticket 无效或浏览器连接超时 | 检查 ticket 响应是否为目标 Java 的绝对 `ws://<后台>:8080/...`，再从浏览器网段检查两个 `:8080` 可达性和两台 Java 的 Origin 白名单；不增加 sticky。 |
 | 部署提示 systemd/8080 不匹配 | 执行 `systemctl show test-agent-backend -p ExecStart -p EnvironmentFiles -p MainPID` 和 `lsof -nP -iTCP:8080 -sTCP:LISTEN`；脚本只自动清理同一路径交付 JAR，其他进程必须人工确认。 |
 | 运行管理只显示一个服务器 | 检查两台是否共享同一 Redis、ID 是否唯一、heartbeat 日志和广播 channel 是否一致。 |
+| 初始化报“进程分配已变化，拒绝旧启动结果回写”，或清缓存后运行管理用户重新出现 | 先按[不依赖 `rg`/`jd` 的用户进程冲突排查流程](../../docs/deployment/backend.md#opencode-process-assignment-conflict-troubleshooting)保留 operationId/traceId，查询操作历史与当前快照，再用 `journalctl`、`docker logs`、`grep`、`sed`、`find` 和浏览器 Network 对齐并发写入来源；不要先重启或直接修改 binding。 |
 | worker 连接到错误 Java | 检查本机 `.serverhost`、两份 env 的数据根目录和本机 manager token；禁止复制另一节点身份文件。 |
 | 跨节点请求失败 | 两台互相 curl `advertised-host:8080`；检查 Redis 快照、目标 Java health 和日志中的 traceId。 |
 | 某一台模型不通 | 先在故障节点直接调用本机 Java 代理并读取 4xx 正文，再在该 Java 宿主机检查 9070；共享数据库配置不能替代每台宿主机的内存刷新和网络可达性。 |
