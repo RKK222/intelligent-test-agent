@@ -1,0 +1,30 @@
+[project]
+name = "testagent-runner-controller"
+version = "0.1.0"
+description = "专用代码分析节点控制器"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "cryptography==45.0.6",
+  "fastapi==0.116.1",
+  "httpx==0.28.1",
+  "pydantic==2.11.7",
+  "pydantic-settings==2.10.1",
+  "uvicorn[standard]==0.35.0",
+]
+
+[dependency-groups]
+dev = ["pytest==8.4.1", "pytest-asyncio==1.1.0"]
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+testagent-runner = "testagent_runner.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/testagent_runner"]
+
+[tool.pytest.ini_options]
+addopts = "-q --import-mode=importlib"
+testpaths = ["tests"]

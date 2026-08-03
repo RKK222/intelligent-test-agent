@@ -7,6 +7,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -53,6 +54,24 @@ public class GitRemoteService {
                 privateKey,
                 DEFAULT_TIMEOUT);
         return parseBranches(result.stdoutText());
+    }
+
+    /** 只信任远端HEAD symref；无法解析时返回empty，由工作流请求用户选择基线。 */
+    public Optional<String> resolveDefaultBranch(String gitUrl, String privateKey) {
+        GitCommandResult result = executor.execute(
+                List.of("git", "ls-remote", "--symref", gitUrl, "HEAD"),
+                privateKey,
+                DEFAULT_TIMEOUT);
+        return parseDefaultBranch(result.stdoutText());
+    }
+
+    public Optional<String> parseDefaultBranch(String output) {
+        return output.lines()
+                .map(String::trim)
+                .filter(line -> line.startsWith("ref: refs/heads/") && line.endsWith("\tHEAD"))
+                .map(line -> line.substring("ref: refs/heads/".length(), line.length() - "\tHEAD".length()))
+                .filter(branch -> !branch.isBlank())
+                .findFirst();
     }
 
     /**

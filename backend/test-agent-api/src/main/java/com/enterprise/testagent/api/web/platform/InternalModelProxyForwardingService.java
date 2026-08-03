@@ -7,7 +7,7 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.configuration.InternalModelProvider;
 import com.enterprise.testagent.domain.configuration.InternalModelProviderRuntimeConfig;
-import com.enterprise.testagent.observability.TraceConstants;
+import com.enterprise.testagent.model.gateway.OpenAiUpstreamSupport;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProviderRegistry;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelResponsesAdapter;
@@ -46,8 +46,8 @@ import reactor.netty.http.client.HttpClient;
 @Service
 public class InternalModelProxyForwardingService {
 
-    public static final String PROVIDER_HEADER = "X-Enterprise-Model-Provider";
-    public static final String UCID_HEADER = "ucid";
+    public static final String PROVIDER_HEADER = OpenAiUpstreamSupport.PROVIDER_HEADER;
+    public static final String UCID_HEADER = OpenAiUpstreamSupport.UCID_HEADER;
 
     private static final String RESPONSES_PATH = "/responses";
     private static final String CHAT_COMPLETIONS_PATH = "/chat/completions";
@@ -151,7 +151,8 @@ public class InternalModelProxyForwardingService {
             upstreamPath = requestedPath;
             responsesSession = null;
         }
-        String targetUrl = targetUrl(provider.baseUrl(), upstreamPath, exchange.getRequest().getURI().getRawQuery());
+        String targetUrl = OpenAiUpstreamSupport.targetUrl(
+                provider.baseUrl(), upstreamPath, exchange.getRequest().getURI().getRawQuery());
         InternalModelThinkStreamConverter converter = new InternalModelThinkStreamConverter(objectMapper);
         Sinks.One<Void> responseHeadersReady = Sinks.one();
         Mono<Void> request = webClient.method(exchange.getRequest().getMethod() == null ? HttpMethod.POST : exchange.getRequest().getMethod())
@@ -348,39 +349,17 @@ public class InternalModelProxyForwardingService {
             String traceId,
             String authToken,
             boolean responsesRequest) {
-        headers.setBearerAuth(authToken);
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        if (responsesRequest) {
-            headers.setAccept(List.of(MediaType.TEXT_EVENT_STREAM));
-        } else {
-            headers.setAccept(exchange.getRequest().getHeaders().getAccept());
-        }
-        headers.set(TraceConstants.TRACE_ID_HEADER, traceId);
         String ucid = exchange.getRequest().getHeaders().getFirst(UCID_HEADER);
-        if (ucid != null && !ucid.isBlank()) {
-            headers.set(UCID_HEADER, ucid);
-        }
+        List<MediaType> accept = responsesRequest
+                ? List.of(MediaType.TEXT_EVENT_STREAM)
+                : exchange.getRequest().getHeaders().getAccept();
+        OpenAiUpstreamSupport.applyTrustedRequestHeaders(
+                headers, authToken, ucid, traceId, MediaType.APPLICATION_JSON, accept);
     }
 
     private void copyResponseHeaders(HttpHeaders target, HttpHeaders source, boolean transformSse) {
-        MediaType contentType = source.getContentType();
-        if (contentType != null) {
-            target.setContentType(contentType);
-        }
         // 非 SSE 分支按字节转发正文，必须同步保留内容编码；SSE 解码重编码后不能沿用上游编码。
-        if (!transformSse) {
-            copyHeader(target, source, HttpHeaders.CONTENT_ENCODING);
-        }
-        copyHeader(target, source, HttpHeaders.RETRY_AFTER);
-        copyHeader(target, source, TraceConstants.TRACE_ID_HEADER);
-        copyHeader(target, source, HttpHeaders.CACHE_CONTROL);
-    }
-
-    private void copyHeader(HttpHeaders target, HttpHeaders source, String headerName) {
-        List<String> values = source.get(headerName);
-        if (values != null && !values.isEmpty()) {
-            target.put(headerName, List.copyOf(values));
-        }
+        OpenAiUpstreamSupport.copySafeResponseHeaders(target, source, !transformSse);
     }
 
     private String downstreamPath(ServerWebExchange exchange) {
@@ -391,14 +370,6 @@ public class InternalModelProxyForwardingService {
         }
         String path = fullPath.substring(prefix.length());
         return path.isBlank() ? "/" : path;
-    }
-
-    private String targetUrl(String baseUrl, String path, String rawQuery) {
-        String normalizedBase = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
-        String normalizedPath = path.startsWith("/") ? path : "/" + path;
-        return rawQuery == null || rawQuery.isBlank()
-                ? normalizedBase + normalizedPath
-                : normalizedBase + normalizedPath + "?" + rawQuery;
     }
 
     /** 鉴权通过后固化同一代供应商与 Token 快照，后续读取请求体期间不会发生串代。 */

@@ -20,12 +20,14 @@
 
 OpenCode 源码快照 `opencode-source/opencode-1.18.4/` 只用于审计和行为参考，严格禁止修改；平台适配必须通过 `test-agent-opencode-client`、运行时业务或其他本项目模块实现。
 
+独立长程任务由根目录 `workflow-service/` 的 Python 服务承载。Java 只提供 HMAC 鉴权的仓库授权、一次性 checkout ticket、短期模型 grant 和超级管理员复核能力，不代理 `/workflow-api/**`，也不创建、保存或查询工作流 conversation、message、task、run、report、event。
+
 ## 模块说明
 
 | 模块 | 作用 |
 |---|---|
 | `test-agent-common` | 公共基础模型与工具 |
-| `test-agent-domain` | 纯领域模型与状态机，包括 Run 运行数据面、会话 `QUESTION/PERMISSION` 待关注摘要、应用源码快照、Agent & Skill Hub 领域端口、opencode 用户进程管理拓扑模型和运营分析/反馈领域端口 |
+| `test-agent-domain` | 纯领域模型与状态机，包括 Run 运行数据面、会话 `QUESTION/PERMISSION` 待关注摘要、应用源码快照、Agent & Skill Hub 领域端口、workflow checkout/model grant 窄能力端口、opencode 用户进程管理拓扑模型和运营分析/反馈领域端口 |
 | `test-agent-observability` | 日志、trace、指标等观测性封装 |
 | `test-agent-opencode-sdk-generated` | 从 opencode OpenAPI spec 生成的 Java SDK |
 | `test-agent-opencode-client` | 业务侧 opencode client facade |
@@ -35,11 +37,12 @@ OpenCode 源码快照 `opencode-source/opencode-1.18.4/` 只用于审计和行�
 | `test-agent-system-management` | 用户、角色、权限等系统内部管理业务，包括用户注册、登录认证、Token 管理等 |
 | `test-agent-configuration-management` | 应用、应用成员、代码库英文名与关联、已初始化引用资产库及已有应用源码历史的英文名/类型冻结、应用工作空间、个人 SSH key、可审计通用参数配置管理，以及显式 JVM 内存参数的本机注册/诊断状态 |
 | `test-agent-scheduler` | XXL adapter 复用的任务 handler/context/result、Redis 全局锁和旧运行记录清理；不再启动 PostgreSQL runner 或创建 `USER_PLAN` |
-| `test-agent-integration` | 非 opencode 外部系统联动业务边界；承载版本化工具盒子离线目录、热门排序和 30 秒点击计数服务 |
+| `test-agent-integration` | 非 opencode 外部系统联动业务边界；承载版本化工具盒子、LobeHub 联动及 Python workflow 共享能力的实时授权/HMAC 编排 |
+| `test-agent-model-gateway` | 中立企业模型目录、能力探测、OpenAI-compatible 流式代理、上游错误脱敏和每日用量聚合，并向既有 OpenCode 内部代理提供共享安全支持 |
 | `test-agent-xxl-job-admin-upstream` | 原样保存 XXL-JOB Admin 3.4.2 源码/资源与 GPL-3.0 许可证，不承载平台补丁 |
 | `test-agent-xxl-job-integration` | 独立 Servlet Admin 子上下文、MySQL Flyway、Admin readiness 就绪后延迟启动的 executor、周期任务 adapter、平台一次性 SSO、JIT 用户和 XXL health |
-| `test-agent-api` | HTTP/SSE/WebSocket API 定义、DTO、鉴权、限流、traceId、按进程精确 Java->Java 聚合、应用源码快照/持久化进度入口和统一异常入口 |
-| `test-agent-persistence` | 持久化、MyBatis XML mapper、迁移、Redis/PostgreSQL 访问，包括 Redis Run manifest/Stream/snapshot/active 索引、应用源码 slot/snapshot/replica/operation/step/cleanup/recent、legacy question/permission 待关注查询、Agent & Skill Hub 内容寻址制品与引用状态、opencode 用户进程管理表映射、scheduler/夜间任务/会话锁/时段容量、引用资产总体/副本表、工具点击明细/累计/用户窗口状态、AI 反馈表和运营分析 rollup 表 |
+| `test-agent-api` | HTTP/SSE/WebSocket API 定义、DTO、鉴权、限流、traceId、按进程精确 Java->Java 聚合、应用源码快照/持久化进度入口、Python workflow 白名单能力入口和统一异常入口 |
+| `test-agent-persistence` | 持久化、MyBatis XML mapper、迁移、Redis/PostgreSQL 访问，包括 Redis Run manifest/Stream/snapshot/active 索引、workflow nonce/ticket/grant 临时状态、应用源码 slot/snapshot/replica/operation/step/cleanup/recent、legacy question/permission 待关注查询、Agent & Skill Hub 内容寻址制品与引用状态、opencode 用户进程管理表映射、scheduler/夜间任务/会话锁/时段容量、引用资产总体/副本表、工具点击明细/累计/用户窗口状态、AI 反馈表和运营分析 rollup 表 |
 | `test-agent-event` | 按 storage mode 分流的 RunEvent 追加、SSE、Redis/数据库回放，以及用户级运行态刷新所需的全局事件触发流 |
 | `test-agent-test-support` | 测试支撑、fixture、mock server |
 | `test-agent-app` | 唯一启动入口和唯一可部署后端服务包，不承载业务逻辑 |
@@ -97,6 +100,16 @@ Windows 开发人员若只需要 legacy guo profile，可直接使用已提交�
 
 该配置通过 `-Dspring.profiles.active=guo` 读取 `test-agent-app/src/main/resources/application-guo.yml`，不依赖 shell 启动脚本或 `.env.local`。`guo` profile 已内置 Java 进程需要的数据库、Redis、opencode、manager token、模型来源和模型 key 配置；`TEST_AGENT_OPENCODE_BIN`、`TEST_AGENT_START_OPENCODE` 等只服务于根目录启动编排脚本，不属于 Java 进程配置。当前本地联调默认改用 `test` profile 和 `.env.test`；Windows 用户要连同一测试环境时，可在 PowerShell 中执行 `powershell -ExecutionPolicy Bypass -File .\restart-dev-services.ps1 -Profile test -EnvFile .env.test`，WSL/Git Bash 中继续使用 `./restart-dev-services.sh --profile test --env-file .env.test`。仅启动 Java 后端时，仍可在 IDEA/PowerShell 中显式导入 `.env.test` 的数据库、Redis、模型和 `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 等变量，并用 `-Dspring.profiles.active=test` 启动 Java 后端。
 
+需要同时联调 LobeHub 时，macOS/Linux 从仓库根目录显式执行
+`./restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`。默认不启动 LobeHub；该模式从
+同级 `../lobehub-platform` 启动独立 dev server，开发密钥只写入 `.tmp/dev-services/lobehub-dev.env`，不修改
+`.env.local/.env.test`；fork 的 loopback scheduler 由同一 helper 独立启动和回收。显式模式还会在后端启动时
+初始化同一本机回环 PostgreSQL 中的四项 LobeHub 公共参数并留下修改审计，配置项完成后才把
+`LOBEHUB_ENABLED` 设为 `true`。平台数据库不是回环地址时会拒绝启动，防止误改共享库；未显式指定 owner 时
+必须恰好能自动找到一名状态正常、部门非空的超级管理员，否则可在命令前设置
+`TEST_AGENT_LOBEHUB_DEV_OWNER_UNIFIED_AUTH_ID=<统一认证号>` 明确本地 owner。owner 解析、参数审计或 LobeHub
+启动失败时会补偿关闭入口，避免残留可点击但不可用的“通用问答”。
+
 ### 环境变量配置
 
 首次运行前，复制环境变量模板：
@@ -129,6 +142,10 @@ cp .env.local.example .env.local
 | `EXTERNAL_API_KEY` | 外部 OpenAI-compatible API Key；变量名可通过 `TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV` 改为其他环境变量名。 |
 | `MODELSTUDIO_API_KEY` | `TEST_AGENT_MODEL_CATALOG_SOURCE=bailian` 时使用的 Model Studio API Key；该模式使用代码内置 `modelstudio` provider 和 qwen/kimi 模型清单。 |
 | `TEST_AGENT_INTERNAL_PROXY_API_KEY` | Java 内部模型代理鉴权 apikey；Java 校验 opencode 子进程请求，manager 启动用户 opencode server 时把同值注入子进程环境。 |
+| `TEST_AGENT_LOBEHUB_HMAC_SECRET` | LobeHub 服务兑换/撤销共享 HMAC secret，至少 32 字节；不得进入公共参数或日志。 |
+| `TEST_AGENT_LOBEHUB_CLIENT_ID` / `TEST_AGENT_LOBEHUB_TICKET_TTL` / `TEST_AGENT_LOBEHUB_GRANT_TTL` | 模型委托 client 与票据/委托生命周期；默认 `lobehub/60s/30d`。 |
+| `TEST_AGENT_LOBEHUB_HMAC_CLOCK_SKEW` / `TEST_AGENT_LOBEHUB_NONCE_TTL` | 服务 HMAC 时钟偏差和 nonce 防重放窗口；默认 `60s/120s`。 |
+| `TEST_AGENT_MODEL_GATEWAY_MULTIPART_DIRECTORY` / `TEST_AGENT_MODEL_GATEWAY_MAX_MULTIPART_PART_BYTES` | transcription 临时 part 隔离目录和单 part 上限；生产目录不得与平台/OpenCode 工作区重叠。 |
 | `ENTERPRISE_OPENAI_AUTH_TOKEN` | 历史兼容项；新实现不读取该环境变量，外部 Token 由前端“内部模型供应商”页面记录到 `internal_model_tokens` 并按 Provider 关联。 |
 | `TEST_AGENT_EXTERNAL_MODEL_BASE_URL` | 外部 OpenAI-compatible base URL，例如 `https://api.deepseek.com`。旧 `TEST_AGENT_BAILIAN_BASE_URL` 仍作为兼容兜底。 |
 | `TEST_AGENT_ENTERPRISE_OPENAI_BASE_URL` | 企业内 OpenAI-compatible base URL，默认与 openclaw 企业 patch 中的 `enterprise-openai` 地址一致。 |

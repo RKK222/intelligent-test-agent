@@ -34,6 +34,16 @@ export const router = createRouter({
       component: () => import("./views/WorkbenchView.vue"),
     },
     {
+      path: "/lobehub/launch",
+      name: "lobehub-launch",
+      component: () => import("./views/LobehubLaunchView.vue"),
+    },
+    {
+      path: "/workflow-chat",
+      name: "workflow-chat",
+      component: () => import("./views/WorkflowChatView.vue"),
+    },
+    {
       path: "/s/:sessionId",
       name: "transcript",
       component: () => import("./views/TranscriptView.vue"),
@@ -74,11 +84,20 @@ export function resolveLoginRedirect(rawRedirect: unknown): string {
     return "/";
   }
 
+  // LobeHub 只能恢复到固定 launch 路由，任何查询或片段都不参与回跳。
+  if (target.pathname === "/lobehub/launch") {
+    return target.pathname;
+  }
+
   return `${target.pathname}${target.search}${target.hash}`;
 }
 
 function isKnownLoginRedirectPath(pathname: string): boolean {
-  return pathname === "/" || /^\/toolbox\/?$/.test(pathname) || /^\/s\/[^/]+$/.test(pathname);
+  return pathname === "/"
+    || /^\/toolbox\/?$/.test(pathname)
+    || pathname === "/lobehub/launch"
+    || pathname === "/workflow-chat"
+    || /^\/s\/[^/]+$/.test(pathname);
 }
 
 router.beforeEach(async (to, _from) => {
@@ -131,7 +150,7 @@ router.beforeEach(async (to, _from) => {
       if (to.name === "not-found") {
         return true;
       }
-      return { path: "/985211", replace: true };
+      return { path: "/985211", query: { redirect: to.fullPath }, replace: true };
     }
     // 非 localhost：任何页面（包括 404）都先走 AAM 登录
     jumpAam(window.location.href, AAM_BASE_URL);

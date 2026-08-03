@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.ModelGatewayUsageDailyMapper">
+
+    <insert id="increment" databaseId="postgresql">
+        insert into model_gateway_usage_daily(
+            usage_date, source_client, user_id, provider_id, model_id, endpoint,
+            request_count, success_count, failure_count,
+            input_tokens, output_tokens, total_tokens, duration_ms, updated_at
+        ) values (
+            #{usageDate}, #{sourceClient}, #{userId}, #{providerId}, #{modelId}, #{endpoint},
+            1,
+            case when #{succeeded} then 1 else 0 end,
+            case when #{succeeded} then 0 else 1 end,
+            #{inputTokens}, #{outputTokens}, #{totalTokens}, #{durationMillis}, current_timestamp
+        )
+        on conflict (usage_date, source_client, user_id, provider_id, model_id, endpoint) do update set
+            request_count = model_gateway_usage_daily.request_count + 1,
+            success_count = model_gateway_usage_daily.success_count
+                + case when excluded.success_count = 1 then 1 else 0 end,
+            failure_count = model_gateway_usage_daily.failure_count
+                + case when excluded.failure_count = 1 then 1 else 0 end,
+            input_tokens = model_gateway_usage_daily.input_tokens + excluded.input_tokens,
+            output_tokens = model_gateway_usage_daily.output_tokens + excluded.output_tokens,
+            total_tokens = model_gateway_usage_daily.total_tokens + excluded.total_tokens,
+            duration_ms = model_gateway_usage_daily.duration_ms + excluded.duration_ms,
+            updated_at = current_timestamp
+    </insert>
+
+    <update id="increment">
+        merge into model_gateway_usage_daily target
+        using (values (
+            #{usageDate}, #{sourceClient}, #{userId}, #{providerId}, #{modelId}, #{endpoint},
+            case when #{succeeded} then 1 else 0 end,
+            case when #{succeeded} then 0 else 1 end,
+            #{inputTokens}, #{outputTokens}, #{totalTokens}, #{durationMillis}
+        )) incoming(
+            usage_date, source_client, user_id, provider_id, model_id, endpoint,
+            success_count, failure_count, input_tokens, output_tokens, total_tokens, duration_ms
+        )
+        on target.usage_date = incoming.usage_date
+           and target.source_client = incoming.source_client
+           and target.user_id = incoming.user_id
+           and target.provider_id = incoming.provider_id
+           and target.model_id = incoming.model_id
+           and target.endpoint = incoming.endpoint
+        when matched then update set
+            request_count = target.request_count + 1,
+            success_count = target.success_count + incoming.success_count,
+            failure_count = target.failure_count + incoming.failure_count,
+            input_tokens = target.input_tokens + incoming.input_tokens,
+            output_tokens = target.output_tokens + incoming.output_tokens,
+            total_tokens = target.total_tokens + incoming.total_tokens,
+            duration_ms = target.duration_ms + incoming.duration_ms,
+            updated_at = current_timestamp
+        when not matched then insert (
+            usage_date, source_client, user_id, provider_id, model_id, endpoint,
+            request_count, success_count, failure_count,
+            input_tokens, output_tokens, total_tokens, duration_ms, updated_at
+        ) values (
+            incoming.usage_date, incoming.source_client, incoming.user_id,
+            incoming.provider_id, incoming.model_id, incoming.endpoint,
+            1, incoming.success_count, incoming.failure_count,
+            incoming.input_tokens, incoming.output_tokens, incoming.total_tokens,
+            incoming.duration_ms, current_timestamp
+        )
+    </update>
+</mapper>

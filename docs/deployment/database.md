@@ -9,6 +9,14 @@
 - 存量 `Jdbc*Repository` 仅保留迁移窗口，后续触及其 SQL 时迁移到 MyBatis XML。当前通用参数 `CommonParameterRepository`、Agent 配置 `AgentConfigRepository`、`RunEventRepository` 与 scheduler `ScheduledTaskRepository` 已迁移到 MyBatis XML；夜间任务从首版即只使用 MyBatis XML。
 - Flyway migration 只能承载表结构变更、历史数据兼容迁移和生产必需的基础字典/系统参数；禁止通过 Flyway 写入测试、演示、个人开发或环境专属数据（例如样例应用/工作区、默认开发账号、默认本地进程绑定）。此类数据必须放在测试 fixture、`test-agent-test-support`、mock 数据、显式本地开发脚本或人工初始化流程中。历史已存在的开发种子迁移仅为兼容已落库环境保留，后续不得新增同类迁移。
 
+## Python workflow 独立 PostgreSQL
+
+长程任务使用同一 PostgreSQL 集群中的独立 `test_agent_workflow` 数据库和最小权限账号，与平台主库及 XXL MySQL 完全隔离。业务表由 `workflow-service/migrations/` 的 Alembic 管理，LangGraph checkpoint 表由独立 `testagent-workflow checkpoint-setup` 命令初始化；不扫描 Java Flyway location、不写平台 `flyway_schema_history`，也不受 Java MyBatis XML 规则约束。
+
+业务库保存 `conversations/messages/tasks/task_repositories/runs/durable_events/analyzer_results/report_versions/workspace_leases/audit_logs/transactional_outbox`。活动run部分唯一约束保证同一会话只有一个 `QUEUED/RUNNING/WAITING_INPUT`；Worker通过 `FOR UPDATE SKIP LOCKED`、租约和心跳认领任务。源码、容器和工具原始日志不写数据库，48小时工作区过期由数据库租约驱动Runner清理，失败状态持久化为 `CLEANUP_FAILED` 并重试。
+
+建库、迁移账号、备份、发布顺序和回滚见 `docs/deployment/workflow-offline.md`。平台 Java migration不得创建、修改或兼容这些Python业务表。
+
 ## XXL-JOB 独立 MySQL migration
 
 XXL MySQL 与平台 PostgreSQL 完全分离。Admin 子上下文只扫描 `backend/test-agent-xxl-job-integration/src/main/resources/xxl-job/db/migration`，平台主 Flyway 的 `classpath:db/migration` 不会扫描该独立顶层目录。
@@ -1170,6 +1178,56 @@ V18 及以前保留既有数字版本，已在共享或稳定数据库执行过�
 5. 正式 JAR/ZIP 产生后必须解出其中 migration 计算 SHA-256，与通过上述升级测试的源码比较。当前企业包使用瘦 `test-agent-app.jar` 和外置 `backend/lib/`，migration 位于 `test-agent-persistence-*.jar`；必须同时校验发布 ZIP 内与目标机 `/data/testagent/dist/backend/lib/` 安装后的 persistence JAR，且完整 JAR SHA 一致。包内字节不同、目标库出现未知 checksum，或没有取得目标库 history 时，均不得进入部署。
 
 多台 Java 对同一套、已排好序的 migration 并发启动由 Flyway schema history 锁负责互斥，不是这里的问题；这里防的是不同开发者把较小的新版本晚合入，导致目标库已经执行更大版本后拒绝启动。
+
+## V20260730090000 LobeHub 企业模型目录与每日聚合
+
+`V20260730090000__add_lobehub_model_gateway.sql` 是开发期候选版本，创建以下平台 PostgreSQL 结构：
+
+| 表 | 口径与边界 |
+|---|---|
+| `internal_model_provider_models` | 关联现有 `internal_model_providers`，保存全局唯一公开模型 ID、仅网关可见的上游 ID、展示名、上下文限制、启用状态和九项声明能力。 |
+| `internal_model_provider_model_probes` | 按供应商、模型和能力覆盖保存最近一次成功/失败与时间；不保存固定探测输入、上游响应或原始错误。 |
+| `model_gateway_usage_daily` | 按日期、来源 client、用户、供应商、公开模型和端点原子累加请求/成功/失败、token 和总耗时；不保存逐请求、prompt、回答、UCID、traceId 或错误。 |
+
+已知一套本地库先执行了 `V20260801093854`，但 history 中缺失后来合入的 `V20260730090000`，因此默认
+Flyway 顺序校验会失败。该分叉由现有 `DatabaseMigrationCompatibilityCustomizer` 在校验前精确识别并隐藏主
+目录中无法再顺序执行的旧候选。早期 history 加载
+`db/migration-compat/lobehub-missing/V20260802173416__backfill_lobehub_model_gateway.sql`；如果 release
+`V20260803133000` 已执行而早期补偿尚未执行，则只加载更高版本
+`db/migration-compat/lobehub-missing-after-rollout/V20260803141754__backfill_lobehub_model_gateway_after_rollout.sql`；
+早期补偿已执行的库继续解析其原始资源。两条补偿都幂等创建同样三张表和四个生产必需参数；正常顺序库和
+空库不加载 compatibility location，仍执行原始 `V20260730090000`。
+
+主 migration、早期补偿和 release 后补偿分别锁定 SHA-256
+`0f16f1b2f3108e60580cfeb00102e10ac21e20220be255fae77bad9871f0bcb7`、
+`4f773e35e55380592f094c03cc5a66fb69b7dee4a2799e1c9ab5d0b9d8f1634a` 和
+`b73b06fb14f407979646df32a8342603ab957c2f4812a4013ab9635cdfdcce64`。所有路径保持
+`outOfOrder=false`，禁止 `repair` 或手工修改 history。
+
+关系型运行 SQL 全部位于 `InternalModelProviderModelMapper.xml` 和 `ModelGatewayUsageDailyMapper.xml`；能力探测
+使用 PostgreSQL `ON CONFLICT` 覆盖最近结果，每日聚合使用单条 upsert 增量，避免 JVM 先读后写造成并发丢失。
+`ai_model_configs` 保持历史兼容，不是 LobeHub 目录来源。
+
+同一 migration 只写入四个生产必需且默认禁用/不可用的公共参数：
+
+- `LOBEHUB_ENABLED=false`
+- `LOBEHUB_BASE_URL=http://127.0.0.1:3210`
+- `LOBEHUB_SSO_EMAIL_DOMAIN=disabled.invalid`
+- `LOBEHUB_INITIAL_OWNER_UNIFIED_AUTH_ID=NOT_CONFIGURED`
+
+HMAC、委托加密密钥、数据库密码和对象存储密钥不进入数据库 migration。票据、nonce 和模型委托是 Redis
+短期状态，也不创建关系型明细表。
+
+持久化测试先在 H2 PostgreSQL mode 覆盖完整 Flyway、目录替换、探测结果和聚合；
+`MyBatisModelGatewayRepositoryPostgresqlIntegrationTest` 使用 PostgreSQL 16 Testcontainers 模拟既有
+`V20260728210000` 基线升级到 HEAD，并以并发增量验证 upsert。没有可用 Docker 时该测试会显式 skip，不能把
+skip 当作正式发布验收。`RedisLobehubSsoStoreIntegrationTest` 另用真实 Redis 5.0.14 并发消费同一 ticket，
+验证只成功一次、nonce 防重放、grant 轮换/撤销、TTL 和全部 key 前缀；它不替代 fork 的 `lobehub:app:*`
+ACL/pubsub 全路径测试。正式合并/企业打包前仍必须读取每个目标环境的 `flyway_schema_history`，必要时只对
+尚未在任何共享库执行的候选版本重新编号，并完成“真实已部署基线 → 当前 HEAD”的 PostgreSQL 升级。
+
+LobeHub fork 使用独立 ParadeDB/PostgreSQL 17、独立账号、卷和自身 migration；平台 Flyway datasource 永远
+不得访问该库。详细安装和回滚见 `docs/deployment/lobehub-offline.md`。
 
 ## V20260628100000 通用参数修改日志表
 

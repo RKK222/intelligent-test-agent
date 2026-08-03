@@ -152,6 +152,17 @@ public class RedisTokenStore implements TokenStore, TokenSessionMarkerStore {
         return redisTemplate.opsForValue().get(markerKey(sessionDigest)) != null;
     }
 
+    @Override
+    public boolean isActiveForUser(String sessionDigest, UserId userId) {
+        if (sessionDigest == null
+                || !sessionDigest.matches("[a-f0-9]{64}")
+                || userId == null) {
+            return false;
+        }
+        String storedUserId = redisTemplate.opsForValue().get(markerKey(sessionDigest));
+        return userId.value().equals(storedUserId);
+    }
+
     /**
      * 构造 Redis key 格式。
      */

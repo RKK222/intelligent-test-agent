@@ -1,6 +1,7 @@
 package com.enterprise.testagent.api.web.aop;
 
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * 敏感数据脱敏工具，用于日志输出前对敏感字段进行脱敏处理。
@@ -17,10 +18,18 @@ public final class SensitiveDataMasker {
     private static final Set<String> SENSITIVE_FIELDS = Set.of(
             "password", "oldpassword", "newpassword",
             "token", "authtoken", "tokenvalue", "accesstoken", "refreshtoken", "contexttoken",
-            "ticket", "cookie", "sessiondigest",
+            "ticket", "ticketid", "cookie", "sessiondigest", "modelgrant", "grant", "grantid",
             "secret", "apikey", "credential", "authorization",
-            "privatekey", "passphrase",
+            "privatekey", "encryptedprivatekey", "encryptedaeskey", "encryptionnonce", "passphrase",
             "sourcevalue", "memoryvalue"
+    );
+
+    /** Workflow 一次性凭据不能作为访问日志 path 的普通业务 ID 保留。 */
+    private static final Pattern CHECKOUT_TICKET_PATH = Pattern.compile(
+            "(?i)(/checkout-tickets/)[^/]+(?=/consume(?:/|$))"
+    );
+    private static final Pattern MODEL_GRANT_PATH = Pattern.compile(
+            "(?i)(/model-grants/)[^/]+(?=/(?:refresh|revoke)(?:/|$))"
     );
 
     /** 日志最大长度，超长部分截断 */
@@ -75,6 +84,20 @@ public final class SensitiveDataMasker {
             return "Basic ***";
         }
         return "***";
+    }
+
+    /**
+     * 脱敏 URL path 中作为路径参数传递的一次性 Workflow 凭据。
+     *
+     * @param path 原始请求路径
+     * @return 保留固定路由形状但隐藏凭据段的路径
+     */
+    public static String maskPath(String path) {
+        if (path == null || path.isBlank()) {
+            return path;
+        }
+        String result = CHECKOUT_TICKET_PATH.matcher(path).replaceAll("$1***");
+        return MODEL_GRANT_PATH.matcher(result).replaceAll("$1***");
     }
 
     /**

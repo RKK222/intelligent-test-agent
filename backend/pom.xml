@@ -31,6 +31,7 @@
         <module>test-agent-configuration-management</module>
         <module>test-agent-scheduler</module>
         <module>test-agent-integration</module>
+        <module>test-agent-model-gateway</module>
         <module>test-agent-xxl-job-admin-upstream</module>
         <module>test-agent-xxl-job-integration</module>
         <module>test-agent-api</module>
@@ -197,6 +198,11 @@
             <dependency>
                 <groupId>com.enterprise.testagent</groupId>
                 <artifactId>test-agent-integration</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.enterprise.testagent</groupId>
+                <artifactId>test-agent-model-gateway</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

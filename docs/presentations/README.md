@@ -9,6 +9,18 @@
 
 当前逻辑版共 9 页；A7 技术版保留用于对照，A8 重点优化汇报顺序和每页结论，不增加页数。
 
+另有单页图稿 `开发测试协同知识沉淀方法论.pptx`，用于说明开发测试共同使用的知识资产、测试深度参与的功能/数据架构资产，以及预留的测试实际案例区域。该页的标题、目录、图例、线条和留白区域均为可编辑的原生 PowerPoint 对象；源图 `assets/开发测试协同知识沉淀方法论.png` 仅保留作视觉参考。可通过以下命令重新生成：
+
+```bash
+node tools/pptx/build-knowledge-methodology-slide.js
+```
+
+单页图稿 `智能研发规范驱动测试智能体落地.pptx` 复原“规范驱动”测试智能体落地页。左侧按当前平台结构区分公共 `opencode/` 与应用 `.opencode/`，应用资产直接使用 `spec/`、`docs/`；右侧 SDD 能力栈包含 `MCP` 与 `Tools`。版面主体、目录树、流程、能力栈和页脚均为可编辑对象，可通过以下命令重新生成：
+
+```bash
+node tools/pptx/build-spec-driven-agent-slide.js
+```
+
 稳定事实依据为 `docs/architecture/module-map.md`、`docs/architecture/dependency-rules.md`、`docs/architecture/domain-models.md`、`backend/README.md`、`frontend/README.md` 与 `frontend/apps/user-manual/docs/guide/agent-config.md`、`workspace.md`。规划内容在页面中显式标注为“规划态”。
 
 重新生成：

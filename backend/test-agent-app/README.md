@@ -32,7 +32,12 @@
 - `TestAgentApplication`：Spring Boot 启动类，强制 Reactive 并把 JVM 默认时区统一为 `Asia/Shanghai`。
 - XXL Admin lifecycle/health、Servlet 子上下文和 executor 由 `test-agent-xxl-job-integration` 装配；app 只提供配置与最终包依赖。
 - `config.TestAgentRuntimeProperties`：运行时配置绑定。
-- `config.DatabaseMigrationCompatibilityCustomizer`：在 Spring Boot 唯一 Flyway Bean 校验前读取已应用版本与 checksum；按 history 隔离解析旧工具盒子 `V20260727203500` 或当前版本的幂等误发变体，企业 `V20260728160800/-1966404877` 与空库继续使用原始主 migration，未知 checksum 失败关闭，始终保持默认顺序模式。`CommonParameterMemoryStartupRunner` 在 Boot Flyway initializer 完成后以最高 Runner 优先级加载显式 JVM 内存通用参数。
+- `config.DatabaseMigrationCompatibilityCustomizer`：在 Spring Boot 唯一 Flyway Bean 校验前读取已应用版本与 checksum；按 history 隔离解析旧工具盒子 `V20260727203500`、当前版本的幂等误发变体，以及已执行 `V20260801093854` 却漏掉 `V20260730090000` 的 LobeHub 模型网关分叉。后者根据 `V20260802173416` 是否已执行及 release 的 `V20260803133000` 是否落库，精确选择原补偿或更高版本补偿；正常顺序历史与空库继续使用原始主 migration，未知 checksum/历史失败关闭，始终保持默认顺序模式。`CommonParameterMemoryStartupRunner` 在 Boot Flyway initializer 完成后以最高 Runner 优先级加载显式 JVM 内存通用参数。
+- `config.LobehubDevelopmentBootstrapRunner`：仅在 `test/local` profile 且
+  `TEST_AGENT_LOBEHUB_DEV_BOOTSTRAP_ENABLED=true` 时装配；拒绝非回环平台 PostgreSQL，通过既有通用参数管理服务
+  写入审计后配置本地聊天 origin、虚拟邮箱域和唯一 owner，最后才启用 `LOBEHUB_ENABLED`。多个可用超级管理员时
+  必须用 `TEST_AGENT_LOBEHUB_DEV_OWNER_UNIFIED_AUTH_ID` 明确指定；初始化或审计失败会补偿为关闭状态，启动脚本在
+  fork readiness 失败时以 `TEST_AGENT_LOBEHUB_DEV_TARGET_ENABLED=false` 重启一次后端并审计关闭入口。
 - `config.OpencodeManagerControlConfig`：绑定 manager 控制面 token，解析稳定服务器身份和 advertised host，按 advertised host 与 `server.port` 派生后端实例直连地址，提供 `SYS_DATA_ROOT_DIR/.serverid/.serverhost` 路径解析器、5 秒 Java 心跳、10 秒 Redis 快照 TTL 和命令超时；启动时注册后端实例心跳，并把服务器身份与可访问地址写入 `.serverid/.serverhost` 供 Go manager 读取，本地和生产都走 manager WebSocket 控制面。
 - `config.RedisHealthIndicator`：基于 Spring 标准 `spring.data.redis.*` 的运行态 Redis 健康检查。
 - `config.RuntimeJsonConfig`：应用运行态共享 Jackson 配置。
@@ -48,6 +53,7 @@
 - `application-test.yml`：数据库使用 `TEST_AGENT_TEST_DB_*`；为避免共享测试库中的占位/跨机器 Git 地址被本机后台反复 clone，应用版本工作区副本补偿器在 test profile 默认关闭。
 - 本地 Spring Boot 可执行 JAR 以 runtime scope 打包 PostgreSQL JDBC 驱动；企业 Java 运行时使用外置 `dist/backend/lib/` 加载全部依赖。驱动类使用 `TEST_AGENT_DB_DRIVER_CLASS_NAME`，默认 `org.postgresql.Driver`。
 - `application.yml`：`test-agent.xxl-job.enabled` 默认 `true`；MySQL、access token、Admin/executor 端口和地址使用 `TEST_AGENT_XXL_JOB_*` 注入。readiness group 明确不包含 `xxlJobAdmin`。
+- `application.yml`：`test-agent.workflow-capability.*` 绑定独立workflow/Runner HMAC、Runner身份/公钥、票据与grant时限。密钥必须由部署环境注入且至少32字节；Java只装配窄能力接口，不启动Python API/Worker/Runner。
 - 标准夜间执行每个 15 分钟时段容量不绑定环境变量，由全局通用参数 `NIGHT_EXECUTION_SLOT_CAPACITY` 提供；该显式内存参数在运行态 Flyway 完成后严格加载，缺失或非法会让应用启动失败。支持精确分钟测试定时后，分发改由 XXL 每分钟触发，补偿仍每 5 分钟触发。
 - 运营分析等周期 handler 不再由旧 runner 注册；任务定义由 XXL MySQL 版本 SQL 初始化，启停、Cron、手动触发和日志在 XXL 页面维护。
 - 应用版本工作区物理根目录由 `common_parameters` 中的 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 决定（数据库唯一来源，缺失抛业务异常），不在 yaml 预留 fallback；副本补偿器除 test profile 外默认开启，可用 `test-agent.managed-workspace.replica-reconciler.enabled=false` 关闭，扫描间隔默认 60 秒。
@@ -65,8 +71,10 @@
 - `RedisHealthIndicatorTest` 覆盖 Redis 必需依赖的 TCP 健康检查。
 - `LoggingFrameworkBindingTest` 覆盖运行态使用 Log4j2 作为 SLF4J 实际绑定。
 - `WebClientConfigTest` 覆盖运行态提供可构建的 `WebClient.Builder`。
-- `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 使用真实 Spring Boot Flyway 初始化和 PostgreSQL 分别验证企业顺序基线、旧工具盒子已应用历史都能升级到当前版本，且均未启用 `outOfOrder`。
+- `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 使用真实 Spring Boot Flyway 初始化和 PostgreSQL 分别验证企业顺序基线、三类工具盒子历史、仅执行 UI marker 的 LobeHub 分叉及已执行 release rollout 的更高版本分叉都能升级到当前版本，且均未启用 `outOfOrder`。
 - `TestAgentApplicationTest` 覆盖即使 classpath 含 Servlet 依赖，平台主应用仍强制为 Reactive 并使用北京时间；integration 模块覆盖 Admin 独立端口、真实 MySQL Flyway、SSO 与故障退避。
+- `LobehubDevelopmentBootstrapRunnerTest` 使用真实内存参数仓储和通用参数管理服务，覆盖占位值替换、审计顺序、
+  启用开关最后写入、owner/审计异常失败关闭、启动失败补偿模式，以及非回环 PostgreSQL 零写入拒绝。
 
 ## 允许依赖
 

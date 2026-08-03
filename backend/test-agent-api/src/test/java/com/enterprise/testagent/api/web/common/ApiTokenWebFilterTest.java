@@ -88,4 +88,42 @@ class ApiTokenWebFilterTest {
         assertThat(child.getResponse().getStatusCode().value()).isEqualTo(401);
     }
 
+    @Test
+    void filterLeavesLobehubRedeemAndRevokeToHmacAuthentication() {
+        ApiTokenWebFilter filter = new ApiTokenWebFilter("secret-token");
+
+        for (String path : java.util.List.of(
+                "/api/internal/platform/lobehub-sso/tickets/redeem",
+                "/api/internal/platform/lobehub-sso/grants/revoke")) {
+            MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.post(path));
+            final boolean[] called = {false};
+
+            filter.filter(exchange, currentExchange -> {
+                called[0] = true;
+                return Mono.empty();
+            }).block();
+
+            assertThat(called[0]).as(path).isTrue();
+        }
+    }
+
+    @Test
+    void filterLeavesModelGatewayToDelegatedGrantAuthentication() {
+        ApiTokenWebFilter filter = new ApiTokenWebFilter("secret-token");
+
+        for (String path : java.util.List.of(
+                "/api/internal/platform/model-gateway/v1",
+                "/api/internal/platform/model-gateway/v1/models",
+                "/api/internal/platform/model-gateway/v1/chat/completions")) {
+            MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.post(path));
+            final boolean[] called = {false};
+
+            filter.filter(exchange, currentExchange -> {
+                called[0] = true;
+                return Mono.empty();
+            }).block();
+
+            assertThat(called[0]).as(path).isTrue();
+        }
+    }
 }

@@ -1247,3 +1247,415 @@
   - TDD 红测准确复现跨会话泄漏，最小修复后组件测试 143 passed / 1 skipped；前端全量 104 files / 1699 passed / 1 skipped，全 workspace typecheck 和生产 build 通过。
 - Result:
   - 跨会话错误展示已隔离；未修改 API、RunEvent、数据库、后端、安全、环境配置、generated SDK 或 OpenCode 源码。
+
+### 2026-07-30 - 集成 LobeHub 企业通用问答入口与模型网关
+
+- Why:
+  - 平台需要以 LobeHub OSS `v2.2.11` 作为测试和代码分析以外的通用聊天/问答入口，复用既有平台认证与模型供应商，并按规范化后的 `department` 名称聚合部门 Workspace。
+  - 企业现场完全离线且继续使用纯 HTTP，需要用一次性表单票据代替跨域读取 `sessionStorage`，并把浏览器会话、模型委托、Redis 前缀、独立数据库和对象存储边界固化为可验证部署合同。
+- What:
+  - 新增平台 SSO 换票、HMAC 服务兑换和委托撤销接口：票据与委托只在 Redis 保存 SHA-256 摘要，票据 60 秒且 Lua 原子消费，nonce 防重放，用户状态在签发及模型调用时重新校验；前端“通用问答”同步打开空白页后以隐藏表单 POST，票据不进入 URL、浏览器存储或日志。
+  - 新建中立 `test-agent-model-gateway` 模块，复用既有供应商解析、密钥/UCID 注入、流式转发和错误脱敏；增加平台模型目录、能力探测、九类 OpenAI 兼容端点和按日聚合用量，现有 OpenCode proxy 契约保持不变。
+  - 新增 `V20260730090000__add_lobehub_model_gateway.sql` 及 MyBatis XML，保存供应商模型目录、探测结果和每日聚合；Redis 继续使用 DB 0，但平台 SSO 固定 `test-agent:lobehub-sso:*`，LobeHub app 固定 `lobehub:app:*`。
+  - 扩展企业离线封包、安装、systemd/Docker、Nginx、Redis ACL、ParadeDB、RustFS、版本锁、SBOM/审批资源和配置校验合同，支持全量及 LobeHub-only 包；同步模块 README、HTTP API、事件、架构、安全、数据库、前后端和部署文档。
+- How:
+  - 按 TDD 覆盖票据过期/重放、HMAC/nonce、部门归一化、委托轮换/撤销、动态模型目录、错误脱敏、SSE 中断及 Netty buffer 释放、MyBatis H2/PostgreSQL 和真实 Redis 原子消费/前缀隔离；关系型 SQL 全部落在 MyBatis XML，未新增 JDBC Repository SQL。
+  - 后端最终执行带 Byte Buddy agent 的根目录 `mvn clean test` 完整通过；新增 PostgreSQL Testcontainers 2/2、Redis 5 集成 1/1 均 0 skipped，生产 `mvn package -DskipTests` 通过。首轮全量仅命中既有 `RunRuntimeLossConvergenceSchedulerTest` 一秒时序抖动，隔离 5/5 与最终 clean 全量均通过。
+  - 前端全量为 105 files / 1715 passed / 1 skipped，workspace typecheck 和生产 build 通过；离线包合同测试、三份 Shell 语法、`git diff --check`、冲突标记和敏感文件范围检查通过。
+- Result:
+  - 当前仓库的平台侧认证、模型网关、前端入口、数据库和离线部署合同已闭环；API 新增且已同步文档，未新增 RunEvent/SSE 事件类型。性能数据只做按日聚合，不保存 prompt、回答、UCID、原始错误或逐请求 trace。
+  - LobeHub fork 本体、部门 Workspace JIT、企业模型 UI/服务端适配、Windows 签名客户端和 Linux 真实沙箱不在本仓库，必须按版本/摘要合同外部构建并完成现场验收；在这些产物和目标环境 Flyway history 未核验前保持 `LOBEHUB_ENABLED=false`。
+  - 纯 HTTP 的同网段窃听与会话劫持风险仍存在，现阶段仅由网络隔离、一次性票据、短会话、委托 scope 和轮换降低；TLS 仍是后续升级项。未修改 `.env.local`、generated SDK 或 OpenCode 上游源码。
+
+### 2026-07-30 - 完成 LobeHub fork、本地启动与真实服务端介质
+
+- Why:
+  - 前一阶段只完成平台侧合同，独立 fork、本地开发启动、可追溯的真实服务端镜像与现场安装门禁仍未闭环；同时完整上线介质不得在缺少 Windows 企业签名和审批 Linux 客户端时被伪造。
+- What:
+  - 在独立 `/Users/huang/workspace/lobehub-platform` fork 基于上游 `v2.2.11` 实现平台票据登录、部门 Workspace JIT、企业模型适配、离线/私有资源策略和客户端执行禁用；最终提交为 `7d16863c88b8acbacda6d9ee15df0840749e0aaa`，本地标签为 `v2.2.11-platform.1`。
+  - 增加 `build-lobehub-artifacts.sh`、真实镜像运行冒烟、安装器完整性/镜像 ID/AuthentiCode 门禁，并将平台版本锁定到该 fork 提交；构建实际 `linux/amd64` LobeHub、ParadeDB 17 和 RustFS 服务端阶段介质。
+  - `restart-dev-services.sh` 增加显式 `--with-lobehub`，默认仍不启动；新增开发用 Compose/helper，生成 `0600` 临时配置、复用独立 Redis 前缀、运行 migration/app/scheduler，并精确清理 macOS screen 会话及其包装进程组。
+- How:
+  - fork 的 CLI 99 项、Desktop 235 项、平台 SSO/离线 44 项、用户/策略 56 项、OpenAPI 5 项、tRPC 24 项测试通过；CLI/Desktop/服务端生产构建、根 typecheck 和变更文件 lint 通过。Docker 8 GiB 内存下用固定 2 worker 完成 Next 生产构建。
+  - 真实服务端介质在 `deploy/internal/dist-lobehub-server` 完成 SHA-256、OCI revision、PostgreSQL 17 migration、私有 RustFS bucket、应用 readiness、公网 workflow 403、内部 scheduler 鉴权与容器密钥隔离冒烟；完整封包因缺少签名客户端按预期失败关闭。
+  - 使用未修改的 `.env.test` 实际执行 `restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`；后端 readiness `UP`、前端 200、LobeHub 3210 固定回跳、ParadeDB/RustFS healthy。最终复跑开发脚本、构建器、安装器、封包合同测试、Shell 语法和 `git diff --check` 全部通过。
+- Result:
+  - 本地已可通过显式参数启动完整 LobeHub 开发环境；部署人员可依手册构建可追溯服务端阶段介质，并在客户端完备后构建完整离线包。未修改 `.env.local`、OpenCode 源码、generated SDK、既有 API/事件或数据库 migration。
+  - 仍需外部完成企业 Authenticode Windows 客户端、审批的 Linux x86_64 客户端与目标内核沙箱边界验证，以及目标环境 Flyway history、DNS/反代/网络隔离、备份恢复和回滚演练；完整上线介质在此前继续失败关闭。fork 目前仅配置 `upstream`，尚需企业内部 Git 远程才能发布提交与标签。
+
+### 2026-07-30 - 完成 LobeHub 现场验收与冷备份恢复闭环
+
+- Why:
+  - 服务端阶段介质此前只证明首次启动，现场仍缺少可执行的运行态验收命令和真实 ParadeDB/RustFS 冷备份恢复工具；配置 URL 也可能分别合法但交叉指向错误服务或凭据。
+- What:
+  - `lobehub-docker.sh` 新增 DB/Redis/S3/MC/app/平台同源及 URL 编码凭据交叉校验，并增加 `verify-deployment`，核对容器运行状态、restart policy、精确镜像、端口、PostgreSQL 17、Redis ACL、私有 bucket、HTTP 离线策略和容器密钥隔离。
+  - 新增 `lobehub-backup.sh` 的 `create/verify/restore` 冷备份流程；三个容器必须由运维显式停止，Docker 状态不可验证即拒绝，归档只允许固定路径和普通文件/目录，归档及 checksum 固定 `0600`，恢复需显式确认并保留原数据 rollback。
+  - 安装器和 LobeHub-only ZIP 纳入备份工具；部署手册补齐现场验收、冷备份、恢复、入口关闭和平台 PostgreSQL 独立备份边界。
+- How:
+  - TDD 覆盖配置错接/错凭据、URL 编码、缺少备份脚本、无确认恢复、容器运行、Docker daemon 不可验证、暴露 checksum、未知路径和符号链接；构建器、安装器、封包、开发 helper 与全部脚本语法回归通过。
+  - 使用现有约 2.1 GiB `linux/amd64` 真实服务端介质两次完成 PostgreSQL/RustFS 证明数据写入、停机归档、移走原临时数据、恢复、二次 migration/启动和数据存续验证；最终冒烟 exit 0。
+  - 本机只有 JDK 21，使用未修改的 `.env.test` 实际执行 `restart-dev-services.sh --profile test --env-file .env.test --skip-backend-build --skip-frontend-build --with-lobehub`；后端 readiness 200、前端 200、LobeHub 307 固定回平台，开发 ParadeDB/RustFS healthy。
+- Result:
+  - 服务端部署人员现在可按手册完成安装后验收和可回滚冷恢复；未新增 API、事件、数据库 migration/SQL、generated SDK 或 OpenCode 修改，也未修改 `.env*`。
+  - 客户端审计确认当前 Desktop/CLI 仍依赖 fork 内部 `/oidc/*`，而企业运行配置未提供 `JWKS_KEY`；直接启用会重新引入原计划删除的 JWKS/授权服务器，非 OIDC 浏览器确认与设备令牌协议需另行确认。因此完整签名客户端、完整上线介质、企业 Git 远端和真实现场验收仍未完成，`LOBEHUB_ENABLED` 继续保持关闭。
+
+### 2026-07-31 - 完成 LobeHub 非 OIDC 客户端认证与 v2.2.11-platform.3 交付复验
+
+- Why:
+  - 上一轮确认 Desktop/CLI 仍依赖 `/oidc/*`，与已确定的简化认证和完全离线边界冲突；同时 Redis wrapper 会在
+    `REDIS_PREFIX` 后自动追加冒号，原配置的尾冒号会产生 `lobehub:app::` 双分隔 key。
+  - fork、服务端介质、现场脚本和 `--with-lobehub` 需要在同一锁定提交上重新构建和运行验证，避免只更新合同而
+    继续交付旧镜像。
+- What:
+  - 独立 `/Users/huang/workspace/lobehub-platform` fork 新增 Desktop/CLI 浏览器确认协议：五分钟 request/poll
+    secret、用户验证码、HttpOnly pending cookie、CSRF、PKCE、一次性授权码和最长 24 小时 opaque Session；
+    Redis 只保存摘要，Desktop 使用系统 safeStorage，CLI 使用 mode `0600` 凭据文件，模型委托不下发客户端。
+  - Next middleware、tRPC 和 OpenAPI 统一校验 opaque Bearer 并复查用户状态；企业 Desktop/CLI 关闭 OIDC、JWT、
+    API Key、refresh token 和自定义服务地址，退出时撤销 Session/模型委托且先清本机凭据。离线 `/oidc/*` 门禁
+    调整到 Session 查询之前，使匿名请求直接返回 403 而不是被登录中间件改写为 307。
+  - fork 发布提交为 `ccd0400fbe934ba929de637a315d25e969977c76`，标签为 `v2.2.11-platform.3`；平台版本锁、
+    环境模板、测试夹具和文档统一升级到合同版本 2。`REDIS_PREFIX` 改为不带尾冒号的 `lobehub:app`，实际 key
+    仍为 `lobehub:app:*`；现场 ACL 仅为客户端固定 Lua 状态机开放 `EVAL`，key/channel 边界不放宽。
+  - 同步 HTTP API、事件、架构、安全、本地开发、离线部署和发布说明；开发脚本帮助明确默认关闭、显式启用及
+    Redis 实际 key 规则。
+- How:
+  - fork 服务端认证/离线/中间件定向 72 项、真实 Redis 原子状态机 3 项、OpenAPI 7 项、tRPC 27 项、CLI 企业
+    认证 21 项、Desktop 企业策略/认证 56 项通过；fork root typecheck、CLI bundle/man、Desktop typecheck 和
+    production main/renderer build通过。CLI 上游全量命令同时包含需预装 `lh` 和登录后端的 E2E，并存在与本次
+    认证无关的既有 type/test 失败，因此只把变更边界测试和可执行 bundle 作为本版本准入证据。
+  - 从锁定 commit 重新构建约 2.2 GiB 的真实 `linux/amd64` 服务端阶段介质
+    `deploy/internal/dist-lobehub-server`；全部 SHA-256、app OCI revision、三镜像 ID/架构通过。真实镜像演练完成
+    ParadeDB 17 migration、Redis ACL/前缀、RustFS 私有桶、readiness、离线策略、scheduler、密钥隔离及冷备份/
+    恢复；完整封包对缺少 Authenticode 证据按预期失败关闭。
+  - `build/package/install/backup` 四组合同测试、开发脚本验证和 Shell 语法通过。使用未修改的 `.env.test` 执行
+    `restart-dev-services.sh --profile test --env-file .env.test --skip-backend-build --skip-frontend-build --with-lobehub`，
+    后端 8080、前端 3000、LobeHub 3210 启动；运行探针确认 0600 env、固定回跳、pending 202、未认证票据 401
+    和匿名 OIDC 403。普通前端生产构建被工作树中无关的 `WorkflowChatView.vue` 缺失 TDesign style import 阻断，
+    未修改或纳入该并行工作。
+- Result:
+  - 本地开发环境和服务端离线部署路径已经在 `v2.2.11-platform.3` 真实镜像上闭环，运行服务保留启动状态；
+    本次平台提交不新增数据库 migration/MyBatis SQL，不改变既有平台 SSO/模型网关 wire，也不新增 RunEvent/SSE。
+  - 完整企业 ZIP 仍必须取得企业 Authenticode 签名的 Windows x64 客户端、匹配签名证据和获批 Linux x86_64
+    客户端；独立 fork 也仍缺企业内部 Git remote，目标 Linux/网络/DNS/反代/Flyway history 的现场验收不能由
+    Apple Silicon Docker 仿真替代。在这些外部条件完成前保持 `LOBEHUB_ENABLED=false`，不得把服务端阶段目录
+    标记为完整上线介质。未修改 `.env.local`、generated SDK 或 OpenCode 源码。
+
+### 2026-07-31 - 补齐 LobeHub 企业客户端原生构建与介质准入
+
+- Why:
+  - 服务端阶段和 fork 已验证，但此前只要求外部“提供”Windows/Linux 客户端，没有锁定源码工具包、原生构建
+    脚本、Linux 独立验收记录或三层统一校验；部署人员无法从现有仓库可复现地完成客户端介质，也容易把自报
+    `Approved` 文本误当成真实审批。
+- What:
+  - 新增可复现客户端构建工具包、Windows PowerShell x64 构建/企业 Authenticode 签名脚本、Linux x86_64
+    候选构建脚本和独立审批脚本；固定 Node `24.11.1`、Bun `1.3.2`、pnpm `10.33.0`、frozen lockfile 和 fork
+    企业策略测试，不叠加 Cloud 源码。Windows 私钥只从证书存储使用，Linux 构建阶段只能产生 Candidate，不能
+    自行产生 Approved。
+  - 新增共享客户端制品合同；Windows 证据绑定 Valid 签名身份、摘要、版本、commit、x64 和执行禁用，Linux
+    证据绑定客户端、目标 OS/内核、审批人及独立验收记录 SHA。验收记录强制登录、无公网依赖、运行期下载阻断、
+    本地数据隔离和设备执行禁用通过，并关联真实变更单号。
+  - `build-lobehub-artifacts.sh`、`package-release.sh` 与现场安装器复用同一门禁，完整介质新增 Linux 审批证据和
+    验收记录；同步部署 README、文档索引、客户端构建手册、离线手册和安全标准。
+- How:
+  - TDD 覆盖 Pending、重复键、占位审批人、错误版本/commit/架构、客户端或验收记录篡改及失败验收结果；客户端
+    合同、构建器、LobeHub-only ZIP、安装器、冷备份和 Shell 语法测试全部通过。使用 PowerShell `7.4` 官方
+    运行时解析 Windows 脚本语法通过；服务端 `--validate-only` 仍通过，现有 server-only 目录被完整打包门禁按
+    预期拒绝。
+  - 从干净锁定 fork `ccd0400fbe934ba929de637a315d25e969977c76` 生成实际 53,451,706 字节客户端构建工具包，
+    SHA-256 为 `e1c4bae1a315f246c3e4abe448a25e80d76186243661cb4e159fab284156fea9`；工作区制品和
+    `~/Desktop/mimoagent/0709/lobehub-client-build-kit` 转运副本均校验 `OK`。
+- Result:
+  - 部署人员已有可校验、可复现的原生客户端构建与审批介质；未新增或修改 HTTP API、事件、数据库/Flyway、
+    关系型 SQL、性能路径、fork 源码或本地环境文件。兼容性变化仅为完整离线包合同收紧，旧 server-only 阶段
+    目录仍可做服务端演练但不能进入完整包。
+  - 当前 Mac 没有企业 Authenticode 私钥，也不是原生 Linux x86_64 审批主机，因此尚未生成或伪造最终 Windows
+    EXE、Linux Approved 客户端和完整企业 ZIP；这些外部结果、企业 Git remote 和目标现场验收仍是明确未完成项。
+
+### 2026-07-31 - 生成 LobeHub fork 转运介质并补齐 server-only 离线定稿
+
+- Why:
+  - 已验证的约 2.2 GB server-only 目录在正式客户端返回后只能重新执行完整联网镜像构建，缺少不重拉镜像、
+    不改原目录的离线定稿路径；独立 fork 也只有本机 checkout，没有可通过 U 盘导入企业 Git 的自包含介质。
+- What:
+  - 新增 `finalize-lobehub-artifacts.sh`：先验证 server-only 的精确 `SHA256SUMS`、版本锁、PostgreSQL 17、三张
+    镜像 tag/ID、客户端未通过状态、执行禁用及普通文件边界，再复用共享 Windows/Linux 客户端合同，复制到新
+    目录、写入成功状态并重建清单；兼容早期 platform.3 server-only 缺少 Linux 审批字段，原目录始终不修改。
+  - 新增 `build-lobehub-fork-transfer.sh`：从干净、锁定的 `main` 和 annotated 内部 tag 创建只发布两个 ref 的
+    自包含 Git Bundle，执行 fork 增量历史高置信凭据扫描、verify 与独立 clone，生成包内/包外双层 SHA-256、
+    ref 清单和不携带 Git 配置/企业凭据的导入说明。
+  - 新增两组 Shell 合同测试，并同步部署入口、架构、安全、客户端汇集、离线部署和独立 fork 企业导入手册。
+- How:
+  - TDD 先锁定旧 server-only 兼容、源目录不变、完整包二次准入、摘要篡改、Pending 审批、已通过状态、输出
+    覆盖、输出与正式客户端/证据重叠、FIFO/特殊文件拒绝；Git 合成仓库覆盖最小 ref、annotated tag、独立
+    clone、双层摘要、脏仓库、输出与版本锁重叠，以及“提交后删除但仍留在历史”的私钥拒绝。独立代码审查发现
+    两处 `--force` 删除输入风险和历史凭据边界，红测复现并修复后复审无剩余 Critical/Important；新增测试与既有
+    client contract、artifact builder、client kit、package、installer、backup 共八组通过。
+  - 真实 fork `ccd0400fbe934ba929de637a315d25e969977c76` 生成
+    `lobehub-fork-transfer-v2.2.11-platform.3.zip`（294,990,199 字节），SHA-256
+    `a494d5a94b7db39fa584c2591b72fb01a1fa3bb61f426fbf59b93a2a4c2d0461`，已复制到
+    `~/Desktop/mimoagent/0709/lobehub-fork-transfer`；从 ZIP 解包后的 Bundle 仅有 main/tag 两个 ref，并在无
+    checkout 上下文中独立 clone、校验 branch/tag 解引用 commit 成功。
+  - 真实 server-only 全部文件再次通过 SHA-256；`release.env` 与清单摘要分别为
+    `1afe00deb9bc288bb5cf292fac7b3e197845fc51f7b2bd03c386a14bb3934c77`、
+    `95c9ad0b4251fca29244a11cc3217bd911a1eb97bad1d8128a9a2afff469d038`，完整打包和缺客户端定稿均按预期失败，
+    原目录摘要不变。
+- Result:
+  - 部署人员现在可以先转运/导入独立 fork，并在正式客户端返回后离线复用已冒烟的 server-only 介质；未修改
+    HTTP API、RunEvent、数据库/Flyway/SQL、性能路径、fork 源码、`.env*`、generated SDK 或 OpenCode 源码。
+  - 完整运行 ZIP 仍缺企业 Authenticode Windows x64 客户端及证据、原生 Linux x86_64 Approved 客户端与独立
+    验收记录；企业 Git remote、目标 DNS/反代/网络/Flyway/备份回滚验收也仍需现场人员完成。上述外部结果完成
+    前保持 `LOBEHUB_ENABLED=false`，不得把 server-only 或转运 Bundle 标记为完整上线交付。
+
+### 2026-07-31 - 限制 LobeHub 开发监听并升级 platform.4 真实介质
+
+- Why:
+  - 真实执行根目录 `--with-lobehub` 后发现 fork 的 Next.js dev server 虽然使用 loopback 访问 URL，实际仍监听
+    `*:3210`；这与本地开发合同及企业隔离边界不一致，也说明 platform.3 服务端、源码转运件和客户端构建工具包
+    需要在同一修复提交上整体重建，不能继续交付旧摘要。
+- What:
+  - 独立 `/Users/huang/workspace/lobehub-platform` fork 的启动序列新增显式 `LOBEHUB_DEV_HOST` 处理，存在时向
+    Next.js 传入 `-H`；平台开发 helper 固定生成 `LOBEHUB_DEV_HOST=127.0.0.1` 且继续保持临时 env mode `0600`。
+    fork 发布提交为 `306dad5dc0968ed008f011d7fc07f12a606b21e1`，annotated tag 为
+    `v2.2.11-platform.4`，平台版本锁、镜像 tag、测试夹具和稳定文档同步升级。
+  - 从干净锁定 fork 重新构建约 2.2 GB 的真实 server-only 目录 `deploy/internal/dist-lobehub-server`；重新生成
+    `.4` fork Git Bundle 转运 ZIP 和原生客户端构建工具包，并复制到固定
+    `~/Desktop/mimoagent/0709/lobehub-fork-transfer`、`lobehub-client-build-kit` 目录。旧 `.3` 实物只保留在
+    显式 archive 目录，禁止与当前版本锁混用。
+- How:
+  - TDD 先分别用 fork 单测和平台 Shell 合同复现缺少 hostname 参数/开发 env 的失败，再做最小修复。fork 检查
+    36 项、Redis 原子状态机 3 项、数据库部门 Workspace/私有对象 110 项通过且完整 typecheck 通过；平台
+    LobeHub/模型网关 Maven 定向测试 35 项、前端隐藏表单交接测试、开发脚本及 artifact/finalizer/client-kit/
+    transfer/package/installer/backup 八组合同回归通过。
+  - 使用未修改的 `.env.test`、JDK 21 真实执行完整
+    `restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`；后端 readiness 200、前端 200、
+    LobeHub 307 固定回平台，`lsof` 确认只监听 `127.0.0.1:3210`。真实 `.4` 镜像演练完成 PostgreSQL 17
+    migration、Redis ACL、私有 RustFS、readiness、离线/调度门禁、证明数据冷备恢复和二次部署验收。
+  - fork 转运 ZIP 为 295,015,450 字节，SHA-256
+    `e63e4cfa16ab7925d2298eb1e34312e362ec5237a361f4d1ffd5cc46c145dec7`；客户端构建工具包为
+    53,454,987 字节，SHA-256 `080f0d214748458fcd9266a9ae7c60bd835a5107e9de895a0a61076fee6a825c`；
+    server-only 的 `release.env` 与 `SHA256SUMS` 文件摘要分别为
+    `788b869b4228c56d164ec87c378828e39885ffc17b33a107d730c1711fac6c45`、
+    `ed1523efa8f4daaadc50b66a89dca47922c605fe9acdbe92ceb42b6c5550dc15`。
+- Result:
+  - 本地开发环境现可显式启动 LobeHub 且不暴露 wildcard 监听；部署人员已有同一 `.4` 锁定提交的真实服务端
+    阶段介质、源码转运件、原生客户端构建工具包和可执行手册。本次不新增或改变 HTTP API、RunEvent、数据库/
+    Flyway/MyBatis SQL、模型网关 wire、性能策略、generated SDK、OpenCode 源码或 `.env*`；安全变化仅为收紧
+    本地监听，兼容性变化为当前 fork/介质版本整体升级到 `.4`。
+  - 完整上线 ZIP 仍按设计失败关闭：尚需企业 Authenticode Windows x64 客户端及证据、原生 Linux x86_64
+    Approved 客户端及独立验收记录、企业内部 Git remote 导入，以及目标现场 DNS/反代/网络、真实 Flyway
+    history、备份恢复和回滚演练。Apple Silicon Docker 冒烟不能替代这些外部验收，完成前继续保持
+    `LOBEHUB_ENABLED=false`。
+
+### 2026-07-31 - 实现独立 Python 长程任务框架与代码变动影响分析
+
+- Why:
+  - 平台需要新增一套完全独立于 OpenCode/LobeHub 会话的固定流程长程任务入口；浏览器必须经 Nginx 同源直连
+    Python，Java 只能复用认证权限、仓库/SSH 与模型网关能力，不能代理或持久化工作流业务。
+  - 首期需要完整落地多仓库代码变动影响分析、可恢复执行、AG-UI 实时事件、局部重分析和 48 小时受控工作区，
+    同时为后续场景保留注册扩展点但不能提前暴露未实现任务。
+- What:
+  - 新增 Python 3.12 `workflow-service`、`runner-controller`、`analysis-task`：AgentScope 白名单意图与综合、
+    LangGraph 固定图/checkpoint、独立 PostgreSQL/Alembic、原生 AG-UI SSE、租约 Worker、版本化报告、追问/局部
+    重分析以及到期清理；首版只注册 `code-change-impact-analysis`。
+  - Java 仅新增 HMAC/nonce/session marker 保护的仓库授权、分支、一次性 checkout ticket、短期模型 grant 与超级
+    管理员复核能力；模型网关接受 workflow grant，但未增加 conversation/message/task/run/report/event 对象或表。
+  - 新增 TDesign `workflow-api-client`/`workflow-chat` 与 `/workflow-chat` 懒加载入口；Nginx `/workflow-api/`
+    直达 Python。补齐固定 linux/amd64 三镜像、SBOM/许可证/摘要、纯 Docker 管理、Redis ACL、独立数据库及
+    `DOCKER-USER` 受限网络交付合同。
+  - 每任务一个非特权分析容器，源码只读，多智能体隔离 HOME/输出；Runner 使用目录 fd 与 `O_NOFOLLOW` 防止
+    可写输出符号链接劫持，控制幂等缓存不挂载进容器。真实模型 grant 只经 `docker exec -i` stdin 进入容器内
+    UID `10002` 的最小回环 relay；UID `10001` 的 Codex/OpenCode 仅持有本地 token。同任务智能体串行执行且每次
+    执行后重启容器，Codex shell 环境白名单与 OpenCode `env -i` shell 阻断平台 grant 泄露及后台后代污染。
+- How:
+  - Python 全量 156 项（workflow 90、Runner 57、analysis-task 9）通过，`compileall` 与两份 `uv lock --check`
+    通过；后端 21 模块 `mvn test` 全绿；前端
+    108 个 Vitest 文件为 1726 passed / 1 skipped，前端全 workspace typecheck 和 agent-web production build
+    通过。架构隔离、Nginx、离线包合同、Shell 语法和 `git diff --check` 通过。
+  - 使用 OpenCode 1.18.4 真实二进制验证受控配置只暴露
+    `test-agent-workflow/workflow-code-analysis`。本机尝试构建 analysis-task 时因已有工具镜像只含 OpenCode、
+    缺少 Codex 而按设计失败关闭，未放宽 Dockerfile 或安全约束。
+  - 在临时 Linux 容器中实测 relay 以 UID `10002` 持有 grant 时，UID `10001` 无法读取其 `/proc` 环境、内存、
+    stdin 或发送信号，未授权 HTTP 返回 401，关闭 stdin 后端口退出；该 Docker 29.6.1 探针只证明当前隔离机制，
+    不替代正式 Docker 18.09 门禁。
+- Result:
+  - 代码、HTTP/AG-UI 协议、模块/依赖/安全/数据库与企业离线部署文档已闭环；独立 Python 数据库不修改平台
+    Flyway 历史，现有 OpenCode/LobeHub 会话、generated SDK 和 OpenCode 上游源码均未修改。
+  - 正式发布仍必须在新工具镜像同时包含固定 Codex/OpenCode 后，于真实 Docker 18.09、真实模型网关、真实
+    PostgreSQL/Redis 和至少两个跨应用仓库完成端到端验收；当前 Apple Silicon 的 Docker 29.6.1 不能替代该
+    门禁。前端生产构建另保留工作流路由 chunk 约 2.86 MiB 的性能告警。
+
+### 2026-07-31 - 收紧 LobeHub Redis、客户端证据与离线发布原子性并升级 platform.5
+
+- Why:
+  - 复核企业部署边界时发现 Agent Runtime 的直接 ioredis 连接绕过上游 `REDIS_PREFIX`，最小 ACL 下可能产生
+    无前缀 key；Linux 最终审批也只绑定候选件和验收记录，未把原生构建人证据纳入完整介质。
+  - server-only 定稿与 fork 转运虽然保护了显式输入路径，但仍需拒绝复制期间输入变化、协作发布并发和目标
+    inode 被替换；现场还缺少可直接执行的最小 Redis ACL 创建程序及平台 HMAC/nonce 运行探针。
+- What:
+  - 独立 fork 为 Agent Runtime ioredis 增加 `lobehub:app:` 物理 key 前缀，返回业务 ID 时剥离前缀，并用游标
+    `SCAN` 替代阻塞式 `KEYS`；发布提交为 `57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c`，annotated tag 为
+    `v2.2.11-platform.5`。
+  - 新增 `lobehub-redis-acl.sh`，从 `-@all` 开始显式授权运行命令，同时限制 key/channel；`check-redis` 证明
+    前缀外 key/channel、Lua 越权和 `CONFIG/ACL/MODULE/FLUSHDB/KEYS/SCRIPT FLUSH` 均被拒绝。新增服务端
+    `lobehub-platform-probe.mjs`，以固定撤销端点验证有效 HMAC 和同 nonce 重放 401，并纳入现场完整验收。
+  - Linux 构建脚本强制稳定构建人身份，最终审批证据绑定构建证据 SHA 且构建人与审批人必须不同；构建、定稿、
+    封包和安装统一要求 `linux-client-build-evidence.txt`。定稿与 fork 转运增加预存在父目录、相邻锁、复制前后
+    摘要及输出 inode 复核；安装/封包拒绝符号链接及 FIFO/socket/device，并严格核对包内版本锁。
+  - 平台版本锁、环境模板、测试夹具、部署入口、架构、安全、客户端构建、fork 转运和现场执行手册同步升级到
+    `.5`，明确 ACL 管理员密码只进入 `REDISCLI_AUTH`、应用密码经 stdin 传给 `redis-cli -x`。
+- How:
+  - fork 定向 39 项、lint/check 和完整 typecheck 通过；平台 Redis ACL、HMAC 探针、客户端合同、构建工具包、
+    artifact builder、定稿、fork 转运、封包、安装和冷备份合同测试全部通过。
+  - 从干净锁定 fork 重建 2.2 GiB `linux/amd64` server-only 介质；应用镜像 ID 为
+    `sha256:7f504fb3723402bd6b17165db02937964799beefc96ae22b34bd8ef60c5ce866`，`release.env` 与
+    `SHA256SUMS` 文件摘要分别为 `3c94d96377fc192301be0851dbd3eeaf15965108eb20fa67e069e2ed9919cc03`、
+    `39c17085322d130045bdbe94d969be9b32ca6abc758ce37b6597ec35a4c4dccf`。真实镜像烟测完成 PostgreSQL 17
+    migration、显式 ACL/越权拒绝、HMAC nonce 重放、私有 RustFS、离线 scheduler、密钥隔离及冷备恢复。
+  - `.5` fork 转运 ZIP 为 294,993,231 字节、SHA-256
+    `2cbca71e90d0fa5925363c530538506e019227a56f0caeae8cf89e0d677843a2`；客户端工具包为 53,453,544 字节、
+    SHA-256 `10fba3e98938252eb0ca7a3a40d0425d8f043ebe268ee267c2e019f3e2210ee1`，均复制到固定 0709 目录并校验。
+  - 使用未修改的 `.env.test` 执行完整 `restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`；
+    后端 8080、前端 3000、LobeHub 3210 启动，真实平台 HMAC/nonce 探针通过，完整封包因缺正式客户端按预期
+    失败关闭。
+- Result:
+  - 本地开发与服务端离线部署现使用同一 `.5` fork/镜像/手册，Redis 前缀和最小权限 ACL、平台服务身份以及
+    原生 Linux 构建来源都形成可执行证据链。本次不新增或改变 HTTP API、RunEvent、数据库/Flyway/MyBatis SQL、
+    模型网关 wire 或性能策略，未修改 `.env.local`、generated SDK 或 OpenCode 源码；兼容性仅收紧完整介质合同。
+  - 完整上线 ZIP 仍按设计等待企业 Authenticode Windows 客户端、原生 Linux x86_64 客户端及双人审批证据；
+    企业 Git remote、目标 Linux/Redis、真实平台 Flyway history、DNS/反代/网络隔离和备份回滚仍需现场验收。
+    完成前保持 `LOBEHUB_ENABLED=false`，不得把 server-only 或 Bundle 宣称为完整上线交付。
+
+### 2026-07-31 - 加固长程任务租约、取消与分析容器清理
+
+- Why:
+  - 对独立 Python 长程任务做交付前并发与清理审计时，发现 Worker 重启可能复用租约身份、取消与终态存在
+    先读后写竞态、Runner 失败会遗留无到期时间的活动租约；分析容器还需要证明恢复/执行前身份约束、智能体
+    输出互相隔离，并在私有目录拒绝宿主访问时仍能安全取消和到期删除。
+  - fetch SSE 对瞬时断线没有续传重试，消费端错误结束后也未显式取消响应流；超级管理员切换 owner 时旧会话流
+    可能发送迟到事件。
+- What:
+  - Worker 每进程使用逻辑 ID 加随机 owner token；运行终态改为单条 PostgreSQL 条件更新，原子校验 owner、
+    租约期限、`RUNNING` 与未取消状态。丢失租约只撤销本 Worker 的模型 grant。取消对 `CANCELED` 幂等、拒绝
+    改写其他终态，并将 Runner 删除结果持久收敛为 `EXPIRED/CLEANUP_FAILED` 供立即重试。
+  - Runner 在创建路径前白名单校验不重复的 `codex/opencode`，每次执行与恢复时复核镜像、精确 bind、网络及
+    资源/非特权约束；分析输出根不可列举，非当前智能体目录为 `000`。取消/到期清理先关闭活动状态和容器、
+    淘汰排队请求，再用镜像内固定非跟随链接助手恢复分析 UID 私有目录权限，并执行不忽略错误的整树删除。
+  - AG-UI fetch SSE 对网络、429、5xx 按 durable 游标重连，认证/协议/reducer 错误终止并取消底层流；owner
+    切换前关闭旧连接。同步 Python/Runner/analysis-task、前端、API/AG-UI、安全和企业离线部署文档及打包合同。
+- How:
+  - Python 工作流、Runner 与 analysis-task 合并回归 183 项通过，`compileall` 通过；后端 21 模块
+    `mvn test` 为 `BUILD SUCCESS`；前端 108 个测试文件 1730 passed / 1 skipped，串行 lint、typecheck 与
+    production build 均通过。
+  - 工作流架构隔离、离线包合同、Nginx 单/多后端路由与 `git diff --check` 通过；未修改依赖或 `uv.lock`，
+    本机未安装 `uv`，因此本轮无法额外执行 `uv lock --check`。
+- Result:
+  - 取消不能再被迟到 Worker 终态覆盖；旧 Worker、排队分析、容器约束漂移、跨智能体输出读取和私有目录清理
+    均有失败关闭与回归覆盖。未修改 Java 工作流边界、平台 Flyway/MyBatis SQL、generated SDK、OpenCode 源码、
+    LobeHub 改动或 `.env*`，也没有创建分支。
+  - 正式企业门禁仍未在本机满足：当前仅有 Docker `29.6.1/linux/arm64`，且现有工具镜像缺 Codex；仍须在真实
+    Docker 18.09/linux/amd64、企业 Redis/PostgreSQL、真实模型网关和至少两个跨应用仓库执行端到端验收。
+    WorkflowChat 路由生产 chunk 约 2.86 MiB 的既有性能告警仍保留。
+
+### 2026-07-31 - 补齐分析容器重启复核、冻结 LFS 与范围补充闭环
+
+- Why:
+  - 继续按原方案审计时发现：智能体结束后的容器重启只复核基础非特权参数，未携带冻结 spec 复核镜像、挂载、
+    网络和资源，也未拒绝重启后仍为停止态；Git LFS 使用了多余分支参数且只检查根 `.gitattributes`；局部重分析
+    找不到候选时前端处于 `WAITING_INPUT`，但既没有可用输入卡，普通发送框也被禁用。最终复核还发现单项范围纠正
+    会覆盖其余范围，SSE 新投影会被较晚的 POST 回包覆盖且终态/重连仍残留旧输入卡，以及重启复核和强制删除
+    同时失败后两侧工作区仍可能遗留 `ACTIVE`。
+- What:
+  - Runner 将冻结 `AnalysisContainerSpec` 从 service 传到 analyzer executor，并在每次工具结束重启后复核运行态、
+    镜像、精确 bind、网络、CPU/内存/PID/nofile/tmpfs 和非特权约束；漂移时删除精确容器并失败关闭。
+  - LFS 从冻结提交读取根目录及嵌套的受跟踪 `.gitattributes`，在 detached `targetHead` 上按 `git lfs pull`
+    的单 remote 语法完整拉取当前 ref。工作流前端在 `SCOPE_DISAMBIGUATION` 无候选或候选不准确时保留范围输入卡，
+    通过 `structuredInput.scopeSelectors` 恢复原 run，并隔离候选按钮样式；逐项纠正时合并已解析项和其余待补充项。
+  - 容器重启复核失败后强制删除；删除也失败时保留不可忽略的危险标记，Runner 本地状态立即到期并转为
+    `CLEANUP_FAILED`，Worker 保留失败后同步收敛 PostgreSQL 租约和 durable 工作区事件，供两侧清理循环重试。
+    控制库短暂失败最多重试三次；持续失败不终态化 run，停止心跳后由租约接管重放幂等流程。
+  - 前端以 AG-UI 投影 revision 保护所有生命周期事件，输入请求或终态先于 POST 回包时不回退状态；实时 reducer
+    与 Python 断线快照均在开始、完成或失败时清空失效输入，终态后不能再次提交旧恢复卡。
+  - 同步 Runner、analysis-task、AG-UI、前端包、安全和企业离线验收文档；没有修改 Java 工作流边界、数据库结构、
+    HTTP 路径、事件类型、依赖锁、generated SDK、OpenCode 源码或 `.env*`。
+- How:
+  - 按 TDD 先复现停止容器未拒绝、重启未携带冻结 spec、嵌套 LFS 未执行和无候选输入死路，再补实现；Python
+    三模块 193 项、`compileall`、两份 `uv lock --check` 通过。
+  - 前端工作流 12 项及全量 108 个文件 1733 passed / 1 skipped，workspace lint/typecheck 和 agent-web 生产构建
+    通过；后端 21 模块 Maven 测试、工作流架构、Nginx 直连和离线打包合同校验通过。
+- Result:
+  - 本机可完成的代码、契约和自动化验证已闭环；没有覆盖当前并行的 LobeHub/工具箱未提交改动，也未创建分支。
+  - 正式企业验收仍未完成：本机是 Docker `29.6.2/linux/arm64`，现有 `linux/amd64` 工具镜像只有 OpenCode、
+    缺少 Codex；仍需真实 Docker 18.09、企业 Redis/PostgreSQL/模型网关和至少两个跨应用仓库端到端验收。
+    WorkflowChat 路由约 2.86 MiB 的生产 chunk 告警继续作为性能风险保留。
+
+### 2026-08-01 - 修复工作流开发路由误回退 SPA HTML
+
+- Why:
+  - 本地访问`/workflow-chat`时，Vite没有注册`/workflow-api/**`代理，请求被SPA fallback以
+    `200 text/html`返回`index.html`；`workflow-api-client`随后直接执行JSON解析，页面暴露
+    `Unexpected token '<'`。同时，本机独立Python 8090未监听时，Vite默认返回纯文本502，也缺少稳定诊断。
+- What:
+  - 新增`workflow-dev-proxy.ts`并接入Vite，开发态默认把工作流前缀直接转给
+    `http://127.0.0.1:8090`，支持`TEST_AGENT_WORKFLOW_API_URL`覆盖，仍不经过Java。
+  - `workflow-api-client`统一校验JSON成功信封，并拒绝JSON接口、Markdown下载和AG-UI SSE收到的
+    HTML fallback；纯文本网关失败收敛为稳定`WorkflowApiError`。错误只携带HTTP状态和Content-Type，
+    不回显响应正文、Bearer或原生JSON解析异常。
+  - 同步前端README/包边界、模块图、前端规范和workflow HTTP边界文档；新增开发代理、HTML fallback、
+    纯文本502、报告下载及SSE协议回归。
+- How:
+  - 按TDD先复现两个失败：Vite代理模块缺失，以及`200 text/html`抛出原生`SyntaxError`；扩展到报告下载
+    和AG-UI SSE后再次确认旧实现错误接受HTML，再补实现。
+  - 工作流前端定向20项、客户端/代理10项通过；全量前端109个测试文件为1738 passed / 1 skipped，
+    agent-web typecheck、production build、AI文档门禁和`git diff --check`通过。
+  - 用临时8090 JSON上游经真实运行中的Vite访问`/workflow-api/v1/me`，确认返回
+    `200 application/json`与`data`信封；停止临时上游后真实路由返回502，不再回退HTML。
+- Result:
+  - 截图中的JSON解析错误已消除；开发态路由边界与生产Nginx一致。独立Python未启动时页面会明确显示
+    `工作流服务暂不可用（HTTP 502）`，启动8090后请求可正常直达Python。
+  - 本次不修改HTTP路径、AG-UI事件类型、Python/Java服务、数据库、依赖锁、`.env*`、generated SDK、
+    OpenCode源码或LobeHub改动；仍需按`workflow-service/README.md`独立启动Python API/Worker/Runner以执行任务。
+
+### 2026-08-01 - 固化本地工作流控制面启动设计
+
+- Why:
+  - 开发代理修复后真实暴露 Python 8090 未监听；进一步诊断确认本地还缺独立工作流数据库/角色、Redis 只读
+    ACL、Java/Python 配对 HMAC、Runner 公钥和 API/Worker 进程，既有交付只有 Linux 企业部署链路。
+  - 当前 macOS Docker Desktop 无法证明 Runner 要求的宿主机 `DOCKER-USER`/`iptables` 出站隔离，不能通过
+    启动本机分析容器或伪造网络标签来消除 502。
+- What:
+  - 与用户确认采用“本地工作流控制面 + 可选外部 Linux Runner”：默认重启初始化 PostgreSQL、Redis ACL、
+    临时密钥并启动 Python API/Worker，Runner 缺失不影响控制面就绪，分析 run 明确失败关闭。
+  - 设计规定所有生成凭据只写 `.tmp/dev-services/workflow/`，不修改 `.env.test/.env.local`；保留
+    `--without-workflow` 兼容开关，外部 Runner 配置必须成组提供且本地不读取其私钥。
+- How:
+  - 核对 workflow-service、runner-controller、analysis-task、数据库 bootstrap、Redis ACL 和分析网络脚本，确认
+    生产安全约束与本机能力差异；完成占位符、矛盾、范围和歧义自检并形成书面规格。
+- Result:
+  - 设计已固化于 `docs/superpowers/specs/2026-08-01-workflow-local-control-plane-design.md`，等待用户书面复核后
+    再进入实施计划和测试驱动实现。本次未修改 API、事件、数据库 migration、生产部署、`.env*` 或现有并行改动。
+
+### 2026-08-01 - 修复 LobeHub 本地入口未启用并补齐失败关闭
+
+- Why:
+  - `restart-dev-services.sh --with-lobehub` 只生成平台 HMAC 并启动 fork，没有初始化平台数据库中的四项
+    LobeHub 公共参数，导致已登录用户点击“通用问答”仍收到 `FORBIDDEN：通用问答功能未启用`。
+  - 复核还发现 owner 解析或审计失败、fork readiness 失败时，既有 `LOBEHUB_ENABLED=true` 可能残留。
+- What:
+  - 新增仅在 `test/local` profile 且显式开发开关下装配的公共参数 bootstrap；严格拒绝非回环 PostgreSQL 和
+    非固定 HTTP 回环聊天 origin，通过既有通用参数管理服务审计写入 base URL、虚拟邮箱域和唯一 owner。
+  - 新增开发 owner 解析器：优先校验显式/已有 owner，否则只选择唯一的状态正常、部门非空超级管理员；零个或
+    多个候选失败关闭。入口每次先关闭、配置完成后最后启用，异常时按当前值补偿关闭。
+  - LobeHub helper 生成 bootstrap 配置但不修改 `.env.test/.env.local`；fork 启动失败时根重启脚本以仅关闭模式
+    重启一次后端并留下审计。同步后端、前端、架构与开发流程文档。
+- How:
+  - TDD 先复现缺少 helper bootstrap、占位值未替换、非回环误写、IPv6 回环、owner 不唯一、启用审计失败和
+    已启用状态 owner 失败，再补实现；`test-agent-app -am test`、`test-agent-integration -am test`、开发脚本
+    校验与 Shell 语法均通过。
+  - 使用未修改的 `.env.test` 和 JDK 21 执行完整 `restart-dev-services.sh --profile test --env-file .env.test
+    --with-lobehub`；后端 readiness 为 UP，LobeHub 3210 返回 307 到固定 `/lobehub/launch`，临时 env 权限为
+    0600。真实本地 PostgreSQL 中四项参数正确，启用审计顺序为 `true→false→true`。
+- Result:
+  - 本地显式 LobeHub 模式会自动开放可用入口，初始化、owner、审计或 fork 启动失败时不会保留已启用入口；
+    默认重启仍不启动 LobeHub，prod/企业公共参数门禁不变。
+  - 本次不新增/变更 HTTP API、事件或数据库结构/Flyway/MyBatis SQL，不修改 `.env*`、generated SDK、
+    OpenCode 源码或企业离线介质；只改变本地开发启动行为和对应审计数据。

@@ -26,6 +26,8 @@
     "@test-agent/test-runner": "workspace:*",
     "@test-agent/ui-kit": "workspace:*",
     "@test-agent/workbench-shell": "workspace:*",
+    "@test-agent/workflow-api-client": "workspace:*",
+    "@test-agent/workflow-chat": "workspace:*",
     "dayjs": "1.11.21",
     "dockview-vue": "6.6.1",
     "echarts": "^6.1.0",
@@ -37,6 +39,7 @@
     "node-forge": "1.3.1",
     "pinyin-pro": "3.28.2",
     "pinia": "3.0.4",
+    "tdesign-vue-next": "1.18.2",
     "vue": "3.5.38",
     "vue-router": "5.1.0"
   },

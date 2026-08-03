@@ -60,6 +60,8 @@ class RedisTokenStoreSessionMarkerTest {
         when(values.get("test-agent:token-session:" + digest)).thenReturn("usr_xxl_marker");
 
         assertThat(store.isActive(digest)).isTrue();
+        assertThat(store.isActiveForUser(digest, new UserId("usr_xxl_marker"))).isTrue();
+        assertThat(store.isActiveForUser(digest, new UserId("usr_another_user"))).isFalse();
         assertThat(store.isActive(TokenSessionMarkerStore.sha256("expired"))).isFalse();
     }
 }

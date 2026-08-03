@@ -12,8 +12,11 @@
 - [Redis 5 升级 + 双后台平台全量执行手册](FULL-UPGRADE-RUNBOOK.md)：按当前现场路径和 `.20 → .4 → .114 → .2` 顺序整合完整命令、成功条件、页面配置、脏数据边界与回滚。
 - [空报文体排查手册](EMPTY-RESPONSE-BODY-TROUBLESHOOTING.md)：部署后按浏览器、Nginx、双 Java、RunEvent SSE、用户 OpenCode 和企业模型代理逐层采证，区分正常空请求与异常空响应。
 - [工具盒子离线部署](../../docs/deployment/toolbox.md)：IT-Tools + OmniTools 的 193 项目录、双镜像、双后台共置、Nginx 故障切换和回滚。
+- [Python长程任务离线部署](../../docs/deployment/workflow-offline.md)：独立workflow数据库/Redis ACL、三镜像、Runner受限网络、Nginx直达、验收和回滚。
 
 底层 Java、manager、Redis 路由设计见 [后端部署说明](../../docs/deployment/backend.md)。
+
+独立长程任务使用 `package-workflow-offline.sh` 单独生成固定 `linux/amd64` 的 workflow-service、runner-controller、analysis-task 镜像tar及SBOM/许可证/锁文件/SHA256。它不并入Java JAR，也不使用Docker Compose；控制节点与分析节点由 `workflow/workflow-docker.sh` 分别管理。Nginx设置 `TEST_AGENT_NGINX_WORKFLOW_UPSTREAM` 后把 `/workflow-api/` 直接转发Python，禁止落入Java upstream。正式发布顺序固定为“workflow数据库与Redis只读ACL → Java窄能力/模型网关 → Python API/Worker → Runner/受限网络 → 前端与Nginx”。
 
 ## 共同前提
 
@@ -64,6 +67,108 @@ grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL
 ```
 
 ## Mac 打包
+
+LobeHub 独立 fork 默认位于平台仓库同级 `../lobehub-platform`，精确提交由 `lobehub/version.env` 锁定。当前
+锁定版本为 `v2.2.11-platform.7`；Desktop/CLI 使用 LobeHub 服务端浏览器确认、PKCE 和 24 小时 opaque Session，
+不再部署或兼容 OIDC Bridge。独立 fork 仍须由企业 Git 管理员推送到受控内部远端；同级本机 checkout 只用于
+构建和验证，不能作为企业源码托管。外网 Mac 先用 `build-lobehub-fork-transfer.sh` 生成只发布 `main` 和内部
+版本 tag 的自包含 Git Bundle，企业管理员按
+[LobeHub fork 企业 Git 转运手册](../../docs/deployment/lobehub-fork-transfer.md) 校验、导入和复核远端；转运包
+不预置 Git URL 或 credential helper 数据，fork 增量历史命中高置信私钥/token 格式时构建失败。再用
+`build-lobehub-artifacts.sh` 从锁定提交构建真实 `linux/amd64` 镜像、
+源码、SBOM、许可证和客户端制品集；
+完整构建必须提供企业签名 Windows x64 客户端与签名证据，以及批准的 Linux x86_64 客户端、原生构建证据、
+最终审批证据和独立验收记录。先由 Mac 运行 `build-lobehub-client-kit.sh` 导出锁定源码及原生构建工具包，再分别交给 Windows
+x64 证书构建机和 Linux x86_64 构建/审批人员；具体流程见
+[LobeHub 企业客户端原生构建与审批](../../docs/deployment/lobehub-client-build.md)。无客户端时只允许
+使用 `--server-only` 做服务端部署演练，后续打包门禁会拒绝该阶段目录。正式客户端返回后用
+`finalize-lobehub-artifacts.sh` 在无网络、无 Docker 条件下复制并定稿新目录；原 server-only 目录保持不变，
+客户端门禁未全部通过时不会生成完整目录。Docker VM 至少分配 8 GiB 内存；
+fork 已将 Next.js 静态生成限制为两个 worker，以支持 10 CPU / 8 GiB 的已验证构建基线。
+
+当前外网 Mac 的 `.5` 服务端阶段实物位于 `deploy/internal/dist-lobehub-server`，已经通过真实镜像启动、迁移、
+显式 Redis ACL、平台 HMAC/nonce 重放探测、部署校验和冷备恢复；它仍因 Windows/Linux 客户端门禁为 `false`
+而不能打成上线 ZIP，且已不匹配 `.6` 版本锁，只能作为历史验证证据，不能带入本次 Community 快照。当前原生客户端构建工具包
+已复制到 `~/Desktop/mimoagent/0709/lobehub-client-build-kit`，SHA-256 为
+`10fba3e98938252eb0ca7a3a40d0425d8f043ebe268ee267c2e019f3e2210ee1`；fork 转运 ZIP 位于相邻的
+`lobehub-fork-transfer` 目录，SHA-256 为
+`2cbca71e90d0fa5925363c530538506e019227a56f0caeae8cf89e0d677843a2`。旧 `.3`/`.4` 产物只能作为归档，
+部署人员不得把这些 `.5` 归档件与 `.6` 版本锁混用；`.6` 必须重新构建服务端介质和客户端工具包并重新验收。
+
+独立 fork 转运介质生成命令：
+
+```bash
+deploy/internal/build-lobehub-fork-transfer.sh \
+  --fork-dir /Users/huang/workspace/lobehub-platform \
+  --output-dir deploy/internal/dist-lobehub-fork-transfer
+```
+
+正式客户端返回后，复用已验证 server-only 目录的定稿命令：
+
+```bash
+deploy/internal/finalize-lobehub-artifacts.sh \
+  --server-artifact-dir /absolute/path/to/lobehub-server-only \
+  --output-dir /absolute/path/to/lobehub-release-artifacts \
+  --windows-client /path/to/lobehub-windows-x64.exe \
+  --windows-signature-evidence /path/to/windows-authenticode-verification.txt \
+  --linux-client /path/to/lobehub-linux-x86_64.tar.gz \
+  --linux-build-evidence /path/to/linux-client-build-evidence.txt \
+  --linux-approval-evidence /path/to/linux-client-verification.txt \
+  --linux-acceptance-record /path/to/linux-client-acceptance-record.txt
+```
+
+服务端阶段目录生成后应在构建机执行一次真实镜像冒烟；它会实际运行 migration、从 `-@all` 开始的显式 Redis
+ACL、平台 HMAC/nonce 重放探针、私有 RustFS 和 LobeHub app，再写入 PostgreSQL/RustFS 证明数据并完成停机
+冷备份、恢复和二次验收；它拒绝覆盖已有同名
+容器。Apple Silicon 的 Docker 仿真结果不替代现场 Linux 验收：
+
+```bash
+TEST_AGENT_LOBEHUB_ARTIFACT_DIR=/absolute/path/to/lobehub-release-artifacts \
+  deploy/internal/tests/lobehub-runtime-smoke-test.sh
+```
+
+外部 fork 和完整制品通过准入后，可用同一脚本生成全量附带包或只包含 LobeHub 的离线包：
+
+```bash
+TEST_AGENT_LOBEHUB_ARTIFACT_DIR=/absolute/path/to/lobehub-release-artifacts \
+  deploy/internal/package-release.sh --with-lobehub
+
+TEST_AGENT_LOBEHUB_ARTIFACT_DIR=/absolute/path/to/lobehub-release-artifacts \
+  deploy/internal/package-release.sh --lobehub-only
+```
+
+脚本会核对上游/内部版本和 fork commit、PostgreSQL 17、三份不可变 tag/image ID 镜像、完整且精确的
+`SHA256SUMS`、源码、SBOM、许可证、
+资源审批清单、Windows Authenticode 证据、Linux 构建/审批/验收记录及客户端摘要；任一缺失或不一致都会失败关闭。现场安装、systemd/Docker
+启停、共享 Redis ACL、HTTP 风险、备份和回滚见 [LobeHub 企业离线部署](../../docs/deployment/lobehub-offline.md)。
+
+现场填写 `/data/testagent/config/lobehub.env` 后必须先运行：
+
+```bash
+/data/testagent/deploy/internal/lobehub-docker.sh validate-config
+```
+
+该命令不访问 Docker，可先校验镜像 tag 与安装清单、全部 secret、固定 Redis 前缀、离线/认证
+开关、`AGENT_RUNTIME_MODE=local`、独立 loopback scheduler 密钥和强制设备执行门禁。企业离线版不会部署
+QStash；单一 app 实例由镜像 launcher 每分钟以内嵌方式触发创建者身份的到期任务。通过后再按文档顺序执行 Redis 检查、PostgreSQL 17 启动、migration、私有
+RustFS bucket 初始化和 app 启动；外部制品契约版本必须与本仓库 `deploy/internal/lobehub/version.env` 一致。
+app 默认只绑定 `127.0.0.1:3210`；跨机 Nginx 必须改为具体内网 IPv4，并把主机防火墙来源限制为代理节点。
+运行脚本拒绝重复键、符号链接或非 0600 的 `lobehub.env`，并按 ParadeDB、RustFS、app 生成临时最小 env，
+避免把 HMAC、Session 和模型委托密钥横向注入无关容器；Redis 管理员先用随包
+`lobehub-redis-acl.sh apply` 创建最小权限用户，运行态 `check-redis` 会证明前缀外 key/channel、Lua 越权和
+管理命令均被拒绝。脚本还会交叉核对 DB、Redis、S3、app 和四个
+平台 URL 的实际目标，防止格式合法但服务错接。
+
+启动、配置变更或恢复后必须执行完整运行态验收；升级前的冷备份输出必须位于 `/data/testagent` 外：
+
+```bash
+/data/testagent/deploy/internal/lobehub-docker.sh verify-deployment
+systemctl stop test-agent-lobehub
+/data/testagent/deploy/internal/lobehub-backup.sh create --output-dir /data/backup/lobehub/change-<change-id>
+```
+
+备份校验、显式恢复、rollback 保留和入口开放顺序以
+[LobeHub 企业离线部署](../../docs/deployment/lobehub-offline.md) 为准。
 
 企业包以执行命令时的本地工作树为准：已提交和未提交、但会被 Maven、前端或 Docker 构建实际读取的本地代码都属于本次构建输入。打包前先合并确认需要交付的相关分支并检查状态；这些命令用于记录输入范围，不要求 `git status --short` 为空，也不得为打包擅自清理、stash 或切换到另一份源码：
 
@@ -422,6 +527,7 @@ persistence JAR 的完整 SHA。只校验外层 ZIP 或 app JAR 不能证明数�
 - Java：[backend.env.example](backend.env.example)
 - worker/构建：[env.example](env.example)
 - 前端 Nginx：[nginx.env.example](nginx.env.example)、[configure-nginx.sh](configure-nginx.sh)
+- Python workflow：[workflow/build.env.example](workflow/build.env.example)、[workflow/workflow.env.example](workflow/workflow.env.example)、[workflow/java-capability.env.example](workflow/java-capability.env.example)、[package-workflow-offline.sh](package-workflow-offline.sh)
 - XXL MySQL：当前生产直接使用外部实例；[mysql.env.example](mysql.env.example) 和 [deploy-xxl-job-mysql.sh](deploy-xxl-job-mysql.sh) 仅作为其它隔离环境的容器备用方案
 
 当前企业浏览器入口固定为 HTTP，因此 Java 模板显式设置 `TEST_AGENT_XXL_JOB_COOKIE_SECURE=false`；基础应用默认仍为 `true`，HTTPS 环境不得复制该例外。两台后台必须保持一致，诊断脚本会输出脱敏的 `COOKIE_SECURE` 状态并拒绝缺失或错误值。

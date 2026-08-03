@@ -39,6 +39,12 @@ spring:
       port: ${TEST_AGENT_REDIS_PORT:6379}
       password: ${TEST_AGENT_REDIS_PASSWORD:}
       timeout: ${TEST_AGENT_REDIS_TIMEOUT:1s}
+  webflux:
+    multipart:
+      max-in-memory-size: 256KB
+      max-disk-usage-per-part: ${TEST_AGENT_MODEL_GATEWAY_MAX_MULTIPART_PART_BYTES:100MB}
+      max-parts: 32
+      file-storage-directory: ${TEST_AGENT_MODEL_GATEWAY_MULTIPART_DIRECTORY:${java.io.tmpdir}/testagent-model-gateway}
 
 mybatis:
   mapper-locations: classpath*:mybatis/**/*.xml
@@ -65,6 +71,29 @@ management:
       enabled: true
 
 test-agent:
+  workflow-capability:
+    hmac-secret: ${TEST_AGENT_WORKFLOW_CAPABILITY_HMAC_SECRET:}
+    runner-hmac-secret: ${TEST_AGENT_WORKFLOW_RUNNER_PLATFORM_HMAC_SECRET:}
+    runner-id: ${TEST_AGENT_WORKFLOW_RUNNER_ID:runner-default}
+    runner-public-key: ${TEST_AGENT_WORKFLOW_RUNNER_PUBLIC_KEY:}
+    runner-public-key-path: ${TEST_AGENT_WORKFLOW_RUNNER_PUBLIC_KEY_PATH:}
+    hmac-clock-skew: ${TEST_AGENT_WORKFLOW_HMAC_CLOCK_SKEW:30s}
+    nonce-ttl: ${TEST_AGENT_WORKFLOW_NONCE_TTL:60s}
+    checkout-ticket-ttl: ${TEST_AGENT_WORKFLOW_CHECKOUT_TICKET_TTL:2m}
+    model-grant-ttl: ${TEST_AGENT_WORKFLOW_MODEL_GRANT_TTL:5m}
+    model-gateway-url: ${TEST_AGENT_WORKFLOW_MODEL_GATEWAY_URL:}
+  lobehub:
+    hmac-secret: ${TEST_AGENT_LOBEHUB_HMAC_SECRET:}
+    client-id: ${TEST_AGENT_LOBEHUB_CLIENT_ID:lobehub}
+    ticket-ttl: ${TEST_AGENT_LOBEHUB_TICKET_TTL:60s}
+    grant-ttl: ${TEST_AGENT_LOBEHUB_GRANT_TTL:30d}
+    hmac-clock-skew: ${TEST_AGENT_LOBEHUB_HMAC_CLOCK_SKEW:60s}
+    nonce-ttl: ${TEST_AGENT_LOBEHUB_NONCE_TTL:120s}
+    dev-bootstrap-enabled: ${TEST_AGENT_LOBEHUB_DEV_BOOTSTRAP_ENABLED:false}
+    dev-owner-unified-auth-id: ${TEST_AGENT_LOBEHUB_DEV_OWNER_UNIFIED_AUTH_ID:}
+    dev-base-url: ${TEST_AGENT_LOBEHUB_DEV_BASE_URL:http://127.0.0.1:3210}
+    dev-email-domain: ${TEST_AGENT_LOBEHUB_DEV_EMAIL_DOMAIN:lobehub.local}
+    dev-target-enabled: ${TEST_AGENT_LOBEHUB_DEV_TARGET_ENABLED:true}
   third-party-api:
     base-url: http://tcds-prod.sdc.icbc
   deployment:

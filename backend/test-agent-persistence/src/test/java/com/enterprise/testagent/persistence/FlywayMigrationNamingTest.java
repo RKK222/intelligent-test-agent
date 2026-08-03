@@ -38,6 +38,18 @@ class FlywayMigrationNamingTest {
             "V20260801104000__rename_ui_test_platform_parameter.sql";
     private static final String APPLIED_UI_TEST_PLATFORM_RENAME_SHA256 =
             "0e306671eda36a9bb8881cf3d85b4e87b5373e00770dcd6503693b11d008e45c";
+    private static final String APPLIED_LOBEHUB_MODEL_GATEWAY_MIGRATION =
+            "V20260730090000__add_lobehub_model_gateway.sql";
+    private static final String APPLIED_LOBEHUB_MODEL_GATEWAY_SHA256 =
+            "0f16f1b2f3108e60580cfeb00102e10ac21e20220be255fae77bad9871f0bcb7";
+    private static final String APPLIED_LOBEHUB_FORWARD_COMPATIBILITY_MIGRATION =
+            "V20260802173416__backfill_lobehub_model_gateway.sql";
+    private static final String APPLIED_LOBEHUB_FORWARD_COMPATIBILITY_SHA256 =
+            "4f773e35e55380592f094c03cc5a66fb69b7dee4a2799e1c9ab5d0b9d8f1634a";
+    private static final String RELEASE_LOBEHUB_FORWARD_COMPATIBILITY_MIGRATION =
+            "V20260803141754__backfill_lobehub_model_gateway_after_rollout.sql";
+    private static final String RELEASE_LOBEHUB_FORWARD_COMPATIBILITY_SHA256 =
+            "b73b06fb14f407979646df32a8342603ab957c2f4812a4013ab9635cdfdcce64";
     private static final List<String> APPLIED_LEGACY_SEED_MIGRATIONS = List.of(
             "V10__seed_fcoss_application.sql",
             "V13__seed_fcoss_more_workspaces.sql");
@@ -109,6 +121,23 @@ class FlywayMigrationNamingTest {
                 "db/migration",
                 APPLIED_UI_TEST_PLATFORM_RENAME_MIGRATION,
                 APPLIED_UI_TEST_PLATFORM_RENAME_SHA256);
+    }
+
+    @Test
+    void appliedLobehubMigrationPathsRemainByteExact()
+            throws IOException, NoSuchAlgorithmException {
+        assertMigrationSha256(
+                "db/migration",
+                APPLIED_LOBEHUB_MODEL_GATEWAY_MIGRATION,
+                APPLIED_LOBEHUB_MODEL_GATEWAY_SHA256);
+        assertMigrationSha256(
+                "db/migration-compat/lobehub-missing",
+                APPLIED_LOBEHUB_FORWARD_COMPATIBILITY_MIGRATION,
+                APPLIED_LOBEHUB_FORWARD_COMPATIBILITY_SHA256);
+        assertMigrationSha256(
+                "db/migration-compat/lobehub-missing-after-rollout",
+                RELEASE_LOBEHUB_FORWARD_COMPATIBILITY_MIGRATION,
+                RELEASE_LOBEHUB_FORWARD_COMPATIBILITY_SHA256);
     }
 
     private static void assertMigrationSha256(

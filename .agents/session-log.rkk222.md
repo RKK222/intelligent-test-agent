@@ -4545,3 +4545,448 @@
 
 - 超级管理员可以在运行管理页一次选择多个异常/未运行用户进程并逐个重启；每项仍独立经过原有鉴权、跨服务器路由、公共停止/启动和健康检查链路，失败项可直接再次处理。
 - 代码、专项测试、类型检查和生产构建已验证；真实点击到 manager 的端到端验证受本地 Flyway 历史分叉阻塞，因此运行验证为部分完成。未修改 `.env*`、OpenCode 源码、generated SDK、RunEvent/SSE 或数据库结构。
+## 2026-08-02 - 本地重启被工作流权限与 Flyway 历史阻塞
+
+### Why
+
+- 用户要求基于当前本地代码重启开发环境，需要确认 `.env.test`/`test` profile 下的真实启动状态。
+
+### What
+
+- 未修改源码、migration、`.env.test` 或 `.env.local`。默认重启和兼容三服务重启均使用 JDK 25、`.env.test`。
+- 默认启动在工作流 PostgreSQL bootstrap 阶段失败：`bootstrap-workflow.sql:21` 的 `CREATE ROLE` 返回当前连接用户没有 `CREATEROLE` 权限。
+- 使用项目已有 `--without-workflow` 继续重启后端、opencode-manager、前端；Maven 后端构建成功，但后端启动时 Flyway 校验失败，提示已解析但数据库未执行 `20260730090000`，数据库已有更晚 migration。
+
+### How
+
+- 执行：`./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build`，随后执行同命令追加 `--without-workflow`。
+- 按规范未使用 `outOfOrder`、`repair`、忽略 migration 或手工修改 `flyway_schema_history` 掩盖历史分叉；读取 `.tmp/dev-services/workflow/workflow-prepare.log` 和 `.tmp/dev-services/backend.log` 定位原因。
+- 脚本失败后停止了遗留的 manager/frontend screen 会话，避免留下后端未启动而前端/manager仍在运行的半启动状态。
+
+### Result
+
+- 当前工作区干净；8080、3000、8090 均无监听，也没有残留 restart/backend/manager/frontend 进程。
+- 后续要恢复完整本地环境，需先由具备权限的数据库管理员处理工作流 bootstrap 角色权限，并按目标库 `flyway_schema_history` 基线解决 `20260730090000` 的历史分叉；不可通过临时替代环境文件规避。
+
+## 2026-08-02 - 核对 LobeHub fork 并复验本地重启阻塞
+
+### Why
+
+- 用户询问 `huangzhenren/lobehub` 是否为当前本地重启所需源码，并要求继续基于本地代码恢复开发环境。
+
+### What
+
+- 确认默认 `.env.test` 重启不依赖 LobeHub fork；只有显式 `--with-lobehub` 才需要 sibling `../lobehub-platform`。远程 fork 的 `main` 与 `v2.2.11-platform.5` 均指向锁定提交 `57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c`，但 sibling 目录当前不存在，未擅自克隆。
+- 使用现有 `deploy/internal/workflow/bootstrap-workflow.sql`，以本机 Docker PostgreSQL 管理员角色完成 `test_agent_workflow` 本地数据库/最小权限角色 bootstrap；未修改 `.env.test`、`.env.local`、源码或 migration，未向业务账号授予 `CREATEROLE`。
+
+### How
+
+- 用显式 workflow runtime/migration URL 和 `.env.test` 的 Redis `127.0.0.1:16379` 执行 `./tools/workflow-dev-services.sh prepare`，exit 0。
+- 按 JDK 25 和项目默认命令执行 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build`；后端 21 模块构建成功，但 readiness 仍因 `V20260730090000` 已解析未执行且数据库已有更晚 migration 而失败。
+- 未使用 `outOfOrder`、`repair`、ignore migration、手工改 `flyway_schema_history` 或重命名候选 migration；精确停止 4104 端口残留 opencode，并确认失败后无 backend、manager、workflow、frontend 或 opencode 残留进程。
+
+### Result
+
+- 工作流权限阻塞已解决；当前唯一启动阻塞是平台 PostgreSQL 的 Flyway 历史分叉，LobeHub 源码不是修复路径。
+- 若要继续恢复服务，需要保留数据并由集成人确认该候选 migration 是否已进入共享/稳定库，或先明确授权重建本地测试库；在此之前不能诚实宣称整套服务已启动。
+
+## 2026-08-02 - 修复 macOS 工作流 PID 误判并完成隔离库重启验证
+
+### Why
+
+- 继续验证本地完整重启时，工作流 API/Worker 实际已启动，但 macOS `ps` 展示的是 Python.app 启动器路径，helper 仅按 venv `bin/python` 路径匹配，误报 Worker 启动失败。
+- 原 `.env.test` 指向的 `testagent` 数据库仍存在 `V20260730090000` 已解析但未执行、后续 migration 已执行的历史分叉；不能用 `outOfOrder`、`repair` 或手改 Flyway 历史掩盖。
+
+### What
+
+- `tools/workflow-dev-services.sh` 新增 Python 符号链接解析、解释器自报基础路径和 framework root 兼容匹配，并补充中文注释。
+- `tools/workflow-dev-services-test.sh` 将 fake venv Python 改为真实文件加符号链接，覆盖回归路径；`docs/guides/ai-workflow.md` 补充 macOS 启动校验说明。
+- 新建非破坏性的本地数据库 `testagent_restart_20260802` 作为本次验证目标；未修改 `.env.test`、`.env.local`、migration、OpenCode 源码或 generated SDK，原 `testagent` 数据库保留。
+
+### How
+
+- 以 JDK 25、`test` profile、`.env.test` 和一次性进程环境变量覆盖 Druid datasource 指向隔离库，执行完整 `restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build`；在 detached screen 中运行以避免当前 Codex exec 回收工作流子进程。
+- 后端构建 21 个 Maven module 成功；隔离库 80 条 Flyway 成功记录，包含 `20260730090000`、`20260801104000` 和四张模型网关相关平台表。后端 readiness、工作流 ready、前端 HTTP 200、manager screen 均通过，用户 OpenCode 端口未按默认策略自动启动。
+- `tools/verify-dev-scripts.sh` 通过；其中 PowerShell 解析因当前 macOS 无 `pwsh/powershell` 跳过。`git diff --check` 通过。
+
+### Result
+
+- 当前本地代码已在隔离库上完整运行 backend、workflow API/Worker、opencode-manager 和 frontend；原 `.env.test` 默认数据库的 Flyway 历史分叉仍未修复，因此不宣称默认数据库路径已完成。
+- LobeHub fork 仍非默认重启依赖，只有显式 `--with-lobehub` 才需要 `../lobehub-platform`；本次未克隆或启动该源码。
+
+## 2026-08-02 - 修复默认库完整重启并启动 Workflow/LobeHub
+
+### Why
+
+- 用户按 JDK 25、`test` profile 和未修改的 `.env.test` 执行标准重启仍报错，并要求检查 Shell、启动独立
+  LobeHub fork，同时确认 Workflow 的实际使用方式。
+- 真实链路依次暴露四个问题：Workflow 重复要求业务库账号执行管理员 bootstrap、默认平台库缺失较早
+  LobeHub migration、仓库临时 Corepack shim 不接受 `pnpm@version` 参数，以及 Workflow 子进程会随启动终端
+  退出；登录后又确认 Python 只接受 ISO 时间，无法解析平台 Redis 中 Jackson 写入的 Unix 秒。
+
+### What
+
+- Workflow helper 先用稳定 owner/runtime 密钥验证既有独立数据库角色，只有首次建库才要求
+  `CREATEROLE/CREATEDB`；API/Worker 在 macOS 由两个独立 Screen 会话托管，仍用 PID 与完整命令校验安全停止。
+- Workflow Token 认证兼容平台 Unix 秒和历史 ISO 两种 `AuthPrincipal.issuedAt/expiresAt`，统一转为 UTC 校验。
+- 对已执行 `V20260801093854`、却漏掉 `V20260730090000` 的已知平台库分叉，复用唯一 Flyway 兼容装配，
+  隐藏无法顺序执行的旧候选并加载高版本 `V20260802173416` 补偿；未启用 `outOfOrder/repair`，两份 migration
+  均增加 SHA-256 锁定测试。
+- LobeHub helper 改用兼容临时 shim 的 `corepack pnpm` 并核对 fork `packageManager` 版本；生成 dotenv 在读取/
+  写入前拒绝软链接，使用同目录 0600 临时文件原子替换。同步 app/persistence/workflow README、数据库、Workflow
+  API 和本地启动文档。
+
+### How
+
+- LobeHub fork 克隆到仓库同级 `/Users/kaka/Desktop/lobehub-platform`，锁定干净提交
+  `57ccf8ffa3f2ec982e1622bed408ad24dfe8d22c`（`v2.2.11-platform.5`）；未修改 fork 源码。
+- Flyway 命名/SHA 测试 6 项和真实 PostgreSQL 兼容测试 6 项通过；Workflow 非 PostgreSQL 测试 92 项、真实
+  PostgreSQL 测试 12 项通过；Workflow/LobeHub helper 与 `tools/verify-dev-scripts.sh` 通过。完整 Python 首轮因
+  Testcontainers Ryuk 被 Docker 提前移除统一报 404，随后禁用 Ryuk 分组重跑全部通过。
+- 使用显式本地 owner `DEV_888888888` 真实执行 `restart-dev-services.sh --profile test --env-file .env.test
+  --with-lobehub`；后端、前端、Workflow、manager、ParadeDB、RustFS 和 LobeHub 就绪。真实平台登录 Token 成功
+  访问 Workflow `/me`/`definitions`，LobeHub 一次性票据 43 字符并完成 302 消费及 Session Cookie 签发。
+
+### Result
+
+- 默认平台库已顺序应用兼容 migration，三张模型网关表存在，LobeHub 四个参数初始化为本地 origin、邮箱域、
+  owner 并启用。当前 8080、3000、8090、3210 均可用，Workflow API/Worker 在重启命令退出后持续运行。
+- 本地仅启动 Workflow 控制面，不启动 macOS Analysis Runner；没有合规外部 Linux Runner 时页面可用，但提交
+  代码影响分析会明确返回 Runner 不可用，不会创建本机分析容器。
+- 未修改 `.env.test/.env.local`、generated SDK 或 OpenCode 源码；未新增 RunEvent。HTTP 路径不变，Workflow
+  认证只增加平台现有 Redis 序列化格式兼容；数据库变更仅为已知历史分叉的隔离高版本补偿。
+
+## 2026-08-02 - 修复 LobeHub 新标签页票据未投递
+
+### Why
+
+- 已登录用户点击工作台“通用问答”后，平台能够签发一次性票据，但新标签页没有继续请求 LobeHub；直接访问
+  固定 `/lobehub/launch` 则能完成 SSO，说明故障位于前端空白标签页交接而非账号、后端或 LobeHub 服务。
+
+### What
+
+- `launchLobehubInNewTab` 在同步打开 `about:blank` 后保留该标签自身的 `document`，切断 `opener`，再把隐藏
+  票据表单创建在弹窗 document 中并以 `_self` 提交，不再从平台页面依赖命名窗口查找。
+- 补充单测锁定表单所属 document 和 `_self` 目标，并同步前端根 README 与 agent-web README。
+
+### How
+
+- 定向 Vitest 3 项、agent-web typecheck/lint、`git diff --check` 通过。
+- 使用 Playwright 真实登录 `888888888` 后点击工作台入口，确认浏览器保持平台页并新建第二个页面，票据消费
+  返回 302，最终到达 `http://127.0.0.1:3210/onboarding`。
+
+### Result
+
+- LobeHub 新标签页入口已恢复；现有 8080、3000、8090、3210 服务保持运行。
+- 未修改 HTTP API、事件、数据库、依赖锁、`.env*`、generated SDK、OpenCode 源码或独立 LobeHub fork。
+
+## 2026-08-02 - 生成开发测试协同知识沉淀方法论汇报页
+
+### Why
+
+- 需要将“开发测试协同的知识沉淀方法论”图稿转为可直接用于领导汇报的 16:9 PowerPoint 单页，并保留测试实际案例的后续补充区域。
+
+### What
+
+- 新增单页 `docs/presentations/开发测试协同知识沉淀方法论.pptx` 与对应视觉参考图 `docs/presentations/assets/开发测试协同知识沉淀方法论.png`。
+- 新增可重复执行的 `tools/pptx/build-knowledge-methodology-slide.js`，并在 `docs/presentations/README.md` 记录图稿用途、可编辑范围、参考图与重建命令。
+
+### How
+
+- 使用 PptxGenJS 按 16:9 画布原生生成标题、目录、文件夹图标、树形线条、图例和右侧留白案例区；视觉参考图不嵌入 PPT。左侧为目录、右侧为留白案例区，开发整理资产为蓝色字体，其余资产为黑色。
+- 已运行 PPTX 结构校验、内容提取和 macOS Quick Look 缩略图渲染检查。环境缺少 LibreOffice.app，因此未能执行 LibreOffice PDF 渲染，但 Quick Look 的 PPTX 缩略图与源图一致。
+
+### Result
+
+- 生成的 PPTX 为自包含单页，标题、目录、图例、线条和留白区域均可编辑，结构校验通过；未修改 API、事件、数据库、安全、环境配置或业务代码。
+
+## 2026-08-02 - 修复 LobeHub 平台票据跨 origin 被拒绝
+
+### Why
+
+- 用户在真实 Chrome 中从平台点击“通用问答”后，新标签页停留在
+  `/api/auth/platform/consume`，页面返回 `INVALID_ORIGIN`；LobeHub 日志确认 Better Auth 以 403 拒绝
+  `http://127.0.0.1:3000` 发起的一次性票据表单 POST。
+
+### What
+
+- LobeHub 本地开发 helper 生成运行环境时，将聊天自身 origin 和 `TEST_AGENT_FRONTEND_URL` 对应的平台
+  前端 origin 一并写入 `AUTH_TRUSTED_ORIGINS`；保留 Better Auth 配置覆盖默认值时所需的聊天自身来源。
+- helper 行为测试锁定两个可信 origin，并同步本地研发流程与 LobeHub 部署文档；未修改独立 LobeHub fork、
+  `.env.test/.env.local`、HTTP API、事件、数据库、generated SDK 或 OpenCode 源码。
+
+### How
+
+- `tools/verify-dev-scripts.sh` 与 `git diff --check` 通过。
+- 使用 JDK 25、`test` profile、未修改的 `.env.test` 和 `--with-lobehub` 完整重启 backend、Workflow
+  API/Worker、opencode-manager、frontend、ParadeDB、RustFS、LobeHub 与 scheduler。
+- 在用户现有 Chrome 平台页刷新后点击“通用问答”，真实票据消费返回 302、平台兑换接口返回 200。
+
+### Result
+
+- 新标签页成功到达 `http://127.0.0.1:3210/onboarding`，不再停留在 `INVALID_ORIGIN`；8080、3000、
+  8090 和 3210 均已由完整重启脚本拉起。
+
+## 2026-08-02 - 核对 LobeHub 在线模板授权与离线预置方案
+
+### Why
+
+- LobeHub 本地离线模式的 onboarding 页面无法加载推荐 Agent，用户要求切换在线模式，并确认后续企业离线
+  交付应如何携带预置模板。
+
+### What
+
+- 确认推荐模板由 LobeHub 前端经 `market.agent.getOnboardingFull` 请求在线 Marketplace；企业离线策略会按
+  设计拒绝全部 `market.*` 路由，fork 内当前没有可替代 Marketplace 的完整 Agent 模板目录。
+- 当前进程以 `PLATFORM_SSO_ENABLED=0`、`LOBEHUB_ENTERPRISE_OFFLINE=0` 临时切换为独立在线开发模式，未修改
+  `.env.test/.env.local`、生成 dotenv 或源码；离线 scheduler 未启动。
+- 明确离线预置模板应作为版本化、可校验的完整 Agent 定义和本地静态资源提交到锁定 LobeHub fork，并复用
+  现有 Agent 创建服务实现本地安装；构建制品需补充模板来源、版本、SHA-256、许可证和审批清单。
+
+### How
+
+- 检查 onboarding hook、Market tRPC、Marketplace 安装服务、企业离线路由门禁、平台 SSO 配置约束，以及
+  `build-lobehub-artifacts.sh`、`package-release.sh` 和离线部署文档的制品契约。
+- 运行检查确认 backend readiness 为 `UP`、frontend 为 HTTP 200、LobeHub 独立在线入口为 302 登录跳转；
+  已登录 Chrome 页面能够进入 onboarding，但在线 Marketplace 返回 `Unauthorized`。
+
+### Result
+
+- 在线 LobeHub 进程已启动，但推荐模板仍未加载成功：当前没有 Market OIDC token，也没有已注册的
+  `MARKET_TRUSTED_CLIENT_ID/SECRET`；下一步需由用户完成 Marketplace 授权或提供受控 trusted-client 配置。
+- 平台 SSO 适配当前显式要求企业离线模式，因此本次在线启动是直接访问 LobeHub 的临时运行态；再次执行标准
+  `restart-dev-services.sh --with-lobehub` 会恢复离线模式。离线模板方案尚未编码实现，也未改动 API、事件、
+  数据库、Flyway、generated SDK 或 OpenCode 源码。
+
+## 2026-08-02 - 修复代码变动影响分析内部请求被代理劫持
+
+### Why
+
+- 已登录页面能够进入 Workflow，但 Python 调 Java 的平台共享能力请求继承了宿主机代理环境，回环地址被代理
+  转发并返回 502，导致用户身份、仓库和会话加载失败，页面显示“平台共享能力调用失败”。
+
+### What
+
+- Workflow 到 Java、Worker 到 Runner、Runner 到 Java 的三个固定内部 HTTP 客户端统一关闭 HTTPX 环境代理
+  继承，保留现有超时、签名和依赖注入边界；补充默认客户端回归测试。
+- 同步 Workflow、Runner、企业离线部署和安全规范，明确内部签名请求必须直达部署配置地址；不修改本地 Runner
+  启动策略，macOS 仍只启动控制面，分析执行继续要求合规 Linux Runner。
+
+### How
+
+- Workflow 全量 105 项、Runner 全量 80 项和 `tools/verify-workflow-architecture.sh` 通过；Workflow PostgreSQL
+  测试使用 `TESTCONTAINERS_RYUK_DISABLED=true` 避开本机 Docker 提前移除 Ryuk 的既有问题。
+- 使用 JDK 25、`test` profile、未修改的 `.env.test` 完整执行
+  `restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build`；backend、frontend、Workflow
+  API/Worker 和 opencode-manager 均正常启动，健康与 readiness 为 UP。
+- 在用户现有已登录 Chrome 页面刷新 `/workflow-chat`，确认身份 `DEV_888888888`、两条最近任务和场景标题可见，
+  且不再出现共享能力错误；Workflow 日志确认 `/me`、`/repositories`、`/conversations` 均返回 200。
+
+### Result
+
+- “代码变动影响分析”场景加载已恢复，内部 HMAC 和票据请求不再受宿主机 HTTP(S)/SOCKS 代理环境影响。
+- 本机 8091 按设计无 Runner 监听，因此未执行真实代码分析任务；这不影响页面与控制面加载，但正式分析仍需
+  配置合规 Linux Runner。未修改 API 路径、事件、数据库、依赖锁、`.env*`、generated SDK 或 OpenCode 源码。
+
+## 2026-08-03 - 初始化 Bytebase 测试仓库并修复影响分析结构化入口
+
+### Why
+
+- 用户要求把私有 Gitee `wrui233/bytebase-java` 配置为应用代码库并执行真实页面验证。原页面的新对话没有
+  直接展示结构化输入卡，手工发送“开始代码变动影响分析”会先调用尚未初始化的意图模型并返回 500。
+- 真实浏览器复测又发现：从失败任务新建对话时，reactive 投影保留旧 `FAILED/runId` 等可选字段，导致新对话
+  仍显示失败且输入卡被遮蔽。
+
+### What
+
+- 在本地平台创建 `Bytebase Java / bytebase-java` 应用代码库，记录 ID
+  `repo_fe8dba411c2b4a0a8e3af5726e879bb2`，SSH 地址为 `git@gitee.com:wrui233/bytebase-java.git`，类型为
+  `APPLICATION_CODE_REPOSITORY`，并关联到 `F-COSS / app_fcoss`；该仓库当前只有 `main`。
+- 新建空对话直接展示仓库、分支、模式与智能体输入卡；仅当注册表中只有一个工作流且请求携带
+  `structuredInput` 时确定性路由，不再重复调用意图模型，自然语言分类和真实代码分析仍保持模型边界。
+- 初始 AG-UI 投影显式清空所有可选运行字段，修复失败任务切换到新对话后的状态残留；补充前后端回归并同步
+  Workflow API、模块图、前端规范和相关 README。
+
+### How
+
+- HTTPS `git ls-remote` 因私有仓库认证失败，平台/本机 SSH 成功读取 `main`，远端 HEAD 为
+  `e87c82adf3900ae50eec5d0d00bc48edae84018d`。真实 `/repositories/{id}/branches` 返回 200 并展示
+  `main（默认）`。
+- Workflow 全量 106 项通过；本机 Docker 24.0.2 的 Ryuk 容器会被提前移除，使用
+  `TESTCONTAINERS_RYUK_DISABLED=true` 后 PostgreSQL 集成 12 项及全量均通过。`workflow-chat` 14 项、全仓
+  TypeScript/Vue typecheck 通过。前端全量另有一项既有 `AppSourceDialog` 保留时长输入断言失败，与本次文件无关。
+- 使用 JDK 25 和未修改的 `.env.test` 完整重启；8080 health/readiness、3000、8090 health/ready 与 CORS 预检
+  通过。真实 Chrome 提交 Bytebase `main` 后，仓库权限复核成功，结构化消息 POST 200，任务
+  `run_043b0442686e509804727c7895b39197` 进入 Worker。
+
+### Result
+
+- 页面入口、仓库初始化、SSH 分支读取、结构化提交及失败任务后新建对话均已验证；当前浏览器保留
+  Bytebase Java / `main` 的可操作输入页。
+- 真实任务在“冻结提交并准备隔离工作区”按设计失败：本机是 `linux/arm64` Docker 且 8091 无合规
+  Linux Runner，不能绕过宿主 `linux/amd64`、`DOCKER-USER/iptables` 等边界。平台内部模型 provider/token/model
+  也尚未初始化，因此尚未生成最终影响报告；仓库只有 `main`，后续还需有实际变更分支才有非空 diff。
+- 未修改 `.env*`、数据库结构/Flyway、RunEvent 类型、HTTP 路径、generated SDK 或 OpenCode 源码；HTTP 请求
+  结构保持兼容，仅补充唯一固定工作流的结构化路由语义。并行 LobeHub 脚本和文档改动未纳入本次范围。
+
+## 2026-08-03 - 接入真实 Community Agent 目录与离线快照
+
+### Why
+
+- LobeHub 是通用工作与生活能力入口，既有测试领域自造模板方向不符合产品定位；用户要求在线展示 Community
+  当前已有、可选择的内容，并让企业离线包能够携带经过选择和审计的真实社区 Agent。
+- 原在线 onboarding 还要求单独 Marketplace 授权；自动 M2M 接入初版沿用 GET query 交换 `clientSecret`，
+  会让凭据进入 Next.js 访问日志，不能作为安全交付。
+
+### What
+
+- 独立 fork 在 `bf73f5f2c1e7f3309ecc1eb874ef58ca587b3a04` 锁定为
+  `v2.2.11-platform.7`：在线 onboarding 自动建立短期 Marketplace M2M 会话并读取实时 Community，凭据改由
+  tRPC mutation 的 POST body 交换；用户不再执行 Community OAuth。在线安装仍保持 Community fork 语义。
+- 离线模式从 fork 内版本化快照读取，当前冻结 13 个通用类别、118 个官方且已验证 Agent 及 118 个本地头像；
+  安装直接创建本地 Agent，不访问 Marketplace、创建 Community 组织或上报事件。选择清单默认同步精选目录，
+  额外条目使用 Community 真实 identifier，不允许手工编造生成 JSON。
+- 平台本地启动增加 `--lobehub-mode online|offline`；在线模式关闭平台 SSO/企业离线网络策略和不兼容的平台入口，
+  默认离线行为保持不变。企业构建器新增快照来源、许可证、自包含依赖、头像集合和 SHA-256 校验，并把元数据
+  写入 `approved-resources.json` 与 `LICENSES.txt`。
+
+### How
+
+- 快照同步器只调用 Community 公开只读接口，有界重试，只接收官方、已验证、配置完整且没有在线 Plugin /
+  Knowledge Base 依赖的 Agent；记录 Community 页面、作者、官方 `lobehub/lobe-chat-agents` 仓库及 MIT 许可证。
+- fork 相关 Community 测试 14 项、tRPC 上下文 28 项、Marketplace/MCP 回归 44 项通过，`bun run check --type`
+  与定向 ESLint 通过。平台快照防篡改、构建、客户端契约/工具包、定稿、安装、备份、探针、发布和开发脚本测试
+  全部通过。
+- 使用 JDK 25、未修改的 `.env.test` 和 `--lobehub-mode online` 完整构建后重启一次，并在安全修正后再次重启；
+  8080、3000、8090 为 HTTP 200，3210 正常跳转。真实 Community 接口返回 200，浏览器渲染 13 类/118 项，
+  “战略顾问”选择后“继续 (1)”启用；未点击继续，未产生 Community fork 写操作。新日志不含 `clientSecret`
+  或 GET `registerM2MToken`。
+
+### Result
+
+- 本地在线模式可自动加载并选择 Community 当前真实目录；离线发布可从同一社区内容生成可审计、自包含快照。
+  后续新增内容先在 Community 选择 identifier，更新选择清单并重新运行 `bun run community:snapshot`、测试、
+  版本提交和企业打包；贡献新社区内容仍走官方 `lobehub/lobe-chat-agents` 仓库审核。
+- 本次不修改平台 HTTP API、事件、数据库/Flyway/MyBatis SQL、generated SDK、OpenCode 源码或 `.env*`。
+  `.7` 完整企业服务端/客户端介质和 fork 转运 ZIP 尚未构建；既有 `.5` 介质仅为历史证据，不能复用或改名。
+
+## 2026-08-03 - 复原规范驱动测试智能体单页 PPT
+
+### Why
+
+- 用户提供现有汇报页截图，要求保持工行红白风格与三栏结构，并按当前平台重新表达公共 Agent、应用 Agent、
+  `spec/docs` 资产和 SDD 能力栈。
+
+### What
+
+- 新增可编辑单页 `智能研发规范驱动测试智能体落地.pptx` 及可重复生成脚本
+  `tools/pptx/build-spec-driven-agent-slide.js`。
+- 左侧按真实配置边界拆为公共 `opencode/`、应用 `.opencode/` 与 workspace 下直接挂载的 `spec/`、`docs/`；
+  删除中间内容目录层和旧知识库目录。
+- 右侧能力栈保留 SOP、Skill、Rule、Spec、Template、Docs，并新增独立的 MCP、Tools 层；同步演示文稿 README。
+
+### How
+
+- 复用仓库既有 PptxGenJS 目录树、图标栅格化和原生形状绘制方式，所有主体文字、框线、目录、流程和能力栈
+  均可在 PowerPoint 中继续编辑。
+- 运行生成脚本、PPTX Office 结构校验、`markitdown` 内容提取和 macOS Quick Look 2000px 实际渲染；首轮
+  发现两处文字裁切后调整字号并重新执行全部校验。环境没有 LibreOffice.app，视觉校验使用 Quick Look 完成。
+
+### Result
+
+- 单页内容与用户要求一致，最终结构校验通过、文本完整、渲染无已知截断或重叠。未修改 API、事件、数据库、
+  性能、安全、环境配置、generated SDK、OpenCode 源码或业务代码，也未创建分支。
+
+## 2026-08-03 - 修复 Linux Runner 并完成真实代码影响分析闭环
+
+### Why
+
+- Bytebase 与 Spring Boot 应用仓库已经能在页面选择，但 macOS 本机没有满足 `linux/amd64`、Docker Socket、
+  `DOCKER-USER/iptables` 隔离要求的 Runner；后续真实任务又依次暴露 Docker API 版本钉死、长 SSH 私钥无法
+  直接 RSA 加密、模型请求继承系统代理、4K 上下文截断、模型虚构证据路径和 AgentScope 工具结构化失败。
+- Lima 虚拟机重启会清空 iptables，Runner 容器若自动恢复可能先于出站策略；本地 8B 模型长上下文冷启动还会
+  超过平台模型网关原有30秒响应头窗口，产生一次无意义重试。
+
+### What
+
+- 初始化独立 Lima/QEMU `linux/amd64` Runner 环境并通过根 Docker 运行隔离容器；Runner 启动改为先验证并
+  恢复分析网络、容器固定 `restart=no`，网络校验输出精确缺失规则。Runner镜像取消旧 Docker API 版本钉死。
+- checkout 私钥改为 `TAEC1` 混合信封：Java 用 RSA-OAEP-SHA256封装随机AES密钥，Python以AES-256-GCM解密
+  任意长度OpenSSH私钥；保留失败关闭和格式/篡改测试。离线打包同时修复 numeric UID chown、Syft tmpfs、
+  macOS扩展属性和不依赖在线Dockerfile syntax frontend的问题。
+- 代码分析任务在模型前确定性读取冻结提交diff，把有界统计、文件清单和patch摘录纳入提示；输出schema和
+  后置校验强制证据使用真实仓库别名与存在路径，非空diff不能返回空证据。模型relay首个Responses请求显式
+  要求工具调用，并修复模型网关把工具schema中的`image_url`误判为视觉输入。
+- Workflow 服务端AgentScope使用独立模型网关路由、`trust_env=false`流式客户端和显式连接释放；结构化结果
+  优先走OpenAI-compatible `response_format + JSON Schema`、温度0并关闭Qwen思考，未实现该能力的供应商才
+  回退工具调用。综合提示明确已成功执行的代码智能体，缺失摘要由代码证据确定性回填。
+- 平台模型网关对Workflow长上下文请求把响应头冷启动窗口扩为120秒，LobeHub交互调用仍保持30秒；首块和
+  相邻块空闲边界不变。同步模型网关、Workflow、Runner、analysis-task、离线部署和HTTP API稳定文档。
+- 真实验收发现Java通用API日志仍会记录checkout ticket路径参数和Runner加密私钥信封；日志脱敏现已覆盖
+  `ticketId/grantId/grant/encryptedPrivateKey`等Workflow凭据字段，并只保留固定凭据路由形状。
+
+### How
+
+- 本机创建 `qwen3-workflow:8b`（`num_ctx=16384`）并把四个Workflow公开模型ID映射到该本地上游；12个
+  CHAT/TOOLS/REASONING探针通过。Lima重启实测证明Runner不会自动启动，启动脚本能在缺失iptables链时恢复
+  白名单策略后再启动Runner，健康/ready与`restart=no`均通过。
+- 真实 Spring Boot `master..feature_testagent_20260630` 单智能体任务
+  `run_417ef9c1d3f9c2ef5782db8f0195a5e8` 最终为 `SUCCEEDED`，报告
+  `report_8b1fea140f2b46be81b5b68d579bc6d1` 精确引用4个实际新增文件；独立综合探针再次返回4条证据且不再误称
+  “未执行代码分析”。
+- 从提交`3d4fe0370e51`构建正式离线介质`V20260803.102851`，外层SHA-256为
+  `84e9b4360e09932838965bc80dd5c24ff09229ba06b65fa993194fdbd71888b0`，内层文件逐项校验通过；Lima已加载并
+  通过正式部署脚本切换到Runner镜像`d78bfa98a478...`和analysis镜像`2ba792706664...`，Docker API自动协商为
+  client 1.41/server 1.55且不再设置`DOCKER_API_VERSION`。
+- 正式镜像页面验收任务`run_726dc810c081196e7168f98cadd43f56`与Codex分析器均为`SUCCEEDED`，报告
+  `report_d7e374c14e464530b77350de3aed190b`含4条真实路径且未声称“未执行代码分析”。日志脱敏定向48项通过，
+  随后再次完整打包Java后端并重启实际服务。
+- Workflow非PostgreSQL 98项、PostgreSQL 12项（本机Docker需`TESTCONTAINERS_RYUK_DISABLED=true`）、
+  analysis-task 14项、Runner 81项、Java模型网关全模块依赖测试、TAEC1定向测试、Ruff、离线包合同、开发启动
+  合同、网络和架构校验全部通过；JDK25后端完整打包并用未修改的`.env.test`重启，8080/3000/8090及独立
+  Linux Runner的8091入口均返回HTTP 200。
+
+### Result
+
+- Linux Runner、代码智能体、平台模型网关、AgentScope综合和报告落库已形成真实可运行闭环；Ollama只作为
+  当前离线测试环境的平台模型上游，工作流和Runner仍使用短期grant经Java网关访问，没有直连旁路。
+- 正式Runner在Lima重启后仍固定`restart=no`，启动程序先验证或恢复出站策略再启动；8080/3000/8090/8091
+  最终均返回HTTP 200，API访问日志不再保留Workflow一次性凭据或加密私钥信封。
+- 本次未新增HTTP路径或事件类型，未修改数据库/Flyway/MyBatis SQL、generated SDK、OpenCode源码或`.env*`；
+  模型网关仅按可信调用来源调整性能窗口，LobeHub行为兼容不变。Lima与模型目录属于本地运行环境状态，不作为
+  生产migration；正式交付仍需由离线包在目标企业Linux主机复核硬件容量、真实模型和网络地址。
+
+## 2026-08-03 - 合并 main 并修复 release 迁移分叉启动
+
+### Why
+
+- 用户要求把本地 `main` 合并到企业 release 分支，同时明确后续企业部署暂不部署 LobeHub 和 Workflow。
+- release 数据库已经执行公共 Agent 发布迁移 `20260803133000` 时，如果尚未执行 main 的 LobeHub 基础迁移
+  `20260730090000` 或旧补偿 `20260802173416`，原补偿版本低于当前 schema 版本，会被 Flyway 拒绝。
+
+### What
+
+- 将本地 `main` 合并到 `codex/release-enterprise-20260801`，冲突文档同时保留公共配置强制重启能力与
+  LobeHub/Workflow 的现有说明。
+- 复用唯一的 `DatabaseMigrationCompatibilityCustomizer`，新增隔离兼容迁移
+  `V20260803141754__backfill_lobehub_model_gateway_after_rollout.sql`：仅对已经执行
+  `20260803133000`、但缺少旧补偿的已部署分支选择高版本补偿；已执行旧补偿的数据库继续加载旧 location
+  校验，正常/空库继续执行 main migration。没有启用 `outOfOrder`、`repair` 或修改 Flyway 历史。
+- 同步 app/persistence README、包说明和数据库部署文档；企业部署决策为不安装、不启动 LobeHub 与
+  Workflow。本次仅完成本地验证，没有制作或部署企业介质。
+
+### How
+
+- PostgreSQL 兼容集成测试 7 项、Flyway 命名与字节锁测试 6 项通过；前端定向 8 个测试文件共 150 项通过。
+- 使用 JDK 25 和未修改的 `.env.test` 执行 `./restart-dev-services.sh --profile test --env-file .env.test`，
+  完整 Maven 21 模块与前端生产构建通过；8080 后端、3000 前端、8090 Workflow 健康检查返回 200，
+  3210 LobeHub 未监听。Workflow 仅因标准本地启动流程运行，不代表将纳入企业部署。
+- 本地历史保留 `20260802173416` 并新增 `20260803133000`，符合旧补偿分支；新兼容 SQL 源码与运行 JAR 内
+  SHA-256 均为 `b73b06fb14f407979646df32a8342603ab957c2f4812a4013ab9635cdfdcce64`。
+
+### Result
+
+- 合并后的 release 分支可在已知 main 分叉和“release rollout 已执行、旧 LobeHub 补偿缺失”两类历史上
+  选择合法迁移路径，本地服务已完整启动并验证。
+- 企业包和目标服务器部署尚未执行；交付前仍须读取目标库真实 `flyway_schema_history`，覆盖对应基线升级，
+  并核对最终企业 persistence JAR 内 migration 字节。部署时继续排除 LobeHub 和 Workflow。

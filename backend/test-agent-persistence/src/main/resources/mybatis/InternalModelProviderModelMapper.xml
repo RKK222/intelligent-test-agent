@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.InternalModelProviderModelMapper">
+
+    <resultMap id="ModelRowMap" type="com.enterprise.testagent.persistence.mybatis.InternalModelProviderModelRow">
+        <constructor>
+            <arg column="provider_id" javaType="java.lang.String"/>
+            <arg column="model_id" javaType="java.lang.String"/>
+            <arg column="upstream_model_id" javaType="java.lang.String"/>
+            <arg column="display_name" javaType="java.lang.String"/>
+            <arg column="context_limit" javaType="java.lang.Long"/>
+            <arg column="enabled" javaType="_boolean"/>
+            <arg column="capability_chat" javaType="_boolean"/>
+            <arg column="capability_tools" javaType="_boolean"/>
+            <arg column="capability_vision" javaType="_boolean"/>
+            <arg column="capability_reasoning" javaType="_boolean"/>
+            <arg column="capability_embedding" javaType="_boolean"/>
+            <arg column="capability_rerank" javaType="_boolean"/>
+            <arg column="capability_image" javaType="_boolean"/>
+            <arg column="capability_speech" javaType="_boolean"/>
+            <arg column="capability_transcription" javaType="_boolean"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="ProbeRowMap" type="com.enterprise.testagent.persistence.mybatis.ModelProbeResultRow">
+        <constructor>
+            <arg column="provider_id" javaType="java.lang.String"/>
+            <arg column="model_id" javaType="java.lang.String"/>
+            <arg column="capability" javaType="java.lang.String"/>
+            <arg column="succeeded" javaType="_boolean"/>
+            <arg column="probed_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="ModelColumns">
+        provider_id, model_id, upstream_model_id, display_name, context_limit, enabled,
+        capability_chat, capability_tools, capability_vision, capability_reasoning,
+        capability_embedding, capability_rerank, capability_image, capability_speech,
+        capability_transcription, created_at, updated_at
+    </sql>
+
+    <select id="findByProviderId" resultMap="ModelRowMap">
+        select <include refid="ModelColumns"/>
+        from internal_model_provider_models
+        where provider_id = #{providerId}
+        order by model_id
+    </select>
+
+    <select id="findEnabled" resultMap="ModelRowMap">
+        select <include refid="ModelColumns"/>
+        from internal_model_provider_models
+        where enabled = true
+        order by model_id
+    </select>
+
+    <select id="findByModelId" resultMap="ModelRowMap">
+        select <include refid="ModelColumns"/>
+        from internal_model_provider_models
+        where model_id = #{modelId}
+    </select>
+
+    <select id="findProbesByModelIds" resultMap="ProbeRowMap">
+        select provider_id, model_id, capability, succeeded, probed_at
+        from internal_model_provider_model_probes
+        where model_id in
+        <foreach collection="modelIds" item="modelId" open="(" separator="," close=")">
+            #{modelId}
+        </foreach>
+        order by model_id, capability
+    </select>
+
+    <delete id="deleteByProviderId">
+        delete from internal_model_provider_models where provider_id = #{providerId}
+    </delete>
+
+    <insert id="insertModel">
+        insert into internal_model_provider_models(
+            provider_id, model_id, upstream_model_id, display_name, context_limit, enabled,
+            capability_chat, capability_tools, capability_vision, capability_reasoning,
+            capability_embedding, capability_rerank, capability_image, capability_speech,
+            capability_transcription, created_at, updated_at
+        ) values (
+            #{providerId}, #{modelId}, #{upstreamModelId}, #{displayName}, #{contextLimit}, #{enabled},
+            #{capabilityChat}, #{capabilityTools}, #{capabilityVision}, #{capabilityReasoning},
+            #{capabilityEmbedding}, #{capabilityRerank}, #{capabilityImage}, #{capabilitySpeech},
+            #{capabilityTranscription}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <insert id="upsertProbe" databaseId="postgresql">
+        insert into internal_model_provider_model_probes(
+            provider_id, model_id, capability, succeeded, probed_at
+        ) values (
+            #{providerId}, #{modelId}, #{capability}, #{succeeded}, #{probedAt}
+        )
+        on conflict (provider_id, model_id, capability) do update set
+            succeeded = excluded.succeeded,
+            probed_at = excluded.probed_at
+    </insert>
+
+    <update id="upsertProbe">
+        merge into internal_model_provider_model_probes target
+        using (values (
+            #{providerId}, #{modelId}, #{capability}, #{succeeded}, #{probedAt}
+        )) incoming(provider_id, model_id, capability, succeeded, probed_at)
+        on target.provider_id = incoming.provider_id
+           and target.model_id = incoming.model_id
+           and target.capability = incoming.capability
+        when matched then update set
+            succeeded = incoming.succeeded,
+            probed_at = incoming.probed_at
+        when not matched then insert (
+            provider_id, model_id, capability, succeeded, probed_at
+        ) values (
+            incoming.provider_id, incoming.model_id, incoming.capability,
+            incoming.succeeded, incoming.probed_at
+        )
+    </update>
+</mapper>

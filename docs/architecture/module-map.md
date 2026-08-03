@@ -9,6 +9,8 @@ Browser
   -> frontend/apps/agent-web
       -> packages/backend-api
       -> packages/event-stream-client
+      -> packages/workflow-api-client -> /workflow-api/v1 (Python, same origin)
+      -> packages/workflow-chat
       -> /xxl-job-admin/ iframe (same origin)
   -> frontend-opencode
       -> packages/backend-api (source alias)
@@ -26,12 +28,19 @@ Browser
       -> test-agent-xxl-job-integration
           -> test-agent-xxl-job-admin-upstream
           -> isolated MySQL / XXL executors
+  -> workflow-service API / Worker
+      -> isolated workflow PostgreSQL
+      -> platform Redis token keys (exact GET/PTTL only)
+      -> Java workflow capability API / model gateway
+      -> runner-controller -> one restricted analysis-task container per task
 ```
 
 关键边界：
 
-- 浏览器只认识平台后端 API 和平台事件流。
+- 浏览器通常只认识平台后端 API 和平台事件流；唯一受控例外是 `/workflow-chat` 经 `workflow-api-client` 同源直连 Python `/workflow-api/v1/**` 并消费原生 AG-UI SSE。
 - `test-agent-api` 统一承载 API、鉴权、限流、traceId、任务入口、事件出口和错误处理。
+- Java 对独立工作流只暴露 `/api/internal/workflow-capabilities/v1/**` 服务端窄能力，不承载工作流对话、任务、报告或事件，也不代理 Python HTTP/SSE。
+- `workflow-service` 独占长程任务注册表、会话、消息、LangGraph 状态、AG-UI、报告与独立 PostgreSQL；只有 `runner-controller` 拥有 Docker 管理权限。
 - `test-agent-app` 只承载启动、装配、profile、migration、health 和日志等运行入口，不承载业务逻辑。
 - `test-agent-agent-runtime` 是多 agent 选择、统一日志/指标包装和具体 agent 适配器边界。
 - `test-agent-opencode-client` 是业务代码访问 opencode server 的唯一门面。
@@ -57,6 +66,7 @@ Browser
 | `test-agent-configuration-management` | 应用定义只读消费、应用成员、代码库英文名与应用关联、已初始化引用资产库及已有应用源码历史的英文名/类型冻结、应用工作空间、个人 SSH key 和 Git 远端只读目录查询配置业务；通用参数数据库直读视图（`RepositoryCommonParameterValues`）、变量引用解析器、参数更新跨实例广播，以及只管理显式 SPI 条目的本机内存参数注册表/诊断响应。 |
 | `test-agent-scheduler` | 保留 `ScheduledTaskHandler`/context/result、Redis 全局锁与旧运行记录清理；不再启动 runner 或创建/执行 `USER_PLAN`，全部周期任务由 XXL adapter 调用业务 handler。 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界；当前承载 IT-Tools/OmniTools 版本化离线目录、193 项目录校验、热门 Top 10 和用户/工具 30 秒点击计数服务。 |
+| `test-agent-model-gateway` | 中立的企业模型目录投影、能力探测、OpenAI-compatible 请求准备/流式转发、上游错误脱敏和每日聚合调用；同时提供 OpenCode 内部代理复用的 URL/可信 Header/响应头安全支持，不承载 Controller 或 SQL。 |
 | `test-agent-xxl-job-admin-upstream` | 未做业务修改的 XXL-JOB Admin 3.4.2 源码与资源普通 JAR；只允许整体上游升级。 |
 | `test-agent-xxl-job-integration` | 进程内独立 Servlet Admin、独立 MySQL/Flyway/MyBatis、平台 advertised host 地址派生、由本机 Admin readiness 门控且不阻塞主服务的 executor、统一 handler adapter、一次性 SSO/JIT 用户、平台 session marker 校验和隔离 health。 |
 | `test-agent-api` | Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、含 `X-Test-Agent-Linux-Server-Id` 的 CORS 边界、RunEvent SSE 按生产 Java 流式转发入口、夜间时段/任务 HTTP 入口、工具盒子目录/点击 HTTP 入口、带 `permissionCount/PERMISSION` 的用户级会话运行态 HTTP/fetch SSE 入口、平台文件 WebSocket route/ticket/RPC 入口（含 workspace 原始文件、引用组合视图、Agent 配置文件及 Hub 制品/引用操作）、应用源码仓库/物化/打开/最近选择/持久化操作快照 HTTP 入口及独立一次性 ticket 进度 WebSocket、Agent & Skill Hub 浏览/发布/更新 HTTP 入口、应用引用资产库 7 个内部入口、工作空间创建进度轮询入口、manager 控制面入口、超级管理员运行管理 overview/指标历史、XXL 一次性 SSO 票据和显式 JVM 内存参数跨 Java 查询/刷新入口、trace Web 入口。 |
@@ -68,6 +78,32 @@ Browser
 公共 Agent 卡死 rollout 的纠错编排仍沿用现有边界：`test-agent-workspace-management.AgentConfigApplicationService` 解析远端修正 commit 并广播新任务，`test-agent-opencode-runtime.PublicAgentConfigRolloutService` 负责原子替换协调、精确目标强停和排空，`test-agent-persistence` 的 MyBatis XML/Flyway 保存替换审计链与 `force_stop` 派生标记，`test-agent-api.AgentConfigController` 仅暴露 `SUPER_ADMIN` DTO/鉴权入口。停止进程必须继续复用 `OpencodeProcessStopService`，不在 workspace、API 或 persistence 层直接控制 manager。
 
 新增后端文件前先按上表归属；没有合适工程时按业务边界新建 Maven module。
+
+### 独立长程任务定位
+
+- `workflow-service`：Python 3.12 API/Worker，负责 Redis Token 精确认证、AgentScope 白名单意图识别、LangGraph 固定图、业务持久化、AG-UI 和报告。首版只注册 `code-change-impact-analysis`。
+- `runner-controller`：独立分析节点控制面，负责一次性票据兑换、冻结提交检出、diff manifest、容器生命周期、模型凭据relay与范围解析；是唯一可访问 Docker Socket 的组件。
+- `analysis-task`：Debian 11/glibc 2.31、非 root、只读根文件系统的 Codex/OpenCode 任务入口；源码只读、每个 analyzer 独立 HOME/缓存/输出，UID `10002`回环relay与UID `10001`智能体隔离平台grant。
+- `test-agent-domain` / `test-agent-integration` / `test-agent-persistence` / `test-agent-api`：只分别承载 checkout/model grant 端口、实时权限与 HMAC 编排、Redis 临时原子状态和服务端能力 Controller；禁止出现 Python 工作流业务对象。
+- `packages/workflow-api-client` / `packages/workflow-chat`：分别负责同源 HTTP/fetch SSE 协议和 TDesign Chat 交互；不经过 `backend-api` 或 `event-stream-client`。
+
+### LobeHub 企业集成定位
+
+- `test-agent-domain`：只定义 LobeHub ticket/grant Redis 端口、模型目录/探测端口和每日聚合端口，不知道 HMAC、
+  HTTP、Redis key 或 MyBatis 行模型。
+- `test-agent-integration`：负责平台用户到一次性票据、部门规范化/摘要、虚拟邮箱、实例角色、HMAC 和模型委托的
+  业务编排；不实现 fork 内的用户或 Workspace 表。
+- `test-agent-configuration-management`：负责超级管理员维护供应商公开模型目录及触发固定样本能力探测。
+- `test-agent-model-gateway`：负责按已探测能力解析公开模型、改写上游模型 ID、流式代理、错误清洗和用量增量；
+  `OpenAiUpstreamSupport` 供既有 OpenCode 内部模型代理复用，不把 OpenCode Responses 转换搬入本模块。
+- `test-agent-persistence`：Redis 原子票据/nonce/委托，以及模型目录、探测和每日聚合的 MyBatis XML 实现与
+  Flyway；LobeHub 自身 ParadeDB 和 Workspace 数据不属于平台 persistence。
+- `test-agent-api`：只暴露当前用户签票、服务 HMAC 兑换/撤销、管理员模型目录/探测和固定模型网关端点。
+- `apps/agent-web`、`packages/backend-api`、`packages/shared-types`：分别承担入口/固定 launch、签票 client 与
+  短期 ticket DTO；票据不进入 Pinia、router state 或持久化。
+- 独立 LobeHub fork：负责 consume、Session、用户/部门 Workspace JIT、私有资源、企业模型适配器、离线开关与
+  Windows/Linux 设备策略，源码不放入当前仓库；本地默认 checkout 为同级 `../lobehub-platform`，精确提交由
+  `deploy/internal/lobehub/version.env` 锁定。
 
 ## 前端包职责
 
@@ -92,6 +128,8 @@ managed/source 选择共用完整 intent authority，旧 terminal 的 repository
 | `packages/backend-api` | 访问平台后端服务的唯一前端 client，负责统一响应、错误、traceId、绑定请求动态 `X-Test-Agent-Linux-Server-Id` 首跳提示、敏感字段递归脱敏的原始 HTTP 交换 observer、工具盒子目录/点击 API、超级管理员服务器目录选择、带 keyed single-flight/连接所有权清理/只读单次传输重试的平台文件 WebSocket route/ticket/RPC（workspace 原始文件、引用组合视图、Agent 配置文件与 Hub 制品/引用操作）、Agent & Skill Hub 元数据/发布/更新角标 API、应用引用资产库 7 个 API 及目标/实际指针状态、工作区 Git diff/stage/unstage/冲突 API、超级管理员应用 Git 工作空间/版本/分支范围查询及单分支/全应用刷新共享控制面、用户 opencode 进程状态/初始化、兼容 `permissionCount` 缺失与 `patterns[]` 的用户级会话运行态/权限请求、夜间时段与任务 CRUD、运行管理 overview 与指标历史、XXL 一次性 SSO 票据、配置管理及 JVM 内存值四接口、版本库类型字典、工作空间创建进度轮询、应用版本工作区 API 映射、active run 恢复查询、兼容同步 `askSideQuestion`、流式 `startSideQuestionRun` 和默认 `opencode` 的 agent URL 前缀。 |
 | `packages/backend-api` | 访问平台后端服务的唯一前端 client，负责统一响应、错误、traceId、绑定请求动态 `X-Test-Agent-Linux-Server-Id` 首跳提示、敏感字段递归脱敏的原始 HTTP 交换 observer、工具盒子目录/点击 API、超级管理员服务器目录选择、带 keyed single-flight/连接所有权清理/只读单次传输重试的平台文件 WebSocket route/ticket/RPC（workspace 原始文件、引用组合视图、Agent 配置文件与 Hub 制品/引用操作）、应用源码仓库/物化/打开/最近选择/操作快照 API 与每次新签 ticket、调用方管理重连的独立进度 WebSocket、Agent & Skill Hub 元数据/发布/更新角标 API、应用引用资产库 7 个 API 及目标/实际指针状态、工作区 Git diff/stage/unstage/冲突 API、用户 opencode 进程状态/初始化、兼容 `permissionCount` 缺失与 `patterns[]` 的用户级会话运行态/权限请求、夜间时段与任务 CRUD、运行管理 overview 与指标历史、XXL 一次性 SSO 票据、配置管理及 JVM 内存值四接口、版本库类型字典、工作空间创建进度轮询、应用版本工作区 API 映射、active run 恢复查询、兼容同步 `askSideQuestion`、流式 `startSideQuestionRun` 和默认 `opencode` 的 agent URL 前缀。 |
 | `packages/event-stream-client` | RunEvent SSE 和用户级运行态 fetch SSE client，负责按默认 `opencode` agent URL 连接 RunEvent、在空 `baseUrl` 的企业同源构建中保留 `/api/...` 相对地址、携带 Bearer Token 和可选动态服务器首跳提示连接 fetch SSE、自动重连、识别 `run.snapshot.reset`、兼容解析 `permissionCount/PERMISSION`、解析前原始 `MessageEvent.data` 回调、事件解析、去重和取消订阅。 |
+| `packages/workflow-api-client` | 独立工作流 HTTP/fetch SSE client；只访问同源 `/workflow-api/v1/**`，携带平台 Bearer、`Last-Event-ID`，校验Python成功信封并把HTML/纯文本上游响应收敛为不含正文的安全错误，不依赖 `backend-api` 或 `event-stream-client`。本地由`apps/agent-web/workflow-dev-proxy.ts`直达Python，生产由Nginx承担同一边界。 |
+| `packages/workflow-chat` | `/workflow-chat` 的 TDesign Chat 对话、空对话直显结构化输入卡、进度、取消、报告版本和局部重分析组件；AG-UI reducer 对快照、重放和工具调用幂等。 |
 | `packages/workbench-shell` | dockview-vue 工作台布局、顶部栏、面板、带加载三态/稳定快照身份/用户内容修订代次及真实绝对路径元数据的文件 tab Pinia 状态，以及 Git 变更面板应用工作区/应用级 Agent mock 数据。 |
 | `packages/file-explorer` | 文件树、普通文件复制/剪切/粘贴与拖放、浏览器文件上传选择、超级管理员服务器工作空间选择事件、已加载文件名过滤、变更列表和打开文件入口；实际文件操作由 app 层调用 backend-api。 |
 | `packages/editor` | Monaco 编辑器（原生 `monaco-editor`，源码区默认按可视宽度自动换行）、语言识别、内容编辑、只读展示、path/model URI 一致时才执行的外部正文同步，以及 Mermaid Flowchart、Sequence、State Diagram 的懒加载可视化编辑。 |

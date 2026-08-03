@@ -91,6 +91,34 @@ class SensitiveDataMaskerTest {
         }
 
         @Test
+        @DisplayName("脱敏 LobeHub 模型委托")
+        void mask_lobehubModelGrant() {
+            String input = "{\"modelGrant\":\"server-side-grant\",\"department\":\"研发一部\"}";
+
+            String result = SensitiveDataMasker.mask(input);
+
+            assertTrue(result.contains("\"modelGrant\":\"***\""));
+            assertFalse(result.contains("server-side-grant"));
+        }
+
+        @Test
+        @DisplayName("脱敏 Workflow 一次性票据、模型授权和加密私钥信封")
+        void mask_workflowCredentials() {
+            String input = "{\"ticketId\":\"wfcheckout-secret\",\"grantId\":\"wfgrantid-secret\","
+                    + "\"grant\":\"wfgrant-secret\",\"encryptedPrivateKey\":\"TAEC1.secret-envelope\"}";
+
+            String result = SensitiveDataMasker.mask(input);
+
+            assertTrue(result.contains("\"ticketId\":\"***\""));
+            assertTrue(result.contains("\"grantId\":\"***\""));
+            assertTrue(result.contains("\"grant\":\"***\""));
+            assertTrue(result.contains("\"encryptedPrivateKey\":\"***\""));
+            assertFalse(result.contains("wfcheckout-secret"));
+            assertFalse(result.contains("wfgrant-secret"));
+            assertFalse(result.contains("TAEC1.secret-envelope"));
+        }
+
+        @Test
         @DisplayName("脱敏 JVM 通用参数源值和内存值")
         void mask_commonParameterMemoryValues() {
             String input = "{\"sourceValue\":\"database-secret-like-value\",\"memoryValue\":\"effective-value\"}";
@@ -152,6 +180,37 @@ class SensitiveDataMaskerTest {
             String input = "This is plain text";
             String result = SensitiveDataMasker.mask(input);
             assertEquals(input, result);
+        }
+    }
+
+    @Nested
+    @DisplayName("maskPath 方法测试")
+    class MaskPathTest {
+
+        @Test
+        @DisplayName("隐藏 Workflow 路径中的 checkout ticket 和 model grant")
+        void maskPath_workflowCredentials() {
+            assertEquals(
+                    "/api/internal/workflow-capabilities/v1/checkout-tickets/***/consume",
+                    SensitiveDataMasker.maskPath(
+                            "/api/internal/workflow-capabilities/v1/checkout-tickets/wfcheckout-secret/consume"));
+            assertEquals(
+                    "/api/internal/workflow-capabilities/v1/model-grants/***/refresh",
+                    SensitiveDataMasker.maskPath(
+                            "/api/internal/workflow-capabilities/v1/model-grants/wfgrantid-secret/refresh"));
+            assertEquals(
+                    "/api/internal/workflow-capabilities/v1/model-grants/***/revoke",
+                    SensitiveDataMasker.maskPath(
+                            "/api/internal/workflow-capabilities/v1/model-grants/wfgrantid-secret/revoke"));
+        }
+
+        @Test
+        @DisplayName("不改写没有凭据路径参数的固定路由")
+        void maskPath_keepsFixedRoutes() {
+            assertEquals(
+                    "/api/internal/workflow-capabilities/v1/model-grants/revoke-run",
+                    SensitiveDataMasker.maskPath(
+                            "/api/internal/workflow-capabilities/v1/model-grants/revoke-run"));
         }
     }
 

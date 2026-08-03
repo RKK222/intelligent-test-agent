@@ -165,7 +165,15 @@ class UserManagementApplicationServiceTest {
         when(dictionaryRepository.findByDictId(USER_DICT_ID))
                 .thenReturn(Optional.of(roleDictionary(USER_DICT_ID, "USER", "普通用户", 4)));
 
-        UserManagementApplicationService service = service(userRepository, userRoleRepository, dictionaryRepository);
+        TokenStore tokenStore = mock(TokenStore.class);
+        UserManagementApplicationService service = service(
+                new UserDomainService(userRepository, mock(ThirdPartyUserApiClient.class)),
+                userRepository,
+                mock(UserDeletionRepository.class),
+                userRoleRepository,
+                dictionaryRepository,
+                tokenStore,
+                mock(ThirdPartyUserApiClient.class));
         ConversationContextStore contextStore = mock(ConversationContextStore.class);
         ConversationContextUserMutation mutation =
                 new ConversationContextUserMutation(user.userId(), "mutation-role");
@@ -182,6 +190,7 @@ class UserManagementApplicationServiceTest {
                 role.userId().equals(user.userId()) && role.dictId().equals(USER_DICT_ID)));
         verify(contextStore).beginUserMutation(user.userId());
         verify(contextStore).completeUserMutation(mutation);
+        verify(tokenStore, times(2)).deleteByUserIds(List.of(user.userId()));
     }
 
     @Test

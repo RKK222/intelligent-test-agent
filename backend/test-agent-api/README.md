@@ -6,6 +6,7 @@
 
 ## 主要职责
 
+- `WorkflowCapabilityController` 只暴露 `/api/internal/workflow-capabilities/v1/**` 服务端白名单：仓库/分支授权、一次性 checkout ticket、模型 grant 和超级管理员复核。入口校验固定 client/runner identity、原始 body digest、timestamp、nonce 与 HMAC；不定义工作流 conversation/message/task/run/report/event，也不代理 `/workflow-api/**` 或 AG-UI。
 - 当前用户 OpenCode 受管启动/重启会在公共启动程序中自动选择同服有效公共个人配置；初始化首次创建 `public-{userId}` worktree 后也会自动加载。API 只返回既有 `publicWorktreePreparation` 结果，不新增轮询接口；准备或加载异常不回滚已健康进程。
 - 暴露 `/api/internal/platform/...`、`/api/internal/agent/{agentId}/...` 和预留 `/api/public/...` URL。
 - 旧 runtime/workspace `/api/...` 兼容 URL 由 `LegacyApiGoneWebFilter` 在进入 Controller 前统一返回 `410 API_GONE`；登录认证 `/api/auth/login|logout|me|refresh` 保留为稳定入口。
@@ -38,7 +39,7 @@
 - 暴露 opencode-manager WebSocket 控制面入口，入口只做 manager token 鉴权、DTO/消息适配、完整运行配置已下发的连接级状态和 traceId 处理；同一连接的 health/start/restart/stop/stopOwned 等出站控制消息在连接级串行 emission，并检查 Reactor sink 结果，发送失败立即进入统一错误链路并取消 pending command，禁止静默等待 command timeout。manager 注册时 runtime 先冻结原 ACTIVE 运行进程候选，入口在完整 `configUpdate` 应用后的首个 `managerHeartbeat` 才把控制连接暴露给业务探测并异步执行恢复，避免空 manager 抢先把待恢复状态写成 `STOPPED`；配置缺失时只返回安全错误且不恢复。旧 manager-backends HTTP 诊断入口已作废，Go manager 运行路径不通过 HTTP 与 Java 交互，只连接本服务器 Java，`backendListRequest/backendListResponse` 仅保留为兼容诊断协议。
 - 后端 Java 路由统一使用 runtime 的 `BackendJavaRouteResolver` 解析当前服务器、首次分配的全局最轻可初始化服务器、`linuxServerId -> BackendJavaProcess` 和 `containerId -> linuxServerId`；API 层普通 Java->Java HTTP 转发走 `BackendHttpForwarder`，RunEvent SSE 长连接走 `BackendSseForwarder` 流式转发，两者都设置 `X-Test-Agent-Backend-Routed` 防循环并透传 Authorization、traceId 和 query。两个 start-run 入口携带 `contextToken` 时，路由过滤器在 32 MiB 上限内缓存请求体并通过 Redis 只读解析 token 绑定的生产服务器，不查询用户进程 assignment，也不刷新 token TTL；字段已出现但为空、非字符串或失效时 fail-closed 返回 409，不回退 assignment。远端转发和本地 Controller 均可再次读取完整 body。无 token 的兼容请求仍走 assignment 路由。后续新增任何 opencode-manager 路由或 Java->manager 控制入口，都必须复用这套公共程序。
 - `CommonParameterMemoryController` / `CommonParameterMemoryBackendRoutingService`：仅向 `SUPER_ADMIN` 提供显式 JVM 内存参数的全部/单进程查询与手工刷新。集群聚合最多 500 个在线 Java，按 `backendProcessId` 精确保留同服务器多进程，使用公共 resolver/forwarder、并发 8、单进程 10 秒超时和内部路由头防循环；部分失败返回 HTTP 200 逐进程结果，未知或离线单进程统一 503。API 层不读取 Repository、不写修改历史、不发布参数广播。
-- `web.aop.ApiLoggingAspect` 按目标 Controller logger 记录前端 HTTP 操作入口、出口、耗时、状态和脱敏请求/响应摘要；`contextToken`、内存参数 `sourceValue/memoryValue` 与 Authorization、Cookie 等敏感字段同样强制掩码，包含 JSON 转义字符时也不得残留原值。`web.aop.WebSocketLoggingAspect` 按目标 WebSocket handler logger 记录前端长连接入口、结束信号和异常；`web.aop.ServiceLoggingAspect` 按目标 Service logger 仅在抛出异常时记录方法、参数摘要、耗时和错误。三者统一进入 `logs/backend.log`，ERROR 级别同时进入 `logs/error.log`；SSE 相关 Controller/Service/logger 还会额外进入 `logs/sse.log`。
+- `web.aop.ApiLoggingAspect` 按目标 Controller logger 记录前端 HTTP 操作入口、出口、耗时、状态和脱敏请求/响应摘要；`contextToken`、Workflow 的 `ticketId/grantId/grant/encryptedPrivateKey`、内存参数 `sourceValue/memoryValue` 与 Authorization、Cookie 等敏感字段同样强制掩码，checkout ticket 和 model grant 路径参数只保留固定路由形状，包含 JSON 转义字符时也不得残留原值。`web.aop.WebSocketLoggingAspect` 按目标 WebSocket handler logger 记录前端长连接入口、结束信号和异常；`web.aop.ServiceLoggingAspect` 按目标 Service logger 仅在抛出异常时记录方法、参数摘要、耗时和错误。三者统一进入 `logs/backend.log`，ERROR 级别同时进入 `logs/error.log`；SSE 相关 Controller/Service/logger 还会额外进入 `logs/sse.log`。
 - 暴露超级管理员运行管理 overview、容器/按稳定服务器身份的后端指标历史和有主/无主 opencode server 重启/停止 API；旧后端进程指标入口已作废。Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选/历史/容器/端口参数校验、用户名筛选参数透传、manager 下属 opencode server 明细和 `BOUND/UNBOUND` 归属 DTO 映射、命令结果 DTO 映射、后端指标 DTO 映射和 traceId 处理；manager 明细新增可空 `unifiedAuthId/managerStatus`，旧 manager/旧 Redis 快照缺字段时保持 `null`。UCID 只通过该现有高权限接口返回，不进入普通用户接口、普通错误信息或日志。后端指标 DTO 按可空字段透传服务器 CPU/load/内存/swap/磁盘、Java 进程 CPU/RSS/FD、JVM heap/non-heap/direct/mapped/GC/线程字段，并保留旧别名 `memoryMaxBytes`、`jvmGcPauseMillis`。重启/停止命令先按 `containerId` 的 Redis manager 快照定位容器所属 `linuxServerId`，目标不是当前 Java 或同服务器选中 Java 时透传用户 JWT 和 traceId 转发到目标 Java，由目标 Java 控制本服务器 manager。API 层不实现 opencode server 启动、停止、状态查询或健康确认；用户进程初始化、STOPPED 进程重启和 manager 明确未托管后的原端口拉起由 `test-agent-opencode-runtime` 的 `OpencodeProcessStartupService` 完成，平台已有进程记录的停止确认和 `STOPPED` 回写由 `OpencodeProcessStopService` 完成，状态查询、健康探测和 heartbeat 刷新由 `OpencodeProcessStatusQueryService` 完成。指标历史主参数为 `windowMinutes`，`hours` 仅兼容旧客户端。
 - 暴露超级管理员 XXL 一次性 SSO 票据 API，Controller 只做 `SUPER_ADMIN` 鉴权和 traceId；旧 scheduler-management 任意子路径统一返回 `410 API_GONE`。
 - 暴露当前用户定时执行时段和任务创建/查询/改期/取消/失败卡关闭 API；创建 DTO 的可选 `scheduleMode` 缺失时按 `NIGHT_WINDOW`，`ADMIN_CUSTOM` 创建和改期由 Controller 基于真实 `AuthPrincipal` 向应用层传递 `SUPER_ADMIN` 权限事实，owner 始终取认证主体。`NightExecutionDtos` 只把完整 prompt/parts 映射到应用命令，任务响应增加模式但仍仅返回安全截断预览，不回显完整输入。精确内部路径 `/api/internal/platform/opencode-runtime/night-execution/internal-dispatch` 仅接收目标 `linuxServerId` 和最多 50 个 `taskId`，使用标准 XXL access token 鉴权；分发网关必须先由公共 resolver 选出目标服务器上的精确 backendProcessId，再决定本机调用或统一 HTTP 转发。
@@ -59,7 +60,18 @@
 - Hub 正文由 `agent-skill-hub/HUB` 独立只读文件 ticket 获取；引用、取消引用与更新复用现有 `agent-config/WORKSPACE` ticket，并校验 `appAdmin`、绑定 workspace 和当前用户。目录和更新 HTTP 查询可携带个人运行 `targetWorkspaceId`；`referencedOnly` 返回当前应用引用清单，详情附带按状态收敛的引用方应用/工作空间。
 - Hub 不新增 SSE 或后端间文件 HTTP 代理；跨服务器引用始终由浏览器连接目标工作区所在 Java 的平台文件 WebSocket。
 
+### 公共 Agent 配置发布
+
 - `AgentConfigController` 的 `POST /public/rollout/supersede` 只负责 `SUPER_ADMIN` 鉴权、共享运行副本恢复确认、请求 DTO 和 traceId 透传；`activeRolloutId` 作为业务层 CAS 前置条件，前端不能提交 `forceStop`。响应沿用 Agent 配置 operation DTO，状态轮询通过 `GET /public/rollout` 的可选替换审计字段完成。
+
+### LobeHub 与企业模型入口
+
+- `LobehubSsoController` 为当前用户签票，并为 LobeHub 服务端提供精确 HMAC 兑换/撤销路径；兑换在 JSON parse
+  前读取有界原始 bytes 验签。只有这两个服务路径跳过通用平台 Token filter，其它路径不继承例外。
+- `InternalModelCatalogManagementController` 仅允许 `SUPER_ADMIN` 覆盖供应商模型目录和探测单项声明能力。
+- `ModelGatewayController` 只接受 Bearer 模型委托，提供 `/models` 和八个固定 OpenAI-compatible POST 端点；
+  JSON、SSE 和 multipart 转发都委托 `test-agent-model-gateway`，不在 Controller 解析供应商或访问 Repository。
+- API 日志对票据原始 bytes 只输出长度占位，并递归脱敏 `ticket/modelGrant`。LobeHub 模型流不创建 RunEvent。
 
 ## 允许依赖
 
@@ -73,6 +85,8 @@
 - `test-agent-configuration-management`。
 - `test-agent-scheduler`。
 - `test-agent-xxl-job-integration` 的票据服务接口。
+- `test-agent-integration` 的 LobeHub SSO 服务接口。
+- `test-agent-model-gateway` 的目录、探测与转发接口。
 - Spring WebFlux、Validation、Security。
 
 ## 禁止依赖
@@ -116,6 +130,8 @@
 - `AuthControllerRolesTest`、`ConfigurationManagementControllerTest` 覆盖认证响应 roles、`APP_ADMIN`/`SUPER_ADMIN` 鉴权、代码库英文名、版本库类型与部署模式 DTO、版本库类型/部署模式下拉接口、应用版本库远端树接口、工作空间创建进度轮询和 SSH key 不回显私钥。
 - `ApiTokenWebFilterTest`、`InMemoryRateLimitWebFilterTest`、`TraceIdWebFilterTest`、`GlobalExceptionHandlerTest`、`LegacyApiGoneWebFilterTest` 覆盖鉴权、限流、traceId、旧接口 410 和统一错误响应。
 - `InternalModelTokenManagementControllerTest` 覆盖 `SUPER_ADMIN` 鉴权、统一冲突错误和响应不泄露 Token；代理测试覆盖按 Provider ID 注入不同 Token、鉴权先于请求体聚合、`2 MiB` 定长及 chunked 上限和流式 JSON 完整性校验。`ApiLoggingAspectTest` / `ServiceLoggingAspectTest` / `WebSocketLoggingAspectTest` 覆盖 Controller、Service 与 WebSocket 日志切面在同步、响应式和错误路径下保留原调用语义；`SensitiveDataMaskerTest` 覆盖 `contextToken` 及内部模型 `authToken` 请求/响应字段脱敏。
+- `LobehubSsoControllerTest`、`InternalModelCatalogManagementControllerTest`、`ModelGatewayControllerTest` 和
+  `ApiLoggingSensitiveBodyTest` 覆盖身份边界、原始 body、固定端点、multipart、错误 envelope 与票据日志脱敏。
 
 ## 后续 AI 编码指引
 

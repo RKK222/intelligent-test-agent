@@ -36,6 +36,13 @@ public class ApiTokenWebFilter implements WebFilter {
             "/api/internal/agent/opencode/workspace-git-tool";
     private static final String UI_TEST_TOOL_CONFIG_PATH =
             "/api/internal/agent/opencode/ui-test-tool/config";
+    private static final String LOBEHUB_SSO_REDEEM_PATH =
+            "/api/internal/platform/lobehub-sso/tickets/redeem";
+    private static final String LOBEHUB_SSO_REVOKE_PATH =
+            "/api/internal/platform/lobehub-sso/grants/revoke";
+    private static final String MODEL_GATEWAY_ROOT_PATH =
+            "/api/internal/platform/model-gateway/v1";
+    private static final String MODEL_GATEWAY_PATH = MODEL_GATEWAY_ROOT_PATH + "/";
 
     private final String apiToken;
     private final ObjectMapper objectMapper;
@@ -68,6 +75,10 @@ public class ApiTokenWebFilter implements WebFilter {
                 || path.equals(NIGHT_EXECUTION_INTERNAL_DISPATCH_PATH)
                 || path.equals(WORKSPACE_GIT_TOOL_PATH)
                 || path.equals(UI_TEST_TOOL_CONFIG_PATH)
+                || path.equals(LOBEHUB_SSO_REDEEM_PATH)
+                || path.equals(LOBEHUB_SSO_REVOKE_PATH)
+                || path.equals(MODEL_GATEWAY_ROOT_PATH)
+                || path.startsWith(MODEL_GATEWAY_PATH)
                 || apiToken == null) {
             return chain.filter(exchange);
         }

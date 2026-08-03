@@ -117,6 +117,7 @@ NGINX_BACKENDS="${TEST_AGENT_NGINX_BACKENDS:-}"
 NGINX_SERVER_ROUTES="${TEST_AGENT_NGINX_SERVER_ROUTES:-}"
 NGINX_LEGACY_TERMINAL_ROUTES="${TEST_AGENT_NGINX_TERMINAL_ROUTES:-}"
 NGINX_XXL_JOB_ADMINS="${TEST_AGENT_NGINX_XXL_JOB_ADMINS:-}"
+NGINX_WORKFLOW_UPSTREAM="${TEST_AGENT_NGINX_WORKFLOW_UPSTREAM:-}"
 NGINX_TOOLBOX_IT_TOOLS_UPSTREAM="${TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM:-}"
 NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM="${TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM:-}"
 NGINX_TLS_ENABLED="${TEST_AGENT_NGINX_TLS_ENABLED:-false}"
@@ -289,6 +290,25 @@ if [[ "${NGINX_MODE}" == "multi" && "${#backend_directives[@]}" -lt 2 ]]; then
   exit 1
 fi
 
+# 工作流API可以独立扩容；留空时生成显式503，绝不回落到Java或SPA。
+workflow_directives=()
+if [[ -n "$(trim "${NGINX_WORKFLOW_UPSTREAM}")" ]]; then
+  IFS=',' read -r -a raw_workflow_endpoints <<<"${NGINX_WORKFLOW_UPSTREAM}"
+  for raw_workflow_endpoint in "${raw_workflow_endpoints[@]}"; do
+    workflow_endpoint="$(trim "${raw_workflow_endpoint}")"
+    [[ "${workflow_endpoint}" =~ ^([A-Za-z0-9.-]+):([0-9]{1,5})$ ]] || {
+      echo "Invalid Python workflow endpoint: ${workflow_endpoint}" >&2
+      exit 1
+    }
+    workflow_port="${BASH_REMATCH[2]}"
+    (( workflow_port >= 1 && workflow_port <= 65535 )) || {
+      echo "Invalid Python workflow port: ${workflow_endpoint}" >&2
+      exit 1
+    }
+    workflow_directives+=("server ${workflow_endpoint} max_fails=2 fail_timeout=10s;")
+  done
+fi
+
 IFS=',' read -r -a raw_xxl_job_admins <<<"${NGINX_XXL_JOB_ADMINS}"
 xxl_job_admin_directives=()
 for raw_admin in "${raw_xxl_job_admins[@]}"; do
@@ -378,6 +398,8 @@ server_upstreams_token='${TEST_AGENT_SERVER_UPSTREAMS}'
 server_route_map_token='${TEST_AGENT_SERVER_ROUTE_MAP}'
 toolbox_it_tools_token='${TEST_AGENT_TOOLBOX_IT_TOOLS_SERVERS}'
 toolbox_omni_tools_token='${TEST_AGENT_TOOLBOX_OMNI_TOOLS_SERVERS}'
+workflow_upstream_token='${TEST_AGENT_WORKFLOW_UPSTREAM_BLOCK}'
+workflow_location_token='${TEST_AGENT_WORKFLOW_LOCATION}'
 listen_directive="listen ${NGINX_LISTEN_PORT};"
 additional_listen_directives=()
 tls_directives=""
@@ -395,6 +417,41 @@ if [[ -n "${NGINX_ADDITIONAL_LISTEN_PORTS}" ]]; then
   done
 fi
 while IFS= read -r line || [[ -n "${line}" ]]; do
+  if [[ "${line}" == *"${workflow_upstream_token}"* ]]; then
+    indent="${line%%"${workflow_upstream_token}"*}"
+    if (( ${#workflow_directives[@]} > 0 )); then
+      printf '%supstream test_agent_workflow_python {\n' "${indent}" >>"${rendered}"
+      printf '%s    least_conn;\n' "${indent}" >>"${rendered}"
+      for directive in "${workflow_directives[@]}"; do
+        printf '%s    %s\n' "${indent}" "${directive}" >>"${rendered}"
+      done
+      printf '%s    keepalive 16;\n' "${indent}" >>"${rendered}"
+      printf '%s}\n' "${indent}" >>"${rendered}"
+    fi
+    continue
+  fi
+  if [[ "${line}" == *"${workflow_location_token}"* ]]; then
+    indent="${line%%"${workflow_location_token}"*}"
+    printf '%slocation ^~ /workflow-api/ {\n' "${indent}" >>"${rendered}"
+    if (( ${#workflow_directives[@]} == 0 )); then
+      printf '%s    return 503;\n' "${indent}" >>"${rendered}"
+    else
+      printf '%s    proxy_pass http://test_agent_workflow_python;\n' "${indent}" >>"${rendered}"
+      printf '%s    proxy_http_version 1.1;\n' "${indent}" >>"${rendered}"
+      printf '%s    proxy_set_header Host $host;\n' "${indent}" >>"${rendered}"
+      printf '%s    proxy_set_header X-Real-IP $remote_addr;\n' "${indent}" >>"${rendered}"
+      printf '%s    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n' "${indent}" >>"${rendered}"
+      printf '%s    proxy_set_header X-Forwarded-Proto $scheme;\n' "${indent}" >>"${rendered}"
+      printf '%s    proxy_set_header Connection "";\n' "${indent}" >>"${rendered}"
+      printf '%s    proxy_read_timeout 3600s;\n' "${indent}" >>"${rendered}"
+      printf '%s    proxy_send_timeout 3600s;\n' "${indent}" >>"${rendered}"
+      printf '%s    proxy_buffering off;\n' "${indent}" >>"${rendered}"
+      printf '%s    proxy_cache off;\n' "${indent}" >>"${rendered}"
+      printf '%s    add_header X-Accel-Buffering no always;\n' "${indent}" >>"${rendered}"
+    fi
+    printf '%s}\n' "${indent}" >>"${rendered}"
+    continue
+  fi
   if [[ "${line}" == *"${toolbox_it_tools_token}"* ]]; then
     indent="${line%%"${toolbox_it_tools_token}"*}"
     for directive in "${toolbox_it_tools_directives[@]}"; do
@@ -500,6 +557,7 @@ if [[ "${VALIDATE_ONLY}" -eq 1 ]]; then
   printf 'XXL-JOB Admin count: %s\n' "${#xxl_job_admin_directives[@]}"
   printf 'toolbox upstream counts: it-tools=%s omni-tools=%s\n' \
     "${#toolbox_it_tools_directives[@]}" "${#toolbox_omni_tools_directives[@]}"
+  printf 'Python workflow upstream count: %s\n' "${#workflow_directives[@]}"
   printf 'tls enabled: %s\n' "${NGINX_TLS_ENABLED}"
   exit 0
 fi

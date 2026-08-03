@@ -10,7 +10,7 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 
 - 定时异步执行交互由 `AgentWorkbench` 与 `FigmaChatPanel` 组合：输入框发送按钮左侧提供定时图标，普通用户点击后加载北京时间 21:00 至次日 07:00 的 15 分钟容量时段并默认选中后端推荐值；超级管理员还可切换“测试时间”，使用 1/3/5 分钟快捷值或显式按 `Asia/Shanghai` 解析的 `datetime-local` 选择未来 24 小时内的完整分钟。创建面板每次打开仍默认夜间模式，提交前按当前时间重新校验；自定义改期保持原模式，角色移除后隐藏调整入口但保留取消。新对话草稿成功提交后才清空输入。主对话始终展示当前会话内容；“会话列表”以 Teleport 非模态抽屉覆盖对话栏左侧编辑区，内部提供“会话 / 待执行任务”页签，选择会话或任务后保持打开，当前会话高亮，再次点击“会话列表”、关闭按钮、Esc 或收起右栏时关闭。待执行页逐页收齐全部待执行项，并展示内容、时间、创建时间和状态，自定义任务显示“测试定时”和单个精确时间，旧响应缺少模式时按夜间范围展示。当前 Session 存在 `SCHEDULED/DISPATCHING` 任务时禁用普通发送但保留“新建对话”。切换到待执行页签时立即查询，页面另按每 30 秒及窗口重新聚焦刷新；夜间容量冲突会重取最新时段。成功投递后复用现有 Session/Run/RunEvent 展示，并以来源标签和北京时间实际启动时间区分。
 
-- 提供 `/985211` 登录页、`/` 工作台页面和 `/s/[sessionId]` 只读 transcript 页面（vue-router 客户端路由），未知路径回退到工作台。
+- 提供 `/985211` 登录页、`/` 工作台、`/toolbox` 离线工具箱、`/lobehub/launch` 通用问答交接、`/workflow-chat` 独立长程任务对话和 `/s/[sessionId]` 只读 transcript 页面（vue-router 客户端路由），未知路径进入 404 页面。工作流入口对所有登录用户可见，新建空对话直接展示结构化仓库/分支输入卡；页面懒加载 `workflow-chat` 与 TDesign 样式，并通过 `workflow-api-client` 直连同源 Python。
 - 组合 dockview-vue 三栏布局和底部运行面板。
 - 组合 36px 顶栏、48px activity rail、紧凑左侧文件面板、中间编辑器和右侧 Agent 面板；顶栏与三栏之间的 8px 间隔复用现有弹框常见的浅雾蓝画布，活动栏融入画布，三栏分别使用纯白底、8px 圆角、发丝边框与轻阴影形成独立悬浮面板。三栏顶部、工作区/Agent 目录加载态和中间无文件预览态同样保持纯白，当前文件标签以 2px 工行红上沿标识。外围 Logo 直接使用用户确认的初版耳机/拱形品牌图形 PNG，保留原图轮廓和比例，图形使用低饱和暗红实色 #7f1e2b，中文品牌字标使用黑色，英文副标题使用深红以呼应图形；导航和选中态继续使用纯白/浅雾蓝/工行红 `--ta-shell-*` token，中间编辑器和右侧对话内部保持原样；Run/Terminal 默认隐藏在底部抽屉中，通过 activity rail 打开。
 - 顶栏非品牌文字默认保持纯黑；Logo 直接使用用户确认的初版耳机/拱形品牌图形 PNG，保留原图轮廓和比例，图形使用低饱和暗红实色 #7f1e2b，中文品牌字标使用黑色，英文副标题使用深红以呼应图形，并按“36px 首行 + 8px 面板间隔”的 44px 视觉带上下居中：Logo 左对齐；应用、工作空间、版本三个白底细框按钮放在 Logo 末端与右侧工具组起点之间的网格列正中，使左右留白相等；书本手册、透明底细框运行态摘要和单字头像依次固定在右侧。手册默认透明无框，弹框打开期间保持与活动栏一致的柔红底、深红图标和工行红定位标记；单字用户名使用 12px。顶部工作空间/版本复用 `appTemplatesWithVersions` 及既有 `handleLoadVersions` / `handleSelectVersion`，左下角入口继续保留；顶部选定工作空间后，单版本直接默认该项，多版本复用后端 `version desc, updated_at desc` 结果的首项，不改变对话逻辑。
@@ -143,19 +143,35 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 - 卡片使用原生新标签链接打开 `/toolbox/apps/it-tools/<route>` 或 `/toolbox/apps/omni-tools/<route>`，普通点击、键盘激活和中键均生成一次 `eventId` 后异步上报；失败不得 `preventDefault`、弹窗或回退到套件首页，成功则更新本地累计和热门排序。
 - 进入沉浸式工具盒子前保存左、右和底部面板可见性，离开时按快照精确恢复；工具盒子激活期间运行态事件和 SSE 导航不得把页面劫持回编辑器。
 - Vite 开发服务器默认把两个工具前缀代理到 `http://127.0.0.1:18120/18121`，可分别用 `TEST_AGENT_TOOLBOX_IT_TOOLS_URL`、`TEST_AGENT_TOOLBOX_OMNI_TOOLS_URL` 覆盖；代理剥离公开前缀，精确套件根路径返回 `308 /toolbox`，生产仍使用前端 Nginx。
+- Vite开发服务器把`/workflow-api/**`直接代理到独立Python，默认目标为`http://127.0.0.1:8090`，可用`TEST_AGENT_WORKFLOW_API_URL`覆盖；Python未启动时页面显示稳定的服务不可用诊断，不能让SPA `index.html`落入JSON解析链。该代理只用于开发，生产仍由Nginx直达Python且不经过Java。
 
 `tests/toolbox-panel.test.ts` 覆盖 14 个标签常驻、数量联动、分类过滤不改变计数、零数量状态、隐藏标题、搜索/筛选、热门与零点击空态、原生新标签属性、普通/中键上报和失败不阻断；`tests/toolbox-navigation.test.ts` 与 `tests/login-redirect.test.ts` 覆盖沉浸式布局状态机和 `/toolbox` 登录回跳，`tests/toolbox-dev-proxy.test.ts` 锁定本地代理目标、路径改写与根路径守卫，`tests/workbench.spec.ts` 真实桌面 Chromium 场景覆盖普通用户入口、左右面板恢复、前进/后退和深链接刷新。
 
 - 系统管理的公共配置 rollout 卡片在状态为 `DRAINING` 时向 `SUPER_ADMIN` 提供“强制终止并替换发布”：弹窗重新读取远端修正分支，要求最多 500 字的非空原因，并二次确认将跳过剩余目标的会话空闲等待；共享运行副本 dirty 时沿用现有恢复确认。页面只提交精确旧 rolloutId 并轮询后端新批次，强停目标由后端按进程身份派生，前端不选择用户、不传 PID，也不直接调用运行管理 stop API。
 
+### LobeHub 通用问答
+
+- activity rail 的入口对已登录用户可见；`launchLobehubInNewTab` 必须在 click 同步阶段先打开空白标签，避免
+  异步签票被浏览器拦截；签票后在该空白标签自身创建临时表单并用 `_self` 提交，避免切断 `opener` 后再依赖
+  命名窗口查找。失败时关闭该标签。
+- `submitLobehubTicket` 只接受 HTTP(S)、无 userinfo/query/fragment 且 path 精确为
+  `/api/auth/platform/consume` 的后端 `consumeUrl`，随后用临时隐藏表单 POST `ticket` 并立即清理 DOM。
+- `/lobehub/launch` 是聊天域名会话失效时唯一回跳入口；登录 guard 会保存这一固定路径，认证完成后在当前标签
+  换票。页面不读取 return URL，也不检查或同步 LobeHub Session。
+- `tests/lobehub-launch.test.ts` 覆盖同步开窗、弹窗自身隐藏 POST、固定 consume path、无 URL/存储泄漏和失败清理；
+  `tests/login-redirect.test.ts` 覆盖未登录 launch 的认证恢复。
+
 ## 禁止事项
 
 - 不直接拼接后端 URL。
 - 不直连 opencode server。
+- 工作流HTTP/AG-UI不得经 `backend-api`、`event-stream-client` 或Java转发。
 - 不把通用业务组件堆在 app 内，必须下沉到 packages。
 - `/s/[sessionId]` 只能读取平台 session transcript，不得接 opencode 公网 share API。
 
 ## 验证
+
+`packages/workflow-api-client/tests/client.test.ts` 覆盖同源请求、Authorization、Python错误、HTML fallback/纯文本网关错误收敛与带 `Last-Event-ID` 的fetch SSE；`tests/workflow-dev-proxy.test.ts`锁定开发态`/workflow-api/**`直达Python；`packages/workflow-chat/tests` 覆盖AG-UI快照/重放、输入卡、报告版本和局部重分析；`tests/login-redirect.test.ts` 覆盖 `/workflow-chat` 登录保护。
 
 `tests/xxl-job-management-panel.test.ts` 覆盖隐藏表单 POST/URL 无票据、刷新重签、403/503、票据或平台会话失效、登出清空 iframe，以及横向 shell 装饰幂等、只读账号、错误页跳过和菜单滚动；`tests/scheduler-management-panel.test.ts` 覆盖系统管理导航及公共配置卡死 rollout 的分支/原因/二次确认/纠错请求回归。
 

@@ -87,7 +87,7 @@ Token 校验流程：
 
 必须脱敏或禁止记录：
 
-- Authorization、Cookie、API key、用户 Token、内部模型 `token/authToken/tokenValue`、`contextToken`、XXL SSO ticket 和 platform session digest。
+- Authorization、Cookie、API key、用户 Token、内部模型 `token/authToken/tokenValue`、`contextToken`、XXL SSO ticket、Workflow checkout ticket/model grant/加密私钥信封和 platform session digest；一次性凭据作为 URL path 参数时只记录固定路由形状。
 - 用户输入中的敏感内容。
 - 文件路径中的隐私片段。
 - 过大的请求体和响应体。
@@ -204,6 +204,106 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 - Tool 请求只允许必填的被测系统环境文本、一行四列案例和调用上下文派生的幂等键；环境只能来自用户输入或父 Agent 从用户明确指定路径读取后的原文，缺失时失败关闭。只传已读取内容，不向 UI 子 agent 或独立 UI 平台传物理路径；调用方不得指定 UI 平台地址、浏览器参数或批量任务；一轮 Tool 执行最多发送一个创建请求。
 - “测试步骤”是唯一操作流程，“测试数据”和“预期结果”只作为输入与验证上下文。外部响应堆栈不得透传，状态查询不回显原始案例内容。
 - 执行报告使用 executionId 绑定路径，禁止接受任意 report path；报告接口与执行接口使用相同的受信任网络边界。
+
+## LobeHub 登录交接与模型委托安全边界
+
+- LobeHub 不读取平台页面的 `sessionStorage`。平台前端只能用现有 Bearer Token 申请一次性票据，再以隐藏表单
+  POST 到配置生成的固定聊天地址；票据禁止进入 URL、router、Web Storage、剪贴板、错误详情和日志。
+- 票据和模型委托均为至少 32 字节随机 opaque 值，Redis 只保存 SHA-256 摘要。票据默认 60 秒、一次性原子
+  消费；模型委托绑定用户、`lobehub` client 和 `model-gateway` scope，最长 30 天且重新兑换时原子轮换。
+- 安全时限只能收紧，不能通过部署配置放宽：ticket 必须为 `(0,60s]`、grant 为 `(0,30d]`、HMAC 时钟偏差为
+  `(0,60s]`，nonce 摘要必须至少保留 120 秒。无效配置在 Spring 绑定阶段失败，不能静默回退到不安全值。
+- 兑换与撤销必须对 timestamp、nonce、HTTP method、精确 path 和原始 body digest 的五行 canonical string 做
+  HMAC-SHA256。共享密钥至少 32 字节；平台限制默认 ±60 秒时钟偏差并原子占用 nonce，比较签名时使用常量时间。
+  不得先解析并重新序列化 JSON 后再验签。
+- API 日志只把票据交换原始 bytes 记为长度占位；字段脱敏必须覆盖 `ticket`、`modelGrant`、Authorization、
+  Cookie、password、secret 和 token。上游模型错误不得回显 URL、响应正文、密钥、prompt、回答、UCID 或堆栈。
+- 模型委托只允许 LobeHub 服务端用外部密钥加密持久化，浏览器、Desktop、CLI 和设备 broker 不得获得。
+  网关每次调用重新检查平台用户状态，并覆盖客户端 Authorization、供应商选择、UCID 和 trace header。
+- 企业 Desktop/CLI 只能使用 fork 的浏览器确认协议，禁止 OIDC discovery/JWKS、Device Code Flow、JWT、API Key、
+  refresh token 和自定义 Server URL。request、poll secret、授权码和客户端 Session 都必须使用独立 32 字节随机值，
+  Redis 只保存摘要；浏览器 pending request 必须绑定 HttpOnly/SameSite=Lax cookie 和 CSRF，页面与客户端同时显示
+  同一验证码并要求显式确认。授权码必须在 PKCE 校验前原子消费，客户端 Session 最长 24 小时且每次请求复查用户状态。
+  企业离线 `/oidc/*` 拒绝必须先于 Session 查询和未登录跳转，确保匿名旧客户端也得到 `403`，不得跳回平台登录。
+- Desktop opaque Session 只进入操作系统 safeStorage，CLI 只进入 mode `0600` 的自身凭据文件；请求只使用标准
+  `Authorization: Bearer`。无效 Bearer 不得回退浏览器 Cookie，显式退出必须撤销服务端 Session 和模型委托，并在
+  远端失败时仍清除本机凭据。
+- LobeHub Redis 使用独立 ACL 用户，key 与 pub/sub channel 均限制为 `lobehub:app:*`，并拒绝管理命令和平台
+  前缀；`REDIS_PREFIX` 配置为不带尾冒号的 `lobehub:app`，由上游 Redis wrapper 追加唯一分隔冒号。客户端认证
+  仅允许仓库内固定 Lua 状态机所需的 `EVAL`，ACL key pattern 不得因此放宽。Agent Runtime 的直接 ioredis
+  连接也必须设置同一 `keyPrefix`，枚举只允许游标 `SCAN`，不得使用 `KEYS`。现场 ACL 从 `-@all` 开始按固定
+  命令白名单授权，并验证 Lua 跨前缀、前缀外 channel、`CONFIG/ACL/MODULE/FLUSH*/KEYS/SCRIPT FLUSH` 均被拒绝。
+  平台 SSO key 固定在
+  `test-agent:lobehub-sso:*`。RustFS bucket 必须私有，初始化任务必须显式撤销匿名访问。
+- LobeHub app 默认只绑定 `127.0.0.1:3210`。跨机反向代理时只允许绑定获批的具体内网 IPv4，拒绝 wildcard，
+  并用主机防火墙把 3210 来源限制为代理主机；RustFS、ParadeDB 和 Redis 不得随之暴露。
+- `/data/testagent/config/lobehub.env` 必须是 root 控制的非符号链接 mode `0600` 文件，拒绝重复键和非法 dotenv。
+  启动脚本必须按容器生成临时最小 env：数据库和对象存储容器不得获得 HMAC、Session、模型委托或彼此密钥；
+  临时文件退出即删，secret 不放入 Docker 命令行。
+- LobeHub 现场预检必须交叉校验连接目标：数据库 URL 与库用户、Redis URL 与 ACL 用户/DB 0、S3/MC 与私有
+  bucket、内部 app URL 与容器名保持一致，平台 launch/兑换/撤销/模型网关必须同源；只验证单个 URL 格式不算
+  通过。URL credential 必须编码，不能让未编码分隔符改变 authority、path 或 query。
+- LobeHub 冷备份必须在 app、RustFS 和 ParadeDB 全部停止后创建，归档及校验和使用 mode `0600` 并置于
+  `/data/testagent` 外的受控加密介质。恢复必须要求显式确认、先校验摘要和归档白名单路径，并保留被替换数据供
+  回滚；工具不得自动停服务或用整目录删除代替精确目标替换。
+- `LOBEHUB_ENABLED=true` 不是绕过配置校验的开关：固定聊天 origin、虚拟邮箱域和唯一 owner 必须同时脱离
+  migration 占位值，平台才允许落票据。现场 `validate-config` 还必须核对 digest 镜像、secret 长度、离线开关、
+  Cookie/Session 契约和执行能力门禁，任一不满足都禁止 migration 或启动 app。
+- 本地在线模式自动申请 Marketplace M2M 会话时，`clientSecret` 只能通过 POST body 发送；禁止使用 query
+  procedure，避免凭据进入 URL、Next.js 访问日志、反向代理历史或浏览器历史。
+- 完全离线部署必须在 UI 和服务端同时关闭公网搜索、SaaS Connector、BYOK、自定义 Base URL、遥测、在线更新、
+  Marketplace、CDN 与运行期下载。离线可选 Agent 只能来自锁定 fork 中经过来源、许可证、官方/验证状态、
+  自包含依赖和本地头像 SHA-256 校验的 Community 快照；安装不得产生 Marketplace 写请求。`v2.2.11-platform.7`
+  对 Windows/Linux 都强制
+  `LOBEHUB_DEVICE_EXECUTION_MODE=disabled`，不存在通过旧变量放开的路径；后续 Linux 执行版本仍须在目标主机
+  通过真实边界验收并 fail closed，且提供 root 所有、mode `0600`、绑定当前发行版/内核的通过证据。
+- 企业客户端必须从锁定 fork commit 的源码工具包在原生 Windows x64 / Linux x86_64 构建，仿真或交叉构建
+  不能作为正式结果。Windows 证据必须由 `signtool` 和 `Get-AuthenticodeSignature=Valid` 产生，并绑定签名身份、
+  客户端 SHA、版本、commit、架构和执行禁用状态；Linux 构建人与审批人必须分离，原生构建证据必须绑定
+  构建身份、客户端、版本、commit、OS/内核和执行禁用状态，最终审批证据必须绑定客户端、构建证据和独立验收
+  记录 SHA。验收记录关联审批人、变更单及登录、无公网依赖、下载阻断、数据隔离和执行禁用结果。构件
+  汇集、Mac 打包和现场安装必须复用同一校验器，任一占位值、摘要或身份不一致都失败关闭。
+- LobeHub server-only 介质只能由无网络定稿工具补入已签名/已审批客户端；工具必须先校验原目录的完整
+  `SHA256SUMS`、版本和镜像身份，不修改原目录，并在共享客户端门禁全部通过后才写入两个成功状态和新清单。
+  `--force` 只能替换经校验的精确输出，输出不得等于或包含任何客户端、证据、版本锁、部署脚本、平台仓库或
+  server-only 输入。输出父目录必须预先存在；相邻锁、复制前后摘要与 inode 复核必须拒绝输入变化和并发目标
+  替换，且不得删除并发方创建的目录。
+  LobeHub fork 转运只能从干净、锁定的 `main` 与 annotated 内部 tag 生成自包含 Git Bundle，只发布这两个 ref，
+  并执行独立 clone、内外两层 SHA-256 校验；生成器必须扫描 fork 增量全部可达 blob/commit/tag 和当前 tag，
+  命中高置信私钥/token 格式时失败关闭。转运包不携带 Git 配置、企业 Git URL 或 credential helper 数据；历史
+  扫描不能替代企业 Git 持续 secret scanning。企业管理员推送后必须只读复核远端 branch/tag commit。
+- 企业离线版必须在代理与工作流 router 两层拒绝 `/api/workflows/*`，不得配置 QStash。定时任务只允许单一 app
+  实例使用至少 32 字节的独立 `ENTERPRISE_INTERNAL_SCHEDULER_SECRET` 调用 loopback 内部入口，并强制
+  `AGENT_RUNTIME_MODE=local`；该密钥不得进入浏览器、日志或进程命令行，queue 模式必须失败关闭。
+- 当前企业现场纯 HTTP 会使表单票据、Session Cookie 和服务端委托暴露于同网段窃听与劫持风险。网络隔离、
+  短票据、HMAC、nonce、短 Session 和 scope 只能缓解，不能替代 TLS；该剩余风险必须进入上线审批。
+
+稳定交接契约、客户端证据和部署门禁见 `docs/architecture/lobehub-integration.md`、
+`docs/deployment/lobehub-client-build.md` 与 `docs/deployment/lobehub-offline.md`。
+
+## 独立长程任务安全边界
+
+- 浏览器只把现有平台 Bearer 经同源 HTTPS 发给 Python。Python 不签发第二套 Cookie，不调用 Java 验证普通请求；每次 HTTP 请求必须精确 `GET test-agent:token:<完整token>` 和 `PTTL`，同时校验 Redis TTL、`AuthPrincipal.expiresAt`、原 Token 恒等、userId、统一认证号与角色。认证结果不得缓存。
+- Python Redis ACL 账号只能 `PING/GET/PTTL` 且 key pattern 仅为 `test-agent:token:*`；必须显式拒绝 `SCAN`、`KEYS`、写命令、pub/sub 和其他前缀。AG-UI 建连时执行相同校验并每30秒复核，Token 删除、过期或平台登出后立即断流。
+- Java共享能力请求只携带 userId、平台 Token SHA-256 session digest、timestamp、nonce、body digest 和 HMAC-SHA256；固定 client ID 为 `workflow`，密钥至少32字节。Java在签名通过后原子占用 nonce，并实时复核 session marker、用户状态、角色、应用成员、仓库类型/关联/启用状态。原始 Bearer不得在服务间传输。
+- Workflow 到 Java、Worker 到 Runner、Runner 到 Java 的固定内部 HTTP 客户端必须禁用环境代理继承；受签名请求只能按部署配置的内部地址直接发送，不能被宿主机 HTTP(S)/SOCKS 代理或 PAC 路由到第三方。
+- checkout ticket 必须一次性、短期并绑定 user/session/repository/task/run/runner/Runner公钥/目标分支/基线分支。Java只在 Runner兑换时解密个人SSH Key，再以目标Runner公钥封装；Python不可看到明文或密文私钥。Runner只在tmpfs解密，Git完成后立即删除，并强制使用非空普通文件 `known_hosts`。
+- model grant 绑定 user/task/run/client/analyzer，网关覆盖供应商Authorization并隐藏真实Token。刷新必须重新检查当前session与用户；取消先原子写 run 级撤销墓碑，再撤销现存grant，后续并发签发/续期必须失败关闭。
+- 代码分析模型必须使用部署侧配置的模型网关公开ID。Codex配置固定`model_provider`与`responses`接口，OpenCode配置只启用唯一自定义provider并显式传入`--model`；工具默认provider、项目级OpenCode配置、自动更新和公网端点均不得参与选择。分析工具只配置容器内回环relay地址和一次性本地token，禁止直接配置平台grant或平台模型网关。
+- 平台grant只能经Runner控制的`docker exec -i` stdin进入容器内独立非root UID `10002`的relay，不得进入UID `10001`分析进程、挂载文件、环境、命令行、工具配置或日志。relay只绑定`127.0.0.1`，仅接受`models/chat/completions/responses`固定端点和本地token，覆盖Authorization后转发到Runner已复核的固定IPv4/base path；Runner关闭stdin、分析结束或取消时必须退出。Codex shell环境只能继承PATH/HOME；OpenCode必须默认拒绝外部目录、编辑、Web及未使用工具，并经镜像内`env -i`白名单shell。只清理子进程环境、但仍让智能体同UID父进程持有平台grant，不算隔离完成。
+- 同任务的多智能体请求必须在Runner按任务串行；每次智能体退出（成功或失败）后关闭relay并重启同一容器、再次复核运行状态、冻结镜像/挂载/网络/资源和用户/只读根/capabilities/no-new-privileges约束，确保模型启动的后台后代不能跨智能体或跨追问存活。不得用进程名匹配或同UID信号扫描替代容器级重启。
+- 重启或约束复核失败后必须强制删除精确容器；删除失败不能被忽略，Runner 本地状态必须立即转为到期的 `CLEANUP_FAILED`。Worker 随后的失败保留被拒绝时，独立 PostgreSQL 中的工作区租约也必须转为 `CLEANUP_FAILED` 并发布 durable 工作区事件，使两侧清理循环均可重试；不得遗留可恢复的 `ACTIVE` 状态。
+- 输出根必须禁止分析 UID 列举、创建或改名直接子项；只在执行当前智能体时开放其固定目录，其他注册智能体目录保持 `000`。共享只读源码不代表输出可以互读，复核综合只能消费 Runner 校验后的结构化结果。
+- Runner 在创建任务目录前必须独立验证 `analyzerIds` 非空、不重复且属于本地注册表；即使请求已通过 Worker HMAC，也不得把未经白名单验证的智能体 ID 拼入宿主路径或容器路径。
+- 只有独立 Runner可管理Docker；workflow API/Worker和分析容器都不得挂Docker Socket。任务容器必须非root、`cap-drop=ALL`、`no-new-privileges`、只读根、独立tmpfs及CPU/内存/PID/文件句柄限制，源码只读，每个analyzer独立HOME/缓存/输出。不得因Docker 18.09兼容问题降级为root或`--privileged`。
+- 分析容器的可写输出是不可信输入。Runner读写请求、本地relay token和结果必须以可信目录fd配合 `O_NOFOLLOW` 操作并只接受有界普通文件；幂等缓存、状态和其他控制数据必须放在未挂载进任务容器的私有目录，禁止跟随分析进程构造的符号链接。
+- 容器恢复只允许从 `STOPPED_RETAINED` 进入。创建后、每次模型执行前、每次智能体结束重启后、恢复后和运行清理助手前必须重新验证容器处于运行态，以及冻结镜像 digest、精确源码/输出 bind、受限网络、CPU/内存/PID/nofile/tmpfs、非root、只读根、capabilities和`no-new-privileges`；验证失败必须停止或删除精确容器。取消和到期清理必须先把Runner私有状态改为非活动，使已排队请求在取得分析锁后重新校验并失败；通过成功的精确容器列表查询确认存在性并停止当前分析，等待执行锁释放后再次停止，之后才能放宽输出目录权限。再用镜像内固定助手以分析UID恢复其私有目录权限，最后执行不忽略错误的整树删除；Docker控制面错误、任何遍历、owner或删除残留都必须失败并保留 `CLEANUP_FAILED` 供重试。
+- Worker 租约也是共享副作用的 fencing 边界。部署 Worker ID 只能作为逻辑前缀，每个进程必须生成独立且不超过数据库长度的随机 owner token，进程重启不得复用旧租约身份。状态收敛、事件发布和容器停止前必须续租；运行终态还必须以单条数据库条件更新同时校验 owner token、租约期限、`RUNNING` 与未取消状态，禁止先读后写覆盖并发取消。旧 Worker 丢失租约后只能精确撤销自己的模型 grant，不得修改 run 或共享工作区。失败保留被拒绝时，Worker 必须在失败终态前持久化带立即到期时间的 `CLEANUP_FAILED`；短暂重试仍失败时不得吞错并终态化，而应保持 `RUNNING`、停止心跳并由租约接管再次执行幂等收敛，防止 `ACTIVE + expiresAt=NULL` 永久逃逸清理队列。
+- 分析任务网络必须通过 `DOCKER-USER` 第一条跳转仅放行固定数字IPv4/CIDR模型网关和端口，拒绝其他出站及Runner管理面。Runner每次准备任务都复核私有bridge、subnet、labels和防火墙；已有任务容器时禁止重写规则。
+- `Authorization`、完整Token Redis键、AuthPrincipal原文、session digest、HMAC、nonce、checkout ticket、grant、SSH内容、远端credential、原始工具日志和下游异常正文不得进入访问日志、trace、错误详情、审计正文或Markdown报告。报告只保存结构化代码证据和安全摘要。
+- 主动取消必须撤销模型grant并删除工作区；取消对既有 `CANCELED` 幂等，但不得把其他终态改写为取消。Runner 删除失败必须立即写入带到期时间的 `CLEANUP_FAILED`，使 PostgreSQL 清理循环能够持久重试，不能遗留无到期时间的 `ACTIVE` 工作区。保留工作区在最后活动48小时后由PostgreSQL驱动的清理任务删除容器、源码、输出和工具原始日志。清理失败不得伪装为已过期。
+
+完整部署、ACL和验收门禁见 `docs/deployment/workflow-offline.md`。
 
 ## 安全变更文档
 

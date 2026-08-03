@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck source=archive-common.sh
 source "${SCRIPT_DIR}/archive-common.sh"
+LOBEHUB_CLIENT_CONTRACT_FILE="${SCRIPT_DIR}/lobehub-client-artifact-contract.sh"
 
 ENV_FILE="${SCRIPT_DIR}/.env"
 if [[ ! -f "${ENV_FILE}" ]]; then
@@ -18,8 +19,10 @@ PACKAGE_BACKEND=1
 PACKAGE_FRONTEND=1
 PACKAGE_OPENCODE_WORKER=1
 PACKAGE_PYTHON_LIBS=0
+PACKAGE_WORKFLOW=1
 PACKAGE_TOOLBOX=1
 PACKAGE_MYSQL_IMAGE=0
+PACKAGE_LOBEHUB=0
 SAVE_TARBALL=1
 PACKAGE_ZIP=1
 PACKAGE_ZIP_ONLY=0
@@ -40,6 +43,7 @@ Build enterprise internal delivery artifacts:
   - frontend dist files and tar.gz
   - opencode-worker image and docker-loadable tar
   - optional independent Python third-party library bundle
+  - Python workflow-service, Runner and analysis-task linux/amd64 image bundle with SBOMs
   - pinned IT-Tools and OmniTools images, checksums and complete modified source
   - repository session logs under .agents/
 
@@ -56,8 +60,11 @@ Options:
   --frontend-only         Package only the frontend dist.
   --opencode-only         Package only the opencode worker image.
   --python-libs-only      Package only the independent Python third-party library bundle.
+  --workflow-only         Package only the Python workflow/Runner/analysis image set.
   --toolbox-only          Package only the two toolbox images and modified source.
   --mysql-only            Package only the standalone MySQL image.
+  --with-lobehub          Include the verified external LobeHub artifact set in a full release.
+  --lobehub-only          Package only the verified LobeHub offline artifact set and operations kit.
   --zip-only              Reassemble the release ZIP from current verified artifacts and component state.
   --include-all-components
                           Force worker runtime (Python/OpenCode Manager/Codex MCP) and toolbox into the ZIP.
@@ -93,8 +100,10 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
       PACKAGE_PYTHON_LIBS=0
+      PACKAGE_WORKFLOW=0
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
+      PACKAGE_LOBEHUB=0
       shift
       ;;
     --frontend-only)
@@ -103,8 +112,10 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_FRONTEND=1
       PACKAGE_OPENCODE_WORKER=0
       PACKAGE_PYTHON_LIBS=0
+      PACKAGE_WORKFLOW=0
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
+      PACKAGE_LOBEHUB=0
       shift
       ;;
     --opencode-only)
@@ -113,8 +124,10 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=1
       PACKAGE_PYTHON_LIBS=0
+      PACKAGE_WORKFLOW=0
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
+      PACKAGE_LOBEHUB=0
       shift
       ;;
     --python-libs-only)
@@ -123,8 +136,22 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
       PACKAGE_PYTHON_LIBS=1
+      PACKAGE_WORKFLOW=0
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
+      PACKAGE_LOBEHUB=0
+      shift
+      ;;
+    --workflow-only)
+      PACKAGE_MODE=workflow-only
+      PACKAGE_BACKEND=0
+      PACKAGE_FRONTEND=0
+      PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_PYTHON_LIBS=0
+      PACKAGE_WORKFLOW=1
+      PACKAGE_TOOLBOX=0
+      PACKAGE_MYSQL_IMAGE=0
+      PACKAGE_LOBEHUB=0
       shift
       ;;
     --toolbox-only)
@@ -133,8 +160,10 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
       PACKAGE_PYTHON_LIBS=0
+      PACKAGE_WORKFLOW=0
       PACKAGE_TOOLBOX=1
       PACKAGE_MYSQL_IMAGE=0
+      PACKAGE_LOBEHUB=0
       shift
       ;;
     --mysql-only)
@@ -143,8 +172,26 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
       PACKAGE_PYTHON_LIBS=0
+      PACKAGE_WORKFLOW=0
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=1
+      PACKAGE_LOBEHUB=0
+      shift
+      ;;
+    --with-lobehub)
+      PACKAGE_LOBEHUB=1
+      shift
+      ;;
+    --lobehub-only)
+      PACKAGE_MODE=lobehub-only
+      PACKAGE_BACKEND=0
+      PACKAGE_FRONTEND=0
+      PACKAGE_OPENCODE_WORKER=0
+      PACKAGE_PYTHON_LIBS=0
+      PACKAGE_WORKFLOW=0
+      PACKAGE_TOOLBOX=0
+      PACKAGE_MYSQL_IMAGE=0
+      PACKAGE_LOBEHUB=1
       shift
       ;;
     --zip-only)
@@ -153,6 +200,7 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_FRONTEND=0
       PACKAGE_OPENCODE_WORKER=0
       PACKAGE_PYTHON_LIBS=0
+      PACKAGE_WORKFLOW=0
       PACKAGE_TOOLBOX=0
       PACKAGE_MYSQL_IMAGE=0
       PACKAGE_ZIP_ONLY=1
@@ -230,6 +278,24 @@ require_digest_pinned_image() {
   # 工具镜像必须可复现；允许切换受控 registry 前缀，但禁止退化为可漂移的纯 tag。
   if [[ ! "${image_reference}" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]]; then
     echo "${variable_name} must be an image reference pinned by a lowercase sha256 digest: ${image_reference}" >&2
+    exit 1
+  fi
+}
+
+require_lobehub_loadable_image() {
+  local variable_name="$1" image_reference="$2" image_id="$3" leaf tag
+  leaf="${image_reference##*/}"
+  tag="${leaf#*:}"
+  # docker save/load 不恢复 Registry RepoDigest 映射，因此离线介质使用不可变 tag，
+  # 再以 Docker image ID 和镜像 tar 的 SHA256SUMS 双重校验内容。
+  if [[ ! "${image_reference}" =~ ^[A-Za-z0-9._:/-]+$ \
+      || "${image_reference}" == *@* || "${leaf}" != *:* \
+      || -z "${tag}" || "${tag}" == latest ]]; then
+    echo "${variable_name} must use an immutable non-latest image tag: ${image_reference}" >&2
+    exit 1
+  fi
+  if [[ ! "${image_id}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    echo "${variable_name}_ID must be a lowercase Docker image ID: ${image_id}" >&2
     exit 1
   fi
 }
@@ -644,6 +710,56 @@ build_opencode_worker_image() {
   fi
 }
 
+package_workflow_images() {
+  local tools_id workflow_version build_env workflow_output archive
+  [[ "${PLATFORM}" == "linux/amd64" ]] || {
+    echo "Python workflow artifacts only support linux/amd64" >&2
+    exit 1
+  }
+  if ! docker image inspect "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" >/dev/null 2>&1; then
+    local worker_tar
+    worker_tar="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
+    [[ -f "${worker_tar}" ]] || {
+      echo "Workflow analysis image requires the verified OpenCode worker image or tar: ${worker_tar}" >&2
+      exit 1
+    }
+    docker load -i "${worker_tar}" >/dev/null
+  fi
+  tools_id="$(docker image inspect --format '{{.Id}}' "${TEST_AGENT_OPENCODE_WORKER_IMAGE}")"
+  workflow_version="${TEST_AGENT_WORKFLOW_RELEASE_VERSION:-$(TZ=Asia/Shanghai date '+V%Y%m%d.%H%M%S')}"
+  workflow_output="${OUTPUT_DIR}/workflow"
+  mkdir -p "${workflow_output}"
+  build_env="$(mktemp "${OUTPUT_DIR}/.workflow-build.XXXXXX")"
+  chmod 0600 "${build_env}"
+  {
+    printf 'TEST_AGENT_WORKFLOW_RELEASE_VERSION=%s\n' "${workflow_version}"
+    printf 'TEST_AGENT_WORKFLOW_PYTHON_IMAGE=%s\n' "${TEST_AGENT_WORKFLOW_PYTHON_IMAGE}"
+    printf 'TEST_AGENT_WORKFLOW_UV_IMAGE=%s\n' "${TEST_AGENT_WORKFLOW_UV_IMAGE}"
+    printf 'TEST_AGENT_WORKFLOW_SYFT_IMAGE=%s\n' "${TEST_AGENT_WORKFLOW_SYFT_IMAGE}"
+    printf 'TEST_AGENT_ANALYSIS_TOOLS_IMAGE=%s\n' "${TEST_AGENT_OPENCODE_WORKER_IMAGE}"
+    printf 'TEST_AGENT_ANALYSIS_TOOLS_IMAGE_ID=%s\n' "${tools_id}"
+    printf 'TEST_AGENT_WORKFLOW_SERVICE_TAG=test-agent-workflow-service\n'
+    printf 'TEST_AGENT_RUNNER_CONTROLLER_TAG=test-agent-runner-controller\n'
+    printf 'TEST_AGENT_ANALYSIS_TASK_TAG=test-agent-analysis-task\n'
+  } >"${build_env}"
+  "${SCRIPT_DIR}/package-workflow-offline.sh" \
+    --env-file "${build_env}" \
+    --output-dir "${workflow_output}" \
+    --platform "${PLATFORM}"
+  rm -f "${build_env}"
+  archive="${workflow_output}/test-agent-workflow-offline-${workflow_version}.tar.gz"
+  [[ -f "${archive}" && -f "${archive}.sha256" ]] || {
+    echo "Workflow offline archive was not generated" >&2
+    exit 1
+  }
+  cp -a "${archive}" "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz"
+  cp -a "${archive}.sha256" "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz.sha256"
+  {
+    printf 'TEST_AGENT_WORKFLOW_RELEASE_VERSION=%s\n' "${workflow_version}"
+    printf 'TEST_AGENT_WORKFLOW_ARCHIVE_SHA256=%s\n' "$(sha256_file "${archive}")"
+  } >"${OUTPUT_DIR}/.workflow-artifact.env"
+}
+
 build_toolbox_image() {
   local image="$1" context="$2" tar_path architecture
   echo "Building ${image} for ${PLATFORM}"
@@ -710,6 +826,211 @@ package_mysql_image() {
   fi
 }
 
+verify_lobehub_artifact_set() {
+  local source_dir="$1" required_file path line checksum_line_pattern
+  local internal_version upstream_version upstream_commit fork_commit image_ref image_id
+  local expected_paths listed_paths
+  local lock_file locked_internal_version locked_upstream_version locked_upstream_commit locked_fork_commit locked_postgres_major
+  local locked_contract_version
+  [[ -d "${source_dir}" ]] || {
+    echo "LobeHub artifact directory not found: ${source_dir}" >&2
+    exit 1
+  }
+  if [[ -n "$(find "${source_dir}" -type l -print -quit)" ]]; then
+    echo "LobeHub artifact set must not contain symbolic links" >&2
+    exit 1
+  fi
+  if [[ -n "$(find "${source_dir}" ! -type d ! -type f -print -quit)" ]]; then
+    echo "LobeHub artifact set may contain only directories and regular files" >&2
+    exit 1
+  fi
+  if [[ -n "$(find "${source_dir}" -type f -name '*[[:space:]]*' -print -quit)" ]]; then
+    echo "LobeHub artifact filenames must not contain whitespace" >&2
+    exit 1
+  fi
+  lock_file="${SCRIPT_DIR}/lobehub/version.env"
+  [[ -f "${lock_file}" ]] || { echo "LobeHub version lock is missing: ${lock_file}" >&2; exit 1; }
+  locked_internal_version="$(state_value "${lock_file}" LOBEHUB_INTERNAL_VERSION)"
+  locked_upstream_version="$(state_value "${lock_file}" LOBEHUB_UPSTREAM_VERSION)"
+  locked_upstream_commit="$(state_value "${lock_file}" LOBEHUB_UPSTREAM_COMMIT)"
+  locked_fork_commit="$(state_value "${lock_file}" LOBEHUB_FORK_COMMIT)"
+  locked_postgres_major="$(state_value "${lock_file}" LOBEHUB_PARADEDB_POSTGRES_MAJOR)"
+  locked_contract_version="$(state_value "${lock_file}" LOBEHUB_PLATFORM_CONTRACT_VERSION)"
+  [[ "${locked_internal_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-platform\.[0-9]+$ \
+    && "${locked_upstream_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ \
+    && "${locked_upstream_commit}" =~ ^[0-9a-f]{7}([0-9a-f]{33})?$ \
+    && "${locked_fork_commit}" =~ ^[0-9a-f]{40}$ \
+    && "${locked_postgres_major}" =~ ^[0-9]+$ \
+    && "${locked_contract_version}" =~ ^[0-9]+$ ]] || {
+    echo "LobeHub version lock is malformed: ${lock_file}" >&2
+    exit 1
+  }
+  for required_file in \
+    release.env SHA256SUMS approved-resources.json LICENSES.txt windows-authenticode-verification.txt \
+    linux-client-verification.txt linux-client-acceptance-record.txt \
+    linux-client-build-evidence.txt \
+    images/lobehub-image.tar images/paradedb-image.tar images/rustfs-image.tar \
+    clients/lobehub-windows-x64.exe clients/lobehub-linux-x86_64.tar.gz \
+    bin/mc-linux-amd64 sbom/lobehub.spdx.json \
+    "source/lobehub-${locked_internal_version}.tar.gz"; do
+    [[ -f "${source_dir}/${required_file}" ]] || {
+      echo "Required LobeHub artifact is missing: ${required_file}" >&2
+      exit 1
+    }
+  done
+
+  # SHA 清单只允许相对普通路径，禁止校验时逃出制品根目录；并且必须完整覆盖全部普通文件。
+  checksum_line_pattern='^([0-9a-f]{64})[[:space:]]+\*?([^[:space:]]+)$'
+  listed_paths=""
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ ! "${line}" =~ ${checksum_line_pattern} ]]; then
+      echo "Malformed line in LobeHub SHA256SUMS" >&2
+      exit 1
+    fi
+    path="${BASH_REMATCH[2]}"
+    if [[ -z "${path}" || "${path}" == /* || "${path}" == ../* || "${path}" == */../* ]]; then
+      echo "Unsafe path in LobeHub SHA256SUMS: ${path}" >&2
+      exit 1
+    fi
+    [[ "${path}" != SHA256SUMS && -f "${source_dir}/${path}" ]] || {
+      echo "LobeHub SHA256SUMS references a missing or forbidden file: ${path}" >&2
+      exit 1
+    }
+    listed_paths+="${path}"$'\n'
+  done <"${source_dir}/SHA256SUMS"
+  listed_paths="$(printf '%s' "${listed_paths}" | LC_ALL=C sort)"
+  if [[ -n "$(printf '%s\n' "${listed_paths}" | uniq -d)" ]]; then
+    echo "LobeHub SHA256SUMS contains duplicate paths" >&2
+    exit 1
+  fi
+  expected_paths="$(cd "${source_dir}" && find . -type f ! -name SHA256SUMS -print \
+    | sed 's#^\./##' | LC_ALL=C sort)"
+  if [[ "${listed_paths}" != "${expected_paths}" ]]; then
+    echo "LobeHub SHA256SUMS must cover every artifact exactly once" >&2
+    exit 1
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "${source_dir}" && sha256sum -c SHA256SUMS)
+  elif command -v shasum >/dev/null 2>&1; then
+    (cd "${source_dir}" && shasum -a 256 -c SHA256SUMS)
+  else
+    echo "Neither sha256sum nor shasum is available" >&2
+    exit 1
+  fi
+
+  internal_version="$(state_value "${source_dir}/release.env" LOBEHUB_INTERNAL_VERSION)"
+  upstream_version="$(state_value "${source_dir}/release.env" LOBEHUB_UPSTREAM_VERSION)"
+  upstream_commit="$(state_value "${source_dir}/release.env" LOBEHUB_UPSTREAM_COMMIT)"
+  fork_commit="$(state_value "${source_dir}/release.env" LOBEHUB_FORK_COMMIT)"
+  [[ "${internal_version}" == "${locked_internal_version}" ]] || {
+    echo "Unexpected LobeHub internal version: ${internal_version}" >&2
+    exit 1
+  }
+  [[ "${upstream_version}" == "${locked_upstream_version}" ]] || {
+    echo "Unexpected LobeHub upstream version: ${upstream_version}" >&2
+    exit 1
+  }
+  if [[ "${#locked_upstream_commit}" -eq 7 ]]; then
+    [[ "${upstream_commit}" == "${locked_upstream_commit}" \
+      || "${upstream_commit}" =~ ^${locked_upstream_commit}[0-9a-f]{33}$ ]] || {
+      echo "Unexpected LobeHub upstream commit: ${upstream_commit}" >&2
+      exit 1
+    }
+  elif [[ "${upstream_commit}" != "${locked_upstream_commit}" ]]; then
+    echo "Unexpected LobeHub upstream commit: ${upstream_commit}" >&2
+    exit 1
+  fi
+  [[ "${fork_commit}" == "${locked_fork_commit}" ]] || {
+    echo "Unexpected LobeHub fork commit: ${fork_commit}" >&2
+    exit 1
+  }
+  [[ "$(state_value "${source_dir}/release.env" LOBEHUB_PARADEDB_POSTGRES_MAJOR)" == "${locked_postgres_major}" ]] || {
+    echo "LobeHub ParadeDB artifact must use PostgreSQL major ${locked_postgres_major}" >&2
+    exit 1
+  }
+  [[ "$(state_value "${source_dir}/release.env" LOBEHUB_PLATFORM_CONTRACT_VERSION)" == "${locked_contract_version}" ]] || {
+    echo "LobeHub platform contract version does not match lock ${locked_contract_version}" >&2
+    exit 1
+  }
+  [[ "$(state_value "${source_dir}/release.env" LOBEHUB_WINDOWS_AUTHENTICODE_VERIFIED)" == true ]] || {
+    echo "Windows Authenticode verification is not recorded as successful" >&2
+    exit 1
+  }
+  [[ "$(state_value "${source_dir}/release.env" LOBEHUB_LINUX_CLIENT_APPROVED)" == true ]] || {
+    echo "Linux client approval is not recorded as successful" >&2
+    exit 1
+  }
+  [[ "$(state_value "${source_dir}/release.env" LOBEHUB_LINUX_EXECUTION_DEFAULT)" == false ]] || {
+    echo "Linux local execution must be disabled by default" >&2
+    exit 1
+  }
+  [[ -f "${LOBEHUB_CLIENT_CONTRACT_FILE}" ]] || {
+    echo "LobeHub client artifact contract is missing: ${LOBEHUB_CLIENT_CONTRACT_FILE}" >&2
+    exit 1
+  }
+  # 最终打包不能信任外部阶段目录的自报状态，必须重新绑定两端客户端、版本和 fork commit。
+  source "${LOBEHUB_CLIENT_CONTRACT_FILE}"
+  lobehub_verify_client_artifacts \
+    "${source_dir}/clients/lobehub-windows-x64.exe" \
+    "${source_dir}/windows-authenticode-verification.txt" \
+    "${source_dir}/clients/lobehub-linux-x86_64.tar.gz" \
+    "${source_dir}/linux-client-verification.txt" \
+    "${source_dir}/linux-client-acceptance-record.txt" \
+    "${source_dir}/linux-client-build-evidence.txt" \
+    "${locked_internal_version}" "${locked_fork_commit}"
+  for image_ref in LOBEHUB_APP_IMAGE LOBEHUB_PARADEDB_IMAGE LOBEHUB_RUSTFS_IMAGE; do
+    image_id="$(state_value "${source_dir}/release.env" "${image_ref}_ID")"
+    require_lobehub_loadable_image \
+      "${image_ref}" "$(state_value "${source_dir}/release.env" "${image_ref}")" "${image_id}"
+  done
+}
+
+package_lobehub_artifacts() {
+  local source_dir target_dir
+  [[ -d "${TEST_AGENT_LOBEHUB_ARTIFACT_DIR}" ]] || {
+    echo "LobeHub artifact directory not found: ${TEST_AGENT_LOBEHUB_ARTIFACT_DIR}" >&2
+    exit 1
+  }
+  source_dir="$(cd "${TEST_AGENT_LOBEHUB_ARTIFACT_DIR}" && pwd)"
+  target_dir="$(cd "${OUTPUT_DIR}" && pwd)/lobehub"
+  if [[ "${source_dir}" == "${target_dir}" || "${source_dir}" == "${target_dir}/"* ]]; then
+    echo "LobeHub input artifacts must be outside the package output directory" >&2
+    exit 1
+  fi
+  verify_lobehub_artifact_set "${source_dir}"
+  rm -rf "${target_dir}"
+  mkdir -p "${target_dir}"
+  cp -a "${source_dir}/." "${target_dir}/"
+  chmod 0755 "${target_dir}/bin/mc-linux-amd64"
+  echo "Verified LobeHub artifact set copied to ${target_dir}"
+}
+
+package_lobehub_zip() {
+  local staging_dir="${OUTPUT_DIR}/.lobehub-release-zip"
+  local zip_path="${OUTPUT_DIR}/test-agent-lobehub-offline.zip"
+  require_command zip
+  verify_lobehub_artifact_set "${OUTPUT_DIR}/lobehub"
+  rm -rf "${staging_dir}"
+  mkdir -p "${staging_dir}/dist/lobehub" "${staging_dir}/deploy/internal"
+  cp -a "${OUTPUT_DIR}/lobehub/." "${staging_dir}/dist/lobehub/"
+  for required_file in \
+    lobehub.env.example lobehub-docker.sh lobehub-backup.sh install-lobehub-offline.sh \
+    lobehub-client-artifact-contract.sh lobehub-platform-probe.mjs lobehub-redis-acl.sh \
+    systemd/test-agent-lobehub.service lobehub/version.env nginx/lobehub.conf.template; do
+    mkdir -p "${staging_dir}/deploy/internal/$(dirname "${required_file}")"
+    cp -a "${SCRIPT_DIR}/${required_file}" "${staging_dir}/deploy/internal/${required_file}"
+  done
+  mkdir -p "${staging_dir}/docs/deployment" "${staging_dir}/docs/architecture"
+  cp -a "${ROOT_DIR}/docs/deployment/lobehub-offline.md" "${staging_dir}/docs/deployment/"
+  cp -a "${ROOT_DIR}/docs/deployment/lobehub-client-build.md" "${staging_dir}/docs/deployment/"
+  cp -a "${ROOT_DIR}/docs/architecture/lobehub-integration.md" "${staging_dir}/docs/architecture/"
+  rm -f "${zip_path}"
+  (cd "${staging_dir}" && zip -qr "${zip_path}" .)
+  rm -rf "${staging_dir}"
+  write_artifact_checksum "${zip_path}"
+  ls -lh "${zip_path}" "${zip_path}.sha256"
+}
+
 package_release_zip() {
   local staging_dir="${OUTPUT_DIR}/.release-zip"
   local zip_path session_log session_log_count=0
@@ -727,7 +1048,10 @@ package_release_zip() {
   # 后端与前端每次交付；大体积 worker runtime 和 toolbox 只在指纹变化时加入。
   for required_artifact in \
     "${OUTPUT_DIR}/backend/test-agent-app.jar" \
-    "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz"; do
+    "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" \
+    "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz" \
+    "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz.sha256" \
+    "${OUTPUT_DIR}/.workflow-artifact.env"; do
     if [[ ! -f "${required_artifact}" ]]; then
       echo "Required release artifact not found: ${required_artifact}" >&2
       exit 1
@@ -762,11 +1086,17 @@ package_release_zip() {
       }
     done
   fi
+  if [[ "${PACKAGE_LOBEHUB}" -eq 1 ]]; then
+    verify_lobehub_artifact_set "${OUTPUT_DIR}/lobehub"
+  fi
 
   # 交付 zip 只放部署所需产物和脚本，避免把 deploy/internal/dist 自身递归打进去。
   mkdir -p "${staging_dir}/dist/backend"
   cp -a "${OUTPUT_DIR}/backend/." "${staging_dir}/dist/backend/"
   cp -a "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" "${staging_dir}/dist/"
+  cp -a "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz" \
+    "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz.sha256" \
+    "${staging_dir}/dist/"
   if [[ "${WORKER_COMPONENT_MODE}" == included ]]; then
     cp -a "${OUTPUT_DIR}/test-agent-programs.tar.gz" "${worker_tar}" "${staging_dir}/dist/"
   fi
@@ -778,6 +1108,13 @@ package_release_zip() {
       "${OUTPUT_DIR}/toolbox-catalog-v1.json" \
       "${OUTPUT_DIR}/toolbox-catalog-v1.json.sha256" \
       "${staging_dir}/dist/"
+  fi
+  if [[ "${PACKAGE_LOBEHUB}" -eq 1 ]]; then
+    mkdir -p "${staging_dir}/dist/lobehub"
+    cp -a "${OUTPUT_DIR}/lobehub/." "${staging_dir}/dist/lobehub/"
+    mkdir -p "${staging_dir}/docs/deployment" "${staging_dir}/docs/architecture"
+    cp -a "${ROOT_DIR}/docs/deployment/lobehub-offline.md" "${staging_dir}/docs/deployment/"
+    cp -a "${ROOT_DIR}/docs/architecture/lobehub-integration.md" "${staging_dir}/docs/architecture/"
   fi
 
   if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 ]]; then
@@ -812,6 +1149,11 @@ package_release_zip() {
     printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=%s\n' "${WORKER_RUNTIME_FINGERPRINT}"
     printf 'TEST_AGENT_RELEASE_TOOLBOX=%s\n' "${TOOLBOX_COMPONENT_MODE}"
     printf 'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=%s\n' "${TOOLBOX_FINGERPRINT}"
+    printf 'TEST_AGENT_RELEASE_WORKFLOW=included\n'
+    printf 'TEST_AGENT_RELEASE_WORKFLOW_VERSION=%s\n' "$(state_value "${OUTPUT_DIR}/.workflow-artifact.env" TEST_AGENT_WORKFLOW_RELEASE_VERSION)"
+    printf 'TEST_AGENT_RELEASE_WORKFLOW_ARCHIVE_SHA256=%s\n' "$(state_value "${OUTPUT_DIR}/.workflow-artifact.env" TEST_AGENT_WORKFLOW_ARCHIVE_SHA256)"
+    printf 'TEST_AGENT_RELEASE_LOBEHUB=%s\n' "$([[ "${PACKAGE_LOBEHUB}" -eq 1 ]] && printf included || printf disabled)"
+    printf 'TEST_AGENT_RELEASE_LOBEHUB_VERSION=%s\n' "$([[ "${PACKAGE_LOBEHUB}" -eq 1 ]] && state_value "${OUTPUT_DIR}/lobehub/release.env" LOBEHUB_INTERNAL_VERSION || printf none)"
   } >"${staging_dir}/deploy/internal/release-components.env"
   chmod 0644 "${staging_dir}/deploy/internal/release-components.env"
   # 升级脚本和官方启动器共用这份忽略清单；任一文件漏包都会让存量节点或新增节点重新出现 Git 脏状态。
@@ -908,11 +1250,18 @@ if [[ "${OUTPUT_DIR_FROM_ARG}" -eq 0 && -n "${TEST_AGENT_IMAGE_OUTPUT_DIR:-}" &&
 fi
 
 TEST_AGENT_OPENCODE_WORKER_IMAGE="${TEST_AGENT_OPENCODE_WORKER_IMAGE:-test-agent-opencode-worker:internal}"
+TEST_AGENT_WORKFLOW_PYTHON_IMAGE="${TEST_AGENT_WORKFLOW_PYTHON_IMAGE:-ghcr.io/astral-sh/uv:0.8.14-python3.12-bookworm-slim@sha256:b748a09ec61c993083278020a84e16f0c81485c5349b30c64dd29d6a22da7462}"
+TEST_AGENT_WORKFLOW_UV_IMAGE="${TEST_AGENT_WORKFLOW_UV_IMAGE:-ghcr.io/astral-sh/uv:0.8.14@sha256:f3660c56d5b08d6c516360981bedc439f499b9bf37f46a216018da3777a74011}"
+TEST_AGENT_WORKFLOW_SYFT_IMAGE="${TEST_AGENT_WORKFLOW_SYFT_IMAGE:-ghcr.io/anchore/syft:v1.30.0@sha256:bd5357d2cd087f03af748dac24df48bfbc1723080d78f75f69aca1f2d429060e}"
 TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE="${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE:-test-agent/it-tools:2024.10.22-7ca5933-platform.2}"
 TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE="${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE:-test-agent/omni-tools:0.6.0-platform.1}"
 TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE="${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE:-node:20.18.0-alpine3.20@sha256:a1d39fe127e43881c6770abf2f0843c955607fb56eb9b45bf6f103c992c5442a}"
 TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE="${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE:-nginx:1.27.2-alpine3.20@sha256:d213b2a02ef4e7ec85882e8955343cdd08ab49d6548995ad18623f47017c65ee}"
 TEST_AGENT_XXL_JOB_MYSQL_IMAGE="${TEST_AGENT_XXL_JOB_MYSQL_IMAGE:-mysql:8.4}"
+TEST_AGENT_LOBEHUB_ARTIFACT_DIR="${TEST_AGENT_LOBEHUB_ARTIFACT_DIR:-${ROOT_DIR}/lobehub-release-artifacts}"
+if [[ "${TEST_AGENT_LOBEHUB_ARTIFACT_DIR}" != /* ]]; then
+  TEST_AGENT_LOBEHUB_ARTIFACT_DIR="${ROOT_DIR}/${TEST_AGENT_LOBEHUB_ARTIFACT_DIR}"
+fi
 NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://mirrors.ustc.edu.cn/debian}"
@@ -944,6 +1293,14 @@ GO_IMAGE="${GO_IMAGE:-golang@sha256:e87b2a5f6df2dff71ea330d55d54f4979eb380ae58a7
 NODE_IMAGE="${NODE_IMAGE:-node@sha256:b042c6d46a90773b82ea3f95b05457ea93ee127a73b1b47ad5ebbb1a08ec3df8}"
 VITE_TEST_AGENT_API_BASE_URL="${VITE_TEST_AGENT_API_BASE_URL:-}"
 
+if [[ "${PACKAGE_LOBEHUB}" -eq 1 \
+  && "${PACKAGE_MODE}" != full \
+  && "${PACKAGE_MODE}" != zip-only \
+  && "${PACKAGE_MODE}" != lobehub-only ]]; then
+  echo "--with-lobehub can only be combined with the full or --zip-only release mode" >&2
+  exit 2
+fi
+
 mkdir -p "${OUTPUT_DIR}"
 if [[ -z "${COMPONENT_STATE_FILE}" ]]; then
   COMPONENT_STATE_FILE="${OUTPUT_DIR}/.release-component-state.env"
@@ -973,6 +1330,11 @@ if [[ "${PACKAGE_TOOLBOX}" -eq 1 ]]; then
   require_platform_image "TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE" "${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}" "test-agent/omni-tools" "0.6.0-platform.1"
   require_digest_pinned_image "TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE" "${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE}"
   require_digest_pinned_image "TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE" "${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE}"
+fi
+if [[ "${PACKAGE_WORKFLOW}" -eq 1 ]]; then
+  require_digest_pinned_image "TEST_AGENT_WORKFLOW_PYTHON_IMAGE" "${TEST_AGENT_WORKFLOW_PYTHON_IMAGE}"
+  require_digest_pinned_image "TEST_AGENT_WORKFLOW_UV_IMAGE" "${TEST_AGENT_WORKFLOW_UV_IMAGE}"
+  require_digest_pinned_image "TEST_AGENT_WORKFLOW_SYFT_IMAGE" "${TEST_AGENT_WORKFLOW_SYFT_IMAGE}"
 fi
 
 echo "Using env file: ${ENV_FILE}"
@@ -1004,6 +1366,11 @@ if [[ "${PACKAGE_PYTHON_LIBS}" -eq 1 ]]; then
       --platform "${PLATFORM}"
 fi
 
+if [[ "${PACKAGE_WORKFLOW}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
+  require_command docker
+  package_workflow_images
+fi
+
 if [[ "${PACKAGE_TOOLBOX}" -eq 1 ]]; then
   require_command docker
   package_toolbox
@@ -1012,6 +1379,14 @@ fi
 if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 ]]; then
   require_command docker
   package_mysql_image
+fi
+
+if [[ "${PACKAGE_LOBEHUB}" -eq 1 && "${PACKAGE_MODE}" != zip-only ]]; then
+  package_lobehub_artifacts
+fi
+
+if [[ "${PACKAGE_MODE}" == lobehub-only && "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
+  package_lobehub_zip
 fi
 
 if [[ "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 \
@@ -1042,6 +1417,10 @@ if [[ "${PACKAGE_PYTHON_LIBS}" -eq 1 ]]; then
   echo "  Python libraries: ${OUTPUT_DIR}/test-agent-python-libs-py313-linux-amd64.tar.gz"
   echo "  Python libraries checksum: ${OUTPUT_DIR}/test-agent-python-libs-py313-linux-amd64.tar.gz.sha256"
 fi
+if [[ "${PACKAGE_WORKFLOW}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
+  echo "  workflow offline archive: ${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz"
+  echo "  workflow checksum: ${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz.sha256"
+fi
 if [[ "${PACKAGE_TOOLBOX}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo "  IT-Tools image tar: ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}" "${PLATFORM}")"
   echo "  OmniTools image tar: ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}" "${PLATFORM}")"
@@ -1052,6 +1431,13 @@ fi
 if [[ "${PACKAGE_MYSQL_IMAGE}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo "  MySQL image tar: ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_XXL_JOB_MYSQL_IMAGE}" "${PLATFORM}")"
   echo "  MySQL target import: docker load -i ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_XXL_JOB_MYSQL_IMAGE}" "${PLATFORM}")"
+fi
+if [[ "${PACKAGE_LOBEHUB}" -eq 1 ]]; then
+  echo "  LobeHub verified artifacts: ${OUTPUT_DIR}/lobehub"
+fi
+if [[ "${PACKAGE_MODE}" == lobehub-only && "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
+  echo "  LobeHub offline zip: ${OUTPUT_DIR}/test-agent-lobehub-offline.zip"
+  echo "  LobeHub offline checksum: ${OUTPUT_DIR}/test-agent-lobehub-offline.zip.sha256"
 fi
 if [[ "${PACKAGE_ZIP}" -eq 1 && "${SAVE_TARBALL}" -eq 1 \
   && ( "${PACKAGE_MODE}" == full || "${PACKAGE_MODE}" == zip-only ) ]]; then

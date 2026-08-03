@@ -5,6 +5,8 @@
 - `V20260728103000__create_app_source_snapshot_tables.sql` 新增应用源码 slot、固定内容 snapshot、服务器 replica、operation/step、cleanup 和 recent 表，结构化选择使用 PostgreSQL JSONB；初始 snapshot 约束为 `expires_at = accepted_at + 1..72` 整小时且索引摘要必须为 64 位十六进制；cleanup 到 operation/snapshot 的外键为 `DEFERRABLE INITIALLY DEFERRED`，并初始化只读 `OPENCODE_APP_SOURCE_ROOT=${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/appsource/`。
 - `V20260731115520__extend_app_source_retention.sql` 保留已经执行的 365 天扩容原始字节，`V20260731123600__cap_app_source_retention_at_one_week.sql` 再把最终 snapshot 整小时上限收紧为 168 小时（7 天），两者均不改历史数据；续期运行 SQL 位于 `AppSourceMapper.xml`，通过快照 expiry CAS 同步更新权威索引摘要和全部未开始 cleanup 的 `delete_at/next_retry_at`。
 - `V20260728210000__index_in_flight_app_source_operations.sql` 为 dispatcher 周期恢复增加 `(status, accepted_at, operation_id)` 索引，使 `PENDING/RUNNING` stranded 扫描不随历史终态 operation 全表增长；迁移只新增索引，不写业务数据。
+- `db/migration-compat/lobehub-missing/V20260802173416__backfill_lobehub_model_gateway.sql` 只对已执行 `V20260801093854`、却漏掉 `V20260730090000` 的已知分叉加载；通过高版本幂等补偿创建模型目录、探测、每日聚合表和四个默认禁用参数，正常顺序库与空库不可见。
+- `db/migration-compat/lobehub-missing-after-rollout/V20260803141754__backfill_lobehub_model_gateway_after_rollout.sql` 只对上述缺失仍存在、早期补偿未执行且 release `V20260803133000` 已落库的更高历史加载，避免倒序执行早期补偿；SQL 语义与早期补偿一致。
 
 ## 工程定位
 
@@ -30,6 +32,7 @@
 - `UserDeletionMapper.xml` / `MyBatisUserDeletionRepository` 以 MyBatis XML 锁定目标用户、汇总受保护业务引用，并按外键顺序清理账号附属数据；不级联删除会话、工作区、进程或调度历史。`RedisTokenStore` 使用增量 `SCAN` 撤销目标用户上线前已签发的 Token，不执行阻塞式 `KEYS`，也不记录 Token key/value。
 - Redis 会话运行上下文、Run 运行数据面、限流、幂等和运行心跳能力适配；用户进程运行管理与 manager 控制面在线状态依赖 Redis。用户级 OpenCode dispose 闸门与 `active:user`、`runtime-user` marker 使用同一 `{userId}` slot：新 Run 在一个 Lua 内先检查闸门再登记 active/marker，dispose 则先清理过期 active 成员再原子确认空闲并申请可续租 token，禁止跨 `{runId}`/`{userId}` slot 执行脚本。通用参数值不写入 Redis，运行态读取直接查询数据库。
 - `RedisTokenStore` 在保存平台 Token 时同步写入 SHA-256 session marker，并使用相同绝对过期时间；删除、刷新或过期清理 Token 时同步删除 marker。原始 Token 不进入 marker key/value，XXL 只持有 digest。
+- `RedisWorkflowCapabilityStore` 在 `test-agent:workflow-capability:*` 前缀保存HMAC nonce摘要、一次性checkout ticket摘要和短期model grant摘要；Lua保证消费/续期/撤销原子性。取消run先写撤销墓碑再撤销现存grant，并使并发签发或刷新失败。该适配不保存Python conversation/task/report/event，也不新增关系型SQL或Flyway migration。
 
 ## 建表规范
 
@@ -202,7 +205,25 @@
 Flyway migration 只能承载表结构变更、历史数据兼容迁移和生产必需的基础字典/系统参数；禁止新增写入测试、演示、个人开发或环境专属数据的 seed migration。测试数据应放在 `test-agent-test-support`、测试 fixture、mock 数据或显式本地开发脚本中。
 新增或修改关系型 SQL 必须新增/调整 `mybatis/*.xml` 与 `com.enterprise.testagent.persistence.mybatis` 内部 mapper，不能继续扩展 `Jdbc*Repository` 或使用 MyBatis 注解 SQL；存量 JDBC 仓储后续按触点分批迁移。
 JSON payload/capabilities 当前以文本列保存，未来切换 PostgreSQL JSONB 必须同步兼容策略和测试。
-`ai_model_configs` 只保存平台托管的企业内模型目录，不保存模型调用密钥；密钥仍通过环境变量或配置中心注入，并由 runtime 模块同步到 opencode provider 配置引用。
+`ai_model_configs` 只保留旧平台模型目录兼容，不是 LobeHub 模型配置来源；LobeHub 使用
+`internal_model_provider_models` 关联现有供应商/Token，密钥不进入模型目录或每日聚合。
 `agent_session_bindings` 是新链路的 agent 远端 session 绑定主数据源；Session 的 `opencode_session_id` 与 `opencode_execution_node_id` 仅作为 `opencode` 兼容字段，新增 agent 不得继续扩展 `sessions` 列，新增查询或导出时不得默认暴露给前端 DTO；`pinned` 是平台 Session API 字段，默认旧数据未置顶。
 RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线程；修改 `MyBatisRunEventRepository` 时必须保留并发 append 下 seq 单调且不重复、scope 列写入、`raw_event_id` 缺失为 `NULL` 的测试。修改 SessionMessage/Run 映射时必须覆盖 token/cost、parts_json 和 active-run 查询。
 修改 `RedisRunRuntimeStore` 时必须使用真实 Redis 验证 Lua 原子性、durable seq 与 runtimeVersion 双 Stream、Hash/ZSET 物化、分页 tail、动态 key 滑动 TTL、7 天 attention/pending、active 索引清理、scope/dedup/pending、20,000 条/32 MiB 显式截断和 `run.snapshot.reset` 语义；禁止以 `MAXLEN`、LRU/LFU 或静默 eviction 代替显式截断。
+
+## LobeHub 与模型网关持久化
+
+- `RedisLobehubSsoStore` 把 ticket、nonce 和 grant 摘要限制在 `test-agent:lobehub-sso:*`，使用 Lua 原子消费、
+  nonce 占用、单用户 grant 轮换和撤销；Redis value 不保存原始 ticket/grant。
+- `InternalModelProviderModelMapper.xml` 覆盖保存公开模型并级联清理旧探测，按能力保存最近探测结果。
+- `ModelGatewayUsageDailyMapper.xml` 使用 PostgreSQL/H2 兼容 upsert 原子累加每日聚合，不先读后写。
+- `V20260730090000__add_lobehub_model_gateway.sql` 只创建上述平台表和四个生产必需公共参数；不触碰独立
+  LobeHub ParadeDB，也不写测试/演示数据。
+- 已知历史若存在 `V20260801093854`、但缺少 `V20260730090000`，app 兼容装配会隐藏无法再顺序执行的
+  旧候选文件。早期补偿 `V20260802173416` 已执行时只加载其原始资源；尚未补偿且 release
+  `V20260803133000` 已执行时只加载更高的 `V20260803141754`；否则继续使用早期补偿。三份 migration 都由
+  SHA-256 测试锁定；不启用 `outOfOrder`、不执行 `repair`、不修改 `flyway_schema_history`。
+- H2 集成测试覆盖完整 Flyway 和 mapper；PostgreSQL Testcontainers 测试模拟既有基线并发累加，无 Docker
+  时显式 skip，正式发布仍需在真实目标基线上运行。
+- Redis Testcontainers 使用真实 Redis 5.0.14 让 8 个线程并发消费同一 ticket，锁定 Lua 只成功一次、nonce
+  防重放、grant 轮换/撤销、TTL 上限和 `test-agent:lobehub-sso:*` 前缀隔离。

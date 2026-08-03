@@ -37,6 +37,19 @@ class GitRemoteServiceTest {
     }
 
     @Test
+    void parsesRemoteHeadSymrefWithoutGuessingMainOrMaster() {
+        GitRemoteService service = new GitRemoteService(new RecordingTimeoutExecutor("""
+                ref: refs/heads/trunk\tHEAD
+                abcdef1234567890\tHEAD
+                """));
+
+        assertThat(service.resolveDefaultBranch("git@example.com:demo/repo.git", "PRIVATE KEY"))
+                .contains("trunk");
+        assertThat(service.parseDefaultBranch("abcdef1234567890\tHEAD"))
+                .isEmpty();
+    }
+
+    @Test
     void parseArchiveTarOutputToTopLevelAndNestedDirectories() {
         GitRemoteService service = new GitRemoteService(new FakeExecutor(List.of(), tarWith("src/main/App.java", "docs/README.md")));
 

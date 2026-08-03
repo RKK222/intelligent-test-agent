@@ -1,0 +1,18 @@
+[Unit]
+Description=TestAgent LobeHub offline stack
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=TEST_AGENT_BASE_DIR=/data/testagent
+Environment=LOBEHUB_ENV_FILE=/data/testagent/config/lobehub.env
+ExecStart=/data/testagent/deploy/internal/lobehub-docker.sh start
+ExecStop=/data/testagent/deploy/internal/lobehub-docker.sh stop
+TimeoutStartSec=600
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target
