@@ -4783,3 +4783,30 @@
   版本提交和企业打包；贡献新社区内容仍走官方 `lobehub/lobe-chat-agents` 仓库审核。
 - 本次不修改平台 HTTP API、事件、数据库/Flyway/MyBatis SQL、generated SDK、OpenCode 源码或 `.env*`。
   `.7` 完整企业服务端/客户端介质和 fork 转运 ZIP 尚未构建；既有 `.5` 介质仅为历史证据，不能复用或改名。
+
+## 2026-08-03 - 复原规范驱动测试智能体单页 PPT
+
+### Why
+
+- 用户提供现有汇报页截图，要求保持工行红白风格与三栏结构，并按当前平台重新表达公共 Agent、应用 Agent、
+  `spec/docs` 资产和 SDD 能力栈。
+
+### What
+
+- 新增可编辑单页 `智能研发规范驱动测试智能体落地.pptx` 及可重复生成脚本
+  `tools/pptx/build-spec-driven-agent-slide.js`。
+- 左侧按真实配置边界拆为公共 `opencode/`、应用 `.opencode/` 与 workspace 下直接挂载的 `spec/`、`docs/`；
+  删除中间内容目录层和旧知识库目录。
+- 右侧能力栈保留 SOP、Skill、Rule、Spec、Template、Docs，并新增独立的 MCP、Tools 层；同步演示文稿 README。
+
+### How
+
+- 复用仓库既有 PptxGenJS 目录树、图标栅格化和原生形状绘制方式，所有主体文字、框线、目录、流程和能力栈
+  均可在 PowerPoint 中继续编辑。
+- 运行生成脚本、PPTX Office 结构校验、`markitdown` 内容提取和 macOS Quick Look 2000px 实际渲染；首轮
+  发现两处文字裁切后调整字号并重新执行全部校验。环境没有 LibreOffice.app，视觉校验使用 Quick Look 完成。
+
+### Result
+
+- 单页内容与用户要求一致，最终结构校验通过、文本完整、渲染无已知截断或重叠。未修改 API、事件、数据库、
+  性能、安全、环境配置、generated SDK、OpenCode 源码或业务代码，也未创建分支。

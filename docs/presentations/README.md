@@ -15,6 +15,12 @@
 node tools/pptx/build-knowledge-methodology-slide.js
 ```
 
+单页图稿 `智能研发规范驱动测试智能体落地.pptx` 复原“规范驱动”测试智能体落地页。左侧按当前平台结构区分公共 `opencode/` 与应用 `.opencode/`，应用资产直接使用 `spec/`、`docs/`；右侧 SDD 能力栈包含 `MCP` 与 `Tools`。版面主体、目录树、流程、能力栈和页脚均为可编辑对象，可通过以下命令重新生成：
+
+```bash
+node tools/pptx/build-spec-driven-agent-slide.js
+```
+
 稳定事实依据为 `docs/architecture/module-map.md`、`docs/architecture/dependency-rules.md`、`docs/architecture/domain-models.md`、`backend/README.md`、`frontend/README.md` 与 `frontend/apps/user-manual/docs/guide/agent-config.md`、`workspace.md`。规划内容在页面中显式标注为“规划态”。
 
 重新生成：
