@@ -820,7 +820,11 @@ build_frontend() {
   fi
 
   echo "Building frontend: corepack pnpm build"
-  (cd "${FRONTEND_DIR}" && corepack pnpm build)
+  # 页面入口与实际启动的可选服务共用同一开关，避免服务关闭后仍能从路由直达。
+  (cd "${FRONTEND_DIR}" && \
+    VITE_TEST_AGENT_WORKFLOW_ENABLED="${with_workflow}" \
+    VITE_TEST_AGENT_LOBEHUB_ENABLED="${with_lobehub}" \
+    corepack pnpm build)
 }
 
 build_opencode_manager() {
@@ -969,13 +973,15 @@ start_frontend() {
   : >"${LOG_DIR}/frontend.log"
   if command -v screen >/dev/null 2>&1; then
     local frontend_cmd
-    printf -v frontend_cmd 'cd %q && export HOST=%q PORT=%q VITE_TEST_AGENT_API_BASE_URL=%q TEST_AGENT_XXL_JOB_ADMIN_URL=%q && exec corepack pnpm dev >>%q 2>&1' \
-      "${FRONTEND_DIR}" "${frontend_host}" "${frontend_port}" "${backend_url}" "${TEST_AGENT_XXL_JOB_ADMIN_URL:-http://127.0.0.1:18080}" "${LOG_DIR}/frontend.log"
+    printf -v frontend_cmd 'cd %q && export HOST=%q PORT=%q VITE_TEST_AGENT_API_BASE_URL=%q VITE_TEST_AGENT_WORKFLOW_ENABLED=%q VITE_TEST_AGENT_LOBEHUB_ENABLED=%q TEST_AGENT_XXL_JOB_ADMIN_URL=%q && exec corepack pnpm dev >>%q 2>&1' \
+      "${FRONTEND_DIR}" "${frontend_host}" "${frontend_port}" "${backend_url}" "${with_workflow}" "${with_lobehub}" "${TEST_AGENT_XXL_JOB_ADMIN_URL:-http://127.0.0.1:18080}" "${LOG_DIR}/frontend.log"
     screen -dmS "${FRONTEND_SCREEN_SESSION}" bash -lc "${frontend_cmd}"
   else
     (
       cd "${FRONTEND_DIR}"
       HOST="${frontend_host}" PORT="${frontend_port}" VITE_TEST_AGENT_API_BASE_URL="${backend_url}" \
+        VITE_TEST_AGENT_WORKFLOW_ENABLED="${with_workflow}" \
+        VITE_TEST_AGENT_LOBEHUB_ENABLED="${with_lobehub}" \
         TEST_AGENT_XXL_JOB_ADMIN_URL="${TEST_AGENT_XXL_JOB_ADMIN_URL:-http://127.0.0.1:18080}" \
         nohup corepack pnpm dev >>"${LOG_DIR}/frontend.log" 2>&1 &
       echo "$!" >"${LOG_DIR}/frontend.pid"

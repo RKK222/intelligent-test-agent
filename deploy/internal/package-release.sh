@@ -19,10 +19,12 @@ PACKAGE_BACKEND=1
 PACKAGE_FRONTEND=1
 PACKAGE_OPENCODE_WORKER=1
 PACKAGE_PYTHON_LIBS=0
-PACKAGE_WORKFLOW=1
+PACKAGE_WORKFLOW=0
 PACKAGE_TOOLBOX=1
 PACKAGE_MYSQL_IMAGE=0
 PACKAGE_LOBEHUB=0
+WITH_WORKFLOW_IN_RELEASE=0
+WITH_LOBEHUB_IN_RELEASE=0
 SAVE_TARBALL=1
 PACKAGE_ZIP=1
 PACKAGE_ZIP_ONLY=0
@@ -33,6 +35,14 @@ COMPONENT_STATE_FILE=""
 OUTPUT_DIR_FROM_ENV_BEFORE_DOTENV="${TEST_AGENT_IMAGE_OUTPUT_DIR+x}"
 TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE="db/migration/V20260728160800__create_toolbox_click_tracking.sql"
 TOOLBOX_ENTERPRISE_MIGRATION_SHA256="777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2"
+LOBEHUB_MAIN_MIGRATION_RESOURCE="db/migration/V20260730090000__add_lobehub_model_gateway.sql"
+LOBEHUB_MAIN_MIGRATION_SHA256="0f16f1b2f3108e60580cfeb00102e10ac21e20220be255fae77bad9871f0bcb7"
+LOBEHUB_FORWARD_MIGRATION_RESOURCE="db/migration-compat/lobehub-missing/V20260802173416__backfill_lobehub_model_gateway.sql"
+LOBEHUB_FORWARD_MIGRATION_SHA256="4f773e35e55380592f094c03cc5a66fb69b7dee4a2799e1c9ab5d0b9d8f1634a"
+ROLLOUT_SUPERSEDE_MIGRATION_RESOURCE="db/migration/V20260803133000__support_public_agent_config_rollout_supersede.sql"
+ROLLOUT_SUPERSEDE_MIGRATION_SHA256="8b3cbad538f856d5daa06d15f118554ecefb2380a249287cdfe291eb71199022"
+LOBEHUB_RELEASE_FORWARD_MIGRATION_RESOURCE="db/migration-compat/lobehub-missing-after-rollout/V20260803141754__backfill_lobehub_model_gateway_after_rollout.sql"
+LOBEHUB_RELEASE_FORWARD_MIGRATION_SHA256="b73b06fb14f407979646df32a8342603ab957c2f4812a4013ab9635cdfdcce64"
 
 usage() {
   cat <<'USAGE'
@@ -43,7 +53,7 @@ Build enterprise internal delivery artifacts:
   - frontend dist files and tar.gz
   - opencode-worker image and docker-loadable tar
   - optional independent Python third-party library bundle
-  - Python workflow-service, Runner and analysis-task linux/amd64 image bundle with SBOMs
+  - optional Python workflow-service, Runner and analysis-task linux/amd64 image bundle with SBOMs
   - pinned IT-Tools and OmniTools images, checksums and complete modified source
   - repository session logs under .agents/
 
@@ -61,6 +71,7 @@ Options:
   --opencode-only         Package only the opencode worker image.
   --python-libs-only      Package only the independent Python third-party library bundle.
   --workflow-only         Package only the Python workflow/Runner/analysis image set.
+  --with-workflow         Include the workflow bundle and enable its frontend entry in a full release.
   --toolbox-only          Package only the two toolbox images and modified source.
   --mysql-only            Package only the standalone MySQL image.
   --with-lobehub          Include the verified external LobeHub artifact set in a full release.
@@ -179,7 +190,11 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --with-lobehub)
-      PACKAGE_LOBEHUB=1
+      WITH_LOBEHUB_IN_RELEASE=1
+      shift
+      ;;
+    --with-workflow)
+      WITH_WORKFLOW_IN_RELEASE=1
       shift
       ;;
     --lobehub-only)
@@ -237,6 +252,22 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# 可选能力采用显式 opt-in，并在参数解析后应用，保证选项先后顺序不改变最终交付范围。
+if [[ "${WITH_WORKFLOW_IN_RELEASE}" -eq 1 ]]; then
+  if [[ "${PACKAGE_MODE}" != full && "${PACKAGE_MODE}" != zip-only ]]; then
+    echo "--with-workflow can only be combined with the full or --zip-only release mode" >&2
+    exit 2
+  fi
+  PACKAGE_WORKFLOW=1
+fi
+if [[ "${WITH_LOBEHUB_IN_RELEASE}" -eq 1 ]]; then
+  if [[ "${PACKAGE_MODE}" != full && "${PACKAGE_MODE}" != zip-only ]]; then
+    echo "--with-lobehub can only be combined with the full or --zip-only release mode" >&2
+    exit 2
+  fi
+  PACKAGE_LOBEHUB=1
+fi
 
 load_dotenv() {
   local file="$1"
@@ -432,14 +463,32 @@ find_unique_persistence_jar() {
   find "${lib_dir}" -maxdepth 1 -type f -name 'test-agent-persistence-*.jar' -print -quit
 }
 
-verify_toolbox_enterprise_migration_jar() {
-  local jar="$1" label="$2" actual
-  actual="$(sha256_jar_resource "${jar}" "${TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE}")"
-  if [[ "${actual}" != "${TOOLBOX_ENTERPRISE_MIGRATION_SHA256}" ]]; then
-    echo "${label} contains the wrong enterprise Flyway migration: jar=${jar} expected=${TOOLBOX_ENTERPRISE_MIGRATION_SHA256} actual=${actual}" >&2
+verify_release_flyway_resource() {
+  local jar="$1" label="$2" resource="$3" expected="$4" actual
+  if ! unzip -Z1 "${jar}" | grep -Fx "${resource}" >/dev/null; then
+    echo "${label} is missing release Flyway migration: ${resource}" >&2
     exit 1
   fi
-  printf '%s Flyway migration verified: sha256=%s\n' "${label}" "${actual}"
+  actual="$(sha256_jar_resource "${jar}" "${resource}")"
+  if [[ "${actual}" != "${expected}" ]]; then
+    echo "${label} contains the wrong release Flyway migration: resource=${resource} expected=${expected} actual=${actual}" >&2
+    exit 1
+  fi
+  printf '%s Flyway migration verified: resource=%s sha256=%s\n' "${label}" "${resource}" "${actual}"
+}
+
+verify_release_flyway_migrations_jar() {
+  local jar="$1" label="$2"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE}" "${TOOLBOX_ENTERPRISE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${LOBEHUB_MAIN_MIGRATION_RESOURCE}" "${LOBEHUB_MAIN_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${LOBEHUB_FORWARD_MIGRATION_RESOURCE}" "${LOBEHUB_FORWARD_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${ROLLOUT_SUPERSEDE_MIGRATION_RESOURCE}" "${ROLLOUT_SUPERSEDE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${LOBEHUB_RELEASE_FORWARD_MIGRATION_RESOURCE}" "${LOBEHUB_RELEASE_FORWARD_MIGRATION_SHA256}"
 }
 
 state_value() {
@@ -619,7 +668,7 @@ package_backend() {
     exit 1
   }
   persistence_jar="$(find_unique_persistence_jar "${backend_dir}/lib")"
-  verify_toolbox_enterprise_migration_jar "${persistence_jar}" "Packaged persistence JAR"
+  verify_release_flyway_migrations_jar "${persistence_jar}" "Packaged persistence JAR"
   unzip -Z1 "${backend_dir}/test-agent-app.jar" | grep -Fx 'BOOT-INF/classes/rsa-private.key' >/dev/null || {
     echo "Backend jar is missing the embedded RSA private key resource" >&2
     exit 1
@@ -644,8 +693,15 @@ package_backend() {
 
 package_frontend() {
   local frontend_dir="${OUTPUT_DIR}/frontend"
+  local workflow_enabled lobehub_enabled
+  workflow_enabled="$([[ "${PACKAGE_WORKFLOW}" -eq 1 ]] && printf true || printf false)"
+  lobehub_enabled="$([[ "${PACKAGE_LOBEHUB}" -eq 1 ]] && printf true || printf false)"
   echo "Building frontend dist"
-  (cd "${ROOT_DIR}/frontend" && corepack pnpm install --frozen-lockfile && VITE_TEST_AGENT_API_BASE_URL="${VITE_TEST_AGENT_API_BASE_URL:-}" corepack pnpm --filter @test-agent/agent-web build)
+  (cd "${ROOT_DIR}/frontend" && corepack pnpm install --frozen-lockfile && \
+    VITE_TEST_AGENT_API_BASE_URL="${VITE_TEST_AGENT_API_BASE_URL:-}" \
+    VITE_TEST_AGENT_WORKFLOW_ENABLED="${workflow_enabled}" \
+    VITE_TEST_AGENT_LOBEHUB_ENABLED="${lobehub_enabled}" \
+    corepack pnpm --filter @test-agent/agent-web build)
 
   rm -rf "${frontend_dir}"
   mkdir -p "${frontend_dir}"
@@ -1048,17 +1104,25 @@ package_release_zip() {
   # 后端与前端每次交付；大体积 worker runtime 和 toolbox 只在指纹变化时加入。
   for required_artifact in \
     "${OUTPUT_DIR}/backend/test-agent-app.jar" \
-    "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" \
-    "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz" \
-    "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz.sha256" \
-    "${OUTPUT_DIR}/.workflow-artifact.env"; do
+    "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz"; do
     if [[ ! -f "${required_artifact}" ]]; then
       echo "Required release artifact not found: ${required_artifact}" >&2
       exit 1
     fi
   done
+  if [[ "${PACKAGE_WORKFLOW}" -eq 1 ]]; then
+    for required_artifact in \
+      "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz" \
+      "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz.sha256" \
+      "${OUTPUT_DIR}/.workflow-artifact.env"; do
+      if [[ ! -f "${required_artifact}" ]]; then
+        echo "Required workflow release artifact not found: ${required_artifact}" >&2
+        exit 1
+      fi
+    done
+  fi
   persistence_jar="$(find_unique_persistence_jar "${OUTPUT_DIR}/backend/lib")"
-  verify_toolbox_enterprise_migration_jar "${persistence_jar}" "Release ZIP input persistence JAR"
+  verify_release_flyway_migrations_jar "${persistence_jar}" "Release ZIP input persistence JAR"
   if [[ "${WORKER_COMPONENT_MODE}" == included ]]; then
     require_artifact_fingerprint "${OUTPUT_DIR}/.worker-runtime-artifact.env" \
       TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT "${WORKER_RUNTIME_FINGERPRINT}"
@@ -1094,9 +1158,11 @@ package_release_zip() {
   mkdir -p "${staging_dir}/dist/backend"
   cp -a "${OUTPUT_DIR}/backend/." "${staging_dir}/dist/backend/"
   cp -a "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" "${staging_dir}/dist/"
-  cp -a "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz" \
-    "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz.sha256" \
-    "${staging_dir}/dist/"
+  if [[ "${PACKAGE_WORKFLOW}" -eq 1 ]]; then
+    cp -a "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz" \
+      "${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz.sha256" \
+      "${staging_dir}/dist/"
+  fi
   if [[ "${WORKER_COMPONENT_MODE}" == included ]]; then
     cp -a "${OUTPUT_DIR}/test-agent-programs.tar.gz" "${worker_tar}" "${staging_dir}/dist/"
   fi
@@ -1149,9 +1215,9 @@ package_release_zip() {
     printf 'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=%s\n' "${WORKER_RUNTIME_FINGERPRINT}"
     printf 'TEST_AGENT_RELEASE_TOOLBOX=%s\n' "${TOOLBOX_COMPONENT_MODE}"
     printf 'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=%s\n' "${TOOLBOX_FINGERPRINT}"
-    printf 'TEST_AGENT_RELEASE_WORKFLOW=included\n'
-    printf 'TEST_AGENT_RELEASE_WORKFLOW_VERSION=%s\n' "$(state_value "${OUTPUT_DIR}/.workflow-artifact.env" TEST_AGENT_WORKFLOW_RELEASE_VERSION)"
-    printf 'TEST_AGENT_RELEASE_WORKFLOW_ARCHIVE_SHA256=%s\n' "$(state_value "${OUTPUT_DIR}/.workflow-artifact.env" TEST_AGENT_WORKFLOW_ARCHIVE_SHA256)"
+    printf 'TEST_AGENT_RELEASE_WORKFLOW=%s\n' "$([[ "${PACKAGE_WORKFLOW}" -eq 1 ]] && printf included || printf disabled)"
+    printf 'TEST_AGENT_RELEASE_WORKFLOW_VERSION=%s\n' "$([[ "${PACKAGE_WORKFLOW}" -eq 1 ]] && state_value "${OUTPUT_DIR}/.workflow-artifact.env" TEST_AGENT_WORKFLOW_RELEASE_VERSION || printf none)"
+    printf 'TEST_AGENT_RELEASE_WORKFLOW_ARCHIVE_SHA256=%s\n' "$([[ "${PACKAGE_WORKFLOW}" -eq 1 ]] && state_value "${OUTPUT_DIR}/.workflow-artifact.env" TEST_AGENT_WORKFLOW_ARCHIVE_SHA256 || printf none)"
     printf 'TEST_AGENT_RELEASE_LOBEHUB=%s\n' "$([[ "${PACKAGE_LOBEHUB}" -eq 1 ]] && printf included || printf disabled)"
     printf 'TEST_AGENT_RELEASE_LOBEHUB_VERSION=%s\n' "$([[ "${PACKAGE_LOBEHUB}" -eq 1 ]] && state_value "${OUTPUT_DIR}/lobehub/release.env" LOBEHUB_INTERNAL_VERSION || printf none)"
   } >"${staging_dir}/deploy/internal/release-components.env"
@@ -1366,7 +1432,8 @@ if [[ "${PACKAGE_PYTHON_LIBS}" -eq 1 ]]; then
       --platform "${PLATFORM}"
 fi
 
-if [[ "${PACKAGE_WORKFLOW}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
+if [[ "${PACKAGE_WORKFLOW}" -eq 1 && "${SAVE_TARBALL}" -eq 1 \
+  && "${PACKAGE_MODE}" != zip-only ]]; then
   require_command docker
   package_workflow_images
 fi

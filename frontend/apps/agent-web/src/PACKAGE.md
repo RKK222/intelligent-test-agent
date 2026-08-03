@@ -8,7 +8,8 @@
 
 - `main.ts`：应用入口，装配 Pinia、`@tanstack/vue-query` 的 `VueQueryPlugin` 和 vue-router。
 - `App.vue`：根组件，渲染 `<RouterView />`。
-- `router.ts`：SPA 客户端路由，`/985211` 登录页、`/` 工作台、`/toolbox` 离线工具箱、`/lobehub/launch` 通用问答交接、懒加载 `/workflow-chat`、`/s/:sessionId` 只读 transcript，以及未知路径 404 页面。
+- `release-features.ts`：集中解析 Workflow/LobeHub 编译期开关；只接受显式 `true`，并为入口、登录回跳和路由守卫提供同一事实源。当前 release 两项默认关闭。
+- `router.ts`：SPA 客户端路由，`/985211` 登录页、`/` 工作台、`/toolbox` 离线工具箱、受发布开关保护的 `/lobehub/launch` 与懒加载 `/workflow-chat`、`/s/:sessionId` 只读 transcript，以及未知路径 404 页面。
 - `views/LoginView.vue`：登录页入口，登录成功后只跳回 SPA 内已知页面，非法 redirect 回退到工作台。
 - `views/WorkbenchView.vue`：工作台首页入口。
 - `views/TranscriptView.vue`：只读 transcript 页面入口，复用平台 session/messages API。

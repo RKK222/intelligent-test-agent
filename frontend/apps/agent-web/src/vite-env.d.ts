@@ -2,6 +2,8 @@
 
 interface ImportMetaEnv {
   readonly VITE_TEST_AGENT_BUILD_VERSION?: string;
+  readonly VITE_TEST_AGENT_LOBEHUB_ENABLED?: string;
+  readonly VITE_TEST_AGENT_WORKFLOW_ENABLED?: string;
 }
 
 interface ImportMeta {

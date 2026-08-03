@@ -37,9 +37,16 @@ mkdir -p "${JAR_ROOT}/BOOT-INF/classes"
 printf 'fixture-rsa-private-key\n' >"${JAR_ROOT}/BOOT-INF/classes/rsa-private.key"
 (cd "${JAR_ROOT}" && zip -qr "${RELEASE_ROOT}/dist/backend/test-agent-app.jar" .)
 PERSISTENCE_JAR_ROOT="${TMP_ROOT}/persistence-jar-root"
-mkdir -p "${PERSISTENCE_JAR_ROOT}/db/migration"
-cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260728160800__create_toolbox_click_tracking.sql" \
-  "${PERSISTENCE_JAR_ROOT}/db/migration/"
+for migration_resource in \
+  db/migration/V20260728160800__create_toolbox_click_tracking.sql \
+  db/migration/V20260730090000__add_lobehub_model_gateway.sql \
+  db/migration-compat/lobehub-missing/V20260802173416__backfill_lobehub_model_gateway.sql \
+  db/migration/V20260803133000__support_public_agent_config_rollout_supersede.sql \
+  db/migration-compat/lobehub-missing-after-rollout/V20260803141754__backfill_lobehub_model_gateway_after_rollout.sql; do
+  mkdir -p "${PERSISTENCE_JAR_ROOT}/$(dirname "${migration_resource}")"
+  cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/${migration_resource}" \
+    "${PERSISTENCE_JAR_ROOT}/${migration_resource}"
+done
 (cd "${PERSISTENCE_JAR_ROOT}" && zip -qr \
   "${RELEASE_ROOT}/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar" .)
 printf 'frontend\n' >"${RELEASE_ROOT}/dist/test-agent-frontend-dist.tar.gz"
@@ -63,6 +70,11 @@ printf '%s\n' \
   'TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=fixture-worker' \
   'TEST_AGENT_RELEASE_TOOLBOX=included' \
   'TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=fixture-toolbox' \
+  'TEST_AGENT_RELEASE_WORKFLOW=disabled' \
+  'TEST_AGENT_RELEASE_WORKFLOW_VERSION=none' \
+  'TEST_AGENT_RELEASE_WORKFLOW_ARCHIVE_SHA256=none' \
+  'TEST_AGENT_RELEASE_LOBEHUB=disabled' \
+  'TEST_AGENT_RELEASE_LOBEHUB_VERSION=none' \
   >"${RELEASE_ROOT}/deploy/internal/release-components.env"
 for session_log in "${ROOT_DIR}"/.agents/session-log*.md; do
   cp "${session_log}" "${RELEASE_ROOT}/.agents/$(basename "${session_log}")"
@@ -146,7 +158,9 @@ grep -Fxq 'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.
 START_HERE="${TMP_ROOT}/START-HERE.md"
 unzip -p "${BUNDLE}" 'test-agent-two-backend-complete/START-HERE.md' >"${START_HERE}"
 grep -Fq 'V20260728160800__create_toolbox_click_tracking.sql' "${START_HERE}"
-grep -Fq 'V20260728210000__index_in_flight_app_source_operations.sql' "${START_HERE}"
+grep -Fq '0352efa987219b9dde5c09e77b1eabfa719fc068' "${START_HERE}"
+grep -Fq '20260802173416' "${START_HERE}"
+grep -Fq '20260803133000' "${START_HERE}"
 grep -Fq 'OPENCODE_MANAGER_MAX_PROCESSES` 从 `20` 改为 `30`' "${START_HERE}"
 INNER_RELEASE="${TMP_ROOT}/inner-release.zip"
 unzip -p "${BUNDLE}" 'test-agent-two-backend-complete/test-agent-internal-release.zip' >"${INNER_RELEASE}"
@@ -176,6 +190,7 @@ grep -Fxq 'TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=122.233.30.4:18120,122.233
   <<<"${frontend_nginx_env}"
 grep -Fxq 'TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=122.233.30.4:18121,122.233.30.114:18121' \
   <<<"${frontend_nginx_env}"
+grep -Fxq 'TEST_AGENT_NGINX_WORKFLOW_UPSTREAM=' <<<"${frontend_nginx_env}"
 if grep -Fq 'TEST_AGENT_NGINX_TERMINAL_ROUTES=' <<<"${frontend_nginx_env}"; then
   echo "Complete package unexpectedly retained the legacy terminal route key" >&2
   exit 1
@@ -260,6 +275,6 @@ if bad_flyway_output="$(run_package 2>&1)"; then
   echo 'Complete package unexpectedly accepted the wrong enterprise Flyway migration' >&2
   exit 1
 fi
-grep -Fq 'Inner release contains the wrong enterprise Flyway migration' <<<"${bad_flyway_output}"
+grep -Fq 'Inner release contains the wrong release Flyway migration' <<<"${bad_flyway_output}"
 
 echo 'Fixed-name platform bundle, Flyway persistence JAR gate, session logs, node normalization, checksum, structure, MySQL separation, redaction and overwrite verified'

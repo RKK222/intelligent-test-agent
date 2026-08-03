@@ -5,6 +5,31 @@
 
 ## Entries
 
+### 2026-08-03 - 以今早企业基线收紧 release 可选能力与 Flyway 门禁
+
+### Why
+
+- 用户确认今天早上企业现网部署包的精确源码提交为 `0352efa987219b9dde5c09e77b1eabfa719fc068`，并要求基于当前 release 重打双后台、前端和公共 Agent 配置交付物。
+- 当前分支已经合入 Workflow、LobeHub 和后续公共配置 rollout 迁移，但本次 release 明确暂不启用前两项；其中 LobeHub 主 migration 版本低于现网已部署最高版本，不能直接依赖默认排序补跑。
+
+### What
+
+- 企业 release 默认构建关闭 Workflow/LobeHub：两项改为显式 opt-in，内层组件清单写入 `disabled`，不携带对应运行制品；前端构建期入口、登录回跳和深链接失败关闭，外层前端节点把 Workflow upstream 规范化为空并由 Nginx 返回显式 503。
+- 打包程序同时校验 toolbox、LobeHub 主/前向兼容、公共配置 rollout 和 rollout 后 LobeHub 兼容五个 migration 在 persistence JAR 内的固定路径与 SHA-256；命名测试新增 rollout migration 不可变字节锁。
+- 真实 PostgreSQL 集成测试按 `0352efa...` 的完整主 migration 上界 `V20260801104000` 构造现网历史，验证升级只选择 `V20260802173416` 前向兼容迁移，再执行 `V20260803133000`，不补跑低版本主 migration，也不启用 `outOfOrder`。
+- 同步企业内层/双后台手册、数据库与前端部署文档、前端工程说明和脚本夹具；公共配置独立仓库仍为干净提交 `8b81dc4`，本次继续交付既有完整白名单替换包，排除其受跟踪的会话和 OAuth 运行态文件。
+
+### How
+
+- JDK 25 下运行 `FlywayMigrationNamingTest` 7 项和 `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 真实 PostgreSQL 7 项全部通过。
+- 前端 typecheck 通过；发布开关与登录回跳 Vitest 7 项、超级管理员入口 Chromium 1 项通过；企业增量组件和固定名双后台封包 verifier 均通过，修改脚本 Bash 语法与 `git diff --check` 通过。
+- 提交前已回顾全部 `.agents/session-log*.md` 近期条目并确认无冲突标记；没有修改 `.env.local`、generated SDK 或 OpenCode 只读源码。
+
+### Result
+
+- 当前代码与打包门禁已经限定本次 release 不启用 Workflow/LobeHub，并覆盖今早精确企业基线的已知 Flyway 升级路径；正式内外层介质将在本条代码提交后全量构建，最终摘要以交付目录配套 `.sha256` 为准。
+- 本次未新增 HTTP/RunEvent wire；数据库 SQL 本身来自当前分支既有提交，本轮只新增不可变校验和精确基线升级测试。现场仍必须在停机前取得完整 `flyway_schema_history`；发现失败记录、未知 checksum、未知更高版本或分叉时停止发布，禁止 `repair`、`outOfOrder` 和手工改历史表。
+
 ### 2026-08-03 - 补充 OpenCode 进程分配冲突现场排查
 
 ### Why

@@ -12,10 +12,24 @@ describe("login redirect", () => {
     expect(resolveLoginRedirect("/s/ses_123?mode=readonly")).toBe("/s/ses_123?mode=readonly");
     expect(resolveLoginRedirect("/toolbox?source=omni-tools")).toBe("/toolbox?source=omni-tools");
     expect(resolveLoginRedirect("/toolbox/?source=it-tools")).toBe("/toolbox/?source=it-tools");
-    expect(resolveLoginRedirect("/lobehub/launch")).toBe("/lobehub/launch");
-    expect(resolveLoginRedirect("/workflow-chat")).toBe("/workflow-chat");
+  });
+
+  it("rejects disabled release feature routes by default", () => {
+    expect(resolveLoginRedirect("/lobehub/launch")).toBe("/");
+    expect(resolveLoginRedirect("/workflow-chat")).toBe("/");
+    expect(resolveLoginRedirect("/lobehub/launch?returnUrl=https://evil.example#ticket")).toBe("/");
+  });
+
+  it("keeps explicitly enabled release feature routes", () => {
+    const enabledFeatures = { lobehub: true, workflow: true };
+    expect(resolveLoginRedirect("/lobehub/launch", enabledFeatures)).toBe("/lobehub/launch");
+    expect(resolveLoginRedirect("/workflow-chat", enabledFeatures)).toBe("/workflow-chat");
     expect(resolveLoginRedirect("/lobehub/launch?returnUrl=https://evil.example#ticket"))
-      .toBe("/lobehub/launch");
+      .toBe("/");
+    expect(resolveLoginRedirect(
+      "/lobehub/launch?returnUrl=https://evil.example#ticket",
+      enabledFeatures
+    )).toBe("/lobehub/launch");
   });
 
   it("rejects external or login-loop redirects", () => {

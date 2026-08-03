@@ -11,6 +11,14 @@ OUTPUT_DIR="${SCRIPT_DIR}/dist"
 BUNDLE_NAME="test-agent-two-backend-complete"
 TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE="db/migration/V20260728160800__create_toolbox_click_tracking.sql"
 TOOLBOX_ENTERPRISE_MIGRATION_SHA256="777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2"
+LOBEHUB_MAIN_MIGRATION_RESOURCE="db/migration/V20260730090000__add_lobehub_model_gateway.sql"
+LOBEHUB_MAIN_MIGRATION_SHA256="0f16f1b2f3108e60580cfeb00102e10ac21e20220be255fae77bad9871f0bcb7"
+LOBEHUB_FORWARD_MIGRATION_RESOURCE="db/migration-compat/lobehub-missing/V20260802173416__backfill_lobehub_model_gateway.sql"
+LOBEHUB_FORWARD_MIGRATION_SHA256="4f773e35e55380592f094c03cc5a66fb69b7dee4a2799e1c9ab5d0b9d8f1634a"
+ROLLOUT_SUPERSEDE_MIGRATION_RESOURCE="db/migration/V20260803133000__support_public_agent_config_rollout_supersede.sql"
+ROLLOUT_SUPERSEDE_MIGRATION_SHA256="8b3cbad538f856d5daa06d15f118554ecefb2380a249287cdfe291eb71199022"
+LOBEHUB_RELEASE_FORWARD_MIGRATION_RESOURCE="db/migration-compat/lobehub-missing-after-rollout/V20260803141754__backfill_lobehub_model_gateway_after_rollout.sql"
+LOBEHUB_RELEASE_FORWARD_MIGRATION_SHA256="b73b06fb14f407979646df32a8342603ab957c2f4812a4013ab9635cdfdcce64"
 
 usage() {
   cat <<'USAGE'
@@ -99,14 +107,32 @@ sha256_jar_resource() {
   fi
 }
 
-verify_toolbox_enterprise_migration_jar() {
-  local jar="$1" actual
-  actual="$(sha256_jar_resource "${jar}" "${TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE}")"
-  if [[ "${actual}" != "${TOOLBOX_ENTERPRISE_MIGRATION_SHA256}" ]]; then
-    echo "Inner release contains the wrong enterprise Flyway migration: expected=${TOOLBOX_ENTERPRISE_MIGRATION_SHA256} actual=${actual}" >&2
+verify_release_flyway_resource() {
+  local jar="$1" resource="$2" expected="$3" actual
+  if ! unzip -Z1 "${jar}" | grep -Fx "${resource}" >/dev/null; then
+    echo "Inner release is missing release Flyway migration: ${resource}" >&2
     exit 1
   fi
-  printf 'Inner release Flyway migration verified: sha256=%s\n' "${actual}"
+  actual="$(sha256_jar_resource "${jar}" "${resource}")"
+  if [[ "${actual}" != "${expected}" ]]; then
+    echo "Inner release contains the wrong release Flyway migration: resource=${resource} expected=${expected} actual=${actual}" >&2
+    exit 1
+  fi
+  printf 'Inner release Flyway migration verified: resource=%s sha256=%s\n' "${resource}" "${actual}"
+}
+
+verify_release_flyway_migrations_jar() {
+  local jar="$1"
+  verify_release_flyway_resource "${jar}" \
+    "${TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE}" "${TOOLBOX_ENTERPRISE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" \
+    "${LOBEHUB_MAIN_MIGRATION_RESOURCE}" "${LOBEHUB_MAIN_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" \
+    "${LOBEHUB_FORWARD_MIGRATION_RESOURCE}" "${LOBEHUB_FORWARD_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" \
+    "${ROLLOUT_SUPERSEDE_MIGRATION_RESOURCE}" "${ROLLOUT_SUPERSEDE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" \
+    "${LOBEHUB_RELEASE_FORWARD_MIGRATION_RESOURCE}" "${LOBEHUB_RELEASE_FORWARD_MIGRATION_SHA256}"
 }
 
 # SHA 文件必须指向同目录的实际文件名，避免误校验同目录中的历史版本。
@@ -143,6 +169,14 @@ require_archive_absent() {
   local listing="$1" entry="$2"
   if grep -Fx "${entry}" <<<"${listing}" >/dev/null; then
     echo "Reused component must not be embedded in incremental release: ${entry}" >&2
+    exit 1
+  fi
+}
+
+require_archive_prefix_absent() {
+  local listing="$1" prefix="$2"
+  if grep -F "${prefix}" <<<"${listing}" >/dev/null; then
+    echo "Disabled component must not be embedded in release: ${prefix}" >&2
     exit 1
   fi
 }
@@ -199,19 +233,44 @@ if [[ "${persistence_entry_count}" != 1 ]]; then
 fi
 persistence_entry="$(grep -E '^dist/backend/lib/test-agent-persistence-[^/]+\.jar$' <<<"${release_listing}")"
 unzip -p "${RELEASE_ARCHIVE}" "${persistence_entry}" >"${TMP_ROOT}/test-agent-persistence.jar"
-verify_toolbox_enterprise_migration_jar "${TMP_ROOT}/test-agent-persistence.jar"
+verify_release_flyway_migrations_jar "${TMP_ROOT}/test-agent-persistence.jar"
 release_component_manifest="$(unzip -p "${RELEASE_ARCHIVE}" deploy/internal/release-components.env 2>/dev/null || true)"
 worker_component_mode="$(manifest_value "${release_component_manifest}" TEST_AGENT_RELEASE_WORKER_RUNTIME)"
 toolbox_component_mode="$(manifest_value "${release_component_manifest}" TEST_AGENT_RELEASE_TOOLBOX)"
+workflow_component_mode="$(manifest_value "${release_component_manifest}" TEST_AGENT_RELEASE_WORKFLOW)"
+lobehub_component_mode="$(manifest_value "${release_component_manifest}" TEST_AGENT_RELEASE_LOBEHUB)"
 # 没有组件清单的历史发布包按全量包处理，保持旧交付物可重新封装。
 worker_component_mode="${worker_component_mode:-included}"
 toolbox_component_mode="${toolbox_component_mode:-included}"
+# 旧包按实际条目推导可选能力；当前包必须通过清单明确 included/disabled。
+if [[ -z "${workflow_component_mode}" ]]; then
+  if grep -Fx 'dist/test-agent-workflow-offline.tar.gz' <<<"${release_listing}" >/dev/null; then
+    workflow_component_mode=included
+  else
+    workflow_component_mode=disabled
+  fi
+fi
+if [[ -z "${lobehub_component_mode}" ]]; then
+  if grep -F 'dist/lobehub/' <<<"${release_listing}" >/dev/null; then
+    lobehub_component_mode=included
+  else
+    lobehub_component_mode=disabled
+  fi
+fi
 [[ "${worker_component_mode}" == included || "${worker_component_mode}" == reuse ]] || {
   echo "Invalid worker runtime component mode: ${worker_component_mode}" >&2
   exit 1
 }
 [[ "${toolbox_component_mode}" == included || "${toolbox_component_mode}" == reuse ]] || {
   echo "Invalid toolbox component mode: ${toolbox_component_mode}" >&2
+  exit 1
+}
+[[ "${workflow_component_mode}" == included || "${workflow_component_mode}" == disabled ]] || {
+  echo "Invalid Workflow component mode: ${workflow_component_mode}" >&2
+  exit 1
+}
+[[ "${lobehub_component_mode}" == included || "${lobehub_component_mode}" == disabled ]] || {
+  echo "Invalid LobeHub component mode: ${lobehub_component_mode}" >&2
   exit 1
 }
 if [[ "${worker_component_mode}" == included ]]; then
@@ -239,6 +298,19 @@ else
   require_archive_absent "${release_listing}" dist/test-agent-toolbox-source.tar.gz.sha256
   require_archive_absent "${release_listing}" dist/toolbox-catalog-v1.json
   require_archive_absent "${release_listing}" dist/toolbox-catalog-v1.json.sha256
+fi
+if [[ "${workflow_component_mode}" == included ]]; then
+  require_archive_entry "${release_listing}" dist/test-agent-workflow-offline.tar.gz
+  require_archive_entry "${release_listing}" dist/test-agent-workflow-offline.tar.gz.sha256
+else
+  require_archive_absent "${release_listing}" dist/test-agent-workflow-offline.tar.gz
+  require_archive_absent "${release_listing}" dist/test-agent-workflow-offline.tar.gz.sha256
+fi
+if [[ "${lobehub_component_mode}" == disabled ]]; then
+  require_archive_prefix_absent "${release_listing}" dist/lobehub/
+elif ! grep -F 'dist/lobehub/' <<<"${release_listing}" >/dev/null; then
+  echo "LobeHub is marked included but no dist/lobehub/ artifact is present" >&2
+  exit 1
 fi
 # 外层完整包只接受包含当前仓库全部会话日志的内层发布包，避免业务制品与交付追溯记录脱节。
 session_log_count=0
@@ -380,6 +452,9 @@ validate_mysql_cluster_config() {
   grep -Fxq 'TEST_AGENT_NGINX_XXL_JOB_ADMINS=122.233.30.4:18080,122.233.30.114:18080' "${frontend}"
   grep -Fxq 'TEST_AGENT_NGINX_TOOLBOX_IT_TOOLS_UPSTREAM=122.233.30.4:18120,122.233.30.114:18120' "${frontend}"
   grep -Fxq 'TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM=122.233.30.4:18121,122.233.30.114:18121' "${frontend}"
+  if [[ "${workflow_component_mode}" == disabled ]]; then
+    grep -Fxq 'TEST_AGENT_NGINX_WORKFLOW_UPSTREAM=' "${frontend}"
+  fi
 
   backend_password="$(sed -n 's/^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=//p' "${backend_4}")"
   backend_token="$(sed -n 's/^TEST_AGENT_XXL_JOB_ACCESS_TOKEN=//p' "${backend_4}")"
@@ -431,6 +506,10 @@ normalize_frontend_node_archive() {
     '122.233.30.4:18120,122.233.30.114:18120'
   replace_or_append_env_value "${nginx_env}" TEST_AGENT_NGINX_TOOLBOX_OMNI_TOOLS_UPSTREAM \
     '122.233.30.4:18121,122.233.30.114:18121'
+  if [[ "${workflow_component_mode}" == disabled ]]; then
+    # 当前 release 未交付 Python 服务时强制留空，configure-nginx.sh 会生成显式 503。
+    replace_or_append_env_value "${nginx_env}" TEST_AGENT_NGINX_WORKFLOW_UPSTREAM ''
+  fi
   target="${TMP_ROOT}/$(basename "${source}")"
   archive_create_tar_gz "${target}" "${node_root}" "${node_dir}"
   chmod 0600 "${target}"

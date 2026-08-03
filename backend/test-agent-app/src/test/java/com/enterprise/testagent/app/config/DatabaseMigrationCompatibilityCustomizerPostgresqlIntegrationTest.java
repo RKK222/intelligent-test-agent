@@ -44,6 +44,9 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             DatabaseMigrationCompatibilityCustomizer.LOBEHUB_RELEASE_FORWARD_COMPATIBILITY_LOCATION;
     private static final String LOBEHUB_MAIN_RESOURCE =
             "db/migration/V20260730090000__add_lobehub_model_gateway.sql";
+    private static final String DEPLOYED_ENTERPRISE_BASELINE_COMMIT =
+            "0352efa987219b9dde5c09e77b1eabfa719fc068";
+    private static final String DEPLOYED_ENTERPRISE_BASELINE_MAX_VERSION = "20260801104000";
 
     @Container
     private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
@@ -131,12 +134,13 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
     }
 
     @Test
-    void missingLobehubMigrationAfterLaterVersionUsesForwardCompatibilityMigration() {
-        DataSource dataSource = dataSource("lobehub_missing_migration");
+    void deployedEnterpriseCommitUsesForwardCompatibilityMigration() {
+        DataSource dataSource = dataSource("deployed_enterprise_0352efa");
         migrateTo(dataSource, "20260728210000", MAIN_LOCATION);
+        // 0352efa 的主 migration 最高为 V20260801104000，且不包含后来合入的 LobeHub 低版本 migration。
         migrateWithoutResourceTo(
                 dataSource,
-                DatabaseMigrationCompatibilityCustomizer.LOBEHUB_SPLIT_MARKER_VERSION,
+                DEPLOYED_ENTERPRISE_BASELINE_MAX_VERSION,
                 LOBEHUB_MAIN_RESOURCE);
 
         assertThat(applied(
@@ -146,6 +150,9 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
         assertThat(applied(
                 dataSource,
                 DatabaseMigrationCompatibilityCustomizer.LOBEHUB_SPLIT_MARKER_VERSION))
+                .isTrue();
+        assertThat(applied(dataSource, DEPLOYED_ENTERPRISE_BASELINE_MAX_VERSION))
+                .as("enterprise baseline %s must be reproduced before upgrading", DEPLOYED_ENTERPRISE_BASELINE_COMMIT)
                 .isTrue();
         assertLobehubTablesAndParameters(dataSource, 0L);
 
@@ -160,6 +167,10 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             assertThat(applied(
                     dataSource,
                     DatabaseMigrationCompatibilityCustomizer.LOBEHUB_FORWARD_COMPATIBILITY_VERSION))
+                    .isTrue();
+            assertThat(applied(
+                    dataSource,
+                    DatabaseMigrationCompatibilityCustomizer.RELEASE_ROLLOUT_MIGRATION_VERSION))
                     .isTrue();
             assertLobehubTablesAndParameters(dataSource, 3L);
         });

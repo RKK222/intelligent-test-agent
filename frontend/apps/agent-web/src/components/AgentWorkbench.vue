@@ -191,6 +191,7 @@ import {
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import { notifyError, notifyFeedback } from "./notify";
 import { launchLobehubInNewTab } from "./lobehub-launch";
+import { releaseFeatures } from "../release-features";
 import { appendLatestRawOutputEntry, prepareRawOutputBody } from "./raw-output";
 import { formatBeijingDateTimeInput } from "../utils/night-execution-schedule";
 import { blobSha256Hex } from "../utils/sha256";
@@ -330,6 +331,8 @@ type RawOutputEntry = {
 };
 
 const isSuperAdmin = computed(() => authStore.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const canUseLobehub = computed(() => releaseFeatures.lobehub && isSuperAdmin.value);
+const canUseWorkflow = computed(() => releaseFeatures.workflow && isSuperAdmin.value);
 const isAppAdmin = computed(() =>
   isSuperAdmin.value || authStore.currentUser?.roles?.includes("APP_ADMIN") === true
 );
@@ -340,7 +343,7 @@ const firstLoginGuideActive = ref(true);
 const lobehubLaunching = ref(false);
 
 async function openLobehub() {
-  if (lobehubLaunching.value) return;
+  if (!canUseLobehub.value || lobehubLaunching.value) return;
   lobehubLaunching.value = true;
   try {
     await launchLobehubInNewTab(api);
@@ -352,6 +355,7 @@ async function openLobehub() {
 }
 
 async function openWorkflowChat() {
+  if (!canUseWorkflow.value) return;
   await router.push({ name: "workflow-chat" });
 }
 
@@ -9131,7 +9135,7 @@ async function handleLogout() {
             <Wrench class="figma-activity-icon" :stroke-width="1.5" />
           </button>
           <button
-            v-if="isSuperAdmin"
+            v-if="canUseLobehub"
             type="button"
             class="figma-activity-btn"
             aria-label="通用问答"
@@ -9143,7 +9147,7 @@ async function handleLogout() {
             <MessageSquare class="figma-activity-icon" :stroke-width="1.5" />
           </button>
           <button
-            v-if="isSuperAdmin"
+            v-if="canUseWorkflow"
             type="button"
             class="figma-activity-btn"
             aria-label="长程任务工作台"

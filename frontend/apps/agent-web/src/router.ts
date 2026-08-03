@@ -1,4 +1,9 @@
 import { createRouter, createWebHistory } from "vue-router";
+import {
+  isReleaseFeaturePathEnabled,
+  releaseFeatures,
+  type ReleaseFeatureFlags
+} from "./release-features";
 import { jumpAam } from "./utils/aamLogin";
 import { useAuthStore } from "./stores/authStore";
 
@@ -59,7 +64,10 @@ export const router = createRouter({
 
 const LOGIN_REDIRECT_BASE_URL = "http://test-agent.local";
 
-export function resolveLoginRedirect(rawRedirect: unknown): string {
+export function resolveLoginRedirect(
+  rawRedirect: unknown,
+  features: ReleaseFeatureFlags = releaseFeatures
+): string {
   if (typeof rawRedirect !== "string") {
     return "/";
   }
@@ -80,7 +88,7 @@ export function resolveLoginRedirect(rawRedirect: unknown): string {
     return "/";
   }
 
-  if (!isKnownLoginRedirectPath(target.pathname)) {
+  if (!isKnownLoginRedirectPath(target.pathname, features)) {
     return "/";
   }
 
@@ -92,11 +100,11 @@ export function resolveLoginRedirect(rawRedirect: unknown): string {
   return `${target.pathname}${target.search}${target.hash}`;
 }
 
-function isKnownLoginRedirectPath(pathname: string): boolean {
+function isKnownLoginRedirectPath(pathname: string, features: ReleaseFeatureFlags): boolean {
   return pathname === "/"
     || /^\/toolbox\/?$/.test(pathname)
-    || pathname === "/lobehub/launch"
-    || pathname === "/workflow-chat"
+    || (pathname === "/lobehub/launch" && features.lobehub)
+    || (pathname === "/workflow-chat" && features.workflow)
     || /^\/s\/[^/]+$/.test(pathname);
 }
 
@@ -131,6 +139,10 @@ router.beforeEach(async (to, _from) => {
       console.error("统一认证登录失败:", error);
     }
     return { path: to.path, query: restQuery, replace: true };
+  }
+
+  if (!isReleaseFeaturePathEnabled(to.path)) {
+    return { path: "/", replace: true };
   }
 
   if (to.name === "login") {

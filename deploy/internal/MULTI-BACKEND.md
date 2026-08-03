@@ -110,6 +110,8 @@ deploy/internal/package-release.sh --python-libs-only \
   --output-dir deploy/internal/dist
 ```
 
+当前 release 不启用 Workflow 和 LobeHub，命令中不得添加 `--with-workflow` 或 `--with-lobehub`。默认包必须满足：组件清单两项均为 `disabled`、无两套运行制品、前端无入口且深链接回到工作台、前端节点 `TEST_AGENT_NGINX_WORKFLOW_UPSTREAM=`。部署脚本会把空 upstream 渲染为 `/workflow-api/` 显式 503，不回落到 Java 或 SPA。
+
 空值是有意配置：前端统一使用同源相对 `/api`，所以从域名打开时请求域名，从 IP 打开时请求 IP。不得固定成其中任一 origin，否则另一个入口会重新产生跨域或名称解析问题。
 
 发布脚本在输出目录保存组件指纹，只对两个大组件做增量判断：
@@ -161,10 +163,9 @@ test "${inner_sha}" = "${embedded_sha}"
 
 后端是瘦启动 JAR + 外置依赖目录结构；Flyway SQL 实际位于
 `dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar`，不是
-`dist/backend/test-agent-app.jar`。打包脚本、外层封装脚本和后台部署脚本都会强制校验企业
-原始 migration SHA-256 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`；
-后台部署还会比较发布包与安装后 persistence JAR 的完整文件 SHA，防止旧解压目录或旧
-`backend/lib` 被继续使用。
+`dist/backend/test-agent-app.jar`。打包脚本和外层封装脚本会逐项校验工具盒子企业 migration、
+LobeHub 主/两条兼容 migration、公共 Agent rollout 纠错 migration 的固定 SHA-256；后台部署还会
+比较发布包与安装后 persistence JAR 的完整文件 SHA，防止旧解压目录或旧 `backend/lib` 被继续使用。
 
 Mac 只负责构建；U 盘导入企业网后，中转机固定在 `~/Desktop/mimoagent/0709` 校验和分发，不得在中转机使用 `/data/0709`。`/data/0709` 只是 `.4/.114/.2` 目标服务器的接收目录。当前固定名外层包在中转机执行：
 
@@ -538,21 +539,32 @@ grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL
 
 两台第一条都应输出 `1`，第二条均无输出；不要使用 `grep` 直接回显密码。
 
-企业上午已经部署过旧包时，PostgreSQL 中可能已有 `V20260721213000`。本包把尚未交付的夜间 XXL
-迁移固定为更晚的 `V20260722130000`，Flyway 会正常顺序执行；不要在企业环境添加
-`SPRING_FLYWAY_OUT_OF_ORDER=true`，也不要手工修改 `flyway_schema_history`。
+今早现网部署包的精确源码基线是 `0352efa987219b9dde5c09e77b1eabfa719fc068`。该提交的主
+migration 最高为 `V20260801104000`，已经晚于当前分支后来合入的
+`V20260730090000__add_lobehub_model_gateway.sql`，所以现网升级属于确定的版本倒序场景。部署前由
+数据库管理员导出完整历史，不能只留最近 20 条：
 
-本次平台库还包含工具盒子点击跟踪和应用源码在途恢复索引变更。部署前由数据库管理员只读查询
-`flyway_schema_history` 并留存最近 20 条的 `version/checksum/success`。企业库若已执行
-`V20260728160800__create_toolbox_click_tracking.sql`，其 checksum 必须为 `-1966404877`；只有早期测试库可能已执行旧
-`V20260727203500__create_toolbox_click_tracking.sql`，少数过渡库可能执行过当前版本的 checksum `-74327385` 幂等变体。当前包必须按已应用 history 选择原始字节不变的隔离兼容资源，未知 checksum 必须失败关闭。随后
-`V20260728210000__index_in_flight_app_source_operations.sql` 只新增恢复扫描索引。
+```sql
+select installed_rank, version, description, type, script, checksum, installed_on, success
+from flyway_schema_history
+order by installed_rank;
+```
 
-除上述已知历史外，任一记录失败、checksum 不一致、出现未知更高版本或其它历史分叉时停止发布；不得启用 Flyway
-`outOfOrder`、执行 `repair` 或手工修改历史表。必须先部署 `.4`，确认 readiness 正常且
-`V20260728210000` 为 `success=true`；企业正式/新建历史中的 `V20260728160800` 应为 `-1966404877`，过渡历史保持 `-74327385`，旧 `V20260727203500` 且当前版本原本缺失的历史不得新增当前版本。确认符合对应已知类型后再部署 `.114`；`.4` 日志出现
-`FlywayValidateException`、`ClassNotFoundException: org.postgresql.Driver` 或
-`Application run failed` 时不得继续滚动。
+只有当完整历史与 `0352efa...` 构建包一致、所有记录 `success=true`，并且现网不存在
+`20260730090000`、`20260802173416`、`20260803133000`、`20260803141754` 时，才按本次已验证路径继续。
+第一台 `.4` 启动时，现有 `DatabaseMigrationCompatibilityCustomizer` 必须保持 `outOfOrder=false`，隐藏无法
+顺序执行的 `20260730090000`，改为执行更高版本 `20260802173416`，随后执行
+`20260803133000`。本次正常路径不应执行 `20260803141754`；该版本只处理“rollout 迁移已经执行、早期
+LobeHub 补偿仍缺失”的另一套已知历史。虽然 LobeHub 服务和页面入口本次关闭，兼容 migration 仍会创建三张
+平台模型目录/聚合表，并写入 `LOBEHUB_ENABLED=false` 等四个默认禁用参数，这是数据库兼容要求，不代表启用服务。
+
+`V20260728160800__create_toolbox_click_tracking.sql` 的现网 checksum 仍必须为 `-1966404877`；只有已登记的
+早期测试/过渡历史才允许旧 `V20260727203500` 或 `-74327385` 幂等变体；今早基线中的
+`V20260728210000__index_in_flight_app_source_operations.sql` 也必须保留且为 `success=true`。任一失败记录、未知 checksum、
+未知更高版本、缺少今早基线版本或其它历史分叉都必须停止发布；不得启用 Flyway `outOfOrder`、执行
+`repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常、`20260802173416` 与
+`20260803133000` 均为 `success=true`、`20260730090000` 未被补写，再部署 `.114`。`.4` 日志出现
+`FlywayValidateException`、`ClassNotFoundException: org.postgresql.Driver` 或 `Application run failed` 时不得继续滚动。
 
 外部 MySQL 端口验证通过后，在 `.4` 执行：
 

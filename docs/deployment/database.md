@@ -86,6 +86,8 @@ PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审
 
 纠错仓储必须在同一个 PostgreSQL 事务内 CAS 更新指定 `DRAINING` 旧任务、清除其 server/target/worktree fencing 租约、创建唯一的新活动任务并写入双向关系；任一步失败都整体回滚，因此消息门禁没有可见空窗。迁移不改写现有 `DRAINING` 数据，也不会自动停止现场进程；升级后仍需超级管理员从公共配置管理页对精确旧 rollout 执行一次“强制终止并替换发布”。该 migration 一旦在共享或企业数据库执行即不可改写；发布集成时仍须按根规范核对 `flyway_schema_history` 版本和 checksum，并从各已知企业基线升级验证。
 
+当前 release 将该 migration 的原始 SHA-256 锁定为 `8b3cbad538f856d5daa06d15f118554ecefb2380a249287cdfe291eb71199022`；正式 persistence JAR 和外层企业包都会复核该字节。
+
 ## V1 核心表
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V1__create_core_tables.sql` 创建以下表：
@@ -1189,14 +1191,17 @@ V18 及以前保留既有数字版本，已在共享或稳定数据库执行过�
 | `internal_model_provider_model_probes` | 按供应商、模型和能力覆盖保存最近一次成功/失败与时间；不保存固定探测输入、上游响应或原始错误。 |
 | `model_gateway_usage_daily` | 按日期、来源 client、用户、供应商、公开模型和端点原子累加请求/成功/失败、token 和总耗时；不保存逐请求、prompt、回答、UCID、traceId 或错误。 |
 
-已知一套本地库先执行了 `V20260801093854`，但 history 中缺失后来合入的 `V20260730090000`，因此默认
+今早企业已部署包的精确源码提交为 `0352efa987219b9dde5c09e77b1eabfa719fc068`；该提交主 migration
+最高为 `V20260801104000`，且 history 中缺失后来合入的 `V20260730090000`，因此默认
 Flyway 顺序校验会失败。该分叉由现有 `DatabaseMigrationCompatibilityCustomizer` 在校验前精确识别并隐藏主
 目录中无法再顺序执行的旧候选。早期 history 加载
 `db/migration-compat/lobehub-missing/V20260802173416__backfill_lobehub_model_gateway.sql`；如果 release
 `V20260803133000` 已执行而早期补偿尚未执行，则只加载更高版本
 `db/migration-compat/lobehub-missing-after-rollout/V20260803141754__backfill_lobehub_model_gateway_after_rollout.sql`；
 早期补偿已执行的库继续解析其原始资源。两条补偿都幂等创建同样三张表和四个生产必需参数；正常顺序库和
-空库不加载 compatibility location，仍执行原始 `V20260730090000`。
+空库不加载 compatibility location，仍执行原始 `V20260730090000`。真实 PostgreSQL 集成测试会先按
+`0352efa...` 的完整主 migration 上界 `V20260801104000`（排除当时尚不存在的 LobeHub migration）构造现网
+history，再验证默认 `outOfOrder=false` 升级为 `V20260802173416`，随后执行 `V20260803133000`。
 
 主 migration、早期补偿和 release 后补偿分别锁定 SHA-256
 `0f16f1b2f3108e60580cfeb00102e10ac21e20220be255fae77bad9871f0bcb7`、

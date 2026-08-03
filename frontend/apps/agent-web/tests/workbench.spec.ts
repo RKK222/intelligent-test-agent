@@ -2999,12 +2999,12 @@ test("application switch menu excludes unjoined apps and keeps them in join dial
   await expect(page.getByRole("option", { name: "F-GCMS" })).toBeVisible();
 });
 
-test("super admin can open system management from the activity bar", async ({ page }) => {
+test("release-disabled question and workflow entries stay hidden for super admin", async ({ page }) => {
   await mockBackendApi(page, { authRoles: ["SUPER_ADMIN"] });
 
   await gotoWorkbench(page);
-  await expect(page.getByRole("button", { name: "通用问答" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "长程任务工作台" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "通用问答" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "长程任务工作台" })).toHaveCount(0);
   await page.getByRole("button", { name: "系统管理" }).click();
 
   await expect(page.getByRole("navigation", { name: "系统管理导航" })).toBeVisible();

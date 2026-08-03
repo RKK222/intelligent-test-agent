@@ -50,6 +50,10 @@ class FlywayMigrationNamingTest {
             "V20260803141754__backfill_lobehub_model_gateway_after_rollout.sql";
     private static final String RELEASE_LOBEHUB_FORWARD_COMPATIBILITY_SHA256 =
             "b73b06fb14f407979646df32a8342603ab957c2f4812a4013ab9635cdfdcce64";
+    private static final String RELEASE_ROLLOUT_SUPERSEDE_MIGRATION =
+            "V20260803133000__support_public_agent_config_rollout_supersede.sql";
+    private static final String RELEASE_ROLLOUT_SUPERSEDE_SHA256 =
+            "8b3cbad538f856d5daa06d15f118554ecefb2380a249287cdfe291eb71199022";
     private static final List<String> APPLIED_LEGACY_SEED_MIGRATIONS = List.of(
             "V10__seed_fcoss_application.sql",
             "V13__seed_fcoss_more_workspaces.sql");
@@ -138,6 +142,15 @@ class FlywayMigrationNamingTest {
                 "db/migration-compat/lobehub-missing-after-rollout",
                 RELEASE_LOBEHUB_FORWARD_COMPATIBILITY_MIGRATION,
                 RELEASE_LOBEHUB_FORWARD_COMPATIBILITY_SHA256);
+    }
+
+    @Test
+    void releaseRolloutSupersedeMigrationRemainsByteExact()
+            throws IOException, NoSuchAlgorithmException {
+        assertMigrationSha256(
+                "db/migration",
+                RELEASE_ROLLOUT_SUPERSEDE_MIGRATION,
+                RELEASE_ROLLOUT_SUPERSEDE_SHA256);
     }
 
     private static void assertMigrationSha256(

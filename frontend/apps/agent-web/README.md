@@ -10,7 +10,7 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 
 - 定时异步执行交互由 `AgentWorkbench` 与 `FigmaChatPanel` 组合：输入框发送按钮左侧提供定时图标，普通用户点击后加载北京时间 21:00 至次日 07:00 的 15 分钟容量时段并默认选中后端推荐值；超级管理员还可切换“测试时间”，使用 1/3/5 分钟快捷值或显式按 `Asia/Shanghai` 解析的 `datetime-local` 选择未来 24 小时内的完整分钟。创建面板每次打开仍默认夜间模式，提交前按当前时间重新校验；自定义改期保持原模式，角色移除后隐藏调整入口但保留取消。新对话草稿成功提交后才清空输入。主对话始终展示当前会话内容；“会话列表”以 Teleport 非模态抽屉覆盖对话栏左侧编辑区，内部提供“会话 / 待执行任务”页签，选择会话或任务后保持打开，当前会话高亮，再次点击“会话列表”、关闭按钮、Esc 或收起右栏时关闭。待执行页逐页收齐全部待执行项，并展示内容、时间、创建时间和状态，自定义任务显示“测试定时”和单个精确时间，旧响应缺少模式时按夜间范围展示。当前 Session 存在 `SCHEDULED/DISPATCHING` 任务时禁用普通发送但保留“新建对话”。切换到待执行页签时立即查询，页面另按每 30 秒及窗口重新聚焦刷新；夜间容量冲突会重取最新时段。成功投递后复用现有 Session/Run/RunEvent 展示，并以来源标签和北京时间实际启动时间区分。
 
-- 提供 `/985211` 登录页、`/` 工作台、`/toolbox` 离线工具箱、`/lobehub/launch` 通用问答交接、`/workflow-chat` 独立长程任务对话和 `/s/[sessionId]` 只读 transcript 页面（vue-router 客户端路由），未知路径进入 404 页面。通用问答和工作流的活动栏入口仅对超级管理员展示，路由本身继续沿用平台登录保护；工作流新建空对话直接展示结构化仓库/分支输入卡，页面懒加载 `workflow-chat` 与 TDesign 样式，并通过 `workflow-api-client` 直连同源 Python。
+- 提供 `/985211` 登录页、`/` 工作台、`/toolbox` 离线工具箱、可选 `/lobehub/launch` 通用问答交接、可选 `/workflow-chat` 独立长程任务对话和 `/s/[sessionId]` 只读 transcript 页面（vue-router 客户端路由），未知路径进入 404 页面。两个可选入口分别要求构建期 `VITE_TEST_AGENT_LOBEHUB_ENABLED=true`、`VITE_TEST_AGENT_WORKFLOW_ENABLED=true` 且用户为超级管理员；缺失或其它值时入口隐藏、登录回跳拒绝、直接访问回到工作台。当前 release 企业包两项均为 `false`。启用后的工作流新建空对话直接展示结构化仓库/分支输入卡，页面懒加载 `workflow-chat` 与 TDesign 样式，并通过 `workflow-api-client` 直连同源 Python。
 - 组合 dockview-vue 三栏布局和底部运行面板。
 - 组合 36px 顶栏、48px activity rail、紧凑左侧文件面板、中间编辑器和右侧 Agent 面板；顶栏与三栏之间的 8px 间隔复用现有弹框常见的浅雾蓝画布，活动栏融入画布，三栏分别使用纯白底、8px 圆角、发丝边框与轻阴影形成独立悬浮面板。三栏顶部、工作区/Agent 目录加载态和中间无文件预览态同样保持纯白，当前文件标签以 2px 工行红上沿标识。外围 Logo 直接使用用户确认的初版耳机/拱形品牌图形 PNG，保留原图轮廓和比例，图形使用低饱和暗红实色 #7f1e2b，中文品牌字标使用黑色，英文副标题使用深红以呼应图形；导航和选中态继续使用纯白/浅雾蓝/工行红 `--ta-shell-*` token，中间编辑器和右侧对话内部保持原样；Run/Terminal 默认隐藏在底部抽屉中，通过 activity rail 打开。
 - 顶栏非品牌文字默认保持纯黑；Logo 直接使用用户确认的初版耳机/拱形品牌图形 PNG，保留原图轮廓和比例，图形使用低饱和暗红实色 #7f1e2b，中文品牌字标使用黑色，英文副标题使用深红以呼应图形，并按“36px 首行 + 8px 面板间隔”的 44px 视觉带上下居中：Logo 左对齐；应用、工作空间、版本三个白底细框按钮放在 Logo 末端与右侧工具组起点之间的网格列正中，使左右留白相等；书本手册、透明底细框运行态摘要和单字头像依次固定在右侧。手册默认透明无框，弹框打开期间保持与活动栏一致的柔红底、深红图标和工行红定位标记；单字用户名使用 12px。顶部工作空间/版本复用 `appTemplatesWithVersions` 及既有 `handleLoadVersions` / `handleSelectVersion`，左下角入口继续保留；顶部选定工作空间后，单版本直接默认该项，多版本复用后端 `version desc, updated_at desc` 结果的首项，不改变对话逻辑。
@@ -151,15 +151,15 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 
 ### LobeHub 通用问答
 
-- activity rail 的入口对已登录用户可见；`launchLobehubInNewTab` 必须在 click 同步阶段先打开空白标签，避免
+- 仅在 LobeHub 构建开关开启且当前用户为超级管理员时显示 activity rail 入口；`launchLobehubInNewTab` 必须在 click 同步阶段先打开空白标签，避免
   异步签票被浏览器拦截；签票后在该空白标签自身创建临时表单并用 `_self` 提交，避免切断 `opener` 后再依赖
   命名窗口查找。失败时关闭该标签。
 - `submitLobehubTicket` 只接受 HTTP(S)、无 userinfo/query/fragment 且 path 精确为
   `/api/auth/platform/consume` 的后端 `consumeUrl`，随后用临时隐藏表单 POST `ticket` 并立即清理 DOM。
-- `/lobehub/launch` 是聊天域名会话失效时唯一回跳入口；登录 guard 会保存这一固定路径，认证完成后在当前标签
+- 启用时 `/lobehub/launch` 是聊天域名会话失效时唯一回跳入口；登录 guard 会保存这一固定路径，认证完成后在当前标签
   换票。页面不读取 return URL，也不检查或同步 LobeHub Session。
 - `tests/lobehub-launch.test.ts` 覆盖同步开窗、弹窗自身隐藏 POST、固定 consume path、无 URL/存储泄漏和失败清理；
-  `tests/login-redirect.test.ts` 覆盖未登录 launch 的认证恢复。
+  `tests/release-features.test.ts` 与 `tests/login-redirect.test.ts` 覆盖开关失败关闭、当前 release 默认拒绝两个可选路由，以及显式启用后的认证恢复。
 
 ## 禁止事项
 

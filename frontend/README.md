@@ -50,7 +50,7 @@ packages/shared-types
 
 `agent-web` 每次加载 Vite 配置时按北京时间生成 `VyyyyMMdd.HHmmss` 构建版本，并以只读编译常量固化到 bundle；设置弹窗左侧导航底部展示该版本。普通刷新或静态服务重启不会改变版本，只有重新构建前端产物才会变化。
 
-`/workflow-chat` 是与 OpenCode/LobeHub 对话隔离的长程任务入口，工作台活动栏按钮仅对超级管理员展示；路由本身继续沿用平台登录保护。新建空对话直接展示仓库/分支/模式/智能体输入卡，不要求先调用意图模型换取表单。`packages/workflow-api-client` 直接访问同源 Python `/workflow-api/v1/**` 并使用带 Authorization/`Last-Event-ID` 的 fetch SSE；`packages/workflow-chat` 提供 TDesign Chat、结构化输入、进度、取消、报告版本和局部重分析。两包不依赖 `backend-api`、`event-stream-client` 或现有 `agent-chat` 状态。
+`/workflow-chat` 是与 OpenCode/LobeHub 对话隔离的长程任务入口。只有构建期 `VITE_TEST_AGENT_WORKFLOW_ENABLED=true` 且用户为超级管理员时才展示活动栏按钮并允许深链接；缺失或其它值一律关闭。当前 release 企业包注入 `false`。启用后的新建空对话直接展示仓库/分支/模式/智能体输入卡，不要求先调用意图模型换取表单。`packages/workflow-api-client` 直接访问同源 Python `/workflow-api/v1/**` 并使用带 Authorization/`Last-Event-ID` 的 fetch SSE；`packages/workflow-chat` 提供 TDesign Chat、结构化输入、进度、取消、报告版本和局部重分析。两包不依赖 `backend-api`、`event-stream-client` 或现有 `agent-chat` 状态。
 
 本地Vite把`/workflow-api/**`直接代理到独立Python，默认目标为`http://127.0.0.1:8090`，可用`TEST_AGENT_WORKFLOW_API_URL`覆盖；Python仍按`workflow-service/README.md`独立启动，不经过Java。代理未配置或Python未启动时，客户端只展示脱敏的路由/服务诊断，不解析或回显SPA HTML正文。
 
@@ -82,6 +82,8 @@ packages/shared-types
 `apps/agent-web` 在“编辑器”后为所有登录用户提供工具盒子活动栏入口和受保护 `/toolbox` 路由。工具盒子进入时保存并隐藏左右面板和底部抽屉，退出、浏览器前进/后退时精确恢复原布局；页面移除占空间的顶部 Hero，只保留屏幕阅读器标题，并从 `packages/backend-api` 读取 193 项离线目录。搜索、来源和 14 个固定分类标签组成吸顶控制区；分类数字随搜索词和来源实时联动，不受当前分类选择影响，移动端标签保持单行横向滚动。热门区仍展示正点击 Top 10。每张卡片是带 `target="_blank"`、`rel="noopener noreferrer"` 的原生具体工具链接，普通点击和中键会异步上报，失败不阻断打开或显示干扰提示。本地 Vite 默认把两个工具前缀分别代理到 `127.0.0.1:18120/18121` 并剥离公开前缀，套件根路径返回 `/toolbox`，因此使用 `restart-dev-services.sh` 时直接访问 3000 端口即可联调具体工具。
 
 ### LobeHub 通用问答
+
+当前 release 企业包设置 `VITE_TEST_AGENT_LOBEHUB_ENABLED=false`；入口、登录回跳和直接路由均关闭。后续只有在独立 LobeHub 制品通过准入并重新构建启用版前端后，以下交接链路才生效。
 
 工作台 activity rail 的“通用问答”仅对超级管理员展示，只承担安全登录交接，不嵌入或复制 LobeHub UI。点击处理器同步创建带
 `noopener` 语义的空白标签，再由 `packages/backend-api` 使用现有 Bearer Token 申请一次性票据，并向后端返回的

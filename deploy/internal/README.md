@@ -18,6 +18,8 @@
 
 独立长程任务使用 `package-workflow-offline.sh` 单独生成固定 `linux/amd64` 的 workflow-service、runner-controller、analysis-task 镜像tar及SBOM/许可证/锁文件/SHA256。它不并入Java JAR，也不使用Docker Compose；控制节点与分析节点由 `workflow/workflow-docker.sh` 分别管理。Nginx设置 `TEST_AGENT_NGINX_WORKFLOW_UPSTREAM` 后把 `/workflow-api/` 直接转发Python，禁止落入Java upstream。正式发布顺序固定为“workflow数据库与Redis只读ACL → Java窄能力/模型网关 → Python API/Worker → Runner/受限网络 → 前端与Nginx”。
 
+当前 release 分支的企业包明确不启用 Workflow 和 LobeHub：默认打包命令不携带两者运行制品，组件清单写入 `disabled`，前端隐藏入口并拒绝两个深链接；前端节点的 `TEST_AGENT_NGINX_WORKFLOW_UPSTREAM` 强制留空，`/workflow-api/` 预期返回 503。上述两套独立部署文档仅供后续单独启用评审，本次部署不得使用 `--with-workflow`、`--with-lobehub`，也不得启动相应服务。
+
 ## 共同前提
 
 - Mac 构建机允许联网；企业服务器完全离线。
@@ -129,6 +131,8 @@ TEST_AGENT_LOBEHUB_ARTIFACT_DIR=/absolute/path/to/lobehub-release-artifacts \
 
 外部 fork 和完整制品通过准入后，可用同一脚本生成全量附带包或只包含 LobeHub 的离线包：
 
+> 以下命令不属于当前 release；只有后续重新审批并重新构建启用版前端时才能执行。
+
 ```bash
 TEST_AGENT_LOBEHUB_ARTIFACT_DIR=/absolute/path/to/lobehub-release-artifacts \
   deploy/internal/package-release.sh --with-lobehub
@@ -188,6 +192,8 @@ test -z "$(git diff --name-only --diff-filter=U)"
 cd /Users/kaka/Desktop/intelligent-test-agent
 deploy/internal/package-release.sh --output-dir deploy/internal/dist
 ```
+
+当前 release 必须使用上述默认命令，不添加 `--with-workflow` 或 `--with-lobehub`。打包后应从 `release-components.env` 复核两项均为 `disabled`，且 ZIP 中不存在 `dist/test-agent-workflow-offline.tar.gz` 和 `dist/lobehub/`。
 
 `VITE_TEST_AGENT_API_BASE_URL` 是编译期参数。只允许一个入口时可固化完整 origin；域名和 IP 需要同时兼容时必须显式传空值，让前端使用当前页面同源的相对 `/api`。当前双入口包使用：
 
@@ -500,9 +506,11 @@ test-agent-config-SENSITIVE-<role>-<node>-<timestamp>.tar.gz.sha256
 
 企业后端采用 `test-agent-app.jar` 瘦启动器与 `dist/backend/lib/` 外置依赖。Flyway migration
 实际打进 `test-agent-persistence-0.1.0-SNAPSHOT.jar`；打包、外层封装、节点预校验和安装后
-复验均锁定工具盒子企业 migration SHA-256
-`777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`，并比较发布包与安装后
-persistence JAR 的完整 SHA。只校验外层 ZIP 或 app JAR 不能证明数据库资源已更新。
+复验会同时锁定工具盒子企业 migration、LobeHub 主/两条兼容 migration 和公共 Agent rollout
+纠错 migration 的 SHA-256，并比较发布包与安装后 persistence JAR 的完整 SHA。只校验外层 ZIP
+或 app JAR 不能证明数据库资源已更新。当前现网基线提交固定为
+`0352efa987219b9dde5c09e77b1eabfa719fc068`，升级前还必须按多后台手册读取完整
+`flyway_schema_history`，不能只凭提交号假定数据库历史一致。
 
 ## 首次部署与版本升级顺序
 

@@ -16,9 +16,16 @@ mkdir -p "${OUTPUT_DIR}/backend/lib"
 printf 'backend\n' >"${OUTPUT_DIR}/backend/test-agent-app.jar"
 # 增量封装也必须经过正式 Flyway 字节门禁，测试夹具复用主 migration 构造外置 persistence JAR。
 PERSISTENCE_JAR_ROOT="${TMP_ROOT}/persistence-jar-root"
-mkdir -p "${PERSISTENCE_JAR_ROOT}/db/migration"
-cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260728160800__create_toolbox_click_tracking.sql" \
-  "${PERSISTENCE_JAR_ROOT}/db/migration/"
+for migration_resource in \
+  db/migration/V20260728160800__create_toolbox_click_tracking.sql \
+  db/migration/V20260730090000__add_lobehub_model_gateway.sql \
+  db/migration-compat/lobehub-missing/V20260802173416__backfill_lobehub_model_gateway.sql \
+  db/migration/V20260803133000__support_public_agent_config_rollout_supersede.sql \
+  db/migration-compat/lobehub-missing-after-rollout/V20260803141754__backfill_lobehub_model_gateway_after_rollout.sql; do
+  mkdir -p "${PERSISTENCE_JAR_ROOT}/$(dirname "${migration_resource}")"
+  cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/${migration_resource}" \
+    "${PERSISTENCE_JAR_ROOT}/${migration_resource}"
+done
 (cd "${PERSISTENCE_JAR_ROOT}" && zip -qr \
   "${OUTPUT_DIR}/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar" .)
 printf 'frontend\n' >"${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz"
@@ -54,6 +61,16 @@ grep -Fxq 'deploy/internal/deploy-python-libs.sh' <<<"${full_listing}"
 grep -Fxq 'deploy/internal/verify-python-libs.sh' <<<"${full_listing}"
 grep -Fxq 'dist/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar' <<<"${full_listing}"
 grep -Fxq 'dist/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar' <<<"${full_listing}"
+if grep -Eq '^dist/(test-agent-workflow-offline|lobehub/)' <<<"${full_listing}"; then
+  echo 'Default release unexpectedly contains Workflow or LobeHub artifacts' >&2
+  exit 1
+fi
+full_manifest="$(unzip -p "${OUTPUT_DIR}/test-agent-internal-release.zip" \
+  deploy/internal/release-components.env)"
+grep -Fxq 'TEST_AGENT_RELEASE_WORKFLOW=disabled' <<<"${full_manifest}"
+grep -Fxq 'TEST_AGENT_RELEASE_WORKFLOW_VERSION=none' <<<"${full_manifest}"
+grep -Fxq 'TEST_AGENT_RELEASE_WORKFLOW_ARCHIVE_SHA256=none' <<<"${full_manifest}"
+grep -Fxq 'TEST_AGENT_RELEASE_LOBEHUB=disabled' <<<"${full_manifest}"
 grep -Fxq "TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=${worker_fingerprint}" "${STATE_FILE}"
 grep -Fxq "TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=${toolbox_fingerprint}" "${STATE_FILE}"
 
@@ -80,6 +97,36 @@ incremental_manifest="$(unzip -p "${OUTPUT_DIR}/test-agent-internal-release.zip"
 grep -Fxq 'TEST_AGENT_RELEASE_WORKER_RUNTIME=reuse' <<<"${incremental_manifest}"
 grep -Fxq 'TEST_AGENT_RELEASE_TOOLBOX=reuse' <<<"${incremental_manifest}"
 
+# Workflow 只允许显式 opt-in；参数顺序不应影响 ZIP 内容或组件清单。
+printf 'workflow\n' >"${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz"
+printf 'fixture checksum\n' >"${OUTPUT_DIR}/test-agent-workflow-offline.tar.gz.sha256"
+printf '%s\n' \
+  'TEST_AGENT_WORKFLOW_RELEASE_VERSION=fixture-workflow' \
+  'TEST_AGENT_WORKFLOW_ARCHIVE_SHA256=fixture-workflow-sha256' \
+  >"${OUTPUT_DIR}/.workflow-artifact.env"
+rm -f "${OUTPUT_DIR}/test-agent-internal-release.zip" \
+  "${OUTPUT_DIR}/test-agent-internal-release.zip.sha256"
+bash "${PACKAGE_SCRIPT}" --with-workflow --zip-only --output-dir "${OUTPUT_DIR}" \
+  --component-state-file "${STATE_FILE}" >/dev/null
+workflow_listing="$(unzip -Z1 "${OUTPUT_DIR}/test-agent-internal-release.zip")"
+grep -Fxq 'dist/test-agent-workflow-offline.tar.gz' <<<"${workflow_listing}"
+grep -Fxq 'dist/test-agent-workflow-offline.tar.gz.sha256' <<<"${workflow_listing}"
+workflow_manifest="$(unzip -p "${OUTPUT_DIR}/test-agent-internal-release.zip" \
+  deploy/internal/release-components.env)"
+grep -Fxq 'TEST_AGENT_RELEASE_WORKFLOW=included' <<<"${workflow_manifest}"
+grep -Fxq 'TEST_AGENT_RELEASE_WORKFLOW_VERSION=fixture-workflow' <<<"${workflow_manifest}"
+
+# 恢复默认发布后即使输出目录残留历史 workflow 制品，也必须继续排除。
+rm -f "${OUTPUT_DIR}/test-agent-internal-release.zip" \
+  "${OUTPUT_DIR}/test-agent-internal-release.zip.sha256"
+bash "${PACKAGE_SCRIPT}" --zip-only --output-dir "${OUTPUT_DIR}" \
+  --component-state-file "${STATE_FILE}" >/dev/null
+disabled_again_listing="$(unzip -Z1 "${OUTPUT_DIR}/test-agent-internal-release.zip")"
+if grep -Eq '^dist/test-agent-workflow-offline' <<<"${disabled_again_listing}"; then
+  echo 'Stale Workflow artifacts leaked into a disabled release' >&2
+  exit 1
+fi
+
 # 只有 worker runtime 基线变化时，只重新携带 Manager/Codex/programs 与 worker 镜像。
 printf '%s\n' \
   'TEST_AGENT_RELEASE_COMPONENT_STATE_VERSION=1' \
@@ -98,4 +145,4 @@ if grep -Eq '^dist/test-agent_(it|omni)-tools_' <<<"${worker_only_listing}"; the
   exit 1
 fi
 
-echo 'Incremental worker runtime/toolbox fingerprints, manifests and ZIP inclusion rules verified'
+echo 'Incremental components and explicit Workflow/LobeHub release gates verified'
