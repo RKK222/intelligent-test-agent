@@ -64,7 +64,7 @@
 
 当前已落地的新平台入口：
 
-独立 Python API 固定提供当前身份、定义、仓库/分支、会话/消息、AG-UI SSE、取消和报告版本/下载；Java 白名单只提供仓库授权、一次性 checkout ticket、模型 grant 及超级管理员复核。两套路径和签名字段以 `docs/api/workflow-api.md` 为单一事实源，禁止在本文件复制工作流 conversation/task/report DTO。
+独立 Python API 固定提供当前身份、定义、仓库/分支、会话/消息、AG-UI SSE、取消和报告版本/下载；Java 白名单只提供仓库授权、一次性 checkout ticket、模型 grant 及超级管理员复核。两套路径和签名字段以 `docs/api/workflow-api.md` 为单一事实源，禁止在本文件复制工作流 conversation/task/report DTO。Java 通用 API 日志必须脱敏 checkout ticket/model grant 的响应字段与路径参数，并禁止记录 Runner 加密私钥信封。
 
 | 业务工程 | 新 URL 示例 | 旧 URL 状态 |
 |---|---|---|

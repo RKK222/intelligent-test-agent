@@ -87,7 +87,7 @@ Token 校验流程：
 
 必须脱敏或禁止记录：
 
-- Authorization、Cookie、API key、用户 Token、内部模型 `token/authToken/tokenValue`、`contextToken`、XXL SSO ticket 和 platform session digest。
+- Authorization、Cookie、API key、用户 Token、内部模型 `token/authToken/tokenValue`、`contextToken`、XXL SSO ticket、Workflow checkout ticket/model grant/加密私钥信封和 platform session digest；一次性凭据作为 URL path 参数时只记录固定路由形状。
 - 用户输入中的敏感内容。
 - 文件路径中的隐私片段。
 - 过大的请求体和响应体。

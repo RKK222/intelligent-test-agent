@@ -4836,6 +4836,8 @@
   回退工具调用。综合提示明确已成功执行的代码智能体，缺失摘要由代码证据确定性回填。
 - 平台模型网关对Workflow长上下文请求把响应头冷启动窗口扩为120秒，LobeHub交互调用仍保持30秒；首块和
   相邻块空闲边界不变。同步模型网关、Workflow、Runner、analysis-task、离线部署和HTTP API稳定文档。
+- 真实验收发现Java通用API日志仍会记录checkout ticket路径参数和Runner加密私钥信封；日志脱敏现已覆盖
+  `ticketId/grantId/grant/encryptedPrivateKey`等Workflow凭据字段，并只保留固定凭据路由形状。
 
 ### How
 
@@ -4846,6 +4848,13 @@
   `run_417ef9c1d3f9c2ef5782db8f0195a5e8` 最终为 `SUCCEEDED`，报告
   `report_8b1fea140f2b46be81b5b68d579bc6d1` 精确引用4个实际新增文件；独立综合探针再次返回4条证据且不再误称
   “未执行代码分析”。
+- 从提交`3d4fe0370e51`构建正式离线介质`V20260803.102851`，外层SHA-256为
+  `84e9b4360e09932838965bc80dd5c24ff09229ba06b65fa993194fdbd71888b0`，内层文件逐项校验通过；Lima已加载并
+  通过正式部署脚本切换到Runner镜像`d78bfa98a478...`和analysis镜像`2ba792706664...`，Docker API自动协商为
+  client 1.41/server 1.55且不再设置`DOCKER_API_VERSION`。
+- 正式镜像页面验收任务`run_726dc810c081196e7168f98cadd43f56`与Codex分析器均为`SUCCEEDED`，报告
+  `report_d7e374c14e464530b77350de3aed190b`含4条真实路径且未声称“未执行代码分析”。日志脱敏定向48项通过，
+  随后再次完整打包Java后端并重启实际服务。
 - Workflow非PostgreSQL 98项、PostgreSQL 12项（本机Docker需`TESTCONTAINERS_RYUK_DISABLED=true`）、
   analysis-task 14项、Runner 81项、Java模型网关全模块依赖测试、TAEC1定向测试、Ruff、离线包合同、开发启动
   合同、网络和架构校验全部通过；JDK25后端完整打包并用未修改的`.env.test`重启，8080/3000/8090及独立
@@ -4855,6 +4864,8 @@
 
 - Linux Runner、代码智能体、平台模型网关、AgentScope综合和报告落库已形成真实可运行闭环；Ollama只作为
   当前离线测试环境的平台模型上游，工作流和Runner仍使用短期grant经Java网关访问，没有直连旁路。
+- 正式Runner在Lima重启后仍固定`restart=no`，启动程序先验证或恢复出站策略再启动；8080/3000/8090/8091
+  最终均返回HTTP 200，API访问日志不再保留Workflow一次性凭据或加密私钥信封。
 - 本次未新增HTTP路径或事件类型，未修改数据库/Flyway/MyBatis SQL、generated SDK、OpenCode源码或`.env*`；
   模型网关仅按可信调用来源调整性能窗口，LobeHub行为兼容不变。Lima与模型目录属于本地运行环境状态，不作为
   生产migration；正式交付仍需由离线包在目标企业Linux主机复核硬件容量、真实模型和网络地址。
