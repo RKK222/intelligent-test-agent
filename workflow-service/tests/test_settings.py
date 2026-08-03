@@ -40,3 +40,15 @@ def test_runner_public_key_source_is_unambiguous() -> None:
 def test_analysis_model_name_rejects_unsafe_configuration() -> None:
     with pytest.raises(ValidationError, match="模型ID"):
         base_settings(analysis_model_name="model\nleak")
+
+
+def test_server_model_gateway_override_requires_fixed_safe_base_path() -> None:
+    configured = base_settings(
+        server_model_gateway_url=(
+            "http://127.0.0.1:8080/api/internal/platform/model-gateway/v1/"
+        )
+    )
+    assert configured.server_model_gateway_url.endswith("/model-gateway/v1")
+
+    with pytest.raises(ValidationError, match="服务端模型网关URL"):
+        base_settings(server_model_gateway_url="http://token@127.0.0.1:8080/v1?leak=1")

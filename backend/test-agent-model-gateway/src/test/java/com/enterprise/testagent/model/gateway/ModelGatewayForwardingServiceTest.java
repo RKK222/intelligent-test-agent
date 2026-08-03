@@ -17,6 +17,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.buffer.Unpooled;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -44,6 +45,16 @@ import reactor.core.publisher.Flux;
 class ModelGatewayForwardingServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-07-30T07:00:00Z");
+
+    @Test
+    void allowsWorkflowLongContextModelToWarmUpWithoutSlowingInteractiveCalls() {
+        assertThat(ModelGatewayForwardingService.firstResponseTimeout(
+                        new ModelGatewayCaller("usr_workflow", "AUTH_WORKFLOW", "workflow")))
+                .isEqualTo(Duration.ofSeconds(120));
+        assertThat(ModelGatewayForwardingService.firstResponseTimeout(
+                        new ModelGatewayCaller("usr_lobehub", "AUTH_LOBEHUB", "lobehub")))
+                .isEqualTo(Duration.ofSeconds(30));
+    }
 
     @Test
     void rewritesPublicModelInjectsTrustedIdentityAndAggregatesUsage() {
@@ -144,6 +155,47 @@ class ModelGatewayForwardingServiceTest {
                 requests.get("/chat/completions").getBytes(StandardCharsets.UTF_8)))
                 .isInstanceOf(PlatformException.class)
                 .hasMessageContaining("能力探测");
+    }
+
+    @Test
+    void doesNotTreatCodexToolSchemaAsVisionInput() {
+        Set<ModelCapability> textAgentCapabilities = Set.of(
+                ModelCapability.CHAT,
+                ModelCapability.TOOLS,
+                ModelCapability.REASONING);
+        ModelGatewayForwardingService service = service(
+                WebClient.create(),
+                new CapturingUsage(),
+                model(textAgentCapabilities, textAgentCapabilities));
+        String request = """
+                {
+                  "model":"enterprise-chat",
+                  "input":"analyze the repository",
+                  "tools":[{
+                    "type":"function",
+                    "name":"view_image",
+                    "parameters":{
+                      "type":"object",
+                      "properties":{"image_url":{"type":"string"}}
+                    }
+                  }],
+                  "reasoning":{"effort":"none"},
+                  "text":{"format":{"type":"json_schema","schema":{
+                    "type":"object",
+                    "properties":{"image_url":{"type":"string"}}
+                  }}}
+                }
+                """;
+
+        PreparedModelGatewayRequest prepared = service.prepare(
+                exchange("/responses"), request.getBytes(StandardCharsets.UTF_8));
+
+        assertThat(prepared.requiredCapabilities())
+                .containsExactlyInAnyOrder(
+                        ModelCapability.CHAT,
+                        ModelCapability.TOOLS,
+                        ModelCapability.REASONING)
+                .doesNotContain(ModelCapability.VISION);
     }
 
     @Test

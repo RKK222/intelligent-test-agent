@@ -12,7 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from testagent_workflow.agui import AgUiEventType
 from testagent_workflow.application import ReportQuestionContext
 from testagent_workflow.impact_engine import AnalyzerOutcome, DiffManifest, FrozenRepository, ImpactState
-from testagent_workflow.intent import ModelFactory, create_platform_chat_model
+from testagent_workflow.intent import (
+    ModelFactory,
+    close_platform_chat_model,
+    create_platform_chat_model,
+)
 from testagent_workflow.platform import PlatformCapabilityClient, PlatformRequestIdentity
 from testagent_workflow.store import ReportVersion
 
@@ -57,10 +61,12 @@ class PlatformGrantedReportQuestionAnswerer:
         model_name: str,
         *,
         model_factory: ModelFactory = create_platform_chat_model,
+        gateway_url_override: str | None = None,
     ) -> None:
         self._platform = platform
         self._model_name = model_name
         self._model_factory = model_factory
+        self._gateway_url_override = gateway_url_override
 
     async def answer(
         self,
@@ -76,10 +82,11 @@ class PlatformGrantedReportQuestionAnswerer:
             run_id=qa_run_id,
             analyzer_ids=["agentscope-report-qa"],
         )
+        model: StructuredModel | None = None
         try:
             model = self._model_factory(
                 str(grant["grant"]),
-                str(grant["gatewayUrl"]),
+                self._gateway_url_override or str(grant["gatewayUrl"]),
                 self._model_name,
             )
             payload = {
@@ -119,12 +126,16 @@ class PlatformGrantedReportQuestionAnswerer:
                 lines.extend(["", "**限制与不确定项**", *[f"- {value}" for value in output.limitations]])
             return "\n".join(lines)
         finally:
-            await self._platform.revoke_model_grant(
-                identity,
-                task_id=report.task_id,
-                run_id=qa_run_id,
-                grant_id=str(grant["grantId"]),
-            )
+            try:
+                if model is not None:
+                    await close_platform_chat_model(model)
+            finally:
+                await self._platform.revoke_model_grant(
+                    identity,
+                    task_id=report.task_id,
+                    run_id=qa_run_id,
+                    grant_id=str(grant["grantId"]),
+                )
 
 
 class AgentScopeResultSynthesizer:
@@ -154,6 +165,14 @@ class AgentScopeResultSynthesizer:
                 "totalFiles": len(manifest.files),
             },
             "analyzerResults": [value.to_dict() for value in outcomes],
+            "analysisExecution": {
+                "successfulAnalyzerIds": [
+                    value.analyzer_id
+                    for value in outcomes
+                    if value.succeeded and value.result is not None
+                ],
+                "failedAnalyzerIds": [value.analyzer_id for value in outcomes if not value.succeeded],
+            },
             "scopeSelectors": state["input_data"].get("scopeSelectors", []),
         }
         messages = [
@@ -165,6 +184,9 @@ class AgentScopeResultSynthesizer:
                         "type": "text",
                         "text": (
                             "综合多个代码分析器结果。只能依据给定代码证据；明确区分共识、分歧和无法裁决项。"
+                            "analysisExecution.successfulAnalyzerIds中的智能体已经执行并返回代码证据，"
+                            "不得声称未执行代码分析、未读取变更或未使用分析工具。"
+                            "证据仅包含文档或配置时可以说明未观察到运行时代码变化，但不能否定分析过程。"
                             "不得丢失比较坐标和变更文件附录，所有风险必须给出0到1置信度。"
                         ),
                     }
@@ -186,12 +208,27 @@ class AgentScopeResultSynthesizer:
         value = report.model_dump(mode="json", by_alias=True)
         value["comparisonCoordinates"] = [item.to_dict() for item in repositories]
         value["changedFilesAppendix"] = list(manifest.files)
+        overview = dict(value["changeOverview"])
+        if not isinstance(overview.get("summary"), str) or not overview["summary"].strip():
+            overview["summary"] = _deterministic_change_summary(outcomes, len(manifest.files))
         value["changeOverview"] = {
-            **dict(value["changeOverview"]),
+            **overview,
             **dict(manifest.statistics),
             "fileCount": len(manifest.files),
         }
         return value
+
+
+def _deterministic_change_summary(outcomes: list[AnalyzerOutcome], file_count: int) -> str:
+    summaries = [
+        str(value.result.get("summary", "")).strip()
+        for value in outcomes
+        if value.succeeded and value.result is not None
+    ]
+    summaries = [value for value in summaries if value]
+    if len(summaries) == 1:
+        return summaries[0]
+    return f"已综合{len(summaries)}个代码分析器结果，涉及{file_count}个变更文件。"
 
 
 class GrantBackedResultSynthesizer:
@@ -204,11 +241,13 @@ class GrantBackedResultSynthesizer:
         store: Any,
         *,
         model_factory: ModelFactory = create_platform_chat_model,
+        gateway_url_override: str | None = None,
     ) -> None:
         self._grant_manager = grant_manager
         self._model_name = model_name
         self._store = store
         self._model_factory = model_factory
+        self._gateway_url_override = gateway_url_override
 
     async def synthesize(
         self,
@@ -228,23 +267,26 @@ class GrantBackedResultSynthesizer:
         grant = await self._grant_manager.get()
         model = self._model_factory(
             str(grant["grant"]),
-            str(grant["gatewayUrl"]),
+            self._gateway_url_override or str(grant["gatewayUrl"]),
             self._model_name,
         )
         result: dict[str, Any] | None = None
-        for attempt in range(3):
-            try:
-                result = await AgentScopeResultSynthesizer(model).synthesize(
-                    state,
-                    repositories,
-                    manifest,
-                    outcomes,
-                    operation_key,
-                )
-                break
-            except Exception:
-                if attempt < 2:
-                    await asyncio.sleep(0.1 * (attempt + 1))
+        try:
+            for attempt in range(3):
+                try:
+                    result = await AgentScopeResultSynthesizer(model).synthesize(
+                        state,
+                        repositories,
+                        manifest,
+                        outcomes,
+                        operation_key,
+                    )
+                    break
+                except Exception:
+                    if attempt < 2:
+                        await asyncio.sleep(0.1 * (attempt + 1))
+        finally:
+            await close_platform_chat_model(model)
         if result is None:
             # 代码智能体已有成功证据时，综合模型不可用不能抹掉整次任务。
             # 降级报告逐项标注analyzerId，便于人工裁决且不伪造共识。

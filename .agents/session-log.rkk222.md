@@ -4810,3 +4810,51 @@
 
 - 单页内容与用户要求一致，最终结构校验通过、文本完整、渲染无已知截断或重叠。未修改 API、事件、数据库、
   性能、安全、环境配置、generated SDK、OpenCode 源码或业务代码，也未创建分支。
+
+## 2026-08-03 - 修复 Linux Runner 并完成真实代码影响分析闭环
+
+### Why
+
+- Bytebase 与 Spring Boot 应用仓库已经能在页面选择，但 macOS 本机没有满足 `linux/amd64`、Docker Socket、
+  `DOCKER-USER/iptables` 隔离要求的 Runner；后续真实任务又依次暴露 Docker API 版本钉死、长 SSH 私钥无法
+  直接 RSA 加密、模型请求继承系统代理、4K 上下文截断、模型虚构证据路径和 AgentScope 工具结构化失败。
+- Lima 虚拟机重启会清空 iptables，Runner 容器若自动恢复可能先于出站策略；本地 8B 模型长上下文冷启动还会
+  超过平台模型网关原有30秒响应头窗口，产生一次无意义重试。
+
+### What
+
+- 初始化独立 Lima/QEMU `linux/amd64` Runner 环境并通过根 Docker 运行隔离容器；Runner 启动改为先验证并
+  恢复分析网络、容器固定 `restart=no`，网络校验输出精确缺失规则。Runner镜像取消旧 Docker API 版本钉死。
+- checkout 私钥改为 `TAEC1` 混合信封：Java 用 RSA-OAEP-SHA256封装随机AES密钥，Python以AES-256-GCM解密
+  任意长度OpenSSH私钥；保留失败关闭和格式/篡改测试。离线打包同时修复 numeric UID chown、Syft tmpfs、
+  macOS扩展属性和不依赖在线Dockerfile syntax frontend的问题。
+- 代码分析任务在模型前确定性读取冻结提交diff，把有界统计、文件清单和patch摘录纳入提示；输出schema和
+  后置校验强制证据使用真实仓库别名与存在路径，非空diff不能返回空证据。模型relay首个Responses请求显式
+  要求工具调用，并修复模型网关把工具schema中的`image_url`误判为视觉输入。
+- Workflow 服务端AgentScope使用独立模型网关路由、`trust_env=false`流式客户端和显式连接释放；结构化结果
+  优先走OpenAI-compatible `response_format + JSON Schema`、温度0并关闭Qwen思考，未实现该能力的供应商才
+  回退工具调用。综合提示明确已成功执行的代码智能体，缺失摘要由代码证据确定性回填。
+- 平台模型网关对Workflow长上下文请求把响应头冷启动窗口扩为120秒，LobeHub交互调用仍保持30秒；首块和
+  相邻块空闲边界不变。同步模型网关、Workflow、Runner、analysis-task、离线部署和HTTP API稳定文档。
+
+### How
+
+- 本机创建 `qwen3-workflow:8b`（`num_ctx=16384`）并把四个Workflow公开模型ID映射到该本地上游；12个
+  CHAT/TOOLS/REASONING探针通过。Lima重启实测证明Runner不会自动启动，启动脚本能在缺失iptables链时恢复
+  白名单策略后再启动Runner，健康/ready与`restart=no`均通过。
+- 真实 Spring Boot `master..feature_testagent_20260630` 单智能体任务
+  `run_417ef9c1d3f9c2ef5782db8f0195a5e8` 最终为 `SUCCEEDED`，报告
+  `report_8b1fea140f2b46be81b5b68d579bc6d1` 精确引用4个实际新增文件；独立综合探针再次返回4条证据且不再误称
+  “未执行代码分析”。
+- Workflow非PostgreSQL 98项、PostgreSQL 12项（本机Docker需`TESTCONTAINERS_RYUK_DISABLED=true`）、
+  analysis-task 14项、Runner 81项、Java模型网关全模块依赖测试、TAEC1定向测试、Ruff、离线包合同、开发启动
+  合同、网络和架构校验全部通过；JDK25后端完整打包并用未修改的`.env.test`重启，8080/3000/8090及独立
+  Linux Runner的8091入口均返回HTTP 200。
+
+### Result
+
+- Linux Runner、代码智能体、平台模型网关、AgentScope综合和报告落库已形成真实可运行闭环；Ollama只作为
+  当前离线测试环境的平台模型上游，工作流和Runner仍使用短期grant经Java网关访问，没有直连旁路。
+- 本次未新增HTTP路径或事件类型，未修改数据库/Flyway/MyBatis SQL、generated SDK、OpenCode源码或`.env*`；
+  模型网关仅按可信调用来源调整性能窗口，LobeHub行为兼容不变。Lima与模型目录属于本地运行环境状态，不作为
+  生产migration；正式交付仍需由离线包在目标企业Linux主机复核硬件容量、真实模型和网络地址。

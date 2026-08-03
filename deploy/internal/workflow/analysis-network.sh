@@ -213,15 +213,27 @@ if [[ "${MODE}" == "apply" ]]; then
     || iptables -I DOCKER-USER 1 -s "${SUBNET}" -j "${CHAIN}"
 fi
 
-iptables -C DOCKER-USER -s "${SUBNET}" -j "${CHAIN}" >/dev/null 2>&1
+iptables -C DOCKER-USER -s "${SUBNET}" -j "${CHAIN}" >/dev/null 2>&1 || {
+  echo "Analysis egress jump is missing from DOCKER-USER" >&2
+  exit 1
+}
 first_docker_user_rule="$(iptables -S DOCKER-USER | awk '$1 == "-A" {print; exit}')"
 [[ "${first_docker_user_rule}" == "-A DOCKER-USER -s ${SUBNET} -j ${CHAIN}" ]] || {
   echo "Analysis egress jump is not the first DOCKER-USER rule; an earlier ACCEPT could bypass isolation" >&2
   exit 1
 }
-iptables -C "${CHAIN}" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT >/dev/null 2>&1
-iptables -C "${CHAIN}" -d "${GATEWAY_CIDR}" -p tcp --dport "${GATEWAY_PORT}" -j ACCEPT >/dev/null 2>&1
-iptables -C "${CHAIN}" -j REJECT --reject-with icmp-port-unreachable >/dev/null 2>&1
+iptables -C "${CHAIN}" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT >/dev/null 2>&1 || {
+  echo "Analysis egress established-connection rule is missing" >&2
+  exit 1
+}
+iptables -C "${CHAIN}" -d "${GATEWAY_CIDR}" -p tcp --dport "${GATEWAY_PORT}" -j ACCEPT >/dev/null 2>&1 || {
+  echo "Analysis egress model-gateway rule is missing" >&2
+  exit 1
+}
+iptables -C "${CHAIN}" -j REJECT --reject-with icmp-port-unreachable >/dev/null 2>&1 || {
+  echo "Analysis egress default reject rule is missing" >&2
+  exit 1
+}
 
 rule_count="$(iptables -S "${CHAIN}" | awk '$1 == "-A" {count += 1} END {print count + 0}')"
 [[ "${rule_count}" == "3" ]] || {

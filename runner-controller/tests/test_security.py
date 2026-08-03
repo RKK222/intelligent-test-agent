@@ -7,6 +7,7 @@ from pathlib import Path
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import pytest
 
 from testagent_runner.credentials import RunnerCredentialDecryptor
@@ -104,6 +105,48 @@ def test_checkout_private_key_is_decrypted_only_in_credential_directory(tmp_path
         assert key_path.parent == credential_root
         assert key_path.read_bytes() == plaintext
         assert key_path.stat().st_mode & 0o777 == 0o600
+
+    assert list(credential_root.iterdir()) == []
+
+
+def test_long_checkout_private_key_uses_hybrid_envelope(tmp_path: Path) -> None:
+    private = rsa.generate_private_key(public_exponent=65537, key_size=3072)
+    private_path = tmp_path / "runner-private.pem"
+    private_path.write_bytes(
+        private.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    private_path.chmod(0o600)
+    plaintext = (
+        b"-----BEGIN OPENSSH PRIVATE KEY-----\n"
+        + b"long-private-key-material" * 256
+        + b"\n-----END OPENSSH PRIVATE KEY-----\n"
+    )
+    aes_key = b"a" * 32
+    nonce = b"n" * 12
+    wrapped_key = private.public_key().encrypt(
+        aes_key,
+        padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None),
+    )
+    ciphertext = AESGCM(aes_key).encrypt(
+        nonce,
+        plaintext,
+        b"test-agent-runner-credential-v1",
+    )
+
+    def encoded(value: bytes) -> str:
+        return base64.urlsafe_b64encode(value).decode().rstrip("=")
+
+    envelope = f"TAEC1.{encoded(wrapped_key)}.{encoded(nonce)}.{encoded(ciphertext)}"
+    credential_root = tmp_path / "credentials"
+    decryptor = RunnerCredentialDecryptor(private_path, credential_root, require_tmpfs=False)
+
+    with decryptor.materialize(envelope) as key_path:
+        assert key_path is not None
+        assert key_path.read_bytes() == plaintext
 
     assert list(credential_root.iterdir()) == []
 

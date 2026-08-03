@@ -3176,8 +3176,9 @@ Base URL：`/api/internal/platform/model-gateway/v1`。所有请求使用
 
 除 transcription 外，POST 请求体必须是 JSON 对象并含 textual `model`；上限 16 MiB。网关把公开模型 ID
 改写为上游 ID后流式转发。transcription 使用 multipart，必须包含 `model` 与 `file`，每个 part 上限
-100 MiB，临时文件目录由部署配置限定且不持久化。连接、响应头、首个响应 chunk 和相邻 chunk 空闲边界分别
-为 10/30/30/120 秒，不设置整体 SSE 生命周期超时；下游取消会取消上游订阅。
+100 MiB，临时文件目录由部署配置限定且不持久化。连接、首个响应 chunk 和相邻 chunk 空闲边界分别
+为 10/30/120 秒；响应头等待对交互式LobeHub为30秒，对Workflow长上下文冷启动为120秒。不设置整体
+SSE 生命周期超时；下游取消会取消上游订阅。
 
 上游非 2xx 保留 HTTP status，但丢弃原始正文并返回固定 JSON：
 

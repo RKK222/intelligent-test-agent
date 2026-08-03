@@ -34,6 +34,10 @@ deploy/internal/package-workflow-offline.sh \
 - `SHA256SUMS` 和纯 Docker 管理/网络/数据库/Redis ACL 脚本。
 
 基础 Python、uv、Syft 镜像必须以 `@sha256` 固定；预装 Codex/OpenCode 工具镜像必须同时固定本地 tag 与完整 image ID。脚本拒绝覆盖同版本产物。
+三个运行镜像使用Docker引擎内置的稳定Dockerfile语法，不声明远端`# syntax` frontend，断网构建不会隐式访问Docker Hub。
+分析任务直接复用已校验工具基础镜像中的Python和账号管理工具，构建阶段不执行`apt/apk/dnf/yum`下载。
+未安装宿主机 Syft 时，打包脚本会在隔离容器中扫描镜像，并为镜像导出提供上限 `2 GiB` 的 tmpfs；构建节点需额外预留相应内存余量。
+macOS构建时最终tar显式禁用`com.apple.*`扩展属性，Linux解包不得出现未知PAX header告警。
 
 ## 数据库
 
@@ -73,9 +77,11 @@ Java 内部的 checkout、nonce 和模型 grant 使用现有 Java Redis连接及
 - Python ↔ Java 的 32 字节以上 workflow HMAC 密钥。
 - Worker ↔ Runner 的独立 32 字节以上 HMAC 密钥。
 - Runner ↔ Java ticket 兑换的独立 32 字节以上 HMAC 密钥。
-- Runner RSA 公私钥；Java与Python只读公钥，Runner私钥文件由容器 uid `10003` 拥有且模式 `0400/0600`。
+- Runner RSA 公私钥；Java与Python只读公钥，Runner私钥文件由容器 uid `10003` 拥有且模式 `0400/0600`。checkout凭据使用`TAEC1`混合信封：RSA-OAEP-SHA256只封装随机AES密钥，任意长度OpenSSH私钥由AES-256-GCM加密，不能回退为直接RSA加密整段私钥。
 - Git `known_hosts` 非空普通文件，模式 `0444/0644`，不得是符号链接。
 - workflow PostgreSQL、Redis ACL账号密码。
+
+Runner 宿主机无需在 `/etc/passwd` 或 `/etc/group` 预建 `10003` 用户；部署脚本直接以数值 UID/GID 设置 Runner 工作目录与私钥所有权。
 
 Java侧的 `TEST_AGENT_WORKFLOW_CAPABILITY_HMAC_SECRET` 必须等于Python侧
 `TEST_AGENT_WORKFLOW_PLATFORM_HMAC_SECRET`；Java侧
@@ -86,8 +92,18 @@ Java的Runner ID、公钥路径和返回给分析容器的模型网关URL也必�
 `backend.env` 中显式配置，示例见 `deploy/internal/backend.env.example`；独立workflow
 离线包同时携带可追加到Java配置的 `deploy/java-capability.env.example` 片段。
 
-Workflow 到 Java、Worker 到 Runner、Runner 到 Java 的固定控制面 HTTP 调用不会继承宿主机的
-HTTP(S)/SOCKS 代理配置。部署必须为这些地址提供直接路由、DNS 和 TLS 信任，不能依赖系统代理转发内部签名请求。
+Workflow 到 Java、Worker 到 Runner、Runner 到 Java 的固定控制面 HTTP 调用，以及服务端 AgentScope
+到平台模型网关的调用，均不会继承宿主机的 HTTP(S)/SOCKS 代理配置。AgentScope 使用流式响应承载
+耗时的本地模型综合，并优先以 OpenAI-compatible `response_format + JSON Schema` 约束结构化结果；
+供应商未实现该能力时才回退AgentScope工具调用。部署必须为这些地址提供直接路由、DNS 和 TLS 信任，
+不能依赖系统代理转发内部签名请求或短期 grant。
+Workflow模型请求的响应头等待上限为120秒，以覆盖长上下文模型冷启动；收到响应头后首块和相邻块仍受
+30秒/120秒空闲边界约束，不能用该窗口掩盖不可达地址或无限挂起的响应流。
+平台grant中的模型网关地址必须继续作为Runner白名单地址原样下发。当Workflow API/Worker与Runner
+处于不同网络视角、无法共同使用该地址时，在`workflow.env`中配置
+`TEST_AGENT_WORKFLOW_SERVER_MODEL_GATEWAY_URL`作为服务端AgentScope的直连路由；它必须使用固定
+`/api/internal/platform/model-gateway/v1`路径且不得包含凭据、查询串或片段。该覆盖不进入Runner请求，
+也不能放宽分析容器的CIDR/端口白名单。
 
 `workflow.env`中的`TEST_AGENT_WORKFLOW_INTENT_MODEL_NAME`、
 `TEST_AGENT_WORKFLOW_SYNTHESIS_MODEL_NAME`、`TEST_AGENT_WORKFLOW_REPORT_QA_MODEL_NAME`和
@@ -108,6 +124,9 @@ dotenv 与密钥不进入离线包、Git、命令行或日志。`workflow-docker
 3. 拒绝其他出站。
 
 来自分析子网的 jump 必须是 `DOCKER-USER` 第一条规则，防止更早的 ACCEPT 绕过。Runner 每次就绪与创建任务前还会复核网络 driver、scope、subnet 和三个固定标签。模型网关 URL 必须使用落在白名单内的数字 IPv4 与相同端口；Runner 管理端口不能被任务子网访问。
+Runner容器内Docker CLI不得设置`DOCKER_API_VERSION`，由CLI自动与Engine协商：现场Docker 18.09使用API 1.39，Docker 29等新版本使用双方支持的最高版本。固定1.39会关闭协商并被当前Engine拒绝。
+
+iptables规则不会随Docker或宿主机重启持久化，因此Runner容器固定使用`--restart no`，不能早于隔离规则自行恢复。`workflow-docker.sh start --role runner`会先只读校验策略；规则缺失时，仅在没有分析任务容器的安全窗口调用`analysis-network.sh --apply`恢复，验证通过后才启动Runner。控制面容器不持有Docker Socket，仍可使用`unless-stopped`自动恢复。
 
 应用规则：
 
@@ -117,7 +136,7 @@ deploy/internal/workflow/analysis-network.sh \
   --apply
 ```
 
-已有分析容器时脚本拒绝重写防火墙。
+已有分析容器时脚本拒绝重写防火墙。日常启动Runner无需单独执行上述命令；它用于首次部署的显式预置和故障排查。
 
 ## 启动与 Nginx
 

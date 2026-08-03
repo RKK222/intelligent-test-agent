@@ -47,6 +47,9 @@ class FakeResponse:
 
 
 class FakeQuestionModel:
+    def __init__(self) -> None:
+        self.closed = False
+
     async def generate_structured_output(self, messages, structured_model):  # type: ignore[no-untyped-def]
         assert "Order.java" in str(messages)
         return FakeResponse({
@@ -54,6 +57,9 @@ class FakeQuestionModel:
             "evidence": ["orders/Order.java:42"],
             "limitations": ["动态调用仍需运行时确认"],
         })
+
+    async def aclose(self) -> None:
+        self.closed = True
 
 
 class FakeQuestionPlatform:
@@ -76,10 +82,14 @@ class FakeQuestionPlatform:
 class CountingSynthesisModel:
     def __init__(self) -> None:
         self.calls = 0
+        self.closed = False
 
     async def generate_structured_output(self, messages, structured_model):  # type: ignore[no-untyped-def]
         self.calls += 1
         return FakeResponse(complete_report())
+
+    async def aclose(self) -> None:
+        self.closed = True
 
 
 class CapturingSynthesisModel:
@@ -91,7 +101,7 @@ class CapturingSynthesisModel:
         self.messages = messages
         forged = complete_report()
         forged["comparisonCoordinates"] = []
-        forged["changeOverview"] = {"summary": "综合结论", "fileCount": 999}
+        forged["changeOverview"] = {"summary": None, "fileCount": 999}
         forged["changedFilesAppendix"] = []
         return FakeResponse(forged)
 
@@ -99,11 +109,15 @@ class CapturingSynthesisModel:
 class FailingSynthesisModel:
     def __init__(self) -> None:
         self.calls = 0
+        self.closed = False
 
     async def generate_structured_output(self, messages, structured_model):  # type: ignore[no-untyped-def]
         del messages, structured_model
         self.calls += 1
         raise RuntimeError("model unavailable")
+
+    async def aclose(self) -> None:
+        self.closed = True
 
 
 class FakeSynthesisGrantManager:
@@ -162,10 +176,12 @@ async def test_synthesis_omits_hunks_and_restores_deterministic_manifest_fields(
     )
 
     assert "SENSITIVE_FULL_PATCH_SHOULD_NOT_ENTER_SYNTHESIS" not in str(model.messages)
+    assert "不得声称未执行代码分析" in model.messages[0].get_text_content()
+    assert '"successfulAnalyzerIds":["codex"]' in model.messages[1].get_text_content()
     assert result["comparisonCoordinates"] == [repository.to_dict()]
     assert result["changedFilesAppendix"] == [changed_file]
     assert result["changeOverview"] == {
-        "summary": "综合结论",
+        "summary": "ok",
         "fileCount": 1,
         "additions": 8,
         "deletions": 2,
@@ -301,10 +317,20 @@ async def test_report_question_uses_short_grant_and_returns_evidence_markdown() 
         "# report",
     )
     platform = FakeQuestionPlatform()
+    captured: dict[str, str] = {}
+    question_model = FakeQuestionModel()
+
+    def model_factory(grant: str, gateway: str, model_name: str) -> FakeQuestionModel:
+        captured.update(grant=grant, gateway=gateway, model=model_name)
+        return question_model
+
     answerer = PlatformGrantedReportQuestionAnswerer(
         platform,  # type: ignore[arg-type]
         "workflow-report-qa",
-        model_factory=lambda grant, gateway, model: FakeQuestionModel(),
+        model_factory=model_factory,
+        gateway_url_override=(
+            "http://127.0.0.1:8080/api/internal/platform/model-gateway/v1"
+        ),
     )
 
     answer = await answerer.answer(
@@ -316,7 +342,9 @@ async def test_report_question_uses_short_grant_and_returns_evidence_markdown() 
     assert answer.startswith("订单校验分支发生变化。")
     assert "orders/Order.java:42" in answer
     assert "动态调用仍需运行时确认" in answer
+    assert captured["gateway"].startswith("http://127.0.0.1:8080/")
     assert platform.revoked is True
+    assert question_model.closed is True
 
 
 @pytest.mark.asyncio
@@ -331,11 +359,20 @@ async def test_agentscope_synthesis_reuses_persisted_node_result_on_replay() -> 
         input_data={},
     )
     model = CountingSynthesisModel()
+    captured: dict[str, str] = {}
+
+    def model_factory(grant: str, gateway: str, name: str) -> CountingSynthesisModel:
+        captured.update(grant=grant, gateway=gateway, name=name)
+        return model
+
     synthesizer = GrantBackedResultSynthesizer(
         FakeSynthesisGrantManager(),
         "workflow-synthesis",
         store,
-        model_factory=lambda grant, gateway, name: model,
+        model_factory=model_factory,
+        gateway_url_override=(
+            "http://127.0.0.1:8080/api/internal/platform/model-gateway/v1"
+        ),
     )
     state = {
         "task_id": run.task_id,
@@ -366,6 +403,8 @@ async def test_agentscope_synthesis_reuses_persisted_node_result_on_replay() -> 
 
     assert replay == first
     assert model.calls == 1
+    assert model.closed is True
+    assert captured["gateway"].startswith("http://127.0.0.1:8080/")
 
 
 @pytest.mark.asyncio
@@ -424,6 +463,7 @@ async def test_synthesis_failure_falls_back_to_successful_analyzer_evidence() ->
     )
 
     assert model.calls == 3
+    assert model.closed is True
     assert result["_synthesisFallback"] is True
     assert result["impactedFeatures"][0]["analyzerId"] == "codex"
     assert result["codeEvidence"][0]["path"] == "Order.java"

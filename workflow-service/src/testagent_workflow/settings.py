@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -20,6 +21,7 @@ class WorkflowSettings(BaseSettings):
     redis_url: SecretStr = SecretStr("redis://127.0.0.1:6379/0")
     platform_base_url: str = "http://127.0.0.1:8080"
     platform_hmac_secret: SecretStr
+    server_model_gateway_url: str | None = None
     intent_model_name: str = "workflow-intent"
     synthesis_model_name: str = "workflow-impact-synthesis"
     report_qa_model_name: str = "workflow-report-qa"
@@ -46,6 +48,25 @@ class WorkflowSettings(BaseSettings):
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", value):
             raise ValueError("代码分析模型ID格式无效")
         return value
+
+    @field_validator("server_model_gateway_url")
+    @classmethod
+    def validate_server_model_gateway_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.rstrip("/")
+        parsed = urlsplit(normalized)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+            or parsed.path != "/api/internal/platform/model-gateway/v1"
+        ):
+            raise ValueError("服务端模型网关URL必须是固定base path且不得包含凭据、查询串或片段")
+        return normalized
 
     @field_validator("worker_id")
     @classmethod

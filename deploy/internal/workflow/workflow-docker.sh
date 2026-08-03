@@ -412,15 +412,22 @@ start_control() {
 
 start_runner() {
   ensure_control_network
-  "${SCRIPT_DIR}/analysis-network.sh" --env-file "${ENV_FILE}" --verify-only
-  install -d -m 0700 -o 10003 -g 10003 "${RUNNER_ROOT}"
+  # iptables规则不随Docker/宿主机重启持久化。Runner启动前先验证，缺失时只在
+  # 没有分析任务容器的安全窗口自动恢复，避免Runner先于出站隔离规则恢复。
+  if ! "${SCRIPT_DIR}/analysis-network.sh" --env-file "${ENV_FILE}" --verify-only; then
+    echo "Restoring workflow analysis egress policy before Runner startup." >&2
+    "${SCRIPT_DIR}/analysis-network.sh" --env-file "${ENV_FILE}" --apply
+  fi
+  # 全新分析节点不要求预先创建宿主机用户；目录只需与容器内 Runner 的数值 UID/GID 对齐。
+  install -d -m 0700 "${RUNNER_ROOT}"
+  chown 10003:10003 "${RUNNER_ROOT}"
   socket_gid="$(stat -c '%g' /var/run/docker.sock)"
   [[ "${socket_gid}" =~ ^[0-9]+$ ]] || {
     echo "Unable to resolve Docker Socket group" >&2
     exit 1
   }
   if replace_exact_container test-agent-workflow-runner "${RUNNER_IMAGE_ID}"; then
-    docker run -d --name test-agent-workflow-runner --restart unless-stopped \
+    docker run -d --name test-agent-workflow-runner --restart no \
       --label "com.enterprise.testagent.config-sha256=${config_digest}" \
       --network "${CONTROL_NETWORK}" \
       --read-only --cap-drop ALL --security-opt no-new-privileges \

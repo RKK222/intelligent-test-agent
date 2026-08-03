@@ -44,6 +44,143 @@ def gateway_request() -> dict:
     }
 
 
+def test_prompt_requires_real_repository_tool_inspection() -> None:
+    prompt = MODULE._prompt(
+        {
+            "repositories": [
+                {
+                    "repositoryAlias": "orders",
+                    "mergeBase": "a" * 40,
+                    "targetHead": "b" * 40,
+                }
+            ],
+            "scopeSelectors": [],
+            "outputSchema": {"type": "object"},
+        }
+    )
+
+    assert "Codex必须调用exec_command" in prompt
+    assert "git diff --stat mergeBase..targetHead" in prompt
+    assert "没有实际工具结果时禁止输出分析结论" in prompt
+    assert "严禁推测、举例或编造文件" in prompt
+    assert "path必须逐字复制仓库相对路径" in prompt
+
+
+def test_collects_frozen_git_diff_and_rejects_invented_evidence(tmp_path: Path) -> None:
+    repository = tmp_path / "orders"
+    source = repository / "src" / "OrderService.java"
+    source.parent.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    source.write_text("class OrderService {}\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "-c",
+            "user.name=Test Agent",
+            "-c",
+            "user.email=test-agent@example.invalid",
+            "commit",
+            "-qm",
+            "baseline",
+        ],
+        check=True,
+    )
+    merge_base = subprocess.run(
+        ["git", "-C", str(repository), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    source.write_text(
+        "class OrderService { boolean submit() { return true; } }\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "-c",
+            "user.name=Test Agent",
+            "-c",
+            "user.email=test-agent@example.invalid",
+            "commit",
+            "-qm",
+            "target",
+        ],
+        check=True,
+    )
+    target_head = subprocess.run(
+        ["git", "-C", str(repository), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    request = {
+        "repositories": [
+            {
+                "repositoryId": "repo-orders",
+                "repositoryAlias": "orders",
+                "mergeBase": merge_base,
+                "targetHead": target_head,
+            }
+        ],
+        "scopeSelectors": [],
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "codeEvidence": {
+                    "type": "array",
+                    "items": {"type": "object", "additionalProperties": True},
+                }
+            },
+        },
+    }
+
+    context = MODULE.collect_repository_context(request, tmp_path)
+    prompt = MODULE._prompt(request, context)
+
+    assert context[0]["changedFiles"] == ["src/OrderService.java"]
+    assert "boolean submit()" in context[0]["diffExcerpt"]
+    assert "src/OrderService.java" in prompt
+    assert str(repository) not in prompt
+    assert "_repositoryPath" not in prompt
+    schema = MODULE.constrain_output_schema(request["outputSchema"], context)
+    evidence_schema = schema["properties"]["codeEvidence"]
+    assert evidence_schema["minItems"] == 1
+    assert evidence_schema["items"]["required"] == ["repositoryAlias", "path"]
+    assert evidence_schema["items"]["properties"]["repositoryAlias"]["enum"] == [
+        "orders"
+    ]
+    MODULE.validate_result_evidence(
+        {
+            "codeEvidence": [
+                {
+                    "repositoryAlias": "orders",
+                    "path": "src/OrderService.java",
+                }
+            ]
+        },
+        context,
+    )
+    with pytest.raises(ValueError, match="不属于冻结仓库"):
+        MODULE.validate_result_evidence(
+            {
+                "codeEvidence": [
+                    {
+                        "repositoryAlias": "orders",
+                        "path": "src/InventedService.java",
+                    }
+                ]
+            },
+            context,
+        )
+
+
 def test_opencode_is_pinned_to_the_platform_gateway_provider() -> None:
     relay_token = "relay_local_token_12345678901234567890"
 

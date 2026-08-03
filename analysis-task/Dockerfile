@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 ARG TOOLS_IMAGE=test-agent-opencode-worker:internal
 FROM ${TOOLS_IMAGE}
 
@@ -8,9 +7,6 @@ COPY test-agent-safe-shell /usr/local/bin/test-agent-safe-shell
 COPY test-agent-model-relay.py /usr/local/bin/test-agent-model-relay
 COPY test-agent-clean-output.py /usr/local/bin/test-agent-clean-output
 RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends python3; \
-    rm -rf /var/lib/apt/lists/*; \
     chmod 0555 /usr/local/bin/test-agent-analysis /usr/local/bin/test-agent-safe-shell /usr/local/bin/test-agent-model-relay /usr/local/bin/test-agent-clean-output; \
     if ! getent group 10001 >/dev/null; then groupadd --gid 10001 analysis; fi; \
     if ! getent group 10002 >/dev/null; then groupadd --gid 10002 analysis-relay; fi; \

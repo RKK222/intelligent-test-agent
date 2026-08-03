@@ -72,12 +72,14 @@ def build_app(settings: WorkflowSettings | None = None):  # type: ignore[no-unty
                 registry,
                 platform,
                 model_name=configuration.intent_model_name,
+                gateway_url_override=configuration.server_model_gateway_url,
             ),
             platform=platform,
             cancellation_service=RunCancellationService(platform, runner, store),
             question_answerer=PlatformGrantedReportQuestionAnswerer(
                 platform,
                 configuration.report_qa_model_name,
+                gateway_url_override=configuration.server_model_gateway_url,
             ),
             followup_retention=ReportFollowupRetentionService(
                 store,
@@ -148,6 +150,7 @@ def build_worker(
                 grants,
                 configuration.synthesis_model_name,
                 store,
+                gateway_url_override=configuration.server_model_gateway_url,
             ),
             reports=StoreReportPublisher(store),
             progress=StoreProgressPublisher(store),

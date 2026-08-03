@@ -14,7 +14,13 @@ from urllib.parse import urlsplit
 
 
 MAX_TOOL_OUTPUT_BYTES = 50 * 1024 * 1024
+MAX_GIT_COMMAND_OUTPUT_BYTES = 2 * 1024 * 1024
+MAX_PROMPT_DIFF_BYTES = 12 * 1024
+MAX_PROMPT_CHANGED_FILE_BYTES = 8 * 1024
+MAX_PROMPT_CHANGED_FILES = 200
 MODEL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+REPOSITORY_ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+COMMIT_ID_PATTERN = re.compile(r"^[0-9a-f]{40,64}$")
 OPENCODE_PROVIDER_ID = "test-agent-workflow"
 SAFE_OPENCODE_SHELL = "/usr/local/bin/test-agent-safe-shell"
 
@@ -35,7 +41,12 @@ def main() -> int:
     relay_token_path.unlink(missing_ok=True)
     environment = _tool_environment(request, relay_token)
     _prepare_tool_home(analyzer_id, request, environment)
-    prompt = _prompt(request)
+    repository_context = collect_repository_context(request)
+    request["outputSchema"] = constrain_output_schema(
+        request.get("outputSchema"),
+        repository_context,
+    )
+    prompt = _prompt(request, repository_context)
     analyzer_root = result_path.parent
     log_path = analyzer_root / "tool.log"
     raw_path = analyzer_root / "last-message.txt"
@@ -61,6 +72,7 @@ def main() -> int:
     if len(raw.encode()) > MAX_TOOL_OUTPUT_BYTES:
         return 74
     result = extract_structured_result(raw)
+    validate_result_evidence(result, repository_context)
     temporary = result_path.with_suffix(".tmp")
     temporary.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
     temporary.replace(result_path)
@@ -121,7 +133,10 @@ def _looks_like_result(value: dict[str, Any]) -> bool:
     return required <= value.keys()
 
 
-def _prompt(request: dict[str, Any]) -> str:
+def _prompt(
+    request: dict[str, Any],
+    repository_context: list[dict[str, Any]] | None = None,
+) -> str:
     repair = request.get("repairResult")
     repair_instruction = (
         "上次输出未通过Schema，请只修复格式和缺失字段："
@@ -132,15 +147,247 @@ def _prompt(request: dict[str, Any]) -> str:
     return "\n".join(
         [
             "你正在执行代码变动影响分析。/workspace/repos 下每个一级目录是一个只读仓库。",
+            "开始分析前必须先调用当前代码智能体的仓库读取工具：Codex必须调用exec_command，"
+            "OpenCode必须调用bash/read/grep；没有实际工具结果时禁止输出分析结论。",
+            "至少对每个仓库执行git diff --stat mergeBase..targetHead和"
+            "git diff mergeBase..targetHead，并继续读取受影响文件、调用方和测试。",
             "只能分析冻结坐标 mergeBase..targetHead，不得修改源码，不得访问互联网或其他地址。",
+            "工具调用失败或无法取得diff时必须在uncertainties中如实说明，"
+            "严禁推测、举例或编造文件、行号、符号与业务影响。",
             "联合分析跨仓库调用、接口与契约影响；每项结论给出仓库、文件、行号或符号证据。",
+            "codeEvidence每项必须使用精确字段repositoryAlias和path；path必须逐字复制仓库相对路径，"
+            "不得翻译、缩写、改名或省略目录。文档/配置变更不得推断成已实现的运行时代码功能。",
             "输出必须严格符合JSON Schema，不要使用Markdown包裹。",
             "仓库坐标：" + json.dumps(request.get("repositories", []), ensure_ascii=False),
+            "冻结差异证据（分析入口已只读执行Git，必须以此为准）："
+            + json.dumps(_public_repository_context(repository_context or []), ensure_ascii=False),
             "局部范围：" + json.dumps(request.get("scopeSelectors", []), ensure_ascii=False),
             "JSON Schema：" + json.dumps(request.get("outputSchema", {}), ensure_ascii=False),
             repair_instruction,
         ]
     )
+
+
+def collect_repository_context(
+    request: dict[str, Any],
+    repository_root: Path = Path("/workspace/repos"),
+) -> list[dict[str, Any]]:
+    """在模型调用前读取冻结Git差异，避免弱模型凭空补造源码证据。"""
+
+    repositories = request.get("repositories")
+    if not isinstance(repositories, list) or not repositories:
+        raise ValueError("分析请求缺少冻结仓库坐标")
+    root = repository_root.resolve(strict=True)
+    contexts: list[dict[str, Any]] = []
+    remaining_diff_bytes = MAX_PROMPT_DIFF_BYTES
+    remaining_file_bytes = MAX_PROMPT_CHANGED_FILE_BYTES
+    for value in repositories:
+        if not isinstance(value, dict):
+            raise ValueError("冻结仓库坐标格式无效")
+        alias = str(value.get("repositoryAlias", ""))
+        merge_base = str(value.get("mergeBase", ""))
+        target_head = str(value.get("targetHead", ""))
+        if not REPOSITORY_ALIAS_PATTERN.fullmatch(alias):
+            raise ValueError("冻结仓库别名格式无效")
+        if not COMMIT_ID_PATTERN.fullmatch(merge_base) or not COMMIT_ID_PATTERN.fullmatch(
+            target_head
+        ):
+            raise ValueError("冻结提交坐标格式无效")
+        repository = (root / alias).resolve(strict=True)
+        try:
+            repository.relative_to(root)
+        except ValueError as exception:
+            raise ValueError("冻结仓库路径越界") from exception
+        coordinate = f"{merge_base}..{target_head}"
+        stat = _run_git(repository, "diff", "--no-ext-diff", "--no-textconv", "--stat", coordinate)
+        raw_names = _run_git(
+            repository,
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--name-only",
+            "-z",
+            coordinate,
+        )
+        changed_files = [item for item in raw_names.split("\0") if item]
+        prompt_files: list[str] = []
+        for changed_file in changed_files:
+            encoded_size = len(changed_file.encode("utf-8")) + 1
+            if (
+                len(prompt_files) >= MAX_PROMPT_CHANGED_FILES
+                or encoded_size > remaining_file_bytes
+            ):
+                break
+            prompt_files.append(changed_file)
+            remaining_file_bytes -= encoded_size
+        changed_files_truncated = len(prompt_files) != len(changed_files)
+        diff = ""
+        if prompt_files and remaining_diff_bytes > 0:
+            diff = _run_git(
+                repository,
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--unified=12",
+                coordinate,
+                "--",
+                *prompt_files,
+            )
+        encoded_diff = diff.encode("utf-8")
+        diff_truncated = len(encoded_diff) > remaining_diff_bytes
+        if diff_truncated:
+            diff = encoded_diff[:remaining_diff_bytes].decode("utf-8", errors="ignore")
+            remaining_diff_bytes = 0
+        else:
+            remaining_diff_bytes -= len(encoded_diff)
+        contexts.append(
+            {
+                "repositoryId": str(value.get("repositoryId", "")),
+                "repositoryAlias": alias,
+                "mergeBase": merge_base,
+                "targetHead": target_head,
+                "diffStat": stat,
+                "changedFiles": prompt_files,
+                "changedFilesTruncated": changed_files_truncated,
+                "diffExcerpt": diff,
+                "diffTruncated": diff_truncated or changed_files_truncated,
+                "_repositoryPath": str(repository),
+                "_allChangedFiles": changed_files,
+            }
+        )
+    return contexts
+
+
+def _public_repository_context(
+    repository_context: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """只把冻结证据送给模型，不暴露Runner内部仓库绝对路径。"""
+
+    return [
+        {key: value for key, value in context.items() if not key.startswith("_")}
+        for context in repository_context
+    ]
+
+
+def constrain_output_schema(
+    output_schema: Any,
+    repository_context: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """收紧通用分析结果中的证据字段，阻止模型用任意别名绕过校验。"""
+
+    if not isinstance(output_schema, dict):
+        raise ValueError("分析输出Schema格式无效")
+    schema = json.loads(json.dumps(output_schema))
+    properties = schema.get("properties")
+    evidence = properties.get("codeEvidence") if isinstance(properties, dict) else None
+    items = evidence.get("items") if isinstance(evidence, dict) else None
+    if not isinstance(items, dict):
+        raise ValueError("分析输出Schema缺少codeEvidence对象定义")
+    aliases = [str(value["repositoryAlias"]) for value in repository_context]
+    item_properties = items.setdefault("properties", {})
+    if not isinstance(item_properties, dict):
+        raise ValueError("分析输出Schema的codeEvidence属性定义无效")
+    item_properties["repositoryAlias"] = {
+        "type": "string",
+        "enum": aliases,
+        "description": "必须逐字复制冻结仓库的repositoryAlias",
+    }
+    item_properties["path"] = {
+        "type": "string",
+        "minLength": 1,
+        "description": "冻结仓库内的精确相对路径，不得翻译、缩写或改名",
+    }
+    required = items.setdefault("required", [])
+    if not isinstance(required, list):
+        raise ValueError("分析输出Schema的codeEvidence必填定义无效")
+    for name in ("repositoryAlias", "path"):
+        if name not in required:
+            required.append(name)
+    if any(context.get("_allChangedFiles") for context in repository_context):
+        evidence["minItems"] = 1
+    return schema
+
+
+def validate_result_evidence(
+    result: dict[str, Any],
+    repository_context: list[dict[str, Any]],
+) -> None:
+    """拒绝不存在或越界的代码证据；删除文件可由冻结changedFiles证明。"""
+
+    evidence = result.get("codeEvidence")
+    has_changes = any(context.get("_allChangedFiles") for context in repository_context)
+    if not isinstance(evidence, list) or (has_changes and not evidence):
+        raise ValueError("非空差异必须返回代码证据")
+    for item in evidence:
+        if not isinstance(item, dict):
+            raise ValueError("代码证据格式无效")
+        raw_path = next(
+            (
+                item.get(name)
+                for name in ("path", "file", "filePath")
+                if isinstance(item.get(name), str) and item.get(name)
+            ),
+            None,
+        )
+        if raw_path is None or not _evidence_path_exists(raw_path, item, repository_context):
+            raise ValueError("代码证据文件不属于冻结仓库")
+
+
+def _evidence_path_exists(
+    raw_path: str,
+    item: dict[str, Any],
+    repository_context: list[dict[str, Any]],
+) -> bool:
+    if "\0" in raw_path or Path(raw_path).is_absolute():
+        return False
+    requested_repository = str(
+        item.get("repositoryAlias") or item.get("repositoryId") or item.get("repository") or ""
+    )
+    for context in repository_context:
+        aliases = {
+            str(context.get("repositoryAlias", "")),
+            str(context.get("repositoryId", "")),
+        }
+        if requested_repository and requested_repository not in aliases:
+            continue
+        normalized = raw_path
+        alias_prefix = str(context.get("repositoryAlias", "")) + "/"
+        if normalized.startswith(alias_prefix):
+            normalized = normalized[len(alias_prefix) :]
+        candidate = Path(str(context["_repositoryPath"])) / normalized
+        try:
+            candidate.resolve(strict=False).relative_to(
+                Path(str(context["_repositoryPath"])).resolve(strict=True)
+            )
+        except (OSError, ValueError):
+            continue
+        if normalized in set(context.get("_allChangedFiles", [])) or candidate.is_file():
+            return True
+    return False
+
+
+def _run_git(repository: Path, *arguments: str) -> str:
+    git_directory = repository / ".git"
+    if not git_directory.is_dir():
+        raise ValueError("冻结仓库缺少Git元数据")
+    try:
+        completed = subprocess.run(
+            [
+                "git",
+                f"--git-dir={git_directory}",
+                f"--work-tree={repository}",
+                *arguments,
+            ],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            check=False,
+            timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exception:
+        raise ValueError("冻结Git差异读取失败") from exception
+    if completed.returncode != 0 or len(completed.stdout) > MAX_GIT_COMMAND_OUTPUT_BYTES:
+        raise ValueError("冻结Git差异读取失败或超过上限")
+    return completed.stdout.decode("utf-8", errors="replace")
 
 
 def _tool_environment(
@@ -261,7 +508,10 @@ def _codex_configuration(request: dict[str, Any], home: str) -> str:
     model_name = _model_name(request)
     gateway_url = _relay_url(request)
     command_path = "/usr/local/bin:/usr/bin:/bin"
-    quoted = lambda value: json.dumps(str(value), ensure_ascii=True)
+
+    def quoted(value: object) -> str:
+        return json.dumps(str(value), ensure_ascii=True)
+
     return "\n".join(
         [
             f"model = {quoted(model_name)}",

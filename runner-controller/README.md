@@ -8,7 +8,7 @@
 
 - 用一次性 checkout ticket 向 Java 兑换 Runner 公钥加密的 Git 凭据。
 - Runner 到 Java 的固定票据兑换调用显式忽略宿主机 HTTP(S)/SOCKS 代理，平台内部地址必须由分析节点直接访问。
-- 在 tmpfs 中解密个人 SSH 私钥，Git 完成后立即擦除。
+- 在 tmpfs 中解密个人 SSH 私钥，Git 完成后立即擦除；当前接收`TAEC1`混合信封（RSA-OAEP-SHA256封装AES密钥、AES-256-GCM加密私钥），滚动升级期间兼容旧版未标记的短RSA报文。
 - 冻结默认/基线与目标提交，计算 merge-base；从冻结提交读取根目录及嵌套的受跟踪 `.gitattributes`，对当前 detached ref 使用同一授权完整拉取 Git LFS，并只检出已映射且当前用户有权访问的 submodule。
 - 为每个任务创建一个固定镜像 digest 的非特权分析容器；多智能体共享只读源码，使用相互不可列举、读取或改名的独立 HOME、cache 和输出目录。
 - 生成确定性 diff manifest、解析局部重分析范围、执行 Codex/OpenCode、停止保留、恢复、取消和到期清理。
@@ -17,6 +17,8 @@
 ## 安全基线
 
 - Docker Server 必须不低于 18.09；正式交付必须在真实 18.09 环境验收。
+- Runner镜像中的Docker CLI必须使用客户端/服务端API自动协商，同时兼容18.09的API 1.39和当前Docker 29；禁止设置`DOCKER_API_VERSION`固定值，因为该变量会关闭协商并被新版本Engine拒绝。
+- 宿主机iptables策略是易失状态；Runner长期容器必须使用`--restart no`，并由部署脚本先校验或恢复分析出站策略、再启动，禁止在Docker重启后抢先恢复并接受任务。
 - 任务容器强制非 root、`cap-drop=ALL`、`no-new-privileges`、只读根文件系统、独立 tmpfs、CPU/内存/PID/nofile 限制且无 Docker Socket。
 - 源码卷只读；输出卷可写；任务子网只允许访问固定 IPv4/CIDR 与端口的模型网关。
 - Runner同时校验请求中的网关URL和公开模型ID格式；真实grant只经stdin交给容器内UID `10002`的回环relay，UID `10001`的Codex/OpenCode只获得生命周期内有效的本地token和`127.0.0.1`地址。relay固定上游IP/base path与模型端点并覆盖Authorization，真实grant不进入分析进程、挂载文件、环境或命令行。Codex shell使用环境白名单，OpenCode仓库命令固定经过`env -i`安全shell。

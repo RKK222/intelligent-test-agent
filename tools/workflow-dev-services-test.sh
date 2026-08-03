@@ -174,6 +174,8 @@ grep -Fq 'TEST_AGENT_WORKFLOW_DATABASE_URL=postgresql+asyncpg://' "${runtime_env
   || fail "runtime env must contain the workflow database URL"
 grep -Fq 'TEST_AGENT_WORKFLOW_REDIS_URL=redis://workflow-dev:' "${runtime_env}" \
   || fail "runtime env must contain the restricted Redis URL"
+grep -Fq 'TEST_AGENT_WORKFLOW_SERVER_MODEL_GATEWAY_URL=http://127.0.0.1:8080/api/internal/platform/model-gateway/v1' "${runtime_env}" \
+  || fail "runtime env must keep host-side AgentScope on the local model gateway route"
 if grep -Eq 'DATABASE_URL|REDIS_URL' "${platform_env}"; then
   fail "platform env must not expose workflow database or Redis credentials to Java"
 fi

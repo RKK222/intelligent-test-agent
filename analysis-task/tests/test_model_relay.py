@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import importlib.util
 import json
 from pathlib import Path
 import subprocess
@@ -10,6 +11,11 @@ import threading
 
 
 RELAY_PATH = Path(__file__).parents[1] / "test-agent-model-relay.py"
+SPEC = importlib.util.spec_from_file_location("test_agent_model_relay", RELAY_PATH)
+assert SPEC and SPEC.loader
+MODULE = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = MODULE
+SPEC.loader.exec_module(MODULE)
 
 
 class GatewayHandler(BaseHTTPRequestHandler):
@@ -55,6 +61,45 @@ class GatewayHandler(BaseHTTPRequestHandler):
 
     def log_message(self, *_arguments: object) -> None:
         return None
+
+
+def test_initial_responses_turn_requires_a_tool_then_restores_auto_choice() -> None:
+    initial = {
+        "model": "workflow-code-analysis",
+        "input": [{"type": "message", "role": "user", "content": "inspect"}],
+        "tools": [{"type": "function", "name": "exec_command"}],
+        "tool_choice": "auto",
+    }
+
+    rewritten = json.loads(
+        MODULE.require_initial_response_tool_call(json.dumps(initial).encode())
+    )
+    assert rewritten["tool_choice"] == "required"
+
+    allowed_tools_auto = {
+        **initial,
+        "tool_choice": {
+            "type": "allowed_tools",
+            "mode": "auto",
+            "tools": [{"type": "function", "name": "exec_command"}],
+        },
+    }
+    rewritten_allowed_tools = json.loads(
+        MODULE.require_initial_response_tool_call(
+            json.dumps(allowed_tools_auto).encode()
+        )
+    )
+    assert rewritten_allowed_tools["tool_choice"] == "required"
+
+    followup = {
+        **initial,
+        "input": [
+            *initial["input"],
+            {"type": "function_call_output", "call_id": "call_1", "output": "ok"},
+        ],
+    }
+    preserved = MODULE.require_initial_response_tool_call(json.dumps(followup).encode())
+    assert json.loads(preserved)["tool_choice"] == "auto"
 
 
 def test_relay_keeps_platform_grant_out_of_the_analyzer_process() -> None:

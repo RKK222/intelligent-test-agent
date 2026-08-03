@@ -108,6 +108,8 @@ class RelayHandler(BaseHTTPRequestHandler):
             return
         try:
             body = self._request_body()
+            if route == "/responses":
+                body = require_initial_response_tool_call(body)
         except ValueError:
             self._error(400, "INVALID_REQUEST")
             return
@@ -194,6 +196,39 @@ class RelayHandler(BaseHTTPRequestHandler):
     def log_message(self, *_arguments: object) -> None:
         # 任何请求头、路径或下游错误都不进入容器日志。
         return None
+
+
+def require_initial_response_tool_call(body: bytes) -> bytes:
+    """首轮Codex请求强制读取仓库，工具结果回传后恢复自动收敛。"""
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError as exception:
+        raise ValueError("Responses请求体不是合法JSON") from exception
+    if not isinstance(payload, dict):
+        raise ValueError("Responses请求体必须是对象")
+    tools = payload.get("tools")
+    if not isinstance(tools, list) or not tools:
+        return body
+    if _contains_function_call_output(payload.get("input")):
+        return body
+    if payload.get("tool_choice") == "required":
+        return body
+    payload["tool_choice"] = "required"
+    rewritten = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+    if len(rewritten) > MAX_REQUEST_BYTES:
+        raise ValueError("Responses请求体超过上限")
+    return rewritten
+
+
+def _contains_function_call_output(value: Any) -> bool:
+    if isinstance(value, dict):
+        if value.get("type") == "function_call_output":
+            return True
+        return any(_contains_function_call_output(child) for child in value.values())
+    if isinstance(value, list):
+        return any(_contains_function_call_output(child) for child in value)
+    return False
 
 
 def main() -> int:

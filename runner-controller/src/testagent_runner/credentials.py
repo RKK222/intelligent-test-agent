@@ -11,6 +11,13 @@ from collections.abc import Iterator
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+
+_HYBRID_ENVELOPE_PREFIX = "TAEC1"
+_HYBRID_ENVELOPE_AAD = b"test-agent-runner-credential-v1"
+_AES_KEY_BYTES = 32
+_GCM_NONCE_BYTES = 12
 
 
 class RunnerCredentialError(RuntimeError):
@@ -49,14 +56,7 @@ class RunnerCredentialDecryptor:
             yield None
             return
         try:
-            plaintext = self._private_key.decrypt(
-                base64.b64decode(encrypted_private_key, validate=True),
-                padding.OAEP(
-                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                    algorithm=hashes.SHA256(),
-                    label=None,
-                ),
-            )
+            plaintext = self._decrypt(encrypted_private_key)
         except Exception as exception:
             raise RunnerCredentialError("checkout凭据无法解封") from exception
         descriptor, raw_path = tempfile.mkstemp(prefix="checkout-", dir=self._credential_root)
@@ -79,6 +79,52 @@ class RunnerCredentialDecryptor:
                         os.fsync(stream.fileno())
                 finally:
                     key_path.unlink(missing_ok=True)
+
+    def _decrypt(self, encrypted_private_key: str) -> bytes:
+        parts = encrypted_private_key.split(".")
+        if parts[0] != _HYBRID_ENVELOPE_PREFIX:
+            # 滚动升级期间继续接受旧版短报文RSA-OAEP信封；Java新版本只签发TAEC1。
+            return self._private_key.decrypt(
+                base64.b64decode(encrypted_private_key, validate=True),
+                _oaep_sha256(),
+            )
+        if len(parts) != 4:
+            raise RunnerCredentialError("checkout凭据信封格式无效")
+
+        wrapped_key = _decode_base64url(parts[1])
+        nonce = _decode_base64url(parts[2])
+        ciphertext = _decode_base64url(parts[3])
+        if len(nonce) != _GCM_NONCE_BYTES or len(ciphertext) < 16:
+            raise RunnerCredentialError("checkout凭据信封格式无效")
+
+        aes_key = bytearray(self._private_key.decrypt(wrapped_key, _oaep_sha256()))
+        try:
+            if len(aes_key) != _AES_KEY_BYTES:
+                raise RunnerCredentialError("checkout凭据信封密钥无效")
+            return AESGCM(bytes(aes_key)).decrypt(
+                nonce,
+                ciphertext,
+                _HYBRID_ENVELOPE_AAD,
+            )
+        finally:
+            aes_key[:] = b"\0" * len(aes_key)
+
+
+def _oaep_sha256() -> padding.OAEP:
+    return padding.OAEP(
+        mgf=padding.MGF1(algorithm=hashes.SHA256()),
+        algorithm=hashes.SHA256(),
+        label=None,
+    )
+
+
+def _decode_base64url(value: str) -> bytes:
+    padding_length = (-len(value)) % 4
+    return base64.b64decode(
+        value + "=" * padding_length,
+        altchars=b"-_",
+        validate=True,
+    )
 
 
 def _is_tmpfs(path: Path) -> bool:

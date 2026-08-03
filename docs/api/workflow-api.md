@@ -80,6 +80,7 @@ run 状态：`QUEUED/RUNNING/WAITING_INPUT/SUCCEEDED/PARTIAL_FAILED/FAILED/CANCE
 - 无共同祖先、分支不存在或目标分支与 ticket 不一致时安全失败。
 - 空 diff 直接发布成功报告，不调用代码智能体。
 - Worker从部署配置选择平台模型网关公开模型ID，并随HMAC保护的Runner请求下发；平台grant到达Runner后只经stdin交给任务容器内独立UID的回环relay。Codex/OpenCode固定使用该模型ID、`127.0.0.1` relay和一次性本地token，不能直接持有平台grant或回退工具默认provider。
+- grant返回的`gatewayUrl`是Runner侧白名单地址，必须原样下发；如果Workflow服务端与Runner网络视角不同，部署可为AgentScope意图、综合和报告问答配置独立的服务端直连路由。服务端AgentScope固定忽略系统代理并使用流式响应，结构化输出优先使用OpenAI-compatible JSON Schema、兼容回退为工具调用，但不得改写Runner请求中的地址、grant scope或出站白名单。
 - 至少一个分析器成功可发布报告；部分分析器失败或 AgentScope 综合连续失败时为 `PARTIAL_FAILED`。综合失败使用带 `analyzerId` 证据来源的确定性降级报告；全部代码分析器失败才为 `FAILED` 且不发布报告。
 - Worker 只有在持有并成功续租当前 run 租约时才能收敛状态、发布事件或停止工作区；终态更新以单条 PostgreSQL 条件更新原子校验 owner token、租约期限、`RUNNING` 和未取消状态，取消与终态并发时不能被 Worker 覆盖。每个 Worker 进程使用逻辑 ID 加随机 owner token，重启进程不能继承旧租约。丢失租约的旧 Worker 只撤销自己持有的精确模型 grant，不操作已由新 Worker 接管的容器。
 - 局部重分析复用原 task 和冻结坐标，创建新 run/checkpoint namespace/报告版本；多义范围进入 `WAITING_INPUT`。
@@ -110,6 +111,12 @@ METHOD\nPATH\nBODY_SHA256\nUSER_ID\nSESSION_DIGEST\nTIMESTAMP\nNONCE\nworkflow
 ```
 
 Runner 兑换 canonical 使用 `METHOD/PATH/BODY_SHA256/RUNNER_ID/TIMESTAMP/NONCE`。Java 校验固定 client ID、时钟窗口、Redis nonce、平台 session marker、用户状态、角色、应用成员与仓库当前状态；内部请求不传原始 Bearer。
+
+checkout兑换响应中的`encryptedPrivateKey`是只供Runner解封的不透明版本化信封。Java当前签发
+`TAEC1.{wrappedKey}.{nonce}.{ciphertext}`：`wrappedKey`使用Runner RSA公钥和OAEP-SHA256封装随机
+32字节AES密钥，私钥正文使用AES-256-GCM与固定协议AAD加密，三个二进制字段均为无填充Base64URL。
+Runner在滚动升级期间继续接受旧版未标记的RSA-OAEP短报文，但Java不再签发旧格式；不得把信封字段拆给
+浏览器、日志或workflow数据库。
 
 ## 兼容性
 

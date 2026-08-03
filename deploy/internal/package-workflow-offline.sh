@@ -273,10 +273,11 @@ generate_sbom() {
     syft "${image}" -o "spdx-json=${output}"
     return
   fi
+  # Syft 会先把 Docker daemon 中的完整镜像导出到 /tmp；当前 analysis 镜像已超过 1 GiB。
   docker run --rm --platform "${PLATFORM}" --network none --read-only --cap-drop ALL \
     --security-opt no-new-privileges \
     --env SYFT_CHECK_FOR_APP_UPDATE=false --env XDG_CACHE_HOME=/tmp/syft-cache \
-    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=256m \
+    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=2g \
     --volume /var/run/docker.sock:/var/run/docker.sock \
     "${SYFT_IMAGE}" "docker:${image}" -o spdx-json >"${output}"
 }
@@ -350,6 +351,7 @@ RELEASE
       done >SHA256SUMS
 )
 
-tar -czf "${ARCHIVE}" -C "${OUTPUT_DIR%/}" "workflow-${VERSION}"
+# macOS归档时禁止把com.apple.*扩展属性写成PAX header，避免Linux部署出现未知header告警。
+COPYFILE_DISABLE=1 tar -czf "${ARCHIVE}" -C "${OUTPUT_DIR%/}" "workflow-${VERSION}"
 sha256_file "${ARCHIVE}" >"${ARCHIVE}.sha256"
 echo "Workflow offline release created: ${ARCHIVE}"

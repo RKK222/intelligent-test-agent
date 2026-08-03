@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 ARG PYTHON_IMAGE
 ARG UV_IMAGE
 
@@ -10,7 +9,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_NO_CACHE=1 \
     UV_PROJECT_ENVIRONMENT=/opt/test-agent-runner/.venv \
-    DOCKER_API_VERSION=1.39 \
     PATH=/opt/test-agent-runner/.venv/bin:${PATH}
 
 COPY --from=uv-bin /uv /usr/local/bin/uv

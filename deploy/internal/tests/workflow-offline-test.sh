@@ -80,14 +80,49 @@ grep -Fq 'TEST_AGENT_WORKFLOW_PLATFORM=linux/amd64' "${release_root}/release.env
 grep -Fq 'TEST_AGENT_RUNNER_KNOWN_HOSTS_PATH' "${release_root}/deploy/workflow.env.example"
 grep -Fq 'TEST_AGENT_WORKFLOW_ANALYSIS_MODEL_NAME=workflow-code-analysis' \
   "${release_root}/deploy/workflow.env.example"
+grep -Fq 'TEST_AGENT_WORKFLOW_SERVER_MODEL_GATEWAY_URL=' \
+  "${release_root}/deploy/workflow.env.example"
 grep -Fq '10001:10003' "${release_root}/source/analysis-task.Dockerfile"
 grep -Fq '10002' "${release_root}/source/analysis-task.Dockerfile"
+if grep -Fq 'DOCKER_API_VERSION=' "${release_root}/source/runner-controller.Dockerfile"; then
+  echo "Runner image unexpectedly disables Docker client/server API negotiation" >&2
+  exit 1
+fi
 grep -Fq '127.0.0.1' "${release_root}/source/test-agent-model-relay.py"
 grep -Fq 'OUTPUT_ROOT = Path("/workspace/output")' \
   "${release_root}/source/test-agent-clean-output.py"
 assert_unique_env_keys "${release_root}/deploy/workflow.env.example"
 grep -Fq 'CONTROL_ENV_FILE' "${release_root}/deploy/workflow-docker.sh"
 grep -Fq 'RUNNER_ENV_FILE' "${release_root}/deploy/workflow-docker.sh"
+grep -Fq 'chown 10003:10003 "${RUNNER_ROOT}"' "${release_root}/deploy/workflow-docker.sh"
+grep -Fq -- '--name test-agent-workflow-runner --restart no' \
+  "${release_root}/deploy/workflow-docker.sh"
+grep -Fq 'Restoring workflow analysis egress policy before Runner startup.' \
+  "${release_root}/deploy/workflow-docker.sh"
+if grep -F -- '--name test-agent-workflow-runner --restart unless-stopped' \
+  "${release_root}/deploy/workflow-docker.sh" >/dev/null; then
+  echo "Runner unexpectedly auto-starts before volatile firewall policy restoration" >&2
+  exit 1
+fi
+if grep -Fq 'install -d -m 0700 -o 10003 -g 10003' "${release_root}/deploy/workflow-docker.sh"; then
+  echo "workflow deploy unexpectedly requires a host passwd entry for uid 10003" >&2
+  exit 1
+fi
+grep -Fq -- '--tmpfs /tmp:rw,noexec,nosuid,nodev,size=2g' \
+  "${INTERNAL_DIR}/package-workflow-offline.sh"
+grep -Fq 'COPYFILE_DISABLE=1 tar -czf' "${INTERNAL_DIR}/package-workflow-offline.sh"
+if grep -Fq '# syntax=' \
+  "${ROOT_DIR}/workflow-service/Dockerfile" \
+  "${ROOT_DIR}/runner-controller/Dockerfile" \
+  "${ROOT_DIR}/analysis-task/Dockerfile"; then
+  echo "Workflow offline images unexpectedly require a remote Dockerfile frontend" >&2
+  exit 1
+fi
+if grep -Eq 'apt-get|apk add|dnf install|yum install' \
+  "${ROOT_DIR}/analysis-task/Dockerfile"; then
+  echo "Analysis image unexpectedly downloads OS packages during offline build" >&2
+  exit 1
+fi
 if grep -F 'TEST_AGENT_WORKFLOW_MIGRATION_DATABASE_URL' \
   "${release_root}/deploy/workflow-docker.sh" | grep -Fq 'write_env_subset'; then
   echo "migration owner URL unexpectedly entered a long-running scoped env" >&2
