@@ -2,8 +2,9 @@ import { defineComponent, h, inject, provide } from "vue";
 import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/vue";
+import { ElMessageBox } from "element-plus";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
-import type { OpencodeRuntimeManagementOverview } from "@test-agent/shared-types";
+import type { CurrentUser, OpencodeRuntimeManagementOverview, OpencodeRuntimeProcess } from "@test-agent/shared-types";
 import RuntimeManagementPanel from "../src/components/settings/RuntimeManagementPanel.vue";
 import { formatMetricSampleTime } from "../src/components/settings/runtimeMetricFormatting";
 import SettingsMenu from "../src/components/settings/SettingsMenu.vue";
@@ -37,17 +38,18 @@ function createQueryClient() {
   });
 }
 
-function renderRuntimePanel(api: Partial<BackendApiClient>) {
+function renderRuntimePanel(
+  api: Partial<BackendApiClient>,
+  currentUser: CurrentUser = {
+    userId: "usr_admin",
+    username: "admin",
+    unifiedAuthId: "AUTH_1",
+    roles: ["SUPER_ADMIN"]
+  }
+) {
   const queryClient = createQueryClient();
   const view = render(RuntimeManagementPanel, {
-    props: {
-      currentUser: {
-        userId: "usr_admin",
-        username: "admin",
-        unifiedAuthId: "AUTH_1",
-        roles: ["SUPER_ADMIN"]
-      }
-    },
+    props: { currentUser },
     global: {
       plugins: [[VueQueryPlugin, { queryClient }]],
       stubs: {
@@ -114,8 +116,37 @@ const emptyOverview: OpencodeRuntimeManagementOverview = {
   }
 };
 
+function createUserRuntimeProcess(overrides: Partial<OpencodeRuntimeProcess> = {}): OpencodeRuntimeProcess {
+  return {
+    processId: "ocp_1234567890abcdef",
+    userId: "usr_1234567890abcdef",
+    username: "wr",
+    linuxServerId: "10.8.0.12",
+    containerId: "ctr_01",
+    port: 4096,
+    pid: 12345,
+    baseUrl: "http://10.8.0.12:4096",
+    status: "STOPPED",
+    managerStatus: "NOT_RUNNING",
+    healthStatus: "NOT_RUNNING",
+    restartable: true,
+    sessionPath: "/data/opencode/session/4096",
+    configPath: "/data/opencode/.config/opencode/",
+    lastHealthCheckAt: "2026-06-24T08:00:00Z",
+    healthMessage: "process pid is not alive",
+    createdAt: "2026-06-24T08:00:00Z",
+    updatedAt: "2026-06-24T08:00:00Z",
+    traceId: "trace_1234567890abcdef",
+    bindingAgentId: "opencode",
+    bindingStatus: "ACTIVE",
+    bindingUpdatedAt: "2026-06-24T08:00:00Z",
+    ...overrides
+  };
+}
+
 describe("runtime management settings", () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.clearAllMocks();
   });
 
@@ -272,6 +303,26 @@ describe("runtime management settings", () => {
     expect(api.getOpencodeRuntimeManagementUserProcesses).not.toHaveBeenCalled();
 
     queryClient.clear();
+  });
+
+  it("does not expose runtime controls to non-super-admin users", async () => {
+    const api = {
+      getOpencodeRuntimeManagementOverview: vi.fn(),
+      restartOpencodeRuntimeManagedProcess: vi.fn()
+    };
+    const view = renderRuntimePanel(api, {
+      userId: "usr_app_admin",
+      username: "app-admin",
+      unifiedAuthId: "AUTH_2",
+      roles: ["APP_ADMIN"]
+    });
+
+    expect(await view.findByText("当前账号无运行管理权限")).toBeTruthy();
+    expect(view.queryByRole("button", { name: /批量重启/ })).toBeNull();
+    expect(api.getOpencodeRuntimeManagementOverview).not.toHaveBeenCalled();
+    expect(api.restartOpencodeRuntimeManagedProcess).not.toHaveBeenCalled();
+
+    view.queryClient.clear();
   });
 
   it("merges Linux servers and backend Java processes by linuxServerId", async () => {
@@ -561,6 +612,118 @@ describe("runtime management settings", () => {
     expect(await findByText(/OPENCODE_UNAVAILABLE/)).toBeTruthy();
 
     queryClient.clear();
+  });
+
+  it("batch restarts selected restartable user processes and skips healthy rows", async () => {
+    const userProcessPage = {
+      items: [
+        createUserRuntimeProcess(),
+        createUserRuntimeProcess({
+          processId: "ocp_2",
+          userId: "usr_2",
+          username: "user-b",
+          containerId: "ctr_02",
+          port: 4097,
+          baseUrl: "http://10.8.0.12:4097"
+        }),
+        createUserRuntimeProcess({
+          processId: "ocp_healthy",
+          userId: "usr_healthy",
+          username: "healthy-user",
+          containerId: "ctr_03",
+          port: 4098,
+          baseUrl: "http://10.8.0.12:4098",
+          status: "RUNNING",
+          managerStatus: "RUNNING",
+          healthStatus: "HEALTHY",
+          restartable: false,
+          healthMessage: "ok"
+        })
+      ],
+      page: 1,
+      size: 20,
+      total: 3
+    };
+    const api = {
+      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(emptyOverview),
+      getOpencodeRuntimeManagementUserProcesses: vi.fn().mockResolvedValue(userProcessPage),
+      restartOpencodeRuntimeManagedProcess: vi.fn().mockResolvedValue({ command: "restart", status: "STARTED" })
+    };
+    vi.spyOn(ElMessageBox, "confirm").mockResolvedValue("confirm" as never);
+    const view = renderRuntimePanel(api);
+
+    expect(await view.findByText("请输入用户关键字查询 TestAgent 进程")).toBeTruthy();
+    await fireEvent.update(view.getByPlaceholderText("用户名 / userId / 统一认证号"), "user");
+    await fireEvent.click(view.getByText("查询用户进程"));
+    expect(await view.findByText("healthy-user")).toBeTruthy();
+    expect((view.getByRole("checkbox", { name: /healthy-user/ }) as HTMLInputElement).disabled).toBe(true);
+
+    await fireEvent.click(view.getByRole("checkbox", { name: "全选本页可重启用户进程" }));
+    await fireEvent.click(view.getByRole("button", { name: "批量重启（2）" }));
+
+    await waitFor(() => expect(api.restartOpencodeRuntimeManagedProcess).toHaveBeenCalledTimes(2));
+    expect(api.restartOpencodeRuntimeManagedProcess.mock.calls).toEqual([
+      ["ctr_01", 4096],
+      ["ctr_02", 4097]
+    ]);
+    expect(ElMessageBox.confirm).toHaveBeenCalledWith(
+      expect.stringContaining("选中的 2 个用户"),
+      "批量重启用户 TestAgent server",
+      expect.objectContaining({ confirmButtonText: "批量重启" })
+    );
+    expect(await view.findByText("批量重启完成：成功 2，失败 0。")).toBeTruthy();
+    await waitFor(() => expect(api.getOpencodeRuntimeManagementUserProcesses).toHaveBeenCalledTimes(2));
+
+    view.queryClient.clear();
+  });
+
+  it("continues a batch restart after one user fails and keeps only the failed row selected", async () => {
+    const userProcessPage = {
+      items: [
+        createUserRuntimeProcess(),
+        createUserRuntimeProcess({
+          processId: "ocp_2",
+          userId: "usr_2",
+          username: "user-b",
+          containerId: "ctr_02",
+          port: 4097,
+          baseUrl: "http://10.8.0.12:4097"
+        })
+      ],
+      page: 1,
+      size: 20,
+      total: 2
+    };
+    const api = {
+      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(emptyOverview),
+      getOpencodeRuntimeManagementUserProcesses: vi.fn().mockResolvedValue(userProcessPage),
+      restartOpencodeRuntimeManagedProcess: vi.fn()
+        .mockResolvedValueOnce({ command: "restart", status: "STARTED" })
+        .mockRejectedValueOnce(new BackendApiError(503, {
+          success: false,
+          code: "OPENCODE_UNAVAILABLE",
+          message: "启动后未通过健康检查",
+          traceId: "trace_batch_failure"
+        }))
+    };
+    vi.spyOn(ElMessageBox, "confirm").mockResolvedValue("confirm" as never);
+    const view = renderRuntimePanel(api);
+
+    expect(await view.findByText("请输入用户关键字查询 TestAgent 进程")).toBeTruthy();
+    await fireEvent.update(view.getByPlaceholderText("用户名 / userId / 统一认证号"), "user");
+    await fireEvent.click(view.getByText("查询用户进程"));
+    expect(await view.findByText("user-b")).toBeTruthy();
+    await fireEvent.click(view.getByRole("checkbox", { name: "全选本页可重启用户进程" }));
+    await fireEvent.click(view.getByRole("button", { name: "批量重启（2）" }));
+
+    expect(await view.findByText(/批量重启完成：成功 1，失败 1。/)).toBeTruthy();
+    expect(await view.findByText(/user-b.*OPENCODE_UNAVAILABLE/)).toBeTruthy();
+    expect((view.getByRole("checkbox", { name: /wr（ctr_01:4096）/ }) as HTMLInputElement).checked).toBe(false);
+    expect((view.getByRole("checkbox", { name: /user-b（ctr_02:4097）/ }) as HTMLInputElement).checked).toBe(true);
+    expect(view.getByRole("button", { name: "批量重启（1）" })).toBeTruthy();
+    await waitFor(() => expect(api.getOpencodeRuntimeManagementUserProcesses).toHaveBeenCalledTimes(2));
+
+    view.queryClient.clear();
   });
 
   it("expands a merged container manager row and groups owned and ghost processes", async () => {

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, inject, ref } from "vue";
+import { computed, inject, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { Refresh, Search } from "@element-plus/icons-vue";
+import { ElMessageBox } from "element-plus";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
 import type {
   CurrentUser,
@@ -57,6 +58,18 @@ type ManagedProcessActionRequest = {
   port: number;
 };
 
+type BatchRestartFailure = {
+  processId: string;
+  label: string;
+  message: string;
+};
+
+type BatchRestartResult = {
+  total: number;
+  succeeded: number;
+  failures: BatchRestartFailure[];
+};
+
 const processStatusOptions = ["RUNNING"];
 const metricsSourceHelp =
   "“cgroup”: Linux 容器/cgroup 整体指标，包含 manager 和下属 TestAgent server 等进程\n" +
@@ -76,6 +89,9 @@ const selectedMetricsTarget = ref<{ type: "container" | "backend"; id: string; t
 const selectedWindowMinutes = ref(60);
 const actionErrorMessage = ref("");
 const activeManagedProcessAction = ref<ManagedProcessActionRequest | null>(null);
+const selectedUserProcessIds = ref<Set<string>>(new Set());
+const batchRestarting = ref(false);
+const batchRestartResult = ref<BatchRestartResult | null>(null);
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 const overviewParams = computed<OpencodeRuntimeManagementOverviewParams>(() => ({
@@ -135,6 +151,7 @@ const managedProcessActionMutation = useMutation({
   },
   onMutate: request => {
     actionErrorMessage.value = "";
+    batchRestartResult.value = null;
     activeManagedProcessAction.value = request;
   },
   onSuccess: (_result, request) => {
@@ -146,11 +163,7 @@ const managedProcessActionMutation = useMutation({
     refetchRuntimeManagementAfterAction();
   },
   onError: error => {
-    if (error instanceof BackendApiError) {
-      actionErrorMessage.value = `${error.message}（${error.code}）`;
-    } else {
-      actionErrorMessage.value = error instanceof Error ? error.message : "进程操作失败";
-    }
+    actionErrorMessage.value = formatProcessActionError(error);
     refetchRuntimeManagementAfterAction();
   },
   onSettled: () => {
@@ -162,6 +175,17 @@ const overview = computed(() => overviewQuery.data.value);
 const summary = computed(() => overview.value?.summary);
 const processPage = computed(() => userProcessQuery.data.value);
 const processRows = computed(() => processPage.value?.items ?? []);
+const restartableProcessRows = computed(() => processRows.value.filter(canRestartUserProcess));
+const selectedUserProcesses = computed(() =>
+  restartableProcessRows.value.filter(process => selectedUserProcessIds.value.has(process.processId))
+);
+const allRestartableProcessesSelected = computed(() =>
+  restartableProcessRows.value.length > 0
+    && selectedUserProcesses.value.length === restartableProcessRows.value.length
+);
+const someRestartableProcessesSelected = computed(() =>
+  selectedUserProcesses.value.length > 0 && !allRestartableProcessesSelected.value
+);
 const isLoading = computed(() => overviewQuery.isLoading.value);
 const isFetching = computed(() => overviewQuery.isFetching.value);
 const isUserProcessFetching = computed(() => userProcessQuery.isFetching.value);
@@ -198,7 +222,30 @@ const userProcessErrorMessage = computed(() => {
   }
   return error.message || "用户 TestAgent 进程加载失败";
 });
+const batchRestartResultMessage = computed(() => {
+  const result = batchRestartResult.value;
+  if (!result) {
+    return "";
+  }
+  const summary = `批量重启完成：成功 ${result.succeeded}，失败 ${result.failures.length}。`;
+  if (result.failures.length === 0) {
+    return summary;
+  }
+  const details = result.failures
+    .map(failure => `${failure.label}：${failure.message}`)
+    .join("；");
+  return `${summary}失败项：${details}`;
+});
 const totalPages = computed(() => Math.max(1, Math.ceil((processPage.value?.total ?? 0) / userProcessSize.value)));
+
+watch(processRows, rows => {
+  // 用户进程选择只在当前查询页内有效，翻页或查询结果变化时移除失效项。
+  const availableIds = new Set(rows.filter(canRestartUserProcess).map(process => process.processId));
+  const retained = new Set(Array.from(selectedUserProcessIds.value).filter(processId => availableIds.has(processId)));
+  if (retained.size !== selectedUserProcessIds.value.size) {
+    selectedUserProcessIds.value = retained;
+  }
+});
 const summaryCards = computed(() => {
   const item = summary.value;
   return [
@@ -308,15 +355,18 @@ function refresh() {
 }
 
 function queryUserProcesses() {
+  resetUserProcessBatchState();
   activeUserKeyword.value = userKeywordDraft.value.trim();
   userProcessPage.value = 1;
 }
 
 function prevPage() {
+  resetUserProcessBatchState();
   userProcessPage.value = Math.max(1, userProcessPage.value - 1);
 }
 
 function nextPage() {
+  resetUserProcessBatchState();
   userProcessPage.value = Math.min(totalPages.value, userProcessPage.value + 1);
 }
 
@@ -540,7 +590,103 @@ function canRestartUserProcess(process: OpencodeRuntimeProcess) {
   return process.restartable === true && Boolean(process.containerId) && Number.isFinite(process.port);
 }
 
+function userProcessLabel(process: OpencodeRuntimeProcess) {
+  return `${process.username || process.userId || process.processId}（${process.containerId}:${process.port}）`;
+}
+
+function formatProcessActionError(error: unknown) {
+  if (error instanceof BackendApiError) {
+    return `${error.message}（${error.code}）`;
+  }
+  return error instanceof Error ? error.message : "进程操作失败";
+}
+
+function resetUserProcessBatchState() {
+  selectedUserProcessIds.value = new Set();
+  batchRestartResult.value = null;
+}
+
+function isUserProcessSelected(process: OpencodeRuntimeProcess) {
+  return selectedUserProcessIds.value.has(process.processId);
+}
+
+function toggleUserProcessSelection(process: OpencodeRuntimeProcess, event: Event) {
+  if (!canRestartUserProcess(process) || batchRestarting.value) {
+    return;
+  }
+  const next = new Set(selectedUserProcessIds.value);
+  if ((event.target as HTMLInputElement).checked) {
+    next.add(process.processId);
+  } else {
+    next.delete(process.processId);
+  }
+  selectedUserProcessIds.value = next;
+  batchRestartResult.value = null;
+}
+
+function toggleAllRestartableProcesses(event: Event) {
+  if (batchRestarting.value) {
+    return;
+  }
+  const checked = (event.target as HTMLInputElement).checked;
+  selectedUserProcessIds.value = checked
+    ? new Set(restartableProcessRows.value.map(process => process.processId))
+    : new Set();
+  batchRestartResult.value = null;
+}
+
+function isMessageBoxCancellation(error: unknown) {
+  return error === "cancel" || error === "close";
+}
+
+async function runBatchUserProcessRestart() {
+  const targets = selectedUserProcesses.value;
+  if (targets.length === 0 || batchRestarting.value || managedProcessActionMutation.isPending.value) {
+    return;
+  }
+  // 确认框打开期间也锁住入口，避免双击产生两批相同控制命令。
+  batchRestarting.value = true;
+  try {
+    await ElMessageBox.confirm(
+      `确认逐个重启选中的 ${targets.length} 个用户 TestAgent server 吗？每个进程都会经过现有停止、重新拉起和健康检查流程；单个失败不会中断其余进程。`,
+      "批量重启用户 TestAgent server",
+      { type: "warning", confirmButtonText: "批量重启", cancelButtonText: "取消" }
+    );
+  } catch (error) {
+    batchRestarting.value = false;
+    if (!isMessageBoxCancellation(error)) {
+      actionErrorMessage.value = error instanceof Error ? error.message : "无法打开批量重启确认框";
+    }
+    return;
+  }
+
+  actionErrorMessage.value = "";
+  batchRestartResult.value = null;
+  const failures: BatchRestartFailure[] = [];
+  let succeeded = 0;
+  // 控制命令串行发送，避免同一批次同时挤占 manager 与启动健康检查资源。
+  for (const process of targets) {
+    try {
+      await api.restartOpencodeRuntimeManagedProcess(process.containerId, process.port);
+      succeeded += 1;
+    } catch (error) {
+      failures.push({
+        processId: process.processId,
+        label: userProcessLabel(process),
+        message: formatProcessActionError(error)
+      });
+    }
+  }
+  batchRestartResult.value = { total: targets.length, succeeded, failures };
+  selectedUserProcessIds.value = new Set(failures.map(failure => failure.processId));
+  batchRestarting.value = false;
+  refetchRuntimeManagementAfterAction();
+}
+
 function runUserProcessRestart(process: OpencodeRuntimeProcess) {
+  if (batchRestarting.value) {
+    return;
+  }
   if (!canRestartUserProcess(process)) {
     actionErrorMessage.value = "该用户进程缺少容器或端口，无法重启";
     return;
@@ -621,7 +767,7 @@ function isManagedProcessActionRunning(
 
 function isManagedProcessActionDisabled(row: RuntimeContainerManagerRow, process: OpencodeRuntimeManagedProcess) {
   const containerId = runtimeRowContainerId(row);
-  return managedProcessActionMutation.isPending.value || !containerId || !Number.isFinite(process.port);
+  return batchRestarting.value || managedProcessActionMutation.isPending.value || !containerId || !Number.isFinite(process.port);
 }
 
 function runtimeRowContainerId(row: RuntimeContainerManagerRow) {
@@ -687,6 +833,13 @@ function startResize(e: MouseEvent) {
 
       <div v-if="errorMessage || userProcessErrorMessage || actionErrorMessage" class="ta-runtime-alert" role="alert">
         {{ errorMessage || userProcessErrorMessage || actionErrorMessage }}
+      </div>
+      <div
+        v-if="batchRestartResultMessage"
+        :class="['ta-runtime-alert', batchRestartResult?.failures.length ? 'is-warning' : 'is-success']"
+        :role="batchRestartResult?.failures.length ? 'alert' : 'status'"
+      >
+        {{ batchRestartResultMessage }}
       </div>
 
       <div v-if="isLoading" class="ta-runtime-placeholder">正在加载运行状态...</div>
@@ -1156,12 +1309,39 @@ function startResize(e: MouseEvent) {
               class="ta-runtime-user-filter"
               @keyup.enter="queryUserProcesses"
             />
-            <el-button size="small" type="primary" :icon="Search" :loading="isUserProcessFetching" @click="queryUserProcesses">查询用户进程</el-button>
+            <el-button
+              size="small"
+              type="primary"
+              :icon="Search"
+              :loading="isUserProcessFetching"
+              :disabled="batchRestarting"
+              @click="queryUserProcesses"
+            >查询用户进程</el-button>
+            <el-button
+              size="small"
+              type="warning"
+              :loading="batchRestarting"
+              :disabled="batchRestarting || selectedUserProcesses.length === 0 || managedProcessActionMutation.isPending.value"
+              @click="runBatchUserProcessRestart"
+            >批量重启（{{ selectedUserProcesses.length }}）</el-button>
+            <span v-if="restartableProcessRows.length" class="ta-runtime-selection-summary">
+              本页 {{ restartableProcessRows.length }} 个可重启
+            </span>
           </div>
           <div class="ta-runtime-table-scroll">
             <table class="ta-runtime-table">
               <thead>
                 <tr>
+                  <th class="is-selection">
+                    <input
+                      type="checkbox"
+                      aria-label="全选本页可重启用户进程"
+                      :checked="allRestartableProcessesSelected"
+                      :indeterminate="someRestartableProcessesSelected"
+                      :disabled="restartableProcessRows.length === 0 || batchRestarting"
+                      @change="toggleAllRestartableProcesses"
+                    />
+                  </th>
                   <th style="width: 120px; position: relative;">进程<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                   <th style="width: 100px; position: relative;">用户<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                   <th style="width: 120px; position: relative;">服务器<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
@@ -1178,10 +1358,19 @@ function startResize(e: MouseEvent) {
                 </tr>
               </thead>
               <tbody>
-                <tr v-if="!hasUserProcessQuery"><td colspan="13" class="is-empty">请输入用户关键字查询 TestAgent 进程</td></tr>
-                <tr v-else-if="isUserProcessFetching && !processRows.length"><td colspan="13" class="is-empty">正在查询用户 TestAgent 进程...</td></tr>
-                <tr v-else-if="!processRows.length"><td colspan="13" class="is-empty">暂无该用户 TestAgent 进程</td></tr>
-                <tr v-for="process in processRows" :key="process.processId">
+                <tr v-if="!hasUserProcessQuery"><td colspan="14" class="is-empty">请输入用户关键字查询 TestAgent 进程</td></tr>
+                <tr v-else-if="isUserProcessFetching && !processRows.length"><td colspan="14" class="is-empty">正在查询用户 TestAgent 进程...</td></tr>
+                <tr v-else-if="!processRows.length"><td colspan="14" class="is-empty">暂无该用户 TestAgent 进程</td></tr>
+                <tr v-for="process in processRows" :key="process.processId" :class="{ 'is-selected': isUserProcessSelected(process) }">
+                  <td class="is-selection">
+                    <input
+                      type="checkbox"
+                      :aria-label="`选择 ${userProcessLabel(process)}`"
+                      :checked="isUserProcessSelected(process)"
+                      :disabled="!canRestartUserProcess(process) || batchRestarting"
+                      @change="toggleUserProcessSelection(process, $event)"
+                    />
+                  </td>
                   <td class="is-compact" :title="process.processId ?? undefined">{{ process.processId }}</td>
                   <td class="is-compact" :title="(process.username || process.userId) ?? undefined">{{ process.username || process.userId }}</td>
                   <td :title="process.linuxServerId ?? undefined">{{ process.linuxServerId }}</td>
@@ -1205,7 +1394,7 @@ function startResize(e: MouseEvent) {
                       type="button"
                       class="ta-runtime-action-button"
                       :class="{ 'is-running': isUserProcessRestartRunning(process) }"
-                      :disabled="managedProcessActionMutation.isPending.value"
+                      :disabled="batchRestarting || managedProcessActionMutation.isPending.value"
                       title="重启该用户 TestAgent server"
                       @click="runUserProcessRestart(process)"
                     >
@@ -1218,9 +1407,9 @@ function startResize(e: MouseEvent) {
             </table>
           </div>
           <footer class="ta-runtime-pagination">
-            <el-button size="small" :disabled="userProcessPage <= 1 || isUserProcessFetching" @click="prevPage">上一页</el-button>
+            <el-button size="small" :disabled="userProcessPage <= 1 || isUserProcessFetching || batchRestarting" @click="prevPage">上一页</el-button>
             <span>第 {{ userProcessPage }} / {{ totalPages }} 页</span>
-            <el-button size="small" :disabled="userProcessPage >= totalPages || isUserProcessFetching" @click="nextPage">下一页</el-button>
+            <el-button size="small" :disabled="userProcessPage >= totalPages || isUserProcessFetching || batchRestarting" @click="nextPage">下一页</el-button>
           </footer>
         </section>
       </template>
@@ -1269,6 +1458,20 @@ function startResize(e: MouseEvent) {
   border-radius: 8px;
   background: #fff5f5;
   color: #b42318;
+  font-size: 12px;
+}
+.ta-runtime-alert.is-warning {
+  border-color: #f3d19e;
+  background: #fdf6ec;
+  color: #946200;
+}
+.ta-runtime-alert.is-success {
+  border-color: #b3e19d;
+  background: #f0f9eb;
+  color: #397826;
+}
+.ta-runtime-selection-summary {
+  color: #606266;
   font-size: 12px;
 }
 .ta-runtime-placeholder {
@@ -1390,6 +1593,22 @@ function startResize(e: MouseEvent) {
   width: 32px;
   padding-right: 4px;
   text-align: center;
+}
+.ta-runtime-table th.is-selection,
+.ta-runtime-table td.is-selection {
+  width: 42px;
+  padding-right: 4px;
+  text-align: center;
+}
+.ta-runtime-table .is-selection input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #b42318;
+  cursor: pointer;
+}
+.ta-runtime-table .is-selection input:disabled {
+  cursor: not-allowed;
 }
 .ta-runtime-table tr:last-child td {
   border-bottom: 0;
