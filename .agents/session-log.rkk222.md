@@ -5091,3 +5091,24 @@
   worktree 处理。本次未构建或部署企业离线包，`.114` 仍由用户已执行的临时链接维持恢复状态。
 - 未修改 HTTP API、RunEvent/SSE、数据库/Flyway/SQL、权限、安全配置、性能策略、环境文件、generated SDK
   或 OpenCode 上游源码；没有创建分支。
+
+## 2026-08-03 - 限制通用问答与长程任务活动栏入口
+
+### Why
+
+- 工作台活动栏的“通用问答”和“长程任务工作台”按钮原先对所有登录用户展示，需要仅让超级管理员看到。
+
+### What
+
+- 两个按钮复用 `AgentWorkbench` 既有 `isSuperAdmin` 角色判断控制显隐，没有新增平行鉴权逻辑。
+- 同步 frontend 与 agent-web README，明确仅收紧活动栏按钮，既有登录保护路由和服务端权限保持不变。
+
+### How
+
+- Playwright 覆盖 `SUPER_ADMIN` 可见、`APP_ADMIN` 与 `USER` 不可见，定向 3 项通过。
+- agent-web 用户手册、TypeScript 检查和生产构建通过，`git diff --check` 通过。
+
+### Result
+
+- 只有超级管理员能在工作台活动栏看到通用问答和长程任务工作台两个入口。
+- 未修改 API、事件、数据库、性能、安全、兼容性、环境配置、generated SDK 或 OpenCode 源码。

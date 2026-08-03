@@ -2942,6 +2942,8 @@ test("user avatar menu keeps the logout action hidden", async ({ page }) => {
   const roleRow = page.locator(".figma-user-menu-role");
   await expect(roleRow).toBeVisible();
   await expect(roleRow).toHaveText("应用管理员");
+  await expect(page.getByRole("button", { name: "通用问答" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "长程任务工作台" })).toHaveCount(0);
   await expect(page.getByRole("menuitem", { name: "退出登录" })).toHaveCount(0);
   expect(logoutRequests).toEqual([]);
 });
@@ -3001,6 +3003,8 @@ test("super admin can open system management from the activity bar", async ({ pa
   await mockBackendApi(page, { authRoles: ["SUPER_ADMIN"] });
 
   await gotoWorkbench(page);
+  await expect(page.getByRole("button", { name: "通用问答" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "长程任务工作台" })).toBeVisible();
   await page.getByRole("button", { name: "系统管理" }).click();
 
   await expect(page.getByRole("navigation", { name: "系统管理导航" })).toBeVisible();
@@ -3015,6 +3019,8 @@ test("ordinary user opens toolbox immersively and browser history restores panel
   const toolboxButton = page.getByRole("button", { name: "工具盒子" });
   await expect(editorButton).toBeVisible();
   await expect(toolboxButton).toBeVisible();
+  await expect(page.getByRole("button", { name: "通用问答" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "长程任务工作台" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "系统管理" })).toHaveCount(0);
   expect(await editorButton.evaluate((node) => node.compareDocumentPosition(
     document.querySelector('[data-testid="toolbox-activity-button"]')!

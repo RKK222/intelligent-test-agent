@@ -9131,6 +9131,7 @@ async function handleLogout() {
             <Wrench class="figma-activity-icon" :stroke-width="1.5" />
           </button>
           <button
+            v-if="isSuperAdmin"
             type="button"
             class="figma-activity-btn"
             aria-label="通用问答"
@@ -9142,6 +9143,7 @@ async function handleLogout() {
             <MessageSquare class="figma-activity-icon" :stroke-width="1.5" />
           </button>
           <button
+            v-if="isSuperAdmin"
             type="button"
             class="figma-activity-btn"
             aria-label="长程任务工作台"
