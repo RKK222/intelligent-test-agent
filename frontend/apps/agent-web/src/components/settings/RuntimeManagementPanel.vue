@@ -385,8 +385,16 @@ function refresh() {
 }
 
 function queryUserProcesses() {
-  activeUserKeyword.value = userKeywordDraft.value.trim();
+  const nextKeyword = userKeywordDraft.value.trim();
+  const repeatsCurrentQuery = nextKeyword.length > 0
+    && nextKeyword === activeUserKeyword.value.trim()
+    && userProcessPage.value === 1;
+  activeUserKeyword.value = nextKeyword;
   userProcessPage.value = 1;
+  if (repeatsCurrentQuery) {
+    // Query Key 未变化时 Vue Query 不会自动请求；人工再次点击必须绕过旧空结果。
+    void userProcessQuery.refetch();
+  }
 }
 
 function prevPage() {

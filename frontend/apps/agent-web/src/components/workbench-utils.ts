@@ -6,6 +6,7 @@ import type {
   MessageScope,
   MessagePart,
   ModelInfo,
+  OpencodeProcessStartOperation,
   PromptPart,
   Run,
   RunDiffFile,
@@ -47,6 +48,14 @@ export type WorkspaceRequirementReference = {
 };
 
 export type OpencodeProcessQueryStatus = "pending" | "success" | "error";
+
+/** 初始化操作运行时暂停模型/供应商恢复查询，避免普通目录请求介入 STARTING 状态。 */
+export function runtimeCatalogRecoveryAllowed(
+  authenticated: boolean,
+  operation: Pick<OpencodeProcessStartOperation, "status"> | null | undefined
+): boolean {
+  return authenticated && operation?.status !== "RUNNING";
+}
 
 /**
  * 只有进程查询明确成功时才能把服务器归属标记为已解析；查询失败不能退化成“用户尚未分配”。

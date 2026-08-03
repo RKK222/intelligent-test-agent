@@ -42,6 +42,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -367,6 +368,53 @@ class OpencodeProcessStartupServiceTest {
     }
 
     @Test
+    void sameStartedInstanceAlreadyRunningIsReconciledWithoutCompensation() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeProcessId processId = new OpencodeProcessId("ocp_same_started_instance");
+        OpencodeServerProcess old = reservedProcess(processId, CONTAINER_ID, 4097);
+        UserOpencodeProcessBinding oldBinding = binding(processId, 4097);
+        repository.processes.put(processId, old);
+        repository.bindings.put(USER_ID.value() + ":opencode", oldBinding);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.startResult = new OpencodeProcessStartResult(12345L, "started", true, MANAGER_STARTED_AT);
+        java.util.concurrent.atomic.AtomicBoolean promoted = new java.util.concurrent.atomic.AtomicBoolean();
+        gateway.beforeHealth = () -> {
+            if (promoted.compareAndSet(false, true)) {
+                OpencodeServerProcess candidate = repository.processes.get(processId);
+                repository.processes.put(processId, new OpencodeServerProcess(
+                        candidate.processId(),
+                        candidate.userId(),
+                        candidate.linuxServerId(),
+                        candidate.containerId(),
+                        candidate.port(),
+                        12345L,
+                        candidate.baseUrl(),
+                        OpencodeServerProcessStatus.RUNNING,
+                        candidate.sessionPath(),
+                        candidate.configPath(),
+                        candidate.startedAt(),
+                        NOW.plusSeconds(1),
+                        "concurrent health query",
+                        candidate.createdAt(),
+                        NOW.plusSeconds(1),
+                        "trace_concurrent_health"));
+            }
+        };
+        OpencodeProcessStartupService service = service(repository, gateway, new RecordingHeartbeatStore());
+
+        OpencodeServerProcess running = service.startAndVerify(
+                request(processId, old.createdAt(), oldBinding.createdAt()));
+
+        assertThat(running.status()).isEqualTo(OpencodeServerProcessStatus.RUNNING);
+        assertThat(running.pid()).isEqualTo(12345L);
+        assertThat(running.startedAt()).isEqualTo(MANAGER_STARTED_AT.truncatedTo(ChronoUnit.MICROS));
+        assertThat(running.traceId()).isEqualTo("trace_concurrent_health");
+        assertThat(gateway.ownedStopCommands).isEmpty();
+        assertThat(gateway.stopCommands).isEmpty();
+        assertThat(repository.findUserBinding(USER_ID, "opencode")).contains(oldBinding);
+    }
+
+    @Test
     void sameAssignmentNewLifecycleCannotBeOverwrittenAndCompensationFailsClosed() {
         FakeRepository repository = new FakeRepository();
         OpencodeProcessId processId = new OpencodeProcessId("ocp_same_assignment_new_lifecycle");
@@ -390,12 +438,12 @@ class OpencodeProcessStartupServiceTest {
                         candidate.linuxServerId(),
                         candidate.containerId(),
                         candidate.port(),
-                        200L,
+                        12345L,
                         candidate.baseUrl(),
                         OpencodeServerProcessStatus.RUNNING,
                         candidate.sessionPath(),
                         candidate.configPath(),
-                        candidate.startedAt(),
+                        candidate.startedAt().plusSeconds(1),
                         NOW.plusSeconds(1),
                         "new lifecycle running",
                         candidate.createdAt(),
@@ -414,7 +462,8 @@ class OpencodeProcessStartupServiceTest {
         assertThat(repository.processes.get(processId)).satisfies(actual -> {
             assertThat(actual.containerId()).isEqualTo(CONTAINER_ID);
             assertThat(actual.port()).isEqualTo(4097);
-            assertThat(actual.pid()).isEqualTo(200L);
+            assertThat(actual.pid()).isEqualTo(12345L);
+            assertThat(actual.startedAt()).isEqualTo(MANAGER_STARTED_AT.truncatedTo(ChronoUnit.MICROS).plusSeconds(1));
             assertThat(actual.status()).isEqualTo(OpencodeServerProcessStatus.RUNNING);
             assertThat(actual.traceId()).isEqualTo("trace_new_lifecycle");
         });

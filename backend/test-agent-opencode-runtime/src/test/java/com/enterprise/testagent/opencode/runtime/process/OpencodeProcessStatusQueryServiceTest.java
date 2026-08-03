@@ -81,6 +81,32 @@ class OpencodeProcessStatusQueryServiceTest {
     }
 
     @Test
+    void startingProcessSkipsOrdinaryHealthQueryAndKeepsStartupOwnership() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess starting = process(
+                "ocp_starting",
+                4097,
+                OpencodeServerProcessStatus.STARTING,
+                11111L);
+        repository.processes.put(starting.processId(), starting);
+        RecordingGateway gateway = new RecordingGateway();
+        RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
+        OpencodeProcessStatusQueryService service = service(repository, gateway, heartbeatStore);
+
+        OpencodeProcessStatusProbe probe = service.query(starting.processId(), TRACE_ID);
+
+        assertThat(probe.status()).isEqualTo(OpencodeProcessProbeStatus.STALE);
+        assertThat(probe.process()).contains(starting);
+        assertThat(probe.managerStatus()).isEqualTo("STARTING");
+        assertThat(probe.healthStatus()).isEqualTo("CHECK_SKIPPED");
+        assertThat(probe.restartable()).isFalse();
+        assertThat(probe.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE);
+        assertThat(gateway.healthCommands).isEmpty();
+        assertThat(repository.savedProcesses).isEmpty();
+        assertThat(heartbeatStore.recordedProcessIds).isEmpty();
+    }
+
+    @Test
     void healthyProcessRefreshesRunningSnapshotAndHeartbeat() {
         FakeRepository repository = new FakeRepository();
         OpencodeServerProcess old = process("ocp_running", 4097, OpencodeServerProcessStatus.UNHEALTHY, 11111L);

@@ -361,10 +361,17 @@ order by p.updated_at desc nulls last;
 | `FAILED / HEALTH_CHECKING`，耗时接近一次 health 等待 | 候选已进入健康检查，但写入最终 `RUNNING` 前当前行被改写 | `GET /processes/me`、运行管理 `user-processes` 本机探测、另一条启动/恢复链路 |
 | 多条显式操作均失败，稍后进程却为 `RUNNING` | 可能存在未写本表的自动恢复或运行管理启动，也可能有查询窗口外的成功操作 | 先扩展 SQL 时间窗并包含 `SUCCEEDED`，再查“自动恢复”和 restart 日志 |
 
+修复版本中，普通强状态查询遇到数据库 `STARTING` 只返回 `STARTING/CHECK_SKIPPED`，不调用 manager、
+不写进程表或 Redis；公共启动程序最终 CAS 若发现同一 PID 和 manager 权威 `startedAt` 的相同实例已是
+`RUNNING`，会幂等完成绑定，不再误执行停止补偿。若升级后仍出现同样错误，应先确认所有 Java 节点和前端均已
+切到同一构建版本；混跑旧 Java 时，落到旧节点的强查询仍可能复现历史竞争。身份、PID、`startedAt`、容器或端口
+确有变化时仍会按真实冲突失败关闭，这是预期保护，不能通过放宽 CAS 或手工改库绕过。
+
 manager 的常规 5 秒 `managerHeartbeat` 只更新 Redis manager 快照，不直接写 `opencode_server_processes`；
 不能仅凭失败耗时约 5 秒就把它认定为数据库抢写者。manager 重新注册并首次完成配置/心跳后可能触发异步自动恢复，
-应在 Java 日志中单独核对。强 `GET /processes/me` 和运行管理 `user-processes` 的本机健康探测会走公共状态查询并可能更新当前进程快照；
-弱 `GET /processes/me/health` 本身不落进程表。
+应在 Java 日志中单独核对。强 `GET /processes/me` 和运行管理 `user-processes` 的本机健康探测会走公共状态查询；
+旧版本可能在 `STARTING` 阶段更新当前进程快照，修复版本只在非 `STARTING` 状态按健康结果更新。弱
+`GET /processes/me/health` 本身不落进程表。
 
 #### 3. 不使用 `rg`/`jd` 的日志采证
 
@@ -430,13 +437,12 @@ state、端口、PID 和 HTTP 只说明采集时刻的现状，不是历史审�
 #### 4. 页面看不到用户时绕过前端缓存
 
 运行管理的用户进程列表只有输入非空关键字后才查询，且不随上方 overview 的 5 秒刷新自动重查。
-当前页面在相同关键字、页码和分页大小均未变化时再次点击查询，不一定产生新的网络请求；清缓存或重开页面后“恢复”只能说明前端重新发起了请求，
-不能证明数据库用户或进程曾经消失。
+修复后的前端在相同关键字和首页条件下再次点击“查询用户进程”也会显式重新请求；旧版本可能因 Query Key 未变化而不产生新请求。清缓存或重开页面后“恢复”只能说明前端重新发起了请求，不能证明数据库用户或进程曾经消失。
 
 先在浏览器开发者工具 Network 打开 `Preserve log`，按统一认证号查询并检查
 `GET /api/internal/platform/opencode-runtime/management/user-processes?keyword=...&page=1&size=20`：
 
-- 没有新请求：属于页面查询缓存/触发问题，先改变关键字或页码再查，保留截图和前端构建版本。
+- 没有新请求：先核对前端构建版本；旧版本属于页面查询缓存/触发问题，可改变关键字或页码再查并保留截图，新版本则按前端缺陷处理。
 - HTTP 200 且 `data.items` 有记录，但页面为空：属于前端展示问题，保存响应正文并按前端缺陷处理。
 - HTTP 200 且 `data.items` 为空，但上面的 SQL 能查到用户和进程：记录响应 `traceId`，到命中的 Java 节点查后端查询日志。
 - HTTP 401/403：确认当前账号确有 `SUPER_ADMIN`，运行管理 API 不向普通系统管理员开放。

@@ -373,6 +373,29 @@ describe("runtime management settings", () => {
     queryClient.clear();
   });
 
+  it("refetches when the administrator repeats the same user process query", async () => {
+    const api = {
+      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(emptyOverview),
+      getOpencodeRuntimeManagementUserProcesses: vi.fn().mockResolvedValue({
+        items: [],
+        page: 1,
+        size: 20,
+        total: 0
+      })
+    };
+    const view = renderRuntimePanel(api);
+
+    await view.findByText("请输入用户关键字查询 TestAgent 进程");
+    await fireEvent.update(view.getByPlaceholderText("用户名 / userId / 统一认证号"), "wr");
+    await fireEvent.click(view.getByText("查询用户进程"));
+    await waitFor(() => expect(api.getOpencodeRuntimeManagementUserProcesses).toHaveBeenCalledTimes(1));
+
+    await fireEvent.click(view.getByText("查询用户进程"));
+    await waitFor(() => expect(api.getOpencodeRuntimeManagementUserProcesses).toHaveBeenCalledTimes(2));
+
+    view.queryClient.clear();
+  });
+
   it("does not expose runtime controls to non-super-admin users", async () => {
     const api = {
       getOpencodeRuntimeManagementOverview: vi.fn(),

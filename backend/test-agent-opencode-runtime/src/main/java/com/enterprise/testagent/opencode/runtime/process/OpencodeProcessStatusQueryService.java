@@ -162,6 +162,10 @@ public class OpencodeProcessStatusQueryService {
                     true,
                     null);
         }
+        if (process.get().status() == OpencodeServerProcessStatus.STARTING) {
+            // STARTING 由公共启动程序独占写入；页面/目录恢复等普通强查询只能观察，不能抢先改成 RUNNING。
+            return initializingProbe(process.get(), checkedAt);
+        }
         return queryExisting(process.get(), checkedAt, traceId, true, false);
     }
 
@@ -399,6 +403,23 @@ public class OpencodeProcessStatusQueryService {
                 checkedAt,
                 false,
                 errorCode);
+    }
+
+    /**
+     * 启动候选在最终健康确认前保持不可用，并明确跳过 manager 探测和任何状态持久化。
+     */
+    private OpencodeProcessStatusProbe initializingProbe(
+            OpencodeServerProcess process,
+            Instant checkedAt) {
+        return new OpencodeProcessStatusProbe(
+                OpencodeProcessProbeStatus.STALE,
+                Optional.of(process),
+                "STARTING",
+                "CHECK_SKIPPED",
+                "TestAgent 进程正在初始化",
+                checkedAt,
+                false,
+                ErrorCode.OPENCODE_UNAVAILABLE);
     }
 
     private OpencodeServerProcess saveSnapshot(

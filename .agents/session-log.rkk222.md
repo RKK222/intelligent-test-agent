@@ -5022,3 +5022,39 @@
   关闭；未选择时两个批量按钮禁用，无主进程仍保留单项处理边界。
 - 本次未新增或修改 HTTP 路径、DTO、RunEvent/SSE、数据库/Flyway/SQL、权限模型、环境配置、generated SDK
   或 OpenCode 源码；仅复用既有高权限单进程控制接口。企业包和企业部署未在本任务中执行。
+
+## 2026-08-03 - 修复 OpenCode 重启初始化被并发健康查询回写打断
+
+### Why
+
+- 现场多次初始化在 `HEALTH_CHECKING` 或 `SAVING_CANDIDATE` 报
+  `TestAgent 进程分配已变化，拒绝旧启动结果回写`；trace 证明普通模型/Provider 或运行管理强查询会在公共启动
+  程序持有 `STARTING` 候选期间先把同一进程写成 `RUNNING`，导致启动最终 CAS 失败并误执行精确停止补偿。
+- 系统管理页相同用户关键字重复查询时 Query Key 不变，可能继续显示旧空结果；清浏览器缓存只会重新触发请求，
+  没有修复数据库或进程状态。
+
+### What
+
+- `OpencodeProcessStatusQueryService.query(processId)` 遇到 `STARTING` 时只返回
+  `STALE + STARTING/CHECK_SKIPPED`，不调用 manager、不写数据库或 Redis；启动程序自己的只读快照健康确认、
+  停止确认和自动恢复路径保持原行为。
+- `OpencodeProcessStartupService` 最终 CAS 失败后仅在数据库记录仍是相同 process/user/server/container/port、
+  PID、manager 权威 `startedAt`、session/config 和创建时间的 `RUNNING` 实例时幂等收口；任一身份变化仍按真实
+  冲突精确补偿，不能吞掉 PID 复用或新生命周期。
+- 工作台开始初始化时取消在途模型/Provider 查询，并在 operation 为 `RUNNING` 期间暂停目录恢复；运行管理页
+  相同关键字和首页条件再次点击时显式 refetch。同步 runtime、agent-web 和部署排查文档。
+
+### How
+
+- JDK 25 下后端定向 44 项通过；`test-agent-opencode-runtime -am` 全量依赖测试通过，并在最终身份校验加强后
+  重新执行定向 44 项通过。新增测试覆盖 STARTING 普通查询零 manager/零写入、同实例提前 RUNNING 幂等收口，
+  以及相同 PID 但不同 manager `startedAt` 仍失败关闭。
+- 前端两个定向测试文件 114 项、agent-web typecheck 和生产 build 通过；真实 Vite 开发服务在
+  `http://127.0.0.1:5173/` 启动并返回 HTTP 200。
+
+### Result
+
+- 普通页面/目录请求不再夺走 STARTING 状态所有权，同一实例的迟到最终确认也不会误杀刚启动的 OpenCode；
+  真正的分配或生命周期变化仍保持原有失败关闭和精确补偿。
+- 本次未新增或修改 HTTP 路径、DTO、事件、数据库/Flyway/SQL、权限、安全配置、环境文件、generated SDK 或
+  OpenCode 源码；前端目录恢复仅在本页面发起的初始化 operation 运行期间暂停。

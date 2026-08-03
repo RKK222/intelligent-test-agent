@@ -38,6 +38,7 @@ import {
   retryExpirationDecision,
   runEventSubscriptionRunId,
   runEventSubscriptionSessionId,
+  runtimeCatalogRecoveryAllowed,
   sessionTitleEventMatchesCurrentSession,
   platformSessionTitleFromSynchronizedEventPayload,
   projectRootInteractionSession,
@@ -99,6 +100,16 @@ describe("opencodeProcessRouteResolution", () => {
       .toEqual({ resolved: true, linuxServerId: "linux-2" });
     expect(opencodeProcessRouteResolution({ linuxServerId: "linux-2" }, "pending"))
       .toEqual({ resolved: false, linuxServerId: "" });
+  });
+});
+
+describe("runtimeCatalogRecoveryAllowed", () => {
+  it("pauses model and provider recovery only while process startup is running", () => {
+    expect(runtimeCatalogRecoveryAllowed(true, { status: "RUNNING" })).toBe(false);
+    expect(runtimeCatalogRecoveryAllowed(true, { status: "SUCCEEDED" })).toBe(true);
+    expect(runtimeCatalogRecoveryAllowed(true, { status: "FAILED" })).toBe(true);
+    expect(runtimeCatalogRecoveryAllowed(true, null)).toBe(true);
+    expect(runtimeCatalogRecoveryAllowed(false, null)).toBe(false);
   });
 });
 

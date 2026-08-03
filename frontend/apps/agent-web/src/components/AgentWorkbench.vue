@@ -248,6 +248,7 @@ import {
   runEventSubscriptionSessionId,
   runtimeResources,
   runtimeStatus,
+  runtimeCatalogRecoveryAllowed,
   platformSessionTitleFromSynchronizedEventPayload,
   sessionTitleEventMatchesCurrentSession,
   sessionTitleFromFirstMessage,
@@ -1594,6 +1595,9 @@ function failLocalProcessStartupOperation(error: unknown) {
 
 function beginInitializeOpencodeProcess() {
   const operationId = newProcessStartupOperationId();
+  // 先取消已经在途的恢复查询，避免它们在后端进入 STARTING 后继续发起强状态探测。
+  void queryClient.cancelQueries({ queryKey: ["runtime", "models"] });
+  void queryClient.cancelQueries({ queryKey: ["runtime", "providers"] });
   processStartupActionLabel.value =
     opencodeProcessStatus.value?.serviceStatus === "NOT_RUNNING" ? "启动进程" : "分配专属进程";
   processStartupOperation.value = initialProcessStartupOperation(operationId);
@@ -1605,6 +1609,9 @@ function beginInitializeOpencodeProcess() {
 // 拆分就绪条件：不同能力依赖不同条件
 // 1. 模型和 Provider：登录后立即加载，不依赖 workspace 和 opencode
 const authReady = computed(() => authStore.isAuthenticated());
+const runtimeCatalogRecoveryReady = computed(() =>
+  runtimeCatalogRecoveryAllowed(authReady.value, processStartupOperation.value)
+);
 // 2. 文件路由：只需要 workspace 存在，不依赖 opencode 状态
 const fileRouteReady = computed(() => Boolean(selectedWorkspaceIdRef.value));
 // 3. Runtime 目录（Agent、Command）：需要 opencode 弱健康 READY + workspace
@@ -1621,7 +1628,7 @@ const robotQuestionAvailable = computed(() => opencodeProcessReady.value
 // 模型和 Provider 登录后立即加载
 const modelsQuery = useQuery({
   queryKey: ["runtime", "models"],
-  enabled: authReady,
+  enabled: runtimeCatalogRecoveryReady,
   queryFn: () => api.listModels(),
   retry: false,
   refetchOnWindowFocus: "always",
@@ -1630,7 +1637,7 @@ const modelsQuery = useQuery({
 });
 const providersQuery = useQuery({
   queryKey: ["runtime", "providers"],
-  enabled: authReady,
+  enabled: runtimeCatalogRecoveryReady,
   queryFn: () => api.listProviders(),
   retry: false,
   refetchOnWindowFocus: "always",

@@ -529,7 +529,7 @@ public class OpencodeProcessStartupService {
         }
         OpencodeServerProcess running = probe.process().orElse(candidate);
         if (!atomicMutationPort.compareAndSetRuntimeState(candidate, running)) {
-            throw new OpencodeProcessAssignmentConflictException("TestAgent 进程分配已变化，拒绝旧健康结果回写");
+            running = reconcileConcurrentRunningInstance(candidate, running);
         }
         heartbeatStore.recordOpencodeHeartbeat(running.processId(), probe.checkedAt());
         if (conversationContextStore != null) {
@@ -552,6 +552,44 @@ public class OpencodeProcessStartupService {
         }
         executionNodeRepository.save(projectExecutionNode(running, running.updatedAt(), request.traceId()));
         return running;
+    }
+
+    /**
+     * 同一启动实例可能被并发状态查询提前写成 RUNNING。此时最终 CAS 虽然失败，但进程身份没有变化，
+     * 启动程序应幂等完成绑定收口；PID、manager 启动时间或运行坐标任一变化仍按真实冲突处理。
+     */
+    private OpencodeServerProcess reconcileConcurrentRunningInstance(
+            OpencodeServerProcess candidate,
+            OpencodeServerProcess verifiedRunning) {
+        Optional<OpencodeServerProcess> current = repository.findOpencodeServerProcessById(candidate.processId());
+        if (current.isPresent() && sameStartedInstance(current.get(), verifiedRunning)) {
+            OpencodeServerProcess reconciled = current.get();
+            LOGGER.info(
+                    "event=opencode_startup_idempotent_reconcile processId={} linuxServerId={} containerId={} port={} pid={}",
+                    reconciled.processId().value(),
+                    reconciled.linuxServerId().value(),
+                    reconciled.containerId().value(),
+                    reconciled.port(),
+                    reconciled.pid());
+            return reconciled;
+        }
+        throw new OpencodeProcessAssignmentConflictException("TestAgent 进程分配已变化，拒绝旧健康结果回写");
+    }
+
+    private boolean sameStartedInstance(
+            OpencodeServerProcess current,
+            OpencodeServerProcess verifiedRunning) {
+        return current.status() == OpencodeServerProcessStatus.RUNNING
+                && current.processId().equals(verifiedRunning.processId())
+                && current.userId().equals(verifiedRunning.userId())
+                && current.linuxServerId().equals(verifiedRunning.linuxServerId())
+                && current.containerId().equals(verifiedRunning.containerId())
+                && current.port() == verifiedRunning.port()
+                && Objects.equals(current.pid(), verifiedRunning.pid())
+                && Objects.equals(current.startedAt(), verifiedRunning.startedAt())
+                && current.sessionPath().equals(verifiedRunning.sessionPath())
+                && current.configPath().equals(verifiedRunning.configPath())
+                && current.createdAt().equals(verifiedRunning.createdAt());
     }
 
     private OpencodeServerProcess startupCandidate(
