@@ -4990,3 +4990,35 @@
   选择合法迁移路径，本地服务已完整启动并验证。
 - 企业包和目标服务器部署尚未执行；交付前仍须读取目标库真实 `flyway_schema_history`，覆盖对应基线升级，
   并核对最终企业 persistence JAR 内 migration 字节。部署时继续排除 LobeHub 和 Workflow。
+
+## 2026-08-03 - 运行管理批量选择重启与关闭用户 OpenCode
+
+### Why
+
+- 既有批量重启藏在页面底部用户查询区，只能选择当前查询页中的异常进程；“容器 / 管理进程”标题区域没有
+  入口，也没有批量关闭能力，无法直接按 manager 在线事实选择需要处理的用户 OpenCode。
+
+### What
+
+- 在“容器 / 管理进程”标题右侧新增“全选有主进程”“批量重启 OpenCode”“批量关闭 OpenCode”；展开容器后，
+  每条有主进程可单独勾选，按钮实时显示已选数量。
+- 可选目标严格来自 overview 中 `ownership=BOUND` 且 `containerId + port` 完整的 manager 有主进程；
+  `UNBOUND` 无主进程没有复选框，不会被批量操作误处理。
+- 批量重启和关闭串行复用既有单进程 restart/stop API、跨 Java 路由及公共停止/启动与 health 确认；二次确认
+  后单项失败不阻断后续项，完成时汇总结果并只保留失败项选择。底部用户查询保留单项重启，移除重复批量入口。
+- 同步 agent-web README/PACKAGE、backend-api README 和 HTTP API 运行管理交互说明。
+
+### How
+
+- `runtime-management-settings.test.ts` 覆盖按钮位置、逐项选择、全选、跳过无主进程、批量重启、批量关闭、
+  单项失败继续执行和失败身份汇总；与 backend-api 测试合计 112 项通过，agent-web TypeScript 检查通过。
+- agent-web 用户手册与生产构建通过；使用 JDK 25、未修改的 `.env.test` 执行
+  `./restart-dev-services.sh --profile test --env-file .env.test --skip-backend-build --without-workflow`，
+  本地后端 readiness 为 `UP`，前端 `http://127.0.0.1:3000` 返回 HTTP 200。
+
+### Result
+
+- 超级管理员现在可以在用户可见的容器进程区域精确选择一个、多个或全部有主用户 OpenCode，再批量重启或
+  关闭；未选择时两个批量按钮禁用，无主进程仍保留单项处理边界。
+- 本次未新增或修改 HTTP 路径、DTO、RunEvent/SSE、数据库/Flyway/SQL、权限模型、环境配置、generated SDK
+  或 OpenCode 源码；仅复用既有高权限单进程控制接口。企业包和企业部署未在本任务中执行。

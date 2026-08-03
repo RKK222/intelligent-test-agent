@@ -58,16 +58,24 @@ type ManagedProcessActionRequest = {
   port: number;
 };
 
-type BatchRestartFailure = {
-  processId: string;
+type BatchManagedProcessTarget = {
+  key: string;
+  containerId: string;
+  port: number;
+  label: string;
+};
+
+type BatchManagedProcessFailure = {
+  key: string;
   label: string;
   message: string;
 };
 
-type BatchRestartResult = {
+type BatchManagedProcessResult = {
+  action: ManagedProcessActionKind;
   total: number;
   succeeded: number;
-  failures: BatchRestartFailure[];
+  failures: BatchManagedProcessFailure[];
 };
 
 const processStatusOptions = ["RUNNING"];
@@ -89,9 +97,9 @@ const selectedMetricsTarget = ref<{ type: "container" | "backend"; id: string; t
 const selectedWindowMinutes = ref(60);
 const actionErrorMessage = ref("");
 const activeManagedProcessAction = ref<ManagedProcessActionRequest | null>(null);
-const selectedUserProcessIds = ref<Set<string>>(new Set());
-const batchRestarting = ref(false);
-const batchRestartResult = ref<BatchRestartResult | null>(null);
+const selectedManagedProcessKeys = ref<Set<string>>(new Set());
+const batchManagedProcessAction = ref<ManagedProcessActionKind | null>(null);
+const batchManagedProcessResult = ref<BatchManagedProcessResult | null>(null);
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 const overviewParams = computed<OpencodeRuntimeManagementOverviewParams>(() => ({
@@ -151,7 +159,7 @@ const managedProcessActionMutation = useMutation({
   },
   onMutate: request => {
     actionErrorMessage.value = "";
-    batchRestartResult.value = null;
+    batchManagedProcessResult.value = null;
     activeManagedProcessAction.value = request;
   },
   onSuccess: (_result, request) => {
@@ -175,17 +183,6 @@ const overview = computed(() => overviewQuery.data.value);
 const summary = computed(() => overview.value?.summary);
 const processPage = computed(() => userProcessQuery.data.value);
 const processRows = computed(() => processPage.value?.items ?? []);
-const restartableProcessRows = computed(() => processRows.value.filter(canRestartUserProcess));
-const selectedUserProcesses = computed(() =>
-  restartableProcessRows.value.filter(process => selectedUserProcessIds.value.has(process.processId))
-);
-const allRestartableProcessesSelected = computed(() =>
-  restartableProcessRows.value.length > 0
-    && selectedUserProcesses.value.length === restartableProcessRows.value.length
-);
-const someRestartableProcessesSelected = computed(() =>
-  selectedUserProcesses.value.length > 0 && !allRestartableProcessesSelected.value
-);
 const isLoading = computed(() => overviewQuery.isLoading.value);
 const isFetching = computed(() => overviewQuery.isFetching.value);
 const isUserProcessFetching = computed(() => userProcessQuery.isFetching.value);
@@ -222,12 +219,13 @@ const userProcessErrorMessage = computed(() => {
   }
   return error.message || "用户 TestAgent 进程加载失败";
 });
-const batchRestartResultMessage = computed(() => {
-  const result = batchRestartResult.value;
+const batchManagedProcessResultMessage = computed(() => {
+  const result = batchManagedProcessResult.value;
   if (!result) {
     return "";
   }
-  const summary = `批量重启完成：成功 ${result.succeeded}，失败 ${result.failures.length}。`;
+  const actionLabel = result.action === "restart" ? "重启" : "关闭";
+  const summary = `批量${actionLabel}完成：成功 ${result.succeeded}，失败 ${result.failures.length}。`;
   if (result.failures.length === 0) {
     return summary;
   }
@@ -237,15 +235,6 @@ const batchRestartResultMessage = computed(() => {
   return `${summary}失败项：${details}`;
 });
 const totalPages = computed(() => Math.max(1, Math.ceil((processPage.value?.total ?? 0) / userProcessSize.value)));
-
-watch(processRows, rows => {
-  // 用户进程选择只在当前查询页内有效，翻页或查询结果变化时移除失效项。
-  const availableIds = new Set(rows.filter(canRestartUserProcess).map(process => process.processId));
-  const retained = new Set(Array.from(selectedUserProcessIds.value).filter(processId => availableIds.has(processId)));
-  if (retained.size !== selectedUserProcessIds.value.size) {
-    selectedUserProcessIds.value = retained;
-  }
-});
 const summaryCards = computed(() => {
   const item = summary.value;
   return [
@@ -332,6 +321,47 @@ const containerManagerRows = computed<RuntimeContainerManagerRow[]>(() => {
     return (left.containerId ?? left.manager?.managerId ?? "").localeCompare(right.containerId ?? right.manager?.managerId ?? "");
   });
 });
+const ownedManagedProcessTargets = computed<BatchManagedProcessTarget[]>(() => {
+  const targets = new Map<string, BatchManagedProcessTarget>();
+  for (const row of containerManagerRows.value) {
+    const containerId = runtimeRowContainerId(row);
+    if (!containerId) {
+      continue;
+    }
+    for (const process of ownedProcesses(row)) {
+      if (!Number.isFinite(process.port)) {
+        continue;
+      }
+      const key = `${containerId}:${process.port}`;
+      targets.set(key, {
+        key,
+        containerId,
+        port: process.port,
+        label: `${processOwner(process)}（${containerId}:${process.port}）`
+      });
+    }
+  }
+  return Array.from(targets.values());
+});
+const selectedManagedProcessTargets = computed(() =>
+  ownedManagedProcessTargets.value.filter(target => selectedManagedProcessKeys.value.has(target.key))
+);
+const allOwnedManagedProcessesSelected = computed(() =>
+  ownedManagedProcessTargets.value.length > 0
+    && selectedManagedProcessTargets.value.length === ownedManagedProcessTargets.value.length
+);
+const someOwnedManagedProcessesSelected = computed(() =>
+  selectedManagedProcessTargets.value.length > 0 && !allOwnedManagedProcessesSelected.value
+);
+
+watch(ownedManagedProcessTargets, targets => {
+  // 5 秒 overview 刷新时只剔除已经消失的目标，保留仍有效的人工选择。
+  const availableKeys = new Set(targets.map(target => target.key));
+  const retained = new Set(Array.from(selectedManagedProcessKeys.value).filter(key => availableKeys.has(key)));
+  if (retained.size !== selectedManagedProcessKeys.value.size) {
+    selectedManagedProcessKeys.value = retained;
+  }
+});
 
 function applyFilters() {
   activeFilters.value = { ...draftFilters.value };
@@ -355,18 +385,15 @@ function refresh() {
 }
 
 function queryUserProcesses() {
-  resetUserProcessBatchState();
   activeUserKeyword.value = userKeywordDraft.value.trim();
   userProcessPage.value = 1;
 }
 
 function prevPage() {
-  resetUserProcessBatchState();
   userProcessPage.value = Math.max(1, userProcessPage.value - 1);
 }
 
 function nextPage() {
-  resetUserProcessBatchState();
   userProcessPage.value = Math.min(totalPages.value, userProcessPage.value + 1);
 }
 
@@ -590,10 +617,6 @@ function canRestartUserProcess(process: OpencodeRuntimeProcess) {
   return process.restartable === true && Boolean(process.containerId) && Number.isFinite(process.port);
 }
 
-function userProcessLabel(process: OpencodeRuntimeProcess) {
-  return `${process.username || process.userId || process.processId}（${process.containerId}:${process.port}）`;
-}
-
 function formatProcessActionError(error: unknown) {
   if (error instanceof BackendApiError) {
     return `${error.message}（${error.code}）`;
@@ -601,90 +624,110 @@ function formatProcessActionError(error: unknown) {
   return error instanceof Error ? error.message : "进程操作失败";
 }
 
-function resetUserProcessBatchState() {
-  selectedUserProcessIds.value = new Set();
-  batchRestartResult.value = null;
-}
-
-function isUserProcessSelected(process: OpencodeRuntimeProcess) {
-  return selectedUserProcessIds.value.has(process.processId);
-}
-
-function toggleUserProcessSelection(process: OpencodeRuntimeProcess, event: Event) {
-  if (!canRestartUserProcess(process) || batchRestarting.value) {
-    return;
-  }
-  const next = new Set(selectedUserProcessIds.value);
-  if ((event.target as HTMLInputElement).checked) {
-    next.add(process.processId);
-  } else {
-    next.delete(process.processId);
-  }
-  selectedUserProcessIds.value = next;
-  batchRestartResult.value = null;
-}
-
-function toggleAllRestartableProcesses(event: Event) {
-  if (batchRestarting.value) {
-    return;
-  }
-  const checked = (event.target as HTMLInputElement).checked;
-  selectedUserProcessIds.value = checked
-    ? new Set(restartableProcessRows.value.map(process => process.processId))
-    : new Set();
-  batchRestartResult.value = null;
-}
-
 function isMessageBoxCancellation(error: unknown) {
   return error === "cancel" || error === "close";
 }
 
-async function runBatchUserProcessRestart() {
-  const targets = selectedUserProcesses.value;
-  if (targets.length === 0 || batchRestarting.value || managedProcessActionMutation.isPending.value) {
+function managedProcessTargetKey(row: RuntimeContainerManagerRow, process: OpencodeRuntimeManagedProcess) {
+  const containerId = runtimeRowContainerId(row);
+  if (!containerId || !Number.isFinite(process.port)) {
+    return "";
+  }
+  return `${containerId}:${process.port}`;
+}
+
+function isOwnedManagedProcessSelected(row: RuntimeContainerManagerRow, process: OpencodeRuntimeManagedProcess) {
+  const key = managedProcessTargetKey(row, process);
+  return Boolean(key) && selectedManagedProcessKeys.value.has(key);
+}
+
+function toggleOwnedManagedProcessSelection(
+  row: RuntimeContainerManagerRow,
+  process: OpencodeRuntimeManagedProcess,
+  event: Event
+) {
+  if (batchManagedProcessAction.value || managedProcessActionMutation.isPending.value) {
     return;
   }
+  const key = managedProcessTargetKey(row, process);
+  if (!key) {
+    return;
+  }
+  const next = new Set(selectedManagedProcessKeys.value);
+  if ((event.target as HTMLInputElement).checked) {
+    next.add(key);
+  } else {
+    next.delete(key);
+  }
+  selectedManagedProcessKeys.value = next;
+  batchManagedProcessResult.value = null;
+}
+
+function toggleAllOwnedManagedProcesses(event: Event) {
+  if (batchManagedProcessAction.value || managedProcessActionMutation.isPending.value) {
+    return;
+  }
+  selectedManagedProcessKeys.value = (event.target as HTMLInputElement).checked
+    ? new Set(ownedManagedProcessTargets.value.map(target => target.key))
+    : new Set();
+  batchManagedProcessResult.value = null;
+}
+
+async function runBatchManagedProcessAction(action: ManagedProcessActionKind) {
+  const targets = [...selectedManagedProcessTargets.value];
+  if (targets.length === 0 || batchManagedProcessAction.value || managedProcessActionMutation.isPending.value) {
+    return;
+  }
+  const actionLabel = action === "restart" ? "重启" : "关闭";
+  const actionDetail = action === "restart"
+    ? "每个进程都会经过现有停止、重新拉起和健康检查流程"
+    : "关闭后，对应用户再次使用时需要重新启动 OpenCode";
   // 确认框打开期间也锁住入口，避免双击产生两批相同控制命令。
-  batchRestarting.value = true;
+  batchManagedProcessAction.value = action;
   try {
     await ElMessageBox.confirm(
-      `确认逐个重启选中的 ${targets.length} 个用户 TestAgent server 吗？每个进程都会经过现有停止、重新拉起和健康检查流程；单个失败不会中断其余进程。`,
-      "批量重启用户 TestAgent server",
-      { type: "warning", confirmButtonText: "批量重启", cancelButtonText: "取消" }
+      `确认逐个${actionLabel}选中的 ${targets.length} 个有主用户 OpenCode 进程吗？${actionDetail}；单个失败不会中断其余进程。`,
+      `批量${actionLabel}用户 OpenCode`,
+      { type: "warning", confirmButtonText: `批量${actionLabel}`, cancelButtonText: "取消" }
     );
   } catch (error) {
-    batchRestarting.value = false;
+    batchManagedProcessAction.value = null;
     if (!isMessageBoxCancellation(error)) {
-      actionErrorMessage.value = error instanceof Error ? error.message : "无法打开批量重启确认框";
+      actionErrorMessage.value = error instanceof Error ? error.message : `无法打开批量${actionLabel}确认框`;
     }
     return;
   }
 
   actionErrorMessage.value = "";
-  batchRestartResult.value = null;
-  const failures: BatchRestartFailure[] = [];
+  batchManagedProcessResult.value = null;
+  const failures: BatchManagedProcessFailure[] = [];
   let succeeded = 0;
   // 控制命令串行发送，避免同一批次同时挤占 manager 与启动健康检查资源。
-  for (const process of targets) {
+  for (const target of targets) {
     try {
-      await api.restartOpencodeRuntimeManagedProcess(process.containerId, process.port);
+      if (action === "restart") {
+        await api.restartOpencodeRuntimeManagedProcess(target.containerId, target.port);
+      } else {
+        await api.stopOpencodeRuntimeManagedProcess(target.containerId, target.port);
+        removeStoppedManagedProcess({ action, containerId: target.containerId, port: target.port });
+      }
       succeeded += 1;
     } catch (error) {
       failures.push({
-        processId: process.processId,
-        label: userProcessLabel(process),
+        key: target.key,
+        label: target.label,
         message: formatProcessActionError(error)
       });
     }
   }
-  batchRestartResult.value = { total: targets.length, succeeded, failures };
-  selectedUserProcessIds.value = new Set(failures.map(failure => failure.processId));
-  batchRestarting.value = false;
+  batchManagedProcessResult.value = { action, total: targets.length, succeeded, failures };
+  selectedManagedProcessKeys.value = new Set(failures.map(failure => failure.key));
+  batchManagedProcessAction.value = null;
   refetchRuntimeManagementAfterAction();
 }
 
 function runUserProcessRestart(process: OpencodeRuntimeProcess) {
-  if (batchRestarting.value) {
+  if (batchManagedProcessAction.value) {
     return;
   }
   if (!canRestartUserProcess(process)) {
@@ -767,7 +810,10 @@ function isManagedProcessActionRunning(
 
 function isManagedProcessActionDisabled(row: RuntimeContainerManagerRow, process: OpencodeRuntimeManagedProcess) {
   const containerId = runtimeRowContainerId(row);
-  return batchRestarting.value || managedProcessActionMutation.isPending.value || !containerId || !Number.isFinite(process.port);
+  return Boolean(batchManagedProcessAction.value)
+    || managedProcessActionMutation.isPending.value
+    || !containerId
+    || !Number.isFinite(process.port);
 }
 
 function runtimeRowContainerId(row: RuntimeContainerManagerRow) {
@@ -835,11 +881,11 @@ function startResize(e: MouseEvent) {
         {{ errorMessage || userProcessErrorMessage || actionErrorMessage }}
       </div>
       <div
-        v-if="batchRestartResultMessage"
-        :class="['ta-runtime-alert', batchRestartResult?.failures.length ? 'is-warning' : 'is-success']"
-        :role="batchRestartResult?.failures.length ? 'alert' : 'status'"
+        v-if="batchManagedProcessResultMessage"
+        :class="['ta-runtime-alert', batchManagedProcessResult?.failures.length ? 'is-warning' : 'is-success']"
+        :role="batchManagedProcessResult?.failures.length ? 'alert' : 'status'"
       >
-        {{ batchRestartResultMessage }}
+        {{ batchManagedProcessResultMessage }}
       </div>
 
       <div v-if="isLoading" class="ta-runtime-placeholder">正在加载运行状态...</div>
@@ -1021,7 +1067,39 @@ function startResize(e: MouseEvent) {
             </div>
 
             <div class="ta-runtime-block is-wide">
-              <h5>容器 / 管理进程</h5>
+              <div class="ta-runtime-block-header">
+                <h5>容器 / 管理进程</h5>
+                <div class="ta-runtime-batch-actions">
+                  <label class="ta-runtime-select-all">
+                    <input
+                      type="checkbox"
+                      aria-label="全选有主用户 OpenCode 进程"
+                      :checked="allOwnedManagedProcessesSelected"
+                      :indeterminate="someOwnedManagedProcessesSelected"
+                      :disabled="ownedManagedProcessTargets.length === 0 || Boolean(batchManagedProcessAction) || managedProcessActionMutation.isPending.value"
+                      @change="toggleAllOwnedManagedProcesses"
+                    />
+                    <span>全选有主进程</span>
+                  </label>
+                  <span>已选 {{ selectedManagedProcessTargets.length }} / {{ ownedManagedProcessTargets.length }}</span>
+                  <el-button
+                    size="small"
+                    type="warning"
+                    plain
+                    :loading="batchManagedProcessAction === 'restart'"
+                    :disabled="selectedManagedProcessTargets.length === 0 || Boolean(batchManagedProcessAction) || managedProcessActionMutation.isPending.value"
+                    @click="runBatchManagedProcessAction('restart')"
+                  >批量重启 OpenCode（{{ selectedManagedProcessTargets.length }}）</el-button>
+                  <el-button
+                    size="small"
+                    type="danger"
+                    plain
+                    :loading="batchManagedProcessAction === 'stop'"
+                    :disabled="selectedManagedProcessTargets.length === 0 || Boolean(batchManagedProcessAction) || managedProcessActionMutation.isPending.value"
+                    @click="runBatchManagedProcessAction('stop')"
+                  >批量关闭 OpenCode（{{ selectedManagedProcessTargets.length }}）</el-button>
+                </div>
+              </div>
               <div class="ta-runtime-block-scroll">
                 <table class="ta-runtime-table">
                   <thead>
@@ -1114,6 +1192,7 @@ function startResize(e: MouseEvent) {
                               <table v-else class="ta-runtime-managed-table">
                                 <thead>
                                   <tr>
+                                    <th class="is-selection">选择</th>
                                     <th style="width: 80px; position: relative;">端口<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                                     <th style="width: 80px; position: relative;">PID<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                                     <th style="width: 100px; position: relative;">用户<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
@@ -1128,7 +1207,21 @@ function startResize(e: MouseEvent) {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  <tr v-for="(process, index) in ownedProcesses(row)" :key="`owned:${row.key}:${process.processId ?? process.port}:${index}`">
+                                  <tr
+                                    v-for="(process, index) in ownedProcesses(row)"
+                                    :key="`owned:${row.key}:${process.processId ?? process.port}:${index}`"
+                                    :class="{ 'is-selected': isOwnedManagedProcessSelected(row, process) }"
+                                  >
+                                    <td class="is-selection">
+                                      <input
+                                        type="checkbox"
+                                        :aria-label="`选择 ${processOwner(process)}（${runtimeRowContainerId(row)}:${process.port}）`"
+                                        :checked="isOwnedManagedProcessSelected(row, process)"
+                                        :disabled="Boolean(batchManagedProcessAction) || managedProcessActionMutation.isPending.value"
+                                        @click.stop
+                                        @change="toggleOwnedManagedProcessSelection(row, process, $event)"
+                                      />
+                                    </td>
                                     <td>{{ process.port }}</td>
                                     <td>{{ formatNullable(process.pid) }}</td>
                                     <td class="is-compact" :title="processOwner(process) ?? undefined">{{ processOwner(process) }}</td>
@@ -1314,34 +1407,14 @@ function startResize(e: MouseEvent) {
               type="primary"
               :icon="Search"
               :loading="isUserProcessFetching"
-              :disabled="batchRestarting"
+              :disabled="Boolean(batchManagedProcessAction)"
               @click="queryUserProcesses"
             >查询用户进程</el-button>
-            <el-button
-              size="small"
-              type="warning"
-              :loading="batchRestarting"
-              :disabled="batchRestarting || selectedUserProcesses.length === 0 || managedProcessActionMutation.isPending.value"
-              @click="runBatchUserProcessRestart"
-            >批量重启（{{ selectedUserProcesses.length }}）</el-button>
-            <span v-if="restartableProcessRows.length" class="ta-runtime-selection-summary">
-              本页 {{ restartableProcessRows.length }} 个可重启
-            </span>
           </div>
           <div class="ta-runtime-table-scroll">
             <table class="ta-runtime-table">
               <thead>
                 <tr>
-                  <th class="is-selection">
-                    <input
-                      type="checkbox"
-                      aria-label="全选本页可重启用户进程"
-                      :checked="allRestartableProcessesSelected"
-                      :indeterminate="someRestartableProcessesSelected"
-                      :disabled="restartableProcessRows.length === 0 || batchRestarting"
-                      @change="toggleAllRestartableProcesses"
-                    />
-                  </th>
                   <th style="width: 120px; position: relative;">进程<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                   <th style="width: 100px; position: relative;">用户<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                   <th style="width: 120px; position: relative;">服务器<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
@@ -1358,19 +1431,10 @@ function startResize(e: MouseEvent) {
                 </tr>
               </thead>
               <tbody>
-                <tr v-if="!hasUserProcessQuery"><td colspan="14" class="is-empty">请输入用户关键字查询 TestAgent 进程</td></tr>
-                <tr v-else-if="isUserProcessFetching && !processRows.length"><td colspan="14" class="is-empty">正在查询用户 TestAgent 进程...</td></tr>
-                <tr v-else-if="!processRows.length"><td colspan="14" class="is-empty">暂无该用户 TestAgent 进程</td></tr>
-                <tr v-for="process in processRows" :key="process.processId" :class="{ 'is-selected': isUserProcessSelected(process) }">
-                  <td class="is-selection">
-                    <input
-                      type="checkbox"
-                      :aria-label="`选择 ${userProcessLabel(process)}`"
-                      :checked="isUserProcessSelected(process)"
-                      :disabled="!canRestartUserProcess(process) || batchRestarting"
-                      @change="toggleUserProcessSelection(process, $event)"
-                    />
-                  </td>
+                <tr v-if="!hasUserProcessQuery"><td colspan="13" class="is-empty">请输入用户关键字查询 TestAgent 进程</td></tr>
+                <tr v-else-if="isUserProcessFetching && !processRows.length"><td colspan="13" class="is-empty">正在查询用户 TestAgent 进程...</td></tr>
+                <tr v-else-if="!processRows.length"><td colspan="13" class="is-empty">暂无该用户 TestAgent 进程</td></tr>
+                <tr v-for="process in processRows" :key="process.processId">
                   <td class="is-compact" :title="process.processId ?? undefined">{{ process.processId }}</td>
                   <td class="is-compact" :title="(process.username || process.userId) ?? undefined">{{ process.username || process.userId }}</td>
                   <td :title="process.linuxServerId ?? undefined">{{ process.linuxServerId }}</td>
@@ -1394,7 +1458,7 @@ function startResize(e: MouseEvent) {
                       type="button"
                       class="ta-runtime-action-button"
                       :class="{ 'is-running': isUserProcessRestartRunning(process) }"
-                      :disabled="batchRestarting || managedProcessActionMutation.isPending.value"
+                      :disabled="Boolean(batchManagedProcessAction) || managedProcessActionMutation.isPending.value"
                       title="重启该用户 TestAgent server"
                       @click="runUserProcessRestart(process)"
                     >
@@ -1407,9 +1471,9 @@ function startResize(e: MouseEvent) {
             </table>
           </div>
           <footer class="ta-runtime-pagination">
-            <el-button size="small" :disabled="userProcessPage <= 1 || isUserProcessFetching || batchRestarting" @click="prevPage">上一页</el-button>
+            <el-button size="small" :disabled="userProcessPage <= 1 || isUserProcessFetching || Boolean(batchManagedProcessAction)" @click="prevPage">上一页</el-button>
             <span>第 {{ userProcessPage }} / {{ totalPages }} 页</span>
-            <el-button size="small" :disabled="userProcessPage >= totalPages || isUserProcessFetching || batchRestarting" @click="nextPage">下一页</el-button>
+            <el-button size="small" :disabled="userProcessPage >= totalPages || isUserProcessFetching || Boolean(batchManagedProcessAction)" @click="nextPage">下一页</el-button>
           </footer>
         </section>
       </template>
@@ -1469,10 +1533,6 @@ function startResize(e: MouseEvent) {
   border-color: #b3e19d;
   background: #f0f9eb;
   color: #397826;
-}
-.ta-runtime-selection-summary {
-  color: #606266;
-  font-size: 12px;
 }
 .ta-runtime-placeholder {
   display: flex;
@@ -1555,6 +1615,53 @@ function startResize(e: MouseEvent) {
   color: #303133;
   background: #fafafa;
 }
+.ta-runtime-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  min-height: 44px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #ebeef5;
+  background: #fafafa;
+}
+.ta-runtime-block-header h5 {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.ta-runtime-batch-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.ta-runtime-batch-actions > span {
+  color: #606266;
+  font-size: 12px;
+}
+.ta-runtime-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #303133;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ta-runtime-select-all input,
+.ta-runtime-managed-table .is-selection input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #b42318;
+  cursor: pointer;
+}
+.ta-runtime-select-all input:disabled,
+.ta-runtime-managed-table .is-selection input:disabled {
+  cursor: not-allowed;
+}
 .ta-runtime-block-scroll {
   flex: 1;
   width: 100%;
@@ -1593,22 +1700,6 @@ function startResize(e: MouseEvent) {
   width: 32px;
   padding-right: 4px;
   text-align: center;
-}
-.ta-runtime-table th.is-selection,
-.ta-runtime-table td.is-selection {
-  width: 42px;
-  padding-right: 4px;
-  text-align: center;
-}
-.ta-runtime-table .is-selection input {
-  width: 14px;
-  height: 14px;
-  margin: 0;
-  accent-color: #b42318;
-  cursor: pointer;
-}
-.ta-runtime-table .is-selection input:disabled {
-  cursor: not-allowed;
 }
 .ta-runtime-table tr:last-child td {
   border-bottom: 0;
@@ -1714,6 +1805,14 @@ function startResize(e: MouseEvent) {
   color: #606266;
   font-weight: 600;
   background: #f7f8fa;
+}
+.ta-runtime-managed-table th.is-selection,
+.ta-runtime-managed-table td.is-selection {
+  width: 54px;
+  text-align: center;
+}
+.ta-runtime-managed-table tbody tr.is-selected {
+  background: #fff7f7;
 }
 .ta-runtime-managed-table .is-command {
   max-width: 520px;

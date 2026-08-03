@@ -144,6 +144,74 @@ function createUserRuntimeProcess(overrides: Partial<OpencodeRuntimeProcess> = {
   };
 }
 
+function createManagedRuntimeOverview(): OpencodeRuntimeManagementOverview {
+  return {
+    ...emptyOverview,
+    summary: {
+      ...emptyOverview.summary,
+      managers: 2,
+      connectedManagers: 2,
+      opencodeProcesses: 2,
+      runningOpencodeProcesses: 2
+    },
+    managers: [
+      {
+        managerId: "mgr_01",
+        containerId: "ctr_01",
+        linuxServerId: "server-a",
+        protocolVersion: "opencode-manager.v1",
+        connectionStatus: "CONNECTED",
+        capabilities: {},
+        createdAt: "2026-06-24T08:00:00Z",
+        updatedAt: "2026-06-24T08:00:00Z",
+        traceId: "trace_mgr_01",
+        managedProcesses: [
+          {
+            port: 4096,
+            pid: 12345,
+            ownership: "BOUND",
+            processId: "ocp_01",
+            userId: "usr_01",
+            username: "user-a",
+            managerStatus: "PID_ALIVE",
+            processStatus: "RUNNING"
+          },
+          {
+            port: 4104,
+            pid: 12346,
+            ownership: "UNBOUND",
+            unifiedAuthId: "ghost-user",
+            managerStatus: "PID_ALIVE"
+          }
+        ]
+      },
+      {
+        managerId: "mgr_02",
+        containerId: "ctr_02",
+        linuxServerId: "server-b",
+        protocolVersion: "opencode-manager.v1",
+        connectionStatus: "CONNECTED",
+        capabilities: {},
+        createdAt: "2026-06-24T08:00:00Z",
+        updatedAt: "2026-06-24T08:00:00Z",
+        traceId: "trace_mgr_02",
+        managedProcesses: [
+          {
+            port: 4097,
+            pid: 22345,
+            ownership: "BOUND",
+            processId: "ocp_02",
+            userId: "usr_02",
+            username: "user-b",
+            managerStatus: "PID_ALIVE",
+            processStatus: "RUNNING"
+          }
+        ]
+      }
+    ]
+  };
+}
+
 describe("runtime management settings", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -614,95 +682,65 @@ describe("runtime management settings", () => {
     queryClient.clear();
   });
 
-  it("batch restarts selected restartable user processes and skips healthy rows", async () => {
-    const userProcessPage = {
-      items: [
-        createUserRuntimeProcess(),
-        createUserRuntimeProcess({
-          processId: "ocp_2",
-          userId: "usr_2",
-          username: "user-b",
-          containerId: "ctr_02",
-          port: 4097,
-          baseUrl: "http://10.8.0.12:4097"
-        }),
-        createUserRuntimeProcess({
-          processId: "ocp_healthy",
-          userId: "usr_healthy",
-          username: "healthy-user",
-          containerId: "ctr_03",
-          port: 4098,
-          baseUrl: "http://10.8.0.12:4098",
-          status: "RUNNING",
-          managerStatus: "RUNNING",
-          healthStatus: "HEALTHY",
-          restartable: false,
-          healthMessage: "ok"
-        })
-      ],
-      page: 1,
-      size: 20,
-      total: 3
-    };
+  it("places batch actions beside the container heading and restarts only owned processes", async () => {
+    const overview = createManagedRuntimeOverview();
     const api = {
-      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(emptyOverview),
-      getOpencodeRuntimeManagementUserProcesses: vi.fn().mockResolvedValue(userProcessPage),
-      restartOpencodeRuntimeManagedProcess: vi.fn().mockResolvedValue({ command: "restart", status: "STARTED" })
+      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(overview),
+      getOpencodeRuntimeManagementUserProcesses: vi.fn(),
+      restartOpencodeRuntimeManagedProcess: vi.fn().mockResolvedValue({ command: "restart", status: "STARTED" }),
+      stopOpencodeRuntimeManagedProcess: vi.fn()
     };
     vi.spyOn(ElMessageBox, "confirm").mockResolvedValue("confirm" as never);
     const view = renderRuntimePanel(api);
 
     expect(await view.findByText("请输入用户关键字查询 TestAgent 进程")).toBeTruthy();
-    await fireEvent.update(view.getByPlaceholderText("用户名 / userId / 统一认证号"), "user");
-    await fireEvent.click(view.getByText("查询用户进程"));
-    expect(await view.findByText("healthy-user")).toBeTruthy();
-    expect((view.getByRole("checkbox", { name: /healthy-user/ }) as HTMLInputElement).disabled).toBe(true);
+    const heading = view.getByText("容器 / 管理进程");
+    const headingBar = heading.closest(".ta-runtime-block-header");
+    expect(headingBar?.textContent).toContain("全选有主进程");
+    expect(headingBar?.textContent).toContain("已选 0 / 2");
+    expect(view.getByRole("button", { name: "批量重启 OpenCode（0）" })).toBeTruthy();
+    expect(view.getByRole("button", { name: "批量关闭 OpenCode（0）" })).toBeTruthy();
 
-    await fireEvent.click(view.getByRole("checkbox", { name: "全选本页可重启用户进程" }));
-    await fireEvent.click(view.getByRole("button", { name: "批量重启（2）" }));
+    const firstContainerRow = view.getByText("mgr_01").closest("tr");
+    await fireEvent.click(firstContainerRow!);
+    expect(view.getByRole("checkbox", { name: "选择 user-a（ctr_01:4096）" })).toBeTruthy();
+    expect(view.queryByRole("checkbox", { name: /ghost-user/ })).toBeNull();
+    await fireEvent.click(view.getByRole("checkbox", { name: "选择 user-a（ctr_01:4096）" }));
+    expect(view.getByRole("button", { name: "批量重启 OpenCode（1）" })).toBeTruthy();
+    await fireEvent.click(view.getByRole("checkbox", { name: "全选有主用户 OpenCode 进程" }));
+
+    await fireEvent.click(view.getByRole("button", { name: "批量重启 OpenCode（2）" }));
 
     await waitFor(() => expect(api.restartOpencodeRuntimeManagedProcess).toHaveBeenCalledTimes(2));
     expect(api.restartOpencodeRuntimeManagedProcess.mock.calls).toEqual([
       ["ctr_01", 4096],
       ["ctr_02", 4097]
     ]);
+    expect(api.restartOpencodeRuntimeManagedProcess).not.toHaveBeenCalledWith("ctr_01", 4104);
+    expect(api.stopOpencodeRuntimeManagedProcess).not.toHaveBeenCalled();
     expect(ElMessageBox.confirm).toHaveBeenCalledWith(
-      expect.stringContaining("选中的 2 个用户"),
-      "批量重启用户 TestAgent server",
+      expect.stringContaining("选中的 2 个有主用户 OpenCode 进程"),
+      "批量重启用户 OpenCode",
       expect.objectContaining({ confirmButtonText: "批量重启" })
     );
     expect(await view.findByText("批量重启完成：成功 2，失败 0。")).toBeTruthy();
-    await waitFor(() => expect(api.getOpencodeRuntimeManagementUserProcesses).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(api.getOpencodeRuntimeManagementOverview).toHaveBeenCalledTimes(2));
 
     view.queryClient.clear();
   });
 
-  it("continues a batch restart after one user fails and keeps only the failed row selected", async () => {
-    const userProcessPage = {
-      items: [
-        createUserRuntimeProcess(),
-        createUserRuntimeProcess({
-          processId: "ocp_2",
-          userId: "usr_2",
-          username: "user-b",
-          containerId: "ctr_02",
-          port: 4097,
-          baseUrl: "http://10.8.0.12:4097"
-        })
-      ],
-      page: 1,
-      size: 20,
-      total: 2
-    };
+  it("continues batch close after one owned process fails and reports the failed identity", async () => {
+    const overview = createManagedRuntimeOverview();
     const api = {
-      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(emptyOverview),
-      getOpencodeRuntimeManagementUserProcesses: vi.fn().mockResolvedValue(userProcessPage),
-      restartOpencodeRuntimeManagedProcess: vi.fn()
-        .mockResolvedValueOnce({ command: "restart", status: "STARTED" })
+      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(overview),
+      getOpencodeRuntimeManagementUserProcesses: vi.fn(),
+      restartOpencodeRuntimeManagedProcess: vi.fn(),
+      stopOpencodeRuntimeManagedProcess: vi.fn()
+        .mockResolvedValueOnce({ command: "stop", status: "STOPPED" })
         .mockRejectedValueOnce(new BackendApiError(503, {
           success: false,
           code: "OPENCODE_UNAVAILABLE",
-          message: "启动后未通过健康检查",
+          message: "停止后仍可访问",
           traceId: "trace_batch_failure"
         }))
     };
@@ -710,18 +748,23 @@ describe("runtime management settings", () => {
     const view = renderRuntimePanel(api);
 
     expect(await view.findByText("请输入用户关键字查询 TestAgent 进程")).toBeTruthy();
-    await fireEvent.update(view.getByPlaceholderText("用户名 / userId / 统一认证号"), "user");
-    await fireEvent.click(view.getByText("查询用户进程"));
-    expect(await view.findByText("user-b")).toBeTruthy();
-    await fireEvent.click(view.getByRole("checkbox", { name: "全选本页可重启用户进程" }));
-    await fireEvent.click(view.getByRole("button", { name: "批量重启（2）" }));
+    await fireEvent.click(view.getByRole("checkbox", { name: "全选有主用户 OpenCode 进程" }));
+    await fireEvent.click(view.getByRole("button", { name: "批量关闭 OpenCode（2）" }));
 
-    expect(await view.findByText(/批量重启完成：成功 1，失败 1。/)).toBeTruthy();
-    expect(await view.findByText(/user-b.*OPENCODE_UNAVAILABLE/)).toBeTruthy();
-    expect((view.getByRole("checkbox", { name: /wr（ctr_01:4096）/ }) as HTMLInputElement).checked).toBe(false);
-    expect((view.getByRole("checkbox", { name: /user-b（ctr_02:4097）/ }) as HTMLInputElement).checked).toBe(true);
-    expect(view.getByRole("button", { name: "批量重启（1）" })).toBeTruthy();
-    await waitFor(() => expect(api.getOpencodeRuntimeManagementUserProcesses).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(api.stopOpencodeRuntimeManagedProcess).toHaveBeenCalledTimes(2));
+    expect(api.stopOpencodeRuntimeManagedProcess.mock.calls).toEqual([
+      ["ctr_01", 4096],
+      ["ctr_02", 4097]
+    ]);
+    expect(api.restartOpencodeRuntimeManagedProcess).not.toHaveBeenCalled();
+    expect(ElMessageBox.confirm).toHaveBeenCalledWith(
+      expect.stringContaining("关闭后，对应用户再次使用时需要重新启动 OpenCode"),
+      "批量关闭用户 OpenCode",
+      expect.objectContaining({ confirmButtonText: "批量关闭" })
+    );
+    expect(await view.findByText(/批量关闭完成：成功 1，失败 1。/)).toBeTruthy();
+    expect(await view.findByText(/user-b（ctr_02:4097）.*OPENCODE_UNAVAILABLE/)).toBeTruthy();
+    await waitFor(() => expect(api.getOpencodeRuntimeManagementOverview).toHaveBeenCalledTimes(2));
 
     view.queryClient.clear();
   });
