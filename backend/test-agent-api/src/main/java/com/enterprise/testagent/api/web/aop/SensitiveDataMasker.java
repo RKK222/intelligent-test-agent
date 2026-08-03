@@ -53,9 +53,9 @@ public final class SensitiveDataMasker {
 
         // 脱敏格式: "fieldName": "value" -> "fieldName": "***"
         for (String field : SENSITIVE_FIELDS) {
-            // 匹配双引号包裹的字段名和完整 JSON 字符串值，转义引号不能提前结束匹配。
+            // 占有量词避免长密文触发 Java 正则回溯栈溢出，转义引号仍不能提前结束匹配。
             result = result.replaceAll(
-                    "(?i)(\"" + field + "\"\\s*:\\s*\")(?:\\\\.|[^\"\\\\])*\"",
+                    "(?i)(\"" + field + "\"\\s*:\\s*\")(?:\\\\.|[^\"\\\\])*+\"",
                     "$1***\""
             );
         }

@@ -5140,3 +5140,32 @@
 
 - 只有超级管理员能在工作台活动栏看到通用问答和长程任务工作台两个入口。
 - 未修改 API、事件、数据库、性能、安全、兼容性、环境配置、generated SDK 或 OpenCode 源码。
+
+## 2026-08-03 - 修复 SSH 密钥长密文日志脱敏栈溢出
+
+### Why
+
+- 企业环境下午包部署后，保存个人 SSH Key 经 X-WEB/Nginx 返回 502，Nginx 记录 Java 上游在响应头前提前断开，
+  后端没有该请求的 `api_entry` 或 traceId；下午提交把 `encryptedPrivateKey` 加入通用敏感字段后，原有 Java
+  正则会对约 2 KB 以上密文递归压栈并触发 `StackOverflowError`，异常恰好发生在 Controller 入口日志之前。
+
+### What
+
+- 通用敏感字段 JSON 脱敏正则改用占有量词，以无回溯方式扫描长字符串，同时保留转义引号处理和既有掩码语义。
+- 新增 16 KiB `encryptedPrivateKey` 回归测试，并同步 API 模块 README 与安全规范，要求长密文日志脱敏不能中断
+  业务请求。
+
+### How
+
+- JShell 精确复现旧表达式在 2 KB 密文上 `StackOverflowError`，修复后的表达式覆盖至 100 KB 仍正确脱敏。
+- JDK 21 下定向日志/脱敏测试 49 项通过；`mvn -pl test-agent-api -am test` 的 18 个 reactor 模块全部通过。
+- JDK 25 下先按完整本地启动命令验证，因本机缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 在启动前停止；未改环境文件，
+  改用 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build --without-workflow`
+  完成 21 模块后端打包和实际重启，后端 health/readiness 为 `UP`、前端 3000 返回 200、登录 CORS 正常。
+
+### Result
+
+- SSH Key 长加密信封不再在请求入口日志脱敏阶段压垮处理线程，正常请求可继续进入鉴权和 Controller，并生成
+  traceId；企业现场仍需重新构建后端产物并依次更新 `.4`、`.114` 节点，本次未执行企业包构建或现场部署。
+- 未修改 HTTP API/DTO、事件、数据库/Flyway/SQL、权限模型、环境配置、前端、worker、manager、generated SDK
+  或 OpenCode 源码；完整 workflow 本地启动仍受缺少开发密钥限制，与本次修复无关。

@@ -119,6 +119,16 @@ class SensitiveDataMaskerTest {
         }
 
         @Test
+        @DisplayName("长加密私钥信封脱敏不发生正则栈溢出")
+        void mask_longEncryptedPrivateKeyWithoutStackOverflow() {
+            String input = "{\"encryptedPrivateKey\":\"" + "A".repeat(16_384) + "\",\"name\":\"work\"}";
+
+            String result = SensitiveDataMasker.mask(input);
+
+            assertEquals("{\"encryptedPrivateKey\":\"***\",\"name\":\"work\"}", result);
+        }
+
+        @Test
         @DisplayName("脱敏 JVM 通用参数源值和内存值")
         void mask_commonParameterMemoryValues() {
             String input = "{\"sourceValue\":\"database-secret-like-value\",\"memoryValue\":\"effective-value\"}";
