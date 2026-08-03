@@ -106,6 +106,7 @@ async function ensureRuntimeGitIgnore(directory, runtimeRoot) {
  */
 export async function prepareOfflineRuntime({ cwd = process.cwd(), env = process.env, runtimeRoot }) {
   const resolvedRuntimeRoot = resolve(runtimeRoot)
+  const resolvedCwd = resolve(cwd)
   const prepared = { ...env, ...OFFLINE_DEFAULTS }
   prepared.OPENCODE_CONFIG_CONTENT = withRequiredConfig(
     prepared,
@@ -113,7 +114,16 @@ export async function prepareOfflineRuntime({ cwd = process.cwd(), env = process
   )
   prepared.OPENCODE_OFFLINE_TOOL_NODE_MODULES = join(resolvedRuntimeRoot, "node_modules")
 
-  for (const directory of effectiveConfigDirectories(resolve(cwd), prepared)) {
+  // OpenCode 进程工作目录是所有个人 worktree 的共同祖先；在这里投影依赖后，
+  // 深层应用 workspace 的 .opencode/tools 也能按 Node 标准祖先规则离线解析模块。
+  for (const dependency of TOOL_DEPENDENCIES) {
+    await linkIfMissing(
+      join(resolvedRuntimeRoot, "node_modules", ...dependency.split("/")),
+      join(resolvedCwd, "node_modules", ...dependency.split("/")),
+    )
+  }
+
+  for (const directory of effectiveConfigDirectories(resolvedCwd, prepared)) {
     await mkdir(directory, { recursive: true })
     await ensureRuntimeGitIgnore(directory, resolvedRuntimeRoot)
     await linkIfMissing(join(resolvedRuntimeRoot, "package.json"), join(directory, "package.json"))

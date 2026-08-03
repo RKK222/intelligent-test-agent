@@ -117,6 +117,8 @@ docker exec "${CONTAINER}" node -e \
 docker exec "${CONTAINER}" sh -lc \
   'for dir in /tmp/opencode-config /tmp/workspace/.opencode; do test -L "$dir/node_modules/@opencode-ai/plugin"; test -L "$dir/node_modules/@opencode-ai/sdk"; test -L "$dir/node_modules/effect"; test -L "$dir/node_modules/zod"; test -L "$dir/package.json"; test -L "$dir/package-lock.json"; for rule in node_modules package.json package-lock.json bun.lock .gitignore; do grep -Fx "$rule" "$dir/.gitignore" >/dev/null; done; done'
 docker exec "${CONTAINER}" sh -lc \
+  'for dependency in @opencode-ai/plugin @opencode-ai/sdk effect zod; do test -L "/tmp/workspace/node_modules/$dependency"; done'
+docker exec "${CONTAINER}" sh -lc \
   "test \"\$(readlink -f /usr/local/bin/opencode)\" = /usr/local/lib/opencode/bin/opencode && test -x /usr/local/lib/opencode/bin/opencode-official && grep -Fx 'asset=${EXPECTED_OPENCODE_ASSET_NAME}' /usr/local/lib/opencode/RELEASE && grep -Fx 'archive_sha256=${EXPECTED_OPENCODE_ASSET_SHA256}' /usr/local/lib/opencode/RELEASE && ! command -v bun >/dev/null"
 
 # launcher 必须在 Docker 的停止宽限期内自行退出，不能依赖 SIGKILL 清理。

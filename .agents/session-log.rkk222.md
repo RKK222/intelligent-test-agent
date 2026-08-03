@@ -5058,3 +5058,36 @@
   真正的分配或生命周期变化仍保持原有失败关闭和精确补偿。
 - 本次未新增或修改 HTTP 路径、DTO、事件、数据库/Flyway/SQL、权限、安全配置、环境文件、generated SDK 或
   OpenCode 源码；前端目录恢复仅在本页面发起的初始化 operation 运行期间暂停。
+
+## 2026-08-03 - 固化深层应用 Tool 离线依赖祖先链接
+
+### Why
+
+- `.114` 节点用户“谢伟 1”的 OpenCode 14117 在加载深层个人 worktree 的
+  `.opencode/tools/server-file-upload.ts` 时无法解析 `@opencode-ai/plugin`；随 programs 交付的模块存在，
+  但既有启动器只给公共配置和进程当前目录的 `.opencode` 建链接，没有覆盖深层 workspace 的 Node 祖先路径。
+- 现场已通过在共享工作区根目录建立四个依赖软链接临时恢复，需要将同一动作固化到正式启动流程。
+
+### What
+
+- OpenCode 官方程序启动器在每次 `serve` 前，把 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod`
+  非覆盖式链接到进程工作目录的 `node_modules`；该目录是个人 worktree 的共同祖先。并发启动沿用既有
+  `EEXIST` 幂等处理，现场已有文件或目录不覆盖。
+- 单测新增深层 `personalworktree/.../.opencode/tools` 的真实模块导入探测和祖先现有依赖保留断言；worker
+  镜像验收脚本新增共享工作区祖先链接检查。同步企业部署、OpenCode 升级和空报文排障文档，澄清超级管理员
+  较少出现是工作区使用路径或历史链接差异，不是角色鉴权差异。
+
+### How
+
+- `node --test tools/test-opencode-official-launcher.mjs` 6 项通过，深层工具探测输出 `IMPORT_OK`；启动器语法、
+  worker 验收脚本语法、runtime Git ignore 和 Tool runtime 部署门禁均通过。
+- 使用 JDK 25 和未修改的 `.env.test` 执行
+  `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build`，21 模块后端打包成功；
+  backend health/readiness 为 `UP`、前端 3000 返回 200、登录 CORS 正常，manager 最终健康探测为 `HEALTHY`。
+
+### Result
+
+- 新 worker/programs 部署并重启用户 OpenCode 后，会自动重建现场临时恢复所需的祖先软链接，无需逐个个人
+  worktree 处理。本次未构建或部署企业离线包，`.114` 仍由用户已执行的临时链接维持恢复状态。
+- 未修改 HTTP API、RunEvent/SSE、数据库/Flyway/SQL、权限、安全配置、性能策略、环境文件、generated SDK
+  或 OpenCode 上游源码；没有创建分支。

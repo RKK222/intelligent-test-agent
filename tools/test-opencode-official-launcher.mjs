@@ -17,6 +17,14 @@ async function createRuntime(root) {
   await mkdir(join(root, "node_modules", "@opencode-ai", "sdk"), { recursive: true })
   await mkdir(join(root, "node_modules", "effect"), { recursive: true })
   await mkdir(join(root, "node_modules", "zod"), { recursive: true })
+  await writeFile(
+    join(root, "node_modules", "@opencode-ai", "plugin", "package.json"),
+    '{"name":"@opencode-ai/plugin","type":"module","exports":"./index.js"}\n',
+  )
+  await writeFile(
+    join(root, "node_modules", "@opencode-ai", "plugin", "index.js"),
+    "export const loaded = true\n",
+  )
   await writeFile(join(root, "package.json"), '{"private":true}\n')
   await writeFile(join(root, "package-lock.json"), '{"lockfileVersion":3}\n')
   await copyFile(
@@ -24,6 +32,19 @@ async function createRuntime(root) {
     join(root, "opencode-runtime.gitignore"),
   )
   await writeFile(join(root, "VERSION"), "1.18.4\n")
+}
+
+async function assertToolDependencyLinks(directory, runtimeRoot) {
+  assert.equal(
+    await readlink(join(directory, "node_modules", "@opencode-ai", "plugin")),
+    join(runtimeRoot, "node_modules", "@opencode-ai", "plugin"),
+  )
+  assert.equal(
+    await readlink(join(directory, "node_modules", "@opencode-ai", "sdk")),
+    join(runtimeRoot, "node_modules", "@opencode-ai", "sdk"),
+  )
+  assert.equal(await readlink(join(directory, "node_modules", "effect")), join(runtimeRoot, "node_modules", "effect"))
+  assert.equal(await readlink(join(directory, "node_modules", "zod")), join(runtimeRoot, "node_modules", "zod"))
 }
 
 test("prepares every effective config directory for offline tools and enforces depth two", async () => {
@@ -52,6 +73,26 @@ test("prepares every effective config directory for offline tools and enforces d
       subagent_depth: 2,
     })
 
+    // 共享工作区根目录是个人 worktree 的共同祖先，必须包含现场临时修复使用的四个链接。
+    await assertToolDependencyLinks(workspace, runtimeRoot)
+    const nestedToolDirectory = join(
+      workspace,
+      "personalworktree",
+      "user",
+      "app",
+      "F-BASE",
+      "workspace",
+      ".opencode",
+      "tools",
+    )
+    const importProbe = join(nestedToolDirectory, "import-probe.mjs")
+    await mkdir(nestedToolDirectory, { recursive: true })
+    await writeFile(
+      importProbe,
+      'import { loaded } from "@opencode-ai/plugin"; console.log(loaded ? "IMPORT_OK" : "IMPORT_FAILED")\n',
+    )
+    assert.equal((await execFileAsync(process.execPath, [importProbe])).stdout, "IMPORT_OK\n")
+
     const effectiveDirectories = [
       join(xdgConfigHome, "opencode"),
       configDir,
@@ -64,16 +105,7 @@ test("prepares every effective config directory for offline tools and enforces d
       )
       assert.equal((await lstat(join(directory, "package.json"))).isSymbolicLink(), true)
       assert.equal((await lstat(join(directory, "package-lock.json"))).isSymbolicLink(), true)
-      assert.equal(
-        await readlink(join(directory, "node_modules", "@opencode-ai", "plugin")),
-        join(runtimeRoot, "node_modules", "@opencode-ai", "plugin"),
-      )
-      assert.equal(
-        await readlink(join(directory, "node_modules", "@opencode-ai", "sdk")),
-        join(runtimeRoot, "node_modules", "@opencode-ai", "sdk"),
-      )
-      assert.equal(await readlink(join(directory, "node_modules", "effect")), join(runtimeRoot, "node_modules", "effect"))
-      assert.equal(await readlink(join(directory, "node_modules", "zod")), join(runtimeRoot, "node_modules", "zod"))
+      await assertToolDependencyLinks(directory, runtimeRoot)
     }
   } finally {
     await rm(root, { force: true, recursive: true })
@@ -115,6 +147,7 @@ test("does not overwrite workspace-owned dependency metadata", async () => {
     const workspace = join(root, "workspace")
     const workspaceConfig = join(workspace, ".opencode")
     await createRuntime(runtimeRoot)
+    await mkdir(join(workspace, "node_modules", "zod"), { recursive: true })
     await mkdir(join(workspaceConfig, "node_modules", "effect"), { recursive: true })
     await writeFile(join(workspaceConfig, "package.json"), '{"name":"workspace-owned"}\n')
 
@@ -125,6 +158,7 @@ test("does not overwrite workspace-owned dependency metadata", async () => {
     })
 
     assert.equal(await readFile(join(workspaceConfig, "package.json"), "utf8"), '{"name":"workspace-owned"}\n')
+    assert.equal((await lstat(join(workspace, "node_modules", "zod"))).isDirectory(), true)
     assert.equal((await lstat(join(workspaceConfig, "node_modules", "effect"))).isDirectory(), true)
   } finally {
     await rm(root, { force: true, recursive: true })

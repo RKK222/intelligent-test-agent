@@ -14,7 +14,7 @@
 | 对话相关 HTTP `响应`正文为空 | 异常 | 当前平台 JSON API 使用统一响应；即使 active Run 不存在，也应返回 `success=true,data=null`，不应是零字节。 |
 | SSE 记录存在，但报文体为空 | 异常 | 前端解析器会忽略纯注释心跳；能进入原始输出但为空，表示收到过空 `data:`。 |
 | SSE 有 `run.succeeded`，但没有 assistant 文本或 message part | 异常，但不是 HTTP 空响应 | Run 已到终态，重点查用户 OpenCode、模型流和消息投影。 |
-| 用户 OpenCode 出现 `prompt_async failed` 和 `errors building .../opencode/tools/*.ts` | 异常，且不是模型空响应 | 公共自定义工具在主模型调用前构建失败；先修复权威公共配置，不能用重发 Run 或重部署应用包掩盖。 |
+| 用户 OpenCode 出现 `prompt_async failed` 和 `errors building .../opencode/tools/*.ts` | 异常，且不是模型空响应 | 自定义工具在主模型调用前构建失败；先根据失败路径和底层异常区分公共配置工具、应用工具或离线依赖解析，不能用重发 Run 掩盖。 |
 | `SSE connection error` | 连接诊断，不是上游响应正文 | 继续查 Network、Nginx、SSE 路由和最终 `run.*` 事件。 |
 
 只看到一条正常的空 GET 请求时可以停止；其余情况继续执行本手册。
@@ -442,7 +442,7 @@ grep -nE \
 
 日志文件名包含统一认证号，外发前必须脱敏。先按当前 Session、消息 ID 和分钟级时间窗口精确过滤，不要用 provider 名称全盘搜索后把历史会话错误当成当前故障。重点查模型 HTTP 状态、上游正文、`data:data:`、`[DONE]` 缺失、连接超时、provider/model 不存在、配置读取失败和自定义工具构建失败。
 
-若同一当前会话出现下面的组合，可直接判定为“公共自定义工具构建失败”，不再把它归类为模型返回空报文：
+若同一当前会话出现下面的组合，可直接判定为“自定义工具构建失败”，不再把它归类为模型返回空报文：
 
 ```text
 prompt_async failed
@@ -450,6 +450,10 @@ AggregateError: ... errors building ".../opencode/tools/REPLACE_TOOL.ts"
 ```
 
 OpenCode 1.18.4 会扫描配置目录下的 `tool/tools` JavaScript 和 TypeScript 文件，并在提示处理时加载全部匹配工具；任一文件存在语法、导入、依赖或导出结构错误，都可能在主模型调用前中止整个提示。此时常见伴随现象是 assistant 消息 token 全为 0、没有 assistant part，随后根 Session 又进入 idle，平台只观察终态后可能产生误导性的 `run.succeeded`。
+
+若底层异常明确为 `Cannot find module '@opencode-ai/plugin'`，且失败路径位于 `personalworktree/.../workspace/.opencode/tools/`，先检查 OpenCode 进程工作目录和祖先依赖投影。超级管理员通常使用公共配置工具，或者现场已存在历史链接，因此可能未触发；这是工作区路径与模块解析差异，不是角色鉴权差异。同一用户进入相同的深层应用 workspace 仍会失败。
+
+正式版本由 OpenCode 启动器在进程工作目录的 `node_modules` 自动非覆盖式链接 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect` 和 `zod`。部署包含该修复的新 worker/programs 并重启用户 OpenCode 进程后，无需为每个个人 worktree 单独建链接；验收时从失败工具目录执行模块导入探测，并确认它解析到 `/data/testagent/programs/opencode/node_modules/`。临时手工链接只能用于已保全证据后的现场恢复，不能代替正式发包。
 
 处置规则：
 
@@ -540,7 +544,7 @@ REPLACE_JSON_REQUEST_BODY = {"model":"DeepSeek-V4-Flash-W8A8","messages":[{"role
 | Java API 日志已有完整 responseBody，直连客户端仍为零字节 | 保留 traceId 和 exact JAR SHA，交响应序列化/路由转发负责人；不要用重复 POST 继续探测。 |
 | SSE 直连正常、Nginx 断流 | 查 SSE 禁缓冲、长连接超时和中间网络设备。 |
 | SSE 到达 `run.succeeded` 但没有文本事件 | 查用户 OpenCode 日志、模型流、消息投影和 `[DONE]`。 |
-| 当前会话出现 `prompt_async failed` 和 `errors building .../opencode/tools/*.ts` | 在权威公共配置 Git 中回退或修复该工具并发布，再通过运行管理更新受影响用户进程；禁止修改逐用户生成投影，也无需重新打应用发布包。 |
+| 当前会话出现 `prompt_async failed` 和 `errors building .../opencode/tools/*.ts` | 先看失败路径和底层异常：公共工具在权威公共配置 Git 中修复；应用工具按应用发布流程修复；深层应用工具缺少 `@opencode-ai/plugin` 时部署已包含祖先依赖投影的新 worker/programs，再重启用户进程。 |
 | 同时出现 `git add --sparse` 的 `unknown option` | 作为旧 Git 兼容告警单独治理；只有同时出现工具构建错误时，提示中止首因仍是失败工具。 |
 | Java 模型代理正常，只有旧用户 OpenCode 失败 | 在运行管理重启该用户进程，使其重新读取公共配置和逐用户注入环境；不需要重启所有 Java。 |
 | Java 模型代理 `400` 且 0 字节，批准的同机 9070 直连正常 | 核对 provider API 根路径、关联 token、Java 内存快照及 UCID/header；修复后必须以 Java 代理 `200 text/event-stream` 复验。 |
