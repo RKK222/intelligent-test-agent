@@ -788,6 +788,7 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 - 只有保存接口会触发 Git clone/fetch、分支 checkout 和本地目录准备；页面上的分支、远端树和新增目录操作均不落磁盘。
 - `directoryNew=true` 表示前端在远端树内存中新增了测试工作库应用根目录下的一级子目录。后端在 clone/checkout 后如果目标目录不存在，则在保存阶段创建 `.gitkeep`，以当前用户身份提交并 push 当前 feature 分支；push 未确认时创建失败，避免只在单台服务器留下 Git 无法复制的空目录。旧客户端不传该字段时行为不变。
 - 后端会先保存或复用 `应用 + 代码库 + 分支 + 目录路径` 对应的工作空间模板，再创建同版本的应用版本工作区并完成 Git clone/fetch、分支 checkout 和运行态 `Workspace` 创建。命中已有位置时返回原 `workspaceId`，按本次请求更新别名；若原模板已停用则同时重新启用，避免异步操作显示成功但模板仍不可见。别名仍需满足同应用唯一约束。
+- 本次请求新插入模板后，如果初始版本创建失败且数据库复核该模板仍没有任何版本，后端会补偿删除该新模板并保留 `workspace_create_operations` 失败审计；命中既有模板或版本已经持久化时不删除，避免失败请求误删历史配置或并发成功结果。补偿失败只记录日志并附加到原异常，不覆盖原始错误码和错误说明。
 - 创建前会按当前用户 READY 的 opencode 进程确定目标 `linuxServerId`，确保初始运行态工作区落在当前用户 agent 所在服务器。
 - 应用版本工作区目录使用通用参数 `{OPENCODE_APP_WORKSPACE_ROOT}/{yyyymmdd}/{repository.englishName}/{directoryPath}`；缺少代码库英文名称时返回统一 `VALIDATION_ERROR`。
 - 删除配置记录只删除模板配置，不级联清理已创建的应用版本工作区、个人工作区或运行态 `Workspace`。

@@ -337,6 +337,107 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void workspaceCreateFailureDeletesNewTemplateWithoutVersion() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        ManagedWorkspaceApplicationService service = service(
+                configuration,
+                managed,
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("F-GCMS/existing"));
+
+        assertThatThrownBy(() -> service.createApplicationWorkspaceWithInitialVersion(
+                "app_gcms",
+                "repo_1",
+                "feature_testagent_20260707",
+                "F-GCMS/missing",
+                "缺失目录",
+                false,
+                null,
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_cleanup_new_template"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.getMessage()).contains("应用工作区目录不存在");
+                });
+
+        assertThat(configuration.savedWorkspaces).isEmpty();
+        assertThat(configuration.deletedWorkspaceIds).hasSize(1);
+        assertThat(managed.versions).isEmpty();
+    }
+
+    @Test
+    void workspaceCreateFailureKeepsExistingTemplateForRetry() {
+        CodeRepository repository = new CodeRepository(
+                new CodeRepositoryId("repo_1"),
+                "https://example.com/gcms.git",
+                "gcms/gcms",
+                "gcms",
+                false,
+                Instant.now(),
+                Instant.now());
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(
+                true,
+                repository,
+                List.of(),
+                true);
+        ManagedWorkspaceApplicationService service = service(
+                configuration,
+                new FakeManagedWorkspaceRepository(),
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("F-GCMS/existing"));
+
+        assertThatThrownBy(() -> service.createApplicationWorkspaceWithInitialVersion(
+                "app_gcms",
+                "repo_1",
+                "main",
+                "F-GCMS/workspace",
+                "GCMS Workspace",
+                false,
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_keep_existing_template"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+
+        assertThat(configuration.deletedWorkspaceIds).isEmpty();
+    }
+
+    @Test
+    void workspaceCreateFailureAfterVersionPersistenceKeepsNewTemplate() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        managed.failVersionReplicaSave = true;
+        ManagedWorkspaceApplicationService service = service(
+                configuration,
+                managed,
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("F-GCMS/new-workspace"));
+
+        assertThatThrownBy(() -> service.createApplicationWorkspaceWithInitialVersion(
+                "app_gcms",
+                "repo_1",
+                "feature_testagent_20260707",
+                "F-GCMS/new-workspace",
+                "新工作空间",
+                false,
+                null,
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_keep_versioned_template"))
+                .isInstanceOf(PlatformException.class);
+
+        assertThat(configuration.savedWorkspaces).hasSize(1);
+        assertThat(configuration.deletedWorkspaceIds).isEmpty();
+        assertThat(managed.versions).hasSize(1);
+    }
+
+    @Test
     void workspaceCreateRejectsDuplicateWorkspaceAliasInSameApplication() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         ManagedWorkspaceApplicationService service = service(
@@ -3440,6 +3541,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private final List<UserSshKey> sshKeys;
         private final ApplicationWorkspace workspace;
         private final List<ApplicationWorkspace> savedWorkspaces = new ArrayList<>();
+        private final List<ApplicationWorkspaceId> deletedWorkspaceIds = new ArrayList<>();
         private ApplicationWorkspace updatedWorkspace;
 
         private FakeConfigurationRepository(boolean member) {
@@ -3525,7 +3627,10 @@ class ManagedWorkspaceApplicationServiceTest {
             updatedWorkspace = workspace;
             return workspace;
         }
-        @Override public void deleteWorkspace(ApplicationWorkspaceId workspaceId) {}
+        @Override public void deleteWorkspace(ApplicationWorkspaceId workspaceId) {
+            deletedWorkspaceIds.add(workspaceId);
+            savedWorkspaces.removeIf(item -> item.workspaceId().equals(workspaceId));
+        }
         @Override public List<UserSshKey> findSshKeys(UserId userId) { return sshKeys; }
         @Override public Optional<UserSshKey> findSshKey(UserId userId, SshKeyId sshKeyId) { return Optional.empty(); }
         @Override public UserSshKey saveSshKey(UserSshKey sshKey) { return sshKey; }
@@ -3537,6 +3642,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private final List<ApplicationWorkspaceVersionReplica> replicas = new ArrayList<>();
         private final List<PersonalWorkspace> personals = new ArrayList<>();
         private final List<WorkspaceSyncRecord> syncRecords = new ArrayList<>();
+        private boolean failVersionReplicaSave;
         private UserWorkspacePreference globalPreference;
         private UserWorkspacePreference applicationPreference;
         private UserWorkspaceBranchPreference branchPreference;
@@ -3560,6 +3666,9 @@ class ManagedWorkspaceApplicationServiceTest {
             return updated;
         }
         @Override public ApplicationWorkspaceVersionReplica saveVersionReplica(ApplicationWorkspaceVersionReplica replica) {
+            if (failVersionReplicaSave) {
+                throw new IllegalStateException("replica save failed");
+            }
             replicas.removeIf(item -> item.versionId().equals(replica.versionId()) && item.linuxServerId().equals(replica.linuxServerId()));
             replicas.add(replica);
             return replica;

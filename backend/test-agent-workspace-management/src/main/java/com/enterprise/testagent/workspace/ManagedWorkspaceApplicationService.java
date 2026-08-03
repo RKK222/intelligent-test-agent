@@ -502,37 +502,24 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             CodeRepository repository = existingRepository(new CodeRepositoryId(repositoryId));
             requireRepositoryEnglishName(repository);
             ensureRepositoryLinked(application.appId(), repository.repositoryId());
-            String normalizedBranch = requireText(branch, "分支不能为空", "branch");
-            String normalizedPath = normalizeDirectoryPath(directoryPath);
-            String normalizedVersion = repository.standard()
-                    ? versionFromStandardBranch(normalizedBranch)
-                    : normalizeNonStandardWorkspaceCreateVersion(version);
-            validateWorkspaceCreateRules(application, repository, normalizedBranch, normalizedPath);
-            boolean createMissingDirectory = Boolean.TRUE.equals(directoryNew);
-
-            progress.step(WorkspaceCreateOperationStep.SAVING_TEMPLATE);
-            ApplicationWorkspace template = saveOrReuseWorkspaceTemplate(
-                    application.appId(),
-                    repository.repositoryId(),
-                    normalizedBranch,
-                    normalizedPath,
-                    workspaceName);
-
-            progress.step(WorkspaceCreateOperationStep.RESOLVING_VERSION);
-            ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse initialVersion = createVersionFromTemplate(
+            WorkspaceInitialVersionCreation creation = createWorkspaceTemplateWithInitialVersion(
                     application,
-                    template,
                     repository,
-                    normalizedVersion,
-                    normalizedBranch,
+                    branch,
+                    directoryPath,
+                    workspaceName,
+                    directoryNew,
+                    version,
                     userId,
                     targetLinuxServerId,
                     traceId,
-                    configurationRepository.isActiveMember(application.appId(), userId),
-                    createMissingDirectory,
                     progress);
-            progress.succeeded(template.workspaceId(), new ApplicationWorkspaceVersionId(initialVersion.versionId()));
-            return ManagedWorkspaceResponses.ApplicationWorkspaceCreateResponse.from(template, initialVersion);
+            progress.succeeded(
+                    creation.template().workspaceId(),
+                    new ApplicationWorkspaceVersionId(creation.initialVersion().versionId()));
+            return ManagedWorkspaceResponses.ApplicationWorkspaceCreateResponse.from(
+                    creation.template(),
+                    creation.initialVersion());
         } catch (PlatformException exception) {
             progress.failed(exception.errorCode().name(), exception.getMessage());
             throw exception;
@@ -621,7 +608,52 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             WorkspaceCreateProgress progress) {
         LOGGER.info("Starting async workspace create, operationId={}", normalizedOperationId);
         try {
-            // 校验并规范化参数
+            WorkspaceInitialVersionCreation creation = createWorkspaceTemplateWithInitialVersion(
+                    application,
+                    repository,
+                    branch,
+                    directoryPath,
+                    workspaceName,
+                    directoryNew,
+                    version,
+                    userId,
+                    targetLinuxServerId,
+                    traceId,
+                    progress);
+
+            LOGGER.info("Workspace create completed, operationId={}, workspaceId={}, versionId={}",
+                    normalizedOperationId, creation.template().workspaceId().value(), creation.initialVersion().versionId());
+            progress.succeeded(
+                    creation.template().workspaceId(),
+                    new ApplicationWorkspaceVersionId(creation.initialVersion().versionId()));
+            LOGGER.info("Workspace create succeeded marked, operationId={}", normalizedOperationId);
+        } catch (PlatformException exception) {
+            progress.failed(exception.errorCode().name(), exception.getMessage());
+            LOGGER.warn("Workspace create async failed, operationId={}, error={}", normalizedOperationId, exception.getMessage());
+        } catch (Exception exception) {
+            progress.failed(ErrorCode.INTERNAL_ERROR.name(), "创建应用工作空间失败");
+            LOGGER.error("Workspace create async failed unexpectedly, operationId={}", normalizedOperationId, exception);
+        }
+    }
+
+    /**
+     * 保存工作空间模板并创建初始版本；仅补偿删除本次新插入且仍无版本的模板。
+     * 既有模板可能承载历史配置或被并发请求复用，失败时必须保留，交由后续重试继续修复。
+     */
+    private WorkspaceInitialVersionCreation createWorkspaceTemplateWithInitialVersion(
+            ApplicationDefinition application,
+            CodeRepository repository,
+            String branch,
+            String directoryPath,
+            String workspaceName,
+            Boolean directoryNew,
+            String version,
+            UserId userId,
+            String targetLinuxServerId,
+            String traceId,
+            WorkspaceCreateProgress progress) {
+        WorkspaceTemplateResolution resolution = null;
+        try {
             String normalizedBranch = requireText(branch, "分支不能为空", "branch");
             String normalizedPath = normalizeDirectoryPath(directoryPath);
             String normalizedVersion = repository.standard()
@@ -631,7 +663,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             boolean createMissingDirectory = Boolean.TRUE.equals(directoryNew);
 
             progress.step(WorkspaceCreateOperationStep.SAVING_TEMPLATE);
-            ApplicationWorkspace template = saveOrReuseWorkspaceTemplate(
+            resolution = saveOrReuseWorkspaceTemplate(
                     application.appId(),
                     repository.repositoryId(),
                     normalizedBranch,
@@ -641,7 +673,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             progress.step(WorkspaceCreateOperationStep.RESOLVING_VERSION);
             ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse initialVersion = createVersionFromTemplate(
                     application,
-                    template,
+                    resolution.template(),
                     repository,
                     normalizedVersion,
                     normalizedBranch,
@@ -651,17 +683,44 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     configurationRepository.isActiveMember(application.appId(), userId),
                     createMissingDirectory,
                     progress);
+            return new WorkspaceInitialVersionCreation(resolution.template(), initialVersion);
+        } catch (RuntimeException exception) {
+            compensateFailedNewWorkspaceTemplate(resolution, traceId, exception);
+            throw exception;
+        }
+    }
 
-            LOGGER.info("Workspace create completed, operationId={}, workspaceId={}, versionId={}",
-                    normalizedOperationId, template.workspaceId().value(), initialVersion.versionId());
-            progress.succeeded(template.workspaceId(), new ApplicationWorkspaceVersionId(initialVersion.versionId()));
-            LOGGER.info("Workspace create succeeded marked, operationId={}", normalizedOperationId);
-        } catch (PlatformException exception) {
-            progress.failed(exception.errorCode().name(), exception.getMessage());
-            LOGGER.warn("Workspace create async failed, operationId={}, error={}", normalizedOperationId, exception.getMessage());
-        } catch (Exception exception) {
-            progress.failed(ErrorCode.INTERNAL_ERROR.name(), "创建应用工作空间失败");
-            LOGGER.error("Workspace create async failed unexpectedly, operationId={}", normalizedOperationId, exception);
+    /**
+     * 初始版本失败时清理本次新建的孤立模板。补偿失败只追加到原异常并记录日志，不能覆盖真实业务错误。
+     */
+    private void compensateFailedNewWorkspaceTemplate(
+            WorkspaceTemplateResolution resolution,
+            String traceId,
+            RuntimeException originalFailure) {
+        if (resolution == null || !resolution.created()) {
+            return;
+        }
+        ApplicationWorkspaceId workspaceId = resolution.template().workspaceId();
+        try {
+            if (!managedWorkspaceRepository.findVersions(workspaceId).isEmpty()) {
+                LOGGER.warn(
+                        "Workspace create failed after version persistence; retaining template, workspaceId={}, traceId={}",
+                        workspaceId.value(),
+                        traceId);
+                return;
+            }
+            configurationRepository.deleteWorkspace(workspaceId);
+            LOGGER.info(
+                    "Compensated failed workspace create by deleting new template, workspaceId={}, traceId={}",
+                    workspaceId.value(),
+                    traceId);
+        } catch (RuntimeException compensationFailure) {
+            originalFailure.addSuppressed(compensationFailure);
+            LOGGER.error(
+                    "Failed to compensate new workspace template, workspaceId={}, traceId={}",
+                    workspaceId.value(),
+                    traceId,
+                    compensationFailure);
         }
     }
 
@@ -4193,7 +4252,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         }
     }
 
-    private ApplicationWorkspace saveOrReuseWorkspaceTemplate(
+    private WorkspaceTemplateResolution saveOrReuseWorkspaceTemplate(
             ApplicationId appId,
             CodeRepositoryId repositoryId,
             String branch,
@@ -4215,13 +4274,14 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 // 位置唯一约束决定这里是恢复已有模板；保存成功不能继续保留旧名称或停用状态。
                 updated = updated.withEnabled(true, now);
             }
-            return updated.equals(current)
+            ApplicationWorkspace resolved = updated.equals(current)
                     ? current
                     : configurationRepository.updateWorkspace(updated);
+            return new WorkspaceTemplateResolution(resolved, false);
         }
         ensureWorkspaceNameUnique(appId, resolvedName, null);
         Instant now = Instant.now();
-        return configurationRepository.saveWorkspace(new ApplicationWorkspace(
+        ApplicationWorkspace created = configurationRepository.saveWorkspace(new ApplicationWorkspace(
                 new ApplicationWorkspaceId(RuntimeIdGenerator.applicationWorkspaceId()),
                 appId,
                 repositoryId,
@@ -4230,6 +4290,15 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 resolvedName,
                 now,
                 now));
+        return new WorkspaceTemplateResolution(created, true);
+    }
+
+    private record WorkspaceTemplateResolution(ApplicationWorkspace template, boolean created) {
+    }
+
+    private record WorkspaceInitialVersionCreation(
+            ApplicationWorkspace template,
+            ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse initialVersion) {
     }
 
     private String defaultWorkspaceName(String directoryPath) {

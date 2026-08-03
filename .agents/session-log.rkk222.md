@@ -4458,3 +4458,25 @@
 - 公共 Agent 仓库 `master` 已推送 `8b81dc4`，独立 UI 仓库 `wr` 已推送 `9248294b`；当前仓库不包含独立 UI 项目源码。
 - 新链路已完成真实对话、动态配置、单次提交、终态失败原因和可点击报告的端到端验证；本次百度案例本身未通过，原因在独立 UI 平台的小模型执行/判定质量，不能表述为正向案例成功。
 - 新增一个内部 HTTP 配置接口、一个列表 query 参数和两条 Flyway migration；不新增 RunEvent/SSE、关系型业务 SQL、generated SDK、OpenCode 源码或凭据。企业发布前仍需对照目标库 `flyway_schema_history` 做完整基线升级验证。
+
+## 2026-08-03 - 修复应用工作空间初始版本失败遗留模板
+
+### Why
+
+- 设置页创建应用工作空间会先保存 `application_workspaces`，再准备 Git 目录、运行态 Workspace 和初始版本；后续失败只记录 operation，历史上会留下“模板存在但没有版本”的全库脏数据。
+
+### What
+
+- 同步和异步入口复用同一创建程序；仅当模板由本次请求新插入、初始版本创建失败且数据库复核仍无版本时补偿删除。既有模板或版本已经落库时保留，避免误删历史配置、重试入口或并发成功结果。
+- 新增 PostgreSQL 运维脚本全库审计和受控清理历史孤立模板，默认只读；执行删除必须停后端、备份、确认候选数量，并排除近期运行任务、个人工作区和 Hub 引用。脚本不伪造版本，也不自动删除 operation、Git 目录或运行态 Workspace。
+- 同步 workspace 模块 README、HTTP API、数据库和测试设计文档；没有新增 Flyway、数据库结构、DTO、事件或前端协议。
+
+### How
+
+- JDK 25 下 `ManagedWorkspaceApplicationServiceTest` 79/79 通过，覆盖新模板无版本删除、既有模板保留、版本已持久化后失败保留；全库 SQL 在 `.env.test` PostgreSQL 只读模式执行成功且未执行 DELETE。
+- 当前工作树的并行 `PublicAgentConfigRolloutMapper.xml` 一度存在未完成 XML，真实启动改用干净 HEAD 加本次服务补丁隔离打包；20 模块构建成功后以 `.env.test`/`test` 恢复三服务，backend health/readiness 为 `UP`、前端和 CORS 正常、manager 最终 `HEALTHY`。
+
+### Result
+
+- 新失败不再产生只有模板没有版本的记录，历史数据可按全库 SQL 在维护窗口审计和清理；F-APIP 同类 `PREPARING_REPOSITORY / 应用工作区目录不存在` 记录属于该补偿范围。
+- 未修改 `.env*`、OpenCode 源码或 generated SDK；运维 SQL 是显式人工修复脚本，不是运行时 JDBC SQL 或自动业务数据 migration。

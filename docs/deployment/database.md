@@ -487,6 +487,7 @@ Java 后端启动时会把稳定服务器身份写入 `SYS_DATA_ROOT_DIR/.server
 - 缺少英文名的历史代码库不能创建新的应用版本工作区，后端返回 `VALIDATION_ERROR`，避免新路径规则下目录冲突。
 - 通用参数读取按 `当前平台 -> all` 顺序选择，命中即用；未命中或值为空时抛 `INTERNAL_ERROR` 业务异常（`通用参数未配置：<参数英文名>`），强制运维在 `common_parameters` 表中补配。公共 Agent Git 地址参数例外：始终读取 `OPENCODE_PUBLIC_AGENT_GIT_URL`，外部部署直接作为完整 URL 使用，内部部署按 `host[:port]/path` 片段解释；参数缺失或为 `UNCONFIGURED` 时视为公共级功能未启用，不抛异常。
 - `workspace_create_operations` 只服务 HTTP 轮询进度，不写入 `run_events`，也不参与 RunEvent SSE 续传。
+- 设置页创建流程先保存模板、后执行 Git 与版本持久化；本次请求新插入的模板在后续失败且仍无版本时由业务服务补偿删除，既有模板和已经形成版本的模板保留。历史失败遗留可用 `tools/cleanup-orphan-application-workspaces.sql` 全库审计并在停机、备份、候选数量二次确认后受控清理。该脚本默认只读，排除近期运行任务、个人工作区和 Hub 资产/引用，保留失败 operation、物理 Git 目录及运行态 Workspace；它是显式运维修复，不作为 Flyway migration 自动删除业务数据，也禁止用 SQL 伪造版本、运行态 Workspace 或服务器副本。
 
 ## V20260702153000 版本库类型字典与字段
 

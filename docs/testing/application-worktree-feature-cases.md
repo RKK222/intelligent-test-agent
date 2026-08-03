@@ -162,7 +162,7 @@ OPENCODE_CONFIG_DIR / manager configPath
 
 兼容接口 `POST /personal-workspaces/{id}/sync-from-application` 不再逐文件复制，也不接受 `force` 覆盖个人内容；`files: []` 是“合并整个固定 feature commit”的合法请求，旧客户端传非空路径时只校验格式，不以路径缩小合并范围。
 
-同一 `appId + repositoryId + version + branch` 的多个应用工作空间版本共用物理 feature 仓库和目标提交；测试需覆盖历史 target 不一致自动收敛、新增目录 `.gitkeep` 提交并 push、历史个人记录指向仓库根时修复到模板子目录，以及子目录仍缺失时拒绝回退到仓库根。设置页还需覆盖快速切换两个版本库后先发请求迟到，分支下拉只保留最后所选版本库的响应。
+同一 `appId + repositoryId + version + branch` 的多个应用工作空间版本共用物理 feature 仓库和目标提交；测试需覆盖历史 target 不一致自动收敛、新增目录 `.gitkeep` 提交并 push、历史个人记录指向仓库根时修复到模板子目录，以及子目录仍缺失时拒绝回退到仓库根。设置页初始版本失败补偿必须覆盖三种边界：本次新模板且无版本时删除、既有模板失败时保留、版本已经持久化后再失败时保留；还需覆盖快速切换两个版本库后先发请求迟到，分支下拉只保留最后所选版本库的响应。
 
 ## 5. 可重复测试数据
 
