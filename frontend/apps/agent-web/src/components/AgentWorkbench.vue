@@ -255,6 +255,7 @@ import {
   platformSessionTitleFromSynchronizedEventPayload,
   sessionTitleEventMatchesCurrentSession,
   sessionTitleFromFirstMessage,
+  scheduledRunTiming,
   shouldResetAfterNightTaskClosure,
   shouldFailExhaustedRetry,
   shouldRefreshRuntimeCatalogAfterMessageGate,
@@ -764,14 +765,15 @@ const currentRawOutputEntries = computed(() => {
   const sessionId = session.value?.sessionId;
   return sessionId ? rawEntriesBySessionId.value[sessionId] ?? [] : [];
 });
-// 任务消耗展示：duration 取 chatStartedAt 实时计算；tokens 从助手消息的 step-finish part
-// 累计（opencode 每轮 step 结束会上报 tokens.total）。Run 结束后保留最后值继续展示。Run 切换时清零。
+// 任务消耗展示：普通任务沿用页面内 chatStartedAt；晚间任务从后端 Run 时间戳恢复，确保页面外执行后仍可展示。
+// tokens 从助手消息的 step-finish part 累计（opencode 每轮 step 结束会上报 tokens.total）。
 const chatStartedAt = ref<number | null>(null);
 const accumulatedTokens = ref(0);
 const totalDurationMs = ref(0);
 let lastDuration: string | undefined;
 let lastTokens = 0;
 const nowTick = ref(Date.now());
+const scheduledRunTimingHydrationRunIds = new Set<string>();
 const settingsOpen = ref(false);
 const firstLoginGuideSettingsMenu = ref<"appWorkspace" | "repository" | "personal">("appWorkspace");
 const firstLoginGuideSettingsTab = ref<"members" | "repositories" | "workspaces" | undefined>();
@@ -1409,7 +1411,9 @@ function adoptRuntimeStateForCurrentSession(summary: SessionRuntimeStateSummary 
       workspaceId: currentSession.workspaceId,
       status: active.runStatus,
       createdAt: existing?.createdAt ?? active.updatedAt,
-      updatedAt: active.updatedAt
+      updatedAt: active.updatedAt,
+      sourceType: existing?.sourceType,
+      sourceRefId: existing?.sourceRefId
     };
     run.value = adopted;
     markConversationRunAdopted(adopted.runId);
@@ -2590,6 +2594,9 @@ watch(liveTrack, (on) => {
 // 新 Run 开始时清空已跟随记录。
 watch(run, (r) => {
   rememberRunSession(r);
+  if (!restoreScheduledRunTiming(r) && shouldHydrateScheduledRunTiming(r)) {
+    hydrateScheduledRunTiming(r);
+  }
   if (r && ["RUNNING", "CANCELLING"].includes(r.status)) {
     liveFollowedParts.value = new Set();
   }
@@ -3325,6 +3332,61 @@ function formatDurationMs(ms: number): string {
   const minutes = Math.floor(totalSec / 60);
   const remain = totalSec % 60;
   return minutes > 0 ? `${minutes}m ${remain}s` : `${totalSec}s`;
+}
+
+/** 使用后端 Run 的权威时间恢复晚间任务计时；普通对话仍保留原有累计计时语义。 */
+function restoreScheduledRunTiming(value: Run | null | undefined): boolean {
+  const timing = scheduledRunTiming(value);
+  if (!value || !timing) {
+    return false;
+  }
+  scheduledRunTimingHydrationRunIds.add(value.runId);
+  nowTick.value = Date.now();
+  if (timing.completedDurationMs !== undefined) {
+    chatStartedAt.value = null;
+    totalDurationMs.value = timing.completedDurationMs;
+    lastDuration = formatDurationMs(timing.completedDurationMs);
+    return true;
+  }
+  chatStartedAt.value = timing.startedAtMs;
+  totalDurationMs.value = 0;
+  lastDuration = undefined;
+  return true;
+}
+
+/** runtime-state 只有摘要；首次晚间 Run 需补读现有 Run 详情，取得真实 createdAt/sourceType。 */
+function shouldHydrateScheduledRunTiming(value: Run | null | undefined): value is Run {
+  if (
+    !value
+    || value.sourceType === "SCHEDULED_TASK"
+    || session.value?.sourceType !== "SCHEDULED_TASK"
+    || historySwitchingSessionId.value === session.value.sessionId
+    || scheduledRunTimingHydrationRunIds.has(value.runId)
+  ) {
+    return false;
+  }
+  const owningUserMessage = [...chatState.value.messages]
+    .reverse()
+    .find((message): message is Extract<AgentMessage, { role: "user" }> => (
+      message.role === "user" && message.runId === value.runId
+    ));
+  const hasAnyUserMessage = chatState.value.messages.some((message) => message.role === "user");
+  return owningUserMessage?.sourceType === "SCHEDULED_TASK" || !hasAnyUserMessage;
+}
+
+function hydrateScheduledRunTiming(value: Run) {
+  const expectedSessionId = value.sessionId;
+  scheduledRunTimingHydrationRunIds.add(value.runId);
+  void api.getRun(value.runId).then((detail) => {
+    if (session.value?.sessionId !== expectedSessionId || run.value?.runId !== detail.runId) {
+      return;
+    }
+    run.value = detail;
+    rememberRunSession(detail);
+  }).catch((error) => {
+    scheduledRunTimingHydrationRunIds.delete(value.runId);
+    console.warn("恢复晚间任务运行时长失败", error);
+  });
 }
 
 // 把 "1s"/"500ms"/"1m 30s" 等字符串解析成毫秒；解析失败返回 0。
@@ -8064,7 +8126,11 @@ function applyRunEventWorkbenchProjection(
       clearRunEventSseFeedback();
     }
     run.value = run.value
-      ? { ...run.value, status: event.type === "run.succeeded" ? "SUCCEEDED" : event.type === "run.failed" ? "FAILED" : "CANCELLED" }
+      ? {
+          ...run.value,
+          status: event.type === "run.succeeded" ? "SUCCEEDED" : event.type === "run.failed" ? "FAILED" : "CANCELLED",
+          updatedAt: event.occurredAt
+        }
       : run.value;
     // Run 完成后刷新所有已展开的目录，确保新增/删除/修改的文件在左侧工作区立即可见。
     setTimeout(() => {
@@ -8072,7 +8138,7 @@ function applyRunEventWorkbenchProjection(
     }, 500);
     // 计算任务消耗统计：duration 由 chatStartedAt 锁定，tokens 仍优先取累计值；
     // 如果后端 payload 直接带上 tokens 字段，则覆盖一次（向后兼容未来后端实现）。
-    if (chatStartedAt.value) {
+    if (!restoreScheduledRunTiming(run.value) && chatStartedAt.value) {
       totalDurationMs.value += Date.now() - chatStartedAt.value;
       lastDuration = formatDurationMs(Date.now() - chatStartedAt.value);
       chatStartedAt.value = null;

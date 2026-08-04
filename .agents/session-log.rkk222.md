@@ -5584,3 +5584,35 @@
 - V9 已在本机共享 XXL MySQL 执行，后续不得修改其字节。企业发布前仍须取得目标环境完整
   `flyway_schema_history` 并核对 V1-V8 checksum/成功状态；未知 checksum、失败记录、版本倒序或分叉必须停发，
   禁止 `repair`、`outOfOrder` 或手工修改历史表。
+
+## 2026-08-04 - 恢复晚间任务运行时长展示
+
+### Why
+
+- “任务消耗”的 Token 可从持久化 `step-finish` part 恢复，但时长只保存在浏览器 `chatStartedAt` 内存中；任务在
+  页面关闭期间执行或切回历史会话后，就只显示 Token、不显示运行时长。
+- Run 时间以 ISO Instant 存储；北京时间与 UTC 相差八小时属于展示换算，直接计算两个 Instant 的差值不会受
+  时区影响。
+
+### What
+
+- 复用现有已鉴权 `backend-api.getRun()` 和 Run `createdAt/updatedAt`，不新增接口：晚间任务运行中从
+  `createdAt` 恢复实时计时，成功、失败或取消后用 `updatedAt - createdAt` 锁定时长。
+- runtime-state 摘要首次接管页面内晚间 Run 时补读一次完整 Run；终态 RunEvent 使用事件 `occurredAt` 更新
+  `updatedAt`。普通手动任务继续沿用原累计计时语义。
+- 单元测试覆盖运行中、终态、手动任务和异常时间顺序；浏览器用例验证历史晚间任务同时显示
+  `12m 34s` 与 `1.2k tokens`，并同步 agent-web README/PACKAGE。
+
+### How
+
+- agent-web typecheck、工具单测 98 项、晚间任务 Playwright Chromium 用例和生产 build 通过；真实 Vite 前端
+  已在 `http://127.0.0.1:4178/` 启动并返回 HTTP 200。
+- 前端全量单测 112 个文件中 111 个通过，共 1792 passed / 1 skipped；唯一失败为既有
+  `AppSourceDialog` 日期敏感夹具，其固定 `expiresAt=2026-08-01` 已早于当前日期 2026-08-04，定向复跑稳定失败，
+  与本次修改文件和晚间任务链路无关。
+
+### Result
+
+- 晚间任务在运行中、刷新/历史切回以及页面关闭期间完成后均可展示运行时长，不再出现只有 Token 的情况。
+- 未修改 API/DTO、RunEvent 类型、数据库/Flyway/SQL、后端、安全、环境配置、generated SDK 或 OpenCode 源码；
+  无新增依赖。全量前端仍保留上述 1 项过期日期夹具风险，本次按最小范围未改动无关测试。

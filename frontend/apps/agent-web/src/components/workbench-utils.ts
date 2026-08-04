@@ -102,6 +102,41 @@ export function shouldResetAfterNightTaskClosure(
     && session.sourceRefId === taskId;
 }
 
+export type ScheduledRunTiming = {
+  startedAtMs: number;
+  completedDurationMs?: number;
+};
+
+/**
+ * 晚间任务可能在页面关闭期间执行，不能依赖浏览器内存里的开始时间。
+ * 这里直接投影后端 Run 的 ISO 时间戳；时间差与 UTC/北京时间的展示时区无关。
+ */
+export function scheduledRunTiming(
+  run: Pick<Run, "sourceType" | "status" | "createdAt" | "updatedAt"> | null | undefined
+): ScheduledRunTiming | null {
+  if (run?.sourceType !== "SCHEDULED_TASK") {
+    return null;
+  }
+  const startedAtMs = Date.parse(run.createdAt);
+  if (!Number.isFinite(startedAtMs)) {
+    return null;
+  }
+  if (["PENDING", "QUEUED", "RUNNING", "CANCELLING"].includes(run.status)) {
+    return { startedAtMs };
+  }
+  if (!["SUCCEEDED", "FAILED", "CANCELLED"].includes(run.status)) {
+    return null;
+  }
+  const completedAtMs = Date.parse(run.updatedAt);
+  if (!Number.isFinite(completedAtMs) || completedAtMs < startedAtMs) {
+    return null;
+  }
+  return {
+    startedAtMs,
+    completedDurationMs: completedAtMs - startedAtMs
+  };
+}
+
 export const workspaceRequirementStageDirectories = ["01-需求", "02-设计", "03-编码", "04-测试"] as const;
 const workspaceRequirementStages = new Set<string>(workspaceRequirementStageDirectories);
 

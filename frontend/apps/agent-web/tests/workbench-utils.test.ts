@@ -39,6 +39,7 @@ import {
   runEventSubscriptionRunId,
   runEventSubscriptionSessionId,
   runtimeCatalogRecoveryAllowed,
+  scheduledRunTiming,
   sessionTitleEventMatchesCurrentSession,
   platformSessionTitleFromSynchronizedEventPayload,
   projectRootInteractionSession,
@@ -169,6 +170,44 @@ describe("shouldResetAfterNightTaskClosure", () => {
       sourceType: "SCHEDULED_TASK",
       sourceRefId: "night_1"
     }, "night_1", 1)).toBe(false);
+  });
+});
+
+describe("scheduledRunTiming", () => {
+  const scheduledRun: Run = {
+    runId: "run_night",
+    sessionId: "ses_night",
+    workspaceId: "wrk_night",
+    status: "RUNNING",
+    sourceType: "SCHEDULED_TASK",
+    createdAt: "2026-07-18T15:00:00Z",
+    updatedAt: "2026-07-18T15:01:00Z"
+  };
+
+  it("restores the authoritative start time for a running scheduled task", () => {
+    expect(scheduledRunTiming(scheduledRun)).toEqual({
+      startedAtMs: Date.parse("2026-07-18T15:00:00Z")
+    });
+  });
+
+  it("computes a completed scheduled duration across ISO timestamps", () => {
+    expect(scheduledRunTiming({
+      ...scheduledRun,
+      status: "SUCCEEDED",
+      updatedAt: "2026-07-18T15:12:34Z"
+    })).toEqual({
+      startedAtMs: Date.parse("2026-07-18T15:00:00Z"),
+      completedDurationMs: 754_000
+    });
+  });
+
+  it("does not override manual timing or accept invalid timestamp order", () => {
+    expect(scheduledRunTiming({ ...scheduledRun, sourceType: "MANUAL" })).toBeNull();
+    expect(scheduledRunTiming({
+      ...scheduledRun,
+      status: "FAILED",
+      updatedAt: "2026-07-18T14:59:59Z"
+    })).toBeNull();
   });
 });
 

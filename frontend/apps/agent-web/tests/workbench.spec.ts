@@ -3448,11 +3448,13 @@ test("a blank conversation schedules a night task and restores it from the pendi
   const nightTaskRequests: Array<Record<string, unknown>> = [];
   const nightTasks: Array<Record<string, unknown>> = [];
   const sessionMessagesBySessionId: Record<string, Array<Record<string, unknown>>> = {};
+  const runsByRunId: Record<string, Record<string, unknown>> = {};
   const backendState = {
     ...runnableWorkspaceSetup(),
     nightTaskRequests,
     nightTasks,
     sessionMessagesBySessionId,
+    runsByRunId,
     activeRun: null as Record<string, unknown> | null,
     runEventsByRunId: { run_night_e2e: [] }
   };
@@ -3501,22 +3503,38 @@ test("a blank conversation schedules a night task and restores it from the pendi
     sourceRefId: dispatchedTask.taskId,
     createdAt: "2026-07-18T13:16:00Z",
     updatedAt: "2026-07-18T13:16:00Z"
+  }, {
+    messageId: "msg_night_e2e_assistant",
+    sessionId: "ses_night_created",
+    runId: "run_night_e2e",
+    role: "ASSISTANT",
+    content: "夜间回归执行完成",
+    parts: [{
+      partId: "part_night_step_finish",
+      type: "step-finish",
+      reason: "stop",
+      tokens: { total: 1_234 }
+    }],
+    createdAt: "2026-07-18T13:28:34Z",
+    updatedAt: "2026-07-18T13:28:34Z"
   }];
-  backendState.activeRun = {
+  runsByRunId.run_night_e2e = {
     runId: "run_night_e2e",
     sessionId: "ses_night_created",
     workspaceId: "wrk_personal_default",
-    status: "RUNNING",
+    status: "SUCCEEDED",
     sourceType: "SCHEDULED_TASK",
     sourceRefId: dispatchedTask.taskId,
     createdAt: "2026-07-18T13:16:00Z",
-    updatedAt: "2026-07-18T13:16:00Z"
+    updatedAt: "2026-07-18T13:28:34Z"
   };
   await page.getByRole("button", { name: "查看对话" }).click();
   await expect(page.getByRole("dialog", { name: "会话列表" })).toBeVisible();
   await expect(page.getByTestId("session-list-night-tasks-tab")).toHaveAttribute("aria-selected", "true");
   await expect(page.locator(".oc-user-message__source-badge")).toContainText("夜间定时执行");
   await expect(page.locator(".oc-user-message__source-badge")).toContainText("21:16");
+  await expect(page.locator(".figma-chat-usage-value")).toContainText("12m 34s");
+  await expect(page.locator(".figma-chat-usage-value")).toContainText("1.2k tokens");
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect(page.getByTestId("current-night-task-card")).toHaveCount(0);
 });
@@ -7507,6 +7525,7 @@ async function mockBackendApi(
     feedbackRequests?: string[];
     runFeedbackQueryRequests?: Array<Record<string, unknown>>;
     historyRun?: Record<string, unknown>;
+    runsByRunId?: Record<string, Record<string, unknown>>;
     historyDiffFiles?: Array<Record<string, unknown>>;
     historyRunGate?: Promise<void>;
     historyRunRequests?: string[];
@@ -8843,6 +8862,17 @@ async function mockBackendApi(
     }
     if (method === "GET" && url.pathname === "/api/internal/agent/opencode/runs/run_history/diff") {
       await route.fulfill(json({ runId: "run_history", files: capture.historyDiffFiles ?? [] }));
+      return;
+    }
+    const runDetailMatch = url.pathname.match(/^\/api\/internal\/agent\/opencode\/runs\/([^/]+)$/);
+    if (method === "GET" && runDetailMatch) {
+      const runId = decodeURIComponent(runDetailMatch[1] ?? "");
+      const detail = capture.runsByRunId?.[runId];
+      if (detail) {
+        await route.fulfill(json(detail));
+      } else {
+        await route.fulfill({ status: 404, ...jsonFailure("RUN_NOT_FOUND", "Run 不存在") });
+      }
       return;
     }
     if (method === "POST" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/side-question\/runs$/.test(url.pathname)) {
