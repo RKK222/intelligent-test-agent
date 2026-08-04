@@ -6669,6 +6669,69 @@ test("workbench does not create default personal workspace while opencode become
   await expect(page.getByText("当前应用尚未切换到可用工作区。")).toBeVisible();
 });
 
+test("version selection prompts for process initialization before creating a personal workspace", async ({ page }) => {
+  const processInitializations: Array<Record<string, unknown>> = [];
+  const gitAccessRequests: string[] = [];
+  const defaultPersonalRequests: string[] = [];
+  await mockBackendApi(page, {
+    processStatus: "NEEDS_INITIALIZATION",
+    processInitializations,
+    gitAccessRequests,
+    defaultPersonalRequests,
+    workspaceTemplates: {
+      app_gcms: [{
+        workspaceId: "awp_main",
+        workspaceName: "F-GCMS 主服务",
+        appId: "app_gcms",
+        repositoryId: "repo_1",
+        defaultBranch: "main",
+        createdAt: "2026-06-24T00:00:00Z",
+        updatedAt: "2026-06-24T00:00:00Z"
+      }]
+    },
+    workspaceVersions: {
+      "app_gcms:awp_main": [{
+        versionId: "awv_2024_01",
+        applicationWorkspaceId: "awp_main",
+        appId: "app_gcms",
+        repositoryId: "repo_1",
+        version: "2024年1月",
+        branch: "feature_testagent_20240101",
+        repoRootPath: "/tmp/test-agent/appworkspace/awp_main/repo_1",
+        workspaceRootPath: "/tmp/test-agent/appworkspace/awp_main/repo_1/F-GCMS/workspace",
+        status: "ACTIVE",
+        createdAt: "2026-06-24T00:00:00Z",
+        updatedAt: "2026-06-24T00:00:00Z"
+      }]
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  const chooseVersion = async () => {
+    await page.locator(".ta-workbench-footer-branch").click();
+    await page.getByRole("menuitem", { name: /F-GCMS 主服务/ }).hover();
+    await page.getByRole("menuitem", { name: /2024年1月/ }).first().click();
+  };
+
+  await chooseVersion();
+  const prompt = page.locator(".el-message-box");
+  await expect(prompt).toBeVisible();
+  await expect(prompt.getByText("请先初始化 TestAgent 进程")).toBeVisible();
+  await expect(prompt).toContainText("切换应用版本前需要先初始化 TestAgent 专属进程");
+  expect(gitAccessRequests).toEqual([]);
+  expect(defaultPersonalRequests).toEqual([]);
+
+  await prompt.getByRole("button", { name: "初始化进程" }).click();
+  await expect.poll(() => processInitializations.length).toBe(1);
+  expect(gitAccessRequests).toEqual([]);
+  expect(defaultPersonalRequests).toEqual([]);
+  await expect(page.getByText("TestAgent 进程可用").first()).toBeVisible();
+
+  await chooseVersion();
+  await expect.poll(() => gitAccessRequests).toEqual(["awv_2024_01"]);
+  await expect.poll(() => defaultPersonalRequests).toEqual(["awv_2024_01"]);
+});
+
 test("workbench accepts the first prompt without requiring new conversation while pet manual help remains available", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   await page.addInitScript(() => {

@@ -1121,7 +1121,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 runtimeWorkspace.status(),
                 runtimeWorkspace.createdAt(),
                 now,
-                runtimeWorkspace.linuxServerId(),
+                serverIdentity.linuxServerId(),
                 traceId), runtimeWorkspace);
         PersonalWorkspace repaired = new PersonalWorkspace(
                 personal.personalWorkspaceId(),
@@ -1147,6 +1147,10 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String expectedBranch,
             Path expectedRepoRoot,
             Path expectedWorkspaceRoot) {
+        // 路径即使碰巧存在，也不能复用其它 Java 节点登记的运行态归属。
+        if (!serverIdentity.linuxServerId().equals(runtimeWorkspace.linuxServerId())) {
+            return false;
+        }
         if (!expectedBranch.equals(personal.branch())) {
             return false;
         }

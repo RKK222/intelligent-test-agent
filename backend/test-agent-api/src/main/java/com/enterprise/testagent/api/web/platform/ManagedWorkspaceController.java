@@ -152,6 +152,8 @@ public class ManagedWorkspaceController {
             @PathVariable String versionId,
             @RequestBody ManagedWorkspaceDtos.CreatePersonalWorkspaceRequest request,
             ServerWebExchange exchange) {
+        // 个人 worktree 必须创建在用户进程所在服务器；未初始化时禁止按入口 Java 本机归属落盘。
+        readyAgentProcess(exchange);
         return ok(exchange, service.createPersonalWorkspace(
                 versionId,
                 request.workspaceName(),
@@ -236,6 +238,8 @@ public class ManagedWorkspaceController {
     public ApiResponse<Object> ensureDefaultPersonalWorkspace(
             @PathVariable String versionId,
             ServerWebExchange exchange) {
+        // 修复已有 default 也可能发生文件落盘，必须与新建路径使用同一 READY 进程守卫。
+        readyAgentProcess(exchange);
         return ok(exchange, service.ensureDefaultPersonalWorkspace(
                 versionId,
                 userId(exchange),
@@ -448,10 +452,7 @@ public class ManagedWorkspaceController {
     }
 
     private String agentLinuxServerId(ServerWebExchange exchange) {
-        UserOpencodeProcessAssignment assignment = processAssignmentService.requireReadyProcess(
-                userId(exchange),
-                "opencode",
-                RuntimeApiSupport.traceId(exchange));
+        UserOpencodeProcessAssignment assignment = readyAgentProcess(exchange);
         if (assignment.linuxServerId() != null) {
             return assignment.linuxServerId();
         }
@@ -460,6 +461,13 @@ public class ManagedWorkspaceController {
         } catch (RuntimeException exception) {
             return null;
         }
+    }
+
+    private UserOpencodeProcessAssignment readyAgentProcess(ServerWebExchange exchange) {
+        return processAssignmentService.requireReadyProcess(
+                userId(exchange),
+                "opencode",
+                RuntimeApiSupport.traceId(exchange));
     }
 
     private ApiResponse<Object> ok(ServerWebExchange exchange, Object data) {

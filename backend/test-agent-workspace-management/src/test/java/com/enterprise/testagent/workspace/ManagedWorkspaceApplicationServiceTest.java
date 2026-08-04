@@ -1153,6 +1153,56 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void ensureDefaultPersonalWorkspaceRepairsRuntimeServerOwnershipAndInvalidatesContext() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(),
+                new UserId("usr_1"),
+                "trace_default");
+        WorkspaceId runtimeId = new WorkspaceId(personal.runtimeWorkspace().workspaceId());
+        Workspace runtime = workspaces.findById(runtimeId).orElseThrow();
+        workspaces.save(new Workspace(
+                runtime.workspaceId(),
+                runtime.name(),
+                runtime.rootPath(),
+                runtime.status(),
+                runtime.createdAt(),
+                runtime.updatedAt(),
+                "10.8.0.22",
+                "trace_wrong_server"));
+        ConversationContextStore contextStore = org.mockito.Mockito.mock(ConversationContextStore.class);
+        ConversationContextWorkspaceMutation mutation =
+                new ConversationContextWorkspaceMutation(runtimeId, "mutation-server-repair");
+        org.mockito.Mockito.when(contextStore.beginWorkspaceMutation(runtimeId)).thenReturn(mutation);
+        service.setConversationContextStore(contextStore);
+
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse repaired = service.ensureDefaultPersonalWorkspace(
+                version.versionId(),
+                new UserId("usr_1"),
+                "trace_repair_server");
+
+        assertThat(repaired.personalWorkspaceId()).isEqualTo(personal.personalWorkspaceId());
+        assertThat(repaired.runtimeWorkspace().linuxServerId()).isEqualTo("127.0.0.1");
+        assertThat(workspaces.findById(runtimeId)).get()
+                .extracting(Workspace::linuxServerId)
+                .isEqualTo("127.0.0.1");
+        org.mockito.Mockito.verify(contextStore).beginWorkspaceMutation(runtimeId);
+        org.mockito.Mockito.verify(contextStore).completeWorkspaceMutation(mutation);
+    }
+
+    @Test
     void ensureDefaultPersonalWorkspaceRejectsMissingConfiguredDirectoryInsteadOfUsingRepoRoot() throws Exception {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();

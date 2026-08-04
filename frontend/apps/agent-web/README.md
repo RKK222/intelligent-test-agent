@@ -125,7 +125,7 @@ Vue 3 + Vite SPA 主应用，组合 Web IDE 工作台、文件树、Monaco 编�
 - 入口 `src/main.ts` 装配 Pinia、`VueQueryPlugin` 和 vue-router；全局样式由 `src/styles/globals.css` 承载。
 
 - `GitChangesPanel` 的应用 Agent 与公共 Agent 未暂存分组均提供“全部暂存”；单文件和批量入口复用同一 index 更新程序，批量操作向对应既有 stage API 一次传入当前作用域全部未暂存路径，并在无权限、冲突或操作进行中禁用。公共 Agent 本地提交成功但远端发布失败时保留页面内待推送文件；页面重开后再读取公共 Diff 的 `publishPending`，即使 Git status 已 clean 也自动切到公共 Agent 并提供“重新推送”，重试不会重复本地提交。
-- 左下角应用工作空间菜单点击具体版本时，先调用平台 Git 只读访问预检；只有当前用户可访问关联版本库才继续创建/修复默认个人 worktree。无版本库权限时弹框展示对应版本库名称和 SCM GMP 地址 `https://scm-gmp.sdc.cs.icbc/icbc/gmp/index.jsp#@`，点击“前往申请”在新窗口打开申请页面；缺少 SSH key 时提示进入个人设置配置，网络或超时仍显示真实切换失败，不伪装为权限不足。
+- 左下角应用工作空间菜单点击具体版本或提交新增版本时，先检查当前用户 TestAgent 专属进程是否 READY；未就绪会弹出确认框说明必须先初始化/启动，用户确认后复用既有进程启动进度弹窗，初始化完成后由用户重新执行原操作，在此之前不发 Git 预检、版本创建或默认个人 worktree 请求。进程就绪后，具体版本继续先调用平台 Git 只读访问预检；只有当前用户可访问关联版本库才创建/修复默认个人 worktree。无版本库权限时弹框展示对应版本库名称和 SCM GMP 地址 `https://scm-gmp.sdc.cs.icbc/icbc/gmp/index.jsp#@`，点击“前往申请”在新窗口打开申请页面；缺少 SSH key 时提示进入个人设置配置，网络或超时仍显示真实切换失败，不伪装为权限不足。
 
 ### Agent / Skill / MCP / Tool Hub
 

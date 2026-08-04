@@ -5202,3 +5202,41 @@
   OpenCode 源码或依赖；未处理无关的 `AppSourceDialog` 测试失败，也未创建分支。
 - Mac 端企业增量包已重新生成，只有前端制品变化，后端 JAR 与昨晚包 SHA 一致；企业现场尚未执行本包部署，
   部署前仍须核对两台后台的组件状态指纹，任一不一致即停止并改用包含对应组件的包。
+
+## 2026-08-04 - 阻断未初始化用户工作空间跨服务器落盘
+
+### Why
+
+- 多 Java 部署中，应用版本创建已经要求当前用户 TestAgent 进程 READY，但个人工作区新建与 default 显式
+  ensure/修复漏了同一守卫；未形成 ACTIVE binding 时请求会留在入口 Java，存在工作区先落到一台服务器、
+  后续进程再按负载分配到另一台服务器的风险。
+- default 修复判断只比较分支与路径，修复运行态记录时还沿用旧 `linuxServerId`；服务器归属不一致但本机路径
+  碰巧存在时可能继续复用错误记录。前端点击版本或提交新增版本也会直接进入创建链路，没有先提示初始化。
+
+### What
+
+- `ManagedWorkspaceController` 的个人工作区新建与 default ensure 在调用业务服务前统一复用
+  `UserOpencodeProcessAssignmentService.requireReadyProcess`；未初始化或进程不健康返回现有
+  `OPENCODE_UNAVAILABLE`，不新增 API 或错误码。
+- default 复用增加当前 `WorkspaceServerIdentity` 与运行态 `linuxServerId` 一致校验；修复时写入当前服务器身份，
+  并复用既有 Workspace mutation gate 失效旧会话上下文。
+- 工作台在选择具体版本或提交新增版本前检查进程 READY；未就绪弹确认框，用户确认后复用既有初始化进度弹窗，
+  初始化完成后重新执行原操作，首次点击不发 Git 预检、版本创建或 default ensure 请求。
+- 同步 API、workspace-management、agent-web README、HTTP API 和安全规范。
+
+### How
+
+- JDK 25 下 `ManagedWorkspaceApplicationServiceTest` 80 项、`ManagedWorkspaceControllerTest` 23 项通过；新增覆盖
+  两个写入口的 READY 守卫、服务器归属修复和上下文失效。
+- agent-web typecheck/lint、生产 build、AI 文档校验通过；Playwright Chromium 新增场景 1 项通过，验证初始化前
+  零 Git/default 请求、确认初始化后必须重新选择才继续。
+- 默认完整启动先按 `.env.test` 执行，因缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 在启动前停止，未修改环境文件；
+  随后使用脚本正式支持的 `--without-workflow` 启动 backend、opencode-manager、frontend，health/readiness 为
+  `UP`、前端 3000 返回 200、CORS 正常，manager 最终健康为 `HEALTHY`。
+
+### Result
+
+- 新用户不能再在未初始化时创建或修复个人工作区；已有 default 记录在显式 ensure 时会以当前绑定服务器为准
+  收敛，因此同一入口不会继续产生“工作空间与 Agent 不在同一服务器”的新错配。
+- 本次未迁移或删除历史用户数据（现场风险用户已由用户处理），未新增/修改 DTO、RunEvent/SSE、数据库/Flyway/
+  SQL、性能策略、环境配置、generated SDK 或 OpenCode 源码；未构建或部署企业离线包，也未创建分支。

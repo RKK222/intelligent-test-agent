@@ -1610,6 +1610,36 @@ function beginInitializeOpencodeProcess() {
   initializeOpencodeProcessMutation.mutate(operationId);
 }
 
+async function confirmProcessInitializationBeforeWorkspaceAction(actionLabel: string): Promise<boolean> {
+  if (opencodeProcessReady.value) {
+    return true;
+  }
+  if (initializeOpencodeProcessMutation.isPending.value || processStartupDialogOpen.value) {
+    feedback.value = {
+      kind: "info",
+      title: "TestAgent 进程正在初始化",
+      description: `初始化完成后请重新${actionLabel}。`
+    };
+    return false;
+  }
+  const startupAction = opencodeProcessStatus.value?.serviceStatus === "NOT_RUNNING" ? "启动" : "初始化";
+  const confirmed = await ElMessageBox.confirm(
+    `${actionLabel}前需要先${startupAction} TestAgent 专属进程。完成后请重新${actionLabel}，是否现在${startupAction}？`,
+    `请先${startupAction} TestAgent 进程`,
+    {
+      type: "info",
+      confirmButtonText: `${startupAction}进程`,
+      cancelButtonText: "取消",
+      autofocus: false
+    }
+  ).then(() => true).catch(() => false);
+  if (!confirmed) {
+    return false;
+  }
+  beginInitializeOpencodeProcess();
+  return false;
+}
+
 // 拆分就绪条件：不同能力依赖不同条件
 // 1. 模型和 Provider：登录后立即加载，不依赖 workspace 和 opencode
 const authReady = computed(() => authStore.isAuthenticated());
@@ -4834,6 +4864,9 @@ async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemp
     feedback.value = { kind: "info", title: "源码快照不能切换应用版本", description: "请先返回应用工作区。" };
     return;
   }
+  if (!await confirmProcessInitializationBeforeWorkspaceAction("切换应用版本")) {
+    return;
+  }
   const selectionAuthority = beginManagedWorkspaceIntent(payload.version.appId ?? selectedAppId.value);
   const selectionIsCurrent = () => appSourceIntentIsCurrent(selectionAuthority);
   try {
@@ -5204,6 +5237,9 @@ async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemp
   const appId = selectedAppId.value;
   if (!appId) {
     feedback.value = { kind: "error", title: "未选择应用", description: "请先选择要新增版本的应用。" };
+    return;
+  }
+  if (!await confirmProcessInitializationBeforeWorkspaceAction("新增应用版本")) {
     return;
   }
   const selectionAuthority = beginManagedWorkspaceIntent(appId);

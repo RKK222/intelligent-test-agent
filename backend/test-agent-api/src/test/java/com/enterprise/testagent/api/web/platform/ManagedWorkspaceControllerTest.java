@@ -7,6 +7,8 @@ import static org.mockito.Mockito.when;
 import com.enterprise.testagent.api.web.common.AuthWebSupport;
 import com.enterprise.testagent.api.web.common.GlobalExceptionHandler;
 import com.enterprise.testagent.api.web.common.TraceIdWebFilter;
+import com.enterprise.testagent.common.error.ErrorCode;
+import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
@@ -101,6 +103,41 @@ class ManagedWorkspaceControllerTest {
                 .expectBody()
                 .jsonPath("$.data.versionId").isEqualTo("awv_123")
                 .jsonPath("$.data.runtimeWorkspace.workspaceId").isEqualTo("wks_123");
+    }
+
+    @Test
+    void personalWorkspaceCreationAndDefaultRepairRequireReadyProcess() {
+        ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
+        UserOpencodeProcessAssignmentService assignmentService = org.mockito.Mockito.mock(
+                UserOpencodeProcessAssignmentService.class);
+        when(assignmentService.requireReadyProcess(USER_ID, "opencode", TRACE_ID))
+                .thenThrow(new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "请先初始化 TestAgent 进程"));
+        WebTestClient client = client(service, assignmentService);
+
+        client.post()
+                .uri("/api/internal/platform/workspace-management/workspace-versions/awv_123/personal-workspaces")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"workspaceName":"custom"}
+                        """)
+                .exchange()
+                .expectStatus().isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE.httpStatus())
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("OPENCODE_UNAVAILABLE")
+                .jsonPath("$.message").isEqualTo("请先初始化 TestAgent 进程");
+
+        client.post()
+                .uri("/api/internal/platform/workspace-management/workspace-versions/awv_123/ensure-default-personal-workspace")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE.httpStatus())
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("OPENCODE_UNAVAILABLE");
+
+        org.mockito.Mockito.verifyNoInteractions(service);
+        org.mockito.Mockito.verify(assignmentService, org.mockito.Mockito.times(2))
+                .requireReadyProcess(USER_ID, "opencode", TRACE_ID);
     }
 
     @Test

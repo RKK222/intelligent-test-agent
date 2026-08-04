@@ -1486,7 +1486,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `POST` | `/workspace-versions/{versionId}/git-pull` | 已停用的版本级拉取兼容入口；返回 `VALIDATION_ERROR`，不会修改共享版本、个人 worktree 或触发广播。 |
 | `GET` | `/workspace-versions/{versionId}/git-access` | 版本选择前以当前用户身份只读探测关联 Git 版本库，不创建或修改本地工作区。 |
 | `GET` | `/workspace-versions/{versionId}/personal-workspaces` | 查询当前用户基于某版本派生的个人工作区。 |
-| `POST` | `/workspace-versions/{versionId}/personal-workspaces` | 基于应用版本工作区创建 git worktree 个人工作区。 |
+| `POST` | `/workspace-versions/{versionId}/personal-workspaces` | 基于应用版本工作区创建 git worktree 个人工作区；要求当前用户 TestAgent 进程 READY。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/git-pull` | 只为当前登录用户拥有的个人 worktree 拉取并合并远端版本；不更新共享版本目标，不影响其他用户，也不提交或推送。 |
 | `GET` | `/recent-workspace` | 查询当前用户全局最近使用且当前仍可见的托管运行态 Workspace；关联应用已撤权、停用或删除时返回 `null`。 |
 | `GET` | `/applications/{appId}/recent-workspace` | 查询当前用户在指定应用下最近使用的托管运行态 Workspace。 |
@@ -1496,7 +1496,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `GET` | `/personal-workspaces/{personalWorkspaceId}/diff` | 查询个人工作区与应用版本工作区目录差异。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/sync-to-application` | 兼容同步入口；只读取个人 `HEAD` 的白名单文件，复用 feature 投影发布，不把未提交工作树内容复制到应用分支。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/sync-from-application` | 兼容入口；校验请求后把当前版本固定 feature commit 原生 merge 到个人 worktree，不再逐文件复制，`force` 不覆盖本地内容。 |
-| `POST` | `/workspace-versions/{versionId}/ensure-default-personal-workspace` | 显式确保默认个人工作区存在：查询 (versionId, userId, workspaceName=default)，存在则复用返回，不存在则后台创建。 |
+| `POST` | `/workspace-versions/{versionId}/ensure-default-personal-workspace` | 显式确保默认个人工作区存在：要求当前用户 TestAgent 进程 READY，存在且同服务器时复用，否则在进程服务器创建或修复。 |
 | `GET` | `/workspaces/{workspaceId}/git-diff` | 基于本地 Git（不依赖 opencode）获取应用版本工作区或个人 worktree 的变更文件列表，并返回 feature merge 状态；Git unmerged 状态会返回 `status=conflict`。 |
 | `POST` | `/workspaces/{workspaceId}/git-discard` | 丢弃当前应用版本工作区或个人 worktree 中指定工作区相对路径的本地 Git 改动；已跟踪文件执行 restore，新增/未跟踪文件定点 clean；`.opencode/**` 要求 `APP_ADMIN`。 |
 | `POST` | `/workspaces/{workspaceId}/git-stage` | 把当前应用版本工作区或个人 worktree 中指定的非冲突文件定点加入真实 Git index；`.opencode/**` 要求 `APP_ADMIN`。 |
@@ -1694,11 +1694,13 @@ Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有�
 
 `POST /workspace-versions/{versionId}/ensure-default-personal-workspace` 无请求体。后端逻辑：
 
+前置条件：请求先按当前用户 ACTIVE binding 路由到对应 Java，并由 Controller 调用 `requireReadyProcess` 做强健康校验。未初始化、binding 非 ACTIVE、进程缺失或健康失败时统一返回 `OPENCODE_UNAVAILABLE`，不会创建/修复个人 worktree，也不会写入个人工作区或运行态 Workspace。`POST /workspace-versions/{versionId}/personal-workspaces` 使用同一前置条件。
+
 1. 先查询 `(versionId, userId, workspaceName=default)` 是否已有个人工作区记录。
-2. 存在：先校验记录里的运行态目录、仓库根和分支是否仍是可用 Git worktree；校验通过才复用并返回 `DefaultPersonalWorkspaceResponse`（含 `personalWorkspaceId`、`personalWorkspaceName`、`personalWorkspaceBranch`、`runtimeWorkspace`）。
+2. 存在：先校验记录里的运行态 `linuxServerId` 与当前 Java 稳定服务器身份一致，再校验运行态目录、仓库根和分支是否仍是可用 Git worktree；全部通过才复用并返回 `DefaultPersonalWorkspaceResponse`（含 `personalWorkspaceId`、`personalWorkspaceName`、`personalWorkspaceBranch`、`runtimeWorkspace`）。
 3. 不存在或已有记录的物理 worktree 缺失/不可复用：先按 `ENSURE_LOCAL` 确保当前服务器有 READY 应用版本副本，再后台创建或修复个人工作区（`git worktree add -b {branch}_{userId}_default`）。如果当前服务器没有副本，后端会基于 `OPENCODE_APP_WORKSPACE_ROOT` 创建本机副本；禁止再用旧 `application_workspace_versions` 绝对路径伪造成 READY replica。如果同名个人分支已存在，后端会尝试复用该分支挂载 worktree；如果目标目录已存在且是同一分支的 Git worktree，则接管并补运行态记录；如果同名分支仍登记在旧路径且目标规范路径不存在，后端会先 `git worktree move` 重挂载到规范路径。已有 default 记录但规范物理目录被删除时，显式 ensure 会重新创建该 worktree 并刷新运行态记录。只有目标目录被其他内容占用时返回 `CONFLICT`。
 
-默认个人工作区分支命名规则：`{应用版本分支}_{userId}_default`（与旧规则的 `_{personalWorkspaceId}` 不同）。已有 `workspaceName=default` 的旧个人工作区记录如果 branch/path 不符合新规范，`ensure-default-personal-workspace` 会非破坏式创建或重挂载规范 worktree，并把 `personal_workspaces` 与关联运行态 `workspaces.root_path` 更新为 `personalworktree:` 逻辑路径；旧物理目录不会被自动删除。新建自定义私人空间同样使用 `{应用版本分支}_{userId}_{workspaceName}`。
+默认个人工作区分支命名规则：`{应用版本分支}_{userId}_default`（与旧规则的 `_{personalWorkspaceId}` 不同）。已有 `workspaceName=default` 的旧个人工作区记录如果 branch/path 不符合新规范，或运行态 `linuxServerId` 不是当前绑定服务器，`ensure-default-personal-workspace` 会非破坏式创建或重挂载规范 worktree，并把 `personal_workspaces`、关联运行态 `workspaces.root_path` 和 `workspaces.linux_server_id` 更新为当前服务器的可信值；可信 root/server/status 变化继续通过 Workspace mutation gate 失效旧会话上下文。旧物理目录不会被自动删除。新建自定义私人空间同样使用 `{应用版本分支}_{userId}_{workspaceName}`。
 
 登录和切换应用的默认加载不调用该接口，不会自动创建或修复 default 私人工作区；只有用户显式点击版本、创建新版本或其它明确创建/修复动作才调用该接口。
 
@@ -1845,7 +1847,7 @@ Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有�
 
 - 工作台左下角的"应用工作空间"按钮按当前应用（`selectedAppId`）查询 `GET /applications/{appId}/workspace-templates`，渲染第一级菜单（只显示已启用配置的 `workspaceName`，不显示 `directoryPath` / `branch`）。设置页关闭后会刷新该查询；若被停用的是当前已打开工作空间，不强制退出或清空当前状态，只在后续菜单中隐藏。版本创建、最近使用、运行态切换和会话逻辑保持原有行为。
 - 鼠标 hover 第一级菜单项时按需触发 `GET /applications/{appId}/workspace-templates/{templateId}/versions` 加载该模板下的版本（懒加载，未展开的模板不发请求）。
-- 点击版本时先调用 `GET /workspace-versions/{versionId}/git-access` 做只读权限预检；只有 `accessible=true` 才调用 `POST /workspace-versions/{versionId}/ensure-default-personal-workspace` 确保默认个人工作区存在（复用、接管或创建），再通过 `POST /workspaces/{workspaceId}/recent` 写入最近使用偏好并触发工作台切换。无仓库权限时前端展示对应版本库名称和申请指引，不创建 worktree。创建新版本等其它显式动作仍按其既有创建链路执行。登录/切换应用的自动默认加载只读取已有 default 私人工作区，不创建、不修复；当前用户当前应用没有 recent、recent 不能反查 `versionId`，或该版本没有 `workspaceName=default` 且带运行态 workspaceId 的个人工作区记录时，只选择应用，不自动加载工作区。普通工作区文件树、保存和左侧 Git 变更面板都基于已加载的 default 私人 worktree。
+- 点击版本或提交新增版本时先检查当前用户 TestAgent 专属进程是否 READY；未就绪则弹确认框，确认后复用既有初始化/启动进度弹窗，初始化完成后提示用户重新执行原操作，在此之前不调用 Git 预检、版本创建或 default ensure。进程就绪后，点击版本先调用 `GET /workspace-versions/{versionId}/git-access` 做只读权限预检；只有 `accessible=true` 才调用 `POST /workspace-versions/{versionId}/ensure-default-personal-workspace` 确保默认个人工作区存在（复用、接管或创建），再通过 `POST /workspaces/{workspaceId}/recent` 写入最近使用偏好并触发工作台切换。无仓库权限时前端展示对应版本库名称和申请指引，不创建 worktree。登录/切换应用的自动默认加载只读取已有 default 私人工作区，不创建、不修复；当前用户当前应用没有 recent、recent 不能反查 `versionId`，或该版本没有 `workspaceName=default` 且带运行态 workspaceId 的个人工作区记录时，只选择应用，不自动加载工作区。普通工作区文件树、保存和左侧 Git 变更面板都基于已加载的 default 私人 worktree。
 - 当前版本匹配规则：优先按 `runtimeWorkspace.workspaceId` 精确匹配，其次按 `workspaceRootPath` 匹配 `selectedWorkspace.rootPath`。
 - 第二级菜单（版本列表）底部固定一行「+新增版本」：点击后弹 el-dialog，内嵌 `ElDatePicker`（`type=date`, `format=yyyyMMdd`），标准库直接选日期；非标准库先通过 `GET /repositories/{repoId}/branches` 加载分支列表，用户选择分支后再选日期。提交时调用 `POST /applications/{appId}/workspace-templates/{templateId}/versions`，请求体 `version` 字段为 `yyyyMMdd` 格式，非标准库同时传递 `branch`。成功后失效 `versionsByTemplateId` 缓存并把新建版本切到工作区。
 
