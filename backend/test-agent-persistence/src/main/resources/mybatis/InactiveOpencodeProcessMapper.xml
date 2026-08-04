@@ -25,19 +25,7 @@
         </constructor>
     </resultMap>
 
-    <sql id="LastActivityExpression">
-        greatest(
-            process.started_at,
-            coalesce((
-                select max(run.updated_at)
-                from runs run
-                join sessions session_row on session_row.session_id = run.session_id
-                where coalesce(run.triggered_by_user_id, session_row.created_by_user_id) = process.user_id
-            ), process.started_at)
-        )
-    </sql>
-
-    <sql id="CandidateColumns">
+    <sql id="ProcessColumns">
         process.process_id,
         process.user_id,
         process.linux_server_id,
@@ -53,11 +41,10 @@
         process.health_message,
         process.created_at,
         process.updated_at,
-        process.trace_id,
-        <include refid="LastActivityExpression"/> as last_activity_at
+        process.trace_id
     </sql>
 
-    <sql id="CandidateJoinAndPredicate">
+    <sql id="EligibleProcessJoin">
         from opencode_server_processes process
         join user_opencode_process_bindings binding
           on binding.process_id = process.process_id
@@ -67,20 +54,103 @@
          and binding.agent_id = 'opencode'
          and binding.status = 'ACTIVE'
         where process.status in ('RUNNING', 'UNHEALTHY')
-          and <include refid="LastActivityExpression"/> &lt; #{activityBefore}
+    </sql>
+
+    <!--
+      先收窄本次相关进程，再分别走 runs 用户索引和 sessions 用户索引聚合；避免旧写法为每个候选
+      重复相关扫描 runs，并且只计算一次 last_activity_at。
+    -->
+    <sql id="ActivityCtes">
+        , direct_run_activity as (
+            select eligible.user_id, max(run.updated_at) as last_run_at
+            from eligible_processes eligible
+            join runs run on run.triggered_by_user_id = eligible.user_id
+            group by eligible.user_id
+        ),
+        legacy_run_activity as (
+            select eligible.user_id, max(run.updated_at) as last_run_at
+            from eligible_processes eligible
+            join sessions session_row on session_row.created_by_user_id = eligible.user_id
+            join runs run
+              on run.session_id = session_row.session_id
+             and run.triggered_by_user_id is null
+            group by eligible.user_id
+        ),
+        user_run_activity as (
+            select activity.user_id, max(activity.last_run_at) as last_run_at
+            from (
+                select user_id, last_run_at from direct_run_activity
+                union all
+                select user_id, last_run_at from legacy_run_activity
+            ) activity
+            group by activity.user_id
+        ),
+        candidate_activity as (
+            select eligible.*,
+                   greatest(
+                       eligible.started_at,
+                       coalesce(activity.last_run_at, eligible.started_at)
+                   ) as last_activity_at
+            from eligible_processes eligible
+            left join user_run_activity activity on activity.user_id = eligible.user_id
+        )
+    </sql>
+
+    <sql id="CandidateColumns">
+        candidate.process_id,
+        candidate.user_id,
+        candidate.linux_server_id,
+        candidate.container_id,
+        candidate.port,
+        candidate.pid,
+        candidate.base_url,
+        candidate.status,
+        candidate.session_path,
+        candidate.config_path,
+        candidate.started_at,
+        candidate.last_health_check_at,
+        candidate.health_message,
+        candidate.created_at,
+        candidate.updated_at,
+        candidate.trace_id,
+        candidate.last_activity_at
+    </sql>
+
+    <sql id="InactiveWithoutPendingTaskPredicate">
+        candidate.last_activity_at &lt; #{activityBefore}
+        and not exists (
+            select 1
+            from night_execution_tasks night_task
+            where night_task.owner_user_id = candidate.user_id
+              and night_task.status in ('SCHEDULED', 'DISPATCHING')
+              and night_task.window_end &gt; #{pendingTaskActiveAfter}
+              and night_task.slot_start &lt; #{pendingTaskSlotBefore}
+        )
     </sql>
 
     <select id="findCandidates" resultMap="InactiveProcessRowMap">
+        with eligible_processes as (
+            select <include refid="ProcessColumns"/>
+            <include refid="EligibleProcessJoin"/>
+              and process.linux_server_id = #{linuxServerId}
+        )
+        <include refid="ActivityCtes"/>
         select <include refid="CandidateColumns"/>
-        <include refid="CandidateJoinAndPredicate"/>
-          and process.linux_server_id = #{linuxServerId}
-        order by last_activity_at asc, process.process_id asc
+        from candidate_activity candidate
+        where <include refid="InactiveWithoutPendingTaskPredicate"/>
+        order by candidate.last_activity_at asc, candidate.process_id asc
         limit #{limit}
     </select>
 
     <select id="findCurrentCandidate" resultMap="InactiveProcessRowMap">
+        with eligible_processes as (
+            select <include refid="ProcessColumns"/>
+            <include refid="EligibleProcessJoin"/>
+              and process.process_id = #{processId}
+        )
+        <include refid="ActivityCtes"/>
         select <include refid="CandidateColumns"/>
-        <include refid="CandidateJoinAndPredicate"/>
-          and process.process_id = #{processId}
+        from candidate_activity candidate
+        where <include refid="InactiveWithoutPendingTaskPredicate"/>
     </select>
 </mapper>

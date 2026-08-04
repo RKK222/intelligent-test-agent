@@ -5,6 +5,7 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.opencodeprocess.InactiveOpencodeProcessCandidate;
 import com.enterprise.testagent.domain.opencodeprocess.InactiveOpencodeProcessRepository;
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeServerProcess;
+import com.enterprise.testagent.opencode.runtime.night.NightExecutionWindowCalculator;
 import com.enterprise.testagent.opencode.runtime.session.UserRuntimeDisposeCoordinator;
 import java.time.Clock;
 import java.time.Duration;
@@ -58,9 +59,16 @@ public class InactiveOpencodeProcessCleanupService {
     public Result cleanupCurrentServer(String traceId, BooleanSupplier stopRequested) {
         Objects.requireNonNull(traceId, "traceId must not be null");
         BooleanSupplier shouldStop = stopRequested == null ? () -> false : stopRequested;
-        Instant activityBefore = clock.instant().minus(INACTIVITY_THRESHOLD);
+        Instant now = clock.instant();
+        Instant activityBefore = now.minus(INACTIVITY_THRESHOLD);
+        // 02:00 清理横跨前一晚窗口：窗口未结束的遗留任务和北京时间当天任务都必须保留进程。
+        Instant pendingTaskSlotBefore = now.atZone(NightExecutionWindowCalculator.ZONE)
+                .toLocalDate()
+                .plusDays(1)
+                .atStartOfDay(NightExecutionWindowCalculator.ZONE)
+                .toInstant();
         List<InactiveOpencodeProcessCandidate> candidates = repository.findCandidates(
-                routeResolver.currentLinuxServerId(), activityBefore, SCAN_LIMIT);
+                routeResolver.currentLinuxServerId(), activityBefore, now, pendingTaskSlotBefore, SCAN_LIMIT);
         Counter counter = new Counter();
         for (InactiveOpencodeProcessCandidate candidate : candidates) {
             if (shouldStop.getAsBoolean()) {
@@ -68,7 +76,7 @@ public class InactiveOpencodeProcessCleanupService {
                 break;
             }
             counter.scannedCount++;
-            cleanupCandidate(candidate, activityBefore, traceId, counter);
+            cleanupCandidate(candidate, activityBefore, now, pendingTaskSlotBefore, traceId, counter);
         }
         return counter.result(activityBefore);
     }
@@ -76,13 +84,18 @@ public class InactiveOpencodeProcessCleanupService {
     private void cleanupCandidate(
             InactiveOpencodeProcessCandidate candidate,
             Instant activityBefore,
+            Instant pendingTaskActiveAfter,
+            Instant pendingTaskSlotBefore,
             String traceId,
             Counter counter) {
         OpencodeServerProcess scannedProcess = candidate.process();
         try {
             Outcome outcome = idleCoordinator.withUserIdle(scannedProcess.userId(), traceId, () -> {
                 Optional<InactiveOpencodeProcessCandidate> current = repository.findCurrentCandidate(
-                        scannedProcess.processId(), activityBefore);
+                        scannedProcess.processId(),
+                        activityBefore,
+                        pendingTaskActiveAfter,
+                        pendingTaskSlotBefore);
                 if (current.isEmpty()) {
                     return Outcome.CHANGED;
                 }

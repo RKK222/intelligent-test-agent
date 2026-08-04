@@ -36,8 +36,10 @@ import org.mockito.ArgumentCaptor;
 /** 验证闲置关闭在用户闸门内二次核对，并始终复用公共 tracked stop。 */
 class InactiveOpencodeProcessCleanupServiceTest {
 
-    private static final Instant NOW = Instant.parse("2026-08-04T02:00:00Z");
+    /** 北京时间 2026-08-04 02:00，对齐生产清理 Cron。 */
+    private static final Instant NOW = Instant.parse("2026-08-03T18:00:00Z");
     private static final Instant CUTOFF = NOW.minus(InactiveOpencodeProcessCleanupService.INACTIVITY_THRESHOLD);
+    private static final Instant TASK_SLOT_BEFORE = Instant.parse("2026-08-04T16:00:00Z");
     private static final String TRACE_ID = "trace_inactive_cleanup_01";
 
     private InactiveOpencodeProcessRepository repository;
@@ -69,9 +71,9 @@ class InactiveOpencodeProcessCleanupServiceTest {
     @Test
     void revalidatesInsideIdleGateAndUsesTrackedStop() {
         InactiveOpencodeProcessCandidate candidate = candidate("usr_old", "ocp_old_process_123", 4101);
-        when(repository.findCandidates(new LinuxServerId("server-a"), CUTOFF, 500))
+        when(repository.findCandidates(new LinuxServerId("server-a"), CUTOFF, NOW, TASK_SLOT_BEFORE, 500))
                 .thenReturn(List.of(candidate));
-        when(repository.findCurrentCandidate(candidate.process().processId(), CUTOFF))
+        when(repository.findCurrentCandidate(candidate.process().processId(), CUTOFF, NOW, TASK_SLOT_BEFORE))
                 .thenReturn(Optional.of(candidate));
         when(containerResolver.findExactBoundContainer(
                         candidate.process().linuxServerId(), candidate.process().containerId()))
@@ -89,12 +91,17 @@ class InactiveOpencodeProcessCleanupServiceTest {
         verify(stopService).stopAndVerify(request.capture());
         assertThat(request.getValue().tracked()).isTrue();
         assertThat(request.getValue().processSnapshot()).isEqualTo(candidate.process());
+        verify(repository).findCandidates(
+                new LinuxServerId("server-a"), CUTOFF, NOW, TASK_SLOT_BEFORE, 500);
+        verify(repository).findCurrentCandidate(
+                candidate.process().processId(), CUTOFF, NOW, TASK_SLOT_BEFORE);
     }
 
     @Test
     void skipsBusyUserDefensively() {
         InactiveOpencodeProcessCandidate candidate = candidate("usr_busy", "ocp_busy_process_123", 4102);
-        when(repository.findCandidates(any(), eq(CUTOFF), eq(500))).thenReturn(List.of(candidate));
+        when(repository.findCandidates(any(), eq(CUTOFF), eq(NOW), eq(TASK_SLOT_BEFORE), eq(500)))
+                .thenReturn(List.of(candidate));
         doThrow(new PlatformException(ErrorCode.CONFLICT, "busy"))
                 .when(idleCoordinator).withUserIdle(eq(candidate.process().userId()), eq(TRACE_ID), any());
 
@@ -107,8 +114,10 @@ class InactiveOpencodeProcessCleanupServiceTest {
     @Test
     void skipsWhenNewRunOrBindingChangeRemovesCandidate() {
         InactiveOpencodeProcessCandidate candidate = candidate("usr_changed", "ocp_changed_proc_123", 4103);
-        when(repository.findCandidates(any(), eq(CUTOFF), eq(500))).thenReturn(List.of(candidate));
-        when(repository.findCurrentCandidate(candidate.process().processId(), CUTOFF))
+        when(repository.findCandidates(any(), eq(CUTOFF), eq(NOW), eq(TASK_SLOT_BEFORE), eq(500)))
+                .thenReturn(List.of(candidate));
+        when(repository.findCurrentCandidate(
+                        candidate.process().processId(), CUTOFF, NOW, TASK_SLOT_BEFORE))
                 .thenReturn(Optional.empty());
 
         var result = service.cleanupCurrentServer(TRACE_ID, () -> false);
@@ -123,9 +132,9 @@ class InactiveOpencodeProcessCleanupServiceTest {
         InactiveOpencodeProcessCandidate remote = candidate("usr_remote", "ocp_remote_process_123", 4104);
         InactiveOpencodeProcessCandidate failed = candidate("usr_failed", "ocp_failed_process_123", 4105);
         InactiveOpencodeProcessCandidate stopped = candidate("usr_stopped", "ocp_stopped_again_123", 4106);
-        when(repository.findCandidates(any(), eq(CUTOFF), eq(500)))
+        when(repository.findCandidates(any(), eq(CUTOFF), eq(NOW), eq(TASK_SLOT_BEFORE), eq(500)))
                 .thenReturn(List.of(remote, failed, stopped));
-        when(repository.findCurrentCandidate(any(), eq(CUTOFF)))
+        when(repository.findCurrentCandidate(any(), eq(CUTOFF), eq(NOW), eq(TASK_SLOT_BEFORE)))
                 .thenAnswer(invocation -> {
                     OpencodeProcessId id = invocation.getArgument(0);
                     return List.of(remote, failed, stopped).stream()
@@ -151,7 +160,8 @@ class InactiveOpencodeProcessCleanupServiceTest {
     @Test
     void cooperativeStopEndsBeforeNextCandidate() {
         InactiveOpencodeProcessCandidate candidate = candidate("usr_cancel", "ocp_cancel_process_123", 4107);
-        when(repository.findCandidates(any(), eq(CUTOFF), eq(500))).thenReturn(List.of(candidate));
+        when(repository.findCandidates(any(), eq(CUTOFF), eq(NOW), eq(TASK_SLOT_BEFORE), eq(500)))
+                .thenReturn(List.of(candidate));
         AtomicBoolean stop = new AtomicBoolean(true);
 
         var result = service.cleanupCurrentServer(TRACE_ID, stop::get);

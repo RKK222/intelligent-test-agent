@@ -14,7 +14,7 @@ import java.util.Objects;
 import java.util.Optional;
 import org.springframework.stereotype.Repository;
 
-/** 使用 MyBatis XML 聚合 Run 活跃时间和当前进程绑定。 */
+/** 使用 MyBatis XML 聚合 Run 活跃时间、待执行夜间任务和当前进程绑定。 */
 @Repository
 public class MyBatisInactiveOpencodeProcessRepository implements InactiveOpencodeProcessRepository {
 
@@ -30,10 +30,18 @@ public class MyBatisInactiveOpencodeProcessRepository implements InactiveOpencod
     public List<InactiveOpencodeProcessCandidate> findCandidates(
             LinuxServerId linuxServerId,
             Instant activityBefore,
+            Instant pendingTaskActiveAfter,
+            Instant pendingTaskSlotBefore,
             int limit) {
         Objects.requireNonNull(linuxServerId, "linuxServerId must not be null");
-        validate(activityBefore, limit);
-        return mapper.findCandidates(linuxServerId.value(), activityBefore, limit).stream()
+        validate(activityBefore, pendingTaskActiveAfter, pendingTaskSlotBefore, limit);
+        return mapper.findCandidates(
+                        linuxServerId.value(),
+                        activityBefore,
+                        pendingTaskActiveAfter,
+                        pendingTaskSlotBefore,
+                        limit)
+                .stream()
                 .map(this::toDomain)
                 .toList();
     }
@@ -41,17 +49,36 @@ public class MyBatisInactiveOpencodeProcessRepository implements InactiveOpencod
     @Override
     public Optional<InactiveOpencodeProcessCandidate> findCurrentCandidate(
             OpencodeProcessId processId,
-            Instant activityBefore) {
+            Instant activityBefore,
+            Instant pendingTaskActiveAfter,
+            Instant pendingTaskSlotBefore) {
         Objects.requireNonNull(processId, "processId must not be null");
-        Objects.requireNonNull(activityBefore, "activityBefore must not be null");
-        return Optional.ofNullable(mapper.findCurrentCandidate(processId.value(), activityBefore))
+        validateWindow(activityBefore, pendingTaskActiveAfter, pendingTaskSlotBefore);
+        return Optional.ofNullable(mapper.findCurrentCandidate(
+                        processId.value(), activityBefore, pendingTaskActiveAfter, pendingTaskSlotBefore))
                 .map(this::toDomain);
     }
 
-    private void validate(Instant activityBefore, int limit) {
-        Objects.requireNonNull(activityBefore, "activityBefore must not be null");
+    private void validate(
+            Instant activityBefore,
+            Instant pendingTaskActiveAfter,
+            Instant pendingTaskSlotBefore,
+            int limit) {
+        validateWindow(activityBefore, pendingTaskActiveAfter, pendingTaskSlotBefore);
         if (limit < 1 || limit > MAX_LIMIT) {
             throw new IllegalArgumentException("limit must be between 1 and " + MAX_LIMIT);
+        }
+    }
+
+    private void validateWindow(
+            Instant activityBefore,
+            Instant pendingTaskActiveAfter,
+            Instant pendingTaskSlotBefore) {
+        Objects.requireNonNull(activityBefore, "activityBefore must not be null");
+        Objects.requireNonNull(pendingTaskActiveAfter, "pendingTaskActiveAfter must not be null");
+        Objects.requireNonNull(pendingTaskSlotBefore, "pendingTaskSlotBefore must not be null");
+        if (!pendingTaskActiveAfter.isBefore(pendingTaskSlotBefore)) {
+            throw new IllegalArgumentException("pending task protection window must be ordered");
         }
     }
 

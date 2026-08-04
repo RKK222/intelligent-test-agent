@@ -5555,6 +5555,8 @@
   登录行为不作为使用依据，所有 Run 类型都计入活动时间。
 - 没有 Run 的用户必须以 manager 记录的实际 `started_at` 为回退时间；边界采用严格早于十五天，且清理不能
   中断仍有活动运行的用户。
+- 后续确认北京时间 02:00 清理还必须保护执行窗口仍有效的前一晚遗留任务和当天待投递任务；原候选 SQL 对
+  每个进程在 SELECT/WHERE 重复执行相关 Run 聚合，5 万 Run、100 候选的 PostgreSQL 夹具约需 2.63 秒。
 
 ### What
 
@@ -5565,12 +5567,20 @@
   binding，用户下次使用时仍走既有公共启动程序恢复进程。
 - 新增 XXL V9 不可变迁移和广播型 handler，每天北京时间 02:00 触发，任务 key 为
   `opencode-runtime.inactive-user-process-cleanup`，并同步 runtime、persistence、XXL、数据库、架构和测试文档。
+- 清理服务复用夜间窗口的 `Asia/Shanghai` 时区，查询排除 `window_end > now` 且 `slot_start` 早于北京时间次日
+  00:00 的 `SCHEDULED/DISPATCHING` 任务；扫描后在用户闸门内再次按相同边界复核。过期、次日和终态任务不保护。
+- 候选 MyBatis XML 改为先收窄本服务器进程，再分别按 `runs.triggered_by_user_id` 和
+  `sessions.created_by_user_id + runs.session_id` 现有索引聚合直接归属/legacy Run，只计算一次最近活动时间；
+  待执行任务复用既有 owner/status/slot 索引，没有新增或改写 Flyway。
 
 ### How
 
-- 定向新增测试 14 项通过；相关 13 模块 Reactor 全量回归成功，其中 runtime 770 项、persistence 248 项
-  （18 项按既有外部条件跳过），XXL Job MySQL 8.4 与 Redis Testcontainers 均实际运行；AI 文档门禁和
+- 初版定向新增测试 14 项通过；补充任务保护后，相关 Reactor 全量回归继续成功，其中 runtime 770 项、
+  persistence 252 项（18 项按既有外部条件跳过），覆盖跨夜遗留、当天待投递、过期、次日、终态任务以及扫描后
+  新建任务；XXL Job MySQL 8.4 与 Redis/PostgreSQL Testcontainers 均实际运行，AI 文档门禁和
   `git diff --check` 通过。
+- 真实 PostgreSQL 16 用 5 万 Run、100 候选执行 `EXPLAIN ANALYZE`，新查询为 20.655 ms；Run 侧只出现现有
+  用户/Session 索引扫描，没有原来每候选两次扫描 5 万行的结构。21 模块 `mvn clean package -DskipTests` 成功。
 - 使用 JDK 25、未修改的 `.env.test` 和 `test` profile 完整打包并重启 backend、manager、frontend；默认启动
   因缺少可选 workflow Redis 密码在构建前失败，随后用项目支持的 `--without-workflow` 启动核心服务成功。
 - backend health/readiness、frontend 3000、登录 CORS 和 manager WebSocket 均正常；本地 XXL MySQL 从 V8
@@ -5579,8 +5589,9 @@
 
 ### Result
 
-- 十五天未使用用户进程自动关闭能力已完成真实运行验证；未修改 HTTP API/DTO、对外事件、PostgreSQL 结构、
-  环境文件、generated SDK 或 OpenCode 源码，新增 Redis 广播仅携带空 payload 和内部 traceId。
+- 十五天未使用且当天没有有效待投递任务的用户进程自动关闭能力已完成真实运行验证；保留 ACTIVE binding，
+  用户无需手工恢复数据，下次使用仍由公共启动程序拉起。未修改对话/Run/Session 编排、HTTP API/DTO、对外事件、
+  PostgreSQL 结构、环境文件、generated SDK 或 OpenCode 源码，新增 Redis 广播仅携带空 payload 和内部 traceId。
 - V9 已在本机共享 XXL MySQL 执行，后续不得修改其字节。企业发布前仍须取得目标环境完整
   `flyway_schema_history` 并核对 V1-V8 checksum/成功状态；未知 checksum、失败记录、版本倒序或分叉必须停发，
   禁止 `repair`、`outOfOrder` 或手工修改历史表。

@@ -18,7 +18,7 @@
 - 周期任务由统一 `testAgentScheduledTaskHandler` 进入；`GLOBAL_MUTEX` 复用旧 Redis 锁键，`ALLOW_OVERLAP` 不申请全局锁。
 - 定时任务由 XXL 的 `opencode-runtime.night-execution-dispatch` 每分钟扫描 PostgreSQL，以同时覆盖标准夜间 15 分钟时段和超级管理员精确分钟测试任务，并由业务层按任务固化的 `linuxServerId` 路由到目标 Java；executor 注册仍不携带服务器亲和。
 - `workspace-management.personal-workspace-relocation` 每 30 分钟使用 `GLOBAL_MUTEX` 触发一次低敏广播；全部 Java 随后只按本机稳定 `linuxServerId` 扫描并租约认领源个人 worktree，XXL 的 ROUND 节点不承担文件服务器亲和。
-- `opencode-runtime.inactive-user-process-cleanup` 每天北京时间 02:00 使用 `GLOBAL_MUTEX` 广播；各 Java 只关闭自己持有 manager 连接且超过 15 天没有 Run 活动的用户进程，运行中或状态不确定时跳过。
+- `opencode-runtime.inactive-user-process-cleanup` 每天北京时间 02:00 使用 `GLOBAL_MUTEX` 广播；各 Java 只关闭自己持有 manager 连接、超过 15 天没有 Run 活动且没有执行窗口仍有效的跨夜遗留/北京时间当天待投递任务的用户进程，运行中或状态不确定时跳过。
 - 上游源码不在本模块复制或修改，所有登录禁用、平台 SSO、响应安全头都通过扩展 Bean/Filter 实现。
 - 平台 SSO 登录链路发生运行时异常时，由 `PlatformXxlSsoController` 统一记录不含票据的结构化错误并返回 `platform/xxl-sso-status` 503 页面；该页面向父页面发送 `unavailable`，不得落入上游依赖 `window.parent.$.adminTab` 的通用错误页而产生二次前端异常。
 - 平台嵌入态横向导航样式由本模块以 `/static/platform/xxl-job-embedded-shell.css` 提供；只有同源父页面显式添加 `test-agent-xxl-embedded` 根 class 后生效，直接访问 Admin 仍使用上游原生布局。

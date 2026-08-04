@@ -12,9 +12,13 @@ public interface InactiveOpencodeProcessMapper {
     List<InactiveOpencodeProcessRow> findCandidates(
             @Param("linuxServerId") String linuxServerId,
             @Param("activityBefore") Instant activityBefore,
+            @Param("pendingTaskActiveAfter") Instant pendingTaskActiveAfter,
+            @Param("pendingTaskSlotBefore") Instant pendingTaskSlotBefore,
             @Param("limit") int limit);
 
     InactiveOpencodeProcessRow findCurrentCandidate(
             @Param("processId") String processId,
-            @Param("activityBefore") Instant activityBefore);
+            @Param("activityBefore") Instant activityBefore,
+            @Param("pendingTaskActiveAfter") Instant pendingTaskActiveAfter,
+            @Param("pendingTaskSlotBefore") Instant pendingTaskSlotBefore);
 }

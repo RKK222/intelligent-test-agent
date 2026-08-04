@@ -16,15 +16,19 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mybatis.spring.SqlSessionFactoryBean;
 import org.mybatis.spring.SqlSessionTemplate;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 
-/** 验证闲置进程候选只使用 MyBatis XML，并按全部 Run 来源聚合最近 OpenCode 活动。 */
+/** 验证闲置进程候选只使用 MyBatis XML，并按全部 Run 来源和待投递夜间任务筛选。 */
 class MyBatisInactiveOpencodeProcessRepositoryIntegrationTest {
 
-    private static final Instant NOW = Instant.parse("2026-08-04T02:00:00Z");
+    /** 北京时间 2026-08-04 02:00，对齐生产清理 Cron。 */
+    private static final Instant NOW = Instant.parse("2026-08-03T18:00:00Z");
     private static final Instant CUTOFF = NOW.minusSeconds(15L * 24 * 60 * 60);
+    private static final Instant TASK_SLOT_BEFORE = Instant.parse("2026-08-04T16:00:00Z");
 
     private SingleConnectionDataSource dataSource;
     private JdbcClient jdbc;
@@ -44,6 +48,10 @@ class MyBatisInactiveOpencodeProcessRepositoryIntegrationTest {
                 .target("20260715213000")
                 .load()
                 .migrate();
+        new ResourceDatabasePopulator(new ClassPathResource(
+                "db/migration/V20260718211000__create_night_execution_tasks.sql")).execute(dataSource);
+        new ResourceDatabasePopulator(new ClassPathResource(
+                "db/migration/V20260724143000__add_night_execution_schedule_mode.sql")).execute(dataSource);
         jdbc = JdbcClient.create(dataSource);
         seedTopology();
         repository = new MyBatisInactiveOpencodeProcessRepository(
@@ -68,7 +76,8 @@ class MyBatisInactiveOpencodeProcessRepositoryIntegrationTest {
         seedUserAndProcess("usr_stopped", "ocp_stopped_process_123", "server-a", 4104,
                 "STOPPED", "ACTIVE", CUTOFF.minusSeconds(100));
 
-        var candidates = repository.findCandidates(new LinuxServerId("server-a"), CUTOFF, 50);
+        var candidates = repository.findCandidates(
+                new LinuxServerId("server-a"), CUTOFF, NOW, TASK_SLOT_BEFORE, 50);
 
         assertThat(candidates)
                 .extracting(candidate -> candidate.process().processId().value())
@@ -91,7 +100,64 @@ class MyBatisInactiveOpencodeProcessRepositoryIntegrationTest {
                 "RUNNING", "ACTIVE", CUTOFF.minusSeconds(100));
         seedRun("usr_legacy", "MANUAL", NOW.minusSeconds(50), true);
 
-        assertThat(repository.findCandidates(new LinuxServerId("server-a"), CUTOFF, 50)).isEmpty();
+        assertThat(repository.findCandidates(
+                new LinuxServerId("server-a"), CUTOFF, NOW, TASK_SLOT_BEFORE, 50)).isEmpty();
+    }
+
+    @Test
+    void pendingTasksInTheActiveNightWindowOrCurrentBeijingDayProtectTheProcess() {
+        seedUserAndProcess("usr_previous_night", "ocp_previous_night_123", "server-a", 4115,
+                "RUNNING", "ACTIVE", CUTOFF.minusSeconds(100));
+        seedNightTask(
+                "usr_previous_night",
+                "previous_night",
+                "SCHEDULED",
+                Instant.parse("2026-08-03T15:00:00Z"),
+                Instant.parse("2026-08-03T23:00:00Z"));
+        seedUserAndProcess("usr_today_dispatching", "ocp_today_dispatching_123", "server-a", 4116,
+                "RUNNING", "ACTIVE", CUTOFF.minusSeconds(100));
+        seedNightTask(
+                "usr_today_dispatching",
+                "today_dispatching",
+                "DISPATCHING",
+                Instant.parse("2026-08-04T13:00:00Z"),
+                Instant.parse("2026-08-04T23:00:00Z"));
+
+        seedUserAndProcess("usr_expired_task", "ocp_expired_task_123", "server-a", 4117,
+                "RUNNING", "ACTIVE", CUTOFF.minusSeconds(100));
+        seedNightTask(
+                "usr_expired_task",
+                "expired_task",
+                "SCHEDULED",
+                Instant.parse("2026-08-03T13:00:00Z"),
+                Instant.parse("2026-08-03T15:00:00Z"));
+        seedUserAndProcess("usr_tomorrow_task", "ocp_tomorrow_task_123", "server-a", 4118,
+                "RUNNING", "ACTIVE", CUTOFF.minusSeconds(100));
+        seedNightTask(
+                "usr_tomorrow_task",
+                "tomorrow_task",
+                "SCHEDULED",
+                Instant.parse("2026-08-04T17:00:00Z"),
+                Instant.parse("2026-08-04T23:00:00Z"));
+        seedUserAndProcess("usr_terminal_task", "ocp_terminal_task_123", "server-a", 4119,
+                "RUNNING", "ACTIVE", CUTOFF.minusSeconds(100));
+        seedNightTask(
+                "usr_terminal_task",
+                "terminal_task",
+                "DISPATCHED",
+                Instant.parse("2026-08-04T13:00:00Z"),
+                Instant.parse("2026-08-04T23:00:00Z"));
+        seedUserAndProcess("usr_without_task", "ocp_without_task_123", "server-a", 4120,
+                "RUNNING", "ACTIVE", CUTOFF.minusSeconds(100));
+
+        assertThat(repository.findCandidates(
+                new LinuxServerId("server-a"), CUTOFF, NOW, TASK_SLOT_BEFORE, 50))
+                .extracting(candidate -> candidate.process().userId().value())
+                .containsExactlyInAnyOrder(
+                        "usr_expired_task",
+                        "usr_tomorrow_task",
+                        "usr_terminal_task",
+                        "usr_without_task");
     }
 
     @Test
@@ -99,11 +165,28 @@ class MyBatisInactiveOpencodeProcessRepositoryIntegrationTest {
         seedUserAndProcess("usr_race", "ocp_race_process_123", "server-a", 4121,
                 "RUNNING", "ACTIVE", CUTOFF.minusSeconds(100));
         OpencodeProcessId processId = new OpencodeProcessId("ocp_race_process_123");
-        assertThat(repository.findCurrentCandidate(processId, CUTOFF)).isPresent();
+        assertThat(repository.findCurrentCandidate(processId, CUTOFF, NOW, TASK_SLOT_BEFORE)).isPresent();
 
         seedRun("usr_race", "SIDE_QUESTION", NOW.minusSeconds(1), false);
 
-        assertThat(repository.findCurrentCandidate(processId, CUTOFF)).isEmpty();
+        assertThat(repository.findCurrentCandidate(processId, CUTOFF, NOW, TASK_SLOT_BEFORE)).isEmpty();
+    }
+
+    @Test
+    void revalidationStopsMatchingAfterPendingTaskIsPersisted() {
+        seedUserAndProcess("usr_task_race", "ocp_task_race_123", "server-a", 4122,
+                "RUNNING", "ACTIVE", CUTOFF.minusSeconds(100));
+        OpencodeProcessId processId = new OpencodeProcessId("ocp_task_race_123");
+        assertThat(repository.findCurrentCandidate(processId, CUTOFF, NOW, TASK_SLOT_BEFORE)).isPresent();
+
+        seedNightTask(
+                "usr_task_race",
+                "task_race",
+                "SCHEDULED",
+                Instant.parse("2026-08-03T19:00:00Z"),
+                Instant.parse("2026-08-03T23:00:00Z"));
+
+        assertThat(repository.findCurrentCandidate(processId, CUTOFF, NOW, TASK_SLOT_BEFORE)).isEmpty();
     }
 
     private void seedTopology() {
@@ -217,6 +300,45 @@ class MyBatisInactiveOpencodeProcessRepositoryIntegrationTest {
                 .param("updatedAt", updatedAt)
                 .param("sourceType", sourceType)
                 .param("triggeredBy", legacyOwner ? null : userId)
+                .update();
+    }
+
+    private void seedNightTask(
+            String userId,
+            String suffix,
+            String status,
+            Instant slotStart,
+            Instant windowEnd) {
+        String sessionId = "ses_night_cleanup_" + suffix;
+        jdbc.sql("""
+                insert into sessions(
+                    session_id, workspace_id, title, status, trace_id, created_at, updated_at,
+                    source_type, created_by_user_id)
+                values(:sessionId, 'wrk_inactive_process', 'night cleanup', 'ACTIVE', 'trace_seed',
+                    :now, :now, 'SCHEDULED_TASK', :userId)
+                """)
+                .param("sessionId", sessionId)
+                .param("now", NOW)
+                .param("userId", userId)
+                .update();
+        jdbc.sql("""
+                insert into night_execution_tasks(
+                    task_id, owner_user_id, session_id, workspace_id, client_request_id,
+                    session_title, content_preview, status, slot_start, slot_end, window_end,
+                    target_linux_server_id, trace_id, created_at, updated_at)
+                values(:taskId, :userId, :sessionId, 'wrk_inactive_process', :requestId,
+                    'night cleanup', 'night cleanup', :status, :slotStart, :slotEnd, :windowEnd,
+                    'server-a', 'trace_seed', :now, :now)
+                """)
+                .param("taskId", "net_cleanup_" + suffix)
+                .param("userId", userId)
+                .param("sessionId", sessionId)
+                .param("requestId", "request_cleanup_" + suffix)
+                .param("status", status)
+                .param("slotStart", slotStart)
+                .param("slotEnd", slotStart.plusSeconds(60))
+                .param("windowEnd", windowEnd)
+                .param("now", NOW)
                 .update();
     }
 
