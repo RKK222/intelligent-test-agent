@@ -5511,3 +5511,38 @@
 - 未修改 API 路径/DTO/事件、PostgreSQL migration、环境文件、generated SDK 或 OpenCode 源码；调度频率
   降低后数据库与广播负载相应下降。正式企业执行仍须先取得两套完整 `flyway_schema_history`：PostgreSQL
   应尚无 `20260804123000`，XXL MySQL 应为 V1-V6 成功且尚无 V7/V8；未知 checksum、失败记录或分叉必须停发。
+
+## 2026-08-04 - 新增企业最近进程日志采集器
+
+### Why
+
+- 企业现场需要在没有 `rg`、`jd`/JSON 专用查看工具的 Linux 上采集最近几天进程日志，经中转机回传后定位
+  Java、Docker、OpenCode 子进程和 Nginx 可能存在的缺陷；既有配置上下文采集器明确不采集日志，不能复用为
+  同一用途。
+
+### What
+
+- 新增独立 `deploy/internal/collect-recent-process-logs.sh`，默认采集最近 3 天、可限制为 `1..14` 天；自动或显式
+  按 backend/frontend 角色采集 systemd/journald、Test Agent 容器、受管 OpenCode 技术故障摘录、Nginx 日志和
+  无命令行参数的宿主机快照，不重启服务、不读数据库、不读取 dotenv 或 manager process state。
+- 每来源限制 20000 行、受管进程最多 40 个近期文件、归档最大 64 MiB；敏感字段先于长行截断统一删除，受管
+  日志原文件名以 SHA-256 摘要替代，归档和校验文件固定为 mode `0600`。包内生成诊断关键词计数和少量首条
+  证据，但明确不把关键词命中自动定性为缺陷。
+- 新增可执行夹具 `tools/verify-internal-process-log-collector.sh`，并同步企业部署 README、文档索引、安全规范和
+  AI 文档门禁。
+
+### How
+
+- 复用既有企业采集器的只读、显式敏感材料确认、安全路径、SHA-256、固定输出目录和归档上限做法；脚本只用
+  Bash、`awk`、`grep`、`sed`、`find`、`tar` 等常见工具。夹具覆盖 3 天窗口、14 天上限、显式确认、日志轮转
+  排除、凭据/prompt/query/统一认证号脱敏、禁止配置/state/binary 入包、诊断分类、权限和 SHA 校验。
+- `bash tools/verify-internal-process-log-collector.sh`、`bash tools/verify-ai-docs.sh`、Shell 语法和
+  `git diff --check` 均通过；生成的独立交付脚本 SHA-256 为
+  `af522bcaeaa9c5e430d948752196f8262dbb7882dec02aa708b5dbc949e5bb61`。
+
+### Result
+
+- Mac 侧脚本、测试、文档和可经 U 盘转入 `~/Desktop/mimoagent/0709` 的脚本/SHA 文件对已准备并校验；本次不
+  涉及 API、事件、数据库/Flyway、业务代码、环境配置、generated SDK 或 OpenCode 源码。
+- 当前 Mac 没有中转机 SSH 配置，也没有挂载可写 U 盘，因此尚未实际进入企业中转机、未在 `.4/.114/.2`
+  采集真实日志，暂时不能给出现场 bug 结论；后续取得中转连接或挂载介质后继续传输、逐节点采集和时间线分析。

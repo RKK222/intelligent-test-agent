@@ -443,6 +443,88 @@ unzip -t test-agent-two-backend-complete.zip
 
 `/data/0709/` 只作为离线交付物上传和校验目录；部署脚本仍把运行文件安装到 `/data/testagent/`，两者不要混用。
 
+## 最近进程日志采集
+
+现场需要汇集最近几天的 Java、Docker、OpenCode 子进程和 Nginx 日志时，使用
+[`collect-recent-process-logs.sh`](collect-recent-process-logs.sh)。脚本只依赖 Bash、`awk`、`grep`、
+`sed`、`find`、`tar` 等常见 Linux 工具，不依赖 JSON 专用查看工具或高速搜索工具；默认采集最近 3 天，
+`--days` 只允许 `1..14`。脚本只读现场状态，不读取数据库，不执行 Docker inspect 环境导出，不启动、停止或
+重启任何服务。
+
+脚本不会直接复制原日志：每个来源最多保留末尾 20000 行，受管 OpenCode 进程最多选择最近 40 个日志文件且
+只保留技术故障关键词行；统一认证号所在的原文件名改为 SHA-256 摘要。所有文本先删除已识别的凭据、query、
+私钥块、prompt/message/tool payload、用户 home/workspace 路径片段，再进入最高 `64 MiB` 的 mode `0600`
+归档。脱敏不能证明任意未知格式都不含业务数据，因此脚本仍要求显式传入 `--include-sensitive`，归档文件名包含
+`SENSITIVE`，只能通过受控 U 盘、中转机和企业诊断渠道传递。
+
+外网 Mac 只准备脚本与 SHA-256；企业包已经在现场时无需重跑完整 Mac 打包。脚本和校验文件经 U 盘进入企业网后，
+**企业内部中转机**只在固定目录校验，不创建 `/data/0709`：
+
+```bash
+cd ~/Desktop/mimoagent/0709
+sha256sum -c collect-recent-process-logs.sh.sha256
+chmod 0700 collect-recent-process-logs.sh
+```
+
+预期 SHA 输出 `collect-recent-process-logs.sh: OK`。失败时停止，不向目标节点分发。通过后仍在
+**企业内部中转机**逐台复制：
+
+```bash
+ssh root@122.233.30.4 'install -d -m 0755 /data/0709'
+scp ~/Desktop/mimoagent/0709/collect-recent-process-logs.sh \
+  root@122.233.30.4:/data/0709/collect-recent-process-logs.sh
+
+ssh root@122.233.30.114 'install -d -m 0755 /data/0709'
+scp ~/Desktop/mimoagent/0709/collect-recent-process-logs.sh \
+  root@122.233.30.114:/data/0709/collect-recent-process-logs.sh
+
+ssh root@122.233.30.2 'install -d -m 0755 /data/0709'
+scp ~/Desktop/mimoagent/0709/collect-recent-process-logs.sh \
+  root@122.233.30.2:/data/0709/collect-recent-process-logs.sh
+```
+
+**122.233.30.4 后台**执行：
+
+```bash
+cd /data/0709
+chmod 0700 collect-recent-process-logs.sh
+bash /data/0709/collect-recent-process-logs.sh \
+  --include-sensitive --days 3 --role backend \
+  --node-label 122-233-30-4 --output-dir /data/0709
+```
+
+**122.233.30.114 后台**执行：
+
+```bash
+cd /data/0709
+chmod 0700 collect-recent-process-logs.sh
+bash /data/0709/collect-recent-process-logs.sh \
+  --include-sensitive --days 3 --role backend \
+  --node-label 122-233-30-114 --output-dir /data/0709
+```
+
+**122.233.30.2 前端**执行：
+
+```bash
+cd /data/0709
+chmod 0700 collect-recent-process-logs.sh
+bash /data/0709/collect-recent-process-logs.sh \
+  --include-sensitive --days 3 --role frontend \
+  --node-label 122-233-30-2 --output-dir /data/0709
+```
+
+每台成功时打印本机精确归档名和校验文件名；两者均为 `0600`。先在该节点执行打印出的 SHA 文件校验，看到
+`OK` 后，再从中转机用打印出的**精确文件名**分别 `scp` 回 `~/Desktop/mimoagent/0709/`，不要用宽泛目录复制
+覆盖其它交付物。解包后先看 `DIAGNOSTIC-SUMMARY.txt` 和 `COLLECTION-WARNINGS.txt`，再按时间与 traceId 对齐
+`logs/` 和 `snapshots/`；`RUNTIME_FATAL`、`MIGRATION`、`RESOURCE`、`PORT_BIND`、`DEPENDENCY`、`PROXY`、
+`PROCESS_ASSIGNMENT`、`MANAGER_LINK` 只表示排查优先级，不是自动确认的缺陷结论。
+
+脚本回归验证命令：
+
+```bash
+bash tools/verify-internal-process-log-collector.sh
+```
+
 ## 现场配置轻量敏感采集
 
 需要基于现场真实配置生成逐节点部署脚本时，使用

@@ -39,6 +39,8 @@ required_files=(
   "docs/deployment/database.md"
   "docs/deployment/frontend.md"
   "deploy/internal/FULL-UPGRADE-RUNBOOK.md"
+  "deploy/internal/collect-recent-process-logs.sh"
+  "tools/verify-internal-process-log-collector.sh"
   ".agents/skills/enterprise-offline-deploy/SKILL.md"
   "frontend/README.md"
   "frontend/apps/agent-web/README.md"
@@ -121,6 +123,10 @@ require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" 'V20260728210000__index_i
 require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" '不得启用 Flyway `outOfOrder`'
 require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" '`"userland-proxy": false`'
 require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" '运行容器时不传 `--platform`'
+require_text "deploy/internal/README.md" '## 最近进程日志采集'
+require_text "deploy/internal/README.md" 'bash tools/verify-internal-process-log-collector.sh'
+require_text "deploy/internal/README.md" 'cd ~/Desktop/mimoagent/0709'
+require_text "docs/standards/security.md" '企业进程日志诊断归档必须只读、限时、限文件数、限每来源行数和限归档总大小'
 require_text "deploy/internal/MULTI-BACKEND.md" 'V20260728160800__create_toolbox_click_tracking.sql'
 require_text "deploy/internal/MULTI-BACKEND.md" 'V20260728210000__index_in_flight_app_source_operations.sql'
 require_text "deploy/internal/REDIS-OFFLINE.md" 'permission denied'
