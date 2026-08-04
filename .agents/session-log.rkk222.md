@@ -5378,3 +5378,36 @@
 - 当前企业搬迁通道不能标记为可交付；需先为精确搬迁 WebSocket 路径配置固定内部 Origin（不得放宽全局白名单），
   并补真实过滤链/upgrade 回归后再做双 Java 验收。本次没有修改 API、事件、数据库、环境配置、generated SDK、
   OpenCode 源码或业务代码，也未构建/部署企业离线介质。
+
+## 2026-08-04 - 修复企业搬迁 WebSocket CORS 签发链路
+
+### Why
+
+- 企业显式 CORS 白名单不包含 Java 搬迁客户端固定使用的 `https://test-agent.internal`，全局 `CorsWebFilter`
+  会在 WebSocket handler 消费一次性 ticket 前返回 403，导致跨服务器个人工作区搬迁无法开始。
+
+### What
+
+- 在既有全局 CORS source 中仅为个人工作区搬迁的精确 WebSocket 路径注册专用配置，只允许固定内部 Origin
+  和 GET；普通浏览器白名单、相邻路径和子路径均不继承该例外，企业配置不得加入内部 Origin 或改成 `*`。
+- 将固定 Origin 提升为与精确 HTTP/WebSocket 路径并列的协议常量，gateway、ticket store、过滤器和测试共用，
+  避免签发端、握手端与前置安全过滤器配置漂移。
+- 同步 API、安全、后端部署、多后台部署和 API 模块 README，明确生产配置边界和回归覆盖。
+
+### How
+
+- 先补企业白名单场景回归并确认修改前 4 项中 2 项失败；修复后同组 4 项通过。最终签票、handler、CORS、
+  API 精确豁免和公共转发定向测试合计 23 项通过；`mvn -q -pl test-agent-api -am test` 全量通过，
+  `mvn -q -pl test-agent-app -am -DskipTests package` 成功。
+- 使用 JDK 25 和未修改的 `.env.test` 执行 `./restart-dev-services.sh --profile test --env-file .env.test
+  --without-workflow`，backend readiness 为 `UP`、frontend 3000 返回 200。真实精确路径握手中，内部 Origin
+  返回 101 并由 handler 对故意构造的无效 ticket 返回 `FORBIDDEN`；浏览器 Origin 在 handler 前返回 403。
+- `tools/verify-ai-docs.sh` 与 `git diff --check` 通过。
+
+### Result
+
+- 企业固定内部 Origin 可以到达一次性 ticket 校验，浏览器不能借用该例外；签票仍绑定同一目标 Java、源服务器、
+  60 秒一次消费和共享 `XXL-JOB-ACCESS-TOKEN`，没有放宽全局浏览器 CORS。
+- 本次只修改精确路径的安全配置与复用常量；未修改 API/DTO、事件、数据库/Flyway/SQL、性能参数、环境文件、
+  generated SDK 或 OpenCode 源码。未构建或部署企业离线介质；上线时两台 Java 必须使用同一新 JAR，且本分支
+  既有搬迁 migration 仍须按企业 Flyway 历史/checksum 门禁验证。

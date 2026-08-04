@@ -679,7 +679,7 @@ TEST_AGENT_INTERNAL_PROXY_API_KEY=<internal-proxy-api-key>
 
 配置 `TEST_AGENT_API_TOKEN` 后，`/api/**` 要求 `Authorization: Bearer <token>`；未配置时本地默认放行。
 
-本地和测试 profile 默认允许主前端和 `frontend-opencode` 的 Vite dev/preview/real E2E origin。`guo` profile 同样支持通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 覆盖；使用根目录 `restart-dev-services.sh` 并设置 `TEST_AGENT_FRONTEND_URL=http://<lan-ip>:3000` 时，脚本会把该局域网前端 origin 追加进显式 CORS 白名单。若受控本地/测试环境单独配置 `*`，脚本会原样保留而不追加动态 origin；生产必须设置明确的允许来源，不要使用 `*` 或沿用本地端口白名单。
+本地和测试 profile 默认允许主前端和 `frontend-opencode` 的 Vite dev/preview/real E2E origin。`guo` profile 同样支持通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 覆盖；使用根目录 `restart-dev-services.sh` 并设置 `TEST_AGENT_FRONTEND_URL=http://<lan-ip>:3000` 时，脚本会把该局域网前端 origin 追加进显式 CORS 白名单。若受控本地/测试环境单独配置 `*`，脚本会原样保留而不追加动态 origin；生产必须设置明确的允许来源，不要使用 `*` 或沿用本地端口白名单。个人工作区搬迁的固定内部 Origin 由后端只在精确 WebSocket 路径处理，不属于浏览器来源，禁止追加到生产 `TEST_AGENT_CORS_ALLOWED_ORIGINS`。
 
 ## 测试环境 profile
 

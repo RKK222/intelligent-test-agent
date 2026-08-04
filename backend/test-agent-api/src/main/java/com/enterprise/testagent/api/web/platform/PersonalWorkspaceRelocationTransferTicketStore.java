@@ -15,7 +15,6 @@ import org.springframework.stereotype.Component;
 @Component
 class PersonalWorkspaceRelocationTransferTicketStore {
 
-    static final String INTERNAL_ORIGIN = "https://test-agent.internal";
     static final String TICKET_HEADER = "X-Test-Agent-Relocation-Ticket";
     static final String SOURCE_SERVER_HEADER = "X-Test-Agent-Source-Linux-Server-Id";
     private static final Duration TTL = Duration.ofSeconds(60);
@@ -54,7 +53,7 @@ class PersonalWorkspaceRelocationTransferTicketStore {
         PersonalWorkspaceRelocationTransferTicket ticket = tickets.remove(value);
         if (ticket == null
                 || !ticket.expiresAt().isAfter(clock.instant())
-                || !INTERNAL_ORIGIN.equals(origin)
+                || !PersonalWorkspaceRelocationTransferController.INTERNAL_ORIGIN.equals(origin)
                 || !ticket.sourceLinuxServerId().equals(sourceLinuxServerId)) {
             throw invalidTicket();
         }

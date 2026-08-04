@@ -367,7 +367,7 @@ TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true
 
 ```
 
-`TEST_AGENT_MAX_PREVIEW_BYTES=5242880` 是一次性 UTF-8 读取和可编辑阈值，不会截断完整渐进预览，也不限制分片上传总大小；`TEST_AGENT_UPLOAD_CHUNK_BYTES=262144` 只控制每条上传分片的解码内存与 frame 大小。两台后端必须保持一致。
+`TEST_AGENT_MAX_PREVIEW_BYTES=5242880` 是一次性 UTF-8 读取和可编辑阈值，不会截断完整渐进预览，也不限制分片上传总大小；`TEST_AGENT_UPLOAD_CHUNK_BYTES=262144` 只控制每条上传分片的解码内存与 frame 大小。两台后端必须保持一致。个人工作区搬迁使用的 `https://test-agent.internal` 只由 Java 在精确内部 WebSocket 路径处理，不得加入上述 `TEST_AGENT_CORS_ALLOWED_ORIGINS`，也不得把企业白名单改成 `*`。
 
 保存后，两台都执行以下检查；命令必须无输出：
 

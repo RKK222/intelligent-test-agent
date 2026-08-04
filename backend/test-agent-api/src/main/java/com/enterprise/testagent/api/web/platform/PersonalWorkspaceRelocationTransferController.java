@@ -23,6 +23,7 @@ public class PersonalWorkspaceRelocationTransferController {
             "/api/internal/platform/workspace-management/personal-workspace-relocations/transfer-tickets";
     public static final String WEB_SOCKET_PATH =
             "/api/internal/platform/workspace-management/personal-workspace-relocations/transfer/ws";
+    public static final String INTERNAL_ORIGIN = "https://test-agent.internal";
     private static final String ACCESS_TOKEN_HEADER = "XXL-JOB-ACCESS-TOKEN";
 
     private final PersonalWorkspaceRelocationTransferTicketService ticketService;

@@ -2,9 +2,14 @@ package com.enterprise.testagent.api.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.enterprise.testagent.api.web.platform.PersonalWorkspaceRelocationTransferController;
+import java.time.Duration;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
+import org.springframework.web.cors.reactive.CorsWebFilter;
 
 class RuntimeSecurityConfigTest {
 
@@ -42,5 +47,67 @@ class RuntimeSecurityConfigTest {
         assertThat(headers.getFirst("Access-Control-Allow-Methods")).contains("POST");
         assertThat(headers.getFirst("Access-Control-Allow-Headers"))
                 .containsIgnoringCase("X-Test-Agent-Linux-Server-Id");
+    }
+
+    @Test
+    void corsAllowsRelocationInternalOriginOnlyOnExactWebSocketPath() {
+        RuntimeSecurityConfig config = new RuntimeSecurityConfig(
+                "http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996");
+        CorsWebFilter filter = config.corsWebFilter();
+        AtomicBoolean exactPathInvoked = new AtomicBoolean();
+        var exactPath = relocationExchange(
+                PersonalWorkspaceRelocationTransferController.WEB_SOCKET_PATH,
+                PersonalWorkspaceRelocationTransferController.INTERNAL_ORIGIN);
+
+        filter.filter(exactPath, chain -> {
+                    exactPathInvoked.set(true);
+                    return reactor.core.publisher.Mono.empty();
+                })
+                .block(Duration.ofSeconds(2));
+
+        assertThat(exactPathInvoked).isTrue();
+        assertThat(exactPath.getResponse().getHeaders().getFirst("Access-Control-Allow-Origin"))
+                .isEqualTo(PersonalWorkspaceRelocationTransferController.INTERNAL_ORIGIN);
+
+        AtomicBoolean childPathInvoked = new AtomicBoolean();
+        var childPath = relocationExchange(
+                PersonalWorkspaceRelocationTransferController.WEB_SOCKET_PATH + "/child",
+                PersonalWorkspaceRelocationTransferController.INTERNAL_ORIGIN);
+        filter.filter(childPath, chain -> {
+                    childPathInvoked.set(true);
+                    return reactor.core.publisher.Mono.empty();
+                })
+                .block(Duration.ofSeconds(2));
+
+        assertThat(childPathInvoked).isFalse();
+        assertThat(childPath.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    void corsRejectsBrowserOriginOnRelocationInternalWebSocketPath() {
+        RuntimeSecurityConfig config = new RuntimeSecurityConfig(
+                "http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996");
+        CorsWebFilter filter = config.corsWebFilter();
+        AtomicBoolean invoked = new AtomicBoolean();
+        var exchange = relocationExchange(
+                PersonalWorkspaceRelocationTransferController.WEB_SOCKET_PATH,
+                "http://mimo.sdc.cs.icbc:9996");
+
+        filter.filter(exchange, chain -> {
+                    invoked.set(true);
+                    return reactor.core.publisher.Mono.empty();
+                })
+                .block(Duration.ofSeconds(2));
+
+        assertThat(invoked).isFalse();
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    private MockServerWebExchange relocationExchange(String path, String origin) {
+        return MockServerWebExchange.from(MockServerHttpRequest
+                .get("http://122.233.30.114:8080" + path)
+                .header("Origin", origin)
+                .header("Connection", "Upgrade")
+                .header("Upgrade", "websocket"));
     }
 }

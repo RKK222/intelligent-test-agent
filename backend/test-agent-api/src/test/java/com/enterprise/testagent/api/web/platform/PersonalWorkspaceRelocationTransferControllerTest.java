@@ -80,11 +80,11 @@ class PersonalWorkspaceRelocationTransferControllerTest {
 
         store.consume(
                 ticket.ticket(),
-                PersonalWorkspaceRelocationTransferTicketStore.INTERNAL_ORIGIN,
+                PersonalWorkspaceRelocationTransferController.INTERNAL_ORIGIN,
                 "server-a");
         assertThatThrownBy(() -> store.consume(
                 ticket.ticket(),
-                PersonalWorkspaceRelocationTransferTicketStore.INTERNAL_ORIGIN,
+                PersonalWorkspaceRelocationTransferController.INTERNAL_ORIGIN,
                 "server-a"))
                 .isInstanceOf(PlatformException.class);
 
@@ -94,7 +94,7 @@ class PersonalWorkspaceRelocationTransferControllerTest {
         PersonalWorkspaceRelocationTransferTicket wrongSource = store.issue(request, "trace_ticket");
         assertThatThrownBy(() -> store.consume(
                 wrongSource.ticket(),
-                PersonalWorkspaceRelocationTransferTicketStore.INTERNAL_ORIGIN,
+                PersonalWorkspaceRelocationTransferController.INTERNAL_ORIGIN,
                 "server-c"))
                 .isInstanceOf(PlatformException.class);
     }
@@ -106,7 +106,7 @@ class PersonalWorkspaceRelocationTransferControllerTest {
 
         assertThatThrownBy(() -> store.consume(
                         null,
-                        PersonalWorkspaceRelocationTransferTicketStore.INTERNAL_ORIGIN,
+                        PersonalWorkspaceRelocationTransferController.INTERNAL_ORIGIN,
                         "server-a"))
                 .isInstanceOf(PlatformException.class)
                 .satisfies(exception -> org.assertj.core.api.Assertions.assertThat(

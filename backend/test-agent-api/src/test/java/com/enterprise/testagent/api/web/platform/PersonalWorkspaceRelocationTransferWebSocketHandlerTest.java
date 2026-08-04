@@ -50,7 +50,7 @@ class PersonalWorkspaceRelocationTransferWebSocketHandlerTest {
         PersonalWorkspaceRelocationReceiveService receiveService =
                 mock(PersonalWorkspaceRelocationReceiveService.class);
         PersonalWorkspaceRelocationArchiveUpload upload = mock(PersonalWorkspaceRelocationArchiveUpload.class);
-        when(tickets.consume("pwrt_ticket", PersonalWorkspaceRelocationTransferTicketStore.INTERNAL_ORIGIN, "server-a"))
+        when(tickets.consume("pwrt_ticket", PersonalWorkspaceRelocationTransferController.INTERNAL_ORIGIN, "server-a"))
                 .thenReturn(ticket());
         when(receiveService.begin(
                 RELOCATION_ID, "server-a", "server-b", SHA256, 4L, "trace_relocation_ws"))
@@ -62,7 +62,7 @@ class PersonalWorkspaceRelocationTransferWebSocketHandlerTest {
         byte[] second = new byte[]{3, 4};
         FakeWebSocketSession session = new FakeWebSocketSession(
                 List.of(first, second, "{\"op\":\"complete\"}"),
-                PersonalWorkspaceRelocationTransferTicketStore.INTERNAL_ORIGIN,
+                PersonalWorkspaceRelocationTransferController.INTERNAL_ORIGIN,
                 "server-a");
 
         new PersonalWorkspaceRelocationTransferWebSocketHandler(tickets, receiveService, OBJECT_MAPPER)
@@ -116,14 +116,14 @@ class PersonalWorkspaceRelocationTransferWebSocketHandlerTest {
         PersonalWorkspaceRelocationReceiveService receiveService =
                 mock(PersonalWorkspaceRelocationReceiveService.class);
         PersonalWorkspaceRelocationArchiveUpload upload = mock(PersonalWorkspaceRelocationArchiveUpload.class);
-        when(tickets.consume("pwrt_ticket", PersonalWorkspaceRelocationTransferTicketStore.INTERNAL_ORIGIN, "server-a"))
+        when(tickets.consume("pwrt_ticket", PersonalWorkspaceRelocationTransferController.INTERNAL_ORIGIN, "server-a"))
                 .thenReturn(ticket());
         when(receiveService.begin(
                 RELOCATION_ID, "server-a", "server-b", SHA256, 4L, "trace_relocation_ws"))
                 .thenReturn(upload);
         FakeWebSocketSession session = new FakeWebSocketSession(
                 List.of(new byte[]{1, 2}),
-                PersonalWorkspaceRelocationTransferTicketStore.INTERNAL_ORIGIN,
+                PersonalWorkspaceRelocationTransferController.INTERNAL_ORIGIN,
                 "server-a");
 
         new PersonalWorkspaceRelocationTransferWebSocketHandler(tickets, receiveService, OBJECT_MAPPER)

@@ -1,5 +1,6 @@
 package com.enterprise.testagent.api.config;
 
+import com.enterprise.testagent.api.web.platform.PersonalWorkspaceRelocationTransferController;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -78,7 +79,19 @@ public class RuntimeSecurityConfig {
                 "X-Test-Agent-Linux-Server-Id"));
         configuration.setExposedHeaders(List.of("X-Trace-Id"));
         configuration.setAllowCredentials(false);
+
+        // 搬迁通道由后端 Java 固定携带内部 Origin；仅对精确 WebSocket 路径覆盖浏览器 CORS 白名单。
+        CorsConfiguration relocationWebSocketConfiguration = new CorsConfiguration();
+        relocationWebSocketConfiguration.setAllowedOrigins(
+                List.of(PersonalWorkspaceRelocationTransferController.INTERNAL_ORIGIN));
+        relocationWebSocketConfiguration.setAllowedMethods(List.of("GET"));
+        relocationWebSocketConfiguration.setExposedHeaders(List.of("X-Trace-Id"));
+        relocationWebSocketConfiguration.setAllowCredentials(false);
+
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration(
+                PersonalWorkspaceRelocationTransferController.WEB_SOCKET_PATH,
+                relocationWebSocketConfiguration);
         source.registerCorsConfiguration("/**", configuration);
         return source;
     }

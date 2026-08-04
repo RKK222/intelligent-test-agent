@@ -91,7 +91,7 @@ public class WebSocketPersonalWorkspaceRelocationTransferGateway
         try {
             socket = httpClient.newWebSocketBuilder()
                     .connectTimeout(CONNECT_TIMEOUT)
-                    .header("Origin", PersonalWorkspaceRelocationTransferTicketStore.INTERNAL_ORIGIN)
+                    .header("Origin", PersonalWorkspaceRelocationTransferController.INTERNAL_ORIGIN)
                     .header(
                             PersonalWorkspaceRelocationTransferTicketStore.TICKET_HEADER,
                             response.data().ticket())

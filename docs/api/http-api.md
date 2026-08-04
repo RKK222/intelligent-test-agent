@@ -1189,7 +1189,7 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 }
 ```
 
-ticket 只保存在签发 Java 的内存中，60 秒过期且消费即删除。HTTP 响应中的 `webSocketPath` 和实际 WebSocket URL 都不拼入 ticket，避免通用 API、网关访问日志记录凭据；源 Java 连接同一目标 Java 时通过专用 `X-Test-Agent-Relocation-Ticket` 握手 Header 携带 ticket，并固定携带 `Origin: https://test-agent.internal`、`X-Test-Agent-Source-Linux-Server-Id: <源服务器ID>` 和 traceId。Origin、源服务器或 ticket 任一不匹配即拒绝连接。
+ticket 只保存在签发 Java 的内存中，60 秒过期且消费即删除。HTTP 响应中的 `webSocketPath` 和实际 WebSocket URL 都不拼入 ticket，避免通用 API、网关访问日志记录凭据；源 Java 连接同一目标 Java 时通过专用 `X-Test-Agent-Relocation-Ticket` 握手 Header 携带 ticket，并固定携带 `Origin: https://test-agent.internal`、`X-Test-Agent-Source-Linux-Server-Id: <源服务器ID>` 和 traceId。全局 CORS 只在上述精确 WebSocket 路径允许该内部 Origin，普通浏览器路径继续使用部署白名单；不需要也不得把内部 Origin 写入 `TEST_AGENT_CORS_ALLOWED_ORIGINS`。Origin、源服务器或 ticket 任一不匹配即拒绝连接。
 
 WebSocket 客户端按不超过 256 KiB 的 binary frame 顺序发送归档，完成后发送唯一 text frame `{"op":"complete"}`。目标端只接受这两类帧，按票据限制总字节数并校验完整 SHA-256；安全解包、Git HEAD/index/worktree/untracked 状态恢复与校验、运行中 Run 防护和数据库 CAS 全部成功后，返回：
 
