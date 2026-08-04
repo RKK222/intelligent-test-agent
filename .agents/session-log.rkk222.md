@@ -5658,3 +5658,52 @@
   保存后重新登录即可使用新权限。该处理是登录时即时赋权加页面一次性人工治理，不需要定时任务。
 - 本次仅增加 GET 用户列表的可选查询参数，旧请求保持兼容；未修改事件、数据库结构/Flyway、环境配置、
   generated SDK 或 OpenCode 源码。默认本地 Workflow 重启因既有开发 Redis 密码缺失未执行，不计入本次验证。
+
+## 2026-08-04 - 基于今晚代码重新封装企业增量包
+
+### Why
+
+- 用户确认 17:20 生成的上一版本已经部署；本机该固定名交付包内最后一条发布相关记录对应
+  `cec4ccf13769d9084c7d02efc158b021afe23c23`，因此本轮以该提交及已执行数据库历史为现场基线，
+  不再沿用此前“个人工作区搬迁包尚未部署”的假设。
+- 今晚代码新增闲置进程关闭、用户治理、晚间任务时长展示和企业日志采集能力，需要重建前后端；
+  worker runtime/toolbox 源码指纹没有变化，Workflow 与 LobeHub 继续禁用。
+
+### What
+
+- 当前代码相对已部署基线新增 XXL MySQL V9：每天北京时间 02:00 广播关闭严格超过 15 天无 Run 活动、
+  且没有活动 Run 或当天有效待投递任务的用户 OpenCode 进程；关闭保留 ACTIVE binding，用户再次使用时
+  仍由公共启动程序恢复。PostgreSQL 没有新增 migration。
+- 同步交付统一认证新用户默认 `USER` 角色、用户管理组合筛选/当前页批量设置、晚间任务历史时长恢复、
+  当天待投递任务保护和闲置候选查询优化，以及只读脱敏的企业最近进程日志采集脚本。
+- 修正 `deploy/internal/README.md`、`deploy/internal/MULTI-BACKEND.md`、`docs/deployment/backend.md` 和
+  `docs/deployment/database.md`：当前已部署基线改为 `cec4ccf13...`，PostgreSQL 应已有
+  `20260804123000`，XXL MySQL 应已有 V1-V8 且尚无 V9；第一台新 Java 只允许新增 V9。
+- 企业组件清单保持 worker runtime/toolbox `reuse`，指纹分别为
+  `bf7b8e1d7c4e996c815a4c7dcf5ec163fe70707be385e0467cfa731170a0639a` 和
+  `35447da08f477dd02e458e4344be9bd870452dba12ba6db32d250c56e9f15040`；Workflow/LobeHub 均为 `disabled`。
+
+### How
+
+- 后端定向回归覆盖闲置进程服务/handler、PostgreSQL MyBatis 候选与用户筛选、用户领域/API 和 MySQL
+  V8→V9 Flyway；真实 PostgreSQL/MySQL Testcontainers 均执行成功。前端用户管理、backend-api 和
+  workbench-utils 202 项通过，shared-types/backend-api/agent-web typecheck 与 production build 通过。
+- `verify-internal-process-log-collector.sh`、`verify-ai-docs.sh`、`git diff --check` 通过；候选内外层 ZIP
+  通过 SHA-256、`unzip -t`、嵌套内层 SHA、后端/前端 `--validate-only`、RSA 和组件清单校验。
+- 最终候选 ZIP 中 PostgreSQL `20260804123000` 仍为
+  `f41a9aaab637f4b196f63cb7d37ef58cf0b15c9521abd1050c9929c6ce27b212`；XXL V7/V8/V9 分别为
+  `be1705cac272b9c4e89c43136f0125132c2afc4bbc3525322678cd02fb2c5305`、
+  `f4919a2f6ce224ecf50b347f2d438ad746753d9bbb8856a3403adf963f031bf2`、
+  `1d2e78716f3ffc33993de2c2b160fb48f6c8b6e9b71a7b592e4beaf6943a45e3`，与源码一致。
+- 首次本地重启因继承的 Java 不支持 release 21，在停止旧服务前失败；按 `restart-services` 约定显式设置
+  JDK 25 后，以未修改的 `.env.test` 和 `--without-workflow` 重启 backend、manager、frontend 成功。
+  readiness 为 `UP`、frontend 3000 返回 200、manager WebSocket 已连接；真实本地 XXL MySQL 的 V7/V8/V9
+  均成功，搬迁任务为 `0 0/30 * * * ? *`，闲置进程关闭任务为 `0 0 2 * * ? *`，两条均启用。
+
+### Result
+
+- Mac 侧今晚代码的候选企业增量介质已完成构建和运行验证；公共 Agent 配置、worker、toolbox 未变化，
+  本轮没有修改 `.env*`、RunEvent/SSE、generated SDK 或 OpenCode 源码。
+- 企业实际部署尚未执行；用户确认的已部署提交只作为包基线证据，现场仍必须读取 PostgreSQL 与 XXL MySQL
+  两套完整 `flyway_schema_history`。PostgreSQL 未知 checksum/失败/更高版本，或 XXL MySQL 不是 V1-V8
+  全成功且 V9 缺失时必须停止，禁止 `repair`、`outOfOrder` 或手工修改历史表。

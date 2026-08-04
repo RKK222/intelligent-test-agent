@@ -539,11 +539,12 @@ grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL
 
 两台第一条都应输出 `1`，第二条均无输出；不要使用 `grep` 直接回显密码。
 
-企业现网当前实际基线是昨晚已部署的提交
-`1e6df22fab43edba6b5eb3d75f2c6a085eaf4ec7`；早上 09:08 生成的后续包尚未部署，不能把其中的
-migration 当作现网历史。昨晚版本已经包含针对更早 `0352efa987219b9dde5c09e77b1eabfa719fc068`
-基线的 LobeHub 版本倒序兼容装配和公共 Agent rollout 迁移。部署前必须分别由数据库管理员导出平台
-PostgreSQL 与 XXL MySQL 的完整历史，不能只留最近 20 条：
+企业现网当前实际基线是已部署提交
+`cec4ccf13769d9084c7d02efc158b021afe23c23`。该版本已经执行个人工作区搬迁的 PostgreSQL
+`20260804123000`，并在 XXL MySQL 连续执行 V7、V8，把搬迁任务最终频率调整为每 30 分钟；更早
+`0352efa987219b9dde5c09e77b1eabfa719fc068` 基线的 LobeHub 版本倒序兼容装配和公共 Agent rollout
+migration 也已经进入现网历史。部署前必须分别由数据库管理员导出平台 PostgreSQL 与 XXL MySQL 的
+完整历史，不能只留最近 20 条：
 
 ```sql
 select installed_rank, version, description, type, script, checksum, installed_on, success
@@ -551,23 +552,24 @@ from flyway_schema_history
 order by installed_rank;
 ```
 
-PostgreSQL 正常现网路径必须满足：所有记录 `success=true`；`20260802173416` 与
-`20260803133000` 已成功；`20260730090000` 未被倒序补写；`20260803141754` 仅允许出现在已经登记的
-“rollout 已执行、早期 LobeHub 补偿仍缺失”历史中，正常昨晚路径不应出现；本轮新增
-`20260804123000` 尚未执行。虽然 LobeHub 服务和页面入口本次关闭，既有兼容 migration 创建的平台模型
-目录/聚合表和四个默认禁用参数仍必须保留，这是数据库兼容要求，不代表启用服务。
+PostgreSQL 正常现网路径必须满足：所有记录 `success=true`；`20260802173416`、`20260803133000` 与
+`20260804123000` 已成功；`20260730090000` 未被倒序补写；`20260803141754` 仅允许出现在已经登记的
+“rollout 已执行、早期 LobeHub 补偿仍缺失”历史中，正常现网路径不应出现。本轮没有新增 PostgreSQL
+migration。虽然 LobeHub 服务和页面入口继续关闭，既有兼容 migration 创建的平台模型目录/聚合表和
+四个默认禁用参数仍必须保留，这是数据库兼容要求，不代表启用服务。
 
-XXL MySQL 使用独立的 `flyway_schema_history`。部署前应为 V1-V6 全部成功、没有 V7/V8，也没有失败、
-未知 checksum 或更高版本；第一台新 Java 启动后才允许执行
-`V7__register_personal_workspace_relocation_task.sql` 和 `V8__schedule_personal_workspace_relocation_every_thirty_minutes.sql`。V7 先登记任务，V8 随即把最终 Cron 调整为每 30 分钟；不得改写 V7 规避 Flyway 历史校验。
+XXL MySQL 使用独立的 `flyway_schema_history`。部署前应为 V1-V8 全部成功、没有 V9，也没有失败、
+未知 checksum 或更高版本；第一台新 Java 启动后只允许新增
+`V9__register_inactive_user_process_cleanup_task.sql`。V7、V8 的原始 history 和搬迁任务每 30 分钟
+配置不得改写。
 
 `V20260728160800__create_toolbox_click_tracking.sql` 的现网 checksum 仍必须为 `-1966404877`；只有已登记的
 早期测试/过渡历史才允许旧 `V20260727203500` 或 `-74327385` 幂等变体；现网历史中的
 `V20260728210000__index_in_flight_app_source_operations.sql` 也必须保留且为 `success=true`。任一失败记录、未知 checksum、
-未知更高版本、缺少上述昨晚基线版本或其它历史分叉都必须停止发布；不得启用 Flyway `outOfOrder`、执行
-`repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常、PostgreSQL
-`20260804123000` 与 XXL MySQL V7/V8 新增且为 `success=true`、搬迁任务 `schedule_conf='0 0/30 * * * ? *'`，同时既有
-`20260802173416`、`20260803133000` 和 checksum 未变化，再部署 `.114`。`.4` 日志出现
+未知更高版本、缺少上述已部署基线版本或其它历史分叉都必须停止发布；不得启用 Flyway `outOfOrder`、执行
+`repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常、PostgreSQL 既有 history/checksum
+完全未变化、XXL MySQL V9 新增且为 `success=true`、搬迁任务仍为
+`schedule_conf='0 0/30 * * * ? *'`，并确认闲置进程关闭任务为每日 02:00，再部署 `.114`。`.4` 日志出现
 `FlywayValidateException`、`ClassNotFoundException: org.postgresql.Driver` 或 `Application run failed` 时不得继续滚动。
 
 外部 MySQL 端口验证通过后，在 `.4` 执行：
@@ -1008,11 +1010,42 @@ from xxl_job_info
 where platform_task_key = 'workspace-management.personal-workspace-relocation';
 ```
 
-上线必须避免新旧 Java 混跑该任务：在维护窗口先停止两台旧 Java，将两台 JAR 和 `backend/lib/` 都替换为同一版本，再依次启动。第一台新版启动会执行 PostgreSQL `V20260804123000__create_personal_workspace_relocations.sql`，XXL MySQL 连续执行 V7 和 V8；V7 登记任务，V8 在 scheduler 启动前把最终频率改为每 30 分钟。第二台尚未启动时目标不可达只会安全重试，不会提前改库。若只能滚动升级，应在 XXL Admin 先停用该 `platform_task_key`，确认所有 Java 都是新版本后再启用。禁止通过手工复制目录后直接 update `linux_server_id`，也禁止删除搬迁状态行来跳过源端清理。
+个人工作区搬迁表和 V7/V8 已随现网基线执行，本轮不重复新增。上线仍应在维护窗口先停止两台旧 Java，
+将两台 JAR 和 `backend/lib/` 都替换为同一版本，再依次启动；如果只能滚动升级，应先停用本轮新增的
+`opencode-runtime.inactive-user-process-cleanup`，确认所有 Java 都包含新 handler 后再启用。禁止通过
+手工复制目录后直接 update `linux_server_id`，也禁止删除搬迁状态行来跳过源端清理。
 
 清理一轮后不能承诺数据库从此永远不会短暂出现错配：正常初始化和修复链路已不再把工作空间直接切到另一台 Agent 而丢下源文件，已有 ACTIVE binding 也不会因负载变化自动迁移；但人工改库、混合版本、正式迁移 binding 或未来新增的迁移入口仍可能暂时形成新错配。该周期任务提供持续收敛，安全目标是“可发现、可恢复、先搬文件、后改库”，不是假设错配永不再发生。
 
 首次初始化前端仍先弹确认框；如果工作区正处于服务器归属修复/搬迁，普通用户只看到“工作区与 Agent 服务器归属正在调整，请稍后重试”一类安全提示，不显示 `workspaceId`、服务器路径或内部搬迁 ID。日志可按 `event=personal_workspace_relocation_succeeded`、`event=personal_workspace_relocation_retry` 和同一 traceId 对齐，但不要记录归档内容或文件清单。
+
+### 十五天未使用用户进程关闭
+
+本轮 XXL V9 新增 `opencode-runtime.inactive-user-process-cleanup`，默认每天北京时间 02:00 执行。
+XXL 只取得全局锁并广播空 payload；每个 Java 只处理本机实际持有 manager 连接的用户进程。候选必须严格
+超过 15 天没有任何来源 Run 活动，且没有活动 Run、当天仍有效的待投递任务或扫描后新增活动；关闭后保留
+ACTIVE binding，用户再次使用时由公共启动程序按原归属恢复。任务不能以登录时间替代 Run 活动时间，也不能
+由入口 Java 直接控制远端 manager。
+
+第一台 `.4` 启动后在 XXL MySQL 验收：
+
+```sql
+select version, description, checksum, success
+from flyway_schema_history
+where version in ('7', '8', '9')
+order by installed_rank;
+
+select platform_task_key, schedule_conf, trigger_status
+from xxl_job_info
+where platform_task_key in (
+    'workspace-management.personal-workspace-relocation',
+    'opencode-runtime.inactive-user-process-cleanup'
+)
+order by platform_task_key;
+```
+
+预期 V7/V8 保持原 checksum、V9 首次成功；搬迁任务为 `0 0/30 * * * ? *`，闲置进程关闭为
+`0 0 2 * * ? *`，两条均 `trigger_status=1`。任一条件不满足时保持 `.114` 和 `.2` 未部署。
 
 ## 11. 故障定位与回滚
 

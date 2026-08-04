@@ -49,7 +49,7 @@ XXL MySQL 与平台 PostgreSQL 完全分离。Admin 子上下文只扫描 `backe
 
 V3-V9 是生产必需基础调度配置，不是演示数据。后续新增任务或调整既有生产默认配置，都必须新建不可变的更高版本 SQL；新增任务按新的 `platform_task_key` 插入，配置调整只修改明确目标字段。不得改写已执行 migration，也不得在应用启动阶段用非版本化 upsert 覆盖页面参数。
 
-所有平台任务固定 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`，参数只含 `taskKey/concurrencyPolicy/payload`。V1-V5 可被多个 Admin 节点并发启动，Flyway schema history 负责互斥；重复启动不得重复 executor 组或任务。
+所有平台任务固定 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`，参数只含 `taskKey/concurrencyPolicy/payload`。V1-V9 可被多个 Admin 节点并发启动，Flyway schema history 负责互斥；重复启动不得重复 executor 组或任务。
 
 PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审计，不再产生新的 PostgreSQL scheduler 运行。短暂停机升级 migration 将旧夜间 `PENDING/RUNNING/STOPPING USER_PLAN` 全部标记为 `SKIPPED`，避免旧 runner 删除后留下永久活动记录。XXL 运行日志独立留在 MySQL，默认保留 30 天。
 
@@ -98,7 +98,7 @@ PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审
 
 状态按 `DISCOVERED → EXPORTING → TRANSFERRING → APPLYING → CLEANUP_PENDING → SUCCEEDED` 推进，目标切换前的瞬时失败进入 `RETRY_WAIT`；目标已切换后的清理失败保持 `CLEANUP_PENDING` 并按 `next_retry_at` 重新认领。`PersonalWorkspaceRelocationMapper.xml` 只扫描 ACTIVE 个人工作区、ACTIVE Workspace 和 ACTIVE `agent_id='opencode'` binding 的真实错配，并排除 `PENDING/RUNNING/CANCELLING` Run。目标完成事务先 `FOR UPDATE` 重读版本、用户、运行态 Workspace、分支、源路径、服务器、binding 和活动 Run，再依次更新 `workspaces.root_path/linux_server_id`、`personal_workspaces.repo_root_path/workspace_root_path/base_commit` 和搬迁状态；任一步不命中整体回滚，源目录不得清理。`CLEANUP_PENDING` 不会被用户连续换服产生的新候选覆盖；即使源 worktree 已删除后数据库确认瞬时失败，下一轮也会幂等完成收尾，旧源清理终态后才允许下一段搬迁。
 
-该 migration 只增加生产状态表、约束、索引和注释，不回填、不改写现有 Workspace，也不包含测试或环境数据。部署时先停止或至少完成全部 Java 的同版本切换边界，先让平台 PostgreSQL Flyway 应用本 migration，再让 XXL MySQL 连续应用 `V7`、`V8`；V7 登记任务，V8 在 scheduler 启动前把最终 Cron 调整为每 30 分钟。禁止让已注册 V7/V8 的新任务调用尚未包含新表/handler 的旧 Java。正式集成仍必须核对目标 `flyway_schema_history` 的版本/checksum，并从每套已知企业基线升级验证，禁止 `outOfOrder`、`repair` 或手工修改历史表。
+该 migration 只增加生产状态表、约束、索引和注释，不回填、不改写现有 Workspace，也不包含测试或环境数据。首次引入该能力的版本必须先停止或至少完成全部 Java 的同版本切换边界，先让平台 PostgreSQL Flyway 应用本 migration，再让 XXL MySQL 连续应用 `V7`、`V8`；V7 登记任务，V8 在 scheduler 启动前把最终 Cron 调整为每 30 分钟。禁止让已注册 V7/V8 的新任务调用尚未包含新表/handler 的旧 Java。正式集成仍必须核对目标 `flyway_schema_history` 的版本/checksum，并从每套已知企业基线升级验证，禁止 `outOfOrder`、`repair` 或手工修改历史表。
 
 当前 release 将该 migration 的原始 SHA-256 锁定为 `f41a9aaab637f4b196f63cb7d37ef58cf0b15c9521abd1050c9929c6ce27b212`；`FlywayMigrationNamingTest` 和最终 persistence JAR 字节校验必须保持一致。XXL `V7` 源码 SHA-256 为 `be1705cac272b9c4e89c43136f0125132c2afc4bbc3525322678cd02fb2c5305`，`V8` 为 `f4919a2f6ce224ecf50b347f2d438ad746753d9bbb8856a3403adf963f031bf2`，`V9` 为 `1d2e78716f3ffc33993de2c2b160fb48f6c8b6e9b71a7b592e4beaf6943a45e3`；任一版本进入共享 MySQL 后都禁止改写。
 
@@ -1217,13 +1217,14 @@ Flyway 顺序校验会失败。该分叉由现有 `DatabaseMigrationCompatibilit
 `0352efa...` 的完整主 migration 上界 `V20260801104000`（排除当时尚不存在的 LobeHub migration）构造现网
 history，再验证默认 `outOfOrder=false` 升级为 `V20260802173416`，随后执行 `V20260803133000`。
 
-企业现网当前实际发布基线已于昨晚升级为
-`1e6df22fab43edba6b5eb3d75f2c6a085eaf4ec7`；早上 09:08 生成的后续包尚未部署。正常现网 history
-因此应已包含成功的 `20260802173416` 与 `20260803133000`，不应倒序补写 `20260730090000`，也不应包含
-仅用于另一套已知分叉的 `20260803141754`。本轮个人工作区搬迁发布前，PostgreSQL 还必须确认没有
-`20260804123000`；XXL MySQL 必须确认 V1-V6 全部成功且没有 V7、V8。第一台新版启动后应连续新增成功的 V7、V8，最终任务 Cron 为 `0 0/30 * * * ? *`。上述 `0352efa...` 测试继续作为历史
-兼容回归，不再代表本轮现场的直接部署基线。任何目标库与该路径不一致时都必须停止并按完整 history 制定
-显式兼容方案，不能用提交号替代现场核对。
+企业现网当前实际发布基线已升级为
+`cec4ccf13769d9084c7d02efc158b021afe23c23`。正常 PostgreSQL history 因此应已包含成功的
+`20260802173416`、`20260803133000` 与 `20260804123000`，不应倒序补写 `20260730090000`，也不应包含
+仅用于另一套已知分叉的 `20260803141754`；本轮没有新增 PostgreSQL migration。XXL MySQL 应为 V1-V8
+全部成功且没有 V9，个人工作区搬迁任务最终 Cron 已为 `0 0/30 * * * ? *`；第一台新版启动后只新增 V9，
+并注册每天北京时间 02:00 的闲置用户进程关闭任务。上述 `0352efa...` 测试继续作为历史兼容回归，不再代表
+本轮现场的直接部署基线。任何目标库与该路径不一致时都必须停止并按完整 history 制定显式兼容方案，不能用
+提交号替代现场核对。
 
 主 migration、早期补偿和 release 后补偿分别锁定 SHA-256
 `0f16f1b2f3108e60580cfeb00102e10ac21e20220be255fae77bad9871f0bcb7`、

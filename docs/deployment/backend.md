@@ -836,7 +836,7 @@ curl -fsS http://127.0.0.1:8080/actuator/health
 
 Spring Boot 唯一 Flyway Bean 会在业务 Bean 和 ApplicationRunner 前完成 migration；`DatabaseMigrationCompatibilityCustomizer` 只在已应用 history 命中旧工具盒子版本时追加隔离兼容 location。固定 opencode node yml 配置已作废，应用不再从配置自动写入 `execution_nodes`，历史兼容节点需由数据库已有数据或后续专门初始化流程维护。`TEST_AGENT_MODEL_CATALOG_SOURCE` 仅保留历史兼容，前端模型和供应商目录始终来自用户 opencode server 的公共配置。
 
-`ScheduledTaskRegistry` 只维护 handler 内存映射，不同步 PostgreSQL，应用内没有 `ScheduledTaskRunner`。Admin 子上下文 Flyway V1-V6 负责初始化八条周期任务；每个 Java 在本机 Admin readiness 就绪后才启动 executor，并使用平台 advertised host 自动注册地址，注册不带 Linux 亲和。超级管理员在同源 XXL 页面查看/修改/触发/停止周期任务和日志；夜间分发与应用源码清理保持每分钟启用，夜间补偿保持 5 分钟启用，scheduler 历史清理在北京时间 08:00 删除 PostgreSQL 中超过 7 天的旧已结束记录。
+`ScheduledTaskRegistry` 只维护 handler 内存映射，不同步 PostgreSQL，应用内没有 `ScheduledTaskRunner`。Admin 子上下文 Flyway V1-V9 负责初始化十条周期任务；每个 Java 在本机 Admin readiness 就绪后才启动 executor，并使用平台 advertised host 自动注册地址，注册不带 Linux 亲和。超级管理员在同源 XXL 页面查看/修改/触发/停止周期任务和日志；夜间分发与应用源码清理保持每分钟启用，个人工作区搬迁每 30 分钟启用，闲置用户进程关闭在北京时间 02:00 启用，夜间补偿保持 5 分钟启用，scheduler 历史清理在北京时间 08:00 删除 PostgreSQL 中超过 7 天的旧已结束记录。
 
 ## 内部模型代理与模型目录配置
 
