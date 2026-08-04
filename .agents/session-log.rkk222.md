@@ -5190,6 +5190,9 @@
   全量前端 1778 passed / 1 skipped；agent-web 用户手册与生产构建通过，`git diff --check` 通过。
 - 完整前端测试仍有一个与本次无关且可单独复现的 `AppSourceDialog` 保留期输入测试失败；Mermaid 首轮偶发失败
   单独重跑已通过。使用 Vite 实际启动 `http://127.0.0.1:4175/` 并确认 HTTP 200。
+- 以昨晚已成功部署的组件状态为基线重新构建企业前端，定向 38 项、typecheck、生产构建、候选静态服务
+  `http://127.0.0.1:4176/`、内外层 SHA/ZIP、Flyway 固定字节和双后台包门禁均通过；worker 与 toolbox
+  指纹未变化，增量包均为 `reuse`，Workflow/LobeHub 保持关闭。
 
 ### Result
 
@@ -5197,3 +5200,5 @@
   超级管理员个人 worktree 权限边界不变。
 - 本次未修改 HTTP API/DTO、RunEvent/SSE、数据库/Flyway/SQL、性能或安全协议、环境配置、generated SDK、
   OpenCode 源码或依赖；未处理无关的 `AppSourceDialog` 测试失败，也未创建分支。
+- Mac 端企业增量包已重新生成，只有前端制品变化，后端 JAR 与昨晚包 SHA 一致；企业现场尚未执行本包部署，
+  部署前仍须核对两台后台的组件状态指纹，任一不一致即停止并改用包含对应组件的包。
