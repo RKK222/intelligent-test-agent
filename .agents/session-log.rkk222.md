@@ -5411,3 +5411,39 @@
 - 本次只修改精确路径的安全配置与复用常量；未修改 API/DTO、事件、数据库/Flyway/SQL、性能参数、环境文件、
   generated SDK 或 OpenCode 源码。未构建或部署企业离线介质；上线时两台 Java 必须使用同一新 JAR，且本分支
   既有搬迁 migration 仍须按企业 Flyway 历史/checksum 门禁验证。
+
+## 2026-08-04 - 基于昨晚现网重新封装个人工作区搬迁企业包
+
+### Why
+
+- 用户确认早上 09:08 生成的企业包尚未部署，企业现网仍以昨晚已部署提交
+  `1e6df22fab43edba6b5eb3d75f2c6a085eaf4ec7` 为基线；本轮不能把早上的包误当作已执行数据库基线。
+- 当前代码已新增个人工作区跨服务器自动搬迁及企业 WebSocket CORS 修复，需要用最新 HEAD 重建前后端，
+  同时继续关闭 Workflow 和 LobeHub，并按昨晚已安装组件指纹复用 worker/toolbox。
+
+### What
+
+- 基于当前 `codex/release-enterprise-20260801` HEAD 重新构建 backend、frontend 和双 Java 完整交付包；
+  worker runtime 复用 `bf7b8e1d7c4e996c815a4c7dcf5ec163fe70707be385e0467cfa731170a0639a`，
+  toolbox 复用 `35447da08f477dd02e458e4344be9bd870452dba12ba6db32d250c56e9f15040`，
+  Workflow/LobeHub 保持禁用，公共 Agent 配置未变。
+- 本包包含 PostgreSQL `V20260804123000__create_personal_workspace_relocations.sql` 和 XXL MySQL
+  `V7__register_personal_workspace_relocation_task.sql`；前者新增搬迁状态表，后者注册并启用每分钟搬迁任务。
+
+### How
+
+- 后端定向回归覆盖 PostgreSQL/MySQL Testcontainers、Flyway 命名与兼容装配、MyBatis 搬迁状态、
+  搬迁 HTTP/WebSocket、worker 和真实 Git 快照；前端 Agent 配置/工作区 49 项测试与 typecheck 通过。
+- 当前 backend/frontend 构建成功；内部包和双后台外层包均通过 SHA-256、`unzip -t`、后端/前端
+  `--validate-only`，本地 backend readiness 为 `UP`、frontend 3000 返回 200。
+- PostgreSQL migration 在源码、候选模块 JAR 和最终内层包中的 SHA-256 均为
+  `f41a9aaab637f4b196f63cb7d37ef58cf0b15c9521abd1050c9929c6ce27b212`；XXL V7 均为
+  `be1705cac272b9c4e89c43136f0125132c2afc4bbc3525322678cd02fb2c5305`。
+
+### Result
+
+- Mac 侧已完成最新代码候选介质构建和本地验证，早上 09:08 的旧包不得再部署；本次没有改动环境文件，
+  没有把 Workflow、LobeHub、worker 或 toolbox 重新打入增量包。
+- 尚未取得企业 PostgreSQL 与 XXL MySQL 的真实 `flyway_schema_history`，因此企业执行仍以数据库门禁为前提：
+  PostgreSQL 应保留昨晚已执行历史且尚无 `20260804123000`，XXL MySQL 应为 V1-V6 成功且尚无 V7；
+  出现未知 checksum、失败记录、版本倒序或环境分叉必须停止，禁止 `repair`、`outOfOrder` 或手改历史表。
