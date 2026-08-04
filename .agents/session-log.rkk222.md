@@ -5546,3 +5546,41 @@
   涉及 API、事件、数据库/Flyway、业务代码、环境配置、generated SDK 或 OpenCode 源码。
 - 当前 Mac 没有中转机 SSH 配置，也没有挂载可写 U 盘，因此尚未实际进入企业中转机、未在 `.4/.114/.2`
   采集真实日志，暂时不能给出现场 bug 结论；后续取得中转连接或挂载介质后继续传输、逐节点采集和时间线分析。
+
+## 2026-08-04 - 自动关闭十五天未使用的用户 OpenCode 进程
+
+### Why
+
+- 用户要求每天自动关闭超过十五天没有 Run 活动的用户 OpenCode 进程，释放长期占用的本机端口和进程资源；
+  登录行为不作为使用依据，所有 Run 类型都计入活动时间。
+- 没有 Run 的用户必须以 manager 记录的实际 `started_at` 为回退时间；边界采用严格早于十五天，且清理不能
+  中断仍有活动运行的用户。
+
+### What
+
+- 新增 MyBatis XML 闲置候选查询，以 ACTIVE `opencode` binding 关联当前 `RUNNING/UNHEALTHY` 进程，最近活动
+  时间取进程 `started_at` 与该用户全部 Run `updated_at` 的较晚值，并支持用户空闲闸门内按 processId 重检。
+- 新增本机清理服务，复用 `UserRuntimeDisposeCoordinator`、公共 manager 容器归属解析和
+  `OpencodeProcessStopService`；忙碌、扫描后状态变化、非本机 owner 和单进程失败均安全跳过，不删除 ACTIVE
+  binding，用户下次使用时仍走既有公共启动程序恢复进程。
+- 新增 XXL V9 不可变迁移和广播型 handler，每天北京时间 02:00 触发，任务 key 为
+  `opencode-runtime.inactive-user-process-cleanup`，并同步 runtime、persistence、XXL、数据库、架构和测试文档。
+
+### How
+
+- 定向新增测试 14 项通过；相关 13 模块 Reactor 全量回归成功，其中 runtime 770 项、persistence 248 项
+  （18 项按既有外部条件跳过），XXL Job MySQL 8.4 与 Redis Testcontainers 均实际运行；AI 文档门禁和
+  `git diff --check` 通过。
+- 使用 JDK 25、未修改的 `.env.test` 和 `test` profile 完整打包并重启 backend、manager、frontend；默认启动
+  因缺少可选 workflow Redis 密码在构建前失败，随后用项目支持的 `--without-workflow` 启动核心服务成功。
+- backend health/readiness、frontend 3000、登录 CORS 和 manager WebSocket 均正常；本地 XXL MySQL 从 V8
+  成功执行 V9，任务启用且 Cron 为 `0 0 2 * * ? *`。源码与最终启动 JAR 内 V9 SHA-256 均为
+  `1d2e78716f3ffc33993de2c2b160fb48f6c8b6e9b71a7b592e4beaf6943a45e3`。
+
+### Result
+
+- 十五天未使用用户进程自动关闭能力已完成真实运行验证；未修改 HTTP API/DTO、对外事件、PostgreSQL 结构、
+  环境文件、generated SDK 或 OpenCode 源码，新增 Redis 广播仅携带空 payload 和内部 traceId。
+- V9 已在本机共享 XXL MySQL 执行，后续不得修改其字节。企业发布前仍须取得目标环境完整
+  `flyway_schema_history` 并核对 V1-V8 checksum/成功状态；未知 checksum、失败记录、版本倒序或分叉必须停发，
+  禁止 `repair`、`outOfOrder` 或手工修改历史表。

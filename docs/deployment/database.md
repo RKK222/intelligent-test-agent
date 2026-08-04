@@ -45,8 +45,9 @@ XXL MySQL 与平台 PostgreSQL 完全分离。Admin 子上下文只扫描 `backe
 | `V6__register_app_source_cleanup_task.sql` | 注册每分钟应用源码到期清理广播任务。 |
 | `V7__register_personal_workspace_relocation_task.sql` | 注册每分钟个人工作区跨服务器搬迁广播任务。 |
 | `V8__schedule_personal_workspace_relocation_every_thirty_minutes.sql` | 保留 V7 原始字节，把既有搬迁任务 Cron 更新为每 30 分钟并触发下一次时间重算。 |
+| `V9__register_inactive_user_process_cleanup_task.sql` | 注册每天北京时间 02:00 执行的十五天未使用用户 OpenCode 进程关闭广播任务。 |
 
-V3-V8 是生产必需基础调度配置，不是演示数据。后续新增任务或调整既有生产默认配置，都必须新建不可变的更高版本 SQL；新增任务按新的 `platform_task_key` 插入，配置调整只修改明确目标字段。不得改写已执行 migration，也不得在应用启动阶段用非版本化 upsert 覆盖页面参数。
+V3-V9 是生产必需基础调度配置，不是演示数据。后续新增任务或调整既有生产默认配置，都必须新建不可变的更高版本 SQL；新增任务按新的 `platform_task_key` 插入，配置调整只修改明确目标字段。不得改写已执行 migration，也不得在应用启动阶段用非版本化 upsert 覆盖页面参数。
 
 所有平台任务固定 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`，参数只含 `taskKey/concurrencyPolicy/payload`。V1-V5 可被多个 Admin 节点并发启动，Flyway schema history 负责互斥；重复启动不得重复 executor 组或任务。
 
@@ -99,7 +100,7 @@ PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审
 
 该 migration 只增加生产状态表、约束、索引和注释，不回填、不改写现有 Workspace，也不包含测试或环境数据。部署时先停止或至少完成全部 Java 的同版本切换边界，先让平台 PostgreSQL Flyway 应用本 migration，再让 XXL MySQL 连续应用 `V7`、`V8`；V7 登记任务，V8 在 scheduler 启动前把最终 Cron 调整为每 30 分钟。禁止让已注册 V7/V8 的新任务调用尚未包含新表/handler 的旧 Java。正式集成仍必须核对目标 `flyway_schema_history` 的版本/checksum，并从每套已知企业基线升级验证，禁止 `outOfOrder`、`repair` 或手工修改历史表。
 
-当前 release 将该 migration 的原始 SHA-256 锁定为 `f41a9aaab637f4b196f63cb7d37ef58cf0b15c9521abd1050c9929c6ce27b212`；`FlywayMigrationNamingTest` 和最终 persistence JAR 字节校验必须保持一致。XXL `V7` 源码 SHA-256 为 `be1705cac272b9c4e89c43136f0125132c2afc4bbc3525322678cd02fb2c5305`，`V8` 为 `f4919a2f6ce224ecf50b347f2d438ad746753d9bbb8856a3403adf963f031bf2`；任一版本进入共享 MySQL 后都禁止改写。
+当前 release 将该 migration 的原始 SHA-256 锁定为 `f41a9aaab637f4b196f63cb7d37ef58cf0b15c9521abd1050c9929c6ce27b212`；`FlywayMigrationNamingTest` 和最终 persistence JAR 字节校验必须保持一致。XXL `V7` 源码 SHA-256 为 `be1705cac272b9c4e89c43136f0125132c2afc4bbc3525322678cd02fb2c5305`，`V8` 为 `f4919a2f6ce224ecf50b347f2d438ad746753d9bbb8856a3403adf963f031bf2`，`V9` 为 `1d2e78716f3ffc33993de2c2b160fb48f6c8b6e9b71a7b592e4beaf6943a45e3`；任一版本进入共享 MySQL 后都禁止改写。
 
 ## V1 核心表
 

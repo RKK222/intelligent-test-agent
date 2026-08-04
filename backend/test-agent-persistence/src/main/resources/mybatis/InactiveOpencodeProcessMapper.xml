@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.InactiveOpencodeProcessMapper">
+    <resultMap id="InactiveProcessRowMap" type="com.enterprise.testagent.persistence.mybatis.InactiveOpencodeProcessRow">
+        <constructor>
+            <arg column="process_id" javaType="java.lang.String"/>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="linux_server_id" javaType="java.lang.String"/>
+            <arg column="container_id" javaType="java.lang.String"/>
+            <arg column="port" javaType="_int"/>
+            <arg column="pid" javaType="java.lang.Long"/>
+            <arg column="base_url" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="session_path" javaType="java.lang.String"/>
+            <arg column="config_path" javaType="java.lang.String"/>
+            <arg column="started_at" javaType="java.time.Instant"/>
+            <arg column="last_health_check_at" javaType="java.time.Instant"/>
+            <arg column="health_message" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="last_activity_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="LastActivityExpression">
+        greatest(
+            process.started_at,
+            coalesce((
+                select max(run.updated_at)
+                from runs run
+                join sessions session_row on session_row.session_id = run.session_id
+                where coalesce(run.triggered_by_user_id, session_row.created_by_user_id) = process.user_id
+            ), process.started_at)
+        )
+    </sql>
+
+    <sql id="CandidateColumns">
+        process.process_id,
+        process.user_id,
+        process.linux_server_id,
+        process.container_id,
+        process.port,
+        process.pid,
+        process.base_url,
+        process.status,
+        process.session_path,
+        process.config_path,
+        process.started_at,
+        process.last_health_check_at,
+        process.health_message,
+        process.created_at,
+        process.updated_at,
+        process.trace_id,
+        <include refid="LastActivityExpression"/> as last_activity_at
+    </sql>
+
+    <sql id="CandidateJoinAndPredicate">
+        from opencode_server_processes process
+        join user_opencode_process_bindings binding
+          on binding.process_id = process.process_id
+         and binding.user_id = process.user_id
+         and binding.linux_server_id = process.linux_server_id
+         and binding.port = process.port
+         and binding.agent_id = 'opencode'
+         and binding.status = 'ACTIVE'
+        where process.status in ('RUNNING', 'UNHEALTHY')
+          and <include refid="LastActivityExpression"/> &lt; #{activityBefore}
+    </sql>
+
+    <select id="findCandidates" resultMap="InactiveProcessRowMap">
+        select <include refid="CandidateColumns"/>
+        <include refid="CandidateJoinAndPredicate"/>
+          and process.linux_server_id = #{linuxServerId}
+        order by last_activity_at asc, process.process_id asc
+        limit #{limit}
+    </select>
+
+    <select id="findCurrentCandidate" resultMap="InactiveProcessRowMap">
+        select <include refid="CandidateColumns"/>
+        <include refid="CandidateJoinAndPredicate"/>
+          and process.process_id = #{processId}
+    </select>
+</mapper>

@@ -67,6 +67,7 @@ Admin 响应固定设置 `Content-Security-Policy: frame-ancestors 'self'` 和 `
 - `V6` 注册每分钟应用源码到期清理唤醒任务 `workspace-management.app-source-cleanup`；XXL 只取得全局锁并广播空 payload，各 Java 再按本机服务器 ID 认领 PostgreSQL cleanup 租约。
 - `V7` 注册个人工作区跨服务器搬迁任务 `workspace-management.personal-workspace-relocation`；XXL 只取得全局锁并广播空 payload，各 Java 再按本机服务器 ID 发现并认领源端 worktree。
 - `V8` 保留 V7 原始 migration，把该任务默认 Cron 调整为每 30 分钟并重算下一触发时间，不改变启停或执行策略。
+- `V9` 注册每天北京时间 02:00 的闲置用户进程关闭任务 `opencode-runtime.inactive-user-process-cleanup`；XXL 只取得全局锁并广播，各 Java 仅处理本机实际持有 manager 连接的进程。
 - 后续新增任务或调整既有生产默认配置必须新建更高版本 SQL；禁止改写已执行 migration，也禁止启动时执行非版本化 upsert。
 
 旧 PostgreSQL 的任务定义和运行历史只做保留，不复制到 MySQL，也不再被 runner 调度。短暂停机升级 migration 将旧夜间 `PENDING/RUNNING/STOPPING USER_PLAN` 全部标记为 `SKIPPED`，避免 runner 删除后残留永久活动记录；不删除历史审计，新夜间任务只写 `night_execution_tasks`。
@@ -104,10 +105,13 @@ Admin 响应固定设置 `Content-Security-Policy: frame-ancestors 'self'` 和 `
 | `scheduler.run-retention-cleanup` | `0 0 8 * * ? *` | 5 分钟 |
 | `workspace-management.app-source-cleanup` | `0 0/1 * * * ? *` | 1 分钟 |
 | `workspace-management.personal-workspace-relocation` | `0 0/30 * * * ? *` | 30 分钟 |
+| `opencode-runtime.inactive-user-process-cleanup` | `0 0 2 * * ? *` | 2 小时 |
 
 应用源码清理采用 `GLOBAL_MUTEX` 只避免多个 XXL executor 重复广播；该锁不承担 Linux 服务器亲和或持久化执行保证。收到 `app-source.cleanup-requested` 的每台 Java 只扫描当前 `linuxServerId` 的到期任务，并以数据库绝对租约和本机文件锁执行；广播丢失、Java 重启或服务器离线不会丢任务，下一轮或恢复上线后继续认领。
 
 个人工作区搬迁同样使用 `GLOBAL_MUTEX` 只避免重复广播，不把 ROUND 命中的 executor 当成文件源。收到 `personal-workspace.relocation-requested` 的每台 Java 只扫描 `workspaces.linux_server_id=本机` 且与用户 ACTIVE `opencode` binding 不一致的个人工作区，活动 Run 先阻断搬迁。源端以 30 分钟数据库租约认领，目标文件校验和数据库切换完成后状态进入 `CLEANUP_PENDING`；旧源 Java 完成 Git worktree 清理后才终态。广播丢失、节点重启、传输响应丢失和连续换服均由下一次扫描与持久化状态恢复，不依赖 XXL 自身重试。
+
+闲置用户进程关闭也使用 `GLOBAL_MUTEX` 避免重复广播。每个 Java 只扫描当前 `linuxServerId`，并以 Redis manager 快照和本机 WebSocket 注册表确认自己持有目标容器；最近活动取全部来源 Run 的最大更新时间，无 Run 时取 manager 权威启动时间。超过 15 天的候选仍须在用户级 dispose 闸门内二次核对，任何 active Run、Session 运行、绑定/代次变化或 manager 不确定都跳过；成功关闭只把进程写为 `STOPPED`，保留 ACTIVE binding 供下次使用自动拉起。
 
 JVM 和 XXL 统一使用 `Asia/Shanghai`。运行记录清理在北京时间 08:00 执行，对应原 UTC 00:00；XXL 日志保留 30 天，旧 PostgreSQL scheduler 历史仍由任务清理 7 天。
 

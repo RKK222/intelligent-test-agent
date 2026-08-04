@@ -10,7 +10,7 @@
 - JIT 用户按 `platform_user_id` 幂等、改名、稳定冲突后缀和无原生密码登录。
 - 原生登录/改密/用户写入口禁用，用户列表只读保留。
 - handler 参数、未知任务/策略、`GLOBAL_MUTEX`/`ALLOW_OVERLAP`、锁续租丢失、线程中断和异常脱敏。
-- MySQL 8.4 全新 Flyway、重复启动、并发 migration、V7 已执行后升级 V8、一个 executor 组、九个任务和无默认管理员；V5 后夜间分发任务必须启用且 Cron 为每分钟，V6 后应用源码清理任务也必须启用、每分钟执行，V8 后个人工作区搬迁任务必须启用、每 30 分钟执行；两类广播任务均使用 `GLOBAL_MUTEX` 和空 payload，路由/阻塞/过期/重试策略保持既有契约。
+- MySQL 8.4 全新 Flyway、重复启动、并发 migration、V8 已执行后升级 V9、一个 executor 组、十个任务和无默认管理员；V5 后夜间分发任务必须启用且 Cron 为每分钟，V6 后应用源码清理任务也必须启用、每分钟执行，V8 后个人工作区搬迁任务必须启用、每 30 分钟执行，V9 后闲置用户进程关闭必须启用、每天北京时间 02:00 执行；三个广播任务均使用 `GLOBAL_MUTEX` 和空 payload，路由/阻塞/过期/重试策略保持既有契约。
 - 每分钟扫描只读取已到 `slotStart` 且未过 `windowEnd` 的 `SCHEDULED`，不按 `NIGHT_WINDOW/ADMIN_CUSTOM` 模式过滤；单轮 500、目标分组 50、服务器并发 8，目标 Java 单批 Run 受理并发 4，接口不等待 Run 终态且没有专属队列。
 - 普通用户缺失 `scheduleMode` 时保持标准夜间语义，伪造 `ADMIN_CUSTOM` 必须在创建任何 Session、幂等锁、会话锁或容量记录前返回 `FORBIDDEN`；超级管理员可创建白天完整分钟任务，边界为下一完整分钟至未来 24 小时，显示区间 1 分钟、重试窗口 15 分钟。
 - `ADMIN_CUSTOM` 创建、改期、取消、Run 受理、永久失败和窗口过期均不得调用夜间容量预留/释放；角色被移除后仍可取消，但调整自定义任务必须返回 `FORBIDDEN`。
@@ -74,13 +74,14 @@ Testcontainers 需要可用 Docker；Docker 不可用时相关 MySQL/Redis 测�
 8. 分别创建标准夜间任务和超级管理员白天 `ADMIN_CUSTOM` 任务，确认都不写 PostgreSQL `USER_PLAN`，XXL `opencode-runtime.night-execution-dispatch` 每分钟到点后按任务固化服务器调用目标 Java；自定义任务不改变 `night_execution_slot_reservations`。停止 XXL 后任务仍可提交，恢复后数据库扫描补发。
 9. 启动两个共享 XXL MySQL 的 Java，确认两个 advertised host 的 executor 都出现在同一执行器组；再新增第三节点并只 reload 中央 Nginx，前两个 Java 不修改配置、不重启，执行器组最终出现三个注册地址。
 10. 分别制造响应丢失、Java 在 legacy Run 行落库后/用户消息前退出、远端 prompt 已接收但本地 handoff 标记前退出、远端探测 UNKNOWN、锚点来源 ID 冲突、租约过期且 owner 在线/离线、07:00 窗口结束且本机 handle 仍在；确认补偿只接受当前任务锚点、没有第二个 Run，远端已接收时不会重投，且不会先写 `FAILED` 后由旧调用创建 Run。通用 stale legacy 扫描不得处理带 attempt 且未受理的 Scheduled 锚点。
+11. 在两台服务器分别准备超过 15 天无 Run 的用户进程和近期任一来源 Run 的用户进程，手动触发闲置清理；确认前者只由持有对应 manager 连接的 Java 关闭并保留 ACTIVE binding，后者不关闭。制造活动 Run、manager 断连和扫描后二次发起 Run，确认都保守跳过；随后再次使用已关闭用户，确认原绑定进程自动拉起。
 
 单节点启动日志还必须确认：平台 Netty 可以先于 Admin 就绪；本机 Admin Tomcat/readiness 完成后才出现 executor 启动和 `ExecutorRegistryThread` 启动；同一次启动区间不得出现指向尚未监听本机 Admin 的 `registry error` / `Connection refused`。MySQL 中注册地址必须等于平台 advertised host 加 executor 端口。
 
 ## 数据与日志检查
 
 - `xxl_job_user` 不存在默认管理员；JIT 行具有唯一 `platform_user_id` 和 SHA-256 session digest，不保存平台原始 Token。
-- `xxl_job_info` 恰好九条且 `platform_task_key` 唯一；所有任务为 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`，夜间分发和应用源码清理均为每分钟 Cron `0 0/1 * * * ? *`，个人工作区搬迁为每 30 分钟 Cron `0 0/30 * * * ? *`；两类广播任务参数都只含 taskKey、`GLOBAL_MUTEX` 和空 payload。
+- `xxl_job_info` 恰好十条且 `platform_task_key` 唯一；所有任务为 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`，夜间分发和应用源码清理均为每分钟 Cron `0 0/1 * * * ? *`，个人工作区搬迁为每 30 分钟 Cron `0 0/30 * * * ? *`，闲置用户进程关闭为每日 Cron `0 0 2 * * ? *`；三个广播任务参数都只含 taskKey、`GLOBAL_MUTEX` 和空 payload。
 - 旧 PostgreSQL scheduler 历史仍存在，但应用内没有 runner，不再产生新的 `CRON`、`MANUAL` 或 `USER_PLAN`；旧夜间 `PENDING/RUNNING/STOPPING USER_PLAN` 在短暂停机升级后均为 `SKIPPED`。
 - URL、访问日志、应用日志和错误响应不得出现票据、Cookie、Token、MySQL 密码或完整 executor 参数中的敏感载荷。
 - XXL 日志保留 30 天；PostgreSQL 已结束 scheduler 历史仍按 7 天清理。
