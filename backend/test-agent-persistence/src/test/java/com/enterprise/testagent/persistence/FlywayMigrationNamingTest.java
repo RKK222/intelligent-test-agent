@@ -54,6 +54,10 @@ class FlywayMigrationNamingTest {
             "V20260803133000__support_public_agent_config_rollout_supersede.sql";
     private static final String RELEASE_ROLLOUT_SUPERSEDE_SHA256 =
             "8b3cbad538f856d5daa06d15f118554ecefb2380a249287cdfe291eb71199022";
+    private static final String RELEASE_PERSONAL_WORKSPACE_RELOCATION_MIGRATION =
+            "V20260804123000__create_personal_workspace_relocations.sql";
+    private static final String RELEASE_PERSONAL_WORKSPACE_RELOCATION_SHA256 =
+            "f41a9aaab637f4b196f63cb7d37ef58cf0b15c9521abd1050c9929c6ce27b212";
     private static final List<String> APPLIED_LEGACY_SEED_MIGRATIONS = List.of(
             "V10__seed_fcoss_application.sql",
             "V13__seed_fcoss_more_workspaces.sql");
@@ -151,6 +155,15 @@ class FlywayMigrationNamingTest {
                 "db/migration",
                 RELEASE_ROLLOUT_SUPERSEDE_MIGRATION,
                 RELEASE_ROLLOUT_SUPERSEDE_SHA256);
+    }
+
+    @Test
+    void releasePersonalWorkspaceRelocationMigrationRemainsByteExact()
+            throws IOException, NoSuchAlgorithmException {
+        assertMigrationSha256(
+                "db/migration",
+                RELEASE_PERSONAL_WORKSPACE_RELOCATION_MIGRATION,
+                RELEASE_PERSONAL_WORKSPACE_RELOCATION_SHA256);
     }
 
     private static void assertMigrationSha256(

@@ -1153,7 +1153,7 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
-    void ensureDefaultPersonalWorkspaceRepairsRuntimeServerOwnershipAndInvalidatesContext() {
+    void ensureDefaultPersonalWorkspaceDefersCrossServerRepairToRelocationTask() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
@@ -1183,23 +1183,25 @@ class ManagedWorkspaceApplicationServiceTest {
                 "10.8.0.22",
                 "trace_wrong_server"));
         ConversationContextStore contextStore = org.mockito.Mockito.mock(ConversationContextStore.class);
-        ConversationContextWorkspaceMutation mutation =
-                new ConversationContextWorkspaceMutation(runtimeId, "mutation-server-repair");
-        org.mockito.Mockito.when(contextStore.beginWorkspaceMutation(runtimeId)).thenReturn(mutation);
         service.setConversationContextStore(contextStore);
 
-        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse repaired = service.ensureDefaultPersonalWorkspace(
-                version.versionId(),
-                new UserId("usr_1"),
-                "trace_repair_server");
+        assertThatThrownBy(() -> service.ensureDefaultPersonalWorkspace(
+                        version.versionId(),
+                        new UserId("usr_1"),
+                        "trace_repair_server"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.details())
+                            .containsEntry("retryable", true)
+                            .containsEntry("reason", "PERSONAL_WORKSPACE_RELOCATION_PENDING")
+                            .doesNotContainKeys("workspaceId", "personalWorkspaceId");
+                });
 
-        assertThat(repaired.personalWorkspaceId()).isEqualTo(personal.personalWorkspaceId());
-        assertThat(repaired.runtimeWorkspace().linuxServerId()).isEqualTo("127.0.0.1");
+        // 初始化入口不得抢先改库，否则旧服务器上的未提交内容会失去可追踪的源路径。
         assertThat(workspaces.findById(runtimeId)).get()
                 .extracting(Workspace::linuxServerId)
-                .isEqualTo("127.0.0.1");
-        org.mockito.Mockito.verify(contextStore).beginWorkspaceMutation(runtimeId);
-        org.mockito.Mockito.verify(contextStore).completeWorkspaceMutation(mutation);
+                .isEqualTo("10.8.0.22");
+        org.mockito.Mockito.verifyNoInteractions(contextStore);
     }
 
     @Test

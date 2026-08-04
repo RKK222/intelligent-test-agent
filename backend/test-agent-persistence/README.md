@@ -5,6 +5,7 @@
 - `V20260728103000__create_app_source_snapshot_tables.sql` 新增应用源码 slot、固定内容 snapshot、服务器 replica、operation/step、cleanup 和 recent 表，结构化选择使用 PostgreSQL JSONB；初始 snapshot 约束为 `expires_at = accepted_at + 1..72` 整小时且索引摘要必须为 64 位十六进制；cleanup 到 operation/snapshot 的外键为 `DEFERRABLE INITIALLY DEFERRED`，并初始化只读 `OPENCODE_APP_SOURCE_ROOT=${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/appsource/`。
 - `V20260731115520__extend_app_source_retention.sql` 保留已经执行的 365 天扩容原始字节，`V20260731123600__cap_app_source_retention_at_one_week.sql` 再把最终 snapshot 整小时上限收紧为 168 小时（7 天），两者均不改历史数据；续期运行 SQL 位于 `AppSourceMapper.xml`，通过快照 expiry CAS 同步更新权威索引摘要和全部未开始 cleanup 的 `delete_at/next_retry_at`。
 - `V20260728210000__index_in_flight_app_source_operations.sql` 为 dispatcher 周期恢复增加 `(status, accepted_at, operation_id)` 索引，使 `PENDING/RUNNING` stranded 扫描不随历史终态 operation 全表增长；迁移只新增索引，不写业务数据。
+- `V20260804123000__create_personal_workspace_relocations.sql` 新增每个个人工作区唯一的跨服务器搬迁状态，保存源/目标服务器、源逻辑路径、租约、快照摘要/大小、安全错误和完成时间。目标完成由 MyBatis XML 在一个 PostgreSQL 事务内锁定搬迁事实并更新运行态 Workspace、个人工作区路径/基线提交和 `CLEANUP_PENDING`；旧源清理完成后才转 `SUCCEEDED`。再次换服不会覆盖尚待清理的旧搬迁，终态后才开启下一段搬迁。
 - `db/migration-compat/lobehub-missing/V20260802173416__backfill_lobehub_model_gateway.sql` 只对已执行 `V20260801093854`、却漏掉 `V20260730090000` 的已知分叉加载；通过高版本幂等补偿创建模型目录、探测、每日聚合表和四个默认禁用参数，正常顺序库与空库不可见。
 - `db/migration-compat/lobehub-missing-after-rollout/V20260803141754__backfill_lobehub_model_gateway_after_rollout.sql` 只对上述缺失仍存在、早期补偿未执行且 release `V20260803133000` 已落库的更高历史加载，避免倒序执行早期补偿；SQL 语义与早期补偿一致。
 
@@ -69,6 +70,7 @@
 - `V20260728100000__add_personal_application_rollout_scope.sql`：把 rollout 作用域约束扩展为 `PERSONAL_APPLICATION`，供个人拉取应用 Agent 后仅持久化当前用户的空闲检测与 dispose；不新增表、不写业务数据，也不加入公共/应用发布唯一锁。
 - `V20260728160000__extend_public_agent_config_refresh.sql`：为 rollout 持久化共享运行副本恢复确认，并创建以 `agent_config_worktrees` 为外键的公共个人 worktree 补偿表；公共冲突不占主 rollout，认领和终态更新使用 fencing token。
 - `V20260803133000__support_public_agent_config_rollout_supersede.sql`：为公共卡死 rollout 增加一对一替换审计链、`SUPERSEDED` 终态说明和 target `force_stop` 标记；历史行保持可空/默认 `false`，不自动改写或停止现场任务。
+- `V20260804123000__create_personal_workspace_relocations.sql`：创建个人工作区跨服务器两阶段搬迁表、认领索引、外键和状态/服务器/次数/归档大小约束；不回填或自动改写现有 Workspace。`PersonalWorkspaceRelocationMapper.xml` 负责错配扫描、活动 Run 闸门、发现、租约认领、版本/用户/分支/源路径 fencing、目标三表切换、退避和可重复认领的旧源清理终态，未新增 JDBC SQL。
 - `V17__seed_local_opencode_machine_for_default_user.sql`：历史本地开发种子脚本，曾预置一台 `127.0.0.1` 的 opencode 机器并绑定默认开发用户；该版本已可能被历史库应用，禁止删除、重命名或直接改写。
 - `V20260627000000__cleanup_loopback_linux_server_seed.sql`：清理 V17 留下的 `127.0.0.1` loopback opencode 拓扑、用户进程、绑定和关联的 manager-backend 连接。
 - `V20260627010000__add_encrypted_aes_key_to_user_ssh_keys.sql`：为 `user_ssh_keys` 增加 `encrypted_aes_key` 列；V10 已被 F-COSS seed 占用，后续 schema 变更不得复用 V10。
@@ -148,6 +150,7 @@
 ## 测试覆盖
 
 - 通用 H2 PostgreSQL 模式测试固定迁移到 `V20260715213000` 这一最后兼容基线；后续含 `timestamptz`、部分表达式索引和 `ON CONFLICT DO UPDATE` 的完整生产链由真实 PostgreSQL 集成测试与应用启动验证。旧 H2 用例只按 mapper 所需补列或单独执行可兼容 migration，历史 V17 本机种子改由 `src/test/resources/db/fixture` 注入；测试不会修改已发布 migration 及其 checksum，也不会依赖生产 migration 写入开发用户。
+- `MyBatisPersonalWorkspaceRelocationPostgresqlIntegrationTest` 在 PostgreSQL 16 上执行完整 Flyway 链，验证错配扫描、ACTIVE Run 阻断、租约状态、目标三表原子切换，以及 `CLEANUP_PENDING` 在连续换服时不被下一段搬迁覆盖；`MyBatisPersonalWorkspaceRelocationRepositoryTest` 固化 MyBatis XML 条件和目标更新顺序。
 - `JdbcRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖 Workspace（含 `linux_server_id`、历史脏 `updated_at < created_at` 归一化）、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision 的保存和读取。
 - `MyBatisCommonParameterRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖通用参数 MyBatis XML 查询、列表、按 ID 查询和仅更新 value。
 - `MyBatisUserDeletionRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式加载真实 MyBatis XML，覆盖无业务用户的角色、登录日志、应用成员清理和受保护业务引用阻断；`RedisTokenStoreTest` 覆盖增量扫描只删除目标用户 Token。

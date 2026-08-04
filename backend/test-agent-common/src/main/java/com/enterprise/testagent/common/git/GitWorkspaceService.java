@@ -12,7 +12,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Git 工作区命令服务，集中封装 clone、worktree、diff 和 push 等本地仓库操作。
@@ -21,6 +23,9 @@ public class GitWorkspaceService {
 
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(60);
     private static final Duration PUSH_TIMEOUT = Duration.ofSeconds(120);
+    private static final Duration BUNDLE_TIMEOUT = Duration.ofMinutes(5);
+    private static final Pattern RELOCATION_REF = Pattern.compile(
+            "^refs/test-agent/relocations/[A-Za-z0-9_-]{8,128}/(head|stash)$");
 
     private final GitCommandExecutor executor;
 
@@ -140,9 +145,10 @@ public class GitWorkspaceService {
     }
 
     /**
-     * 清理已失效的 worktree 元数据。Git 只会删除磁盘目录已不存在的登记，不会移除仍存活的其它 worktree。
+     * 清理已失效的 worktree 元数据。Git 只会删除磁盘目录已不存在的登记，不会移除仍存活的其它 worktree；
+     * 公开给删除成功但状态回写失败后的幂等补偿复用。
      */
-    private void pruneWorktrees(Path repoRoot, String privateKey) {
+    public void pruneWorktrees(Path repoRoot, String privateKey) {
         executor.execute(
                 List.of("git", "-C", repoRoot.toString(), "worktree", "prune"),
                 privateKey,
@@ -407,7 +413,7 @@ public class GitWorkspaceService {
             String targetCommit,
             String privateKey) {
         String localRef = "refs/heads/" + branch;
-        if (localBranchExists(repoRoot, localRef)) {
+        if (localRefExists(repoRoot, localRef)) {
             String localCommit = resolveCommit(repoRoot, localRef);
             if (!isAncestor(repoRoot, localCommit, targetCommit)) {
                 throw new PlatformException(
@@ -427,7 +433,7 @@ public class GitWorkspaceService {
         }
     }
 
-    private boolean localBranchExists(Path repoRoot, String localRef) {
+    private boolean localRefExists(Path repoRoot, String localRef) {
         try {
             executor.execute(
                     List.of("git", "-C", repoRoot.toString(), "show-ref", "--verify", "--quiet", localRef),
@@ -1276,6 +1282,263 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 捕获不修改工作树的 Git 状态指纹。stash create 只写入临时 Git 对象，不更新 stash ref、index 或文件。
+     */
+    public PortableTrackedState capturePortableTrackedState(Path worktreeRoot) {
+        if (isMergeInProgress(worktreeRoot) || !conflictPaths(worktreeRoot).isEmpty()) {
+            throw new PlatformException(
+                    com.enterprise.testagent.common.error.ErrorCode.CONFLICT,
+                    "个人工作区存在未完成合并，暂不能自动搬迁",
+                    Map.of("gitFailureType", "UNMERGED_WORKTREE"));
+        }
+        if (hasIndexedSubmodule(worktreeRoot)) {
+            throw new PlatformException(
+                    com.enterprise.testagent.common.error.ErrorCode.CONFLICT,
+                    "个人工作区包含 Git 子模块，暂不能自动搬迁",
+                    Map.of("gitFailureType", "UNSUPPORTED_GIT_SUBMODULE"));
+        }
+        String headCommit = headCommit(worktreeRoot);
+        String indexTree = executor.execute(
+                List.of("git", "-C", worktreeRoot.toString(), "write-tree"),
+                null,
+                DEFAULT_TIMEOUT).stdoutText().trim();
+        String stashCommit = executor.execute(
+                List.of("git", "-C", worktreeRoot.toString(), "stash", "create"),
+                null,
+                DEFAULT_TIMEOUT).stdoutText().trim();
+        String worktreeTree = stashCommit.isBlank()
+                ? resolveCommit(worktreeRoot, headCommit + "^{tree}")
+                : resolveCommit(worktreeRoot, stashCommit + "^{tree}");
+        return new PortableTrackedState(
+                headCommit,
+                indexTree,
+                worktreeTree,
+                stashCommit.isBlank() ? null : stashCommit);
+    }
+
+    /** 以 NUL 分隔读取全部未跟踪文件路径（包括被 ignore 的文件），避免空格和换行造成路径拆分。 */
+    public List<String> untrackedPaths(Path worktreeRoot) {
+        byte[] output = executor.execute(
+                List.of(
+                        "git", "-c", "core.quotepath=false", "-C", worktreeRoot.toString(),
+                        "ls-files", "--others", "-z"),
+                null,
+                DEFAULT_TIMEOUT).stdoutBytes();
+        List<String> paths = new ArrayList<>();
+        int start = 0;
+        for (int index = 0; index < output.length; index++) {
+            if (output[index] == 0) {
+                if (index > start) {
+                    paths.add(new String(output, start, index - start, StandardCharsets.UTF_8));
+                }
+                start = index + 1;
+            }
+        }
+        if (start < output.length) {
+            paths.add(new String(output, start, output.length - start, StandardCharsets.UTF_8));
+        }
+        return List.copyOf(paths);
+    }
+
+    /**
+     * Git bundle 只能携带超级仓库中的 gitlink，不包含子模块内部的本地工作态。
+     * 源端删除 worktree 前必须失败关闭，避免已初始化或有未提交内容的子模块被误删。
+     */
+    private boolean hasIndexedSubmodule(Path worktreeRoot) {
+        byte[] output = executor.execute(
+                List.of(
+                        "git", "-c", "core.quotepath=false", "-C", worktreeRoot.toString(),
+                        "ls-files", "--stage", "-z"),
+                null,
+                DEFAULT_TIMEOUT).stdoutBytes();
+        int recordStart = 0;
+        for (int index = 0; index <= output.length; index++) {
+            if (index < output.length && output[index] != 0) {
+                continue;
+            }
+            if (index - recordStart >= 7
+                    && output[recordStart] == '1'
+                    && output[recordStart + 1] == '6'
+                    && output[recordStart + 2] == '0'
+                    && output[recordStart + 3] == '0'
+                    && output[recordStart + 4] == '0'
+                    && output[recordStart + 5] == '0'
+                    && output[recordStart + 6] == ' ') {
+                return true;
+            }
+            recordStart = index + 1;
+        }
+        return false;
+    }
+
+    /**
+     * 把 HEAD 与可选 stash commit 写入只包含两条临时引用的 bundle，finally 中删除源仓库临时 ref。
+     */
+    public void createPortableBundle(
+            Path worktreeRoot,
+            Path bundlePath,
+            String headRef,
+            String stashRef,
+            PortableTrackedState state) {
+        requireRelocationRef(headRef, "head");
+        requireRelocationRef(stashRef, "stash");
+        Objects.requireNonNull(state, "state must not be null");
+        try {
+            updateRef(worktreeRoot, headRef, state.headCommit());
+            if (state.stashCommit() != null) {
+                updateRef(worktreeRoot, stashRef, state.stashCommit());
+            }
+            ArrayList<String> command = new ArrayList<>(List.of(
+                    "git", "-C", worktreeRoot.toString(), "bundle", "create", bundlePath.toString(), headRef));
+            if (state.stashCommit() != null) {
+                command.add(stashRef);
+            }
+            executor.execute(List.copyOf(command), null, BUNDLE_TIMEOUT);
+        } finally {
+            deleteRefQuietly(worktreeRoot, headRef);
+            deleteRefQuietly(worktreeRoot, stashRef);
+        }
+    }
+
+    /** 从搬迁 bundle 获取指定引用到目标公共仓库的隔离临时引用。 */
+    public void fetchPortableBundleRef(
+            Path repoRoot, Path bundlePath, String sourceRef, String targetRef) {
+        requireAnyRelocationRef(sourceRef);
+        requireAnyRelocationRef(targetRef);
+        executor.execute(
+                List.of(
+                        "git", "-C", repoRoot.toString(), "fetch", bundlePath.toString(),
+                        sourceRef + ":" + targetRef),
+                null,
+                BUNDLE_TIMEOUT);
+    }
+
+    /** 在隔离分支上从指定提交创建目标端暂存 worktree。 */
+    public void createWorktreeAtCommit(Path repoRoot, Path worktreeRoot, String branch, String commitRef) {
+        executor.execute(
+                List.of(
+                        "git", "-C", repoRoot.toString(), "worktree", "add", "-b", branch,
+                        worktreeRoot.toString(), commitRef),
+                null,
+                DEFAULT_TIMEOUT);
+    }
+
+    /** 使用 stash 原生三父提交恢复工作树和 index，保留 staged/unstaged 的区别。 */
+    public void applyPortableStash(Path worktreeRoot, String stashRef) {
+        requireAnyRelocationRef(stashRef);
+        executor.execute(
+                List.of("git", "-C", worktreeRoot.toString(), "stash", "apply", "--index", stashRef),
+                null,
+                BUNDLE_TIMEOUT);
+    }
+
+    /** 把目标端暂存 worktree 原子登记移动到最终目录。 */
+    public void moveWorktree(Path repoRoot, Path sourceWorktreeRoot, Path targetWorktreeRoot) {
+        executor.execute(
+                List.of(
+                        "git", "-C", repoRoot.toString(), "worktree", "move",
+                        sourceWorktreeRoot.toString(), targetWorktreeRoot.toString()),
+                null,
+                DEFAULT_TIMEOUT);
+    }
+
+    /** 返回分支当前登记的 worktree；空表示分支不存在或未被任何 worktree 使用。 */
+    public Optional<Path> worktreePathForBranch(Path repoRoot, String branch) {
+        return Optional.ofNullable(registeredWorktreePathForBranch(repoRoot, branch));
+    }
+
+    /** 判断本地分支是否存在，不把 show-ref 的标准“未命中”退出码误报成仓库故障。 */
+    public boolean localBranchExists(Path repoRoot, String branch) {
+        try {
+            executor.execute(
+                    List.of("git", "-C", repoRoot.toString(), "show-ref", "--verify", "--quiet", "refs/heads/" + branch),
+                    null,
+                    DEFAULT_TIMEOUT);
+            return true;
+        } catch (PlatformException exception) {
+            Object exitCode = exception.details().get("exitCode");
+            if (exitCode instanceof Number number && number.intValue() == 1) {
+                return false;
+            }
+            throw exception;
+        }
+    }
+
+    /** 删除未被 worktree 使用的旧本地分支；调用方必须先完成登记路径校验。 */
+    public void deleteLocalBranch(Path repoRoot, String branch) {
+        executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "branch", "-D", branch),
+                null,
+                DEFAULT_TIMEOUT);
+    }
+
+    /** 将当前暂存分支改回个人工作区原始分支名。 */
+    public void renameCurrentBranch(Path worktreeRoot, String branch) {
+        executor.execute(
+                List.of("git", "-C", worktreeRoot.toString(), "branch", "-m", branch),
+                null,
+                DEFAULT_TIMEOUT);
+    }
+
+    /** 删除目标仓库搬迁临时引用。 */
+    public void deletePortableRef(Path repoRoot, String ref) {
+        requireAnyRelocationRef(ref);
+        deleteRefQuietly(repoRoot, ref);
+    }
+
+    private void updateRef(Path repoRoot, String ref, String commit) {
+        executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "update-ref", ref, commit),
+                null,
+                DEFAULT_TIMEOUT);
+    }
+
+    private void deleteRefQuietly(Path repoRoot, String ref) {
+        try {
+            executor.execute(
+                    List.of("git", "-C", repoRoot.toString(), "update-ref", "-d", ref),
+                    null,
+                    DEFAULT_TIMEOUT);
+        } catch (RuntimeException ignored) {
+            // 临时 ref 清理由下一次同 ID 操作覆盖；不得掩盖主搬迁结果。
+        }
+    }
+
+    private void requireRelocationRef(String ref, String suffix) {
+        requireAnyRelocationRef(ref);
+        if (!ref.endsWith("/" + suffix)) {
+            throw new IllegalArgumentException("relocation ref suffix mismatch");
+        }
+    }
+
+    private void requireAnyRelocationRef(String ref) {
+        if (ref == null || !RELOCATION_REF.matcher(ref).matches()) {
+            throw new IllegalArgumentException("invalid relocation ref");
+        }
+    }
+
+    public record PortableTrackedState(
+            String headCommit,
+            String indexTree,
+            String worktreeTree,
+            String stashCommit) {
+
+        public PortableTrackedState {
+            headCommit = requireObjectId(headCommit, "headCommit");
+            indexTree = requireObjectId(indexTree, "indexTree");
+            worktreeTree = requireObjectId(worktreeTree, "worktreeTree");
+            stashCommit = stashCommit == null ? null : requireObjectId(stashCommit, "stashCommit");
+        }
+
+        private static String requireObjectId(String value, String name) {
+            if (value == null || !value.matches("^[0-9a-fA-F]{40,64}$")) {
+                throw new IllegalArgumentException(name + " must be a Git object id");
+            }
+            return value.toLowerCase(java.util.Locale.ROOT);
+        }
+    }
+
+    /**
      * 删除 worktree 目录并清理 Git worktree 元数据。
      */
     public void removeWorktree(Path repoRoot, Path worktreeRoot, String privateKey) {
@@ -1283,10 +1546,7 @@ public class GitWorkspaceService {
                 List.of("git", "-C", repoRoot.toString(), "worktree", "remove", "--force", worktreeRoot.toString()),
                 privateKey,
                 DEFAULT_TIMEOUT);
-        executor.execute(
-                List.of("git", "-C", repoRoot.toString(), "worktree", "prune"),
-                privateKey,
-                DEFAULT_TIMEOUT);
+        pruneWorktrees(repoRoot, privateKey);
     }
 
     /**

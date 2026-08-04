@@ -126,6 +126,13 @@ public final class RuntimeIdGenerator {
     }
 
     /**
+     * 生成个人工作区跨服务器搬迁 ID，供定时补偿、传输票据和审计状态共同引用。
+     */
+    public static String personalWorkspaceRelocationId() {
+        return prefixed("pwr_");
+    }
+
+    /**
      * 生成工作区同步记录 ID，返回值固定使用 {@code sync_} 前缀。
      */
     public static String workspaceSyncRecordId() {

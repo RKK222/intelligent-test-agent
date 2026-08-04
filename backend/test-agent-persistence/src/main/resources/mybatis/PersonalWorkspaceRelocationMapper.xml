@@ -1,0 +1,401 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.PersonalWorkspaceRelocationMapper">
+
+    <resultMap id="CandidateMap" type="com.enterprise.testagent.persistence.mybatis.PersonalWorkspaceRelocationCandidateRow">
+        <constructor>
+            <arg column="personal_workspace_id" javaType="java.lang.String"/>
+            <arg column="app_workspace_version_id" javaType="java.lang.String"/>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="runtime_workspace_id" javaType="java.lang.String"/>
+            <arg column="source_linux_server_id" javaType="java.lang.String"/>
+            <arg column="target_linux_server_id" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="RelocationMap" type="com.enterprise.testagent.persistence.mybatis.PersonalWorkspaceRelocationRow">
+        <constructor>
+            <arg column="relocation_id" javaType="java.lang.String"/>
+            <arg column="personal_workspace_id" javaType="java.lang.String"/>
+            <arg column="app_workspace_version_id" javaType="java.lang.String"/>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="runtime_workspace_id" javaType="java.lang.String"/>
+            <arg column="source_linux_server_id" javaType="java.lang.String"/>
+            <arg column="target_linux_server_id" javaType="java.lang.String"/>
+            <arg column="branch" javaType="java.lang.String"/>
+            <arg column="source_repo_root_path" javaType="java.lang.String"/>
+            <arg column="source_workspace_root_path" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="attempt_count" javaType="_int"/>
+            <arg column="lease_owner" javaType="java.lang.String"/>
+            <arg column="lease_until" javaType="java.time.Instant"/>
+            <arg column="snapshot_sha256" javaType="java.lang.String"/>
+            <arg column="archive_size_bytes" javaType="java.lang.Long"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="RelocationColumns">
+        relocation_id, personal_workspace_id, app_workspace_version_id, user_id, runtime_workspace_id,
+        source_linux_server_id, target_linux_server_id, branch, source_repo_root_path,
+        source_workspace_root_path, status, attempt_count, lease_owner, lease_until,
+        snapshot_sha256, archive_size_bytes, trace_id, created_at, updated_at
+    </sql>
+
+    <select id="findMismatches" resultMap="CandidateMap">
+        select pw.personal_workspace_id, pw.app_workspace_version_id, pw.user_id,
+               pw.runtime_workspace_id, w.linux_server_id as source_linux_server_id,
+               b.linux_server_id as target_linux_server_id
+        from personal_workspaces pw
+        join workspaces w on w.workspace_id = pw.runtime_workspace_id
+        join user_opencode_process_bindings b
+          on b.user_id = pw.user_id
+         and b.agent_id = 'opencode'
+         and b.status = 'ACTIVE'
+        where pw.status = 'ACTIVE'
+          and w.status = 'ACTIVE'
+          and w.linux_server_id = #{sourceLinuxServerId}
+          and w.linux_server_id is not null
+          and b.linux_server_id is not null
+          and w.linux_server_id &lt;&gt; b.linux_server_id
+          and not exists (
+              select 1 from runs active_run
+              where active_run.workspace_id = pw.runtime_workspace_id
+                and active_run.status in ('PENDING', 'RUNNING', 'CANCELLING')
+          )
+        order by pw.updated_at, pw.personal_workspace_id
+        limit #{limit}
+    </select>
+
+    <insert id="discover" databaseId="postgresql">
+        insert into personal_workspace_relocations as current_relocation(
+            relocation_id, personal_workspace_id, app_workspace_version_id, user_id, runtime_workspace_id,
+            source_linux_server_id, target_linux_server_id, branch, source_repo_root_path,
+            source_workspace_root_path, status, attempt_count, next_retry_at, trace_id,
+            created_at, updated_at
+        )
+        select #{relocationId}, pw.personal_workspace_id, pw.app_workspace_version_id, pw.user_id,
+               pw.runtime_workspace_id, w.linux_server_id, b.linux_server_id, pw.branch,
+               pw.repo_root_path, pw.workspace_root_path, 'DISCOVERED', 0, #{now}, #{traceId}, #{now}, #{now}
+        from personal_workspaces pw
+        join workspaces w on w.workspace_id = pw.runtime_workspace_id
+        join user_opencode_process_bindings b
+          on b.user_id = pw.user_id and b.agent_id = 'opencode' and b.status = 'ACTIVE'
+        where pw.personal_workspace_id = #{personalWorkspaceId}
+          and pw.runtime_workspace_id = #{runtimeWorkspaceId}
+          and pw.status = 'ACTIVE' and w.status = 'ACTIVE'
+          and w.linux_server_id = #{sourceLinuxServerId}
+          and b.linux_server_id = #{targetLinuxServerId}
+          and w.linux_server_id &lt;&gt; b.linux_server_id
+        on conflict (personal_workspace_id) do update set
+            relocation_id = excluded.relocation_id,
+            app_workspace_version_id = excluded.app_workspace_version_id,
+            user_id = excluded.user_id,
+            runtime_workspace_id = excluded.runtime_workspace_id,
+            source_linux_server_id = excluded.source_linux_server_id,
+            target_linux_server_id = excluded.target_linux_server_id,
+            branch = excluded.branch,
+            source_repo_root_path = excluded.source_repo_root_path,
+            source_workspace_root_path = excluded.source_workspace_root_path,
+            status = 'DISCOVERED', attempt_count = 0, next_retry_at = excluded.next_retry_at,
+            lease_owner = null, lease_until = null,
+            snapshot_sha256 = null, archive_size_bytes = null,
+            safe_error_code = null, safe_error_message = null,
+            target_applied_at = null, completed_at = null,
+            trace_id = excluded.trace_id,
+            updated_at = excluded.updated_at
+        where current_relocation.status in ('SUCCEEDED', 'CANCELLED')
+           or (
+                (
+                    current_relocation.app_workspace_version_id &lt;&gt; excluded.app_workspace_version_id
+                    or current_relocation.user_id &lt;&gt; excluded.user_id
+                    or current_relocation.runtime_workspace_id &lt;&gt; excluded.runtime_workspace_id
+                    or current_relocation.source_linux_server_id &lt;&gt; excluded.source_linux_server_id
+                    or current_relocation.target_linux_server_id &lt;&gt; excluded.target_linux_server_id
+                    or current_relocation.branch &lt;&gt; excluded.branch
+                    or current_relocation.source_repo_root_path &lt;&gt; excluded.source_repo_root_path
+                    or current_relocation.source_workspace_root_path &lt;&gt; excluded.source_workspace_root_path
+                )
+                and (
+                    current_relocation.status in ('DISCOVERED', 'RETRY_WAIT')
+                    or (
+                        current_relocation.status in ('EXPORTING', 'TRANSFERRING', 'APPLYING')
+                        and (current_relocation.lease_until is null
+                             or current_relocation.lease_until &lt;= excluded.updated_at)
+                    )
+                )
+           )
+    </insert>
+
+    <!-- H2 PostgreSQL mode 不支持 ON CONFLICT；测试路径使用同语义 ANSI MERGE。 -->
+    <insert id="discover" databaseId="h2">
+        merge into personal_workspace_relocations target
+        using (
+            select #{relocationId} relocation_id, pw.personal_workspace_id, pw.app_workspace_version_id,
+                   pw.user_id, pw.runtime_workspace_id, w.linux_server_id source_linux_server_id,
+                   b.linux_server_id target_linux_server_id, pw.branch,
+                   pw.repo_root_path source_repo_root_path, pw.workspace_root_path source_workspace_root_path,
+                   #{now} next_retry_at, #{traceId} trace_id, #{now} created_at, #{now} updated_at
+            from personal_workspaces pw
+            join workspaces w on w.workspace_id = pw.runtime_workspace_id
+            join user_opencode_process_bindings b
+              on b.user_id = pw.user_id and b.agent_id = 'opencode' and b.status = 'ACTIVE'
+            where pw.personal_workspace_id = #{personalWorkspaceId}
+              and pw.runtime_workspace_id = #{runtimeWorkspaceId}
+              and pw.status = 'ACTIVE' and w.status = 'ACTIVE'
+              and w.linux_server_id = #{sourceLinuxServerId}
+              and b.linux_server_id = #{targetLinuxServerId}
+              and w.linux_server_id &lt;&gt; b.linux_server_id
+        ) source
+        on target.personal_workspace_id = source.personal_workspace_id
+        when matched and (
+            target.status in ('SUCCEEDED', 'CANCELLED')
+            or (
+                (
+                    target.app_workspace_version_id &lt;&gt; source.app_workspace_version_id
+                    or target.user_id &lt;&gt; source.user_id
+                    or target.runtime_workspace_id &lt;&gt; source.runtime_workspace_id
+                    or target.source_linux_server_id &lt;&gt; source.source_linux_server_id
+                    or target.target_linux_server_id &lt;&gt; source.target_linux_server_id
+                    or target.branch &lt;&gt; source.branch
+                    or target.source_repo_root_path &lt;&gt; source.source_repo_root_path
+                    or target.source_workspace_root_path &lt;&gt; source.source_workspace_root_path
+                )
+                and (
+                    target.status in ('DISCOVERED', 'RETRY_WAIT')
+                    or (
+                        target.status in ('EXPORTING', 'TRANSFERRING', 'APPLYING')
+                        and (target.lease_until is null or target.lease_until &lt;= source.updated_at)
+                    )
+                )
+            )
+        ) then update set
+            relocation_id = source.relocation_id,
+            app_workspace_version_id = source.app_workspace_version_id,
+            user_id = source.user_id,
+            runtime_workspace_id = source.runtime_workspace_id,
+            source_linux_server_id = source.source_linux_server_id,
+            target_linux_server_id = source.target_linux_server_id,
+            branch = source.branch,
+            source_repo_root_path = source.source_repo_root_path,
+            source_workspace_root_path = source.source_workspace_root_path,
+            status = 'DISCOVERED', attempt_count = 0, next_retry_at = source.next_retry_at,
+            lease_owner = null, lease_until = null,
+            snapshot_sha256 = null, archive_size_bytes = null,
+            safe_error_code = null, safe_error_message = null,
+            target_applied_at = null, completed_at = null,
+            trace_id = source.trace_id, updated_at = source.updated_at
+        when not matched then insert (
+            relocation_id, personal_workspace_id, app_workspace_version_id, user_id, runtime_workspace_id,
+            source_linux_server_id, target_linux_server_id, branch, source_repo_root_path,
+            source_workspace_root_path, status, attempt_count, next_retry_at, trace_id, created_at, updated_at
+        ) values (
+            source.relocation_id, source.personal_workspace_id, source.app_workspace_version_id,
+            source.user_id, source.runtime_workspace_id, source.source_linux_server_id,
+            source.target_linux_server_id, source.branch, source.source_repo_root_path,
+            source.source_workspace_root_path, 'DISCOVERED', 0, source.next_retry_at,
+            source.trace_id, source.created_at, source.updated_at
+        )
+    </insert>
+
+    <select id="findClaimable" resultMap="RelocationMap">
+        select <include refid="RelocationColumns"/>
+        from personal_workspace_relocations relocation
+        where relocation.source_linux_server_id = #{sourceLinuxServerId}
+          and (
+              (relocation.status in ('DISCOVERED', 'RETRY_WAIT') and relocation.next_retry_at &lt;= #{now})
+              or (relocation.status in ('EXPORTING', 'TRANSFERRING', 'APPLYING')
+                  and (relocation.lease_until is null or relocation.lease_until &lt;= #{now}))
+              or (relocation.status = 'CLEANUP_PENDING'
+                  and relocation.next_retry_at &lt;= #{now}
+                  and (relocation.lease_until is null or relocation.lease_until &lt;= #{now}))
+          )
+          and (
+              relocation.status = 'CLEANUP_PENDING'
+              or exists (
+                  select 1
+                  from personal_workspaces current_personal
+                  join workspaces current_workspace
+                    on current_workspace.workspace_id = current_personal.runtime_workspace_id
+                  join user_opencode_process_bindings current_binding
+                    on current_binding.user_id = current_personal.user_id
+                   and current_binding.agent_id = 'opencode'
+                   and current_binding.status = 'ACTIVE'
+                  where current_personal.personal_workspace_id = relocation.personal_workspace_id
+                    and current_personal.status = 'ACTIVE'
+                    and current_personal.app_workspace_version_id = relocation.app_workspace_version_id
+                    and current_personal.user_id = relocation.user_id
+                    and current_personal.runtime_workspace_id = relocation.runtime_workspace_id
+                    and current_personal.branch = relocation.branch
+                    and current_personal.repo_root_path = relocation.source_repo_root_path
+                    and current_personal.workspace_root_path = relocation.source_workspace_root_path
+                    and current_workspace.status = 'ACTIVE'
+                    and current_workspace.linux_server_id = relocation.source_linux_server_id
+                    and current_binding.linux_server_id = relocation.target_linux_server_id
+                    and not exists (
+                        select 1 from runs active_run
+                        where active_run.workspace_id = current_personal.runtime_workspace_id
+                          and active_run.status in ('PENDING', 'RUNNING', 'CANCELLING')
+                    )
+              )
+          )
+        order by relocation.updated_at, relocation.relocation_id
+        limit #{limit}
+    </select>
+
+    <update id="claim">
+        update personal_workspace_relocations relocation
+        set status = case when status = 'CLEANUP_PENDING' then status else 'EXPORTING' end,
+            attempt_count = case when status = 'CLEANUP_PENDING' then attempt_count else attempt_count + 1 end,
+            lease_owner = #{leaseOwner}, lease_until = #{leaseUntil}, updated_at = #{now},
+            safe_error_code = null, safe_error_message = null
+        where relocation_id = #{relocationId}
+          and (
+              (status in ('DISCOVERED', 'RETRY_WAIT') and next_retry_at &lt;= #{now})
+              or (status in ('EXPORTING', 'TRANSFERRING', 'APPLYING')
+                  and (lease_until is null or lease_until &lt;= #{now}))
+              or (status = 'CLEANUP_PENDING' and next_retry_at &lt;= #{now}
+                  and (lease_until is null or lease_until &lt;= #{now}))
+          )
+          and (
+              status = 'CLEANUP_PENDING'
+              or exists (
+                  select 1
+                  from personal_workspaces current_personal
+                  join workspaces current_workspace
+                    on current_workspace.workspace_id = current_personal.runtime_workspace_id
+                  join user_opencode_process_bindings current_binding
+                    on current_binding.user_id = current_personal.user_id
+                   and current_binding.agent_id = 'opencode'
+                   and current_binding.status = 'ACTIVE'
+                  where current_personal.personal_workspace_id = relocation.personal_workspace_id
+                    and current_personal.status = 'ACTIVE'
+                    and current_personal.app_workspace_version_id = relocation.app_workspace_version_id
+                    and current_personal.user_id = relocation.user_id
+                    and current_personal.runtime_workspace_id = relocation.runtime_workspace_id
+                    and current_personal.branch = relocation.branch
+                    and current_personal.repo_root_path = relocation.source_repo_root_path
+                    and current_personal.workspace_root_path = relocation.source_workspace_root_path
+                    and current_workspace.status = 'ACTIVE'
+                    and current_workspace.linux_server_id = relocation.source_linux_server_id
+                    and current_binding.linux_server_id = relocation.target_linux_server_id
+                    and not exists (
+                        select 1 from runs active_run
+                        where active_run.workspace_id = current_personal.runtime_workspace_id
+                          and active_run.status in ('PENDING', 'RUNNING', 'CANCELLING')
+                    )
+              )
+          )
+    </update>
+
+    <select id="findByRelocationId" resultMap="RelocationMap">
+        select <include refid="RelocationColumns"/>
+        from personal_workspace_relocations
+        where relocation_id = #{relocationId}
+    </select>
+
+    <update id="markTransferring">
+        update personal_workspace_relocations
+        set status = 'TRANSFERRING', snapshot_sha256 = #{snapshotSha256},
+            archive_size_bytes = #{archiveSizeBytes}, updated_at = #{now}
+        where relocation_id = #{relocationId}
+          and status = 'EXPORTING'
+          and lease_owner = #{leaseOwner}
+          and lease_until &gt; #{now}
+    </update>
+
+    <update id="markApplying">
+        update personal_workspace_relocations
+        set status = 'APPLYING', updated_at = #{now}
+        where relocation_id = #{relocationId}
+          and status = 'TRANSFERRING'
+          and snapshot_sha256 = #{snapshotSha256}
+          and archive_size_bytes = #{archiveSizeBytes}
+          and lease_until &gt; #{now}
+    </update>
+
+    <select id="lockTargetCompletion" resultType="java.lang.String">
+        select relocation.relocation_id
+        from personal_workspace_relocations relocation
+        join personal_workspaces personal
+          on personal.personal_workspace_id = relocation.personal_workspace_id
+        join workspaces runtime_workspace
+          on runtime_workspace.workspace_id = relocation.runtime_workspace_id
+        join user_opencode_process_bindings binding
+          on binding.user_id = relocation.user_id
+         and binding.agent_id = 'opencode'
+         and binding.status = 'ACTIVE'
+        where relocation.relocation_id = #{relocationId}
+          and relocation.status = 'APPLYING'
+          and relocation.source_linux_server_id = #{sourceLinuxServerId}
+          and relocation.target_linux_server_id = #{targetLinuxServerId}
+          and personal.status = 'ACTIVE'
+          and personal.app_workspace_version_id = relocation.app_workspace_version_id
+          and personal.user_id = relocation.user_id
+          and personal.runtime_workspace_id = relocation.runtime_workspace_id
+          and personal.branch = relocation.branch
+          and personal.repo_root_path = relocation.source_repo_root_path
+          and personal.workspace_root_path = relocation.source_workspace_root_path
+          and runtime_workspace.status = 'ACTIVE'
+          and runtime_workspace.linux_server_id = #{sourceLinuxServerId}
+          and binding.linux_server_id = #{targetLinuxServerId}
+          and not exists (
+              select 1 from runs active_run
+              where active_run.workspace_id = relocation.runtime_workspace_id
+                and active_run.status in ('PENDING', 'RUNNING', 'CANCELLING')
+          )
+        for update
+    </select>
+
+    <update id="updateRuntimeWorkspaceTarget">
+        update workspaces
+        set root_path = #{targetWorkspaceRootPath}, linux_server_id = #{targetLinuxServerId},
+            trace_id = #{traceId}, updated_at = #{now}
+        where workspace_id = (
+            select runtime_workspace_id from personal_workspace_relocations where relocation_id = #{relocationId}
+        )
+          and linux_server_id = #{sourceLinuxServerId}
+          and status = 'ACTIVE'
+    </update>
+
+    <update id="updatePersonalWorkspaceTarget">
+        update personal_workspaces
+        set repo_root_path = #{targetRepoRootPath}, workspace_root_path = #{targetWorkspaceRootPath},
+            base_commit = #{baseCommit}, updated_at = #{now}
+        where personal_workspace_id = (
+            select personal_workspace_id from personal_workspace_relocations where relocation_id = #{relocationId}
+        )
+          and status = 'ACTIVE'
+    </update>
+
+    <update id="markTargetComplete">
+        update personal_workspace_relocations
+        set status = 'CLEANUP_PENDING', target_applied_at = #{now}, updated_at = #{now}
+        where relocation_id = #{relocationId} and status = 'APPLYING'
+    </update>
+
+    <update id="reschedule">
+        update personal_workspace_relocations
+        set status = case when status = 'CLEANUP_PENDING' then 'CLEANUP_PENDING' else 'RETRY_WAIT' end,
+            attempt_count = #{attemptCount}, next_retry_at = #{nextRetryAt},
+            safe_error_code = #{safeErrorCode}, safe_error_message = #{safeErrorMessage},
+            lease_owner = null, lease_until = null, updated_at = #{now}
+        where relocation_id = #{relocationId}
+          and lease_owner = #{leaseOwner}
+          and status in ('EXPORTING', 'TRANSFERRING', 'APPLYING', 'CLEANUP_PENDING')
+    </update>
+
+    <update id="completeCleanup">
+        update personal_workspace_relocations
+        set status = 'SUCCEEDED', lease_owner = null, lease_until = null,
+            safe_error_code = null, safe_error_message = null,
+            completed_at = #{now}, updated_at = #{now}
+        where relocation_id = #{relocationId}
+          and status = 'CLEANUP_PENDING'
+          and lease_owner = #{leaseOwner}
+    </update>
+</mapper>

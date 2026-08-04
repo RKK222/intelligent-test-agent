@@ -54,6 +54,26 @@ class ApiTokenWebFilterTest {
     }
 
     @Test
+    void filterExemptsOnlyExactPersonalWorkspaceRelocationInternalPaths() {
+        ApiTokenWebFilter filter = new ApiTokenWebFilter("secret-token");
+        for (String path : java.util.List.of(
+                "/api/internal/platform/workspace-management/personal-workspace-relocations/transfer-tickets",
+                "/api/internal/platform/workspace-management/personal-workspace-relocations/transfer/ws")) {
+            MockServerWebExchange exact = MockServerWebExchange.from(MockServerHttpRequest.post(path));
+            final boolean[] called = {false};
+            filter.filter(exact, currentExchange -> {
+                called[0] = true;
+                return Mono.empty();
+            }).block();
+            assertThat(called[0]).as(path).isTrue();
+
+            MockServerWebExchange child = MockServerWebExchange.from(MockServerHttpRequest.post(path + "/extra"));
+            filter.filter(child, currentExchange -> Mono.empty()).block();
+            assertThat(child.getResponse().getStatusCode().value()).as(path + "/extra").isEqualTo(401);
+        }
+    }
+
+    @Test
     void filterLeavesWorkspaceGitToolAuthenticationToDedicatedController() {
         ApiTokenWebFilter filter = new ApiTokenWebFilter("secret-token");
         MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.post(

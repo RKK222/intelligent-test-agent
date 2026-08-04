@@ -42,8 +42,10 @@ XXL MySQL 与平台 PostgreSQL 完全分离。Admin 子上下文只扫描 `backe
 | `V3__register_platform_executor_and_tasks.sql` | 新增自动注册执行器组 `test-agent-backend` 与六个首批周期任务。 |
 | `V4__register_night_execution_dispatch_task.sql` | 注册每 15 分钟执行的 `opencode-runtime.night-execution-dispatch`，使用 ROUND、DISCARD_LATER、DO_NOTHING、GLOBAL_MUTEX 和零 XXL 重试。 |
 | `V5__schedule_night_execution_dispatch_every_minute.sql` | 把既有分发任务 Cron 更新为每分钟并触发下一次时间重算，其它策略不变。 |
+| `V6__register_app_source_cleanup_task.sql` | 注册每分钟应用源码到期清理广播任务。 |
+| `V7__register_personal_workspace_relocation_task.sql` | 注册每分钟个人工作区跨服务器搬迁广播任务。 |
 
-V3/V4/V5 是生产必需基础调度配置，不是演示数据。后续新增任务使用完全相同的模式：每次新建不可变的 `V6`、`V7` 等版本 SQL，以新的 `platform_task_key` 插入任务；不得在应用启动阶段 upsert，也不得覆盖 XXL 页面中已调整的启停、Cron 或其它运行参数。
+V3-V7 是生产必需基础调度配置，不是演示数据。后续新增任务使用完全相同的模式：每次新建不可变的 `V8`、`V9` 等版本 SQL，以新的 `platform_task_key` 插入任务；不得在应用启动阶段 upsert，也不得覆盖 XXL 页面中已调整的启停、Cron 或其它运行参数。
 
 所有平台任务固定 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`，参数只含 `taskKey/concurrencyPolicy/payload`。V1-V5 可被多个 Admin 节点并发启动，Flyway schema history 负责互斥；重复启动不得重复 executor 组或任务。
 
@@ -87,6 +89,16 @@ PostgreSQL 的旧任务定义和运行记录不搬运到 MySQL；旧行保留审
 纠错仓储必须在同一个 PostgreSQL 事务内 CAS 更新指定 `DRAINING` 旧任务、清除其 server/target/worktree fencing 租约、创建唯一的新活动任务并写入双向关系；任一步失败都整体回滚，因此消息门禁没有可见空窗。迁移不改写现有 `DRAINING` 数据，也不会自动停止现场进程；升级后仍需超级管理员从公共配置管理页对精确旧 rollout 执行一次“强制终止并替换发布”。该 migration 一旦在共享或企业数据库执行即不可改写；发布集成时仍须按根规范核对 `flyway_schema_history` 版本和 checksum，并从各已知企业基线升级验证。
 
 当前 release 将该 migration 的原始 SHA-256 锁定为 `8b3cbad538f856d5daa06d15f118554ecefb2380a249287cdfe291eb71199022`；正式 persistence JAR 和外层企业包都会复核该字节。
+
+## V20260804123000 个人工作区跨服务器搬迁状态
+
+`V20260804123000__create_personal_workspace_relocations.sql` 创建 `personal_workspace_relocations`，每个 `personal_workspace_id` 最多保留一条当前搬迁状态。表记录 `relocation_id`、用户/版本/运行态 Workspace、源/目标稳定服务器、个人分支、发现时源逻辑路径、状态、次数、租约、归档 SHA-256/大小、安全错误和目标应用/最终完成时间；外键关联个人工作区、版本、用户和运行态 Workspace，并限制源目标不同、非负次数/大小与状态枚举。
+
+状态按 `DISCOVERED → EXPORTING → TRANSFERRING → APPLYING → CLEANUP_PENDING → SUCCEEDED` 推进，目标切换前的瞬时失败进入 `RETRY_WAIT`；目标已切换后的清理失败保持 `CLEANUP_PENDING` 并按 `next_retry_at` 重新认领。`PersonalWorkspaceRelocationMapper.xml` 只扫描 ACTIVE 个人工作区、ACTIVE Workspace 和 ACTIVE `agent_id='opencode'` binding 的真实错配，并排除 `PENDING/RUNNING/CANCELLING` Run。目标完成事务先 `FOR UPDATE` 重读版本、用户、运行态 Workspace、分支、源路径、服务器、binding 和活动 Run，再依次更新 `workspaces.root_path/linux_server_id`、`personal_workspaces.repo_root_path/workspace_root_path/base_commit` 和搬迁状态；任一步不命中整体回滚，源目录不得清理。`CLEANUP_PENDING` 不会被用户连续换服产生的新候选覆盖；即使源 worktree 已删除后数据库确认瞬时失败，下一轮也会幂等完成收尾，旧源清理终态后才允许下一段搬迁。
+
+该 migration 只增加生产状态表、约束、索引和注释，不回填、不改写现有 Workspace，也不包含测试或环境数据。部署时先停止或至少完成全部 Java 的同版本切换边界，先让平台 PostgreSQL Flyway 应用本 migration，再让 XXL MySQL 应用 `V7` 并启用任务；禁止让已注册 V7 的新任务调用尚未包含新表/handler 的旧 Java。正式集成仍必须核对目标 `flyway_schema_history` 的版本/checksum，并从每套已知企业基线升级验证，禁止 `outOfOrder`、`repair` 或手工修改历史表。
+
+当前 release 将该 migration 的原始 SHA-256 锁定为 `f41a9aaab637f4b196f63cb7d37ef58cf0b15c9521abd1050c9929c6ce27b212`；`FlywayMigrationNamingTest` 和最终 persistence JAR 字节校验必须保持一致。XXL `V7` 当前源码 SHA-256 为 `be1705cac272b9c4e89c43136f0125132c2afc4bbc3525322678cd02fb2c5305`，一旦进入共享 MySQL 同样禁止改写。
 
 ## V1 核心表
 

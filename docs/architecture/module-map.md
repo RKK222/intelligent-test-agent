@@ -119,6 +119,8 @@ Browser
 
 工作区文件下载仍沿用平台文件 WebSocket 边界：`test-agent-workspace-management` 安全读取约 512 KiB 原始字节分段，`test-agent-api` 暴露普通工作区/组合 locator 两类 RPC，`packages/backend-api` 映射共享分段类型，`apps/agent-web` 在浏览器校验目录完整性、按来源消解冲突并生成 ZIP；不新增跨服务器 HTTP 文件代理。
 
+个人工作区与用户 `opencode` binding 跨服务器错配的补偿边界固定为：`test-agent-workspace-management` 负责源端 Git 工作态快照、目标恢复和每分钟 XXL handler，`test-agent-persistence` 用 MyBatis XML/Flyway 保存租约状态并在一个事务内切换 Workspace/个人路径，`test-agent-api` 复用公共 Java 路由签发目标 JVM 的一次性专用 WebSocket ticket，`test-agent-xxl-job-integration` 只注册全局广播任务。文件字节不经过 Java→Java HTTP，OpenCode 源码和 generated SDK 均不参与该流程。
+
 managed/source 选择共用完整 intent authority，旧 terminal 的 repository summary 刷新使用独立 list authority；child commit 漂移会失效整棵 tree authority。每次进度自动重连按 connection epoch 隔离，当前 socket 失败会先作废 epoch，使退避与 replacement snapshot 等待期的旧帧无效；只有有效 operation frame 清零指数退避，`AbortSignal` 可在 CONNECTING 期间立即停止观察。source 中 Run Diff 的普通文件仍可写，PUBLIC/WORKSPACE Agent 保存由组件和父 handler 双重拒绝；已打开的 Hub、配置重载、新增版本和 Git pull 弹窗在能力失效时立即收敛。
 
 活动栏底部 `Boxes` 入口的前端 Hub 统一表示 Agent、Skill、MCP、Tool：Agent/Skill 继续调用平台 Hub API 管理远端资产，MCP/Tool 只复用 `apps/agent-web` 已加载的 OpenCode 运行态目录，不新增服务端资产类型。顶部资源摘要另保留 Plugin 计数；顶部摘要与 Hub 详情面板都支持拖拽调宽和页面内全屏。

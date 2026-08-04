@@ -128,6 +128,15 @@ Token 校验流程：
 9. `workspace.create` 必须要求 `SUPER_ADMIN`，并且选择服务器与当前 agent 服务器一致；不一致时前端禁用输入，后端仍必须返回 `CONFLICT` 或 `FORBIDDEN`。
 10. 日志和错误响应不得输出 ticket、Authorization、Cookie、完整用户输入、完整文件内容或敏感路径片段；审计只记录 traceId、workspaceId、worktreeId、服务器 ID、操作类型、路径摘要和错误码等必要字段。
 
+## 个人工作区搬迁 WebSocket 安全例外
+
+个人工作区搬迁是平台后端之间的受控文件通道，不接受浏览器用户凭据或任意文件路径：
+
+1. 源 Java 必须由持久化搬迁记录和本机 `WorkspaceServerIdentity` 确认源服务器，目标 Java 必须复用 `BackendJavaRouteResolver` 选择精确在线后端；`BackendHttpForwarder` 只允许把搬迁 ID、源/目标服务器、归档 SHA-256/大小和 traceId 送到精确 ticket 路径，不得承载文件字节或自建转发器。
+2. ticket HTTP 入口只对精确路径豁免普通 API token，并使用标准非空 `XXL-JOB-ACCESS-TOKEN` 常量时间校验。ticket 只保存在签发 JVM 内存 60 秒、消费即删除，绑定搬迁事实和源服务器；HTTP 响应的 `webSocketPath` 和实际 WebSocket URL 均不得内嵌 ticket，源 Java 只能通过专用 `X-Test-Agent-Relocation-Ticket` 握手 Header 携带，避免通用响应日志和网关访问日志泄露凭据。WebSocket upgrade 还必须匹配固定内部 Origin 和源服务器头，相邻/子路径不得继承豁免。
+3. WebSocket 只接受有界二进制归档帧和唯一 `complete` 控制帧；服务端按声明大小、2 GiB 总上限和 SHA-256 校验，ZIP 解包还必须限制 manifest、entry 类型/数量、总展开大小和相对路径。目标目录、分支和应用副本只能从数据库及受控路径参数派生，协议不得接受客户端物理路径。
+4. 目标恢复校验完成前不得更新 Workspace 归属；数据库切换失败、活动 Run、源文件并发变化、摘要不一致或不支持的文件类型均不得清理源 worktree。错误响应、数据库 `safe_error_message` 和日志只保留固定安全说明/错误码/搬迁 ID/服务器 ID，不得记录用户文件、物理路径、SSH 私钥、ticket 或原始 Git stderr。普通用户错误不返回 workspaceId；运维关联只能在授权的数据库和日志侧完成。
+
 ## 应用源码进度 WebSocket 安全例外
 
 应用源码进度 WebSocket 是只读观察通道，不属于平台文件 RPC 或 RunEvent。实现和后续扩展必须满足：

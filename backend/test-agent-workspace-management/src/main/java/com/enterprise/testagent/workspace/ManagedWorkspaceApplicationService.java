@@ -39,6 +39,7 @@ import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceReposito
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceStatus;
 import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspace;
 import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspaceId;
+import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspaceRelocation;
 import com.enterprise.testagent.domain.managedworkspace.UserWorkspaceBranchPreference;
 import com.enterprise.testagent.domain.managedworkspace.UserWorkspacePreference;
 import com.enterprise.testagent.domain.managedworkspace.WorkspaceSyncDirection;
@@ -59,6 +60,7 @@ import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -1087,6 +1089,13 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             Workspace runtimeWorkspace,
             UserId userId,
             String traceId) {
+        if (!serverIdentity.linuxServerId().equals(runtimeWorkspace.linuxServerId())) {
+            // 跨服务器错配必须由两阶段搬迁保留未提交内容，用户请求不能再直接改库并遗弃源端文件。
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "个人工作区正在迁移到 TestAgent 所在服务器，请稍后重试",
+                    Map.of("retryable", true, "reason", "PERSONAL_WORKSPACE_RELOCATION_PENDING"));
+        }
         String expectedBranch = personalWorkspaceBranch(version, userId, "default");
         Path expectedRepoRoot = personalRepoRootWithName(version, userId, expectedBranch);
         ApplicationWorkspace template = existingTemplate(version.applicationWorkspaceId());
@@ -1275,6 +1284,85 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 .resolve(requireRepositoryEnglishName(repository))
                 .resolve(sanitizePathPart(branch))
                 .normalize();
+    }
+
+    /**
+     * 解析源服务器的既有个人 worktree 和其公共应用仓库；只允许处理数据库记录的源服务器。
+     */
+    PersonalWorkspaceRelocationPaths sourceRelocationPaths(PersonalWorkspaceRelocation relocation) {
+        if (!serverIdentity.linuxServerId().equals(relocation.sourceLinuxServerId())) {
+            throw new PlatformException(ErrorCode.CONFLICT, "个人工作区搬迁源服务器已变化");
+        }
+        PersonalWorkspace personal = existingPersonalWorkspace(relocation.personalWorkspaceId());
+        requireRelocationIdentity(relocation, personal);
+        ApplicationWorkspaceVersion version = existingVersion(relocation.versionId());
+        ApplicationWorkspaceVersionReplica sourceReplica = managedWorkspaceRepository
+                .findVersionReplica(version.versionId(), relocation.sourceLinuxServerId())
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.CONFLICT,
+                        "源服务器缺少个人工作区所属应用副本"));
+        Path personalRoot = pathResolver.resolve(relocation.sourceRepoRootPath()).toAbsolutePath().normalize();
+        Path workspaceRoot = pathResolver.resolve(relocation.sourceWorkspaceRootPath()).toAbsolutePath().normalize();
+        boolean sourceExists = Files.exists(personalRoot, LinkOption.NOFOLLOW_LINKS);
+        if (!workspaceRoot.startsWith(personalRoot)
+                || (sourceExists && (Files.isSymbolicLink(personalRoot)
+                        || !Files.isDirectory(personalRoot, LinkOption.NOFOLLOW_LINKS)
+                        || !gitWorkspaceService.isGitRepository(personalRoot)))) {
+            throw new PlatformException(ErrorCode.CONFLICT, "源服务器个人工作区目录不可用");
+        }
+        return new PersonalWorkspaceRelocationPaths(
+                pathResolver.resolve(sourceReplica.repoRootPath()).toAbsolutePath().normalize(),
+                personalRoot,
+                workspaceRoot,
+                relocation.sourceRepoRootPath(),
+                relocation.sourceWorkspaceRootPath());
+    }
+
+    /**
+     * 在目标服务器准备应用公共副本并计算最终个人 worktree 路径；实际个人文件由快照恢复器创建。
+     */
+    PersonalWorkspaceRelocationPaths targetRelocationPaths(
+            PersonalWorkspaceRelocation relocation, String traceId) {
+        if (!serverIdentity.linuxServerId().equals(relocation.targetLinuxServerId())) {
+            throw new PlatformException(ErrorCode.CONFLICT, "个人工作区搬迁目标服务器已变化");
+        }
+        PersonalWorkspace personal = existingPersonalWorkspace(relocation.personalWorkspaceId());
+        requireRelocationIdentity(relocation, personal);
+        ApplicationWorkspaceVersion version = existingVersion(relocation.versionId());
+        ApplicationWorkspace template = existingTemplate(version.applicationWorkspaceId());
+        ApplicationWorkspaceVersionReplica targetReplica = ensureLocalReplica(
+                version, template, personal.userId(), traceId);
+        Path personalRoot = personalRepoRootWithName(version, personal.userId(), relocation.branch())
+                .toAbsolutePath().normalize();
+        Path workspaceRoot = personalRoot.resolve(template.directoryPath()).normalize();
+        if (!workspaceRoot.startsWith(personalRoot)) {
+            throw new PlatformException(ErrorCode.CONFLICT, "个人工作区目标目录越界");
+        }
+        return new PersonalWorkspaceRelocationPaths(
+                pathResolver.resolve(targetReplica.repoRootPath()).toAbsolutePath().normalize(),
+                personalRoot,
+                workspaceRoot,
+                personalRepoValue(version, personal.userId(), relocation.branch()),
+                personalWorkspaceValue(version, template, personal.userId(), relocation.branch()));
+    }
+
+    private PersonalWorkspace existingPersonalWorkspace(PersonalWorkspaceId personalWorkspaceId) {
+        return managedWorkspaceRepository.findPersonalWorkspace(personalWorkspaceId)
+                .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "个人工作区不存在"));
+    }
+
+    private void requireRelocationIdentity(
+            PersonalWorkspaceRelocation relocation, PersonalWorkspace personal) {
+        if (!personal.versionId().equals(relocation.versionId())
+                || !personal.userId().equals(relocation.userId())
+                || !personal.runtimeWorkspaceId().equals(relocation.runtimeWorkspaceId())
+                || !personal.branch().equals(relocation.branch())
+                || (!relocation.cleanupPending()
+                        && (!personal.repoRootPath().equals(relocation.sourceRepoRootPath())
+                                || !personal.workspaceRootPath().equals(relocation.sourceWorkspaceRootPath())))
+                || personal.status() != ManagedWorkspaceStatus.ACTIVE) {
+            throw new PlatformException(ErrorCode.CONFLICT, "个人工作区搬迁事实已变化");
+        }
     }
 
     private String appRepoValue(String version, CodeRepository repository) {

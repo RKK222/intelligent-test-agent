@@ -71,6 +71,7 @@
 | `workspace-management` | `/api/internal/platform/workspace-management/workspaces` | 旧 `/api/workspaces` 返回 `410 API_GONE`。 |
 | `workspace-management` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/file-ws-route` + `/api/internal/platform/workspace-management/file-ws/tickets` + 文件 WebSocket | 旧 HTTP 文件接口和旧 `/api/workspaces/{workspaceId}/file-ws-route` 返回 `410 API_GONE`。 |
 | `workspace-management` | `/api/internal/platform/workspace-management/file-ws/tickets` | 无旧 URL |
+| `workspace-management` | `/api/internal/platform/workspace-management/personal-workspace-relocations/transfer-tickets` + `/api/internal/platform/workspace-management/personal-workspace-relocations/transfer/ws` | 仅供平台 Java 间搬迁个人工作区快照，不是普通用户 API。 |
 | `workspace-management` | `/api/internal/platform/workspace-management/agent-config/public/status` | 无旧 URL |
 | `workspace-management` | `/api/internal/platform/workspace-management/agent-config/operations/{operationId}/tickets` | 无旧 URL |
 | `workspace-management` | `/api/internal/platform/workspace-management/backend-servers` | 无旧 URL |
@@ -1122,6 +1123,8 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 | `POST` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/file-ws-route` | 查询当前工作区文件 WebSocket 应连接的目标后端。 |
 | `GET` | `/api/internal/platform/workspace-management/backend-servers` | 查询可用于服务器工作空间选择器的后端服务器。 |
 | `POST` | `/api/internal/platform/workspace-management/file-ws/tickets` | 在目标后端创建文件 WebSocket 一次性 ticket。 |
+| `POST` | `/api/internal/platform/workspace-management/personal-workspace-relocations/transfer-tickets` | 平台 Java 向精确目标 Java 申请个人工作区搬迁 WebSocket 一次性 ticket。 |
+| `WS` | `/api/internal/platform/workspace-management/personal-workspace-relocations/transfer/ws` | 平台 Java 间流式上传个人工作区 Git 工作态快照；一次性 ticket 仅通过专用握手 Header 传递。 |
 
 旧 `/api/workspaces/**`、旧 HTTP 文件接口以及内部平台 HTTP 文件 `workspaces/{workspaceId}/files*` 已作废，返回 `410 API_GONE`。工作区文件列表、读取、写入、上传、复制、移动、状态和删除必须走 `file-ws-route`、目标后端 ticket 和文件 WebSocket RPC。工作台文件树使用同一通道的 `workspace.view.list` / `workspace.view.read` 读取“工作区 + 已配置引用”的只读组合视图；原始 `workspace.list` / `workspace.read` 继续保留给配置文件等明确只访问工作区物理内容的调用方。
 
@@ -1159,6 +1162,48 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 ```
 
 `POST /api/internal/platform/workspace-management/workspaces/{workspaceId}/file-ws-route` 使用当前登录用户的 `opencode` 进程服务器归属定位同服务器后端，返回浏览器应直连的目标后端地址。该路由查询只读取 ACTIVE binding 和可恢复进程记录，不下发 opencode-manager `health` 或 `start` 命令；工作区服务器归属、用户 opencode 进程服务器和目标后端服务器不一致时返回统一 `CONFLICT`。本地服务器身份变化或切换测试库后，若历史 workspace 仍绑定旧 `linuxServerId`，且旧服务器没有在线后端快照、当前 opencode 进程在本后端、workspace 根目录在本机可访问，后端会在路由时把 workspace 回绑到当前服务器；多机环境中旧服务器仍在线或目录不可访问时不会自动迁移。用户进程初始化、`/processes/me` 状态查询和未携带有效会话运行上下文的兼容 Run 启动仍按用户进程 API 执行强健康检查。
+
+#### 个人工作区跨服务器搬迁内部通道
+
+该通道只供每分钟执行的 `workspace-management.personal-workspace-relocation` 平台任务使用，不接受浏览器登录态，也不暴露给普通用户。源 Java 必须先通过公共 `BackendJavaRouteResolver` 选中搬迁记录指定的目标 Java，再由公共 `BackendHttpForwarder` 调用 ticket 接口；HTTP 只传搬迁事实和归档摘要，不承载任何工作区文件字节。
+
+`POST /api/internal/platform/workspace-management/personal-workspace-relocations/transfer-tickets` 必须携带非空且精确匹配的 `XXL-JOB-ACCESS-TOKEN`，请求体为：
+
+```json
+{
+  "relocationId": "pwr_...",
+  "sourceLinuxServerId": "test-agent-backend-122-233-30-114",
+  "targetLinuxServerId": "test-agent-backend-122-233-30-4",
+  "snapshotSha256": "64位小写十六进制SHA-256",
+  "archiveSizeBytes": 123456
+}
+```
+
+目标 Java 会把上述字段与 PostgreSQL 中仍处于 `TRANSFERRING` 的权威搬迁记录逐项核对，且 `targetLinuxServerId` 必须是本服务器；不一致统一返回安全错误，不创建任意客户端指定路径。成功响应仍使用统一 `ApiResponse` 包装，`data` 为：
+
+```json
+{
+  "ticket": "pwrt_...",
+  "expiresAt": "2026-08-04T09:00:00Z",
+  "webSocketPath": "/api/internal/platform/workspace-management/personal-workspace-relocations/transfer/ws"
+}
+```
+
+ticket 只保存在签发 Java 的内存中，60 秒过期且消费即删除。HTTP 响应中的 `webSocketPath` 和实际 WebSocket URL 都不拼入 ticket，避免通用 API、网关访问日志记录凭据；源 Java 连接同一目标 Java 时通过专用 `X-Test-Agent-Relocation-Ticket` 握手 Header 携带 ticket，并固定携带 `Origin: https://test-agent.internal`、`X-Test-Agent-Source-Linux-Server-Id: <源服务器ID>` 和 traceId。Origin、源服务器或 ticket 任一不匹配即拒绝连接。
+
+WebSocket 客户端按不超过 256 KiB 的 binary frame 顺序发送归档，完成后发送唯一 text frame `{"op":"complete"}`。目标端只接受这两类帧，按票据限制总字节数并校验完整 SHA-256；安全解包、Git HEAD/index/worktree/untracked 状态恢复与校验、运行中 Run 防护和数据库 CAS 全部成功后，返回：
+
+```json
+{
+  "success": true,
+  "relocationId": "pwr_...",
+  "headCommit": "恢复后的Git提交",
+  "code": null,
+  "message": null
+}
+```
+
+失败响应为 `success=false`，只携带平台安全错误码和脱敏说明。该内部通道不返回用户统一认证号、`workspaceId`、工作区逻辑路径或物理路径；Redis 唤醒事件同样不携带这些字段。普通用户遇到搬迁中的工作区与 Agent 归属冲突时只收到可重试提示，不会看到 `workspaceId`。
 
 响应 `WorkspaceFileRouteResponse`：
 

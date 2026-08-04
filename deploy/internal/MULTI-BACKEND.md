@@ -869,7 +869,148 @@ docker exec test-agent-opencode-worker \
 
 模型验收不能只在其中一台执行。在 `.4` 和 `.114` 分别用本机 `127.0.0.1:8080` 执行 [单后台文档的两条 Java 代理 curl](SINGLE-BACKEND.md#8-验收)，分别验证 `qwen-prod + Qwen3.6-27B` 和 `deepseek-prod + DeepSeek-V4-Flash-W8A8`。两台都应持续返回单层 `data:`、正确的 `reasoning_content` 和单层 `[DONE]`；这样才能同时覆盖每台 Java 的内存快照、内部代理 key、UCID 转发和本机 9070 出站网络。
 
-## 10. 故障定位与回滚
+## 10. 个人工作区与 Agent 跨服务器自动搬迁
+
+本版本新增 XXL 全局任务 `workspace-management.personal-workspace-relocation`，使用 `0 0/1 * * * ? *` 每分钟触发一次。入口 executor 先通过 Redis 广播唤醒全部 Java；每台 Java 只扫描并认领 `workspaces.linux_server_id` 等于本机稳定服务器 ID、而用户当前 ACTIVE `opencode` binding 已在另一台服务器的个人工作区。该规则对所有应用生效，不按 `f-base`、应用名或用户白名单过滤。
+
+搬迁不是直接改库。源端先生成可移植 Git 快照，覆盖本地 HEAD（包括尚未 push 的本地提交）、暂存区、未暂存修改和全部普通未跟踪文件（包括被 Git ignore 的文件）；随后通过精确目标 Java 的一次性内部 WebSocket 分片传输。目标端校验归档大小、SHA-256、Git HEAD/index/worktree/untracked 状态和目标目录，再在同一事务中更新 `workspaces.root_path/linux_server_id`、`personal_workspaces.repo_root_path/workspace_root_path/base_commit`，最后由源端删除旧 worktree。目标未恢复或校验未通过时不会切数据库；数据库已切换但源目录清理失败时保持 `CLEANUP_PENDING`，后续只重试旧源清理，不会被新的错配发现覆盖。
+
+有 `PENDING`、`RUNNING` 或 `CANCELLING` Run 的工作区不会进入搬迁。存在未解决 Git merge 冲突、Git 子模块、超过 2 GiB、超过 10000 个未跟踪文件，或未跟踪项包含符号链接/特殊文件时也不会冒险迁移，而是记录脱敏错误并指数退避重试，源目录不会删除。Git ignored 普通文件同样进入快照并计入上述个数/容量上限；如 `node_modules` 或构建产物使快照超限，需先清理可重建内容后等待重试。Redis 广播只用于低延迟唤醒，不携带用户、工作区 ID 或路径；广播失败仍由下一分钟 XXL 调度补偿。
+
+企业环境 `SYS_DATA_ROOT_DIR=/data/testagent/data` 时，个人仓库物理路径为：
+
+```text
+/data/testagent/data/agent-opencode/workspace/personalworktree/{versionSegment}/{userId}/{repositoryEnglishName}/{branch}
+```
+
+工作区物理路径再追加 `application_workspaces.directory_path`。数据库新记录保存 `personalworktree:` 逻辑路径；现场以 `common_parameters.OPENCODE_PERSONAL_WORKTREE_ROOT` 解析结果为权威，不要只按应用名猜目录。下面的 PostgreSQL 查询会同时给出逻辑路径和按当前 Linux 参数解析出的精确物理路径，默认覆盖全部应用；只定位 `f-base` 时可临时取消最后的应用过滤注释。
+
+先统计受影响用户和个人工作区数量：
+
+```sql
+with mismatch as (
+    select distinct pw.personal_workspace_id, pw.user_id
+    from personal_workspaces pw
+    join workspaces w
+      on w.workspace_id = pw.runtime_workspace_id
+    join user_opencode_process_bindings b
+      on b.user_id = pw.user_id
+     and b.agent_id = 'opencode'
+     and b.status = 'ACTIVE'
+    where pw.status = 'ACTIVE'
+      and w.status = 'ACTIVE'
+      and w.linux_server_id is not null
+      and b.linux_server_id is not null
+      and w.linux_server_id <> b.linux_server_id
+)
+select count(*) as affected_personal_workspace_count,
+       count(distinct user_id) as affected_user_count
+from mismatch;
+```
+
+再列出源/目标服务器、准确路径和是否被运行中任务阻塞；本查询不输出 `workspaceId`：
+
+```sql
+with roots as (
+    select replace(personal_root.parameter_value,
+                   '${SYS_DATA_ROOT_DIR}', data_root.parameter_value) as personal_root
+    from common_parameters personal_root
+    join common_parameters data_root
+      on data_root.parameter_english = 'SYS_DATA_ROOT_DIR'
+     and data_root.platform = 'linux'
+    where personal_root.parameter_english = 'OPENCODE_PERSONAL_WORKTREE_ROOT'
+      and personal_root.platform = 'all'
+)
+select u.unified_auth_id,
+       a.app_id,
+       a.app_name,
+       pw.workspace_name,
+       pw.branch,
+       w.linux_server_id as source_linux_server_id,
+       b.linux_server_id as target_linux_server_id,
+       pw.repo_root_path as source_repo_logical_path,
+       pw.workspace_root_path as source_workspace_logical_path,
+       case
+           when pw.repo_root_path like 'personalworktree:%' then
+               rtrim(roots.personal_root, '/') || '/' ||
+               substring(pw.repo_root_path from char_length('personalworktree:') + 1)
+           else pw.repo_root_path
+       end as source_repo_physical_path,
+       case
+           when pw.workspace_root_path like 'personalworktree:%' then
+               rtrim(roots.personal_root, '/') || '/' ||
+               substring(pw.workspace_root_path from char_length('personalworktree:') + 1)
+           else pw.workspace_root_path
+       end as source_workspace_physical_path,
+       not exists (
+           select 1
+           from runs r
+           where r.workspace_id = pw.runtime_workspace_id
+             and r.status in ('PENDING', 'RUNNING', 'CANCELLING')
+       ) as no_active_run
+from personal_workspaces pw
+join users u on u.user_id = pw.user_id
+join applications a on a.app_id = pw.app_id
+join workspaces w on w.workspace_id = pw.runtime_workspace_id
+join user_opencode_process_bindings b
+  on b.user_id = pw.user_id
+ and b.agent_id = 'opencode'
+ and b.status = 'ACTIVE'
+cross join roots
+where pw.status = 'ACTIVE'
+  and w.status = 'ACTIVE'
+  and w.linux_server_id is not null
+  and b.linux_server_id is not null
+  and w.linux_server_id <> b.linux_server_id
+-- and u.unified_auth_id = '555047824'
+-- and lower(a.app_name) = 'f-base'
+order by u.unified_auth_id, a.app_name, pw.workspace_name;
+```
+
+查看搬迁状态和等待人工处理的安全错误：
+
+```sql
+select status, count(*)
+from personal_workspace_relocations
+group by status
+order by status;
+
+select relocation_id,
+       source_linux_server_id,
+       target_linux_server_id,
+       status,
+       attempt_count,
+       next_retry_at,
+       lease_until,
+       safe_error_code,
+       safe_error_message,
+       updated_at
+from personal_workspace_relocations
+where status not in ('SUCCEEDED', 'CANCELLED')
+order by updated_at;
+```
+
+在 XXL MySQL 核对任务已注册并启用：
+
+```sql
+select platform_task_key,
+       schedule_type,
+       schedule_conf,
+       trigger_status,
+       executor_route_strategy,
+       executor_block_strategy,
+       executor_fail_retry_count
+from xxl_job_info
+where platform_task_key = 'workspace-management.personal-workspace-relocation';
+```
+
+上线必须避免新旧 Java 混跑该任务：在维护窗口先停止两台旧 Java，将两台 JAR 和 `backend/lib/` 都替换为同一版本，再依次启动。第一台新版启动会执行 PostgreSQL `V20260804123000__create_personal_workspace_relocations.sql` 和 XXL MySQL `V7__register_personal_workspace_relocation_task.sql`；第二台尚未启动时目标不可达只会安全重试，不会提前改库。若只能滚动升级，应在 XXL Admin 先停用该 `platform_task_key`，确认所有 Java 都是新版本后再启用。禁止通过手工复制目录后直接 update `linux_server_id`，也禁止删除搬迁状态行来跳过源端清理。
+
+清理一轮后不能承诺数据库从此永远不会短暂出现错配：正常初始化和修复链路已不再把工作空间直接切到另一台 Agent 而丢下源文件，已有 ACTIVE binding 也不会因负载变化自动迁移；但人工改库、混合版本、正式迁移 binding 或未来新增的迁移入口仍可能暂时形成新错配。该分钟任务提供持续收敛，安全目标是“可发现、可恢复、先搬文件、后改库”，不是假设错配永不再发生。
+
+首次初始化前端仍先弹确认框；如果工作区正处于服务器归属修复/搬迁，普通用户只看到“工作区与 Agent 服务器归属正在调整，请稍后重试”一类安全提示，不显示 `workspaceId`、服务器路径或内部搬迁 ID。日志可按 `event=personal_workspace_relocation_succeeded`、`event=personal_workspace_relocation_retry` 和同一 traceId 对齐，但不要记录归档内容或文件清单。
+
+## 11. 故障定位与回滚
 
 浏览器原始输出出现“（空报文体）”、HTTP 响应正文为零字节、SSE 空 `data:` 或 Run 成功但没有 assistant 文本时，先按 [空报文体排查手册](EMPTY-RESPONSE-BODY-TROUBLESHOOTING.md) 保全 `traceId/runId` 并逐层对比；不要先重启、重发 Run 或切换用户 binding。
 

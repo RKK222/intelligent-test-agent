@@ -5307,3 +5307,44 @@
   应用 feature 共享副本仍按原权限模型只读。
 - 本次未新增或修改 API/DTO、RunEvent/SSE、数据库/Flyway/SQL、性能或安全协议、环境配置、generated SDK、
   OpenCode 源码或依赖；未构建或部署企业离线包，也未创建分支。
+
+## 2026-08-04 - 增加个人工作区跨服务器自动搬迁
+
+### Why
+
+- READY 进程绑定和初始化提示已阻断正常入口继续产生新错配，但历史数据、手工调整、服务器故障切换或
+  混合版本窗口仍可能使个人 Workspace 与当前 ACTIVE OpenCode binding 落在不同 Java 服务器。
+- 仅修改数据库服务器归属会把源 worktree 中未 push 提交、暂存、未暂存和未跟踪文件遗留在旧服务器，
+  因此需要可重试、先文件后数据库的两阶段搬迁。
+
+### What
+
+- 新增 XXL 全局互斥任务 `workspace-management.personal-workspace-relocation`，默认每分钟执行；Redis 广播唤醒全部 Java，
+  各节点只扫描和认领源 worktree 属于本服务器的记录，广播失败仍由下一轮调度补偿。
+- 源端用 Git bundle 和受控 ZIP manifest 保留个人 HEAD（含未 push 本地提交）、staged、unstaged 及全部普通未跟踪文件
+  （包括 Git ignored 文件）；目标端通过精确 Java 路由的一次性 WebSocket 分片接收，校验大小、SHA-256、安全路径与
+  Git HEAD/index/worktree/untracked 状态后，才在事务内切换 `workspaces`、`personal_workspaces` 和搬迁状态，最后清理旧 worktree。
+- 新增 PostgreSQL `personal_workspace_relocations` 搬迁状态表与 MyBatis XML mapper，以 lease、fencing、事实快照、指数退避和
+  `CLEANUP_PENDING` 支持宕机恢复；正在运行的 Run 会阻断搬迁。未合并冲突、Git 子模块、符号链接/特殊未跟踪项、
+  超过 2 GiB 或 10000 个未跟踪文件均失败关闭并保留源目录。
+- 内部 HTTP 只签发搬迁 ticket，文件字节不经 Java→Java HTTP 代理；ticket 绑定搬迁/源/目标、60 秒且单次消费，
+  通过 `X-Test-Agent-Relocation-Ticket` 握手头传递而不放入 URL。普通用户只看到可重试错误，不暴露 workspaceId 或物理路径。
+
+### How
+
+- 定向后端回归通过：API 15 项、PostgreSQL/MyBatis/Flyway 11 项、XXL MySQL Testcontainers 3 项；最终修改后的
+  workspace 专项 8 项通过，其中真实 Git 覆盖本地提交、staged/unstaged、普通 untracked、ignored、子模块、
+  跟踪符号链接逃逸和清理幂等。工作台初始化交互 Playwright 2 项通过。
+- JDK 25 下 `mvn -pl test-agent-app -am -DskipTests package` 成功；用未修改的 `.env.test` 执行
+  `./restart-dev-services.sh --profile test --env-file .env.test --without-workflow`，backend readiness `UP`、frontend 3000 返回 200。
+- 本地 PostgreSQL 已执行 `20260804123000`，XXL MySQL 已执行 V7；任务唯一、启用且 Cron 为每分钟，
+  2026-08-04 13:17 最新执行 `handle_code=200`。两份 migration 在源码、模块 classes 和最终 app JAR 内 SHA-256 一致。
+- `tools/verify-ai-docs.sh`、`git diff --check` 和冲突标记检查通过；同步更新 API、数据库、XXL、安全、模块图和多后端排查/统计 SQL 文档。
+
+### Result
+
+- 该修复不限于 `f-base`；全部启用应用中的个人工作区都会持续收敛到当前 ACTIVE binding 服务器。目标恢复或校验失败时
+  不切数据库；数据库切换后源清理失败则保持 `CLEANUP_PENDING` 继续补偿，不再重复搬迁。
+- 本次新增内部 HTTP/WebSocket 边界、PostgreSQL Flyway/MyBatis SQL 和 XXL MySQL migration；未修改 RunEvent/SSE、
+  generated SDK、OpenCode 源码或 `.env*`，未新建分支。未构建/部署企业离线介质；产线上线前仍必须核对每套
+  `flyway_schema_history` 与 checksum，两台 Java 同版本升级后再启用调度。

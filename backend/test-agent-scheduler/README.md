@@ -42,7 +42,7 @@ XXL-JOB 业务适配所复用的公共任务协议与 Redis 全局锁模块。�
 - 业务模块实现 `ScheduledTaskHandler`；XXL integration 统一调用 handler，`GLOBAL_MUTEX` 复用本模块 Redis 锁，停止信号通过 `ScheduledTaskContext` 传递。
 - 任务键、Cron、路由、阻塞、过期和重试策略必须通过 XXL MySQL Flyway migration 注册，不得恢复 PostgreSQL Cron/手工/`USER_PLAN` 扫描。
 - 长循环或批量任务必须定期检查 `ScheduledTaskContext.stopRequested()`；业务扫描上限、路由和幂等语义由所属业务模块维护。
-- 定时执行的每分钟分发与 5 分钟补偿均由 XXL 调度，设计见 `docs/architecture/xxl-job-integration.md`。
+- 定时执行的每分钟分发、应用源码清理、个人工作区跨服务器搬迁与 5 分钟补偿均由 XXL 调度，设计见 `docs/architecture/xxl-job-integration.md`；个人搬迁的具体 handler 仍位于所属 `test-agent-workspace-management` 模块。
 
 ## 配置
 
