@@ -5240,3 +5240,36 @@
   收敛，因此同一入口不会继续产生“工作空间与 Agent 不在同一服务器”的新错配。
 - 本次未迁移或删除历史用户数据（现场风险用户已由用户处理），未新增/修改 DTO、RunEvent/SSE、数据库/Flyway/
   SQL、性能策略、环境配置、generated SDK 或 OpenCode 源码；未构建或部署企业离线包，也未创建分支。
+
+## 2026-08-04 - 二次复核收紧工作区初始化提示边界
+
+### Why
+
+- 二次检查发现工作区动作的初始化确认虽然已覆盖正常未初始化状态，但在进程状态尚未返回、明确
+  `UNAVAILABLE`，或强状态为 READY 而弱健康未通过时仍可能误展示“初始化进程”按钮。
+- 新增应用版本在初始化确认之前会先失效当前会话交互，不符合“用户确认前不产生前置副作用”的边界。
+
+### What
+
+- 工作台只在后端明确返回 `NEEDS_INITIALIZATION && initializable=true` 时显示初始化/启动确认框；状态查询中只提示
+  等待，明确不可初始化或健康未通过时显示不可用告警并刷新状态，不发初始化、Git 预检、版本创建或 default
+  personal workspace 请求。
+- 新增版本的会话交互失效移动到进程就绪检查之后；补充不可初始化浏览器回归，并显式锁定个人工作区新建与
+  default ensure 两个 HTTP 入口必须按 ACTIVE binding 路由到目标 Java。
+- 同步 agent-web README 与 HTTP API 文档中的初始化状态机说明。
+
+### How
+
+- JDK 25 下 `ManagedWorkspaceApplicationServiceTest` 80 项通过；`ManagedWorkspaceControllerTest` 与
+  `UserOpencodeBackendRoutingWebFilterTest` 合计 59 项通过。
+- Playwright Chromium 两个初始化交互场景通过；agent-web typecheck、lint、生产 build、AI 文档校验和
+  `git diff --check` 通过，构建仅保留既有大 chunk 提示。
+- 运行中的 backend readiness 为 `UP`，前端 `http://127.0.0.1:3000` 返回 200，backend、frontend 和
+  opencode-manager 进程均存活。
+
+### Result
+
+- 初始化提示现在不会把“检查中/不可初始化/健康异常”误当成可恢复初始化；可初始化状态仍先征得用户确认，且
+  首次动作不会落盘工作区。
+- 本次未新增或修改 HTTP 路径/DTO、RunEvent/SSE、数据库/Flyway/SQL、性能或安全协议、环境配置、generated
+  SDK、OpenCode 源码或依赖；未构建或部署企业离线包，也未创建分支。

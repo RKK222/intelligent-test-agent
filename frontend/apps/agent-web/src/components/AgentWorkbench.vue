@@ -1622,7 +1622,34 @@ async function confirmProcessInitializationBeforeWorkspaceAction(actionLabel: st
     };
     return false;
   }
-  const startupAction = opencodeProcessStatus.value?.serviceStatus === "NOT_RUNNING" ? "启动" : "初始化";
+  const processStatus = opencodeProcessStatus.value;
+  if (!processStatus) {
+    feedback.value = {
+      kind: "info",
+      title: "正在检查 TestAgent 进程",
+      description: `状态确认后请重新${actionLabel}。`
+    };
+    if (!opencodeProcessQuery.isFetching.value) {
+      void opencodeProcessQuery.refetch();
+    }
+    return false;
+  }
+  // 只有后端明确允许初始化时才展示确认框；健康检查失败或无可用容器不能伪装成可恢复操作。
+  if (processStatus.status !== "NEEDS_INITIALIZATION" || !processStatus.initializable) {
+    const description = processStatus.status === "READY"
+      ? "TestAgent 进程健康检查尚未通过，请稍后刷新进程状态后重试。"
+      : processStatus.message || "当前没有可初始化的 TestAgent 进程，请联系管理员检查容器和服务器状态。";
+    if (!opencodeProcessQuery.isFetching.value) {
+      void opencodeProcessQuery.refetch();
+    }
+    await ElMessageBox.alert(description, "TestAgent 进程当前不可用", {
+      type: "warning",
+      confirmButtonText: "我知道了",
+      autofocus: false
+    }).catch(() => undefined);
+    return false;
+  }
+  const startupAction = processStatus.serviceStatus === "NOT_RUNNING" ? "启动" : "初始化";
   const confirmed = await ElMessageBox.confirm(
     `${actionLabel}前需要先${startupAction} TestAgent 专属进程。完成后请重新${actionLabel}，是否现在${startupAction}？`,
     `请先${startupAction} TestAgent 进程`,
@@ -5233,7 +5260,6 @@ async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemp
     feedback.value = { kind: "info", title: "源码快照不能新增应用版本", description: "请先返回应用工作区。" };
     return;
   }
-  invalidateConversationInteraction();
   const appId = selectedAppId.value;
   if (!appId) {
     feedback.value = { kind: "error", title: "未选择应用", description: "请先选择要新增版本的应用。" };
@@ -5242,6 +5268,7 @@ async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemp
   if (!await confirmProcessInitializationBeforeWorkspaceAction("新增应用版本")) {
     return;
   }
+  invalidateConversationInteraction();
   const selectionAuthority = beginManagedWorkspaceIntent(appId);
   const selectionIsCurrent = () => appSourceIntentIsCurrent(selectionAuthority);
   creatingVersion.value = true;

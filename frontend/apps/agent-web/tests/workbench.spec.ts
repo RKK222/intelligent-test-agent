@@ -6678,32 +6678,7 @@ test("version selection prompts for process initialization before creating a per
     processInitializations,
     gitAccessRequests,
     defaultPersonalRequests,
-    workspaceTemplates: {
-      app_gcms: [{
-        workspaceId: "awp_main",
-        workspaceName: "F-GCMS 主服务",
-        appId: "app_gcms",
-        repositoryId: "repo_1",
-        defaultBranch: "main",
-        createdAt: "2026-06-24T00:00:00Z",
-        updatedAt: "2026-06-24T00:00:00Z"
-      }]
-    },
-    workspaceVersions: {
-      "app_gcms:awp_main": [{
-        versionId: "awv_2024_01",
-        applicationWorkspaceId: "awp_main",
-        appId: "app_gcms",
-        repositoryId: "repo_1",
-        version: "2024年1月",
-        branch: "feature_testagent_20240101",
-        repoRootPath: "/tmp/test-agent/appworkspace/awp_main/repo_1",
-        workspaceRootPath: "/tmp/test-agent/appworkspace/awp_main/repo_1/F-GCMS/workspace",
-        status: "ACTIVE",
-        createdAt: "2026-06-24T00:00:00Z",
-        updatedAt: "2026-06-24T00:00:00Z"
-      }]
-    }
+    ...versionSelectionWorkspaceSetup()
   });
 
   await gotoWorkbench(page, { selectConversation: false });
@@ -6730,6 +6705,33 @@ test("version selection prompts for process initialization before creating a per
   await chooseVersion();
   await expect.poll(() => gitAccessRequests).toEqual(["awv_2024_01"]);
   await expect.poll(() => defaultPersonalRequests).toEqual(["awv_2024_01"]);
+});
+
+test("version selection does not offer initialization when no process can be initialized", async ({ page }) => {
+  const processInitializations: Array<Record<string, unknown>> = [];
+  const gitAccessRequests: string[] = [];
+  const defaultPersonalRequests: string[] = [];
+  await mockBackendApi(page, {
+    processStatus: "UNAVAILABLE",
+    processInitializations,
+    gitAccessRequests,
+    defaultPersonalRequests,
+    ...versionSelectionWorkspaceSetup()
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.locator(".ta-workbench-footer-branch").click();
+  await page.getByRole("menuitem", { name: /F-GCMS 主服务/ }).hover();
+  await page.getByRole("menuitem", { name: /2024年1月/ }).first().click();
+
+  const alert = page.locator(".el-message-box");
+  await expect(alert).toBeVisible();
+  await expect(alert.getByText("TestAgent 进程当前不可用")).toBeVisible();
+  await expect(alert).toContainText("没有可用的 TestAgent 容器");
+  await expect(alert.getByRole("button", { name: "初始化进程" })).toHaveCount(0);
+  expect(processInitializations).toEqual([]);
+  expect(gitAccessRequests).toEqual([]);
+  expect(defaultPersonalRequests).toEqual([]);
 });
 
 test("workbench accepts the first prompt without requiring new conversation while pet manual help remains available", async ({ page }) => {
@@ -9166,6 +9168,37 @@ function runnableWorkspaceSetup() {
     },
     personalWorkspaces: {
       awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    }
+  };
+}
+
+function versionSelectionWorkspaceSetup() {
+  return {
+    workspaceTemplates: {
+      app_gcms: [{
+        workspaceId: "awp_main",
+        workspaceName: "F-GCMS 主服务",
+        appId: "app_gcms",
+        repositoryId: "repo_1",
+        defaultBranch: "main",
+        createdAt: "2026-06-24T00:00:00Z",
+        updatedAt: "2026-06-24T00:00:00Z"
+      }]
+    },
+    workspaceVersions: {
+      "app_gcms:awp_main": [{
+        versionId: "awv_2024_01",
+        applicationWorkspaceId: "awp_main",
+        appId: "app_gcms",
+        repositoryId: "repo_1",
+        version: "2024年1月",
+        branch: "feature_testagent_20240101",
+        repoRootPath: "/tmp/test-agent/appworkspace/awp_main/repo_1",
+        workspaceRootPath: "/tmp/test-agent/appworkspace/awp_main/repo_1/F-GCMS/workspace",
+        status: "ACTIVE",
+        createdAt: "2026-06-24T00:00:00Z",
+        updatedAt: "2026-06-24T00:00:00Z"
+      }]
     }
   };
 }

@@ -339,6 +339,14 @@ class UserOpencodeBackendRoutingWebFilterTest {
     }
 
     @Test
+    void routesPersonalWorkspaceCreationAndDefaultRepairToTheUsersBoundServer() {
+        assertRequestIsForwarded(
+                "/api/internal/platform/workspace-management/workspace-versions/awv_1/personal-workspaces");
+        assertRequestIsForwarded(
+                "/api/internal/platform/workspace-management/workspace-versions/awv_1/ensure-default-personal-workspace");
+    }
+
+    @Test
     void routesPersonalWorkspaceGitPullBecauseItRequiresOwnerWorktreeServer() {
         assertRequestIsForwarded("/api/internal/platform/workspace-management/personal-workspaces/pws_1/git-pull");
     }
