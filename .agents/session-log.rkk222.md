@@ -5477,3 +5477,37 @@
 - 动态长图已生成且完整可播放，文件大小约 3.62 MiB，明显低于 20 MB 上限。
 - 本次仅新增宣传素材并更新本机 session log；未修改业务代码、README、API、事件、数据库/Flyway/SQL、
   性能、安全、环境配置、generated SDK 或 OpenCode 源码。
+
+## 2026-08-04 - 将个人工作区搬迁调整为每 30 分钟并保留 V7 历史
+
+### Why
+
+- 上一轮企业包尚未部署，用户希望重新打包前直接把个人工作区搬迁从每分钟改为每 30 分钟。
+- 本机共享 XXL MySQL 已执行 V7；按 Flyway 不可变规则不能改写 V7，否则本地、共享或企业分叉环境会出现
+  checksum 校验失败。企业现网虽然尚无 V7，也应走同一条可回归的 V7 → V8 升级链路。
+
+### What
+
+- 保留 `V7__register_personal_workspace_relocation_task.sql` 原始字节和 SHA-256
+  `be1705cac272b9c4e89c43136f0125132c2afc4bbc3525322678cd02fb2c5305`；新增不可变 V8，只把该任务
+  `schedule_conf` 更新为 `0 0/30 * * * ? *`、清零 `trigger_next_time`，不改变启停和执行策略。
+- handler 默认 Cron 同步改为每 30 分钟；MySQL 8.4 回归新增已执行 V7 再升级 V8 的场景，并同步 workspace、
+  XXL、数据库、架构、测试、HTTP API 和企业多后台部署手册。
+
+### How
+
+- JDK 25 下定向 handler/MySQL 测试 5 项通过；workspace 与 XXL 相关 reactor 完整测试共 637 项通过，
+  MySQL/Redis Testcontainers 均实际执行、无跳过；企业 XXL 只读诊断脚本通过。
+- 使用未修改的 `.env.test` 和 `--without-workflow` 重建并重启真实 backend、manager、frontend；默认启动因
+  workflow 开发 Redis 密码缺失在构建前失败，按本轮 release 明确禁用 workflow 的口径关闭该组件后成功。
+- 真实本地 XXL MySQL 从 V7 成功执行 V8，history 中 V7/V8 均为成功，任务唯一行最终为
+  `0 0/30 * * * ? *` 且 `trigger_status=1`；backend health/readiness、frontend 3000、登录 CORS 和 manager
+  WebSocket 均正常。
+
+### Result
+
+- 当前代码和数据库升级链路已通过运行验证，可作为本轮重新封装企业包的源码提交；企业首次启动将先执行
+  V7、随即执行 V8，scheduler 启动后的有效频率直接为每 30 分钟，不需要现场再手工 update 任务表。
+- 未修改 API 路径/DTO/事件、PostgreSQL migration、环境文件、generated SDK 或 OpenCode 源码；调度频率
+  降低后数据库与广播负载相应下降。正式企业执行仍须先取得两套完整 `flyway_schema_history`：PostgreSQL
+  应尚无 `20260804123000`，XXL MySQL 应为 V1-V6 成功且尚无 V7/V8；未知 checksum、失败记录或分叉必须停发。

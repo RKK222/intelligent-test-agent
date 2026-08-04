@@ -72,7 +72,7 @@ corepack pnpm playwright test apps/agent-web/tests/workbench.spec.ts \
 ## 数据、容量与日志检查
 
 - PostgreSQL 中一个 repository 只有一个 active generation；非终态 operation/step 与 replica 对应一致，不存在无父 cleanup、终态步骤回退或过期 lease 写回。
-- XXL MySQL 中 `xxl_job_info` 恰好八条；应用源码清理使用每分钟 Cron、`ROUND + DISCARD_LATER + DO_NOTHING + GLOBAL_MUTEX + retry=0` 和空 payload。
+- XXL MySQL 中 `xxl_job_info` 恰好九条；应用源码清理使用每分钟 Cron，个人工作区搬迁使用每 30 分钟 Cron，两者都保持 `ROUND + DISCARD_LATER + DO_NOTHING + GLOBAL_MUTEX + retry=0` 和空 payload。
 - 每台服务器核对 active 源码、同目录 staging/backup、锁文件和数据库 replica/cleanup；磁盘告警必须早于无法创建同体量 staging，cleanup backlog 持续增长时优先恢复 XXL/executor 和目标 Java，不手工递归删除未知路径。
 - API、WebSocket、广播和日志只允许 operationId、repositoryId、generation、linuxServerId、traceId 与安全摘要；不得出现 SSH 私钥、Authorization、物理源码根、完整命令 stderr、文件正文或堆栈。
 - 工作台操作不得产生新的 Run、Session、RunEvent 或用户级 runtime-state 事件；进度只由 AppSource 独立 WebSocket 传输，普通文件内容继续只走 Workspace 文件 WebSocket。

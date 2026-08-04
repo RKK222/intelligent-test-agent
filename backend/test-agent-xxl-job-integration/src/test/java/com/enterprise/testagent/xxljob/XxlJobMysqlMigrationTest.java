@@ -65,7 +65,7 @@ class XxlJobMysqlMigrationTest {
                     .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='workspace-management.app-source-cleanup' and schedule_conf='0 0/1 * * * ? *' and executor_param like '%GLOBAL_MUTEX%' and trigger_status=1"))
                     .isEqualTo(1);
-            assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='workspace-management.personal-workspace-relocation' and schedule_conf='0 0/1 * * * ? *' and executor_param like '%GLOBAL_MUTEX%' and trigger_status=1"))
+            assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='workspace-management.personal-workspace-relocation' and schedule_conf='0 0/30 * * * ? *' and executor_param like '%GLOBAL_MUTEX%' and trigger_status=1"))
                     .isEqualTo(1);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where executor_param like '%executionAffinity%' or executor_param like '%linuxServerId%'"))
                     .isZero();
@@ -73,14 +73,45 @@ class XxlJobMysqlMigrationTest {
     }
 
     @Test
+    void upgradesExecutedV7WithoutChangingItsHistory() throws Exception {
+        String schema = "xxl_job_v7_upgrade";
+        createDatabase(schema);
+        String schemaUrl = MYSQL.getJdbcUrl().replace("/xxl_job", "/" + schema);
+
+        Flyway.configure()
+                .dataSource(schemaUrl, MYSQL.getUsername(), MYSQL.getPassword())
+                .locations("classpath:xxl-job/db/migration")
+                .target("7")
+                .load()
+                .migrate();
+        try (Connection connection = DriverManager.getConnection(
+                schemaUrl, MYSQL.getUsername(), MYSQL.getPassword());
+             Statement statement = connection.createStatement()) {
+            assertThat(singleInt(statement, "select count(*) from flyway_schema_history where success=1"))
+                    .isEqualTo(7);
+            assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='workspace-management.personal-workspace-relocation' and schedule_conf='0 0/1 * * * ? *'"))
+                    .isEqualTo(1);
+        }
+
+        Flyway flyway = Flyway.configure()
+                .dataSource(schemaUrl, MYSQL.getUsername(), MYSQL.getPassword())
+                .locations("classpath:xxl-job/db/migration")
+                .load();
+        assertThat(flyway.migrate().success).isTrue();
+        try (Connection connection = DriverManager.getConnection(
+                schemaUrl, MYSQL.getUsername(), MYSQL.getPassword());
+             Statement statement = connection.createStatement()) {
+            assertThat(singleInt(statement, "select count(*) from flyway_schema_history where success=1"))
+                    .isEqualTo(8);
+            assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key='workspace-management.personal-workspace-relocation' and schedule_conf='0 0/30 * * * ? *' and trigger_next_time=0"))
+                    .isEqualTo(1);
+        }
+    }
+
+    @Test
     void concurrentAdminMigrationsSerializeOnFreshSchema() throws Exception {
         String schema = "xxl_job_concurrent";
-        try (Connection connection = DriverManager.getConnection(
-                MYSQL.getJdbcUrl().replace("/xxl_job", "/mysql"), "root", MYSQL.getPassword());
-             Statement statement = connection.createStatement()) {
-            statement.execute("CREATE DATABASE `" + schema + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-            statement.execute("GRANT ALL PRIVILEGES ON `" + schema + "`.* TO 'xxl_job'@'%'");
-        }
+        createDatabase(schema);
 
         String schemaUrl = MYSQL.getJdbcUrl().replace("/xxl_job", "/" + schema);
         CountDownLatch ready = new CountDownLatch(2);
@@ -98,9 +129,18 @@ class XxlJobMysqlMigrationTest {
                 schemaUrl, MYSQL.getUsername(), MYSQL.getPassword());
              Statement statement = connection.createStatement()) {
             assertThat(singleInt(statement, "select count(*) from flyway_schema_history where success=1"))
-                    .isEqualTo(7);
+                    .isEqualTo(8);
             assertThat(singleInt(statement, "select count(*) from xxl_job_info where platform_task_key is not null"))
                     .isEqualTo(9);
+        }
+    }
+
+    private static void createDatabase(String schema) throws Exception {
+        try (Connection connection = DriverManager.getConnection(
+                MYSQL.getJdbcUrl().replace("/xxl_job", "/mysql"), "root", MYSQL.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("CREATE DATABASE `" + schema + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+            statement.execute("GRANT ALL PRIVILEGES ON `" + schema + "`.* TO 'xxl_job'@'%'");
         }
     }
 

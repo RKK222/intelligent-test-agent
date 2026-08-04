@@ -557,16 +557,16 @@ PostgreSQL 正常现网路径必须满足：所有记录 `success=true`；`20260
 `20260804123000` 尚未执行。虽然 LobeHub 服务和页面入口本次关闭，既有兼容 migration 创建的平台模型
 目录/聚合表和四个默认禁用参数仍必须保留，这是数据库兼容要求，不代表启用服务。
 
-XXL MySQL 使用独立的 `flyway_schema_history`。部署前应为 V1-V6 全部成功、没有 V7，也没有失败、
+XXL MySQL 使用独立的 `flyway_schema_history`。部署前应为 V1-V6 全部成功、没有 V7/V8，也没有失败、
 未知 checksum 或更高版本；第一台新 Java 启动后才允许执行
-`V7__register_personal_workspace_relocation_task.sql`。
+`V7__register_personal_workspace_relocation_task.sql` 和 `V8__schedule_personal_workspace_relocation_every_thirty_minutes.sql`。V7 先登记任务，V8 随即把最终 Cron 调整为每 30 分钟；不得改写 V7 规避 Flyway 历史校验。
 
 `V20260728160800__create_toolbox_click_tracking.sql` 的现网 checksum 仍必须为 `-1966404877`；只有已登记的
 早期测试/过渡历史才允许旧 `V20260727203500` 或 `-74327385` 幂等变体；现网历史中的
 `V20260728210000__index_in_flight_app_source_operations.sql` 也必须保留且为 `success=true`。任一失败记录、未知 checksum、
 未知更高版本、缺少上述昨晚基线版本或其它历史分叉都必须停止发布；不得启用 Flyway `outOfOrder`、执行
 `repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常、PostgreSQL
-`20260804123000` 与 XXL MySQL V7 新增且为 `success=true`，同时既有
+`20260804123000` 与 XXL MySQL V7/V8 新增且为 `success=true`、搬迁任务 `schedule_conf='0 0/30 * * * ? *'`，同时既有
 `20260802173416`、`20260803133000` 和 checksum 未变化，再部署 `.114`。`.4` 日志出现
 `FlywayValidateException`、`ClassNotFoundException: org.postgresql.Driver` 或 `Application run failed` 时不得继续滚动。
 
@@ -875,11 +875,11 @@ docker exec test-agent-opencode-worker \
 
 ## 10. 个人工作区与 Agent 跨服务器自动搬迁
 
-本版本新增 XXL 全局任务 `workspace-management.personal-workspace-relocation`，使用 `0 0/1 * * * ? *` 每分钟触发一次。入口 executor 先通过 Redis 广播唤醒全部 Java；每台 Java 只扫描并认领 `workspaces.linux_server_id` 等于本机稳定服务器 ID、而用户当前 ACTIVE `opencode` binding 已在另一台服务器的个人工作区。该规则对所有应用生效，不按 `f-base`、应用名或用户白名单过滤。
+本版本新增 XXL 全局任务 `workspace-management.personal-workspace-relocation`，最终使用 `0 0/30 * * * ? *` 每 30 分钟触发一次。入口 executor 先通过 Redis 广播唤醒全部 Java；每台 Java 只扫描并认领 `workspaces.linux_server_id` 等于本机稳定服务器 ID、而用户当前 ACTIVE `opencode` binding 已在另一台服务器的个人工作区。该规则对所有应用生效，不按 `f-base`、应用名或用户白名单过滤。
 
 搬迁不是直接改库。源端先生成可移植 Git 快照，覆盖本地 HEAD（包括尚未 push 的本地提交）、暂存区、未暂存修改和全部普通未跟踪文件（包括被 Git ignore 的文件）；随后通过精确目标 Java 的一次性内部 WebSocket 分片传输。目标端校验归档大小、SHA-256、Git HEAD/index/worktree/untracked 状态和目标目录，再在同一事务中更新 `workspaces.root_path/linux_server_id`、`personal_workspaces.repo_root_path/workspace_root_path/base_commit`，最后由源端删除旧 worktree。目标未恢复或校验未通过时不会切数据库；数据库已切换但源目录清理失败时保持 `CLEANUP_PENDING`，后续只重试旧源清理，不会被新的错配发现覆盖。
 
-有 `PENDING`、`RUNNING` 或 `CANCELLING` Run 的工作区不会进入搬迁。存在未解决 Git merge 冲突、Git 子模块、超过 2 GiB、超过 10000 个未跟踪文件，或未跟踪项包含符号链接/特殊文件时也不会冒险迁移，而是记录脱敏错误并指数退避重试，源目录不会删除。Git ignored 普通文件同样进入快照并计入上述个数/容量上限；如 `node_modules` 或构建产物使快照超限，需先清理可重建内容后等待重试。Redis 广播只用于低延迟唤醒，不携带用户、工作区 ID 或路径；广播失败仍由下一分钟 XXL 调度补偿。
+有 `PENDING`、`RUNNING` 或 `CANCELLING` Run 的工作区不会进入搬迁。存在未解决 Git merge 冲突、Git 子模块、超过 2 GiB、超过 10000 个未跟踪文件，或未跟踪项包含符号链接/特殊文件时也不会冒险迁移，而是记录脱敏错误并指数退避重试，源目录不会删除。Git ignored 普通文件同样进入快照并计入上述个数/容量上限；如 `node_modules` 或构建产物使快照超限，需先清理可重建内容后等待重试。Redis 广播只用于低延迟唤醒，不携带用户、工作区 ID 或路径；广播失败仍由下一次 XXL 调度补偿。
 
 企业环境 `SYS_DATA_ROOT_DIR=/data/testagent/data` 时，个人仓库物理路径为：
 
@@ -1008,9 +1008,9 @@ from xxl_job_info
 where platform_task_key = 'workspace-management.personal-workspace-relocation';
 ```
 
-上线必须避免新旧 Java 混跑该任务：在维护窗口先停止两台旧 Java，将两台 JAR 和 `backend/lib/` 都替换为同一版本，再依次启动。第一台新版启动会执行 PostgreSQL `V20260804123000__create_personal_workspace_relocations.sql` 和 XXL MySQL `V7__register_personal_workspace_relocation_task.sql`；第二台尚未启动时目标不可达只会安全重试，不会提前改库。若只能滚动升级，应在 XXL Admin 先停用该 `platform_task_key`，确认所有 Java 都是新版本后再启用。禁止通过手工复制目录后直接 update `linux_server_id`，也禁止删除搬迁状态行来跳过源端清理。
+上线必须避免新旧 Java 混跑该任务：在维护窗口先停止两台旧 Java，将两台 JAR 和 `backend/lib/` 都替换为同一版本，再依次启动。第一台新版启动会执行 PostgreSQL `V20260804123000__create_personal_workspace_relocations.sql`，XXL MySQL 连续执行 V7 和 V8；V7 登记任务，V8 在 scheduler 启动前把最终频率改为每 30 分钟。第二台尚未启动时目标不可达只会安全重试，不会提前改库。若只能滚动升级，应在 XXL Admin 先停用该 `platform_task_key`，确认所有 Java 都是新版本后再启用。禁止通过手工复制目录后直接 update `linux_server_id`，也禁止删除搬迁状态行来跳过源端清理。
 
-清理一轮后不能承诺数据库从此永远不会短暂出现错配：正常初始化和修复链路已不再把工作空间直接切到另一台 Agent 而丢下源文件，已有 ACTIVE binding 也不会因负载变化自动迁移；但人工改库、混合版本、正式迁移 binding 或未来新增的迁移入口仍可能暂时形成新错配。该分钟任务提供持续收敛，安全目标是“可发现、可恢复、先搬文件、后改库”，不是假设错配永不再发生。
+清理一轮后不能承诺数据库从此永远不会短暂出现错配：正常初始化和修复链路已不再把工作空间直接切到另一台 Agent 而丢下源文件，已有 ACTIVE binding 也不会因负载变化自动迁移；但人工改库、混合版本、正式迁移 binding 或未来新增的迁移入口仍可能暂时形成新错配。该周期任务提供持续收敛，安全目标是“可发现、可恢复、先搬文件、后改库”，不是假设错配永不再发生。
 
 首次初始化前端仍先弹确认框；如果工作区正处于服务器归属修复/搬迁，普通用户只看到“工作区与 Agent 服务器归属正在调整，请稍后重试”一类安全提示，不显示 `workspaceId`、服务器路径或内部搬迁 ID。日志可按 `event=personal_workspace_relocation_succeeded`、`event=personal_workspace_relocation_retry` 和同一 traceId 对齐，但不要记录归档内容或文件清单。
 

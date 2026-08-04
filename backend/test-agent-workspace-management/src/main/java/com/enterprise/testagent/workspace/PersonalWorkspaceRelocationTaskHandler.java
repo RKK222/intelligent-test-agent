@@ -51,7 +51,7 @@ public class PersonalWorkspaceRelocationTaskHandler
 
     @Override
     public String cronExpression() {
-        return "0 0/1 * * * ? *";
+        return "0 0/30 * * * ? *";
     }
 
     @Override
@@ -72,7 +72,7 @@ public class PersonalWorkspaceRelocationTaskHandler
                     clock.instant(),
                     Map.of()));
         } catch (RuntimeException ignored) {
-            // 广播只负责低延迟唤醒；入口 Java 本地执行和下一分钟 XXL 调度仍会补偿。
+            // 广播只负责低延迟唤醒；入口 Java 本地执行和下一次 XXL 调度仍会补偿。
         }
         return ScheduledTaskResult.of(worker.runDue(context.traceId()).asDetails());
     }

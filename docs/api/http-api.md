@@ -1165,7 +1165,7 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 
 #### 个人工作区跨服务器搬迁内部通道
 
-该通道只供每分钟执行的 `workspace-management.personal-workspace-relocation` 平台任务使用，不接受浏览器登录态，也不暴露给普通用户。源 Java 必须先通过公共 `BackendJavaRouteResolver` 选中搬迁记录指定的目标 Java，再由公共 `BackendHttpForwarder` 调用 ticket 接口；HTTP 只传搬迁事实和归档摘要，不承载任何工作区文件字节。
+该通道只供每 30 分钟执行的 `workspace-management.personal-workspace-relocation` 平台任务使用，不接受浏览器登录态，也不暴露给普通用户。源 Java 必须先通过公共 `BackendJavaRouteResolver` 选中搬迁记录指定的目标 Java，再由公共 `BackendHttpForwarder` 调用 ticket 接口；HTTP 只传搬迁事实和归档摘要，不承载任何工作区文件字节。
 
 `POST /api/internal/platform/workspace-management/personal-workspace-relocations/transfer-tickets` 必须携带非空且精确匹配的 `XXL-JOB-ACCESS-TOKEN`，请求体为：
 

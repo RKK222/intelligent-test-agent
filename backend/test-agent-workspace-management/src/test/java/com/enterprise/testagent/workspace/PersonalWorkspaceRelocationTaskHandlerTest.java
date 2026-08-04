@@ -48,7 +48,7 @@ class PersonalWorkspaceRelocationTaskHandlerTest {
         assertThat(event.getValue().payload()).isEmpty();
         assertThat(handler.taskKey().value())
                 .isEqualTo("workspace-management.personal-workspace-relocation");
-        assertThat(handler.cronExpression()).isEqualTo("0 0/1 * * * ? *");
+        assertThat(handler.cronExpression()).isEqualTo("0 0/30 * * * ? *");
 
         handler.handle(new ServerBroadcastEvent(
                 "sbe_relocation",
