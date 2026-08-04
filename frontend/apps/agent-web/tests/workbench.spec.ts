@@ -6425,6 +6425,7 @@ test("history loading does not wait for interaction snapshot or message feedback
 test("switching history changes to the session application and workspace", async ({ page }) => {
   const fileRequests: Array<{ workspaceId: string; path: string }> = [];
   const markRecentRequests: string[] = [];
+  const personalWorkspaceRequests: string[] = [];
   const historyWorkspace = {
     ...workspace(),
     workspaceId: "wrk_history_coss",
@@ -6434,9 +6435,18 @@ test("switching history changes to the session application and workspace", async
     versionId: "awv_coss",
     applicationWorkspaceId: "awp_coss"
   };
+  const historyPersonalWorkspace = {
+    ...defaultPersonalWorkspace("awv_coss"),
+    personalWorkspaceId: "psw_history_coss",
+    appId: "app_coss",
+    applicationWorkspaceId: "awp_coss",
+    branch: "feature_coss_usr_admin_default",
+    runtimeWorkspace: historyWorkspace
+  };
   await mockBackendApi(page, {
     fileRequests,
     markRecentRequests,
+    personalWorkspaceRequests,
     applications: [
       { appId: "app_gcms", appName: "F-GCMS", enabled: true },
       { appId: "app_coss", appName: "F-COSS", enabled: true }
@@ -6451,7 +6461,8 @@ test("switching history changes to the session application and workspace", async
       }
     },
     personalWorkspaces: {
-      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")],
+      awv_coss: [historyPersonalWorkspace]
     },
     markRecentWorkspaces: {
       wrk_history_coss: historyWorkspace
@@ -6492,8 +6503,13 @@ test("switching history changes to the session application and workspace", async
   await page.getByRole("button", { name: /COSS 历史会话/ }).click();
 
   await expect.poll(() => markRecentRequests).toContain("wrk_history_coss");
+  await expect.poll(() => personalWorkspaceRequests).toContain("awv_coss");
   await expect(page.getByRole("button", { name: "应用：F-COSS", exact: true })).toBeVisible();
   await expect.poll(() => fileRequests).toContainEqual({ workspaceId: "wrk_history_coss", path: "" });
+  await page.getByRole("button", { name: "关闭会话列表抽屉" }).click();
+  await expect(page.getByRole("button", { name: "新建或上传到工作区根目录" })).toBeVisible();
+  await page.getByRole("button", { name: "package.json", exact: true }).hover();
+  await expect(page.getByRole("button", { name: "删除 package.json" })).toBeVisible();
 });
 
 test("history switch failure keeps current context and makes the session readonly", async ({ page }) => {

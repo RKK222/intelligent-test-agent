@@ -5273,3 +5273,37 @@
   首次动作不会落盘工作区。
 - 本次未新增或修改 HTTP 路径/DTO、RunEvent/SSE、数据库/Flyway/SQL、性能或安全协议、环境配置、generated
   SDK、OpenCode 源码或依赖；未构建或部署企业离线包，也未创建分支。
+
+## 2026-08-04 - 修复个人 worktree 切换后文件操作按钮消失
+
+### Why
+
+- `switchWorkspace` 会先清空 `currentPersonalWorkspaceId`，普通版本切换又要等目录加载结束后才恢复；历史 Session
+  和服务器目录切换则没有恢复该身份。文件树以该 ID 判定托管 Workspace 是否可写，因此新增、上传和删除入口
+  会暂时或持续消失，刷新后由 recent/default 个人工作区恢复链重新写入才出现。
+- 问题由 `7f2a4dd6d` 的切换清理和 `05117acd1` 的历史工作区切换路径埋下，`57f61b9d8` 开始按可写状态隐藏
+  文件操作按钮后显性暴露；后续 7 月 28 日工作区重构保留了该行为。
+
+### What
+
+- 为 Workspace 切换增加个人 worktree 上下文参数，在清空旧状态后、激活目标 Workspace 和加载文件树前同步
+  写入个人 ID/分支；版本选择、新增版本和应用 recent 切换直接传递已知身份，不再事后恢复。
+- 历史 Session 和服务器目录入口复用既有个人工作区列表，按 `versionId` 查询并以运行态 Workspace ID 精确
+  匹配；匹配不到时仍保持只读，不按名称、路径或角色放宽权限。
+- 补充纯函数单测和 Playwright 回归，验证历史 Session 切到另一应用的个人 worktree 后不刷新即可看到根新增
+  和文件删除入口；同步 frontend、agent-web、包说明、前端规范和模块图。
+
+### How
+
+- `app-source-workspace` 定向 Vitest 11 项、agent-web typecheck、历史切换相关 Playwright 12 项和生产构建通过；
+  构建只保留既有大 chunk 告警。
+- 使用 JDK 25、`.env.test` 和 `test` profile 重启；默认启动因缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 在启动前停止，
+  未修改环境文件，随后用脚本支持的 `--without-workflow` 重启 backend、opencode-manager、frontend。后端
+  readiness 为 `UP`、前端 3000 返回 200、CORS 正常，manager 最终把 OpenCode 4104 收敛为 `HEALTHY`。
+
+### Result
+
+- 个人 worktree 在版本、应用、服务器目录和历史 Session 切换后立即保持可写，新增/删除按钮不再依赖刷新；
+  应用 feature 共享副本仍按原权限模型只读。
+- 本次未新增或修改 API/DTO、RunEvent/SSE、数据库/Flyway/SQL、性能或安全协议、环境配置、generated SDK、
+  OpenCode 源码或依赖；未构建或部署企业离线包，也未创建分支。

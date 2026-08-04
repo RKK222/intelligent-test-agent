@@ -1,7 +1,30 @@
-import type { AppSourceOpenResult, AppSourcePurpose } from "@test-agent/shared-types";
+import type { AppSourceOpenResult, AppSourcePurpose, PersonalWorkspace } from "@test-agent/shared-types";
 import { BackendApiError } from "@test-agent/backend-api";
 
 export type SelectedWorkspaceKind = "MANAGED" | "APP_SOURCE";
+
+export type PersonalWorkspaceRuntimeContext = {
+  personalWorkspaceId: string;
+  personalWorkspaceBranch: string;
+};
+
+/**
+ * 个人 worktree 身份只能按服务端返回的运行态 Workspace ID 精确恢复，不能用名称或物理路径推断写权限。
+ */
+export function personalWorkspaceRuntimeContext(
+  workspaceId: string | undefined,
+  personalWorkspaces: PersonalWorkspace[]
+): PersonalWorkspaceRuntimeContext | undefined {
+  if (!workspaceId) return undefined;
+  const matched = personalWorkspaces.find((workspace) =>
+    workspace.runtimeWorkspace?.workspaceId === workspaceId
+  );
+  if (!matched) return undefined;
+  return {
+    personalWorkspaceId: matched.personalWorkspaceId,
+    personalWorkspaceBranch: matched.branch
+  };
+}
 
 /**
  * 源码工作区只保存服务端返回的逻辑身份；物理路径仍由 Workspace 与文件 WebSocket 路由解析。

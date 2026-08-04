@@ -10,6 +10,7 @@ import {
   claimAppSourceTerminalOperation,
   diffFileCanWrite,
   ordinaryWorkspaceCanWrite,
+  personalWorkspaceRuntimeContext,
   sourceContextFromOpen
 } from "../src/components/app-source-workspace";
 import agentWorkbenchSource from "../src/components/AgentWorkbench.vue?raw";
@@ -55,6 +56,39 @@ describe("app source workspace state", () => {
     expect(ordinaryWorkspaceCanWrite("MANAGED", "pws-personal", "wrk-personal")).toBe(true);
     expect(ordinaryWorkspaceCanWrite("MANAGED", undefined, "wrk-feature-readonly")).toBe(false);
     expect(ordinaryWorkspaceCanWrite("APP_SOURCE", undefined, undefined)).toBe(false);
+  });
+
+  it("restores personal worktree identity only from an exact runtime workspace match", () => {
+    const personalWorkspace = {
+      personalWorkspaceId: "psw-history",
+      versionId: "awv-history",
+      appId: "app-history",
+      applicationWorkspaceId: "awp-history",
+      workspaceName: "default",
+      branch: "feature_history_usr_admin_default",
+      repoRootPath: "/mock/history",
+      workspaceRootPath: "/mock/history",
+      runtimeWorkspace: {
+        workspaceId: "wrk-history-personal",
+        name: "history personal",
+        rootPath: "/mock/history",
+        status: "ACTIVE",
+        linuxServerId: "linux-a",
+        createdAt: "2026-08-04T00:00:00Z",
+        updatedAt: "2026-08-04T00:00:00Z"
+      },
+      baseCommit: "commit-history",
+      status: "ACTIVE",
+      createdAt: "2026-08-04T00:00:00Z",
+      updatedAt: "2026-08-04T00:00:00Z"
+    };
+
+    expect(personalWorkspaceRuntimeContext("wrk-history-personal", [personalWorkspace])).toEqual({
+      personalWorkspaceId: "psw-history",
+      personalWorkspaceBranch: "feature_history_usr_admin_default"
+    });
+    expect(personalWorkspaceRuntimeContext("wrk-shared-feature", [personalWorkspace])).toBeUndefined();
+    expect(personalWorkspaceRuntimeContext(undefined, [personalWorkspace])).toBeUndefined();
   });
 
   it("double-gates Diff saves by workspace kind, file scope, and managed roles", () => {

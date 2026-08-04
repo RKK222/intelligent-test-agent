@@ -106,11 +106,13 @@ import {
   claimAppSourceTerminalOperation,
   diffFileCanWrite,
   ordinaryWorkspaceCanWrite,
+  personalWorkspaceRuntimeContext,
   sourceContextFromOpen,
   type AppSourceProgressAuthority,
   type AppSourceIntentAuthority,
   type AppSourceTreeAuthority,
   type AppSourceWorkspaceContext,
+  type PersonalWorkspaceRuntimeContext,
   type SelectedWorkspaceKind
 } from "./app-source-workspace";
 import FigmaEditorArea from "./FigmaEditorArea.vue";
@@ -3858,6 +3860,25 @@ function rememberPersonalWorkspace(personalWorkspaceId?: string, personalWorkspa
   currentPersonalWorkspaceBranch.value = personalWorkspaceBranch;
 }
 
+function personalWorkspaceContext(
+  personalWorkspaceId?: string,
+  personalWorkspaceBranch?: string
+): PersonalWorkspaceRuntimeContext | undefined {
+  if (!personalWorkspaceId) return undefined;
+  return {
+    personalWorkspaceId,
+    personalWorkspaceBranch: personalWorkspaceBranch ?? ""
+  };
+}
+
+async function resolvePersonalWorkspaceRuntimeContext(
+  workspace: Workspace
+): Promise<PersonalWorkspaceRuntimeContext | undefined> {
+  if (!workspace.versionId) return undefined;
+  const personalWorkspaces = await api.listPersonalWorkspaces(workspace.versionId);
+  return personalWorkspaceRuntimeContext(workspace.workspaceId, personalWorkspaces);
+}
+
 function cacheWorkspace(workspace: Workspace) {
   queryClient.setQueryData<PageResponse<Workspace>>(["workspaces"], (old) => {
     const previousItems = old?.items ?? [];
@@ -4818,6 +4839,7 @@ async function switchWorkspace(
     awaitDirectory?: boolean;
     kind?: SelectedWorkspaceKind;
     isCurrent?: () => boolean;
+    personalWorkspaceContext?: PersonalWorkspaceRuntimeContext;
   } = {}
 ) {
   const isCurrent = options.isCurrent ?? (() => true);
@@ -4839,6 +4861,11 @@ async function switchWorkspace(
     invalidateConversationInteraction();
   }
   resetWorkspaceState();
+  // 个人 worktree 身份和运行态 Workspace 必须在同一个同步切换边界写入，避免目录加载期间误降级为只读。
+  rememberPersonalWorkspace(
+    options.personalWorkspaceContext?.personalWorkspaceId,
+    options.personalWorkspaceContext?.personalWorkspaceBranch
+  );
   cacheWorkspace(workspace);
   selectedWorkspaceId.value = workspace.workspaceId;
   selectedWorkspaceSnapshot.value = workspace;
@@ -4940,9 +4967,8 @@ async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemp
     const applied = await applyManagedWorkspace(workspace, selectionIsCurrent, {
       successTitle: "已切换应用版本",
       successDescription: `${payload.template.workspaceName} · ${payload.version.version} (个人空间: default)`
-    });
+    }, personalWorkspaceContext(defaultPw.personalWorkspaceId, defaultPw.personalWorkspaceBranch));
     if (!applied || !selectionIsCurrent()) return;
-    rememberPersonalWorkspace(defaultPw.personalWorkspaceId, defaultPw.personalWorkspaceBranch);
   } catch (error) {
     if (selectionIsCurrent()) feedback.value = errorFeedback("切换应用版本失败", error);
   }
@@ -4957,7 +4983,8 @@ async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemp
 async function applyManagedWorkspace(
   workspace: Workspace,
   isCurrent: () => boolean,
-  feedbackDetail?: { successTitle: string; successDescription: string }
+  feedbackDetail?: { successTitle: string; successDescription: string },
+  knownPersonalWorkspaceContext?: PersonalWorkspaceRuntimeContext
 ) {
   let resolvedWorkspace = workspace;
   try {
@@ -4974,7 +5001,13 @@ async function applyManagedWorkspace(
   }
   // 应用目录刷新可能在 recent 请求期间撤销当前应用；迟到响应不得把已隐藏工作区重新挂回页面。
   if (!isCurrent()) return false;
-  const switched = await switchWorkspace(resolvedWorkspace, { isCurrent });
+  const resolvedPersonalWorkspaceContext = knownPersonalWorkspaceContext
+    ?? await resolvePersonalWorkspaceRuntimeContext(resolvedWorkspace);
+  if (!isCurrent()) return false;
+  const switched = await switchWorkspace(resolvedWorkspace, {
+    isCurrent,
+    personalWorkspaceContext: resolvedPersonalWorkspaceContext
+  });
   if (!switched || !isCurrent()) return false;
   if (feedbackDetail) {
     feedback.value = { kind: "info", title: feedbackDetail.successTitle, description: feedbackDetail.successDescription };
@@ -5300,9 +5333,8 @@ async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemp
       const applied = await applyManagedWorkspace(defaultPw.runtimeWorkspace, selectionIsCurrent, {
         successTitle: "已切换应用版本",
         successDescription: `${payload.template.workspaceName} · ${response.version}`
-      });
+      }, personalWorkspaceContext(defaultPw.personalWorkspaceId, defaultPw.personalWorkspaceBranch));
       if (!applied || !selectionIsCurrent()) return;
-      rememberPersonalWorkspace(defaultPw.personalWorkspaceId, defaultPw.personalWorkspaceBranch);
     } else {
       rememberPersonalWorkspace(defaultPw.personalWorkspaceId, defaultPw.personalWorkspaceBranch);
       feedback.value = {
@@ -5350,11 +5382,15 @@ async function handleSelectApp(appId: string) {
       return;
     }
     if (pick) {
-      const applied = await applyManagedWorkspace(pick.workspace, selectionIsCurrent);
+      const applied = await applyManagedWorkspace(
+        pick.workspace,
+        selectionIsCurrent,
+        undefined,
+        personalWorkspaceContext(pick.personalWorkspaceId, pick.personalWorkspaceBranch)
+      );
       if (!applied || !selectionIsCurrent()) {
         return;
       }
-      rememberPersonalWorkspace(pick.personalWorkspaceId, pick.personalWorkspaceBranch);
       return;
     }
     // 应用没有可用 recent/versionId 时保持空态，不回退到普通本机目录选择。
@@ -5386,7 +5422,7 @@ async function selectServerWorkspaceDirectory(payload: { server: WorkspaceBacken
         rootPath: payload.path
       }));
     if (!selectionIsCurrent()) return;
-    const switched = await switchWorkspace(workspace, { isCurrent: selectionIsCurrent });
+    const switched = await applyManagedWorkspace(workspace, selectionIsCurrent);
     if (!switched || !selectionIsCurrent()) return;
     serverWorkspacePickerOpen.value = false;
     serverWorkspaceDirectory.value = null;
@@ -8954,6 +8990,10 @@ async function switchToHistorySessionWorkspace(
     if (nextAppId) {
       selectedAppId.value = nextAppId;
     }
+    const personalWorkspaceContext = await resolvePersonalWorkspaceRuntimeContext(workspace);
+    if (!selectionIsCurrent()) {
+      return null;
+    }
     if (workspace.workspaceId !== selectedWorkspaceIdRef.value) {
       if (!selectionIsCurrent()) {
         return null;
@@ -8961,7 +9001,8 @@ async function switchToHistorySessionWorkspace(
       const switched = await switchWorkspace(workspace, {
         preserveConversationInteraction: true,
         awaitDirectory: false,
-        isCurrent: selectionIsCurrent
+        isCurrent: selectionIsCurrent,
+        personalWorkspaceContext
       });
       if (!switched || !selectionIsCurrent()) {
         return null;
@@ -8972,6 +9013,10 @@ async function switchToHistorySessionWorkspace(
       }
       cacheWorkspace(workspace);
       selectedWorkspaceSnapshot.value = workspace;
+      rememberPersonalWorkspace(
+        personalWorkspaceContext?.personalWorkspaceId,
+        personalWorkspaceContext?.personalWorkspaceBranch
+      );
       syncCurrentVersionFromWorkspace(workspace);
     }
     return "";
