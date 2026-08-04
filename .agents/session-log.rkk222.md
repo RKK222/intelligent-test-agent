@@ -5452,3 +5452,28 @@
 - 尚未取得企业 PostgreSQL 与 XXL MySQL 的真实 `flyway_schema_history`，因此企业执行仍以数据库门禁为前提：
   PostgreSQL 应保留昨晚已执行历史且尚无 `20260804123000`，XXL MySQL 应为 V1-V6 成功且尚无 V7；
   出现未知 checksum、失败记录、版本倒序或环境分叉必须停止，禁止 `repair`、`outOfOrder` 或手改历史表。
+
+## 2026-08-04 - 合成六项能力动态长图
+
+### Why
+
+- 用户提供独立工作空间、多任务并行、子智能体协同、后台与定时执行、跨资产库引用、Agent & Skill Hub
+  六段 GIF，希望合成为带顶部整体介绍的动态长图，并将文件控制在 20 MB 以内。
+
+### What
+
+- 新增 `docs/assets/marketing/ice-blue/00-capabilities-long-demo.gif`，顶部复用既有价值主张介绍图，下面按
+  `01/06` 至 `06/06` 顺序纵向排列并同步循环六段能力演示。
+- 成品为 720×2842、124 帧、约 6 FPS、20.67 秒，大小 3,794,461 字节，并保留无限循环标记。
+
+### How
+
+- 使用 FFmpeg 将六段不同帧率和时长的 GIF 统一为 6 FPS，以最长的 20.67 秒为循环周期；采用 64 色全局
+  调色板和 Bayer 抖动压缩，保持长图文字与界面状态可辨认。
+- 完整解码成品，并检查首帧、中间帧、尺寸、帧数、时长、SHA-256 和 `NETSCAPE2.0` 循环扩展。
+
+### Result
+
+- 动态长图已生成且完整可播放，文件大小约 3.62 MiB，明显低于 20 MB 上限。
+- 本次仅新增宣传素材并更新本机 session log；未修改业务代码、README、API、事件、数据库/Flyway/SQL、
+  性能、安全、环境配置、generated SDK 或 OpenCode 源码。
