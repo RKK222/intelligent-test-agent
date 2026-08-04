@@ -170,6 +170,7 @@ import type {
   SyncUsersFromTcdsResult,
   UpdateUserRolePayload,
   UserIdsPayload,
+  UserManagementQuery,
   UpdateRepositoryPayload,
   UserManagementUser,
   UserOpencodeProcess,
@@ -2250,9 +2251,21 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
 
     // ---- 用户管理 API ----
 
-    /** 分页查询用户列表（仅 SUPER_ADMIN）。 */
-    listUsers: (keyword?: string, page = 1, size = 50) =>
-      request<PageResponse<UserManagementUser>>(`${systemManagementBase}/users${query({ keyword, page, size })}`),
+    /** 按关键字、角色、组织及部门组合分页查询用户；字符串入参保留旧调用兼容。 */
+    listUsers: (paramsOrKeyword: UserManagementQuery | string = {}, page = 1, size = 50) => {
+      const params: UserManagementQuery = typeof paramsOrKeyword === "string"
+        ? { keyword: paramsOrKeyword, page, size }
+        : paramsOrKeyword;
+      return request<PageResponse<UserManagementUser>>(`${systemManagementBase}/users${query({
+        keyword: params.keyword,
+        role: params.role,
+        organization: params.organization,
+        rdDepartment: params.rdDepartment,
+        department: params.department,
+        page: params.page ?? 1,
+        size: params.size ?? 50
+      })}`);
+    },
     /** 创建测试用户，密码由后端注入默认值 123456。 */
     createUser: (payload: CreateUserPayload) =>
       request<UserManagementUser>(`${systemManagementBase}/users`, { method: "POST", body: JSON.stringify(payload) }),

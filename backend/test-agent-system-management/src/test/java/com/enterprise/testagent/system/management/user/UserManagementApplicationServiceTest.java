@@ -24,6 +24,8 @@ import com.enterprise.testagent.domain.dictionary.UserRoleRepository;
 import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserDeletionRepository;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.user.UserManagementQuery;
+import com.enterprise.testagent.domain.user.UserManagementQueryRepository;
 import com.enterprise.testagent.domain.user.UserRepository;
 import com.enterprise.testagent.domain.run.ConversationContextStore;
 import com.enterprise.testagent.domain.run.ConversationContextUserMutation;
@@ -49,10 +51,12 @@ class UserManagementApplicationServiceTest {
     @Test
     void listUsersReturnsUsersWithoutPasswordHashAndWithRoles() {
         UserRepository userRepository = mock(UserRepository.class);
+        UserManagementQueryRepository queryRepository = mock(UserManagementQueryRepository.class);
         User user = User.createNew(
                 "usr_1234567890abcdef", "AUTH_1", "alice",
                 "$2a$10$hashedvalue", "企业", "研发部", "测试部");
-        when(userRepository.findPage(eq("ali"), any(PageRequest.class)))
+        UserManagementQuery query = new UserManagementQuery("ali", "APP_ADMIN", "企业", "研发", "测试");
+        when(queryRepository.findPage(eq(query), any(PageRequest.class)))
                 .thenReturn(new PageResponse<>(List.of(user), 1, 50, 1));
 
         UserRoleRepository userRoleRepository = mock(UserRoleRepository.class);
@@ -63,8 +67,16 @@ class UserManagementApplicationServiceTest {
         when(dictionaryRepository.findByDictId(APP_ADMIN_DICT_ID))
                 .thenReturn(Optional.of(roleDictionary(APP_ADMIN_DICT_ID, "APP_ADMIN", "应用管理员", 3)));
 
-        UserManagementApplicationService service = service(userRepository, userRoleRepository, dictionaryRepository);
-        PageResponse<UserResponse> page = service.listUsers("ali", new PageRequest(1, 50));
+        UserManagementApplicationService service = service(
+                userDomainService(userRepository),
+                userRepository,
+                queryRepository,
+                mock(UserDeletionRepository.class),
+                userRoleRepository,
+                dictionaryRepository,
+                mock(TokenStore.class),
+                mock(ThirdPartyUserApiClient.class));
+        PageResponse<UserResponse> page = service.listUsers(query, new PageRequest(1, 50));
 
         assertThat(page.items()).hasSize(1);
         UserResponse response = page.items().get(0);
@@ -105,6 +117,7 @@ class UserManagementApplicationServiceTest {
         UserManagementApplicationService service = service(
                 userDomainService,
                 userRepository,
+                mock(UserManagementQueryRepository.class),
                 mock(UserDeletionRepository.class),
                 userRoleRepository,
                 dictionaryRepository,
@@ -167,8 +180,9 @@ class UserManagementApplicationServiceTest {
 
         TokenStore tokenStore = mock(TokenStore.class);
         UserManagementApplicationService service = service(
-                new UserDomainService(userRepository, mock(ThirdPartyUserApiClient.class)),
+                userDomainService(userRepository, mock(ThirdPartyUserApiClient.class)),
                 userRepository,
+                mock(UserManagementQueryRepository.class),
                 mock(UserDeletionRepository.class),
                 userRoleRepository,
                 dictionaryRepository,
@@ -250,8 +264,9 @@ class UserManagementApplicationServiceTest {
             return new ConversationContextUserMutation(userId, "delete-" + userId.value());
         });
         UserManagementApplicationService service = service(
-                new UserDomainService(userRepository, thirdPartyUserApiClient),
+                userDomainService(userRepository, thirdPartyUserApiClient),
                 userRepository,
+                mock(UserManagementQueryRepository.class),
                 deletionRepository,
                 mock(UserRoleRepository.class),
                 mock(DictionaryRepository.class),
@@ -277,8 +292,9 @@ class UserManagementApplicationServiceTest {
         UserRepository userRepository = mock(UserRepository.class);
         ThirdPartyUserApiClient thirdPartyUserApiClient = mock(ThirdPartyUserApiClient.class);
         UserManagementApplicationService service = service(
-                new UserDomainService(userRepository, thirdPartyUserApiClient),
+                userDomainService(userRepository, thirdPartyUserApiClient),
                 userRepository,
+                mock(UserManagementQueryRepository.class),
                 deletionRepository,
                 mock(UserRoleRepository.class),
                 mock(DictionaryRepository.class),
@@ -301,8 +317,9 @@ class UserManagementApplicationServiceTest {
         when(deletionRepository.lockExistingUserIds(targets)).thenReturn(targets);
         when(deletionRepository.findDeletionBlockedUserIds(targets)).thenReturn(List.of(targets.get(1)));
         UserManagementApplicationService service = service(
-                new UserDomainService(userRepository, thirdPartyUserApiClient),
+                userDomainService(userRepository, thirdPartyUserApiClient),
                 userRepository,
+                mock(UserManagementQueryRepository.class),
                 deletionRepository,
                 mock(UserRoleRepository.class),
                 mock(DictionaryRepository.class),
@@ -345,8 +362,9 @@ class UserManagementApplicationServiceTest {
         when(thirdPartyUserApiClient.getUserByLoginName("AUTH_B")).thenReturn(Optional.of(
                 new UserManagementResponses.ThirdPartyUserInfoResponse("李四", "AUTH_B", "科技部", "平台部")));
         UserManagementApplicationService service = service(
-                new UserDomainService(userRepository, thirdPartyUserApiClient),
+                userDomainService(userRepository, thirdPartyUserApiClient),
                 userRepository,
+                mock(UserManagementQueryRepository.class),
                 mock(UserDeletionRepository.class),
                 mock(UserRoleRepository.class),
                 mock(DictionaryRepository.class),
@@ -380,8 +398,9 @@ class UserManagementApplicationServiceTest {
                 new UserManagementResponses.ThirdPartyUserInfoResponse("张三", "AUTH_A", "研发中心", "测试部")));
         when(thirdPartyUserApiClient.getUserByLoginName("AUTH_B")).thenReturn(Optional.empty());
         UserManagementApplicationService service = service(
-                new UserDomainService(userRepository, thirdPartyUserApiClient),
+                userDomainService(userRepository, thirdPartyUserApiClient),
                 userRepository,
+                mock(UserManagementQueryRepository.class),
                 mock(UserDeletionRepository.class),
                 mock(UserRoleRepository.class),
                 mock(DictionaryRepository.class),
@@ -425,8 +444,9 @@ class UserManagementApplicationServiceTest {
             DictionaryRepository dictionaryRepository) {
         ThirdPartyUserApiClient thirdPartyUserApiClient = mock(ThirdPartyUserApiClient.class);
         return service(
-                new UserDomainService(userRepository, thirdPartyUserApiClient),
+                userDomainService(userRepository, thirdPartyUserApiClient),
                 userRepository,
+                mock(UserManagementQueryRepository.class),
                 mock(UserDeletionRepository.class),
                 userRoleRepository,
                 dictionaryRepository,
@@ -437,6 +457,7 @@ class UserManagementApplicationServiceTest {
     private UserManagementApplicationService service(
             UserDomainService userDomainService,
             UserRepository userRepository,
+            UserManagementQueryRepository userManagementQueryRepository,
             UserDeletionRepository userDeletionRepository,
             UserRoleRepository userRoleRepository,
             DictionaryRepository dictionaryRepository,
@@ -445,6 +466,7 @@ class UserManagementApplicationServiceTest {
         return new UserManagementApplicationService(
                 userDomainService,
                 userRepository,
+                userManagementQueryRepository,
                 userDeletionRepository,
                 userRoleRepository,
                 dictionaryRepository,
@@ -453,6 +475,16 @@ class UserManagementApplicationServiceTest {
     }
 
     private UserDomainService userDomainService(UserRepository userRepository) {
-        return new UserDomainService(userRepository, mock(ThirdPartyUserApiClient.class));
+        return userDomainService(userRepository, mock(ThirdPartyUserApiClient.class));
+    }
+
+    private UserDomainService userDomainService(
+            UserRepository userRepository,
+            ThirdPartyUserApiClient thirdPartyUserApiClient) {
+        return new UserDomainService(
+                userRepository,
+                thirdPartyUserApiClient,
+                mock(UserRoleRepository.class),
+                mock(DictionaryRepository.class));
     }
 }

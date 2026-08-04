@@ -1,7 +1,6 @@
 package com.enterprise.testagent.api.web.platform;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -13,6 +12,7 @@ import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.user.UserManagementQuery;
 import com.enterprise.testagent.system.management.user.UserManagementApplicationService;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.CreateUserCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.DeleteUsersCommand;
@@ -36,12 +36,21 @@ class UserManagementControllerTest {
     @Test
     void superAdminCanListUsers() {
         UserManagementApplicationService service = org.mockito.Mockito.mock(UserManagementApplicationService.class);
-        when(service.listUsers(eq("ali"), any(PageRequest.class)))
+        when(service.listUsers(any(UserManagementQuery.class), any(PageRequest.class)))
                 .thenReturn(new PageResponse<>(List.of(userResponse("usr_1", "alice")), 1, 50, 1));
         WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
 
         client.get()
-                .uri("/api/internal/platform/system-management/users?keyword=ali&page=1&size=50")
+                .uri(uriBuilder -> uriBuilder
+                        .path("/api/internal/platform/system-management/users")
+                        .queryParam("keyword", "ali")
+                        .queryParam("role", "APP_ADMIN")
+                        .queryParam("organization", "企业")
+                        .queryParam("rdDepartment", "研发")
+                        .queryParam("department", "测试")
+                        .queryParam("page", 1)
+                        .queryParam("size", 50)
+                        .build())
                 .header("X-Trace-Id", TRACE_ID)
                 .exchange()
                 .expectStatus().isOk()
@@ -49,6 +58,15 @@ class UserManagementControllerTest {
                 .jsonPath("$.data.items[0].username").isEqualTo("alice")
                 .jsonPath("$.data.items[0].roles[0]").isEqualTo("APP_ADMIN")
                 .jsonPath("$.data.total").isEqualTo(1);
+
+        verify(service).listUsers(
+                org.mockito.ArgumentMatchers.argThat((UserManagementQuery query) ->
+                        "ali".equals(query.keyword())
+                                && "APP_ADMIN".equals(query.role())
+                                && "企业".equals(query.organization())
+                                && "研发".equals(query.rdDepartment())
+                                && "测试".equals(query.department())),
+                any(PageRequest.class));
     }
 
     @Test

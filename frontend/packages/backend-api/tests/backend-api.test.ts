@@ -505,6 +505,45 @@ describe("backend-api", () => {
     );
   });
 
+  it("lists managed users with role and organization filters", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: { items: [], page: 2, size: 20, total: 0 }
+      }), { status: 200 })
+    );
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await client.listUsers({
+      keyword: "alice",
+      role: "UNASSIGNED",
+      organization: "总行",
+      rdDepartment: "研发中心",
+      department: "测试部",
+      page: 2,
+      size: 20
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/system-management/users"
+        + "?keyword=alice&role=UNASSIGNED&organization=%E6%80%BB%E8%A1%8C"
+        + "&rdDepartment=%E7%A0%94%E5%8F%91%E4%B8%AD%E5%BF%83"
+        + "&department=%E6%B5%8B%E8%AF%95%E9%83%A8&page=2&size=20",
+      expect.any(Object)
+    );
+
+    await client.listUsers("legacy", 3, 10);
+    expect(fetcher).toHaveBeenLastCalledWith(
+      "http://api/api/internal/platform/system-management/users?keyword=legacy&page=3&size=10",
+      expect.any(Object)
+    );
+  });
+
   it("deletes and syncs managed users through single and batch endpoints", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
       const path = String(input);

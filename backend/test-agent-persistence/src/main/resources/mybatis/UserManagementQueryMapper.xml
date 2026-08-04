@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.UserManagementQueryMapper">
+    <resultMap id="UserManagementRowMap" type="com.enterprise.testagent.persistence.mybatis.UserManagementRow">
+        <constructor>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="unified_auth_id" javaType="java.lang.String"/>
+            <arg column="username" javaType="java.lang.String"/>
+            <arg column="password_hash" javaType="java.lang.String"/>
+            <arg column="organization" javaType="java.lang.String"/>
+            <arg column="rd_department" javaType="java.lang.String"/>
+            <arg column="department" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="UserManagementColumns">
+        u.user_id,
+        u.unified_auth_id,
+        u.username,
+        u.password_hash,
+        u.organization,
+        u.rd_department,
+        u.department,
+        u.status,
+        u.created_at,
+        u.updated_at
+    </sql>
+
+    <sql id="UserManagementWhere">
+        <where>
+            <if test="keywordPattern != null">
+                and (
+                    lower(u.user_id) like #{keywordPattern}
+                    or lower(u.unified_auth_id) like #{keywordPattern}
+                    or lower(u.username) like #{keywordPattern}
+                )
+            </if>
+            <if test="organizationPattern != null">
+                and lower(coalesce(u.organization, '')) like #{organizationPattern}
+            </if>
+            <if test="rdDepartmentPattern != null">
+                and lower(coalesce(u.rd_department, '')) like #{rdDepartmentPattern}
+            </if>
+            <if test="departmentPattern != null">
+                and lower(coalesce(u.department, '')) like #{departmentPattern}
+            </if>
+            <if test="roleCode != null">
+                and exists (
+                    select 1
+                    from user_roles ur
+                    join dictionaries d on d.dict_id = ur.dict_id
+                    where ur.user_id = u.user_id
+                      and d.dict_key = 'ROLE'
+                      and d.dict_value = #{roleCode}
+                )
+            </if>
+            <if test="unassignedRoleOnly">
+                and not exists (
+                    select 1
+                    from user_roles ur
+                    join dictionaries d on d.dict_id = ur.dict_id
+                    where ur.user_id = u.user_id
+                      and d.dict_key = 'ROLE'
+                )
+            </if>
+        </where>
+    </sql>
+
+    <select id="findUsers" resultMap="UserManagementRowMap">
+        select
+        <include refid="UserManagementColumns"/>
+        from users u
+        <include refid="UserManagementWhere"/>
+        order by u.username, u.user_id
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countUsers" resultType="long">
+        select count(*)
+        from users u
+        <include refid="UserManagementWhere"/>
+    </select>
+</mapper>

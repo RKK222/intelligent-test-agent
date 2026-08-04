@@ -5,6 +5,7 @@ import com.enterprise.testagent.api.web.common.RuntimeApiSupport;
 import com.enterprise.testagent.common.api.ApiResponse;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
+import com.enterprise.testagent.domain.user.UserManagementQuery;
 import com.enterprise.testagent.system.management.user.UserManagementApplicationService;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.CreateUserCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.DeleteUsersCommand;
@@ -41,16 +42,22 @@ public class UserManagementController {
     }
 
     /**
-     * 分页查询用户列表，可按关键字匹配用户名/统一认证号。
+     * 分页查询用户列表，可组合匹配关键字、角色、组织、研发部门和部门。
      */
     @GetMapping("/users")
     public ApiResponse<Object> listUsers(
             @RequestParam(name = "keyword", required = false) String keyword,
+            @RequestParam(name = "role", required = false) String role,
+            @RequestParam(name = "organization", required = false) String organization,
+            @RequestParam(name = "rdDepartment", required = false) String rdDepartment,
+            @RequestParam(name = "department", required = false) String department,
             @RequestParam(name = "page", required = false) Integer page,
             @RequestParam(name = "size", required = false) Integer size,
             ServerWebExchange exchange) {
         requireSuperAdmin(exchange);
-        return ok(exchange, service.listUsers(keyword, RuntimeApiSupport.pageRequest(page, size)));
+        return ok(exchange, service.listUsers(
+                new UserManagementQuery(keyword, role, organization, rdDepartment, department),
+                RuntimeApiSupport.pageRequest(page, size)));
     }
 
     /**

@@ -5,6 +5,7 @@ import com.enterprise.testagent.domain.dictionary.DictionaryRepository;
 import com.enterprise.testagent.domain.dictionary.UserRoleRepository;
 import com.enterprise.testagent.domain.user.UserLoginLogRepository;
 import com.enterprise.testagent.domain.user.UserDeletionRepository;
+import com.enterprise.testagent.domain.user.UserManagementQueryRepository;
 import com.enterprise.testagent.domain.user.UserRepository;
 import com.enterprise.testagent.system.management.auth.AuthApplicationService;
 import com.enterprise.testagent.system.management.user.ThirdPartyUserApiClient;
@@ -35,8 +36,16 @@ public class SystemManagementConfig {
     }
 
     @Bean
-    public UserDomainService userDomainService(UserRepository userRepository, ThirdPartyUserApiClient thirdPartyUserApiClient) {
-        return new UserDomainService(userRepository, thirdPartyUserApiClient);
+    public UserDomainService userDomainService(
+            UserRepository userRepository,
+            ThirdPartyUserApiClient thirdPartyUserApiClient,
+            UserRoleRepository userRoleRepository,
+            DictionaryRepository dictionaryRepository) {
+        return new UserDomainService(
+                userRepository,
+                thirdPartyUserApiClient,
+                userRoleRepository,
+                dictionaryRepository);
     }
 
     /**
@@ -64,6 +73,7 @@ public class SystemManagementConfig {
     public UserManagementApplicationService userManagementApplicationService(
             UserDomainService userDomainService,
             UserRepository userRepository,
+            UserManagementQueryRepository userManagementQueryRepository,
             UserDeletionRepository userDeletionRepository,
             UserRoleRepository userRoleRepository,
             DictionaryRepository dictionaryRepository,
@@ -72,6 +82,7 @@ public class SystemManagementConfig {
         return new UserManagementApplicationService(
                 userDomainService,
                 userRepository,
+                userManagementQueryRepository,
                 userDeletionRepository,
                 userRoleRepository,
                 dictionaryRepository,

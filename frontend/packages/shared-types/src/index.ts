@@ -2339,6 +2339,17 @@ export type UserManagementUser = PlatformUserSummary & {
   updatedAt?: string;
 };
 
+/** 用户管理列表组合筛选；role=UNASSIGNED 表示仅查询未分配全局角色的用户。 */
+export type UserManagementQuery = {
+  keyword?: string;
+  role?: string;
+  organization?: string;
+  rdDepartment?: string;
+  department?: string;
+  page?: number;
+  size?: number;
+};
+
 export type CreateUserPayload = {
   unifiedAuthId: string;
   username: string;

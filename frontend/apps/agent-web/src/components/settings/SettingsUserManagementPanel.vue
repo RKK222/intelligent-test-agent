@@ -28,7 +28,12 @@ const total = ref(0);
 const page = ref(1);
 const size = ref(20);
 const keyword = ref("");
+const roleFilter = ref("");
+const organizationFilter = ref("");
+const rdDepartmentFilter = ref("");
+const departmentFilter = ref("");
 const roleDrafts = ref<Record<string, string>>({});
+const batchRole = ref("");
 const savingRoles = ref(false);
 const selectedUsers = ref<UserManagementUser[]>([]);
 const deleting = ref(false);
@@ -130,7 +135,15 @@ async function run(action: () => Promise<void>) {
 
 async function loadUsers() {
   await run(async () => {
-    const result = await api.listUsers(keyword.value.trim() || undefined, page.value, size.value);
+    const result = await api.listUsers({
+      keyword: keyword.value.trim() || undefined,
+      role: roleFilter.value || undefined,
+      organization: organizationFilter.value.trim() || undefined,
+      rdDepartment: rdDepartmentFilter.value.trim() || undefined,
+      department: departmentFilter.value.trim() || undefined,
+      page: page.value,
+      size: size.value
+    });
     users.value = result.items;
     total.value = result.total;
     const nextDrafts: Record<string, string> = {};
@@ -149,6 +162,7 @@ async function loadRoles() {
     if (!form.value.role && roles.value.length) {
       const userRole = roles.value.find((item) => item.roleCode === "USER");
       form.value.role = userRole?.roleCode ?? roles.value[0].roleCode;
+      batchRole.value = userRole?.roleCode ?? roles.value[0].roleCode;
     }
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "加载角色失败";
@@ -158,6 +172,16 @@ async function loadRoles() {
 async function search() {
   page.value = 1;
   await loadUsers();
+}
+
+// 清空全部组合筛选并回到第一页，避免重置后仍停留在无数据的高页码。
+async function resetFilters() {
+  keyword.value = "";
+  roleFilter.value = "";
+  organizationFilter.value = "";
+  rdDepartmentFilter.value = "";
+  departmentFilter.value = "";
+  await search();
 }
 
 async function handlePageChange(next: number) {
@@ -240,6 +264,19 @@ function canSelectUser(row: UserManagementUser) {
 
 function handleSelectionChange(selection: UserManagementUser[]) {
   selectedUsers.value = selection;
+}
+
+// 批量操作只修改当前页已选用户的草稿，仍由管理员显式保存后才改变服务端权限。
+function applyRoleToSelectedUsers() {
+  if (!batchRole.value || selectedUsers.value.length === 0) {
+    return;
+  }
+  const nextDrafts = { ...roleDrafts.value };
+  for (const user of selectedUsers.value) {
+    nextDrafts[user.userId] = batchRole.value;
+  }
+  roleDrafts.value = nextDrafts;
+  ElMessage.info(`已设置 ${selectedUsers.value.length} 个待保存角色，请确认后保存`);
 }
 
 function isMessageBoxCancellation(error: unknown) {
@@ -369,21 +406,11 @@ onMounted(() => {
           :closable="false"
           show-icon
           title="存量用户处理说明"
-          description="有会话、工作区或运行进程的用户请同步 TCDS 信息，原 userId 不变，已有应用权限和历史数据会保留；未使用的脏账号可直接删除。"
+          description="可筛选“未分配角色”并批量勾选当前页用户，先设置待保存角色再提交；保存后会撤销相关用户的旧 Token，用户需重新登录。"
         />
         <div class="ta-list-header">
           <h4 class="ta-section-title">用户列表</h4>
           <div class="ta-list-actions">
-            <div class="ta-list-search">
-              <el-input
-                v-model="keyword"
-                placeholder="按用户名/认证号搜索"
-                style="width: 220px"
-                clearable
-                @keyup.enter="search"
-              />
-              <el-button :disabled="operationBusy" @click="search">查询</el-button>
-            </div>
             <el-button
               :disabled="operationBusy || selectedUsers.length === 0"
               @click="syncSelectedUsersFromTcds"
@@ -407,6 +434,58 @@ onMounted(() => {
             </el-button>
           </div>
         </div>
+        <div class="ta-filter-bar">
+          <el-input
+            v-model="keyword"
+            placeholder="用户名/认证号/userId"
+            style="width: 210px"
+            clearable
+            @keyup.enter="search"
+          />
+          <el-select
+            v-model="roleFilter"
+            aria-label="按角色筛选"
+            placeholder="全部角色"
+            style="width: 160px"
+          >
+            <el-option label="全部角色" value="" />
+            <el-option label="未分配角色" value="UNASSIGNED" />
+            <el-option
+              v-for="role in roles"
+              :key="role.roleCode"
+              :label="role.roleLabel"
+              :value="role.roleCode"
+            />
+          </el-select>
+          <el-input v-model="organizationFilter" placeholder="组织" style="width: 150px" clearable />
+          <el-input v-model="rdDepartmentFilter" placeholder="研发部门" style="width: 150px" clearable />
+          <el-input v-model="departmentFilter" placeholder="部门" style="width: 150px" clearable />
+          <el-button :disabled="operationBusy" @click="search">查询</el-button>
+          <el-button :disabled="operationBusy" @click="resetFilters">重置</el-button>
+        </div>
+        <div class="ta-batch-role-bar">
+          <span class="ta-inline-note">表头复选框可选择当前页用户</span>
+          <el-select
+            v-model="batchRole"
+            aria-label="批量目标角色"
+            placeholder="选择目标角色"
+            style="width: 180px"
+            :disabled="operationBusy"
+          >
+            <el-option
+              v-for="role in roles"
+              :key="role.roleCode"
+              :label="role.roleLabel"
+              :value="role.roleCode"
+            />
+          </el-select>
+          <el-button
+            :disabled="operationBusy || selectedUsers.length === 0 || !batchRole"
+            @click="applyRoleToSelectedUsers"
+          >
+            {{ selectedUsers.length > 0 ? `批量设置待保存角色（${selectedUsers.length}）` : '批量设置待保存角色' }}
+          </el-button>
+        </div>
         <el-table
           :data="users"
           row-key="userId"
@@ -420,6 +499,7 @@ onMounted(() => {
           <el-table-column prop="username" label="用户名" min-width="120" />
           <el-table-column prop="unifiedAuthId" label="统一认证号" min-width="140" />
           <el-table-column prop="organization" label="组织" min-width="120" />
+          <el-table-column prop="rdDepartment" label="研发部门" min-width="120" />
           <el-table-column prop="department" label="部门" min-width="120" />
           <el-table-column label="角色" min-width="180">
             <template #default="{ row }">
@@ -608,8 +688,11 @@ onMounted(() => {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
-.ta-list-search {
+.ta-filter-bar,
+.ta-batch-role-bar {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .ta-user-table {

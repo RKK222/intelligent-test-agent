@@ -23,7 +23,7 @@
 3. 后端不得直接返回 generated SDK DTO。
 4. API 返回平台 DTO 和统一错误格式。
 5. API 文档变更必须与 Controller、DTO、测试同步。
-6. 旧 runtime/workspace `/api/...` URL 已强制作废，命中时统一返回 `410 API_GONE` 和 `ApiErrorResponse`；登录认证 `/api/auth/login|logout|me|refresh` 保留为稳定入口。
+6. 旧 runtime/workspace `/api/...` URL 已强制作废，命中时统一返回 `410 API_GONE` 和 `ApiErrorResponse`；登录认证 `/api/auth/login|login-by-unified-auth|logout|me|refresh` 保留为稳定入口。
 7. CORS 本地默认仅覆盖主前端与 `frontend-opencode` 的 localhost/127.0.0.1 开发、预览和 real E2E 端口；生产必须通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 显式配置允许来源。
 8. 多 Java 同源部署允许前端在需要用户绑定服务器的请求上携带可选 `X-Test-Agent-Linux-Server-Id`。该头只是 Nginx 静态白名单的首跳性能提示，不参与鉴权，不替代数据库 binding、Session 归属、运行上下文或后端公共路由判断。
 9. 独立长程任务是受控例外：浏览器由 Nginx 同源直达 Python `/workflow-api/v1/**`，不经过 Java 或 `backend-api`。完整浏览器 API、Python 错误和 Java 服务端窄能力契约见 `docs/api/workflow-api.md`。
@@ -46,7 +46,7 @@
 
 | URL 前缀 | 用途 |
 |---|---|
-| `/api/auth/login`、`/api/auth/logout`、`/api/auth/me`、`/api/auth/refresh` | 当前稳定登录认证入口，暂不平台化。 |
+| `/api/auth/login`、`/api/auth/login-by-unified-auth`、`/api/auth/logout`、`/api/auth/me`、`/api/auth/refresh` | 当前稳定登录认证入口，暂不平台化。 |
 | `/api/...` 旧 runtime/workspace URL | 已作废，返回 `410 API_GONE`；包括旧 `/api/runs/**`、`/api/sessions/**`、`/api/workspaces/**`、`/api/agents`、`/api/models`、`/api/providers`、`/api/commands`、`/api/references`、`/api/status`、`/api/fs/**`、`/api/vcs/**`、`/api/lsp/**`、`/api/mcp/**`、`/api/config`、`/api/global/**`、`/api/provider/**`、`/api/worktrees/**`。 |
 | `/api/internal/platform/{business-project}/{business}/...` | 前端调用平台自身能力的新入口。 |
 | `/api/internal/agent/{agentId}/...` | 与具体 agent 交互的新入口，`agentId` 由前端 URL 传递；当前唯一可运行值为 `opencode`。 |
@@ -567,6 +567,7 @@ ticket 响应中的 `webSocketUrl` 是签发 ticket 的当前 Java 绝对地址�
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `POST` | `/api/auth/login` | 用户登录，返回 Token。 |
+| `POST` | `/api/auth/login-by-unified-auth` | AAM 统一认证登录；首次建号时同时授予普通用户角色。 |
 | `POST` | `/api/auth/logout` | 用户登出，删除 Token。 |
 | `GET` | `/api/auth/me` | 获取当前登录用户信息。 |
 | `POST` | `/api/auth/refresh` | 刷新 Token，旧 Token 失效。 |
@@ -614,7 +615,8 @@ ticket 响应中的 `webSocketUrl` 是签发 ticket 的当前 Java 绝对地址�
 `POST /api/auth/refresh` 响应 `LoginResponse`（同上）。请求需携带当前有效 Token。
 
 兼容性：
-- 登录路径当前只有 `/api/auth/login`，后续可增加 `/api/internal/platform/system-management/auth/login` 平台入口。
+- 登录路径当前保留 `/api/auth/login` 和 AAM 使用的 `/api/auth/login-by-unified-auth`；后续可增加 `/api/internal/platform/system-management/auth/login` 平台入口。
+- `/api/auth/login-by-unified-auth` 的首次建号会在同一数据库事务内写入 `users` 和 `USER` 角色；`USER` 字典缺失时拒绝建号，不生成空角色用户。已存在的空角色账号不会在登录时静默改权，由超级管理员在用户管理页筛选“未分配角色”后手工处理。
 - Token 存储在 Redis，1 天过期。
 - 登录、刷新和 `/api/auth/me` 会返回当前用户全局角色 `roles`，以及中文展示名 `roleLabels`。旧 token 或旧响应缺少字段时前端按空列表兼容。
 - 认证失败统一返回 `UNAUTHENTICATED` 错误码。
@@ -2815,7 +2817,7 @@ Base URL：`/api/internal/platform/system-management`
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| `GET` | `/users` | 分页查询用户列表，可按关键字匹配用户名/统一认证号。 |
+| `GET` | `/users` | 分页查询用户列表，可按关键字、角色、组织和部门组合筛选。 |
 | `POST` | `/users` | 创建测试用户，密码默认为 `123456`，并授予单个角色。 |
 | `PUT` | `/users/{userId}/roles` | 替换指定用户的全局角色，当前测试入口只保留单个角色。 |
 | `DELETE` | `/users/{userId}` | 删除单个未承载业务资产的用户，禁止删除当前登录用户。 |
@@ -2828,9 +2830,15 @@ Base URL：`/api/internal/platform/system-management`
 
 | 参数 | 说明 |
 |---|---|
-| `keyword` | 可选，按用户名/统一认证号模糊匹配。 |
+| `keyword` | 可选，按 `userId`、用户名或统一认证号模糊匹配。 |
+| `role` | 可选，按 `ROLE` 字典 code 精确匹配；传 `UNASSIGNED` 时仅返回没有有效全局角色的用户。 |
+| `organization` | 可选，按 `users.organization` 不区分大小写模糊匹配。 |
+| `rdDepartment` | 可选，按 `users.rd_department` 不区分大小写模糊匹配。 |
+| `department` | 可选，按 `users.department` 不区分大小写模糊匹配。 |
 | `page` | 页码，默认 `1`。 |
 | `size` | 分页大小，默认 `50`，上限 `200`。 |
+
+上述筛选条件按 AND 组合，全部为空时保持原有全量分页语义。`UNASSIGNED` 仅为查询约定值，不是角色字典项。管理页批量勾选仅作用于当前页：先把同一目标角色写入前端待保存草稿，管理员确认后逐个调用现有 `PUT /users/{userId}/roles`，不新增批量改权接口。
 
 用户响应字段（不含密码）：
 
@@ -2879,6 +2887,7 @@ Base URL：`/api/internal/platform/system-management`
 - `role` 必填，必须是 `ROLE` 字典中的有效角色 code。
 - 用户不存在时返回 `NOT_FOUND`；角色无效时返回 `VALIDATION_ERROR`。
 - 更新成功后返回更新后的用户响应字段，`roles` / `roleLabels` 反映最新角色。
+- 角色保存会撤销目标用户现有平台 Token；用户下一次请求需要重新登录，新 Token 才会携带更新后的角色。该动作由现有角色更新服务执行，不依赖额外一次性任务或定时任务。
 
 用户删除与存量信息补全：
 

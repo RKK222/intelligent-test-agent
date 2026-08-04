@@ -191,7 +191,15 @@ describe("SettingsUserManagementPanel", () => {
 
     // 列表区标题渲染即表示挂载后已发起请求
     await findByText("用户列表");
-    await waitFor(() => expect(api.listUsers).toHaveBeenCalledWith(undefined, 1, 20));
+    await waitFor(() => expect(api.listUsers).toHaveBeenCalledWith({
+      keyword: undefined,
+      role: undefined,
+      organization: undefined,
+      rdDepartment: undefined,
+      department: undefined,
+      page: 1,
+      size: 20
+    }));
     expect(api.listRoles).toHaveBeenCalled();
     expect(container.textContent?.indexOf("用户列表")).toBeLessThan(container.textContent?.indexOf("新增用户") ?? 0);
   });
@@ -219,7 +227,7 @@ describe("SettingsUserManagementPanel", () => {
     const api = createApi();
     const { findByText, getByLabelText, getByRole } = renderPanel(api);
 
-    await waitFor(() => expect(api.listUsers).toHaveBeenCalledWith(undefined, 1, 20));
+    await waitFor(() => expect(api.listUsers).toHaveBeenCalled());
     await findByText("alice");
 
     await fireEvent.update(getByLabelText("调整 alice 的角色"), "USER");
@@ -228,6 +236,44 @@ describe("SettingsUserManagementPanel", () => {
 
     await waitFor(() => expect(api.updateUserRole).toHaveBeenCalledWith("usr_existing", { role: "USER" }));
     await waitFor(() => expect((api.listUsers as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(2));
+  });
+
+  it("filters users by role, organization and department fields", async () => {
+    const api = createApi();
+    const { getByPlaceholderText, getByLabelText, getByRole } = renderPanel(api);
+
+    await waitFor(() => expect(api.listRoles).toHaveBeenCalled());
+    await fireEvent.update(getByPlaceholderText("用户名/认证号/userId"), "AUTH_1");
+    await fireEvent.update(getByLabelText("按角色筛选"), "UNASSIGNED");
+    await fireEvent.update(getByPlaceholderText("组织"), "总行");
+    await fireEvent.update(getByPlaceholderText("研发部门"), "研发中心");
+    await fireEvent.update(getByPlaceholderText("部门"), "测试部");
+    await fireEvent.click(getByRole("button", { name: "查询" }));
+
+    await waitFor(() => expect(api.listUsers).toHaveBeenLastCalledWith({
+      keyword: "AUTH_1",
+      role: "UNASSIGNED",
+      organization: "总行",
+      rdDepartment: "研发中心",
+      department: "测试部",
+      page: 1,
+      size: 20
+    }));
+  });
+
+  it("applies one target role to selected users before saving", async () => {
+    const api = createApi();
+    const { findByText, getByLabelText, getByRole } = renderPanel(api);
+
+    await findByText("alice");
+    await waitFor(() => expect(api.listRoles).toHaveBeenCalled());
+    await fireEvent.click(getByLabelText("选择 alice"));
+    await fireEvent.update(getByLabelText("批量目标角色"), "USER");
+    await fireEvent.click(getByRole("button", { name: "批量设置待保存角色（1）" }));
+    await findByText("已修改");
+    await fireEvent.click(getByRole("button", { name: "保存角色修改（1）" }));
+
+    await waitFor(() => expect(api.updateUserRole).toHaveBeenCalledWith("usr_existing", { role: "USER" }));
   });
 
   it("deletes one user after confirmation and refreshes the list", async () => {

@@ -10,12 +10,12 @@
 
 已完成用户认证相关的基础能力：
 
-- **用户管理**：用户注册、查询、密码校验（BCrypt）。
+- **用户管理**：用户注册、组合查询、密码校验（BCrypt）；统一认证首次登录创建用户时在同一短事务内授予 `USER` 普通用户角色，TCDS 外部查询不占用数据库事务。
 - **认证服务**：用户登录（用户名+密码验证 -> 加载全局角色 -> Token 生成）、登出、Token 校验和刷新。
 - **领域模型**：`User`、`UserLoginLog`、`Dictionary`、`UserRole`、`AuthPrincipal`、`TokenStore`。
 - **测试造号与角色调整**：创建测试用户时使用事务同时写入用户和角色，调整角色时在同一事务内替换用户全局角色；当前测试管理入口由超级管理员直接操作，不包含普通用户审批通知流。
 - **权限即时失效**：用户删除、停用或角色调整除失效运行上下文外，还批量撤销该用户全部平台Token及对应session marker；Python workflow下一次精确Token读取或最长30秒SSE复核即失败。
-- **存量用户清理与补全**：超级管理员可单个或批量删除没有会话、工作区、运行进程等受保护业务引用的账号，批量删除全有或全无并撤销登录 Token/运行上下文；已有业务数据的账号通过 TCDS 原位刷新姓名、研发部门和部门，保留原 `userId`、角色、应用成员和历史数据。TCDS 不返回应用成员关系，缺失应用仍由配置管理添加成员。
+- **存量用户清理与补全**：超级管理员可按角色（含未分配角色）、组织、研发部门、部门和用户关键字组合检索，手工勾选后批量设置待保存角色；也可单个或批量删除没有会话、工作区、运行进程等受保护业务引用的账号，批量删除全有或全无并撤销登录 Token/运行上下文。已有业务数据的账号通过 TCDS 原位刷新姓名、研发部门和部门，保留原 `userId`、角色、应用成员和历史数据。TCDS 不返回应用成员关系，缺失应用仍由配置管理添加成员。
 - **数据库 IDENTITY 运维**：查询/对齐/手动重启白名单表（users/user_roles/dictionaries/user_login_logs）的 identity 序列，修复序列落后于已有主键导致的新增冲突。
 
 ## 依赖
@@ -35,8 +35,8 @@
 
 ## 主要接口
 
-- `UserDomainService`：用户注册、密码校验。
-- `UserManagementApplicationService`：超级管理员测试用户查询、创建、单角色调整、安全删除和 TCDS 存量信息同步；外部查询完成后才开启短事务写入，删除通过领域端口清理账号附属数据并保护业务资产。
+- `UserDomainService`：用户注册、密码校验，以及统一认证首次建号与普通用户角色的原子写入。
+- `UserManagementApplicationService`：超级管理员测试用户组合查询、创建、单角色调整、安全删除和 TCDS 存量信息同步；外部查询完成后才开启短事务写入，删除通过领域端口清理账号附属数据并保护业务资产。
 - `AuthApplicationService`：登录/登出/Token 刷新，调用 `UserRepository`、`TokenStore`、`UserLoginLogRepository`、`UserRoleRepository`、`DictionaryRepository`；登录时把 `ROLE` 字典值加载为 `AuthPrincipal.roles`。
 
 ## API 入口

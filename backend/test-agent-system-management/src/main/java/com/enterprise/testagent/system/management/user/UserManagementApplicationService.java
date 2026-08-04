@@ -14,6 +14,8 @@ import com.enterprise.testagent.domain.run.ConversationContextUserMutation;
 import com.enterprise.testagent.domain.user.User;
 import com.enterprise.testagent.domain.user.UserDeletionRepository;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.user.UserManagementQuery;
+import com.enterprise.testagent.domain.user.UserManagementQueryRepository;
 import com.enterprise.testagent.domain.user.UserRepository;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.DeleteUsersCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.DeleteUsersResponse;
@@ -66,6 +68,7 @@ public class UserManagementApplicationService {
 
     private final UserDomainService userDomainService;
     private final UserRepository userRepository;
+    private final UserManagementQueryRepository userManagementQueryRepository;
     private final UserDeletionRepository userDeletionRepository;
     private final UserRoleRepository userRoleRepository;
     private final DictionaryRepository dictionaryRepository;
@@ -92,6 +95,7 @@ public class UserManagementApplicationService {
     public UserManagementApplicationService(
             UserDomainService userDomainService,
             UserRepository userRepository,
+            UserManagementQueryRepository userManagementQueryRepository,
             UserDeletionRepository userDeletionRepository,
             UserRoleRepository userRoleRepository,
             DictionaryRepository dictionaryRepository,
@@ -99,6 +103,8 @@ public class UserManagementApplicationService {
             ThirdPartyUserApiClient thirdPartyUserApiClient) {
         this.userDomainService = Objects.requireNonNull(userDomainService, "userDomainService must not be null");
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
+        this.userManagementQueryRepository = Objects.requireNonNull(
+                userManagementQueryRepository, "userManagementQueryRepository must not be null");
         this.userDeletionRepository = Objects.requireNonNull(userDeletionRepository, "userDeletionRepository must not be null");
         this.userRoleRepository = Objects.requireNonNull(userRoleRepository, "userRoleRepository must not be null");
         this.dictionaryRepository = Objects.requireNonNull(dictionaryRepository, "dictionaryRepository must not be null");
@@ -107,10 +113,10 @@ public class UserManagementApplicationService {
     }
 
     /**
-     * 分页查询用户列表，按关键字匹配用户名/统一认证号，响应剔除密码哈希并装配角色信息。
+     * 分页查询用户列表，支持按关键字、角色、组织和部门组合检索，响应剔除密码哈希并装配角色信息。
      */
-    public PageResponse<UserResponse> listUsers(String keyword, PageRequest pageRequest) {
-        PageResponse<User> page = userRepository.findPage(keyword, pageRequest);
+    public PageResponse<UserResponse> listUsers(UserManagementQuery query, PageRequest pageRequest) {
+        PageResponse<User> page = userManagementQueryRepository.findPage(query, pageRequest);
         return new PageResponse<>(
                 page.items().stream().map(this::userResponse).toList(),
                 page.page(),

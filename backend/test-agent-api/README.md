@@ -46,7 +46,7 @@
 - 暴露当前用户定时执行时段和任务创建/查询/改期/取消/失败卡关闭 API；创建 DTO 的可选 `scheduleMode` 缺失时按 `NIGHT_WINDOW`，`ADMIN_CUSTOM` 创建和改期由 Controller 基于真实 `AuthPrincipal` 向应用层传递 `SUPER_ADMIN` 权限事实，owner 始终取认证主体。`NightExecutionDtos` 只把完整 prompt/parts 映射到应用命令，任务响应增加模式但仍仅返回安全截断预览，不回显完整输入。精确内部路径 `/api/internal/platform/opencode-runtime/night-execution/internal-dispatch` 仅接收目标 `linuxServerId` 和最多 50 个 `taskId`，使用标准 XXL access token 鉴权；分发网关必须先由公共 resolver 选出目标服务器上的精确 backendProcessId，再决定本机调用或统一 HTTP 转发。
 - `InternalModelTokenManagementController` 仅允许 `SUPER_ADMIN` 通过独立 API 记录外部 Token、改名/轮换和删除；响应类型只包含安全元数据。`InternalModelProviderManagementController` 在原供应商字段上返回 `tokenId/tokenName/tokenConfigured` 并接受 `tokenId/clearToken`，旧顶层 `authToken/tokenConfigured` 继续兼容。两类成功变更都复用既有刷新事件和跨 Java 广播。
 - 暴露应用引用资产库 7 个内部 API，`ReferenceRepositoryController` 只做 `APP_ADMIN` 鉴权（`SUPER_ADMIN` 继承）、初始化/切换分支请求 DTO、包含可空 `repositoryPath` 的状态响应、traceId 和阻塞 Git/文件任务调度；列表、初始化、同步、受控分支切换、只读指针核验、状态、单层树的业务规则全部委托 workspace-management，不在 Controller 访问 Repository 或文件系统。
-- 暴露超级管理员用户管理 API，Controller 只做 `SUPER_ADMIN` 鉴权、分页参数、创建用户请求和单角色调整请求转换；用户创建、角色替换和 ROLE 字典校验委托 `test-agent-system-management`。
+- 暴露超级管理员用户管理 API，Controller 只做 `SUPER_ADMIN` 鉴权、关键字/角色/组织/部门组合筛选与分页参数、创建用户请求和单角色调整请求转换；用户创建、角色替换和 ROLE 字典校验委托 `test-agent-system-management`。
 - 暴露 AI Run 整体回复反馈 API：单查/写入按 `runId`，批量查询每次最多 100 个 Run；Controller 只读取当前登录用户和 traceId，成功状态、主对话与归属校验由 runtime 服务完成。旧 messageId API 保留兼容。
 - 暴露超级管理员运营分析 API，Controller 只做 `SUPER_ADMIN` 鉴权、ISO 时间参数解析、通用筛选参数传递、CSV 响应头和统一错误转换；查询服务只读 rollup。
 - `GET /api/internal/platform/opencode-runtime/sessions` 是当前登录用户历史会话分页接口，支持 `page/size/q`，返回 `workspaceContext` 且按 `updatedAt desc` 排序。Session 历史正文恢复主入口是 agent-scoped session tree messages；内部平台 messages 接口的 `refresh=false` 只读数据库快照用于只读 transcript、Run ID 恢复和旧消息反馈兼容，不再为新反馈寻找 assistant messageId。`RunResponse` 可选携带 `storageMode/clientRequestId/detailsAvailableUntil`；active-run API 供前端刷新后恢复 SSE。
@@ -107,7 +107,7 @@
 - `CommonParameterMemoryControllerTest`、`CommonParameterMemoryBackendRoutingServiceTest` 覆盖四个超管接口、同服务器多个 Java 精确聚合、当前/远端执行、部分失败、离线、超时、稳定排序和防二次转发；`BackendJavaRouteResolverTest` 覆盖按 `backendProcessId` 精确选择。
 - `XxlJobSsoTicketControllerTest` 覆盖票据签发的 `SUPER_ADMIN` 成功、`APP_ADMIN`/匿名拒绝；`SchedulerManagementControllerTest` 覆盖旧路径任意后缀统一返回 `410 API_GONE`。
 - `NightExecutionControllerTest`、`NightExecutionDtosTest` 覆盖认证、旧请求默认模式、超级管理员权限事实透传、创建/查询 DTO、输入校验、安全响应和统一错误；`UserOpencodeBackendRoutingWebFilterTest` 覆盖定时任务创建、改期、取消和失败卡关闭按用户 binding 路由。
-- `UserManagementControllerTest` 覆盖用户管理 API 的 `SUPER_ADMIN` 查询、创建、角色调整、角色列表和非超管/匿名拒绝。
+- `UserManagementControllerTest` 覆盖用户管理 API 的 `SUPER_ADMIN` 组合筛选查询、创建、角色调整、角色列表和非超管/匿名拒绝。
 - `AiRunFeedbackControllerTest` 覆盖登录用户提交、查询和批量读取 Run 反馈；`AiMessageFeedbackControllerTest` 覆盖旧消息接口兼容与匿名拒绝。
 - `AnalyticsControllerTest` 覆盖运营分析 API 的 `SUPER_ADMIN` 成功、非超级管理员/匿名拒绝和非法时间参数统一校验错误。
 - `ManagerControlWebSocketHandlerTest` 覆盖 `register`、完整配置下发后首个 `managerHeartbeat` 才开放控制连接并触发恢复、未配置连接不触发恢复、兼容 `backendListRequest` 忽略、命令结果、错误 envelope 和多线程并发控制命令完整送达的 WebSocket 入口适配。
