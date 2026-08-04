@@ -5348,3 +5348,33 @@
 - 本次新增内部 HTTP/WebSocket 边界、PostgreSQL Flyway/MyBatis SQL 和 XXL MySQL migration；未修改 RunEvent/SSE、
   generated SDK、OpenCode 源码或 `.env*`，未新建分支。未构建/部署企业离线介质；产线上线前仍必须核对每套
   `flyway_schema_history` 与 checksum，两台 Java 同版本升级后再启用调度。
+
+## 2026-08-04 - 复核企业搬迁 ticket 签发链路
+
+### Why
+
+- 用户要求复查企业内部 ticket 签发机制，重点确认之前因 Origin 白名单过严和多 Java 负载均衡造成的误拒绝是否重现。
+
+### What
+
+- 只做代码、企业配置和运行链路审查，未修改业务实现。确认 HTTP 签票使用两节点共享的
+  `TEST_AGENT_XXL_JOB_ACCESS_TOKEN`，签票与 WebSocket 都复用同一个精确 `backend.listenUrl`，不会经
+  `least_conn` 落到另一台 JVM；60 秒 ticket 只约束握手前消费，上传仍使用独立 30 分钟超时。
+- 发现一个尚未修复的企业阻断：源 Java 固定发送 `Origin: https://test-agent.internal`，但全局高优先级
+  `CorsWebFilter` 会在搬迁 WebSocket handler 前执行，企业白名单只包含平台域名/IP，因此真实企业握手会在
+  ticket 校验前被 CORS 403。现有 handler 单测使用伪 Session，没有装配全局过滤器；本地 `.env.test` 使用 `*`
+  又会掩盖该问题。
+
+### How
+
+- 对照 `RuntimeSecurityConfig`、搬迁 gateway/store/handler、`BackendHttpForwarder`、`BackendJavaRouteResolver`、
+  双后台配置与打包校验脚本；Spring 7.0.8 `CorsConfiguration` 以企业白名单检查固定内部 Origin 的结果为 `null`。
+- 本地运行实例因 `.env.test` 的通配 Origin 可完成 101 upgrade，并在 handler 内按无效 ticket 返回 `FORBIDDEN`，
+  证明 CORS 过滤器确实参与 WebSocket 握手。JDK 25 下签票、handler、CORS、API 精确豁免和公共转发定向测试
+  合计 21 项通过，但这些测试尚未覆盖“企业白名单 + 真实 WebSocket upgrade”组合。
+
+### Result
+
+- 当前企业搬迁通道不能标记为可交付；需先为精确搬迁 WebSocket 路径配置固定内部 Origin（不得放宽全局白名单），
+  并补真实过滤链/upgrade 回归后再做双 Java 验收。本次没有修改 API、事件、数据库、环境配置、generated SDK、
+  OpenCode 源码或业务代码，也未构建/部署企业离线介质。
