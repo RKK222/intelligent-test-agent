@@ -1203,7 +1203,7 @@ V18 及以前保留既有数字版本，已在共享或稳定数据库执行过�
 | `internal_model_provider_model_probes` | 按供应商、模型和能力覆盖保存最近一次成功/失败与时间；不保存固定探测输入、上游响应或原始错误。 |
 | `model_gateway_usage_daily` | 按日期、来源 client、用户、供应商、公开模型和端点原子累加请求/成功/失败、token 和总耗时；不保存逐请求、prompt、回答、UCID、traceId 或错误。 |
 
-今早企业已部署包的精确源码提交为 `0352efa987219b9dde5c09e77b1eabfa719fc068`；该提交主 migration
+历史企业基线包的精确源码提交为 `0352efa987219b9dde5c09e77b1eabfa719fc068`；该提交主 migration
 最高为 `V20260801104000`，且 history 中缺失后来合入的 `V20260730090000`，因此默认
 Flyway 顺序校验会失败。该分叉由现有 `DatabaseMigrationCompatibilityCustomizer` 在校验前精确识别并隐藏主
 目录中无法再顺序执行的旧候选。早期 history 加载
@@ -1214,6 +1214,14 @@ Flyway 顺序校验会失败。该分叉由现有 `DatabaseMigrationCompatibilit
 空库不加载 compatibility location，仍执行原始 `V20260730090000`。真实 PostgreSQL 集成测试会先按
 `0352efa...` 的完整主 migration 上界 `V20260801104000`（排除当时尚不存在的 LobeHub migration）构造现网
 history，再验证默认 `outOfOrder=false` 升级为 `V20260802173416`，随后执行 `V20260803133000`。
+
+企业现网当前实际发布基线已于昨晚升级为
+`1e6df22fab43edba6b5eb3d75f2c6a085eaf4ec7`；早上 09:08 生成的后续包尚未部署。正常现网 history
+因此应已包含成功的 `20260802173416` 与 `20260803133000`，不应倒序补写 `20260730090000`，也不应包含
+仅用于另一套已知分叉的 `20260803141754`。本轮个人工作区搬迁发布前，PostgreSQL 还必须确认没有
+`20260804123000`；XXL MySQL 必须确认 V1-V6 全部成功且没有 V7。上述 `0352efa...` 测试继续作为历史
+兼容回归，不再代表本轮现场的直接部署基线。任何目标库与该路径不一致时都必须停止并按完整 history 制定
+显式兼容方案，不能用提交号替代现场核对。
 
 主 migration、早期补偿和 release 后补偿分别锁定 SHA-256
 `0f16f1b2f3108e60580cfeb00102e10ac21e20220be255fae77bad9871f0bcb7`、

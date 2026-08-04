@@ -539,10 +539,11 @@ grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL
 
 两台第一条都应输出 `1`，第二条均无输出；不要使用 `grep` 直接回显密码。
 
-今早现网部署包的精确源码基线是 `0352efa987219b9dde5c09e77b1eabfa719fc068`。该提交的主
-migration 最高为 `V20260801104000`，已经晚于当前分支后来合入的
-`V20260730090000__add_lobehub_model_gateway.sql`，所以现网升级属于确定的版本倒序场景。部署前由
-数据库管理员导出完整历史，不能只留最近 20 条：
+企业现网当前实际基线是昨晚已部署的提交
+`1e6df22fab43edba6b5eb3d75f2c6a085eaf4ec7`；早上 09:08 生成的后续包尚未部署，不能把其中的
+migration 当作现网历史。昨晚版本已经包含针对更早 `0352efa987219b9dde5c09e77b1eabfa719fc068`
+基线的 LobeHub 版本倒序兼容装配和公共 Agent rollout 迁移。部署前必须分别由数据库管理员导出平台
+PostgreSQL 与 XXL MySQL 的完整历史，不能只留最近 20 条：
 
 ```sql
 select installed_rank, version, description, type, script, checksum, installed_on, success
@@ -550,20 +551,23 @@ from flyway_schema_history
 order by installed_rank;
 ```
 
-只有当完整历史与 `0352efa...` 构建包一致、所有记录 `success=true`，并且现网不存在
-`20260730090000`、`20260802173416`、`20260803133000`、`20260803141754` 时，才按本次已验证路径继续。
-第一台 `.4` 启动时，现有 `DatabaseMigrationCompatibilityCustomizer` 必须保持 `outOfOrder=false`，隐藏无法
-顺序执行的 `20260730090000`，改为执行更高版本 `20260802173416`，随后执行
-`20260803133000`。本次正常路径不应执行 `20260803141754`；该版本只处理“rollout 迁移已经执行、早期
-LobeHub 补偿仍缺失”的另一套已知历史。虽然 LobeHub 服务和页面入口本次关闭，兼容 migration 仍会创建三张
-平台模型目录/聚合表，并写入 `LOBEHUB_ENABLED=false` 等四个默认禁用参数，这是数据库兼容要求，不代表启用服务。
+PostgreSQL 正常现网路径必须满足：所有记录 `success=true`；`20260802173416` 与
+`20260803133000` 已成功；`20260730090000` 未被倒序补写；`20260803141754` 仅允许出现在已经登记的
+“rollout 已执行、早期 LobeHub 补偿仍缺失”历史中，正常昨晚路径不应出现；本轮新增
+`20260804123000` 尚未执行。虽然 LobeHub 服务和页面入口本次关闭，既有兼容 migration 创建的平台模型
+目录/聚合表和四个默认禁用参数仍必须保留，这是数据库兼容要求，不代表启用服务。
+
+XXL MySQL 使用独立的 `flyway_schema_history`。部署前应为 V1-V6 全部成功、没有 V7，也没有失败、
+未知 checksum 或更高版本；第一台新 Java 启动后才允许执行
+`V7__register_personal_workspace_relocation_task.sql`。
 
 `V20260728160800__create_toolbox_click_tracking.sql` 的现网 checksum 仍必须为 `-1966404877`；只有已登记的
-早期测试/过渡历史才允许旧 `V20260727203500` 或 `-74327385` 幂等变体；今早基线中的
+早期测试/过渡历史才允许旧 `V20260727203500` 或 `-74327385` 幂等变体；现网历史中的
 `V20260728210000__index_in_flight_app_source_operations.sql` 也必须保留且为 `success=true`。任一失败记录、未知 checksum、
-未知更高版本、缺少今早基线版本或其它历史分叉都必须停止发布；不得启用 Flyway `outOfOrder`、执行
-`repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常、`20260802173416` 与
-`20260803133000` 均为 `success=true`、`20260730090000` 未被补写，再部署 `.114`。`.4` 日志出现
+未知更高版本、缺少上述昨晚基线版本或其它历史分叉都必须停止发布；不得启用 Flyway `outOfOrder`、执行
+`repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常、PostgreSQL
+`20260804123000` 与 XXL MySQL V7 新增且为 `success=true`，同时既有
+`20260802173416`、`20260803133000` 和 checksum 未变化，再部署 `.114`。`.4` 日志出现
 `FlywayValidateException`、`ClassNotFoundException: org.postgresql.Driver` 或 `Application run failed` 时不得继续滚动。
 
 外部 MySQL 端口验证通过后，在 `.4` 执行：

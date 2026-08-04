@@ -5429,6 +5429,9 @@
   Workflow/LobeHub 保持禁用，公共 Agent 配置未变。
 - 本包包含 PostgreSQL `V20260804123000__create_personal_workspace_relocations.sql` 和 XXL MySQL
   `V7__register_personal_workspace_relocation_task.sql`；前者新增搬迁状态表，后者注册并启用每分钟搬迁任务。
+- 终检发现交付手册仍把更早 `0352efa...` 写成当前现网基线，已同步修正 `deploy/internal/README.md`、
+  `deploy/internal/MULTI-BACKEND.md` 和 `docs/deployment/database.md`：当前基线改为昨晚 `1e6df22...`，
+  并分别明确 PostgreSQL 与 XXL MySQL 的发布前历史门禁，避免现场误判早上 09:08 包已经执行。
 
 ### How
 
@@ -5436,6 +5439,8 @@
   搬迁 HTTP/WebSocket、worker 和真实 Git 快照；前端 Agent 配置/工作区 49 项测试与 typecheck 通过。
 - 当前 backend/frontend 构建成功；内部包和双后台外层包均通过 SHA-256、`unzip -t`、后端/前端
   `--validate-only`，本地 backend readiness 为 `UP`、frontend 3000 返回 200。
+- 修正文档后执行 `tools/verify-ai-docs.sh` 与 `git diff --check`，再重新封装内外层固定名 ZIP；包内
+  `START-HERE.md` 必须显示昨晚 `1e6df22...` 基线，不再出现“今早现网部署包”的错误表述。
 - PostgreSQL migration 在源码、候选模块 JAR 和最终内层包中的 SHA-256 均为
   `f41a9aaab637f4b196f63cb7d37ef58cf0b15c9521abd1050c9929c6ce27b212`；XXL V7 均为
   `be1705cac272b9c4e89c43136f0125132c2afc4bbc3525322678cd02fb2c5305`。

@@ -508,9 +508,10 @@ test-agent-config-SENSITIVE-<role>-<node>-<timestamp>.tar.gz.sha256
 实际打进 `test-agent-persistence-0.1.0-SNAPSHOT.jar`；打包、外层封装、节点预校验和安装后
 复验会同时锁定工具盒子企业 migration、LobeHub 主/两条兼容 migration 和公共 Agent rollout
 纠错 migration 的 SHA-256，并比较发布包与安装后 persistence JAR 的完整 SHA。只校验外层 ZIP
-或 app JAR 不能证明数据库资源已更新。当前现网基线提交固定为
-`0352efa987219b9dde5c09e77b1eabfa719fc068`，升级前还必须按多后台手册读取完整
-`flyway_schema_history`，不能只凭提交号假定数据库历史一致。
+或 app JAR 不能证明数据库资源已更新。当前现网实际基线是昨晚已部署提交
+`1e6df22fab43edba6b5eb3d75f2c6a085eaf4ec7`，早上 09:08 生成的后续包尚未部署；升级前仍必须按
+多后台手册分别读取 PostgreSQL 与 XXL MySQL 的完整 `flyway_schema_history`，不能只凭提交号假定
+数据库历史一致。
 
 ## 首次部署与版本升级顺序
 
