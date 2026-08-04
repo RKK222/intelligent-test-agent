@@ -335,6 +335,36 @@ describe("AgentConfigPanel", () => {
     expect(view.queryByText("直接 · 测试服务器")).toBeNull();
   });
 
+  it("loads the shared public directory read-only without an OpenCode process binding", async () => {
+    apiClientMock.listPublicAgentFiles.mockResolvedValue([
+      { path: "agents/public.md", name: "public.md", type: "file" }
+    ]);
+    const { view } = renderPanel(undefined, {
+      canWrite: false,
+      routeLinuxServerId: "",
+      routeLinuxServerResolved: false
+    });
+
+    await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalledWith(
+      "",
+      undefined,
+      "linux-1"
+    ));
+    expect(apiClientMock.listPublicAgentWorktrees).not.toHaveBeenCalled();
+    expect(apiClientMock.createPublicAgentWorktree).not.toHaveBeenCalled();
+    expect(await view.findByText("直接 · 测试服务器")).toBeTruthy();
+
+    await fireEvent.click(await view.findByRole("button", { name: "public.md" }));
+    const openedFiles = ((view.emitted("openFile") ?? []) as unknown[][]).map((event) => event[0]);
+    expect(openedFiles).toContainEqual(expect.objectContaining({
+      scope: "PUBLIC",
+      path: "agents/public.md",
+      worktreeId: undefined,
+      linuxServerId: "linux-1",
+      readonly: true
+    }));
+  });
+
   it("remounts the exact prepared worktree when initialization reuses the same server", async () => {
     const staleWorktree: PublicWorktree = {
       ...publicWorktreeOption(),

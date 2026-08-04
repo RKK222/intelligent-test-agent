@@ -1352,9 +1352,13 @@ function preferredPublicServer(repositories: PublicAgentRepositoryStatus[]) {
 }
 
 /**
- * 自动挂载必须等进程归属查询结束；有绑定时只认进程服务器，保证本地配置软链接和 OpenCode 进程同服。
+ * 管理员自动挂载必须等待进程归属并保持同服；普通用户只读共享副本，不进入个人 worktree 流程。
  */
 function automaticPublicServer(repositories: PublicAgentRepositoryStatus[]) {
+  // 只读用户读取共享公共副本，不需要个人 worktree，也不依赖 OpenCode 进程是否已经分配。
+  if (!props.canWrite) {
+    return preferredPublicServer(repositories);
+  }
   if (props.routeLinuxServerResolved !== true) {
     return "";
   }
@@ -1368,7 +1372,7 @@ function automaticPublicServer(repositories: PublicAgentRepositoryStatus[]) {
   return "";
 }
 
-/** 公共文件树只有在个人 worktree 或已确认的进程同服目录存在时才允许发起文件请求。 */
+/** 管理员只访问本人 worktree；普通用户可直接访问任一已初始化服务器上的共享只读副本。 */
 function publicFileTargetAvailable() {
   if (publicWorktree.value?.worktreeId && publicWorktree.value.linuxServerId) {
     return true;
@@ -1377,13 +1381,7 @@ function publicFileTargetAvailable() {
   if (props.canWrite) {
     return false;
   }
-  if (props.routeLinuxServerResolved !== true) {
-    return false;
-  }
-  const processServer = props.routeLinuxServerId?.trim();
-  return Boolean(processServer && initializedPublicRepositories.value.some(
-    (repository) => repository.linuxServerId === processServer
-  ));
+  return Boolean(preferredPublicServer(publicRepositories.value));
 }
 
 async function publicFileLinuxServerId() {
@@ -1396,17 +1394,13 @@ async function publicFileLinuxServerId() {
   if (props.canWrite) {
     throw new Error("请先创建或重新挂载当前用户的公共个人 worktree。");
   }
-  const processServer = props.routeLinuxServerResolved === true ? props.routeLinuxServerId?.trim() : "";
-  if (processServer && initializedPublicRepositories.value.some(
-    (repository) => repository.linuxServerId === processServer
-  )) {
-    selectedPublicLinuxServerId.value = processServer;
-    publicConfigLinuxServerId.value = processServer;
-    return processServer;
+  const readOnlyServer = preferredPublicServer(publicRepositories.value);
+  if (readOnlyServer) {
+    selectedPublicLinuxServerId.value = readOnlyServer;
+    publicConfigLinuxServerId.value = readOnlyServer;
+    return readOnlyServer;
   }
-  throw new Error(props.routeLinuxServerResolved === true
-    ? "请先初始化 TestAgent 进程，再加载公共配置。"
-    : "正在确认 TestAgent 进程所在服务器，请稍后刷新。");
+  throw new Error("没有已初始化服务器，请联系超级管理员初始化公共配置。");
 }
 
 async function openSwitchWorktreeModal() {

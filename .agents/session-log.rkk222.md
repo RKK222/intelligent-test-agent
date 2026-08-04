@@ -5169,3 +5169,31 @@
   traceId；企业现场仍需重新构建后端产物并依次更新 `.4`、`.114` 节点，本次未执行企业包构建或现场部署。
 - 未修改 HTTP API/DTO、事件、数据库/Flyway/SQL、权限模型、环境配置、前端、worker、manager、generated SDK
   或 OpenCode 源码；完整 workflow 本地启动仍受缺少开发密钥限制，与本次修复无关。
+
+## 2026-08-04 - 恢复普通用户公共 Agent 只读浏览
+
+### Why
+
+- 公共 Agent 文件读取契约允许任意登录用户只读，但前端公共目录加载被误绑到当前用户 OpenCode 进程服务器；
+  无公共 Git 写权限且尚未分配进程的用户因此看不到共享公共配置文件。
+
+### What
+
+- `AgentConfigPanel` 对无公共写权限用户复用既有已初始化公共仓库选服，直接读取共享公共副本，不创建个人
+  worktree，也不依赖 `/processes/me` 是否已有 binding；超级管理员个人 worktree 的同服门禁保持不变。
+- 新增“无写权限、无进程 binding”回归，验证目录请求不携带 worktree、显式路由到已初始化服务器，并以
+  `readonly=true` 打开文件。同步 agent-web README/PACKAGE 和用户手册。
+
+### How
+
+- Agent 配置面板定向 38 项通过；前端 workspace lint 通过；排除既有失败的 `AppSourceDialog.test.ts` 后，
+  全量前端 1778 passed / 1 skipped；agent-web 用户手册与生产构建通过，`git diff --check` 通过。
+- 完整前端测试仍有一个与本次无关且可单独复现的 `AppSourceDialog` 保留期输入测试失败；Mermaid 首轮偶发失败
+  单独重跑已通过。使用 Vite 实际启动 `http://127.0.0.1:4175/` 并确认 HTTP 200。
+
+### Result
+
+- 普通成员无需公共 Git 仓库权限或个人 TestAgent 进程即可查看公共 Agent/Skill 文件，所有写入、Git 操作和
+  超级管理员个人 worktree 权限边界不变。
+- 本次未修改 HTTP API/DTO、RunEvent/SSE、数据库/Flyway/SQL、性能或安全协议、环境配置、generated SDK、
+  OpenCode 源码或依赖；未处理无关的 `AppSourceDialog` 测试失败，也未创建分支。
