@@ -199,8 +199,8 @@ function renderWithApi(
         },
         ElOption: { props: ["label", "value"], template: `<option :value="value">{{ label }}</option>` },
         SupportAccessPanel: {
-          props: ["currentUser"],
-          template: `<div data-testid="support-access-panel">只读排查授权面板</div>`
+          props: ["currentUser", "activationSequence"],
+          template: `<div data-testid="support-access-panel" :data-activation-sequence="activationSequence">只读排查授权面板</div>`
         }
       },
       provide: { api: backendApi }
@@ -236,9 +236,15 @@ describe("scheduler management panel", () => {
 
     expect(await view.findByText("问题排查只读访问", { selector: ".ta-system-menu-text" })).toBeTruthy();
     expect(view.getByTestId("support-access-panel")).toBeTruthy();
+    expect(view.getByTestId("support-access-panel").getAttribute("data-activation-sequence")).toBe("1");
     expect(view.emitted().supportAccessOpened).toHaveLength(1);
     expect(currentUser.userId).toBe("usr_admin");
     expect(currentUser.roles).toEqual(["SUPER_ADMIN"]);
+
+    await view.rerender({ currentUser, supportAccessRequested: false });
+    await view.rerender({ currentUser, supportAccessRequested: true });
+    await waitFor(() => expect(view.getByTestId("support-access-panel").getAttribute("data-activation-sequence")).toBe("2"));
+    expect(view.emitted().supportAccessOpened).toHaveLength(2);
     view.queryClient.clear();
   });
 

@@ -21,9 +21,9 @@ function backendApi(
   } as Partial<BackendApiClient> as BackendApiClient;
 }
 
-function renderPanel(api: BackendApiClient) {
+function renderPanel(api: BackendApiClient, props: { activationSequence?: number } = {}) {
   return render(SupportAccessPanel, {
-    props: { currentUser },
+    props: { currentUser, ...props },
     global: { provide: { api } }
   });
 }
@@ -66,7 +66,40 @@ describe("support access panel incident prefill", () => {
 
     const input = view.getByLabelText("工单号") as HTMLInputElement;
     await waitFor(() => expect(input.value).toBe("INC-LATE-ACTOR"));
-    expect(view.getByText("已自动带入当前管理员最近一次已入库工单")).toBeTruthy();
+    expect(view.getByText("已读取最近一条授权记录的入库工单；数据库未变化时号码不变")).toBeTruthy();
+  });
+
+  it("refreshes the persisted incident after repeated activation and grant revocation", async () => {
+    const getRecentSupportAccessIncident = vi.fn()
+      .mockResolvedValueOnce({ incidentId: "INC-132" })
+      .mockResolvedValueOnce({ incidentId: "INC-133" })
+      .mockResolvedValueOnce({ incidentId: "INC-134" });
+    const api = {
+      getRecentSupportAccessIncident,
+      listUsers: vi.fn().mockResolvedValue({ items: [], page: 1, size: 30, total: 0 }),
+      issueSupportAccessGrant: vi.fn().mockResolvedValue({
+        grantId: "sag_refresh",
+        grantToken: "grant-token",
+        expiresAt: "2099-08-05T00:00:00Z"
+      }),
+      revokeSupportAccessGrant: vi.fn().mockResolvedValue(undefined),
+      closeSupportAccessConnections: vi.fn()
+    } as Partial<BackendApiClient> as BackendApiClient;
+    const view = renderPanel(api, { activationSequence: 1 });
+
+    await waitFor(() => expect((view.getByLabelText("工单号") as HTMLInputElement).value).toBe("INC-132"));
+    await view.rerender({ currentUser, activationSequence: 2 });
+    await waitFor(() => expect((view.getByLabelText("工单号") as HTMLInputElement).value).toBe("INC-133"));
+
+    await fireEvent.update(view.getByLabelText("排查原因"), "验证撤销后的工单刷新");
+    await fireEvent.click(view.getByLabelText(/我确认仅用于问题排查/));
+    await fireEvent.click(view.getByRole("button", { name: "开启限时只读访问" }));
+    await fireEvent.click(await view.findByRole("button", { name: "关闭并撤销" }));
+
+    await waitFor(() => expect((view.getByLabelText("工单号") as HTMLInputElement).value).toBe("INC-134"));
+    expect((view.getByLabelText("排查原因") as HTMLTextAreaElement).value).toBe("");
+    expect((view.getByLabelText(/我确认仅用于问题排查/) as HTMLInputElement).checked).toBe(false);
+    expect(getRecentSupportAccessIncident).toHaveBeenCalledTimes(3);
   });
 
   it("loads archived sessions only on demand and disables offline workspaces", async () => {

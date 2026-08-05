@@ -25,7 +25,7 @@ describe("backend-api", () => {
     await expect(client.getRecentSupportAccessIncident()).resolves.toEqual({ incidentId: "INC-PERSISTED" });
     expect(fetcher).toHaveBeenCalledWith(
       "http://api/api/internal/platform/system-management/support-access/grants/recent-incident",
-      expect.any(Object)
+      expect.objectContaining({ cache: "no-store" })
     );
   });
 

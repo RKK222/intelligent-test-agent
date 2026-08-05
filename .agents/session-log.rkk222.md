@@ -6070,3 +6070,41 @@
 - Session/Trace 是始终可辨识的排查信息，不再依赖管理员从普通用户正文中寻找。
 - 未修改 HTTP API、RunEvent、数据库/Flyway、ticket/RPC、限流、鉴权、`.env*`、OpenCode 源码或 generated SDK；
   Workflow/LobeHub 继续不启动。
+
+## 2026-08-05 - 修复排查工单刷新、复选框与诊断区收缩
+
+### Why
+
+- 最近工单只在 actor 首次到达时查询；问题排查面板保持挂载后再次三击 Shift 不会触发刷新，撤销后表单还保留
+  上一轮工单、原因和只读确认，容易把数据库真实值未变化误判为前端缓存。
+- 授权表单的通用 `input` 样式同时作用于 checkbox，把复选框撑成普通输入框高度并造成文字错位。
+- 真实长会话中，正文滚动容器的 flex 子项允许收缩，吸顶排查标识被压到约 3px，DOM 中虽有 Session/Trace，
+  视觉上却不可见。
+
+### What
+
+- 系统管理为每次问题排查手势生成激活代次；无有效授权时，重复触发、撤销或到期均禁用浏览器缓存重新查询
+  当前管理员最近一条已入库工单，并清空上一轮原因、时长和只读确认；人工填写的新工单仍不被自动请求覆盖。
+- 页面按钮和提示明确说明“重新读取最近工单”读取的是数据库最近一条授权记录；数据库最新值仍为 `132` 时继续
+  显示 `132`，不伪造递增工单。
+- 通用输入框样式排除 checkbox，授权确认与归档筛选都使用固定 14×14 复选框和两列网格对齐；排查标题、诊断区、
+  时间线和只读输入区设为不可收缩，保留诊断区 sticky 行为。
+- 同步 agent-web/backend-api README/PACKAGE 与定向回归测试；没有改变 HTTP 路径或响应结构。
+
+### How
+
+- agent-web 排查面板、系统管理和 backend-api 定向 Vitest 3 个文件 118 项通过；前端 workspace typecheck 与
+  agent-web production build 通过，仅保留既有大 chunk 告警。
+- 使用 JDK 25、未修改的主工作区 `.env.test` 和既有数据根，以 `--without-workflow` 重启 backend、manager、
+  frontend；backend health/readiness 为 `UP`，前端 3000 返回 200，登录 CORS 正常，manager WebSocket 已连接。
+- 真实浏览器确认三击 Shift 可打开入口、复选框与文字对齐；创建短时本地只读授权并打开长会话后，排查标识完整
+  显示 `ses_0031744a5bb445c8b77357a26cb52eb3` 与最近 Trace，随后主动撤销并确认原因/勾选已清空。
+
+### Result
+
+- 工单会按真实数据库状态重新读取，重复触发不再复用组件首次挂载时的前端值；本地库最新工单确为 `132`，因此
+  刷新后保持 `132` 是预期审计语义。
+- 复选框对齐和长会话 Session/Trace 排查标识均已在真实页面验证；本地验收只新增正常的授权、选人、查看和撤销
+  审计记录。
+- 未修改 API 契约、RunEvent、数据库/Flyway、ticket/RPC、限流、鉴权、`.env*`、OpenCode 源码或 generated SDK；
+  Workflow/LobeHub 继续不启动。

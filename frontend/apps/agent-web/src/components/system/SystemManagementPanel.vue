@@ -24,6 +24,7 @@ type SystemMenuItem = { key: SystemMenuKey; label: string; icon: Component };
 
 const activeKey = ref<SystemMenuKey>("scheduler");
 const supportRevealed = ref(false);
+const supportActivationSequence = ref(0);
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 
 const items: SystemMenuItem[] = [
@@ -45,6 +46,7 @@ function selectMenu(key: SystemMenuKey) {
 /** 全局手势只请求展示入口；组件仍按实时角色收口，不参与身份切换。 */
 function revealSupportAccess() {
   if (!hasSuperAdmin.value) return;
+  supportActivationSequence.value += 1;
   supportRevealed.value = true;
   activeKey.value = "support";
   emit("supportAccessOpened");
@@ -89,7 +91,11 @@ watch(hasSuperAdmin, (allowed) => {
         <InternalModelProviderPanel v-else-if="activeKey === 'internalModels'" :current-user="currentUser" />
         <ConfigurationManagementPanel v-else-if="activeKey === 'config'" :current-user="currentUser" />
         <AnalyticsManagementPanel v-else-if="activeKey === 'analytics'" />
-        <SupportAccessPanel v-else-if="activeKey === 'support'" :current-user="currentUser" />
+        <SupportAccessPanel
+          v-else-if="activeKey === 'support'"
+          :current-user="currentUser"
+          :activation-sequence="supportActivationSequence"
+        />
       </div>
     </template>
   </section>

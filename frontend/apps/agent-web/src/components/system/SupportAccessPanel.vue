@@ -24,7 +24,10 @@ import type {
 } from "@test-agent/shared-types";
 import { chatStateFromSessionTreeSnapshot } from "../workbench-utils";
 
-const props = defineProps<{ currentUser: CurrentUser | null }>();
+const props = defineProps<{
+  currentUser: CurrentUser | null;
+  activationSequence?: number;
+}>();
 const api = inject<BackendApiClient>("api")!;
 
 type MainTab = "access" | "audit";
@@ -157,6 +160,12 @@ watch(supportActorKey, (actorUserId, previousActorUserId) => {
   if (actorUserId) void prefillRecentIncident();
 }, { immediate: true });
 
+watch(() => props.activationSequence, (activationSequence, previousActivationSequence) => {
+  if (activationSequence === previousActivationSequence || grant.value) return;
+  // 再次三击 Shift 代表管理员主动重新进入；只刷新自动值或空值，不能覆盖已手工填写的新工单。
+  if (incidentPrefilled.value || !incidentId.value.trim()) void prefillRecentIncident(true);
+});
+
 watch(() => props.currentUser?.roles, (roles) => {
   if (!roles?.includes("SUPER_ADMIN") && grant.value) {
     const active = grant.value;
@@ -170,6 +179,8 @@ watch(remainingSeconds, (seconds) => {
   if (grant.value && seconds === 0) {
     api.closeSupportAccessConnections(grant.value.grantId);
     clearGrantState();
+    resetGrantForm();
+    void prefillRecentIncident(true);
     errorMessage.value = "排查授权已到期，请重新填写工单信息并授权";
   }
 });
@@ -191,10 +202,9 @@ async function prefillRecentIncident(force = false) {
     const suggestedIncidentId = suggestion.incidentId?.trim() || "";
     if (requestId === incidentSuggestionRequest
       && supportActorKey.value === actorUserId
-      && suggestedIncidentId
       && (force || !incidentId.value.trim())) {
       incidentId.value = suggestedIncidentId;
-      incidentPrefilled.value = true;
+      incidentPrefilled.value = Boolean(suggestedIncidentId);
     }
   } catch {
     // 自动回填属于便利能力，失败时保持表单可手工填写，不遮挡主要排查流程。
@@ -240,8 +250,19 @@ async function closeGrant() {
     errorMessage.value = errorText(error);
   } finally {
     clearGrantState();
+    resetGrantForm();
+    void prefillRecentIncident(true);
     closing.value = false;
   }
+}
+
+/** 撤销或到期后清除上一轮敏感上下文，再重新读取数据库中的最新工单建议。 */
+function resetGrantForm() {
+  incidentId.value = "";
+  incidentPrefilled.value = false;
+  reason.value = "";
+  durationMinutes.value = 30;
+  readOnlyAcknowledged.value = false;
 }
 
 function clearGrantState() {
@@ -589,11 +610,11 @@ function resetTranscriptState() {
           <div class="form-field incident-field">
             <span class="field-label"><label for="support-incident-id">工单号</label>
               <button type="button" :disabled="incidentSuggestionLoading" @click="prefillRecentIncident(true)">
-                {{ incidentSuggestionLoading ? '读取中…' : '带入最近工单' }}
+                {{ incidentSuggestionLoading ? '读取中…' : '重新读取最近工单' }}
               </button>
             </span>
             <input id="support-incident-id" v-model="incidentId" maxlength="128" placeholder="例如 INC-2026-00123" @input="markIncidentAsManual" />
-            <small v-if="incidentPrefilled">已自动带入当前管理员最近一次已入库工单</small>
+            <small v-if="incidentPrefilled">已读取最近一条授权记录的入库工单；数据库未变化时号码不变</small>
           </div>
           <label class="form-field form-field-wide">排查原因<textarea v-model="reason" maxlength="1000" rows="4" placeholder="描述故障、影响范围和需要核对的内容" /></label>
           <label class="form-field duration-field">授权时长
@@ -605,7 +626,7 @@ function resetTranscriptState() {
           </label>
         </div>
         <label class="grant-check"><input v-model="readOnlyAcknowledged" type="checkbox" />
-          我确认仅用于问题排查，不写入、不上传、不进入终端/Agent 配置，也不批量导出。
+          <span>我确认仅用于问题排查，不写入、不上传、不进入终端/Agent 配置，也不批量导出。</span>
         </label>
         <div class="grant-actions">
           <button class="primary" :disabled="issuing" @click="issueGrant">{{ issuing ? '授权中…' : '开启限时只读访问' }}</button>
@@ -664,7 +685,7 @@ function resetTranscriptState() {
                   <div class="inline-search"><input v-model="sessionQuery" placeholder="标题或 Session ID" @keyup.enter="loadSessions(1)" /><button @click="loadSessions(1)">查询</button></div>
                   <label class="archive-filter">
                     <input v-model="includeArchived" type="checkbox" @change="reloadSessionsWithArchiveFilter" />
-                    包含已归档会话（用户已删除或隐藏，数据未物理删除）
+                    <span>包含已归档会话（用户已删除或隐藏，数据未物理删除）</span>
                   </label>
                   <div v-if="sessionsLoading" class="empty">加载中…</div>
                   <button v-for="session in sessions.items" :key="session.sessionId" :class="['resource-row', { active: selectedSession?.sessionId === session.sessionId }]" @click="openSession(session)">
@@ -905,7 +926,7 @@ function resetTranscriptState() {
   font: 600 12px/1.2 var(--font-sans);
 }
 .form-field small { color: var(--ta-ok, #3f7a5a); font-size: 11px; font-weight: 500; }
-.grant-form input,
+.grant-form input:not([type="checkbox"]),
 .grant-form textarea,
 .grant-form select,
 .inline-search input,
@@ -920,7 +941,7 @@ function resetTranscriptState() {
   padding: 8px 10px;
   font: 14px/1.4 var(--font-sans);
 }
-.grant-form input:focus,
+.grant-form input:not([type="checkbox"]):focus,
 .grant-form textarea:focus,
 .grant-form select:focus,
 .inline-search input:focus,
@@ -930,10 +951,11 @@ function resetTranscriptState() {
   outline: 2px solid #f8dfe0;
   outline-offset: 1px;
 }
-.grant-form input:disabled { background: #f7f8fa; color: #6b7280; }
+.grant-form input:not([type="checkbox"]):disabled { background: #f7f8fa; color: #6b7280; }
 .grant-form textarea { min-height: 96px; resize: vertical; }
-.grant-check { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 9px; color: #4b5563; font-size: 13px; }
-.grant-check input { margin-top: 3px; accent-color: var(--support-accent); }
+.grant-check { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: 8px; color: #4b5563; font-size: 13px; line-height: 1.5; }
+.grant-check input,
+.archive-filter input { width: 14px; height: 14px; min-height: 0; margin: 2px 0 0; padding: 0; accent-color: var(--support-accent); }
 .grant-actions { display: flex; align-items: center; gap: 12px; }
 .grant-actions > span { color: var(--support-muted); font-size: 12px; }
 button.primary {
@@ -1022,8 +1044,7 @@ button.primary:hover:not(:disabled) { background: var(--support-accent-strong); 
 .resource-row small { overflow: hidden; color: var(--support-muted); text-overflow: ellipsis; white-space: nowrap; }
 .resource-row span { font: 11px/1.35 var(--font-mono); }
 .resource-row small { font-size: 11px; }
-.archive-filter { display: flex; align-items: flex-start; gap: 7px; margin: 2px 4px 10px; color: var(--support-muted); font-size: 12px; line-height: 1.4; }
-.archive-filter input { margin-top: 2px; accent-color: var(--support-accent); }
+.archive-filter { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: 7px; margin: 2px 4px 10px; color: var(--support-muted); font-size: 12px; line-height: 1.4; }
 .archived-pill,
 .backend-pill { display: inline-block; border-radius: 999px; padding: 1px 6px; font-style: normal; font-size: 10px; font-weight: 700; }
 .archived-pill { border: 1px solid #c7cdd5; background: #f2f4f6; color: #66707d; }
@@ -1040,7 +1061,7 @@ button.primary:hover:not(:disabled) { background: var(--support-accent-strong); 
 .pager { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 10px 0; color: var(--support-muted); font: 11px/1 var(--font-mono); }
 
 .transcript { display: flex; min-height: 0; overflow: auto; flex-direction: column; padding: 16px 20px; background: var(--ta-chat-bg, #f5f5f5); }
-.user-view-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; width: min(100%, 920px); margin: 0 auto 10px; }
+.user-view-heading { display: flex; flex: 0 0 auto; align-items: flex-end; justify-content: space-between; gap: 16px; width: min(100%, 920px); margin: 0 auto 10px; }
 .user-view-heading > div { display: grid; gap: 1px; }
 .user-view-heading strong { color: #273244; font-size: 15px; font-weight: 680; }
 .user-view-heading > span { color: var(--support-muted); font-size: 12px; text-align: right; }
@@ -1049,6 +1070,7 @@ button.primary:hover:not(:disabled) { background: var(--support-accent-strong); 
   top: 0;
   z-index: 4;
   display: grid;
+  flex: 0 0 auto;
   width: min(100%, 920px);
   margin: 0 auto 12px;
   box-sizing: border-box;
@@ -1076,8 +1098,8 @@ button.primary:hover:not(:disabled) { background: var(--support-accent-strong); 
 .diagnostic-status span { display: grid; min-width: 140px; gap: 2px; padding: 9px 11px; border-right: 1px solid #edf0f3; }
 .diagnostic-status small { color: var(--support-muted); font-size: 10px; }
 .diagnostic-status b { color: #334155; font-size: 12px; font-weight: 650; }
-.support-timeline { width: min(100%, 920px); margin: 0 auto; padding: 4px 8px 18px; }
-.readonly-composer { position: sticky; bottom: -16px; width: min(100%, 920px); margin: auto auto 0; padding: 12px 0 2px; background: linear-gradient(to bottom, transparent, var(--ta-chat-bg, #f5f5f5) 24%); }
+.support-timeline { width: min(100%, 920px); flex: 0 0 auto; margin: 0 auto; padding: 4px 8px 18px; }
+.readonly-composer { position: sticky; bottom: -16px; width: min(100%, 920px); flex: 0 0 auto; margin: auto auto 0; padding: 12px 0 2px; background: linear-gradient(to bottom, transparent, var(--ta-chat-bg, #f5f5f5) 24%); }
 .readonly-composer textarea { width: 100%; box-sizing: border-box; resize: none; border: 1px solid var(--support-border-strong); border-radius: 8px; padding: 10px 12px; background: #eef0f3; color: var(--support-muted); font: 13px/1.4 var(--font-sans); }
 
 .file-preview pre { margin: 0; padding: 10px 12px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 12px/1.55 var(--font-mono); }

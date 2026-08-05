@@ -2418,7 +2418,10 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         body: JSON.stringify(payload)
       }),
     getRecentSupportAccessIncident: () =>
-      request<SupportAccessIncidentSuggestion>(`${systemManagementBase}/support-access/grants/recent-incident`),
+      request<SupportAccessIncidentSuggestion>(
+        `${systemManagementBase}/support-access/grants/recent-incident`,
+        { cache: "no-store" }
+      ),
     revokeSupportAccessGrant: async (grantId: string, grantToken: string) => {
       try {
         return await request<void>(
