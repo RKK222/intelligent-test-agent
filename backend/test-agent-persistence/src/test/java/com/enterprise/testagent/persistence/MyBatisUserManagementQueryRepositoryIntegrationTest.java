@@ -97,6 +97,18 @@ class MyBatisUserManagementQueryRepositoryIntegrationTest {
                 .containsExactly("usr_roleless");
     }
 
+    @Test
+    void findsAllMatchingUserIdsWhileExcludingOperatorAndHonoringLimit() {
+        var userIds = repository.findUserIds(
+                new UserManagementQuery(null, null, "总行", null, null),
+                new com.enterprise.testagent.domain.user.UserId("usr_bob"),
+                1);
+
+        assertThat(userIds)
+                .extracting(userId -> userId.value())
+                .containsExactly("usr_alice");
+    }
+
     /** 仅加载本次查询 mapper，避免集成测试依赖整个 Spring 应用上下文。 */
     private SqlSessionFactory sqlSessionFactory() throws Exception {
         SqlSessionFactoryBean factoryBean = new SqlSessionFactoryBean();

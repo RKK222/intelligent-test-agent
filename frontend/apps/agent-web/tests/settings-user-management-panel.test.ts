@@ -33,6 +33,7 @@ function createApi(): Partial<BackendApiClient> {
     listRoles: vi.fn().mockResolvedValue(roles),
     createUser: vi.fn().mockResolvedValue(users[0]),
     updateUserRole: vi.fn().mockResolvedValue({ ...users[0], roles: ["USER"], roleLabels: ["普通用户"] }),
+    updateUserRoles: vi.fn().mockResolvedValue({ updatedCount: 1 }),
     deleteUser: vi.fn().mockResolvedValue({ deletedUserIds: ["usr_existing"], deletedCount: 1 }),
     deleteUsers: vi.fn().mockResolvedValue({ deletedUserIds: ["usr_existing"], deletedCount: 1 }),
     syncUserFromTcds: vi.fn().mockResolvedValue({ syncedUserIds: ["usr_existing"], syncedCount: 1 }),
@@ -234,7 +235,10 @@ describe("SettingsUserManagementPanel", () => {
     await findByText("已修改");
     await fireEvent.click(getByRole("button", { name: "保存角色修改（1）" }));
 
-    await waitFor(() => expect(api.updateUserRole).toHaveBeenCalledWith("usr_existing", { role: "USER" }));
+    await waitFor(() => expect(api.updateUserRoles).toHaveBeenCalledWith({
+      assignments: [{ userId: "usr_existing", role: "USER" }]
+    }));
+    expect(api.updateUserRole).not.toHaveBeenCalled();
     await waitFor(() => expect((api.listUsers as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(2));
   });
 
@@ -273,7 +277,42 @@ describe("SettingsUserManagementPanel", () => {
     await findByText("已修改");
     await fireEvent.click(getByRole("button", { name: "保存角色修改（1）" }));
 
-    await waitFor(() => expect(api.updateUserRole).toHaveBeenCalledWith("usr_existing", { role: "USER" }));
+    await waitFor(() => expect(api.updateUserRoles).toHaveBeenCalledWith({
+      assignments: [{ userId: "usr_existing", role: "USER" }]
+    }));
+  });
+
+  it("selects every filtered result and saves it through one server-side batch request", async () => {
+    const api = createApi();
+    (api.listUsers as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: users,
+      page: 1,
+      size: 20,
+      total: 42
+    });
+    (api.updateUserRoles as ReturnType<typeof vi.fn>).mockResolvedValue({ updatedCount: 41 });
+    vi.spyOn(ElMessageBox, "confirm").mockResolvedValue("confirm" as never);
+    const { findByText, getByLabelText, getByRole } = renderPanel(api);
+
+    await findByText("alice");
+    await waitFor(() => expect(api.listRoles).toHaveBeenCalled());
+    await fireEvent.click(getByRole("button", { name: "选择全部检索结果（42）" }));
+    await fireEvent.update(getByLabelText("批量目标角色"), "USER");
+    await fireEvent.click(getByRole("button", { name: "设置全部检索结果的待保存角色（42）" }));
+    await fireEvent.click(getByRole("button", { name: "保存全部检索结果的角色（42）" }));
+
+    await waitFor(() => expect(api.updateUserRoles).toHaveBeenCalledWith({
+      allMatching: true,
+      role: "USER",
+      filter: {
+        keyword: undefined,
+        role: undefined,
+        organization: undefined,
+        rdDepartment: undefined,
+        department: undefined
+      }
+    }));
+    expect(api.updateUserRole).not.toHaveBeenCalled();
   });
 
   it("deletes one user after confirmation and refreshes the list", async () => {

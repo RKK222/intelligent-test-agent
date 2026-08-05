@@ -11,6 +11,8 @@ import com.enterprise.testagent.system.management.user.UserManagementResponses.C
 import com.enterprise.testagent.system.management.user.UserManagementResponses.DeleteUsersCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.SyncUsersFromTcdsCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRoleCommand;
+import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRolesCommand;
+import com.enterprise.testagent.system.management.user.UserManagementResponses.UserRoleAssignment;
 import java.util.List;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -88,6 +90,36 @@ public class UserManagementController {
             ServerWebExchange exchange) {
         requireSuperAdmin(exchange);
         return ok(exchange, service.updateUserRole(new UpdateUserRoleCommand(userId, request.role())));
+    }
+
+    /**
+     * 一次提交多名用户的角色修改，或按当前筛选快照更新全部匹配用户。
+     */
+    @PutMapping("/users/batch-roles")
+    public ApiResponse<Object> updateUserRoles(
+            @RequestBody UserManagementDtos.UpdateUserRolesRequest request,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = requireSuperAdmin(exchange);
+        UserManagementDtos.UserManagementFilterRequest filter = request.filter();
+        UserManagementQuery query = filter == null
+                ? null
+                : new UserManagementQuery(
+                        filter.keyword(),
+                        filter.role(),
+                        filter.organization(),
+                        filter.rdDepartment(),
+                        filter.department());
+        List<UserRoleAssignment> assignments = request.assignments() == null
+                ? List.of()
+                : request.assignments().stream()
+                        .map(item -> new UserRoleAssignment(item.userId(), item.role()))
+                        .toList();
+        return ok(exchange, service.updateUserRoles(new UpdateUserRolesCommand(
+                principal.userId().value(),
+                assignments,
+                request.allMatching(),
+                request.role(),
+                query)));
     }
 
     /**

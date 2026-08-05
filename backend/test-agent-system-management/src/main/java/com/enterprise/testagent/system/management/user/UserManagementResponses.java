@@ -1,5 +1,6 @@
 package com.enterprise.testagent.system.management.user;
 
+import com.enterprise.testagent.domain.user.UserManagementQuery;
 import java.time.Instant;
 import java.util.List;
 
@@ -31,6 +32,24 @@ public final class UserManagementResponses {
      * 更新用户全局角色命令。当前测试管理入口只允许设置单个全局角色，避免和登录态多角色展示混淆。
      */
     public record UpdateUserRoleCommand(String userId, String role) {
+    }
+
+    /** 单个用户的一项角色修改，用于一次请求携带多个不同目标角色。 */
+    public record UserRoleAssignment(String userId, String role) {
+    }
+
+    /**
+     * 批量更新用户角色命令。
+     *
+     * <p>allMatching=false 时使用 assignments；allMatching=true 时由服务端按 query 解析全部匹配用户，
+     * 并统一设置 matchingRole。operatorUserId 始终用于排除当前登录的超级管理员。
+     */
+    public record UpdateUserRolesCommand(
+            String operatorUserId,
+            List<UserRoleAssignment> assignments,
+            boolean allMatching,
+            String matchingRole,
+            UserManagementQuery query) {
     }
 
     /**
@@ -71,6 +90,10 @@ public final class UserManagementResponses {
      * 单个或批量删除结果；批量操作保持事务原子性，成功时列表即全部目标用户。
      */
     public record DeleteUsersResponse(List<String> deletedUserIds, int deletedCount) {
+    }
+
+    /** 批量角色修改结果；不返回大规模用户 ID，避免放大高权限响应。 */
+    public record UpdateUserRolesResponse(int updatedCount) {
     }
 
     /**

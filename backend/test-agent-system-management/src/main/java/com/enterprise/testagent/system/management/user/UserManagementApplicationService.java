@@ -24,9 +24,13 @@ import com.enterprise.testagent.system.management.user.UserManagementResponses.R
 import com.enterprise.testagent.system.management.user.UserManagementResponses.SyncUsersFromTcdsCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.SyncUsersFromTcdsResponse;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRoleCommand;
+import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRolesCommand;
+import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRolesResponse;
+import com.enterprise.testagent.system.management.user.UserManagementResponses.UserRoleAssignment;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UserResponse;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -61,6 +65,9 @@ public class UserManagementApplicationService {
 
     /** 单次删除上限，限制动态 SQL、Redis Token 扫描和事务锁定规模。 */
     public static final int MAX_DELETE_BATCH_SIZE = 100;
+
+    /** 单次角色修改上限；一次请求只扫描两轮 Token，避免旧实现按用户重复扫描 Redis。 */
+    public static final int MAX_ROLE_BATCH_SIZE = 5000;
 
     /** TCDS 当前仅提供单用户查询，批量同步限制规模并以最多四路并发调用。 */
     public static final int MAX_TCDS_SYNC_BATCH_SIZE = 20;
@@ -169,38 +176,84 @@ public class UserManagementApplicationService {
     public UserResponse updateUserRole(UpdateUserRoleCommand command) {
         User user = userRepository.findByUserId(new UserId(command.userId()))
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "用户不存在"));
-        String roleCode = command.role();
-        if (roleCode == null || roleCode.isBlank()) {
-            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "角色不能为空");
-        }
-        Dictionary roleDictionary = dictionaryRepository
-                .findByDictKeyAndValue(Dictionary.DICT_KEY_ROLE, roleCode)
-                .orElseThrow(() -> new PlatformException(ErrorCode.VALIDATION_ERROR, "角色无效"));
+        Dictionary roleDictionary = requireRoleDictionary(command.role());
+        replaceUserRoles(Map.of(user.userId(), roleDictionary));
+        return userResponse(user);
+    }
 
-        ConversationContextUserMutation mutation = conversationContextStore == null
-                ? null
-                : conversationContextStore.beginUserMutation(user.userId());
-        List<UserId> affectedUsers = List.of(user.userId());
-        boolean transactionCompletionRegistered = registerRoleChangeCompletion(mutation, affectedUsers);
+    /**
+     * 原子批量替换用户角色；支持显式的不同角色项，也支持按筛选快照选择全部匹配用户。
+     *
+     * <p>批量只在操作前后各扫描一次 Token，避免旧前端逐用户请求时重复执行全量 Redis SCAN。
+     * 当前登录的超级管理员不会被“全部检索结果”选中，显式提交自身则整批拒绝。
+     */
+    @Transactional
+    public UpdateUserRolesResponse updateUserRoles(UpdateUserRolesCommand command) {
+        Objects.requireNonNull(command, "command must not be null");
+        UserId operatorUserId = new UserId(command.operatorUserId());
+        LinkedHashMap<UserId, String> requestedRoles;
+        if (command.allMatching()) {
+            if (command.query() == null) {
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "全部检索结果筛选不能为空");
+            }
+            String roleCode = normalizeRoleCode(command.matchingRole());
+            List<UserId> matchedUserIds = userManagementQueryRepository.findUserIds(
+                    command.query(),
+                    operatorUserId,
+                    MAX_ROLE_BATCH_SIZE + 1);
+            if (matchedUserIds.size() > MAX_ROLE_BATCH_SIZE) {
+                throw new PlatformException(
+                        ErrorCode.VALIDATION_ERROR,
+                        "角色修改单次最多处理 %d 个用户，请增加筛选条件后重试".formatted(MAX_ROLE_BATCH_SIZE));
+            }
+            requestedRoles = new LinkedHashMap<>();
+            matchedUserIds.forEach(userId -> requestedRoles.put(userId, roleCode));
+        } else {
+            requestedRoles = normalizeRoleAssignments(command.assignments());
+            if (requestedRoles.containsKey(operatorUserId)) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "不能批量修改当前登录用户的角色");
+            }
+        }
+        if (requestedRoles.isEmpty()) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "没有符合条件的可修改用户");
+        }
+
+        Map<String, Dictionary> dictionariesByRole = new LinkedHashMap<>();
+        LinkedHashMap<UserId, Dictionary> assignments = new LinkedHashMap<>();
+        requestedRoles.forEach((userId, roleCode) -> assignments.put(
+                userId,
+                dictionariesByRole.computeIfAbsent(roleCode, this::requireRoleDictionary)));
+        if (!command.allMatching()) {
+            // 显式 ID 不可信，逐项确认存在；筛选模式的 ID 刚由权威查询返回，无需重复读取完整用户。
+            loadExistingUsers(List.copyOf(requestedRoles.keySet()), "角色修改");
+        }
+        replaceUserRoles(assignments);
+        return new UpdateUserRolesResponse(assignments.size());
+    }
+
+    /** 在当前事务内替换全部角色，并把登录 Token 和会话上下文失效合并为一批操作。 */
+    private void replaceUserRoles(Map<UserId, Dictionary> assignments) {
+        List<UserId> affectedUsers = List.copyOf(assignments.keySet());
+        List<ConversationContextUserMutation> mutations = beginUserMutations(affectedUsers);
+        boolean transactionCompletionRegistered = registerRoleChangeCompletion(mutations, affectedUsers);
         try {
             // 权限边界变化前先撤销平台Token，使Python直连认证和已有模型grant立即失效。
             tokenStore.deleteByUserIds(affectedUsers);
-            List<UserRole> existingRoles = userRoleRepository.findByUserId(user.userId());
-            existingRoles.forEach(userRoleRepository::delete);
-            userRoleRepository.save(UserRole.create(user.userId(), roleDictionary.dictId()));
+            assignments.forEach((userId, roleDictionary) -> {
+                List<UserRole> existingRoles = userRoleRepository.findByUserId(userId);
+                existingRoles.forEach(userRoleRepository::delete);
+                userRoleRepository.save(UserRole.create(userId, roleDictionary.dictId()));
+            });
         } catch (RuntimeException exception) {
-            if (mutation != null && !transactionCompletionRegistered) {
-                abortUserMutation(mutation, exception);
+            if (!transactionCompletionRegistered) {
+                abortUserMutations(mutations, exception);
             }
             throw exception;
         }
         if (!transactionCompletionRegistered) {
-            if (mutation != null) {
-                conversationContextStore.completeUserMutation(mutation);
-            }
+            completeUserMutations(mutations);
             tokenStore.deleteByUserIds(affectedUsers);
         }
-        return userResponse(user);
     }
 
     /**
@@ -268,7 +321,7 @@ public class UserManagementApplicationService {
     public SyncUsersFromTcdsResponse syncUsersFromTcds(SyncUsersFromTcdsCommand command) {
         Objects.requireNonNull(command, "command must not be null");
         List<UserId> userIds = normalizeUserIds(command.userIds(), MAX_TCDS_SYNC_BATCH_SIZE, "TCDS 同步");
-        List<User> users = loadExistingUsers(userIds);
+        List<User> users = loadExistingUsers(userIds, "TCDS 同步");
         List<TcdsUserProfile> profiles = fetchTcdsProfiles(users);
 
         Runnable saveAction = () -> saveTcdsProfiles(profiles);
@@ -286,7 +339,7 @@ public class UserManagementApplicationService {
      * 生产事务在真正 commit 后才原子完成 Redis gate；回滚时仅释放当前 gate。
      */
     private boolean registerRoleChangeCompletion(
-            ConversationContextUserMutation mutation,
+            List<ConversationContextUserMutation> mutations,
             List<UserId> userIds) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             return false;
@@ -294,9 +347,7 @@ public class UserManagementApplicationService {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                if (mutation != null) {
-                    conversationContextStore.completeUserMutation(mutation);
-                }
+                completeUserMutations(mutations);
                 try {
                     // 再次撤销以收敛角色事务期间极小的并发登录窗口。
                     tokenStore.deleteByUserIds(userIds);
@@ -310,12 +361,49 @@ public class UserManagementApplicationService {
                 if (status == TransactionSynchronization.STATUS_COMMITTED) {
                     return;
                 }
-                if (mutation != null) {
-                    conversationContextStore.abortUserMutation(mutation);
-                }
+                abortUserMutations(mutations, null);
             }
         });
         return true;
+    }
+
+    /** 规范化显式角色项，拒绝空值、重复用户和超过批量上限的请求。 */
+    private LinkedHashMap<UserId, String> normalizeRoleAssignments(List<UserRoleAssignment> rawAssignments) {
+        if (rawAssignments == null || rawAssignments.isEmpty()) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "角色修改列表不能为空");
+        }
+        if (rawAssignments.size() > MAX_ROLE_BATCH_SIZE) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "角色修改单次最多处理 %d 个用户".formatted(MAX_ROLE_BATCH_SIZE));
+        }
+        LinkedHashMap<UserId, String> normalized = new LinkedHashMap<>();
+        for (UserRoleAssignment assignment : rawAssignments) {
+            if (assignment == null || assignment.userId() == null || assignment.userId().isBlank()) {
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "用户 ID 不能为空");
+            }
+            UserId userId = new UserId(assignment.userId().trim());
+            if (normalized.putIfAbsent(userId, normalizeRoleCode(assignment.role())) != null) {
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "角色修改列表包含重复用户");
+            }
+        }
+        return normalized;
+    }
+
+    /** 规范化并校验角色 code。 */
+    private String normalizeRoleCode(String roleCode) {
+        if (roleCode == null || roleCode.isBlank()) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "角色不能为空");
+        }
+        return roleCode.trim();
+    }
+
+    /** 从 ROLE 字典读取目标角色，不接受查询约定值或未知 code。 */
+    private Dictionary requireRoleDictionary(String roleCode) {
+        String normalizedRole = normalizeRoleCode(roleCode);
+        return dictionaryRepository
+                .findByDictKeyAndValue(Dictionary.DICT_KEY_ROLE, normalizedRole)
+                .orElseThrow(() -> new PlatformException(ErrorCode.VALIDATION_ERROR, "角色无效"));
     }
 
     /**
@@ -348,14 +436,6 @@ public class UserManagementApplicationService {
             }
         });
         return true;
-    }
-
-    private void abortUserMutation(ConversationContextUserMutation mutation, RuntimeException original) {
-        try {
-            conversationContextStore.abortUserMutation(mutation);
-        } catch (RuntimeException abortFailure) {
-            original.addSuppressed(abortFailure);
-        }
     }
 
     private List<UserId> normalizeUserIds(List<String> rawUserIds, int maxSize, String operationName) {
@@ -420,7 +500,7 @@ public class UserManagementApplicationService {
         }
     }
 
-    private List<User> loadExistingUsers(List<UserId> userIds) {
+    private List<User> loadExistingUsers(List<UserId> userIds, String operationName) {
         List<User> users = new ArrayList<>();
         List<String> missingUserIds = new ArrayList<>();
         for (UserId userId : userIds) {
@@ -431,7 +511,7 @@ public class UserManagementApplicationService {
         if (!missingUserIds.isEmpty()) {
             throw new PlatformException(
                     ErrorCode.NOT_FOUND,
-                    "部分用户不存在，未执行 TCDS 同步",
+                    "部分用户不存在，未执行%s".formatted(operationName),
                     Map.of("userIds", missingUserIds));
         }
         return List.copyOf(users);

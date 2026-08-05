@@ -169,6 +169,8 @@ import type {
   DeleteUsersResult,
   SyncUsersFromTcdsResult,
   UpdateUserRolePayload,
+  UpdateUserRolesPayload,
+  UpdateUserRolesResult,
   UserIdsPayload,
   UserManagementQuery,
   UpdateRepositoryPayload,
@@ -2272,6 +2274,12 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     /** 调整指定用户的全局角色（仅 SUPER_ADMIN）。 */
     updateUserRole: (userId: string, payload: UpdateUserRolePayload) =>
       request<UserManagementUser>(`${systemManagementBase}/users/${encodeURIComponent(userId)}/roles`, {
+        method: "PUT",
+        body: JSON.stringify(payload)
+      }),
+    /** 一次提交显式角色项，或按筛选快照更新全部匹配用户（仅 SUPER_ADMIN）。 */
+    updateUserRoles: (payload: UpdateUserRolesPayload) =>
+      request<UpdateUserRolesResult>(`${systemManagementBase}/users/batch-roles`, {
         method: "PUT",
         body: JSON.stringify(payload)
       }),

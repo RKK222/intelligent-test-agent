@@ -5707,3 +5707,39 @@
 - 企业实际部署尚未执行；用户确认的已部署提交只作为包基线证据，现场仍必须读取 PostgreSQL 与 XXL MySQL
   两套完整 `flyway_schema_history`。PostgreSQL 未知 checksum/失败/更高版本，或 XXL MySQL 不是 V1-V8
   全成功且 V9 缺失时必须停止，禁止 `repair`、`outOfOrder` 或手工修改历史表。
+
+## 2026-08-05 - 优化批量角色保存并支持全选检索结果
+
+### Why
+
+- 用户反馈企业部署后的用户管理页保存角色非常慢，且表头复选框只能选择当前页，无法一次处理全部筛选用户。
+- 排查确认旧页面对每名改权用户顺序调用一次单人接口；单人服务又在事务前后分别执行按用户 Token 撤销，
+  `RedisTokenStore` 每次都扫描全部 Token。N 名用户因此产生 N 个 HTTP 请求和约 `2N` 次 Redis Token 扫描。
+
+### What
+
+- 新增 `PUT /api/internal/platform/system-management/users/batch-roles`，支持显式携带多名用户的不同目标角色，
+  或按关键字、角色、组织、研发部门、部门筛选快照由服务端解析全部匹配用户；单次上限 5000。
+- 批量角色关系在一个事务内全有或全无地替换，当前操作者取认证主体：按筛选全选时在 MyBatis SQL 中排除，
+  显式包含当前账号时整批拒绝。user mutation gate 仍逐用户保留，Token 撤销改为事务前后各整批一次。
+- 用户管理页保留表头当前页选择，新增“选择全部检索结果”；角色保存统一调用一次批量接口。全部结果模式只影响
+  角色修改，批量删除和 TCDS 同步仍只处理当前页勾选行。当前登录账号的角色下拉被禁用。
+- 同步 API、安全、模块图以及 backend/frontend 各模块 README/PACKAGE；只新增 MyBatis XML 查询，未改表结构、
+  Flyway、事件、generated SDK、OpenCode 源码或 `.env*`。
+
+### How
+
+- 后端应用服务最新 18 项、Controller 10 项、MyBatis 查询 3 项通过，覆盖一次整批 Token 撤销、筛选全选、
+  当前操作者排除、5000 上限和 SQL limit；前端用户管理与 backend-api 106 项通过，三个相关包 typecheck 通过。
+- JDK 25 下后端 21 模块 `mvn clean package -DskipTests`、前端 production build、`verify-ai-docs.sh` 和
+  `git diff --check` 通过。
+- 默认 `.env.test` 重启先被既有 Workflow 开发密钥缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 拦截；未修改环境文件，
+  改用脚本正式支持的 `--without-workflow` 重启 backend、manager、frontend。health/readiness 为 `UP`、前端
+  3000 返回 200、CORS 正常，新批量路径已注册，manager WebSocket 已连接并恢复 `HEALTHY`。
+
+### Result
+
+- 页面保存 N 名用户时从 N 个 HTTP 请求降为 1 个，Redis Token 全量扫描从约 `2N` 次降为 2 次；没有虚构
+  现场耗时数据，实际时延仍取决于企业 Redis、数据库和目标用户数量。
+- 超管现在可按权限、组织和部门筛选后选择全部检索结果并手工赋权；目标用户旧 Token 立即失效，需要重新登录。
+  本地 Workflow 未纳入本次运行验证，企业部署需同时更新后端与前端，无数据库迁移。

@@ -7,6 +7,7 @@ import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.user.UserManagementQuery;
 import com.enterprise.testagent.domain.user.UserManagementQueryRepository;
 import com.enterprise.testagent.domain.user.UserStatus;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import org.springframework.stereotype.Repository;
@@ -41,6 +42,7 @@ public class MyBatisUserManagementQueryRepository implements UserManagementQuery
                 organizationPattern,
                 rdDepartmentPattern,
                 departmentPattern,
+                null,
                 pageRequest.size(),
                 pageRequest.offset());
         long total = mapper.countUsers(
@@ -49,12 +51,37 @@ public class MyBatisUserManagementQueryRepository implements UserManagementQuery
                 query.unassignedRoleOnly(),
                 organizationPattern,
                 rdDepartmentPattern,
-                departmentPattern);
+                departmentPattern,
+                null);
         return new PageResponse<>(
                 rows.stream().map(this::toUser).toList(),
                 pageRequest.page(),
                 pageRequest.size(),
                 total);
+    }
+
+    @Override
+    public List<UserId> findUserIds(
+            UserManagementQuery query,
+            UserId excludedUserId,
+            int limit) {
+        Objects.requireNonNull(query, "query must not be null");
+        Objects.requireNonNull(excludedUserId, "excludedUserId must not be null");
+        if (limit < 1) {
+            throw new IllegalArgumentException("limit must be greater than or equal to 1");
+        }
+        return mapper.findUserIds(
+                        searchPattern(query.keyword()),
+                        query.assignedRoleCode(),
+                        query.unassignedRoleOnly(),
+                        searchPattern(query.organization()),
+                        searchPattern(query.rdDepartment()),
+                        searchPattern(query.department()),
+                        excludedUserId.value(),
+                        limit)
+                .stream()
+                .map(UserId::new)
+                .toList();
     }
 
     /** 把只读查询行恢复为完整用户领域对象。 */

@@ -19,7 +19,7 @@
 - `mybatis.InternalModelProviderMapper` / `mybatis/InternalModelProviderMapper.xml`：内部模型供应商、可复用 Token 定义、Provider 关联和一次联表运行快照的全部关系型 SQL。
 - `mybatis.MyBatisInternalModelProviderRepository` / `mybatis.MyBatisInternalModelTokenRepository`：内部模型供应商与 Token 定义领域端口的生产 Bean；普通返回模型不包含 Token 明文。
 - `mybatis.UserDeletionMapper` / `mybatis/UserDeletionMapper.xml` / `mybatis.MyBatisUserDeletionRepository`：用户安全删除领域端口的生产实现，锁定目标用户、识别会话/工作区/进程/调度等受保护引用，并按外键顺序清理可随账号删除的附属表。
-- `mybatis.UserManagementQueryMapper` / `mybatis/UserManagementQueryMapper.xml` / `mybatis.MyBatisUserManagementQueryRepository`：用户管理组合分页查询端口的生产实现，按关键字、有效角色/未分配角色、组织和部门筛选，不扩展存量 JDBC SQL。
+- `mybatis.UserManagementQueryMapper` / `mybatis/UserManagementQueryMapper.xml` / `mybatis.MyBatisUserManagementQueryRepository`：用户管理组合分页查询及“全部检索结果”有界 ID 解析端口的生产实现，按关键字、有效角色/未分配角色、组织和部门筛选，并可排除当前操作者；不扩展存量 JDBC SQL。
 - `mybatis.RunMapper` / `mybatis/RunMapper.xml`：Run MyBatis SQL，包含保存、读取、最近非终态 Run 查询、只选择 `LEGACY_FULL` 的 stale active 查询和 `status` 条件更新。
 - `mybatis.MyBatisRunRepository`：Run 领域端口的生产 Bean，通过 `saveIfStatus` 原子条件写入避免终态竞态覆盖。
 - `mybatis.RunEventMapper` / `mybatis/RunEventMapper.xml`：RunEvent append-only MyBatis SQL，写入结构化 scope 列和可空 raw event id，并支持按 `root_session_id` 读取历史状态事件。

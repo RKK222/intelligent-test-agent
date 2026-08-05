@@ -505,6 +505,36 @@ describe("backend-api", () => {
     );
   });
 
+  it("updates explicit or filtered users through one batch role request", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: { updatedCount: 2 }
+      }), { status: 200 })
+    );
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+    const payload = {
+      assignments: [
+        { userId: "usr_a", role: "USER" },
+        { userId: "usr_b", role: "APP_ADMIN" }
+      ]
+    };
+
+    await expect(client.updateUserRoles(payload)).resolves.toEqual({ updatedCount: 2 });
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/system-management/users/batch-roles",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify(payload)
+      })
+    );
+  });
+
   it("lists managed users with role and organization filters", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
       new Response(JSON.stringify({

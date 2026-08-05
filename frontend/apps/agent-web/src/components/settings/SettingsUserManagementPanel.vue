@@ -7,6 +7,7 @@ import type {
   CurrentUser,
   IdentityStatus,
   RoleOption,
+  UserManagementFilter,
   UserManagementUser
 } from "@test-agent/shared-types";
 
@@ -34,6 +35,9 @@ const rdDepartmentFilter = ref("");
 const departmentFilter = ref("");
 const roleDrafts = ref<Record<string, string>>({});
 const batchRole = ref("");
+const loadedFilter = ref<UserManagementFilter>({});
+const allMatchingSelection = ref<{ filter: UserManagementFilter; estimatedCount: number } | null>(null);
+const allMatchingRoleDraft = ref<{ filter: UserManagementFilter; role: string; estimatedCount: number } | null>(null);
 const savingRoles = ref(false);
 const selectedUsers = ref<UserManagementUser[]>([]);
 const deleting = ref(false);
@@ -135,23 +139,25 @@ async function run(action: () => Promise<void>) {
 
 async function loadUsers() {
   await run(async () => {
-    const result = await api.listUsers({
+    const filter: UserManagementFilter = {
       keyword: keyword.value.trim() || undefined,
       role: roleFilter.value || undefined,
       organization: organizationFilter.value.trim() || undefined,
       rdDepartment: rdDepartmentFilter.value.trim() || undefined,
-      department: departmentFilter.value.trim() || undefined,
+      department: departmentFilter.value.trim() || undefined
+    };
+    const result = await api.listUsers({
+      ...filter,
       page: page.value,
       size: size.value
     });
     users.value = result.items;
     total.value = result.total;
-    const nextDrafts: Record<string, string> = {};
-    for (const user of result.items) {
-      nextDrafts[user.userId] = user.roles?.[0] ?? "";
-    }
-    roleDrafts.value = nextDrafts;
+    loadedFilter.value = filter;
+    resetVisibleRoleDrafts();
     selectedUsers.value = [];
+    allMatchingSelection.value = null;
+    allMatchingRoleDraft.value = null;
   });
 }
 
@@ -224,6 +230,15 @@ function currentRole(row: UserManagementUser) {
   return row.roles?.[0] ?? "";
 }
 
+// 用服务端返回的当前页角色重置草稿，取消“全部检索结果”时不需要重新发请求。
+function resetVisibleRoleDrafts() {
+  const nextDrafts: Record<string, string> = {};
+  for (const user of users.value) {
+    nextDrafts[user.userId] = currentRole(user);
+  }
+  roleDrafts.value = nextDrafts;
+}
+
 const changedRoleRows = computed(() =>
   users.value.filter((row) => {
     const role = roleDrafts.value[row.userId];
@@ -232,27 +247,40 @@ const changedRoleRows = computed(() =>
 );
 
 const changedRoleCount = computed(() => changedRoleRows.value.length);
+const roleSaveCount = computed(() => allMatchingRoleDraft.value?.estimatedCount ?? changedRoleCount.value);
 
 async function saveRoleChanges() {
+  const allMatchingDraft = allMatchingRoleDraft.value;
   const changes = changedRoleRows.value.map((row) => ({
     userId: row.userId,
-    username: row.username,
     role: roleDrafts.value[row.userId]
   }));
-  if (changes.length === 0) {
+  if (!allMatchingDraft && changes.length === 0) {
     return;
   }
-  savingRoles.value = true;
-  errorMessage.value = "";
   try {
-    // 后端目前是单用户角色更新接口，这里按用户逐条提交，避免新增批量契约。
-    for (const change of changes) {
-      await api.updateUserRole(change.userId, { role: change.role });
+    if (allMatchingDraft) {
+      await ElMessageBox.confirm(
+        `当前检索结果共 ${allMatchingDraft.estimatedCount} 条。确认把除当前登录账号外的全部用户设置为所选角色吗？成功后目标用户需要重新登录。`,
+        "保存全部检索结果的角色",
+        { type: "warning", confirmButtonText: "确认保存", cancelButtonText: "取消" }
+      );
     }
-    ElMessage.success(`已保存 ${changes.length} 个用户角色`);
+    savingRoles.value = true;
+    errorMessage.value = "";
+    const result = allMatchingDraft
+      ? await api.updateUserRoles({
+          allMatching: true,
+          role: allMatchingDraft.role,
+          filter: allMatchingDraft.filter
+        })
+      : await api.updateUserRoles({ assignments: changes });
+    ElMessage.success(`已保存 ${result.updatedCount} 个用户角色`);
     await loadUsers();
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "保存角色失败";
+    if (!isMessageBoxCancellation(error)) {
+      errorMessage.value = error instanceof Error ? error.message : "保存角色失败";
+    }
   } finally {
     savingRoles.value = false;
   }
@@ -266,9 +294,46 @@ function handleSelectionChange(selection: UserManagementUser[]) {
   selectedUsers.value = selection;
 }
 
-// 批量操作只修改当前页已选用户的草稿，仍由管理员显式保存后才改变服务端权限。
+/** 角色批量范围切换为服务端当前筛选结果；当前管理员由后端强制排除。 */
+function selectAllMatchingUsers() {
+  if (total.value === 0) {
+    return;
+  }
+  allMatchingSelection.value = {
+    filter: { ...loadedFilter.value },
+    estimatedCount: total.value
+  };
+  allMatchingRoleDraft.value = null;
+}
+
+/** 取消跨页选择并恢复当前页真实角色。 */
+function clearAllMatchingUsers() {
+  allMatchingSelection.value = null;
+  allMatchingRoleDraft.value = null;
+  resetVisibleRoleDrafts();
+}
+
+const roleSelectionCount = computed(() =>
+  allMatchingSelection.value?.estimatedCount ?? selectedUsers.value.length
+);
+
+// 批量操作只生成待保存草稿；真正提交统一走一次服务端批量接口。
 function applyRoleToSelectedUsers() {
-  if (!batchRole.value || selectedUsers.value.length === 0) {
+  if (!batchRole.value || roleSelectionCount.value === 0) {
+    return;
+  }
+  if (allMatchingSelection.value) {
+    allMatchingRoleDraft.value = {
+      filter: { ...allMatchingSelection.value.filter },
+      role: batchRole.value,
+      estimatedCount: allMatchingSelection.value.estimatedCount
+    };
+    const nextDrafts = { ...roleDrafts.value };
+    for (const user of users.value.filter(canSelectUser)) {
+      nextDrafts[user.userId] = batchRole.value;
+    }
+    roleDrafts.value = nextDrafts;
+    ElMessage.info(`已为全部检索结果设置待保存角色（共 ${allMatchingSelection.value.estimatedCount} 条，当前账号不处理）`);
     return;
   }
   const nextDrafts = { ...roleDrafts.value };
@@ -406,7 +471,7 @@ onMounted(() => {
           :closable="false"
           show-icon
           title="存量用户处理说明"
-          description="可筛选“未分配角色”并批量勾选当前页用户，先设置待保存角色再提交；保存后会撤销相关用户的旧 Token，用户需重新登录。"
+          description="可筛选“未分配角色”后选择当前页或全部检索结果；角色修改一次批量提交，保存后会撤销相关用户的旧 Token，用户需重新登录。"
         />
         <div class="ta-list-header">
           <h4 class="ta-section-title">用户列表</h4>
@@ -427,10 +492,12 @@ onMounted(() => {
             </el-button>
             <el-button
               type="primary"
-              :disabled="operationBusy || changedRoleCount === 0"
+              :disabled="operationBusy || roleSaveCount === 0"
               @click="saveRoleChanges"
             >
-              {{ changedRoleCount > 0 ? `保存角色修改（${changedRoleCount}）` : '保存角色修改' }}
+              {{ allMatchingRoleDraft
+                ? `保存全部检索结果的角色（${allMatchingRoleDraft.estimatedCount}）`
+                : (changedRoleCount > 0 ? `保存角色修改（${changedRoleCount}）` : '保存角色修改') }}
             </el-button>
           </div>
         </div>
@@ -465,6 +532,19 @@ onMounted(() => {
         </div>
         <div class="ta-batch-role-bar">
           <span class="ta-inline-note">表头复选框可选择当前页用户</span>
+          <el-button
+            v-if="!allMatchingSelection"
+            link
+            type="primary"
+            :disabled="operationBusy || total === 0"
+            @click="selectAllMatchingUsers"
+          >
+            选择全部检索结果（{{ total }}）
+          </el-button>
+          <template v-else>
+            <span class="ta-inline-note">已选择全部检索结果（共 {{ allMatchingSelection.estimatedCount }} 条，当前账号不处理）</span>
+            <el-button link :disabled="operationBusy" @click="clearAllMatchingUsers">取消全选</el-button>
+          </template>
           <el-select
             v-model="batchRole"
             aria-label="批量目标角色"
@@ -480,10 +560,12 @@ onMounted(() => {
             />
           </el-select>
           <el-button
-            :disabled="operationBusy || selectedUsers.length === 0 || !batchRole"
+            :disabled="operationBusy || roleSelectionCount === 0 || !batchRole"
             @click="applyRoleToSelectedUsers"
           >
-            {{ selectedUsers.length > 0 ? `批量设置待保存角色（${selectedUsers.length}）` : '批量设置待保存角色' }}
+            {{ allMatchingSelection
+              ? `设置全部检索结果的待保存角色（${allMatchingSelection.estimatedCount}）`
+              : (selectedUsers.length > 0 ? `批量设置待保存角色（${selectedUsers.length}）` : '批量设置待保存角色') }}
           </el-button>
         </div>
         <el-table
@@ -509,7 +591,7 @@ onMounted(() => {
                   :aria-label="`调整 ${row.username} 的角色`"
                   size="small"
                   style="width: 160px"
-                  :disabled="operationBusy"
+                  :disabled="operationBusy || allMatchingRoleDraft !== null || !canSelectUser(row)"
                 >
                   <el-option
                     v-for="role in roles"

@@ -34,10 +34,13 @@ import com.enterprise.testagent.system.management.user.UserManagementResponses.D
 import com.enterprise.testagent.system.management.user.UserManagementResponses.RoleOption;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.SyncUsersFromTcdsCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRoleCommand;
+import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRolesCommand;
+import com.enterprise.testagent.system.management.user.UserManagementResponses.UserRoleAssignment;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UserResponse;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.annotation.Transactional;
@@ -217,6 +220,162 @@ class UserManagementApplicationServiceTest {
         assertThatThrownBy(() -> service.updateUserRole(new UpdateUserRoleCommand("usr_missing", "USER")))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.NOT_FOUND));
+    }
+
+    @Test
+    void batchRoleUpdateUsesOneTokenRevocationBatchForDifferentTargetRoles() {
+        UserRepository userRepository = mock(UserRepository.class);
+        User alice = User.createNew(
+                "usr_alice", "AUTH_A", "alice", "hash", "企业", "研发部", "测试部");
+        User bob = User.createNew(
+                "usr_bob", "AUTH_B", "bob", "hash", "企业", "研发部", "测试部");
+        when(userRepository.findByUserId(alice.userId())).thenReturn(Optional.of(alice));
+        when(userRepository.findByUserId(bob.userId())).thenReturn(Optional.of(bob));
+
+        UserRoleRepository userRoleRepository = mock(UserRoleRepository.class);
+        when(userRoleRepository.findByUserId(alice.userId()))
+                .thenReturn(List.of(UserRole.create(alice.userId(), APP_ADMIN_DICT_ID)));
+        when(userRoleRepository.findByUserId(bob.userId()))
+                .thenReturn(List.of(UserRole.create(bob.userId(), USER_DICT_ID)));
+        DictionaryRepository dictionaryRepository = mock(DictionaryRepository.class);
+        when(dictionaryRepository.findByDictKeyAndValue(Dictionary.DICT_KEY_ROLE, "USER"))
+                .thenReturn(Optional.of(roleDictionary(USER_DICT_ID, "USER", "普通用户", 4)));
+        when(dictionaryRepository.findByDictKeyAndValue(Dictionary.DICT_KEY_ROLE, "APP_ADMIN"))
+                .thenReturn(Optional.of(roleDictionary(APP_ADMIN_DICT_ID, "APP_ADMIN", "应用管理员", 3)));
+        TokenStore tokenStore = mock(TokenStore.class);
+        ConversationContextStore contextStore = mock(ConversationContextStore.class);
+        when(contextStore.beginUserMutation(any(UserId.class))).thenAnswer(invocation -> {
+            UserId userId = invocation.getArgument(0);
+            return new ConversationContextUserMutation(userId, "role-" + userId.value());
+        });
+        UserManagementApplicationService service = service(
+                userDomainService(userRepository),
+                userRepository,
+                mock(UserManagementQueryRepository.class),
+                mock(UserDeletionRepository.class),
+                userRoleRepository,
+                dictionaryRepository,
+                tokenStore,
+                mock(ThirdPartyUserApiClient.class));
+        service.setConversationContextStore(contextStore);
+
+        var response = service.updateUserRoles(new UpdateUserRolesCommand(
+                "usr_admin",
+                List.of(
+                        new UserRoleAssignment(alice.userId().value(), "USER"),
+                        new UserRoleAssignment(bob.userId().value(), "APP_ADMIN")),
+                false,
+                null,
+                null));
+
+        List<UserId> targets = List.of(alice.userId(), bob.userId());
+        assertThat(response.updatedCount()).isEqualTo(2);
+        verify(tokenStore, times(2)).deleteByUserIds(targets);
+        verify(contextStore).completeUserMutation(
+                new ConversationContextUserMutation(alice.userId(), "role-usr_alice"));
+        verify(contextStore).completeUserMutation(
+                new ConversationContextUserMutation(bob.userId(), "role-usr_bob"));
+        verify(userRoleRepository).save(argThat(role ->
+                role.userId().equals(alice.userId()) && role.dictId().equals(USER_DICT_ID)));
+        verify(userRoleRepository).save(argThat(role ->
+                role.userId().equals(bob.userId()) && role.dictId().equals(APP_ADMIN_DICT_ID)));
+    }
+
+    @Test
+    void batchRoleUpdateResolvesAllFilteredUsersAndExcludesOperator() {
+        UserRepository userRepository = mock(UserRepository.class);
+        User target = User.createNew(
+                "usr_target", "AUTH_T", "target", "hash", "企业", "研发部", "测试部");
+        when(userRepository.findByUserId(target.userId())).thenReturn(Optional.of(target));
+        UserManagementQuery query = new UserManagementQuery(
+                null, UserManagementQuery.ROLE_UNASSIGNED, "企业", null, null);
+        UserManagementQueryRepository queryRepository = mock(UserManagementQueryRepository.class);
+        UserId operator = new UserId("usr_admin");
+        when(queryRepository.findUserIds(
+                query,
+                operator,
+                UserManagementApplicationService.MAX_ROLE_BATCH_SIZE + 1))
+                .thenReturn(List.of(target.userId()));
+        DictionaryRepository dictionaryRepository = mock(DictionaryRepository.class);
+        when(dictionaryRepository.findByDictKeyAndValue(Dictionary.DICT_KEY_ROLE, "USER"))
+                .thenReturn(Optional.of(roleDictionary(USER_DICT_ID, "USER", "普通用户", 4)));
+        UserRoleRepository userRoleRepository = mock(UserRoleRepository.class);
+        UserManagementApplicationService service = service(
+                userDomainService(userRepository),
+                userRepository,
+                queryRepository,
+                mock(UserDeletionRepository.class),
+                userRoleRepository,
+                dictionaryRepository,
+                mock(TokenStore.class),
+                mock(ThirdPartyUserApiClient.class));
+
+        var response = service.updateUserRoles(new UpdateUserRolesCommand(
+                operator.value(), List.of(), true, "USER", query));
+
+        assertThat(response.updatedCount()).isEqualTo(1);
+        verify(queryRepository).findUserIds(
+                query,
+                operator,
+                UserManagementApplicationService.MAX_ROLE_BATCH_SIZE + 1);
+        verify(userRoleRepository).save(argThat(role -> role.userId().equals(target.userId())));
+    }
+
+    @Test
+    void batchRoleUpdateRejectsExplicitOperatorTarget() {
+        TokenStore tokenStore = mock(TokenStore.class);
+        UserRepository userRepository = mock(UserRepository.class);
+        UserManagementApplicationService service = service(
+                userDomainService(userRepository),
+                userRepository,
+                mock(UserManagementQueryRepository.class),
+                mock(UserDeletionRepository.class),
+                mock(UserRoleRepository.class),
+                mock(DictionaryRepository.class),
+                tokenStore,
+                mock(ThirdPartyUserApiClient.class));
+
+        assertThatThrownBy(() -> service.updateUserRoles(new UpdateUserRolesCommand(
+                "usr_admin",
+                List.of(new UserRoleAssignment("usr_admin", "USER")),
+                false,
+                null,
+                null)))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        verify(tokenStore, never()).deleteByUserIds(any());
+    }
+
+    @Test
+    void batchRoleUpdateRejectsMoreThanMaximumFilteredUsers() {
+        UserManagementQuery query = new UserManagementQuery(null, null, null, null, null);
+        UserManagementQueryRepository queryRepository = mock(UserManagementQueryRepository.class);
+        List<UserId> tooManyUserIds = IntStream
+                .rangeClosed(1, UserManagementApplicationService.MAX_ROLE_BATCH_SIZE + 1)
+                .mapToObj(index -> new UserId("usr_" + index))
+                .toList();
+        when(queryRepository.findUserIds(
+                query,
+                new UserId("usr_admin"),
+                UserManagementApplicationService.MAX_ROLE_BATCH_SIZE + 1))
+                .thenReturn(tooManyUserIds);
+        TokenStore tokenStore = mock(TokenStore.class);
+        UserRepository userRepository = mock(UserRepository.class);
+        UserManagementApplicationService service = service(
+                userDomainService(userRepository),
+                userRepository,
+                queryRepository,
+                mock(UserDeletionRepository.class),
+                mock(UserRoleRepository.class),
+                mock(DictionaryRepository.class),
+                tokenStore,
+                mock(ThirdPartyUserApiClient.class));
+
+        assertThatThrownBy(() -> service.updateUserRoles(new UpdateUserRolesCommand(
+                "usr_admin", List.of(), true, "USER", query)))
+                .isInstanceOfSatisfying(PlatformException.class,
+                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+        verify(tokenStore, never()).deleteByUserIds(any());
     }
 
     @Test

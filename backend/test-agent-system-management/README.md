@@ -10,7 +10,7 @@
 
 已完成用户认证相关的基础能力：
 
-- **用户管理**：用户注册、组合查询、密码校验（BCrypt）；统一认证首次登录创建用户时在同一短事务内授予 `USER` 普通用户角色，TCDS 外部查询不占用数据库事务。
+- **用户管理**：用户注册、组合查询、密码校验（BCrypt）；统一认证首次登录创建用户时在同一短事务内授予 `USER` 普通用户角色，TCDS 外部查询不占用数据库事务；角色管理支持显式多用户和按筛选快照全选的一次性事务更新。
 - **认证服务**：用户登录（用户名+密码验证 -> 加载全局角色 -> Token 生成）、登出、Token 校验和刷新。
 - **领域模型**：`User`、`UserLoginLog`、`Dictionary`、`UserRole`、`AuthPrincipal`、`TokenStore`。
 - **测试造号与角色调整**：创建测试用户时使用事务同时写入用户和角色，调整角色时在同一事务内替换用户全局角色；当前测试管理入口由超级管理员直接操作，不包含普通用户审批通知流。
@@ -36,7 +36,7 @@
 ## 主要接口
 
 - `UserDomainService`：用户注册、密码校验，以及统一认证首次建号与普通用户角色的原子写入。
-- `UserManagementApplicationService`：超级管理员测试用户组合查询、创建、单角色调整、安全删除和 TCDS 存量信息同步；外部查询完成后才开启短事务写入，删除通过领域端口清理账号附属数据并保护业务资产。
+- `UserManagementApplicationService`：超级管理员测试用户组合查询、创建、单个/批量单角色调整、安全删除和 TCDS 存量信息同步；批量角色调整单次最多 5000 人，排除当前操作者并把关系型修改放在一个事务内，Token 在事务前后各按整批撤销一次，避免旧页面按用户重复扫描 Redis；外部查询完成后才开启短事务写入，删除通过领域端口清理账号附属数据并保护业务资产。
 - `AuthApplicationService`：登录/登出/Token 刷新，调用 `UserRepository`、`TokenStore`、`UserLoginLogRepository`、`UserRoleRepository`、`DictionaryRepository`；登录时把 `ROLE` 字典值加载为 `AuthPrincipal.roles`。
 
 ## API 入口

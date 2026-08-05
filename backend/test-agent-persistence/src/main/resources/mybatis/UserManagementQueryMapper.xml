@@ -49,6 +49,9 @@
             <if test="departmentPattern != null">
                 and lower(coalesce(u.department, '')) like #{departmentPattern}
             </if>
+            <if test="excludedUserId != null">
+                and u.user_id &lt;&gt; #{excludedUserId}
+            </if>
             <if test="roleCode != null">
                 and exists (
                     select 1
@@ -84,5 +87,13 @@
         select count(*)
         from users u
         <include refid="UserManagementWhere"/>
+    </select>
+
+    <select id="findUserIds" resultType="string">
+        select u.user_id
+        from users u
+        <include refid="UserManagementWhere"/>
+        order by u.username, u.user_id
+        limit #{limit}
     </select>
 </mapper>

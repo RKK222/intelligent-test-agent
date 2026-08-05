@@ -2820,6 +2820,7 @@ Base URL：`/api/internal/platform/system-management`
 | `GET` | `/users` | 分页查询用户列表，可按关键字、角色、组织和部门组合筛选。 |
 | `POST` | `/users` | 创建测试用户，密码默认为 `123456`，并授予单个角色。 |
 | `PUT` | `/users/{userId}/roles` | 替换指定用户的全局角色，当前测试入口只保留单个角色。 |
+| `PUT` | `/users/batch-roles` | 一次替换多个显式用户的角色，或按筛选快照替换全部匹配用户的角色。 |
 | `DELETE` | `/users/{userId}` | 删除单个未承载业务资产的用户，禁止删除当前登录用户。 |
 | `POST` | `/users/batch-delete` | 批量删除未承载业务资产的用户，整批全有或全无。 |
 | `POST` | `/users/{userId}/tcds-sync` | 从 TCDS 原位补全单个存量用户的姓名和部门。 |
@@ -2838,7 +2839,7 @@ Base URL：`/api/internal/platform/system-management`
 | `page` | 页码，默认 `1`。 |
 | `size` | 分页大小，默认 `50`，上限 `200`。 |
 
-上述筛选条件按 AND 组合，全部为空时保持原有全量分页语义。`UNASSIGNED` 仅为查询约定值，不是角色字典项。管理页批量勾选仅作用于当前页：先把同一目标角色写入前端待保存草稿，管理员确认后逐个调用现有 `PUT /users/{userId}/roles`，不新增批量改权接口。
+上述筛选条件按 AND 组合，全部为空时保持原有全量分页语义。`UNASSIGNED` 仅为查询约定值，不是角色字典项。表头复选框选择当前页；“选择全部检索结果”会把本次已加载的筛选快照交给服务端解析，不要求浏览器逐页拉取用户，也不把分页参数纳入批量范围。
 
 用户响应字段（不含密码）：
 
@@ -2888,6 +2889,39 @@ Base URL：`/api/internal/platform/system-management`
 - 用户不存在时返回 `NOT_FOUND`；角色无效时返回 `VALIDATION_ERROR`。
 - 更新成功后返回更新后的用户响应字段，`roles` / `roleLabels` 反映最新角色。
 - 角色保存会撤销目标用户现有平台 Token；用户下一次请求需要重新登录，新 Token 才会携带更新后的角色。该动作由现有角色更新服务执行，不依赖额外一次性任务或定时任务。
+
+`PUT /users/batch-roles` 支持两种互斥请求。显式选择模式允许每个用户设置不同角色：
+
+```json
+{
+  "assignments": [
+    { "userId": "usr_a", "role": "USER" },
+    { "userId": "usr_b", "role": "APP_ADMIN" }
+  ]
+}
+```
+
+全部检索结果模式由服务端按筛选快照重新解析目标，并为所有目标设置同一角色：
+
+```json
+{
+  "allMatching": true,
+  "role": "USER",
+  "filter": {
+    "keyword": null,
+    "role": "UNASSIGNED",
+    "organization": "企业",
+    "rdDepartment": null,
+    "department": "测试部"
+  }
+}
+```
+
+- 两种模式必须且只能提交一种，单次最多处理 5000 个用户；超过上限时整批拒绝，管理员应增加筛选条件后重试。
+- 当前操作者始终取后端认证主体。全部检索结果模式在 SQL 中排除当前登录账号；显式模式包含当前账号时整批返回 `FORBIDDEN`，避免超管误撤销自身权限。
+- 角色、用户和批量边界全部校验通过后，角色关系在一个数据库事务内全有或全无地替换。成功响应为 `{ "updatedCount": 2 }`，不返回大规模用户 ID。
+- 整批操作仍为每个目标建立 user mutation gate，但平台 Token 只在事务前、提交后各按整批撤销一次。相较旧页面逐用户调用单人接口，N 个用户的 HTTP 请求由 N 次降为 1 次，Redis Token 全量扫描由约 `2N` 次降为 2 次。
+- 原 `PUT /users/{userId}/roles` 保留兼容；管理页保存一个或多个角色草稿统一使用批量接口。
 
 用户删除与存量信息补全：
 

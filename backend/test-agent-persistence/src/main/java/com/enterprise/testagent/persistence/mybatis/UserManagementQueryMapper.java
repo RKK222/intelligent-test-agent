@@ -17,8 +17,19 @@ public interface UserManagementQueryMapper {
             @Param("organizationPattern") String organizationPattern,
             @Param("rdDepartmentPattern") String rdDepartmentPattern,
             @Param("departmentPattern") String departmentPattern,
+            @Param("excludedUserId") String excludedUserId,
             @Param("limit") int limit,
             @Param("offset") long offset);
+
+    List<String> findUserIds(
+            @Param("keywordPattern") String keywordPattern,
+            @Param("roleCode") String roleCode,
+            @Param("unassignedRoleOnly") boolean unassignedRoleOnly,
+            @Param("organizationPattern") String organizationPattern,
+            @Param("rdDepartmentPattern") String rdDepartmentPattern,
+            @Param("departmentPattern") String departmentPattern,
+            @Param("excludedUserId") String excludedUserId,
+            @Param("limit") int limit);
 
     long countUsers(
             @Param("keywordPattern") String keywordPattern,
@@ -26,5 +37,6 @@ public interface UserManagementQueryMapper {
             @Param("unassignedRoleOnly") boolean unassignedRoleOnly,
             @Param("organizationPattern") String organizationPattern,
             @Param("rdDepartmentPattern") String rdDepartmentPattern,
-            @Param("departmentPattern") String departmentPattern);
+            @Param("departmentPattern") String departmentPattern,
+            @Param("excludedUserId") String excludedUserId);
 }

@@ -21,6 +21,8 @@ import com.enterprise.testagent.system.management.user.UserManagementResponses.R
 import com.enterprise.testagent.system.management.user.UserManagementResponses.SyncUsersFromTcdsCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.SyncUsersFromTcdsResponse;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRoleCommand;
+import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRolesCommand;
+import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRolesResponse;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UserResponse;
 import java.time.Instant;
 import java.util.List;
@@ -135,6 +137,40 @@ class UserManagementControllerTest {
 
         verify(service).updateUserRole(org.mockito.ArgumentMatchers.argThat((UpdateUserRoleCommand command) ->
                 "usr_target".equals(command.userId()) && "USER".equals(command.role())));
+    }
+
+    @Test
+    void superAdminCanUpdateAllUsersMatchingFilterInOneRequest() {
+        UserManagementApplicationService service = org.mockito.Mockito.mock(UserManagementApplicationService.class);
+        when(service.updateUserRoles(any(UpdateUserRolesCommand.class)))
+                .thenReturn(new UpdateUserRolesResponse(12));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.put()
+                .uri("/api/internal/platform/system-management/users/batch-roles")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {
+                          "allMatching": true,
+                          "role": "USER",
+                          "filter": {
+                            "role": "UNASSIGNED",
+                            "organization": "企业"
+                          }
+                        }
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.updatedCount").isEqualTo(12);
+
+        verify(service).updateUserRoles(org.mockito.ArgumentMatchers.argThat((UpdateUserRolesCommand command) ->
+                USER_ID.value().equals(command.operatorUserId())
+                        && command.allMatching()
+                        && "USER".equals(command.matchingRole())
+                        && UserManagementQuery.ROLE_UNASSIGNED.equals(command.query().role())
+                        && "企业".equals(command.query().organization())));
     }
 
     @Test

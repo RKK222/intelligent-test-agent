@@ -2350,6 +2350,30 @@ export type UserManagementQuery = {
   size?: number;
 };
 
+/** 用户管理“全部检索结果”选择使用的筛选快照，不包含分页字段。 */
+export type UserManagementFilter = Omit<UserManagementQuery, "page" | "size">;
+
+export type UserRoleAssignmentPayload = {
+  userId: string;
+  role: string;
+};
+
+/** 批量角色修改支持显式角色项，或由服务端按筛选快照选择全部匹配用户。 */
+export type UpdateUserRolesPayload =
+  | {
+      assignments: UserRoleAssignmentPayload[];
+      allMatching?: false;
+    }
+  | {
+      allMatching: true;
+      role: string;
+      filter: UserManagementFilter;
+    };
+
+export type UpdateUserRolesResult = {
+  updatedCount: number;
+};
+
 export type CreateUserPayload = {
   unifiedAuthId: string;
   username: string;

@@ -52,6 +52,60 @@ public final class UserManagementDtos {
         }
     }
 
+    /** 单个显式选中用户的目标角色。 */
+    public record UserRoleAssignmentRequest(String userId, String role) {
+
+        /** 拒绝不完整角色项，具体用户和角色合法性由应用服务统一校验。 */
+        public UserRoleAssignmentRequest {
+            if (userId == null || userId.isBlank()) {
+                throw new IllegalArgumentException("用户 ID 不能为空");
+            }
+            if (role == null || role.isBlank()) {
+                throw new IllegalArgumentException("角色不能为空");
+            }
+        }
+    }
+
+    /** “选择全部检索结果”使用的稳定筛选快照，不包含分页字段。 */
+    public record UserManagementFilterRequest(
+            String keyword,
+            String role,
+            String organization,
+            String rdDepartment,
+            String department) {
+    }
+
+    /**
+     * 批量角色修改请求。
+     *
+     * <p>显式选择时提交 assignments；选择全部检索结果时提交 allMatching=true、统一 role 和 filter。
+     * 两种模式互斥，避免服务端误解批量作用范围。
+     */
+    public record UpdateUserRolesRequest(
+            List<UserRoleAssignmentRequest> assignments,
+            boolean allMatching,
+            String role,
+            UserManagementFilterRequest filter) {
+
+        /** 校验两种选择模式互斥，并复制显式角色项避免请求反序列化后的外部修改。 */
+        public UpdateUserRolesRequest {
+            boolean hasAssignments = assignments != null && !assignments.isEmpty();
+            if (allMatching == hasAssignments) {
+                throw new IllegalArgumentException("显式用户与全部检索结果必须且只能选择一种");
+            }
+            if (allMatching) {
+                if (role == null || role.isBlank()) {
+                    throw new IllegalArgumentException("角色不能为空");
+                }
+                if (filter == null) {
+                    throw new IllegalArgumentException("全部检索结果筛选不能为空");
+                }
+            } else {
+                assignments = List.copyOf(assignments);
+            }
+        }
+    }
+
     /**
      * 批量用户操作请求。具体数量上限由业务服务按删除或 TCDS 同步场景分别校验。
      */

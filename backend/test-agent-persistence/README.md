@@ -1,6 +1,6 @@
 # test-agent-persistence
 
-- 用户管理组合分页查询由 `UserManagementQueryMapper.xml` / `MyBatisUserManagementQueryRepository` 实现，支持用户关键字、角色（含未分配角色）、组织、研发部门和部门筛选；未修改 users/user_roles 表结构，也没有新增 Flyway migration。
+- 用户管理组合分页查询和“全部检索结果”有界 ID 解析由 `UserManagementQueryMapper.xml` / `MyBatisUserManagementQueryRepository` 实现，支持用户关键字、角色（含未分配角色）、组织、研发部门和部门筛选，并可在 SQL 中排除当前操作者；未修改 users/user_roles 表结构，也没有新增 Flyway migration。
 
 - `V20260723145200__add_application_workspace_enabled.sql` 为应用工作空间配置增加默认启用的 `enabled` 字段；配置管理 MyBatis XML 负责该字段的查询、新增和更新，未新增 JDBC SQL。
 - `V20260728160800__create_toolbox_click_tracking.sql` 新增工具盒子永久点击明细、工具累计和用户/工具 30 秒窗口状态三张表；主文件恢复并锁定企业已执行的 `-1966404877` 原始 checksum。旧 `V20260727203500` 原文保存在 `db/migration-compat/toolbox`，曾误发的当前版本 `-74327385` 幂等原文保存在 `db/migration-compat/toolbox-current-idempotent`，由 app 按已应用 version/checksum 隔离选择；删除用户时明细匿名化、窗口状态级联删除，累计保留，不写生产演示数据。
@@ -156,7 +156,7 @@
 - `MyBatisPersonalWorkspaceRelocationPostgresqlIntegrationTest` 在 PostgreSQL 16 上执行完整 Flyway 链，验证错配扫描、ACTIVE Run 阻断、租约状态、目标三表原子切换，以及 `CLEANUP_PENDING` 在连续换服时不被下一段搬迁覆盖；`MyBatisPersonalWorkspaceRelocationRepositoryTest` 固化 MyBatis XML 条件和目标更新顺序。
 - `JdbcRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖 Workspace（含 `linux_server_id`、历史脏 `updated_at < created_at` 归一化）、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision 的保存和读取。
 - `MyBatisCommonParameterRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖通用参数 MyBatis XML 查询、列表、按 ID 查询和仅更新 value。
-- `MyBatisUserDeletionRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式加载真实 MyBatis XML，覆盖无业务用户的角色、登录日志、应用成员清理和受保护业务引用阻断；`RedisTokenStoreTest` 覆盖增量扫描只删除目标用户 Token。
+- `MyBatisUserManagementQueryRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式加载真实 MyBatis XML，覆盖组合分页、未分配角色及按筛选返回有界 ID 并排除操作者；`MyBatisUserDeletionRepositoryIntegrationTest` 覆盖无业务用户的角色、登录日志、应用成员清理和受保护业务引用阻断；`RedisTokenStoreTest` 覆盖增量扫描只删除目标用户 Token。
 - `JdbcRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖 Workspace（含 `linux_server_id`）、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision 的保存和读取。
 - `MyBatisCommonParameterRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖通用参数 MyBatis XML 查询、列表、按 ID 查询、`SYS_DATA_ROOT_DIR` 三平台种子和仅更新 value。
 - `MyBatisRunSessionScopeRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖 Run session scope 表、MyBatis XML upsert/query、按 root session 查询和 root/child session 映射；`PersistenceSqlConventionTest` 固化 Run session scope mapper 在 PostgreSQL `MERGE` 中必须显式 cast 时间参数。
