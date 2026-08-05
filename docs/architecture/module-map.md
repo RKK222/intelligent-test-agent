@@ -55,7 +55,7 @@ Browser
 - `test-agent-workspace-management` 通过 `UserWorkspaceQueryService` 返回目标用户个人工作区及其会话引用工作区的逻辑身份；`test-agent-opencode-runtime` 使用 `BackendJavaRouteResolver` 按权威 Workspace 服务器选择目标 Java，不使用 actor affinity、本机降级或 Java→Java 文件代理。
 - `test-agent-persistence` 以 MyBatis XML/Flyway 保存授权与一年期审计，以 Redis Lua 保存当前登录会话的短期令牌摘要；数据库、Redis、日志均不保存明文 grant token、平台 Token、消息正文或文件正文。
 - `test-agent-api` 暴露独立 `/system-management/support-access/**` HTTP 与文件 route/ticket/RPC，普通 Session/Workspace/文件入口仍按 actor 自身所有权校验。排查文件 RPC 只允许目录、搜索和预览读取，并过滤 `.opencode`。
-- `packages/shared-types` 定义 grant/target/audit DTO，`packages/backend-api` 管理独立 `X-Support-Access-Grant` 内存令牌和 support socket，`packages/file-explorer` 用 `canWrite/canAttach/canDownload` 分离能力，`apps/agent-web` 仅在隐藏快捷键后显示受控入口。该链路不新增 RunEvent/SSE。
+- `packages/shared-types` 定义 grant/target/audit DTO，`packages/backend-api` 管理独立 `X-Support-Access-Grant` 内存令牌和 support socket，`packages/file-explorer` 用 `canWrite/canAttach/canDownload` 分离能力，`apps/agent-web` 仅为实时 `SUPER_ADMIN` 在工作台全局三击 Shift 后显示受控入口。该链路不新增 RunEvent/SSE。
 
 ## 后端模块职责
 

@@ -174,10 +174,15 @@ function api(overrides: Partial<BackendApiClient> = {}) {
   } as Partial<BackendApiClient> as BackendApiClient;
 }
 
-function renderWithApi(component: Component, backendApi: BackendApiClient, user: CurrentUser = currentUser) {
+function renderWithApi(
+  component: Component,
+  backendApi: BackendApiClient,
+  user: CurrentUser = currentUser,
+  props: Record<string, unknown> = {}
+) {
   const client = queryClient();
   const view = render(component, {
-    props: { currentUser: user },
+    props: { currentUser: user, ...props },
     global: {
       plugins: [[VueQueryPlugin, { queryClient: client }]],
       stubs: {
@@ -222,15 +227,16 @@ describe("scheduler management panel", () => {
     view.queryClient.clear();
   });
 
-  it("reveals the support panel only through the super-admin shortcut without changing identity", async () => {
+  it("reveals the support panel only after the global super-admin gesture requests it without changing identity", async () => {
     const backendApi = api();
     const view = renderWithApi(SystemManagementPanel, backendApi);
 
     expect(view.queryByText("问题排查只读访问", { selector: ".ta-system-menu-text" })).toBeNull();
-    await fireEvent.keyDown(window, { code: "KeyD", key: "d", ctrlKey: true, altKey: true, shiftKey: true });
+    await view.rerender({ currentUser, supportAccessRequested: true });
 
     expect(await view.findByText("问题排查只读访问", { selector: ".ta-system-menu-text" })).toBeTruthy();
     expect(view.getByTestId("support-access-panel")).toBeTruthy();
+    expect(view.emitted().supportAccessOpened).toHaveLength(1);
     expect(currentUser.userId).toBe("usr_admin");
     expect(currentUser.roles).toEqual(["SUPER_ADMIN"]);
     view.queryClient.clear();

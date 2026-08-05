@@ -5859,3 +5859,38 @@
   清理了占用 8080 的原工作区旧后端，最终监听进程的 JAR 路径明确属于新 worktree。
 - 本地 Workflow 未纳入运行验证，原因是现有测试数据库角色权限不足；这不影响本次排查入口三服务验证。manager
   对历史 4104 端口仍会记录 `PROCESS_NOT_MANAGED`，属于本机旧进程绑定状态，不是本次排查授权链路错误。
+
+## 2026-08-05 - 改为工作台三击 Shift 并恢复本地 OpenCode
+
+### Why
+
+- 用户本地验证时发现原组合键只有进入系统管理组件后才生效，活动栏入口距离当前操作区较远；同时用户绑定的
+  4104 端口在服务重启后未被 manager 接管，平台返回 `TestAgent 进程不可用，请先初始化`。
+- 新 worktree 默认把 `TESTAGENT` 指向自身目录，而本地数据库的 macOS `SYS_DATA_ROOT_DIR` 通过
+  `$TESTAGENT/.testagent` 展开，导致公共 Agent 配置源解析到空的新 worktree 目录，正式初始化失败。
+
+### What
+
+- 将排查入口手势改为工作台任意位置 1 秒内连续按 3 次 Shift；只对当前 `SUPER_ADMIN` 计数，长按 repeat 不计，
+  其它按键或超时重置。触发后直接切到系统管理的问题排查页，但仍需工单、原因、时长和只读确认才能签发授权。
+- 手势检测沉淀为轻量前端工具，`AgentWorkbench` 负责全局监听和页面切换，系统管理包装层以一次性请求传递并在
+  消费后清零；原组件级 Ctrl/Cmd+Alt+Shift+D 监听移除。
+- 同步前端总览、agent-web README、模块图和安全规范；没有变更 HTTP API、事件、数据库、Flyway、后端、
+  generated SDK、OpenCode 源码或 `.env*`。
+
+### How
+
+- 新增快捷键超时、打断、repeat 和显式 reset 测试；与系统管理组件测试组合共 16 项通过，agent-web typecheck
+  和 `VITE_TEST_AGENT_API_BASE_URL=''` 的 Chromium 108 生产构建通过。
+- 使用未修改的主工作区 `.env.test`，按脚本 `--without-workflow` 重启 backend、manager、frontend；启动时显式
+  保留 worktree 代码根，同时让 `TESTAGENT`/`SYS_DATA_ROOT_DIR` 复用主工作区已有测试运行数据，再通过平台
+  `/processes/me/initialize` 正式初始化，不手工伪造进程或数据库状态。
+- 项目 Playwright 真实登录 `SUPER_ADMIN`：初始排查标题数量为 0，未点击系统管理直接三击 Shift 后标题可见，
+  页面无 JavaScript 异常；截图保存在临时目录，不纳入仓库。
+
+### Result
+
+- backend health/readiness 均为 `UP`，前端 3000 返回 200；OpenCode 1.18.4 在 4104 监听，原生 health 为
+  `healthy=true`，平台状态为 `READY/RUNNING`，manager 连续健康检查返回 `HEALTHY`。
+- 三击 Shift 已通过组件、构建和真实浏览器验证。Workflow/LobeHub 仍按此前本地三服务范围保持不启动；首次默认
+  Workflow 准备仍因测试数据库账号无 `CREATEROLE/ADMIN OPTION` 失败，未修改权限或环境文件绕过。

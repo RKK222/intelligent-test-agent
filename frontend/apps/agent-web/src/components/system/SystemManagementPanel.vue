@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch, type Component } from "vue";
+import { computed, ref, watch, type Component } from "vue";
 import { Activity, BarChart3, CalendarClock, KeyRound, Network, Settings2, SlidersHorizontal } from "lucide-vue-next";
 import type { CurrentUser } from "@test-agent/shared-types";
 import RuntimeManagementPanel from "../settings/RuntimeManagementPanel.vue";
@@ -12,6 +12,11 @@ import SupportAccessPanel from "./SupportAccessPanel.vue";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
+  supportAccessRequested?: boolean;
+}>();
+
+const emit = defineEmits<{
+  supportAccessOpened: [];
 }>();
 
 type SystemMenuKey = "scheduler" | "runtime" | "params" | "internalModels" | "config" | "analytics" | "support";
@@ -37,20 +42,17 @@ function selectMenu(key: SystemMenuKey) {
   activeKey.value = key;
 }
 
-/** 隐藏快捷键只展示入口，不参与授权或身份校验。 */
-function onSupportShortcut(event: KeyboardEvent) {
-  if (!hasSuperAdmin.value
-    || event.code !== "KeyD"
-    || !(event.ctrlKey || event.metaKey)
-    || !event.altKey
-    || !event.shiftKey) return;
-  event.preventDefault();
+/** 全局手势只请求展示入口；组件仍按实时角色收口，不参与身份切换。 */
+function revealSupportAccess() {
+  if (!hasSuperAdmin.value) return;
   supportRevealed.value = true;
   activeKey.value = "support";
+  emit("supportAccessOpened");
 }
 
-onMounted(() => window.addEventListener("keydown", onSupportShortcut));
-onBeforeUnmount(() => window.removeEventListener("keydown", onSupportShortcut));
+watch(() => props.supportAccessRequested, (requested) => {
+  if (requested) revealSupportAccess();
+}, { immediate: true });
 watch(hasSuperAdmin, (allowed) => {
   if (!allowed) {
     supportRevealed.value = false;

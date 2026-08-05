@@ -182,6 +182,7 @@ import SettingsDialog from "./settings/SettingsDialog.vue";
 import ServerWorkspacePickerDialog from "./ServerWorkspacePickerDialog.vue";
 import { readServerWorkspacePickerTabState } from "./server-workspace-picker-tab";
 import SystemManagementWrapper from "./SystemManagementWrapper.vue";
+import { createSupportAccessShortcut } from "./support-access-shortcut";
 import AgentSkillHub from "./AgentSkillHub.vue";
 import ToolboxPanel from "./ToolboxPanel.vue";
 import {
@@ -513,6 +514,8 @@ const vcsDiffFiles = ref<RunDiffFile[]>([]);
 const diffSource = ref<"run" | "session" | "vcs" | "agent">("run");
 const diffViewMode = ref<"split" | "unified">("split");
 const centerMode = ref<WorkbenchCenterMode>("editor");
+const supportAccessRequested = ref(false);
+const supportAccessShortcut = createSupportAccessShortcut();
 const centerModeBeforeHub = ref<"editor" | "diff" | "system">("editor");
 const centerModeBeforeToolbox = ref<NonToolboxCenterMode>("editor");
 const hubUpdateCount = ref(0);
@@ -617,6 +620,12 @@ async function selectActivityCenterMode(mode: NonToolboxCenterMode) {
     await router.push({ name: "workbench" });
   }
   centerMode.value = mode;
+}
+
+/** SUPER_ADMIN 可在工作台任意位置三击 Shift，直接进入仍需二次授权的问题排查页。 */
+async function openSupportAccessFromShortcut() {
+  await selectActivityCenterMode("system");
+  supportAccessRequested.value = true;
 }
 
 async function toggleToolbox() {
@@ -844,6 +853,14 @@ function tryHandleSaveShortcut(event: KeyboardEvent) {
 }
 
 function onWindowKeydown(event: KeyboardEvent) {
+  if (!isSuperAdmin.value) {
+    supportAccessShortcut.reset();
+  } else if (supportAccessShortcut.handleKeydown(event)) {
+    event.preventDefault();
+    void openSupportAccessFromShortcut();
+    return;
+  }
+
   const target = event.target as HTMLElement | null;
   if (target) {
     // Monaco 编辑器自带 addCommand 注册了 Ctrl/Cmd+S 快捷键，
@@ -9534,7 +9551,11 @@ async function handleLogout() {
         </template>
         <template v-else-if="centerMode === 'system'">
           <div class="managed-runtime-container">
-            <SystemManagementWrapper :current-user="authStore.currentUser" />
+            <SystemManagementWrapper
+              :current-user="authStore.currentUser"
+              :support-access-requested="supportAccessRequested"
+              @support-access-opened="supportAccessRequested = false"
+            />
           </div>
           <WorkbenchFooter />
         </template>
