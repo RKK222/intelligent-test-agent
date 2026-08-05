@@ -11,5 +11,7 @@ public enum RunHistoryRecoverySource {
     /** OpenCode 不可用时，以 PostgreSQL 旧轮次摘要补齐 Redis 近期完整详情。 */
     REDIS_POSTGRESQL_SUMMARY,
     POSTGRESQL_SUMMARY,
+    /** OpenCode 与双摘要无可展示正文或离线路径跳过 OpenCode 时，从旧 session_messages 恢复用户/助手正文。 */
+    POSTGRESQL_LEGACY,
     NONE
 }

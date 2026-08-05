@@ -5961,3 +5961,42 @@
   保持为 `INC-LOCAL-PREFILL-20260805`，没有恢复旧授权、原因或确认状态。
 - 未修改 HTTP API、RunEvent、数据库/Flyway、鉴权、限流、generated SDK、OpenCode 源码或 `.env*`；
   iframe 内获得焦点时仍需先点击平台主页面，再触发全局手势。
+
+## 2026-08-05 - 补齐归档会话、旧正文恢复与只读用户视角
+
+### Why
+
+- 排查面板默认只查 `ACTIVE` 会话，用户删除或隐藏后的 `ARCHIVED` 会话无法按需查看；部分旧会话只有
+  `session_messages` 原文，Redis、摘要或 OpenCode 空快照会导致页面显示空助手消息。
+- 目标工作区绑定的 Java 后端可能已离线或 Redis 路由快照暂时不可用，旧实现仍尝试访问不可达 OpenCode，容易
+  等待超时；面板自己的逐条 JSON/文本渲染也与用户首页展示不同，难以复现用户实际看到的问题。
+
+### What
+
+- 会话查询默认继续只返回 `ACTIVE`；超级管理员显式勾选“包含已归档会话”后才合并 `ARCHIVED`，仍排除
+  `SIDE_QUESTION`。归档只表示从用户正常列表删除或隐藏，数据没有物理删除。
+- 历史恢复增加有界旧 `session_messages` 兜底并标记 `LEGACY`；Redis/OpenCode 空结果不再截断兜底。目标工作区
+  后端不是明确 `ONLINE` 时跳过 OpenCode，仅读取持久化历史，避免不可达服务器超时。
+- 排查会话复用首页的 Session-tree reducer 与 `OpencodeTimeline`，能按首页方式显示 message part、工具、Todo 和
+  子 Agent 投影；发送区保持禁用，不切换管理员身份。工作区列表展示在线/离线/未绑定/未知，非在线项禁止读取。
+- 同步 HTTP API、安全规范、后端 runtime/persistence/domain/API 与前端 agent-web/backend-api/shared-types 的
+  README/PACKAGE；没有新增事件类型、数据库结构或 Flyway migration，也没有修改 ticket/RPC 协议。
+
+### How
+
+- JDK 25 定向后端回归：`MyBatisSessionHistoryRepositoryIntegrationTest` 6 项、
+  `RunMessageRecoveryServiceTest` 20 项、`SupportAccessDtosTest` 1 项，合计 27 项通过。
+- 前端排查面板与 backend-api 定向回归 103 项通过；workspace typecheck 和 agent-web production build 通过，
+  构建仅保留既有大 chunk 提示。
+- 使用未修改的主工作区 `.env.test`，以 `--without-workflow` 重启 backend、opencode-manager、frontend；backend
+  readiness 为 `UP`、前端 3000 返回 200、manager 对本机 OpenCode 连续返回 `HEALTHY`。
+- Playwright 真实页面验证三击 Shift、已入库工单自动回填、目标用户切换、归档筛选和离线工作区禁用；打开绑定
+  `192.168.100.165` 离线后端的旧会话约 3.6 秒（含 CLI 启动开销），页面显示“历史原文（旧存储）”以及非空用户/
+  助手正文。
+
+### Result
+
+- 排查会话的正文展示与用户首页使用同一投影/时间线，空助手 envelope 不再作为正文渲染；离线目标可以直接查看
+  已持久化历史，不再为了不可达 OpenCode 长时间等待。
+- 这不是完整身份冒充或完整首页壳切换：管理员身份与所有写入口仍保持隔离，工作区文件仍使用排查面板的只读布局。
+  Workflow/LobeHub 继续按本次本地三服务范围保持不启动；未修改 `.env*`、OpenCode 源码或 generated SDK。

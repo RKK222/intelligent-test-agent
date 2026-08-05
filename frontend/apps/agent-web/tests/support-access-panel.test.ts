@@ -53,4 +53,194 @@ describe("support access panel incident prefill", () => {
 
     expect(input.value).toBe("INC-MANUAL");
   });
+
+  it("loads archived sessions only on demand and disables offline workspaces", async () => {
+    const listSupportAccessSessions = vi.fn().mockResolvedValue({
+      items: [], page: 1, size: 30, total: 0
+    });
+    const api = {
+      getRecentSupportAccessIncident: vi.fn().mockResolvedValue({ incidentId: "INC-1" }),
+      listUsers: vi.fn().mockResolvedValue({
+        items: [{
+          userId: "usr_target",
+          username: "target",
+          unifiedAuthId: "AUTH_TARGET",
+          status: "ACTIVE",
+          roles: [],
+          createdAt: "2026-08-05T00:00:00Z"
+        }],
+        page: 1,
+        size: 100,
+        total: 1
+      }),
+      issueSupportAccessGrant: vi.fn().mockResolvedValue({
+        grantId: "sag_1",
+        grantToken: "grant-token",
+        expiresAt: "2099-08-05T00:00:00Z"
+      }),
+      revokeSupportAccessGrant: vi.fn().mockResolvedValue(undefined),
+      closeSupportAccessConnections: vi.fn(),
+      selectSupportAccessTarget: vi.fn().mockResolvedValue({
+        userId: "usr_target",
+        username: "target",
+        unifiedAuthId: "AUTH_TARGET",
+        status: "ACTIVE"
+      }),
+      listSupportAccessSessions,
+      listSupportAccessWorkspaces: vi.fn().mockResolvedValue({
+        items: [{
+          workspaceId: "wrk_offline",
+          name: "离线工作区",
+          rootPath: "/tmp/offline",
+          status: "ACTIVE",
+          linuxServerId: "server-old",
+          backendAvailability: "OFFLINE",
+          createdAt: "2026-08-05T00:00:00Z",
+          updatedAt: "2026-08-05T00:00:00Z"
+        }],
+        page: 1,
+        size: 30,
+        total: 1
+      })
+    } as Partial<BackendApiClient> as BackendApiClient;
+    const view = renderPanel(api);
+
+    await fireEvent.update(view.getByLabelText("排查原因"), "排查历史缺失");
+    await fireEvent.click(view.getByLabelText(/我确认仅用于问题排查/));
+    await fireEvent.click(view.getByRole("button", { name: "开启限时只读访问" }));
+    await waitFor(() => expect(view.getByText("target")).toBeTruthy());
+    await fireEvent.click(view.getByText("target"));
+    await waitFor(() => expect(listSupportAccessSessions).toHaveBeenCalledWith(
+      "grant-token",
+      "usr_target",
+      expect.objectContaining({ includeArchived: false, page: 1 })
+    ));
+
+    await fireEvent.click(view.getByLabelText(/包含已归档会话/));
+    await waitFor(() => expect(listSupportAccessSessions).toHaveBeenLastCalledWith(
+      "grant-token",
+      "usr_target",
+      expect.objectContaining({ includeArchived: true, page: 1 })
+    ));
+    await fireEvent.click(view.getByRole("button", { name: /工作区（1）/ }));
+
+    const offlineWorkspace = view.getByRole("button", { name: /离线工作区/ });
+    expect(offlineWorkspace).toHaveProperty("disabled", true);
+    expect(view.getByText("离线")).toBeTruthy();
+  });
+
+  it("renders assistant parts through the same timeline used by the user homepage", async () => {
+    const api = {
+      getRecentSupportAccessIncident: vi.fn().mockResolvedValue({ incidentId: "INC-1" }),
+      listUsers: vi.fn().mockResolvedValue({
+        items: [{
+          userId: "usr_target",
+          username: "target",
+          unifiedAuthId: "AUTH_TARGET",
+          status: "ACTIVE",
+          roles: [],
+          createdAt: "2026-08-05T00:00:00Z"
+        }],
+        page: 1,
+        size: 100,
+        total: 1
+      }),
+      issueSupportAccessGrant: vi.fn().mockResolvedValue({
+        grantId: "sag_1",
+        grantToken: "grant-token",
+        expiresAt: "2099-08-05T00:00:00Z"
+      }),
+      revokeSupportAccessGrant: vi.fn().mockResolvedValue(undefined),
+      closeSupportAccessConnections: vi.fn(),
+      selectSupportAccessTarget: vi.fn().mockResolvedValue({
+        userId: "usr_target",
+        username: "target",
+        unifiedAuthId: "AUTH_TARGET",
+        status: "ACTIVE"
+      }),
+      listSupportAccessSessions: vi.fn().mockResolvedValue({
+        items: [{
+          sessionId: "ses_target",
+          workspaceId: "wrk_target",
+          title: "真实首页投影",
+          status: "ACTIVE",
+          createdAt: "2026-08-05T00:00:00Z",
+          updatedAt: "2026-08-05T00:01:00Z"
+        }],
+        page: 1,
+        size: 30,
+        total: 1
+      }),
+      listSupportAccessWorkspaces: vi.fn().mockResolvedValue({
+        items: [], page: 1, size: 30, total: 0
+      }),
+      getSupportAccessSessionTreeMessages: vi.fn().mockResolvedValue({
+        sessionId: "ses_target",
+        events: [
+          {
+            eventId: "evt_user",
+            runId: "run_1",
+            seq: 1,
+            type: "message.updated",
+            traceId: "trace_test",
+            occurredAt: "2026-08-05T00:00:00Z",
+            payload: {
+              sessionId: "ses_target",
+              rootSessionId: "ses_target",
+              message: { id: "msg_user", role: "user", text: "用户问题" }
+            }
+          },
+          {
+            eventId: "evt_assistant",
+            runId: "run_1",
+            seq: 2,
+            type: "message.updated",
+            traceId: "trace_test",
+            occurredAt: "2026-08-05T00:00:01Z",
+            payload: {
+              sessionId: "ses_target",
+              rootSessionId: "ses_target",
+              message: { id: "msg_assistant", role: "assistant" }
+            }
+          },
+          {
+            eventId: "evt_assistant_part",
+            runId: "run_1",
+            seq: 3,
+            type: "message.part.updated",
+            traceId: "trace_test",
+            occurredAt: "2026-08-05T00:00:02Z",
+            payload: {
+              sessionId: "ses_target",
+              rootSessionId: "ses_target",
+              messageId: "msg_assistant",
+              part: {
+                id: "part_assistant",
+                messageID: "msg_assistant",
+                type: "text",
+                text: "真实助手正文"
+              }
+            }
+          }
+        ],
+        messagesBySessionId: {},
+        historyRepresentation: "FULL",
+        replayAvailable: true,
+        detailsAvailableUntil: null
+      })
+    } as Partial<BackendApiClient> as BackendApiClient;
+    const view = renderPanel(api);
+
+    await fireEvent.update(view.getByLabelText("排查原因"), "验证首页只读投影");
+    await fireEvent.click(view.getByLabelText(/我确认仅用于问题排查/));
+    await fireEvent.click(view.getByRole("button", { name: "开启限时只读访问" }));
+    await waitFor(() => expect(view.getByText("target")).toBeTruthy());
+    await fireEvent.click(view.getByText("target"));
+    await waitFor(() => expect(view.getByText("真实首页投影")).toBeTruthy());
+    await fireEvent.click(view.getByText("真实首页投影"));
+
+    await waitFor(() => expect(view.getByText("真实助手正文")).toBeTruthy());
+    expect(view.getByText("用户首页视角（只读）")).toBeTruthy();
+    expect(view.getByLabelText("只读排查输入区")).toBeTruthy();
+  });
 });

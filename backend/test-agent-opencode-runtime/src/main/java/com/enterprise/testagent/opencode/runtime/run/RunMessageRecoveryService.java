@@ -5,6 +5,7 @@ import com.enterprise.testagent.agent.runtime.AgentRuntimeRegistry;
 import com.enterprise.testagent.agent.runtime.AgentSessionMessage;
 import com.enterprise.testagent.agent.runtime.AgentSessionMessagesCommand;
 import com.enterprise.testagent.agent.runtime.AgentSessionMessagesResult;
+import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.domain.agent.AgentSessionBinding;
 import com.enterprise.testagent.domain.agent.AgentSessionBindingRepository;
 import com.enterprise.testagent.domain.event.RunEventDraft;
@@ -26,6 +27,7 @@ import com.enterprise.testagent.domain.run.RunStorageMode;
 import com.enterprise.testagent.domain.run.RunSummaryPersistencePort;
 import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.session.SessionMessage;
 import com.enterprise.testagent.domain.session.SessionMessageRepository;
 import com.enterprise.testagent.domain.session.SessionMessageRole;
 import com.enterprise.testagent.domain.session.SessionRepository;
@@ -60,6 +62,8 @@ public class RunMessageRecoveryService {
     private static final int RECOVERY_MESSAGE_LIMIT = 100;
     private static final int RECOVERY_MAX_PAGES = 20;
     private static final int RECENT_RUN_LIMIT = 100;
+    private static final int LEGACY_MESSAGE_PAGE_SIZE = PageRequest.MAX_SIZE;
+    private static final int LEGACY_MESSAGE_MAX_PAGES = 20;
     private static final String RECOVERY_ORDER = "asc";
 
     private final RunRepository runRepository;
@@ -258,11 +262,29 @@ public class RunMessageRecoveryService {
         Objects.requireNonNull(sessionId, "sessionId must not be null");
         Objects.requireNonNull(traceId, "traceId must not be null");
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
-        return Mono.fromCallable(() -> recoverSessionTreeHistorySync(resolvedAgentId, sessionId, traceId))
+        return Mono.fromCallable(() -> recoverSessionTreeHistorySync(resolvedAgentId, sessionId, traceId, true))
                 .subscribeOn(Schedulers.boundedElastic())
                 .onErrorResume(error -> {
                     LOGGER.warn("Failed to recover session tree history, agentId={}, sessionId={}, traceId={}",
                             resolvedAgentId, sessionId.value(), traceId, error);
+                    return Mono.just(RunHistoryRecoveryResult.empty());
+                });
+    }
+
+    /**
+     * 目标服务器后端离线或状态未知时只读持久化来源，避免排查页面等待不可达 OpenCode 超时。
+     */
+    public Mono<RunHistoryRecoveryResult> recoverPersistedSessionTreeHistory(
+            SessionId sessionId,
+            String traceId) {
+        Objects.requireNonNull(sessionId, "sessionId must not be null");
+        Objects.requireNonNull(traceId, "traceId must not be null");
+        String agentId = agentRuntimeRegistry.defaultAgentId();
+        return Mono.fromCallable(() -> recoverSessionTreeHistorySync(agentId, sessionId, traceId, false))
+                .subscribeOn(Schedulers.boundedElastic())
+                .onErrorResume(error -> {
+                    LOGGER.warn("Failed to recover persisted session tree history, sessionId={}, traceId={}",
+                            sessionId.value(), traceId, error);
                     return Mono.just(RunHistoryRecoveryResult.empty());
                 });
     }
@@ -303,22 +325,31 @@ public class RunMessageRecoveryService {
     private RunHistoryRecoveryResult recoverSessionTreeHistorySync(
             String agentId,
             SessionId sessionId,
-            String traceId) {
+            String traceId,
+            boolean openCodeAvailable) {
         Optional<RedisSessionHistory> redis = recoverRedisSession(sessionId);
         if (redis.isPresent()) {
             RedisSessionHistory recent = redis.orElseThrow();
             // Session 级 Redis 索引受 24 小时 TTL 和 100 Run 上限约束，不能单独宣称覆盖全部历史。
-            Optional<List<RunEventSsePayload>> openCode = recoverOpenCodeSession(agentId, sessionId, traceId);
+            Optional<List<RunEventSsePayload>> openCode = openCodeAvailable
+                    ? recoverOpenCodeSession(agentId, sessionId, traceId)
+                    : Optional.empty();
             if (openCode.filter(events -> !events.isEmpty()).isPresent()) {
                 return RunHistoryRecoveryResult.full(
                         openCode.orElseThrow(),
                         recent.result().detailsAvailableUntil(),
                         RunHistoryRecoverySource.OPENCODE_REDIS_SUMMARY);
             }
-            return mergeRedisSessionWithSummaries(sessionId, traceId, recent);
+            RunHistoryRecoveryResult merged = mergeRedisSessionWithSummaries(sessionId, traceId, recent);
+            // 旧会话可能仅残留空 Redis 快照；不能用“完整历史”空结果截断关系库原文兜底。
+            return merged.events().isEmpty()
+                    ? recoverLegacySessionMessages(sessionId, traceId)
+                    : merged;
         }
-        Optional<List<RunEventSsePayload>> openCode = recoverOpenCodeSession(agentId, sessionId, traceId);
-        if (openCode.isPresent()) {
+        Optional<List<RunEventSsePayload>> openCode = openCodeAvailable
+                ? recoverOpenCodeSession(agentId, sessionId, traceId)
+                : Optional.empty();
+        if (openCode.filter(events -> !events.isEmpty()).isPresent()) {
             return RunHistoryRecoveryResult.full(
                     openCode.orElseThrow(),
                     null,
@@ -620,18 +651,145 @@ public class RunMessageRecoveryService {
 
     private RunHistoryRecoveryResult recoverSessionSummaries(SessionId sessionId, String traceId) {
         if (runSummaryPersistencePort == null) {
-            return RunHistoryRecoveryResult.empty();
+            return recoverLegacySessionMessages(sessionId, traceId);
         }
         try {
+            List<RunConversationSummary> summaries = runSummaryPersistencePort.findSummariesBySessionId(sessionId);
+            if (summaries == null || summaries.isEmpty()) {
+                return recoverLegacySessionMessages(sessionId, traceId);
+            }
             return RunHistoryRecoveryResult.summary(summaryEvents(
-                    runSummaryPersistencePort.findSummariesBySessionId(sessionId),
+                    summaries,
                     "session_snapshot:" + sessionId.value(),
                     sessionId.value(),
                     traceId));
         } catch (RuntimeException exception) {
             LOGGER.warn("PostgreSQL session summaries unavailable, sessionId={}", sessionId.value(), exception);
+            return recoverLegacySessionMessages(sessionId, traceId);
+        }
+    }
+
+    /**
+     * 有界读取旧 session_messages 正文作为最后兜底；它不包含完整工具事件，因此标记为 LEGACY 且不可回放。
+     */
+    private RunHistoryRecoveryResult recoverLegacySessionMessages(SessionId sessionId, String traceId) {
+        if (sessionMessageRepository == null) {
             return RunHistoryRecoveryResult.empty();
         }
+        try {
+            List<SessionMessage> messages = new ArrayList<>();
+            for (int page = 1; page <= LEGACY_MESSAGE_MAX_PAGES; page++) {
+                var result = sessionMessageRepository.findBySessionId(
+                        sessionId,
+                        new PageRequest(page, LEGACY_MESSAGE_PAGE_SIZE));
+                if (result == null) {
+                    break;
+                }
+                messages.addAll(result.items());
+                if (messages.size() >= result.total() || result.items().isEmpty()) {
+                    break;
+                }
+            }
+            List<RunEventSsePayload> events = legacyMessageEvents(sessionId, traceId, messages);
+            return events.isEmpty()
+                    ? RunHistoryRecoveryResult.empty()
+                    : RunHistoryRecoveryResult.legacy(events);
+        } catch (RuntimeException exception) {
+            LOGGER.warn("PostgreSQL legacy session messages unavailable, sessionId={}", sessionId.value(), exception);
+            return RunHistoryRecoveryResult.empty();
+        }
+    }
+
+    /** 将旧平台消息映射成现有 session-tree reducer 可直接消费的文本 message/part 事件。 */
+    private List<RunEventSsePayload> legacyMessageEvents(
+            SessionId sessionId,
+            String traceId,
+            List<SessionMessage> messages) {
+        String snapshotRunId = "session_snapshot:" + sessionId.value();
+        List<RunEventSsePayload> events = new ArrayList<>();
+        int index = 0;
+        for (SessionMessage item : messages == null ? List.<SessionMessage>of() : messages) {
+            if (item.role() != SessionMessageRole.USER && item.role() != SessionMessageRole.ASSISTANT) {
+                continue;
+            }
+            String messageId = item.messageId().value();
+            String role = item.role() == SessionMessageRole.USER ? "user" : "assistant";
+            LinkedHashMap<String, Object> message = new LinkedHashMap<>();
+            message.put("id", messageId);
+            message.put("messageID", messageId);
+            message.put("messageId", messageId);
+            message.put("role", role);
+            message.put("text", item.content());
+            message.put("contentKind", "RAW_LEGACY");
+            message.put("createdAt", item.createdAt().toString());
+            if (item.remoteMessageId() != null) {
+                message.put("remoteMessageId", item.remoteMessageId());
+            }
+            LinkedHashMap<String, Object> messagePayload = legacyPayloadBase(sessionId);
+            messagePayload.put("messageId", messageId);
+            messagePayload.put("role", role);
+            messagePayload.put("text", item.content());
+            messagePayload.put("message", Map.copyOf(message));
+            events.add(legacyPayload(
+                    snapshotRunId,
+                    sessionId,
+                    RunEventType.MESSAGE_UPDATED,
+                    traceId,
+                    item.createdAt(),
+                    index++,
+                    messagePayload));
+
+            String partId = "part_legacy_" + messageId;
+            LinkedHashMap<String, Object> part = new LinkedHashMap<>();
+            part.put("id", partId);
+            part.put("partID", partId);
+            part.put("partId", partId);
+            part.put("messageID", messageId);
+            part.put("messageId", messageId);
+            part.put("type", "text");
+            part.put("text", item.content());
+            part.put("contentKind", "RAW_LEGACY");
+            LinkedHashMap<String, Object> partPayload = legacyPayloadBase(sessionId);
+            partPayload.put("messageID", messageId);
+            partPayload.put("messageId", messageId);
+            partPayload.put("part", Map.copyOf(part));
+            events.add(legacyPayload(
+                    snapshotRunId,
+                    sessionId,
+                    RunEventType.MESSAGE_PART_UPDATED,
+                    traceId,
+                    item.createdAt(),
+                    index++,
+                    partPayload));
+        }
+        return List.copyOf(events);
+    }
+
+    private LinkedHashMap<String, Object> legacyPayloadBase(SessionId sessionId) {
+        LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+        payload.put("rootSessionId", sessionId.value());
+        payload.put("sessionId", sessionId.value());
+        payload.put("isChildSession", false);
+        payload.put("contentKind", "RAW_LEGACY");
+        return payload;
+    }
+
+    private RunEventSsePayload legacyPayload(
+            String snapshotRunId,
+            SessionId sessionId,
+            RunEventType type,
+            String traceId,
+            Instant occurredAt,
+            int index,
+            Map<String, Object> payload) {
+        return new RunEventSsePayload(
+                "evt_history_legacy_" + sessionId.value() + "_" + index,
+                snapshotRunId,
+                0L,
+                type.wireName(),
+                traceId,
+                occurredAt,
+                Map.copyOf(payload));
     }
 
     /** 将双摘要映射为前端既有 reducer 可直接消费的 message/part transient 事件。 */

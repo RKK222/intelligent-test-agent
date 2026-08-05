@@ -64,7 +64,15 @@
     </sql>
 
     <sql id="SessionHistoryWhere">
-        where s.status = 'ACTIVE'
+        where
+        <choose>
+          <when test="includeArchived">
+            s.status in ('ACTIVE', 'ARCHIVED')
+          </when>
+          <otherwise>
+            s.status = 'ACTIVE'
+          </otherwise>
+        </choose>
           and s.source_type != 'SIDE_QUESTION'
           and (
             s.created_by_user_id = #{userId}

@@ -121,6 +121,27 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
     }
 
     @Test
+    void supportHistoryIncludesArchivedOnlyWhenExplicitlyRequested() {
+        PageResponse<SessionHistoryItem> activeOnly = repository.findUserHistory(
+                CURRENT_USER, "", false, new PageRequest(1, 30));
+        PageResponse<SessionHistoryItem> withArchived = repository.findUserHistory(
+                CURRENT_USER, "", true, new PageRequest(1, 30));
+
+        assertThat(activeOnly.items())
+                .extracting(item -> item.session().sessionId().value())
+                .doesNotContain("ses_history_archived");
+        assertThat(withArchived.total()).isEqualTo(5);
+        assertThat(withArchived.items())
+                .extracting(item -> item.session().sessionId().value())
+                .contains("ses_history_archived")
+                .doesNotContain("ses_history_side_question", "ses_history_side_question_active");
+        assertThat(repository.findUserSession(
+                CURRENT_USER, new SessionId("ses_history_archived"), false)).isEmpty();
+        assertThat(repository.findUserSession(
+                CURRENT_USER, new SessionId("ses_history_archived"), true)).isPresent();
+    }
+
+    @Test
     void singleSessionAndWorkspacePageReuseTheSameUserAttributionRules() {
         assertThat(repository.findUserSession(CURRENT_USER, new SessionId("ses_history_run")))
                 .isPresent();

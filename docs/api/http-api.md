@@ -2956,9 +2956,9 @@ Base URL：`/api/internal/platform/system-management`
 | `GET` | `/grants/recent-incident` | 返回当前超级管理员最近一次已入库的工单号，供新授权表单自动回填；不恢复旧授权。 |
 | `DELETE` | `/grants/{grantId}` | 显式撤销当前授权。 |
 | `POST` | `/targets/{targetUserId}/selections` | 选择/切换目标用户并记录审计。 |
-| `GET` | `/targets/{targetUserId}/sessions?q=&page=&size=` | 按目标用户归因规则分页查询 ACTIVE 会话。 |
-| `GET` | `/targets/{targetUserId}/sessions/{sessionId}/session-tree/messages` | 读取既有保留链路可恢复的会话树消息。 |
-| `GET` | `/targets/{targetUserId}/workspaces?page=&size=` | 查询目标用户 ACTIVE 个人或会话归因工作区。 |
+| `GET` | `/targets/{targetUserId}/sessions?q=&includeArchived=&page=&size=` | 按目标用户归因规则分页查询会话；默认仅 ACTIVE，显式 `includeArchived=true` 时包含软删除的 ARCHIVED。 |
+| `GET` | `/targets/{targetUserId}/sessions/{sessionId}/session-tree/messages?includeArchived=` | 读取既有保留链路可恢复的会话树消息；读取 ARCHIVED 会话时必须显式传 `true`。 |
+| `GET` | `/targets/{targetUserId}/workspaces?page=&size=` | 查询目标用户 ACTIVE 个人或会话归因工作区，并返回目标 Java 路由状态。 |
 | `POST` | `/targets/{targetUserId}/workspaces/{workspaceId}/file-ws-route` | 按工作区权威服务器返回只读文件 WebSocket 目标。 |
 | `POST` | `/targets/{targetUserId}/workspaces/{workspaceId}/file-ws-tickets` | 在目标 Java 签发一次性只读文件 ticket。 |
 | `GET` | `/audit-events?actorUserId=&targetUserId=&incidentId=&outcome=&page=&size=` | 所有实时超级管理员查询一年期访问审计。 |
@@ -2994,7 +2994,9 @@ X-Support-Access-Grant: sat_...
 
 该头与当前 Bearer 登录会话、actor、实时角色和数据库授权记录共同校验；缺失、过期、已撤销、登出、停用、角色移除或登录会话不匹配统一失败关闭。排查授权失效产生的 `401` 只清理本页排查状态，不代表平台登录态必然失效。
 
-会话和工作区归因使用目标用户的 `sessions.created_by_user_id`、`runs.triggered_by_user_id`、`session_messages.sender_user_id` 以及 ACTIVE 个人工作区关系；只凭任意 ID 不能扩大范围。会话树响应沿用既有 `SessionTreeMessagesResponse`，包含 `historyRepresentation=FULL|SUMMARY`、`replayAvailable` 和 `detailsAvailableUntil`，不建立额外正文副本。
+会话和工作区归因使用目标用户的 `sessions.created_by_user_id`、`runs.triggered_by_user_id`、`session_messages.sender_user_id` 以及 ACTIVE 个人工作区关系；只凭任意 ID 不能扩大范围。`ARCHIVED` 表示用户软删除/隐藏，未物理删除消息或 Run；排查列表只有显式开启筛选时才返回，内部 `SIDE_QUESTION` 会话始终排除。会话树响应沿用既有 `SessionTreeMessagesResponse`，包含 `historyRepresentation=FULL|SUMMARY|LEGACY`、`replayAvailable` 和 `detailsAvailableUntil`：`LEGACY` 表示 Redis/OpenCode/双摘要没有可展示正文，或工作区权威 Java 后端离线、未知而跳过不可达 OpenCode 后，从既有 `session_messages` 有界恢复的旧正文，不保证工具/事件细节完整，因此 `replayAvailable=false`。空 Redis/OpenCode 快照不得以“完整历史”截断该兜底；该兜底复用原表，不建立额外正文副本。
+
+排查工作区项在普通 `Workspace` 字段外增加可选 `backendAvailability=ONLINE|OFFLINE|UNBOUND|UNKNOWN` 和 `backendLastHeartbeatAt`。状态来自公共 `BackendJavaRouteResolver` 在线快照；Redis 快照临时不可读时远端状态为 `UNKNOWN`。只有 `ONLINE` 可在页面打开文件树和尝试读取 OpenCode 完整历史；其他状态直接使用持久化历史来源，不改写 `linuxServerId`，也不会切换到当前或其它服务器。前端会话正文复用普通用户首页的 Session tree reducer 与 `OpencodeTimeline`，assistant envelope 没有 text 时仍从 text part 展示正文，工具、Todo 和子 Agent 投影口径与首页一致；输入区固定只读。
 
 排查文件 ticket 仅接受 `workspace.list/search/read/read.chunk/read.binary.chunk` RPC，并拒绝 `.opencode`。写入、上传、复制/移动、删除、重命名、Git、终端、Agent 配置、加入对话、下载和批量导出没有排查 API。普通 Session、Workspace 与文件入口继续按当前 actor 自身归属校验，`SUPER_ADMIN` 不旁路。
 

@@ -2438,19 +2438,27 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     listSupportAccessSessions: (
       grantToken: string,
       targetUserId: string,
-      params: { q?: string; page?: number; size?: number } = {}
+      params: { q?: string; includeArchived?: boolean; page?: number; size?: number } = {}
     ) => request<PageResponse<Session>>(
       `${systemManagementBase}/support-access/targets/${encodeURIComponent(targetUserId)}/sessions${query({
         q: params.q,
+        includeArchived: params.includeArchived || undefined,
         page: params.page ?? 1,
         size: params.size ?? 30
       })}`,
       { headers: supportHeaders(grantToken) }
     ),
-    getSupportAccessSessionTreeMessages: (grantToken: string, targetUserId: string, sessionId: string) =>
+    getSupportAccessSessionTreeMessages: (
+      grantToken: string,
+      targetUserId: string,
+      sessionId: string,
+      includeArchived = false
+    ) =>
       request<SessionTreeMessagesResponse>(
         `${systemManagementBase}/support-access/targets/${encodeURIComponent(targetUserId)}`
-          + `/sessions/${encodeURIComponent(sessionId)}/session-tree/messages`,
+          + `/sessions/${encodeURIComponent(sessionId)}/session-tree/messages${query({
+            includeArchived: includeArchived || undefined
+          })}`,
         { headers: supportHeaders(grantToken) }
       ),
     listSupportAccessWorkspaces: (

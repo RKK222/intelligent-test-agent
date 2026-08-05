@@ -78,6 +78,37 @@ describe("backend-api", () => {
     delete (window as unknown as Record<string, unknown>).__handleUnauthorized;
   });
 
+  it("passes the explicit archived-session scope to support history endpoints", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: { items: [], page: 1, size: 30, total: 0 }
+    }), { status: 200 }));
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "login-token",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await client.listSupportAccessSessions("support-token", "usr_target", {
+      includeArchived: true,
+      page: 2,
+      size: 30
+    });
+    await client.getSupportAccessSessionTreeMessages(
+      "support-token",
+      "usr_target",
+      "ses_archived",
+      true
+    );
+
+    expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
+      "http://api/api/internal/platform/system-management/support-access/targets/usr_target/sessions?includeArchived=true&page=2&size=30",
+      "http://api/api/internal/platform/system-management/support-access/targets/usr_target/sessions/ses_archived/session-tree/messages?includeArchived=true"
+    ]);
+  });
+
   it("reads the toolbox catalog and records an idempotent click event", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
       const isClick = String(input).endsWith("/toolbox/tools/omni-tools.text%2Fhash/clicks");

@@ -6,12 +6,15 @@ import com.enterprise.testagent.common.api.ApiResponse;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
+import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcess;
+import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.supportaccess.SupportAccessAuditQuery;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.event.RunEventSsePayload;
 import com.enterprise.testagent.event.RunEventSseStreamService;
+import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import com.enterprise.testagent.opencode.runtime.process.WorkspaceFileRouteResponse;
 import com.enterprise.testagent.opencode.runtime.process.WorkspaceFileRoutingService;
 import com.enterprise.testagent.opencode.runtime.run.RunHistoryRecoveryResult;
@@ -30,6 +33,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -50,6 +55,8 @@ import reactor.core.scheduler.Schedulers;
 @RequestMapping("/api/internal/platform/system-management/support-access")
 public class SupportAccessController {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(SupportAccessController.class);
+
     private final SupportAccessApplicationService supportAccessService;
     private final SessionApplicationService sessionService;
     private final RunMessageRecoveryService messageRecoveryService;
@@ -57,6 +64,7 @@ public class SupportAccessController {
     private final UserWorkspaceQueryService userWorkspaceQueryService;
     private final WorkspaceFileRoutingService fileRoutingService;
     private final WorkspaceFileSocketTicketService ticketService;
+    private final BackendJavaRouteResolver routeResolver;
 
     public SupportAccessController(
             SupportAccessApplicationService supportAccessService,
@@ -65,7 +73,8 @@ public class SupportAccessController {
             RunEventSseStreamService eventStreamService,
             UserWorkspaceQueryService userWorkspaceQueryService,
             WorkspaceFileRoutingService fileRoutingService,
-            WorkspaceFileSocketTicketService ticketService) {
+            WorkspaceFileSocketTicketService ticketService,
+            BackendJavaRouteResolver routeResolver) {
         this.supportAccessService = supportAccessService;
         this.sessionService = sessionService;
         this.messageRecoveryService = messageRecoveryService;
@@ -73,6 +82,7 @@ public class SupportAccessController {
         this.userWorkspaceQueryService = userWorkspaceQueryService;
         this.fileRoutingService = fileRoutingService;
         this.ticketService = ticketService;
+        this.routeResolver = routeResolver;
     }
 
     /** 签发绑定当前登录会话的限时只读授权；不接受共享激活暗号。 */
@@ -135,6 +145,7 @@ public class SupportAccessController {
     public ApiResponse<PageResponse<RuntimeDtos.SessionResponse>> listSessions(
             @PathVariable String targetUserId,
             @RequestParam(required = false, name = "q") String query,
+            @RequestParam(required = false, defaultValue = "false") boolean includeArchived,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
             @RequestHeader(name = SupportAccessApplicationService.HEADER_NAME, required = false) String grantToken,
@@ -152,15 +163,16 @@ public class SupportAccessController {
                 null,
                 context,
                 () -> RuntimeDtos.sessionHistoryPage(sessionService.listUserSessions(
-                        target, query, RuntimeApiSupport.pageRequest(page, size))));
+                        target, query, includeArchived, RuntimeApiSupport.pageRequest(page, size))));
         return ApiResponse.ok(result, context.traceId());
     }
 
-    /** 读取目标用户会话的可恢复消息树，并返回 FULL/SUMMARY 与回放可用性元数据。 */
+    /** 读取目标用户会话的可恢复消息树，并返回 FULL/SUMMARY/LEGACY 与回放可用性元数据。 */
     @GetMapping("/targets/{targetUserId}/sessions/{sessionId}/session-tree/messages")
     public Mono<ApiResponse<RuntimeDtos.SessionTreeMessagesResponse>> getSessionTreeMessages(
             @PathVariable String targetUserId,
             @PathVariable String sessionId,
+            @RequestParam(required = false, defaultValue = "false") boolean includeArchived,
             @RequestHeader(name = SupportAccessApplicationService.HEADER_NAME, required = false) String grantToken,
             ServerWebExchange exchange) {
         AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
@@ -177,9 +189,16 @@ public class SupportAccessController {
                         null,
                         context,
                         () -> {
-                            sessionService.getSession(target, requestedSession);
-                            RunHistoryRecoveryResult recovery = messageRecoveryService.recoverSessionTreeHistory(
-                                            requestedSession, context.traceId())
+                            var session = sessionService.getSession(target, requestedSession, includeArchived);
+                            var workspace = userWorkspaceQueryService.requireUserWorkspace(
+                                    target, session.workspaceId());
+                            Mono<RunHistoryRecoveryResult> recoverySource = workspaceBackendOnline(
+                                    workspace.linuxServerId(), context.traceId())
+                                            ? messageRecoveryService.recoverSessionTreeHistory(
+                                                    requestedSession, context.traceId())
+                                            : messageRecoveryService.recoverPersistedSessionTreeHistory(
+                                                    requestedSession, context.traceId());
+                            RunHistoryRecoveryResult recovery = recoverySource
                                     .block(Duration.ofSeconds(30));
                             List<RunEventSsePayload> events = new ArrayList<>(recovery.events());
                             if (recovery.source() == RunHistoryRecoverySource.OPENCODE) {
@@ -198,7 +217,7 @@ public class SupportAccessController {
 
     /** 分页读取目标用户关联工作区。 */
     @GetMapping("/targets/{targetUserId}/workspaces")
-    public ApiResponse<PageResponse<RuntimeDtos.WorkspaceResponse>> listWorkspaces(
+    public ApiResponse<PageResponse<SupportAccessDtos.WorkspaceResponse>> listWorkspaces(
             @PathVariable String targetUserId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
@@ -216,8 +235,10 @@ public class SupportAccessController {
                 targetUserId,
                 null,
                 context,
-                () -> RuntimeDtos.workspacePage(userWorkspaceQueryService.listUserWorkspaces(
-                        target, RuntimeApiSupport.pageRequest(page, size))));
+                () -> supportWorkspacePage(
+                        userWorkspaceQueryService.listUserWorkspaces(
+                                target, RuntimeApiSupport.pageRequest(page, size)),
+                        context.traceId()));
         return ApiResponse.ok(result, context.traceId());
     }
 
@@ -317,6 +338,48 @@ public class SupportAccessController {
                 RuntimeApiSupport.traceId(exchange),
                 ipAddress,
                 exchange.getRequest().getHeaders().getFirst("User-Agent"));
+    }
+
+    /**
+     * 在线状态只来自公共 Java 路由快照；Redis 临时不可用时不阻断工作区清单，但文件入口保持不可选。
+     */
+    private PageResponse<SupportAccessDtos.WorkspaceResponse> supportWorkspacePage(
+            PageResponse<com.enterprise.testagent.domain.workspace.Workspace> page,
+            String traceId) {
+        Map<String, BackendJavaProcess> liveBackends;
+        boolean backendStateKnown = true;
+        try {
+            liveBackends = routeResolver.liveBackendsByServer();
+        } catch (RuntimeException exception) {
+            backendStateKnown = false;
+            liveBackends = Map.of();
+            LOGGER.warn("Support workspace backend snapshot unavailable, traceId={}", traceId, exception);
+        }
+        return SupportAccessDtos.workspacePage(
+                page,
+                liveBackends,
+                routeResolver.currentLinuxServerIdValue(),
+                backendStateKnown);
+    }
+
+    /**
+     * 排查历史只有在权威工作区服务器的 Java 路由在线时才访问 OpenCode；未知状态按离线处理。
+     */
+    private boolean workspaceBackendOnline(String linuxServerId, String traceId) {
+        if (linuxServerId == null) {
+            return false;
+        }
+        if (routeResolver.isCurrent(linuxServerId)) {
+            return true;
+        }
+        try {
+            BackendJavaProcess backend = routeResolver.liveBackendsByServer().get(linuxServerId);
+            return backend != null && backend.status() == BackendJavaProcessStatus.READY;
+        } catch (RuntimeException exception) {
+            LOGGER.warn("Support session backend snapshot unavailable, linuxServerId={}, traceId={}",
+                    linuxServerId, traceId, exception);
+            return false;
+        }
     }
 
     private List<RunEventSsePayload> durableSnapshotPayloadsByRootSessionId(List<RunEventSsePayload> snapshotEvents) {

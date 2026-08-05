@@ -217,10 +217,17 @@ public class SessionApplicationService {
 
     /** 按用户归因规则读取单个会话；不向调用方暴露“存在但不属于当前用户”的差异。 */
     public Session getSession(UserId userId, SessionId sessionId) {
+        return getSession(userId, sessionId, false);
+    }
+
+    /**
+     * 排查入口可显式读取用户已软删除的会话，普通用户入口仍把 ARCHIVED 视为不存在。
+     */
+    public Session getSession(UserId userId, SessionId sessionId, boolean includeArchived) {
         if (sessionHistoryRepository == null) {
             throw new IllegalStateException("sessionHistoryRepository must be provided for user session query");
         }
-        return sessionHistoryRepository.findUserSession(userId, sessionId)
+        return sessionHistoryRepository.findUserSession(userId, sessionId, includeArchived)
                 .map(SessionHistoryItem::session)
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.NOT_FOUND,
@@ -239,10 +246,21 @@ public class SessionApplicationService {
      * 按当前登录用户查询历史 Session；不校验当前应用成员关系，避免用户离开应用后丢失自己的历史记录。
      */
     public PageResponse<SessionHistoryItem> listUserSessions(UserId userId, String query, PageRequest pageRequest) {
+        return listUserSessions(userId, query, false, pageRequest);
+    }
+
+    /**
+     * 排查入口显式选择时包含 ARCHIVED 会话；SIDE_QUESTION 等内部会话仍由查询端口排除。
+     */
+    public PageResponse<SessionHistoryItem> listUserSessions(
+            UserId userId,
+            String query,
+            boolean includeArchived,
+            PageRequest pageRequest) {
         if (sessionHistoryRepository == null) {
             throw new IllegalStateException("sessionHistoryRepository must be provided for user history query");
         }
-        return sessionHistoryRepository.findUserHistory(userId, query, pageRequest);
+        return sessionHistoryRepository.findUserHistory(userId, query, includeArchived, pageRequest);
     }
 
     /**

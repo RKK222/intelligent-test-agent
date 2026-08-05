@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import {
+  createInitialAgentChatRuntimeState,
+  createOpencodeLikeState,
+  OpencodeTimeline,
+  type AgentChatRuntimeState
+} from "@test-agent/agent-chat";
 import { FileExplorer } from "@test-agent/file-explorer";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type {
-  AgentMessage,
   CurrentUser,
   FilePreviewChunk,
   FileSearchResult,
@@ -15,7 +20,7 @@ import type {
   UserManagementUser,
   Workspace
 } from "@test-agent/shared-types";
-import { messagesFromSessionTreeSnapshot } from "../workbench-utils";
+import { chatStateFromSessionTreeSnapshot } from "../workbench-utils";
 
 const props = defineProps<{ currentUser: CurrentUser | null }>();
 const api = inject<BackendApiClient>("api")!;
@@ -42,10 +47,12 @@ const targetUser = ref<UserManagementUser | null>(null);
 const targetSelecting = ref(false);
 
 const sessionQuery = ref("");
+const includeArchived = ref(false);
 const sessions = ref<PageResponse<Session>>({ items: [], page: 1, size: 30, total: 0 });
 const sessionsLoading = ref(false);
 const selectedSession = ref<Session | null>(null);
-const transcript = ref<AgentMessage[]>([]);
+const transcriptState = ref<AgentChatRuntimeState>(createInitialAgentChatRuntimeState());
+const transcript = computed(() => transcriptState.value.messages);
 const transcriptLoading = ref(false);
 const historyRepresentation = ref<string | null>(null);
 const replayAvailable = ref<boolean | null>(null);
@@ -86,6 +93,27 @@ const countdownLabel = computed(() => {
 const activeGrantRef = computed(() => grant.value
   ? { grantId: grant.value.grantId, grantToken: grant.value.grantToken }
   : null);
+const canBrowseSelectedWorkspace = computed(() =>
+  selectedWorkspace.value?.backendAvailability === "ONLINE");
+const supportTimelineState = computed(() => {
+  const state = transcriptState.value;
+  return createOpencodeLikeState({
+    messages: state.messages,
+    permissions: state.permissions,
+    questions: state.questions,
+    todos: state.todos,
+    todoSnapshotsByUserMessageId: state.todoSnapshotsByUserMessageId,
+    diff: state.diff,
+    running: false,
+    status: state.status,
+    runtimeStatus: state.runtimeStatus,
+    streamingTextByPartId: state.streamingTextByPartId,
+    messageScopesById: state.messageScopesById,
+    subagentsBySessionId: state.subagentsBySessionId,
+    subagentByTaskPartId: state.subagentByTaskPartId,
+    runStatusesByRunId: state.runStatusesByRunId
+  });
+});
 
 let clockTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -183,8 +211,9 @@ async function closeGrant() {
 function clearGrantState() {
   grant.value = null;
   targetUser.value = null;
+  includeArchived.value = false;
   selectedSession.value = null;
-  transcript.value = [];
+  resetTranscriptState();
   selectedWorkspace.value = null;
   entriesByDirectory.value = {};
   expandedDirectories.value = new Set();
@@ -211,7 +240,7 @@ async function selectTarget(user: UserManagementUser) {
     await api.selectSupportAccessTarget(grant.value.grantToken, user.userId);
     targetUser.value = user;
     selectedSession.value = null;
-    transcript.value = [];
+    resetTranscriptState();
     selectedWorkspace.value = null;
     entriesByDirectory.value = {};
     preview.value = null;
@@ -230,7 +259,12 @@ async function loadSessions(page = sessions.value.page) {
     sessions.value = await api.listSupportAccessSessions(
       grant.value.grantToken,
       targetUser.value.userId,
-      { q: sessionQuery.value.trim() || undefined, page, size: 30 }
+      {
+        q: sessionQuery.value.trim() || undefined,
+        includeArchived: includeArchived.value,
+        page,
+        size: 30
+      }
     );
   } catch (error) {
     errorMessage.value = errorText(error);
@@ -243,14 +277,16 @@ async function openSession(session: Session) {
   if (!grant.value || !targetUser.value) return;
   selectedSession.value = session;
   transcriptLoading.value = true;
-  transcript.value = [];
+  resetTranscriptState();
   try {
     const snapshot = await api.getSupportAccessSessionTreeMessages(
       grant.value.grantToken,
       targetUser.value.userId,
-      session.sessionId
+      session.sessionId,
+      session.status === "ARCHIVED"
     );
-    transcript.value = messagesFromSessionTreeSnapshot(snapshot);
+    // 与普通用户首页复用同一 Session tree reducer，保留 message part、工具、Todo 和子 Agent 投影。
+    transcriptState.value = chatStateFromSessionTreeSnapshot(snapshot);
     historyRepresentation.value = snapshot.historyRepresentation ?? null;
     replayAvailable.value = snapshot.replayAvailable ?? null;
     detailsAvailableUntil.value = snapshot.detailsAvailableUntil ?? null;
@@ -279,6 +315,14 @@ async function loadWorkspaces(page = workspaces.value.page) {
 }
 
 async function selectWorkspace(workspace: Workspace) {
+  if (workspace.backendAvailability !== "ONLINE") {
+    errorMessage.value = workspace.backendAvailability === "OFFLINE"
+      ? "目标服务器后端离线，当前不能读取该工作区文件"
+      : workspace.backendAvailability === "UNBOUND"
+        ? "工作区未绑定目标服务器，当前不能读取文件"
+        : "目标服务器状态未知，当前不能读取该工作区文件";
+    return;
+  }
   selectedWorkspace.value = workspace;
   entriesByDirectory.value = {};
   expandedDirectories.value = new Set();
@@ -288,7 +332,7 @@ async function selectWorkspace(workspace: Workspace) {
 }
 
 async function loadDirectory(path: string) {
-  if (!activeGrantRef.value || !targetUser.value || !selectedWorkspace.value) return;
+  if (!activeGrantRef.value || !targetUser.value || !selectedWorkspace.value || !canBrowseSelectedWorkspace.value) return;
   loadingPaths.value = new Set(loadingPaths.value).add(path);
   try {
     const entries = await api.listSupportWorkspaceFiles(
@@ -412,9 +456,31 @@ function formatTime(value?: string | null) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false });
 }
 
-function messageText(message: AgentMessage): string {
-  if (message.role === "card") return JSON.stringify(message.payload, null, 2);
-  return message.text;
+function historyRepresentationLabel(value?: string | null): string {
+  if (value === "FULL") return "完整历史";
+  if (value === "SUMMARY") return "摘要";
+  if (value === "LEGACY") return "历史原文（旧存储）";
+  return value || "-";
+}
+
+function backendAvailabilityLabel(value?: string | null): string {
+  if (value === "ONLINE") return "在线";
+  if (value === "OFFLINE") return "离线";
+  if (value === "UNBOUND") return "未绑定";
+  return "状态未知";
+}
+
+function reloadSessionsWithArchiveFilter() {
+  selectedSession.value = null;
+  resetTranscriptState();
+  historyRepresentation.value = null;
+  replayAvailable.value = null;
+  detailsAvailableUntil.value = null;
+  void loadSessions(1);
+}
+
+function resetTranscriptState() {
+  transcriptState.value = createInitialAgentChatRuntimeState();
 }
 </script>
 
@@ -492,26 +558,36 @@ function messageText(message: AgentMessage): string {
               <div v-if="resourceTab === 'sessions'" class="session-layout">
                 <section class="resource-list">
                   <div class="inline-search"><input v-model="sessionQuery" placeholder="标题或 Session ID" @keyup.enter="loadSessions(1)" /><button @click="loadSessions(1)">查询</button></div>
+                  <label class="archive-filter">
+                    <input v-model="includeArchived" type="checkbox" @change="reloadSessionsWithArchiveFilter" />
+                    包含已归档会话（用户已删除或隐藏，数据未物理删除）
+                  </label>
                   <div v-if="sessionsLoading" class="empty">加载中…</div>
                   <button v-for="session in sessions.items" :key="session.sessionId" :class="['resource-row', { active: selectedSession?.sessionId === session.sessionId }]" @click="openSession(session)">
-                    <strong>{{ session.title }}</strong><span>{{ session.sessionId }}</span><small>{{ formatTime(session.updatedAt) }}</small>
+                    <strong>{{ session.title }} <em v-if="session.status === 'ARCHIVED'" class="archived-pill">已归档</em></strong><span>{{ session.sessionId }}</span><small>{{ formatTime(session.updatedAt) }}</small>
                   </button>
                   <div class="pager"><button :disabled="sessions.page <= 1" @click="loadSessions(sessions.page - 1)">上一页</button><span>{{ sessions.page }}</span><button :disabled="sessions.page * sessions.size >= sessions.total" @click="loadSessions(sessions.page + 1)">下一页</button></div>
                 </section>
-                <section class="transcript">
+                <section class="transcript" data-testid="support-user-conversation-view">
                   <div v-if="!selectedSession" class="empty large">选择会话查看可恢复消息。</div>
                   <template v-else>
+                    <div class="user-view-heading">
+                      <strong>用户首页视角（只读）</strong>
+                      <span>复用首页消息投影与时间线渲染，不切换管理员身份。</span>
+                    </div>
                     <div class="representation">
-                      <span>历史：{{ historyRepresentation || '-' }}</span>
+                      <span>历史：{{ historyRepresentationLabel(historyRepresentation) }}</span>
                       <span>回放：{{ replayAvailable === true ? '可用' : replayAvailable === false ? '不可用' : '-' }}</span>
                       <span>详情保留至：{{ formatTime(detailsAvailableUntil) }}</span>
                     </div>
                     <div v-if="transcriptLoading" class="empty">恢复中…</div>
-                    <article v-for="message in transcript" :key="message.id" :class="['message', `is-${message.role}`]">
-                      <header>{{ message.role === 'card' ? message.title : message.role === 'user' ? '用户' : '助手' }}</header>
-                      <pre>{{ messageText(message) }}</pre>
-                    </article>
+                    <div v-else-if="transcript.length" class="support-timeline">
+                      <OpencodeTimeline :state="supportTimelineState" />
+                    </div>
                     <div v-if="!transcriptLoading && transcript.length === 0" class="empty">当前保留链路没有可恢复正文。</div>
+                    <div class="readonly-composer" aria-label="只读排查输入区">
+                      <textarea disabled rows="1" value="只读排查视角，不能发送消息、调用工具或修改用户数据。" />
+                    </div>
                   </template>
                 </section>
               </div>
@@ -519,12 +595,13 @@ function messageText(message: AgentMessage): string {
               <div v-else class="workspace-layout">
                 <section class="resource-list">
                   <div v-if="workspacesLoading" class="empty">加载中…</div>
-                  <button v-for="workspace in workspaces.items" :key="workspace.workspaceId" :class="['resource-row', { active: selectedWorkspace?.workspaceId === workspace.workspaceId }]" @click="selectWorkspace(workspace)">
-                    <strong>{{ workspace.name }}</strong><span>{{ workspace.workspaceId }}</span><small>{{ workspace.linuxServerId || '未绑定服务器' }}</small>
+                  <button v-for="workspace in workspaces.items" :key="workspace.workspaceId" :class="['resource-row', { active: selectedWorkspace?.workspaceId === workspace.workspaceId }]" :disabled="workspace.backendAvailability !== 'ONLINE'" @click="selectWorkspace(workspace)">
+                    <strong>{{ workspace.name }}</strong><span>{{ workspace.workspaceId }}</span>
+                    <small><em :class="['backend-pill', `is-${(workspace.backendAvailability || 'UNKNOWN').toLowerCase()}`]">{{ backendAvailabilityLabel(workspace.backendAvailability) }}</em> {{ workspace.linuxServerId || '未绑定服务器' }}</small>
                   </button>
                   <div class="pager"><button :disabled="workspaces.page <= 1" @click="loadWorkspaces(workspaces.page - 1)">上一页</button><span>{{ workspaces.page }}</span><button :disabled="workspaces.page * workspaces.size >= workspaces.total" @click="loadWorkspaces(workspaces.page + 1)">下一页</button></div>
                 </section>
-                <section v-if="selectedWorkspace" class="file-tree">
+                <section v-if="selectedWorkspace && canBrowseSelectedWorkspace" class="file-tree">
                   <FileExplorer
                     :workspace-name="selectedWorkspace.name"
                     :entries-by-directory="entriesByDirectory"
@@ -546,6 +623,7 @@ function messageText(message: AgentMessage): string {
                 </section>
                 <section class="file-preview">
                   <div v-if="!selectedWorkspace" class="empty large">选择工作区后通过权威服务器只读浏览文件。</div>
+                  <div v-else-if="!canBrowseSelectedWorkspace" class="empty large">目标服务器当前不可用，文件读取已禁用；不会切换到本机或其它服务器。</div>
                   <div v-else-if="!previewPath" class="empty large">选择文件查看文本预览；下载与加入对话均已关闭。</div>
                   <template v-else>
                     <header><span>{{ previewPath }}</span><small v-if="preview">{{ preview.content.length }} / {{ preview.size }} bytes</small></header>
@@ -591,8 +669,10 @@ button.primary { justify-self:start; border:1px solid #1d4ed8; border-radius:5px
 .access-banner { display:flex; align-items:center; gap:18px; padding:10px 16px; border-bottom:1px solid #f0c36d; background:#fff7dc; flex-wrap:wrap; }.access-banner button { margin-left:auto; }.readonly-pill { border:1px solid #d97706; border-radius:999px; padding:2px 8px; color:#9a5400; }
 .support-layout { display:grid; grid-template-columns:240px 1fr; min-height:0; flex:1; }.target-picker { min-height:0; overflow:auto; border-right:1px solid #dfe3e8; background:#fff; padding:12px; }.target-picker h3 { margin:2px 0 10px; }.inline-search { display:flex; gap:6px; margin-bottom:10px; }.inline-search input { min-width:0; flex:1; }.inline-search button,.pager button,.audit-filter button,.access-banner button,.file-preview button { border:1px solid #c6ccd4; border-radius:5px; background:#fff; padding:6px 9px; cursor:pointer; }
 .target-row,.resource-row { display:grid; width:100%; gap:2px; border:0; border-radius:5px; background:transparent; padding:8px; text-align:left; cursor:pointer; }.target-row:hover,.resource-row:hover,.target-row.active,.resource-row.active { background:#eaf1ff; }.target-row span,.resource-row span,.target-row small,.resource-row small { overflow:hidden; color:#66707d; text-overflow:ellipsis; white-space:nowrap; }
+.archive-filter { display:flex; align-items:flex-start; gap:7px; margin:2px 4px 10px; color:#5f6874; font-size:12px; line-height:1.4; }.archive-filter input { margin-top:2px; }.archived-pill,.backend-pill { display:inline-block; border-radius:999px; padding:1px 6px; font-style:normal; font-size:11px; font-weight:600; }.archived-pill { border:1px solid #c7cdd5; background:#f2f4f6; color:#66707d; }.backend-pill.is-online { background:#e7f7ee; color:#177245; }.backend-pill.is-offline { background:#fff0f0; color:#a52b2b; }.backend-pill.is-unbound,.backend-pill.is-unknown { background:#f2f4f6; color:#66707d; }
 .resource-panel { display:flex; flex-direction:column; min-width:0; min-height:0; }.resource-tabs { flex:0 0 auto; padding:5px 12px 0; border-bottom:1px solid #dfe3e8; background:#fff; }.session-layout { display:grid; grid-template-columns:300px 1fr; min-height:0; flex:1; }.workspace-layout { display:grid; grid-template-columns:270px 330px 1fr; min-height:0; flex:1; }.resource-list { min-height:0; overflow:auto; padding:10px; border-right:1px solid #dfe3e8; background:#fff; }.pager { display:flex; align-items:center; justify-content:center; gap:10px; padding:10px 0; }
-.transcript { min-height:0; overflow:auto; padding:14px 18px; }.representation { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:12px; padding:8px 10px; border:1px solid #d9e2f0; border-radius:5px; background:#f4f8ff; color:#536173; }.message { max-width:900px; margin:0 0 12px; border:1px solid #dfe3e8; border-radius:7px; background:#fff; }.message header { padding:6px 10px; border-bottom:1px solid #edf0f3; color:#526070; font-weight:600; }.message pre,.file-preview pre { margin:0; padding:10px 12px; overflow:auto; white-space:pre-wrap; word-break:break-word; font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; }.message.is-user { border-left:3px solid #2563eb; }.message.is-card { border-left:3px solid #8b5cf6; }
+.transcript { display:flex; min-height:0; overflow:auto; padding:14px 18px; flex-direction:column; }.user-view-heading { display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin-bottom:10px; }.user-view-heading span { color:#69717d; font-size:12px; }.representation { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:12px; padding:8px 10px; border:1px solid #d9e2f0; border-radius:5px; background:#f4f8ff; color:#536173; }.support-timeline { width:min(100%,980px); margin:0 auto; padding:4px 8px 18px; }.readonly-composer { position:sticky; bottom:-14px; margin-top:auto; padding:10px 0 2px; background:linear-gradient(to bottom,transparent,#f6f7f9 18%); }.readonly-composer textarea { width:100%; box-sizing:border-box; resize:none; border:1px solid #cbd1d8; border-radius:8px; padding:11px 12px; background:#eef1f4; color:#6b7280; font:inherit; }
+.file-preview pre { margin:0; padding:10px 12px; overflow:auto; white-space:pre-wrap; word-break:break-word; font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; }
 .file-tree { min-height:0; overflow:hidden; border-right:1px solid #dfe3e8; background:#fff; --ta-tree-bg:#fff; --ta-tree-text:#2c333a; --ta-tree-muted:#707985; --ta-tree-border-strong:#dfe3e8; }.file-preview { min-width:0; min-height:0; overflow:auto; background:#fff; }.file-preview header { display:flex; justify-content:space-between; gap:12px; padding:9px 12px; border-bottom:1px solid #e4e7eb; }.file-preview pre { min-height:calc(100% - 76px); white-space:pre; }.file-preview>button { margin:8px 12px 14px; }
 .empty { padding:16px; color:#78818d; text-align:center; }.empty.large { display:grid; min-height:180px; place-items:center; }.audit-panel { min-height:0; overflow:auto; padding:14px 18px; }.audit-filter { display:flex; gap:8px; margin-bottom:12px; }.audit-table-wrap { overflow:auto; border:1px solid #dfe3e8; background:#fff; }.audit-table-wrap table { width:100%; border-collapse:collapse; white-space:nowrap; }.audit-table-wrap th,.audit-table-wrap td { padding:8px 10px; border-bottom:1px solid #e8ebef; text-align:left; vertical-align:top; }.audit-table-wrap th { position:sticky; top:0; background:#f5f6f8; }.audit-table-wrap small { color:#737d89; }.ok { color:#177245; }.fail { color:#a52b2b; }
 @media (max-width:1100px) { .workspace-layout { grid-template-columns:230px 280px 1fr; }.session-layout { grid-template-columns:260px 1fr; } }

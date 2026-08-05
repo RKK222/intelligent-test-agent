@@ -34,7 +34,7 @@ API 定义包，承载 HTTP/SSE/WebSocket 入口、请求响应 DTO、统一响�
 - `web.platform.RuntimeDtos`、`web.platform.AuthDtos`：平台 API 请求/响应 DTO；Session、SessionMessage、Run 可选暴露 `sourceType/sourceRefId`，Run、SessionMessage、Run 历史与 Session 历史响应的新存储/摘要元数据保持 nullable，并通过显式映射重载接入新模式投影，旧领域对象不会被误标记。
 - `web.common.TraceIdWebFilter`、`web.common.JwtAuthWebFilter`、`web.common.ApiTokenWebFilter`、`web.common.InMemoryRateLimitWebFilter`、`web.common.GlobalExceptionHandler`：入口公共处理。
 - `web.common.RuntimeApiSupport`、`web.common.AuthWebSupport`：Controller 与 WebFilter 共用的 HTTP 边界工具。
-- `web.platform.SupportAccessController` / `SupportAccessDtos`：超级管理员限时只读排查协议入口；actor 始终为当前管理员，target 只限定查询范围，文件 route/ticket 复用公共路由并携带专用授权头。
+- `web.platform.SupportAccessController` / `SupportAccessDtos`：超级管理员限时只读排查协议入口；actor 始终为当前管理员，target 只限定查询范围，会话可显式包含软删除 ARCHIVED，工作区附带公共 Java 路由可用状态；会话完整历史只在权威 Java 在线时访问 OpenCode，否则直接读取持久化来源。文件 route/ticket 复用公共路由并携带专用授权头。
 - `web.platform.WorkspaceFileWebSocketHandler`：受控平台文件 WebSocket upgrade 入口，覆盖 workspace 原始文件、引用组合视图、原始字节下载分段、服务器目录选择和 Agent 配置文件 RPC；普通 workspace 每条 RPC 使用 ticket 用户重新执行当前归属校验且不允许 `SUPER_ADMIN` 非托管旁路，排查 ticket 仅放行五种读取 RPC、过滤 `.opencode` 并在响应前落审计。
 - `web.platform.TerminalWebSocketHandler`：受控 PTY WebSocket upgrade 入口。
 - `config.RuntimeSecurityConfig`、`config.TerminalWebSocketConfig`：API 层安全和 WebSocket mapping；CORS 允许可选 `X-Test-Agent-Linux-Server-Id` 首跳提示头和 `X-Support-Access-Grant` 排查授权头，两者均不能替代后端实时鉴权或权威路由。

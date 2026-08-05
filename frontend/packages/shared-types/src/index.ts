@@ -76,6 +76,10 @@ export type Workspace = {
   rootPath: string;
   status: string;
   linuxServerId?: string | null;
+  /** 排查只读列表中的目标 Java 路由状态；旧后端和普通工作区接口可缺失。 */
+  backendAvailability?: "ONLINE" | "OFFLINE" | "UNBOUND" | "UNKNOWN" | string | null;
+  /** 在线 Java 路由最近心跳；离线或旧后端可缺失。 */
+  backendLastHeartbeatAt?: string | null;
   createdAt: string;
   updatedAt: string;
   /**
@@ -735,8 +739,8 @@ export type SessionTreeMessagesResponse = {
   messagesBySessionId: Record<string, Record<string, unknown>[]>;
   childSessionIdByTaskPartId: Record<string, string>;
   events: RunSessionTreeEventResponse[];
-  /** 完整历史来自 Redis/OpenCode，摘要历史来自 PostgreSQL 终态投影。 */
-  historyRepresentation?: "FULL" | "SUMMARY" | string | null;
+  /** FULL 来自 Redis/OpenCode，SUMMARY 为终态摘要，LEGACY 为旧表保留的正文。 */
+  historyRepresentation?: "FULL" | "SUMMARY" | "LEGACY" | string | null;
   replayAvailable?: boolean | null;
   detailsAvailableUntil?: string | null;
 };

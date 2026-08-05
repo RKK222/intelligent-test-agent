@@ -180,6 +180,142 @@ class RunMessageRecoveryServiceTest {
     }
 
     @Test
+    void sessionHistoryFallsBackToLegacyMessagesWhenOpenCodeAndSummariesAreUnavailable() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.error = new IllegalStateException("opencode unavailable");
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunSummaryPersistencePort summaryPersistence = mock(RunSummaryPersistencePort.class);
+        SessionMessageRepository messages = mock(SessionMessageRepository.class);
+        when(messages.findBySessionId(
+                        org.mockito.ArgumentMatchers.eq(SESSION_ID),
+                        org.mockito.ArgumentMatchers.any(PageRequest.class)))
+                .thenReturn(new PageResponse<>(List.of(
+                        new SessionMessage(
+                                new SessionMessageId("msg_legacy_user"),
+                                SESSION_ID,
+                                SessionMessageRole.USER,
+                                "历史问题",
+                                NOW,
+                                "trace_1234567890abcdef"),
+                        new SessionMessage(
+                                new SessionMessageId("msg_legacy_assistant"),
+                                SESSION_ID,
+                                SessionMessageRole.ASSISTANT,
+                                "历史答案",
+                                NOW.plusSeconds(1),
+                                "trace_1234567890abcdef")), 1, PageRequest.MAX_SIZE, 2));
+        RunMessageRecoveryService service = new RunMessageRecoveryService(
+                new FakeRunRepository(run()),
+                new FakeSessionRepository(mappedSession()),
+                new FakeExecutionNodeRepository(),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                null,
+                runtimeStore,
+                summaryPersistence,
+                messages);
+
+        RunHistoryRecoveryResult result = service
+                .recoverSessionTreeHistory(SESSION_ID, "trace_1234567890abcdef")
+                .block(Duration.ofSeconds(2));
+
+        assertThat(result).isNotNull();
+        assertThat(result.source()).isEqualTo(RunHistoryRecoverySource.POSTGRESQL_LEGACY);
+        assertThat(result.historyRepresentation()).isEqualTo("LEGACY");
+        assertThat(result.replayAvailable()).isFalse();
+        assertThat(result.events()).extracting(RunEventSsePayload::type)
+                .containsExactly(
+                        "message.updated", "message.part.updated",
+                        "message.updated", "message.part.updated");
+        assertThat(result.events())
+                .extracting(event -> event.payload().toString())
+                .anyMatch(payload -> payload.contains("历史问题"))
+                .anyMatch(payload -> payload.contains("历史答案"))
+                .allMatch(payload -> payload.contains("RAW_LEGACY"));
+    }
+
+    @Test
+    void sessionHistoryFallsBackToLegacyMessagesWhenRedisAndOpenCodeSnapshotsAreEmpty() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunSummaryPersistencePort summaryPersistence = mock(RunSummaryPersistencePort.class);
+        SessionMessageRepository messages = mock(SessionMessageRepository.class);
+        RunRuntimeManifest manifest = runtimeManifest();
+        when(runtimeStore.findRecentBySession(SESSION_ID, 100)).thenReturn(List.of(manifest));
+        when(runtimeStore.replayAfter(RUN_ID, 0L, RunRuntimeStore.MAX_DURABLE_EVENTS))
+                .thenReturn(emptyReplay(manifest));
+        when(summaryPersistence.findSummariesBySessionId(SESSION_ID)).thenReturn(List.of());
+        when(messages.findBySessionId(
+                        org.mockito.ArgumentMatchers.eq(SESSION_ID),
+                        org.mockito.ArgumentMatchers.any(PageRequest.class)))
+                .thenReturn(new PageResponse<>(List.of(
+                        new SessionMessage(
+                                new SessionMessageId("msg_legacy_assistant"),
+                                SESSION_ID,
+                                SessionMessageRole.ASSISTANT,
+                                "空快照后的历史正文",
+                                NOW,
+                                "trace_1234567890abcdef")), 1, PageRequest.MAX_SIZE, 1));
+        RunMessageRecoveryService service = new RunMessageRecoveryService(
+                new FakeRunRepository(run()),
+                new FakeSessionRepository(mappedSession()),
+                new FakeExecutionNodeRepository(),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                null,
+                runtimeStore,
+                summaryPersistence,
+                messages);
+
+        RunHistoryRecoveryResult result = service
+                .recoverSessionTreeHistory(SESSION_ID, "trace_1234567890abcdef")
+                .block(Duration.ofSeconds(2));
+
+        assertThat(result).isNotNull();
+        assertThat(result.source()).isEqualTo(RunHistoryRecoverySource.POSTGRESQL_LEGACY);
+        assertThat(result.historyRepresentation()).isEqualTo("LEGACY");
+        assertThat(result.events()).extracting(event -> event.payload().toString())
+                .anyMatch(payload -> payload.contains("空快照后的历史正文"));
+    }
+
+    @Test
+    void persistedSessionHistorySkipsOpenCodeForOfflineSupportTarget() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        SessionMessageRepository messages = mock(SessionMessageRepository.class);
+        when(messages.findBySessionId(
+                        org.mockito.ArgumentMatchers.eq(SESSION_ID),
+                        org.mockito.ArgumentMatchers.any(PageRequest.class)))
+                .thenReturn(new PageResponse<>(List.of(
+                        new SessionMessage(
+                                new SessionMessageId("msg_offline_history"),
+                                SESSION_ID,
+                                SessionMessageRole.ASSISTANT,
+                                "离线服务器历史正文",
+                                NOW,
+                                "trace_1234567890abcdef")), 1, PageRequest.MAX_SIZE, 1));
+        RunMessageRecoveryService service = new RunMessageRecoveryService(
+                new FakeRunRepository(run()),
+                new FakeSessionRepository(mappedSession()),
+                new FakeExecutionNodeRepository(),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                null,
+                null,
+                null,
+                messages);
+
+        RunHistoryRecoveryResult result = service
+                .recoverPersistedSessionTreeHistory(SESSION_ID, "trace_1234567890abcdef")
+                .block(Duration.ofSeconds(2));
+
+        assertThat(result).isNotNull();
+        assertThat(result.historyRepresentation()).isEqualTo("LEGACY");
+        assertThat(result.events()).extracting(event -> event.payload().toString())
+                .anyMatch(payload -> payload.contains("离线服务器历史正文"));
+        assertThat(facade.lastCommand).isNull();
+    }
+
+    @Test
     void sessionHistoryUsesRecentRedisSnapshotsInChronologicalRunOrder() {
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
         facade.error = new IllegalStateException("opencode unavailable");
@@ -975,6 +1111,15 @@ class RunMessageRecoveryServiceTest {
         return new RunRuntimeReplay(
                 manifest,
                 new RunRuntimeSnapshot(manifest.runId(), 1L, 1L, 0L, List.of(message), NOW),
+                List.of(),
+                false,
+                null);
+    }
+
+    private static RunRuntimeReplay emptyReplay(RunRuntimeManifest manifest) {
+        return new RunRuntimeReplay(
+                manifest,
+                new RunRuntimeSnapshot(manifest.runId(), 0L, 0L, 0L, List.of(), NOW),
                 List.of(),
                 false,
                 null);
