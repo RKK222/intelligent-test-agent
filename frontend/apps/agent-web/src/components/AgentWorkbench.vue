@@ -852,15 +852,17 @@ function tryHandleSaveShortcut(event: KeyboardEvent) {
   }
 }
 
-function onWindowKeydown(event: KeyboardEvent) {
+/** 捕获阶段识别排查手势，避免子控件 stopPropagation 后顶层收不到 Shift。 */
+function onSupportAccessShortcutKeydown(event: KeyboardEvent) {
   if (!isSuperAdmin.value) {
     supportAccessShortcut.reset();
   } else if (supportAccessShortcut.handleKeydown(event)) {
     event.preventDefault();
     void openSupportAccessFromShortcut();
-    return;
   }
+}
 
+function onWindowKeydown(event: KeyboardEvent) {
   const target = event.target as HTMLElement | null;
   if (target) {
     // Monaco 编辑器自带 addCommand 注册了 Ctrl/Cmd+S 快捷键，
@@ -880,12 +882,14 @@ function onWindowKeydown(event: KeyboardEvent) {
 }
 
 onMounted(() => {
+  window.addEventListener("keydown", onSupportAccessShortcutKeydown, true);
   window.addEventListener("keydown", onWindowKeydown);
   window.addEventListener("focus", refreshAppSourceAuthorizationOnFocus);
 });
 onBeforeUnmount(() => {
   invalidateConversationInteraction();
   clearTerminalRunEventSubscriptionHold();
+  window.removeEventListener("keydown", onSupportAccessShortcutKeydown, true);
   window.removeEventListener("keydown", onWindowKeydown);
   window.removeEventListener("focus", refreshAppSourceAuthorizationOnFocus);
   teardownAppSourceInteractions();

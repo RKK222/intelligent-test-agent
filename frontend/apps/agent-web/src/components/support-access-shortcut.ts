@@ -1,7 +1,7 @@
-export const SUPPORT_ACCESS_SHIFT_WINDOW_MS = 1_000;
+export const SUPPORT_ACCESS_SHIFT_WINDOW_MS = 2_000;
 
 export type SupportAccessShortcut = {
-  handleKeydown: (event: Pick<KeyboardEvent, "key" | "repeat">) => boolean;
+  handleKeydown: (event: Pick<KeyboardEvent, "key" | "repeat"> & Partial<Pick<KeyboardEvent, "code">>) => boolean;
   reset: () => void;
 };
 
@@ -21,8 +21,13 @@ export function createSupportAccessShortcut(
     firstPressAt = 0;
   }
 
-  function handleKeydown(event: Pick<KeyboardEvent, "key" | "repeat">) {
-    if (event.key !== "Shift") {
+  function handleKeydown(event: Pick<KeyboardEvent, "key" | "repeat"> & Partial<Pick<KeyboardEvent, "code">>) {
+    const isShift = event.key === "Shift"
+      || event.key === "ShiftLeft"
+      || event.key === "ShiftRight"
+      || event.code === "ShiftLeft"
+      || event.code === "ShiftRight";
+    if (!isShift) {
       reset();
       return false;
     }

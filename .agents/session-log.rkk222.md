@@ -5930,3 +5930,34 @@
   空白，不会跨管理员取值或静默恢复旧授权上下文。
 - backend readiness 为 `UP`、前端运行于 3000；本地测试库保留上述正常授权/撤销审计记录。未修改 `.env*`、
   OpenCode 源码、generated SDK、RunEvent 或数据库结构；Workflow/LobeHub 继续保持不启动。
+
+## 2026-08-05 - 提高三击 Shift 排查入口触发可靠性
+
+### Why
+
+- 用户实际三击多次仍没有反应。复查发现全局监听器注册在冒泡阶段，页面中输入、重命名和弹窗
+  控件调用 `stopPropagation()` 时顶层收不到 Shift；首次到第三次限制在 1 秒内也对人工操作偏紧。
+
+### What
+
+- 复用既有 `createSupportAccessShortcut` 检测器，把排查手势从通用窗口快捷键中拆出，改为 `window`
+  捕获阶段监听；保留 Ctrl/Cmd+S 的原冒泡阶段和可编辑控件边界。
+- 三次 Shift 总窗口放宽到 2 秒，兼容 `key/code` 中的 `Shift`、`ShiftLeft`、`ShiftRight`，
+  仍忽略长按 repeat，并在其它按键或超时时重置。
+- 同步前端总览、agent-web README 和安全规范；明确 iframe 键盘事件不会跨文档冒泡。
+
+### How
+
+- `support-access-shortcut` 与系统管理定向 Vitest 共 18 项通过；agent-web typecheck 和
+  `VITE_TEST_AGENT_API_BASE_URL=''` 生产构建通过。
+- JDK 25 下复用未修改的主工作区 `.env.test` 和测试数据根，以 `--without-workflow` 重启
+  backend、opencode-manager 和 frontend；backend readiness 为 `UP`，前端 3000 返回 200。
+- Playwright 真实登录 `SUPER_ADMIN`，焦点保持在聊天输入框并为该控件显式增加
+  `keydown.stopPropagation()`，以 650ms 间隔三击 Shift；页面从排查标题数 0 切换为 1。
+
+### Result
+
+- 主页面内即使焦点控件阻止冒泡，人工速度三击 Shift 也能打开“问题排查只读访问”；工单自动回填仍
+  保持为 `INC-LOCAL-PREFILL-20260805`，没有恢复旧授权、原因或确认状态。
+- 未修改 HTTP API、RunEvent、数据库/Flyway、鉴权、限流、generated SDK、OpenCode 源码或 `.env*`；
+  iframe 内获得焦点时仍需先点击平台主页面，再触发全局手势。
