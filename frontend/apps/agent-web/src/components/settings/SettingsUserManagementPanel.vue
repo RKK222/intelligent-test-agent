@@ -42,11 +42,12 @@ const savingRoles = ref(false);
 const selectedUsers = ref<UserManagementUser[]>([]);
 const deleting = ref(false);
 const syncingTcds = ref(false);
+const updatingUsername = ref(false);
 
 const loading = ref(false);
 const errorMessage = ref("");
 const operationBusy = computed(
-  () => loading.value || savingRoles.value || deleting.value || syncingTcds.value
+  () => loading.value || savingRoles.value || deleting.value || syncingTcds.value || updatingUsername.value
 );
 
 // 新增用户表单
@@ -355,6 +356,43 @@ async function reloadAfterDelete(deletedCount: number) {
   await loadUsers();
 }
 
+async function editUsername(row: UserManagementUser) {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      "请输入新用户名。后续 TCDS 同步会用外部姓名覆盖手工值；本地密码登录下次需使用新用户名，当前登录展示会在下次登录时刷新。",
+      `修改“${row.username}”的用户名`,
+      {
+        type: "warning",
+        inputValue: row.username,
+        confirmButtonText: "保存",
+        cancelButtonText: "取消",
+        inputValidator: (input: string) => {
+          const normalized = input?.trim();
+          if (!normalized) {
+            return "用户名不能为空";
+          }
+          return normalized.length <= 128 || "用户名不能超过 128 个字符";
+        }
+      }
+    );
+    const username = String(value).trim();
+    if (username === row.username) {
+      return;
+    }
+    updatingUsername.value = true;
+    errorMessage.value = "";
+    await api.updateUsername(row.userId, { username });
+    ElMessage.success("用户名已修改");
+    await loadUsers();
+  } catch (error) {
+    if (!isMessageBoxCancellation(error)) {
+      errorMessage.value = error instanceof Error ? error.message : "修改用户名失败";
+    }
+  } finally {
+    updatingUsername.value = false;
+  }
+}
+
 async function deleteUser(row: UserManagementUser) {
   if (!canSelectUser(row)) {
     return;
@@ -471,7 +509,7 @@ onMounted(() => {
           :closable="false"
           show-icon
           title="存量用户处理说明"
-          description="可筛选“未分配角色”后选择当前页或全部检索结果；角色修改一次批量提交，保存后会撤销相关用户的旧 Token，用户需重新登录。"
+          description="可筛选“未分配角色”后选择当前页或全部检索结果；角色修改一次批量提交，保存后会撤销相关用户的旧 Token，用户需重新登录。手工修改用户名后，后续 TCDS 同步会覆盖该值。"
         />
         <div class="ta-list-header">
           <h4 class="ta-section-title">用户列表</h4>
@@ -607,9 +645,12 @@ onMounted(() => {
             </template>
           </el-table-column>
           <el-table-column prop="status" label="状态" width="90" />
-          <el-table-column label="操作" width="170" fixed="right">
+          <el-table-column label="操作" width="250" fixed="right">
             <template #default="{ row }">
               <div class="ta-row-actions">
+                <el-button link type="primary" :disabled="operationBusy" @click="editUsername(row)">
+                  修改用户名
+                </el-button>
                 <el-button link type="primary" :disabled="operationBusy" @click="syncUserFromTcds(row)">
                   同步 TCDS
                 </el-button>

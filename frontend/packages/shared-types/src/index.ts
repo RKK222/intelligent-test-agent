@@ -2402,6 +2402,11 @@ export type CreateUserPayload = {
   department?: string | null;
 };
 
+/** 超级管理员手工修正用户名；统一认证号不允许随请求修改。 */
+export type UpdateUsernamePayload = {
+  username: string;
+};
+
 export type UpdateUserRolePayload = {
   role: string;
 };

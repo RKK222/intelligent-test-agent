@@ -20,6 +20,7 @@ import com.enterprise.testagent.system.management.user.UserManagementResponses.D
 import com.enterprise.testagent.system.management.user.UserManagementResponses.RoleOption;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.SyncUsersFromTcdsCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.SyncUsersFromTcdsResponse;
+import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUsernameCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRoleCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRolesCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRolesResponse;
@@ -116,6 +117,29 @@ class UserManagementControllerTest {
                 .expectBody()
                 .jsonPath("$.data[0].roleCode").isEqualTo("SUPER_ADMIN")
                 .jsonPath("$.data[1].roleLabel").isEqualTo("应用管理员");
+    }
+
+    @Test
+    void superAdminCanUpdateUsernameWithoutChangingUnifiedAuthenticationId() {
+        UserManagementApplicationService service = org.mockito.Mockito.mock(UserManagementApplicationService.class);
+        when(service.updateUsername(any(UpdateUsernameCommand.class)))
+                .thenReturn(userResponse("usr_target", "Alice Updated", "AUTH_1"));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.put()
+                .uri("/api/internal/platform/system-management/users/usr_target/username")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"username\":\"  Alice Updated  \"}")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.userId").isEqualTo("usr_target")
+                .jsonPath("$.data.username").isEqualTo("Alice Updated")
+                .jsonPath("$.data.unifiedAuthId").isEqualTo("AUTH_1");
+
+        verify(service).updateUsername(org.mockito.ArgumentMatchers.argThat((UpdateUsernameCommand command) ->
+                "usr_target".equals(command.userId()) && "Alice Updated".equals(command.username())));
     }
 
     @Test
@@ -303,8 +327,12 @@ class UserManagementControllerTest {
     }
 
     private UserResponse userResponse(String userId, String username) {
+        return userResponse(userId, username, "AUTH_" + username);
+    }
+
+    private UserResponse userResponse(String userId, String username, String unifiedAuthId) {
         return new UserResponse(
-                userId, username, "AUTH_" + username,
+                userId, username, unifiedAuthId,
                 "企业", "研发部", "测试部",
                 "ACTIVE",
                 List.of("APP_ADMIN"),

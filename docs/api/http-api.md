@@ -2819,6 +2819,7 @@ Base URL：`/api/internal/platform/system-management`
 |---|---|---|
 | `GET` | `/users` | 分页查询用户列表，可按关键字、角色、组织和部门组合筛选。 |
 | `POST` | `/users` | 创建测试用户，密码默认为 `123456`，并授予单个角色。 |
+| `PUT` | `/users/{userId}/username` | 手工修正指定用户的用户名，统一认证号和既有授权保持不变。 |
 | `PUT` | `/users/{userId}/roles` | 替换指定用户的全局角色，当前测试入口只保留单个角色。 |
 | `PUT` | `/users/batch-roles` | 一次替换多个显式用户的角色，或按筛选快照替换全部匹配用户的角色。 |
 | `DELETE` | `/users/{userId}` | 删除单个未承载业务资产的用户，禁止删除当前登录用户。 |
@@ -2875,6 +2876,19 @@ Base URL：`/api/internal/platform/system-management`
 - 密码由后端注入默认值 `123456`，前端不传。
 - 用户名或统一认证号已存在时返回 `CONFLICT`。
 - 角色无效时返回 `VALIDATION_ERROR`。
+
+`PUT /users/{userId}/username` 请求体：
+
+```json
+{
+  "username": "Alice Updated"
+}
+```
+
+- `username` 去除首尾空白后必填，最长 128 个字符；与其他用户重名时返回 `CONFLICT`。
+- 该接口只修改 `users.username`，保留原 `userId`、`unifiedAuthId`、密码、组织部门、角色、应用成员和历史业务关系；统一认证号不接受手工修改。
+- 用户名不是权限边界，保存时不撤销已有 Token。已登录页面中的旧用户名会在下次登录时刷新；本地密码登录下次需使用新用户名，企业统一认证仍使用不变的统一认证号。
+- 后续执行 TCDS 同步时，TCDS `fullname` 会覆盖手工保存的用户名。
 
 `PUT /users/{userId}/roles` 请求体：
 

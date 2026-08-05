@@ -505,6 +505,38 @@ describe("backend-api", () => {
     );
   });
 
+  it("updates a managed user's username through its dedicated endpoint", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: {
+          userId: "usr_target",
+          username: "Alice Updated",
+          unifiedAuthId: "AUTH_1",
+          status: "ACTIVE",
+          roles: ["USER"],
+          createdAt: "2026-06-26T00:00:00Z"
+        }
+      }), { status: 200 })
+    );
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(client.updateUsername("usr/target", { username: "Alice Updated" }))
+      .resolves.toMatchObject({ username: "Alice Updated", unifiedAuthId: "AUTH_1" });
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/system-management/users/usr%2Ftarget/username",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ username: "Alice Updated" })
+      })
+    );
+  });
+
   it("updates explicit or filtered users through one batch role request", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({

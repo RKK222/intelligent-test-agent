@@ -5817,3 +5817,37 @@
   OpenCode；服务器聚合计数仍保持完整，诊断明细有界且兼容旧客户端/旧后端。
 - 代码、真实 PostgreSQL、前端构建、定向行为和更新后端的本地三服务运行均已验证；Workflow/LobeHub 按用户
   要求保持停止，本次没有改写其密钥或环境配置。
+
+## 2026-08-05 - 支持超级管理员手工修正用户名
+
+### Why
+
+- 企业内部署后，存量用户可能需要修正展示用户名；原用户管理页只能改角色、同步 TCDS 或删除，不能在保留
+  `userId`、统一认证号、权限和历史关系的前提下手工改名。
+
+### What
+
+- 新增 `PUT /api/internal/platform/system-management/users/{userId}/username`，只允许 `SUPER_ADMIN` 提交
+  最长 128 字符的唯一用户名；复用既有 `UserRepository.save`，不新增 SQL 或 Flyway migration。
+- `User.renameUsername` 保留统一认证号、密码、组织部门、状态及创建时间；用户名不是权限边界，保存时不撤销
+  Token，当前登录显示名到下次登录刷新，本地密码登录改用新用户名，后续 TCDS 同步仍可覆盖手工值。
+- 用户管理列表增加“修改用户名”入口和上述覆盖/登录提示；统一认证号继续只读。同步更新 API、安全、模块和
+  前后端包 README，并补齐应用服务、Controller、API 客户端和页面回归测试。
+
+### How
+
+- JDK 25 下应用服务 20 项、Controller 11 项测试通过；前端组件/API 客户端定向 108 项通过，shared-types、
+  backend-api、agent-web typecheck 通过；后端 21 模块完整打包、前端 production build、AI 文档门禁和
+  `git diff --check` 通过。
+- 默认 `.env.test` 重启先被缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 阻断；使用 `--without-workflow` 时发现 8080
+  已由 `intelligent-test-agent-support-access` 工作树占用，未停止该进程。随后把本次 JAR 隔离启动在 18081，
+  XXL 端口改为 28080/19999，前端隔离启动在 4177；health/readiness 均为 UP，前端 200，改名 PUT CORS 预检
+  通过，匿名请求命中新增 Controller 并返回 401。首轮隔离进程验证后已优雅停止；最终为便于页面验收，保留
+  `test-agent-username-edit-backend/frontend` 两个隔离 screen，后端 18081 显式关闭 XXL 与服务广播，前端 4177
+  只指向该后端，避免与另一工作树的 8080/3000 服务和调度注册冲突。
+
+### Result
+
+- 超级管理员可直接修正用户名，无需删除重建用户；统一认证号和权限保持不变，TCDS 覆盖风险在页面明确提示。
+- 本次涉及新增高权限 HTTP API 和登录名兼容语义，不涉及事件、数据库结构、性能链路、环境文件、依赖、
+  generated SDK 或 OpenCode 源码；企业升级需同时替换后端和前端交付物，无数据库迁移步骤。

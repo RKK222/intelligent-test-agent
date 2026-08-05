@@ -23,6 +23,7 @@ import com.enterprise.testagent.system.management.user.UserManagementResponses.C
 import com.enterprise.testagent.system.management.user.UserManagementResponses.RoleOption;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.SyncUsersFromTcdsCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.SyncUsersFromTcdsResponse;
+import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUsernameCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRoleCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRolesCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRolesResponse;
@@ -162,6 +163,30 @@ public class UserManagementApplicationService {
         // 重新读取以带回刚授予的角色
         return userResponse(userRepository.findByUserId(user.userId())
                 .orElseThrow(() -> new PlatformException(ErrorCode.INTERNAL_ERROR, "用户创建后读取失败")));
+    }
+
+    /**
+     * 手工修正指定用户的用户名，不修改统一认证号、角色、部门及其他业务关联。
+     *
+     * <p>用户名不是权限边界，本操作不会撤销已有 Token；当前登录主体中的旧用户名会在下次登录时刷新。
+     * 后续执行 TCDS 同步时，外部姓名仍会覆盖这里保存的手工值。
+     *
+     * @throws PlatformException 当用户不存在或新用户名已被占用时
+     */
+    @Transactional
+    public UserResponse updateUsername(UpdateUsernameCommand command) {
+        Objects.requireNonNull(command, "command must not be null");
+        User current = userRepository.findByUserId(new UserId(command.userId()))
+                .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "用户不存在"));
+        User renamed = current.renameUsername(command.username());
+        if (renamed == current) {
+            return userResponse(current);
+        }
+        if (userRepository.existsByUsername(renamed.username())) {
+            throw new PlatformException(ErrorCode.CONFLICT, "用户名已存在");
+        }
+        userRepository.save(renamed);
+        return userResponse(renamed);
     }
 
     /**

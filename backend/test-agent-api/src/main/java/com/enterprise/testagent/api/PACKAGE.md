@@ -22,7 +22,7 @@ API 定义包，承载 HTTP/SSE/WebSocket 入口、请求响应 DTO、统一响�
 - `web.platform.UiTestToolConfigController`：仅供受信任 OpenCode worker 内网直连的 UI 平台地址查询入口；不使用应用层凭据，只返回 `configured/baseUrl`，公共 Nginx 必须精确拒绝该路径。
 - `web.platform.NightExecutionController`、`web.platform.NightExecutionDtos`：当前用户夜间时段和双模式任务创建/查询/改期/取消/失败卡关闭入口；`ADMIN_CUSTOM` 创建/改期传递后端认证的 `SUPER_ADMIN` 权限事实，响应返回调度模式但完整 Run 输入不进入 DTO。
 - `web.platform.NightExecutionInternalDispatchController`、`web.platform.HttpNightExecutionDispatchGateway`：标准 XXL token 保护的目标 Java 批量分发入口，以及复用公共 Java resolver/forwarder 的系统调用；先按目标服务器选出精确 backendProcessId，避免同服务器多 JVM 误走当前进程，跨 Java 只传固定目标和最多 50 个任务 ID。
-- `web.platform.UserManagementController`：超级管理员用户管理入口，校验 `SUPER_ADMIN` 后把关键字/角色/组织/部门组合查询、创建、单人角色调整和显式/按筛选全选的批量角色请求交给 system-management 服务；批量操作者只取认证主体。
+- `web.platform.UserManagementController`：超级管理员用户管理入口，校验 `SUPER_ADMIN` 后把关键字/角色/组织/部门组合查询、创建、仅含用户名的手工改名、单人角色调整和显式/按筛选全选的批量角色请求交给 system-management 服务；批量操作者只取认证主体。
 - `web.platform.ConfigurationManagementController`：应用配置管理入口，代码库 DTO 包含 `englishName`；设置页创建应用工作空间时根据当前用户 READY opencode 进程确定目标 Linux 服务器，并提供 `workspace-create-operations/{operationId}` 轮询接口。
 - `web.platform.ReferenceRepositoryController`、`web.platform.ReferenceRepositoryDtos`：应用引用资产库列表、初始化、同步、受控分支切换、只读指针核验、含可空 `repositoryPath` 的状态和单层树内部入口；只负责 `APP_ADMIN`（含 `SUPER_ADMIN`）鉴权、分支请求、traceId 和阻塞任务调度。
 - `web.platform.AppSourceController`、`web.platform.AppSourceOperationController`、`web.platform.AppSourceOperationWebSocketHandler`：应用源码列表/树/物化/重试/打开/最近选择、操作快照、一次性 ticket 与独立只读进度 WebSocket 入口；Controller 不访问 Repository，GET/ticket/upgrade/轮询均委托业务层按 repository 任一当前启用关联应用实时复核 TEAM/PERSONAL 权限，协议 wire 保持不变。
@@ -67,7 +67,7 @@ API 定义包，承载 HTTP/SSE/WebSocket 入口、请求响应 DTO、统一响�
 - JVM 内存通用参数 API 测试必须覆盖四个 `SUPER_ADMIN` 接口、同服务器多 Java、当前/远端进程、部分失败、离线、超时和防二次转发。
 - UI Tool 配置 API 测试必须覆盖无凭据窄字段响应、精确 API Token 过滤器例外和相邻路径不放行。
 - 定时任务 API 测试必须覆盖认证、owner 隔离、旧请求默认夜间模式、超级管理员自定义模式权限、输入校验、完整输入不回显、写入口用户 binding 路由和统一错误格式；内部批量入口还必须覆盖精确 token、固定目标、同服务器多 JVM 的 backendProcessId 选择、50 条上限、trace/防循环 header 和逐任务结果。
-- 用户管理 API 测试必须覆盖 `SUPER_ADMIN` 组合筛选查询、创建、单人/批量角色调整、按筛选全选的认证操作者映射、角色列表和非超级管理员/匿名拒绝。
+- 用户管理 API 测试必须覆盖 `SUPER_ADMIN` 组合筛选查询、创建、手工用户名修正且不接收统一认证号、单人/批量角色调整、按筛选全选的认证操作者映射、角色列表和非超级管理员/匿名拒绝。
 - Configuration 管理 API 测试必须覆盖代码库英文名 DTO、创建应用工作空间的用户 opencode 服务器透传、进度查询鉴权和统一错误格式。
 - 引用资产库 API 测试必须覆盖 7 个端点、请求/响应 DTO、traceId、`APP_ADMIN` 与 `SUPER_ADMIN` 成功和普通用户拒绝。
 - 应用源码 API 测试必须覆盖跨关联应用 TEAM 成员的 HTTP/ticket/WebSocket 成功，以及 ticket 签发后撤权、解除关联、禁用应用和 PERSONAL owner/成员管理员/普通成员边界。

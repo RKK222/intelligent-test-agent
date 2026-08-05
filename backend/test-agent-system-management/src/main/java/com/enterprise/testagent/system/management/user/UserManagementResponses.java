@@ -28,6 +28,24 @@ public final class UserManagementResponses {
             String role) {
     }
 
+    /** 手工修正用户名命令；统一认证号和既有授权不在该操作范围内。 */
+    public record UpdateUsernameCommand(String userId, String username) {
+
+        /** 规范化可信业务输入，避免非 HTTP 调用绕过用户名边界校验。 */
+        public UpdateUsernameCommand {
+            if (userId == null || userId.isBlank()) {
+                throw new IllegalArgumentException("用户 ID 不能为空");
+            }
+            if (username == null || username.isBlank()) {
+                throw new IllegalArgumentException("用户名不能为空");
+            }
+            username = username.trim();
+            if (username.length() > 128) {
+                throw new IllegalArgumentException("用户名不能超过 128 个字符");
+            }
+        }
+    }
+
     /**
      * 更新用户全局角色命令。当前测试管理入口只允许设置单个全局角色，避免和登录态多角色展示混淆。
      */

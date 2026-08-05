@@ -33,6 +33,7 @@ import com.enterprise.testagent.system.management.user.UserManagementResponses.C
 import com.enterprise.testagent.system.management.user.UserManagementResponses.DeleteUsersCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.RoleOption;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.SyncUsersFromTcdsCommand;
+import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUsernameCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRoleCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRolesCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UserRoleAssignment;
@@ -159,6 +160,69 @@ class UserManagementApplicationServiceTest {
                 "AUTH_3", "casper", null, null, null, "GHOST")))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+    }
+
+    @Test
+    void updateUsernamePreservesIdentityAndAuthorizationWithoutRevokingTokens() {
+        UserRepository userRepository = mock(UserRepository.class);
+        User current = User.createNew(
+                "usr_1234567890abcdef", "AUTH_1", "alice",
+                "$2a$10$hashedvalue", "企业", "研发部", "测试部");
+        when(userRepository.findByUserId(current.userId())).thenReturn(Optional.of(current));
+        when(userRepository.existsByUsername("Alice Updated")).thenReturn(false);
+        UserRoleRepository userRoleRepository = mock(UserRoleRepository.class);
+        when(userRoleRepository.findByUserId(current.userId()))
+                .thenReturn(List.of(UserRole.create(current.userId(), USER_DICT_ID)));
+        DictionaryRepository dictionaryRepository = mock(DictionaryRepository.class);
+        when(dictionaryRepository.findByDictId(USER_DICT_ID))
+                .thenReturn(Optional.of(roleDictionary(USER_DICT_ID, "USER", "普通用户", 4)));
+        TokenStore tokenStore = mock(TokenStore.class);
+        UserManagementApplicationService service = service(
+                userDomainService(userRepository),
+                userRepository,
+                mock(UserManagementQueryRepository.class),
+                mock(UserDeletionRepository.class),
+                userRoleRepository,
+                dictionaryRepository,
+                tokenStore,
+                mock(ThirdPartyUserApiClient.class));
+
+        UserResponse response = service.updateUsername(
+                new UpdateUsernameCommand(current.userId().value(), "  Alice Updated  "));
+
+        ArgumentCaptor<User> savedUser = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).save(savedUser.capture());
+        assertThat(savedUser.getValue())
+                .returns(current.userId(), User::userId)
+                .returns(current.unifiedAuthId(), User::unifiedAuthId)
+                .returns("Alice Updated", User::username)
+                .returns(current.organization(), User::organization)
+                .returns(current.rdDepartment(), User::rdDepartment)
+                .returns(current.department(), User::department)
+                .returns(current.passwordHash(), User::passwordHash)
+                .returns(current.status(), User::status);
+        assertThat(response.username()).isEqualTo("Alice Updated");
+        assertThat(response.unifiedAuthId()).isEqualTo("AUTH_1");
+        assertThat(response.roles()).containsExactly("USER");
+        verify(tokenStore, never()).deleteByUserIds(any());
+    }
+
+    @Test
+    void updateUsernameRejectsDuplicateNameWithoutWriting() {
+        UserRepository userRepository = mock(UserRepository.class);
+        User current = User.createNew(
+                "usr_1234567890abcdef", "AUTH_1", "alice", "hash", null, null, null);
+        when(userRepository.findByUserId(current.userId())).thenReturn(Optional.of(current));
+        when(userRepository.existsByUsername("bob")).thenReturn(true);
+        UserManagementApplicationService service = service(
+                userRepository, mock(UserRoleRepository.class), mock(DictionaryRepository.class));
+
+        assertThatThrownBy(() -> service.updateUsername(
+                new UpdateUsernameCommand(current.userId().value(), "bob")))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+
+        verify(userRepository, never()).save(any());
     }
 
     @Test

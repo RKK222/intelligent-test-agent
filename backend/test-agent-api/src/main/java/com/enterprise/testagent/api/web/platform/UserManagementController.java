@@ -10,6 +10,7 @@ import com.enterprise.testagent.system.management.user.UserManagementApplication
 import com.enterprise.testagent.system.management.user.UserManagementResponses.CreateUserCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.DeleteUsersCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.SyncUsersFromTcdsCommand;
+import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUsernameCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRoleCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UpdateUserRolesCommand;
 import com.enterprise.testagent.system.management.user.UserManagementResponses.UserRoleAssignment;
@@ -78,6 +79,18 @@ public class UserManagementController {
                 request.department(),
                 request.role());
         return ok(exchange, service.createUser(command));
+    }
+
+    /**
+     * 手工修正指定用户的用户名；统一认证号、角色和业务关联保持不变。
+     */
+    @PutMapping("/users/{userId}/username")
+    public ApiResponse<Object> updateUsername(
+            @PathVariable("userId") String userId,
+            @RequestBody UserManagementDtos.UpdateUsernameRequest request,
+            ServerWebExchange exchange) {
+        requireSuperAdmin(exchange);
+        return ok(exchange, service.updateUsername(new UpdateUsernameCommand(userId, request.username())));
     }
 
     /**

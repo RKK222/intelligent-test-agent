@@ -48,6 +48,35 @@ public record User(
     }
 
     /**
+     * 手工修正用户名，保留统一认证号、权限及全部业务关联。
+     *
+     * <p>用户名字段与数据库长度保持一致；该操作只修改持久化资料，不承担登录 Token 刷新职责。
+     */
+    public User renameUsername(String newUsername) {
+        String normalizedUsername = Objects.requireNonNull(newUsername, "newUsername must not be null").trim();
+        if (normalizedUsername.isBlank()) {
+            throw new IllegalArgumentException("newUsername must not be blank");
+        }
+        if (normalizedUsername.length() > 128) {
+            throw new IllegalArgumentException("newUsername must not exceed 128 characters");
+        }
+        if (username.equals(normalizedUsername)) {
+            return this;
+        }
+        return new User(
+                userId,
+                unifiedAuthId,
+                normalizedUsername,
+                passwordHash,
+                organization,
+                rdDepartment,
+                department,
+                status,
+                createdAt,
+                Instant.now());
+    }
+
+    /**
      * 保留用户业务 ID、认证号、密码和已有业务关联，仅用外部身份源刷新展示姓名与部门信息。
      *
      * <p>organization 不在当前 TCDS 响应中，因此沿用原值；空白部门统一转为空值，避免写入无意义空串。

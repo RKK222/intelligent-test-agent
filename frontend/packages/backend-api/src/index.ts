@@ -168,6 +168,7 @@ import type {
   TodoItem,
   DeleteUsersResult,
   SyncUsersFromTcdsResult,
+  UpdateUsernamePayload,
   UpdateUserRolePayload,
   UpdateUserRolesPayload,
   UpdateUserRolesResult,
@@ -2271,6 +2272,12 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     /** 创建测试用户，密码由后端注入默认值 123456。 */
     createUser: (payload: CreateUserPayload) =>
       request<UserManagementUser>(`${systemManagementBase}/users`, { method: "POST", body: JSON.stringify(payload) }),
+    /** 手工修正用户名，统一认证号、角色及业务关联保持不变（仅 SUPER_ADMIN）。 */
+    updateUsername: (userId: string, payload: UpdateUsernamePayload) =>
+      request<UserManagementUser>(`${systemManagementBase}/users/${encodeURIComponent(userId)}/username`, {
+        method: "PUT",
+        body: JSON.stringify(payload)
+      }),
     /** 调整指定用户的全局角色（仅 SUPER_ADMIN）。 */
     updateUserRole: (userId: string, payload: UpdateUserRolePayload) =>
       request<UserManagementUser>(`${systemManagementBase}/users/${encodeURIComponent(userId)}/roles`, {

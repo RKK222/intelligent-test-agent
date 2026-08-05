@@ -32,6 +32,7 @@ function createApi(): Partial<BackendApiClient> {
     listUsers: vi.fn().mockResolvedValue({ items: users, page: 1, size: 20, total: users.length }),
     listRoles: vi.fn().mockResolvedValue(roles),
     createUser: vi.fn().mockResolvedValue(users[0]),
+    updateUsername: vi.fn().mockResolvedValue({ ...users[0], username: "Alice Updated" }),
     updateUserRole: vi.fn().mockResolvedValue({ ...users[0], roles: ["USER"], roleLabels: ["普通用户"] }),
     updateUserRoles: vi.fn().mockResolvedValue({ updatedCount: 1 }),
     deleteUser: vi.fn().mockResolvedValue({ deletedUserIds: ["usr_existing"], deletedCount: 1 }),
@@ -324,6 +325,27 @@ describe("SettingsUserManagementPanel", () => {
     await fireEvent.click(getByRole("button", { name: "删除" }));
 
     await waitFor(() => expect(api.deleteUser).toHaveBeenCalledWith("usr_existing"));
+    await waitFor(() => expect((api.listUsers as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(2));
+  });
+
+  it("updates a username and warns that a later TCDS sync can overwrite it", async () => {
+    const api = createApi();
+    const prompt = vi.spyOn(ElMessageBox, "prompt")
+      .mockResolvedValue({ value: "  Alice Updated  " } as never);
+    const { findByText, getByRole } = renderPanel(api);
+
+    await findByText("alice");
+    await fireEvent.click(getByRole("button", { name: "修改用户名" }));
+
+    await waitFor(() => expect(api.updateUsername).toHaveBeenCalledWith(
+      "usr_existing",
+      { username: "Alice Updated" }
+    ));
+    expect(prompt).toHaveBeenCalledWith(
+      expect.stringMatching(/TCDS.*覆盖/),
+      expect.stringContaining("alice"),
+      expect.objectContaining({ inputValue: "alice" })
+    );
     await waitFor(() => expect((api.listUsers as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(2));
   });
 

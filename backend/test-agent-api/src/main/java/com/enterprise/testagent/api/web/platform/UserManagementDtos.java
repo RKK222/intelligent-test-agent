@@ -37,6 +37,21 @@ public final class UserManagementDtos {
         }
     }
 
+    /** 手工修正用户名请求体；统一认证号继续保持只读。 */
+    public record UpdateUsernameRequest(String username) {
+
+        /** 去除首尾空白并按 users.username 的字段长度校验。 */
+        public UpdateUsernameRequest {
+            if (username == null || username.isBlank()) {
+                throw new IllegalArgumentException("用户名不能为空");
+            }
+            username = username.trim();
+            if (username.length() > 128) {
+                throw new IllegalArgumentException("用户名不能超过 128 个字符");
+            }
+        }
+    }
+
     /**
      * 更新用户角色请求体。当前测试管理入口只接收单个全局角色 code。
      */
