@@ -159,11 +159,11 @@ public class SupportAccessApplicationService {
     }
 
     /**
-     * 返回当前超级管理员最近一次已入库工单号，仅用于表单建议，不恢复旧授权或排查上下文。
+     * 生成本次排查使用的新单号。当前工程没有权威工单数据源，禁止从历史授权循环回填旧号码。
      */
-    public Optional<String> findLatestIncidentId(AuthPrincipal principal) {
-        User actor = requireLiveSuperAdmin(principal);
-        return repository.findLatestIncidentId(actor.userId());
+    public String generateIncidentId(AuthPrincipal principal) {
+        requireLiveSuperAdmin(principal);
+        return RuntimeIdGenerator.supportAccessIncidentId();
     }
 
     /** 显式撤销当前授权。 */

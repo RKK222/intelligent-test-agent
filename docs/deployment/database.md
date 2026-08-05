@@ -1520,11 +1520,11 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 
 `V20260805132000__create_support_access_audit.sql` 只创建生产必需结构，不写入测试、演示、默认管理员或部署侧暗号：
 
-- `support_access_grants`：保存 `sag_` 授权 ID、actor 用户/用户名快照、工单号、原因、平台登录会话 SHA-256 摘要、签发/到期/撤销时间、撤销原因和 traceId。表不保存平台 Token 或 `sat_` 授权 Token 明文；actor 删除时外键 `ON DELETE SET NULL`，用户名与工单快照继续保留。
-- `support_access_audit_events`：append-only 保存 `sae_` 事件 ID、可空 grant/actor/target 外键、身份与工单快照、动作、资源类型/业务 ID、文件路径 SHA-256、结果/错误码、traceId、IP、User-Agent SHA-256 和发生时间。消息正文、文件正文、文件路径明文和 Token 均不得入表；用户或授权删除时外键置空，不级联删除审计。
-- actor、target、grant、工单和保留期索引均以前述查询字段加时间倒序建立；授权表额外按会话摘要和到期时间索引。历史 actor/target 外键置空后，快照仍可按工单、动作和 traceId 检索。
+- `support_access_grants`：保存 `sag_` 授权 ID、actor 用户/用户名快照、`incident_id` 排查单号、原因、平台登录会话 SHA-256 摘要、签发/到期/撤销时间、撤销原因和 traceId。表不保存平台 Token 或 `sat_` 授权 Token 明文；actor 删除时外键 `ON DELETE SET NULL`，用户名与排查单号快照继续保留。
+- `support_access_audit_events`：append-only 保存 `sae_` 事件 ID、可空 grant/actor/target 外键、身份与排查单号快照、动作、资源类型/业务 ID、文件路径 SHA-256、结果/错误码、traceId、IP、User-Agent SHA-256 和发生时间。消息正文、文件正文、文件路径明文和 Token 均不得入表；用户或授权删除时外键置空，不级联删除审计。
+- actor、target、grant、排查单号和保留期索引均以前述查询字段加时间倒序建立；授权表额外按会话摘要和到期时间索引。历史 actor/target 外键置空后，快照仍可按排查单号、动作和 traceId 检索。
 
-运行 SQL 全部位于 `SupportAccessMapper.xml`，包括按当前 actor 和签发时间倒序读取最近工单号；目标用户关联工作区查询位于 `UserWorkspaceQueryMapper.xml`，没有新增 JDBC SQL。工作区范围只包含 ACTIVE 个人工作区或 ACTIVE 非旁路会话通过创建人、Run 触发人、消息发送人归因到的工作区；历史空白 workspace name 只在读模型中回退为 workspaceId，不修改存量数据。
+运行 SQL 全部位于 `SupportAccessMapper.xml`；目标用户关联工作区查询位于 `UserWorkspaceQueryMapper.xml`，没有新增 JDBC SQL。当前工程没有权威工单数据源，排查单号由业务层生成，不查询历史授权，也不需要新增表或 Flyway migration。工作区范围只包含 ACTIVE 个人工作区或 ACTIVE 非旁路会话通过创建人、Run 触发人、消息发送人归因到的工作区；历史空白 workspace name 只在读模型中回退为 workspaceId，不修改存量数据。
 
 Redis 使用 `test-agent:support-access:session:{sessionDigest}` 与 `test-agent:support-access:token:{grantTokenDigest}` 保存当前授权摘要和短期 payload；两类 key/value 都不含原始平台/授权 Token。Lua rotate 保证同一平台登录会话的新授权立即淘汰旧 token，revoke 只删除仍与当前摘要匹配的 session key。TTL 与授权绝对到期时间一致，Redis 不可用时不降级 JVM 内存或数据库明文 Token。
 

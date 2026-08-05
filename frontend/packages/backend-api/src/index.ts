@@ -2417,8 +2417,9 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         method: "POST",
         body: JSON.stringify(payload)
       }),
-    getRecentSupportAccessIncident: () =>
+    getSupportAccessIncidentSuggestion: () =>
       request<SupportAccessIncidentSuggestion>(
+        // 滚动发布期间继续调用兼容别名，使新前端也能与尚未升级的旧后端共同运行。
         `${systemManagementBase}/support-access/grants/recent-incident`,
         { cache: "no-store" }
       ),

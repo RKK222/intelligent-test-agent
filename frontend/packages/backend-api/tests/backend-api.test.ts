@@ -9,11 +9,11 @@ import {
 } from "../src";
 
 describe("backend-api", () => {
-  it("reads the current super-admin recent persisted support incident", async () => {
+  it("requests a fresh generated support incident suggestion", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       success: true,
       traceId: "trace_fixed",
-      data: { incidentId: "INC-PERSISTED" }
+      data: { incidentId: "sai_generated", source: "GENERATED" }
     }), { status: 200 }));
     const client = createBackendApiClient({
       baseUrl: "http://api",
@@ -22,7 +22,10 @@ describe("backend-api", () => {
       traceIdFactory: () => "trace_fixed"
     });
 
-    await expect(client.getRecentSupportAccessIncident()).resolves.toEqual({ incidentId: "INC-PERSISTED" });
+    await expect(client.getSupportAccessIncidentSuggestion()).resolves.toEqual({
+      incidentId: "sai_generated",
+      source: "GENERATED"
+    });
     expect(fetcher).toHaveBeenCalledWith(
       "http://api/api/internal/platform/system-management/support-access/grants/recent-incident",
       expect.objectContaining({ cache: "no-store" })

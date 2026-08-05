@@ -104,14 +104,16 @@ public class SupportAccessController {
                 context.traceId());
     }
 
-    /** 查询当前操作人最近一次已入库工单号，供新授权表单自动回填。 */
-    @GetMapping("/grants/recent-incident")
-    public ApiResponse<SupportAccessDtos.IncidentSuggestionResponse> getRecentIncident(
+    /**
+     * 返回本次排查使用的新单号；旧 recent-incident 路径仅保留 HTTP 兼容，不再读取历史授权。
+     */
+    @GetMapping({"/grants/incident-suggestion", "/grants/recent-incident"})
+    public ApiResponse<SupportAccessDtos.IncidentSuggestionResponse> getIncidentSuggestion(
             ServerWebExchange exchange) {
         AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
         String traceId = RuntimeApiSupport.traceId(exchange);
-        String incidentId = supportAccessService.findLatestIncidentId(principal).orElse(null);
-        return ApiResponse.ok(new SupportAccessDtos.IncidentSuggestionResponse(incidentId), traceId);
+        String incidentId = supportAccessService.generateIncidentId(principal);
+        return ApiResponse.ok(new SupportAccessDtos.IncidentSuggestionResponse(incidentId, "GENERATED"), traceId);
     }
 
     /** 主动撤销授权。 */

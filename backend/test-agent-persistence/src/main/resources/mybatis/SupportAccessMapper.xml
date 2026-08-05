@@ -59,14 +59,6 @@
         where grant_id = #{grantId}
     </select>
 
-    <select id="findLatestIncidentId" resultType="java.lang.String">
-        select incident_id
-        from support_access_grants
-        where actor_user_id = #{actorUserId}
-        order by issued_at desc, id desc
-        limit 1
-    </select>
-
     <update id="revokeGrant">
         update support_access_grants
         set revoked_at = #{revokedAt}, revoke_reason = #{reason}

@@ -2952,8 +2952,9 @@ Base URL：`/api/internal/platform/system-management`
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| `POST` | `/grants` | 填写工单信息并签发绑定当前登录会话的限时只读授权。 |
-| `GET` | `/grants/recent-incident` | 返回当前超级管理员最近一次已入库的工单号，供新授权表单自动回填；不恢复旧授权。 |
+| `POST` | `/grants` | 携带排查单号和原因，签发绑定当前登录会话的限时只读授权。 |
+| `GET` | `/grants/incident-suggestion` | 返回本次排查使用的单号及来源。当前没有权威工单数据源时，每次生成新的 `sai_` 单号。 |
+| `GET` | `/grants/recent-incident` | 兼容旧客户端的别名；响应与 `incident-suggestion` 相同，不再读取历史授权。 |
 | `DELETE` | `/grants/{grantId}` | 显式撤销当前授权。 |
 | `POST` | `/targets/{targetUserId}/selections` | 选择/切换目标用户并记录审计。 |
 | `GET` | `/targets/{targetUserId}/sessions?q=&includeArchived=&page=&size=` | 按目标用户归因规则分页查询会话；默认仅 ACTIVE，显式 `includeArchived=true` 时包含软删除的 ARCHIVED。 |
@@ -2967,7 +2968,7 @@ Base URL：`/api/internal/platform/system-management`
 
 ```json
 {
-  "incidentId": "INC-2026-00123",
+  "incidentId": "sai_0123456789abcdef0123456789abcdef",
   "reason": "排查失败会话及关联工作区",
   "durationMinutes": 30,
   "readOnlyAcknowledged": true
@@ -2984,9 +2985,9 @@ Base URL：`/api/internal/platform/system-management`
 }
 ```
 
-最近工单响应为 `{ "incidentId": "INC-2026-00123" }`；没有历史授权时为 `null`。查询严格使用当前登录 actor，不接受前端传入用户 ID。页面在当前超级管理员资料可用后自动回填；即使组件先于登录资料挂载，也必须在身份稍后到达时补触发。自动请求返回前已有人工输入时不得覆盖，页面同时允许用户显式重新带入最近工单；不恢复历史原因、目标用户、时长、确认状态或 grant。
+排查单号建议响应为 `{ "incidentId": "sai_<32位小写十六进制UUID>", "source": "GENERATED" }`。当前工程没有权威工单表或外部工单服务，因此后端每次请求都生成新号码，禁止从最近授权循环回填；未来接入权威工单时可返回 `source=WORK_ORDER`，`incidentId` 字段保持兼容。查询严格使用当前登录 actor，不接受前端传入用户 ID。页面在当前超级管理员资料可用后自动请求，组件先挂载、身份后到达时同样补触发；再次三击 Shift、撤销或到期后都会为下一轮请求新号，不恢复历史原因、目标用户、时长、确认状态或 grant。
 
-除签发、最近工单建议和审计列表外，其余排查请求必须携带：
+除签发、排查单号建议和审计列表外，其余排查请求必须携带：
 
 ```http
 X-Support-Access-Grant: sat_...

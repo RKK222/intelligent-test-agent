@@ -38,6 +38,7 @@ const resourceTab = ref<ResourceTab>("sessions");
 const grant = ref<SupportAccessGrant | null>(null);
 const incidentId = ref("");
 const incidentPrefilled = ref(false);
+const incidentSuggestionSource = ref<"WORK_ORDER" | "GENERATED" | "">("");
 const incidentSuggestionLoading = ref(false);
 const reason = ref("");
 const durationMinutes = ref(30);
@@ -152,18 +153,19 @@ onBeforeUnmount(() => {
 
 watch(supportActorKey, (actorUserId, previousActorUserId) => {
   if (actorUserId === previousActorUserId) return;
-  // 组件可能先于登录用户资料挂载；身份稍后到达时仍要触发最近工单回填。
+  // 组件可能先于登录用户资料挂载；身份稍后到达时仍要生成本次排查单号。
   if (previousActorUserId) {
     incidentId.value = "";
     incidentPrefilled.value = false;
+    incidentSuggestionSource.value = "";
   }
-  if (actorUserId) void prefillRecentIncident();
+  if (actorUserId) void loadIncidentSuggestion();
 }, { immediate: true });
 
 watch(() => props.activationSequence, (activationSequence, previousActivationSequence) => {
   if (activationSequence === previousActivationSequence || grant.value) return;
-  // 再次三击 Shift 代表管理员主动重新进入；只刷新自动值或空值，不能覆盖已手工填写的新工单。
-  if (incidentPrefilled.value || !incidentId.value.trim()) void prefillRecentIncident(true);
+  // 再次三击 Shift 代表一轮新的排查上下文，必须取得新的排查单号。
+  void loadIncidentSuggestion();
 });
 
 watch(() => props.currentUser?.roles, (roles) => {
@@ -180,8 +182,8 @@ watch(remainingSeconds, (seconds) => {
     api.closeSupportAccessConnections(grant.value.grantId);
     clearGrantState();
     resetGrantForm();
-    void prefillRecentIncident(true);
-    errorMessage.value = "排查授权已到期，请重新填写工单信息并授权";
+    void loadIncidentSuggestion();
+    errorMessage.value = "排查授权已到期，请重新填写排查原因并授权";
   }
 });
 
@@ -189,37 +191,42 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/**
- * 只回填当前管理员最近一次已入库工单；请求返回前已有人工输入时不得覆盖。
- */
-async function prefillRecentIncident(force = false) {
+/** 获取权威工单建议；当前后端没有工单数据源时会返回新的唯一排查单号。 */
+async function loadIncidentSuggestion() {
   if (!props.currentUser?.roles?.includes("SUPER_ADMIN")) return;
   const actorUserId = props.currentUser.userId;
   const requestId = ++incidentSuggestionRequest;
   incidentSuggestionLoading.value = true;
   try {
-    const suggestion = await api.getRecentSupportAccessIncident();
+    const suggestion = await api.getSupportAccessIncidentSuggestion();
     const suggestedIncidentId = suggestion.incidentId?.trim() || "";
     if (requestId === incidentSuggestionRequest
-      && supportActorKey.value === actorUserId
-      && (force || !incidentId.value.trim())) {
+      && supportActorKey.value === actorUserId) {
       incidentId.value = suggestedIncidentId;
       incidentPrefilled.value = Boolean(suggestedIncidentId);
+      incidentSuggestionSource.value = suggestion.source || "GENERATED";
+      if (!suggestedIncidentId) {
+        errorMessage.value = "未取得可用的排查单号，请点击重新生成";
+      } else if (errorMessage.value === "生成排查单号失败，请点击重试"
+        || errorMessage.value === "未取得可用的排查单号，请点击重新生成") {
+        errorMessage.value = "";
+      }
     }
   } catch {
-    // 自动回填属于便利能力，失败时保持表单可手工填写，不遮挡主要排查流程。
+    if (requestId === incidentSuggestionRequest && supportActorKey.value === actorUserId) {
+      incidentId.value = "";
+      incidentPrefilled.value = false;
+      incidentSuggestionSource.value = "";
+      errorMessage.value = "生成排查单号失败，请点击重试";
+    }
   } finally {
     if (requestId === incidentSuggestionRequest) incidentSuggestionLoading.value = false;
   }
 }
 
-function markIncidentAsManual() {
-  incidentPrefilled.value = false;
-}
-
 async function issueGrant() {
   if (!incidentId.value.trim() || !reason.value.trim() || !readOnlyAcknowledged.value) {
-    errorMessage.value = "请填写工单号、排查原因并确认只读约束";
+    errorMessage.value = "请等待生成排查单号、填写排查原因并确认只读约束";
     return;
   }
   issuing.value = true;
@@ -251,15 +258,16 @@ async function closeGrant() {
   } finally {
     clearGrantState();
     resetGrantForm();
-    void prefillRecentIncident(true);
+    void loadIncidentSuggestion();
     closing.value = false;
   }
 }
 
-/** 撤销或到期后清除上一轮敏感上下文，再重新读取数据库中的最新工单建议。 */
+/** 撤销或到期后清除上一轮敏感上下文，再为下一轮生成新的排查单号。 */
 function resetGrantForm() {
   incidentId.value = "";
   incidentPrefilled.value = false;
+  incidentSuggestionSource.value = "";
   reason.value = "";
   durationMinutes.value = 30;
   readOnlyAcknowledged.value = false;
@@ -602,19 +610,21 @@ function resetTranscriptState() {
         <div class="grant-notice">
           <span class="notice-mark">READ ONLY</span>
           <div><strong>先建立一次限时排查上下文</strong>
-            <span>入口快捷键不是认证因素；授权依赖当前 SUPER_ADMIN、有效登录会话和工单信息。</span>
+            <span>入口快捷键不是认证因素；授权依赖当前 SUPER_ADMIN、有效登录会话和排查单号。</span>
           </div>
         </div>
         <div class="grant-fields">
           <label class="form-field">当前操作人<input :value="actorLabel" disabled /></label>
           <div class="form-field incident-field">
-            <span class="field-label"><label for="support-incident-id">工单号</label>
-              <button type="button" :disabled="incidentSuggestionLoading" @click="prefillRecentIncident(true)">
-                {{ incidentSuggestionLoading ? '读取中…' : '重新读取最近工单' }}
+            <span class="field-label"><label for="support-incident-id">排查单号</label>
+              <button type="button" :disabled="incidentSuggestionLoading" @click="loadIncidentSuggestion">
+                {{ incidentSuggestionLoading ? '生成中…' : '生成新排查单号' }}
               </button>
             </span>
-            <input id="support-incident-id" v-model="incidentId" maxlength="128" placeholder="例如 INC-2026-00123" @input="markIncidentAsManual" />
-            <small v-if="incidentPrefilled">已读取最近一条授权记录的入库工单；数据库未变化时号码不变</small>
+            <input id="support-incident-id" v-model="incidentId" maxlength="128" placeholder="正在生成…" readonly />
+            <small v-if="incidentPrefilled">
+              {{ incidentSuggestionSource === 'WORK_ORDER' ? '已读取当前有效工单' : '系统已生成唯一排查单号；重新生成后号码会变化' }}
+            </small>
           </div>
           <label class="form-field form-field-wide">排查原因<textarea v-model="reason" maxlength="1000" rows="4" placeholder="描述故障、影响范围和需要核对的内容" /></label>
           <label class="form-field duration-field">授权时长
@@ -629,7 +639,7 @@ function resetTranscriptState() {
           <span>我确认仅用于问题排查，不写入、不上传、不进入终端/Agent 配置，也不批量导出。</span>
         </label>
         <div class="grant-actions">
-          <button class="primary" :disabled="issuing" @click="issueGrant">{{ issuing ? '授权中…' : '开启限时只读访问' }}</button>
+          <button class="primary" :disabled="issuing || incidentSuggestionLoading || !incidentId" @click="issueGrant">{{ issuing ? '授权中…' : '开启限时只读访问' }}</button>
           <span>授权到期或离开页面后自动撤销。</span>
         </div>
       </div>
@@ -665,7 +675,7 @@ function resetTranscriptState() {
               </el-option>
             </el-select>
           </div>
-          <span><small>工单</small><b>{{ incidentId }}</b></span>
+          <span><small>排查单号</small><b>{{ incidentId }}</b></span>
           <span><small>剩余时间</small><b class="mono-value">{{ countdownLabel }}</b></span>
           <span class="readonly-pill">只读</span>
           <button :disabled="closing" @click="closeGrant">{{ closing ? '关闭中…' : '关闭并撤销' }}</button>
@@ -793,14 +803,14 @@ function resetTranscriptState() {
 
     <section v-else class="audit-panel">
       <div class="audit-filter">
-        <input v-model="auditIncidentId" placeholder="工单号" @keyup.enter="loadAudit(1)" />
+        <input v-model="auditIncidentId" placeholder="排查单号" @keyup.enter="loadAudit(1)" />
         <select v-model="auditOutcome"><option value="">全部结果</option><option value="SUCCESS">SUCCESS</option><option value="FAILED">FAILED</option></select>
         <button @click="loadAudit(1)">查询</button>
       </div>
       <div v-if="auditLoading" class="empty">加载中…</div>
       <div class="audit-table-wrap">
         <table>
-          <thead><tr><th>时间</th><th>操作人</th><th>目标</th><th>工单</th><th>动作</th><th>资源</th><th>结果</th><th>Trace</th></tr></thead>
+          <thead><tr><th>时间</th><th>操作人</th><th>目标</th><th>排查单号</th><th>动作</th><th>资源</th><th>结果</th><th>Trace</th></tr></thead>
           <tbody><tr v-for="event in audit.items" :key="event.eventId"><td>{{ formatTime(event.occurredAt) }}</td><td>{{ event.actorUsername }}<br><small>{{ event.actorUserId || '-' }}</small></td><td>{{ event.targetUsername || '-' }}<br><small>{{ event.targetUserId || '-' }}</small></td><td>{{ event.incidentId || '-' }}</td><td>{{ event.action }}</td><td>{{ event.resourceType }}<br><small>{{ event.resourceId || event.pathDigest || '-' }}</small></td><td :class="event.outcome === 'SUCCESS' ? 'ok' : 'fail'">{{ event.outcome }}<br><small>{{ event.errorCode || '' }}</small></td><td><small>{{ event.traceId }}</small></td></tr></tbody>
         </table>
       </div>
@@ -951,7 +961,8 @@ function resetTranscriptState() {
   outline: 2px solid #f8dfe0;
   outline-offset: 1px;
 }
-.grant-form input:not([type="checkbox"]):disabled { background: #f7f8fa; color: #6b7280; }
+.grant-form input:not([type="checkbox"]):disabled,
+.grant-form input:not([type="checkbox"])[readonly] { background: #f7f8fa; color: #4b5563; }
 .grant-form textarea { min-height: 96px; resize: vertical; }
 .grant-check { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: 8px; color: #4b5563; font-size: 13px; line-height: 1.5; }
 .grant-check input,

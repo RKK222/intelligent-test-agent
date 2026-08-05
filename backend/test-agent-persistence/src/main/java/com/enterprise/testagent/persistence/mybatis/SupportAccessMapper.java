@@ -13,8 +13,6 @@ public interface SupportAccessMapper {
 
     SupportAccessGrantRow findGrant(@Param("grantId") String grantId);
 
-    String findLatestIncidentId(@Param("actorUserId") String actorUserId);
-
     int revokeGrant(
             @Param("grantId") String grantId,
             @Param("revokedAt") Instant revokedAt,

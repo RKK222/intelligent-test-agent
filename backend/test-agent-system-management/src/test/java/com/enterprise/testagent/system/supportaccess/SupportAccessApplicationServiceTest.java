@@ -96,12 +96,12 @@ class SupportAccessApplicationServiceTest {
     }
 
     @Test
-    void returnsLatestIncidentOnlyForCurrentLiveSuperAdmin() {
-        when(repository.findLatestIncidentId(ACTOR_ID)).thenReturn(Optional.of("INC-PERSISTED"));
+    void generatesANewIncidentForEveryLiveSuperAdminRequest() {
+        String first = service.generateIncidentId(principal());
+        String second = service.generateIncidentId(principal());
 
-        assertThat(service.findLatestIncidentId(principal())).contains("INC-PERSISTED");
-
-        verify(repository).findLatestIncidentId(ACTOR_ID);
+        assertThat(first).matches("sai_[0-9a-f]{32}");
+        assertThat(second).matches("sai_[0-9a-f]{32}").isNotEqualTo(first);
     }
 
     @Test

@@ -231,6 +231,11 @@ public final class RuntimeIdGenerator {
         return prefixed("sag_");
     }
 
+    /** 生成问题排查单号；没有权威工单数据源时用于替代外部工单号。 */
+    public static String supportAccessIncidentId() {
+        return prefixed("sai_");
+    }
+
     /** 生成问题排查审计事件 ID。 */
     public static String supportAccessAuditEventId() {
         return prefixed("sae_");

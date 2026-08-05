@@ -2379,9 +2379,10 @@ export type SupportAccessGrant = {
   expiresAt: string;
 };
 
-/** 最近工单只用于新授权表单建议，不代表历史授权仍然有效。 */
+/** 排查单号建议；没有权威工单数据源时由平台生成新的唯一号码。 */
 export type SupportAccessIncidentSuggestion = {
   incidentId?: string | null;
+  source?: "WORK_ORDER" | "GENERATED";
 };
 
 export type SupportAccessTarget = {

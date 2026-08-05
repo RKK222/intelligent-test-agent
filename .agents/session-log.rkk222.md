@@ -6108,3 +6108,34 @@
   审计记录。
 - 未修改 API 契约、RunEvent、数据库/Flyway、ticket/RPC、限流、鉴权、`.env*`、OpenCode 源码或 generated SDK；
   Workflow/LobeHub 继续不启动。
+
+## 2026-08-05 - 为问题排查生成唯一单号
+
+### Why
+
+- 仓库内没有权威业务工单表或外部工单服务；原“最近工单”实际读取的是上一条排查授权记录，导致最新值为 `132`
+  时重复激活、撤销和重新读取都会继续得到 `132`，形成自引用，不能标识新一轮排查。
+
+### What
+
+- 新增 `sai_` 加 32 位小写十六进制 UUID 的排查单号生成器；SUPER_ADMIN 每次请求建议值都会获得新号码。
+- 新增规范接口 `GET /api/platform/support-access/grants/incident-suggestion`，响应增加可选 `source`；保留
+  `/grants/recent-incident` 作为兼容别名，但不再查询历史授权。删除 Repository、MyBatis Mapper/XML 中已无用途的
+  “最近工单”查询，没有新增或修改数据库结构。
+- 前端将字段改为只读“排查单号”，三击 Shift 重复激活、撤销、到期和“生成新排查单号”都会请求新值；并用请求
+  代次隔离迟到响应，生成失败时禁止提交授权。同步 backend-api/shared-types、模块 README、HTTP API、数据库和安全文档。
+
+### How
+
+- 后端定向测试覆盖 ID 格式、权限和每次生成不同号码；common、system-management、persistence、api 相关测试均通过。
+- 前端排查面板、系统管理和 backend-api 定向 Vitest 3 个文件 118 项通过；workspace typecheck 与 agent-web
+  production build 通过，仅保留既有大 chunk 告警。
+- 使用 JDK 25、未修改的主工作区 `.env.test` 和既有测试数据根，以 `--without-workflow` 重启 backend、manager、
+  frontend；backend health/readiness 为 `UP`，前端 3000 返回 200。
+- 真实浏览器确认字段为只读，手动生成与再次三击 Shift 均得到不同且符合 `sai_[0-9a-f]{32}` 的排查单号。
+
+### Result
+
+- 新一轮排查不再循环复用历史授权中的 `132`；每次激活或重建都有可审计的唯一排查单号。
+- HTTP 新增规范路径并保留旧路径兼容，`source` 为向后兼容的响应扩展；未修改 RunEvent、数据库/Flyway、
+  ticket/RPC、限流、`.env*`、OpenCode 源码或 generated SDK。仓库未来接入真实工单源时可返回 `WORK_ORDER` 来源。

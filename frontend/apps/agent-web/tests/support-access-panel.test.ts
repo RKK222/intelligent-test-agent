@@ -16,7 +16,7 @@ function backendApi(
   suggestion: Promise<SupportAccessIncidentSuggestion>
 ): BackendApiClient {
   return {
-    getRecentSupportAccessIncident: vi.fn().mockReturnValue(suggestion),
+    getSupportAccessIncidentSuggestion: vi.fn().mockReturnValue(suggestion),
     listUsers: vi.fn().mockResolvedValue({ items: [], page: 1, size: 100, total: 0 })
   } as Partial<BackendApiClient> as BackendApiClient;
 }
@@ -28,54 +28,63 @@ function renderPanel(api: BackendApiClient, props: { activationSequence?: number
   });
 }
 
-describe("support access panel incident prefill", () => {
-  it("prefills the current admin recent persisted incident", async () => {
-    const api = backendApi(Promise.resolve({ incidentId: "  INC-PERSISTED  " }));
+describe("support access panel incident suggestion", () => {
+  it("loads a generated incident for the current admin", async () => {
+    const api = backendApi(Promise.resolve({ incidentId: "  sai_generated  ", source: "GENERATED" }));
     const view = renderPanel(api);
 
-    const input = view.getByLabelText("工单号") as HTMLInputElement;
-    await waitFor(() => expect(input.value).toBe("INC-PERSISTED"));
-    expect(api.getRecentSupportAccessIncident).toHaveBeenCalledTimes(1);
+    const input = view.getByLabelText("排查单号") as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe("sai_generated"));
+    expect(input.readOnly).toBe(true);
+    expect(view.getByText("系统已生成唯一排查单号；重新生成后号码会变化")).toBeTruthy();
+    expect(api.getSupportAccessIncidentSuggestion).toHaveBeenCalledTimes(1);
   });
 
-  it("does not overwrite manual input while the suggestion request is pending", async () => {
+  it("ignores a stale incident response after repeated activation", async () => {
     let resolveSuggestion!: (value: SupportAccessIncidentSuggestion) => void;
-    const suggestion = new Promise<SupportAccessIncidentSuggestion>((resolve) => {
+    const firstSuggestion = new Promise<SupportAccessIncidentSuggestion>((resolve) => {
       resolveSuggestion = resolve;
     });
-    const view = renderPanel(backendApi(suggestion));
-    const input = view.getByLabelText("工单号") as HTMLInputElement;
+    const getSupportAccessIncidentSuggestion = vi.fn()
+      .mockReturnValueOnce(firstSuggestion)
+      .mockResolvedValueOnce({ incidentId: "sai_new", source: "GENERATED" });
+    const api = {
+      getSupportAccessIncidentSuggestion,
+      listUsers: vi.fn().mockResolvedValue({ items: [], page: 1, size: 100, total: 0 })
+    } as Partial<BackendApiClient> as BackendApiClient;
+    const view = renderPanel(api, { activationSequence: 1 });
+    const input = view.getByLabelText("排查单号") as HTMLInputElement;
 
-    await fireEvent.update(input, "INC-MANUAL");
-    resolveSuggestion({ incidentId: "INC-PERSISTED" });
-    await suggestion;
+    await view.rerender({ currentUser, activationSequence: 2 });
+    await waitFor(() => expect(input.value).toBe("sai_new"));
+    resolveSuggestion({ incidentId: "sai_stale", source: "GENERATED" });
+    await firstSuggestion;
     await nextTick();
 
-    expect(input.value).toBe("INC-MANUAL");
+    expect(input.value).toBe("sai_new");
   });
 
-  it("prefills after the current admin profile arrives asynchronously", async () => {
-    const api = backendApi(Promise.resolve({ incidentId: "INC-LATE-ACTOR" }));
+  it("loads an incident after the current admin profile arrives asynchronously", async () => {
+    const api = backendApi(Promise.resolve({ incidentId: "sai_late_actor", source: "GENERATED" }));
     const view = render(SupportAccessPanel, {
       props: { currentUser: null },
       global: { provide: { api } }
     });
 
-    expect(api.getRecentSupportAccessIncident).not.toHaveBeenCalled();
+    expect(api.getSupportAccessIncidentSuggestion).not.toHaveBeenCalled();
     await view.rerender({ currentUser });
 
-    const input = view.getByLabelText("工单号") as HTMLInputElement;
-    await waitFor(() => expect(input.value).toBe("INC-LATE-ACTOR"));
-    expect(view.getByText("已读取最近一条授权记录的入库工单；数据库未变化时号码不变")).toBeTruthy();
+    const input = view.getByLabelText("排查单号") as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe("sai_late_actor"));
   });
 
-  it("refreshes the persisted incident after repeated activation and grant revocation", async () => {
-    const getRecentSupportAccessIncident = vi.fn()
-      .mockResolvedValueOnce({ incidentId: "INC-132" })
-      .mockResolvedValueOnce({ incidentId: "INC-133" })
-      .mockResolvedValueOnce({ incidentId: "INC-134" });
+  it("generates a different incident after repeated activation and grant revocation", async () => {
+    const getSupportAccessIncidentSuggestion = vi.fn()
+      .mockResolvedValueOnce({ incidentId: "sai_132", source: "GENERATED" })
+      .mockResolvedValueOnce({ incidentId: "sai_133", source: "GENERATED" })
+      .mockResolvedValueOnce({ incidentId: "sai_134", source: "GENERATED" });
     const api = {
-      getRecentSupportAccessIncident,
+      getSupportAccessIncidentSuggestion,
       listUsers: vi.fn().mockResolvedValue({ items: [], page: 1, size: 30, total: 0 }),
       issueSupportAccessGrant: vi.fn().mockResolvedValue({
         grantId: "sag_refresh",
@@ -87,19 +96,19 @@ describe("support access panel incident prefill", () => {
     } as Partial<BackendApiClient> as BackendApiClient;
     const view = renderPanel(api, { activationSequence: 1 });
 
-    await waitFor(() => expect((view.getByLabelText("工单号") as HTMLInputElement).value).toBe("INC-132"));
+    await waitFor(() => expect((view.getByLabelText("排查单号") as HTMLInputElement).value).toBe("sai_132"));
     await view.rerender({ currentUser, activationSequence: 2 });
-    await waitFor(() => expect((view.getByLabelText("工单号") as HTMLInputElement).value).toBe("INC-133"));
+    await waitFor(() => expect((view.getByLabelText("排查单号") as HTMLInputElement).value).toBe("sai_133"));
 
-    await fireEvent.update(view.getByLabelText("排查原因"), "验证撤销后的工单刷新");
+    await fireEvent.update(view.getByLabelText("排查原因"), "验证撤销后生成新的排查单号");
     await fireEvent.click(view.getByLabelText(/我确认仅用于问题排查/));
     await fireEvent.click(view.getByRole("button", { name: "开启限时只读访问" }));
     await fireEvent.click(await view.findByRole("button", { name: "关闭并撤销" }));
 
-    await waitFor(() => expect((view.getByLabelText("工单号") as HTMLInputElement).value).toBe("INC-134"));
+    await waitFor(() => expect((view.getByLabelText("排查单号") as HTMLInputElement).value).toBe("sai_134"));
     expect((view.getByLabelText("排查原因") as HTMLTextAreaElement).value).toBe("");
     expect((view.getByLabelText(/我确认仅用于问题排查/) as HTMLInputElement).checked).toBe(false);
-    expect(getRecentSupportAccessIncident).toHaveBeenCalledTimes(3);
+    expect(getSupportAccessIncidentSuggestion).toHaveBeenCalledTimes(3);
   });
 
   it("loads archived sessions only on demand and disables offline workspaces", async () => {
@@ -120,7 +129,7 @@ describe("support access panel incident prefill", () => {
       total: 1
     });
     const api = {
-      getRecentSupportAccessIncident: vi.fn().mockResolvedValue({ incidentId: "INC-1" }),
+      getSupportAccessIncidentSuggestion: vi.fn().mockResolvedValue({ incidentId: "sai_1", source: "GENERATED" }),
       listUsers,
       issueSupportAccessGrant: vi.fn().mockResolvedValue({
         grantId: "sag_1",
@@ -185,7 +194,7 @@ describe("support access panel incident prefill", () => {
 
   it("renders assistant parts through the same timeline used by the user homepage", async () => {
     const api = {
-      getRecentSupportAccessIncident: vi.fn().mockResolvedValue({ incidentId: "INC-1" }),
+      getSupportAccessIncidentSuggestion: vi.fn().mockResolvedValue({ incidentId: "sai_1", source: "GENERATED" }),
       listUsers: vi.fn().mockResolvedValue({
         items: [{
           userId: "usr_target",

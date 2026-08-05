@@ -104,17 +104,4 @@ class SupportAccessRepositoryIntegrationTest {
         assertThat(repository.deleteExpiredBefore(Instant.parse("2025-08-05T00:00:00Z"))).isEqualTo(2);
         assertThat(repository.findGrant(grant.grantId())).isEmpty();
     }
-
-    @Test
-    void returnsLatestPersistedIncidentForActor() {
-        repository.saveGrant(new SupportAccessGrant(
-                "sag_persistence_old", ACTOR_ID, "support-actor", "INC-OLDER", "较早排查",
-                "1".repeat(64), ISSUED_AT, ISSUED_AT.plusSeconds(1800), null, null, "trace_old"));
-        repository.saveGrant(new SupportAccessGrant(
-                "sag_persistence_latest", ACTOR_ID, "support-actor", "INC-LATEST", "最近排查",
-                "2".repeat(64), ISSUED_AT.plusSeconds(60), ISSUED_AT.plusSeconds(1860), null, null, "trace_latest"));
-
-        assertThat(repository.findLatestIncidentId(ACTOR_ID)).contains("INC-LATEST");
-        assertThat(repository.findLatestIncidentId(new UserId("usr_without_grant"))).isEmpty();
-    }
 }
