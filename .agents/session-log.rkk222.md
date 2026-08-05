@@ -5805,11 +5805,15 @@
   与本次排空页面无关。
 - JDK 25 下 20 模块 `mvn -pl test-agent-app -am -DskipTests package`、`verify-ai-docs.sh` 和
   `git diff --check` 通过。按默认 `.env.test`/`test` profile 尝试真实重启时，脚本在停止旧服务前因工作流
-  密钥文件缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 失败；未改环境文件或切换旧 profile。既有 backend/frontend
-  仍分别在 8080/3000 返回 200，但旧 backend JAR 不包含本次改动，不能作为本次运行验证。
+  密钥文件缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 失败；未改环境文件或切换旧 profile。用户随后明确要求不启动
+  Workflow/LobeHub：先安全停止旧版多 Worker screen、精确 PID、LobeHub 应用和开发容器，再用
+  `--without-workflow` 重建并重启 backend、manager、frontend。health/readiness 均为 `UP`，前端 3000 和
+  CORS 正常，manager WebSocket 已连接且 OpenCode 最终为 `HEALTHY`；8090/3210 均无监听，最终只保留三服务
+  screen，frontend 启动变量也明确为 Workflow/LobeHub disabled。
 
 ### Result
 
 - 超级管理员现在可以直接在排空页看到具体阻塞用户、个人错误和进程坐标，并复用已有停止能力只关闭该目标
   OpenCode；服务器聚合计数仍保持完整，诊断明细有界且兼容旧客户端/旧后端。
-- 代码、真实 PostgreSQL、前端构建和定向行为已验证；更新后端的本地真实启动仍受上述开发密钥缺失阻塞。
+- 代码、真实 PostgreSQL、前端构建、定向行为和更新后端的本地三服务运行均已验证；Workflow/LobeHub 按用户
+  要求保持停止，本次没有改写其密钥或环境配置。
