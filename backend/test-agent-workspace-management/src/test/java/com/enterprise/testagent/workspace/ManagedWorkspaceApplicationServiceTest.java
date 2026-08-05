@@ -2,7 +2,10 @@ package com.enterprise.testagent.workspace;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -34,6 +37,7 @@ import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutCoo
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
 import com.enterprise.testagent.domain.configuration.SshKeyId;
 import com.enterprise.testagent.domain.configuration.UserSshKey;
+import com.enterprise.testagent.domain.hub.AgentSkillHubPushIndexer;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersion;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionId;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplica;
@@ -68,6 +72,7 @@ import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 
 class ManagedWorkspaceApplicationServiceTest {
 
@@ -623,15 +628,65 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
-    void recordsApplicationAgentPublishAndBroadcastsUpdatedFeatureHead() {
+    void recordsApplicationAgentPublishAndIndexesEveryWorkspaceInRepositoryGroup() throws Exception {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
         FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
         RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
         ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git, publisher);
+        AgentSkillHubPushIndexer hubIndexer = mock(AgentSkillHubPushIndexer.class);
+        service.setAgentSkillHubPushIndexer(hubIndexer);
         ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
                 "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        Instant now = Instant.now();
+        ApplicationWorkspaceId siblingTemplateId = new ApplicationWorkspaceId("awp_order");
+        configuration.savedWorkspaces.add(new ApplicationWorkspace(
+                siblingTemplateId,
+                new ApplicationId("app_gcms"),
+                new CodeRepositoryId("repo_1"),
+                "main",
+                "F-GCMS/order",
+                "订单 Workspace",
+                true,
+                now,
+                now));
+        ApplicationWorkspaceVersion sourceVersion = managed.findVersion(
+                new ApplicationWorkspaceVersionId(version.versionId())).orElseThrow();
+        ApplicationWorkspaceVersionId siblingVersionId = new ApplicationWorkspaceVersionId("awv_order");
+        WorkspaceId siblingRuntimeId = new WorkspaceId("wrk_order_feature");
+        Path siblingWorkspaceRoot = applicationRepoRoot().resolve("F-GCMS/order");
+        Files.createDirectories(siblingWorkspaceRoot);
+        managed.saveVersion(new ApplicationWorkspaceVersion(
+                siblingVersionId,
+                siblingTemplateId,
+                sourceVersion.appId(),
+                sourceVersion.repositoryId(),
+                sourceVersion.version(),
+                sourceVersion.branch(),
+                sourceVersion.repoRootPath(),
+                "appworkspace:20260707/gcms/F-GCMS/order",
+                siblingRuntimeId,
+                sourceVersion.createdBy(),
+                sourceVersion.status(),
+                sourceVersion.targetCommitHash(),
+                sourceVersion.targetCommitUpdatedAt(),
+                now,
+                now));
+        managed.saveVersionReplica(new ApplicationWorkspaceVersionReplica(
+                new ApplicationWorkspaceVersionReplicaId("awr_order"),
+                siblingVersionId,
+                "127.0.0.1",
+                sourceVersion.repoRootPath(),
+                "appworkspace:20260707/gcms/F-GCMS/order",
+                siblingRuntimeId,
+                "commit_base",
+                WorkspaceReplicaSyncStatus.READY,
+                null,
+                now,
+                "trace_order_replica",
+                now,
+                now));
         publisher.events.clear();
 
         service.recordFeatureWorkspacePublished(
@@ -640,8 +695,25 @@ class ManagedWorkspaceApplicationServiceTest {
                 new UserId("usr_1"),
                 "trace_agent_publish");
 
-        assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_agent_config");
-        assertThat(managed.replicas.get(0).currentCommitHash()).isEqualTo("commit_agent_config");
+        assertThat(managed.versions).extracting(ApplicationWorkspaceVersion::targetCommitHash)
+                .containsOnly("commit_agent_config");
+        assertThat(managed.replicas).extracting(ApplicationWorkspaceVersionReplica::currentCommitHash)
+                .containsOnly("commit_agent_config");
+        ArgumentCaptor<ApplicationWorkspaceVersion> versionCaptor =
+                ArgumentCaptor.forClass(ApplicationWorkspaceVersion.class);
+        ArgumentCaptor<Path> workspaceRootCaptor = ArgumentCaptor.forClass(Path.class);
+        verify(hubIndexer, times(2)).indexSuccessfulPush(
+                versionCaptor.capture(),
+                eq(applicationRepoRoot()),
+                workspaceRootCaptor.capture(),
+                eq("commit_agent_config"));
+        assertThat(versionCaptor.getAllValues())
+                .extracting(item -> item.versionId().value())
+                .containsExactlyInAnyOrder(version.versionId(), siblingVersionId.value());
+        assertThat(workspaceRootCaptor.getAllValues())
+                .containsExactlyInAnyOrder(
+                        applicationRepoRoot().resolve("F-GCMS/workspace"),
+                        siblingWorkspaceRoot);
         assertThat(publisher.events).singleElement().satisfies(event -> {
             assertThat(event.type()).isEqualTo("workspace.version.sync-requested");
             assertThat(event.payload()).containsEntry("reason", "AGENT_CONFIG_PUBLISHED");
@@ -2170,6 +2242,8 @@ class ManagedWorkspaceApplicationServiceTest {
         FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
         RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
         ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git, publisher);
+        AgentSkillHubPushIndexer hubIndexer = mock(AgentSkillHubPushIndexer.class);
+        service.setAgentSkillHubPushIndexer(hubIndexer);
         ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
                 "app_gcms",
                 "awp_1",
@@ -2206,6 +2280,11 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(git.mergedCommitRepoRoot).isEqualTo(Path.of(personal.repoRootPath()));
         assertThat(git.mergedCommit).isEqualTo("commit_after_admin_refresh");
         assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_after_admin_refresh");
+        verify(hubIndexer).indexSuccessfulPush(
+                any(ApplicationWorkspaceVersion.class),
+                eq(applicationRepoRoot()),
+                eq(applicationRepoRoot().resolve("F-GCMS/workspace")),
+                eq("commit_after_admin_refresh"));
         assertThat(publisher.events).singleElement().satisfies(event ->
                 assertThat(event.payload()).containsEntry("reason", "ADMIN_APPLICATION_GIT_REFRESHED"));
     }

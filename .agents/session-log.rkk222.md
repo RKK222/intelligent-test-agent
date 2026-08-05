@@ -5743,3 +5743,34 @@
   现场耗时数据，实际时延仍取决于企业 Redis、数据库和目标用户数量。
 - 超管现在可按权限、组织和部门筛选后选择全部检索结果并手工赋权；目标用户旧 Token 立即失效，需要重新登录。
   本地 Workflow 未纳入本次运行验证，企业部署需同时更新后端与前端，无数据库迁移。
+
+## 2026-08-05 - 修复应用 Agent & Skill Hub 远端同步后快照滞后
+
+### Why
+
+- 应用 feature 已由平台外部 push，并通过超级管理员应用 Git 刷新同步到本机后，版本 target 和 replica 会更新，
+  但成功链路没有调用既有 Hub push 索引器，导致新增或删除的 Agent/Skill 仍展示旧快照。
+- 同一物理 feature 仓库承载多个工作空间目录时，平台内发布链路也只索引触发发布的目录，兄弟目录可能滞后。
+
+### What
+
+- 新增仓库组 Hub 索引收敛程序：复用本机 READY replica 和既有 `AgentSkillHubPushIndexer`，按精确 commit
+  为组内每个有效工作空间目录分别生成快照，单目录失败仍保持 push 成功并由定时对账补偿。
+- 个人工作区发布、应用 Agent 配置发布以及超级管理员远端 Git 刷新统一调用该程序；Hub 不依赖用户个人
+  worktree 执行拉取。平台外部 push 仍需管理员 Git 刷新让平台发现远端新 commit。
+- 同步工作区模块 README 和 HTTP API 行为说明；未新增或变更接口、事件、数据库、环境配置或 generated SDK。
+
+### How
+
+- `ManagedWorkspaceApplicationServiceTest` 80 项通过，新增覆盖管理员远端刷新触发 Hub，以及同仓库组两个目录
+  都按同一提交索引；`AgentSkillHubApplicationServiceTest` 9 项通过。
+- JDK 25 下 `mvn -pl test-agent-app -am -DskipTests package` 成功，20 个后端模块完成打包；
+  `git diff --check` 通过。
+- 按 `.env.test` 默认链路尝试重启，启动脚本在停止旧服务前因工作流密钥文件缺少
+  `WORKFLOW_DEV_REDIS_PASSWORD` 失败；未修改环境文件或切换旧 profile。此前运行的旧后端仍为 `UP`，
+  但不包含本次改动，不能作为本次运行验证。
+
+### Result
+
+- 平台已完成 push 或管理员已同步远端 commit 后，Hub 会立即按仓库组反映新增和删除状态，无需用户个人拉取。
+- 代码与打包验证完成；真实服务重启验证仍受本机 `.env.test` 工作流密钥缺失阻塞。

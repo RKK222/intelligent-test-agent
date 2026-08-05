@@ -1590,7 +1590,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 ]
 ```
 
-`POST /applications/{appId}/git-refresh` 使用当前超级管理员保存的唯一 SSH Key，对应用下每个去重后的 `repositoryId + version + branch` 物理 feature 仓库组执行 fetch 和只允许快进的更新。feature 工作树存在未提交修改、远端发生分叉、SSH Key 缺失或 Git 不可用时，该组返回 `FAILED`，其它组继续执行；接口以 HTTP 成功响应返回完整汇总，调用方必须检查 `failedGroups`，不能把部分成功显示为全量成功。更新或已是最新的组都会重新发布固定目标并触发相关服务器个人 worktree 的原生 Git merge；非重叠 staged、unstaged 和 untracked 修改保留，可能被覆盖的 worktree 保持待处理，真实冲突保留三方 index，不执行 stash、reset 或强制覆盖个人内容。远端差异包含应用 `.opencode/**` 时复用既有应用 Agent rollout，仅在目标提交已进入对应个人 worktree 后等待该用户空闲并 dispose。该入口不要求超级管理员拥有 READY OpenCode 进程，也不发送 `X-Test-Agent-Linux-Server-Id` 首跳提示。
+`POST /applications/{appId}/git-refresh` 使用当前超级管理员保存的唯一 SSH Key，对应用下每个去重后的 `repositoryId + version + branch` 物理 feature 仓库组执行 fetch 和只允许快进的更新。feature 工作树存在未提交修改、远端发生分叉、SSH Key 缺失或 Git 不可用时，该组返回 `FAILED`，其它组继续执行；接口以 HTTP 成功响应返回完整汇总，调用方必须检查 `failedGroups`，不能把部分成功显示为全量成功。更新或已是最新的组都会重新发布固定目标、按精确提交为组内每个工作空间目录刷新 Agent & Skill Hub 快照，并触发相关服务器个人 worktree 的原生 Git merge；Hub 更新不要求用户先在个人工作区拉取。非重叠 staged、unstaged 和 untracked 修改保留，可能被覆盖的 worktree 保持待处理，真实冲突保留三方 index，不执行 stash、reset 或强制覆盖个人内容。远端差异包含应用 `.opencode/**` 时复用既有应用 Agent rollout，仅在目标提交已进入对应个人 worktree 后等待该用户空闲并 dispose。该入口不要求超级管理员拥有 READY OpenCode 进程，也不发送 `X-Test-Agent-Linux-Server-Id` 首跳提示。
 
 `POST /applications/{appId}/git-refresh-groups` 请求体为 `{"repositoryId":"repo_1","version":"20260728","branch":"feature_testagent_20260728"}`。三个字段必须精确命中范围查询中的同一个物理组；不存在时返回 `NOT_FOUND`，不能只凭分支名误选同名分支。命中后只复用上述执行程序处理该组，响应仍使用 `ApplicationGitRefreshResponse`，其中 `totalGroups=1`；同应用其它分支、target、replica 和个人 worktree 均不处理。
 

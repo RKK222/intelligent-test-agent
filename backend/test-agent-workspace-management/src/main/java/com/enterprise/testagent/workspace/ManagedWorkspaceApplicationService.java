@@ -2101,8 +2101,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         markRepositoryGroupLocalReplicasReady(
                 updatedVersion, prepared.repoRoot(), headCommit, now, traceId);
         activateApplicationConfigRollout(rolloutId, headCommit);
-        indexHubAfterSuccessfulPush(updatedVersion, prepared.repoRoot(),
-                pathResolver.resolve(prepared.replica().workspaceRootPath()), headCommit);
+        indexRepositoryGroupHubSnapshots(updatedVersion, prepared.repoRoot(), headCommit);
         synchronizeFeatureCommitToPersonalWorktrees(
                 updatedVersion,
                 synchronizedReplica,
@@ -2133,6 +2132,26 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     version.versionId().value(),
                     commitHash,
                     exception.toString());
+        }
+    }
+
+    /**
+     * 同一物理 feature 仓库可能承载多个应用工作空间目录；仓库 HEAD 收敛后必须逐目录生成 Hub
+     * 快照，避免只刷新本次发布入口对应的目录而让兄弟目录继续展示旧 Agent/Skill。
+     */
+    private void indexRepositoryGroupHubSnapshots(
+            ApplicationWorkspaceVersion anchor,
+            Path synchronizedRepoRoot,
+            String commitHash) {
+        Path normalizedRoot = synchronizedRepoRoot.toAbsolutePath().normalize();
+        for (ApplicationWorkspaceVersion member : repositoryVersionGroup(anchor)) {
+            managedWorkspaceRepository.findVersionReplica(member.versionId(), serverIdentity.linuxServerId())
+                    .filter(replica -> isUsableReplicaAtRoot(replica, normalizedRoot))
+                    .ifPresent(replica -> indexHubAfterSuccessfulPush(
+                            member,
+                            normalizedRoot,
+                            pathResolver.resolve(replica.workspaceRootPath()),
+                            commitHash));
         }
     }
 
@@ -3232,6 +3251,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 replica.ready(remoteCommit, now, traceId));
         markRepositoryGroupLocalReplicasReady(
                 updatedVersion, replicaRepoRoot, remoteCommit, now, traceId);
+        indexRepositoryGroupHubSnapshots(updatedVersion, replicaRepoRoot, remoteCommit);
         rolloutIds.forEach(rolloutId -> activateApplicationConfigRollout(rolloutId, remoteCommit));
         synchronizeFeatureCommitToPersonalWorktrees(
                 updatedVersion,
@@ -4061,11 +4081,10 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                             commitHash,
                             now,
                             traceId);
-                    // Agent 配置专用发布入口与 Git Changes 发布入口必须生成同一种远端提交快照。
-                    indexHubAfterSuccessfulPush(
+                    // Agent 配置专用发布入口与 Git Changes 发布入口必须生成同一种仓库组远端提交快照。
+                    indexRepositoryGroupHubSnapshots(
                             updatedVersion,
                             pathResolver.resolve(readyReplica.repoRootPath()),
-                            pathResolver.resolve(readyReplica.workspaceRootPath()),
                             commitHash);
                 });
         if (rolloutId != null && agentConfigRolloutCoordinator != null) {
