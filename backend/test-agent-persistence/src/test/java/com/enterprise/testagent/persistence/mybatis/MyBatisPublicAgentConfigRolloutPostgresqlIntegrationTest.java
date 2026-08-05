@@ -124,10 +124,27 @@ class MyBatisPublicAgentConfigRolloutPostgresqlIntegrationTest {
                 .containsExactlyInAnyOrder(
                         org.assertj.core.groups.Tuple.tuple("act_matching", true),
                         org.assertj.core.groups.Tuple.tuple("act_other", false));
+        assertThat(repository.findRolloutServerStatuses("acr_fixed"))
+                .filteredOn(server -> "linux-1".equals(server.linuxServerId()))
+                .singleElement()
+                .satisfies(server -> assertThat(server.pendingTargets())
+                        .extracting(
+                                target -> target.username(),
+                                target -> target.containerId(),
+                                target -> target.forceStop())
+                        .containsExactlyInAnyOrder(
+                                org.assertj.core.groups.Tuple.tuple("卡住用户", "container-1", true),
+                                org.assertj.core.groups.Tuple.tuple("卡住用户", "container-1", false)));
         assertThat(repository.findActiveRolloutId()).contains("acr_fixed");
     }
 
     private static void insertStuckRollout() {
+        jdbc.sql("""
+                        insert into users(user_id, unified_auth_id, username, password_hash, status, created_at, updated_at)
+                        values ('usr-stuck', 'AUTH-STUCK', '卡住用户', 'hash', 'ACTIVE', :now, :now)
+                        """)
+                .param("now", Timestamp.from(NOW.minusSeconds(180)))
+                .update();
         jdbc.sql("""
                         insert into public_agent_config_rollouts(
                             rollout_id, config_scope, scope_key, branch, commit_hash, previous_commit_hash,

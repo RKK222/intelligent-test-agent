@@ -49,7 +49,7 @@
 - 把后端文件 DTO 转换为前端稳定展示模型。
 - SSH key 新增方法只发送私钥给平台后端，响应类型只包含 key 元信息，不包含明文或密文。
 
-- `supersedePublicAgentConfigRollout({ activeRolloutId, branch, operationId?, discardLocalChanges?, reason })` 调用公共纠错入口；client 只发送旧任务 CAS 标识、修正分支和原因，不暴露 target `forceStop` 开关。新状态字段 `supersedesRolloutId/supersededByRolloutId/supersedeReason` 由共享类型以可选字段透传，轮询方式与普通公共 rollout 一致。
+- `supersedePublicAgentConfigRollout({ activeRolloutId, branch, operationId?, discardLocalChanges?, reason })` 调用公共纠错入口；client 只发送旧任务 CAS 标识、修正分支和原因，不暴露 target `forceStop` 开关。状态字段 `supersedesRolloutId/supersededByRolloutId/supersedeReason` 和每台服务器最多 200 条的可选 `pendingTargets` 由共享类型透传，轮询方式与普通公共 rollout 一致；排空页关闭单个阻塞用户时直接复用既有 `stopOpencodeRuntimeManagedProcess(containerId, port)`。
 
 ### Agent & Skill Hub client
 

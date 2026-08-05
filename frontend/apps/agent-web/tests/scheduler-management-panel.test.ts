@@ -144,6 +144,13 @@ function api(overrides: Partial<BackendApiClient> = {}) {
       status: "SUCCEEDED",
       commitHash: "commit_fixed"
     }),
+    stopOpencodeRuntimeManagedProcess: vi.fn().mockResolvedValue({
+      command: "stop",
+      status: "STOPPED",
+      port: 4096,
+      healthy: false,
+      traceId: "trace-stop"
+    }),
     pullPublicAgentRepository: vi.fn().mockResolvedValue({
       ...publicRepository,
       status: "READY",
@@ -409,6 +416,65 @@ describe("scheduler management panel", () => {
     expect(await view.findByText("git fetch 超时")).toBeTruthy();
     expect(await view.findByText(/补偿已收敛 1\/2，待用户处理 1/)).toBeTruthy();
     expect(view.getByRole("button", { name: "刷新公共 Agent Git" }).hasAttribute("disabled")).toBe(true);
+    view.queryClient.clear();
+  });
+
+  it("shows the blocking rollout user and reuses the existing managed-process stop API", async () => {
+    const latestRollout = {
+      rolloutId: "acr_1",
+      status: "DRAINING",
+      branch: "main",
+      commitHash: "commit_target",
+      failureReason: null,
+      createdAt: "2026-08-05T00:00:00Z",
+      updatedAt: "2026-08-05T00:00:01Z",
+      completedAt: null,
+      servers: [{
+        linuxServerId: "linux-1",
+        syncStatus: "SYNCED",
+        retryCount: 0,
+        targetTotal: 2,
+        targetPending: 1,
+        targetDisposed: 1,
+        targetAbandoned: 0,
+        worktreeTotal: 0,
+        worktreePending: 0,
+        worktreeSynced: 0,
+        lastError: "SESSION_RUNNING",
+        syncedAt: "2026-08-05T00:00:00Z",
+        updatedAt: "2026-08-05T00:00:01Z",
+        pendingTargets: [{
+          targetId: "act_pending",
+          userId: "usr_zhangsan",
+          username: "张三",
+          linuxServerId: "linux-1",
+          containerId: "container-1",
+          port: 4096,
+          processPid: 1234,
+          processStartedAt: "2026-08-04T23:50:00Z",
+          status: "RETRY_WAIT",
+          retryCount: 3,
+          nextRetryAt: "2026-08-05T00:00:05Z",
+          lastError: "SESSION_RUNNING",
+          forceStop: false,
+          updatedAt: "2026-08-05T00:00:01Z"
+        }]
+      }]
+    };
+    const backendApi = api({
+      getPublicAgentConfigRollout: vi.fn().mockResolvedValue(latestRollout)
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const view = renderWithApi(OpencodePublicConfigManagementPanel, backendApi);
+
+    expect(await view.findByText("张三")).toBeTruthy();
+    expect(view.getAllByText("SESSION_RUNNING").length).toBeGreaterThan(0);
+    await fireEvent.click(view.getByRole("button", { name: "关闭 张三 的 OpenCode" }));
+
+    await waitFor(() => expect(backendApi.stopOpencodeRuntimeManagedProcess)
+      .toHaveBeenCalledWith("container-1", 4096));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("可能中断正在执行的任务"));
+    expect(await view.findByText("已关闭 张三 的 OpenCode，正在等待排空任务确认")).toBeTruthy();
     view.queryClient.clear();
   });
 

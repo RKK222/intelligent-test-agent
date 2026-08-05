@@ -5774,3 +5774,42 @@
 
 - 平台已完成 push 或管理员已同步远端 commit 后，Hub 会立即按仓库组反映新增和删除状态，无需用户个人拉取。
 - 代码与打包验证完成；真实服务重启验证仍受本机 `.env.test` 工作流密钥缺失阻塞。
+
+## 2026-08-05 - 在公共配置排空页定位并关闭单个阻塞用户
+
+### Why
+
+- 公共 Agent/Skill rollout 状态原先只返回服务器级排空计数和聚合 `lastError`，超级管理员无法判断具体是哪名
+  用户、哪个进程和什么原因阻塞，也只能切到运行管理页另行查找。
+- 项目已经具备按 `containerId + port` 停止单个受管 OpenCode 的公共链路，本次不应再新增一套停止接口。
+
+### What
+
+- `GET /agent-config/public/rollout` 的服务器状态新增 additive 可选 `pendingTargets`，MyBatis 按服务器返回最多
+  200 个未进入 `DISPOSED/ABANDONED` 的目标，关联内部 `userId/username`，并携带进程身份、状态、重试、
+  `lastError` 与 `forceStop`；不返回统一认证号、Session 内容或凭据。
+- 系统管理排空页在服务器汇总行下展示未排空用户和原因，并提供“关闭该用户 OpenCode”。按钮二次确认后直接
+  复用 `BackendApiClient.stopOpencodeRuntimeManagedProcess(containerId, port)`，后端继续经过运行管理路由、
+  `RuntimeManagementCommandService` 和 `OpencodeProcessStopService` 的代次/PID/停止后健康确认；不修改 target
+  `forceStop`，worker 在后续轮询中自行确认目标收敛。
+- 同步 domain/persistence/API/frontend/shared-types README、HTTP API 和安全规范；没有新增数据库表、Flyway、
+  RunEvent/SSE、依赖、generated SDK 或 OpenCode 源码，也没有修改 `.env*`。
+
+### How
+
+- JDK 25 下组合执行 `AgentConfigControllerTest`、`MyBatisPublicAgentConfigRolloutRepositoryTest` 和真实
+  PostgreSQL 16/Testcontainers 集成测试，共 33 项通过；实库用例确认 username 关联与新旧批次
+  `forceStop` 身份判定不变。
+- agent-web 定向组件测试 12 项、typecheck 和 production build 通过；前端全量为 111/112 个文件通过，
+  1798 passed / 1 skipped，唯一失败仍是既有 `AppSourceDialog` 固定过期时间夹具找不到保留期输入框，
+  与本次排空页面无关。
+- JDK 25 下 20 模块 `mvn -pl test-agent-app -am -DskipTests package`、`verify-ai-docs.sh` 和
+  `git diff --check` 通过。按默认 `.env.test`/`test` profile 尝试真实重启时，脚本在停止旧服务前因工作流
+  密钥文件缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 失败；未改环境文件或切换旧 profile。既有 backend/frontend
+  仍分别在 8080/3000 返回 200，但旧 backend JAR 不包含本次改动，不能作为本次运行验证。
+
+### Result
+
+- 超级管理员现在可以直接在排空页看到具体阻塞用户、个人错误和进程坐标，并复用已有停止能力只关闭该目标
+  OpenCode；服务器聚合计数仍保持完整，诊断明细有界且兼容旧客户端/旧后端。
+- 代码、真实 PostgreSQL、前端构建和定向行为已验证；更新后端的本地真实启动仍受上述开发密钥缺失阻塞。

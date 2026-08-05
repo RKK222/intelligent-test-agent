@@ -6,6 +6,7 @@ import type {
   CurrentUser,
   PublicAgentConfigRolloutServerStatus,
   PublicAgentConfigRolloutStatus,
+  PublicAgentConfigRolloutTargetStatus,
   PublicAgentRepositoryStatus
 } from "@test-agent/shared-types";
 
@@ -35,6 +36,7 @@ const supersedeBranches = ref<string[]>([]);
 const supersedeReason = ref("");
 const supersedeErrorMessage = ref("");
 const supersedeBranchesLoading = ref(false);
+const closingTargetId = ref<string | null>(null);
 let rolloutTimer: number | null = null;
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
@@ -300,6 +302,32 @@ async function submitSupersede() {
   }
 }
 
+/** 单目标关闭复用运行管理现有接口；rollout worker 会按原 PID/startedAt 再确认目标已消失。 */
+async function closePendingTarget(target: PublicAgentConfigRolloutTargetStatus) {
+  if (closingTargetId.value || !target.containerId || !Number.isFinite(target.port)) {
+    return;
+  }
+  const owner = targetOwner(target);
+  const confirmed = window.confirm(
+    `确认关闭 ${owner} 的 OpenCode 进程（${target.containerId}:${target.port}）吗？该操作不等待会话空闲，可能中断正在执行的任务。`
+  );
+  if (!confirmed) {
+    return;
+  }
+  closingTargetId.value = target.targetId;
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    await api.stopOpencodeRuntimeManagedProcess(target.containerId, target.port);
+    successMessage.value = `已关闭 ${owner} 的 OpenCode，正在等待排空任务确认`;
+    await refreshRollout();
+  } catch (error) {
+    errorMessage.value = formatError(error, `关闭 ${owner} 的 OpenCode 失败`);
+  } finally {
+    closingTargetId.value = null;
+  }
+}
+
 function preferredBranch(repository: PublicAgentRepositoryStatus, remoteBranches: string[]) {
   const current = repository.currentBranch?.trim();
   if (current && remoteBranches.includes(current)) {
@@ -337,6 +365,28 @@ function serverProgress(server: PublicAgentConfigRolloutServerStatus) {
     return `已同步，${server.targetAbandoned} 个运行目标已放弃`;
   }
   return "已同步并排空";
+}
+
+function targetOwner(target: PublicAgentConfigRolloutTargetStatus) {
+  return target.username?.trim() || target.userId?.trim() || "无法识别用户";
+}
+
+function pendingTargetDetails(server: PublicAgentConfigRolloutServerStatus) {
+  return server.pendingTargets ?? [];
+}
+
+function omittedPendingTargetCount(server: PublicAgentConfigRolloutServerStatus) {
+  return Math.max(0, server.targetPending - pendingTargetDetails(server).length);
+}
+
+function targetStatusText(target: PublicAgentConfigRolloutTargetStatus) {
+  if (target.forceStop) {
+    return "等待强制停止";
+  }
+  return ({
+    PROCESSING: "正在检查",
+    RETRY_WAIT: "等待重试"
+  } as Record<string, string>)[target.status] ?? target.status;
 }
 
 function worktreeProgress(server: PublicAgentConfigRolloutServerStatus) {
@@ -473,13 +523,56 @@ function newOperationId() {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="server in rollout.servers" :key="server.linuxServerId">
-              <td>{{ server.linuxServerId }}</td>
-              <td>{{ serverProgress(server) }}</td>
-              <td>{{ worktreeProgress(server) }}</td>
-              <td>{{ server.retryCount }}</td>
-              <td class="ta-opencode-config-message">{{ formatNullable(server.lastError) }}</td>
-            </tr>
+            <template v-for="server in rollout.servers" :key="server.linuxServerId">
+              <tr>
+                <td>{{ server.linuxServerId }}</td>
+                <td>{{ serverProgress(server) }}</td>
+                <td>{{ worktreeProgress(server) }}</td>
+                <td>{{ server.retryCount }}</td>
+                <td class="ta-opencode-config-message">{{ formatNullable(server.lastError) }}</td>
+              </tr>
+              <tr v-if="server.targetPending > 0" class="ta-opencode-config-target-detail-row">
+                <td colspan="5">
+                  <div class="ta-opencode-config-target-detail-header">
+                    <strong>未排空用户</strong>
+                    <span v-if="omittedPendingTargetCount(server) > 0" class="ta-opencode-config-muted">
+                      当前展示 {{ pendingTargetDetails(server).length }} 个，另有 {{ omittedPendingTargetCount(server) }} 个目标
+                    </span>
+                  </div>
+                  <div v-if="pendingTargetDetails(server).length" class="ta-opencode-config-target-list">
+                    <article
+                      v-for="target in pendingTargetDetails(server)"
+                      :key="target.targetId"
+                      class="ta-opencode-config-target"
+                    >
+                      <div class="ta-opencode-config-target-owner">
+                        <strong>{{ targetOwner(target) }}</strong>
+                        <span class="ta-opencode-config-muted">{{ formatNullable(target.userId) }}</span>
+                      </div>
+                      <div class="ta-opencode-config-target-state">
+                        <span>{{ targetStatusText(target) }}</span>
+                        <span>重试 {{ target.retryCount }}</span>
+                        <span v-if="target.lastError" class="ta-opencode-config-target-error">{{ target.lastError }}</span>
+                      </div>
+                      <div class="ta-opencode-config-mono ta-opencode-config-target-process">
+                        {{ target.containerId }}:{{ target.port }} · PID {{ target.processPid ?? "-" }}
+                      </div>
+                      <button
+                        type="button"
+                        class="ta-opencode-config-btn is-danger"
+                        :aria-label="`关闭 ${targetOwner(target)} 的 OpenCode`"
+                        :disabled="closingTargetId !== null"
+                        @click="closePendingTarget(target)"
+                      >
+                        <Loader2 v-if="closingTargetId === target.targetId" class="ta-opencode-config-icon is-spin" />
+                        关闭该用户 OpenCode
+                      </button>
+                    </article>
+                  </div>
+                  <div v-else class="ta-opencode-config-muted">目标明细尚未返回，请等待下一轮刷新或确认后端版本。</div>
+                </td>
+              </tr>
+            </template>
             <tr v-if="rollout.servers.length === 0">
               <td colspan="5" class="ta-opencode-config-empty">正在登记服务器同步任务</td>
             </tr>
@@ -808,6 +901,63 @@ function newOperationId() {
   padding: 7px 8px;
   text-align: left;
   vertical-align: top;
+}
+.ta-opencode-config-target-detail-row > td {
+  background: #f8fafc;
+  padding: 10px;
+}
+.ta-opencode-config-target-detail-header,
+.ta-opencode-config-target,
+.ta-opencode-config-target-owner,
+.ta-opencode-config-target-state {
+  display: flex;
+  align-items: center;
+}
+.ta-opencode-config-target-detail-header {
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.ta-opencode-config-target-list {
+  display: grid;
+  gap: 6px;
+}
+.ta-opencode-config-target {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.9fr) minmax(220px, 1.5fr) minmax(180px, 1fr) auto;
+  gap: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  padding: 8px;
+}
+.ta-opencode-config-target-owner,
+.ta-opencode-config-target-state {
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+}
+.ta-opencode-config-target-owner {
+  flex-direction: column;
+  align-items: flex-start;
+}
+.ta-opencode-config-target-state > span:not(.ta-opencode-config-target-error) {
+  white-space: nowrap;
+}
+.ta-opencode-config-target-error {
+  width: 100%;
+  color: #b45309;
+  overflow-wrap: anywhere;
+}
+.ta-opencode-config-target-process {
+  align-self: center;
+  color: #4b5563;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 1080px) {
+  .ta-opencode-config-target {
+    grid-template-columns: minmax(140px, 1fr) minmax(220px, 1.5fr);
+  }
 }
 .ta-opencode-config-table-wrap {
   flex: 1;

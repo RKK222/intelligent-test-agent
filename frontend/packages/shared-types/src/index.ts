@@ -407,6 +407,23 @@ export type PublicAgentRepositoryStatus = {
   localChangesPresent?: boolean;
 };
 
+export type PublicAgentConfigRolloutTargetStatus = {
+  targetId: string;
+  userId?: string | null;
+  username?: string | null;
+  linuxServerId: string;
+  containerId: string;
+  port: number;
+  processPid?: number | null;
+  processStartedAt?: string | null;
+  status: string;
+  retryCount: number;
+  nextRetryAt?: string | null;
+  lastError?: string | null;
+  forceStop: boolean;
+  updatedAt: string;
+};
+
 export type PublicAgentConfigRolloutServerStatus = {
   linuxServerId: string;
   syncStatus: string;
@@ -421,6 +438,8 @@ export type PublicAgentConfigRolloutServerStatus = {
   lastError?: string | null;
   syncedAt?: string | null;
   updatedAt: string;
+  /** 新后端返回每台服务器最多 200 个未排空目标；缺失时兼容旧后端。 */
+  pendingTargets?: PublicAgentConfigRolloutTargetStatus[];
 };
 
 export type PublicAgentConfigRolloutStatus = {

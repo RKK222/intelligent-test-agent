@@ -16,6 +16,7 @@ import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.configuration.PersonalAgentConfigRuntimeReloadResult;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutServerStatus;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutStatus;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutTargetStatus;
 import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.workspace.AgentConfigApplicationService;
@@ -80,9 +81,25 @@ class AgentConfigControllerTest {
                 null,
                 List.of(new PublicAgentConfigRolloutServerStatus(
                         "linux-2", "RETRY_WAIT", 2, 3, 1, 2, 0,
+                        0, 0, 0,
                         "公共 Agent 运行副本存在未提交变更",
                         null,
-                        Instant.parse("2026-07-28T01:01:00Z"))))));
+                        Instant.parse("2026-07-28T01:01:00Z"),
+                        List.of(new PublicAgentConfigRolloutTargetStatus(
+                                "act_pending",
+                                "usr_1",
+                                "张三",
+                                "linux-2",
+                                "container-1",
+                                4096,
+                                123L,
+                                Instant.parse("2026-07-28T00:59:00Z"),
+                                "RETRY_WAIT",
+                                3,
+                                Instant.parse("2026-07-28T01:01:05Z"),
+                                "SESSION_RUNNING",
+                                false,
+                                Instant.parse("2026-07-28T01:01:00Z"))))))));
         WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
 
         client.get()
@@ -96,6 +113,8 @@ class AgentConfigControllerTest {
                 .jsonPath("$.data.supersedeReason").isEqualTo("修复错误配置")
                 .jsonPath("$.data.servers[0].linuxServerId").isEqualTo("linux-2")
                 .jsonPath("$.data.servers[0].targetPending").isEqualTo(1)
+                .jsonPath("$.data.servers[0].pendingTargets[0].username").isEqualTo("张三")
+                .jsonPath("$.data.servers[0].pendingTargets[0].lastError").isEqualTo("SESSION_RUNNING")
                 .jsonPath("$.data.servers[0].lastError").isEqualTo("公共 Agent 运行副本存在未提交变更");
     }
 

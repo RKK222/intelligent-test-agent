@@ -22,6 +22,10 @@ public interface PublicAgentConfigRolloutMapper {
     List<PublicAgentConfigRolloutServerStatusRow> findRolloutServerStatuses(
             @Param("rolloutId") String rolloutId);
 
+    List<PublicAgentConfigRolloutTargetStatusRow> findPendingRolloutTargets(
+            @Param("rolloutId") String rolloutId,
+            @Param("limitPerServer") int limitPerServer);
+
     List<String> findRolloutServerIds(@Param("rolloutId") String rolloutId);
 
     String findBlockingRolloutId(@Param("userId") String userId);

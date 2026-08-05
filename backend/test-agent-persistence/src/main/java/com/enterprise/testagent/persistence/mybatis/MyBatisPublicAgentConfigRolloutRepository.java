@@ -8,12 +8,15 @@ import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSer
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutStatus;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutPreparation;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutTarget;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutTargetStatus;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigWorktreeClaim;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigWorktreePending;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +25,9 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Repository
 public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentConfigRolloutRepository {
+
+    /** 页面诊断明细按服务器显式限量，聚合计数仍保持完整。 */
+    private static final int PENDING_TARGET_DETAIL_LIMIT_PER_SERVER = 200;
 
     private final PublicAgentConfigRolloutMapper mapper;
 
@@ -56,6 +62,25 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
 
     @Override
     public List<PublicAgentConfigRolloutServerStatus> findRolloutServerStatuses(String rolloutId) {
+        Map<String, List<PublicAgentConfigRolloutTargetStatus>> pendingTargetsByServer = mapper
+                .findPendingRolloutTargets(rolloutId, PENDING_TARGET_DETAIL_LIMIT_PER_SERVER)
+                .stream()
+                .map(row -> new PublicAgentConfigRolloutTargetStatus(
+                        row.targetId(),
+                        row.userId(),
+                        row.username(),
+                        row.linuxServerId(),
+                        row.containerId(),
+                        row.port(),
+                        row.processPid(),
+                        row.processStartedAt(),
+                        row.status(),
+                        row.retryCount(),
+                        row.nextRetryAt(),
+                        row.lastError(),
+                        row.forceStop(),
+                        row.updatedAt()))
+                .collect(Collectors.groupingBy(PublicAgentConfigRolloutTargetStatus::linuxServerId));
         return mapper.findRolloutServerStatuses(rolloutId).stream()
                 .map(row -> new PublicAgentConfigRolloutServerStatus(
                         row.linuxServerId(),
@@ -70,7 +95,8 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
                         row.worktreeSynced(),
                         row.lastError(),
                         row.syncedAt(),
-                        row.updatedAt()))
+                        row.updatedAt(),
+                        pendingTargetsByServer.getOrDefault(row.linuxServerId(), List.of())))
                 .toList();
     }
 

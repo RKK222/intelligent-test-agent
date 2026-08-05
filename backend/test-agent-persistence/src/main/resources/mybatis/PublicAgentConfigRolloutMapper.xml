@@ -108,6 +108,24 @@
             <arg column="updated_at" javaType="java.time.Instant"/>
         </constructor>
     </resultMap>
+    <resultMap id="RolloutTargetStatusRowMap" type="com.enterprise.testagent.persistence.mybatis.PublicAgentConfigRolloutTargetStatusRow">
+        <constructor>
+            <arg column="target_id" javaType="java.lang.String"/>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="username" javaType="java.lang.String"/>
+            <arg column="linux_server_id" javaType="java.lang.String"/>
+            <arg column="container_id" javaType="java.lang.String"/>
+            <arg column="port" javaType="_int"/>
+            <arg column="process_pid" javaType="java.lang.Long"/>
+            <arg column="process_started_at" javaType="java.time.Instant"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="retry_count" javaType="_int"/>
+            <arg column="next_retry_at" javaType="java.time.Instant"/>
+            <arg column="last_error" javaType="java.lang.String"/>
+            <arg column="force_stop" javaType="_boolean"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
 
     <select id="findActiveRolloutId" resultType="java.lang.String">
         select rollout_id from public_agent_config_rollouts
@@ -187,6 +205,27 @@
         ) w on w.rollout_id = s.rollout_id and w.linux_server_id = s.linux_server_id
         where s.rollout_id = #{rolloutId}
         order by s.linux_server_id
+    </select>
+
+    <select id="findPendingRolloutTargets" resultMap="RolloutTargetStatusRowMap">
+        select target_id, user_id, username, linux_server_id, container_id, port,
+               process_pid, process_started_at, status, retry_count, next_retry_at,
+               last_error, force_stop, updated_at
+        from (
+            select t.target_id, t.user_id, u.username, t.linux_server_id, t.container_id, t.port,
+                   t.process_pid, t.process_started_at, t.status, t.retry_count, t.next_retry_at,
+                   t.last_error, t.force_stop, t.updated_at,
+                   row_number() over (
+                       partition by t.linux_server_id
+                       order by t.force_stop desc, t.next_retry_at, t.created_at, t.target_id
+                   ) as target_rank
+            from public_agent_config_rollout_targets t
+            left join users u on u.user_id = t.user_id
+            where t.rollout_id = #{rolloutId}
+              and t.status not in ('DISPOSED', 'ABANDONED')
+        ) ranked
+        where target_rank &lt;= #{limitPerServer}
+        order by linux_server_id, target_rank
     </select>
 
     <select id="findBlockingRolloutId" resultType="java.lang.String">

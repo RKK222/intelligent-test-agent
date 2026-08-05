@@ -44,6 +44,8 @@ class MyBatisPublicAgentConfigRolloutRepositoryTest {
                 "com.enterprise.testagent.persistence.mybatis.PublicAgentConfigRolloutMapper.PublicWorktreeRowMap");
         ResultMap serverStatusRow = configuration.getResultMap(
                 "com.enterprise.testagent.persistence.mybatis.PublicAgentConfigRolloutMapper.RolloutServerStatusRowMap");
+        ResultMap targetStatusRow = configuration.getResultMap(
+                "com.enterprise.testagent.persistence.mybatis.PublicAgentConfigRolloutMapper.RolloutTargetStatusRowMap");
 
         assertThat(syncRow.getResultMappings())
                 .filteredOn(mapping -> "retry_count".equals(mapping.getColumn()))
@@ -76,6 +78,14 @@ class MyBatisPublicAgentConfigRolloutRepositoryTest {
         assertThat(serverStatusRow.getResultMappings())
                 .filteredOn(mapping -> mapping.getColumn().startsWith("target_"))
                 .allSatisfy(mapping -> assertThat(mapping.getJavaType()).isEqualTo(long.class));
+        assertThat(targetStatusRow.getResultMappings())
+                .filteredOn(mapping -> List.of("port", "retry_count").contains(mapping.getColumn()))
+                .allSatisfy(mapping -> assertThat(mapping.getJavaType()).isEqualTo(int.class));
+        assertThat(targetStatusRow.getResultMappings())
+                .filteredOn(mapping -> "force_stop".equals(mapping.getColumn()))
+                .singleElement()
+                .extracting(mapping -> mapping.getJavaType())
+                .isEqualTo(boolean.class);
     }
 
     @Test
@@ -186,6 +196,22 @@ class MyBatisPublicAgentConfigRolloutRepositoryTest {
                         "公共 Agent 运行副本存在未提交变更",
                         null,
                         NOW.plusSeconds(5))));
+        when(mapper.findPendingRolloutTargets("acr_rollout", 200)).thenReturn(List.of(
+                new PublicAgentConfigRolloutTargetStatusRow(
+                        "act_pending",
+                        "usr_1",
+                        "张三",
+                        "linux-1",
+                        "container-1",
+                        4096,
+                        123L,
+                        NOW.minusSeconds(30),
+                        "RETRY_WAIT",
+                        3,
+                        NOW.plusSeconds(10),
+                        "SESSION_RUNNING",
+                        false,
+                        NOW.plusSeconds(5))));
 
         var status = repository.findLatestRolloutStatus(AgentConfigRolloutScope.PUBLIC, null).orElseThrow();
         var servers = repository.findRolloutServerStatuses(status.rolloutId());
@@ -197,6 +223,12 @@ class MyBatisPublicAgentConfigRolloutRepositoryTest {
             assertThat(server.worktreePending()).isEqualTo(1);
             assertThat(server.worktreeSynced()).isEqualTo(3);
             assertThat(server.lastError()).contains("未提交变更");
+            assertThat(server.pendingTargets()).singleElement().satisfies(target -> {
+                assertThat(target.userId()).isEqualTo("usr_1");
+                assertThat(target.username()).isEqualTo("张三");
+                assertThat(target.containerId()).isEqualTo("container-1");
+                assertThat(target.lastError()).isEqualTo("SESSION_RUNNING");
+            });
         });
     }
 
