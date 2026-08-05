@@ -44,10 +44,10 @@ const closing = ref(false);
 const errorMessage = ref("");
 const now = ref(Date.now());
 
-const userKeyword = ref("");
 const users = ref<UserManagementUser[]>([]);
 const usersLoading = ref(false);
 const targetUser = ref<UserManagementUser | null>(null);
+const selectedTargetUserId = ref("");
 const targetSelecting = ref(false);
 
 const sessionQuery = ref("");
@@ -127,6 +127,7 @@ const supportTimelineState = computed(() => {
 
 let clockTimer: ReturnType<typeof setInterval> | undefined;
 let incidentSuggestionRequest = 0;
+let userSearchRequest = 0;
 let copiedDiagnosticTimer: ReturnType<typeof setTimeout> | undefined;
 
 onMounted(() => {
@@ -246,6 +247,7 @@ async function closeGrant() {
 function clearGrantState() {
   grant.value = null;
   targetUser.value = null;
+  selectedTargetUserId.value = "";
   includeArchived.value = false;
   selectedSession.value = null;
   resetTranscriptState();
@@ -256,24 +258,43 @@ function clearGrantState() {
   previewPath.value = "";
 }
 
-async function loadUsers() {
+/** 顶部远程下拉复用既有用户列表 API；只保留最近一次搜索结果，并始终保留已选目标。 */
+async function loadUsers(keyword = "") {
+  const requestId = ++userSearchRequest;
   usersLoading.value = true;
   try {
-    users.value = (await api.listUsers({ keyword: userKeyword.value.trim(), page: 1, size: 100 })).items;
+    const page = await api.listUsers({ keyword: keyword.trim(), page: 1, size: 30 });
+    if (requestId !== userSearchRequest) return;
+    const selected = targetUser.value;
+    users.value = selected && !page.items.some((item) => item.userId === selected.userId)
+      ? [selected, ...page.items]
+      : page.items;
   } catch (error) {
-    errorMessage.value = errorText(error);
+    if (requestId === userSearchRequest) errorMessage.value = errorText(error);
   } finally {
-    usersLoading.value = false;
+    if (requestId === userSearchRequest) usersLoading.value = false;
   }
+}
+
+function targetOptionLabel(user: UserManagementUser): string {
+  return `${user.username} · ${user.unifiedAuthId || "无统一认证号"} · ${user.userId}`;
+}
+
+async function selectTargetById(userId: string) {
+  const user = users.value.find((item) => item.userId === userId);
+  if (!user || user.userId === targetUser.value?.userId) return;
+  await selectTarget(user);
 }
 
 async function selectTarget(user: UserManagementUser) {
   if (!grant.value) return;
+  const previousTargetUserId = targetUser.value?.userId || "";
   targetSelecting.value = true;
   errorMessage.value = "";
   try {
     await api.selectSupportAccessTarget(grant.value.grantToken, user.userId);
     targetUser.value = user;
+    selectedTargetUserId.value = user.userId;
     selectedSession.value = null;
     resetTranscriptState();
     selectedWorkspace.value = null;
@@ -281,6 +302,7 @@ async function selectTarget(user: UserManagementUser) {
     preview.value = null;
     await Promise.all([loadSessions(1), loadWorkspaces(1)]);
   } catch (error) {
+    selectedTargetUserId.value = previousTargetUserId;
     errorMessage.value = errorText(error);
   } finally {
     targetSelecting.value = false;
@@ -594,7 +616,34 @@ function resetTranscriptState() {
       <template v-else>
         <div class="access-banner">
           <span><small>操作人</small><b>{{ props.currentUser?.username || '-' }}</b></span>
-          <span><small>目标用户</small><b>{{ targetUser?.username || '尚未选择' }}</b></span>
+          <div class="target-select" data-testid="support-target-select">
+            <small>目标用户</small>
+            <el-select
+              v-model="selectedTargetUserId"
+              aria-label="选择目标用户"
+              class="target-select-control"
+              filterable
+              remote
+              :remote-method="loadUsers"
+              :loading="usersLoading || targetSelecting"
+              :disabled="targetSelecting"
+              placeholder="输入姓名、用户 ID 或统一认证号"
+              @change="selectTargetById"
+            >
+              <el-option
+                v-for="user in users"
+                :key="user.userId"
+                :label="targetOptionLabel(user)"
+                :value="user.userId"
+              >
+                <div class="target-option">
+                  <strong>{{ user.username }}</strong>
+                  <span>{{ user.unifiedAuthId || '无统一认证号' }}</span>
+                  <code>{{ user.userId }}</code>
+                </div>
+              </el-option>
+            </el-select>
+          </div>
           <span><small>工单</small><b>{{ incidentId }}</b></span>
           <span><small>剩余时间</small><b class="mono-value">{{ countdownLabel }}</b></span>
           <span class="readonly-pill">只读</span>
@@ -602,21 +651,6 @@ function resetTranscriptState() {
         </div>
 
         <div class="support-layout">
-          <aside class="target-picker">
-            <h3>选择目标用户</h3>
-            <div class="inline-search"><input v-model="userKeyword" placeholder="姓名 / 用户 ID / 统一认证号" @keyup.enter="loadUsers" /><button @click="loadUsers">查询</button></div>
-            <div v-if="usersLoading" class="empty">加载中…</div>
-            <button
-              v-for="user in users"
-              :key="user.userId"
-              :class="['target-row', { active: targetUser?.userId === user.userId }]"
-              :disabled="targetSelecting"
-              @click="selectTarget(user)"
-            >
-              <strong>{{ user.username }}</strong><span>{{ user.userId }}</span><small>{{ user.unifiedAuthId }}</small>
-            </button>
-          </aside>
-
           <main class="resource-panel">
             <div v-if="!targetUser" class="empty large">选择一个目标用户后才能读取其关联会话和工作区。</div>
             <template v-else>
@@ -645,16 +679,20 @@ function resetTranscriptState() {
                       <div><span class="section-kicker">CONVERSATION</span><strong>用户首页视角</strong></div>
                       <span>与首页使用同一消息投影和时间线，不切换管理员身份。</span>
                     </div>
-                    <div class="diagnostic-context" aria-label="排查上下文">
+                    <div class="diagnostic-context" aria-label="会话排查标识" data-testid="support-session-diagnostics">
+                      <div class="diagnostic-heading">
+                        <strong>排查标识</strong>
+                        <span>始终显示，用于关联服务日志</span>
+                      </div>
                       <div class="diagnostic-id">
-                        <span>SESSION ID</span>
+                        <span>会话 SESSION ID</span>
                         <code :title="selectedSession.sessionId">{{ selectedSession.sessionId }}</code>
                         <button type="button" @click="copyDiagnosticValue(selectedSession.sessionId)">
                           {{ copiedDiagnosticValue === selectedSession.sessionId ? '已复制' : '复制' }}
                         </button>
                       </div>
                       <div class="diagnostic-id">
-                        <span>TRACE ID · 最近</span>
+                        <span>最近 TRACE ID</span>
                         <code :class="{ muted: !primaryTraceId }" :title="primaryTraceId || undefined">{{ primaryTraceId || '暂无可恢复 Trace' }}</code>
                         <button v-if="primaryTraceId" type="button" @click="copyDiagnosticValue(primaryTraceId)">
                           {{ copiedDiagnosticValue === primaryTraceId ? '已复制' : '复制' }}
@@ -924,19 +962,26 @@ button.primary:hover:not(:disabled) { background: var(--support-accent-strong); 
 .access-banner > span:not(.readonly-pill) { display: grid; gap: 1px; }
 .access-banner small { color: var(--support-muted); font-size: 10px; letter-spacing: .04em; }
 .access-banner b { max-width: 230px; overflow: hidden; color: #263244; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.access-banner button { margin-left: auto; }
+.access-banner > button { margin-left: auto; }
+.target-select { display: grid; min-width: 300px; max-width: 560px; flex: 1 1 420px; gap: 2px; }
+.target-select-control { width: 100%; }
+.target-select :deep(.el-select__wrapper) { min-height: 34px; border-radius: 6px; box-shadow: 0 0 0 1px var(--support-border-strong) inset; }
+.target-select :deep(.el-select__wrapper.is-focused) { box-shadow: 0 0 0 1px #d1777b inset, 0 0 0 2px #f8dfe0; }
+.target-select :deep(.el-select__selected-item) { font: 12px/1.4 var(--font-sans); }
+.target-option { display: grid; grid-template-columns: minmax(80px, .8fr) minmax(100px, 1fr) minmax(160px, 1.5fr); align-items: center; gap: 10px; width: 100%; }
+.target-option strong { overflow: hidden; color: #273244; text-overflow: ellipsis; white-space: nowrap; }
+.target-option span { overflow: hidden; color: var(--support-muted); text-overflow: ellipsis; white-space: nowrap; }
+.target-option code { overflow: hidden; color: #526176; font: 11px/1.4 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .mono-value { font-family: var(--font-mono); }
 .readonly-pill { border: 1px solid #d69092; border-radius: 999px; background: var(--support-accent-soft); padding: 2px 8px; color: var(--support-accent-strong); font-size: 11px; font-weight: 700; }
 
-.support-layout { display: grid; grid-template-columns: 252px 1fr; min-height: 0; flex: 1; }
-.target-picker { min-height: 0; overflow: auto; border-right: 1px solid var(--support-border); background: #fff; padding: 12px; }
-.target-picker h3 { margin: 2px 0 10px; font-size: 13px; font-weight: 680; }
+.support-layout { display: flex; min-height: 0; flex: 1; }
 .inline-search { display: flex; gap: 6px; margin-bottom: 10px; }
 .inline-search input { min-width: 0; flex: 1; font-size: 13px; }
 .inline-search button,
 .pager button,
 .audit-filter button,
-.access-banner button,
+.access-banner > button,
 .file-preview button,
 .diagnostic-id button,
 .trace-list button {
@@ -952,11 +997,10 @@ button.primary:hover:not(:disabled) { background: var(--support-accent-strong); 
 .inline-search button:hover,
 .pager button:hover:not(:disabled),
 .audit-filter button:hover,
-.access-banner button:hover,
+.access-banner > button:hover,
 .file-preview button:hover,
 .diagnostic-id button:hover,
 .trace-list button:hover { border-color: #d69092; color: var(--support-accent-strong); }
-.target-row,
 .resource-row {
   display: grid;
   width: 100%;
@@ -971,19 +1015,12 @@ button.primary:hover:not(:disabled) { background: var(--support-accent-strong); 
   cursor: pointer;
   font-family: var(--font-sans);
 }
-.target-row:hover,
 .resource-row:hover { background: #f7f8fa; }
-.target-row.active,
 .resource-row.active { border-left-color: var(--support-accent); background: var(--support-accent-soft); }
-.target-row strong,
 .resource-row strong { color: #283446; font-size: 13px; font-weight: 650; }
-.target-row span,
 .resource-row span,
-.target-row small,
 .resource-row small { overflow: hidden; color: var(--support-muted); text-overflow: ellipsis; white-space: nowrap; }
-.target-row span,
 .resource-row span { font: 11px/1.35 var(--font-mono); }
-.target-row small,
 .resource-row small { font-size: 11px; }
 .archive-filter { display: flex; align-items: flex-start; gap: 7px; margin: 2px 4px 10px; color: var(--support-muted); font-size: 12px; line-height: 1.4; }
 .archive-filter input { margin-top: 2px; accent-color: var(--support-accent); }
@@ -995,7 +1032,7 @@ button.primary:hover:not(:disabled) { background: var(--support-accent-strong); 
 .backend-pill.is-unbound,
 .backend-pill.is-unknown { background: #f2f4f6; color: #66707d; }
 
-.resource-panel { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
+.resource-panel { display: flex; width: 100%; min-width: 0; min-height: 0; flex-direction: column; }
 .resource-tabs { flex: 0 0 auto; padding: 5px 12px 0; border-bottom: 1px solid var(--support-border); background: #fff; }
 .session-layout { display: grid; grid-template-columns: 310px 1fr; min-height: 0; flex: 1; }
 .workspace-layout { display: grid; grid-template-columns: 280px 330px 1fr; min-height: 0; flex: 1; }
@@ -1008,6 +1045,9 @@ button.primary:hover:not(:disabled) { background: var(--support-accent-strong); 
 .user-view-heading strong { color: #273244; font-size: 15px; font-weight: 680; }
 .user-view-heading > span { color: var(--support-muted); font-size: 12px; text-align: right; }
 .diagnostic-context {
+  position: sticky;
+  top: 0;
+  z-index: 4;
   display: grid;
   width: min(100%, 920px);
   margin: 0 auto 12px;
@@ -1019,16 +1059,19 @@ button.primary:hover:not(:disabled) { background: var(--support-accent-strong); 
   box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
   overflow: hidden;
 }
-.diagnostic-id { display: grid; grid-template-columns: 112px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 38px; padding: 0 11px; border-bottom: 1px solid #edf0f3; }
-.diagnostic-id > span { color: var(--support-muted); font: 700 9px/1 var(--font-mono); letter-spacing: .08em; }
+.diagnostic-heading { display: flex; align-items: baseline; gap: 10px; padding: 8px 11px; border-bottom: 1px solid #f1d6d7; background: var(--support-accent-soft); }
+.diagnostic-heading strong { color: var(--support-accent-strong); font-size: 13px; font-weight: 700; }
+.diagnostic-heading span { color: #76595b; font-size: 12px; }
+.diagnostic-id { display: grid; grid-template-columns: 132px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 42px; padding: 0 11px; border-bottom: 1px solid #edf0f3; }
+.diagnostic-id > span { color: #4b5563; font: 700 11px/1 var(--font-sans); letter-spacing: .02em; }
 .diagnostic-id code,
-.trace-list code { overflow: hidden; color: #334155; font: 11.5px/1.4 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.trace-list code { overflow: hidden; color: #27364b; font: 600 13px/1.4 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .diagnostic-id code.muted { color: #9ca3af; font-family: var(--font-sans); }
 .diagnostic-id button,
 .trace-list button { min-height: 24px; padding: 4px 7px; font-size: 11px; }
 .trace-list { border-bottom: 1px solid #edf0f3; }
 .trace-list summary { padding: 8px 11px; color: var(--support-muted); cursor: pointer; font-size: 11px; }
-.trace-list > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 6px 11px 6px 123px; border-top: 1px solid #f2f4f6; }
+.trace-list > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 6px 11px 6px 143px; border-top: 1px solid #f2f4f6; }
 .diagnostic-status { display: flex; align-items: stretch; gap: 0; }
 .diagnostic-status span { display: grid; min-width: 140px; gap: 2px; padding: 9px 11px; border-right: 1px solid #edf0f3; }
 .diagnostic-status small { color: var(--support-muted); font-size: 10px; }
@@ -1066,8 +1109,8 @@ button.primary:hover:not(:disabled) { background: var(--support-accent-strong); 
   .support-header { align-items: flex-start; flex-direction: column; gap: 8px; }
   .grant-fields { grid-template-columns: 1fr; }
   .form-field-wide { grid-column: auto; }
-  .support-layout { grid-template-columns: 210px 1fr; }
   .session-layout { grid-template-columns: 240px 1fr; }
+  .target-select { min-width: 240px; max-width: none; flex-basis: 100%; }
   .user-view-heading { align-items: flex-start; flex-direction: column; gap: 4px; }
   .user-view-heading > span { text-align: left; }
   .diagnostic-id { grid-template-columns: 1fr auto; padding: 8px 10px; }

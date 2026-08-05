@@ -6035,3 +6035,38 @@
 - Session/Trace 诊断信息已进入只读用户视角，便于直接关联服务日志；Trace 字段是向后兼容的 HTTP 响应扩展，
   未修改 RunEvent、数据库/Flyway、ticket/RPC、限流、`.env*`、OpenCode 源码或 generated SDK。
 - 浏览器控制台仍有两条既有 `agent-config/public/diff` 400，与本次排查页请求无关；Workflow/LobeHub 继续不启动。
+
+## 2026-08-05 - 将目标用户选择收拢到顶部并强化排查标识
+
+### Why
+
+- 目标用户列表占用左侧宽度，挤压会话列表和用户首页视角；管理员需要的是可输入姓名、用户 ID 或统一认证号的
+  单一选择入口，而不是长期展开的侧栏。
+- Session ID 和 Trace ID 已随会话快照返回，但原展示位于滚动正文内、字号和层级过弱，真实页面容易被误认为
+  只有用户正文、没有排查标识。
+
+### What
+
+- 移除目标用户左侧栏，把目标选择放入顶部授权状态条，复用 Element Plus 远程可搜索下拉和已有用户查询接口；
+  选择后仍调用既有 `selectSupportAccessTarget` 审计链路，没有增加平行接口或绕过授权。
+- 搜索请求增加序号防止旧响应覆盖新关键字结果，并保留当前已选用户选项；真实浏览器验收时发现下拉展开事件会
+  用空关键字覆盖输入搜索，已删除该重复请求入口。
+- 会话诊断区改为滚动容器顶部的 sticky 排查条，使用“会话 SESSION ID”“最近 TRACE ID”明确标识并提高字号、
+  对比度；会话、工作区和用户视角获得完整横向空间。
+- 同步 agent-web README、组件 PACKAGE 和组件回归测试。
+
+### How
+
+- `SupportAccessPanel` 与 backend-api 定向 Vitest 共 104 项通过；前端 15 个工作区 typecheck 和 agent-web
+  production build 通过，仅保留既有大 chunk 告警。
+- Playwright 真实页面完成远程搜索、目标选择、旧会话打开和排查标识核对，确认左侧用户栏消失、顶部下拉只返回
+  匹配用户，真实 Session/Trace 值均可见；测试授权随后主动撤销。
+- 使用 JDK 25、未修改的主工作区 `.env.test` 和既有测试数据根，以 `--without-workflow` 重启 backend、manager、
+  frontend；backend/readiness 均为 `UP`，前端 3000 返回 200，CORS 正常，manager 初始拉起后连续 `HEALTHY`。
+
+### Result
+
+- 目标用户选择不再占用左右布局，管理员可在顶部下拉直接输入检索；会话和用户视角的横向空间更充足。
+- Session/Trace 是始终可辨识的排查信息，不再依赖管理员从普通用户正文中寻找。
+- 未修改 HTTP API、RunEvent、数据库/Flyway、ticket/RPC、限流、鉴权、`.env*`、OpenCode 源码或 generated SDK；
+  Workflow/LobeHub 继续不启动。

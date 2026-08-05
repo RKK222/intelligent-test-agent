@@ -73,21 +73,22 @@ describe("support access panel incident prefill", () => {
     const listSupportAccessSessions = vi.fn().mockResolvedValue({
       items: [], page: 1, size: 30, total: 0
     });
+    const listUsers = vi.fn().mockResolvedValue({
+      items: [{
+        userId: "usr_target",
+        username: "target",
+        unifiedAuthId: "AUTH_TARGET",
+        status: "ACTIVE",
+        roles: [],
+        createdAt: "2026-08-05T00:00:00Z"
+      }],
+      page: 1,
+      size: 30,
+      total: 1
+    });
     const api = {
       getRecentSupportAccessIncident: vi.fn().mockResolvedValue({ incidentId: "INC-1" }),
-      listUsers: vi.fn().mockResolvedValue({
-        items: [{
-          userId: "usr_target",
-          username: "target",
-          unifiedAuthId: "AUTH_TARGET",
-          status: "ACTIVE",
-          roles: [],
-          createdAt: "2026-08-05T00:00:00Z"
-        }],
-        page: 1,
-        size: 100,
-        total: 1
-      }),
+      listUsers,
       issueSupportAccessGrant: vi.fn().mockResolvedValue({
         grantId: "sag_1",
         grantToken: "grant-token",
@@ -123,8 +124,13 @@ describe("support access panel incident prefill", () => {
     await fireEvent.update(view.getByLabelText("排查原因"), "排查历史缺失");
     await fireEvent.click(view.getByLabelText(/我确认仅用于问题排查/));
     await fireEvent.click(view.getByRole("button", { name: "开启限时只读访问" }));
-    await waitFor(() => expect(view.getByText("target")).toBeTruthy());
-    await fireEvent.click(view.getByText("target"));
+    const targetSelect = within(view.getByTestId("support-target-select"));
+    const targetCombobox = targetSelect.getByRole("combobox", { name: "选择目标用户" });
+    expect(view.queryByRole("complementary")).toBeNull();
+    await fireEvent.update(targetCombobox, "target");
+    await waitFor(() => expect(listUsers).toHaveBeenCalledWith({ keyword: "target", page: 1, size: 30 }));
+    const targetOption = await waitFor(() => view.getByRole("option", { name: /target.*AUTH_TARGET.*usr_target/ }));
+    await fireEvent.click(targetOption);
     await waitFor(() => expect(listSupportAccessSessions).toHaveBeenCalledWith(
       "grant-token",
       "usr_target",
@@ -249,15 +255,19 @@ describe("support access panel incident prefill", () => {
     await fireEvent.update(view.getByLabelText("排查原因"), "验证首页只读投影");
     await fireEvent.click(view.getByLabelText(/我确认仅用于问题排查/));
     await fireEvent.click(view.getByRole("button", { name: "开启限时只读访问" }));
-    await waitFor(() => expect(view.getByText("target")).toBeTruthy());
-    await fireEvent.click(view.getByText("target"));
+    await fireEvent.click(view.getByRole("combobox", { name: "选择目标用户" }));
+    const targetOption = await waitFor(() => view.getByRole("option", { name: /target.*AUTH_TARGET.*usr_target/ }));
+    await fireEvent.click(targetOption);
     await waitFor(() => expect(view.getByText("真实首页投影")).toBeTruthy());
     await fireEvent.click(view.getByText("真实首页投影"));
 
     await waitFor(() => expect(view.getByText("真实助手正文")).toBeTruthy());
     expect(view.getByText("用户首页视角")).toBeTruthy();
     expect(view.getByLabelText("只读排查输入区")).toBeTruthy();
-    const diagnosticContext = within(view.getByLabelText("排查上下文"));
+    const diagnosticContext = within(view.getByLabelText("会话排查标识"));
+    expect(diagnosticContext.getByText("排查标识")).toBeTruthy();
+    expect(diagnosticContext.getByText("会话 SESSION ID")).toBeTruthy();
+    expect(diagnosticContext.getByText("最近 TRACE ID")).toBeTruthy();
     expect(diagnosticContext.getByText("ses_target")).toBeTruthy();
     expect(diagnosticContext.getByText("trace_test")).toBeTruthy();
   });
