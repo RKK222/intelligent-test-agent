@@ -12,7 +12,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 
 ## 主要程序清单
 
-- `session.SessionApplicationService`：会话创建、查询、消息和归档；消息列表会优先触发 projected messages 刷新，失败回退数据库快照。
+- `session.SessionApplicationService`：会话创建、查询、消息和归档；普通入口按当前用户归因校验单会话/工作区历史，消息列表会优先触发 projected messages 刷新，失败回退数据库快照。
 - `night.NightExecutionCapacityRegistry` / `NightExecutionTaskApplicationService` / `NightExecutionCustomSchedulePolicy`：从全局通用参数 `NIGHT_EXECUTION_SLOT_CAPACITY` 原子维护内存容量快照，并负责标准夜间窗口、15 分钟容量时段、仅超级管理员可用的未来 24 小时精确分钟测试定时、提交查询/改期/取消和会话锁；测试定时不读写夜间容量，任务提交时固化目标 Linux 服务器，不创建 `USER_PLAN`。
 - `night.NightExecutionDispatchScanTaskHandler` / `NightExecutionDispatchCoordinator` / `NightExecutionDispatchService`：XXL 每分钟扫描 500 条两种模式的到期任务，按目标服务器分组并以 50 条批次/8 台服务器并发分发；公共路由器先选出精确 backendProcessId，目标 Java 用 attempt/owner/5 分钟租约认领并在 Run 副作用前再次执行窗口续租 CAS，最多并发受理 4 个普通 Run，不建立夜间队列。
 - `night.NightExecutionRunLifecycleService` / `NightExecutionDispatchLeaseGuard` / `NightExecutionDispatchOwnerWatchdog` / `NightExecutionReconcileService`：只用来源/任务/owner/Session/Workspace 全部匹配且确已受理的普通 Run 锚点驱动 `DISPATCHED` 和容量/会话锁释放；默认 legacy Scheduled Run 还用 Run 级 attempt/租约/受理标记恢复 anchor-only 崩溃窗口，不把仅有用户消息视为受理。恢复重投前通过 `RunDispatchAcceptanceProbe` 精确检查远端稳定消息，ACCEPTED 只补受理标记，NOT_ACCEPTED 才发送，UNKNOWN 不发送；同步调用每分钟续租，owner 本机先查锚点并收敛 handle 已消失的过期 attempt，跨 Java 的 5 分钟补偿再按精确 backendProcessId 心跳和 attempt fencing 恢复，窗口结束时仍先保护存活的 in-flight 调用。Run 终态继续使用既有会话与 RunEvent SSE，不反向修改夜间调度状态。
@@ -35,12 +35,12 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 - `run.RunInactiveExpiryCoordinator` / `run.RunInactiveExpiryScheduler`：启动时和每 30 秒扫描本服务器 Redis active manifest；无 attention 且两小时无活动的新模式 Run 复用 fencing-safe 远端取消与终态摘要程序，整个运行态收敛不写 `run_events`。
 - `run.RunRuntimeSchedulingConfiguration`：owner lease 续租独占单线程调度器，其余恢复/到期/重试任务使用独立 4 线程维护调度器，避免阻塞 Boot 默认调度线程或饿死 5 秒续租。
 - `run.RunOwnerLeaseSupervisor`：统一维护本机 owner handle 的 5 秒续租信号；fencing 被其它 owner 取得时正常完成 `lost` 只停止旧订阅，Redis/运行态异常时以原错误终止 `lost`，让 Run 启动订阅和恢复订阅调度 30 秒安全收敛。
-- `run.RunMessageRecoveryService`：为 Run/Session HTTP 历史按 Redis → OpenCode → PostgreSQL 双摘要恢复，并携带完整度、可回放性和详情到期时间；Run 级 OpenCode 来源因果裁剪到目标轮，Session 级来源保持全量多轮，legacy SSE 兼容方法只输出目标轮 assistant。
+- `run.RunMessageRecoveryService`：为 Run/Session HTTP 历史按 Redis → OpenCode → PostgreSQL 双摘要恢复，Session 上游没有可展示正文时再有界读取旧 `session_messages` 正文并标记 LEGACY；空 Redis/OpenCode 快照不截断兜底，排查入口可显式跳过离线服务器 OpenCode。结果携带完整度、可回放性和详情到期时间。Run 级 OpenCode 来源因果裁剪到目标轮，Session 级来源保持全量多轮，legacy SSE 兼容方法只输出目标轮 assistant。
 - `runtime.OpencodeRuntimeApplicationService`：opencode Web App runtime API 到 `AgentRuntime` 的映射；平台配置 GET 使用实例级 `/config` 读取包含 `OPENCODE_CONFIG_DIR` 的合并有效配置，Agent 标准 global config 兼容路径继续使用 `/global/config`。
 - `runtime.SideQuestionStreamingApplicationService` / `runtime.SideQuestionTerminalService`：以归档内部 Session 启动 `SIDE_QUESTION` Run；临时 fork 仅接收用户问题并禁用工具，通过本轮 assistant 事件流输出增量，消息快照补偿漏失终态，最后以事务 CAS 写唯一终态。
 - `runtime.SideQuestionOrphanCleanupTaskHandler` / `runtime.SideQuestionOrphanCleanupService`：复用 scheduler 每 5 分钟回收超过 10 分钟的旁路 fork；按内部映射使用原节点，404 幂等，无映射时记录潜在泄漏窗口并收敛平台 Run。
 - `process.*`：当前用户 opencode 进程分配、用户/服务器短事务预留、process/binding 生命周期代次 CAS、已有 binding 原端口恢复、公共状态查询、公共启动/owned-stop 健康确认、通用参数 session/config 路径读取、启动时可选注入当前平台 `OPENCODE_REFERENCES_DIR`、manager WebSocket 控制面网关、后端实例生命周期和超级管理员运行管理快照/命令编排。只有明确 `PORT_CONFLICT/PORT_OUT_OF_RANGE` 才进入既有端口选择；引用目录参数缺失不阻断滚动升级中的进程启动，既有进程不热更新环境。
-- `process.WorkspaceFileRoutingService`：复用公共 Java 路由程序定位 workspace 文件 WebSocket 的目标后端，并在路由阶段通过 `ConversationWorkspaceAccessAuthorizer` 校验实时应用成员关系；非托管 Workspace 仅接受 `SUPER_ADMIN` 服务器工作空间兼容访问，ticket 和具体 RPC 的再次校验由 API/业务入口共同完成。
+- `process.WorkspaceFileRoutingService`：复用公共 Java 路由程序定位 workspace 文件 WebSocket 的目标后端，并在普通路由阶段通过 `ConversationWorkspaceAccessAuthorizer` 校验当前用户归属，`SUPER_ADMIN` 不旁路；排查只读路由按目标工作区权威服务器选择 Java，不使用 actor affinity、回绑或本机降级，ticket 和具体 RPC 的再次校验由 API/业务入口共同完成。
 - `terminal.*`：PTY ticket、限流、WebSocket 背后的业务状态和本地进程适配。
 
 ## 允许依赖

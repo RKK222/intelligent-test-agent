@@ -28,6 +28,8 @@ VALIDATE_ONLY=0
 SYSTEMD_UNIT_DIR="${TEST_AGENT_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE="db/migration/V20260728160800__create_toolbox_click_tracking.sql"
 TOOLBOX_ENTERPRISE_MIGRATION_SHA256="777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2"
+SUPPORT_ACCESS_MIGRATION_RESOURCE="db/migration/V20260805132000__create_support_access_audit.sql"
+SUPPORT_ACCESS_MIGRATION_SHA256="54cea9a84948f8e4cee14d630772b8ee0668c2a7e5fc897ede5e792a15edd761"
 RELEASE_PERSISTENCE_JAR=""
 RELEASE_PERSISTENCE_JAR_SHA256=""
 
@@ -236,14 +238,26 @@ find_unique_persistence_jar() {
   find "${lib_dir}" -maxdepth 1 -type f -name 'test-agent-persistence-*.jar' -print -quit
 }
 
-verify_toolbox_enterprise_migration_jar() {
-  local jar="$1" label="$2" actual
-  actual="$(sha256_jar_resource "${jar}" "${TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE}")"
-  if [[ "${actual}" != "${TOOLBOX_ENTERPRISE_MIGRATION_SHA256}" ]]; then
-    echo "${label} contains the wrong enterprise Flyway migration: jar=${jar} expected=${TOOLBOX_ENTERPRISE_MIGRATION_SHA256} actual=${actual}" >&2
+verify_release_flyway_resource() {
+  local jar="$1" label="$2" resource="$3" expected="$4" actual
+  if ! unzip -Z1 "${jar}" | grep -Fx "${resource}" >/dev/null; then
+    echo "${label} is missing release Flyway migration: ${resource}" >&2
     exit 1
   fi
-  printf '%s Flyway migration verified: sha256=%s\n' "${label}" "${actual}"
+  actual="$(sha256_jar_resource "${jar}" "${resource}")"
+  if [[ "${actual}" != "${expected}" ]]; then
+    echo "${label} contains the wrong release Flyway migration: resource=${resource} expected=${expected} actual=${actual}" >&2
+    exit 1
+  fi
+  printf '%s Flyway migration verified: resource=%s sha256=%s\n' "${label}" "${resource}" "${actual}"
+}
+
+verify_release_flyway_migrations_jar() {
+  local jar="$1" label="$2"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${TOOLBOX_ENTERPRISE_MIGRATION_RESOURCE}" "${TOOLBOX_ENTERPRISE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
+    "${SUPPORT_ACCESS_MIGRATION_RESOURCE}" "${SUPPORT_ACCESS_MIGRATION_SHA256}"
 }
 
 manifest_value() {
@@ -668,7 +682,7 @@ require_file "${BACKEND_JAR}"
   exit 1
 }
 RELEASE_PERSISTENCE_JAR="$(find_unique_persistence_jar "${BACKEND_LIB_DIR}")"
-verify_toolbox_enterprise_migration_jar "${RELEASE_PERSISTENCE_JAR}" "Release archive persistence JAR"
+verify_release_flyway_migrations_jar "${RELEASE_PERSISTENCE_JAR}" "Release archive persistence JAR"
 RELEASE_PERSISTENCE_JAR_SHA256="$(sha256_file "${RELEASE_PERSISTENCE_JAR}")"
 if [[ "${WORKER_RUNTIME_REUSE}" -eq 0 ]]; then
   require_file "${PROGRAMS_ARCHIVE}"
@@ -773,7 +787,7 @@ fi
 mv "${INSTALL_ROOT}/dist/backend/test-agent-app.jar.new" "${INSTALL_ROOT}/dist/backend/test-agent-app.jar"
 mv "${INSTALL_ROOT}/dist/backend/lib.new" "${INSTALL_ROOT}/dist/backend/lib"
 INSTALLED_PERSISTENCE_JAR="$(find_unique_persistence_jar "${INSTALL_ROOT}/dist/backend/lib")"
-verify_toolbox_enterprise_migration_jar "${INSTALLED_PERSISTENCE_JAR}" "Installed persistence JAR"
+verify_release_flyway_migrations_jar "${INSTALLED_PERSISTENCE_JAR}" "Installed persistence JAR"
 INSTALLED_PERSISTENCE_JAR_SHA256="$(sha256_file "${INSTALLED_PERSISTENCE_JAR}")"
 if [[ "${INSTALLED_PERSISTENCE_JAR_SHA256}" != "${RELEASE_PERSISTENCE_JAR_SHA256}" ]]; then
   echo "Installed persistence JAR differs from the release archive: expected=${RELEASE_PERSISTENCE_JAR_SHA256} actual=${INSTALLED_PERSISTENCE_JAR_SHA256}" >&2

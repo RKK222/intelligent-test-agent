@@ -64,7 +64,15 @@
     </sql>
 
     <sql id="SessionHistoryWhere">
-        where s.status = 'ACTIVE'
+        where
+        <choose>
+          <when test="includeArchived">
+            s.status in ('ACTIVE', 'ARCHIVED')
+          </when>
+          <otherwise>
+            s.status = 'ACTIVE'
+          </otherwise>
+        </choose>
           and s.source_type != 'SIDE_QUESTION'
           and (
             s.created_by_user_id = #{userId}
@@ -102,5 +110,31 @@
         select count(*)
         <include refid="SessionHistoryFrom"/>
         <include refid="SessionHistoryWhere"/>
+    </select>
+
+    <select id="findUserSession" resultMap="SessionHistoryRowMap">
+        select
+        <include refid="SessionHistoryColumns"/>
+        <include refid="SessionHistoryFrom"/>
+        <include refid="SessionHistoryWhere"/>
+          and s.session_id = #{sessionId}
+        limit 1
+    </select>
+
+    <select id="findUserWorkspaceHistory" resultMap="SessionHistoryRowMap">
+        select
+        <include refid="SessionHistoryColumns"/>
+        <include refid="SessionHistoryFrom"/>
+        <include refid="SessionHistoryWhere"/>
+          and s.workspace_id = #{workspaceId}
+        order by s.updated_at desc, s.id desc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countUserWorkspaceHistory" resultType="long">
+        select count(*)
+        <include refid="SessionHistoryFrom"/>
+        <include refid="SessionHistoryWhere"/>
+          and s.workspace_id = #{workspaceId}
     </select>
 </mapper>

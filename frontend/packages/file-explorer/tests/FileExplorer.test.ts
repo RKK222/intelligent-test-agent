@@ -22,6 +22,35 @@ describe("FileExplorer", () => {
     expect(view.emitted("downloadEntry")).toEqual([[entries[0]], [entries[1]]]);
   });
 
+  it("hides and blocks attach, download and mutation entry points in strict read-only mode", async () => {
+    const view = render(FileExplorer, {
+      props: {
+        entriesByDirectory: {
+          "": [{ type: "file", path: "secret.txt", name: "secret.txt" }]
+        },
+        expandedDirectories: new Set<string>(),
+        changedFiles: [],
+        canWrite: false,
+        canAttach: false,
+        canDownload: false
+      }
+    });
+    const file = view.getByRole("button", { name: "secret.txt" });
+
+    expect(view.queryByRole("button", { name: "下载文件 secret.txt" })).toBeNull();
+    expect(view.queryByRole("button", { name: "新建或上传到工作区根目录" })).toBeNull();
+    await fireEvent.contextMenu(file);
+    await fireEvent.keyDown(file, { key: "x", ctrlKey: true });
+    await fireEvent.change(view.getByLabelText("选择要上传到工作区的文件"), {
+      target: { files: [new File(["content"], "blocked.txt", { type: "text/plain" })] }
+    });
+
+    expect(view.queryByText("添加文件到对话")).toBeNull();
+    expect(view.emitted("addFileContext")).toBeUndefined();
+    expect(view.emitted("moveEntry")).toBeUndefined();
+    expect(view.emitted("uploadFiles")).toBeUndefined();
+  });
+
   it("forwards view entries so duplicate logical paths keep their locator identity", async () => {
     const reference = {
       id: "reference:requirements:guide",

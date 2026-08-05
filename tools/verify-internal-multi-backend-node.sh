@@ -85,6 +85,8 @@ PERSISTENCE_JAR_ROOT="${TMP_ROOT}/persistence-jar-root"
 mkdir -p "${PERSISTENCE_JAR_ROOT}/db/migration"
 cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260728160800__create_toolbox_click_tracking.sql" \
   "${PERSISTENCE_JAR_ROOT}/db/migration/"
+cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260805132000__create_support_access_audit.sql" \
+  "${PERSISTENCE_JAR_ROOT}/db/migration/"
 (cd "${PERSISTENCE_JAR_ROOT}" && zip -qr \
   "${RELEASE_ROOT}/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar" .)
 tar -C "${EMPTY_ROOT}" -czf "${RELEASE_ROOT}/dist/test-agent-frontend-dist.tar.gz" .

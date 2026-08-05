@@ -177,19 +177,8 @@ public class WorkspaceFileRoutingService {
      * 根据当前用户 opencode 进程定位工作空间文件 WebSocket 所在后端。
      */
     public WorkspaceFileRouteResponse routeWorkspace(UserId userId, String agentId, WorkspaceId workspaceId, String traceId) {
-        return routeWorkspace(userId, agentId, workspaceId, traceId, false);
-    }
-
-    /**
-     * 根据当前用户 opencode 进程定位工作空间文件 WebSocket 所在后端；非托管服务器工作区仅向超级管理员兼容开放。
-     */
-    public WorkspaceFileRouteResponse routeWorkspace(
-            UserId userId,
-            String agentId,
-            WorkspaceId workspaceId,
-            String traceId,
-            boolean allowUnmanagedWorkspace) {
-        workspaceAccessAuthorizer.requireFileAccess(userId, workspaceId, allowUnmanagedWorkspace);
+        // 普通文件入口始终按当前登录用户校验归属；跨用户排查只能走独立授权和审计通道。
+        workspaceAccessAuthorizer.requireFileAccess(userId, workspaceId, false);
         Workspace workspace = workspaceRepository.findById(workspaceId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Workspace 不存在", Map.of("workspaceId", workspaceId.value())));
         UserOpencodeProcessFileRoutingAffinity process = assignmentService.fileRoutingAffinity(userId, agentId, traceId);
@@ -214,6 +203,45 @@ public class WorkspaceFileRoutingService {
                 trimTrailingSlash(backend.listenUrl()),
                 WEB_SOCKET_PATH,
                 true,
+                null);
+    }
+
+    /**
+     * 按工作区权威服务器定位只读排查文件通道，不借用 actor 的 opencode 进程归属，也不做本机降级或重绑。
+     */
+    public WorkspaceFileRouteResponse routeSupportWorkspace(WorkspaceId workspaceId) {
+        Workspace workspace = workspaceRepository.findById(workspaceId)
+                .filter(item -> item.status() == com.enterprise.testagent.domain.workspace.WorkspaceStatus.ACTIVE)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.NOT_FOUND, "Workspace 不存在", Map.of("workspaceId", workspaceId.value())));
+        String workspaceLinuxServerId = workspace.linuxServerId();
+        if (workspaceLinuxServerId == null || workspaceLinuxServerId.isBlank()) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "工作空间尚未绑定权威服务器",
+                    Map.of("workspaceId", workspaceId.value()));
+        }
+        AppSourceReplica replica = appSourceReplica(workspaceId);
+        if (replica != null) {
+            boolean currentReadyGeneration = replica.status() == AppSourceReplicaStatus.READY
+                    && appSourceRepository.findSlot(replica.repositoryId())
+                            .map(slot -> Objects.equals(slot.activeGeneration(), replica.generation()))
+                            .orElse(false);
+            if (!currentReadyGeneration || !workspaceLinuxServerId.equals(replica.linuxServerId().value())) {
+                throw new PlatformException(
+                        ErrorCode.CONFLICT,
+                        "应用源码工作区副本路由不一致",
+                        Map.of("workspaceId", workspaceId.value()));
+            }
+            workspaceLinuxServerId = replica.linuxServerId().value();
+        }
+        BackendJavaProcess backend = backendFor(new LinuxServerId(workspaceLinuxServerId));
+        return new WorkspaceFileRouteResponse(
+                workspaceId.value(),
+                workspaceLinuxServerId,
+                trimTrailingSlash(backend.listenUrl()),
+                WEB_SOCKET_PATH,
+                routeResolver.isCurrent(backend.backendProcessId()),
                 null);
     }
 

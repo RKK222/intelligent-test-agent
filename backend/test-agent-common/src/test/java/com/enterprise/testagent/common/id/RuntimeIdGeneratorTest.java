@@ -16,6 +16,7 @@ class RuntimeIdGeneratorTest {
         assertThat(RuntimeIdGenerator.managerCommandId()).matches("mcmd_[0-9a-f]{32}");
         assertThat(RuntimeIdGenerator.scheduledTaskRunId()).matches("str_[0-9a-f]{32}");
         assertThat(RuntimeIdGenerator.scheduledTaskPlanId()).matches("stp_[0-9a-f]{32}");
+        assertThat(RuntimeIdGenerator.supportAccessIncidentId()).matches("sai_[0-9a-f]{32}");
     }
 
     @Test

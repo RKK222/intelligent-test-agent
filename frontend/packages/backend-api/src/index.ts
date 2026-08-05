@@ -157,6 +157,12 @@ import type {
   ManualQuestionRunRequest,
   SessionRuntimeStateSummary,
   SessionTreeMessagesResponse,
+  SupportAccessAuditEvent,
+  SupportAccessAuditQuery,
+  SupportAccessGrant,
+  SupportAccessGrantRequest,
+  SupportAccessIncidentSuggestion,
+  SupportAccessTarget,
   SshKeyMetadata,
   SshKeyPublicKeyResponse,
   SyncWorkspacePayload,
@@ -277,6 +283,7 @@ export class BackendApiError extends Error {
 export type BackendApiClient = ReturnType<typeof createBackendApiClient>;
 
 export const LINUX_SERVER_ROUTE_HEADER = "X-Test-Agent-Linux-Server-Id";
+export const SUPPORT_ACCESS_GRANT_HEADER = "X-Support-Access-Grant";
 
 // 应用源码分支读取最多执行一次 60 秒 Git 命令，目录快照还会串行解析提交并读取远端树；
 // 这里仅放宽这两类慢 Git 读取，避免全局 30 秒超时先于后端的权威 Git 结果返回。
@@ -466,7 +473,9 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       if (!response.ok || !isSuccessResponse<T>(body)) {
         const error = new BackendApiError(response.status, normalizeFailure(body, traceId, response.status));
         // 401 未认证：触发全局跳转到登录页
-        if (response.status === 401 && typeof window !== "undefined") {
+        if (response.status === 401
+          && !headers.has(SUPPORT_ACCESS_GRANT_HEADER)
+          && typeof window !== "undefined") {
           const handler = (window as unknown as Record<string, unknown>).__handleUnauthorized;
           if (typeof handler === "function") {
             handler();
@@ -540,6 +549,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const agentPath = (path: string) => `${agentBase}${path}`;
   const workspaceFileSockets = new Map<string, WorkspaceFileSocketClient>();
   const workspaceFileConnections = new Map<string, Promise<WorkspaceFileSocketClient>>();
+  const supportFileSockets = new Map<string, WorkspaceFileSocketClient>();
+  const supportFileConnections = new Map<string, Promise<WorkspaceFileSocketClient>>();
   const agentConfigFileSockets = new Map<string, WorkspaceFileSocketClient>();
   const agentConfigFileConnections = new Map<string, Promise<WorkspaceFileSocketClient>>();
   let agentSkillHubFileSocket: WorkspaceFileSocketClient | null = null;
@@ -600,6 +611,96 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         if (!retryTransportOnce || attempt > 0 || !(error instanceof WorkspaceFileTransportError)) {
           throw error;
         }
+      }
+    }
+  }
+
+  function supportHeaders(grantToken: string): Headers {
+    const headers = new Headers();
+    headers.set(SUPPORT_ACCESS_GRANT_HEADER, grantToken);
+    return headers;
+  }
+
+  function supportSocketKey(grantId: string, targetUserId: string, workspaceId: string): string {
+    return [grantId, targetUserId, workspaceId].map(encodeURIComponent).join(":");
+  }
+
+  function closeSupportFileSockets(grantId?: string) {
+    const encodedGrant = grantId ? `${encodeURIComponent(grantId)}:` : undefined;
+    for (const [key, client] of supportFileSockets) {
+      if (!encodedGrant || key.startsWith(encodedGrant)) {
+        client.close();
+        supportFileSockets.delete(key);
+      }
+    }
+    // CONNECTING socket 会在 ready 失败后自清理；先删除 single-flight，禁止后续调用复用旧授权。
+    for (const key of supportFileConnections.keys()) {
+      if (!encodedGrant || key.startsWith(encodedGrant)) supportFileConnections.delete(key);
+    }
+  }
+
+  async function ensureSupportWorkspaceFileClient(
+    grant: Pick<SupportAccessGrant, "grantId" | "grantToken">,
+    targetUserId: string,
+    workspaceId: string
+  ): Promise<WorkspaceFileSocketClient> {
+    const key = supportSocketKey(grant.grantId, targetUserId, workspaceId);
+    const existing = supportFileSockets.get(key);
+    if (existing?.open) return existing;
+    const connecting = supportFileConnections.get(key);
+    if (connecting) return connecting;
+    existing?.close();
+    const basePath = `${systemManagementBase}/support-access/targets/${encodeURIComponent(targetUserId)}`
+      + `/workspaces/${encodeURIComponent(workspaceId)}`;
+    const connection = (async () => {
+      // 排查控制面请求不携带动态用户路由头，目标后端完全由权威 workspace 归属决定。
+      const route = await requestFrom<WorkspaceFileRoute>(baseUrl, `${basePath}/file-ws-route`, {
+        method: "POST",
+        headers: supportHeaders(grant.grantToken)
+      });
+      const ticket = await requestFrom<WorkspaceFileSocketTicketResponse>(
+        route.baseUrl.replace(/\/$/, ""),
+        `${basePath}/file-ws-tickets`,
+        {
+          method: "POST",
+          headers: supportHeaders(grant.grantToken),
+          body: JSON.stringify({ linuxServerId: route.linuxServerId })
+        }
+      );
+      let client!: WorkspaceFileSocketClient;
+      client = new WorkspaceFileSocketClient(
+        toWebSocketUrl(route.baseUrl, ticket.webSocketUrl),
+        webSocketFactory,
+        () => {
+          if (supportFileSockets.get(key) === client) supportFileSockets.delete(key);
+        }
+      );
+      supportFileSockets.set(key, client);
+      await client.ready();
+      return client;
+    })();
+    supportFileConnections.set(key, connection);
+    try {
+      return await connection;
+    } finally {
+      if (supportFileConnections.get(key) === connection) supportFileConnections.delete(key);
+    }
+  }
+
+  async function supportWorkspaceFileRpc<T>(
+    grant: Pick<SupportAccessGrant, "grantId" | "grantToken">,
+    targetUserId: string,
+    workspaceId: string,
+    op: "workspace.list" | "workspace.search" | "workspace.read" | "workspace.read.chunk" | "workspace.read.binary.chunk",
+    params: Record<string, unknown>,
+    retryTransportOnce = false
+  ): Promise<T> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        const client = await ensureSupportWorkspaceFileClient(grant, targetUserId, workspaceId);
+        return await client.request<T>(op, { workspaceId, ...params });
+      } catch (error) {
+        if (!retryTransportOnce || attempt > 0 || !(error instanceof WorkspaceFileTransportError)) throw error;
       }
     }
   }
@@ -2316,6 +2417,152 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     /** 查询可选角色列表，供新增用户下拉选择。 */
     listRoles: () => request<RoleOption[]>(`${systemManagementBase}/roles`),
 
+    // ---- 超级管理员问题排查只读 API ----
+
+    issueSupportAccessGrant: (payload: SupportAccessGrantRequest) =>
+      request<SupportAccessGrant>(`${systemManagementBase}/support-access/grants`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
+    getSupportAccessIncidentSuggestion: () =>
+      request<SupportAccessIncidentSuggestion>(
+        // 滚动发布期间继续调用兼容别名，使新前端也能与尚未升级的旧后端共同运行。
+        `${systemManagementBase}/support-access/grants/recent-incident`,
+        { cache: "no-store" }
+      ),
+    revokeSupportAccessGrant: async (grantId: string, grantToken: string) => {
+      try {
+        return await request<void>(
+          `${systemManagementBase}/support-access/grants/${encodeURIComponent(grantId)}`,
+          { method: "DELETE", headers: supportHeaders(grantToken) }
+        );
+      } finally {
+        closeSupportFileSockets(grantId);
+      }
+    },
+    closeSupportAccessConnections: (grantId?: string) => closeSupportFileSockets(grantId),
+    selectSupportAccessTarget: (grantToken: string, targetUserId: string) =>
+      request<SupportAccessTarget>(
+        `${systemManagementBase}/support-access/targets/${encodeURIComponent(targetUserId)}/selections`,
+        { method: "POST", headers: supportHeaders(grantToken) }
+      ),
+    listSupportAccessSessions: (
+      grantToken: string,
+      targetUserId: string,
+      params: { q?: string; includeArchived?: boolean; page?: number; size?: number } = {}
+    ) => request<PageResponse<Session>>(
+      `${systemManagementBase}/support-access/targets/${encodeURIComponent(targetUserId)}/sessions${query({
+        q: params.q,
+        includeArchived: params.includeArchived || undefined,
+        page: params.page ?? 1,
+        size: params.size ?? 30
+      })}`,
+      { headers: supportHeaders(grantToken) }
+    ),
+    getSupportAccessSessionTreeMessages: (
+      grantToken: string,
+      targetUserId: string,
+      sessionId: string,
+      includeArchived = false
+    ) =>
+      request<SessionTreeMessagesResponse>(
+        `${systemManagementBase}/support-access/targets/${encodeURIComponent(targetUserId)}`
+          + `/sessions/${encodeURIComponent(sessionId)}/session-tree/messages${query({
+            includeArchived: includeArchived || undefined
+          })}`,
+        { headers: supportHeaders(grantToken) }
+      ),
+    listSupportAccessWorkspaces: (
+      grantToken: string,
+      targetUserId: string,
+      page = 1,
+      size = 30
+    ) => request<PageResponse<Workspace>>(
+      `${systemManagementBase}/support-access/targets/${encodeURIComponent(targetUserId)}`
+        + `/workspaces${query({ page, size })}`,
+      { headers: supportHeaders(grantToken) }
+    ),
+    listSupportAccessAuditEvents: (params: SupportAccessAuditQuery = {}) =>
+      request<PageResponse<SupportAccessAuditEvent>>(
+        `${systemManagementBase}/support-access/audit-events${query({
+          actorUserId: params.actorUserId,
+          targetUserId: params.targetUserId,
+          incidentId: params.incidentId,
+          outcome: params.outcome,
+          page: params.page ?? 1,
+          size: params.size ?? 50
+        })}`
+      ),
+    listSupportWorkspaceFiles: async (
+      grant: Pick<SupportAccessGrant, "grantId" | "grantToken">,
+      targetUserId: string,
+      workspaceId: string,
+      path = ""
+    ) => {
+      const entries = await supportWorkspaceFileRpc<BackendFileTreeEntry[]>(
+        grant, targetUserId, workspaceId, "workspace.list", { path }
+      );
+      return entries.map((entry) => ({
+        path: entry.path,
+        name: entry.name,
+        type: entry.directory ? "directory" : "file",
+        size: entry.size,
+        modifiedAt: entry.lastModifiedAt
+      })) satisfies FileTreeEntry[];
+    },
+    searchSupportWorkspaceFiles: async (
+      grant: Pick<SupportAccessGrant, "grantId" | "grantToken">,
+      targetUserId: string,
+      workspaceId: string,
+      searchQuery: string
+    ) => {
+      const results = await supportWorkspaceFileRpc<BackendFileSearchResult[]>(
+        grant, targetUserId, workspaceId, "workspace.search", { query: searchQuery }
+      );
+      return results.map((result) => ({
+        path: result.path,
+        name: result.name,
+        directory: result.directory,
+        size: result.size,
+        modifiedAt: result.lastModifiedAt
+      })) satisfies FileSearchResult[];
+    },
+    readSupportWorkspaceFile: async (
+      grant: Pick<SupportAccessGrant, "grantId" | "grantToken">,
+      targetUserId: string,
+      workspaceId: string,
+      path: string
+    ) => {
+      const data = await supportWorkspaceFileRpc<BackendFileContent>(
+        grant, targetUserId, workspaceId, "workspace.read", { path }, true
+      );
+      return {
+        path: data.path || path,
+        content: typeof data.content === "string" ? data.content : "",
+        encoding: "utf-8",
+        size: data.size,
+        readonly: true
+      } satisfies FileContent;
+    },
+    readSupportWorkspaceFilePreviewChunk: async (
+      grant: Pick<SupportAccessGrant, "grantId" | "grantToken">,
+      targetUserId: string,
+      workspaceId: string,
+      path: string,
+      preview: FilePreviewChunkRequest
+    ) => mapFilePreviewChunk(await supportWorkspaceFileRpc<BackendFilePreviewChunk>(
+      grant, targetUserId, workspaceId, "workspace.read.chunk", { path, ...preview }, true
+    )),
+    readSupportWorkspaceFileBinaryChunk: async (
+      grant: Pick<SupportAccessGrant, "grantId" | "grantToken">,
+      targetUserId: string,
+      workspaceId: string,
+      path: string,
+      binaryRequest: FileBinaryChunkRequest
+    ) => mapFileBinaryChunk(await supportWorkspaceFileRpc<BackendFileBinaryChunk>(
+      grant, targetUserId, workspaceId, "workspace.read.binary.chunk", { path, ...binaryRequest }, true
+    )),
+
     // ---- 数据库 IDENTITY 运维 API ----
 
     /** 查询白名单表 identity 状态（仅 SUPER_ADMIN）。 */
@@ -3119,10 +3366,12 @@ const OBSERVED_SENSITIVE_KEYS = new Set([
   "authtoken",
   "cookie",
   "contexttoken",
+  "granttoken",
   "password",
   "refreshtoken",
   "secret",
   "sessiondigest",
+  "supportaccessgrant",
   "setcookie",
   "ticket",
   "token",
@@ -3130,7 +3379,7 @@ const OBSERVED_SENSITIVE_KEYS = new Set([
 ]);
 
 function redactObservedSensitiveText(raw: string): string {
-  const keyPattern = /(["']?)\b(?:authorization|access[-_]?token|auth[-_]?token|cookie|context[-_]?token|password|refresh[-_]?token|secret|session[-_]?digest|set-cookie|ticket|token[-_]?value|token)\b\1\s*[:=]\s*/gi;
+  const keyPattern = /(["']?)\b(?:authorization|access[-_]?token|auth[-_]?token|cookie|context[-_]?token|grant[-_]?token|password|refresh[-_]?token|secret|session[-_]?digest|set-cookie|support[-_]?access[-_]?grant|ticket|token[-_]?value|token)\b\1\s*[:=]\s*/gi;
   let redacted = "";
   let cursor = 0;
   let match: RegExpExecArray | null;

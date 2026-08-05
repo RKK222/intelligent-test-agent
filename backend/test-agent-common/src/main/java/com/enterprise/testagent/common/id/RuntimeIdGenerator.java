@@ -226,6 +226,21 @@ public final class RuntimeIdGenerator {
         return prefixed("nda_");
     }
 
+    /** 生成问题排查只读授权 ID。 */
+    public static String supportAccessGrantId() {
+        return prefixed("sag_");
+    }
+
+    /** 生成问题排查单号；没有权威工单数据源时用于替代外部工单号。 */
+    public static String supportAccessIncidentId() {
+        return prefixed("sai_");
+    }
+
+    /** 生成问题排查审计事件 ID。 */
+    public static String supportAccessAuditEventId() {
+        return prefixed("sae_");
+    }
+
     /**
      * 按给定领域前缀拼接无横线 UUID；调用方必须传入已约定的稳定前缀。
      */

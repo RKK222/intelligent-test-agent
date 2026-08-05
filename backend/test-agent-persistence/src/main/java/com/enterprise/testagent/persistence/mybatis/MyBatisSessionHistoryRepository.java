@@ -13,6 +13,7 @@ import com.enterprise.testagent.domain.session.SessionWorkspaceContext;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import java.util.Locale;
+import java.util.Optional;
 import org.springframework.stereotype.Repository;
 
 /**
@@ -32,9 +33,49 @@ public class MyBatisSessionHistoryRepository implements SessionHistoryRepository
 
     @Override
     public PageResponse<SessionHistoryItem> findUserHistory(UserId userId, String query, PageRequest pageRequest) {
+        return findUserHistory(userId, query, false, pageRequest);
+    }
+
+    @Override
+    public PageResponse<SessionHistoryItem> findUserHistory(
+            UserId userId,
+            String query,
+            boolean includeArchived,
+            PageRequest pageRequest) {
         String queryPattern = searchPattern(query);
-        var rows = mapper.findUserHistory(userId.value(), queryPattern, pageRequest.size(), pageRequest.offset());
-        long total = mapper.countUserHistory(userId.value(), queryPattern);
+        var rows = mapper.findUserHistory(
+                userId.value(), queryPattern, includeArchived, pageRequest.size(), pageRequest.offset());
+        long total = mapper.countUserHistory(userId.value(), queryPattern, includeArchived);
+        return new PageResponse<>(
+                rows.stream().map(this::toHistoryItem).toList(),
+                pageRequest.page(),
+                pageRequest.size(),
+                total);
+    }
+
+    @Override
+    public Optional<SessionHistoryItem> findUserSession(UserId userId, SessionId sessionId) {
+        return findUserSession(userId, sessionId, false);
+    }
+
+    @Override
+    public Optional<SessionHistoryItem> findUserSession(
+            UserId userId,
+            SessionId sessionId,
+            boolean includeArchived) {
+        return Optional.ofNullable(mapper.findUserSession(
+                        userId.value(), sessionId.value(), null, includeArchived))
+                .map(this::toHistoryItem);
+    }
+
+    @Override
+    public PageResponse<SessionHistoryItem> findUserWorkspaceHistory(
+            UserId userId,
+            WorkspaceId workspaceId,
+            PageRequest pageRequest) {
+        var rows = mapper.findUserWorkspaceHistory(
+                userId.value(), workspaceId.value(), null, false, pageRequest.size(), pageRequest.offset());
+        long total = mapper.countUserWorkspaceHistory(userId.value(), workspaceId.value(), null, false);
         return new PageResponse<>(
                 rows.stream().map(this::toHistoryItem).toList(),
                 pageRequest.page(),

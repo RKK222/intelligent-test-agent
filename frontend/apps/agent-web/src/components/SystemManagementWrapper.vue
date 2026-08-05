@@ -10,9 +10,18 @@ provide("api", api);
 
 defineProps<{
   currentUser: CurrentUser | null;
+  supportAccessRequested?: boolean;
+}>();
+
+const emit = defineEmits<{
+  supportAccessOpened: [];
 }>();
 </script>
 
 <template>
-  <SystemManagementPanel :current-user="currentUser" />
+  <SystemManagementPanel
+    :current-user="currentUser"
+    :support-access-requested="supportAccessRequested"
+    @support-access-opened="emit('supportAccessOpened')"
+  />
 </template>

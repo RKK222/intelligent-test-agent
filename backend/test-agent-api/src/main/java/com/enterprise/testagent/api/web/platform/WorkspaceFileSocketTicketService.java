@@ -15,6 +15,10 @@ import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessFile
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
 import com.enterprise.testagent.opencode.runtime.process.WorkspaceFileRoutingService;
 import com.enterprise.testagent.workspace.WorkspaceApplicationService;
+import com.enterprise.testagent.workspace.UserWorkspaceQueryService;
+import com.enterprise.testagent.system.supportaccess.SupportAccessApplicationService;
+import com.enterprise.testagent.system.supportaccess.SupportAccessAuthorization;
+import com.enterprise.testagent.system.supportaccess.SupportAccessRequestContext;
 import java.util.Map;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
@@ -37,19 +41,34 @@ class WorkspaceFileSocketTicketService {
     private final UserOpencodeProcessAssignmentService assignmentService;
     private final WorkspaceFileSocketTicketStore ticketStore;
     private final ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer;
+    private final SupportAccessApplicationService supportAccessService;
+    private final UserWorkspaceQueryService userWorkspaceQueryService;
 
-    @Autowired
     WorkspaceFileSocketTicketService(
             WorkspaceApplicationService workspaceService,
             UserOpencodeProcessAssignmentService assignmentService,
             WorkspaceFileSocketTicketStore ticketStore,
             ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer) {
+        this(workspaceService, assignmentService, ticketStore, workspaceAccessAuthorizer, null, null);
+    }
+
+    /** 生产构造器注入排查授权和用户工作区查询服务。 */
+    @Autowired
+    WorkspaceFileSocketTicketService(
+            WorkspaceApplicationService workspaceService,
+            UserOpencodeProcessAssignmentService assignmentService,
+            WorkspaceFileSocketTicketStore ticketStore,
+            ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer,
+            SupportAccessApplicationService supportAccessService,
+            UserWorkspaceQueryService userWorkspaceQueryService) {
         this.workspaceService = Objects.requireNonNull(workspaceService, "workspaceService must not be null");
         this.assignmentService = Objects.requireNonNull(assignmentService, "assignmentService must not be null");
         this.ticketStore = Objects.requireNonNull(ticketStore, "ticketStore must not be null");
         this.workspaceAccessAuthorizer = Objects.requireNonNull(
                 workspaceAccessAuthorizer,
                 "workspaceAccessAuthorizer must not be null");
+        this.supportAccessService = supportAccessService;
+        this.userWorkspaceQueryService = userWorkspaceQueryService;
     }
 
     WorkspaceFileSocketDtos.TicketResponse createTicket(
@@ -90,7 +109,7 @@ class WorkspaceFileSocketTicketService {
             FileWorkspaceKind workspaceKind = workspaceAccessAuthorizer.requireClassifiedFileAccess(
                     principal.userId(),
                     new WorkspaceId(workspaceId),
-                    superAdmin);
+                    false);
             UserOpencodeProcessFileRoutingAffinity process = userProcessAffinity(principal, traceId);
             String agentLinuxServerId = process.status() == UserOpencodeProcessAvailability.READY
                     ? process.linuxServerId()
@@ -125,13 +144,44 @@ class WorkspaceFileSocketTicketService {
         return ticketStore.consume(ticket, origin);
     }
 
+    /** 在目标 Java 上签发排查专用只读文件 ticket。 */
+    WorkspaceFileSocketDtos.TicketResponse createSupportReadOnlyTicket(
+            AuthPrincipal principal,
+            String rawGrantToken,
+            UserId targetUserId,
+            WorkspaceId workspaceId,
+            String requestedLinuxServerId,
+            SupportAccessRequestContext requestContext) {
+        requireSupportServices();
+        SupportAccessAuthorization authorization = supportAccessService.authorize(
+                principal, rawGrantToken, targetUserId, "FILE_TICKET_ISSUED", "WORKSPACE",
+                workspaceId.value(), null, requestContext, true);
+        userWorkspaceQueryService.requireUserWorkspace(targetUserId, workspaceId);
+        String currentLinuxServerId = workspaceService.currentLinuxServerId();
+        if (requestedLinuxServerId == null || !currentLinuxServerId.equals(requestedLinuxServerId.trim())) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "排查文件 ticket 必须在目标后端签发",
+                    Map.of("currentLinuxServerId", currentLinuxServerId));
+        }
+        workspaceService.requireWorkspaceOnCurrentServer(workspaceId, requestContext.traceId());
+        WorkspaceFileSocketTicket ticket = ticketStore.issueSupportReadOnly(
+                workspaceId.value(), currentLinuxServerId, authorization.actor().userId().value(),
+                targetUserId.value(), authorization.grant().grantId(), authorization.session().grantTokenDigest(),
+                authorization.session().sessionDigest(), requestContext.traceId());
+        supportAccessService.recordReadOutcome(
+                authorization, "FILE_TICKET_ISSUED", "WORKSPACE", workspaceId.value(), null,
+                "SUCCESS", null, requestContext);
+        return response(ticket);
+    }
+
     /**
      * 每条 workspace RPC 重新校验 ticket、当前 JVM、用户 agent、Workspace 与托管副本事实。
      *
      * <p>连接建立后的 binding 迁移不能继续沿用旧 socket；这里只复用公共 assignment 与 workspace
      * 校验程序，不扫描 Redis、不自行选择路由，也不做本机降级。
      */
-    void authorizeWorkspaceRpc(WorkspaceFileSocketTicket ticket, WorkspaceId workspaceId) {
+    SupportAccessAuthorization authorizeWorkspaceRpc(WorkspaceFileSocketTicket ticket, WorkspaceId workspaceId) {
         if (ticket == null
                 || !MODE_WORKSPACE.equals(ticket.mode())
                 || ticket.userId() == null
@@ -139,6 +189,28 @@ class WorkspaceFileSocketTicketService {
                 || ticket.workspaceId() == null
                 || !ticket.workspaceId().equals(workspaceId.value())) {
             throw workspaceRpcDenied();
+        }
+        if (ticket.supportReadOnly()) {
+            requireSupportServices();
+            if (ticket.supportTargetUserId() == null
+                    || ticket.supportGrantId() == null
+                    || ticket.supportGrantTokenDigest() == null
+                    || ticket.supportActorSessionDigest() == null) {
+                throw workspaceRpcDenied();
+            }
+            String currentLinuxServerId = workspaceService.currentLinuxServerId();
+            if (!Objects.equals(currentLinuxServerId, ticket.linuxServerId())) {
+                throw workspaceRpcDenied();
+            }
+            UserId targetUserId = new UserId(ticket.supportTargetUserId());
+            userWorkspaceQueryService.requireUserWorkspace(targetUserId, workspaceId);
+            workspaceService.requireWorkspaceOnCurrentServer(workspaceId, ticket.traceId());
+            SupportAccessAuthorization authorization = supportAccessService.authorizeByDigest(
+                    ticket.userId(), ticket.supportActorSessionDigest(), ticket.supportGrantTokenDigest(), targetUserId);
+            if (!ticket.supportGrantId().equals(authorization.grant().grantId())) {
+                throw workspaceRpcDenied();
+            }
+            return authorization;
         }
         String currentLinuxServerId = workspaceService.currentLinuxServerId();
         if (!Objects.equals(currentLinuxServerId, ticket.linuxServerId())
@@ -152,13 +224,40 @@ class WorkspaceFileSocketTicketService {
                 || !Objects.equals(currentLinuxServerId, currentAffinity.linuxServerId())) {
             throw workspaceRpcDenied();
         }
-        boolean allowUnmanagedWorkspace = ticket.superAdmin() && !ticket.appSourceWorkspace();
         FileWorkspaceKind currentKind = workspaceAccessAuthorizer.requireClassifiedFileAccess(
-                userId, workspaceId, allowUnmanagedWorkspace);
+                userId, workspaceId, false);
         if (ticket.appSourceWorkspace() && currentKind != FileWorkspaceKind.APP_SOURCE) {
             throw workspaceRpcDenied();
         }
         workspaceService.requireWorkspaceOnCurrentServer(workspaceId, ticket.traceId());
+        return null;
+    }
+
+    /** 记录文件 RPC 审计结果。 */
+    void recordSupportRpc(
+            SupportAccessAuthorization authorization,
+            String operation,
+            WorkspaceId workspaceId,
+            String path,
+            String outcome,
+            String errorCode,
+            String traceId) {
+        requireSupportServices();
+        supportAccessService.recordReadOutcome(
+                authorization,
+                operation.toUpperCase(java.util.Locale.ROOT).replace('.', '_'),
+                "WORKSPACE_FILE",
+                workspaceId.value(),
+                path,
+                outcome,
+                errorCode,
+                new SupportAccessRequestContext(traceId, null, null));
+    }
+
+    private void requireSupportServices() {
+        if (supportAccessService == null || userWorkspaceQueryService == null) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "排查只读文件服务未装配");
+        }
     }
 
     private UserOpencodeProcessFileRoutingAffinity userProcessAffinity(AuthPrincipal principal, String traceId) {

@@ -27,6 +27,7 @@
 7. CORS 本地默认仅覆盖主前端与 `frontend-opencode` 的 localhost/127.0.0.1 开发、预览和 real E2E 端口；生产必须通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 显式配置允许来源。
 8. 多 Java 同源部署允许前端在需要用户绑定服务器的请求上携带可选 `X-Test-Agent-Linux-Server-Id`。该头只是 Nginx 静态白名单的首跳性能提示，不参与鉴权，不替代数据库 binding、Session 归属、运行上下文或后端公共路由判断。
 9. 独立长程任务是受控例外：浏览器由 Nginx 同源直达 Python `/workflow-api/v1/**`，不经过 Java 或 `backend-api`。完整浏览器 API、Python 错误和 Java 服务端窄能力契约见 `docs/api/workflow-api.md`。
+10. 超级管理员问题排查使用独立 `X-Support-Access-Grant` 请求头；该短期值不进入 URL、浏览器持久化、原始报文观察副本或普通用户路由头。跨域部署的 CORS 预检允许该头。
 
 ### 用户绑定服务器首跳提示
 
@@ -1084,6 +1085,8 @@ manager 收到后按自身端口池容量 `PortEnd-PortStart+1` 做 clamp（超�
 
 Phase 02/03 不新增对外 HTTP API，也不新增 Controller。新增的 Workspace、Session、Run、RunEvent、ExecutionNode、RoutingDecision 字段目前只作为后端内部领域和持久化边界使用，Phase 04 暴露 Runtime API 时再在本文件固化请求/响应 DTO。
 
+问题排查入口不接收部署侧共享暗号，所以没有“暗号错误 N 次锁定”之类的独立限流。以下接口继续进入平台统一限流；生产网关应按当前登录用户和 `/system-management/support-access/**` 接口组实施分布式频率/并发限制，限流键不得包含平台 Token 或 `X-Support-Access-Grant` 明文。
+
 内部字段兼容策略：
 
 - `workspaceId`、`sessionId`、`runId`、`eventId`、`executionNodeId` 均保持带前缀字符串，不向前端暴露数据库 surrogate PK。
@@ -2013,7 +2016,7 @@ Hub 元数据与更新角标走 HTTP；制品正文、引用落盘和三方合�
 
 `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` 是分页接口，查询参数为 `page`、`size` 和可选 `refresh`。`refresh` 默认 `true`，会在存在 agent binding 时从 bounded-elastic 线程分页读取当前 agent 标准 session messages 并 upsert 到 `session_messages`；这是 Session 级全量同步，只保留已存在消息的 `runId`，新发现的远端历史 assistant 写空 `runId`，不得把整个 Session 重新归给最新 Run。`refresh=false` 只读数据库快照，用于前端反馈 messageId 映射、只读 transcript 或过渡只读场景，避免触发远端快照刷新。如果 opencode 进程不可用、超时或远端 session 不存在，接口回退返回数据库快照，不向前端暴露 generated SDK DTO。assistant 的 `content` 只保存可见 text part，不混入 reasoning 或 tool output；仅包含工具/文件 parts 的 assistant 消息允许 `content=""`，结构化内容仍由 `parts` 返回。
 
-`GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 是前端工作台历史恢复的主接口，返回 Session root 下全量历史消息树快照；内部平台入口 `/api/internal/platform/opencode-runtime/sessions/{sessionId}/session-tree/messages` 保留，旧 `/api/sessions/{sessionId}/session-tree/messages` 返回 `410 API_GONE`。完整历史按 Redis 24 小时详情、OpenCode 完整会话、PostgreSQL 终态摘要的顺序读取。响应字段与 Run 级 snapshot 一致，但顶层标识为 `sessionId`，并增加以下可选兼容字段：
+`GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 是前端工作台历史恢复的主接口，返回 Session root 下全量历史消息树快照；内部平台入口 `/api/internal/platform/opencode-runtime/sessions/{sessionId}/session-tree/messages` 保留，旧 `/api/sessions/{sessionId}/session-tree/messages` 返回 `410 API_GONE`。完整历史按 Redis 24 小时详情、OpenCode 完整会话、PostgreSQL 终态摘要的顺序读取。`events[]` 在既有 `type/sessionId/payload` 外增加原始 `traceId`，用于授权页面关联日志；滚动发布期间新前端必须兼容旧后端缺少该字段。响应字段与 Run 级 snapshot 一致，但顶层标识为 `sessionId`，并增加以下可选兼容字段：
 
 | 字段 | 说明 |
 |---|---|
@@ -2957,6 +2960,63 @@ Base URL：`/api/internal/platform/system-management`
 ]
 ```
 
+### system-management 问题排查只读 API
+
+基础路径：`/api/internal/platform/system-management/support-access`。所有入口都要求当前平台登录用户在数据库中实时拥有 `SUPER_ADMIN`；页面快捷键仅展示入口，不参与授权。系统没有部署侧激活暗号配置，actor 不切换为目标用户。
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `POST` | `/grants` | 携带排查单号和原因，签发绑定当前登录会话的限时只读授权。 |
+| `GET` | `/grants/incident-suggestion` | 返回本次排查使用的单号及来源。当前没有权威工单数据源时，每次生成新的 `sai_` 单号。 |
+| `GET` | `/grants/recent-incident` | 兼容旧客户端的别名；响应与 `incident-suggestion` 相同，不再读取历史授权。 |
+| `DELETE` | `/grants/{grantId}` | 显式撤销当前授权。 |
+| `POST` | `/targets/{targetUserId}/selections` | 选择/切换目标用户并记录审计。 |
+| `GET` | `/targets/{targetUserId}/sessions?q=&includeArchived=&page=&size=` | 按目标用户归因规则分页查询会话；默认仅 ACTIVE，显式 `includeArchived=true` 时包含软删除的 ARCHIVED。 |
+| `GET` | `/targets/{targetUserId}/sessions/{sessionId}/session-tree/messages?includeArchived=` | 读取既有保留链路可恢复的会话树消息；读取 ARCHIVED 会话时必须显式传 `true`。 |
+| `GET` | `/targets/{targetUserId}/workspaces?page=&size=` | 查询目标用户 ACTIVE 个人或会话归因工作区，并返回目标 Java 路由状态。 |
+| `POST` | `/targets/{targetUserId}/workspaces/{workspaceId}/file-ws-route` | 按工作区权威服务器返回只读文件 WebSocket 目标。 |
+| `POST` | `/targets/{targetUserId}/workspaces/{workspaceId}/file-ws-tickets` | 在目标 Java 签发一次性只读文件 ticket。 |
+| `GET` | `/audit-events?actorUserId=&targetUserId=&incidentId=&outcome=&page=&size=` | 所有实时超级管理员查询一年期访问审计。 |
+
+签发请求：
+
+```json
+{
+  "incidentId": "sai_0123456789abcdef0123456789abcdef",
+  "reason": "排查失败会话及关联工作区",
+  "durationMinutes": 30,
+  "readOnlyAcknowledged": true
+}
+```
+
+`durationMinutes` 允许 `5..240`。同一平台登录会话再次签发会让旧授权立即失效。成功响应只返回一次 `grantToken`：
+
+```json
+{
+  "grantId": "sag_...",
+  "grantToken": "sat_...",
+  "expiresAt": "2026-08-05T06:00:00Z"
+}
+```
+
+排查单号建议响应为 `{ "incidentId": "sai_<32位小写十六进制UUID>", "source": "GENERATED" }`。当前工程没有权威工单表或外部工单服务，因此后端每次请求都生成新号码，禁止从最近授权循环回填；未来接入权威工单时可返回 `source=WORK_ORDER`，`incidentId` 字段保持兼容。查询严格使用当前登录 actor，不接受前端传入用户 ID。页面在当前超级管理员资料可用后自动请求，组件先挂载、身份后到达时同样补触发；再次三击 Shift、撤销或到期后都会为下一轮请求新号，不恢复历史原因、目标用户、时长、确认状态或 grant。
+
+除签发、排查单号建议和审计列表外，其余排查请求必须携带：
+
+```http
+X-Support-Access-Grant: sat_...
+```
+
+该头与当前 Bearer 登录会话、actor、实时角色和数据库授权记录共同校验；缺失、过期、已撤销、登出、停用、角色移除或登录会话不匹配统一失败关闭。排查授权失效产生的 `401` 只清理本页排查状态，不代表平台登录态必然失效。
+
+会话和工作区归因使用目标用户的 `sessions.created_by_user_id`、`runs.triggered_by_user_id`、`session_messages.sender_user_id` 以及 ACTIVE 个人工作区关系；只凭任意 ID 不能扩大范围。`ARCHIVED` 表示用户软删除/隐藏，未物理删除消息或 Run；排查列表只有显式开启筛选时才返回，内部 `SIDE_QUESTION` 会话始终排除。会话树响应沿用既有 `SessionTreeMessagesResponse`，包含 `historyRepresentation=FULL|SUMMARY|LEGACY`、`replayAvailable` 和 `detailsAvailableUntil`：`LEGACY` 表示 Redis/OpenCode/双摘要没有可展示正文，或工作区权威 Java 后端离线、未知而跳过不可达 OpenCode 后，从既有 `session_messages` 有界恢复的旧正文，不保证工具/事件细节完整，因此 `replayAvailable=false`。空 Redis/OpenCode 快照不得以“完整历史”截断该兜底；该兜底复用原表，不建立额外正文副本。
+
+排查工作区项在普通 `Workspace` 字段外增加可选 `backendAvailability=ONLINE|OFFLINE|UNBOUND|UNKNOWN` 和 `backendLastHeartbeatAt`。状态来自公共 `BackendJavaRouteResolver` 在线快照；Redis 快照临时不可读时远端状态为 `UNKNOWN`。只有 `ONLINE` 可在页面打开文件树和尝试读取 OpenCode 完整历史；其他状态直接使用持久化历史来源，不改写 `linuxServerId`，也不会切换到当前或其它服务器。前端会话正文复用普通用户首页的 Session tree reducer 与 `OpencodeTimeline`，assistant envelope 没有 text 时仍从 text part 展示正文，工具、Todo 和子 Agent 投影口径与首页一致；输入区固定只读。会话详情在排查上下文栏显示可复制的 `sessionId` 和事件中最近一个 `traceId`，存在多个唯一 Trace 时允许展开全部值；这些业务 ID 不包含授权 Token。
+
+排查文件 ticket 仅接受 `workspace.list/search/read/read.chunk/read.binary.chunk` RPC，并拒绝 `.opencode`。写入、上传、复制/移动、删除、重命名、Git、终端、Agent 配置、加入对话、下载和批量导出没有排查 API。普通 Session、Workspace 与文件入口继续按当前 actor 自身归属校验，`SUPER_ADMIN` 不旁路。
+
+每次目标切换、读取和失败在返回正文前写入审计；审计失败时正文不返回。审计响应不包含消息/文件正文、路径明文或 Token，文件路径仅保存 SHA-256 摘要。
+
 #### 查询数据库 IDENTITY 状态
 
 | 方法 | 路径 | 用途 |
@@ -3535,8 +3595,8 @@ RunEvent SSE 按 Run 原始生产 Java 路由，不按当前用户最新 binding
     ]
   },
   "events": [
-    { "type": "message.updated", "sessionId": "ses_child", "payload": {} },
-    { "type": "permission.asked", "sessionId": "ses_child", "payload": { "requestId": "perm_..." } }
+    { "type": "message.updated", "traceId": "trace_...", "sessionId": "ses_child", "payload": {} },
+    { "type": "permission.asked", "traceId": "trace_...", "sessionId": "ses_child", "payload": { "requestId": "perm_..." } }
   ],
   "historyRepresentation": "FULL",
   "replayAvailable": true,
@@ -3544,7 +3604,7 @@ RunEvent SSE 按 Run 原始生产 Java 路由，不按当前用户最新 binding
 }
 ```
 
-三个历史元数据字段与 Session 级接口语义一致，均保持可选以兼容旧客户端；Redis 来源的 `detailsAvailableUntil` 取 manifest 到期时间，OpenCode 完整来源可为 `null`，PostgreSQL 摘要来源固定返回 `historyRepresentation=SUMMARY`、`replayAvailable=false`。该接口是 HTTP snapshot 辅助入口，不替代 RunEvent SSE。它只返回因果裁剪后的当前 Run scope 子树；root session 下全量多轮历史及全部历史 child 使用 `GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 查询。Session 级命中 legacy OpenCode 来源时仍按消息 snapshot 中的远端 `rootSessionId` 补读 `run_events.root_session_id` 下的 durable 状态事件；Redis 和摘要来源禁止回查旧事件表。
+三个历史元数据字段与 Session 级接口语义一致，均保持可选以兼容旧客户端；`events[].traceId` 为对应恢复事件的原始 Trace，新增字段不改变 reducer payload。Redis 来源的 `detailsAvailableUntil` 取 manifest 到期时间，OpenCode 完整来源可为 `null`，PostgreSQL 摘要来源固定返回 `historyRepresentation=SUMMARY`、`replayAvailable=false`。该接口是 HTTP snapshot 辅助入口，不替代 RunEvent SSE。它只返回因果裁剪后的当前 Run scope 子树；root session 下全量多轮历史及全部历史 child 使用 `GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 查询。Session 级命中 legacy OpenCode 来源时仍按消息 snapshot 中的远端 `rootSessionId` 补读 `run_events.root_session_id` 下的 durable 状态事件；Redis 和摘要来源禁止回查旧事件表。
 
 PTY WebSocket 不在上述默认 HTTP/SSE 契约内，已按 `docs/standards/security.md` 增加后端受控例外入口，前端仍不得直连 opencode server、SSH、sidecar 或任意主机。
 

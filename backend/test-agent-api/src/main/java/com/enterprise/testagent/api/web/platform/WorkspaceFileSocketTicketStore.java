@@ -57,6 +57,11 @@ class WorkspaceFileSocketTicketStore {
                 mode,
                 scope,
                 worktreeId,
+                false,
+                null,
+                null,
+                null,
+                null,
                 traceId,
                 clock.instant().plus(DEFAULT_TTL));
         tickets.put(ticket.ticket(), ticket);
@@ -102,6 +107,24 @@ class WorkspaceFileSocketTicketStore {
         if (origin == null || origin.isBlank()) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "文件 WebSocket 缺少 Origin");
         }
+        return ticket;
+    }
+
+    /** 签发只读排查 ticket；只保存授权和平台会话摘要，不保存两类 Token 明文。 */
+    WorkspaceFileSocketTicket issueSupportReadOnly(
+            String workspaceId,
+            String linuxServerId,
+            String actorUserId,
+            String targetUserId,
+            String grantId,
+            String grantTokenDigest,
+            String actorSessionDigest,
+            String traceId) {
+        WorkspaceFileSocketTicket ticket = new WorkspaceFileSocketTicket(
+                ticketFactory.get(), workspaceId, linuxServerId, null, false, true, false,
+                actorUserId, "workspace", null, null, true, grantId, grantTokenDigest,
+                actorSessionDigest, targetUserId, traceId, clock.instant().plus(DEFAULT_TTL));
+        tickets.put(ticket.ticket(), ticket);
         return ticket;
     }
 

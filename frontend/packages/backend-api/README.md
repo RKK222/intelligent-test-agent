@@ -7,6 +7,7 @@
 ## 主要职责
 
 - 统一 baseUrl、traceId、鉴权头和 JSON 解析；`VITE_TEST_AGENT_API_BASE_URL` 显式为空时，HTTP 请求保留同源相对 `/api`，WebSocket ticket 的相对路径则按当前页面 origin 补全为绝对 `ws://` / `wss://` 地址，不会回退到本机开发地址。
+- 超级管理员排查读取使用独立的 `X-Support-Access-Grant` 内存令牌和独立 support 文件 WebSocket 连接；client 提供授权签发/撤销、目标选择、显式归档会话筛选/读取、会话树、带后端可用状态的用户工作区和审计查询，只暴露文件列表、搜索、文本/二进制预览分段读取。该令牌会从原始交换 observer 递归脱敏，带该头的 401 不触发普通登录全局退出。
 - Model/Provider 目录仍读取 opencode 原生接口；平台 config GET 代理实例级 `/config` 合并有效配置，存在非空 `enabled_providers` 时，client 按同一 Provider ID 白名单过滤两类目录，企业配置只展示白名单 Provider 下的全部模型，不会混入 OpenCode Zen。未配置白名单或 config 暂时读取失败时保持原生目录；并发目录查询复用同一轮 config 请求，请求结束即失效以支持配置热加载。
 - 可选 `routeLinuxServerId` 动态读取当前页面内存中的用户 binding；只有用户 OpenCode、Session、Run、夜间任务和本地工作区/Agent 配置请求通过内部 `routedRequest` 增加 `X-Test-Agent-Linux-Server-Id`。空值不发送，登录、用户管理、应用列表和共享控制面仍使用普通请求；该值仅用于 Nginx 首跳，不替代后端权威路由。
 - 可选 `rawExchangeObserver` 供前端调试面板记录浏览器与平台后端之间的最终 method/url/path/traceId、请求体、响应状态/响应头和响应原文；observer 不记录 `Authorization`、Cookie 等敏感请求头，也不改变后端 API 契约。
@@ -70,7 +71,7 @@ corepack pnpm --filter @test-agent/backend-api typecheck
 corepack pnpm test -- backend-api
 ```
 
-`backend-api.test.ts` 覆盖 LobeHub 签票方法/路径/无请求体、动态路由 ID 空值不发送、绑定请求携带修剪后的
+`backend-api.test.ts` 覆盖 LobeHub 签票方法/路径/无请求体、排查 grant 头、原始交换脱敏及排查 401 不触发全局退出、动态路由 ID 空值不发送、绑定请求携带修剪后的
 `X-Test-Agent-Linux-Server-Id`、普通控制面不携带，OpenCode V2 模型 limit 与 Provider `all` envelope 映射，
 用户单人兼容/批量角色修改、单个/批量删除与 TCDS 同步的方法/路径/body，以及引用资产端点和通用参数内存值接口；
 `night-execution.test.ts` 覆盖旧夜间请求不带模式、自定义请求携带 `ADMIN_CUSTOM`，以及查询/改期/取消/关闭。

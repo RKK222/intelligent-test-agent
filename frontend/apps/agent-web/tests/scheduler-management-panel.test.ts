@@ -174,10 +174,15 @@ function api(overrides: Partial<BackendApiClient> = {}) {
   } as Partial<BackendApiClient> as BackendApiClient;
 }
 
-function renderWithApi(component: Component, backendApi: BackendApiClient, user: CurrentUser = currentUser) {
+function renderWithApi(
+  component: Component,
+  backendApi: BackendApiClient,
+  user: CurrentUser = currentUser,
+  props: Record<string, unknown> = {}
+) {
   const client = queryClient();
   const view = render(component, {
-    props: { currentUser: user },
+    props: { currentUser: user, ...props },
     global: {
       plugins: [[VueQueryPlugin, { queryClient: client }]],
       stubs: {
@@ -192,7 +197,11 @@ function renderWithApi(component: Component, backendApi: BackendApiClient, user:
           emits: ["update:modelValue"],
           template: `<select :aria-label="placeholder" :value="modelValue" @change="$emit('update:modelValue', $event.target.value)"><slot /></select>`
         },
-        ElOption: { props: ["label", "value"], template: `<option :value="value">{{ label }}</option>` }
+        ElOption: { props: ["label", "value"], template: `<option :value="value">{{ label }}</option>` },
+        SupportAccessPanel: {
+          props: ["currentUser", "activationSequence"],
+          template: `<div data-testid="support-access-panel" :data-activation-sequence="activationSequence">只读排查授权面板</div>`
+        }
       },
       provide: { api: backendApi }
     }
@@ -215,6 +224,27 @@ describe("scheduler management panel", () => {
 
     await waitFor(() => expect(backendApi.getOpencodeRuntimeManagementOverview).toHaveBeenCalled());
     expect(await view.findByText("暂无服务器 / Java 进程")).toBeTruthy();
+    view.queryClient.clear();
+  });
+
+  it("reveals the support panel only after the global super-admin gesture requests it without changing identity", async () => {
+    const backendApi = api();
+    const view = renderWithApi(SystemManagementPanel, backendApi);
+
+    expect(view.queryByText("问题排查只读访问", { selector: ".ta-system-menu-text" })).toBeNull();
+    await view.rerender({ currentUser, supportAccessRequested: true });
+
+    expect(await view.findByText("问题排查只读访问", { selector: ".ta-system-menu-text" })).toBeTruthy();
+    expect(view.getByTestId("support-access-panel")).toBeTruthy();
+    expect(view.getByTestId("support-access-panel").getAttribute("data-activation-sequence")).toBe("1");
+    expect(view.emitted().supportAccessOpened).toHaveLength(1);
+    expect(currentUser.userId).toBe("usr_admin");
+    expect(currentUser.roles).toEqual(["SUPER_ADMIN"]);
+
+    await view.rerender({ currentUser, supportAccessRequested: false });
+    await view.rerender({ currentUser, supportAccessRequested: true });
+    await waitFor(() => expect(view.getByTestId("support-access-panel").getAttribute("data-activation-sequence")).toBe("2"));
+    expect(view.emitted().supportAccessOpened).toHaveLength(2);
     view.queryClient.clear();
   });
 

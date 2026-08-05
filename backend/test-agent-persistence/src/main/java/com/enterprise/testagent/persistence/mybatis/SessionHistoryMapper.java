@@ -13,10 +13,32 @@ public interface SessionHistoryMapper {
     List<SessionHistoryRow> findUserHistory(
             @Param("userId") String userId,
             @Param("queryPattern") String queryPattern,
+            @Param("includeArchived") boolean includeArchived,
             @Param("limit") int limit,
             @Param("offset") long offset);
 
     long countUserHistory(
             @Param("userId") String userId,
-            @Param("queryPattern") String queryPattern);
+            @Param("queryPattern") String queryPattern,
+            @Param("includeArchived") boolean includeArchived);
+
+    SessionHistoryRow findUserSession(
+            @Param("userId") String userId,
+            @Param("sessionId") String sessionId,
+            @Param("queryPattern") String queryPattern,
+            @Param("includeArchived") boolean includeArchived);
+
+    List<SessionHistoryRow> findUserWorkspaceHistory(
+            @Param("userId") String userId,
+            @Param("workspaceId") String workspaceId,
+            @Param("queryPattern") String queryPattern,
+            @Param("includeArchived") boolean includeArchived,
+            @Param("limit") int limit,
+            @Param("offset") long offset);
+
+    long countUserWorkspaceHistory(
+            @Param("userId") String userId,
+            @Param("workspaceId") String workspaceId,
+            @Param("queryPattern") String queryPattern,
+            @Param("includeArchived") boolean includeArchived);
 }

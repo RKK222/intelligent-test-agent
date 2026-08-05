@@ -76,6 +76,10 @@ export type Workspace = {
   rootPath: string;
   status: string;
   linuxServerId?: string | null;
+  /** 排查只读列表中的目标 Java 路由状态；旧后端和普通工作区接口可缺失。 */
+  backendAvailability?: "ONLINE" | "OFFLINE" | "UNBOUND" | "UNKNOWN" | string | null;
+  /** 在线 Java 路由最近心跳；离线或旧后端可缺失。 */
+  backendLastHeartbeatAt?: string | null;
   createdAt: string;
   updatedAt: string;
   /**
@@ -722,6 +726,8 @@ export type RunSessionTreeSessionResponse = {
 
 export type RunSessionTreeEventResponse = {
   type: string;
+  /** 事件原始 traceId；滚动发布兼容旧后端，因此前端按可选字段读取。 */
+  traceId?: string | null;
   rootSessionId?: string | null;
   sessionId?: string | null;
   parentSessionId?: string | null;
@@ -735,8 +741,8 @@ export type SessionTreeMessagesResponse = {
   messagesBySessionId: Record<string, Record<string, unknown>[]>;
   childSessionIdByTaskPartId: Record<string, string>;
   events: RunSessionTreeEventResponse[];
-  /** 完整历史来自 Redis/OpenCode，摘要历史来自 PostgreSQL 终态投影。 */
-  historyRepresentation?: "FULL" | "SUMMARY" | string | null;
+  /** FULL 来自 Redis/OpenCode，SUMMARY 为终态摘要，LEGACY 为旧表保留的正文。 */
+  historyRepresentation?: "FULL" | "SUMMARY" | "LEGACY" | string | null;
   replayAvailable?: boolean | null;
   detailsAvailableUntil?: string | null;
 };
@@ -2356,6 +2362,64 @@ export type UserManagementUser = PlatformUserSummary & {
   roleLabels?: string[];
   createdAt: string;
   updatedAt?: string;
+};
+
+/** 超级管理员问题排查授权签发参数；共享暗号不属于该协议。 */
+export type SupportAccessGrantRequest = {
+  incidentId: string;
+  reason: string;
+  durationMinutes: number;
+  readOnlyAcknowledged: true;
+};
+
+/** grantToken 只返回一次，调用方只可保存在当前页面组件内存。 */
+export type SupportAccessGrant = {
+  grantId: string;
+  grantToken: string;
+  expiresAt: string;
+};
+
+/** 排查单号建议；没有权威工单数据源时由平台生成新的唯一号码。 */
+export type SupportAccessIncidentSuggestion = {
+  incidentId?: string | null;
+  source?: "WORK_ORDER" | "GENERATED";
+};
+
+export type SupportAccessTarget = {
+  userId: string;
+  unifiedAuthId: string;
+  username: string;
+  status: string;
+};
+
+export type SupportAccessAuditEvent = {
+  eventId: string;
+  grantId?: string | null;
+  actorUserId?: string | null;
+  actorUsername: string;
+  targetUserId?: string | null;
+  targetUsername?: string | null;
+  incidentId?: string | null;
+  reason?: string | null;
+  action: string;
+  resourceType: string;
+  resourceId?: string | null;
+  pathDigest?: string | null;
+  outcome: string;
+  errorCode?: string | null;
+  traceId: string;
+  ipAddress?: string | null;
+  userAgentDigest?: string | null;
+  occurredAt: string;
+};
+
+export type SupportAccessAuditQuery = {
+  actorUserId?: string;
+  targetUserId?: string;
+  incidentId?: string;
+  outcome?: string;
+  page?: number;
+  size?: number;
 };
 
 /** 用户管理列表组合筛选；role=UNASSIGNED 表示仅查询未分配全局角色的用户。 */

@@ -13,9 +13,12 @@ import com.enterprise.testagent.workspace.AgentSkillHubApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceDirectoryService;
 import com.enterprise.testagent.workspace.WorkspaceFileUpload;
+import com.enterprise.testagent.workspace.FileTreeEntryResponse;
+import com.enterprise.testagent.workspace.FileSearchResultResponse;
 import com.enterprise.testagent.workspace.WorkspaceViewApplicationService;
 import com.enterprise.testagent.workspace.WorkspaceViewLocator;
 import com.enterprise.testagent.workspace.WorkspaceViewLocatorKind;
+import com.enterprise.testagent.system.supportaccess.SupportAccessAuthorization;
 import java.net.URI;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -190,13 +193,22 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
             String traceId,
             Map<String, ActiveUpload> activeUploads) {
         String id = null;
+        String op = null;
+        WorkspaceId auditedWorkspaceId = null;
+        String auditedPath = null;
+        SupportAccessAuthorization supportAuthorization = null;
         try {
             JsonNode root = objectMapper.readTree(payload);
             id = text(root, "id");
-            String op = requiredText(root, "op");
+            op = requiredText(root, "op");
             JsonNode params = root.path("params");
             if (MODE_WORKSPACE.equals(ticket.mode()) && op.startsWith("workspace.")) {
-                authorizeWorkspaceRpc(ticket, params);
+                if (ticket.supportReadOnly()) {
+                    requireSupportReadOperation(op);
+                }
+                auditedWorkspaceId = workspaceId(ticket, params);
+                auditedPath = supportAuditPath(op, params);
+                supportAuthorization = authorizeWorkspaceRpc(ticket, auditedWorkspaceId);
             }
             Object data = switch (op) {
                 case "workspace.list" -> workspaceService.listFiles(workspaceId(ticket, params), text(params, "path"));
@@ -345,12 +357,84 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 case "workspace.create" -> createWorkspace(ticket, params, traceId);
                 default -> throw new PlatformException(ErrorCode.VALIDATION_ERROR, "不支持的文件 WebSocket 操作", Map.of("op", op));
             };
+            if (supportAuthorization != null) {
+                data = sanitizeSupportReadResult(op, data);
+                // 审计必须先于正文响应落库；审计存储异常时不会把 data 发送给浏览器。
+                ticketService.recordSupportRpc(
+                        supportAuthorization, op, auditedWorkspaceId, auditedPath, "SUCCESS", null, traceId);
+            }
             return success(id, data, traceId);
         } catch (PlatformException exception) {
+            if (supportAuthorization != null) {
+                try {
+                    ticketService.recordSupportRpc(
+                            supportAuthorization,
+                            op == null ? "workspace.unknown" : op,
+                            auditedWorkspaceId,
+                            auditedPath,
+                            "FAILED",
+                            exception.errorCode().name(),
+                            traceId);
+                } catch (RuntimeException auditFailure) {
+                    return error(id, ErrorCode.INTERNAL_ERROR.name(), "排查访问审计失败", traceId, Map.of());
+                }
+            }
             return error(id, exception.errorCode().name(), exception.getMessage(), traceId, exception.details());
         } catch (Exception exception) {
+            if (supportAuthorization != null) {
+                try {
+                    ticketService.recordSupportRpc(
+                            supportAuthorization,
+                            op == null ? "workspace.unknown" : op,
+                            auditedWorkspaceId,
+                            auditedPath,
+                            "FAILED",
+                            ErrorCode.INTERNAL_ERROR.name(),
+                            traceId);
+                } catch (RuntimeException ignored) {
+                    // 两次失败均只返回稳定错误，不暴露审计存储或文件系统异常细节。
+                }
+            }
             return error(id, ErrorCode.VALIDATION_ERROR.name(), "文件 WebSocket 消息无效", traceId, Map.of());
         }
+    }
+
+    /** 排查 ticket 只开放有限文件读取白名单，所有写入、Git、配置和组合视图操作均拒绝。 */
+    private void requireSupportReadOperation(String op) {
+        if (!Set.of(
+                "workspace.list",
+                "workspace.search",
+                "workspace.read",
+                "workspace.read.chunk",
+                "workspace.read.binary.chunk").contains(op)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "排查只读 ticket 不允许该文件操作", Map.of("op", op));
+        }
+    }
+
+    private String supportAuditPath(String op, JsonNode params) {
+        if ("workspace.search".equals(op)) {
+            return null;
+        }
+        String path = text(params, "path");
+        if (protectedConfigPath(path)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "排查入口不允许读取 Agent 配置文件");
+        }
+        return path;
+    }
+
+    /** 根目录和搜索结果过滤 .opencode，避免通过普通 workspace 读绕过 Agent 配置边界。 */
+    private Object sanitizeSupportReadResult(String op, Object data) {
+        if ("workspace.list".equals(op) && data instanceof java.util.List<?> values) {
+            return values.stream()
+                    .filter(value -> !(value instanceof FileTreeEntryResponse entry) || !protectedConfigPath(entry.path()))
+                    .toList();
+        }
+        if ("workspace.search".equals(op) && data instanceof java.util.List<?> values) {
+            return values.stream()
+                    .filter(value -> !(value instanceof FileSearchResultResponse entry) || !protectedConfigPath(entry.path()))
+                    .toList();
+        }
+        return data;
     }
 
     private Object workspaceUploadBegin(
@@ -421,9 +505,10 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         active.upload().abort();
     }
 
-    private void authorizeWorkspaceRpc(WorkspaceFileSocketTicket ticket, JsonNode params) {
-        WorkspaceId workspaceId = workspaceId(ticket, params);
-        ticketService.authorizeWorkspaceRpc(ticket, workspaceId);
+    private SupportAccessAuthorization authorizeWorkspaceRpc(
+            WorkspaceFileSocketTicket ticket,
+            WorkspaceId workspaceId) {
+        return ticketService.authorizeWorkspaceRpc(ticket, workspaceId);
     }
 
     private WorkspaceViewLocator viewLocator(JsonNode params) {

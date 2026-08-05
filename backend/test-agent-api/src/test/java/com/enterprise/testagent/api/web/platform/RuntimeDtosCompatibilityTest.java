@@ -68,6 +68,9 @@ class RuntimeDtosCompatibilityTest {
         assertThat(response.historyRepresentation()).isEqualTo("FULL");
         assertThat(response.replayAvailable()).isTrue();
         assertThat(response.detailsAvailableUntil()).isNull();
+        assertThat(response.events()).singleElement()
+                .extracting(RuntimeDtos.RunSessionTreeEventResponse::traceId)
+                .isEqualTo("trace_1234567890abcdef");
     }
 
     @Test

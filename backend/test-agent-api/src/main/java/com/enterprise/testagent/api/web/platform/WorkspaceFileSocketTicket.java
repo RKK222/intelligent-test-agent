@@ -17,6 +17,11 @@ record WorkspaceFileSocketTicket(
         String mode,
         String scope,
         String worktreeId,
+        boolean supportReadOnly,
+        String supportGrantId,
+        String supportGrantTokenDigest,
+        String supportActorSessionDigest,
+        String supportTargetUserId,
         String traceId,
         Instant expiresAt) {
 
@@ -34,7 +39,7 @@ record WorkspaceFileSocketTicket(
             String traceId,
             Instant expiresAt) {
         this(ticket, workspaceId, linuxServerId, agentLinuxServerId, false, superAdmin, appAdmin,
-                userId, mode, scope, worktreeId, traceId, expiresAt);
+                userId, mode, scope, worktreeId, false, null, null, null, null, traceId, expiresAt);
     }
 
     WorkspaceFileSocketTicket(
@@ -49,6 +54,6 @@ record WorkspaceFileSocketTicket(
             String traceId,
             Instant expiresAt) {
         this(ticket, workspaceId, linuxServerId, agentLinuxServerId, false, superAdmin, superAdmin,
-                null, mode, scope, worktreeId, traceId, expiresAt);
+                null, mode, scope, worktreeId, false, null, null, null, null, traceId, expiresAt);
     }
 }

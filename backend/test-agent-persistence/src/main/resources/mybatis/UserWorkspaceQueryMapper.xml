@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.UserWorkspaceQueryMapper">
+    <resultMap id="WorkspaceRowMap" type="com.enterprise.testagent.persistence.mybatis.UserWorkspaceRow">
+        <constructor>
+            <arg column="workspace_id" javaType="java.lang.String"/>
+            <arg column="name" javaType="java.lang.String"/>
+            <arg column="root_path" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="linux_server_id" javaType="java.lang.String"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="UserWorkspaceWhere">
+        where w.status = 'ACTIVE'
+          and (
+            exists (
+                select 1 from personal_workspaces pw
+                where pw.runtime_workspace_id = w.workspace_id
+                  and pw.user_id = #{userId}
+                  and pw.status = 'ACTIVE'
+            )
+            or exists (
+                select 1 from sessions s
+                where s.workspace_id = w.workspace_id
+                  and s.status = 'ACTIVE'
+                  and s.source_type != 'SIDE_QUESTION'
+                  and (
+                    s.created_by_user_id = #{userId}
+                    or exists (
+                        select 1 from runs r
+                        where r.session_id = s.session_id
+                          and r.triggered_by_user_id = #{userId}
+                    )
+                    or exists (
+                        select 1 from session_messages sm
+                        where sm.session_id = s.session_id
+                          and sm.sender_user_id = #{userId}
+                    )
+                  )
+            )
+          )
+    </sql>
+
+    <select id="findUserWorkspaces" resultMap="WorkspaceRowMap">
+        select w.workspace_id, coalesce(nullif(trim(w.name), ''), w.workspace_id) as name,
+               w.root_path, w.status, w.linux_server_id,
+               w.trace_id, w.created_at, w.updated_at
+        from workspaces w
+        <include refid="UserWorkspaceWhere"/>
+        order by w.updated_at desc, w.id desc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countUserWorkspaces" resultType="long">
+        select count(*) from workspaces w
+        <include refid="UserWorkspaceWhere"/>
+    </select>
+
+    <select id="findUserWorkspace" resultMap="WorkspaceRowMap">
+        select w.workspace_id, coalesce(nullif(trim(w.name), ''), w.workspace_id) as name,
+               w.root_path, w.status, w.linux_server_id,
+               w.trace_id, w.created_at, w.updated_at
+        from workspaces w
+        <include refid="UserWorkspaceWhere"/>
+          and w.workspace_id = #{workspaceId}
+        limit 1
+    </select>
+</mapper>

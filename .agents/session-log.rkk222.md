@@ -5851,3 +5851,360 @@
 - 超级管理员可直接修正用户名，无需删除重建用户；统一认证号和权限保持不变，TCDS 覆盖风险在页面明确提示。
 - 本次涉及新增高权限 HTTP API 和登录名兼容语义，不涉及事件、数据库结构、性能链路、环境文件、依赖、
   generated SDK 或 OpenCode 源码；企业升级需同时替换后端和前端交付物，无数据库迁移步骤。
+## 2026-08-05 - 增加超级管理员限时只读问题排查访问
+
+### Why
+
+- 内网问题排查需要超级管理员查看任意目标用户归因的会话、工作区和文件，但原有 `SUPER_ADMIN` 普通接口既缺少
+  明确目标范围、限时授权和逐次审计，也曾存在未托管文件工作区的管理员旁路。
+- 共享“激活暗号”无法提供个人问责或可靠撤销，因此最终安全边界改为实时超级管理员角色、当前登录会话和限时
+  随机授权 Token；隐藏快捷键只负责展示入口，不参与鉴权，也不存在暗号专用限流规则。
+
+### What
+
+- 新增排查授权、目标切换、用户会话/消息树、关联工作区、只读文件 WebSocket ticket 和一年期审计 API；授权
+  5–240 分钟、同一登录会话只保留一个当前授权，Token 只驻留前端内存且服务端仅保存摘要。
+- 目标资源按用户创建/触发/发送归因的活动会话，以及活动个人工作区和这些会话引用的活动工作区统一查询；普通
+  Session/Workspace/文件入口同步补齐对象归属检查，并移除超级管理员未托管工作区文件旁路。
+- 排查文件 WebSocket 每个 RPC 重新校验登录会话、实时角色、授权、目标用户、工作区和目标 Java，只开放
+  list/search/read/chunk/binary-chunk，过滤 `.opencode`，拒绝写入、上传、下载、Git、终端和 Agent 配置。
+- 系统管理页用 `Ctrl/Cmd+Alt+Shift+D` 显示排查面板，支持工单号、原因、时长、只读确认、目标用户切换、
+  会话恢复元数据、只读文件预览和审计查询；同步 API、事件边界、数据库、安全、前端、模块图及模块 README。
+- 新增 Flyway `V20260805132000__create_support_access_audit.sql`、MyBatis mapper 和 Redis 当前授权索引；没有修改
+  generated SDK、OpenCode 源码或 `.env*`。
+
+### How
+
+- JDK 25 下后端 21 模块 `mvn test` 全量通过；新增授权服务、API、WebSocket、Session 归属和 PostgreSQL/MyBatis
+  集成测试通过。最终补充 Spring 注入构造器后，授权服务与 CORS 定向测试再次通过，并以真实应用启动验证装配。
+- 前端相关 121 项通过，workspace typecheck 和 production build 通过；全量 1801 passed / 1 skipped，唯一失败是
+  `AppSourceDialog` 固定 `2026-08-01` 过期时间夹具，已在未修改的原工作区复现，属于日期相关既有基线问题。
+- 打包 JAR 内 persistence 子 JAR 与源码构建物 SHA-256 一致，新 migration 资源与源码 SHA-256 均为
+  `54cea9a84948f8e4cee14d630772b8ee0668c2a7e5fc897ede5e792a15edd761`。
+- 新 worktree 缺被忽略的 `.env.test`，未复制或改写配置，改用原工作区现有测试 env 绝对路径。默认 Workflow
+  初始化因数据库账号缺 `CREATEROLE/ADMIN OPTION` 失败，随后使用脚本正式支持的 `--without-workflow` 启动。
+
+### Result
+
+- backend、opencode-manager、frontend 已由新 worktree 构建物运行；backend health/readiness 为 `UP`，前端
+  3000 返回 200，CORS 预检包含 `x-support-access-grant`，新 Flyway 已在本地 PostgreSQL 成功应用。
+- 启动检查发现并修复了 `SupportAccessApplicationService` 多构造器缺少 `@Autowired` 的真实装配失败；同时停止并
+  清理了占用 8080 的原工作区旧后端，最终监听进程的 JAR 路径明确属于新 worktree。
+- 本地 Workflow 未纳入运行验证，原因是现有测试数据库角色权限不足；这不影响本次排查入口三服务验证。manager
+  对历史 4104 端口仍会记录 `PROCESS_NOT_MANAGED`，属于本机旧进程绑定状态，不是本次排查授权链路错误。
+
+## 2026-08-05 - 改为工作台三击 Shift 并恢复本地 OpenCode
+
+### Why
+
+- 用户本地验证时发现原组合键只有进入系统管理组件后才生效，活动栏入口距离当前操作区较远；同时用户绑定的
+  4104 端口在服务重启后未被 manager 接管，平台返回 `TestAgent 进程不可用，请先初始化`。
+- 新 worktree 默认把 `TESTAGENT` 指向自身目录，而本地数据库的 macOS `SYS_DATA_ROOT_DIR` 通过
+  `$TESTAGENT/.testagent` 展开，导致公共 Agent 配置源解析到空的新 worktree 目录，正式初始化失败。
+
+### What
+
+- 将排查入口手势改为工作台任意位置 1 秒内连续按 3 次 Shift；只对当前 `SUPER_ADMIN` 计数，长按 repeat 不计，
+  其它按键或超时重置。触发后直接切到系统管理的问题排查页，但仍需工单、原因、时长和只读确认才能签发授权。
+- 手势检测沉淀为轻量前端工具，`AgentWorkbench` 负责全局监听和页面切换，系统管理包装层以一次性请求传递并在
+  消费后清零；原组件级 Ctrl/Cmd+Alt+Shift+D 监听移除。
+- 同步前端总览、agent-web README、模块图和安全规范；没有变更 HTTP API、事件、数据库、Flyway、后端、
+  generated SDK、OpenCode 源码或 `.env*`。
+
+### How
+
+- 新增快捷键超时、打断、repeat 和显式 reset 测试；与系统管理组件测试组合共 16 项通过，agent-web typecheck
+  和 `VITE_TEST_AGENT_API_BASE_URL=''` 的 Chromium 108 生产构建通过。
+- 使用未修改的主工作区 `.env.test`，按脚本 `--without-workflow` 重启 backend、manager、frontend；启动时显式
+  保留 worktree 代码根，同时让 `TESTAGENT`/`SYS_DATA_ROOT_DIR` 复用主工作区已有测试运行数据，再通过平台
+  `/processes/me/initialize` 正式初始化，不手工伪造进程或数据库状态。
+- 项目 Playwright 真实登录 `SUPER_ADMIN`：初始排查标题数量为 0，未点击系统管理直接三击 Shift 后标题可见，
+  页面无 JavaScript 异常；截图保存在临时目录，不纳入仓库。
+
+### Result
+
+- backend health/readiness 均为 `UP`，前端 3000 返回 200；OpenCode 1.18.4 在 4104 监听，原生 health 为
+  `healthy=true`，平台状态为 `READY/RUNNING`，manager 连续健康检查返回 `HEALTHY`。
+- 三击 Shift 已通过组件、构建和真实浏览器验证。Workflow/LobeHub 仍按此前本地三服务范围保持不启动；首次默认
+  Workflow 准备仍因测试数据库账号无 `CREATEROLE/ADMIN OPTION` 失败，未修改权限或环境文件绕过。
+
+## 2026-08-05 - 自动回填当前超级管理员最近已入库工单
+
+### Why
+
+- 排查授权与审计已经把工单号写入数据库，但重新打开排查面板时工单输入框仍为空，需要重复录入。
+- 直接复用审计列表第一条不可靠：审计查询本身会新增一条没有工单号的 `AUDIT_LIST` 事件，因此需要从授权表按
+  当前 actor 精确读取最近一次工单，且不能恢复旧授权、原因或目标用户。
+
+### What
+
+- 在既有 `SupportAccessRepository` / `SupportAccessMapper.xml` 增加按当前 actor、签发时间倒序读取最近工单号的
+  MyBatis 查询，复用已有 `support_access_grants(actor_user_id, issued_at desc)` 索引；没有新增表或 migration。
+- 新增 `GET /api/internal/platform/system-management/support-access/grants/recent-incident`，只接受当前登录身份，
+  服务层继续实时复核 `SUPER_ADMIN`，不接受前端 actor 参数，响应只含可空 `incidentId`。
+- 排查面板挂载时读取建议值，只有输入框仍为空且登录用户未变化时才回填；失败保持可手工输入。原因、时长、
+  只读确认、目标用户和 grant 均不恢复。
+- 同步 HTTP API、数据库、模块图、backend/frontend 模块 README/PACKAGE 和共享类型说明。
+
+### How
+
+- JDK 25 下 `SupportAccessApplicationServiceTest` 5 项、`SupportAccessRepositoryIntegrationTest` 2 项通过；
+  backend-api、快捷键、系统管理和新面板定向测试合计 116 项通过，两个相关前端包 typecheck 通过。
+- 后端 20 模块 `mvn -pl test-agent-app -am package -DskipTests` 与空 API base 的 agent-web production build 通过。
+  前端全量误触发运行时为 1807 passed / 1 skipped，唯一失败仍是既有 `AppSourceDialog` 固定过期日期夹具，
+  与本次改动无关；本次定向文件随后精确重跑通过。
+- 使用未修改的主工作区 `.env.test` 和既有测试数据根，以 `--without-workflow` 重启 backend、manager、frontend。
+  真实浏览器登录 `888888888` 后首次接口返回 `incidentId=null`；随后通过页面签发并立即撤销本地测试工单
+  `INC-LOCAL-PREFILL-20260805`，切走再回到排查面板后工单自动回填，原因为空且确认框未勾选。
+
+### Result
+
+- 当前超级管理员有历史授权记录时，新排查表单会自动带出自己最近一次已入库工单；没有记录或查询失败时保持
+  空白，不会跨管理员取值或静默恢复旧授权上下文。
+- backend readiness 为 `UP`、前端运行于 3000；本地测试库保留上述正常授权/撤销审计记录。未修改 `.env*`、
+  OpenCode 源码、generated SDK、RunEvent 或数据库结构；Workflow/LobeHub 继续保持不启动。
+
+## 2026-08-05 - 提高三击 Shift 排查入口触发可靠性
+
+### Why
+
+- 用户实际三击多次仍没有反应。复查发现全局监听器注册在冒泡阶段，页面中输入、重命名和弹窗
+  控件调用 `stopPropagation()` 时顶层收不到 Shift；首次到第三次限制在 1 秒内也对人工操作偏紧。
+
+### What
+
+- 复用既有 `createSupportAccessShortcut` 检测器，把排查手势从通用窗口快捷键中拆出，改为 `window`
+  捕获阶段监听；保留 Ctrl/Cmd+S 的原冒泡阶段和可编辑控件边界。
+- 三次 Shift 总窗口放宽到 2 秒，兼容 `key/code` 中的 `Shift`、`ShiftLeft`、`ShiftRight`，
+  仍忽略长按 repeat，并在其它按键或超时时重置。
+- 同步前端总览、agent-web README 和安全规范；明确 iframe 键盘事件不会跨文档冒泡。
+
+### How
+
+- `support-access-shortcut` 与系统管理定向 Vitest 共 18 项通过；agent-web typecheck 和
+  `VITE_TEST_AGENT_API_BASE_URL=''` 生产构建通过。
+- JDK 25 下复用未修改的主工作区 `.env.test` 和测试数据根，以 `--without-workflow` 重启
+  backend、opencode-manager 和 frontend；backend readiness 为 `UP`，前端 3000 返回 200。
+- Playwright 真实登录 `SUPER_ADMIN`，焦点保持在聊天输入框并为该控件显式增加
+  `keydown.stopPropagation()`，以 650ms 间隔三击 Shift；页面从排查标题数 0 切换为 1。
+
+### Result
+
+- 主页面内即使焦点控件阻止冒泡，人工速度三击 Shift 也能打开“问题排查只读访问”；工单自动回填仍
+  保持为 `INC-LOCAL-PREFILL-20260805`，没有恢复旧授权、原因或确认状态。
+- 未修改 HTTP API、RunEvent、数据库/Flyway、鉴权、限流、generated SDK、OpenCode 源码或 `.env*`；
+  iframe 内获得焦点时仍需先点击平台主页面，再触发全局手势。
+
+## 2026-08-05 - 补齐归档会话、旧正文恢复与只读用户视角
+
+### Why
+
+- 排查面板默认只查 `ACTIVE` 会话，用户删除或隐藏后的 `ARCHIVED` 会话无法按需查看；部分旧会话只有
+  `session_messages` 原文，Redis、摘要或 OpenCode 空快照会导致页面显示空助手消息。
+- 目标工作区绑定的 Java 后端可能已离线或 Redis 路由快照暂时不可用，旧实现仍尝试访问不可达 OpenCode，容易
+  等待超时；面板自己的逐条 JSON/文本渲染也与用户首页展示不同，难以复现用户实际看到的问题。
+
+### What
+
+- 会话查询默认继续只返回 `ACTIVE`；超级管理员显式勾选“包含已归档会话”后才合并 `ARCHIVED`，仍排除
+  `SIDE_QUESTION`。归档只表示从用户正常列表删除或隐藏，数据没有物理删除。
+- 历史恢复增加有界旧 `session_messages` 兜底并标记 `LEGACY`；Redis/OpenCode 空结果不再截断兜底。目标工作区
+  后端不是明确 `ONLINE` 时跳过 OpenCode，仅读取持久化历史，避免不可达服务器超时。
+- 排查会话复用首页的 Session-tree reducer 与 `OpencodeTimeline`，能按首页方式显示 message part、工具、Todo 和
+  子 Agent 投影；发送区保持禁用，不切换管理员身份。工作区列表展示在线/离线/未绑定/未知，非在线项禁止读取。
+- 同步 HTTP API、安全规范、后端 runtime/persistence/domain/API 与前端 agent-web/backend-api/shared-types 的
+  README/PACKAGE；没有新增事件类型、数据库结构或 Flyway migration，也没有修改 ticket/RPC 协议。
+
+### How
+
+- JDK 25 定向后端回归：`MyBatisSessionHistoryRepositoryIntegrationTest` 6 项、
+  `RunMessageRecoveryServiceTest` 20 项、`SupportAccessDtosTest` 1 项，合计 27 项通过。
+- 前端排查面板与 backend-api 定向回归 103 项通过；workspace typecheck 和 agent-web production build 通过，
+  构建仅保留既有大 chunk 提示。
+- 使用未修改的主工作区 `.env.test`，以 `--without-workflow` 重启 backend、opencode-manager、frontend；backend
+  readiness 为 `UP`、前端 3000 返回 200、manager 对本机 OpenCode 连续返回 `HEALTHY`。
+- Playwright 真实页面验证三击 Shift、已入库工单自动回填、目标用户切换、归档筛选和离线工作区禁用；打开绑定
+  `192.168.100.165` 离线后端的旧会话约 3.6 秒（含 CLI 启动开销），页面显示“历史原文（旧存储）”以及非空用户/
+  助手正文。
+
+### Result
+
+- 排查会话的正文展示与用户首页使用同一投影/时间线，空助手 envelope 不再作为正文渲染；离线目标可以直接查看
+  已持久化历史，不再为了不可达 OpenCode 长时间等待。
+- 这不是完整身份冒充或完整首页壳切换：管理员身份与所有写入口仍保持隔离，工作区文件仍使用排查面板的只读布局。
+  Workflow/LobeHub 继续按本次本地三服务范围保持不启动；未修改 `.env*`、OpenCode 源码或 generated SDK。
+
+## 2026-08-05 - 恢复工单自动回填并补充会话诊断上下文
+
+### Why
+
+- 排查组件可能先于当前登录用户资料挂载，原先只在 `onMounted` 查询最近工单；当 SUPER_ADMIN 身份稍后才到达时，
+  查询会被直接跳过且不再重试，因此页面偶发不再自动填写已入库工单号。
+- 排查页虽然能恢复用户会话正文，但没有直接展示业务 Session ID 和事件 Trace ID，定位后台日志仍需跨页面查找；
+  页面字体、间距和强调色也没有完全对齐平台工作台。
+
+### What
+
+- 以当前 SUPER_ADMIN 用户 ID 作为回填触发键，身份异步到达或管理员切换时重新查询本人最近一次已入库工单；自动
+  请求不覆盖人工输入，并增加显式“带入最近工单”入口和回填状态提示。
+- 会话快照 HTTP DTO 保留 RunEvent 原始 `traceId`，shared-types 按可选字段接收以兼容旧后端滚动发布；排查上下文
+  展示并可复制 Session ID、最近 Trace ID，存在多条 Trace 时可展开查看全部唯一值。
+- 排查页统一使用平台 sans/mono 字体变量、平台红强调色和更紧凑的卡片/列表层级；会话正文继续复用首页
+  `OpencodeTimeline`，没有引入管理员身份冒充或写入口。
+- 同步 HTTP API、安全规范、后端 API README/PACKAGE 以及前端 agent-web/shared-types README/PACKAGE。
+
+### How
+
+- 前端排查面板与 backend-api 定向回归 104 项通过；workspace typecheck 和 agent-web production build 通过，
+  仅保留既有大 chunk 告警。后端 `RuntimeDtosCompatibilityTest`、`RuntimeControllerTest` 通过。
+- 使用未修改的主工作区 `.env.test` 和既有测试数据根，以 `--without-workflow` 重启 backend、opencode-manager、
+  frontend；backend readiness 为 `UP`，前端运行于 3000。
+- Playwright 真实页面完成三击 Shift、工单 `132` 自动回填、限时授权、目标用户选择和旧会话打开；确认页面展示真实
+  Session ID、Trace ID、旧正文，并验证复制操作后主动撤销授权。
+
+### Result
+
+- 异步登录资料不再造成工单自动回填丢失；人工已填写工单不会被后台建议覆盖，查询失败仍可继续手工填写。
+- Session/Trace 诊断信息已进入只读用户视角，便于直接关联服务日志；Trace 字段是向后兼容的 HTTP 响应扩展，
+  未修改 RunEvent、数据库/Flyway、ticket/RPC、限流、`.env*`、OpenCode 源码或 generated SDK。
+- 浏览器控制台仍有两条既有 `agent-config/public/diff` 400，与本次排查页请求无关；Workflow/LobeHub 继续不启动。
+
+## 2026-08-05 - 将目标用户选择收拢到顶部并强化排查标识
+
+### Why
+
+- 目标用户列表占用左侧宽度，挤压会话列表和用户首页视角；管理员需要的是可输入姓名、用户 ID 或统一认证号的
+  单一选择入口，而不是长期展开的侧栏。
+- Session ID 和 Trace ID 已随会话快照返回，但原展示位于滚动正文内、字号和层级过弱，真实页面容易被误认为
+  只有用户正文、没有排查标识。
+
+### What
+
+- 移除目标用户左侧栏，把目标选择放入顶部授权状态条，复用 Element Plus 远程可搜索下拉和已有用户查询接口；
+  选择后仍调用既有 `selectSupportAccessTarget` 审计链路，没有增加平行接口或绕过授权。
+- 搜索请求增加序号防止旧响应覆盖新关键字结果，并保留当前已选用户选项；真实浏览器验收时发现下拉展开事件会
+  用空关键字覆盖输入搜索，已删除该重复请求入口。
+- 会话诊断区改为滚动容器顶部的 sticky 排查条，使用“会话 SESSION ID”“最近 TRACE ID”明确标识并提高字号、
+  对比度；会话、工作区和用户视角获得完整横向空间。
+- 同步 agent-web README、组件 PACKAGE 和组件回归测试。
+
+### How
+
+- `SupportAccessPanel` 与 backend-api 定向 Vitest 共 104 项通过；前端 15 个工作区 typecheck 和 agent-web
+  production build 通过，仅保留既有大 chunk 告警。
+- Playwright 真实页面完成远程搜索、目标选择、旧会话打开和排查标识核对，确认左侧用户栏消失、顶部下拉只返回
+  匹配用户，真实 Session/Trace 值均可见；测试授权随后主动撤销。
+- 使用 JDK 25、未修改的主工作区 `.env.test` 和既有测试数据根，以 `--without-workflow` 重启 backend、manager、
+  frontend；backend/readiness 均为 `UP`，前端 3000 返回 200，CORS 正常，manager 初始拉起后连续 `HEALTHY`。
+
+### Result
+
+- 目标用户选择不再占用左右布局，管理员可在顶部下拉直接输入检索；会话和用户视角的横向空间更充足。
+- Session/Trace 是始终可辨识的排查信息，不再依赖管理员从普通用户正文中寻找。
+- 未修改 HTTP API、RunEvent、数据库/Flyway、ticket/RPC、限流、鉴权、`.env*`、OpenCode 源码或 generated SDK；
+  Workflow/LobeHub 继续不启动。
+
+## 2026-08-05 - 修复排查工单刷新、复选框与诊断区收缩
+
+### Why
+
+- 最近工单只在 actor 首次到达时查询；问题排查面板保持挂载后再次三击 Shift 不会触发刷新，撤销后表单还保留
+  上一轮工单、原因和只读确认，容易把数据库真实值未变化误判为前端缓存。
+- 授权表单的通用 `input` 样式同时作用于 checkbox，把复选框撑成普通输入框高度并造成文字错位。
+- 真实长会话中，正文滚动容器的 flex 子项允许收缩，吸顶排查标识被压到约 3px，DOM 中虽有 Session/Trace，
+  视觉上却不可见。
+
+### What
+
+- 系统管理为每次问题排查手势生成激活代次；无有效授权时，重复触发、撤销或到期均禁用浏览器缓存重新查询
+  当前管理员最近一条已入库工单，并清空上一轮原因、时长和只读确认；人工填写的新工单仍不被自动请求覆盖。
+- 页面按钮和提示明确说明“重新读取最近工单”读取的是数据库最近一条授权记录；数据库最新值仍为 `132` 时继续
+  显示 `132`，不伪造递增工单。
+- 通用输入框样式排除 checkbox，授权确认与归档筛选都使用固定 14×14 复选框和两列网格对齐；排查标题、诊断区、
+  时间线和只读输入区设为不可收缩，保留诊断区 sticky 行为。
+- 同步 agent-web/backend-api README/PACKAGE 与定向回归测试；没有改变 HTTP 路径或响应结构。
+
+### How
+
+- agent-web 排查面板、系统管理和 backend-api 定向 Vitest 3 个文件 118 项通过；前端 workspace typecheck 与
+  agent-web production build 通过，仅保留既有大 chunk 告警。
+- 使用 JDK 25、未修改的主工作区 `.env.test` 和既有数据根，以 `--without-workflow` 重启 backend、manager、
+  frontend；backend health/readiness 为 `UP`，前端 3000 返回 200，登录 CORS 正常，manager WebSocket 已连接。
+- 真实浏览器确认三击 Shift 可打开入口、复选框与文字对齐；创建短时本地只读授权并打开长会话后，排查标识完整
+  显示 `ses_0031744a5bb445c8b77357a26cb52eb3` 与最近 Trace，随后主动撤销并确认原因/勾选已清空。
+
+### Result
+
+- 工单会按真实数据库状态重新读取，重复触发不再复用组件首次挂载时的前端值；本地库最新工单确为 `132`，因此
+  刷新后保持 `132` 是预期审计语义。
+- 复选框对齐和长会话 Session/Trace 排查标识均已在真实页面验证；本地验收只新增正常的授权、选人、查看和撤销
+  审计记录。
+- 未修改 API 契约、RunEvent、数据库/Flyway、ticket/RPC、限流、鉴权、`.env*`、OpenCode 源码或 generated SDK；
+  Workflow/LobeHub 继续不启动。
+
+## 2026-08-05 - 为问题排查生成唯一单号
+
+### Why
+
+- 仓库内没有权威业务工单表或外部工单服务；原“最近工单”实际读取的是上一条排查授权记录，导致最新值为 `132`
+  时重复激活、撤销和重新读取都会继续得到 `132`，形成自引用，不能标识新一轮排查。
+
+### What
+
+- 新增 `sai_` 加 32 位小写十六进制 UUID 的排查单号生成器；SUPER_ADMIN 每次请求建议值都会获得新号码。
+- 新增规范接口 `GET /api/platform/support-access/grants/incident-suggestion`，响应增加可选 `source`；保留
+  `/grants/recent-incident` 作为兼容别名，但不再查询历史授权。删除 Repository、MyBatis Mapper/XML 中已无用途的
+  “最近工单”查询，没有新增或修改数据库结构。
+- 前端将字段改为只读“排查单号”，三击 Shift 重复激活、撤销、到期和“生成新排查单号”都会请求新值；并用请求
+  代次隔离迟到响应，生成失败时禁止提交授权。同步 backend-api/shared-types、模块 README、HTTP API、数据库和安全文档。
+
+### How
+
+- 后端定向测试覆盖 ID 格式、权限和每次生成不同号码；common、system-management、persistence、api 相关测试均通过。
+- 前端排查面板、系统管理和 backend-api 定向 Vitest 3 个文件 118 项通过；workspace typecheck 与 agent-web
+  production build 通过，仅保留既有大 chunk 告警。
+- 使用 JDK 25、未修改的主工作区 `.env.test` 和既有测试数据根，以 `--without-workflow` 重启 backend、manager、
+  frontend；backend health/readiness 为 `UP`，前端 3000 返回 200。
+- 真实浏览器确认字段为只读，手动生成与再次三击 Shift 均得到不同且符合 `sai_[0-9a-f]{32}` 的排查单号。
+
+### Result
+
+- 新一轮排查不再循环复用历史授权中的 `132`；每次激活或重建都有可审计的唯一排查单号。
+- HTTP 新增规范路径并保留旧路径兼容，`source` 为向后兼容的响应扩展；未修改 RunEvent、数据库/Flyway、
+  ticket/RPC、限流、`.env*`、OpenCode 源码或 generated SDK。仓库未来接入真实工单源时可返回 `WORK_ORDER` 来源。
+
+## 2026-08-05 - 合并问题排查能力并补齐企业打包迁移门禁
+
+### Why
+
+- 企业 release 分支需要纳入 `codex/support-access-admin` 已完成的超级管理员只读问题排查能力，并重新生成今晚的
+  企业离线部署包。
+- 本轮新增 PostgreSQL Flyway migration；既有企业数据库已经执行到工具箱点击统计版本，打包与部署必须显式区分
+  已部署基线和本次新增版本，避免 Flyway 版本倒序、checksum 漂移或双后端同时迁移。
+
+### What
+
+- 将 `codex/support-access-admin` 合并到 `codex/release-enterprise-20260801`，保留双方 session log，业务代码无冲突。
+- 纳入 SUPER_ADMIN 限时只读排查授权、唯一 `sai_` 排查单号、目标用户会话/工作区/文件只读视角、授权撤销与完整
+  审计；令牌仅在页面内存保留，Redis/PostgreSQL 只持久化摘要和审计元数据。
+- 企业 release、双后端完整包和安装校验脚本增加
+  `V20260805132000__create_support_access_audit.sql` 的固定 SHA-256 门禁，并同步企业部署与数据库文档：上线前
+  PostgreSQL 必须已有 `20260804123000` 且没有 `20260805132000`，首台新 Java 启动后只允许新增该版本；
+  XXL-JOB MySQL 必须由 V1-V8 升至 V9。
+- Workflow/LobeHub 继续保持 release 禁用；公共 Agent 配置、worker、toolbox 和 OpenCode 源码边界未因本次合并修改。
+
+### How
+
+- 企业包脚本通过 `bash -n`、`git diff --check`、AI 文档校验、完整包契约、增量组件契约和多后端节点契约测试。
+- 前端 support access、调度管理、用户管理、backend-api 和文件浏览器共 146 项 Vitest 通过；15 个工作区
+  typecheck 与 agent-web production build 通过，仅保留既有大 chunk 告警。
+- JDK 25 下执行 `mvn -pl test-agent-app -am test`，20 个 reactor module 全部成功；API 481 项、persistence
+  257 项（18 项按环境跳过）、app 60 项（1 项 fixture 跳过）通过。真实 MySQL 8.4 验证 V1→V9 及重复启动，
+  真实 PostgreSQL 已知历史兼容升级测试 7 项全部通过。
+
+### Result
+
+- 问题排查能力及其 API、数据库、安全和前端文档已进入企业 release 分支，迁移文件源码 SHA-256 固定为
+  `54cea9a84948f8e4cee14d630772b8ee0668c2a7e5fc897ede5e792a15edd761`。
+- 企业部署仍必须先停全部旧 Java，再按 `.4 → .114 → .2` 顺序放量；禁止 `repair`、`outOfOrder` 或手工改写
+  `flyway_schema_history`。未修改 `.env*`、generated SDK 或 OpenCode 上游源码。

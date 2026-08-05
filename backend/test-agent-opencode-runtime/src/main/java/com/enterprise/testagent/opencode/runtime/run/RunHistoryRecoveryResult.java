@@ -17,8 +17,10 @@ public record RunHistoryRecoveryResult(
 
     public RunHistoryRecoveryResult {
         events = events == null ? List.of() : List.copyOf(events);
-        if (!"FULL".equals(historyRepresentation) && !"SUMMARY".equals(historyRepresentation)) {
-            throw new IllegalArgumentException("historyRepresentation must be FULL or SUMMARY");
+        if (!"FULL".equals(historyRepresentation)
+                && !"SUMMARY".equals(historyRepresentation)
+                && !"LEGACY".equals(historyRepresentation)) {
+            throw new IllegalArgumentException("historyRepresentation must be FULL, SUMMARY or LEGACY");
         }
         Objects.requireNonNull(source, "source must not be null");
         if ("SUMMARY".equals(historyRepresentation) && replayAvailable) {
@@ -52,6 +54,16 @@ public record RunHistoryRecoveryResult(
                 false,
                 null,
                 RunHistoryRecoverySource.POSTGRESQL_SUMMARY);
+    }
+
+    /** 旧 session_messages 保存正文但不保证工具/事件细节完整，因此可展示且不可宣称可重放。 */
+    public static RunHistoryRecoveryResult legacy(List<RunEventSsePayload> events) {
+        return new RunHistoryRecoveryResult(
+                events,
+                "LEGACY",
+                false,
+                null,
+                RunHistoryRecoverySource.POSTGRESQL_LEGACY);
     }
 
     /** Session 跨越 Redis 详情窗口时，旧轮次只能展示摘要，因此整体按 SUMMARY 对外声明。 */

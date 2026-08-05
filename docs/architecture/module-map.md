@@ -48,6 +48,15 @@ Browser
 - XXL executor 注册不使用稳定 Linux 服务器亲和；夜间扫描取得任务后，由业务层按任务提交时固化的目标服务器通过公共 Java 路由分发。
 - Workspace 级 OpenCode 运行态目录由 `test-agent-opencode-runtime` 在目标解析前复用 `ConversationWorkspaceAccessAuthorizer` 校验应用成员与个人工作区 owner，不能只凭 workspaceId 读取其它应用的 `.opencode` 能力。
 
+## 超级管理员问题排查只读访问边界
+
+- `test-agent-domain` 只定义短期 grant、当前登录会话摘要、审计事件和目标用户会话/工作区查询端口；不包含 HTTP、SQL、Redis key 或明文令牌。
+- `test-agent-system-management` 实时复核 actor 的 `SUPER_ADMIN` 角色，编排 5–240 分钟授权、单登录会话令牌轮换、目标选择和失败关闭；target 只限定查询范围，不替换 actor 身份。
+- `test-agent-workspace-management` 通过 `UserWorkspaceQueryService` 返回目标用户个人工作区及其会话引用工作区的逻辑身份；`test-agent-opencode-runtime` 使用 `BackendJavaRouteResolver` 按权威 Workspace 服务器选择目标 Java，不使用 actor affinity、本机降级或 Java→Java 文件代理。
+- `test-agent-persistence` 以 MyBatis XML/Flyway 保存授权与一年期审计，以 Redis Lua 保存当前登录会话的短期令牌摘要；数据库、Redis、日志均不保存明文 grant token、平台 Token、消息正文或文件正文。
+- `test-agent-api` 暴露独立 `/system-management/support-access/**` HTTP 与文件 route/ticket/RPC，普通 Session/Workspace/文件入口仍按 actor 自身所有权校验。排查文件 RPC 只允许目录、搜索和预览读取，并过滤 `.opencode`。
+- `packages/shared-types` 定义 grant/带来源排查单号建议/target/audit DTO，`packages/backend-api` 管理排查单号请求、独立 `X-Support-Access-Grant` 内存令牌和 support socket，`packages/file-explorer` 用 `canWrite/canAttach/canDownload` 分离能力，`apps/agent-web` 仅为实时 `SUPER_ADMIN` 在工作台全局三击 Shift 后显示受控入口。当前没有权威工单数据源时由 `test-agent-system-management` 每轮生成新的 `sai_` 排查单号，禁止从历史授权循环回填；该链路不新增 RunEvent/SSE。
+
 ## 后端模块职责
 
 | 模块 | 职责 |
