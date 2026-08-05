@@ -94,6 +94,16 @@ public class SupportAccessController {
                 context.traceId());
     }
 
+    /** 查询当前操作人最近一次已入库工单号，供新授权表单自动回填。 */
+    @GetMapping("/grants/recent-incident")
+    public ApiResponse<SupportAccessDtos.IncidentSuggestionResponse> getRecentIncident(
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        String incidentId = supportAccessService.findLatestIncidentId(principal).orElse(null);
+        return ApiResponse.ok(new SupportAccessDtos.IncidentSuggestionResponse(incidentId), traceId);
+    }
+
     /** 主动撤销授权。 */
     @DeleteMapping("/grants/{grantId}")
     public ApiResponse<Void> revokeGrant(

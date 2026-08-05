@@ -91,6 +91,7 @@ let clockTimer: ReturnType<typeof setInterval> | undefined;
 
 onMounted(() => {
   clockTimer = setInterval(() => { now.value = Date.now(); }, 1000);
+  void prefillRecentIncident();
   void loadUsers();
 });
 
@@ -124,6 +125,22 @@ watch(remainingSeconds, (seconds) => {
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * 只回填当前管理员最近一次已入库工单；请求返回前已有人工输入时不得覆盖。
+ */
+async function prefillRecentIncident() {
+  if (!props.currentUser?.roles?.includes("SUPER_ADMIN")) return;
+  const actorUserId = props.currentUser.userId;
+  try {
+    const suggestion = await api.getRecentSupportAccessIncident();
+    if (props.currentUser?.userId === actorUserId && !incidentId.value.trim()) {
+      incidentId.value = suggestion.incidentId?.trim() || "";
+    }
+  } catch {
+    // 自动回填属于便利能力，失败时保持表单可手工填写，不遮挡主要排查流程。
+  }
 }
 
 async function issueGrant() {

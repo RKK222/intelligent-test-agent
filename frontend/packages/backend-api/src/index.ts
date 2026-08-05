@@ -161,6 +161,7 @@ import type {
   SupportAccessAuditQuery,
   SupportAccessGrant,
   SupportAccessGrantRequest,
+  SupportAccessIncidentSuggestion,
   SupportAccessTarget,
   SshKeyMetadata,
   SshKeyPublicKeyResponse,
@@ -2416,6 +2417,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         method: "POST",
         body: JSON.stringify(payload)
       }),
+    getRecentSupportAccessIncident: () =>
+      request<SupportAccessIncidentSuggestion>(`${systemManagementBase}/support-access/grants/recent-incident`),
     revokeSupportAccessGrant: async (grantId: string, grantToken: string) => {
       try {
         return await request<void>(

@@ -2953,6 +2953,7 @@ Base URL：`/api/internal/platform/system-management`
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `POST` | `/grants` | 填写工单信息并签发绑定当前登录会话的限时只读授权。 |
+| `GET` | `/grants/recent-incident` | 返回当前超级管理员最近一次已入库的工单号，供新授权表单自动回填；不恢复旧授权。 |
 | `DELETE` | `/grants/{grantId}` | 显式撤销当前授权。 |
 | `POST` | `/targets/{targetUserId}/selections` | 选择/切换目标用户并记录审计。 |
 | `GET` | `/targets/{targetUserId}/sessions?q=&page=&size=` | 按目标用户归因规则分页查询 ACTIVE 会话。 |
@@ -2983,7 +2984,9 @@ Base URL：`/api/internal/platform/system-management`
 }
 ```
 
-除签发和审计列表外，其余排查请求必须携带：
+最近工单响应为 `{ "incidentId": "INC-2026-00123" }`；没有历史授权时为 `null`。查询严格使用当前登录 actor，不接受前端传入用户 ID。页面仅在工单输入框仍为空时回填，不恢复历史原因、目标用户、时长、确认状态或 grant。
+
+除签发、最近工单建议和审计列表外，其余排查请求必须携带：
 
 ```http
 X-Support-Access-Grant: sat_...

@@ -26,6 +26,7 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -155,6 +156,14 @@ public class SupportAccessApplicationService {
                 null,
                 requestContext);
         return new SupportAccessGrantIssue(grantId, rawToken, expiresAt);
+    }
+
+    /**
+     * 返回当前超级管理员最近一次已入库工单号，仅用于表单建议，不恢复旧授权或排查上下文。
+     */
+    public Optional<String> findLatestIncidentId(AuthPrincipal principal) {
+        User actor = requireLiveSuperAdmin(principal);
+        return repository.findLatestIncidentId(actor.userId());
     }
 
     /** 显式撤销当前授权。 */

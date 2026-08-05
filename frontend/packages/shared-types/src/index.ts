@@ -2373,6 +2373,11 @@ export type SupportAccessGrant = {
   expiresAt: string;
 };
 
+/** 最近工单只用于新授权表单建议，不代表历史授权仍然有效。 */
+export type SupportAccessIncidentSuggestion = {
+  incidentId?: string | null;
+};
+
 export type SupportAccessTarget = {
   userId: string;
   unifiedAuthId: string;

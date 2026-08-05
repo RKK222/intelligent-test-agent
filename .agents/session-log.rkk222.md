@@ -5894,3 +5894,39 @@
   `healthy=true`，平台状态为 `READY/RUNNING`，manager 连续健康检查返回 `HEALTHY`。
 - 三击 Shift 已通过组件、构建和真实浏览器验证。Workflow/LobeHub 仍按此前本地三服务范围保持不启动；首次默认
   Workflow 准备仍因测试数据库账号无 `CREATEROLE/ADMIN OPTION` 失败，未修改权限或环境文件绕过。
+
+## 2026-08-05 - 自动回填当前超级管理员最近已入库工单
+
+### Why
+
+- 排查授权与审计已经把工单号写入数据库，但重新打开排查面板时工单输入框仍为空，需要重复录入。
+- 直接复用审计列表第一条不可靠：审计查询本身会新增一条没有工单号的 `AUDIT_LIST` 事件，因此需要从授权表按
+  当前 actor 精确读取最近一次工单，且不能恢复旧授权、原因或目标用户。
+
+### What
+
+- 在既有 `SupportAccessRepository` / `SupportAccessMapper.xml` 增加按当前 actor、签发时间倒序读取最近工单号的
+  MyBatis 查询，复用已有 `support_access_grants(actor_user_id, issued_at desc)` 索引；没有新增表或 migration。
+- 新增 `GET /api/internal/platform/system-management/support-access/grants/recent-incident`，只接受当前登录身份，
+  服务层继续实时复核 `SUPER_ADMIN`，不接受前端 actor 参数，响应只含可空 `incidentId`。
+- 排查面板挂载时读取建议值，只有输入框仍为空且登录用户未变化时才回填；失败保持可手工输入。原因、时长、
+  只读确认、目标用户和 grant 均不恢复。
+- 同步 HTTP API、数据库、模块图、backend/frontend 模块 README/PACKAGE 和共享类型说明。
+
+### How
+
+- JDK 25 下 `SupportAccessApplicationServiceTest` 5 项、`SupportAccessRepositoryIntegrationTest` 2 项通过；
+  backend-api、快捷键、系统管理和新面板定向测试合计 116 项通过，两个相关前端包 typecheck 通过。
+- 后端 20 模块 `mvn -pl test-agent-app -am package -DskipTests` 与空 API base 的 agent-web production build 通过。
+  前端全量误触发运行时为 1807 passed / 1 skipped，唯一失败仍是既有 `AppSourceDialog` 固定过期日期夹具，
+  与本次改动无关；本次定向文件随后精确重跑通过。
+- 使用未修改的主工作区 `.env.test` 和既有测试数据根，以 `--without-workflow` 重启 backend、manager、frontend。
+  真实浏览器登录 `888888888` 后首次接口返回 `incidentId=null`；随后通过页面签发并立即撤销本地测试工单
+  `INC-LOCAL-PREFILL-20260805`，切走再回到排查面板后工单自动回填，原因为空且确认框未勾选。
+
+### Result
+
+- 当前超级管理员有历史授权记录时，新排查表单会自动带出自己最近一次已入库工单；没有记录或查询失败时保持
+  空白，不会跨管理员取值或静默恢复旧授权上下文。
+- backend readiness 为 `UP`、前端运行于 3000；本地测试库保留上述正常授权/撤销审计记录。未修改 `.env*`、
+  OpenCode 源码、generated SDK、RunEvent 或数据库结构；Workflow/LobeHub 继续保持不启动。

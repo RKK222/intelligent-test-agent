@@ -96,6 +96,15 @@ class SupportAccessApplicationServiceTest {
     }
 
     @Test
+    void returnsLatestIncidentOnlyForCurrentLiveSuperAdmin() {
+        when(repository.findLatestIncidentId(ACTOR_ID)).thenReturn(Optional.of("INC-PERSISTED"));
+
+        assertThat(service.findLatestIncidentId(principal())).contains("INC-PERSISTED");
+
+        verify(repository).findLatestIncidentId(ACTOR_ID);
+    }
+
+    @Test
     void authorizationFailsImmediatelyAfterLiveRoleIsRemoved() {
         SupportAccessGrant grant = grant();
         SupportAccessGrantSession session = session(grant);

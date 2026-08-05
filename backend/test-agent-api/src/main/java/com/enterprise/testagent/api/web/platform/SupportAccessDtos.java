@@ -25,6 +25,10 @@ final class SupportAccessDtos {
     record GrantResponse(String grantId, String grantToken, Instant expiresAt) {
     }
 
+    /** 最近工单只用于前端表单建议，不表示已有授权仍然有效。 */
+    record IncidentSuggestionResponse(String incidentId) {
+    }
+
     record TargetResponse(
             String userId,
             String unifiedAuthId,

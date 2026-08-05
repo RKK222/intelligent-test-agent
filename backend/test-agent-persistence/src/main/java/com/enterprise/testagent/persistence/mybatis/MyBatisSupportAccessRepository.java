@@ -33,6 +33,11 @@ public class MyBatisSupportAccessRepository implements SupportAccessRepository {
     }
 
     @Override
+    public Optional<String> findLatestIncidentId(UserId actorUserId) {
+        return Optional.ofNullable(mapper.findLatestIncidentId(actorUserId.value()));
+    }
+
+    @Override
     public void revokeGrant(String grantId, Instant revokedAt, String reason) {
         mapper.revokeGrant(grantId, revokedAt, reason);
     }
