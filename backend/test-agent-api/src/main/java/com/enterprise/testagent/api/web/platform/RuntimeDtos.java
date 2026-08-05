@@ -586,10 +586,11 @@ final class RuntimeDtos {
     }
 
     /**
-     * HTTP snapshot 中保留事件化 payload，便于前端复用 SSE reducer。
+     * HTTP snapshot 中保留事件化 payload 和原始 traceId，便于前端复用 SSE reducer 并关联排查日志。
      */
     record RunSessionTreeEventResponse(
             String type,
+            String traceId,
             String rootSessionId,
             String sessionId,
             String parentSessionId,
@@ -640,6 +641,7 @@ final class RuntimeDtos {
             }
             events.add(new RunSessionTreeEventResponse(
                     event.type(),
+                    event.traceId(),
                     rootSessionId,
                     sessionId,
                     parentSessionId,

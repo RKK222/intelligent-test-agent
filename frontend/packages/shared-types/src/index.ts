@@ -726,6 +726,8 @@ export type RunSessionTreeSessionResponse = {
 
 export type RunSessionTreeEventResponse = {
   type: string;
+  /** 事件原始 traceId；滚动发布兼容旧后端，因此前端按可选字段读取。 */
+  traceId?: string | null;
   rootSessionId?: string | null;
   sessionId?: string | null;
   parentSessionId?: string | null;

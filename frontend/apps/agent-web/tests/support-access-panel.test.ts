@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/vue";
+import { fireEvent, render, waitFor, within } from "@testing-library/vue";
 import { nextTick } from "vue";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type { CurrentUser, SupportAccessIncidentSuggestion } from "@test-agent/shared-types";
@@ -52,6 +52,21 @@ describe("support access panel incident prefill", () => {
     await nextTick();
 
     expect(input.value).toBe("INC-MANUAL");
+  });
+
+  it("prefills after the current admin profile arrives asynchronously", async () => {
+    const api = backendApi(Promise.resolve({ incidentId: "INC-LATE-ACTOR" }));
+    const view = render(SupportAccessPanel, {
+      props: { currentUser: null },
+      global: { provide: { api } }
+    });
+
+    expect(api.getRecentSupportAccessIncident).not.toHaveBeenCalled();
+    await view.rerender({ currentUser });
+
+    const input = view.getByLabelText("工单号") as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe("INC-LATE-ACTOR"));
+    expect(view.getByText("已自动带入当前管理员最近一次已入库工单")).toBeTruthy();
   });
 
   it("loads archived sessions only on demand and disables offline workspaces", async () => {
@@ -240,7 +255,10 @@ describe("support access panel incident prefill", () => {
     await fireEvent.click(view.getByText("真实首页投影"));
 
     await waitFor(() => expect(view.getByText("真实助手正文")).toBeTruthy());
-    expect(view.getByText("用户首页视角（只读）")).toBeTruthy();
+    expect(view.getByText("用户首页视角")).toBeTruthy();
     expect(view.getByLabelText("只读排查输入区")).toBeTruthy();
+    const diagnosticContext = within(view.getByLabelText("排查上下文"));
+    expect(diagnosticContext.getByText("ses_target")).toBeTruthy();
+    expect(diagnosticContext.getByText("trace_test")).toBeTruthy();
   });
 });

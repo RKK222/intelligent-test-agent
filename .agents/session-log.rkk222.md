@@ -6000,3 +6000,38 @@
   已持久化历史，不再为了不可达 OpenCode 长时间等待。
 - 这不是完整身份冒充或完整首页壳切换：管理员身份与所有写入口仍保持隔离，工作区文件仍使用排查面板的只读布局。
   Workflow/LobeHub 继续按本次本地三服务范围保持不启动；未修改 `.env*`、OpenCode 源码或 generated SDK。
+
+## 2026-08-05 - 恢复工单自动回填并补充会话诊断上下文
+
+### Why
+
+- 排查组件可能先于当前登录用户资料挂载，原先只在 `onMounted` 查询最近工单；当 SUPER_ADMIN 身份稍后才到达时，
+  查询会被直接跳过且不再重试，因此页面偶发不再自动填写已入库工单号。
+- 排查页虽然能恢复用户会话正文，但没有直接展示业务 Session ID 和事件 Trace ID，定位后台日志仍需跨页面查找；
+  页面字体、间距和强调色也没有完全对齐平台工作台。
+
+### What
+
+- 以当前 SUPER_ADMIN 用户 ID 作为回填触发键，身份异步到达或管理员切换时重新查询本人最近一次已入库工单；自动
+  请求不覆盖人工输入，并增加显式“带入最近工单”入口和回填状态提示。
+- 会话快照 HTTP DTO 保留 RunEvent 原始 `traceId`，shared-types 按可选字段接收以兼容旧后端滚动发布；排查上下文
+  展示并可复制 Session ID、最近 Trace ID，存在多条 Trace 时可展开查看全部唯一值。
+- 排查页统一使用平台 sans/mono 字体变量、平台红强调色和更紧凑的卡片/列表层级；会话正文继续复用首页
+  `OpencodeTimeline`，没有引入管理员身份冒充或写入口。
+- 同步 HTTP API、安全规范、后端 API README/PACKAGE 以及前端 agent-web/shared-types README/PACKAGE。
+
+### How
+
+- 前端排查面板与 backend-api 定向回归 104 项通过；workspace typecheck 和 agent-web production build 通过，
+  仅保留既有大 chunk 告警。后端 `RuntimeDtosCompatibilityTest`、`RuntimeControllerTest` 通过。
+- 使用未修改的主工作区 `.env.test` 和既有测试数据根，以 `--without-workflow` 重启 backend、opencode-manager、
+  frontend；backend readiness 为 `UP`，前端运行于 3000。
+- Playwright 真实页面完成三击 Shift、工单 `132` 自动回填、限时授权、目标用户选择和旧会话打开；确认页面展示真实
+  Session ID、Trace ID、旧正文，并验证复制操作后主动撤销授权。
+
+### Result
+
+- 异步登录资料不再造成工单自动回填丢失；人工已填写工单不会被后台建议覆盖，查询失败仍可继续手工填写。
+- Session/Trace 诊断信息已进入只读用户视角，便于直接关联服务日志；Trace 字段是向后兼容的 HTTP 响应扩展，
+  未修改 RunEvent、数据库/Flyway、ticket/RPC、限流、`.env*`、OpenCode 源码或 generated SDK。
+- 浏览器控制台仍有两条既有 `agent-config/public/diff` 400，与本次排查页请求无关；Workflow/LobeHub 继续不启动。

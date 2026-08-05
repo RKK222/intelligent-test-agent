@@ -25,6 +25,7 @@
 - Controller 只调用业务模块 service，不直接访问 Repository、generated SDK 或 JDBC 实现。
 - `ToolboxController` 暴露登录用户目录 `GET /api/internal/platform/toolbox/tools` 和点击 `POST /api/internal/platform/toolbox/tools/{toolId}/clicks`；不校验角色，客户端只提供 `eventId`，用户、服务端时间和 traceId 由入口取得后委托 `test-agent-integration`。工具静态页面不经过本 Controller。
 - 维护 `RuntimeDtos` 等平台 DTO，不返回 generated SDK DTO；Session、SessionMessage、Run 可选返回 `sourceType/sourceRefId`，用于区分夜间定时执行来源。
+- `RuntimeDtos` 的 Session-tree 事件映射保留每个恢复事件的原始 `traceId`，供授权排查页关联日志；字段为响应增量，不改变既有 reducer `payload`。
 - runtime Controller 只读取可选认证主体并传入 `test-agent-opencode-runtime`，有用户主体时由业务层使用用户专属 opencode 进程，无用户主体时保持 static-token 兼容 fallback。
 - `POST /api/internal/agent/{agentId}/sessions/{sessionId}/run-context` 只读取必需认证主体、agentId、sessionId 和 traceId，委托 runtime 在签发 fence 内从权威数据构造会话运行上下文；托管 Workspace 会实时校验应用启用、有效成员及个人 Workspace owner，`SUPER_ADMIN` 不旁路成员规则。响应只返回 `contextToken/contextVersion/expiresAt`。Run 请求 DTO 可选接收 `contextToken/clientRequestId`，不接受客户端传入可信工作区路径、进程、节点或服务器快照。有效 token 由 runtime resolver 复用完整服务端快照，并通过公共 `querySnapshot` 动态健康探测；已有远端 session 时，Session、Workspace、进程、ExecutionNode 和 binding 均为 0 次 Repository SELECT。稳定 `RUNNING` 为 0 次数据库写入，只有稳定状态、PID 或服务地址变化时写一次；`STALE` 拒绝当前 Run 但保留 token，`NOT_STARTED` 才失效进程上下文。
 - `DELETE /api/internal/platform/opencode-runtime/sessions/{sessionId}` 把当前认证用户传入 Session 归档服务，并在归档写库前建立 Redis revoke gate；数据库失败只回滚本次撤销 token，并发归档 gate 不受影响。Workspace root/server 变化、可信路径参数重载、成员和全局角色撤权也已分别接入 Workspace、全局或用户维度失效。

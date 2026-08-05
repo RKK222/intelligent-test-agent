@@ -814,6 +814,7 @@ class RuntimeControllerTest {
                 .jsonPath("$.data.historyRepresentation").isEqualTo("FULL")
                 .jsonPath("$.data.replayAvailable").isEqualTo(true)
                 .jsonPath("$.data.events[0].type").isEqualTo("message.updated")
+                .jsonPath("$.data.events[0].traceId").isEqualTo("trace_1234567890abcdef")
                 .jsonPath("$.data.events[1].type").isEqualTo("permission.asked")
                 .jsonPath("$.data.events[1].payload.requestId").isEqualTo("perm_1");
     }
