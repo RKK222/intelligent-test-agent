@@ -5817,3 +5817,45 @@
   OpenCode；服务器聚合计数仍保持完整，诊断明细有界且兼容旧客户端/旧后端。
 - 代码、真实 PostgreSQL、前端构建、定向行为和更新后端的本地三服务运行均已验证；Workflow/LobeHub 按用户
   要求保持停止，本次没有改写其密钥或环境配置。
+
+## 2026-08-05 - 增加超级管理员限时只读问题排查访问
+
+### Why
+
+- 内网问题排查需要超级管理员查看任意目标用户归因的会话、工作区和文件，但原有 `SUPER_ADMIN` 普通接口既缺少
+  明确目标范围、限时授权和逐次审计，也曾存在未托管文件工作区的管理员旁路。
+- 共享“激活暗号”无法提供个人问责或可靠撤销，因此最终安全边界改为实时超级管理员角色、当前登录会话和限时
+  随机授权 Token；隐藏快捷键只负责展示入口，不参与鉴权，也不存在暗号专用限流规则。
+
+### What
+
+- 新增排查授权、目标切换、用户会话/消息树、关联工作区、只读文件 WebSocket ticket 和一年期审计 API；授权
+  5–240 分钟、同一登录会话只保留一个当前授权，Token 只驻留前端内存且服务端仅保存摘要。
+- 目标资源按用户创建/触发/发送归因的活动会话，以及活动个人工作区和这些会话引用的活动工作区统一查询；普通
+  Session/Workspace/文件入口同步补齐对象归属检查，并移除超级管理员未托管工作区文件旁路。
+- 排查文件 WebSocket 每个 RPC 重新校验登录会话、实时角色、授权、目标用户、工作区和目标 Java，只开放
+  list/search/read/chunk/binary-chunk，过滤 `.opencode`，拒绝写入、上传、下载、Git、终端和 Agent 配置。
+- 系统管理页用 `Ctrl/Cmd+Alt+Shift+D` 显示排查面板，支持工单号、原因、时长、只读确认、目标用户切换、
+  会话恢复元数据、只读文件预览和审计查询；同步 API、事件边界、数据库、安全、前端、模块图及模块 README。
+- 新增 Flyway `V20260805132000__create_support_access_audit.sql`、MyBatis mapper 和 Redis 当前授权索引；没有修改
+  generated SDK、OpenCode 源码或 `.env*`。
+
+### How
+
+- JDK 25 下后端 21 模块 `mvn test` 全量通过；新增授权服务、API、WebSocket、Session 归属和 PostgreSQL/MyBatis
+  集成测试通过。最终补充 Spring 注入构造器后，授权服务与 CORS 定向测试再次通过，并以真实应用启动验证装配。
+- 前端相关 121 项通过，workspace typecheck 和 production build 通过；全量 1801 passed / 1 skipped，唯一失败是
+  `AppSourceDialog` 固定 `2026-08-01` 过期时间夹具，已在未修改的原工作区复现，属于日期相关既有基线问题。
+- 打包 JAR 内 persistence 子 JAR 与源码构建物 SHA-256 一致，新 migration 资源与源码 SHA-256 均为
+  `54cea9a84948f8e4cee14d630772b8ee0668c2a7e5fc897ede5e792a15edd761`。
+- 新 worktree 缺被忽略的 `.env.test`，未复制或改写配置，改用原工作区现有测试 env 绝对路径。默认 Workflow
+  初始化因数据库账号缺 `CREATEROLE/ADMIN OPTION` 失败，随后使用脚本正式支持的 `--without-workflow` 启动。
+
+### Result
+
+- backend、opencode-manager、frontend 已由新 worktree 构建物运行；backend health/readiness 为 `UP`，前端
+  3000 返回 200，CORS 预检包含 `x-support-access-grant`，新 Flyway 已在本地 PostgreSQL 成功应用。
+- 启动检查发现并修复了 `SupportAccessApplicationService` 多构造器缺少 `@Autowired` 的真实装配失败；同时停止并
+  清理了占用 8080 的原工作区旧后端，最终监听进程的 JAR 路径明确属于新 worktree。
+- 本地 Workflow 未纳入运行验证，原因是现有测试数据库角色权限不足；这不影响本次排查入口三服务验证。manager
+  对历史 4104 端口仍会记录 `PROCESS_NOT_MANAGED`，属于本机旧进程绑定状态，不是本次排查授权链路错误。

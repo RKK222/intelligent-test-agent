@@ -17,6 +17,7 @@
 - **权限即时失效**：用户删除、停用或角色调整除失效运行上下文外，还批量撤销该用户全部平台Token及对应session marker；Python workflow下一次精确Token读取或最长30秒SSE复核即失败。
 - **存量用户清理与补全**：超级管理员可按角色（含未分配角色）、组织、研发部门、部门和用户关键字组合检索，手工勾选后批量设置待保存角色；也可单个或批量删除没有会话、工作区、运行进程等受保护业务引用的账号，批量删除全有或全无并撤销登录 Token/运行上下文。已有业务数据的账号通过 TCDS 原位刷新姓名、研发部门和部门，保留原 `userId`、角色、应用成员和历史数据。TCDS 不返回应用成员关系，缺失应用仍由配置管理添加成员。
 - **数据库 IDENTITY 运维**：查询/对齐/手动重启白名单表（users/user_roles/dictionaries/user_login_logs）的 identity 序列，修复序列落后于已有主键导致的新增冲突。
+- **问题排查只读授权**：`SupportAccessApplicationService` 为实时 `SUPER_ADMIN` 签发绑定当前平台登录会话的 5–240 分钟授权，同一会话只保留一个有效 grant；目标用户只作为查询范围，不切换 actor。签发、撤销、目标切换、每次读取和失败均先落审计，审计失败时正文不返回；每日清理一年以前的审计。
 
 ## 依赖
 
@@ -38,10 +39,15 @@
 - `UserDomainService`：用户注册、密码校验，以及统一认证首次建号与普通用户角色的原子写入。
 - `UserManagementApplicationService`：超级管理员测试用户组合查询、创建、单个/批量单角色调整、安全删除和 TCDS 存量信息同步；批量角色调整单次最多 5000 人，排除当前操作者并把关系型修改放在一个事务内，Token 在事务前后各按整批撤销一次，避免旧页面按用户重复扫描 Redis；外部查询完成后才开启短事务写入，删除通过领域端口清理账号附属数据并保护业务资产。
 - `AuthApplicationService`：登录/登出/Token 刷新，调用 `UserRepository`、`TokenStore`、`UserLoginLogRepository`、`UserRoleRepository`、`DictionaryRepository`；登录时把 `ROLE` 字典值加载为 `AuthPrincipal.roles`。
+- `SupportAccessApplicationService`：实时复核登录会话、用户状态和数据库角色，校验/轮换 Redis grant 摘要，并通过 `SupportAccessRepository` 保存授权和一年期审计；不接受共享激活暗号，不依赖 persistence 实现类。
 
 ## API 入口
 
-认证 API 放在 `test-agent-api`，路径为 `/api/auth/`，通过 `AuthController` 暴露。
+认证 API 放在 `test-agent-api`，路径为 `/api/auth/`，通过 `AuthController` 暴露。问题排查只读 API 位于 `/api/internal/platform/system-management/support-access/**`，由 `SupportAccessController` 暴露。
+
+## 测试覆盖
+
+- `SupportAccessApplicationServiceTest` 覆盖无共享暗号签发、登录会话绑定、实时角色撤销、成功读取先审计和审计不可用时正文 fail-closed。
 
 ## 后续 AI 编码指引
 

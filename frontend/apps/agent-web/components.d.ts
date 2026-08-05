@@ -82,6 +82,7 @@ declare module 'vue' {
     SettingsPersonalPanel: typeof import('./src/components/settings/SettingsPersonalPanel.vue')['default']
     SettingsRepositoryPanel: typeof import('./src/components/settings/SettingsRepositoryPanel.vue')['default']
     SettingsUserManagementPanel: typeof import('./src/components/settings/SettingsUserManagementPanel.vue')['default']
+    SupportAccessPanel: typeof import('./src/components/system/SupportAccessPanel.vue')['default']
     SystemManagementPanel: typeof import('./src/components/system/SystemManagementPanel.vue')['default']
     SystemManagementWrapper: typeof import('./src/components/SystemManagementWrapper.vue')['default']
     ToolboxPanel: typeof import('./src/components/ToolboxPanel.vue')['default']

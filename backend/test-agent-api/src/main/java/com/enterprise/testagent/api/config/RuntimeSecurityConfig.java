@@ -60,7 +60,7 @@ public class RuntimeSecurityConfig {
     }
 
     /**
-     * 构造 CORS 配置，暴露 X-Trace-Id，并允许前端发送 SSE 续传与 Nginx 首跳路由提示头。
+     * 构造 CORS 配置，暴露 X-Trace-Id，并允许 SSE 续传、首跳提示与排查授权头。
      */
     @Bean
     UrlBasedCorsConfigurationSource corsConfigurationSource() {
@@ -76,7 +76,8 @@ public class RuntimeSecurityConfig {
                 "Content-Type",
                 "X-Trace-Id",
                 "Last-Event-ID",
-                "X-Test-Agent-Linux-Server-Id"));
+                "X-Test-Agent-Linux-Server-Id",
+                "X-Support-Access-Grant"));
         configuration.setExposedHeaders(List.of("X-Trace-Id"));
         configuration.setAllowCredentials(false);
 

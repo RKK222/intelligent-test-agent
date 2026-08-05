@@ -20,7 +20,7 @@
 
 1. 只能通过 `packages/backend-api` 访问平台后端服务（当前由 `test-agent-app` 装配运行），不得直连 opencode server，不得在组件中直接拼接后端 URL。
 2. Run、Diff 和 runtime 相关请求默认使用 `agentId=opencode` 的 `/api/internal/agent/{agentId}/...` URL；切换 agent 只能通过 `backend-api` 配置，不得在页面组件中手拼旧 runtime URL。
-3. 工作区文件和 Agent 配置文件的目录列表、读取、写入、上传、复制和移动只能通过 `backend-api` 的文件 WebSocket route/ticket/RPC helper；页面组件不得回退到 HTTP 文件接口或自行拼接 WebSocket URL。工作区拖动只允许可写纯 `WORKSPACE` 文件/目录作为源；只读、纯 `REFERENCE` 和 `MIXED` 条目不可拖。合法目录或根空白区为蓝色落点；当前父目录、自身、被拖目录的后代、文件行、纯引用目录和只读目录必须拒绝，带 `workspacePath` 的 `MIXED` 目录可作为工作区侧落点接收工作区条目。移动成功后 app 层必须先迁移整棵已打开子文件、活动/Diff/展开/请求路径，再按迁移后的 `workspacePath` 补齐祖先并逐层认领组合视图新稳定 ID；无快照的加载中 tab 必须在刷新新代次建立后再补读，最后刷新 Git Diff。反向移动撤销复用同一顺序。公共 Agent worktree/直接目录切换只能更新 `worktreeId/linuxServerId` 上下文，后续文件操作仍由 `backend-api` 申请 route 和 ticket。
+3. 工作区文件和 Agent 配置文件的目录列表、读取、写入、上传、复制和移动只能通过 `backend-api` 的文件 WebSocket route/ticket/RPC helper；页面组件不得回退到 HTTP 文件接口或自行拼接 WebSocket URL。超级管理员排查读取必须使用独立 support route/ticket/RPC 和内存 grant，不能复用普通连接或角色绕过；其文件树必须同时设置 `canWrite=false`、`canAttach=false`、`canDownload=false`。工作区拖动只允许可写纯 `WORKSPACE` 文件/目录作为源；只读、纯 `REFERENCE` 和 `MIXED` 条目不可拖。合法目录或根空白区为蓝色落点；当前父目录、自身、被拖目录的后代、文件行、纯引用目录和只读目录必须拒绝，带 `workspacePath` 的 `MIXED` 目录可作为工作区侧落点接收工作区条目。移动成功后 app 层必须先迁移整棵已打开子文件、活动/Diff/展开/请求路径，再按迁移后的 `workspacePath` 补齐祖先并逐层认领组合视图新稳定 ID；无快照的加载中 tab 必须在刷新新代次建立后再补读，最后刷新 Git Diff。反向移动撤销复用同一顺序。公共 Agent worktree/直接目录切换只能更新 `worktreeId/linuxServerId` 上下文，后续文件操作仍由 `backend-api` 申请 route 和 ticket。
 4. API 请求、响应、错误类型必须与 `docs/api/http-api.md` 一致；新增或变更 API 必须同步 `docs/api/http-api.md` 和 `docs/architecture/module-map.md`。
 5. 前端调试用原始报文查看器只能通过 `backend-api` 的可选 observer 捕获浏览器可访问的请求体和响应文本，不得记录 `Authorization`、Cookie 等敏感请求头，不得新增后端持久化或绕过平台后端直连 opencode；展示、筛选和下载按发生时间倒序派生时不得改变有界缓存的原始采集顺序。
 6. 独立长程任务是唯一受控例外：`/workflow-chat` 只能通过 `packages/workflow-api-client` 同源访问 Python `/workflow-api/v1/**`，不得经过 `backend-api`、Java 或页面内手拼 URL。Bearer 沿用平台既有内存/sessionStorage，不能复制到新的持久化状态。本地Vite必须为该前缀配置直达Python的代理，不能让SPA fallback接管；客户端必须校验JSON成功信封，并将HTML、纯文本或畸形JSON收敛为不回显正文的安全错误。
@@ -124,7 +124,7 @@
 
 1. Dockview 面板恢复不能阻塞首屏交互；Monaco 编辑器和 Diff 组件按需加载。
 2. 大文件由后端一次性读取阈值统一判定；收到 `PREVIEW_TOO_LARGE` 时切换到 IDE 风格的渐进只读预览，先显示首段，再提供“继续加载一段”和“加载全部”入口。完整预览不得设置硬上限，但加载全部前必须提示内存占用和 Monaco 卡顿风险；追加分段应增量更新 Monaco 模型，不能每次重建完整正文。Diff 展示避免一次性渲染超大变更；面板切换时不得重复初始化重型实例。
-3. 中间 Monaco 源码区默认按可视宽度自动换行；文件树复制/剪切/粘贴/撤销、删除、拖动和上传必须在 `canWrite=false` 时同时隐藏并在事件处理层阻断。组合视图还必须执行节点级能力：纯引用文件/目录阻断所有变更，混合目录只能通过后端返回的 `workspacePath` 向工作区侧新增、上传、粘贴或拖入，不能重命名、删除或移动整棵混合目录；聚焦或右键纯引用文件也不能把其逻辑父路径当作粘贴目标。工作空间和 Agents 的根或目标目录 `+` 必须复用 `file-explorer` 共享新建面板并展示目标路径，Agents 关闭上传选项；文件/目录删除必须由行尾 `−` 或 Delete/Del 键进入同一确认弹框，目录递归删除要明确提示影响范围；拖放结束必须清理全部目标高亮，撤销历史不得跨个人 worktree 保留。
+3. 中间 Monaco 源码区默认按可视宽度自动换行；文件树复制/剪切/粘贴/撤销、删除、拖动和上传必须在 `canWrite=false` 时同时隐藏并在事件处理层阻断。“加入对话”与下载必须分别由 `canAttach`、`canDownload` 控制，严格只读场景不能仅依赖 `canWrite=false`。组合视图还必须执行节点级能力：纯引用文件/目录阻断所有变更，混合目录只能通过后端返回的 `workspacePath` 向工作区侧新增、上传、粘贴或拖入，不能重命名、删除或移动整棵混合目录；聚焦或右键纯引用文件也不能把其逻辑父路径当作粘贴目标。工作空间和 Agents 的根或目标目录 `+` 必须复用 `file-explorer` 共享新建面板并展示目标路径，Agents 关闭上传选项；文件/目录删除必须由行尾 `−` 或 Delete/Del 键进入同一确认弹框，目录递归删除要明确提示影响范围；拖放结束必须清理全部目标高亮，撤销历史不得跨个人 worktree 保留。
 
 ### 请求与缓存
 

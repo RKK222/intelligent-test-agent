@@ -192,7 +192,11 @@ function renderWithApi(component: Component, backendApi: BackendApiClient, user:
           emits: ["update:modelValue"],
           template: `<select :aria-label="placeholder" :value="modelValue" @change="$emit('update:modelValue', $event.target.value)"><slot /></select>`
         },
-        ElOption: { props: ["label", "value"], template: `<option :value="value">{{ label }}</option>` }
+        ElOption: { props: ["label", "value"], template: `<option :value="value">{{ label }}</option>` },
+        SupportAccessPanel: {
+          props: ["currentUser"],
+          template: `<div data-testid="support-access-panel">只读排查授权面板</div>`
+        }
       },
       provide: { api: backendApi }
     }
@@ -215,6 +219,20 @@ describe("scheduler management panel", () => {
 
     await waitFor(() => expect(backendApi.getOpencodeRuntimeManagementOverview).toHaveBeenCalled());
     expect(await view.findByText("暂无服务器 / Java 进程")).toBeTruthy();
+    view.queryClient.clear();
+  });
+
+  it("reveals the support panel only through the super-admin shortcut without changing identity", async () => {
+    const backendApi = api();
+    const view = renderWithApi(SystemManagementPanel, backendApi);
+
+    expect(view.queryByText("问题排查只读访问", { selector: ".ta-system-menu-text" })).toBeNull();
+    await fireEvent.keyDown(window, { code: "KeyD", key: "d", ctrlKey: true, altKey: true, shiftKey: true });
+
+    expect(await view.findByText("问题排查只读访问", { selector: ".ta-system-menu-text" })).toBeTruthy();
+    expect(view.getByTestId("support-access-panel")).toBeTruthy();
+    expect(currentUser.userId).toBe("usr_admin");
+    expect(currentUser.roles).toEqual(["SUPER_ADMIN"]);
     view.queryClient.clear();
   });
 

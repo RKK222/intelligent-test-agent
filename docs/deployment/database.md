@@ -1515,3 +1515,17 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 ## V20260717214000 公共配置发布进程身份兼容回填
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260717214000__backfill_public_agent_rollout_process_identity.sql` 为升级时仍处于排空状态的存量 target，按 `linuxServerId + containerId + port` 从平台进程表回填 PID 和启动时间。旧进程表使用无时区 timestamp，迁移按当前数据库会话时区转换成绝对时间，与既有 JDBC 读写语义保持一致；无法可靠回填的行继续保留空身份，worker 会持久化重试并保持消息门禁，不会把端口复用或未知进程误判成已 dispose。
+
+## V20260805132000 超级管理员问题排查授权与审计
+
+`V20260805132000__create_support_access_audit.sql` 只创建生产必需结构，不写入测试、演示、默认管理员或部署侧暗号：
+
+- `support_access_grants`：保存 `sag_` 授权 ID、actor 用户/用户名快照、工单号、原因、平台登录会话 SHA-256 摘要、签发/到期/撤销时间、撤销原因和 traceId。表不保存平台 Token 或 `sat_` 授权 Token 明文；actor 删除时外键 `ON DELETE SET NULL`，用户名与工单快照继续保留。
+- `support_access_audit_events`：append-only 保存 `sae_` 事件 ID、可空 grant/actor/target 外键、身份与工单快照、动作、资源类型/业务 ID、文件路径 SHA-256、结果/错误码、traceId、IP、User-Agent SHA-256 和发生时间。消息正文、文件正文、文件路径明文和 Token 均不得入表；用户或授权删除时外键置空，不级联删除审计。
+- actor、target、grant、工单和保留期索引均以前述查询字段加时间倒序建立；授权表额外按会话摘要和到期时间索引。历史 actor/target 外键置空后，快照仍可按工单、动作和 traceId 检索。
+
+运行 SQL 全部位于 `SupportAccessMapper.xml`，目标用户关联工作区查询位于 `UserWorkspaceQueryMapper.xml`，没有新增 JDBC SQL。工作区范围只包含 ACTIVE 个人工作区或 ACTIVE 非旁路会话通过创建人、Run 触发人、消息发送人归因到的工作区；历史空白 workspace name 只在读模型中回退为 workspaceId，不修改存量数据。
+
+Redis 使用 `test-agent:support-access:session:{sessionDigest}` 与 `test-agent:support-access:token:{grantTokenDigest}` 保存当前授权摘要和短期 payload；两类 key/value 都不含原始平台/授权 Token。Lua rotate 保证同一平台登录会话的新授权立即淘汰旧 token，revoke 只删除仍与当前摘要匹配的 session key。TTL 与授权绝对到期时间一致，Redis 不可用时不降级 JVM 内存或数据库明文 Token。
+
+每日清理以当前 UTC 时间减 365 天为 cutoff，先删除更早的审计，再删除已到期且不再被审计引用的授权；一年内审计不会因用户删除或授权撤销提前消失。应用回滚时保留 migration 和历史审计，新表对旧 Java 为向后兼容新增。发布前仍须按本文件 migration 规则，用目标环境真实 PostgreSQL 历史执行基线到当前 HEAD，禁止 `repair`、`outOfOrder` 或改写已经执行的 SQL。

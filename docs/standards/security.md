@@ -64,6 +64,7 @@ Token 校验流程：
 1. 登录、创建 session、发送 message、代理 opencode 请求等高风险接口必须考虑限流。
 2. 限流返回统一错误格式和 `429` 状态码，限流 key 不得直接暴露敏感 token。
 3. 内存限流只作为本地和测试占位，通过 `test-agent.rate-limit.enabled` 开关启用；生产必须替换为网关或 Redis 等分布式限流，不能依赖单实例内存计数。
+4. 问题排查入口不接收部署侧共享暗号，因此不存在“暗号尝试次数”这一条独立限流规则；授权签发、目标选择和只读查询仍必须经过平台统一限流。生产网关可按登录用户与接口组设置分布式频率和并发上限，但不得把登录 Token 或排查授权 Token 明文作为限流键或日志字段。
 
 ## 密钥与配置
 
@@ -88,14 +89,14 @@ Token 校验流程：
 
 必须脱敏或禁止记录：
 
-- Authorization、Cookie、API key、用户 Token、内部模型 `token/authToken/tokenValue`、`contextToken`、XXL SSO ticket、Workflow checkout ticket/model grant/加密私钥信封和 platform session digest；一次性凭据作为 URL path 参数时只记录固定路由形状。
+- Authorization、Cookie、API key、用户 Token、内部模型 `token/authToken/tokenValue`、`contextToken`、`grantToken`、`X-Support-Access-Grant`、XXL SSO ticket、Workflow checkout ticket/model grant/加密私钥信封和 platform session digest；一次性凭据作为 URL path 参数时只记录固定路由形状。
 - 用户输入中的敏感内容。
 - 文件路径中的隐私片段。
 - 过大的请求体和响应体。
 
 长密文、私钥信封和其它大字段的日志脱敏必须使用线性、有界且不会递归回溯的实现；禁止让日志摘要处理因正则栈溢出或超量回溯中断业务请求。脱敏必须先于日志长度截断，确保敏感值不会因截断边界而残留。
 
-日志配置必须对可变 message、thread 和 traceId 做 CRLF 编码，避免换行注入伪造日志记录。opencode 节点 health、Redis health、scheduler/XXL 运行日志和 opencode-manager 控制面日志必须避免输出 ticket、token、完整 Authorization header、Cookie、session digest、MySQL 密码、用户输入、完整 prompt 或原始 executor 敏感 payload。前端 `rawExchangeObserver` 和原始输出缓存对 ticket/token/authToken/tokenValue/cookie/password/secret/sessionDigest 做递归、大小写不敏感脱敏后才允许展示。
+日志配置必须对可变 message、thread 和 traceId 做 CRLF 编码，避免换行注入伪造日志记录。opencode 节点 health、Redis health、scheduler/XXL 运行日志和 opencode-manager 控制面日志必须避免输出 ticket、token、完整 Authorization header、Cookie、session digest、MySQL 密码、用户输入、完整 prompt 或原始 executor 敏感 payload。前端 `rawExchangeObserver` 和原始输出缓存对 ticket/token/authToken/tokenValue/grantToken/supportAccessGrant/cookie/password/secret/sessionDigest 做递归、大小写不敏感脱敏后才允许展示。
 
 受管用户 opencode server 的日志文件名包含统一认证号的路径安全编码、UTC 启动时间和端口。`%HH` 编码或“有界前缀 + 完整 SHA-256”只用于避免路径穿越、冲突和文件名超限，不构成匿名化；日志目录必须限制为运维所需的最小访问权限。manager 生命周期日志、错误响应和普通业务日志不得记录原始统一认证号或完整用户日志文件名，身份与 session 路径不一致时只返回通用校验错误。对外工单、日志下载或排障报告必须遮蔽文件名中的身份部分，可保留启动时间、端口、traceId 等低敏关联字段；日志正文仍按上述 token、prompt 和用户输入规则脱敏。
 
@@ -116,15 +117,28 @@ Token 校验流程：
 7. 用户专属 opencode server 默认监听 `0.0.0.0:{port}` 且不设置 Basic Auth，生产必须用容器网络、主机防火墙或内网网关限制端口池访问面；浏览器和外部系统不得直接访问这些端口。
 8. `tools/verify-opencode-process-deployment.sh` 只用于只读 smoke check；传入的 manager token 和 `SUPER_ADMIN` 用户 token 不会由脚本打印。生产执行时应使用临时 shell、禁用命令历史或通过安全变量注入，避免 token 留在 history 中。
 9. 应用引用资产库状态中的 `repositoryPath` 只能由服务端使用当前平台 `OPENCODE_REFERENCES_DIR` 和已校验版本库英文名派生，并且只通过既有 `APP_ADMIN` 接口返回；参数缺失或历史名称非法时返回空。客户端输入不得控制该路径，日志、trace 和错误消息不得记录该物理路径。
-10. `X-Test-Agent-Linux-Server-Id` 只能作为 Nginx 首跳性能提示，不能作为鉴权、binding、Session 归属或运行上下文事实源。Nginx 必须通过静态 `linuxServerId -> Java endpoint` 白名单映射，禁止把头值直接拼成地址；缺失或未知值回退默认 upstream。代理给 Java 前必须删除该头，并清除外部传入的 `X-Test-Agent-Backend-Routed`，后者只允许公共 Java→Java 转发器产生。前端只在页面内存保存 binding ID，仅对用户 OpenCode、会话、Run、SSE 和本地工作区请求发送；登录和共享控制面不得被该提示固定到用户节点。CORS 可允许该头，但目标 Java 仍必须重新执行完整鉴权和归属校验。
+10. `X-Test-Agent-Linux-Server-Id` 只能作为 Nginx 首跳性能提示，不能作为鉴权、binding、Session 归属或运行上下文事实源。Nginx 必须通过静态 `linuxServerId -> Java endpoint` 白名单映射，禁止把头值直接拼成地址；缺失或未知值回退默认 upstream。代理给 Java 前必须删除该头，并清除外部传入的 `X-Test-Agent-Backend-Routed`，后者只允许公共 Java→Java 转发器产生。前端只在页面内存保存 binding ID，仅对用户 OpenCode、会话、Run、SSE 和本地工作区请求发送；登录和共享控制面不得被该提示固定到用户节点。CORS 可允许该头以及排查专用 `X-Support-Access-Grant`，但目标 Java 仍必须重新执行完整鉴权和归属校验。
 11. XXL Admin 只允许经同源 `/xxl-job-admin/` iframe 访问；响应必须包含 `Content-Security-Policy: frame-ancestors 'self'`、`X-Frame-Options: SAMEORIGIN`，会话 Cookie 必须为 `HttpOnly; Secure; SameSite=Lax` 并限制 Path。Nginx/Vite 必须保持同源和路径前缀，不能通过放宽 frame/Cookie 策略解决代理错误。
 12. XXL MySQL 密码和生产 access token 必须从外部配置注入，所有 Java/Admin/executor 使用同一生产 access token；基础配置中的默认 token 仅供本地开发，生产漏配会继承该值并形成已接受但必须由部署检查阻断的风险。executor 端口只对可信 Admin 网络开放。Admin/MySQL health 不进入平台 readiness，但必须独立告警。
+
+## 超级管理员问题排查只读访问
+
+该能力只用于受控内网故障排查，不实现身份冒用或共享后门。页面隐藏快捷键 `Ctrl/Cmd+Alt+Shift+D` 只展示入口，不是认证因素；系统不读取部署侧“激活暗号”，也没有可查询或可配置的暗号值。
+
+1. actor 始终是当前登录用户，必须在签发和每次 HTTP/文件 RPC 时重新校验平台登录会话、用户可登录状态和数据库实时 `SUPER_ADMIN` 角色；target 只决定查询范围，不能替换 `AuthPrincipal`、签发目标用户 Token 或继承目标用户写权限。
+2. 开启访问必须填写工单号、排查原因、5–240 分钟时长并确认只读约束。同一平台登录会话同时最多一个有效授权，新签发原子淘汰旧授权；显式关闭、过期、登出、停用或移除角色后立即失败关闭。
+3. `grantToken` 必须使用至少 32 字节安全随机值，只在签发响应返回一次并仅保存在当前页面组件内存。后续请求使用 `X-Support-Access-Grant`，不得写入 URL、localStorage、sessionStorage、Pinia、日志或错误正文；Redis 和 PostgreSQL 只保存 SHA-256 摘要或授权元数据，不保存明文。
+4. 可读范围只包括目标用户的 ACTIVE 个人工作区，以及由该用户创建会话、触发 Run 或发送消息所归因到的 ACTIVE 工作区/会话。普通 Workspace、Session 和文件入口始终按当前 actor 自身归属校验，`SUPER_ADMIN` 不得用普通接口旁路排查授权与审计。
+5. 对话正文复用既有历史恢复和保留策略，并显式返回 `FULL/SUMMARY`、回放可用性和详情保留时间；不得建立第二份消息镜像、延长正文保留或提供批量导出。
+6. 文件访问只允许 `workspace.list/search/read/read.chunk/read.binary.chunk`，每条 RPC 都重新校验授权、实时角色、目标用户工作区归属和权威服务器。`.opencode` 命名空间、写入、上传、删除、重命名、复制/移动、Git、终端、Agent 配置、加入对话和下载/批量导出全部拒绝；浏览器隐藏控件不能替代后端白名单。
+7. 目标切换、授权签发/撤销、每次会话/工作区/文件读取及失败结果必须在响应正文返回前落库审计；审计失败时正文不得返回。审计保存 actor/target 快照、工单、原因、动作、资源业务 ID、traceId、结果、IP 和 User-Agent/文件路径摘要，不保存消息或文件正文、路径明文和任何 Token。
+8. 审计向所有实时 `SUPER_ADMIN` 开放，保留 365 天后由定时任务清理。删除用户只将关联外键置空，actor/target 用户名和工单快照继续用于追溯；目标用户不接收自动通知。
 
 ## 平台文件 WebSocket 安全例外
 
 工作区文件与 Agent 配置文件操作属于受控 WebSocket 例外。前端不得直连 opencode server 或任意文件服务，必须先通过平台后端解析目标服务器，再使用目标后端的一次性 ticket 建立 WebSocket。实现和后续扩展必须满足：
 
-1. `file-ws-route` 必须基于当前登录用户的 opencode 进程解析目标后端，并强校验 `workspace.linuxServerId == opencodeProcess.linuxServerId == targetBackend.linuxServerId`；历史 `workspace.linuxServerId` 为空时只能在 root path 校验成功后回填。应用源码 Runtime Workspace 例外地以数据库当前 active generation 的 READY replica 作为精确目标服务器，历史 Workspace 信息不得触发本机回绑或本机降级；目标 Java 继续由公共 `BackendJavaRouteResolver` 选择，入口转发只用 `BackendHttpForwarder`，文件内容不经过 Java→Java HTTP 代理。托管工作区在 route、workspace ticket 签发和每一条 `workspace.*` RPC 都必须实时校验当前用户仍是有效应用成员，`SUPER_ADMIN` 不旁路成员关系，不能依赖 ticket 签发时缓存的成员状态；签票授权必须在同一次权威读取/判断中返回 `STANDARD/APP_SOURCE` 分类并写入不可伪造的短期 ticket，APP_SOURCE 票后续每条 RPC 都禁止 unmanaged 回退且必须再次识别为 APP_SOURCE，replica 映射消失时不得降级为超级管理员服务器工作区。每条 RPC 还必须重新读取用户 `opencode` 文件路由 affinity，并校验它与 ticket 目标/agent 服务器、Workspace/托管副本服务器和当前 JVM 全部一致，连接后的 binding 迁移必须使旧 socket 立即失败关闭，不能继续调用文件服务。非托管 Workspace 默认拒绝文件访问，仅签票时已明确为非 AppSource 的服务器工作空间兼容链路可依据当前登录角色向 `SUPER_ADMIN` 放行，并把该角色写入 ticket 供每条 RPC 复核。
+1. `file-ws-route` 必须基于当前登录用户的 opencode 进程解析目标后端，并强校验 `workspace.linuxServerId == opencodeProcess.linuxServerId == targetBackend.linuxServerId`；历史 `workspace.linuxServerId` 为空时只能在 root path 校验成功后回填。应用源码 Runtime Workspace 例外地以数据库当前 active generation 的 READY replica 作为精确目标服务器，历史 Workspace 信息不得触发本机回绑或本机降级；目标 Java 继续由公共 `BackendJavaRouteResolver` 选择，入口转发只用 `BackendHttpForwarder`，文件内容不经过 Java→Java HTTP 代理。托管工作区在 route、workspace ticket 签发和每一条 `workspace.*` RPC 都必须实时校验当前用户仍是有效应用成员，`SUPER_ADMIN` 不旁路成员关系，不能依赖 ticket 签发时缓存的成员状态；签票授权必须在同一次权威读取/判断中返回 `STANDARD/APP_SOURCE` 分类并写入不可伪造的短期 ticket，APP_SOURCE 票后续每条 RPC 都禁止 unmanaged 回退且必须再次识别为 APP_SOURCE，replica 映射消失时不得降级为超级管理员服务器工作区。每条 RPC 还必须重新读取用户 `opencode` 文件路由 affinity，并校验它与 ticket 目标/agent 服务器、Workspace/托管副本服务器和当前 JVM 全部一致，连接后的 binding 迁移必须使旧 socket 立即失败关闭，不能继续调用文件服务。非托管 Workspace 的普通路由、ticket 与 RPC 对所有角色默认拒绝；超级管理员跨用户排查只能使用上一节的专用只读通道。
 2. Agent 配置文件必须通过 `agent-config/file-ws-route` 按 `scope/workspaceId/worktreeId/linuxServerId` 解析目标后端；公共 worktree 使用落库 `linuxServerId`，公共直接模式必须由前端传入已初始化公共配置服务器 ID。
 3. ticket 只能通过用户登录态创建，短期过期、一次性消费，并绑定 workspace、目标服务器、当前 agent 服务器、签票时工作区是否为 AppSource 的权威分类、模式、Agent 配置 scope/worktree、traceId 和是否 `SUPER_ADMIN`；不得把长期 Bearer token 放入 WebSocket URL。
 4. WebSocket upgrade 必须校验 Origin 白名单、ticket 有效性和 ticket 模式；ticket 消费后无论连接成功与否都不能重复使用。仅当全局 CORS 配置恰好为单个 `*` 时，平台文件 WebSocket 才允许任意格式合法的 canonical Origin；缺失、畸形 Origin 以及混合 wildcard 与显式来源都不得放宽，生产仍必须配置显式来源。

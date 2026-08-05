@@ -3,11 +3,61 @@ import {
   BackendApiError,
   createBackendApiClient,
   LINUX_SERVER_ROUTE_HEADER,
+  SUPPORT_ACCESS_GRANT_HEADER,
   type ReferenceRepositoryStatus,
   type WorkspaceWebSocketFactory
 } from "../src";
 
 describe("backend-api", () => {
+  it("keeps support grants in the dedicated header, redacts them, and does not log out on grant expiry", async () => {
+    const exchanges: Array<Record<string, unknown>> = [];
+    const unauthorized = vi.fn();
+    (window as unknown as Record<string, unknown>).__handleUnauthorized = unauthorized;
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: {
+          grantId: "sag_1",
+          grantToken: "support-secret-token",
+          expiresAt: "2026-08-05T05:30:00Z"
+        }
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: false,
+        code: "SUPPORT_ACCESS_EXPIRED",
+        message: "排查授权已过期",
+        traceId: "trace_fixed"
+      }), { status: 401 }));
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "login-token",
+      routeLinuxServerId: () => "server-a",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      rawExchangeObserver: (exchange) => exchanges.push(exchange)
+    });
+
+    const grant = await client.issueSupportAccessGrant({
+      incidentId: "INC-1",
+      reason: "排查失败会话",
+      durationMinutes: 30,
+      readOnlyAcknowledged: true
+    });
+    await expect(client.listSupportAccessSessions(grant.grantToken, "usr_target"))
+      .rejects.toMatchObject({ status: 401, code: "SUPPORT_ACCESS_EXPIRED" });
+
+    const issueHeaders = new Headers(fetcher.mock.calls[0]?.[1]?.headers);
+    const readHeaders = new Headers(fetcher.mock.calls[1]?.[1]?.headers);
+    expect(issueHeaders.get(SUPPORT_ACCESS_GRANT_HEADER)).toBeNull();
+    expect(readHeaders.get(SUPPORT_ACCESS_GRANT_HEADER)).toBe("support-secret-token");
+    expect(readHeaders.get(LINUX_SERVER_ROUTE_HEADER)).toBeNull();
+    expect(exchanges[0]?.responseText).toContain('"grantToken":"[REDACTED]"');
+    expect(JSON.stringify(exchanges)).not.toContain("support-secret-token");
+    expect(unauthorized).not.toHaveBeenCalled();
+    delete (window as unknown as Record<string, unknown>).__handleUnauthorized;
+  });
+
   it("reads the toolbox catalog and records an idempotent click event", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
       const isClick = String(input).endsWith("/toolbox/tools/omni-tools.text%2Fhash/clicks");

@@ -105,7 +105,7 @@ class WorkspaceFileSocketTicketServiceTest {
         WorkspaceFileSocketTicketService service = service(workspaceService, assignmentService, authorizer);
         WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
         when(workspaceService.currentLinuxServerId()).thenReturn("10.8.0.12");
-        when(authorizer.requireClassifiedFileAccess(USER_ID, workspaceId, true))
+        when(authorizer.requireClassifiedFileAccess(USER_ID, workspaceId, false))
                 .thenThrow(new PlatformException(ErrorCode.FORBIDDEN, "成员关系已失效"));
 
         assertThatThrownBy(() -> service.createTicket(

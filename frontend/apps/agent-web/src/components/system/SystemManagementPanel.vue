@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, type Component } from "vue";
-import { Activity, BarChart3, CalendarClock, Network, Settings2, SlidersHorizontal } from "lucide-vue-next";
+import { computed, onBeforeUnmount, onMounted, ref, watch, type Component } from "vue";
+import { Activity, BarChart3, CalendarClock, KeyRound, Network, Settings2, SlidersHorizontal } from "lucide-vue-next";
 import type { CurrentUser } from "@test-agent/shared-types";
 import RuntimeManagementPanel from "../settings/RuntimeManagementPanel.vue";
 import ScheduledTaskManagementPanel from "./ScheduledTaskManagementPanel.vue";
@@ -8,15 +8,17 @@ import ConfigurationManagementPanel from "./ConfigurationManagementPanel.vue";
 import GeneralParamManagementPanel from "./GeneralParamManagementPanel.vue";
 import AnalyticsManagementPanel from "./AnalyticsManagementPanel.vue";
 import InternalModelProviderPanel from "./InternalModelProviderPanel.vue";
+import SupportAccessPanel from "./SupportAccessPanel.vue";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
 }>();
 
-type SystemMenuKey = "scheduler" | "runtime" | "params" | "internalModels" | "config" | "analytics";
+type SystemMenuKey = "scheduler" | "runtime" | "params" | "internalModels" | "config" | "analytics" | "support";
 type SystemMenuItem = { key: SystemMenuKey; label: string; icon: Component };
 
 const activeKey = ref<SystemMenuKey>("scheduler");
+const supportRevealed = ref(false);
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 
 const items: SystemMenuItem[] = [
@@ -27,10 +29,34 @@ const items: SystemMenuItem[] = [
   { key: "config", label: "配置管理", icon: Settings2 },
   { key: "analytics", label: "运营分析", icon: BarChart3 }
 ];
+const visibleItems = computed<SystemMenuItem[]>(() => supportRevealed.value
+  ? [...items, { key: "support", label: "问题排查只读访问", icon: KeyRound }]
+  : items);
 
 function selectMenu(key: SystemMenuKey) {
   activeKey.value = key;
 }
+
+/** 隐藏快捷键只展示入口，不参与授权或身份校验。 */
+function onSupportShortcut(event: KeyboardEvent) {
+  if (!hasSuperAdmin.value
+    || event.code !== "KeyD"
+    || !(event.ctrlKey || event.metaKey)
+    || !event.altKey
+    || !event.shiftKey) return;
+  event.preventDefault();
+  supportRevealed.value = true;
+  activeKey.value = "support";
+}
+
+onMounted(() => window.addEventListener("keydown", onSupportShortcut));
+onBeforeUnmount(() => window.removeEventListener("keydown", onSupportShortcut));
+watch(hasSuperAdmin, (allowed) => {
+  if (!allowed) {
+    supportRevealed.value = false;
+    activeKey.value = "scheduler";
+  }
+});
 </script>
 
 <template>
@@ -39,7 +65,7 @@ function selectMenu(key: SystemMenuKey) {
     <template v-else>
       <nav class="ta-system-menu" aria-label="系统管理导航">
         <el-tooltip
-          v-for="item in items"
+          v-for="item in visibleItems"
           :key="item.key"
           :content="item.label"
           placement="right"
@@ -60,7 +86,8 @@ function selectMenu(key: SystemMenuKey) {
         <GeneralParamManagementPanel v-else-if="activeKey === 'params'" :current-user="currentUser" />
         <InternalModelProviderPanel v-else-if="activeKey === 'internalModels'" :current-user="currentUser" />
         <ConfigurationManagementPanel v-else-if="activeKey === 'config'" :current-user="currentUser" />
-        <AnalyticsManagementPanel v-else />
+        <AnalyticsManagementPanel v-else-if="activeKey === 'analytics'" />
+        <SupportAccessPanel v-else-if="activeKey === 'support'" :current-user="currentUser" />
       </div>
     </template>
   </section>

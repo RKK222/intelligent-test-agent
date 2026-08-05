@@ -19,4 +19,21 @@ public interface SessionHistoryMapper {
     long countUserHistory(
             @Param("userId") String userId,
             @Param("queryPattern") String queryPattern);
+
+    SessionHistoryRow findUserSession(
+            @Param("userId") String userId,
+            @Param("sessionId") String sessionId,
+            @Param("queryPattern") String queryPattern);
+
+    List<SessionHistoryRow> findUserWorkspaceHistory(
+            @Param("userId") String userId,
+            @Param("workspaceId") String workspaceId,
+            @Param("queryPattern") String queryPattern,
+            @Param("limit") int limit,
+            @Param("offset") long offset);
+
+    long countUserWorkspaceHistory(
+            @Param("userId") String userId,
+            @Param("workspaceId") String workspaceId,
+            @Param("queryPattern") String queryPattern);
 }

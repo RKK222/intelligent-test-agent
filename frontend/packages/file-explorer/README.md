@@ -14,7 +14,7 @@
 - 文件和目录行都常驻低强调的 `−` 删除入口，聚焦行按 `Delete/Del` 使用同一 `FileEntryDeleteDialog` 确认面板；目录确认会明确提示其中全部内容将递归删除。该组件从包入口导出，供 Agents 配置树复用同一确认语义；新建/上传与删除面板统一使用工作台紧凑样式、路径块和危险状态。
 - 文件和目录行在悬停或键盘聚焦时提供下载按钮；本包只 emit `downloadEntry`，文件内容读取、文件夹递归打包 ZIP 和浏览器下载均由 app 层按当前工作区权限完成。
 - 文件拖放在全局 `drop/dragend` 后统一清除根目录和递归目录高亮，避免蓝色目标框残留。
-- `canWrite=false` 时保留展开、读取、搜索和“添加文件到对话”，隐藏并在组件内部阻断新增、删除、重命名、复制移动和上传入口，避免只读 feature 副本出现伪写操作。节点级 `readonly=true` 同样阻断所有变更；`source=MIXED` 的目录只允许通过 `workspacePath` 向工作区侧新增、上传、粘贴或拖入，不能重命名、删除或移动整棵混合目录。
+- `canWrite=false` 时保留展开、读取和搜索，隐藏并在组件内部阻断新增、删除、重命名、复制移动和上传入口；`canAttach=false` 独立隐藏并阻断“添加文件到对话”，`canDownload=false` 独立隐藏并阻断文件/目录下载。排查页面同时关闭三项能力，避免伪只读入口；节点级 `readonly=true` 同样阻断所有变更，`source=MIXED` 的目录只允许通过 `workspacePath` 向工作区侧新增、上传、粘贴或拖入，不能重命名、删除或移动整棵混合目录。
 - 使用 VS Code Workbench 风格的 30px icon tabbar 承载文件树、搜索和变更视图，文件浏览列表行保持 22px 高、13px 字号。
 - 文件/目录、chevron 和 loading 图标使用 `@vscode/codicons`；`getVsCodeFileIconClass(entry)` 从包入口导出，供 `agent-web` 的 Agent 配置树复用。
 - 展开目录时通过回调交给 app 调用后端。

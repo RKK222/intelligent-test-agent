@@ -21,6 +21,7 @@ import com.enterprise.testagent.domain.run.ConversationContextSessionRevocation;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
+import com.enterprise.testagent.domain.workspace.UserWorkspaceQueryRepository;
 import com.enterprise.testagent.opencode.runtime.run.RunSessionMessageSnapshotService;
 import com.enterprise.testagent.opencode.runtime.run.RunSessionTitleWatchService;
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLockGuard;
@@ -48,6 +49,7 @@ public class SessionApplicationService {
     private final RunSessionTitleWatchService titleWatchService;
     private final ConversationContextStore conversationContextStore;
     private NightExecutionSessionLockGuard nightExecutionLockGuard;
+    private UserWorkspaceQueryRepository userWorkspaceQueryRepository;
 
     /**
      * 创建 Session 应用服务，Controller 不直接访问这些仓储实现。
@@ -179,6 +181,7 @@ public class SessionApplicationService {
      * 在指定 Workspace 下创建当前用户的 Session，并记录创建人归因供运营统计使用。
      */
     public Session createSession(UserId userId, WorkspaceId workspaceId, String title, String traceId) {
+        requireUserWorkspace(userId, workspaceId);
         if (workspaceRepository.findById(workspaceId).isEmpty()) {
             LOGGER.warn("Cannot create session: workspace not found, workspaceId={}, traceId={}", workspaceId.value(), traceId);
             throw new PlatformException(ErrorCode.NOT_FOUND, "Workspace 不存在", Map.of("workspaceId", workspaceId.value()));
@@ -212,6 +215,19 @@ public class SessionApplicationService {
         return session;
     }
 
+    /** 按用户归因规则读取单个会话；不向调用方暴露“存在但不属于当前用户”的差异。 */
+    public Session getSession(UserId userId, SessionId sessionId) {
+        if (sessionHistoryRepository == null) {
+            throw new IllegalStateException("sessionHistoryRepository must be provided for user session query");
+        }
+        return sessionHistoryRepository.findUserSession(userId, sessionId)
+                .map(SessionHistoryItem::session)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.NOT_FOUND,
+                        "Session 不存在",
+                        Map.of("sessionId", sessionId.value())));
+    }
+
     /**
      * 按查询词分页列出 Session，分页上限由 PageRequest 负责约束。
      */
@@ -239,6 +255,18 @@ public class SessionApplicationService {
         return sessionRepository.findByWorkspaceId(workspaceId, pageRequest);
     }
 
+    /** 校验工作区和其中会话均属于当前用户后再返回分页。 */
+    public PageResponse<Session> listSessions(UserId userId, WorkspaceId workspaceId, PageRequest pageRequest) {
+        requireUserWorkspace(userId, workspaceId);
+        PageResponse<SessionHistoryItem> page = sessionHistoryRepository.findUserWorkspaceHistory(
+                userId, workspaceId, pageRequest);
+        return new PageResponse<>(
+                page.items().stream().map(SessionHistoryItem::session).toList(),
+                page.page(),
+                page.size(),
+                page.total());
+    }
+
     /**
      * 更新 Session 标题和 pinned 状态，未传字段保持原值。
      */
@@ -254,6 +282,12 @@ public class SessionApplicationService {
         return updated;
     }
 
+    /** 更新用户自己的会话。 */
+    public Session updateSession(UserId userId, SessionId sessionId, String title, Boolean pinned, String traceId) {
+        getSession(userId, sessionId);
+        return updateSession(sessionId, title, pinned, traceId);
+    }
+
     /**
      * 归档 Session；归档后查询接口会按不存在处理。
      */
@@ -266,7 +300,7 @@ public class SessionApplicationService {
      */
     public Session archiveSession(UserId userId, SessionId sessionId, String traceId) {
         requireNightExecutionUnlocked(sessionId);
-        Session current = getSession(sessionId);
+        Session current = userId == null ? getSession(sessionId) : getSession(userId, sessionId);
         ConversationContextSessionRevocation revocation = conversationContextStore == null
                 ? null
                 : conversationContextStore.revokeSession(sessionId);
@@ -303,7 +337,11 @@ public class SessionApplicationService {
      */
     public SessionMessage appendMessage(UserId userId, SessionId sessionId, SessionMessageRole role, String content, String traceId) {
         requireNightExecutionUnlocked(sessionId);
-        getSession(sessionId);
+        if (userId == null) {
+            getSession(sessionId);
+        } else {
+            getSession(userId, sessionId);
+        }
         SessionMessageRole resolvedRole = role == null ? SessionMessageRole.USER : role;
         SessionMessage draft = new SessionMessage(
                 new SessionMessageId(RuntimeIdGenerator.messageId()),
@@ -321,6 +359,12 @@ public class SessionApplicationService {
     @Autowired(required = false)
     void setNightExecutionLockGuard(NightExecutionSessionLockGuard nightExecutionLockGuard) {
         this.nightExecutionLockGuard = nightExecutionLockGuard;
+    }
+
+    /** 生产装配必须注入用户工作区查询端口；手工构造的单元测试可按需显式调用该 setter。 */
+    @Autowired
+    void setUserWorkspaceQueryRepository(UserWorkspaceQueryRepository userWorkspaceQueryRepository) {
+        this.userWorkspaceQueryRepository = userWorkspaceQueryRepository;
     }
 
     private void requireNightExecutionUnlocked(SessionId sessionId) {
@@ -356,5 +400,28 @@ public class SessionApplicationService {
             snapshotService.refreshSessionSnapshot("opencode", session, traceId);
         }
         return sessionMessageRepository.findBySessionId(sessionId, pageRequest);
+    }
+
+    /** 分页读取用户自己的会话消息。 */
+    public PageResponse<SessionMessage> listMessages(
+            UserId userId,
+            SessionId sessionId,
+            PageRequest pageRequest,
+            String traceId,
+            boolean refreshSnapshot) {
+        getSession(userId, sessionId);
+        return listMessages(sessionId, pageRequest, traceId, refreshSnapshot);
+    }
+
+    private void requireUserWorkspace(UserId userId, WorkspaceId workspaceId) {
+        if (userId == null || userWorkspaceQueryRepository == null) {
+            return;
+        }
+        if (userWorkspaceQueryRepository.findUserWorkspace(userId, workspaceId).isEmpty()) {
+            throw new PlatformException(
+                    ErrorCode.NOT_FOUND,
+                    "Workspace 不存在",
+                    Map.of("workspaceId", workspaceId.value()));
+        }
     }
 }

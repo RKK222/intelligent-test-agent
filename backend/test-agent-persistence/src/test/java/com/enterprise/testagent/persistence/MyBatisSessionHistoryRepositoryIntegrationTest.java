@@ -6,9 +6,14 @@ import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.session.SessionHistoryItem;
 import com.enterprise.testagent.domain.session.SessionHistoryRepository;
+import com.enterprise.testagent.domain.session.SessionId;
+import com.enterprise.testagent.domain.workspace.UserWorkspaceQueryRepository;
+import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.persistence.mybatis.MyBatisSessionHistoryRepository;
+import com.enterprise.testagent.persistence.mybatis.MyBatisUserWorkspaceQueryRepository;
 import com.enterprise.testagent.persistence.mybatis.SessionHistoryMapper;
+import com.enterprise.testagent.persistence.mybatis.UserWorkspaceQueryMapper;
 import java.time.Instant;
 import java.util.UUID;
 import org.apache.ibatis.session.SqlSessionFactory;
@@ -32,6 +37,7 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
 
     private SingleConnectionDataSource dataSource;
     private SessionHistoryRepository repository;
+    private UserWorkspaceQueryRepository workspaceQueryRepository;
     private JdbcClient jdbcClient;
 
     @BeforeEach
@@ -51,6 +57,8 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
         SessionHistoryMapper mapper = new SqlSessionTemplate(sqlSessionFactory)
                 .getMapper(SessionHistoryMapper.class);
         repository = new MyBatisSessionHistoryRepository(mapper);
+        workspaceQueryRepository = new MyBatisUserWorkspaceQueryRepository(
+                new SqlSessionTemplate(sqlSessionFactory).getMapper(UserWorkspaceQueryMapper.class));
     }
 
     @AfterEach
@@ -110,6 +118,39 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
         assertThat(page.items())
                 .extracting(item -> item.session().sessionId().value())
                 .doesNotContain("ses_history_side_question", "ses_history_side_question_active");
+    }
+
+    @Test
+    void singleSessionAndWorkspacePageReuseTheSameUserAttributionRules() {
+        assertThat(repository.findUserSession(CURRENT_USER, new SessionId("ses_history_run")))
+                .isPresent();
+        assertThat(repository.findUserSession(CURRENT_USER, new SessionId("ses_history_other")))
+                .isEmpty();
+
+        PageResponse<SessionHistoryItem> page = repository.findUserWorkspaceHistory(
+                CURRENT_USER,
+                new WorkspaceId("wrk_history_unmanaged"),
+                new PageRequest(1, 20));
+        assertThat(page.total()).isEqualTo(1);
+        assertThat(page.items())
+                .extracting(item -> item.session().sessionId().value())
+                .containsExactly("ses_history_message");
+    }
+
+    @Test
+    void userWorkspaceQueryIncludesPersonalAndAttributedSessionWorkspacesOnly() {
+        var page = workspaceQueryRepository.findUserWorkspaces(CURRENT_USER, new PageRequest(1, 30));
+
+        assertThat(page.total()).isEqualTo(4);
+        assertThat(page.items())
+                .extracting(workspace -> workspace.workspaceId().value())
+                .containsExactlyInAnyOrder(
+                        "wrk_history_personal",
+                        "wrk_history_replica",
+                        "wrk_history_unmanaged",
+                        "wrk_history_blank");
+        assertThat(workspaceQueryRepository.findUserWorkspace(
+                CURRENT_USER, new WorkspaceId("wrk_history_other"))).isEmpty();
     }
 
     private void seedData() {

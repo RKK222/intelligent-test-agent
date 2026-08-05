@@ -19,6 +19,7 @@ public final class SensitiveDataMasker {
             "password", "oldpassword", "newpassword",
             "token", "authtoken", "tokenvalue", "accesstoken", "refreshtoken", "contexttoken",
             "ticket", "ticketid", "cookie", "sessiondigest", "modelgrant", "grant", "grantid",
+            "granttoken", "supportaccessgrant",
             "secret", "apikey", "credential", "authorization",
             "privatekey", "encryptedprivatekey", "encryptedaeskey", "encryptionnonce", "passphrase",
             "sourcevalue", "memoryvalue"

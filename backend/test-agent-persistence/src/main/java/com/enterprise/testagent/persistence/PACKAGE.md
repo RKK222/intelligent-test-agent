@@ -20,6 +20,9 @@
 - `mybatis.MyBatisInternalModelProviderRepository` / `mybatis.MyBatisInternalModelTokenRepository`：内部模型供应商与 Token 定义领域端口的生产 Bean；普通返回模型不包含 Token 明文。
 - `mybatis.UserDeletionMapper` / `mybatis/UserDeletionMapper.xml` / `mybatis.MyBatisUserDeletionRepository`：用户安全删除领域端口的生产实现，锁定目标用户、识别会话/工作区/进程/调度等受保护引用，并按外键顺序清理可随账号删除的附属表。
 - `mybatis.UserManagementQueryMapper` / `mybatis/UserManagementQueryMapper.xml` / `mybatis.MyBatisUserManagementQueryRepository`：用户管理组合分页查询及“全部检索结果”有界 ID 解析端口的生产实现，按关键字、有效角色/未分配角色、组织和部门筛选，并可排除当前操作者；不扩展存量 JDBC SQL。
+- `mybatis.SupportAccessMapper` / `mybatis/SupportAccessMapper.xml` / `mybatis.MyBatisSupportAccessRepository`：短期只读排查授权快照、目标切换和逐次资源访问审计的关系型 SQL 与生产实现；审计按超级管理员可见并保留一年。
+- `RedisSupportAccessGrantStore` / `SupportAccessStoreConfig`：登录会话内当前授权和明文令牌的短期 Redis 适配；轮换、撤销使用 Lua 原子收敛，数据库只保存 SHA-256 摘要。
+- `mybatis.UserWorkspaceQueryMapper` / `mybatis/UserWorkspaceQueryMapper.xml` / `mybatis.MyBatisUserWorkspaceQueryRepository`：目标用户个人工作区与目标用户会话引用工作区的只读联合查询；所有新增关系型 SQL 均位于 MyBatis XML。
 - `mybatis.RunMapper` / `mybatis/RunMapper.xml`：Run MyBatis SQL，包含保存、读取、最近非终态 Run 查询、只选择 `LEGACY_FULL` 的 stale active 查询和 `status` 条件更新。
 - `mybatis.MyBatisRunRepository`：Run 领域端口的生产 Bean，通过 `saveIfStatus` 原子条件写入避免终态竞态覆盖。
 - `mybatis.RunEventMapper` / `mybatis/RunEventMapper.xml`：RunEvent append-only MyBatis SQL，写入结构化 scope 列和可空 raw event id，并支持按 `root_session_id` 读取历史状态事件。
@@ -79,6 +82,7 @@
 - `db/migration/V20260718110000__create_reference_repository_replica_tables.sql`：创建引用资产总体状态/服务器副本表及认领、generation 查询索引。
 - `db/migration/V20260718143000__add_reference_repository_operations_and_verification.sql`：增加引用资产操作类型、实际指针可空语义与核验时间。
 - `db/migration/V20260728103000__create_app_source_snapshot_tables.sql`：创建七类应用源码表、JSONB 路径选择、snapshot 整小时过期与十六进制摘要检查、步骤部分唯一索引和 cleanup 延迟外键，并初始化只读应用源码根目录参数。
+- `db/migration/V20260805132000__create_support_access_audit.sql`：创建排查授权与访问审计表、查询索引和中文注释；用户删除时仅清空用户快照外键，不删除审计事实。
 - `db/migration/V20260728160800__create_toolbox_click_tracking.sql`：企业顺序基线的工具盒子点击表正式迁移；保持企业已执行的 `-1966404877` checksum 原始字节。
 - `db/migration-compat/toolbox/V20260727203500__create_toolbox_click_tracking.sql`：已执行旧工具盒子版本的原始 checksum 兼容脚本，只能由 app 根据 Flyway 已应用历史选择加载。
 - `db/migration-compat/toolbox-current-idempotent/V20260728160800__create_toolbox_click_tracking.sql`：曾误发并执行的当前版本 `-74327385` 幂等原文，只能由 app 在 checksum 命中时隔离加载。

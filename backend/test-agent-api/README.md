@@ -11,8 +11,9 @@
 - 暴露 `/api/internal/platform/...`、`/api/internal/agent/{agentId}/...` 和预留 `/api/public/...` URL。
 - 旧 runtime/workspace `/api/...` 兼容 URL 由 `LegacyApiGoneWebFilter` 在进入 Controller 前统一返回 `410 API_GONE`；登录认证 `/api/auth/login|logout|me|refresh` 保留为稳定入口。
 - `web.platform` 承载平台自身接口，`web.agent` 承载 agent runtime 代理入口，`web.common` 承载 traceId、鉴权、限流、旧接口作废拦截和统一异常等入口支撑。
-- CORS allowed headers 包含前端可选的 `X-Test-Agent-Linux-Server-Id`。该头在生产由 Nginx 静态白名单消费并在转发前删除，只是首跳提示；API 层仍按 binding、Session、Run 和运行上下文执行既有权威路由与鉴权。
+- CORS allowed headers 包含前端可选的 `X-Test-Agent-Linux-Server-Id` 和排查专用 `X-Support-Access-Grant`。前者在生产由 Nginx 静态白名单消费并在转发前删除，只是首跳提示；后者只绑定限时排查授权，不参与用户路由。API 层仍执行既有权威路由与鉴权。
 - 普通 Workspace HTTP 入口只保留查询和文件路由；服务器目录选择与创建仅通过超级管理员文件 WebSocket ticket 执行。
+- `SupportAccessController` 暴露 `/api/internal/platform/system-management/support-access/**`：签发/撤销绑定当前登录会话的限时只读 grant、目标切换、目标用户会话/工作区/消息读取、权威文件 route/ticket 和一年期审计查询。普通 Workspace/Session/文件入口已按当前用户归属收紧；排查文件 RPC 只允许列表/搜索/读取并拒绝 `.opencode`，成功正文在审计落库后才返回。
 - 工作区文件下载新增 `workspace.read.binary.chunk` 与 `workspace.view.read.binary.chunk`：每段仍在目标 Java 重新校验 ticket、成员关系、路径或逻辑 locator，并透传文件大小/修改时间快照；API 层不解码完整文件，也不新增后端到后端 HTTP 文件代理。
 - 暴露应用版本工作区和个人工作区运行接口；“拉取远程”调用个人工作区 `git-pull`，更新当前 owner 在该应用下的整棵 worktree（含应用 Agent），并返回 `runtimeReloadStatus/runtimeReloadId` 表达当前用户后台运行态重载是否已登记；版本级 `git-pull` 兼容入口固定拒绝，避免旧客户端触发共享版本或全员同步。Controller 只解析登录主体、traceId、当前用户 opencode agent 服务器并委托 workspace-management；应用成员、owner 和目录权限仍由业务服务校验。个人工作区新建和 default 显式确保/修复在进入业务服务前统一调用 `requireReadyProcess`，未形成 ACTIVE binding 或进程不健康时返回 `OPENCODE_UNAVAILABLE`，不得按入口 Java 本机目录落盘。
 - 暴露应用源码仓库列表、分支、远端树、物化、当前 generation 保留期调整、同 generation 副本重试、打开、最近选择，以及持久化操作快照查询；同一 tree URL 默认继续返回节点数组，只有显式 `includeCommit=true` 才返回 `{targetCommit,nodes}`，其中提交和节点来自 workspace-management 的同一次固定提交树快照。仓库列表状态严格使用 `NOT_DOWNLOADED/DOWNLOADED_ACTIVE/DOWNLOADED_EXPIRED/PERSONAL_OCCUPIED`，additive 返回 `acceptedAt/maxRetentionHours`，并按当前用户 READY opencode 进程所在服务器计算是否可打开。Controller 只传递认证主体、`APP_ADMIN` 事实、当前进程服务器和 traceId，业务鉴权、固定 commit、generation、成员关系与安全步骤摘要全部委托 workspace-management。
@@ -128,7 +129,7 @@
 - `WorkspaceGitToolControllerTest`、`ApiTokenWebFilterTest` 覆盖专用 Tool 凭据入口的身份透传和精确过滤器例外；其它 API 路径仍要求原有用户或静态 Token。
 - `UiTestToolConfigControllerTest`、`ApiTokenWebFilterTest` 覆盖 UI Tool 无凭据只读响应、精确过滤器例外和相邻路径仍要求原有 Token。
 - `ManagedWorkspaceController` 额外暴露版本选择前的 `GET /workspace-versions/{versionId}/git-access` 只读预检；Controller 只透传当前认证用户，仓库身份、SSH key 和 Git 失败分类由 workspace-management 处理。
-- `RuntimeSecurityConfigTest` 覆盖本地 `frontend-opencode` real E2E Origin 白名单、`X-Test-Agent-Linux-Server-Id` 的 CORS 预检，以及企业显式浏览器白名单下搬迁内部 Origin 只允许精确 WebSocket 路径、浏览器 Origin 和子路径仍被拒绝。
+- `RuntimeSecurityConfigTest` 覆盖本地 `frontend-opencode` real E2E Origin 白名单、`X-Test-Agent-Linux-Server-Id` / `X-Support-Access-Grant` 的 CORS 预检，以及企业显式浏览器白名单下搬迁内部 Origin 只允许精确 WebSocket 路径、浏览器 Origin 和子路径仍被拒绝。
 - `AuthControllerRolesTest`、`ConfigurationManagementControllerTest` 覆盖认证响应 roles、`APP_ADMIN`/`SUPER_ADMIN` 鉴权、代码库英文名、版本库类型与部署模式 DTO、版本库类型/部署模式下拉接口、应用版本库远端树接口、工作空间创建进度轮询和 SSH key 不回显私钥。
 - `ApiTokenWebFilterTest`、`InMemoryRateLimitWebFilterTest`、`TraceIdWebFilterTest`、`GlobalExceptionHandlerTest`、`LegacyApiGoneWebFilterTest` 覆盖鉴权、限流、traceId、旧接口 410 和统一错误响应。
 - `InternalModelTokenManagementControllerTest` 覆盖 `SUPER_ADMIN` 鉴权、统一冲突错误和响应不泄露 Token；代理测试覆盖按 Provider ID 注入不同 Token、鉴权先于请求体聚合、`2 MiB` 定长及 chunked 上限和流式 JSON 完整性校验。`ApiLoggingAspectTest` / `ServiceLoggingAspectTest` / `WebSocketLoggingAspectTest` 覆盖 Controller、Service 与 WebSocket 日志切面在同步、响应式和错误路径下保留原调用语义；`SensitiveDataMaskerTest` 覆盖 `contextToken` 及内部模型 `authToken` 请求/响应字段脱敏。

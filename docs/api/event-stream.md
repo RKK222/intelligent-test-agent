@@ -824,6 +824,12 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 既有对话事件映射，因此前端可以展示 `test-execution-ui` 子 agent 卡片，但不把外部执行步骤冒充
 当前平台 RunEvent。后续若要实时转发外部浏览器步骤，必须单独设计稳定、可恢复、带归属的事件契约。
 
+## 问题排查只读访问不新增事件
+
+超级管理员问题排查授权、目标切换、会话/工作区列表、审计查询均为普通 HTTP API，文件内容继续使用平台文件 WebSocket 的独立 RPC 协议。本功能不创建 Session、Run、RunEvent 或用户级 runtime-state 事件，也不新增 SSE。
+
+会话正文读取复用既有 `RunMessageRecoveryService` 和 durable session-tree 快照，只把当前保留链路已有的事件投影为一次 HTTP 响应，并携带 `FULL/SUMMARY`、回放可用性和详情保留时间；不得把排查读取重新发布到 RunEvent/SSE，亦不得因此延长消息保留。文件 WebSocket 每条排查 RPC 都重新校验短期授权和目标归属，授权失效后直接返回错误并清理连接，不通过事件通知目标用户。
+
 ## LobeHub 不新增平台事件
 
 LobeHub 登录票据签发、HMAC 兑换/撤销、Desktop/CLI 浏览器确认、模型目录维护与能力探测都是普通 HTTP API，

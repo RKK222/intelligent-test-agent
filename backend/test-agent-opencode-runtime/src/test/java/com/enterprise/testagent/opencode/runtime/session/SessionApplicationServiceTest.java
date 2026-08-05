@@ -131,7 +131,7 @@ class SessionApplicationServiceTest {
         SessionApplicationService service = new SessionApplicationService(
                 new FakeWorkspaceRepository(true),
                 sessions,
-                Mockito.mock(SessionHistoryRepository.class),
+                ownedHistory(),
                 new FakeMessageRepository(),
                 null,
                 contextStore);
@@ -159,7 +159,7 @@ class SessionApplicationServiceTest {
         SessionApplicationService service = new SessionApplicationService(
                 new FakeWorkspaceRepository(true),
                 sessions,
-                Mockito.mock(SessionHistoryRepository.class),
+                ownedHistory(),
                 new FakeMessageRepository(),
                 null,
                 contextStore);
@@ -258,7 +258,12 @@ class SessionApplicationServiceTest {
     @Test
     void appendMessageWithUserRecordsSender() {
         FakeMessageRepository messages = new FakeMessageRepository();
-        SessionApplicationService service = service(new FakeWorkspaceRepository(true), new FakeSessionRepository(session()), messages);
+        SessionApplicationService service = new SessionApplicationService(
+                new FakeWorkspaceRepository(true),
+                new FakeSessionRepository(session()),
+                ownedHistory(),
+                messages,
+                null);
 
         SessionMessage message = service.appendMessage(
                 new UserId("usr_1234567890abcdef"),
@@ -356,6 +361,15 @@ class SessionApplicationServiceTest {
             SessionRepository sessions,
             SessionMessageRepository messages) {
         return new SessionApplicationService(workspaces, sessions, messages);
+    }
+
+    /** 带用户身份的变更用例必须显式提供会话归属，避免测试绕过生产对象级鉴权。 */
+    private static SessionHistoryRepository ownedHistory() {
+        return new FakeSessionHistoryRepository(new PageResponse<>(
+                List.of(new SessionHistoryItem(session(), null)),
+                1,
+                30,
+                1));
     }
 
     private static Workspace workspace() {
@@ -456,6 +470,24 @@ class SessionApplicationServiceTest {
             this.capturedQuery = query;
             this.capturedPageRequest = pageRequest;
             return page;
+        }
+
+        @Override
+        public Optional<SessionHistoryItem> findUserSession(UserId userId, SessionId sessionId) {
+            return page.items().stream()
+                    .filter(item -> item.session().sessionId().equals(sessionId))
+                    .findFirst();
+        }
+
+        @Override
+        public PageResponse<SessionHistoryItem> findUserWorkspaceHistory(
+                UserId userId,
+                WorkspaceId workspaceId,
+                PageRequest pageRequest) {
+            List<SessionHistoryItem> items = page.items().stream()
+                    .filter(item -> item.session().workspaceId().equals(workspaceId))
+                    .toList();
+            return new PageResponse<>(items, pageRequest.page(), pageRequest.size(), items.size());
         }
     }
 

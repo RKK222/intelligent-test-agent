@@ -10,6 +10,10 @@ export type DirectoryRowsProps = {
   depth?: number;
   /** 只读工作区隐藏并阻断所有文件系统写入口。 */
   canWrite?: boolean;
+  /** 是否允许加入对话。 */
+  canAttach?: boolean;
+  /** 是否允许下载文件或目录。 */
+  canDownload?: boolean;
   /** 当前个人 worktree 是否存在可撤销的文件操作。 */
   canUndo?: boolean;
   /** 根组件递增该值，统一清理递归目录残留的拖放高亮。 */
@@ -50,7 +54,12 @@ import FileEntryContextMenu from "./FileEntryContextMenu.vue";
 import FileEntryDeleteDialog from "./FileEntryDeleteDialog.vue";
 import FileIcon from "./FileIcon.vue";
 
-const props = withDefaults(defineProps<DirectoryRowsProps>(), { depth: 0, canWrite: true });
+const props = withDefaults(defineProps<DirectoryRowsProps>(), {
+  depth: 0,
+  canWrite: true,
+  canAttach: true,
+  canDownload: true
+});
 const emit = defineEmits<{
   toggleDirectory: [path: string];
   toggleViewDirectory: [entry: WorkspaceViewEntry];
@@ -160,8 +169,8 @@ function openFileContextMenu(event: MouseEvent, entry: FileTreeEntry) {
   event.preventDefault();
   const selection = selectedForEntry(entry);
   // 组合/引用目录没有变更权限且剪贴板为空时，不创建只剩边框的空白菜单。
-  const hasAction = selection.length > 0
-    || entry.type === "file"
+  const hasAction = (props.canWrite && canMutateEntry(entry) && selection.length > 0)
+    || (props.canAttach && entry.type === "file")
     || Boolean(props.clipboardEntry && canPasteIntoEntry(entry))
     || canUndoFromEntry(entry);
   if (!hasAction) {
@@ -178,7 +187,7 @@ function closeFileContextMenu() {
 
 function emitAddFileContext() {
   const entry = entryContextMenu.value?.entry;
-  if (!entry || entry.type !== "file") {
+  if (!props.canAttach || !entry || entry.type !== "file") {
     return;
   }
   if (isWorkspaceViewEntry(entry)) emit("addViewFileContext", entry);
@@ -267,7 +276,7 @@ function targetDirectory(entry: FileTreeEntry): string {
 
 function emitSetClipboard(mode: "copy" | "move") {
   const context = entryContextMenu.value;
-  if (!context || context.selection.length === 0) return;
+  if (!props.canWrite || !context || context.selection.length === 0 || !canMutateEntry(context.entry)) return;
   if (mode === "copy" && context.selection.some((entry) => entry.type !== "file")) return;
   if (context.selection.length === 1) emit("setClipboard", context.selection[0]!.path, mode);
   emit("setClipboardEntries", context.selection, mode);
@@ -542,6 +551,7 @@ function submitRename() {
       </button>
       <div class="ta-file-tree-actions">
         <button
+          v-if="canDownload"
           type="button"
           class="ta-file-tree-download-btn"
           :disabled="downloadingEntryId === nodeId(entry)"
@@ -598,6 +608,8 @@ function submitRename() {
         :loading-path="loadingPath"
         :change-stats="changeStats"
         :can-write="canWrite"
+        :can-attach="canAttach"
+        :can-download="canDownload"
         :can-undo="canUndo"
         :drag-reset-token="dragResetToken"
         :drag-source-paths="dragSourcePaths"
@@ -645,7 +657,7 @@ function submitRename() {
           重命名
         </button>
         <button
-          v-if="entryContextMenu.selection.length > 0"
+          v-if="canWrite && canMutateEntry(entryContextMenu.entry) && entryContextMenu.selection.length > 0"
           type="button"
           role="menuitem"
           class="ta-file-context-menu-item is-danger"
@@ -654,7 +666,7 @@ function submitRename() {
           {{ entryContextMenu.selection.length > 1 ? `删除 ${entryContextMenu.selection.length} 个条目` : '删除' }}
         </button>
         <button
-          v-if="entryContextMenu.entry.type === 'file'"
+          v-if="canAttach && entryContextMenu.entry.type === 'file'"
           type="button"
           role="menuitem"
           class="ta-file-context-menu-item"
@@ -663,7 +675,7 @@ function submitRename() {
           添加文件到对话
         </button>
         <button
-          v-if="entryContextMenu.selection.length > 0 && entryContextMenu.selection.every((entry) => entry.type === 'file')"
+          v-if="canWrite && canMutateEntry(entryContextMenu.entry) && entryContextMenu.selection.length > 0 && entryContextMenu.selection.every((entry) => entry.type === 'file')"
           type="button"
           role="menuitem"
           class="ta-file-context-menu-item"
@@ -673,7 +685,7 @@ function submitRename() {
           <span>Ctrl/Cmd+C</span>
         </button>
         <button
-          v-if="entryContextMenu.selection.length > 0"
+          v-if="canWrite && canMutateEntry(entryContextMenu.entry) && entryContextMenu.selection.length > 0"
           type="button"
           role="menuitem"
           class="ta-file-context-menu-item"

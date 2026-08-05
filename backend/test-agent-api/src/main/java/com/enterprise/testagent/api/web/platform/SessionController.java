@@ -122,8 +122,9 @@ public class SessionController {
             @RequestParam(required = false) Integer size,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
         return ApiResponse.ok(RuntimeDtos.sessionPage(sessionService.listSessions(
-                new WorkspaceId(workspaceId), RuntimeApiSupport.pageRequest(page, size))), traceId);
+                userId, new WorkspaceId(workspaceId), RuntimeApiSupport.pageRequest(page, size))), traceId);
     }
 
     /**
@@ -134,7 +135,8 @@ public class SessionController {
             @PathVariable String sessionId,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
-        return ApiResponse.ok(RuntimeDtos.SessionResponse.from(sessionService.getSession(new SessionId(sessionId))), traceId);
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        return ApiResponse.ok(RuntimeDtos.SessionResponse.from(sessionService.getSession(userId, new SessionId(sessionId))), traceId);
     }
 
     /**
@@ -163,8 +165,9 @@ public class SessionController {
             @RequestBody RuntimeDtos.UpdateSessionRequest request,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
         return ApiResponse.ok(RuntimeDtos.SessionResponse.from(sessionService.updateSession(
-                new SessionId(sessionId), request.title(), request.pinned(), traceId)), traceId);
+                userId, new SessionId(sessionId), request.title(), request.pinned(), traceId)), traceId);
     }
 
     /**
@@ -205,9 +208,11 @@ public class SessionController {
             @RequestParam(required = false, defaultValue = "true") Boolean refresh,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
         // 历史消息查询会同步刷新远端快照，必须整体 offload，避免在 Reactor 事件线程调用 block()。
         return Mono.fromCallable(() -> ApiResponse.ok(RuntimeDtos.messagePage(sessionService.listMessages(
-                        new SessionId(sessionId), RuntimeApiSupport.pageRequest(page, size), traceId, Boolean.TRUE.equals(refresh))), traceId))
+                        userId, new SessionId(sessionId), RuntimeApiSupport.pageRequest(page, size), traceId,
+                        Boolean.TRUE.equals(refresh))), traceId))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
@@ -224,7 +229,9 @@ public class SessionController {
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         SessionId currentSessionId = new SessionId(sessionId);
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
         return Mono.fromCallable(() -> {
+                    sessionService.getSession(userId, currentSessionId);
                     RunHistoryRecoveryResult recovery = messageRecoveryService == null
                             ? RunHistoryRecoveryResult.full(
                                     List.of(), null, RunHistoryRecoverySource.OPENCODE)

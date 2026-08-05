@@ -12,8 +12,12 @@ export type FileExplorerProps = {
   loadingPath?: Set<string>;
   hideHeader?: boolean;
   hideTabbar?: boolean;
-  /** 当前工作区是否允许文件新增、删除和重命名；只读时仍允许浏览、搜索和加入对话。 */
+  /** 当前工作区是否允许文件新增、删除和重命名。 */
   canWrite?: boolean;
+  /** 是否允许把文件加入当前对话；排查只读模式必须关闭。 */
+  canAttach?: boolean;
+  /** 是否允许下载文件或目录；排查只读模式必须关闭批量导出。 */
+  canDownload?: boolean;
   /** 当前个人 worktree 是否存在可撤销的复制、移动或上传操作。 */
   canUndo?: boolean;
   activeTab?: ExplorerTab;
@@ -39,7 +43,12 @@ import DirectoryRows from "./DirectoryRows.vue";
 import type { WorkspaceClipboardEntry, WorkspaceSelectionEntry } from "./DirectoryRows.vue";
 import FileIcon from "./FileIcon.vue";
 
-const props = withDefaults(defineProps<FileExplorerProps>(), { workspaceName: "Workspace", canWrite: true });
+const props = withDefaults(defineProps<FileExplorerProps>(), {
+  workspaceName: "Workspace",
+  canWrite: true,
+  canAttach: true,
+  canDownload: true
+});
 const computedTab = computed(() => props.activeTab ?? tab.value);
 const emit = defineEmits<{
   toggleDirectory: [path: string];
@@ -163,6 +172,10 @@ function requestUpload(directory: string) {
 
 function onUploadInput(event: Event) {
   const input = event.target as HTMLInputElement;
+  if (!props.canWrite) {
+    input.value = "";
+    return;
+  }
   const files = Array.from(input.files ?? []);
   if (files.length > 0) emit("uploadFiles", uploadDirectory.value, files);
   input.value = "";
@@ -345,6 +358,8 @@ defineExpose({ openRootActions });
         :loading-path="loadingPath"
         :change-stats="changeStats"
         :can-write="canWrite"
+        :can-attach="canAttach"
+        :can-download="canDownload"
         :can-undo="canUndo"
         :drag-reset-token="dragResetToken"
         :drag-source-paths="dragSourcePaths"
@@ -405,7 +420,7 @@ defineExpose({ openRootActions });
           :style="{ paddingLeft: '6px' }"
           :title="entry.path"
           @click="emit('openFile', entry.path)"
-          @contextmenu.prevent="emit('addFileContext', entry.path)"
+          @contextmenu.prevent="canAttach && emit('addFileContext', entry.path)"
         >
           <span class="ta-file-tree-file-spacer" />
           <FileIcon :entry="{ name: entry.name, path: entry.path, type: 'file' }" />

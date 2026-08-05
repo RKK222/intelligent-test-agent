@@ -892,12 +892,17 @@ class RuntimeControllerTest {
                         List.of(snapshot), null, RunHistoryRecoverySource.OPENCODE)));
         when(eventStreamService.snapshotDurablePayloadsByRootSessionId(eq("ses_root"), eq(0L), eq(100)))
                 .thenReturn(List.of(question));
+        when(sessionService.getSession(
+                        eq(new UserId("usr_1234567890abcdef")),
+                        eq(sessionId)))
+                .thenReturn(session("Session tree", false, SessionStatus.ACTIVE));
         WebTestClient client = WebTestClient.bindToController(new SessionController(
                         sessionService,
                         null,
                         recoveryService,
                         eventStreamService))
                 .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
                 .build();
 
         client.get()
@@ -934,6 +939,7 @@ class RuntimeControllerTest {
                                 "ver_1234567890abcdef",
                                 "20260708"))), 1, 20, 1));
         when(service.updateSession(
+                        eq(new UserId("usr_1234567890abcdef")),
                         eq(new SessionId("ses_1234567890abcdef")),
                         eq("Renamed"),
                         eq(false),
@@ -1019,6 +1025,7 @@ class RuntimeControllerTest {
         SessionApplicationService service = org.mockito.Mockito.mock(SessionApplicationService.class);
         AtomicBoolean calledOnNonBlockingThread = new AtomicBoolean(true);
         when(service.listMessages(
+                        eq(new UserId("usr_1234567890abcdef")),
                         eq(new SessionId("ses_1234567890abcdef")),
                         any(),
                         eq("trace_1234567890abcdef"),
@@ -1029,6 +1036,7 @@ class RuntimeControllerTest {
                 });
         WebTestClient client = WebTestClient.bindToController(new SessionController(service))
                 .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
                 .build();
 
         client.get()
@@ -1046,6 +1054,7 @@ class RuntimeControllerTest {
     void sessionControllerPassesRefreshFlagToMessageListing() {
         SessionApplicationService service = org.mockito.Mockito.mock(SessionApplicationService.class);
         when(service.listMessages(
+                        eq(new UserId("usr_1234567890abcdef")),
                         eq(new SessionId("ses_1234567890abcdef")),
                         any(),
                         eq("trace_1234567890abcdef"),
@@ -1053,6 +1062,7 @@ class RuntimeControllerTest {
                 .thenReturn(new PageResponse<>(List.of(), 1, 20, 0));
         WebTestClient client = WebTestClient.bindToController(new SessionController(service))
                 .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
                 .build();
 
         client.get()
@@ -1064,6 +1074,7 @@ class RuntimeControllerTest {
                 .jsonPath("$.data.items").isArray();
 
         verify(service).listMessages(
+                eq(new UserId("usr_1234567890abcdef")),
                 eq(new SessionId("ses_1234567890abcdef")),
                 any(),
                 eq("trace_1234567890abcdef"),

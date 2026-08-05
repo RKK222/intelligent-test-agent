@@ -2358,6 +2358,58 @@ export type UserManagementUser = PlatformUserSummary & {
   updatedAt?: string;
 };
 
+/** 超级管理员问题排查授权签发参数；共享暗号不属于该协议。 */
+export type SupportAccessGrantRequest = {
+  incidentId: string;
+  reason: string;
+  durationMinutes: number;
+  readOnlyAcknowledged: true;
+};
+
+/** grantToken 只返回一次，调用方只可保存在当前页面组件内存。 */
+export type SupportAccessGrant = {
+  grantId: string;
+  grantToken: string;
+  expiresAt: string;
+};
+
+export type SupportAccessTarget = {
+  userId: string;
+  unifiedAuthId: string;
+  username: string;
+  status: string;
+};
+
+export type SupportAccessAuditEvent = {
+  eventId: string;
+  grantId?: string | null;
+  actorUserId?: string | null;
+  actorUsername: string;
+  targetUserId?: string | null;
+  targetUsername?: string | null;
+  incidentId?: string | null;
+  reason?: string | null;
+  action: string;
+  resourceType: string;
+  resourceId?: string | null;
+  pathDigest?: string | null;
+  outcome: string;
+  errorCode?: string | null;
+  traceId: string;
+  ipAddress?: string | null;
+  userAgentDigest?: string | null;
+  occurredAt: string;
+};
+
+export type SupportAccessAuditQuery = {
+  actorUserId?: string;
+  targetUserId?: string;
+  incidentId?: string;
+  outcome?: string;
+  page?: number;
+  size?: number;
+};
+
 /** 用户管理列表组合筛选；role=UNASSIGNED 表示仅查询未分配全局角色的用户。 */
 export type UserManagementQuery = {
   keyword?: string;
