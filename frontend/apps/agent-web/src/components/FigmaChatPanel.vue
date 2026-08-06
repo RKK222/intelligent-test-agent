@@ -1019,22 +1019,8 @@ const allModels = computed(() => {
       byValue.set(modelValue(providerModel), providerModel)
     }
   }
-  // 企业目录固定把 DeepSeek 放在千问之前；同优先级模型保持 OpenCode 原生返回顺序。
   return Array.from(byValue.values())
-    .map((model, index) => ({ model, index }))
-    .sort((left, right) => {
-      const priority = enterpriseModelDisplayPriority(left.model) - enterpriseModelDisplayPriority(right.model)
-      return priority || left.index - right.index
-    })
-    .map(({ model }) => model)
 })
-
-/** 返回企业模型的展示优先级，未命中的 Provider 继续保持原生目录顺序。 */
-function enterpriseModelDisplayPriority(model: ModelInfo) {
-  if (model.providerId === 'enterprise-deepseek') return 0
-  if (model.providerId === 'enterprise-qwen') return 1
-  return 2
-}
 
 const recommendedModels = computed(() => {
   return allModels.value.slice(0, 4)

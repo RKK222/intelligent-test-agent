@@ -6771,3 +6771,31 @@
 - `/help`、`/new`、`/clear` 等原生能力不再因普通消息门禁失效，普通消息的进程、权限、历史和上下文保护保持不变。
 - 未修改 HTTP API、RunEvent、数据库/Flyway、后端、环境配置、generated SDK 或 OpenCode 上游源码；需重新构建
   并部署前端交付物后企业环境才会获得修复。
+
+## 2026-08-06 - 改为由 JSONC 控制模型目录顺序
+
+### Why
+
+- 用户明确要求模型展示顺序不能写死 DeepSeek/Qwen；既有 `enabled_providers` 已经是企业 Provider 白名单，适合
+  同时承担可配置的 Provider 分组顺序，避免再增加一套配置或在组件中识别具体厂商 ID。
+
+### What
+
+- `backend-api` 将运行配置 `enabled_providers` 的首次出现位置保留为顺序映射，Model/Provider 两个原生目录在
+  过滤白名单后按该顺序稳定排列；同一 Provider 内继续保持 OpenCode 原生返回顺序，未配置或读取失败时不排序。
+- 删除 `FigmaChatPanel` 中 `enterprise-deepseek` / `enterprise-qwen` 的写死优先级及其组件测试，改由公共目录客户端
+  统一控制；示例 JSONC 调整为 `enterprise-deepseek` 在前，并同步前端、包边界和 HTTP 行为文档。
+
+### How
+
+- 回归用例故意让原生 Model/Provider 目录返回千问在前、配置返回 DeepSeek 在前，验证两个目录均按配置排列；
+  `backend-api` 102 passed，模型面板 145 passed / 1 skipped，两个 package typecheck 均通过。
+- `agent-web` production build 通过；开发实例在 `http://127.0.0.1:4175/` 返回 HTTP 200；示例 JSONC 可解析，
+  `git diff --check` 在提交前通过。
+
+### Result
+
+- 企业现场只需把 `enabled_providers` 写为 `["enterprise-deepseek", "enterprise-qwen"]` 即可优先展示 DeepSeek；
+  反转数组即可反转展示顺序，不改变 `model` / `small_model` 默认模型或用户已有本地选择。
+- 未新增或变更 HTTP 路径、RunEvent、数据库/Flyway、后端路由、安全、环境变量、generated SDK 或 OpenCode 源码；
+  需要部署新前端并让用户 OpenCode 进程重新读取公共 JSONC 后生效。

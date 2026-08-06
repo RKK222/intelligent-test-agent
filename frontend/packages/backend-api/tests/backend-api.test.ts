@@ -155,23 +155,25 @@ describe("backend-api", () => {
     }
   });
 
-  it("filters OpenCode 1.18.4 Zen envelopes using the configured provider allowlist", async () => {
+  it("filters and orders OpenCode 1.18.4 catalogs using the configured provider list", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
       const url = String(input);
       const data = url.endsWith("/config")
-        ? { enabled_providers: ["enterprise-qwen"] }
+        ? { enabled_providers: ["enterprise-deepseek", "enterprise-qwen"] }
         : url.endsWith("/models")
           ? {
               data: [
                 { id: "ring-2.6-1t-free", providerID: "opencode", name: "Ring 2.6 1T Free" },
-                { id: "Qwen3.6-27B", providerID: "enterprise-qwen", name: "Qwen3.6 27B" }
+                { id: "Qwen3.6-27B", providerID: "enterprise-qwen", name: "Qwen3.6 27B" },
+                { id: "DeepSeek-V4-Flash-W8A8", providerID: "enterprise-deepseek", name: "DeepSeek V4 Flash W8A8" }
               ],
               location: { directory: "/data/testagent/data/agent-opencode/workspace" }
             }
           : {
               data: [
                 { id: "opencode", name: "OpenCode Zen" },
-                { id: "enterprise-qwen", name: "企业通义" }
+                { id: "enterprise-qwen", name: "企业通义" },
+                { id: "enterprise-deepseek", name: "企业 DeepSeek" }
               ],
               location: { directory: "/data/testagent/data/agent-opencode/workspace" }
             };
@@ -182,9 +184,11 @@ describe("backend-api", () => {
     const [models, providers] = await Promise.all([client.listModels(), client.listProviders()]);
 
     expect(models).toEqual([
+      expect.objectContaining({ id: "DeepSeek-V4-Flash-W8A8", providerId: "enterprise-deepseek" }),
       expect.objectContaining({ id: "Qwen3.6-27B", providerId: "enterprise-qwen" })
     ]);
     expect(providers).toEqual([
+      expect.objectContaining({ providerId: "enterprise-deepseek", name: "企业 DeepSeek" }),
       expect.objectContaining({ providerId: "enterprise-qwen", name: "企业通义" })
     ]);
     expect(fetcher.mock.calls.filter((call) => String(call[0]).endsWith("/config"))).toHaveLength(1);

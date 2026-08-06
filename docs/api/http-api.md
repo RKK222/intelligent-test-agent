@@ -3110,7 +3110,7 @@ opencode Web App 运行态能力统一由 `test-agent-api` 的 runtime Controlle
 | `GET` | `/api/internal/platform/opencode-runtime/mcp/status?workspaceId=` | 读取 MCP 状态。 |
 | `GET` | `/api/internal/platform/opencode-runtime/mcp/resources?workspaceId=` | 读取 MCP resource 目录，后端映射到 opencode `/experimental/resource`。 |
 | `GET` | `/api/internal/platform/opencode-runtime/mcp/tools?workspaceId=&provider=&model=` | 读取 MCP/runtime tool 目录；带 provider/model 时返回工具 schema，否则返回 tool id 降级列表。 |
-| `GET` | `/api/internal/platform/opencode-runtime/config?workspaceId=` | 读取 opencode 实例级合并有效配置，后端映射 `/config`；响应包含 `OPENCODE_CONFIG_DIR` 中的 `enabled_providers`，供原生 Model/Provider 目录过滤。 |
+| `GET` | `/api/internal/platform/opencode-runtime/config?workspaceId=` | 读取 opencode 实例级合并有效配置，后端映射 `/config`；响应包含 `OPENCODE_CONFIG_DIR` 中的 `enabled_providers`，供原生 Model/Provider 目录过滤并按数组顺序排列 Provider 分组。 |
 | `PATCH` | `/api/internal/platform/opencode-runtime/config?workspaceId=` | 更新 opencode global config，body 透传给 runtime。 |
 | `POST` | `/api/internal/platform/opencode-runtime/global/dispose` | 触发当前用户 opencode 进程释放缓存的 workspace Instance；后续请求重新 bootstrap 并读取磁盘配置。引用 JSONC、Agent 定义或 Skill 入口保存只在当前用户全部 Session 空闲时调用，运行中或与其它重载竞态时返回 `CONFLICT`，由后端用户级闸门原子复核；闸门覆盖主 Run、宠物/手册旁路问答和 legacy sideQuestion/command/shell，并以 token 定时续租覆盖 OpenCode 超时重试上限。该接口不会重启进程，也不能补充进程启动时缺失的环境变量。 |
 | `GET` | `/api/internal/platform/opencode-runtime/provider/auth?workspaceId=` | 查询 provider auth 状态。 |
@@ -3390,7 +3390,7 @@ prompt、回答或错误，也不实施配额。
 `ModelCapabilityProbeServiceTest`、`ModelGatewayForwardingServiceTest`、`ModelGatewayControllerTest`、
 `MyBatisModelGatewayRepositoryIntegrationTest` 和 PostgreSQL Testcontainers 并发测试。
 
-OpenCode 1.18.4 的 `/api/model`、`/api/provider` 即使配置了 `enabled_providers` 仍可能返回 Zen；平台不得据此重新引入数据库模型目录，而是通过上述实例级配置 GET 读取合并后的 Provider 白名单，再由前端按 Provider ID 同时过滤两个原生目录。白名单限制的是企业 Provider，不限制这些 Provider 内的模型数量。
+OpenCode 1.18.4 的 `/api/model`、`/api/provider` 即使配置了 `enabled_providers` 仍可能返回 Zen；平台不得据此重新引入数据库模型目录，而是通过上述实例级配置 GET 读取合并后的 Provider 白名单，再由前端按 Provider ID 同时过滤两个原生目录，并以白名单数组顺序稳定排列 Provider 分组；同一 Provider 内仍保持原生模型顺序。白名单限制的是企业 Provider，不限制这些 Provider 内的模型数量。
 
 opencode 公共配置样例（企业单后端部署可直接使用 `deploy/internal/opencode.jsonc.example`）：
 
@@ -3399,7 +3399,7 @@ opencode 公共配置样例（企业单后端部署可直接使用 `deploy/inter
   "$schema": "https://opencode.ai/config.json",
   "model": "enterprise-qwen/Qwen3.6-27B",
   "small_model": "enterprise-qwen/Qwen3.6-27B",
-  "enabled_providers": ["enterprise-qwen", "enterprise-deepseek"],
+  "enabled_providers": ["enterprise-deepseek", "enterprise-qwen"],
   "provider": {
     "enterprise-qwen": {
       "name": "企业通义",
