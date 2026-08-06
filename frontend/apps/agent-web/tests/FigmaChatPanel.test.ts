@@ -2002,6 +2002,39 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("run-shell")?.at(-1)).toEqual(["pwd"]);
   });
 
+  it("keeps native candidate clicks open for models and routes compact", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        models: [{ id: "Qwen3.6-27B", providerId: "enterprise-qwen", name: "Qwen3.6 27B" }]
+      } as any
+    });
+    const textarea = wrapper.get("textarea");
+
+    await textarea.setValue("/models");
+    const modelsRow = wrapper.get('[data-testid="slash-native-section"]')
+      .findAll(".figma-chat-skill-row")
+      .find((row) => row.text().includes("/models"));
+    expect(modelsRow).toBeDefined();
+    await modelsRow!.trigger("click");
+    await nextTick();
+
+    expect(wrapper.find('.figma-chat-model-dropdown[aria-label="模型选择"]').exists()).toBe(true);
+    expect((textarea.element as HTMLTextAreaElement).value).toBe("");
+
+    window.dispatchEvent(new MouseEvent("click"));
+    await textarea.setValue("/compact");
+    const compactRow = wrapper.get('[data-testid="slash-native-section"]')
+      .findAll(".figma-chat-skill-row")
+      .find((row) => row.text().includes("/compact"));
+    expect(compactRow).toBeDefined();
+    await compactRow!.trigger("click");
+
+    expect(wrapper.emitted("native-command")?.at(-1)).toEqual(["compact"]);
+    expect((textarea.element as HTMLTextAreaElement).value).toBe("");
+  });
+
   it("does not show a question panel for ordinary numbered assistant output", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

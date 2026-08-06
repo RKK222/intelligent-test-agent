@@ -292,6 +292,8 @@ export const SUPPORT_ACCESS_GRANT_HEADER = "X-Support-Access-Grant";
 // 这里仅放宽这两类慢 Git 读取，避免全局 30 秒超时先于后端的权威 Git 结果返回。
 const APP_SOURCE_BRANCH_REQUEST_TIMEOUT_MS = 70_000;
 const APP_SOURCE_TREE_REQUEST_TIMEOUT_MS = 130_000;
+// OpenCode summarize 会同步等待模型生成摘要，需与企业 Nginx 的一小时长请求窗口保持一致。
+const NATIVE_SESSION_COMPACT_TIMEOUT_MS = 3_600_000;
 
 // 统一读取环境变量：Vite 运行时（import.meta.env）优先，Node 运行时（process.env）兜底
 function readEnv(key: string): string | undefined {
@@ -2257,7 +2259,12 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     forkSession: (sessionId: string, payload?: Record<string, unknown>) =>
       postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/fork`, payload, routedRequest),
     compactSession: (sessionId: string, payload: { providerID: string; modelID: string }) =>
-      postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/compact`, payload, routedRequest),
+      postRuntime(
+        `${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/compact`,
+        payload,
+        routedRequest,
+        { timeoutMs: NATIVE_SESSION_COMPACT_TIMEOUT_MS }
+      ),
     revertSession: (sessionId: string, payload: { messageID: string }) =>
       postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/revert`, payload, routedRequest),
     unrevertSession: (sessionId: string) =>

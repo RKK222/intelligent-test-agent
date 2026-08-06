@@ -5335,7 +5335,7 @@ function onCompositionEnd() {
             v-for="command in filteredNativeCommands"
             :key="command.name"
             class="figma-chat-skill-row"
-            @click="selectNativeCommand(command)"
+            @click.stop="selectNativeCommand(command)"
           >
             <FileText :size="16" class="figma-chat-native-command-icon" />
             <div class="figma-chat-skill-info">

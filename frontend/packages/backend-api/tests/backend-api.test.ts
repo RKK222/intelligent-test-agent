@@ -253,6 +253,24 @@ describe("backend-api", () => {
     ]);
   });
 
+  it("keeps native compact requests alive beyond the default request timeout", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: true }), { status: 200 });
+    });
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      requestTimeoutMs: 5,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(client.compactSession("ses_native", {
+      providerID: "enterprise-qwen",
+      modelID: "Qwen3.6-27B"
+    })).resolves.toBe(true);
+  });
+
   it("updates application workspace settings through the existing PATCH resource", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
       new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: { enabled: false } }), { status: 200 })

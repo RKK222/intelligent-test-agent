@@ -6799,3 +6799,64 @@
   反转数组即可反转展示顺序，不改变 `model` / `small_model` 默认模型或用户已有本地选择。
 - 未新增或变更 HTTP 路径、RunEvent、数据库/Flyway、后端路由、安全、环境变量、generated SDK 或 OpenCode 源码；
   需要部署新前端并让用户 OpenCode 进程重新读取公共 JSONC 后生效。
+
+## 2026-08-06 - 回退模型目录自定义排序
+
+### Why
+
+- 用户确认不应让 `enabled_providers` 同时承担白名单和展示顺序；该字段在 OpenCode 1.18.4 的正式语义只有启用范围，
+  平台按数组顺序重排会改变 `/api/model` 原生目录和“上新推荐”含义。
+- 进一步验证发现本地 JSONC 的模型 `release_date` 虽被旧配置 schema 和 `/config` 接受，但 1.18.4 的 v1→v2
+  配置迁移不传递该字段，平台实际使用的 `/api/model` 对两个企业模型均返回 `time.released=0`。
+
+### What
+
+- `backend-api` 恢复原有 Provider `Set` 白名单：Model/Provider 目录只过滤，不再按 `enabled_providers` 数组排序；
+  保持 `FigmaChatPanel` 中没有 DeepSeek/Qwen 厂商硬编码。
+- 回归用例把配置顺序设为“千问、DeepSeek”、原生模型顺序设为“DeepSeek、千问”，验证过滤后模型原生顺序不变；
+  企业示例恢复原白名单顺序，不保留经真实运行证明无效的 `release_date`。
+- 同步 HTTP、前端总览、agent-web 和 backend-api 包文档，记录 OpenCode 1.18.4 V2 目录限制。
+
+### How
+
+- `backend-api` 103 passed，模型面板 146 passed / 1 skipped，两个 package typecheck 和 `agent-web` production build
+  通过；Vite 新实例在 `http://127.0.0.1:4176/` 返回 HTTP 200，示例 JSONC 解析通过。
+- 使用本机官方 OpenCode 1.18.4 和隔离 `OPENCODE_CONFIG_DIR` 启动真实服务：`/config`、旧 `/provider` 可见配置日期，
+  但 `/api/model` 中 Qwen/DeepSeek 的 `time.released` 都是 `0`；临时服务和目录已清理。
+
+### Result
+
+- 提交 `f65ea2474` 引入的公共配置数组排序被后续实现回退，目录恢复原生顺序；更早的厂商硬编码也未重新引入。
+- 当前固定 OpenCode 1.18.4 下，单靠 `enabled_providers` 或本地 JSONC `release_date` 不能可靠指定 DeepSeek 优先；
+  本次按用户要求只完成相关代码回退，不新增替代排序策略。
+- 未新增或变更 HTTP 路径、RunEvent、数据库/Flyway、后端路由、安全、环境变量、generated SDK 或 OpenCode 源码。
+
+## 2026-08-06 - 修复 models 候选点击与 compact 长请求
+
+### Why
+
+- `/clear` 已能执行，说明原生命令分发链路整体有效；`/models` 的候选点击继续冒泡到 window 下拉关闭器，导致模型
+  面板在同一次点击中刚打开就关闭。
+- `/compact` 会同步等待模型生成摘要，但 client 沿用全局 30 秒超时且等待期间没有反馈，企业模型耗时稍长时会被
+  浏览器中止或表现为“点了没反应”。
+
+### What
+
+- slash 候选点击阻止冒泡，保留技能、原生能力和项目命令既有分区与键盘行为；`/models` 可稳定打开模型面板。
+- compact 发起后立即显示“正在压缩上下文”，并仅为既有 `compactSession` 设置与企业 Nginx 一致的一小时局部
+  超时；继续复用平台 Session 映射和 OpenCode summarize 路由，不绕过后端。
+- 新增组件、client 超时和真实工作台浏览器回归；同步 `agent-web`、`backend-api` README/PACKAGE。
+
+### How
+
+- 定向 Vitest 350 passed / 1 skipped，前端全量 1835 passed / 1 skipped；`agent-web` typecheck、production build、
+  AI 文档门禁和 `git diff --check` 通过。
+- 默认 Playwright 浏览器未安装，改用本机 Google Chrome 跑同一条工作台用例，1 passed；真实开发页面确认
+  `/models` 面板可见，`/compact` 在无 Session 时能到达父处理器并显示明确提示。前端 3000、后端 health 均为 200。
+
+### Result
+
+- `/clear` 原有可用行为保持不变，`/models` 不再瞬时关闭，`/compact` 在长摘要期间有可见进度且不会被 30 秒
+  默认超时提前中止。
+- 未修改 HTTP 路径/响应、RunEvent、数据库/Flyway、后端、环境配置、generated SDK 或 OpenCode 上游源码；企业
+  现场仍需重新构建并部署前端交付物，当前已部署包不会自动获得该修复。

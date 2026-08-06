@@ -6993,6 +6993,43 @@ test("slash skill starts a recoverable run instead of a direct session command",
   expect(commandRequests).toEqual([]);
 });
 
+test("native slash candidate opens models and visibly runs compact", async ({ page }) => {
+  const runRequests: Array<Record<string, unknown>> = [];
+  const compactRequests: Array<Record<string, unknown>> = [];
+  let releaseCompact!: () => void;
+  const compactRequestGate = new Promise<void>((resolve) => {
+    releaseCompact = resolve;
+  });
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    runRequests,
+    compactRequests,
+    compactRequestGate,
+    runEvents: [event(1, "run.succeeded", {})]
+  });
+
+  await gotoWorkbench(page);
+  const textarea = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
+  await textarea.fill("建立原生命令测试会话");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect.poll(() => runRequests.length).toBe(1);
+  await expect(page.getByRole("button", { name: "发送" })).toBeVisible();
+
+  await textarea.fill("/models");
+  await page.getByTestId("slash-native-section").locator(".figma-chat-skill-row", { hasText: "/models" }).click();
+  await expect(page.getByRole("dialog", { name: "模型选择" })).toBeVisible();
+  await page.getByRole("button", { name: "切换模型" }).click();
+
+  await textarea.fill("/compact");
+  await page.getByTestId("slash-native-section").locator(".figma-chat-skill-row", { hasText: "/compact" }).click();
+  await expect.poll(() => compactRequests.length).toBe(1);
+  expect(compactRequests[0]).toEqual({ providerID: "anthropic", modelID: "sonnet" });
+  await expect(page.getByText("正在压缩上下文", { exact: true })).toBeVisible();
+
+  releaseCompact();
+  await expect(page.getByText("上下文已压缩", { exact: true })).toBeVisible();
+});
+
 test("completed write events refresh the changed file without a separate live toggle", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, {
@@ -7411,6 +7448,8 @@ async function mockBackendApi(
     runRequests?: Array<Record<string, unknown>>;
     cancelRunRequests?: string[];
     commandRequests?: Array<Record<string, unknown>>;
+    compactRequests?: Array<Record<string, unknown>>;
+    compactRequestGate?: Promise<void>;
     sessionRequests?: Array<Record<string, unknown>>;
     permissionReplies?: Array<Record<string, unknown>>;
     questionReplies?: Array<Record<string, unknown>>;
@@ -8984,6 +9023,12 @@ async function mockBackendApi(
     if (method === "POST" && /^\/api\/internal\/agent\/opencode\/session\/[^/]+\/command$/.test(url.pathname)) {
       capture.commandRequests?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
       await route.fulfill(json({ accepted: true }));
+      return;
+    }
+    if (method === "POST" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/compact$/.test(url.pathname)) {
+      capture.compactRequests?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+      await capture.compactRequestGate;
+      await route.fulfill(json(true));
       return;
     }
     const runEventsMatch = url.pathname.match(/^\/api\/internal\/agent\/opencode\/runs\/([^/]+)\/events$/);

@@ -9268,6 +9268,8 @@ async function handleNativeTuiCommand(command: OpenCodeTuiCommandName) {
         feedback.value = { kind: "info", title: "无法压缩上下文", description: "请先选择包含供应商信息的模型。" };
         return;
       }
+      // 原生 summarize 会等待模型生成摘要；先给出可见反馈，避免长请求期间被误认为点击无效。
+      feedback.value = { kind: "info", title: "正在压缩上下文", description: currentSession.title };
       await api.compactSession(currentSession.sessionId, { providerID, modelID });
       await switchSession(currentSession.sessionId, {
         refreshSnapshot: true,
