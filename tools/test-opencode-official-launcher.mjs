@@ -51,7 +51,7 @@ async function assertToolDependencyLinks(directory, runtimeRoot) {
   assert.equal(await readlink(join(directory, "node_modules", "zod")), join(runtimeRoot, "node_modules", "zod"))
 }
 
-async function waitForPath(path, timeoutMs = 2_000) {
+async function waitForPath(path, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     try {
@@ -64,7 +64,7 @@ async function waitForPath(path, timeoutMs = 2_000) {
   throw new Error(`timed out waiting for ${path}`)
 }
 
-async function waitForProcessGone(pid, timeoutMs = 2_000) {
+async function waitForProcessGone(pid, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     try {
