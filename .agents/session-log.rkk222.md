@@ -6270,3 +6270,38 @@
 - 企业现场仍需发布完整离线包并逐台重启 worker/服务；`.4` 的 systemd 启用和 `.114` 的 14118 残留端口清理属于
   服务器操作，本机未执行。启动器仅处理进程启动前已存在的 `.opencode`，运行后新建目录在下次受管重启时补齐；
   扫描会增加与工作区目录数量相关的少量启动 I/O，但跳过构建、依赖、Git 目录且不覆盖用户文件。
+
+## 2026-08-06 - 将工作区依赖补齐移出用户启动并修复日期漂移测试
+
+### Why
+
+- 企业 worker 原由每个用户 `opencode serve` 启动前递归扫描整棵工作区，目录越多首次启动 I/O 越明显；进程运行后
+  新建的 `.opencode` 又只能等下次受管重启补齐。
+- `AppSourceDialog` 的续期用例写死 `2026-08-01` 到期日；当前真实日期推进到到期日之后，组件按设计隐藏第一步续期
+  控件，但测试仍强行获取该输入框，形成时间漂移失败。
+
+### What
+
+- 用户启动器只处理固定配置目录和共同祖先依赖链接，不再递归扫描；worker entrypoint 启动唯一后台维护器并独立
+  监督 manager。维护器开机只注册监听和 60 秒定时任务，不立即递归扫描；存量目录由周期任务补齐，新建
+  `.opencode` 在递归文件事件可用时即时补齐，事件不可用时由下一周期收敛。
+- 定时扫描禁止重叠，目录写入继续坚持非覆盖式 package/lockfile/依赖链接；事件路径同时校验逻辑路径、最终目录
+  和物理根目录，拒绝经软链接父目录越出受管工作区。
+- 前端续期用例固定在快照尚未过期的 `2026-07-30`，并在每个用例后恢复 mock；组件的真实到期判断未修改。
+- 同步企业内部部署、OpenCode 1.18.4 升级和 App Source 测试说明，没有修改 OpenCode 上游快照。
+
+### How
+
+- launcher/entrypoint 9 项进程与文件系统回归、离线 Tool runtime 与 Git ignore 两项合同、Shell/Node 语法、
+  `git diff --check` 和 AI 文档门禁通过。
+- 前端全量 114 个测试文件为 1817 passed / 1 skipped，15 个 workspace typecheck 与 agent-web production build
+  通过，仅保留既有大 chunk 告警。
+- 按 JDK 25、`.env.test`/`test` profile 尝试真实重启，但启动脚本在停服务前因缺少
+  `WORKFLOW_DEV_REDIS_PASSWORD` 失败；未改换环境文件或伪造密钥。8080/3000 仍由另一 worktree 的既有服务提供
+  `UP/200`，不能作为本次代码的运行验证。
+
+### Result
+
+- 用户 OpenCode 首次启动不再承担工作区递归扫描；新增工作区通常即时补齐，文件事件不可用时最长等待约 60 秒。
+- 未变更 HTTP API、RunEvent、数据库/Flyway/MyBatis SQL、鉴权、依赖锁、`.env*`、generated SDK 或 OpenCode
+  上游源码。企业生效仍需重打完整离线包并重建/重启 worker；本机真实项目重启因既有 `.env.test` 缺项未验证。

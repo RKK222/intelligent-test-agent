@@ -1,14 +1,19 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict"
-import { execFile } from "node:child_process"
-import { chmod, copyFile, lstat, mkdtemp, mkdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises"
+import { execFile, spawn } from "node:child_process"
+import { chmod, copyFile, lstat, mkdtemp, mkdir, readFile, readlink, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
+import { setTimeout as delay } from "node:timers/promises"
 import test from "node:test"
 import { promisify } from "node:util"
 
-import { prepareOfflineRuntime } from "../deploy/internal/opencode-official-launcher.mjs"
+import {
+  prepareOfflineRuntime,
+  reconcileProjectConfigDirectories,
+  startProjectConfigMaintenance,
+} from "../deploy/internal/opencode-official-launcher.mjs"
 
 const execFileAsync = promisify(execFile)
 
@@ -47,7 +52,34 @@ async function assertToolDependencyLinks(directory, runtimeRoot) {
   assert.equal(await readlink(join(directory, "node_modules", "zod")), join(runtimeRoot, "node_modules", "zod"))
 }
 
-test("prepares every effective config directory for offline tools and enforces depth two", async () => {
+async function waitForPath(path, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      return await lstat(path)
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error
+    }
+    await delay(20)
+  }
+  throw new Error(`timed out waiting for ${path}`)
+}
+
+async function waitForProcessGone(pid, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0)
+    } catch (error) {
+      if (error?.code === "ESRCH") return
+      throw error
+    }
+    await delay(20)
+  }
+  throw new Error(`timed out waiting for process ${pid} to exit`)
+}
+
+test("keeps recursive project scanning out of user startup and prepares it through reconciliation", async () => {
   const root = await mkdtemp(join(tmpdir(), "opencode-official-launcher-"))
   try {
     const runtimeRoot = join(root, "runtime")
@@ -75,6 +107,10 @@ test("prepares every effective config directory for offline tools and enforces d
       theme: "dark",
       subagent_depth: 2,
     })
+
+    // 用户启动只处理固定配置目录；深层项目目录交给 worker 后台任务，避免阻塞每个用户进程。
+    await assert.rejects(lstat(join(nestedProjectConfig, "package.json")), { code: "ENOENT" })
+    assert.equal(await reconcileProjectConfigDirectories({ cwd: workspace, runtimeRoot }), 2)
 
     // 共享工作区根目录是个人 worktree 的共同祖先，必须包含现场临时修复使用的四个链接。
     await assertToolDependencyLinks(workspace, runtimeRoot)
@@ -113,6 +149,110 @@ test("prepares every effective config directory for offline tools and enforces d
       await assertToolDependencyLinks(directory, runtimeRoot)
     }
   } finally {
+    await rm(root, { force: true, recursive: true })
+  }
+})
+
+test("defers recursive reconciliation to the timer", async () => {
+  const root = await mkdtemp(join(tmpdir(), "opencode-official-launcher-maintenance-"))
+  let maintenance = null
+  try {
+    const runtimeRoot = join(root, "runtime")
+    const workspace = join(root, "workspace")
+    const existingConfig = join(workspace, "personalworktree", "existing-user", "app", ".opencode")
+    await createRuntime(runtimeRoot)
+    await mkdir(existingConfig, { recursive: true })
+
+    // 关闭事件监听，只观察定时器路径，避免 macOS 在注册监听器时回放已有目录事件。
+    maintenance = startProjectConfigMaintenance({
+      cwd: workspace,
+      runtimeRoot,
+      scanIntervalMs: 250,
+      watchEnabled: false,
+    })
+    await delay(50)
+    await assert.rejects(lstat(join(existingConfig, "package.json")), { code: "ENOENT" })
+    assert.equal((await waitForPath(join(existingConfig, "package.json"))).isSymbolicLink(), true)
+  } finally {
+    maintenance?.stop()
+    await rm(root, { force: true, recursive: true })
+  }
+})
+
+test("automatically prepares a project config created after maintenance starts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "opencode-official-launcher-watch-"))
+  let maintenance = null
+  try {
+    const runtimeRoot = join(root, "runtime")
+    const workspace = join(root, "workspace")
+    const createdConfig = join(workspace, "personalworktree", "new-user", "app", ".opencode")
+    await createRuntime(runtimeRoot)
+    await mkdir(workspace, { recursive: true })
+
+    maintenance = startProjectConfigMaintenance({ cwd: workspace, runtimeRoot, scanIntervalMs: 60_000 })
+    await mkdir(createdConfig, { recursive: true })
+
+    assert.equal((await waitForPath(join(createdConfig, "package.json"))).isSymbolicLink(), true)
+    assert.equal((await waitForPath(join(createdConfig, "package-lock.json"))).isSymbolicLink(), true)
+    await assertToolDependencyLinks(createdConfig, runtimeRoot)
+  } finally {
+    maintenance?.stop()
+    await rm(root, { force: true, recursive: true })
+  }
+})
+
+test("worker entrypoint runs one background maintainer without delaying manager startup", async () => {
+  const root = await mkdtemp(join(tmpdir(), "opencode-worker-entrypoint-"))
+  let worker = null
+  let exited = null
+  try {
+    const programsRoot = join(root, "programs")
+    const workspace = join(root, "workspace")
+    const manager = join(programsRoot, "bin", "opencode-manager")
+    const launcher = join(programsRoot, "opencode", "bin", "opencode")
+    const managerPidFile = join(root, "manager.pid")
+    const maintenancePidFile = join(root, "maintenance.pid")
+    const maintenanceArgsFile = join(root, "maintenance.args")
+    await mkdir(dirname(manager), { recursive: true })
+    await mkdir(dirname(launcher), { recursive: true })
+    await mkdir(workspace, { recursive: true })
+    await writeFile(
+      manager,
+      `#!/usr/bin/env bash\nprintf '%s\\n' "$$" >"${managerPidFile}"\ntrap 'exit 0' INT TERM\nwhile true; do sleep 1; done\n`,
+    )
+    await writeFile(
+      launcher,
+      `#!/usr/bin/env bash\nprintf '%s\\n' "$$" >"${maintenancePidFile}"\nprintf '%s\\n' "$*" >"${maintenanceArgsFile}"\ntrap 'exit 0' INT TERM\nwhile true; do sleep 1; done\n`,
+    )
+    await chmod(manager, 0o755)
+    await chmod(launcher, 0o755)
+
+    worker = spawn("bash", [join(process.cwd(), "deploy/internal/opencode-worker-entrypoint.sh"), "run"], {
+      cwd: workspace,
+      env: { ...process.env, OPENCODE_BIN: "", TEST_AGENT_PROGRAM_ROOT: programsRoot },
+      stdio: "ignore",
+    })
+    exited = new Promise((resolveExit) => worker.once("exit", (code, signal) => resolveExit({ code, signal })))
+    await waitForPath(managerPidFile)
+    await waitForPath(maintenancePidFile)
+    const managerPid = Number((await readFile(managerPidFile, "utf8")).trim())
+    const maintenancePid = Number((await readFile(maintenancePidFile, "utf8")).trim())
+    const maintenanceArgs = (await readFile(maintenanceArgsFile, "utf8")).trim()
+
+    worker.kill("SIGTERM")
+    const result = await exited
+    await waitForProcessGone(managerPid)
+    await waitForProcessGone(maintenancePid)
+
+    assert.equal(maintenanceArgs, `__maintain-project-config --root ${await realpath(workspace)}`)
+    assert.equal(result.signal, null)
+    assert.equal(result.code, 143)
+  } finally {
+    if (worker?.exitCode === null && worker?.signalCode === null) {
+      worker.kill("SIGTERM")
+      await Promise.race([exited ?? Promise.resolve(), delay(500)])
+      if (worker.exitCode === null && worker.signalCode === null) worker.kill("SIGKILL")
+    }
     await rm(root, { force: true, recursive: true })
   }
 })

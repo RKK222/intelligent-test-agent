@@ -24,4 +24,36 @@ if [[ $# -eq 0 ]]; then
   set -- run
 fi
 
-exec "${manager_bin}" "$@"
+maintenance_pid=""
+manager_pid=""
+
+stop_children() {
+  if [[ -n "${maintenance_pid}" ]]; then
+    kill -TERM "${maintenance_pid}" 2>/dev/null || true
+  fi
+  if [[ -n "${manager_pid}" ]]; then
+    kill -TERM "${manager_pid}" 2>/dev/null || true
+  fi
+}
+
+trap stop_children INT TERM EXIT
+
+if [[ "${1:-}" == "run" ]]; then
+  # 递归工作区检查由每台 worker 唯一的后台维护器承担，不能阻塞或按用户重复执行启动链路。
+  "${OPENCODE_BIN}" __maintain-project-config --root "$(pwd)" &
+  maintenance_pid="$!"
+fi
+
+"${manager_bin}" "$@" &
+manager_pid="$!"
+set +e
+wait "${manager_pid}"
+manager_status="$?"
+set -e
+
+stop_children
+if [[ -n "${maintenance_pid}" ]]; then
+  wait "${maintenance_pid}" 2>/dev/null || true
+fi
+trap - INT TERM EXIT
+exit "${manager_status}"

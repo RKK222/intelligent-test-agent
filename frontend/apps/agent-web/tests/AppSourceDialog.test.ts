@@ -1,5 +1,5 @@
 import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   AppSourceOperation,
   AppSourceRepositorySummary,
@@ -80,6 +80,10 @@ function operation(status: AppSourceOperation["status"]): AppSourceOperation {
 }
 
 describe("AppSourceDialog", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("renders a searchable virtualized selector for a large branch list", async () => {
     const branches = ["main", ...Array.from({ length: 500 }, (_, index) => `feature/source-${index}`)];
     const wrapper = mount(AppSourceDialog, {
@@ -98,6 +102,8 @@ describe("AppSourceDialog", () => {
   });
 
   it("updates the active generation retention directly from step one", async () => {
+    // 固定在快照未过期的时间点，避免写死的 2026-08-01 到期日随真实日期推进后让用例漂移。
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-30T12:00:00Z"));
     const wrapper = mount(AppSourceDialog, {
       props: { open: true, repositories: [repository], repository },
       global: { stubs: { Teleport: true } }
