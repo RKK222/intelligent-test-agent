@@ -295,9 +295,12 @@ function renderPanel(
         ElCheckbox: ElCheckboxStub,
         ElDatePicker: ElDatePickerStub,
         ElDialog: {
-          props: ["modelValue"],
+          props: {
+            modelValue: Boolean,
+            alignCenter: Boolean
+          },
           emits: ["update:modelValue"],
-          template: `<section v-if="modelValue"><slot /><slot name="footer" /></section>`
+          template: `<section v-if="modelValue" role="dialog" :data-align-center="String(alignCenter)"><slot /><slot name="footer" /></section>`
         },
         ElForm: { template: `<form><slot /></form>` },
         ElFormItem: { template: `<label><slot /></label>` },
@@ -336,6 +339,7 @@ it("lets only a super admin create an enabled application from settings", async 
   await waitFor(() => expect(view.getByTestId("create-application-open")).toBeTruthy());
 
   await fireEvent.click(view.getByTestId("create-application-open"));
+  expect(view.getByRole("dialog").getAttribute("data-align-center")).toBe("true");
   await fireEvent.update(view.getByPlaceholderText("例如 F-COSS"), "F-NEW");
   await fireEvent.update(view.getByPlaceholderText("请输入应用名称"), "新应用");
   await fireEvent.click(view.getByTestId("create-application-submit"));

@@ -908,7 +908,7 @@ onBeforeUnmount(() => {
         </el-button>
       </div>
 
-      <el-dialog v-model="createApplicationOpen" title="新建应用" width="460px" append-to-body>
+      <el-dialog v-model="createApplicationOpen" title="新建应用" width="460px" append-to-body align-center>
         <el-form label-position="top">
           <el-form-item label="应用 ID">
             <el-input v-model="newApplicationId" maxlength="128" placeholder="例如 F-COSS" />
