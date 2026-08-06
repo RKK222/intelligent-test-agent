@@ -6891,3 +6891,35 @@
   保留；`/rename` 可更新当前会话标题。
 - 未新增或变更 HTTP 路径/响应、RunEvent、数据库/Flyway、后端、安全、环境配置、generated SDK 或 OpenCode
   上游源码；企业现场需要重新构建并部署前端交付物后生效。
+
+## 2026-08-06 - 支持企业全局 OpenCode 模型元数据快照
+
+### Why
+
+- 企业交付另有一份 `opencode-models.json`，但 OpenCode 1.18.4 不会按该文件名从公共 Agent 配置目录自动发现；
+  上游实际只通过 `OPENCODE_MODELS_PATH` 读取 models.dev 兼容快照。
+- 显式路径文件损坏时，上游会回退内置目录。企业双后台若静默显示不同模型目录，排障和验收都无法确认实际来源。
+
+### What
+
+- worker 管理脚本自动发现宿主机 `/data/testagent/config/opencode-models.json`，或接受
+  `TEST_AGENT_OPENCODE_MODELS_FILE` 显式绝对路径；文件只读挂载到容器并设置 `OPENCODE_MODELS_PATH`。
+- entrypoint 在 manager 启动前用 `jq` 校验 JSON 根对象并记录 SHA-256，缺失、不可读或格式错误时失败关闭；
+  manager 启动的全部用户 OpenCode 子进程继承同一目录路径。
+- 同步 worker 模板、Manager/企业部署/OpenCode 1.18.4 文档和脚本回归，明确该文件不属于公共 Agent Git，
+  不得包含 provider token、UCID 或内部代理密钥；两台后台必须使用相同 SHA，替换后逐台重启 worker。
+
+### How
+
+- `tools/verify-dev-scripts.sh` 覆盖全局目录 env 和只读 bind mount 参数，开发/部署脚本回归通过；两个 worker
+  脚本 `bash -n`、AI 文档门禁和 `git diff --check` 通过。
+- 当前前端/backend-api 聚焦回归为 249 passed / 1 skipped，两个 package typecheck 通过；正式 worker 镜像仍由
+  随后的企业封包流程重建并执行镜像 smoke。
+
+### Result
+
+- 全局模型元数据有了独立、可审计、双后台一致的加载入口，不再错误依赖 `OPENCODE_CONFIG_DIR` 或用户 HOME。
+- 当前仓库、本机 Desktop/Downloads/Documents 和既有节点包均未找到实际 `opencode-models.json`，因此代码与包只
+  交付加载能力，不伪造企业模型数据；现场必须把受控原文件复制到 `.4/.114` 固定路径后再重启 worker。
+- 未修改 HTTP API、RunEvent、数据库/Flyway、Java 后端、generated SDK、OpenCode 上游源码或 `.env*`；新增的是
+  worker 运行配置能力和稳定部署说明。

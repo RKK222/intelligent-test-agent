@@ -348,14 +348,17 @@ worker_env="${tmp_dir}/worker.env"
 worker_data_root="${tmp_dir}/worker-data"
 worker_program_root="${tmp_dir}/worker-programs"
 worker_python_libs_root="${tmp_dir}/worker-python-libs"
+worker_models_file="${tmp_dir}/opencode-models.json"
 worker_docker_calls="${tmp_dir}/worker-docker.calls"
 mkdir -p "${worker_python_libs_root}/site-packages"
 printf 'PYTHON_VERSION=3.13.14\n' >"${worker_python_libs_root}/VERSION"
+printf '{"enterprise-test":{"name":"Enterprise Test","models":{}}}\n' >"${worker_models_file}"
 cat >"${worker_env}" <<EOF
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=test-token
 TEST_AGENT_DATA_ROOT=${worker_data_root}
 TEST_AGENT_PROGRAM_ROOT=${worker_program_root}
 TEST_AGENT_PYTHON_LIBS_ROOT=${worker_python_libs_root}
+TEST_AGENT_OPENCODE_MODELS_FILE=${worker_models_file}
 TEST_AGENT_OPENCODE_WORKER_IMAGE=test-agent-opencode-worker:internal
 OPENCODE_WORKER_BACKEND_PORT=8080
 OPENCODE_WORKER_PORT_START=4096
@@ -409,6 +412,14 @@ fi
 if [[ " ${worker_docker_run} " != *" -v ${worker_python_libs_root}:/opt/test-agent/python-libs:ro "* ]]; then
   cat "${worker_docker_calls}" >&2
   fail "worker docker script should mount Python libraries read-only"
+fi
+if [[ " ${worker_docker_run} " != *" -e OPENCODE_MODELS_PATH=/etc/test-agent/opencode-models.json "* ]]; then
+  cat "${worker_docker_calls}" >&2
+  fail "worker docker script should expose the global OpenCode models catalog path"
+fi
+if [[ " ${worker_docker_run} " != *" -v ${worker_models_file}:/etc/test-agent/opencode-models.json:ro "* ]]; then
+  cat "${worker_docker_calls}" >&2
+  fail "worker docker script should mount the global OpenCode models catalog read-only"
 fi
 
 # Docker 18.09 的千端口池必须在删除现有容器前拒绝默认 userland proxy；

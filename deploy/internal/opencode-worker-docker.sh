@@ -124,7 +124,8 @@ stop_container() {
 }
 
 start_container() {
-  local -a python_library_args=()
+  local -a python_library_args=() models_catalog_args=()
+  local models_catalog_file="${TEST_AGENT_OPENCODE_MODELS_FILE:-}"
   require_value TEST_AGENT_OPENCODE_MANAGER_TOKEN
   require_value TEST_AGENT_DATA_ROOT
   require_value TEST_AGENT_PROGRAM_ROOT
@@ -140,6 +141,27 @@ start_container() {
     )
   else
     echo "Python library bundle not installed; starting with standard library only: ${TEST_AGENT_PYTHON_LIBS_ROOT}" >&2
+  fi
+
+  # models.dev 元数据不属于用户 HOME 或公共 Agent Git。两台后台通过同一宿主机配置路径
+  # 只读挂载，manager 启动的全部 OpenCode 子进程继承 OPENCODE_MODELS_PATH 后统一生效。
+  if [[ -z "${models_catalog_file}" \
+    && -f "/data/testagent/config/opencode-models.json" ]]; then
+    models_catalog_file="/data/testagent/config/opencode-models.json"
+  fi
+  if [[ -n "${models_catalog_file}" ]]; then
+    if [[ "${models_catalog_file}" != /* || "${models_catalog_file}" == *:* ]]; then
+      echo "TEST_AGENT_OPENCODE_MODELS_FILE must be an absolute path without colon" >&2
+      exit 1
+    fi
+    if [[ ! -f "${models_catalog_file}" || ! -r "${models_catalog_file}" ]]; then
+      echo "OpenCode models catalog is not a readable regular file: ${models_catalog_file}" >&2
+      exit 1
+    fi
+    models_catalog_args=(
+      -e "OPENCODE_MODELS_PATH=/etc/test-agent/opencode-models.json"
+      -v "${models_catalog_file}:/etc/test-agent/opencode-models.json:ro"
+    )
   fi
   stop_container
 
@@ -167,6 +189,7 @@ start_container() {
     -v "${TEST_AGENT_DATA_ROOT}:/data/testagent/data" \
     -v "${TEST_AGENT_PROGRAM_ROOT}:/data/testagent/programs:ro" \
     ${python_library_args[@]+"${python_library_args[@]}"} \
+    ${models_catalog_args[@]+"${models_catalog_args[@]}"} \
     --health-cmd "pgrep -f 'opencode-manager run' >/dev/null" \
     --health-interval 10s \
     --health-timeout 3s \

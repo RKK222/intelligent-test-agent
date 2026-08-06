@@ -35,6 +35,7 @@
 - 所有 Java 连接外部 `122.210.106.43:3306/xxl_job`，当前现场统一使用 `root` 账号和同一组纳管密码、XXL access token；JDBC 启用 `createDatabaseIfNotExist=true`，Flyway 负责后续表和基础任务初始化。真实密码只进入 `.4/.114` 敏感节点包，不写入仓库模板、文档或命令行。
 - 每个 Java 的 Admin 固定与同 JVM executor 配对，executor 注册地址复用平台 advertised host；同机多 Java 的 Admin/executor 端口必须唯一，所有 Admin 必须能访问所有 executor。前端 Nginx 把 `/xxl-job-admin/` 同源代理到各 Admin 子端口。
 - worker 读取 `/data/testagent/config/docker.env`。
+- 可选的全局模型元数据快照固定放在两台后台的 `/data/testagent/config/opencode-models.json`。文件存在时 worker 自动只读挂载并向全部用户进程设置 `OPENCODE_MODELS_PATH`；也可在 `docker.env` 用 `TEST_AGENT_OPENCODE_MODELS_FILE` 指定其它绝对路径。它不属于公共 Agent Git，不得包含供应商 token；两台文件 SHA 必须一致，替换后需要逐台重启 worker。
 - Java 的 `SYS_DATA_ROOT_DIR` 必须与本机 worker 的 `TEST_AGENT_DATA_ROOT` 一致。
 - 每个稳定 `TEST_AGENT_LINUX_SERVER_ID` 只运行一个 worker，不配置人工 `containerId/managerId`。
 - 企业模型供应商地址和上游 token 由数据库及管理页面维护，不写入 `docker.env`。
@@ -403,7 +404,7 @@ worker 不再从 OpenCode 源码生成 Node bundle，而是下载并校验上游
 
 这套基线覆盖使用官方 `tool(...)`、schema、SDK 类型和 Effect/Zod 的 Tool。`axios`、数据库驱动或企业私有 SDK 等任意业务依赖不会被猜测加入；新增这类 import 时，必须同步修改 `opencode-node-runtime.package.json` 和 lockfile，在外网 Mac 重新打完整企业包。升级依赖不能只替换 Tool 文件，必须同时解压新 programs、导入新 worker 镜像并重启 worker；标准 `deploy-internal-release.sh` 已按该顺序执行。
 
-Agent 配置热加载不修改 OpenCode 的配置目录解析：公共配置继续由 `OPENCODE_CONFIG_DIR` 提供，应用配置由当前个人 workspace 的 `.opencode` 提供；平台在 Git 发布阶段同步个人 worktree，再调用 OpenCode 原生 `/global/dispose`。官方程序启动器只做离线依赖链接（含共享工作区祖先目录投影）、离线开关、`subagent_depth=2` 和信号转发，不包含公共个人或应用共享路径映射，也不需要在 `docker.env` 手工拼接个人物理路径。
+Agent 配置热加载不修改 OpenCode 的配置目录解析：公共配置继续由 `OPENCODE_CONFIG_DIR` 提供，应用配置由当前个人 workspace 的 `.opencode` 提供；平台在 Git 发布阶段同步个人 worktree，再调用 OpenCode 原生 `/global/dispose`。全局 `opencode-models.json` 是独立的 models.dev 元数据输入，通过 worker 的 `OPENCODE_MODELS_PATH` 继承，不放入上述任一配置目录。官方程序启动器只做离线依赖链接（含共享工作区祖先目录投影）、离线开关、`subagent_depth=2` 和信号转发，不包含公共个人或应用共享路径映射，也不需要在 `docker.env` 手工拼接个人物理路径。
 
 ## 中转机与目标服务器交付目录
 

@@ -24,6 +24,21 @@ if [[ $# -eq 0 ]]; then
   set -- run
 fi
 
+# OpenCode 对显式 OPENCODE_MODELS_PATH 的解析失败会回退内置目录。企业全局目录要求失败关闭，
+# 避免文件损坏后界面静默显示另一套模型，因此在 manager 拉起任何用户进程前校验 JSON 根对象。
+if [[ -n "${OPENCODE_MODELS_PATH:-}" ]]; then
+  if [[ ! -f "${OPENCODE_MODELS_PATH}" || ! -r "${OPENCODE_MODELS_PATH}" ]]; then
+    echo "OpenCode models catalog is not a readable regular file: ${OPENCODE_MODELS_PATH}" >&2
+    exit 64
+  fi
+  if ! jq -e 'type == "object"' "${OPENCODE_MODELS_PATH}" >/dev/null; then
+    echo "OpenCode models catalog must be a JSON object: ${OPENCODE_MODELS_PATH}" >&2
+    exit 64
+  fi
+  printf 'event=opencode_models_catalog_validated sha256=%s\n' \
+    "$(sha256sum "${OPENCODE_MODELS_PATH}" | awk '{print $1}')"
+fi
+
 maintenance_interval_seconds="${OPENCODE_PROJECT_CONFIG_MAINTENANCE_INTERVAL_SECONDS:-60}"
 if [[ ! "${maintenance_interval_seconds}" =~ ^[1-9][0-9]*$ ]]; then
   echo "OPENCODE_PROJECT_CONFIG_MAINTENANCE_INTERVAL_SECONDS must be a positive integer" >&2

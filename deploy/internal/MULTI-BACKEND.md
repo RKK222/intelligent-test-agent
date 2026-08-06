@@ -389,6 +389,8 @@ TEST_AGENT_DATA_ROOT=/data/testagent/data
 TEST_AGENT_PROGRAM_ROOT=/data/testagent/programs
 TEST_AGENT_PYTHON_LIBS_ROOT=/data/testagent/python-libs
 TEST_AGENT_OPENCODE_WORKER_IMAGE=test-agent-opencode-worker:internal
+# 文件存在时脚本也会自动发现该固定路径；显式配置可让缺文件直接失败。
+TEST_AGENT_OPENCODE_MODELS_FILE=/data/testagent/config/opencode-models.json
 
 VITE_TEST_AGENT_API_BASE_URL=
 
@@ -750,6 +752,25 @@ bash /tmp/deploy-internal-frontend.sh \
 每台后台部署脚本都会校验已有 systemd unit 的 JAR/env 指向；`systemctl stop` 后若 `8080` 仍被同一路径的旧 `test-agent-app.jar` 占用，会安全终止该遗留进程，其他程序占用则拒绝误杀。新 Java health/readiness 通过后还会核对 systemd `MainPID` 正是 `8080` 监听者，避免滚动升级时误连旧手工进程。
 
 ## 8. 公共配置和模型
+
+`opencode-models.json` 与公共 Agent 配置是两层不同输入。它必须使用 models.dev `api.json` 兼容结构，作为全局模型元数据快照分别放到两台后台，不能放到公共 Git 的 `opencode/` 目录，也不能只放 `.2`：
+
+```bash
+# 在 .4 和 .114 分别执行；源文件路径按现场接收位置替换。
+install -m 0644 /data/0709/opencode-models.json \
+  /data/testagent/config/opencode-models.json
+jq -e 'type == "object"' /data/testagent/config/opencode-models.json >/dev/null
+sha256sum /data/testagent/config/opencode-models.json
+
+cd /data/testagent/deploy/internal
+./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env restart
+docker logs --tail 100 test-agent-opencode-worker | \
+  grep 'event=opencode_models_catalog_validated'
+docker inspect test-agent-opencode-worker --format '{{range .Config.Env}}{{println .}}{{end}}' | \
+  grep '^OPENCODE_MODELS_PATH=/etc/test-agent/opencode-models.json$'
+```
+
+`.4` 与 `.114` 的 `sha256sum` 必须完全一致。worker 对文件执行只读 bind mount，entrypoint 在 manager 启动前校验 JSON 根对象；校验失败时容器退出，不允许静默回退 OpenCode 内置模型快照。manager 子进程继承该环境，所以重启 worker 后新恢复的全部用户 OpenCode 进程统一读取；仅重启 Java、刷新页面或调用公共配置热加载均不足以替换这份全局快照。文件只允许模型元数据，不得写 provider token、UCID、Authorization 或平台内部代理 key。
 
 超级管理员进入“系统管理 → 配置管理 → opencode 公共配置管理”，分别初始化：
 
