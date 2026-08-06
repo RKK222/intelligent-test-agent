@@ -237,7 +237,8 @@ describe("SettingsUserManagementPanel", () => {
     await fireEvent.click(getByRole("button", { name: "保存角色修改（1）" }));
 
     await waitFor(() => expect(api.updateUserRoles).toHaveBeenCalledWith({
-      assignments: [{ userId: "usr_existing", role: "USER" }]
+      assignments: [{ userId: "usr_existing", role: "USER" }],
+      allMatching: false
     }));
     expect(api.updateUserRole).not.toHaveBeenCalled();
     await waitFor(() => expect((api.listUsers as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(2));
@@ -279,7 +280,8 @@ describe("SettingsUserManagementPanel", () => {
     await fireEvent.click(getByRole("button", { name: "保存角色修改（1）" }));
 
     await waitFor(() => expect(api.updateUserRoles).toHaveBeenCalledWith({
-      assignments: [{ userId: "usr_existing", role: "USER" }]
+      assignments: [{ userId: "usr_existing", role: "USER" }],
+      allMatching: false
     }));
   });
 

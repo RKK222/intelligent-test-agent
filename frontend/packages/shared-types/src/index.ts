@@ -2445,7 +2445,7 @@ export type UserRoleAssignmentPayload = {
 export type UpdateUserRolesPayload =
   | {
       assignments: UserRoleAssignmentPayload[];
-      allMatching?: false;
+      allMatching: false;
     }
   | {
       allMatching: true;

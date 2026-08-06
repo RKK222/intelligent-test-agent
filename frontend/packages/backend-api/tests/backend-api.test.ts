@@ -658,7 +658,8 @@ describe("backend-api", () => {
       assignments: [
         { userId: "usr_a", role: "USER" },
         { userId: "usr_b", role: "APP_ADMIN" }
-      ]
+      ],
+      allMatching: false as const
     };
 
     await expect(client.updateUserRoles(payload)).resolves.toEqual({ updatedCount: 2 });

@@ -2911,12 +2911,15 @@ Base URL：`/api/internal/platform/system-management`
 
 ```json
 {
+  "allMatching": false,
   "assignments": [
     { "userId": "usr_a", "role": "USER" },
     { "userId": "usr_b", "role": "APP_ADMIN" }
   ]
 }
 ```
+
+新前端必须显式提交 `allMatching: false`；后端仍把缺省或 `null` 按 `false` 处理，兼容已部署的旧前端静态资源和滚动升级过程。
 
 全部检索结果模式由服务端按筛选快照重新解析目标，并为所有目标设置同一角色：
 

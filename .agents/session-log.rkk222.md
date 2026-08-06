@@ -6305,3 +6305,30 @@
 - 用户 OpenCode 首次启动不再承担工作区递归扫描；新增工作区通常即时补齐，文件事件不可用时最长等待约 60 秒。
 - 未变更 HTTP API、RunEvent、数据库/Flyway/MyBatis SQL、鉴权、依赖锁、`.env*`、generated SDK 或 OpenCode
   上游源码。企业生效仍需重打完整离线包并重建/重启 worker；本机真实项目重启因既有 `.env.test` 缺项未验证。
+
+## 2026-08-06 - 修复批量修改应用管理员角色返回 400
+
+### Why
+
+- 用户管理页显式修改一名或多名用户角色时只提交 `assignments`，后端请求 DTO 却使用不可缺省的原始布尔字段
+  `allMatching`，导致 JSON 在进入角色业务逻辑前反序列化失败并返回 `Failed to read HTTP message`。
+
+### What
+
+- 前端显式角色模式固定提交 `allMatching: false`，共享类型改为稳定判别联合；后端将该字段改为可空包装类型，
+  并把旧前端缺省或提交 `null` 的请求兼容为 `false`，保证企业前后端滚动升级期间仍可保存角色。
+- 补充旧请求不带 `allMatching` 的 Controller 回归，并同步 HTTP API 与前后端模块说明；未修改角色事务、Token
+  撤销、数据库、事件、鉴权或批量性能策略。
+
+### How
+
+- 修复前回归稳定复现相同 400；修复后 `UserManagementControllerTest` 12 项通过，前端全量 114 个测试文件为
+  1817 passed / 1 skipped，三个相关包 typecheck、后端 20 模块打包、agent-web production build、AI 文档门禁
+  和 `git diff --check` 通过。
+- 按 JDK 25、`.env.test`/`test` profile 执行默认真实重启，脚本在停止服务前因缺少
+  `WORKFLOW_DEV_REDIS_PASSWORD` 失败；未切换环境文件，也未停止另一工作树正在运行的服务。
+
+### Result
+
+- 修改用户为 `APP_ADMIN` 的显式批量请求不再返回 400；旧静态前端和新前端均可被新后端接受。企业生效需同时
+  更新后端与前端交付物，无数据库迁移或一次性数据处理步骤；真实本地三服务运行验证仍受既有密钥缺项阻塞。

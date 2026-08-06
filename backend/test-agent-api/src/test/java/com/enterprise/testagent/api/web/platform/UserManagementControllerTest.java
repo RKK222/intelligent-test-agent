@@ -164,6 +164,37 @@ class UserManagementControllerTest {
     }
 
     @Test
+    void superAdminCanUpdateExplicitUserRolesWithoutAllMatchingForLegacyClients() {
+        UserManagementApplicationService service = org.mockito.Mockito.mock(UserManagementApplicationService.class);
+        when(service.updateUserRoles(any(UpdateUserRolesCommand.class)))
+                .thenReturn(new UpdateUserRolesResponse(1));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.put()
+                .uri("/api/internal/platform/system-management/users/batch-roles")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {
+                          "assignments": [
+                            {"userId": "usr_target", "role": "APP_ADMIN"}
+                          ]
+                        }
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.updatedCount").isEqualTo(1);
+
+        verify(service).updateUserRoles(org.mockito.ArgumentMatchers.argThat((UpdateUserRolesCommand command) ->
+                USER_ID.value().equals(command.operatorUserId())
+                        && !command.allMatching()
+                        && command.assignments().size() == 1
+                        && "usr_target".equals(command.assignments().getFirst().userId())
+                        && "APP_ADMIN".equals(command.assignments().getFirst().role())));
+    }
+
+    @Test
     void superAdminCanUpdateAllUsersMatchingFilterInOneRequest() {
         UserManagementApplicationService service = org.mockito.Mockito.mock(UserManagementApplicationService.class);
         when(service.updateUserRoles(any(UpdateUserRolesCommand.class)))

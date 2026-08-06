@@ -275,7 +275,7 @@ async function saveRoleChanges() {
           role: allMatchingDraft.role,
           filter: allMatchingDraft.filter
         })
-      : await api.updateUserRoles({ assignments: changes });
+      : await api.updateUserRoles({ assignments: changes, allMatching: false });
     ElMessage.success(`已保存 ${result.updatedCount} 个用户角色`);
     await loadUsers();
   } catch (error) {

@@ -98,17 +98,18 @@ public final class UserManagementDtos {
      */
     public record UpdateUserRolesRequest(
             List<UserRoleAssignmentRequest> assignments,
-            boolean allMatching,
+            Boolean allMatching,
             String role,
             UserManagementFilterRequest filter) {
 
-        /** 校验两种选择模式互斥，并复制显式角色项避免请求反序列化后的外部修改。 */
+        /** 兼容旧前端缺省 allMatching，并校验两种选择模式互斥。 */
         public UpdateUserRolesRequest {
+            boolean selectsAllMatching = Boolean.TRUE.equals(allMatching);
             boolean hasAssignments = assignments != null && !assignments.isEmpty();
-            if (allMatching == hasAssignments) {
+            if (selectsAllMatching == hasAssignments) {
                 throw new IllegalArgumentException("显式用户与全部检索结果必须且只能选择一种");
             }
-            if (allMatching) {
+            if (selectsAllMatching) {
                 if (role == null || role.isBlank()) {
                     throw new IllegalArgumentException("角色不能为空");
                 }
@@ -118,6 +119,7 @@ public final class UserManagementDtos {
             } else {
                 assignments = List.copyOf(assignments);
             }
+            allMatching = selectsAllMatching;
         }
     }
 
