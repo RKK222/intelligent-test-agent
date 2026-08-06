@@ -59,6 +59,20 @@ class ManagedWorkspacePathResolverTest {
     }
 
     @Test
+    void rejectsUnmanagedRelativePathAtResponseBoundary() {
+        ManagedWorkspacePathResolver resolver = new ManagedWorkspacePathResolver(parameters());
+        Workspace workspace = new Workspace(
+                new WorkspaceId("wrk_relative_response"),
+                "relative",
+                "workspaces/demo",
+                java.time.Instant.parse("2026-08-06T00:00:00Z"));
+
+        assertThatThrownBy(() -> resolver.withResolvedRootPathForResponse(workspace))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.INTERNAL_ERROR));
+    }
+
+    @Test
     void rejectsLogicalPathTraversal() {
         ManagedWorkspacePathResolver resolver = new ManagedWorkspacePathResolver(parameters());
 

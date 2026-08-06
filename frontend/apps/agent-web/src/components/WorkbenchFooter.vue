@@ -10,6 +10,7 @@ import type {
 import type { BackendApiClient } from "@test-agent/backend-api";
 import { copyTextToClipboard } from "@test-agent/ui-kit";
 import type { SelectedWorkspaceKind } from "./app-source-workspace";
+import { resolvePhysicalFilePath } from "./physical-path";
 
 export type PreviewMode = "off" | "full" | "split";
 
@@ -124,26 +125,13 @@ const displayFilename = computed(() => {
   return props.writePath.split("/").pop() || props.writePath;
 });
 
-const absoluteWritePath = computed(() => {
-  if (!props.workspaceRootPath || !props.writePath) return "";
-  const normalizedRoot = props.workspaceRootPath.replace(/\\/g, "/");
-  const normalizedPath = props.writePath.replace(/\\/g, "/");
-  // 文件路径本身已是绝对路径时直接复用，避免重复拼接工作区根目录。
-  if (normalizedPath.startsWith("/") || /^[A-Za-z]:\//.test(normalizedPath)) {
-    return normalizedPath;
-  }
-  const rootWithoutTrailingSlash = normalizedRoot.replace(/\/+$/, "");
-  const pathWithoutLeadingSlash = normalizedPath.replace(/^\/+/, "");
-  return rootWithoutTrailingSlash
-    ? `${rootWithoutTrailingSlash}/${pathWithoutLeadingSlash}`
-    : `/${pathWithoutLeadingSlash}`;
-});
-
 const copyPathText = computed(() => {
-  if (props.copyPath !== undefined) return props.copyPath.replace(/\\/g, "/");
-  if (!props.writePath) return "";
-  // 复制入口直接给出可执行定位的绝对路径，不再混入相对路径或内部 tab 路由。
-  return absoluteWritePath.value || props.writePath;
+  // 物理文件操作统一失败关闭；相对路径和内部 tab 路由不再作为复制兜底。
+  return resolvePhysicalFilePath({
+    explicitPath: props.copyPath,
+    workspaceRootPath: props.workspaceRootPath,
+    filePath: props.writePath
+  }) ?? "";
 });
 
 async function copyPath(textToCopy: string) {

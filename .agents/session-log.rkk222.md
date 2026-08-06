@@ -6575,3 +6575,35 @@
 - Skill 仍优先展示，Web 不再丢失 OpenCode TUI 的 slash/alias 输入路径；已有按钮与原生命令并存。
 - 未新增或修改 HTTP 路径、RunEvent、数据库、性能策略、安全权限、依赖、环境配置、generated SDK 或
   OpenCode 源码；`/connect`、`/models` 继续受企业 Provider 白名单约束，`/themes` 保持统一企业主题说明。
+
+## 2026-08-06 - 收口工作区物理路径响应与前端消费边界
+
+### Why
+
+- 工作区数据库为跨服务器搬迁保存 `personalworktree:` 等逻辑路径是正确设计，但普通 Workspace 查询曾绕过
+  统一响应解析，导致小地球和复制路径拿到逻辑前缀或相对路径；前端又存在直接兜底复制相对路径的问题。
+
+### What
+
+- `ManagedWorkspacePathResolver` 新增严格响应解析：逻辑前缀和历史绝对路径正常解析，未纳管相对路径失败关闭；
+  存量 Git/文件/PTY/Run 执行解析保持兼容。普通、排查、文件 WebSocket 创建及托管 Workspace 响应统一增加
+  `physicalRootPath`，兼容 `rootPath` 返回同一物理绝对路径。
+- agent-web 新增统一物理路径守卫；复制路径只接受绝对 Agent 路径或“物理工作区根 + 安全相对文件”，小地球
+  缺少物理根时禁用，不再消费逻辑前缀、内部 tab route、相对 Agent 路径或 `..` 越界路径。
+- 同步 API、domain、workspace-management、api、agent-web、shared-types README/PACKAGE 与模块图。
+
+### How
+
+- 后端 20 条定向用例通过，覆盖物理响应契约、相对路径失败关闭、用户工作区查询和个人 worktree 搬迁；
+  另有 73 条 Workspace service/controller/WebSocket 兼容回归通过。前端 3 个测试文件 38 条通过，
+  agent-web typecheck 与生产 build 通过；JDK 25 后端完整 package 通过。
+- 因 8080 被并行 worktree 占用，使用项目 `dev-backend-run.sh`、原 `.env.test` 和 test profile 在 18081
+  隔离启动，health/readiness 均为 UP，Workspace API 未认证访问按预期返回 401；前端生产 preview 在 4178
+  返回 200，验证后均已关闭，未干扰既有 8080/3000 服务。
+
+### Result
+
+- 数据库存储语义与昨天的跨服务器个人 worktree 搬迁不变；对外物理动作从类型字段到组件入口均失败关闭，
+  不再由进程当前目录或前端字符串拼接制造“看似绝对”的错误路径。
+- 本次为 additive HTTP 响应字段，旧 `rootPath` 保持物理值兼容；未变更 HTTP 路径、RunEvent、数据库、
+  Flyway/MyBatis SQL、性能策略、安全权限、环境配置、generated SDK 或 OpenCode 源码。

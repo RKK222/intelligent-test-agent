@@ -426,7 +426,7 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
     }
 
     private Workspace workspaceForResponse(Workspace workspace) {
-        return pathResolver.withResolvedRootPath(workspace);
+        return pathResolver.withResolvedRootPathForResponse(workspace);
     }
 
     private String resolvedRootPath(Workspace workspace) {

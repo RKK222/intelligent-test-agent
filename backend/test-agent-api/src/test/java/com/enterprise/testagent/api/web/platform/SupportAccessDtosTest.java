@@ -9,6 +9,7 @@ import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
+import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import java.time.Instant;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,8 @@ class SupportAccessDtosTest {
                 .isEqualTo("UNBOUND");
         assertThat(response("server-unknown", Map.of(), false).backendAvailability())
                 .isEqualTo("UNKNOWN");
+        assertThat(response("server-online", Map.of("server-online", online), true).physicalRootPath())
+                .isEqualTo("/tmp/support");
     }
 
     private SupportAccessDtos.WorkspaceResponse response(
@@ -45,7 +48,11 @@ class SupportAccessDtosTest {
                 linuxServerId,
                 "trace_1234567890abcdef");
         return SupportAccessDtos.WorkspaceResponse.from(
-                workspace, liveBackends, "server-current", backendStateKnown);
+                workspace,
+                liveBackends,
+                "server-current",
+                backendStateKnown,
+                ManagedWorkspacePathResolver.legacyOnly());
     }
 
     private BackendJavaProcess backend(String linuxServerId, BackendJavaProcessStatus status) {

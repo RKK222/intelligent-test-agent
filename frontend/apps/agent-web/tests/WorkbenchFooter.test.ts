@@ -490,6 +490,27 @@ describe("WorkbenchFooter", () => {
     expect(mockWriteText.mock.calls[0]?.[0]).not.toContain(":::");
   });
 
+  it("hides copy path when only a logical root or relative Agent path is available", () => {
+    const logicalWorkspace = mount(WorkbenchFooter, {
+      props: {
+        showSave: true,
+        writePath: "src/main.ts",
+        workspaceRootPath: "personalworktree:20260806/usr_1/demo"
+      }
+    });
+    const relativeAgent = mount(WorkbenchFooter, {
+      props: {
+        showSave: true,
+        writePath: "agent-workspace:wrk_1:::agents%2Freview.md",
+        copyPath: "agents/review.md",
+        workspaceRootPath: "/data/workspace"
+      }
+    });
+
+    expect(logicalWorkspace.find(".ta-workbench-footer-copy-path").exists()).toBe(false);
+    expect(relativeAgent.find(".ta-workbench-footer-copy-path").exists()).toBe(false);
+  });
+
   it("renders locate button when writePath is defined, and emits locate on click", async () => {
     const wrapper = mount(WorkbenchFooter, {
       props: {

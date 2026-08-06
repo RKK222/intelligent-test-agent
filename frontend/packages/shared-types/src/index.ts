@@ -73,7 +73,10 @@ export type ToolboxClickResult = {
 export type Workspace = {
   workspaceId: string;
   name: string;
+  /** 兼容旧客户端的物理根路径；新代码应优先读取 physicalRootPath。 */
   rootPath: string;
+  /** 后端明确解析的物理绝对路径；旧后端响应可缺失。 */
+  physicalRootPath?: string;
   status: string;
   linuxServerId?: string | null;
   /** 排查只读列表中的目标 Java 路由状态；旧后端和普通工作区接口可缺失。 */

@@ -170,6 +170,10 @@ import FigmaChatPanel from "./FigmaChatPanel.vue";
 import HelpCenterDialog from "./HelpCenterDialog.vue";
 import { buildManualQuestionPrompt, DEFAULT_HELP_TOPIC } from "./help-center";
 import { type PreviewMode } from "./WorkbenchFooter.vue";
+import {
+  normalizePhysicalAbsolutePath,
+  workspacePhysicalRootPath
+} from "./physical-path";
 import OpencodeProcessStartupDialog from "./OpencodeProcessStartupDialog.vue";
 import PersonalWorkspacePullDialog, {
   type PersonalWorkspacePullDialogPhase,
@@ -1008,8 +1012,8 @@ const activeTab = computed(() => tabs.value.find((tab: EditorTab) => tab.path ==
 const activeTabCopyPath = computed(() => {
   const tab = activeTab.value;
   if (!tab || !isAgentFilePath(tab.path)) return undefined;
-  // Agent tab.path 是携带 workspace/worktree/server 的合成路由；没有绝对路径时也只回退到解码后的文件路径。
-  return tab.absolutePath ?? agentFileInfo(tab.path).path;
+  // Agent tab.path 是合成路由；真实绝对路径尚未返回时禁用复制，不再回退内部相对路径。
+  return normalizePhysicalAbsolutePath(tab.absolutePath);
 });
 const activeTabInitialLoading = computed(() =>
   activeTab.value?.loadState === "loading" && activeTab.value.hasLoadedSnapshot === false
@@ -1053,6 +1057,7 @@ const selectedWorkspace = computed(() => {
   }
   return undefined;
 });
+const selectedWorkspacePhysicalRootPath = computed(() => workspacePhysicalRootPath(selectedWorkspace.value));
 const selectedWorkspaceIdRef = computed(() => selectedWorkspace.value?.workspaceId);
 const sessionSearchTrim = computed(() => sessionSearch.value.trim());
 const sessionRuntimeStateQueryKey = ["sessions", "runtime-state"] as const;
@@ -3985,7 +3990,11 @@ function cacheWorkspace(workspace: Workspace) {
 }
 
 function sameWorkspaceLocation(left: Workspace, right: Workspace) {
-  return left.rootPath === right.rootPath && (left.linuxServerId ?? "") === (right.linuxServerId ?? "");
+  const leftPhysicalPath = workspacePhysicalRootPath(left);
+  const rightPhysicalPath = workspacePhysicalRootPath(right);
+  return Boolean(leftPhysicalPath)
+    && leftPhysicalPath === rightPhysicalPath
+    && (left.linuxServerId ?? "") === (right.linuxServerId ?? "");
 }
 
 function workspaceNameFromPath(path: string) {
@@ -4989,7 +4998,7 @@ function syncCurrentVersionFromWorkspace(workspace: Workspace) {
   for (const list of entries) {
     const hit = list.find((version) =>
       version.runtimeWorkspace?.workspaceId === workspace.workspaceId ||
-      version.workspaceRootPath === workspace.rootPath
+      version.workspaceRootPath === workspacePhysicalRootPath(workspace)
     );
     if (hit) {
       currentVersionFromWorkspace.value = hit.versionId;
@@ -5501,7 +5510,8 @@ async function selectServerWorkspaceDirectory(payload: { server: WorkspaceBacken
   serverWorkspacePickerLoading.value = true;
   try {
     const existing = workspaces.value.find(
-      (item) => item.rootPath === payload.path && item.linuxServerId === payload.server.linuxServerId
+      (item) => workspacePhysicalRootPath(item) === payload.path
+        && item.linuxServerId === payload.server.linuxServerId
     );
     const workspace =
       existing ??
@@ -8249,7 +8259,7 @@ async function refreshPersistedFeedbackIdentities(runId: string, sessionId: stri
 // - 去掉 workspace 根路径（兼容根路径带不带尾斜杠）
 // - 折叠前导 ./ 与重复斜杠
 function normalizeWorkspacePath(raw: string): string {
-  const rootPath = selectedWorkspace.value?.rootPath ?? "";
+  const rootPath = selectedWorkspacePhysicalRootPath.value ?? "";
   let p = raw.replace(/^([ab])\//, "").replace(/\\/g, "/");
   const normalizedRoot = rootPath.replace(/\\/g, "/").replace(/\/+$/, "");
   if (normalizedRoot) {
@@ -9545,7 +9555,7 @@ async function handleLogout() {
           ref="fileExplorerRef"
           class="managed-workspace-files"
           :workspace-name="selectedWorkspace?.name ?? '未选择工作区'"
-          :workspace-root-path="selectedWorkspace?.rootPath"
+          :workspace-root-path="selectedWorkspacePhysicalRootPath"
           :entries-by-directory="entriesByDirectory"
           :expanded-directories="expandedDirectories"
           :active-path="activeWorkspaceViewNodeId"
@@ -9680,7 +9690,7 @@ async function handleLogout() {
           </div>
           <WorkbenchFooter
             :write-path="selectedDiffPath"
-            :workspace-root-path="selectedWorkspace?.rootPath"
+            :workspace-root-path="selectedWorkspacePhysicalRootPath"
             :dirty="isDiffDirty"
             :saving="saveDiffFileMutation.isPending.value"
             :readonly="!canSaveSelectedDiffFile"
@@ -9719,7 +9729,7 @@ async function handleLogout() {
           :breadcrumb-path="breadcrumbDisplay"
           :write-path="activeTab?.path"
           :copy-path="activeTabCopyPath"
-          :workspace-root-path="selectedWorkspace?.rootPath"
+          :workspace-root-path="selectedWorkspacePhysicalRootPath"
           :updated-at="activeTab ? Date.now() / 1000 : undefined"
           :dirty="!!activeTab && !activeTab.livePreview && activeTab.content !== activeTab.savedContent"
           :readonly="!!activeTab?.readonly"

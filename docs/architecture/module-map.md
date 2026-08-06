@@ -153,8 +153,10 @@ Skill Hub 的事项分类以逻辑资产持久化：应用推送 Skill 复用 `a
 | `packages/terminal` | 受控 PTY 前端包，负责 ticket WebSocket 连接、输入、resize、关闭和输出渲染，不创建 ticket、不直连 opencode server。 |
 | `packages/test-runner` | 底部 Run 状态、取消、重试和事件日志面板。 |
 | `packages/ui-kit` | 平台通用 UI 组件、基础样式组合和反馈组件。 |
-| `packages/shared-types` | 跨包共享 TypeScript 类型和事件/DTO 模型；包含应用源码严格四态、固定选择、操作安全快照和独立进度 WebSocket envelope，以及工具盒子目录、工具项和点击响应，`PermissionRequest.patterns` 与 `SessionRuntimeStateSummary.permissionCount` 保持可选，attention 接受 `PERMISSION`，Session/SessionMessage/Run 来源、夜间时段/任务、代码库英文名、版本库类型、工作空间创建进度、平台文件 WebSocket route/ticket 等新增契约字段必须保持可选或按请求/响应兼容策略处理。 |
+| `packages/shared-types` | 跨包共享 TypeScript 类型和事件/DTO 模型；包含应用源码严格四态、固定选择、操作安全快照和独立进度 WebSocket envelope，以及工具盒子目录、工具项和点击响应，Workspace 的 `physicalRootPath`、`PermissionRequest.patterns` 与 `SessionRuntimeStateSummary.permissionCount` 保持可选，attention 接受 `PERMISSION`，Session/SessionMessage/Run 来源、夜间时段/任务、代码库英文名、版本库类型、工作空间创建进度、平台文件 WebSocket route/ticket 等新增契约字段必须保持可选或按请求/响应兼容策略处理。 |
 | `../frontend-opencode` | 独立 Vue/TypeScript/Vite opencode IDE App 复刻工程；不加入 `frontend/pnpm-workspace.yaml`，通过 alias 复用 `backend-api`、`event-stream-client`、`shared-types` 源码。 |
+
+Workspace 的存储路径与物理路径边界由 `test-agent-domain/ManagedWorkspacePathResolver` 统一定义：数据库逻辑前缀保留跨服务器可迁移性，`test-agent-api` 和 `test-agent-workspace-management` 的对外 DTO 必须投影成同值的 `rootPath/physicalRootPath` 绝对路径。`apps/agent-web/components/physical-path.ts` 只允许复制路径与小地球消费该物理绝对路径，逻辑前缀、普通相对路径和内部 tab route 均失败关闭。
 
 `apps/agent-web` 的视觉边界由应用层维护：`FigmaShell.vue` 组合外围壳层，并让顶栏与 8px 栏间间隔共用浅雾蓝画布色、左/中/右三栏各自形成纯白悬浮面板；左侧工作区/Agent 目录加载前后与中间未打开文件时的预览区均保持纯白，当前文件标签只用 2px 工行红上沿标记激活态。顶栏按“36px 首行 + 8px 面板间隔”的 44px 视觉带统一上下居中：Logo 左对齐，直接使用用户确认的初版耳机/拱形品牌图形 PNG，保留原图轮廓和比例，图形使用低饱和暗红实色 #7f1e2b，中文品牌字标使用黑色，英文副标题使用深红以呼应图形；应用、工作空间、版本三个白底细框按钮放在 Logo 末端与右侧工具组起点之间的网格列正中，使左右留白相等；书本手册、透明底细框运行态摘要和单字头像依次固定在右侧。手册入口默认透明无框，打开弹框后保持与活动栏一致的柔红底、深红图标和工行红定位标记。顶部工作空间/版本选择只复用 `AgentWorkbench` 既有数据和 `handleLoadVersions` / `handleSelectVersion` 回调，左下角 `WorkbenchFooter` 入口继续保留，两处不得各自新增切换链路；用户在顶部选定工作空间时，版本列表只有一项则直接默认该项，多项则复用后端倒序结果的首项（最新版本）。非品牌首行文字默认保持纯黑，单字用户名为 12px。`styles/globals.css` 提供隔离的 `--ta-shell-*` token。`FigmaChatPanel.vue` 和 `packages/agent-chat` 不消费 shell token，避免外围品牌色影响对话内容。
 

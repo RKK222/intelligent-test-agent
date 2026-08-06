@@ -1139,13 +1139,14 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 
 `WorkspaceResponse`：
 
-列表和详情响应的 `rootPath` 始终是服务端解析后的物理绝对路径；数据库中的 `personalworktree:`、`appworkspace:`、`appsource:` 逻辑值不得直接返回给前端。历史绝对路径保持兼容。普通文件操作仍只使用 `workspaceId` 走文件 WebSocket，`rootPath` 仅供需要与同服务器受控外部页面交接目录的兼容场景使用。
+列表和详情响应新增显式 `physicalRootPath`，始终是服务端解析后的物理绝对路径；兼容字段 `rootPath` 保持同一物理值，避免旧前端失效。数据库中的 `personalworktree:`、`appworkspace:`、`appsource:` 逻辑值只用于跨服务器重新解析，不得直接返回给前端；历史绝对路径保持兼容，无法识别的相对路径在响应边界失败关闭，禁止按 Java 当前工作目录补成伪绝对路径。普通文件操作仍只使用 `workspaceId` 走文件 WebSocket；两个路径字段仅供复制路径或与同服务器受控外部页面交接目录等物理路径场景使用。
 
 ```json
 {
   "workspaceId": "wrk_...",
   "name": "demo",
   "rootPath": "/absolute/workspace/path",
+  "physicalRootPath": "/absolute/workspace/path",
   "linuxServerId": "127.0.0.1",
   "status": "ACTIVE",
   "createdAt": "2026-06-19T00:00:00Z",

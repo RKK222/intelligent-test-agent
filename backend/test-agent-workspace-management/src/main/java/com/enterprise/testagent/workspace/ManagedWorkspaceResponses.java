@@ -40,6 +40,7 @@ public final class ManagedWorkspaceResponses {
             String workspaceId,
             String name,
             String rootPath,
+            String physicalRootPath,
             String status,
             String linuxServerId,
             Instant createdAt,
@@ -47,6 +48,33 @@ public final class ManagedWorkspaceResponses {
             String appId,
             String versionId,
             String applicationWorkspaceId) {
+
+        /** 兼容既有内部构造调用；稳定 HTTP 响应新增 physicalRootPath，不改变旧 rootPath 物理路径语义。 */
+        public WorkspaceRuntimeResponse(
+                String workspaceId,
+                String name,
+                String rootPath,
+                String status,
+                String linuxServerId,
+                Instant createdAt,
+                Instant updatedAt,
+                String appId,
+                String versionId,
+                String applicationWorkspaceId) {
+            this(
+                    workspaceId,
+                    name,
+                    rootPath,
+                    rootPath,
+                    status,
+                    linuxServerId,
+                    createdAt,
+                    updatedAt,
+                    appId,
+                    versionId,
+                    applicationWorkspaceId);
+        }
+
         public static WorkspaceRuntimeResponse from(Workspace workspace) {
             return from(workspace, null, null, null);
         }
@@ -60,6 +88,7 @@ public final class ManagedWorkspaceResponses {
             return new WorkspaceRuntimeResponse(
                     workspace.workspaceId().value(),
                     workspace.name(),
+                    workspace.rootPath(),
                     workspace.rootPath(),
                     workspace.status().name(),
                     workspace.linuxServerId(),

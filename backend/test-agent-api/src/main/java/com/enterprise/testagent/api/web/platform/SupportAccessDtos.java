@@ -5,6 +5,7 @@ import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
 import com.enterprise.testagent.domain.supportaccess.SupportAccessAuditEvent;
 import com.enterprise.testagent.domain.user.User;
+import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Max;
@@ -56,6 +57,7 @@ final class SupportAccessDtos {
             String workspaceId,
             String name,
             String rootPath,
+            String physicalRootPath,
             String status,
             String linuxServerId,
             Instant createdAt,
@@ -67,8 +69,10 @@ final class SupportAccessDtos {
                 Workspace workspace,
                 Map<String, BackendJavaProcess> liveBackends,
                 String currentLinuxServerId,
-                boolean backendStateKnown) {
-            String linuxServerId = workspace.linuxServerId();
+                boolean backendStateKnown,
+                ManagedWorkspacePathResolver pathResolver) {
+            Workspace resolved = pathResolver.withResolvedRootPathForResponse(workspace);
+            String linuxServerId = resolved.linuxServerId();
             BackendJavaProcess backend = linuxServerId == null ? null : liveBackends.get(linuxServerId);
             String availability;
             if (linuxServerId == null) {
@@ -83,13 +87,14 @@ final class SupportAccessDtos {
                 availability = "OFFLINE";
             }
             return new WorkspaceResponse(
-                    workspace.workspaceId().value(),
-                    workspace.name(),
-                    workspace.rootPath(),
-                    workspace.status().name(),
+                    resolved.workspaceId().value(),
+                    resolved.name(),
+                    resolved.rootPath(),
+                    resolved.rootPath(),
+                    resolved.status().name(),
                     linuxServerId,
-                    workspace.createdAt(),
-                    workspace.updatedAt(),
+                    resolved.createdAt(),
+                    resolved.updatedAt(),
                     availability,
                     backend == null ? null : backend.lastHeartbeatAt());
         }
@@ -99,11 +104,12 @@ final class SupportAccessDtos {
             PageResponse<Workspace> page,
             Map<String, BackendJavaProcess> liveBackends,
             String currentLinuxServerId,
-            boolean backendStateKnown) {
+            boolean backendStateKnown,
+            ManagedWorkspacePathResolver pathResolver) {
         return new PageResponse<>(
                 page.items().stream()
                         .map(workspace -> WorkspaceResponse.from(
-                                workspace, liveBackends, currentLinuxServerId, backendStateKnown))
+                                workspace, liveBackends, currentLinuxServerId, backendStateKnown, pathResolver))
                         .toList(),
                 page.page(),
                 page.size(),

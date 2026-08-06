@@ -5,6 +5,7 @@ import com.enterprise.testagent.workspace.WorkspaceApplicationService;
 import com.enterprise.testagent.workspace.UserWorkspaceQueryService;
 import com.enterprise.testagent.common.api.ApiResponse;
 import com.enterprise.testagent.common.pagination.PageResponse;
+import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,21 +23,24 @@ public class WorkspaceController {
 
     private final WorkspaceApplicationService workspaceService;
     private final UserWorkspaceQueryService userWorkspaceQueryService;
+    private final ManagedWorkspacePathResolver pathResolver;
 
     /**
      * 注入工作区应用服务，Controller 只负责 HTTP 协议适配。
      */
     public WorkspaceController(WorkspaceApplicationService workspaceService) {
-        this(workspaceService, null);
+        this(workspaceService, null, ManagedWorkspacePathResolver.legacyOnly());
     }
 
     /** 生产入口注入用户工作区查询服务，所有普通列表和详情都执行对象级归属校验。 */
     @Autowired
     public WorkspaceController(
             WorkspaceApplicationService workspaceService,
-            UserWorkspaceQueryService userWorkspaceQueryService) {
+            UserWorkspaceQueryService userWorkspaceQueryService,
+            ManagedWorkspacePathResolver pathResolver) {
         this.workspaceService = workspaceService;
         this.userWorkspaceQueryService = userWorkspaceQueryService;
+        this.pathResolver = pathResolver;
     }
 
     /**
@@ -52,7 +56,7 @@ public class WorkspaceController {
         var principal = AuthWebSupport.getAuthPrincipal(exchange);
         return ApiResponse.ok(RuntimeDtos.workspacePage(userWorkspaceQueryService == null
                 ? workspaceService.listWorkspaces(pageRequest)
-                : userWorkspaceQueryService.listUserWorkspaces(principal.userId(), pageRequest)), traceId);
+                : userWorkspaceQueryService.listUserWorkspaces(principal.userId(), pageRequest), pathResolver), traceId);
     }
 
     /**
@@ -66,7 +70,7 @@ public class WorkspaceController {
         var principal = AuthWebSupport.getAuthPrincipal(exchange);
         return ApiResponse.ok(RuntimeDtos.WorkspaceResponse.from(userWorkspaceQueryService == null
                 ? workspaceService.getWorkspace(new WorkspaceId(workspaceId))
-                : userWorkspaceQueryService.requireUserWorkspace(principal.userId(), new WorkspaceId(workspaceId))), traceId);
+                : userWorkspaceQueryService.requireUserWorkspace(principal.userId(), new WorkspaceId(workspaceId)), pathResolver), traceId);
     }
 
 }

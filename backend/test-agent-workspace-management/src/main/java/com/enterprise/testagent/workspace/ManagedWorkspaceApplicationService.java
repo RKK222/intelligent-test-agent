@@ -4197,7 +4197,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     private Workspace workspaceForResponse(Workspace workspace) {
-        return pathResolver.withResolvedRootPath(workspace);
+        return pathResolver.withResolvedRootPathForResponse(workspace);
     }
 
     private ApplicationWorkspaceVersion versionForResponse(ApplicationWorkspaceVersion version) {

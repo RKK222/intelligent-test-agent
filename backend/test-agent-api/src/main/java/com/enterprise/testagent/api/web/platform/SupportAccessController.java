@@ -11,6 +11,7 @@ import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.supportaccess.SupportAccessAuditQuery;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.event.RunEventSsePayload;
 import com.enterprise.testagent.event.RunEventSseStreamService;
@@ -65,6 +66,7 @@ public class SupportAccessController {
     private final WorkspaceFileRoutingService fileRoutingService;
     private final WorkspaceFileSocketTicketService ticketService;
     private final BackendJavaRouteResolver routeResolver;
+    private final ManagedWorkspacePathResolver pathResolver;
 
     public SupportAccessController(
             SupportAccessApplicationService supportAccessService,
@@ -74,7 +76,8 @@ public class SupportAccessController {
             UserWorkspaceQueryService userWorkspaceQueryService,
             WorkspaceFileRoutingService fileRoutingService,
             WorkspaceFileSocketTicketService ticketService,
-            BackendJavaRouteResolver routeResolver) {
+            BackendJavaRouteResolver routeResolver,
+            ManagedWorkspacePathResolver pathResolver) {
         this.supportAccessService = supportAccessService;
         this.sessionService = sessionService;
         this.messageRecoveryService = messageRecoveryService;
@@ -83,6 +86,7 @@ public class SupportAccessController {
         this.fileRoutingService = fileRoutingService;
         this.ticketService = ticketService;
         this.routeResolver = routeResolver;
+        this.pathResolver = pathResolver;
     }
 
     /** 签发绑定当前登录会话的限时只读授权；不接受共享激活暗号。 */
@@ -361,7 +365,8 @@ public class SupportAccessController {
                 page,
                 liveBackends,
                 routeResolver.currentLinuxServerIdValue(),
-                backendStateKnown);
+                backendStateKnown,
+                pathResolver);
     }
 
     /**

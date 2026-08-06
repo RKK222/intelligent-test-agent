@@ -24,6 +24,7 @@ import com.enterprise.testagent.domain.session.SessionMessageRole;
 import com.enterprise.testagent.domain.session.SessionRuntimeState;
 import com.enterprise.testagent.domain.session.SessionRuntimeStateSummary;
 import com.enterprise.testagent.domain.session.SessionWorkspaceContext;
+import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.event.RunEventSsePayload;
 import jakarta.validation.constraints.AssertTrue;
@@ -221,6 +222,7 @@ final class RuntimeDtos {
             String workspaceId,
             String name,
             String rootPath,
+            String physicalRootPath,
             String status,
             String linuxServerId,
             Instant createdAt,
@@ -229,15 +231,19 @@ final class RuntimeDtos {
         /**
          * 从领域对象映射为 API 响应，避免直接暴露 domain 类型。
          */
-        static WorkspaceResponse from(Workspace workspace) {
+        static WorkspaceResponse from(
+                Workspace workspace,
+                ManagedWorkspacePathResolver pathResolver) {
+            Workspace resolved = pathResolver.withResolvedRootPathForResponse(workspace);
             return new WorkspaceResponse(
-                    workspace.workspaceId().value(),
-                    workspace.name(),
-                    workspace.rootPath(),
-                    workspace.status().name(),
-                    workspace.linuxServerId(),
-                    workspace.createdAt(),
-                    workspace.updatedAt());
+                    resolved.workspaceId().value(),
+                    resolved.name(),
+                    resolved.rootPath(),
+                    resolved.rootPath(),
+                    resolved.status().name(),
+                    resolved.linuxServerId(),
+                    resolved.createdAt(),
+                    resolved.updatedAt());
         }
     }
 
@@ -930,8 +936,14 @@ final class RuntimeDtos {
     /**
      * 映射工作区分页响应。
      */
-    static PageResponse<WorkspaceResponse> workspacePage(PageResponse<Workspace> page) {
-        return new PageResponse<>(page.items().stream().map(WorkspaceResponse::from).toList(), page.page(), page.size(), page.total());
+    static PageResponse<WorkspaceResponse> workspacePage(
+            PageResponse<Workspace> page,
+            ManagedWorkspacePathResolver pathResolver) {
+        return new PageResponse<>(
+                page.items().stream().map(workspace -> WorkspaceResponse.from(workspace, pathResolver)).toList(),
+                page.page(),
+                page.size(),
+                page.total());
     }
 
     /**

@@ -1,7 +1,10 @@
 package com.enterprise.testagent.api.web.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+import com.enterprise.testagent.domain.configuration.CommonParameterValues;
 import com.enterprise.testagent.domain.run.Run;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.run.RunStatus;
@@ -11,10 +14,13 @@ import com.enterprise.testagent.domain.session.SessionMessage;
 import com.enterprise.testagent.domain.session.SessionMessageId;
 import com.enterprise.testagent.domain.session.SessionMessageRole;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
+import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.event.RunEventSsePayload;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class RuntimeDtosCompatibilityTest {
@@ -39,6 +45,27 @@ class RuntimeDtosCompatibilityTest {
         assertThat(response.storageMode()).isEqualTo("REDIS_SUMMARY");
         assertThat(response.clientRequestId()).isEqualTo("req_1234567890abcdef");
         assertThat(response.detailsAvailableUntil()).isEqualTo(DETAILS_EXPIRE_AT);
+    }
+
+    @Test
+    void workspaceMappingResolvesLogicalStoragePathAndExposesExplicitPhysicalPath() {
+        CommonParameterValues parameters = mock(CommonParameterValues.class);
+        when(parameters.resolvedValue(ManagedWorkspacePathResolver.PARAM_OPENCODE_PERSONAL_WORKTREE_ROOT))
+                .thenReturn(Optional.of("/data/.testagent/agent-opencode/workspace/personalworktree"));
+        Workspace workspace = new Workspace(
+                new WorkspaceId("wrk_physical_contract"),
+                "personal",
+                "personalworktree:20260806/usr_1/demo/feature_usr_1_default/workspace",
+                NOW);
+
+        RuntimeDtos.WorkspaceResponse response = RuntimeDtos.WorkspaceResponse.from(
+                workspace,
+                new ManagedWorkspacePathResolver(parameters));
+
+        assertThat(response.rootPath()).isEqualTo(
+                "/data/.testagent/agent-opencode/workspace/personalworktree/20260806/usr_1/demo/feature_usr_1_default/workspace");
+        assertThat(response.physicalRootPath()).isEqualTo(response.rootPath());
+        assertThat(response.rootPath()).doesNotStartWith("personalworktree:");
     }
 
     @Test

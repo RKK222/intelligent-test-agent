@@ -16,6 +16,7 @@ import type { AgentConfigMutation, AgentFileLoadRequest, PublicWorktreeMountRequ
 import GitChangesPanel from "./GitChangesPanel.vue";
 import { ChevronDown, ChevronRight, CloudDownload, FolderTree, GitBranch, Globe, MoreHorizontal, Plus, RefreshCw, Search } from "lucide-vue-next";
 import type { AppSourceWorkspaceContext, SelectedWorkspaceKind } from "./app-source-workspace";
+import { normalizePhysicalAbsolutePath } from "./physical-path";
 
 const props = defineProps<FileExplorerProps & {
   workspaceRootPath?: string;
@@ -207,7 +208,8 @@ function openRootActions() {
 
 const iframeUrl = computed(() => {
   const baseUrl = import.meta.env.VITE_IFRAME_URL ?? "";
-  if (!baseUrl) return "";
+  const workspacePath = normalizePhysicalAbsolutePath(props.workspaceRootPath);
+  if (!baseUrl || !workspacePath) return "";
   
   const now = new Date();
   const version = `${now.getFullYear()}年${now.getMonth() + 1}月`;
@@ -220,9 +222,7 @@ const iframeUrl = computed(() => {
     params.append("appName", props.appName);
   }
   params.append("version", version);
-  if (props.workspaceRootPath) {
-    params.append("workspacePath", props.workspaceRootPath);
-  }
+  params.append("workspacePath", workspacePath);
 
   let backendUrl = props.backendJavaServerIp ?? null;
   if (!backendUrl) {
@@ -251,6 +251,7 @@ const iframeUrl = computed(() => {
 });
 
 function openIframeDialog() {
+  if (!iframeUrl.value) return;
   iframeDialogVisible.value = true;
 }
 
@@ -492,10 +493,10 @@ defineExpose({
                 v-if="tab === 'explorer'"
                 type="button"
                 class="figma-fe-section-action-btn"
-                title="打开外部页面"
+                :title="iframeUrl ? '打开外部页面' : '工作区物理路径不可用'"
                 aria-label="打开外部页面"
                 data-onboarding="workspace-reference"
-                :disabled="!workspaceId"
+                :disabled="!workspaceId || !iframeUrl"
                 @click="openIframeDialog"
               >
                 <Globe class="h-3.5 w-3.5" :stroke-width="1.5" />

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.workspace.Workspace;
+import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.observability.TraceConstants;
 import com.enterprise.testagent.observability.TraceIdSupport;
@@ -58,6 +59,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
     private final AgentConfigApplicationService agentConfigService;
     private final AgentSkillHubApplicationService agentSkillHubService;
     private final WorkspaceViewApplicationService workspaceViewService;
+    private final ManagedWorkspacePathResolver pathResolver;
     private final ObjectMapper objectMapper;
     private final Set<String> allowedOrigins;
     private final boolean allowAnyOrigin;
@@ -73,6 +75,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
             AgentConfigApplicationService agentConfigService,
             AgentSkillHubApplicationService agentSkillHubService,
             WorkspaceViewApplicationService workspaceViewService,
+            ManagedWorkspacePathResolver pathResolver,
             ObjectMapper objectMapper,
             @Value("${test-agent.security.cors-allowed-origins:http://localhost:3000,http://127.0.0.1:3000,http://localhost:4173,http://127.0.0.1:4173,http://localhost:4177,http://127.0.0.1:4177,http://localhost:4187,http://127.0.0.1:4187,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}")
             String allowedOrigins) {
@@ -82,6 +85,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         this.agentConfigService = Objects.requireNonNull(agentConfigService, "agentConfigService must not be null");
         this.agentSkillHubService = Objects.requireNonNull(agentSkillHubService, "agentSkillHubService must not be null");
         this.workspaceViewService = Objects.requireNonNull(workspaceViewService, "workspaceViewService must not be null");
+        this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.allowedOrigins = Set.copyOf(Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim)
@@ -104,6 +108,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         this.agentConfigService = Objects.requireNonNull(agentConfigService, "agentConfigService must not be null");
         this.agentSkillHubService = null;
         this.workspaceViewService = null;
+        this.pathResolver = ManagedWorkspacePathResolver.legacyOnly();
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.allowedOrigins = Set.copyOf(Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim)
@@ -127,6 +132,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         this.agentConfigService = Objects.requireNonNull(agentConfigService, "agentConfigService must not be null");
         this.agentSkillHubService = null;
         this.workspaceViewService = Objects.requireNonNull(workspaceViewService, "workspaceViewService must not be null");
+        this.pathResolver = ManagedWorkspacePathResolver.legacyOnly();
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.allowedOrigins = Set.copyOf(Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim)
@@ -584,7 +590,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 requiredText(params, "rootPath"),
                 ticket.linuxServerId(),
                 traceId);
-        return RuntimeDtos.WorkspaceResponse.from(workspace);
+        return RuntimeDtos.WorkspaceResponse.from(workspace, pathResolver);
     }
 
     private Object agentConfigList(WorkspaceFileSocketTicket ticket, JsonNode params) {

@@ -176,6 +176,32 @@ describe("FigmaFileExplorer", () => {
     expect(wrapper.get('[data-onboarding="workspace-reference"]').attributes("aria-label")).toBe("打开外部页面");
   });
 
+  it("only enables the external page when a physical workspace root is available", async () => {
+    vi.stubEnv("VITE_IFRAME_URL", "https://mimo.example/#/dashboard/create");
+    try {
+      const wrapper = shallowMount(FigmaFileExplorer, {
+        props: {
+          workspaceId: "wrk_personal",
+          workspaceRootPath: "personalworktree:20260806/usr_1/demo",
+          entriesByDirectory: { "": [] },
+          expandedDirectories: new Set<string>(),
+          changedFiles: []
+        }
+      });
+      const button = wrapper.get('button[aria-label="打开外部页面"]');
+
+      expect(button.attributes("disabled")).toBeDefined();
+      expect(button.attributes("title")).toBe("工作区物理路径不可用");
+
+      await wrapper.setProps({ workspaceRootPath: "/data/workspaces/demo" });
+
+      expect(button.attributes("disabled")).toBeUndefined();
+      expect(button.attributes("title")).toBe("打开外部页面");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("shows the total diff count reported by all three change scopes", async () => {
     const wrapper = shallowMount(FigmaFileExplorer, {
       props: {

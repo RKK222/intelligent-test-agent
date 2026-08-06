@@ -89,6 +89,24 @@ public final class ManagedWorkspacePathResolver {
     }
 
     /**
+     * 解析对外响应使用的物理绝对路径。数据库逻辑路径和历史绝对路径可正常解析，
+     * 未纳管的相对路径失败关闭，避免把进程工作目录补成伪物理路径后泄漏给前端。
+     */
+    public Path resolveForResponse(String storedPath) {
+        String value = requireText(storedPath, "path");
+        if (value.startsWith(APP_PREFIX)
+                || value.startsWith(PERSONAL_PREFIX)
+                || value.startsWith(APP_SOURCE_PREFIX)
+                || isLegacyAbsolutePath(value)) {
+            return resolve(value);
+        }
+        throw new PlatformException(
+                ErrorCode.INTERNAL_ERROR,
+                "工作区物理路径未解析",
+                Map.of("pathKind", "RELATIVE"));
+    }
+
+    /**
      * 生成应用版本工作区逻辑路径值，调用方负责传入已业务安全化的版本、仓库英文名和模板相对目录。
      */
     public String appValue(String... fragments) {
@@ -122,6 +140,11 @@ public final class ManagedWorkspacePathResolver {
 
     public Workspace withResolvedRootPath(Workspace workspace) {
         return workspace.withRootPath(resolve(workspace.rootPath()).toString());
+    }
+
+    /** 仅供对外 DTO 投影使用，严格拒绝未纳管的相对根路径。 */
+    public Workspace withResolvedRootPathForResponse(Workspace workspace) {
+        return workspace.withRootPath(resolveForResponse(workspace.rootPath()).toString());
     }
 
     private Path resolveLogical(String rootParameter, String prefix, String value) {
