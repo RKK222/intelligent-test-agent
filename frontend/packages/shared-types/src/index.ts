@@ -261,6 +261,13 @@ export type WorkspaceFileSocketTicketResponse = {
 export type AgentConfigScope = "PUBLIC" | "WORKSPACE" | string;
 
 export type AgentSkillHubAssetType = "AGENT" | "SKILL";
+export type AgentSkillHubSkillCategory = "WORKER" | "TEST" | "CODE" | "OTHER";
+export type AgentSkillHubSkillSubcategory =
+  | "TEST_DESIGN"
+  | "TEST_DATA_CONSTRUCTION"
+  | "TEST_EXECUTION"
+  | "TEST_ANALYSIS"
+  | "WHITE_BOX_ANALYSIS";
 
 export type AgentSkillHubAsset = {
   assetId: string;
@@ -269,6 +276,9 @@ export type AgentSkillHubAsset = {
   displayName?: string | null;
   displayNameEn?: string | null;
   description?: string | null;
+  /** 旧后端缺失时按 OTHER 展示，避免升级窗口把未分类 Skill 隐藏。 */
+  category?: AgentSkillHubSkillCategory | null;
+  subcategory?: AgentSkillHubSkillSubcategory | null;
   sourceAppId: string;
   sourceAppName: string;
   sourceWorkspaceId: string;
@@ -284,6 +294,14 @@ export type AgentSkillHubAsset = {
   referenceCount: number;
   pushedAt: string;
   publishedAt?: string | null;
+};
+
+export type AgentSkillHubClassification = {
+  assetId: string;
+  category: AgentSkillHubSkillCategory;
+  subcategory?: AgentSkillHubSkillSubcategory | null;
+  classifiedByUserId: string;
+  classifiedAt: string;
 };
 
 export type AgentSkillHubArtifactFile = {

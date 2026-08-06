@@ -7,6 +7,8 @@ import com.enterprise.testagent.domain.hub.AgentSkillHubModels.AssetType;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedAsset;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedSnapshot;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Reference;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillCategory;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillSubcategory;
 import com.enterprise.testagent.domain.hub.AgentSkillHubRepository;
 import com.enterprise.testagent.persistence.mybatis.AgentSkillHubMapper;
 import com.enterprise.testagent.persistence.mybatis.MyBatisAgentSkillHubRepository;
@@ -49,6 +51,8 @@ class MyBatisAgentSkillHubRepositoryIntegrationTest {
                 "db/migration/V20260725143000__create_agent_skill_hub.sql")).execute(dataSource);
         new ResourceDatabasePopulator(new ClassPathResource(
                 "db/migration/V20260725230000__support_hub_reference_removal.sql")).execute(dataSource);
+        new ResourceDatabasePopulator(new ClassPathResource(
+                "db/migration/V20260806143000__classify_skill_hub_assets.sql")).execute(dataSource);
         seedRequiredParents(JdbcClient.create(dataSource));
         SqlSessionFactoryBean factory = new SqlSessionFactoryBean();
         factory.setDataSource(dataSource);
@@ -172,12 +176,48 @@ class MyBatisAgentSkillHubRepositoryIntegrationTest {
                 .singleElement().extracting("referenceStatus").isEqualTo("PENDING_PUSH");
     }
 
+    @Test
+    void newSkillDefaultsToOtherAndKeepsAdminClassificationAcrossPushes() {
+        repository.replacePushedSnapshot(skillSnapshot("a".repeat(40), "3".repeat(64), NOW));
+        var unclassified = repository.listAssets(
+                AssetType.SKILL, SkillCategory.OTHER, null,
+                null, "usr_hub", null, false, 0, 10).getFirst();
+        assertThat(unclassified.asset().skillCategory()).isEqualTo(SkillCategory.OTHER);
+        assertThat(unclassified.asset().skillSubcategory()).isNull();
+
+        repository.updateSkillClassification(
+                unclassified.asset().assetId(), SkillCategory.TEST, SkillSubcategory.TEST_DATA_CONSTRUCTION,
+                "usr_hub", NOW.plusSeconds(1));
+        repository.replacePushedSnapshot(skillSnapshot(
+                "b".repeat(40), "4".repeat(64), NOW.plusSeconds(60)));
+
+        assertThat(repository.countAssets(
+                AssetType.SKILL, SkillCategory.OTHER, null, null, null, false)).isZero();
+        assertThat(repository.listAssets(
+                AssetType.SKILL, SkillCategory.TEST, SkillSubcategory.TEST_DATA_CONSTRUCTION,
+                null, "usr_hub", null, false, 0, 10))
+                .singleElement().satisfies(summary -> {
+                    assertThat(summary.asset().skillCategory()).isEqualTo(SkillCategory.TEST);
+                    assertThat(summary.asset().skillSubcategory()).isEqualTo(SkillSubcategory.TEST_DATA_CONSTRUCTION);
+                    assertThat(summary.pushedRevision().sourceCommitHash()).isEqualTo("b".repeat(40));
+                });
+    }
+
     private PushedSnapshot snapshot(String commit, String artifactSha, Instant pushedAt) {
         byte[] compressed = new byte[]{1, 2, 3};
         Artifact artifact = new Artifact(artifactSha, "GZIP_JSON_V1", compressed, "[]", 12,
                 compressed.length, 1, pushedAt);
         PushedAsset asset = new PushedAsset(AssetType.AGENT, "reviewer", artifact, artifactSha,
                 "评审专家", "Reviewer", "评审测试设计");
+        return new PushedSnapshot("app_hub", "aw_hub", "ver_hub", commit, pushedAt, List.of(asset));
+    }
+
+    private PushedSnapshot skillSnapshot(String commit, String artifactSha, Instant pushedAt) {
+        byte[] compressed = new byte[]{4, 5, 6};
+        Artifact artifact = new Artifact(artifactSha, "GZIP_JSON_V1", compressed, "[]", 12,
+                compressed.length, 1, pushedAt);
+        PushedAsset asset = new PushedAsset(AssetType.SKILL, "case-design", artifact, artifactSha,
+                "测试案例设计", "Test case design", "生成结构化测试案例");
         return new PushedSnapshot("app_hub", "aw_hub", "ver_hub", commit, pushedAt, List.of(asset));
     }
 

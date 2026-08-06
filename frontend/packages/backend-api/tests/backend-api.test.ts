@@ -2837,6 +2837,47 @@ describe("backend-api", () => {
     );
   });
 
+  it("filters and updates the controlled Skill Hub classification", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: { items: [], total: 0, page: 1, size: 30 }
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: {
+          assetId: "hub_asset_skill",
+          category: "TEST",
+          subcategory: "TEST_DESIGN",
+          classifiedByUserId: "usr_admin",
+          classifiedAt: "2026-08-06T00:00:00Z"
+        }
+      }), { status: 200 }));
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await client.listAgentSkillHubAssets({
+      type: "SKILL",
+      category: "TEST",
+      subcategory: "TEST_DESIGN",
+      page: 1,
+      size: 30
+    });
+    await client.updateAgentSkillHubClassification("hub_asset_skill", "TEST", "TEST_DESIGN");
+
+    expect(fetcher).toHaveBeenNthCalledWith(1,
+      "http://api/api/internal/platform/workspace-management/agent-skill-hub/assets"
+        + "?type=SKILL&category=TEST&subcategory=TEST_DESIGN&page=1&size=30",
+      expect.any(Object));
+    expect(fetcher).toHaveBeenNthCalledWith(2,
+      "http://api/api/internal/platform/workspace-management/agent-skill-hub/assets/hub_asset_skill/classification",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ category: "TEST", subcategory: "TEST_DESIGN" })
+      }));
+  });
+
   it("resolves a relative Hub file websocket ticket against the enterprise same-origin page", async () => {
     vi.stubGlobal("location", { href: "http://mimo.sdc.cs.icbc:9996/hub" });
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(

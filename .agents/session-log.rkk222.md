@@ -6235,3 +6235,41 @@
   `54cea9a84948f8e4cee14d630772b8ee0668c2a7e5fc897ede5e792a15edd761`。
 - 企业部署仍必须先停全部旧 Java，再按 `.4 → .114 → .2` 顺序放量；禁止 `repair`、`outOfOrder` 或手工改写
   `flyway_schema_history`。未修改 `.env*`、generated SDK 或 OpenCode 上游源码。
+
+## 2026-08-06 - Skill Hub 按具体事项分类并开放超级管理员治理
+
+### Why
+
+- Skill Hub 原目录只有 Agent/Skill 资产类型，无法按日常工作、测试和代码分析等实际事项检索；用户新推送的
+  Skill 也缺少统一待分类入口，需要由超级管理员在平台页面集中治理。
+
+### What
+
+- 复用既有 Hub 逻辑资产增加 `WORKER/TEST/CODE/OTHER` 一级分类；测试细分测试设计、测试数据构造、测试执行、
+  测试分析，代码固定白盒分析，Worker 与 Other 当前无二级事项。历史、新 push 和平台内置 Skill 默认
+  `OTHER/null`，后续 push 只更新不可变修订，不覆盖人工分类。
+- 新增 Skill 分类分页筛选和 `PUT /assets/{assetId}/classification`；HTTP 边界只允许 `SUPER_ADMIN`，拒绝
+  应用管理员、Agent、内置 Skill 和非法枚举组合。前端 Skill 页增加两级筛选、卡片标签和超级管理员详情编辑器，
+  旧后端缺字段时兼容显示为“其他”。
+- `V20260806143000__classify_skill_hub_assets.sql` 增加分类、最近分类管理员/时间、组合约束和筛选索引；分类 SQL
+  位于 MyBatis XML。同步 Hub 各模块 README、HTTP API、模块图、数据库、安全及前端包说明。
+
+### How
+
+- 后端应用服务、Controller、MyBatis/H2 集成定向测试共 15 项通过，Flyway migration 命名/顺序 8 项通过；
+  JDK 25 下 21 模块 `mvn clean package -Dmaven.test.skip=true` 成功。
+- 前端 Hub 与 backend-api 定向 112 项通过，agent-web/backend-api typecheck 和 agent-web production build 通过；
+  一次误触发全量前端测试为 1819 passed / 1 skipped / 1 failed，唯一失败仍是既有 `AppSourceDialog` 保留时长
+  aria-label 断言，与本次文件无重叠。
+- 使用未修改的主工作区 `.env.test` 从独立 worktree 启动。首次 workflow 锁定依赖准备因 pythonhost 网络超时失败，
+  随后使用项目官方 `--without-workflow` 开关完成 backend、opencode-manager、frontend 重启；清理原工作区占用
+  8080 的旧 backend 后，确认监听 JAR 来自本 worktree，health/readiness 为 `UP`、前端 3000 与登录 CORS 正常；
+  最终运行 JAR 内 migration 字节 SHA-256 与源码一致。
+
+### Result
+
+- 真实 PostgreSQL 从 `20260805132000` 成功升级到 `20260806143000`，migration 源码 SHA-256 为
+  `f59f641527fdabaf21393319cd70ed578c6f75a55decae4d8839bc2b561ac06d`；manager 日志未发现目标解码或重连错误。
+- 本次变更涉及向后兼容 HTTP 响应扩展、受控分类写接口、Flyway/MyBatis SQL、超级管理员权限和分类索引；不涉及
+  RunEvent、OpenCode 源码、generated SDK、环境配置或跨服务器文件路由。Workflow/LobeHub 未启动；正式交付前
+  仍须按数据库规范核对全部目标环境 migration 历史和并行候选版本，禁止改写已在共享/稳定环境执行的 migration。

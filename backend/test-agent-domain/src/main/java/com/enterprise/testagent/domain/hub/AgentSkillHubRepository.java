@@ -10,6 +10,8 @@ import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Reference;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.ReferenceConsumer;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.ReferenceUpdate;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Revision;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillCategory;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillSubcategory;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.UpdateOperation;
 import java.time.Instant;
 import java.util.List;
@@ -20,12 +22,31 @@ public interface AgentSkillHubRepository {
 
     void replacePushedSnapshot(PushedSnapshot snapshot);
 
-    List<AssetSummary> listAssets(AssetType type, String keyword, String currentUserId,
+    List<AssetSummary> listAssets(AssetType type, SkillCategory category, SkillSubcategory subcategory,
+                                  String keyword, String currentUserId,
                                   String targetApplicationWorkspaceId, boolean referencedOnly,
                                   int offset, int limit);
 
-    long countAssets(AssetType type, String keyword, String targetApplicationWorkspaceId,
+    /** 兼容不需要事项筛选的既有领域调用。 */
+    default List<AssetSummary> listAssets(AssetType type, String keyword, String currentUserId,
+                                          String targetApplicationWorkspaceId, boolean referencedOnly,
+                                          int offset, int limit) {
+        return listAssets(type, null, null, keyword, currentUserId,
+                targetApplicationWorkspaceId, referencedOnly, offset, limit);
+    }
+
+    long countAssets(AssetType type, SkillCategory category, SkillSubcategory subcategory,
+                     String keyword, String targetApplicationWorkspaceId,
                      boolean referencedOnly);
+
+    /** 兼容不需要事项筛选的既有领域调用。 */
+    default long countAssets(AssetType type, String keyword, String targetApplicationWorkspaceId,
+                             boolean referencedOnly) {
+        return countAssets(type, null, null, keyword, targetApplicationWorkspaceId, referencedOnly);
+    }
+
+    void updateSkillClassification(String assetId, SkillCategory category, SkillSubcategory subcategory,
+                                   String classifiedByUserId, Instant classifiedAt);
 
     Optional<Asset> findAsset(String assetId);
 

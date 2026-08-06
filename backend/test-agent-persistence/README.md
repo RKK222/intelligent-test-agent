@@ -145,6 +145,7 @@
 
 - `MyBatisAgentSkillHubRepository` / `AgentSkillHubMapper.xml` 保存内容寻址 GZIP 制品、每个远端 commit 的不可变修订、发布依赖、应用级引用和更新操作。
 - `V20260725143000__create_agent_skill_hub.sql` 创建六张 Hub 表；`V20260725230000__support_hub_reference_removal.sql` 增加 `PENDING_REMOVE` 并允许引用解除时级联清理临时更新操作。相同 canonical 内容按 SHA-256 去重，逻辑修订仍按 `(asset_id, source_commit_hash)` 保留每次 push 身份。
+- `V20260806143000__classify_skill_hub_assets.sql` 为资产增加 Skill 一级/二级事项分类及最近分类操作者、时间；历史与新资产默认 `OTHER`，数据库约束只允许 `TEST` 的四类测试事项和 `CODE/WHITE_BOX_ANALYSIS` 组合，`WORKER/OTHER` 当前不带二级事项。分类更新 SQL 继续位于 `AgentSkillHubMapper.xml`，不会被后续 push 覆盖。
 - 多资产引用批量保存以及“引用状态 + 更新操作终态”在同一 Spring 事务中提交；全量目录可按目标应用工作空间投影 `PENDING_PUSH/ACTIVE/PENDING_REMOVE/UPDATE_CONFLICT`，当前应用过滤、有效引用应用计数和消费者投影均排除 `PENDING_REMOVE`，待删除引用也不进入更新角标；同一记录从取消状态恢复时同步更新目标路径和别名。H2 集成测试覆盖 mapper CRUD/发布/引用/取消与恢复状态/引用方查询及 PostgreSQL `bytea` 映射，完整 migration 链由真实 PostgreSQL 启动验证。
 
 ## 测试环境 PostgreSQL

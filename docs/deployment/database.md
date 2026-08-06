@@ -1534,3 +1534,14 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 Redis 使用 `test-agent:support-access:session:{sessionDigest}` 与 `test-agent:support-access:token:{grantTokenDigest}` 保存当前授权摘要和短期 payload；两类 key/value 都不含原始平台/授权 Token。Lua rotate 保证同一平台登录会话的新授权立即淘汰旧 token，revoke 只删除仍与当前摘要匹配的 session key。TTL 与授权绝对到期时间一致，Redis 不可用时不降级 JVM 内存或数据库明文 Token。
 
 每日清理以当前 UTC 时间减 365 天为 cutoff，先删除更早的审计，再删除已到期且不再被审计引用的授权；一年内审计不会因用户删除或授权撤销提前消失。应用回滚时保留 migration 和历史审计，新表对旧 Java 为向后兼容新增。发布前仍须按本文件 migration 规则，用目标环境真实 PostgreSQL 历史执行基线到当前 HEAD，禁止 `repair`、`outOfOrder` 或改写已经执行的 SQL。
+
+## V20260806143000 Skill Hub 事项分类
+
+`V20260806143000__classify_skill_hub_assets.sql` 是开发期候选 migration，在既有 `agent_skill_hub_assets` 逻辑资产上增加：
+
+- `skill_category`：非空一级事项分类，历史与新记录默认 `OTHER`，允许 `WORKER/TEST/CODE/OTHER`。
+- `skill_subcategory`：可空二级事项；`TEST` 只允许测试设计、测试数据构造、测试执行、测试分析四种枚举，`CODE` 只允许白盒分析，`WORKER/OTHER` 必须为空。
+- `classified_by_user_id/classified_at`：最近一次人工分类的超级管理员和时间；前者使用现有 `users` 外键，不保存用户名快照或认证 Token。
+- `(asset_type, skill_category, skill_subcategory)` 索引：服务 Skill 目录分页筛选；数据库约束同时保证 Agent 始终为 `OTHER/null`。
+
+默认值完成存量兼容回填，不写测试、演示或环境专属分类数据。后续 push 只更新最新修订指针，不修改分类；人工分类 SQL 位于 `AgentSkillHubMapper.xml`。正式合入交付分支前仍须对照全部目标环境的 `flyway_schema_history` 确认该候选版本高于部署基线且未与并行 migration 冲突，并按本文件规则用真实 PostgreSQL 覆盖每套已知历史的升级与最终 JAR 字节校验。

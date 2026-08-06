@@ -35,13 +35,22 @@ public interface AgentSkillHubMapper {
     int updateLatestPushed(@Param("assetId") String assetId, @Param("revisionId") String revisionId,
                            @Param("pushedAt") Instant pushedAt);
     List<AssetSummaryRow> listAssets(@Param("assetType") String assetType, @Param("keyword") String keyword,
+                                     @Param("skillCategory") String skillCategory,
+                                     @Param("skillSubcategory") String skillSubcategory,
                                      @Param("currentUserId") String currentUserId,
                                      @Param("targetWorkspaceId") String targetWorkspaceId,
                                      @Param("referencedOnly") boolean referencedOnly,
                                      @Param("offset") int offset, @Param("limit") int limit);
     long countAssets(@Param("assetType") String assetType, @Param("keyword") String keyword,
+                     @Param("skillCategory") String skillCategory,
+                     @Param("skillSubcategory") String skillSubcategory,
                      @Param("targetWorkspaceId") String targetWorkspaceId,
                      @Param("referencedOnly") boolean referencedOnly);
+    int updateSkillClassification(@Param("assetId") String assetId,
+                                  @Param("skillCategory") String skillCategory,
+                                  @Param("skillSubcategory") String skillSubcategory,
+                                  @Param("classifiedByUserId") String classifiedByUserId,
+                                  @Param("classifiedAt") Instant classifiedAt);
     int markRevisionPublished(@Param("revisionId") String revisionId, @Param("userId") String userId,
                               @Param("now") Instant now);
     int updateLatestPublished(@Param("assetId") String assetId, @Param("revisionId") String revisionId,

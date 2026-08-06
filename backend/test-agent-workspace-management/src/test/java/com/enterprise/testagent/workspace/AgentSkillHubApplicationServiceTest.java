@@ -23,6 +23,8 @@ import com.enterprise.testagent.domain.hub.AgentSkillHubModels.AssetType;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedSnapshot;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Reference;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Revision;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillCategory;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillSubcategory;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.UpdateOperation;
 import com.enterprise.testagent.domain.hub.AgentSkillHubRepository;
 import com.enterprise.testagent.domain.managedworkspace.ApplicationWorkspaceVersion;
@@ -136,8 +138,8 @@ class AgentSkillHubApplicationServiceTest {
                 .thenReturn(List.of("opencode/agents/reviewer.md"));
         when(git.readFileAtCommit(publicRoot, commit, "opencode/agents/reviewer.md"))
                 .thenReturn("---\ndescription: Reviewer（评审专家）。\n---\n# Reviewer".getBytes(StandardCharsets.UTF_8));
-        when(repository.listAssets(any(), nullable(String.class), anyString(), nullable(String.class),
-                anyBoolean(), anyInt(), anyInt()))
+        when(repository.listAssets(any(), nullable(SkillCategory.class), nullable(SkillSubcategory.class),
+                nullable(String.class), anyString(), nullable(String.class), anyBoolean(), anyInt(), anyInt()))
                 .thenReturn(List.of());
         AgentSkillHubApplicationService service = new AgentSkillHubApplicationService(
                 repository, mock(ConfigurationManagementRepository.class), mock(ManagedWorkspaceRepository.class),
@@ -167,8 +169,8 @@ class AgentSkillHubApplicationServiceTest {
         Revision revision = new Revision(
                 "hub_rev_1", asset.assetId(), "ver_1", "a".repeat(40), "1".repeat(64), "1".repeat(64),
                 "Reviewer", null, null, false, now, now, "usr_1");
-        when(repository.listAssets(any(), nullable(String.class), anyString(), nullable(String.class),
-                anyBoolean(), anyInt(), anyInt()))
+        when(repository.listAssets(any(), nullable(SkillCategory.class), nullable(SkillSubcategory.class),
+                nullable(String.class), anyString(), nullable(String.class), anyBoolean(), anyInt(), anyInt()))
                 .thenReturn(List.of(new AssetSummary(
                         asset, revision, revision, "来源应用", "来源工作空间", false, "PENDING_PUSH", 0)));
         AgentSkillHubApplicationService service = new AgentSkillHubApplicationService(
@@ -194,8 +196,8 @@ class AgentSkillHubApplicationServiceTest {
         Revision revision = new Revision(
                 "hub_rev_1", asset.assetId(), "ver_1", "a".repeat(40), "1".repeat(64), "1".repeat(64),
                 "API Check", null, null, false, now, now, "usr_1");
-        when(repository.listAssets(any(), nullable(String.class), anyString(), nullable(String.class),
-                anyBoolean(), anyInt(), anyInt()))
+        when(repository.listAssets(any(), nullable(SkillCategory.class), nullable(SkillSubcategory.class),
+                nullable(String.class), anyString(), nullable(String.class), anyBoolean(), anyInt(), anyInt()))
                 .thenReturn(List.of(new AssetSummary(
                         asset, revision, revision, "来源应用", "来源工作空间", false, "PENDING_REMOVE", 0)));
         AgentSkillHubApplicationService service = new AgentSkillHubApplicationService(
@@ -210,6 +212,34 @@ class AgentSkillHubApplicationServiceTest {
 
         assertThat(response.referenceStatus()).isEqualTo("PENDING_REMOVE");
         assertThat(response.referenced()).isFalse();
+    }
+
+    @Test
+    void superAdminClassificationUsesControlledSkillTaxonomy() {
+        AgentSkillHubRepository repository = mock(AgentSkillHubRepository.class);
+        Instant now = Instant.parse("2026-08-06T00:00:00Z");
+        Asset asset = new Asset("hub_asset_skill", "app_source", "aw_source", AssetType.SKILL, "case-design",
+                "hub_rev_1", "hub_rev_1", now, now);
+        when(repository.findAsset(asset.assetId())).thenReturn(Optional.of(asset));
+        AgentSkillHubApplicationService service = new AgentSkillHubApplicationService(
+                repository,
+                mock(ConfigurationManagementRepository.class),
+                mock(ManagedWorkspaceRepository.class),
+                mock(CommonParameterValues.class),
+                mock(GitWorkspaceService.class),
+                new ObjectMapper());
+
+        var response = service.classifySkill(
+                asset.assetId(), "test", "test_design", new UserId("usr_admin"));
+
+        assertThat(response.category()).isEqualTo("TEST");
+        assertThat(response.subcategory()).isEqualTo("TEST_DESIGN");
+        verify(repository).updateSkillClassification(
+                asset.assetId(), SkillCategory.TEST, SkillSubcategory.TEST_DESIGN,
+                "usr_admin", response.classifiedAt());
+        assertThatThrownBy(() -> service.classifySkill(
+                asset.assetId(), "CODE", "TEST_EXECUTION", new UserId("usr_admin")))
+                .hasMessageContaining("不匹配");
     }
 
     @Test

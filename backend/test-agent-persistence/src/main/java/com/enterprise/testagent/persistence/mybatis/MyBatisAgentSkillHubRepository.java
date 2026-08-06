@@ -13,6 +13,8 @@ import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Reference;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.ReferenceConsumer;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.ReferenceUpdate;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Revision;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillCategory;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillSubcategory;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.UpdateOperation;
 import com.enterprise.testagent.domain.hub.AgentSkillHubRepository;
 import com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows.ArtifactRow;
@@ -61,7 +63,8 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
                 String assetId = id("hub_asset_");
                 mapper.insertAsset(new AssetRow(
                         assetId, snapshot.sourceAppId(), snapshot.sourceApplicationWorkspaceId(),
-                        pushed.assetType().name(), pushed.technicalId(), null, null,
+                        pushed.assetType().name(), pushed.technicalId(), SkillCategory.OTHER.name(), null,
+                        null, null,
                         snapshot.pushedAt(), snapshot.pushedAt()));
                 asset = mapper.findAssetByIdentity(
                         snapshot.sourceAppId(), snapshot.sourceApplicationWorkspaceId(),
@@ -98,19 +101,38 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
     }
 
     @Override
-    public List<AssetSummary> listAssets(AssetType type, String keyword, String currentUserId,
-                                         String targetApplicationWorkspaceId, boolean referencedOnly,
-                                         int offset, int limit) {
-        return mapper.listAssets(type == null ? null : type.name(), keyword, currentUserId,
+    public List<AssetSummary> listAssets(
+            AssetType type, SkillCategory category, SkillSubcategory subcategory,
+            String keyword, String currentUserId,
+            String targetApplicationWorkspaceId, boolean referencedOnly,
+            int offset, int limit) {
+        return mapper.listAssets(type == null ? null : type.name(), keyword,
+                        category == null ? null : category.name(),
+                        subcategory == null ? null : subcategory.name(), currentUserId,
                         targetApplicationWorkspaceId, referencedOnly, offset, limit).stream()
                 .map(this::toSummary).toList();
     }
 
     @Override
-    public long countAssets(AssetType type, String keyword, String targetApplicationWorkspaceId,
-                            boolean referencedOnly) {
+    public long countAssets(
+            AssetType type, SkillCategory category, SkillSubcategory subcategory,
+            String keyword, String targetApplicationWorkspaceId,
+            boolean referencedOnly) {
         return mapper.countAssets(type == null ? null : type.name(), keyword,
+                category == null ? null : category.name(),
+                subcategory == null ? null : subcategory.name(),
                 targetApplicationWorkspaceId, referencedOnly);
+    }
+
+    @Override
+    @Transactional
+    public void updateSkillClassification(
+            String assetId, SkillCategory category, SkillSubcategory subcategory,
+            String classifiedByUserId, Instant classifiedAt) {
+        if (mapper.updateSkillClassification(assetId, category.name(),
+                subcategory == null ? null : subcategory.name(), classifiedByUserId, classifiedAt) != 1) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Skill 分类更新失败，请刷新后重试");
+        }
     }
 
     @Override
@@ -249,7 +271,9 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
 
     private AssetSummary toSummary(AssetSummaryRow row) {
         Asset asset = new Asset(row.assetId(), row.sourceAppId(), row.sourceApplicationWorkspaceId(),
-                AssetType.valueOf(row.assetType()), row.technicalId(), row.latestPushedRevisionId(),
+                AssetType.valueOf(row.assetType()), row.technicalId(), SkillCategory.valueOf(row.skillCategory()),
+                row.skillSubcategory() == null ? null : SkillSubcategory.valueOf(row.skillSubcategory()),
+                row.latestPushedRevisionId(),
                 row.latestPublishedRevisionId(), row.assetCreatedAt(), row.assetUpdatedAt());
         Revision pushed = revision(row.pushedRevisionId(), row.assetId(), row.pushedSourceVersionId(),
                 row.pushedSourceCommitHash(), row.pushedArtifactSha256(), row.pushedContentSha256(),
@@ -296,7 +320,9 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
 
     private Asset toDomain(AssetRow row) {
         return new Asset(row.assetId(), row.sourceAppId(), row.sourceApplicationWorkspaceId(),
-                AssetType.valueOf(row.assetType()), row.technicalId(), row.latestPushedRevisionId(),
+                AssetType.valueOf(row.assetType()), row.technicalId(), SkillCategory.valueOf(row.skillCategory()),
+                row.skillSubcategory() == null ? null : SkillSubcategory.valueOf(row.skillSubcategory()),
+                row.latestPushedRevisionId(),
                 row.latestPublishedRevisionId(), row.createdAt(), row.updatedAt());
     }
 

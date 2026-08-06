@@ -18,6 +18,8 @@ import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedSnapshot;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Reference;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.ReferenceUpdate;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Revision;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillCategory;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillSubcategory;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.UpdateOperation;
 import com.enterprise.testagent.domain.hub.AgentSkillHubPushIndexer;
 import com.enterprise.testagent.domain.hub.AgentSkillHubRepository;
@@ -180,17 +182,23 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
     }
 
     public AgentSkillHubResponses.PageResponse<AgentSkillHubResponses.AssetResponse> listAssets(
-            String type, String keyword, boolean referencedOnly, int page, int size,
+            String type, String category, String subcategory, String keyword,
+            boolean referencedOnly, int page, int size,
             String targetRuntimeWorkspaceId, UserId userId) {
         int normalizedPage = Math.max(1, page);
         int normalizedSize = Math.max(1, Math.min(MAX_PAGE_SIZE, size));
         AssetType assetType = type == null || type.isBlank() ? null : parseType(type);
+        SkillCategory skillCategory = category == null || category.isBlank() ? null : parseCategory(category);
+        SkillSubcategory skillSubcategory = subcategory == null || subcategory.isBlank()
+                ? null : parseSubcategory(subcategory);
+        validateClassificationFilter(assetType, skillCategory, skillSubcategory);
         String normalizedKeyword = keyword == null || keyword.isBlank() ? null : keyword.trim();
         String targetWorkspaceId = targetApplicationWorkspaceId(targetRuntimeWorkspaceId, userId);
         if (referencedOnly && targetWorkspaceId == null) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "查看当前应用引用时必须选择个人工作区");
         }
-        List<BuiltinSnapshot> builtins = referencedOnly ? List.of() : publicBuiltinSnapshots(assetType, normalizedKeyword);
+        List<BuiltinSnapshot> builtins = referencedOnly ? List.of()
+                : publicBuiltinSnapshots(assetType, normalizedKeyword, skillCategory, skillSubcategory);
         int offset = (normalizedPage - 1) * normalizedSize;
         List<AgentSkillHubResponses.AssetResponse> items = new ArrayList<>();
         if (offset < builtins.size()) {
@@ -200,19 +208,20 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         int databaseOffset = Math.max(0, offset - builtins.size());
         int remaining = normalizedSize - items.size();
         if (remaining > 0) {
-            repository.listAssets(assetType, normalizedKeyword, userId.value(), targetWorkspaceId, referencedOnly,
-                            databaseOffset, remaining).stream()
+            repository.listAssets(assetType, skillCategory, skillSubcategory, normalizedKeyword, userId.value(),
+                            targetWorkspaceId, referencedOnly, databaseOffset, remaining).stream()
                     .map(this::response).forEach(items::add);
         }
         return new AgentSkillHubResponses.PageResponse<>(
                 List.copyOf(items),
-                builtins.size() + repository.countAssets(assetType, normalizedKeyword, targetWorkspaceId, referencedOnly),
+                builtins.size() + repository.countAssets(assetType, skillCategory, skillSubcategory,
+                        normalizedKeyword, targetWorkspaceId, referencedOnly),
                 normalizedPage, normalizedSize);
     }
 
     public AgentSkillHubResponses.PageResponse<AgentSkillHubResponses.AssetResponse> listAssets(
             String type, String keyword, int page, int size, UserId userId) {
-        return listAssets(type, keyword, false, page, size, null, userId);
+        return listAssets(type, null, null, keyword, false, page, size, null, userId);
     }
 
     public AgentSkillHubResponses.AssetDetailResponse getAsset(
@@ -236,7 +245,8 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         ArtifactEnvelope envelope = revision.deleted() ? new ArtifactEnvelope(List.of()) : decode(requireArtifact(revision));
         String targetWorkspaceId = targetApplicationWorkspaceId(targetRuntimeWorkspaceId, userId);
         AssetSummary summary = repository.listAssets(
-                        asset.assetType(), asset.technicalId(), userId.value(), targetWorkspaceId, false, 0, 100).stream()
+                        asset.assetType(), null, null, asset.technicalId(), userId.value(),
+                        targetWorkspaceId, false, 0, 100).stream()
                 .filter(item -> item.asset().assetId().equals(assetId)).findFirst()
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Hub 资产不存在"));
         return new AgentSkillHubResponses.AssetDetailResponse(
@@ -299,6 +309,30 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         ensureAcyclic(assetId, dependencies);
         repository.publish(assetId, revision.revisionId(), userId.value(), List.copyOf(dependencies), now);
         return new AgentSkillHubResponses.PublishResponse(assetId, revision.revisionId(), now, dependencies.size());
+    }
+
+    /**
+     * 由 API 层确认超级管理员身份后，修改用户推送 Skill 的事项分类；后续 push 只更新修订，不覆盖分类。
+     */
+    public AgentSkillHubResponses.ClassificationResponse classifySkill(
+            String assetId, String category, String subcategory, UserId userId) {
+        if (isBuiltinAssetId(assetId)) {
+            throw new PlatformException(ErrorCode.CONFLICT, "平台内置 Skill 不支持人工分类");
+        }
+        Asset asset = requireAsset(assetId);
+        if (asset.assetType() != AssetType.SKILL) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "只有 Skill 可以设置事项分类");
+        }
+        SkillCategory normalizedCategory = parseCategory(category);
+        SkillSubcategory normalizedSubcategory = subcategory == null || subcategory.isBlank()
+                ? null : parseSubcategory(subcategory);
+        validateExactClassification(normalizedCategory, normalizedSubcategory);
+        Instant now = Instant.now();
+        repository.updateSkillClassification(asset.assetId(), normalizedCategory, normalizedSubcategory,
+                userId.value(), now);
+        return new AgentSkillHubResponses.ClassificationResponse(
+                asset.assetId(), normalizedCategory.name(),
+                normalizedSubcategory == null ? null : normalizedSubcategory.name(), userId.value(), now);
     }
 
     public long countUpdates(String targetRuntimeWorkspaceId, UserId userId) {
@@ -857,7 +891,12 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
      * 公共配置本来就由 OpenCode 全局加载，因此仅以虚拟、只读 Hub 资产展示。
      * 修订 ID 携带精确 Git commit，文件读取始终回到该提交，不把可变工作树伪装成快照。
      */
-    private List<BuiltinSnapshot> publicBuiltinSnapshots(AssetType type, String keyword) {
+    private List<BuiltinSnapshot> publicBuiltinSnapshots(
+            AssetType type, String keyword, SkillCategory category, SkillSubcategory subcategory) {
+        // 公共配置资产没有持久化分类；与用户新推送资产保持一致，统一展示在“其他”。
+        if ((category != null && category != SkillCategory.OTHER) || subcategory != null) {
+            return List.of();
+        }
         Path repoRoot = publicConfigGitRoot();
         if (repoRoot == null || !git.isGitRepository(repoRoot)) return List.of();
         try {
@@ -1005,6 +1044,7 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         PushedAsset asset = snapshot.pushedAsset();
         return new AgentSkillHubResponses.AssetResponse(snapshot.assetId(), snapshot.type().name(),
                 snapshot.technicalId(), asset.displayName(), asset.displayNameEn(), asset.description(),
+                SkillCategory.OTHER.name(), null,
                 "platform", "平台内置", "public", "公共配置", snapshot.revisionId(), snapshot.revisionId(),
                 true, true, false, false, false, null, 0, snapshot.pushedAt(), snapshot.pushedAt());
     }
@@ -1015,6 +1055,8 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         Revision display = published == null ? pushed : published;
         return new AgentSkillHubResponses.AssetResponse(summary.asset().assetId(), summary.asset().assetType().name(),
                 summary.asset().technicalId(), display.displayName(), display.displayNameEn(), display.description(),
+                summary.asset().skillCategory().name(), summary.asset().skillSubcategory() == null
+                        ? null : summary.asset().skillSubcategory().name(),
                 summary.asset().sourceAppId(), summary.sourceAppName(), summary.asset().sourceApplicationWorkspaceId(),
                 summary.sourceWorkspaceName(), pushed.revisionId(), published == null ? null : published.revisionId(),
                 published != null, false, summary.updateAvailable(), isEffectiveReference(summary.referenceStatus()),
@@ -1116,6 +1158,59 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
     private AssetType parseType(String type) {
         try { return AssetType.valueOf(type.trim().toUpperCase(Locale.ROOT)); }
         catch (Exception exception) { throw new PlatformException(ErrorCode.VALIDATION_ERROR, "Hub 资产类型无效"); }
+    }
+
+    private SkillCategory parseCategory(String category) {
+        try { return SkillCategory.valueOf(category.trim().toUpperCase(Locale.ROOT)); }
+        catch (Exception exception) { throw new PlatformException(ErrorCode.VALIDATION_ERROR, "Skill 事项分类无效"); }
+    }
+
+    private SkillSubcategory parseSubcategory(String subcategory) {
+        try { return SkillSubcategory.valueOf(subcategory.trim().toUpperCase(Locale.ROOT)); }
+        catch (Exception exception) { throw new PlatformException(ErrorCode.VALIDATION_ERROR, "Skill 具体事项无效"); }
+    }
+
+    /** 列表允许只选一级分类；一旦给出二级事项，就必须与一级分类匹配。 */
+    private void validateClassificationFilter(
+            AssetType assetType, SkillCategory category, SkillSubcategory subcategory) {
+        if ((category != null || subcategory != null) && assetType != AssetType.SKILL) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "事项分类筛选仅适用于 Skill");
+        }
+        if (subcategory != null) {
+            if (category == null) {
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "筛选具体事项时必须指定一级分类");
+            }
+            validateSubcategoryBelongsToCategory(category, subcategory);
+        }
+    }
+
+    /** 持久化分类必须落到唯一有效的末级事项，WORKER/OTHER 当前无二级事项。 */
+    private void validateExactClassification(SkillCategory category, SkillSubcategory subcategory) {
+        if (category == SkillCategory.TEST || category == SkillCategory.CODE) {
+            if (subcategory == null) {
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "该一级分类必须选择具体事项");
+            }
+            validateSubcategoryBelongsToCategory(category, subcategory);
+            return;
+        }
+        if (subcategory != null) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "该一级分类暂不支持二级事项");
+        }
+    }
+
+    private void validateSubcategoryBelongsToCategory(
+            SkillCategory category, SkillSubcategory subcategory) {
+        boolean valid = switch (category) {
+            case TEST -> subcategory == SkillSubcategory.TEST_DESIGN
+                    || subcategory == SkillSubcategory.TEST_DATA_CONSTRUCTION
+                    || subcategory == SkillSubcategory.TEST_EXECUTION
+                    || subcategory == SkillSubcategory.TEST_ANALYSIS;
+            case CODE -> subcategory == SkillSubcategory.WHITE_BOX_ANALYSIS;
+            case WORKER, OTHER -> false;
+        };
+        if (!valid) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "具体事项与一级分类不匹配");
+        }
     }
 
     private String repoRelativePrefix(Path repoRoot, Path workspaceRoot) {

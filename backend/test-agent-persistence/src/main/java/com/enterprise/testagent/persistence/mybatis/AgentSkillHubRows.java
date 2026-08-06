@@ -13,7 +13,8 @@ public final class AgentSkillHubRows {
     }
 
     public record AssetRow(String assetId, String sourceAppId, String sourceApplicationWorkspaceId,
-                           String assetType, String technicalId, String latestPushedRevisionId,
+                           String assetType, String technicalId, String skillCategory, String skillSubcategory,
+                           String latestPushedRevisionId,
                            String latestPublishedRevisionId, Instant createdAt, Instant updatedAt) {
     }
 
@@ -40,7 +41,8 @@ public final class AgentSkillHubRows {
 
     public record AssetSummaryRow(
             String assetId, String sourceAppId, String sourceApplicationWorkspaceId, String assetType,
-            String technicalId, String latestPushedRevisionId, String latestPublishedRevisionId,
+            String technicalId, String skillCategory, String skillSubcategory,
+            String latestPushedRevisionId, String latestPublishedRevisionId,
             Instant assetCreatedAt, Instant assetUpdatedAt,
             String pushedRevisionId, String pushedSourceVersionId, String pushedSourceCommitHash,
             String pushedArtifactSha256, String pushedContentSha256, String pushedDisplayName,

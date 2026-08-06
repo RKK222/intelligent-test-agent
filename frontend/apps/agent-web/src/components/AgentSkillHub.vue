@@ -9,6 +9,8 @@ import type {
   AgentSkillHubAssetDetail,
   AgentSkillHubAssetType,
   AgentSkillHubConflictFile,
+  AgentSkillHubSkillCategory,
+  AgentSkillHubSkillSubcategory,
   AgentSkillHubUpdate,
   AgentSkillHubUpdateOperation,
   WorkspaceGitConflict
@@ -48,6 +50,7 @@ const props = defineProps<{
   selectedAppId?: string;
   workspaceId?: string;
   canManage: boolean;
+  canClassifySkills?: boolean;
   runtimeMcp?: RuntimeHubItem[];
   runtimeTools?: RuntimeHubItem[];
 }>();
@@ -62,7 +65,29 @@ const api = inject<BackendApiClient>("api")!;
 if (!api) throw new Error("AgentSkillHub requires backend api");
 
 type HubTab = "DISCOVER" | "AGENT" | "SKILL" | "MCP" | "TOOL" | "REFERENCED" | "UPDATES";
+type SkillCategoryFilter = AgentSkillHubSkillCategory | "ALL";
+type SkillSubcategoryFilter = AgentSkillHubSkillSubcategory | "ALL";
+
+const SKILL_CATEGORIES: Array<{ value: SkillCategoryFilter; label: string; hint: string }> = [
+  { value: "ALL", label: "全部", hint: "全部 Skill" },
+  { value: "WORKER", label: "日常工作", hint: "Worker" },
+  { value: "TEST", label: "测试", hint: "Test" },
+  { value: "CODE", label: "代码", hint: "Code" },
+  { value: "OTHER", label: "其他", hint: "待分类" }
+];
+const TEST_SUBCATEGORIES: Array<{ value: AgentSkillHubSkillSubcategory; label: string }> = [
+  { value: "TEST_DESIGN", label: "测试设计" },
+  { value: "TEST_DATA_CONSTRUCTION", label: "测试数据构造" },
+  { value: "TEST_EXECUTION", label: "测试执行" },
+  { value: "TEST_ANALYSIS", label: "测试分析" }
+];
+const CODE_SUBCATEGORIES: Array<{ value: AgentSkillHubSkillSubcategory; label: string }> = [
+  { value: "WHITE_BOX_ANALYSIS", label: "白盒分析" }
+];
+
 const tab = ref<HubTab>("DISCOVER");
+const skillCategory = ref<SkillCategoryFilter>("ALL");
+const skillSubcategory = ref<SkillSubcategoryFilter>("ALL");
 const keyword = ref("");
 const loading = ref(false);
 const actionLoading = ref(false);
@@ -90,6 +115,19 @@ const activeConflictPath = ref<string | null>(null);
 const detailPanelWidth = ref(640);
 const detailFullscreen = ref(false);
 const detailResizing = ref(false);
+const classificationCategory = ref<AgentSkillHubSkillCategory>("OTHER");
+const classificationSubcategory = ref<AgentSkillHubSkillSubcategory | null>(null);
+
+const visibleSkillSubcategories = computed(() => {
+  if (skillCategory.value === "TEST") return TEST_SUBCATEGORIES;
+  if (skillCategory.value === "CODE") return CODE_SUBCATEGORIES;
+  return [];
+});
+const classificationSubcategories = computed(() => {
+  if (classificationCategory.value === "TEST") return TEST_SUBCATEGORIES;
+  if (classificationCategory.value === "CODE") return CODE_SUBCATEGORIES;
+  return [];
+});
 
 const runtimeItems = computed(() => {
   const source = tab.value === "MCP" ? props.runtimeMcp ?? [] : tab.value === "TOOL" ? props.runtimeTools ?? [] : [];
@@ -230,6 +268,8 @@ async function loadAssets() {
     }
     const page = await api.listAgentSkillHubAssets({
       type: selectedAssetType(requestedTab),
+      category: requestedTab === "SKILL" && skillCategory.value !== "ALL" ? skillCategory.value : undefined,
+      subcategory: requestedTab === "SKILL" && skillSubcategory.value !== "ALL" ? skillSubcategory.value : undefined,
       keyword: requestedKeyword || undefined,
       referencedOnly: requestedTab === "REFERENCED",
       targetWorkspaceId: requestedWorkspaceId,
@@ -313,9 +353,60 @@ async function selectAsset(asset: AgentSkillHubAsset) {
   selectedAsset.value = asset;
   clampDetailPanelWidth();
   detail.value = await api.getAgentSkillHubAsset(asset.assetId, undefined, props.workspaceId);
+  classificationCategory.value = detail.value.asset.category ?? "OTHER";
+  classificationSubcategory.value = detail.value.asset.subcategory ?? null;
   selectedFile.value = detail.value.files[0]?.path ?? null;
   if (selectedFile.value) await readFile(selectedFile.value);
   else fileContent.value = "";
+}
+
+/** 一级分类切换会清空二级筛选，避免把上一分类的具体事项带入新请求。 */
+function selectSkillCategory(category: SkillCategoryFilter) {
+  skillCategory.value = category;
+  skillSubcategory.value = "ALL";
+  void loadAssets();
+}
+
+function selectSkillSubcategory(subcategory: SkillSubcategoryFilter) {
+  skillSubcategory.value = subcategory;
+  void loadAssets();
+}
+
+function skillCategoryLabel(asset: AgentSkillHubAsset) {
+  return SKILL_CATEGORIES.find((item) => item.value === (asset.category ?? "OTHER"))?.label ?? "其他";
+}
+
+function skillSubcategoryLabel(asset: AgentSkillHubAsset) {
+  const value = asset.subcategory;
+  if (!value) return null;
+  return [...TEST_SUBCATEGORIES, ...CODE_SUBCATEGORIES].find((item) => item.value === value)?.label ?? value;
+}
+
+/** 超级管理员分类后直接更新当前快照，再按现有筛选重新拉取目录。 */
+async function saveSkillClassification() {
+  if (!props.canClassifySkills || selectedAsset.value?.type !== "SKILL" || selectedAsset.value.builtin) return;
+  actionLoading.value = true;
+  try {
+    const result = await api.updateAgentSkillHubClassification(
+      selectedAsset.value.assetId,
+      classificationCategory.value,
+      classificationSubcategory.value
+    );
+    const updated = {
+      ...selectedAsset.value,
+      category: result.category,
+      subcategory: result.subcategory ?? null
+    };
+    selectedAsset.value = updated;
+    if (detail.value) detail.value = { ...detail.value, asset: updated };
+    assets.value = assets.value.map((item) => item.assetId === updated.assetId ? updated : item);
+    ElMessage.success("Skill 事项分类已更新");
+    await loadAssets();
+  } catch (cause) {
+    ElMessage.error(message(cause));
+  } finally {
+    actionLoading.value = false;
+  }
 }
 
 function selectRuntimeItem(item: RuntimeHubItem) {
@@ -538,6 +629,20 @@ function consumerStatus(status: string) {
   return { key: "referenced", label: "引用生效" };
 }
 
+watch(classificationCategory, (category) => {
+  if (category === "TEST") {
+    if (!TEST_SUBCATEGORIES.some((item) => item.value === classificationSubcategory.value)) {
+      classificationSubcategory.value = "TEST_DESIGN";
+    }
+    return;
+  }
+  if (category === "CODE") {
+    classificationSubcategory.value = "WHITE_BOX_ANALYSIS";
+    return;
+  }
+  classificationSubcategory.value = null;
+});
+
 watch(tab, async (value) => {
   if (value === "UPDATES") {
     assetRequestVersion++;
@@ -683,6 +788,34 @@ onUnmounted(stopDetailResize);
           </div>
           <label class="hub-search"><Search :size="14" /><input v-model="keyword" placeholder="搜索名称、应用或技术 ID" /></label>
         </div>
+        <div v-if="tab === 'SKILL'" class="hub-taxonomy" aria-label="Skill 事项分类">
+          <div class="hub-taxonomy-row">
+            <span>事项分类</span>
+            <button
+              v-for="category in SKILL_CATEGORIES"
+              :key="category.value"
+              type="button"
+              :class="skillCategory === category.value && 'is-active'"
+              :title="category.hint"
+              @click="selectSkillCategory(category.value)"
+            >{{ category.label }}</button>
+          </div>
+          <div v-if="visibleSkillSubcategories.length" class="hub-taxonomy-row is-secondary">
+            <span>具体事项</span>
+            <button
+              type="button"
+              :class="skillSubcategory === 'ALL' && 'is-active'"
+              @click="selectSkillSubcategory('ALL')"
+            >全部</button>
+            <button
+              v-for="subcategory in visibleSkillSubcategories"
+              :key="subcategory.value"
+              type="button"
+              :class="skillSubcategory === subcategory.value && 'is-active'"
+              @click="selectSkillSubcategory(subcategory.value)"
+            >{{ subcategory.label }}</button>
+          </div>
+        </div>
         <div v-if="loading" class="hub-loading"><Loader2 class="hub-spin" :size="18" />{{ isRuntimeTab ? '正在同步运行态目录' : '正在读取远端快照' }}</div>
         <div v-else-if="isRuntimeTab && runtimeItems.length" class="hub-card-grid">
           <button
@@ -724,6 +857,9 @@ onUnmounted(stopDetailResize);
             </span>
             <strong>{{ asset.displayName || asset.technicalId }}</strong>
             <code>{{ asset.technicalId }}</code>
+            <span v-if="asset.type === 'SKILL'" class="hub-card-taxonomy">
+              {{ skillCategoryLabel(asset) }}<template v-if="skillSubcategoryLabel(asset)"> · {{ skillSubcategoryLabel(asset) }}</template>
+            </span>
             <p>{{ asset.description || '该能力暂未提供说明。' }}</p>
             <span class="hub-card-meta">
               <span class="hub-card-origin"><Building2 :size="12" />原创应用：<b>{{ asset.builtin ? '平台内置' : asset.sourceAppName }}</b></span>
@@ -815,6 +951,40 @@ onUnmounted(stopDetailResize);
                   >{{ selectedAsset.referenceStatus === 'PENDING_REMOVE' ? '取消待推送' : '取消引用' }}</button>
                 </div>
               </div>
+
+              <section v-if="selectedAsset.type === 'SKILL'" class="hub-classification">
+                <div>
+                  <strong>事项分类</strong>
+                  <span>用户推送默认进入“其他”，由超级管理员归入受控事项。</span>
+                </div>
+                <div v-if="canClassifySkills && !selectedAsset.builtin" class="hub-classification-form">
+                  <label>
+                    一级分类
+                    <select v-model="classificationCategory" aria-label="Skill 一级分类">
+                      <option value="WORKER">日常工作（Worker）</option>
+                      <option value="TEST">测试（Test）</option>
+                      <option value="CODE">代码（Code）</option>
+                      <option value="OTHER">其他</option>
+                    </select>
+                  </label>
+                  <label v-if="classificationSubcategories.length">
+                    具体事项
+                    <select v-model="classificationSubcategory" aria-label="Skill 具体事项">
+                      <option
+                        v-for="subcategory in classificationSubcategories"
+                        :key="subcategory.value"
+                        :value="subcategory.value"
+                      >{{ subcategory.label }}</option>
+                    </select>
+                  </label>
+                  <button class="hub-secondary" type="button" :disabled="actionLoading" @click="saveSkillClassification">
+                    保存分类
+                  </button>
+                </div>
+                <b v-else class="hub-classification-value">
+                  {{ skillCategoryLabel(selectedAsset) }}<template v-if="skillSubcategoryLabel(selectedAsset)"> · {{ skillSubcategoryLabel(selectedAsset) }}</template>
+                </b>
+              </section>
 
               <div class="hub-revision-strip">
                 <GitCommitHorizontal :size="17" />
@@ -953,6 +1123,13 @@ onUnmounted(stopDetailResize);
 .hub-catalog-head>div>span,.hub-section-heading>div>span{color:#64748b;font-family:var(--font-mono);font-size:9px;letter-spacing:.12em;font-weight:600}
 .hub-catalog-head h2,.hub-section-heading h2{margin:2px 0 1px;font-size:18px;letter-spacing:-.02em;color:#0f172a}
 .hub-catalog-head p,.hub-section-heading p{margin:0;color:#64748b;font-size:11px}
+.hub-taxonomy{display:flex;flex-direction:column;gap:7px;margin:-4px 0 16px;border:1px solid #e2e8f0;border-radius:9px;background:#f8fafc;padding:9px 11px}
+.hub-taxonomy-row{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.hub-taxonomy-row>span{width:56px;color:#64748b;font-size:9px;font-weight:700}
+.hub-taxonomy-row button{border:1px solid #cbd5e1;border-radius:999px;background:#fff;padding:4px 10px;color:#475569;font-size:9px;cursor:pointer}
+.hub-taxonomy-row button:hover{border-color:#93c5fd;color:#1d4ed8}
+.hub-taxonomy-row button.is-active{border-color:#2563eb;background:#eff6ff;color:#1d4ed8;font-weight:700}
+.hub-taxonomy-row.is-secondary{border-top:1px dashed #dbe3ed;padding-top:7px}
 .hub-search{display:flex;width:min(300px,45%);height:34px;align-items:center;gap:7px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;padding:0 10px;color:#94a3b8;box-shadow:0 1px 2px rgba(0,0,0,.03)}
 .hub-search:focus-within{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
 .hub-search input{min-width:0;flex:1;border:0;outline:0;font-size:11px;color:#0f172a}
@@ -970,6 +1147,7 @@ onUnmounted(stopDetailResize);
 .hub-card-top .hub-asset-status{margin-left:auto}
 .hub-asset-card>strong{overflow:hidden;margin-top:10px;text-overflow:ellipsis;font-size:14px;white-space:nowrap;color:#0f172a;font-weight:700}
 .hub-asset-card>code{margin-top:2px;color:#64748b;font-size:9px;font-family:var(--font-mono)}
+.hub-card-taxonomy{align-self:flex-start;margin-top:7px;border-radius:4px;background:#f1f5f9;padding:3px 6px;color:#475569;font-size:9px;font-weight:700}
 .hub-asset-card>p{display:-webkit-box;min-height:32px;overflow:hidden;margin:8px 0;color:#475569;font-size:11px;line-height:1.5;-webkit-box-orient:vertical;-webkit-line-clamp:2}
 .hub-card-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:auto;border-top:1px solid #f1f5f9;padding-top:9px;color:#64748b;font-size:10px}
 .hub-card-meta>span{display:flex;min-width:0;align-items:center;gap:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1007,6 +1185,15 @@ onUnmounted(stopDetailResize);
 .hub-detail-top>div:first-child{min-width:0}
 .hub-detail-top code{color:#64748b;font-size:10px;font-family:var(--font-mono)}
 .hub-detail-top p{margin:6px 0 0;color:var(--hub-muted);font-size:11px;line-height:1.6}
+.hub-classification{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-top:12px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;padding:10px 12px}
+.hub-classification>div:first-child{display:flex;min-width:150px;flex-direction:column;gap:2px}
+.hub-classification>div:first-child strong{color:#1e3a8a;font-size:10px}
+.hub-classification>div:first-child span{color:#64748b;font-size:9px;line-height:1.4}
+.hub-classification-form{display:flex;align-items:flex-end;justify-content:flex-end;flex-wrap:wrap;gap:7px}
+.hub-classification-form label{display:flex;flex-direction:column;gap:3px;color:#475569;font-size:8px;font-weight:700}
+.hub-classification-form select{height:29px;min-width:132px;border:1px solid #93c5fd;border-radius:6px;background:#fff;padding:0 8px;color:#1e293b;font-size:10px;outline:0}
+.hub-classification-form select:focus{border-color:#2563eb;box-shadow:0 0 0 2px rgba(37,99,235,.12)}
+.hub-classification-value{flex:none;border-radius:5px;background:#dbeafe;padding:5px 8px;color:#1d4ed8;font-size:10px}
 .hub-runtime-detail{display:flex;flex-direction:column;gap:16px}
 .hub-runtime-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .hub-runtime-summary>div{display:flex;min-width:0;flex-direction:column;gap:5px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;padding:12px}
@@ -1107,5 +1294,5 @@ onUnmounted(stopDetailResize);
 .hub-binary-conflict p{color:#64748b;font-size:11px;line-height:1.6}
 .hub-binary-conflict section>div{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
 
-@media (max-width:760px){.hub-header-main{flex-direction:column;align-items:stretch}.hub-header-actions{flex-direction:column;align-items:stretch}.hub-overview{flex-wrap:wrap}.hub-tabs{overflow:auto;padding:0 12px}.hub-tabs button{flex:none}.hub-catalog-head{align-items:stretch;flex-direction:column}.hub-search{width:100%}.hub-detail-panel{width:100%!important}.hub-runtime-summary{grid-template-columns:1fr}.hub-detail-resize-handle{display:none}}
+@media (max-width:760px){.hub-header-main{flex-direction:column;align-items:stretch}.hub-header-actions{flex-direction:column;align-items:stretch}.hub-overview{flex-wrap:wrap}.hub-tabs{overflow:auto;padding:0 12px}.hub-tabs button{flex:none}.hub-catalog-head{align-items:stretch;flex-direction:column}.hub-search{width:100%}.hub-classification{align-items:stretch;flex-direction:column}.hub-classification-form{justify-content:flex-start}.hub-detail-panel{width:100%!important}.hub-runtime-summary{grid-template-columns:1fr}.hub-detail-resize-handle{display:none}}
 </style>
