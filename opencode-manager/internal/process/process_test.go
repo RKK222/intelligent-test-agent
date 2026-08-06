@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1017,6 +1018,79 @@ func TestManagerStopTerminatesProcessAndRemovesState(t *testing.T) {
 	_, ok, err := store.Get(4096)
 	if err != nil || ok {
 		t.Fatalf("expected state to be removed, ok=%v err=%v", ok, err)
+	}
+}
+
+func TestManagerStopOwnedRemovesControlProcessStateWithoutSendingSignals(t *testing.T) {
+	controlPIDs := []int{1, os.Getppid(), os.Getpid()}
+	for _, pid := range controlPIDs {
+		t.Run(fmt.Sprintf("pid-%d", pid), func(t *testing.T) {
+			cfg := testConfig(t)
+			store := state.NewFileStore(t.TempDir())
+			if err := store.Save(state.ProcessRecord{
+				Port:          4096,
+				PID:           pid,
+				UnifiedAuthID: "user-a",
+				SessionPath:   "/tmp/sessions/users/user-a",
+				StartedAt:     time.Now().UTC(),
+				TraceID:       "trace_stale_container_generation",
+			}); err != nil {
+				t.Fatalf("save stale process state: %v", err)
+			}
+			signaler := &capturingSignaler{}
+			manager := NewManager(cfg, store, &fakeStarter{pid: 12345}, signaler, health.Checker{
+				ProcessAlive: func(int) bool { return true },
+			})
+
+			result, err := manager.StopOwned(context.Background(), OwnedStopRequest{
+				Port:                  4096,
+				ExpectedUnifiedAuthID: "user-a",
+				ExpectedPID:           pid,
+				TraceID:               "trace_control_pid_reuse",
+				Timeout:               time.Millisecond,
+			})
+
+			if err != nil || result.Status != StatusStopped {
+				t.Fatalf("stale control-process state should be removed, result=%#v err=%v", result, err)
+			}
+			if len(signaler.terminatedPIDs) != 0 || len(signaler.killedPIDs) != 0 {
+				t.Fatalf("control process must never receive lifecycle signals, signaler=%#v", signaler)
+			}
+			if _, ok, getErr := store.Get(4096); getErr != nil || ok {
+				t.Fatalf("stale control-process state should be deleted, ok=%t err=%v", ok, getErr)
+			}
+		})
+	}
+}
+
+func TestManagerResetSupervisorStateRemovesPreviousContainerGenerationWithoutSignals(t *testing.T) {
+	cfg := testConfig(t)
+	store := state.NewFileStore(t.TempDir())
+	for index, pid := range []int{os.Getpid(), 12345} {
+		if err := store.Save(state.ProcessRecord{
+			Port:      4096 + index,
+			PID:       pid,
+			StartedAt: time.Now().UTC(),
+			TraceID:   "trace_previous_container_generation",
+		}); err != nil {
+			t.Fatalf("save previous generation state: %v", err)
+		}
+	}
+	signaler := &capturingSignaler{}
+	manager := NewManager(cfg, store, &fakeStarter{pid: 22345}, signaler, health.Checker{})
+
+	removed, err := manager.ResetSupervisorState()
+
+	if err != nil || removed != 2 {
+		t.Fatalf("expected two previous-generation states removed, removed=%d err=%v", removed, err)
+	}
+	if len(signaler.terminatedPIDs) != 0 || len(signaler.killedPIDs) != 0 {
+		t.Fatalf("startup state reset must not signal reused pids, signaler=%#v", signaler)
+	}
+	for _, port := range []int{4096, 4097} {
+		if _, ok, getErr := store.Get(port); getErr != nil || ok {
+			t.Fatalf("previous-generation state should be deleted for port %d, ok=%t err=%v", port, ok, getErr)
+		}
 	}
 }
 

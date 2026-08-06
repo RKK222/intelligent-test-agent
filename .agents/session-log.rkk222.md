@@ -6684,3 +6684,38 @@
 
 - 当前 manager 修复包的数据库验收不会误套首次升级条件；只调整稳定部署说明，不改 API、事件、SQL、
   运行配置、generated SDK 或 OpenCode 上游源码。
+
+## 2026-08-06 - 阻断容器重启后的 Manager PID 复用自杀
+
+### Why
+
+- 移除常驻 watcher 后企业 worker 仍约两分钟重启，最后一行变为 entrypoint 第 103 行、PID 12 被 Killed；
+  该行仍是 `wait`，数字 12 是 manager PID，不是错误码。
+- manager state 持久化到宿主机，但 worker 重启会结束 PID namespace 内全部用户子进程；旧 state 继续保留
+  数值 PID 后，PID 可能复用成新 entrypoint/manager。后台迟到 `stopOwned` 命中旧 UCID+PID 后会让 manager
+  先向自己 TERM、等待自身退出超时，再向自己 KILL，形成固定周期重启。
+
+### What
+
+- `opencode-manager run` 在连接 Java 前复用现有 FileStore List/Delete 清除上一容器世代的全部进程 state，
+  输出 `event=manager_previous_generation_state_clear`；既有 Java `OpencodeProcessAutoRecoveryService` 继续按
+  持久 binding 恢复仍有运行意图的用户实例。
+- 停止路径增加最终控制面保护：state PID 等于容器 PID 1、entrypoint 父 PID 或 manager 当前 PID 时，只删除
+  失效 state 并返回幂等停止，绝不发送 TERM/KILL；普通与 `stopOwned` 共用同一 `stopRecord`。
+- 同步 manager README、企业后台排障和内部发布说明，纠正“容器重启后继续识别 PID state”的旧描述。
+
+### How
+
+- 新增真实 helper supervisor 子进程测试，预置 PID 12 state 后验证连接后台前删除、审计日志和正常 TERM；
+  `stopOwned` 回归覆盖 PID 1/父 PID/manager PID，断言 TERM/KILL 均为 0。Go 全量测试、`-race` 和 vet 通过。
+- JDK 25 下现有 Java 自动恢复测试 3 项通过；launcher/entrypoint 9 项、runtime/Git ignore/AI 文档门禁通过。
+- 实际重建 linux/amd64 worker 镜像并通过 OpenCode 1.18.4、Codex/Python smoke；镜像内预置 PID 12 state 的
+  真实 manager 运行探针输出 `removedCount=1`，state 消失且进程可正常 TERM。
+
+### Result
+
+- 容器世代 PID 复用不再能让 manager/entrypoint 自杀；上一轮只按资源方向处理并不完整，本轮补上了与现场
+  两分钟周期和 PID 12 一致的根因路径。
+- 未修改 Java API/事件、数据库/Flyway/MyBatis SQL、环境配置、generated SDK 或 OpenCode 上游源码；Mac
+  仅生成了本地验证镜像和 `--no-save/--no-zip` 临时 programs，正式内外层企业交付包仍需按标准流程重建，
+  真实 Docker 18.09/linux-amd64 节点仍需完成超过原故障窗口的长稳验收。

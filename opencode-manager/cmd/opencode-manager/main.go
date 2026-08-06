@@ -81,6 +81,15 @@ func runSupervisor() int {
 		process.OSSignaler{},
 		health.Checker{},
 	)
+	removedStateCount, err := manager.ResetSupervisorState()
+	if err != nil {
+		log.Printf("event=manager_previous_generation_state_clear status=failed error=%s", sanitizeLogValue(err.Error()))
+		writeJSON(process.Result{Status: process.StatusFailed, Message: "clear previous manager process state failed"})
+		return 1
+	}
+	if removedStateCount > 0 {
+		log.Printf("event=manager_previous_generation_state_clear status=success removedCount=%d", removedStateCount)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	supervisor := control.NewSupervisor(cfg, manager)

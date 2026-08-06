@@ -166,6 +166,26 @@ func NewManager(cfg config.Config, store Store, starter Starter, signaler Signal
 	return m
 }
 
+// ResetSupervisorState 清除上一容器进程世代遗留的本地 PID state。
+// supervisor 是 worker 容器的唯一长运行 manager；容器启动时上一世代的子进程已经全部退出，
+// 旧 PID 可能复用为本世代的 entrypoint 或 manager，绝不能对这些数值直接发送停止信号。
+func (m *Manager) ResetSupervisorState() (int, error) {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	records, err := m.store.List()
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	for _, record := range records {
+		if err := m.store.Delete(record.Port); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
+}
+
 // MaxProcesses 返回当前生效的最大并发进程数，供 topologyMessage 上报后端。
 func (m *Manager) MaxProcesses() int {
 	return int(m.maxProcesses.Load())
@@ -533,6 +553,15 @@ func (m *Manager) stop(ctx context.Context, request StopRequest) (Result, error)
 
 // stopRecord 对已经在 lifecycleMu 内读取并按需校验过的精确 state 执行停止。
 func (m *Manager) stopRecord(ctx context.Context, request StopRequest, record state.ProcessRecord) (Result, error) {
+	if isControlProcessPID(record.PID) {
+		// 持久 state 中的旧 PID 可能在容器重启后复用为 tini、entrypoint 或 manager。
+		// 这类 PID 不可能是当前 manager 新建的用户进程，直接清理 state，禁止向控制面自身发信号。
+		if err := m.store.Delete(request.Port); err != nil {
+			return failed(request.Port, request.TraceID, err), err
+		}
+		record.TraceID = request.TraceID
+		return result(StatusStopped, record, "stale process state removed without signaling control process", request.TraceID), nil
+	}
 	finished := false
 	if err := m.signaler.Terminate(record.PID); err != nil {
 		if !isProcessFinishedError(err) {
@@ -562,6 +591,10 @@ func (m *Manager) stopRecord(ctx context.Context, request StopRequest, record st
 	}
 	record.TraceID = request.TraceID
 	return result(StatusStopped, record, "opencode server stopped", request.TraceID), nil
+}
+
+func isControlProcessPID(pid int) bool {
+	return pid == 1 || pid == os.Getpid() || pid == os.Getppid()
 }
 
 // Restart 先停止旧进程，再使用同一端口启动新进程。
