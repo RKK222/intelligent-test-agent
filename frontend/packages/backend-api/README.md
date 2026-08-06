@@ -54,7 +54,7 @@
 
 ### Agent & Skill Hub client
 
-- Hub 目录、详情、发布、更新列表和角标使用 `/workspace-management/agent-skill-hub` HTTP API；目录可携带 `referencedOnly + targetWorkspaceId` 获取当前应用引用清单，详情返回引用方应用/工作空间，更新请求按同一目标工作区统计。
+- Hub 目录、详情、发布、更新列表和角标使用 `/workspace-management/agent-skill-hub` HTTP API；Skill 目录可携带可选 `category/subcategory` 做服务端分页筛选，超级管理员分类使用同一资产资源下的 `PUT classification`，目录仍可携带 `referencedOnly + targetWorkspaceId` 获取当前应用引用清单，详情返回引用方应用/工作空间，更新请求按同一目标工作区统计。
 - `readAgentSkillHubFile` 使用独立 `agent-skill-hub/HUB` ticket；企业同源构建收到相对 `webSocketUrl` 时，client 必须用浏览器当前页面补全 origin 后再创建 WebSocket。引用、取消引用和更新方法复用目标 workspace 的 Agent 配置 WebSocket route/ticket/RPC，保持多 Java 文件路由边界。
 - 调用方只得到标准响应和冲突 DTO，不接触 Git 仓库路径、压缩制品或数据库标识实现。
 

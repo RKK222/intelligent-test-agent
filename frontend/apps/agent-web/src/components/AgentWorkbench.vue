@@ -9503,6 +9503,7 @@ async function handleLogout() {
             :selected-app-id="selectedAppId"
             :workspace-id="selectedWorkspace?.workspaceId"
             :can-manage="isAppAdmin && appSourceCapabilities.canPublishApplicationAgentConfig"
+            :can-classify-skills="isSuperAdmin"
             :runtime-mcp="runtimeInventoryForShell.mcp"
             :runtime-tools="runtimeInventoryForShell.tools"
             @update-count="hubUpdateCount = $event"

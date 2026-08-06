@@ -17,6 +17,23 @@ public final class AgentSkillHubModels {
         SKILL
     }
 
+    /** Skill Hub 一级事项分类；用户推送的 Skill 默认进入 OTHER。 */
+    public enum SkillCategory {
+        WORKER,
+        TEST,
+        CODE,
+        OTHER
+    }
+
+    /** Skill Hub 二级具体事项；WORKER 与 OTHER 当前没有二级事项。 */
+    public enum SkillSubcategory {
+        TEST_DESIGN,
+        TEST_DATA_CONSTRUCTION,
+        TEST_EXECUTION,
+        TEST_ANALYSIS,
+        WHITE_BOX_ANALYSIS
+    }
+
     public record Artifact(
             String sha256,
             String encoding,
@@ -47,10 +64,32 @@ public final class AgentSkillHubModels {
             String sourceApplicationWorkspaceId,
             AssetType assetType,
             String technicalId,
+            SkillCategory skillCategory,
+            SkillSubcategory skillSubcategory,
             String latestPushedRevisionId,
             String latestPublishedRevisionId,
             Instant createdAt,
             Instant updatedAt) {
+
+        public Asset {
+            Objects.requireNonNull(skillCategory, "skillCategory must not be null");
+        }
+
+        /** 兼容既有调用方；未显式分类的资产统一进入 OTHER。 */
+        public Asset(
+                String assetId,
+                String sourceAppId,
+                String sourceApplicationWorkspaceId,
+                AssetType assetType,
+                String technicalId,
+                String latestPushedRevisionId,
+                String latestPublishedRevisionId,
+                Instant createdAt,
+                Instant updatedAt) {
+            this(assetId, sourceAppId, sourceApplicationWorkspaceId, assetType, technicalId,
+                    SkillCategory.OTHER, null, latestPushedRevisionId, latestPublishedRevisionId,
+                    createdAt, updatedAt);
+        }
     }
 
     public record Revision(
@@ -123,6 +162,34 @@ public final class AgentSkillHubModels {
             String displayName,
             String displayNameEn,
             String description) {
+    }
+
+    /** 公共配置仓库某个精确提交中的只读 Agent/Skill 修订。 */
+    public record BuiltinRevision(
+            String revisionId,
+            String assetId,
+            AssetType assetType,
+            String technicalId,
+            String sourceCommitHash,
+            String artifactSha256,
+            String contentSha256,
+            String displayName,
+            String displayNameEn,
+            String description,
+            SkillCategory skillCategory,
+            SkillSubcategory skillSubcategory,
+            Instant pushedAt) {
+    }
+
+    /** 公共修订与内容寻址制品的写入载荷；列表查询只读取 BuiltinRevision 元数据。 */
+    public record BuiltinPushedRevision(BuiltinRevision revision, Artifact artifact) {
+    }
+
+    /** 一次公共配置 HEAD 对账所得的完整快照。 */
+    public record BuiltinSnapshot(
+            String sourceCommitHash,
+            Instant indexedAt,
+            List<BuiltinPushedRevision> revisions) {
     }
 
     /** Hub 浏览页所需的扁平投影，避免前端 N+1。 */

@@ -13,7 +13,8 @@ public final class AgentSkillHubRows {
     }
 
     public record AssetRow(String assetId, String sourceAppId, String sourceApplicationWorkspaceId,
-                           String assetType, String technicalId, String latestPushedRevisionId,
+                           String assetType, String technicalId, String skillCategory, String skillSubcategory,
+                           String latestPushedRevisionId,
                            String latestPublishedRevisionId, Instant createdAt, Instant updatedAt) {
     }
 
@@ -21,6 +22,13 @@ public final class AgentSkillHubRows {
                               String sourceCommitHash, String artifactSha256, String contentSha256,
                               String displayName, String displayNameEn, String description, boolean deleted,
                               Instant pushedAt, Instant publishedAt, String publishedByUserId) {
+    }
+
+    public record BuiltinRevisionRow(
+            String revisionId, String assetId, String assetType, String technicalId,
+            String sourceCommitHash, String artifactSha256, String contentSha256,
+            String displayName, String displayNameEn, String description,
+            String skillCategory, String skillSubcategory, Instant pushedAt) {
     }
 
     public record DependencyRow(String revisionId, String dependencyAssetId,
@@ -40,7 +48,8 @@ public final class AgentSkillHubRows {
 
     public record AssetSummaryRow(
             String assetId, String sourceAppId, String sourceApplicationWorkspaceId, String assetType,
-            String technicalId, String latestPushedRevisionId, String latestPublishedRevisionId,
+            String technicalId, String skillCategory, String skillSubcategory,
+            String latestPushedRevisionId, String latestPublishedRevisionId,
             Instant assetCreatedAt, Instant assetUpdatedAt,
             String pushedRevisionId, String pushedSourceVersionId, String pushedSourceCommitHash,
             String pushedArtifactSha256, String pushedContentSha256, String pushedDisplayName,

@@ -11,6 +11,7 @@ const api = {
   getAgentSkillHubUpdateCount: vi.fn(),
   listAgentSkillHubUpdates: vi.fn(),
   publishAgentSkillHubAsset: vi.fn(),
+  updateAgentSkillHubClassification: vi.fn(),
   createAgentSkillHubReference: vi.fn(),
   removeAgentSkillHubReference: vi.fn(),
   startAgentSkillHubReferenceUpdate: vi.fn(),
@@ -59,6 +60,13 @@ describe("AgentSkillHub", () => {
       status: "PENDING_REMOVE",
       runtimeReloadRequired: true,
       message: "已从当前个人 worktree 移除"
+    });
+    api.updateAgentSkillHubClassification.mockResolvedValue({
+      assetId: "hub_asset_1",
+      category: "TEST",
+      subcategory: "TEST_DESIGN",
+      classifiedByUserId: "usr_admin",
+      classifiedAt: "2026-08-06T00:00:00Z"
     });
   });
 
@@ -213,6 +221,92 @@ describe("AgentSkillHub", () => {
     ));
   });
 
+  it("filters the Skill catalog by controlled category and concrete test matter", async () => {
+    const skill = {
+      ...hubAsset(), type: "SKILL", technicalId: "case-design", displayName: "测试案例设计",
+      category: "TEST", subcategory: "TEST_DESIGN"
+    } as const;
+    api.listAgentSkillHubAssets.mockResolvedValue({ items: [skill], total: 1, page: 1, size: 100 });
+    const view = renderHub({ canManage: false });
+
+    await fireEvent.click(await view.findByRole("button", { name: "Skill" }));
+    await fireEvent.click(view.getByRole("button", { name: "测试" }));
+    await waitFor(() => expect(api.listAgentSkillHubAssets).toHaveBeenCalledWith(expect.objectContaining({
+      type: "SKILL",
+      category: "TEST",
+      subcategory: undefined
+    })));
+    await fireEvent.click(view.getByRole("button", { name: "测试设计" }));
+    await waitFor(() => expect(api.listAgentSkillHubAssets).toHaveBeenCalledWith(expect.objectContaining({
+      type: "SKILL",
+      category: "TEST",
+      subcategory: "TEST_DESIGN"
+    })));
+    expect(view.getByText("测试 · 测试设计")).toBeTruthy();
+  });
+
+  it("lets only a super administrator classify a user-pushed Skill in the detail page", async () => {
+    const skill = {
+      ...hubAsset(), type: "SKILL", technicalId: "case-design", displayName: "测试案例设计",
+      category: "OTHER", subcategory: null
+    } as const;
+    api.listAgentSkillHubAssets.mockResolvedValue({ items: [skill], total: 1, page: 1, size: 100 });
+    api.getAgentSkillHubAsset.mockResolvedValue({
+      asset: skill,
+      selectedRevisionId: "hub_rev_published",
+      files: [{ path: "SKILL.md", size: 30, sha256: "a".repeat(64), mediaType: "text/markdown" }],
+      dependencies: [],
+      consumers: []
+    });
+    const view = renderHub({ canManage: false, canClassifySkills: true });
+
+    await fireEvent.click(await view.findByRole("button", { name: "Skill" }));
+    await fireEvent.click(await view.findByText("测试案例设计"));
+    await fireEvent.update(await view.findByLabelText("Skill 一级分类"), "TEST");
+    await fireEvent.update(await view.findByLabelText("Skill 具体事项"), "TEST_DESIGN");
+    await fireEvent.click(view.getByRole("button", { name: "保存分类" }));
+
+    await waitFor(() => expect(api.updateAgentSkillHubClassification).toHaveBeenCalledWith(
+      "hub_asset_1", "TEST", "TEST_DESIGN"
+    ));
+  });
+
+  it("lets a super administrator classify a public Git Skill", async () => {
+    const skill = {
+      ...hubAsset(),
+      assetId: "hub_builtin_SKILL_d2hpdGUtYm94LWFuYWx5c2lz",
+      type: "SKILL",
+      technicalId: "white-box-analysis",
+      displayName: "白盒分析",
+      category: "OTHER",
+      subcategory: null,
+      builtin: true,
+      sourceAppId: "platform",
+      sourceAppName: "平台内置",
+      sourceWorkspaceId: "public",
+      sourceWorkspaceName: "公共配置"
+    } as const;
+    api.listAgentSkillHubAssets.mockResolvedValue({ items: [skill], total: 1, page: 1, size: 100 });
+    api.getAgentSkillHubAsset.mockResolvedValue({
+      asset: skill,
+      selectedRevisionId: "hub_builtin_rev_1",
+      files: [{ path: "SKILL.md", size: 30, sha256: "a".repeat(64), mediaType: "text/markdown" }],
+      dependencies: [],
+      consumers: []
+    });
+    const view = renderHub({ canManage: false, canClassifySkills: true });
+
+    await fireEvent.click(await view.findByRole("button", { name: "Skill" }));
+    await fireEvent.click(await view.findByText("白盒分析"));
+    await fireEvent.update(await view.findByLabelText("Skill 一级分类"), "CODE");
+    await fireEvent.update(await view.findByLabelText("Skill 具体事项"), "WHITE_BOX_ANALYSIS");
+    await fireEvent.click(view.getByRole("button", { name: "保存分类" }));
+
+    await waitFor(() => expect(api.updateAgentSkillHubClassification).toHaveBeenCalledWith(
+      skill.assetId, "CODE", "WHITE_BOX_ANALYSIS"
+    ));
+  });
+
   it("does not let a late initial catalog response overwrite the current application tab", async () => {
     let resolveCatalog!: (value: unknown) => void;
     const lateCatalog = new Promise((resolve) => { resolveCatalog = resolve; });
@@ -304,6 +398,7 @@ describe("AgentSkillHub", () => {
 
 function renderHub(props: {
   canManage: boolean;
+  canClassifySkills?: boolean;
   runtimeMcp?: Array<{ id: string; name: string; status?: string; description?: string }>;
   runtimeTools?: Array<{ id: string; name: string; status?: string; description?: string }>;
 }) {
@@ -328,6 +423,8 @@ function hubAsset() {
     displayName: "结账检查",
     displayNameEn: "Checkout",
     description: "检查结账流程",
+    category: "OTHER",
+    subcategory: null,
     sourceAppId: "app_pay",
     sourceAppName: "支付应用",
     sourceWorkspaceId: "awp_pay",

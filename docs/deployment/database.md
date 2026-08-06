@@ -1534,3 +1534,29 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 Redis 使用 `test-agent:support-access:session:{sessionDigest}` 与 `test-agent:support-access:token:{grantTokenDigest}` 保存当前授权摘要和短期 payload；两类 key/value 都不含原始平台/授权 Token。Lua rotate 保证同一平台登录会话的新授权立即淘汰旧 token，revoke 只删除仍与当前摘要匹配的 session key。TTL 与授权绝对到期时间一致，Redis 不可用时不降级 JVM 内存或数据库明文 Token。
 
 每日清理以当前 UTC 时间减 365 天为 cutoff，先删除更早的审计，再删除已到期且不再被审计引用的授权；一年内审计不会因用户删除或授权撤销提前消失。应用回滚时保留 migration 和历史审计，新表对旧 Java 为向后兼容新增。发布前仍须按本文件 migration 规则，用目标环境真实 PostgreSQL 历史执行基线到当前 HEAD，禁止 `repair`、`outOfOrder` 或改写已经执行的 SQL。
+
+## V20260806143000 Skill Hub 事项分类
+
+`V20260806143000__classify_skill_hub_assets.sql` 是开发期候选 migration，在既有 `agent_skill_hub_assets` 逻辑资产上增加：
+
+- `skill_category`：非空一级事项分类，历史与新记录默认 `OTHER`，允许 `WORKER/TEST/CODE/OTHER`。
+- `skill_subcategory`：可空二级事项；`TEST` 只允许测试设计、测试数据构造、测试执行、测试分析四种枚举，`CODE` 只允许白盒分析，`WORKER/OTHER` 必须为空。
+- `classified_by_user_id/classified_at`：最近一次人工分类的超级管理员和时间；前者使用现有 `users` 外键，不保存用户名快照或认证 Token。
+- `(asset_type, skill_category, skill_subcategory)` 索引：服务 Skill 目录分页筛选；数据库约束同时保证 Agent 始终为 `OTHER/null`。
+
+默认值完成存量兼容回填，不写测试、演示或环境专属分类数据。后续 push 只更新最新修订指针，不修改分类；人工分类 SQL 位于 `AgentSkillHubMapper.xml`。正式合入交付分支前仍须对照全部目标环境的 `flyway_schema_history` 确认该候选版本高于部署基线且未与并行 migration 冲突，并按本文件规则用真实 PostgreSQL 覆盖每套已知历史的升级与最终 JAR 字节校验。
+
+## V20260806190000 公共 Skill Hub 快照持久化
+
+`V20260806190000__persist_public_skill_hub_snapshots.sql` 在现有内容寻址制品表之上增加：
+
+- `agent_skill_hub_builtin_revisions`：按 `revision_id` 保存公共 Agent/Skill 在精确 Git commit 下的元数据和 artifact SHA-256；`(asset_id, source_commit_hash)` 唯一，旧修订不因目录前进而删除。
+- `agent_skill_hub_builtin_state`：以固定 `source_key=PUBLIC` 保存当前完成事务性对账的 commit 和时间。写入端先锁定状态并比较期望 commit，避免多服务器旧副本覆盖新目录。
+
+迁移只创建结构，不写环境公共内容。服务启动后由定时任务用 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT` 共享仓库现有 Git 身份 fetch 当前分支，并读取 `origin/{branch}` 的精确提交完成快照；任务不修改工作树，认证暂不可用时回退本地 HEAD。正文继续写入 `agent_skill_hub_artifacts`，相同内容按 SHA-256 去重。该迁移是开发期候选版本；合入交付分支前必须对照所有目标环境历史确认版本严格递增，并按本文件规则验证真实 PostgreSQL 基线升级和最终 JAR 内 migration SHA-256。
+
+## V20260806190500 公共 Git Skill 分类持久化
+
+`V20260806190500__classify_public_skill_hub_snapshots.sql` 新增 `agent_skill_hub_builtin_classifications`：以稳定 `asset_id` 保存公共 Git Skill 的一级/二级事项、最近分类超级管理员和时间。现有公共 Skill 回填 `OTHER/null`，以后首次发现的 Skill 由快照事务幂等补齐默认分类；分类不绑定具体 revision，因此共享仓库进入下一个 commit 后仍然保留。数据库约束与应用推送 Skill 相同，Agent 不写入本表。
+
+该迁移不修改已经执行的 `V20260806190000` 字节。正式合入交付分支前，仍须对照全部目标环境 `flyway_schema_history` 校验两个候选版本的严格递增关系、checksum 和并行 migration 冲突，并用每套已知真实 PostgreSQL 基线验证升级及最终 JAR 内 migration 字节。

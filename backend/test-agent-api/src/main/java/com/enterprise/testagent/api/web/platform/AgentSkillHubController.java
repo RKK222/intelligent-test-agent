@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.server.ServerWebExchange;
 
 /** Agent & Skill Hub 元数据、显式发布和更新通知 HTTP 入口。 */
@@ -31,6 +32,8 @@ public class AgentSkillHubController {
     @GetMapping("/assets")
     public ApiResponse<AgentSkillHubResponses.PageResponse<AgentSkillHubResponses.AssetResponse>> listAssets(
             @RequestParam(required = false) String type,
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String subcategory,
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "false") boolean referencedOnly,
             @RequestParam(required = false) String targetWorkspaceId,
@@ -38,7 +41,7 @@ public class AgentSkillHubController {
             @RequestParam(defaultValue = "30") int size,
             ServerWebExchange exchange) {
         AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
-        return ApiResponse.ok(service.listAssets(type, keyword, referencedOnly, page, size,
+        return ApiResponse.ok(service.listAssets(type, category, subcategory, keyword, referencedOnly, page, size,
                         targetWorkspaceId, principal.userId()),
                 RuntimeApiSupport.traceId(exchange));
     }
@@ -65,6 +68,18 @@ public class AgentSkillHubController {
         return ApiResponse.ok(service.publish(assetId, dependencies, principal.userId()), RuntimeApiSupport.traceId(exchange));
     }
 
+    /** 只有超级管理员可以把 Hub Skill（含公共 Git 内容）归入受控事项分类。 */
+    @PutMapping("/assets/{assetId}/classification")
+    public ApiResponse<AgentSkillHubResponses.ClassificationResponse> classifySkill(
+            @PathVariable String assetId,
+            @RequestBody ClassificationRequest request,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        return ApiResponse.ok(service.classifySkill(
+                        assetId, request.category(), request.subcategory(), principal.userId()),
+                RuntimeApiSupport.traceId(exchange));
+    }
+
     @GetMapping("/updates/count")
     public ApiResponse<UpdateCountResponse> countUpdates(
             @RequestParam(required = false) String targetWorkspaceId,
@@ -86,6 +101,9 @@ public class AgentSkillHubController {
     }
 
     record PublishRequest(List<String> dependencyAssetIds) {
+    }
+
+    record ClassificationRequest(String category, String subcategory) {
     }
 
     record UpdateCountResponse(long count) {

@@ -59,7 +59,7 @@
 
 ### Agent & Skill Hub 入口
 
-- `AgentSkillHubController` 提供全员可读的目录/详情/更新角标，以及 `APP_ADMIN` 的显式发布入口。
+- `AgentSkillHubController` 提供全员可读的目录/详情/更新角标、`APP_ADMIN` 的显式发布入口，以及仅 `SUPER_ADMIN` 可调用的用户推送 Skill 事项分类入口；分类权限在 Controller 强校验，不能以应用管理员身份替代。
 - Hub 正文由 `agent-skill-hub/HUB` 独立只读文件 ticket 获取；引用、取消引用与更新复用现有 `agent-config/WORKSPACE` ticket，并校验 `appAdmin`、绑定 workspace 和当前用户。目录和更新 HTTP 查询可携带个人运行 `targetWorkspaceId`；`referencedOnly` 返回当前应用引用清单，详情附带按状态收敛的引用方应用/工作空间。
 - Hub 不新增 SSE 或后端间文件 HTTP 代理；跨服务器引用始终由浏览器连接目标工作区所在 Java 的平台文件 WebSocket。
 

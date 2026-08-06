@@ -11,11 +11,23 @@
             <arg column="file_count" javaType="_int"/><arg column="created_at" javaType="java.time.Instant"/>
         </constructor>
     </resultMap>
+    <resultMap id="BuiltinRevisionMap" type="com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows$BuiltinRevisionRow">
+        <constructor>
+            <arg column="revision_id" javaType="java.lang.String"/><arg column="asset_id" javaType="java.lang.String"/>
+            <arg column="asset_type" javaType="java.lang.String"/><arg column="technical_id" javaType="java.lang.String"/>
+            <arg column="source_commit_hash" javaType="java.lang.String"/><arg column="artifact_sha256" javaType="java.lang.String"/>
+            <arg column="content_sha256" javaType="java.lang.String"/><arg column="display_name" javaType="java.lang.String"/>
+            <arg column="display_name_en" javaType="java.lang.String"/><arg column="description" javaType="java.lang.String"/>
+            <arg column="skill_category" javaType="java.lang.String"/><arg column="skill_subcategory" javaType="java.lang.String"/>
+            <arg column="pushed_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
     <resultMap id="AssetMap" type="com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows$AssetRow">
         <constructor>
             <arg column="asset_id" javaType="java.lang.String"/><arg column="source_app_id" javaType="java.lang.String"/>
             <arg column="source_application_workspace_id" javaType="java.lang.String"/><arg column="asset_type" javaType="java.lang.String"/>
-            <arg column="technical_id" javaType="java.lang.String"/><arg column="latest_pushed_revision_id" javaType="java.lang.String"/>
+            <arg column="technical_id" javaType="java.lang.String"/><arg column="skill_category" javaType="java.lang.String"/>
+            <arg column="skill_subcategory" javaType="java.lang.String"/><arg column="latest_pushed_revision_id" javaType="java.lang.String"/>
             <arg column="latest_published_revision_id" javaType="java.lang.String"/><arg column="created_at" javaType="java.time.Instant"/>
             <arg column="updated_at" javaType="java.time.Instant"/>
         </constructor>
@@ -71,19 +83,113 @@
     <select id="findArtifact" resultMap="ArtifactMap">
         select * from agent_skill_hub_artifacts where artifact_sha256 = #{sha256}
     </select>
+    <insert id="ensureBuiltinState" databaseId="postgresql">
+        insert into agent_skill_hub_builtin_state(source_key, source_commit_hash, indexed_at)
+        values (#{sourceKey}, null, #{indexedAt}) on conflict (source_key) do nothing
+    </insert>
+    <insert id="ensureBuiltinState">
+        insert into agent_skill_hub_builtin_state(source_key, source_commit_hash, indexed_at)
+        select #{sourceKey}, null, #{indexedAt}
+        where not exists (select 1 from agent_skill_hub_builtin_state where source_key = #{sourceKey})
+    </insert>
+    <select id="findBuiltinState" resultType="java.lang.String">
+        select source_commit_hash from agent_skill_hub_builtin_state where source_key = #{sourceKey}
+    </select>
+    <select id="lockBuiltinState" resultType="java.lang.String">
+        select source_commit_hash from agent_skill_hub_builtin_state where source_key = #{sourceKey} for update
+    </select>
+    <update id="updateBuiltinState">
+        update agent_skill_hub_builtin_state
+        set source_commit_hash = #{sourceCommitHash}, indexed_at = #{indexedAt}
+        where source_key = #{sourceKey}
+    </update>
+    <insert id="insertBuiltinRevision" databaseId="postgresql">
+        insert into agent_skill_hub_builtin_revisions(
+            revision_id, asset_id, asset_type, technical_id, source_commit_hash, artifact_sha256,
+            content_sha256, display_name, display_name_en, description, pushed_at)
+        values (#{revisionId}, #{assetId}, #{assetType}, #{technicalId}, #{sourceCommitHash}, #{artifactSha256},
+            #{contentSha256}, #{displayName}, #{displayNameEn}, #{description}, #{pushedAt})
+        on conflict (revision_id) do nothing
+    </insert>
+    <insert id="insertBuiltinRevision">
+        merge into agent_skill_hub_builtin_revisions(
+            revision_id, asset_id, asset_type, technical_id, source_commit_hash, artifact_sha256,
+            content_sha256, display_name, display_name_en, description, pushed_at) key(revision_id)
+        values (#{revisionId}, #{assetId}, #{assetType}, #{technicalId}, #{sourceCommitHash}, #{artifactSha256},
+            #{contentSha256}, #{displayName}, #{displayNameEn}, #{description}, #{pushedAt})
+    </insert>
+    <insert id="ensureBuiltinClassification" databaseId="postgresql">
+        insert into agent_skill_hub_builtin_classifications(
+            asset_id, skill_category, skill_subcategory, classified_by_user_id, classified_at)
+        values (#{assetId}, #{skillCategory}, null, null, #{classifiedAt})
+        on conflict (asset_id) do nothing
+    </insert>
+    <insert id="ensureBuiltinClassification">
+        insert into agent_skill_hub_builtin_classifications(
+            asset_id, skill_category, skill_subcategory, classified_by_user_id, classified_at)
+        select #{assetId}, #{skillCategory}, null, null, #{classifiedAt}
+        where not exists (
+            select 1 from agent_skill_hub_builtin_classifications where asset_id = #{assetId}
+        )
+    </insert>
+    <update id="updateBuiltinSkillClassification">
+        update agent_skill_hub_builtin_classifications
+        set skill_category = #{skillCategory}, skill_subcategory = #{skillSubcategory},
+            classified_by_user_id = #{classifiedByUserId}, classified_at = #{classifiedAt}
+        where asset_id = #{assetId}
+          and exists (
+              select 1 from agent_skill_hub_builtin_revisions revision
+              where revision.asset_id = #{assetId} and revision.asset_type = 'SKILL'
+          )
+    </update>
+    <select id="listCurrentBuiltinRevisions" resultMap="BuiltinRevisionMap">
+        select revision.*,
+               coalesce(classification.skill_category, 'OTHER') as skill_category,
+               classification.skill_subcategory as skill_subcategory
+        from agent_skill_hub_builtin_revisions revision
+        join agent_skill_hub_builtin_state state
+          on state.source_key = #{sourceKey} and state.source_commit_hash = revision.source_commit_hash
+        left join agent_skill_hub_builtin_classifications classification
+          on classification.asset_id = revision.asset_id
+        order by revision.asset_type, coalesce(revision.display_name, revision.technical_id), revision.technical_id
+    </select>
+    <select id="findCurrentBuiltinRevision" resultMap="BuiltinRevisionMap">
+        select revision.*,
+               coalesce(classification.skill_category, 'OTHER') as skill_category,
+               classification.skill_subcategory as skill_subcategory
+        from agent_skill_hub_builtin_revisions revision
+        join agent_skill_hub_builtin_state state
+          on state.source_key = #{sourceKey} and state.source_commit_hash = revision.source_commit_hash
+        left join agent_skill_hub_builtin_classifications classification
+          on classification.asset_id = revision.asset_id
+        where revision.asset_id = #{assetId}
+    </select>
+    <select id="findBuiltinRevision" resultMap="BuiltinRevisionMap">
+        select revision.*,
+               coalesce(classification.skill_category, 'OTHER') as skill_category,
+               classification.skill_subcategory as skill_subcategory
+        from agent_skill_hub_builtin_revisions revision
+        left join agent_skill_hub_builtin_classifications classification
+          on classification.asset_id = revision.asset_id
+        where revision.revision_id = #{revisionId}
+    </select>
     <insert id="insertAsset" databaseId="postgresql">
         insert into agent_skill_hub_assets(asset_id, source_app_id, source_application_workspace_id, asset_type,
-            technical_id, latest_pushed_revision_id, latest_published_revision_id, created_at, updated_at)
+            technical_id, skill_category, skill_subcategory, latest_pushed_revision_id,
+            latest_published_revision_id, created_at, updated_at)
         values (#{assetId}, #{sourceAppId}, #{sourceApplicationWorkspaceId}, #{assetType}, #{technicalId},
-            #{latestPushedRevisionId}, #{latestPublishedRevisionId}, #{createdAt}, #{updatedAt})
+            #{skillCategory}, #{skillSubcategory}, #{latestPushedRevisionId}, #{latestPublishedRevisionId},
+            #{createdAt}, #{updatedAt})
         on conflict (source_app_id, source_application_workspace_id, asset_type, technical_id) do nothing
     </insert>
     <insert id="insertAsset">
         merge into agent_skill_hub_assets(asset_id, source_app_id, source_application_workspace_id, asset_type,
-            technical_id, latest_pushed_revision_id, latest_published_revision_id, created_at, updated_at)
+            technical_id, skill_category, skill_subcategory, latest_pushed_revision_id,
+            latest_published_revision_id, created_at, updated_at)
         key(source_app_id, source_application_workspace_id, asset_type, technical_id)
         values (#{assetId}, #{sourceAppId}, #{sourceApplicationWorkspaceId}, #{assetType}, #{technicalId},
-            #{latestPushedRevisionId}, #{latestPublishedRevisionId}, #{createdAt}, #{updatedAt})
+            #{skillCategory}, #{skillSubcategory}, #{latestPushedRevisionId}, #{latestPublishedRevisionId},
+            #{createdAt}, #{updatedAt})
     </insert>
     <select id="findAsset" resultMap="AssetMap">select * from agent_skill_hub_assets where asset_id = #{assetId}</select>
     <select id="findAssetByIdentity" resultMap="AssetMap">
@@ -122,6 +228,8 @@
 
     <sql id="BrowseWhere">
         where <if test="assetType != null">a.asset_type = #{assetType} and</if>
+          <if test="skillCategory != null">a.skill_category = #{skillCategory} and</if>
+          <if test="skillSubcategory != null">a.skill_subcategory = #{skillSubcategory} and</if>
           <choose><when test="keyword != null and keyword != ''">
             (lower(a.technical_id) like concat('%', lower(#{keyword}), '%') or
              lower(coalesce(pr.display_name, '')) like concat('%', lower(#{keyword}), '%') or
@@ -137,7 +245,8 @@
     <select id="listAssets" resultType="com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows$AssetSummaryRow">
         select a.asset_id as assetId, a.source_app_id as sourceAppId,
           a.source_application_workspace_id as sourceApplicationWorkspaceId, a.asset_type as assetType,
-          a.technical_id as technicalId, a.latest_pushed_revision_id as latestPushedRevisionId,
+          a.technical_id as technicalId, a.skill_category as skillCategory,
+          a.skill_subcategory as skillSubcategory, a.latest_pushed_revision_id as latestPushedRevisionId,
           a.latest_published_revision_id as latestPublishedRevisionId, a.created_at as assetCreatedAt,
           a.updated_at as assetUpdatedAt,
           pr.revision_id as pushedRevisionId, pr.source_version_id as pushedSourceVersionId,
@@ -182,6 +291,12 @@
         join application_workspaces aw on aw.workspace_id = a.source_application_workspace_id
         <include refid="BrowseWhere"/>
     </select>
+    <update id="updateSkillClassification">
+        update agent_skill_hub_assets
+        set skill_category = #{skillCategory}, skill_subcategory = #{skillSubcategory},
+            classified_by_user_id = #{classifiedByUserId}, classified_at = #{classifiedAt}
+        where asset_id = #{assetId} and asset_type = 'SKILL'
+    </update>
     <update id="markRevisionPublished">
         update agent_skill_hub_revisions set published_at = #{now}, published_by_user_id = #{userId}
         where revision_id = #{revisionId} and deleted = false and published_at is null

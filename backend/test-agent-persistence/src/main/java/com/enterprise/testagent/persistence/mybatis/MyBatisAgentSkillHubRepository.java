@@ -6,6 +6,9 @@ import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Artifact;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Asset;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.AssetSummary;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.AssetType;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinPushedRevision;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinRevision;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinSnapshot;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Dependency;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedAsset;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedSnapshot;
@@ -13,11 +16,14 @@ import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Reference;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.ReferenceConsumer;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.ReferenceUpdate;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Revision;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillCategory;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillSubcategory;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.UpdateOperation;
 import com.enterprise.testagent.domain.hub.AgentSkillHubRepository;
 import com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows.ArtifactRow;
 import com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows.AssetRow;
 import com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows.AssetSummaryRow;
+import com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows.BuiltinRevisionRow;
 import com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows.DependencyRow;
 import com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows.ReferenceRow;
 import com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows.ReferenceConsumerRow;
@@ -36,6 +42,8 @@ import org.springframework.transaction.annotation.Transactional;
 /** Hub 领域端口的 MyBatis 实现。 */
 @Repository
 public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
+
+    private static final String PUBLIC_SOURCE_KEY = "PUBLIC";
 
     private final AgentSkillHubMapper mapper;
 
@@ -61,7 +69,8 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
                 String assetId = id("hub_asset_");
                 mapper.insertAsset(new AssetRow(
                         assetId, snapshot.sourceAppId(), snapshot.sourceApplicationWorkspaceId(),
-                        pushed.assetType().name(), pushed.technicalId(), null, null,
+                        pushed.assetType().name(), pushed.technicalId(), SkillCategory.OTHER.name(), null,
+                        null, null,
                         snapshot.pushedAt(), snapshot.pushedAt()));
                 asset = mapper.findAssetByIdentity(
                         snapshot.sourceAppId(), snapshot.sourceApplicationWorkspaceId(),
@@ -98,19 +107,92 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
     }
 
     @Override
-    public List<AssetSummary> listAssets(AssetType type, String keyword, String currentUserId,
-                                         String targetApplicationWorkspaceId, boolean referencedOnly,
-                                         int offset, int limit) {
-        return mapper.listAssets(type == null ? null : type.name(), keyword, currentUserId,
+    public Optional<String> findBuiltinSnapshotCommit() {
+        return Optional.ofNullable(mapper.findBuiltinState(PUBLIC_SOURCE_KEY));
+    }
+
+    /** 公共目录切换与修订写入处于同一事务，多节点重复对账不会产生半成品目录。 */
+    @Override
+    @Transactional
+    public boolean replaceBuiltinSnapshot(String expectedSourceCommitHash, BuiltinSnapshot snapshot) {
+        mapper.ensureBuiltinState(PUBLIC_SOURCE_KEY, snapshot.indexedAt());
+        String currentCommit = mapper.lockBuiltinState(PUBLIC_SOURCE_KEY);
+        if (!java.util.Objects.equals(currentCommit, expectedSourceCommitHash)) {
+            return false;
+        }
+        for (BuiltinPushedRevision pushed : snapshot.revisions()) {
+            mapper.insertArtifact(toRow(pushed.artifact()));
+            mapper.insertBuiltinRevision(toRow(pushed.revision()));
+            if (pushed.revision().assetType() == AssetType.SKILL) {
+                mapper.ensureBuiltinClassification(
+                        pushed.revision().assetId(), SkillCategory.OTHER.name(), snapshot.indexedAt());
+            }
+        }
+        return mapper.updateBuiltinState(
+                PUBLIC_SOURCE_KEY, snapshot.sourceCommitHash(), snapshot.indexedAt()) == 1;
+    }
+
+    @Override
+    public List<BuiltinRevision> listCurrentBuiltinRevisions() {
+        return mapper.listCurrentBuiltinRevisions(PUBLIC_SOURCE_KEY).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public Optional<BuiltinRevision> findCurrentBuiltinRevision(String assetId) {
+        return Optional.ofNullable(mapper.findCurrentBuiltinRevision(PUBLIC_SOURCE_KEY, assetId))
+                .map(this::toDomain);
+    }
+
+    @Override
+    public Optional<BuiltinRevision> findBuiltinRevision(String revisionId) {
+        return Optional.ofNullable(mapper.findBuiltinRevision(revisionId)).map(this::toDomain);
+    }
+
+    @Override
+    @Transactional
+    public void updateBuiltinSkillClassification(
+            String assetId, SkillCategory category, SkillSubcategory subcategory,
+            String classifiedByUserId, Instant classifiedAt) {
+        mapper.ensureBuiltinClassification(assetId, SkillCategory.OTHER.name(), classifiedAt);
+        if (mapper.updateBuiltinSkillClassification(assetId, category.name(),
+                subcategory == null ? null : subcategory.name(), classifiedByUserId, classifiedAt) != 1) {
+            throw new PlatformException(ErrorCode.CONFLICT, "公共 Skill 分类更新失败，请刷新后重试");
+        }
+    }
+
+    @Override
+    public List<AssetSummary> listAssets(
+            AssetType type, SkillCategory category, SkillSubcategory subcategory,
+            String keyword, String currentUserId,
+            String targetApplicationWorkspaceId, boolean referencedOnly,
+            int offset, int limit) {
+        return mapper.listAssets(type == null ? null : type.name(), keyword,
+                        category == null ? null : category.name(),
+                        subcategory == null ? null : subcategory.name(), currentUserId,
                         targetApplicationWorkspaceId, referencedOnly, offset, limit).stream()
                 .map(this::toSummary).toList();
     }
 
     @Override
-    public long countAssets(AssetType type, String keyword, String targetApplicationWorkspaceId,
-                            boolean referencedOnly) {
+    public long countAssets(
+            AssetType type, SkillCategory category, SkillSubcategory subcategory,
+            String keyword, String targetApplicationWorkspaceId,
+            boolean referencedOnly) {
         return mapper.countAssets(type == null ? null : type.name(), keyword,
+                category == null ? null : category.name(),
+                subcategory == null ? null : subcategory.name(),
                 targetApplicationWorkspaceId, referencedOnly);
+    }
+
+    @Override
+    @Transactional
+    public void updateSkillClassification(
+            String assetId, SkillCategory category, SkillSubcategory subcategory,
+            String classifiedByUserId, Instant classifiedAt) {
+        if (mapper.updateSkillClassification(assetId, category.name(),
+                subcategory == null ? null : subcategory.name(), classifiedByUserId, classifiedAt) != 1) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Skill 分类更新失败，请刷新后重试");
+        }
     }
 
     @Override
@@ -249,7 +331,9 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
 
     private AssetSummary toSummary(AssetSummaryRow row) {
         Asset asset = new Asset(row.assetId(), row.sourceAppId(), row.sourceApplicationWorkspaceId(),
-                AssetType.valueOf(row.assetType()), row.technicalId(), row.latestPushedRevisionId(),
+                AssetType.valueOf(row.assetType()), row.technicalId(), SkillCategory.valueOf(row.skillCategory()),
+                row.skillSubcategory() == null ? null : SkillSubcategory.valueOf(row.skillSubcategory()),
+                row.latestPushedRevisionId(),
                 row.latestPublishedRevisionId(), row.assetCreatedAt(), row.assetUpdatedAt());
         Revision pushed = revision(row.pushedRevisionId(), row.assetId(), row.pushedSourceVersionId(),
                 row.pushedSourceCommitHash(), row.pushedArtifactSha256(), row.pushedContentSha256(),
@@ -289,6 +373,23 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
                 value.uncompressedSize(), value.compressedSize(), value.fileCount(), value.createdAt());
     }
 
+    private BuiltinRevisionRow toRow(BuiltinRevision value) {
+        return new BuiltinRevisionRow(
+                value.revisionId(), value.assetId(), value.assetType().name(), value.technicalId(),
+                value.sourceCommitHash(), value.artifactSha256(), value.contentSha256(), value.displayName(),
+                value.displayNameEn(), value.description(), value.skillCategory().name(),
+                value.skillSubcategory() == null ? null : value.skillSubcategory().name(), value.pushedAt());
+    }
+
+    private BuiltinRevision toDomain(BuiltinRevisionRow row) {
+        return new BuiltinRevision(
+                row.revisionId(), row.assetId(), AssetType.valueOf(row.assetType()), row.technicalId(),
+                row.sourceCommitHash(), row.artifactSha256(), row.contentSha256(), row.displayName(),
+                row.displayNameEn(), row.description(), SkillCategory.valueOf(row.skillCategory()),
+                row.skillSubcategory() == null ? null : SkillSubcategory.valueOf(row.skillSubcategory()),
+                row.pushedAt());
+    }
+
     private Artifact toDomain(ArtifactRow row) {
         return new Artifact(row.artifactSha256(), row.encoding(), row.content(), row.manifestJson(),
                 row.uncompressedSize(), row.compressedSize(), row.fileCount(), row.createdAt());
@@ -296,7 +397,9 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
 
     private Asset toDomain(AssetRow row) {
         return new Asset(row.assetId(), row.sourceAppId(), row.sourceApplicationWorkspaceId(),
-                AssetType.valueOf(row.assetType()), row.technicalId(), row.latestPushedRevisionId(),
+                AssetType.valueOf(row.assetType()), row.technicalId(), SkillCategory.valueOf(row.skillCategory()),
+                row.skillSubcategory() == null ? null : SkillSubcategory.valueOf(row.skillSubcategory()),
+                row.latestPushedRevisionId(),
                 row.latestPublishedRevisionId(), row.createdAt(), row.updatedAt());
     }
 

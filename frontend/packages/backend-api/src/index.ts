@@ -21,10 +21,13 @@ import type {
   AgentSkillHubAsset,
   AgentSkillHubAssetDetail,
   AgentSkillHubAssetType,
+  AgentSkillHubClassification,
   AgentSkillHubFileContent,
   AgentSkillHubReference,
   AgentSkillHubUpdate,
   AgentSkillHubUpdateOperation,
+  AgentSkillHubSkillCategory,
+  AgentSkillHubSkillSubcategory,
   AgentConfigWorktree,
   AgentConfigWorktreeOption,
   AgentConfigWorktreePayload,
@@ -916,6 +919,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   return {
     listAgentSkillHubAssets: (params: {
       type?: AgentSkillHubAssetType;
+      category?: AgentSkillHubSkillCategory;
+      subcategory?: AgentSkillHubSkillSubcategory;
       keyword?: string;
       referencedOnly?: boolean;
       targetWorkspaceId?: string;
@@ -933,6 +938,14 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         `${agentSkillHubBase}/assets/${encodeURIComponent(assetId)}/publish`,
         { method: "POST", body: JSON.stringify({ dependencyAssetIds }) }
       ),
+    updateAgentSkillHubClassification: (
+      assetId: string,
+      category: AgentSkillHubSkillCategory,
+      subcategory?: AgentSkillHubSkillSubcategory | null
+    ) => request<AgentSkillHubClassification>(
+      `${agentSkillHubBase}/assets/${encodeURIComponent(assetId)}/classification`,
+      { method: "PUT", body: JSON.stringify({ category, subcategory: subcategory ?? null }) }
+    ),
     getAgentSkillHubUpdateCount: (targetWorkspaceId?: string) =>
       request<{ count: number }>(`${agentSkillHubBase}/updates/count${query({ targetWorkspaceId })}`),
     listAgentSkillHubUpdates: (page = 1, size = 30, targetWorkspaceId?: string) =>

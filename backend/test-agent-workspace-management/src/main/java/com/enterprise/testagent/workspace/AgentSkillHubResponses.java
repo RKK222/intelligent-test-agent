@@ -14,11 +14,18 @@ public final class AgentSkillHubResponses {
 
     public record AssetResponse(
             String assetId, String type, String technicalId, String displayName, String displayNameEn,
-            String description, String sourceAppId, String sourceAppName, String sourceWorkspaceId,
+            String description, String category, String subcategory,
+            String sourceAppId, String sourceAppName, String sourceWorkspaceId,
             String sourceWorkspaceName, String pushedRevisionId, String publishedRevisionId,
             boolean published, boolean builtin, boolean updateAvailable, boolean referenced, boolean deleted,
             String referenceStatus, long referenceCount,
             Instant pushedAt, Instant publishedAt) {
+    }
+
+    /** 超级管理员修改 Skill 事项分类后的审计响应。 */
+    public record ClassificationResponse(
+            String assetId, String category, String subcategory,
+            String classifiedByUserId, Instant classifiedAt) {
     }
 
     public record AssetDetailResponse(
