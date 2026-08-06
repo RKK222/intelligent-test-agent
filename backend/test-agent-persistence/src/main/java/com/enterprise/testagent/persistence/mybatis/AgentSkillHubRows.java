@@ -24,6 +24,13 @@ public final class AgentSkillHubRows {
                               Instant pushedAt, Instant publishedAt, String publishedByUserId) {
     }
 
+    public record BuiltinRevisionRow(
+            String revisionId, String assetId, String assetType, String technicalId,
+            String sourceCommitHash, String artifactSha256, String contentSha256,
+            String displayName, String displayNameEn, String description,
+            String skillCategory, String skillSubcategory, Instant pushedAt) {
+    }
+
     public record DependencyRow(String revisionId, String dependencyAssetId,
                                 String dependencyRevisionId, Instant createdAt) {
     }

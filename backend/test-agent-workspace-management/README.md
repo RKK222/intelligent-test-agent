@@ -54,8 +54,8 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 ## Agent & Skill Hub
 
 - `AgentSkillHubApplicationService` 在应用 feature push 成功后从精确 Git commit 扫描 `.opencode/agents/*.md` 与完整 `.opencode/skills/{id}/**`，按同一物理仓库组逐工作空间目录生成不可变压缩快照；平台外部 push 由超级管理员应用 Git 刷新发现，远端提交同步完成后立即执行同一组索引。Hub 不依赖用户个人 worktree 拉取，定时对账本机 READY 副本仅用于补偿漏记。
-- push 与 publish 分离：全员可浏览 pushed 快照，显式发布固定当前修订和精确依赖；公共配置仓库只以平台内置只读资产展示。
-- Skill 目录复用资产表持久化受控事项分类：一级固定为 `WORKER/TEST/CODE/OTHER`，二级固定为测试设计、测试数据构造、测试执行、测试分析和白盒分析。历史与新 push 的 Skill 默认 `OTHER`，后续 push 只新增不可变修订，不覆盖超级管理员已经设置的分类；列表分类筛选与关键字、当前应用筛选共用同一分页查询。
+- push 与 publish 分离：全员可浏览 pushed 快照，显式发布固定当前修订和精确依赖；公共配置仓库只以平台内置只读资产展示。`reconcilePublicBuiltinSnapshots()` 默认启动 2 秒后、此后每 30 秒用共享仓库现有 Git 身份 fetch 当前分支、读取 `origin/{branch}` 的精确提交并把元数据和内容寻址制品写入数据库，因此用户从其它本地 clone 直接 push 后无需打开 Hub 即可入库；任务只刷新远端引用，不 checkout/reset 运行工作树，认证暂不可用时回退已由公共 rollout 同步的本地 HEAD。Hub 列表、详情和正文查询不再读取 Git。
+- Skill 目录持久化受控事项分类：一级固定为 `WORKER/TEST/CODE/OTHER`，二级固定为测试设计、测试数据构造、测试执行、测试分析和白盒分析。历史、新 push 与公共 Git Skill 默认 `OTHER`；应用 Skill 分类保存在资产表，公共 Skill 分类保存在独立逻辑资产表，后续 push/commit 都不覆盖超级管理员已经设置的分类。列表分类筛选同时覆盖两类内容。
 - 引用递归物化已发布依赖到当前管理员个人 worktree，不自动 commit/push；`PENDING_PUSH` 只表示本地待推送，feature push 内容摘要吻合后才提升为 `ACTIVE`。取消引用先安全移除 worktree 文件并进入 `PENDING_REMOVE`，立即退出当前应用和消费者视图，push 确认远端路径消失后才正式删除引用记录；确认前重新引用会原位恢复该记录并重新物化最新发布修订。
 - 更新使用 active/current/incoming 三方合并。任何冲突都会先持久化操作且保持工作树不变；全部解决后做 current 摘要乐观校验，再以文件备份和数据库事务收敛落盘。目录、详情和更新查询可绑定当前个人运行工作区；`referencedOnly` 提供当前应用可用引用资产库并排除 `PENDING_REMOVE`，详情返回已生效引用方，并仅向目标应用成员补充待推送引用方。
 

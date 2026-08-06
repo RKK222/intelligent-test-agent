@@ -4,6 +4,8 @@ import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Artifact;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Asset;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.AssetSummary;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.AssetType;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinRevision;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinSnapshot;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Dependency;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedSnapshot;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Reference;
@@ -21,6 +23,25 @@ import java.util.Optional;
 public interface AgentSkillHubRepository {
 
     void replacePushedSnapshot(PushedSnapshot snapshot);
+
+    /** 返回数据库已完成对账的公共配置提交；空表示尚未建立首个快照。 */
+    Optional<String> findBuiltinSnapshotCommit();
+
+    /**
+     * 以 compare-and-set 方式切换公共快照，避免多节点用旧本地 HEAD 覆盖较新的数据库目录。
+     *
+     * @return 当前提交仍等于 expectedSourceCommitHash 且切换成功时返回 true
+     */
+    boolean replaceBuiltinSnapshot(String expectedSourceCommitHash, BuiltinSnapshot snapshot);
+
+    List<BuiltinRevision> listCurrentBuiltinRevisions();
+
+    Optional<BuiltinRevision> findCurrentBuiltinRevision(String assetId);
+
+    Optional<BuiltinRevision> findBuiltinRevision(String revisionId);
+
+    void updateBuiltinSkillClassification(String assetId, SkillCategory category, SkillSubcategory subcategory,
+                                          String classifiedByUserId, Instant classifiedAt);
 
     List<AssetSummary> listAssets(AssetType type, SkillCategory category, SkillSubcategory subcategory,
                                   String keyword, String currentUserId,

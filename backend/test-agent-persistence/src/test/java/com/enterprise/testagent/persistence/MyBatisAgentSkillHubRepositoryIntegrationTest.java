@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Artifact;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.AssetType;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinPushedRevision;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinRevision;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinSnapshot;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedAsset;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedSnapshot;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Reference;
@@ -53,6 +56,10 @@ class MyBatisAgentSkillHubRepositoryIntegrationTest {
                 "db/migration/V20260725230000__support_hub_reference_removal.sql")).execute(dataSource);
         new ResourceDatabasePopulator(new ClassPathResource(
                 "db/migration/V20260806143000__classify_skill_hub_assets.sql")).execute(dataSource);
+        new ResourceDatabasePopulator(new ClassPathResource(
+                "db/migration/V20260806190000__persist_public_skill_hub_snapshots.sql")).execute(dataSource);
+        new ResourceDatabasePopulator(new ClassPathResource(
+                "db/migration/V20260806190500__classify_public_skill_hub_snapshots.sql")).execute(dataSource);
         seedRequiredParents(JdbcClient.create(dataSource));
         SqlSessionFactoryBean factory = new SqlSessionFactoryBean();
         factory.setDataSource(dataSource);
@@ -203,6 +210,59 @@ class MyBatisAgentSkillHubRepositoryIntegrationTest {
                 });
     }
 
+    @Test
+    void publicBuiltinSnapshotUsesCommitCasAndKeepsExactHistoricalRevision() {
+        String firstCommit = "d".repeat(40);
+        String secondCommit = "e".repeat(40);
+        BuiltinSnapshot first = builtinSnapshot(firstCommit, "5".repeat(64), NOW);
+        BuiltinSnapshot second = builtinSnapshot(secondCommit, "6".repeat(64), NOW.plusSeconds(60));
+
+        assertThat(repository.replaceBuiltinSnapshot(null, first)).isTrue();
+        assertThat(repository.findBuiltinSnapshotCommit()).contains(firstCommit);
+        assertThat(repository.listCurrentBuiltinRevisions())
+                .singleElement().satisfies(revision -> {
+                    assertThat(revision.assetType()).isEqualTo(AssetType.AGENT);
+                    assertThat(revision.technicalId()).isEqualTo("public-reviewer");
+                    assertThat(revision.sourceCommitHash()).isEqualTo(firstCommit);
+                });
+        assertThat(repository.replaceBuiltinSnapshot(null, second)).isFalse();
+        assertThat(repository.findBuiltinSnapshotCommit()).contains(firstCommit);
+
+        assertThat(repository.replaceBuiltinSnapshot(firstCommit, second)).isTrue();
+        assertThat(repository.findBuiltinSnapshotCommit()).contains(secondCommit);
+        assertThat(repository.listCurrentBuiltinRevisions())
+                .singleElement().extracting("sourceCommitHash").isEqualTo(secondCommit);
+        assertThat(repository.findBuiltinRevision(first.revisions().getFirst().revision().revisionId())).isPresent();
+        assertThat(repository.findArtifact("5".repeat(64))).isPresent();
+    }
+
+    @Test
+    void publicSkillClassificationSurvivesTheNextGitSnapshot() {
+        String firstCommit = "7".repeat(40);
+        String secondCommit = "8".repeat(40);
+        BuiltinSnapshot first = builtinSkillSnapshot(firstCommit, "9".repeat(64), NOW);
+        BuiltinSnapshot second = builtinSkillSnapshot(secondCommit, "a".repeat(64), NOW.plusSeconds(60));
+
+        assertThat(repository.replaceBuiltinSnapshot(null, first)).isTrue();
+        var firstRevision = repository.listCurrentBuiltinRevisions().getFirst();
+        assertThat(firstRevision.skillCategory()).isEqualTo(SkillCategory.OTHER);
+
+        repository.updateBuiltinSkillClassification(
+                firstRevision.assetId(), SkillCategory.CODE, SkillSubcategory.WHITE_BOX_ANALYSIS,
+                "usr_hub", NOW.plusSeconds(30));
+        assertThat(repository.replaceBuiltinSnapshot(firstCommit, second)).isTrue();
+
+        assertThat(repository.listCurrentBuiltinRevisions()).singleElement().satisfies(revision -> {
+            assertThat(revision.sourceCommitHash()).isEqualTo(secondCommit);
+            assertThat(revision.skillCategory()).isEqualTo(SkillCategory.CODE);
+            assertThat(revision.skillSubcategory()).isEqualTo(SkillSubcategory.WHITE_BOX_ANALYSIS);
+        });
+        assertThat(repository.findBuiltinRevision(firstRevision.revisionId())).get().satisfies(revision -> {
+            assertThat(revision.skillCategory()).isEqualTo(SkillCategory.CODE);
+            assertThat(revision.skillSubcategory()).isEqualTo(SkillSubcategory.WHITE_BOX_ANALYSIS);
+        });
+    }
+
     private PushedSnapshot snapshot(String commit, String artifactSha, Instant pushedAt) {
         byte[] compressed = new byte[]{1, 2, 3};
         Artifact artifact = new Artifact(artifactSha, "GZIP_JSON_V1", compressed, "[]", 12,
@@ -219,6 +279,32 @@ class MyBatisAgentSkillHubRepositoryIntegrationTest {
         PushedAsset asset = new PushedAsset(AssetType.SKILL, "case-design", artifact, artifactSha,
                 "测试案例设计", "Test case design", "生成结构化测试案例");
         return new PushedSnapshot("app_hub", "aw_hub", "ver_hub", commit, pushedAt, List.of(asset));
+    }
+
+    private BuiltinSnapshot builtinSnapshot(String commit, String artifactSha, Instant pushedAt) {
+        byte[] compressed = new byte[]{7, 8, 9};
+        Artifact artifact = new Artifact(
+                artifactSha, "GZIP_JSON_V1", compressed, "[]", 12, compressed.length, 1, pushedAt);
+        String assetId = "hub_builtin_AGENT_cHVibGljLXJldmlld2Vy";
+        BuiltinRevision revision = new BuiltinRevision(
+                "hub_builtin_rev_" + commit + "_AGENT_cHVibGljLXJldmlld2Vy",
+                assetId, AssetType.AGENT, "public-reviewer", commit, artifactSha, artifactSha,
+                "公共评审", "Public reviewer", "公共评审 Agent", SkillCategory.OTHER, null, pushedAt);
+        return new BuiltinSnapshot(
+                commit, pushedAt, List.of(new BuiltinPushedRevision(revision, artifact)));
+    }
+
+    private BuiltinSnapshot builtinSkillSnapshot(String commit, String artifactSha, Instant pushedAt) {
+        byte[] compressed = new byte[]{10, 11, 12};
+        Artifact artifact = new Artifact(
+                artifactSha, "GZIP_JSON_V1", compressed, "[]", 12, compressed.length, 1, pushedAt);
+        String assetId = "hub_builtin_SKILL_d2hpdGUtYm94LWFuYWx5c2lz";
+        BuiltinRevision revision = new BuiltinRevision(
+                "hub_builtin_rev_" + commit + "_SKILL_d2hpdGUtYm94LWFuYWx5c2lz",
+                assetId, AssetType.SKILL, "white-box-analysis", commit, artifactSha, artifactSha,
+                "白盒分析", "White-box analysis", "分析代码实现", SkillCategory.OTHER, null, pushedAt);
+        return new BuiltinSnapshot(
+                commit, pushedAt, List.of(new BuiltinPushedRevision(revision, artifact)));
     }
 
     private void seedRequiredParents(JdbcClient jdbc) {

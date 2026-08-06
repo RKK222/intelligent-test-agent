@@ -68,7 +68,7 @@ public class AgentSkillHubController {
         return ApiResponse.ok(service.publish(assetId, dependencies, principal.userId()), RuntimeApiSupport.traceId(exchange));
     }
 
-    /** 只有超级管理员可以把用户推送的 Skill 归入受控事项分类。 */
+    /** 只有超级管理员可以把 Hub Skill（含公共 Git 内容）归入受控事项分类。 */
     @PutMapping("/assets/{assetId}/classification")
     public ApiResponse<AgentSkillHubResponses.ClassificationResponse> classifySkill(
             @PathVariable String assetId,

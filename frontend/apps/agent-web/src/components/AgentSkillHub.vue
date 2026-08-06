@@ -384,7 +384,7 @@ function skillSubcategoryLabel(asset: AgentSkillHubAsset) {
 
 /** 超级管理员分类后直接更新当前快照，再按现有筛选重新拉取目录。 */
 async function saveSkillClassification() {
-  if (!props.canClassifySkills || selectedAsset.value?.type !== "SKILL" || selectedAsset.value.builtin) return;
+  if (!props.canClassifySkills || selectedAsset.value?.type !== "SKILL") return;
   actionLoading.value = true;
   try {
     const result = await api.updateAgentSkillHubClassification(
@@ -955,9 +955,9 @@ onUnmounted(stopDetailResize);
               <section v-if="selectedAsset.type === 'SKILL'" class="hub-classification">
                 <div>
                   <strong>事项分类</strong>
-                  <span>用户推送默认进入“其他”，由超级管理员归入受控事项。</span>
+                  <span>新入库 Skill 默认进入“其他”，由超级管理员归入受控事项。</span>
                 </div>
-                <div v-if="canClassifySkills && !selectedAsset.builtin" class="hub-classification-form">
+                <div v-if="canClassifySkills" class="hub-classification-form">
                   <label>
                     一级分类
                     <select v-model="classificationCategory" aria-label="Skill 一级分类">

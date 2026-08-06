@@ -8,7 +8,11 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.common.git.GitWorkspaceService;
@@ -20,6 +24,8 @@ import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepo
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Asset;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.AssetSummary;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.AssetType;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinSnapshot;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinRevision;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedSnapshot;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Reference;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Revision;
@@ -43,6 +49,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
@@ -138,6 +145,26 @@ class AgentSkillHubApplicationServiceTest {
                 .thenReturn(List.of("opencode/agents/reviewer.md"));
         when(git.readFileAtCommit(publicRoot, commit, "opencode/agents/reviewer.md"))
                 .thenReturn("---\ndescription: Reviewer（评审专家）。\n---\n# Reviewer".getBytes(StandardCharsets.UTF_8));
+        AtomicReference<BuiltinSnapshot> stored = new AtomicReference<>();
+        when(repository.findBuiltinSnapshotCommit()).thenAnswer(invocation -> Optional.ofNullable(stored.get())
+                .map(BuiltinSnapshot::sourceCommitHash));
+        when(repository.replaceBuiltinSnapshot(nullable(String.class), any(BuiltinSnapshot.class)))
+                .thenAnswer(invocation -> {
+                    stored.set(invocation.getArgument(1));
+                    return true;
+                });
+        when(repository.listCurrentBuiltinRevisions()).thenAnswer(invocation -> stored.get() == null
+                ? List.of()
+                : stored.get().revisions().stream().map(item -> item.revision()).toList());
+        when(repository.findCurrentBuiltinRevision(anyString())).thenAnswer(invocation -> stored.get().revisions()
+                .stream().map(item -> item.revision())
+                .filter(item -> item.assetId().equals(invocation.getArgument(0))).findFirst());
+        when(repository.findBuiltinRevision(anyString())).thenAnswer(invocation -> stored.get().revisions()
+                .stream().map(item -> item.revision())
+                .filter(item -> item.revisionId().equals(invocation.getArgument(0))).findFirst());
+        when(repository.findArtifact(anyString())).thenAnswer(invocation -> stored.get().revisions().stream()
+                .map(item -> item.artifact())
+                .filter(item -> item.sha256().equals(invocation.getArgument(0))).findFirst());
         when(repository.listAssets(any(), nullable(SkillCategory.class), nullable(SkillSubcategory.class),
                 nullable(String.class), anyString(), nullable(String.class), anyBoolean(), anyInt(), anyInt()))
                 .thenReturn(List.of());
@@ -145,6 +172,10 @@ class AgentSkillHubApplicationServiceTest {
                 repository, mock(ConfigurationManagementRepository.class), mock(ManagedWorkspaceRepository.class),
                 parameters, git, new ObjectMapper());
 
+        service.reconcilePublicBuiltinSnapshots();
+        service.reconcilePublicBuiltinSnapshots();
+        verify(git, times(1)).listFilesAtCommit(publicRoot, commit, "opencode");
+        clearInvocations(git);
         var page = service.listAssets("AGENT", null, 1, 100, new UserId("usr_1"));
 
         assertThat(page.total()).isEqualTo(1);
@@ -158,6 +189,64 @@ class AgentSkillHubApplicationServiceTest {
             assertThatThrownBy(() -> service.publish(asset.assetId(), List.of(), new UserId("usr_1")))
                     .hasMessageContaining("无需发布");
         });
+        verifyNoInteractions(git);
+    }
+
+    @Test
+    void publicSnapshotReconcileDoesNotLetStaleServerMoveCatalogBackward() {
+        AgentSkillHubRepository repository = mock(AgentSkillHubRepository.class);
+        GitWorkspaceService git = mock(GitWorkspaceService.class);
+        CommonParameterValues parameters = mock(CommonParameterValues.class);
+        Path publicRoot = Path.of("/public-config");
+        String oldCommit = "a".repeat(40);
+        String indexedCommit = "b".repeat(40);
+        when(parameters.resolvedValue("OPENCODE_PUBLIC_CONFIG_GIT_ROOT"))
+                .thenReturn(Optional.of(publicRoot.toString()));
+        when(git.isGitRepository(publicRoot)).thenReturn(true);
+        when(git.headCommit(publicRoot)).thenReturn(oldCommit);
+        when(git.isAncestor(publicRoot, oldCommit, indexedCommit)).thenReturn(true);
+        when(repository.findBuiltinSnapshotCommit()).thenReturn(Optional.of(indexedCommit));
+        AgentSkillHubApplicationService service = new AgentSkillHubApplicationService(
+                repository, mock(ConfigurationManagementRepository.class), mock(ManagedWorkspaceRepository.class),
+                parameters, git, new ObjectMapper());
+
+        service.reconcilePublicBuiltinSnapshots();
+
+        verify(git, never()).listFilesAtCommit(any(), anyString(), anyString());
+        verify(repository, never()).replaceBuiltinSnapshot(nullable(String.class), any(BuiltinSnapshot.class));
+    }
+
+    @Test
+    void publicSnapshotReconcileFindsAPushFromAnotherLocalClone() {
+        AgentSkillHubRepository repository = mock(AgentSkillHubRepository.class);
+        GitWorkspaceService git = mock(GitWorkspaceService.class);
+        CommonParameterValues parameters = mock(CommonParameterValues.class);
+        Path publicRoot = Path.of("/public-config");
+        String localCommit = "1".repeat(40);
+        String remoteCommit = "2".repeat(40);
+        when(parameters.resolvedValue("OPENCODE_PUBLIC_CONFIG_GIT_ROOT"))
+                .thenReturn(Optional.of(publicRoot.toString()));
+        when(git.isGitRepository(publicRoot)).thenReturn(true);
+        when(git.headCommit(publicRoot)).thenReturn(localCommit);
+        when(git.currentBranch(publicRoot)).thenReturn("main");
+        when(git.resolveCommit(publicRoot, "origin/main")).thenReturn(remoteCommit);
+        when(git.listFilesAtCommit(publicRoot, remoteCommit, "opencode"))
+                .thenReturn(List.of("opencode/agents/remote-reviewer.md"));
+        when(git.readFileAtCommit(publicRoot, remoteCommit, "opencode/agents/remote-reviewer.md"))
+                .thenReturn("---\ndescription: 远端评审\n---\n# Reviewer".getBytes(StandardCharsets.UTF_8));
+        when(repository.replaceBuiltinSnapshot(nullable(String.class), any(BuiltinSnapshot.class))).thenReturn(true);
+        AgentSkillHubApplicationService service = new AgentSkillHubApplicationService(
+                repository, mock(ConfigurationManagementRepository.class), mock(ManagedWorkspaceRepository.class),
+                parameters, git, new ObjectMapper());
+
+        service.reconcilePublicBuiltinSnapshots();
+
+        verify(git).fetch(publicRoot, null);
+        ArgumentCaptor<BuiltinSnapshot> snapshot = ArgumentCaptor.forClass(BuiltinSnapshot.class);
+        verify(repository).replaceBuiltinSnapshot(nullable(String.class), snapshot.capture());
+        assertThat(snapshot.getValue().sourceCommitHash()).isEqualTo(remoteCommit);
+        assertThat(snapshot.getValue().revisions()).singleElement().satisfies(item ->
+                assertThat(item.revision().technicalId()).isEqualTo("remote-reviewer"));
     }
 
     @Test
@@ -240,6 +329,34 @@ class AgentSkillHubApplicationServiceTest {
         assertThatThrownBy(() -> service.classifySkill(
                 asset.assetId(), "CODE", "TEST_EXECUTION", new UserId("usr_admin")))
                 .hasMessageContaining("不匹配");
+    }
+
+    @Test
+    void superAdminCanClassifyPublicGitSkill() {
+        AgentSkillHubRepository repository = mock(AgentSkillHubRepository.class);
+        Instant now = Instant.parse("2026-08-06T00:00:00Z");
+        String assetId = "hub_builtin_SKILL_d2hpdGUtYm94LWFuYWx5c2lz";
+        BuiltinRevision revision = new BuiltinRevision(
+                "hub_builtin_rev_" + "a".repeat(40) + "_SKILL_d2hpdGUtYm94LWFuYWx5c2lz",
+                assetId, AssetType.SKILL, "white-box-analysis", "a".repeat(40), "b".repeat(64),
+                "c".repeat(64), "白盒分析", "White-box analysis", "分析代码实现",
+                SkillCategory.OTHER, null, now);
+        when(repository.findCurrentBuiltinRevision(assetId)).thenReturn(Optional.of(revision));
+        AgentSkillHubApplicationService service = new AgentSkillHubApplicationService(
+                repository,
+                mock(ConfigurationManagementRepository.class),
+                mock(ManagedWorkspaceRepository.class),
+                mock(CommonParameterValues.class),
+                mock(GitWorkspaceService.class),
+                new ObjectMapper());
+
+        var response = service.classifySkill(
+                assetId, "CODE", "WHITE_BOX_ANALYSIS", new UserId("usr_admin"));
+
+        assertThat(response.assetId()).isEqualTo(assetId);
+        verify(repository).updateBuiltinSkillClassification(
+                assetId, SkillCategory.CODE, SkillSubcategory.WHITE_BOX_ANALYSIS,
+                "usr_admin", response.classifiedAt());
     }
 
     @Test

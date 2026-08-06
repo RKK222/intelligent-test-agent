@@ -6273,3 +6273,43 @@
 - 本次变更涉及向后兼容 HTTP 响应扩展、受控分类写接口、Flyway/MyBatis SQL、超级管理员权限和分类索引；不涉及
   RunEvent、OpenCode 源码、generated SDK、环境配置或跨服务器文件路由。Workflow/LobeHub 未启动；正式交付前
   仍须按数据库规范核对全部目标环境 migration 历史和并行候选版本，禁止改写已在共享/稳定环境执行的 migration。
+
+## 2026-08-06 - 定时持久化公共 Skill Hub 并移除查询链路 Git 扫描
+
+### Why
+
+- 公共 Agent/Skill 原先在每次 Hub 列表、详情和正文请求中重新扫描 Git，页面并发加载目录时出现秒级延迟；公共
+  内容又可能由用户在其它本地 clone 直接 push，仅依赖平台页面操作触发索引会漏记。
+- 应用推送内容已经写入 Hub 资产、修订和压缩制品表，但公共 Git Skill 仍是虚拟只读项，不能沿用超级管理员分类。
+
+### What
+
+- 新增 30 秒公共快照定时对账：使用共享仓库现有 Git 身份 fetch 当前分支，只刷新 `origin` 引用而不修改运行
+  工作树；按远端精确 commit 扫描完整 Agent/Skill，元数据和当前提交写表，正文复用内容寻址 GZIP artifact。
+  远端认证暂不可用时回退本地 HEAD；多 Java 通过事务锁和 commit compare-and-set 防止旧副本回退目录。
+- Hub 列表、详情和正文全部改为数据库读取，保留历史公共 revision；公共 Skill 首次入库默认 `OTHER`，独立分类表
+  以稳定 assetId 跨 commit 保留超级管理员分类，公共 Agent 仍不可分类。
+- 新增 `V20260806190000__persist_public_skill_hub_snapshots.sql` 和
+  `V20260806190500__classify_public_skill_hub_snapshots.sql`，同步 domain/repository、MyBatis XML、HTTP/数据库/模块
+  文档及前端公共 Skill 分类入口。两份 migration 已在本机共享测试库执行，后续禁止改写原始字节。
+
+### How
+
+- 后端分类、定时远端 push 发现、无查询 Git、旧副本隔离和公共分类跨 commit 回归通过；完整相关 Maven 测试为
+  common 96、domain 93、observability 6、scheduler 8、workspace 396、persistence 260（18 项按环境跳过），全部
+  0 失败。前端 Hub 12 项通过，agent-web 类型检查与开发构建通过。
+- 使用未修改的主工作区 `.env.test`、JDK 25 和官方 `--without-workflow` 开关，从独立 worktree 重新打包并启动
+  backend、opencode-manager、frontend；health/readiness 为 `UP`，前端 3000 返回 200，实际 Java 运行本 worktree
+  的不可变 JAR。真实 PostgreSQL 16 从 `20260806190000` 升到 `20260806190500` 成功。
+- 最终 JAR 内两份 migration 与源码 SHA-256 一致：`190000` 为
+  `1b2547cf466c09fe11a63b1f76e5e17ec1773e2187aa01e052288a9bb4861e75`，`190500` 为
+  `19a0e5af5f361179ac3887d541c274f75f43f89a683ee8037a5e0391444a92bf`。
+
+### Result
+
+- 本机数据库当前公共目录为 6 个 Agent、12 个 Skill，18 条公共 revision，12 条公共 Skill 分类均为默认
+  `OTHER`；数据库 current commit、本地 HEAD 与 `origin/master` 都是
+  `8b81dc4d9e343e9d6a999cff816d8c3dbfedf923`。
+- Hub 热查询实测由原逐请求 Git 扫描的秒级下降到约 5–21ms；首次并发冷查询约 79–117ms。此次涉及数据库、HTTP
+  分类行为和性能，不改 RunEvent、OpenCode 源码、generated SDK、环境配置或跨服务器文件路由。正式交付前仍须
+  对照全部目标环境 Flyway 历史与并行候选版本，验证每套已知 PostgreSQL 基线升级。

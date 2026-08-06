@@ -134,7 +134,7 @@ managed/source 选择共用完整 intent authority，旧 terminal 的 repository
 
 活动栏底部 `Boxes` 入口的前端 Hub 统一表示 Agent、Skill、MCP、Tool：Agent/Skill 继续调用平台 Hub API 管理远端资产，MCP/Tool 只复用 `apps/agent-web` 已加载的 OpenCode 运行态目录，不新增服务端资产类型。顶部资源摘要另保留 Plugin 计数；顶部摘要与 Hub 详情面板都支持拖拽调宽和页面内全屏。
 
-Skill Hub 的事项分类复用既有 `agent_skill_hub_assets` 逻辑资产：新 push 默认 `OTHER`，后续修订不覆盖分类；`test-agent-workspace-management` 校验 `WORKER/TEST/CODE/OTHER` 与受控二级事项组合，`test-agent-persistence` 通过 `AgentSkillHubMapper.xml` 分页筛选并审计分类者，`test-agent-api` 仅向 `SUPER_ADMIN` 开放分类 mutation。前端 `AgentSkillHub.vue` 复用同一目录/详情链路提供两级筛选和详情内管理，不新增独立分类服务或客户端直连。
+Skill Hub 的事项分类以逻辑资产持久化：应用推送 Skill 复用 `agent_skill_hub_assets`，公共 Git Skill 使用 `agent_skill_hub_builtin_classifications`，首次入库默认 `OTHER`，后续修订或 commit 不覆盖分类；`test-agent-workspace-management` 校验 `WORKER/TEST/CODE/OTHER` 与受控二级事项组合，`test-agent-persistence` 通过 `AgentSkillHubMapper.xml` 筛选并审计分类者，`test-agent-api` 仅向 `SUPER_ADMIN` 开放分类 mutation。公共 Agent/Skill 由 `AgentSkillHubApplicationService` 定时用共享仓库现有 Git 身份刷新当前分支远端引用并按精确 commit 对账，修订元数据写入公共快照表、正文复用内容寻址 artifact 表，查询链路只读数据库。前端 `AgentSkillHub.vue` 复用同一目录/详情链路提供两级筛选和详情内管理，不新增独立分类服务或客户端直连。
 
 | 包 | 职责 |
 |---|---|

@@ -3,6 +3,7 @@ package com.enterprise.testagent.persistence.mybatis;
 import com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows.ArtifactRow;
 import com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows.AssetRow;
 import com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows.AssetSummaryRow;
+import com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows.BuiltinRevisionRow;
 import com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows.DependencyRow;
 import com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows.ReferenceRow;
 import com.enterprise.testagent.persistence.mybatis.AgentSkillHubRows.ReferenceConsumerRow;
@@ -20,6 +21,25 @@ public interface AgentSkillHubMapper {
 
     int insertArtifact(ArtifactRow row);
     ArtifactRow findArtifact(@Param("sha256") String sha256);
+    int ensureBuiltinState(@Param("sourceKey") String sourceKey, @Param("indexedAt") Instant indexedAt);
+    String findBuiltinState(@Param("sourceKey") String sourceKey);
+    String lockBuiltinState(@Param("sourceKey") String sourceKey);
+    int updateBuiltinState(@Param("sourceKey") String sourceKey,
+                           @Param("sourceCommitHash") String sourceCommitHash,
+                           @Param("indexedAt") Instant indexedAt);
+    int insertBuiltinRevision(BuiltinRevisionRow row);
+    int ensureBuiltinClassification(@Param("assetId") String assetId,
+                                    @Param("skillCategory") String skillCategory,
+                                    @Param("classifiedAt") Instant classifiedAt);
+    int updateBuiltinSkillClassification(@Param("assetId") String assetId,
+                                         @Param("skillCategory") String skillCategory,
+                                         @Param("skillSubcategory") String skillSubcategory,
+                                         @Param("classifiedByUserId") String classifiedByUserId,
+                                         @Param("classifiedAt") Instant classifiedAt);
+    List<BuiltinRevisionRow> listCurrentBuiltinRevisions(@Param("sourceKey") String sourceKey);
+    BuiltinRevisionRow findCurrentBuiltinRevision(@Param("sourceKey") String sourceKey,
+                                                  @Param("assetId") String assetId);
+    BuiltinRevisionRow findBuiltinRevision(@Param("revisionId") String revisionId);
     int insertAsset(AssetRow row);
     AssetRow findAsset(@Param("assetId") String assetId);
     AssetRow findAssetByIdentity(@Param("sourceAppId") String sourceAppId,

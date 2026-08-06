@@ -12,6 +12,9 @@ import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Artifact;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Asset;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.AssetSummary;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.AssetType;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinPushedRevision;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinRevision;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.BuiltinSnapshot;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Dependency;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedAsset;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushedSnapshot;
@@ -181,6 +184,65 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         }
     }
 
+    /**
+     * 定时把公共配置当前分支的远端提交固化到数据库。fetch 使用共享仓库现有 Git 身份，失败时
+     * 回退本地 HEAD，因此用户从其它 clone 直接 push 后也能被发现，且不会修改运行工作树。
+     */
+    @Scheduled(
+            initialDelayString = "${test-agent.agent-skill-hub.builtin-reconcile-initial-delay:PT2S}",
+            fixedDelayString = "${test-agent.agent-skill-hub.builtin-reconcile-delay:PT30S}")
+    public void reconcilePublicBuiltinSnapshots() {
+        Path repoRoot = publicConfigGitRoot();
+        if (repoRoot == null || !git.isGitRepository(repoRoot)) {
+            return;
+        }
+        try {
+            String headCommit = publicSnapshotCommit(repoRoot);
+            String indexedCommit = repository.findBuiltinSnapshotCommit().orElse(null);
+            if (headCommit.equals(indexedCommit)) {
+                return;
+            }
+            if (indexedCommit != null) {
+                if (git.isAncestor(repoRoot, headCommit, indexedCommit)) {
+                    LOGGER.debug("event=hub_public_builtin_stale_replica_skipped indexedCommit={} localCommit={}",
+                            indexedCommit, headCommit);
+                    return;
+                }
+                if (!git.isAncestor(repoRoot, indexedCommit, headCommit)) {
+                    LOGGER.warn("event=hub_public_builtin_diverged_skipped indexedCommit={} localCommit={}",
+                            indexedCommit, headCommit);
+                    return;
+                }
+            }
+            Instant indexedAt = Instant.now();
+            BuiltinSnapshot snapshot = scanPublicBuiltinSnapshot(repoRoot, headCommit, indexedAt);
+            if (repository.replaceBuiltinSnapshot(indexedCommit, snapshot)) {
+                LOGGER.info("event=hub_public_builtin_snapshot_indexed commit={} assetCount={}",
+                        headCommit, snapshot.revisions().size());
+            }
+        } catch (RuntimeException exception) {
+            LOGGER.warn("event=hub_public_builtin_reconcile_failed repoRoot={} error={}",
+                    repoRoot, exception.toString());
+        }
+    }
+
+    /** 只刷新 origin 引用，不 checkout/reset；远端认证不可用时仍允许公共 rollout 后的本地 HEAD 被索引。 */
+    private String publicSnapshotCommit(Path repoRoot) {
+        String localCommit = git.headCommit(repoRoot);
+        String branch = git.currentBranch(repoRoot);
+        if (branch == null || branch.isBlank() || "HEAD".equals(branch)) {
+            return localCommit;
+        }
+        try {
+            git.fetch(repoRoot, null);
+            return git.resolveCommit(repoRoot, "origin/" + branch);
+        } catch (RuntimeException exception) {
+            LOGGER.debug("event=hub_public_builtin_remote_refresh_fallback branch={} localCommit={} error={}",
+                    branch, localCommit, exception.toString());
+            return localCommit;
+        }
+    }
+
     public AgentSkillHubResponses.PageResponse<AgentSkillHubResponses.AssetResponse> listAssets(
             String type, String category, String subcategory, String keyword,
             boolean referencedOnly, int page, int size,
@@ -197,7 +259,7 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         if (referencedOnly && targetWorkspaceId == null) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "查看当前应用引用时必须选择个人工作区");
         }
-        List<BuiltinSnapshot> builtins = referencedOnly ? List.of()
+        List<BuiltinRevision> builtins = referencedOnly ? List.of()
                 : publicBuiltinSnapshots(assetType, normalizedKeyword, skillCategory, skillSubcategory);
         int offset = (normalizedPage - 1) * normalizedSize;
         List<AgentSkillHubResponses.AssetResponse> items = new ArrayList<>();
@@ -227,8 +289,8 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
     public AgentSkillHubResponses.AssetDetailResponse getAsset(
             String assetId, String revisionId, String targetRuntimeWorkspaceId, UserId userId) {
         if (isBuiltinAssetId(assetId)) {
-            BuiltinSnapshot snapshot = requireBuiltinAsset(assetId, revisionId);
-            ArtifactEnvelope envelope = decode(snapshot.pushedAsset().artifact());
+            BuiltinRevision snapshot = requireBuiltinAsset(assetId, revisionId);
+            ArtifactEnvelope envelope = decode(requireBuiltinArtifact(snapshot));
             return new AgentSkillHubResponses.AssetDetailResponse(
                     response(snapshot), snapshot.revisionId(),
                     envelope.files().stream().map(file -> new AgentSkillHubResponses.ArtifactFileResponse(
@@ -262,8 +324,8 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
 
     public AgentSkillHubResponses.FileContentResponse readFile(String revisionId, String path) {
         if (isBuiltinRevisionId(revisionId)) {
-            BuiltinSnapshot snapshot = requireBuiltinRevision(revisionId);
-            ArtifactFile file = decode(snapshot.pushedAsset().artifact()).files().stream()
+            BuiltinRevision snapshot = requireBuiltinRevision(revisionId);
+            ArtifactFile file = decode(requireBuiltinArtifact(snapshot)).files().stream()
                     .filter(candidate -> candidate.path().equals(normalizeArtifactPath(path)))
                     .findFirst().orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Hub 制品文件不存在"));
             byte[] bytes = Base64.getDecoder().decode(file.contentBase64());
@@ -311,27 +373,31 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         return new AgentSkillHubResponses.PublishResponse(assetId, revision.revisionId(), now, dependencies.size());
     }
 
-    /**
-     * 由 API 层确认超级管理员身份后，修改用户推送 Skill 的事项分类；后续 push 只更新修订，不覆盖分类。
-     */
+    /** 由 API 层确认超级管理员身份后修改 Skill 分类；公共 Git 与应用推送分类都跨修订保留。 */
     public AgentSkillHubResponses.ClassificationResponse classifySkill(
             String assetId, String category, String subcategory, UserId userId) {
-        if (isBuiltinAssetId(assetId)) {
-            throw new PlatformException(ErrorCode.CONFLICT, "平台内置 Skill 不支持人工分类");
-        }
-        Asset asset = requireAsset(assetId);
-        if (asset.assetType() != AssetType.SKILL) {
-            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "只有 Skill 可以设置事项分类");
-        }
         SkillCategory normalizedCategory = parseCategory(category);
         SkillSubcategory normalizedSubcategory = subcategory == null || subcategory.isBlank()
                 ? null : parseSubcategory(subcategory);
         validateExactClassification(normalizedCategory, normalizedSubcategory);
         Instant now = Instant.now();
-        repository.updateSkillClassification(asset.assetId(), normalizedCategory, normalizedSubcategory,
-                userId.value(), now);
+        if (isBuiltinAssetId(assetId)) {
+            BuiltinRevision revision = requireBuiltinAsset(assetId, null);
+            if (revision.assetType() != AssetType.SKILL) {
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "只有 Skill 可以设置事项分类");
+            }
+            repository.updateBuiltinSkillClassification(
+                    revision.assetId(), normalizedCategory, normalizedSubcategory, userId.value(), now);
+        } else {
+            Asset asset = requireAsset(assetId);
+            if (asset.assetType() != AssetType.SKILL) {
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "只有 Skill 可以设置事项分类");
+            }
+            repository.updateSkillClassification(
+                    asset.assetId(), normalizedCategory, normalizedSubcategory, userId.value(), now);
+        }
         return new AgentSkillHubResponses.ClassificationResponse(
-                asset.assetId(), normalizedCategory.name(),
+                assetId, normalizedCategory.name(),
                 normalizedSubcategory == null ? null : normalizedSubcategory.name(), userId.value(), now);
     }
 
@@ -887,119 +953,97 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         }).toList();
     }
 
-    /**
-     * 公共配置本来就由 OpenCode 全局加载，因此仅以虚拟、只读 Hub 资产展示。
-     * 修订 ID 携带精确 Git commit，文件读取始终回到该提交，不把可变工作树伪装成快照。
-     */
-    private List<BuiltinSnapshot> publicBuiltinSnapshots(
+    /** 公共内容只读取定时任务固化的数据库快照；Skill 分类来自跨修订保留的独立记录。 */
+    private List<BuiltinRevision> publicBuiltinSnapshots(
             AssetType type, String keyword, SkillCategory category, SkillSubcategory subcategory) {
-        // 公共配置资产没有持久化分类；与用户新推送资产保持一致，统一展示在“其他”。
-        if ((category != null && category != SkillCategory.OTHER) || subcategory != null) {
-            return List.of();
-        }
-        Path repoRoot = publicConfigGitRoot();
-        if (repoRoot == null || !git.isGitRepository(repoRoot)) return List.of();
-        try {
-            String commit = git.headCommit(repoRoot);
-            List<String> paths = git.listFilesAtCommit(repoRoot, commit, "opencode");
-            List<BuiltinSnapshot> snapshots = new ArrayList<>();
-            if (type == null || type == AssetType.AGENT) {
-                paths.stream()
-                        .filter(path -> path.startsWith("opencode/agents/"))
-                        .filter(path -> path.substring("opencode/agents/".length()).matches("[^/]+\\.md"))
-                        .forEach(path -> {
-                            String technicalId = path.substring("opencode/agents/".length(), path.length() - 3);
-                            snapshots.add(builtinSnapshot(repoRoot, commit, AssetType.AGENT, technicalId));
-                        });
-            }
-            if (type == null || type == AssetType.SKILL) {
-                paths.stream().filter(path -> path.startsWith("opencode/skills/")).map(path -> {
-                    String relative = path.substring("opencode/skills/".length());
-                    int slash = relative.indexOf('/');
-                    return slash > 0 ? relative.substring(0, slash) : null;
-                }).filter(Objects::nonNull).distinct()
-                        .filter(technicalId -> paths.contains("opencode/skills/" + technicalId + "/SKILL.md"))
-                        .forEach(technicalId -> snapshots.add(
-                                builtinSnapshot(repoRoot, commit, AssetType.SKILL, technicalId)));
-            }
-            String lowered = keyword == null ? null : keyword.toLowerCase(Locale.ROOT);
-            return snapshots.stream().filter(snapshot -> lowered == null || java.util.stream.Stream.of(
-                            snapshot.technicalId(), snapshot.pushedAsset().displayName(),
-                            snapshot.pushedAsset().displayNameEn(), snapshot.pushedAsset().description(),
-                            "平台内置", "公共配置").filter(Objects::nonNull)
-                    .anyMatch(value -> value.toLowerCase(Locale.ROOT).contains(lowered)))
-                    .sorted(Comparator.comparing((BuiltinSnapshot snapshot) -> snapshot.type().name())
-                            .thenComparing(snapshot -> Objects.requireNonNullElse(
-                                    snapshot.pushedAsset().displayName(), snapshot.technicalId())))
-                    .toList();
-        } catch (RuntimeException exception) {
-            LOGGER.warn("event=hub_public_builtin_scan_failed repoRoot={} error={}", repoRoot, exception.toString());
-            return List.of();
-        }
+        String lowered = keyword == null ? null : keyword.toLowerCase(Locale.ROOT);
+        return repository.listCurrentBuiltinRevisions().stream()
+                .filter(snapshot -> type == null || snapshot.assetType() == type)
+                .filter(snapshot -> category == null || snapshot.skillCategory() == category)
+                .filter(snapshot -> subcategory == null || snapshot.skillSubcategory() == subcategory)
+                .filter(snapshot -> lowered == null || java.util.stream.Stream.of(
+                                snapshot.technicalId(), snapshot.displayName(), snapshot.displayNameEn(),
+                                snapshot.description(), "平台内置", "公共配置")
+                        .filter(Objects::nonNull)
+                        .anyMatch(value -> value.toLowerCase(Locale.ROOT).contains(lowered)))
+                .toList();
     }
 
-    private BuiltinSnapshot requireBuiltinAsset(String assetId, String revisionId) {
+    private BuiltinRevision requireBuiltinAsset(String assetId, String revisionId) {
         BuiltinIdentity identity = parseBuiltinAssetId(assetId);
         if (revisionId != null && !revisionId.isBlank()) {
-            BuiltinSnapshot snapshot = requireBuiltinRevision(revisionId.trim());
-            if (snapshot.type() != identity.type() || !snapshot.technicalId().equals(identity.technicalId())) {
+            BuiltinRevision snapshot = requireBuiltinRevision(revisionId.trim());
+            if (snapshot.assetType() != identity.type() || !snapshot.technicalId().equals(identity.technicalId())) {
                 throw new PlatformException(ErrorCode.VALIDATION_ERROR, "平台内置修订不属于指定资产");
             }
             return snapshot;
         }
-        Path repoRoot = requirePublicConfigGitRoot();
-        return builtinSnapshot(repoRoot, git.headCommit(repoRoot), identity.type(), identity.technicalId());
+        return repository.findCurrentBuiltinRevision(assetId)
+                .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "平台内置资产不存在"));
     }
 
-    private BuiltinSnapshot requireBuiltinRevision(String revisionId) {
-        String encoded = revisionId.substring(BUILTIN_REVISION_PREFIX.length());
-        int commitEnd = encoded.indexOf('_');
-        int typeEnd = commitEnd < 0 ? -1 : encoded.indexOf('_', commitEnd + 1);
-        if (commitEnd <= 0 || typeEnd <= commitEnd + 1) {
+    private BuiltinRevision requireBuiltinRevision(String revisionId) {
+        if (!isBuiltinRevisionId(revisionId)) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "平台内置修订 ID 无效");
         }
-        String commit = encoded.substring(0, commitEnd);
-        if (!commit.matches("[a-fA-F0-9]{7,128}")) {
-            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "平台内置修订提交无效");
-        }
-        AssetType type = parseType(encoded.substring(commitEnd + 1, typeEnd));
-        String technicalId = decodeBuiltinTechnicalId(encoded.substring(typeEnd + 1));
-        return builtinSnapshot(requirePublicConfigGitRoot(), commit, type, technicalId);
+        return repository.findBuiltinRevision(revisionId)
+                .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "平台内置修订不存在"));
     }
 
-    private BuiltinSnapshot builtinSnapshot(Path repoRoot, String commit, AssetType type, String technicalId) {
-        String normalizedId = normalizeTechnicalId(technicalId);
-        Map<String, byte[]> files = new LinkedHashMap<>();
-        if (type == AssetType.AGENT) {
-            files.put(AGENT_FILE, git.readFileAtCommit(
-                    repoRoot, commit, "opencode/agents/" + normalizedId + ".md"));
-        } else {
-            String prefix = "opencode/skills/" + normalizedId + "/";
-            for (String path : git.listFilesAtCommit(repoRoot, commit, prefix)) {
-                if (path.startsWith(prefix) && path.length() > prefix.length()) {
-                    files.put(path.substring(prefix.length()), git.readFileAtCommit(repoRoot, commit, path));
-                }
+    private Artifact requireBuiltinArtifact(BuiltinRevision revision) {
+        return repository.findArtifact(revision.artifactSha256())
+                .orElseThrow(() -> new PlatformException(ErrorCode.INTERNAL_ERROR, "平台内置制品不存在"));
+    }
+
+    /** 从一个不会变化的 commit 构造完整公共快照；HEAD 后续移动不影响本次读取的一致性。 */
+    private BuiltinSnapshot scanPublicBuiltinSnapshot(Path repoRoot, String commit, Instant indexedAt) {
+        List<String> paths = git.listFilesAtCommit(repoRoot, commit, "opencode");
+        List<BuiltinPushedRevision> revisions = new ArrayList<>();
+        paths.stream()
+                .filter(path -> path.startsWith("opencode/agents/"))
+                .filter(path -> path.substring("opencode/agents/".length()).matches("[^/]+\\.md"))
+                .forEach(path -> {
+                    String technicalId = normalizeTechnicalId(
+                            path.substring("opencode/agents/".length(), path.length() - 3));
+                    revisions.add(builtinPushedRevision(
+                            commit, AssetType.AGENT, technicalId,
+                            Map.of(AGENT_FILE, git.readFileAtCommit(repoRoot, commit, path)), indexedAt));
+                });
+        Map<String, Map<String, byte[]>> skills = new LinkedHashMap<>();
+        for (String path : paths) {
+            if (!path.startsWith("opencode/skills/")) {
+                continue;
             }
-            if (!files.containsKey("SKILL.md")) {
-                throw new PlatformException(ErrorCode.NOT_FOUND, "平台内置 Skill 不存在");
+            String relative = path.substring("opencode/skills/".length());
+            int slash = relative.indexOf('/');
+            if (slash <= 0 || slash == relative.length() - 1) {
+                continue;
             }
+            String technicalId = normalizeTechnicalId(relative.substring(0, slash));
+            skills.computeIfAbsent(technicalId, ignored -> new LinkedHashMap<>())
+                    .put(relative.substring(slash + 1), git.readFileAtCommit(repoRoot, commit, path));
         }
-        PushedAsset pushedAsset = pushedAsset(type, normalizedId, files);
-        return new BuiltinSnapshot(type, normalizedId, builtinAssetId(type, normalizedId),
-                builtinRevisionId(commit, type, normalizedId), commit, pushedAsset, Instant.EPOCH);
+        skills.forEach((technicalId, files) -> {
+            if (files.containsKey("SKILL.md")) {
+                revisions.add(builtinPushedRevision(commit, AssetType.SKILL, technicalId, files, indexedAt));
+            }
+        });
+        return new BuiltinSnapshot(commit, indexedAt, List.copyOf(revisions));
+    }
+
+    private BuiltinPushedRevision builtinPushedRevision(
+            String commit, AssetType type, String technicalId, Map<String, byte[]> files, Instant pushedAt) {
+        PushedAsset pushed = pushedAsset(type, technicalId, files);
+        BuiltinRevision revision = new BuiltinRevision(
+                builtinRevisionId(commit, type, technicalId), builtinAssetId(type, technicalId), type, technicalId,
+                commit, pushed.artifact().sha256(), pushed.contentSha256(), pushed.displayName(),
+                pushed.displayNameEn(), pushed.description(), SkillCategory.OTHER, null, pushedAt);
+        return new BuiltinPushedRevision(revision, pushed.artifact());
     }
 
     private Path publicConfigGitRoot() {
         return commonParameterValues.resolvedValue(PUBLIC_CONFIG_GIT_ROOT)
                 .map(String::trim).filter(value -> !value.isEmpty()).map(Path::of).map(Path::normalize).orElse(null);
-    }
-
-    private Path requirePublicConfigGitRoot() {
-        Path repoRoot = publicConfigGitRoot();
-        if (repoRoot == null || !git.isGitRepository(repoRoot)) {
-            throw new PlatformException(ErrorCode.NOT_FOUND, "平台公共配置仓库尚未就绪");
-        }
-        return repoRoot;
     }
 
     private boolean isBuiltinAssetId(String assetId) {
@@ -1040,11 +1084,11 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         }
     }
 
-    private AgentSkillHubResponses.AssetResponse response(BuiltinSnapshot snapshot) {
-        PushedAsset asset = snapshot.pushedAsset();
-        return new AgentSkillHubResponses.AssetResponse(snapshot.assetId(), snapshot.type().name(),
-                snapshot.technicalId(), asset.displayName(), asset.displayNameEn(), asset.description(),
-                SkillCategory.OTHER.name(), null,
+    private AgentSkillHubResponses.AssetResponse response(BuiltinRevision snapshot) {
+        return new AgentSkillHubResponses.AssetResponse(snapshot.assetId(), snapshot.assetType().name(),
+                snapshot.technicalId(), snapshot.displayName(), snapshot.displayNameEn(), snapshot.description(),
+                snapshot.skillCategory().name(), snapshot.skillSubcategory() == null
+                        ? null : snapshot.skillSubcategory().name(),
                 "platform", "平台内置", "public", "公共配置", snapshot.revisionId(), snapshot.revisionId(),
                 true, true, false, false, false, null, 0, snapshot.pushedAt(), snapshot.pushedAt());
     }
@@ -1322,8 +1366,6 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
     private record ArtifactEnvelope(List<ArtifactFile> files) { }
     private record ArtifactFile(String path, long size, String sha256, String mediaType, String contentBase64) { }
     private record BuiltinIdentity(AssetType type, String technicalId) { }
-    private record BuiltinSnapshot(AssetType type, String technicalId, String assetId, String revisionId,
-                                   String commitHash, PushedAsset pushedAsset, Instant pushedAt) { }
     private record WriteBackup(Path assetRoot, Path backupPath, boolean existed) { }
     private record ImportRequest(Asset asset, Revision revision, String alias, Map<String, byte[]> files, String contentSha256) { }
     private record ConflictFile(String path, String kind, String baseContent, String currentContent,

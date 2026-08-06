@@ -1545,3 +1545,18 @@ Redis 使用 `test-agent:support-access:session:{sessionDigest}` 与 `test-agent
 - `(asset_type, skill_category, skill_subcategory)` 索引：服务 Skill 目录分页筛选；数据库约束同时保证 Agent 始终为 `OTHER/null`。
 
 默认值完成存量兼容回填，不写测试、演示或环境专属分类数据。后续 push 只更新最新修订指针，不修改分类；人工分类 SQL 位于 `AgentSkillHubMapper.xml`。正式合入交付分支前仍须对照全部目标环境的 `flyway_schema_history` 确认该候选版本高于部署基线且未与并行 migration 冲突，并按本文件规则用真实 PostgreSQL 覆盖每套已知历史的升级与最终 JAR 字节校验。
+
+## V20260806190000 公共 Skill Hub 快照持久化
+
+`V20260806190000__persist_public_skill_hub_snapshots.sql` 在现有内容寻址制品表之上增加：
+
+- `agent_skill_hub_builtin_revisions`：按 `revision_id` 保存公共 Agent/Skill 在精确 Git commit 下的元数据和 artifact SHA-256；`(asset_id, source_commit_hash)` 唯一，旧修订不因目录前进而删除。
+- `agent_skill_hub_builtin_state`：以固定 `source_key=PUBLIC` 保存当前完成事务性对账的 commit 和时间。写入端先锁定状态并比较期望 commit，避免多服务器旧副本覆盖新目录。
+
+迁移只创建结构，不写环境公共内容。服务启动后由定时任务用 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT` 共享仓库现有 Git 身份 fetch 当前分支，并读取 `origin/{branch}` 的精确提交完成快照；任务不修改工作树，认证暂不可用时回退本地 HEAD。正文继续写入 `agent_skill_hub_artifacts`，相同内容按 SHA-256 去重。该迁移是开发期候选版本；合入交付分支前必须对照所有目标环境历史确认版本严格递增，并按本文件规则验证真实 PostgreSQL 基线升级和最终 JAR 内 migration SHA-256。
+
+## V20260806190500 公共 Git Skill 分类持久化
+
+`V20260806190500__classify_public_skill_hub_snapshots.sql` 新增 `agent_skill_hub_builtin_classifications`：以稳定 `asset_id` 保存公共 Git Skill 的一级/二级事项、最近分类超级管理员和时间。现有公共 Skill 回填 `OTHER/null`，以后首次发现的 Skill 由快照事务幂等补齐默认分类；分类不绑定具体 revision，因此共享仓库进入下一个 commit 后仍然保留。数据库约束与应用推送 Skill 相同，Agent 不写入本表。
+
+该迁移不修改已经执行的 `V20260806190000` 字节。正式合入交付分支前，仍须对照全部目标环境 `flyway_schema_history` 校验两个候选版本的严格递增关系、checksum 和并行 migration 冲突，并用每套已知真实 PostgreSQL 基线验证升级及最终 JAR 内 migration 字节。

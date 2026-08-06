@@ -164,6 +164,34 @@ public final class AgentSkillHubModels {
             String description) {
     }
 
+    /** 公共配置仓库某个精确提交中的只读 Agent/Skill 修订。 */
+    public record BuiltinRevision(
+            String revisionId,
+            String assetId,
+            AssetType assetType,
+            String technicalId,
+            String sourceCommitHash,
+            String artifactSha256,
+            String contentSha256,
+            String displayName,
+            String displayNameEn,
+            String description,
+            SkillCategory skillCategory,
+            SkillSubcategory skillSubcategory,
+            Instant pushedAt) {
+    }
+
+    /** 公共修订与内容寻址制品的写入载荷；列表查询只读取 BuiltinRevision 元数据。 */
+    public record BuiltinPushedRevision(BuiltinRevision revision, Artifact artifact) {
+    }
+
+    /** 一次公共配置 HEAD 对账所得的完整快照。 */
+    public record BuiltinSnapshot(
+            String sourceCommitHash,
+            Instant indexedAt,
+            List<BuiltinPushedRevision> revisions) {
+    }
+
     /** Hub 浏览页所需的扁平投影，避免前端 N+1。 */
     public record AssetSummary(
             Asset asset,
