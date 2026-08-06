@@ -2252,15 +2252,15 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     abortSession: (sessionId: string) => routedRequest<unknown>(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/abort`, { method: "POST" }),
     forkSession: (sessionId: string, payload?: Record<string, unknown>) =>
       postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/fork`, payload, routedRequest),
-    compactSession: (sessionId: string, payload?: Record<string, unknown>) =>
+    compactSession: (sessionId: string, payload: { providerID: string; modelID: string }) =>
       postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/compact`, payload, routedRequest),
-    revertSession: (sessionId: string, payload?: Record<string, unknown>) =>
+    revertSession: (sessionId: string, payload: { messageID: string }) =>
       postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/revert`, payload, routedRequest),
-    unrevertSession: (sessionId: string, payload?: Record<string, unknown>) =>
-      postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/unrevert`, payload, routedRequest),
+    unrevertSession: (sessionId: string) =>
+      postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/unrevert`, undefined, routedRequest),
     runSessionCommand: (sessionId: string, payload?: Record<string, unknown>) =>
       postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/command`, payload, routedRequest, { timeoutMs: 120000 }),
-    runSessionShell: (sessionId: string, payload?: Record<string, unknown>) =>
+    runSessionShell: (sessionId: string, payload: { command: string; agent: string; model?: { providerID: string; modelID: string } }) =>
       postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/shell`, payload, routedRequest, { timeoutMs: 120000 }),
     shareSession: (sessionId: string) =>
       postRuntime(`${opencodeRuntimeBase}/sessions/${encodeURIComponent(sessionId)}/share`, undefined, routedRequest),

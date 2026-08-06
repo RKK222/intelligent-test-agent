@@ -68,7 +68,15 @@ import SessionContextUsage from './SessionContextUsage.vue'
 import { copyTextToClipboard, Spinner } from '@test-agent/ui-kit'
 import type { ChatContextItem } from '../stores/chatContextStore'
 import { validateChatSend } from '../stores/chatContextStore'
-import type { WorkspaceRequirementReference } from './workbench-utils'
+import {
+  OPENCODE_TUI_COMMANDS,
+  openCodeTuiCommandQuery,
+  parseOpenCodeTuiShellCommand,
+  resolveOpenCodeTuiCommand,
+  type OpenCodeTuiCommand,
+  type OpenCodeTuiCommandName,
+  type WorkspaceRequirementReference,
+} from './workbench-utils'
 import { resolveSessionListDrawerPlacement } from './session-list-drawer'
 import { sortRawOutputEntriesNewestFirst } from './raw-output'
 import {
@@ -827,6 +835,8 @@ const emit =
     (e: 'stop'): void
     (e: 'retry'): void
     (e: 'new-conversation'): void
+    (e: 'native-command', command: OpenCodeTuiCommandName): void
+    (e: 'run-shell', command: string): void
     (e: 'request-night-slots'): void
     (e: 'schedule-night', payload: {
       prompt: string
@@ -879,6 +889,7 @@ const emit =
 const collapsedMessages = ref<Record<string, boolean>>({})
 
 const localInput = ref(props.inputValue ?? '')
+const composerTextarea = ref<HTMLTextAreaElement | null>(null)
 const attachmentInput = ref<HTMLInputElement | null>(null)
 const attachmentDragOver = ref(false)
 const nightPickerOpen = ref(false)
@@ -1412,6 +1423,7 @@ function replyQuestion(item: QuestionRequest) {
 // ===== 技能面板 =====
 // 直接展示 OpenCode /command 返回的 source=skill 项；Agent 是否可调用由 OpenCode 原生 permission.skill 判定。
 type SkillItem = { name: string; description: string; commandId: string }
+type ProjectCommandItem = { name: string; description: string; commandId: string }
 
 function skillLabel(skill: SkillItem): string {
   return configuredDisplayName(skill.name, skill.description)
@@ -1433,6 +1445,17 @@ const skills = computed<SkillItem[]>(() => {
     }))
 })
 
+const projectCommands = computed<ProjectCommandItem[]>(() => {
+  const nativeNames = new Set(OPENCODE_TUI_COMMANDS.flatMap((command) => [command.name, ...command.aliases]))
+  return props.commands
+    .filter((command) => command.source !== 'skill' && !nativeNames.has(command.name.toLowerCase()))
+    .map((command) => ({
+      name: command.name,
+      description: command.description || '',
+      commandId: command.commandId,
+    }))
+})
+
 const showSkillPanel = ref(false)
 const skillFilterText = ref('')
 const showAgentPanel = ref(false)
@@ -1447,6 +1470,24 @@ const filteredSkills = computed(() => {
     (s) =>
       s.name.toLowerCase().includes(q) ||
       s.description.toLowerCase().includes(q)
+  )
+})
+
+const filteredNativeCommands = computed(() => {
+  const query = skillFilterText.value.toLowerCase()
+  if (!query) return OPENCODE_TUI_COMMANDS
+  return OPENCODE_TUI_COMMANDS.filter((command) =>
+    command.name.includes(query)
+    || command.aliases.some((alias) => alias.includes(query))
+    || command.description.toLowerCase().includes(query)
+  )
+})
+
+const filteredProjectCommands = computed(() => {
+  const query = skillFilterText.value.toLowerCase()
+  if (!query) return projectCommands.value
+  return projectCommands.value.filter((command) =>
+    command.name.toLowerCase().includes(query) || command.description.toLowerCase().includes(query)
   )
 })
 
@@ -1486,11 +1527,10 @@ function removeCurrentReferenceQuery(text: string, marker: '@' | '#'): string {
 }
 
 function onSkillInput(text: string) {
-  const trimmed = text.trimStart()
+  const query = openCodeTuiCommandQuery(text)
   // 已选命令后的空格表示进入参数输入阶段，此时不再重复打开技能检索面板。
-  if (/^\/\S*$/.test(trimmed) && !props.running) {
-    const afterSlash = trimmed.slice(1)
-    skillFilterText.value = afterSlash
+  if (query !== null && !props.running) {
+    skillFilterText.value = query
     showSkillPanel.value = true
     showAgentPanel.value = false
     agentFilterText.value = ''
@@ -1556,6 +1596,96 @@ function selectSkill(skill: SkillItem) {
   emit('update:inputValue', commandText)
   showSkillPanel.value = false
   skillFilterText.value = ''
+}
+
+function selectProjectCommand(command: ProjectCommandItem) {
+  const commandText = `/${command.name} `
+  localInput.value = commandText
+  emit('update:inputValue', commandText)
+  dismissSkillPanel()
+}
+
+const timelineDetailsExpanded = ref(false)
+const timelineThinkingVisible = ref(true)
+
+function executeNativeCommand(command: OpenCodeTuiCommand, originalPrompt = `/${command.name}`) {
+  dismissSkillPanel()
+  switch (command.name) {
+    case 'connect':
+    case 'models':
+      agentDropdownOpen.value = false
+      dropdownOpen.value = true
+      void nextTick(() => document.querySelector<HTMLInputElement>('.figma-chat-model-search-input')?.focus())
+      return
+    case 'details':
+      timelineDetailsExpanded.value = !timelineDetailsExpanded.value
+      return
+    case 'editor':
+      void nextTick(() => composerTextarea.value?.focus())
+      return
+    case 'exit':
+      emit('close')
+      return
+    case 'export':
+      downloadConversationMarkdown()
+      return
+    case 'help':
+      emit('open-help')
+      return
+    case 'init':
+      emit('send', originalPrompt)
+      return
+    case 'new':
+      emit('new-conversation')
+      return
+    case 'sessions':
+      openHistoryDrawer()
+      return
+    case 'thinking':
+      timelineThinkingVisible.value = !timelineThinkingVisible.value
+      return
+    default:
+      emit('native-command', command.name)
+  }
+}
+
+function selectNativeCommand(command: OpenCodeTuiCommand) {
+  executeNativeCommand(command)
+  localInput.value = ''
+  emit('update:inputValue', '')
+}
+
+function markdownMessageBody(message: ChatMessageInput): string {
+  if (message.role === 'card') {
+    return message.title || ''
+  }
+  const direct = message.text?.trim() || message.content?.trim()
+  if (direct) return direct
+  return (message.parts ?? [])
+    .filter((part) => part.type === 'text' || part.type === 'reasoning')
+    .map((part) => part.type === 'text' || part.type === 'reasoning' ? part.text?.trim() || '' : '')
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+/** 浏览器环境用下载替代 TUI 的外部编辑器打开行为，正文只使用已在页面内存中的会话投影。 */
+function downloadConversationMarkdown() {
+  const lines = [`# ${props.title || 'OpenCode 会话'}`, '']
+  for (const message of props.messages) {
+    const body = markdownMessageBody(message)
+    if (!body) continue
+    lines.push(`## ${message.role === 'user' ? '用户' : message.role === 'assistant' ? '助手' : '系统'}`)
+    lines.push('')
+    lines.push(body)
+    lines.push('')
+  }
+  const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `opencode-session-${new Date().toISOString().replace(/[:.]/g, '-')}.md`
+  link.click()
+  URL.revokeObjectURL(url)
 }
 
 function selectMentionAgent(agent: AgentInfo) {
@@ -4192,6 +4322,21 @@ function submit() {
   const text = localInput.value.trim()
   const attachments = props.chatAttachments
   if ((!text && attachments.length === 0) || sendSubmitBlocked.value) return
+  // TUI 内置命令和 !shell 必须先于通用 Run/Skill 分发处理，避免落入 session command 命名空间。
+  const nativeCommand = attachments.length === 0 ? resolveOpenCodeTuiCommand(text) : null
+  if (nativeCommand) {
+    executeNativeCommand(nativeCommand, text)
+    localInput.value = ''
+    emit('update:inputValue', '')
+    return
+  }
+  const shellCommand = attachments.length === 0 ? parseOpenCodeTuiShellCommand(text) : null
+  if (shellCommand) {
+    emit('run-shell', shellCommand)
+    localInput.value = ''
+    emit('update:inputValue', '')
+    return
+  }
   wasStopped.value = false
   wasCompleted.value = false
   wasFailed.value = false
@@ -4295,6 +4440,8 @@ function onCompositionEnd() {
         v-else
         :state="opencodeTimelineState"
         :work-status-dock-target="activeSubagentSessionId ? undefined : workStatusDockRef"
+        :force-tool-details-open="timelineDetailsExpanded"
+        :show-reasoning="timelineThinkingVisible"
         @open-diff="openTimelineDiff"
         @open-file="(path) => emit('open-file', path)"
         @select-subagent="selectSubagent"
@@ -5144,10 +5291,10 @@ function onCompositionEnd() {
       </div>
     </div>
 
-    <!-- 技能面板：输入 / 触发 -->
+    <!-- 输入 / 时先展示 Skill，再展示 OpenCode TUI 内置能力和项目命令。 -->
     <div v-if="!activeSubagentSessionId && showSkillPanel" class="figma-chat-skill-panel">
       <div class="figma-chat-choice-header">
-        <div class="figma-chat-choice-question">技能</div>
+        <div class="figma-chat-choice-question">技能与命令</div>
         <button
           type="button"
           class="figma-chat-choice-close"
@@ -5157,22 +5304,53 @@ function onCompositionEnd() {
         </button>
       </div>
       <div class="figma-chat-skill-list">
-        <div
-          v-for="skill in filteredSkills"
-          :key="skill.name"
-          class="figma-chat-skill-row"
-          @click="selectSkill(skill)"
-        >
-          <BookOpen :size="16" class="figma-chat-skill-icon" />
-          <div class="figma-chat-skill-info">
-            <span class="figma-chat-skill-name">{{ skillLabel(skill) }}</span
-            >&nbsp;&nbsp;
-            <span v-if="skillDescription(skill)" class="figma-chat-skill-desc"> {{ skillDescription(skill) }}</span>
+        <section v-if="filteredSkills.length" class="figma-chat-command-section" data-testid="slash-skill-section">
+          <div class="figma-chat-command-section-title">技能</div>
+          <div
+            v-for="skill in filteredSkills"
+            :key="skill.name"
+            class="figma-chat-skill-row"
+            @click="selectSkill(skill)"
+          >
+            <BookOpen :size="16" class="figma-chat-skill-icon" />
+            <div class="figma-chat-skill-info">
+              <span class="figma-chat-skill-name">/{{ skill.name }} · {{ skillLabel(skill) }}</span>
+              <span v-if="skillDescription(skill)" class="figma-chat-skill-desc">{{ skillDescription(skill) }}</span>
+            </div>
           </div>
-        </div>
-        <div v-if="filteredSkills.length === 0" class="figma-chat-skill-empty">
-          无匹配技能
-        </div>
+        </section>
+        <section v-if="filteredNativeCommands.length" class="figma-chat-command-section" data-testid="slash-native-section">
+          <div class="figma-chat-command-section-title">OpenCode 原生能力</div>
+          <div
+            v-for="command in filteredNativeCommands"
+            :key="command.name"
+            class="figma-chat-skill-row"
+            @click="selectNativeCommand(command)"
+          >
+            <FileText :size="16" class="figma-chat-native-command-icon" />
+            <div class="figma-chat-skill-info">
+              <span class="figma-chat-skill-name">/{{ command.name }}</span>
+              <span v-if="command.aliases.length" class="figma-chat-command-aliases">别名 {{ command.aliases.map((alias) => `/${alias}`).join('、') }}</span>
+              <span class="figma-chat-skill-desc">{{ command.description }}</span>
+            </div>
+          </div>
+        </section>
+        <section v-if="filteredProjectCommands.length" class="figma-chat-command-section" data-testid="slash-project-section">
+          <div class="figma-chat-command-section-title">项目命令</div>
+          <div
+            v-for="command in filteredProjectCommands"
+            :key="command.commandId"
+            class="figma-chat-skill-row"
+            @click="selectProjectCommand(command)"
+          >
+            <FileText :size="16" class="figma-chat-project-command-icon" />
+            <div class="figma-chat-skill-info">
+              <span class="figma-chat-skill-name">/{{ command.name }}</span>
+              <span v-if="command.description" class="figma-chat-skill-desc">{{ command.description }}</span>
+            </div>
+          </div>
+        </section>
+        <div v-if="filteredSkills.length === 0 && filteredNativeCommands.length === 0 && filteredProjectCommands.length === 0" class="figma-chat-skill-empty">无匹配技能或命令</div>
       </div>
     </div>
 
@@ -5562,6 +5740,7 @@ function onCompositionEnd() {
           @pointerdown.stop.prevent="startComposerResize"
         />
         <textarea
+          ref="composerTextarea"
           v-model="localInput"
           class="figma-chat-textarea"
           :style="composerTextareaStyle"
@@ -8533,9 +8712,26 @@ function onCompositionEnd() {
 .figma-chat-skill-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  max-height: 200px;
+  gap: 10px;
+  max-height: 320px;
   overflow-y: auto;
+}
+
+.figma-chat-command-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.figma-chat-command-section-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 3px 8px;
+  background: #ffffff;
+  color: var(--ta-chat-muted, #737373);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .figma-chat-skill-row {
@@ -8555,6 +8751,16 @@ function onCompositionEnd() {
 
 .figma-chat-skill-icon {
   color: #3366ff;
+  flex-shrink: 0;
+}
+
+.figma-chat-native-command-icon {
+  color: #7f1e2b;
+  flex-shrink: 0;
+}
+
+.figma-chat-project-command-icon {
+  color: #667085;
   flex-shrink: 0;
 }
 
@@ -8580,6 +8786,13 @@ function onCompositionEnd() {
   white-space: nowrap;
   flex: 1;
   margin-left: 8px;
+}
+
+.figma-chat-command-aliases {
+  margin-left: 8px;
+  color: var(--ta-chat-muted, #737373);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .figma-chat-skill-empty {

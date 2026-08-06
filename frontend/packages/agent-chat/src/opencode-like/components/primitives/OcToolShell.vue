@@ -7,17 +7,19 @@ export type OcToolShellProps = {
   statusText?: string;
   defaultOpen?: boolean;
   nested?: boolean;
+  forceOpen?: boolean;
 };
 </script>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { ChevronDown, ChevronRight } from "lucide-vue-next";
 
 const props = withDefaults(defineProps<OcToolShellProps>(), {
   defaultOpen: false
 });
 const open = ref(props.defaultOpen);
+const visibleOpen = computed(() => props.forceOpen || open.value);
 
 function formatStatus(status: string): string {
   const val = status.toLowerCase();
@@ -34,10 +36,10 @@ function formatStatus(status: string): string {
       <span class="oc-tool__title">{{ title }}</span>
       <span v-if="subtitle" class="oc-tool__subtitle" :title="subtitleTitle ?? subtitle">{{ subtitle }}</span>
       <span v-if="status" :class="['oc-tool__status', `is-${status.toLowerCase()}`]">{{ statusText ?? formatStatus(status) }}</span>
-      <ChevronDown v-if="open" class="oc-tool__chevron" />
+      <ChevronDown v-if="visibleOpen" class="oc-tool__chevron" />
       <ChevronRight v-else class="oc-tool__chevron" />
     </button>
-    <div v-if="open" class="oc-tool__body">
+    <div v-if="visibleOpen" class="oc-tool__body">
       <slot />
     </div>
   </section>

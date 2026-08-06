@@ -4,6 +4,8 @@ import type { OpencodeLikeConversationState, TimelineRow as TimelineRowType } fr
 export type OpencodeTimelineProps = {
   state: OpencodeLikeConversationState;
   workStatusDockTarget?: string | HTMLElement | null;
+  forceToolDetailsOpen?: boolean;
+  showReasoning?: boolean;
 };
 </script>
 
@@ -13,7 +15,10 @@ import TimelineRow from "./TimelineRow.vue";
 import ConversationLocator from "./ConversationLocator.vue";
 import { createTimelineRows } from "../state/projection";
 
-const props = defineProps<OpencodeTimelineProps>();
+const props = withDefaults(defineProps<OpencodeTimelineProps>(), {
+  forceToolDetailsOpen: false,
+  showReasoning: true
+});
 const emit = defineEmits<{ openDiff: []; openFile: [path: string]; selectSubagent: [sessionId: string] }>();
 defineSlots<{
   "completed-status-actions"?: (props: { row: Extract<TimelineRowType, { type: "work-status" }> }) => unknown;
@@ -98,6 +103,8 @@ watch(latestUserMessageKey, () => {
         :key="row.key"
         :row="row"
         :state="state"
+        :force-tool-details-open="forceToolDetailsOpen"
+        :show-reasoning="showReasoning"
         :historical-work-status-expanded="expandedHistoricalStatusKey === row.key"
         :completed-work-status-expanded="expandedCompletedStatusKey === row.key"
         :open-work-status-event-key="openWorkStatusDetail?.rowKey === row.key ? openWorkStatusDetail.eventKey : undefined"
@@ -121,6 +128,8 @@ watch(latestUserMessageKey, () => {
           :key="row.key"
           :row="row"
           :state="state"
+          :force-tool-details-open="forceToolDetailsOpen"
+          :show-reasoning="showReasoning"
           :completed-work-status-expanded="expandedCompletedStatusKey === row.key"
           :open-work-status-event-key="openWorkStatusDetail?.rowKey === row.key ? openWorkStatusDetail.eventKey : undefined"
           @open-diff="emit('openDiff')"

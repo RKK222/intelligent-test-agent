@@ -5,17 +5,19 @@ export type OcDisclosureProps = {
   subtitle?: string;
   defaultOpen?: boolean;
   status?: string;
+  forceOpen?: boolean;
 };
 </script>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { ChevronDown, ChevronRight } from "lucide-vue-next";
 
 const props = withDefaults(defineProps<OcDisclosureProps>(), {
   defaultOpen: false
 });
 const open = ref(props.defaultOpen);
+const visibleOpen = computed(() => props.forceOpen || open.value);
 </script>
 
 <template>
@@ -24,10 +26,10 @@ const open = ref(props.defaultOpen);
       <span class="oc-tool__title">{{ title }}</span>
       <span v-if="detail" class="oc-tool__subtitle">{{ detail }}</span>
       <span v-if="subtitle" :class="['oc-tool__status', status ? `is-${status}` : '']">{{ subtitle }}</span>
-      <ChevronDown v-if="open" class="oc-tool__chevron" />
+      <ChevronDown v-if="visibleOpen" class="oc-tool__chevron" />
       <ChevronRight v-else class="oc-tool__chevron" />
     </button>
-    <div v-if="open" class="oc-disclosure__body">
+    <div v-if="visibleOpen" class="oc-disclosure__body">
       <slot />
     </div>
   </section>

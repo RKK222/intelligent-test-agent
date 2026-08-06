@@ -7,6 +7,7 @@ export type ToolPartGroupProps = {
   subagentsBySessionId?: Record<string, SubagentSession>;
   subagentByTaskPartId?: Record<string, string>;
   permissions?: PermissionRequest[];
+  forceOpen?: boolean;
 };
 </script>
 
@@ -20,6 +21,7 @@ const props = defineProps<ToolPartGroupProps>();
 const emit = defineEmits<{ selectSubagent: [sessionId: string] }>();
 
 const open = ref(false);
+const visibleOpen = computed(() => props.forceOpen || open.value);
 
 const firstInfo = computed(() => (props.parts[0] ? getToolInfo(props.parts[0]) : undefined));
 const titleText = computed(() => firstInfo.value?.title ?? "Tool");
@@ -53,10 +55,10 @@ const statusText = computed(() => {
       <span class="oc-tool__title">{{ titleText }}</span>
       <span v-if="subtitleText" class="oc-tool__subtitle" :title="subtitleTitle">{{ subtitleText }}</span>
       <span :class="['oc-tool__status', `is-${aggregateStatus}`]">{{ statusText }}</span>
-      <ChevronDown v-if="open" class="oc-tool__chevron" />
+      <ChevronDown v-if="visibleOpen" class="oc-tool__chevron" />
       <ChevronRight v-else class="oc-tool__chevron" />
     </button>
-    <div v-if="open" class="oc-tool-group__body">
+    <div v-if="visibleOpen" class="oc-tool-group__body">
       <ToolPartView
         v-for="part in parts"
         :key="part.partId"
@@ -65,6 +67,7 @@ const statusText = computed(() => {
         :subagent-by-task-part-id="subagentByTaskPartId"
         :permissions="permissions"
         :nested="true"
+        :force-open="forceOpen"
         @select-subagent="(sessionId) => emit('selectSubagent', sessionId)"
       />
     </div>

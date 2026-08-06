@@ -6546,3 +6546,32 @@
 - 本次只修改企业打包/部署脚本、兼容性测试和稳定部署文档；不新增生产 API、事件、migration 或环境配置，
   不修改 OpenCode 源码和 generated SDK。生产仍必须先导出 PostgreSQL/MySQL `flyway_schema_history`，未知版本、checksum 或
   历史分叉必须停止发布，严禁 `repair` / `outOfOrder` / 手改历史表。
+
+## 2026-08-06 - 恢复 Web 的 OpenCode TUI 原生命令兼容层
+
+### Why
+
+- 工作台把所有 `/xxx` 统一交给 Skill/Command 解析后，`/compact`、`/new`、`/clear` 等 OpenCode TUI
+  内置命令会被吞掉或误发为普通命令；即使页面已有按钮，也不应移除用户熟悉的原生输入能力。
+
+### What
+
+- 输入 `/` 的候选固定按“技能、OpenCode 原生能力、项目命令”展示，原生命令及别名优先于同名项目命令；
+  恢复 `/compact`、`/new`、`/clear`、`/undo`、`/redo`、`/sessions`、`/details`、`/thinking` 等
+  OpenCode 1.18.4 TUI 能力，并保留 `/summarize`、`/resume`、`/continue`、`/quit`、`/q` 等别名。
+- 本地显示命令复用现有模型、会话、帮助、导出与时间线组件；Session 命令复用 compact/revert/unrevert/share
+  API，`/init` 继续走原生 session command；`!command` 复用既有 shell API。工具详情和 reasoning 显隐改为
+  时间线受控展示，不改写 reducer 消息状态。
+- 同步 agent-web、agent-chat、backend-api README、HTTP API 与模块图；OpenCode 上游快照保持只读。
+
+### How
+
+- 新增命令解析、别名、分区顺序、本地显示切换、原生 API payload 与 shell 分发回归；聚焦 348 项通过，
+  前端全量 114 个测试文件 1827 passed / 1 skipped，三个相关包 typecheck 与生产 build 通过。
+- 真实 Vite 实例启动于 `http://127.0.0.1:4174/`，首页返回 HTTP 200；`git diff --check` 通过。
+
+### Result
+
+- Skill 仍优先展示，Web 不再丢失 OpenCode TUI 的 slash/alias 输入路径；已有按钮与原生命令并存。
+- 未新增或修改 HTTP 路径、RunEvent、数据库、性能策略、安全权限、依赖、环境配置、generated SDK 或
+  OpenCode 源码；`/connect`、`/models` 继续受企业 Provider 白名单约束，`/themes` 保持统一企业主题说明。

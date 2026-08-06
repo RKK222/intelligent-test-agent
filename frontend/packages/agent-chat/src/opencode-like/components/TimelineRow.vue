@@ -8,6 +8,8 @@ export type TimelineRowProps = {
   openWorkStatusEventKey?: string;
   historicalWorkStatusExpanded?: boolean;
   completedWorkStatusExpanded?: boolean;
+  forceToolDetailsOpen?: boolean;
+  showReasoning?: boolean;
 };
 </script>
 
@@ -26,7 +28,10 @@ import ToolPartGroup from "./tools/ToolPartGroup.vue";
 import WorkStatusRow from "./rows/WorkStatusRow.vue";
 import OcIconButton from "./primitives/OcIconButton.vue";
 
-const props = defineProps<TimelineRowProps>();
+const props = withDefaults(defineProps<TimelineRowProps>(), {
+  forceToolDetailsOpen: false,
+  showReasoning: true
+});
 const emit = defineEmits<{
   openDiff: [];
   openFile: [path: string];
@@ -110,7 +115,7 @@ const toolGroupParts = computed(() => {
     :continuation="row.previousAssistantPart"
     :show-header="row.showAssistantHeader"
   >
-    <ContextToolGroup :parts="contextParts" :busy="row.busy" />
+    <ContextToolGroup :parts="contextParts" :busy="row.busy" :force-open="forceToolDetailsOpen" />
   </AssistantMessageFrame>
   <AssistantMessageFrame
     v-else-if="row.type === 'tool-group' && assistantMessage"
@@ -125,6 +130,7 @@ const toolGroupParts = computed(() => {
       :subagents-by-session-id="state.subagentsBySessionId"
       :subagent-by-task-part-id="state.subagentByTaskPartId"
       :permissions="state.permissions"
+      :force-open="forceToolDetailsOpen"
       @select-subagent="(sessionId) => emit('selectSubagent', sessionId)"
     />
   </AssistantMessageFrame>
@@ -142,11 +148,13 @@ const toolGroupParts = computed(() => {
       :subagents-by-session-id="state.subagentsBySessionId"
       :subagent-by-task-part-id="state.subagentByTaskPartId"
       :permissions="state.permissions"
+      :force-tool-details-open="forceToolDetailsOpen"
+      :show-reasoning="showReasoning"
       @select-subagent="(sessionId) => emit('selectSubagent', sessionId)"
     />
   </AssistantMessageFrame>
   <AssistantMessageFrame
-    v-else-if="row.type === 'reasoning-group' && assistantMessage"
+    v-else-if="row.type === 'reasoning-group' && assistantMessage && showReasoning"
     class="oc-row"
     :message="assistantMessage"
     :continuation="row.previousAssistantPart"
@@ -177,6 +185,8 @@ const toolGroupParts = computed(() => {
       v-if="historicalWorkStatusExpanded"
       :row="row"
       :state="state"
+      :force-tool-details-open="forceToolDetailsOpen"
+      :show-reasoning="showReasoning"
       :open-event-key="openWorkStatusEventKey"
       @toggle-event="(eventKey) => emit('toggleWorkStatusEvent', eventKey)"
       @close-event="emit('closeWorkStatusEvent')"
@@ -201,6 +211,8 @@ const toolGroupParts = computed(() => {
       v-if="completedWorkStatusExpanded"
       :row="row"
       :state="state"
+      :force-tool-details-open="forceToolDetailsOpen"
+      :show-reasoning="showReasoning"
       :open-event-key="openWorkStatusEventKey"
       @toggle-event="(eventKey) => emit('toggleWorkStatusEvent', eventKey)"
       @close-event="emit('closeWorkStatusEvent')"
@@ -210,6 +222,8 @@ const toolGroupParts = computed(() => {
     <WorkStatusRow
       :row="row"
       :state="state"
+      :force-tool-details-open="forceToolDetailsOpen"
+      :show-reasoning="showReasoning"
       :open-event-key="openWorkStatusEventKey"
       @toggle-event="(eventKey) => emit('toggleWorkStatusEvent', eventKey)"
       @close-event="emit('closeWorkStatusEvent')"

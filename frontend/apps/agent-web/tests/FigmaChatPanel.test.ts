@@ -1915,14 +1915,14 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find(".figma-chat-requirement-panel").exists()).toBe(false);
   });
 
-  it("lists native skill commands when the user types slash", async () => {
+  it("lists skills before OpenCode native commands and project commands", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [],
         processStatus: { status: "READY", initializable: false, message: "ready" },
         commands: [
           { commandId: "skill-1", name: "test-design", description: "Equivalence Partitioning（等价类法）。生成等价类表", source: "skill" },
-          { commandId: "command-1", name: "help", description: "帮助", source: "command" }
+          { commandId: "command-1", name: "review", description: "审查当前修改", source: "command" }
         ]
       }
     });
@@ -1932,7 +1932,13 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find(".figma-chat-skill-panel").exists()).toBe(true);
     expect(wrapper.text()).toContain("等价类法");
     expect(wrapper.text()).toContain("Equivalence Partitioning · 生成等价类表");
-    expect(wrapper.text()).not.toContain("帮助");
+    expect(wrapper.get('[data-testid="slash-native-section"]').text()).toContain("/compact");
+    expect(wrapper.get('[data-testid="slash-native-section"]').text()).toContain("/new");
+    expect(wrapper.get('[data-testid="slash-native-section"]').text()).toContain("/clear");
+    expect(wrapper.get('[data-testid="slash-project-section"]').text()).toContain("/review");
+    const panelText = wrapper.get(".figma-chat-skill-list").text();
+    expect(panelText.indexOf("技能")).toBeLessThan(panelText.indexOf("OpenCode 原生能力"));
+    expect(panelText.indexOf("OpenCode 原生能力")).toBeLessThan(panelText.indexOf("项目命令"));
 
     await wrapper.setProps({
       commands: [
@@ -1949,6 +1955,33 @@ describe("FigmaChatPanel", () => {
     expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("/test-design ");
     expect(wrapper.emitted("update:inputValue")).toContainEqual(["/test-design "]);
     expect(wrapper.find(".figma-chat-skill-panel").exists()).toBe(false);
+  });
+
+  it("executes TUI aliases locally and routes session or shell actions separately", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any
+    });
+    const textarea = wrapper.get("textarea");
+
+    await textarea.setValue("/clear");
+    await textarea.trigger("keydown", { key: "Enter" });
+    expect(wrapper.emitted("new-conversation")).toHaveLength(1);
+    expect(wrapper.emitted("send")).toBeUndefined();
+
+    await textarea.setValue("/summarize");
+    await textarea.trigger("keydown", { key: "Enter" });
+    expect(wrapper.emitted("native-command")?.at(-1)).toEqual(["compact"]);
+
+    await textarea.setValue("/init");
+    await textarea.trigger("keydown", { key: "Enter" });
+    expect(wrapper.emitted("send")?.at(-1)).toEqual(["/init"]);
+
+    await textarea.setValue("!pwd");
+    await textarea.trigger("keydown", { key: "Enter" });
+    expect(wrapper.emitted("run-shell")?.at(-1)).toEqual(["pwd"]);
   });
 
   it("does not show a question panel for ordinary numbered assistant output", () => {
@@ -4513,6 +4546,53 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.findAll('[data-testid="oc-tool-group"]')).toHaveLength(1);
     expect(wrapper.find('[data-testid="oc-tool-group"]').text()).toContain("命令行");
     expect(wrapper.find('[data-testid="oc-tool-group"]').text()).toContain("2 次");
+  });
+
+  it("toggles native tool details and thinking visibility without sending a Run", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "a1", messageId: "a1", role: "assistant", text: "完成", parts: [
+              { partId: "tool-1", type: "tool", toolName: "bash", status: "completed", output: "src", input: { command: "ls" } },
+              { partId: "text-1", type: "text", text: "完成" }
+            ],
+            createdAt: "2026-08-06T07:00:01.000Z"
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+    const textarea = wrapper.get("textarea");
+    expect(wrapper.find(".oc-tool__body").exists()).toBe(false);
+
+    await textarea.setValue("/details");
+    await textarea.trigger("keydown", { key: "Enter" });
+    expect(wrapper.find(".oc-tool__body").exists()).toBe(true);
+    expect(wrapper.emitted("send")).toBeUndefined();
+
+    const thinkingWrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [{
+          id: "a2", messageId: "a2", role: "assistant", text: "完成",
+          parts: [
+            { partId: "reason-2", type: "reasoning", text: "先检查目录", status: "completed" },
+            { partId: "text-2", type: "text", text: "完成" }
+          ],
+          createdAt: "2026-08-06T07:00:02.000Z"
+        }],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+    expect(thinkingWrapper.find(".oc-reasoning-part").exists()).toBe(true);
+
+    const thinkingTextarea = thinkingWrapper.get("textarea");
+    await thinkingTextarea.setValue("/thinking");
+    await thinkingTextarea.trigger("keydown", { key: "Enter" });
+    expect(thinkingWrapper.find(".oc-reasoning-part").exists()).toBe(false);
+    expect(thinkingWrapper.emitted("send")).toBeUndefined();
   });
 
   it("does NOT include reasoning text in the main content", async () => {

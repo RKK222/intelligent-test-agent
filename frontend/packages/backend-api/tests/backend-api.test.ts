@@ -204,6 +204,51 @@ describe("backend-api", () => {
     ]);
   });
 
+  it("sends typed OpenCode TUI session action payloads through the platform runtime routes", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: true
+    }), { status: 200 }));
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await client.compactSession("ses/native", { providerID: "enterprise-qwen", modelID: "Qwen3.6-27B" });
+    await client.revertSession("ses/native", { messageID: "msg_remote" });
+    await client.unrevertSession("ses/native");
+    await client.runSessionShell("ses/native", {
+      command: "pwd",
+      agent: "build",
+      model: { providerID: "enterprise-qwen", modelID: "Qwen3.6-27B" }
+    });
+
+    expect(fetcher.mock.calls.map((call) => [call[0], call[1]?.method, call[1]?.body])).toEqual([
+      [
+        "http://api/api/internal/platform/opencode-runtime/sessions/ses%2Fnative/compact",
+        "POST",
+        JSON.stringify({ providerID: "enterprise-qwen", modelID: "Qwen3.6-27B" })
+      ],
+      [
+        "http://api/api/internal/platform/opencode-runtime/sessions/ses%2Fnative/revert",
+        "POST",
+        JSON.stringify({ messageID: "msg_remote" })
+      ],
+      [
+        "http://api/api/internal/platform/opencode-runtime/sessions/ses%2Fnative/unrevert",
+        "POST",
+        undefined
+      ],
+      [
+        "http://api/api/internal/platform/opencode-runtime/sessions/ses%2Fnative/shell",
+        "POST",
+        JSON.stringify({
+          command: "pwd",
+          agent: "build",
+          model: { providerID: "enterprise-qwen", modelID: "Qwen3.6-27B" }
+        })
+      ]
+    ]);
+  });
+
   it("updates application workspace settings through the existing PATCH resource", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
       new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: { enabled: false } }), { status: 200 })

@@ -8,6 +8,7 @@ export type ToolPartViewProps = {
   subagentByTaskPartId?: Record<string, string>;
   permissions?: PermissionRequest[];
   nested?: boolean;
+  forceOpen?: boolean;
 };
 </script>
 
@@ -113,6 +114,7 @@ function displayName(value: string): string {
     :part="part"
     :subagent="subagent"
     :pending-permission="pendingPermission"
+    :force-open="forceOpen"
     @select-subagent="(sessionId: string) => emit('selectSubagent', sessionId)"
   />
   <component
@@ -121,6 +123,7 @@ function displayName(value: string): string {
     :part="part"
     :subagent="subagent"
     :nested="nested"
+    :force-open="forceOpen"
     @select-subagent="(sessionId: string) => emit('selectSubagent', sessionId)"
   />
 </template>

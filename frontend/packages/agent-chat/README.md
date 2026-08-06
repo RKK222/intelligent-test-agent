@@ -11,6 +11,7 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 - 右侧 Agent 面板的主路径始终展示当前会话时间线，不再提供 Chat/History 顶部 tab；会话选择和待执行任务由 `agent-web` 的独立非模态会话列表浮层承载，本包继续只负责紧凑消息流和受控 composer/runtime 展示。
 - `opencode-like/state` 提供 `createOpencodeLikeState` 与 `createTimelineRows`，把用户消息、孤立助手历史消息、assistant parts、运行态、Diff 文件、permission/question/todo 与模型目录归并为稳定时间线行。
 - `OpencodeTimeline` 在当前可见时间线用户对话轮次大于 3 时显示左侧中线对话定位器；定位器弹层列出全部轮次的用户问题、助手摘要和最多 2 个文件 chips，点击轮次会滚动定位到对应用户消息。该能力只消费现有 `AgentMessage`/message part 投影，不新增 API、事件或持久化字段。
+- `OpencodeTimeline` 额外接受受控的 `forceToolDetailsOpen` 与 `showReasoning`：前者向工具分组和 disclosure 壳传递强制展开状态，后者同时控制 reasoning 行、assistant reasoning part 与工作状态 reasoning 摘要。它们用于承接 Web 的原生 `/details`、`/thinking` 命令，只改变展示投影，不改写消息或 RunEvent reducer 状态。
 - `opencode-like` 基于 RunEvent scope 区分主 Agent 与子 Agent 时间线：主视图过滤 child scoped 输出，仅展示 root 输出和 task 子 Agent 入口卡片；原生 pending task 先显示为不可点击“智能体 / 准备中”，收到 child discovery 或上层恢复出的 subagent 索引后转换为 `Explore + title` 可点击入口；pending permission 的 `sessionId` 精确匹配 child 时，在该 task “进行中”等状态文字前显示动态、可访问的铃铛，并行 child 互不影响；点击入口后切换到子 Agent 时间线，子视图隐藏输入框并只提供返回主 Agent 的提示及该 child 自己的权限交互卡。
 - 展示 message part timeline（text、reasoning、tool、file、retry 以及未知 part fallback）。旧 `card` 消息中的 Diff payload 会被收敛为 `diff-summary` 行；存量 `AgentCard`/`TimelineCard` 仅保留兼容，不作为主对话路径。
 - `reasoning`、最终 `text`、工具调用和文件引用分块展示，避免把思考、工具日志和最终答复混入同一个气泡；同一用户回合内被多个 assistant message 拆开的真实思考状态会合并为一个过程行，默认折叠但在折叠头中保留一行实时摘要。

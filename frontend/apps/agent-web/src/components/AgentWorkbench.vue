@@ -267,6 +267,7 @@ import {
   workspaceAttachmentTargetPath,
   workspaceLoadIsCurrent,
   type AutoRetryRunDraft,
+  type OpenCodeTuiCommandName,
   type OpencodeAvailabilityState,
   type RetryDeadlineMap,
   type WorkspaceRequirementReference
@@ -8850,7 +8851,10 @@ function handleSaveDiffFile(path: string, content: string) {
   saveDiffFileMutation.mutate({ path, content });
 }
 
-async function switchSession(sessionId: string) {
+async function switchSession(
+  sessionId: string,
+  options: { refreshSnapshot?: boolean; completionFeedback?: Feedback } = {}
+) {
   // 历史切换必须释放旧 Run 的标题待定订阅，避免晚到事件改写新打开的会话。
   pendingSessionTitleRunId.value = null;
   invalidateConversationInteraction();
@@ -8869,7 +8873,7 @@ async function switchSession(sessionId: string) {
     }
   }
   // 历史消息和当前交互快照先取；大树快照/Todo 作为增强，避免历史记录首屏被串行请求拖慢。
-  const historyMessagesPromise = api.listSessionMessages(sessionId, 1, 100, { refresh: false });
+  const historyMessagesPromise = api.listSessionMessages(sessionId, 1, 100, { refresh: options.refreshSnapshot ?? false });
   const historyInteractionsPromise = Promise.all([
     api.listSessionPermissions(sessionId).catch(() => null),
     api.listSessionQuestions(sessionId).catch(() => null)
@@ -9032,7 +9036,7 @@ async function switchSession(sessionId: string) {
       }
     }).catch(() => undefined);
 
-    feedback.value = { kind: "info", title: "已切换 Session", description: selected.title };
+    feedback.value = options.completionFeedback ?? { kind: "info", title: "已切换 Session", description: selected.title };
   } catch (error) {
     if (switchIsCurrent()) {
       feedback.value = errorFeedback("加载 Session 消息失败", error);
@@ -9190,6 +9194,146 @@ function handleNewConversation() {
   lastDuration = undefined;
   lastTokens = 0;
   nowTick.value = Date.now();
+}
+
+const nativeCommandInFlight = ref(false);
+
+function nativeSessionActionAllowed(action: string): Session | null {
+  const currentSession = session.value;
+  if (!currentSession) {
+    feedback.value = { kind: "info", title: `无法${action}`, description: "请先发送一条消息建立会话。" };
+    return null;
+  }
+  if (readonlySessionReason.value) {
+    feedback.value = { kind: "info", title: `无法${action}`, description: readonlySessionReason.value };
+    return null;
+  }
+  if (runtimeBusy.value) {
+    feedback.value = { kind: "info", title: `暂不能${action}`, description: "请等待当前任务结束或先停止任务。" };
+    return null;
+  }
+  return currentSession;
+}
+
+function nativeShareUrl(result: unknown): string | undefined {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return undefined;
+  const value = result as Record<string, unknown>;
+  const nested = value.share && typeof value.share === "object" && !Array.isArray(value.share)
+    ? value.share as Record<string, unknown>
+    : undefined;
+  return text(value.url) ?? text(nested?.url);
+}
+
+/**
+ * 执行需要平台 Session API 的 OpenCode TUI 命令。
+ * 本地显示类命令由 FigmaChatPanel 处理；这里集中守住会话身份、运行中状态和远端消息 ID。
+ */
+async function handleNativeTuiCommand(command: OpenCodeTuiCommandName) {
+  if (nativeCommandInFlight.value) {
+    feedback.value = { kind: "info", title: "原生命令执行中", description: "请等待当前命令完成。" };
+    return;
+  }
+  if (command === "themes") {
+    feedback.value = { kind: "info", title: "平台主题", description: "当前企业工作台使用统一主题，暂不提供独立主题切换。" };
+    return;
+  }
+  const actionLabels: Partial<Record<OpenCodeTuiCommandName, string>> = {
+    compact: "压缩上下文",
+    undo: "撤销上一轮",
+    redo: "重做上一轮",
+    share: "分享会话",
+    unshare: "取消分享"
+  };
+  const actionLabel = actionLabels[command];
+  if (!actionLabel) return;
+  const currentSession = nativeSessionActionAllowed(actionLabel);
+  if (!currentSession) return;
+
+  nativeCommandInFlight.value = true;
+  try {
+    if (command === "compact") {
+      const modelID = selectedModelInfo.value?.id ?? modelIdOnly(selectedModel.value);
+      const providerID = selectedModelInfo.value?.providerId ?? selectedProvider.value;
+      if (!modelID || !providerID) {
+        feedback.value = { kind: "info", title: "无法压缩上下文", description: "请先选择包含供应商信息的模型。" };
+        return;
+      }
+      await api.compactSession(currentSession.sessionId, { providerID, modelID });
+      await switchSession(currentSession.sessionId, {
+        refreshSnapshot: true,
+        completionFeedback: { kind: "success", title: "上下文已压缩", description: currentSession.title }
+      });
+      return;
+    }
+    if (command === "undo") {
+      const message = [...chatState.value.messages]
+        .reverse()
+        .find((item) => item.role === "user" && remoteMessageIdForAgentMessage(item));
+      const messageID = message ? remoteMessageIdForAgentMessage(message) : undefined;
+      if (!messageID) {
+        feedback.value = { kind: "info", title: "无法撤销上一轮", description: "当前会话没有可撤销的远端用户消息。" };
+        return;
+      }
+      await api.revertSession(currentSession.sessionId, { messageID });
+      await switchSession(currentSession.sessionId, {
+        refreshSnapshot: true,
+        completionFeedback: { kind: "success", title: "已撤销上一轮", description: "消息以及该轮文件修改已按 OpenCode 原生语义回退。" }
+      });
+      return;
+    }
+    if (command === "redo") {
+      await api.unrevertSession(currentSession.sessionId);
+      await switchSession(currentSession.sessionId, {
+        refreshSnapshot: true,
+        completionFeedback: { kind: "success", title: "已重做上一轮", description: "撤销的消息与文件修改已恢复。" }
+      });
+      return;
+    }
+    if (command === "share") {
+      const result = await api.shareSession(currentSession.sessionId);
+      const url = nativeShareUrl(result);
+      feedback.value = {
+        kind: "success",
+        title: "会话已分享",
+        description: url ?? "分享链接已由 OpenCode 创建。"
+      };
+      return;
+    }
+    await api.unshareSession(currentSession.sessionId);
+    feedback.value = { kind: "success", title: "已取消分享", description: currentSession.title };
+  } catch (error) {
+    feedback.value = errorFeedback(`${actionLabel}失败`, error);
+  } finally {
+    nativeCommandInFlight.value = false;
+  }
+}
+
+/** 执行 OpenCode TUI 的 !command，并刷新远端 Session 投影以显示 shell 工具结果。 */
+async function handleNativeShellCommand(command: string) {
+  if (nativeCommandInFlight.value) {
+    feedback.value = { kind: "info", title: "原生命令执行中", description: "请等待当前命令完成。" };
+    return;
+  }
+  const currentSession = nativeSessionActionAllowed("执行 Shell 命令");
+  if (!currentSession) return;
+  nativeCommandInFlight.value = true;
+  try {
+    const modelID = selectedModelInfo.value?.id ?? modelIdOnly(selectedModel.value);
+    const providerID = selectedModelInfo.value?.providerId ?? selectedProvider.value;
+    await api.runSessionShell(currentSession.sessionId, {
+      command,
+      agent: selectedAgent.value || "build",
+      ...(modelID && providerID ? { model: { providerID, modelID } } : {})
+    });
+    await switchSession(currentSession.sessionId, {
+      refreshSnapshot: true,
+      completionFeedback: { kind: "success", title: "Shell 命令已执行", description: command }
+    });
+  } catch (error) {
+    feedback.value = errorFeedback("执行 Shell 命令失败", error);
+  } finally {
+    nativeCommandInFlight.value = false;
+  }
 }
 
 async function loadFeedbacksForMessages(
@@ -9830,6 +9974,8 @@ async function handleLogout() {
           @stop="handleStopRun"
           @retry="handleRetryRun"
           @new-conversation="handleNewConversation"
+          @native-command="handleNativeTuiCommand"
+          @run-shell="handleNativeShellCommand"
           @request-night-slots="requestNightExecutionSlots"
           @request-night-tasks="refreshNightExecutionTasks({ reportError: true })"
           @schedule-night="handleScheduleNight"

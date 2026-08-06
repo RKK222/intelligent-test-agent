@@ -31,7 +31,10 @@ import {
   normalizePathKey,
   nextCenterModeAfterVcsRefresh,
   nextCenterModeAfterRunDiff,
+  openCodeTuiCommandQuery,
+  parseOpenCodeTuiShellCommand,
   prepareAutoRetryRun,
+  resolveOpenCodeTuiCommand,
   retryRunDraftFromSessionMessages,
   resolveRetryDeadline,
   retryCountdownSeconds,
@@ -81,6 +84,32 @@ describe("filterWorkspaceRootEntries", () => {
       { path: "src", name: "src", type: "directory" }
     ]);
     expect(filterWorkspaceRootEntries("config", entries)).toEqual(entries);
+  });
+});
+
+describe("OpenCode TUI command helpers", () => {
+  it("resolves native aliases before generic slash commands", () => {
+    expect(resolveOpenCodeTuiCommand("/compact")?.name).toBe("compact");
+    expect(resolveOpenCodeTuiCommand("/summarize")?.name).toBe("compact");
+    expect(resolveOpenCodeTuiCommand("/clear")?.name).toBe("new");
+    expect(resolveOpenCodeTuiCommand("/resume")?.name).toBe("sessions");
+    expect(resolveOpenCodeTuiCommand("/continue")?.name).toBe("sessions");
+    expect(resolveOpenCodeTuiCommand("/q")?.name).toBe("exit");
+    expect(resolveOpenCodeTuiCommand("/custom-command arg")).toBeNull();
+  });
+
+  it("opens autocomplete only for a slash word without arguments", () => {
+    expect(openCodeTuiCommandQuery("/")).toBe("");
+    expect(openCodeTuiCommandQuery("  /sum")).toBe("sum");
+    expect(openCodeTuiCommandQuery("/compact now")).toBeNull();
+    expect(openCodeTuiCommandQuery("普通消息")).toBeNull();
+  });
+
+  it("parses non-empty TUI shell input", () => {
+    expect(parseOpenCodeTuiShellCommand("!ls -la")).toBe("ls -la");
+    expect(parseOpenCodeTuiShellCommand(" ! pwd ")).toBe("pwd");
+    expect(parseOpenCodeTuiShellCommand("!")).toBeNull();
+    expect(parseOpenCodeTuiShellCommand("echo hi")).toBeNull();
   });
 });
 

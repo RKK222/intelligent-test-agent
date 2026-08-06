@@ -8,6 +8,8 @@ export type AssistantPartRowProps = {
   subagentsBySessionId?: Record<string, SubagentSession>;
   subagentByTaskPartId?: Record<string, string>;
   permissions?: PermissionRequest[];
+  forceToolDetailsOpen?: boolean;
+  showReasoning?: boolean;
 };
 </script>
 
@@ -19,7 +21,10 @@ import FilePartView from "../parts/FilePartView.vue";
 import UnknownPartView from "../parts/UnknownPartView.vue";
 import CompactionMarker from "../../../CompactionMarker.vue";
 
-defineProps<AssistantPartRowProps>();
+withDefaults(defineProps<AssistantPartRowProps>(), {
+  forceToolDetailsOpen: false,
+  showReasoning: true
+});
 const emit = defineEmits<{ selectSubagent: [sessionId: string] }>();
 </script>
 
@@ -31,7 +36,7 @@ const emit = defineEmits<{ selectSubagent: [sessionId: string] }>();
       :streaming-text-by-part-id="streamingTextByPartId"
     />
     <ReasoningPartView
-      v-else-if="part.type === 'reasoning'"
+      v-else-if="part.type === 'reasoning' && showReasoning"
       :part="part"
       :streaming-text-by-part-id="streamingTextByPartId"
     />
@@ -41,10 +46,11 @@ const emit = defineEmits<{ selectSubagent: [sessionId: string] }>();
       :subagents-by-session-id="subagentsBySessionId"
       :subagent-by-task-part-id="subagentByTaskPartId"
       :permissions="permissions"
+      :force-open="forceToolDetailsOpen"
       @select-subagent="(sessionId) => emit('selectSubagent', sessionId)"
     />
     <FilePartView v-else-if="part.type === 'file'" :part="part" />
     <CompactionMarker v-else-if="part.type === 'compaction'" :part="part" />
-    <UnknownPartView v-else :part="part" />
+    <UnknownPartView v-else-if="part.type !== 'reasoning'" :part="part" />
   </div>
 </template>

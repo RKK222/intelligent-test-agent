@@ -7,6 +7,8 @@ export type WorkStatusRowProps = {
   row: Extract<TimelineRow, { type: "work-status" }>;
   state: OpencodeLikeConversationState;
   openEventKey?: string;
+  forceToolDetailsOpen?: boolean;
+  showReasoning?: boolean;
 };
 </script>
 
@@ -28,7 +30,10 @@ import ReasoningPartGroup from "../parts/ReasoningPartGroup.vue";
 import ToolPartView from "../parts/ToolPartView.vue";
 import TodoPanel from "../TodoPanel.vue";
 
-const props = defineProps<WorkStatusRowProps>();
+const props = withDefaults(defineProps<WorkStatusRowProps>(), {
+  forceToolDetailsOpen: false,
+  showReasoning: true
+});
 const emit = defineEmits<{
   toggleEvent: [eventKey: string];
   closeEvent: [];
@@ -165,7 +170,7 @@ onBeforeUnmount(() => {
       <ShimmerDivider orientation="vertical" :height="2" :animated="animatedDivider" :fade="true" />
     </div>
 
-    <div class="oc-work-status__line oc-work-status__reasoning-line">
+    <div v-if="showReasoning" class="oc-work-status__line oc-work-status__reasoning-line">
       <ReasoningPartGroup
         :key="`${row.key}:${detailResetKey}`"
         :parts="reasoningParts"
@@ -215,7 +220,13 @@ onBeforeUnmount(() => {
     >
       <div class="oc-work-status__popover-title">{{ selectedEvent.label }}详情</div>
       <div class="oc-work-status__popover-body">
-        <ToolPartView v-for="part in selectedToolParts" :key="part.partId" :part="part" :nested="true" />
+        <ToolPartView
+          v-for="part in selectedToolParts"
+          :key="part.partId"
+          :part="part"
+          :nested="true"
+          :force-open="forceToolDetailsOpen"
+        />
       </div>
     </div>
   </section>
