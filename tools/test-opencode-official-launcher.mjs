@@ -54,11 +54,14 @@ test("prepares every effective config directory for offline tools and enforces d
     const workspace = join(root, "workspace")
     const configDir = join(root, "public-config")
     const xdgConfigHome = join(root, "xdg-config")
+    const home = join(root, "home")
+    const nestedProjectConfig = join(workspace, "personalworktree", "user", "app", ".opencode")
     await createRuntime(runtimeRoot)
-    await mkdir(workspace, { recursive: true })
+    await mkdir(nestedProjectConfig, { recursive: true })
+    await mkdir(join(home, ".opencode"), { recursive: true })
 
     const env = {
-      HOME: join(root, "home"),
+      HOME: home,
       OPENCODE_CONFIG_CONTENT: '{"theme":"dark","subagent_depth":1}',
       OPENCODE_CONFIG_DIR: configDir,
       XDG_CONFIG_HOME: xdgConfigHome,
@@ -95,8 +98,10 @@ test("prepares every effective config directory for offline tools and enforces d
 
     const effectiveDirectories = [
       join(xdgConfigHome, "opencode"),
+      join(home, ".opencode"),
       configDir,
       join(workspace, ".opencode"),
+      nestedProjectConfig,
     ]
     for (const directory of effectiveDirectories) {
       assert.equal(

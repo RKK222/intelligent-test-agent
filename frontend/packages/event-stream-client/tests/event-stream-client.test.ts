@@ -395,6 +395,7 @@ describe("event-stream-client", () => {
       sseResponse([
         "event: session-runtime.snapshot\n",
         'data: {"runningCount":0,"questionCount":0,"sessions":[],"generatedAt":"2026-07-08T08:00:00Z"}\n\n',
+        ": heartbeat\n\n",
         "event: session-runtime.updated\n",
         'data: {"runningCount":1,"questionCount":0,"permissionCount":1,"sessions":[{"sessionId":"ses_1","runId":"run_1","runStatus":"RUNNING","attention":"PERMISSION","attentionEventId":"evt_1","attentionAt":"2026-07-08T08:01:00Z","updatedAt":"2026-07-08T08:01:02Z"}],"generatedAt":"2026-07-08T08:01:03Z"}\n\n'
       ])

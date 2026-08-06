@@ -1695,10 +1695,14 @@ async function confirmProcessInitializationBeforeWorkspaceAction(actionLabel: st
 }
 
 // 拆分就绪条件：不同能力依赖不同条件
-// 1. 模型和 Provider：登录后立即加载，不依赖 workspace 和 opencode
+// 1. 模型和 Provider：依赖用户 opencode 进程，不依赖 workspace
 const authReady = computed(() => authStore.isAuthenticated());
 const runtimeCatalogRecoveryReady = computed(() =>
-  runtimeCatalogRecoveryAllowed(authReady.value, processStartupOperation.value)
+  runtimeCatalogRecoveryAllowed(
+    authReady.value,
+    opencodeProcessReady.value,
+    processStartupOperation.value
+  )
 );
 // 2. 文件路由：只需要 workspace 存在，不依赖 opencode 状态
 const fileRouteReady = computed(() => Boolean(selectedWorkspaceIdRef.value));
@@ -1713,7 +1717,7 @@ const robotQuestionAvailable = computed(() => opencodeProcessReady.value
   && opencodeProcessStatus.value?.messageSendAllowed !== false
   && Boolean(session.value?.sessionId || selectedWorkspaceIdRef.value));
 
-// 模型和 Provider 登录后立即加载
+// 模型和 Provider 在进程 READY 后加载；未初始化页面不发起无效 503 轮询。
 const modelsQuery = useQuery({
   queryKey: ["runtime", "models"],
   enabled: runtimeCatalogRecoveryReady,

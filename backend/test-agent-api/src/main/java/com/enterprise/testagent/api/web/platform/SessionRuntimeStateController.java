@@ -5,6 +5,7 @@ import com.enterprise.testagent.api.web.common.RuntimeApiSupport;
 import com.enterprise.testagent.common.api.ApiResponse;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.session.SessionRuntimeStateApplicationService;
+import java.time.Duration;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,6 +23,7 @@ public class SessionRuntimeStateController {
 
     private static final String SNAPSHOT_EVENT = "session-runtime.snapshot";
     private static final String UPDATED_EVENT = "session-runtime.updated";
+    private static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(25);
 
     private final SessionRuntimeStateApplicationService service;
 
@@ -43,7 +45,7 @@ public class SessionRuntimeStateController {
     }
 
     /**
-     * fetch SSE 状态通道。首帧为 snapshot，后续 run/question 触发或兜底轮询变更时推送 updated。
+     * fetch SSE 状态通道。首帧为 snapshot，后续变更推送 updated；空闲期发送注释心跳维持代理连接。
      */
     @GetMapping(
             value = "/api/internal/platform/opencode-runtime/sessions/runtime-state/events",
@@ -51,7 +53,7 @@ public class SessionRuntimeStateController {
     public Flux<ServerSentEvent<RuntimeDtos.SessionRuntimeStateResponse>> streamRuntimeState(
             ServerWebExchange exchange) {
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
-        return service.stream(userId)
+        Flux<ServerSentEvent<RuntimeDtos.SessionRuntimeStateResponse>> stateEvents = service.stream(userId)
                 .map(RuntimeDtos.SessionRuntimeStateResponse::from)
                 .index()
                 .map(tuple -> {
@@ -61,5 +63,19 @@ public class SessionRuntimeStateController {
                             .id(data.generatedAt() == null ? null : data.generatedAt().toString())
                             .build();
                 });
+        return stateEvents.mergeWith(heartbeat(HEARTBEAT_INTERVAL));
+    }
+
+    /**
+     * 心跳使用 SSE comment，不产生 data/event/id，旧客户端会按协议忽略且不会误更新业务状态。
+     */
+    static Flux<ServerSentEvent<RuntimeDtos.SessionRuntimeStateResponse>> heartbeat(Duration interval) {
+        if (interval == null || interval.isZero() || interval.isNegative()) {
+            return Flux.error(new IllegalArgumentException("heartbeat interval must be positive"));
+        }
+        return Flux.interval(interval)
+                .map(ignored -> ServerSentEvent.<RuntimeDtos.SessionRuntimeStateResponse>builder()
+                        .comment("heartbeat")
+                        .build());
     }
 }

@@ -15,6 +15,7 @@ import com.enterprise.testagent.domain.session.SessionRuntimeState;
 import com.enterprise.testagent.domain.session.SessionRuntimeStateSummary;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.session.SessionRuntimeStateApplicationService;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -119,6 +120,19 @@ class SessionRuntimeStateControllerTest {
                     assertThat(event.data()).isNotNull();
                     assertThat(event.data().runningCount()).isEqualTo(1);
                     assertThat(event.data().sessions().get(0).attention()).isEqualTo("QUESTION");
+                })
+                .thenCancel()
+                .verify();
+    }
+
+    @Test
+    void runtimeStateHeartbeatIsACommentWithoutBusinessData() {
+        StepVerifier.create(SessionRuntimeStateController.heartbeat(Duration.ofMillis(1)).take(1))
+                .assertNext(event -> {
+                    assertThat(event.comment()).isEqualTo("heartbeat");
+                    assertThat(event.event()).isNull();
+                    assertThat(event.id()).isNull();
+                    assertThat(event.data()).isNull();
                 })
                 .verifyComplete();
     }

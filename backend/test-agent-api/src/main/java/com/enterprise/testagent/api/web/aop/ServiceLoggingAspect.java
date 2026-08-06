@@ -69,6 +69,10 @@ public class ServiceLoggingAspect {
             Object[] args,
             long startTime,
             Throwable error) {
+        if (PlatformErrorLogPolicy.isExpectedProcessInitializationPrecondition(error)) {
+            // API 切面会记录一次预期拒绝，业务层不重复制造同 trace 的日志和堆栈。
+            return;
+        }
         logger.error(
                 "event=service_exit traceId={} method={} durationMs={} status=error args={} errorType={} errorCode={} message={}",
                 traceId,

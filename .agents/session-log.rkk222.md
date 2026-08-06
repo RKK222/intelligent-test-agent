@@ -6235,3 +6235,38 @@
   `54cea9a84948f8e4cee14d630772b8ee0668c2a7e5fc897ede5e792a15edd761`。
 - 企业部署仍必须先停全部旧 Java，再按 `.4 → .114 → .2` 顺序放量；禁止 `repair`、`outOfOrder` 或手工改写
   `flyway_schema_history`。未修改 `.env*`、generated SDK 或 OpenCode 上游源码。
+
+## 2026-08-06 - 修复企业部署运行态日志噪声与长连接稳定性
+
+### Why
+
+- 企业三台节点日志中，进程尚未初始化时前端持续轮询模型目录，产生重复 503 和双层异常栈；运行态 SSE 空闲一小时
+  后会被中间网络设备断开；OpenCode 还会对工作区 `.opencode` 尝试联网安装依赖。
+- 原现场日志采集脚本既向旧 Docker 传递不兼容的 `--since 3d`，又按文件修改时间整份统计，导致当前日志文件里的
+  历史故障与正常 `timeoutMs` 被误报为本次问题。
+
+### What
+
+- 模型/Provider 恢复轮询增加“已认证、OpenCode 进程 READY、当前无运行中操作”门禁；未初始化时不再制造 503。
+- 只把精确的“请先初始化 TestAgent 进程”前置条件降为单条 WARN 并去重，其他同码故障仍保留 ERROR 和异常栈。
+- 运行态 SSE 每 25 秒发送标准注释心跳，不增加业务事件、游标或前端状态变更。
+- 官方 OpenCode 启动器删除无效的禁用安装环境变量，启动前递归发现已存在的 `.opencode` 并按不覆盖原则补齐
+  离线 package、lockfile 与 `node_modules` 链接；保留自定义元数据由交付方保证离线完整的既有合同。
+- 日志采集器兼容 BSD/GNU date 和旧 Docker 的小时格式，按 OpenCode/manager/Nginx 行内时间过滤，并收紧 manager
+  异常统计正则；同步后端、前端、API、事件流和企业部署文档。
+
+### How
+
+- 后端定向 30 项、前端定向 114 项、启动器 6 项和日志采集器契约测试通过；后端打包、前端 workspace typecheck、
+  agent-web production build、AI 文档门禁及 `git diff --check` 通过。
+- 使用 JDK 25 和未修改的 `.env.test` 执行完整开发构建；本机缺少 `WORKFLOW_DEV_REDIS_PASSWORD`，因此使用启动脚本
+  官方开关 `--without-workflow`。标准 8080 端口被另一工作区占用且未擅自停止，当前分支改在 18081 独立启动，
+  manager 已完成鉴权和配置应用，frontend 3000 指向该后端；backend readiness 为 UP、前端返回 200。
+
+### Result
+
+- 代码侧可修问题已闭环，未处理用户明确排除的企业千问模型问题和已经修复的历史问题；没有修改 API 路径/DTO、
+  RunEvent 业务类型、数据库/Flyway/MyBatis SQL、鉴权、`.env*`、generated SDK 或 OpenCode 上游源码。
+- 企业现场仍需发布完整离线包并逐台重启 worker/服务；`.4` 的 systemd 启用和 `.114` 的 14118 残留端口清理属于
+  服务器操作，本机未执行。启动器仅处理进程启动前已存在的 `.opencode`，运行后新建目录在下次受管重启时补齐；
+  扫描会增加与工作区目录数量相关的少量启动 I/O，但跳过构建、依赖、Git 目录且不覆盖用户文件。

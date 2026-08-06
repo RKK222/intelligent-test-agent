@@ -24,15 +24,21 @@ mkdir -p \
   "${OUTPUT_DIR}" \
   "${FAKE_BIN}"
 
+RECENT_ISO_UTC="$(date -u '+%Y-%m-%dT%H:%M:%S')"
+RECENT_MANAGER_LOCAL="$(date '+%Y/%m/%d %H:%M:%S')"
+RECENT_NGINX_ACCESS="$(date '+%d/%b/%Y:%H:%M:%S %z')"
+
 printf '%s\n' \
   'TEST_AGENT_DB_PASSWORD=config-secret-must-not-be-collected' \
   'TEST_AGENT_OPENCODE_MANAGER_TOKEN=config-manager-secret' \
   >"${INSTALL_ROOT}/config/backend.env"
 printf '122.233.30.4\n' >"${INSTALL_ROOT}/data/.serverhost"
 printf '%s\n' \
-  '2026-08-03T13:44:01+0800 listening on 14097' \
-  '2026-08-03T13:44:02+0800 ERROR connection refused while checking provider' \
-  '2026-08-03T13:44:03+0800 {"prompt":"user says ERROR and password=prompt-secret"}' \
+  "timestamp=${RECENT_ISO_UTC}Z listening on 14097" \
+  "timestamp=${RECENT_ISO_UTC}Z ERROR connection refused while checking provider" \
+  "timestamp=${RECENT_ISO_UTC}Z {\"prompt\":\"user says ERROR and password=prompt-secret\"}" \
+  "${RECENT_MANAGER_LOCAL} event=manager_command_entry command=health timeoutMs=10000" \
+  'timestamp=2020-01-01T00:00:00Z ERROR old-inline-managed-error' \
   >"${INSTALL_ROOT}/data/agent-opencode/manager/worker/logs/000857009-20260803T054400.000000000Z-14097.log"
 printf '{"unifiedAuthId":"000857009","token":"state-secret"}\n' \
   >"${INSTALL_ROOT}/data/agent-opencode/manager/worker/processes/14097.json"
@@ -42,10 +48,11 @@ touch -t 202001010000 \
   "${INSTALL_ROOT}/data/agent-opencode/manager/worker/logs/old-user-20200101T000000.000000000Z-14098.log"
 
 printf '%s\n' \
-  '127.0.0.1 - - [03/Aug/2026:13:44:05 +0800] "GET /api/run?ticket=nginx-ticket-secret HTTP/1.1" 502 0' \
+  "127.0.0.1 - - [${RECENT_NGINX_ACCESS}] \"GET /api/run?ticket=nginx-ticket-secret HTTP/1.1\" 502 0" \
+  '127.0.0.1 - - [01/Jan/2020:00:00:00 +0800] "GET /old-inline-nginx-error HTTP/1.1" 502 0' \
   >"${NGINX_HOME}/logs/access.log"
 printf '%s\n' \
-  '2026/08/03 13:44:05 [error] upstream timed out while reading response header from upstream' \
+  "${RECENT_MANAGER_LOCAL} [error] upstream timed out while reading response header from upstream" \
   'Authorization: Bearer nginx-bearer-secret' \
   >"${NGINX_HOME}/logs/error.log"
 printf 'old nginx ERROR must not be collected\n' >"${NGINX_HOME}/logs/error.log.9"
@@ -106,6 +113,10 @@ case "${1:-}" in
     printf 'name=/test-agent-opencode-worker image=worker:test status=running running=true started=2026-08-02T00:00:00Z finished= exit=0 oom=false restarts=2 health=healthy\n'
     ;;
   logs)
+    if [[ "$*" != *'--since 72h'* ]]; then
+      printf 'unsupported docker --since value: %s\n' "$*" >&2
+      exit 41
+    fi
     printf '%s\n' \
       '2026-08-03T13:44:04+0800 manager websocket disconnected' \
       '2026-08-03T13:44:05+0800 Address already in use port=14097' \
@@ -200,6 +211,8 @@ grep -Fq 'MIGRATION|' "${EXTRACT_ROOT}/DIAGNOSTIC-SUMMARY.txt"
 grep -Fq 'PORT_BIND|' "${EXTRACT_ROOT}/DIAGNOSTIC-SUMMARY.txt"
 grep -Fq 'PROXY|' "${EXTRACT_ROOT}/DIAGNOSTIC-SUMMARY.txt"
 grep -Fq 'MANAGER_LINK|' "${EXTRACT_ROOT}/DIAGNOSTIC-SUMMARY.txt"
+grep -Fq 'MANAGER_LINK|1|' "${EXTRACT_ROOT}/DIAGNOSTIC-SUMMARY.txt"
+grep -R -Fq 'manager websocket disconnected' "${EXTRACT_ROOT}/logs"
 grep -R -Fq '[REDACTED_SENSITIVE_LOG_LINE]' "${EXTRACT_ROOT}/logs"
 grep -R -Fq '?[REDACTED_QUERY]' "${EXTRACT_ROOT}/logs"
 grep -R -Fq 'source_name_sha256=' "${EXTRACT_ROOT}/logs"
@@ -218,6 +231,8 @@ for forbidden in \
   old-user \
   'old managed ERROR' \
   'old nginx ERROR' \
+  old-inline-managed-error \
+  old-inline-nginx-error \
   000857009; do
   if grep -R -Fq "${forbidden}" "${EXTRACT_ROOT}"; then
     printf 'Diagnostic bundle leaked or included forbidden fixture: %s\n' "${forbidden}" >&2

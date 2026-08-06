@@ -1,16 +1,24 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process"
-import { appendFile, lstat, mkdir, readFile, realpath, symlink } from "node:fs/promises"
+import { appendFile, lstat, mkdir, readFile, readdir, realpath, symlink } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const TOOL_DEPENDENCIES = ["@opencode-ai/plugin", "@opencode-ai/sdk", "effect", "zod"]
+const PROJECT_SCAN_IGNORED_DIRECTORIES = new Set([
+  ".git",
+  ".gradle",
+  ".idea",
+  "build",
+  "dist",
+  "node_modules",
+  "target",
+])
 const OFFLINE_DEFAULTS = {
   OPENCODE_CLIENT: "server",
   OPENCODE_DISABLE_AUTOUPDATE: "true",
-  OPENCODE_DISABLE_CONFIG_DEPENDENCY_INSTALL: "true",
   OPENCODE_DISABLE_EMBEDDED_WEB_UI: "true",
   OPENCODE_DISABLE_EXTERNAL_SKILLS: "true",
   OPENCODE_DISABLE_LSP_DOWNLOAD: "true",
@@ -41,10 +49,43 @@ async function linkIfMissing(source, target) {
 function effectiveConfigDirectories(cwd, env) {
   const home = env.HOME || homedir()
   const xdgConfigHome = env.XDG_CONFIG_HOME || join(home, ".config")
-  const directories = new Set([join(xdgConfigHome, "opencode"), join(cwd, ".opencode")])
+  const directories = new Set([
+    join(xdgConfigHome, "opencode"),
+    join(cwd, ".opencode"),
+  ])
   if (env.OPENCODE_CONFIG_DIR) directories.add(resolve(env.OPENCODE_CONFIG_DIR))
   if (env.OPENCODE_CONFIG) directories.add(dirname(resolve(env.OPENCODE_CONFIG)))
   return [...directories]
+}
+
+/**
+ * OpenCode 会从每个请求 workspace 向上发现 `.opencode`，并在每个命中的目录启动 npm 安装。
+ * 启动时扫描已有工作区配置并预置本地链接；不跟随软链接，也不进入依赖和构建产物目录。
+ */
+async function discoverProjectConfigDirectories(root) {
+  const discovered = []
+  const pending = [root]
+  while (pending.length > 0) {
+    const directory = pending.pop()
+    let entries
+    try {
+      entries = await readdir(directory, { withFileTypes: true })
+    } catch (error) {
+      // 并发删除或无权读取的业务目录不能阻断其它用户进程启动。
+      if (error?.code === "ENOENT" || error?.code === "EACCES" || error?.code === "EPERM") continue
+      throw error
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      if (entry.name === ".opencode") {
+        discovered.push(join(directory, entry.name))
+        continue
+      }
+      if (PROJECT_SCAN_IGNORED_DIRECTORIES.has(entry.name)) continue
+      pending.push(join(directory, entry.name))
+    }
+  }
+  return discovered
 }
 
 function withRequiredConfig(env, supportsSubagentDepth) {
@@ -123,7 +164,13 @@ export async function prepareOfflineRuntime({ cwd = process.cwd(), env = process
     )
   }
 
-  for (const directory of effectiveConfigDirectories(resolvedCwd, prepared)) {
+  const configDirectories = new Set([
+    ...effectiveConfigDirectories(resolvedCwd, prepared),
+    ...await discoverProjectConfigDirectories(resolvedCwd),
+  ])
+  const existingHomeConfig = join(prepared.HOME || homedir(), ".opencode")
+  if (await pathExists(existingHomeConfig)) configDirectories.add(existingHomeConfig)
+  for (const directory of configDirectories) {
     await mkdir(directory, { recursive: true })
     await ensureRuntimeGitIgnore(directory, resolvedRuntimeRoot)
     await linkIfMissing(join(resolvedRuntimeRoot, "package.json"), join(directory, "package.json"))

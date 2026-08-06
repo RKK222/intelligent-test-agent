@@ -236,7 +236,7 @@ payload 字段：
 | `session-runtime.snapshot` | 建连后的首帧当前快照。 |
 | `session-runtime.updated` | 后续摘要发生变化时推送。 |
 
-SSE `id` 使用本次摘要的 `generatedAt` 字符串，只用于客户端调试和日志关联，不作为可持久续传游标。客户端断线重连后应直接重新建立连接并接收新的 `session-runtime.snapshot`。
+SSE `id` 使用本次摘要的 `generatedAt` 字符串，只用于客户端调试和日志关联，不作为可持久续传游标。摘要无变化时服务端每 25 秒发送 `: heartbeat` 标准 comment；它不含 data、event 或 id，不是业务事件，客户端必须忽略，也不能把它计为 snapshot/updated 或更新续传状态。客户端断线重连后应直接重新建立连接并接收新的 `session-runtime.snapshot`。
 
 前端恢复规则：
 

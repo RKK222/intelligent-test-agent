@@ -380,7 +380,7 @@ deploy/internal/package-release.sh --opencode-only --output-dir deploy/internal/
 
 ## 自定义 Tool 离线依赖
 
-`test-agent-programs.tar.gz` 已内置与 OpenCode `1.18.4` 锁定的自定义 Tool 基线：`@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及其全部传递依赖；Node 22 自带的 `fetch`、`URL`、`AbortController` 等标准 API 不需要额外包。OpenCode 启动时不会联网安装依赖，而会为 XDG 全局配置、公共配置和当前目录的 `.opencode` 建立非覆盖式 package/lockfile 与模块链接，并在 OpenCode 进程工作目录的 `node_modules` 投影同一组依赖。后者是所有个人 worktree 的共同祖先，可让深层应用 workspace 的 `.opencode/tools` 按 Node 标准祖先规则解析随包模块；任何目标位置已有同名文件或目录时均保留现场版本。
+`test-agent-programs.tar.gz` 已内置与 OpenCode `1.18.4` 锁定的自定义 Tool 基线：`@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及其全部传递依赖；Node 22 自带的 `fetch`、`URL`、`AbortController` 等标准 API 不需要额外包。官方 OpenCode 仍会对每个配置目录执行依赖一致性检查，启动器不能依赖上游不存在的禁用环境变量；它会先为 XDG 全局配置、用户 HOME `.opencode`、公共配置、当前目录及工作区树中已有的 `.opencode` 建立非覆盖式 package/lockfile 与模块链接，使检查命中完整本地 metadata/node_modules 而不访问 npm registry，并在 OpenCode 进程工作目录的 `node_modules` 投影同一组依赖。扫描不跟随软链接，也不进入 `.git`、`node_modules` 和常见构建产物目录。共同祖先投影可让深层应用 workspace 的 `.opencode/tools` 按 Node 标准祖先规则解析随包模块；任何目标位置已有同名文件或目录时均保留现场版本。管理员自定义 package/lockfile 时必须自行保证离线依赖闭包完整，启动器不会覆盖现场 metadata。
 
 标准后台部署脚本会调用 `verify-opencode-tool-runtime.sh`，在 `included` programs 解压前后以及 `reuse` 现场复用时核对 runtime manifest、lockfile、全部固定直接依赖的包元数据和入口文件；`@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 缺失、为空、未锁定或版本不符都会在服务变更前失败。专项校验可执行 `tools/verify-opencode-tool-runtime-deploy.sh`。
 
@@ -451,8 +451,7 @@ unzip -t test-agent-two-backend-complete.zip
 `--days` 只允许 `1..14`。脚本只读现场状态，不读取数据库，不执行 Docker inspect 环境导出，不启动、停止或
 重启任何服务。
 
-脚本不会直接复制原日志：每个来源最多保留末尾 20000 行，受管 OpenCode 进程最多选择最近 40 个日志文件且
-只保留技术故障关键词行；统一认证号所在的原文件名改为 SHA-256 摘要。所有文本先删除已识别的凭据、query、
+脚本不会直接复制原日志：先按日志行内的 ISO/OpenCode、manager/Nginx 时间戳裁剪请求窗口，再为每个来源最多保留末尾 20000 行；受管 OpenCode 进程最多选择最近 40 个日志文件且只保留窗口内技术故障关键词行，避免长寿命文件的旧错误被误算为最近故障。Docker 日志使用旧版 Docker 同样支持的小时数（例如 3 天为 `72h`）作为 `--since`。统一认证号所在的原文件名改为 SHA-256 摘要。所有文本先删除已识别的凭据、query、
 私钥块、prompt/message/tool payload、用户 home/workspace 路径片段，再进入最高 `64 MiB` 的 mode `0600`
 归档。脱敏不能证明任意未知格式都不含业务数据，因此脚本仍要求显式传入 `--include-sensitive`，归档文件名包含
 `SENSITIVE`，只能通过受控 U 盘、中转机和企业诊断渠道传递。
@@ -517,7 +516,7 @@ bash /data/0709/collect-recent-process-logs.sh \
 `OK` 后，再从中转机用打印出的**精确文件名**分别 `scp` 回 `~/Desktop/mimoagent/0709/`，不要用宽泛目录复制
 覆盖其它交付物。解包后先看 `DIAGNOSTIC-SUMMARY.txt` 和 `COLLECTION-WARNINGS.txt`，再按时间与 traceId 对齐
 `logs/` 和 `snapshots/`；`RUNTIME_FATAL`、`MIGRATION`、`RESOURCE`、`PORT_BIND`、`DEPENDENCY`、`PROXY`、
-`PROCESS_ASSIGNMENT`、`MANAGER_LINK` 只表示排查优先级，不是自动确认的缺陷结论。
+`PROCESS_ASSIGNMENT`、`MANAGER_LINK` 只表示排查优先级，不是自动确认的缺陷结论；`MANAGER_LINK` 只匹配明确断链、配置更新失败或 manager command 的失败状态，不再把正常请求字段 `timeoutMs` 当成超时故障。
 
 脚本回归验证命令：
 

@@ -105,12 +105,13 @@ describe("opencodeProcessRouteResolution", () => {
 });
 
 describe("runtimeCatalogRecoveryAllowed", () => {
-  it("pauses model and provider recovery only while process startup is running", () => {
-    expect(runtimeCatalogRecoveryAllowed(true, { status: "RUNNING" })).toBe(false);
-    expect(runtimeCatalogRecoveryAllowed(true, { status: "SUCCEEDED" })).toBe(true);
-    expect(runtimeCatalogRecoveryAllowed(true, { status: "FAILED" })).toBe(true);
-    expect(runtimeCatalogRecoveryAllowed(true, null)).toBe(true);
-    expect(runtimeCatalogRecoveryAllowed(false, null)).toBe(false);
+  it("requires authentication and a ready process while pausing during startup", () => {
+    expect(runtimeCatalogRecoveryAllowed(true, true, { status: "RUNNING" })).toBe(false);
+    expect(runtimeCatalogRecoveryAllowed(true, true, { status: "SUCCEEDED" })).toBe(true);
+    expect(runtimeCatalogRecoveryAllowed(true, true, { status: "FAILED" })).toBe(true);
+    expect(runtimeCatalogRecoveryAllowed(true, true, null)).toBe(true);
+    expect(runtimeCatalogRecoveryAllowed(true, false, null)).toBe(false);
+    expect(runtimeCatalogRecoveryAllowed(false, true, null)).toBe(false);
   });
 });
 

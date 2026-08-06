@@ -49,12 +49,15 @@ export type WorkspaceRequirementReference = {
 
 export type OpencodeProcessQueryStatus = "pending" | "success" | "error";
 
-/** 初始化操作运行时暂停模型/供应商恢复查询，避免普通目录请求介入 STARTING 状态。 */
+/**
+ * 模型/供应商目录来自用户 OpenCode 进程；只有进程就绪且初始化操作不在运行时才允许恢复查询。
+ */
 export function runtimeCatalogRecoveryAllowed(
   authenticated: boolean,
+  processReady: boolean,
   operation: Pick<OpencodeProcessStartOperation, "status"> | null | undefined
 ): boolean {
-  return authenticated && operation?.status !== "RUNNING";
+  return authenticated && processReady && operation?.status !== "RUNNING";
 }
 
 /**

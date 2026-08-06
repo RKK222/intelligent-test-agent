@@ -146,6 +146,12 @@ public class ApiLoggingAspect {
         String errorCode = extractErrorCode(error);
         String errorMessage = error.getMessage();
 
+        if (PlatformErrorLogPolicy.isExpectedProcessInitializationPrecondition(error)) {
+            // 页面尚未初始化是用户可恢复前置条件，只在 API 边界保留一条无堆栈 WARN。
+            logger.warn("event=api_exit traceId={} userId={} method={} httpMethod={} path={} durationMs={} status=error expectedPrecondition=true errorType={} errorCode={} message={}",
+                    traceId, userId, methodName, httpMethod, path, duration, errorType, errorCode, errorMessage);
+            return;
+        }
         logger.error("event=api_exit traceId={} userId={} method={} httpMethod={} path={} durationMs={} status=error errorType={} errorCode={} message={}",
                 traceId, userId, methodName, httpMethod, path, duration, errorType, errorCode, errorMessage, error);
     }

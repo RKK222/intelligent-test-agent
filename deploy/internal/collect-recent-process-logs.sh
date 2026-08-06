@@ -124,6 +124,23 @@ if [[ ! "${BACKEND_SERVICE}" =~ ^[A-Za-z0-9_.@-]+$ ]]; then
   exit 2
 fi
 
+if CUTOFF_UTC="$(date -u -d "${DAYS} days ago" '+%Y-%m-%dT%H:%M:%S' 2>/dev/null)"; then
+  :
+elif CUTOFF_UTC="$(date -u -v-"${DAYS}"d '+%Y-%m-%dT%H:%M:%S' 2>/dev/null)"; then
+  :
+else
+  printf 'Unable to calculate UTC log cutoff with date command\n' >&2
+  exit 2
+fi
+if CUTOFF_LOCAL="$(date -d "${DAYS} days ago" '+%Y-%m-%dT%H:%M:%S' 2>/dev/null)"; then
+  :
+elif CUTOFF_LOCAL="$(date -v-"${DAYS}"d '+%Y-%m-%dT%H:%M:%S' 2>/dev/null)"; then
+  :
+else
+  printf 'Unable to calculate local log cutoff with date command\n' >&2
+  exit 2
+fi
+
 safe_label() {
   printf '%s' "$1" | tr -cs 'A-Za-z0-9._-' '-' | sed 's/^-*//; s/-*$//'
 }
@@ -265,11 +282,62 @@ capture_command() {
   fi
 }
 
+# 仅凭文件 mtime 会把长寿命 manager/OpenCode 日志中的历史错误带入最近窗口。
+# 这里识别现场三类稳定时间戳，并让无时间戳的续行继承上一条记录的窗口判定。
+filter_recent_log_stream() {
+  LC_ALL=C awk -v cutoff_utc="${CUTOFF_UTC}" -v cutoff_local="${CUTOFF_LOCAL}" '
+    BEGIN {
+      month["Jan"] = "01"; month["Feb"] = "02"; month["Mar"] = "03"
+      month["Apr"] = "04"; month["May"] = "05"; month["Jun"] = "06"
+      month["Jul"] = "07"; month["Aug"] = "08"; month["Sep"] = "09"
+      month["Oct"] = "10"; month["Nov"] = "11"; month["Dec"] = "12"
+      keep = 0
+    }
+    {
+      line = $0
+      recognized = 0
+      marker = index(line, "timestamp=")
+      if (marker > 0) {
+        stamp = substr(line, marker + 10, 19)
+        if (stamp ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]$/) {
+          recognized = 1
+          keep = (stamp >= cutoff_utc)
+        }
+      }
+      slash_stamp = substr(line, 1, 19)
+      if (!recognized && slash_stamp ~ /^[0-9][0-9][0-9][0-9]\/[0-9][0-9]\/[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9]$/) {
+        recognized = 1
+        normalized = slash_stamp
+        gsub(/\//, "-", normalized)
+        normalized = substr(normalized, 1, 10) "T" substr(normalized, 12, 8)
+        keep = (normalized >= cutoff_local)
+      }
+      bracket = index(line, "[")
+      access_stamp = bracket > 0 ? substr(line, bracket + 1, 20) : ""
+      if (!recognized && access_stamp ~ /^[0-9][0-9]\/[A-Z][a-z][a-z]\/[0-9][0-9][0-9][0-9]:[0-9][0-9]:[0-9][0-9]:[0-9][0-9]$/) {
+        split(access_stamp, access_parts, /[\/:]/)
+        if (month[access_parts[2]] != "") {
+          recognized = 1
+          normalized = access_parts[3] "-" month[access_parts[2]] "-" access_parts[1] \
+            "T" access_parts[4] ":" access_parts[5] ":" access_parts[6]
+          keep = (normalized >= cutoff_local)
+        }
+      }
+      if (recognized) {
+        if (keep) print line
+        next
+      }
+      if (keep) print line
+    }
+  '
+}
+
 collect_plain_log_file() {
   local source="$1"
   local destination="$2"
   local title="$3"
   local raw_file
+  local -a pipeline_status
   CAPTURE_SEQUENCE=$((CAPTURE_SEQUENCE + 1))
   raw_file="${RAW_ROOT}/file-${CAPTURE_SEQUENCE}.log"
   mkdir -p "$(dirname "${destination}")"
@@ -279,17 +347,21 @@ collect_plain_log_file() {
       return 0
     fi
     set +e
-    gzip -cd "${source}" 2>&1 | tail -n "${MAX_SOURCE_LINES}" >"${raw_file}"
-    local gzip_status="${PIPESTATUS[0]}"
+    gzip -cd "${source}" 2>&1 | filter_recent_log_stream | tail -n "${MAX_SOURCE_LINES}" >"${raw_file}"
+    pipeline_status=("${PIPESTATUS[@]}")
     set -e
-    if [[ "${gzip_status}" -ne 0 ]]; then
+    if [[ "${pipeline_status[0]}" -ne 0 || "${pipeline_status[1]}" -ne 0 ]]; then
       warn "Unable to read compressed log ${title}; partial output kept"
     fi
   else
-    tail -n "${MAX_SOURCE_LINES}" "${source}" >"${raw_file}" 2>&1 || {
+    set +e
+    filter_recent_log_stream <"${source}" | tail -n "${MAX_SOURCE_LINES}" >"${raw_file}" 2>&1
+    pipeline_status=("${PIPESTATUS[@]}")
+    set -e
+    if [[ "${pipeline_status[0]}" -ne 0 ]]; then
       warn "Unable to read ${title}"
       return 0
-    }
+    fi
   fi
   {
     printf '# %s\n' "${title}"
@@ -356,7 +428,7 @@ collect_backend_logs() {
   local managed_digest
   local managed_destination
   local managed_matches
-  local managed_status
+  local -a managed_status
 
   capture_command "${BUNDLE_ROOT}/snapshots/backend-systemd-show.txt" "Backend systemd state" \
     systemctl show "${BACKEND_SERVICE}" \
@@ -396,7 +468,7 @@ collect_backend_logs() {
           "${container}"
       capture_command "${BUNDLE_ROOT}/logs/container-${safe_container}.log" \
         "Container log ${safe_container} for latest ${DAYS} day(s)" \
-        docker logs --since "${DAYS}d" --tail "${MAX_SOURCE_LINES}" "${container}"
+        docker logs --since "$((DAYS * 24))h" --tail "${MAX_SOURCE_LINES}" "${container}"
     done <"${container_list}"
   else
     warn "Skipped container snapshots and logs: docker command not found"
@@ -413,16 +485,19 @@ collect_backend_logs() {
       managed_destination="${BUNDLE_ROOT}/logs/managed-process-$(printf '%03d' "${managed_index}")-${managed_digest}.log"
       managed_matches="${RAW_ROOT}/managed-${managed_index}.log"
       set +e
-      LC_ALL=C grep -n -E \
+      filter_recent_log_stream <"${managed_source}" | LC_ALL=C grep -n -E \
         'OutOfMemoryError|StackOverflowError|Exception|ERROR|FATAL|panic|failed|failure|unhealthy|health.*(fail|error)|Address already in use|EADDRINUSE|ECONNREFUSED|ECONNRESET|ENOSPC|EMFILE|ENOMEM|SIGTERM|SIGKILL|connection (refused|reset|timed out)|timeout|exited? (with )?(code|status)|listen(ing)? on' \
-        "${managed_source}" | tail -n "${MAX_SOURCE_LINES}" >"${managed_matches}"
-      managed_status="${PIPESTATUS[0]}"
+        | tail -n "${MAX_SOURCE_LINES}" >"${managed_matches}"
+      managed_status=("${PIPESTATUS[@]}")
       set -e
+      if [[ "${managed_status[0]}" -ne 0 ]]; then
+        warn "Unable to apply recent timestamp window to managed log ${managed_digest}"
+      fi
       {
         printf '# Managed process diagnostic excerpts\n'
         printf '# source_name_sha256=%s source_mtime=%s source_bytes=%s\n' \
           "${managed_digest}" "$(file_mtime "${managed_source}")" "$(file_size "${managed_source}")"
-        if [[ "${managed_status}" -eq 0 ]]; then
+        if [[ "${managed_status[1]}" -eq 0 ]]; then
           sanitize_stream <"${managed_matches}"
         else
           printf '[INFO] No selected technical diagnostic signature in this log.\n'
@@ -538,7 +613,7 @@ append_finding "PROCESS_ASSIGNMENT" \
   '进程分配已变化|SAVING_CANDIDATE|HEALTH_CHECKING'
 append_finding "MANAGER_LINK" \
   "Manager WebSocket/configuration link may be unstable." \
-  'websocket disconnected|manager.*disconnect|config update.*failed|manager_command_.*(failed|timeout)'
+  'websocket disconnected|manager.*disconnect|config update.*failed|event=manager_command_exit.*status=(FAILED|UNHEALTHY)'
 append_finding "GENERAL_ERROR" \
   "General error signatures need traceId/timestamp correlation before bug classification." \
   '(^|[^A-Za-z])(ERROR|FATAL|Exception|FAILED|unhealthy)([^A-Za-z]|$)'
