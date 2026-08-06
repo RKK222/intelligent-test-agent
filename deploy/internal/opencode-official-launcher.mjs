@@ -1,16 +1,14 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process"
-import { watch } from "node:fs"
 import { appendFile, lstat, mkdir, readFile, readdir, realpath, symlink } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const TOOL_DEPENDENCIES = ["@opencode-ai/plugin", "@opencode-ai/sdk", "effect", "zod"]
-const PROJECT_CONFIG_MAINTENANCE_COMMAND = "__maintain-project-config"
-const PROJECT_CONFIG_SCAN_INTERVAL_MS = 60_000
-const PROJECT_CONFIG_PREPARATIONS = new Map()
+const PROJECT_CONFIG_RECONCILE_COMMAND = "__reconcile-project-config"
+const LEGACY_PROJECT_CONFIG_MAINTENANCE_COMMAND = "__maintain-project-config"
 const PROJECT_SCAN_IGNORED_DIRECTORIES = new Set([
   ".git",
   ".gradle",
@@ -66,8 +64,7 @@ function effectiveConfigDirectories(cwd, env) {
  * OpenCode 会从每个请求 workspace 向上发现 `.opencode`，并在每个命中的目录启动 npm 安装。
  * 定时扫描已有工作区配置并预置本地链接；不跟随软链接，也不进入依赖和构建产物目录。
  */
-async function discoverProjectConfigDirectories(root) {
-  const discovered = []
+async function visitProjectConfigDirectories(root, visitor) {
   const pending = [root]
   while (pending.length > 0) {
     const directory = pending.pop()
@@ -82,46 +79,35 @@ async function discoverProjectConfigDirectories(root) {
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
       if (entry.name === ".opencode") {
-        discovered.push(join(directory, entry.name))
+        await visitor(join(directory, entry.name))
         continue
       }
       if (PROJECT_SCAN_IGNORED_DIRECTORIES.has(entry.name)) continue
       pending.push(join(directory, entry.name))
     }
   }
-  return discovered
 }
 
 /**
- * 只补齐一个已经存在且物理路径仍位于工作区内的 `.opencode` 目录；监听事件不能经父级软链接越界。
+ * 只补齐一个已经存在且物理路径仍位于工作区内的 `.opencode` 目录；定时扫描不能经父级软链接越界。
  */
 async function prepareExistingProjectConfigDirectory(directory, runtimeRoot, workspaceRoot) {
-  const existing = PROJECT_CONFIG_PREPARATIONS.get(directory)
-  if (existing) return existing
-  const preparation = (async () => {
-    let info
-    try {
-      info = await lstat(directory)
-    } catch (error) {
-      if (error?.code === "ENOENT" || error?.code === "EACCES" || error?.code === "EPERM") return false
-      throw error
-    }
-    if (info.isSymbolicLink() || !info.isDirectory()) return false
-    const [physicalDirectory, physicalWorkspaceRoot] = await Promise.all([
-      realpath(directory),
-      realpath(workspaceRoot),
-    ])
-    const physicalChild = relative(physicalWorkspaceRoot, physicalDirectory)
-    if (physicalChild === ".." || physicalChild.startsWith(`..${sep}`) || isAbsolute(physicalChild)) return false
-    await prepareConfigDirectory(directory, runtimeRoot)
-    return true
-  })()
-  PROJECT_CONFIG_PREPARATIONS.set(directory, preparation)
+  let info
   try {
-    return await preparation
-  } finally {
-    PROJECT_CONFIG_PREPARATIONS.delete(directory)
+    info = await lstat(directory)
+  } catch (error) {
+    if (error?.code === "ENOENT" || error?.code === "EACCES" || error?.code === "EPERM") return false
+    throw error
   }
+  if (info.isSymbolicLink() || !info.isDirectory()) return false
+  const [physicalDirectory, physicalWorkspaceRoot] = await Promise.all([
+    realpath(directory),
+    realpath(workspaceRoot),
+  ])
+  const physicalChild = relative(physicalWorkspaceRoot, physicalDirectory)
+  if (physicalChild === ".." || physicalChild.startsWith(`..${sep}`) || isAbsolute(physicalChild)) return false
+  await prepareConfigDirectory(directory, runtimeRoot)
+  return true
 }
 
 /**
@@ -130,95 +116,15 @@ async function prepareExistingProjectConfigDirectory(directory, runtimeRoot, wor
 export async function reconcileProjectConfigDirectories({ cwd = process.cwd(), runtimeRoot }) {
   const resolvedRuntimeRoot = resolve(runtimeRoot)
   const resolvedCwd = resolve(cwd)
-  const directories = await discoverProjectConfigDirectories(resolvedCwd)
   let preparedCount = 0
-  for (const directory of directories) {
+  await visitProjectConfigDirectories(resolvedCwd, async (directory) => {
     try {
       if (await prepareExistingProjectConfigDirectory(directory, resolvedRuntimeRoot, resolvedCwd)) preparedCount += 1
     } catch (error) {
       if (error?.code !== "ENOENT" && error?.code !== "EACCES" && error?.code !== "EPERM") throw error
     }
-  }
+  })
   return preparedCount
-}
-
-function projectConfigDirectoryFromWatchEvent(root, fileName) {
-  if (fileName === null || fileName === undefined) return null
-  const changed = String(fileName)
-  if (!changed || isAbsolute(changed)) return null
-  const absolute = resolve(root, changed)
-  const child = relative(root, absolute)
-  if (!child || child === ".." || child.startsWith(`..${sep}`)) return null
-  const segments = child.split(sep)
-  const configIndex = segments.indexOf(".opencode")
-  if (configIndex < 0) return null
-  if (segments.slice(0, configIndex).some((segment) => PROJECT_SCAN_IGNORED_DIRECTORIES.has(segment))) return null
-  return join(root, ...segments.slice(0, configIndex + 1))
-}
-
-/**
- * worker 级后台维护器：按周期扫描存量目录，并在文件系统事件可用时即时补齐新工作区。
- * 同一时刻最多执行一次递归扫描，避免慢盘上出现重叠任务。
- */
-export function startProjectConfigMaintenance({
-  cwd = process.cwd(),
-  runtimeRoot,
-  scanIntervalMs = PROJECT_CONFIG_SCAN_INTERVAL_MS,
-  watchEnabled = true,
-}) {
-  const resolvedCwd = resolve(cwd)
-  const resolvedRuntimeRoot = resolve(runtimeRoot)
-  let stopped = false
-  let scanRunning = false
-  let scanRequested = false
-  const reportFailure = (error) => {
-    console.error(`event=opencode_project_config_maintenance_failed errorCode=${JSON.stringify(error?.code ?? "UNEXPECTED")}`)
-  }
-  const reconcile = async () => {
-    if (stopped) return
-    if (scanRunning) {
-      scanRequested = true
-      return
-    }
-    scanRunning = true
-    try {
-      do {
-        scanRequested = false
-        await reconcileProjectConfigDirectories({ cwd: resolvedCwd, runtimeRoot: resolvedRuntimeRoot })
-      } while (!stopped && scanRequested)
-    } catch (error) {
-      reportFailure(error)
-    } finally {
-      scanRunning = false
-    }
-  }
-  const prepareChangedDirectory = (fileName) => {
-    const directory = projectConfigDirectoryFromWatchEvent(resolvedCwd, fileName)
-    if (!directory) return
-    void prepareExistingProjectConfigDirectory(directory, resolvedRuntimeRoot, resolvedCwd).catch(reportFailure)
-  }
-
-  // 开机只注册定时器和监听器，首轮递归检查等待定时周期，避免与 manager 启动争用磁盘。
-  const timer = setInterval(() => void reconcile(), scanIntervalMs)
-  let watcher = null
-  if (watchEnabled) {
-    try {
-      watcher = watch(resolvedCwd, { recursive: true }, (_eventType, fileName) => prepareChangedDirectory(fileName))
-      watcher.on("error", reportFailure)
-    } catch (error) {
-      // 旧平台不支持递归 watch 时保留定时扫描兜底，不能反向阻断 worker。
-      reportFailure(error)
-    }
-  }
-
-  return {
-    stop() {
-      stopped = true
-      clearInterval(timer)
-      watcher?.close()
-    },
-    reconcileNow: reconcile,
-  }
 }
 
 function withRequiredConfig(env, supportsSubagentDepth) {
@@ -321,27 +227,17 @@ export async function prepareOfflineRuntime({ cwd = process.cwd(), env = process
   return prepared
 }
 
-async function runProjectConfigMaintenance() {
+async function runProjectConfigReconciliation() {
   const args = process.argv.slice(3)
   let root = process.cwd()
   if (args.length > 0) {
     if (args.length !== 2 || args[0] !== "--root" || !args[1]) {
-      throw new Error(`usage: ${PROJECT_CONFIG_MAINTENANCE_COMMAND} [--root <workspace-root>]`)
+      throw new Error(`usage: ${PROJECT_CONFIG_RECONCILE_COMMAND} [--root <workspace-root>]`)
     }
     root = args[1]
   }
   const runtimeRoot = fileURLToPath(new URL("../", import.meta.url))
-  const maintenance = startProjectConfigMaintenance({ cwd: root, runtimeRoot })
-  await new Promise((resolveStop) => {
-    const stop = () => {
-      process.off("SIGINT", stop)
-      process.off("SIGTERM", stop)
-      maintenance.stop()
-      resolveStop()
-    }
-    process.once("SIGINT", stop)
-    process.once("SIGTERM", stop)
-  })
+  await reconcileProjectConfigDirectories({ cwd: root, runtimeRoot })
   return 0
 }
 
@@ -389,8 +285,10 @@ async function isMainModule() {
 }
 
 if (await isMainModule()) {
-  const run = process.argv[2] === PROJECT_CONFIG_MAINTENANCE_COMMAND
-    ? runProjectConfigMaintenance
+  const internalCommand = process.argv[2]
+  const run = internalCommand === PROJECT_CONFIG_RECONCILE_COMMAND
+    || internalCommand === LEGACY_PROJECT_CONFIG_MAINTENANCE_COMMAND
+    ? runProjectConfigReconciliation
     : runOfficialBinary
   run()
     .then((exitCode) => {

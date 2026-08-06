@@ -6607,3 +6607,37 @@
   不再由进程当前目录或前端字符串拼接制造“看似绝对”的错误路径。
 - 本次为 additive HTTP 响应字段，旧 `rootPath` 保持物理值兼容；未变更 HTTP 路径、RunEvent、数据库、
   Flyway/MyBatis SQL、性能策略、安全权限、环境配置、generated SDK 或 OpenCode 源码。
+
+## 2026-08-06 - 修复 OpenCode Manager 被 SIGKILL 后无诊断及维护器资源回归
+
+### Why
+
+- 企业 worker 在运行一段时间后只留下 entrypoint `wait` 位置的 `Killed`，该现象可确定 manager 收到
+  `SIGKILL`/退出 137，但旧日志无法区分容器 OOM、宿主机 OOM、人工 `kill -9` 或 Docker 强杀。
+- 上一版为工作区 `.opencode` 自动补齐引入了常驻 Node 递归监听器，在大型共享工作区可能长期占用并放大
+  内存和文件句柄，且会与 manager 共享 worker 资源。
+
+### What
+
+- 移除 launcher 中常驻递归 `fs.watch` 和常驻 Node 维护进程；entrypoint 先启动 manager，首轮等待 60 秒，
+  之后每轮仅启动一次短生命周期扫描，结束即释放资源。扫描逐目录处理 `.opencode`，不再累计全部路径。
+- 保留新建工作区自动补齐：新 `.opencode` 在下一轮扫描收敛；旧内部命令名保留单次扫描兼容别名，避免
+  programs 与 worker 临时错配时直接失败。
+- manager 非正常退出时记录 `event=opencode_manager_exited`、退出码、信号和 cgroup OOM 计数/增量；只有
+  OOM 增量上升或 Docker `OOMKilled=true` 才据此确认容器 OOM。
+- 同步企业部署、内部发布和 OpenCode 1.18.4 升级文档，补充 137/SIGKILL 的现场取证与处理边界。
+
+### How
+
+- launcher/entrypoint 进程级回归 9 项通过，覆盖不开机扫描、manager 先启动、周期单次扫描、信号清理、
+  新旧内部命令和 137/OOM 结构化诊断；Shell/Node 语法、runtime deploy、Git ignore、AI 文档和 diff 门禁通过。
+- 在 macOS arm64 上实际重建 `linux/amd64` worker 镜像并通过官方 OpenCode 1.18.4 基线、Python、Codex MCP
+  协议 smoke；镜像内复核周期命令存在且常驻 `watch(` 不存在。Codex 原生 sandbox 按门禁要求留待原生
+  linux/amd64 worker 验证。
+
+### Result
+
+- 新 worker 不再常驻递归 Node watcher，并能在 manager 再次被强杀时留下判定 OOM 与否的证据；旧现场只有
+  `Killed`，因此不能倒推确认当时一定是 OOM，企业 Docker 18.09/linux/amd64 仍需做长时间运行验收。
+- 未修改 API、事件、数据库/Flyway/MyBatis SQL、安全权限、环境配置、generated SDK 或 OpenCode 上游源码；
+  programs 与 worker 镜像必须作为同一完整企业包配对发布。

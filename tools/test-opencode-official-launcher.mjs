@@ -12,7 +12,6 @@ import { promisify } from "node:util"
 import {
   prepareOfflineRuntime,
   reconcileProjectConfigDirectories,
-  startProjectConfigMaintenance,
 } from "../deploy/internal/opencode-official-launcher.mjs"
 
 const execFileAsync = promisify(execFile)
@@ -153,55 +152,35 @@ test("keeps recursive project scanning out of user startup and prepares it throu
   }
 })
 
-test("defers recursive reconciliation to the timer", async () => {
-  const root = await mkdtemp(join(tmpdir(), "opencode-official-launcher-maintenance-"))
-  let maintenance = null
+test("runs project config reconciliation as a short-lived internal command", async () => {
+  const root = await mkdtemp(join(tmpdir(), "opencode-official-launcher-reconcile-"))
   try {
     const runtimeRoot = join(root, "runtime")
     const workspace = join(root, "workspace")
-    const existingConfig = join(workspace, "personalworktree", "existing-user", "app", ".opencode")
-    await createRuntime(runtimeRoot)
-    await mkdir(existingConfig, { recursive: true })
-
-    // 关闭事件监听，只观察定时器路径，避免 macOS 在注册监听器时回放已有目录事件。
-    maintenance = startProjectConfigMaintenance({
-      cwd: workspace,
-      runtimeRoot,
-      scanIntervalMs: 250,
-      watchEnabled: false,
-    })
-    await delay(50)
-    await assert.rejects(lstat(join(existingConfig, "package.json")), { code: "ENOENT" })
-    assert.equal((await waitForPath(join(existingConfig, "package.json"))).isSymbolicLink(), true)
-  } finally {
-    maintenance?.stop()
-    await rm(root, { force: true, recursive: true })
-  }
-})
-
-test("automatically prepares a project config created after maintenance starts", async () => {
-  const root = await mkdtemp(join(tmpdir(), "opencode-official-launcher-watch-"))
-  let maintenance = null
-  try {
-    const runtimeRoot = join(root, "runtime")
-    const workspace = join(root, "workspace")
+    const launcher = join(runtimeRoot, "bin", "opencode")
     const createdConfig = join(workspace, "personalworktree", "new-user", "app", ".opencode")
+    const legacyConfig = join(workspace, "personalworktree", "legacy-user", "app", ".opencode")
     await createRuntime(runtimeRoot)
-    await mkdir(workspace, { recursive: true })
-
-    maintenance = startProjectConfigMaintenance({ cwd: workspace, runtimeRoot, scanIntervalMs: 60_000 })
+    await mkdir(dirname(launcher), { recursive: true })
+    await copyFile(new URL("../deploy/internal/opencode-official-launcher.mjs", import.meta.url), launcher)
     await mkdir(createdConfig, { recursive: true })
 
-    assert.equal((await waitForPath(join(createdConfig, "package.json"))).isSymbolicLink(), true)
-    assert.equal((await waitForPath(join(createdConfig, "package-lock.json"))).isSymbolicLink(), true)
-    await assertToolDependencyLinks(createdConfig, runtimeRoot)
+    await execFileAsync(process.execPath, [launcher, "__reconcile-project-config", "--root", workspace])
+
+    assert.equal((await lstat(join(createdConfig, "package.json"))).isSymbolicLink(), true)
+    assert.equal((await lstat(join(createdConfig, "package-lock.json"))).isSymbolicLink(), true)
+    await assertToolDependencyLinks(createdConfig, await realpath(runtimeRoot))
+
+    // 旧 worker 镜像短暂搭配新 programs 时仍能执行一次扫描，不因内部命令改名直接失败。
+    await mkdir(legacyConfig, { recursive: true })
+    await execFileAsync(process.execPath, [launcher, "__maintain-project-config", "--root", workspace])
+    assert.equal((await lstat(join(legacyConfig, "package.json"))).isSymbolicLink(), true)
   } finally {
-    maintenance?.stop()
     await rm(root, { force: true, recursive: true })
   }
 })
 
-test("worker entrypoint runs one background maintainer without delaying manager startup", async () => {
+test("worker entrypoint starts manager before short-lived scheduled reconciliation", async () => {
   const root = await mkdtemp(join(tmpdir(), "opencode-worker-entrypoint-"))
   let worker = null
   let exited = null
@@ -211,7 +190,8 @@ test("worker entrypoint runs one background maintainer without delaying manager 
     const manager = join(programsRoot, "bin", "opencode-manager")
     const launcher = join(programsRoot, "opencode", "bin", "opencode")
     const managerPidFile = join(root, "manager.pid")
-    const maintenancePidFile = join(root, "maintenance.pid")
+    const maintenanceLoopPidFile = join(root, "maintenance-loop.pid")
+    const maintenanceScanPidFile = join(root, "maintenance-scan.pid")
     const maintenanceArgsFile = join(root, "maintenance.args")
     await mkdir(dirname(manager), { recursive: true })
     await mkdir(dirname(launcher), { recursive: true })
@@ -222,29 +202,38 @@ test("worker entrypoint runs one background maintainer without delaying manager 
     )
     await writeFile(
       launcher,
-      `#!/usr/bin/env bash\nprintf '%s\\n' "$$" >"${maintenancePidFile}"\nprintf '%s\\n' "$*" >"${maintenanceArgsFile}"\ntrap 'exit 0' INT TERM\nwhile true; do sleep 1; done\n`,
+      `#!/usr/bin/env bash\ntest -f "${managerPidFile}" || exit 91\nprintf '%s\\n' "$PPID" >"${maintenanceLoopPidFile}"\nprintf '%s\\n' "$$" >"${maintenanceScanPidFile}"\nprintf '%s\\n' "$*" >"${maintenanceArgsFile}"\n`,
     )
     await chmod(manager, 0o755)
     await chmod(launcher, 0o755)
 
     worker = spawn("bash", [join(process.cwd(), "deploy/internal/opencode-worker-entrypoint.sh"), "run"], {
       cwd: workspace,
-      env: { ...process.env, OPENCODE_BIN: "", TEST_AGENT_PROGRAM_ROOT: programsRoot },
+      env: {
+        ...process.env,
+        OPENCODE_BIN: "",
+        OPENCODE_PROJECT_CONFIG_MAINTENANCE_INTERVAL_SECONDS: "1",
+        TEST_AGENT_PROGRAM_ROOT: programsRoot,
+      },
       stdio: "ignore",
     })
     exited = new Promise((resolveExit) => worker.once("exit", (code, signal) => resolveExit({ code, signal })))
     await waitForPath(managerPidFile)
-    await waitForPath(maintenancePidFile)
+    await delay(100)
+    await assert.rejects(lstat(maintenanceArgsFile), { code: "ENOENT" })
+    await waitForPath(maintenanceArgsFile)
     const managerPid = Number((await readFile(managerPidFile, "utf8")).trim())
-    const maintenancePid = Number((await readFile(maintenancePidFile, "utf8")).trim())
+    const maintenanceLoopPid = Number((await readFile(maintenanceLoopPidFile, "utf8")).trim())
+    const maintenanceScanPid = Number((await readFile(maintenanceScanPidFile, "utf8")).trim())
     const maintenanceArgs = (await readFile(maintenanceArgsFile, "utf8")).trim()
+    await waitForProcessGone(maintenanceScanPid)
 
     worker.kill("SIGTERM")
     const result = await exited
     await waitForProcessGone(managerPid)
-    await waitForProcessGone(maintenancePid)
+    await waitForProcessGone(maintenanceLoopPid)
 
-    assert.equal(maintenanceArgs, `__maintain-project-config --root ${await realpath(workspace)}`)
+    assert.equal(maintenanceArgs, `__reconcile-project-config --root ${await realpath(workspace)}`)
     assert.equal(result.signal, null)
     assert.equal(result.code, 143)
   } finally {
@@ -253,6 +242,40 @@ test("worker entrypoint runs one background maintainer without delaying manager 
       await Promise.race([exited ?? Promise.resolve(), delay(500)])
       if (worker.exitCode === null && worker.signalCode === null) worker.kill("SIGKILL")
     }
+    await rm(root, { force: true, recursive: true })
+  }
+})
+
+test("worker entrypoint reports SIGKILL and cgroup OOM evidence for manager exit 137", async () => {
+  const root = await mkdtemp(join(tmpdir(), "opencode-worker-entrypoint-sigkill-"))
+  let worker = null
+  try {
+    const programsRoot = join(root, "programs")
+    const manager = join(programsRoot, "bin", "opencode-manager")
+    await mkdir(dirname(manager), { recursive: true })
+    await writeFile(manager, '#!/usr/bin/env bash\nkill -KILL "$$"\n')
+    await chmod(manager, 0o755)
+
+    worker = spawn("bash", [join(process.cwd(), "deploy/internal/opencode-worker-entrypoint.sh"), "status"], {
+      env: { ...process.env, OPENCODE_BIN: process.execPath, TEST_AGENT_PROGRAM_ROOT: programsRoot },
+      stdio: ["ignore", "ignore", "pipe"],
+    })
+    let stderr = ""
+    worker.stderr.setEncoding("utf8")
+    worker.stderr.on("data", (chunk) => {
+      stderr += chunk
+    })
+    const result = await new Promise((resolveExit) => {
+      worker.once("exit", (code, signal) => resolveExit({ code, signal }))
+    })
+
+    assert.deepEqual(result, { code: 137, signal: null })
+    assert.match(
+      stderr,
+      /event=opencode_manager_exited exitCode=137 signal=SIGKILL cgroupOomKillCount=(?:[0-9]+|unavailable) cgroupOomKillDelta=(?:[0-9]+|unavailable)/,
+    )
+  } finally {
+    if (worker?.exitCode === null && worker?.signalCode === null) worker.kill("SIGKILL")
     await rm(root, { force: true, recursive: true })
   }
 })
