@@ -306,7 +306,7 @@ describe("FigmaChatPanel", () => {
       } as any
     });
 
-    expect(wrapper.get("textarea").attributes("disabled")).toBeDefined();
+    expect(wrapper.get("textarea").attributes("disabled")).toBeUndefined();
     expect(wrapper.get('button[aria-label="发送"]').attributes("disabled")).toBeDefined();
     expect(wrapper.get('button[aria-label="新建对话"]').attributes("disabled")).toBeUndefined();
     expect(wrapper.get('[data-testid="current-night-task-card"]').text()).toContain("等待执行");
@@ -492,7 +492,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find(".figma-chat-process-status-dot").exists()).toBe(false);
   });
 
-  it("greys the complete composer while the process is not initialized", () => {
+  it("keeps native slash commands available while the process is not initialized", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [],
@@ -507,12 +507,21 @@ describe("FigmaChatPanel", () => {
     });
 
     expect(wrapper.get(".figma-chat-input-card").classes()).toContain("is-disabled");
-    expect(wrapper.get(".figma-chat-textarea").attributes("disabled")).toBeDefined();
+    const textarea = wrapper.get(".figma-chat-textarea");
+    expect(textarea.attributes("disabled")).toBeUndefined();
     expect(wrapper.get(".figma-chat-textarea").attributes("placeholder")).toBe("请先初始化 TestAgent 进程");
     expect(wrapper.get('[aria-label="上传附件"]').attributes("disabled")).toBeDefined();
     expect(wrapper.get('[aria-label="切换 Agent"]').attributes("disabled")).toBeDefined();
     expect(wrapper.get('[aria-label="切换模型"]').attributes("disabled")).toBeDefined();
     expect(wrapper.get('[aria-label="新建对话"]').attributes("disabled")).toBeDefined();
+
+    await textarea.setValue("/");
+    expect(wrapper.get('[data-testid="slash-native-section"]').text()).toContain("/help");
+
+    await textarea.setValue("/help");
+    await textarea.trigger("keydown", { key: "Enter" });
+    expect(wrapper.emitted("open-help")).toHaveLength(1);
+    expect(wrapper.emitted("send")).toBeUndefined();
   });
 
   it("keeps the composer available before the first session is created", async () => {
@@ -1630,7 +1639,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("new-conversation")).toEqual([[]]);
   });
 
-  it("disables composer controls and exposes readonly reason on hover title", () => {
+  it("blocks readonly messages but keeps native slash commands available", async () => {
     const readonlyReason = "你已不属于该会话所属应用，当前会话只读。";
     const wrapper = mount(FigmaChatPanel, {
       props: {
@@ -1644,10 +1653,19 @@ describe("FigmaChatPanel", () => {
     const textarea = wrapper.get("textarea");
     const sendButton = wrapper.get(".figma-chat-send-card");
 
-    expect(textarea.attributes("disabled")).toBeDefined();
+    expect(textarea.attributes("disabled")).toBeUndefined();
     expect(textarea.attributes("title")).toBe(readonlyReason);
     expect(sendButton.attributes("disabled")).toBeDefined();
     expect(sendButton.attributes("title")).toBe(readonlyReason);
+
+    await textarea.trigger("keydown", { key: "Enter" });
+    expect(wrapper.emitted("send")).toBeUndefined();
+
+    await textarea.setValue("/clear");
+    expect(sendButton.attributes("disabled")).toBeUndefined();
+    await sendButton.trigger("click");
+    expect(wrapper.emitted("new-conversation")).toHaveLength(1);
+    expect(wrapper.emitted("send")).toBeUndefined();
   });
 
   it("renders workspace context attachments and blocks oversized input before sending", async () => {

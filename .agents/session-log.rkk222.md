@@ -6744,3 +6744,30 @@
 - 企业模型排序不再依赖 JSONC 对象插入顺序或缺失 `release_date` 时的并列顺序；不改变用户已保存的模型选择。
 - 未修改 HTTP API、RunEvent、数据库/Flyway、后端、环境配置、generated SDK 或 OpenCode 上游源码；企业现场
   仍需重新构建并部署前端交付物，单纯保存 JSONC 不会获得该页面排序修复。
+
+## 2026-08-06 - 修复部署后 OpenCode 原生命令被发送门禁拦截
+
+### Why
+
+- 原生命令虽然已进入前端构建产物，但 `submit()` 在命令解析前统一检查普通消息发送门禁；会话只读、运行中、
+  进程未就绪、历史加载或上下文超限时，命令会静默返回。输入框同时被这些状态禁用，导致 `/` 候选也无法打开。
+
+### What
+
+- `FigmaChatPanel` 改为先识别并分发 OpenCode 原生命令，再检查普通消息发送门禁；普通文本和 `!shell` 仍沿用
+  原有门禁，远程 Session 命令继续由 `AgentWorkbench` 校验会话身份、只读状态和运行态。
+- 输入框在普通消息不可发送时保持可编辑，发送按钮仅对已识别的原生命令放行；保留技能、原生能力、项目命令的
+  既有展示顺序。补充进程未初始化、只读会话和夜间任务状态回归，并同步 `agent-web` README。
+
+### How
+
+- 定向组件/工具测试 247 passed / 1 skipped，前端全量测试 1834 passed / 1 skipped；`agent-web` typecheck、
+  production build、AI 文档门禁和 `git diff --check` 通过。
+- 在当前本地后端返回进程不可用的真实页面中用 Chrome 验证输入框可编辑，输入 `/` 后出现 17 个 OpenCode
+  原生命令；生产预览启动于 `http://127.0.0.1:4174/` 并返回 HTTP 200。
+
+### Result
+
+- `/help`、`/new`、`/clear` 等原生能力不再因普通消息门禁失效，普通消息的进程、权限、历史和上下文保护保持不变。
+- 未修改 HTTP API、RunEvent、数据库/Flyway、后端、环境配置、generated SDK 或 OpenCode 上游源码；需重新构建
+  并部署前端交付物后企业环境才会获得修复。

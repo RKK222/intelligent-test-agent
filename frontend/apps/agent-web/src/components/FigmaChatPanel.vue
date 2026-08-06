@@ -993,7 +993,6 @@ function startComposerResize(event: PointerEvent) {
  * 点击输入框卡片空白区域时，自动聚焦到内部文本输入框（避开按钮、手柄和下拉框等子元素）
  */
 function onComposerCardClick(event: MouseEvent) {
-  if (composerInteractionBlocked.value) return
   const target = event.target as HTMLElement | null
   if (
     target?.closest('button') ||
@@ -2289,6 +2288,16 @@ const sendSubmitBlocked = computed(
     || nightSessionLocked.value
     || readonlySubmitBlocked.value
     || contextSubmitBlocked.value
+)
+// OpenCode 原生命令不是普通消息发送：即使会话只读、进程异常或上下文超限，
+// 也要允许用户输入并交给命令处理器，由具体命令自行判断是否可执行。
+const nativeComposerCommand = computed(() =>
+  props.chatAttachments.length === 0
+    ? resolveOpenCodeTuiCommand(localInput.value.trim())
+    : null
+)
+const composerSubmitBlocked = computed(
+  () => sendSubmitBlocked.value && nativeComposerCommand.value === null
 )
 const composerPlaceholder = computed(() => {
   if (props.processLoading && !props.processStatus) return '正在检查 TestAgent 进程…'
@@ -4335,7 +4344,7 @@ function confirmCancelNightTask(taskId: string) {
 function submit() {
   const text = localInput.value.trim()
   const attachments = props.chatAttachments
-  if ((!text && attachments.length === 0) || sendSubmitBlocked.value) return
+  if (!text && attachments.length === 0) return
   // TUI 内置命令和 !shell 必须先于通用 Run/Skill 分发处理，避免落入 session command 命名空间。
   const nativeCommand = attachments.length === 0 ? resolveOpenCodeTuiCommand(text) : null
   if (nativeCommand) {
@@ -4344,6 +4353,7 @@ function submit() {
     emit('update:inputValue', '')
     return
   }
+  if (sendSubmitBlocked.value) return
   const shellCommand = attachments.length === 0 ? parseOpenCodeTuiShellCommand(text) : null
   if (shellCommand) {
     emit('run-shell', shellCommand)
@@ -5760,7 +5770,6 @@ function onCompositionEnd() {
           :style="composerTextareaStyle"
           :placeholder="composerPlaceholder"
           rows="1"
-          :disabled="running || composerInteractionBlocked || readonlySubmitBlocked || nightSessionLocked"
           :title="sendBlockedTitle"
           @keydown="onKeydown"
           @compositionstart="onCompositionStart"
@@ -5978,7 +5987,7 @@ function onCompositionEnd() {
             v-if="!running"
             type="button"
             class="figma-chat-send-card"
-            :disabled="(!localInput.trim() && chatAttachments.length === 0) || sendSubmitBlocked"
+            :disabled="(!localInput.trim() && chatAttachments.length === 0) || composerSubmitBlocked"
             :title="sendBlockedTitle"
             aria-label="发送"
             @click="submit"
