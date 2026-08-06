@@ -6861,3 +6861,33 @@
   默认超时提前中止。
 - 未修改 HTTP 路径/响应、RunEvent、数据库/Flyway、后端、环境配置、generated SDK 或 OpenCode 上游源码；企业
   现场仍需重新构建并部署前端交付物，当前已部署包不会自动获得该修复。
+
+## 2026-08-06 - 收敛企业原生命令并补齐会话重命名
+
+### Why
+
+- 用户明确只保留 `/sessions|continue`、`/new|clear`、`/models`、`/compact|summarize` 和 `/rename`；此前完整
+  OpenCode TUI 命令目录会继续截获 `/help`、`/share`、`/details` 等平台不需要的名称。
+- `/rename` 尚未进入 Web 原生命令链，需要复用平台已有 Session 更新能力完成真实改名。
+
+### What
+
+- 原生命令类型、候选目录、别名解析和父级处理器统一缩减为五组白名单；移除旧显示、导出、撤销、分享、主题等
+  本地处理分支，Skills 与运行态项目命令分区保持不变。
+- `/rename` 使用既有 `updateSessionMutation` 和 Session PATCH 接口，校验非空标题、处理取消与只读状态；标题属于
+  Session 元数据，因此允许在 Run 进行期间修改，`/compact` 仍要求 Run 空闲。
+- 同步 agent-web README，并新增精确目录、别名、被移除名称、动态项目命令、模型、压缩和重命名浏览器回归。
+
+### How
+
+- 聚焦 Vitest 247 passed / 1 skipped，前端全量 115 个测试文件 1835 passed / 1 skipped；agent-web typecheck 和
+  production build 通过，AI 文档门禁与 `git diff --check` 通过。
+- 默认 Playwright Chromium 未安装，临时使用本机 Google Chrome 执行同一工作台端到端用例，1 passed；临时配置
+  已删除。运行中的前端 3000 与后端 `/actuator/health` 均返回 HTTP 200，后端状态为 UP。
+
+### Result
+
+- 企业原生候选现在只展示五组命令；`/continue`、`/clear`、`/summarize` 保留为指定别名，`/resume` 等旧别名不再
+  保留；`/rename` 可更新当前会话标题。
+- 未新增或变更 HTTP 路径/响应、RunEvent、数据库/Flyway、后端、安全、环境配置、generated SDK 或 OpenCode
+  上游源码；企业现场需要重新构建并部署前端交付物后生效。

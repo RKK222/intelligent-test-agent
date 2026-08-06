@@ -9208,7 +9208,7 @@ function handleNewConversation() {
 
 const nativeCommandInFlight = ref(false);
 
-function nativeSessionActionAllowed(action: string): Session | null {
+function nativeSessionActionAllowed(action: string, options: { allowBusy?: boolean } = {}): Session | null {
   const currentSession = session.value;
   if (!currentSession) {
     feedback.value = { kind: "info", title: `无法${action}`, description: "请先发送一条消息建立会话。" };
@@ -9218,49 +9218,51 @@ function nativeSessionActionAllowed(action: string): Session | null {
     feedback.value = { kind: "info", title: `无法${action}`, description: readonlySessionReason.value };
     return null;
   }
-  if (runtimeBusy.value) {
+  if (!options.allowBusy && runtimeBusy.value) {
     feedback.value = { kind: "info", title: `暂不能${action}`, description: "请等待当前任务结束或先停止任务。" };
     return null;
   }
   return currentSession;
 }
 
-function nativeShareUrl(result: unknown): string | undefined {
-  if (!result || typeof result !== "object" || Array.isArray(result)) return undefined;
-  const value = result as Record<string, unknown>;
-  const nested = value.share && typeof value.share === "object" && !Array.isArray(value.share)
-    ? value.share as Record<string, unknown>
-    : undefined;
-  return text(value.url) ?? text(nested?.url);
-}
-
 /**
  * 执行需要平台 Session API 的 OpenCode TUI 命令。
- * 本地显示类命令由 FigmaChatPanel 处理；这里集中守住会话身份、运行中状态和远端消息 ID。
+ * 本地导航类命令由 FigmaChatPanel 处理；这里集中守住会话身份、只读状态和运行态约束。
  */
 async function handleNativeTuiCommand(command: OpenCodeTuiCommandName) {
   if (nativeCommandInFlight.value) {
     feedback.value = { kind: "info", title: "原生命令执行中", description: "请等待当前命令完成。" };
     return;
   }
-  if (command === "themes") {
-    feedback.value = { kind: "info", title: "平台主题", description: "当前企业工作台使用统一主题，暂不提供独立主题切换。" };
-    return;
-  }
   const actionLabels: Partial<Record<OpenCodeTuiCommandName, string>> = {
     compact: "压缩上下文",
-    undo: "撤销上一轮",
-    redo: "重做上一轮",
-    share: "分享会话",
-    unshare: "取消分享"
+    rename: "重命名会话"
   };
   const actionLabel = actionLabels[command];
   if (!actionLabel) return;
-  const currentSession = nativeSessionActionAllowed(actionLabel);
+  // 会话标题是平台元数据，运行中的任务不影响重命名；压缩仍必须等待当前任务结束。
+  const currentSession = nativeSessionActionAllowed(actionLabel, { allowBusy: command === "rename" });
   if (!currentSession) return;
 
   nativeCommandInFlight.value = true;
   try {
+    if (command === "rename") {
+      const result = await ElMessageBox.prompt("请输入新的会话名称", "重命名会话", {
+        inputValue: currentSession.title,
+        inputPlaceholder: "会话名称",
+        confirmButtonText: "保存",
+        cancelButtonText: "取消",
+        inputValidator: (value: string) => value.trim().length > 0 || "会话名称不能为空"
+      });
+      const title = String(result.value).trim();
+      if (title === currentSession.title) {
+        feedback.value = { kind: "info", title: "会话名称未变化", description: title };
+        return;
+      }
+      const updated = await updateSessionMutation.mutateAsync({ sessionId: currentSession.sessionId, title });
+      feedback.value = { kind: "success", title: "会话已重命名", description: updated.title };
+      return;
+    }
     if (command === "compact") {
       const modelID = selectedModelInfo.value?.id ?? modelIdOnly(selectedModel.value);
       const providerID = selectedModelInfo.value?.providerId ?? selectedProvider.value;
@@ -9277,43 +9279,8 @@ async function handleNativeTuiCommand(command: OpenCodeTuiCommandName) {
       });
       return;
     }
-    if (command === "undo") {
-      const message = [...chatState.value.messages]
-        .reverse()
-        .find((item) => item.role === "user" && remoteMessageIdForAgentMessage(item));
-      const messageID = message ? remoteMessageIdForAgentMessage(message) : undefined;
-      if (!messageID) {
-        feedback.value = { kind: "info", title: "无法撤销上一轮", description: "当前会话没有可撤销的远端用户消息。" };
-        return;
-      }
-      await api.revertSession(currentSession.sessionId, { messageID });
-      await switchSession(currentSession.sessionId, {
-        refreshSnapshot: true,
-        completionFeedback: { kind: "success", title: "已撤销上一轮", description: "消息以及该轮文件修改已按 OpenCode 原生语义回退。" }
-      });
-      return;
-    }
-    if (command === "redo") {
-      await api.unrevertSession(currentSession.sessionId);
-      await switchSession(currentSession.sessionId, {
-        refreshSnapshot: true,
-        completionFeedback: { kind: "success", title: "已重做上一轮", description: "撤销的消息与文件修改已恢复。" }
-      });
-      return;
-    }
-    if (command === "share") {
-      const result = await api.shareSession(currentSession.sessionId);
-      const url = nativeShareUrl(result);
-      feedback.value = {
-        kind: "success",
-        title: "会话已分享",
-        description: url ?? "分享链接已由 OpenCode 创建。"
-      };
-      return;
-    }
-    await api.unshareSession(currentSession.sessionId);
-    feedback.value = { kind: "success", title: "已取消分享", description: currentSession.title };
   } catch (error) {
+    if (command === "rename" && (error === "cancel" || error === "close")) return;
     feedback.value = errorFeedback(`${actionLabel}失败`, error);
   } finally {
     nativeCommandInFlight.value = false;

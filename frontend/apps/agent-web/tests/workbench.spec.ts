@@ -6993,9 +6993,10 @@ test("slash skill starts a recoverable run instead of a direct session command",
   expect(commandRequests).toEqual([]);
 });
 
-test("native slash candidate opens models and visibly runs compact", async ({ page }) => {
+test("enterprise native slash commands open models, compact context, and rename the session", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   const compactRequests: Array<Record<string, unknown>> = [];
+  const sessionUpdateRequests: Array<{ sessionId: string; payload: Record<string, unknown> }> = [];
   let releaseCompact!: () => void;
   const compactRequestGate = new Promise<void>((resolve) => {
     releaseCompact = resolve;
@@ -7005,6 +7006,7 @@ test("native slash candidate opens models and visibly runs compact", async ({ pa
     runRequests,
     compactRequests,
     compactRequestGate,
+    sessionUpdateRequests,
     runEvents: [event(1, "run.succeeded", {})]
   });
 
@@ -7014,6 +7016,15 @@ test("native slash candidate opens models and visibly runs compact", async ({ pa
   await page.getByRole("button", { name: "发送" }).click();
   await expect.poll(() => runRequests.length).toBe(1);
   await expect(page.getByRole("button", { name: "发送" })).toBeVisible();
+
+  await textarea.fill("/");
+  await expect(page.getByTestId("slash-native-section").locator(".figma-chat-skill-name")).toHaveText([
+    "/sessions",
+    "/new",
+    "/models",
+    "/compact",
+    "/rename"
+  ]);
 
   await textarea.fill("/models");
   await page.getByTestId("slash-native-section").locator(".figma-chat-skill-row", { hasText: "/models" }).click();
@@ -7028,6 +7039,19 @@ test("native slash candidate opens models and visibly runs compact", async ({ pa
 
   releaseCompact();
   await expect(page.getByText("上下文已压缩", { exact: true })).toBeVisible();
+
+  await textarea.fill("/rename");
+  await page.getByTestId("slash-native-section").locator(".figma-chat-skill-row", { hasText: "/rename" }).click();
+  const renameDialog = page.locator(".el-message-box", { hasText: "重命名会话" });
+  await expect(renameDialog).toBeVisible();
+  await renameDialog.locator("input").fill("企业原生命令会话");
+  await renameDialog.getByRole("button", { name: "保存" }).click();
+
+  await expect.poll(() => sessionUpdateRequests).toEqual([{
+    sessionId: "ses_1",
+    payload: { title: "企业原生命令会话" }
+  }]);
+  await expect(page.getByText("会话已重命名", { exact: true })).toBeVisible();
 });
 
 test("completed write events refresh the changed file without a separate live toggle", async ({ page }) => {
@@ -7450,6 +7474,7 @@ async function mockBackendApi(
     commandRequests?: Array<Record<string, unknown>>;
     compactRequests?: Array<Record<string, unknown>>;
     compactRequestGate?: Promise<void>;
+    sessionUpdateRequests?: Array<{ sessionId: string; payload: Record<string, unknown> }>;
     sessionRequests?: Array<Record<string, unknown>>;
     permissionReplies?: Array<Record<string, unknown>>;
     questionReplies?: Array<Record<string, unknown>>;
@@ -8780,6 +8805,18 @@ async function mockBackendApi(
       capture.sessionRequests?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
       await capture.sessionRequestGate;
       await route.fulfill(json(session()));
+      return;
+    }
+    if (method === "PATCH" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+$/.test(url.pathname)) {
+      const sessionId = decodeURIComponent(url.pathname.match(/\/sessions\/([^/]+)$/)?.[1] ?? "ses_1");
+      const payload = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+      capture.sessionUpdateRequests?.push({ sessionId, payload });
+      await route.fulfill(json({
+        ...session(),
+        sessionId,
+        title: typeof payload.title === "string" ? payload.title : session().title,
+        ...(typeof payload.pinned === "boolean" ? { pinned: payload.pinned } : {})
+      }));
       return;
     }
     if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+$/.test(url.pathname)) {

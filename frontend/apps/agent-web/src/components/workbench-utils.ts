@@ -1864,23 +1864,11 @@ export function parseCommand(prompt: string, mode: string) {
 }
 
 export type OpenCodeTuiCommandName =
-  | "connect"
   | "compact"
-  | "details"
-  | "editor"
-  | "exit"
-  | "export"
-  | "help"
-  | "init"
   | "models"
   | "new"
-  | "redo"
-  | "sessions"
-  | "share"
-  | "themes"
-  | "thinking"
-  | "undo"
-  | "unshare";
+  | "rename"
+  | "sessions";
 
 export type OpenCodeTuiCommand = {
   name: OpenCodeTuiCommandName;
@@ -1889,27 +1877,15 @@ export type OpenCodeTuiCommand = {
 };
 
 /**
- * OpenCode 1.18.4 TUI 的内置斜杠命令目录。
- * Skill/项目命令来自运行态目录；这里仅维护客户端本地处理、不能提交给 session command 的命令。
+ * 企业工作台明确保留的 OpenCode 原生斜杠命令目录。
+ * Skill/项目命令仍来自运行态目录；未列在这里的名称不会被客户端作为原生命令保留。
  */
 export const OPENCODE_TUI_COMMANDS: OpenCodeTuiCommand[] = [
-  { name: "connect", aliases: [], description: "选择平台已配置的模型供应商" },
-  { name: "compact", aliases: ["summarize"], description: "压缩当前会话上下文" },
-  { name: "details", aliases: [], description: "切换工具执行详情" },
-  { name: "editor", aliases: [], description: "聚焦消息编辑器" },
-  { name: "exit", aliases: ["quit", "q"], description: "关闭当前对话面板" },
-  { name: "export", aliases: [], description: "将当前对话导出为 Markdown" },
-  { name: "help", aliases: [], description: "打开平台帮助中心" },
-  { name: "init", aliases: [], description: "创建或更新 AGENTS.md" },
-  { name: "models", aliases: [], description: "列出并选择可用模型" },
+  { name: "sessions", aliases: ["continue"], description: "列出并切换会话" },
   { name: "new", aliases: ["clear"], description: "开始新的会话" },
-  { name: "redo", aliases: [], description: "重做上一次撤销" },
-  { name: "sessions", aliases: ["resume", "continue"], description: "列出并切换会话" },
-  { name: "share", aliases: [], description: "分享当前会话" },
-  { name: "themes", aliases: [], description: "查看平台主题说明" },
-  { name: "thinking", aliases: [], description: "切换思考过程的显示" },
-  { name: "undo", aliases: [], description: "撤销最后一轮消息及文件修改" },
-  { name: "unshare", aliases: [], description: "取消分享当前会话" }
+  { name: "models", aliases: [], description: "列出并选择可用模型" },
+  { name: "compact", aliases: ["summarize"], description: "压缩当前会话上下文" },
+  { name: "rename", aliases: [], description: "重命名当前会话" }
 ];
 
 /** 只匹配输入框末尾仍在编辑的单个斜杠词，参数输入阶段不再打开目录。 */

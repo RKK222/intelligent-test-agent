@@ -1604,44 +1604,19 @@ function selectProjectCommand(command: ProjectCommandItem) {
   dismissSkillPanel()
 }
 
-const timelineDetailsExpanded = ref(false)
-const timelineThinkingVisible = ref(true)
-
-function executeNativeCommand(command: OpenCodeTuiCommand, originalPrompt = `/${command.name}`) {
+function executeNativeCommand(command: OpenCodeTuiCommand) {
   dismissSkillPanel()
   switch (command.name) {
-    case 'connect':
     case 'models':
       agentDropdownOpen.value = false
       dropdownOpen.value = true
       void nextTick(() => document.querySelector<HTMLInputElement>('.figma-chat-model-search-input')?.focus())
-      return
-    case 'details':
-      timelineDetailsExpanded.value = !timelineDetailsExpanded.value
-      return
-    case 'editor':
-      void nextTick(() => composerTextarea.value?.focus())
-      return
-    case 'exit':
-      emit('close')
-      return
-    case 'export':
-      downloadConversationMarkdown()
-      return
-    case 'help':
-      emit('open-help')
-      return
-    case 'init':
-      emit('send', originalPrompt)
       return
     case 'new':
       emit('new-conversation')
       return
     case 'sessions':
       openHistoryDrawer()
-      return
-    case 'thinking':
-      timelineThinkingVisible.value = !timelineThinkingVisible.value
       return
     default:
       emit('native-command', command.name)
@@ -1652,39 +1627,6 @@ function selectNativeCommand(command: OpenCodeTuiCommand) {
   executeNativeCommand(command)
   localInput.value = ''
   emit('update:inputValue', '')
-}
-
-function markdownMessageBody(message: ChatMessageInput): string {
-  if (message.role === 'card') {
-    return message.title || ''
-  }
-  const direct = message.text?.trim() || message.content?.trim()
-  if (direct) return direct
-  return (message.parts ?? [])
-    .filter((part) => part.type === 'text' || part.type === 'reasoning')
-    .map((part) => part.type === 'text' || part.type === 'reasoning' ? part.text?.trim() || '' : '')
-    .filter(Boolean)
-    .join('\n\n')
-}
-
-/** 浏览器环境用下载替代 TUI 的外部编辑器打开行为，正文只使用已在页面内存中的会话投影。 */
-function downloadConversationMarkdown() {
-  const lines = [`# ${props.title || 'OpenCode 会话'}`, '']
-  for (const message of props.messages) {
-    const body = markdownMessageBody(message)
-    if (!body) continue
-    lines.push(`## ${message.role === 'user' ? '用户' : message.role === 'assistant' ? '助手' : '系统'}`)
-    lines.push('')
-    lines.push(body)
-    lines.push('')
-  }
-  const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `opencode-session-${new Date().toISOString().replace(/[:.]/g, '-')}.md`
-  link.click()
-  URL.revokeObjectURL(url)
 }
 
 function selectMentionAgent(agent: AgentInfo) {
@@ -4334,7 +4276,7 @@ function submit() {
   // TUI 内置命令和 !shell 必须先于通用 Run/Skill 分发处理，避免落入 session command 命名空间。
   const nativeCommand = attachments.length === 0 ? resolveOpenCodeTuiCommand(text) : null
   if (nativeCommand) {
-    executeNativeCommand(nativeCommand, text)
+    executeNativeCommand(nativeCommand)
     localInput.value = ''
     emit('update:inputValue', '')
     return
@@ -4450,8 +4392,6 @@ function onCompositionEnd() {
         v-else
         :state="opencodeTimelineState"
         :work-status-dock-target="activeSubagentSessionId ? undefined : workStatusDockRef"
-        :force-tool-details-open="timelineDetailsExpanded"
-        :show-reasoning="timelineThinkingVisible"
         @open-diff="openTimelineDiff"
         @open-file="(path) => emit('open-file', path)"
         @select-subagent="selectSubagent"

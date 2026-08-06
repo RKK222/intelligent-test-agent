@@ -88,13 +88,24 @@ describe("filterWorkspaceRootEntries", () => {
 });
 
 describe("OpenCode TUI command helpers", () => {
-  it("resolves native aliases before generic slash commands", () => {
+  it("only reserves the enterprise-approved native commands and aliases", () => {
+    expect(workbenchUtils.OPENCODE_TUI_COMMANDS.map((command) => [command.name, command.aliases])).toEqual([
+      ["sessions", ["continue"]],
+      ["new", ["clear"]],
+      ["models", []],
+      ["compact", ["summarize"]],
+      ["rename", []]
+    ]);
     expect(resolveOpenCodeTuiCommand("/compact")?.name).toBe("compact");
     expect(resolveOpenCodeTuiCommand("/summarize")?.name).toBe("compact");
     expect(resolveOpenCodeTuiCommand("/clear")?.name).toBe("new");
-    expect(resolveOpenCodeTuiCommand("/resume")?.name).toBe("sessions");
     expect(resolveOpenCodeTuiCommand("/continue")?.name).toBe("sessions");
-    expect(resolveOpenCodeTuiCommand("/q")?.name).toBe("exit");
+    expect(resolveOpenCodeTuiCommand("/models")?.name).toBe("models");
+    expect(resolveOpenCodeTuiCommand("/rename")?.name).toBe("rename");
+    expect(resolveOpenCodeTuiCommand("/resume")).toBeNull();
+    expect(resolveOpenCodeTuiCommand("/help")).toBeNull();
+    expect(resolveOpenCodeTuiCommand("/share")).toBeNull();
+    expect(resolveOpenCodeTuiCommand("/q")).toBeNull();
     expect(resolveOpenCodeTuiCommand("/custom-command arg")).toBeNull();
   });
 
