@@ -190,7 +190,7 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
      */
     @Scheduled(
             initialDelayString = "${test-agent.agent-skill-hub.builtin-reconcile-initial-delay:PT2S}",
-            fixedDelayString = "${test-agent.agent-skill-hub.builtin-reconcile-delay:PT30S}")
+            fixedDelayString = "${test-agent.agent-skill-hub.builtin-reconcile-delay:PT10M}")
     public void reconcilePublicBuiltinSnapshots() {
         Path repoRoot = publicConfigGitRoot();
         if (repoRoot == null || !git.isGitRepository(repoRoot)) {

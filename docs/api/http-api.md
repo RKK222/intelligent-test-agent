@@ -1943,7 +1943,7 @@ Hub 元数据与更新角标走 HTTP；制品正文、引用落盘和三方合�
 
 Skill 分类固定为一级 `WORKER/TEST/CODE/OTHER`。`TEST` 必须选择 `TEST_DESIGN/TEST_DATA_CONSTRUCTION/TEST_EXECUTION/TEST_ANALYSIS` 之一，`CODE` 必须选择 `WHITE_BOX_ANALYSIS`，`WORKER/OTHER` 当前不带二级事项。历史 Skill、新 push Skill 和公共 Git Skill 默认返回 `OTHER/null`；新字段对旧客户端为向后兼容新增，新前端连接旧后端缺字段时也按“其他”展示。人工分类保存在逻辑资产上，公共 Git Skill 使用独立分类记录，后续 push 或 commit 只生成新修订、不覆盖分类。
 
-发布是显式动作：push 只生成不可变修订，未发布修订可被全员浏览但不能被引用。平台公共配置仓库中的 Agent/Skill 由后台定时任务按共享仓库当前分支的远端精确提交固化到数据库，以 `builtin=true` 展示，响应文案为“平台内置、无需引用”；公共 Skill 允许超级管理员分类，公共 Agent/Skill 都不允许再次发布或复制到应用工作区。默认启动 2 秒后完成首次对账、此后每 30 秒用共享仓库现有 Git 身份 fetch 并检查 `origin/{branch}`；任务只刷新远端引用，不 checkout/reset 运行工作树，认证暂不可用时回退本地 HEAD。用户从其它本地 checkout 直接 push 后可被下一轮发现。目标 commit 未变化时不读取正文；Hub 列表、详情和文件正文只查询数据库，不在请求链路执行 Git。
+发布是显式动作：push 只生成不可变修订，未发布修订可被全员浏览但不能被引用。平台公共配置仓库中的 Agent/Skill 由后台定时任务按共享仓库当前分支的远端精确提交固化到数据库，以 `builtin=true` 展示，响应文案为“平台内置、无需引用”；公共 Skill 允许超级管理员分类，公共 Agent/Skill 都不允许再次发布或复制到应用工作区。默认启动 2 秒后完成首次对账、此后每 10 分钟用共享仓库现有 Git 身份 fetch 并检查 `origin/{branch}`；任务只刷新远端引用，不 checkout/reset 运行工作树，认证暂不可用时回退本地 HEAD。用户从其它本地 checkout 直接 push 后可被下一轮发现。目标 commit 未变化时不读取正文；Hub 列表、详情和文件正文只查询数据库，不在请求链路执行 Git。
 
 引用和更新不自动提交 Git。成功写入当前个人 worktree 后返回 `PENDING_PUSH`，此时 `referenced=false/referenceStatus=PENDING_PUSH`；只有后续应用 feature 发布的远端提交内容摘要与待推送摘要一致时，引用才提升为 `ACTIVE` 并显示为已引用。取消引用先移除当前个人 worktree 文件并进入 `PENDING_REMOVE`：该关系立即从“当前应用”、有效引用计数和公开引用方清单隐藏，但保留内部记录等待远端 push 确认目标路径消失后删除；确认前再次引用会复用原记录、重新写盘并恢复为 `PENDING_PUSH`。更新以 active 修订为 base、当前 worktree 为 current、最新发布修订为 incoming 做三方合并；存在任何冲突时不改工作树，全部冲突确认后再整体落盘。修订链按每个远端 commit 保留，但更新角标比较内容 SHA-256，未改动资产不会因其它文件的 push 产生假更新。
 

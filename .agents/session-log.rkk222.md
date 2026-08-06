@@ -6313,3 +6313,29 @@
 - Hub 热查询实测由原逐请求 Git 扫描的秒级下降到约 5–21ms；首次并发冷查询约 79–117ms。此次涉及数据库、HTTP
   分类行为和性能，不改 RunEvent、OpenCode 源码、generated SDK、环境配置或跨服务器文件路由。正式交付前仍须
   对照全部目标环境 Flyway 历史与并行候选版本，验证每套已知 PostgreSQL 基线升级。
+
+## 2026-08-06 - 降低公共 Skill Hub Git 对账频率
+
+### Why
+
+- 实际公共仓库 `git fetch` 通常耗时 2.2～4.4 秒，偶发达到 6.7～13.6 秒；每 30 秒执行会产生不必要的网络、
+  SSH 和日志开销。公共快照查询已经完全走数据库，外部本地 push 允许接受更长的兜底发现时间。
+
+### What
+
+- 复用 `AgentSkillHubApplicationService.reconcilePublicBuiltinSnapshots()` 既有 fixed-delay 调度，只把默认间隔从
+  `PT30S` 调整为 `PT10M`，启动后首次 2 秒对账和可覆盖配置键保持不变。
+- 新增反射测试锁定默认调度表达式，并同步 workspace-management README 与 HTTP API 稳定文档。
+
+### How
+
+- Hub 后端定向测试 21 项通过，前端 Hub/backend-api 113 项通过；JDK 25 下 `test-agent-app -am package
+  -DskipTests` 和 agent-web production build 均成功，`git diff --check` 通过。
+- 核对 `git cherry` 与祖先关系，确认 taxonomy 两个功能提交尚未进入 `codex/release-enterprise-20260801`；当前
+  8080/3000 运行实例仍来自本功能 worktree，但运行 JAR 早于本次间隔修改，未为避免误切 release 而重启。
+
+### Result
+
+- 新构建默认在每轮对账结束后等待 10 分钟再执行下一轮，不会发生同一调度方法重叠。
+- 页面“刷新目录”只重新查询数据库，不会手工执行公共 Git 对账；系统管理公共仓库更新会触发 rollout，但当前也
+  没有直接调用 Hub 对账。外部 clone push 的最坏发现时间仍接近 10 分钟，合并后如需即时对账应另设显式入口。

@@ -53,8 +53,19 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
+import org.springframework.scheduling.annotation.Scheduled;
 
 class AgentSkillHubApplicationServiceTest {
+
+    @Test
+    void publicBuiltinReconciliationDefaultsToTenMinutes() throws Exception {
+        Scheduled scheduled = AgentSkillHubApplicationService.class
+                .getDeclaredMethod("reconcilePublicBuiltinSnapshots")
+                .getAnnotation(Scheduled.class);
+
+        assertThat(scheduled.fixedDelayString())
+                .isEqualTo("${test-agent.agent-skill-hub.builtin-reconcile-delay:PT10M}");
+    }
 
     @Test
     void successfulPushBuildsOneAgentAndOneWholeSkillArtifactFromCommit() {
