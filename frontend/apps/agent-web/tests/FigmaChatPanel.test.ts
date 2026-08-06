@@ -1175,6 +1175,35 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).not.toContain("暂无匹配模型");
   });
 
+  it("shows enterprise DeepSeek before Qwen regardless of the native catalog order", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        models: [
+          { id: "Qwen3.6-27B", providerId: "enterprise-qwen", name: "Qwen3.6 27B" },
+          { id: "DeepSeek-V4-Flash-W8A8", providerId: "enterprise-deepseek", name: "DeepSeek V4 Flash W8A8" }
+        ],
+        providers: [
+          { providerId: "enterprise-qwen", name: "企业通义" },
+          { providerId: "enterprise-deepseek", name: "企业 DeepSeek" }
+        ],
+        selectedModel: "enterprise-qwen/Qwen3.6-27B"
+      } as any
+    });
+
+    await wrapper.get('[aria-label="切换模型"]').trigger("click");
+
+    expect(wrapper.findAll(".figma-chat-model-rec-name").map((item) => item.text())).toEqual([
+      "DeepSeek V4 Flash W8A8",
+      "Qwen3.6 27B"
+    ]);
+    expect(wrapper.findAll(".figma-chat-model-group-title").map((item) => item.text())).toEqual([
+      "企业 DeepSeek",
+      "企业通义"
+    ]);
+  });
+
   it("shows visible primary/all agents in the composer agent picker and emits changes", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

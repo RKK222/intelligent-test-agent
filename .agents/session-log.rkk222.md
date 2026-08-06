@@ -6719,3 +6719,28 @@
 - 未修改 Java API/事件、数据库/Flyway/MyBatis SQL、环境配置、generated SDK 或 OpenCode 上游源码；Mac
   仅生成了本地验证镜像和 `--no-save/--no-zip` 临时 programs，正式内外层企业交付包仍需按标准流程重建，
   真实 Docker 18.09/linux-amd64 节点仍需完成超过原故障窗口的长稳验收。
+
+## 2026-08-06 - 固定企业 DeepSeek 模型展示优先级
+
+### Why
+
+- 企业公共 JSONC 调整 `enabled_providers` 顺序后，模型选择面板仍可能先显示千问；该字段在前端只转为
+  Provider 白名单，OpenCode 原生 `/api/model` 则按模型发布时间降序，不按名称字母或白名单顺序排序。
+
+### What
+
+- 复用 `FigmaChatPanel` 现有模型聚合路径，仅对 `enterprise-deepseek` 和 `enterprise-qwen` 施加稳定展示优先级，
+  固定 DeepSeek 在千问之前；其他 Provider 和同优先级模型继续保持 OpenCode 原生目录顺序。
+- 新增组件回归，故意输入千问在前的原生目录，验证“上新推荐”和 Provider 分组都先显示 DeepSeek；同步
+  `agent-web` README 的模型目录行为。
+
+### How
+
+- 定向 `FigmaChatPanel` 测试 146 passed / 1 skipped，`agent-web` typecheck 和 production build 通过；独立 Vite
+  实例在 `http://127.0.0.1:3001/` 启动并返回 HTTP 200。
+
+### Result
+
+- 企业模型排序不再依赖 JSONC 对象插入顺序或缺失 `release_date` 时的并列顺序；不改变用户已保存的模型选择。
+- 未修改 HTTP API、RunEvent、数据库/Flyway、后端、环境配置、generated SDK 或 OpenCode 上游源码；企业现场
+  仍需重新构建并部署前端交付物，单纯保存 JSONC 不会获得该页面排序修复。
