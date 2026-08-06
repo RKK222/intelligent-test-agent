@@ -589,11 +589,12 @@ test-agent-config-SENSITIVE-<role>-<node>-<timestamp>.tar.gz.sha256
 实际打进 `test-agent-persistence-0.1.0-SNAPSHOT.jar`；打包、外层封装、节点预校验和安装后
 复验会同时锁定工具盒子企业 migration、LobeHub 主/两条兼容 migration 和公共 Agent rollout
 纠错 migration、问题排查审计 migration 以及三条 Skill Hub migration 的 SHA-256，并比较发布包与安装后
-persistence JAR 的完整 SHA。只校验外层 ZIP 或 app JAR 不能证明数据库资源已更新。当前现网实际基线是已部署提交
-`cec4ccf13769d9084c7d02efc158b021afe23c23`；该版本已包含 PostgreSQL `20260804123000` 和 XXL
-MySQL V7/V8。本轮升级前仍必须按多后台手册分别读取 PostgreSQL 与 XXL MySQL 的完整
-`flyway_schema_history`，确认 PostgreSQL `20260805132000`、`20260806143000`、`20260806190000`、
-`20260806190500` 与 XXL MySQL V9 均尚未执行，不能只凭提交号假定数据库历史一致。
+persistence JAR 的完整 SHA。只校验外层 ZIP 或 app JAR 不能证明数据库资源已更新。首次从已部署提交
+`cec4ccf13769d9084c7d02efc158b021afe23c23` 升级时，该基线只包含 PostgreSQL `20260804123000` 和 XXL
+MySQL V7/V8，因此四条后续 PostgreSQL migration 和 XXL MySQL V9 应尚未执行。若上一企业包已经部署，
+重打包或故障修复重部署前则应确认这四条 migration 与 V9 已全部成功且 checksum 不变；当前相对
+`ab6e46936` 的修复包没有新增或修改 PostgreSQL/XXL migration，不应再次产生新 history。两种路径都必须
+按多后台手册读取完整 `flyway_schema_history`，不能只凭提交号或最高版本判断数据库历史一致。
 
 ## 首次部署与版本升级顺序
 
@@ -601,11 +602,11 @@ MySQL V7/V8。本轮升级前仍必须按多后台手册分别读取 PostgreSQL 
 
 1. 从两台后台确认外部 `122.210.106.43:3306` 可达，两份 `backend.env` 使用同一个 JDBC 地址、账号密码和 XXL access token。
 2. 替换 Java JAR、`backend/lib/` 和随包 XXL 上游许可证材料。
-3. 本轮升级先停止全部旧 Java，再启动 `.4` 新版本；平台 PostgreSQL 只允许从已部署
-   `20260804123000` 依次新增问题排查审计、Skill Hub 事项分类、公共快照持久化和公共 Skill 分类四条
-   migration，既有 history/checksum 必须完全不变。外部 XXL MySQL 只允许从已部署 V8 升级到 V9；随后确认
-   PostgreSQL 四条新 migration、Admin health、XXL V9、闲置用户进程关闭任务每日 02:00，以及既有搬迁任务
-   每 30 分钟均正常。任一校验失败时不得继续 `.114` 和前端。
+3. 升级先停止全部旧 Java，再启动 `.4` 新版本。首次从 `cec4ccf...` 基线升级时，平台 PostgreSQL 只允许
+   依次新增问题排查审计、Skill Hub 事项分类、公共快照持久化和公共 Skill 分类四条 migration，外部 XXL
+   MySQL 只允许从 V8 升级到 V9；若上一企业包已部署，本次修复重部署则必须保持 PostgreSQL/XXL history
+   和 checksum 完全不变，不允许新增版本。随后确认 Admin health、闲置用户进程关闭任务每日 02:00，以及
+   既有搬迁任务每 30 分钟均正常。任一校验失败时不得继续 `.114` 和前端。
 4. 确认本机 `/data/testagent/data/.serverid` 和 `.serverhost`。
 5. 导入 worker 镜像、解压 programs。
 6. 启动本机唯一 worker，等待当前结构化日志 `event=manager_config_update status=applied`；部署脚本同时兼容旧版 `manager config update applied`。
@@ -615,8 +616,9 @@ MySQL V7/V8。本轮升级前仍必须按多后台手册分别读取 PostgreSQL 
 manager/programs/worker；toolbox 指纹未变化，按 `reuse` 校验现有容器。两台旧 Java 必须先停，再按
 `.4 → .114 → .2` 部署。每台 Java readiness 和 `.serverid/.serverhost` 正确后才允许 worker 恢复连接；
 混合版本中的未知命令或错误只允许报错并保留原 binding，不得迁移端口，也不要在升级窗口内同时对同一用户
-执行人工重启与初始化。本轮不变更 `backend.env`、`docker.env`、SSE 或 generated SDK；新增 PostgreSQL
-问题排查授权/审计与 Skill Hub 分类/快照结构、XXL MySQL V9 生产任务，并同步更新前后端能力。
+执行人工重启与初始化。本轮不变更 `backend.env`、`docker.env`、SSE 或 generated SDK；首次从旧基线升级
+会增加 PostgreSQL 问题排查授权/审计与 Skill Hub 分类/快照结构、XXL MySQL V9 生产任务，已经部署上一
+企业包的故障修复重部署只做 Flyway validate，不再新增数据库版本。
 
 扩容时只在新 Linux 启动一套 Java/worker，将新节点同时加入 `TEST_AGENT_NGINX_BACKENDS` 和 `TEST_AGENT_NGINX_XXL_JOB_ADMINS` 后执行 Nginx 无停机 reload；这两个 Nginx upstream 变量不是 Java 配置，旧 Java 不需要修改环境或重启。当前 `.4 + .114` 双后台交付为每台 worker 发布 `14096-15095` 共 1000 个端口坐标；页面全局通用参数 `OPENCODE_MANAGER_MAX_PROCESSES=30` 会分别热推到两台 manager，使每台后台实际最多运行 30 个用户 OpenCode 进程。其它部署仍按各自节点包配置。manager 异常时优先核对数据根目录、manager token、`.serverid/.serverhost` 和本机端口池。
 

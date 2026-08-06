@@ -554,8 +554,9 @@ order by installed_rank;
 
 PostgreSQL 正常现网路径必须满足：所有记录 `success=true`；`20260802173416`、`20260803133000` 与
 `20260804123000` 已成功；`20260730090000` 未被倒序补写；`20260803141754` 仅允许出现在已经登记的
-“rollout 已执行、早期 LobeHub 补偿仍缺失”历史中，正常现网路径不应出现；部署前不得已有
-`20260805132000`、`20260806143000`、`20260806190000` 或 `20260806190500`。本轮第一台新 Java 只允许按顺序新增：
+“rollout 已执行、早期 LobeHub 补偿仍缺失”历史中，正常现网路径不应出现。首次从 `cec4ccf...` 基线升级
+时，部署前不得已有 `20260805132000`、`20260806143000`、`20260806190000` 或 `20260806190500`，第一台
+新 Java 只允许按顺序新增：
 
 - `V20260805132000__create_support_access_audit.sql`，SHA-256
   `54cea9a84948f8e4cee14d630772b8ee0668c2a7e5fc897ede5e792a15edd761`；
@@ -566,21 +567,25 @@ PostgreSQL 正常现网路径必须满足：所有记录 `success=true`；`20260
 - `V20260806190500__classify_public_skill_hub_snapshots.sql`，SHA-256
   `19a0e5af5f361179ac3887d541c274f75f43f89a683ee8037a5e0391444a92bf`。
 
+若上一企业包已经部署，上述四条 migration 应全部存在、`success=true` 且保持原 checksum；当前相对
+`ab6e46936` 的 manager 故障修复包没有新增或修改 PostgreSQL migration，重部署只允许 Flyway validate，
+不得新增 history。只存在其中一部分、checksum 不同或出现未知更高版本时都必须停止发布。
+
 虽然 LobeHub 服务和页面入口继续关闭，既有兼容 migration 创建的平台模型目录/聚合表和四个默认禁用参数仍必须
 保留，这是数据库兼容要求，不代表启用服务。
 
-XXL MySQL 使用独立的 `flyway_schema_history`。部署前应为 V1-V8 全部成功、没有 V9，也没有失败、
-未知 checksum 或更高版本；第一台新 Java 启动后只允许新增
-`V9__register_inactive_user_process_cleanup_task.sql`。V7、V8 的原始 history 和搬迁任务每 30 分钟
-配置不得改写。
+XXL MySQL 使用独立的 `flyway_schema_history`。首次从 `cec4ccf...` 基线升级时应为 V1-V8 全部成功且
+没有 V9，第一台新 Java 启动后只允许新增 `V9__register_inactive_user_process_cleanup_task.sql`；若上一
+企业包已部署，则 V1-V9 应全部成功且本次不得新增版本。两种路径都不允许失败、未知 checksum 或更高版本，
+V7、V8 的原始 history 和搬迁任务每 30 分钟配置不得改写。
 
 `V20260728160800__create_toolbox_click_tracking.sql` 的现网 checksum 仍必须为 `-1966404877`；只有已登记的
 早期测试/过渡历史才允许旧 `V20260727203500` 或 `-74327385` 幂等变体；现网历史中的
 `V20260728210000__index_in_flight_app_source_operations.sql` 也必须保留且为 `success=true`。任一失败记录、未知 checksum、
 未知更高版本、缺少上述已部署基线版本或其它历史分叉都必须停止发布；不得启用 Flyway `outOfOrder`、执行
-`repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常、PostgreSQL 既有 history/checksum
-未变化且只新增成功的 `20260805132000`、`20260806143000`、`20260806190000`、`20260806190500`，XXL MySQL
-V9 新增且为 `success=true`、搬迁任务仍为
+`repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常：首次升级只新增上述四条 PostgreSQL
+migration 和 XXL MySQL V9；已经部署上一企业包的修复重部署必须保持两套 history/checksum 完全不变。
+随后确认搬迁任务仍为
 `schedule_conf='0 0/30 * * * ? *'`，并确认闲置进程关闭任务为每日 02:00，再部署 `.114`。`.4` 日志出现
 `FlywayValidateException`、`ClassNotFoundException: org.postgresql.Driver` 或 `Application run failed` 时不得继续滚动。
 

@@ -6662,3 +6662,25 @@
 
 - 消除繁忙机器或并行测试调度引起的假失败；生产代码、API、事件、数据库/Flyway、安全、环境配置和
   OpenCode 上游源码均未变化。
+
+## 2026-08-06 - 区分首次数据库升级与已部署包故障重部署
+
+### Why
+
+- 重打 manager 故障修复包时发现，企业手册仍只描述从 `cec4ccf...` 首次升级，要求四条 PostgreSQL
+  migration 和 XXL V9 部署前不存在；上一企业包已经部署的现场会因此被错误阻断。
+
+### What
+
+- 企业 README、多后台手册和数据库文档统一增加两条明确路径：首次升级只允许新增固定四条 PostgreSQL
+  migration 与 XXL V9；已部署上一包的故障重部署要求这些版本全部成功且 checksum 不变，不得新增 history。
+
+### How
+
+- 对照 `ab6e46936..HEAD` 确认没有新增或修改 PostgreSQL/XXL migration；保留未知 checksum、部分历史、
+  失败记录、`repair`、`outOfOrder` 和手改历史表的停止发布门禁。
+
+### Result
+
+- 当前 manager 修复包的数据库验收不会误套首次升级条件；只调整稳定部署说明，不改 API、事件、SQL、
+  运行配置、generated SDK 或 OpenCode 上游源码。
