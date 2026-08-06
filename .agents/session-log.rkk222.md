@@ -6515,3 +6515,34 @@
 
 - 工作区 API 恢复返回 `/data/...` 物理绝对路径，小地球可继续将该参数交给同服务器外部页面。
 - 本次只修正现有 HTTP 响应值，不新增 API/事件/数据库变更，不涉及性能、安全、OpenCode 源码、generated SDK 或环境配置。
+
+## 2026-08-06 - 加固企业发布包 Flyway 门禁并重建交付物
+
+### Why
+
+- 当前交付分支新增了 Skill Hub 分类与公共快照持久化的三份 PostgreSQL migration，原企业打包和部署脚本
+  尚未锁定它们的 JAR 内资源路径与原始字节，存在误发、漏发或 migration 被后续改写时仍继续发布的风险。
+
+### What
+
+- 复用现有 release Flyway 校验链，在单包、双后端整包和正式部署入口锁定
+  `V20260806143000` / `V20260806190000` / `V20260806190500` 三份资源及 SHA-256，并同步脚本契约测试和部署文档。
+- 扩展现有 PostgreSQL Testcontainers 兼容性测试，明确覆盖企业 `cec4ccf` 已部署基线第一次启动停在
+  `20260804123000`，第二次启动升级至当前 HEAD 的完整路径。
+- 保持 Workflow 与 LobeHub 禁用；单机配置渲染器对三个可选 HMAC 变量采用“已有值原样保留，未配置则空值”，
+  避免禁用能力的 `REPLACE_` 模板占位符阻断配置重建和 `--validate-only`。
+
+### How
+
+- JDK 25 下 PostgreSQL 16 真实数据库兼容测试 8 项全部通过，包括已部署基线→当前 HEAD；MySQL XXL-Job
+  migration 测试 4 项全部通过；三组企业脚本契约测试、AI 文档校验、Shell 语法与 `git diff --check` 通过。
+- 在 macOS arm64 使用正式 `package-release.sh` 重建 backend、frontend 与 linux/amd64 Worker 镜像；首次 Worker
+  `go mod download` 因 `goproxy.cn` EOF 中止，保持同一输入重试后完整通过，未跳过官方 Codex 契约或 Flyway 校验。
+
+### Result
+
+- 当前企业包将 Worker 运行时作为 `included` 交付，Toolbox 继续 `reuse`，Workflow/LobeHub 不启用；打包与
+  部署前会逐份拒绝三份新 migration 的缺失或字节偏差。
+- 本次只修改企业打包/部署脚本、兼容性测试和稳定部署文档；不新增生产 API、事件、migration 或环境配置，
+  不修改 OpenCode 源码和 generated SDK。生产仍必须先导出 PostgreSQL/MySQL `flyway_schema_history`，未知版本、checksum 或
+  历史分叉必须停止发布，严禁 `repair` / `outOfOrder` / 手改历史表。

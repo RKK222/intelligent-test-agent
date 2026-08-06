@@ -47,6 +47,11 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
     private static final String DEPLOYED_ENTERPRISE_BASELINE_COMMIT =
             "0352efa987219b9dde5c09e77b1eabfa719fc068";
     private static final String DEPLOYED_ENTERPRISE_BASELINE_MAX_VERSION = "20260801104000";
+    private static final String DEPLOYED_CEC_BASELINE_MAX_VERSION = "20260804123000";
+    private static final String SUPPORT_ACCESS_VERSION = "20260805132000";
+    private static final String SKILL_HUB_CLASSIFICATION_VERSION = "20260806143000";
+    private static final String PUBLIC_SKILL_HUB_SNAPSHOT_VERSION = "20260806190000";
+    private static final String PUBLIC_SKILL_HUB_CLASSIFICATION_VERSION = "20260806190500";
 
     @Container
     private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
@@ -136,12 +141,7 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
     @Test
     void deployedEnterpriseCommitUsesForwardCompatibilityMigration() {
         DataSource dataSource = dataSource("deployed_enterprise_0352efa");
-        migrateTo(dataSource, "20260728210000", MAIN_LOCATION);
-        // 0352efa 的主 migration 最高为 V20260801104000，且不包含后来合入的 LobeHub 低版本 migration。
-        migrateWithoutResourceTo(
-                dataSource,
-                DEPLOYED_ENTERPRISE_BASELINE_MAX_VERSION,
-                LOBEHUB_MAIN_RESOURCE);
+        prepareDeployedEnterpriseBaseline(dataSource);
 
         assertThat(applied(
                 dataSource,
@@ -173,6 +173,32 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                     DatabaseMigrationCompatibilityCustomizer.RELEASE_ROLLOUT_MIGRATION_VERSION))
                     .isTrue();
             assertLobehubTablesAndParameters(dataSource, 3L);
+        });
+    }
+
+    @Test
+    void deployedCecBaselineMigratesToCurrentHeadInOrder() {
+        DataSource dataSource = dataSource("deployed_enterprise_cec4ccf");
+        prepareDeployedEnterpriseBaseline(dataSource);
+
+        // 先以真实兼容装配停在已部署 cec4ccf 的最高版本，再模拟新包的第二次启动升级。
+        runBootFlywayTo(dataSource, DEPLOYED_CEC_BASELINE_MAX_VERSION, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(applied(
+                    dataSource,
+                    DatabaseMigrationCompatibilityCustomizer.LOBEHUB_FORWARD_COMPATIBILITY_VERSION))
+                    .isTrue();
+            assertThat(applied(dataSource, DEPLOYED_CEC_BASELINE_MAX_VERSION)).isTrue();
+            assertThat(applied(dataSource, SUPPORT_ACCESS_VERSION)).isFalse();
+        });
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(applied(dataSource, SUPPORT_ACCESS_VERSION)).isTrue();
+            assertThat(applied(dataSource, SKILL_HUB_CLASSIFICATION_VERSION)).isTrue();
+            assertThat(applied(dataSource, PUBLIC_SKILL_HUB_SNAPSHOT_VERSION)).isTrue();
+            assertThat(applied(dataSource, PUBLIC_SKILL_HUB_CLASSIFICATION_VERSION)).isTrue();
+            assertCurrentReleaseTables(dataSource);
         });
     }
 
@@ -265,6 +291,16 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
         configuration.load().migrate();
     }
 
+    /** 构造已部署 0352efa 的字节级历史，供旧基线与当前现网基线升级用例共同复用。 */
+    private static void prepareDeployedEnterpriseBaseline(DataSource dataSource) {
+        migrateTo(dataSource, "20260728210000", MAIN_LOCATION);
+        // 0352efa 的主 migration 最高为 V20260801104000，且不包含后来合入的 LobeHub 低版本 migration。
+        migrateWithoutResourceTo(
+                dataSource,
+                DEPLOYED_ENTERPRISE_BASELINE_MAX_VERSION,
+                LOBEHUB_MAIN_RESOURCE);
+    }
+
     private static void runBootFlyway(
             DataSource dataSource,
             java.util.function.Consumer<Flyway> assertions) {
@@ -272,6 +308,19 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             assertThat(context).hasNotFailed().hasSingleBean(Flyway.class);
             assertions.accept(context.getBean(Flyway.class));
         });
+    }
+
+    /** 用生产相同的兼容装配升级到指定已部署版本，避免只测试空库直达当前 HEAD。 */
+    private static void runBootFlywayTo(
+            DataSource dataSource,
+            String target,
+            java.util.function.Consumer<Flyway> assertions) {
+        bootFlywayRunner(dataSource)
+                .withPropertyValues("spring.flyway.target=" + target)
+                .run(context -> {
+                    assertThat(context).hasNotFailed().hasSingleBean(Flyway.class);
+                    assertions.accept(context.getBean(Flyway.class));
+                });
     }
 
     private static ApplicationContextRunner bootFlywayRunner(DataSource dataSource) {
@@ -361,6 +410,40 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                 .single();
         assertThat(tableCount).isEqualTo(expectedTableCount);
         assertThat(parameterCount).isEqualTo(expectedTableCount == 0L ? 0L : 4L);
+    }
+
+    private static void assertCurrentReleaseTables(DataSource dataSource) {
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        Long tableCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.tables
+                        where table_schema = current_schema()
+                          and table_name in (
+                              'support_access_grants',
+                              'support_access_audit_events',
+                              'agent_skill_hub_builtin_revisions',
+                              'agent_skill_hub_builtin_state',
+                              'agent_skill_hub_builtin_classifications'
+                          )
+                        """)
+                .query(Long.class)
+                .single();
+        Long classificationColumnCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.columns
+                        where table_schema = current_schema()
+                          and table_name = 'agent_skill_hub_assets'
+                          and column_name in (
+                              'skill_category',
+                              'skill_subcategory',
+                              'classified_by_user_id',
+                              'classified_at'
+                          )
+                        """)
+                .query(Long.class)
+                .single();
+        assertThat(tableCount).isEqualTo(5L);
+        assertThat(classificationColumnCount).isEqualTo(4L);
     }
 
     private static boolean matches(LoadableResource resource, String expectedResource) {

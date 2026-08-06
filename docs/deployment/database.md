@@ -1222,7 +1222,8 @@ history，再验证默认 `outOfOrder=false` 升级为 `V20260802173416`，随�
 `20260802173416`、`20260803133000` 与 `20260804123000`，不应倒序补写 `20260730090000`，也不应包含
 仅用于另一套已知分叉的 `20260803141754`，部署前也不应已有 `20260805132000`。XXL MySQL 应为 V1-V8
 全部成功且没有 V9，个人工作区搬迁任务最终 Cron 已为 `0 0/30 * * * ? *`；第一台新版启动后 PostgreSQL
-只新增 `20260805132000`，XXL MySQL 只新增 V9 并注册每天北京时间 02:00 的闲置用户进程关闭任务。上述
+只允许依次新增 `20260805132000`、`20260806143000`、`20260806190000`、`20260806190500`，XXL MySQL 只新增
+V9 并注册每天北京时间 02:00 的闲置用户进程关闭任务。部署前四条 PostgreSQL 新版本均不应存在；上述
 `0352efa...` 测试继续作为历史兼容回归，不再代表
 本轮现场的直接部署基线。任何目标库与该路径不一致时都必须停止并按完整 history 制定显式兼容方案，不能用
 提交号替代现场核对。
@@ -1537,26 +1538,39 @@ Redis 使用 `test-agent:support-access:session:{sessionDigest}` 与 `test-agent
 
 ## V20260806143000 Skill Hub 事项分类
 
-`V20260806143000__classify_skill_hub_assets.sql` 是开发期候选 migration，在既有 `agent_skill_hub_assets` 逻辑资产上增加：
+`V20260806143000__classify_skill_hub_assets.sql` 已进入共享测试库，原始字节不得改写；其 SHA-256 固定为
+`f59f641527fdabaf21393319cd70ed578c6f75a55decae4d8839bc2b561ac06d`。该 migration 在既有
+`agent_skill_hub_assets` 逻辑资产上增加：
 
 - `skill_category`：非空一级事项分类，历史与新记录默认 `OTHER`，允许 `WORKER/TEST/CODE/OTHER`。
 - `skill_subcategory`：可空二级事项；`TEST` 只允许测试设计、测试数据构造、测试执行、测试分析四种枚举，`CODE` 只允许白盒分析，`WORKER/OTHER` 必须为空。
 - `classified_by_user_id/classified_at`：最近一次人工分类的超级管理员和时间；前者使用现有 `users` 外键，不保存用户名快照或认证 Token。
 - `(asset_type, skill_category, skill_subcategory)` 索引：服务 Skill 目录分页筛选；数据库约束同时保证 Agent 始终为 `OTHER/null`。
 
-默认值完成存量兼容回填，不写测试、演示或环境专属分类数据。后续 push 只更新最新修订指针，不修改分类；人工分类 SQL 位于 `AgentSkillHubMapper.xml`。正式合入交付分支前仍须对照全部目标环境的 `flyway_schema_history` 确认该候选版本高于部署基线且未与并行 migration 冲突，并按本文件规则用真实 PostgreSQL 覆盖每套已知历史的升级与最终 JAR 字节校验。
+默认值完成存量兼容回填，不写测试、演示或环境专属分类数据。后续 push 只更新最新修订指针，不修改分类；人工分类
+SQL 位于 `AgentSkillHubMapper.xml`。正式部署前仍须对照全部目标环境的 `flyway_schema_history` 确认版本高于部署
+基线且未与并行 migration 冲突，并按本文件规则用真实 PostgreSQL 覆盖每套已知历史的升级与最终 JAR 字节校验。
 
 ## V20260806190000 公共 Skill Hub 快照持久化
 
 `V20260806190000__persist_public_skill_hub_snapshots.sql` 在现有内容寻址制品表之上增加：
 
+该 migration 已进入共享测试库，原始字节不得改写；SHA-256 固定为
+`1b2547cf466c09fe11a63b1f76e5e17ec1773e2187aa01e052288a9bb4861e75`。
+
 - `agent_skill_hub_builtin_revisions`：按 `revision_id` 保存公共 Agent/Skill 在精确 Git commit 下的元数据和 artifact SHA-256；`(asset_id, source_commit_hash)` 唯一，旧修订不因目录前进而删除。
 - `agent_skill_hub_builtin_state`：以固定 `source_key=PUBLIC` 保存当前完成事务性对账的 commit 和时间。写入端先锁定状态并比较期望 commit，避免多服务器旧副本覆盖新目录。
 
-迁移只创建结构，不写环境公共内容。服务启动后由定时任务用 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT` 共享仓库现有 Git 身份 fetch 当前分支，并读取 `origin/{branch}` 的精确提交完成快照；任务不修改工作树，认证暂不可用时回退本地 HEAD。正文继续写入 `agent_skill_hub_artifacts`，相同内容按 SHA-256 去重。该迁移是开发期候选版本；合入交付分支前必须对照所有目标环境历史确认版本严格递增，并按本文件规则验证真实 PostgreSQL 基线升级和最终 JAR 内 migration SHA-256。
+迁移只创建结构，不写环境公共内容。服务启动后由定时任务用 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT` 共享仓库现有 Git 身份
+fetch 当前分支，并读取 `origin/{branch}` 的精确提交完成快照；任务不修改工作树，认证暂不可用时回退本地 HEAD。
+正文继续写入 `agent_skill_hub_artifacts`，相同内容按 SHA-256 去重。部署前必须对照所有目标环境历史确认版本严格递增，
+并按本文件规则验证真实 PostgreSQL 基线升级和最终 JAR 内 migration SHA-256。
 
 ## V20260806190500 公共 Git Skill 分类持久化
 
 `V20260806190500__classify_public_skill_hub_snapshots.sql` 新增 `agent_skill_hub_builtin_classifications`：以稳定 `asset_id` 保存公共 Git Skill 的一级/二级事项、最近分类超级管理员和时间。现有公共 Skill 回填 `OTHER/null`，以后首次发现的 Skill 由快照事务幂等补齐默认分类；分类不绑定具体 revision，因此共享仓库进入下一个 commit 后仍然保留。数据库约束与应用推送 Skill 相同，Agent 不写入本表。
 
-该迁移不修改已经执行的 `V20260806190000` 字节。正式合入交付分支前，仍须对照全部目标环境 `flyway_schema_history` 校验两个候选版本的严格递增关系、checksum 和并行 migration 冲突，并用每套已知真实 PostgreSQL 基线验证升级及最终 JAR 内 migration 字节。
+该 migration 已进入共享测试库，原始字节不得改写；SHA-256 固定为
+`19a0e5af5f361179ac3887d541c274f75f43f89a683ee8037a5e0391444a92bf`。它不修改已经执行的
+`V20260806190000` 字节。正式部署前仍须对照全部目标环境 `flyway_schema_history` 校验两个版本的严格递增关系、
+checksum 和并行 migration 冲突，并用每套已知真实 PostgreSQL 基线验证升级及最终 JAR 内 migration 字节。

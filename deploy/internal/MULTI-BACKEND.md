@@ -555,11 +555,19 @@ order by installed_rank;
 PostgreSQL 正常现网路径必须满足：所有记录 `success=true`；`20260802173416`、`20260803133000` 与
 `20260804123000` 已成功；`20260730090000` 未被倒序补写；`20260803141754` 仅允许出现在已经登记的
 “rollout 已执行、早期 LobeHub 补偿仍缺失”历史中，正常现网路径不应出现；部署前不得已有
-`20260805132000`。本轮第一台新 Java 只允许新增
-`V20260805132000__create_support_access_audit.sql`，其源码 SHA-256 固定为
-`54cea9a84948f8e4cee14d630772b8ee0668c2a7e5fc897ede5e792a15edd761`。虽然 LobeHub 服务和页面入口继续
-关闭，既有兼容 migration 创建的平台模型目录/聚合表和四个默认禁用参数仍必须保留，这是数据库兼容要求，
-不代表启用服务。
+`20260805132000`、`20260806143000`、`20260806190000` 或 `20260806190500`。本轮第一台新 Java 只允许按顺序新增：
+
+- `V20260805132000__create_support_access_audit.sql`，SHA-256
+  `54cea9a84948f8e4cee14d630772b8ee0668c2a7e5fc897ede5e792a15edd761`；
+- `V20260806143000__classify_skill_hub_assets.sql`，SHA-256
+  `f59f641527fdabaf21393319cd70ed578c6f75a55decae4d8839bc2b561ac06d`；
+- `V20260806190000__persist_public_skill_hub_snapshots.sql`，SHA-256
+  `1b2547cf466c09fe11a63b1f76e5e17ec1773e2187aa01e052288a9bb4861e75`；
+- `V20260806190500__classify_public_skill_hub_snapshots.sql`，SHA-256
+  `19a0e5af5f361179ac3887d541c274f75f43f89a683ee8037a5e0391444a92bf`。
+
+虽然 LobeHub 服务和页面入口继续关闭，既有兼容 migration 创建的平台模型目录/聚合表和四个默认禁用参数仍必须
+保留，这是数据库兼容要求，不代表启用服务。
 
 XXL MySQL 使用独立的 `flyway_schema_history`。部署前应为 V1-V8 全部成功、没有 V9，也没有失败、
 未知 checksum 或更高版本；第一台新 Java 启动后只允许新增
@@ -571,7 +579,8 @@ XXL MySQL 使用独立的 `flyway_schema_history`。部署前应为 V1-V8 全部
 `V20260728210000__index_in_flight_app_source_operations.sql` 也必须保留且为 `success=true`。任一失败记录、未知 checksum、
 未知更高版本、缺少上述已部署基线版本或其它历史分叉都必须停止发布；不得启用 Flyway `outOfOrder`、执行
 `repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常、PostgreSQL 既有 history/checksum
-未变化且只新增成功的 `20260805132000`、XXL MySQL V9 新增且为 `success=true`、搬迁任务仍为
+未变化且只新增成功的 `20260805132000`、`20260806143000`、`20260806190000`、`20260806190500`，XXL MySQL
+V9 新增且为 `success=true`、搬迁任务仍为
 `schedule_conf='0 0/30 * * * ? *'`，并确认闲置进程关闭任务为每日 02:00，再部署 `.114`。`.4` 日志出现
 `FlywayValidateException`、`ClassNotFoundException: org.postgresql.Driver` 或 `Application run failed` 时不得继续滚动。
 

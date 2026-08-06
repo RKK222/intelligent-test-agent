@@ -28,6 +28,9 @@ printf '%s\n' \
   'TEST_AGENT_API_TOKEN=' \
   'TEST_AGENT_OPENCODE_MANAGER_TOKEN=manager-secret-must-not-print' \
   'TEST_AGENT_INTERNAL_PROXY_API_KEY=proxy-secret-must-not-print' \
+  'TEST_AGENT_WORKFLOW_CAPABILITY_HMAC_SECRET=workflow-capability-secret-must-not-print' \
+  'TEST_AGENT_WORKFLOW_RUNNER_PLATFORM_HMAC_SECRET=runner-platform-secret-must-not-print' \
+  'TEST_AGENT_LOBEHUB_HMAC_SECRET=lobehub-secret-must-not-print' \
   'TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=xxl-mysql-secret-must-not-print' \
   'TEST_AGENT_XXL_JOB_ACCESS_TOKEN=xxl-access-secret-must-not-print' \
   >"${CONFIG_114}/backend.env"
@@ -42,6 +45,12 @@ bash "${CONFIGURE_SCRIPT}" backend \
   --backend-template "${ROOT_DIR}/deploy/internal/backend.env.example" \
   --docker-template "${ROOT_DIR}/deploy/internal/env.example" \
   >/dev/null
+grep -Fxq 'TEST_AGENT_WORKFLOW_CAPABILITY_HMAC_SECRET=workflow-capability-secret-must-not-print' \
+  "${CONFIG_114}/backend.env"
+grep -Fxq 'TEST_AGENT_WORKFLOW_RUNNER_PLATFORM_HMAC_SECRET=runner-platform-secret-must-not-print' \
+  "${CONFIG_114}/backend.env"
+grep -Fxq 'TEST_AGENT_LOBEHUB_HMAC_SECRET=lobehub-secret-must-not-print' \
+  "${CONFIG_114}/backend.env"
 # 当前双后台现场每台 worker 固定发布 1000 个同号端口；通用单后台模板仍保留较小默认值。
 sed -i.bak \
   -e 's/^OPENCODE_WORKER_PORT_START=.*/OPENCODE_WORKER_PORT_START=14096/' \
@@ -86,6 +95,12 @@ mkdir -p "${PERSISTENCE_JAR_ROOT}/db/migration"
 cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260728160800__create_toolbox_click_tracking.sql" \
   "${PERSISTENCE_JAR_ROOT}/db/migration/"
 cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260805132000__create_support_access_audit.sql" \
+  "${PERSISTENCE_JAR_ROOT}/db/migration/"
+cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260806143000__classify_skill_hub_assets.sql" \
+  "${PERSISTENCE_JAR_ROOT}/db/migration/"
+cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260806190000__persist_public_skill_hub_snapshots.sql" \
+  "${PERSISTENCE_JAR_ROOT}/db/migration/"
+cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/db/migration/V20260806190500__classify_public_skill_hub_snapshots.sql" \
   "${PERSISTENCE_JAR_ROOT}/db/migration/"
 (cd "${PERSISTENCE_JAR_ROOT}" && zip -qr \
   "${RELEASE_ROOT}/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar" .)
@@ -205,7 +220,7 @@ if bad_flyway_output="$(bash "${DEPLOY_SCRIPT}" backend \
   echo 'Validation unexpectedly accepted a persistence JAR with the wrong Flyway migration' >&2
   exit 1
 fi
-grep -Fq 'contains the wrong enterprise Flyway migration' <<<"${bad_flyway_output}"
+grep -Fq 'contains the wrong release Flyway migration' <<<"${bad_flyway_output}"
 
 # 未更新的 Manager/Codex/OpenCode runtime 由现场复用时，增量包不携带 programs 和 worker tar，
 # 但节点预校验仍必须接受清单明确声明的 reuse 模式。

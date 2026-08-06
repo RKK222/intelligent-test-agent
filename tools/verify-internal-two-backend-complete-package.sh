@@ -43,7 +43,10 @@ for migration_resource in \
   db/migration-compat/lobehub-missing/V20260802173416__backfill_lobehub_model_gateway.sql \
   db/migration/V20260803133000__support_public_agent_config_rollout_supersede.sql \
   db/migration-compat/lobehub-missing-after-rollout/V20260803141754__backfill_lobehub_model_gateway_after_rollout.sql \
-  db/migration/V20260805132000__create_support_access_audit.sql; do
+  db/migration/V20260805132000__create_support_access_audit.sql \
+  db/migration/V20260806143000__classify_skill_hub_assets.sql \
+  db/migration/V20260806190000__persist_public_skill_hub_snapshots.sql \
+  db/migration/V20260806190500__classify_public_skill_hub_snapshots.sql; do
   mkdir -p "${PERSISTENCE_JAR_ROOT}/$(dirname "${migration_resource}")"
   cp "${ROOT_DIR}/backend/test-agent-persistence/src/main/resources/${migration_resource}" \
     "${PERSISTENCE_JAR_ROOT}/${migration_resource}"
