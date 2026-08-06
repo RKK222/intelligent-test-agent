@@ -50,14 +50,15 @@
 - 根据后续反馈新增 1500×8230 Light 版长图，并再次从测试人员工作视角重构：产品名称统一为“MIMO 测试智能体工作台”，前半段直接展示测试设计、测试执行 2 类公共 Agent，测试分析、案例生成、案例审核、接口测试执行 4 个协作 subagent，JSP 调用分析、SLB 排查、案例增量生成、异步文件处理 4 个应用场景 Agent，以及 12 项已实现公共测试 Skill；后半段再说明场景共建、跨项目复用和 Agent/Skill/MCP/Tool/Docs 扩展路径。按用户批注明确不展示 SEAS 自动化未达标分析、DCM 问题提交、模拟问题排查和投产验证点检查。
 - 新增“星轨共生”视觉哲学说明和邮件成稿；邮件区分当前已具备能力与后续场景共建方向，并保留正式访问地址、手册链接和联系人占位符，避免编造发布信息。
 - Light 版视觉哲学由“开放蓝图”调整为“联动工场”，用“先运行、再生长”的信息顺序证明现有能力不是空壳；共建共享不再描述自建 Skill Hub，只保留“快速复用 SkillHub 既有 Skill”，并明确来源、版本和跨项目复用关系。
-- 根据用户补充的组织身份，将 Light 长图品牌位、结尾邀请语和页脚统一为“杭州产品部”发起；邮件保持约 717 字符，工具介绍和三项亮点均以测试人员实际工作为主语，邀请对象统一为“各产品部”。
+- 根据用户补充的组织身份，将 Light 长图品牌位、结尾邀请语和页脚统一为“杭州产品部”发起；邮件保持约 757 字符，工具介绍和三项亮点均以测试人员实际工作为主语，邀请对象统一为“各产品部”。
+- 根据用户对标题可理解性的反馈，将 01—06 及收尾标题全部改为“能力 + 直接收益”的直述表达：明确公共/应用 Agent 可直接使用、测试设计到执行全流程闭环、多任务与 subagent 协作、后台持续和结果追溯、应用场景联合共建、共建成果跨项目共享，以及 Agent/Skill/MCP/Tool/Docs 按需扩展；同步重写邮件三项核心亮点，删除“托住任务”“把一条任务做到底”等概念化口号。
 - 找到并保留此前的 `docs/assets/marketing/ice-blue/00-capabilities-long-demo.gif`（720×2842、约 3.6 MB）及源录屏 `source-workbench-no-pet.gif`；本轮不改写已有动图。
 
 ### How
 
 - 对照当前用户手册目录映射中的 `implementation: implemented` 标记、功能总览和前端工程说明核对公共 Agent/subagent/Skill 的真实数量与职责；使用 Canvas Design 的“联动工场”视觉体系完成排版，并逐段放大检查公共能力、测试任务链、共建复用和扩展区域。
 - 通过无头 Chrome 渲染最终 PNG，使用 `file`、`sips` 和 FFmpeg 解码核对尺寸、格式与可读性；最终 PNG 约 6.8 MB，与既有动态演示合计约 10.4 MB，低于 50 MB 邮件素材预算。
-- Light 版最终文件为 1500×8230、约 5.85 MiB；FFmpeg 完整解码通过，应用 Agent 区原尺寸裁切与全图目检通过，无头浏览器逐元素边界检查未发现文字或内容越界。
+- Light 版最终文件为 1500×8230、约 5.95 MiB；FFmpeg 完整解码通过，标题区、能力区、共建共享扩展区和收尾区原尺寸裁切目检通过，无头浏览器检查页面横向宽度与画布一致，未发现文字横向越界。
 
 ### Result
 
@@ -6387,106 +6388,3 @@
 ### Result
 
 - 新建应用弹框已稳定显示在页面正中；未修改 API、事件、数据库、性能、安全、兼容性、依赖或环境配置。
-## 2026-08-06 - Skill Hub 按具体事项分类并开放超级管理员治理
-
-### Why
-
-- Skill Hub 原目录只有 Agent/Skill 资产类型，无法按日常工作、测试和代码分析等实际事项检索；用户新推送的
-  Skill 也缺少统一待分类入口，需要由超级管理员在平台页面集中治理。
-
-### What
-
-- 复用既有 Hub 逻辑资产增加 `WORKER/TEST/CODE/OTHER` 一级分类；测试细分测试设计、测试数据构造、测试执行、
-  测试分析，代码固定白盒分析，Worker 与 Other 当前无二级事项。历史、新 push 和平台内置 Skill 默认
-  `OTHER/null`，后续 push 只更新不可变修订，不覆盖人工分类。
-- 新增 Skill 分类分页筛选和 `PUT /assets/{assetId}/classification`；HTTP 边界只允许 `SUPER_ADMIN`，拒绝
-  应用管理员、Agent、内置 Skill 和非法枚举组合。前端 Skill 页增加两级筛选、卡片标签和超级管理员详情编辑器，
-  旧后端缺字段时兼容显示为“其他”。
-- `V20260806143000__classify_skill_hub_assets.sql` 增加分类、最近分类管理员/时间、组合约束和筛选索引；分类 SQL
-  位于 MyBatis XML。同步 Hub 各模块 README、HTTP API、模块图、数据库、安全及前端包说明。
-
-### How
-
-- 后端应用服务、Controller、MyBatis/H2 集成定向测试共 15 项通过，Flyway migration 命名/顺序 8 项通过；
-  JDK 25 下 21 模块 `mvn clean package -Dmaven.test.skip=true` 成功。
-- 前端 Hub 与 backend-api 定向 112 项通过，agent-web/backend-api typecheck 和 agent-web production build 通过；
-  一次误触发全量前端测试为 1819 passed / 1 skipped / 1 failed，唯一失败仍是既有 `AppSourceDialog` 保留时长
-  aria-label 断言，与本次文件无重叠。
-- 使用未修改的主工作区 `.env.test` 从独立 worktree 启动。首次 workflow 锁定依赖准备因 pythonhost 网络超时失败，
-  随后使用项目官方 `--without-workflow` 开关完成 backend、opencode-manager、frontend 重启；清理原工作区占用
-  8080 的旧 backend 后，确认监听 JAR 来自本 worktree，health/readiness 为 `UP`、前端 3000 与登录 CORS 正常；
-  最终运行 JAR 内 migration 字节 SHA-256 与源码一致。
-
-### Result
-
-- 真实 PostgreSQL 从 `20260805132000` 成功升级到 `20260806143000`，migration 源码 SHA-256 为
-  `f59f641527fdabaf21393319cd70ed578c6f75a55decae4d8839bc2b561ac06d`；manager 日志未发现目标解码或重连错误。
-- 本次变更涉及向后兼容 HTTP 响应扩展、受控分类写接口、Flyway/MyBatis SQL、超级管理员权限和分类索引；不涉及
-  RunEvent、OpenCode 源码、generated SDK、环境配置或跨服务器文件路由。Workflow/LobeHub 未启动；正式交付前
-  仍须按数据库规范核对全部目标环境 migration 历史和并行候选版本，禁止改写已在共享/稳定环境执行的 migration。
-
-## 2026-08-06 - 定时持久化公共 Skill Hub 并移除查询链路 Git 扫描
-
-### Why
-
-- 公共 Agent/Skill 原先在每次 Hub 列表、详情和正文请求中重新扫描 Git，页面并发加载目录时出现秒级延迟；公共
-  内容又可能由用户在其它本地 clone 直接 push，仅依赖平台页面操作触发索引会漏记。
-- 应用推送内容已经写入 Hub 资产、修订和压缩制品表，但公共 Git Skill 仍是虚拟只读项，不能沿用超级管理员分类。
-
-### What
-
-- 新增 30 秒公共快照定时对账：使用共享仓库现有 Git 身份 fetch 当前分支，只刷新 `origin` 引用而不修改运行
-  工作树；按远端精确 commit 扫描完整 Agent/Skill，元数据和当前提交写表，正文复用内容寻址 GZIP artifact。
-  远端认证暂不可用时回退本地 HEAD；多 Java 通过事务锁和 commit compare-and-set 防止旧副本回退目录。
-- Hub 列表、详情和正文全部改为数据库读取，保留历史公共 revision；公共 Skill 首次入库默认 `OTHER`，独立分类表
-  以稳定 assetId 跨 commit 保留超级管理员分类，公共 Agent 仍不可分类。
-- 新增 `V20260806190000__persist_public_skill_hub_snapshots.sql` 和
-  `V20260806190500__classify_public_skill_hub_snapshots.sql`，同步 domain/repository、MyBatis XML、HTTP/数据库/模块
-  文档及前端公共 Skill 分类入口。两份 migration 已在本机共享测试库执行，后续禁止改写原始字节。
-
-### How
-
-- 后端分类、定时远端 push 发现、无查询 Git、旧副本隔离和公共分类跨 commit 回归通过；完整相关 Maven 测试为
-  common 96、domain 93、observability 6、scheduler 8、workspace 396、persistence 260（18 项按环境跳过），全部
-  0 失败。前端 Hub 12 项通过，agent-web 类型检查与开发构建通过。
-- 使用未修改的主工作区 `.env.test`、JDK 25 和官方 `--without-workflow` 开关，从独立 worktree 重新打包并启动
-  backend、opencode-manager、frontend；health/readiness 为 `UP`，前端 3000 返回 200，实际 Java 运行本 worktree
-  的不可变 JAR。真实 PostgreSQL 16 从 `20260806190000` 升到 `20260806190500` 成功。
-- 最终 JAR 内两份 migration 与源码 SHA-256 一致：`190000` 为
-  `1b2547cf466c09fe11a63b1f76e5e17ec1773e2187aa01e052288a9bb4861e75`，`190500` 为
-  `19a0e5af5f361179ac3887d541c274f75f43f89a683ee8037a5e0391444a92bf`。
-
-### Result
-
-- 本机数据库当前公共目录为 6 个 Agent、12 个 Skill，18 条公共 revision，12 条公共 Skill 分类均为默认
-  `OTHER`；数据库 current commit、本地 HEAD 与 `origin/master` 都是
-  `8b81dc4d9e343e9d6a999cff816d8c3dbfedf923`。
-- Hub 热查询实测由原逐请求 Git 扫描的秒级下降到约 5–21ms；首次并发冷查询约 79–117ms。此次涉及数据库、HTTP
-  分类行为和性能，不改 RunEvent、OpenCode 源码、generated SDK、环境配置或跨服务器文件路由。正式交付前仍须
-  对照全部目标环境 Flyway 历史与并行候选版本，验证每套已知 PostgreSQL 基线升级。
-
-## 2026-08-06 - 降低公共 Skill Hub Git 对账频率
-
-### Why
-
-- 实际公共仓库 `git fetch` 通常耗时 2.2～4.4 秒，偶发达到 6.7～13.6 秒；每 30 秒执行会产生不必要的网络、
-  SSH 和日志开销。公共快照查询已经完全走数据库，外部本地 push 允许接受更长的兜底发现时间。
-
-### What
-
-- 复用 `AgentSkillHubApplicationService.reconcilePublicBuiltinSnapshots()` 既有 fixed-delay 调度，只把默认间隔从
-  `PT30S` 调整为 `PT10M`，启动后首次 2 秒对账和可覆盖配置键保持不变。
-- 新增反射测试锁定默认调度表达式，并同步 workspace-management README 与 HTTP API 稳定文档。
-
-### How
-
-- Hub 后端定向测试 21 项通过，前端 Hub/backend-api 113 项通过；JDK 25 下 `test-agent-app -am package
-  -DskipTests` 和 agent-web production build 均成功，`git diff --check` 通过。
-- 核对 `git cherry` 与祖先关系，确认 taxonomy 两个功能提交尚未进入 `codex/release-enterprise-20260801`；当前
-  8080/3000 运行实例仍来自本功能 worktree，但运行 JAR 早于本次间隔修改，未为避免误切 release 而重启。
-
-### Result
-
-- 新构建默认在每轮对账结束后等待 10 分钟再执行下一轮，不会发生同一调度方法重叠。
-- 页面“刷新目录”只重新查询数据库，不会手工执行公共 Git 对账；系统管理公共仓库更新会触发 rollout，但当前也
-  没有直接调用 Hub 对账。外部 clone push 的最坏发现时间仍接近 10 分钟，合并后如需即时对账应另设显式入口。
