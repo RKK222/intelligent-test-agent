@@ -6830,6 +6830,7 @@
 - 当前固定 OpenCode 1.18.4 下，单靠 `enabled_providers` 或本地 JSONC `release_date` 不能可靠指定 DeepSeek 优先；
   本次按用户要求只完成相关代码回退，不新增替代排序策略。
 - 未新增或变更 HTTP 路径、RunEvent、数据库/Flyway、后端路由、安全、环境变量、generated SDK 或 OpenCode 源码。
+- 并行的 slash/compact 修复提交先吸收了本节记录；对应回退实现与文档继续由独立后续提交承载，避免混入其它任务代码。
 
 ## 2026-08-06 - 修复 models 候选点击与 compact 长请求
 

@@ -560,49 +560,45 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const agentConfigFileConnections = new Map<string, Promise<WorkspaceFileSocketClient>>();
   let agentSkillHubFileSocket: WorkspaceFileSocketClient | null = null;
   let agentSkillHubFileConnection: Promise<WorkspaceFileSocketClient> | null = null;
-  const runtimeProviderOrderRequests = new Map<string, Promise<Map<string, number> | undefined>>();
+  const runtimeProviderAllowlistRequests = new Map<string, Promise<Set<string> | undefined>>();
 
   /**
    * 模型和 Provider 目录并发加载时复用同一轮 config 请求；请求结束即清理，配置热加载后可及时生效。
-   * config 暂时不可用时保持原生目录兼容，不能让辅助过滤和排序阻断整个模型选择器。
+   * config 暂时不可用时保持原生目录兼容，不能让辅助过滤阻断整个模型选择器。
    */
-  function runtimeProviderOrder(workspaceId?: string): Promise<Map<string, number> | undefined> {
+  function runtimeProviderAllowlist(workspaceId?: string): Promise<Set<string> | undefined> {
     const routeLinuxServerId = options.routeLinuxServerId?.()?.trim() ?? "";
     const key = `${routeLinuxServerId}\u0000${workspaceId ?? ""}`;
-    const existing = runtimeProviderOrderRequests.get(key);
+    const existing = runtimeProviderAllowlistRequests.get(key);
     if (existing) return existing;
 
     const pending = routedRequest<unknown>(`${opencodeRuntimeBase}/config${query({ workspaceId })}`).then(
-      providerOrderFromConfig,
+      providerAllowlistFromConfig,
       () => undefined
     );
-    runtimeProviderOrderRequests.set(key, pending);
+    runtimeProviderAllowlistRequests.set(key, pending);
     void pending.then(() => {
-      if (runtimeProviderOrderRequests.get(key) === pending) {
-        runtimeProviderOrderRequests.delete(key);
+      if (runtimeProviderAllowlistRequests.get(key) === pending) {
+        runtimeProviderAllowlistRequests.delete(key);
       }
     });
     return pending;
   }
 
   async function runtimeCatalogList(path: string, workspaceId?: string): Promise<Record<string, unknown>[]> {
-    const [value, providerOrder] = await Promise.all([
+    const [value, allowlist] = await Promise.all([
       routedRequest<unknown>(path),
-      runtimeProviderOrder(workspaceId)
+      runtimeProviderAllowlist(workspaceId)
     ]);
-    // OpenCode V2 的 Provider 目录包在 `{ all: [...] }` 中；统一解包后再按平台白名单过滤和稳定排序。
+    // OpenCode V2 的 Provider 目录包在 `{ all: [...] }` 中；统一解包后只应用平台白名单，保留原生顺序。
     const payload = record(value)?.data ?? value;
     const all = record(payload)?.all;
     const items = listFromRuntimeEnvelope(Array.isArray(all) ? all : payload);
-    if (!providerOrder) return items;
-    return items
-      .flatMap((item, index) => {
-        const providerId = runtimeCatalogProviderId(item);
-        const order = providerId === undefined ? undefined : providerOrder.get(providerId);
-        return order === undefined ? [] : [{ item, index, order }];
-      })
-      .sort((left, right) => left.order - right.order || left.index - right.index)
-      .map(({ item }) => item);
+    if (!allowlist) return items;
+    return items.filter((item) => {
+      const providerId = runtimeCatalogProviderId(item);
+      return providerId !== undefined && allowlist.has(providerId);
+    });
   }
 
   async function workspaceFileRpc<T>(
@@ -3085,8 +3081,7 @@ async function runtimeList(path: string, request: RequestFn, init?: ExtraRequest
   return listFromRuntimeEnvelope(await request<unknown>(path, init));
 }
 
-/** 把 Provider 白名单的首次出现位置转换为展示顺序，重复项不改变已有优先级。 */
-function providerOrderFromConfig(value: unknown): Map<string, number> | undefined {
+function providerAllowlistFromConfig(value: unknown): Set<string> | undefined {
   const config = record(value);
   const raw = config?.enabled_providers ?? config?.enabledProviders;
   if (!Array.isArray(raw)) return undefined;
@@ -3094,12 +3089,7 @@ function providerOrderFromConfig(value: unknown): Map<string, number> | undefine
     .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim())
     .filter(Boolean);
-  if (providerIds.length === 0) return undefined;
-  const order = new Map<string, number>();
-  for (const providerId of providerIds) {
-    if (!order.has(providerId)) order.set(providerId, order.size);
-  }
-  return order;
+  return providerIds.length > 0 ? new Set(providerIds) : undefined;
 }
 
 function runtimeCatalogProviderId(value: Record<string, unknown>): string | undefined {

@@ -44,6 +44,7 @@
 - `includeUsage=false` 仍须保留。1.18.4 对 openai-compatible provider 仍会在未显式关闭时设置 `includeUsage=true`，企业内部不支持该字段的接口会受影响。
 - `FilePartInput.source` 在 1.18.4 中仍为可选，但一旦提供，`FileSource` 必须完整包含 `text/type/path` 且不能混入平台字段。平台路径型原生附件因此只发送已校验的 `file://`、mime 和 filename，不发送 source；只有内联正文生成完整 FileSource。非原生工作区附件的 `contextType/deliveryMode` 仅用于平台分流和历史展示，转换为 OpenCode text part 时移除。
 - 1.18.4 的 `GET /session/status` 返回当前 busy/retry session map；session 进入 idle 时上游发布 idle 事件并从 map 删除该 key。平台的交互回复终态补偿据此只把“root key 不存在”视为 idle，空值、非对象、请求异常或 root key 仍存在均失败关闭，不能仅凭某条 assistant `finish=stop` 判定整轮结束。
+- 1.18.4 的旧 Provider 配置 schema 虽接受模型 `release_date`，旧 `/provider` 也会回显该值，但 v1→v2 配置迁移和 `ConfigV2.Model` 不传递发布时间；平台实际使用的 `/api/model` 对这类本地配置模型返回 `time.released=0`。企业前端只能保持该接口的原生目录顺序，不能把 `enabled_providers` 数组或 JSONC `release_date` 解释为展示排序配置。
 - 本次不修改平台 HTTP API、RunEvent SSE wire shape、数据库结构、Flyway、鉴权和密钥配置。
 
 ## 交付、升级与回滚

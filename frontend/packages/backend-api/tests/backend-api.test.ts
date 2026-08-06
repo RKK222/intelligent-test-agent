@@ -155,17 +155,17 @@ describe("backend-api", () => {
     }
   });
 
-  it("filters and orders OpenCode 1.18.4 catalogs using the configured provider list", async () => {
+  it("filters OpenCode 1.18.4 catalogs without reordering their native results", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
       const url = String(input);
       const data = url.endsWith("/config")
-        ? { enabled_providers: ["enterprise-deepseek", "enterprise-qwen"] }
+        ? { enabled_providers: ["enterprise-qwen", "enterprise-deepseek"] }
         : url.endsWith("/models")
           ? {
               data: [
+                { id: "DeepSeek-V4-Flash-W8A8", providerID: "enterprise-deepseek", name: "DeepSeek V4 Flash W8A8" },
                 { id: "ring-2.6-1t-free", providerID: "opencode", name: "Ring 2.6 1T Free" },
-                { id: "Qwen3.6-27B", providerID: "enterprise-qwen", name: "Qwen3.6 27B" },
-                { id: "DeepSeek-V4-Flash-W8A8", providerID: "enterprise-deepseek", name: "DeepSeek V4 Flash W8A8" }
+                { id: "Qwen3.6-27B", providerID: "enterprise-qwen", name: "Qwen3.6 27B" }
               ],
               location: { directory: "/data/testagent/data/agent-opencode/workspace" }
             }
@@ -188,8 +188,8 @@ describe("backend-api", () => {
       expect.objectContaining({ id: "Qwen3.6-27B", providerId: "enterprise-qwen" })
     ]);
     expect(providers).toEqual([
-      expect.objectContaining({ providerId: "enterprise-deepseek", name: "企业 DeepSeek" }),
-      expect.objectContaining({ providerId: "enterprise-qwen", name: "企业通义" })
+      expect.objectContaining({ providerId: "enterprise-qwen", name: "企业通义" }),
+      expect.objectContaining({ providerId: "enterprise-deepseek", name: "企业 DeepSeek" })
     ]);
     expect(fetcher.mock.calls.filter((call) => String(call[0]).endsWith("/config"))).toHaveLength(1);
   });
