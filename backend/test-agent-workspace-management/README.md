@@ -13,7 +13,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 
 公共 Agent/Skill 的 `update`、`update-and-push`、`publish` 在任何远端 push 或共享运行副本切换前，先通过 `PublicAgentConfigRolloutCoordinator` 建立 `PREPARING` 持久化禁发任务；远端提交确认后才转为 `DRAINING` 并广播 `rolloutId`。push 回包不确定时会 fetch 验证远端是否已包含目标提交；发起 Java 退出时，同服务器补偿任务按远端事实恢复 PREPARING。每台服务器通过数据库租约认领同步任务，复用发起用户已加密保存的 SSH key 刷新 origin、fetch、checkout/reset 到明确 commit，再登记本机 manager 进程并确认同步，因此广播丢失、Java 重启、同服务器多 Java 或瞬时 Git 失败都不会提前解除门禁。发布请求在远端提交确认、rollout 激活并广播后立即返回，不在 HTTP 请求线程认领或执行本机同步；本机和其它服务器均由广播消费者或 5 秒持久化补偿程序异步推进。公共个人 worktree 仍是管理员编辑事实源，共享仓库只作为各服务器运行时副本；显式“拉取”会先同步当前管理员的稳定个人 worktree，成功后才在 PREPARING 闸门内推进共享副本。公共发布不会再推送长期个人分支的整段历史，而是把合并后的最终文件树投影为以当前远端提交为唯一父节点、由当前管理员企业身份签署的线性提交，成功后再把个人分支和共享副本重置到该提交，避免旧的无效 committer 污染新发布。
 
-- 工作区注册、查询和分页。
+- 工作区注册、查询和分页；用户范围列表/详情在完成对象级归属过滤后，仍统一把 `personalworktree:`、`appworkspace:` 等托管逻辑路径解析为当前服务器 `/data/...` 物理绝对路径后响应，避免调用方把数据库逻辑值当作可写目录。
 - 应用引用资产库管理：只处理当前应用关联的 `APPLICATION_ASSET_REPOSITORY`，首次初始化固定远端 HEAD，后续同分支同步或管理员受控切换分支都以 generation 固定目标提交；按在线及历史 Linux 服务器创建副本目标。generation 建档后立即提交本机有界异步 worker，并通过 `reference-repository.sync-requested` 唤醒其它 Java；广播消费者只排队、不在 Redis listener 线程执行 Git，任务继续由数据库租约/CAS fencing、本机文件锁和 60 秒补偿扫描保护。瞬时失败按数据库退避时间定向重试，调度器拒绝或进程退出仍由补偿扫描恢复。离线副本进入 `DEFERRED` 并在恢复后补齐；新目录在同根临时目录校验后原子移动，已有目录必须干净且同源，同分支仅允许快进；实际分支与固定 HEAD 已一致时跳过 fetch/reset，跨分支则显式抓取目标 refspec，从固定提交创建不存在的本地分支，已有目标本地分支仍拒绝分叉。主动指针核验只读本地实际 branch、HEAD、origin 和工作树状态，实际快照与目标指针分别返回。目录树仅开放总体与当前服务器副本均 `READY` 的单层安全读取，并只把根层命中 `REFERENCES_SDD_FOLDER_NAMES` 的目录标记为可选。
 - 引用资产库列表和状态另返回可空的 `repositoryPath`：业务层只用当前平台 `OPENCODE_REFERENCES_DIR` 与可信英文名派生规范化绝对路径；参数缺失或历史非法名称不阻断仓库列表，也不把物理路径写入错误或日志。
 - 应用源码快照编排：仅处理当前启用应用关联的 `APPLICATION_CODE_REPOSITORY`。所有目录、分支、树、物化、同 generation 重试、打开和最近选择入口都会实时复核有效成员与仓库关联；个人快照固定当前用户 READY OpenCode 进程所在服务器，团队快照冻结受理时在线后端服务器集合。物化先在事务外把分支解析为固定 commit 并校验 FILE/DIRECTORY/`.` 选择，再在事务内锁仓库；同一 `operationId` 的重放在仓库锁内先于 slot 的 expected/pending generation 校验，严格绑定首请求 app、repository、actor、类型、requestHash 和 source generation，并从已登记 SERVER steps/replicas 返回首请求冻结服务器，不能被第二次在线集合改变。全新请求的目标服务器 cleanup task 必须是第一条持久化写，随后才建立 pending generation、operation、replica 和每服务器固定 13 步时间线。提交后由本机有界 dispatcher 与低敏广播唤醒各服务器，dispatcher 启动时及默认每 5 秒既扫描本机可领取副本，也恢复满足 operation 自身终态门禁的 stranded 记录，因此队列拒绝、广播丢失、Java 重启或终态事务响应丢失不会永久挂起。数据库租约、generation fencing 和同根文件锁保证每服务器单执行；步骤写入先锁定并核对活租约，新 lease attempt 会重置整条稳定时间线，旧 owner 发现失租后立即停止，不能写后续步骤或副本结果。worker 使用当前操作人的同一临时 SSH 凭据完成浅克隆、冻结提交显式 fetch、checkout 与提交校验，再执行本地 `sparse-checkout --no-cone`，不递归子模块。配置根以下的物化、索引、打开和清理路径逐段执行 `NOFOLLOW_LINKS` 校验并在创建后复核，拒绝祖先/目标符号链接；删除 `.git` 后原子写入索引并替换目录。磁盘发布与数据库 READY 写回在同一文件锁回调内完成；数据库 completion 失败会恢复旧目录，completion 成功后即为不可逆发布点，backup 删除只作 best-effort，失败遗留由 cleanup 回收且不得回滚新目录。
@@ -61,7 +61,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 
 ## 测试覆盖
 
-- `WorkspaceApplicationServiceTest` 覆盖工作区创建、服务器归属、分页/详情查询、未找到错误和文件服务编排。
+- `WorkspaceApplicationServiceTest` 覆盖工作区创建、服务器归属、分页/详情查询、未找到错误和文件服务编排；`UserWorkspaceQueryServiceTest` 覆盖对象级过滤后的个人 worktree 列表/详情仍返回解析后的物理绝对路径。
 - `WorkspaceFileServiceTest` 覆盖 UTF-8 读写、跨多字节字符边界的完整渐进预览、预览期间文件变化栅栏、分片上传超过一次性读取阈值、上传分片顺序/声明大小/取消与临时文件清理、旧 Base64 上传兼容、普通文件与非空目录整体移动、同路径幂等、根/后代/符号链接/特殊文件/越界拒绝、校验后工作区根祖先或目标父目录替换失败关闭、目标并发创建不覆盖、普通文件和目录同目录重命名、普通文件/目录树删除、工作区根与 `.git` 删除拒绝、目录列表排序与上限、相对路径/空关键字文件搜索、一次性读取阈值和 null 内容写入。
 - `WorkspaceDirectoryServiceTest` 覆盖服务器工作空间选择器的默认目录、只返回子目录、排序、父目录、条目上限和缺失目录错误码。
 - `GitPublishWorkflowTest` 覆盖直接发布、worktree 合并发布、冲突文件收集、merge abort、abort 失败保护，以及同步文件时先 clean/pull 再复制提交推送。

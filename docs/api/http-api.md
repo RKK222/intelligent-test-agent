@@ -1123,8 +1123,8 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| `GET` | `/api/internal/platform/workspace-management/workspaces` | 分页列出工作区。 |
-| `GET` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}` | 查询工作区详情。 |
+| `GET` | `/api/internal/platform/workspace-management/workspaces` | 分页列出当前用户拥有或由其历史会话归因的工作区。 |
+| `GET` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}` | 查询当前用户可访问的工作区详情。 |
 | `POST` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/file-ws-route` | 查询当前工作区文件 WebSocket 应连接的目标后端。 |
 | `GET` | `/api/internal/platform/workspace-management/backend-servers` | 查询可用于服务器工作空间选择器的后端服务器。 |
 | `POST` | `/api/internal/platform/workspace-management/file-ws/tickets` | 在目标后端创建文件 WebSocket 一次性 ticket。 |
@@ -1138,6 +1138,8 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 普通前端不再通过 HTTP 传入物理目录注册 Workspace。应用版本工作区和个人工作区由后端根据应用、模板、版本、个人工作区等 id 读取通用参数并派生物理目录；仅超级管理员服务器工作空间选择器可通过目标后端文件 WebSocket ticket 在目标服务器上创建运行态 Workspace。
 
 `WorkspaceResponse`：
+
+列表和详情响应的 `rootPath` 始终是服务端解析后的物理绝对路径；数据库中的 `personalworktree:`、`appworkspace:`、`appsource:` 逻辑值不得直接返回给前端。历史绝对路径保持兼容。普通文件操作仍只使用 `workspaceId` 走文件 WebSocket，`rootPath` 仅供需要与同服务器受控外部页面交接目录的兼容场景使用。
 
 ```json
 {

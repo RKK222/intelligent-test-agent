@@ -6388,3 +6388,27 @@
 ### Result
 
 - 新建应用弹框已稳定显示在页面正中；未修改 API、事件、数据库、性能、安全、兼容性、依赖或环境配置。
+
+## 2026-08-06 - 恢复工作区 API 的 /data 物理路径
+
+### Why
+
+- 工作区列表和详情切换到用户范围查询服务后，直接返回数据库中的 `personalworktree:` 逻辑路径；小地球
+  外部页面仍把 `rootPath` 当作可访问目录传递，因此不再能定位到原来的 `/data/...` 个人 worktree。
+
+### What
+
+- `UserWorkspaceQueryService` 在完成用户归属过滤后，复用 `ManagedWorkspacePathResolver` 解析列表和详情中的托管逻辑路径；
+  历史绝对路径保持原有兼容行为。
+- 新增个人 worktree 列表/详情回归测试，并同步 workspace-management README 和 HTTP API 文档的 `rootPath` 响应语义。
+
+### How
+
+- JDK 25 下定向 Maven 测试通过，前端小地球相关 Vitest 通过，21 模块后端 `clean package` 成功，`git diff --check` 通过。
+- 默认重启受缺失 workflow 密码和另一 worktree 占用 8080 影响；未停止对方进程，改用 18081 隔离启动本次构建，
+  Spring 上下文启动成功且 `/actuator/health` 返回 `UP`。
+
+### Result
+
+- 工作区 API 恢复返回 `/data/...` 物理绝对路径，小地球可继续将该参数交给同服务器外部页面。
+- 本次只修正现有 HTTP 响应值，不新增 API/事件/数据库变更，不涉及性能、安全、OpenCode 源码、generated SDK 或环境配置。
