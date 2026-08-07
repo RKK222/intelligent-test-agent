@@ -3651,6 +3651,87 @@ test("runtime-state uses the SSE snapshot without a parallel HTTP read", async (
   expect(runtimeStateHttpRequests).toEqual([]);
 });
 
+test("runtime-state reconciles a run completed while the page was disconnected and re-enables follow-up", async ({ page }) => {
+  let releaseCompletedRuntimeSnapshot!: () => void;
+  const completedRuntimeSnapshotGate = new Promise<void>((resolve) => {
+    releaseCompletedRuntimeSnapshot = resolve;
+  });
+  const runRequests: Array<Record<string, unknown>> = [];
+  const runDetailRequests: string[] = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    runRequests,
+    runDetailRequests,
+    runDetailFailuresBeforeSuccess: { run_1: 1 },
+    runEvents: [],
+    runtimeStateEventGate: completedRuntimeSnapshotGate,
+    runtimeStateSummary: {
+      runningCount: 0,
+      questionCount: 0,
+      sessions: [],
+      generatedAt: "2026-07-10T00:00:00Z"
+    },
+    runsByRunId: {
+      run_1: {
+        runId: "run_1",
+        sessionId: "ses_1",
+        workspaceId: "wrk_1234567890abcdef",
+        status: "SUCCEEDED",
+        createdAt: "2026-06-19T00:00:00Z",
+        updatedAt: "2026-06-19T01:00:00Z"
+      }
+    }
+  });
+
+  await gotoWorkbench(page);
+  const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
+  await composer.fill("隔夜执行任务");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect.poll(() => runRequests.length).toBe(1);
+  await expect(page.getByRole("button", { name: "停止执行" })).toBeEnabled();
+  releaseCompletedRuntimeSnapshot();
+  await expect.poll(() => runDetailRequests.filter((runId) => runId === "run_1").length).toBe(2);
+  await composer.fill("白天继续追问");
+  await expect(page.getByRole("button", { name: "发送" })).toBeEnabled();
+});
+
+test("runtime-state does not reconcile a newer run from an older snapshot", async ({ page }) => {
+  let releaseOlderRuntimeSnapshot!: () => void;
+  const olderRuntimeSnapshotGate = new Promise<void>((resolve) => {
+    releaseOlderRuntimeSnapshot = resolve;
+  });
+  const runRequests: Array<Record<string, unknown>> = [];
+  const runDetailRequests: string[] = [];
+  const runtimeStateEventRequests: string[] = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    runRequests,
+    runDetailRequests,
+    runtimeStateEventRequests,
+    runEvents: [],
+    runtimeStateEventGate: olderRuntimeSnapshotGate,
+    runtimeStateSummary: {
+      runningCount: 0,
+      questionCount: 0,
+      sessions: [],
+      generatedAt: "2026-06-18T23:59:59Z"
+    }
+  });
+
+  await gotoWorkbench(page);
+  const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
+  await composer.fill("刚启动的新任务");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect.poll(() => runRequests.length).toBe(1);
+  await expect(page.getByRole("button", { name: "停止执行" })).toBeEnabled();
+  releaseOlderRuntimeSnapshot();
+  await expect.poll(() => runtimeStateEventRequests.length).toBeGreaterThanOrEqual(2);
+  expect(runDetailRequests).toEqual([]);
+  await expect(page.getByRole("button", { name: "停止执行" })).toBeEnabled();
+});
+
 test("run snapshot reset replaces stale live output with the materialized snapshot", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, {
@@ -7590,6 +7671,8 @@ async function mockBackendApi(
     runFeedbackQueryRequests?: Array<Record<string, unknown>>;
     historyRun?: Record<string, unknown>;
     runsByRunId?: Record<string, Record<string, unknown>>;
+    runDetailRequests?: string[];
+    runDetailFailuresBeforeSuccess?: Record<string, number>;
     historyDiffFiles?: Array<Record<string, unknown>>;
     historyRunGate?: Promise<void>;
     historyRunRequests?: string[];
@@ -8943,6 +9026,13 @@ async function mockBackendApi(
     const runDetailMatch = url.pathname.match(/^\/api\/internal\/agent\/opencode\/runs\/([^/]+)$/);
     if (method === "GET" && runDetailMatch) {
       const runId = decodeURIComponent(runDetailMatch[1] ?? "");
+      capture.runDetailRequests?.push(runId);
+      const remainingFailures = capture.runDetailFailuresBeforeSuccess?.[runId] ?? 0;
+      if (remainingFailures > 0) {
+        capture.runDetailFailuresBeforeSuccess![runId] = remainingFailures - 1;
+        await route.fulfill({ status: 503, ...jsonFailure("RUN_DETAIL_UNAVAILABLE", "Run 详情暂不可用") });
+        return;
+      }
       const detail = capture.runsByRunId?.[runId];
       if (detail) {
         await route.fulfill(json(detail));

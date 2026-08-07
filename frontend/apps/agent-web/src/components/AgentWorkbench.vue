@@ -564,6 +564,7 @@ const historyLoadingSessionId = ref<string | null>(null);
 const historySwitchingSessionId = ref<string | null>(null);
 let historySwitchSeq = 0;
 let activeRunProbeSeq = 0;
+const runtimeStateRunReconciliations = new Set<string>();
 const followUpQueue = ref<FollowUpDraft[]>([]);
 const retryDeadlines = ref<RetryDeadlineMap>({});
 const retryActionInFlightKey = ref<string | null>(null);
@@ -1396,7 +1397,10 @@ watch(
         activeRunProbeSeq += 1;
         sessionRuntimeState.value = summary;
         queryClient.setQueryData(sessionRuntimeStateQueryKey, summary);
-        adoptRuntimeStateForCurrentSession(summary, "runtime-state-event");
+        const adopted = adoptRuntimeStateForCurrentSession(summary, "runtime-state-event");
+        if (!adopted) {
+          void reconcileCurrentRunAfterRuntimeState(summary);
+        }
       },
       onStatus: (status) => {
         logs.value = [...logs.value.slice(-200), `[runtime-state] ${status}`];
@@ -1449,6 +1453,96 @@ function adoptRuntimeStateForCurrentSession(summary: SessionRuntimeStateSummary 
     logs.value = [...logs.value.slice(-200), `[run] recovered ${active.runId} ${active.runStatus} via ${reason}`];
   }
   return true;
+}
+
+/**
+ * 页面休眠或断网期间可能错过单 Run 的终态事件；用户级运行态快照已不再包含当前 busy Run 时，
+ * 读取该 Run 的权威详情并复用既有终态投影，避免隔夜返回后仍被旧 RUNNING 状态锁住发送按钮。
+ */
+async function reconcileCurrentRunAfterRuntimeState(summary: SessionRuntimeStateSummary): Promise<void> {
+  const currentSession = session.value;
+  const currentRun = run.value;
+  if (
+    !currentSession
+    || !currentRun
+    || currentRun.sessionId !== currentSession.sessionId
+    || !isRunBusyStatus(currentRun.status)
+    || startRunMutation.isPending.value
+    || autoRetryStarting.value
+    || ignoredRunIds.value.has(currentRun.runId)
+    || runtimeStateRunReconciliations.has(currentRun.runId)
+    || summary.sessions.some((item) => item.sessionId === currentSession.sessionId && isRunBusyStatus(item.runStatus))
+  ) {
+    return;
+  }
+  const snapshotAt = Date.parse(summary.generatedAt);
+  const runUpdatedAt = Date.parse(currentRun.updatedAt);
+  if (Number.isFinite(snapshotAt) && Number.isFinite(runUpdatedAt) && snapshotAt < runUpdatedAt) {
+    // 旧快照可能与新 Run 启动响应交错到达，不能用较早的用户级快照结束较新的 Run。
+    return;
+  }
+
+  runtimeStateRunReconciliations.add(currentRun.runId);
+  try {
+    let detail: Run | null = null;
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 3 && !detail; attempt += 1) {
+      if (attempt > 0) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+      }
+      if (session.value?.sessionId !== currentSession.sessionId || run.value?.runId !== currentRun.runId) {
+        return;
+      }
+      try {
+        detail = await api.getRun(currentRun.runId);
+      } catch (error) {
+        // runtime-state 未变化时服务端只发送 heartbeat；这里做有限重试，避免一次瞬时 HTTP 失败永久保留发送锁。
+        lastError = error;
+      }
+    }
+    if (!detail) {
+      throw lastError;
+    }
+    if (
+      session.value?.sessionId !== currentSession.sessionId
+      || run.value?.runId !== currentRun.runId
+      || isRunBusyStatus(detail.status)
+      || sessionRuntimeState.value?.sessions.some(
+        (item) => item.sessionId === currentSession.sessionId && isRunBusyStatus(item.runStatus)
+      )
+    ) {
+      return;
+    }
+    const eventType = detail.status === "SUCCEEDED"
+      ? "run.succeeded"
+      : detail.status === "FAILED"
+        ? "run.failed"
+        : detail.status === "CANCELLED"
+          ? "run.cancelled"
+          : null;
+    if (!eventType) {
+      return;
+    }
+    const terminalEvent: RunEvent = {
+      eventId: `local-runtime-state-reconcile-${detail.runId}-${detail.updatedAt}`,
+      runId: detail.runId,
+      seq: Date.now(),
+      type: eventType,
+      traceId: "trace_runtime_state_reconcile",
+      occurredAt: detail.updatedAt,
+      payload: { status: detail.status, recoveredFrom: "runtime-state" }
+    };
+    // 隔夜恢复只校准页面状态，不补发桌面完成通知；其余计时、反馈和目录刷新仍复用统一终态链路。
+    handleRunEvent(terminalEvent, currentSession.sessionId, false);
+    if (run.value?.runId === detail.runId) {
+      run.value = detail;
+    }
+    logs.value = [...logs.value.slice(-200), `[run] reconciled ${detail.runId} ${detail.status} via runtime-state`];
+  } catch (error) {
+    console.warn("校准已结束 Run 状态失败", error);
+  } finally {
+    runtimeStateRunReconciliations.delete(currentRun.runId);
+  }
 }
 
 function fallbackActiveRunOnce(reason: string) {
@@ -8051,7 +8145,7 @@ function handleRetryRun() {
   retryLastRun("manual");
 }
 
-function handleRunEvent(event: RunEvent, subscribedSessionId?: string) {
+function handleRunEvent(event: RunEvent, subscribedSessionId?: string, allowNotification = true) {
   const projectedEvent = projectRootInteractionSession(event, subscribedSessionId);
   logs.value = [...logs.value.slice(-200), `[${projectedEvent.seq}] ${projectedEvent.type}`];
   if (isInteractionAskSupersededBySnapshot(projectedEvent)) {
@@ -8073,7 +8167,7 @@ function handleRunEvent(event: RunEvent, subscribedSessionId?: string) {
     }
     return;
   }
-  applyRunEventWorkbenchProjection(projectedEvent, true, subscribedSessionId);
+  applyRunEventWorkbenchProjection(projectedEvent, allowNotification, subscribedSessionId);
 }
 
 function isInteractionAskSupersededBySnapshot(event: RunEvent): boolean {

@@ -6953,3 +6953,29 @@
 - 已关闭打开文件产生的 Monaco model 保留链，并把会话历史请求窗口和页面原始输出会话缓存统一限制为 20。
 - 未新增或变更 HTTP API、RunEvent、数据库/Flyway、后端、环境配置、generated SDK 或 OpenCode 上游源码；并行的
   runtime-state 终态校准、3001 Playwright 配置等工作区改动未纳入本次实现或提交。
+
+## 2026-08-07 - 修复隔夜任务结束后无法继续追问
+
+### Why
+
+- 页面休眠或断网期间可能错过单 Run 的终态事件；用户级 runtime-state 摘要虽已移除结束的 Run，工作台仍保留
+  本地 `RUNNING` 状态，导致白天返回时持续显示停止按钮并锁住发送。
+
+### What
+
+- runtime-state 新快照不再包含当前 busy Run 时，按精确 `runId` 有限重试读取权威 Run 详情，并复用既有
+  `run.succeeded/run.failed/run.cancelled` 终态投影解除发送锁；并发查询按 Run 去重，切换 Session/Run 后丢弃迟到结果。
+- 以 `generatedAt >= run.updatedAt` 作为校准前提，较旧快照不能误结束刚启动的新 Run；隔夜校准不补发桌面通知。
+- 新增真实 Chromium 回归，覆盖详情首次 503 后恢复继续追问、旧快照保持新 Run 运行中，并保留既有 runtime-state
+  接管和 outage fallback 用例。
+
+### How
+
+- `agent-web` typecheck 和 production build 通过；当前工作区 3001 Vite 服务返回 200。
+- Playwright runtime-state 相关 7 条用例全部通过；3000 被另一并行工作树占用，验证使用临时 3001 配置，配置已删除。
+
+### Result
+
+- 夜间任务在页面外结束后，白天收到最新运行态即可自动收敛真实终态并继续追问；瞬时详情查询失败不会永久锁住。
+- 仅修改前端状态恢复、测试和稳定 README；未变更 HTTP/RunEvent 契约、数据库、后端、安全、环境配置、
+  generated SDK 或 OpenCode 上游源码。
