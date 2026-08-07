@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcome;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcomeGroup;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecord;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordQuery;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordRepository;
@@ -72,7 +73,7 @@ class InternalModelObservabilityRepositoryIntegrationTest {
         callRepository.record(record(PROVIDER, "deepseek-v4", "/chat/completions", "UPSTREAM_HTTP_ERROR", 500, 800L, "UpstreamException", T0.plusSeconds(60)));
 
         var page = callRepository.query(new InternalModelCallRecordQuery(
-                PROVIDER, null, null, T0.minus(1, ChronoUnit.HOURS), T0.plus(1, ChronoUnit.HOURS), new PageRequest(1, 20)));
+                PROVIDER, List.of(), null, T0.minus(1, ChronoUnit.HOURS), T0.plus(1, ChronoUnit.HOURS), new PageRequest(1, 20)));
         assertThat(page.total()).isEqualTo(2);
         assertThat(page.items()).extracting(InternalModelCallRecord::outcome)
                 .containsExactly(InternalModelCallOutcome.UPSTREAM_HTTP_ERROR, InternalModelCallOutcome.SUCCESS);
@@ -113,22 +114,33 @@ class InternalModelObservabilityRepositoryIntegrationTest {
     void filtersByOutcomeAndSource() {
         callRepository.record(record(PROVIDER, "deepseek-v4", "/chat/completions", "SUCCESS", 200, 100L, null, T0));
         callRepository.record(record(PROVIDER, "deepseek-v4", "/responses", "PROVIDER_UNAVAILABLE", null, 10L, "RegistryException", T0.plusSeconds(5)));
+        callRepository.record(record(PROVIDER, "deepseek-v4", "/chat/completions", "UPSTREAM_HTTP_ERROR", 503, 80L, "UpstreamException", T0.plusSeconds(6)));
+        callRepository.record(record(PROVIDER, "deepseek-v4", "/chat/completions", "UPSTREAM_CONNECT_FAILED", null, 60L, "ConnectException", T0.plusSeconds(7)));
         callRepository.record(record(PROVIDER, "deepseek-v4", "/chat/completions", "SUCCESS", 200, 200L, null,
                 T0.plusSeconds(10), InternalModelCallSource.PROBE, null));
 
         var failures = callRepository.query(new InternalModelCallRecordQuery(
-                null, InternalModelCallOutcome.PROVIDER_UNAVAILABLE, null, null, null, new PageRequest(1, 20)));
+                null, List.of(InternalModelCallOutcome.PROVIDER_UNAVAILABLE), null, null, null, new PageRequest(1, 20)));
         assertThat(failures.total()).isEqualTo(1);
         assertThat(failures.items().getFirst().endpoint()).isEqualTo("/responses");
         assertThat(failures.items().getFirst().httpStatus()).isNull();
 
+        var upstreamFailures = callRepository.query(new InternalModelCallRecordQuery(
+                null, InternalModelCallOutcomeGroup.UPSTREAM_FAILURE.outcomes(), null,
+                null, null, new PageRequest(1, 20)));
+        assertThat(upstreamFailures.total()).isEqualTo(2);
+        assertThat(upstreamFailures.items()).extracting(InternalModelCallRecord::outcome)
+                .containsExactlyInAnyOrder(
+                        InternalModelCallOutcome.UPSTREAM_HTTP_ERROR,
+                        InternalModelCallOutcome.UPSTREAM_CONNECT_FAILED);
+
         var probeOnly = callRepository.query(new InternalModelCallRecordQuery(
-                null, null, InternalModelCallSource.PROBE, null, null, new PageRequest(1, 20)));
+                null, List.of(), InternalModelCallSource.PROBE, null, null, new PageRequest(1, 20)));
         assertThat(probeOnly.total()).isEqualTo(1);
 
         assertThat(callRepository.queryHourlyStats(
                 PROVIDER, InternalModelCallSource.USER_CALL,
-                T0.minus(1, ChronoUnit.HOURS), T0.plus(2, ChronoUnit.HOURS))).hasSize(2);
+                T0.minus(1, ChronoUnit.HOURS), T0.plus(2, ChronoUnit.HOURS))).hasSize(4);
         var probeStats = callRepository.queryHourlyStats(
                 PROVIDER, InternalModelCallSource.PROBE,
                 T0.minus(1, ChronoUnit.HOURS), T0.plus(2, ChronoUnit.HOURS));

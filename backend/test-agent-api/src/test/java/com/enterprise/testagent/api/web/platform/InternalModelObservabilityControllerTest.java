@@ -14,6 +14,7 @@ import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcome;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcomeGroup;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecord;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallSource;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelProbeStatus;
@@ -40,12 +41,14 @@ class InternalModelObservabilityControllerTest {
                 500, "WebClientResponseException", true, 800L, 50L, 75L, 700L,
                 TRACE_ID, "ucid", NOW);
         when(queryService.queryCallRecords(
-                        eq("enterprise-deepseek"), any(), any(), any(), any(), any(PageRequest.class)))
+                        eq("enterprise-deepseek"), any(), eq(InternalModelCallOutcomeGroup.UPSTREAM_FAILURE),
+                        any(), any(), any(), any(PageRequest.class)))
                 .thenReturn(new PageResponse<>(List.of(record), 1, 20, 1));
         WebTestClient client = client(queryService, List.of(Dictionary.ROLE_SUPER_ADMIN));
 
         client.get()
-                .uri("/api/internal/platform/opencode-runtime/internal-model-observability/call-records?providerId=enterprise-deepseek")
+                .uri("/api/internal/platform/opencode-runtime/internal-model-observability/call-records"
+                        + "?providerId=enterprise-deepseek&outcomeGroup=UPSTREAM_FAILURE")
                 .header("X-Trace-Id", TRACE_ID)
                 .exchange()
                 .expectStatus().isOk()
@@ -54,10 +57,12 @@ class InternalModelObservabilityControllerTest {
                 .jsonPath("$.data.items[0].outcome").isEqualTo("UPSTREAM_HTTP_ERROR")
                 .jsonPath("$.data.items[0].httpStatus").isEqualTo(500)
                 .jsonPath("$.data.items[0].streamCompleteMillis").isEqualTo(700)
-                .jsonPath("$.data.items[0].source").isEqualTo("USER_CALL");
+                .jsonPath("$.data.items[0].source").isEqualTo("USER_CALL")
+                .jsonPath("$.data.items[0].ucid").isEqualTo("ucid");
 
         verify(queryService).queryCallRecords(
-                eq("enterprise-deepseek"), any(), any(), any(), any(), any(PageRequest.class));
+                eq("enterprise-deepseek"), any(), eq(InternalModelCallOutcomeGroup.UPSTREAM_FAILURE),
+                any(), any(), any(), any(PageRequest.class));
     }
 
     @Test

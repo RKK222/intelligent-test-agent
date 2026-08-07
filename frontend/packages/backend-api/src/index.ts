@@ -84,6 +84,7 @@ import type {
   GeneralParameterUpdatePayload,
   GitRepositoryAccess,
   InternalModelCallOutcome,
+  InternalModelCallOutcomeGroup,
   InternalModelCallSource,
   InternalModelCallRecord,
   InternalModelCallHourlyStat,
@@ -2194,6 +2195,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     listInternalModelCallRecords: (params: {
       providerId?: string | null;
       outcome?: InternalModelCallOutcome | null;
+      outcomeGroup?: InternalModelCallOutcomeGroup | null;
       source?: InternalModelCallSource | null;
       from?: string | null;
       to?: string | null;
@@ -2203,6 +2205,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       `${internalModelObservabilityBase}/call-records${query({
         providerId: params.providerId,
         outcome: params.outcome,
+        outcomeGroup: params.outcomeGroup,
         source: params.source,
         from: params.from,
         to: params.to,

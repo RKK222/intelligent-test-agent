@@ -42,13 +42,13 @@ public class MyBatisInternalModelCallRecordRepository implements InternalModelCa
 
     @Override
     public PageResponse<InternalModelCallRecord> query(InternalModelCallRecordQuery query) {
-        String outcome = query.outcome() == null ? null : query.outcome().name();
+        List<String> outcomes = query.outcomes().stream().map(Enum::name).toList();
         String source = query.source() == null ? null : query.source().name();
         List<InternalModelCallRecordRow> rows = mapper.findCallRecords(
-                query.providerId(), outcome, source, query.from(), query.to(),
+                query.providerId(), outcomes, source, query.from(), query.to(),
                 query.page().size(), query.page().offset());
         long total = mapper.countCallRecords(
-                query.providerId(), outcome, source, query.from(), query.to());
+                query.providerId(), outcomes, source, query.from(), query.to());
         return new PageResponse<>(
                 rows.stream().map(this::toDomain).toList(),
                 query.page().page(),

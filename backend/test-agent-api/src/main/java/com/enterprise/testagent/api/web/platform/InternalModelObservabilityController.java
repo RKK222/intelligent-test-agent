@@ -9,6 +9,7 @@ import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcome;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcomeGroup;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallSource;
 import com.enterprise.testagent.opencode.runtime.internalmodel.observability.InternalModelObservabilityQueryService;
 import com.enterprise.testagent.opencode.runtime.internalmodel.observability.InternalModelProviderProbeService;
@@ -47,6 +48,7 @@ public class InternalModelObservabilityController {
     public Mono<ApiResponse<Object>> callRecords(
             @RequestParam(required = false) String providerId,
             @RequestParam(required = false) InternalModelCallOutcome outcome,
+            @RequestParam(required = false) InternalModelCallOutcomeGroup outcomeGroup,
             @RequestParam(required = false) InternalModelCallSource source,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
@@ -58,7 +60,7 @@ public class InternalModelObservabilityController {
         return Mono.fromCallable(() -> {
             PageResponse<com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecord> result =
                     queryService.queryCallRecords(
-                            providerId, outcome, source, from, to, new PageRequest(page, size));
+                            providerId, outcome, outcomeGroup, source, from, to, new PageRequest(page, size));
             return ApiResponse.ok((Object) result, traceId);
         }).subscribeOn(Schedulers.boundedElastic());
     }

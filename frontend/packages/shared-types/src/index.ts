@@ -1817,6 +1817,14 @@ export type InternalModelCallOutcome =
   | "CLIENT_DISCONNECTED"
   | "UNKNOWN_ERROR";
 
+/** 面向看板的结果大类；底层 outcome 仍保留具体排障原因。 */
+export type InternalModelCallOutcomeGroup =
+  | "SUCCESS"
+  | "REQUEST_OR_CONFIGURATION"
+  | "UPSTREAM_FAILURE"
+  | "CALLER_INTERRUPTED"
+  | "OTHER";
+
 /** 调用来源：真实用户调用或探活。 */
 export type InternalModelCallSource = "USER_CALL" | "PROBE";
 
@@ -1849,7 +1857,7 @@ export type InternalModelCallHourlyStat = {
   model: string;
   endpoint: string;
   source: string;
-  outcome: string;
+  outcome: InternalModelCallOutcome;
   requestCount: number;
   durationMillisSum: number;
   durationMillisMax: number;

@@ -229,13 +229,13 @@ RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线�
   nonce 占用、单用户 grant 轮换和撤销；Redis value 不保存原始 ticket/grant。
 - `InternalModelProviderModelMapper.xml` 覆盖保存公开模型并级联清理旧探测，按能力保存最近探测结果。
 - `ModelGatewayUsageDailyMapper.xml` 使用 PostgreSQL/H2 兼容 upsert 原子累加每日聚合，不先读后写。
-- `InternalModelObservabilityMapper.xml` 维护内部模型调用可观测：明细 insert 与小时聚合 upsert 同一事务，探活状态 upsert 由 SQL 依据本次结果原子递增/归零连续失败计数；`V20260807130134__create_internal_model_observability.sql` 创建明细/小时聚合/探活状态三张表，后续 migration 分别增加首 token 与 `[DONE]` 流完成明细及各自小时 sum/max/count。`duration_ms` 保留端到端口径，`stream_complete_ms` 单独表达上游完整流耗时；所有表只存结构化字段，不保存请求/响应正文或 Token。
+- `InternalModelObservabilityMapper.xml` 维护内部模型调用可观测：明细 insert 与小时聚合 upsert 同一事务，明细查询通过 MyBatis XML 的低基数 `outcome IN (...)` 支持看板结果大类筛选，探活状态 upsert 由 SQL 依据本次结果原子递增/归零连续失败计数；`V20260807130134__create_internal_model_observability.sql` 创建明细/小时聚合/探活状态三张表，后续 migration 分别增加首 Token 延迟（TTFT）与 `[DONE]` 流完成明细及各自小时 sum/max/count。`duration_ms` 保留端到端口径，`stream_complete_ms` 单独表达上游完整流耗时；所有表只存结构化字段，不保存请求/响应正文或 Token。
 - `V20260730090000__add_lobehub_model_gateway.sql` 只创建上述平台表和四个生产必需公共参数；不触碰独立
   LobeHub ParadeDB，也不写测试/演示数据。
 - 已知历史若存在 `V20260801093854`、但缺少 `V20260730090000`，app 兼容装配会隐藏无法再顺序执行的
   旧候选文件。早期补偿 `V20260802173416` 已执行时只加载其原始资源；尚未补偿且 release
   `V20260803133000` 已执行时只加载更高的 `V20260803141754`；否则继续使用早期补偿。三份 migration 都由
   SHA-256 测试锁定；不启用 `outOfOrder`、不执行 `repair`、不修改 `flyway_schema_history`。
-- H2 集成测试覆盖完整 Flyway 和 mapper；PostgreSQL Testcontainers 测试覆盖模型网关并发累加，以及内部模型可观测从首 token 已部署基线升级到流完成 migration、PostgreSQL `ON CONFLICT` 聚合。无 Docker时显式 skip，正式发布仍需在真实目标基线上运行。
+- H2 集成测试覆盖完整 Flyway 和 mapper；PostgreSQL Testcontainers 测试覆盖模型网关并发累加，以及内部模型可观测从首 Token 延迟（TTFT）已部署基线升级到流完成 migration、PostgreSQL `ON CONFLICT` 聚合。无 Docker时显式 skip，正式发布仍需在真实目标基线上运行。
 - Redis Testcontainers 使用真实 Redis 5.0.14 让 8 个线程并发消费同一 ticket，锁定 Lua 只成功一次、nonce
   防重放、grant 轮换/撤销、TTL 上限和 `test-agent:lobehub-sso:*` 前缀隔离。

@@ -156,7 +156,12 @@
     <sql id="CallRecordWhere">
         where 1 = 1
         <if test="providerId != null">and provider_id = #{providerId}</if>
-        <if test="outcome != null">and outcome = #{outcome}</if>
+        <if test="outcomes != null and !outcomes.isEmpty()">
+            and outcome in
+            <foreach collection="outcomes" item="outcome" open="(" separator="," close=")">
+                #{outcome}
+            </foreach>
+        </if>
         <if test="source != null">and source = #{source}</if>
         <if test="from != null">and started_at &gt;= #{from}</if>
         <if test="to != null">and started_at &lt; #{to}</if>

@@ -29,6 +29,7 @@
 - `routing.RoutingDecision`、`routing.RoutingReason`、`routing.ExecutionNodeRouter`、`routing.RoutingDecisionRepository`：路由决策值对象、纯路由策略和持久化端口。
 - `user.User`、`user.UserId`、`user.UserRepository`、`user.UserDeletionRepository`：用户聚合、常规持久化端口和安全删除端口；外部身份资料刷新保持用户业务 ID 与既有关系不变，删除端口负责锁定目标并区分可清理账号附属数据与受保护业务引用。
 - `opencodeprocess.*`：Linux 服务器、后端 Java 进程、opencode 容器、容器管理进程、管理进程连接、用户专属 opencode server 进程、查询筛选和用户绑定模型；`OpencodeProcessManagementRepository` 作为持久化端口。
+- `internalmodelobservability.*`：内部模型调用精确结果、五类看板结果、结构化明细、小时聚合、探活状态及查询端口；结果大类只负责筛选和展示，精确原因继续保留供排障。
 - `configuration.*`：应用定义、应用成员、代码库配置、应用仓库关联、应用工作空间模板、个人 SSH key、通用参数、显式 JVM 内存参数 SPI/状态和设置页工作空间创建进度；`CommonParameterMemoryEntry` 约束实现先完整查库校验再原子替换，未注册参数仍按需直读数据库；`ConfigurationManagementRepository`、`CommonParameterRepository`、`WorkspaceCreateOperationRepository` 作为持久化端口。
 - `appsource.*`：应用源码仓库槽位、固定内容 snapshot、服务器 replica、全局/服务器 operation step、cleanup task 和 recent selection 模型；领域规则约束 generation fencing、从 `acceptedAt` 推导的 1–168 整小时保留期、状态转换与租约所有权，`AppSourceRepository` 额外定义活租约步骤更新/attempt 重置、共享槽位锁、保留期/cleanup 同步更新和 stranded operation 有界扫描，`AppSourceRepositoryHistory` 定义历史守卫。
 - `scheduler.*`：旧定时任务定义、用户级计划、运行记录、触发来源和状态枚举的历史兼容模型；生产只继续使用任务 handler 所需值对象和 `ScheduledTaskRunRetentionRepository` 清理端口，不再执行 `USER_PLAN`。

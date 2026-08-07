@@ -55,6 +55,8 @@ class UserOpencodeBackendRoutingService {
     private static final String PROCESS_STATUS_PATH = "/api/internal/agent/opencode/processes/me";
     private static final String PROCESS_INITIALIZE_PATH = PROCESS_STATUS_PATH + "/initialize";
     private static final String PLATFORM_RUNTIME_PREFIX = "/api/internal/platform/opencode-runtime";
+    private static final String INTERNAL_MODEL_OBSERVABILITY_PREFIX =
+            PLATFORM_RUNTIME_PREFIX + "/internal-model-observability";
     private static final String CONFIGURATION_WORKSPACE_PREFIX =
             "/api/internal/platform/configuration-management/applications/";
     private static final String WORKSPACE_MANAGEMENT_PREFIX =
@@ -444,6 +446,11 @@ class UserOpencodeBackendRoutingService {
 
     private boolean isPlatformRuntimePath(String path, HttpMethod method) {
         if (!path.startsWith(PLATFORM_RUNTIME_PREFIX)) {
+            return false;
+        }
+        // 可观测看板读取共享统计记录，不属于某个用户的 OpenCode 进程，不能跟随用户 binding 转发。
+        if (path.equals(INTERNAL_MODEL_OBSERVABILITY_PREFIX)
+                || path.startsWith(INTERNAL_MODEL_OBSERVABILITY_PREFIX + "/")) {
             return false;
         }
         String suffix = path.substring(PLATFORM_RUNTIME_PREFIX.length());

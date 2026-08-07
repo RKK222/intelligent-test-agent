@@ -26,12 +26,14 @@ const record: InternalModelCallRecord = {
   model: "mock-model",
   endpoint: "/chat/completions",
   source: "USER_CALL",
-  outcome: "SUCCESS",
+  outcome: "UPSTREAM_HTTP_ERROR",
+  httpStatus: 502,
   streaming: true,
   durationMillis: 900,
   firstTokenMillis: 200,
   streamCompleteMillis: 800,
   traceId: "trace_metric_help",
+  ucid: "user-10086",
   startedAt: "2026-08-07T09:10:00Z"
 };
 
@@ -112,30 +114,37 @@ describe("InternalModelObservabilityPanel", () => {
     vi.restoreAllMocks();
   });
 
-  it("explains every displayed metric in plain language and includes both hourly buckets in QPS", async () => {
+  it("uses standard metric names, plain-language help, grouped outcomes, and the user id", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-07T10:30:00Z"));
     const view = renderPanel();
 
     await view.findByText("总览");
-    expect(view.getByText(/默认查看最近 24 小时的用户调用/)).toBeTruthy();
-    expect(await view.findByText("0.05")).toBeTruthy();
+    expect(view.getByText(/当前小时和之前 23 个小时段/)).toBeTruthy();
+    expect(await view.findByText("0.0043")).toBeTruthy();
+    expect(await view.findByText("user-10086")).toBeTruthy();
+    expect(view.getAllByText("上游服务异常").length).toBeGreaterThan(0);
+    expect(view.getByText("上游 HTTP 错误")).toBeTruthy();
 
     const explainedLabels = [
-      "总请求", "供应商", "成功率", "失败率", "失败数", "平均耗时", "最大耗时", "总耗时", "QPS",
-      "平均首 token", "最大首 token", "平均流完成", "最大流完成", "小时趋势", "成功率构成", "失败分类",
-      "按供应商请求量", "端到端耗时", "首 token", "流完成", "失败", "请求数", "耗时合计"
+      "请求数", "有调用供应商数", "请求成功率", "请求错误率", "错误请求数",
+      "平均端到端请求延迟", "最大端到端请求延迟", "累计请求时长", "平均请求速率（RPS）",
+      "平均首 Token 延迟（TTFT）", "最大首 Token 延迟（TTFT）",
+      "平均流式响应完成时间", "最大流式响应完成时间",
+      "请求量与请求成功率趋势", "请求结果分布", "异常结果分布", "供应商请求量",
+      "端到端请求延迟", "首 Token 延迟（TTFT）", "流式响应完成时间", "累计请求时长"
     ];
     for (const label of explainedLabels) {
       expect(view.getAllByRole("button", { name: `查看${label}说明` }).length).toBeGreaterThan(0);
     }
 
     await waitFor(() => {
-      const descriptions = [...view.container.querySelectorAll<HTMLElement>("[data-description]")]
-        .map((item) => item.dataset.description ?? "");
+      const tooltips = [...view.container.querySelectorAll<HTMLElement>("[data-description]")]
+        .filter((item) => item.querySelector(".ta-metric-help-button"));
+      const descriptions = tooltips.map((item) => item.dataset.description ?? "");
       expect(descriptions.length).toBeGreaterThanOrEqual(explainedLabels.length);
-      expect([...view.container.querySelectorAll<HTMLElement>("[data-description]")]
-        .every((item) => item.dataset.trigger === "hover,focus")).toBe(true);
+      expect(tooltips.every((item) => item.dataset.trigger === "hover,focus")).toBe(true);
       expect(descriptions.join(" ")).not.toMatch(/SSE|\[DONE]|SQL|chunk|sum|count/i);
-      expect(descriptions.some((description) => description.includes("没有返回回答的调用不参与"))).toBe(true);
+      expect(descriptions.some((description) => description.includes("没有返回实际回答的调用不参与"))).toBe(true);
       expect(descriptions.some((description) => description.includes("不是瞬时峰值"))).toBe(true);
     });
     view.queryClient.clear();

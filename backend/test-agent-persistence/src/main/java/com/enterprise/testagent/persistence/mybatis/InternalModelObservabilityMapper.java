@@ -25,7 +25,7 @@ public interface InternalModelObservabilityMapper {
 
     List<InternalModelCallRecordRow> findCallRecords(
             @Param("providerId") String providerId,
-            @Param("outcome") String outcome,
+            @Param("outcomes") List<String> outcomes,
             @Param("source") String source,
             @Param("from") Instant from,
             @Param("to") Instant to,
@@ -34,7 +34,7 @@ public interface InternalModelObservabilityMapper {
 
     long countCallRecords(
             @Param("providerId") String providerId,
-            @Param("outcome") String outcome,
+            @Param("outcomes") List<String> outcomes,
             @Param("source") String source,
             @Param("from") Instant from,
             @Param("to") Instant to);

@@ -95,8 +95,8 @@ curl -X POST http://127.0.0.1:8080/api/internal/platform/opencode-runtime/intern
 ## 5. 核对观测查询 API
 
 ```bash
-# 明细（按 provider/outcome 过滤）
-curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-model-observability/call-records?providerId=local-mock&page=1&size=20" \
+# 明细（按 provider 和看板结果大类过滤）
+curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-model-observability/call-records?providerId=local-mock&outcomeGroup=UPSTREAM_FAILURE&page=1&size=20" \
   -H "Authorization: Bearer <超管token>"
 
 # 小时聚合
@@ -111,6 +111,8 @@ curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-mode
 curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-model-observability/probe-status" \
   -H "Authorization: Bearer <超管token>"
 ```
+
+`outcomeGroup` 可选 `SUCCESS/REQUEST_OR_CONFIGURATION/UPSTREAM_FAILURE/CALLER_INTERRUPTED/OTHER`。返回项仍保留精确 `outcome` 供排障；用户调用的 `ucid` 会在页面“来源 / 用户 ID”列直接展示，探活记录则显示“探活”。如需核对单一底层原因，仍可使用兼容参数 `outcome=UPSTREAM_HTTP_ERROR`。
 
 ## 验证结论
 

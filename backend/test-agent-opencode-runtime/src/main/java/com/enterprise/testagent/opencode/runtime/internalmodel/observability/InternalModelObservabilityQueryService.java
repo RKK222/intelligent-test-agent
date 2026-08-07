@@ -4,6 +4,7 @@ import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallHourlyStat;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcome;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcomeGroup;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecord;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordQuery;
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordRepository;
@@ -41,6 +42,7 @@ public class InternalModelObservabilityQueryService {
     public PageResponse<InternalModelCallRecord> queryCallRecords(
             String providerId,
             InternalModelCallOutcome outcome,
+            InternalModelCallOutcomeGroup outcomeGroup,
             InternalModelCallSource source,
             Instant from,
             Instant to,
@@ -48,8 +50,22 @@ public class InternalModelObservabilityQueryService {
         int size = Math.min(pageRequest.size(), MAX_PAGE_SIZE);
         PageRequest bounded = new PageRequest(pageRequest.page(), size);
         Instant[] window = boundedWindow(from, to);
+        List<InternalModelCallOutcome> outcomes = outcome != null
+                ? List.of(outcome)
+                : outcomeGroup == null ? List.of() : outcomeGroup.outcomes();
         return callRecordRepository.query(new InternalModelCallRecordQuery(
-                providerId, outcome, source, window[0], window[1], bounded));
+                providerId, outcomes, source, window[0], window[1], bounded));
+    }
+
+    /** 保留旧的单 outcome 查询形态，兼容既有内部调用与测试。 */
+    public PageResponse<InternalModelCallRecord> queryCallRecords(
+            String providerId,
+            InternalModelCallOutcome outcome,
+            InternalModelCallSource source,
+            Instant from,
+            Instant to,
+            PageRequest pageRequest) {
+        return queryCallRecords(providerId, outcome, null, source, from, to, pageRequest);
     }
 
     public List<InternalModelCallHourlyStat> queryHourlyStats(
