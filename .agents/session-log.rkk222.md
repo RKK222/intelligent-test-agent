@@ -17,6 +17,7 @@
 - 将共建页改为“通用能力沉淀复用，应用能力按场景共建”，用“从真实业务场景出发”“将成熟方法封装为可执行能力”“共建成果持续沉淀，后续任务可直接复用”说明工作方式；共享页改为“一次沉淀、多处复用，共建成果跨项目共享”；扩展页改为“能力模块按需扩展，新测试场景快速落地”。
 - 将开头的 Agent Team 改为“先由设计分析、案例生成和 Review 三个 Agent 协同完成测试设计”，邮件同步改为同一套自然表述，未改变信息结构和亮点内容。
 - 根据后续反馈，进一步将首屏改为“测试人员可在真实项目工作区中调用现有 Agent，先完成设计分析、案例生成和 Review”，让主语和动作更自然，不再把工作区与 Agent 协同方式硬接。
+- 根据后续反馈，将 Review 统一改为“案例审核”，并用“公共 Agent 与应用 Agent 按任务组队”“按任务组建测试设计 Agent Team”说明通用能力、应用场景与测试设计协同关系；同时将“长任务稳定执行”改为“长任务可持续处理，单次执行超过 4 小时”，与其他能力标题保持同一表达节奏。
 
 ### How
 
@@ -6983,23 +6984,29 @@
 
 - 页面休眠或断网期间可能错过单 Run 的终态事件；用户级 runtime-state 摘要虽已移除结束的 Run，工作台仍保留
   本地 `RUNNING` 状态，导致白天返回时持续显示停止按钮并锁住发送。
+- 首轮校准后继续发现 history session-tree/messages 可能晚于权威 Run 详情恢复一份同轮 `RUNNING` 投影，形成
+  “输入框可编辑、仍展示禁用停止按钮、无法发送”的分裂状态。
 
 ### What
 
 - runtime-state 新快照不再包含当前 busy Run 时，按精确 `runId` 有限重试读取权威 Run 详情，并复用既有
   `run.succeeded/run.failed/run.cancelled` 终态投影解除发送锁；并发查询按 Run 去重，切换 Session/Run 后丢弃迟到结果。
 - 以 `generatedAt >= run.updatedAt` 作为校准前提，较旧快照不能误结束刚启动的新 Run；隔夜校准不补发桌面通知。
+- 运行态归并改为让当前 Run 的权威终态覆盖同轮残留 chat busy；新 Run 请求和重试在 HTTP/runtime-state 接管前
+  使用既有 pending request 标识继续保持启动锁，不把上一轮终态误用于新一轮。
 - 新增真实 Chromium 回归，覆盖详情首次 503 后恢复继续追问、旧快照保持新 Run 运行中，并保留既有 runtime-state
-  接管和 outage fallback 用例。
+  接管和 outage fallback 用例；历史恢复增加“session-tree 残留 RUNNING、Run 详情已成功”场景。
 
 ### How
 
 - `agent-web` typecheck 和 production build 通过；当前工作区 3001 Vite 服务返回 200。
-- Playwright runtime-state 相关 7 条用例全部通过；3000 被另一并行工作树占用，验证使用临时 3001 配置，配置已删除。
+- `follow-up-queue` Vitest 6 条、Playwright runtime-state/历史终态相关 8 条及普通成功终态 1 条用例全部通过；
+  3000 被另一并行工作树占用，验证使用临时 3001 配置，配置已删除。
 
 ### Result
 
-- 夜间任务在页面外结束后，白天收到最新运行态即可自动收敛真实终态并继续追问；瞬时详情查询失败不会永久锁住。
+- 夜间任务在页面外结束后，白天收到最新运行态即可自动收敛真实终态并继续追问；瞬时详情查询失败、历史 busy
+  快照晚到都不会继续保留禁用的停止按钮。
 - 仅修改前端状态恢复、测试和稳定 README；未变更 HTTP/RunEvent 契约、数据库、后端、安全、环境配置、
   generated SDK 或 OpenCode 上游源码。
 
