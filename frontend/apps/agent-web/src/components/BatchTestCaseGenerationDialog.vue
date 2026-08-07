@@ -192,6 +192,17 @@ function openSchedule() {
   emit("request-night-slots");
 }
 
+/** 返回立即执行模式时丢弃未提交的定时时间，避免再次打开误用旧选择。 */
+function closeSchedule() {
+  if (executionLocked.value) return;
+  scheduleOpen.value = false;
+  scheduleMode.value = "NIGHT_WINDOW";
+  selectedNightTimes.value = [];
+  customScheduleInput.value = "";
+  customScheduleError.value = "";
+  customTimes.value = [];
+}
+
 function toggleNightTime(slotStart: string, available: boolean) {
   if (!available || executionLocked.value) return;
   selectedNightTimes.value = selectedNightTimes.value.includes(slotStart)
@@ -343,7 +354,7 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
         'is-progress': dialogStage === 'progress',
         'has-retry-schedule': dialogStage === 'progress' && capacityConflictIds.length > 0
       }"
-      style="width: 70vw; height: 70vh"
+      style="width: 70vw; height: 90vh"
       role="dialog"
       aria-modal="true"
       aria-labelledby="batch-dialog-title"
@@ -444,9 +455,21 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
         </div>
       </main>
 
-      <section v-if="dialogStage === 'selection' && scheduleOpen" class="batch-schedule-panel">
+      <section
+        v-if="dialogStage === 'selection' && scheduleOpen"
+        class="batch-schedule-panel"
+        data-testid="batch-schedule-panel"
+      >
         <div class="batch-schedule-head">
           <strong>选择定时执行时间</strong>
+          <button
+            type="button"
+            class="batch-schedule-close"
+            aria-label="关闭定时选择"
+            data-testid="batch-close-schedule"
+            :disabled="executionLocked"
+            @click="closeSchedule"
+          ><X :size="14" /></button>
         </div>
         <ExecutionTimePicker
           multiple
@@ -469,15 +492,9 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
           @remove-custom-time="(time) => customTimes = customTimes.filter((item) => item !== time)"
         />
         <div class="batch-schedule-foot">
-          <span v-if="!scheduleAllocation.ok" class="batch-error">所选时段总余量 {{ scheduleAllocation.remainingCapacity }}，不足以安排 {{ selectedIds.length }} 个子条目。</span>
+          <span v-if="selectedScheduleTimes.length === 0">请选择至少一个执行时间。</span>
+          <span v-else-if="!scheduleAllocation.ok" class="batch-error">所选时段总余量 {{ scheduleAllocation.remainingCapacity }}，不足以安排 {{ selectedIds.length }} 个子条目。</span>
           <span v-else>将按时间升序轮询分配 {{ selectedScheduleTimes.length }} 个时间段。</span>
-          <button
-            type="button"
-            class="batch-primary"
-            data-testid="batch-execute-scheduled"
-            :disabled="running || selectedIds.length === 0 || !scheduleAllocation.ok"
-            @click="executeScheduled()"
-          ><Clock3 :size="15" /> 定时执行</button>
         </div>
       </section>
 
@@ -520,12 +537,20 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
         </label>
         <div class="batch-foot-actions">
           <span v-if="selectionAtLimit" class="batch-limit-hint">最多选择 50 个子条目</span>
-          <button type="button" class="batch-secondary" data-testid="batch-open-schedule" :disabled="running || selectedIds.length === 0" @click="openSchedule">
+          <button v-if="!scheduleOpen" type="button" class="batch-secondary" data-testid="batch-open-schedule" :disabled="running || selectedIds.length === 0" @click="openSchedule">
             <Clock3 :size="15" /> 选择定时
           </button>
-          <button type="button" class="batch-primary" data-testid="batch-execute-now" :disabled="running || selectedIds.length === 0 || !requirement.trim()" @click="executeImmediate()">
+          <button v-if="!scheduleOpen" type="button" class="batch-primary" data-testid="batch-execute-now" :disabled="running || selectedIds.length === 0 || !requirement.trim()" @click="executeImmediate()">
             <Play :size="15" /> 立刻执行
           </button>
+          <button
+            v-else-if="selectedScheduleTimes.length > 0 && scheduleAllocation.ok"
+            type="button"
+            class="batch-primary"
+            data-testid="batch-execute-scheduled"
+            :disabled="running || selectedIds.length === 0 || !requirement.trim()"
+            @click="executeScheduled()"
+          ><Clock3 :size="15" /> 定时执行</button>
         </div>
       </footer>
       <footer v-else class="batch-dialog-foot batch-progress-foot">
@@ -623,6 +648,12 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
 .batch-schedule-panel { display: grid; gap: 10px; max-height: 220px; overflow: auto; padding: 12px 16px; border-top: 1px solid #dce4ec; background: #eef4f9; }
 .batch-schedule-head, .batch-schedule-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .batch-schedule-head strong { font-size: 13px; }
+.batch-schedule-close {
+  display: grid; width: 26px; height: 26px; place-items: center; border: 0; border-radius: 7px;
+  background: transparent; color: #66778a; cursor: pointer;
+}
+.batch-schedule-close:hover:not(:disabled) { background: #dfe7ef; color: #8f2731; }
+.batch-schedule-close:disabled { cursor: not-allowed; opacity: .45; }
 .batch-mode-switch { display: flex; gap: 3px; padding: 3px; border-radius: 8px; background: #dfe7ef; }
 .batch-mode-switch button { min-height: 28px; border: 0; border-radius: 6px; background: transparent; color: #657589; font: inherit; font-size: 11px; cursor: pointer; }
 .batch-mode-switch button.active { background: #fff; color: #8f2731; box-shadow: 0 1px 3px rgba(31, 47, 67, .13); }

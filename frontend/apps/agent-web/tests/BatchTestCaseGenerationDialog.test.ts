@@ -11,18 +11,59 @@ const references = Array.from({ length: 51 }, (_, index) => ({
 }));
 
 describe("BatchTestCaseGenerationDialog", () => {
-  it("uses the existing # candidates, default requirement and a 70% page dialog", async () => {
+  it("uses the existing # candidates, default requirement and a 90% height dialog", async () => {
     const wrapper = mount(BatchTestCaseGenerationDialog, {
       props: { open: true, references, loading: false }
     });
 
     const dialog = wrapper.get('[data-testid="batch-test-case-dialog"]');
     expect(dialog.attributes("style")).toContain("width: 70vw");
-    expect(dialog.attributes("style")).toContain("height: 70vh");
+    expect(dialog.attributes("style")).toContain("height: 90vh");
     expect(wrapper.get('[data-testid="batch-requirement-input"]').element)
       .toHaveProperty("value", "请生成子条目测试案例。");
     expect(wrapper.text()).toContain("子条目1");
     expect(wrapper.emitted("reload-candidates")).toBeTruthy();
+  });
+
+  it("uses one primary action slot and can close scheduling without retaining old times", async () => {
+    const nightSlots = {
+      timeZone: "Asia/Shanghai",
+      windowStart: "2026-08-08T13:00:00Z",
+      windowEnd: "2026-08-08T23:00:00Z",
+      capacity: 2,
+      slots: [{
+        slotStart: "2026-08-08T13:00:00Z",
+        slotEnd: "2026-08-08T13:15:00Z",
+        reservedCount: 0,
+        capacity: 2,
+        available: true,
+        recommended: false
+      }]
+    };
+    const wrapper = mount(BatchTestCaseGenerationDialog, {
+      props: { open: true, references: references.slice(0, 2), loading: false, nightSlots }
+    });
+    for (const checkbox of wrapper.findAll('input[data-testid="batch-item-checkbox"]')) {
+      await checkbox.setValue(true);
+    }
+
+    await wrapper.get('[data-testid="batch-open-schedule"]').trigger("click");
+    expect(wrapper.find('[data-testid="batch-open-schedule"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="batch-execute-now"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="batch-execute-scheduled"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="batch-close-schedule"]')).toBeTruthy();
+
+    await wrapper.get('[data-testid="batch-night-slot"]').trigger("click");
+    expect(wrapper.find('[data-testid="batch-execute-scheduled"]').exists()).toBe(true);
+
+    await wrapper.get('[data-testid="batch-close-schedule"]').trigger("click");
+    expect(wrapper.find('[data-testid="batch-schedule-panel"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="batch-execute-now"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="batch-open-schedule"]').exists()).toBe(true);
+
+    await wrapper.get('[data-testid="batch-open-schedule"]').trigger("click");
+    expect(wrapper.find('[data-testid="batch-execute-scheduled"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="batch-night-slot"]').classes()).not.toContain("is-selected");
   });
 
   it("limits selection to 50 and emits an immediate batch without editing the composer", async () => {
