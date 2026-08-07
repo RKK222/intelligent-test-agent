@@ -11,6 +11,7 @@ import type {
   InternalModelCallSource,
   InternalModelProbeStatus
 } from "@test-agent/shared-types";
+import MetricHelpLabel from "./MetricHelpLabel.vue";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -25,6 +26,36 @@ const filterOutcome = ref<InternalModelCallOutcome | "">("");
 const filterSource = ref<InternalModelCallSource | "">("USER_CALL");
 const page = ref(1);
 const pageSize = 20;
+
+// 页面提示只讲业务含义、分母和空值规则，避免把采集与存储实现暴露给使用者。
+const metricHelp = {
+  totalRequests: "当前筛选范围内一共发起了多少次调用，成功和失败都会算在内。",
+  providerCount: "当前筛选范围内实际产生过调用记录的供应商数量，没有调用记录的不计入。",
+  successRate: "成功完成的调用次数占总调用次数的比例。失败或中途断开的调用不算成功。",
+  failureRate: "没有成功完成的调用次数占总调用次数的比例，和成功率相加为 100%。",
+  failureCount: "没有成功完成的调用次数，包括连接失败、等待超时、对方报错、回答中断等情况。",
+  duration: "一次调用从平台开始处理，到结果发送完或确认失败所用的时间。",
+  avgDuration: "所有调用耗时相加后除以调用次数。成功和失败都会参与计算。",
+  maxDuration: "当前筛选范围内耗时最长的那一次调用。成功和失败都会参与比较。",
+  totalDuration: "把每一次调用的耗时相加。多次调用可能同时进行，所以它不等于实际经过的钟表时间。",
+  qps: "从最早有记录的小时算到最晚有记录的小时结束，用总调用次数折算出的平均每秒请求数。只有一个小时时按 1 小时计算；它反映平均负载，不是瞬时峰值。",
+  firstToken: "从发起调用到模型开始返回实际回答的等待时间；模型没有返回实际回答时显示“—”。",
+  avgFirstToken: "只统计模型确实开始回答的调用，用这些调用的等待时间计算平均值；没有返回回答的调用不参与。",
+  maxFirstToken: "只比较模型确实开始回答的调用，取等待时间最长的一次；没有返回回答的调用不参与。",
+  streamComplete: "从发起调用到模型完整结束回答所用的时间；回答中断或没有正常结束时显示“—”。",
+  avgStreamComplete: "只统计模型正常结束回答的调用，用这些调用的完整回答时间计算平均值；中断或未结束的调用不参与。",
+  maxStreamComplete: "只比较模型正常结束回答的调用，取完整回答时间最长的一次；中断或未结束的调用不参与。",
+  requestCount: "这一小时内，符合本行供应商、模型、来源和结果的调用次数。",
+  durationTotal: "这一行所有调用耗时相加，成功和失败都会计入。",
+  providerFailure: "这个供应商没有成功完成的调用次数，包括连接失败、等待超时、对方报错、回答中断等情况。"
+} as const;
+
+const chartHelp = {
+  hourlyTrend: "按小时查看调用次数和成功率如何变化，每个点只代表对应小时。",
+  successComposition: "把当前筛选范围内的调用分成成功和失败两类，展示各自所占比例。",
+  failureBreakdown: "只看失败调用，按最终失败原因统计次数；同一次调用只归到一个原因。",
+  providerVolume: "按供应商汇总当前筛选范围内的调用次数，用来比较各供应商实际承载的调用量。"
+} as const;
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 
@@ -225,9 +256,9 @@ const overallMetrics = computed(() => {
   const streamCompleteAvg = streamCompleteCount > 0
     ? Math.round(streamCompleteMillisSum / streamCompleteCount)
     : null;
-  // QPS：按小时跨度估算（至少 1 小时，避免单小时行除 0）。
+  // 首尾小时都属于统计范围，因此跨度需要包含最后一个完整小时；单小时至少按 1 小时计算。
   const hoursSpan = minHour && maxHour
-    ? Math.max(1, (new Date(maxHour).getTime() - new Date(minHour).getTime()) / 3_600_000)
+    ? Math.max(1, (new Date(maxHour).getTime() - new Date(minHour).getTime()) / 3_600_000 + 1)
     : 1;
   const qps = totalRequests === 0 ? 0 : Math.round((totalRequests / (hoursSpan * 3600)) * 100) / 100;
   const providerCount = new Set(stats.value.map((row) => row.providerId)).size;
@@ -477,7 +508,7 @@ function onPageChange(next: number) {
     <template v-if="hasSuperAdmin">
       <div class="ta-imob-header">
         <h3 class="ta-imob-title">内部模型调用可观测</h3>
-        <span class="ta-imob-sub">默认统计真实用户调用（可切换探活）；首 token 为首个真实输出 SSE data，流完成为收到 [DONE]，端到端耗时包含下游写出；仅记录结构化字段</span>
+        <span class="ta-imob-sub">默认查看最近 24 小时的用户调用，也可以切换查看自动探活。所有耗时都从调用发起时开始计算；模型没有开始回答或没有正常结束时，相应指标显示“—”。</span>
       </div>
 
       <div class="ta-imob-combined">
@@ -540,12 +571,21 @@ function onPageChange(next: number) {
               <template #default="{ row }">{{ row.traceId || "-" }}</template>
             </el-table-column>
             <el-table-column label="端到端耗时" min-width="140">
+              <template #header>
+                <MetricHelpLabel label="端到端耗时" :description="metricHelp.duration" />
+              </template>
               <template #default="{ row }">{{ formatDuration(row.durationMillis) }}</template>
             </el-table-column>
             <el-table-column label="首 token" min-width="140">
+              <template #header>
+                <MetricHelpLabel label="首 token" :description="metricHelp.firstToken" />
+              </template>
               <template #default="{ row }">{{ formatDuration(row.firstTokenMillis) }}</template>
             </el-table-column>
             <el-table-column label="流完成" min-width="140">
+              <template #header>
+                <MetricHelpLabel label="流完成" :description="metricHelp.streamComplete" />
+              </template>
               <template #default="{ row }">{{ formatDuration(row.streamCompleteMillis) }}</template>
             </el-table-column>
             <el-table-column prop="model" label="模型" min-width="150">
@@ -590,61 +630,61 @@ function onPageChange(next: number) {
               <div class="ta-imob-overview-grid">
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ overallMetrics.totalRequests }}</span>
-                  <span class="ta-imob-overview-label">总请求</span>
+                  <MetricHelpLabel class="ta-imob-overview-label" label="总请求" :description="metricHelp.totalRequests" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ overallMetrics.providerCount }}</span>
-                  <span class="ta-imob-overview-label">供应商</span>
+                  <MetricHelpLabel class="ta-imob-overview-label" label="供应商" :description="metricHelp.providerCount" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value" :class="{ 'is-ok': overallMetrics.successRate >= 90 }">
                     {{ overallMetrics.successRate }}%
                   </span>
-                  <span class="ta-imob-overview-label">成功率</span>
+                  <MetricHelpLabel class="ta-imob-overview-label" label="成功率" :description="metricHelp.successRate" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value" :class="{ 'is-bad': overallMetrics.failureRate > 10 }">
                     {{ overallMetrics.failureRate }}%
                   </span>
-                  <span class="ta-imob-overview-label">失败率</span>
+                  <MetricHelpLabel class="ta-imob-overview-label" label="失败率" :description="metricHelp.failureRate" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value" :class="{ 'is-bad': overallMetrics.failureCount > 0 }">
                     {{ overallMetrics.failureCount }}
                   </span>
-                  <span class="ta-imob-overview-label">失败数</span>
+                  <MetricHelpLabel class="ta-imob-overview-label" label="失败数" :description="metricHelp.failureCount" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.avgDuration) }}</span>
-                  <span class="ta-imob-overview-label">平均耗时</span>
+                  <MetricHelpLabel class="ta-imob-overview-label" label="平均耗时" :description="metricHelp.avgDuration" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.maxDuration) }}</span>
-                  <span class="ta-imob-overview-label">最大耗时</span>
+                  <MetricHelpLabel class="ta-imob-overview-label" label="最大耗时" :description="metricHelp.maxDuration" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ overallMetrics.totalDurationSeconds }}s</span>
-                  <span class="ta-imob-overview-label">总耗时</span>
+                  <MetricHelpLabel class="ta-imob-overview-label" label="总耗时" :description="metricHelp.totalDuration" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ overallMetrics.qps }}</span>
-                  <span class="ta-imob-overview-label">QPS</span>
+                  <MetricHelpLabel class="ta-imob-overview-label" label="QPS" :description="metricHelp.qps" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.firstTokenAvg) }}</span>
-                  <span class="ta-imob-overview-label">平均首 token</span>
+                  <MetricHelpLabel class="ta-imob-overview-label" label="平均首 token" :description="metricHelp.avgFirstToken" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.firstTokenMax) }}</span>
-                  <span class="ta-imob-overview-label">最大首 token</span>
+                  <MetricHelpLabel class="ta-imob-overview-label" label="最大首 token" :description="metricHelp.maxFirstToken" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.streamCompleteAvg) }}</span>
-                  <span class="ta-imob-overview-label">平均流完成</span>
+                  <MetricHelpLabel class="ta-imob-overview-label" label="平均流完成" :description="metricHelp.avgStreamComplete" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.streamCompleteMax) }}</span>
-                  <span class="ta-imob-overview-label">最大流完成</span>
+                  <MetricHelpLabel class="ta-imob-overview-label" label="最大流完成" :description="metricHelp.maxStreamComplete" />
                 </div>
               </div>
             </div>
@@ -652,19 +692,27 @@ function onPageChange(next: number) {
             <!-- 图表：趋势 / 成功率 / 失败分类 / 供应商对比。小时聚合无法还原分位数与分布，避免展示伪 P90/P95。 -->
             <div v-if="hourlyTrend.hours.length" class="ta-imob-charts">
               <div class="ta-imob-chart-card">
-                <h4 class="ta-imob-overview-title">小时趋势</h4>
+                <h4 class="ta-imob-overview-title">
+                  <MetricHelpLabel label="小时趋势" :description="chartHelp.hourlyTrend" />
+                </h4>
                 <div ref="trendChartEl" class="ta-imob-chart" />
               </div>
               <div class="ta-imob-chart-card">
-                <h4 class="ta-imob-overview-title">成功率构成</h4>
+                <h4 class="ta-imob-overview-title">
+                  <MetricHelpLabel label="成功率构成" :description="chartHelp.successComposition" />
+                </h4>
                 <div ref="pieChartEl" class="ta-imob-chart" />
               </div>
               <div v-if="failureBarData.length" class="ta-imob-chart-card">
-                <h4 class="ta-imob-overview-title">失败分类</h4>
+                <h4 class="ta-imob-overview-title">
+                  <MetricHelpLabel label="失败分类" :description="chartHelp.failureBreakdown" />
+                </h4>
                 <div ref="failureChartEl" class="ta-imob-chart" />
               </div>
               <div v-if="providerBarData.length" class="ta-imob-chart-card">
-                <h4 class="ta-imob-overview-title">按供应商请求量</h4>
+                <h4 class="ta-imob-overview-title">
+                  <MetricHelpLabel label="按供应商请求量" :description="chartHelp.providerVolume" />
+                </h4>
                 <div ref="providerChartEl" class="ta-imob-chart" />
               </div>
             </div>
@@ -678,35 +726,35 @@ function onPageChange(next: number) {
                   <div class="ta-imob-metric-body">
                     <div class="ta-imob-metric-cell">
                       <span class="ta-imob-metric-value">{{ metric.totalRequests }}</span>
-                      <span class="ta-imob-metric-label">总请求</span>
+                      <MetricHelpLabel class="ta-imob-metric-label" label="总请求" :description="metricHelp.totalRequests" />
                     </div>
                     <div class="ta-imob-metric-cell">
                       <span class="ta-imob-metric-value" :class="{ 'is-ok': metric.successRate >= 90 }">
                         {{ metric.successRate }}%
                       </span>
-                      <span class="ta-imob-metric-label">成功率</span>
+                      <MetricHelpLabel class="ta-imob-metric-label" label="成功率" :description="metricHelp.successRate" />
                     </div>
                     <div class="ta-imob-metric-cell">
                       <span class="ta-imob-metric-value">{{ formatDuration(metric.avgDurationMillis) }}</span>
-                      <span class="ta-imob-metric-label">平均耗时</span>
+                      <MetricHelpLabel class="ta-imob-metric-label" label="平均耗时" :description="metricHelp.avgDuration" />
                     </div>
                     <div class="ta-imob-metric-cell">
                       <span class="ta-imob-metric-value">{{ formatDuration(metric.maxDurationMillis) }}</span>
-                      <span class="ta-imob-metric-label">最大耗时</span>
+                      <MetricHelpLabel class="ta-imob-metric-label" label="最大耗时" :description="metricHelp.maxDuration" />
                     </div>
                     <div class="ta-imob-metric-cell">
                       <span class="ta-imob-metric-value">{{ formatDuration(metric.avgFirstTokenMillis) }}</span>
-                      <span class="ta-imob-metric-label">平均首 token</span>
+                      <MetricHelpLabel class="ta-imob-metric-label" label="平均首 token" :description="metricHelp.avgFirstToken" />
                     </div>
                     <div class="ta-imob-metric-cell">
                       <span class="ta-imob-metric-value">{{ formatDuration(metric.avgStreamCompleteMillis) }}</span>
-                      <span class="ta-imob-metric-label">平均流完成</span>
+                      <MetricHelpLabel class="ta-imob-metric-label" label="平均流完成" :description="metricHelp.avgStreamComplete" />
                     </div>
                     <div class="ta-imob-metric-cell">
                       <span class="ta-imob-metric-value" :class="{ 'is-bad': metric.failureCount > 0 }">
                         {{ metric.failureCount }}
                       </span>
-                      <span class="ta-imob-metric-label">失败</span>
+                      <MetricHelpLabel class="ta-imob-metric-label" label="失败" :description="metricHelp.providerFailure" />
                     </div>
                   </div>
                 </div>
@@ -728,27 +776,49 @@ function onPageChange(next: number) {
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column prop="requestCount" label="请求数" width="90" />
+              <el-table-column prop="requestCount" label="请求数" width="110">
+                <template #header>
+                  <MetricHelpLabel label="请求数" :description="metricHelp.requestCount" />
+                </template>
+              </el-table-column>
               <el-table-column label="耗时合计" width="100">
+                <template #header>
+                  <MetricHelpLabel label="耗时合计" :description="metricHelp.durationTotal" />
+                </template>
                 <template #default="{ row }">{{ formatDuration(row.durationMillisSum) }}</template>
               </el-table-column>
               <el-table-column label="最大耗时" width="100">
+                <template #header>
+                  <MetricHelpLabel label="最大耗时" :description="metricHelp.maxDuration" />
+                </template>
                 <template #default="{ row }">{{ formatDuration(row.durationMillisMax) }}</template>
               </el-table-column>
               <el-table-column label="平均首 token" width="120">
+                <template #header>
+                  <MetricHelpLabel label="平均首 token" :description="metricHelp.avgFirstToken" />
+                </template>
                 <template #default="{ row }">
                   {{ formatDuration((row.firstTokenCount ?? 0) > 0 ? Math.round((row.firstTokenMillisSum ?? 0) / (row.firstTokenCount ?? 1)) : null) }}
                 </template>
               </el-table-column>
               <el-table-column label="最大首 token" width="120">
+                <template #header>
+                  <MetricHelpLabel label="最大首 token" :description="metricHelp.maxFirstToken" />
+                </template>
                 <template #default="{ row }">{{ formatDuration((row.firstTokenCount ?? 0) > 0 ? (row.firstTokenMillisMax ?? 0) : null) }}</template>
               </el-table-column>
               <el-table-column label="平均流完成" width="120">
+                <template #header>
+                  <MetricHelpLabel label="平均流完成" :description="metricHelp.avgStreamComplete" />
+                </template>
                 <template #default="{ row }">
                   {{ formatDuration((row.streamCompleteCount ?? 0) > 0 ? Math.round((row.streamCompleteMillisSum ?? 0) / (row.streamCompleteCount ?? 1)) : null) }}
                 </template>
               </el-table-column>
               <el-table-column label="最大流完成" width="120">
+                <template #header>
+                  <MetricHelpLabel label="最大流完成" :description="metricHelp.maxStreamComplete" />
+                </template>
                 <template #default="{ row }">{{ formatDuration((row.streamCompleteCount ?? 0) > 0 ? (row.streamCompleteMillisMax ?? 0) : null) }}</template>
               </el-table-column>
             </el-table>
