@@ -5,6 +5,28 @@
 
 ## Entries
 
+### 2026-08-07 - 企业内部模型 API 调用可观测性
+
+### Why
+
+- 企业内部部署后 opencode/codex 调用企业模型端点总是失败，排查只能人工 grep manager 日志 + 手工 curl 代理端点（`EMPTY-RESPONSE-BODY-TROUBLESHOOTING.md` 第 9 节），没有任何自动化调用记录、统计或主动探活。本次在 Java 内部模型代理链路插桩，落地调用可观测性。
+
+### What
+
+- 内部模型代理转发链路（opencode → `/internal-model-proxy/v1/**` → 企业端点）每次调用落结构化明细 `internal_model_call_records` 并小时聚合 `internal_model_call_stats_hourly`；`InternalModelCallOutcome` 按连接失败/三种超时/HTTP 错误/流中断/鉴权失败等 13 类分类，只记 traceId、耗时、状态码与异常类简名，不存请求/响应正文、Token 或密钥。
+- 探活服务 `InternalModelProviderProbeService` 每 5 分钟对启用 provider 发 `max_tokens=1` 最小 chat 探测并维护逐 provider 探活状态（连续失败计数由 SQL 原子维护）；超管 API 提供明细分页、小时聚合、探活状态与手动触发探活。
+- 前端系统管理新增「内部模型可观测」页：探活状态卡片 + 调用记录/聚合统计两个 tab。
+
+### How
+
+- 插桩在 `InternalModelProxyForwardingService`（`test-agent-api`）的响应式链路上：`validateAndExtractModel` 提取 model、首字节/首事件标记、responses 补偿分支 stream outcome、`Mono.firstWithSignal` 结果挂 `doOnError/doOnCancel/doFinally` 终态归类；观测绝不影响主链路（recorder 内 onErrorResume + doFinally try-catch 双保险）。`InternalModelCallRecorder`/`Classifier`/探活/查询服务放 `test-agent-opencode-runtime` 新包 `internalmodel.observability`，SQL 走 `test-agent-persistence` MyBatis XML 三段式。
+- Flyway `V20260807130134` 建三张表；XXL `V10/V11` 注册探活与清理任务；四模块 `clean test` 共 1531 项通过，前端全仓 `typecheck` 通过。
+
+### Result
+
+- 排查从人工 grep 变为超管页面一键查询：先看调用记录按 `traceId/outcome` 定位失败分类，再按分类进对应层；页面「全部探活」可主动确认端点可达性。已同步 `docs/api/http-api.md`、`docs/deployment/database.md`、`docs/architecture/xxl-job-integration.md`、`docs/testing/xxl-job-integration.md`、opencode-runtime/persistence README 与 troubleshooting 引导。
+- 提交未包含主工作区其他会话的 marketing 长图/pptx 未提交改动；`components.d.ts` 仅含本页触发的组件自动注册。后端新 SQL 均走 MyBatis XML，未改 generated SDK/OpenCode 源码/`.env*`。
+
 ### 2026-08-07 - 润色 MIMO 长图与邀请邮件文案
 
 ### Why
@@ -18,6 +40,8 @@
 - 将开头的 Agent Team 改为“先由设计分析、案例生成和 Review 三个 Agent 协同完成测试设计”，邮件同步改为同一套自然表述，未改变信息结构和亮点内容。
 - 根据后续反馈，进一步将首屏改为“测试人员可在真实项目工作区中调用现有 Agent，先完成设计分析、案例生成和 Review”，让主语和动作更自然，不再把工作区与 Agent 协同方式硬接。
 - 根据后续反馈，将 Review 统一改为“案例审核”，并用“公共 Agent 与应用 Agent 按任务组队”“按任务组建测试设计 Agent Team”说明通用能力、应用场景与测试设计协同关系；同时将“长任务稳定执行”改为“长任务可持续处理，单次执行超过 4 小时”，与其他能力标题保持同一表达节奏。
+- 根据最新反馈，将公共/应用 Agent 的关系进一步表达为“按需组建 Agent Team”，将各基地产品部作为共享去向；重构长任务区为“长任务可跨时段持续推进，约定时间自动接续”，合并 4 小时与 50 个 JSP 为一个真实验证卡片，并新增定时接续、已有对话上下文和过程追溯三个配套卡片。
+- 根据版面反馈，将一级标题进一步收束为“公共与应用 Agent，按需组建 Agent Team”，避免 Agent 词组重复和英文断行；长任务区保持四卡结构，并以“约定时间自动接续”卡片做视觉强调。
 
 ### How
 
