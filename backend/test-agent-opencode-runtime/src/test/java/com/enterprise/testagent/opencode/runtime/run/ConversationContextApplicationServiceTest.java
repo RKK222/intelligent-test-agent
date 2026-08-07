@@ -286,6 +286,32 @@ class ConversationContextApplicationServiceTest {
     }
 
     @Test
+    void requireExpiresContextSignedBeforeRemoteBindingWasCreated() {
+        ConversationRunContext preBindingContext = new ConversationRunContext(
+                USER_ID,
+                "opencode",
+                "ocp_1234567890abcdef",
+                "server-a",
+                session(),
+                workspace(),
+                node(),
+                null,
+                1,
+                NOW.plusSeconds(3600));
+        when(contextStore.peek(TOKEN)).thenReturn(Optional.of(preBindingContext));
+        when(contextStore.touch(TOKEN, preBindingContext)).thenReturn(Optional.of(preBindingContext));
+        when(bindingRepository.findBySessionIdAndAgentId(SESSION_ID, "opencode"))
+                .thenReturn(Optional.of(binding()));
+
+        assertCode(
+                () -> service.require(TOKEN, USER_ID, "opencode", SESSION_ID),
+                ErrorCode.CONVERSATION_CONTEXT_EXPIRED);
+
+        verify(contextStore).invalidate(USER_ID, SESSION_ID);
+        verify(contextStore, org.mockito.Mockito.never()).touch(TOKEN, preBindingContext);
+    }
+
+    @Test
     void invalidateDelegatesToReverseIndexStore() {
         service.invalidate(USER_ID, SESSION_ID);
 

@@ -58,6 +58,7 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 ## 撤销重发投影
 
 用户消息行仅在调用方确认它是根会话最后一条、Run 已终态且具有远端边界时展示“撤销重发”。定时来源读取可选 `resend` 元数据，
-展示“夜间定时执行 · 自动重发 n/3”或“手动重发”，WAITING 显示本地倒计时并隐藏按钮。`run.resend.started` reducer 会一次性移除
-源 Run 的回答、工具卡、Todo、Diff、失败卡、流式 overlay 和 child scope，再等待替代 Run 的真实 user/assistant 事件建立新归属；
+展示“夜间定时执行 · 自动重发 n/3”或“手动重发”，WAITING 显示本地倒计时并隐藏按钮。重发 API 返回后，`run.resend.requested`
+立即把源用户轮次的展示所有权切到预留替代 Run，使工作状态 Dock 按 `PENDING` 展示运行中；`run.resend.started` reducer 会一次性移除源 Run
+的回答、工具卡、Todo、Diff、失败卡、流式 overlay 和 child scope，但保留该用户轮次作为替代 Run 的页面锚点，并清除旧消息标识，让后到的真实 user message 原位替换且保留定时来源与重发元数据；
 `session.status.retry` 只作为 OpenCode 原生供应商重试状态展示，不再触发前端自动取消或重复 startRun。

@@ -260,6 +260,7 @@ public class ConversationContextApplicationService {
                     ErrorCode.CONVERSATION_CONTEXT_EXPIRED,
                     "会话运行上下文已过期或与当前请求不匹配");
         }
+        requireBindingSnapshotCurrent(context);
         ConversationRunContext refreshed = contextStore.touch(normalizedToken, context)
                 .orElseThrow(() -> new PlatformException(ErrorCode.CONVERSATION_CONTEXT_EXPIRED));
         if (!matches(refreshed, userId, normalizedAgentId, sessionId)) {
@@ -267,7 +268,30 @@ public class ConversationContextApplicationService {
                     ErrorCode.CONVERSATION_CONTEXT_EXPIRED,
                     "会话运行上下文已过期或与当前请求不匹配");
         }
+        requireBindingSnapshotCurrent(refreshed);
         return refreshed;
+    }
+
+    /**
+     * 首轮消息前签发的上下文允许没有远端 binding；首轮建立 binding 后旧快照必须失效，
+     * 由调用方沿既有幂等键重新签发，避免后续发送或撤销重发误判为没有可恢复边界。
+     */
+    private void requireBindingSnapshotCurrent(ConversationRunContext context) {
+        if (context.bindingSnapshot() != null) {
+            return;
+        }
+        boolean bindingEstablished = bindingRepository
+                .findBySessionIdAndAgentId(context.sessionId(), context.agentId())
+                .filter(binding -> binding.executionNodeId().equals(
+                        context.executionNodeSnapshot().executionNodeId()))
+                .isPresent();
+        if (!bindingEstablished) {
+            return;
+        }
+        contextStore.invalidate(context.userId(), context.sessionId());
+        throw new PlatformException(
+                ErrorCode.CONVERSATION_CONTEXT_EXPIRED,
+                "会话远端绑定已更新，请重试");
     }
 
     /**

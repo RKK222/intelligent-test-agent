@@ -1733,3 +1733,19 @@
   - 所有 worktree 的候选 migration 已复核，本次 `V20260807230000` 高于原工作区未提交的 `V20260807190000`；共享或企业环境执行前仍必须核对真实 `flyway_schema_history`，未知版本或 checksum 时停止发布。
   - 目标 Playwright 全套在错误复用原工作区 3000 服务时产生伪失败；改用本 worktree 3001 后本功能 E2E 与三个重试回归通过。另有一个 HEAD 已存在的“只读历史 textarea 应 disabled”场景与基线模板不一致，本次未扩大范围修改。
   - 合并到 `codex/release-enterprise-20260801` 后，本功能立即执行、失败项重试和批量定时 E2E 通过；发布分支原有三条重发 E2E 仍断言旧的取消/重新 `startRun` 流程，而发布分支实现已改为原生 `createRunResend`，相关测试段落和重发处理函数均未被本次合并改动，需由重发功能后续单独校准。
+
+### 2026-08-07 - 修复撤销重发边界误判与页面接管
+
+- Why:
+  - 首轮发送前签发的页面上下文不含远端 binding，首轮完成后继续复用该旧 token 会让重发校验误报“会话缺少可恢复的远端边界”，尽管权威 binding 和消息边界已经存在。
+  - 重发 API 成功后页面仍把用户轮次绑定在已终态的源 Run，时间线因此优先展示“已完成”而没有运行状态 Dock；后到 `run.resend.started` 又按源 Run 删除了用户消息，造成页面空白或不刷新。
+- What:
+  - `ConversationContextApplicationService` 在 `peek/touch` 两侧校验无 binding 快照是否已被同节点权威 binding 淘汰；命中时失效旧 token 并返回既有 `CONVERSATION_CONTEXT_EXPIRED`，前端沿原幂等键重签重试。
+  - agent-chat 新增内部 `run.resend.requested` 接管动作：接口返回后立即把源用户轮次、Todo owner 和状态投影切到预留替代 Run；`started` 只清理旧回答、工具、Todo、Diff、失败卡、流式 overlay 与 child scope，保留用户轮次、清除旧消息标识并等待新远端 ID 原位接管。
+  - 替代 user message 合并时保留 `sourceType/sourceRefId/resend`，`started` 同步把重发标记收敛为 `DISPATCHED`，避免定时来源和等待倒计时残留。
+- How:
+  - TDD 先复现旧 token 边界误判、状态栏未运行、`started` 删除用户轮次和等待标记残留，再补后端与 reducer/Workbench 修复；后端 10 模块 790 tests、前端 118 文件 1851 passed / 1 skipped、15 项 workspace typecheck 和 production build 全部通过。
+  - Chromium 页面回归验证点击后立即出现 running Dock，`started` 后旧回答消失但用户消息保持一条，替代远端 user ID 和新回答原位接管；本地后端、前端、OpenCode manager 与工作流服务重建重启后再次通过，readiness 为 `UP`。
+- Result:
+  - 用户现在可在无需刷新页面的情况下看到重发运行状态和新结果，原用户请求不会被回退事件误删；首轮后旧上下文会自动走一次安全重签，不再误报缺少远端边界。
+  - 本次仅修正既有 API/RunEvent 的校验与前端投影，不新增或变更外部 API、事件 wire name、数据库/Flyway、SQL、权限或日志字段；已同步 HTTP 行为、后端/前端 README/PACKAGE 与用户手册，未修改 `.env*`、generated SDK 或 OpenCode 源码。

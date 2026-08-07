@@ -3743,14 +3743,9 @@ async function retryLastRun() {
       });
     }
     run.value = response.replacementRun;
-    chatState.value = {
-      ...chatState.value,
-      messages: chatState.value.messages.map((message) => message.id === sourceMessage.id
-        ? { ...message, resend: response.resend }
-        : message)
-    };
-    // 替代消息尚未被 OpenCode 受理，不能提前把新 Run 绑定到即将删除的源用户消息。
-    markConversationRunAdopted(response.replacementRun.runId);
+    dispatchChat({ type: "run.resend.requested", resend: response.resend });
+    // 用户轮次已接管到替代 Run，远端新消息 ID 会在 started 后原位替换旧边界。
+    markConversationRunAdopted(response.replacementRun.runId, sourceMessage.id);
     rememberRunSession(response.replacementRun);
     clearRunEventSseFeedback();
     chatStartedAt.value = Date.now();

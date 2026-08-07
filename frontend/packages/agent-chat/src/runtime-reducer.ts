@@ -41,6 +41,7 @@ export type AgentChatRuntimeState = {
 
 export type AgentChatRuntimeAction =
   | { type: "event"; event: RunEvent }
+  | { type: "run.resend.requested"; resend: ResendMetadata }
   | { type: "run.requested"; userMessageId?: string; supersededRunId?: string }
   | { type: "run.adopted"; runId: string; userMessageId?: string }
   | { type: "run.request.failed"; message?: string }
@@ -83,6 +84,9 @@ export function reduceAgentChatRuntime(
   }
   if (action.type === "run.statuses.loaded") {
     return { ...state, runStatusesByRunId: { ...state.runStatusesByRunId, ...action.statuses } };
+  }
+  if (action.type === "run.resend.requested") {
+    return adoptResendReplacement(state, action.resend);
   }
   if (action.type === "run.requested") {
     const userMessageId = action.userMessageId ?? state.pendingTodoUserMessageId ?? latestUserMessageId(state.messages);
@@ -501,16 +505,52 @@ function reduceResendStatus(state: AgentChatRuntimeState, event: RunEvent): Agen
   const metadata = resendMetadataFromEvent(event);
   if (!sourceRunId || !metadata) return state;
   const failed = event.type === "run.resend.failed";
+  if (!failed) {
+    return adoptResendReplacement(state, metadata);
+  }
   return {
     ...state,
-    messages: state.messages.map((message) => message.role === "user" && message.runId === sourceRunId
-      ? { ...message, resend: metadata }
+    messages: state.messages.map((message) => message.role === "user"
+      && (message.runId === sourceRunId || message.runId === replacementRunId)
+      ? { ...message, runId: sourceRunId, resend: metadata }
       : message),
-    status: failed ? "FAILED" : "PENDING",
-    runtimeStatus: failed ? undefined : { type: "busy" },
+    status: "FAILED",
+    runtimeStatus: undefined,
     runStatusesByRunId: {
       ...state.runStatusesByRunId,
-      [replacementRunId]: failed ? "FAILED" : "PENDING"
+      [replacementRunId]: "FAILED"
+    }
+  };
+}
+
+/** 等待阶段把现有用户轮次接管到替代 Run，使状态栏立即进入运行态；远端新 ID 到达前仍保留原气泡。 */
+function adoptResendReplacement(
+  state: AgentChatRuntimeState,
+  metadata: ResendMetadata
+): AgentChatRuntimeState {
+  const sourceUser = state.messages.find(
+    (message) => message.role === "user" && message.runId === metadata.sourceRunId
+  );
+  const sourceUserMessageId = state.todoUserMessageIdByRunId[metadata.sourceRunId]
+    ?? (sourceUser?.role === "user" ? sourceUser.id : undefined);
+  return {
+    ...state,
+    messages: state.messages.map((message) => message.role === "user" && message.runId === metadata.sourceRunId
+      ? { ...message, runId: metadata.replacementRunId, resend: metadata }
+      : message),
+    status: "PENDING",
+    runtimeStatus: { type: "busy" },
+    todoUserMessageIdByRunId: sourceUserMessageId
+      ? {
+          ...state.todoUserMessageIdByRunId,
+          [metadata.replacementRunId]: sourceUserMessageId
+        }
+      : state.todoUserMessageIdByRunId,
+    pendingTodoUserMessageId: sourceUserMessageId ?? state.pendingTodoUserMessageId,
+    currentTodoRunId: metadata.replacementRunId,
+    runStatusesByRunId: {
+      ...state.runStatusesByRunId,
+      [metadata.replacementRunId]: "PENDING"
     }
   };
 }
@@ -520,13 +560,25 @@ function reduceResendStarted(state: AgentChatRuntimeState, event: RunEvent): Age
   const sourceRunId = text(event.payload.sourceRunId);
   const replacementRunId = text(event.payload.replacementRunId) ?? event.runId;
   if (!sourceRunId) return state;
+  const startedMetadata = resendMetadataFromEvent(event);
   const sourceUserMessageId = state.todoUserMessageIdByRunId[sourceRunId];
-  const messages = state.messages.filter((message) => {
+  const messages: AgentMessage[] = state.messages.filter((message) => {
     if (message.role === "card") {
       return text(message.payload.runId) !== sourceRunId
         && text(message.payload.sourceRunId) !== sourceRunId;
     }
     return message.runId !== sourceRunId;
+  }).map((message): AgentMessage => {
+    if (message.role !== "user" || message.runId !== replacementRunId) {
+      return message;
+    }
+    // OpenCode 会为替代轮次分配新消息 ID；旧平台/远端边界仅用于等待展示，受理后必须原位迁移。
+    const { messageId: _messageId, remoteMessageId: _remoteMessageId, platformMessageId: _platformMessageId, ...pendingUser } = message;
+    const resend = startedMetadata
+      ?? (message.resend
+        ? { ...message.resend, status: text(event.payload.status) ?? "DISPATCHED" }
+        : undefined);
+    return { ...pendingUser, resend };
   });
   const retainedMessageIds = new Set(messages
     .filter((message) => message.role !== "card")
@@ -537,9 +589,6 @@ function reduceResendStarted(state: AgentChatRuntimeState, event: RunEvent): Age
   if (sourceUserMessageId) delete todoSnapshotsByUserMessageId[sourceUserMessageId];
   const todoUserMessageIdByRunId = { ...state.todoUserMessageIdByRunId };
   delete todoUserMessageIdByRunId[sourceRunId];
-  if (sourceUserMessageId && todoUserMessageIdByRunId[replacementRunId] === sourceUserMessageId) {
-    delete todoUserMessageIdByRunId[replacementRunId];
-  }
   return {
     ...state,
     messages,
@@ -548,7 +597,7 @@ function reduceResendStarted(state: AgentChatRuntimeState, event: RunEvent): Age
     todos: [],
     todoSnapshotsByUserMessageId,
     todoUserMessageIdByRunId,
-    pendingTodoUserMessageId: undefined,
+    pendingTodoUserMessageId: sourceUserMessageId,
     currentTodoRunId: replacementRunId,
     supersededTodoRunIds: [...new Set([...state.supersededTodoRunIds, sourceRunId])].slice(-100),
     diff: undefined,
@@ -982,7 +1031,10 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
     ? {
         ...base,
         role: "user",
-        parts: existing?.role === "user" ? existing.parts : undefined
+        parts: existing?.role === "user" ? existing.parts : undefined,
+        sourceType: existing?.role === "user" ? existing.sourceType : undefined,
+        sourceRefId: existing?.role === "user" ? existing.sourceRefId : undefined,
+        resend: existing?.role === "user" ? existing.resend : undefined
       }
     : {
         ...base,

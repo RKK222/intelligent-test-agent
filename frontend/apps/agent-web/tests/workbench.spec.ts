@@ -5317,6 +5317,97 @@ test("switching history restores assistant documents and the file changes summar
   await expect(page.getByTestId("oc-diff-summary").getByText("登录测试报告.md", { exact: false })).toBeVisible();
 });
 
+test("manual resend keeps the user turn, shows running status, and replaces the old answer", async ({ page }) => {
+  const runResendRequests: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, {
+    runResendRequests,
+    sessions: [session()],
+    sessionMessages: [
+      {
+        messageId: "msg_11111111111111111111111111111111",
+        remoteMessageId: "msg_remote_source",
+        sessionId: "ses_1",
+        role: "USER",
+        content: "重新检查登录流程",
+        createdAt: "2026-08-07T08:00:00Z",
+        runId: "run_history"
+      },
+      {
+        messageId: "msg_22222222222222222222222222222222",
+        remoteMessageId: "msg_remote_old_answer",
+        sessionId: "ses_1",
+        role: "ASSISTANT",
+        content: "旧回答不应继续显示",
+        createdAt: "2026-08-07T08:01:00Z",
+        runId: "run_history"
+      }
+    ],
+    historyRun: {
+      runId: "run_history",
+      sessionId: "ses_1",
+      workspaceId: "wrk_1234567890abcdef",
+      status: "SUCCEEDED",
+      createdAt: "2026-08-07T08:00:00Z",
+      updatedAt: "2026-08-07T08:01:00Z"
+    },
+    runEventsByRunId: { run_resend_replacement: [] }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await selectPetContextSession(page);
+  await expect(page.getByText("旧回答不应继续显示")).toBeVisible();
+  await page.getByRole("button", { name: "撤销重发最后一条消息" }).click();
+
+  await expect.poll(() => runResendRequests.length).toBe(1);
+  await expect(page.getByTestId("figma-work-status-dock").locator(".oc-work-status[data-status='running']")).toBeVisible();
+  await expect(page.getByText("旧回答不应继续显示")).toBeVisible();
+
+  const resendPayload = {
+    resendId: "rsd_e2e",
+    sourceRunId: "run_history",
+    replacementRunId: "run_resend_replacement",
+    trigger: "MANUAL",
+    totalAttempt: 1,
+    automaticAttempt: 0,
+    automaticLimit: 3,
+    status: "DISPATCHED",
+    executeAt: "2026-08-07T08:02:00Z"
+  };
+  await callAgentWorkbenchHandler(page, "handleRunEvent", [{
+    ...event(1, "run.resend.started", resendPayload),
+    runId: "run_resend_replacement"
+  }, "ses_1"]);
+  await callAgentWorkbenchHandler(page, "handleRunEvent", [{
+    ...event(2, "message.updated", {
+      message: { id: "msg_remote_replacement", role: "user", content: "重新检查登录流程" }
+    }),
+    runId: "run_resend_replacement"
+  }, "ses_1"]);
+  await callAgentWorkbenchHandler(page, "handleRunEvent", [{
+    ...event(3, "message.updated", {
+      message: { id: "msg_remote_new_answer", role: "assistant" }
+    }),
+    runId: "run_resend_replacement"
+  }, "ses_1"]);
+  await callAgentWorkbenchHandler(page, "handleRunEvent", [{
+    ...event(4, "message.part.updated", {
+      messageID: "msg_remote_new_answer",
+      part: { id: "part_resend_answer", messageID: "msg_remote_new_answer", type: "text", text: "新回答已经接管页面" }
+    }),
+    runId: "run_resend_replacement"
+  }, "ses_1"]);
+  await callAgentWorkbenchHandler(page, "handleRunEvent", [{
+    ...event(5, "run.succeeded", {}),
+    runId: "run_resend_replacement"
+  }, "ses_1"]);
+
+  await expect(page.getByText("旧回答不应继续显示")).toHaveCount(0);
+  await expect(page.getByText("新回答已经接管页面")).toBeVisible();
+  await expect(page.locator(".oc-user-message")).toHaveCount(1);
+  await expect(page.locator(".oc-user-message")).toHaveAttribute("data-oc-turn-id", "msg_remote_replacement");
+  await expect(page.getByTestId("figma-work-status-dock").locator(".oc-work-status[data-status='running']")).toHaveCount(0);
+});
+
 test("history run projection keeps sending locked until stale details cannot overwrite a new run", async ({ page }) => {
   let releaseHistoryRun!: () => void;
   const historyRunGate = new Promise<void>((resolve) => {
@@ -7656,6 +7747,7 @@ async function mockBackendApi(
     sessionUpdateRequests?: Array<{ sessionId: string; payload: Record<string, unknown> }>;
     sessionRequests?: Array<Record<string, unknown>>;
     batchSessionRequests?: Array<Record<string, unknown>>;
+    runResendRequests?: Array<Record<string, unknown>>;
     permissionReplies?: Array<Record<string, unknown>>;
     questionReplies?: Array<Record<string, unknown>>;
     terminalTickets?: Array<Record<string, unknown>>;
@@ -9068,6 +9160,34 @@ async function mockBackendApi(
         contextToken: capture.runContextTokens?.[contextIndex] ?? `ctx_e2e_${contextIndex + 1}`,
         contextVersion: contextIndex + 1,
         expiresAt: "2026-07-11T00:00:00Z"
+      }));
+      return;
+    }
+    if (method === "POST" && /^\/api\/internal\/agent\/opencode\/sessions\/[^/]+\/resends$/.test(url.pathname)) {
+      const request = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+      capture.runResendRequests?.push(request);
+      const resend = {
+        resendId: "rsd_e2e",
+        sourceRunId: String(request.expectedRunId ?? "run_history"),
+        replacementRunId: "run_resend_replacement",
+        trigger: "MANUAL",
+        totalAttempt: 1,
+        automaticAttempt: 0,
+        automaticLimit: 3,
+        status: "WAITING",
+        executeAt: "2026-08-07T08:02:00Z"
+      };
+      await route.fulfill(json({
+        replacementRun: {
+          runId: "run_resend_replacement",
+          sessionId: url.pathname.match(/\/sessions\/([^/]+)\/resends$/)?.[1] ?? "ses_1",
+          workspaceId: "wrk_1234567890abcdef",
+          status: "PENDING",
+          createdAt: "2026-08-07T08:01:30Z",
+          updatedAt: "2026-08-07T08:01:30Z",
+          resend
+        },
+        resend
       }));
       return;
     }

@@ -2767,7 +2767,7 @@ Base URL：`/api/internal/platform/opencode-runtime/night-execution`。除下文
 
 主动失效入口包括 Session 归档、进程状态变化、Workspace 可信字段变化、成员/角色撤权和可信路径参数重载。用户权限及 Workspace 关系型变更先建立 mutation gate 并失效旧 token，保存成功后 Lua 原子再次失效并释放自己的 gate token，数据库失败只释放自己的 token；Redis 完成失败时 gate 留存 fail-closed，最多 24 小时。generation 不设 TTL，确保 gate 过期后旧 token 仍不能复活。Redis 读取、脚本或写入失败返回 `503 RUNTIME_STATE_UNAVAILABLE`，不回退 PostgreSQL 或 JVM 内存。
 
-鉴权、Session/Workspace 归属或当前用户进程校验失败仍使用既有 `UNAUTHENTICATED`、`FORBIDDEN`、`NOT_FOUND`、`OPENCODE_UNAVAILABLE`。Run 缺少 token 且兼容开关关闭时返回 `409 CONVERSATION_CONTEXT_REQUIRED`；token 未命中、过期、版本不匹配或与当前用户/agent/Session 不匹配时返回 `409 CONVERSATION_CONTEXT_EXPIRED`。
+鉴权、Session/Workspace 归属或当前用户进程校验失败仍使用既有 `UNAUTHENTICATED`、`FORBIDDEN`、`NOT_FOUND`、`OPENCODE_UNAVAILABLE`。Run 缺少 token 且兼容开关关闭时返回 `409 CONVERSATION_CONTEXT_REQUIRED`；token 未命中、过期、版本不匹配或与当前用户/agent/Session 不匹配时返回 `409 CONVERSATION_CONTEXT_EXPIRED`。若 token 签发时远端 binding 尚不存在，而校验时同一执行节点已经建立权威 binding，服务端同样令该旧 token 过期；前端按既有规则重签上下文并复用原 `clientRequestId` 重试，确保新远端边界进入后续重发校验。
 
 对应测试：`ConversationContextControllerTest`、`ConversationContextApplicationServiceTest`、`ManagedConversationWorkspaceAccessAuthorizerTest`、`ConversationMemberRevocationIntegrationTest`、`ConversationRunContextResolverTest`、`RedisConversationContextStoreTest`、`RedisConversationContextStoreIntegrationTest`。
 
@@ -3862,6 +3862,7 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
   上下文缺失/过期分别返回既有 `CONVERSATION_CONTEXT_REQUIRED/CONVERSATION_CONTEXT_EXPIRED`；远端读取失败使用安全网关错误。
 - traceId：沿统一响应 envelope 和 RunEvent 传播；控制表只保存 traceId 与安全错误摘要，不保存用户输入、模型回答或供应商正文。
 - 幂等：同一 owner + `clientRequestId` 返回同一替代 Run；同一 source Run、replacement Run 和会话活动锁均有数据库唯一约束。
+- 页面接管：接口返回替代 Run 后，调用方应立即把源用户轮次的展示所有权切到替代 Run，以 `PENDING/WAITING` 投影运行状态栏；`run.resend.started` 仅清理源 Run 的回答、工具和其它过程投影，保留该用户轮次并清除旧远端标识，随后用替代 Run 的真实 user message ID 原位接管。定时来源及 `resend` 元数据在 ID 替换期间必须保留。
 - 兼容性：接口与所有 `resend` 字段均为新增，旧客户端缺失字段时按普通 Run/消息显示。
 - 对应测试：`RunResendApplicationServiceTest`、`RunResendExecutionServiceTest`、`RunResendAutomaticServiceTest`、
   `MyBatisRunResendRepositoryIntegrationTest`、前端 reducer 和 `FigmaChatPanelTest`。

@@ -1,12 +1,26 @@
 import { describe, expect, it } from "vitest";
 import { createInitialAgentChatRuntimeState, reduceAgentChatRuntime, type AgentChatRuntimeState } from "../src/runtime-reducer";
+import { createOpencodeLikeState, createTimelineRows } from "../src/opencode-like";
 import type { RunEvent } from "@test-agent/shared-types";
 
 describe("agent-chat runtime reducer", () => {
   it("projects an automatic resend countdown on the scheduled source message", () => {
-    const initial = createInitialAgentChatRuntimeState([
-      { id: "user-old", role: "user", text: "retry me", createdAt: "2026-08-07T00:00:00Z", runId: "run_old", sourceType: "SCHEDULED_TASK" }
-    ]);
+    const initial = {
+      ...createInitialAgentChatRuntimeState([
+        {
+          id: "user-old",
+          messageId: "platform-user-old",
+          remoteMessageId: "msg_remote_old",
+          role: "user",
+          text: "retry me",
+          createdAt: "2026-08-07T00:00:00Z",
+          runId: "run_old",
+          sourceType: "SCHEDULED_TASK"
+        }
+      ]),
+      todoUserMessageIdByRunId: { run_old: "user-old" },
+      runStatusesByRunId: { run_old: "SUCCEEDED" }
+    } satisfies AgentChatRuntimeState;
 
     const next = reduceAgentChatRuntime(initial, { type: "event", event: runEvent(
       "run.resend.scheduled",
@@ -26,15 +40,29 @@ describe("agent-chat runtime reducer", () => {
 
     expect(next.messages[0]).toMatchObject({
       role: "user",
+      runId: "run_new",
       resend: { trigger: "AUTOMATIC", automaticAttempt: 1, automaticLimit: 3, status: "WAITING" }
     });
+    expect(next.messages[0]).toMatchObject({
+      messageId: "platform-user-old",
+      remoteMessageId: "msg_remote_old"
+    });
     expect(next.status).toBe("PENDING");
+    expect(next.runtimeStatus).toEqual({ type: "busy" });
+    expect(next.todoUserMessageIdByRunId).toMatchObject({ run_old: "user-old", run_new: "user-old" });
     expect(next.runStatusesByRunId.run_new).toBe("PENDING");
+    const statusRow = createTimelineRows(createOpencodeLikeState({
+      messages: next.messages,
+      running: true,
+      runtimeStatus: next.runtimeStatus,
+      runStatusesByRunId: next.runStatusesByRunId
+    })).find((row) => row.type === "work-status");
+    expect(statusRow).toMatchObject({ type: "work-status", runId: "run_new", status: "running", isLatest: true });
   });
 
   it("atomically removes the superseded run projection when native resend starts", () => {
     const initial = createInitialAgentChatRuntimeState([
-      { id: "user-old", role: "user", text: "retry me", createdAt: "2026-08-07T00:00:00Z", runId: "run_old" },
+      { id: "user-old", role: "user", text: "retry me", createdAt: "2026-08-07T00:00:00Z", runId: "run_old", sourceType: "SCHEDULED_TASK" },
       { id: "assistant-old", role: "assistant", text: "old answer", createdAt: "2026-08-07T00:00:01Z", runId: "run_old" },
       { id: "card-old", role: "card", cardType: "event", title: "failed", payload: { runId: "run_old" }, createdAt: "2026-08-07T00:00:02Z" }
     ]);
@@ -48,20 +76,59 @@ describe("agent-chat runtime reducer", () => {
       todoUserMessageIdByRunId: { run_old: "user-old", run_new: "user-old" }
     } as unknown as AgentChatRuntimeState;
 
-    const next = reduceAgentChatRuntime(dirty, { type: "event", event: runEvent(
+    const scheduled = reduceAgentChatRuntime(dirty, { type: "event", event: runEvent(
+      "run.resend.scheduled",
+      "run_new",
+      {
+        resendId: "resend_2",
+        sourceRunId: "run_old",
+        replacementRunId: "run_new",
+        trigger: "MANUAL",
+        totalAttempt: 1,
+        automaticAttempt: 0,
+        automaticLimit: 3,
+        status: "WAITING",
+        executeAt: "2026-08-07T00:01:00Z"
+      }
+    ) });
+    const next = reduceAgentChatRuntime(scheduled, { type: "event", event: runEvent(
       "run.resend.started",
       "run_new",
       { sourceRunId: "run_old", replacementRunId: "run_new", status: "DISPATCHED" }
     ) });
 
-    expect(next.messages).toEqual([]);
+    expect(next.messages).toEqual([
+      expect.objectContaining({
+        id: "user-old",
+        role: "user",
+        runId: "run_new",
+        resend: expect.objectContaining({ status: "DISPATCHED" })
+      })
+    ]);
+    expect(next.messages[0]).not.toHaveProperty("messageId");
+    expect(next.messages[0]).not.toHaveProperty("remoteMessageId");
     expect(next.todos).toEqual([]);
     expect(next.diff).toBeUndefined();
     expect(next.streamingTextByPartId).toEqual({});
     expect(next.subagentsBySessionId).toEqual({});
     expect(next.supersededTodoRunIds).toContain("run_old");
     expect(next.currentTodoRunId).toBe("run_new");
-    expect(next.todoUserMessageIdByRunId).toEqual({});
+    expect(next.pendingTodoUserMessageId).toBe("user-old");
+    expect(next.todoUserMessageIdByRunId).toEqual({ run_new: "user-old" });
+
+    const rebound = reduceAgentChatRuntime(next, { type: "event", event: runEvent(
+      "message.updated",
+      "run_new",
+      { message: { id: "msg_remote_new", role: "user", content: "retry me" } }
+    ) });
+    expect(rebound.messages).toEqual([
+      expect.objectContaining({
+        id: "msg_remote_new",
+        runId: "run_new",
+        sourceType: "SCHEDULED_TASK",
+        resend: expect.objectContaining({ resendId: "resend_2", trigger: "MANUAL" })
+      })
+    ]);
   });
   it("keeps assistant usage and model metadata across later part updates", () => {
     const withMessage = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
