@@ -3444,6 +3444,89 @@ test("new runs use one in-memory conversation context and a client request id", 
   expect(String(runRequests[0]?.clientRequestId)).toMatch(/^req_/);
 });
 
+test("batch test cases start isolated runs, retry failures, and create isolated scheduled tasks", async ({ page }) => {
+  const batchSessionRequests: Array<Record<string, unknown>> = [];
+  const runRequests: Array<Record<string, unknown>> = [];
+  const runContextRequests: string[] = [];
+  const nightTaskRequests: Array<Record<string, unknown>> = [];
+  const nightTasks: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    batchSessionRequests,
+    runRequests,
+    runContextRequests,
+    nightTaskRequests,
+    nightTasks,
+    runIds: ["run_batch_1", "run_batch_2"],
+    runEventsByRunId: { run_batch_1: [], run_batch_2: [] },
+    fileReadFailureAttempts: {
+      "spec/支付需求/01-需求/退款/需求.md": [1]
+    },
+    fileContents: {
+      "spec/账户需求/01-需求/密码重置/需求.md": "密码重置需求正文",
+      "spec/账户需求/02-设计/密码重置/设计.md": "密码重置设计正文",
+      "spec/支付需求/01-需求/退款/需求.md": "退款需求正文"
+    }
+  });
+
+  await gotoWorkbench(page);
+  const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
+  await composer.fill("保留当前输入内容");
+  await page.locator(".figma-chat-composer").hover();
+  await page.getByTestId("batch-test-case-entry").click();
+
+  const dialog = page.getByTestId("batch-test-case-dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("密码重置");
+  await expect(dialog).toContainText("退款");
+  await dialog.getByTestId("batch-select-all").click();
+  await dialog.getByTestId("batch-execute-now").click();
+
+  await expect.poll(() => batchSessionRequests.length).toBe(1);
+  await expect.poll(() => runRequests.length).toBe(1);
+  await dialog.getByRole("button", { name: /仅重试失败项/ }).click();
+  await expect.poll(() => batchSessionRequests.length).toBe(2);
+  await expect.poll(() => runRequests.length).toBe(2);
+  expect(new Set(batchSessionRequests.map((request) => String(
+    (request.batchContext as Record<string, unknown>)?.batchId
+  ))).size).toBe(1);
+  expect(new Set(batchSessionRequests.map((request) => String(
+    (request.batchContext as Record<string, unknown>)?.itemRequestId
+  ))).size).toBe(2);
+  expect(new Set(batchSessionRequests.map((request) => request.title))).toEqual(new Set([
+    "账户需求 密码重置 测试案例",
+    "支付需求 退款 测试案例"
+  ]));
+  expect(new Set(runRequests.map((request) => request.sessionId))).toEqual(
+    new Set(["ses_batch_1", "ses_batch_2"])
+  );
+  expect(new Set(runContextRequests)).toEqual(new Set(["ses_batch_1", "ses_batch_2"]));
+  expect(new Set(runRequests.map((request) => String(request.prompt)))).toEqual(new Set([
+    "请生成子条目测试案例。\n\n需求项：账户需求\n子条目：密码重置",
+    "请生成子条目测试案例。\n\n需求项：支付需求\n子条目：退款"
+  ]));
+  expect(new Set(runRequests.flatMap((request) => request.parts as Array<Record<string, unknown>>)
+    .filter((part) => part.type === "file")
+    .map((part) => part.content))).toEqual(new Set(["密码重置需求正文", "密码重置设计正文", "退款需求正文"]));
+
+  await dialog.getByTestId("batch-open-schedule").click();
+  await dialog.getByTestId("batch-night-slot").click();
+  await dialog.getByTestId("batch-execute-scheduled").click();
+  await expect.poll(() => nightTaskRequests.length).toBe(2);
+  expect(nightTaskRequests.every((request) => request.sessionId == null)).toBe(true);
+  expect(new Set(nightTaskRequests.map((request) => String(
+    (request.batchContext as Record<string, unknown>)?.batchId
+  ))).size).toBe(1);
+  expect(new Set(nightTaskRequests.map((request) => String(
+    (request.batchContext as Record<string, unknown>)?.itemRequestId
+  ))).size).toBe(2);
+  expect(new Set(nightTasks.map((task) => task.sessionId))).toEqual(
+    new Set(["ses_night_created_1", "ses_night_created_2"])
+  );
+  await expect(composer).toHaveValue("保留当前输入内容");
+  await expect(page.locator(".figma-chat-title")).toHaveText("");
+});
+
 test("a blank conversation schedules a night task and restores it from the pending tab", async ({ page }, testInfo) => {
   const nightTaskRequests: Array<Record<string, unknown>> = [];
   const nightTasks: Array<Record<string, unknown>> = [];
@@ -7572,6 +7655,7 @@ async function mockBackendApi(
     compactRequestGate?: Promise<void>;
     sessionUpdateRequests?: Array<{ sessionId: string; payload: Record<string, unknown> }>;
     sessionRequests?: Array<Record<string, unknown>>;
+    batchSessionRequests?: Array<Record<string, unknown>>;
     permissionReplies?: Array<Record<string, unknown>>;
     questionReplies?: Array<Record<string, unknown>>;
     terminalTickets?: Array<Record<string, unknown>>;
@@ -8850,12 +8934,15 @@ async function mockBackendApi(
       const request = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
       capture.nightTaskRequests?.push(request);
       const taskId = `net_e2e_${nightTasks.length + 1}`;
+      const createdSessionId = request.sessionId == null && request.batchContext != null
+        ? `ses_night_created_${nightTasks.length + 1}`
+        : String(request.sessionId ?? "ses_night_created");
       const scheduleMode = String(request.scheduleMode ?? "NIGHT_WINDOW");
       const slotStart = String(request.slotStart ?? "2026-07-18T13:15:00Z");
       const slotStartMillis = new Date(slotStart).getTime();
       const task = {
         taskId,
-        sessionId: String(request.sessionId ?? "ses_night_created"),
+        sessionId: createdSessionId,
         workspaceId: String(request.workspaceId ?? "wrk_1234567890abcdef"),
         sessionTitle: String(request.sessionTitle ?? "夜间任务"),
         contentPreview: String(request.prompt ?? "夜间任务"),
@@ -8877,6 +8964,17 @@ async function mockBackendApi(
       };
       nightTasks.push(task);
       await route.fulfill(json(task));
+      return;
+    }
+    if (method === "POST" && url.pathname === "/api/internal/platform/opencode-runtime/sessions/batch-items") {
+      const request = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+      capture.batchSessionRequests?.push(request);
+      const requestIndex = capture.batchSessionRequests?.length ?? 1;
+      await route.fulfill(json({
+        ...session(),
+        sessionId: `ses_batch_${requestIndex}`,
+        title: String(request.title ?? "批量测试案例")
+      }));
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/night-execution/tasks") {

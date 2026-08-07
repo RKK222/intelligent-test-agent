@@ -31,6 +31,9 @@ import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.event.RunEventSsePayload;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
+import jakarta.validation.Valid;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -64,6 +67,19 @@ final class RuntimeDtos {
      * 创建会话请求体。
      */
     record CreateSessionRequest(@NotBlank String workspaceId, @NotBlank String title) {
+    }
+
+    /** 创建批量单项会话请求体；batchContext 为必填幂等归因。 */
+    record CreateBatchItemSessionRequest(
+            @NotBlank String workspaceId,
+            @NotBlank @Size(max = 255) String title,
+            @NotNull @Valid BatchContextRequest batchContext) {
+    }
+
+    /** 批量归因 ID 均由调用方稳定生成，服务端限制为数据库字段长度。 */
+    record BatchContextRequest(
+            @NotBlank @Size(max = 128) String batchId,
+            @NotBlank @Size(max = 128) String itemRequestId) {
     }
 
     /**

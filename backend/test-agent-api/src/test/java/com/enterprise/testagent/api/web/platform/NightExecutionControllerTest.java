@@ -84,6 +84,54 @@ class NightExecutionControllerTest {
     }
 
     @Test
+    void mapsBatchContextAndRequiresASeparateSession() {
+        NightExecutionTaskApplicationService service = mock(NightExecutionTaskApplicationService.class);
+        when(service.create(eq(USER_ID), eq(false), any(NightExecutionCreateCommand.class), eq(TRACE_ID)))
+                .thenReturn(task());
+        WebTestClient client = authenticatedClient(service);
+
+        client.post().uri("/api/internal/platform/opencode-runtime/night-execution/tasks")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {
+                          "clientRequestId":"task-request-batch",
+                          "workspaceId":"wrk_night_controller",
+                          "sessionTitle":"批量夜间回归",
+                          "prompt":"生成测试案例",
+                          "slotStart":"2026-07-18T13:15:00Z",
+                          "batchContext":{"batchId":"batch_controller","itemRequestId":"item_controller"}
+                        }
+                        """)
+                .exchange()
+                .expectStatus().isOk();
+
+        verify(service).create(eq(USER_ID), eq(false), argThat(command -> command.sessionId() == null
+                        && command.batchContext() != null
+                        && command.batchContext().batchId().equals("batch_controller")
+                        && command.batchContext().itemRequestId().equals("item_controller")),
+                eq(TRACE_ID));
+
+        client.post().uri("/api/internal/platform/opencode-runtime/night-execution/tasks")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {
+                          "clientRequestId":"task-request-invalid-batch",
+                          "sessionId":"ses_existing",
+                          "workspaceId":"wrk_night_controller",
+                          "prompt":"不能复用当前会话",
+                          "slotStart":"2026-07-18T13:15:00Z",
+                          "batchContext":{"batchId":"batch_controller","itemRequestId":"item_controller_2"}
+                        }
+                        """)
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("VALIDATION_ERROR");
+    }
+
+    @Test
     void passesSuperAdminFactAndCustomModeToApplicationService() {
         NightExecutionTaskApplicationService service = mock(NightExecutionTaskApplicationService.class);
         when(service.create(eq(USER_ID), eq(true), any(NightExecutionCreateCommand.class), eq(TRACE_ID)))

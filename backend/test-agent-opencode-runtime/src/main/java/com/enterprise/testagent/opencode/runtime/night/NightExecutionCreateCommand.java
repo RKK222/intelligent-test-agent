@@ -3,6 +3,7 @@ package com.enterprise.testagent.opencode.runtime.night;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionScheduleMode;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
+import com.enterprise.testagent.opencode.runtime.session.BatchContext;
 import java.time.Instant;
 import java.util.Objects;
 
@@ -14,7 +15,8 @@ public record NightExecutionCreateCommand(
         String sessionTitle,
         NightExecutionRunInputSnapshot runInput,
         NightExecutionScheduleMode scheduleMode,
-        Instant slotStart) {
+        Instant slotStart,
+        BatchContext batchContext) {
 
     public NightExecutionCreateCommand {
         clientRequestId = required(clientRequestId, "clientRequestId");
@@ -23,6 +25,21 @@ public record NightExecutionCreateCommand(
         Objects.requireNonNull(runInput, "runInput must not be null");
         scheduleMode = scheduleMode == null ? NightExecutionScheduleMode.NIGHT_WINDOW : scheduleMode;
         Objects.requireNonNull(slotStart, "slotStart must not be null");
+        if (batchContext != null && sessionId != null) {
+            throw new IllegalArgumentException("batchContext requires sessionId to be omitted");
+        }
+    }
+
+    /** 兼容未携带批量归因的既有调用方。 */
+    public NightExecutionCreateCommand(
+            String clientRequestId,
+            SessionId sessionId,
+            WorkspaceId workspaceId,
+            String sessionTitle,
+            NightExecutionRunInputSnapshot runInput,
+            NightExecutionScheduleMode scheduleMode,
+            Instant slotStart) {
+        this(clientRequestId, sessionId, workspaceId, sessionTitle, runInput, scheduleMode, slotStart, null);
     }
 
     /** 兼容未携带模式的既有调用方，保持标准夜间窗口语义。 */
@@ -34,7 +51,7 @@ public record NightExecutionCreateCommand(
             NightExecutionRunInputSnapshot runInput,
             Instant slotStart) {
         this(clientRequestId, sessionId, workspaceId, sessionTitle, runInput,
-                NightExecutionScheduleMode.NIGHT_WINDOW, slotStart);
+                NightExecutionScheduleMode.NIGHT_WINDOW, slotStart, null);
     }
 
     private static String required(String value, String name) {

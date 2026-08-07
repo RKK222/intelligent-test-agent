@@ -9,6 +9,12 @@
 - 存量 `Jdbc*Repository` 仅保留迁移窗口，后续触及其 SQL 时迁移到 MyBatis XML。当前通用参数 `CommonParameterRepository`、Agent 配置 `AgentConfigRepository`、`RunEventRepository` 与 scheduler `ScheduledTaskRepository` 已迁移到 MyBatis XML；夜间任务从首版即只使用 MyBatis XML。
 - Flyway migration 只能承载表结构变更、历史数据兼容迁移和生产必需的基础字典/系统参数；禁止通过 Flyway 写入测试、演示、个人开发或环境专属数据（例如样例应用/工作区、默认开发账号、默认本地进程绑定）。此类数据必须放在测试 fixture、`test-agent-test-support`、mock 数据、显式本地开发脚本或人工初始化流程中。历史已存在的开发种子迁移仅为兼容已落库环境保留，后续不得新增同类迁移。
 
+## V20260807230000 批量会话归因
+
+`V20260807230000__add_batch_session_attribution.sql` 为 `sessions` 增加 `batch_mode boolean not null default false`、`batch_id varchar(128)` 和 `batch_item_request_id varchar(128)`。普通会话继续使用默认值且两个 ID 必须为空；批量会话必须存在 `created_by_user_id` 和两个非空白 ID。部分唯一索引 `uk_sessions_batch_item_request(created_by_user_id, batch_item_request_id)` 保证同一用户的单项创建幂等，不同用户互不冲突；`idx_sessions_batch_created(batch_id, created_at)` 只服务后续运营统计查询。本期不新增报表，也不改变 `source_type`：立即批量保持 `MANUAL`，定时批量保持 `SCHEDULED_TASK`。
+
+批量归因查询、写入和 PostgreSQL 事务级 advisory lock 全部位于 `BatchSessionAttributionMapper.xml`；锁键由当前用户和 `itemRequestId` 组成，Session 业务键固定使用 `session_id`，不得与内部 bigint `id` 混用。夜间任务在既有事务内完成新 Session、归因、容量、任务和会话锁写入，任一失败整体回滚。真实 PostgreSQL 测试覆盖完整空库迁移、默认值、检查/唯一约束、索引和同键并发串行化；正式合并或企业打包前仍须重新对照各目标环境 `flyway_schema_history`，若候选版本已被占用则只允许顺延新 migration，禁止改写任何已执行文件。
+
 ## Python workflow 独立 PostgreSQL
 
 长程任务使用同一 PostgreSQL 集群中的独立 `test_agent_workflow` 数据库和最小权限账号，与平台主库及 XXL MySQL 完全隔离。业务表由 `workflow-service/migrations/` 的 Alembic 管理，LangGraph checkpoint 表由独立 `testagent-workflow checkpoint-setup` 命令初始化；不扫描 Java Flyway location、不写平台 `flyway_schema_history`，也不受 Java MyBatis XML 规则约束。

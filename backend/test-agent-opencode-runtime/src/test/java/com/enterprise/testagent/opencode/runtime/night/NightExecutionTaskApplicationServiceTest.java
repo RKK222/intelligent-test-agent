@@ -20,6 +20,7 @@ import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskId;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskRepository;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskStatus;
 import com.enterprise.testagent.domain.session.ConversationSourceType;
+import com.enterprise.testagent.domain.session.BatchSessionAttributionRepository;
 import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionMessageRepository;
@@ -34,6 +35,7 @@ import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.run.StartRunInput;
+import com.enterprise.testagent.opencode.runtime.session.BatchContext;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -58,6 +60,7 @@ class NightExecutionTaskApplicationServiceTest {
     private SessionRepository sessionRepository;
     private WorkspaceRepository workspaceRepository;
     private ConversationWorkspaceAccessAuthorizer accessAuthorizer;
+    private BatchSessionAttributionRepository batchAttributionRepository;
     private UserOpencodeProcessAssignmentService assignmentService;
     private NightExecutionCapacityRegistry capacityRegistry;
     private NightExecutionTaskApplicationService service;
@@ -68,6 +71,7 @@ class NightExecutionTaskApplicationServiceTest {
         sessionRepository = mock(SessionRepository.class);
         workspaceRepository = mock(WorkspaceRepository.class);
         accessAuthorizer = mock(ConversationWorkspaceAccessAuthorizer.class);
+        batchAttributionRepository = mock(BatchSessionAttributionRepository.class);
         assignmentService = mock(UserOpencodeProcessAssignmentService.class);
         SessionMessageRepository messageRepository = mock(SessionMessageRepository.class);
         BackendJavaRouteResolver routeResolver = mock(BackendJavaRouteResolver.class);
@@ -89,6 +93,7 @@ class NightExecutionTaskApplicationServiceTest {
                 taskRepository, sessionRepository, messageRepository, workspaceRepository,
                 accessAuthorizer, assignmentService, routeResolver,
                 new NightExecutionWindowCalculator(), capacityRegistry,
+                batchAttributionRepository,
                 new ObjectMapper().findAndRegisterModules(), Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -144,6 +149,31 @@ class NightExecutionTaskApplicationServiceTest {
         assertThat(session.getValue().sourceRefId()).isEqualTo(created.taskId().value());
         assertThat(session.getValue().createdByUserId()).isEqualTo(USER);
         verify(taskRepository).insertSessionLock(created.sessionId(), created.taskId(), USER, NOW);
+    }
+
+    @Test
+    void marksNewScheduledSessionWithBatchAttribution() {
+        when(sessionRepository.save(any(Session.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(taskRepository.insertSessionLock(any(SessionId.class), any(), eq(USER), eq(NOW))).thenReturn(true);
+        when(batchAttributionRepository.markBatch(
+                any(SessionId.class), eq(USER), eq("batch_night"), eq("batch_item_night")))
+                .thenReturn(true);
+
+        NightExecutionTask created = service.create(
+                USER,
+                false,
+                new NightExecutionCreateCommand(
+                        "request-night-service", null, WORKSPACE_ID, "批量夜间会话",
+                        new NightExecutionRunInputSnapshot(
+                                "生成批量测试", List.of(StartRunInput.PromptPart.text("生成批量测试")),
+                                null, "build", null, null, "build", null, null, null),
+                        NightExecutionScheduleMode.NIGHT_WINDOW,
+                        SLOT,
+                        new BatchContext("batch_night", "batch_item_night")),
+                "trace_night_batch");
+
+        verify(batchAttributionRepository).markBatch(
+                created.sessionId(), USER, "batch_night", "batch_item_night");
     }
 
     @Test

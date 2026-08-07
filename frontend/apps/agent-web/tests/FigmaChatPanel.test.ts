@@ -61,6 +61,32 @@ describe("FigmaChatPanel", () => {
     vi.unstubAllGlobals();
   });
 
+  it("opens batch test case generation from the hover/focus composer entry and reuses # candidates", async () => {
+    const reference = {
+      id: "spec/需求一/01-需求/登录",
+      requirementName: "需求一",
+      subitemName: "登录",
+      filePaths: ["spec/需求一/01-需求/登录/需求.md"]
+    };
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        workspaceRequirementReferences: [reference]
+      } as any
+    });
+
+    await wrapper.get('[data-testid="batch-test-case-entry"]').trigger("click");
+    expect(wrapper.get('[data-testid="batch-test-case-dialog"]').text()).toContain("登录");
+    expect(wrapper.get('[data-testid="batch-requirement-input"]').element)
+      .toHaveProperty("value", "请生成子条目测试案例。");
+    expect(wrapper.emitted("load-workspace-requirements")).toBeTruthy();
+
+    const source = readFileSync(resolve(__dirname, "../src/components/FigmaChatPanel.vue"), "utf8");
+    expect(source).toContain(".figma-chat-composer:hover .figma-chat-batch-entry");
+    expect(source).toContain(".figma-chat-composer:focus-within .figma-chat-batch-entry");
+  });
+
   it("opens the night slot picker from the timer immediately left of send", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

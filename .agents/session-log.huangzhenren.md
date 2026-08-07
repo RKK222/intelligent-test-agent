@@ -1717,3 +1717,19 @@
     OpenCode 源码，也未创建分支。
   - 本机已执行的 migration 文件自此不可改写；企业发布前仍须逐一核对所有目标环境 `flyway_schema_history`、
     checksum 和已知历史升级路径，本机验证不能替代企业 PostgreSQL/双后台滚动升级验收。
+### 2026-08-07 - 支持批量生成子条目测试案例
+
+- Why:
+  - 用户需要从对话输入区批量选择当前工作空间的需求子条目，分别创建独立立即执行会话或定时任务，并为后续运营统计记录批量来源；候选口径必须与输入 `#` 完全一致。
+- What:
+  - 输入卡悬浮或聚焦时显示批量入口，70vw × 70vh 弹层直接复用四阶段 `#` 候选，支持搜索、最多 50 项多选、可编辑要求、四路并发、逐项状态、部分失败继续和仅失败重试；局部文件上下文不修改当前输入、附件或 Session。
+  - 立即模式新增幂等批量 Session API；定时模式扩展可选 `batchContext` 并复用公共时间选择器。`sessions` 新增批量标识与两个归因 ID、约束及索引，专用 MyBatis XML 使用 PostgreSQL 事务级 advisory lock 串行化同用户同条目创建。
+  - 同步 HTTP、RunEvent 边界、数据库、模块图、前后端 README/PACKAGE 和用户手册；未新增工作空间 RPC、RunEvent 或运营报表。
+- How:
+  - 前端全量 118 个 Vitest 文件 1851 passed / 1 skipped，typecheck、production build 及聚焦 Chromium E2E 通过；E2E 覆盖两个子条目的独立 Session/Run、首次失败仅失败重试和两个独立 Session/Task。
+  - 后端相关服务/API/MyBatis/真实 PostgreSQL 测试 27 项通过，企业基线及已知历史分叉 Flyway 测试 8 项通过，21 模块 `mvn clean package -DskipTests` 成功；迁移源码、persistence JAR 和最终应用 JAR 的 SHA-256 均为 `42ec1917deb16d96b910f81a0a4739487500453f90dc742e516822f800fdd6e3`。
+- Result:
+  - 批量项保持 `MANUAL` / `SCHEDULED_TASK` 原触发来源，同时可通过 `sessions.batch_mode` 统计；日志只记录安全批量 ID、状态、数量、traceId 和错误码，文件正文与用户要求不进入日志。
+  - 所有 worktree 的候选 migration 已复核，本次 `V20260807230000` 高于原工作区未提交的 `V20260807190000`；共享或企业环境执行前仍必须核对真实 `flyway_schema_history`，未知版本或 checksum 时停止发布。
+  - 目标 Playwright 全套在错误复用原工作区 3000 服务时产生伪失败；改用本 worktree 3001 后本功能 E2E 与三个重试回归通过。另有一个 HEAD 已存在的“只读历史 textarea 应 disabled”场景与基线模板不一致，本次未扩大范围修改。
+  - 合并到 `codex/release-enterprise-20260801` 后，本功能立即执行、失败项重试和批量定时 E2E 通过；发布分支原有三条重发 E2E 仍断言旧的取消/重新 `startRun` 流程，而发布分支实现已改为原生 `createRunResend`，相关测试段落和重发处理函数均未被本次合并改动，需由重发功能后续单独校准。

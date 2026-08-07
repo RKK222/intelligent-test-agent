@@ -143,6 +143,19 @@ export function scheduledRunTiming(
 export const workspaceRequirementStageDirectories = ["01-需求", "02-设计", "03-编码", "04-测试"] as const;
 const workspaceRequirementStages = new Set<string>(workspaceRequirementStageDirectories);
 
+/** 普通 # 上下文和批量局部上下文共用的轻量文本/二进制判断。 */
+export function looksBinaryContent(content: string): boolean {
+  if (!content) return false;
+  if (content.includes("\u0000")) return true;
+  const sample = content.slice(0, 4096);
+  let control = 0;
+  for (let index = 0; index < sample.length; index += 1) {
+    const code = sample.charCodeAt(index);
+    if (code < 32 && code !== 9 && code !== 10 && code !== 13) control += 1;
+  }
+  return sample.length > 0 && control / sample.length > 0.08;
+}
+
 /**
  * 将当前个人 worktree 的文件搜索结果按“spec/需求项/阶段/子条目”聚合。
  * 同名子条目可分布在需求、设计、编码、测试阶段；其下所有文件最终均作为同一条子条目上下文。

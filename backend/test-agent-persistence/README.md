@@ -9,6 +9,7 @@
 - `V20260728210000__index_in_flight_app_source_operations.sql` 为 dispatcher 周期恢复增加 `(status, accepted_at, operation_id)` 索引，使 `PENDING/RUNNING` stranded 扫描不随历史终态 operation 全表增长；迁移只新增索引，不写业务数据。
 - `V20260804123000__create_personal_workspace_relocations.sql` 新增每个个人工作区唯一的跨服务器搬迁状态，保存源/目标服务器、源逻辑路径、租约、快照摘要/大小、安全错误和完成时间。目标完成由 MyBatis XML 在一个 PostgreSQL 事务内锁定搬迁事实并更新运行态 Workspace、个人工作区路径/基线提交和 `CLEANUP_PENDING`；旧源清理完成后才转 `SUCCEEDED`。再次换服不会覆盖尚待清理的旧搬迁，终态后才开启下一段搬迁。
 - `V20260805132000__create_support_access_audit.sql` 新增问题排查授权与访问审计表；只保存平台会话/文件路径/User-Agent 的 SHA-256 摘要和必要业务快照，不保存平台/授权 Token、消息或文件正文。审计保留一年，用户删除时外键置空而快照保留。
+- `V20260807230000__add_batch_session_attribution.sql` 为 Session 增加批量模式、批次和条目幂等 ID，普通行保持默认空值；部分唯一索引按创建用户隔离条目请求，统计索引按批次和创建时间排序。
 - `db/migration-compat/lobehub-missing/V20260802173416__backfill_lobehub_model_gateway.sql` 只对已执行 `V20260801093854`、却漏掉 `V20260730090000` 的已知分叉加载；通过高版本幂等补偿创建模型目录、探测、每日聚合表和四个默认禁用参数，正常顺序库与空库不可见。
 - `db/migration-compat/lobehub-missing-after-rollout/V20260803141754__backfill_lobehub_model_gateway_after_rollout.sql` 只对上述缺失仍存在、早期补偿未执行且 release `V20260803133000` 已落库的更高历史加载，避免倒序执行早期补偿；SQL 语义与早期补偿一致。
 
@@ -125,6 +126,7 @@
 - `MyBatisScheduledTaskRunRetentionRepository`：实现 scheduler 运行记录保留策略 domain 端口，供框架维护任务调用。
 - `ScheduledTaskMapper` / `ScheduledTaskMapper.xml` / `MyBatisScheduledTaskRepository`：保留旧 scheduler 任务定义和运行记录的历史兼容持久化；生产不再调用其 Cron、手工或 `USER_PLAN` 扫描/认领能力。
 - `NightExecutionTaskMapper` / `NightExecutionTaskMapper.xml` / `MyBatisNightExecutionTaskRepository`：持久化双模式定时任务、owner/clientRequestId 幂等锁、会话锁和标准夜间全局时段容量；`schedule_mode` 以枚举名往返。按 `slot_start, created_at` 有限扫描两种模式中已到期且窗口未结束的 `SCHEDULED`，以 `status + state_version + target_linux_server_id` 原子认领 attempt，所有续租/完成/回退 SQL 匹配 `task_id + DISPATCHING + attemptId`，续租还要求 `window_end > now`，作为 Run 创建副作用前的最终窗口 fencing。PostgreSQL 首次创建使用事务级 advisory lock；30 天终态清理再次匹配状态、更新时间和 stateVersion，不能删除扫描后刚被用户关闭/更新的任务。
+- `BatchSessionAttributionMapper` / `BatchSessionAttributionMapper.xml` / `MyBatisBatchSessionAttributionRepository`：通过 `session_id` 业务键读取和标记批量归因，并使用用户与 `itemRequestId` 组成的 PostgreSQL 事务级 advisory lock 串行化首次创建；不向存量 JDBC Session Repository 增加 SQL。
 - `RedisRunTerminalRetryStore`：独立保存 PostgreSQL 终态事务失败后的已清洗 `RunTerminalProjection`。record 与全局 due ZSET 统一使用固定 `{terminal-retry}` hash tag；保存 Lua 按 `terminalProjectionVersion → lastEventSeq → failedAttempts/nextAttemptAt` 单调更新，旧 worker 不能覆盖晚到纠正版；删除 Lua 只在完整白名单 JSON 仍等于调用方处理记录时执行 `ZREM + DEL`，旧 worker 不能删除新版。缺失/非法 due member 的自愈 Lua 也只在 record 仍不存在时移除索引，不会误删并发新记录。每 Run JSON 使用 24 小时内的绝对 TTL，due ZSET 只保存 runId 和 `nextAttemptAt`；显式白名单序列化形状不包含 prompt、完整回答、parts、reasoning、工具输入输出或原始事件，Redis 不可用时返回 `RUNTIME_STATE_UNAVAILABLE`，不回退数据库或 JVM 内存队列。
 - `JdbcCommonParameterRepository`：通用参数存量 JDBC 实现已不再作为 Spring Bean，仅保留给旧集成测试直接构造；后续通用参数 SQL 变更必须改 MyBatis XML。
 - `JdbcWorkspaceCreateOperationRepository`：实现设置页创建应用工作空间进度保存、步骤更新、成功/失败记录和按 `operationId` 查询。

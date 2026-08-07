@@ -39,8 +39,22 @@ class NightExecutionDtosTest {
         NightExecutionDtos.CreateTaskRequest request = new NightExecutionDtos.CreateTaskRequest(
                 "request-night-default", null, "wrk_night_dto_test", null,
                 "执行回归", null, null, null, null, null, null, null, null,
-                null, null, Instant.parse("2026-07-18T13:00:00Z"));
+                null, null, Instant.parse("2026-07-18T13:00:00Z"), null);
 
         assertThat(request.toCommand().scheduleMode()).isEqualTo(NightExecutionScheduleMode.NIGHT_WINDOW);
+    }
+
+    @Test
+    void mapsOptionalBatchContextAndKeepsSessionIdEmpty() {
+        NightExecutionDtos.CreateTaskRequest request = new NightExecutionDtos.CreateTaskRequest(
+                "request-night-batch", null, "wrk_night_dto_test", "批量夜间",
+                "执行批量回归", null, null, null, null, null, null, null, null,
+                null, NightExecutionScheduleMode.NIGHT_WINDOW,
+                Instant.parse("2026-07-18T13:00:00Z"),
+                new RuntimeDtos.BatchContextRequest("batch_dto", "batch_item_dto"));
+
+        assertThat(request.toCommand().batchContext().batchId()).isEqualTo("batch_dto");
+        assertThat(request.toCommand().batchContext().itemRequestId()).isEqualTo("batch_item_dto");
+        assertThat(request.toCommand().sessionId()).isNull();
     }
 }
