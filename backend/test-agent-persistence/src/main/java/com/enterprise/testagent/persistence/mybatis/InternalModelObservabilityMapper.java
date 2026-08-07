@@ -19,7 +19,8 @@ public interface InternalModelObservabilityMapper {
             @Param("endpoint") String endpoint,
             @Param("source") String source,
             @Param("outcome") String outcome,
-            @Param("durationMillis") long durationMillis);
+            @Param("durationMillis") long durationMillis,
+            @Param("firstTokenMillis") Long firstTokenMillis);
 
     List<InternalModelCallRecordRow> findCallRecords(
             @Param("providerId") String providerId,
@@ -39,6 +40,7 @@ public interface InternalModelObservabilityMapper {
 
     List<InternalModelCallHourlyStatRow> findHourlyStats(
             @Param("providerId") String providerId,
+            @Param("source") String source,
             @Param("from") Instant from,
             @Param("to") Instant to);
 

@@ -35,7 +35,8 @@ public class MyBatisInternalModelCallRecordRepository implements InternalModelCa
                 record.endpoint(),
                 record.source().name(),
                 record.outcome().name(),
-                record.durationMillis());
+                record.durationMillis(),
+                record.firstTokenMillis());
     }
 
     @Override
@@ -55,8 +56,10 @@ public class MyBatisInternalModelCallRecordRepository implements InternalModelCa
     }
 
     @Override
-    public List<InternalModelCallHourlyStat> queryHourlyStats(String providerId, Instant from, Instant to) {
-        return mapper.findHourlyStats(providerId, from, to).stream()
+    public List<InternalModelCallHourlyStat> queryHourlyStats(
+            String providerId, InternalModelCallSource source, Instant from, Instant to) {
+        return mapper.findHourlyStats(
+                        providerId, source == null ? null : source.name(), from, to).stream()
                 .map(this::toDomain)
                 .toList();
     }
@@ -84,6 +87,7 @@ public class MyBatisInternalModelCallRecordRepository implements InternalModelCa
                 record.streaming(),
                 record.durationMillis(),
                 record.firstByteMillis(),
+                record.firstTokenMillis(),
                 record.traceId(),
                 record.ucid(),
                 record.startedAt());
@@ -102,6 +106,7 @@ public class MyBatisInternalModelCallRecordRepository implements InternalModelCa
                 row.streaming(),
                 row.durationMillis(),
                 row.firstByteMillis(),
+                row.firstTokenMillis(),
                 row.traceId(),
                 row.ucid(),
                 row.startedAt());
@@ -117,6 +122,9 @@ public class MyBatisInternalModelCallRecordRepository implements InternalModelCa
                 row.outcome(),
                 row.requestCount(),
                 row.durationMillisSum(),
-                row.durationMillisMax());
+                row.durationMillisMax(),
+                row.firstTokenMillisSum(),
+                row.firstTokenMillisMax(),
+                row.firstTokenCount());
     }
 }

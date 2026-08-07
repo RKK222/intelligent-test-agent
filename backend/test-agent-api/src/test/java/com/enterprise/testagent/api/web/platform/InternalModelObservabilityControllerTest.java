@@ -37,7 +37,7 @@ class InternalModelObservabilityControllerTest {
         InternalModelCallRecord record = new InternalModelCallRecord(
                 null, "enterprise-deepseek", "DeepSeek-V4", "/chat/completions",
                 InternalModelCallSource.USER_CALL, InternalModelCallOutcome.UPSTREAM_HTTP_ERROR,
-                500, "WebClientResponseException", true, 800L, 50L,
+                500, "WebClientResponseException", true, 800L, 50L, 75L,
                 TRACE_ID, "ucid", NOW);
         when(queryService.queryCallRecords(
                         eq("enterprise-deepseek"), any(), any(), any(), any(), any(PageRequest.class)))
@@ -62,7 +62,7 @@ class InternalModelObservabilityControllerTest {
     @Test
     void onlySuperAdminCanQueryStatsAndProbeStatus() {
         InternalModelObservabilityQueryService queryService = mock(InternalModelObservabilityQueryService.class);
-        when(queryService.queryHourlyStats(any(), any(), any())).thenReturn(List.of());
+        when(queryService.queryHourlyStats(any(), any(), any(), any())).thenReturn(List.of());
         when(queryService.findProbeStatus()).thenReturn(List.of(new InternalModelProbeStatus(
                 "enterprise-qwen", InternalModelCallOutcome.SUCCESS, 200, null, 300L,
                 NOW, NOW, 0, TRACE_ID)));
@@ -73,6 +73,13 @@ class InternalModelObservabilityControllerTest {
                 .header("X-Trace-Id", TRACE_ID)
                 .exchange()
                 .expectStatus().isOk();
+        superAdmin.get()
+                .uri("/api/internal/platform/opencode-runtime/internal-model-observability/stats?source=USER_CALL")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk();
+        verify(queryService).queryHourlyStats(
+                eq(null), eq(InternalModelCallSource.USER_CALL), any(), any());
         superAdmin.get()
                 .uri("/api/internal/platform/opencode-runtime/internal-model-observability/probe-status")
                 .header("X-Trace-Id", TRACE_ID)

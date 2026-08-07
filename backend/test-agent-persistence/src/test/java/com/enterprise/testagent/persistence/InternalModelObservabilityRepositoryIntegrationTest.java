@@ -49,7 +49,7 @@ class InternalModelObservabilityRepositoryIntegrationTest {
         Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
                 .baselineOnMigrate(true)
                 .baselineVersion("20260807130133")
-                .target("20260807130134").load().migrate();
+                .target("20260807203000").load().migrate();
         SqlSessionFactoryBean factory = new SqlSessionFactoryBean();
         factory.setDataSource(dataSource);
         factory.setMapperLocations(new PathMatchingResourcePatternResolver()
@@ -84,6 +84,9 @@ class InternalModelObservabilityRepositoryIntegrationTest {
         assertThat(success.requestCount()).isEqualTo(1);
         assertThat(success.durationMillisSum()).isEqualTo(1200L);
         assertThat(success.durationMillisMax()).isEqualTo(1200L);
+        assertThat(success.firstTokenMillisSum()).isEqualTo(75L);
+        assertThat(success.firstTokenMillisMax()).isEqualTo(75L);
+        assertThat(success.firstTokenCount()).isEqualTo(1L);
     }
 
     @Test
@@ -96,12 +99,17 @@ class InternalModelObservabilityRepositoryIntegrationTest {
         assertThat(success.requestCount()).isEqualTo(2);
         assertThat(success.durationMillisSum()).isEqualTo(400L);
         assertThat(success.durationMillisMax()).isEqualTo(300L);
+        assertThat(success.firstTokenMillisSum()).isEqualTo(150L);
+        assertThat(success.firstTokenMillisMax()).isEqualTo(75L);
+        assertThat(success.firstTokenCount()).isEqualTo(2L);
     }
 
     @Test
     void filtersByOutcomeAndSource() {
         callRepository.record(record(PROVIDER, "deepseek-v4", "/chat/completions", "SUCCESS", 200, 100L, null, T0));
         callRepository.record(record(PROVIDER, "deepseek-v4", "/responses", "PROVIDER_UNAVAILABLE", null, 10L, "RegistryException", T0.plusSeconds(5)));
+        callRepository.record(record(PROVIDER, "deepseek-v4", "/chat/completions", "SUCCESS", 200, 200L, null,
+                T0.plusSeconds(10), InternalModelCallSource.PROBE, null));
 
         var failures = callRepository.query(new InternalModelCallRecordQuery(
                 null, InternalModelCallOutcome.PROVIDER_UNAVAILABLE, null, null, null, new PageRequest(1, 20)));
@@ -111,7 +119,16 @@ class InternalModelObservabilityRepositoryIntegrationTest {
 
         var probeOnly = callRepository.query(new InternalModelCallRecordQuery(
                 null, null, InternalModelCallSource.PROBE, null, null, new PageRequest(1, 20)));
-        assertThat(probeOnly.total()).isEqualTo(0);
+        assertThat(probeOnly.total()).isEqualTo(1);
+
+        assertThat(callRepository.queryHourlyStats(
+                PROVIDER, InternalModelCallSource.USER_CALL,
+                T0.minus(1, ChronoUnit.HOURS), T0.plus(2, ChronoUnit.HOURS))).hasSize(2);
+        var probeStats = callRepository.queryHourlyStats(
+                PROVIDER, InternalModelCallSource.PROBE,
+                T0.minus(1, ChronoUnit.HOURS), T0.plus(2, ChronoUnit.HOURS));
+        assertThat(probeStats).hasSize(1);
+        assertThat(probeStats.getFirst().firstTokenCount()).isZero();
     }
 
     @Test
@@ -146,9 +163,17 @@ class InternalModelObservabilityRepositoryIntegrationTest {
     private InternalModelCallRecord record(
             String providerId, String model, String endpoint, String outcome, Integer status,
             long duration, String errorClass, Instant startedAt) {
+        return record(providerId, model, endpoint, outcome, status, duration, errorClass, startedAt,
+                InternalModelCallSource.USER_CALL, 75L);
+    }
+
+    private InternalModelCallRecord record(
+            String providerId, String model, String endpoint, String outcome, Integer status,
+            long duration, String errorClass, Instant startedAt, InternalModelCallSource source,
+            Long firstTokenMillis) {
         return new InternalModelCallRecord(
-                null, providerId, model, endpoint, InternalModelCallSource.USER_CALL,
-                InternalModelCallOutcome.valueOf(outcome), status, errorClass, true, duration, 50L,
+                null, providerId, model, endpoint, source,
+                InternalModelCallOutcome.valueOf(outcome), status, errorClass, true, duration, 50L, firstTokenMillis,
                 "trace_imo_test", "ucid_test", startedAt);
     }
 

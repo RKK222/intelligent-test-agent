@@ -156,6 +156,59 @@ class InternalModelProxyForwardingServiceTest {
         assertThat(recorded.getFirst().httpStatus()).isEqualTo(200);
     }
 
+    @Test
+    void recordsFirstTokenSeparatelyAndClassifiesStreamWithoutDoneAsInterrupted() {
+        List<InternalModelCallRecord> recorded = new CopyOnWriteArrayList<>();
+        org.springframework.core.io.buffer.DataBufferFactory bufferFactory =
+                org.springframework.core.io.buffer.DefaultDataBufferFactory.sharedInstance;
+        WebClient webClient = WebClient.builder()
+                .exchangeFunction(request -> Mono.just(org.springframework.web.reactive.function.client.ClientResponse
+                        .create(HttpStatus.OK)
+                        .header(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_EVENT_STREAM_VALUE)
+                        .body(Flux.just(bufferFactory.wrap(
+                                "data: {\"choices\":[{\"delta\":{\"content\":\"首 token\"}}]}\n\n"
+                                        .getBytes(StandardCharsets.UTF_8))))
+                        .build()))
+                .build();
+        InternalModelProxyForwardingService service = service(
+                webClient, List.of(runtimeConfig(PROVIDER_ID, MODEL_TOKEN)), recorded);
+
+        StepVerifier.create(service.forward(exchange(), REQUEST_BODY, "trace_missing_done"))
+                .verifyComplete();
+
+        awaitRecorded(recorded);
+        assertThat(recorded).hasSize(1);
+        InternalModelCallRecord record = recorded.getFirst();
+        assertThat(record.outcome())
+                .isEqualTo(com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcome.UPSTREAM_STREAM_INTERRUPTED);
+        assertThat(record.firstByteMillis()).isNotNull();
+        assertThat(record.firstTokenMillis()).isNotNull();
+        assertThat(record.firstTokenMillis()).isLessThanOrEqualTo(record.durationMillis());
+    }
+
+    @Test
+    void recordsEmptySseAsInterruptedWithoutFirstToken() {
+        List<InternalModelCallRecord> recorded = new CopyOnWriteArrayList<>();
+        WebClient webClient = WebClient.builder()
+                .exchangeFunction(request -> Mono.just(org.springframework.web.reactive.function.client.ClientResponse
+                        .create(HttpStatus.OK)
+                        .header(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_EVENT_STREAM_VALUE)
+                        .body(Flux.empty())
+                        .build()))
+                .build();
+        InternalModelProxyForwardingService service = service(
+                webClient, List.of(runtimeConfig(PROVIDER_ID, MODEL_TOKEN)), recorded);
+
+        StepVerifier.create(service.forward(exchange(), REQUEST_BODY, "trace_empty_stream"))
+                .verifyComplete();
+
+        awaitRecorded(recorded);
+        assertThat(recorded).hasSize(1);
+        assertThat(recorded.getFirst().outcome())
+                .isEqualTo(com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcome.UPSTREAM_STREAM_INTERRUPTED);
+        assertThat(recorded.getFirst().firstTokenMillis()).isNull();
+    }
+
     private InternalModelProxyForwardingService service(WebClient webClient) {
         return service(webClient, List.of(runtimeConfig(PROVIDER_ID, MODEL_TOKEN)));
     }

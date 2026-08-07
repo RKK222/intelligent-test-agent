@@ -23,7 +23,7 @@ public enum InternalModelCallOutcome {
     UPSTREAM_STREAM_IDLE_TIMEOUT,
     /** 上游返回非 2xx 状态。 */
     UPSTREAM_HTTP_ERROR,
-    /** responses 适配：上游流在完成前正常结束。 */
+    /** 流式上游在收到有效 chunk 与完成标记前正常结束（空流、缺失 [DONE] 或 responses 适配未完成）。 */
     UPSTREAM_STREAM_INTERRUPTED,
     /** responses 适配：上游流读取异常。 */
     UPSTREAM_STREAM_FAILED,

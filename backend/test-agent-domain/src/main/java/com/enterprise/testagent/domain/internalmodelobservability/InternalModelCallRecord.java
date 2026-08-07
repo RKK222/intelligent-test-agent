@@ -5,7 +5,8 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * 内部模型代理单次调用观测记录。只存结构化字段，禁止存请求/响应正文或错误文本。
+ * 内部模型代理单次调用观测记录。{@code firstByteMillis} 表示响应头到达，
+ * {@code firstTokenMillis} 表示首个有效 SSE data；只存结构化字段，禁止存请求/响应正文或错误文本。
  */
 public record InternalModelCallRecord(
         Long id,
@@ -19,6 +20,7 @@ public record InternalModelCallRecord(
         boolean streaming,
         long durationMillis,
         Long firstByteMillis,
+        Long firstTokenMillis,
         String traceId,
         String ucid,
         Instant startedAt) {
@@ -37,6 +39,9 @@ public record InternalModelCallRecord(
         }
         if (firstByteMillis != null && firstByteMillis < 0) {
             throw new IllegalArgumentException("firstByteMillis must be >= 0");
+        }
+        if (firstTokenMillis != null && firstTokenMillis < 0) {
+            throw new IllegalArgumentException("firstTokenMillis must be >= 0");
         }
         traceId = traceId == null || traceId.isBlank() ? "" : traceId.trim();
         ucid = normalize(ucid);

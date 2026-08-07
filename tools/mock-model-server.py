@@ -19,7 +19,7 @@
     http400   返回 400 非 SSE 错误正文
     http500   返回 500 非 SSE 错误正文
     timeout   响应头后静默不发送正文，模拟首响应/首事件超时
-    empty     返回 200 text/event-stream 但永远不发任何事件，模拟首事件超时
+    empty     返回 200 text/event-stream 后立即 EOF，不发任何事件，模拟空/截断流
 """
 import argparse
 import json

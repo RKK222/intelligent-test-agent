@@ -16,7 +16,13 @@ public interface InternalModelCallRecordRepository {
     PageResponse<InternalModelCallRecord> query(InternalModelCallRecordQuery query);
 
     /** 按 provider/时间返回小时聚合序列，按 stat_hour 升序。 */
-    List<InternalModelCallHourlyStat> queryHourlyStats(String providerId, Instant from, Instant to);
+    List<InternalModelCallHourlyStat> queryHourlyStats(
+            String providerId, InternalModelCallSource source, Instant from, Instant to);
+
+    /** 保留旧调用形态，未传 source 时查询所有来源。 */
+    default List<InternalModelCallHourlyStat> queryHourlyStats(String providerId, Instant from, Instant to) {
+        return queryHourlyStats(providerId, null, from, to);
+    }
 
     /** 删除截止时间之前的明细记录，返回删除行数。 */
     int deleteRecordsBefore(Instant cutoff);

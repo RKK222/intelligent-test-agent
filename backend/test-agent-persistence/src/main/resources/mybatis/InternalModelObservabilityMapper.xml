@@ -17,6 +17,7 @@
             <arg column="streaming" javaType="java.lang.Boolean"/>
             <arg column="duration_ms" javaType="java.lang.Long"/>
             <arg column="first_byte_ms" javaType="java.lang.Long"/>
+            <arg column="first_token_ms" javaType="java.lang.Long"/>
             <arg column="trace_id" javaType="java.lang.String"/>
             <arg column="ucid" javaType="java.lang.String"/>
             <arg column="started_at" javaType="java.time.Instant"/>
@@ -34,6 +35,9 @@
             <arg column="request_count" javaType="java.lang.Long"/>
             <arg column="duration_ms_sum" javaType="java.lang.Long"/>
             <arg column="duration_ms_max" javaType="java.lang.Long"/>
+            <arg column="first_token_ms_sum" javaType="java.lang.Long"/>
+            <arg column="first_token_ms_max" javaType="java.lang.Long"/>
+            <arg column="first_token_count" javaType="java.lang.Long"/>
         </constructor>
     </resultMap>
 
@@ -54,25 +58,32 @@
     <insert id="insertCallRecord" parameterType="com.enterprise.testagent.persistence.mybatis.InternalModelCallRecordRow">
         insert into internal_model_call_records(
             provider_id, model, endpoint, source, outcome, http_status, error_class,
-            streaming, duration_ms, first_byte_ms, trace_id, ucid, started_at
+            streaming, duration_ms, first_byte_ms, first_token_ms, trace_id, ucid, started_at
         ) values (
             #{providerId}, #{model}, #{endpoint}, #{source}, #{outcome}, #{httpStatus}, #{errorClass},
-            #{streaming}, #{durationMillis}, #{firstByteMillis}, #{traceId}, #{ucid}, #{startedAt}
+            #{streaming}, #{durationMillis}, #{firstByteMillis}, #{firstTokenMillis}, #{traceId}, #{ucid}, #{startedAt}
         )
     </insert>
 
     <insert id="incrementHourlyStat" databaseId="postgresql">
         insert into internal_model_call_stats_hourly(
             stat_hour, provider_id, model, endpoint, source, outcome,
-            request_count, duration_ms_sum, duration_ms_max, updated_at
+            request_count, duration_ms_sum, duration_ms_max,
+            first_token_ms_sum, first_token_ms_max, first_token_count, updated_at
         ) values (
             #{statHour}, #{providerId}, #{model}, #{endpoint}, #{source}, #{outcome},
-            1, #{durationMillis}, #{durationMillis}, current_timestamp
+            1, #{durationMillis}, #{durationMillis},
+            coalesce(#{firstTokenMillis}, 0), coalesce(#{firstTokenMillis}, 0),
+            case when #{firstTokenMillis} is null then 0 else 1 end,
+            current_timestamp
         )
         on conflict (stat_hour, provider_id, model, endpoint, source, outcome) do update set
             request_count = internal_model_call_stats_hourly.request_count + 1,
             duration_ms_sum = internal_model_call_stats_hourly.duration_ms_sum + excluded.duration_ms_sum,
             duration_ms_max = greatest(internal_model_call_stats_hourly.duration_ms_max, excluded.duration_ms_max),
+            first_token_ms_sum = internal_model_call_stats_hourly.first_token_ms_sum + excluded.first_token_ms_sum,
+            first_token_ms_max = greatest(internal_model_call_stats_hourly.first_token_ms_max, excluded.first_token_ms_max),
+            first_token_count = internal_model_call_stats_hourly.first_token_count + excluded.first_token_count,
             updated_at = current_timestamp
     </insert>
 
@@ -80,10 +91,13 @@
         merge into internal_model_call_stats_hourly target
         using (values (
             #{statHour}, #{providerId}, #{model}, #{endpoint}, #{source}, #{outcome},
-            1, #{durationMillis}, #{durationMillis}
+            1, #{durationMillis}, #{durationMillis},
+            coalesce(#{firstTokenMillis}, 0), coalesce(#{firstTokenMillis}, 0),
+            case when #{firstTokenMillis} is null then 0 else 1 end
         )) incoming(
             stat_hour, provider_id, model, endpoint, source, outcome,
-            request_count, duration_ms_sum, duration_ms_max
+            request_count, duration_ms_sum, duration_ms_max,
+            first_token_ms_sum, first_token_ms_max, first_token_count
         )
         on target.stat_hour = incoming.stat_hour
            and target.provider_id = incoming.provider_id
@@ -96,14 +110,21 @@
             duration_ms_sum = target.duration_ms_sum + incoming.duration_ms_sum,
             duration_ms_max = case when incoming.duration_ms_max > target.duration_ms_max
                 then incoming.duration_ms_max else target.duration_ms_max end,
+            first_token_ms_sum = target.first_token_ms_sum + incoming.first_token_ms_sum,
+            first_token_ms_max = case when incoming.first_token_ms_max > target.first_token_ms_max
+                then incoming.first_token_ms_max else target.first_token_ms_max end,
+            first_token_count = target.first_token_count + incoming.first_token_count,
             updated_at = current_timestamp
         when not matched then insert (
             stat_hour, provider_id, model, endpoint, source, outcome,
-            request_count, duration_ms_sum, duration_ms_max, updated_at
+            request_count, duration_ms_sum, duration_ms_max,
+            first_token_ms_sum, first_token_ms_max, first_token_count, updated_at
         ) values (
             incoming.stat_hour, incoming.provider_id, incoming.model, incoming.endpoint,
             incoming.source, incoming.outcome,
-            1, incoming.duration_ms_sum, incoming.duration_ms_max, current_timestamp
+            1, incoming.duration_ms_sum, incoming.duration_ms_max,
+            incoming.first_token_ms_sum, incoming.first_token_ms_max, incoming.first_token_count,
+            current_timestamp
         )
     </insert>
 
@@ -118,7 +139,7 @@
 
     <select id="findCallRecords" resultMap="CallRecordRowMap">
         select id, provider_id, model, endpoint, source, outcome, http_status, error_class,
-               streaming, duration_ms, first_byte_ms, trace_id, ucid, started_at
+               streaming, duration_ms, first_byte_ms, first_token_ms, trace_id, ucid, started_at
         from internal_model_call_records
         <include refid="CallRecordWhere"/>
         order by started_at desc, id desc
@@ -132,10 +153,12 @@
 
     <select id="findHourlyStats" resultMap="HourlyStatRowMap">
         select stat_hour, provider_id, model, endpoint, source, outcome,
-               request_count, duration_ms_sum, duration_ms_max
+               request_count, duration_ms_sum, duration_ms_max,
+               first_token_ms_sum, first_token_ms_max, first_token_count
         from internal_model_call_stats_hourly
         where 1 = 1
         <if test="providerId != null">and provider_id = #{providerId}</if>
+        <if test="source != null">and source = #{source}</if>
         <if test="from != null">and stat_hour &gt;= #{from}</if>
         <if test="to != null">and stat_hour &lt; #{to}</if>
         order by stat_hour asc, provider_id asc, outcome asc

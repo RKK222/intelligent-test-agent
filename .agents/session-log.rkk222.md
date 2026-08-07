@@ -5,6 +5,26 @@
 
 ## Entries
 
+### 2026-08-07 - 修正内部模型可观测首 token 与聚合口径
+
+### Why
+
+- 原实现把响应头到达时间 `firstByteMillis` 当作首 token，空/截断 SSE 在 2xx 正常 EOF 时可能记为成功；前端还用小时最大值展开伪造平均/P90/P95，探活数据也会混入业务统计。
+
+### What
+
+- 新增 `first_token_ms` 明细及小时 `sum/max/count` 聚合；代理只把首个非空且非 `[DONE]` 的 SSE data 记为首 token，并要求流同时有有效 chunk 和 `[DONE]` 才成功，空/缺少完成标记记为 `UPSTREAM_STREAM_INTERRUPTED`。
+- 修正探活首字节取样位置，统计 API 支持 `source=USER_CALL|PROBE`，页面默认隔离探活；移除无法由小时聚合还原的 P90/P95/分布，改用准确平均/最大值。
+
+### How
+
+- 复用现有 `CallObservation`、MyBatis XML upsert 和小时聚合结构，增加 Flyway `V20260807203000__add_internal_model_first_token_metrics.sql`，补充 proxy 空流/缺 `[DONE]`、探活正文延迟、source 过滤与聚合断言；同步 API、数据库、模块、测试与排障文档。
+- 使用 JDK 21 执行后端定向 Maven 测试（代理/探活/API/持久化）与 agent-web `vue-tsc` 类型检查，并检查主 release 工作区保持干净。
+
+### Result
+
+- 观测明细现在能区分响应头、首 token、空/截断流；小时统计不再把最大值冒充分布或分位数，用户调用指标默认不受探活污染。旧明细首 token 为空、旧小时行首 token 计数为 0，接口新增字段保持可选兼容。
+
 ### 2026-08-07 - 企业内部模型 API 调用可观测性
 
 ### Why

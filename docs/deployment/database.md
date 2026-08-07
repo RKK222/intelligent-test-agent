@@ -1245,12 +1245,16 @@ PostgreSQL migration 与 XXL V9 则应全部成功且 checksum 不变；当前�
 
 | 表 | 口径与边界 |
 |---|---|
-| `internal_model_call_records` | append-only 内部模型代理调用明细：`provider_id/model/endpoint/source(USER_CALL\|PROBE)/outcome/http_status/error_class/streaming/duration_ms/first_byte_ms/trace_id/ucid/started_at`。只存结构化字段，**禁止写入请求/响应正文、错误文本、Token 或密钥**；`error_class` 只保存剥离 Reactor 包装后的异常类简名。索引 `(provider_id, started_at desc)`、`(outcome, started_at desc)`、`(started_at)`；保留 30 天。 |
-| `internal_model_call_stats_hourly` | 按 `(stat_hour, provider_id, model, endpoint, source, outcome)` 原子累加 `request_count/duration_ms_sum/duration_ms_max`；`stat_hour` 由写入方截断到小时，保留 180 天。 |
+| `internal_model_call_records` | append-only 内部模型代理调用明细：`provider_id/model/endpoint/source(USER_CALL\|PROBE)/outcome/http_status/error_class/streaming/duration_ms/first_byte_ms/first_token_ms/trace_id/ucid/started_at`。`first_byte_ms` 是响应头耗时，`first_token_ms` 是首个非空且非 `[DONE]` SSE data 的耗时；非流式或未收到有效 chunk 时为空。只存结构化字段，**禁止写入请求/响应正文、错误文本、Token 或密钥**；`error_class` 只保存剥离 Reactor 包装后的异常类简名。索引 `(provider_id, started_at desc)`、`(outcome, started_at desc)`、`(started_at)`；保留 30 天。 |
+| `internal_model_call_stats_hourly` | 按 `(stat_hour, provider_id, model, endpoint, source, outcome)` 原子累加 `request_count/duration_ms_sum/duration_ms_max/first_token_ms_sum/first_token_ms_max/first_token_count`；首 token 三列只统计存在首 token 的调用，可准确计算平均/最大值；小时聚合无法还原 P90/P95 或分布；`stat_hour` 由写入方截断到小时，保留 180 天。 |
 | `internal_model_probe_status` | 每 provider 一行的最近探活状态：`last_outcome/last_http_status/last_error_class/last_duration_ms/last_probed_at/last_success_at/consecutive_failures/trace_id/updated_at`；`consecutive_failures` 由 SQL 依据本次结果成功归零、失败 +1。 |
 
 写入 SQL 位于 `InternalModelObservabilityMapper.xml`：明细 insert 与小时聚合 upsert 在同一事务完成（PostgreSQL `ON CONFLICT` 双实现，H2 用 MERGE），探活状态 upsert 连续失败计数由数据库原子维护。明细与聚合保留期由 XXL 任务
 `opencode-runtime.internal-model-observability-retention` 每日执行清理，不依赖 application 层逐条扫描。
+
+## V20260807203000 首 token 观测指标
+
+`V20260807203000__add_internal_model_first_token_metrics.sql` 为既有明细表增加 `first_token_ms`，为小时聚合增加首 token sum/max/count，旧数据首 token 计数保持为 0；升级时必须按目标环境已执行 migration 版本顺序校验，不得改写已执行 migration。
 
 内部模型调用观测只记录 traceId、耗时、状态与稳定错误信息，与现有企业模型代理日志脱敏边界一致，不记录代码、
 提示词、Token 或密钥。

@@ -66,13 +66,14 @@ public class InternalModelObservabilityController {
     @GetMapping("/stats")
     public Mono<ApiResponse<Object>> stats(
             @RequestParam(required = false) String providerId,
+            @RequestParam(required = false) InternalModelCallSource source,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
             ServerWebExchange exchange) {
         requireSuperAdmin(exchange);
         String traceId = RuntimeApiSupport.traceId(exchange);
         return Mono.fromCallable(() -> ApiResponse.ok(
-                        (Object) queryService.queryHourlyStats(providerId, from, to), traceId))
+                        (Object) queryService.queryHourlyStats(providerId, source, from, to), traceId))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 

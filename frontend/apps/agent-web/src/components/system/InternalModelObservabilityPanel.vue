@@ -22,7 +22,8 @@ const queryClient = useQueryClient();
 const activeTab = ref<"records" | "stats">("records");
 const filterProviderId = ref("");
 const filterOutcome = ref<InternalModelCallOutcome | "">("");
-const filterSource = ref<InternalModelCallSource | "">("");
+// 默认只看真实用户调用，避免每 5 分钟一次的探活把业务首 token/成功率冲淡。
+const filterSource = ref<InternalModelCallSource | "">("USER_CALL");
 const page = ref(1);
 const pageSize = 20;
 
@@ -55,11 +56,15 @@ const recordsQuery = useQuery({
 
 const statsQuery = useQuery({
   queryKey: computed(() => ["internal-model-observability-stats", {
-    providerId: filterProviderId.value || null
+    providerId: filterProviderId.value || null,
+    source: filterSource.value || null
   }]),
   enabled: () => hasSuperAdmin.value,
   retry: false,
-  queryFn: () => api.getInternalModelCallStats({ providerId: filterProviderId.value || null })
+  queryFn: () => api.getInternalModelCallStats({
+    providerId: filterProviderId.value || null,
+    source: filterSource.value || null
+  })
 });
 
 const probeMutation = useMutation({
@@ -81,43 +86,19 @@ const records = computed(() => recordsQuery.data.value?.items ?? []);
 const recordsTotal = computed(() => recordsQuery.data.value?.total ?? 0);
 const stats = computed(() => statsQuery.data.value ?? []);
 
-/** AI API 调用相关数据：基于当前明细页记录的首 token 延迟统计（平均/P90/P95/分布）。 */
-const firstTokenStats = computed(() => {
-  const tokens: number[] = [];
-  for (const row of records.value) {
-    if (row.firstByteMillis != null && row.firstByteMillis > 0) {
-      tokens.push(row.firstByteMillis);
-    }
-  }
-  if (!tokens.length) return { count: 0, avg: 0, p90: 0, p95: 0, distribution: [] as string[] };
-  const sorted = tokens.slice().sort((a, b) => a - b);
-  const pct = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
-  const avg = Math.round(tokens.reduce((a, b) => a + b, 0) / tokens.length);
-  // 分布：按秒分段。
-  const buckets = new Map<string, number>();
-  for (const t of tokens) {
-    const s = t / 1000;
-    const b = s < 1 ? "<1s" : s < 5 ? "1-5s" : s < 15 ? "5-15s" : s < 30 ? "15-30s" : ">30s";
-    buckets.set(b, (buckets.get(b) ?? 0) + 1);
-  }
-  const order = ["<1s", "1-5s", "5-15s", "15-30s", ">30s"];
-  return {
-    count: tokens.length,
-    avg,
-    p90: pct(0.9),
-    p95: pct(0.95),
-    distribution: order.filter((b) => buckets.has(b)).map((b) => `${b}:${buckets.get(b)}`)
-  };
-});
-
 type ProviderMetric = {
   providerId: string;
   totalRequests: number;
   successCount: number;
   failureCount: number;
   successRate: number;
+  durationMillisSum: number;
   avgDurationMillis: number;
   maxDurationMillis: number;
+  firstTokenMillisSum: number;
+  firstTokenMillisMax: number;
+  firstTokenCount: number;
+  avgFirstTokenMillis: number | null;
 };
 
 /** 按 provider 汇总小时聚合为指标卡片；用于「聚合统计」tab 的指标视图。 */
@@ -133,8 +114,13 @@ const providerMetrics = computed<ProviderMetric[]>(() => {
         successCount: 0,
         failureCount: 0,
         successRate: 0,
+        durationMillisSum: 0,
         avgDurationMillis: 0,
-        maxDurationMillis: 0
+        maxDurationMillis: 0,
+        firstTokenMillisSum: 0,
+        firstTokenMillisMax: 0,
+        firstTokenCount: 0,
+        avgFirstTokenMillis: null
       };
       byProvider.set(providerId, metric);
     }
@@ -144,17 +130,22 @@ const providerMetrics = computed<ProviderMetric[]>(() => {
     } else {
       metric.failureCount += row.requestCount;
     }
+    metric.durationMillisSum += row.durationMillisSum;
     metric.maxDurationMillis = Math.max(metric.maxDurationMillis, row.durationMillisMax);
-    // durationSum 是该 provider 该 outcome 的请求数 × 平均耗时的近似；按成功请求累加平均更准。
-    if (row.outcome === "SUCCESS" && row.requestCount > 0) {
-      metric.avgDurationMillis += row.durationMillisSum / row.requestCount;
-    }
+    metric.firstTokenMillisSum += row.firstTokenMillisSum ?? 0;
+    metric.firstTokenMillisMax = Math.max(metric.firstTokenMillisMax, row.firstTokenMillisMax ?? 0);
+    metric.firstTokenCount += row.firstTokenCount ?? 0;
   }
   for (const metric of byProvider.values()) {
     metric.successRate = metric.totalRequests === 0
       ? 0
       : Math.round((metric.successCount / metric.totalRequests) * 1000) / 10;
-    // 平均耗时仅基于成功请求的平均值，多 outcome 行取最大平均值近似。
+    metric.avgDurationMillis = metric.totalRequests === 0
+      ? 0
+      : Math.round(metric.durationMillisSum / metric.totalRequests);
+    metric.avgFirstTokenMillis = metric.firstTokenCount === 0
+      ? null
+      : Math.round(metric.firstTokenMillisSum / metric.firstTokenCount);
   }
   return [...byProvider.values()];
 });
@@ -175,36 +166,37 @@ const failureBreakdown = computed<Array<{ outcome: string; label: string; count:
     .sort((a, b) => b.count - a.count);
 });
 
-/** 全局总览指标：跨所有 provider 的请求量、成功率、失败率、耗时分位、总耗时、QPS。 */
+/** 全局总览指标：只使用小时聚合可准确还原的计数、均值、最大值与首 token 均值。 */
 const overallMetrics = computed(() => {
   let totalRequests = 0;
   let successCount = 0;
   let totalDurationMillis = 0;
+  let maxDuration = 0;
+  let firstTokenMillisSum = 0;
+  let firstTokenMillisMax = 0;
+  let firstTokenCount = 0;
   let minHour: string | null = null;
   let maxHour: string | null = null;
-  const durations: number[] = [];
   for (const row of stats.value) {
     totalRequests += row.requestCount;
     if (row.outcome === "SUCCESS") successCount += row.requestCount;
     totalDurationMillis += row.durationMillisSum;
+    maxDuration = Math.max(maxDuration, row.durationMillisMax);
+    firstTokenMillisSum += row.firstTokenMillisSum ?? 0;
+    firstTokenMillisMax = Math.max(firstTokenMillisMax, row.firstTokenMillisMax ?? 0);
+    firstTokenCount += row.firstTokenCount ?? 0;
     if (minHour === null || row.statHour < minHour) minHour = row.statHour;
     if (maxHour === null || row.statHour > maxHour) maxHour = row.statHour;
-    // 用每小时行展开近似时长样本：最大耗时按 requestCount 加权展开，用于分位。
-    for (let i = 0; i < row.requestCount; i++) {
-      durations.push(row.durationMillisMax);
-    }
   }
   const failureCount = totalRequests - successCount;
   const successRate = totalRequests === 0 ? 0 : Math.round((successCount / totalRequests) * 1000) / 10;
   const failureRate = totalRequests === 0 ? 0 : Math.round((failureCount / totalRequests) * 1000) / 10;
-  const maxDuration = durations.length ? Math.max(...durations) : 0;
-  const avgDuration = durations.length
-    ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
+  const avgDuration = totalRequests > 0
+    ? Math.round(totalDurationMillis / totalRequests)
     : 0;
-  const sorted = durations.slice().sort((a, b) => a - b);
-  const percentile = (p: number) => sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] : 0;
-  const p90 = percentile(0.9);
-  const p95 = percentile(0.95);
+  const firstTokenAvg = firstTokenCount > 0
+    ? Math.round(firstTokenMillisSum / firstTokenCount)
+    : null;
   // QPS：按小时跨度估算（至少 1 小时，避免单小时行除 0）。
   const hoursSpan = minHour && maxHour
     ? Math.max(1, (new Date(maxHour).getTime() - new Date(minHour).getTime()) / 3_600_000)
@@ -213,7 +205,9 @@ const overallMetrics = computed(() => {
   const providerCount = new Set(stats.value.map((row) => row.providerId)).size;
   return {
     totalRequests, successCount, failureCount, successRate, failureRate,
-    avgDuration, maxDuration, p90, p95,
+    avgDuration, maxDuration,
+    firstTokenAvg, firstTokenMax: firstTokenCount > 0 ? firstTokenMillisMax : null,
+    firstTokenCount,
     totalDurationSeconds: Math.round(totalDurationMillis / 1000),
     qps, providerCount
   };
@@ -258,31 +252,14 @@ const failureBarData = computed(() =>
   failureBreakdown.value.map((item) => ({ name: item.label, value: item.count }))
 );
 
-/** 耗时分布直方图：按秒分段统计请求量。 */
-const durationHistogram = computed(() => {
-  const buckets = new Map<string, number>();
-  for (const row of stats.value) {
-    if (row.outcome !== "SUCCESS" || row.requestCount === 0) continue;
-    const seconds = row.durationMillisMax / 1000;
-    const bucket = seconds < 1 ? "<1s" : seconds < 5 ? "1-5s" : seconds < 15 ? "5-15s" : seconds < 30 ? "15-30s" : ">30s";
-    buckets.set(bucket, (buckets.get(bucket) ?? 0) + row.requestCount);
-  }
-  const order = ["<1s", "1-5s", "5-15s", "15-30s", ">30s"];
-  return order
-    .filter((b) => buckets.has(b))
-    .map((b) => ({ name: b, value: buckets.get(b)! }));
-});
-
 const trendChartEl = ref<HTMLDivElement | null>(null);
 const pieChartEl = ref<HTMLDivElement | null>(null);
 const failureChartEl = ref<HTMLDivElement | null>(null);
 const providerChartEl = ref<HTMLDivElement | null>(null);
-const durationChartEl = ref<HTMLDivElement | null>(null);
 let trendChart: echarts.ECharts | null = null;
 let pieChart: echarts.ECharts | null = null;
 let failureChart: echarts.ECharts | null = null;
 let providerChart: echarts.ECharts | null = null;
-let durationChart: echarts.ECharts | null = null;
 
 function ensureChart(el: HTMLDivElement, holder: { current: echarts.ECharts | null }) {
   // 若实例已存在但容器宽度为 0（曾在隐藏 tab 中初始化过），dispose 重建。
@@ -378,22 +355,6 @@ function renderCharts() {
       }]
     }, true);
   }
-  if (durationChartEl.value && durationChartEl.value.clientWidth > 0 && durationHistogram.value.length) {
-    durationChart = ensureChart(durationChartEl.value, { current: durationChart });
-    durationChart.setOption({
-      animation: false,
-      tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
-      grid: { top: 16, left: 48, right: 16, bottom: 24 },
-      xAxis: { type: "category", data: durationHistogram.value.map((d) => d.name) },
-      yAxis: { type: "value", minInterval: 1 },
-      series: [{
-        type: "bar",
-        data: durationHistogram.value.map((d) => d.value),
-        itemStyle: { color: "#f59e0b", borderRadius: [4, 4, 0, 0] },
-        barMaxWidth: 40
-      }]
-    }, true);
-  }
 }
 
 function resizeCharts() {
@@ -401,7 +362,6 @@ function resizeCharts() {
   pieChart?.resize();
   failureChart?.resize();
   providerChart?.resize();
-  durationChart?.resize();
 }
 
 onMounted(() => {
@@ -412,12 +372,11 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", resizeCharts);
-  [trendChart, pieChart, failureChart, providerChart, durationChart].forEach((chart) => chart?.dispose());
+  [trendChart, pieChart, failureChart, providerChart].forEach((chart) => chart?.dispose());
   trendChart = null;
   pieChart = null;
   failureChart = null;
   providerChart = null;
-  durationChart = null;
 });
 
 // 数据变化时重绘；聚合 tab 首次激活时容器从隐藏变可见，需强制重渲染图表。
@@ -447,7 +406,7 @@ const outcomeText: Record<InternalModelCallOutcome, string> = {
 
 /** 耗时毫秒转秒：小于 1s 保留 1 位小数，否则取整，单位统一为 s；空值显示 -。 */
 function formatDuration(millis: number | null | undefined): string {
-  if (millis === null || millis === undefined || !Number.isFinite(millis) || millis <= 0) return "-";
+  if (millis === null || millis === undefined || !Number.isFinite(millis) || millis < 0) return "-";
   const seconds = millis / 1000;
   return seconds < 1 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds)}s`;
 }
@@ -492,7 +451,7 @@ function onPageChange(next: number) {
     <template v-if="hasSuperAdmin">
       <div class="ta-imob-header">
         <h3 class="ta-imob-title">内部模型调用可观测</h3>
-        <span class="ta-imob-sub">调用明细、聚合统计与供应商探活状态；仅记录结构化字段，不含请求正文</span>
+        <span class="ta-imob-sub">默认统计真实用户调用（可切换探活）；首 token 为首个有效 SSE data，聚合不伪造 P90/P95；仅记录结构化字段，不含请求正文</span>
       </div>
 
       <el-tabs v-model="activeTab" class="ta-imob-tabs">
@@ -572,7 +531,7 @@ function onPageChange(next: number) {
               <template #default="{ row }">{{ formatDuration(row.durationMillis) }}</template>
             </el-table-column>
             <el-table-column label="首 token" width="110">
-              <template #default="{ row }">{{ formatDuration(row.firstByteMillis) }}</template>
+              <template #default="{ row }">{{ formatDuration(row.firstTokenMillis) }}</template>
             </el-table-column>
           </el-table>
 
@@ -624,14 +583,6 @@ function onPageChange(next: number) {
                   <span class="ta-imob-overview-label">平均耗时</span>
                 </div>
                 <div class="ta-imob-overview-cell">
-                  <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.p90) }}</span>
-                  <span class="ta-imob-overview-label">P90 耗时</span>
-                </div>
-                <div class="ta-imob-overview-cell">
-                  <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.p95) }}</span>
-                  <span class="ta-imob-overview-label">P95 耗时</span>
-                </div>
-                <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.maxDuration) }}</span>
                   <span class="ta-imob-overview-label">最大耗时</span>
                 </div>
@@ -644,17 +595,17 @@ function onPageChange(next: number) {
                   <span class="ta-imob-overview-label">QPS</span>
                 </div>
                 <div class="ta-imob-overview-cell">
-                  <span class="ta-imob-overview-value">{{ formatDuration(firstTokenStats.avg) }}</span>
+                  <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.firstTokenAvg) }}</span>
                   <span class="ta-imob-overview-label">平均首 token</span>
                 </div>
                 <div class="ta-imob-overview-cell">
-                  <span class="ta-imob-overview-value">{{ formatDuration(firstTokenStats.p90) }}</span>
-                  <span class="ta-imob-overview-label">首 token P90</span>
+                  <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.firstTokenMax) }}</span>
+                  <span class="ta-imob-overview-label">最大首 token</span>
                 </div>
               </div>
             </div>
 
-            <!-- 图表：趋势 / 成功率 / 失败分类 / 供应商对比 / 耗时分布 -->
+            <!-- 图表：趋势 / 成功率 / 失败分类 / 供应商对比。小时聚合无法还原分位数与分布，避免展示伪 P90/P95。 -->
             <div v-if="hourlyTrend.hours.length" class="ta-imob-charts">
               <div class="ta-imob-chart-card">
                 <h4 class="ta-imob-overview-title">小时趋势</h4>
@@ -671,10 +622,6 @@ function onPageChange(next: number) {
               <div v-if="providerBarData.length" class="ta-imob-chart-card">
                 <h4 class="ta-imob-overview-title">按供应商请求量</h4>
                 <div ref="providerChartEl" class="ta-imob-chart" />
-              </div>
-              <div v-if="durationHistogram.length" class="ta-imob-chart-card">
-                <h4 class="ta-imob-overview-title">耗时分布</h4>
-                <div ref="durationChartEl" class="ta-imob-chart" />
               </div>
             </div>
 
@@ -702,6 +649,10 @@ function onPageChange(next: number) {
                     <div class="ta-imob-metric-cell">
                       <span class="ta-imob-metric-value">{{ formatDuration(metric.maxDurationMillis) }}</span>
                       <span class="ta-imob-metric-label">最大耗时</span>
+                    </div>
+                    <div class="ta-imob-metric-cell">
+                      <span class="ta-imob-metric-value">{{ formatDuration(metric.avgFirstTokenMillis) }}</span>
+                      <span class="ta-imob-metric-label">平均首 token</span>
                     </div>
                     <div class="ta-imob-metric-cell">
                       <span class="ta-imob-metric-value" :class="{ 'is-bad': metric.failureCount > 0 }">
@@ -735,6 +686,14 @@ function onPageChange(next: number) {
               </el-table-column>
               <el-table-column label="最大耗时" width="100">
                 <template #default="{ row }">{{ formatDuration(row.durationMillisMax) }}</template>
+              </el-table-column>
+              <el-table-column label="平均首 token" width="120">
+                <template #default="{ row }">
+                  {{ formatDuration((row.firstTokenCount ?? 0) > 0 ? Math.round((row.firstTokenMillisSum ?? 0) / (row.firstTokenCount ?? 1)) : null) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="最大首 token" width="120">
+                <template #default="{ row }">{{ formatDuration((row.firstTokenCount ?? 0) > 0 ? (row.firstTokenMillisMax ?? 0) : null) }}</template>
               </el-table-column>
             </el-table>
           </div>

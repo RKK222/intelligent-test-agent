@@ -53,9 +53,14 @@ public class InternalModelObservabilityQueryService {
     }
 
     public List<InternalModelCallHourlyStat> queryHourlyStats(
-            String providerId, Instant from, Instant to) {
+            String providerId, InternalModelCallSource source, Instant from, Instant to) {
         Instant[] window = boundedWindow(from, to);
-        return callRecordRepository.queryHourlyStats(providerId, window[0], window[1]);
+        return callRecordRepository.queryHourlyStats(providerId, source, window[0], window[1]);
+    }
+
+    /** 保留旧调用形态，未传 source 时查询所有来源。 */
+    public List<InternalModelCallHourlyStat> queryHourlyStats(String providerId, Instant from, Instant to) {
+        return queryHourlyStats(providerId, null, from, to);
     }
 
     public List<InternalModelProbeStatus> findProbeStatus() {

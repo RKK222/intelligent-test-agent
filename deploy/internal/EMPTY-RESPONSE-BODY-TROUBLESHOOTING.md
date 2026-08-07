@@ -414,7 +414,7 @@ unset TEST_AGENT_DIAG_JWT
 
 ## 9. 验证用户 OpenCode 和企业模型链路
 
-> 已部署带「内部模型调用可观测」的版本时，先看系统管理 → 内部模型可观测页面：调用记录 tab 会列出最近 24 小时每次代理调用的 `providerId/model/outcome/httpStatus/durationMillis/traceId`，聚合统计 tab 按小时汇总成功率与耗时，探活状态卡片显示每个 provider 的最近探活结果与连续失败次数。先按 `traceId` 在明细中定位本次失败属于哪类（`UPSTREAM_CONNECT_FAILED` / `UPSTREAM_FIRST_RESPONSE_TIMEOUT` / `UPSTREAM_HTTP_ERROR` 等），再按分类进入下方对应层排查；也可以在页面手动触发「全部探活」主动确认当前端点可达性，避免先登机器 grep 日志。
+> 已部署带「内部模型调用可观测」的版本时，先看系统管理 → 内部模型可观测页面：调用记录 tab 默认只列真实用户调用（可切换探活），展示 `providerId/model/outcome/httpStatus/durationMillis/firstByteMillis/firstTokenMillis/traceId`；其中 `firstByteMillis` 是响应头时间，`firstTokenMillis` 才是首个有效 SSE data 时间。聚合统计 tab 默认按 `source=USER_CALL` 汇总小时成功率、准确平均/最大耗时和平均/最大首 token，不展示无法从小时 sum/max 还原的 P90/P95。探活状态卡片显示每个 provider 的最近探活结果与连续失败次数。先按 `traceId` 在明细中定位本次失败属于哪类（`UPSTREAM_CONNECT_FAILED` / `UPSTREAM_FIRST_RESPONSE_TIMEOUT` / `UPSTREAM_HTTP_ERROR` / `UPSTREAM_STREAM_INTERRUPTED` 等），再按分类进入下方对应层排查；也可以在页面手动触发「全部探活」主动确认当前端点可达性，避免先登机器 grep 日志。
 
 先在运行管理确认故障用户为 `BOUND`，记录实际动态端口和所属后台。只在所属后台执行：
 

@@ -125,27 +125,29 @@ public class InternalModelProviderProbeService {
         long startedNanos = System.nanoTime();
         WebClient client = webClient();
         try {
-            HttpStatusCode status = client.post()
+            ProbeResponse response = client.post()
                     .uri(normalizedTarget(provider.baseUrl(), CHAT_PATH))
                     .headers(headers -> applyHeaders(headers, runtimeConfig.authToken(), traceId))
                     .bodyValue(probeBody(model))
-                    .retrieve()
-                    .toBodilessEntity()
-                    .map(entity -> entity.getStatusCode())
+                    .exchangeToMono(upstream -> {
+                        // 在收到响应头的回调内取样，不能等正文消费完再伪造首字节时间。
+                        long firstByteNanos = System.nanoTime();
+                        return upstream.releaseBody()
+                                .thenReturn(new ProbeResponse(upstream.statusCode(), firstByteNanos));
+                    })
                     .block(RESPONSE_TIMEOUT);
-            if (status == null) {
+            if (response == null) {
                 return recordProbe(provider.providerId(), model, InternalModelCallOutcome.UPSTREAM_FIRST_RESPONSE_TIMEOUT,
                         null, null, startedAt, startedNanos, null, traceId);
             }
-            // 探活为同步 block 调用，返回即代表响应已到达，此刻记录首字节时间。
-            long firstByteNanos = System.nanoTime();
+            HttpStatusCode status = response.status();
             InternalModelCallOutcome outcome = status.is2xxSuccessful()
                     ? InternalModelCallOutcome.SUCCESS
                     : InternalModelCallOutcome.UPSTREAM_HTTP_ERROR;
             return recordProbe(provider.providerId(), model, outcome, status.value(), null,
-                    startedAt, startedNanos, firstByteNanos, traceId);
+                    startedAt, startedNanos, response.firstByteNanos(), traceId);
         } catch (org.springframework.web.reactive.function.client.WebClientResponseException httpError) {
-            // retrieve() 对非 2xx 直接抛异常：按真实上游状态码归为 HTTP_ERROR；异常抛出即响应已到。
+            // 保留 WebClient 异常兼容分支：按真实上游状态码归为 HTTP_ERROR，响应已到达。
             long firstByteNanos = System.nanoTime();
             HttpStatusCode status = httpError.getStatusCode();
             InternalModelCallOutcome outcome = status.is2xxSuccessful()
@@ -177,6 +179,7 @@ public class InternalModelProviderProbeService {
         InternalModelCallRecord record = new InternalModelCallRecord(
                 null, providerId, model, CHAT_PATH, InternalModelCallSource.PROBE, outcome,
                 httpStatus, errorClass, false, durationMillis, firstByteMillis,
+                null,
                 traceId == null ? "" : traceId, PROBE_UCID, startedAt);
         try {
             callRecordRepository.record(record);
@@ -241,6 +244,9 @@ public class InternalModelProviderProbeService {
         return WebClient.builder()
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .build();
+    }
+
+    private record ProbeResponse(HttpStatusCode status, long firstByteNanos) {
     }
 
     /** 单次探活结果集合：providerId -> outcome 等结构化字段。 */

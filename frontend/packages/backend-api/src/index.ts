@@ -2212,11 +2212,13 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     ),
     getInternalModelCallStats: (params: {
       providerId?: string | null;
+      source?: InternalModelCallSource | null;
       from?: string | null;
       to?: string | null;
     } = {}) => request<InternalModelCallHourlyStat[]>(
       `${internalModelObservabilityBase}/stats${query({
         providerId: params.providerId,
+        source: params.source,
         from: params.from,
         to: params.to
       })}`

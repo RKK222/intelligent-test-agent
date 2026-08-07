@@ -213,11 +213,16 @@ public class InternalModelProxyForwardingService {
         }
 
         observation.markStreaming();
-        Flux<ServerSentEvent<String>> upstreamEvents = withStreamingTimeouts(response.bodyToFlux(SSE_EVENT_TYPE))
-                .doOnNext(ignored -> observation.markFirstEvent());
+        Flux<ServerSentEvent<String>> upstreamEvents = withSseTimeouts(response.bodyToFlux(SSE_EVENT_TYPE))
+                .doOnNext(observation::markSseEvent);
         Flux<ServerSentEvent<String>> events;
         if (responsesSession == null) {
-            events = upstreamEvents.map(event -> convertEvent(event, converter));
+            events = upstreamEvents
+                    .map(event -> convertEvent(event, converter))
+                    .concatWith(Flux.defer(() -> {
+                        observation.markDirectStreamEnd();
+                        return Flux.empty();
+                    }));
         } else {
             events = upstreamEvents
                     .concatMapIterable(event -> convertResponsesEvent(event, converter, responsesSession))
@@ -320,6 +325,19 @@ public class InternalModelProxyForwardingService {
         return source.timeout(
                 Mono.delay(firstEventTimeout),
                 ignored -> Mono.delay(streamIdleTimeout));
+    }
+
+    /** SSE 注释/空事件不能刷新首有效 chunk 超时；收到有效 data 后才切换到流空闲边界。 */
+    private Flux<ServerSentEvent<String>> withSseTimeouts(Flux<ServerSentEvent<String>> source) {
+        return source.timeout(
+                Mono.delay(firstEventTimeout),
+                event -> hasSseData(event)
+                        ? Mono.delay(streamIdleTimeout)
+                        : Mono.delay(firstEventTimeout));
+    }
+
+    private static boolean hasSseData(ServerSentEvent<String> event) {
+        return event != null && event.data() != null && !event.data().isBlank();
     }
 
     private static Duration requirePositive(Duration value, String name) {
@@ -486,6 +504,8 @@ public class InternalModelProxyForwardingService {
         private final long startedNanos;
         private final AtomicBoolean firstByteMarked = new AtomicBoolean(false);
         private final AtomicBoolean firstEventMarked = new AtomicBoolean(false);
+        private final AtomicBoolean firstTokenMarked = new AtomicBoolean(false);
+        private final AtomicBoolean doneSeen = new AtomicBoolean(false);
         private final AtomicBoolean streaming = new AtomicBoolean(false);
         private final AtomicBoolean streamOutcomeSet = new AtomicBoolean(false);
         private final AtomicBoolean outcomeExplicitlySet = new AtomicBoolean(false);
@@ -494,6 +514,7 @@ public class InternalModelProxyForwardingService {
         private volatile InternalModelCallOutcome outcome = InternalModelCallOutcome.SUCCESS;
         private volatile String errorClass;
         private volatile long firstByteNanos;
+        private volatile long firstTokenNanos;
 
         CallObservation(String providerId, String model, String endpoint, String traceId, String ucid) {
             this.providerId = providerId;
@@ -521,17 +542,37 @@ public class InternalModelProxyForwardingService {
         }
 
         void markFirstByte(HttpStatusCode statusCode) {
-            firstByteMarked.set(true);
             firstByteNanos = System.nanoTime();
             httpStatus.set(statusCode.value());
+            // 先写时间与状态，再发布标记，避免终态线程观察到 true 但读到默认值。
+            firstByteMarked.set(true);
         }
 
         void markStreaming() {
             streaming.set(true);
         }
 
-        void markFirstEvent() {
+        void markSseEvent(ServerSentEvent<String> event) {
+            String data = event == null ? null : event.data();
+            if (data == null || data.isBlank()) {
+                return;
+            }
+            // 首事件超时也以有 data 的有效 SSE 为边界，注释/空事件不能掩盖空响应。
             firstEventMarked.set(true);
+            if ("[DONE]".equals(data.trim())) {
+                doneSeen.set(true);
+                return;
+            }
+            if (firstTokenMarked.compareAndSet(false, true)) {
+                firstTokenNanos = System.nanoTime();
+            }
+        }
+
+        void markDirectStreamEnd() {
+            // Chat Completions 流必须有有效 chunk 并以 [DONE] 结束；正常 EOF 否则属于截断/空流。
+            if (!firstTokenMarked.get() || !doneSeen.get()) {
+                markStreamOutcome(InternalModelCallOutcome.UPSTREAM_STREAM_INTERRUPTED);
+            }
         }
 
         void markStreamOutcome(InternalModelCallOutcome streamOutcome) {
@@ -543,9 +584,10 @@ public class InternalModelProxyForwardingService {
         }
 
         void markError(Throwable error) {
-            outcome = InternalModelCallOutcomeClassifier.classify(error, signals());
-            errorClass = InternalModelCallOutcomeClassifier.errorClass(error);
-            outcomeExplicitlySet.set(true);
+            if (outcomeExplicitlySet.compareAndSet(false, true)) {
+                outcome = InternalModelCallOutcomeClassifier.classify(error, signals());
+                errorClass = InternalModelCallOutcomeClassifier.errorClass(error);
+            }
         }
 
         void markCancelled() {
@@ -568,6 +610,9 @@ public class InternalModelProxyForwardingService {
             Long firstByteMillis = firstByteMarked.get()
                     ? (firstByteNanos - startedNanos) / 1_000_000
                     : null;
+            Long firstTokenMillis = firstTokenMarked.get()
+                    ? (firstTokenNanos - startedNanos) / 1_000_000
+                    : null;
             return new InternalModelCallRecord(
                     null,
                     providerId,
@@ -580,6 +625,7 @@ public class InternalModelProxyForwardingService {
                     streaming.get(),
                     durationMillis,
                     firstByteMillis,
+                    firstTokenMillis,
                     traceId == null ? "" : traceId,
                     ucid,
                     startedAt);

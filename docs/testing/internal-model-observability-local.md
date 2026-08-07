@@ -23,7 +23,7 @@ python3 tools/mock-model-server.py --port 19070 --mode http500
 # SSE 流式成功
 python3 tools/mock-model-server.py --port 19070 --mode sse
 
-# 响应头后挂起（触发首响应超时） / SSE 永远无事件（触发首事件超时）
+# 响应头后挂起（触发首响应超时） / SSE 响应头后立即 EOF（验证空/截断流）
 python3 tools/mock-model-server.py --port 19070 --mode timeout
 python3 tools/mock-model-server.py --port 19070 --mode empty
 ```
@@ -70,7 +70,7 @@ curl -X POST http://127.0.0.1:8080/api/internal/platform/opencode-runtime/intern
 | `http400` | `UPSTREAM_HTTP_ERROR` | 400 |
 | `http500` | `UPSTREAM_HTTP_ERROR` | 500 |
 | `timeout` | `UPSTREAM_FIRST_RESPONSE_TIMEOUT` | 200（响应头已到） |
-| `empty` | `UPSTREAM_FIRST_EVENT_TIMEOUT` | 200 |
+| `empty` | `UPSTREAM_STREAM_INTERRUPTED` | 200（响应头后立即 EOF，无有效 chunk/[DONE]） |
 
 > 连接失败：把 provider 的 baseUrl 指向未监听端口（如 `http://127.0.0.1:19999`），预期 `UPSTREAM_CONNECT_FAILED`。
 
@@ -97,6 +97,10 @@ curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-mode
 curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-model-observability/stats?providerId=local-mock" \
   -H "Authorization: Bearer <超管token>"
 
+# 仅真实用户调用（页面默认口径；探活不会混入业务指标）
+curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-model-observability/stats?providerId=local-mock&source=USER_CALL" \
+  -H "Authorization: Bearer <超管token>"
+
 # 探活状态
 curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-model-observability/probe-status" \
   -H "Authorization: Bearer <超管token>"
@@ -111,5 +115,5 @@ curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-mode
 ## 已知边界
 
 - mock 不校验 Token/鉴权，仅用于链路验证；真实环境仍走代理 key 与 provider Token。
-- `timeout`/`empty` 模式挂起 120 秒，触发后记得重启 mock 或等超时释放。
+- `timeout` 模式挂起 120 秒，触发后记得重启 mock 或等超时释放；`empty` 模式响应头后立即 EOF，应记录为 `UPSTREAM_STREAM_INTERRUPTED`，用于验证空流不被误记成功。
 - 真实企业端点的网络时延、真实 token 计数、TLS 与证书等，仍需部署后按 `deploy/internal/EMPTY-RESPONSE-BODY-TROUBLESHOOTING.md` 现场验收。

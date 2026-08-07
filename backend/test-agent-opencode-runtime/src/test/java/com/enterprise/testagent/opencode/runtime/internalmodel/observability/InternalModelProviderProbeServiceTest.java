@@ -49,6 +49,11 @@ class InternalModelProviderProbeServiceTest {
             byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, body.length);
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
             try (OutputStream output = exchange.getResponseBody()) {
                 output.write(body);
             }
@@ -69,10 +74,11 @@ class InternalModelProviderProbeServiceTest {
         assertThat(recorded).hasSize(1);
         assertThat(recorded.getFirst().source()).isEqualTo(InternalModelCallSource.PROBE);
         assertThat(recorded.getFirst().outcome()).isEqualTo(InternalModelCallOutcome.SUCCESS);
-        // 探活同步 block 返回即响应到达，首 token 时间应为正且不大于总耗时。
+        // 首字节在响应头回调取样，即使正文读取较慢也应早于总耗时；探活是非流式，不产生首 token。
         assertThat(recorded.getFirst().firstByteMillis()).isNotNull();
         assertThat(recorded.getFirst().firstByteMillis()).isGreaterThanOrEqualTo(0);
-        assertThat(recorded.getFirst().firstByteMillis()).isLessThanOrEqualTo(recorded.getFirst().durationMillis());
+        assertThat(recorded.getFirst().firstByteMillis()).isLessThan(recorded.getFirst().durationMillis());
+        assertThat(recorded.getFirst().firstTokenMillis()).isNull();
         assertThat(statuses).hasSize(1);
         assertThat(statuses.getFirst().consecutiveFailures()).isZero();
     }

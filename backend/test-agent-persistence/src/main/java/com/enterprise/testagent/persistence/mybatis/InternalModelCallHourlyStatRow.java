@@ -12,5 +12,8 @@ public record InternalModelCallHourlyStatRow(
         String outcome,
         Long requestCount,
         Long durationMillisSum,
-        Long durationMillisMax) {
+        Long durationMillisMax,
+        Long firstTokenMillisSum,
+        Long firstTokenMillisMax,
+        Long firstTokenCount) {
 }

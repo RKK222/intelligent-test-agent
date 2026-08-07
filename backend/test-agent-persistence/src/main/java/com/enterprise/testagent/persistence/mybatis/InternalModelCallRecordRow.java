@@ -15,6 +15,7 @@ public record InternalModelCallRecordRow(
         Boolean streaming,
         Long durationMillis,
         Long firstByteMillis,
+        Long firstTokenMillis,
         String traceId,
         String ucid,
         Instant startedAt) {

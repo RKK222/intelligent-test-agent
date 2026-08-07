@@ -1833,6 +1833,8 @@ export type InternalModelCallRecord = {
   streaming: boolean;
   durationMillis: number;
   firstByteMillis?: number | null;
+  /** 首个非空且非 [DONE] SSE data 的相对耗时；非流式或未收到有效 chunk 时为空。 */
+  firstTokenMillis?: number | null;
   traceId: string;
   ucid?: string | null;
   startedAt: string;
@@ -1849,6 +1851,9 @@ export type InternalModelCallHourlyStat = {
   requestCount: number;
   durationMillisSum: number;
   durationMillisMax: number;
+  firstTokenMillisSum?: number | null;
+  firstTokenMillisMax?: number | null;
+  firstTokenCount?: number | null;
 };
 
 /** 逐 provider 最近探活状态，供健康卡片直接读取。 */
