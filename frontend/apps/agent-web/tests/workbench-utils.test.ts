@@ -44,6 +44,7 @@ import {
   sessionTitleEventMatchesCurrentSession,
   platformSessionTitleFromSynchronizedEventPayload,
   projectRootInteractionSession,
+  replaceRootSessionInteractions,
   isSupersededInteractionAsk,
   runEventProjection,
   sessionTitleFromFirstMessage,
@@ -681,11 +682,7 @@ describe("historyRuntimeBadgeCounts", () => {
 
 describe("replaceRootSessionInteractions", () => {
   it("replaces only root pending interactions and keeps child interactions restored from the session tree", () => {
-    const reconcile = (workbenchUtils as unknown as Record<string, unknown>).replaceRootSessionInteractions;
-    expect(reconcile).toBeTypeOf("function");
-    if (typeof reconcile !== "function") return;
-
-    expect(reconcile(
+    expect(replaceRootSessionInteractions(
       [
         { requestId: "root_stale", sessionId: "ses_root" },
         { requestId: "child_pending", sessionId: "ses_child" }
@@ -696,6 +693,54 @@ describe("replaceRootSessionInteractions", () => {
       { requestId: "child_pending", sessionId: "ses_child" },
       { requestId: "root_live", sessionId: "ses_root" }
     ]);
+  });
+
+  it("drops the remote root alias before an SSE replay can expose a duplicate question card", () => {
+    const reconciled = replaceRootSessionInteractions(
+      [
+        { requestId: "que_1", sessionId: "ses_remote_root", questions: [], createdAt: "2026-08-08T00:00:00Z" },
+        { requestId: "que_child", sessionId: "ses_remote_child", questions: [], createdAt: "2026-08-08T00:00:01Z" }
+      ],
+      [{ requestId: "que_1", sessionId: "ses_platform_root", questions: [], createdAt: "2026-08-08T00:00:02Z" }],
+      "ses_platform_root"
+    );
+    const replayed = reduceAgentChatRuntime(
+      { ...createInitialAgentChatRuntimeState(), questions: reconciled },
+      {
+        type: "event",
+        event: projectRootInteractionSession({
+          eventId: "evt_question_replay",
+          runId: "run_1",
+          seq: 9,
+          type: "question.asked",
+          traceId: "trace_1",
+          occurredAt: "2026-08-08T00:00:03Z",
+          payload: { id: "que_1", sessionId: "ses_remote_root", questions: [] }
+        }, "ses_platform_root")
+      }
+    );
+
+    expect(replayed.questions).toEqual([
+      { requestId: "que_child", sessionId: "ses_remote_child", questions: [], createdAt: "2026-08-08T00:00:01Z" },
+      { requestId: "que_1", sessionId: "ses_platform_root", questions: [], createdAt: "2026-08-08T00:00:03Z" }
+    ]);
+  });
+
+  it("keeps the historical fallback when the live interaction request fails", () => {
+    const restored = [{ requestId: "que_history", sessionId: "ses_remote_root" }];
+
+    expect(replaceRootSessionInteractions(restored, null, "ses_platform_root")).toBe(restored);
+  });
+
+  it("clears the projected root scope from an authoritative empty live snapshot", () => {
+    expect(replaceRootSessionInteractions(
+      [
+        { requestId: "que_root", sessionId: "ses_platform_root" },
+        { requestId: "que_child", sessionId: "ses_remote_child" }
+      ],
+      [],
+      "ses_platform_root"
+    )).toEqual([{ requestId: "que_child", sessionId: "ses_remote_child" }]);
   });
 });
 

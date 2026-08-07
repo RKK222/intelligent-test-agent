@@ -1804,3 +1804,17 @@
 - Result:
   - 首次批量定时操作现在只有一个明确的主执行入口，并可安全退出定时选择；已同步 frontend、agent-web、PACKAGE 和用户手册说明及浏览器回归。
   - 本次仅修改前端交互、测试和稳定文档，不变更 HTTP API、RunEvent、数据库/Flyway、后端、性能或安全契约，也未修改 `.env*`、generated SDK 或 OpenCode 源码。
+
+### 2026-08-08 - 修复历史会话待答问题重复显示
+
+- Why:
+  - 历史 Session Tree 保留 OpenCode 远端根 sessionId，当前 pending 接口使用平台 sessionId；现有合并只按 sessionId 替换，使同一 `requestId` 暂存两份，后续 SSE 根会话投影后同时进入当前会话并显示重复问题卡片。
+- What:
+  - `replaceRootSessionInteractions` 改为用稳定 `requestId` 让实时根请求覆盖历史远端别名，同时保留不同请求 ID 的子 Agent 交互、接口失败时的历史降级和空实时快照的根 scope 清理语义。
+  - agent-web 回归覆盖历史树、实时 pending 与 SSE ask 回放的完整重复链路，并同步历史交互校准说明。
+- How:
+  - TDD 红测稳定得到 1 failed / 100 passed，唯一多余项为 `que_1 / ses_remote_root`；最小修复后聚焦测试 101 passed。
+  - 前端全量 118 个测试文件 1864 passed / 1 skipped，15 个 workspace typecheck 和 production build 通过；Vitest 仅有既有 jsdom Canvas 提示，构建仅有既有 plugin timing 与 chunk-size 警告。
+- Result:
+  - 从会话列表恢复待答问题时，同一请求只保留一张可交互卡片，子 Agent 请求与失败降级保持不变。
+  - 本次不新增或变更 HTTP API、RunEvent wire name、DTO、数据库/Flyway、后端、性能、安全或兼容性契约，未修改 `.env*`、generated SDK 或 OpenCode 源码。

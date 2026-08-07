@@ -828,15 +828,19 @@ export function historyRuntimeBadgeCounts(
   return { runningCount, questionCount, permissionCount };
 }
 
-/** 根会话实时快照只替换根 scope，child 的 asked/replied 收敛结果继续以 session tree 为准。 */
-export function replaceRootSessionInteractions<T extends { sessionId: string }>(
+/**
+ * 根会话实时快照只替换根 scope，child 的 asked/replied 收敛结果继续以 session tree 为准。
+ * requestId 是平台与 OpenCode 远端 session 别名之间的稳定身份，实时根请求必须覆盖同 ID 的历史副本。
+ */
+export function replaceRootSessionInteractions<T extends { requestId: string; sessionId: string }>(
   restored: T[],
   liveRoot: T[] | null,
   rootSessionId: string
 ): T[] {
   if (liveRoot === null) return restored;
+  const liveRequestIds = new Set(liveRoot.map((item) => item.requestId));
   return [
-    ...restored.filter((item) => item.sessionId !== rootSessionId),
+    ...restored.filter((item) => item.sessionId !== rootSessionId && !liveRequestIds.has(item.requestId)),
     ...liveRoot.filter((item) => item.sessionId === rootSessionId)
   ];
 }
