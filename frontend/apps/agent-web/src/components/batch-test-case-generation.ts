@@ -33,6 +33,15 @@ export type BatchGenerationRequest = {
   retry?: boolean;
 };
 
+export type BatchExecutionControls = {
+  reject: () => void;
+};
+
+/** 将工作区路径型候选 ID 转为可稳定查询的 data-testid 片段。 */
+export function batchReferenceTestId(id: string): string {
+  return encodeURIComponent(id);
+}
+
 export type BatchItemPreparationErrorCode =
   | "INPUT_REQUIRED"
   | "INPUT_TOO_LARGE"

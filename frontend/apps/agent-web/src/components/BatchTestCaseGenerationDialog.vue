@@ -12,6 +12,8 @@ import type { WorkspaceRequirementReference } from "./workbench-utils";
 import ExecutionTimePicker from "./ExecutionTimePicker.vue";
 import {
   allocateBatchSchedule,
+  batchReferenceTestId,
+  type BatchExecutionControls,
   type BatchGenerationRequest,
   type BatchItemExecutionState
 } from "./batch-test-case-generation";
@@ -38,11 +40,13 @@ const props = withDefaults(defineProps<{
 });
 
 const emit = defineEmits<{
-  (event: "close"): void;
+  (event: "close", result: { incompleteCount: number }): void;
   (event: "reload-candidates"): void;
   (event: "request-night-slots"): void;
-  (event: "execute", request: BatchGenerationRequest): void;
+  (event: "execute", request: BatchGenerationRequest, controls: BatchExecutionControls): void;
 }>();
+
+type BatchDialogStage = "selection" | "progress";
 
 const searchInput = ref<HTMLInputElement | null>(null);
 const search = ref("");
@@ -55,6 +59,12 @@ const customScheduleInput = ref("");
 const customScheduleError = ref("");
 const customTimes = ref<string[]>([]);
 const lastRequest = ref<BatchGenerationRequest | null>(null);
+const dialogStage = ref<BatchDialogStage>("selection");
+const activeRequest = ref<BatchGenerationRequest | null>(null);
+const activeReferenceIds = ref<string[]>([]);
+const localSubmitting = ref(false);
+const executionObserved = ref(false);
+let submissionSequence = 0;
 
 const filteredReferences = computed(() => {
   const query = search.value.trim().toLowerCase();
@@ -65,6 +75,8 @@ const filteredReferences = computed(() => {
 });
 const selectedSet = computed(() => new Set(selectedIds.value));
 const selectedReferences = computed(() => props.references.filter((item) => selectedSet.value.has(item.id)));
+const activeReferenceSet = computed(() => new Set(activeReferenceIds.value));
+const activeReferences = computed(() => props.references.filter((item) => activeReferenceSet.value.has(item.id)));
 const selectionAtLimit = computed(() => selectedIds.value.length >= MAX_SELECTION);
 const allFilteredSelected = computed(() => filteredReferences.value.length > 0
   && filteredReferences.value.every((item) => selectedSet.value.has(item.id)));
@@ -77,16 +89,56 @@ const scheduleAllocation = computed(() => allocateBatchSchedule({
   selectedTimes: selectedScheduleTimes.value,
   slots: props.nightSlots?.slots
 }));
-const failedIds = computed(() => props.references
+const failedIds = computed(() => activeReferences.value
   .filter((reference) => props.itemStates[reference.id]?.status === "failed")
   .map((reference) => reference.id));
+const capacityConflictIds = computed(() => failedIds.value.filter(
+  (id) => props.itemStates[id]?.errorCode === "SLOT_CAPACITY_CONFLICT"
+));
+const retryScheduleAllocation = computed(() => allocateBatchSchedule({
+  itemCount: capacityConflictIds.value.length,
+  scheduleMode: activeRequest.value?.scheduleMode ?? scheduleMode.value,
+  selectedTimes: selectedScheduleTimes.value,
+  slots: props.nightSlots?.slots
+}));
+const executionLocked = computed(() => props.running || localSubmitting.value);
+const createdSessionCount = computed(() => activeReferences.value.filter(
+  (reference) => Boolean(props.itemStates[reference.id]?.sessionId)
+).length);
+const incompleteCount = computed(() => activeReferences.value.length - createdSessionCount.value);
+const succeededCount = computed(() => activeReferences.value.filter(
+  (reference) => props.itemStates[reference.id]?.status === "succeeded"
+).length);
 
 watch(() => props.open, async (open) => {
-  if (!open) return;
+  if (!open) {
+    resetDialogState();
+    return;
+  }
   emit("reload-candidates");
   await nextTick();
   searchInput.value?.focus();
 }, { immediate: true });
+
+watch(() => props.running, (running) => {
+  if (dialogStage.value !== "progress") return;
+  if (running) {
+    executionObserved.value = true;
+    localSubmitting.value = false;
+    return;
+  }
+  if (executionObserved.value) {
+    executionObserved.value = false;
+    localSubmitting.value = false;
+  }
+});
+
+watch(capacityConflictIds, (current, previous) => {
+  if (current.length === 0 || previous.length > 0) return;
+  selectedNightTimes.value = [];
+  customTimes.value = [];
+  emit("request-night-slots");
+});
 
 watch(() => props.references, (references) => {
   const valid = new Set(references.map((item) => item.id));
@@ -94,7 +146,8 @@ watch(() => props.references, (references) => {
 });
 
 function requestClose() {
-  if (!props.running) emit("close");
+  if (executionLocked.value) return;
+  emit("close", { incompleteCount: incompleteCount.value });
 }
 
 function toggleSelection(reference: WorkspaceRequirementReference, checked: boolean) {
@@ -124,16 +177,14 @@ function toggleSelectAll() {
   selectedIds.value = next;
 }
 
-function executeImmediate(referenceIds = selectedIds.value, retry = false) {
-  if (props.running || referenceIds.length === 0 || !requirement.value.trim()) return;
+function executeImmediate() {
+  if (executionLocked.value || selectedIds.value.length === 0 || !requirement.value.trim()) return;
   const request: BatchGenerationRequest = {
-    referenceIds: [...referenceIds],
+    referenceIds: [...selectedIds.value],
     requirement: requirement.value,
-    executionMode: "immediate",
-    ...(retry ? { retry: true } : {})
+    executionMode: "immediate"
   };
-  lastRequest.value = request;
-  emit("execute", request);
+  beginExecution(request);
 }
 
 function openSchedule() {
@@ -142,7 +193,7 @@ function openSchedule() {
 }
 
 function toggleNightTime(slotStart: string, available: boolean) {
-  if (!available || props.running) return;
+  if (!available || executionLocked.value) return;
   selectedNightTimes.value = selectedNightTimes.value.includes(slotStart)
     ? selectedNightTimes.value.filter((item) => item !== slotStart)
     : [...selectedNightTimes.value, slotStart].sort();
@@ -176,34 +227,97 @@ function updateCustomScheduleInput(value: string) {
   customScheduleError.value = "";
 }
 
-function executeScheduled(referenceIds = selectedIds.value, retry = false) {
-  if (props.running || referenceIds.length === 0 || !requirement.value.trim()) return;
+function executeScheduled() {
+  if (executionLocked.value || selectedIds.value.length === 0 || !requirement.value.trim()) return;
   const allocation = allocateBatchSchedule({
-    itemCount: referenceIds.length,
+    itemCount: selectedIds.value.length,
     scheduleMode: scheduleMode.value,
     selectedTimes: selectedScheduleTimes.value,
     slots: props.nightSlots?.slots
   });
   if (!allocation.ok) return;
   const request: BatchGenerationRequest = {
-    referenceIds: [...referenceIds],
+    referenceIds: [...selectedIds.value],
     requirement: requirement.value,
     executionMode: "scheduled",
     scheduleMode: scheduleMode.value,
-    slotStarts: [...selectedScheduleTimes.value].sort(),
-    ...(retry ? { retry: true } : {})
+    slotStarts: [...selectedScheduleTimes.value].sort()
   };
-  lastRequest.value = request;
-  emit("execute", request);
+  beginExecution(request);
 }
 
-function retryFailed() {
-  if (!lastRequest.value || failedIds.value.length === 0 || props.running) return;
-  if (lastRequest.value.executionMode === "immediate") {
-    executeImmediate(failedIds.value, true);
-  } else {
-    executeScheduled(failedIds.value, true);
+/** 先切换到进度页再通知父层，关闭同一渲染帧内的重复点击窗口。 */
+function beginExecution(request: BatchGenerationRequest) {
+  if (dialogStage.value !== "selection" || executionLocked.value) return;
+  activeRequest.value = request;
+  activeReferenceIds.value = [...request.referenceIds];
+  lastRequest.value = request;
+  dialogStage.value = "progress";
+  emitExecution(request, true);
+}
+
+function emitExecution(request: BatchGenerationRequest, firstSubmission: boolean) {
+  localSubmitting.value = true;
+  executionObserved.value = false;
+  const sequence = ++submissionSequence;
+  emit("execute", request, {
+    reject: () => {
+      if (sequence !== submissionSequence || props.running) return;
+      localSubmitting.value = false;
+      if (!firstSubmission) return;
+      dialogStage.value = "selection";
+      activeRequest.value = null;
+      activeReferenceIds.value = [];
+      lastRequest.value = null;
+    }
+  });
+}
+
+function retryReferences(referenceIds: string[]) {
+  const request = activeRequest.value;
+  if (!request || executionLocked.value || referenceIds.length === 0) return;
+  const includesCapacityConflict = referenceIds.some((id) => capacityConflictIds.value.includes(id));
+  if (includesCapacityConflict && !retryScheduleAllocation.value.ok) return;
+  emitExecution({
+    ...request,
+    referenceIds: [...referenceIds],
+    retry: true,
+    ...(request.executionMode === "scheduled" && includesCapacityConflict
+      ? { slotStarts: [...selectedScheduleTimes.value].sort() }
+      : {})
+  }, false);
+}
+
+function resetDialogState() {
+  search.value = "";
+  selectedIds.value = [];
+  requirement.value = DEFAULT_REQUIREMENT;
+  scheduleOpen.value = false;
+  scheduleMode.value = "NIGHT_WINDOW";
+  selectedNightTimes.value = [];
+  customScheduleInput.value = "";
+  customScheduleError.value = "";
+  customTimes.value = [];
+  lastRequest.value = null;
+  activeRequest.value = null;
+  activeReferenceIds.value = [];
+  dialogStage.value = "selection";
+  localSubmitting.value = false;
+  executionObserved.value = false;
+  submissionSequence += 1;
+}
+
+function retryDisabled(referenceId?: string): boolean {
+  if (executionLocked.value) return true;
+  if (!referenceId || !capacityConflictIds.value.includes(referenceId)) return false;
+  return !retryScheduleAllocation.value.ok;
+}
+
+function failureText(state?: BatchItemExecutionState): string {
+  if (state?.status === "failed" && state.sessionId) {
+    return "会话已创建，执行启动失败";
   }
+  return statusText(state);
 }
 
 function statusText(state?: BatchItemExecutionState): string {
@@ -225,6 +339,10 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
   <div v-if="open" class="batch-dialog-overlay" @click.self="requestClose">
     <div
       class="batch-dialog"
+      :class="{
+        'is-progress': dialogStage === 'progress',
+        'has-retry-schedule': dialogStage === 'progress' && capacityConflictIds.length > 0
+      }"
       style="width: 70vw; height: 70vh"
       role="dialog"
       aria-modal="true"
@@ -234,20 +352,21 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
       <header class="batch-dialog-head">
         <div>
           <span class="batch-kicker">BATCH CASES</span>
-          <h2 id="batch-dialog-title">批量生成子条目测试案例</h2>
-          <p>候选目录与输入框 <strong>#</strong> 完全一致，单批最多选择 {{ MAX_SELECTION }} 项。</p>
+          <h2 id="batch-dialog-title">{{ dialogStage === "selection" ? "批量生成子条目测试案例" : "会话创建情况" }}</h2>
+          <p v-if="dialogStage === 'selection'">候选目录与输入框 <strong>#</strong> 完全一致，单批最多选择 {{ MAX_SELECTION }} 项。</p>
+          <p v-else>本页不会自动关闭；失败项可重试，主动关闭后本次批量创建即结束。</p>
         </div>
         <button
           type="button"
           class="batch-icon-button"
           aria-label="关闭批量生成"
           data-testid="batch-dialog-close"
-          :disabled="running"
+          :disabled="executionLocked"
           @click="requestClose"
         ><X :size="18" /></button>
       </header>
 
-      <section class="batch-toolbar">
+      <section v-if="dialogStage === 'selection'" class="batch-toolbar">
         <label class="batch-search">
           <Search :size="16" />
           <input ref="searchInput" v-model="search" type="search" placeholder="搜索需求项或子条目" />
@@ -258,7 +377,7 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
         <span class="batch-count" :class="{ 'is-limit': selectionAtLimit }">已选 {{ selectedIds.length }}/{{ MAX_SELECTION }}</span>
       </section>
 
-      <main class="batch-dialog-body">
+      <main v-if="dialogStage === 'selection'" class="batch-dialog-body">
         <div class="batch-table-head">
           <span>选择</span><span>需求项 / 子条目</span><span>关联文件</span><span>执行状态</span>
         </div>
@@ -287,7 +406,45 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
         </label>
       </main>
 
-      <section v-if="scheduleOpen" class="batch-schedule-panel">
+      <main v-else class="batch-dialog-body batch-progress" data-testid="batch-creation-progress">
+        <div class="batch-progress-summary">
+          <span>已选 <strong>{{ activeReferences.length }}</strong></span>
+          <span>已创建会话 <strong>{{ createdSessionCount }}</strong></span>
+          <span>成功 <strong>{{ succeededCount }}</strong></span>
+          <span :class="{ 'is-error': failedIds.length > 0 }">失败 <strong>{{ failedIds.length }}</strong></span>
+          <span v-if="executionLocked" class="batch-progress-running"><LoaderCircle class="is-spinning" :size="14" /> 正在创建，请稍候</span>
+        </div>
+        <div class="batch-table-head is-progress">
+          <span>需求项 / 子条目</span><span>关联文件</span><span>会话</span><span>创建状态</span><span>操作</span>
+        </div>
+        <div v-for="reference in activeReferences" :key="reference.id" class="batch-row is-progress">
+          <span class="batch-reference">
+            <strong>{{ reference.subitemName }}</strong>
+            <small>{{ reference.requirementName }}</small>
+          </span>
+          <span class="batch-file-count">{{ reference.filePaths.length }} 个</span>
+          <span class="batch-session-id" :title="itemStates[reference.id]?.sessionId">
+            {{ itemStates[reference.id]?.sessionId || "尚未创建" }}
+          </span>
+          <span class="batch-status" :class="`is-${itemStates[reference.id]?.status ?? 'idle'}`">
+            <CheckCircle2 v-if="itemStates[reference.id]?.status === 'succeeded'" :size="14" />
+            <LoaderCircle v-else-if="itemStates[reference.id] && !['idle', 'failed'].includes(itemStates[reference.id]!.status)" class="is-spinning" :size="14" />
+            {{ failureText(itemStates[reference.id]) }}
+          </span>
+          <span>
+            <button
+              v-if="itemStates[reference.id]?.status === 'failed'"
+              type="button"
+              class="batch-secondary batch-row-retry"
+              :data-testid="`batch-retry-item-${batchReferenceTestId(reference.id)}`"
+              :disabled="retryDisabled(reference.id)"
+              @click="retryReferences([reference.id])"
+            ><RotateCcw :size="13" /> 重试</button>
+          </span>
+        </div>
+      </main>
+
+      <section v-if="dialogStage === 'selection' && scheduleOpen" class="batch-schedule-panel">
         <div class="batch-schedule-head">
           <strong>选择定时执行时间</strong>
         </div>
@@ -324,22 +481,65 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
         </div>
       </section>
 
-      <footer class="batch-dialog-foot">
+      <section
+        v-if="dialogStage === 'progress' && activeRequest?.executionMode === 'scheduled' && capacityConflictIds.length > 0"
+        class="batch-schedule-panel"
+        data-testid="batch-retry-schedule"
+      >
+        <div class="batch-schedule-head">
+          <strong>为 {{ capacityConflictIds.length }} 个容量冲突项重新选择时间</strong>
+        </div>
+        <ExecutionTimePicker
+          multiple
+          :schedule-mode="activeRequest.scheduleMode ?? scheduleMode"
+          :allow-mode-switch="false"
+          :slots="nightSlots"
+          :loading="nightSlotsLoading"
+          :disabled="executionLocked"
+          :selected-times="selectedNightTimes"
+          :custom-input="customScheduleInput"
+          :custom-error="customScheduleError"
+          :custom-min="customBounds.min"
+          :custom-max="customBounds.max"
+          :custom-times="customTimes"
+          @toggle-time="toggleNightTime"
+          @quick-offset="setCustomOffset"
+          @update:custom-input="updateCustomScheduleInput"
+          @add-custom-time="addCustomTime"
+          @remove-custom-time="(time) => customTimes = customTimes.filter((item) => item !== time)"
+        />
+        <span v-if="!retryScheduleAllocation.ok" class="batch-error">
+          所选时段总余量 {{ retryScheduleAllocation.remainingCapacity }}，不足以重试 {{ capacityConflictIds.length }} 个子条目。
+        </span>
+      </section>
+
+      <footer v-if="dialogStage === 'selection'" class="batch-dialog-foot">
         <label class="batch-requirement">
           <span>批量案例生成要求</span>
           <textarea v-model="requirement" data-testid="batch-requirement-input" :disabled="running" maxlength="20000" />
         </label>
         <div class="batch-foot-actions">
           <span v-if="selectionAtLimit" class="batch-limit-hint">最多选择 50 个子条目</span>
-          <button v-if="failedIds.length" type="button" class="batch-secondary" :disabled="running" @click="retryFailed">
-            <RotateCcw :size="15" /> 仅重试失败项（{{ failedIds.length }}）
-          </button>
           <button type="button" class="batch-secondary" data-testid="batch-open-schedule" :disabled="running || selectedIds.length === 0" @click="openSchedule">
             <Clock3 :size="15" /> 选择定时
           </button>
           <button type="button" class="batch-primary" data-testid="batch-execute-now" :disabled="running || selectedIds.length === 0 || !requirement.trim()" @click="executeImmediate()">
             <Play :size="15" /> 立刻执行
           </button>
+        </div>
+      </footer>
+      <footer v-else class="batch-dialog-foot batch-progress-foot">
+        <span>关闭后本次批量创建结束；已创建的会话、Run 和定时任务不会取消。</span>
+        <div class="batch-foot-actions">
+          <button
+            v-if="failedIds.length"
+            type="button"
+            class="batch-secondary"
+            data-testid="batch-retry-all"
+            :disabled="executionLocked || (capacityConflictIds.length > 0 && !retryScheduleAllocation.ok)"
+            @click="retryReferences(failedIds)"
+          ><RotateCcw :size="15" /> 重试全部失败项（{{ failedIds.length }}）</button>
+          <button type="button" class="batch-primary" :disabled="executionLocked" @click="requestClose">关闭</button>
         </div>
       </footer>
     </div>
@@ -368,6 +568,8 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
   color: #263548;
   box-shadow: 0 26px 80px rgba(20, 31, 51, 0.28);
 }
+.batch-dialog.is-progress { grid-template-rows: auto minmax(0, 1fr) auto; }
+.batch-dialog.is-progress.has-retry-schedule { grid-template-rows: auto minmax(0, 1fr) auto auto; }
 .batch-dialog-head {
   display: flex;
   align-items: flex-start;
@@ -396,18 +598,28 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
 .batch-count.is-limit { color: #9f2e38; font-weight: 700; }
 .batch-dialog-body { min-height: 0; overflow: auto; padding: 0 16px 10px; background: #f7f9fc; }
 .batch-table-head, .batch-row { display: grid; grid-template-columns: 56px minmax(240px, 1fr) 110px 150px; align-items: center; }
+.batch-table-head.is-progress, .batch-row.is-progress { grid-template-columns: minmax(190px, 1fr) 90px minmax(150px, .8fr) minmax(180px, 1fr) 80px; gap: 10px; }
 .batch-table-head { position: sticky; z-index: 2; top: 0; min-height: 36px; border-bottom: 1px solid #dfe6ee; background: #f7f9fc; color: #7b8999; font-size: 11px; font-weight: 700; }
 .batch-row { min-height: 52px; border-bottom: 1px solid #e5eaf0; background: #fff; cursor: pointer; }
 .batch-row:hover { background: #f3f7fb; }
+.batch-row.is-progress { padding: 0 10px; cursor: default; }
+.batch-row.is-progress:hover { background: #fff; }
 .batch-row > span:first-child { display: grid; place-items: center; }
 .batch-row input { width: 16px; height: 16px; accent-color: #9f2e38; }
 .batch-reference { display: grid; gap: 2px; }
 .batch-reference strong { overflow: hidden; color: #27384b; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .batch-reference small, .batch-file-count { color: #758496; font-size: 11px; }
+.batch-session-id { overflow: hidden; color: #607187; font-family: var(--font-mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .batch-status { display: inline-flex; align-items: center; gap: 5px; color: #68778a; font-size: 11px; }
 .batch-status.is-succeeded { color: #28724f; }
 .batch-status.is-failed { color: #a0343d; }
 .batch-empty { display: flex; min-height: 140px; align-items: center; justify-content: center; gap: 8px; color: #758496; font-size: 13px; }
+.batch-progress { padding-top: 0; }
+.batch-progress-summary { position: sticky; z-index: 3; top: 0; display: flex; min-height: 42px; align-items: center; gap: 18px; border-bottom: 1px solid #dfe6ee; background: #eef4f9; color: #607187; font-size: 11px; }
+.batch-progress-summary strong { color: #27384b; font-size: 13px; }
+.batch-progress-summary .is-error strong { color: #a0343d; }
+.batch-progress-running { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; color: #8f2731; font-weight: 700; }
+.batch-row-retry { min-height: 28px; padding: 0 8px; }
 .batch-schedule-panel { display: grid; gap: 10px; max-height: 220px; overflow: auto; padding: 12px 16px; border-top: 1px solid #dce4ec; background: #eef4f9; }
 .batch-schedule-head, .batch-schedule-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .batch-schedule-head strong { font-size: 13px; }
@@ -435,6 +647,7 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
 .batch-requirement textarea:focus { border-color: #8f2731; box-shadow: 0 0 0 2px rgba(143, 39, 49, .08); outline: 0; }
 .batch-foot-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
 .batch-limit-hint { color: #9f2e38; font-size: 10px; }
+.batch-progress-foot { align-items: center; color: #657589; font-size: 11px; }
 .is-spinning { animation: batch-spin .8s linear infinite; }
 @keyframes batch-spin { to { transform: rotate(360deg); } }
 @media (max-width: 980px) {
