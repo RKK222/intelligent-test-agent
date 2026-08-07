@@ -173,7 +173,12 @@ public class InternalModelProviderProbeService {
         } catch (RuntimeException ignored) {
             log.warn("probe detail record failed, providerId={}", providerId);
         }
-        recordStatus(providerId, outcome, httpStatus, errorClass, traceId);
+        // 探活状态写库失败只记日志，绝不能把基础设施异常当作模型调用失败重新分类。
+        try {
+            recordStatus(providerId, outcome, httpStatus, errorClass, traceId);
+        } catch (RuntimeException ignored) {
+            log.warn("probe status upsert failed, providerId={} outcome={}", providerId, outcome);
+        }
         return ProbeOutcome.of(providerId, outcome, httpStatus, durationMillis);
     }
 

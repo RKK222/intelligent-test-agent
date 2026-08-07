@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, inject, ref } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { Activity, Play, Radar, RefreshCw } from "lucide-vue-next";
 import { ElMessage } from "element-plus";
+import * as echarts from "echarts";
 import { type BackendApiClient } from "@test-agent/backend-api";
 import type {
   CurrentUser,
@@ -173,6 +174,130 @@ const overallMetrics = computed(() => {
     ? durations.slice().sort((a, b) => a - b)[Math.floor(durations.length * 0.9)]
     : 0;
   return { totalRequests, successCount, failureCount, successRate, failureRate, avgDuration, maxDuration, p90 };
+});
+
+/** 按小时聚合的请求量与成功率序列，供 echarts 趋势折线使用。 */
+const hourlyTrend = computed(() => {
+  const byHour = new Map<string, { total: number; success: number }>();
+  for (const row of stats.value) {
+    const hour = row.statHour;
+    const cur = byHour.get(hour) ?? { total: 0, success: 0 };
+    cur.total += row.requestCount;
+    if (row.outcome === "SUCCESS") cur.success += row.requestCount;
+    byHour.set(hour, cur);
+  }
+  const hours = [...byHour.keys()].sort();
+  return {
+    hours,
+    requests: hours.map((h) => byHour.get(h)!.total),
+    successRate: hours.map((h) => {
+      const { total, success } = byHour.get(h)!;
+      return total === 0 ? 0 : Math.round((success / total) * 1000) / 10;
+    })
+  };
+});
+
+/** 成功率/失败率饼图数据。 */
+const outcomePieData = computed(() => [
+  { name: "成功", value: overallMetrics.value.successCount },
+  { name: "失败", value: overallMetrics.value.failureCount }
+].filter((item) => item.value > 0));
+
+const trendChartEl = ref<HTMLDivElement | null>(null);
+const pieChartEl = ref<HTMLDivElement | null>(null);
+let trendChart: echarts.ECharts | null = null;
+let pieChart: echarts.ECharts | null = null;
+
+function ensureChart(el: HTMLDivElement, holder: { current: echarts.ECharts | null }) {
+  // 若实例已存在但容器宽度为 0（曾在隐藏 tab 中初始化过），dispose 重建。
+  if (holder.current && el.clientWidth === 0) {
+    holder.current.dispose();
+    holder.current = null;
+  }
+  if (!holder.current) {
+    holder.current = echarts.init(el);
+  }
+  return holder.current;
+}
+
+function renderCharts() {
+  if (trendChartEl.value && trendChartEl.value.clientWidth > 0) {
+    trendChart = ensureChart(trendChartEl.value, { current: trendChart });
+    trendChart.setOption({
+      animation: false,
+      tooltip: { trigger: "axis" },
+      legend: { top: 0, right: 8, textStyle: { fontSize: 11 } },
+      grid: { top: 32, left: 48, right: 16, bottom: 28 },
+      xAxis: { type: "category", boundaryGap: false, data: hourlyTrend.value.hours },
+      yAxis: [
+        { type: "value", name: "请求", scale: true },
+        { type: "value", name: "成功率%", max: 100, min: 0, splitLine: { show: false } }
+      ],
+      series: [
+        {
+          name: "请求数",
+          type: "line",
+          showSymbol: false,
+          data: hourlyTrend.value.requests,
+          itemStyle: { color: "#2563eb" }
+        },
+        {
+          name: "成功率%",
+          type: "line",
+          yAxisIndex: 1,
+          showSymbol: false,
+          data: hourlyTrend.value.successRate,
+          itemStyle: { color: "#16a34a" },
+          lineStyle: { type: "dashed" }
+        }
+      ]
+    }, true);
+  }
+  if (pieChartEl.value && pieChartEl.value.clientWidth > 0) {
+    pieChart = ensureChart(pieChartEl.value, { current: pieChart });
+    pieChart.setOption({
+      animation: false,
+      tooltip: { trigger: "item" },
+      legend: { bottom: 0, textStyle: { fontSize: 11 } },
+      series: [{
+        type: "pie",
+        radius: ["42%", "68%"],
+        center: ["50%", "44%"],
+        avoidLabelOverlap: true,
+        itemStyle: { borderRadius: 6, borderColor: "#fff", borderWidth: 2 },
+        label: { formatter: "{b}: {d}%" },
+        data: outcomePieData.value
+      }]
+    }, true);
+  }
+}
+
+function resizeCharts() {
+  trendChart?.resize();
+  pieChart?.resize();
+}
+
+onMounted(() => {
+  window.addEventListener("resize", resizeCharts);
+  // 初始为调用记录 tab，聚合 tab 容器不可见，等切到聚合统计时再渲染图表。
+  renderCharts();
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", resizeCharts);
+  trendChart?.dispose();
+  pieChart?.dispose();
+  trendChart = null;
+  pieChart = null;
+});
+
+// 数据变化时重绘；聚合 tab 首次激活时容器从隐藏变可见，需强制重渲染图表。
+watch(() => stats.value, renderCharts, { deep: true });
+watch(activeTab, (tab) => {
+  if (tab === "stats") {
+    // 容器在 el-tab-pane 内，切换后需等布局完成再渲染，否则 echarts 拿到 0 宽。
+    nextTick(() => setTimeout(renderCharts, 50));
+  }
 });
 
 const outcomeText: Record<InternalModelCallOutcome, string> = {
@@ -420,6 +545,18 @@ function onPageChange(next: number) {
                   <span class="ta-imob-overview-value">{{ overallMetrics.maxDuration }}ms</span>
                   <span class="ta-imob-overview-label">最大耗时</span>
                 </div>
+              </div>
+            </div>
+
+            <!-- 图表：小时趋势 + 成功率构成 -->
+            <div v-if="hourlyTrend.hours.length" class="ta-imob-charts">
+              <div class="ta-imob-chart-card">
+                <h4 class="ta-imob-overview-title">小时趋势</h4>
+                <div ref="trendChartEl" class="ta-imob-chart" />
+              </div>
+              <div class="ta-imob-chart-card">
+                <h4 class="ta-imob-overview-title">成功率构成</h4>
+                <div ref="pieChartEl" class="ta-imob-chart" />
               </div>
             </div>
 
@@ -672,21 +809,37 @@ function onPageChange(next: number) {
   font-size: 12px;
   color: #6b7280;
 }
+.ta-imob-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+}
+.ta-imob-chart-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px 16px;
+}
+.ta-imob-chart {
+  width: 100%;
+  height: 240px;
+}
 .ta-imob-metric-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
 }
 .ta-imob-metric-card {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #fff;
-  padding: 12px;
+  padding: 10px;
 }
 .ta-imob-metric-provider {
   font-weight: 600;
+  font-size: 13px;
   color: #111827;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -694,17 +847,17 @@ function onPageChange(next: number) {
 .ta-imob-metric-body {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 8px;
+  gap: 6px;
 }
 .ta-imob-metric-cell {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
 }
 .ta-imob-metric-value {
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 700;
   color: #111827;
   white-space: nowrap;
