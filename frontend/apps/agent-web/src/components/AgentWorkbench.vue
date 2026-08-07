@@ -3434,7 +3434,12 @@ const initializeOpencodeProcessMutation = useMutation({
 
 // Run 与 reducer 可能因网络时序短暂不一致；明确终态优先，避免完成后的残留 shimmer。
 const runtimeBusy = computed(() =>
-  isRuntimeBusy(run.value?.status, chatState.value.status, startRunMutation.isPending.value)
+  isRuntimeBusy(
+    run.value?.status,
+    chatState.value.status,
+    startRunMutation.isPending.value,
+    pendingRequestedRunUserMessageId.value !== null
+  )
 );
 // dispose 释放当前用户全部 Workspace Instance，不能只看当前页面的 Run；后端仍会在 dispose 前做权威复核。
 const userRuntimeBusy = computed(() =>

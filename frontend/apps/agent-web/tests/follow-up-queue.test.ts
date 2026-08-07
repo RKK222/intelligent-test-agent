@@ -40,12 +40,14 @@ describe("follow-up queue", () => {
     expect(isRuntimeBusy("RUNNING", "FAILED", false)).toBe(false);
     expect(isRuntimeBusy("RUNNING", "CANCELLED", false)).toBe(false);
     expect(isRuntimeBusy("SUCCEEDED", undefined, false)).toBe(false);
+    expect(isRuntimeBusy("SUCCEEDED", "RUNNING", false)).toBe(false);
+    expect(isRuntimeBusy("FAILED", "PENDING", false)).toBe(false);
   });
 
   it("keeps a retried run busy while the previous run is terminal", () => {
-    expect(isRuntimeBusy("FAILED", "PENDING", false)).toBe(true);
-    expect(isRuntimeBusy("SUCCEEDED", "RUNNING", false)).toBe(true);
-    expect(isRuntimeBusy("CANCELLED", "CANCELLING", false)).toBe(true);
+    expect(isRuntimeBusy("FAILED", "PENDING", false, true)).toBe(true);
+    expect(isRuntimeBusy("SUCCEEDED", "RUNNING", false, true)).toBe(true);
+    expect(isRuntimeBusy("CANCELLED", "CANCELLING", false, true)).toBe(true);
   });
 
   it("keeps runtime animation for active or starting runs without a terminal status", () => {

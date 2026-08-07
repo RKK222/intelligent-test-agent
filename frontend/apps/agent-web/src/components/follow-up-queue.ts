@@ -51,20 +51,17 @@ export function isRunBusyStatus(status: Run["status"] | string | undefined): boo
 export function isRuntimeBusy(
   runStatus: Run["status"] | string | undefined,
   chatStatus: string | undefined,
-  mutationPending: boolean
+  mutationPending: boolean,
+  runRequestPending = false
 ): boolean {
-  if (mutationPending) {
+  if (mutationPending || runRequestPending) {
     return true;
   }
-  // 重试会先把 chat reducer 切到新一轮 PENDING，再等待新的 Run HTTP 响应；
-  // 此时旧 run 可能仍是 FAILED/SUCCEEDED，不能让上一轮终态压住新一轮启动态。
-  if (isBusyStatus(chatStatus)) {
-    return true;
-  }
+  // 当前 Run 的权威终态必须压过同一轮历史快照残留的 busy；新一轮请求则由上面的显式请求锁保护。
   if (isTerminalStatus(chatStatus) || isTerminalStatus(runStatus)) {
     return false;
   }
-  return isBusyStatus(runStatus);
+  return isBusyStatus(chatStatus) || isBusyStatus(runStatus);
 }
 
 function isBusyStatus(status: string | undefined): boolean {

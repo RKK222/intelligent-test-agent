@@ -5135,6 +5135,17 @@ test("switching history restores assistant documents and the file changes summar
       childSessionIdByTaskPartId: {},
       events: [
         {
+          type: "run.started",
+          rootSessionId: "ses_history",
+          sessionId: "ses_history",
+          childSession: false,
+          payload: {
+            runId: "run_history",
+            status: "RUNNING",
+            occurredAt: "2026-06-28T08:00:01Z"
+          }
+        },
+        {
           type: "message.updated",
           rootSessionId: "ses_history",
           sessionId: "ses_history",
@@ -5213,6 +5224,10 @@ test("switching history restores assistant documents and the file changes summar
   await expect.poll(() => sessionTreeRequests).toContain("/api/internal/agent/opencode/sessions/ses_history/session-tree/messages");
   await expect.poll(() => sessionMessageRequests).toContain("/api/internal/platform/opencode-runtime/sessions/ses_history/messages?page=1&size=100&refresh=false");
   await expect(page.getByText("测试报告已生成")).toBeVisible();
+  await expect(page.getByRole("button", { name: "停止执行" })).toHaveCount(0);
+  const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
+  await composer.fill("继续追问测试报告");
+  await expect(page.getByRole("button", { name: "发送" })).toBeEnabled();
   const changesCard = page.getByRole("button", { name: /文件修改 1/ });
   await expect(changesCard).toContainText("+1");
   await changesCard.click();
