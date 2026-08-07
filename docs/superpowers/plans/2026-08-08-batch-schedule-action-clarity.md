@@ -30,7 +30,7 @@
 - Consumes: existing `scheduleOpen`, `selectedScheduleTimes`, `scheduleAllocation`, `executeImmediate()` and `executeScheduled()`.
 - Produces: local `closeSchedule(): void`; stable test IDs `batch-close-schedule` and `batch-execute-scheduled`.
 
-- [ ] **Step 1: Change the existing size assertion and add a failing scheduling choreography test**
+- [x] **Step 1: Change the existing size assertion and add a failing scheduling choreography test**
 
 Update the first component test to assert:
 
@@ -84,7 +84,7 @@ it("uses one primary action slot and can close scheduling without retaining old 
 });
 ```
 
-- [ ] **Step 2: Run the focused component test and verify RED**
+- [x] **Step 2: Run the focused component test and verify RED**
 
 Run:
 
@@ -95,7 +95,7 @@ corepack pnpm exec vitest run apps/agent-web/tests/BatchTestCaseGenerationDialog
 
 Expected: the size assertion reports `70vh`, the close control is missing, and immediate/scheduled actions remain in the old locations.
 
-- [ ] **Step 3: Add the schedule close boundary**
+- [x] **Step 3: Add the schedule close boundary**
 
 Add immediately after `openSchedule()`:
 
@@ -112,7 +112,7 @@ function closeSchedule() {
 }
 ```
 
-- [ ] **Step 4: Move the scheduled submit action to the shared footer slot**
+- [x] **Step 4: Move the scheduled submit action to the shared footer slot**
 
 Change the dialog inline size to:
 
@@ -191,7 +191,7 @@ Add compact close-button styling without changing the progress-page close button
 .batch-schedule-close:disabled { cursor: not-allowed; opacity: .45; }
 ```
 
-- [ ] **Step 5: Run focused tests and agent-web typecheck**
+- [x] **Step 5: Run focused tests and agent-web typecheck**
 
 Run:
 
@@ -203,7 +203,7 @@ corepack pnpm --filter @test-agent/agent-web typecheck
 
 Expected: all component tests pass and `vue-tsc` exits 0.
 
-- [ ] **Step 6: Commit the independently testable component change**
+- [x] **Step 6: Commit the independently testable component change**
 
 Before committing, review all `.agents/session-log*.md`, then run:
 
@@ -231,7 +231,7 @@ git commit -m "优化批量定时选择与执行入口"
 - Consumes: `batch-close-schedule`, `batch-open-schedule`, `batch-execute-now`, `batch-execute-scheduled` and the `70vw × 90vh` dialog contract from Task 1.
 - Produces: stable user instructions and browser regression evidence; no public interface change.
 
-- [ ] **Step 1: Extend the existing Playwright batch test**
+- [x] **Step 1: Extend the existing Playwright batch test**
 
 In `batch test cases start isolated runs, retry failures, and create isolated scheduled tasks`, after opening the schedule picker and before selecting a slot, assert:
 
@@ -247,11 +247,11 @@ await scheduledDialog.getByTestId("batch-execute-scheduled").click();
 
 Do not alter the existing request and `batchId` assertions.
 
-- [ ] **Step 2: Update stable documentation**
+- [x] **Step 2: Update stable documentation**
 
 Replace every user-facing `70vw × 70vh` batch-dialog statement in the scoped front-end documents with `70vw × 90vh`. Document that opening scheduling hides immediate execution, selecting a valid time reveals scheduled execution in the same primary-action position, and the schedule close icon returns to immediate mode while discarding unsubmitted times.
 
-- [ ] **Step 3: Run focused unit and browser tests**
+- [x] **Step 3: Run focused unit and browser tests**
 
 Run:
 
@@ -296,7 +296,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 4: Run the full front-end release checks sequentially**
+- [x] **Step 4: Run the full front-end release checks sequentially**
 
 Run from `frontend/`:
 
@@ -308,11 +308,11 @@ corepack pnpm build
 
 Expected: Vitest, all workspace typechecks and production build exit 0. Record the existing jsdom Canvas and chunk-size warnings separately if they remain non-failing.
 
-- [ ] **Step 5: Review scope and update the contributor session log**
+- [x] **Step 5: Review scope and update the contributor session log**
 
 Review all `.agents/session-log*.md`, run `git diff --check`, and verify no backend, API, RunEvent, migration, `.env*`, generated SDK or OpenCode source file changed. Add one concise `Why / What / How / Result` entry to `.agents/session-log.huangzhenren.md` with the verified test counts and compatibility scope.
 
-- [ ] **Step 6: Create the final documentation and verification commit**
+- [x] **Step 6: Create the final documentation and verification commit**
 
 ```bash
 git add .agents/session-log.huangzhenren.md \

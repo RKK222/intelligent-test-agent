@@ -3523,7 +3523,11 @@ test("batch test cases start isolated runs, retry failures, and create isolated 
   await expect(scheduledDialog.locator('input[data-testid="batch-item-checkbox"]:checked')).toHaveCount(0);
   await scheduledDialog.getByTestId("batch-select-all").click();
   await scheduledDialog.getByTestId("batch-open-schedule").click();
+  await expect(scheduledDialog.getByTestId("batch-close-schedule")).toBeVisible();
+  await expect(scheduledDialog.getByTestId("batch-execute-now")).toHaveCount(0);
+  await expect(scheduledDialog.getByTestId("batch-execute-scheduled")).toHaveCount(0);
   await scheduledDialog.getByTestId("batch-night-slot").click();
+  await expect(scheduledDialog.getByTestId("batch-execute-scheduled")).toBeVisible();
   await scheduledDialog.getByTestId("batch-execute-scheduled").click();
   await expect(scheduledDialog.getByTestId("batch-creation-progress")).toBeVisible();
   await expect.poll(() => nightTaskRequests.length).toBe(2);
