@@ -3481,15 +3481,18 @@ test("batch test cases start isolated runs, retry failures, and create isolated 
   await expect(dialog).toContainText("退款");
   await dialog.getByTestId("batch-select-all").click();
   await dialog.getByTestId("batch-execute-now").click();
+  await expect(dialog.getByTestId("batch-creation-progress")).toBeVisible();
+  await expect(dialog.getByTestId("batch-requirement-input")).toHaveCount(0);
 
   await expect.poll(() => batchSessionRequests.length).toBe(1);
   await expect.poll(() => runRequests.length).toBe(1);
-  await dialog.getByRole("button", { name: /仅重试失败项/ }).click();
+  await dialog.getByRole("button", { name: "重试", exact: true }).click();
   await expect.poll(() => batchSessionRequests.length).toBe(2);
   await expect.poll(() => runRequests.length).toBe(2);
-  expect(new Set(batchSessionRequests.map((request) => String(
+  const immediateBatchIds = new Set(batchSessionRequests.map((request) => String(
     (request.batchContext as Record<string, unknown>)?.batchId
-  ))).size).toBe(1);
+  )));
+  expect(immediateBatchIds.size).toBe(1);
   expect(new Set(batchSessionRequests.map((request) => String(
     (request.batchContext as Record<string, unknown>)?.itemRequestId
   ))).size).toBe(2);
@@ -3509,20 +3512,36 @@ test("batch test cases start isolated runs, retry failures, and create isolated 
     .filter((part) => part.type === "file")
     .map((part) => part.content))).toEqual(new Set(["密码重置需求正文", "密码重置设计正文", "退款需求正文"]));
 
-  await dialog.getByTestId("batch-open-schedule").click();
-  await dialog.getByTestId("batch-night-slot").click();
-  await dialog.getByTestId("batch-execute-scheduled").click();
+  await expect(dialog).toContainText("已创建会话 2");
+  await dialog.getByTestId("batch-dialog-close").click();
+  await expect(dialog).toHaveCount(0);
+
+  await page.locator(".figma-chat-composer").hover();
+  await page.getByTestId("batch-test-case-entry").click();
+  const scheduledDialog = page.getByTestId("batch-test-case-dialog");
+  await expect(scheduledDialog.getByTestId("batch-requirement-input")).toHaveValue("请生成子条目测试案例。");
+  await expect(scheduledDialog.locator('input[data-testid="batch-item-checkbox"]:checked')).toHaveCount(0);
+  await scheduledDialog.getByTestId("batch-select-all").click();
+  await scheduledDialog.getByTestId("batch-open-schedule").click();
+  await scheduledDialog.getByTestId("batch-night-slot").click();
+  await scheduledDialog.getByTestId("batch-execute-scheduled").click();
+  await expect(scheduledDialog.getByTestId("batch-creation-progress")).toBeVisible();
   await expect.poll(() => nightTaskRequests.length).toBe(2);
   expect(nightTaskRequests.every((request) => request.sessionId == null)).toBe(true);
-  expect(new Set(nightTaskRequests.map((request) => String(
+  const scheduledBatchIds = new Set(nightTaskRequests.map((request) => String(
     (request.batchContext as Record<string, unknown>)?.batchId
-  ))).size).toBe(1);
+  )));
+  expect(scheduledBatchIds.size).toBe(1);
+  expect([...scheduledBatchIds][0]).not.toBe([...immediateBatchIds][0]);
   expect(new Set(nightTaskRequests.map((request) => String(
     (request.batchContext as Record<string, unknown>)?.itemRequestId
   ))).size).toBe(2);
   expect(new Set(nightTasks.map((task) => task.sessionId))).toEqual(
     new Set(["ses_night_created_1", "ses_night_created_2"])
   );
+  await expect(scheduledDialog).toContainText("已创建会话 2");
+  await scheduledDialog.getByTestId("batch-dialog-close").click();
+  await expect(scheduledDialog).toHaveCount(0);
   await expect(composer).toHaveValue("保留当前输入内容");
   await expect(page.locator(".figma-chat-title")).toHaveText("");
 });

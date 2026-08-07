@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch, type CSSProperties } from 'vue'
+import { ElMessageBox } from 'element-plus'
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -81,6 +82,7 @@ import {
   type WorkspaceRequirementReference,
 } from './workbench-utils'
 import type {
+  BatchExecutionControls,
   BatchGenerationRequest,
   BatchItemExecutionState,
 } from './batch-test-case-generation'
@@ -880,7 +882,8 @@ const emit =
     (e: 'refresh-agents'): void
     (e: 'search-workspace-files', query: string | null): void
     (e: 'load-workspace-requirements'): void
-    (e: 'execute-batch-test-cases', request: BatchGenerationRequest): void
+    (e: 'execute-batch-test-cases', request: BatchGenerationRequest, controls: BatchExecutionControls): void
+    (e: 'reset-batch-test-cases'): void
     (e: 'add-workspace-file-context', path: string): void
     (e: 'add-workspace-requirement-context', reference: WorkspaceRequirementReference): void
     (e: 'clear-raw-output'): void
@@ -912,8 +915,25 @@ function openBatchTestCaseDialog() {
   batchDialogOpen.value = true
 }
 
-function closeBatchTestCaseDialog() {
-  if (!props.batchRunning) batchDialogOpen.value = false
+async function closeBatchTestCaseDialog(result: { incompleteCount: number }) {
+  if (props.batchRunning) return
+  if (result.incompleteCount > 0) {
+    try {
+      await ElMessageBox.confirm(
+        `仍有 ${result.incompleteCount} 个子条目未创建会话，关闭后本次批量创建将结束。是否关闭？`,
+        '确认关闭批量创建',
+        { confirmButtonText: '仍然关闭', cancelButtonText: '继续处理', type: 'warning' }
+      )
+    } catch {
+      return
+    }
+  }
+  batchDialogOpen.value = false
+  emit('reset-batch-test-cases')
+}
+
+function forwardBatchExecution(request: BatchGenerationRequest, controls: BatchExecutionControls) {
+  emit('execute-batch-test-cases', request, controls)
 }
 const attachmentInput = ref<HTMLInputElement | null>(null)
 const attachmentDragOver = ref(false)
@@ -5928,7 +5948,7 @@ function onCompositionEnd() {
       @close="closeBatchTestCaseDialog"
       @reload-candidates="emit('load-workspace-requirements')"
       @request-night-slots="emit('request-night-slots')"
-      @execute="emit('execute-batch-test-cases', $event)"
+      @execute="forwardBatchExecution"
     />
     <!-- 与左侧面板、中心面板底部栏等高的常驻 footer -->
     <div class="figma-chat-footer">

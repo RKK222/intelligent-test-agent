@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { nextTick } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ElMessageBox } from "element-plus";
 import { chatStateFromSessionTreeSnapshot } from "../src/components/workbench-utils";
 import FigmaChatPanel from "../src/components/FigmaChatPanel.vue";
 import type { SessionTreeMessagesResponse } from "@test-agent/shared-types";
@@ -85,6 +86,81 @@ describe("FigmaChatPanel", () => {
     const source = readFileSync(resolve(__dirname, "../src/components/FigmaChatPanel.vue"), "utf8");
     expect(source).toContain(".figma-chat-composer:hover .figma-chat-batch-entry");
     expect(source).toContain(".figma-chat-composer:focus-within .figma-chat-batch-entry");
+  });
+
+  it("closes a completed batch without confirmation and emits orchestration reset", async () => {
+    const confirm = vi.spyOn(ElMessageBox, "confirm");
+    const reference = {
+      id: "spec/需求一/01-需求/登录",
+      requirementName: "需求一",
+      subitemName: "登录",
+      filePaths: ["spec/需求一/01-需求/登录/需求.md"]
+    };
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        workspaceRequirementReferences: [reference]
+      } as any
+    });
+    await wrapper.get('[data-testid="batch-test-case-entry"]').trigger("click");
+    await wrapper.get('input[data-testid="batch-item-checkbox"]').setValue(true);
+    await wrapper.get('[data-testid="batch-execute-now"]').trigger("click");
+    await wrapper.setProps({ batchRunning: true } as any);
+    await wrapper.setProps({
+      batchRunning: false,
+      batchItemStates: { [reference.id]: { status: "succeeded", sessionId: "ses_1", runId: "run_1" } }
+    } as any);
+
+    await wrapper.get('[data-testid="batch-dialog-close"]').trigger("click");
+    expect(confirm).not.toHaveBeenCalled();
+    expect(wrapper.emitted("reset-batch-test-cases")).toHaveLength(1);
+    expect(wrapper.find('[data-testid="batch-test-case-dialog"]').exists()).toBe(false);
+  });
+
+  it("keeps an incomplete batch open when close confirmation is cancelled", async () => {
+    const confirm = vi.spyOn(ElMessageBox, "confirm")
+      .mockRejectedValueOnce(new Error("cancel"))
+      .mockResolvedValueOnce("confirm" as never);
+    const referencesForClose = ["登录", "支付"].map((name) => ({
+      id: `spec/需求一/01-需求/${name}`,
+      requirementName: "需求一",
+      subitemName: name,
+      filePaths: [`spec/需求一/01-需求/${name}/需求.md`]
+    }));
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        workspaceRequirementReferences: referencesForClose
+      } as any
+    });
+    await wrapper.get('[data-testid="batch-test-case-entry"]').trigger("click");
+    for (const checkbox of wrapper.findAll('input[data-testid="batch-item-checkbox"]')) {
+      await checkbox.setValue(true);
+    }
+    await wrapper.get('[data-testid="batch-execute-now"]').trigger("click");
+    await wrapper.setProps({ batchRunning: true } as any);
+    await wrapper.setProps({
+      batchRunning: false,
+      batchItemStates: Object.fromEntries(referencesForClose.map((reference) => [
+        reference.id,
+        { status: "failed", message: "创建失败" }
+      ]))
+    } as any);
+
+    await wrapper.get('[data-testid="batch-dialog-close"]').trigger("click");
+    expect(confirm).toHaveBeenCalledWith(
+      expect.stringContaining("仍有 2 个子条目未创建会话"),
+      "确认关闭批量创建",
+      expect.any(Object)
+    );
+    expect(wrapper.find('[data-testid="batch-test-case-dialog"]').exists()).toBe(true);
+    expect(wrapper.emitted("reset-batch-test-cases")).toBeUndefined();
+
+    await wrapper.get('[data-testid="batch-dialog-close"]').trigger("click");
+    expect(wrapper.find('[data-testid="batch-test-case-dialog"]').exists()).toBe(false);
+    expect(wrapper.emitted("reset-batch-test-cases")).toHaveLength(1);
   });
 
   it("opens the night slot picker from the timer immediately left of send", async () => {

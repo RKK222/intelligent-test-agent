@@ -213,7 +213,7 @@ import {
   startRunWithConversationContext
 } from "./conversation-run-context";
 import { useBatchTestCaseGeneration } from "./useBatchTestCaseGeneration";
-import type { BatchGenerationRequest } from "./batch-test-case-generation";
+import type { BatchExecutionControls, BatchGenerationRequest } from "./batch-test-case-generation";
 import { useSideQuestionRun } from "./useSideQuestionRun";
 import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp, isRunBusyStatus, isRuntimeBusy, type FollowUpDraft } from "./follow-up-queue";
 import {
@@ -7714,10 +7714,14 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
 /**
  * 批量流程只消费与 # 同源的候选并使用局部上下文，不切换当前 Session，也不清空输入框和附件。
  */
-async function handleBatchTestCaseGeneration(request: BatchGenerationRequest) {
-  if (batchTestCaseRunning.value) return;
+async function handleBatchTestCaseGeneration(request: BatchGenerationRequest, controls: BatchExecutionControls) {
+  if (batchTestCaseRunning.value) {
+    controls.reject();
+    return;
+  }
   if (!selectedWorkspace.value) {
     feedback.value = { kind: "info", title: "未选择工作区", description: "请先切换到应用版本或个人工作区。" };
+    controls.reject();
     return;
   }
   if (!opencodeProcessReady.value || opencodeProcessStatus.value?.messageSendAllowed === false) {
@@ -7728,10 +7732,12 @@ async function handleBatchTestCaseGeneration(request: BatchGenerationRequest) {
         ?? opencodeProcessStatus.value?.message
         ?? "请先初始化 TestAgent 进程。"
     };
+    controls.reject();
     return;
   }
   if (request.scheduleMode === "ADMIN_CUSTOM" && !isSuperAdmin.value) {
     feedback.value = { kind: "error", title: "无权使用测试定时", description: "仅超级管理员可以自定义执行时间。" };
+    controls.reject();
     return;
   }
 
@@ -7752,9 +7758,15 @@ async function handleBatchTestCaseGeneration(request: BatchGenerationRequest) {
           description: `${result.succeeded} 项成功，${result.failed} 项失败，可在弹层中仅重试失败项。`
         };
   } catch (error) {
+    controls.reject();
     feedback.value = errorFeedback("批量生成测试案例失败", error);
     if (error instanceof BackendApiError && error.status === 409) void requestNightExecutionSlots();
   }
+}
+
+/** 用户主动结束进度页后清理前端批次身份；已创建的服务端对象不受影响。 */
+function resetBatchTestCaseGeneration() {
+  batchTestCaseGeneration.reset();
 }
 
 /**
@@ -10191,6 +10203,7 @@ async function handleLogout() {
           @search-workspace-files="handleWorkspaceFileCandidateSearch"
           @load-workspace-requirements="loadWorkspaceRequirementCandidates"
           @execute-batch-test-cases="handleBatchTestCaseGeneration"
+          @reset-batch-test-cases="resetBatchTestCaseGeneration"
           @add-workspace-file-context="addWorkspaceFileToChatContext"
           @add-workspace-requirement-context="addWorkspaceRequirementToChatContext"
           @select-model="(model) => selectRuntimeModel(model)"
