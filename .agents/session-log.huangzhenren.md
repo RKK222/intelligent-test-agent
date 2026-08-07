@@ -1659,3 +1659,27 @@
     默认重启仍不启动 LobeHub，prod/企业公共参数门禁不变。
   - 本次不新增/变更 HTTP API、事件或数据库结构/Flyway/MyBatis SQL，不修改 `.env*`、generated SDK、
     OpenCode 源码或企业离线介质；只改变本地开发启动行为和对应审计数据。
+
+### 2026-08-07 - 现代化顶部上下文选择器与下拉菜单
+
+- Why:
+  - 顶部“应用 / 工作空间 / 版本”三个独立白底按钮视觉割裂，层级、品牌识别与菜单展开反馈不足；用户确认采用
+    “精密上下文舱”方案，并要求把三个下拉菜单一并纳入优化。
+- What:
+  - 在 `FigmaShell.vue` 中将三个入口合并为 34px 高连续上下文舱，增加 11px 圆角、发丝边框、轻阴影、
+    内部分隔线与 3px 工行红信号条；分段补齐悬停、键盘焦点、展开和禁用态。
+  - 三个下拉菜单统一为 12px 圆角、双层轻阴影、6px 内边距、8px 项目圆角与柔红选中态；保留原菜单内容、
+    数据来源、加载状态、禁用语义和切换回调。同步前端总 README、agent-web README 与包级说明。
+- How:
+  - 按 TDD 先新增上下文舱结构与视觉契约测试并确认失败，再补实现；`FigmaShell.test.ts` 57 项、前端全量
+    115 个测试文件 1839 passed / 1 skipped，agent-web typecheck 与 production build 通过。
+  - 使用真实本地页面完成 2048px 桌面端、880px 窄屏、下拉展开和键盘 Enter 验收：上下文舱高度 34px、
+    圆角 11px，三个分段无重叠；菜单圆角 12px、双层阴影生效。构建的 chunk size 告警及 jsdom Canvas
+    提示与改动前基线一致。
+  - 收尾时前端全量测试在并行改动后的工作树上仍为 115 个文件 1840 passed / 1 skipped；一次 agent-web
+    typecheck 曾被本次范围外 `AgentWorkbench.vue` 的瞬时未定义引用阻断，本次未代改该并行文件；随后同一工作树
+    的 production build（含 `vue-tsc --noEmit`）通过。
+- Result:
+  - 顶部上下文切换形成连续、紧凑且可辨识的现代工作台控件，同时保持原功能与响应式布局兼容。
+  - 本次不变更 API、RunEvent、数据库、性能路径、安全边界、`.env*`、generated SDK 或 OpenCode 源码；
+    未覆盖工作区中并行存在的其他前后端改动。
