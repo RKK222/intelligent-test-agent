@@ -81,6 +81,35 @@ const records = computed(() => recordsQuery.data.value?.items ?? []);
 const recordsTotal = computed(() => recordsQuery.data.value?.total ?? 0);
 const stats = computed(() => statsQuery.data.value ?? []);
 
+/** AI API 调用相关数据：基于当前明细页记录的首 token 延迟统计（平均/P90/P95/分布）。 */
+const firstTokenStats = computed(() => {
+  const tokens: number[] = [];
+  for (const row of records.value) {
+    if (row.firstByteMillis != null && row.firstByteMillis > 0) {
+      tokens.push(row.firstByteMillis);
+    }
+  }
+  if (!tokens.length) return { count: 0, avg: 0, p90: 0, p95: 0, distribution: [] as string[] };
+  const sorted = tokens.slice().sort((a, b) => a - b);
+  const pct = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
+  const avg = Math.round(tokens.reduce((a, b) => a + b, 0) / tokens.length);
+  // 分布：按秒分段。
+  const buckets = new Map<string, number>();
+  for (const t of tokens) {
+    const s = t / 1000;
+    const b = s < 1 ? "<1s" : s < 5 ? "1-5s" : s < 15 ? "5-15s" : s < 30 ? "15-30s" : ">30s";
+    buckets.set(b, (buckets.get(b) ?? 0) + 1);
+  }
+  const order = ["<1s", "1-5s", "5-15s", "15-30s", ">30s"];
+  return {
+    count: tokens.length,
+    avg,
+    p90: pct(0.9),
+    p95: pct(0.95),
+    distribution: order.filter((b) => buckets.has(b)).map((b) => `${b}:${buckets.get(b)}`)
+  };
+});
+
 type ProviderMetric = {
   providerId: string;
   totalRequests: number;
@@ -416,9 +445,9 @@ const outcomeText: Record<InternalModelCallOutcome, string> = {
   UNKNOWN_ERROR: "未知错误"
 };
 
-/** 耗时毫秒转秒：小于 1s 保留 1 位小数，否则取整，单位统一为 s。 */
-function formatDuration(millis: number): string {
-  if (!Number.isFinite(millis) || millis <= 0) return "-";
+/** 耗时毫秒转秒：小于 1s 保留 1 位小数，否则取整，单位统一为 s；空值显示 -。 */
+function formatDuration(millis: number | null | undefined): string {
+  if (millis === null || millis === undefined || !Number.isFinite(millis) || millis <= 0) return "-";
   const seconds = millis / 1000;
   return seconds < 1 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds)}s`;
 }
@@ -522,11 +551,9 @@ function onPageChange(next: number) {
             <el-table-column prop="startedAt" label="时间" min-width="160">
               <template #default="{ row }">{{ formatTime(row.startedAt) }}</template>
             </el-table-column>
-            <el-table-column prop="providerId" label="供应商" min-width="150" />
             <el-table-column prop="model" label="模型" min-width="150">
               <template #default="{ row }">{{ row.model ?? "-" }}</template>
             </el-table-column>
-            <el-table-column prop="endpoint" label="端点" min-width="130" />
             <el-table-column label="来源" width="90">
               <template #default="{ row }">
                 <el-tag :type="row.source === 'PROBE' ? 'info' : 'primary'" size="small">
@@ -541,13 +568,12 @@ function onPageChange(next: number) {
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="httpStatus" label="状态码" width="80">
-              <template #default="{ row }">{{ row.httpStatus ?? "-" }}</template>
-            </el-table-column>
-            <el-table-column label="耗时" width="100">
+            <el-table-column label="总耗时" width="100">
               <template #default="{ row }">{{ formatDuration(row.durationMillis) }}</template>
             </el-table-column>
-            <el-table-column prop="traceId" label="traceId" min-width="170" show-overflow-tooltip />
+            <el-table-column label="首 token" width="110">
+              <template #default="{ row }">{{ formatDuration(row.firstByteMillis) }}</template>
+            </el-table-column>
           </el-table>
 
           <div class="ta-imob-pager">
@@ -616,6 +642,14 @@ function onPageChange(next: number) {
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ overallMetrics.qps }}</span>
                   <span class="ta-imob-overview-label">QPS</span>
+                </div>
+                <div class="ta-imob-overview-cell">
+                  <span class="ta-imob-overview-value">{{ formatDuration(firstTokenStats.avg) }}</span>
+                  <span class="ta-imob-overview-label">平均首 token</span>
+                </div>
+                <div class="ta-imob-overview-cell">
+                  <span class="ta-imob-overview-value">{{ formatDuration(firstTokenStats.p90) }}</span>
+                  <span class="ta-imob-overview-label">首 token P90</span>
                 </div>
               </div>
             </div>
