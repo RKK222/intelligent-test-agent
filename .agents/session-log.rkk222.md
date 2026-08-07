@@ -7016,3 +7016,41 @@
   打包前失败，不再把仍可工作的当前容器先删除。
 - 本次不变更平台 HTTP 路径/响应、RunEvent、Java、前端、数据库/Flyway、鉴权、generated SDK、OpenCode
   上游源码或 `.env*`；尚未重新生成内外层企业交付 ZIP，真实企业代理推理和两台 Linux 节点部署留待下次打包验收。
+## 2026-08-07 - 修复企业环境排查授权选择用户立即 401
+
+### Why
+
+- 企业 Linux/JDK 时钟可产生纳秒精度 `Instant`；问题排查签发把同一个到期时间分别写入 Redis payload 和
+  PostgreSQL `timestamp`，后者只保留微秒。授权读取又要求数据库与 Redis 的 `expiresAt` 精确相等，因此数据库
+  往返后的微秒值会与 Redis 纳秒值不一致，签发虽成功，第一次选择用户便被误判为“排查授权无效或已失效”。
+
+### What
+
+- `SupportAccessApplicationService` 在派生到期时间前把唯一权威签发时间归一化到微秒，再将同一值写入 Redis、
+  PostgreSQL 和响应；授权 ID、会话摘要、到期时间的严格一致校验保持不变，没有引入有效期容差或本机降级。
+- 新增纳秒固定时钟回归，模拟 PostgreSQL 微秒持久化往返，覆盖签发后选择目标用户仍能通过授权。
+- 同步 system-management README、HTTP API、安全规范、数据库部署说明和多后端故障表，明确所有 Java 节点必须
+  使用同一修复版本，不用 sticky、手改 Redis 或放宽鉴权规避。
+
+### How
+
+- TDD 先运行 `SupportAccessApplicationServiceTest`：修复前新增用例稳定抛出“排查授权无效或已失效”，修复后
+  6 项通过；随后 `mvn -pl test-agent-system-management -am test` 的 common/domain/system-management 共
+  228 项通过，SupportAccess DTO 与 Repository 集成测试各 1 项通过，21 模块跳过测试的真实 JAR 打包成功。
+- 使用 JDK 25、未修改的主工作区 `.env.test` 和既有测试数据根，以 `--without-workflow` 启动本 worktree。
+  首次检查发现 `8080` 被另一个 worktree 的 18 小时旧后端占用，脚本误把旧 health 当成新进程成功；精确停止
+  该旧 screen/Java 后重新启动，确认 PID 23062 的 JAR 路径属于本 worktree，health/readiness 为 UP、前端 3000
+  返回 200、登录 CORS 正常。
+- 真实浏览器完成登录、三击 Shift、签发、检索并选择目标用户，成功返回 3 个会话和 1 个工作区且无 401；随后
+  主动撤销授权。控制台只有既有 `ElTour` Vue 告警，没有排查接口错误。
+
+### Result
+
+- 企业环境即时 401 的时间精度根因已在签发源头修复，严格安全语义不变；本地代码、持久化映射、真实服务和页面
+  主路径均验证通过。
+- 本地 manager WebSocket 已连接，但共享测试库残留的 4104 进程记录仍触发重复 `PROCESS_NOT_MANAGED`，当前用户
+  OpenCode 路径未完全健康；该状态不影响本次已验证的排查授权选择用户接口。
+- 本 worktree 数据库日志提示测试库版本 `20260806190500` 高于本分支最新 migration `20260805132000`；本提交应
+  合入当前企业发布分支后再构建并同时更新全部 Java 节点，不能直接把该旧分支 JAR 作为企业完整交付包。
+- 未修改 API 路径/DTO、RunEvent、数据库结构/Flyway/MyBatis SQL、ticket/RPC、限流、Nginx、Redis key、`.env*`、
+  OpenCode 源码或 generated SDK；仅修复安全相关时间兼容行为和对应文档。

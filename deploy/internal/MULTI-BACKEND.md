@@ -1107,6 +1107,7 @@ order by platform_task_key;
 | 初始化报“进程分配已变化，拒绝旧启动结果回写”，或清缓存后运行管理用户重新出现 | 先按[不依赖 `rg`/`jd` 的用户进程冲突排查流程](../../docs/deployment/backend.md#opencode-process-assignment-conflict-troubleshooting)保留 operationId/traceId，查询操作历史与当前快照，再用 `journalctl`、`docker logs`、`grep`、`sed`、`find` 和浏览器 Network 对齐并发写入来源；不要先重启或直接修改 binding。 |
 | worker 连接到错误 Java | 检查本机 `.serverhost`、两份 env 的数据根目录和本机 manager token；禁止复制另一节点身份文件。 |
 | 跨节点请求失败 | 两台互相 curl `advertised-host:8080`；检查 Redis 快照、目标 Java health 和日志中的 traceId。 |
+| 排查授权签发成功，但选择用户立即返回 `401 排查授权无效或已失效` | 先确认所有 Java 节点都已部署包含“排查授权时间微秒归一化”的同一版本，并共享同一 Redis 与 PostgreSQL；旧版本在 Linux/JDK 纳秒时钟下可能因 PostgreSQL `timestamp` 微秒截断而误判 Redis/数据库授权身份不一致。升级全部 Java 节点后重新签发授权，不增加 sticky、不放宽鉴权，也不修改 Redis 中的授权值。 |
 | 某一台模型不通 | 先在故障节点直接调用本机 Java 代理并读取 4xx 正文，再在该 Java 宿主机检查 9070；共享数据库配置不能替代每台宿主机的内存刷新和网络可达性。 |
 | 某一台报“供应商未启用或不存在” | 对比两台 refresh-status；确认广播开启且 channel 相同，必要时在故障节点重启 Java 重载数据库。 |
 | 某一台模型不显示 | 初始化该 `linuxServerId` 的公共配置，确认包含 `includeUsage=false`，并重启该服务器上的用户 OpenCode 进程。共享数据库不会复制本机公共配置工作树。 |

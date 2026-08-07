@@ -1533,7 +1533,7 @@ Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`worksp
 
 运行 SQL 全部位于 `SupportAccessMapper.xml`；目标用户关联工作区查询位于 `UserWorkspaceQueryMapper.xml`，没有新增 JDBC SQL。当前工程没有权威工单数据源，排查单号由业务层生成，不查询历史授权，也不需要新增表或 Flyway migration。工作区范围只包含 ACTIVE 个人工作区或 ACTIVE 非旁路会话通过创建人、Run 触发人、消息发送人归因到的工作区；历史空白 workspace name 只在读模型中回退为 workspaceId，不修改存量数据。
 
-Redis 使用 `test-agent:support-access:session:{sessionDigest}` 与 `test-agent:support-access:token:{grantTokenDigest}` 保存当前授权摘要和短期 payload；两类 key/value 都不含原始平台/授权 Token。Lua rotate 保证同一平台登录会话的新授权立即淘汰旧 token，revoke 只删除仍与当前摘要匹配的 session key。TTL 与授权绝对到期时间一致，Redis 不可用时不降级 JVM 内存或数据库明文 Token。
+Redis 使用 `test-agent:support-access:session:{sessionDigest}` 与 `test-agent:support-access:token:{grantTokenDigest}` 保存当前授权摘要和短期 payload；两类 key/value 都不含原始平台/授权 Token。签发时间在业务层先归一化到 PostgreSQL `timestamp` 的微秒精度，再由同一个权威值写入 Redis 与 `support_access_grants`，避免 Linux/JDK 纳秒时钟经数据库往返后与 Redis payload 不一致；读取时仍按精确值校验，不使用有效期容差。Lua rotate 保证同一平台登录会话的新授权立即淘汰旧 token，revoke 只删除仍与当前摘要匹配的 session key。TTL 与授权绝对到期时间一致，Redis 不可用时不降级 JVM 内存或数据库明文 Token。
 
 每日清理以当前 UTC 时间减 365 天为 cutoff，先删除更早的审计，再删除已到期且不再被审计引用的授权；一年内审计不会因用户删除或授权撤销提前消失。应用回滚时保留 migration 和历史审计，新表对旧 Java 为向后兼容新增。发布前仍须按本文件 migration 规则，用目标环境真实 PostgreSQL 历史执行基线到当前 HEAD，禁止 `repair`、`outOfOrder` 或改写已经执行的 SQL。
 

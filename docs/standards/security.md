@@ -127,7 +127,7 @@ Token 校验流程：
 
 1. actor 始终是当前登录用户，必须在签发和每次 HTTP/文件 RPC 时重新校验平台登录会话、用户可登录状态和数据库实时 `SUPER_ADMIN` 角色；target 只决定查询范围，不能替换 `AuthPrincipal`、签发目标用户 Token 或继承目标用户写权限。
 2. 开启访问必须携带后端提供的排查单号、排查原因、5–240 分钟时长并确认只读约束。当前没有权威工单数据源时后端每轮生成新的 `sai_` 单号，禁止从历史授权循环回填；同一平台登录会话同时最多一个有效授权，新签发原子淘汰旧授权；显式关闭、过期、登出、停用或移除角色后立即失败关闭。
-3. `grantToken` 必须使用至少 32 字节安全随机值，只在签发响应返回一次并仅保存在当前页面组件内存。后续请求使用 `X-Support-Access-Grant`，不得写入 URL、localStorage、sessionStorage、Pinia、日志或错误正文；Redis 和 PostgreSQL 只保存 SHA-256 摘要或授权元数据，不保存明文。
+3. `grantToken` 必须使用至少 32 字节安全随机值，只在签发响应返回一次并仅保存在当前页面组件内存。后续请求使用 `X-Support-Access-Grant`，不得写入 URL、localStorage、sessionStorage、Pinia、日志或错误正文；Redis 和 PostgreSQL 只保存 SHA-256 摘要或授权元数据，不保存明文。授权签发的权威时间必须先归一化到 PostgreSQL `timestamp` 的微秒精度，再同时写入 Redis payload 和关系库；校验仍要求两侧授权 ID、会话摘要和到期时间严格一致，禁止用容差窗口掩盖存储精度差异。
 4. 可读范围只包括目标用户的 ACTIVE 个人工作区，以及由该用户创建会话、触发 Run 或发送消息所归因到的 ACTIVE 工作区/会话；只有排查会话列表和正文入口显式传 `includeArchived=true` 时可读取同一归因范围内的 ARCHIVED 软删除会话，内部 `SIDE_QUESTION` 始终排除。普通 Workspace、Session 和文件入口始终按当前 actor 自身归属校验，`SUPER_ADMIN` 不得用普通接口旁路排查授权与审计。
 5. 对话正文复用既有历史恢复、首页 Session tree reducer/时间线和保留策略，并显式返回 `FULL/SUMMARY/LEGACY`、回放可用性和详情保留时间；空 Redis/OpenCode 快照不得阻断关系库兜底。工作区权威 Java 后端非 ONLINE 时必须跳过不可达 OpenCode，只读持久化来源；`LEGACY` 只能有界读取既有 `session_messages` 原文且必须标记不可完整回放，不得建立第二份消息镜像、延长正文保留或提供批量导出。用户视角仍是只读投影，不得挂载发送、permission/question 回复或其它真实用户写入口。排查页可以展示并复制会话业务 ID 与事件 Trace ID 以关联日志，但不得把 grantToken、Bearer、文件正文或路径明文混入该上下文栏。
 6. 文件访问只允许 `workspace.list/search/read/read.chunk/read.binary.chunk`，每条 RPC 都重新校验授权、实时角色、目标用户工作区归属和权威服务器。工作区列表可用公共路由快照标记 `ONLINE/OFFLINE/UNBOUND/UNKNOWN`，非 ONLINE 状态必须禁用页面文件入口；无论页面状态如何，后端均不得重绑 `linuxServerId`、降级本机或绕过权威路由。`.opencode` 命名空间、写入、上传、删除、重命名、复制/移动、Git、终端、Agent 配置、加入对话和下载/批量导出全部拒绝；浏览器隐藏控件不能替代后端白名单。

@@ -25,8 +25,10 @@ import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.user.UserRepository;
 import com.enterprise.testagent.domain.user.UserStatus;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -93,6 +95,45 @@ class SupportAccessApplicationServiceTest {
         assertThat(grantCaptor.getValue().sessionDigest()).isEqualTo(SESSION_DIGEST);
         assertThat(grantCaptor.getValue().incidentId()).isEqualTo("INC-2026-001");
         verify(repository).appendAuditEvent(any());
+    }
+
+    @Test
+    void authorizationSurvivesPostgresMicrosecondPersistenceOnNanosecondClock() {
+        Instant nanosecondNow = Instant.parse("2026-08-05T05:00:00.123456789Z");
+        SupportAccessApplicationService nanosecondService = new SupportAccessApplicationService(
+                repository,
+                grantStore,
+                markerStore,
+                userRepository,
+                userRoleRepository,
+                dictionaryRepository,
+                Clock.fixed(nanosecondNow, ZoneOffset.UTC),
+                () -> RAW_GRANT_TOKEN);
+
+        SupportAccessGrantIssue issue = nanosecondService.issue(
+                principal(), "sai_precision", "验证企业 PostgreSQL 时间精度", 30, true, requestContext());
+
+        ArgumentCaptor<SupportAccessGrant> grantCaptor = ArgumentCaptor.forClass(SupportAccessGrant.class);
+        ArgumentCaptor<SupportAccessGrantSession> sessionCaptor = ArgumentCaptor.forClass(SupportAccessGrantSession.class);
+        verify(repository).saveGrant(grantCaptor.capture());
+        verify(grantStore).rotate(sessionCaptor.capture(), any(Duration.class));
+        SupportAccessGrant savedGrant = grantCaptor.getValue();
+        Instant persistedIssuedAt = savedGrant.issuedAt().truncatedTo(ChronoUnit.MICROS);
+        Instant persistedExpiresAt = savedGrant.expiresAt().truncatedTo(ChronoUnit.MICROS);
+        SupportAccessGrant databaseGrant = new SupportAccessGrant(
+                savedGrant.grantId(), savedGrant.actorUserId(), savedGrant.actorUsername(), savedGrant.incidentId(),
+                savedGrant.reason(), savedGrant.sessionDigest(), persistedIssuedAt, persistedExpiresAt,
+                savedGrant.revokedAt(), savedGrant.revokeReason(), savedGrant.traceId());
+        when(grantStore.findByTokenDigest(GRANT_DIGEST)).thenReturn(Optional.of(sessionCaptor.getValue()));
+        when(repository.findGrant(issue.grantId())).thenReturn(Optional.of(databaseGrant));
+
+        SupportAccessAuthorization authorization = nanosecondService.authorize(
+                principal(), RAW_GRANT_TOKEN, TARGET_ID, "TARGET_SELECTED", "USER", TARGET_ID.value(),
+                null, requestContext(), true);
+
+        assertThat(savedGrant.issuedAt()).isEqualTo(persistedIssuedAt);
+        assertThat(savedGrant.expiresAt()).isEqualTo(persistedExpiresAt);
+        assertThat(authorization.target().userId()).isEqualTo(TARGET_ID);
     }
 
     @Test

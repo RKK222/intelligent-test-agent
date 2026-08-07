@@ -23,6 +23,7 @@ import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.Map;
 import java.util.Objects;
@@ -119,7 +120,8 @@ public class SupportAccessApplicationService {
         if (!markerStore.isActiveForUser(sessionDigest, actor.userId())) {
             throw unauthenticated("平台登录会话已失效");
         }
-        Instant now = clock.instant();
+        // PostgreSQL timestamp 仅保留微秒；Redis 与关系库必须保存同一归一化时间，避免 Linux 纳秒时钟导致授权身份误判。
+        Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
         Instant expiresAt = now.plus(Duration.ofMinutes(durationMinutes));
         String rawToken = tokenFactory.get();
         if (rawToken == null || !rawToken.startsWith("sat_") || rawToken.length() < 40) {

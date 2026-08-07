@@ -3016,7 +3016,7 @@ Base URL：`/api/internal/platform/system-management`
 X-Support-Access-Grant: sat_...
 ```
 
-该头与当前 Bearer 登录会话、actor、实时角色和数据库授权记录共同校验；缺失、过期、已撤销、登出、停用、角色移除或登录会话不匹配统一失败关闭。排查授权失效产生的 `401` 只清理本页排查状态，不代表平台登录态必然失效。
+该头与当前 Bearer 登录会话、actor、实时角色和数据库授权记录共同校验；缺失、过期、已撤销、登出、停用、角色移除或登录会话不匹配统一失败关闭。签发时间和到期时间在写入 Redis 与 PostgreSQL 前统一归一化到微秒精度，两个存储中的授权身份仍做严格相等校验，兼容 Linux/JDK 纳秒时钟而不引入有效期容差。排查授权失效产生的 `401` 只清理本页排查状态，不代表平台登录态必然失效。
 
 会话和工作区归因使用目标用户的 `sessions.created_by_user_id`、`runs.triggered_by_user_id`、`session_messages.sender_user_id` 以及 ACTIVE 个人工作区关系；只凭任意 ID 不能扩大范围。`ARCHIVED` 表示用户软删除/隐藏，未物理删除消息或 Run；排查列表只有显式开启筛选时才返回，内部 `SIDE_QUESTION` 会话始终排除。会话树响应沿用既有 `SessionTreeMessagesResponse`，包含 `historyRepresentation=FULL|SUMMARY|LEGACY`、`replayAvailable` 和 `detailsAvailableUntil`：`LEGACY` 表示 Redis/OpenCode/双摘要没有可展示正文，或工作区权威 Java 后端离线、未知而跳过不可达 OpenCode 后，从既有 `session_messages` 有界恢复的旧正文，不保证工具/事件细节完整，因此 `replayAvailable=false`。空 Redis/OpenCode 快照不得以“完整历史”截断该兜底；该兜底复用原表，不建立额外正文副本。
 
