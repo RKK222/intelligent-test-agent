@@ -414,6 +414,8 @@ unset TEST_AGENT_DIAG_JWT
 
 ## 9. 验证用户 OpenCode 和企业模型链路
 
+> 已部署带「内部模型调用可观测」的版本时，先看系统管理 → 内部模型可观测页面：调用记录 tab 会列出最近 24 小时每次代理调用的 `providerId/model/outcome/httpStatus/durationMillis/traceId`，聚合统计 tab 按小时汇总成功率与耗时，探活状态卡片显示每个 provider 的最近探活结果与连续失败次数。先按 `traceId` 在明细中定位本次失败属于哪类（`UPSTREAM_CONNECT_FAILED` / `UPSTREAM_FIRST_RESPONSE_TIMEOUT` / `UPSTREAM_HTTP_ERROR` 等），再按分类进入下方对应层排查；也可以在页面手动触发「全部探活」主动确认当前端点可达性，避免先登机器 grep 日志。
+
 先在运行管理确认故障用户为 `BOUND`，记录实际动态端口和所属后台。只在所属后台执行：
 
 ```bash

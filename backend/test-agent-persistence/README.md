@@ -229,6 +229,7 @@ RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线�
   nonce 占用、单用户 grant 轮换和撤销；Redis value 不保存原始 ticket/grant。
 - `InternalModelProviderModelMapper.xml` 覆盖保存公开模型并级联清理旧探测，按能力保存最近探测结果。
 - `ModelGatewayUsageDailyMapper.xml` 使用 PostgreSQL/H2 兼容 upsert 原子累加每日聚合，不先读后写。
+- `InternalModelObservabilityMapper.xml` 维护内部模型调用可观测：明细 insert 与小时聚合 upsert 同一事务，探活状态 upsert 由 SQL 依据本次结果原子递增/归零连续失败计数；`V20260807130134__create_internal_model_observability.sql` 创建明细/小时聚合/探活状态三张表，只存结构化字段，不保存请求/响应正文或 Token。
 - `V20260730090000__add_lobehub_model_gateway.sql` 只创建上述平台表和四个生产必需公共参数；不触碰独立
   LobeHub ParadeDB，也不写测试/演示数据。
 - 已知历史若存在 `V20260801093854`、但缺少 `V20260730090000`，app 兼容装配会隐藏无法再顺序执行的

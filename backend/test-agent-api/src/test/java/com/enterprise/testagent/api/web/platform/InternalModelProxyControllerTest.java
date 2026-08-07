@@ -10,8 +10,10 @@ import com.enterprise.testagent.api.web.common.GlobalExceptionHandler;
 import com.enterprise.testagent.domain.configuration.InternalModelProvider;
 import com.enterprise.testagent.domain.configuration.InternalModelProviderRepository;
 import com.enterprise.testagent.domain.configuration.InternalModelProviderRuntimeConfig;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordRepository;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProviderRegistry;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
+import com.enterprise.testagent.opencode.runtime.internalmodel.observability.InternalModelCallRecorder;
 import com.enterprise.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -494,7 +496,8 @@ class InternalModelProxyControllerTest {
                 registry,
                 settings,
                 WebClient.create(),
-                OBJECT_MAPPER);
+                OBJECT_MAPPER,
+                new InternalModelCallRecorder(mock(InternalModelCallRecordRepository.class)));
         downstreamContext = new AnnotationConfigApplicationContext();
         downstreamContext.register(ControllerTestConfiguration.class);
         downstreamContext.registerBean(

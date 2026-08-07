@@ -1239,6 +1239,22 @@ PostgreSQL migration 与 XXL V9 则应全部成功且 checksum 不变；当前�
 使用 PostgreSQL `ON CONFLICT` 覆盖最近结果，每日聚合使用单条 upsert 增量，避免 JVM 先读后写造成并发丢失。
 `ai_model_configs` 保持历史兼容，不是 LobeHub 目录来源。
 
+## V20260807130134 内部模型调用可观测性
+
+`V20260807130134__create_internal_model_observability.sql` 创建以下平台 PostgreSQL 结构：
+
+| 表 | 口径与边界 |
+|---|---|
+| `internal_model_call_records` | append-only 内部模型代理调用明细：`provider_id/model/endpoint/source(USER_CALL\|PROBE)/outcome/http_status/error_class/streaming/duration_ms/first_byte_ms/trace_id/ucid/started_at`。只存结构化字段，**禁止写入请求/响应正文、错误文本、Token 或密钥**；`error_class` 只保存剥离 Reactor 包装后的异常类简名。索引 `(provider_id, started_at desc)`、`(outcome, started_at desc)`、`(started_at)`；保留 30 天。 |
+| `internal_model_call_stats_hourly` | 按 `(stat_hour, provider_id, model, endpoint, source, outcome)` 原子累加 `request_count/duration_ms_sum/duration_ms_max`；`stat_hour` 由写入方截断到小时，保留 180 天。 |
+| `internal_model_probe_status` | 每 provider 一行的最近探活状态：`last_outcome/last_http_status/last_error_class/last_duration_ms/last_probed_at/last_success_at/consecutive_failures/trace_id/updated_at`；`consecutive_failures` 由 SQL 依据本次结果成功归零、失败 +1。 |
+
+写入 SQL 位于 `InternalModelObservabilityMapper.xml`：明细 insert 与小时聚合 upsert 在同一事务完成（PostgreSQL `ON CONFLICT` 双实现，H2 用 MERGE），探活状态 upsert 连续失败计数由数据库原子维护。明细与聚合保留期由 XXL 任务
+`opencode-runtime.internal-model-observability-retention` 每日执行清理，不依赖 application 层逐条扫描。
+
+内部模型调用观测只记录 traceId、耗时、状态与稳定错误信息，与现有企业模型代理日志脱敏边界一致，不记录代码、
+提示词、Token 或密钥。
+
 同一 migration 只写入四个生产必需且默认禁用/不可用的公共参数：
 
 - `LOBEHUB_ENABLED=false`

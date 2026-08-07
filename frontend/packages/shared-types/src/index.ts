@@ -1801,6 +1801,77 @@ export type InternalModelProviderRefreshStatus = {
   traceId?: string;
 };
 
+/** 内部模型代理调用结果分类，与后端 InternalModelCallOutcome 枚举一致。 */
+export type InternalModelCallOutcome =
+  | "SUCCESS"
+  | "PROXY_AUTH_FAILED"
+  | "PROVIDER_UNAVAILABLE"
+  | "REQUEST_INVALID"
+  | "UPSTREAM_CONNECT_FAILED"
+  | "UPSTREAM_FIRST_RESPONSE_TIMEOUT"
+  | "UPSTREAM_FIRST_EVENT_TIMEOUT"
+  | "UPSTREAM_STREAM_IDLE_TIMEOUT"
+  | "UPSTREAM_HTTP_ERROR"
+  | "UPSTREAM_STREAM_INTERRUPTED"
+  | "UPSTREAM_STREAM_FAILED"
+  | "CLIENT_DISCONNECTED"
+  | "UNKNOWN_ERROR";
+
+/** 调用来源：真实用户调用或探活。 */
+export type InternalModelCallSource = "USER_CALL" | "PROBE";
+
+/** 单次内部模型代理调用明细；只含结构化字段，不含任何请求/响应正文。 */
+export type InternalModelCallRecord = {
+  id?: number;
+  providerId: string;
+  model?: string | null;
+  endpoint: string;
+  source: InternalModelCallSource;
+  outcome: InternalModelCallOutcome;
+  httpStatus?: number | null;
+  errorClass?: string | null;
+  streaming: boolean;
+  durationMillis: number;
+  firstByteMillis?: number | null;
+  traceId: string;
+  ucid?: string | null;
+  startedAt: string;
+};
+
+/** 小时级聚合统计行。 */
+export type InternalModelCallHourlyStat = {
+  statHour: string;
+  providerId: string;
+  model: string;
+  endpoint: string;
+  source: string;
+  outcome: string;
+  requestCount: number;
+  durationMillisSum: number;
+  durationMillisMax: number;
+};
+
+/** 逐 provider 最近探活状态，供健康卡片直接读取。 */
+export type InternalModelProbeStatus = {
+  providerId: string;
+  lastOutcome: InternalModelCallOutcome;
+  lastHttpStatus?: number | null;
+  lastErrorClass?: string | null;
+  lastDurationMillis?: number | null;
+  lastProbedAt: string;
+  lastSuccessAt?: string | null;
+  consecutiveFailures: number;
+  traceId: string;
+};
+
+/** 手动触发探活的单 provider 结果。 */
+export type InternalModelProbeRunResult = Record<string, {
+  providerId: string;
+  outcome: InternalModelCallOutcome;
+  httpStatus?: number | null;
+  durationMillis: number;
+}>;
+
 export type RunEventType =
   | "run.created"
   | "run.started"

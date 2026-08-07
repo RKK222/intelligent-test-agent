@@ -7,24 +7,33 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.configuration.InternalModelProvider;
 import com.enterprise.testagent.domain.configuration.InternalModelProviderRuntimeConfig;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcome;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecord;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallSource;
 import com.enterprise.testagent.model.gateway.OpenAiUpstreamSupport;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProviderRegistry;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelResponsesAdapter;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelThinkStreamConverter;
+import com.enterprise.testagent.opencode.runtime.internalmodel.observability.InternalModelCallOutcomeClassifier;
+import com.enterprise.testagent.opencode.runtime.internalmodel.observability.InternalModelCallRecorder;
 import io.netty.channel.ChannelOption;
 import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.ResolvableType;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.http.codec.ServerSentEvent;
@@ -60,6 +69,7 @@ public class InternalModelProxyForwardingService {
     private final InternalModelProxyRuntimeSettings settings;
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
+    private final InternalModelCallRecorder recorder;
     private final Duration firstResponseTimeout;
     private final Duration firstEventTimeout;
     private final Duration streamIdleTimeout;
@@ -74,20 +84,23 @@ public class InternalModelProxyForwardingService {
     public InternalModelProxyForwardingService(
             InternalModelProviderRegistry registry,
             InternalModelProxyRuntimeSettings settings,
-            ObjectMapper objectMapper) {
-        this(registry, settings, defaultWebClient(), objectMapper);
+            ObjectMapper objectMapper,
+            InternalModelCallRecorder recorder) {
+        this(registry, settings, defaultWebClient(), objectMapper, recorder);
     }
 
     InternalModelProxyForwardingService(
             InternalModelProviderRegistry registry,
             InternalModelProxyRuntimeSettings settings,
             WebClient webClient,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            InternalModelCallRecorder recorder) {
         this(
                 registry,
                 settings,
                 webClient,
                 objectMapper,
+                recorder,
                 FIRST_RESPONSE_TIMEOUT,
                 FIRST_EVENT_TIMEOUT,
                 STREAM_IDLE_TIMEOUT);
@@ -101,6 +114,7 @@ public class InternalModelProxyForwardingService {
             InternalModelProxyRuntimeSettings settings,
             WebClient webClient,
             ObjectMapper objectMapper,
+            InternalModelCallRecorder recorder,
             Duration firstResponseTimeout,
             Duration firstEventTimeout,
             Duration streamIdleTimeout) {
@@ -108,6 +122,7 @@ public class InternalModelProxyForwardingService {
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
         this.webClient = Objects.requireNonNull(webClient, "webClient must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.recorder = Objects.requireNonNull(recorder, "recorder must not be null");
         this.firstResponseTimeout = requirePositive(firstResponseTimeout, "firstResponseTimeout");
         this.firstEventTimeout = requirePositive(firstEventTimeout, "firstEventTimeout");
         this.streamIdleTimeout = requirePositive(streamIdleTimeout, "streamIdleTimeout");
@@ -140,13 +155,15 @@ public class InternalModelProxyForwardingService {
         byte[] upstreamBody;
         String upstreamPath;
         InternalModelResponsesAdapter.StreamSession responsesSession;
+        String model;
         if (responsesRequest) {
             InternalModelResponsesAdapter.ConvertedRequest converted = responsesAdapter.convertRequest(body);
             upstreamBody = converted.body();
             upstreamPath = CHAT_COMPLETIONS_PATH;
-            responsesSession = responsesAdapter.newStreamSession(converted.model());
+            model = converted.model();
+            responsesSession = responsesAdapter.newStreamSession(model);
         } else {
-            validateModel(body);
+            model = validateAndExtractModel(body);
             upstreamBody = body == null ? new byte[0] : body;
             upstreamPath = requestedPath;
             responsesSession = null;
@@ -154,6 +171,9 @@ public class InternalModelProxyForwardingService {
         String targetUrl = OpenAiUpstreamSupport.targetUrl(
                 provider.baseUrl(), upstreamPath, exchange.getRequest().getURI().getRawQuery());
         InternalModelThinkStreamConverter converter = new InternalModelThinkStreamConverter(objectMapper);
+        CallObservation observation = new CallObservation(
+                provider.providerId(), model, requestedPath, traceId,
+                exchange.getRequest().getHeaders().getFirst(UCID_HEADER));
         Sinks.One<Void> responseHeadersReady = Sinks.one();
         Mono<Void> request = webClient.method(exchange.getRequest().getMethod() == null ? HttpMethod.POST : exchange.getRequest().getMethod())
                 .uri(URI.create(targetUrl))
@@ -162,19 +182,24 @@ public class InternalModelProxyForwardingService {
                 .body(BodyInserters.fromValue(upstreamBody))
                 .exchangeToMono(response -> {
                     responseHeadersReady.tryEmitEmpty();
-                    return writeResponse(exchange, response, converter, responsesSession);
+                    observation.markFirstByte(response.statusCode());
+                    return writeResponse(exchange, response, converter, responsesSession, observation);
                 });
         Mono<Void> responseHeaderTimeout = responseHeadersReady.asMono()
                 .timeout(firstResponseTimeout)
                 .then(Mono.never());
-        return Mono.firstWithSignal(request, responseHeaderTimeout);
+        return Mono.firstWithSignal(request, responseHeaderTimeout)
+                .doOnError(error -> observation.markError(error))
+                .doOnCancel(observation::markCancelled)
+                .doFinally(signal -> recordTerminal(observation));
     }
 
     private Mono<Void> writeResponse(
             ServerWebExchange exchange,
             ClientResponse response,
             InternalModelThinkStreamConverter converter,
-            InternalModelResponsesAdapter.StreamSession responsesSession) {
+            InternalModelResponsesAdapter.StreamSession responsesSession,
+            CallObservation observation) {
         ServerHttpResponse targetResponse = exchange.getResponse();
         targetResponse.setStatusCode(response.statusCode());
 
@@ -187,21 +212,27 @@ public class InternalModelProxyForwardingService {
             return targetResponse.writeWith(withStreamingTimeouts(response.bodyToFlux(DataBuffer.class)));
         }
 
-        Flux<ServerSentEvent<String>> upstreamEvents = withStreamingTimeouts(response.bodyToFlux(SSE_EVENT_TYPE));
+        observation.markStreaming();
+        Flux<ServerSentEvent<String>> upstreamEvents = withStreamingTimeouts(response.bodyToFlux(SSE_EVENT_TYPE))
+                .doOnNext(ignored -> observation.markFirstEvent());
         Flux<ServerSentEvent<String>> events;
         if (responsesSession == null) {
             events = upstreamEvents.map(event -> convertEvent(event, converter));
         } else {
             events = upstreamEvents
                     .concatMapIterable(event -> convertResponsesEvent(event, converter, responsesSession))
-                    .concatWith(Flux.defer(() -> Flux.fromIterable(convertResponsesFailure(
-                            responsesSession,
-                            "upstream_stream_interrupted",
-                            "上游模型流在完成前结束"))))
-                    .onErrorResume(ignored -> Flux.fromIterable(convertResponsesFailure(
-                            responsesSession,
-                            "upstream_stream_failed",
-                            "上游模型流读取失败")));
+                    .concatWith(Flux.defer(() -> Flux.fromIterable(markInterrupted(
+                            convertResponsesFailure(
+                                    responsesSession,
+                                    "upstream_stream_interrupted",
+                                    "上游模型流在完成前结束"),
+                            observation))))
+                    .onErrorResume(error -> Flux.fromIterable(markStreamFailure(
+                            convertResponsesFailure(
+                                    responsesSession,
+                                    "upstream_stream_failed",
+                                    "上游模型流读取失败"),
+                            observation, error)));
         }
         return sseWriter.write(
                 events,
@@ -209,6 +240,66 @@ public class InternalModelProxyForwardingService {
                 contentType,
                 targetResponse,
                 Collections.emptyMap());
+    }
+
+    /**
+     * 记录 prepareRequest 阶段的同步失败：代理鉴权失败 -> PROXY_AUTH_FAILED；
+     * provider 未启用/不存在/Token 未配置 -> PROVIDER_UNAVAILABLE。调用方在捕获后原样抛出。
+     */
+    void recordPrepareRequestFailure(ServerWebExchange exchange, String traceId, PlatformException error) {
+        InternalModelCallOutcome outcome = error.errorCode() == ErrorCode.UNAUTHENTICATED
+                ? InternalModelCallOutcome.PROXY_AUTH_FAILED
+                : InternalModelCallOutcome.PROVIDER_UNAVAILABLE;
+        recordStageFailure(exchange, traceId, outcome, error);
+    }
+
+    /**
+     * 记录请求体校验阶段的同步失败（缺 model、非法 JSON、2 MiB 上限、responses 转换失败）：
+     * 一律归为 REQUEST_INVALID。调用方在捕获后原样抛出。
+     */
+    void recordRequestValidationFailure(ServerWebExchange exchange, String traceId, PlatformException error) {
+        recordStageFailure(exchange, traceId, InternalModelCallOutcome.REQUEST_INVALID, error);
+    }
+
+    private void recordStageFailure(
+            ServerWebExchange exchange,
+            String traceId,
+            InternalModelCallOutcome outcome,
+            PlatformException error) {
+        recordTerminal(CallObservation.stageFailure(
+                exchange, traceId, outcome, InternalModelCallOutcomeClassifier.errorClass(error)));
+    }
+
+    private void recordTerminal(CallObservation observation) {
+        try {
+            if (observation.terminalRecorded.compareAndSet(false, true)) {
+                recorder.record(observation.toRecord()).subscribe();
+            }
+        } catch (RuntimeException ignored) {
+            // 观测记录失败绝不影响转发主链路。
+        }
+    }
+
+    private static List<ServerSentEvent<String>> markInterrupted(
+            List<ServerSentEvent<String>> events, CallObservation observation) {
+        // 只有补偿分支实际产生事件（流未在完成前正常结束）才标记中断，避免误报。
+        if (!events.isEmpty()) {
+            observation.markStreamOutcome(InternalModelCallOutcome.UPSTREAM_STREAM_INTERRUPTED);
+        }
+        return events;
+    }
+
+    private static List<ServerSentEvent<String>> markStreamFailure(
+            List<ServerSentEvent<String>> events, CallObservation observation, Throwable error) {
+        // 上游流错误若属超时（首事件/流空闲），保留精确分类；否则归为流读取失败。
+        InternalModelCallOutcome classified =
+                InternalModelCallOutcomeClassifier.classify(error, observation.signals());
+        if (classified == InternalModelCallOutcome.UNKNOWN_ERROR) {
+            observation.markStreamOutcome(InternalModelCallOutcome.UPSTREAM_STREAM_FAILED);
+        } else {
+            observation.markError(error);
+        }
+        return events;
     }
 
     private static WebClient defaultWebClient() {
@@ -295,7 +386,7 @@ public class InternalModelProxyForwardingService {
         }
     }
 
-    private void validateModel(byte[] body) {
+    private String validateAndExtractModel(byte[] body) {
         byte[] requestBody = body == null ? new byte[0] : body;
         try (JsonParser parser = objectMapper.getFactory().createParser(requestBody)) {
             JsonToken rootToken = parser.nextToken();
@@ -329,6 +420,7 @@ public class InternalModelProxyForwardingService {
             if (!textualModel || model == null || model.isBlank()) {
                 throw new PlatformException(ErrorCode.VALIDATION_ERROR, "内部模型代理请求缺少 model");
             }
+            return model;
         } catch (PlatformException exception) {
             throw exception;
         } catch (IOException exception) {
@@ -377,6 +469,141 @@ public class InternalModelProxyForwardingService {
 
         PreparedRequest {
             Objects.requireNonNull(runtimeConfig, "runtimeConfig must not be null");
+        }
+    }
+
+    /**
+     * 单次转发的观测上下文。线程模型：Netty event loop 上并发访问，所有标记位用原子布尔保护，
+     * 终态只用一次（terminalRecorded 防 doOnError 与 doFinally 双写）。不携带任何请求/响应正文。
+     */
+    static final class CallObservation {
+        private final String providerId;
+        private final String model;
+        private final String endpoint;
+        private final String traceId;
+        private final String ucid;
+        private final Instant startedAt;
+        private final long startedNanos;
+        private final AtomicBoolean firstByteMarked = new AtomicBoolean(false);
+        private final AtomicBoolean firstEventMarked = new AtomicBoolean(false);
+        private final AtomicBoolean streaming = new AtomicBoolean(false);
+        private final AtomicBoolean streamOutcomeSet = new AtomicBoolean(false);
+        private final AtomicBoolean terminalRecorded = new AtomicBoolean(false);
+        private final AtomicLong httpStatus = new AtomicLong(-1);
+        private volatile InternalModelCallOutcome outcome = InternalModelCallOutcome.SUCCESS;
+        private volatile String errorClass;
+        private volatile long firstByteNanos;
+
+        CallObservation(String providerId, String model, String endpoint, String traceId, String ucid) {
+            this.providerId = providerId;
+            this.model = model;
+            this.endpoint = endpoint;
+            this.traceId = traceId;
+            this.ucid = ucid;
+            this.startedAt = Instant.now();
+            this.startedNanos = System.nanoTime();
+        }
+
+        /** 请求前同步阶段失败的观测：无转发时序，仅记录分类与耗时。 */
+        static CallObservation stageFailure(
+                ServerWebExchange exchange,
+                String traceId,
+                InternalModelCallOutcome outcome,
+                String errorClass) {
+            CallObservation observation = new CallObservation(
+                    providerIdFromHeader(exchange), null, pathFrom(exchange), traceId,
+                    exchange.getRequest().getHeaders().getFirst(UCID_HEADER));
+            observation.outcome = outcome;
+            observation.errorClass = errorClass;
+            return observation;
+        }
+
+        void markFirstByte(HttpStatusCode statusCode) {
+            firstByteMarked.set(true);
+            firstByteNanos = System.nanoTime();
+            httpStatus.set(statusCode.value());
+        }
+
+        void markStreaming() {
+            streaming.set(true);
+        }
+
+        void markFirstEvent() {
+            firstEventMarked.set(true);
+        }
+
+        void markStreamOutcome(InternalModelCallOutcome streamOutcome) {
+            // 流补偿分支的终态优先于超时/状态码判定，且只允许设置一次。
+            if (streamOutcomeSet.compareAndSet(false, true)) {
+                outcome = streamOutcome;
+            }
+        }
+
+        void markError(Throwable error) {
+            outcome = InternalModelCallOutcomeClassifier.classify(error, signals());
+            errorClass = InternalModelCallOutcomeClassifier.errorClass(error);
+        }
+
+        void markCancelled() {
+            // 下游 opencode 提前断开；仅当尚未被更精确的分类覆盖时才标记。
+            outcome = InternalModelCallOutcome.CLIENT_DISCONNECTED;
+        }
+
+        InternalModelCallOutcomeClassifier.TimeoutSignals signals() {
+            return new InternalModelCallOutcomeClassifier.TimeoutSignals(
+                    firstByteMarked.get(), firstEventMarked.get(), streaming.get());
+        }
+
+        InternalModelCallRecord toRecord() {
+            long httpStatusValue = httpStatus.get();
+            resolveOutcome(httpStatusValue);
+            long durationMillis = (System.nanoTime() - startedNanos) / 1_000_000;
+            Long firstByteMillis = firstByteMarked.get()
+                    ? (firstByteNanos - startedNanos) / 1_000_000
+                    : null;
+            return new InternalModelCallRecord(
+                    null,
+                    providerId,
+                    model,
+                    endpoint == null ? "/" : endpoint,
+                    InternalModelCallSource.USER_CALL,
+                    outcome,
+                    httpStatusValue >= 0 ? (int) httpStatusValue : null,
+                    errorClass,
+                    streaming.get(),
+                    durationMillis,
+                    firstByteMillis,
+                    traceId == null ? "" : traceId,
+                    ucid,
+                    startedAt);
+        }
+
+        private void resolveOutcome(long httpStatusValue) {
+            if (streamOutcomeSet.get()) {
+                return;
+            }
+            if (firstByteMarked.get()) {
+                outcome = httpStatusValue >= 200 && httpStatusValue < 300
+                        ? InternalModelCallOutcome.SUCCESS
+                        : InternalModelCallOutcome.UPSTREAM_HTTP_ERROR;
+            } else if (outcome == InternalModelCallOutcome.SUCCESS) {
+                // 上游响应头未到且无错误信号：视为未知（正常不会发生）。
+                outcome = InternalModelCallOutcome.UNKNOWN_ERROR;
+            }
+        }
+
+        private static String providerIdFromHeader(ServerWebExchange exchange) {
+            String value = exchange.getRequest().getHeaders().getFirst(PROVIDER_HEADER);
+            return value == null || value.isBlank() ? "unknown" : value;
+        }
+
+        private static String pathFrom(ServerWebExchange exchange) {
+            String fullPath = exchange.getRequest().getURI().getRawPath();
+            if (fullPath == null || !fullPath.startsWith(InternalModelProxyRuntimeSettings.PROXY_PATH)) {
+                return "/";
+            }
+            String path = fullPath.substring(InternalModelProxyRuntimeSettings.PROXY_PATH.length());
+            return path.isBlank() ? "/" : path;
         }
     }
 }

@@ -68,6 +68,8 @@ Admin 响应固定设置 `Content-Security-Policy: frame-ancestors 'self'` 和 `
 - `V7` 注册个人工作区跨服务器搬迁任务 `workspace-management.personal-workspace-relocation`；XXL 只取得全局锁并广播空 payload，各 Java 再按本机服务器 ID 发现并认领源端 worktree。
 - `V8` 保留 V7 原始 migration，把该任务默认 Cron 调整为每 30 分钟并重算下一触发时间，不改变启停或执行策略。
 - `V9` 注册每天北京时间 02:00 的闲置用户进程关闭任务 `opencode-runtime.inactive-user-process-cleanup`；XXL 只取得全局锁并广播，各 Java 仅处理本机实际持有 manager 连接的进程。
+- `V10` 注册每 5 分钟的内部模型供应商探活任务 `opencode-runtime.internal-model-probe`；GLOBAL_MUTEX 只保证单实例执行，实际探活遍历当前 Java 进程 registry 快照中的启用供应商并落观测明细与探活状态。
+- `V11` 注册每天北京时间 03:30 的内部模型调用观测数据清理任务 `opencode-runtime.internal-model-observability-retention`；删除 30 天前明细与 180 天前小时聚合。
 - 后续新增任务或调整既有生产默认配置必须新建更高版本 SQL；禁止改写已执行 migration，也禁止启动时执行非版本化 upsert。
 
 旧 PostgreSQL 的任务定义和运行历史只做保留，不复制到 MySQL，也不再被 runner 调度。短暂停机升级 migration 将旧夜间 `PENDING/RUNNING/STOPPING USER_PLAN` 全部标记为 `SKIPPED`，避免 runner 删除后残留永久活动记录；不删除历史审计，新夜间任务只写 `night_execution_tasks`。
@@ -106,6 +108,8 @@ Admin 响应固定设置 `Content-Security-Policy: frame-ancestors 'self'` 和 `
 | `workspace-management.app-source-cleanup` | `0 0/1 * * * ? *` | 1 分钟 |
 | `workspace-management.personal-workspace-relocation` | `0 0/30 * * * ? *` | 30 分钟 |
 | `opencode-runtime.inactive-user-process-cleanup` | `0 0 2 * * ? *` | 2 小时 |
+| `opencode-runtime.internal-model-probe` | `0 */5 * * * ? *` | 4 分钟 |
+| `opencode-runtime.internal-model-observability-retention` | `0 30 3 * * ? *` | 10 分钟 |
 
 应用源码清理采用 `GLOBAL_MUTEX` 只避免多个 XXL executor 重复广播；该锁不承担 Linux 服务器亲和或持久化执行保证。收到 `app-source.cleanup-requested` 的每台 Java 只扫描当前 `linuxServerId` 的到期任务，并以数据库绝对租约和本机文件锁执行；广播丢失、Java 重启或服务器离线不会丢任务，下一轮或恢复上线后继续认领。
 

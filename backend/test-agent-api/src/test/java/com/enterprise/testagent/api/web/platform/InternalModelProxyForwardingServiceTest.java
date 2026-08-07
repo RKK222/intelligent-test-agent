@@ -1,15 +1,20 @@
 package com.enterprise.testagent.api.web.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.enterprise.testagent.domain.configuration.InternalModelProvider;
 import com.enterprise.testagent.domain.configuration.InternalModelProviderRepository;
 import com.enterprise.testagent.domain.configuration.InternalModelProviderRuntimeConfig;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecord;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordRepository;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProviderRegistry;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
+import com.enterprise.testagent.opencode.runtime.internalmodel.observability.InternalModelCallRecorder;
 import com.enterprise.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -93,6 +98,34 @@ class InternalModelProxyForwardingServiceTest {
         assertThat(authorizationHeaders).containsExactlyInAnyOrder("Bearer qwen-token", "Bearer deepseek-token");
     }
 
+    @Test
+    void recordsSuccessfulForwardWithProviderModelAndDuration() {
+        List<InternalModelCallRecord> recorded = new CopyOnWriteArrayList<>();
+        WebClient webClient = WebClient.builder()
+                .exchangeFunction(request -> Mono.just(org.springframework.web.reactive.function.client.ClientResponse
+                        .create(HttpStatus.OK)
+                        .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                        .body("{}")
+                        .build()))
+                .build();
+        InternalModelProxyForwardingService service = service(
+                webClient, List.of(runtimeConfig(PROVIDER_ID, MODEL_TOKEN)), recorded);
+
+        StepVerifier.create(service.forward(exchange(), REQUEST_BODY, "trace_observe"))
+                .verifyComplete();
+
+        // recorder 在 boundedElastic 上异步落库，等待记录写入后再断言。
+        awaitRecorded(recorded);
+        assertThat(recorded).hasSize(1);
+        InternalModelCallRecord record = recorded.getFirst();
+        assertThat(record.providerId()).isEqualTo(PROVIDER_ID);
+        assertThat(record.model()).isEqualTo("Qwen3.6-27B");
+        assertThat(record.outcome()).isEqualTo(com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcome.SUCCESS);
+        assertThat(record.httpStatus()).isEqualTo(200);
+        assertThat(record.traceId()).isEqualTo("trace_observe");
+        assertThat(record.durationMillis()).isGreaterThanOrEqualTo(0);
+    }
+
     private InternalModelProxyForwardingService service(WebClient webClient) {
         return service(webClient, List.of(runtimeConfig(PROVIDER_ID, MODEL_TOKEN)));
     }
@@ -100,6 +133,13 @@ class InternalModelProxyForwardingServiceTest {
     private InternalModelProxyForwardingService service(
             WebClient webClient,
             List<InternalModelProviderRuntimeConfig> runtimeConfigs) {
+        return service(webClient, runtimeConfigs, new CopyOnWriteArrayList<>());
+    }
+
+    private InternalModelProxyForwardingService service(
+            WebClient webClient,
+            List<InternalModelProviderRuntimeConfig> runtimeConfigs,
+            List<InternalModelCallRecord> captured) {
         InternalModelProviderRepository repository = mock(InternalModelProviderRepository.class);
         when(repository.findEnabledRuntimeConfigs()).thenReturn(runtimeConfigs);
         InternalModelProviderRegistry registry = new InternalModelProviderRegistry(repository);
@@ -112,9 +152,31 @@ class InternalModelProxyForwardingServiceTest {
                 settings,
                 webClient,
                 new ObjectMapper(),
+                recorder(captured),
                 SHORT_TIMEOUT,
                 SHORT_TIMEOUT,
                 SHORT_TIMEOUT);
+    }
+
+    private static void awaitRecorded(List<InternalModelCallRecord> recorded) {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+        while (recorded.isEmpty() && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+    }
+
+    private InternalModelCallRecorder recorder(List<InternalModelCallRecord> captured) {
+        InternalModelCallRecordRepository repository = mock(InternalModelCallRecordRepository.class);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            captured.add(invocation.getArgument(0));
+            return null;
+        }).when(repository).record(any(InternalModelCallRecord.class));
+        return new InternalModelCallRecorder(repository);
     }
 
     private InternalModelProviderRuntimeConfig runtimeConfig(String providerId, String authToken) {

@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.InternalModelObservabilityMapper">
+
+    <resultMap id="CallRecordRowMap" type="com.enterprise.testagent.persistence.mybatis.InternalModelCallRecordRow">
+        <constructor>
+            <arg column="id" javaType="java.lang.Long"/>
+            <arg column="provider_id" javaType="java.lang.String"/>
+            <arg column="model" javaType="java.lang.String"/>
+            <arg column="endpoint" javaType="java.lang.String"/>
+            <arg column="source" javaType="java.lang.String"/>
+            <arg column="outcome" javaType="java.lang.String"/>
+            <arg column="http_status" javaType="java.lang.Integer"/>
+            <arg column="error_class" javaType="java.lang.String"/>
+            <arg column="streaming" javaType="java.lang.Boolean"/>
+            <arg column="duration_ms" javaType="java.lang.Long"/>
+            <arg column="first_byte_ms" javaType="java.lang.Long"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="ucid" javaType="java.lang.String"/>
+            <arg column="started_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="HourlyStatRowMap" type="com.enterprise.testagent.persistence.mybatis.InternalModelCallHourlyStatRow">
+        <constructor>
+            <arg column="stat_hour" javaType="java.time.Instant"/>
+            <arg column="provider_id" javaType="java.lang.String"/>
+            <arg column="model" javaType="java.lang.String"/>
+            <arg column="endpoint" javaType="java.lang.String"/>
+            <arg column="source" javaType="java.lang.String"/>
+            <arg column="outcome" javaType="java.lang.String"/>
+            <arg column="request_count" javaType="java.lang.Long"/>
+            <arg column="duration_ms_sum" javaType="java.lang.Long"/>
+            <arg column="duration_ms_max" javaType="java.lang.Long"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="ProbeStatusRowMap" type="com.enterprise.testagent.persistence.mybatis.InternalModelProbeStatusRow">
+        <constructor>
+            <arg column="provider_id" javaType="java.lang.String"/>
+            <arg column="last_outcome" javaType="java.lang.String"/>
+            <arg column="last_http_status" javaType="java.lang.Integer"/>
+            <arg column="last_error_class" javaType="java.lang.String"/>
+            <arg column="last_duration_ms" javaType="java.lang.Long"/>
+            <arg column="last_probed_at" javaType="java.time.Instant"/>
+            <arg column="last_success_at" javaType="java.time.Instant"/>
+            <arg column="consecutive_failures" javaType="java.lang.Integer"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <insert id="insertCallRecord" parameterType="com.enterprise.testagent.persistence.mybatis.InternalModelCallRecordRow">
+        insert into internal_model_call_records(
+            provider_id, model, endpoint, source, outcome, http_status, error_class,
+            streaming, duration_ms, first_byte_ms, trace_id, ucid, started_at
+        ) values (
+            #{providerId}, #{model}, #{endpoint}, #{source}, #{outcome}, #{httpStatus}, #{errorClass},
+            #{streaming}, #{durationMillis}, #{firstByteMillis}, #{traceId}, #{ucid}, #{startedAt}
+        )
+    </insert>
+
+    <insert id="incrementHourlyStat" databaseId="postgresql">
+        insert into internal_model_call_stats_hourly(
+            stat_hour, provider_id, model, endpoint, source, outcome,
+            request_count, duration_ms_sum, duration_ms_max, updated_at
+        ) values (
+            #{statHour}, #{providerId}, #{model}, #{endpoint}, #{source}, #{outcome},
+            1, #{durationMillis}, #{durationMillis}, current_timestamp
+        )
+        on conflict (stat_hour, provider_id, model, endpoint, source, outcome) do update set
+            request_count = internal_model_call_stats_hourly.request_count + 1,
+            duration_ms_sum = internal_model_call_stats_hourly.duration_ms_sum + excluded.duration_ms_sum,
+            duration_ms_max = greatest(internal_model_call_stats_hourly.duration_ms_max, excluded.duration_ms_max),
+            updated_at = current_timestamp
+    </insert>
+
+    <insert id="incrementHourlyStat">
+        merge into internal_model_call_stats_hourly target
+        using (values (
+            #{statHour}, #{providerId}, #{model}, #{endpoint}, #{source}, #{outcome},
+            1, #{durationMillis}, #{durationMillis}
+        )) incoming(
+            stat_hour, provider_id, model, endpoint, source, outcome,
+            request_count, duration_ms_sum, duration_ms_max
+        )
+        on target.stat_hour = incoming.stat_hour
+           and target.provider_id = incoming.provider_id
+           and target.model = incoming.model
+           and target.endpoint = incoming.endpoint
+           and target.source = incoming.source
+           and target.outcome = incoming.outcome
+        when matched then update set
+            request_count = target.request_count + 1,
+            duration_ms_sum = target.duration_ms_sum + incoming.duration_ms_sum,
+            duration_ms_max = case when incoming.duration_ms_max > target.duration_ms_max
+                then incoming.duration_ms_max else target.duration_ms_max end,
+            updated_at = current_timestamp
+        when not matched then insert (
+            stat_hour, provider_id, model, endpoint, source, outcome,
+            request_count, duration_ms_sum, duration_ms_max, updated_at
+        ) values (
+            incoming.stat_hour, incoming.provider_id, incoming.model, incoming.endpoint,
+            incoming.source, incoming.outcome,
+            1, incoming.duration_ms_sum, incoming.duration_ms_max, current_timestamp
+        )
+    </insert>
+
+    <sql id="CallRecordWhere">
+        where 1 = 1
+        <if test="providerId != null">and provider_id = #{providerId}</if>
+        <if test="outcome != null">and outcome = #{outcome}</if>
+        <if test="source != null">and source = #{source}</if>
+        <if test="from != null">and started_at &gt;= #{from}</if>
+        <if test="to != null">and started_at &lt; #{to}</if>
+    </sql>
+
+    <select id="findCallRecords" resultMap="CallRecordRowMap">
+        select id, provider_id, model, endpoint, source, outcome, http_status, error_class,
+               streaming, duration_ms, first_byte_ms, trace_id, ucid, started_at
+        from internal_model_call_records
+        <include refid="CallRecordWhere"/>
+        order by started_at desc, id desc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countCallRecords" resultType="long">
+        select count(*) from internal_model_call_records
+        <include refid="CallRecordWhere"/>
+    </select>
+
+    <select id="findHourlyStats" resultMap="HourlyStatRowMap">
+        select stat_hour, provider_id, model, endpoint, source, outcome,
+               request_count, duration_ms_sum, duration_ms_max
+        from internal_model_call_stats_hourly
+        where 1 = 1
+        <if test="providerId != null">and provider_id = #{providerId}</if>
+        <if test="from != null">and stat_hour &gt;= #{from}</if>
+        <if test="to != null">and stat_hour &lt; #{to}</if>
+        order by stat_hour asc, provider_id asc, outcome asc
+    </select>
+
+    <delete id="deleteCallRecordsBefore">
+        delete from internal_model_call_records where started_at &lt; #{cutoff}
+    </delete>
+
+    <delete id="deleteHourlyStatsBefore">
+        delete from internal_model_call_stats_hourly where stat_hour &lt; #{cutoff}
+    </delete>
+
+    <insert id="upsertProbeStatus" databaseId="postgresql">
+        insert into internal_model_probe_status(
+            provider_id, last_outcome, last_http_status, last_error_class, last_duration_ms,
+            last_probed_at, last_success_at, consecutive_failures, trace_id, updated_at
+        ) values (
+            #{providerId}, #{lastOutcome}, #{lastHttpStatus}, #{lastErrorClass}, #{lastDurationMillis},
+            #{lastProbedAt},
+            case when #{lastOutcome} = 'SUCCESS' then #{lastProbedAt} else null end,
+            case when #{lastOutcome} = 'SUCCESS' then 0 else 1 end,
+            #{traceId}, current_timestamp
+        )
+        on conflict (provider_id) do update set
+            last_outcome = excluded.last_outcome,
+            last_http_status = excluded.last_http_status,
+            last_error_class = excluded.last_error_class,
+            last_duration_ms = excluded.last_duration_ms,
+            last_probed_at = excluded.last_probed_at,
+            last_success_at = case when excluded.last_outcome = 'SUCCESS'
+                then excluded.last_probed_at else internal_model_probe_status.last_success_at end,
+            consecutive_failures = case when excluded.last_outcome = 'SUCCESS'
+                then 0 else internal_model_probe_status.consecutive_failures + 1 end,
+            trace_id = excluded.trace_id,
+            updated_at = current_timestamp
+    </insert>
+
+    <insert id="upsertProbeStatus">
+        merge into internal_model_probe_status target
+        using (values (
+            #{providerId}, #{lastOutcome}, #{lastHttpStatus}, #{lastErrorClass}, #{lastDurationMillis},
+            #{lastProbedAt}, #{traceId}
+        )) incoming(provider_id, last_outcome, last_http_status, last_error_class, last_duration_ms, last_probed_at, trace_id)
+        on target.provider_id = incoming.provider_id
+        when matched then update set
+            last_outcome = incoming.last_outcome,
+            last_http_status = incoming.last_http_status,
+            last_error_class = incoming.last_error_class,
+            last_duration_ms = incoming.last_duration_ms,
+            last_probed_at = incoming.last_probed_at,
+            last_success_at = case when incoming.last_outcome = 'SUCCESS'
+                then incoming.last_probed_at else target.last_success_at end,
+            consecutive_failures = case when incoming.last_outcome = 'SUCCESS'
+                then 0 else target.consecutive_failures + 1 end,
+            trace_id = incoming.trace_id,
+            updated_at = current_timestamp
+        when not matched then insert (
+            provider_id, last_outcome, last_http_status, last_error_class, last_duration_ms,
+            last_probed_at, last_success_at, consecutive_failures, trace_id, updated_at
+        ) values (
+            incoming.provider_id, incoming.last_outcome, incoming.last_http_status,
+            incoming.last_error_class, incoming.last_duration_ms, incoming.last_probed_at,
+            case when incoming.last_outcome = 'SUCCESS' then incoming.last_probed_at else null end,
+            case when incoming.last_outcome = 'SUCCESS' then 0 else 1 end,
+            incoming.trace_id, current_timestamp
+        )
+    </insert>
+
+    <select id="findAllProbeStatus" resultMap="ProbeStatusRowMap">
+        select provider_id, last_outcome, last_http_status, last_error_class, last_duration_ms,
+               last_probed_at, last_success_at, consecutive_failures, trace_id
+        from internal_model_probe_status
+        order by provider_id asc
+    </select>
+</mapper>

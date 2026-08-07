@@ -3151,6 +3151,17 @@ Token 列表及写入响应只返回 `{tokenId,name,referencedProviderCount,crea
 
 供应商响应项在原字段上增加 `tokenId/tokenName/tokenConfigured`。保存项可增加 `tokenId`；停用供应商可用 `clearToken=true` 显式解除关联，启用供应商必须关联存在且非空的 Token。未提交 `tokenId` 的旧客户端会保留既有关联；新供应商可继承兼容默认 Token。顶层旧字段 `authToken` / `tokenConfigured` 暂时保留：非空 `authToken` 会轮换兼容默认 Token、同步旧单例表，并给本次未显式选 Token 且原本无关联的供应商补挂默认 Token；顶层 `tokenConfigured` 表示所有启用供应商都能解析到非空 Token。Provider ID、Token 名称均在服务端去除首尾空白并校验重复或不存在引用。
 
+内部模型代理调用可观测性 API（全部仅限 `SUPER_ADMIN`）：
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/api/internal/platform/opencode-runtime/internal-model-observability/call-records` | 分页查询内部模型代理调用明细；过滤 `providerId/outcome/source/from/to`，`page` 从 1 起、`size` 上限 100，时间范围默认最近 24 小时、上限 31 天。 |
+| `GET` | `/api/internal/platform/opencode-runtime/internal-model-observability/stats` | 查询小时级聚合统计；过滤 `providerId/from/to`，返回按 `stat_hour` 升序的 `InternalModelCallHourlyStat[]`。 |
+| `GET` | `/api/internal/platform/opencode-runtime/internal-model-observability/probe-status` | 查询逐 provider 最近探活状态（`lastOutcome/lastProbedAt/lastSuccessAt/consecutiveFailures`）。 |
+| `POST` | `/api/internal/platform/opencode-runtime/internal-model-observability/probe` | 手动触发探活；请求体 `{providerId}` 可空，为空时全量探活，同步返回逐 provider 探活结果。 |
+
+调用明细只含结构化字段：`providerId/model/endpoint/source(USER_CALL|PROBE)/outcome/httpStatus/errorClass/streaming/durationMillis/firstByteMillis/traceId/ucid/startedAt`。**不返回、不记录任何请求/响应正文、Token、密钥或错误文本**；`errorClass` 只保存剥离 Reactor 包装后的异常类简名。`outcome` 枚举取值：`SUCCESS/PROXY_AUTH_FAILED/PROVIDER_UNAVAILABLE/REQUEST_INVALID/UPSTREAM_CONNECT_FAILED/UPSTREAM_FIRST_RESPONSE_TIMEOUT/UPSTREAM_FIRST_EVENT_TIMEOUT/UPSTREAM_STREAM_IDLE_TIMEOUT/UPSTREAM_HTTP_ERROR/UPSTREAM_STREAM_INTERRUPTED/UPSTREAM_STREAM_FAILED/CLIENT_DISCONNECTED/UNKNOWN_ERROR`。明细保留 30 天、小时聚合保留 180 天，由 `opencode-runtime.internal-model-observability-retention` 定时清理。
+
 内部模型代理 API：
 
 | 方法 | 路径 | 用途 |
