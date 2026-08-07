@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { Activity, Play, Radar, RefreshCw } from "lucide-vue-next";
 import { ElMessage } from "element-plus";
@@ -409,8 +409,10 @@ onBeforeUnmount(() => {
   providerChart = null;
 });
 
-// 聚合指标与明细常驻同一页面，数据变化后直接重绘图表。
-watch(() => stats.value, renderCharts, { deep: true });
+// 首批数据会同时创建 v-if 中的图表容器，必须等 DOM 完成后再初始化 ECharts。
+watch(() => stats.value, () => {
+  void nextTick(renderCharts);
+}, { deep: true, flush: "post" });
 
 const outcomeText: Record<InternalModelCallOutcome, string> = {
   SUCCESS: "成功",
@@ -785,17 +787,19 @@ function onPageChange(next: number) {
   color: #6b7280;
 }
 .ta-imob-combined {
-  flex: 1;
-  min-height: 0;
+  /* 整张 BI 看板由最外层统一滚动，内部区域不能在固定高度里收缩后让内容互相覆盖。 */
+  flex: 0 0 auto;
+  min-height: auto;
   display: flex;
   flex-direction: column;
   gap: 24px;
 }
 .ta-imob-section {
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  min-height: 0;
+  min-height: auto;
 }
 .ta-imob-metrics-section {
   order: 1;

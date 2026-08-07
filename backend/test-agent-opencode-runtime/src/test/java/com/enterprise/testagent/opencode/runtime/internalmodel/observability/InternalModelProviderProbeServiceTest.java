@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 /** 覆盖真实 SSE 探活成功、协议异常、超时、上游非 2xx 与连接失败，并验证观测落库。 */
 class InternalModelProviderProbeServiceTest {
@@ -42,6 +43,22 @@ class InternalModelProviderProbeServiceTest {
         if (upstream != null) {
             upstream.stop(0);
         }
+    }
+
+    @Test
+    void springSelectsProductionConstructorWhenTestConstructorAlsoExists() {
+        new ApplicationContextRunner()
+                .withBean(InternalModelProviderRegistry.class, () -> mock(InternalModelProviderRegistry.class))
+                .withBean(InternalModelProviderModelRepository.class,
+                        () -> mock(InternalModelProviderModelRepository.class))
+                .withBean(InternalModelCallRecordRepository.class,
+                        () -> mock(InternalModelCallRecordRepository.class))
+                .withBean(InternalModelProbeStatusRepository.class,
+                        () -> mock(InternalModelProbeStatusRepository.class))
+                .withBean(ObjectMapper.class, ObjectMapper::new)
+                .withBean(InternalModelProviderProbeService.class)
+                .run(context -> assertThat(context)
+                        .hasSingleBean(InternalModelProviderProbeService.class));
     }
 
     @Test

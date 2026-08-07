@@ -7226,3 +7226,38 @@
   统一筛选同时作用于聚合和明细。
 - 新增的 API 响应字段保持可选，没有新增 HTTP 路径或事件类型；数据库只新增递增 migration，旧数据按 `NULL/0`
   兼容。不记录请求/响应正文，未修改 `.env*`、generated SDK 或 OpenCode 上游源码。
+
+## 2026-08-07 - 修复可观测看板重叠、首屏图表与探活装配
+
+### Why
+
+- 聚合区和调用明细同页后仍继承固定高度 flex 收缩规则，内容超过视口时两个区块被压缩并向外溢出，形成视觉
+  重叠；首批统计数据又与 `v-if` 图表容器同时出现，默认 pre-flush watcher 会在 DOM 挂载前尝试初始化 ECharts。
+- 使用当前 JAR 做真实重启时发现探活服务保留测试专用构造器后，生产构造器未显式标注，Spring 无法选择构造器，
+  应用启动失败；同时需要通过内部代理 Mock 造数验证企业供应商调用的真实统计链路。
+
+### What
+
+- BI 页面改为最外层统一滚动，聚合与明细区块禁止参与固定高度收缩；统计 watcher 改为 post-flush，并在
+  `nextTick` 后初始化/重绘四个 ECharts 图表。
+- 为 `InternalModelProviderProbeService` 的生产构造器增加 `@Autowired`，并新增 ApplicationContextRunner 回归，
+  锁定存在测试构造器时 Spring 仍能成功装配生产 Bean。
+- 本地新增独立 `local-mock-observability` 供应商和 `local-observability-mock-model` 模型，通过 19071 Mock 与真实
+  内部代理链路写入 18 条成功、HTTP 失败、流中断和探活记录；Mock 最终恢复为健康 SSE 模式，未修改 `.env*`。
+
+### How
+
+- JDK 25 执行 `InternalModelProviderProbeServiceTest`，7 项通过；agent-web typecheck 与 production build 通过，
+  构建仅保留既有大 chunk 警告。
+- 使用未修改的 `.env.test` 以 `--without-workflow` 重启 backend、opencode-manager 和 frontend；backend health/
+  readiness 为 UP，前端 3000 返回 200，CORS 预检正常。工作流初始化因本机 PostgreSQL 用户缺少
+  `CREATEROLE/CREATEDB` 权限而按显式开关跳过。
+- 真实 Chromium 在 1440×900 下验证聚合区底部 1545、明细区顶部 1569，四个图表实例及 Canvas 均存在，页面
+  外层滚动正常、无区块重叠且控制台无报错。
+
+### Result
+
+- 统计看板、图表和明细在同一滚动页面稳定分区显示；服务可正常启动，Mock 数据可直接覆盖成功、首 token、流完成、
+  HTTP 失败与流中断口径。
+- 本次跟进不新增或变更 HTTP API、RunEvent、数据库结构/Flyway/MyBatis SQL、安全边界或环境配置；同步更新
+  agent-web README。19071 Mock 属于显式本地验证进程，后续不需要造数时可停止。
