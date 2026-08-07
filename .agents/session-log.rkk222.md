@@ -6923,3 +6923,33 @@
   交付加载能力，不伪造企业模型数据；现场必须把受控原文件复制到 `.4/.114` 固定路径后再重启 worker。
 - 未修改 HTTP API、RunEvent、数据库/Flyway、Java 后端、generated SDK、OpenCode 上游源码或 `.env*`；新增的是
   worker 运行配置能力和稳定部署说明。
+
+## 2026-08-07 - 释放 Monaco 模型并限制页面会话缓存
+
+### Why
+
+- 用户反馈工作台长期开启后内存上升并变卡；只读分析确认 CodeEditor 切换文件和卸载时没有销毁全局 Monaco model，
+  页面原始输出缓存也只有单会话条数上限，没有会话总数淘汰。
+- 用户明确本轮只修复上述两个问题：会话历史每批保留 20 条并渐进加载；WebSocket 生命周期和空闲动画/轮询暂不改。
+
+### What
+
+- CodeEditor 复用现有 URI 模型机制，增加 editor 包内引用计数；切换文件、清空路径或组件卸载时释放引用，最后一个
+  同路径编辑器离开后调用 `model.dispose()`，避免已关闭文件继续驻留 Monaco 全局注册表。
+- 会话列表继续复用既有“显示更多”分页链路，把首批和后续页大小从 30 收敛为 20；原始输出页面缓存增加最近
+  20 个 Session 的 LRU 上限，超限淘汰关联 Run 映射，认证切换或会话删除时同步清理。
+- 同步 frontend、agent-web、editor README/PACKAGE 及模型、分页、原始输出边界测试；未修改问题 3 的 WebSocket
+  客户端和问题 4 的 Spinner、后台轮询代码。
+
+### How
+
+- Monaco 模型切换、清空、卸载和共享引用，20 会话 LRU 与既有渐进“显示更多”回归均通过；前端全量测试为
+  115 个文件、1839 passed / 1 skipped，editor/agent-web typecheck 和 agent-web production build 通过。
+- 运行中的 Vite 页面 `http://127.0.0.1:3000` 返回 200；Python Playwright 使用本机 Google Chrome headless 等待
+  `networkidle` 后进入登录页，标题为 `TestAgent IDE` 且无 console error。构建仅保留既有大 chunk 警告。
+
+### Result
+
+- 已关闭打开文件产生的 Monaco model 保留链，并把会话历史请求窗口和页面原始输出会话缓存统一限制为 20。
+- 未新增或变更 HTTP API、RunEvent、数据库/Flyway、后端、环境配置、generated SDK 或 OpenCode 上游源码；并行的
+  runtime-state 终态校准、3001 Playwright 配置等工作区改动未纳入本次实现或提交。

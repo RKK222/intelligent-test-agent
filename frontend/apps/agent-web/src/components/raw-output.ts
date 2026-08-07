@@ -4,6 +4,12 @@ export type PreparedRawOutputBody = {
 };
 
 export const RAW_OUTPUT_MAX_ENTRIES_PER_SESSION = 2_000;
+export const RAW_OUTPUT_MAX_SESSIONS_PER_PAGE = 20;
+
+export type RawOutputSessionCacheUpdate<T> = {
+  entriesBySessionId: Record<string, T[]>;
+  evictedSessionIds: string[];
+};
 
 const RAW_OUTPUT_SENSITIVE_KEYS = new Set([
   "authorization",
@@ -26,6 +32,30 @@ const RAW_OUTPUT_SENSITIVE_KEYS = new Set([
  */
 export function appendLatestRawOutputEntry<T>(current: readonly T[], entry: T): T[] {
   return [...current, entry].slice(-RAW_OUTPUT_MAX_ENTRIES_PER_SESSION);
+}
+
+/**
+ * 页面原始输出只保留最近访问的 20 个会话；命中旧会话时把它移动到末尾，超限后淘汰最久未访问项。
+ */
+export function upsertLatestRawOutputSession<T>(
+  current: Readonly<Record<string, T[]>>,
+  sessionId: string,
+  entries: T[]
+): RawOutputSessionCacheUpdate<T> {
+  const orderedSessionIds = [
+    ...Object.keys(current).filter((candidate) => candidate !== sessionId),
+    sessionId
+  ];
+  const overflow = Math.max(0, orderedSessionIds.length - RAW_OUTPUT_MAX_SESSIONS_PER_PAGE);
+  const evictedSessionIds = orderedSessionIds.slice(0, overflow);
+  const retainedSessionIds = orderedSessionIds.slice(overflow);
+  return {
+    entriesBySessionId: Object.fromEntries(retainedSessionIds.map((candidate) => [
+      candidate,
+      candidate === sessionId ? entries : current[candidate] ?? []
+    ])),
+    evictedSessionIds
+  };
 }
 
 /**

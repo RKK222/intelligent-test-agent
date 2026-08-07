@@ -42,6 +42,7 @@ export type CodeEditorEmits = {
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { languageFromPath } from "./language";
+import { releaseCodeEditorModel, retainCodeEditorModel } from "./model-lifecycle";
 import MarkdownPreview from "./MarkdownPreview.vue";
 
 const props = withDefaults(defineProps<CodeEditorProps>(), { content: "", showPreview: false });
@@ -113,7 +114,7 @@ function observeContainerResize() {
   }
 }
 
-function buildModel(path: string, content: string): monaco.editor.ITextModel {
+function acquireModel(path: string, content: string): monaco.editor.ITextModel {
   const m = monacoLib!;
   const uri = typeof m.Uri.file === "function" ? m.Uri.file(path) : m.Uri.parse(`file:///${path}`);
   const existing = m.editor.getModel(uri);
@@ -121,9 +122,12 @@ function buildModel(path: string, content: string): monaco.editor.ITextModel {
     if (existing.getValue() !== content) {
       existing.setValue(content);
     }
+    retainCodeEditorModel(existing);
     return existing;
   }
-  return m.editor.createModel(content, languageFromPath(path), uri);
+  const created = m.editor.createModel(content, languageFromPath(path), uri);
+  retainCodeEditorModel(created);
+  return created;
 }
 
 function modelMatchesPath(candidate: monaco.editor.ITextModel, path: string): boolean {
@@ -153,18 +157,25 @@ async function ensureMonacoEditor(path: string) {
     console.error("Failed to load Monaco Editor");
     return;
   }
-  model = buildModel(path, props.content);
+  const previousModel = model;
+  const nextModel = previousModel && modelMatchesPath(previousModel, path)
+    ? previousModel
+    : acquireModel(path, props.content);
+  model = nextModel;
   syncedContentLength = props.content.length;
   syncedProgressiveAppend = props.progressiveAppend ?? false;
   if (editor.value) {
-    editor.value.setModel(model);
+    editor.value.setModel(nextModel);
+    if (previousModel && previousModel !== nextModel) {
+      releaseCodeEditorModel(previousModel);
+    }
     emitSelection(editor.value);
     await nextTick();
     layoutEditor();
     return;
   }
   const inst = monacoLib.editor.create(containerEl.value, {
-    model,
+    model: nextModel,
     theme: "vs",
     readOnly: props.readonly ?? false,
     minimap: { enabled: false },
@@ -262,6 +273,15 @@ watch(
   () => props.path,
   async (path) => {
     if (!path) {
+      ensureEditorSequence += 1;
+      const previousModel = model;
+      model = null;
+      editor.value?.setModel(null);
+      if (previousModel) {
+        releaseCodeEditorModel(previousModel);
+      }
+      syncedContentLength = 0;
+      syncedProgressiveAppend = false;
       return;
     }
     // 切换文件时由父级决定是否关闭预览；这里不主动改写 props。
@@ -419,9 +439,13 @@ onBeforeUnmount(() => {
     containerResizeObserver.disconnect();
     containerResizeObserver = null;
   }
+  const previousModel = model;
   editor.value?.dispose();
   editor.value = null;
   model = null;
+  if (previousModel) {
+    releaseCodeEditorModel(previousModel);
+  }
   syncedContentLength = 0;
   syncedProgressiveAppend = false;
 });

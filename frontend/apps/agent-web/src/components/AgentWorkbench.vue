@@ -199,7 +199,7 @@ import WorkbenchFooter from "./WorkbenchFooter.vue";
 import { notifyError, notifyFeedback } from "./notify";
 import { launchLobehubInNewTab } from "./lobehub-launch";
 import { releaseFeatures } from "../release-features";
-import { appendLatestRawOutputEntry, prepareRawOutputBody } from "./raw-output";
+import { appendLatestRawOutputEntry, prepareRawOutputBody, upsertLatestRawOutputSession } from "./raw-output";
 import { formatBeijingDateTimeInput } from "../utils/night-execution-schedule";
 import { blobSha256Hex } from "../utils/sha256";
 import {
@@ -233,6 +233,7 @@ import {
   notifyOnAttention,
   OPENCODE_HEALTH_REFETCH_INTERVAL_MS,
   PUBLIC_CONFIG_GATE_REFETCH_INTERVAL_MS,
+  SESSION_HISTORY_PAGE_SIZE,
   OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS,
   OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS,
   opencodeAvailabilityFromHealth,
@@ -319,7 +320,6 @@ const SELECTED_PROVIDER_STORAGE_KEY = "ta_selected_provider";
 const SELECTED_MODEL_STORAGE_KEY = "ta_selected_model";
 const RUNTIME_STATE_RECOVERY_STABLE_MS = 5_000;
 const RAW_OUTPUT_BODY_LIMIT = 200_000;
-const SESSION_HISTORY_PAGE_SIZE = 30;
 
 type RawOutputKind = "request" | "response" | "sse";
 
@@ -1377,6 +1377,7 @@ watch(
       // context 与认证用户绑定，切换登录态必须丢弃页面内存缓存。
       invalidateConversationInteraction();
       conversationRunContexts.clear();
+      resetRawOutputCache();
       runtimeStateOutages.reset();
       routeLinuxServerId.value = "";
       routeLinuxServerResolved.value = false;
@@ -2173,10 +2174,10 @@ function appendRawOutputEntry(sessionId: string, entry: RawOutputEntry) {
     body: preparedBody.body,
     truncated: preparedBody.truncated
   };
-  rawEntriesBySessionId.value = {
-    ...rawEntriesBySessionId.value,
-    [sessionId]: appendLatestRawOutputEntry(current, preparedEntry)
-  };
+  updateRawOutputSession(
+    sessionId,
+    appendLatestRawOutputEntry(current, preparedEntry)
+  );
 }
 
 function clearCurrentRawOutput() {
@@ -2184,10 +2185,34 @@ function clearCurrentRawOutput() {
   if (!sessionId) {
     return;
   }
-  rawEntriesBySessionId.value = {
-    ...rawEntriesBySessionId.value,
-    [sessionId]: []
-  };
+  updateRawOutputSession(sessionId, []);
+}
+
+/** 更新会话级原始输出并同步淘汰已离开最近 20 个会话窗口的 Run 映射。 */
+function updateRawOutputSession(sessionId: string, entries: RawOutputEntry[]) {
+  const update = upsertLatestRawOutputSession(rawEntriesBySessionId.value, sessionId, entries);
+  rawEntriesBySessionId.value = update.entriesBySessionId;
+  if (update.evictedSessionIds.length === 0) {
+    return;
+  }
+  const evictedSessionIds = new Set(update.evictedSessionIds);
+  rawRunSessionMap.value = Object.fromEntries(
+    Object.entries(rawRunSessionMap.value).filter(([, mappedSessionId]) => !evictedSessionIds.has(mappedSessionId))
+  );
+}
+
+function removeRawOutputSession(sessionId: string) {
+  rawEntriesBySessionId.value = Object.fromEntries(
+    Object.entries(rawEntriesBySessionId.value).filter(([candidate]) => candidate !== sessionId)
+  );
+  rawRunSessionMap.value = Object.fromEntries(
+    Object.entries(rawRunSessionMap.value).filter(([, mappedSessionId]) => mappedSessionId !== sessionId)
+  );
+}
+
+function resetRawOutputCache() {
+  rawEntriesBySessionId.value = {};
+  rawRunSessionMap.value = {};
 }
 
 function rememberRunSession(value: Run | null | undefined) {
@@ -3692,6 +3717,7 @@ const deleteSessionMutation = useMutation({
   mutationFn: async (sessionId: string) => api.deleteSession(sessionId),
   onSuccess: (deleted) => {
     conversationRunContexts.invalidate(deleted.sessionId);
+    removeRawOutputSession(deleted.sessionId);
     if (session.value?.sessionId === deleted.sessionId) {
       pendingSessionTitleRunId.value = null;
       session.value = null;

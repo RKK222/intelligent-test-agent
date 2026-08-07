@@ -8,6 +8,7 @@ import {
   PUBLIC_CONFIG_GATE_REFETCH_INTERVAL_MS,
   OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS,
   OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS,
+  SESSION_HISTORY_PAGE_SIZE,
   opencodeAvailabilityFromHealth,
   opencodeAvailabilityFromProcess,
   opencodeHealthRequestFromProcess,
@@ -820,6 +821,12 @@ describe("opencode readiness helpers", () => {
         message: "HTTP 503"
       })
     ).toEqual({ ready: false, source: "health" });
+  });
+});
+
+describe("session history pagination", () => {
+  it("loads conversation history in progressive pages of 20", () => {
+    expect(SESSION_HISTORY_PAGE_SIZE).toBe(20);
   });
 });
 

@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   appendLatestRawOutputEntry,
   prepareRawOutputBody,
-  sortRawOutputEntriesNewestFirst
+  sortRawOutputEntriesNewestFirst,
+  upsertLatestRawOutputSession
 } from "../src/components/raw-output";
 
 describe("raw output boundary", () => {
@@ -15,6 +16,26 @@ describe("raw output boundary", () => {
     expect(result[0]).toBe(1);
     expect(result.at(-1)).toBe(2_000);
     expect(current).toEqual(Array.from({ length: 2_000 }, (_, index) => index));
+  });
+
+  it("keeps raw output for only the latest 20 conversations and refreshes recency", () => {
+    const current = Object.fromEntries(
+      Array.from({ length: 20 }, (_, index) => [`ses_${index + 1}`, [index + 1]])
+    );
+
+    const appended = upsertLatestRawOutputSession(current, "ses_21", [21]);
+
+    expect(Object.keys(appended.entriesBySessionId)).toHaveLength(20);
+    expect(appended.evictedSessionIds).toEqual(["ses_1"]);
+    expect(appended.entriesBySessionId.ses_1).toBeUndefined();
+    expect(appended.entriesBySessionId.ses_21).toEqual([21]);
+    expect(current.ses_1).toEqual([1]);
+
+    const refreshed = upsertLatestRawOutputSession(appended.entriesBySessionId, "ses_2", [200]);
+
+    expect(refreshed.evictedSessionIds).toEqual([]);
+    expect(Object.keys(refreshed.entriesBySessionId).at(-1)).toBe("ses_2");
+    expect(refreshed.entriesBySessionId.ses_2).toEqual([200]);
   });
 
   it("sorts raw-output entries by occurred time descending without mutating the cache", () => {

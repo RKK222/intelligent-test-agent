@@ -13,7 +13,7 @@ type FakeModel = {
   setValue: ReturnType<typeof vi.fn>;
   applyEdits: ReturnType<typeof vi.fn>;
   getValueInRange: () => string;
-  dispose: () => void;
+  dispose: ReturnType<typeof vi.fn>;
 };
 
 const models = new Map<string, FakeModel>();
@@ -24,7 +24,7 @@ let monacoLoadCalls = 0;
 vi.mock("../src/monaco-env", () => {
   const uri = (path: string): FakeUri => ({ path, toString: () => `file://${path}` });
   const fakeEditor = {
-    setModel: (next: FakeModel) => {
+    setModel: (next: FakeModel | null) => {
       activeModel = next;
     },
     layout: vi.fn(),
@@ -78,7 +78,11 @@ vi.mock("../src/monaco-env", () => {
             model.value += edits.map((edit) => edit.text).join("");
           }),
           getValueInRange: () => "",
-          dispose: () => {}
+          dispose: vi.fn(() => {
+            if (models.get(modelUri.path) === model) {
+              models.delete(modelUri.path);
+            }
+          })
         };
         models.set(modelUri.path, model);
         return model;
@@ -119,6 +123,7 @@ vi.mock("@vue-flow/core", () => ({
 }));
 
 import CodeEditor from "../src/CodeEditor.vue";
+import { releaseCodeEditorModel, retainCodeEditorModel } from "../src/model-lifecycle";
 
 describe("CodeEditor Monaco 模型隔离", () => {
   it("路径和内容同 tick 切换时不把新内容写入旧路径模型", async () => {
@@ -136,6 +141,8 @@ describe("CodeEditor Monaco 模型隔离", () => {
     expect(models.get("docs/b.md")?.getValue()).toBe("B");
     expect(oldModel.getValue()).toBe("A");
     expect(oldModel.setValue).not.toHaveBeenCalledWith("B");
+    expect(oldModel.dispose).toHaveBeenCalledTimes(1);
+    expect(models.has("docs/a.md")).toBe(false);
   });
 
   it("Agent 编码路径同 tick 切换时保持各自模型内容", async () => {
@@ -156,6 +163,8 @@ describe("CodeEditor Monaco 模型隔离", () => {
     expect(models.get(workspacePath)?.getValue()).toBe("workspace Agent");
     expect(publicModel.getValue()).toBe("public Agent");
     expect(publicModel.setValue).not.toHaveBeenCalledWith("workspace Agent");
+    expect(publicModel.dispose).toHaveBeenCalledTimes(1);
+    expect(models.has(publicPath)).toBe(false);
   });
 
   it("Monaco 异步初始化期间快速切换 Agent 文件只挂载最新路径", async () => {
@@ -224,5 +233,44 @@ describe("CodeEditor Monaco 模型隔离", () => {
     await waitFor(() => expect(model.getValue()).toBe("new first preview chunk"));
     expect(model.setValue).toHaveBeenCalledWith("new first preview chunk");
     expect(model.applyEdits).not.toHaveBeenCalled();
+  });
+
+  it("清空路径和卸载组件时释放当前 Monaco 模型", async () => {
+    models.clear();
+    activeModel = null;
+    monacoLoadGate = Promise.resolve();
+    const { rerender, unmount } = render(CodeEditor, {
+      props: { path: "docs/temporary.md", content: "temporary", dirty: false }
+    });
+    await waitFor(() => expect(models.get("docs/temporary.md")).toBeTruthy());
+    const clearedModel = models.get("docs/temporary.md")!;
+
+    await rerender({ path: undefined, content: "", dirty: false });
+
+    await waitFor(() => expect(clearedModel.dispose).toHaveBeenCalledTimes(1));
+    expect(models.has("docs/temporary.md")).toBe(false);
+
+    await rerender({ path: "docs/unmount.md", content: "unmount", dirty: false });
+    await waitFor(() => expect(models.get("docs/unmount.md")).toBeTruthy());
+    const unmountedModel = models.get("docs/unmount.md")!;
+
+    unmount();
+
+    expect(unmountedModel.dispose).toHaveBeenCalledTimes(1);
+    expect(models.has("docs/unmount.md")).toBe(false);
+  });
+
+  it("多个编辑器共享同一路径时只在最后一个引用释放后销毁模型", () => {
+    const sharedModel = { dispose: vi.fn() };
+
+    retainCodeEditorModel(sharedModel);
+    retainCodeEditorModel(sharedModel);
+    releaseCodeEditorModel(sharedModel);
+
+    expect(sharedModel.dispose).not.toHaveBeenCalled();
+
+    releaseCodeEditorModel(sharedModel);
+
+    expect(sharedModel.dispose).toHaveBeenCalledTimes(1);
   });
 });

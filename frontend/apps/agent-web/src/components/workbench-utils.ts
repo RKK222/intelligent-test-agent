@@ -356,6 +356,8 @@ export function assistantSummaryMessageId(payload: Record<string, unknown>): str
 
 export const OPENCODE_HEALTH_REFETCH_INTERVAL_MS = 10_000;
 export const PUBLIC_CONFIG_GATE_REFETCH_INTERVAL_MS = 5_000;
+/** 会话列表按固定小页渐进加载，避免首次进入工作台就保留过多历史记录。 */
+export const SESSION_HISTORY_PAGE_SIZE = 20;
 
 /** 轻量消息闸门查询的固定轮询间隔。 */
 export function publicConfigGateRefetchInterval(
