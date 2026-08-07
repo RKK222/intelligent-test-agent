@@ -3397,8 +3397,8 @@ opencode 公共配置样例（企业单后端部署可直接使用 `deploy/inter
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "enterprise-qwen/Qwen3.6-27B",
-  "small_model": "enterprise-qwen/Qwen3.6-27B",
+  "model": "enterprise-deepseek/DeepSeek-V4-Flash-W8A8",
+  "small_model": "enterprise-deepseek/DeepSeek-V4-Flash-W8A8",
   "enabled_providers": ["enterprise-qwen", "enterprise-deepseek"],
   "provider": {
     "enterprise-qwen": {
@@ -3411,7 +3411,7 @@ opencode 公共配置样例（企业单后端部署可直接使用 `deploy/inter
         "baseURL": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
         "includeUsage": false,
         "timeout": false,
-        "headerTimeout": 30000,
+        "headerTimeout": 150000,
         "chunkTimeout": 120000,
         "headers": {
           "X-Enterprise-Model-Provider": "qwen-prod",
@@ -3426,7 +3426,7 @@ opencode 公共配置样例（企业单后端部署可直接使用 `deploy/inter
           "tool_call": true,
           "temperature": true,
           "interleaved": { "field": "reasoning_content" },
-          "limit": { "context": 131072, "output": 8192 }
+          "limit": { "context": 200000, "output": 8192 }
         }
       }
     },
@@ -3455,15 +3455,28 @@ opencode 公共配置样例（企业单后端部署可直接使用 `deploy/inter
           "tool_call": true,
           "temperature": true,
           "interleaved": { "field": "reasoning_content" },
-          "limit": { "context": 65536, "output": 8192 }
+          "limit": { "context": 262144, "output": 8192 }
         }
       }
+    }
+  },
+  "mcp": {
+    "code_analysis": {
+      "type": "local",
+      "command": ["/data/testagent/programs/codex/bin/test-agent-codex-mcp"],
+      "environment": {
+        "TEST_AGENT_CODEX_PROVIDER_ID": "deepseek-prod",
+        "TEST_AGENT_CODEX_MODEL": "DeepSeek-V4-Flash-W8A8",
+        "TEST_AGENT_CODEX_CONTEXT_WINDOW": "262144"
+      },
+      "enabled": true,
+      "timeout": 600000
     }
   }
 }
 ```
 
-`provider` 下的 `enterprise-qwen` / `enterprise-deepseek` 是 opencode 原生 provider key，决定前端模型标识；`X-Enterprise-Model-Provider` 的 `qwen-prod` / `deepseek-prod` 是 Java 内部代理路由键，必须与数据库 `internal_model_providers.provider_id` 完全一致。`includeUsage=false` 用于避免 opencode 1.18.4 默认向不支持 `stream_options.include_usage` 的企业内部接口追加该参数。上游 Token 只保存在 `internal_model_tokens.token_value` 并由 `internal_model_providers.token_id` 关联，不得写入 opencode 配置、`backend.env` 或 `docker.env`；旧 `internal_model_proxy_settings` 只为滚动升级兼容保留。
+`provider` 下的 `enterprise-qwen` / `enterprise-deepseek` 是 opencode 原生 provider key，决定前端模型标识；`X-Enterprise-Model-Provider` 的 `qwen-prod` / `deepseek-prod` 是 Java 内部代理路由键，必须与数据库 `internal_model_providers.provider_id` 完全一致。默认模型和小模型均为 DeepSeek，Qwen/DeepSeek 上下文分别为 `200000`/`262144`；`code_analysis` 使用 Java 路由键 `deepseek-prod`，其上下文必须与 DeepSeek 的 `262144` 一致。`includeUsage=false` 用于避免 opencode 1.18.4 默认向不支持 `stream_options.include_usage` 的企业内部接口追加该参数。上游 Token 只保存在 `internal_model_tokens.token_value` 并由 `internal_model_providers.token_id` 关联，不得写入 opencode 配置、`backend.env` 或 `docker.env`；旧 `internal_model_proxy_settings` 只为滚动升级兼容保留。全局 models.dev 元数据使用随包 `deploy/internal/opencode-models.json`，不得把其中的元数据职责与公共 JSONC 的代理、鉴权职责混合。
 
 Session 运行态接口：
 

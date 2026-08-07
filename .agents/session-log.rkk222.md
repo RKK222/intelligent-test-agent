@@ -6979,3 +6979,40 @@
 - 夜间任务在页面外结束后，白天收到最新运行态即可自动收敛真实终态并继续追问；瞬时详情查询失败不会永久锁住。
 - 仅修改前端状态恢复、测试和稳定 README；未变更 HTTP/RunEvent 契约、数据库、后端、安全、环境配置、
   generated SDK 或 OpenCode 上游源码。
+
+## 2026-08-07 - 固化企业 OpenCode 模型目录并增加失败关闭校验
+
+### Why
+
+- 企业现场把只有 Provider/Model 名称和发布日期的 JSON 作为 `OPENCODE_MODELS_PATH` 后，OpenCode 1.18.4
+  models.dev 插件直接读取缺失的 `limit`，导致用户实例 `/config`、`/vcs/status` 等接口持续 502；删除宿主文件
+  不能改变运行容器已有的只读挂载和子进程缓存。
+- 现场公共 `opencode.jsonc` 已把默认/小模型调整为 DeepSeek，Qwen/DeepSeek 上下文分别为
+  `200000`/`262144`，但仓库样例和模型目录尚未形成同一可持续交付基线。
+
+### What
+
+- 新增随包 `deploy/internal/opencode-models.json`，固定两个企业 Provider 的 OpenCode 1.18.4 必填元数据；更新
+  公共 `opencode.jsonc.example` 的默认模型、上下文、Qwen 首包超时，并直接纳入 `code_analysis` MCP。
+- 从 worker 入口原有根对象检查提取共享 `validate-opencode-models.sh`：宿主重建脚本在删除当前容器前校验，
+  镜像入口在 manager 启动前复验；Mac 打包额外检查公共 JSONC 与目录的模型、能力、上下文及 MCP 一致性。
+  `opencode-worker-docker.sh validate-models` 提供只读现场入口，宿主没有 `jq` 时复用待启动镜像内校验器，
+  不删除或重启当前 worker。
+- 同步单/多后台执行单、企业 README、HTTP 样例、OpenCode 1.18.4 和 Codex MCP 部署文档；明确目录不含 token、
+  UCID 或代理密钥，公共 JSONC 与全局元数据仍是两层独立输入。
+
+### How
+
+- `tools/verify-dev-scripts.sh` 覆盖缺能力/`limit` 的旧目录拒绝、Docker 调用前失败、无 `jq` 宿主只读校验和
+  公共配置上下文漂移；Shell 语法、JSON 解析、`git diff --check` 与组件指纹计划通过。
+- 使用本机 OpenCode 1.18.4 隔离启动，`/config`、`/provider` 均返回 200，并确认默认 DeepSeek、Qwen
+  `200000`、DeepSeek/MCP `262144`；未向企业模型代理发送真实推理请求。
+- 实际重建 `linux/amd64` worker 镜像（未导出新企业包），镜像内校验器可执行、固定目录通过且 OpenCode
+  输出 `1.18.4`；Apple Silicon 不替代企业 Linux 原生 Codex sandbox 验收。
+
+### Result
+
+- 后续企业包以仓库内同一对公共 JSONC/模型目录为事实源，结构不完整或两份上下文漂移会在替换 worker 或 Mac
+  打包前失败，不再把仍可工作的当前容器先删除。
+- 本次不变更平台 HTTP 路径/响应、RunEvent、Java、前端、数据库/Flyway、鉴权、generated SDK、OpenCode
+  上游源码或 `.env*`；尚未重新生成内外层企业交付 ZIP，真实企业代理推理和两台 Linux 节点部署留待下次打包验收。

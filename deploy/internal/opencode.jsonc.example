@@ -1,7 +1,7 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "enterprise-qwen/Qwen3.6-27B",
-  "small_model": "enterprise-qwen/Qwen3.6-27B",
+  "model": "enterprise-deepseek/DeepSeek-V4-Flash-W8A8",
+  "small_model": "enterprise-deepseek/DeepSeek-V4-Flash-W8A8",
   "enabled_providers": ["enterprise-qwen", "enterprise-deepseek"],
   "provider": {
     "enterprise-qwen": {
@@ -18,7 +18,7 @@
         "apiKey": "{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}",
         "includeUsage": false,
         "timeout": false,
-        "headerTimeout": 30000,
+        "headerTimeout": 150000,
         "chunkTimeout": 120000,
         "headers": {
           "X-Enterprise-Model-Provider": "qwen-prod",
@@ -34,7 +34,7 @@
           "tool_call": true,
           "temperature": true,
           "limit": {
-            "context": 131072,
+            "context": 200000,
             "output": 8192
           }
         }
@@ -70,11 +70,26 @@
           "tool_call": true,
           "temperature": true,
           "limit": {
-            "context": 65536,
+            "context": 262144,
             "output": 8192
           }
         }
       }
+    }
+  },
+  "mcp": {
+    "code_analysis": {
+      "type": "local",
+      "command": [
+        "/data/testagent/programs/codex/bin/test-agent-codex-mcp"
+      ],
+      "environment": {
+        "TEST_AGENT_CODEX_PROVIDER_ID": "deepseek-prod",
+        "TEST_AGENT_CODEX_MODEL": "DeepSeek-V4-Flash-W8A8",
+        "TEST_AGENT_CODEX_CONTEXT_WINDOW": "262144"
+      },
+      "enabled": true,
+      "timeout": 600000
     }
   }
 }

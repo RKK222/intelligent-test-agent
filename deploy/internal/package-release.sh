@@ -584,6 +584,7 @@ plan_release_components() {
     deploy/internal/opencode-worker.Dockerfile \
     deploy/internal/opencode-worker.Dockerfile.dockerignore \
     deploy/internal/opencode-worker-entrypoint.sh \
+    deploy/internal/validate-opencode-models.sh \
     deploy/internal/opencode-node-runtime.package.json \
     deploy/internal/opencode-node-runtime.package-lock.json \
     deploy/internal/opencode-official-launcher.mjs \
@@ -1384,6 +1385,9 @@ if [[ "${PACKAGE_LOBEHUB}" -eq 1 \
 fi
 
 mkdir -p "${OUTPUT_DIR}"
+bash "${SCRIPT_DIR}/validate-opencode-models.sh" \
+  "${SCRIPT_DIR}/opencode-models.json" \
+  "${SCRIPT_DIR}/opencode.jsonc.example"
 if [[ -z "${COMPONENT_STATE_FILE}" ]]; then
   COMPONENT_STATE_FILE="${OUTPUT_DIR}/.release-component-state.env"
 fi

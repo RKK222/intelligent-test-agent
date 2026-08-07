@@ -4,10 +4,11 @@ set -euo pipefail
 ENV_FILE="/data/testagent/config/docker.env"
 ACTION="start"
 CONTAINER_NAME="test-agent-opencode-worker"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
   cat <<'USAGE'
-Usage: deploy/internal/opencode-worker-docker.sh [options] [start|restart|stop|status|logs]
+Usage: deploy/internal/opencode-worker-docker.sh [options] [start|restart|stop|status|logs|validate-models]
 
 Manage the enterprise opencode-worker container with plain docker commands.
 
@@ -28,7 +29,7 @@ while [[ $# -gt 0 ]]; do
       CONTAINER_NAME="$2"
       shift 2
       ;;
-    start|restart|stop|status|logs)
+    start|restart|stop|status|logs|validate-models)
       ACTION="$1"
       shift
       ;;
@@ -123,9 +124,48 @@ stop_container() {
   docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 }
 
+validate_models_catalog() {
+  local models_catalog_file="$1"
+  if command -v jq >/dev/null 2>&1; then
+    bash "${SCRIPT_DIR}/validate-opencode-models.sh" "${models_catalog_file}"
+    return
+  fi
+  # 老企业宿主机不强制预装 jq；缺少时先用待启动镜像内的同一校验器做一次性只读预检。
+  docker run --rm \
+    --entrypoint /usr/local/bin/validate-opencode-models \
+    -v "${models_catalog_file}:/tmp/opencode-models.json:ro" \
+    "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" \
+    /tmp/opencode-models.json
+}
+
+resolve_models_catalog_file() {
+  local models_catalog_file="${TEST_AGENT_OPENCODE_MODELS_FILE:-}"
+  if [[ -z "${models_catalog_file}" \
+    && -f "/data/testagent/config/opencode-models.json" ]]; then
+    models_catalog_file="/data/testagent/config/opencode-models.json"
+  fi
+  if [[ -z "${models_catalog_file}" ]]; then
+    echo "OpenCode models catalog is not configured" >&2
+    exit 1
+  fi
+  if [[ "${models_catalog_file}" != /* || "${models_catalog_file}" == *:* ]]; then
+    echo "TEST_AGENT_OPENCODE_MODELS_FILE must be an absolute path without colon" >&2
+    exit 1
+  fi
+  if [[ ! -f "${models_catalog_file}" || ! -r "${models_catalog_file}" ]]; then
+    echo "OpenCode models catalog is not a readable regular file: ${models_catalog_file}" >&2
+    exit 1
+  fi
+  if [[ ! -f "${SCRIPT_DIR}/validate-opencode-models.sh" ]]; then
+    echo "OpenCode models catalog validator not found: ${SCRIPT_DIR}/validate-opencode-models.sh" >&2
+    exit 1
+  fi
+  printf '%s\n' "${models_catalog_file}"
+}
+
 start_container() {
   local -a python_library_args=() models_catalog_args=()
-  local models_catalog_file="${TEST_AGENT_OPENCODE_MODELS_FILE:-}"
+  local models_catalog_file=""
   require_value TEST_AGENT_OPENCODE_MANAGER_TOKEN
   require_value TEST_AGENT_DATA_ROOT
   require_value TEST_AGENT_PROGRAM_ROOT
@@ -145,19 +185,11 @@ start_container() {
 
   # models.dev 元数据不属于用户 HOME 或公共 Agent Git。两台后台通过同一宿主机配置路径
   # 只读挂载，manager 启动的全部 OpenCode 子进程继承 OPENCODE_MODELS_PATH 后统一生效。
-  if [[ -z "${models_catalog_file}" \
-    && -f "/data/testagent/config/opencode-models.json" ]]; then
-    models_catalog_file="/data/testagent/config/opencode-models.json"
-  fi
-  if [[ -n "${models_catalog_file}" ]]; then
-    if [[ "${models_catalog_file}" != /* || "${models_catalog_file}" == *:* ]]; then
-      echo "TEST_AGENT_OPENCODE_MODELS_FILE must be an absolute path without colon" >&2
-      exit 1
-    fi
-    if [[ ! -f "${models_catalog_file}" || ! -r "${models_catalog_file}" ]]; then
-      echo "OpenCode models catalog is not a readable regular file: ${models_catalog_file}" >&2
-      exit 1
-    fi
+  if [[ -n "${TEST_AGENT_OPENCODE_MODELS_FILE:-}" \
+    || -f "/data/testagent/config/opencode-models.json" ]]; then
+    models_catalog_file="$(resolve_models_catalog_file)"
+    # 在删除现有容器前使用与镜像入口相同的校验器，避免错误目录把仍可工作的 worker 一并替换掉。
+    validate_models_catalog "${models_catalog_file}"
     models_catalog_args=(
       -e "OPENCODE_MODELS_PATH=/etc/test-agent/opencode-models.json"
       -v "${models_catalog_file}:/etc/test-agent/opencode-models.json:ro"
@@ -226,5 +258,10 @@ case "${ACTION}" in
     ;;
   logs)
     docker logs --tail 200 -f "${CONTAINER_NAME}"
+    ;;
+  validate-models)
+    models_catalog_file="$(resolve_models_catalog_file)"
+    validate_models_catalog "${models_catalog_file}"
+    printf 'OpenCode models catalog validation passed: %s\n' "${models_catalog_file}"
     ;;
 esac

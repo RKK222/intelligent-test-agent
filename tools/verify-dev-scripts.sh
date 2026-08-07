@@ -352,7 +352,7 @@ worker_models_file="${tmp_dir}/opencode-models.json"
 worker_docker_calls="${tmp_dir}/worker-docker.calls"
 mkdir -p "${worker_python_libs_root}/site-packages"
 printf 'PYTHON_VERSION=3.13.14\n' >"${worker_python_libs_root}/VERSION"
-printf '{"enterprise-test":{"name":"Enterprise Test","models":{}}}\n' >"${worker_models_file}"
+cp "${ROOT_DIR}/deploy/internal/opencode-models.json" "${worker_models_file}"
 cat >"${worker_env}" <<EOF
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=test-token
 TEST_AGENT_DATA_ROOT=${worker_data_root}
@@ -420,6 +420,67 @@ fi
 if [[ " ${worker_docker_run} " != *" -v ${worker_models_file}:/etc/test-agent/opencode-models.json:ro "* ]]; then
   cat "${worker_docker_calls}" >&2
   fail "worker docker script should mount the global OpenCode models catalog read-only"
+fi
+
+# 企业宿主不要求安装 jq；显式只读校验动作必须复用镜像内校验器，且不能删除当前 worker。
+: >"${worker_docker_calls}"
+PATH="${tmp_dir}/bin:/usr/bin:/bin" \
+  TEST_AGENT_OPENCODE_MODELS_FILE="${worker_models_file}" \
+  bash "${ROOT_DIR}/deploy/internal/opencode-worker-docker.sh" \
+  --env-file "${worker_env}" \
+  --name test-agent-opencode-worker-verify \
+  validate-models >/dev/null
+worker_validate_call="$(grep '^run ' "${worker_docker_calls}")"
+if [[ " ${worker_validate_call} " != *" --entrypoint /usr/local/bin/validate-opencode-models "* ]]; then
+  cat "${worker_docker_calls}" >&2
+  fail "worker docker script should validate the models catalog through the image when jq is unavailable"
+fi
+if grep -Eq '(^| )rm -f( |$)' "${worker_docker_calls}"; then
+  cat "${worker_docker_calls}" >&2
+  fail "worker models validation should not remove the current container"
+fi
+
+# 旧现场文件虽然是 JSON 对象，但缺少 models.dev 必填的 limit/capability 字段；必须在 docker rm 前拒绝。
+invalid_worker_models_file="${tmp_dir}/invalid-opencode-models.json"
+printf '%s\n' '{"enterprise-test":{"id":"enterprise-test","name":"Enterprise Test","env":[],"models":{"test":{"id":"test","name":"Test","release_date":"2026-08-07"}}}}' >"${invalid_worker_models_file}"
+if bash "${ROOT_DIR}/deploy/internal/validate-opencode-models.sh" \
+  "${invalid_worker_models_file}" >/dev/null 2>&1; then
+  fail "OpenCode models validator should reject a catalog without required capability and limit fields"
+fi
+invalid_worker_env="${tmp_dir}/invalid-worker.env"
+sed "s|^TEST_AGENT_OPENCODE_MODELS_FILE=.*$|TEST_AGENT_OPENCODE_MODELS_FILE=${invalid_worker_models_file}|" \
+  "${worker_env}" >"${invalid_worker_env}"
+: >"${worker_docker_calls}"
+set +e
+invalid_worker_output="$(
+  PATH="${tmp_dir}/bin:${PATH}" bash "${ROOT_DIR}/deploy/internal/opencode-worker-docker.sh" \
+    --env-file "${invalid_worker_env}" \
+    --name test-agent-opencode-worker-verify \
+    restart 2>&1
+)"
+invalid_worker_status=$?
+set -e
+if [[ "${invalid_worker_status}" -eq 0 ]]; then
+  fail "worker docker script should reject an invalid OpenCode models catalog"
+fi
+if [[ -s "${worker_docker_calls}" ]]; then
+  cat "${worker_docker_calls}" >&2
+  fail "worker docker script should validate the models catalog before calling docker"
+fi
+if [[ "${invalid_worker_output}" != *"incompatible with the required OpenCode 1.18.4 models.dev structure"* ]]; then
+  printf '%s\n' "${invalid_worker_output}" >&2
+  fail "worker docker script should report the incompatible OpenCode models catalog"
+fi
+bash "${ROOT_DIR}/deploy/internal/validate-opencode-models.sh" \
+  "${ROOT_DIR}/deploy/internal/opencode-models.json" \
+  "${ROOT_DIR}/deploy/internal/opencode.jsonc.example"
+drifted_public_config="${tmp_dir}/drifted-opencode.jsonc"
+jq '.provider["enterprise-deepseek"].models["DeepSeek-V4-Flash-W8A8"].limit.context = 65536' \
+  "${ROOT_DIR}/deploy/internal/opencode.jsonc.example" >"${drifted_public_config}"
+if bash "${ROOT_DIR}/deploy/internal/validate-opencode-models.sh" \
+  "${ROOT_DIR}/deploy/internal/opencode-models.json" \
+  "${drifted_public_config}" >/dev/null 2>&1; then
+  fail "OpenCode models validator should reject public config and catalog context drift"
 fi
 
 # Docker 18.09 的千端口池必须在删除现有容器前拒绝默认 userland proxy；

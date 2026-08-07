@@ -6,6 +6,7 @@ EXTERNAL_MANAGER="${EXTERNAL_PROGRAM_ROOT}/bin/opencode-manager"
 EXTERNAL_OPENCODE="${EXTERNAL_PROGRAM_ROOT}/opencode/bin/opencode"
 BUILTIN_MANAGER="/usr/local/bin/opencode-manager"
 BUILTIN_OPENCODE="/usr/local/bin/opencode"
+MODELS_VALIDATOR="/usr/local/bin/validate-opencode-models"
 
 manager_bin="${BUILTIN_MANAGER}"
 if [[ -x "${EXTERNAL_MANAGER}" ]]; then
@@ -25,16 +26,13 @@ if [[ $# -eq 0 ]]; then
 fi
 
 # OpenCode 对显式 OPENCODE_MODELS_PATH 的解析失败会回退内置目录。企业全局目录要求失败关闭，
-# 避免文件损坏后界面静默显示另一套模型，因此在 manager 拉起任何用户进程前校验 JSON 根对象。
+# 避免字段缺失使用户 OpenCode 的 /config 等接口整体失败，因此在 manager 拉起前校验完整必填结构。
 if [[ -n "${OPENCODE_MODELS_PATH:-}" ]]; then
-  if [[ ! -f "${OPENCODE_MODELS_PATH}" || ! -r "${OPENCODE_MODELS_PATH}" ]]; then
-    echo "OpenCode models catalog is not a readable regular file: ${OPENCODE_MODELS_PATH}" >&2
+  if [[ ! -x "${MODELS_VALIDATOR}" ]]; then
+    echo "OpenCode models catalog validator is not executable: ${MODELS_VALIDATOR}" >&2
     exit 64
   fi
-  if ! jq -e 'type == "object"' "${OPENCODE_MODELS_PATH}" >/dev/null; then
-    echo "OpenCode models catalog must be a JSON object: ${OPENCODE_MODELS_PATH}" >&2
-    exit 64
-  fi
+  "${MODELS_VALIDATOR}" "${OPENCODE_MODELS_PATH}"
   printf 'event=opencode_models_catalog_validated sha256=%s\n' \
     "$(sha256sum "${OPENCODE_MODELS_PATH}" | awk '{print $1}')"
 fi

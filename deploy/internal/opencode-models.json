@@ -1,0 +1,58 @@
+{
+  "enterprise-qwen": {
+    "id": "enterprise-qwen",
+    "name": "企业通义",
+    "env": [],
+    "npm": "@ai-sdk/openai-compatible",
+    "models": {
+      "Qwen3.6-27B": {
+        "id": "Qwen3.6-27B",
+        "name": "Qwen3.6 27B",
+        "release_date": "2026-08-05",
+        "attachment": false,
+        "reasoning": true,
+        "temperature": true,
+        "tool_call": true,
+        "interleaved": {
+          "field": "reasoning_content"
+        },
+        "limit": {
+          "context": 200000,
+          "output": 8192
+        },
+        "modalities": {
+          "input": ["text"],
+          "output": ["text"]
+        }
+      }
+    }
+  },
+  "enterprise-deepseek": {
+    "id": "enterprise-deepseek",
+    "name": "企业 DeepSeek",
+    "env": [],
+    "npm": "@ai-sdk/openai-compatible",
+    "models": {
+      "DeepSeek-V4-Flash-W8A8": {
+        "id": "DeepSeek-V4-Flash-W8A8",
+        "name": "DeepSeek V4 Flash W8A8",
+        "release_date": "2026-08-06",
+        "attachment": false,
+        "reasoning": true,
+        "temperature": true,
+        "tool_call": true,
+        "interleaved": {
+          "field": "reasoning_content"
+        },
+        "limit": {
+          "context": 262144,
+          "output": 8192
+        },
+        "modalities": {
+          "input": ["text"],
+          "output": ["text"]
+        }
+      }
+    }
+  }
+}

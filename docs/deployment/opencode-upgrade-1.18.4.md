@@ -45,7 +45,7 @@
 - `FilePartInput.source` 在 1.18.4 中仍为可选，但一旦提供，`FileSource` 必须完整包含 `text/type/path` 且不能混入平台字段。平台路径型原生附件因此只发送已校验的 `file://`、mime 和 filename，不发送 source；只有内联正文生成完整 FileSource。非原生工作区附件的 `contextType/deliveryMode` 仅用于平台分流和历史展示，转换为 OpenCode text part 时移除。
 - 1.18.4 的 `GET /session/status` 返回当前 busy/retry session map；session 进入 idle 时上游发布 idle 事件并从 map 删除该 key。平台的交互回复终态补偿据此只把“root key 不存在”视为 idle，空值、非对象、请求异常或 root key 仍存在均失败关闭，不能仅凭某条 assistant `finish=stop` 判定整轮结束。
 - 1.18.4 的旧 Provider 配置 schema 虽接受模型 `release_date`，旧 `/provider` 也会回显该值，但 v1→v2 配置迁移和 `ConfigV2.Model` 不传递发布时间；平台实际使用的 `/api/model` 对这类本地配置模型返回 `time.released=0`。企业前端只能保持该接口的原生目录顺序，不能把 `enabled_providers` 数组或 JSONC `release_date` 解释为展示排序配置。
-- `opencode-models.json` 是 models.dev 兼容的全局模型元数据快照，不是 OpenCode 会按文件名自动发现的公共配置。企业两台后台统一放在宿主机 `/data/testagent/config/opencode-models.json`；worker 将其只读挂载为 `/etc/test-agent/opencode-models.json` 并设置 `OPENCODE_MODELS_PATH`，manager 启动的所有用户 OpenCode 进程继承后生效。该文件只维护 Provider/Model 元数据，不放 token、UCID 或内部代理密钥；实际 provider、`includeUsage=false` 和企业代理路由仍由公共配置 Git 的 `opencode.jsonc` 管理。worker entrypoint 会在启动 manager 前要求文件为 JSON 根对象并记录 SHA-256，损坏时失败关闭，避免 OpenCode 静默回退内置快照。替换文件后必须重启 worker，并确认两台后台文件 SHA 一致；已有用户进程不能只靠刷新浏览器取得新目录。
+- [opencode-models.json](../../deploy/internal/opencode-models.json) 是 models.dev 兼容的全局模型元数据固定快照，不是 OpenCode 会按文件名自动发现的公共配置。当前 Qwen 上下文为 `200000`，DeepSeek 为 `262144`；DeepSeek 同时是公共默认/小模型和 `code_analysis` MCP 模型。企业两台后台统一把随包文件安装到宿主机 `/data/testagent/config/opencode-models.json`；worker 将其只读挂载为 `/etc/test-agent/opencode-models.json` 并设置 `OPENCODE_MODELS_PATH`，manager 启动的所有用户 OpenCode 进程继承后生效。该文件只维护 Provider/Model 元数据，不放 token、UCID 或内部代理密钥；实际 provider、`includeUsage=false` 和企业代理路由仍由公共配置 Git 的 [opencode.jsonc.example](../../deploy/internal/opencode.jsonc.example) 管理。宿主启动脚本在删除当前容器前、worker entrypoint 在启动 manager 前均复用 [validate-opencode-models.sh](../../deploy/internal/validate-opencode-models.sh)，校验 ID 对齐、必填能力、`release_date`、正数 `limit` 和可选模态并记录 SHA-256；缺少 `limit` 等结构错误时失败关闭，避免 `/config`、`/provider` 整体不可用。替换文件后必须重启 worker，并确认两台后台文件 SHA 一致；已有用户进程不能只靠刷新浏览器取得新目录。
 - 本次不修改平台 HTTP API、RunEvent SSE wire shape、数据库结构、Flyway、鉴权和密钥配置。
 
 ## 交付、升级与回滚
@@ -60,6 +60,7 @@
 node --test tools/test-opencode-official-launcher.mjs
 tools/verify-opencode-runtime-gitignore.sh
 tools/verify-opencode-tool-runtime-deploy.sh
+deploy/internal/validate-opencode-models.sh deploy/internal/opencode-models.json
 tools/generate-opencode-java-sdk.sh
 mvn -f backend/pom.xml -pl test-agent-opencode-client,test-agent-opencode-runtime -am test
 corepack pnpm --dir frontend vitest run packages/agent-chat/tests/opencode-like-state.test.ts

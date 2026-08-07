@@ -483,6 +483,27 @@ cd /data/testagent/deploy/internal
 
 ## 7. 公共 OpenCode 和模型配置
 
+先把发布 ZIP 固定携带的全局模型目录安装到后台。它不是公共配置 Git 文件，必须通过 worker 的 `OPENCODE_MODELS_PATH` 继承：
+
+```bash
+cd /data/testagent/deploy/internal
+TEST_AGENT_OPENCODE_MODELS_FILE=/data/testagent/deploy/internal/opencode-models.json \
+  ./opencode-worker-docker.sh \
+  --env-file /data/testagent/config/docker.env validate-models
+install -m 0644 /data/testagent/deploy/internal/opencode-models.json \
+  /data/testagent/config/opencode-models.json
+TEST_AGENT_OPENCODE_MODELS_FILE=/data/testagent/config/opencode-models.json \
+  ./opencode-worker-docker.sh \
+  --env-file /data/testagent/config/docker.env validate-models
+sha256sum /data/testagent/config/opencode-models.json
+
+./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env restart
+docker logs --tail 100 test-agent-opencode-worker | \
+  grep 'event=opencode_models_catalog_validated'
+```
+
+`validate-models` 在宿主机没有 `jq` 时会使用已经导入的 worker 镜像执行同一校验；它只读文件，不删除或重启现有容器。校验失败立即停止。只删除宿主文件或刷新浏览器不会清掉运行容器的旧挂载和用户 OpenCode 进程。
+
 超级管理员进入“系统管理 → 配置管理 → opencode 公共配置管理”，在 `test-agent-backend-122-233-30-114` 初始化或更新公共配置。公共 `opencode.jsonc` 使用 [opencode.jsonc.example](opencode.jsonc.example)，生产模型固定为：
 
 完整配置已经放进交付 ZIP，不需要手工拼 JSONC。在 `.114` 直接导出全文，然后将 `/tmp/opencode.jsonc` 全文粘贴到公共配置编辑器并保存：
@@ -500,6 +521,8 @@ sed -n '1,220p' /tmp/opencode.jsonc
 enterprise-qwen/Qwen3.6-27B
 enterprise-deepseek/DeepSeek-V4-Flash-W8A8
 ```
+
+默认模型和小模型均为 DeepSeek；DeepSeek 上下文为 `262144`，Qwen 上下文为 `200000`。样例已经包含 `code_analysis` MCP，其模型为 `DeepSeek-V4-Flash-W8A8`、Java 路由键为 `deepseek-prod`、上下文为 `262144`。
 
 数据库供应商路由固定为：
 
@@ -519,6 +542,7 @@ deepseek-prod
 
 | 配置层 | 正确内容 | 生效方式 |
 |---|---|---|
+| 本服务器 `/data/testagent/config/opencode-models.json` | 随包固定模型元数据，Qwen `200000`、DeepSeek `262144`，不含密钥 | 重建 worker；只刷新页面或重启 Java 无效 |
 | 本服务器公共 `opencode.jsonc` | `enterprise-qwen/Qwen3.6-27B`、`enterprise-deepseek/DeepSeek-V4-Flash-W8A8`，并包含 `includeUsage=false` | 重启已有用户 OpenCode 进程；新进程直接读取 |
 | 共享数据库内部供应商 | `qwen-prod`、`deepseek-prod` 均启用，`baseUrl=http://ai-code.sdc.icbc:9070/enterprise/jdt/model/api/openai/v1`，全局 token 已配置 | 保存或点击“刷新 Java 内存”；不需要重启用户进程 |
 | 用户进程环境 | Java 启动进程时注入内部代理 key、同节点 Java 代理地址和该用户的 `ENTERPRISE_UCID` | 停止并通过运行管理重新启动用户进程 |

@@ -1,5 +1,5 @@
 {
-  // 合并到公共配置仓库的 opencode/opencode.jsonc。
+  // 仅用于给已有公共配置增量合并；新部署直接使用已含本段的 opencode.jsonc.example。
   "mcp": {
     "code_analysis": {
       "type": "local",

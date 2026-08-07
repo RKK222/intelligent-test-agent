@@ -753,16 +753,21 @@ bash /tmp/deploy-internal-frontend.sh \
 
 ## 8. 公共配置和模型
 
-`opencode-models.json` 与公共 Agent 配置是两层不同输入。它必须使用 models.dev `api.json` 兼容结构，作为全局模型元数据快照分别放到两台后台，不能放到公共 Git 的 `opencode/` 目录，也不能只放 `.2`：
+`opencode-models.json` 与公共 Agent 配置是两层不同输入。发布 ZIP 已固定携带 [opencode-models.json](opencode-models.json)，它使用 models.dev `api.json` 兼容结构，作为全局模型元数据快照分别放到两台后台，不能放到公共 Git 的 `opencode/` 目录，也不能只放 `.2`：
 
 ```bash
-# 在 .4 和 .114 分别执行；源文件路径按现场接收位置替换。
-install -m 0644 /data/0709/opencode-models.json \
+# 在 .4 和 .114 分别执行；使用本次已安装的同一发布 ZIP 内容。
+cd /data/testagent/deploy/internal
+TEST_AGENT_OPENCODE_MODELS_FILE=/data/testagent/deploy/internal/opencode-models.json \
+  ./opencode-worker-docker.sh \
+  --env-file /data/testagent/config/docker.env validate-models
+install -m 0644 /data/testagent/deploy/internal/opencode-models.json \
   /data/testagent/config/opencode-models.json
-jq -e 'type == "object"' /data/testagent/config/opencode-models.json >/dev/null
+TEST_AGENT_OPENCODE_MODELS_FILE=/data/testagent/config/opencode-models.json \
+  ./opencode-worker-docker.sh \
+  --env-file /data/testagent/config/docker.env validate-models
 sha256sum /data/testagent/config/opencode-models.json
 
-cd /data/testagent/deploy/internal
 ./opencode-worker-docker.sh --env-file /data/testagent/config/docker.env restart
 docker logs --tail 100 test-agent-opencode-worker | \
   grep 'event=opencode_models_catalog_validated'
@@ -770,7 +775,7 @@ docker inspect test-agent-opencode-worker --format '{{range .Config.Env}}{{print
   grep '^OPENCODE_MODELS_PATH=/etc/test-agent/opencode-models.json$'
 ```
 
-`.4` 与 `.114` 的 `sha256sum` 必须完全一致。worker 对文件执行只读 bind mount，entrypoint 在 manager 启动前校验 JSON 根对象；校验失败时容器退出，不允许静默回退 OpenCode 内置模型快照。manager 子进程继承该环境，所以重启 worker 后新恢复的全部用户 OpenCode 进程统一读取；仅重启 Java、刷新页面或调用公共配置热加载均不足以替换这份全局快照。文件只允许模型元数据，不得写 provider token、UCID、Authorization 或平台内部代理 key。
+`.4` 与 `.114` 的 `sha256sum` 必须完全一致。`validate-models` 在宿主机没有 `jq` 时会使用已经导入的 worker 镜像执行同一校验；它只读文件，不删除或重启现有容器。worker 对文件执行只读 bind mount；宿主脚本会在删除当前容器前校验 Provider/Model ID、能力布尔值、`release_date`、正数 `limit` 和可选模态，镜像入口在 manager 启动前再次执行同一校验。失败时保留当前 worker 或让新容器失败关闭，不允许缺少 `limit` 的目录进入 OpenCode，也不允许静默回退内置快照。manager 子进程继承该环境，所以重启 worker 后新恢复的全部用户 OpenCode 进程统一读取；仅重启 Java、刷新页面或调用公共配置热加载均不足以替换这份全局快照。文件只允许模型元数据，不得写 provider token、UCID、Authorization 或平台内部代理 key。
 
 超级管理员进入“系统管理 → 配置管理 → opencode 公共配置管理”，分别初始化：
 
@@ -779,7 +784,7 @@ test-agent-backend-122-233-30-4
 test-agent-backend-122-233-30-114
 ```
 
-两个服务器使用同一版本的 [opencode.jsonc.example](opencode.jsonc.example)，模型为：
+两个服务器使用同一版本的 [opencode.jsonc.example](opencode.jsonc.example)：默认模型和小模型均为 `enterprise-deepseek/DeepSeek-V4-Flash-W8A8`，DeepSeek 上下文为 `262144`，Qwen 上下文为 `200000`；完整样例已包含 `code_analysis` MCP，MCP 上下文同样为 `262144`。
 
 在任意一台已收到交付包的后台导出完整 JSONC，分别粘贴到两个 `linuxServerId` 的公共配置编辑器；两个节点内容必须一致：
 

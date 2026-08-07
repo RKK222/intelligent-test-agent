@@ -4,6 +4,7 @@
 !deploy/
 !deploy/internal/
 !deploy/internal/opencode-worker-entrypoint.sh
+!deploy/internal/validate-opencode-models.sh
 !deploy/internal/opencode-official-launcher.mjs
 !deploy/internal/codex-whitebox-mcp-launcher.sh
 !deploy/internal/codex-whitebox-requirements.toml

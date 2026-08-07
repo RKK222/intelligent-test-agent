@@ -59,9 +59,10 @@ workspace，仍由平台现有应用成员、workspace/session 和源码 Runtime
 
 ## 公共 JSONC 与 Agent
 
-按“Java 后端 → programs/worker → 公共配置”的顺序升级。把
-`deploy/internal/codex-whitebox-public.opencode.jsonc.example` 的 `mcp.code_analysis` 合并到
-公共配置仓库 `opencode/opencode.jsonc`。默认企业模型为：
+按“Java 后端 → programs/worker → 公共配置”的顺序升级。当前完整
+`deploy/internal/opencode.jsonc.example` 已包含 `mcp.code_analysis`，新部署直接把完整样例写入
+公共配置仓库 `opencode/opencode.jsonc`；`deploy/internal/codex-whitebox-public.opencode.jsonc.example`
+仅用于给已有公共配置增量合并 MCP 片段。默认企业模型为：
 
 - `TEST_AGENT_CODEX_PROVIDER_ID=deepseek-prod`；
 - `TEST_AGENT_CODEX_MODEL=DeepSeek-V4-Flash-W8A8`；

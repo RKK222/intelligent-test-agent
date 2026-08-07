@@ -395,7 +395,9 @@ RUN set -eux; \
 
 COPY --from=manager-build /out/opencode-manager /usr/local/bin/opencode-manager
 COPY deploy/internal/opencode-worker-entrypoint.sh /usr/local/bin/opencode-worker-entrypoint
-RUN chmod +x /usr/local/bin/opencode-manager /usr/local/bin/opencode-worker-entrypoint
+COPY deploy/internal/validate-opencode-models.sh /usr/local/bin/validate-opencode-models
+RUN chmod +x /usr/local/bin/opencode-manager /usr/local/bin/opencode-worker-entrypoint \
+    /usr/local/bin/validate-opencode-models
 
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ENV SYS_DATA_ROOT_DIR=/data/testagent/data
