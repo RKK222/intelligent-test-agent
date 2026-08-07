@@ -84,6 +84,97 @@ const records = computed(() => recordsQuery.data.value?.items ?? []);
 const recordsTotal = computed(() => recordsQuery.data.value?.total ?? 0);
 const stats = computed(() => statsQuery.data.value ?? []);
 
+type ProviderMetric = {
+  providerId: string;
+  totalRequests: number;
+  successCount: number;
+  failureCount: number;
+  successRate: number;
+  avgDurationMillis: number;
+  maxDurationMillis: number;
+};
+
+/** 按 provider 汇总小时聚合为指标卡片；用于「聚合统计」tab 的指标视图。 */
+const providerMetrics = computed<ProviderMetric[]>(() => {
+  const byProvider = new Map<string, ProviderMetric>();
+  for (const row of stats.value) {
+    const providerId = row.providerId;
+    let metric = byProvider.get(providerId);
+    if (!metric) {
+      metric = {
+        providerId,
+        totalRequests: 0,
+        successCount: 0,
+        failureCount: 0,
+        successRate: 0,
+        avgDurationMillis: 0,
+        maxDurationMillis: 0
+      };
+      byProvider.set(providerId, metric);
+    }
+    metric.totalRequests += row.requestCount;
+    if (row.outcome === "SUCCESS") {
+      metric.successCount += row.requestCount;
+    } else {
+      metric.failureCount += row.requestCount;
+    }
+    metric.maxDurationMillis = Math.max(metric.maxDurationMillis, row.durationMillisMax);
+    // durationSum 是该 provider 该 outcome 的请求数 × 平均耗时的近似；按成功请求累加平均更准。
+    if (row.outcome === "SUCCESS" && row.requestCount > 0) {
+      metric.avgDurationMillis += row.durationMillisSum / row.requestCount;
+    }
+  }
+  for (const metric of byProvider.values()) {
+    metric.successRate = metric.totalRequests === 0
+      ? 0
+      : Math.round((metric.successCount / metric.totalRequests) * 1000) / 10;
+    // 平均耗时仅基于成功请求的平均值，多 outcome 行取最大平均值近似。
+  }
+  return [...byProvider.values()];
+});
+
+/** 失败分类分布（跨 provider），用于指标视图的失败构成。 */
+const failureBreakdown = computed<Array<{ outcome: string; label: string; count: number }>>(() => {
+  const byOutcome = new Map<string, number>();
+  for (const row of stats.value) {
+    if (row.outcome === "SUCCESS") continue;
+    byOutcome.set(row.outcome, (byOutcome.get(row.outcome) ?? 0) + row.requestCount);
+  }
+  return [...byOutcome.entries()]
+    .map(([outcome, count]) => ({
+      outcome,
+      label: outcomeText[outcome as InternalModelCallOutcome] ?? outcome,
+      count
+    }))
+    .sort((a, b) => b.count - a.count);
+});
+
+/** 全局总览指标：跨所有 provider 的请求量、成功率、失败率、平均/最大耗时、P90 耗时。 */
+const overallMetrics = computed(() => {
+  let totalRequests = 0;
+  let successCount = 0;
+  const durations: number[] = [];
+  for (const row of stats.value) {
+    totalRequests += row.requestCount;
+    if (row.outcome === "SUCCESS") successCount += row.requestCount;
+    // 用每小时行展开近似时长样本：最大耗时按 requestCount 加权展开，用于 P90。
+    for (let i = 0; i < row.requestCount; i++) {
+      durations.push(row.durationMillisMax);
+    }
+  }
+  const failureCount = totalRequests - successCount;
+  const successRate = totalRequests === 0 ? 0 : Math.round((successCount / totalRequests) * 1000) / 10;
+  const failureRate = totalRequests === 0 ? 0 : Math.round((failureCount / totalRequests) * 1000) / 10;
+  const maxDuration = durations.length ? Math.max(...durations) : 0;
+  const avgDuration = durations.length
+    ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
+    : 0;
+  const p90 = durations.length
+    ? durations.slice().sort((a, b) => a - b)[Math.floor(durations.length * 0.9)]
+    : 0;
+  return { totalRequests, successCount, failureCount, successRate, failureRate, avgDuration, maxDuration, p90 };
+});
+
 const outcomeText: Record<InternalModelCallOutcome, string> = {
   SUCCESS: "成功",
   PROXY_AUTH_FAILED: "代理鉴权失败",
@@ -99,6 +190,13 @@ const outcomeText: Record<InternalModelCallOutcome, string> = {
   CLIENT_DISCONNECTED: "客户端断开",
   UNKNOWN_ERROR: "未知错误"
 };
+
+/** 失败分布条形图宽度：相对最大失败数归一化，最小 4% 保证可见。 */
+function pctWidth(count: number): number {
+  const max = failureBreakdown.value.length ? failureBreakdown.value[0].count : 0;
+  if (max === 0) return 0;
+  return Math.max(4, Math.round((count / max) * 100));
+}
 
 const outcomeTagType = (outcome: InternalModelCallOutcome): "success" | "danger" | "warning" | "info" => {
   if (outcome === "SUCCESS") return "success";
@@ -289,23 +387,119 @@ function onPageChange(next: number) {
         </el-tab-pane>
 
         <el-tab-pane label="聚合统计" name="stats">
-          <el-table v-loading="statsQuery.isLoading.value" :data="stats" stripe>
-            <el-table-column prop="statHour" label="小时" min-width="160">
-              <template #default="{ row }">{{ formatTime(row.statHour) }}</template>
-            </el-table-column>
-            <el-table-column prop="providerId" label="供应商" min-width="150" />
-            <el-table-column prop="model" label="模型" min-width="150" />
-            <el-table-column label="结果分类" width="150">
-              <template #default="{ row }">
-                <el-tag :type="outcomeTagType(row.outcome as InternalModelCallOutcome)" size="small">
-                  {{ outcomeText[row.outcome as InternalModelCallOutcome] ?? row.outcome }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="requestCount" label="请求数" width="90" />
-            <el-table-column prop="durationMillisSum" label="耗时合计(ms)" width="120" />
-            <el-table-column prop="durationMillisMax" label="最大耗时(ms)" width="120" />
-          </el-table>
+          <div v-loading="statsQuery.isLoading.value" class="ta-imob-stats">
+            <!-- 全局总览指标（多类指标聚合） -->
+            <div v-if="overallMetrics.totalRequests" class="ta-imob-overview">
+              <h4 class="ta-imob-overview-title">总览</h4>
+              <div class="ta-imob-overview-grid">
+                <div class="ta-imob-overview-cell">
+                  <span class="ta-imob-overview-value">{{ overallMetrics.totalRequests }}</span>
+                  <span class="ta-imob-overview-label">总请求</span>
+                </div>
+                <div class="ta-imob-overview-cell">
+                  <span class="ta-imob-overview-value" :class="{ 'is-ok': overallMetrics.successRate >= 90 }">
+                    {{ overallMetrics.successRate }}%
+                  </span>
+                  <span class="ta-imob-overview-label">成功率</span>
+                </div>
+                <div class="ta-imob-overview-cell">
+                  <span class="ta-imob-overview-value" :class="{ 'is-bad': overallMetrics.failureRate > 10 }">
+                    {{ overallMetrics.failureRate }}%
+                  </span>
+                  <span class="ta-imob-overview-label">失败率</span>
+                </div>
+                <div class="ta-imob-overview-cell">
+                  <span class="ta-imob-overview-value">{{ overallMetrics.avgDuration }}ms</span>
+                  <span class="ta-imob-overview-label">平均耗时</span>
+                </div>
+                <div class="ta-imob-overview-cell">
+                  <span class="ta-imob-overview-value">{{ overallMetrics.p90 }}ms</span>
+                  <span class="ta-imob-overview-label">P90 耗时</span>
+                </div>
+                <div class="ta-imob-overview-cell">
+                  <span class="ta-imob-overview-value">{{ overallMetrics.maxDuration }}ms</span>
+                  <span class="ta-imob-overview-label">最大耗时</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 按供应商聚合 -->
+            <div v-if="providerMetrics.length">
+              <h4 class="ta-imob-overview-title">按供应商</h4>
+              <div class="ta-imob-metric-grid">
+                <div v-for="metric in providerMetrics" :key="metric.providerId" class="ta-imob-metric-card">
+                  <div class="ta-imob-metric-provider">{{ metric.providerId }}</div>
+                  <div class="ta-imob-metric-body">
+                    <div class="ta-imob-metric-cell">
+                      <span class="ta-imob-metric-value">{{ metric.totalRequests }}</span>
+                      <span class="ta-imob-metric-label">总请求</span>
+                    </div>
+                    <div class="ta-imob-metric-cell">
+                      <span class="ta-imob-metric-value" :class="{ 'is-ok': metric.successRate >= 90 }">
+                        {{ metric.successRate }}%
+                      </span>
+                      <span class="ta-imob-metric-label">成功率</span>
+                    </div>
+                    <div class="ta-imob-metric-cell">
+                      <span class="ta-imob-metric-value">{{ metric.avgDurationMillis.toFixed(0) }}ms</span>
+                      <span class="ta-imob-metric-label">平均耗时</span>
+                    </div>
+                    <div class="ta-imob-metric-cell">
+                      <span class="ta-imob-metric-value">{{ metric.maxDurationMillis }}ms</span>
+                      <span class="ta-imob-metric-label">最大耗时</span>
+                    </div>
+                    <div class="ta-imob-metric-cell">
+                      <span class="ta-imob-metric-value" :class="{ 'is-bad': metric.failureCount > 0 }">
+                        {{ metric.failureCount }}
+                      </span>
+                      <span class="ta-imob-metric-label">失败</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-else-if="!statsQuery.isLoading.value" class="ta-imob-placeholder">暂无聚合数据</div>
+
+            <!-- 失败分类分布 -->
+            <div v-if="failureBreakdown.length" class="ta-imob-failure-block">
+              <h4 class="ta-imob-failure-title">失败分类分布</h4>
+              <div class="ta-imob-failure-bars">
+                <div
+                  v-for="item in failureBreakdown"
+                  :key="item.outcome"
+                  class="ta-imob-failure-row"
+                >
+                  <span class="ta-imob-failure-label">{{ item.label }}</span>
+                  <div class="ta-imob-failure-track">
+                    <div
+                      class="ta-imob-failure-fill"
+                      :style="{ width: pctWidth(item.count) + '%' }"
+                    />
+                  </div>
+                  <span class="ta-imob-failure-count">{{ item.count }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 按小时明细 -->
+            <el-table v-if="stats.length" :data="stats" stripe class="ta-imob-hourly-table">
+              <el-table-column prop="statHour" label="小时" min-width="160">
+                <template #default="{ row }">{{ formatTime(row.statHour) }}</template>
+              </el-table-column>
+              <el-table-column prop="providerId" label="供应商" min-width="140" />
+              <el-table-column prop="model" label="模型" min-width="140" />
+              <el-table-column label="结果" width="140">
+                <template #default="{ row }">
+                  <el-tag :type="outcomeTagType(row.outcome as InternalModelCallOutcome)" size="small">
+                    {{ outcomeText[row.outcome as InternalModelCallOutcome] ?? row.outcome }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="requestCount" label="请求数" width="90" />
+              <el-table-column prop="durationMillisSum" label="耗时合计(ms)" width="120" />
+              <el-table-column prop="durationMillisMax" label="最大耗时(ms)" width="120" />
+            </el-table>
+          </div>
         </el-tab-pane>
       </el-tabs>
     </template>
@@ -419,6 +613,165 @@ function onPageChange(next: number) {
 .ta-imob-tabs {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* el-tabs 默认 content 高度不随 flex 收缩，显式约束让表格区域在容器内滚动而不是撑破外层。 */
+.ta-imob-tabs :deep(.el-tabs__content),
+.ta-imob-tabs :deep(.el-tab-pane) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.ta-imob-tabs :deep(.el-tabs__content) {
+  flex: 1;
+  overflow: auto;
+}
+.ta-imob-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+.ta-imob-overview {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px 16px;
+}
+.ta-imob-overview-title {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+.ta-imob-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+}
+.ta-imob-overview-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.ta-imob-overview-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #111827;
+  white-space: nowrap;
+}
+.ta-imob-overview-value.is-ok {
+  color: #16a34a;
+}
+.ta-imob-overview-value.is-bad {
+  color: #dc2626;
+}
+.ta-imob-overview-label {
+  font-size: 12px;
+  color: #6b7280;
+}
+.ta-imob-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.ta-imob-metric-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+.ta-imob-metric-provider {
+  font-weight: 600;
+  color: #111827;
+  margin-bottom: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ta-imob-metric-body {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+.ta-imob-metric-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.ta-imob-metric-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+  white-space: nowrap;
+}
+.ta-imob-metric-value.is-ok {
+  color: #16a34a;
+}
+.ta-imob-metric-value.is-bad {
+  color: #dc2626;
+}
+.ta-imob-metric-label {
+  font-size: 11px;
+  color: #6b7280;
+}
+.ta-imob-failure-block {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px 16px;
+}
+.ta-imob-failure-title {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+.ta-imob-failure-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ta-imob-failure-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.ta-imob-failure-label {
+  width: 120px;
+  flex-shrink: 0;
+  color: #374151;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ta-imob-failure-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: #f3f4f6;
+  overflow: hidden;
+}
+.ta-imob-failure-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: #ef4444;
+  transition: width 0.3s ease;
+}
+.ta-imob-failure-count {
+  width: 40px;
+  flex-shrink: 0;
+  text-align: right;
+  color: #6b7280;
+}
+.ta-imob-hourly-table {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
 }
 .ta-imob-filter-bar {
   display: flex;

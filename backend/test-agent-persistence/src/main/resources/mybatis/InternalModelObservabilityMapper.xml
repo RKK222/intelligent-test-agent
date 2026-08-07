@@ -156,7 +156,7 @@
         ) values (
             #{providerId}, #{lastOutcome}, #{lastHttpStatus}, #{lastErrorClass}, #{lastDurationMillis},
             #{lastProbedAt},
-            case when #{lastOutcome} = 'SUCCESS' then #{lastProbedAt} else null end,
+            case when #{lastOutcome} = 'SUCCESS' then cast(#{lastProbedAt} as timestamp) else null end,
             case when #{lastOutcome} = 'SUCCESS' then 0 else 1 end,
             #{traceId}, current_timestamp
         )
@@ -167,7 +167,8 @@
             last_duration_ms = excluded.last_duration_ms,
             last_probed_at = excluded.last_probed_at,
             last_success_at = case when excluded.last_outcome = 'SUCCESS'
-                then excluded.last_probed_at else internal_model_probe_status.last_success_at end,
+                then cast(excluded.last_probed_at as timestamp)
+                else internal_model_probe_status.last_success_at end,
             consecutive_failures = case when excluded.last_outcome = 'SUCCESS'
                 then 0 else internal_model_probe_status.consecutive_failures + 1 end,
             trace_id = excluded.trace_id,
@@ -188,7 +189,7 @@
             last_duration_ms = incoming.last_duration_ms,
             last_probed_at = incoming.last_probed_at,
             last_success_at = case when incoming.last_outcome = 'SUCCESS'
-                then incoming.last_probed_at else target.last_success_at end,
+                then cast(incoming.last_probed_at as timestamp) else target.last_success_at end,
             consecutive_failures = case when incoming.last_outcome = 'SUCCESS'
                 then 0 else target.consecutive_failures + 1 end,
             trace_id = incoming.trace_id,
@@ -199,7 +200,7 @@
         ) values (
             incoming.provider_id, incoming.last_outcome, incoming.last_http_status,
             incoming.last_error_class, incoming.last_duration_ms, incoming.last_probed_at,
-            case when incoming.last_outcome = 'SUCCESS' then incoming.last_probed_at else null end,
+            case when incoming.last_outcome = 'SUCCESS' then cast(incoming.last_probed_at as timestamp) else null end,
             case when incoming.last_outcome = 'SUCCESS' then 0 else 1 end,
             incoming.trace_id, current_timestamp
         )
