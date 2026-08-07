@@ -74,7 +74,14 @@ public class InternalModelProviderProbeService {
         InternalModelProviderSnapshot snapshot = registry.currentSnapshot();
         Result result = new Result();
         for (InternalModelProvider provider : snapshot.providers()) {
-            result.put(provider.providerId(), probeProvider(provider, traceId));
+            try {
+                result.put(provider.providerId(), probeProvider(provider, traceId));
+            } catch (RuntimeException error) {
+                // 单 provider 探活异常（如模型目录查询失败）不中断后续 provider。
+                log.warn("probe failed for providerId={} error={}", provider.providerId(),
+                        error.getClass().getSimpleName());
+                result.put(provider.providerId(), ProbeOutcome.unavailable(provider.providerId()));
+            }
         }
         return result;
     }

@@ -549,9 +549,11 @@ public class InternalModelProxyForwardingService {
         }
 
         void markCancelled() {
-            // 下游 opencode 提前断开：显式分类，后续 resolveOutcome 不得再按状态码覆盖。
-            outcome = InternalModelCallOutcome.CLIENT_DISCONNECTED;
-            outcomeExplicitlySet.set(true);
+            // 下游 opencode 提前断开：仅当尚未被更精确的分类（错误/流补偿）覆盖时才标记，
+            // 避免把真实的连接失败/超时错误误记为客户端断开。
+            if (outcomeExplicitlySet.compareAndSet(false, true)) {
+                outcome = InternalModelCallOutcome.CLIENT_DISCONNECTED;
+            }
         }
 
         InternalModelCallOutcomeClassifier.TimeoutSignals signals() {
