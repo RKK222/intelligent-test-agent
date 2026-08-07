@@ -7072,8 +7072,8 @@
 - 把独立分支的排查授权微秒归一化提交 cherry-pick 到当前发布分支，只合入该最小提交；会话日志冲突保留两边
   完整记录，后端、API、数据库说明和安全规范自动合并。
 - 使用现有节点敏感配置包重建固定名内层 `test-agent-internal-release.zip` 和外层
-  `test-agent-two-backend-complete.zip`；worker runtime 因模型校验指纹变化完整纳入，toolbox 指纹未变继续复用，
-  Workflow/LobeHub 继续禁用。
+  `test-agent-two-backend-complete.zip`；worker runtime 因模型校验指纹变化完整纳入，最终全量封装同时纳入
+  指纹未变且 SHA 复验通过的 toolbox 镜像、源码和目录，Workflow/LobeHub 继续禁用。
 
 ### How
 
@@ -7084,7 +7084,8 @@
   `linux/amd64` worker 的 OpenCode 1.18.4、Codex CLI 0.145.0、Python 3.13.14、官方 MCP 路由/reply 冒烟通过，
   Docker tar 可重新 load 且镜像架构为 `linux/amd64`。
 - 内外层 SHA 配对、ZIP 完整性、外层内嵌 ZIP 与当前内层 SHA 相等、发布包 `--validate-only`、固定名完整包、自动
-  节点部署和多后台节点合同回归均通过；本日志提交后再用 `--zip-only` 保持本批组件选择重封内层并重建外层。
+  节点部署和多后台节点合同回归均通过；本日志提交后用 `--zip-only --include-all-components` 重封内层并重建
+  外层，避免新机、灾备或现场组件指纹缺失时依赖旧包遗留的 toolbox。
 
 ### Result
 
