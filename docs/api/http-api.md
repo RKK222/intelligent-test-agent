@@ -3862,7 +3862,7 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
   上下文缺失/过期分别返回既有 `CONVERSATION_CONTEXT_REQUIRED/CONVERSATION_CONTEXT_EXPIRED`；远端读取失败使用安全网关错误。
 - traceId：沿统一响应 envelope 和 RunEvent 传播；控制表只保存 traceId 与安全错误摘要，不保存用户输入、模型回答或供应商正文。
 - 幂等：同一 owner + `clientRequestId` 返回同一替代 Run；同一 source Run、replacement Run 和会话活动锁均有数据库唯一约束。
-- 页面接管：接口返回替代 Run 后，调用方应立即把源用户轮次的展示所有权切到替代 Run，以 `PENDING/WAITING` 投影运行状态栏；`run.resend.started` 仅清理源 Run 的回答、工具和其它过程投影，保留该用户轮次并清除旧远端标识，随后用替代 Run 的真实 user message ID 原位接管。定时来源及 `resend` 元数据在 ID 替换期间必须保留。
+- 页面接管：接口返回替代 Run 后，调用方应立即把源用户轮次的展示所有权切到替代 Run，以 `PENDING/WAITING` 投影运行状态栏，并隐藏源 Run 的回答、工具、Todo 和 Diff；隐藏只作用于派生页面投影，原生回退开始前收到 `run.resend.failed` 时可恢复。`run.resend.started` 再清理源 Run 的明细投影，保留该用户轮次并清除旧远端标识，随后用替代 Run 的真实 user message ID 原位接管。定时来源及 `resend` 元数据在 ID 替换期间必须保留。
 - 兼容性：接口与所有 `resend` 字段均为新增，旧客户端缺失字段时按普通 Run/消息显示。
 - 对应测试：`RunResendApplicationServiceTest`、`RunResendExecutionServiceTest`、`RunResendAutomaticServiceTest`、
   `MyBatisRunResendRepositoryIntegrationTest`、前端 reducer 和 `FigmaChatPanelTest`。

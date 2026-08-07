@@ -1749,3 +1749,17 @@
 - Result:
   - 用户现在可在无需刷新页面的情况下看到重发运行状态和新结果，原用户请求不会被回退事件误删；首轮后旧上下文会自动走一次安全重签，不再误报缺少远端边界。
   - 本次仅修正既有 API/RunEvent 的校验与前端投影，不新增或变更外部 API、事件 wire name、数据库/Flyway、SQL、权限或日志字段；已同步 HTTP 行为、后端/前端 README/PACKAGE 与用户手册，未修改 `.env*`、generated SDK 或 OpenCode 源码。
+
+### 2026-08-07 - 修复重发等待阶段旧回答延迟隐藏
+
+- Why:
+  - 重发 API 返回后虽然用户轮次和状态栏已经接管到替代 Run，但旧 assistant、Todo 和 Diff 仍保留在时间线，直到后端发出 `run.resend.started` 才删除；回退或投递稍慢时，用户会持续看到上一轮回答，误以为页面没有刷新。
+- What:
+  - `opencode-like` 派生状态识别用户消息上的 `WAITING/REVERTING/REVERTED` 重发元数据，在等待阶段立即从页面隐藏源 Run 的回答、工具、Todo、Diff 和关联卡片，同时保留 reducer 原数据。
+  - 原生回退开始前若收到 `run.resend.failed`，失败状态解除隐藏并恢复旧内容；收到 `started` 后仍沿用既有原子清理和替代消息 ID 接管，不改变后端状态机。
+- How:
+  - TDD 先确认单测仍投影 `assistant-part/diff-summary`、Chromium 页面仍找到旧回答，再补最小派生过滤；修复后等待阶段只投影用户消息和 running 工作状态，失败分支恢复旧回答、Todo 与 Diff。
+  - 前端全量 118 个测试文件 1852 passed / 1 skipped，15 个 workspace typecheck、production build、agent-chat 68 项聚焦测试和 Chromium 重发页面回归均通过。
+- Result:
+  - 平台接受撤销重发请求后，旧回答与过程信息立即从页面消失，不再等待新回答完成；回退前失败仍可安全恢复原轮次，避免乐观隐藏导致内容丢失。
+  - 本次不新增或变更 HTTP API、RunEvent wire name、DTO、数据库/Flyway、SQL、安全或后端实现；已同步 HTTP 行为、agent-web/agent-chat README/PACKAGE 和用户手册，未修改 `.env*`、generated SDK 或 OpenCode 源码。

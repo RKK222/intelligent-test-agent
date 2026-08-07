@@ -60,6 +60,79 @@ describe("agent-chat runtime reducer", () => {
     expect(statusRow).toMatchObject({ type: "work-status", runId: "run_new", status: "running", isLatest: true });
   });
 
+  it("hides the source answer immediately while resend is waiting and restores it when resend fails", () => {
+    const initial = {
+      ...createInitialAgentChatRuntimeState([
+        { id: "user-old", role: "user", text: "retry me", createdAt: "2026-08-07T00:00:00Z", runId: "run_old" },
+        {
+          id: "assistant-old",
+          role: "assistant",
+          text: "old answer",
+          createdAt: "2026-08-07T00:00:01Z",
+          runId: "run_old"
+        }
+      ]),
+      todos: [{ id: "todo-old", text: "old todo", status: "completed" }],
+      todoSnapshotsByUserMessageId: {
+        "user-old": [{ id: "todo-old", text: "old todo", status: "completed" }]
+      },
+      todoUserMessageIdByRunId: { run_old: "user-old" },
+      diff: {
+        sessionId: "ses_resend",
+        files: [{ path: "old.txt", patch: "@@\n-old\n+new", additions: 1, deletions: 1, status: "modified" }]
+      },
+      runStatusesByRunId: { run_old: "SUCCEEDED" }
+    } satisfies AgentChatRuntimeState;
+    const resend = {
+      resendId: "resend_waiting",
+      sourceRunId: "run_old",
+      replacementRunId: "run_new",
+      trigger: "MANUAL",
+      totalAttempt: 1,
+      automaticAttempt: 0,
+      automaticLimit: 3,
+      status: "WAITING",
+      executeAt: "2026-08-07T00:01:00Z"
+    } as const;
+
+    const waiting = reduceAgentChatRuntime(initial, { type: "run.resend.requested", resend });
+    expect(waiting.messages).toContainEqual(expect.objectContaining({ id: "assistant-old", text: "old answer" }));
+    const waitingRows = createTimelineRows(createOpencodeLikeState({
+      messages: waiting.messages,
+      running: true,
+      todos: waiting.todos,
+      todoSnapshotsByUserMessageId: waiting.todoSnapshotsByUserMessageId,
+      diffFiles: waiting.diff?.files,
+      runStatusesByRunId: waiting.runStatusesByRunId
+    }));
+    expect(waitingRows.map((row) => row.type)).toEqual(["user-message", "work-status"]);
+    expect(waitingRows.at(-1)).toMatchObject({ type: "work-status", todos: [], status: "running" });
+
+    const failed = reduceAgentChatRuntime(waiting, { type: "event", event: runEvent(
+      "run.resend.failed",
+      "run_new",
+      { ...resend, status: "FAILED" }
+    ) });
+    const restoredRows = createTimelineRows(createOpencodeLikeState({
+      messages: failed.messages,
+      running: false,
+      todos: failed.todos,
+      todoSnapshotsByUserMessageId: failed.todoSnapshotsByUserMessageId,
+      diffFiles: failed.diff?.files,
+      runStatusesByRunId: failed.runStatusesByRunId
+    }));
+    expect(restoredRows.map((row) => row.type)).toEqual([
+      "user-message",
+      "assistant-part",
+      "work-status",
+      "diff-summary"
+    ]);
+    expect(restoredRows.find((row) => row.type === "work-status")).toMatchObject({
+      type: "work-status",
+      todos: [{ id: "todo-old", text: "old todo", status: "completed" }]
+    });
+  });
+
   it("atomically removes the superseded run projection when native resend starts", () => {
     const initial = createInitialAgentChatRuntimeState([
       { id: "user-old", role: "user", text: "retry me", createdAt: "2026-08-07T00:00:00Z", runId: "run_old", sourceType: "SCHEDULED_TASK" },

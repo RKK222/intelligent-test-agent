@@ -11,8 +11,13 @@ export function createOpencodeLikeState(input: OpencodeLikeConversationInput): O
   const partsByMessageId: Record<string, MessagePart[]> = {};
   let currentUserId: string | undefined;
   const activeSubagentSessionId = input.activeSubagentSessionId ?? null;
+  const optimisticResend = optimisticResendProjection(input.messages);
+  const visibleMessages = input.messages.filter((message) => messageVisibleDuringResend(
+    message,
+    optimisticResend.sourceRunIds
+  ));
 
-  for (const message of input.messages) {
+  for (const message of visibleMessages) {
     if (message.role === "card") {
       continue;
     }
@@ -38,7 +43,13 @@ export function createOpencodeLikeState(input: OpencodeLikeConversationInput): O
   }
 
   const runtimeStatus = input.runtimeStatus ?? runtimeStatusFromLegacy(input.status, input.running);
-  const diffFiles = input.diffFiles ?? input.diff?.files ?? diffFilesFromCards(input.messages);
+  const diffFiles = optimisticResend.userMessageIds.size > 0
+    ? []
+    : input.diffFiles ?? input.diff?.files ?? diffFilesFromCards(visibleMessages);
+  const todoSnapshotsByUserMessageId = { ...(input.todoSnapshotsByUserMessageId ?? {}) };
+  for (const userMessageId of optimisticResend.userMessageIds) {
+    todoSnapshotsByUserMessageId[userMessageId] = [];
+  }
   const subagentByTaskPartId = { ...(input.subagentByTaskPartId ?? {}) };
   if (!activeSubagentSessionId) {
     appendSyntheticSubagentEntries({
@@ -53,7 +64,7 @@ export function createOpencodeLikeState(input: OpencodeLikeConversationInput): O
   }
 
   return {
-    messages: input.messages,
+    messages: visibleMessages,
     messageById,
     userMessages,
     orphanAssistantMessages,
@@ -65,8 +76,8 @@ export function createOpencodeLikeState(input: OpencodeLikeConversationInput): O
     diffFiles,
     permissions: input.permissions ?? [],
     questions: input.questions ?? [],
-    todos: input.todos ?? [],
-    todoSnapshotsByUserMessageId: input.todoSnapshotsByUserMessageId ?? {},
+    todos: optimisticResend.userMessageIds.size > 0 ? [] : input.todos ?? [],
+    todoSnapshotsByUserMessageId,
     running: input.running ?? (runtimeStatus.type === "busy" || runtimeStatus.type === "retry"),
     showReasoningSummaries: input.showReasoningSummaries ?? true,
     messageScopesById: input.messageScopesById ?? {},
@@ -75,6 +86,43 @@ export function createOpencodeLikeState(input: OpencodeLikeConversationInput): O
     activeSubagentSessionId,
     runStatusesByRunId: input.runStatusesByRunId ?? {}
   };
+}
+
+/**
+ * 后端接受重发到原生 started 事件之间只隐藏源轮次投影，不销毁 reducer 中的原数据；
+ * 若回退前失败，FAILED 元数据会让下一次投影自然恢复旧回答、Todo 和 Diff。
+ */
+function optimisticResendProjection(messages: AgentMessage[]): {
+  sourceRunIds: Set<string>;
+  userMessageIds: Set<string>;
+} {
+  const sourceRunIds = new Set<string>();
+  const userMessageIds = new Set<string>();
+  for (const message of messages) {
+    if (message.role !== "user" || !message.resend) {
+      continue;
+    }
+    const status = message.resend.status.toUpperCase();
+    if (status !== "WAITING" && status !== "REVERTING" && status !== "REVERTED") {
+      continue;
+    }
+    sourceRunIds.add(message.resend.sourceRunId);
+    userMessageIds.add(canonicalMessageId(message));
+  }
+  return { sourceRunIds, userMessageIds };
+}
+
+function messageVisibleDuringResend(message: AgentMessage, hiddenSourceRunIds: Set<string>): boolean {
+  if (hiddenSourceRunIds.size === 0 || message.role === "user") {
+    return true;
+  }
+  if (message.role === "assistant") {
+    return !message.runId || !hiddenSourceRunIds.has(message.runId);
+  }
+  const runId = typeof message.payload.runId === "string" ? message.payload.runId : undefined;
+  const sourceRunId = typeof message.payload.sourceRunId === "string" ? message.payload.sourceRunId : undefined;
+  return !(runId && hiddenSourceRunIds.has(runId))
+    && !(sourceRunId && hiddenSourceRunIds.has(sourceRunId));
 }
 
 function messageVisibleInView(

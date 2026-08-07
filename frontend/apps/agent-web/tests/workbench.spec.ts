@@ -5360,7 +5360,7 @@ test("manual resend keeps the user turn, shows running status, and replaces the 
 
   await expect.poll(() => runResendRequests.length).toBe(1);
   await expect(page.getByTestId("figma-work-status-dock").locator(".oc-work-status[data-status='running']")).toBeVisible();
-  await expect(page.getByText("旧回答不应继续显示")).toBeVisible();
+  await expect(page.getByText("旧回答不应继续显示")).toHaveCount(0);
 
   const resendPayload = {
     resendId: "rsd_e2e",
