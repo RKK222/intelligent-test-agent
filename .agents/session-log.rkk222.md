@@ -7072,8 +7072,9 @@
 - 把独立分支的排查授权微秒归一化提交 cherry-pick 到当前发布分支，只合入该最小提交；会话日志冲突保留两边
   完整记录，后端、API、数据库说明和安全规范自动合并。
 - 使用现有节点敏感配置包重建固定名内层 `test-agent-internal-release.zip` 和外层
-  `test-agent-two-backend-complete.zip`；worker runtime 因模型校验指纹变化完整纳入，最终全量封装同时纳入
-  指纹未变且 SHA 复验通过的 toolbox 镜像、源码和目录，Workflow/LobeHub 继续禁用。
+  `test-agent-two-backend-complete.zip`；worker runtime 因模型校验指纹变化完整纳入。用户确认本介质用于现有
+  `.4/.114/.2` 升级后，toolbox 保持 `reuse`，不再重复携带指纹未变的镜像、源码和目录；Workflow/LobeHub
+  继续禁用。
 
 ### How
 
@@ -7084,13 +7085,19 @@
   `linux/amd64` worker 的 OpenCode 1.18.4、Codex CLI 0.145.0、Python 3.13.14、官方 MCP 路由/reply 冒烟通过，
   Docker tar 可重新 load 且镜像架构为 `linux/amd64`。
 - 内外层 SHA 配对、ZIP 完整性、外层内嵌 ZIP 与当前内层 SHA 相等、发布包 `--validate-only`、固定名完整包、自动
-  节点部署和多后台节点合同回归均通过；本日志提交后用 `--zip-only --include-all-components` 重封内层并重建
-  外层，避免新机、灾备或现场组件指纹缺失时依赖旧包遗留的 toolbox。
+  节点部署和多后台节点合同回归均通过；本日志提交后按组件指纹状态用 `--zip-only` 重封内层并重建外层，保持
+  worker `included`、toolbox `reuse`。该增量包要求现网已有匹配 toolbox；新机或灾备恢复应另行生成全组件包。
+- 以上一企业包提交 `ab6e46936`（2026-08-06 15:40）以及用户所述 17～18 点部署时段内的候选提交
+  `99517c9b1`（17:13）、`b3f4e9aed`（18:01）分别对比当前 HEAD，PostgreSQL 主/兼容 migration 与 XXL
+  migration 均无新增、删除或字节修改。当前三份 8 月 6 日 migration SHA 仍为 `f59f6415...`、
+  `1b2547cf...`、`19a0e5af...`；现场仍须从真实 `flyway_schema_history` 证明三条均已成功且 checksum 不变。
 
 ### Result
 
 - 当前发布分支已同时包含前端内存治理、隔夜终态校准、排查授权时间精度和完整企业模型目录失败关闭能力；本次
-  相对昨晚已发布包没有新增或改写 PostgreSQL/MySQL migration，不修改 `.env*`、generated SDK 或 OpenCode 源码。
+  相对昨日下午 17～18 点已部署包没有新增或改写 PostgreSQL/MySQL migration，不修改 `.env*`、generated SDK
+  或 OpenCode 源码。若现场三条 8 月 6 日 migration 已全部成功，本次重部署不应新增 Flyway history；缺失、
+  失败、部分执行、未知版本或 checksum 不一致时必须停止，禁止 `repair`、`outOfOrder` 或手改历史表。
 - Apple Silicon 不能替代企业两台原生 `linux/amd64` worker 的 Codex sandbox E2E；企业真实 PostgreSQL history、
   模型代理推理、双后台滚动部署、前端浏览器业务验收和节点资源/网络状态仍必须按执行单现场验证，任一 Flyway
   未知 checksum 或首台 Java 校验失败时停止后续节点。
