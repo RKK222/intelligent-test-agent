@@ -1245,7 +1245,7 @@ PostgreSQL migration 与 XXL V9 则应全部成功且 checksum 不变；当前�
 
 | 表 | 口径与边界 |
 |---|---|
-| `internal_model_call_records` | append-only 内部模型代理调用明细：`provider_id/model/endpoint/source(USER_CALL\|PROBE)/outcome/http_status/error_class/streaming/duration_ms/first_byte_ms/first_token_ms/trace_id/ucid/started_at`。`first_byte_ms` 是响应头耗时，`first_token_ms` 是首个非空且非 `[DONE]` SSE data 的耗时；非流式或未收到有效 chunk 时为空。只存结构化字段，**禁止写入请求/响应正文、错误文本、Token 或密钥**；`error_class` 只保存剥离 Reactor 包装后的异常类简名。索引 `(provider_id, started_at desc)`、`(outcome, started_at desc)`、`(started_at)`；保留 30 天。 |
+| `internal_model_call_records` | append-only 内部模型代理调用明细：`provider_id/model/endpoint/source(USER_CALL\|PROBE)/outcome/http_status/error_class/streaming/duration_ms/first_byte_ms/first_token_ms/trace_id/ucid/started_at`。`first_byte_ms` 是响应头耗时，`first_token_ms` 是首个包含模型输出字段的 SSE data 耗时；非流式或未收到有效输出 chunk 时为空。只存结构化字段，**禁止写入请求/响应正文、错误文本、Token 或密钥**；`error_class` 只保存剥离 Reactor 包装后的异常类简名。索引 `(provider_id, started_at desc)`、`(outcome, started_at desc)`、`(started_at)`；保留 30 天。 |
 | `internal_model_call_stats_hourly` | 按 `(stat_hour, provider_id, model, endpoint, source, outcome)` 原子累加 `request_count/duration_ms_sum/duration_ms_max/first_token_ms_sum/first_token_ms_max/first_token_count`；首 token 三列只统计存在首 token 的调用，可准确计算平均/最大值；小时聚合无法还原 P90/P95 或分布；`stat_hour` 由写入方截断到小时，保留 180 天。 |
 | `internal_model_probe_status` | 每 provider 一行的最近探活状态：`last_outcome/last_http_status/last_error_class/last_duration_ms/last_probed_at/last_success_at/consecutive_failures/trace_id/updated_at`；`consecutive_failures` 由 SQL 依据本次结果成功归零、失败 +1。 |
 

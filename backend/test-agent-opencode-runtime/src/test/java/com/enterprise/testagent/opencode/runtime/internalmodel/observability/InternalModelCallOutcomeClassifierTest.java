@@ -65,6 +65,16 @@ class InternalModelCallOutcomeClassifierTest {
     }
 
     @Test
+    void classifiesTimeoutWrappedByBlockingOrNettyClient() {
+        assertThat(InternalModelCallOutcomeClassifier.classify(
+                new IllegalStateException("blocking timeout", new TimeoutException()), noSignals))
+                .isEqualTo(InternalModelCallOutcome.UPSTREAM_FIRST_RESPONSE_TIMEOUT);
+        assertThat(InternalModelCallOutcomeClassifier.classify(
+                webClientError(io.netty.handler.timeout.ReadTimeoutException.INSTANCE), noSignals))
+                .isEqualTo(InternalModelCallOutcome.UPSTREAM_FIRST_RESPONSE_TIMEOUT);
+    }
+
+    @Test
     void classifiesPlatformExceptions() {
         assertThat(InternalModelCallOutcomeClassifier.classify(
                 new PlatformException(ErrorCode.UNAUTHENTICATED, "proxy auth failed"), noSignals))

@@ -20,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -55,18 +56,38 @@ public class InternalModelProviderProbeService {
     private final InternalModelProviderModelRepository modelRepository;
     private final InternalModelCallRecordRepository callRecordRepository;
     private final InternalModelProbeStatusRepository probeStatusRepository;
+    private final Duration connectTimeout;
+    private final Duration responseTimeout;
 
     public InternalModelProviderProbeService(
             InternalModelProviderRegistry registry,
             InternalModelProviderModelRepository modelRepository,
             InternalModelCallRecordRepository callRecordRepository,
             InternalModelProbeStatusRepository probeStatusRepository) {
+        this(
+                registry,
+                modelRepository,
+                callRecordRepository,
+                probeStatusRepository,
+                CONNECT_TIMEOUT,
+                RESPONSE_TIMEOUT);
+    }
+
+    InternalModelProviderProbeService(
+            InternalModelProviderRegistry registry,
+            InternalModelProviderModelRepository modelRepository,
+            InternalModelCallRecordRepository callRecordRepository,
+            InternalModelProbeStatusRepository probeStatusRepository,
+            Duration connectTimeout,
+            Duration responseTimeout) {
         this.registry = Objects.requireNonNull(registry, "registry must not be null");
         this.modelRepository = Objects.requireNonNull(modelRepository, "modelRepository must not be null");
         this.callRecordRepository =
                 Objects.requireNonNull(callRecordRepository, "callRecordRepository must not be null");
         this.probeStatusRepository =
                 Objects.requireNonNull(probeStatusRepository, "probeStatusRepository must not be null");
+        this.connectTimeout = requirePositive(connectTimeout, "connectTimeout");
+        this.responseTimeout = requirePositive(responseTimeout, "responseTimeout");
     }
 
     /** 探活全部启用的 provider，返回逐 provider 结果；单点失败不影响其他 provider。 */
@@ -124,6 +145,7 @@ public class InternalModelProviderProbeService {
         Instant startedAt = Instant.now();
         long startedNanos = System.nanoTime();
         WebClient client = webClient();
+        AtomicReference<ProbeResponse> observedResponse = new AtomicReference<>();
         try {
             ProbeResponse response = client.post()
                     .uri(normalizedTarget(provider.baseUrl(), CHAT_PATH))
@@ -132,10 +154,11 @@ public class InternalModelProviderProbeService {
                     .exchangeToMono(upstream -> {
                         // 在收到响应头的回调内取样，不能等正文消费完再伪造首字节时间。
                         long firstByteNanos = System.nanoTime();
-                        return upstream.releaseBody()
-                                .thenReturn(new ProbeResponse(upstream.statusCode(), firstByteNanos));
+                        ProbeResponse header = new ProbeResponse(upstream.statusCode(), firstByteNanos);
+                        observedResponse.set(header);
+                        return upstream.releaseBody().thenReturn(header);
                     })
-                    .block(RESPONSE_TIMEOUT);
+                    .block(responseTimeout);
             if (response == null) {
                 return recordProbe(provider.providerId(), model, InternalModelCallOutcome.UPSTREAM_FIRST_RESPONSE_TIMEOUT,
                         null, null, startedAt, startedNanos, null, traceId);
@@ -156,11 +179,14 @@ public class InternalModelProviderProbeService {
             return recordProbe(provider.providerId(), model, outcome, status.value(), null,
                     startedAt, startedNanos, firstByteNanos, traceId);
         } catch (RuntimeException error) {
+            ProbeResponse header = observedResponse.get();
             InternalModelCallOutcome outcome = InternalModelCallOutcomeClassifier.classify(
-                    error, new InternalModelCallOutcomeClassifier.TimeoutSignals(false, false, false));
-            return recordProbe(provider.providerId(), model, outcome, null,
+                    error,
+                    new InternalModelCallOutcomeClassifier.TimeoutSignals(header != null, false, false));
+            return recordProbe(provider.providerId(), model, outcome,
+                    header == null ? null : header.status().value(),
                     InternalModelCallOutcomeClassifier.errorClass(error),
-                    startedAt, startedNanos, null, traceId);
+                    startedAt, startedNanos, header == null ? null : header.firstByteNanos(), traceId);
         }
     }
 
@@ -239,11 +265,19 @@ public class InternalModelProviderProbeService {
 
     private WebClient webClient() {
         HttpClient httpClient = HttpClient.create()
-                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, (int) CONNECT_TIMEOUT.toMillis())
-                .responseTimeout(RESPONSE_TIMEOUT);
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, (int) connectTimeout.toMillis())
+                .responseTimeout(responseTimeout);
         return WebClient.builder()
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .build();
+    }
+
+    private static Duration requirePositive(Duration value, String name) {
+        Duration duration = Objects.requireNonNull(value, name + " must not be null");
+        if (duration.isZero() || duration.isNegative()) {
+            throw new IllegalArgumentException(name + " must be positive");
+        }
+        return duration;
     }
 
     private record ProbeResponse(HttpStatusCode status, long firstByteNanos) {

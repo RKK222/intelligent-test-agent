@@ -6,7 +6,7 @@ import java.util.Objects;
 
 /**
  * 内部模型代理单次调用观测记录。{@code firstByteMillis} 表示响应头到达，
- * {@code firstTokenMillis} 表示首个有效 SSE data；只存结构化字段，禁止存请求/响应正文或错误文本。
+ * {@code firstTokenMillis} 表示首个包含模型输出的 SSE data；只存结构化字段，禁止存请求/响应正文或错误文本。
  */
 public record InternalModelCallRecord(
         Long id,

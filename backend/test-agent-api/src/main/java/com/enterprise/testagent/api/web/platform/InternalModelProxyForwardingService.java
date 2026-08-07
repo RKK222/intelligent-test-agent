@@ -2,6 +2,7 @@ package com.enterprise.testagent.api.web.platform;
 
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
@@ -173,7 +174,7 @@ public class InternalModelProxyForwardingService {
         InternalModelThinkStreamConverter converter = new InternalModelThinkStreamConverter(objectMapper);
         CallObservation observation = new CallObservation(
                 provider.providerId(), model, requestedPath, traceId,
-                exchange.getRequest().getHeaders().getFirst(UCID_HEADER));
+                exchange.getRequest().getHeaders().getFirst(UCID_HEADER), objectMapper);
         Sinks.One<Void> responseHeadersReady = Sinks.one();
         Mono<Void> request = webClient.method(exchange.getRequest().getMethod() == null ? HttpMethod.POST : exchange.getRequest().getMethod())
                 .uri(URI.create(targetUrl))
@@ -327,17 +328,84 @@ public class InternalModelProxyForwardingService {
                 ignored -> Mono.delay(streamIdleTimeout));
     }
 
-    /** SSE 注释/空事件不能刷新首有效 chunk 超时；收到有效 data 后才切换到流空闲边界。 */
-    private Flux<ServerSentEvent<String>> withSseTimeouts(Flux<ServerSentEvent<String>> source) {
-        return source.timeout(
-                Mono.delay(firstEventTimeout),
-                event -> hasSseData(event)
-                        ? Mono.delay(streamIdleTimeout)
-                        : Mono.delay(firstEventTimeout));
+    /** SSE 注释/空事件不能刷新首有效输出截止时间；收到有效输出后才切换到流空闲边界。 */
+    Flux<ServerSentEvent<String>> withSseTimeouts(Flux<ServerSentEvent<String>> source) {
+        return Flux.defer(() -> {
+            long firstOutputDeadline = System.nanoTime() + firstEventTimeout.toNanos();
+            AtomicBoolean firstOutputSeen = new AtomicBoolean(false);
+            Flux<ServerSentEvent<String>> observed = source.doOnNext(event -> {
+                if (hasFirstOutputData(event)) {
+                    firstOutputSeen.set(true);
+                }
+            });
+            return observed.timeout(
+                    timeoutUntil(firstOutputDeadline),
+                    ignored -> firstOutputSeen.get()
+                            ? Mono.delay(streamIdleTimeout)
+                            : timeoutUntil(firstOutputDeadline));
+        });
     }
 
-    private static boolean hasSseData(ServerSentEvent<String> event) {
-        return event != null && event.data() != null && !event.data().isBlank();
+    private Mono<Long> timeoutUntil(long deadlineNanos) {
+        long remainingNanos = deadlineNanos - System.nanoTime();
+        return Mono.delay(Duration.ofNanos(Math.max(0L, remainingNanos)));
+    }
+
+    private boolean hasFirstOutputData(ServerSentEvent<String> event) {
+        return event != null && hasFirstOutputData(event.data());
+    }
+
+    /** 只把真正携带模型输出的 SSE data 作为首 token；role/usage/DONE 等元数据不计入。 */
+    private boolean hasFirstOutputData(String data) {
+        return isFirstOutputData(objectMapper, data);
+    }
+
+    private static boolean isFirstOutputData(ObjectMapper objectMapper, String data) {
+        if (data == null || data.isBlank() || "[DONE]".equals(data.trim())) {
+            return false;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(data);
+            JsonNode choices = root == null ? null : root.get("choices");
+            if (choices == null || !choices.isArray()) {
+                // 非标准纯文本 SSE 仍视为模型输出，避免兼容实现被误判为空流。
+                return root == null || !root.isObject()
+                        || containsOutputText(root, "text")
+                        || containsOutputText(root, "content");
+            }
+            for (JsonNode choice : choices) {
+                JsonNode delta = choice.get("delta");
+                if (containsOutputText(delta, "content")
+                        || containsOutputText(delta, "reasoning_content")
+                        || containsOutputText(choice, "text")
+                        || containsToolOutput(delta)) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (Exception ignored) {
+            // 无法解析的上游 data 保留兼容行为，按非空原始输出计时，不保存正文。
+            return true;
+        }
+    }
+
+    private static boolean containsOutputText(JsonNode node, String fieldName) {
+        JsonNode value = node == null ? null : node.get(fieldName);
+        return value != null && value.isTextual() && !value.textValue().isEmpty();
+    }
+
+    private static boolean containsToolOutput(JsonNode delta) {
+        JsonNode toolCalls = delta == null ? null : delta.get("tool_calls");
+        if (toolCalls == null || !toolCalls.isArray()) {
+            return false;
+        }
+        for (JsonNode toolCall : toolCalls) {
+            JsonNode function = toolCall.get("function");
+            if (containsOutputText(function, "name") || containsOutputText(function, "arguments")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Duration requirePositive(Duration value, String name) {
@@ -491,7 +559,7 @@ public class InternalModelProxyForwardingService {
     }
 
     /**
-     * 单次转发的观测上下文。线程模型：Netty event loop 上并发访问，所有标记位用原子布尔保护，
+     * 单次转发的观测上下文。线程模型：Netty event loop 上并发访问，标记位与时间戳用原子类型保护，
      * 终态只用一次（terminalRecorded 防 doOnError 与 doFinally 双写）。不携带任何请求/响应正文。
      */
     static final class CallObservation {
@@ -504,7 +572,6 @@ public class InternalModelProxyForwardingService {
         private final long startedNanos;
         private final AtomicBoolean firstByteMarked = new AtomicBoolean(false);
         private final AtomicBoolean firstEventMarked = new AtomicBoolean(false);
-        private final AtomicBoolean firstTokenMarked = new AtomicBoolean(false);
         private final AtomicBoolean doneSeen = new AtomicBoolean(false);
         private final AtomicBoolean streaming = new AtomicBoolean(false);
         private final AtomicBoolean streamOutcomeSet = new AtomicBoolean(false);
@@ -514,14 +581,23 @@ public class InternalModelProxyForwardingService {
         private volatile InternalModelCallOutcome outcome = InternalModelCallOutcome.SUCCESS;
         private volatile String errorClass;
         private volatile long firstByteNanos;
-        private volatile long firstTokenNanos;
+        private static final long UNSET_NANOS = Long.MIN_VALUE;
+        private final AtomicLong firstTokenNanos = new AtomicLong(UNSET_NANOS);
+        private final ObjectMapper objectMapper;
 
-        CallObservation(String providerId, String model, String endpoint, String traceId, String ucid) {
+        CallObservation(
+                String providerId,
+                String model,
+                String endpoint,
+                String traceId,
+                String ucid,
+                ObjectMapper objectMapper) {
             this.providerId = providerId;
             this.model = model;
             this.endpoint = endpoint;
             this.traceId = traceId;
             this.ucid = ucid;
+            this.objectMapper = objectMapper;
             this.startedAt = Instant.now();
             this.startedNanos = System.nanoTime();
         }
@@ -534,7 +610,7 @@ public class InternalModelProxyForwardingService {
                 String errorClass) {
             CallObservation observation = new CallObservation(
                     providerIdFromHeader(exchange), null, pathFrom(exchange), traceId,
-                    exchange.getRequest().getHeaders().getFirst(UCID_HEADER));
+                    exchange.getRequest().getHeaders().getFirst(UCID_HEADER), null);
             observation.outcome = outcome;
             observation.errorClass = errorClass;
             observation.outcomeExplicitlySet.set(true);
@@ -557,20 +633,21 @@ public class InternalModelProxyForwardingService {
             if (data == null || data.isBlank()) {
                 return;
             }
-            // 首事件超时也以有 data 的有效 SSE 为边界，注释/空事件不能掩盖空响应。
-            firstEventMarked.set(true);
             if ("[DONE]".equals(data.trim())) {
                 doneSeen.set(true);
                 return;
             }
-            if (firstTokenMarked.compareAndSet(false, true)) {
-                firstTokenNanos = System.nanoTime();
+            if (!hasFirstOutputData(data)) {
+                return;
             }
+            firstEventMarked.set(true);
+            // AtomicLong 同时发布时间和值，避免终态线程观察到已标记但仍是默认时间。
+            firstTokenNanos.compareAndSet(UNSET_NANOS, System.nanoTime());
         }
 
         void markDirectStreamEnd() {
             // Chat Completions 流必须有有效 chunk 并以 [DONE] 结束；正常 EOF 否则属于截断/空流。
-            if (!firstTokenMarked.get() || !doneSeen.get()) {
+            if (!hasFirstToken() || !doneSeen.get()) {
                 markStreamOutcome(InternalModelCallOutcome.UPSTREAM_STREAM_INTERRUPTED);
             }
         }
@@ -610,8 +687,8 @@ public class InternalModelProxyForwardingService {
             Long firstByteMillis = firstByteMarked.get()
                     ? (firstByteNanos - startedNanos) / 1_000_000
                     : null;
-            Long firstTokenMillis = firstTokenMarked.get()
-                    ? (firstTokenNanos - startedNanos) / 1_000_000
+            Long firstTokenMillis = hasFirstToken()
+                    ? (firstTokenNanos.get() - startedNanos) / 1_000_000
                     : null;
             return new InternalModelCallRecord(
                     null,
@@ -629,6 +706,17 @@ public class InternalModelProxyForwardingService {
                     traceId == null ? "" : traceId,
                     ucid,
                     startedAt);
+        }
+
+        private boolean hasFirstOutputData(String data) {
+            if (objectMapper == null) {
+                return data != null && !data.isBlank() && !"[DONE]".equals(data.trim());
+            }
+            return InternalModelProxyForwardingService.isFirstOutputData(objectMapper, data);
+        }
+
+        private boolean hasFirstToken() {
+            return firstTokenNanos.get() != UNSET_NANOS;
         }
 
         private void resolveOutcome(long httpStatusValue) {

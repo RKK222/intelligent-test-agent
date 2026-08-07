@@ -5,6 +5,26 @@
 
 ## Entries
 
+### 2026-08-07 - 修复内部模型可观测首输出判定与探活超时归类
+
+### Why
+
+- 复核首 token 与流式超时指标后发现，SSE 注释/空事件会持续重置首事件超时，role-only 元数据块会被误计为首 token；首 token 标记与时间戳分开发布还存在并发窗口。
+- 探活响应头已返回但正文读取超时时，原逻辑丢失 HTTP 状态并把底层 Netty/JDK 超时归为未知，无法区分上游首响应慢与首字节后的流式空闲。
+
+### What
+
+- 将首输出定义收敛为包含 `content`、`reasoning_content` 或工具输出字段的 SSE data；首个输出截止时间改为绝对 deadline，注释/空事件不能延后，首 token 时间戳使用原子占位值一次性发布。
+- 扩展阻塞/Netty 超时识别，探活保存响应头后再读取正文，正文超时保留 HTTP 状态并归类为 `UPSTREAM_STREAM_IDLE_TIMEOUT`；同步前端、API、数据库和排障文档中的指标口径。
+
+### How
+
+- 新增 SSE 注释超时、role-only chunk、阻塞/Netty 超时和响应头后正文超时回归用例；使用 JDK 21 执行 API/runtime/persistence 定向 Maven 测试，并执行 agent-web typecheck 与 `git diff --check`。
+
+### Result
+
+- 43 项后端定向测试、agent-web 类型检查和差异检查通过；未修改 API/事件线格式或既有 migration 字节，未执行真实 PostgreSQL 基线升级或长驻应用启动验证。
+
 ### 2026-08-07 - 修正内部模型可观测首 token 与聚合口径
 
 ### Why

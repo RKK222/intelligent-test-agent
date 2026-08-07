@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -71,6 +72,36 @@ class InternalModelProxyForwardingServiceTest {
                 .expectNext("第一条")
                 .expectErrorSatisfies(error -> assertThat(error).isInstanceOf(TimeoutException.class))
                 .verify(Duration.ofSeconds(1));
+    }
+
+    @Test
+    void timesOutWhenOnlyCommentEventsArriveBeforeFirstOutput() {
+        InternalModelProxyForwardingService service = service(WebClient.create());
+        Flux<ServerSentEvent<String>> comments = Flux.interval(Duration.ofMillis(20))
+                .map(ignored -> ServerSentEvent.<String>builder().comment("keepalive").build());
+
+        // 过滤掉心跳本身，只断言超时终态；超时算子仍会在上游接收这些事件。
+        StepVerifier.create(service.withSseTimeouts(comments).filter(ignored -> false))
+                .expectErrorSatisfies(error -> assertThat(error).isInstanceOf(TimeoutException.class))
+                .verify(Duration.ofSeconds(1));
+    }
+
+    @Test
+    void ignoresRoleOnlyChunkWhenMeasuringFirstToken() {
+        InternalModelProxyForwardingService.CallObservation observation =
+                new InternalModelProxyForwardingService.CallObservation(
+                        PROVIDER_ID, "Qwen3.6-27B", "/chat/completions", "trace_first_token", "ucid",
+                        new ObjectMapper());
+        observation.markFirstByte(HttpStatus.OK);
+        observation.markSseEvent(ServerSentEvent.<String>builder()
+                .data("{\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}")
+                .build());
+        assertThat(observation.toRecord().firstTokenMillis()).isNull();
+
+        observation.markSseEvent(ServerSentEvent.<String>builder()
+                .data("{\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}")
+                .build());
+        assertThat(observation.toRecord().firstTokenMillis()).isNotNull();
     }
 
     @Test

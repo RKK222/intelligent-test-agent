@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -126,10 +127,51 @@ class InternalModelProviderProbeServiceTest {
         assertThat(recorded.getFirst().outcome()).isEqualTo(InternalModelCallOutcome.UPSTREAM_CONNECT_FAILED);
     }
 
+    @Test
+    void probeKeepsResponseHeadersWhenBodyTimesOut() throws IOException {
+        upstream = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        upstream.createContext("/chat/completions", exchange -> {
+            byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            try {
+                Thread.sleep(300);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(body);
+            }
+        });
+        upstream.start();
+
+        List<InternalModelCallRecord> recorded = new CopyOnWriteArrayList<>();
+        List<InternalModelProbeStatus> statuses = new CopyOnWriteArrayList<>();
+        InternalModelProviderProbeService service = service(
+                upstreamBaseUrl(), recorded, statuses, Duration.ofSeconds(1), Duration.ofMillis(80));
+
+        var result = service.probeAll("trace_probe_body_timeout");
+
+        assertThat(result.outcomes().get(PROVIDER_ID).outcome())
+                .isEqualTo(InternalModelCallOutcome.UPSTREAM_STREAM_IDLE_TIMEOUT);
+        assertThat(recorded).hasSize(1);
+        assertThat(recorded.getFirst().httpStatus()).isEqualTo(200);
+        assertThat(recorded.getFirst().firstByteMillis()).isNotNull();
+    }
+
     private InternalModelProviderProbeService service(
             String baseUrl,
             List<InternalModelCallRecord> recorded,
             List<InternalModelProbeStatus> statuses) {
+        return service(baseUrl, recorded, statuses, Duration.ofSeconds(10), Duration.ofSeconds(30));
+    }
+
+    private InternalModelProviderProbeService service(
+            String baseUrl,
+            List<InternalModelCallRecord> recorded,
+            List<InternalModelProbeStatus> statuses,
+            Duration connectTimeout,
+            Duration responseTimeout) {
         InternalModelProvider provider = new InternalModelProvider(
                 PROVIDER_ID, PROVIDER_ID, baseUrl, true, 1,
                 Instant.now(), Instant.now());
@@ -158,7 +200,7 @@ class InternalModelProviderProbeServiceTest {
         }).when(statusRepository).upsert(org.mockito.ArgumentMatchers.any(InternalModelProbeStatus.class));
 
         return new InternalModelProviderProbeService(
-                registry, modelRepository, recordRepository, statusRepository);
+                registry, modelRepository, recordRepository, statusRepository, connectTimeout, responseTimeout);
     }
 
     private String upstreamBaseUrl() {

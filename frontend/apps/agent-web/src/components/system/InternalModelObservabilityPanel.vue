@@ -451,7 +451,7 @@ function onPageChange(next: number) {
     <template v-if="hasSuperAdmin">
       <div class="ta-imob-header">
         <h3 class="ta-imob-title">内部模型调用可观测</h3>
-        <span class="ta-imob-sub">默认统计真实用户调用（可切换探活）；首 token 为首个有效 SSE data，聚合不伪造 P90/P95；仅记录结构化字段，不含请求正文</span>
+        <span class="ta-imob-sub">默认统计真实用户调用（可切换探活）；首 token 为首个包含模型输出的 SSE data，聚合不伪造 P90/P95；仅记录结构化字段，不含请求正文</span>
       </div>
 
       <el-tabs v-model="activeTab" class="ta-imob-tabs">

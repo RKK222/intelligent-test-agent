@@ -41,10 +41,14 @@ public final class InternalModelCallOutcomeClassifier {
             if (isConnectFailure(cause)) {
                 return InternalModelCallOutcome.UPSTREAM_CONNECT_FAILED;
             }
+            if (isTimeoutFailure(cause)) {
+                return classifyTimeout(signals);
+            }
             // 连接类之外落到通用流中途失败判定。
             return classifyStreamOrUnknown(unwrapped, signals);
         }
-        if (unwrapped instanceof TimeoutException) {
+        // block(Duration) 可能抛出外层 IllegalStateException，底层 cause 仍是 TimeoutException。
+        if (isTimeoutFailure(rootCause(unwrapped))) {
             return classifyTimeout(signals);
         }
         return classifyStreamOrUnknown(unwrapped, signals);
@@ -105,5 +109,23 @@ public final class InternalModelCallOutcomeClassifier {
         }
         // Reactor Netty 连接超时异常类名稳定：ConnectTimeoutException。
         return cause != null && cause.getClass().getSimpleName().equals("ConnectTimeoutException");
+    }
+
+    /** 兼容 JDK TimeoutException 与 Netty 自有的 Read/WriteTimeoutException 层次。 */
+    private static boolean isTimeoutFailure(Throwable cause) {
+        if (cause == null) {
+            return false;
+        }
+        if (cause instanceof TimeoutException) {
+            return true;
+        }
+        Class<?> type = cause.getClass();
+        while (type != null && type != Throwable.class) {
+            if (type.getSimpleName().endsWith("TimeoutException")) {
+                return true;
+            }
+            type = type.getSuperclass();
+        }
+        return false;
     }
 }

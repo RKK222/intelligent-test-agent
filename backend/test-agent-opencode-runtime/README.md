@@ -84,7 +84,7 @@
 
 ## 内部模型调用可观测
 
-代理转发链路上对每次调用落结构化明细（`internal_model_call_records`）并小时聚合（`internal_model_call_stats_hourly`），按 `InternalModelCallOutcome` 分类失败（连接/响应头超时/首事件超时/空或截断流/流空闲/HTTP 错误等）。`firstByteMillis` 只表示响应头到达，流式调用的 `firstTokenMillis` 取首个非空且非 `[DONE]` SSE data；流必须同时有有效 chunk 和 `[DONE]` 才记成功。小时聚合只展示可由 sum/count/max 准确还原的均值和最大值，不伪造 P90/P95 或分布；只记 traceId、耗时、状态与异常类简名，不存请求/响应正文或 Token。`InternalModelCallRecorder` 在 boundedElastic 上异步落库且失败静默，绝不影响转发主链路。`InternalModelProviderProbeService` 每 5 分钟（`opencode-runtime.internal-model-probe`）对启用 provider 发 `max_tokens=1` 最小 chat 探测并维护逐 provider 探活状态；查询统计 API 支持按 `source=USER_CALL|PROBE` 隔离探活与真实调用。`InternalModelObservabilityRetentionTaskHandler` 每日清理 30 天前明细与 180 天前聚合。查询/手动探活入口见 `InternalModelObservabilityController`（仅 `SUPER_ADMIN`）。
+代理转发链路上对每次调用落结构化明细（`internal_model_call_records`）并小时聚合（`internal_model_call_stats_hourly`），按 `InternalModelCallOutcome` 分类失败（连接/响应头超时/首事件超时/空或截断流/流空闲/HTTP 错误等）。`firstByteMillis` 只表示响应头到达，流式调用的 `firstTokenMillis` 取首个包含模型输出字段的 SSE data（`content`、`reasoning_content`、工具输出等）；流必须同时有有效输出 chunk 和 `[DONE]` 才记成功。小时聚合只展示可由 sum/count/max 准确还原的均值和最大值，不伪造 P90/P95 或分布；只记 traceId、耗时、状态与异常类简名，不存请求/响应正文或 Token。`InternalModelCallRecorder` 在 boundedElastic 上异步落库且失败静默，绝不影响转发主链路。`InternalModelProviderProbeService` 每 5 分钟（`opencode-runtime.internal-model-probe`）对启用 provider 发 `max_tokens=1` 最小 chat 探测并维护逐 provider 探活状态；查询统计 API 支持按 `source=USER_CALL|PROBE` 隔离探活与真实调用。`InternalModelObservabilityRetentionTaskHandler` 每日清理 30 天前明细与 180 天前聚合。查询/手动探活入口见 `InternalModelObservabilityController`（仅 `SUPER_ADMIN`）。
 
 ## 测试覆盖
 
