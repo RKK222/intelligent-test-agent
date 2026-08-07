@@ -89,6 +89,10 @@ describe("useBatchTestCaseGeneration", () => {
     };
 
     await generation.execute(request);
+    expect(generation.itemStates.value[references[0]!.id]).toEqual(expect.objectContaining({
+      status: "failed",
+      sessionId: "ses_login"
+    }));
     await generation.execute({ ...request, retry: true });
 
     const firstContext = api.createBatchItemSession.mock.calls[0]![2];
@@ -97,6 +101,49 @@ describe("useBatchTestCaseGeneration", () => {
     expect(api.startRun.mock.calls[0]![0].clientRequestId)
       .toBe(api.startRun.mock.calls[1]![0].clientRequestId);
     expect(generation.itemStates.value[references[0]!.id]?.status).toBe("succeeded");
+  });
+
+  it("clears item state and creates a fresh batch identity after reset", async () => {
+    const api = {
+      readFile: vi.fn(async () => ({ content: "需求正文" })),
+      createBatchItemSession: vi.fn(async (
+        _workspaceId: string,
+        _title: string,
+        _batchContext: { batchId: string; itemRequestId: string }
+      ) => ({ sessionId: "ses_login" })),
+      startRun: vi.fn(async () => ({ runId: "run_login" })),
+      createNightExecutionTask: vi.fn()
+    };
+    const generation = useBatchTestCaseGeneration({
+      api: api as any,
+      conversationContexts: {
+        get: vi.fn(async () => ({ contextToken: "ctx", contextVersion: 1, expiresAt: "2026-08-07T13:00:00Z" })),
+        invalidate: vi.fn(),
+        clear: vi.fn()
+      },
+      references: () => references,
+      workspaceId: () => "wrk_batch",
+      agent: () => "build",
+      model: () => undefined,
+      mode: () => "build",
+      nightSlots: () => null
+    });
+    const request = {
+      referenceIds: [references[0]!.id],
+      requirement: "请生成子条目测试案例。",
+      executionMode: "immediate" as const
+    };
+
+    await generation.execute(request);
+    const firstContext = api.createBatchItemSession.mock.calls[0]![2];
+    generation.reset();
+
+    expect(generation.itemStates.value).toEqual({});
+    await generation.execute(request);
+
+    const secondContext = api.createBatchItemSession.mock.calls[1]![2];
+    expect(secondContext.batchId).not.toBe(firstContext.batchId);
+    expect(secondContext.itemRequestId).not.toBe(firstContext.itemRequestId);
   });
 
   it("does not misclassify an ordinary conflict as a night capacity conflict", async () => {

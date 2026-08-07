@@ -52,6 +52,7 @@ export function useBatchTestCaseGeneration(options: BatchTestCaseGenerationOptio
   running: Ref<boolean>;
   itemStates: Ref<Record<string, BatchItemExecutionState>>;
   execute: (request: BatchGenerationRequest) => Promise<BatchExecutionSummary>;
+  reset: () => void;
 } {
   const running = ref(false);
   const itemStates = ref<Record<string, BatchItemExecutionState>>({});
@@ -92,6 +93,7 @@ export function useBatchTestCaseGeneration(options: BatchTestCaseGenerationOptio
       await mapWithConcurrency(references, 4, async (reference) => {
         const itemRequestId = identity!.itemRequestIds.get(reference.id)!;
         const batchContext = { batchId: identity!.batchId, itemRequestId };
+        let createdSessionId: string | undefined;
         try {
           update(reference.id, { status: "loading-context" });
           const input = await buildBatchItemRunInput({
@@ -106,6 +108,7 @@ export function useBatchTestCaseGeneration(options: BatchTestCaseGenerationOptio
           if (request.executionMode === "immediate") {
             update(reference.id, { status: "creating-session" });
             const created = await options.api.createBatchItemSession(workspaceId, title, batchContext);
+            createdSessionId = created.sessionId;
             update(reference.id, { status: "starting-run", sessionId: created.sessionId });
             const started = await startRunWithConversationContext({
               cache: options.conversationContexts,
@@ -157,7 +160,11 @@ export function useBatchTestCaseGeneration(options: BatchTestCaseGenerationOptio
           });
         } catch (error) {
           const failure = safeFailure(error);
-          update(reference.id, { status: "failed", ...failure });
+          update(reference.id, {
+            status: "failed",
+            ...(createdSessionId ? { sessionId: createdSessionId } : {}),
+            ...failure
+          });
           console.info("batch_test_case_item", {
             batchId: batchContext.batchId,
             itemRequestId,
@@ -180,7 +187,14 @@ export function useBatchTestCaseGeneration(options: BatchTestCaseGenerationOptio
     return result;
   }
 
-  return { running, itemStates, execute };
+  /** 用户主动关闭进度页后结束本批次；运行中拒绝清理，避免在途请求失去幂等身份。 */
+  function reset() {
+    if (running.value) return;
+    identity = null;
+    itemStates.value = {};
+  }
+
+  return { running, itemStates, execute, reset };
 }
 
 function resolveScheduleTimes(
