@@ -37,7 +37,7 @@ class InternalModelObservabilityControllerTest {
         InternalModelCallRecord record = new InternalModelCallRecord(
                 null, "enterprise-deepseek", "DeepSeek-V4", "/chat/completions",
                 InternalModelCallSource.USER_CALL, InternalModelCallOutcome.UPSTREAM_HTTP_ERROR,
-                500, "WebClientResponseException", true, 800L, 50L, 75L,
+                500, "WebClientResponseException", true, 800L, 50L, 75L, 700L,
                 TRACE_ID, "ucid", NOW);
         when(queryService.queryCallRecords(
                         eq("enterprise-deepseek"), any(), any(), any(), any(), any(PageRequest.class)))
@@ -53,6 +53,7 @@ class InternalModelObservabilityControllerTest {
                 .jsonPath("$.data.items[0].providerId").isEqualTo("enterprise-deepseek")
                 .jsonPath("$.data.items[0].outcome").isEqualTo("UPSTREAM_HTTP_ERROR")
                 .jsonPath("$.data.items[0].httpStatus").isEqualTo(500)
+                .jsonPath("$.data.items[0].streamCompleteMillis").isEqualTo(700)
                 .jsonPath("$.data.items[0].source").isEqualTo("USER_CALL");
 
         verify(queryService).queryCallRecords(

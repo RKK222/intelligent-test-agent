@@ -15,5 +15,8 @@ public record InternalModelCallHourlyStatRow(
         Long durationMillisMax,
         Long firstTokenMillisSum,
         Long firstTokenMillisMax,
-        Long firstTokenCount) {
+        Long firstTokenCount,
+        Long streamCompleteMillisSum,
+        Long streamCompleteMillisMax,
+        Long streamCompleteCount) {
 }

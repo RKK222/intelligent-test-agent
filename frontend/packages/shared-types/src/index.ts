@@ -1835,6 +1835,8 @@ export type InternalModelCallRecord = {
   firstByteMillis?: number | null;
   /** 首个包含模型输出的 SSE data 相对耗时；非流式或未收到有效输出 chunk 时为空。 */
   firstTokenMillis?: number | null;
+  /** 从请求开始到收到 OpenAI 兼容 SSE [DONE]；未完整结束或非流式时为空。 */
+  streamCompleteMillis?: number | null;
   traceId: string;
   ucid?: string | null;
   startedAt: string;
@@ -1854,6 +1856,9 @@ export type InternalModelCallHourlyStat = {
   firstTokenMillisSum?: number | null;
   firstTokenMillisMax?: number | null;
   firstTokenCount?: number | null;
+  streamCompleteMillisSum?: number | null;
+  streamCompleteMillisMax?: number | null;
+  streamCompleteCount?: number | null;
 };
 
 /** 逐 provider 最近探活状态，供健康卡片直接读取。 */

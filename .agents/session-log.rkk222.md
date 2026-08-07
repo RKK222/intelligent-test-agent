@@ -7195,3 +7195,34 @@
 - Apple Silicon 不能替代企业两台原生 `linux/amd64` worker 的 Codex sandbox E2E；企业真实 PostgreSQL history、
   模型代理推理、双后台滚动部署、前端浏览器业务验收和节点资源/网络状态仍必须按执行单现场验证，任一 Flyway
   未知 checksum 或首台 Java 校验失败时停止后续节点。
+
+## 2026-08-07 - 修复内部模型流式可观测口径并收拢 BI 看板
+
+### Why
+
+- 旧实现可能把注释、心跳、畸形 data 或只有 role/usage 的 SSE 事件误当首 token，也会被这些事件不断
+  延长超时；既有指标只有首 token 和端到端耗时，不能直接回答 curl 中“首输出到完整流”是否
+  卡顿，原非流式探活也不能验证模型流完整性。
+
+### What
+
+- 真实代理与供应商探活共用单次解析的 OpenAI-compatible SSE 观测器；只认可展示文本、推理、拒答、工具/
+  function call 片段为真实输出，注释、空事件、心跳、元数据、非对象与畸形 data 不计时且不刷新输出截止时间。
+- 新增 `streamCompleteMillis` 明细和小时 sum/max/count 聚合，只在先收到真实输出、再收到 `[DONE]` 时记录；
+  探活改为真实 SSE，2xx 非 SSE、空流、纯元数据或缺少 `[DONE]` 均失败收敛。
+- 增加 Flyway migration 和 PostgreSQL/H2 MyBatis 映射、聚合与升级回归；前端改为顶部统一筛选、中部聚合指标、底部
+  调用明细的 BI 布局，Trace ID 作为首列，三类耗时前置并加宽，时间列放最后。
+
+### How
+
+- 共享 SSE 观测、探活、代理/控制器、H2 持久化定向回归共 27 项通过；真实 PostgreSQL 16 Testcontainers 从
+  `20260807203000` 基线升级到 HEAD，验证新列、Flyway 成功记录和 `ON CONFLICT` 聚合。
+- agent-web typecheck 与 production build 通过；`git diff --check` 和 mock server Python 语法校验通过。构建仅保留
+  既有大 chunk 警告。
+
+### Result
+
+- 现在可同时比较端到端、首 token 和流完成耗时，能区分首输出慢、后续输出/上游收尾慢与下游写出慢；
+  统一筛选同时作用于聚合和明细。
+- 新增的 API 响应字段保持可选，没有新增 HTTP 路径或事件类型；数据库只新增递增 migration，旧数据按 `NULL/0`
+  兼容。不记录请求/响应正文，未修改 `.env*`、generated SDK 或 OpenCode 上游源码。

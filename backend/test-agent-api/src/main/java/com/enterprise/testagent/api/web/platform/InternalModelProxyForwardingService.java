@@ -2,7 +2,6 @@ package com.enterprise.testagent.api.web.platform;
 
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
@@ -15,6 +14,8 @@ import com.enterprise.testagent.model.gateway.OpenAiUpstreamSupport;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProviderRegistry;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelResponsesAdapter;
+import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelSseStreamObserver;
+import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelSseStreamObserver.ObservedEvent;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelThinkStreamConverter;
 import com.enterprise.testagent.opencode.runtime.internalmodel.observability.InternalModelCallOutcomeClassifier;
 import com.enterprise.testagent.opencode.runtime.internalmodel.observability.InternalModelCallRecorder;
@@ -70,6 +71,7 @@ public class InternalModelProxyForwardingService {
     private final InternalModelProxyRuntimeSettings settings;
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
+    private final InternalModelSseStreamObserver sseStreamObserver;
     private final InternalModelCallRecorder recorder;
     private final Duration firstResponseTimeout;
     private final Duration firstEventTimeout;
@@ -123,6 +125,7 @@ public class InternalModelProxyForwardingService {
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
         this.webClient = Objects.requireNonNull(webClient, "webClient must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.sseStreamObserver = new InternalModelSseStreamObserver(objectMapper);
         this.recorder = Objects.requireNonNull(recorder, "recorder must not be null");
         this.firstResponseTimeout = requirePositive(firstResponseTimeout, "firstResponseTimeout");
         this.firstEventTimeout = requirePositive(firstEventTimeout, "firstEventTimeout");
@@ -174,7 +177,7 @@ public class InternalModelProxyForwardingService {
         InternalModelThinkStreamConverter converter = new InternalModelThinkStreamConverter(objectMapper);
         CallObservation observation = new CallObservation(
                 provider.providerId(), model, requestedPath, traceId,
-                exchange.getRequest().getHeaders().getFirst(UCID_HEADER), objectMapper);
+                exchange.getRequest().getHeaders().getFirst(UCID_HEADER));
         Sinks.One<Void> responseHeadersReady = Sinks.one();
         Mono<Void> request = webClient.method(exchange.getRequest().getMethod() == null ? HttpMethod.POST : exchange.getRequest().getMethod())
                 .uri(URI.create(targetUrl))
@@ -215,7 +218,10 @@ public class InternalModelProxyForwardingService {
 
         observation.markStreaming();
         Flux<ServerSentEvent<String>> upstreamEvents = withSseTimeouts(response.bodyToFlux(SSE_EVENT_TYPE))
-                .doOnNext(observation::markSseEvent);
+                .doOnNext(observation::markSseEvent)
+                // [DONE] 是 OpenAI 兼容流的协议终点；此处主动取消仍保持连接的异常上游。
+                .takeUntil(ObservedEvent::done)
+                .map(ObservedEvent::event);
         Flux<ServerSentEvent<String>> events;
         if (responsesSession == null) {
             events = upstreamEvents
@@ -328,84 +334,9 @@ public class InternalModelProxyForwardingService {
                 ignored -> Mono.delay(streamIdleTimeout));
     }
 
-    /** SSE 注释/空事件不能刷新首有效输出截止时间；收到有效输出后才切换到流空闲边界。 */
-    Flux<ServerSentEvent<String>> withSseTimeouts(Flux<ServerSentEvent<String>> source) {
-        return Flux.defer(() -> {
-            long firstOutputDeadline = System.nanoTime() + firstEventTimeout.toNanos();
-            AtomicBoolean firstOutputSeen = new AtomicBoolean(false);
-            Flux<ServerSentEvent<String>> observed = source.doOnNext(event -> {
-                if (hasFirstOutputData(event)) {
-                    firstOutputSeen.set(true);
-                }
-            });
-            return observed.timeout(
-                    timeoutUntil(firstOutputDeadline),
-                    ignored -> firstOutputSeen.get()
-                            ? Mono.delay(streamIdleTimeout)
-                            : timeoutUntil(firstOutputDeadline));
-        });
-    }
-
-    private Mono<Long> timeoutUntil(long deadlineNanos) {
-        long remainingNanos = deadlineNanos - System.nanoTime();
-        return Mono.delay(Duration.ofNanos(Math.max(0L, remainingNanos)));
-    }
-
-    private boolean hasFirstOutputData(ServerSentEvent<String> event) {
-        return event != null && hasFirstOutputData(event.data());
-    }
-
-    /** 只把真正携带模型输出的 SSE data 作为首 token；role/usage/DONE 等元数据不计入。 */
-    private boolean hasFirstOutputData(String data) {
-        return isFirstOutputData(objectMapper, data);
-    }
-
-    private static boolean isFirstOutputData(ObjectMapper objectMapper, String data) {
-        if (data == null || data.isBlank() || "[DONE]".equals(data.trim())) {
-            return false;
-        }
-        try {
-            JsonNode root = objectMapper.readTree(data);
-            JsonNode choices = root == null ? null : root.get("choices");
-            if (choices == null || !choices.isArray()) {
-                // 非标准纯文本 SSE 仍视为模型输出，避免兼容实现被误判为空流。
-                return root == null || !root.isObject()
-                        || containsOutputText(root, "text")
-                        || containsOutputText(root, "content");
-            }
-            for (JsonNode choice : choices) {
-                JsonNode delta = choice.get("delta");
-                if (containsOutputText(delta, "content")
-                        || containsOutputText(delta, "reasoning_content")
-                        || containsOutputText(choice, "text")
-                        || containsToolOutput(delta)) {
-                    return true;
-                }
-            }
-            return false;
-        } catch (Exception ignored) {
-            // 无法解析的上游 data 保留兼容行为，按非空原始输出计时，不保存正文。
-            return true;
-        }
-    }
-
-    private static boolean containsOutputText(JsonNode node, String fieldName) {
-        JsonNode value = node == null ? null : node.get(fieldName);
-        return value != null && value.isTextual() && !value.textValue().isEmpty();
-    }
-
-    private static boolean containsToolOutput(JsonNode delta) {
-        JsonNode toolCalls = delta == null ? null : delta.get("tool_calls");
-        if (toolCalls == null || !toolCalls.isArray()) {
-            return false;
-        }
-        for (JsonNode toolCall : toolCalls) {
-            JsonNode function = toolCall.get("function");
-            if (containsOutputText(function, "name") || containsOutputText(function, "arguments")) {
-                return true;
-            }
-        }
-        return false;
+    /** SSE 注释、元数据和伪心跳都不能刷新有效输出截止时间。 */
+    Flux<ObservedEvent> withSseTimeouts(Flux<ServerSentEvent<String>> source) {
+        return sseStreamObserver.observe(source, firstEventTimeout, streamIdleTimeout);
     }
 
     private static Duration requirePositive(Duration value, String name) {
@@ -583,21 +514,19 @@ public class InternalModelProxyForwardingService {
         private volatile long firstByteNanos;
         private static final long UNSET_NANOS = Long.MIN_VALUE;
         private final AtomicLong firstTokenNanos = new AtomicLong(UNSET_NANOS);
-        private final ObjectMapper objectMapper;
+        private final AtomicLong streamCompleteNanos = new AtomicLong(UNSET_NANOS);
 
         CallObservation(
                 String providerId,
                 String model,
                 String endpoint,
                 String traceId,
-                String ucid,
-                ObjectMapper objectMapper) {
+                String ucid) {
             this.providerId = providerId;
             this.model = model;
             this.endpoint = endpoint;
             this.traceId = traceId;
             this.ucid = ucid;
-            this.objectMapper = objectMapper;
             this.startedAt = Instant.now();
             this.startedNanos = System.nanoTime();
         }
@@ -610,7 +539,7 @@ public class InternalModelProxyForwardingService {
                 String errorClass) {
             CallObservation observation = new CallObservation(
                     providerIdFromHeader(exchange), null, pathFrom(exchange), traceId,
-                    exchange.getRequest().getHeaders().getFirst(UCID_HEADER), null);
+                    exchange.getRequest().getHeaders().getFirst(UCID_HEADER));
             observation.outcome = outcome;
             observation.errorClass = errorClass;
             observation.outcomeExplicitlySet.set(true);
@@ -628,21 +557,20 @@ public class InternalModelProxyForwardingService {
             streaming.set(true);
         }
 
-        void markSseEvent(ServerSentEvent<String> event) {
-            String data = event == null ? null : event.data();
-            if (data == null || data.isBlank()) {
-                return;
-            }
-            if ("[DONE]".equals(data.trim())) {
+        void markSseEvent(ObservedEvent event) {
+            if (event.done()) {
                 doneSeen.set(true);
+                if (hasFirstToken()) {
+                    streamCompleteNanos.compareAndSet(UNSET_NANOS, event.receivedNanos());
+                }
                 return;
             }
-            if (!hasFirstOutputData(data)) {
+            if (!event.output()) {
                 return;
             }
             firstEventMarked.set(true);
-            // AtomicLong 同时发布时间和值，避免终态线程观察到已标记但仍是默认时间。
-            firstTokenNanos.compareAndSet(UNSET_NANOS, System.nanoTime());
+            // 使用数据到达时刻而非 JSON 解析完成时刻，避免解析开销污染首 token 指标。
+            firstTokenNanos.compareAndSet(UNSET_NANOS, event.receivedNanos());
         }
 
         void markDirectStreamEnd() {
@@ -690,6 +618,9 @@ public class InternalModelProxyForwardingService {
             Long firstTokenMillis = hasFirstToken()
                     ? (firstTokenNanos.get() - startedNanos) / 1_000_000
                     : null;
+            Long streamCompleteMillis = hasStreamComplete()
+                    ? (streamCompleteNanos.get() - startedNanos) / 1_000_000
+                    : null;
             return new InternalModelCallRecord(
                     null,
                     providerId,
@@ -703,20 +634,18 @@ public class InternalModelProxyForwardingService {
                     durationMillis,
                     firstByteMillis,
                     firstTokenMillis,
+                    streamCompleteMillis,
                     traceId == null ? "" : traceId,
                     ucid,
                     startedAt);
         }
 
-        private boolean hasFirstOutputData(String data) {
-            if (objectMapper == null) {
-                return data != null && !data.isBlank() && !"[DONE]".equals(data.trim());
-            }
-            return InternalModelProxyForwardingService.isFirstOutputData(objectMapper, data);
-        }
-
         private boolean hasFirstToken() {
             return firstTokenNanos.get() != UNSET_NANOS;
+        }
+
+        private boolean hasStreamComplete() {
+            return streamCompleteNanos.get() != UNSET_NANOS;
         }
 
         private void resolveOutcome(long httpStatusValue) {

@@ -36,7 +36,8 @@ public class MyBatisInternalModelCallRecordRepository implements InternalModelCa
                 record.source().name(),
                 record.outcome().name(),
                 record.durationMillis(),
-                record.firstTokenMillis());
+                record.firstTokenMillis(),
+                record.streamCompleteMillis());
     }
 
     @Override
@@ -88,6 +89,7 @@ public class MyBatisInternalModelCallRecordRepository implements InternalModelCa
                 record.durationMillis(),
                 record.firstByteMillis(),
                 record.firstTokenMillis(),
+                record.streamCompleteMillis(),
                 record.traceId(),
                 record.ucid(),
                 record.startedAt());
@@ -107,6 +109,7 @@ public class MyBatisInternalModelCallRecordRepository implements InternalModelCa
                 row.durationMillis(),
                 row.firstByteMillis(),
                 row.firstTokenMillis(),
+                row.streamCompleteMillis(),
                 row.traceId(),
                 row.ucid(),
                 row.startedAt());
@@ -125,6 +128,9 @@ public class MyBatisInternalModelCallRecordRepository implements InternalModelCa
                 row.durationMillisMax(),
                 row.firstTokenMillisSum(),
                 row.firstTokenMillisMax(),
-                row.firstTokenCount());
+                row.firstTokenCount(),
+                row.streamCompleteMillisSum(),
+                row.streamCompleteMillisMax(),
+                row.streamCompleteCount());
     }
 }

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.enterprise.testagent.domain.configuration.InternalModelProvider;
 import com.enterprise.testagent.domain.configuration.InternalModelProviderModel;
 import com.enterprise.testagent.domain.configuration.InternalModelProviderModelRepository;
@@ -28,7 +29,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/** 覆盖探活成功、上游非 2xx 与连接失败三类结果，并验证明细与状态落库。 */
+/** 覆盖真实 SSE 探活成功、协议异常、超时、上游非 2xx 与连接失败，并验证观测落库。 */
 class InternalModelProviderProbeServiceTest {
 
     private static final String PROVIDER_ID = "enterprise-deepseek";
@@ -47,16 +48,14 @@ class InternalModelProviderProbeServiceTest {
     void probeSucceedsAndRecordsDetailAndStatus() throws IOException {
         upstream = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         upstream.createContext("/chat/completions", exchange -> {
-            byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.length);
-            try {
-                Thread.sleep(50);
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-            }
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
             try (OutputStream output = exchange.getResponseBody()) {
-                output.write(body);
+                writeAndFlush(output, "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n");
+                pause(30);
+                writeAndFlush(output, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n");
+                pause(30);
+                writeAndFlush(output, "data: [DONE]\n\n");
             }
         });
         upstream.start();
@@ -75,11 +74,17 @@ class InternalModelProviderProbeServiceTest {
         assertThat(recorded).hasSize(1);
         assertThat(recorded.getFirst().source()).isEqualTo(InternalModelCallSource.PROBE);
         assertThat(recorded.getFirst().outcome()).isEqualTo(InternalModelCallOutcome.SUCCESS);
-        // 首字节在响应头回调取样，即使正文读取较慢也应早于总耗时；探活是非流式，不产生首 token。
+        // 首字节、首 token 与 [DONE] 分阶段取样，且均应早于端到端耗时。
+        assertThat(recorded.getFirst().streaming()).isTrue();
         assertThat(recorded.getFirst().firstByteMillis()).isNotNull();
         assertThat(recorded.getFirst().firstByteMillis()).isGreaterThanOrEqualTo(0);
         assertThat(recorded.getFirst().firstByteMillis()).isLessThan(recorded.getFirst().durationMillis());
-        assertThat(recorded.getFirst().firstTokenMillis()).isNull();
+        assertThat(recorded.getFirst().firstTokenMillis()).isGreaterThanOrEqualTo(
+                recorded.getFirst().firstByteMillis());
+        assertThat(recorded.getFirst().streamCompleteMillis()).isGreaterThanOrEqualTo(
+                recorded.getFirst().firstTokenMillis());
+        assertThat(recorded.getFirst().streamCompleteMillis()).isLessThanOrEqualTo(
+                recorded.getFirst().durationMillis());
         assertThat(statuses).hasSize(1);
         assertThat(statuses.getFirst().consecutiveFailures()).isZero();
     }
@@ -131,16 +136,11 @@ class InternalModelProviderProbeServiceTest {
     void probeKeepsResponseHeadersWhenBodyTimesOut() throws IOException {
         upstream = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         upstream.createContext("/chat/completions", exchange -> {
-            byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.length);
-            try {
-                Thread.sleep(300);
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-            }
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
             try (OutputStream output = exchange.getResponseBody()) {
-                output.write(body);
+                writeAndFlush(output, ": headers-ready\n\n");
+                pause(300);
             }
         });
         upstream.start();
@@ -153,10 +153,64 @@ class InternalModelProviderProbeServiceTest {
         var result = service.probeAll("trace_probe_body_timeout");
 
         assertThat(result.outcomes().get(PROVIDER_ID).outcome())
-                .isEqualTo(InternalModelCallOutcome.UPSTREAM_STREAM_IDLE_TIMEOUT);
+                .isEqualTo(InternalModelCallOutcome.UPSTREAM_FIRST_EVENT_TIMEOUT);
         assertThat(recorded).hasSize(1);
         assertThat(recorded.getFirst().httpStatus()).isEqualTo(200);
         assertThat(recorded.getFirst().firstByteMillis()).isNotNull();
+        assertThat(recorded.getFirst().firstTokenMillis()).isNull();
+        assertThat(recorded.getFirst().streamCompleteMillis()).isNull();
+    }
+
+    @Test
+    void probeRejectsEmptyNonStreamingSuccessBody() throws IOException {
+        upstream = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        upstream.createContext("/chat/completions", exchange -> {
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, -1);
+            exchange.close();
+        });
+        upstream.start();
+
+        List<InternalModelCallRecord> recorded = new CopyOnWriteArrayList<>();
+        List<InternalModelProbeStatus> statuses = new CopyOnWriteArrayList<>();
+
+        var result = service(upstreamBaseUrl(), recorded, statuses).probeAll("trace_empty_200");
+
+        assertThat(result.outcomes().get(PROVIDER_ID).outcome())
+                .isEqualTo(InternalModelCallOutcome.UPSTREAM_STREAM_INTERRUPTED);
+        assertThat(recorded.getFirst().streaming()).isFalse();
+        assertThat(recorded.getFirst().firstTokenMillis()).isNull();
+    }
+
+    @Test
+    void probeDoesNotLetCommentsExtendIdleDeadline() throws IOException {
+        upstream = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        upstream.createContext("/chat/completions", exchange -> {
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            try (OutputStream output = exchange.getResponseBody()) {
+                writeAndFlush(output, "data: {\"choices\":[{\"delta\":{\"content\":\"first\"}}]}\n\n");
+                for (int index = 0; index < 10; index++) {
+                    pause(20);
+                    writeAndFlush(output, ": keepalive\n\n");
+                }
+            } catch (IOException ignored) {
+                // 客户端在输出空闲超时后主动关闭连接属于预期行为。
+            }
+        });
+        upstream.start();
+
+        List<InternalModelCallRecord> recorded = new CopyOnWriteArrayList<>();
+        List<InternalModelProbeStatus> statuses = new CopyOnWriteArrayList<>();
+        var result = service(
+                upstreamBaseUrl(), recorded, statuses,
+                Duration.ofSeconds(1), Duration.ofMillis(80))
+                .probeAll("trace_idle_timeout");
+
+        assertThat(result.outcomes().get(PROVIDER_ID).outcome())
+                .isEqualTo(InternalModelCallOutcome.UPSTREAM_STREAM_IDLE_TIMEOUT);
+        assertThat(recorded.getFirst().firstTokenMillis()).isNotNull();
+        assertThat(recorded.getFirst().streamCompleteMillis()).isNull();
     }
 
     private InternalModelProviderProbeService service(
@@ -200,10 +254,24 @@ class InternalModelProviderProbeServiceTest {
         }).when(statusRepository).upsert(org.mockito.ArgumentMatchers.any(InternalModelProbeStatus.class));
 
         return new InternalModelProviderProbeService(
-                registry, modelRepository, recordRepository, statusRepository, connectTimeout, responseTimeout);
+                registry, modelRepository, recordRepository, statusRepository,
+                new ObjectMapper(), connectTimeout, responseTimeout);
     }
 
     private String upstreamBaseUrl() {
         return "http://127.0.0.1:" + upstream.getAddress().getPort();
+    }
+
+    private static void writeAndFlush(OutputStream output, String value) throws IOException {
+        output.write(value.getBytes(StandardCharsets.UTF_8));
+        output.flush();
+    }
+
+    private static void pause(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 }

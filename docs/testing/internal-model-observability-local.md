@@ -13,26 +13,29 @@
 `tools/mock-model-server.py` 是纯标准库的 OpenAI-compatible mock，按故障模式返回不同响应：
 
 ```bash
-# 成功（非流式 200，含 usage）
+# 成功（按请求 stream 参数返回 JSON 或完整 SSE）
 python3 tools/mock-model-server.py --port 19070 --mode ok
 
 # 上游 400 / 500（非 SSE 错误正文）
 python3 tools/mock-model-server.py --port 19070 --mode http400
 python3 tools/mock-model-server.py --port 19070 --mode http500
 
-# SSE 流式成功
-python3 tools/mock-model-server.py --port 19070 --mode sse
+# 首响应、首有效输出、输出空闲三种不同超时
+python3 tools/mock-model-server.py --port 19070 --mode header-timeout
+python3 tools/mock-model-server.py --port 19070 --mode first-output-timeout
+python3 tools/mock-model-server.py --port 19070 --mode idle-timeout
 
-# 响应头后挂起（触发首响应超时） / SSE 响应头后立即 EOF（验证空/截断流）
-python3 tools/mock-model-server.py --port 19070 --mode timeout
+# 强制非流式 200 / SSE 响应头后立即 EOF
+python3 tools/mock-model-server.py --port 19070 --mode nonstream-200
 python3 tools/mock-model-server.py --port 19070 --mode empty
 ```
 
 验证 mock 可用：
 
 ```bash
-curl -X POST http://127.0.0.1:19070/chat/completions \
-  -H "Content-Type: application/json" -d '{"model":"mock-model","messages":[{"role":"user","content":"hi"}]}'
+curl -N -X POST http://127.0.0.1:19070/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"mock-model","messages":[{"role":"user","content":"hi"}],"stream":true}'
 ```
 
 ## 2. 配置内部模型 provider 指向 mock
@@ -54,23 +57,26 @@ curl -X POST http://127.0.0.1:19070/chat/completions \
 
 ```bash
 # 从 backend.env 读取代理 key（本地默认空则省略 Authorization）
-curl -X POST http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-model-proxy/v1/chat/completions \
+curl -N -X POST http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-model-proxy/v1/chat/completions \
   -H "Authorization: Bearer ${TEST_AGENT_INTERNAL_PROXY_API_KEY}" \
   -H "X-Enterprise-Model-Provider: local-mock" \
   -H "Content-Type: application/json" \
-  -d '{"model":"mock-model","messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"mock-model","messages":[{"role":"user","content":"hi"}],"stream":true}'
 ```
 
 用不同 `--mode` 重启 mock 后重复调用，可分别复现并核对以下分类：
 
-| mock 模式 | 期望 outcome | 期望 httpStatus |
-|---|---|---|
-| `ok` | `SUCCESS` | 200 |
-| `sse` | `SUCCESS` | 200 |
-| `http400` | `UPSTREAM_HTTP_ERROR` | 400 |
-| `http500` | `UPSTREAM_HTTP_ERROR` | 500 |
-| `timeout` | `UPSTREAM_FIRST_RESPONSE_TIMEOUT` | 200（响应头已到） |
-| `empty` | `UPSTREAM_STREAM_INTERRUPTED` | 200（响应头后立即 EOF，无有效 chunk/[DONE]） |
+| mock 模式 | 真实流式代理 outcome | 流式探活 outcome | httpStatus |
+|---|---|---|---|
+| `ok` / `sse` | `SUCCESS` | `SUCCESS` | 200 |
+| `nonstream-200` | `SUCCESS`（非 SSE 原样透传） | `UPSTREAM_STREAM_INTERRUPTED` | 200 |
+| `http400` / `http500` | `UPSTREAM_HTTP_ERROR` | `UPSTREAM_HTTP_ERROR` | 400 / 500 |
+| `header-timeout` | `UPSTREAM_FIRST_RESPONSE_TIMEOUT` | `UPSTREAM_FIRST_RESPONSE_TIMEOUT` | 空（响应头未到） |
+| `first-output-timeout` | `UPSTREAM_FIRST_EVENT_TIMEOUT` | `UPSTREAM_FIRST_EVENT_TIMEOUT` | 200 |
+| `idle-timeout` | `UPSTREAM_STREAM_IDLE_TIMEOUT` | `UPSTREAM_STREAM_IDLE_TIMEOUT` | 200 |
+| `empty` | `UPSTREAM_STREAM_INTERRUPTED` | `UPSTREAM_STREAM_INTERRUPTED` | 200 |
+
+`first-output-timeout` 会持续发送 SSE 注释和 `data: ping`，`idle-timeout` 会在首个真实输出后持续发送注释；它们用于确认伪心跳不会延后对应截止时间。`timeout` 仍作为 `header-timeout` 的兼容别名。
 
 > 连接失败：把 provider 的 baseUrl 指向未监听端口（如 `http://127.0.0.1:19999`），预期 `UPSTREAM_CONNECT_FAILED`。
 
@@ -84,7 +90,7 @@ curl -X POST http://127.0.0.1:8080/api/internal/platform/opencode-runtime/intern
   -H "Authorization: Bearer <超管token>" -H "Content-Type: application/json" -d '{}'
 ```
 
-把 mock 切到 `http500` 后再探活，观察探活状态卡片变红、`consecutiveFailures` 递增；切回 `ok` 后探活，连续失败清零。
+探活固定发送 `stream=true,max_tokens=1`，必须收到至少一个真实输出 chunk 和 `[DONE]` 才成功。把 mock 切到 `http500` 或 `nonstream-200` 后再探活，观察探活状态卡片变红、`consecutiveFailures` 递增；切回 `ok` 后探活，连续失败清零。
 
 ## 5. 核对观测查询 API
 
@@ -108,12 +114,13 @@ curl "http://127.0.0.1:8080/api/internal/platform/opencode-runtime/internal-mode
 
 ## 验证结论
 
-- **插桩→分类→落库**：由 `InternalModelProxyForwardingServiceTest`（mock WebClient 覆盖 200/超时/流中断）、`InternalModelProviderProbeServiceTest`（本地 HttpServer 覆盖 200/500/连接拒绝）在测试中固化。
+- **插桩→分类→落库**：由 `InternalModelSseStreamObserverTest` 固化真实输出与伪心跳语义；`InternalModelProxyForwardingServiceTest` 覆盖首 token、`[DONE]` 流完成和流中断；`InternalModelProviderProbeServiceTest` 用本地 HttpServer 覆盖完整 SSE、空 200、超时、500 与连接拒绝。
 - **查询/探活 API**：由 `InternalModelObservabilityControllerTest`、持久化集成测试覆盖。
 - **本指南**用真实 HTTP 链路串起上述各层，作为部署前的人工交互复现，不替代真实企业端点验收。
 
 ## 已知边界
 
 - mock 不校验 Token/鉴权，仅用于链路验证；真实环境仍走代理 key 与 provider Token。
-- `timeout` 模式挂起 120 秒，触发后记得重启 mock 或等超时释放；`empty` 模式响应头后立即 EOF，应记录为 `UPSTREAM_STREAM_INTERRUPTED`，用于验证空流不被误记成功。
+- 三种 timeout 模式最长挂起 120 秒，客户端达到平台截止时间后会主动断开；需要切换模式时可直接重启 mock。`empty` 与 `nonstream-200` 用于验证 2xx 不会让流式探活误报健康。
+- 明细的 `firstTokenMillis` 是首个真实输出到达耗时，`streamCompleteMillis` 是收到 `[DONE]` 的上游完整流耗时；`durationMillis` 还包含代理向下游写出和终态处理，不应拿来替代前两者。
 - 真实企业端点的网络时延、真实 token 计数、TLS 与证书等，仍需部署后按 `deploy/internal/EMPTY-RESPONSE-BODY-TROUBLESHOOTING.md` 现场验收。

@@ -14,6 +14,7 @@ import com.enterprise.testagent.domain.internalmodelobservability.InternalModelC
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordRepository;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProviderRegistry;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
+import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelSseStreamObserver;
 import com.enterprise.testagent.opencode.runtime.internalmodel.observability.InternalModelCallRecorder;
 import com.enterprise.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
 import java.nio.charset.StandardCharsets;
@@ -90,17 +91,23 @@ class InternalModelProxyForwardingServiceTest {
     void ignoresRoleOnlyChunkWhenMeasuringFirstToken() {
         InternalModelProxyForwardingService.CallObservation observation =
                 new InternalModelProxyForwardingService.CallObservation(
-                        PROVIDER_ID, "Qwen3.6-27B", "/chat/completions", "trace_first_token", "ucid",
-                        new ObjectMapper());
+                        PROVIDER_ID, "Qwen3.6-27B", "/chat/completions", "trace_first_token", "ucid");
+        InternalModelSseStreamObserver observer = new InternalModelSseStreamObserver(new ObjectMapper());
         observation.markFirstByte(HttpStatus.OK);
-        observation.markSseEvent(ServerSentEvent.<String>builder()
+        observation.markSseEvent(observer.inspect(ServerSentEvent.<String>builder()
                 .data("{\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}")
-                .build());
+                .build()));
+        observation.markSseEvent(observer.inspect(ServerSentEvent.<String>builder()
+                .data("ping")
+                .build()));
+        observation.markSseEvent(observer.inspect(ServerSentEvent.<String>builder()
+                .data("{\"choices\":[")
+                .build()));
         assertThat(observation.toRecord().firstTokenMillis()).isNull();
 
-        observation.markSseEvent(ServerSentEvent.<String>builder()
+        observation.markSseEvent(observer.inspect(ServerSentEvent.<String>builder()
                 .data("{\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}")
-                .build());
+                .build()));
         assertThat(observation.toRecord().firstTokenMillis()).isNotNull();
     }
 
@@ -215,6 +222,7 @@ class InternalModelProxyForwardingServiceTest {
         assertThat(record.firstByteMillis()).isNotNull();
         assertThat(record.firstTokenMillis()).isNotNull();
         assertThat(record.firstTokenMillis()).isLessThanOrEqualTo(record.durationMillis());
+        assertThat(record.streamCompleteMillis()).isNull();
     }
 
     @Test
@@ -238,6 +246,36 @@ class InternalModelProxyForwardingServiceTest {
         assertThat(recorded.getFirst().outcome())
                 .isEqualTo(com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcome.UPSTREAM_STREAM_INTERRUPTED);
         assertThat(recorded.getFirst().firstTokenMillis()).isNull();
+        assertThat(recorded.getFirst().streamCompleteMillis()).isNull();
+    }
+
+    @Test
+    void recordsDoneAsUpstreamStreamCompletion() {
+        List<InternalModelCallRecord> recorded = new CopyOnWriteArrayList<>();
+        org.springframework.core.io.buffer.DataBufferFactory bufferFactory =
+                org.springframework.core.io.buffer.DefaultDataBufferFactory.sharedInstance;
+        String body = "data: {\"choices\":[{\"delta\":{\"content\":\"完成\"}}]}\n\n"
+                + "data: [DONE]\n\n";
+        WebClient webClient = WebClient.builder()
+                .exchangeFunction(request -> Mono.just(org.springframework.web.reactive.function.client.ClientResponse
+                        .create(HttpStatus.OK)
+                        .header(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_EVENT_STREAM_VALUE)
+                        .body(Flux.just(bufferFactory.wrap(body.getBytes(StandardCharsets.UTF_8))))
+                        .build()))
+                .build();
+        InternalModelProxyForwardingService service = service(
+                webClient, List.of(runtimeConfig(PROVIDER_ID, MODEL_TOKEN)), recorded);
+
+        StepVerifier.create(service.forward(exchange(), REQUEST_BODY, "trace_done"))
+                .verifyComplete();
+
+        awaitRecorded(recorded);
+        InternalModelCallRecord record = recorded.getFirst();
+        assertThat(record.outcome())
+                .isEqualTo(com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcome.SUCCESS);
+        assertThat(record.streamCompleteMillis()).isNotNull();
+        assertThat(record.streamCompleteMillis()).isGreaterThanOrEqualTo(record.firstTokenMillis());
+        assertThat(record.streamCompleteMillis()).isLessThanOrEqualTo(record.durationMillis());
     }
 
     private InternalModelProxyForwardingService service(WebClient webClient) {

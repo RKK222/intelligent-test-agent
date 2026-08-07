@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { Activity, Play, Radar, RefreshCw } from "lucide-vue-next";
 import { ElMessage } from "element-plus";
@@ -19,7 +19,6 @@ const props = defineProps<{
 const api = inject<BackendApiClient>("api")!;
 const queryClient = useQueryClient();
 
-const activeTab = ref<"records" | "stats">("records");
 const filterProviderId = ref("");
 const filterOutcome = ref<InternalModelCallOutcome | "">("");
 // 默认只看真实用户调用，避免每 5 分钟一次的探活把业务首 token/成功率冲淡。
@@ -84,7 +83,10 @@ function probeAll() {
 const probeStatuses = computed(() => probeStatusQuery.data.value ?? []);
 const records = computed(() => recordsQuery.data.value?.items ?? []);
 const recordsTotal = computed(() => recordsQuery.data.value?.total ?? 0);
-const stats = computed(() => statsQuery.data.value ?? []);
+// stats API 返回全部 outcome；同页展示时在前端复用明细 outcome 筛选，保证两块口径一致。
+const stats = computed(() => (statsQuery.data.value ?? []).filter((row) =>
+  !filterOutcome.value || row.outcome === filterOutcome.value
+));
 
 type ProviderMetric = {
   providerId: string;
@@ -99,6 +101,10 @@ type ProviderMetric = {
   firstTokenMillisMax: number;
   firstTokenCount: number;
   avgFirstTokenMillis: number | null;
+  streamCompleteMillisSum: number;
+  streamCompleteMillisMax: number;
+  streamCompleteCount: number;
+  avgStreamCompleteMillis: number | null;
 };
 
 /** 按 provider 汇总小时聚合为指标卡片；用于「聚合统计」tab 的指标视图。 */
@@ -120,7 +126,11 @@ const providerMetrics = computed<ProviderMetric[]>(() => {
         firstTokenMillisSum: 0,
         firstTokenMillisMax: 0,
         firstTokenCount: 0,
-        avgFirstTokenMillis: null
+        avgFirstTokenMillis: null,
+        streamCompleteMillisSum: 0,
+        streamCompleteMillisMax: 0,
+        streamCompleteCount: 0,
+        avgStreamCompleteMillis: null
       };
       byProvider.set(providerId, metric);
     }
@@ -135,6 +145,12 @@ const providerMetrics = computed<ProviderMetric[]>(() => {
     metric.firstTokenMillisSum += row.firstTokenMillisSum ?? 0;
     metric.firstTokenMillisMax = Math.max(metric.firstTokenMillisMax, row.firstTokenMillisMax ?? 0);
     metric.firstTokenCount += row.firstTokenCount ?? 0;
+    metric.streamCompleteMillisSum += row.streamCompleteMillisSum ?? 0;
+    metric.streamCompleteMillisMax = Math.max(
+      metric.streamCompleteMillisMax,
+      row.streamCompleteMillisMax ?? 0
+    );
+    metric.streamCompleteCount += row.streamCompleteCount ?? 0;
   }
   for (const metric of byProvider.values()) {
     metric.successRate = metric.totalRequests === 0
@@ -146,6 +162,9 @@ const providerMetrics = computed<ProviderMetric[]>(() => {
     metric.avgFirstTokenMillis = metric.firstTokenCount === 0
       ? null
       : Math.round(metric.firstTokenMillisSum / metric.firstTokenCount);
+    metric.avgStreamCompleteMillis = metric.streamCompleteCount === 0
+      ? null
+      : Math.round(metric.streamCompleteMillisSum / metric.streamCompleteCount);
   }
   return [...byProvider.values()];
 });
@@ -175,6 +194,9 @@ const overallMetrics = computed(() => {
   let firstTokenMillisSum = 0;
   let firstTokenMillisMax = 0;
   let firstTokenCount = 0;
+  let streamCompleteMillisSum = 0;
+  let streamCompleteMillisMax = 0;
+  let streamCompleteCount = 0;
   let minHour: string | null = null;
   let maxHour: string | null = null;
   for (const row of stats.value) {
@@ -185,6 +207,9 @@ const overallMetrics = computed(() => {
     firstTokenMillisSum += row.firstTokenMillisSum ?? 0;
     firstTokenMillisMax = Math.max(firstTokenMillisMax, row.firstTokenMillisMax ?? 0);
     firstTokenCount += row.firstTokenCount ?? 0;
+    streamCompleteMillisSum += row.streamCompleteMillisSum ?? 0;
+    streamCompleteMillisMax = Math.max(streamCompleteMillisMax, row.streamCompleteMillisMax ?? 0);
+    streamCompleteCount += row.streamCompleteCount ?? 0;
     if (minHour === null || row.statHour < minHour) minHour = row.statHour;
     if (maxHour === null || row.statHour > maxHour) maxHour = row.statHour;
   }
@@ -197,6 +222,9 @@ const overallMetrics = computed(() => {
   const firstTokenAvg = firstTokenCount > 0
     ? Math.round(firstTokenMillisSum / firstTokenCount)
     : null;
+  const streamCompleteAvg = streamCompleteCount > 0
+    ? Math.round(streamCompleteMillisSum / streamCompleteCount)
+    : null;
   // QPS：按小时跨度估算（至少 1 小时，避免单小时行除 0）。
   const hoursSpan = minHour && maxHour
     ? Math.max(1, (new Date(maxHour).getTime() - new Date(minHour).getTime()) / 3_600_000)
@@ -208,6 +236,9 @@ const overallMetrics = computed(() => {
     avgDuration, maxDuration,
     firstTokenAvg, firstTokenMax: firstTokenCount > 0 ? firstTokenMillisMax : null,
     firstTokenCount,
+    streamCompleteAvg,
+    streamCompleteMax: streamCompleteCount > 0 ? streamCompleteMillisMax : null,
+    streamCompleteCount,
     totalDurationSeconds: Math.round(totalDurationMillis / 1000),
     qps, providerCount
   };
@@ -366,7 +397,6 @@ function resizeCharts() {
 
 onMounted(() => {
   window.addEventListener("resize", resizeCharts);
-  // 初始为调用记录 tab，聚合 tab 容器不可见，等切到聚合统计时再渲染图表。
   renderCharts();
 });
 
@@ -379,14 +409,8 @@ onBeforeUnmount(() => {
   providerChart = null;
 });
 
-// 数据变化时重绘；聚合 tab 首次激活时容器从隐藏变可见，需强制重渲染图表。
+// 聚合指标与明细常驻同一页面，数据变化后直接重绘图表。
 watch(() => stats.value, renderCharts, { deep: true });
-watch(activeTab, (tab) => {
-  if (tab === "stats") {
-    // 容器在 el-tab-pane 内，切换后需等布局完成再渲染，否则 echarts 拿到 0 宽。
-    nextTick(() => setTimeout(renderCharts, 50));
-  }
-});
 
 const outcomeText: Record<InternalModelCallOutcome, string> = {
   SUCCESS: "成功",
@@ -451,64 +475,76 @@ function onPageChange(next: number) {
     <template v-if="hasSuperAdmin">
       <div class="ta-imob-header">
         <h3 class="ta-imob-title">内部模型调用可观测</h3>
-        <span class="ta-imob-sub">默认统计真实用户调用（可切换探活）；首 token 为首个包含模型输出的 SSE data，聚合不伪造 P90/P95；仅记录结构化字段，不含请求正文</span>
+        <span class="ta-imob-sub">默认统计真实用户调用（可切换探活）；首 token 为首个真实输出 SSE data，流完成为收到 [DONE]，端到端耗时包含下游写出；仅记录结构化字段</span>
       </div>
 
-      <el-tabs v-model="activeTab" class="ta-imob-tabs">
-        <el-tab-pane label="调用记录" name="records">
-          <div class="ta-imob-filter-bar">
-            <el-select
-              v-model="filterProviderId"
-              placeholder="供应商"
-              clearable
-              class="ta-imob-filter"
-              @change="applyFilters"
-            >
-              <el-option
-                v-for="option in providerOptions"
-                :key="option.value"
-                :label="option.label"
-                :value="option.value"
-              />
-            </el-select>
-            <el-select
-              v-model="filterOutcome"
-              placeholder="结果分类"
-              clearable
-              class="ta-imob-filter"
-              @change="applyFilters"
-            >
-              <el-option
-                v-for="(label, key) in outcomeText"
-                :key="key"
-                :label="label"
-                :value="key"
-              />
-            </el-select>
-            <el-select
-              v-model="filterSource"
-              placeholder="来源"
-              clearable
-              class="ta-imob-filter"
-              @change="applyFilters"
-            >
-              <el-option label="用户调用" value="USER_CALL" />
-              <el-option label="探活" value="PROBE" />
-            </el-select>
-            <button
-              type="button"
-              class="ta-imob-probe-all-btn"
-              :disabled="probeMutation.isPending.value"
-              @click="probeAll()"
-            >
-              <Activity class="ta-imob-probe-icon" :size="12" />
-              全部探活
-            </button>
-          </div>
+      <div class="ta-imob-combined">
+        <div class="ta-imob-filter-bar">
+          <span class="ta-imob-filter-title">筛选条件</span>
+          <el-select
+            v-model="filterProviderId"
+            placeholder="供应商"
+            clearable
+            class="ta-imob-filter"
+            @change="applyFilters"
+          >
+            <el-option
+              v-for="option in providerOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+          <el-select
+            v-model="filterOutcome"
+            placeholder="结果分类"
+            clearable
+            class="ta-imob-filter"
+            @change="applyFilters"
+          >
+            <el-option
+              v-for="(label, key) in outcomeText"
+              :key="key"
+              :label="label"
+              :value="key"
+            />
+          </el-select>
+          <el-select
+            v-model="filterSource"
+            placeholder="来源"
+            clearable
+            class="ta-imob-filter"
+            @change="applyFilters"
+          >
+            <el-option label="用户调用" value="USER_CALL" />
+            <el-option label="探活" value="PROBE" />
+          </el-select>
+          <button
+            type="button"
+            class="ta-imob-probe-all-btn"
+            :disabled="probeMutation.isPending.value"
+            @click="probeAll()"
+          >
+            <Activity class="ta-imob-probe-icon" :size="12" />
+            全部探活
+          </button>
+        </div>
+
+        <section class="ta-imob-section ta-imob-records-section">
+          <h4 class="ta-imob-section-title">调用明细</h4>
 
           <el-table v-loading="recordsQuery.isLoading.value" :data="records" stripe>
-            <el-table-column prop="startedAt" label="时间" min-width="160">
-              <template #default="{ row }">{{ formatTime(row.startedAt) }}</template>
+            <el-table-column prop="traceId" label="Trace ID" min-width="220" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.traceId || "-" }}</template>
+            </el-table-column>
+            <el-table-column label="端到端耗时" min-width="140">
+              <template #default="{ row }">{{ formatDuration(row.durationMillis) }}</template>
+            </el-table-column>
+            <el-table-column label="首 token" min-width="140">
+              <template #default="{ row }">{{ formatDuration(row.firstTokenMillis) }}</template>
+            </el-table-column>
+            <el-table-column label="流完成" min-width="140">
+              <template #default="{ row }">{{ formatDuration(row.streamCompleteMillis) }}</template>
             </el-table-column>
             <el-table-column prop="model" label="模型" min-width="150">
               <template #default="{ row }">{{ row.model ?? "-" }}</template>
@@ -527,11 +563,8 @@ function onPageChange(next: number) {
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="总耗时" width="100">
-              <template #default="{ row }">{{ formatDuration(row.durationMillis) }}</template>
-            </el-table-column>
-            <el-table-column label="首 token" width="110">
-              <template #default="{ row }">{{ formatDuration(row.firstTokenMillis) }}</template>
+            <el-table-column prop="startedAt" label="时间" min-width="180">
+              <template #default="{ row }">{{ formatTime(row.startedAt) }}</template>
             </el-table-column>
           </el-table>
 
@@ -544,9 +577,10 @@ function onPageChange(next: number) {
               @current-change="onPageChange"
             />
           </div>
-        </el-tab-pane>
+        </section>
 
-        <el-tab-pane label="聚合统计" name="stats">
+        <section class="ta-imob-section ta-imob-metrics-section">
+          <h4 class="ta-imob-section-title">聚合指标</h4>
           <div v-loading="statsQuery.isLoading.value" class="ta-imob-stats">
             <!-- 全局总览指标（多类指标聚合） -->
             <div v-if="overallMetrics.totalRequests" class="ta-imob-overview">
@@ -602,6 +636,14 @@ function onPageChange(next: number) {
                   <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.firstTokenMax) }}</span>
                   <span class="ta-imob-overview-label">最大首 token</span>
                 </div>
+                <div class="ta-imob-overview-cell">
+                  <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.streamCompleteAvg) }}</span>
+                  <span class="ta-imob-overview-label">平均流完成</span>
+                </div>
+                <div class="ta-imob-overview-cell">
+                  <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.streamCompleteMax) }}</span>
+                  <span class="ta-imob-overview-label">最大流完成</span>
+                </div>
               </div>
             </div>
 
@@ -655,6 +697,10 @@ function onPageChange(next: number) {
                       <span class="ta-imob-metric-label">平均首 token</span>
                     </div>
                     <div class="ta-imob-metric-cell">
+                      <span class="ta-imob-metric-value">{{ formatDuration(metric.avgStreamCompleteMillis) }}</span>
+                      <span class="ta-imob-metric-label">平均流完成</span>
+                    </div>
+                    <div class="ta-imob-metric-cell">
                       <span class="ta-imob-metric-value" :class="{ 'is-bad': metric.failureCount > 0 }">
                         {{ metric.failureCount }}
                       </span>
@@ -695,10 +741,18 @@ function onPageChange(next: number) {
               <el-table-column label="最大首 token" width="120">
                 <template #default="{ row }">{{ formatDuration((row.firstTokenCount ?? 0) > 0 ? (row.firstTokenMillisMax ?? 0) : null) }}</template>
               </el-table-column>
+              <el-table-column label="平均流完成" width="120">
+                <template #default="{ row }">
+                  {{ formatDuration((row.streamCompleteCount ?? 0) > 0 ? Math.round((row.streamCompleteMillisSum ?? 0) / (row.streamCompleteCount ?? 1)) : null) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="最大流完成" width="120">
+                <template #default="{ row }">{{ formatDuration((row.streamCompleteCount ?? 0) > 0 ? (row.streamCompleteMillisMax ?? 0) : null) }}</template>
+              </el-table-column>
             </el-table>
           </div>
-        </el-tab-pane>
-      </el-tabs>
+        </section>
+      </div>
     </template>
     <div v-else class="ta-imob-placeholder">当前账号无系统管理权限</div>
   </section>
@@ -730,22 +784,32 @@ function onPageChange(next: number) {
   font-size: 12px;
   color: #6b7280;
 }
-.ta-imob-tabs {
+.ta-imob-combined {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  gap: 24px;
 }
-/* el-tabs 默认 content 高度不随 flex 收缩，显式约束让表格区域在容器内滚动而不是撑破外层。 */
-.ta-imob-tabs :deep(.el-tabs__content),
-.ta-imob-tabs :deep(.el-tab-pane) {
+.ta-imob-section {
   display: flex;
   flex-direction: column;
+  gap: 12px;
   min-height: 0;
 }
-.ta-imob-tabs :deep(.el-tabs__content) {
-  flex: 1;
-  overflow: auto;
+.ta-imob-metrics-section {
+  order: 1;
+}
+.ta-imob-records-section {
+  order: 2;
+  padding-top: 20px;
+  border-top: 1px solid #e5e7eb;
+}
+.ta-imob-section-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
 }
 .ta-imob-stats {
   display: flex;
@@ -868,8 +932,17 @@ function onPageChange(next: number) {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
   flex-wrap: wrap;
+}
+.ta-imob-filter-title {
+  margin-right: 4px;
+  color: #374151;
+  font-size: 13px;
+  font-weight: 600;
 }
 .ta-imob-filter {
   width: 160px;

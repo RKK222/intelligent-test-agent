@@ -11,14 +11,17 @@
 用法：
     python3 tools/mock-model-server.py --mode ok --port 19070
     python3 tools/mock-model-server.py --mode http500 --port 19070
-    python3 tools/mock-model-server.py --mode timeout --port 19070
+    python3 tools/mock-model-server.py --mode first-output-timeout --port 19070
 
 故障模式：
-    ok        返回 200 非流式 JSON（{"choices":[{"message":{"content":"ok"}}]}）
+    ok        按请求 stream 参数返回合法 JSON 或 SSE
     sse       返回 200 text/event-stream，含 data: 与 [DONE]
+    nonstream-200 强制返回 200 JSON，用于验证流式探活拒绝非 SSE 成功响应
     http400   返回 400 非 SSE 错误正文
     http500   返回 500 非 SSE 错误正文
-    timeout   响应头后静默不发送正文，模拟首响应/首事件超时
+    header-timeout       响应头前挂起，模拟首响应超时（timeout 为兼容别名）
+    first-output-timeout 发 SSE 响应头后只发注释/伪心跳，模拟首有效输出超时
+    idle-timeout         发首个有效输出后只发注释，模拟输出空闲超时
     empty     返回 200 text/event-stream 后立即 EOF，不发任何事件，模拟空/截断流
 """
 import argparse
@@ -42,8 +45,11 @@ class MockHandler(BaseHTTPRequestHandler):
     def do_POST(self):  # noqa: N802 - BaseHTTPRequestHandler 命名约定
         # 消费并丢弃请求体，避免 keep-alive 残留。
         length = int(self.headers.get("Content-Length") or 0)
-        if length > 0:
-            self.rfile.read(length)
+        request_body = self.rfile.read(length) if length > 0 else b"{}"
+        try:
+            stream_requested = bool(json.loads(request_body).get("stream"))
+        except (json.JSONDecodeError, AttributeError):
+            stream_requested = False
 
         if self.mode == "http400":
             body = b"upstream rejected"
@@ -63,8 +69,13 @@ class MockHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
+        if self.mode in ("timeout", "header-timeout"):
+            # 响应头发送前挂起，确保分类为首响应超时。
+            time.sleep(120)
+            return
+
         # 200 分支。
-        if self.mode == "sse":
+        if self.mode == "sse" or (self.mode == "ok" and stream_requested):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
@@ -75,6 +86,34 @@ class MockHandler(BaseHTTPRequestHandler):
             self.wfile.flush()
             return
 
+        if self.mode == "first-output-timeout":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            for _ in range(1200):
+                try:
+                    self.wfile.write(b": keepalive\n\ndata: ping\n\n")
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    break
+                time.sleep(0.1)
+            return
+
+        if self.mode == "idle-timeout":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            self.wfile.write(b'data: {"choices":[{"delta":{"content":"first"}}]}\n\n')
+            self.wfile.flush()
+            for _ in range(1200):
+                try:
+                    self.wfile.write(b": keepalive\n\n")
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    break
+                time.sleep(0.1)
+            return
+
         if self.mode == "empty":
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -82,16 +121,7 @@ class MockHandler(BaseHTTPRequestHandler):
             self.wfile.flush()
             return
 
-        if self.mode == "timeout":
-            # 发响应头后挂起，正文迟迟不到，触发首响应/首事件超时。
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.flush()
-            time.sleep(120)
-            return
-
-        # 默认 ok：非流式 200。
+        # nonstream-200 或 stream=false 的 ok：返回普通 JSON。
         body = ok_body()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -107,7 +137,10 @@ class MockHandler(BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description="OpenAI-compatible 模型 mock 服务")
     parser.add_argument("--port", type=int, default=19070)
-    parser.add_argument("--mode", choices=["ok", "sse", "http400", "http500", "timeout", "empty"],
+    parser.add_argument("--mode", choices=[
+        "ok", "sse", "nonstream-200", "http400", "http500", "timeout",
+        "header-timeout", "first-output-timeout", "idle-timeout", "empty"
+    ],
                         default="ok", help="故障模式（默认 ok）")
     args = parser.parse_args()
 

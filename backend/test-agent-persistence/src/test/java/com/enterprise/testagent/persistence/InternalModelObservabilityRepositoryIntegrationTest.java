@@ -49,7 +49,7 @@ class InternalModelObservabilityRepositoryIntegrationTest {
         Flyway.configure().dataSource(dataSource).locations("classpath:db/migration")
                 .baselineOnMigrate(true)
                 .baselineVersion("20260807130133")
-                .target("20260807203000").load().migrate();
+                .target("20260807222227").load().migrate();
         SqlSessionFactoryBean factory = new SqlSessionFactoryBean();
         factory.setDataSource(dataSource);
         factory.setMapperLocations(new PathMatchingResourcePatternResolver()
@@ -87,6 +87,9 @@ class InternalModelObservabilityRepositoryIntegrationTest {
         assertThat(success.firstTokenMillisSum()).isEqualTo(75L);
         assertThat(success.firstTokenMillisMax()).isEqualTo(75L);
         assertThat(success.firstTokenCount()).isEqualTo(1L);
+        assertThat(success.streamCompleteMillisSum()).isEqualTo(75L);
+        assertThat(success.streamCompleteMillisMax()).isEqualTo(75L);
+        assertThat(success.streamCompleteCount()).isEqualTo(1L);
     }
 
     @Test
@@ -102,6 +105,8 @@ class InternalModelObservabilityRepositoryIntegrationTest {
         assertThat(success.firstTokenMillisSum()).isEqualTo(150L);
         assertThat(success.firstTokenMillisMax()).isEqualTo(75L);
         assertThat(success.firstTokenCount()).isEqualTo(2L);
+        assertThat(success.streamCompleteMillisSum()).isEqualTo(150L);
+        assertThat(success.streamCompleteCount()).isEqualTo(2L);
     }
 
     @Test
@@ -129,6 +134,7 @@ class InternalModelObservabilityRepositoryIntegrationTest {
                 T0.minus(1, ChronoUnit.HOURS), T0.plus(2, ChronoUnit.HOURS));
         assertThat(probeStats).hasSize(1);
         assertThat(probeStats.getFirst().firstTokenCount()).isZero();
+        assertThat(probeStats.getFirst().streamCompleteCount()).isZero();
     }
 
     @Test
@@ -174,6 +180,7 @@ class InternalModelObservabilityRepositoryIntegrationTest {
         return new InternalModelCallRecord(
                 null, providerId, model, endpoint, source,
                 InternalModelCallOutcome.valueOf(outcome), status, errorClass, true, duration, 50L, firstTokenMillis,
+                firstTokenMillis,
                 "trace_imo_test", "ucid_test", startedAt);
     }
 

@@ -18,6 +18,7 @@
             <arg column="duration_ms" javaType="java.lang.Long"/>
             <arg column="first_byte_ms" javaType="java.lang.Long"/>
             <arg column="first_token_ms" javaType="java.lang.Long"/>
+            <arg column="stream_complete_ms" javaType="java.lang.Long"/>
             <arg column="trace_id" javaType="java.lang.String"/>
             <arg column="ucid" javaType="java.lang.String"/>
             <arg column="started_at" javaType="java.time.Instant"/>
@@ -38,6 +39,9 @@
             <arg column="first_token_ms_sum" javaType="java.lang.Long"/>
             <arg column="first_token_ms_max" javaType="java.lang.Long"/>
             <arg column="first_token_count" javaType="java.lang.Long"/>
+            <arg column="stream_complete_ms_sum" javaType="java.lang.Long"/>
+            <arg column="stream_complete_ms_max" javaType="java.lang.Long"/>
+            <arg column="stream_complete_count" javaType="java.lang.Long"/>
         </constructor>
     </resultMap>
 
@@ -58,10 +62,12 @@
     <insert id="insertCallRecord" parameterType="com.enterprise.testagent.persistence.mybatis.InternalModelCallRecordRow">
         insert into internal_model_call_records(
             provider_id, model, endpoint, source, outcome, http_status, error_class,
-            streaming, duration_ms, first_byte_ms, first_token_ms, trace_id, ucid, started_at
+            streaming, duration_ms, first_byte_ms, first_token_ms, stream_complete_ms,
+            trace_id, ucid, started_at
         ) values (
             #{providerId}, #{model}, #{endpoint}, #{source}, #{outcome}, #{httpStatus}, #{errorClass},
-            #{streaming}, #{durationMillis}, #{firstByteMillis}, #{firstTokenMillis}, #{traceId}, #{ucid}, #{startedAt}
+            #{streaming}, #{durationMillis}, #{firstByteMillis}, #{firstTokenMillis}, #{streamCompleteMillis},
+            #{traceId}, #{ucid}, #{startedAt}
         )
     </insert>
 
@@ -69,12 +75,17 @@
         insert into internal_model_call_stats_hourly(
             stat_hour, provider_id, model, endpoint, source, outcome,
             request_count, duration_ms_sum, duration_ms_max,
-            first_token_ms_sum, first_token_ms_max, first_token_count, updated_at
+            first_token_ms_sum, first_token_ms_max, first_token_count,
+            stream_complete_ms_sum, stream_complete_ms_max, stream_complete_count, updated_at
         ) values (
             #{statHour}, #{providerId}, #{model}, #{endpoint}, #{source}, #{outcome},
             1, #{durationMillis}, #{durationMillis},
-            coalesce(#{firstTokenMillis}, 0), coalesce(#{firstTokenMillis}, 0),
-            case when #{firstTokenMillis} is null then 0 else 1 end,
+            coalesce(#{firstTokenMillis,jdbcType=BIGINT}, 0),
+            coalesce(#{firstTokenMillis,jdbcType=BIGINT}, 0),
+            case when #{firstTokenMillis,jdbcType=BIGINT} is null then 0 else 1 end,
+            coalesce(#{streamCompleteMillis,jdbcType=BIGINT}, 0),
+            coalesce(#{streamCompleteMillis,jdbcType=BIGINT}, 0),
+            case when #{streamCompleteMillis,jdbcType=BIGINT} is null then 0 else 1 end,
             current_timestamp
         )
         on conflict (stat_hour, provider_id, model, endpoint, source, outcome) do update set
@@ -84,6 +95,9 @@
             first_token_ms_sum = internal_model_call_stats_hourly.first_token_ms_sum + excluded.first_token_ms_sum,
             first_token_ms_max = greatest(internal_model_call_stats_hourly.first_token_ms_max, excluded.first_token_ms_max),
             first_token_count = internal_model_call_stats_hourly.first_token_count + excluded.first_token_count,
+            stream_complete_ms_sum = internal_model_call_stats_hourly.stream_complete_ms_sum + excluded.stream_complete_ms_sum,
+            stream_complete_ms_max = greatest(internal_model_call_stats_hourly.stream_complete_ms_max, excluded.stream_complete_ms_max),
+            stream_complete_count = internal_model_call_stats_hourly.stream_complete_count + excluded.stream_complete_count,
             updated_at = current_timestamp
     </insert>
 
@@ -92,12 +106,17 @@
         using (values (
             #{statHour}, #{providerId}, #{model}, #{endpoint}, #{source}, #{outcome},
             1, #{durationMillis}, #{durationMillis},
-            coalesce(#{firstTokenMillis}, 0), coalesce(#{firstTokenMillis}, 0),
-            case when #{firstTokenMillis} is null then 0 else 1 end
+            coalesce(#{firstTokenMillis,jdbcType=BIGINT}, 0),
+            coalesce(#{firstTokenMillis,jdbcType=BIGINT}, 0),
+            case when #{firstTokenMillis,jdbcType=BIGINT} is null then 0 else 1 end,
+            coalesce(#{streamCompleteMillis,jdbcType=BIGINT}, 0),
+            coalesce(#{streamCompleteMillis,jdbcType=BIGINT}, 0),
+            case when #{streamCompleteMillis,jdbcType=BIGINT} is null then 0 else 1 end
         )) incoming(
             stat_hour, provider_id, model, endpoint, source, outcome,
             request_count, duration_ms_sum, duration_ms_max,
-            first_token_ms_sum, first_token_ms_max, first_token_count
+            first_token_ms_sum, first_token_ms_max, first_token_count,
+            stream_complete_ms_sum, stream_complete_ms_max, stream_complete_count
         )
         on target.stat_hour = incoming.stat_hour
            and target.provider_id = incoming.provider_id
@@ -114,16 +133,22 @@
             first_token_ms_max = case when incoming.first_token_ms_max > target.first_token_ms_max
                 then incoming.first_token_ms_max else target.first_token_ms_max end,
             first_token_count = target.first_token_count + incoming.first_token_count,
+            stream_complete_ms_sum = target.stream_complete_ms_sum + incoming.stream_complete_ms_sum,
+            stream_complete_ms_max = case when incoming.stream_complete_ms_max > target.stream_complete_ms_max
+                then incoming.stream_complete_ms_max else target.stream_complete_ms_max end,
+            stream_complete_count = target.stream_complete_count + incoming.stream_complete_count,
             updated_at = current_timestamp
         when not matched then insert (
             stat_hour, provider_id, model, endpoint, source, outcome,
             request_count, duration_ms_sum, duration_ms_max,
-            first_token_ms_sum, first_token_ms_max, first_token_count, updated_at
+            first_token_ms_sum, first_token_ms_max, first_token_count,
+            stream_complete_ms_sum, stream_complete_ms_max, stream_complete_count, updated_at
         ) values (
             incoming.stat_hour, incoming.provider_id, incoming.model, incoming.endpoint,
             incoming.source, incoming.outcome,
             1, incoming.duration_ms_sum, incoming.duration_ms_max,
             incoming.first_token_ms_sum, incoming.first_token_ms_max, incoming.first_token_count,
+            incoming.stream_complete_ms_sum, incoming.stream_complete_ms_max, incoming.stream_complete_count,
             current_timestamp
         )
     </insert>
@@ -139,7 +164,8 @@
 
     <select id="findCallRecords" resultMap="CallRecordRowMap">
         select id, provider_id, model, endpoint, source, outcome, http_status, error_class,
-               streaming, duration_ms, first_byte_ms, first_token_ms, trace_id, ucid, started_at
+               streaming, duration_ms, first_byte_ms, first_token_ms, stream_complete_ms,
+               trace_id, ucid, started_at
         from internal_model_call_records
         <include refid="CallRecordWhere"/>
         order by started_at desc, id desc
@@ -154,7 +180,8 @@
     <select id="findHourlyStats" resultMap="HourlyStatRowMap">
         select stat_hour, provider_id, model, endpoint, source, outcome,
                request_count, duration_ms_sum, duration_ms_max,
-               first_token_ms_sum, first_token_ms_max, first_token_count
+               first_token_ms_sum, first_token_ms_max, first_token_count,
+               stream_complete_ms_sum, stream_complete_ms_max, stream_complete_count
         from internal_model_call_stats_hourly
         where 1 = 1
         <if test="providerId != null">and provider_id = #{providerId}</if>

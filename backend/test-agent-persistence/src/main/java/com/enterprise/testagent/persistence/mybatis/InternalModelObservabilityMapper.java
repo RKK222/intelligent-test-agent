@@ -20,7 +20,8 @@ public interface InternalModelObservabilityMapper {
             @Param("source") String source,
             @Param("outcome") String outcome,
             @Param("durationMillis") long durationMillis,
-            @Param("firstTokenMillis") Long firstTokenMillis);
+            @Param("firstTokenMillis") Long firstTokenMillis,
+            @Param("streamCompleteMillis") Long streamCompleteMillis);
 
     List<InternalModelCallRecordRow> findCallRecords(
             @Param("providerId") String providerId,

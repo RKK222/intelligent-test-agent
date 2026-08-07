@@ -1,5 +1,6 @@
 package com.enterprise.testagent.opencode.runtime.internalmodel.observability;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.configuration.InternalModelProvider;
 import com.enterprise.testagent.domain.configuration.InternalModelProviderModel;
@@ -13,6 +14,8 @@ import com.enterprise.testagent.domain.internalmodelobservability.InternalModelP
 import com.enterprise.testagent.domain.internalmodelobservability.InternalModelProbeStatusRepository;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProviderRegistry;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProviderSnapshot;
+import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelSseStreamObserver;
+import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelSseStreamObserver.ObservedEvent;
 import io.netty.channel.ChannelOption;
 import java.time.Duration;
 import java.time.Instant;
@@ -20,16 +23,21 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
 
 /**
@@ -51,11 +59,15 @@ public class InternalModelProviderProbeService {
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration RESPONSE_TIMEOUT = Duration.ofSeconds(30);
     private static final String CHAT_PATH = "/chat/completions";
+    private static final ParameterizedTypeReference<ServerSentEvent<String>> SSE_EVENT_TYPE =
+            new ParameterizedTypeReference<>() {};
+    private static final long UNSET_NANOS = Long.MIN_VALUE;
 
     private final InternalModelProviderRegistry registry;
     private final InternalModelProviderModelRepository modelRepository;
     private final InternalModelCallRecordRepository callRecordRepository;
     private final InternalModelProbeStatusRepository probeStatusRepository;
+    private final InternalModelSseStreamObserver sseStreamObserver;
     private final Duration connectTimeout;
     private final Duration responseTimeout;
 
@@ -63,12 +75,14 @@ public class InternalModelProviderProbeService {
             InternalModelProviderRegistry registry,
             InternalModelProviderModelRepository modelRepository,
             InternalModelCallRecordRepository callRecordRepository,
-            InternalModelProbeStatusRepository probeStatusRepository) {
+            InternalModelProbeStatusRepository probeStatusRepository,
+            ObjectMapper objectMapper) {
         this(
                 registry,
                 modelRepository,
                 callRecordRepository,
                 probeStatusRepository,
+                objectMapper,
                 CONNECT_TIMEOUT,
                 RESPONSE_TIMEOUT);
     }
@@ -78,6 +92,7 @@ public class InternalModelProviderProbeService {
             InternalModelProviderModelRepository modelRepository,
             InternalModelCallRecordRepository callRecordRepository,
             InternalModelProbeStatusRepository probeStatusRepository,
+            ObjectMapper objectMapper,
             Duration connectTimeout,
             Duration responseTimeout) {
         this.registry = Objects.requireNonNull(registry, "registry must not be null");
@@ -86,6 +101,8 @@ public class InternalModelProviderProbeService {
                 Objects.requireNonNull(callRecordRepository, "callRecordRepository must not be null");
         this.probeStatusRepository =
                 Objects.requireNonNull(probeStatusRepository, "probeStatusRepository must not be null");
+        this.sseStreamObserver = new InternalModelSseStreamObserver(
+                Objects.requireNonNull(objectMapper, "objectMapper must not be null"));
         this.connectTimeout = requirePositive(connectTimeout, "connectTimeout");
         this.responseTimeout = requirePositive(responseTimeout, "responseTimeout");
     }
@@ -146,6 +163,7 @@ public class InternalModelProviderProbeService {
         long startedNanos = System.nanoTime();
         WebClient client = webClient();
         AtomicReference<ProbeResponse> observedResponse = new AtomicReference<>();
+        ProbeStreamObservation streamObservation = new ProbeStreamObservation();
         try {
             ProbeResponse response = client.post()
                     .uri(normalizedTarget(provider.baseUrl(), CHAT_PATH))
@@ -154,21 +172,42 @@ public class InternalModelProviderProbeService {
                     .exchangeToMono(upstream -> {
                         // 在收到响应头的回调内取样，不能等正文消费完再伪造首字节时间。
                         long firstByteNanos = System.nanoTime();
-                        ProbeResponse header = new ProbeResponse(upstream.statusCode(), firstByteNanos);
+                        boolean streaming = upstream.headers().contentType()
+                                .map(MediaType.TEXT_EVENT_STREAM::isCompatibleWith)
+                                .orElse(false);
+                        ProbeResponse header = new ProbeResponse(
+                                upstream.statusCode(), firstByteNanos, streaming);
                         observedResponse.set(header);
-                        return upstream.releaseBody().thenReturn(header);
+                        if (!upstream.statusCode().is2xxSuccessful() || !streaming) {
+                            return upstream.releaseBody().thenReturn(header);
+                        }
+                        return sseStreamObserver.observe(
+                                        upstream.bodyToFlux(SSE_EVENT_TYPE),
+                                        responseTimeout,
+                                        responseTimeout)
+                                .doOnNext(streamObservation::mark)
+                                .takeUntil(ObservedEvent::done)
+                                .then(Mono.just(header));
                     })
-                    .block(responseTimeout);
+                    // 响应头、首有效输出、流完成各有独立边界；额外保留连接建立时间。
+                    .block(connectTimeout.plus(responseTimeout.multipliedBy(3)));
             if (response == null) {
                 return recordProbe(provider.providerId(), model, InternalModelCallOutcome.UPSTREAM_FIRST_RESPONSE_TIMEOUT,
-                        null, null, startedAt, startedNanos, null, traceId);
+                        null, null, startedAt, startedNanos, false, null, null, null, traceId);
             }
             HttpStatusCode status = response.status();
-            InternalModelCallOutcome outcome = status.is2xxSuccessful()
-                    ? InternalModelCallOutcome.SUCCESS
-                    : InternalModelCallOutcome.UPSTREAM_HTTP_ERROR;
+            InternalModelCallOutcome outcome;
+            if (!status.is2xxSuccessful()) {
+                outcome = InternalModelCallOutcome.UPSTREAM_HTTP_ERROR;
+            } else if (response.streaming() && streamObservation.completed()) {
+                outcome = InternalModelCallOutcome.SUCCESS;
+            } else {
+                // 2xx 非 SSE、空流、只有元数据或缺少 [DONE] 都不代表模型可用。
+                outcome = InternalModelCallOutcome.UPSTREAM_STREAM_INTERRUPTED;
+            }
             return recordProbe(provider.providerId(), model, outcome, status.value(), null,
-                    startedAt, startedNanos, response.firstByteNanos(), traceId);
+                    startedAt, startedNanos, response.streaming(), response.firstByteNanos(),
+                    streamObservation.firstTokenNanos(), streamObservation.streamCompleteNanos(), traceId);
         } catch (org.springframework.web.reactive.function.client.WebClientResponseException httpError) {
             // 保留 WebClient 异常兼容分支：按真实上游状态码归为 HTTP_ERROR，响应已到达。
             long firstByteNanos = System.nanoTime();
@@ -177,16 +216,26 @@ public class InternalModelProviderProbeService {
                     ? InternalModelCallOutcome.SUCCESS
                     : InternalModelCallOutcome.UPSTREAM_HTTP_ERROR;
             return recordProbe(provider.providerId(), model, outcome, status.value(), null,
-                    startedAt, startedNanos, firstByteNanos, traceId);
+                    startedAt, startedNanos, false, firstByteNanos, null, null, traceId);
         } catch (RuntimeException error) {
             ProbeResponse header = observedResponse.get();
-            InternalModelCallOutcome outcome = InternalModelCallOutcomeClassifier.classify(
-                    error,
-                    new InternalModelCallOutcomeClassifier.TimeoutSignals(header != null, false, false));
+            InternalModelCallOutcome outcome = header != null && !header.status().is2xxSuccessful()
+                    ? InternalModelCallOutcome.UPSTREAM_HTTP_ERROR
+                    : InternalModelCallOutcomeClassifier.classify(
+                            error,
+                            new InternalModelCallOutcomeClassifier.TimeoutSignals(
+                                    header != null,
+                                    streamObservation.hasFirstToken(),
+                                    header != null && header.streaming()));
             return recordProbe(provider.providerId(), model, outcome,
                     header == null ? null : header.status().value(),
                     InternalModelCallOutcomeClassifier.errorClass(error),
-                    startedAt, startedNanos, header == null ? null : header.firstByteNanos(), traceId);
+                    startedAt, startedNanos,
+                    header != null && header.streaming(),
+                    header == null ? null : header.firstByteNanos(),
+                    streamObservation.firstTokenNanos(),
+                    streamObservation.streamCompleteNanos(),
+                    traceId);
         }
     }
 
@@ -198,14 +247,21 @@ public class InternalModelProviderProbeService {
             String errorClass,
             Instant startedAt,
             long startedNanos,
+            boolean streaming,
             Long firstByteNanos,
+            Long firstTokenNanos,
+            Long streamCompleteNanos,
             String traceId) {
         long durationMillis = (System.nanoTime() - startedNanos) / 1_000_000;
         Long firstByteMillis = firstByteNanos == null ? null : (firstByteNanos - startedNanos) / 1_000_000;
+        Long firstTokenMillis = firstTokenNanos == null ? null : (firstTokenNanos - startedNanos) / 1_000_000;
+        Long streamCompleteMillis = streamCompleteNanos == null
+                ? null
+                : (streamCompleteNanos - startedNanos) / 1_000_000;
         InternalModelCallRecord record = new InternalModelCallRecord(
                 null, providerId, model, CHAT_PATH, InternalModelCallSource.PROBE, outcome,
-                httpStatus, errorClass, false, durationMillis, firstByteMillis,
-                null,
+                httpStatus, errorClass, streaming, durationMillis, firstByteMillis,
+                firstTokenMillis, streamCompleteMillis,
                 traceId == null ? "" : traceId, PROBE_UCID, startedAt);
         try {
             callRecordRepository.record(record);
@@ -241,13 +297,13 @@ public class InternalModelProviderProbeService {
                 "model", model,
                 "messages", List.of(Map.of("role", "user", "content", "health check")),
                 "max_tokens", 1,
-                "stream", false);
+                "stream", true);
     }
 
     private void applyHeaders(HttpHeaders headers, String authToken, String traceId) {
         headers.setBearerAuth(authToken);
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setAccept(List.of(MediaType.APPLICATION_JSON));
+        headers.setAccept(List.of(MediaType.TEXT_EVENT_STREAM));
         headers.set(UCID_HEADER, PROBE_UCID);
         if (traceId != null && !traceId.isBlank()) {
             headers.set("X-Trace-Id", traceId);
@@ -280,7 +336,44 @@ public class InternalModelProviderProbeService {
         return duration;
     }
 
-    private record ProbeResponse(HttpStatusCode status, long firstByteNanos) {
+    private record ProbeResponse(HttpStatusCode status, long firstByteNanos, boolean streaming) {
+    }
+
+    /** 只接收共享解析器已经判定的事件，避免探活与真实代理产生两套首 token 语义。 */
+    private static final class ProbeStreamObservation {
+        private final AtomicLong firstTokenNanos = new AtomicLong(UNSET_NANOS);
+        private final AtomicLong streamCompleteNanos = new AtomicLong(UNSET_NANOS);
+        private final AtomicBoolean doneSeen = new AtomicBoolean(false);
+
+        void mark(ObservedEvent event) {
+            if (event.output()) {
+                firstTokenNanos.compareAndSet(UNSET_NANOS, event.receivedNanos());
+            }
+            if (event.done()) {
+                doneSeen.set(true);
+                if (hasFirstToken()) {
+                    streamCompleteNanos.compareAndSet(UNSET_NANOS, event.receivedNanos());
+                }
+            }
+        }
+
+        boolean hasFirstToken() {
+            return firstTokenNanos.get() != UNSET_NANOS;
+        }
+
+        boolean completed() {
+            return hasFirstToken() && doneSeen.get();
+        }
+
+        Long firstTokenNanos() {
+            long value = firstTokenNanos.get();
+            return value == UNSET_NANOS ? null : value;
+        }
+
+        Long streamCompleteNanos() {
+            long value = streamCompleteNanos.get();
+            return value == UNSET_NANOS ? null : value;
+        }
     }
 
     /** 单次探活结果集合：providerId -> outcome 等结构化字段。 */

@@ -100,5 +100,6 @@ Repository 端口只定义在 domain，具体 JDBC/Flyway 实现必须放在 `te
   唯一，`upstreamModelId` 只供模型网关解析。
 - `ModelGatewayUsageDailyRepository` 接受无正文的 `ModelGatewayUsageDelta`，只按稳定聚合维度累加计数、token
   和耗时。
+- `InternalModelCallRecordRepository` 接受不含正文的代理/探活结构化观测；明细中的 `firstByteMillis`、`firstTokenMillis`、`streamCompleteMillis` 分别表达响应头、首个真实 SSE 输出和 `[DONE]` 到达，`durationMillis` 保留端到端耗时。小时聚合为首 token 与流完成分别保留 sum/max/count，未达到对应阶段时不参与该指标统计。
 
 LobeHub 自身用户、Session、部门 Workspace、资源与审计是独立 fork 的领域，不在本模块建模。
