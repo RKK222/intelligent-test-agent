@@ -80,9 +80,16 @@ describe("FigmaShell", () => {
     expect(figmaShellSource).toMatch(/\.figma-header-help:active,[\s\S]*?\.figma-header-help\.is-open\s*\{[^}]*background: var\(--ta-shell-accent-soft, #fdf2f2\);[^}]*color: var\(--ta-shell-accent-strong, #991b1b\)/s);
     expect(figmaShellSource).toContain('<BookOpen :size="20" :stroke-width="1.5" />');
     expect(figmaShellSource).toMatch(/\.figma-runtime-inventory-summary\s*\{[^}]*border: 1px solid var\(--ta-shell-border, #e5e7eb\);[^}]*background: transparent/s);
-    expect(figmaShellSource).toMatch(/\.figma-app-menu-trigger,[\s\S]*?\.figma-context-menu-trigger\s*\{[^}]*border: 1px solid var\(--ta-shell-border, #e5e7eb\);[^}]*background: var\(--ta-shell-surface, #fff\)/s);
     expect(figmaShellSource).toContain('data-testid="header-workspace-selector"');
     expect(figmaShellSource).toContain('data-testid="header-version-selector"');
+    expect(figmaShellSource).toContain('data-testid="header-context-rail"');
+    expect(figmaShellSource).toMatch(/\.figma-context-rail\s*\{[^}]*height: 34px;[^}]*border: 1px solid var\(--ta-shell-border, #e5e7eb\);[^}]*border-radius: 11px;[^}]*background: var\(--ta-shell-surface, #fff\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-context-rail::before\s*\{[^}]*width: 3px;[^}]*height: 15px;[^}]*background: var\(--ta-shell-accent, #c8161d\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-context-rail\.has-open-menu\s*\{[^}]*border-color: var\(--ta-shell-accent, #c8161d\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-context-rail > :not\(:first-child\)::before\s*\{[^}]*background: var\(--ta-shell-border, #e5e7eb\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-app-menu-trigger,[\s\S]*?\.figma-context-menu-trigger\s*\{[^}]*height: 26px;[^}]*border: 0;[^}]*background: transparent/s);
+    expect(figmaShellSource).toMatch(/\.figma-app-menu-dropdown\s*\{[^}]*border-radius: 12px;[^}]*box-shadow:\s*0 12px 32px rgba\(15, 23, 42, 0\.10\),\s*0 2px 8px rgba\(15, 23, 42, 0\.06\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-app-menu-item\s*\{[^}]*border-radius: 8px/s);
     expect(figmaShellSource).toMatch(/\.figma-user-avatar-btn\s*\{[^}]*border: 1px solid var\(--ta-shell-border, #e5e7eb\);[^}]*background: var\(--ta-shell-surface, #fff\)/s);
     expect(figmaShellSource).toMatch(/\.figma-user-avatar\s*\{[^}]*background: var\(--ta-shell-hover, #f3f4f6\);[^}]*color: var\(--ta-shell-header-text, #000000\)/s);
     expect(figmaShellSource).toMatch(/\.figma-user-avatar--compact\s*\{[^}]*font-size: 12px/s);
@@ -920,6 +927,16 @@ describe("FigmaShell", () => {
     const workspaceSwitch = wrapper.get('[data-testid="header-workspace-selector"]');
     const versionSwitch = wrapper.get('[data-testid="header-version-selector"]');
     const userSwitch = wrapper.get(".figma-user-avatar-btn");
+    const contextRail = wrapper.get('[data-testid="header-context-rail"]');
+    const railSegments = contextRail.findAll(
+      ":scope > .figma-app-menu-wrapper, :scope > .figma-workspace-menu-wrapper, :scope > .figma-version-menu-wrapper"
+    );
+    expect(railSegments.map((segment) => segment.classes()[0])).toEqual([
+      "figma-app-menu-wrapper",
+      "figma-workspace-menu-wrapper",
+      "figma-version-menu-wrapper"
+    ]);
+    expect(contextRail.classes()).not.toContain("has-open-menu");
     expect(headerCenter.element.contains(appSwitch.element)).toBe(true);
     expect(appSwitch.element.compareDocumentPosition(workspaceSwitch.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(workspaceSwitch.element.compareDocumentPosition(versionSwitch.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -933,6 +950,10 @@ describe("FigmaShell", () => {
     expect(summary.text()).toContain("MCP 2");
     expect(summary.text()).toContain("Tool 1");
     expect(summary.text()).toContain("Plugin 0");
+
+    await appSwitch.get("button").trigger("click");
+    expect(contextRail.classes()).toContain("has-open-menu");
+    expect(appSwitch.get("button").attributes("aria-expanded")).toBe("true");
 
     await summary.trigger("click");
 
