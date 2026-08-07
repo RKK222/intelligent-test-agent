@@ -69,6 +69,10 @@ class InternalModelProviderProbeServiceTest {
         assertThat(recorded).hasSize(1);
         assertThat(recorded.getFirst().source()).isEqualTo(InternalModelCallSource.PROBE);
         assertThat(recorded.getFirst().outcome()).isEqualTo(InternalModelCallOutcome.SUCCESS);
+        // 探活同步 block 返回即响应到达，首 token 时间应为正且不大于总耗时。
+        assertThat(recorded.getFirst().firstByteMillis()).isNotNull();
+        assertThat(recorded.getFirst().firstByteMillis()).isGreaterThanOrEqualTo(0);
+        assertThat(recorded.getFirst().firstByteMillis()).isLessThanOrEqualTo(recorded.getFirst().durationMillis());
         assertThat(statuses).hasSize(1);
         assertThat(statuses.getFirst().consecutiveFailures()).isZero();
     }

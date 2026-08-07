@@ -130,19 +130,22 @@ public class InternalModelProviderProbeService {
                 return recordProbe(provider.providerId(), model, InternalModelCallOutcome.UPSTREAM_FIRST_RESPONSE_TIMEOUT,
                         null, null, startedAt, startedNanos, null, traceId);
             }
+            // 探活为同步 block 调用，返回即代表响应已到达，此刻记录首字节时间。
+            long firstByteNanos = System.nanoTime();
             InternalModelCallOutcome outcome = status.is2xxSuccessful()
                     ? InternalModelCallOutcome.SUCCESS
                     : InternalModelCallOutcome.UPSTREAM_HTTP_ERROR;
             return recordProbe(provider.providerId(), model, outcome, status.value(), null,
-                    startedAt, startedNanos, startedNanos, traceId);
+                    startedAt, startedNanos, firstByteNanos, traceId);
         } catch (org.springframework.web.reactive.function.client.WebClientResponseException httpError) {
-            // retrieve() 对非 2xx 直接抛异常：按真实上游状态码归为 HTTP_ERROR。
+            // retrieve() 对非 2xx 直接抛异常：按真实上游状态码归为 HTTP_ERROR；异常抛出即响应已到。
+            long firstByteNanos = System.nanoTime();
             HttpStatusCode status = httpError.getStatusCode();
             InternalModelCallOutcome outcome = status.is2xxSuccessful()
                     ? InternalModelCallOutcome.SUCCESS
                     : InternalModelCallOutcome.UPSTREAM_HTTP_ERROR;
             return recordProbe(provider.providerId(), model, outcome, status.value(), null,
-                    startedAt, startedNanos, startedNanos, traceId);
+                    startedAt, startedNanos, firstByteNanos, traceId);
         } catch (RuntimeException error) {
             InternalModelCallOutcome outcome = InternalModelCallOutcomeClassifier.classify(
                     error, new InternalModelCallOutcomeClassifier.TimeoutSignals(false, false, false));
