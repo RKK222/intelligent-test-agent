@@ -334,8 +334,8 @@ retry 字段：
 
 - `session.status.retry` 在右侧时间线展示原因和“重试中 N 秒后 - 第 X 次 / 共 3 次”。
 - 等待 retry 时前端运行态仍视为运行中，不出队 busy follow-up，不关闭 RunEvent SSE，也不显示失败卡。
-- 前端按固定 60 秒倒计时展示每次 retry；最多等待 3 次。第 1/2 次倒计时结束后可 best-effort 取消当前等待 Run，并用最近一次 Run 草稿自动新建 Run；第 3 次倒计时结束前若收到后续消息、非 retry 状态或 `run.*` 终态，以后续事件为准；若倒计时结束后仍没有新状态，前端本地把对话收敛为失败并展示最近一次 retry message。
-- 失败卡片的手动重试与上述自动重试复用同一准备流程：聊天状态已经失败但平台 Run 仍为非终态时，前端先隔离旧 Run、best-effort 取消，再以同一用户轮次启动新 Run，旧 Run 的晚到事件不得覆盖新轮。刷新或重新进入历史失败会话后，前端从最后一条持久化 USER 消息恢复正文与可重放 PromptPart；找不到有效用户请求时必须明确提示重新输入，不能把失败卡或 assistant 内容当作 prompt。
+- 前端可按现有 60 秒口径展示 OpenCode 的 retry 等待状态，但倒计时只用于展示；不得在到期后取消 Run、重新 `startRun` 或本地伪造终态。后续消息、非 retry 状态或 `run.*` 终态到达后按真实事件收敛。
+- 失败卡片与最后一条用户消息的“撤销重发”统一调用平台 resends API。前端不得从本地草稿或历史 assistant 内容自行重建请求；后端重新验证远端最后用户边界，并从原生用户轮次取得可重放输入。
 - 后端 `run.succeeded/run.failed/run.cancelled` 仍是持久 Run 终态事实源；前端 retry 失败兜底只用于避免浏览器一直停留在运行中。
 
 ## `session.updated`
@@ -400,7 +400,7 @@ scope 发现与缓存规则：
 - `message.part.updated` 的 `part.type=tool` 且 `part.tool=task` 时，前端从 `part.state.metadata.sessionId/sessionID` 或 payload scope 识别子会话，并生成 `SubagentSession`：标题优先取 `state.title`，再取 `state.input.description`、`state.input.prompt` 首行；Agent 名称优先取 `state.input.subagent_type`，再取 `metadata.agent`，缺失时展示 `Task`；状态优先取 `part.state.status`。
 - 若历史 live payload 同时携带 `sessionId=child`、`sessionID=root`、`isChildSession=true` 和 root `part.sessionID`，前端按 root task part 兼容处理，避免同一个 root message scope 被覆盖成 child。
 - `session.child.discovered` 和 `session.scope.updated` 到达时，前端用 payload 中的 `sessionId`、`parentSessionId`、`taskMessageId`、`taskPartId`、`taskCallId` 补全子会话索引和 `taskPartId -> sessionId` 映射。
-- `session.status` 的 `payload.status` 可能是字符串，也可能是 opencode 原生对象。当前已知对象形态包含 `type`、`attempt`、`message`、`action` 和 `next`；当 `status.type=retry` 时，前端必须把它归一为运行期 `runtimeStatus.type=retry`，用平台 `eventId` 作为本地 retry key，并在第一次收到该 retry 事件时启动固定 60 秒倒计时。时间线展示“重试中 N 秒后 - 第 X 次 / 共 3 次”、上游 `message` 和可选 `action.link`，等待期间不能继续只显示普通“思考中”。
+- `session.status` 的 `payload.status` 可能是字符串，也可能是 opencode 原生对象。当前已知对象形态包含 `type`、`attempt`、`message`、`action` 和 `next`；当 `status.type=retry` 时，前端必须把它归一为运行期 `runtimeStatus.type=retry`，用平台 `eventId` 作为本地 retry key。时间线可展示“重试中 N 秒后 - 第 X 次 / 共 3 次”、上游 `message` 和可选 `action.link`，但该倒计时不触发平台重发，等待期间不能继续只显示普通“思考中”。
 - Run 终态按事件自己的 `runId` 记录；同一 Run 已收到 `run.succeeded/run.failed/run.cancelled` 后，乱序到达的 `session.status.busy/retry` 必须忽略，不得回退全局运行态。不同 `runId` 的新轮 `session.status` 仍可正常进入 busy/retry。
 - 原生两阶段场景下，未绑定的 root task part 会先显示为不可点击“智能体 / 准备中”；收到带 `taskPartId` 的 child discovery 后，同一个入口转为 `Explore + title` 并可点击。
 - 主 Agent 视图过滤 `messageScopesById[messageId].isChildSession=true` 的 user/assistant 输出，只保留 root 输出和 root task tool part 卡片；task 子 Agent 卡片始终独立展示，不参与普通 `tool-group` 折叠；点击 task 卡片后切到对应 child session 视图。若后续 `message.part.removed`、`message.removed` 或 snapshot 缺少原始 task part，但 `subagentsBySessionId/subagentByTaskPartId` 仍有绑定索引，前端会在主视图合成一个导航入口，避免子 Agent 卡片短暂出现后消失。
@@ -409,7 +409,7 @@ scope 发现与缓存规则：
 终态派生规则：
 
 - `session.status` 的 `status.type=idle` 和 `session.idle` 均规范化为 `session.status`。
-- `session.status` 的 `status.type=retry` 不派生 `run.failed` 或 `run.succeeded`，也不更新 Run 终态；它表示上游仍在等待重试或需要用户处理限额/订阅等 action，前端应作为非终态运行状态展示。前端不使用 opencode 原生 `next` 作为展示时间，第 1/2 次本地 60 秒倒计时结束后可 best-effort 取消当前等待 Run 并用同一请求草稿新建 Run；第 3 次倒计时结束仍无后续事件时，本地收敛为失败以避免页面永久运行中。
+- `session.status` 的 `status.type=retry` 不派生 `run.failed` 或 `run.succeeded`，也不更新 Run 终态；它表示上游仍在等待供应商重试或需要用户处理限额/订阅等 action，前端仅作为非终态运行状态展示。任何倒计时归零都不得取消当前 Run、自动新建 Run 或本地伪造失败；撤销重发只由独立 resends 状态机驱动。
 - root session idle 额外派生 `run.succeeded`；child session idle 只发送 `session.status`。不得用“idle 前尚无 assistant 输出”过滤真实远端终态；平台通过正确的 OpenCode 时序 dispatch ID 防止消息排序错误导致的无输出 idle。
 - root `session.error` 额外派生 `run.failed`；child `session.error` 只发送 `session.error`。
 - `session.next.step.ended` 不再派生 `run.succeeded`，只作为兼容未知事件保留上下文。
@@ -444,7 +444,7 @@ manager 复用现有 `sessionPath/configPath/environment` 字段，在合并调�
 
 超级管理员定时任务管理页只调用 `POST /api/internal/platform/xxl-job/sso-tickets`，随后把 XXL Admin 作为同源 iframe 加载；任务启停、Cron、手动触发、停止和日志都留在 XXL HTML/HTTP 边界。该迁移不新增 SSE 事件类型，也不向 RunEvent 流发布 XXL 任务状态或日志；旧 `/api/internal/platform/scheduler-management/**` 返回 `410 API_GONE`。
 
-夜间任务的提交、时段容量、待执行列表、改期、取消和最终失败卡同样只通过 `/api/internal/platform/opencode-runtime/night-execution/**` HTTP 查询/变更，不新增 RunEvent 类型，也不把 `SCHEDULED/DISPATCHING/DISPATCHED/CANCELLED/FAILED` 调度状态写入 RunEvent。XXL/内部批量接口只负责取得普通 Run 的已受理 runId，不等待或发布 Run 终态；`DISPATCHED` 只表示已交给 Run。此后执行过程与前端即时发送完全复用该 Run 的既有 RunEvent SSE、snapshot/replay、终态和用户级 runtime-state；Session、USER 消息和 Run 的 HTTP DTO 可选携带 `sourceType=SCHEDULED_TASK`、`sourceRefId=net_...` 用于展示来源。旧前端忽略新增字段仍可按普通 Run 展示；待执行任务页面必须继续通过 HTTP 轮询和窗口 focus 刷新，不得从 RunEvent 猜测任务状态。
+夜间任务的提交、时段容量、待执行列表、改期、取消和最终失败卡同样只通过 `/api/internal/platform/opencode-runtime/night-execution/**` HTTP 查询/变更，不把 `SCHEDULED/DISPATCHING/DISPATCHED/CANCELLED/FAILED` 调度状态写入 RunEvent。XXL/内部批量接口只负责取得普通 Run 的已受理 runId，不等待或发布 Run 终态；`DISPATCHED` 只表示已交给 Run。此后执行过程与前端即时发送完全复用该 Run 的既有 RunEvent SSE、snapshot/replay、终态和用户级 runtime-state；仅当根 `session.error` 创建统一撤销重发时，才产生本文件定义的 `run.resend.*` 生命周期事件，它不是夜间任务调度状态。Session、USER 消息和 Run 的 HTTP DTO 可选携带 `sourceType=SCHEDULED_TASK`、`sourceRefId=net_...` 用于展示来源。旧前端忽略新增字段仍可按普通 Run 展示；待执行任务页面必须继续通过 HTTP 轮询和窗口 focus 刷新，不得从 RunEvent 猜测任务状态。
 
 AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId}/feedback` 只写入 `ai_message_feedbacks` 事实表，不产生 RunEvent，不通过 SSE 推送反馈状态；前端用既有 Run 终态事件绑定用户轮次，并通过 HTTP 批量接口恢复历史 Run 状态与当前用户反馈。旧消息反馈接口只作兼容。运营分析页 `/api/internal/platform/analytics/**` 只读取 hourly/daily rollup、水位和明细查询接口，不订阅 RunEvent，也不新增 SSE 事件类型。反馈、Diff、Run 状态和 token 等运营指标由后台 rollup runner 定期从事实表聚合，主链路不在 RunEvent 里补发统计事件。
 
@@ -853,6 +853,19 @@ LobeHub 登录票据签发、HMAC 兑换/撤销、Desktop/CLI 浏览器确认、
 4. opencode raw event 不直接透传；已知事件映射为平台稳定类型，未知事件映射为 `opencode.event.unknown` 并保留安全的 `rawType`、`rawEventId`、`rawPayload`。
 5. `LEGACY_FULL` RunEvent payload 继续以 PostgreSQL JSON 文本读取；`REDIS_SUMMARY` 使用 Redis JSON/Stream。manifest 缺失按 legacy 兼容，旧前端未知 `run.snapshot.reset` 时至少必须安全忽略；支持新模式的前端应按上文清空并重放 snapshot。
 6. 新 Run 仅在请求携带已校验的 `contextToken + clientRequestId` 且命中 userId 稳定灰度桶时使用 `REDIS_SUMMARY`；开关默认关闭且 rollout 为 0。storageMode 在创建时固定，回滚比例只影响后续 Run。
+
+## 撤销重发事件
+
+- `run.resend.scheduled`：替代 Run 已预留并进入等待，payload 只包含 `resendId/sourceRunId/replacementRunId/trigger`、总次数、
+  自动次数、上限、状态和 `executeAt`。前端据此展示倒计时并锁定输入。
+- `run.resend.started`：OpenCode 已确认稳定替代 message ID 存在，且源 Run 的 PostgreSQL/Redis 可回放明细清理已提交。前端必须
+  原子移除源 Run 的 assistant/tool/Todo/Diff/失败卡/流式 overlay/child scope，再接管替代 Run SSE；该事件不表示替代 Run 已终态。
+- `run.resend.failed`：重发在安全可判定窗口失败；payload 仍只含身份、次数、状态和执行时间，不携带 prompt、回答、工具输出或
+  供应商响应正文。
+
+三个事件都是 additive；未知类型的旧前端按默认忽略策略继续工作。`session.status.retry` 仍仅表示 OpenCode 内部供应商重试，
+前端可以展示但不得用它触发平台撤销重发。自动入口只由 root `session.error` 派生的 `run.failed` 触发，transport failure 与
+`run.cancelled` 不触发。
 
 ## manager 控制面补充
 

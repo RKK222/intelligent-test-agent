@@ -341,3 +341,15 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 ## 安全变更文档
 
 鉴权、限流、CORS、密钥、日志脱敏变更必须同步 `docs/standards/security.md`、`docs/api/http-api.md` 和相关 README。
+
+## 撤销重发安全边界
+
+- 浏览器手动入口必须重新校验登录 owner、可信 `contextToken`、根会话、最后远端 user message、终态 Run 和会话活动锁；
+  `expectedRunId/expectedRemoteMessageId/clientRequestId` 都只是并发前置条件，不是授权事实源。
+- Java→Java 内部分发只对精确路径豁免用户 token，并使用既有 XXL access token 常量时间校验；跨服务器固定复用公共路由解析与
+  HTTP 转发器，不允许浏览器指定目标后端或通过本机降级绕过目标服务器。
+- PostgreSQL `run_resends`、RunEvent、访问日志、trace、错误详情和 session log 禁止记录 prompt、附件正文、回答、reasoning、
+  工具输入输出、供应商错误正文、Authorization 或上下文 token。只允许安全错误摘要、次数、身份和 traceId。
+- 精确重放输入只能进入有限 TTL Redis，缺失时必须在 revert 前失败；未知投递状态保持锁并继续探测，禁止重复发送；只有稳定替代
+  message ID 明确不存在时才允许 unrevert，unrevert 回包未知仍不得解锁。
+- 源 Run 明细清理不得删除 feedback、usage、Run 或重发审计关系；API/SSE 只返回 additive 元数据，旧客户端安全忽略。

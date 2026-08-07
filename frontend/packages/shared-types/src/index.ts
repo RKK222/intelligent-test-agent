@@ -619,6 +619,7 @@ export type SessionRuntimeState = {
   attentionEventId?: string | null;
   attentionAt?: string | null;
   updatedAt: string;
+  resend?: ResendMetadata | null;
 };
 
 export type SessionRuntimeStateSummary = {
@@ -632,6 +633,18 @@ export type SessionRuntimeStateSummary = {
 
 export type SessionMessageContentKind = "RAW_LEGACY" | "SUMMARY" | string;
 export type SessionMessageSummaryStatus = "COMPLETE" | "PARTIAL" | "FALLBACK" | string;
+
+export type ResendMetadata = {
+  resendId: string;
+  trigger: "MANUAL" | "AUTOMATIC" | string;
+  totalAttempt: number;
+  automaticAttempt: number;
+  automaticLimit: number;
+  status: "WAITING" | "REVERTING" | "REVERTED" | "DISPATCHED" | "FAILED" | "CANCELLED" | string;
+  executeAt: string;
+  sourceRunId: string;
+  replacementRunId: string;
+};
 
 export type SessionMessage = {
   messageId: string;
@@ -651,6 +664,7 @@ export type SessionMessage = {
   summaryVersion?: number | null;
   sourceType?: ConversationSourceType | null;
   sourceRefId?: string | null;
+  resend?: ResendMetadata | null;
 };
 
 export type NightExecutionTaskStatus =
@@ -1051,6 +1065,22 @@ export type Run = {
   tokens?: TokenUsage;
   sourceType?: ConversationSourceType | null;
   sourceRefId?: string | null;
+  resend?: ResendMetadata | null;
+};
+
+export type CreateRunResendPayload = {
+  expectedRemoteMessageId: string;
+  expectedRunId?: string | null;
+  contextToken: string;
+  clientRequestId: string;
+};
+
+export type RunResendResponse = {
+  resendId: string;
+  status: string;
+  executeAt: string;
+  resend: ResendMetadata;
+  replacementRun: Run;
 };
 
 export type UserOpencodeProcessStatus = "READY" | "NEEDS_INITIALIZATION" | "UNAVAILABLE" | string;
@@ -1808,6 +1838,9 @@ export type RunEventType =
   | "run.succeeded"
   | "run.failed"
   | "run.cancelled"
+  | "run.resend.scheduled"
+  | "run.resend.started"
+  | "run.resend.failed"
   | "run.snapshot.reset"
   | "side_question.started"
   | "side_question.progress"
@@ -2238,6 +2271,7 @@ export type AgentMessage =
       runId?: string;
       sourceType?: ConversationSourceType | null;
       sourceRefId?: string | null;
+      resend?: ResendMetadata | null;
     }
   | {
       id: string;

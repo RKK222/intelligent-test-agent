@@ -57,6 +57,7 @@ import type {
   NightExecutionTaskQueryResponse,
   PersonalWorkspaceGitPullResult,
   ProviderInfo,
+  ResendMetadata,
   Session,
   SessionMessage,
   SessionRuntimeState,
@@ -241,12 +242,9 @@ import {
   opencodeHealthRequestFromProcess,
   opencodeProcessRouteResolution,
   parseCommand,
-  prepareAutoRetryRun,
   promptFromParts,
   resolveRetryDeadline,
-  retryRunDraftFromSessionMessages,
   retryCountdownSeconds,
-  retryExpirationDecision,
   projectRootInteractionSession,
   reconcileCurrentTurnTodos,
   replaceRootSessionInteractions,
@@ -263,7 +261,6 @@ import {
   sessionTitleFromFirstMessage,
   scheduledRunTiming,
   shouldResetAfterNightTaskClosure,
-  shouldFailExhaustedRetry,
   shouldRefreshRuntimeCatalogAfterMessageGate,
   syntheticEvent,
   text,
@@ -271,7 +268,7 @@ import {
   workspaceRequirementStageDirectories,
   workspaceAttachmentTargetPath,
   workspaceLoadIsCurrent,
-  type AutoRetryRunDraft,
+  type ChatRunDraft,
   type OpenCodeTuiCommandName,
   type OpencodeAvailabilityState,
   type RetryDeadlineMap,
@@ -505,7 +502,6 @@ const reportedRunEventStreamErrors = new Set<string>();
 // legacy 终态重放只能为每个逻辑 Run 启动一条 messages -> feedback 批量恢复链。
 const legacyFeedbackRecoveryRunIds = new Set<string>();
 const lastPrompt = ref("");
-const lastRunDraft = ref<AutoRetryRunDraft | null>(null);
 // 仅当前页面真实发出的未决启动请求可以为 runtime-state 接管提供 Todo owner；跨标签页 Run 不猜归属。
 const pendingRequestedRunUserMessageId = ref<string | null>(null);
 const selectedAgent = ref("");
@@ -567,8 +563,7 @@ let activeRunProbeSeq = 0;
 const runtimeStateRunReconciliations = new Set<string>();
 const followUpQueue = ref<FollowUpDraft[]>([]);
 const retryDeadlines = ref<RetryDeadlineMap>({});
-const retryActionInFlightKey = ref<string | null>(null);
-const autoRetryStarting = ref(false);
+const resendStarting = ref(false);
 const ignoredRunIds = ref<Set<string>>(new Set());
 const diffContextParts = ref<PromptPart[]>([]);
 const editorSelection = ref<EditorSelectionContext | undefined>(undefined);
@@ -949,10 +944,8 @@ function markConversationRunAdopted(runId: string, userMessageId?: string) {
 }
 
 function clearAutoRetryState() {
-  lastRunDraft.value = null;
   retryDeadlines.value = {};
-  retryActionInFlightKey.value = null;
-  autoRetryStarting.value = false;
+  resendStarting.value = false;
   ignoredRunIds.value = new Set();
   supersededConversationRunId.value = null;
   pendingRequestedRunUserMessageId.value = null;
@@ -999,6 +992,16 @@ const chatMessagesForPanel = computed<AgentMessage[]>(() =>
   chatState.value.messages.map((message) => {
     if (message.role === "card") return message;
     const platformMessageId = platformMessageIdForAgentMessage(message);
+    if (message.role === "user") {
+      const currentRun = run.value;
+      const currentResend = currentRun?.resend;
+      const belongsToCurrentResend = currentRun && currentResend
+        && (message.runId === currentRun.runId || message.runId === currentResend.sourceRunId);
+      const resend = belongsToCurrentResend
+        ? currentResend
+        : message.resend;
+      return platformMessageId || resend ? { ...message, platformMessageId, resend } : message;
+    }
     return platformMessageId ? { ...message, platformMessageId } : message;
   })
 );
@@ -1445,7 +1448,8 @@ function adoptRuntimeStateForCurrentSession(summary: SessionRuntimeStateSummary 
       createdAt: existing?.createdAt ?? active.updatedAt,
       updatedAt: active.updatedAt,
       sourceType: existing?.sourceType,
-      sourceRefId: existing?.sourceRefId
+      sourceRefId: existing?.sourceRefId,
+      resend: active.resend ?? existing?.resend
     };
     run.value = adopted;
     markConversationRunAdopted(adopted.runId);
@@ -1468,7 +1472,7 @@ async function reconcileCurrentRunAfterRuntimeState(summary: SessionRuntimeState
     || currentRun.sessionId !== currentSession.sessionId
     || !isRunBusyStatus(currentRun.status)
     || startRunMutation.isPending.value
-    || autoRetryStarting.value
+    || resendStarting.value
     || ignoredRunIds.value.has(currentRun.runId)
     || runtimeStateRunReconciliations.has(currentRun.runId)
     || summary.sessions.some((item) => item.sessionId === currentSession.sessionId && isRunBusyStatus(item.runStatus))
@@ -2423,7 +2427,7 @@ async function recoverActiveRunForSession(
   reason: string,
   fallbackLease: RuntimeStateFallbackLease
 ): Promise<Run | null> {
-  if (autoRetryStarting.value) {
+  if (resendStarting.value) {
     return null;
   }
   const seq = ++activeRunProbeSeq;
@@ -3441,6 +3445,21 @@ const runtimeBusy = computed(() =>
     pendingRequestedRunUserMessageId.value !== null
   )
 );
+const resendableMessageId = computed(() => {
+  if (runtimeBusy.value || resendStarting.value) return undefined;
+  const sourceRun = run.value;
+  if (!sourceRun || !["SUCCEEDED", "FAILED", "CANCELLED"].includes(sourceRun.status)) return undefined;
+  const sourceMessage = [...chatState.value.messages].reverse().find(
+    (message): message is Extract<AgentMessage, { role: "user" }> => {
+    if (message.role !== "user") return false;
+    const scope = chatState.value.messageScopesById[message.messageId ?? message.id];
+    return scope?.isChildSession !== true;
+    }
+  );
+  if (!sourceMessage || sourceMessage.runId !== sourceRun.runId || !sourceMessage.remoteMessageId) return undefined;
+  if (["WAITING", "REVERTING", "REVERTED"].includes(sourceMessage.resend?.status ?? "")) return undefined;
+  return sourceMessage.remoteMessageId;
+});
 // dispose 释放当前用户全部 Workspace Instance，不能只看当前页面的 Run；后端仍会在 dispose 前做权威复核。
 const userRuntimeBusy = computed(() =>
   runtimeBusy.value || (sessionRuntimeState.value?.runningCount ?? 0) > 0
@@ -3661,7 +3680,6 @@ watch(
   () => chatState.value.runtimeStatus,
   (status) => {
     if (!status || status.type !== "retry") {
-      retryActionInFlightKey.value = null;
       return;
     }
     const resolved = resolveRetryDeadline(retryDeadlines.value, status, Date.now());
@@ -3672,102 +3690,61 @@ watch(
   { immediate: true }
 );
 
-watch(
-  [() => chatState.value.runtimeStatus, nowTick],
-  () => {
-    const status = chatState.value.runtimeStatus;
-    if (!status || status.type !== "retry") {
-      return;
-    }
-    const resolved = resolveRetryDeadline(retryDeadlines.value, status, nowTick.value);
-    if (resolved.deadlines !== retryDeadlines.value) {
-      retryDeadlines.value = resolved.deadlines;
-    }
-    const decision = retryExpirationDecision(status, nowTick.value, retryDeadlines.value);
-    if (decision === "wait") {
-      return;
-    }
-    const key = retryActionKey(status);
-    if (retryActionInFlightKey.value === key) {
-      return;
-    }
-    retryActionInFlightKey.value = key;
-    if (shouldFailExhaustedRetry(status, nowTick.value, retryDeadlines.value)) {
-      failRetryingRun(status.message ?? "重试 3 次后仍然失败");
-      return;
-    }
-    handleAutoRetryRun();
-  },
-  { immediate: true }
-);
-
-function retryActionKey(status: { retryKey?: string; attempt?: number; message?: string }): string {
-  return status.retryKey ?? `${status.attempt ?? 0}:${status.message ?? ""}`;
-}
-
-function failRetryingRun(message: string) {
-  const occurredAt = new Date().toISOString();
-  dispatchChat({
-    type: "event",
-    event: syntheticEvent("run.failed", { error: { name: "RetryExhausted", message }, status: "FAILED" }, occurredAt)
-  });
-  if (run.value && isRunBusyStatus(run.value.status)) {
-    run.value = { ...run.value, status: "FAILED", updatedAt: occurredAt };
-  }
-  if (chatStartedAt.value) {
-    totalDurationMs.value += Date.now() - chatStartedAt.value;
-    lastDuration = formatDurationMs(Date.now() - chatStartedAt.value);
-    chatStartedAt.value = null;
-    nowTick.value = Date.now();
-  }
-}
-
-function retryLastRun(trigger: "manual" | "automatic") {
-  const prepared = prepareAutoRetryRun(run.value, lastRunDraft.value, new Date().toISOString());
-  if (prepared.type === "missing-draft") {
-    feedback.value = {
-      kind: trigger === "automatic" ? "error" : "info",
-      title: trigger === "automatic" ? "自动重试失败" : "无法重试",
-      description: "未找到上一条任务内容，请重新输入后发送"
-    };
-    if (trigger === "automatic") {
-      failRetryingRun("未找到可自动重试的任务内容");
-    }
+async function retryLastRun() {
+  const currentSession = session.value;
+  const sourceRun = run.value;
+  const sourceMessage = [...chatState.value.messages].reverse().find(
+    (message): message is Extract<AgentMessage, { role: "user" }> => message.role === "user"
+      && Boolean(message.remoteMessageId)
+      && message.runId === sourceRun?.runId
+  );
+  if (!currentSession || !sourceRun || !sourceMessage?.remoteMessageId || !sourceRun.status
+      || !["SUCCEEDED", "FAILED", "CANCELLED"].includes(sourceRun.status)) {
+    feedback.value = { kind: "info", title: "无法撤销重发", description: "仅支持会话最后一条已结束的用户消息。" };
     return;
   }
-  // 异常中断时聊天状态可能已经失败，但后端 Run 仍在等待；沿用自动重试的隔离逻辑，避免新请求撞上旧运行。
-  autoRetryStarting.value = true;
-  if (prepared.cancelRunId) {
-    ignoredRunIds.value = new Set([...ignoredRunIds.value, prepared.cancelRunId]);
-    void api.cancelRun(prepared.cancelRunId).catch(() => undefined);
-  }
-  if (prepared.localRun) {
-    run.value = prepared.localRun;
-  }
-  clearRunEventSseFeedback();
-  // 远端 user message 可能已替换乐观 ID；重试必须复用 reducer 迁移后的当前 Run owner。
-  const retryInput: AutoRetryRunDraft = {
-    ...prepared.input,
-    userMessageId: run.value?.runId
-      ? chatState.value.todoUserMessageIdByRunId[run.value.runId] ?? prepared.input.userMessageId
-      : prepared.input.userMessageId
-  };
-  lastRunDraft.value = retryInput;
-  if (trigger === "manual") {
-    // 手动重试是一轮新的用户操作，重新统计本轮耗时与 token；自动重试仍延续原请求的累计口径。
+  resendStarting.value = true;
+  const clientRequestId = createClientRequestId();
+  try {
+    let context = await conversationRunContexts.get(currentSession.sessionId);
+    let response;
+    try {
+      response = await api.createRunResend(currentSession.sessionId, {
+        expectedRemoteMessageId: sourceMessage.remoteMessageId,
+        expectedRunId: sourceRun.runId,
+        contextToken: context.contextToken,
+        clientRequestId
+      });
+    } catch (error) {
+      const code = error && typeof error === "object" ? (error as { code?: unknown }).code : undefined;
+      if (code !== "CONVERSATION_CONTEXT_REQUIRED" && code !== "CONVERSATION_CONTEXT_EXPIRED") throw error;
+      conversationRunContexts.invalidate(currentSession.sessionId);
+      context = await conversationRunContexts.get(currentSession.sessionId);
+      response = await api.createRunResend(currentSession.sessionId, {
+        expectedRemoteMessageId: sourceMessage.remoteMessageId,
+        expectedRunId: sourceRun.runId,
+        contextToken: context.contextToken,
+        clientRequestId
+      });
+    }
+    run.value = response.replacementRun;
+    chatState.value = {
+      ...chatState.value,
+      messages: chatState.value.messages.map((message) => message.id === sourceMessage.id
+        ? { ...message, resend: response.resend }
+        : message)
+    };
+    // 替代消息尚未被 OpenCode 受理，不能提前把新 Run 绑定到即将删除的源用户消息。
+    markConversationRunAdopted(response.replacementRun.runId);
+    rememberRunSession(response.replacementRun);
+    clearRunEventSseFeedback();
     chatStartedAt.value = Date.now();
     accumulatedTokens.value = 0;
+  } catch (error) {
+    feedback.value = errorFeedback("撤销重发失败", error);
+  } finally {
+    resendStarting.value = false;
   }
-  requestChatRun(retryInput.userMessageId);
-  startRunMutation.mutate({ input: retryInput, guard: captureConversationInteraction() }, {
-    onSettled: () => {
-      autoRetryStarting.value = false;
-    }
-  });
-}
-
-function handleAutoRetryRun() {
-  retryLastRun("automatic");
 }
 
 // follow-up 队列：Run 空闲且有排队 prompt 时自动出队执行
@@ -3786,13 +3763,12 @@ watch(
       return;
     }
     followUpQueue.value = queue;
-    const draft: AutoRetryRunDraft = {
+    const draft: ChatRunDraft = {
       prompt: next.prompt,
       parts: next.parts,
       userMessageId: next.userMessageId,
       command: next.command
     };
-    lastRunDraft.value = draft;
     requestChatRun(draft.userMessageId);
     startRunMutation.mutate({ input: draft, guard: captureConversationInteraction() });
   }
@@ -7725,14 +7701,13 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     return;
   }
   // slash 技能和普通消息统一创建平台 Run，才能复用 SSE、刷新恢复和终止能力。
-  const runDraft: AutoRetryRunDraft = {
+  const runDraft: ChatRunDraft = {
     prompt: submitPrompt,
     parts,
     userMessageId,
     title: displayPrompt,
     command: command ?? undefined
   };
-  lastRunDraft.value = runDraft;
   clearRunEventSseFeedback();
   requestChatRun(userMessageId);
   chatContextStore.clearContexts();
@@ -8145,9 +8120,9 @@ function handleStopRun() {
   }
 }
 
-/** 手动重试复用自动重试的旧 Run 隔离和原用户消息归属，不追加第二条相同的乐观 user message。 */
+/** 手动入口只预留替代 Run；旧轮次清理由 run.resend.started 原子接管，不追加乐观重复消息。 */
 function handleRetryRun() {
-  retryLastRun("manual");
+  void retryLastRun();
 }
 
 function handleRunEvent(event: RunEvent, subscribedSessionId?: string, allowNotification = true) {
@@ -8237,6 +8212,49 @@ function applyRunEventWorkbenchProjection(
         [event.runId]: summaryMessageId
       };
     }
+  }
+  if (event.type === "run.resend.scheduled" || event.type === "run.resend.started" || event.type === "run.resend.failed") {
+    const resend = resendMetadataFromRunEvent(event);
+    const replacementRunId = text(event.payload.replacementRunId) ?? event.runId;
+    const current = run.value;
+    const currentSession = session.value;
+    if (resend && currentSession) {
+      const replacementStatus = event.type === "run.resend.scheduled"
+        ? "PENDING"
+        : event.type === "run.resend.started" ? "RUNNING" : "FAILED";
+      run.value = {
+        runId: replacementRunId,
+        sessionId: currentSession.sessionId,
+        workspaceId: current?.workspaceId ?? currentSession.workspaceId,
+        storageMode: current?.runId === replacementRunId ? current.storageMode : undefined,
+        status: replacementStatus,
+        createdAt: current?.runId === replacementRunId ? current.createdAt : event.occurredAt,
+        updatedAt: event.occurredAt,
+        sourceType: current?.sourceType ?? currentSession.sourceType,
+        sourceRefId: current?.sourceRefId,
+        resend
+      };
+      rememberRunSession(run.value);
+    }
+    if (event.type === "run.resend.started") {
+      // reducer 已原子移除源 Run 明细；这里同步清理独立维护的文件与跟随投影，再接管替代 Run。
+      diffFiles.value = [];
+      diffSource.value = "run";
+      liveFollowedParts.value = new Set();
+      workbench.setSelectedDiffPath(undefined);
+      chatStartedAt.value = Date.now();
+      accumulatedTokens.value = 0;
+      void refreshWorkspaceGitDiff();
+      void refreshWorkspaceView();
+    }
+    if (event.type === "run.resend.failed") {
+      feedback.value = {
+        kind: "error",
+        title: "撤销重发失败",
+        description: "本次重发未投递，原会话轮次已按安全恢复结果保留。"
+      };
+    }
+    return;
   }
   if (event.type === "assistant.message.delta") {
     return;
@@ -8338,6 +8356,32 @@ function applyRunEventWorkbenchProjection(
     // 触发 taskUsage 重新计算
     nowTick.value = Date.now();
   }
+}
+
+function resendMetadataFromRunEvent(event: RunEvent): ResendMetadata | undefined {
+  const resendId = text(event.payload.resendId);
+  const sourceRunId = text(event.payload.sourceRunId);
+  const replacementRunId = text(event.payload.replacementRunId) ?? event.runId;
+  const trigger = text(event.payload.trigger);
+  const executeAt = text(event.payload.executeAt);
+  const totalAttempt = typeof event.payload.totalAttempt === "number" ? event.payload.totalAttempt : undefined;
+  const automaticAttempt = typeof event.payload.automaticAttempt === "number" ? event.payload.automaticAttempt : undefined;
+  const automaticLimit = typeof event.payload.automaticLimit === "number" ? event.payload.automaticLimit : undefined;
+  if (!resendId || !sourceRunId || !trigger || !executeAt
+      || totalAttempt === undefined || automaticAttempt === undefined || automaticLimit === undefined) {
+    return undefined;
+  }
+  return {
+    resendId,
+    trigger,
+    totalAttempt,
+    automaticAttempt,
+    automaticLimit,
+    status: text(event.payload.status) ?? (event.type === "run.resend.failed" ? "FAILED" : "WAITING"),
+    executeAt,
+    sourceRunId,
+    replacementRunId
+  };
 }
 
 function hasUnmappedAssistantRemoteMessages(): boolean {
@@ -9059,8 +9103,6 @@ async function switchSession(
     }
     const persistedMessages = dedupeSessionMessages(page.items);
     rememberPersistedMessageIdentities(persistedMessages);
-    // 历史失败卡片来自持久化消息/Run；同步恢复最近用户请求，确保刷新或切回后仍可直接重试。
-    lastRunDraft.value = retryRunDraftFromSessionMessages(persistedMessages);
     // 先以分页消息渲染正文，树快照和 Todo 作为后续增强；避免大历史树把首屏卡住。
     dispatchChat({ type: "reset", messages: messagesFromSessionMessages(persistedMessages) });
     // 视觉 loading 只等待数据库正文；实时 interaction 校准继续后台完成，发送锁仍由 switching 状态持有。
@@ -10033,6 +10075,7 @@ async function handleLogout() {
           :questions="chatState.questions"
           :current-session-id="session?.sessionId"
           :current-session-source-type="session?.sourceType"
+          :resendable-message-id="resendableMessageId"
           :night-tasks="nightTasks"
           :current-night-task="currentNightTask"
           :night-visible-failure="nightVisibleFailure"

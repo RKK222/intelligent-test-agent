@@ -63,6 +63,11 @@ public interface OpencodeClientFacade {
      */
     Mono<OpencodeRejectDiffResult> rejectDiff(OpencodeRejectDiffCommand command);
 
+    /** 仅在确定替代消息未投递时恢复原生回退。 */
+    default Mono<OpencodeUnrevertResult> unrevert(OpencodeUnrevertCommand command) {
+        return Mono.error(new UnsupportedOperationException("unrevert is not implemented"));
+    }
+
     /**
      * 受控调用 opencode runtime HTTP API，并返回稳定 JSON projection。
      */

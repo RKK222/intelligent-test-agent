@@ -118,6 +118,16 @@ public interface OpencodeSdkGateway {
             String partId,
             String traceId);
 
+    /** 调用远端 session unrevert API。 */
+    default Mono<OpencodeUnrevertResult> unrevert(
+            ExecutionNode node,
+            String opencodeSessionId,
+            String directory,
+            String workspace,
+            String traceId) {
+        return Mono.error(new UnsupportedOperationException("unrevert is not implemented"));
+    }
+
     /**
      * 调用受控 runtime API，query 和 body 由上层策略提前校验。
      */

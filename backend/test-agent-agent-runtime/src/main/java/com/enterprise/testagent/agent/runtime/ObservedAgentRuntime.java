@@ -87,6 +87,26 @@ final class ObservedAgentRuntime implements AgentRuntime {
         return observe("sessionMessages", command.traceId(), delegate.sessionMessages(command));
     }
 
+    @Override
+    public Mono<AgentReplayableTurn> loadReplayableTurn(AgentReplayableTurnCommand command) {
+        return observe("loadReplayableTurn", command.traceId(), delegate.loadReplayableTurn(command));
+    }
+
+    @Override
+    public Mono<AgentRevertTurnResult> revertTurn(AgentRevertTurnCommand command) {
+        return observe("revertTurn", command.traceId(), delegate.revertTurn(command));
+    }
+
+    @Override
+    public Mono<AgentUnrevertTurnResult> unrevertTurn(AgentUnrevertTurnCommand command) {
+        return observe("unrevertTurn", command.traceId(), delegate.unrevertTurn(command));
+    }
+
+    @Override
+    public Mono<AgentMessageProbeResult> probeMessage(AgentMessageProbeCommand command) {
+        return observe("probeMessage", command.traceId(), delegate.probeMessage(command));
+    }
+
     private <T> Mono<T> observe(String operation, String traceId, Mono<T> source) {
         LOGGER.debug("Agent runtime call started, agentId={}, operation={}, traceId={}", agentId(), operation, traceId);
         return source.doFinally(signalType -> record(operation, result(signalType)));

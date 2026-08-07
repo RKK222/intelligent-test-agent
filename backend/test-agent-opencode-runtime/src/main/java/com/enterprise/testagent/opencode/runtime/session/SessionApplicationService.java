@@ -18,6 +18,8 @@ import com.enterprise.testagent.domain.session.SessionStatus;
 import com.enterprise.testagent.domain.session.ConversationSourceType;
 import com.enterprise.testagent.domain.run.ConversationContextStore;
 import com.enterprise.testagent.domain.run.ConversationContextSessionRevocation;
+import com.enterprise.testagent.domain.run.RunId;
+import com.enterprise.testagent.domain.run.RunResendRepository;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
@@ -27,6 +29,7 @@ import com.enterprise.testagent.opencode.runtime.run.RunSessionTitleWatchService
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLockGuard;
 import java.time.Instant;
 import java.util.Map;
+import java.util.List;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,6 +52,7 @@ public class SessionApplicationService {
     private final RunSessionTitleWatchService titleWatchService;
     private final ConversationContextStore conversationContextStore;
     private NightExecutionSessionLockGuard nightExecutionLockGuard;
+    private RunResendRepository runResendRepository;
     private UserWorkspaceQueryRepository userWorkspaceQueryRepository;
 
     /**
@@ -379,6 +383,12 @@ public class SessionApplicationService {
         this.nightExecutionLockGuard = nightExecutionLockGuard;
     }
 
+    /** 历史查询按已提交重发关系过滤，防止滚动发布或清理延迟让旧回答复活。 */
+    @Autowired(required = false)
+    void setRunResendRepository(RunResendRepository runResendRepository) {
+        this.runResendRepository = runResendRepository;
+    }
+
     /** 生产装配必须注入用户工作区查询端口；手工构造的单元测试可按需显式调用该 setter。 */
     @Autowired
     void setUserWorkspaceQueryRepository(UserWorkspaceQueryRepository userWorkspaceQueryRepository) {
@@ -417,7 +427,16 @@ public class SessionApplicationService {
         if (refreshSnapshot && snapshotService != null) {
             snapshotService.refreshSessionSnapshot("opencode", session, traceId);
         }
-        return sessionMessageRepository.findBySessionId(sessionId, pageRequest);
+        PageResponse<SessionMessage> page = sessionMessageRepository.findBySessionId(sessionId, pageRequest);
+        if (runResendRepository == null) return page;
+        java.util.Set<RunId> suppressed = java.util.Set.copyOf(
+                runResendRepository.findDispatchedSourceRunIds(sessionId));
+        if (suppressed.isEmpty()) return page;
+        List<SessionMessage> visible = page.items().stream()
+                .filter(message -> message.runId() == null || !suppressed.contains(message.runId()))
+                .toList();
+        long removed = page.items().size() - visible.size();
+        return new PageResponse<>(visible, page.page(), page.size(), Math.max(0, page.total() - removed));
     }
 
     /** 分页读取用户自己的会话消息。 */

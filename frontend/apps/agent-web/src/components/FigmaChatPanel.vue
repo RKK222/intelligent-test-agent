@@ -781,6 +781,8 @@ const props =
     /** 当前 root 会话；历史切换时用于退出上一次子 Agent 视图。 */
     currentSessionId?: string
     currentSessionSourceType?: string | null
+    /** 仅根会话最后一条、具备远端回退边界的终态用户消息可撤销重发。 */
+    resendableMessageId?: string
     /** 右侧对话栏是否可见；收起时同步关闭传送到 body 的会话列表浮层。 */
     panelVisible?: boolean
     /** RunEvent scope 索引：用于把主 Agent 与子 Agent 输出分离展示。 */
@@ -4391,10 +4393,12 @@ function onCompositionEnd() {
       <OpencodeTimeline
         v-else
         :state="opencodeTimelineState"
+        :resendable-message-id="resendableMessageId"
         :work-status-dock-target="activeSubagentSessionId ? undefined : workStatusDockRef"
         @open-diff="openTimelineDiff"
         @open-file="(path) => emit('open-file', path)"
         @select-subagent="selectSubagent"
+        @resend="emit('retry')"
       >
         <template #completed-status-actions="{ row }">
           <div

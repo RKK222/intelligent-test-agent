@@ -1575,3 +1575,21 @@ fetch 当前分支，并读取 `origin/{branch}` 的精确提交完成快照；�
 `19a0e5af5f361179ac3887d541c274f75f43f89a683ee8037a5e0391444a92bf`。它不修改已经执行的
 `V20260806190000` 字节。正式部署前仍须对照全部目标环境 `flyway_schema_history` 校验两个版本的严格递增关系、
 checksum 和并行 migration 冲突，并用每套已知真实 PostgreSQL 基线验证升级及最终 JAR 内 migration 字节。
+
+## V20260807190000 撤销重发状态机
+
+`V20260807190000__create_run_resends.sql` 是开发期候选 migration，新增：
+
+- `run_resends`：保存源/替代 Run、远端消息边界、触发方式、总次数/自动次数、1/2/4 分钟执行时间、固定目标服务器、稳定替代
+  message ID、租约、状态、traceId 和最长 512 字符安全错误摘要；唯一约束覆盖 source Run、replacement Run 和
+  `(owner_user_id, client_request_id)`。
+- `run_resend_session_locks`：每个 Session 最多一条活动锁，等待期间阻止消息、command、shell、archive、compact、share 等写入口；
+  WAITING 可由既有停止 Run 入口取消，进入 revert 后由恢复任务收敛。
+
+两张表都禁止保存 prompt、附件正文、模型回答、reasoning、工具输入输出或供应商响应。精确重放输入只保存在有限 TTL Redis；
+关系型 SQL 全部位于 `RunResendMapper.xml`。替代消息受理后删除源 Run 的 `session_messages/run_events/run_session_scope*` 明细，
+保留 `runs`、反馈、用量、traceId 和重发关系；历史查询同时按已提交关系过滤。
+
+该 migration 不写测试、演示或个人数据，尚未声明为任何共享环境已执行的冻结版本。合并交付或企业打包前，集成人必须对照所有目标
+环境 `flyway_schema_history` 的版本/checksum 和并行 migration，必要时只在尚未执行前重排候选版本；随后用每套已知真实
+PostgreSQL 基线验证升级，并校验最终 JAR 中 migration 字节。禁止 `outOfOrder`、`repair` 或改写任何已经执行的 migration。

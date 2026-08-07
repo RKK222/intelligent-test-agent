@@ -6,6 +6,7 @@ import type {
   QuestionRequest,
   RunDiffFile,
   RunEvent,
+  ResendMetadata,
   SessionDiff,
   MessageScope,
   SubagentSession,
@@ -289,6 +290,12 @@ function reduceEventOnly(
   rawEvent: RunEvent
 ): AgentChatRuntimeState {
   const event = normalizeRunEventPayload(rawEvent);
+  if (event.type === "run.resend.scheduled" || event.type === "run.resend.failed") {
+    return reduceResendStatus(state, event);
+  }
+  if (event.type === "run.resend.started") {
+    return reduceResendStarted(state, event);
+  }
   if (event.type === "assistant.message.delta") {
     return { ...state, messages: appendAssistantDelta(state.messages, text(event.payload.text) ?? text(event.payload.delta) ?? "", event) };
   }
@@ -485,6 +492,103 @@ function reduceEventOnly(
     };
   }
   return state;
+}
+
+/** 等待与失败阶段保留源轮次，只更新审计标签和替代 Run 的运行状态。 */
+function reduceResendStatus(state: AgentChatRuntimeState, event: RunEvent): AgentChatRuntimeState {
+  const sourceRunId = text(event.payload.sourceRunId);
+  const replacementRunId = text(event.payload.replacementRunId) ?? event.runId;
+  const metadata = resendMetadataFromEvent(event);
+  if (!sourceRunId || !metadata) return state;
+  const failed = event.type === "run.resend.failed";
+  return {
+    ...state,
+    messages: state.messages.map((message) => message.role === "user" && message.runId === sourceRunId
+      ? { ...message, resend: metadata }
+      : message),
+    status: failed ? "FAILED" : "PENDING",
+    runtimeStatus: failed ? undefined : { type: "busy" },
+    runStatusesByRunId: {
+      ...state.runStatusesByRunId,
+      [replacementRunId]: failed ? "FAILED" : "PENDING"
+    }
+  };
+}
+
+/** 原生替代消息受理后，一次性丢弃源 Run 的回答、工具、Todo、Diff、流式层和 child scope。 */
+function reduceResendStarted(state: AgentChatRuntimeState, event: RunEvent): AgentChatRuntimeState {
+  const sourceRunId = text(event.payload.sourceRunId);
+  const replacementRunId = text(event.payload.replacementRunId) ?? event.runId;
+  if (!sourceRunId) return state;
+  const sourceUserMessageId = state.todoUserMessageIdByRunId[sourceRunId];
+  const messages = state.messages.filter((message) => {
+    if (message.role === "card") {
+      return text(message.payload.runId) !== sourceRunId
+        && text(message.payload.sourceRunId) !== sourceRunId;
+    }
+    return message.runId !== sourceRunId;
+  });
+  const retainedMessageIds = new Set(messages
+    .filter((message) => message.role !== "card")
+    .flatMap((message) => [message.id, message.messageId].filter((value): value is string => Boolean(value))));
+  const messageScopesById = Object.fromEntries(Object.entries(state.messageScopesById)
+    .filter(([messageId]) => retainedMessageIds.has(messageId)));
+  const todoSnapshotsByUserMessageId = { ...state.todoSnapshotsByUserMessageId };
+  if (sourceUserMessageId) delete todoSnapshotsByUserMessageId[sourceUserMessageId];
+  const todoUserMessageIdByRunId = { ...state.todoUserMessageIdByRunId };
+  delete todoUserMessageIdByRunId[sourceRunId];
+  if (sourceUserMessageId && todoUserMessageIdByRunId[replacementRunId] === sourceUserMessageId) {
+    delete todoUserMessageIdByRunId[replacementRunId];
+  }
+  return {
+    ...state,
+    messages,
+    permissions: [],
+    questions: [],
+    todos: [],
+    todoSnapshotsByUserMessageId,
+    todoUserMessageIdByRunId,
+    pendingTodoUserMessageId: undefined,
+    currentTodoRunId: replacementRunId,
+    supersededTodoRunIds: [...new Set([...state.supersededTodoRunIds, sourceRunId])].slice(-100),
+    diff: undefined,
+    status: "RUNNING",
+    runtimeStatus: { type: "busy" },
+    streamingTextByPartId: {},
+    messageScopesById,
+    subagentsBySessionId: {},
+    subagentByTaskPartId: {},
+    runStatusesByRunId: {
+      ...state.runStatusesByRunId,
+      [replacementRunId]: "RUNNING"
+    }
+  };
+}
+
+function resendMetadataFromEvent(event: RunEvent): ResendMetadata | undefined {
+  const resendId = text(event.payload.resendId);
+  const sourceRunId = text(event.payload.sourceRunId);
+  const replacementRunId = text(event.payload.replacementRunId) ?? event.runId;
+  const trigger = text(event.payload.trigger);
+  const executeAt = text(event.payload.executeAt);
+  const totalAttempt = number(event.payload.totalAttempt);
+  const automaticAttempt = number(event.payload.automaticAttempt);
+  const automaticLimit = number(event.payload.automaticLimit);
+  if (!resendId || !sourceRunId || !replacementRunId || !trigger || !executeAt
+      || totalAttempt === undefined || automaticAttempt === undefined || automaticLimit === undefined) {
+    return undefined;
+  }
+  return {
+    resendId,
+    trigger,
+    totalAttempt,
+    automaticAttempt,
+    automaticLimit,
+    status: text(event.payload.status) ?? (event.type === "run.resend.failed" ? "FAILED" : "WAITING"),
+    executeAt,
+    sourceRunId,
+    replacementRunId
+  };
 }
 
 function runtimeStatusFromSessionStatus(event: RunEvent): OpencodeLikeRuntimeStatus | undefined {

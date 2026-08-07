@@ -25,3 +25,16 @@ Codex 白盒分析使用 worker 内固定的官方 Codex CLI，启动器直接�
 ## 生成 SDK 边界
 
 `backend/test-agent-opencode-sdk-generated/` 同样禁止手工修改 generated Java 源码。SDK 变更必须通过 `tools/generate-opencode-java-sdk.sh` 重新生成，再按模块文档同步。
+
+## 最后一条消息原生撤销重发语义
+
+OpenCode 1.18.4 的界面重发不是独立 resend API：界面先对最后一条 user message 调用
+`POST /session/{sessionID}/revert`，OpenCode 立即把该消息及后续 assistant/tool 内容排除出消息查询和下一轮模型上下文，
+并恢复该轮文件改动；下一次投递使用新的 message ID。`session.status.type=retry` 是供应商调用内部重试，平台只展示该状态，
+不得据此取消 Run 或重复发送 prompt。
+
+平台实现只能通过 `AgentRuntime` 中立端口调用既有消息查询、revert/unrevert 和 prompt/command 适配，禁止修改只读快照或
+generated SDK。重发前必须确认目标仍是远端最后一条 user message；重放 text/file/agent/subtask、model、agent、variant，
+使用服务端稳定的新 message ID。投递结果未知时只能继续探测该稳定 ID；只有明确不存在时才能尝试 unrevert，unrevert 回包未知时
+仍保留锁并在恢复轮重新确认。替代消息确认受理后才清理源 Run 的正文、工具事件和 scope 投影，`runs`、反馈、用量、traceId 与
+重发关系继续作为最小审计数据保留。

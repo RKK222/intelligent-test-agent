@@ -13,7 +13,9 @@ import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessStat
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.run.Run;
+import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.domain.run.RunStorageMode;
+import com.enterprise.testagent.domain.run.RunResend;
 import com.enterprise.testagent.domain.run.TokenUsage;
 import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionHistoryItem;
@@ -35,6 +37,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 /**
  * Runtime API DTO 集合，统一隔离 HTTP 契约与 domain 对象，避免 Controller 直接返回领域模型。
@@ -345,7 +348,8 @@ final class RuntimeDtos {
             String summaryStatus,
             Integer summaryVersion,
             String sourceType,
-            String sourceRefId) {
+            String sourceRefId,
+            ResendMetadataResponse resend) {
 
         /**
          * 从旧领域消息映射为 API 响应；摘要元数据保持可空，避免旧数据被误标记为终态摘要。
@@ -362,6 +366,15 @@ final class RuntimeDtos {
                 String contentKind,
                 String summaryStatus,
                 Integer summaryVersion) {
+            return from(message, contentKind, summaryStatus, summaryVersion, null);
+        }
+
+        static SessionMessageResponse from(
+                SessionMessage message,
+                String contentKind,
+                String summaryStatus,
+                Integer summaryVersion,
+                RunResend resend) {
             return new SessionMessageResponse(
                     message.messageId().value(),
                     message.sessionId().value(),
@@ -378,7 +391,35 @@ final class RuntimeDtos {
                     summaryStatus,
                     summaryVersion,
                     message.sourceType().name(),
-                    message.sourceRefId());
+                    message.sourceRefId(),
+                    ResendMetadataResponse.from(resend));
+        }
+    }
+
+    /** additive 重发元数据；旧客户端忽略，新客户端据此显示来源、倒计时和链次数。 */
+    record ResendMetadataResponse(
+            String resendId,
+            String trigger,
+            int totalAttempt,
+            int automaticAttempt,
+            int automaticLimit,
+            String status,
+            Instant executeAt,
+            String sourceRunId,
+            String replacementRunId) {
+
+        static ResendMetadataResponse from(RunResend resend) {
+            if (resend == null) return null;
+            return new ResendMetadataResponse(
+                    resend.resendId().value(),
+                    resend.trigger().name(),
+                    resend.totalAttempt(),
+                    resend.automaticAttempt(),
+                    resend.automaticLimit(),
+                    resend.status().name(),
+                    resend.executeAt(),
+                    resend.sourceRunId().value(),
+                    resend.replacementRunId().value());
         }
     }
 
@@ -421,13 +462,14 @@ final class RuntimeDtos {
             String clientRequestId,
             Instant detailsAvailableUntil,
             String sourceType,
-            String sourceRefId) {
+            String sourceRefId,
+            ResendMetadataResponse resend) {
 
         /**
          * 从旧领域运行对象映射为 API 响应；新存储元数据保持可空以兼容历史 Run。
          */
         static RunResponse from(Run run) {
-            return from(run, null, null, null);
+            return from(run, null, null, null, null);
         }
 
         /**
@@ -438,6 +480,15 @@ final class RuntimeDtos {
                 RunStorageMode storageMode,
                 String clientRequestId,
                 Instant detailsAvailableUntil) {
+            return from(run, storageMode, clientRequestId, detailsAvailableUntil, null);
+        }
+
+        static RunResponse from(
+                Run run,
+                RunStorageMode storageMode,
+                String clientRequestId,
+                Instant detailsAvailableUntil,
+                RunResend resend) {
             return new RunResponse(
                     run.runId().value(),
                     run.sessionId().value(),
@@ -451,7 +502,8 @@ final class RuntimeDtos {
                     clientRequestId,
                     detailsAvailableUntil,
                     run.sourceType().name(),
-                    run.sourceRefId());
+                    run.sourceRefId(),
+                    ResendMetadataResponse.from(resend));
         }
     }
 
@@ -466,12 +518,18 @@ final class RuntimeDtos {
             Instant generatedAt) {
 
         static SessionRuntimeStateResponse from(SessionRuntimeStateSummary summary) {
+            return from(summary, null);
+        }
+
+        static SessionRuntimeStateResponse from(
+                SessionRuntimeStateSummary summary,
+                Function<RunId, RunResend> resendLookup) {
             return new SessionRuntimeStateResponse(
                     summary.runningCount(),
                     summary.questionCount(),
                     summary.permissionCount(),
                     summary.sessions().stream()
-                            .map(SessionRuntimeStateItemResponse::from)
+                            .map(state -> SessionRuntimeStateItemResponse.from(state, resendLookup))
                             .toList(),
                     summary.generatedAt());
         }
@@ -487,9 +545,19 @@ final class RuntimeDtos {
             String attention,
             String attentionEventId,
             Instant attentionAt,
-            Instant updatedAt) {
+            Instant updatedAt,
+            ResendMetadataResponse resend) {
 
         static SessionRuntimeStateItemResponse from(SessionRuntimeState state) {
+            return from(state, null);
+        }
+
+        static SessionRuntimeStateItemResponse from(
+                SessionRuntimeState state,
+                Function<RunId, RunResend> resendLookup) {
+            RunResend resend = resendLookup == null
+                    ? null
+                    : resendLookup.apply(state.runId());
             return new SessionRuntimeStateItemResponse(
                     state.sessionId().value(),
                     state.runId().value(),
@@ -497,7 +565,8 @@ final class RuntimeDtos {
                     state.attention() == null ? null : state.attention().name(),
                     state.attentionEventId(),
                     state.attentionAt(),
-                    state.updatedAt());
+                    state.updatedAt(),
+                    ResendMetadataResponse.from(resend));
         }
     }
 
@@ -965,6 +1034,19 @@ final class RuntimeDtos {
      */
     static PageResponse<SessionMessageResponse> messagePage(PageResponse<SessionMessage> page) {
         List<SessionMessageResponse> items = page.items().stream().map(SessionMessageResponse::from).toList();
+        return new PageResponse<>(items, page.page(), page.size(), page.total());
+    }
+
+    static PageResponse<SessionMessageResponse> messagePage(
+            PageResponse<SessionMessage> page,
+            Function<RunId, RunResend> resendLookup) {
+        if (resendLookup == null) return messagePage(page);
+        List<SessionMessageResponse> items = page.items().stream().map(message -> {
+            RunResend resend = message.runId() == null
+                    ? null
+                    : resendLookup.apply(message.runId());
+            return SessionMessageResponse.from(message, null, null, null, resend);
+        }).toList();
         return new PageResponse<>(items, page.page(), page.size(), page.total());
     }
 }

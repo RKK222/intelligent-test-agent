@@ -42,6 +42,12 @@ public record OpencodePromptPart(
             url = null;
             mime = null;
             filename = null;
+        } else if ("subtask".equals(type)) {
+            text = DomainValidation.requireText(text, "prompt");
+            filename = DomainValidation.requireText(filename, "description");
+            name = DomainValidation.requireText(name, "agent");
+            url = null;
+            mime = null;
         } else {
             throw new IllegalArgumentException("unsupported opencode prompt part type: " + type);
         }
@@ -68,12 +74,32 @@ public record OpencodePromptPart(
         return new OpencodePromptPart("agent", null, null, null, null, name, source, null);
     }
 
+    /** 创建 subtask part；model/command 放在短期元数据中并按原生字段输出。 */
+    public static OpencodePromptPart subtask(
+            String prompt,
+            String description,
+            String agent,
+            Map<String, Object> metadata) {
+        return new OpencodePromptPart(
+                "subtask", prompt, null, null, description, agent, null, metadata);
+    }
+
     /**
      * 转换为 prompt_async 请求体 Map，只输出当前 part 类型允许的字段。
      */
     Map<String, Object> toRequestBody() {
         LinkedHashMap<String, Object> body = new LinkedHashMap<>();
         body.put("type", type);
+        if ("subtask".equals(type)) {
+            body.put("prompt", text);
+            body.put("description", filename);
+            body.put("agent", name);
+            Object model = metadata.get("model");
+            Object command = metadata.get("command");
+            if (model != null) body.put("model", model);
+            if (command != null) body.put("command", command);
+            return Map.copyOf(body);
+        }
         if (text != null) {
             body.put("text", text);
         }

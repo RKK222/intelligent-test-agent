@@ -31,6 +31,7 @@ export type AssistantThreadProps = {
   messageScopesById?: Record<string, MessageScope>;
   subagentsBySessionId?: Record<string, SubagentSession>;
   subagentByTaskPartId?: Record<string, string>;
+  resendableMessageId?: string;
 };
 </script>
 
@@ -199,9 +200,11 @@ function jumpToBottom() {
       </div>
       <OpencodeTimeline
         :state="timelineState"
+        :resendable-message-id="resendableMessageId"
         :work-status-dock-target="activeSubagentSessionId ? undefined : workStatusDockRef"
         @open-diff="emit('openDiff')"
         @select-subagent="selectSubagent"
+        @resend="emit('retry')"
       />
       <button
         v-if="hasNewContent"

@@ -63,6 +63,7 @@ import type {
   CommonParameterMemoryCluster,
   CommonParameterMemoryProcess,
   ConversationRunContext,
+  CreateRunResendPayload,
   CreateApplicationWorkspacePayload,
   CreateWorkspaceAcceptedResponse,
   CreatePersonalWorkspacePayload,
@@ -140,6 +141,7 @@ import type {
   RoleOption,
   IdentityStatus,
   Run,
+  RunResendResponse,
   RunDiff,
   RunDiffAction,
   RuntimeResourceInfo,
@@ -2021,6 +2023,12 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       routedRequest<Run>(agentPath("/runs"), {
         method: "POST",
         body: JSON.stringify(normalizeStartRunPayload(sessionIdOrPayload, prompt)),
+        timeoutMs: 120000
+      }),
+    createRunResend: (sessionId: string, payload: CreateRunResendPayload) =>
+      routedRequest<RunResendResponse>(agentPath(`/sessions/${encodeURIComponent(sessionId)}/resends`), {
+        method: "POST",
+        body: JSON.stringify(payload),
         timeoutMs: 120000
       }),
     getMyOpencodeProcess: () => routedRequest<UserOpencodeProcess>(agentPath("/processes/me")),

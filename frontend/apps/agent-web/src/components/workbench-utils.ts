@@ -423,20 +423,14 @@ export function opencodeAvailabilityFromHealth(
 }
 
 export type RetryDeadlineMap = Record<string, number>;
-export type RetryExpirationDecision = "wait" | "retry" | "fail";
-export type AutoRetryRunDraft = {
+export type ChatRunDraft = {
   prompt: string;
   parts: PromptPart[];
   userMessageId: string;
   title?: string;
   command?: { command: string; arguments: string };
 };
-export type AutoRetryRunPreparation =
-  | { type: "missing-draft" }
-  | { type: "start"; input: AutoRetryRunDraft; cancelRunId?: string; localRun?: Run };
-
 const DEFAULT_RETRY_WAIT_SECONDS = 60;
-const DEFAULT_RETRY_MAX_ATTEMPTS = 3;
 
 /**
  * retry 事件可能来自 SSE 重放，不能用 occurredAt 推导倒计时。
@@ -474,82 +468,8 @@ export function retryCountdownSeconds(
   return Math.max(0, Math.ceil(((deadlineMs as number) - nowMs) / 1000));
 }
 
-export function retryExpirationDecision(
-  retryRuntimeStatus: OpencodeLikeRuntimeStatus | undefined,
-  nowMs = Date.now(),
-  deadlines: RetryDeadlineMap = {}
-): RetryExpirationDecision {
-  if (!retryRuntimeStatus || retryRuntimeStatus.type !== "retry" || retryCountdownSeconds(retryRuntimeStatus, nowMs, deadlines) > 0) {
-    return "wait";
-  }
-  const attempt = retryRuntimeStatus.attempt ?? 0;
-  const maxAttempts = retryRuntimeStatus.maxAttempts ?? DEFAULT_RETRY_MAX_ATTEMPTS;
-  return attempt >= maxAttempts ? "fail" : "retry";
-}
-
-export function shouldFailExhaustedRetry(
-  retryRuntimeStatus: OpencodeLikeRuntimeStatus | undefined,
-  nowMs = Date.now(),
-  deadlines: RetryDeadlineMap = {}
-): boolean {
-  return retryExpirationDecision(retryRuntimeStatus, nowMs, deadlines) === "fail";
-}
-
-export function prepareAutoRetryRun(
-  currentRun: Run | null | undefined,
-  draft: AutoRetryRunDraft | null | undefined,
-  updatedAt = new Date().toISOString()
-): AutoRetryRunPreparation {
-  if (!draft || !draft.prompt.trim()) {
-    return { type: "missing-draft" };
-  }
-  if (currentRun && autoRetryRunIsBusyStatus(currentRun.status)) {
-    return {
-      type: "start",
-      input: draft,
-      cancelRunId: currentRun.runId,
-      localRun: { ...currentRun, status: "CANCELLED", updatedAt }
-    };
-  }
-  return { type: "start", input: draft };
-}
-
-/**
- * 页面刷新或重新进入历史会话后，内存草稿已经丢失；从平台持久化的最后一条用户消息恢复同一轮请求。
- * 只复用用户输入与可重放的 PromptPart，不从 assistant/card 内容猜测请求，避免把错误说明再次发给模型。
- */
-export function retryRunDraftFromSessionMessages(
-  messages: SessionMessage[]
-): AutoRetryRunDraft | null {
-  const deduped = dedupeSessionMessages(messages);
-  for (let index = deduped.length - 1; index >= 0; index -= 1) {
-    const message = deduped[index];
-    if (message.role !== "USER") {
-      continue;
-    }
-    const parts = normalizeSessionPromptParts(message);
-    const prompt = message.content.trim() || promptFromParts(parts);
-    if (!prompt) {
-      continue;
-    }
-    const command = parseCommand(prompt, "build") ?? undefined;
-    return {
-      prompt,
-      parts: parts.length > 0 ? parts : [{ type: "text", text: prompt }],
-      userMessageId: message.messageId,
-      title: prompt,
-      ...(command ? { command } : {})
-    };
-  }
-  return null;
-}
-
 function retryDeadlineKey(retryRuntimeStatus: OpencodeLikeRuntimeStatus): string {
   return retryRuntimeStatus.retryKey ?? `${retryRuntimeStatus.attempt ?? 0}:${retryRuntimeStatus.message ?? ""}`;
-}
-
-function autoRetryRunIsBusyStatus(status: Run["status"] | string | undefined): boolean {
-  return status === "PENDING" || status === "QUEUED" || status === "RUNNING" || status === "CANCELLING";
 }
 
 type WorkbenchCenterMode = "editor" | "diff" | "system";
@@ -954,6 +874,7 @@ export function messagesFromSessionMessages(messages: SessionMessage[]): AgentMe
         runId: message.runId,
         ...(message.sourceType ? { sourceType: message.sourceType } : {}),
         ...(message.sourceRefId ? { sourceRefId: message.sourceRefId } : {}),
+        ...(message.resend ? { resend: message.resend } : {}),
         role: "user",
         text: message.content,
         parts: normalizeSessionPromptParts(message),

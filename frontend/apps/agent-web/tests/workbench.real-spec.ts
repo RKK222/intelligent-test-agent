@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { access, rm } from "node:fs/promises";
+import { access, readFile, rm } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
@@ -220,6 +220,138 @@ test.describe("phase 11 real service integration", () => {
       ]);
     }
   });
+
+  test("native resend reverts the last user turn and replaces its visible response", async () => {
+    test.setTimeout(180_000);
+    const sessions = await apiGet<{ items?: Array<{ workspaceId?: string; status?: string }> }>(
+      "/api/internal/platform/opencode-runtime/sessions?page=1&size=100"
+    );
+    const reusable = sessions.items?.find((item) => item.status === "ACTIVE" && item.workspaceId);
+    if (!reusable?.workspaceId) throw new Error("No existing active workspace is available for resend real E2E");
+    const workspace = await apiGet<{ physicalRootPath?: string }>(
+      `/api/internal/platform/workspace-management/workspaces/${encodeURIComponent(reusable.workspaceId)}`
+    );
+    if (!workspace.physicalRootPath) throw new Error("Resend real E2E workspace has no physical root");
+
+    const marker = `resend_real_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const markerName = `.testagent-${marker}.txt`;
+    const markerPath = path.join(workspace.physicalRootPath, markerName);
+    let sessionId: string | undefined;
+    let remoteSessionId: string | undefined;
+    let opencodeBaseUrl: string | undefined;
+    try {
+      const processInfo = await apiGet<{ baseUrl?: string }>("/api/internal/agent/opencode/processes/me");
+      opencodeBaseUrl = processInfo.baseUrl;
+      if (!opencodeBaseUrl) throw new Error("Resend real E2E OpenCode process has no baseUrl");
+      const session = await apiPost<{ sessionId: string }>("/api/internal/platform/opencode-runtime/sessions", {
+        workspaceId: reusable.workspaceId,
+        title: `Resend real E2E ${marker}`
+      });
+      sessionId = session.sessionId;
+      const context = await apiPost<{ contextToken: string }>(
+        `/api/internal/agent/opencode/sessions/${encodeURIComponent(sessionId)}/run-context`,
+        {}
+      );
+      const prompt = [
+        `Check whether ${markerName} exists in the current workspace.`,
+        `If absent, create it containing exactly ${marker} and reply exactly CREATED_FROM_ABSENT_${marker}.`,
+        `If it exists, do not modify it and reply exactly FOUND_EXISTING_${marker}.`
+      ].join(" ");
+      const source = await apiPost<{ runId: string }>("/api/internal/agent/opencode/runs", {
+        sessionId,
+        contextToken: context.contextToken,
+        clientRequestId: `real-source-${marker}`,
+        prompt,
+        parts: [{ type: "text", text: prompt }]
+      });
+      const sourceEvents = await captureRunEventsUntilTerminal(source.runId).finished;
+      expect(sourceEvents.some((event) => event.type === "run.succeeded")).toBe(true);
+      expect(await readFile(markerPath, "utf8")).toBe(marker);
+      remoteSessionId = await resolveRemoteSessionId(sessionId, () => undefined);
+
+      const beforeMessages = await apiGet<{ items?: PlatformRealMessage[] }>(
+        `/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(sessionId)}/messages?page=1&size=100&refresh=true`
+      );
+      const sourceUser = beforeMessages.items?.find(
+        (message) => message.runId === source.runId && message.role?.toUpperCase() === "USER"
+      );
+      if (!sourceUser?.remoteMessageId) throw new Error("Source Run has no recoverable remote user boundary");
+      const beforeNative = await listNativeMessages(opencodeBaseUrl, remoteSessionId, workspace.physicalRootPath);
+      const oldAssistantIds = beforeNative
+        .filter((message) => message.info?.role === "assistant" && message.info.parentID === sourceUser.remoteMessageId)
+        .map((message) => message.info?.id)
+        .filter((id): id is string => Boolean(id));
+      expect(oldAssistantIds.length).toBeGreaterThan(0);
+      const resendContext = await apiPost<{ contextToken: string }>(
+        `/api/internal/agent/opencode/sessions/${encodeURIComponent(sessionId)}/run-context`,
+        {}
+      );
+
+      const created = await apiPost<{
+        replacementRun: { runId: string };
+        resend: { replacementRunId: string; status: string };
+      }>(`/api/internal/agent/opencode/sessions/${encodeURIComponent(sessionId)}/resends`, {
+        expectedRemoteMessageId: sourceUser.remoteMessageId,
+        expectedRunId: source.runId,
+        contextToken: resendContext.contextToken,
+        clientRequestId: `real-resend-${marker}`
+      });
+      expect(created.replacementRun.runId).toBe(created.resend.replacementRunId);
+      expect(created.resend.status).toBe("WAITING");
+      const replacementEvents = await captureRunEventsUntilTerminal(created.replacementRun.runId).finished;
+      expect(replacementEvents.some((event) => event.type === "run.resend.scheduled")).toBe(true);
+      expect(replacementEvents.some((event) => event.type === "run.resend.started")).toBe(true);
+      expect(replacementEvents.some((event) => event.type === "run.succeeded")).toBe(true);
+
+      const afterNative = await listNativeMessages(opencodeBaseUrl, remoteSessionId, workspace.physicalRootPath);
+      const nativeIds = new Set(afterNative.map((message) => message.info?.id).filter(Boolean));
+      expect(nativeIds.has(sourceUser.remoteMessageId)).toBe(false);
+      expect(oldAssistantIds.every((id) => !nativeIds.has(id))).toBe(true);
+      const replacementUser = afterNative.find(
+        (message) => message.info?.role === "user" && message.info?.id !== sourceUser.remoteMessageId
+      );
+      if (!replacementUser?.info?.id) throw new Error("Replacement native user message was not found");
+      const replacementAnswer = afterNative
+        .filter((message) => message.info?.role === "assistant" && message.info.parentID === replacementUser.info?.id)
+        .flatMap((message) => message.parts ?? [])
+        .filter((part) => part.type === "text")
+        .map((part) => String(part.text ?? ""))
+        .join("\n");
+      expect(replacementAnswer).toContain(`CREATED_FROM_ABSENT_${marker}`);
+      expect(replacementAnswer).not.toContain(`FOUND_EXISTING_${marker}`);
+      expect(await readFile(markerPath, "utf8")).toBe(marker);
+
+      const afterMessages = await apiGet<{ items?: PlatformRealMessage[] }>(
+        `/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(sessionId)}/messages?page=1&size=100&refresh=true`
+      );
+      expect(afterMessages.items?.some((message) => message.runId === source.runId) ?? false).toBe(false);
+      expect(afterMessages.items?.some((message) => message.runId === created.replacementRun.runId) ?? false).toBe(true);
+    } finally {
+      const ownedSessionId = sessionId;
+      const ownedRemoteSessionId = remoteSessionId;
+      const ownedOpencodeBaseUrl = opencodeBaseUrl;
+      await runCleanupStages([
+        async () => {
+          if (!ownedSessionId) return;
+          const activeRun = await apiGet<{ runId: string } | null>(
+            `/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(ownedSessionId)}/active-run`
+          );
+          if (activeRun?.runId) await apiPost(`/api/internal/agent/opencode/runs/${encodeURIComponent(activeRun.runId)}/cancel`, {});
+        },
+        async () => {
+          if (ownedRemoteSessionId && ownedOpencodeBaseUrl) {
+            await deleteNativeSession(ownedOpencodeBaseUrl, ownedRemoteSessionId, workspace.physicalRootPath!);
+          }
+        },
+        async () => {
+          if (ownedSessionId) await apiDelete(`/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(ownedSessionId)}`);
+        },
+        async () => {
+          await rm(markerPath, { force: true });
+        }
+      ]);
+    }
+  });
 });
 
 async function createManagedWorkspaceFixture(): Promise<ManagedWorkspaceFixture> {
@@ -338,6 +470,19 @@ type ManagedWorkspaceFixture = {
 };
 
 type CapturedRunEvent = { seq: number; type: string; payload: Record<string, unknown> };
+type PlatformRealMessage = { role?: string; runId?: string; remoteMessageId?: string };
+type NativeRealMessage = {
+  info?: { id?: string; role?: string; parentID?: string };
+  parts?: Array<{ type?: string; text?: string }>;
+};
+
+async function listNativeMessages(baseUrl: string, remoteSessionId: string, directory: string): Promise<NativeRealMessage[]> {
+  const url = new URL(`/session/${encodeURIComponent(remoteSessionId)}/message`, `${stripTrailingSlash(baseUrl)}/`);
+  url.searchParams.set("directory", directory);
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Native OpenCode messages failed with HTTP ${response.status}`);
+  return (await response.json()) as NativeRealMessage[];
+}
 
 /** 真实 E2E 只通过平台 RunEvent SSE 收集旁路可见事件，不接触生产浏览器外的 OpenCode 事件流。 */
 function captureRunEventsUntilTerminal(runId: string): { finished: Promise<CapturedRunEvent[]> } {
@@ -345,7 +490,7 @@ function captureRunEventsUntilTerminal(runId: string): { finished: Promise<Captu
   const finished = new Promise<CapturedRunEvent[]>(async (resolve, reject) => {
     const timeout = setTimeout(() => {
       controller.abort();
-      reject(new Error(`side-question Run ${runId} did not reach a terminal event within 120 seconds`));
+      reject(new Error(`Run ${runId} did not reach a terminal event within 120 seconds`));
     }, 120_000);
     try {
       const response = await fetch(`${backendBaseUrl}/api/internal/agent/opencode/runs/${encodeURIComponent(runId)}/events`, {

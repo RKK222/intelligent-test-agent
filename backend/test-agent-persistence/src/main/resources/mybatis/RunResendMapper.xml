@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.RunResendMapper">
+    <sql id="columns">
+        resend_id as "resendId", session_id as "sessionId", owner_user_id as "ownerUserId",
+        source_run_id as "sourceRunId", replacement_run_id as "replacementRunId",
+        source_remote_message_id as "sourceRemoteMessageId",
+        replacement_remote_message_id as "replacementRemoteMessageId",
+        trigger_type as "triggerType", total_attempt as "totalAttempt",
+        automatic_attempt as "automaticAttempt", automatic_limit as "automaticLimit", status,
+        execute_at as "executeAt", target_linux_server_id as "targetLinuxServerId",
+        lease_token as "leaseToken", lease_until as "leaseUntil",
+        client_request_id as "clientRequestId", trace_id as "traceId",
+        safe_error_message as "safeErrorMessage", created_at as "createdAt", updated_at as "updatedAt"
+    </sql>
+    <sql id="values">
+        session_id=#{sessionId}, owner_user_id=#{ownerUserId}, source_run_id=#{sourceRunId},
+        replacement_run_id=#{replacementRunId}, source_remote_message_id=#{sourceRemoteMessageId},
+        replacement_remote_message_id=#{replacementRemoteMessageId}, trigger_type=#{triggerType},
+        total_attempt=#{totalAttempt}, automatic_attempt=#{automaticAttempt}, automatic_limit=#{automaticLimit},
+        status=#{status}, execute_at=#{executeAt}, target_linux_server_id=#{targetLinuxServerId},
+        lease_token=#{leaseToken}, lease_until=#{leaseUntil}, client_request_id=#{clientRequestId},
+        trace_id=#{traceId}, safe_error_message=#{safeErrorMessage},
+        created_at=#{createdAt}, updated_at=#{updatedAt}
+    </sql>
+
+    <insert id="insert" parameterType="map">
+        insert into run_resends(
+            resend_id,session_id,owner_user_id,source_run_id,replacement_run_id,
+            source_remote_message_id,replacement_remote_message_id,trigger_type,total_attempt,
+            automatic_attempt,automatic_limit,status,execute_at,target_linux_server_id,
+            lease_token,lease_until,client_request_id,trace_id,safe_error_message,created_at,updated_at)
+        values(
+            #{resendId},#{sessionId},#{ownerUserId},#{sourceRunId},#{replacementRunId},
+            #{sourceRemoteMessageId},#{replacementRemoteMessageId},#{triggerType},#{totalAttempt},
+            #{automaticAttempt},#{automaticLimit},#{status},#{executeAt},#{targetLinuxServerId},
+            #{leaseToken},#{leaseUntil},#{clientRequestId},#{traceId},#{safeErrorMessage},#{createdAt},#{updatedAt})
+    </insert>
+    <update id="update" parameterType="map">
+        update run_resends set <include refid="values"/> where resend_id=#{resendId}
+    </update>
+    <update id="updateIfStatus" parameterType="map">
+        update run_resends set <include refid="values"/>
+        where resend_id=#{resendId} and status=#{expectedStatus}
+    </update>
+    <update id="updateIfStatusAndLease" parameterType="map">
+        update run_resends set <include refid="values"/>
+        where resend_id=#{resendId} and status=#{expectedStatus} and lease_token=#{expectedLeaseToken}
+    </update>
+    <select id="findById" resultType="map">
+        select <include refid="columns"/> from run_resends where resend_id=#{resendId}
+    </select>
+    <select id="findByOwnerAndClientRequestId" resultType="map">
+        select <include refid="columns"/> from run_resends
+        where owner_user_id=#{ownerUserId} and client_request_id=#{clientRequestId}
+    </select>
+    <select id="findBySourceRunId" resultType="map">
+        select <include refid="columns"/> from run_resends where source_run_id=#{sourceRunId}
+    </select>
+    <select id="findByReplacementRunId" resultType="map">
+        select <include refid="columns"/> from run_resends where replacement_run_id=#{replacementRunId}
+    </select>
+    <select id="findActiveBySession" resultType="map">
+        select <include refid="columns"/> from run_resends
+        where session_id=#{sessionId} and status in ('WAITING','REVERTING','REVERTED')
+        order by created_at desc limit 1
+    </select>
+    <select id="findDue" resultType="map">
+        select <include refid="columns"/> from run_resends
+        where (status='WAITING' and execute_at &lt;= #{now})
+           or status='REVERTED'
+           or (status='REVERTING' and lease_until &lt;= #{now})
+        order by execute_at, created_at, resend_id limit #{limit}
+    </select>
+    <select id="findLatestUserTurn" resultType="map">
+        select m.run_id as "runId", m.remote_message_id as "remoteMessageId"
+        from session_messages m
+        where m.session_id=#{sessionId}
+          and m.role='USER'
+          and m.run_id is not null
+          and m.remote_message_id is not null
+          and not exists (
+              select 1 from run_resends r
+              where r.source_run_id=m.run_id and r.status='DISPATCHED'
+          )
+        order by m.created_at desc, m.id desc
+        limit 1
+    </select>
+
+    <insert id="insertSessionLock" databaseId="postgresql">
+        insert into run_resend_session_locks(session_id,resend_id,owner_user_id,created_at)
+        values(#{sessionId},#{resendId},#{ownerUserId},#{now}) on conflict do nothing
+    </insert>
+    <insert id="insertSessionLock">
+        insert into run_resend_session_locks(session_id,resend_id,owner_user_id,created_at)
+        select #{sessionId},#{resendId},#{ownerUserId},#{now}
+        where not exists (
+            select 1 from run_resend_session_locks where session_id=#{sessionId} or resend_id=#{resendId}
+        )
+    </insert>
+    <delete id="deleteSessionLock">
+        delete from run_resend_session_locks where session_id=#{sessionId} and resend_id=#{resendId}
+    </delete>
+    <select id="countSessionLocks" resultType="long">
+        select count(*) from run_resend_session_locks where session_id=#{sessionId}
+    </select>
+    <select id="findDispatchedSourceRunIds" resultType="string">
+        select source_run_id from run_resends
+        where session_id=#{sessionId} and status='DISPATCHED'
+    </select>
+
+    <!-- 替代消息确认受理后，只删除源 Run 的可回放正文、工具事件和 child scope；Run/反馈/用量保留。 -->
+    <update id="detachFeedbackMessagesByRunId">
+        update ai_message_feedbacks set message_id=null
+        where run_id=#{runId} and message_id is not null
+    </update>
+    <delete id="deleteScopeSessionsByRunId">
+        delete from run_session_scope_sessions where run_id=#{runId}
+    </delete>
+    <delete id="deleteScopesByRunId">
+        delete from run_session_scopes where run_id=#{runId}
+    </delete>
+    <delete id="deleteSessionMessagesByRunId">
+        delete from session_messages where run_id=#{runId}
+    </delete>
+    <delete id="deleteRunEventsByRunId">
+        delete from run_events where run_id=#{runId}
+    </delete>
+</mapper>

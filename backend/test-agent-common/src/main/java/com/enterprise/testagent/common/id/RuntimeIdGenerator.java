@@ -34,6 +34,11 @@ public final class RuntimeIdGenerator {
         return prefixed("run_");
     }
 
+    /** 生成原生撤销重发控制记录 ID。 */
+    public static String runResendId() {
+        return prefixed("rsd_");
+    }
+
     /**
      * 生成会话消息 ID，供平台持久化消息和恢复投影时稳定定位消息。
      */

@@ -66,6 +66,27 @@
   opacity: 1;
 }
 
+.oc-user-message__resend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--ta-chat-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.oc-user-message__resend:hover {
+  color: var(--ta-chat-text);
+}
+
+.oc-user-message__resend svg {
+  width: 12px;
+  height: 12px;
+}
+
 .oc-user-message__contexts {
   display: flex;
   flex-wrap: wrap;

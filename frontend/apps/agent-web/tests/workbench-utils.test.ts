@@ -34,12 +34,9 @@ import {
   nextCenterModeAfterRunDiff,
   openCodeTuiCommandQuery,
   parseOpenCodeTuiShellCommand,
-  prepareAutoRetryRun,
   resolveOpenCodeTuiCommand,
-  retryRunDraftFromSessionMessages,
   resolveRetryDeadline,
   retryCountdownSeconds,
-  retryExpirationDecision,
   runEventSubscriptionRunId,
   runEventSubscriptionSessionId,
   runtimeCatalogRecoveryAllowed,
@@ -51,7 +48,6 @@ import {
   runEventProjection,
   sessionTitleFromFirstMessage,
   shouldResetAfterNightTaskClosure,
-  shouldFailExhaustedRetry,
   workspaceRequirementReferences,
   workspaceRequirementStageDirectories,
   workspaceAttachmentTargetPath,
@@ -864,102 +860,7 @@ describe("retry status helpers", () => {
     expect(resolved.deadlineMs).toBe(deadlines.evt_retry_1);
   });
 
-  it("auto-retries the first two expired retry attempts and fails the third", () => {
-    const deadlines = { evt_retry_1: Date.parse("2026-07-05T11:30:00.000Z") };
-    const now = Date.parse("2026-07-05T11:30:00.000Z");
-    const retry = {
-      type: "retry",
-      retryKey: "evt_retry_1",
-      attempt: 1,
-      maxAttempts: 3,
-      retryAfterSeconds: 60
-    } as const;
-
-    expect(retryExpirationDecision(retry, now - 1, deadlines)).toBe("wait");
-    expect(retryExpirationDecision(retry, now, deadlines)).toBe("retry");
-    expect(retryExpirationDecision({ ...retry, attempt: 2 }, now, deadlines)).toBe("retry");
-    expect(retryExpirationDecision({ ...retry, attempt: 3 }, now, deadlines)).toBe("fail");
-    expect(shouldFailExhaustedRetry({ ...retry, attempt: 3 }, now, deadlines)).toBe(true);
-  });
 });
-
-describe("auto retry run helpers", () => {
-  it("prepares a new run from the last run draft and cancels the current busy run", () => {
-    const parts: PromptPart[] = [{ type: "text", text: "继续执行" }];
-    const currentRun: Run = {
-      runId: "run_old",
-      sessionId: "ses_1",
-      workspaceId: "wrk_1",
-      status: "RUNNING",
-      createdAt: "2026-07-05T11:00:00Z",
-      updatedAt: "2026-07-05T11:00:00Z"
-    };
-    const draft = {
-      prompt: "继续执行",
-      parts,
-      userMessageId: "msg_user_retry",
-      title: "继续执行",
-      command: { command: "skill", arguments: "frontend" }
-    };
-
-    expect(prepareAutoRetryRun(currentRun, draft, "2026-07-05T11:01:00.000Z")).toEqual({
-      type: "start",
-      input: draft,
-      cancelRunId: "run_old",
-      localRun: { ...currentRun, status: "CANCELLED", updatedAt: "2026-07-05T11:01:00.000Z" }
-    });
-  });
-
-  it("fails auto retry when the previous run draft is missing", () => {
-    expect(prepareAutoRetryRun(null, null, "2026-07-05T11:01:00.000Z")).toEqual({
-      type: "missing-draft"
-    });
-  });
-
-  it("restores the last persisted user request for retry after reopening a failed session", () => {
-    const messages: SessionMessage[] = [
-      {
-        messageId: "msg_user_old",
-        sessionId: "ses_1",
-        role: "USER",
-        content: "上一轮请求",
-        createdAt: "2026-07-05T10:00:00Z",
-        runId: "run_old"
-      },
-      {
-        messageId: "msg_assistant_failed",
-        sessionId: "ses_1",
-        role: "ASSISTANT",
-        content: "连接异常",
-        createdAt: "2026-07-05T10:01:00Z",
-        runId: "run_failed"
-      },
-      {
-        messageId: "msg_user_failed",
-        sessionId: "ses_1",
-        role: "USER",
-        content: "重新检查登录流程",
-        createdAt: "2026-07-05T10:02:00Z",
-        runId: "run_failed",
-        parts: [
-          { partId: "part_text", type: "text", text: "重新检查登录流程" },
-          { partId: "part_file", type: "file", path: "docs/login.md", name: "login.md", mimeType: "text/markdown" }
-        ]
-      }
-    ];
-
-    expect(retryRunDraftFromSessionMessages(messages)).toEqual({
-      prompt: "重新检查登录流程",
-      parts: [
-        { type: "text", text: "重新检查登录流程" },
-        { type: "file", path: "docs/login.md", name: "login.md", mimeType: "text/markdown", source: undefined }
-      ],
-      userMessageId: "msg_user_failed",
-      title: "重新检查登录流程"
-    });
-  });
-});
-
 describe("diffFilesFromPayload", () => {
   it("reads file objects from payload.files", () => {
     expect(diffFilesFromPayload({ files: [{ path: "a.ts", additions: 1, deletions: 0 }] })).toEqual([

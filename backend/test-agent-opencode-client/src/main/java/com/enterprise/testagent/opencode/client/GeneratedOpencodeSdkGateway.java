@@ -597,6 +597,37 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                 .thenReturn(new OpencodeRejectDiffResult(true));
     }
 
+    /** 直接调用原生 unrevert；generated SDK 模型仍不向外暴露。 */
+    @Override
+    public Mono<OpencodeUnrevertResult> unrevert(
+            ExecutionNode node,
+            String opencodeSessionId,
+            String directory,
+            String workspace,
+            String traceId) {
+        ApiClient apiClient = apiClient(node, traceId);
+        ParameterizedTypeReference<Void> returnType = new ParameterizedTypeReference<>() {
+        };
+        Map<String, Object> pathParams = new HashMap<>();
+        pathParams.put("sessionID", opencodeSessionId);
+        MultiValueMap<String, String> queryParams = queryParams(apiClient, directory, workspace);
+        return apiClient.invokeAPI(
+                        "/session/{sessionID}/unrevert",
+                        HttpMethod.POST,
+                        pathParams,
+                        queryParams,
+                        null,
+                        new HttpHeaders(),
+                        new LinkedMultiValueMap<>(),
+                        new LinkedMultiValueMap<>(),
+                        apiClient.selectHeaderAccept(new String[]{"application/json"}),
+                        apiClient.selectHeaderContentType(new String[]{}),
+                        new String[]{},
+                        returnType)
+                .bodyToMono(returnType)
+                .thenReturn(new OpencodeUnrevertResult(true));
+    }
+
     /**
      * 受控调用 opencode runtime API，追加 directory/workspace/query 后返回 JSON projection。
      */

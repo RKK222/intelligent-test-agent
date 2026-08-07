@@ -23,7 +23,11 @@ import com.enterprise.testagent.opencode.client.OpencodeStartRunCommand;
 import com.enterprise.testagent.opencode.client.OpencodeStartRunResult;
 import com.enterprise.testagent.opencode.client.OpencodeStartCommand;
 import com.enterprise.testagent.opencode.client.OpencodeStreamEventsCommand;
+import com.enterprise.testagent.opencode.client.OpencodeUnrevertCommand;
 import java.util.Objects;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -197,6 +201,46 @@ public class OpencodeAgentRuntime implements AgentRuntime {
                 .map(this::toSessionMessagesResult);
     }
 
+    @Override
+    public Mono<AgentReplayableTurn> loadReplayableTurn(AgentReplayableTurnCommand command) {
+        return opencodeClientFacade.sessionMessages(new OpencodeSessionMessagesCommand(
+                        command.node(), command.remoteSessionId(), 200, "desc", null, command.traceId()))
+                .map(result -> {
+                    OpencodeSessionMessage lastUserMessage = result.messages().stream()
+                            .filter(message -> "user".equals(text(message.message(), "role")))
+                            .findFirst()
+                            .orElseThrow(() -> new IllegalStateException("session has no replayable user message"));
+                    if (!command.messageId().equals(text(lastUserMessage.message(), "id"))) {
+                        throw new IllegalStateException("target is not the last user message");
+                    }
+                    return toReplayableTurn(lastUserMessage);
+                });
+    }
+
+    @Override
+    public Mono<AgentRevertTurnResult> revertTurn(AgentRevertTurnCommand command) {
+        return opencodeClientFacade.rejectDiff(new OpencodeRejectDiffCommand(
+                        command.node(), command.remoteSessionId(), command.directory(), command.workspace(),
+                        command.messageId(), null, command.traceId()))
+                .map(result -> new AgentRevertTurnResult(result.rejected()));
+    }
+
+    @Override
+    public Mono<AgentUnrevertTurnResult> unrevertTurn(AgentUnrevertTurnCommand command) {
+        return opencodeClientFacade.unrevert(new OpencodeUnrevertCommand(
+                        command.node(), command.remoteSessionId(), command.directory(), command.workspace(),
+                        command.traceId()))
+                .map(result -> new AgentUnrevertTurnResult(result.unreverted()));
+    }
+
+    @Override
+    public Mono<AgentMessageProbeResult> probeMessage(AgentMessageProbeCommand command) {
+        return opencodeClientFacade.sessionMessages(new OpencodeSessionMessagesCommand(
+                        command.node(), command.remoteSessionId(), 200, "desc", null, command.traceId()))
+                .map(result -> new AgentMessageProbeResult(result.messages().stream()
+                        .anyMatch(message -> command.messageId().equals(text(message.message(), "id")))));
+    }
+
     private AgentCreateSessionResult toCreateSessionResult(OpencodeCreateSessionResult result) {
         return new AgentCreateSessionResult(result.opencodeSessionId());
     }
@@ -242,7 +286,64 @@ public class OpencodeAgentRuntime implements AgentRuntime {
             case "text" -> OpencodePromptPart.text(part.text());
             case "file" -> OpencodePromptPart.file(part.url(), part.mime(), part.filename(), part.source());
             case "agent" -> OpencodePromptPart.agent(part.agentName(), part.source());
+            case "subtask" -> OpencodePromptPart.subtask(
+                    part.text(), part.filename(), part.agentName(), part.source());
             default -> throw new IllegalArgumentException("Unsupported agent prompt part type: " + part.type());
         };
+    }
+
+    private AgentReplayableTurn toReplayableTurn(OpencodeSessionMessage source) {
+        if (!"user".equals(text(source.message(), "role"))) {
+            throw new IllegalStateException("only user messages can be replayed");
+        }
+        List<AgentPromptPart> parts = source.parts().stream().map(this::toAgentPromptPart).toList();
+        String prompt = parts.stream()
+                .filter(part -> "text".equals(part.type()) && part.text() != null && !part.text().isBlank())
+                .map(AgentPromptPart::text)
+                .findFirst()
+                .orElseGet(() -> parts.stream()
+                        .filter(part -> "subtask".equals(part.type()))
+                        .map(AgentPromptPart::text)
+                        .findFirst()
+                        .orElseThrow(() -> new IllegalStateException("user message has no replayable prompt")));
+        Map<String, Object> model = map(source.message().get("model"));
+        return new AgentReplayableTurn(
+                text(source.message(), "id"),
+                prompt,
+                parts,
+                text(source.message(), "agent"),
+                text(model, "providerID"),
+                text(model, "modelID"),
+                text(source.message(), "variant"));
+    }
+
+    private AgentPromptPart toAgentPromptPart(Map<String, Object> part) {
+        String type = text(part, "type");
+        return switch (type) {
+            case "text" -> AgentPromptPart.text(text(part, "text"));
+            case "file" -> AgentPromptPart.file(
+                    text(part, "url"), text(part, "mime"), text(part, "filename"), map(part.get("source")));
+            case "agent" -> AgentPromptPart.agent(text(part, "name"), map(part.get("source")));
+            case "subtask" -> AgentPromptPart.subtask(
+                    text(part, "prompt"), text(part, "description"), text(part, "agent"), subtaskMetadata(part));
+            default -> throw new IllegalStateException("unsupported replayable prompt part type: " + type);
+        };
+    }
+
+    private Map<String, Object> subtaskMetadata(Map<String, Object> part) {
+        LinkedHashMap<String, Object> result = new LinkedHashMap<>();
+        if (part.get("model") instanceof Map<?, ?> model) result.put("model", Map.copyOf(model));
+        if (part.get("command") != null) result.put("command", part.get("command"));
+        return Map.copyOf(result);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> map(Object value) {
+        return value instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
+    }
+
+    private static String text(Map<String, Object> values, String key) {
+        Object value = values.get(key);
+        return value == null ? null : value.toString();
     }
 }

@@ -37,3 +37,9 @@
 ## 后续 AI 编码指引
 
 新增真实 agent 时优先新增本模块内的 `AgentRuntime` 实现，输出必须适配为平台稳定 DTO、RunEvent 和错误码；如果该 agent 支持可复用远端 session，必须实现 `sessionExists`，让历史 binding 缺失能被上层恢复。Controller、Repository 和 generated SDK 仍不得穿透到业务模块。
+
+## 原生轮次撤销重放
+
+`AgentRuntime` 提供中立的 `loadReplayableTurn/revertTurn/unrevertTurn/probeMessage` 能力。OpenCode 适配器从远端倒序消息中只接受
+最后一条 user message，保留 text/file/agent/subtask、model、agent、variant，并复用既有 revert、unrevert 和 prompt/command
+协议；稳定替代 message ID 由运行时创建。该能力不暴露 OpenCode generated DTO，也不得通过修改只读源码快照或 generated SDK 实现。

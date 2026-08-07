@@ -288,6 +288,21 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                 command.node());
     }
 
+    /** 恢复尚未产生替代消息的原生回退边界。 */
+    @Override
+    public Mono<OpencodeUnrevertResult> unrevert(OpencodeUnrevertCommand command) {
+        Objects.requireNonNull(command, "command must not be null");
+        return applyPolicy(
+                Mono.defer(() -> gateway.unrevert(
+                        command.node(),
+                        command.opencodeSessionId(),
+                        command.directory(),
+                        command.workspace(),
+                        command.traceId())),
+                "unrevert",
+                command.node());
+    }
+
     /**
      * 受控转发 opencode Web App runtime API，返回稳定 JsonNode projection。
      */

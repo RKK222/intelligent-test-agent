@@ -1,6 +1,7 @@
 package com.enterprise.testagent.agent.runtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -10,6 +11,10 @@ import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.node.ExecutionNodeStatus;
 import com.enterprise.testagent.opencode.client.OpencodeClientFacade;
+import com.enterprise.testagent.opencode.client.OpencodeRejectDiffResult;
+import com.enterprise.testagent.opencode.client.OpencodeSessionMessage;
+import com.enterprise.testagent.opencode.client.OpencodeSessionMessagesResult;
+import com.enterprise.testagent.opencode.client.OpencodeUnrevertResult;
 import com.enterprise.testagent.opencode.client.OpencodeStartRunCommand;
 import com.enterprise.testagent.opencode.client.OpencodeStartRunResult;
 import java.time.Instant;
@@ -20,6 +25,92 @@ import org.mockito.ArgumentCaptor;
 import reactor.core.publisher.Mono;
 
 class OpencodeAgentRuntimeTest {
+
+    @Test
+    void loadsReplayableUserTurnWithOriginalModelAgentVariantAndParts() {
+        OpencodeClientFacade facade = mock(OpencodeClientFacade.class);
+        List<OpencodeSessionMessage> messages = List.of(
+                new OpencodeSessionMessage(
+                        Map.of(
+                                "id", "msg_original1234567890",
+                                "role", "user",
+                                "agent", "build",
+                                "variant", "high",
+                                "model", Map.of("providerID", "openai", "modelID", "gpt-5")),
+                        List.of(
+                                Map.of("type", "text", "text", "检查附件"),
+                                Map.of("type", "file", "url", "file:///tmp/a.txt", "mime", "text/plain",
+                                        "filename", "a.txt", "source", Map.of("value", "@a.txt", "start", 0, "end", 6)),
+                                Map.of("type", "agent", "name", "review",
+                                        "source", Map.of("value", "@review", "start", 7, "end", 14)),
+                                Map.of("type", "subtask", "prompt", "核对实现", "description", "审查代码",
+                                        "agent", "review", "command", "review"))),
+                new OpencodeSessionMessage(
+                        Map.of("id", "msg_assistant123456", "role", "assistant"),
+                        List.of(Map.of("type", "text", "text", "旧回答"))));
+        when(facade.sessionMessages(any())).thenReturn(Mono.just(
+                new OpencodeSessionMessagesResult(messages, null, null)));
+        OpencodeAgentRuntime runtime = new OpencodeAgentRuntime(facade);
+
+        AgentReplayableTurn turn = runtime.loadReplayableTurn(new AgentReplayableTurnCommand(
+                        node(), "ses_remote1234567890abcdef", "/tmp/demo", null,
+                        "msg_original1234567890", "trace_1234567890abcdef"))
+                .block();
+
+        assertThat(turn.messageId()).isEqualTo("msg_original1234567890");
+        assertThat(turn.prompt()).isEqualTo("检查附件");
+        assertThat(turn.agent()).isEqualTo("build");
+        assertThat(turn.modelProviderId()).isEqualTo("openai");
+        assertThat(turn.modelId()).isEqualTo("gpt-5");
+        assertThat(turn.variant()).isEqualTo("high");
+        assertThat(turn.parts()).extracting(AgentPromptPart::type)
+                .containsExactly("text", "file", "agent", "subtask");
+    }
+
+    @Test
+    void rejectsReplayWhenTargetIsNotTheLastRemoteUserMessage() {
+        OpencodeClientFacade facade = mock(OpencodeClientFacade.class);
+        when(facade.sessionMessages(any())).thenReturn(Mono.just(new OpencodeSessionMessagesResult(
+                List.of(
+                        new OpencodeSessionMessage(
+                                Map.of("id", "msg_new1234567890", "role", "user"),
+                                List.of(Map.of("type", "text", "text", "new"))),
+                        new OpencodeSessionMessage(
+                                Map.of("id", "msg_old1234567890", "role", "user"),
+                                List.of(Map.of("type", "text", "text", "old")))),
+                null,
+                null)));
+        OpencodeAgentRuntime runtime = new OpencodeAgentRuntime(facade);
+
+        assertThatThrownBy(() -> runtime.loadReplayableTurn(new AgentReplayableTurnCommand(
+                        node(), "ses_remote1234567890abcdef", "/tmp/demo", null,
+                        "msg_old1234567890", "trace_1234567890abcdef"))
+                .block())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("last user message");
+    }
+
+    @Test
+    void revertsUnrevertsAndProbesStableMessageThroughNeutralRuntimeApi() {
+        OpencodeClientFacade facade = mock(OpencodeClientFacade.class);
+        when(facade.rejectDiff(any())).thenReturn(Mono.just(new OpencodeRejectDiffResult(true)));
+        when(facade.unrevert(any())).thenReturn(Mono.just(new OpencodeUnrevertResult(true)));
+        when(facade.sessionMessages(any())).thenReturn(Mono.just(new OpencodeSessionMessagesResult(List.of(
+                new OpencodeSessionMessage(Map.of("id", "msg_stable1234567890", "role", "user"), List.of())),
+                null, null)));
+        OpencodeAgentRuntime runtime = new OpencodeAgentRuntime(facade);
+        AgentRevertTurnCommand command = new AgentRevertTurnCommand(
+                node(), "ses_remote1234567890abcdef", "/tmp/demo", null,
+                "msg_original1234567890", "trace_1234567890abcdef");
+
+        assertThat(runtime.revertTurn(command).block().reverted()).isTrue();
+        assertThat(runtime.unrevertTurn(new AgentUnrevertTurnCommand(
+                node(), "ses_remote1234567890abcdef", "/tmp/demo", null,
+                "trace_1234567890abcdef")).block().unreverted()).isTrue();
+        assertThat(runtime.probeMessage(new AgentMessageProbeCommand(
+                node(), "ses_remote1234567890abcdef", "msg_stable1234567890",
+                "trace_1234567890abcdef")).block().present()).isTrue();
+    }
 
     @Test
     void createsOpencodeCompatibleDispatchMessageId() {

@@ -3827,3 +3827,28 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 - 响应 DTO 可以新增字段，前端必须忽略未知字段。
 - 文件 API 初版不承诺 Git 状态、二进制预览、递归扫描和搜索。
 - RunEvent payload 可以新增字段；事件 wire name 不可重命名。
+
+## 最后一条用户消息撤销重发
+
+### `POST /api/internal/agent/{agentId}/sessions/{sessionId}/resends`
+
+- 用途：对当前根会话最后一条、已有远端 user message 边界且源 Run 已终态的消息创建原生撤销重发。接口同步预留新的
+  `PENDING` Run 和会话锁；实际 revert/dispatch 由统一恢复状态机执行。
+- 鉴权：必须登录；服务端通过会话上下文重新验证 owner、Workspace、执行节点、远端 Session 和目标服务器，不能只信任路径或请求体。
+- 请求：`expectedRemoteMessageId`、可选 `expectedRunId`、短期 `contextToken`、幂等 `clientRequestId`。四者都不得包含 prompt 或附件正文。
+- 响应：`resendId/status/executeAt/resend/replacementRun`。`resend` 包含 `trigger/totalAttempt/automaticAttempt/automaticLimit/status`
+  以及源/替代 Run；`Run`、`SessionMessage`、用户 `AgentMessage`、用户级 runtime-state item 同步 additive 返回可选 `resend`。
+- 错误：非 owner 为统一 `FORBIDDEN`；目标不再是最后消息、源 Run 非终态、子会话、会话忙或已有重发锁返回 `CONFLICT`；
+  上下文缺失/过期分别返回既有 `CONVERSATION_CONTEXT_REQUIRED/CONVERSATION_CONTEXT_EXPIRED`；远端读取失败使用安全网关错误。
+- traceId：沿统一响应 envelope 和 RunEvent 传播；控制表只保存 traceId 与安全错误摘要，不保存用户输入、模型回答或供应商正文。
+- 幂等：同一 owner + `clientRequestId` 返回同一替代 Run；同一 source Run、replacement Run 和会话活动锁均有数据库唯一约束。
+- 兼容性：接口与所有 `resend` 字段均为新增，旧客户端缺失字段时按普通 Run/消息显示。
+- 对应测试：`RunResendApplicationServiceTest`、`RunResendExecutionServiceTest`、`RunResendAutomaticServiceTest`、
+  `MyBatisRunResendRepositoryIntegrationTest`、前端 reducer 和 `FigmaChatPanelTest`。
+
+### 内部恢复分发
+
+`POST /api/internal/platform/opencode-runtime/run-resends/internal-dispatch` 只允许 Java→Java 系统调用，使用既有 XXL access token
+和常量时间比较；浏览器 token 过滤器只对该精确路径豁免。请求只包含目标 `linuxServerId` 和最多 50 个 `resendId`，入口通过
+`BackendJavaRouteResolver`、`BackendHttpForwarder` 固定路由到目标 Java，不扫描 Redis 路由快照、不本机降级。响应只有每条状态与
+安全错误码，不含 prompt、回答或供应商响应。

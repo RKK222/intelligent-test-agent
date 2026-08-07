@@ -7,8 +7,10 @@ import com.enterprise.testagent.opencode.runtime.run.RunDiffApplicationService;
 import com.enterprise.testagent.opencode.runtime.run.RunHistoryRecoveryResult;
 import com.enterprise.testagent.opencode.runtime.run.RunHistoryRecoverySource;
 import com.enterprise.testagent.opencode.runtime.run.RunMessageRecoveryService;
+import com.enterprise.testagent.opencode.runtime.run.RunResendQueryService;
 import com.enterprise.testagent.common.api.ApiResponse;
 import com.enterprise.testagent.domain.run.RunId;
+import com.enterprise.testagent.domain.run.RunResend;
 import com.enterprise.testagent.domain.run.RunStorageMode;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.event.RunEventSseMapper;
@@ -49,6 +51,7 @@ public class RunController {
     private final RunEventSseStreamService eventStreamService;
     private final RunMessageRecoveryService messageRecoveryService;
     private final RunEventSseMapper sseMapper;
+    private final RunResendQueryService resendQueryService;
 
     /**
      * 注入运行、diff、SSE 与消息恢复服务，兼容生产构造路径。
@@ -59,12 +62,24 @@ public class RunController {
             RunDiffApplicationService runDiffService,
             RunEventSseStreamService eventStreamService,
             RunMessageRecoveryService messageRecoveryService,
-            RunEventSseMapper sseMapper) {
+            RunEventSseMapper sseMapper,
+            RunResendQueryService resendQueryService) {
         this.runService = runService;
         this.runDiffService = runDiffService;
         this.eventStreamService = eventStreamService;
         this.messageRecoveryService = messageRecoveryService;
         this.sseMapper = Objects.requireNonNull(sseMapper, "sseMapper must not be null");
+        this.resendQueryService = resendQueryService;
+    }
+
+    /** 兼容既有测试和手工装配；生产 Spring 构造器额外注入重发查询服务。 */
+    public RunController(
+            RunApplicationService runService,
+            RunDiffApplicationService runDiffService,
+            RunEventSseStreamService eventStreamService,
+            RunMessageRecoveryService messageRecoveryService,
+            RunEventSseMapper sseMapper) {
+        this(runService, runDiffService, eventStreamService, messageRecoveryService, sseMapper, null);
     }
 
     /**
@@ -74,7 +89,7 @@ public class RunController {
             RunApplicationService runService,
             RunDiffApplicationService runDiffService,
             RunEventSseStreamService eventStreamService) {
-        this(runService, runDiffService, eventStreamService, null, new RunEventSseMapper());
+        this(runService, runDiffService, eventStreamService, null, new RunEventSseMapper(), null);
     }
 
     /**
@@ -132,13 +147,19 @@ public class RunController {
     }
 
     private RuntimeDtos.RunResponse toRunResponse(com.enterprise.testagent.domain.run.Run run) {
+        RunResend resend = resendFor(run.runId());
         return runService.storageMetadata(run.runId())
                 .map(metadata -> RuntimeDtos.RunResponse.from(
                         run,
                         metadata.storageMode(),
                         metadata.clientRequestId(),
-                        metadata.detailsAvailableUntil()))
-                .orElseGet(() -> RuntimeDtos.RunResponse.from(run));
+                        metadata.detailsAvailableUntil(),
+                        resend))
+                .orElseGet(() -> RuntimeDtos.RunResponse.from(run, null, null, null, resend));
+    }
+
+    private RunResend resendFor(RunId runId) {
+        return resendQueryService == null ? null : resendQueryService.findForRun(runId);
     }
 
     /**

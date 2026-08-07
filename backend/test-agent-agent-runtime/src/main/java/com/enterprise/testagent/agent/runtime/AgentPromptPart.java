@@ -64,4 +64,20 @@ public record AgentPromptPart(
                 DomainValidation.requireText(agentName, "agentName"),
                 source);
     }
+
+    /** 构造 OpenCode 用户轮次中的 subtask part，扩展字段仅在运行态短期保存。 */
+    public static AgentPromptPart subtask(
+            String prompt,
+            String description,
+            String agentName,
+            Map<String, Object> metadata) {
+        return new AgentPromptPart(
+                "subtask",
+                DomainValidation.requireText(prompt, "prompt"),
+                null,
+                null,
+                DomainValidation.requireText(description, "description"),
+                DomainValidation.requireText(agentName, "agentName"),
+                metadata);
+    }
 }

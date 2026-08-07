@@ -141,3 +141,8 @@
 ## 后续 AI 编码指引
 
 新增 API 时先确认业务实现应落在哪个业务模块；本模块只新增 Controller/DTO/协议转换。平台自身接口放 `web.platform`，agent 代理入口放 `web.agent`，横切入口支撑放 `web.common`。不得新增旧 `/api/...` runtime/workspace 入口；新 URL 必须同步记录到 `docs/api/http-api.md`。
+
+`RunResendController` 暴露 agent-scoped 最后一条消息撤销重发；`RunResendInternalDispatchController` 仅接收带既有 XXL token 的
+精确 Java→Java 批量恢复请求，`HttpRunResendDispatchGateway` 固定复用公共路由解析器和转发器。`Run`、Session message 与
+runtime-state DTO 的 `resend` 均为可选 additive 字段，旧客户端缺失时继续按普通运行展示。内部响应与事件不返回 prompt、回答或
+供应商正文。

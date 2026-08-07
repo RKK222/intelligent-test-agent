@@ -4896,6 +4896,63 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find(".oc-retry-row a").attributes("href")).toBe("https://opencode.ai/go");
   });
 
+  it("shows scheduled resend metadata and hides resend while waiting", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [{
+          id: "user-scheduled",
+          messageId: "platform-user-scheduled",
+          remoteMessageId: "msg_remote_scheduled",
+          runId: "run_source",
+          role: "user",
+          text: "执行夜间回归",
+          createdAt: "2026-08-07T09:05:39.000Z",
+          sourceType: "SCHEDULED_TASK",
+          resend: {
+            resendId: "rsd_scheduled",
+            trigger: "AUTOMATIC",
+            totalAttempt: 2,
+            automaticAttempt: 2,
+            automaticLimit: 3,
+            status: "WAITING",
+            executeAt: "2099-08-07T09:07:39.000Z",
+            sourceRunId: "run_source",
+            replacementRunId: "run_replacement"
+          }
+        }],
+        resendableMessageId: "msg_remote_scheduled",
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any
+    });
+
+    await showFullTimeline(wrapper);
+    expect(wrapper.get(".oc-user-message__source-badge").text()).toContain("夜间定时执行 · 自动重发 2/3");
+    expect(wrapper.get(".oc-user-message__source-badge").text()).toContain("秒后");
+    expect(wrapper.find(".oc-user-message__resend").exists()).toBe(false);
+  });
+
+  it("emits retry from the eligible last user turn", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [{
+          id: "user-manual",
+          messageId: "platform-user-manual",
+          remoteMessageId: "msg_remote_manual",
+          runId: "run_manual",
+          role: "user",
+          text: "重新执行",
+          createdAt: "2026-08-07T09:05:39.000Z"
+        }],
+        resendableMessageId: "msg_remote_manual",
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any
+    });
+
+    await showFullTimeline(wrapper);
+    await wrapper.get(".oc-user-message__resend").trigger("click");
+    expect(wrapper.emitted("retry")).toHaveLength(1);
+  });
+
   it("allows the explore section to expand and collapse", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

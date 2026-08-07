@@ -10,6 +10,7 @@ export type TimelineRowProps = {
   completedWorkStatusExpanded?: boolean;
   forceToolDetailsOpen?: boolean;
   showReasoning?: boolean;
+  resendableMessageId?: string;
 };
 </script>
 
@@ -40,6 +41,7 @@ const emit = defineEmits<{
   toggleHistoricalWorkStatus: [];
   toggleCompletedWorkStatus: [];
   closeWorkStatusEvent: [];
+  resend: [];
 }>();
 
 defineSlots<{
@@ -107,6 +109,8 @@ const toolGroupParts = computed(() => {
     v-else-if="row.type === 'user-message' && userMessage?.role === 'user'"
     class="oc-row"
     :message="userMessage"
+    :resendable="resendableMessageId === (userMessage.remoteMessageId ?? userMessage.messageId ?? userMessage.id)"
+    @resend="emit('resend')"
   />
   <AssistantMessageFrame
     v-else-if="row.type === 'context-tool-group' && assistantMessage"

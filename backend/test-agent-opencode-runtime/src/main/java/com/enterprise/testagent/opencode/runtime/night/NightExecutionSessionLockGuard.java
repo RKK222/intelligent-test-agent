@@ -3,26 +3,38 @@ package com.enterprise.testagent.opencode.runtime.night;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskRepository;
+import com.enterprise.testagent.domain.run.RunResendRepository;
 import com.enterprise.testagent.domain.session.SessionId;
 import java.util.Map;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /** 会话写入口共用的夜间任务锁门禁，防止浏览器之外的调用绕过前端禁用。 */
 @Service
 public class NightExecutionSessionLockGuard {
 
     private final NightExecutionTaskRepository repository;
+    private final RunResendRepository resendRepository;
 
     public NightExecutionSessionLockGuard(NightExecutionTaskRepository repository) {
+        this(repository, null);
+    }
+
+    @Autowired
+    public NightExecutionSessionLockGuard(
+            NightExecutionTaskRepository repository,
+            RunResendRepository resendRepository) {
         this.repository = Objects.requireNonNull(repository);
+        this.resendRepository = resendRepository;
     }
 
     public void requireUnlocked(SessionId sessionId) {
-        if (repository.hasSessionLock(sessionId)) {
+        if (repository.hasSessionLock(sessionId)
+                || (resendRepository != null && resendRepository.hasSessionLock(sessionId))) {
             throw new PlatformException(
                     ErrorCode.CONFLICT,
-                    "当前会话已有待执行夜间任务，取消后可继续对话",
+                    "当前会话已有待执行夜间任务或重发，取消后可继续对话",
                     Map.of("sessionId", sessionId.value()));
         }
     }

@@ -6,6 +6,7 @@ export type OpencodeTimelineProps = {
   workStatusDockTarget?: string | HTMLElement | null;
   forceToolDetailsOpen?: boolean;
   showReasoning?: boolean;
+  resendableMessageId?: string;
 };
 </script>
 
@@ -19,7 +20,7 @@ const props = withDefaults(defineProps<OpencodeTimelineProps>(), {
   forceToolDetailsOpen: false,
   showReasoning: true
 });
-const emit = defineEmits<{ openDiff: []; openFile: [path: string]; selectSubagent: [sessionId: string] }>();
+const emit = defineEmits<{ openDiff: []; openFile: [path: string]; selectSubagent: [sessionId: string]; resend: [] }>();
 defineSlots<{
   "completed-status-actions"?: (props: { row: Extract<TimelineRowType, { type: "work-status" }> }) => unknown;
 }>();
@@ -108,9 +109,11 @@ watch(latestUserMessageKey, () => {
         :historical-work-status-expanded="expandedHistoricalStatusKey === row.key"
         :completed-work-status-expanded="expandedCompletedStatusKey === row.key"
         :open-work-status-event-key="openWorkStatusDetail?.rowKey === row.key ? openWorkStatusDetail.eventKey : undefined"
+        :resendable-message-id="resendableMessageId"
         @open-diff="emit('openDiff')"
         @open-file="(path) => emit('openFile', path)"
         @select-subagent="(sessionId) => emit('selectSubagent', sessionId)"
+        @resend="emit('resend')"
         @toggle-work-status-event="(eventKey) => toggleWorkStatusDetail(row.key, eventKey)"
         @toggle-historical-work-status="toggleHistoricalStatus(row.key)"
         @toggle-completed-work-status="toggleCompletedStatus(row.key)"
@@ -132,9 +135,11 @@ watch(latestUserMessageKey, () => {
           :show-reasoning="showReasoning"
           :completed-work-status-expanded="expandedCompletedStatusKey === row.key"
           :open-work-status-event-key="openWorkStatusDetail?.rowKey === row.key ? openWorkStatusDetail.eventKey : undefined"
+          :resendable-message-id="resendableMessageId"
           @open-diff="emit('openDiff')"
           @open-file="(path) => emit('openFile', path)"
           @select-subagent="(sessionId) => emit('selectSubagent', sessionId)"
+          @resend="emit('resend')"
           @toggle-work-status-event="(eventKey) => toggleWorkStatusDetail(row.key, eventKey)"
           @toggle-completed-work-status="toggleCompletedStatus(row.key)"
           @close-work-status-event="openWorkStatusDetail = null"

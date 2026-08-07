@@ -6,6 +6,7 @@ import com.enterprise.testagent.opencode.runtime.run.RunApplicationService;
 import com.enterprise.testagent.opencode.runtime.run.RunHistoryRecoveryResult;
 import com.enterprise.testagent.opencode.runtime.run.RunHistoryRecoverySource;
 import com.enterprise.testagent.opencode.runtime.run.RunMessageRecoveryService;
+import com.enterprise.testagent.opencode.runtime.run.RunResendQueryService;
 import com.enterprise.testagent.opencode.runtime.session.SessionApplicationService;
 import com.enterprise.testagent.common.api.ApiResponse;
 import com.enterprise.testagent.common.pagination.PageResponse;
@@ -44,6 +45,7 @@ public class SessionController {
     private final RunApplicationService runService;
     private final RunMessageRecoveryService messageRecoveryService;
     private final RunEventSseStreamService eventStreamService;
+    private final RunResendQueryService resendQueryService;
 
     /**
      * 注入会话应用服务，Controller 仅保留协议和 DTO 转换职责。
@@ -72,16 +74,26 @@ public class SessionController {
     /**
      * 注入会话、Run、消息恢复和事件回放服务，Session 历史树可补齐 durable 状态事件。
      */
-    @Autowired
     public SessionController(
             SessionApplicationService sessionService,
             RunApplicationService runService,
             RunMessageRecoveryService messageRecoveryService,
             RunEventSseStreamService eventStreamService) {
+        this(sessionService, runService, messageRecoveryService, eventStreamService, null);
+    }
+
+    @Autowired
+    public SessionController(
+            SessionApplicationService sessionService,
+            RunApplicationService runService,
+            RunMessageRecoveryService messageRecoveryService,
+            RunEventSseStreamService eventStreamService,
+            RunResendQueryService resendQueryService) {
         this.sessionService = sessionService;
         this.runService = runService;
         this.messageRecoveryService = messageRecoveryService;
         this.eventStreamService = eventStreamService;
+        this.resendQueryService = resendQueryService;
     }
 
     /**
@@ -212,7 +224,8 @@ public class SessionController {
         // 历史消息查询会同步刷新远端快照，必须整体 offload，避免在 Reactor 事件线程调用 block()。
         return Mono.fromCallable(() -> ApiResponse.ok(RuntimeDtos.messagePage(sessionService.listMessages(
                         userId, new SessionId(sessionId), RuntimeApiSupport.pageRequest(page, size), traceId,
-                        Boolean.TRUE.equals(refresh))), traceId))
+                        Boolean.TRUE.equals(refresh)),
+                        resendQueryService == null ? null : resendQueryService::findForRun), traceId))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 

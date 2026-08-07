@@ -17,6 +17,7 @@ import com.enterprise.testagent.domain.opencodeprocess.BackendProcessId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.opencode.runtime.run.RunEventSseRouteService;
+import com.enterprise.testagent.opencode.runtime.run.RunResendQueryService;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
@@ -43,7 +44,7 @@ class RunControlBackendRoutingWebFilterTest {
         when(routeService.forwardTargetStrict(new RunId(RUN_ID))).thenReturn(Optional.of(target));
         when(forwarder.forwardRaw(any(), eq(target))).thenReturn(Mono.empty());
         RunControlBackendRoutingWebFilter filter = new RunControlBackendRoutingWebFilter(
-                routeService, forwarder, errorWriter());
+                routeService, queryService(), forwarder, errorWriter());
         MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
                 .post("/api/internal/agent/opencode/runs/" + RUN_ID + "/cancel?source=toolbar")
                 .build());
@@ -67,7 +68,7 @@ class RunControlBackendRoutingWebFilterTest {
         when(routeService.forwardTargetStrict(new RunId(RUN_ID))).thenReturn(Optional.of(target));
         when(forwarder.forwardRaw(any(), eq(target))).thenReturn(Mono.empty());
         RunControlBackendRoutingWebFilter filter = new RunControlBackendRoutingWebFilter(
-                routeService, forwarder, errorWriter());
+                routeService, queryService(), forwarder, errorWriter());
         MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
                 .post("/api/internal/platform/opencode-runtime/runs/" + RUN_ID + "/cancel")
                 .build());
@@ -84,7 +85,7 @@ class RunControlBackendRoutingWebFilterTest {
         BackendHttpForwarder forwarder = mock(BackendHttpForwarder.class);
         when(routeService.forwardTargetStrict(new RunId(RUN_ID))).thenReturn(Optional.empty());
         RunControlBackendRoutingWebFilter filter = new RunControlBackendRoutingWebFilter(
-                routeService, forwarder, errorWriter());
+                routeService, queryService(), forwarder, errorWriter());
         MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
                 .post("/api/internal/agent/opencode/runs/" + RUN_ID + "/cancel")
                 .build());
@@ -105,7 +106,7 @@ class RunControlBackendRoutingWebFilterTest {
         BackendHttpForwarder forwarder = mock(BackendHttpForwarder.class);
         when(routeService.forwardTargetStrict(new RunId(RUN_ID))).thenReturn(Optional.empty());
         RunControlBackendRoutingWebFilter filter = new RunControlBackendRoutingWebFilter(
-                routeService, forwarder, errorWriter());
+                routeService, queryService(), forwarder, errorWriter());
         MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
                 .post("/api/internal/platform/opencode-runtime/runs/" + RUN_ID + "/cancel")
                 .header(BackendHttpForwarder.ROUTED_HEADER, "true")
@@ -132,7 +133,7 @@ class RunControlBackendRoutingWebFilterTest {
                 Map.of("linuxServerId", "server-b"));
         when(routeService.forwardTargetStrict(new RunId(RUN_ID))).thenThrow(unavailable);
         RunControlBackendRoutingWebFilter filter = new RunControlBackendRoutingWebFilter(
-                routeService, forwarder, errorWriter());
+                routeService, queryService(), forwarder, errorWriter());
         MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
                 .post("/api/internal/agent/opencode/runs/" + RUN_ID + "/cancel")
                 .build());
@@ -159,7 +160,7 @@ class RunControlBackendRoutingWebFilterTest {
         when(routeService.forwardTargetStrict(new RunId(RUN_ID))).thenReturn(Optional.of(target));
         when(forwarder.forwardRaw(any(), eq(target))).thenReturn(Mono.error(new IOException("connection refused")));
         RunControlBackendRoutingWebFilter filter = new RunControlBackendRoutingWebFilter(
-                routeService, forwarder, errorWriter());
+                routeService, queryService(), forwarder, errorWriter());
         MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
                 .post("/api/internal/agent/opencode/runs/" + RUN_ID + "/cancel")
                 .build());
@@ -183,9 +184,31 @@ class RunControlBackendRoutingWebFilterTest {
         RunEventSseRouteService routeService = mock(RunEventSseRouteService.class);
         BackendHttpForwarder forwarder = mock(BackendHttpForwarder.class);
         RunControlBackendRoutingWebFilter filter = new RunControlBackendRoutingWebFilter(
-                routeService, forwarder, errorWriter());
+                routeService, queryService(), forwarder, errorWriter());
         MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
                 .post("/api/internal/agent/opencode/runs/" + RUN_ID + "/diff/accept")
+                .build());
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+
+        filter.filter(exchange, chain(exchange1 -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        })).block(Duration.ofSeconds(2));
+
+        assertThat(chainCalled).isTrue();
+        verifyNoInteractions(routeService, forwarder);
+    }
+
+    @Test
+    void waitingResendCancelStaysLocalBeforeProductionRouteExists() {
+        RunEventSseRouteService routeService = mock(RunEventSseRouteService.class);
+        RunResendQueryService resendQueryService = mock(RunResendQueryService.class);
+        BackendHttpForwarder forwarder = mock(BackendHttpForwarder.class);
+        when(resendQueryService.isWaitingReplacement(new RunId(RUN_ID))).thenReturn(true);
+        RunControlBackendRoutingWebFilter filter = new RunControlBackendRoutingWebFilter(
+                routeService, resendQueryService, forwarder, errorWriter());
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
+                .post("/api/internal/agent/opencode/runs/" + RUN_ID + "/cancel")
                 .build());
         AtomicBoolean chainCalled = new AtomicBoolean(false);
 
@@ -205,6 +228,10 @@ class RunControlBackendRoutingWebFilterTest {
 
     private static BackendRoutingErrorWriter errorWriter() {
         return new BackendRoutingErrorWriter(new ObjectMapper().findAndRegisterModules());
+    }
+
+    private static RunResendQueryService queryService() {
+        return mock(RunResendQueryService.class);
     }
 
     private static BackendJavaProcess backend() {

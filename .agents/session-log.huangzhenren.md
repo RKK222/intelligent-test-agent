@@ -1683,3 +1683,37 @@
   - 顶部上下文切换形成连续、紧凑且可辨识的现代工作台控件，同时保持原功能与响应式布局兼容。
   - 本次不变更 API、RunEvent、数据库、性能路径、安全边界、`.env*`、generated SDK 或 OpenCode 源码；
     未覆盖工作区中并行存在的其他前后端改动。
+
+### 2026-08-07 - 实现最后一条用户消息原生撤销重发
+
+- Why:
+  - 平台原有失败重试只在前端倒计时后取消 Run 并重新发送，没有调用 OpenCode `session.revert`，旧回答、工具结果、
+    文件改动和模型上下文仍可能残留；定时任务也缺少可恢复的自动重发状态、次数和页面标识。
+  - 原生供应商 `session.status=retry` 与撤销重发语义不同，必须由后端统一状态机处理人工入口、定时自动入口、
+    跨 Java 路由、投递响应丢失和服务重启窗口。
+- What:
+  - agent-runtime/OpenCode 适配层新增读取可重放用户轮次、revert/unrevert 和稳定消息探测；保留 text/file/agent/
+    subtask、模型、Agent 和 variant，并继续把 OpenCode 1.18.4 快照与 generated SDK 作为只读边界。
+  - 新增 MyBatis XML/Flyway `run_resends` 状态机与会话锁，Redis 限时保存精确重放输入；手动 API 和根
+    `session.error` 定时自动入口共用同一服务，自动次数最多 3 次、等待 1/2/4 分钟，人工重发不重置自动额度。
+  - 替代消息受理后清理源 Run 的消息、工具事件、Redis 明细和 child scope，历史查询按已提交重发关系过滤；
+    Run/消息/运行态增加可选 resend 元数据和 scheduled/started/failed 事件。前端增加资格按钮、倒计时锁、
+    自动/手动标签及原子接管，删除旧 60 秒取消后重新 startRun 的逻辑。
+  - 自动扫描复用已注册的每分钟夜间任务与公共 Java 路由/转发器。验证中修复两处恢复边界：WAITING 替代 Run
+    停止必须在尚无生产路由时本机处理；预留替代 Run 启动只绕过自身重发锁，普通消息仍严格受锁保护。
+- How:
+  - JDK 21 完整后端 21 模块 `mvn test` 为 `BUILD SUCCESS`；重发 domain/runtime/API/persistence、调度注册、
+    取消路由、预留 Run 与 PostgreSQL migration 集成测试均通过。前端全量 115 个测试文件为 1839 passed /
+    1 skipped，typecheck 和 production build 通过。
+  - 真实三服务 OpenCode E2E 验证旧 user/assistant、工具与平台明细消失、文件改动回退后由新轮次重建、新消息 ID
+    生效，目标用例 1 passed；后端、manager、前端及本地 PostgreSQL/Redis/MySQL 最终均恢复健康。
+  - 本地真实 PostgreSQL 已成功执行 `V20260807190000__create_run_resends.sql`，Flyway 记录成功；源码与 persistence
+    JAR 内 migration SHA-256 同为 `ca044d9819c7259b62e29243e9d72a06a2f01a532f1803f37e117de1d2f5d83d`。
+- Result:
+  - 人工和定时任务均使用完整 OpenCode 原生回退语义；自动等待可停止、会话写入口受锁、重启与响应丢失窗口按
+    稳定替代消息 ID 恢复，新增 PostgreSQL 状态表和事件不保存 prompt、模型回答或供应商响应正文。
+  - HTTP API、RunEvent、数据库、安全、OpenCode 边界、测试场景、后端/前端 README/PACKAGE 与用户手册已同步；
+    DTO/事件字段均为 additive，旧客户端缺失字段时继续按普通消息展示。未修改 `.env*`、generated SDK 或
+    OpenCode 源码，也未创建分支。
+  - 本机已执行的 migration 文件自此不可改写；企业发布前仍须逐一核对所有目标环境 `flyway_schema_history`、
+    checksum 和已知历史升级路径，本机验证不能替代企业 PostgreSQL/双后台滚动升级验收。

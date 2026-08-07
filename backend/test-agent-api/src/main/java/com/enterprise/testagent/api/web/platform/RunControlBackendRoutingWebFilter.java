@@ -5,6 +5,7 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.enterprise.testagent.domain.run.RunId;
 import com.enterprise.testagent.opencode.runtime.run.RunEventSseRouteService;
+import com.enterprise.testagent.opencode.runtime.run.RunResendQueryService;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -34,14 +35,17 @@ class RunControlBackendRoutingWebFilter implements WebFilter {
     private static final String CANCEL_SUFFIX = "/cancel";
 
     private final RunEventSseRouteService routeService;
+    private final RunResendQueryService resendQueryService;
     private final BackendHttpForwarder forwarder;
     private final BackendRoutingErrorWriter errorWriter;
 
     RunControlBackendRoutingWebFilter(
             RunEventSseRouteService routeService,
+            RunResendQueryService resendQueryService,
             BackendHttpForwarder forwarder,
             BackendRoutingErrorWriter errorWriter) {
         this.routeService = Objects.requireNonNull(routeService, "routeService must not be null");
+        this.resendQueryService = Objects.requireNonNull(resendQueryService, "resendQueryService must not be null");
         this.forwarder = Objects.requireNonNull(forwarder, "forwarder must not be null");
         this.errorWriter = Objects.requireNonNull(errorWriter, "errorWriter must not be null");
     }
@@ -50,6 +54,10 @@ class RunControlBackendRoutingWebFilter implements WebFilter {
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         Optional<RunId> runId = runId(exchange);
         if (runId.isEmpty()) {
+            return chain.filter(exchange);
+        }
+        // WAITING 替代 Run 尚未投递、也没有生产节点；它的取消只修改共享状态并释放会话锁。
+        if (resendQueryService.isWaitingReplacement(runId.orElseThrow())) {
             return chain.filter(exchange);
         }
         return Mono.fromCallable(() -> routeService.forwardTargetStrict(runId.get()))

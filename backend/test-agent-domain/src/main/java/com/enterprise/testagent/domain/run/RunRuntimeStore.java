@@ -60,6 +60,11 @@ public interface RunRuntimeStore {
      */
     void discardBeforeDispatch(RunId runId);
 
+    /** 原生替代消息已受理后，删除源 Run 的 Redis 正文、事件、快照和 child scope 投影。 */
+    default void purgeDetailsAfterResend(RunId runId) {
+        // 兼容尚未接入 Redis 运行数据面的测试实现。
+    }
+
     Optional<RunRuntimeManifest> findManifest(RunId runId);
 
     /** 读取本轮完整输入，仅供终态摘要和故障恢复；调用方不得写入日志或 PostgreSQL。 */

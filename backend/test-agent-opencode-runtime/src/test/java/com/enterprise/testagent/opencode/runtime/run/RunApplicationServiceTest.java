@@ -164,6 +164,50 @@ class RunApplicationServiceTest {
     }
 
     @Test
+    void reservedResendRunBypassesOnlyItsOwnSessionLock() {
+        UserId userId = new UserId("usr_1234567890abcdef");
+        RunId replacementRunId = new RunId("run_resend1234567890");
+        FakeRunRepository runs = new FakeRunRepository();
+        runs.save(new Run(
+                replacementRunId,
+                session().sessionId(),
+                workspace().workspaceId(),
+                RunStatus.PENDING,
+                NOW,
+                NOW,
+                "trace_resend_dispatch"));
+        UserOpencodeProcessAssignmentService assignmentService =
+                org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        org.mockito.Mockito.when(assignmentService.requireReadyProcess(
+                        userId, "opencode", "trace_resend_dispatch"))
+                .thenReturn(new UserOpencodeProcessAssignment(
+                        userProcessNode("node_resend123456789", "http://127.0.0.1:4096")));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(), new FakeSessionRepository(session()), runs,
+                new FakeSessionMessageRepository(), new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(), new RunEventAppender(new FakeRunEventRepository()),
+                runtimeRegistry(new FakeOpencodeFacade()), new FakeAgentSessionBindingRepository(),
+                assignmentService);
+        NightExecutionSessionLockGuard guard = org.mockito.Mockito.mock(NightExecutionSessionLockGuard.class);
+        org.mockito.Mockito.doThrow(new PlatformException(ErrorCode.CONFLICT, "locked"))
+                .when(guard).requireUnlocked(session().sessionId());
+        service.setNightExecutionLockGuard(guard);
+
+        Run started = service.startResendRun(
+                userId,
+                new StartRunInput(
+                        session().sessionId(), "resend", List.of(), RUNTIME_DISPATCH_MESSAGE_ID,
+                        null, null, null, null),
+                replacementRunId,
+                ConversationSourceType.MANUAL,
+                null,
+                "trace_resend_dispatch");
+
+        assertThat(started.status()).isEqualTo(RunStatus.RUNNING);
+        org.mockito.Mockito.verifyNoInteractions(guard);
+    }
+
+    @Test
     void serviceCreatesRemoteOpencodeSessionOnFirstRunAndDoesNotSendPlatformWorkspace() {
         FakeRunRepository runs = new FakeRunRepository();
         FakeRunEventRepository events = new FakeRunEventRepository();

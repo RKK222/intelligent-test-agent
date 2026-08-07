@@ -1420,6 +1420,16 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
 
     @Override
     public void discardBeforeDispatch(RunId runId) {
+        purgeRunDetails(runId);
+    }
+
+    @Override
+    public void purgeDetailsAfterResend(RunId runId) {
+        purgeRunDetails(runId);
+    }
+
+    /** 清除单 Run 的全部详情与外部索引；调用入口分别约束“未投递丢弃”和“重发后清理”语义。 */
+    private void purgeRunDetails(RunId runId) {
         Objects.requireNonNull(runId, "runId must not be null");
         Optional<RunRuntimeManifest> found = findManifest(runId);
         if (found.isEmpty()) {

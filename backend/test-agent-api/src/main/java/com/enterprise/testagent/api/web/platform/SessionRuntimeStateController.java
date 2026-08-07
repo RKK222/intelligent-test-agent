@@ -4,8 +4,10 @@ import com.enterprise.testagent.api.web.common.AuthWebSupport;
 import com.enterprise.testagent.api.web.common.RuntimeApiSupport;
 import com.enterprise.testagent.common.api.ApiResponse;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.opencode.runtime.run.RunResendQueryService;
 import com.enterprise.testagent.opencode.runtime.session.SessionRuntimeStateApplicationService;
 import java.time.Duration;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,9 +28,16 @@ public class SessionRuntimeStateController {
     private static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(25);
 
     private final SessionRuntimeStateApplicationService service;
+    private RunResendQueryService resendQueryService;
 
     public SessionRuntimeStateController(SessionRuntimeStateApplicationService service) {
         this.service = service;
+    }
+
+    /** 重发能力为 additive 注入，保留轻量 Controller 测试和旧装配方式。 */
+    @Autowired(required = false)
+    void configureRunResendQueryService(RunResendQueryService resendQueryService) {
+        this.resendQueryService = resendQueryService;
     }
 
     /**
@@ -39,7 +48,9 @@ public class SessionRuntimeStateController {
         String traceId = RuntimeApiSupport.traceId(exchange);
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
         return Mono.fromCallable(() -> ApiResponse.ok(
-                        RuntimeDtos.SessionRuntimeStateResponse.from(service.snapshot(userId)),
+                        RuntimeDtos.SessionRuntimeStateResponse.from(
+                                service.snapshot(userId),
+                                resendQueryService == null ? null : resendQueryService::findForRun),
                         traceId))
                 .subscribeOn(Schedulers.boundedElastic());
     }
@@ -54,7 +65,8 @@ public class SessionRuntimeStateController {
             ServerWebExchange exchange) {
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
         Flux<ServerSentEvent<RuntimeDtos.SessionRuntimeStateResponse>> stateEvents = service.stream(userId)
-                .map(RuntimeDtos.SessionRuntimeStateResponse::from)
+                .map(summary -> RuntimeDtos.SessionRuntimeStateResponse.from(
+                        summary, resendQueryService == null ? null : resendQueryService::findForRun))
                 .index()
                 .map(tuple -> {
                     RuntimeDtos.SessionRuntimeStateResponse data = tuple.getT2();

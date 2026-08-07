@@ -32,6 +32,8 @@ public class ApiTokenWebFilter implements WebFilter {
             "/api/internal/platform/opencode-runtime/internal-model-proxy/v1";
     private static final String NIGHT_EXECUTION_INTERNAL_DISPATCH_PATH =
             "/api/internal/platform/opencode-runtime/night-execution/internal-dispatch";
+    private static final String RUN_RESEND_INTERNAL_DISPATCH_PATH =
+            "/api/internal/platform/opencode-runtime/run-resends/internal-dispatch";
     private static final String PERSONAL_WORKSPACE_RELOCATION_TICKET_PATH =
             "/api/internal/platform/workspace-management/personal-workspace-relocations/transfer-tickets";
     private static final String PERSONAL_WORKSPACE_RELOCATION_WEB_SOCKET_PATH =
@@ -77,6 +79,7 @@ public class ApiTokenWebFilter implements WebFilter {
                 || path.equals(INTERNAL_MODEL_PROXY_ROOT_PATH)
                 || path.startsWith(INTERNAL_MODEL_PROXY_PATH)
                 || path.equals(NIGHT_EXECUTION_INTERNAL_DISPATCH_PATH)
+                || path.equals(RUN_RESEND_INTERNAL_DISPATCH_PATH)
                 || path.equals(PERSONAL_WORKSPACE_RELOCATION_TICKET_PATH)
                 || path.equals(PERSONAL_WORKSPACE_RELOCATION_WEB_SOCKET_PATH)
                 || path.equals(WORKSPACE_GIT_TOOL_PATH)

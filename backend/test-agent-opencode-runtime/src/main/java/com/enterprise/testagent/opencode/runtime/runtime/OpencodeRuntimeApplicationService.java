@@ -15,6 +15,7 @@ import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.opencode.runtime.model.ModelCatalogApplicationService;
+import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLockGuard;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.run.RunApplicationService;
 import com.enterprise.testagent.opencode.runtime.session.UserRuntimeDisposeCoordinator;
@@ -47,6 +48,7 @@ public class OpencodeRuntimeApplicationService {
     private final ModelCatalogApplicationService modelCatalogService;
     private final RunApplicationService runApplicationService;
     private UserRuntimeDisposeCoordinator userRuntimeDisposeCoordinator;
+    private NightExecutionSessionLockGuard sessionLockGuard;
     private PublicAgentConfigMessageGate publicConfigMessageGate = ignored ->
             PublicAgentConfigMessageGate.MessageGateStatus.open();
     private final ThreadLocal<String> agentContext = new ThreadLocal<>();
@@ -91,6 +93,12 @@ public class OpencodeRuntimeApplicationService {
     void configureUserRuntimeDisposeCoordinator(UserRuntimeDisposeCoordinator coordinator) {
         this.userRuntimeDisposeCoordinator = Objects.requireNonNull(
                 coordinator, "coordinator must not be null");
+    }
+
+    /** 等待原生回退期间，所有可改变主会话的兼容写入口复用同一数据库锁。 */
+    @Autowired(required = false)
+    void configureSessionLockGuard(NightExecutionSessionLockGuard lockGuard) {
+        this.sessionLockGuard = Objects.requireNonNull(lockGuard, "lockGuard must not be null");
     }
 
     /**
@@ -542,6 +550,7 @@ public class OpencodeRuntimeApplicationService {
      * 请求远端 compact/summarize session。
      */
     public Object compactSession(String sessionId, Map<String, Object> body, String traceId) {
+        requireSessionUnlocked(sessionId);
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
         return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/summarize", safeBody(body), traceId);
     }
@@ -550,6 +559,7 @@ public class OpencodeRuntimeApplicationService {
      * 请求远端 revert session。
      */
     public Object revertSession(String sessionId, Map<String, Object> body, String traceId) {
+        requireSessionUnlocked(sessionId);
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
         return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/revert", safeBody(body), traceId);
     }
@@ -558,6 +568,7 @@ public class OpencodeRuntimeApplicationService {
      * 请求远端 unrevert session。
      */
     public Object unrevertSession(String sessionId, Map<String, Object> body, String traceId) {
+        requireSessionUnlocked(sessionId);
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
         return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/unrevert", safeBody(body), traceId);
     }
@@ -567,6 +578,7 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object commandSession(String sessionId, Map<String, Object> body, String traceId) {
         requireNewMessageAllowed(traceId);
+        requireSessionUnlocked(sessionId);
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
         return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/command", safeBody(body), traceId);
     }
@@ -576,6 +588,7 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object shellSession(String sessionId, Map<String, Object> body, String traceId) {
         requireNewMessageAllowed(traceId);
+        requireSessionUnlocked(sessionId);
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
         return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/shell", safeBody(body), traceId);
     }
@@ -584,6 +597,7 @@ public class OpencodeRuntimeApplicationService {
      * 创建 opencode 会话分享链接，sessionId 经平台映射后再访问远端。
      */
     public Object shareSession(String sessionId, String traceId) {
+        requireSessionUnlocked(sessionId);
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
         return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/share", Map.of(), traceId);
     }
@@ -592,8 +606,15 @@ public class OpencodeRuntimeApplicationService {
      * 取消 opencode 会话分享。
      */
     public Object unshareSession(String sessionId, String traceId) {
+        requireSessionUnlocked(sessionId);
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
         return delete(location, "/session/" + encodePath(location.remoteSessionId()) + "/share", Map.of(), traceId);
+    }
+
+    private void requireSessionUnlocked(String sessionId) {
+        if (sessionLockGuard != null) {
+            sessionLockGuard.requireUnlocked(new SessionId(sessionId));
+        }
     }
 
     /**

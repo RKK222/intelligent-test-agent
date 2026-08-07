@@ -26,6 +26,8 @@
 - `mybatis.UserWorkspaceQueryMapper` / `mybatis/UserWorkspaceQueryMapper.xml` / `mybatis.MyBatisUserWorkspaceQueryRepository`：目标用户个人工作区与目标用户会话引用工作区的只读联合查询；所有新增关系型 SQL 均位于 MyBatis XML。
 - `mybatis.RunMapper` / `mybatis/RunMapper.xml`：Run MyBatis SQL，包含保存、读取、最近非终态 Run 查询、只选择 `LEGACY_FULL` 的 stale active 查询和 `status` 条件更新。
 - `mybatis.MyBatisRunRepository`：Run 领域端口的生产 Bean，通过 `saveIfStatus` 原子条件写入避免终态竞态覆盖。
+- `mybatis.RunResendMapper` / `mybatis/RunResendMapper.xml` / `mybatis.MyBatisRunResendRepository`：重发状态机、会话锁、幂等键、租约和到期扫描的全部关系型 SQL；状态表仅保存身份、次数、路由和安全错误摘要，不保存 prompt、附件或模型回答。
+- `mybatis.MyBatisRunResendDetailCleanup`：替代消息受理后删除源 Run 的消息、工具事件和 scope 展示投影，先解除反馈消息外键并保留 Run、反馈、用量与重发关系。
 - `mybatis.RunEventMapper` / `mybatis/RunEventMapper.xml`：RunEvent append-only MyBatis SQL，写入结构化 scope 列和可空 raw event id，并支持按 `root_session_id` 读取历史状态事件。
 - `mybatis.MyBatisRunEventRepository`：RunEvent 领域端口的生产 Bean，保留 `(run_id, seq)` 冲突重试、`runId + lastSeq` 增量读取和 root session 历史状态读取。
 - `mybatis.RunSessionScopeMapper` / `mybatis/RunSessionScopeMapper.xml`：Run session scope MyBatis SQL，包含按 Run 和按 root session 查询；`MERGE ... USING (VALUES ...)` 写入时间参数时显式 cast 为 `timestamp`，兼容 PostgreSQL 参数类型推断。
@@ -49,6 +51,7 @@
 - `JdbcSessionMessageRepository`：实现 SessionMessage 保存、按 messageId/远端 messageId 查询、分页和计数，并映射 parts/token/cost 快照字段。
 - `JdbcRunRepository`：Run 存量 JDBC 实现已不再作为生产 Spring Bean，仅保留旧集成测试和迁移窗口。
 - `JdbcRunEventRepository`：RunEvent 存量 JDBC 实现已不再作为生产 Spring Bean，仅保留迁移窗口。
+- `RedisRunResendReplayInputStore`：以有限 TTL 保存精确可重放输入；输入缺失时执行器必须在原生 revert 前失败。
 - `JdbcExecutionNodeRepository`：实现执行节点保存和可路由节点查询。
 - `JdbcRoutingDecisionRepository`：实现路由决策保存和查询。
 - `JdbcOpencodeProcessManagementRepository`：实现 opencode 用户进程管理拓扑、用户进程、用户绑定持久化，以及运行管理页拓扑列表、连接列表、进程分页筛选和绑定关联查询；读取历史用户进程时会兼容 `updated_at < created_at` 的脏数据并按 `created_at` 归一化，避免旧记录阻断状态查询和重新初始化。

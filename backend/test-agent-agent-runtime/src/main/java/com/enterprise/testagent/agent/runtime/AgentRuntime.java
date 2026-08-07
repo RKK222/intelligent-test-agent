@@ -92,6 +92,26 @@ public interface AgentRuntime {
         return Mono.error(unsupported("sessionMessages"));
     }
 
+    /** 读取一个可精确重放的远端用户轮次。 */
+    default Mono<AgentReplayableTurn> loadReplayableTurn(AgentReplayableTurnCommand command) {
+        return Mono.error(unsupported("loadReplayableTurn"));
+    }
+
+    /** 从用户消息边界执行远端完整回退。 */
+    default Mono<AgentRevertTurnResult> revertTurn(AgentRevertTurnCommand command) {
+        return Mono.error(unsupported("revertTurn"));
+    }
+
+    /** 仅用于确定未投递后的安全补偿。 */
+    default Mono<AgentUnrevertTurnResult> unrevertTurn(AgentUnrevertTurnCommand command) {
+        return Mono.error(unsupported("unrevertTurn"));
+    }
+
+    /** 用稳定新消息 ID 探测投递受理事实。 */
+    default Mono<AgentMessageProbeResult> probeMessage(AgentMessageProbeCommand command) {
+        return Mono.error(unsupported("probeMessage"));
+    }
+
     /**
      * 为占位实现提供统一未实现异常。
      */

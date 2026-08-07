@@ -182,6 +182,8 @@ public class RunApplicationService {
     private UserRuntimeDisposeCoordinator userRuntimeDisposeCoordinator;
     private List<ScheduledRunLifecycleObserver> scheduledRunLifecycleObservers = List.of();
     private RunDispatchAcceptanceProbe runDispatchAcceptanceProbe;
+    private List<RunRootSessionErrorObserver> rootSessionErrorObservers = List.of();
+    private RunResendCancellationService resendCancellationService;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
     /**
@@ -887,7 +889,39 @@ public class RunApplicationService {
             StartRunInput input,
             String traceId,
             RunSource source) {
-        if (source.type() == ConversationSourceType.MANUAL && nightExecutionLockGuard != null) {
+        return startRunInternal(userId, agentId, input, traceId, source, null);
+    }
+
+    /**
+     * 执行已经由重发状态机预留的 PENDING Run；固定 runId/messageId 保证恢复时不会重复投递。
+     */
+    public Run startResendRun(
+            UserId userId,
+            StartRunInput input,
+            RunId replacementRunId,
+            ConversationSourceType sourceType,
+            String sourceRefId,
+            String traceId) {
+        Objects.requireNonNull(replacementRunId, "replacementRunId must not be null");
+        return startRunInternal(
+                userId,
+                agentRuntimeRegistry.defaultAgentId(),
+                input,
+                traceId,
+                new RunSource(sourceType, sourceRefId, null),
+                replacementRunId);
+    }
+
+    private Run startRunInternal(
+            UserId userId,
+            String agentId,
+            StartRunInput input,
+            String traceId,
+            RunSource source,
+            RunId reservedRunId) {
+        if (reservedRunId == null
+                && source.type() == ConversationSourceType.MANUAL
+                && nightExecutionLockGuard != null) {
             nightExecutionLockGuard.requireUnlocked(input.sessionId());
         }
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
@@ -925,14 +959,16 @@ public class RunApplicationService {
                 : conversationContext.workspaceSnapshot();
         ModelSelection modelSelection = resolveModelSelection(input.model());
         String opencodeAgent = resolveOpencodeAgent(input);
-        Run pending = new Run(
-                new RunId(RuntimeIdGenerator.runId()),
-                session.sessionId(),
-                workspace.workspaceId(),
-                RunStatus.PENDING,
-                now,
-                now,
-                traceId);
+        Run pending = reservedRunId == null
+                ? new Run(
+                        new RunId(RuntimeIdGenerator.runId()),
+                        session.sessionId(),
+                        workspace.workspaceId(),
+                        RunStatus.PENDING,
+                        now,
+                        now,
+                        traceId)
+                : requireReservedRun(reservedRunId, session, workspace);
         if (userId != null) {
             pending = pending.withSource(source.type(), source.refId(), userId);
         }
@@ -940,6 +976,10 @@ public class RunApplicationService {
         RunStorageMode storageMode = runStorageModeSelector == null
                 ? RunStorageMode.LEGACY_FULL
                 : runStorageModeSelector.select(userId, input, conversationContext);
+        // 预留 Run 已有关系型 PENDING 锚点；当前版本沿 legacy 明细链启动，避免重复插入摘要锚点。
+        if (reservedRunId != null) {
+            storageMode = RunStorageMode.LEGACY_FULL;
+        }
         Optional<RunPersistenceAnchor> existingScheduledAnchor = findExistingScheduledAnchor(
                 source, input, pending);
         if (existingScheduledAnchor.isPresent()) {
@@ -1099,12 +1139,20 @@ public class RunApplicationService {
                     traceId);
             renewLegacyScheduledDispatchClaim(scheduledClaim, source, running.runId());
             // prompt_async/command 的 HTTP 结果不是 Run 终态，后台调用异常需给 root 终态留出到达窗口。
-            Mono.defer(() -> runtime.startRun(command))
-                    .subscribe(
-                            ignored -> {
-                            },
-                            error -> failRunFromDispatch(
-                                    resolvedAgentId, running, RunStorageMode.LEGACY_FULL, traceId, error));
+            if (reservedRunId != null) {
+                // 重发 started 事件要求原生替代消息已经受理，因此固定 Run 路径等待 HTTP 接收结果。
+                var accepted = Mono.defer(() -> runtime.startRun(command)).block();
+                if (accepted == null || !accepted.accepted()) {
+                    throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "替代消息未被远端受理");
+                }
+            } else {
+                Mono.defer(() -> runtime.startRun(command))
+                        .subscribe(
+                                ignored -> {
+                                },
+                                error -> failRunFromDispatch(
+                                        resolvedAgentId, running, RunStorageMode.LEGACY_FULL, traceId, error));
+            }
             markLegacyScheduledDispatchAccepted(scheduledClaim, source, running.runId());
             return running;
         } catch (PlatformException exception) {
@@ -1121,6 +1169,17 @@ public class RunApplicationService {
             markLegacyScheduledDispatchAccepted(scheduledClaim, source, failed.runId());
             throw exception;
         }
+    }
+
+    private Run requireReservedRun(RunId runId, Session session, Workspace workspace) {
+        Run run = runRepository.findById(runId)
+                .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "预留替代 Run 不存在"));
+        if (run.status() != RunStatus.PENDING
+                || !run.sessionId().equals(session.sessionId())
+                || !run.workspaceId().equals(workspace.workspaceId())) {
+            throw new PlatformException(ErrorCode.CONFLICT, "预留替代 Run 状态或会话边界不匹配");
+        }
+        return run;
     }
 
     /**
@@ -2084,6 +2143,11 @@ public class RunApplicationService {
             case "file" -> toAgentFilePart(part, workspace);
             case "agent" -> toAgentAgentPart(part);
             case "reference" -> toReferenceTextPart(part);
+            case "subtask" -> AgentPromptPart.subtask(
+                    part.text(),
+                    firstText(part.label(), part.name(), "子任务"),
+                    firstText(part.agentId(), part.name(), DEFAULT_OPENCODE_AGENT),
+                    part.metadata());
             default -> null;
         };
     }
@@ -2940,6 +3004,12 @@ public class RunApplicationService {
      * 请求取消指定 agent Run；旧 URL 默认传入 opencode，新 URL 由 path 决定。
      */
     public Run cancelRun(String agentId, RunId runId, String traceId) {
+        if (resendCancellationService != null) {
+            Optional<Run> cancelledWaiting = resendCancellationService.cancelWaiting(runId, traceId);
+            if (cancelledWaiting.isPresent()) {
+                return cancelledWaiting.orElseThrow();
+            }
+        }
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
         LOGGER.info("Run cancellation requested, runId={}, agentId={}, traceId={}", runId.value(), resolvedAgentId, traceId);
         AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
@@ -3186,6 +3256,18 @@ public class RunApplicationService {
     @Autowired(required = false)
     void setRunDispatchAcceptanceProbe(RunDispatchAcceptanceProbe probe) {
         this.runDispatchAcceptanceProbe = probe;
+    }
+
+    /** 自动重发等扩展只观察已提交的根 session.error，避免把 transport failure 当作模型错误。 */
+    @Autowired(required = false)
+    void setRootSessionErrorObservers(List<RunRootSessionErrorObserver> observers) {
+        this.rootSessionErrorObservers = observers == null ? List.of() : List.copyOf(observers);
+    }
+
+    /** WAITING 重发可由现有 Run 停止入口取消，进入 revert 后仍由状态机恢复。 */
+    @Autowired(required = false)
+    void setRunResendCancellationService(RunResendCancellationService cancellationService) {
+        this.resendCancellationService = cancellationService;
     }
 
     private record LegacyScheduledAnchorClaim(
@@ -3647,6 +3729,9 @@ public class RunApplicationService {
                         safeErrorMessage,
                         false,
                         eventDraft.traceId());
+                notifyRootSessionErrorObservers(
+                        originalRun.applyTerminalFact(terminalStatus, eventDraft.occurredAt()),
+                        eventDraft);
                 return;
             }
             Run current = runRepository.findById(originalRun.runId()).orElse(originalRun);
@@ -3655,6 +3740,7 @@ public class RunApplicationService {
             Run saved = runRepository.save(terminal);
             runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(eventDraft), storageMode);
             snapshotService.persistRunSnapshot(agentId, saved, eventDraft.traceId());
+            notifyRootSessionErrorObservers(saved, eventDraft);
             return;
         }
         if (eventDraft.type() == RunEventType.MESSAGE_PART_UPDATED) {
@@ -3673,6 +3759,25 @@ public class RunApplicationService {
                 runEventPersistencePolicy.sanitizeForPersistence(eventDraft),
                 storageMode,
                 ownerLeaseIfPresent(ownership));
+    }
+
+    /** 只接受 OpenCode mapper 从根 session.error 派生的失败事实；观察者失败不回滚 Run 终态。 */
+    private void notifyRootSessionErrorObservers(Run terminalRun, RunEventDraft eventDraft) {
+        if (eventDraft.type() != RunEventType.RUN_FAILED
+                || !Boolean.TRUE.equals(eventDraft.payload().get("derived"))
+                || !"session.error".equals(eventDraft.payload().get("derivedFromRawType"))) {
+            return;
+        }
+        for (RunRootSessionErrorObserver observer : rootSessionErrorObservers) {
+            try {
+                observer.onRootSessionError(terminalRun, eventDraft);
+            } catch (RuntimeException observerFailure) {
+                LOGGER.warn(
+                        "Root session.error observer failed, runId={}, traceId={}, exceptionType={}",
+                        terminalRun.runId().value(), eventDraft.traceId(),
+                        observerFailure.getClass().getSimpleName());
+            }
+        }
     }
 
     /**

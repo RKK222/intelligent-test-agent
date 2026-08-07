@@ -45,3 +45,6 @@
 
 - 不依赖 UI、API client 或事件 client。
 - 不存放组件逻辑。
+
+`ResendMetadata` 及 `Run/SessionMessage/AgentMessage/SessionRuntimeState.resend` 是向后兼容的可选字段；RunEvent wire union additive
+声明 `run.resend.scheduled/started/failed`，未知字段和旧后端缺失字段必须保持可忽略。

@@ -51,6 +51,7 @@ export type AgentChatProps = {
   historySearch?: string;
   /** 实时追踪是否开启：开启后 agent 改文件会自动在中间编辑器流式预览。 */
   liveTrack?: boolean;
+  resendableMessageId?: string;
 };
 
 type AgentTab = "agent" | "history";
@@ -184,6 +185,7 @@ function onHistorySearchInput(value: string) {
           :message-scopes-by-id="messageScopesById"
           :subagents-by-session-id="subagentsBySessionId"
           :subagent-by-task-part-id="subagentByTaskPartId"
+          :resendable-message-id="resendableMessageId"
           @send="(prompt, attachments) => emit('send', prompt, attachments)"
           @cancel="emit('cancel')"
           @retry="emit('retry')"
