@@ -126,6 +126,36 @@ class InternalModelProxyForwardingServiceTest {
         assertThat(record.durationMillis()).isGreaterThanOrEqualTo(0);
     }
 
+    @Test
+    void recordsMidStreamErrorWithoutOverwritingToSuccess() {
+        List<InternalModelCallRecord> recorded = new CopyOnWriteArrayList<>();
+        org.springframework.core.io.buffer.DataBufferFactory bufferFactory =
+                org.springframework.core.io.buffer.DefaultDataBufferFactory.sharedInstance;
+        WebClient webClient = WebClient.builder()
+                .exchangeFunction(request -> Mono.just(org.springframework.web.reactive.function.client.ClientResponse
+                        .create(HttpStatus.OK)
+                        .header(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_EVENT_STREAM_VALUE)
+                        .body(Flux.concat(
+                                Flux.just(bufferFactory.wrap(
+                                        "data: {\"choices\":[{\"delta\":{\"content\":\"首条\"}}]}\n\n"
+                                                .getBytes(StandardCharsets.UTF_8))),
+                                Flux.error(new RuntimeException("stream broken"))))
+                        .build()))
+                .build();
+        InternalModelProxyForwardingService service = service(
+                webClient, List.of(runtimeConfig(PROVIDER_ID, MODEL_TOKEN)), recorded);
+
+        StepVerifier.create(service.forward(exchange(), REQUEST_BODY, "trace_stream_error"))
+                .verifyError();
+
+        awaitRecorded(recorded);
+        assertThat(recorded).hasSize(1);
+        // 首字节已到、首事件已到但流中途异常：必须保留 UPSTREAM_STREAM_FAILED，不得被覆盖成 SUCCESS。
+        assertThat(recorded.getFirst().outcome())
+                .isEqualTo(com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcome.UPSTREAM_STREAM_FAILED);
+        assertThat(recorded.getFirst().httpStatus()).isEqualTo(200);
+    }
+
     private InternalModelProxyForwardingService service(WebClient webClient) {
         return service(webClient, List.of(runtimeConfig(PROVIDER_ID, MODEL_TOKEN)));
     }

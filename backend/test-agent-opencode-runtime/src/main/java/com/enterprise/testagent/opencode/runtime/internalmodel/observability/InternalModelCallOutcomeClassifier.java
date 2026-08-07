@@ -41,14 +41,22 @@ public final class InternalModelCallOutcomeClassifier {
             if (isConnectFailure(cause)) {
                 return InternalModelCallOutcome.UPSTREAM_CONNECT_FAILED;
             }
-            // 非连接类 WebClient 异常：若首事件已到则归为流读取失败，否则未知。
-            if (signals != null && signals.streaming() && signals.firstEventMarked()) {
-                return InternalModelCallOutcome.UPSTREAM_STREAM_FAILED;
-            }
-            return InternalModelCallOutcome.UNKNOWN_ERROR;
+            // 连接类之外落到通用流中途失败判定。
+            return classifyStreamOrUnknown(unwrapped, signals);
         }
         if (unwrapped instanceof TimeoutException) {
             return classifyTimeout(signals);
+        }
+        return classifyStreamOrUnknown(unwrapped, signals);
+    }
+
+    /**
+     * 非连接、非超时的响应体/流中途错误：首事件已到且处于流式转发则归为流读取失败，
+     * 否则未知。响应体中途异常（如连接被上游掐断、解码失败）通常不是 WebClientRequestException。
+     */
+    private static InternalModelCallOutcome classifyStreamOrUnknown(Throwable unwrapped, TimeoutSignals signals) {
+        if (signals != null && signals.streaming() && signals.firstEventMarked()) {
+            return InternalModelCallOutcome.UPSTREAM_STREAM_FAILED;
         }
         return InternalModelCallOutcome.UNKNOWN_ERROR;
     }

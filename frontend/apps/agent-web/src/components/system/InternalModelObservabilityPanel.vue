@@ -35,12 +35,12 @@ const probeStatusQuery = useQuery({
 });
 
 const recordsQuery = useQuery({
-  queryKey: ["internal-model-observability-records", {
+  queryKey: computed(() => ["internal-model-observability-records", {
     providerId: filterProviderId.value || null,
     outcome: filterOutcome.value || null,
     source: filterSource.value || null,
     page: page.value
-  }],
+  }]),
   enabled: () => hasSuperAdmin.value,
   retry: false,
   queryFn: () => api.listInternalModelCallRecords({
@@ -53,9 +53,9 @@ const recordsQuery = useQuery({
 });
 
 const statsQuery = useQuery({
-  queryKey: ["internal-model-observability-stats", {
+  queryKey: computed(() => ["internal-model-observability-stats", {
     providerId: filterProviderId.value || null
-  }],
+  }]),
   enabled: () => hasSuperAdmin.value,
   retry: false,
   queryFn: () => api.getInternalModelCallStats({ providerId: filterProviderId.value || null })

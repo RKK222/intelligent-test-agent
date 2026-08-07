@@ -488,6 +488,7 @@ public class InternalModelProxyForwardingService {
         private final AtomicBoolean firstEventMarked = new AtomicBoolean(false);
         private final AtomicBoolean streaming = new AtomicBoolean(false);
         private final AtomicBoolean streamOutcomeSet = new AtomicBoolean(false);
+        private final AtomicBoolean outcomeExplicitlySet = new AtomicBoolean(false);
         private final AtomicBoolean terminalRecorded = new AtomicBoolean(false);
         private final AtomicLong httpStatus = new AtomicLong(-1);
         private volatile InternalModelCallOutcome outcome = InternalModelCallOutcome.SUCCESS;
@@ -515,6 +516,7 @@ public class InternalModelProxyForwardingService {
                     exchange.getRequest().getHeaders().getFirst(UCID_HEADER));
             observation.outcome = outcome;
             observation.errorClass = errorClass;
+            observation.outcomeExplicitlySet.set(true);
             return observation;
         }
 
@@ -536,17 +538,20 @@ public class InternalModelProxyForwardingService {
             // 流补偿分支的终态优先于超时/状态码判定，且只允许设置一次。
             if (streamOutcomeSet.compareAndSet(false, true)) {
                 outcome = streamOutcome;
+                outcomeExplicitlySet.set(true);
             }
         }
 
         void markError(Throwable error) {
             outcome = InternalModelCallOutcomeClassifier.classify(error, signals());
             errorClass = InternalModelCallOutcomeClassifier.errorClass(error);
+            outcomeExplicitlySet.set(true);
         }
 
         void markCancelled() {
-            // 下游 opencode 提前断开；仅当尚未被更精确的分类覆盖时才标记。
+            // 下游 opencode 提前断开：显式分类，后续 resolveOutcome 不得再按状态码覆盖。
             outcome = InternalModelCallOutcome.CLIENT_DISCONNECTED;
+            outcomeExplicitlySet.set(true);
         }
 
         InternalModelCallOutcomeClassifier.TimeoutSignals signals() {
@@ -579,7 +584,8 @@ public class InternalModelProxyForwardingService {
         }
 
         private void resolveOutcome(long httpStatusValue) {
-            if (streamOutcomeSet.get()) {
+            // 已由错误/取消/流补偿分支显式分类：保留该分类，不再按状态码或首字节推断覆盖。
+            if (outcomeExplicitlySet.get()) {
                 return;
             }
             if (firstByteMarked.get()) {

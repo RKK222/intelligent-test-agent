@@ -49,12 +49,14 @@ public class InternalModelProbeTaskHandler implements ScheduledTaskHandler {
         InternalModelProviderProbeService.Result result = probeService.probeAll(context.traceId());
         context.throwIfStopRequested();
         Map<String, Object> payload = new LinkedHashMap<>();
-        result.outcomes().forEach((providerId, outcome) -> payload.put(
-                providerId,
-                Map.of(
-                        "outcome", outcome.outcome().name(),
-                        "httpStatus", outcome.httpStatus(),
-                        "durationMillis", outcome.durationMillis())));
+        result.outcomes().forEach((providerId, outcome) -> {
+            // 连接失败/超时/供应商不可用时 httpStatus 为 null，Map.of 会抛 NPE，需用允许 null 的 LinkedHashMap。
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("outcome", outcome.outcome().name());
+            detail.put("httpStatus", outcome.httpStatus());
+            detail.put("durationMillis", outcome.durationMillis());
+            payload.put(providerId, detail);
+        });
         return ScheduledTaskResult.of(payload);
     }
 }
