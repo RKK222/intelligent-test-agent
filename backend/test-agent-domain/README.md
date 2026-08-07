@@ -24,7 +24,7 @@
 - Workspace：`Workspace`、`WorkspaceId`。
 - Agent & Skill Hub：`AgentSkillHubModels`、`AgentSkillHubRepository`、`AgentSkillHubPushIndexer`；领域层只表达不可变制品、逻辑资产、提交修订、精确依赖、应用级引用（含待推送/生效/取消待推送状态）和三方更新操作，不依赖压缩/Git/SQL 实现。
 - 会话 Workspace 权限：`ConversationWorkspaceAccessAuthorizer` 隔离 runtime 与托管应用/个人 Workspace 权威成员查询；`TrustedWorkspaceResolver` 负责当前节点可信 root/server 解析，两者职责分离。
-- Session：`Session`、`SessionId`、`SessionStatus`、`SessionMessage`、`SessionMessageId`、`SessionMessageRole`；`Session` 内含平台置顶状态和后端内部 opencode session/node 映射字段，软删除使用 `ARCHIVED` 状态。
+- Session：`Session`、`SessionId`、`SessionStatus`、`SessionMessage`、`SessionMessageId`、`SessionMessageRole`；`Session` 内含平台置顶状态和后端内部 opencode session/node 映射字段，软删除使用 `ARCHIVED` 状态。`BatchSessionAttributionRepository` 只定义用户级条目幂等查询、事务锁和归因标记端口，不暴露 SQL、索引或统计报表。
 - 会话运行态摘要：`SessionRuntimeState`、`SessionRuntimeStateSummary`、`SessionRuntimeAttention`；attention 支持 `QUESTION/PERMISSION`，摘要分别提供 `questionCount/permissionCount`，计数均表示存在对应待关注状态的会话数。
 - AgentSessionBinding：`AgentSessionBinding`、`AgentSessionBindingRepository`；按 `(sessionId, agentId)` 表达平台 session 到远端 agent session/node 的通用绑定，旧 opencode 字段只作兼容。
 - Run：`Run`、`RunId`、`RunStatus`、`TokenUsage`；Run 可保存单次对话 token/cost 快照。`RunRepository.saveIfStatus` 提供按当前状态条件保存语义，用于终态事件与异步 transport error 并发到达时避免旧快照覆盖已落库终态；`Run.applyTerminalFact` 只接受 root `run.succeeded/run.failed/run.cancelled` 等终态事实，用于以后到 root 终态纠正先到的 transport error 临时失败。
@@ -47,7 +47,7 @@
 - Scheduler：`ScheduledTask`、`ScheduledTaskPlan`、`ScheduledTaskRun`、状态枚举和值对象只保留旧数据兼容和运行记录清理端口；生产调度不再创建或执行 `USER_PLAN`。
 - NightExecution：`NightExecutionTask`、`NightExecutionScheduleMode`、`NightExecutionTaskStatus`、`NightExecutionTaskRepository` 表达任务状态机、完整输入短期持有、固定目标服务器、会话锁、15 分钟时段容量以及 attempt/owner/租约 fencing；`NIGHT_WINDOW` 预留夜间容量，`ADMIN_CUSTOM` 使用精确分钟且不产生容量释放标记。`SCHEDULED/DISPATCHING` 为待执行，普通 Run 锚点受理后进入 `DISPATCHED`，Run 后续终态不反向修改调度状态。
 - Analytics：`AiRunFeedback` 是新反馈事实，按 `(userId, runId)` 定位整轮回复；`AiMessageFeedback` 仅保留旧消息兼容。反馈评分/原因枚举、`AnalyticsModels` 和 `AnalyticsRepository` 不暴露 prompt/assistant 原文或 cost 字段。
-- Repository 端口：Workspace、Session、SessionTitleUpdate、AgentSessionBinding、SessionMessage、Run、RunEvent、RunSessionScope、ExecutionNode、RoutingDecision、UserManagementQuery、UserDeletion、OpencodeProcessManagement、ConfigurationManagement、CommonParameter、InternalModelProvider、InternalModelToken、WorkspaceCreateOperation、ManagedWorkspace、ScheduledTask、ScheduledTaskRunRetention、NightExecutionTask、AiMessageFeedback、Analytics 持久化端口。`InternalModelProviderRepository.findEnabledRuntimeConfigs()` 定义一次联表运行快照读取，Token 明文不得进入普通 Provider 或 Token 元数据响应。`SessionTitleUpdateRepository` 仅在当前标题与预期临时标题一致时更新，用于避免异步标题覆盖原生或人工标题；RunRepository 的条件保存端口要求成功时返回本次快照，条件不匹配时返回数据库当前 Run。
+- Repository 端口：Workspace、Session、BatchSessionAttribution、SessionTitleUpdate、AgentSessionBinding、SessionMessage、Run、RunEvent、RunSessionScope、ExecutionNode、RoutingDecision、UserManagementQuery、UserDeletion、OpencodeProcessManagement、ConfigurationManagement、CommonParameter、InternalModelProvider、InternalModelToken、WorkspaceCreateOperation、ManagedWorkspace、ScheduledTask、ScheduledTaskRunRetention、NightExecutionTask、AiMessageFeedback、Analytics 持久化端口。`InternalModelProviderRepository.findEnabledRuntimeConfigs()` 定义一次联表运行快照读取，Token 明文不得进入普通 Provider 或 Token 元数据响应。`SessionTitleUpdateRepository` 仅在当前标题与预期临时标题一致时更新，用于避免异步标题覆盖原生或人工标题；RunRepository 的条件保存端口要求成功时返回本次快照，条件不匹配时返回数据库当前 Run。
 - `RunRepository.findStaleActiveSideQuestionRuns` 只查询有上限的 stale active `SIDE_QUESTION` Run，供旁路临时会话孤儿回收，不影响普通 stale Run 收敛查询。
 
 ## Run 状态机

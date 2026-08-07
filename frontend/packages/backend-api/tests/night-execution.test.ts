@@ -44,6 +44,51 @@ describe("backend-api night execution", () => {
     }));
   });
 
+  it("creates idempotent batch item sessions and passes batch attribution to scheduled tasks", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const data = String(input).endsWith("/sessions/batch-items")
+        ? { sessionId: "ses_batch", workspaceId: "wrk_batch", title: "需求一 登录 测试案例" }
+        : {
+            taskId: "night_batch",
+            sessionId: "ses_batch",
+            workspaceId: "wrk_batch",
+            contentPreview: "批量测试",
+            status: "SCHEDULED",
+            slotStart: "2026-07-24T13:00:00Z",
+            slotEnd: "2026-07-24T13:15:00Z",
+            windowEnd: "2026-07-24T23:00:00Z",
+            rolloverCount: 0,
+            createdAt: "2026-07-24T12:00:00Z",
+            updatedAt: "2026-07-24T12:00:00Z"
+          };
+      return new Response(JSON.stringify({ success: true, traceId: "trace_batch", data }), { status: 200 });
+    });
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher });
+    const batchContext = { batchId: "batch_01", itemRequestId: "batch_item_01" };
+
+    await client.createBatchItemSession("wrk_batch", "需求一 登录 测试案例", batchContext);
+    await client.createNightExecutionTask({
+      clientRequestId: "task_batch_01",
+      workspaceId: "wrk_batch",
+      prompt: "批量测试",
+      slotStart: "2026-07-24T13:00:00Z",
+      batchContext
+    });
+
+    expect(fetcher.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({
+      workspaceId: "wrk_batch",
+      title: "需求一 登录 测试案例",
+      batchContext
+    }));
+    expect(fetcher.mock.calls[1]?.[1]?.body).toBe(JSON.stringify({
+      clientRequestId: "task_batch_01",
+      workspaceId: "wrk_batch",
+      prompt: "批量测试",
+      slotStart: "2026-07-24T13:00:00Z",
+      batchContext
+    }));
+  });
+
   it("uses the platform runtime endpoints for slots, create, query and task actions", async () => {
     const task = {
       taskId: "night_1",

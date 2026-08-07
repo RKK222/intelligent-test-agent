@@ -18,6 +18,7 @@ import {
   Folder,
   MessageSquare,
   Loader2,
+  ListChecks,
   MinusCircle,
   PanelRightClose,
   SquarePen,
@@ -64,6 +65,8 @@ import {
   type OpencodeLikeRuntimeStatus,
 } from '@test-agent/agent-chat'
 import ChatContextAttachmentList from './ChatContextAttachmentList.vue'
+import BatchTestCaseGenerationDialog from './BatchTestCaseGenerationDialog.vue'
+import ExecutionTimePicker from './ExecutionTimePicker.vue'
 import SessionContextUsage from './SessionContextUsage.vue'
 import { copyTextToClipboard, Spinner } from '@test-agent/ui-kit'
 import type { ChatContextItem } from '../stores/chatContextStore'
@@ -77,6 +80,10 @@ import {
   type OpenCodeTuiCommandName,
   type WorkspaceRequirementReference,
 } from './workbench-utils'
+import type {
+  BatchGenerationRequest,
+  BatchItemExecutionState,
+} from './batch-test-case-generation'
 import { resolveSessionListDrawerPlacement } from './session-list-drawer'
 import { sortRawOutputEntriesNewestFirst } from './raw-output'
 import {
@@ -719,6 +726,9 @@ const props =
     /** 当前个人 worktree 中按“spec/需求项/阶段/子条目”跨需求、设计、编码、测试聚合的引用。 */
     workspaceRequirementReferences?: WorkspaceRequirementReference[]
     workspaceRequirementReferencesLoading?: boolean
+    /** 批量生成子条目测试案例的逐项状态；候选仍复用 # 数据源。 */
+    batchItemStates?: Record<string, BatchItemExecutionState>
+    batchRunning?: boolean
     /** Agent 目录首次加载中。 */
     agentsLoading?: boolean
     /** Agent 目录已有数据后的后台刷新中。 */
@@ -809,6 +819,8 @@ const props =
     agents: () => [],
     workspaceFileCandidates: () => [],
     workspaceRequirementReferences: () => [],
+    batchItemStates: () => ({}),
+    batchRunning: false,
     rawOutputEntries: () => [],
     streamingTextByPartId: () => ({}),
     todos: () => [],
@@ -866,6 +878,7 @@ const emit =
     (e: 'refresh-agents'): void
     (e: 'search-workspace-files', query: string | null): void
     (e: 'load-workspace-requirements'): void
+    (e: 'execute-batch-test-cases', request: BatchGenerationRequest): void
     (e: 'add-workspace-file-context', path: string): void
     (e: 'add-workspace-requirement-context', reference: WorkspaceRequirementReference): void
     (e: 'clear-raw-output'): void
@@ -890,6 +903,16 @@ const collapsedMessages = ref<Record<string, boolean>>({})
 
 const localInput = ref(props.inputValue ?? '')
 const composerTextarea = ref<HTMLTextAreaElement | null>(null)
+const batchDialogOpen = ref(false)
+
+function openBatchTestCaseDialog() {
+  if (composerInteractionBlocked.value || props.batchRunning) return
+  batchDialogOpen.value = true
+}
+
+function closeBatchTestCaseDialog() {
+  if (!props.batchRunning) batchDialogOpen.value = false
+}
 const attachmentInput = ref<HTMLInputElement | null>(null)
 const attachmentDragOver = ref(false)
 const nightPickerOpen = ref(false)
@@ -5559,6 +5582,18 @@ function onCompositionEnd() {
     </section>
     <!-- 统一输入卡片：textarea + 底部工具行（附件、模型、新建、发送/停止）整合在一个圆角卡片内 -->
     <div v-if="!activeSubagentSessionId" class="figma-chat-composer">
+      <button
+        type="button"
+        class="figma-chat-batch-entry"
+        data-testid="batch-test-case-entry"
+        aria-label="批量生成子条目测试案例"
+        title="批量生成子条目测试案例"
+        :disabled="composerInteractionBlocked || batchRunning"
+        @click="openBatchTestCaseDialog"
+      >
+        <ListChecks :size="15" />
+        <span>批量案例</span>
+      </button>
       <section
         v-if="nightPickerOpen"
         class="figma-chat-night-picker"
@@ -5573,84 +5608,22 @@ function onCompositionEnd() {
           </div>
           <button type="button" aria-label="关闭时间选择" @click="closeNightPicker"><X :size="14" /></button>
         </div>
-        <div
-          v-if="canScheduleCustomTime && nightPickerMode === 'create'"
-          class="figma-chat-schedule-mode"
-          aria-label="定时模式"
-        >
-          <button
-            type="button"
-            data-testid="schedule-mode-night"
-            :class="{ 'is-active': nightPickerScheduleMode === 'NIGHT_WINDOW' }"
-            @click="selectScheduleMode('NIGHT_WINDOW')"
-          >夜间时段</button>
-          <button
-            type="button"
-            data-testid="schedule-mode-custom"
-            :class="{ 'is-active': nightPickerScheduleMode === 'ADMIN_CUSTOM' }"
-            @click="selectScheduleMode('ADMIN_CUSTOM')"
-          >测试时间</button>
-        </div>
-        <template v-if="nightPickerScheduleMode === 'NIGHT_WINDOW'">
-          <div v-if="nightSlotsLoading" class="figma-chat-night-picker-loading">
-            <Spinner /> 正在计算合适时间…
-          </div>
-          <div v-else-if="!nightSlots?.slots.length" class="figma-chat-night-picker-empty">
-            暂无可用夜间时间段，请稍后重试。
-          </div>
-          <div v-else class="figma-chat-night-track">
-            <button
-              v-for="slot in nightSlots.slots"
-              :key="slot.slotStart"
-              type="button"
-              data-testid="night-slot-option"
-              :class="[
-                'figma-chat-night-slot',
-                selectedNightSlotStart === slot.slotStart && 'is-selected',
-                slot.recommended && 'is-recommended',
-              ]"
-              :disabled="!slot.available || nightTaskSubmitting"
-              :title="slot.available ? `${slot.reservedCount}/${slot.capacity} 已预约` : '该时间段已满'"
-              @click="selectNightSlot(slot.slotStart, slot.available)"
-            >
-              <span>{{ formatNightTime(slot.slotStart) }}</span>
-              <small v-if="slot.recommended">系统推荐</small>
-              <small v-else-if="!slot.available">已满</small>
-              <small v-else>{{ slot.reservedCount }}/{{ slot.capacity }}</small>
-            </button>
-          </div>
-        </template>
-        <div v-else class="figma-chat-custom-schedule">
-          <div class="figma-chat-custom-quick" aria-label="快捷测试时间">
-            <button
-              v-for="minutes in [1, 3, 5]"
-              :key="minutes"
-              type="button"
-              :data-testid="`custom-schedule-plus-${minutes}`"
-              :disabled="nightTaskSubmitting"
-              @click="setCustomScheduleOffset(minutes)"
-            >{{ minutes }} 分钟后</button>
-          </div>
-          <label class="figma-chat-custom-input-label">
-            <span>计划启动时间（北京时间）</span>
-            <input
-              v-model="customScheduleInput"
-              type="datetime-local"
-              step="60"
-              :min="customScheduleMin"
-              :max="customScheduleMax"
-              :disabled="nightTaskSubmitting"
-              data-testid="custom-schedule-input"
-              @input="onCustomScheduleInput"
-            />
-          </label>
-          <span
-            v-if="customScheduleError"
-            class="figma-chat-custom-error"
-            data-testid="custom-schedule-error"
-          >{{ customScheduleError }}</span>
-          <span v-else class="figma-chat-custom-hint">到达计划时间后，通常会在 1 分钟内发起执行。</span>
-        </div>
+        <ExecutionTimePicker
+          :schedule-mode="nightPickerScheduleMode"
+          :allow-mode-switch="canScheduleCustomTime && nightPickerMode === 'create'"
+          :slots="nightSlots"
+          :loading="nightSlotsLoading"
+          :disabled="nightTaskSubmitting"
+          :selected-times="selectedNightSlotStart ? [selectedNightSlotStart] : []"
+          :custom-input="customScheduleInput"
+          :custom-error="customScheduleError"
+          :custom-min="customScheduleMin"
+          :custom-max="customScheduleMax"
+          @select-mode="selectScheduleMode"
+          @toggle-time="selectNightSlot"
+          @quick-offset="setCustomScheduleOffset"
+          @update:custom-input="(value) => { customScheduleInput = value; onCustomScheduleInput(); }"
+        />
         <div class="figma-chat-night-picker-foot">
           <span v-if="nightPickerScheduleMode === 'ADMIN_CUSTOM' && customScheduleInput">
             将按北京时间 {{ customScheduleInput.replace('T', ' ') }} 启动
@@ -5939,6 +5912,20 @@ function onCompositionEnd() {
       <button type="button" class="figma-chat-subagent-return" @click="returnToRootAgent">切换到主 Agent</button>
       <span>。</span>
     </div>
+    <BatchTestCaseGenerationDialog
+      :open="batchDialogOpen"
+      :references="workspaceRequirementReferences"
+      :loading="workspaceRequirementReferencesLoading"
+      :running="batchRunning"
+      :item-states="batchItemStates"
+      :night-slots="nightSlots"
+      :night-slots-loading="nightSlotsLoading"
+      :can-schedule-custom-time="canScheduleCustomTime"
+      @close="closeBatchTestCaseDialog"
+      @reload-candidates="emit('load-workspace-requirements')"
+      @request-night-slots="emit('request-night-slots')"
+      @execute="emit('execute-batch-test-cases', $event)"
+    />
     <!-- 与左侧面板、中心面板底部栏等高的常驻 footer -->
     <div class="figma-chat-footer">
       <SessionContextUsage
@@ -9214,9 +9201,50 @@ function onCompositionEnd() {
 
 /* ---- Composer ---- */
 .figma-chat-composer {
+  position: relative;
   flex-shrink: 0;
   padding: 8px 10px 10px;
   background: transparent;
+}
+
+/* 批量入口悬浮在输入卡上沿，仅在输入区域 hover 或 focus-within 时显现。 */
+.figma-chat-batch-entry {
+  position: absolute;
+  z-index: 6;
+  top: -25px;
+  right: 13px;
+  display: inline-flex;
+  min-height: 27px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid #cfd8e2;
+  border-radius: 8px 8px 0 0;
+  background: #f8fbfd;
+  color: #52657a;
+  box-shadow: 0 -3px 10px rgba(31, 50, 71, 0.07);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
+}
+.figma-chat-composer:hover .figma-chat-batch-entry,
+.figma-chat-composer:focus-within .figma-chat-batch-entry {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+.figma-chat-batch-entry:hover:not(:disabled) {
+  border-color: #9f2e38;
+  color: #8f2731;
+}
+.figma-chat-batch-entry:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
 .figma-chat-night-picker {

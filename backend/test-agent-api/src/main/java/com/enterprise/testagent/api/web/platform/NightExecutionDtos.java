@@ -10,6 +10,8 @@ import com.enterprise.testagent.opencode.runtime.night.NightExecutionRunInputSna
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionTaskQueryResult;
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionWindowCalculator;
 import com.enterprise.testagent.opencode.runtime.run.StartRunInput;
+import com.enterprise.testagent.opencode.runtime.session.BatchContext;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -38,13 +40,19 @@ final class NightExecutionDtos {
             String arguments,
             @Size(max = 128) String runClientRequestId,
             NightExecutionScheduleMode scheduleMode,
-            @NotNull Instant slotStart) {
+            @NotNull Instant slotStart,
+            @Valid RuntimeDtos.BatchContextRequest batchContext) {
 
         @AssertTrue(message = "prompt or text part must not be blank")
         boolean hasPromptText() {
             if (prompt != null && !prompt.isBlank()) return true;
             return parts != null && parts.stream().anyMatch(part -> part != null
                     && "text".equals(part.type()) && part.text() != null && !part.text().isBlank());
+        }
+
+        @AssertTrue(message = "batchContext requires sessionId to be omitted")
+        boolean hasValidBatchTarget() {
+            return batchContext == null || sessionId == null || sessionId.isBlank();
         }
 
         NightExecutionCreateCommand toCommand() {
@@ -60,7 +68,10 @@ final class NightExecutionDtos {
                             prompt, inputParts, messageId, agent, model, variant, mode,
                             command, arguments, runClientRequestId),
                     scheduleMode == null ? NightExecutionScheduleMode.NIGHT_WINDOW : scheduleMode,
-                    slotStart);
+                    slotStart,
+                    batchContext == null
+                            ? null
+                            : new BatchContext(batchContext.batchId(), batchContext.itemRequestId()));
         }
     }
 

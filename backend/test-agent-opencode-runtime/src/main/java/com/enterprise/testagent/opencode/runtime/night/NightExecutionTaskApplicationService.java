@@ -13,6 +13,7 @@ import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskReposito
 import com.enterprise.testagent.domain.nightexecution.NightExecutionScheduleMode;
 import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskStatus;
 import com.enterprise.testagent.domain.session.ConversationSourceType;
+import com.enterprise.testagent.domain.session.BatchSessionAttributionRepository;
 import com.enterprise.testagent.domain.session.Session;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionMessageRepository;
@@ -46,6 +47,7 @@ public class NightExecutionTaskApplicationService {
     private final BackendJavaRouteResolver routeResolver;
     private final NightExecutionWindowCalculator windowCalculator;
     private final NightExecutionCapacityRegistry capacityRegistry;
+    private final BatchSessionAttributionRepository batchAttributionRepository;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
@@ -59,6 +61,7 @@ public class NightExecutionTaskApplicationService {
             BackendJavaRouteResolver routeResolver,
             NightExecutionWindowCalculator windowCalculator,
             NightExecutionCapacityRegistry capacityRegistry,
+            BatchSessionAttributionRepository batchAttributionRepository,
             ObjectMapper objectMapper,
             Clock clock) {
         this.taskRepository = Objects.requireNonNull(taskRepository);
@@ -70,6 +73,7 @@ public class NightExecutionTaskApplicationService {
         this.routeResolver = Objects.requireNonNull(routeResolver);
         this.windowCalculator = Objects.requireNonNull(windowCalculator);
         this.capacityRegistry = Objects.requireNonNull(capacityRegistry);
+        this.batchAttributionRepository = Objects.requireNonNull(batchAttributionRepository);
         this.objectMapper = Objects.requireNonNull(objectMapper);
         this.clock = Objects.requireNonNull(clock);
     }
@@ -111,6 +115,7 @@ public class NightExecutionTaskApplicationService {
 
         NightExecutionTaskId taskId = new NightExecutionTaskId(RuntimeIdGenerator.nightExecutionTaskId());
         SessionResolution session = resolveSession(owner, command, taskId, traceId, now);
+        markBatchAttribution(owner, command, session.session());
         if (schedule.reservesCapacity()
                 && !taskRepository.reserveSlot(schedule.slotStart(), schedule.capacity(), now)) {
             throw slotConflict("所选夜间时段刚刚已满，请重新选择", slots());
@@ -132,6 +137,21 @@ public class NightExecutionTaskApplicationService {
             throw new PlatformException(ErrorCode.CONFLICT, "当前会话已有待执行夜间任务");
         }
         return draft;
+    }
+
+    /** 定时批量只能绑定本事务新建的 Session，归因写入失败时整体回滚。 */
+    private void markBatchAttribution(
+            UserId owner,
+            NightExecutionCreateCommand command,
+            Session session) {
+        if (command.batchContext() == null) return;
+        if (!batchAttributionRepository.markBatch(
+                session.sessionId(),
+                owner,
+                command.batchContext().batchId(),
+                command.batchContext().itemRequestId())) {
+            throw new PlatformException(ErrorCode.CONFLICT, "批量定时会话归因写入失败");
+        }
     }
 
     /** 集中任务页分页；按 sessionId 查询时同时恢复最近未关闭失败卡。 */

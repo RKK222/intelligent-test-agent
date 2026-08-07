@@ -6,6 +6,7 @@
 
 ## 主要程序清单
 
+- `components/BatchTestCaseGenerationDialog.vue`、`components/ExecutionTimePicker.vue`、`components/useBatchTestCaseGeneration.ts` 与 `components/batch-test-case-generation.ts`：提供 70% 批量选择弹层、单条/批量共用时间选择、最多四路局部上下文编排和纯容量分配；候选只消费输入 `#` 的既有聚合结果，执行过程不修改当前 Session、输入正文或附件。
 - `main.ts`：应用入口，装配 Pinia、`@tanstack/vue-query` 的 `VueQueryPlugin` 和 vue-router。
 - `App.vue`：根组件，渲染 `<RouterView />`。
 - `release-features.ts`：集中解析 Workflow/LobeHub 编译期开关；只接受显式 `true`，并为入口、登录回跳和路由守卫提供同一事实源。当前 release 两项默认关闭。

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.BatchSessionAttributionMapper">
+    <!-- PostgreSQL 事务级 advisory lock 串行化同一用户、同一条目请求的首次创建。 -->
+    <select id="lockCreateRequest" databaseId="postgresql" resultType="int">
+        select 1 from (select pg_advisory_xact_lock(hashtext(#{lockKey}))) locked
+    </select>
+    <select id="lockCreateRequest" resultType="int">select 1</select>
+
+    <select id="findSessionId" resultType="string">
+        select session_id
+        from sessions
+        where created_by_user_id=#{userId}
+          and batch_mode=true
+          and batch_item_request_id=#{itemRequestId}
+        limit 1
+    </select>
+
+    <update id="markBatch">
+        update sessions
+        set batch_mode=true,
+            batch_id=#{batchId},
+            batch_item_request_id=#{itemRequestId}
+        where session_id=#{sessionId}
+          and created_by_user_id=#{userId}
+          and batch_mode=false
+          and batch_id is null
+          and batch_item_request_id is null
+    </update>
+</mapper>

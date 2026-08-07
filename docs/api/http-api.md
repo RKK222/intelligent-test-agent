@@ -1957,6 +1957,7 @@ Skill 分类固定为一级 `WORKER/TEST/CODE/OTHER`。`TEST` 必须选择 `TEST
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `POST` | `/api/internal/platform/opencode-runtime/sessions` | 创建会话。 |
+| `POST` | `/api/internal/platform/opencode-runtime/sessions/batch-items` | 为一个批量子条目幂等创建独立会话，并记录批量归因。 |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions?q=&page=&size=` | 当前登录用户历史会话分页；`q` 为空时返回该用户全部 ACTIVE 会话，默认前端每页 30 条。 |
 | `GET` | `/api/internal/platform/opencode-runtime/workspaces/{workspaceId}/sessions` | 按工作区分页查询会话。 |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}` | 查询会话详情。 |
@@ -1978,6 +1979,21 @@ Skill 分类固定为一级 `WORKER/TEST/CODE/OTHER`。`TEST` 必须选择 `TEST
   "title": "new session"
 }
 ```
+
+`POST /api/internal/platform/opencode-runtime/sessions/batch-items` 请求体：
+
+```json
+{
+  "workspaceId": "wrk_...",
+  "title": "需求项 子条目 测试案例",
+  "batchContext": {
+    "batchId": "batch_...",
+    "itemRequestId": "batch_item_..."
+  }
+}
+```
+
+`batchId` 和 `itemRequestId` 均必填、最长 128 字符。接口只使用认证用户作为创建人；同一用户重复提交同一 `itemRequestId` 返回原 Session，不重复创建。不同用户的相同 `itemRequestId` 彼此隔离。该 Session 保持 `sourceType=MANUAL`，批量维度只记录在 Session 内部归因字段中，不改变 `SessionResponse`。
 
 `PATCH /api/internal/platform/opencode-runtime/sessions/{sessionId}` 请求体：
 
@@ -2669,11 +2685,15 @@ Base URL：`/api/internal/platform/opencode-runtime/night-execution`。除下文
   "arguments": null,
   "runClientRequestId": "run-night-7a6e...",
   "scheduleMode": "NIGHT_WINDOW",
-  "slotStart": "2026-07-18T13:00:00Z"
+  "slotStart": "2026-07-18T13:00:00Z",
+  "batchContext": {
+    "batchId": "batch_...",
+    "itemRequestId": "batch_item_..."
+  }
 }
 ```
 
-同一用户重复提交相同 `clientRequestId` 时，后端在完成当前模式权限校验后先返回原任务，不会因原定时时间已过、时段已满或窗口切换而拒绝响应；不重复创建 Session 或容量占位，也不创建 `USER_PLAN`。`prompt` 或至少一个 text part 必须非空；`workspaceId` 和 `slotStart` 必填。`scheduleMode` 可省略，省略时为 `NIGHT_WINDOW`；未知枚举值返回统一 `400 VALIDATION_ERROR`。`ADMIN_CUSTOM` 必须由后端根据认证主体确认 `SUPER_ADMIN`，普通用户伪造请求返回 `403 FORBIDDEN`，且权限和时间校验发生在幂等锁、Session、会话锁和任务写入之前。自定义时间必须秒和纳秒均为零，并位于请求处理时刻的下一完整分钟至未来 24 小时之间。调整请求仍只有 `{ "slotStart": "..." }`，不允许切换模式；自定义任务改期时再次校验 `SUPER_ADMIN`，角色被移除后仍可取消但不可改期。`sessionId` 存在时必须是当前用户可用、ACTIVE 且属于同一 Workspace 的会话；省略时后端创建来源为 `SCHEDULED_TASK` 的空白会话，取消或最终失败关闭后若仍无消息会自动归档。交互不提供单独“执行位置”字段：已有会话默认在该会话继续，新对话草稿默认使用预创建的新会话。后端在提交时固化当前用户进程所属 `targetLinuxServerId`，之后不随 binding 变化迁移。`POST /tasks` 与普通 Run 一样由路由层缓存请求体，硬上限为 32 MiB；超限返回 `400 VALIDATION_ERROR`，不查询进程 assignment，也不会进入本地 Controller 或远端转发。
+同一用户重复提交相同 `clientRequestId` 时，后端在完成当前模式权限校验后先返回原任务，不会因原定时时间已过、时段已满或窗口切换而拒绝响应；不重复创建 Session 或容量占位，也不创建 `USER_PLAN`。`batchContext` 为可选兼容字段；携带时必须省略 `sessionId`，后端在原事务内新建 `sourceType=SCHEDULED_TASK` 的独立 Session 并写入批量归因，归因、容量占位、任务和会话锁任一失败都会整体回滚。旧客户端省略该字段时行为不变。`prompt` 或至少一个 text part 必须非空；`workspaceId` 和 `slotStart` 必填。`scheduleMode` 可省略，省略时为 `NIGHT_WINDOW`；未知枚举值返回统一 `400 VALIDATION_ERROR`。`ADMIN_CUSTOM` 必须由后端根据认证主体确认 `SUPER_ADMIN`，普通用户伪造请求返回 `403 FORBIDDEN`，且权限和时间校验发生在幂等锁、Session、会话锁和任务写入之前。自定义时间必须秒和纳秒均为零，并位于请求处理时刻的下一完整分钟至未来 24 小时之间。调整请求仍只有 `{ "slotStart": "..." }`，不允许切换模式；自定义任务改期时再次校验 `SUPER_ADMIN`，角色被移除后仍可取消但不可改期。`sessionId` 存在时必须是当前用户可用、ACTIVE 且属于同一 Workspace 的会话；省略时后端创建来源为 `SCHEDULED_TASK` 的空白会话，取消或最终失败关闭后若仍无消息会自动归档。交互不提供单独“执行位置”字段：已有会话默认在该会话继续，新对话草稿默认使用预创建的新会话。后端在提交时固化当前用户进程所属 `targetLinuxServerId`，之后不随 binding 变化迁移。`POST /tasks` 与普通 Run 一样由路由层缓存请求体，硬上限为 32 MiB；超限返回 `400 VALIDATION_ERROR`，不查询进程 assignment，也不会进入本地 Controller 或远端转发。
 
 任务响应只返回安全展示字段：
 

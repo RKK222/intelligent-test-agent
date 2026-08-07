@@ -211,6 +211,8 @@ import {
   createConversationRunContextCache,
   startRunWithConversationContext
 } from "./conversation-run-context";
+import { useBatchTestCaseGeneration } from "./useBatchTestCaseGeneration";
+import type { BatchGenerationRequest } from "./batch-test-case-generation";
 import { useSideQuestionRun } from "./useSideQuestionRun";
 import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp, isRunBusyStatus, isRuntimeBusy, type FollowUpDraft } from "./follow-up-queue";
 import {
@@ -226,6 +228,7 @@ import {
   initialMessages,
   mergeDiffFiles,
   messagesFromSessionMessages,
+  looksBinaryContent,
   modelIdOnly,
   modelValue,
   nextCenterModeAfterRunDiff,
@@ -1628,6 +1631,18 @@ const opencodeHealthQuery = useQuery({
 });
 const opencodeHealthReady = computed(() => opencodeAvailability.value.ready);
 const opencodeProcessReady = computed(() => opencodeHealthReady.value);
+const batchTestCaseGeneration = useBatchTestCaseGeneration({
+  api,
+  conversationContexts: conversationRunContexts,
+  references: () => workspaceRequirementCandidates.value,
+  workspaceId: () => selectedWorkspace.value?.workspaceId,
+  agent: () => selectedAgent.value || undefined,
+  model: () => selectedModel.value || undefined,
+  mode: () => promptMode.value || undefined,
+  nightSlots: () => nightSlots.value
+});
+const batchTestCaseRunning = batchTestCaseGeneration.running;
+const batchTestCaseItemStates = batchTestCaseGeneration.itemStates;
 const workspaceFileRouteReadyById = ref<Record<string, boolean>>({});
 const selectedWorkspaceFileRouteReady = computed(() => {
   const workspaceId = selectedWorkspaceIdRef.value;
@@ -7430,20 +7445,6 @@ function addCurrentSelectionToChatContext() {
   notifyChatContextValidation(result, "已添加选区上下文");
 }
 
-function looksBinaryContent(content: string): boolean {
-  if (!content) return false;
-  if (content.includes("\u0000")) return true;
-  const sample = content.slice(0, 4096);
-  let control = 0;
-  for (let i = 0; i < sample.length; i += 1) {
-    const code = sample.charCodeAt(i);
-    if (code < 32 && code !== 9 && code !== 10 && code !== 13) {
-      control += 1;
-    }
-  }
-  return sample.length > 0 && control / sample.length > 0.08;
-}
-
 async function addWorkspaceFileToChatContext(path: string, silentSuccess = false): Promise<boolean> {
   if (!selectedWorkspace.value) {
     feedback.value = { kind: "info", title: "未选择工作区", description: "请先切换到可用工作区。" };
@@ -7738,6 +7739,52 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   chatContextStore.clearContexts();
   chatAttachments.value = [];
   startRunMutation.mutate({ input: runDraft, guard: captureConversationInteraction() });
+}
+
+/**
+ * 批量流程只消费与 # 同源的候选并使用局部上下文，不切换当前 Session，也不清空输入框和附件。
+ */
+async function handleBatchTestCaseGeneration(request: BatchGenerationRequest) {
+  if (batchTestCaseRunning.value) return;
+  if (!selectedWorkspace.value) {
+    feedback.value = { kind: "info", title: "未选择工作区", description: "请先切换到应用版本或个人工作区。" };
+    return;
+  }
+  if (!opencodeProcessReady.value || opencodeProcessStatus.value?.messageSendAllowed === false) {
+    feedback.value = {
+      kind: "info",
+      title: "暂不能批量生成",
+      description: opencodeProcessStatus.value?.messageSendBlockedReason
+        ?? opencodeProcessStatus.value?.message
+        ?? "请先初始化 TestAgent 进程。"
+    };
+    return;
+  }
+  if (request.scheduleMode === "ADMIN_CUSTOM" && !isSuperAdmin.value) {
+    feedback.value = { kind: "error", title: "无权使用测试定时", description: "仅超级管理员可以自定义执行时间。" };
+    return;
+  }
+
+  try {
+    const result = await batchTestCaseGeneration.execute(request);
+    void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    if (request.executionMode === "scheduled") void refreshNightExecutionTasks();
+    if (result.capacityConflict) void requestNightExecutionSlots();
+    feedback.value = result.failed === 0
+      ? {
+          kind: "success",
+          title: request.executionMode === "immediate" ? "批量案例已开始执行" : "批量定时任务已创建",
+          description: `共 ${result.succeeded} 个子条目已成功提交。`
+        }
+      : {
+          kind: "info",
+          title: "批量处理已完成",
+          description: `${result.succeeded} 项成功，${result.failed} 项失败，可在弹层中仅重试失败项。`
+        };
+  } catch (error) {
+    feedback.value = errorFeedback("批量生成测试案例失败", error);
+    if (error instanceof BackendApiError && error.status === 409) void requestNightExecutionSlots();
+  }
 }
 
 /**
@@ -10054,6 +10101,8 @@ async function handleLogout() {
           :workspace-file-candidates-loading="workspaceFileCandidatesLoading"
           :workspace-requirement-references="workspaceRequirementCandidates"
           :workspace-requirement-references-loading="workspaceRequirementCandidatesLoading"
+          :batch-item-states="batchTestCaseItemStates"
+          :batch-running="batchTestCaseRunning"
           :chat-attachments="chatAttachments"
           :chat-attachments-uploading="!!workspaceUploadOverlay"
           :agents-loading="agentsLoading"
@@ -10103,6 +10152,7 @@ async function handleLogout() {
           @refresh-agents="refreshAgentsCatalog"
           @search-workspace-files="handleWorkspaceFileCandidateSearch"
           @load-workspace-requirements="loadWorkspaceRequirementCandidates"
+          @execute-batch-test-cases="handleBatchTestCaseGeneration"
           @add-workspace-file-context="addWorkspaceFileToChatContext"
           @add-workspace-requirement-context="addWorkspaceRequirementToChatContext"
           @select-model="(model) => selectRuntimeModel(model)"

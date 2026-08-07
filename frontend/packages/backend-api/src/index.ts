@@ -47,6 +47,7 @@ import type {
   AnalyticsTimeSeriesPoint,
   AnalyticsUserUsageRow,
   ApplicationWorkspaceTemplate,
+  BatchContext,
   ApplicationWorkspaceVersion,
   ApplicationDefinition,
   ApplicationGitRefreshScope,
@@ -330,6 +331,7 @@ export type CreateNightExecutionTaskPayload = Omit<StartRunPayload, "sessionId" 
   sessionTitle?: string;
   scheduleMode?: NightExecutionScheduleMode;
   slotStart: string;
+  batchContext?: BatchContext;
 };
 
 /** 引用资产库在单台 Linux 服务器上的同步投影。 */
@@ -2017,6 +2019,11 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       }),
     createSession: (workspaceId: string, title: string) =>
       routedRequest<Session>(`${opencodeRuntimeBase}/sessions`, { method: "POST", body: JSON.stringify({ workspaceId, title }) }),
+    createBatchItemSession: (workspaceId: string, title: string, batchContext: BatchContext) =>
+      routedRequest<Session>(`${opencodeRuntimeBase}/sessions/batch-items`, {
+        method: "POST",
+        body: JSON.stringify({ workspaceId, title, batchContext })
+      }),
     startRun: (sessionIdOrPayload: string | StartRunPayload, prompt?: string) =>
       routedRequest<Run>(agentPath("/runs"), {
         method: "POST",

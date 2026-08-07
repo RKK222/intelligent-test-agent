@@ -663,6 +663,12 @@ export type NightExecutionTaskStatus =
 
 export type NightExecutionScheduleMode = "NIGHT_WINDOW" | "ADMIN_CUSTOM";
 
+/** 批量模式归因与单项幂等上下文。 */
+export type BatchContext = {
+  batchId: string;
+  itemRequestId: string;
+};
+
 export type NightExecutionSlot = {
   slotStart: string;
   slotEnd: string;
