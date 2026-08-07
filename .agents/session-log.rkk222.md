@@ -7054,3 +7054,42 @@
   合入当前企业发布分支后再构建并同时更新全部 Java 节点，不能直接把该旧分支 JAR 作为企业完整交付包。
 - 未修改 API 路径/DTO、RunEvent、数据库结构/Flyway/MyBatis SQL、ticket/RPC、限流、Nginx、Redis key、`.env*`、
   OpenCode 源码或 generated SDK；仅修复安全相关时间兼容行为和对应文档。
+
+## 2026-08-07 - 合并排查授权精度修复并重建企业双后台包
+
+### Why
+
+- 用户要求梳理昨晚 20:00 至今的提交和问题，并以当前发布分支为源码输入重新生成企业离线部署介质；其中排查
+  授权时间精度修复仍停留在基于旧提交的独立分支，不能直接把旧分支 JAR 当作当前完整交付。
+- 企业宿主明确不提供 `rg`、`jq`；新增模型目录校验虽然已有 Docker fallback，稳定手册仍直接调用依赖 `jq` 的
+  底层脚本，需要在封包前收口为无宿主 `jq` 的只读入口。
+
+### What
+
+- 将模型目录失败关闭批次提交到发布分支，并扩展既有 `opencode-worker-docker.sh` 增加 `validate-models` 动作；
+  宿主无 `jq` 时复用待启动 worker 镜像内的同一校验器，动作本身不删除或重启当前容器。单/双后台手册同步改用
+  该入口。
+- 把独立分支的排查授权微秒归一化提交 cherry-pick 到当前发布分支，只合入该最小提交；会话日志冲突保留两边
+  完整记录，后端、API、数据库说明和安全规范自动合并。
+- 使用现有节点敏感配置包重建固定名内层 `test-agent-internal-release.zip` 和外层
+  `test-agent-two-backend-complete.zip`；worker runtime 因模型校验指纹变化完整纳入，toolbox 指纹未变继续复用，
+  Workflow/LobeHub 继续禁用。
+
+### How
+
+- `tools/verify-dev-scripts.sh`、相关 Shell 语法、JSON/JSONC 一致性和无 `jq` Docker fallback 回归通过；JDK 25
+  执行 `mvn -pl test-agent-system-management -am clean test`，common 96、domain 94、system-management 41，
+  共 231 项通过。默认 JDK 17 的首次尝试在加载 Java 21 class 时退出，未计为代码测试结果。
+- 完整企业打包重新编译后端和前端，最终 persistence JAR 内 9 个受控主/兼容 migration SHA 全部匹配；
+  `linux/amd64` worker 的 OpenCode 1.18.4、Codex CLI 0.145.0、Python 3.13.14、官方 MCP 路由/reply 冒烟通过，
+  Docker tar 可重新 load 且镜像架构为 `linux/amd64`。
+- 内外层 SHA 配对、ZIP 完整性、外层内嵌 ZIP 与当前内层 SHA 相等、发布包 `--validate-only`、固定名完整包、自动
+  节点部署和多后台节点合同回归均通过；本日志提交后再用 `--zip-only` 保持本批组件选择重封内层并重建外层。
+
+### Result
+
+- 当前发布分支已同时包含前端内存治理、隔夜终态校准、排查授权时间精度和完整企业模型目录失败关闭能力；本次
+  相对昨晚已发布包没有新增或改写 PostgreSQL/MySQL migration，不修改 `.env*`、generated SDK 或 OpenCode 源码。
+- Apple Silicon 不能替代企业两台原生 `linux/amd64` worker 的 Codex sandbox E2E；企业真实 PostgreSQL history、
+  模型代理推理、双后台滚动部署、前端浏览器业务验收和节点资源/网络状态仍必须按执行单现场验证，任一 Flyway
+  未知 checksum 或首台 Java 校验失败时停止后续节点。
