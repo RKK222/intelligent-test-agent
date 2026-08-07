@@ -22,7 +22,7 @@ corepack pnpm --filter @test-agent/user-manual build
 - `docs/guide/feature-overview.md`：按真实工作台入口汇总文件与编辑器、对话、Git、Agent/Skill、Hub、引用配置和帮助能力，并链接到各专题章节。
 - `docs/guide/first-time-setup.md`：首次使用的角色、SSH、应用、工作空间和进程准备顺序；操作入口必须与当前权限和页面文案一致。
 - `docs/guide/settings.md`：按普通用户与应用管理员权限说明设置弹窗中的 SSH、应用成员、版本库关联和工作空间操作；不展开超级管理员专属的用户管理流程。
-- `docs/guide/conversation.md`：主对话、上下文、批量子条目案例生成、夜间执行时段、待执行任务、会话锁定、宠物旁路和历史对话的稳定用户操作说明。
+- `docs/guide/conversation.md`：主对话、上下文、批量子条目案例选择与会话创建进度、失败重试和主动结束批次、夜间执行时段、待执行任务、会话锁定、宠物旁路和历史对话的稳定用户操作说明。
 - `docs/guide/reference-config.md`：应用管理员在个人工作区初始化/同步/受控切换应用资产分支、主动核验各服务器实际 Git 指针、选择橙色 SDD 根目录、最小更新 JSONC 引用配置和处理错误的稳定操作说明；同时说明工作区文件树中的合并/非合并投影、蓝色引用来源、同名冲突、只读交互和局部告警，并明确已有进程只在下次启动或受管重启后获得引用目录环境。
 - `docs/guide/directory-mapping.md`：以当前落地的公共 Git、应用 Git 和个人 worktree 为事实源，将开发与测试目录按真实层级合并为一棵可逐级展开的工程树；目录、Agent/workagent/Skill 名称、两套物理 Git、实现状态和职责都在该 Markdown 顶部的 `directoryMapping` frontmatter 中维护，`DirectoryMapping.vue` 只负责通用展示。正文同步说明公共配置仅超级管理员可写、应用配置仅应用管理员及以上可写、`docs/**` 所有应用成员可发布、`spec/**` 仅个人本地提交，以及从个人 `HEAD` 按白名单投影到应用 feature worktree 的发布流程。
 - `docs/guide/faq.md`：把常见功能、权限问答和故障排查放在同一页，覆盖文件树、对话、Git、Agent/Skill、Hub、引用配置、定时任务和手册问答，并提供脱敏上报模板。

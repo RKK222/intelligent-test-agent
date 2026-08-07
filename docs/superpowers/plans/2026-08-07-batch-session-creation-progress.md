@@ -31,7 +31,7 @@
 - Consumes: existing `execute(request: BatchGenerationRequest): Promise<BatchExecutionSummary>` and stable `BatchIdentity`.
 - Produces: `reset(): void` on the composable return value; failed immediate states retain `sessionId` after Session creation.
 
-- [ ] **Step 1: Extract exact test helpers, then write a failing test for preserving an already-created Session**
+- [x] **Step 1: Extract exact test helpers, then write a failing test for preserving an already-created Session**
 
 Add these helpers immediately below the existing `references` fixture so later test cases do not depend on undefined shorthand:
 
@@ -105,7 +105,7 @@ it("keeps the created session and reuses all request ids when run start retry is
 });
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -116,7 +116,7 @@ corepack pnpm exec vitest run apps/agent-web/tests/useBatchTestCaseGeneration.te
 
 Expected: FAIL because the first failed state does not retain `sessionId`.
 
-- [ ] **Step 3: Implement Session preservation with a local item boundary**
+- [x] **Step 3: Implement Session preservation with a local item boundary**
 
 Inside each concurrency worker, retain the created Session before starting the Run:
 
@@ -140,7 +140,7 @@ try {
 
 Do not change `itemRequestId` or `run_${itemRequestId}` generation.
 
-- [ ] **Step 4: Write a failing test for ending one batch and starting a new identity**
+- [x] **Step 4: Write a failing test for ending one batch and starting a new identity**
 
 ```ts
 it("clears item state and creates a fresh batch identity after reset", async () => {
@@ -161,11 +161,11 @@ it("clears item state and creates a fresh batch identity after reset", async () 
 });
 ```
 
-- [ ] **Step 5: Run the focused test and verify RED**
+- [x] **Step 5: Run the focused test and verify RED**
 
 Expected: TypeScript/test failure because `reset` is not returned by the composable.
 
-- [ ] **Step 6: Add the guarded reset API**
+- [x] **Step 6: Add the guarded reset API**
 
 Extend the existing inferred return object with `reset`; do not replace the real function parameter list with a shorthand signature. The resulting returned members are exactly:
 
@@ -184,11 +184,11 @@ function reset() {
 }
 ```
 
-- [ ] **Step 7: Run the focused composable tests and verify GREEN**
+- [x] **Step 7: Run the focused composable tests and verify GREEN**
 
 Run the focused Vitest command again. Expected: all tests in `useBatchTestCaseGeneration.test.ts` pass.
 
-- [ ] **Step 8: Commit the independently testable composable change**
+- [x] **Step 8: Commit the independently testable composable change**
 
 ```bash
 git add frontend/apps/agent-web/src/components/useBatchTestCaseGeneration.ts \
@@ -208,7 +208,7 @@ git commit -m "修复批量会话重试与批次身份重置"
 - Consumes: `BatchGenerationRequest`, `BatchItemExecutionState`, `props.running`, `props.itemStates`.
 - Produces: `close` event payload `{ incompleteCount: number }`; retry requests use `{ retry: true, referenceIds: [...] }` and the original execution configuration.
 
-- [ ] **Step 1: Write a failing test for synchronous submit locking**
+- [x] **Step 1: Write a failing test for synchronous submit locking**
 
 Mount two selected references, click the immediate button twice without changing props, and assert:
 
@@ -226,7 +226,7 @@ expect(wrapper.get('[data-testid="batch-dialog-close"]').attributes("disabled"))
 
 The progress close button remains disabled while `running=true`; set `running=true` in the same test after the first click.
 
-- [ ] **Step 2: Run the dialog tests and verify RED**
+- [x] **Step 2: Run the dialog tests and verify RED**
 
 Run:
 
@@ -237,7 +237,7 @@ corepack pnpm exec vitest run apps/agent-web/tests/BatchTestCaseGenerationDialog
 
 Expected: FAIL because the selection form remains visible and two execute events are emitted before the parent prop updates.
 
-- [ ] **Step 3: Add an explicit local dialog state**
+- [x] **Step 3: Add an explicit local dialog state**
 
 Use these exact state members:
 
@@ -269,7 +269,7 @@ function beginExecution(request: BatchGenerationRequest) {
 
 `executeImmediate` and `executeScheduled` only build requests and call `beginExecution`.
 
-- [ ] **Step 4: Render a dedicated progress page**
+- [x] **Step 4: Render a dedicated progress page**
 
 When `dialogStage === "progress"`:
 
@@ -283,7 +283,7 @@ When `dialogStage === "progress"`:
 
 Do not use CSS-only hiding for form controls; remove them with `v-if` so keyboard focus cannot reach them.
 
-- [ ] **Step 5: Write failing tests for single and bulk retry**
+- [x] **Step 5: Write failing tests for single and bulk retry**
 
 After entering progress, set props so one row succeeds and one fails:
 
@@ -317,7 +317,7 @@ export function batchReferenceTestId(id: string): string {
 }
 ```
 
-- [ ] **Step 6: Implement retry requests without generating a new local request**
+- [x] **Step 6: Implement retry requests without generating a new local request**
 
 ```ts
 function retryReferences(referenceIds: string[]) {
@@ -336,7 +336,7 @@ function retryReferences(referenceIds: string[]) {
 
 Single-row retry calls `retryReferences([reference.id])`; bulk retry calls `retryReferences(failedIds.value)`.
 
-- [ ] **Step 7: Add capacity-conflict time reselection tests and implementation**
+- [x] **Step 7: Add capacity-conflict time reselection tests and implementation**
 
 Test a scheduled active request whose failed row has `errorCode="SLOT_CAPACITY_CONFLICT"`:
 
@@ -355,7 +355,7 @@ const capacityConflictIds = computed(() => failedIds.value.filter(
 
 The progress time picker is rendered only for a scheduled request with `capacityConflictIds.length > 0`. Its allocation count is `capacityConflictIds.length`, not all failed rows.
 
-- [ ] **Step 8: Add close-result tests**
+- [x] **Step 8: Add close-result tests**
 
 Verify all three boundaries:
 
@@ -373,7 +373,7 @@ await wrapper.get('[data-testid="batch-dialog-close"]').trigger("click");
 expect(wrapper.emitted("close")?.at(-1)?.[0]).toEqual({ incompleteCount: 1 });
 ```
 
-- [ ] **Step 9: Reset all local form state when the dialog closes**
+- [x] **Step 9: Reset all local form state when the dialog closes**
 
 Add a single `resetDialogState()` that restores:
 
@@ -395,7 +395,7 @@ dialogStage.value = "selection";
 
 Call it from the `props.open` watcher when `open` changes to `false`. Add a test that closes, reopens, and observes zero selections and the exact default requirement.
 
-- [ ] **Step 10: Run dialog tests and commit**
+- [x] **Step 10: Run dialog tests and commit**
 
 Expected: all `BatchTestCaseGenerationDialog.test.ts` tests pass.
 
@@ -420,7 +420,7 @@ git commit -m "实现批量会话创建进度与失败重试"
 - Consumes: dialog `close` payload `{ incompleteCount: number }` and composable `reset()`.
 - Produces: `reset-batch-test-cases` component event; closing an accepted dialog always ends the current front-end batch.
 
-- [ ] **Step 1: Add an explicit submission-rejection control before close-confirmation tests**
+- [x] **Step 1: Add an explicit submission-rejection control before close-confirmation tests**
 
 Define this shared type in `batch-test-case-generation.ts`:
 
@@ -434,7 +434,7 @@ export type BatchExecutionControls = {
 
 Add a dialog/integration unit test that simulates `controls.reject()` and verifies the original selections, requirement and scheduling choices remain available in the selection stage.
 
-- [ ] **Step 2: Write failing FigmaChatPanel tests for close confirmation**
+- [x] **Step 2: Write failing FigmaChatPanel tests for close confirmation**
 
 Mock `ElMessageBox.confirm` and cover:
 
@@ -446,7 +446,7 @@ expect(wrapper.find('[data-testid="batch-test-case-dialog"]').exists()).toBe(fal
 
 For `incompleteCount=2`, assert the message contains `仍有 2 个子条目未创建会话` and cancellation keeps the dialog open without emitting reset. Confirming closes and emits reset exactly once.
 
-- [ ] **Step 3: Run FigmaChatPanel tests and verify RED**
+- [x] **Step 3: Run FigmaChatPanel tests and verify RED**
 
 Run:
 
@@ -457,7 +457,7 @@ corepack pnpm exec vitest run apps/agent-web/tests/FigmaChatPanel.test.ts
 
 Expected: FAIL because the close payload and reset event do not exist.
 
-- [ ] **Step 4: Implement confirmed close in FigmaChatPanel**
+- [x] **Step 4: Implement confirmed close in FigmaChatPanel**
 
 Import `ElMessageBox` and add this component event:
 
@@ -488,7 +488,7 @@ async function closeBatchTestCaseDialog(result: { incompleteCount: number }) {
 
 The dialog `@close` passes its payload to this function. Do not auto-close from a `running` watcher.
 
-- [ ] **Step 5: Wire orchestration reset in AgentWorkbench**
+- [x] **Step 5: Wire orchestration reset in AgentWorkbench**
 
 Add:
 
@@ -501,7 +501,7 @@ function resetBatchTestCaseGeneration() {
 
 Bind `@reset-batch-test-cases="resetBatchTestCaseGeneration"` on `FigmaChatPanel`.
 
-- [ ] **Step 6: Update the Playwright batch flow before implementation assertions pass**
+- [x] **Step 6: Update the Playwright batch flow before implementation assertions pass**
 
 Revise `batch test cases start isolated runs, retry failures, and create isolated scheduled tasks`:
 
@@ -514,7 +514,7 @@ Revise `batch test cases start isolated runs, retry failures, and create isolate
 7. close it manually;
 8. assert immediate and scheduled batches use different `batchId` values, while retries inside the immediate batch reuse its original IDs.
 
-- [ ] **Step 7: Run focused unit and browser tests**
+- [x] **Step 7: Run focused unit and browser tests**
 
 Run:
 
@@ -531,7 +531,7 @@ corepack pnpm exec playwright test apps/agent-web/tests/workbench.spec.ts \
 
 Expected: all focused tests pass; the browser test reports one passed test.
 
-- [ ] **Step 8: Commit the page integration**
+- [x] **Step 8: Commit the page integration**
 
 ```bash
 git add frontend/apps/agent-web/src/components/FigmaChatPanel.vue \
@@ -558,7 +558,7 @@ git commit -m "接入批量创建关闭确认与全新批次"
 - Consumes: completed two-stage UI behavior and verified tests from Tasks 1-3.
 - Produces: stable documentation and final Chinese Git commit; no API/event/database documentation change.
 
-- [ ] **Step 1: Update stable documentation**
+- [x] **Step 1: Update stable documentation**
 
 Document these exact user-visible rules:
 
@@ -571,7 +571,7 @@ Document these exact user-visible rules:
 
 Do not describe HTTP, RunEvent or database changes because none are made.
 
-- [ ] **Step 2: Run the full front-end verification sequentially**
+- [x] **Step 2: Run the full front-end verification sequentially**
 
 Run from `frontend/` in this exact order to avoid VitePress temporary-directory races:
 
@@ -583,7 +583,7 @@ corepack pnpm build
 
 Expected: Vitest exits 0, all workspace typechecks exit 0, and the production build exits 0. Record any existing non-failing chunk-size or jsdom canvas warnings separately.
 
-- [ ] **Step 3: Run focused Playwright on the correct worktree server**
+- [x] **Step 3: Run focused Playwright on the correct worktree server**
 
 Before testing, verify the listener working directory:
 
@@ -596,7 +596,7 @@ lsof -a -p "$listener_pid" -d cwd
 
 Only reuse port 3000 when its `cwd` belongs to this worktree. Otherwise start this worktree on an unused port with a temporary Playwright config, run the focused batch test, and remove only that temporary config after the run.
 
-- [ ] **Step 4: Review diffs, session logs, and scope**
+- [x] **Step 4: Review diffs, session logs, and scope**
 
 Run:
 
@@ -608,11 +608,11 @@ find .agents -maxdepth 1 -type f -name 'session-log*.md' -print | sort
 
 Review recent entries in every session log. Confirm no `.env*`, generated SDK, OpenCode source, backend, migration, API or RunEvent file is staged.
 
-- [ ] **Step 5: Update the current contributor session log when warranted**
+- [x] **Step 5: Update the current contributor session log when warranted**
 
 Add one `Why / What / How / Result` entry to `.agents/session-log.huangzhenren.md` summarizing the duplicate-submit root cause, two-stage progress page, stable retry identity, focused/full test evidence, and compatibility scope.
 
-- [ ] **Step 6: Stage only this feature and create the final Chinese commit**
+- [x] **Step 6: Stage only this feature and create the final Chinese commit**
 
 ```bash
 git add .agents/session-log.huangzhenren.md \

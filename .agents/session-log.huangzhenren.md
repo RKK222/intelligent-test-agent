@@ -1776,3 +1776,17 @@
 - Result:
   - 平台接受撤销重发请求后，旧回答与过程信息立即从页面消失，不再等待新回答完成；回退前失败仍可安全恢复原轮次，避免乐观隐藏导致内容丢失。
   - 本次不新增或变更 HTTP API、RunEvent wire name、DTO、数据库/Flyway、SQL、安全或后端实现；已同步 HTTP 行为、agent-web/agent-chat README/PACKAGE 和用户手册，未修改 `.env*`、generated SDK 或 OpenCode 源码。
+
+### 2026-08-08 - 修复批量子条目重复发起并增加会话创建进度页
+
+- Why:
+  - 原批量弹层只在编排运行期间依赖父组件 `running` 禁用按钮；编排完成后会恢复原选择和提交按钮，再次点击会生成新的 `batchId/itemRequestId`，因此后端幂等约束会把它识别为合法新批次，无法阻止同一弹层内重复发起。
+- What:
+  - 批量弹层改为“选择配置 → 会话创建情况”两阶段，首次点击在本地同步锁定并移除可编辑表单；进度页逐项展示 Session、Run 或定时任务创建状态，不自动关闭，失败项支持单笔和批量重试，定时容量冲突只为冲突项重选时间。
+  - 立即 Run 启动失败保留已创建 `sessionId`，重试继续复用原批次、条目和 Run 请求 ID；顶层校验拒绝会原样回到选择页。运行中禁止关闭，空闲时若仍有条目未创建 Session 则二次确认；确认关闭后显式清空编排身份，重新打开恢复空选择和默认要求。
+- How:
+  - TDD 先复现同一渲染帧重复提交、Run 失败丢失 Session、批次 reset 缺失、关闭无确认和旧 E2E 在同一弹层继续发起定时批次，再补状态门禁、父级确认和编排重置。
+  - 前端全量 118 个 Vitest 文件 1860 passed / 1 skipped，15 个 workspace typecheck、production build 和目标 Chromium 批量 E2E 通过；E2E 覆盖立即失败单笔重试、主动关闭、重新打开全新定时批次及不同 `batchId`。最终复跑时 Playwright 1228 缓存被外部清理且 CDN 下载超时，改用不入库的临时配置指向本机 Google Chrome 取得同一用例 1 passed，临时文件已删除。
+- Result:
+  - 同一弹层生命周期只能受理一次初始批次，失败重试保持幂等；用户主动关闭才结束本批次，再次打开允许对同一子条目发起全新批次，符合新的产品边界。
+  - 仅修改前端交互、测试和稳定文档，不变更 HTTP API、RunEvent、数据库/Flyway、后端、性能/安全契约、`.env*`、generated SDK 或 OpenCode 源码；生产构建仅保留既有 chunk-size 警告，Vitest 仅保留既有 jsdom Canvas 提示。
