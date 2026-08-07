@@ -5,6 +5,19 @@
 
 ## Entries
 
+### 2026-08-07 - 居中面板 drag handle / resize handle 垂直与水平分割线
+
+- Why:
+  - 用户反馈右侧对话面板与中间编辑器之间的拖拽分割线（resize handle）未处于最中间，指示线偏向右侧面板边缘。
+- What:
+  - `FigmaShell.vue`: 为 `.figma-chat-panel-wrapper` 补充 `position: relative`，并将 `.figma-chat-resize-handle` 调整为 `position: absolute; left: calc(-1 * var(--ta-shell-gap, 8px)); width: var(--ta-shell-gap, 8px); top: 0; bottom: 0;`；内部 `::before` 指示线由原本偏右（0.5px）修正为在 8px 间隔内水平与垂直精确居中（`left: 50%; top: 50%; transform: translate(-50%, -50%);`），`::after` 拖拽响应区域填满 8px 间隔。
+  - `FigmaShell.vue`: 优化 `.figma-runtime-inventory-resize-handle::after` 指示线位置，从 `left: 2px; transform: translateY(-50%)` 修正为 `left: 50%; transform: translate(-50%, -50%)`。
+  - `AgentSkillHub.vue`: 同步优化 `.hub-detail-resize-handle::after` 从 `left: 2px` 修正为 `left: 50%; transform: translate(-50%, -50%)` 居中。
+- How:
+  - 检查 DOM 与 CSS 发现：`.figma-chat-panel-wrapper` 的 8px `margin-left` 在面板外侧，而原 `.figma-chat-resize-handle` 宽度仅为 1px 并放置在 wrapper 最左侧（即 8px 间隔的最右边），导致内部 `::before` 偏向右侧面板。改成 absolute 填满 8px 间隔后，`left: 50%` 精确置于间隔中心 (4px)。
+- Result:
+  - `npm run typecheck` (`vue-tsc --noEmit`) 校验通过。拖拽分割线在中央与右侧面板间 8px 缝隙内完美居中呈现。
+
 ### 2026-07-31 - 优化工作台外围配色为中国工商银行 (ICBC) 企业级极简红白风格
 
 - Why:

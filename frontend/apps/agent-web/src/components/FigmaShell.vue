@@ -3746,13 +3746,13 @@ function submitJoinApp() {
   content: "";
   position: absolute;
   top: 50%;
-  left: 2px;
+  left: 50%;
   width: 3px;
   height: 44px;
   border-radius: 999px;
   background: #cbd5e1;
   opacity: 0;
-  transform: translateY(-50%);
+  transform: translate(-50%, -50%);
   transition: opacity 0.14s ease, background-color 0.14s ease;
 }
 
@@ -4768,6 +4768,7 @@ function submitJoinApp() {
 
 /* ---- Right Chat Panel ---- */
 .figma-chat-panel-wrapper {
+  position: relative;
   flex-shrink: 0;
   display: flex;
   min-height: 0;
@@ -4794,10 +4795,12 @@ function submitJoinApp() {
 }
 
 .figma-chat-resize-handle {
-  width: 1px;
-  flex-shrink: 0;
+  position: absolute;
+  left: calc(-1 * var(--ta-shell-gap, 8px));
+  top: 0;
+  bottom: 0;
+  width: var(--ta-shell-gap, 8px);
   cursor: col-resize;
-  position: relative;
   z-index: 5;
   background: transparent;
   transition: background-color 0.14s ease;
@@ -4821,8 +4824,8 @@ function submitJoinApp() {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -3px;
-  width: 7px;
+  left: 0;
+  width: 100%;
   background: transparent;
   cursor: col-resize;
 }

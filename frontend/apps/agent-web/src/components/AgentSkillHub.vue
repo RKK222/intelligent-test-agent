@@ -1164,7 +1164,7 @@ onUnmounted(stopDetailResize);
 .hub-drawer-overlay{position:absolute;inset:0;background:rgba(15,23,42,.32);backdrop-filter:blur(2px)}
 .hub-detail-panel{position:relative;z-index:1;display:flex;width:min(640px,88vw);height:100%;flex-direction:column;background:#fff;box-shadow:-8px 0 30px rgba(0,0,0,.12);overflow:hidden}
 .hub-detail-resize-handle{position:absolute;inset:0 auto 0 0;z-index:3;width:10px;padding:0;border:0;background:transparent;cursor:ew-resize;touch-action:none}
-.hub-detail-resize-handle::after{content:"";position:absolute;top:50%;left:2px;width:3px;height:48px;border-radius:999px;background:#cbd5e1;opacity:0;transform:translateY(-50%);transition:opacity .14s ease,background-color .14s ease}
+.hub-detail-resize-handle::after{content:"";position:absolute;top:50%;left:50%;width:3px;height:48px;border-radius:999px;background:#cbd5e1;opacity:0;transform:translate(-50%,-50%);transition:opacity .14s ease,background-color .14s ease}
 .hub-detail-resize-handle:hover::after,.hub-detail-resize-handle:focus-visible::after,.hub-detail-resize-handle.is-resizing::after{background:var(--hub-blue);opacity:1}
 .hub-detail-resize-handle:focus-visible{outline:2px solid var(--hub-blue);outline-offset:-2px}
 .hub-detail-head-bar{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid #e2e8f0;background:#f8fafc}
