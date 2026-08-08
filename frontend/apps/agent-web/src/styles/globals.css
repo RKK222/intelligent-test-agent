@@ -477,15 +477,15 @@ h3 {
   color: #1d2129;
 }
 
-/* 选中状态：深邃青绿卡片，高对比薄荷绿文字 */
+/* 选中状态：左侧青绿强调边框 + 浅透明底（VS Code 风格，不遮文字） */
 .tree-node.is-active,
 .ta-file-tree-row.is-active,
 .ta-file-tree-row.active {
-  background: linear-gradient(90deg, #0f766e 0%, #0d9488 100%);
-  color: #ccfbf1;
+  background: rgba(13, 148, 136, 0.10);
+  color: #0f766e;
   font-weight: 600;
-  box-shadow: 0 2px 10px rgba(13, 148, 136, 0.28), 0 1px 3px rgba(0, 0, 0, 0.08);
-  border-radius: 4px;
+  border-left: 3px solid #0d9488;
+  box-shadow: none;
 }
 
 /* ---- 工作空间色彩主题配置 ---- */
@@ -525,7 +525,7 @@ h3 {
 .ta-file-tree-row.active .folder-icon,
 .ta-file-tree-row.active .ta-file-tree-icon,
 .ta-file-tree-row.active .ta-file-tree-source-icon {
-  color: #5eead4 !important;
+  color: #0d9488 !important;
 }
 
 /* ---- 文件与目录整行操作按钮全彩配置 ---- */
