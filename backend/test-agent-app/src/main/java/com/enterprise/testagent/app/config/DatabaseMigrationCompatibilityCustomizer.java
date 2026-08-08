@@ -128,13 +128,6 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
         boolean anyCurrentInternalModelMigrationApplied = currentInternalModelObservabilityApplied
                 || currentInternalModelFirstTokenApplied
                 || currentInternalModelStreamCompleteApplied;
-        boolean allCurrentInternalModelMigrationsApplied = currentInternalModelObservabilityApplied
-                && currentInternalModelFirstTokenApplied
-                && currentInternalModelStreamCompleteApplied;
-        if (anyCurrentInternalModelMigrationApplied && !allCurrentInternalModelMigrationsApplied) {
-            throw new IllegalStateException(
-                    "检测到不完整的内部模型可观测新 migration history，拒绝自动兼容；请核对 flyway_schema_history");
-        }
         if (allLegacyInternalModelMigrationsApplied && anyCurrentInternalModelMigrationApplied) {
             throw new IllegalStateException(
                     "检测到内部模型可观测新旧 migration 同时执行，拒绝自动兼容；请核对 flyway_schema_history");

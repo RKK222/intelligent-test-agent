@@ -255,6 +255,22 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
     }
 
     @Test
+    void currentInternalModelHistoryResumesAfterObservabilityMigration() {
+        assertCurrentInternalModelHistoryResumes(
+                "current_internal_model_after_observability",
+                INTERNAL_MODEL_OBSERVABILITY_VERSION,
+                false);
+    }
+
+    @Test
+    void currentInternalModelHistoryResumesAfterFirstTokenMigration() {
+        assertCurrentInternalModelHistoryResumes(
+                "current_internal_model_after_first_token",
+                INTERNAL_MODEL_FIRST_TOKEN_VERSION,
+                true);
+    }
+
+    @Test
     void appliedLegacyInternalModelHistoryUsesCompatibilityAndForwardRunResendMigration() {
         DataSource dataSource = dataSource("legacy_internal_model_history");
         // 复现并行 worktree 已执行旧可观测版本、但撤销重发候选版本尚未执行的本地 history。
@@ -436,6 +452,29 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
         bootFlywayRunner(dataSource).run(context -> {
             assertThat(context).hasNotFailed().hasSingleBean(Flyway.class);
             assertions.accept(context.getBean(Flyway.class));
+        });
+    }
+
+    /** 模拟当前 migration 链在进程中断后重启，剩余版本必须按默认顺序继续执行。 */
+    private static void assertCurrentInternalModelHistoryResumes(
+            String schema,
+            String appliedThroughVersion,
+            boolean firstTokenAlreadyApplied) {
+        DataSource dataSource = dataSource(schema);
+        migrateTo(dataSource, appliedThroughVersion, MAIN_LOCATION);
+
+        assertThat(applied(dataSource, INTERNAL_MODEL_OBSERVABILITY_VERSION)).isTrue();
+        assertThat(applied(dataSource, INTERNAL_MODEL_FIRST_TOKEN_VERSION))
+                .isEqualTo(firstTokenAlreadyApplied);
+        assertThat(applied(dataSource, INTERNAL_MODEL_STREAM_COMPLETE_VERSION)).isFalse();
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(locationDescriptors(flyway)).doesNotContain(INTERNAL_MODEL_LEGACY_LOCATION);
+            assertThat(applied(dataSource, INTERNAL_MODEL_OBSERVABILITY_VERSION)).isTrue();
+            assertThat(applied(dataSource, INTERNAL_MODEL_FIRST_TOKEN_VERSION)).isTrue();
+            assertThat(applied(dataSource, INTERNAL_MODEL_STREAM_COMPLETE_VERSION)).isTrue();
+            assertThat(internalModelObservabilitySchemaObjectCount(dataSource)).isEqualTo(5L);
         });
     }
 
