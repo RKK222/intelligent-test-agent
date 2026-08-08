@@ -539,94 +539,94 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
         </div>
       </footer>
 
-      <!-- 右侧弹出定时执行时间选择抽屉 -->
+      <!-- 右侧弹出定时执行时间选择抽屉（transition 只能有单个子节点） -->
       <transition name="batch-drawer-slide">
         <aside
-          v-if="dialogStage === 'selection' && scheduleOpen"
-          class="batch-schedule-drawer batch-schedule-panel"
-          data-testid="batch-schedule-panel"
+          v-if="(dialogStage === 'selection' && scheduleOpen) || (dialogStage === 'progress' && activeRequest?.executionMode === 'scheduled' && capacityConflictIds.length > 0)"
+          class="batch-schedule-drawer"
+          :data-testid="dialogStage === 'selection' ? 'batch-schedule-panel' : 'batch-retry-schedule'"
         >
-          <div class="batch-schedule-drawer-head">
-            <div class="batch-schedule-drawer-title">
-              <strong>选择定时执行时间</strong>
-              <small>已根据选中的 {{ selectedIds.length }} 个子条目推荐/分配</small>
+          <!-- 选择阶段：定时时间选择 -->
+          <template v-if="dialogStage === 'selection' && scheduleOpen">
+            <div class="batch-schedule-drawer-head">
+              <div class="batch-schedule-drawer-title">
+                <strong>选择定时执行时间</strong>
+                <small>已根据选中的 {{ selectedIds.length }} 个子条目推荐/分配</small>
+              </div>
+              <button
+                type="button"
+                class="batch-schedule-close"
+                aria-label="关闭定时选择"
+                data-testid="batch-close-schedule"
+                :disabled="executionLocked"
+                @click="closeSchedule"
+              ><X :size="14" /></button>
             </div>
-            <button
-              type="button"
-              class="batch-schedule-close"
-              aria-label="关闭定时选择"
-              data-testid="batch-close-schedule"
-              :disabled="executionLocked"
-              @click="closeSchedule"
-            ><X :size="14" /></button>
-          </div>
-          <div class="batch-schedule-drawer-body">
-            <ExecutionTimePicker
-              multiple
-              :schedule-mode="scheduleMode"
-              :allow-mode-switch="canScheduleCustomTime"
-              :slots="nightSlots"
-              :loading="nightSlotsLoading"
-              :disabled="running"
-              :selected-times="selectedNightTimes"
-              :custom-input="customScheduleInput"
-              :custom-error="customScheduleError"
-              :custom-min="customBounds.min"
-              :custom-max="customBounds.max"
-              :custom-times="customTimes"
-              @select-mode="setScheduleMode"
-              @toggle-time="toggleNightTime"
-              @quick-offset="setCustomOffset"
-              @update:custom-input="updateCustomScheduleInput"
-              @add-custom-time="addCustomTime"
-              @remove-custom-time="(time) => customTimes = customTimes.filter((item) => item !== time)"
-            />
-          </div>
-          <div class="batch-schedule-drawer-foot">
-            <span v-if="selectedScheduleTimes.length === 0">请选择至少一个执行时间。</span>
-            <span v-else-if="!scheduleAllocation.ok" class="batch-error">所选时段总余量 {{ scheduleAllocation.remainingCapacity }}，不足以安排 {{ selectedIds.length }} 个子条目。</span>
-            <span v-else>将按时间升序轮询分配 {{ selectedScheduleTimes.length }} 个时间段。</span>
-          </div>
-        </aside>
+            <div class="batch-schedule-drawer-body">
+              <ExecutionTimePicker
+                multiple
+                :schedule-mode="scheduleMode"
+                :allow-mode-switch="canScheduleCustomTime"
+                :slots="nightSlots"
+                :loading="nightSlotsLoading"
+                :disabled="running"
+                :selected-times="selectedNightTimes"
+                :custom-input="customScheduleInput"
+                :custom-error="customScheduleError"
+                :custom-min="customBounds.min"
+                :custom-max="customBounds.max"
+                :custom-times="customTimes"
+                @select-mode="setScheduleMode"
+                @toggle-time="toggleNightTime"
+                @quick-offset="setCustomOffset"
+                @update:custom-input="updateCustomScheduleInput"
+                @add-custom-time="addCustomTime"
+                @remove-custom-time="(time) => customTimes = customTimes.filter((item) => item !== time)"
+              />
+            </div>
+            <div class="batch-schedule-drawer-foot">
+              <span v-if="selectedScheduleTimes.length === 0">请选择至少一个执行时间。</span>
+              <span v-else-if="!scheduleAllocation.ok" class="batch-error">所选时段总余量 {{ scheduleAllocation.remainingCapacity }}，不足以安排 {{ selectedIds.length }} 个子条目。</span>
+              <span v-else>将按时间升序轮询分配 {{ selectedScheduleTimes.length }} 个时间段。</span>
+            </div>
+          </template>
 
-        <aside
-          v-else-if="dialogStage === 'progress' && activeRequest?.executionMode === 'scheduled' && capacityConflictIds.length > 0"
-          class="batch-schedule-drawer batch-schedule-panel"
-          data-testid="batch-retry-schedule"
-        >
-          <div class="batch-schedule-drawer-head">
-            <div class="batch-schedule-drawer-title">
-              <strong>容量冲突项重新选择时间</strong>
-              <small>为 {{ capacityConflictIds.length }} 个冲突项安排新时段</small>
+          <!-- 进度阶段：容量冲突重新选时间 -->
+          <template v-else>
+            <div class="batch-schedule-drawer-head">
+              <div class="batch-schedule-drawer-title">
+                <strong>容量冲突项重新选择时间</strong>
+                <small>为 {{ capacityConflictIds.length }} 个冲突项安排新时段</small>
+              </div>
             </div>
-          </div>
-          <div class="batch-schedule-drawer-body">
-            <ExecutionTimePicker
-              multiple
-              :schedule-mode="activeRequest.scheduleMode ?? scheduleMode"
-              :allow-mode-switch="false"
-              :slots="nightSlots"
-              :loading="nightSlotsLoading"
-              :disabled="executionLocked"
-              :selected-times="selectedNightTimes"
-              :custom-input="customScheduleInput"
-              :custom-error="customScheduleError"
-              :custom-min="customBounds.min"
-              :custom-max="customBounds.max"
-              :custom-times="customTimes"
-              @toggle-time="toggleNightTime"
-              @quick-offset="setCustomOffset"
-              @update:custom-input="updateCustomScheduleInput"
-              @add-custom-time="addCustomTime"
-              @remove-custom-time="(time) => customTimes = customTimes.filter((item) => item !== time)"
-            />
-          </div>
-          <div class="batch-schedule-drawer-foot">
-            <span v-if="!retryScheduleAllocation.ok" class="batch-error">
-              所选时段总余量 {{ retryScheduleAllocation.remainingCapacity }}，不足以重试 {{ capacityConflictIds.length }} 个子条目。
-            </span>
-            <span v-else>重试时段余量充足。</span>
-          </div>
+            <div class="batch-schedule-drawer-body">
+              <ExecutionTimePicker
+                multiple
+                :schedule-mode="activeRequest.scheduleMode ?? scheduleMode"
+                :allow-mode-switch="false"
+                :slots="nightSlots"
+                :loading="nightSlotsLoading"
+                :disabled="executionLocked"
+                :selected-times="selectedNightTimes"
+                :custom-input="customScheduleInput"
+                :custom-error="customScheduleError"
+                :custom-min="customBounds.min"
+                :custom-max="customBounds.max"
+                :custom-times="customTimes"
+                @toggle-time="toggleNightTime"
+                @quick-offset="setCustomOffset"
+                @update:custom-input="updateCustomScheduleInput"
+                @add-custom-time="addCustomTime"
+                @remove-custom-time="(time) => customTimes = customTimes.filter((item) => item !== time)"
+              />
+            </div>
+            <div class="batch-schedule-drawer-foot">
+              <span v-if="!retryScheduleAllocation.ok" class="batch-error">
+                所选时段总余量 {{ retryScheduleAllocation.remainingCapacity }}，不足以重试 {{ capacityConflictIds.length }} 个子条目。
+              </span>
+              <span v-else>重试时段余量充足。</span>
+            </div>
+          </template>
         </aside>
       </transition>
     </div>
@@ -649,7 +649,8 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   max-width: 1180px;
   min-width: 720px;
-  overflow: hidden;
+  /* overflow:clip 裁剪布局溢出但不建立滚动容器，不影响 position:absolute 子元素的 transform 动画 */
+  overflow: clip;
   border: 1px solid #cdd6e2;
   border-radius: 18px;
   background: #f7f9fc;
