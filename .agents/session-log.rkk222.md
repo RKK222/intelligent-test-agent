@@ -7362,3 +7362,22 @@
 - 新增的 `outcomeGroup` 为向后兼容的可选查询参数；未新增事件或数据库结构，未修改 migration、鉴权、安全策略、
   `.env*`、generated SDK 或 OpenCode 源码。工作流仍因本机 PostgreSQL 用户缺少创建角色权限而显式跳过，不影响
   本功能实机验证。
+
+## 2026-08-08 - 修复模型调用监控趋势图图例与右侧 Y 轴名称重叠问题
+
+### Why
+
+- 在模型调用监控页面中，双 Y 轴趋势图（REQ 与 Success Rate %）的图例放置在右上角（`top: 0, right: 8`），与右侧 Y 轴标题（`name: "SR %"`）在渲染位置上发生重叠，导致图例图标与文字在右上角堆叠显示。
+
+### What
+
+- 修改 [InternalModelObservabilityPanel.vue](file:///Users/kaka/Desktop/intelligent-test-agent/frontend/apps/agent-web/src/components/system/InternalModelObservabilityPanel.vue) 中 ECharts 趋势图配置：将图例改为顶部居中对齐（`top: 0, left: "center"`）并增加 `itemGap: 16`，将 `grid.right` 边距由 `16` 调整为 `44`，确保右侧 Y 轴刻度标签和名称有足够展示空间。
+
+### How
+
+- 执行 `npx vitest run --environment jsdom tests/internal-model-observability-panel.test.ts`，测试 100% 通过。
+
+### Result
+
+- 趋势图图例居中展示，REQ 轴名称位于左上方，SR % 轴名称位于右上方，图例与 Y 轴名称不再发生堆叠或遮挡。
+

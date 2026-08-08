@@ -478,8 +478,8 @@ function renderCharts() {
     trendChart?.setOption({
       animation: false,
       tooltip: { trigger: "axis" },
-      legend: { top: 0, right: 8, textStyle: { fontSize: 11 } },
-      grid: { top: 32, left: 48, right: 16, bottom: 28 },
+      legend: { top: 0, left: "center", itemGap: 16, textStyle: { fontSize: 11 } },
+      grid: { top: 34, left: 48, right: 44, bottom: 28 },
       xAxis: {
         type: "category",
         boundaryGap: false,
