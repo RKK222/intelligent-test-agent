@@ -9719,12 +9719,12 @@ async function handleLogout() {
             type="button"
             :class="['figma-activity-btn figma-activity-btn--hub hub-activity-button', centerMode === 'hub' && 'figma-activity-btn--active']"
             aria-label="Agent、Skill、MCP 与 Tool Hub"
-            title="资源库"
+            title="能力库"
             data-testid="agent-skill-hub-button"
             @click="toggleAgentSkillHub"
           >
             <Boxes class="figma-activity-icon" :stroke-width="1.5" />
-            <span class="figma-activity-text">资源库</span>
+            <span class="figma-activity-text">能力库</span>
             <span v-if="hubUpdateCount > 0" class="hub-activity-badge" aria-label="有可用更新">
               {{ hubUpdateCount > 99 ? '99+' : hubUpdateCount }}
             </span>
