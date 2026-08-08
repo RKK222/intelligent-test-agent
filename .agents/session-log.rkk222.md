@@ -7389,3 +7389,25 @@
 - 点击“NVIDIA AIPerf 规范 ↗”胶囊按钮可直接弹出离线对照指南；`ITL / TPOT` 带有明显的橙色“暂未计算”状态标识。
 - 时间选择器合二为一，筛选控件与操作按钮紧凑连贯排列，彻底消除右侧大片空白；整体外观符合高端监控工具设计标准。
 
+## 2026-08-08 - 优化内部模型可观测面板筛选吸顶条宽度对齐与留白布局
+
+### Why
+
+- 内部模型可观测面板 `InternalModelObservabilityPanel.vue` 的筛选吸顶条 `.ta-imob-sticky-bar` 使用了 `-16px` 的负外边距，导致其左右两端超出了上、下方卡片和表格的宽度边界；筛选条下方原叠加了 60px 的空旷留白与重复分割线；筛选下拉框宽度偏窄（95px ~ 115px）且操作按钮靠左导致右侧尾部留白过多。
+
+### What
+
+- 移除 `.ta-imob-sticky-bar` 的 `-16px` 负外边距，恢复与上下卡片/图表/明细表格 100% 宽度一致对齐；增加 `border: 1px solid #e5e7eb` 与 `border-radius: 8px` 圆角卡片样式及轻量阴影。
+- 调整筛选栏分割线 `.ta-imob-filter-vdivider` 的边距（`margin: 0 4px 0 auto`），将操作按钮组（“刷新”、“探活”）自动推至筛选吸顶栏最右侧，形成双端分布布局，彻底消除右侧大面积无效留白。
+- 适当加长各筛选下拉框宽度：按用户 `155px`、供应商 `145px`、结果分类 `145px`、来源 `125px`，让文本显示更加清晰舒展。
+- 清理 `.ta-imob-records-section` 的冗余 `padding-top` 和 `border-top`，将 `ta-imob-combined` 间距收敛为标准的 `16px`。
+
+### How
+
+- 修改 `frontend/apps/agent-web/src/components/system/InternalModelObservabilityPanel.vue` 中的对应 CSS 规则。
+
+### Result
+
+- 筛选吸顶条宽度与上下卡片及表格完全齐平，双端分布布局与加宽后的选择框清晰舒展，筛选条下方的边距过渡自然平滑。
+
+

@@ -132,8 +132,16 @@ function outcomeGroupOf(outcome: InternalModelCallOutcome): InternalModelCallOut
   return group ?? "OTHER";
 }
 
+interface GlossaryItem {
+  abbr: string;
+  name: string;
+  desc: string;
+  isPending?: boolean;
+  pendingText?: string;
+}
+
 // AIPerf (NVIDIA) 指标规范与业界标准英文缩写说明
-const glossaryItems = [
+const glossaryItems: GlossaryItem[] = [
   { abbr: "TTFT", name: "Time to First Token", desc: "首 Token 延迟：发起请求到接收到模型首个 Token 的时间（NVIDIA GenAI Perf 核心延迟指标）。" },
   {
     abbr: "ITL / TPOT",
@@ -148,7 +156,7 @@ const glossaryItems = [
   { abbr: "REQ", name: "Requests", desc: "请求总数：包含成功与失败在内的总调用次数。" },
   { abbr: "SR", name: "Success Rate", desc: "请求成功率：成功完成的请求占总请求数的百分比。" },
   { abbr: "FR", name: "Failure Rate", desc: "请求错误率：失败或中途中断的请求占总请求数的百分比。" }
-] as const;
+];
 
 // 页面提示只讲业务含义、分母和空值规则，计算逻辑保持不变。
 const metricHelp = {
@@ -1465,7 +1473,7 @@ function onPageChange(next: number) {
   min-height: auto;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
 }
 .ta-imob-section {
   flex: 0 0 auto;
@@ -1479,8 +1487,6 @@ function onPageChange(next: number) {
 }
 .ta-imob-records-section {
   order: 2;
-  padding-top: 20px;
-  border-top: 1px solid #e5e7eb;
 }
 .ta-imob-section-title {
   margin: 0;
@@ -1633,17 +1639,18 @@ function onPageChange(next: number) {
 }
 .ta-imob-sticky-bar {
   position: sticky !important;
-  top: -16px !important;
+  top: 0 !important;
   z-index: 100 !important;
   display: flex !important;
   flex-wrap: nowrap !important;
   align-items: center !important;
   gap: 8px !important;
-  padding: 8px 16px !important;
-  margin: -16px -16px 16px -16px !important;
+  padding: 8px 12px !important;
+  margin: 0 !important;
   background: #ffffff !important;
-  border-bottom: 1px solid #e2e8f0 !important;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04) !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 8px !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05) !important;
   overflow-x: auto !important;
   scrollbar-width: thin !important;
   flex-shrink: 0 !important;
@@ -1690,22 +1697,22 @@ function onPageChange(next: number) {
   font-weight: 500;
 }
 :deep(.ta-imob-filter-select-user) {
-  width: 115px !important;
+  width: 155px !important;
 }
 :deep(.ta-imob-filter-select-provider) {
-  width: 105px !important;
+  width: 145px !important;
 }
 :deep(.ta-imob-filter-select-outcome) {
-  width: 105px !important;
+  width: 145px !important;
 }
 :deep(.ta-imob-filter-select-source) {
-  width: 95px !important;
+  width: 125px !important;
 }
 .ta-imob-filter-vdivider {
   width: 1px;
   height: 14px;
   background: #cbd5e1;
-  margin: 0 2px;
+  margin: 0 4px 0 auto;
   flex-shrink: 0;
 }
 .ta-imob-filter-actions {
