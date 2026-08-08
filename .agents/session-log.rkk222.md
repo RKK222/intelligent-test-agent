@@ -7376,8 +7376,7 @@
 - 参考 NVIDIA GenAI Perf / AI Perf Metrics Reference 标准，在前端面板页首内置“AIPerf & 业界指标英文缩写指南 (Glossary)”卡片，点击“参照 NVIDIA AIPerf 性能指标规范定义 ↗”可直接唤起离线规范弹窗。
 - 在缩写指南与离线标准文档 [docs/standards/metrics-glossary.md](file:///Users/kaka/Desktop/intelligent-test-agent/docs/standards/metrics-glossary.md) 中添加 [NVIDIA GenAI Perf / AI Perf Metrics Reference](https://docs.nvidia.com/aiperf/dev/reference/ai-perf-metrics-reference) 官方链接，并将尚未提取 Token 粒度时间戳计算的 `ITL / TPOT` 用醒目的橙色徽章 `<span class="ta-imob-orange-badge">（暂未计算）</span>` 显式标注。
 - 在筛选栏与调用明细区增加“按人 (用户 `filterUcid` Select/Input)”与“按时间 (自定义起止时间段 `el-date-picker` Datetimerange)”选择器，支持快捷选择或输入用户 ID 筛选，并支持自定义精确定时检索。
-- 重新设计并构建吸顶固顶底板（Sticky Header Plate `.ta-imob-sticky-bar`）：采用纯白背景、底边框 `#e2e8f0` 及下沉阴影，与容器边缘平齐铺满（`margin: -16px -16px 16px -16px; padding: 10px 16px`），使页面向下滑动时内容完全被底板遮挡挡住，不再出现浮空穿透现象。
-- 恢复各筛选下拉框与日期选择框的舒适展宽（日期框 320px，下拉框 115~135px），彻底解决“最近 24 ...”、“按人 (用...”等文字截断问题，并保持单行平滑滚动。
+- 优化吸顶底板（Sticky Header Plate `.ta-imob-sticky-bar`）中各控件比例与视觉层级：统一引入 Element Plus `size="small"`，将日期选择框调至视觉协调的 240px，下拉框调至 95~115px，消除中间大日期框的突兀感；左侧设置图标标题 `<Filter /> 筛选`，右侧自动靠右对齐极简操作按钮组 `[刷新]` `[探活]`。
 
 ### How
 
@@ -7388,5 +7387,5 @@
 
 - 趋势图图例居中展示，所有聚合图表表头均采用清晰中文展示。
 - 点击“NVIDIA AIPerf 规范 ↗”胶囊按钮可直接弹出离线对照指南；`ITL / TPOT` 带有明显的橙色“暂未计算”状态标识。
-- 筛选栏配备通幅纯白固顶“底板”，滚动视图时完美吸顶且遮挡下方图表；各控件文本完整显示无省略号截断。
+- 筛选栏尺寸比例精致统一，吸顶底板纯白平整，操作按钮右对齐且文本完整无任何省略号截断。
 
