@@ -44,4 +44,15 @@ describe("filterLoadedFiles", () => {
 
     expect(result).toEqual([]);
   });
+
+  it("matches file names case-insensitively and ignores whitespace-only keywords", () => {
+    const entriesByDirectory = {
+      "": [{ type: "file" as const, path: "AgentConfig.vue", name: "AgentConfig.vue" }]
+    };
+
+    expect(filterLoadedFiles(entriesByDirectory, " CONFIG ")).toEqual([
+      { type: "file", path: "AgentConfig.vue", name: "AgentConfig.vue" }
+    ]);
+    expect(filterLoadedFiles(entriesByDirectory, "   ")).toEqual([]);
+  });
 });
