@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
-import { Activity, BookOpen, ChevronDown, ChevronUp, ExternalLink, FileText, RefreshCw } from "lucide-vue-next";
+import { Activity, BookOpen, ChevronDown, ChevronUp, ExternalLink, FileText, Filter, RefreshCw } from "lucide-vue-next";
 import { ElMessage } from "element-plus";
 import * as echarts from "echarts";
 import { type BackendApiClient } from "@test-agent/backend-api";
@@ -770,11 +770,16 @@ function onPageChange(next: number) {
 
       <div class="ta-imob-combined">
         <div class="ta-imob-sticky-bar">
-          <span class="ta-imob-filter-title">筛选条件</span>
+          <div class="ta-imob-filter-label">
+            <Filter :size="13" />
+            <span>筛选</span>
+          </div>
+
           <el-select
             v-model="selectedWindowHours"
             placeholder="时间范围"
-            class="ta-imob-filter ta-imob-filter-select-window"
+            size="small"
+            class="ta-imob-filter-select-window"
             @change="onWindowHoursChange"
           >
             <el-option
@@ -784,9 +789,11 @@ function onPageChange(next: number) {
               :value="option.value"
             />
           </el-select>
+
           <el-date-picker
             v-model="customTimeRange"
             type="datetimerange"
+            size="small"
             range-separator="至"
             start-placeholder="开始时间"
             end-placeholder="结束时间"
@@ -794,14 +801,16 @@ function onPageChange(next: number) {
             class="ta-imob-filter-date"
             @change="onCustomTimeRangeChange"
           />
+
           <el-select
             v-model="filterUcid"
-            placeholder="按人 (用户)"
+            placeholder="按用户"
+            size="small"
             clearable
             filterable
             allow-create
             default-first-option
-            class="ta-imob-filter ta-imob-filter-select-user"
+            class="ta-imob-filter-select-user"
             @change="applyFilters"
           >
             <el-option
@@ -811,11 +820,13 @@ function onPageChange(next: number) {
               :value="user"
             />
           </el-select>
+
           <el-select
             v-model="filterProviderId"
             placeholder="供应商"
+            size="small"
             clearable
-            class="ta-imob-filter ta-imob-filter-select-provider"
+            class="ta-imob-filter-select-provider"
             @change="applyFilters"
           >
             <el-option
@@ -825,11 +836,13 @@ function onPageChange(next: number) {
               :value="option.value"
             />
           </el-select>
+
           <el-select
             v-model="filterOutcomeGroup"
             placeholder="结果分类"
+            size="small"
             clearable
-            class="ta-imob-filter ta-imob-filter-select-outcome"
+            class="ta-imob-filter-select-outcome"
             @change="applyFilters"
           >
             <el-option
@@ -839,37 +852,42 @@ function onPageChange(next: number) {
               :value="key"
             />
           </el-select>
+
           <el-select
             v-model="filterSource"
             placeholder="来源"
+            size="small"
             clearable
-            class="ta-imob-filter ta-imob-filter-select-source"
+            class="ta-imob-filter-select-source"
             @change="applyFilters"
           >
             <el-option label="用户调用" value="USER_CALL" />
             <el-option label="探活" value="PROBE" />
           </el-select>
-          <button
-            type="button"
-            class="ta-imob-probe-all-btn"
-            :disabled="recordsQuery.isFetching.value || statsQuery.isFetching.value"
-            @click="refreshAll()"
-          >
-            <RefreshCw
-              :size="12"
-              :class="{ 'ta-imob-spin': recordsQuery.isFetching.value || statsQuery.isFetching.value }"
-            />
-            刷新
-          </button>
-          <button
-            type="button"
-            class="ta-imob-probe-all-btn"
-            :disabled="probeMutation.isPending.value"
-            @click="probeAll()"
-          >
-            <Activity class="ta-imob-probe-icon" :size="12" />
-            探活
-          </button>
+
+          <div class="ta-imob-filter-actions">
+            <button
+              type="button"
+              class="ta-imob-btn-small"
+              :disabled="recordsQuery.isFetching.value || statsQuery.isFetching.value"
+              @click="refreshAll()"
+            >
+              <RefreshCw
+                :size="11"
+                :class="{ 'ta-imob-spin': recordsQuery.isFetching.value || statsQuery.isFetching.value }"
+              />
+              <span>刷新</span>
+            </button>
+            <button
+              type="button"
+              class="ta-imob-btn-small"
+              :disabled="probeMutation.isPending.value"
+              @click="probeAll()"
+            >
+              <Activity class="ta-imob-probe-icon" :size="11" />
+              <span>探活</span>
+            </button>
+          </div>
         </div>
 
         <section class="ta-imob-section ta-imob-records-section">
@@ -1571,11 +1589,11 @@ function onPageChange(next: number) {
   flex-wrap: nowrap !important;
   align-items: center !important;
   gap: 8px !important;
-  padding: 10px 16px !important;
+  padding: 8px 16px !important;
   margin: -16px -16px 16px -16px !important;
   background: #ffffff !important;
   border-bottom: 1px solid #e2e8f0 !important;
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05) !important;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04) !important;
   overflow-x: auto !important;
   scrollbar-width: thin !important;
   flex-shrink: 0 !important;
@@ -1583,58 +1601,65 @@ function onPageChange(next: number) {
 .ta-imob-sticky-bar > * {
   flex-shrink: 0 !important;
 }
-.ta-imob-filter-title {
-  margin-right: 4px;
-  color: #334155;
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-.ta-imob-filter {
-  flex-shrink: 0;
-}
-:deep(.ta-imob-filter-select-window) {
-  width: 135px !important;
-}
-:deep(.ta-imob-filter-date) {
-  width: 320px !important;
-}
-:deep(.ta-imob-filter-select-user) {
-  width: 135px !important;
-}
-:deep(.ta-imob-filter-select-provider) {
-  width: 125px !important;
-}
-:deep(.ta-imob-filter-select-outcome) {
-  width: 125px !important;
-}
-:deep(.ta-imob-filter-select-source) {
-  width: 115px !important;
-}
-.ta-imob-probe-all-btn {
+.ta-imob-filter-label {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 5px 12px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding-right: 2px;
+}
+:deep(.ta-imob-filter-select-window) {
+  width: 115px !important;
+}
+:deep(.ta-imob-filter-date) {
+  width: 240px !important;
+}
+:deep(.ta-imob-filter-select-user) {
+  width: 115px !important;
+}
+:deep(.ta-imob-filter-select-provider) {
+  width: 105px !important;
+}
+:deep(.ta-imob-filter-select-outcome) {
+  width: 105px !important;
+}
+:deep(.ta-imob-filter-select-source) {
+  width: 95px !important;
+}
+.ta-imob-filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.ta-imob-btn-small {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px;
   border: 1px solid #cbd5e1;
-  border-radius: 6px;
+  border-radius: 4px;
   background: #ffffff;
   color: #2563eb;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
-  flex-shrink: 0;
   transition: all 0.15s ease;
 }
-.ta-imob-probe-all-btn:hover:not(:disabled) {
+.ta-imob-btn-small:hover:not(:disabled) {
   background: #eff6ff;
   border-color: #93c5fd;
   color: #1d4ed8;
 }
-.ta-imob-probe-all-btn:disabled {
-  opacity: 0.6;
+.ta-imob-btn-small:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
 }
 .ta-imob-probe-icon {
