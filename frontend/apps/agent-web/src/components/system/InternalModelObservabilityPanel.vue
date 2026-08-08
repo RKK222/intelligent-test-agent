@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
-import { Activity, BookOpen, ChevronDown, ChevronUp, ExternalLink, FileText, Filter, RefreshCw } from "lucide-vue-next";
+import { Activity, BookOpen, ChevronDown, ChevronUp, Clock, ExternalLink, FileText, Filter, RefreshCw } from "lucide-vue-next";
 import { ElMessage } from "element-plus";
 import * as echarts from "echarts";
 import { type BackendApiClient } from "@test-agent/backend-api";
@@ -55,28 +55,51 @@ function createQueryWindow(hours = selectedWindowHours.value, nowMillis = Date.n
 }
 
 const queryWindow = ref<QueryWindow>(createQueryWindow());
+const timePopoverVisible = ref(false);
+const isCustomTime = ref(false);
 
-function onWindowHoursChange() {
-  if (selectedWindowHours.value) {
-    customTimeRange.value = null;
-    queryWindow.value = createQueryWindow(selectedWindowHours.value);
-    applyFilters();
-  }
+function selectPreset(hours: number) {
+  selectedWindowHours.value = hours;
+  isCustomTime.value = false;
+  customTimeRange.value = null;
+  queryWindow.value = createQueryWindow(hours);
+  timePopoverVisible.value = false;
+  applyFilters();
 }
 
-function onCustomTimeRangeChange(val: [string, string] | null) {
+function onCustomTimeChange(val: [string, string] | null) {
   if (val && val.length === 2) {
+    isCustomTime.value = true;
     selectedWindowHours.value = 0;
     queryWindow.value = {
       from: new Date(val[0]).toISOString(),
       to: new Date(val[1]).toISOString()
     };
+    timePopoverVisible.value = false;
   } else {
+    isCustomTime.value = false;
     selectedWindowHours.value = 24;
     queryWindow.value = createQueryWindow(24);
   }
   applyFilters();
 }
+
+function formatShortTime(dateStr: string): string {
+  if (!dateStr) return "";
+  const parts = dateStr.split(" ");
+  if (parts.length === 2) {
+    return `${parts[0].slice(5)} ${parts[1].slice(0, 5)}`;
+  }
+  return dateStr;
+}
+
+const timeDisplayLabel = computed(() => {
+  if (isCustomTime.value && customTimeRange.value && customTimeRange.value.length === 2) {
+    return `${formatShortTime(customTimeRange.value[0])} 至 ${formatShortTime(customTimeRange.value[1])}`;
+  }
+  const found = windowHourOptions.find((o) => o.value === selectedWindowHours.value);
+  return found ? found.label : "最近 24 小时";
+});
 
 const outcomeGroupText: Record<InternalModelCallOutcomeGroup, string> = {
   SUCCESS: "成功",
@@ -775,32 +798,57 @@ function onPageChange(next: number) {
             <span>筛选</span>
           </div>
 
-          <el-select
-            v-model="selectedWindowHours"
-            placeholder="时间范围"
-            size="small"
-            class="ta-imob-filter-select-window"
-            @change="onWindowHoursChange"
+          <!-- 统一融合时间选择器 (Unified Time Picker) -->
+          <el-popover
+            v-model:visible="timePopoverVisible"
+            placement="bottom-start"
+            :width="300"
+            trigger="click"
+            popper-class="ta-imob-time-popover"
           >
-            <el-option
-              v-for="option in windowHourOptions"
-              :key="option.value"
-              :label="option.label"
-              :value="option.value"
-            />
-          </el-select>
+            <template #reference>
+              <button
+                type="button"
+                class="ta-imob-time-picker-btn"
+                :class="{ 'is-custom': isCustomTime }"
+              >
+                <Clock :size="12" />
+                <span class="ta-imob-time-btn-text">{{ timeDisplayLabel }}</span>
+                <ChevronDown :size="11" />
+              </button>
+            </template>
 
-          <el-date-picker
-            v-model="customTimeRange"
-            type="datetimerange"
-            size="small"
-            range-separator="至"
-            start-placeholder="开始时间"
-            end-placeholder="结束时间"
-            value-format="YYYY-MM-DD HH:mm:ss"
-            class="ta-imob-filter-date"
-            @change="onCustomTimeRangeChange"
-          />
+            <div class="ta-imob-time-popover-panel">
+              <div class="ta-imob-time-section-head">快捷时间窗口</div>
+              <div class="ta-imob-time-presets">
+                <button
+                  v-for="opt in windowHourOptions"
+                  :key="opt.value"
+                  type="button"
+                  class="ta-imob-preset-chip"
+                  :class="{ 'is-active': !isCustomTime && selectedWindowHours === opt.value }"
+                  @click="selectPreset(opt.value)"
+                >
+                  {{ opt.label }}
+                </button>
+              </div>
+
+              <div class="ta-imob-time-divider" />
+
+              <div class="ta-imob-time-section-head">自定义起止时间段</div>
+              <el-date-picker
+                v-model="customTimeRange"
+                type="datetimerange"
+                size="small"
+                range-separator="至"
+                start-placeholder="开始时间"
+                end-placeholder="结束时间"
+                value-format="YYYY-MM-DD HH:mm:ss"
+                style="width: 100%"
+                @change="onCustomTimeChange"
+              />
+            </div>
+          </el-popover>
 
           <el-select
             v-model="filterUcid"
@@ -1612,11 +1660,32 @@ function onPageChange(next: number) {
   flex-shrink: 0;
   padding-right: 2px;
 }
-:deep(.ta-imob-filter-select-window) {
-  width: 115px !important;
+.ta-imob-time-picker-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #606266;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
 }
-:deep(.ta-imob-filter-date) {
-  width: 240px !important;
+.ta-imob-time-picker-btn:hover {
+  border-color: #c0c4cc;
+  color: #303133;
+}
+.ta-imob-time-picker-btn.is-custom {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+.ta-imob-time-btn-text {
+  font-weight: 500;
 }
 :deep(.ta-imob-filter-select-user) {
   width: 115px !important;
@@ -1688,5 +1757,47 @@ function onPageChange(next: number) {
 @keyframes ta-imob-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+.ta-imob-time-popover-panel {
+  padding: 4px 2px;
+}
+.ta-imob-time-section-head {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+.ta-imob-time-presets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.ta-imob-preset-chip {
+  padding: 4px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 11px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s ease;
+}
+.ta-imob-preset-chip:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #1e293b;
+}
+.ta-imob-preset-chip.is-active {
+  background: #0284c7;
+  border-color: #0284c7;
+  color: #ffffff;
+  font-weight: 600;
+}
+.ta-imob-time-divider {
+  height: 1px;
+  background: #e2e8f0;
+  margin: 10px 0;
 }
 </style>

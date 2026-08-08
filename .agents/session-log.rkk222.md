@@ -7376,7 +7376,7 @@
 - 参考 NVIDIA GenAI Perf / AI Perf Metrics Reference 标准，在前端面板页首内置“AIPerf & 业界指标英文缩写指南 (Glossary)”卡片，点击“参照 NVIDIA AIPerf 性能指标规范定义 ↗”可直接唤起离线规范弹窗。
 - 在缩写指南与离线标准文档 [docs/standards/metrics-glossary.md](file:///Users/kaka/Desktop/intelligent-test-agent/docs/standards/metrics-glossary.md) 中添加 [NVIDIA GenAI Perf / AI Perf Metrics Reference](https://docs.nvidia.com/aiperf/dev/reference/ai-perf-metrics-reference) 官方链接，并将尚未提取 Token 粒度时间戳计算的 `ITL / TPOT` 用醒目的橙色徽章 `<span class="ta-imob-orange-badge">（暂未计算）</span>` 显式标注。
 - 在筛选栏与调用明细区增加“按人 (用户 `filterUcid` Select/Input)”与“按时间 (自定义起止时间段 `el-date-picker` Datetimerange)”选择器，支持快捷选择或输入用户 ID 筛选，并支持自定义精确定时检索。
-- 优化吸顶底板（Sticky Header Plate `.ta-imob-sticky-bar`）中各控件比例与视觉层级：统一引入 Element Plus `size="small"`，将日期选择框调至视觉协调的 240px，下拉框调至 95~115px，消除中间大日期框的突兀感；左侧设置图标标题 `<Filter /> 筛选`，右侧自动靠右对齐极简操作按钮组 `[刷新]` `[探活]`。
+- 将原有分离的“时间范围”下拉框和较宽的“自定义起止时间”日期选择框合成一个统一的精美时间选择组件（`UnifiedTimePicker` Popover）：默认筛选栏上仅展示轻量按键 `[🕒 最近 24 小时 v]`（自定义时展示 `08-08 08:00 至 12:00`），宽度由原本的 455px 大幅收缩至仅 150px；点击唤起的下拉面板顶部内置 `最近 1/6/12/24 小时` 与 `最近 3/7 天` 快捷 Chip 按钮，底部内置精简日期时间段选择器。
 
 ### How
 
@@ -7387,5 +7387,5 @@
 
 - 趋势图图例居中展示，所有聚合图表表头均采用清晰中文展示。
 - 点击“NVIDIA AIPerf 规范 ↗”胶囊按钮可直接弹出离线对照指南；`ITL / TPOT` 带有明显的橙色“暂未计算”状态标识。
-- 筛选栏尺寸比例精致统一，吸顶底板纯白平整，操作按钮右对齐且文本完整无任何省略号截断。
+- 时间选择器合二为一，极大释放筛选栏横向空间；预设快捷窗口与自定义日期时间段统一收纳于下拉面板，整体外观与 Grafana / Datadog 等专业监控看板高度一致。
 
