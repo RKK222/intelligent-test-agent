@@ -487,6 +487,7 @@ function submitRename() {
         type="button"
         :class="cn(
           'ta-file-tree-row',
+          'tree-node',
           (isWorkspaceViewEntry(entry) ? activePath === nodeId(entry) : activePath === entry.path) && 'is-active',
           isSelected(entry) && 'is-selected',
           dragOverDirectory === nodeId(entry) && 'is-drop-target',
@@ -524,7 +525,7 @@ function submitRename() {
             aria-hidden="true"
           />
           <span v-else class="ta-file-tree-spacer" />
-          <i class="codicon codicon-folder ta-file-tree-source-icon" aria-hidden="true" />
+          <i class="codicon codicon-folder folder-icon ta-file-tree-source-icon" aria-hidden="true" />
         </template>
         <template v-else>
           <span class="ta-file-tree-file-spacer" />
@@ -1190,7 +1191,8 @@ function submitRename() {
   transition: all 0.15s ease;
 }
 
-.ta-file-tree-row-wrapper:hover > .ta-file-tree-actions .ta-file-tree-download-btn,
+.ta-file-tree-row:hover + .ta-file-tree-actions .ta-file-tree-download-btn,
+.ta-file-tree-actions:hover .ta-file-tree-download-btn,
 .ta-file-tree-download-btn:focus-visible {
   display: inline-flex;
 }
@@ -1221,7 +1223,8 @@ function submitRename() {
   margin-left: 4px;
 }
 
-.ta-file-tree-row-wrapper:hover > .ta-file-tree-actions .ta-file-tree-add-btn {
+.ta-file-tree-row:hover + .ta-file-tree-actions .ta-file-tree-add-btn,
+.ta-file-tree-actions:hover .ta-file-tree-add-btn {
   display: inline-flex;
 }
 
@@ -1246,7 +1249,8 @@ function submitRename() {
   margin-left: 4px;
 }
 
-.ta-file-tree-row-wrapper:hover > .ta-file-tree-actions .ta-file-tree-delete-btn,
+.ta-file-tree-row:hover + .ta-file-tree-actions .ta-file-tree-delete-btn,
+.ta-file-tree-actions:hover .ta-file-tree-delete-btn,
 .ta-file-tree-delete-btn:focus-visible {
   display: inline-flex;
 }
@@ -1272,7 +1276,8 @@ function submitRename() {
   margin-left: 4px;
 }
 
-.ta-file-tree-row-wrapper:hover > .ta-file-tree-actions .ta-file-tree-plane-btn {
+.ta-file-tree-row:hover + .ta-file-tree-actions .ta-file-tree-plane-btn,
+.ta-file-tree-actions:hover .ta-file-tree-plane-btn {
   display: inline-flex;
 }
 

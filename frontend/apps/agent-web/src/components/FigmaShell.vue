@@ -3931,7 +3931,7 @@ function submitJoinApp() {
   padding: 3px 3px 3px 8px;
   border: 1px solid var(--ta-shell-border, #e5e7eb);
   border-radius: 11px;
-  background: var(--ta-shell-surface, #fff);
+  background: var(--ta-shell-canvas, #f0f4fa);
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
   transition: border-color 0.14s ease, box-shadow 0.14s ease;
 }
@@ -3982,15 +3982,15 @@ function submitJoinApp() {
 }
 
 .figma-header-center .figma-app-menu-trigger {
-  width: clamp(136px, 14vw, 164px);
+  max-width: 200px;
 }
 
 .figma-workspace-menu-wrapper .figma-context-menu-trigger {
-  width: clamp(148px, 15vw, 176px);
+  max-width: 240px;
 }
 
 .figma-version-menu-wrapper .figma-context-menu-trigger {
-  width: clamp(108px, 11vw, 128px);
+  max-width: 180px;
 }
 
 .figma-app-menu-trigger:hover,
@@ -4033,7 +4033,7 @@ function submitJoinApp() {
 
 .figma-context-menu-value {
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   overflow: hidden;
   color: var(--ta-shell-header-text, #000000);
   font-size: 11px;
@@ -4047,7 +4047,7 @@ function submitJoinApp() {
 
 .figma-app-menu-name {
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   overflow: hidden;
   font-weight: 600;
   font-size: 11px;
@@ -4670,16 +4670,16 @@ function submitJoinApp() {
   flex-shrink: 0;
   /* 文件树只在左侧壳层内映射主题，避免影响编辑器与右侧对话。 */
   --ta-tree-bg: var(--ta-shell-sidebar, #ffffff);
-  --ta-tree-border: var(--ta-shell-border, #e5e7eb);
+  --ta-tree-border: var(--ta-shell-border, rgba(226, 232, 240, 0.8));
   --ta-tree-border-strong: var(--ta-shell-border-strong, #d1d5db);
-  --ta-tree-text: var(--ta-shell-text, #1f2937);
+  --ta-tree-text: var(--ta-shell-text, #333A48);
   --ta-tree-muted: var(--ta-shell-muted, #6b7280);
-  --ta-tree-hover: var(--ta-shell-hover, #f3f4f6);
-  --ta-tree-active: var(--ta-shell-accent-soft, #fdf2f2);
-  --ta-tree-active-text: var(--ta-shell-accent-strong, #c8161d);
-  --ta-tree-accent: var(--ta-shell-accent, #c8161d);
+  --ta-tree-hover: var(--ta-shell-hover, rgba(22, 119, 255, 0.06));
+  --ta-tree-active: var(--ta-shell-accent-soft, #ffffff);
+  --ta-tree-active-text: var(--ta-shell-accent-strong, #1677ff);
+  --ta-tree-accent: var(--ta-shell-accent, #1677ff);
   background: var(--ta-shell-sidebar, #ffffff);
-  border: 1px solid var(--ta-shell-border, #e5e7eb);
+  border: 1px solid var(--ta-shell-border, rgba(226, 232, 240, 0.8));
   border-radius: var(--ta-shell-radius, 8px);
   box-shadow: var(--ta-shell-shadow, 0 1px 2px rgba(15, 23, 42, 0.04));
   display: flex;
@@ -4984,15 +4984,15 @@ function submitJoinApp() {
   }
 
   .figma-header-center .figma-app-menu-trigger {
-    width: 92px;
+    max-width: 120px;
   }
 
   .figma-workspace-menu-wrapper .figma-context-menu-trigger {
-    width: 112px;
+    max-width: 140px;
   }
 
   .figma-version-menu-wrapper .figma-context-menu-trigger {
-    width: 86px;
+    max-width: 110px;
   }
 
   .figma-app-menu-trigger,

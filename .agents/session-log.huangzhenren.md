@@ -5,6 +5,19 @@
 
 ## Entries
 
+### 2026-08-08 - 优化顶栏全局切换轨道底色与应用/工作空间/版本下拉箭头消除留白
+
+- Why:
+  - 用户反馈顶栏中间“应用 / 工作空间 / 版本” 3 个选项所在轨道的底色需与周边顶栏画布一致（不能是白色），且应用名称与下拉箭头之间不应有被强行拉长的留白空间。
+- What:
+  - `FigmaShell.vue`: 将 `.figma-context-rail` 的 `background` 由纯白 `var(--ta-shell-surface, #fff)` 调整为与外围画布一致的浅雾蓝底色 `var(--ta-shell-canvas, #f0f4fa)`。
+  - `FigmaShell.vue`: 将 `.figma-app-menu-name` 与 `.figma-context-menu-value` 的 `flex: 1 1 auto` 改为 `flex: 0 1 auto`，并将触发按钮的固定宽度强制拉长 `width: clamp(...)` 改为适应内容的 `max-width` 限制，使应用名称与 ChevronDown 下拉箭头自然贴合收紧，消除留白。
+  - `FigmaShell.test.ts`: 同步更新 `figma-context-rail` 样式的匹配断言。
+- How:
+  - 调整 context-rail 容器 background 适配 `--ta-shell-canvas`，解绑按钮 flex 占据剩余空间的强制扩展，实现名称与箭头的紧凑水平对齐。
+- Result:
+  - 自动化单元测试 `FigmaShell.test.ts` (57 tests) 100% 全部通过。
+
 ### 2026-08-08 - 限定输入框顶部批量案例设计菜单仅在新建对话且未发送消息时展示
 
 - Why:

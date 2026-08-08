@@ -66,7 +66,7 @@ describe("FigmaShell", () => {
     expect(figmaShellSource).toContain('import logoUrl from "../assets/figma/logo.png";');
     expect(figmaShellSource).toMatch(/\.figma-title\s*\{[^}]*color: var\(--ta-shell-brand, #111827\)/s);
     expect(figmaShellSource).toMatch(/\.figma-subtitle\s*\{[^}]*color: var\(--ta-shell-brand-strong, #7f1e2b\)/s);
-    expect(figmaShellSource).toContain("--ta-tree-active: var(--ta-shell-accent-soft, #fdf2f2)");
+    expect(figmaShellSource).toContain("--ta-tree-active: var(--ta-shell-accent-soft, #ffffff)");
     expect(figmaShellSource).toMatch(/\.figma-activity-bar\s*\{[^}]*background: transparent[^}]*border-right: 0/s);
     expect(figmaShellSource).toMatch(/\.figma-header\s*\{[^}]*display: grid;[^}]*grid-template-columns: max-content minmax\(0, 1fr\) max-content;[^}]*background: var\(--ta-shell-canvas, #f0f4fa\)/s);
     expect(figmaShellSource).toMatch(/\.figma-body\s*\{[^}]*padding: var\(--ta-shell-gap, 8px\)[^}]*background: var\(--ta-shell-canvas, #f0f4fa\)/s);
@@ -83,7 +83,7 @@ describe("FigmaShell", () => {
     expect(figmaShellSource).toContain('data-testid="header-workspace-selector"');
     expect(figmaShellSource).toContain('data-testid="header-version-selector"');
     expect(figmaShellSource).toContain('data-testid="header-context-rail"');
-    expect(figmaShellSource).toMatch(/\.figma-context-rail\s*\{[^}]*height: 34px;[^}]*border: 1px solid var\(--ta-shell-border, #e5e7eb\);[^}]*border-radius: 11px;[^}]*background: var\(--ta-shell-surface, #fff\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-context-rail\s*\{[^}]*height: 34px;[^}]*border: 1px solid var\(--ta-shell-border, #e5e7eb\);[^}]*border-radius: 11px;[^}]*background: var\(--ta-shell-canvas, #f0f4fa\)/s);
     expect(figmaShellSource).toMatch(/\.figma-context-rail::before\s*\{[^}]*width: 3px;[^}]*height: 15px;[^}]*background: var\(--ta-shell-accent, #c8161d\)/s);
     expect(figmaShellSource).toMatch(/\.figma-context-rail\.has-open-menu\s*\{[^}]*border-color: var\(--ta-shell-accent, #c8161d\)/s);
     expect(figmaShellSource).toMatch(/\.figma-context-rail > :not\(:first-child\)::before\s*\{[^}]*background: var\(--ta-shell-border, #e5e7eb\)/s);
