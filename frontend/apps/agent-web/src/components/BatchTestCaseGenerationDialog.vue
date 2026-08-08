@@ -414,10 +414,15 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
         ><X :size="18" /></button>
       </header>
 
-      <!-- 主内容区：toolbar + 列表 + 右侧抽屉（flex 横向排列，抽屉展开时列表左压缩） -->
+      <!-- 主内容区：toolbar + 列表 + 右侧抽屉（抽屉在弹出框内部从右向左平滑滑出，列表向左压缩，Footer全宽不被占用） -->
       <div class="batch-main-area">
-        <!-- 左侧：搜索栏 + 列表 -->
-        <div class="batch-left-pane">
+        <!-- 左侧：搜索栏 + 列表（抽屉打开时 margin-right: 380px 平滑向左压缩） -->
+        <div
+          class="batch-left-pane"
+          :class="{
+            'has-drawer': (dialogStage === 'selection' && scheduleOpen) || (dialogStage === 'progress' && activeRequest?.executionMode === 'scheduled' && capacityConflictIds.length > 0)
+          }"
+        >
           <section v-if="dialogStage === 'selection'" class="batch-toolbar">
             <label class="batch-search">
               <Search :size="16" />
@@ -691,19 +696,24 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
 .batch-secondary:disabled, .batch-primary:disabled { cursor: not-allowed; opacity: .45; }
 .batch-count { color: #6d7b8b; font-size: 12px; font-variant-numeric: tabular-nums; }
 .batch-count.is-limit { color: #9f2e38; font-weight: 700; }
-/* 主内容区：flex 横向，左侧列表 + 右侧抽屉 */
+/* 主内容区：相对定位且溢出裁剪，作为抽屉的定位容器 */
 .batch-main-area {
+  position: relative;
   display: flex;
   min-height: 0;
   overflow: hidden;
 }
-/* 左侧面板：搜索栏 + 列表，抽屉展开时被压缩 */
+/* 左侧面板：搜索栏 + 列表，抽屉展开时 margin-right: 380px 平滑向左压缩 */
 .batch-left-pane {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  transition: margin-right 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.batch-left-pane.has-drawer {
+  margin-right: 380px;
 }
 .batch-dialog-body { min-height: 0; flex: 1; overflow: auto; padding: 0 16px 10px; background: #f7f9fc; }
 .batch-table-head, .batch-row { display: grid; grid-template-columns: 56px minmax(240px, 1fr) 110px 150px; align-items: center; }
@@ -730,10 +740,14 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
 .batch-progress-running { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; color: #8f2731; font-weight: 700; }
 .batch-row-retry { min-height: 28px; padding: 0 8px; }
 
-/* 右侧侧边抽屉面板：flex 子元素，展开时将左侧列表向左压缩 */
+/* 右侧侧边抽屉面板：在弹出框主内容区内部绝对定位，贴靠弹出框右壁向左滑出 */
 .batch-schedule-drawer {
-  flex-shrink: 0;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
   width: 380px;
+  z-index: 10;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -785,15 +799,14 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
 .batch-schedule-close:hover:not(:disabled) { background: #dfe7ef; color: #8f2731; }
 .batch-schedule-close:disabled { cursor: not-allowed; opacity: .45; }
 
-/* width 滑入动画：抽屉展开 width 从 0→380px，左侧列表同步压缩 */
+/* 从弹出框右侧向左滑入滑出动画 */
 .batch-drawer-slide-enter-active,
 .batch-drawer-slide-leave-active {
-  transition: width 0.28s cubic-bezier(0.16, 1, 0.3, 1);
-  overflow: hidden;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .batch-drawer-slide-enter-from,
 .batch-drawer-slide-leave-to {
-  width: 0 !important;
+  transform: translateX(100%);
 }
 
 .batch-mode-switch { display: flex; gap: 3px; padding: 3px; border-radius: 8px; background: #dfe7ef; }

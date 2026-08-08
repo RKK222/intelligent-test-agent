@@ -5,18 +5,18 @@
 
 ## Entries
 
-### 2026-08-08 - 批量生成测试案例定时选择面板改为弹层内部右侧弹出并自动向左压缩列表
+### 2026-08-08 - 批量生成测试案例定时选择面板改为从弹出框右壁向左滑出并平滑压缩列表
 
 - Why:
-  - 响应用户最新布局调整要求：定时选择抽屉不能在弹层外部弹出，也不能遮挡弹层底部的“生成要求”文本框和“立刻执行/定时执行”按钮；抽屉展开时，顶部的标题栏与底部的操作栏保持全宽不动，中间主内容区的子条目搜索栏和表格列表平滑向左压缩，确保不影响弹层内的全部操作。
+  - 响应用户精确交互要求：定时选择抽屉必须限定在弹出框（Modal Dialog）内部，从弹出框的右边缘向左平滑滑出；弹出时绝不能占用或盖住底部的生成要求文本框与操作按钮；列表与搜索栏通过 `margin-right` 平滑向左收紧，确保全部操作区域正常可见。
 - What:
   - `BatchTestCaseGenerationDialog.vue`: 
-    1. **主内容区结构重构**：将对话框模板改为 `header + .batch-main-area (flex) + footer` 三层 Grid 结构。在 `.batch-main-area` 内部，将搜索栏与表格封装为左侧自适应面板 `.batch-left-pane` (`flex: 1`)，定时抽屉 `.batch-schedule-drawer` 作为其右侧同级子节点 (`flex-shrink: 0`, 宽 `380px`)。
-    2. **伸缩动画与无遮挡体验**：抽屉动画从 CSS `transform` 切换为 `width` 过渡 (`width: 0` -> `380px`)。抽屉展开时，左侧搜索栏与子条目列表自动平滑向左收紧，底部“案例生成要求”与操作按钮不受任何遮挡。
+    1. **弹窗右壁定位**：将 `.batch-main-area` 设为 `position: relative; overflow: hidden`，作为抽屉的绝对定位容器；抽屉 `.batch-schedule-drawer` 设置为 `position: absolute; top:0; right:0; bottom:0; width: 380px`，贴靠弹出框内部右侧，动画从 `translateX(100%)` 平滑滑向 `translateX(0)`。
+    2. **底部隔离与列表向左压缩**：Header 与 Footer 为弹出框的上下固定行，抽屉仅存在于中间主内容区，**底部的生成要求 textarea 与执行按钮 100% 保持独立全宽与可点击**。`batch-left-pane` 绑定 `:class="{ 'has-drawer': isDrawerOpen }"`，在抽屉展开时通过 `margin-right: 380px` 配合动画将搜索栏和列表平滑向左收紧。
 - How:
-  - 调整弹层 Grid 为 3 行自适应布局，配置抽屉为 Flex 局内元素并挂载 `width` 动画，重新验证单元测试契约。
+  - 配置主内容区为相对定位基准，抽屉绝对定位从右壁滑出，配合左侧面板 margin-right 弹性平滑压缩，验证单元测试契约。
 - Result:
-  - `BatchTestCaseGenerationDialog.test.ts` (11 tests) 全部顺利通过。定时抽屉在弹层内部右侧优雅展开，子条目列表向左自动压缩，底部生成要求与按钮保持全宽完整展示。
+  - `BatchTestCaseGenerationDialog.test.ts` (11 tests) 全部顺利通过。抽屉贴合弹出框右壁向左平滑滑出，列表平滑向左压缩，底部生成要求与按钮 100% 保持无遮挡。
 
 ### 2026-08-08 - 中间文件编辑器“预览”与“定位文件”图标替换及全彩主题升级（FileSearch文件预览/LocateFixed定位）
 
