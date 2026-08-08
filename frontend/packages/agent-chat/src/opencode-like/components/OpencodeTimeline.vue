@@ -106,7 +106,7 @@ watch(latestUserMessageKey, () => {
             <div class="oc-empty-state__title">{{ emptyTitle || '有什么可以帮你？' }}</div>
           </div>
           <div class="oc-empty-state__subtitle">
-            {{ emptySubtitle || '描述你的目标或任务，智能体将理解你的需求并协助完成。' }}
+            {{ emptySubtitle || '描述你的目标或任务，智能体将协助完成。' }}
           </div>
         </div>
       </div>

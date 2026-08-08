@@ -35,7 +35,7 @@ describe("OpencodeTimeline", () => {
     });
 
     expect(getByText("有什么可以帮你？")).toBeTruthy();
-    expect(getByText("描述你的目标或任务，智能体将理解你的需求并协助完成。")).toBeTruthy();
+    expect(getByText("描述你的目标或任务，智能体将协助完成。")).toBeTruthy();
     expect(container.querySelector(".test-pet-icon")).toBeTruthy();
   });
 
