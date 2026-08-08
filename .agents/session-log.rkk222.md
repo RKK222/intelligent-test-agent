@@ -7432,3 +7432,42 @@
 - 本地 OpenCode 起不来的直接原因不是 OpenCode 二进制或配置，而是当前仓库后端未真正启动，manager 误连到了旧 worktree 后端；`/actuator/health` 的 200 也来自该旧进程，不能作为当前根目录后端已启动的依据。
 - 后续清理或停止旧 worktree 的 8080 服务后，再按项目标准 `test` 启动链重启并复核 manager 与 OpenCode 端口。
 
+## 2026-08-08 - 兼容并行 worktree Flyway 历史并恢复本地启动
+
+### Why
+
+- 用户确认重启后，清理旧 worktree 后端仍发现当前 `.env.test` 数据库已执行内部模型可观测旧版本
+  `20260807130134`、`20260807203000`、`20260807222227`，而当前分支只保留重编号版本，Flyway 因 unresolved/applied
+  与低版本撤销重发候选缺失而拒绝启动。
+- 默认 Workflow 准备还因本机密钥文件缺少 `WORKFLOW_DEV_REDIS_PASSWORD` 失败；前端配置已禁用 Workflow，因此本次按
+  脚本支持的 `--without-workflow` 恢复 Java、manager 和前端三服务。
+
+### What
+
+- 复用现有 `DatabaseMigrationCompatibilityCustomizer` 和主 migration 资源过滤器，增加内部模型旧三版本的原始字节隔离
+  解析，并过滤对应的三个重编号主目录资源；部分旧历史、部分新历史、新旧混用均 fail-closed。
+- 当 `V20260807190000__create_run_resends.sql` 缺失但后续版本已执行时，分别提供批量归因前
+  `V20260807229999` 与批量归因/当前内部模型后 `V20260808143303` 两条顺序补偿路径；若某条补偿版本已经落库，后续启动
+  固定沿用同一路径，主 migration 与补偿同时存在或两个补偿同时存在时拒绝启动。
+- 增加真实 PostgreSQL 升级与二次启动回归，覆盖批量归因前后两条路径；同步 `docs/deployment/database.md` 的选择规则、
+  SHA-256 和禁止 `repair`/`outOfOrder` 约束。
+
+### How
+
+- 内部模型旧三条兼容 SQL 与旧 worktree 字节一致，SHA-256 分别为
+  `f214dfd0d4f26de830452d9f4121bc938cf031e4867555d5248e159d99377084`、
+  `de7188e3ba5d01148a655dbc238783cf7881abf168bd7b6e422c9f2fa118a5c3`、
+  `46f0a8e687f59c037a7e02cb1f9ba3db4893633ba20edd67d4ae75f0b6fd0d9e`；两个撤销重发补偿 SQL 与主候选字节一致，
+  SHA-256 为 `ca044d9819c7259b62e29243e9d72a06a2f01a532f1803f37e117de1d2f5d83d`。
+- JDK 25 下执行 `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest`，11 项全部通过；最终应用 JAR 的
+  persistence 嵌套 JAR 已确认包含五个 compatibility SQL。
+- 使用 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build --without-workflow` 全量打包并重启；
+  最终再次重启验证已落库的 `20260807229999` 可持续解析，未执行 `repair`、未启用 `outOfOrder`、未手工改 history。
+
+### Result
+
+- 当前根目录后端 runtime JAR 正常监听 8080，health/readiness 均为 UP；前端 3000 返回 200，登录 CORS 正常，
+  `opencode-manager` 已连接后端 WebSocket 且无重连循环。数据库通过 Flyway 正常新增 `20260807229999` 和
+  `20260807230000`，旧三条 checksum 保持不变。
+- 未修改 `.env*`、HTTP API、RunEvent、generated SDK 或 OpenCode 源码；未跟踪的 `demo/` 未修改且不纳入提交。
+- Workflow 尚未启动，若后续需要该控制面，必须先补齐本机 `WORKFLOW_DEV_REDIS_PASSWORD`。

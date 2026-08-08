@@ -56,12 +56,30 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
     private static final String INTERNAL_MODEL_OBSERVABILITY_VERSION = "20260808143300";
     private static final String INTERNAL_MODEL_FIRST_TOKEN_VERSION = "20260808143301";
     private static final String INTERNAL_MODEL_STREAM_COMPLETE_VERSION = "20260808143302";
+    private static final String INTERNAL_MODEL_STREAM_COMPLETE_LEGACY_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.INTERNAL_MODEL_STREAM_COMPLETE_LEGACY_VERSION;
     private static final String INTERNAL_MODEL_OBSERVABILITY_OLD_RESOURCE =
             "db/migration/V20260807130134__create_internal_model_observability.sql";
     private static final String INTERNAL_MODEL_FIRST_TOKEN_OLD_RESOURCE =
             "db/migration/V20260807203000__add_internal_model_first_token_metrics.sql";
     private static final String INTERNAL_MODEL_STREAM_COMPLETE_OLD_RESOURCE =
             "db/migration/V20260807222227__add_internal_model_stream_complete_metrics.sql";
+    private static final String INTERNAL_MODEL_LEGACY_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.INTERNAL_MODEL_LEGACY_COMPATIBILITY_LOCATION;
+    private static final String RUN_RESEND_FORWARD_BEFORE_BATCH_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.RUN_RESEND_FORWARD_BEFORE_BATCH_LOCATION;
+    private static final String RUN_RESEND_FORWARD_AFTER_BATCH_LOCATION =
+            DatabaseMigrationCompatibilityCustomizer.RUN_RESEND_FORWARD_AFTER_BATCH_LOCATION;
+    private static final String RUN_RESEND_MAIN_RESOURCE =
+            "db/migration/V20260807190000__create_run_resends.sql";
+    private static final String RUN_RESEND_MIGRATION_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.RUN_RESEND_MIGRATION_VERSION;
+    private static final String RUN_RESEND_FORWARD_BEFORE_BATCH_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.RUN_RESEND_FORWARD_BEFORE_BATCH_VERSION;
+    private static final String RUN_RESEND_FORWARD_AFTER_BATCH_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.RUN_RESEND_FORWARD_AFTER_BATCH_VERSION;
+    private static final String BATCH_SESSION_ATTRIBUTION_VERSION =
+            DatabaseMigrationCompatibilityCustomizer.BATCH_SESSION_ATTRIBUTION_MIGRATION_VERSION;
 
     @Container
     private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
@@ -237,6 +255,71 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
     }
 
     @Test
+    void appliedLegacyInternalModelHistoryUsesCompatibilityAndForwardRunResendMigration() {
+        DataSource dataSource = dataSource("legacy_internal_model_history");
+        // 复现并行 worktree 已执行旧可观测版本、但撤销重发候选版本尚未执行的本地 history。
+        migrateWithoutResourceTo(
+                dataSource,
+                INTERNAL_MODEL_STREAM_COMPLETE_LEGACY_VERSION,
+                new String[] {MAIN_LOCATION, INTERNAL_MODEL_LEGACY_LOCATION},
+                RUN_RESEND_MAIN_RESOURCE);
+
+        assertThat(applied(dataSource, INTERNAL_MODEL_STREAM_COMPLETE_LEGACY_VERSION)).isTrue();
+        assertThat(applied(dataSource, RUN_RESEND_MIGRATION_VERSION)).isFalse();
+        assertThat(internalModelObservabilitySchemaObjectCount(dataSource)).isEqualTo(5L);
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(locationDescriptors(flyway)).contains(
+                    INTERNAL_MODEL_LEGACY_LOCATION,
+                    RUN_RESEND_FORWARD_BEFORE_BATCH_LOCATION);
+            assertThat(applied(dataSource, RUN_RESEND_FORWARD_BEFORE_BATCH_VERSION)).isTrue();
+            assertThat(applied(dataSource, BATCH_SESSION_ATTRIBUTION_VERSION)).isTrue();
+            assertThat(applied(dataSource, INTERNAL_MODEL_OBSERVABILITY_VERSION)).isFalse();
+            assertThat(applied(dataSource, INTERNAL_MODEL_FIRST_TOKEN_VERSION)).isFalse();
+            assertThat(applied(dataSource, INTERNAL_MODEL_STREAM_COMPLETE_VERSION)).isFalse();
+            assertThat(runResendSchemaObjectCount(dataSource)).isEqualTo(2L);
+        });
+
+        // 第二次启动必须继续解析已经落库的“批量前”补偿版本，不能因批量版本已存在误切到另一条路径。
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(locationDescriptors(flyway)).contains(RUN_RESEND_FORWARD_BEFORE_BATCH_LOCATION);
+            assertThat(locationDescriptors(flyway)).doesNotContain(RUN_RESEND_FORWARD_AFTER_BATCH_LOCATION);
+            assertThat(applied(dataSource, RUN_RESEND_FORWARD_BEFORE_BATCH_VERSION)).isTrue();
+            assertThat(runResendSchemaObjectCount(dataSource)).isEqualTo(2L);
+        });
+    }
+
+    @Test
+    void missingRunResendAfterBatchUsesHigherForwardMigrationAndRemainsResolvable() {
+        DataSource dataSource = dataSource("run_resend_missing_after_batch");
+        migrateWithoutResourceTo(
+                dataSource,
+                BATCH_SESSION_ATTRIBUTION_VERSION,
+                RUN_RESEND_MAIN_RESOURCE);
+
+        assertThat(applied(dataSource, BATCH_SESSION_ATTRIBUTION_VERSION)).isTrue();
+        assertThat(applied(dataSource, RUN_RESEND_MIGRATION_VERSION)).isFalse();
+        assertThat(runResendSchemaObjectCount(dataSource)).isZero();
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(locationDescriptors(flyway)).contains(RUN_RESEND_FORWARD_AFTER_BATCH_LOCATION);
+            assertThat(locationDescriptors(flyway)).doesNotContain(RUN_RESEND_FORWARD_BEFORE_BATCH_LOCATION);
+            assertThat(applied(dataSource, RUN_RESEND_FORWARD_AFTER_BATCH_VERSION)).isTrue();
+            assertThat(applied(dataSource, RUN_RESEND_MIGRATION_VERSION)).isFalse();
+            assertThat(runResendSchemaObjectCount(dataSource)).isEqualTo(2L);
+        });
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(locationDescriptors(flyway)).contains(RUN_RESEND_FORWARD_AFTER_BATCH_LOCATION);
+            assertThat(locationDescriptors(flyway)).doesNotContain(RUN_RESEND_FORWARD_BEFORE_BATCH_LOCATION);
+            assertThat(applied(dataSource, RUN_RESEND_FORWARD_AFTER_BATCH_VERSION)).isTrue();
+            assertThat(runResendSchemaObjectCount(dataSource)).isEqualTo(2L);
+        });
+    }
+
+    @Test
     void missingLobehubMigrationAfterReleaseRolloutUsesHigherCompatibilityMigration() {
         DataSource dataSource = dataSource("lobehub_missing_after_release_rollout");
         migrateTo(dataSource, "20260728210000", MAIN_LOCATION);
@@ -302,9 +385,17 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             DataSource dataSource,
             String target,
             String... excludedResources) {
+        migrateWithoutResourceTo(dataSource, target, new String[] {MAIN_LOCATION}, excludedResources);
+    }
+
+    private static void migrateWithoutResourceTo(
+            DataSource dataSource,
+            String target,
+            String[] locations,
+            String... excludedResources) {
         FluentConfiguration configuration = Flyway.configure()
                 .dataSource(dataSource)
-                .locations(MAIN_LOCATION)
+                .locations(locations)
                 .target(target);
         ResourceProvider defaultProvider = new Scanner<>(
                 JavaMigration.class, configuration, configuration.getLocations());
@@ -509,6 +600,18 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                 .query(Long.class)
                 .single();
         return tableCount + columnCount;
+    }
+
+    private static long runResendSchemaObjectCount(DataSource dataSource) {
+        return JdbcClient.create(dataSource)
+                .sql("""
+                        select count(*)
+                        from information_schema.tables
+                        where table_schema = current_schema()
+                          and table_name in ('run_resends', 'run_resend_session_locks')
+                        """)
+                .query(Long.class)
+                .single();
     }
 
     private static boolean matches(LoadableResource resource, String expectedResource) {
