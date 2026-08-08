@@ -85,6 +85,13 @@ import type {
   GeneralParameterListParams,
   GeneralParameterUpdatePayload,
   GitRepositoryAccess,
+  InternalModelCallOutcome,
+  InternalModelCallOutcomeGroup,
+  InternalModelCallSource,
+  InternalModelCallRecord,
+  InternalModelCallHourlyStat,
+  InternalModelProbeStatus,
+  InternalModelProbeRunResult,
   InternalModelProviderManagementResponse,
   InternalModelProviderModel,
   InternalModelProviderModelUpdatePayload,
@@ -395,6 +402,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const agentConfigBase = `${workspaceManagementBase}/agent-config`;
   const agentSkillHubBase = `${workspaceManagementBase}/agent-skill-hub`;
   const opencodeRuntimeBase = "/api/internal/platform/opencode-runtime";
+  const internalModelObservabilityBase = `${opencodeRuntimeBase}/internal-model-observability`;
   const opencodeRuntimeManagementBase = "/api/internal/platform/opencode-runtime/management";
   const schedulerManagementBase = "/api/internal/platform/scheduler-management";
   const xxlJobBase = "/api/internal/platform/xxl-job";
@@ -2199,6 +2207,48 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         `${configurationBase}/internal-model-tokens/${encodeURIComponent(String(tokenId))}`,
         { method: "DELETE" }
       ),
+    listInternalModelCallRecords: (params: {
+      providerId?: string | null;
+      outcome?: InternalModelCallOutcome | null;
+      outcomeGroup?: InternalModelCallOutcomeGroup | null;
+      source?: InternalModelCallSource | null;
+      from?: string | null;
+      to?: string | null;
+      page?: number;
+      size?: number;
+    } = {}) => request<PageResponse<InternalModelCallRecord>>(
+      `${internalModelObservabilityBase}/call-records${query({
+        providerId: params.providerId,
+        outcome: params.outcome,
+        outcomeGroup: params.outcomeGroup,
+        source: params.source,
+        from: params.from,
+        to: params.to,
+        page: params.page ?? 1,
+        size: params.size ?? 20
+      })}`
+    ),
+    getInternalModelCallStats: (params: {
+      providerId?: string | null;
+      source?: InternalModelCallSource | null;
+      from?: string | null;
+      to?: string | null;
+    } = {}) => request<InternalModelCallHourlyStat[]>(
+      `${internalModelObservabilityBase}/stats${query({
+        providerId: params.providerId,
+        source: params.source,
+        from: params.from,
+        to: params.to
+      })}`
+    ),
+    getInternalModelProbeStatus: () => request<InternalModelProbeStatus[]>(
+      `${internalModelObservabilityBase}/probe-status`
+    ),
+    triggerInternalModelProbe: (providerId?: string | null) =>
+      request<InternalModelProbeRunResult>(`${internalModelObservabilityBase}/probe`, {
+        method: "POST",
+        body: JSON.stringify(providerId ? { providerId } : {})
+      }),
     getRun: (runId: string) => routedRequest<Run>(agentPath(`/runs/${encodeURIComponent(runId)}`)),
     cancelRun: (runId: string) => routedRequest<Run>(agentPath(`/runs/${encodeURIComponent(runId)}/cancel`), { method: "POST" }),
     getRunDiff: (runId: string) => routedRequest<RunDiff>(agentPath(`/runs/${encodeURIComponent(runId)}/diff`)),

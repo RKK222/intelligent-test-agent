@@ -18,7 +18,7 @@ API 定义包，承载 HTTP/SSE/WebSocket 入口、请求响应 DTO、统一响�
 - `web.platform.RunResendInternalDispatchController` / `HttpRunResendDispatchGateway`：使用精确内部路径、XXL token 和公共 Java 路由/转发器分发到固定目标服务器，不接受用户 token 豁免到其它路径。
 - `web.platform.RunControlBackendRoutingWebFilter`、`web.platform.BackendRoutingErrorWriter`：普通 Run 的两个 cancel 写入口严格路由到生产 Java；尚未投递且没有生产路由的 WAITING 重发替代 Run 留在入口 Java，经 owner 校验后只做共享状态 CAS 和解锁。其它归属解析或普通 HTTP 转发失败时直接写统一平台错误，禁止降级执行本机副作用。
 - `web.platform.PlatformOpencodeRuntimeController`：平台侧 opencode runtime 代理入口，只承载旧 `/api/...` 与 `/api/internal/platform/...` 路径，并把可选用户主体交给业务层决定用户进程或固定节点 fallback。
-- `web.platform.UserOpencodeBackendRoutingWebFilter` / `UserOpencodeBackendRoutingService`：用户已有 ACTIVE opencode binding 属于远端服务器时，在 Controller 前把用户进程状态、初始化、Run 启动和 opencode runtime 代理请求转发到 binding 所属服务器 Java；透传用户 Authorization/traceId/body，并用内部路由头防止循环。
+- `web.platform.UserOpencodeBackendRoutingWebFilter` / `UserOpencodeBackendRoutingService`：用户已有 ACTIVE opencode binding 属于远端服务器时，在 Controller 前把用户进程状态、初始化、Run 启动和 opencode runtime 代理请求转发到 binding 所属服务器 Java；透传用户 Authorization/traceId/body，并用内部路由头防止循环。内部模型可观测接口读取共享统计，不跟随用户 binding 转发。
 - `web.platform.RuntimeManagementController`：超级管理员运行管理入口，校验 `SUPER_ADMIN` 后把筛选、分页、命令参数和 traceId 交给 runtime 查询/命令服务；manager 进程明细可空透传 `unifiedAuthId/managerStatus`，旧载荷缺字段保持兼容，UCID 不进入普通用户响应或日志。API 层不实现 opencode server 启动、停止、状态查询或健康确认。
 - `web.platform.CommonParameterMemoryController` / `CommonParameterMemoryBackendRoutingService`：超级管理员显式 JVM 内存参数查询与手工刷新入口；按 `backendProcessId` 精确聚合全部或单个在线 Java，跨 Java 复用公共 resolver/forwarder，部分失败保留逐进程结果。
 - `web.platform.UiTestToolConfigController`：仅供受信任 OpenCode worker 内网直连的 UI 平台地址查询入口；不使用应用层凭据，只返回 `configured/baseUrl`，公共 Nginx 必须精确拒绝该路径。
@@ -29,6 +29,7 @@ API 定义包，承载 HTTP/SSE/WebSocket 入口、请求响应 DTO、统一响�
 - `web.platform.ReferenceRepositoryController`、`web.platform.ReferenceRepositoryDtos`：应用引用资产库列表、初始化、同步、受控分支切换、只读指针核验、含可空 `repositoryPath` 的状态和单层树内部入口；只负责 `APP_ADMIN`（含 `SUPER_ADMIN`）鉴权、分支请求、traceId 和阻塞任务调度。
 - `web.platform.AppSourceController`、`web.platform.AppSourceOperationController`、`web.platform.AppSourceOperationWebSocketHandler`：应用源码列表/树/物化/重试/打开/最近选择、操作快照、一次性 ticket 与独立只读进度 WebSocket 入口；Controller 不访问 Repository，GET/ticket/upgrade/轮询均委托业务层按 repository 任一当前启用关联应用实时复核 TEAM/PERSONAL 权限，协议 wire 保持不变。
 - `web.platform.InternalModelProviderManagementController` / `web.platform.InternalModelTokenManagementController`：超级管理员维护内部模型供应商关联和外部 Token 记录的入口，Token API 响应不含明文；`InternalModelProxyController` 是仅供 opencode 子进程调用、按 Provider ID 注入对应 Token 的内部模型代理入口，代理密钥和供应商快照在订阅请求体前校验，请求体仅在该端点按 `2 MiB` 上限聚合并以 byte[] 转发，顶层 `model` 通过流式 JSON 扫描校验，避免放大全局 WebFlux 缓冲区、完整 JSON 对象树和额外 String 副本。
+- `web.platform.InternalModelObservabilityController`：仅 `SUPER_ADMIN` 可用的内部模型调用明细、小时统计、探活状态和手工探活入口；明细支持精确 `outcome` 与五类 `outcomeGroup`，保留 `traceId/ucid` 等结构化排障字段，不返回请求或响应正文。
 - `web.platform.XxlJobSsoTicketController`：仅 `SUPER_ADMIN` 可用的 60 秒一次性 iframe 表单票据入口；业务签发与 Redis 消费属于 XXL integration。
 - `web.platform.SchedulerManagementController`：旧 `/scheduler-management/**` 兼容入口，所有方法统一返回 `410 API_GONE`，不再调用旧管理服务。
 - `web.platform.AgentConfigController`：Agent 配置 HTTP 元数据、Git 操作和进度 ticket 入口；公共仓库初始化和显式拉取按 `linuxServerId` 路由到目标后端，公共 update-and-push 合并冲突读取/解决/取消接口复用工作区冲突协议，公共 worktree 列表只返回指定服务器 `ACTIVE/PUBLIC` 元数据和创建人字段，文件内容操作继续走平台文件 WebSocket。

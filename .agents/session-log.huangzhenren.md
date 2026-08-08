@@ -1834,3 +1834,22 @@
 - Result:
   - 批量定时打开即按所选子条目数与排队任务数自动选中可覆盖时段并在按钮上方提示推荐来源；用户手动改选后保留其选择，关闭重开按最新数量重新推荐。
   - 仅修改前端交互、测试与稳定文档（frontend README、新增设计文档），不变更 HTTP API、RunEvent、数据库/Flyway、后端、权限、安全、性能路径、`.env*`、generated SDK 或 OpenCode 源码。
+
+### 2026-08-08 - 合并内部模型可观测并校准 Flyway 迁移顺序
+
+- Why:
+  - 当前发布分支本地领先 26 个提交、远端领先 19 个提交；远端新增的三条内部模型可观测迁移版本低于本机已经成功执行的 `V20260807190000` 与 `V20260807230000`，直接合并会在保持 `outOfOrder=false` 时阻断从当前基线升级。
+  - 用户明确确认远端三条候选迁移从未在任何环境执行，因此可在首次集成前重新编号；已执行迁移及其 checksum 必须保持不变。
+- What:
+  - 合并远端内部模型调用记录、聚合、探活、保留任务、管理 API 与前端面板，并解决 shared-types 包说明的唯一内容冲突，保留本地批量/重发与远端可观测两侧说明。
+  - 将三条未执行迁移依次编号为 `V20260808143300`、`V20260808143301`、`V20260808143302`；SQL 字节保持不变，SHA-256 分别为 `f214dfd0d4f26de830452d9f4121bc938cf031e4867555d5248e159d99377084`、`de7188e3ba5d01148a655dbc238783cf7881abf168bd7b6e422c9f2fa118a5c3`、`46f0a8e687f59c037a7e02cb1f9ba3db4893633ba20edd67d4ae75f0b6fd0d9e`；同步数据库文档与迁移集成测试。
+  - 新增真实 PostgreSQL 当前基线升级用例，覆盖 `V20260807230000 → V20260808143302` 且保持 `outOfOrder=false`；同时修复开发脚本校验对新版 macOS 自带 `/usr/bin/jq` 的错误假设，以及本地模型 mock 在监听前被反向 DNS 阻塞的问题。
+  - 根据提交前独立审查补齐观测闭环：转发前未知供应商/模型统一使用 `unknown`，分块超限异步失败补记 `REQUEST_INVALID`，探活状态写入真实端到端耗时；开发脚本的单一 EXIT cleanup 同时回收 mock PID 与临时目录。
+- How:
+  - 专项迁移测试先稳定复现三条低版本迁移无法应用，再在重新编号后 1 项通过；后端 21 模块 `mvn test` 全部成功，迁移兼容测试类 9 项通过，`mvn package -DskipTests` 成功。
+  - 前端全量 119 个 Vitest 文件 1872 passed / 1 skipped，workspace typecheck 与 production build 通过；`tools/verify-dev-scripts.sh` 在两处环境差异修复后完整通过。
+  - 三条迁移在源码、persistence JAR 和最终应用 JAR 中的 SHA-256 一致；既有 `V20260807190000` 与 `V20260807230000` 源码哈希仍分别为 `ca044d9819c7259b62e29243e9d72a06a2f01a532f1803f37e117de1d2f5d83d`、`42ec1917deb16d96b910f81a0a4739487500453f90dc742e516822f800fdd6e3`。
+  - 审查问题先由 3 项聚焦回归稳定复现，再全部转绿；真实 PostgreSQL Testcontainers 2 项通过，其中失败记录经 Spring 事务代理同时写入明细与小时聚合；修复后受影响依赖链 19 模块全量测试成功（API 503、persistence 272 / skipped 18），21 模块跳过测试打包再次成功；自定义 `TMPDIR` 回归确认脚本不再遗留 `test-agent-dev-scripts.*` 临时目录。
+- Result:
+  - 当前本地数据库历史可在不启用 `outOfOrder`、不执行 `repair`、不改写已执行 migration 的前提下顺序升级；内部模型可观测的 HTTP API、数据库表/字段及前端类型均为 additive，转发前失败、分块超限与探活耗时也能完整入库，并已同步 API、数据库、架构、测试及模块 README/PACKAGE 文档。
+  - 未修改 `.env*`、generated SDK 或 OpenCode 源码，也未新建分支。企业发布前仍须逐一核对每个目标环境的 `flyway_schema_history`、checksum 和已知历史升级路径；本次确认与真实 PostgreSQL 测试不能替代目标企业库验收。

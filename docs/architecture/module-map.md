@@ -62,7 +62,7 @@ Browser
 | 模块 | 职责 |
 |---|---|
 | `test-agent-common` | 公共异常、统一响应 `ApiResponse`/`ApiErrorResponse`、TraceId、分页、校验、时间工具。 |
-| `test-agent-domain` | Workspace、Session、含 `QUESTION/PERMISSION` 与独立计数的 SessionRuntimeState、AgentSessionBinding、Run、RunStorageMode、RunRuntimeStore/manifest/snapshot/replay/runtime tail、RunEvent、ExecutionNode、RoutingDecision、应用源码 snapshot/replica/operation/cleanup、通用服务器广播 envelope/端口、opencode 用户进程管理拓扑、通用参数、显式 JVM 内存参数 SPI/状态和工作空间创建进度等纯领域模型与状态机，不依赖 Spring Web/Persistence/generated SDK。 |
+| `test-agent-domain` | Workspace、Session、含 `QUESTION/PERMISSION` 与独立计数的 SessionRuntimeState、AgentSessionBinding、Run、RunStorageMode、RunRuntimeStore/manifest/snapshot/replay/runtime tail、RunEvent、ExecutionNode、RoutingDecision、应用源码 snapshot/replica/operation/cleanup、内部模型调用精确结果与五类看板结果、通用服务器广播 envelope/端口、opencode 用户进程管理拓扑、通用参数、显式 JVM 内存参数 SPI/状态和工作空间创建进度等纯领域模型与状态机，不依赖 Spring Web/Persistence/generated SDK。 |
 | `test-agent-observability` | traceId、结构化日志、Micrometer 指标、观测性工具。 |
 | `test-agent-opencode-sdk-generated` | 从 opencode OpenAPI spec 生成的 Java SDK，禁止手改。 |
 | `test-agent-opencode-client` | 封装 generated SDK，提供 `OpencodeClientFacade`，是业务访问 opencode 的唯一门面。 |

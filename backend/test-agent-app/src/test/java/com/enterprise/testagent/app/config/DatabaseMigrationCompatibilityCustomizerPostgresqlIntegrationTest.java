@@ -52,6 +52,16 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
     private static final String SKILL_HUB_CLASSIFICATION_VERSION = "20260806143000";
     private static final String PUBLIC_SKILL_HUB_SNAPSHOT_VERSION = "20260806190000";
     private static final String PUBLIC_SKILL_HUB_CLASSIFICATION_VERSION = "20260806190500";
+    private static final String CURRENT_LOCAL_APPLIED_MAX_VERSION = "20260807230000";
+    private static final String INTERNAL_MODEL_OBSERVABILITY_VERSION = "20260808143300";
+    private static final String INTERNAL_MODEL_FIRST_TOKEN_VERSION = "20260808143301";
+    private static final String INTERNAL_MODEL_STREAM_COMPLETE_VERSION = "20260808143302";
+    private static final String INTERNAL_MODEL_OBSERVABILITY_OLD_RESOURCE =
+            "db/migration/V20260807130134__create_internal_model_observability.sql";
+    private static final String INTERNAL_MODEL_FIRST_TOKEN_OLD_RESOURCE =
+            "db/migration/V20260807203000__add_internal_model_first_token_metrics.sql";
+    private static final String INTERNAL_MODEL_STREAM_COMPLETE_OLD_RESOURCE =
+            "db/migration/V20260807222227__add_internal_model_stream_complete_metrics.sql";
 
     @Container
     private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
@@ -203,6 +213,30 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
     }
 
     @Test
+    void currentLocalBaselineAppliesIntegratedInternalModelMigrationsInOrder() {
+        DataSource dataSource = dataSource("current_local_before_internal_model_observability");
+        // 构造合并前已执行到批量会话版本、但从未执行可观测候选 migration 的真实本地历史。
+        migrateWithoutResourceTo(
+                dataSource,
+                CURRENT_LOCAL_APPLIED_MAX_VERSION,
+                INTERNAL_MODEL_OBSERVABILITY_OLD_RESOURCE,
+                INTERNAL_MODEL_FIRST_TOKEN_OLD_RESOURCE,
+                INTERNAL_MODEL_STREAM_COMPLETE_OLD_RESOURCE);
+
+        assertThat(applied(dataSource, CURRENT_LOCAL_APPLIED_MAX_VERSION)).isTrue();
+        assertThat(applied(dataSource, INTERNAL_MODEL_OBSERVABILITY_VERSION)).isFalse();
+        assertThat(internalModelObservabilitySchemaObjectCount(dataSource)).isZero();
+
+        runBootFlyway(dataSource, flyway -> {
+            assertThat(flyway.getConfiguration().isOutOfOrder()).isFalse();
+            assertThat(applied(dataSource, INTERNAL_MODEL_OBSERVABILITY_VERSION)).isTrue();
+            assertThat(applied(dataSource, INTERNAL_MODEL_FIRST_TOKEN_VERSION)).isTrue();
+            assertThat(applied(dataSource, INTERNAL_MODEL_STREAM_COMPLETE_VERSION)).isTrue();
+            assertThat(internalModelObservabilitySchemaObjectCount(dataSource)).isEqualTo(5L);
+        });
+    }
+
+    @Test
     void missingLobehubMigrationAfterReleaseRolloutUsesHigherCompatibilityMigration() {
         DataSource dataSource = dataSource("lobehub_missing_after_release_rollout");
         migrateTo(dataSource, "20260728210000", MAIN_LOCATION);
@@ -267,7 +301,7 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
     private static void migrateWithoutResourceTo(
             DataSource dataSource,
             String target,
-            String excludedResource) {
+            String... excludedResources) {
         FluentConfiguration configuration = Flyway.configure()
                 .dataSource(dataSource)
                 .locations(MAIN_LOCATION)
@@ -278,17 +312,21 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
             @Override
             public LoadableResource getResource(String name) {
                 LoadableResource resource = defaultProvider.getResource(name);
-                return resource != null && matches(resource, excludedResource) ? null : resource;
+                return resource != null && matchesAny(resource, excludedResources) ? null : resource;
             }
 
             @Override
             public Collection<LoadableResource> getResources(String prefix, String[] suffixes) {
                 return defaultProvider.getResources(prefix, suffixes).stream()
-                        .filter(resource -> !matches(resource, excludedResource))
+                        .filter(resource -> !matchesAny(resource, excludedResources))
                         .toList();
             }
         });
         configuration.load().migrate();
+    }
+
+    private static boolean matchesAny(LoadableResource resource, String[] excludedResources) {
+        return Arrays.stream(excludedResources).anyMatch(excluded -> matches(resource, excluded));
     }
 
     /** 构造已部署 0352efa 的字节级历史，供旧基线与当前现网基线升级用例共同复用。 */
@@ -444,6 +482,33 @@ class DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest {
                 .single();
         assertThat(tableCount).isEqualTo(5L);
         assertThat(classificationColumnCount).isEqualTo(4L);
+    }
+
+    /** 三张可观测表及首 token、流完成列必须在同一正常 Flyway 链中落地。 */
+    private static long internalModelObservabilitySchemaObjectCount(DataSource dataSource) {
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        Long tableCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.tables
+                        where table_schema = current_schema()
+                          and table_name in (
+                              'internal_model_call_records',
+                              'internal_model_call_stats_hourly',
+                              'internal_model_probe_status'
+                          )
+                        """)
+                .query(Long.class)
+                .single();
+        Long columnCount = jdbc.sql("""
+                        select count(*)
+                        from information_schema.columns
+                        where table_schema = current_schema()
+                          and table_name = 'internal_model_call_records'
+                          and column_name in ('first_token_ms', 'stream_complete_ms')
+                        """)
+                .query(Long.class)
+                .single();
+        return tableCount + columnCount;
     }
 
     private static boolean matches(LoadableResource resource, String expectedResource) {

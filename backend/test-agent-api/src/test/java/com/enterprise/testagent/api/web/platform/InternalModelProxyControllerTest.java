@@ -10,8 +10,12 @@ import com.enterprise.testagent.api.web.common.GlobalExceptionHandler;
 import com.enterprise.testagent.domain.configuration.InternalModelProvider;
 import com.enterprise.testagent.domain.configuration.InternalModelProviderRepository;
 import com.enterprise.testagent.domain.configuration.InternalModelProviderRuntimeConfig;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcome;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecord;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordRepository;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProviderRegistry;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
+import com.enterprise.testagent.opencode.runtime.internalmodel.observability.InternalModelCallRecorder;
 import com.enterprise.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -21,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -352,8 +357,9 @@ class InternalModelProxyControllerTest {
     void rejectsChunkedRequestBodyAboveTwoMebibytes() {
         String request = largeRequest(InternalModelProxyController.MAX_REQUEST_BODY_BYTES + 1);
         int middle = request.length() / 2;
+        List<InternalModelCallRecord> recorded = new CopyOnWriteArrayList<>();
 
-        clientForProvider(upstreamBaseUrl()).post()
+        clientForProvider(upstreamBaseUrl(), PROVIDER_ID, recorded).post()
                 .uri("/api/internal/platform/opencode-runtime/internal-model-proxy/v1/chat/completions")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + PROXY_KEY)
                 .header(InternalModelProxyForwardingService.PROVIDER_HEADER, PROVIDER_ID)
@@ -365,6 +371,13 @@ class InternalModelProxyControllerTest {
                 .jsonPath("$.code").isEqualTo("PAYLOAD_TOO_LARGE")
                 .jsonPath("$.details.maxBytes")
                 .isEqualTo(InternalModelProxyController.MAX_REQUEST_BODY_BYTES);
+
+        awaitRecorded(recorded);
+        assertThat(recorded).singleElement().satisfies(record -> {
+            assertThat(record.outcome()).isEqualTo(InternalModelCallOutcome.REQUEST_INVALID);
+            assertThat(record.providerId()).isEqualTo(PROVIDER_ID);
+            assertThat(record.model()).isEqualTo("unknown");
+        });
     }
 
     @Test
@@ -473,6 +486,13 @@ class InternalModelProxyControllerTest {
     }
 
     private WebTestClient clientForProvider(String baseUrl, String providerId) {
+        return clientForProvider(baseUrl, providerId, new CopyOnWriteArrayList<>());
+    }
+
+    private WebTestClient clientForProvider(
+            String baseUrl,
+            String providerId,
+            List<InternalModelCallRecord> recorded) {
         InternalModelProviderRepository repository = mock(InternalModelProviderRepository.class);
         InternalModelProvider provider = new InternalModelProvider(
                 providerId,
@@ -490,11 +510,17 @@ class InternalModelProxyControllerTest {
 
         BackendJavaProcessLifecycleService lifecycle = mock(BackendJavaProcessLifecycleService.class);
         InternalModelProxyRuntimeSettings settings = new InternalModelProxyRuntimeSettings(lifecycle, PROXY_KEY);
+        InternalModelCallRecordRepository recordRepository = mock(InternalModelCallRecordRepository.class);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            recorded.add(invocation.getArgument(0));
+            return null;
+        }).when(recordRepository).record(org.mockito.ArgumentMatchers.any(InternalModelCallRecord.class));
         InternalModelProxyForwardingService service = new InternalModelProxyForwardingService(
                 registry,
                 settings,
                 WebClient.create(),
-                OBJECT_MAPPER);
+                OBJECT_MAPPER,
+                new InternalModelCallRecorder(recordRepository));
         downstreamContext = new AnnotationConfigApplicationContext();
         downstreamContext.register(ControllerTestConfiguration.class);
         downstreamContext.registerBean(
@@ -514,6 +540,18 @@ class InternalModelProxyControllerTest {
                 .baseUrl("http://127.0.0.1:" + downstream.port())
                 .responseTimeout(Duration.ofSeconds(5))
                 .build();
+    }
+
+    private static void awaitRecorded(List<InternalModelCallRecord> recorded) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (recorded.isEmpty() && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
     }
 
     private String upstreamBaseUrl() {

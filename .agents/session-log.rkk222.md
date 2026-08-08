@@ -5,6 +5,70 @@
 
 ## Entries
 
+### 2026-08-08 - 优化超级管理员内部模型调用可观测页面布局与精细化调整
+
+### Why
+
+- 超级管理员反馈内部模型调用可观测页面进一步优化需求：1. `REQ & SR Trend` 折线图与旁边饼图/柱状图排版挤压，要求折线图单独全宽独立整行展示；2. 删除页首文案中的“；每个指标悬浮提示中的计算逻辑与判定保持不变。”；3. `By Provider` 替换为中文“按供应商”，且移除底部“按小时明细”数据表格；4. 页首“AIPerf & 业界指标英文缩写指南 (Metrics Glossary)”改为默认展开。
+
+### What
+
+- `REQ & SR Trend` 折线图卡片设为全宽独立整行展示（`grid-column: 1 / -1`），并提升容器高度，避免由于三栏排版导致折线图被挤压、图例与数值重叠。
+- 删除了页首子标题提示文案中的“；每个指标悬浮提示中的计算逻辑与判定保持不变。”。
+- 将“By Provider”替换为中文“按供应商”，彻底删除了页面底部的“按小时明细”表格及关联未使用的 `groupedHourlyStats` 计算属性。
+- 页首“AIPerf & 业界指标英文缩写指南 (Metrics Glossary)”折叠卡片的 `showGlossary` 默认状态调整为 `true`（默认展开）。
+- 同步更新 Vue 组件单元测试 `internal-model-observability-panel.test.ts`。
+
+### How
+
+- 修改 `InternalModelObservabilityPanel.vue` 模板与 CSS 样式，完成 `npx vitest` jsdom 测试与 `npx vue-tsc --noEmit` 类型校验。
+
+### Result
+
+- 前端单测和 `vue-tsc` 类型检查 100% 通过，界面折线图独占整行宽敞展示，各卡片布局与中文字样准确，默认展开 Glossary 手册。
+
+
+
+### 2026-08-07 - 修复内部模型可观测首输出判定与探活超时归类
+
+### Why
+
+- 复核首 token 与流式超时指标后发现，SSE 注释/空事件会持续重置首事件超时，role-only 元数据块会被误计为首 token；首 token 标记与时间戳分开发布还存在并发窗口。
+- 探活响应头已返回但正文读取超时时，原逻辑丢失 HTTP 状态并把底层 Netty/JDK 超时归为未知，无法区分上游首响应慢与首字节后的流式空闲。
+
+### What
+
+- 将首输出定义收敛为包含 `content`、`reasoning_content` 或工具输出字段的 SSE data；首个输出截止时间改为绝对 deadline，注释/空事件不能延后，首 token 时间戳使用原子占位值一次性发布。
+- 扩展阻塞/Netty 超时识别，探活保存响应头后再读取正文，正文超时保留 HTTP 状态并归类为 `UPSTREAM_STREAM_IDLE_TIMEOUT`；同步前端、API、数据库和排障文档中的指标口径。
+
+### How
+
+- 新增 SSE 注释超时、role-only chunk、阻塞/Netty 超时和响应头后正文超时回归用例；使用 JDK 21 执行 API/runtime/persistence 定向 Maven 测试，并执行 agent-web typecheck 与 `git diff --check`。
+
+### Result
+
+- 43 项后端定向测试、agent-web 类型检查和差异检查通过；未修改 API/事件线格式或既有 migration 字节，未执行真实 PostgreSQL 基线升级或长驻应用启动验证。
+
+### 2026-08-07 - 修正内部模型可观测首 token 与聚合口径
+
+### Why
+
+- 原实现把响应头到达时间 `firstByteMillis` 当作首 token，空/截断 SSE 在 2xx 正常 EOF 时可能记为成功；前端还用小时最大值展开伪造平均/P90/P95，探活数据也会混入业务统计。
+
+### What
+
+- 新增 `first_token_ms` 明细及小时 `sum/max/count` 聚合；代理只把首个非空且非 `[DONE]` 的 SSE data 记为首 token，并要求流同时有有效 chunk 和 `[DONE]` 才成功，空/缺少完成标记记为 `UPSTREAM_STREAM_INTERRUPTED`。
+- 修正探活首字节取样位置，统计 API 支持 `source=USER_CALL|PROBE`，页面默认隔离探活；移除无法由小时聚合还原的 P90/P95/分布，改用准确平均/最大值。
+
+### How
+
+- 复用现有 `CallObservation`、MyBatis XML upsert 和小时聚合结构，增加 Flyway `V20260807203000__add_internal_model_first_token_metrics.sql`，补充 proxy 空流/缺 `[DONE]`、探活正文延迟、source 过滤与聚合断言；同步 API、数据库、模块、测试与排障文档。
+- 使用 JDK 21 执行后端定向 Maven 测试（代理/探活/API/持久化）与 agent-web `vue-tsc` 类型检查，并检查主 release 工作区保持干净。
+
+### Result
+
+- 观测明细现在能区分响应头、首 token、空/截断流；小时统计不再把最大值冒充分布或分位数，用户调用指标默认不受探活污染。旧明细首 token 为空、旧小时行首 token 计数为 0，接口新增字段保持可选兼容。
+
 ### 2026-08-07 - 企业内部模型 API 调用可观测性
 
 ### Why
@@ -7159,3 +7223,142 @@
 - Apple Silicon 不能替代企业两台原生 `linux/amd64` worker 的 Codex sandbox E2E；企业真实 PostgreSQL history、
   模型代理推理、双后台滚动部署、前端浏览器业务验收和节点资源/网络状态仍必须按执行单现场验证，任一 Flyway
   未知 checksum 或首台 Java 校验失败时停止后续节点。
+
+## 2026-08-07 - 修复内部模型流式可观测口径并收拢 BI 看板
+
+### Why
+
+- 旧实现可能把注释、心跳、畸形 data 或只有 role/usage 的 SSE 事件误当首 token，也会被这些事件不断
+  延长超时；既有指标只有首 token 和端到端耗时，不能直接回答 curl 中“首输出到完整流”是否
+  卡顿，原非流式探活也不能验证模型流完整性。
+
+### What
+
+- 真实代理与供应商探活共用单次解析的 OpenAI-compatible SSE 观测器；只认可展示文本、推理、拒答、工具/
+  function call 片段为真实输出，注释、空事件、心跳、元数据、非对象与畸形 data 不计时且不刷新输出截止时间。
+- 新增 `streamCompleteMillis` 明细和小时 sum/max/count 聚合，只在先收到真实输出、再收到 `[DONE]` 时记录；
+  探活改为真实 SSE，2xx 非 SSE、空流、纯元数据或缺少 `[DONE]` 均失败收敛。
+- 增加 Flyway migration 和 PostgreSQL/H2 MyBatis 映射、聚合与升级回归；前端改为顶部统一筛选、中部聚合指标、底部
+  调用明细的 BI 布局，Trace ID 作为首列，三类耗时前置并加宽，时间列放最后。
+
+### How
+
+- 共享 SSE 观测、探活、代理/控制器、H2 持久化定向回归共 27 项通过；真实 PostgreSQL 16 Testcontainers 从
+  `20260807203000` 基线升级到 HEAD，验证新列、Flyway 成功记录和 `ON CONFLICT` 聚合。
+- agent-web typecheck 与 production build 通过；`git diff --check` 和 mock server Python 语法校验通过。构建仅保留
+  既有大 chunk 警告。
+
+### Result
+
+- 现在可同时比较端到端、首 token 和流完成耗时，能区分首输出慢、后续输出/上游收尾慢与下游写出慢；
+  统一筛选同时作用于聚合和明细。
+- 新增的 API 响应字段保持可选，没有新增 HTTP 路径或事件类型；数据库只新增递增 migration，旧数据按 `NULL/0`
+  兼容。不记录请求/响应正文，未修改 `.env*`、generated SDK 或 OpenCode 上游源码。
+
+## 2026-08-07 - 修复可观测看板重叠、首屏图表与探活装配
+
+### Why
+
+- 聚合区和调用明细同页后仍继承固定高度 flex 收缩规则，内容超过视口时两个区块被压缩并向外溢出，形成视觉
+  重叠；首批统计数据又与 `v-if` 图表容器同时出现，默认 pre-flush watcher 会在 DOM 挂载前尝试初始化 ECharts。
+- 使用当前 JAR 做真实重启时发现探活服务保留测试专用构造器后，生产构造器未显式标注，Spring 无法选择构造器，
+  应用启动失败；同时需要通过内部代理 Mock 造数验证企业供应商调用的真实统计链路。
+
+### What
+
+- BI 页面改为最外层统一滚动，聚合与明细区块禁止参与固定高度收缩；统计 watcher 改为 post-flush，并在
+  `nextTick` 后初始化/重绘四个 ECharts 图表。
+- 为 `InternalModelProviderProbeService` 的生产构造器增加 `@Autowired`，并新增 ApplicationContextRunner 回归，
+  锁定存在测试构造器时 Spring 仍能成功装配生产 Bean。
+- 本地新增独立 `local-mock-observability` 供应商和 `local-observability-mock-model` 模型，通过 19071 Mock 与真实
+  内部代理链路写入 18 条成功、HTTP 失败、流中断和探活记录；Mock 最终恢复为健康 SSE 模式，未修改 `.env*`。
+
+### How
+
+- JDK 25 执行 `InternalModelProviderProbeServiceTest`，7 项通过；agent-web typecheck 与 production build 通过，
+  构建仅保留既有大 chunk 警告。
+- 使用未修改的 `.env.test` 以 `--without-workflow` 重启 backend、opencode-manager 和 frontend；backend health/
+  readiness 为 UP，前端 3000 返回 200，CORS 预检正常。工作流初始化因本机 PostgreSQL 用户缺少
+  `CREATEROLE/CREATEDB` 权限而按显式开关跳过。
+- 真实 Chromium 在 1440×900 下验证聚合区底部 1545、明细区顶部 1569，四个图表实例及 Canvas 均存在，页面
+  外层滚动正常、无区块重叠且控制台无报错。
+
+### Result
+
+- 统计看板、图表和明细在同一滚动页面稳定分区显示；服务可正常启动，Mock 数据可直接覆盖成功、首 token、流完成、
+  HTTP 失败与流中断口径。
+- 本次跟进不新增或变更 HTTP API、RunEvent、数据库结构/Flyway/MyBatis SQL、安全边界或环境配置；同步更新
+  agent-web README。19071 Mock 属于显式本地验证进程，后续不需要造数时可停止。
+
+## 2026-08-07 - 补全可观测指标口径说明并修正 QPS
+
+### Why
+
+- 看板已经展示请求量、成功率和三类耗时，但使用者无法从页面直接判断统计范围、哪些调用参与平均值，以及空值
+  代表什么；页头原说明夹杂底层传输术语，不利于业务人员理解。
+- QPS 原先只计算首末有记录小时之间的间隔，漏掉最后一个小时，连续两个小时的数据会被错误地只除以一小时。
+
+### What
+
+- 新增可复用的指标说明标签，为总览、四张图表、供应商卡片、小时统计表和明细耗时列的全部数值指标增加问号
+  提示；说明只表达业务含义、统计范围、计算分母和空值规则，并同时支持鼠标悬停与键盘聚焦。
+- 页头改成面向使用者的说明，明确默认查看最近 24 小时用户调用，以及模型未开始回答或未正常结束时显示空值。
+- QPS 改为包含首尾小时的完整覆盖时段；只有一个有记录小时仍按一小时计算，并明确它是平均负载而非瞬时峰值。
+
+### How
+
+- 新增组件定向测试，覆盖所有指标均有说明、说明中不出现底层实现术语、鼠标与键盘均可触发，以及两个小时各
+  180 次调用折算为 0.05 QPS；测试 1 项通过。
+- agent-web 类型检查和生产构建通过，构建只保留既有大文件提示。真实 Chromium 验证 41 个说明入口、4 张图表、
+  键盘聚焦提示可见且聚合区与明细区无重叠。
+- 使用未修改的 `.env.test` 以 `--without-workflow` 重启 backend、opencode-manager 和 frontend；backend health/
+  readiness 为 UP，前端 3000 返回 200，CORS 预检正常，manager WebSocket 正常连接。
+
+### Result
+
+- 使用者可以直接从每个指标旁的问号理解“统计了什么、怎么算、什么情况不参与”，不需要了解采集和存储细节；
+  QPS 能正确反映所选时间段的平均请求负载。
+- 本次仅调整前端展示和派生计算，不修改 HTTP API、RunEvent、数据库结构/Flyway/MyBatis SQL、安全边界、环境配置、
+  generated SDK 或 OpenCode 上游源码；同步更新 agent-web README。工作流仍因本机 PostgreSQL 用户权限不足而跳过，
+  不影响本功能验证。
+
+## 2026-08-08 - 统一可观测指标口径、结果大类与用户来源展示
+
+### Why
+
+- 看板仍使用部分非标准或含义不清的指标名称，结果原因直接暴露 13 个底层枚举，不适合运营查看；来源列只显示
+  “用户”，无法直接定位实际调用人。
+- 复核统计口径时发现原平均请求速率会把尚未发生的当前小时剩余时间计入分母；实机验证又发现可观测 API 被用户
+  OpenCode binding 路由误转到离线旧服务器，导致页面请求在到达 Controller 前返回 503。
+
+### What
+
+- 页面统一使用请求数、请求成功率/错误率、端到端请求延迟、RPS、Time to First Token（TTFT）等通用名称；全部
+  指标说明改为面向使用者的含义、分母和空值规则。均值继续按 sum/count 加权计算，不从小时均值再次平均，也不
+  展示无法由现有聚合还原的 P90/P95。
+- 查询范围改为当前小时加之前 23 个小时段，并以实际加载/刷新时刻收口；RPS 使用总请求数除以该真实窗口秒数。
+  小时趋势补零，短耗时保留毫秒，成功率和错误率在页面上严格互补。
+- 将 13 个精确结果归并为成功、请求或配置问题、上游服务异常、调用方中断、其他异常五类；新增可选
+  `outcomeGroup` 明细筛选并用 MyBatis `IN` 查询，原 `outcome` 精确筛选保持兼容且优先。明细同时保留大类和具体
+  原因，避免丢失排障信息；API 文档补充说明精确结果综合鉴权/配置/校验、失败阶段、HTTP 状态、流结束状态和调用方
+  断开判断，并非只依赖错误码。
+- 明细首列展示 Trace ID，三类时长前置并加宽，时间列移到最后；看板在上、明细在下且统一外层滚动。用户调用在
+  “来源 / 用户 ID”列直接展示 `ucid`，探活显示“探活”，历史缺失值显示“未知用户”。
+- 可观测路径明确排除用户 OpenCode binding 路由，因为其读取共享统计；同步更新 HTTP API、模块图、模块/包
+  README 和本地验证说明。
+
+### How
+
+- JDK 25 定向执行结果映射、MyBatis 聚合、Controller 和用户后端路由 45 项测试，全部通过；前端面板与 API client
+  105 项测试通过，agent-web 与 backend-api 类型检查通过，`git diff --check` 通过。
+- 使用未修改的主工作区 `.env.test`，以 `--without-workflow` 完成后端打包并重启 backend、manager、frontend；
+  readiness 为 UP，前端 3000 返回 200。真实 Chromium 验证可观测三类接口均为 200、控制台无错误、16 条 mock
+  用户调用显示用户 ID，聚合区在明细区上方且没有重叠。
+
+### Result
+
+- 看板名称、说明、结果分类、统计窗口和用户来源展示已统一，精确原因仍可用于排障；离线旧用户绑定不再影响共享
+  可观测查询。
+- 新增的 `outcomeGroup` 为向后兼容的可选查询参数；未新增事件或数据库结构，未修改 migration、鉴权、安全策略、
+  `.env*`、generated SDK 或 OpenCode 源码。工作流仍因本机 PostgreSQL 用户缺少创建角色权限而显式跳过，不影响
+  本功能实机验证。

@@ -140,7 +140,12 @@ fi
 
 # 用临时命令隔离进程发现逻辑，执行到后端启动前置校验，证明误用 sh 时不会再卡在 PID 采集语法处。
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/test-agent-dev-scripts.XXXXXX")"
+mock_model_pid=""
 cleanup() {
+  if [[ -n "${mock_model_pid}" ]]; then
+    kill "${mock_model_pid}" 2>/dev/null || true
+    wait "${mock_model_pid}" 2>/dev/null || true
+  fi
   rm -rf "${tmp_dir}"
 }
 trap cleanup EXIT
@@ -424,9 +429,12 @@ fi
 
 # 企业宿主不要求安装 jq；显式只读校验动作必须复用镜像内校验器，且不能删除当前 worker。
 : >"${worker_docker_calls}"
-PATH="${tmp_dir}/bin:/usr/bin:/bin" \
+ln -s "$(command -v bash)" "${tmp_dir}/bin/bash"
+ln -s "$(command -v dirname)" "${tmp_dir}/bin/dirname"
+# 新版 macOS 已在 /usr/bin 提供 jq；使用只含必要命令的 PATH 才能稳定复现企业宿主缺少 jq。
+PATH="${tmp_dir}/bin" \
   TEST_AGENT_OPENCODE_MODELS_FILE="${worker_models_file}" \
-  bash "${ROOT_DIR}/deploy/internal/opencode-worker-docker.sh" \
+  "${tmp_dir}/bin/bash" "${ROOT_DIR}/deploy/internal/opencode-worker-docker.sh" \
   --env-file "${worker_env}" \
   --name test-agent-opencode-worker-verify \
   validate-models >/dev/null
@@ -538,5 +546,26 @@ grep -Eq '^run .*14096-15095:14096-15095' "${worker_docker_calls}" || {
   cat "${worker_docker_calls}" >&2
   fail "disabled userland-proxy should allow the 1000-port worker range"
 }
+
+# 内部模型调用可观测本地 mock 服务：校验语法并做一次 ok 模式冒烟。
+run_check "mock model server python syntax" python3 -m py_compile "${ROOT_DIR}/tools/mock-model-server.py"
+MOCK_MODEL_PORT="${MOCK_MODEL_PORT:-19070}"
+python3 "${ROOT_DIR}/tools/mock-model-server.py" --port "${MOCK_MODEL_PORT}" --mode ok >/dev/null 2>&1 &
+mock_model_pid=$!
+for _ in $(seq 1 20); do
+  if curl -s -o /dev/null --max-time 1 "http://127.0.0.1:${MOCK_MODEL_PORT}/chat/completions" \
+      -H "Content-Type: application/json" -d '{}'; then
+    break
+  fi
+  sleep 0.2
+done
+curl -s --max-time 2 -X POST "http://127.0.0.1:${MOCK_MODEL_PORT}/chat/completions" \
+  -H "Content-Type: application/json" -d '{"model":"mock-model"}' >/dev/null || {
+  kill "${mock_model_pid}" 2>/dev/null || true
+  fail "mock model server smoke failed"
+}
+kill "${mock_model_pid}" 2>/dev/null || true
+wait "${mock_model_pid}" 2>/dev/null || true
+mock_model_pid=""
 
 echo "Development script verification passed."
