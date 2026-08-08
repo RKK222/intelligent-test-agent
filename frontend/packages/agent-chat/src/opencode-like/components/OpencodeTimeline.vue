@@ -111,9 +111,10 @@ watch(latestUserMessageKey, () => {
           </div>
           <slot name="empty-shortcuts">
             <div class="oc-empty-state__shortcuts">
+              <div class="oc-empty-state__shortcuts-title">在输入框中输入：</div>
               <div class="oc-empty-state__shortcut-item">
                 <span class="oc-empty-state__shortcut-key">@</span>
-                <span class="oc-empty-state__shortcut-desc">选择 Agent / 上下文文件</span>
+                <span class="oc-empty-state__shortcut-desc">选择 Agent 或 上下文文件</span>
               </div>
               <div class="oc-empty-state__shortcut-item">
                 <span class="oc-empty-state__shortcut-key">#</span>

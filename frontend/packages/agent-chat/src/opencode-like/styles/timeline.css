@@ -89,6 +89,13 @@
   box-sizing: border-box;
 }
 
+.oc-empty-state__shortcuts-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--oc-muted, #8A8F99);
+  margin-bottom: 2px;
+}
+
 .oc-empty-state__shortcut-item {
   display: inline-flex;
   align-items: center;
