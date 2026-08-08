@@ -2243,6 +2243,10 @@ const newConversationBlocked = computed(
     || publicConfigMessageBlocked.value
     || (props.processRefreshing && props.processRefreshBlocksSubmit !== false)
 )
+/** 只有在新建的对话（未建立/加载已有 Session），且还没有发送消息时，才允许展示输入框顶部的批量入口菜单 */
+const showComposerTopMenu = computed(() => {
+  return !props.currentSessionId && (props.messages ?? []).length === 0
+})
 const readonlyBlockedReason = computed(() => props.readonlyReason?.trim() ?? '')
 const readonlySubmitBlocked = computed(() => Boolean(readonlyBlockedReason.value))
 const contextSendValidation = computed(() => validateChatSend(localInput.value.trim(), props.chatContexts ?? []))
@@ -5627,6 +5631,7 @@ function onCompositionEnd() {
     <!-- 统一输入卡片：textarea + 底部工具行（附件、模型、新建、发送/停止）整合在一个圆角卡片内 -->
     <div v-if="!activeSubagentSessionId" class="figma-chat-composer">
       <button
+        v-if="showComposerTopMenu"
         type="button"
         class="figma-chat-batch-entry"
         data-testid="batch-test-case-entry"

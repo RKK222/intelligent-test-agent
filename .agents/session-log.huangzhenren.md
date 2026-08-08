@@ -5,6 +5,18 @@
 
 ## Entries
 
+### 2026-08-08 - 限定输入框顶部批量案例设计菜单仅在新建对话且未发送消息时展示
+
+- Why:
+  - 用户反馈输入框顶部的“批量案例设计”菜单只应在新建对话、且尚未发送任何消息时展示，发送消息后或从历史记录进入已有 Session 时不应展示。
+- What:
+  - `FigmaChatPanel.vue`: 新增 `showComposerTopMenu` computed 属性（定义为 `!props.currentSessionId && (props.messages ?? []).length === 0`），并在顶部的 `<button class="figma-chat-batch-entry">` 上添加 `v-if="showComposerTopMenu"` 门禁。
+  - `FigmaChatPanel.test.ts`: 新增单元测试 `only displays top batch menu entry for a newly created session with no messages sent`，验证新建对话未发送消息时展示、已发送消息时隐藏、切换至已有历史 Session 时隐藏。
+- How:
+  - 通过 `currentSessionId` 区分是否为已存在的历史 Session（或已创建的 Session），通过 `messages.length` 区分当前对话是否已发送消息。在新建对话草稿状态下 `currentSessionId` 为空且 `messages` 数组为空，满足展示条件；发送消息或从历史列表切换 session 后条件失效，顶部批量案例设计入口按钮自动隐藏。
+- Result:
+  - `FigmaChatPanel.test.ts` 154 项测试全过（含新增测试）；`corepack pnpm test` 全量单元测试（1874 passed, 1 skipped）全过；`vue-tsc --noEmit` typecheck 校验通过。
+
 ### 2026-08-08 - 优化新建对话空白状态文案与当前宠物图标展示
 
 - Why:

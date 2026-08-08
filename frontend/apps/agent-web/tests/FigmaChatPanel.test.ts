@@ -105,6 +105,38 @@ describe("FigmaChatPanel", () => {
     expect(source).toContain(".figma-chat-composer:focus-within .figma-chat-batch-entry");
   });
 
+  it("only displays top batch menu entry for a newly created session with no messages sent", async () => {
+    const reference = {
+      id: "spec/需求一/01-需求/登录",
+      requirementName: "需求一",
+      subitemName: "登录",
+      filePaths: ["spec/需求一/01-需求/登录/需求.md"]
+    };
+    // 1. 新建对话且无消息：显示顶部菜单按钮
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        currentSessionId: undefined,
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        workspaceRequirementReferences: [reference]
+      } as any
+    });
+    expect(wrapper.find('[data-testid="batch-test-case-entry"]').exists()).toBe(true);
+
+    // 2. 已发送消息：隐藏顶部菜单按钮
+    await wrapper.setProps({
+      messages: [{ id: "m1", role: "user", content: "hello" }]
+    } as any);
+    expect(wrapper.find('[data-testid="batch-test-case-entry"]').exists()).toBe(false);
+
+    // 3. 切换至已有历史 Session：隐藏顶部菜单按钮
+    await wrapper.setProps({
+      messages: [],
+      currentSessionId: "ses_existing"
+    } as any);
+    expect(wrapper.find('[data-testid="batch-test-case-entry"]').exists()).toBe(false);
+  });
+
   it("closes a completed batch without confirmation and emits orchestration reset", async () => {
     const confirm = vi.spyOn(ElMessageBox, "confirm");
     const reference = {
