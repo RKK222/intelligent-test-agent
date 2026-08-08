@@ -54,7 +54,7 @@ describe("FigmaShell", () => {
   it("isolates the ICBC palette to the outer shell and preserves the chat surface", () => {
     expect(globalStylesSource).toContain("--ta-shell-accent: #c8161d");
     expect(globalStylesSource).toContain("--ta-shell-canvas:");
-    expect(globalStylesSource).toContain("rgba(21, 242, 204");
+    expect(globalStylesSource).toContain("#F7F9FC");
     expect(globalStylesSource).toContain("--ta-shell-header: #ffffff");
     expect(globalStylesSource).toContain("--ta-shell-header-text: #000000");
     expect(globalStylesSource).toContain("--ta-shell-sidebar: #ffffff");

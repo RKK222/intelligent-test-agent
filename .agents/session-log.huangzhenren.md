@@ -5,18 +5,17 @@
 
 ## Entries
 
-### 2026-08-08 - 切换平台主页面全局背景为多重不规则椭圆弥散光云雾渐变底色
+### 2026-08-08 - 落地多中心不规则蓝紫弥散雾环境光背景（无方向感、冷白清透低干扰）
 
 - Why:
-  - 响应用户渐变形态优化需求：将原本规则呈上下分布的线性/网格渐变，升级为由多个不同尺寸不规则椭圆（`ellipse`）与不同倾角坐标随机交错重叠的柔和弥散光云雾背景。
+  - 响应用户精确的背景渐变需求规范：基于冷雾白 (`#F7F9FC`) 打造 7 个散落不规则中心、边缘极度柔和的半透明蓝紫雾气环境光，彻底消除方向感、偏绿偏青及彩虹色。
 - What:
-  - `globals.css`: 将 `--ta-shell-canvas` 升级为 6 组非对称椭圆径向渐变（`radial-gradient(ellipse ... at X% Y%)`），基于 5 色（青绿 `#15F2CC`、鼠尾草绿 `#76B48D`、暖珊瑚橘 `#EF8754`、兰花粉紫 `#D15ABC`、玫瑰洋红 `#D8036C`）在屏幕不同象限形成高低错落、有机流动的云雾光效。
-  - `FigmaShell.vue`: 维持顶部 Header 与主体 Body 的 `transparent` 贯通层，确保整屏背景图层自然透出。
-  - `FigmaShell.test.ts`: 同步校验规则。
+  - `globals.css`: 配置 `--ta-shell-canvas` 为 7 组错落分布的浅蓝系 (`#DEE9FF`, `#EAF2FF`, `#EEF3FF`) 与浅紫系 (`#E8E3FF`, `#DDD8FF`, `#F0EDFF`) 径向椭圆渐变，基底采用冷雾白 `#F7F9FC`；同步更新全局背景 token `--ta-bg`、`--ta-chrome`、`--ta-panel`、`--secondary` 与 `--background` 为 `#F7F9FC`。
+  - `FigmaShell.test.ts`: 同步更新断言规则，校验 `#F7F9FC` 契约。
 - How:
-  - 采用非对称长短半轴与非规则坐标聚焦算法，并通过 `npx vitest run apps/agent-web/tests/FigmaShell.test.ts` 完成测试回归校验。
+  - 基于低饱和多中心淡雾融色算法，并通过 `npx vitest run apps/agent-web/tests/FigmaShell.test.ts` 校验全套单测。
 - Result:
-  - 自动化单元测试 `FigmaShell.test.ts` (57 tests) 100% 通过；消除了规则的上下线性切割感，呈现自然流动、多中心交错的不规则柔和光雾效果。
+  - 自动化单元测试 `FigmaShell.test.ts` (57 tests) 100% 通过；如同蓝色和紫色的半透明雾气随机漂浮在冷白背景中，界面干净清透、科技感强且低干扰。
 
 ### 2026-08-08 - 缩小对话框到任务栏的距离至 3px
 
@@ -2038,4 +2037,18 @@
   - 活动栏 Hub 入口现名“能力库”，与弹层“共享能力中心”语义对齐。
   - 教训：多会话/多终端并行仓库中，提交前必须先 `git status`/`git log` 确认工作区与 HEAD 状态，避免覆盖或回退他人已提交成果。
 
+### 2026-08-08 - 修复工作空间文件名搜索误报
 
+- Why:
+  - 工作区搜索曾以完整路径匹配；父目录名称命中关键字时，文件名未命中的文件也会错误显示。
+- What:
+  - `file-explorer` 新增并复用只匹配文件名的最终过滤：服务端结果在组件展示边界过滤，本地回退也只过滤已加载物理工作区文件名。
+  - 增加服务端路径误报和本地回退路径误报两条回归覆盖，并同步包 README 的搜索边界说明。
+- How:
+  - TDD RED：聚焦 Vitest 14 个用例中 2 个失败，分别显示“贷款申请.md”仍被渲染和本地回退额外返回该文件；最小修复后 GREEN 为 14/14。
+  - 最终审查补充 `AgentConfig.vue` 与 `" CONFIG "` 的公开 `filterLoadedFiles` 行为覆盖，并断言纯空白关键字返回空数组；正确实现无需生产代码调整，聚焦回归最终为 15/15，原 RED/GREEN 14/14 事实保持不变。
+  - `@test-agent/file-explorer` typecheck、前端全量测试、workspace typecheck 与 production build 均以退出码 0 完成。
+  - 任务五个文件在并行会话提交 `2e2de18f6` 时被一并收入；按明确例外保留该混合提交，不 amend、reset、revert 或改动其中任务外文件。
+- Result:
+  - 文件搜索面板不再展示仅因父目录路径命中而误报的文件；API、事件、数据库和安全边界均未变更。
+  - 最终审查同时锁定大小写不敏感、首尾空白归一化和纯空白短路这三个公开搜索边界。
