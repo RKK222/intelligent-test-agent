@@ -42,7 +42,7 @@
   font-size: var(--oc-text-md);
   border-radius: var(--oc-radius-md);
   border-top-right-radius: 2px;
-  padding: 6px 36px 6px 12px;
+  padding: 6px 12px;
   line-height: var(--oc-line-height);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 }
@@ -53,33 +53,37 @@
   color: var(--oc-fg);
 }
 
-.oc-user-message__copy {
-  position: absolute;
-  top: 5px;
-  right: 8px;
+.oc-user-message__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
   opacity: 0;
-  transition: opacity 0.2s ease;
+  transition: opacity 0.15s ease;
 }
 
-.oc-user-message__bubble:hover .oc-user-message__copy,
-.oc-user-message__copy:focus-within {
+.oc-user-message:hover .oc-user-message__actions,
+.oc-user-message__actions:focus-within {
   opacity: 1;
 }
 
 .oc-user-message__resend {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 6px;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 0;
   border: 0;
+  border-radius: var(--oc-radius-sm);
   background: transparent;
-  color: var(--ta-chat-muted);
-  font-size: 11px;
+  color: var(--oc-subtle);
   cursor: pointer;
 }
 
 .oc-user-message__resend:hover {
-  color: var(--ta-chat-text);
+  background: var(--oc-surface-muted);
+  color: var(--oc-fg);
 }
 
 .oc-user-message__resend svg {

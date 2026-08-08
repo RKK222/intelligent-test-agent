@@ -5,6 +5,18 @@
 
 ## Entries
 
+### 2026-08-08 - 优化用户消息操作栏（撤销重发、复制）悬浮于气泡下方且仅展示图标
+
+- Why:
+  - 用户反馈用户消息的气泡操作按钮（撤销重发、复制）需在鼠标悬浮时展示在气泡下方，且统一仅展示图标。
+- What:
+  - `UserMessageRow.vue`: 将“撤销重发”与“复制”按钮统一移入消息气泡 `oc-user-message__bubble` 下方的 `oc-user-message__actions` 容器中；“撤销重发”按钮改为仅展示 `<RotateCcw />` 图标按钮，保留 `title="撤销重发"` 与 `aria-label="撤销重发最后一条消息"` 辅助属性。
+  - `rows.css`: 调整 `oc-user-message__bubble` 右侧 padding 为 `6px 12px`；`.oc-user-message__actions` 默认 `opacity: 0`，在 `.oc-user-message:hover` 及 `:focus-within` 时展示在气泡下方右侧；`.oc-user-message__resend` 统一使用 `20x20px` 图标按钮样式。
+- How:
+  - 检查类名保留 `.oc-user-message__resend` 以保证自动化测试选择器兼容。
+- Result:
+  - `FigmaChatPanel.test.ts` (151 passed, 1 skipped) 测试全过；`vue-tsc --noEmit` 校验通过。
+
 ### 2026-08-08 - 修改对话框输入卡片快捷入口文本为批量案例设计
 
 - Why:

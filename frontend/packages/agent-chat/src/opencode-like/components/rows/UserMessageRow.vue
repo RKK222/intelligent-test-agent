@@ -75,21 +75,21 @@ onBeforeUnmount(() => {
         <Clock3 aria-hidden="true" />
         <span>{{ sourceBadge }}<span v-if="resendWaiting"> · {{ resendCountdown }} 秒后</span><span v-else-if="scheduledAt"> · {{ scheduledAt }}</span></span>
       </div>
-      <button
-        v-if="resendable && !resendActive"
-        type="button"
-        class="oc-user-message__resend"
-        aria-label="撤销重发最后一条消息"
-        @click="emit('resend')"
-      >
-        <RotateCcw aria-hidden="true" />
-        撤销重发
-      </button>
       <div class="oc-user-message__bubble">
-        <div class="oc-user-message__copy">
-          <OcCopyButton :value="message.text" />
-        </div>
         <p>{{ displayText }}</p>
+      </div>
+      <div class="oc-user-message__actions">
+        <button
+          v-if="resendable && !resendActive"
+          type="button"
+          class="oc-user-message__resend oc-icon-button"
+          aria-label="撤销重发最后一条消息"
+          title="撤销重发"
+          @click="emit('resend')"
+        >
+          <RotateCcw class="oc-icon-button__icon" aria-hidden="true" />
+        </button>
+        <OcCopyButton :value="message.text" />
       </div>
       <div v-if="workspaceContexts.length" class="oc-user-message__contexts" aria-label="本轮关联的工作区上下文">
         <span
