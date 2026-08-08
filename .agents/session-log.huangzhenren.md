@@ -5,6 +5,19 @@
 
 ## Entries
 
+### 2026-08-08 - 切换平台主页面全局背景为多重不规则椭圆弥散光云雾渐变底色
+
+- Why:
+  - 响应用户渐变形态优化需求：将原本规则呈上下分布的线性/网格渐变，升级为由多个不同尺寸不规则椭圆（`ellipse`）与不同倾角坐标随机交错重叠的柔和弥散光云雾背景。
+- What:
+  - `globals.css`: 将 `--ta-shell-canvas` 升级为 6 组非对称椭圆径向渐变（`radial-gradient(ellipse ... at X% Y%)`），基于 5 色（青绿 `#15F2CC`、鼠尾草绿 `#76B48D`、暖珊瑚橘 `#EF8754`、兰花粉紫 `#D15ABC`、玫瑰洋红 `#D8036C`）在屏幕不同象限形成高低错落、有机流动的云雾光效。
+  - `FigmaShell.vue`: 维持顶部 Header 与主体 Body 的 `transparent` 贯通层，确保整屏背景图层自然透出。
+  - `FigmaShell.test.ts`: 同步校验规则。
+- How:
+  - 采用非对称长短半轴与非规则坐标聚焦算法，并通过 `npx vitest run apps/agent-web/tests/FigmaShell.test.ts` 完成测试回归校验。
+- Result:
+  - 自动化单元测试 `FigmaShell.test.ts` (57 tests) 100% 通过；消除了规则的上下线性切割感，呈现自然流动、多中心交错的不规则柔和光雾效果。
+
 ### 2026-08-08 - 缩小对话框到任务栏的距离至 3px
 
 - Why:

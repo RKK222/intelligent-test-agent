@@ -53,7 +53,8 @@ describe("FigmaShell", () => {
 
   it("isolates the ICBC palette to the outer shell and preserves the chat surface", () => {
     expect(globalStylesSource).toContain("--ta-shell-accent: #c8161d");
-    expect(globalStylesSource).toContain("--ta-shell-canvas: #f0f4fa");
+    expect(globalStylesSource).toContain("--ta-shell-canvas:");
+    expect(globalStylesSource).toContain("rgba(21, 242, 204");
     expect(globalStylesSource).toContain("--ta-shell-header: #ffffff");
     expect(globalStylesSource).toContain("--ta-shell-header-text: #000000");
     expect(globalStylesSource).toContain("--ta-shell-sidebar: #ffffff");
@@ -68,8 +69,8 @@ describe("FigmaShell", () => {
     expect(figmaShellSource).toMatch(/\.figma-subtitle\s*\{[^}]*color: var\(--ta-shell-brand-strong, #7f1e2b\)/s);
     expect(figmaShellSource).toContain("--ta-tree-active: var(--ta-shell-accent-soft, #ffffff)");
     expect(figmaShellSource).toMatch(/\.figma-activity-bar\s*\{[^}]*background: transparent[^}]*border-right: 0/s);
-    expect(figmaShellSource).toMatch(/\.figma-header\s*\{[^}]*display: grid;[^}]*grid-template-columns: max-content minmax\(0, 1fr\) max-content;[^}]*background: var\(--ta-shell-canvas, #f0f4fa\)/s);
-    expect(figmaShellSource).toMatch(/\.figma-body\s*\{[^}]*padding: var\(--ta-shell-gap, 8px\)[^}]*background: var\(--ta-shell-canvas, #f0f4fa\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-header\s*\{[^}]*display: grid;[^}]*grid-template-columns: max-content minmax\(0, 1fr\) max-content;[^}]*background: transparent/s);
+    expect(figmaShellSource).toMatch(/\.figma-body\s*\{[^}]*padding: var\(--ta-shell-gap, 8px\)[^}]*background: transparent/s);
     expect(figmaShellSource).toMatch(/\.figma-header-left\s*\{[^}]*align-items: center;[^}]*justify-content: flex-start;[^}]*height: 100%;[^}]*transform: translateY\(calc\(var\(--ta-shell-gap, 8px\) \/ 2\)\)/s);
     expect(figmaShellSource).toMatch(/\.figma-title-group\s*\{[^}]*justify-content: center;[^}]*align-items: flex-start/s);
     expect(figmaShellSource).toMatch(/\.figma-header-center\s*\{[^}]*justify-self: center;[^}]*transform: translateY\(calc\(var\(--ta-shell-gap, 8px\) \/ 2\)\)/s);
@@ -83,7 +84,7 @@ describe("FigmaShell", () => {
     expect(figmaShellSource).toContain('data-testid="header-workspace-selector"');
     expect(figmaShellSource).toContain('data-testid="header-version-selector"');
     expect(figmaShellSource).toContain('data-testid="header-context-rail"');
-    expect(figmaShellSource).toMatch(/\.figma-context-rail\s*\{[^}]*height: 34px;[^}]*border: 1px solid var\(--ta-shell-border, #e5e7eb\);[^}]*border-radius: 11px;[^}]*background: var\(--ta-shell-canvas, #f0f4fa\)/s);
+    expect(figmaShellSource).toMatch(/\.figma-context-rail\s*\{[^}]*height: 34px;[^}]*border: 1px solid var\(--ta-shell-border, #e5e7eb\);[^}]*border-radius: 11px;[^}]*background: transparent/s);
     expect(figmaShellSource).toMatch(/\.figma-context-rail::before\s*\{[^}]*width: 3px;[^}]*height: 15px;[^}]*background: var\(--ta-shell-accent, #c8161d\)/s);
     expect(figmaShellSource).toMatch(/\.figma-context-rail\.has-open-menu\s*\{[^}]*border-color: var\(--ta-shell-accent, #c8161d\)/s);
     expect(figmaShellSource).toMatch(/\.figma-context-rail > :not\(:first-child\)::before\s*\{[^}]*background: var\(--ta-shell-border, #e5e7eb\)/s);

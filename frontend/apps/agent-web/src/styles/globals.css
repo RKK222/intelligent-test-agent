@@ -9,14 +9,14 @@
    对齐目标 Frame 的浅灰 chrome、白色编辑面、发丝边框和紧凑 14px 信息密度。 */
 :root {
   color-scheme: light;
-  --ta-bg: #F0F4FA;
+  --ta-bg: #F8F9FA;
   --ta-bg-2: #eeeeee;
-  --ta-chrome: #F0F4FA;
+  --ta-chrome: #F8F9FA;
   --ta-tabbar: #eaeaea;
-  --ta-panel: #F0F4FA;
+  --ta-panel: #F8F9FA;
   --ta-panel-2: #ffffff;
   --ta-surface: #ffffff;
-  --ta-control: #F0F4FA;
+  --ta-control: #F8F9FA;
   --ta-control-strong: #e0e0e0;
   --ta-hover: #e8e8e8;
   --ta-active: #e0e0e0;
@@ -36,8 +36,15 @@
   --ta-add: rgba(63, 122, 90, 0.12);
   --ta-line-numbers: #b5b5b5;
 
-  /* 仅用于工作台外围：复用弹框常见浅雾蓝底，配合 CloudStudio 式白色分区与工行红定位轴。 */
-  --ta-shell-canvas: #f0f4fa;
+  /* 仅用于工作台外围：使用多重不规则椭圆弥散光云雾渐变（#15F2CC, #76B48D, #EF8754, #D15ABC, #D8036C），配合 CloudStudio 式白色分区与工行红定位轴。 */
+  --ta-shell-canvas:
+    radial-gradient(ellipse 65% 50% at 18% 22%, rgba(21, 242, 204, 0.22) 0%, rgba(21, 242, 204, 0) 70%),
+    radial-gradient(ellipse 50% 65% at 82% 15%, rgba(118, 180, 141, 0.22) 0%, rgba(118, 180, 141, 0) 75%),
+    radial-gradient(ellipse 70% 55% at 35% 68%, rgba(239, 135, 84, 0.18) 0%, rgba(239, 135, 84, 0) 70%),
+    radial-gradient(ellipse 55% 75% at 88% 75%, rgba(209, 90, 188, 0.20) 0%, rgba(209, 90, 188, 0) 75%),
+    radial-gradient(ellipse 75% 45% at 62% 28%, rgba(216, 3, 108, 0.16) 0%, rgba(216, 3, 108, 0) 70%),
+    radial-gradient(ellipse 48% 60% at 12% 82%, rgba(21, 242, 204, 0.15) 0%, rgba(21, 242, 204, 0) 65%),
+    #F8F9FA;
   --ta-shell-header: #ffffff;
   --ta-shell-sidebar: #ffffff;
   --ta-shell-surface: #ffffff;
@@ -90,7 +97,7 @@
   /* ===== 语义 token（对齐前端样式规范） ===== */
   --primary: #333333;
   --primary-foreground: #ffffff;
-  --secondary: #F0F4FA;
+  --secondary: #F8F9FA;
   --secondary-foreground: #333333;
   --muted: #7a7a7a;
   --muted-foreground: #7a7a7a;
@@ -98,7 +105,7 @@
   --accent-foreground: #ffffff;
   --destructive: #9e3b34;
   --destructive-foreground: #ffffff;
-  --background: #F0F4FA;
+  --background: #F8F9FA;
   --foreground: #333333;
   --border: #eaeaea;
   --surface: #ffffff;

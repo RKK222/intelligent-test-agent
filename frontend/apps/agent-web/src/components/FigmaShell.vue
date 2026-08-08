@@ -3000,7 +3000,7 @@ function submitJoinApp() {
   grid-template-columns: minmax(0, 1fr);
   width: 100%;
   height: 100vh;
-  background: var(--ta-shell-canvas, #f0f4fa);
+  background: var(--ta-shell-canvas, #f8f9fa);
   overflow: hidden;
 }
 
@@ -3011,7 +3011,7 @@ function submitJoinApp() {
   align-items: center;
   height: 36px;
   border-bottom: 0;
-  background: var(--ta-shell-canvas, #f0f4fa);
+  background: transparent;
   padding: 0 12px;
   flex-shrink: 0;
   z-index: 50;
@@ -3931,7 +3931,7 @@ function submitJoinApp() {
   padding: 3px 3px 3px 8px;
   border: 1px solid var(--ta-shell-border, #e5e7eb);
   border-radius: 11px;
-  background: var(--ta-shell-canvas, #f0f4fa);
+  background: transparent;
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
   transition: border-color 0.14s ease, box-shadow 0.14s ease;
 }
@@ -4638,7 +4638,7 @@ function submitJoinApp() {
   min-width: 0;
   overflow: hidden;
   padding: var(--ta-shell-gap, 8px) var(--ta-shell-gap, 8px) var(--ta-shell-gap, 8px) 0;
-  background: var(--ta-shell-canvas, #f0f4fa);
+  background: transparent;
   position: relative;
 }
 

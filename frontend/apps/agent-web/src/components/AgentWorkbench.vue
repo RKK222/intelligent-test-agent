@@ -10408,7 +10408,7 @@ async function handleLogout() {
   right: 1px;
   min-width: 14px;
   height: 14px;
-  border: 1.5px solid var(--ta-shell-canvas, #f0f4fa);
+  border: 1.5px solid var(--ta-shell-canvas, #f8f9fa);
   border-radius: 999px;
   background: var(--ta-shell-accent, #c8161d);
   padding: 0 3px;

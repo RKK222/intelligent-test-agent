@@ -878,7 +878,7 @@ function submitRename() {
   overflow: hidden;
   border: 1px solid var(--ta-border, #eaeaea);
   border-radius: 8px;
-  background: var(--ta-bg, #f0f4fa);
+  background: var(--ta-bg, #f8f9fa);
   padding: 8px 12px;
   color: var(--ta-subtle, #444444);
   font-family: var(--font-mono, "Geist Mono", monospace);
@@ -899,7 +899,7 @@ function submitRename() {
   gap: 4px;
   border: 1px solid var(--ta-border, #eaeaea);
   border-radius: 8px;
-  background: var(--ta-bg, #f0f4fa);
+  background: var(--ta-bg, #f8f9fa);
   padding: 4px;
 }
 

@@ -832,7 +832,7 @@ function resetTranscriptState() {
   height: 100%;
   min-height: 0;
   flex-direction: column;
-  background: var(--ta-shell-canvas, #f0f4fa);
+  background: var(--ta-shell-canvas, #f8f9fa);
   color: var(--support-ink);
   font-family: var(--font-sans);
   font-size: 14px;
