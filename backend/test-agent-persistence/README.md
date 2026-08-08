@@ -215,7 +215,7 @@
 
 ## 后续 AI 编码指引
 
-新增表结构、Repository、数据库映射和 migration 时改这里。V18 之后新增 migration 文件名必须使用 `VyyyyMMddHHmmss__description.sql`，开发分支先使用创建时的本地时间作为候选版本，不再使用顺序数字版本。多人或多分支合并、打企业包前必须由发布集成人对照目标库最高 `flyway_schema_history` 和本次全部新 migration 统一排序：尚未进入共享库的候选版本可调整，但最终版本必须严格递增且全部高于已部署基线；已在任何共享或稳定库执行过的文件禁止删除、改名或改写。必须验证真实数据库从已部署基线按默认顺序升级，禁止用 `outOfOrder`、`repair` 或手改历史表绕过。不要把任务状态机或 HTTP API 编排逻辑放进本模块。
+新增表结构、Repository、数据库映射和 migration 时改这里。V18 之后新增 migration 文件名必须使用 `VyyyyMMddHHmmss__description.sql`，开发分支可先使用创建时的本地时间区分候选，不再使用顺序数字版本。当前没有共享开发数据库、中央编号服务或自动合并门禁，每个开发者使用需要保留的个人本地数据库；因此多人或多分支只能在合并时由集成人收集全部待合并 migration 和相关个人本地库/目标库 `flyway_schema_history`，统一设计最终主链及已执行分叉的兼容路径。只有从未在任何需要保留的数据库执行的候选 migration 才能重命名或重排；已在个人本地持久库或其它需要保留的数据库执行的文件必须保持版本和字节不变。冲突历史复用现有 Flyway 兼容装配、隔离 location 和更高版本前向 migration，并用真实 PostgreSQL 覆盖每套历史；只有数据库所有者明确同意废弃并重建个人库后，才可不保留其历史。禁止用 `outOfOrder`、`repair` 或手改历史表绕过。不要把任务状态机或 HTTP API 编排逻辑放进本模块。
 Flyway migration 只能承载表结构变更、历史数据兼容迁移和生产必需的基础字典/系统参数；禁止新增写入测试、演示、个人开发或环境专属数据的 seed migration。测试数据应放在 `test-agent-test-support`、测试 fixture、mock 数据或显式本地开发脚本中。
 新增或修改关系型 SQL 必须新增/调整 `mybatis/*.xml` 与 `com.enterprise.testagent.persistence.mybatis` 内部 mapper，不能继续扩展 `Jdbc*Repository` 或使用 MyBatis 注解 SQL；存量 JDBC 仓储后续按触点分批迁移。
 JSON payload/capabilities 当前以文本列保存，未来切换 PostgreSQL JSONB 必须同步兼容策略和测试。

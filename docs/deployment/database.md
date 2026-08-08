@@ -13,7 +13,7 @@
 
 `V20260807230000__add_batch_session_attribution.sql` 为 `sessions` 增加 `batch_mode boolean not null default false`、`batch_id varchar(128)` 和 `batch_item_request_id varchar(128)`。普通会话继续使用默认值且两个 ID 必须为空；批量会话必须存在 `created_by_user_id` 和两个非空白 ID。部分唯一索引 `uk_sessions_batch_item_request(created_by_user_id, batch_item_request_id)` 保证同一用户的单项创建幂等，不同用户互不冲突；`idx_sessions_batch_created(batch_id, created_at)` 只服务后续运营统计查询。本期不新增报表，也不改变 `source_type`：立即批量保持 `MANUAL`，定时批量保持 `SCHEDULED_TASK`。
 
-批量归因查询、写入和 PostgreSQL 事务级 advisory lock 全部位于 `BatchSessionAttributionMapper.xml`；锁键由当前用户和 `itemRequestId` 组成，Session 业务键固定使用 `session_id`，不得与内部 bigint `id` 混用。夜间任务在既有事务内完成新 Session、归因、容量、任务和会话锁写入，任一失败整体回滚。真实 PostgreSQL 测试覆盖完整空库迁移、默认值、检查/唯一约束、索引和同键并发串行化；正式合并或企业打包前仍须重新对照各目标环境 `flyway_schema_history`，若候选版本已被占用则只允许顺延新 migration，禁止改写任何已执行文件。
+批量归因查询、写入和 PostgreSQL 事务级 advisory lock 全部位于 `BatchSessionAttributionMapper.xml`；锁键由当前用户和 `itemRequestId` 组成，Session 业务键固定使用 `session_id`，不得与内部 bigint `id` 混用。夜间任务在既有事务内完成新 Session、归因、容量、任务和会话锁写入，任一失败整体回滚。真实 PostgreSQL 测试覆盖完整空库迁移、默认值、检查/唯一约束、索引和同键并发串行化；正式合并或企业打包前仍须重新对照相关个人本地库和目标环境 `flyway_schema_history`。版本冲突时，只有从未在任何需要保留的数据库执行的 migration 可以顺延；已经执行的版本必须保留原始字节并按本文件的合并期兼容规则处理。
 
 ## Python workflow 独立 PostgreSQL
 
@@ -1113,7 +1113,7 @@ XXL MySQL 的独立 migration `xxl-job/db/migration/V5__schedule_night_execution
 
 ## V17 本地 opencode 机器与默认开发用户进程种子（历史）
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V17__seed_local_opencode_machine_for_default_user.sql` 曾为本地开发环境预置一个 "本地 opencode 机器"（Linux 服务器 + 容器 + 管理进程）和默认开发用户 `usr_test_dev`（用户名 `888888888`）的进程绑定。该 migration 已可能在历史本地库或共享库执行过，禁止删除、重命名或直接改写，否则会破坏 Flyway validate。
+`backend/test-agent-persistence/src/main/resources/db/migration/V17__seed_local_opencode_machine_for_default_user.sql` 曾为本地开发环境预置一个 "本地 opencode 机器"（Linux 服务器 + 容器 + 管理进程）和默认开发用户 `usr_test_dev`（用户名 `888888888`）的进程绑定。该 migration 已可能在需要保留的历史个人本地库执行过，禁止删除、重命名或直接改写，否则会破坏 Flyway validate。
 
 兼容历史本地库时，V17 不只按固定 `process_id='ocp_local_user_dev'` 判断是否已种子化，也会检查 `linux_server_id='127.0.0.1' and port=4096` 是否已有 opencode 进程。若同端口已有旧进程，迁移复用该进程写入默认用户绑定，不再插入新的 `ocp_local_user_dev`，避免 `uk_opencode_server_processes_linux_port` 唯一约束阻塞本地启动。
 
@@ -1189,24 +1189,19 @@ XXL MySQL 的独立 migration `xxl-job/db/migration/V5__schedule_night_execution
 
 ## 后续 migration 版本规则
 
-V18 及以前保留既有数字版本，已在共享或稳定数据库执行过的 migration 禁止删除、重命名或改写。V18 之后新增 migration 必须使用 `VyyyyMMddHHmmss__description.sql`，开发分支创建时可先使用本地时间作为候选版本；多人并行开发时不得再抢占 `V19`、`V20` 这类顺序数字版本。提交前需运行持久化模块 migration 命名测试，确认版本唯一、历史已落库 migration 仍可解析且时间戳规则生效。
+V18 及以前保留既有数字版本。V18 之后新增 migration 必须使用 `VyyyyMMddHHmmss__description.sql`，开发分支创建时可先使用本地时间区分候选，不再抢占 `V19`、`V20` 这类顺序数字版本。14 位时间戳只能降低同号冲突，不能让彼此不可见的本地分支自动取得一致执行顺序。
 
-推荐把“候选版本”和“最终版本”分成两个阶段，避免依赖开发者本地时钟协调：
+当前开发协作没有共享数据库、中央 migration 编号服务或自动合并门禁，每个开发者使用需要保留的个人本地数据库。两个尚未推送的分支无法感知对方的 migration，开发顺序也可能与最终合并顺序不同；因此本项目不把自动编号、merge queue、CI 清单或临时 worktree schema 描述为当前能力。并行 migration 只能在合并时由集成人显式处理，不能承诺在保留双方本地历史的同时自动重新编号。
 
-- 功能分支只在该分支独享的临时 PostgreSQL 数据库或 schema 中执行候选 migration，不与其它 worktree 共用可长期保留的开发库，也不得把候选 migration 提前执行到共享、稳定或企业数据库。
-- 合入交付分支时由单一集成人或受保护的 merge queue 串行分配最终版本。分配前先基于目标分支最新提交和全部目标库 history 计算上界，再只对从未进入共享、稳定或企业数据库的候选文件重新编号；时间戳在此时生成，而不是以功能分支创建时间作为最终顺序。
-- CI 应生成并校验 migration 清单，至少包含版本、文件名和 SHA-256：拒绝重复版本、低于或等于已冻结上界的新版本、已冻结文件删除/重命名/字节变化，以及新 migration 未高于目标库基线。共享库 history 和已经发布的清单共同决定“已冻结”，不能只看当前 Git 分支。
-- 若团队不希望继续使用时间戳，可改为由 merge queue 分配的全局单调序号；它仍然需要串行分配，但能消除“时间看起来能代表依赖顺序”的误导。UUID、repeatable migration、`outOfOrder` 和 `repair` 都不能替代有序版本分配：前两者不适合一般表结构演进，后两者会掩盖或改变已部署历史。
+合并和企业打包必须执行以下门禁：
 
-14 位时间戳只能降低同号冲突，不能保证多个分支按相同顺序合并和部署。多人或多分支同时增加 migration 时，发布集成人必须执行以下门禁：
+1. 集成人收集所有待合并分支的 migration 文件，以及每位相关开发者个人本地库和全部稳定/企业目标库的 `flyway_schema_history`，至少包含 `installed_rank/version/description/checksum/success`；不能只检查自己分支、提交时间或最高版本。
+2. 从未在任何需要保留的数据库执行的 migration 仍是可调整候选，可以在合并时统一重命名、重排并形成严格递增且高于已部署基线的主链。任何 migration 一旦在个人本地持久库或其它需要保留的数据库执行，版本、文件名、注释、空白和 SQL 字节均视为冻结；只有数据库所有者明确同意废弃并重建该个人库后，才可将其按“未执行”处理。
+3. 若多套已执行历史无法直接汇成同一主链，例如某个个人库已经执行较高版本却缺少另一分支的较低版本，禁止靠改名、`SPRING_FLYWAY_OUT_OF_ORDER=true`、Flyway `repair` 或手工修改 `flyway_schema_history` 掩盖。集成人必须复用现有 `DatabaseMigrationCompatibilityCustomizer`，为已知历史保留原始字节的隔离 compatibility location，并在需要时增加高于该历史的前向 migration；不得新建第二套迁移器或把个人分叉资源混入默认主 location。
+4. 合并前必须用真实 PostgreSQL 分别模拟空库、每套需要保留的个人本地历史、已部署企业基线和其它已知分叉，再使用默认 `outOfOrder=false` 升级到当前 HEAD。兼容程序必须精确选择一条路径，重复启动可继续解析；未知 checksum、部分旧链、新旧链混合或未覆盖历史必须停止合并并制定显式方案，只验证空库不算通过。
+5. 正式 JAR/ZIP 产生后必须解出其中 migration 计算 SHA-256，与通过上述升级测试的源码比较。当前企业包使用瘦 `test-agent-app.jar` 和外置 `backend/lib/`，migration 位于 `test-agent-persistence-*.jar`；必须同时校验发布 ZIP 内与目标机 `/data/testagent/dist/backend/lib/` 安装后的 persistence JAR，且完整 JAR SHA 一致。包内字节不同、目标库出现未知 checksum，或没有取得相关数据库 history 时，均不得进入部署。
 
-1. 以本次所有目标环境 `flyway_schema_history` 的全部已执行 `version/checksum/success` 为发布基线，同时列出自上次已部署提交以来所有待合并 migration，不能只检查自己分支的文件名或最高版本。
-2. 尚未进入任何共享或稳定数据库的 migration 可以在合并前统一调整候选时间戳；最终版本必须彼此严格递增，并全部高于发布基线。版本顺序应表达依赖顺序，不以提交先后或谁先部署为准。
-3. migration 一旦进入任何共享、稳定或企业数据库即视为字节不可变；SQL 改成幂等形式、只改注释或空白也会改变 checksum，不是兼容方案。已执行文件必须保留原始字节并用 SHA-256 回归锁定。若不同环境已经形成分叉，立即停止合并和发布，先盘点各环境历史，再通过现有 Flyway 兼容装配和隔离 location 制定显式方案；禁止新建第二套迁移器，也禁止用 `SPRING_FLYWAY_OUT_OF_ORDER=true`、Flyway `repair` 或手工修改 `flyway_schema_history` 让校验表面通过。
-4. 正式打包前必须用真实 PostgreSQL 分别模拟空库、已部署企业基线和每套已知分叉历史，再使用默认 Flyway 配置升级到当前 HEAD，覆盖“旧包已运行、新包首次启动”的现场路径；只验证空库全量建库不算通过。
-5. 正式 JAR/ZIP 产生后必须解出其中 migration 计算 SHA-256，与通过上述升级测试的源码比较。当前企业包使用瘦 `test-agent-app.jar` 和外置 `backend/lib/`，migration 位于 `test-agent-persistence-*.jar`；必须同时校验发布 ZIP 内与目标机 `/data/testagent/dist/backend/lib/` 安装后的 persistence JAR，且完整 JAR SHA 一致。包内字节不同、目标库出现未知 checksum，或没有取得目标库 history 时，均不得进入部署。
-
-多台 Java 对同一套、已排好序的 migration 并发启动由 Flyway schema history 锁负责互斥，不是这里的问题；这里防的是不同开发者把较小的新版本晚合入，导致目标库已经执行更大版本后拒绝启动。
+多台 Java 对同一套已排好序的主链并发启动由 Flyway schema history 锁负责互斥，不是这里的问题；本节处理的是多个个人本地历史在合并时已经形成不同版本顺序的情况。
 
 ## V20260730090000 LobeHub 企业模型目录与每日聚合
 
@@ -1291,8 +1286,8 @@ HMAC、委托加密密钥、数据库密码和对象存储密钥不进入数据�
 `V20260728210000` 基线升级到 HEAD，并以并发增量验证 upsert。没有可用 Docker 时该测试会显式 skip，不能把
 skip 当作正式发布验收。`RedisLobehubSsoStoreIntegrationTest` 另用真实 Redis 5.0.14 并发消费同一 ticket，
 验证只成功一次、nonce 防重放、grant 轮换/撤销、TTL 和全部 key 前缀；它不替代 fork 的 `lobehub:app:*`
-ACL/pubsub 全路径测试。正式合并/企业打包前仍必须读取每个目标环境的 `flyway_schema_history`，必要时只对
-尚未在任何共享库执行的候选版本重新编号，并完成“真实已部署基线 → 当前 HEAD”的 PostgreSQL 升级。
+ACL/pubsub 全路径测试。正式合并/企业打包前仍必须读取相关个人本地库和每个目标环境的 `flyway_schema_history`；只有
+从未在任何需要保留的数据库执行的候选版本才能重新编号，并完成“每套需保留历史 → 当前 HEAD”的 PostgreSQL 升级。
 
 LobeHub fork 使用独立 ParadeDB/PostgreSQL 17、独立账号、卷和自身 migration；平台 Flyway datasource 永远
 不得访问该库。详细安装和回滚见 `docs/deployment/lobehub-offline.md`。
@@ -1576,7 +1571,7 @@ Redis 使用 `test-agent:support-access:session:{sessionDigest}` 与 `test-agent
 
 ## V20260806143000 Skill Hub 事项分类
 
-`V20260806143000__classify_skill_hub_assets.sql` 已进入共享测试库，原始字节不得改写；其 SHA-256 固定为
+`V20260806143000__classify_skill_hub_assets.sql` 已在需要保留的个人本地数据库执行，原始字节不得改写；其 SHA-256 固定为
 `f59f641527fdabaf21393319cd70ed578c6f75a55decae4d8839bc2b561ac06d`。该 migration 在既有
 `agent_skill_hub_assets` 逻辑资产上增加：
 
@@ -1593,7 +1588,7 @@ SQL 位于 `AgentSkillHubMapper.xml`。正式部署前仍须对照全部目标�
 
 `V20260806190000__persist_public_skill_hub_snapshots.sql` 在现有内容寻址制品表之上增加：
 
-该 migration 已进入共享测试库，原始字节不得改写；SHA-256 固定为
+该 migration 已在需要保留的个人本地数据库执行，原始字节不得改写；SHA-256 固定为
 `1b2547cf466c09fe11a63b1f76e5e17ec1773e2187aa01e052288a9bb4861e75`。
 
 - `agent_skill_hub_builtin_revisions`：按 `revision_id` 保存公共 Agent/Skill 在精确 Git commit 下的元数据和 artifact SHA-256；`(asset_id, source_commit_hash)` 唯一，旧修订不因目录前进而删除。
@@ -1608,7 +1603,7 @@ fetch 当前分支，并读取 `origin/{branch}` 的精确提交完成快照；�
 
 `V20260806190500__classify_public_skill_hub_snapshots.sql` 新增 `agent_skill_hub_builtin_classifications`：以稳定 `asset_id` 保存公共 Git Skill 的一级/二级事项、最近分类超级管理员和时间。现有公共 Skill 回填 `OTHER/null`，以后首次发现的 Skill 由快照事务幂等补齐默认分类；分类不绑定具体 revision，因此共享仓库进入下一个 commit 后仍然保留。数据库约束与应用推送 Skill 相同，Agent 不写入本表。
 
-该 migration 已进入共享测试库，原始字节不得改写；SHA-256 固定为
+该 migration 已在需要保留的个人本地数据库执行，原始字节不得改写；SHA-256 固定为
 `19a0e5af5f361179ac3887d541c274f75f43f89a683ee8037a5e0391444a92bf`。它不修改已经执行的
 `V20260806190000` 字节。正式部署前仍须对照全部目标环境 `flyway_schema_history` 校验两个版本的严格递增关系、
 checksum 和并行 migration 冲突，并用每套已知真实 PostgreSQL 基线验证升级及最终 JAR 内 migration 字节。
@@ -1627,8 +1622,8 @@ checksum 和并行 migration 冲突，并用每套已知真实 PostgreSQL 基线
 关系型 SQL 全部位于 `RunResendMapper.xml`。替代消息受理后删除源 Run 的 `session_messages/run_events/run_session_scope*` 明细，
 保留 `runs`、反馈、用量、traceId 和重发关系；历史查询同时按已提交关系过滤。
 
-该 migration 不写测试、演示或个人数据，尚未声明为任何共享环境已执行的冻结版本。合并交付或企业打包前，集成人必须对照所有目标
-环境 `flyway_schema_history` 的版本/checksum 和并行 migration，必要时只在尚未执行前重排候选版本；随后用每套已知真实
+该 migration 不写测试、演示或个人数据，尚未确认在任何需要保留的数据库执行。合并交付或企业打包前，集成人必须对照相关个人本地库和所有目标
+环境 `flyway_schema_history` 的版本/checksum 和并行 migration，只有从未执行的候选版本才能重排；随后用每套已知真实
 PostgreSQL 基线验证升级，并校验最终 JAR 中 migration 字节。禁止 `outOfOrder`、`repair` 或改写任何已经执行的 migration。
 
 ### 并行 worktree 已执行旧历史的兼容路径
