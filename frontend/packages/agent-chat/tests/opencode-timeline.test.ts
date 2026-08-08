@@ -36,7 +36,7 @@ describe("OpencodeTimeline", () => {
 
     expect(getByText("有什么可以帮你？")).toBeTruthy();
     expect(getByText("描述你的目标或任务，智能体将协助完成。")).toBeTruthy();
-    expect(getByText("在输入框中输入：")).toBeTruthy();
+    expect(getByText("快捷命令：")).toBeTruthy();
     expect(getByText("选择 Agent 或 上下文文件")).toBeTruthy();
     expect(getByText("选择需求与测试资源")).toBeTruthy();
     expect(getByText("快捷指令与控制选项")).toBeTruthy();
