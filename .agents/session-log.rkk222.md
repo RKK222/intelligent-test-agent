@@ -7471,3 +7471,37 @@
   `20260807230000`，旧三条 checksum 保持不变。
 - 未修改 `.env*`、HTTP API、RunEvent、generated SDK 或 OpenCode 源码；未跟踪的 `demo/` 未修改且不纳入提交。
 - Workflow 尚未启动，若后续需要该控制面，必须先补齐本机 `WORKFLOW_DEV_REDIS_PASSWORD`。
+
+## 2026-08-09 - 允许当前 Flyway 迁移链断点续跑并补充多人协作门禁
+
+### Why
+
+- 上一轮兼容提交 `7195257b5` 为防止内部模型新旧迁移链混用，误把“当前三条 migration 只执行了一部分”也判为
+  非法历史；Flyway 逐版本提交时，进程正常中断在 `V20260808143300` 或 `V20260808143301` 后会因此无法重启续跑。
+- 多人功能分支各自创建时间戳只能降低同号概率，不能保证合并顺序和部署顺序，需要把最终版本分配移到串行集成门禁。
+
+### What
+
+- 删除当前内部模型 migration 部分执行即拒绝启动的判断；部分旧历史和新旧版本混用仍保持 fail-closed，完整旧历史继续
+  使用字节级兼容目录，当前主迁移链则按默认顺序执行剩余版本。
+- 新增两个真实 PostgreSQL 回归场景，分别从只完成 `V20260808143300` 和只完成 `V20260808143301` 的 history 重启，
+  验证最终执行到 `V20260808143302`、不加载旧兼容目录且 `outOfOrder=false`。
+- 数据库规范补充候选/最终版本两阶段流程：功能分支使用独享临时数据库或 schema，合入时由单一集成人或 merge queue
+  串行分配最终版本，CI 以目标库 history 和版本/文件/SHA-256 清单锁定已冻结 migration；可选全局单调序号但不能用
+  UUID、repeatable migration、`outOfOrder` 或 `repair` 替代顺序治理。
+
+### How
+
+- JDK 25 下运行 `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest`，13 项全部通过；运行
+  `FlywayMigrationNamingTest`，8 项全部通过。
+- 使用未修改的 `.env.test` 与 `--without-workflow` 全量打包并重启 backend、opencode-manager、frontend；backend health/
+  readiness 为 UP，前端 3000 与 CORS 正常，manager 将用户 OpenCode 拉起到 4104，`/global/config` 返回 200。
+- 最终运行 JAR 中旧内部模型三份兼容 SQL 与两份撤销重发补偿 SQL 的 SHA-256 均与数据库文档锁定值一致；未执行
+  `repair`、未打开 `outOfOrder`、未手工修改 history。
+
+### Result
+
+- 当前主迁移链可从合法中断点恢复，不再因上一轮过严保护影响其他开发者重启；未知旧分叉、部分旧链和新旧混合链仍会
+  被明确阻断，避免静默污染数据库历史。
+- 本次不新增或改写 migration SQL，不变更 HTTP API、RunEvent、数据库结构、MyBatis SQL、安全边界、`.env*`、
+  generated SDK 或 OpenCode 源码；未跟踪 `demo/` 保持不变且不纳入提交。Workflow 仍因缺少本机密钥而显式跳过。
