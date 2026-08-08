@@ -414,83 +414,180 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
         ><X :size="18" /></button>
       </header>
 
-      <section v-if="dialogStage === 'selection'" class="batch-toolbar">
-        <label class="batch-search">
-          <Search :size="16" />
-          <input ref="searchInput" v-model="search" type="search" placeholder="搜索需求项或子条目" />
-        </label>
-        <button type="button" class="batch-secondary" data-testid="batch-select-all" :disabled="running" @click="toggleSelectAll">
-          {{ allFilteredSelected ? "取消全选" : "全选当前结果" }}
-        </button>
-        <span class="batch-count" :class="{ 'is-limit': selectionAtLimit }">已选 {{ selectedIds.length }}/{{ MAX_SELECTION }}</span>
-      </section>
+      <!-- 主内容区：toolbar + 列表 + 右侧抽屉（flex 横向排列，抽屉展开时列表左压缩） -->
+      <div class="batch-main-area">
+        <!-- 左侧：搜索栏 + 列表 -->
+        <div class="batch-left-pane">
+          <section v-if="dialogStage === 'selection'" class="batch-toolbar">
+            <label class="batch-search">
+              <Search :size="16" />
+              <input ref="searchInput" v-model="search" type="search" placeholder="搜索需求项或子条目" />
+            </label>
+            <button type="button" class="batch-secondary" data-testid="batch-select-all" :disabled="running" @click="toggleSelectAll">
+              {{ allFilteredSelected ? "取消全选" : "全选当前结果" }}
+            </button>
+            <span class="batch-count" :class="{ 'is-limit': selectionAtLimit }">已选 {{ selectedIds.length }}/{{ MAX_SELECTION }}</span>
+          </section>
 
-      <main v-if="dialogStage === 'selection'" class="batch-dialog-body">
-        <div class="batch-table-head">
-          <span>选择</span><span>需求项 / 子条目</span><span>关联文件</span><span>执行状态</span>
-        </div>
-        <div v-if="loading" class="batch-empty"><LoaderCircle class="is-spinning" :size="18" /> 正在读取当前工作区需求结构…</div>
-        <div v-else-if="filteredReferences.length === 0" class="batch-empty">当前工作区没有匹配的需求子条目</div>
-        <label v-for="reference in filteredReferences" v-else :key="reference.id" class="batch-row">
-          <span>
-            <input
-              type="checkbox"
-              data-testid="batch-item-checkbox"
-              :checked="selectedSet.has(reference.id)"
-              :disabled="running || (!selectedSet.has(reference.id) && selectionAtLimit)"
-              @change="toggleSelection(reference, ($event.target as HTMLInputElement).checked)"
-            />
-          </span>
-          <span class="batch-reference">
-            <strong>{{ reference.subitemName }}</strong>
-            <small>{{ reference.requirementName }}</small>
-          </span>
-          <span class="batch-file-count">{{ reference.filePaths.length }} 个</span>
-          <span class="batch-status" :class="`is-${itemStates[reference.id]?.status ?? 'idle'}`">
-            <CheckCircle2 v-if="itemStates[reference.id]?.status === 'succeeded'" :size="14" />
-            <LoaderCircle v-else-if="itemStates[reference.id] && !['idle', 'failed'].includes(itemStates[reference.id]!.status)" class="is-spinning" :size="14" />
-            {{ statusText(itemStates[reference.id]) }}
-          </span>
-        </label>
-      </main>
+          <main v-if="dialogStage === 'selection'" class="batch-dialog-body">
+            <div class="batch-table-head">
+              <span>选择</span><span>需求项 / 子条目</span><span>关联文件</span><span>执行状态</span>
+            </div>
+            <div v-if="loading" class="batch-empty"><LoaderCircle class="is-spinning" :size="18" /> 正在读取当前工作区需求结构…</div>
+            <div v-else-if="filteredReferences.length === 0" class="batch-empty">当前工作区没有匹配的需求子条目</div>
+            <label v-for="reference in filteredReferences" v-else :key="reference.id" class="batch-row">
+              <span>
+                <input
+                  type="checkbox"
+                  data-testid="batch-item-checkbox"
+                  :checked="selectedSet.has(reference.id)"
+                  :disabled="running || (!selectedSet.has(reference.id) && selectionAtLimit)"
+                  @change="toggleSelection(reference, ($event.target as HTMLInputElement).checked)"
+                />
+              </span>
+              <span class="batch-reference">
+                <strong>{{ reference.subitemName }}</strong>
+                <small>{{ reference.requirementName }}</small>
+              </span>
+              <span class="batch-file-count">{{ reference.filePaths.length }} 个</span>
+              <span class="batch-status" :class="`is-${itemStates[reference.id]?.status ?? 'idle'}`">
+                <CheckCircle2 v-if="itemStates[reference.id]?.status === 'succeeded'" :size="14" />
+                <LoaderCircle v-else-if="itemStates[reference.id] && !['idle', 'failed'].includes(itemStates[reference.id]!.status)" class="is-spinning" :size="14" />
+                {{ statusText(itemStates[reference.id]) }}
+              </span>
+            </label>
+          </main>
 
-      <main v-else class="batch-dialog-body batch-progress" data-testid="batch-creation-progress">
-        <div class="batch-progress-summary">
-          <span>已选 <strong>{{ activeReferences.length }}</strong></span>
-          <span>已创建会话 <strong>{{ createdSessionCount }}</strong></span>
-          <span>成功 <strong>{{ succeededCount }}</strong></span>
-          <span :class="{ 'is-error': failedIds.length > 0 }">失败 <strong>{{ failedIds.length }}</strong></span>
-          <span v-if="executionLocked" class="batch-progress-running"><LoaderCircle class="is-spinning" :size="14" /> 正在创建，请稍候</span>
+          <main v-else class="batch-dialog-body batch-progress" data-testid="batch-creation-progress">
+            <div class="batch-progress-summary">
+              <span>已选 <strong>{{ activeReferences.length }}</strong></span>
+              <span>已创建会话 <strong>{{ createdSessionCount }}</strong></span>
+              <span>成功 <strong>{{ succeededCount }}</strong></span>
+              <span :class="{ 'is-error': failedIds.length > 0 }">失败 <strong>{{ failedIds.length }}</strong></span>
+              <span v-if="executionLocked" class="batch-progress-running"><LoaderCircle class="is-spinning" :size="14" /> 正在创建，请稍候</span>
+            </div>
+            <div class="batch-table-head is-progress">
+              <span>需求项 / 子条目</span><span>关联文件</span><span>会话</span><span>创建状态</span><span>操作</span>
+            </div>
+            <div v-for="reference in activeReferences" :key="reference.id" class="batch-row is-progress">
+              <span class="batch-reference">
+                <strong>{{ reference.subitemName }}</strong>
+                <small>{{ reference.requirementName }}</small>
+              </span>
+              <span class="batch-file-count">{{ reference.filePaths.length }} 个</span>
+              <span class="batch-session-id" :title="itemStates[reference.id]?.sessionId">
+                {{ itemStates[reference.id]?.sessionId || "尚未创建" }}
+              </span>
+              <span class="batch-status" :class="`is-${itemStates[reference.id]?.status ?? 'idle'}`">
+                <CheckCircle2 v-if="itemStates[reference.id]?.status === 'succeeded'" :size="14" />
+                <LoaderCircle v-else-if="itemStates[reference.id] && !['idle', 'failed'].includes(itemStates[reference.id]!.status)" class="is-spinning" :size="14" />
+                {{ failureText(itemStates[reference.id]) }}
+              </span>
+              <span>
+                <button
+                  v-if="itemStates[reference.id]?.status === 'failed'"
+                  type="button"
+                  class="batch-secondary batch-row-retry"
+                  :data-testid="`batch-retry-item-${batchReferenceTestId(reference.id)}`"
+                  :disabled="retryDisabled(reference.id)"
+                  @click="retryReferences([reference.id])"
+                ><RotateCcw :size="13" /> 重试</button>
+              </span>
+            </div>
+          </main>
         </div>
-        <div class="batch-table-head is-progress">
-          <span>需求项 / 子条目</span><span>关联文件</span><span>会话</span><span>创建状态</span><span>操作</span>
-        </div>
-        <div v-for="reference in activeReferences" :key="reference.id" class="batch-row is-progress">
-          <span class="batch-reference">
-            <strong>{{ reference.subitemName }}</strong>
-            <small>{{ reference.requirementName }}</small>
-          </span>
-          <span class="batch-file-count">{{ reference.filePaths.length }} 个</span>
-          <span class="batch-session-id" :title="itemStates[reference.id]?.sessionId">
-            {{ itemStates[reference.id]?.sessionId || "尚未创建" }}
-          </span>
-          <span class="batch-status" :class="`is-${itemStates[reference.id]?.status ?? 'idle'}`">
-            <CheckCircle2 v-if="itemStates[reference.id]?.status === 'succeeded'" :size="14" />
-            <LoaderCircle v-else-if="itemStates[reference.id] && !['idle', 'failed'].includes(itemStates[reference.id]!.status)" class="is-spinning" :size="14" />
-            {{ failureText(itemStates[reference.id]) }}
-          </span>
-          <span>
-            <button
-              v-if="itemStates[reference.id]?.status === 'failed'"
-              type="button"
-              class="batch-secondary batch-row-retry"
-              :data-testid="`batch-retry-item-${batchReferenceTestId(reference.id)}`"
-              :disabled="retryDisabled(reference.id)"
-              @click="retryReferences([reference.id])"
-            ><RotateCcw :size="13" /> 重试</button>
-          </span>
-        </div>
-      </main>
+
+        <!-- 右侧抽屉：作为 flex 局内元素压缩左侧列表，不占用 header/footer -->
+        <transition name="batch-drawer-slide">
+          <aside
+            v-if="(dialogStage === 'selection' && scheduleOpen) || (dialogStage === 'progress' && activeRequest?.executionMode === 'scheduled' && capacityConflictIds.length > 0)"
+            class="batch-schedule-drawer"
+            :data-testid="dialogStage === 'selection' ? 'batch-schedule-panel' : 'batch-retry-schedule'"
+          >
+            <!-- 选择阶段：定时时间选择 -->
+            <template v-if="dialogStage === 'selection' && scheduleOpen">
+              <div class="batch-schedule-drawer-head">
+                <div class="batch-schedule-drawer-title">
+                  <strong>选择定时执行时间</strong>
+                  <small>已根据选中的 {{ selectedIds.length }} 个子条目推荐/分配</small>
+                </div>
+                <button
+                  type="button"
+                  class="batch-schedule-close"
+                  aria-label="关闭定时选择"
+                  data-testid="batch-close-schedule"
+                  :disabled="executionLocked"
+                  @click="closeSchedule"
+                ><X :size="14" /></button>
+              </div>
+              <div class="batch-schedule-drawer-body">
+                <ExecutionTimePicker
+                  multiple
+                  :schedule-mode="scheduleMode"
+                  :allow-mode-switch="canScheduleCustomTime"
+                  :slots="nightSlots"
+                  :loading="nightSlotsLoading"
+                  :disabled="running"
+                  :selected-times="selectedNightTimes"
+                  :custom-input="customScheduleInput"
+                  :custom-error="customScheduleError"
+                  :custom-min="customBounds.min"
+                  :custom-max="customBounds.max"
+                  :custom-times="customTimes"
+                  @select-mode="setScheduleMode"
+                  @toggle-time="toggleNightTime"
+                  @quick-offset="setCustomOffset"
+                  @update:custom-input="updateCustomScheduleInput"
+                  @add-custom-time="addCustomTime"
+                  @remove-custom-time="(time) => customTimes = customTimes.filter((item) => item !== time)"
+                />
+              </div>
+              <div class="batch-schedule-drawer-foot">
+                <span v-if="selectedScheduleTimes.length === 0">请选择至少一个执行时间。</span>
+                <span v-else-if="!scheduleAllocation.ok" class="batch-error">所选时段总余量 {{ scheduleAllocation.remainingCapacity }}，不足以安排 {{ selectedIds.length }} 个子条目。</span>
+                <span v-else>将按时间升序轮询分配 {{ selectedScheduleTimes.length }} 个时间段。</span>
+              </div>
+            </template>
+
+            <!-- 进度阶段：容量冲突重新选时间 -->
+            <template v-else>
+              <div class="batch-schedule-drawer-head">
+                <div class="batch-schedule-drawer-title">
+                  <strong>容量冲突项重新选择时间</strong>
+                  <small>为 {{ capacityConflictIds.length }} 个冲突项安排新时段</small>
+                </div>
+              </div>
+              <div class="batch-schedule-drawer-body">
+                <ExecutionTimePicker
+                  multiple
+                  :schedule-mode="activeRequest?.scheduleMode ?? scheduleMode"
+                  :allow-mode-switch="false"
+                  :slots="nightSlots"
+                  :loading="nightSlotsLoading"
+                  :disabled="executionLocked"
+                  :selected-times="selectedNightTimes"
+                  :custom-input="customScheduleInput"
+                  :custom-error="customScheduleError"
+                  :custom-min="customBounds.min"
+                  :custom-max="customBounds.max"
+                  :custom-times="customTimes"
+                  @toggle-time="toggleNightTime"
+                  @quick-offset="setCustomOffset"
+                  @update:custom-input="updateCustomScheduleInput"
+                  @add-custom-time="addCustomTime"
+                  @remove-custom-time="(time) => customTimes = customTimes.filter((item) => item !== time)"
+                />
+              </div>
+              <div class="batch-schedule-drawer-foot">
+                <span v-if="!retryScheduleAllocation.ok" class="batch-error">
+                  所选时段总余量 {{ retryScheduleAllocation.remainingCapacity }}，不足以重试 {{ capacityConflictIds.length }} 个子条目。
+                </span>
+                <span v-else>重试时段余量充足。</span>
+              </div>
+            </template>
+          </aside>
+        </transition>
+      </div>
 
       <footer v-if="dialogStage === 'selection'" class="batch-dialog-foot">
         <label class="batch-requirement">
@@ -541,96 +638,6 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
 
     </div>
 
-    <!-- 右侧弹出定时执行时间选择抽屉：作为 overlay 兄弟节点，position:fixed 贴靠视口右侧，不遮挡弹层内容 -->
-    <transition name="batch-drawer-slide">
-      <aside
-        v-if="(dialogStage === 'selection' && scheduleOpen) || (dialogStage === 'progress' && activeRequest?.executionMode === 'scheduled' && capacityConflictIds.length > 0)"
-        class="batch-schedule-drawer"
-        :data-testid="dialogStage === 'selection' ? 'batch-schedule-panel' : 'batch-retry-schedule'"
-      >
-        <!-- 选择阶段：定时时间选择 -->
-        <template v-if="dialogStage === 'selection' && scheduleOpen">
-          <div class="batch-schedule-drawer-head">
-            <div class="batch-schedule-drawer-title">
-              <strong>选择定时执行时间</strong>
-              <small>已根据选中的 {{ selectedIds.length }} 个子条目推荐/分配</small>
-            </div>
-            <button
-              type="button"
-              class="batch-schedule-close"
-              aria-label="关闭定时选择"
-              data-testid="batch-close-schedule"
-              :disabled="executionLocked"
-              @click="closeSchedule"
-            ><X :size="14" /></button>
-          </div>
-          <div class="batch-schedule-drawer-body">
-            <ExecutionTimePicker
-              multiple
-              :schedule-mode="scheduleMode"
-              :allow-mode-switch="canScheduleCustomTime"
-              :slots="nightSlots"
-              :loading="nightSlotsLoading"
-              :disabled="running"
-              :selected-times="selectedNightTimes"
-              :custom-input="customScheduleInput"
-              :custom-error="customScheduleError"
-              :custom-min="customBounds.min"
-              :custom-max="customBounds.max"
-              :custom-times="customTimes"
-              @select-mode="setScheduleMode"
-              @toggle-time="toggleNightTime"
-              @quick-offset="setCustomOffset"
-              @update:custom-input="updateCustomScheduleInput"
-              @add-custom-time="addCustomTime"
-              @remove-custom-time="(time) => customTimes = customTimes.filter((item) => item !== time)"
-            />
-          </div>
-          <div class="batch-schedule-drawer-foot">
-            <span v-if="selectedScheduleTimes.length === 0">请选择至少一个执行时间。</span>
-            <span v-else-if="!scheduleAllocation.ok" class="batch-error">所选时段总余量 {{ scheduleAllocation.remainingCapacity }}，不足以安排 {{ selectedIds.length }} 个子条目。</span>
-            <span v-else>将按时间升序轮询分配 {{ selectedScheduleTimes.length }} 个时间段。</span>
-          </div>
-        </template>
-
-        <!-- 进度阶段：容量冲突重新选时间 -->
-        <template v-else>
-          <div class="batch-schedule-drawer-head">
-            <div class="batch-schedule-drawer-title">
-              <strong>容量冲突项重新选择时间</strong>
-              <small>为 {{ capacityConflictIds.length }} 个冲突项安排新时段</small>
-            </div>
-          </div>
-          <div class="batch-schedule-drawer-body">
-            <ExecutionTimePicker
-              multiple
-              :schedule-mode="activeRequest.scheduleMode ?? scheduleMode"
-              :allow-mode-switch="false"
-              :slots="nightSlots"
-              :loading="nightSlotsLoading"
-              :disabled="executionLocked"
-              :selected-times="selectedNightTimes"
-              :custom-input="customScheduleInput"
-              :custom-error="customScheduleError"
-              :custom-min="customBounds.min"
-              :custom-max="customBounds.max"
-              :custom-times="customTimes"
-              @toggle-time="toggleNightTime"
-              @quick-offset="setCustomOffset"
-              @update:custom-input="updateCustomScheduleInput"
-              @add-custom-time="addCustomTime"
-              @remove-custom-time="(time) => customTimes = customTimes.filter((item) => item !== time)"
-            />
-          </div>
-          <div class="batch-schedule-drawer-foot">
-            <span v-if="!retryScheduleAllocation.ok" class="batch-error">
-              所选时段总余量 {{ retryScheduleAllocation.remainingCapacity }}，不足以重试 {{ capacityConflictIds.length }} 个子条目。
-            </span>
-            <span v-else>重试时段余量充足。</span>
-          </div>
-        </template>
-      </aside>
-    </transition>
   </div>
 </template>
 
@@ -646,7 +653,8 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
 }
 .batch-dialog {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  /* header | 主内容区（列表+抽屉横排）| footer */
+  grid-template-rows: auto 1fr auto;
   max-width: 1180px;
   min-width: 720px;
   overflow: hidden;
@@ -656,8 +664,7 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
   color: #263548;
   box-shadow: 0 26px 80px rgba(20, 31, 51, 0.28);
 }
-.batch-dialog.is-progress { grid-template-rows: auto minmax(0, 1fr) auto; }
-.batch-dialog.is-progress.has-retry-schedule { grid-template-rows: auto minmax(0, 1fr) auto; }
+/* is-progress 不再需要单独覆写 grid-template-rows，由 .batch-main-area 内部处理 */
 .batch-dialog-head {
   display: flex;
   align-items: flex-start;
@@ -684,7 +691,21 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
 .batch-secondary:disabled, .batch-primary:disabled { cursor: not-allowed; opacity: .45; }
 .batch-count { color: #6d7b8b; font-size: 12px; font-variant-numeric: tabular-nums; }
 .batch-count.is-limit { color: #9f2e38; font-weight: 700; }
-.batch-dialog-body { min-height: 0; overflow: auto; padding: 0 16px 10px; background: #f7f9fc; }
+/* 主内容区：flex 横向，左侧列表 + 右侧抽屉 */
+.batch-main-area {
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+/* 左侧面板：搜索栏 + 列表，抽屉展开时被压缩 */
+.batch-left-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.batch-dialog-body { min-height: 0; flex: 1; overflow: auto; padding: 0 16px 10px; background: #f7f9fc; }
 .batch-table-head, .batch-row { display: grid; grid-template-columns: 56px minmax(240px, 1fr) 110px 150px; align-items: center; }
 .batch-table-head.is-progress, .batch-row.is-progress { grid-template-columns: minmax(190px, 1fr) 90px minmax(150px, .8fr) minmax(180px, 1fr) 80px; gap: 10px; }
 .batch-table-head { position: sticky; z-index: 2; top: 0; min-height: 36px; border-bottom: 1px solid #dfe6ee; background: #f7f9fc; color: #7b8999; font-size: 11px; font-weight: 700; }
@@ -709,21 +730,16 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
 .batch-progress-running { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; color: #8f2731; font-weight: 700; }
 .batch-row-retry { min-height: 28px; padding: 0 8px; }
 
-/* 右侧侧边抽屉面板样式 */
+/* 右侧侧边抽屉面板：flex 子元素，展开时将左侧列表向左压缩 */
 .batch-schedule-drawer {
-  /* position:fixed 贴靠视口右侧，完全在对话框外部弹出，不遮挡弹层内容 */
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 440px;
-  max-width: 100vw;
-  z-index: 2201;
+  flex-shrink: 0;
+  width: 380px;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background: #ffffff;
   border-left: 1px solid #dce4ec;
-  box-shadow: -8px 0 32px rgba(18, 25, 42, 0.16);
+  box-shadow: -4px 0 20px rgba(18, 25, 42, 0.12);
 }
 .batch-schedule-drawer-head {
   display: flex;
@@ -769,15 +785,15 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
 .batch-schedule-close:hover:not(:disabled) { background: #dfe7ef; color: #8f2731; }
 .batch-schedule-close:disabled { cursor: not-allowed; opacity: .45; }
 
-/* Slide-in transition from right */
+/* width 滑入动画：抽屉展开 width 从 0→380px，左侧列表同步压缩 */
 .batch-drawer-slide-enter-active,
 .batch-drawer-slide-leave-active {
-  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+  transition: width 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
 }
 .batch-drawer-slide-enter-from,
 .batch-drawer-slide-leave-to {
-  transform: translateX(100%);
-  opacity: 0;
+  width: 0 !important;
 }
 
 .batch-mode-switch { display: flex; gap: 3px; padding: 3px; border-radius: 8px; background: #dfe7ef; }
@@ -811,6 +827,6 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
 @media (max-width: 980px) {
   .batch-dialog { width: calc(100vw - 24px) !important; min-width: 0; }
   .batch-dialog-foot { grid-template-columns: 1fr; }
-  .batch-schedule-drawer { width: min(440px, 100vw); }
+  .batch-schedule-drawer { width: min(380px, 100%); }
 }
 </style>
