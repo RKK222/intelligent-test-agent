@@ -25,6 +25,8 @@ const filterProviderId = ref("");
 const filterOutcomeGroup = ref<InternalModelCallOutcomeGroup | "">("");
 // 默认只看真实用户调用，避免每 5 分钟一次的探活把业务 TTFT/成功率冲淡。
 const filterSource = ref<InternalModelCallSource | "">("USER_CALL");
+const filterUcid = ref("");
+const customTimeRange = ref<[string, string] | null>(null);
 const page = ref(1);
 const pageSize = 20;
 const HOUR_MILLIS = 3_600_000;
@@ -55,7 +57,24 @@ function createQueryWindow(hours = selectedWindowHours.value, nowMillis = Date.n
 const queryWindow = ref<QueryWindow>(createQueryWindow());
 
 function onWindowHoursChange() {
-  queryWindow.value = createQueryWindow(selectedWindowHours.value);
+  if (selectedWindowHours.value) {
+    customTimeRange.value = null;
+    queryWindow.value = createQueryWindow(selectedWindowHours.value);
+    applyFilters();
+  }
+}
+
+function onCustomTimeRangeChange(val: [string, string] | null) {
+  if (val && val.length === 2) {
+    selectedWindowHours.value = 0;
+    queryWindow.value = {
+      from: new Date(val[0]).toISOString(),
+      to: new Date(val[1]).toISOString()
+    };
+  } else {
+    selectedWindowHours.value = 24;
+    queryWindow.value = createQueryWindow(24);
+  }
   applyFilters();
 }
 
@@ -213,8 +232,23 @@ async function refreshAll() {
 }
 
 const probeStatuses = computed(() => probeStatusQuery.data.value ?? []);
-const records = computed(() => recordsQuery.data.value?.items ?? []);
-const recordsTotal = computed(() => recordsQuery.data.value?.total ?? 0);
+/** 从已获取的明细数据中动态汇总所有出现过的用户 ID 供下拉选单快捷选择。 */
+const ucidOptions = computed(() => {
+  const set = new Set<string>();
+  for (const item of recordsQuery.data.value?.items ?? []) {
+    if (item.ucid && item.ucid.trim()) {
+      set.add(item.ucid.trim());
+    }
+  }
+  return [...set].sort();
+});
+const records = computed(() => {
+  const list = recordsQuery.data.value?.items ?? [];
+  if (!filterUcid.value) return list;
+  const keyword = filterUcid.value.trim().toLowerCase();
+  return list.filter((row) => row.ucid && row.ucid.toLowerCase().includes(keyword));
+});
+const recordsTotal = computed(() => records.value.length);
 // stats API 返回底层 outcome；页面按大类筛选，明细 API 使用相同大类，保证两块口径一致。
 const stats = computed(() => (statsQuery.data.value ?? []).filter((row) =>
   !filterOutcomeGroup.value || outcomeGroupOf(row.outcome) === filterOutcomeGroup.value
@@ -731,6 +765,33 @@ function onPageChange(next: number) {
               :key="option.value"
               :label="option.label"
               :value="option.value"
+            />
+          </el-select>
+          <el-date-picker
+            v-model="customTimeRange"
+            type="datetimerange"
+            range-separator="至"
+            start-placeholder="开始时间"
+            end-placeholder="结束时间"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            class="ta-imob-filter-date"
+            @change="onCustomTimeRangeChange"
+          />
+          <el-select
+            v-model="filterUcid"
+            placeholder="按人 (用户)"
+            clearable
+            filterable
+            allow-create
+            default-first-option
+            class="ta-imob-filter"
+            @change="applyFilters"
+          >
+            <el-option
+              v-for="user in ucidOptions"
+              :key="user"
+              :label="user"
+              :value="user"
             />
           </el-select>
           <el-select
@@ -1466,6 +1527,9 @@ function onPageChange(next: number) {
 }
 .ta-imob-filter {
   width: 160px;
+}
+.ta-imob-filter-date {
+  max-width: 340px;
 }
 .ta-imob-probe-all-btn {
   display: inline-flex;
