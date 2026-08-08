@@ -9,6 +9,31 @@ import {
 } from "../src";
 
 describe("backend-api", () => {
+  it("passes the grouped internal-model outcome filter to the observability API", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: { items: [], page: 1, size: 20, total: 0 }
+    }), { status: 200 }));
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await client.listInternalModelCallRecords({
+      providerId: "enterprise-deepseek",
+      outcomeGroup: "UPSTREAM_FAILURE",
+      source: "USER_CALL",
+      from: "2026-08-07T00:00:00Z",
+      to: "2026-08-08T00:00:00Z",
+      page: 2,
+      size: 50
+    });
+
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      "http://api/api/internal/platform/opencode-runtime/internal-model-observability/call-records"
+      + "?providerId=enterprise-deepseek&outcomeGroup=UPSTREAM_FAILURE&source=USER_CALL"
+      + "&from=2026-08-07T00%3A00%3A00Z&to=2026-08-08T00%3A00%3A00Z&page=2&size=50"
+    );
+  });
+
   it("requests a fresh generated support incident suggestion", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       success: true,

@@ -31,15 +31,38 @@ public class InternalModelProxyController {
         String traceId = RuntimeApiSupport.traceId(exchange);
         return Mono.defer(() -> {
             // 鉴权和供应商快照解析必须先于请求体订阅，避免无效请求占用 2 MiB 聚合缓冲区。
-            InternalModelProxyForwardingService.PreparedRequest preparedRequest =
-                    forwardingService.prepareRequest(exchange);
+            InternalModelProxyForwardingService.PreparedRequest preparedRequest;
+            try {
+                preparedRequest = forwardingService.prepareRequest(exchange);
+            } catch (PlatformException exception) {
+                forwardingService.recordPrepareRequestFailure(exchange, traceId, exception);
+                throw exception;
+            }
             long contentLength = exchange.getRequest().getHeaders().getContentLength();
             if (contentLength > MAX_REQUEST_BODY_BYTES) {
-                return Mono.error(payloadTooLarge());
+                PlatformException exception = payloadTooLarge();
+                forwardingService.recordRequestValidationFailure(exchange, traceId, exception);
+                return Mono.error(exception);
             }
             return readRequestBody(exchange)
-                    .flatMap(body -> forwardingService.forward(exchange, body, traceId, preparedRequest));
+                    .flatMap(body -> forwardBody(exchange, body, traceId, preparedRequest));
         });
+    }
+
+    /**
+     * 转发请求体；同步校验失败（缺 model、非法 JSON、responses 转换）记录后原样抛出。
+     */
+    private Mono<Void> forwardBody(
+            ServerWebExchange exchange,
+            byte[] body,
+            String traceId,
+            InternalModelProxyForwardingService.PreparedRequest preparedRequest) {
+        try {
+            return forwardingService.forward(exchange, body, traceId, preparedRequest);
+        } catch (PlatformException exception) {
+            forwardingService.recordRequestValidationFailure(exchange, traceId, exception);
+            throw exception;
+        }
     }
 
     /**

@@ -329,6 +329,12 @@ class UserOpencodeBackendRoutingWebFilterTest {
     }
 
     @Test
+    void internalModelObservabilityStaysOnCurrentBackendBecauseItReadsSharedStatistics() {
+        assertRequestIsNotForwarded(
+                "/api/internal/platform/opencode-runtime/internal-model-observability/call-records");
+    }
+
+    @Test
     void routesConfigurationWorkspaceCreationBecauseItRequiresUserOpencodeServer() {
         assertRequestIsForwarded("/api/internal/platform/configuration-management/applications/app_1/workspaces");
     }

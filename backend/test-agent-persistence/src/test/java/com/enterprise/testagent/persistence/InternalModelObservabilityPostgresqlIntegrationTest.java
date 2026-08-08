@@ -1,0 +1,144 @@
+package com.enterprise.testagent.persistence;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcome;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecord;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordRepository;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallSource;
+import com.enterprise.testagent.persistence.mybatis.InternalModelObservabilityMapper;
+import com.enterprise.testagent.persistence.mybatis.MyBatisInternalModelCallRecordRepository;
+import java.time.Instant;
+import java.util.Properties;
+import javax.sql.DataSource;
+import org.apache.ibatis.mapping.VendorDatabaseIdProvider;
+import org.apache.ibatis.session.SqlSessionFactory;
+import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.mybatis.spring.SqlSessionFactoryBean;
+import org.mybatis.spring.SqlSessionTemplate;
+import org.postgresql.ds.PGSimpleDataSource;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
+
+/** 使用真实 PostgreSQL 验证已部署首 token 基线升级、流完成列和 ON CONFLICT 聚合。 */
+@Testcontainers(disabledWithoutDocker = true)
+class InternalModelObservabilityPostgresqlIntegrationTest {
+
+    private static final Instant STARTED_AT = Instant.parse("2026-08-07T12:34:56Z");
+
+    @Container
+    private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
+            DockerImageName.parse("postgres:16-alpine"));
+
+    private static JdbcClient jdbc;
+    private static InternalModelCallRecordRepository repository;
+
+    @BeforeAll
+    static void setUp() throws Exception {
+        PGSimpleDataSource dataSource = new PGSimpleDataSource();
+        dataSource.setURL(POSTGRES.getJdbcUrl());
+        dataSource.setUser(POSTGRES.getUsername());
+        dataSource.setPassword(POSTGRES.getPassword());
+
+        Flyway baseline = Flyway.configure()
+                .dataSource(dataSource)
+                .locations("classpath:db/migration")
+                .target("20260807203000")
+                .load();
+        baseline.migrate();
+        jdbc = JdbcClient.create(dataSource);
+        assertThat(columnExists("internal_model_call_records", "stream_complete_ms")).isFalse();
+
+        Flyway.configure()
+                .dataSource(dataSource)
+                .locations("classpath:db/migration")
+                .load()
+                .migrate();
+        assertThat(columnExists("internal_model_call_records", "stream_complete_ms")).isTrue();
+        assertThat(jdbc.sql("""
+                        select success from flyway_schema_history
+                        where version = '20260807222227'
+                        """)
+                .query(Boolean.class)
+                .single()).isTrue();
+
+        SqlSessionTemplate template = new SqlSessionTemplate(sqlSessionFactory(dataSource));
+        repository = new MyBatisInternalModelCallRecordRepository(
+                template.getMapper(InternalModelObservabilityMapper.class));
+    }
+
+    @Test
+    void recordsAndAggregatesOnlyCompletedStreams() {
+        repository.record(record(120L));
+        repository.record(record(null));
+
+        assertThat(jdbc.sql("""
+                        select stream_complete_ms from internal_model_call_records
+                        order by id
+                        """)
+                .query(Long.class)
+                .list()).containsExactly(120L, null);
+
+        var stat = repository.queryHourlyStats(
+                        "provider-pg", InternalModelCallSource.USER_CALL,
+                        STARTED_AT.minusSeconds(3600), STARTED_AT.plusSeconds(3600))
+                .getFirst();
+        assertThat(stat.requestCount()).isEqualTo(2L);
+        assertThat(stat.firstTokenCount()).isEqualTo(2L);
+        assertThat(stat.streamCompleteMillisSum()).isEqualTo(120L);
+        assertThat(stat.streamCompleteMillisMax()).isEqualTo(120L);
+        assertThat(stat.streamCompleteCount()).isEqualTo(1L);
+    }
+
+    private static InternalModelCallRecord record(Long streamCompleteMillis) {
+        return new InternalModelCallRecord(
+                null,
+                "provider-pg",
+                "model-pg",
+                "/chat/completions",
+                InternalModelCallSource.USER_CALL,
+                InternalModelCallOutcome.CLIENT_DISCONNECTED,
+                200,
+                null,
+                true,
+                150L,
+                10L,
+                40L,
+                streamCompleteMillis,
+                "trace_pg",
+                "ucid_pg",
+                STARTED_AT);
+    }
+
+    private static boolean columnExists(String tableName, String columnName) {
+        return jdbc.sql("""
+                        select count(*) from information_schema.columns
+                        where table_schema = 'public'
+                          and table_name = :tableName
+                          and column_name = :columnName
+                        """)
+                .param("tableName", tableName)
+                .param("columnName", columnName)
+                .query(Long.class)
+                .single() > 0;
+    }
+
+    private static SqlSessionFactory sqlSessionFactory(DataSource dataSource) throws Exception {
+        VendorDatabaseIdProvider databaseIdProvider = new VendorDatabaseIdProvider();
+        Properties databaseIds = new Properties();
+        databaseIds.setProperty("PostgreSQL", "postgresql");
+        databaseIdProvider.setProperties(databaseIds);
+        SqlSessionFactoryBean factory = new SqlSessionFactoryBean();
+        factory.setDataSource(dataSource);
+        factory.setDatabaseIdProvider(databaseIdProvider);
+        factory.setMapperLocations(new PathMatchingResourcePatternResolver()
+                .getResources("classpath*:mybatis/**/*.xml"));
+        return factory.getObject();
+    }
+}

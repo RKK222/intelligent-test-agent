@@ -18,6 +18,7 @@
 - `mybatis.MyBatisCommonParameterRepository`：通用参数领域端口的生产 Bean。
 - `mybatis.InternalModelProviderMapper` / `mybatis/InternalModelProviderMapper.xml`：内部模型供应商、可复用 Token 定义、Provider 关联和一次联表运行快照的全部关系型 SQL。
 - `mybatis.MyBatisInternalModelProviderRepository` / `mybatis.MyBatisInternalModelTokenRepository`：内部模型供应商与 Token 定义领域端口的生产 Bean；普通返回模型不包含 Token 明文。
+- `mybatis.InternalModelObservabilityMapper` / `mybatis/InternalModelObservabilityMapper.xml` / `mybatis.MyBatisInternalModelCallRecordRepository`：内部模型结构化明细、小时聚合和探活状态实现；明细结果大类通过低基数 `outcome IN (...)` 过滤，关系型 SQL 只存在于 MyBatis XML。
 - `mybatis.UserDeletionMapper` / `mybatis/UserDeletionMapper.xml` / `mybatis.MyBatisUserDeletionRepository`：用户安全删除领域端口的生产实现，锁定目标用户、识别会话/工作区/进程/调度等受保护引用，并按外键顺序清理可随账号删除的附属表。
 - `mybatis.UserManagementQueryMapper` / `mybatis/UserManagementQueryMapper.xml` / `mybatis.MyBatisUserManagementQueryRepository`：用户管理组合分页查询及“全部检索结果”有界 ID 解析端口的生产实现，按关键字、有效角色/未分配角色、组织和部门筛选，并可排除当前操作者；不扩展存量 JDBC SQL。
 - `mybatis.SupportAccessMapper` / `mybatis/SupportAccessMapper.xml` / `mybatis.MyBatisSupportAccessRepository`：短期只读排查授权快照、目标切换和逐次资源访问审计的关系型 SQL 与生产实现；审计按超级管理员可见并保留一年。

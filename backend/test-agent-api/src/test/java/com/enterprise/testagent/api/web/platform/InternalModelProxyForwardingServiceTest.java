@@ -1,15 +1,21 @@
 package com.enterprise.testagent.api.web.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.enterprise.testagent.domain.configuration.InternalModelProvider;
 import com.enterprise.testagent.domain.configuration.InternalModelProviderRepository;
 import com.enterprise.testagent.domain.configuration.InternalModelProviderRuntimeConfig;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecord;
+import com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallRecordRepository;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProviderRegistry;
 import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelProxyRuntimeSettings;
+import com.enterprise.testagent.opencode.runtime.internalmodel.InternalModelSseStreamObserver;
+import com.enterprise.testagent.opencode.runtime.internalmodel.observability.InternalModelCallRecorder;
 import com.enterprise.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -21,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -69,6 +76,42 @@ class InternalModelProxyForwardingServiceTest {
     }
 
     @Test
+    void timesOutWhenOnlyCommentEventsArriveBeforeFirstOutput() {
+        InternalModelProxyForwardingService service = service(WebClient.create());
+        Flux<ServerSentEvent<String>> comments = Flux.interval(Duration.ofMillis(20))
+                .map(ignored -> ServerSentEvent.<String>builder().comment("keepalive").build());
+
+        // 过滤掉心跳本身，只断言超时终态；超时算子仍会在上游接收这些事件。
+        StepVerifier.create(service.withSseTimeouts(comments).filter(ignored -> false))
+                .expectErrorSatisfies(error -> assertThat(error).isInstanceOf(TimeoutException.class))
+                .verify(Duration.ofSeconds(1));
+    }
+
+    @Test
+    void ignoresRoleOnlyChunkWhenMeasuringFirstToken() {
+        InternalModelProxyForwardingService.CallObservation observation =
+                new InternalModelProxyForwardingService.CallObservation(
+                        PROVIDER_ID, "Qwen3.6-27B", "/chat/completions", "trace_first_token", "ucid");
+        InternalModelSseStreamObserver observer = new InternalModelSseStreamObserver(new ObjectMapper());
+        observation.markFirstByte(HttpStatus.OK);
+        observation.markSseEvent(observer.inspect(ServerSentEvent.<String>builder()
+                .data("{\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}")
+                .build()));
+        observation.markSseEvent(observer.inspect(ServerSentEvent.<String>builder()
+                .data("ping")
+                .build()));
+        observation.markSseEvent(observer.inspect(ServerSentEvent.<String>builder()
+                .data("{\"choices\":[")
+                .build()));
+        assertThat(observation.toRecord().firstTokenMillis()).isNull();
+
+        observation.markSseEvent(observer.inspect(ServerSentEvent.<String>builder()
+                .data("{\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}")
+                .build()));
+        assertThat(observation.toRecord().firstTokenMillis()).isNotNull();
+    }
+
+    @Test
     void forwardsEachProviderWithItsProviderIdMappedToken() {
         List<String> authorizationHeaders = new CopyOnWriteArrayList<>();
         WebClient webClient = WebClient.builder()
@@ -93,6 +136,148 @@ class InternalModelProxyForwardingServiceTest {
         assertThat(authorizationHeaders).containsExactlyInAnyOrder("Bearer qwen-token", "Bearer deepseek-token");
     }
 
+    @Test
+    void recordsSuccessfulForwardWithProviderModelAndDuration() {
+        List<InternalModelCallRecord> recorded = new CopyOnWriteArrayList<>();
+        WebClient webClient = WebClient.builder()
+                .exchangeFunction(request -> Mono.just(org.springframework.web.reactive.function.client.ClientResponse
+                        .create(HttpStatus.OK)
+                        .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                        .body("{}")
+                        .build()))
+                .build();
+        InternalModelProxyForwardingService service = service(
+                webClient, List.of(runtimeConfig(PROVIDER_ID, MODEL_TOKEN)), recorded);
+
+        StepVerifier.create(service.forward(exchange(), REQUEST_BODY, "trace_observe"))
+                .verifyComplete();
+
+        // recorder 在 boundedElastic 上异步落库，等待记录写入后再断言。
+        awaitRecorded(recorded);
+        assertThat(recorded).hasSize(1);
+        InternalModelCallRecord record = recorded.getFirst();
+        assertThat(record.providerId()).isEqualTo(PROVIDER_ID);
+        assertThat(record.model()).isEqualTo("Qwen3.6-27B");
+        assertThat(record.outcome()).isEqualTo(com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcome.SUCCESS);
+        assertThat(record.httpStatus()).isEqualTo(200);
+        assertThat(record.traceId()).isEqualTo("trace_observe");
+        assertThat(record.durationMillis()).isGreaterThanOrEqualTo(0);
+    }
+
+    @Test
+    void recordsMidStreamErrorWithoutOverwritingToSuccess() {
+        List<InternalModelCallRecord> recorded = new CopyOnWriteArrayList<>();
+        org.springframework.core.io.buffer.DataBufferFactory bufferFactory =
+                org.springframework.core.io.buffer.DefaultDataBufferFactory.sharedInstance;
+        WebClient webClient = WebClient.builder()
+                .exchangeFunction(request -> Mono.just(org.springframework.web.reactive.function.client.ClientResponse
+                        .create(HttpStatus.OK)
+                        .header(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_EVENT_STREAM_VALUE)
+                        .body(Flux.concat(
+                                Flux.just(bufferFactory.wrap(
+                                        "data: {\"choices\":[{\"delta\":{\"content\":\"首条\"}}]}\n\n"
+                                                .getBytes(StandardCharsets.UTF_8))),
+                                Flux.error(new RuntimeException("stream broken"))))
+                        .build()))
+                .build();
+        InternalModelProxyForwardingService service = service(
+                webClient, List.of(runtimeConfig(PROVIDER_ID, MODEL_TOKEN)), recorded);
+
+        StepVerifier.create(service.forward(exchange(), REQUEST_BODY, "trace_stream_error"))
+                .verifyError();
+
+        awaitRecorded(recorded);
+        assertThat(recorded).hasSize(1);
+        // 首字节已到、首事件已到但流中途异常：必须保留 UPSTREAM_STREAM_FAILED，不得被覆盖成 SUCCESS。
+        assertThat(recorded.getFirst().outcome())
+                .isEqualTo(com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcome.UPSTREAM_STREAM_FAILED);
+        assertThat(recorded.getFirst().httpStatus()).isEqualTo(200);
+    }
+
+    @Test
+    void recordsFirstTokenSeparatelyAndClassifiesStreamWithoutDoneAsInterrupted() {
+        List<InternalModelCallRecord> recorded = new CopyOnWriteArrayList<>();
+        org.springframework.core.io.buffer.DataBufferFactory bufferFactory =
+                org.springframework.core.io.buffer.DefaultDataBufferFactory.sharedInstance;
+        WebClient webClient = WebClient.builder()
+                .exchangeFunction(request -> Mono.just(org.springframework.web.reactive.function.client.ClientResponse
+                        .create(HttpStatus.OK)
+                        .header(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_EVENT_STREAM_VALUE)
+                        .body(Flux.just(bufferFactory.wrap(
+                                "data: {\"choices\":[{\"delta\":{\"content\":\"首 token\"}}]}\n\n"
+                                        .getBytes(StandardCharsets.UTF_8))))
+                        .build()))
+                .build();
+        InternalModelProxyForwardingService service = service(
+                webClient, List.of(runtimeConfig(PROVIDER_ID, MODEL_TOKEN)), recorded);
+
+        StepVerifier.create(service.forward(exchange(), REQUEST_BODY, "trace_missing_done"))
+                .verifyComplete();
+
+        awaitRecorded(recorded);
+        assertThat(recorded).hasSize(1);
+        InternalModelCallRecord record = recorded.getFirst();
+        assertThat(record.outcome())
+                .isEqualTo(com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcome.UPSTREAM_STREAM_INTERRUPTED);
+        assertThat(record.firstByteMillis()).isNotNull();
+        assertThat(record.firstTokenMillis()).isNotNull();
+        assertThat(record.firstTokenMillis()).isLessThanOrEqualTo(record.durationMillis());
+        assertThat(record.streamCompleteMillis()).isNull();
+    }
+
+    @Test
+    void recordsEmptySseAsInterruptedWithoutFirstToken() {
+        List<InternalModelCallRecord> recorded = new CopyOnWriteArrayList<>();
+        WebClient webClient = WebClient.builder()
+                .exchangeFunction(request -> Mono.just(org.springframework.web.reactive.function.client.ClientResponse
+                        .create(HttpStatus.OK)
+                        .header(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_EVENT_STREAM_VALUE)
+                        .body(Flux.empty())
+                        .build()))
+                .build();
+        InternalModelProxyForwardingService service = service(
+                webClient, List.of(runtimeConfig(PROVIDER_ID, MODEL_TOKEN)), recorded);
+
+        StepVerifier.create(service.forward(exchange(), REQUEST_BODY, "trace_empty_stream"))
+                .verifyComplete();
+
+        awaitRecorded(recorded);
+        assertThat(recorded).hasSize(1);
+        assertThat(recorded.getFirst().outcome())
+                .isEqualTo(com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcome.UPSTREAM_STREAM_INTERRUPTED);
+        assertThat(recorded.getFirst().firstTokenMillis()).isNull();
+        assertThat(recorded.getFirst().streamCompleteMillis()).isNull();
+    }
+
+    @Test
+    void recordsDoneAsUpstreamStreamCompletion() {
+        List<InternalModelCallRecord> recorded = new CopyOnWriteArrayList<>();
+        org.springframework.core.io.buffer.DataBufferFactory bufferFactory =
+                org.springframework.core.io.buffer.DefaultDataBufferFactory.sharedInstance;
+        String body = "data: {\"choices\":[{\"delta\":{\"content\":\"完成\"}}]}\n\n"
+                + "data: [DONE]\n\n";
+        WebClient webClient = WebClient.builder()
+                .exchangeFunction(request -> Mono.just(org.springframework.web.reactive.function.client.ClientResponse
+                        .create(HttpStatus.OK)
+                        .header(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_EVENT_STREAM_VALUE)
+                        .body(Flux.just(bufferFactory.wrap(body.getBytes(StandardCharsets.UTF_8))))
+                        .build()))
+                .build();
+        InternalModelProxyForwardingService service = service(
+                webClient, List.of(runtimeConfig(PROVIDER_ID, MODEL_TOKEN)), recorded);
+
+        StepVerifier.create(service.forward(exchange(), REQUEST_BODY, "trace_done"))
+                .verifyComplete();
+
+        awaitRecorded(recorded);
+        InternalModelCallRecord record = recorded.getFirst();
+        assertThat(record.outcome())
+                .isEqualTo(com.enterprise.testagent.domain.internalmodelobservability.InternalModelCallOutcome.SUCCESS);
+        assertThat(record.streamCompleteMillis()).isNotNull();
+        assertThat(record.streamCompleteMillis()).isGreaterThanOrEqualTo(record.firstTokenMillis());
+        assertThat(record.streamCompleteMillis()).isLessThanOrEqualTo(record.durationMillis());
+    }
+
     private InternalModelProxyForwardingService service(WebClient webClient) {
         return service(webClient, List.of(runtimeConfig(PROVIDER_ID, MODEL_TOKEN)));
     }
@@ -100,6 +285,13 @@ class InternalModelProxyForwardingServiceTest {
     private InternalModelProxyForwardingService service(
             WebClient webClient,
             List<InternalModelProviderRuntimeConfig> runtimeConfigs) {
+        return service(webClient, runtimeConfigs, new CopyOnWriteArrayList<>());
+    }
+
+    private InternalModelProxyForwardingService service(
+            WebClient webClient,
+            List<InternalModelProviderRuntimeConfig> runtimeConfigs,
+            List<InternalModelCallRecord> captured) {
         InternalModelProviderRepository repository = mock(InternalModelProviderRepository.class);
         when(repository.findEnabledRuntimeConfigs()).thenReturn(runtimeConfigs);
         InternalModelProviderRegistry registry = new InternalModelProviderRegistry(repository);
@@ -112,9 +304,31 @@ class InternalModelProxyForwardingServiceTest {
                 settings,
                 webClient,
                 new ObjectMapper(),
+                recorder(captured),
                 SHORT_TIMEOUT,
                 SHORT_TIMEOUT,
                 SHORT_TIMEOUT);
+    }
+
+    private static void awaitRecorded(List<InternalModelCallRecord> recorded) {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+        while (recorded.isEmpty() && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+    }
+
+    private InternalModelCallRecorder recorder(List<InternalModelCallRecord> captured) {
+        InternalModelCallRecordRepository repository = mock(InternalModelCallRecordRepository.class);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            captured.add(invocation.getArgument(0));
+            return null;
+        }).when(repository).record(any(InternalModelCallRecord.class));
+        return new InternalModelCallRecorder(repository);
     }
 
     private InternalModelProviderRuntimeConfig runtimeConfig(String providerId, String authToken) {

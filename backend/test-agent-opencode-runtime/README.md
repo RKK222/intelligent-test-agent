@@ -82,6 +82,10 @@
 
 `test-agent.model-catalog.source` 和 `ai_model_configs` 相关类保留历史兼容，但不再参与前端模型目录、供应商目录、Run 模型校验或默认模型回退。内部供应商维护在 `internal_model_providers`，外部 Token 记录在 `internal_model_tokens` 并由 `token_id` 关联；旧 `internal_model_proxy_settings` 只供滚动升级兼容。Java 启动和既有刷新事件会用一次联表查询构建 `InternalModelProviderRegistry` 的 `providersById` 与 `authTokensByProviderId`，地址和 Token 在刷新瞬间不会串代。
 
+## 内部模型调用可观测
+
+代理转发链路上对每次调用落结构化明细（`internal_model_call_records`）并小时聚合（`internal_model_call_stats_hourly`），按 `InternalModelCallOutcome` 保留连接/超时/流中断/HTTP 错误等精确原因，再由 `InternalModelCallOutcomeGroup` 归并为五个看板大类。代理与探活共同复用 `InternalModelSseStreamObserver`，每个 chunk 只解析一次并先记录到达时刻；只有 OpenAI-compatible `choices` 中的 `content/reasoning_content/refusal/legacy text/工具输出` 算真实输出，注释、role/usage、伪心跳和畸形 data 均不能产生首 Token 或刷新截止时间。`firstByteMillis` 表示响应头到达，`firstTokenMillis` 按 Time to First Token（TTFT）表示首个有效 Token 到达，`streamCompleteMillis` 表示收到 `[DONE]`，`durationMillis` 仍是包含下游写出的端到端耗时；流必须同时有真实输出和 `[DONE]` 才记成功。小时聚合只展示可由 sum/count/max 准确还原的均值和最大值，不伪造 P90/P95 或分布；只记 traceId、耗时、状态与异常类简名，不存请求/响应正文或 Token。`InternalModelCallRecorder` 在 boundedElastic 上异步落库且失败静默，绝不影响转发主链路。`InternalModelProviderProbeService` 每 5 分钟（`opencode-runtime.internal-model-probe`）对启用 provider 发 `stream=true,max_tokens=1` 最小 chat 探测；`2xx` 非 SSE、空流、只有元数据或缺 `[DONE]` 都不记成功。查询统计 API 支持按 `source=USER_CALL|PROBE` 隔离探活与真实调用，明细 API 另支持 `outcomeGroup` 大类筛选；精确原因和用户调用 `ucid` 继续随明细返回。`InternalModelObservabilityRetentionTaskHandler` 每日清理 30 天前明细与 180 天前聚合。查询/手动探活入口见 `InternalModelObservabilityController`（仅 `SUPER_ADMIN`）。
+
 ## 测试覆盖
 
 - `NightExecutionCapacityRegistryTest`、`NightExecutionWindowCalculatorTest`、`NightExecutionTaskApplicationServiceTest`、`NightExecutionDispatchCoordinatorTest`、`NightExecutionDispatchServiceTest`、`NightExecutionDispatchLeaseGuardTest`、`NightExecutionRunLifecycleServiceTest`、`NightExecutionReconcileServiceTest` 覆盖通用参数启动加载/热刷新/失败保留、动态容量、北京时间窗口/推荐、幂等创建、容量和会话锁、固定服务器批量分发、attempt 认领/续租、普通 Run 受理、稳定 Run ID 恢复、owner 心跳失联、07:00 失败与保留清理；`RunApplicationServiceTest`、`SessionApplicationServiceTest` 额外覆盖待执行锁阻断普通发送/归档，而调度入口可启动 Run。

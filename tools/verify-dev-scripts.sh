@@ -539,4 +539,25 @@ grep -Eq '^run .*14096-15095:14096-15095' "${worker_docker_calls}" || {
   fail "disabled userland-proxy should allow the 1000-port worker range"
 }
 
+# 内部模型调用可观测本地 mock 服务：校验语法并做一次 ok 模式冒烟。
+run_check "mock model server python syntax" python3 -m py_compile "${ROOT_DIR}/tools/mock-model-server.py"
+MOCK_MODEL_PORT="${MOCK_MODEL_PORT:-19070}"
+python3 "${ROOT_DIR}/tools/mock-model-server.py" --port "${MOCK_MODEL_PORT}" --mode ok >/dev/null 2>&1 &
+mock_model_pid=$!
+trap 'kill "${mock_model_pid}" 2>/dev/null || true' EXIT
+for _ in $(seq 1 20); do
+  if curl -s -o /dev/null --max-time 1 "http://127.0.0.1:${MOCK_MODEL_PORT}/chat/completions" \
+      -H "Content-Type: application/json" -d '{}'; then
+    break
+  fi
+  sleep 0.2
+done
+curl -s --max-time 2 -X POST "http://127.0.0.1:${MOCK_MODEL_PORT}/chat/completions" \
+  -H "Content-Type: application/json" -d '{"model":"mock-model"}' >/dev/null || {
+  kill "${mock_model_pid}" 2>/dev/null || true
+  fail "mock model server smoke failed"
+}
+kill "${mock_model_pid}" 2>/dev/null || true
+trap - EXIT
+
 echo "Development script verification passed."
