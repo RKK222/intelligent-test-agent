@@ -118,20 +118,20 @@ describe("InternalModelObservabilityPanel", () => {
     vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-07T10:30:00Z"));
     const view = renderPanel();
 
-    await view.findByText("总览");
-    expect(view.getByText(/当前小时和之前 23 个小时段/)).toBeTruthy();
+    await view.findByText("Overview");
+    expect(view.getByText(/当前 24 小时时间段/)).toBeTruthy();
     expect(await view.findByText("0.0043")).toBeTruthy();
     expect(await view.findByText("user-10086")).toBeTruthy();
     expect(view.getAllByText("上游服务异常").length).toBeGreaterThan(0);
     expect(view.getByText("上游 HTTP 错误")).toBeTruthy();
 
     const explainedLabels = [
-      "请求数", "有调用供应商数", "请求成功率", "请求错误率", "错误请求数",
-      "平均端到端请求延迟", "最大端到端请求延迟", "累计请求时长", "平均请求速率（RPS）",
-      "平均首 Token 延迟（TTFT）", "最大首 Token 延迟（TTFT）",
-      "平均流式响应完成时间", "最大流式响应完成时间",
-      "请求量与请求成功率趋势", "请求结果分布", "异常结果分布", "供应商请求量",
-      "端到端请求延迟", "首 Token 延迟（TTFT）", "流式响应完成时间", "累计请求时长"
+      "REQ", "Providers", "SR", "FR", "Failures",
+      "Avg E2E", "Max E2E", "Total Duration", "RPS",
+      "Avg TTFT", "Max TTFT",
+      "Avg SCT", "Max SCT",
+      "REQ & SR Trend", "Outcome Distribution", "Failure Breakdown", "Provider REQ Volume",
+      "E2E Latency", "TTFT", "SCT"
     ];
     for (const label of explainedLabels) {
       expect(view.getAllByRole("button", { name: `查看${label}说明` }).length).toBeGreaterThan(0);

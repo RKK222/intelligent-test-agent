@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
-import { Activity, RefreshCw } from "lucide-vue-next";
+import { Activity, BookOpen, RefreshCw } from "lucide-vue-next";
 import { ElMessage } from "element-plus";
 import * as echarts from "echarts";
 import { type BackendApiClient } from "@test-agent/backend-api";
@@ -29,6 +29,7 @@ const page = ref(1);
 const pageSize = 20;
 const HOUR_MILLIS = 3_600_000;
 const WINDOW_HOURS = 24;
+const showGlossary = ref(false);
 
 type QueryWindow = { from: string; to: string };
 
@@ -74,7 +75,18 @@ function outcomeGroupOf(outcome: InternalModelCallOutcome): InternalModelCallOut
   return group ?? "OTHER";
 }
 
-// 页面提示只讲业务含义、分母和空值规则，避免把采集与存储实现暴露给使用者。
+// AIPerf (NVIDIA) 指标规范与业界标准英文缩写说明
+const glossaryItems = [
+  { abbr: "TTFT", name: "Time to First Token", desc: "首 Token 延迟：发起请求到接收到模型首个 Token 的时间。" },
+  { abbr: "SCT", name: "Stream Completion Time", desc: "流式完成时间：发起请求到流式响应正常结束的总耗时。" },
+  { abbr: "E2E", name: "End-to-End Latency", desc: "端到端延迟：发起请求到接收到完整响应或异常终止的总端到端时长。" },
+  { abbr: "RPS", name: "Requests Per Second", desc: "每秒请求数：在统计时间窗口内的平均每秒请求处理量。" },
+  { abbr: "REQ", name: "Requests", desc: "请求总数：包含成功与失败在内的总调用次数。" },
+  { abbr: "SR", name: "Success Rate", desc: "请求成功率：成功完成的请求占总请求数的百分比。" },
+  { abbr: "FR", name: "Failure Rate", desc: "请求错误率：失败或中途中断的请求占总请求数的百分比。" }
+] as const;
+
+// 页面提示只讲业务含义、分母和空值规则，计算逻辑保持不变。
 const metricHelp = {
   totalRequests: "当前筛选范围内一共发起了多少次调用，成功和失败都会算在内。",
   providerCount: "当前筛选范围内实际产生过调用记录的供应商数量，没有调用记录的不计入。",
@@ -174,6 +186,8 @@ async function refreshAll() {
     statsQuery.refetch(),
     probeStatusQuery.refetch()
   ]);
+  await nextTick();
+  renderCharts();
 }
 
 const probeStatuses = computed(() => probeStatusQuery.data.value ?? []);
@@ -340,7 +354,7 @@ const overallMetrics = computed(() => {
   };
 });
 
-/** 按查询窗口补齐无调用小时，避免趋势图跨空档直接连线造成持续有流量的错觉。 */
+/** 无论是否有调用数据，均生成 24 小时区间完整的轴刻度，避免刷新或类型切换时数据变为空导致图表容器卸载。 */
 const hourlyTrend = computed(() => {
   const byHour = new Map<number, { total: number; success: number }>();
   for (const row of stats.value) {
@@ -349,9 +363,6 @@ const hourlyTrend = computed(() => {
     cur.total += row.requestCount;
     if (row.outcome === "SUCCESS") cur.success += row.requestCount;
     byHour.set(hour, cur);
-  }
-  if (byHour.size === 0) {
-    return { hours: [], requests: [], successRate: [] };
   }
   const hours: number[] = [];
   for (
@@ -373,8 +384,8 @@ const hourlyTrend = computed(() => {
 
 /** 成功率/失败率饼图数据。 */
 const outcomePieData = computed(() => [
-  { name: "成功", value: overallMetrics.value.successCount },
-  { name: "错误", value: overallMetrics.value.failureCount }
+  { name: "成功 (Success)", value: overallMetrics.value.successCount },
+  { name: "错误 (Failure)", value: overallMetrics.value.failureCount }
 ].filter((item) => item.value > 0));
 
 type GroupedHourlyStat = Omit<InternalModelCallHourlyStat, "outcome"> & {
@@ -419,7 +430,7 @@ const providerBarData = computed(() =>
     .sort((a, b) => b.value - a.value)
 );
 
-/** 失败分类条形图数据（echarts，替代纯 CSS 条）。 */
+/** 失败分类条形图数据。 */
 const failureBarData = computed(() =>
   failureBreakdown.value.map((item) => ({ name: item.label, value: item.count }))
 );
@@ -434,12 +445,14 @@ let failureChart: echarts.ECharts | null = null;
 let providerChart: echarts.ECharts | null = null;
 
 function ensureChart(el: HTMLDivElement, holder: { current: echarts.ECharts | null }) {
-  // 若实例已存在但容器宽度为 0（曾在隐藏 tab 中初始化过），dispose 重建。
-  if (holder.current && el.clientWidth === 0) {
-    holder.current.dispose();
-    holder.current = null;
+  // 当组件重绘、DOM 节点更新（getDom 不匹配）或实例销毁时，dispose 旧实例并在新 DOM 节点初始化
+  if (holder.current) {
+    if (holder.current.isDisposed() || holder.current.getDom() !== el || el.clientWidth === 0) {
+      holder.current.dispose();
+      holder.current = null;
+    }
   }
-  if (!holder.current) {
+  if (!holder.current && el.clientWidth > 0) {
     holder.current = echarts.init(el);
   }
   return holder.current;
@@ -448,26 +461,30 @@ function ensureChart(el: HTMLDivElement, holder: { current: echarts.ECharts | nu
 function renderCharts() {
   if (trendChartEl.value && trendChartEl.value.clientWidth > 0) {
     trendChart = ensureChart(trendChartEl.value, { current: trendChart });
-    trendChart.setOption({
+    trendChart?.setOption({
       animation: false,
       tooltip: { trigger: "axis" },
       legend: { top: 0, right: 8, textStyle: { fontSize: 11 } },
       grid: { top: 32, left: 48, right: 16, bottom: 28 },
-      xAxis: { type: "category", boundaryGap: false, data: hourlyTrend.value.hours },
+      xAxis: {
+        type: "category",
+        boundaryGap: false,
+        data: hourlyTrend.value.hours.map(h => new Date(h).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))
+      },
       yAxis: [
-        { type: "value", name: "请求", scale: true },
-        { type: "value", name: "成功率%", max: 100, min: 0, splitLine: { show: false } }
+        { type: "value", name: "REQ", scale: true },
+        { type: "value", name: "SR %", max: 100, min: 0, splitLine: { show: false } }
       ],
       series: [
         {
-          name: "请求数",
+          name: "REQ",
           type: "line",
           showSymbol: false,
           data: hourlyTrend.value.requests,
           itemStyle: { color: "#2563eb" }
         },
         ...(showRateMetrics.value ? [{
-          name: "成功率%",
+          name: "SR %",
           type: "line",
           yAxisIndex: 1,
           showSymbol: false,
@@ -480,7 +497,7 @@ function renderCharts() {
   }
   if (showRateMetrics.value && pieChartEl.value && pieChartEl.value.clientWidth > 0) {
     pieChart = ensureChart(pieChartEl.value, { current: pieChart });
-    pieChart.setOption({
+    pieChart?.setOption({
       animation: false,
       tooltip: { trigger: "item" },
       legend: { bottom: 0, textStyle: { fontSize: 11 } },
@@ -497,7 +514,7 @@ function renderCharts() {
   }
   if (failureChartEl.value && failureChartEl.value.clientWidth > 0 && failureBarData.value.length) {
     failureChart = ensureChart(failureChartEl.value, { current: failureChart });
-    failureChart.setOption({
+    failureChart?.setOption({
       animation: false,
       tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
       grid: { top: 16, left: 96, right: 24, bottom: 24 },
@@ -513,7 +530,7 @@ function renderCharts() {
   }
   if (providerChartEl.value && providerChartEl.value.clientWidth > 0 && providerBarData.value.length) {
     providerChart = ensureChart(providerChartEl.value, { current: providerChart });
-    providerChart.setOption({
+    providerChart?.setOption({
       animation: false,
       tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
       grid: { top: 16, left: 96, right: 24, bottom: 24 },
@@ -538,7 +555,7 @@ function resizeCharts() {
 
 onMounted(() => {
   window.addEventListener("resize", resizeCharts);
-  renderCharts();
+  void nextTick(renderCharts);
 });
 
 onBeforeUnmount(() => {
@@ -550,8 +567,8 @@ onBeforeUnmount(() => {
   providerChart = null;
 });
 
-// 首批数据会同时创建 v-if 中的图表容器，必须等 DOM 完成后再初始化 ECharts。
-watch(() => stats.value, () => {
+// 数据变动后 post-flush 触发重新渲染，确保在新 DOM 或过滤数据更新后重绘图表
+watch([() => stats.value, filterProviderId, filterOutcomeGroup, filterSource], () => {
   void nextTick(renderCharts);
 }, { deep: true, flush: "post" });
 
@@ -635,8 +652,33 @@ function onPageChange(next: number) {
   <section class="ta-imob">
     <template v-if="hasSuperAdmin">
       <div class="ta-imob-header">
-        <h3 class="ta-imob-title">内部模型调用可观测</h3>
-        <span class="ta-imob-sub">默认查看当前小时和之前 23 个小时段的用户调用，统计截至本次加载或刷新时刻；也可以切换查看自动探活。所有耗时都从调用发起时开始计算；模型没有开始回答或没有正常结束时，相应指标显示“—”。</span>
+        <div class="ta-imob-title-row">
+          <h3 class="ta-imob-title">内部模型调用可观测</h3>
+          <button
+            type="button"
+            class="ta-imob-glossary-toggle"
+            @click="showGlossary = !showGlossary"
+          >
+            <BookOpen :size="13" />
+            <span>{{ showGlossary ? "收起缩写指南" : "指标英文缩写指南 (Glossary)" }}</span>
+          </button>
+        </div>
+        <span class="ta-imob-sub">默认查看当前 24 小时时间段的用户调用，统计截至本次加载或刷新时刻。所有的英文缩写见页首对照指南；每个指标悬浮提示中的计算逻辑与判定保持不变。</span>
+
+        <!-- 页首 AIPerf / 业界指标英文缩写对照指南 (Glossary) -->
+        <div v-if="showGlossary" class="ta-imob-glossary-card">
+          <div class="ta-imob-glossary-header">
+            <strong>AIPerf & 业界指标英文缩写指南 (Metrics Glossary)</strong>
+            <span>参照 NVIDIA AIPerf 性能指标规范定义</span>
+          </div>
+          <div class="ta-imob-glossary-grid">
+            <div v-for="item in glossaryItems" :key="item.abbr" class="ta-imob-glossary-item">
+              <code class="ta-imob-glossary-abbr">{{ item.abbr }}</code>
+              <span class="ta-imob-glossary-name">{{ item.name }}</span>
+              <span class="ta-imob-glossary-desc">{{ item.desc }}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="ta-imob-combined">
@@ -710,34 +752,34 @@ function onPageChange(next: number) {
             <el-table-column prop="traceId" label="Trace ID" min-width="220" show-overflow-tooltip>
               <template #default="{ row }">{{ row.traceId || "-" }}</template>
             </el-table-column>
-            <el-table-column label="端到端请求延迟" min-width="170">
+            <el-table-column label="E2E Latency" min-width="170">
               <template #header>
-                <MetricHelpLabel label="端到端请求延迟" :description="metricHelp.duration" />
+                <MetricHelpLabel label="E2E Latency" :description="metricHelp.duration" />
               </template>
               <template #default="{ row }">{{ formatDuration(row.durationMillis) }}</template>
             </el-table-column>
-            <el-table-column label="首 Token 延迟（TTFT）" min-width="190">
+            <el-table-column label="TTFT" min-width="170">
               <template #header>
-                <MetricHelpLabel label="首 Token 延迟（TTFT）" :description="metricHelp.firstToken" />
+                <MetricHelpLabel label="TTFT" :description="metricHelp.firstToken" />
               </template>
               <template #default="{ row }">{{ formatDuration(row.firstTokenMillis) }}</template>
             </el-table-column>
-            <el-table-column label="流式响应完成时间" min-width="180">
+            <el-table-column label="SCT" min-width="170">
               <template #header>
-                <MetricHelpLabel label="流式响应完成时间" :description="metricHelp.streamComplete" />
+                <MetricHelpLabel label="SCT" :description="metricHelp.streamComplete" />
               </template>
               <template #default="{ row }">{{ formatDuration(row.streamCompleteMillis) }}</template>
             </el-table-column>
-            <el-table-column prop="model" label="模型" min-width="150">
+            <el-table-column prop="model" label="Model" min-width="150">
               <template #default="{ row }">{{ row.model ?? "-" }}</template>
             </el-table-column>
-            <el-table-column label="来源 / 用户 ID" min-width="150" show-overflow-tooltip>
+            <el-table-column label="Source / User" min-width="150" show-overflow-tooltip>
               <template #default="{ row }">
                 <el-tag v-if="row.source === 'PROBE'" type="info" size="small">探活</el-tag>
                 <span v-else class="ta-imob-user-id">{{ row.ucid || "未知用户" }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="结果分类" min-width="180">
+            <el-table-column label="Outcome Group" min-width="180">
               <template #default="{ row }">
                 <div class="ta-imob-outcome-cell">
                   <el-tag :type="outcomeTagType(outcomeGroupOf(row.outcome))" size="small">
@@ -747,7 +789,7 @@ function onPageChange(next: number) {
                 </div>
               </template>
             </el-table-column>
-            <el-table-column prop="startedAt" label="时间" min-width="180">
+            <el-table-column prop="startedAt" label="Time" min-width="180">
               <template #default="{ row }">{{ formatTime(row.startedAt) }}</template>
             </el-table-column>
           </el-table>
@@ -766,77 +808,77 @@ function onPageChange(next: number) {
         <section class="ta-imob-section ta-imob-metrics-section">
           <h4 class="ta-imob-section-title">聚合指标</h4>
           <div v-loading="statsQuery.isLoading.value" class="ta-imob-stats">
-            <!-- 全局总览指标（多类指标聚合） -->
-            <div v-if="overallMetrics.totalRequests" class="ta-imob-overview">
-              <h4 class="ta-imob-overview-title">总览</h4>
+            <!-- 全局总览指标 -->
+            <div v-if="overallMetrics.totalRequests !== undefined" class="ta-imob-overview">
+              <h4 class="ta-imob-overview-title">Overview</h4>
               <div class="ta-imob-overview-grid">
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ overallMetrics.totalRequests }}</span>
-                  <MetricHelpLabel class="ta-imob-overview-label" label="请求数" :description="metricHelp.totalRequests" />
+                  <MetricHelpLabel class="ta-imob-overview-label" label="REQ" :description="metricHelp.totalRequests" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ overallMetrics.providerCount }}</span>
-                  <MetricHelpLabel class="ta-imob-overview-label" label="有调用供应商数" :description="metricHelp.providerCount" />
+                  <MetricHelpLabel class="ta-imob-overview-label" label="Providers" :description="metricHelp.providerCount" />
                 </div>
                 <div v-if="showRateMetrics" class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value" :class="{ 'is-ok': overallMetrics.successRate >= 90 }">
                     {{ overallMetrics.successRate }}%
                   </span>
-                  <MetricHelpLabel class="ta-imob-overview-label" label="请求成功率" :description="metricHelp.successRate" />
+                  <MetricHelpLabel class="ta-imob-overview-label" label="SR" :description="metricHelp.successRate" />
                 </div>
                 <div v-if="showRateMetrics" class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value" :class="{ 'is-bad': overallMetrics.failureRate > 10 }">
                     {{ overallMetrics.failureRate }}%
                   </span>
-                  <MetricHelpLabel class="ta-imob-overview-label" label="请求错误率" :description="metricHelp.failureRate" />
+                  <MetricHelpLabel class="ta-imob-overview-label" label="FR" :description="metricHelp.failureRate" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value" :class="{ 'is-bad': overallMetrics.failureCount > 0 }">
                     {{ overallMetrics.failureCount }}
                   </span>
-                  <MetricHelpLabel class="ta-imob-overview-label" label="错误请求数" :description="metricHelp.failureCount" />
+                  <MetricHelpLabel class="ta-imob-overview-label" label="Failures" :description="metricHelp.failureCount" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.avgDuration) }}</span>
-                  <MetricHelpLabel class="ta-imob-overview-label" label="平均端到端请求延迟" :description="metricHelp.avgDuration" />
+                  <MetricHelpLabel class="ta-imob-overview-label" label="Avg E2E" :description="metricHelp.avgDuration" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.maxDuration) }}</span>
-                  <MetricHelpLabel class="ta-imob-overview-label" label="最大端到端请求延迟" :description="metricHelp.maxDuration" />
+                  <MetricHelpLabel class="ta-imob-overview-label" label="Max E2E" :description="metricHelp.maxDuration" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.totalDurationMillis) }}</span>
-                  <MetricHelpLabel class="ta-imob-overview-label" label="累计请求时长" :description="metricHelp.totalDuration" />
+                  <MetricHelpLabel class="ta-imob-overview-label" label="Total Duration" :description="metricHelp.totalDuration" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ formatRps(overallMetrics.rps) }}</span>
-                  <MetricHelpLabel class="ta-imob-overview-label" label="平均请求速率（RPS）" :description="metricHelp.rps" />
+                  <MetricHelpLabel class="ta-imob-overview-label" label="RPS" :description="metricHelp.rps" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.firstTokenAvg) }}</span>
-                  <MetricHelpLabel class="ta-imob-overview-label" label="平均首 Token 延迟（TTFT）" :description="metricHelp.avgFirstToken" />
+                  <MetricHelpLabel class="ta-imob-overview-label" label="Avg TTFT" :description="metricHelp.avgFirstToken" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.firstTokenMax) }}</span>
-                  <MetricHelpLabel class="ta-imob-overview-label" label="最大首 Token 延迟（TTFT）" :description="metricHelp.maxFirstToken" />
+                  <MetricHelpLabel class="ta-imob-overview-label" label="Max TTFT" :description="metricHelp.maxFirstToken" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.streamCompleteAvg) }}</span>
-                  <MetricHelpLabel class="ta-imob-overview-label" label="平均流式响应完成时间" :description="metricHelp.avgStreamComplete" />
+                  <MetricHelpLabel class="ta-imob-overview-label" label="Avg SCT" :description="metricHelp.avgStreamComplete" />
                 </div>
                 <div class="ta-imob-overview-cell">
                   <span class="ta-imob-overview-value">{{ formatDuration(overallMetrics.streamCompleteMax) }}</span>
-                  <MetricHelpLabel class="ta-imob-overview-label" label="最大流式响应完成时间" :description="metricHelp.maxStreamComplete" />
+                  <MetricHelpLabel class="ta-imob-overview-label" label="Max SCT" :description="metricHelp.maxStreamComplete" />
                 </div>
               </div>
             </div>
 
-            <!-- 图表：趋势 / 成功率 / 失败分类 / 供应商对比。小时聚合无法还原分位数与分布，避免展示伪 P90/P95。 -->
-            <div v-if="hourlyTrend.hours.length" class="ta-imob-charts">
+            <!-- 图表：趋势 / 成功率 / 失败分类 / 供应商对比 -->
+            <div class="ta-imob-charts">
               <div class="ta-imob-chart-card">
                 <h4 class="ta-imob-overview-title">
                   <MetricHelpLabel
-                    :label="showRateMetrics ? '请求量与请求成功率趋势' : '请求量趋势'"
+                    :label="showRateMetrics ? 'REQ & SR Trend' : 'REQ Trend'"
                     :description="chartHelp.hourlyTrend"
                   />
                 </h4>
@@ -844,19 +886,19 @@ function onPageChange(next: number) {
               </div>
               <div v-if="showRateMetrics" class="ta-imob-chart-card">
                 <h4 class="ta-imob-overview-title">
-                  <MetricHelpLabel label="请求结果分布" :description="chartHelp.successComposition" />
+                  <MetricHelpLabel label="Outcome Distribution" :description="chartHelp.successComposition" />
                 </h4>
                 <div ref="pieChartEl" class="ta-imob-chart" />
               </div>
               <div v-if="failureBarData.length" class="ta-imob-chart-card">
                 <h4 class="ta-imob-overview-title">
-                  <MetricHelpLabel label="异常结果分布" :description="chartHelp.failureBreakdown" />
+                  <MetricHelpLabel label="Failure Breakdown" :description="chartHelp.failureBreakdown" />
                 </h4>
                 <div ref="failureChartEl" class="ta-imob-chart" />
               </div>
               <div v-if="providerBarData.length" class="ta-imob-chart-card">
                 <h4 class="ta-imob-overview-title">
-                  <MetricHelpLabel label="供应商请求量" :description="chartHelp.providerVolume" />
+                  <MetricHelpLabel label="Provider REQ Volume" :description="chartHelp.providerVolume" />
                 </h4>
                 <div ref="providerChartEl" class="ta-imob-chart" />
               </div>
@@ -864,42 +906,42 @@ function onPageChange(next: number) {
 
             <!-- 按供应商聚合 -->
             <div v-if="providerMetrics.length">
-              <h4 class="ta-imob-overview-title">按供应商</h4>
+              <h4 class="ta-imob-overview-title">By Provider</h4>
               <div class="ta-imob-metric-grid">
                 <div v-for="metric in providerMetrics" :key="metric.providerId" class="ta-imob-metric-card">
                   <div class="ta-imob-metric-provider">{{ metric.providerId }}</div>
                   <div class="ta-imob-metric-body">
                     <div class="ta-imob-metric-cell">
+                      <MetricHelpLabel class="ta-imob-metric-label" label="REQ" :description="metricHelp.totalRequests" />
                       <span class="ta-imob-metric-value">{{ metric.totalRequests }}</span>
-                      <MetricHelpLabel class="ta-imob-metric-label" label="请求数" :description="metricHelp.totalRequests" />
                     </div>
                     <div v-if="showRateMetrics" class="ta-imob-metric-cell">
+                      <MetricHelpLabel class="ta-imob-metric-label" label="SR" :description="metricHelp.successRate" />
                       <span class="ta-imob-metric-value" :class="{ 'is-ok': metric.successRate >= 90 }">
                         {{ metric.successRate }}%
                       </span>
-                      <MetricHelpLabel class="ta-imob-metric-label" label="请求成功率" :description="metricHelp.successRate" />
                     </div>
                     <div class="ta-imob-metric-cell">
+                      <MetricHelpLabel class="ta-imob-metric-label" label="Avg E2E" :description="metricHelp.avgDuration" />
                       <span class="ta-imob-metric-value">{{ formatDuration(metric.avgDurationMillis) }}</span>
-                      <MetricHelpLabel class="ta-imob-metric-label" label="平均端到端延迟" :description="metricHelp.avgDuration" />
                     </div>
                     <div class="ta-imob-metric-cell">
+                      <MetricHelpLabel class="ta-imob-metric-label" label="Max E2E" :description="metricHelp.maxDuration" />
                       <span class="ta-imob-metric-value">{{ formatDuration(metric.maxDurationMillis) }}</span>
-                      <MetricHelpLabel class="ta-imob-metric-label" label="最大端到端延迟" :description="metricHelp.maxDuration" />
                     </div>
                     <div class="ta-imob-metric-cell">
+                      <MetricHelpLabel class="ta-imob-metric-label" label="Avg TTFT" :description="metricHelp.avgFirstToken" />
                       <span class="ta-imob-metric-value">{{ formatDuration(metric.avgFirstTokenMillis) }}</span>
-                      <MetricHelpLabel class="ta-imob-metric-label" label="平均 TTFT" :description="metricHelp.avgFirstToken" />
                     </div>
                     <div class="ta-imob-metric-cell">
+                      <MetricHelpLabel class="ta-imob-metric-label" label="Avg SCT" :description="metricHelp.avgStreamComplete" />
                       <span class="ta-imob-metric-value">{{ formatDuration(metric.avgStreamCompleteMillis) }}</span>
-                      <MetricHelpLabel class="ta-imob-metric-label" label="平均流式完成时间" :description="metricHelp.avgStreamComplete" />
                     </div>
                     <div class="ta-imob-metric-cell">
+                      <MetricHelpLabel class="ta-imob-metric-label" label="Failures" :description="metricHelp.providerFailure" />
                       <span class="ta-imob-metric-value" :class="{ 'is-bad': metric.failureCount > 0 }">
                         {{ metric.failureCount }}
                       </span>
-                      <MetricHelpLabel class="ta-imob-metric-label" label="错误请求数" :description="metricHelp.providerFailure" />
                     </div>
                   </div>
                 </div>
@@ -909,60 +951,60 @@ function onPageChange(next: number) {
 
             <!-- 按小时明细 -->
             <el-table v-if="groupedHourlyStats.length" :data="groupedHourlyStats" stripe class="ta-imob-hourly-table">
-              <el-table-column prop="statHour" label="小时" min-width="160">
+              <el-table-column prop="statHour" label="Hour" min-width="160">
                 <template #default="{ row }">{{ formatTime(row.statHour) }}</template>
               </el-table-column>
-              <el-table-column prop="providerId" label="供应商" min-width="140" />
-              <el-table-column prop="model" label="模型" min-width="140" />
-              <el-table-column label="结果分类" min-width="150">
+              <el-table-column prop="providerId" label="Provider" min-width="140" />
+              <el-table-column prop="model" label="Model" min-width="140" />
+              <el-table-column label="Outcome Group" min-width="150">
                 <template #default="{ row }">
                   <el-tag :type="outcomeTagType(row.outcomeGroup)" size="small">
                     {{ outcomeGroupText[row.outcomeGroup as InternalModelCallOutcomeGroup] }}
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column prop="requestCount" label="请求数" width="110">
+              <el-table-column prop="requestCount" label="REQ" width="110">
                 <template #header>
-                  <MetricHelpLabel label="请求数" :description="metricHelp.requestCount" />
+                  <MetricHelpLabel label="REQ" :description="metricHelp.requestCount" />
                 </template>
               </el-table-column>
-              <el-table-column label="累计请求时长" min-width="135">
+              <el-table-column label="Total Duration" min-width="135">
                 <template #header>
-                  <MetricHelpLabel label="累计请求时长" :description="metricHelp.durationTotal" />
+                  <MetricHelpLabel label="Total Duration" :description="metricHelp.durationTotal" />
                 </template>
                 <template #default="{ row }">{{ formatDuration(row.durationMillisSum) }}</template>
               </el-table-column>
-              <el-table-column label="最大端到端延迟" min-width="150">
+              <el-table-column label="Max E2E" min-width="135">
                 <template #header>
-                  <MetricHelpLabel label="最大端到端延迟" :description="metricHelp.maxDuration" />
+                  <MetricHelpLabel label="Max E2E" :description="metricHelp.maxDuration" />
                 </template>
                 <template #default="{ row }">{{ formatDuration(row.durationMillisMax) }}</template>
               </el-table-column>
-              <el-table-column label="平均 TTFT" min-width="125">
+              <el-table-column label="Avg TTFT" min-width="125">
                 <template #header>
-                  <MetricHelpLabel label="平均 TTFT" :description="metricHelp.avgFirstToken" />
+                  <MetricHelpLabel label="Avg TTFT" :description="metricHelp.avgFirstToken" />
                 </template>
                 <template #default="{ row }">
                   {{ formatDuration((row.firstTokenCount ?? 0) > 0 ? Math.round((row.firstTokenMillisSum ?? 0) / (row.firstTokenCount ?? 1)) : null) }}
                 </template>
               </el-table-column>
-              <el-table-column label="最大 TTFT" min-width="125">
+              <el-table-column label="Max TTFT" min-width="125">
                 <template #header>
-                  <MetricHelpLabel label="最大 TTFT" :description="metricHelp.maxFirstToken" />
+                  <MetricHelpLabel label="Max TTFT" :description="metricHelp.maxFirstToken" />
                 </template>
                 <template #default="{ row }">{{ formatDuration((row.firstTokenCount ?? 0) > 0 ? (row.firstTokenMillisMax ?? 0) : null) }}</template>
               </el-table-column>
-              <el-table-column label="平均流式完成时间" min-width="155">
+              <el-table-column label="Avg SCT" min-width="135">
                 <template #header>
-                  <MetricHelpLabel label="平均流式完成时间" :description="metricHelp.avgStreamComplete" />
+                  <MetricHelpLabel label="Avg SCT" :description="metricHelp.avgStreamComplete" />
                 </template>
                 <template #default="{ row }">
                   {{ formatDuration((row.streamCompleteCount ?? 0) > 0 ? Math.round((row.streamCompleteMillisSum ?? 0) / (row.streamCompleteCount ?? 1)) : null) }}
                 </template>
               </el-table-column>
-              <el-table-column label="最大流式完成时间" min-width="155">
+              <el-table-column label="Max SCT" min-width="135">
                 <template #header>
-                  <MetricHelpLabel label="最大流式完成时间" :description="metricHelp.maxStreamComplete" />
+                  <MetricHelpLabel label="Max SCT" :description="metricHelp.maxStreamComplete" />
                 </template>
                 <template #default="{ row }">{{ formatDuration((row.streamCompleteCount ?? 0) > 0 ? (row.streamCompleteMillisMax ?? 0) : null) }}</template>
               </el-table-column>
@@ -989,7 +1031,13 @@ function onPageChange(next: number) {
 .ta-imob-header {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+}
+.ta-imob-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 .ta-imob-title {
   margin: 0;
@@ -997,12 +1045,85 @@ function onPageChange(next: number) {
   font-weight: 600;
   color: #111827;
 }
+.ta-imob-glossary-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #f6f8fa;
+  color: #0969da;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.ta-imob-glossary-toggle:hover {
+  background: #ddf4ff;
+  border-color: #54aeff;
+}
 .ta-imob-sub {
   font-size: 12px;
   color: #6b7280;
+  line-height: 1.5;
+}
+.ta-imob-glossary-card {
+  margin-top: 6px;
+  padding: 12px 14px;
+  border: 1px solid #c8e1ff;
+  border-radius: 8px;
+  background: #f0f7ff;
+  color: #1f2328;
+}
+.ta-imob-glossary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #d0e5ff;
+}
+.ta-imob-glossary-header strong {
+  font-size: 13px;
+  color: #0969da;
+}
+.ta-imob-glossary-header span {
+  font-size: 11px;
+  color: #57606a;
+}
+.ta-imob-glossary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px 14px;
+}
+.ta-imob-glossary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #ffffff;
+  border: 1px solid #e1e4e8;
+}
+.ta-imob-glossary-abbr {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 700;
+  font-size: 12px;
+  color: #0969da;
+}
+.ta-imob-glossary-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: #24292f;
+}
+.ta-imob-glossary-desc {
+  font-size: 11px;
+  color: #57606a;
+  line-height: 1.35;
 }
 .ta-imob-combined {
-  /* 整张 BI 看板由最外层统一滚动，内部区域不能在固定高度里收缩后让内容互相覆盖。 */
   flex: 0 0 auto;
   min-height: auto;
   display: flex;
@@ -1050,7 +1171,7 @@ function onPageChange(next: number) {
 }
 .ta-imob-overview-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 12px;
 }
 .ta-imob-overview-cell {
@@ -1092,8 +1213,8 @@ function onPageChange(next: number) {
 }
 .ta-imob-metric-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
 }
 .ta-imob-metric-card {
   border: 1px solid #e5e7eb;
@@ -1110,17 +1231,30 @@ function onPageChange(next: number) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* 优化“按供应商”卡片布局：采用上下垂直结构 (Label在上，Value在下)，防止狭窄列内字体折叠堆叠 */
 .ta-imob-metric-body {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px 16px;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
 }
 .ta-imob-metric-cell {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 6px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3px;
   min-width: 0;
+  padding: 6px 8px;
+  background: #f8fafc;
+  border: 1px solid #f1f5f9;
+  border-radius: 6px;
+}
+.ta-imob-metric-label {
+  font-size: 11px;
+  color: #6b7280;
+  font-weight: 500;
+  white-space: nowrap;
 }
 .ta-imob-metric-value {
   font-size: 15px;
@@ -1128,20 +1262,11 @@ function onPageChange(next: number) {
   color: #111827;
   white-space: nowrap;
 }
-.ta-imob-metric-label {
-  font-size: 12px;
-  color: #6b7280;
-  flex-shrink: 0;
-}
 .ta-imob-metric-value.is-ok {
   color: #16a34a;
 }
 .ta-imob-metric-value.is-bad {
   color: #dc2626;
-}
-.ta-imob-metric-label {
-  font-size: 11px;
-  color: #6b7280;
 }
 .ta-imob-hourly-table {
   border: 1px solid #e5e7eb;
@@ -1229,3 +1354,4 @@ function onPageChange(next: number) {
   to { transform: rotate(360deg); }
 }
 </style>
+
