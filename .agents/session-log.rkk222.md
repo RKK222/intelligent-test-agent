@@ -7376,6 +7376,8 @@
 - 参考 NVIDIA GenAI Perf / AI Perf Metrics Reference 标准，在前端面板页首内置“AIPerf & 业界指标英文缩写指南 (Glossary)”卡片，点击“参照 NVIDIA AIPerf 性能指标规范定义 ↗”可直接唤起离线规范弹窗。
 - 在缩写指南与离线标准文档 [docs/standards/metrics-glossary.md](file:///Users/kaka/Desktop/intelligent-test-agent/docs/standards/metrics-glossary.md) 中添加 [NVIDIA GenAI Perf / AI Perf Metrics Reference](https://docs.nvidia.com/aiperf/dev/reference/ai-perf-metrics-reference) 官方链接，并将尚未提取 Token 粒度时间戳计算的 `ITL / TPOT` 用醒目的橙色徽章 `<span class="ta-imob-orange-badge">（暂未计算）</span>` 显式标注。
 - 在筛选栏与调用明细区增加“按人 (用户 `filterUcid` Select/Input)”与“按时间 (自定义起止时间段 `el-date-picker` Datetimerange)”选择器，支持快捷选择或输入用户 ID 筛选，并支持自定义精确定时检索。
+- 优化筛选栏样式为单行不换行布局（`flex-wrap: nowrap`，超出时横向滚动）并吸顶固定在页面顶部（`position: sticky; top: 0; z-index: 15`），滚动查看图表与表格时筛选条件始终可见。
+- 重新设计缩写指南卡片表头布局：左侧展示分类标题 `AIPerf & 业界指标英文缩写指南` 与 BookOpen 图标；右侧同行排列两个极简 Pill 胶囊按钮 `[📄 NVIDIA AIPerf 规范 ↗]` 与 `[▲ 收起指南]`，彻底解决图标换行、下划线遮挡和对齐凌乱问题；收起状态下在页面标题右侧展示 `[📘 展开指标英文缩写指南 (Glossary) ▼]`。
 
 ### How
 
@@ -7385,6 +7387,6 @@
 ### Result
 
 - 趋势图图例居中展示，所有聚合图表表头均采用清晰中文展示。
-- 点击“参照 NVIDIA AIPerf 性能指标规范定义 ↗”可直接在页面弹出离线对照指南，Markdown 源码中保留完整官方链接；`ITL / TPOT` 带有明显的橙色“暂未计算”状态标识。
-- 调用明细支持按人（UCID 动态下拉/模糊输入）和按时间（预设时间窗口 + 自定义精确日期时间范围 `el-date-picker`）灵活检索。
+- 点击“NVIDIA AIPerf 规范 ↗”胶囊按钮可直接弹出离线对照指南；`ITL / TPOT` 带有明显的橙色“暂未计算”状态标识。
+- 缩写指南表头按钮右侧同行水平居中对齐，排版整洁美观；筛选栏缩小为单行吸顶置顶展示，滚动视图时随时可调整筛选。
 
