@@ -28,21 +28,35 @@ const filterSource = ref<InternalModelCallSource | "">("USER_CALL");
 const page = ref(1);
 const pageSize = 20;
 const HOUR_MILLIS = 3_600_000;
-const WINDOW_HOURS = 24;
-const showGlossary = ref(false);
+const selectedWindowHours = ref<number>(24);
+const showGlossary = ref(true);
+
+const windowHourOptions = [
+  { label: "最近 1 小时", value: 1 },
+  { label: "最近 6 小时", value: 6 },
+  { label: "最近 12 小时", value: 12 },
+  { label: "最近 24 小时", value: 24 },
+  { label: "最近 3 天", value: 72 },
+  { label: "最近 7 天", value: 168 }
+];
 
 type QueryWindow = { from: string; to: string };
 
-/** 查询当前小时和之前 23 个小时桶，并以实际加载时刻收口，避免把未来时段算进 RPS 分母。 */
-function createQueryWindow(nowMillis = Date.now()): QueryWindow {
+/** 查询当前小时和之前指定小时数（基于选定时间段），并以实际加载时刻收口。 */
+function createQueryWindow(hours = selectedWindowHours.value, nowMillis = Date.now()): QueryWindow {
   const currentHourMillis = Math.floor(nowMillis / HOUR_MILLIS) * HOUR_MILLIS;
   return {
-    from: new Date(currentHourMillis - (WINDOW_HOURS - 1) * HOUR_MILLIS).toISOString(),
+    from: new Date(currentHourMillis - (hours - 1) * HOUR_MILLIS).toISOString(),
     to: new Date(nowMillis).toISOString()
   };
 }
 
 const queryWindow = ref<QueryWindow>(createQueryWindow());
+
+function onWindowHoursChange() {
+  queryWindow.value = createQueryWindow(selectedWindowHours.value);
+  applyFilters();
+}
 
 const outcomeGroupText: Record<InternalModelCallOutcomeGroup, string> = {
   SUCCESS: "成功",
@@ -663,7 +677,7 @@ function onPageChange(next: number) {
             <span>{{ showGlossary ? "收起缩写指南" : "指标英文缩写指南 (Glossary)" }}</span>
           </button>
         </div>
-        <span class="ta-imob-sub">默认查看当前 24 小时时间段的用户调用，统计截至本次加载或刷新时刻。所有的英文缩写见页首对照指南；每个指标悬浮提示中的计算逻辑与判定保持不变。</span>
+        <span class="ta-imob-sub">默认查看当前 {{ selectedWindowHours }} 小时时间段的用户调用，统计截至本次加载或刷新时刻。所有的英文缩写见页首对照指南。</span>
 
         <!-- 页首 AIPerf / 业界指标英文缩写对照指南 (Glossary) -->
         <div v-if="showGlossary" class="ta-imob-glossary-card">
@@ -684,6 +698,19 @@ function onPageChange(next: number) {
       <div class="ta-imob-combined">
         <div class="ta-imob-filter-bar">
           <span class="ta-imob-filter-title">筛选条件</span>
+          <el-select
+            v-model="selectedWindowHours"
+            placeholder="时间范围"
+            class="ta-imob-filter"
+            @change="onWindowHoursChange"
+          >
+            <el-option
+              v-for="option in windowHourOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
           <el-select
             v-model="filterProviderId"
             placeholder="供应商"
@@ -875,14 +902,15 @@ function onPageChange(next: number) {
 
             <!-- 图表：趋势 / 成功率 / 失败分类 / 供应商对比 -->
             <div class="ta-imob-charts">
-              <div class="ta-imob-chart-card">
+              <!-- 折线图独立占满全行 -->
+              <div class="ta-imob-chart-card ta-imob-chart-card-full">
                 <h4 class="ta-imob-overview-title">
                   <MetricHelpLabel
                     :label="showRateMetrics ? 'REQ & SR Trend' : 'REQ Trend'"
                     :description="chartHelp.hourlyTrend"
                   />
                 </h4>
-                <div ref="trendChartEl" class="ta-imob-chart" />
+                <div ref="trendChartEl" class="ta-imob-chart ta-imob-chart-trend" />
               </div>
               <div v-if="showRateMetrics" class="ta-imob-chart-card">
                 <h4 class="ta-imob-overview-title">
@@ -904,9 +932,9 @@ function onPageChange(next: number) {
               </div>
             </div>
 
-            <!-- 按供应商聚合 -->
+            <!-- 按供应商汇总 -->
             <div v-if="providerMetrics.length">
-              <h4 class="ta-imob-overview-title">By Provider</h4>
+              <h4 class="ta-imob-overview-title">按供应商</h4>
               <div class="ta-imob-metric-grid">
                 <div v-for="metric in providerMetrics" :key="metric.providerId" class="ta-imob-metric-card">
                   <div class="ta-imob-metric-provider">{{ metric.providerId }}</div>
@@ -948,67 +976,6 @@ function onPageChange(next: number) {
               </div>
             </div>
             <div v-else-if="!statsQuery.isLoading.value" class="ta-imob-placeholder">暂无聚合数据</div>
-
-            <!-- 按小时明细 -->
-            <el-table v-if="groupedHourlyStats.length" :data="groupedHourlyStats" stripe class="ta-imob-hourly-table">
-              <el-table-column prop="statHour" label="Hour" min-width="160">
-                <template #default="{ row }">{{ formatTime(row.statHour) }}</template>
-              </el-table-column>
-              <el-table-column prop="providerId" label="Provider" min-width="140" />
-              <el-table-column prop="model" label="Model" min-width="140" />
-              <el-table-column label="Outcome Group" min-width="150">
-                <template #default="{ row }">
-                  <el-tag :type="outcomeTagType(row.outcomeGroup)" size="small">
-                    {{ outcomeGroupText[row.outcomeGroup as InternalModelCallOutcomeGroup] }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="requestCount" label="REQ" width="110">
-                <template #header>
-                  <MetricHelpLabel label="REQ" :description="metricHelp.requestCount" />
-                </template>
-              </el-table-column>
-              <el-table-column label="Total Duration" min-width="135">
-                <template #header>
-                  <MetricHelpLabel label="Total Duration" :description="metricHelp.durationTotal" />
-                </template>
-                <template #default="{ row }">{{ formatDuration(row.durationMillisSum) }}</template>
-              </el-table-column>
-              <el-table-column label="Max E2E" min-width="135">
-                <template #header>
-                  <MetricHelpLabel label="Max E2E" :description="metricHelp.maxDuration" />
-                </template>
-                <template #default="{ row }">{{ formatDuration(row.durationMillisMax) }}</template>
-              </el-table-column>
-              <el-table-column label="Avg TTFT" min-width="125">
-                <template #header>
-                  <MetricHelpLabel label="Avg TTFT" :description="metricHelp.avgFirstToken" />
-                </template>
-                <template #default="{ row }">
-                  {{ formatDuration((row.firstTokenCount ?? 0) > 0 ? Math.round((row.firstTokenMillisSum ?? 0) / (row.firstTokenCount ?? 1)) : null) }}
-                </template>
-              </el-table-column>
-              <el-table-column label="Max TTFT" min-width="125">
-                <template #header>
-                  <MetricHelpLabel label="Max TTFT" :description="metricHelp.maxFirstToken" />
-                </template>
-                <template #default="{ row }">{{ formatDuration((row.firstTokenCount ?? 0) > 0 ? (row.firstTokenMillisMax ?? 0) : null) }}</template>
-              </el-table-column>
-              <el-table-column label="Avg SCT" min-width="135">
-                <template #header>
-                  <MetricHelpLabel label="Avg SCT" :description="metricHelp.avgStreamComplete" />
-                </template>
-                <template #default="{ row }">
-                  {{ formatDuration((row.streamCompleteCount ?? 0) > 0 ? Math.round((row.streamCompleteMillisSum ?? 0) / (row.streamCompleteCount ?? 1)) : null) }}
-                </template>
-              </el-table-column>
-              <el-table-column label="Max SCT" min-width="135">
-                <template #header>
-                  <MetricHelpLabel label="Max SCT" :description="metricHelp.maxStreamComplete" />
-                </template>
-                <template #default="{ row }">{{ formatDuration((row.streamCompleteCount ?? 0) > 0 ? (row.streamCompleteMillisMax ?? 0) : null) }}</template>
-              </el-table-column>
-            </el-table>
           </div>
         </section>
       </div>
@@ -1207,9 +1174,15 @@ function onPageChange(next: number) {
   background: #fff;
   padding: 12px 16px;
 }
+.ta-imob-chart-card-full {
+  grid-column: 1 / -1;
+}
 .ta-imob-chart {
   width: 100%;
   height: 240px;
+}
+.ta-imob-chart-trend {
+  height: 260px;
 }
 .ta-imob-metric-grid {
   display: grid;

@@ -5,6 +5,30 @@
 
 ## Entries
 
+### 2026-08-08 - 优化超级管理员内部模型调用可观测页面布局与精细化调整
+
+### Why
+
+- 超级管理员反馈内部模型调用可观测页面进一步优化需求：1. `REQ & SR Trend` 折线图与旁边饼图/柱状图排版挤压，要求折线图单独全宽独立整行展示；2. 删除页首文案中的“；每个指标悬浮提示中的计算逻辑与判定保持不变。”；3. `By Provider` 替换为中文“按供应商”，且移除底部“按小时明细”数据表格；4. 页首“AIPerf & 业界指标英文缩写指南 (Metrics Glossary)”改为默认展开。
+
+### What
+
+- `REQ & SR Trend` 折线图卡片设为全宽独立整行展示（`grid-column: 1 / -1`），并提升容器高度，避免由于三栏排版导致折线图被挤压、图例与数值重叠。
+- 删除了页首子标题提示文案中的“；每个指标悬浮提示中的计算逻辑与判定保持不变。”。
+- 将“By Provider”替换为中文“按供应商”，彻底删除了页面底部的“按小时明细”表格及关联未使用的 `groupedHourlyStats` 计算属性。
+- 页首“AIPerf & 业界指标英文缩写指南 (Metrics Glossary)”折叠卡片的 `showGlossary` 默认状态调整为 `true`（默认展开）。
+- 同步更新 Vue 组件单元测试 `internal-model-observability-panel.test.ts`。
+
+### How
+
+- 修改 `InternalModelObservabilityPanel.vue` 模板与 CSS 样式，完成 `npx vitest` jsdom 测试与 `npx vue-tsc --noEmit` 类型校验。
+
+### Result
+
+- 前端单测和 `vue-tsc` 类型检查 100% 通过，界面折线图独占整行宽敞展示，各卡片布局与中文字样准确，默认展开 Glossary 手册。
+
+
+
 ### 2026-08-07 - 修复内部模型可观测首输出判定与探活超时归类
 
 ### Why

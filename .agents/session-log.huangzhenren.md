@@ -5,21 +5,6 @@
 
 ## Entries
 
-### 2026-08-08 - 优化超级管理员内部模型调用可观测页面
-
-- Why:
-  - 超级管理员反馈内部模型调用可观测页面存在三个痛点：1. 指标命名中英文混用，缺乏规范统称和页首整体 Glossary 对照指南；2. 点击“刷新数据”或选择结果/来源类型过滤后图表数据会变空白；3. “按供应商”模块卡片下内部指标数值与 Label 挤在狭窄水平列中导致文字折叠堆叠。
-- What:
-  - 页面全部指标采用 NVIDIA AIPerf 规范与业界标准英文缩写（REQ, Providers, SR, FR, Failures, Avg/Max E2E, Total Duration, RPS, Avg/Max TTFT, Avg/Max SCT），保持每个指标注释与悬浮 Help 的业务逻辑和算法完全不变；在页首标题旁增加可展开/收起的“AIPerf & 业界指标英文缩写指南 (Glossary)”卡片。
-  - 修复 `hourlyTrend` 24 小时完整时间轴补齐，避免空数据时 DOM 容器被卸载；修正 `ensureChart` 中 ECharts 实例在 Vue DOM 重新挂载与过滤更新时的绑定校验与销毁逻辑，确保数据刷新和过滤后图表稳定绘制无空白。
-  - 优化“按供应商”指标卡片自适应 Grid 布局，单元格改为上下 Vertical Flex 结构（Label 在上，Value 在下），彻底解决字体堆叠问题。
-  - 同步更新 Vue 组件单元测试 `internal-model-observability-panel.test.ts`。
-- How:
-  - 修改 `InternalModelObservabilityPanel.vue`，补齐图表 lifecycle 与 ensureChart 条件判断，完成 `npx vitest` jsdom 测试与 `npx vue-tsc --noEmit` 类型校验。
-- Result:
-  - 前端单测和 `vue-tsc` 类型检查 100% 通过，指标体验符合 AIPerf 规范，刷新/过滤与各屏幕下的图表及布局渲染正常。
-
-
 ### 2026-07-31 - 优化工作台外围配色为中国工商银行 (ICBC) 企业级极简红白风格
 
 - Why:
