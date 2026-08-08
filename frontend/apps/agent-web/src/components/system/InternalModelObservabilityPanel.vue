@@ -30,6 +30,7 @@ const pageSize = 20;
 const HOUR_MILLIS = 3_600_000;
 const selectedWindowHours = ref<number>(24);
 const showGlossary = ref(true);
+const showDocDialog = ref(false);
 
 const windowHourOptions = [
   { label: "最近 1 小时", value: 1 },
@@ -92,7 +93,13 @@ function outcomeGroupOf(outcome: InternalModelCallOutcome): InternalModelCallOut
 // AIPerf (NVIDIA) 指标规范与业界标准英文缩写说明
 const glossaryItems = [
   { abbr: "TTFT", name: "Time to First Token", desc: "首 Token 延迟：发起请求到接收到模型首个 Token 的时间（NVIDIA GenAI Perf 核心延迟指标）。" },
-  { abbr: "ITL / TPOT", name: "Inter-Token Latency / Time Per Output Token", desc: "Token 输出间隔耗时：生成过程中连续两个 Output Token 之间的平均生成间隔。" },
+  {
+    abbr: "ITL / TPOT",
+    name: "Inter-Token Latency / Time Per Output Token",
+    desc: "Token 输出间隔耗时：生成过程中连续两个 Output Token 之间的平均生成间隔。",
+    isPending: true,
+    pendingText: "（暂未计算）"
+  },
   { abbr: "SCT", name: "Stream Completion Time", desc: "流式完成时间：发起请求到流式响应正常结束的总耗时。" },
   { abbr: "E2E", name: "End-to-End Latency", desc: "端到端延迟：发起请求到接收到完整响应或异常终止的总端到端时长。" },
   { abbr: "RPS", name: "Requests Per Second", desc: "每秒请求数：在统计时间窗口内的平均每秒请求处理量（Throughput 吞吐量指标）。" },
@@ -684,11 +691,25 @@ function onPageChange(next: number) {
         <div v-if="showGlossary" class="ta-imob-glossary-card">
           <div class="ta-imob-glossary-header">
             <strong>AIPerf & 业界指标英文缩写指南 (Metrics Glossary)</strong>
-            <span>参照 NVIDIA AIPerf 性能指标规范定义</span>
+            <button
+              type="button"
+              class="ta-imob-glossary-link"
+              @click="showDocDialog = true"
+            >
+              参照 NVIDIA AIPerf 性能指标规范定义 ↗
+            </button>
           </div>
           <div class="ta-imob-glossary-grid">
-            <div v-for="item in glossaryItems" :key="item.abbr" class="ta-imob-glossary-item">
-              <code class="ta-imob-glossary-abbr">{{ item.abbr }}</code>
+            <div
+              v-for="item in glossaryItems"
+              :key="item.abbr"
+              class="ta-imob-glossary-item"
+              :class="{ 'is-pending': item.isPending }"
+            >
+              <div class="ta-imob-glossary-item-top">
+                <code class="ta-imob-glossary-abbr">{{ item.abbr }}</code>
+                <span v-if="item.pendingText" class="ta-imob-glossary-pending-badge">{{ item.pendingText }}</span>
+              </div>
               <span class="ta-imob-glossary-name">{{ item.name }}</span>
               <span class="ta-imob-glossary-desc">{{ item.desc }}</span>
             </div>
@@ -980,6 +1001,94 @@ function onPageChange(next: number) {
           </div>
         </section>
       </div>
+
+      <!-- 性能指标规范定义 (离线指南弹窗) -->
+      <el-dialog
+        v-model="showDocDialog"
+        title="AIPerf & 业界模型性能指标规范定义 (离线指南)"
+        width="760px"
+        append-to-body
+      >
+        <div class="ta-imob-doc-content">
+          <p class="ta-imob-doc-lead">
+            本文档参考
+            <a
+              href="https://docs.nvidia.com/aiperf/dev/reference/ai-perf-metrics-reference"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="ta-imob-external-link"
+            >
+              NVIDIA GenAI Perf / AI Perf Metrics Reference
+            </a>
+            官方规范标准定义。对应本地源码 Markdown 文件位于 <code>docs/standards/metrics-glossary.md</code>。
+          </p>
+
+          <table class="ta-imob-doc-table">
+            <thead>
+              <tr>
+                <th>缩写</th>
+                <th>全称 (Full Name)</th>
+                <th>中文名称</th>
+                <th>状态 / 计算说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>TTFT</code></td>
+                <td>Time to First Token</td>
+                <td>首 Token 延迟</td>
+                <td>已统计（计算模型生成首包 Token 的启动延迟）</td>
+              </tr>
+              <tr class="is-pending-row">
+                <td><code>ITL / TPOT</code></td>
+                <td>Inter-Token Latency / Time Per Output Token</td>
+                <td>Token 输出间隔 / 单 Token 耗时</td>
+                <td><span class="ta-imob-orange-badge">[暂未计算]</span>（待代理协议提取 Token 粒度时间戳后计算）</td>
+              </tr>
+              <tr>
+                <td><code>SCT</code></td>
+                <td>Stream Completion Time</td>
+                <td>流式完成时间</td>
+                <td>已统计（计算流式响应完整结束传输的耗时）</td>
+              </tr>
+              <tr>
+                <td><code>E2E</code></td>
+                <td>End-to-End Latency</td>
+                <td>端到端总延迟</td>
+                <td>已统计（客户端 HTTP 请求开始到整体结束的总耗时）</td>
+              </tr>
+              <tr>
+                <td><code>RPS</code></td>
+                <td>Requests Per Second</td>
+                <td>每秒请求数 (吞吐量)</td>
+                <td>已统计（统计窗口内平均每秒请求处理量）</td>
+              </tr>
+              <tr>
+                <td><code>REQ</code></td>
+                <td>Requests</td>
+                <td>请求总数</td>
+                <td>已统计（全量请求计数，含成功与异常）</td>
+              </tr>
+              <tr>
+                <td><code>SR</code></td>
+                <td>Success Rate</td>
+                <td>请求成功率</td>
+                <td>已统计（成功请求占总请求数的百分比）</td>
+              </tr>
+              <tr>
+                <td><code>FR</code></td>
+                <td>Failure Rate</td>
+                <td>请求错误率</td>
+                <td>已统计（异常或中断请求占总请求数的百分比）</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="ta-imob-doc-footer">
+            <span>官方参考链接：<a href="https://docs.nvidia.com/aiperf/dev/reference/ai-perf-metrics-reference" target="_blank" rel="noopener noreferrer">NVIDIA GenAI Perf / AI Perf Metrics Reference ↗</a></span>
+          </div>
+        </div>
+      </el-dialog>
     </template>
     <div v-else class="ta-imob-placeholder">当前账号无系统管理权限</div>
   </section>
@@ -1061,6 +1170,20 @@ function onPageChange(next: number) {
   font-size: 11px;
   color: #57606a;
 }
+.ta-imob-glossary-link {
+  font-size: 11px;
+  color: #0969da;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  font-weight: 500;
+  transition: color 0.15s ease;
+}
+.ta-imob-glossary-link:hover {
+  color: #0550ae;
+}
 .ta-imob-glossary-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -1074,6 +1197,69 @@ function onPageChange(next: number) {
   border-radius: 6px;
   background: #ffffff;
   border: 1px solid #e1e4e8;
+}
+.ta-imob-glossary-item.is-pending {
+  border-color: #fcd34d;
+  background-color: #fffbeb;
+}
+.ta-imob-glossary-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ta-imob-glossary-pending-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: #d97706;
+  background-color: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.ta-imob-doc-content {
+  font-size: 13px;
+  color: #1f2328;
+  line-height: 1.6;
+}
+.ta-imob-doc-lead {
+  margin-top: 0;
+  margin-bottom: 12px;
+  color: #57606a;
+}
+.ta-imob-external-link {
+  color: #0969da;
+  text-decoration: underline;
+  font-weight: 500;
+}
+.ta-imob-doc-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 16px;
+}
+.ta-imob-doc-table th,
+.ta-imob-doc-table td {
+  border: 1px solid #d0d7de;
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 12px;
+}
+.ta-imob-doc-table th {
+  background-color: #f6f8fa;
+  font-weight: 600;
+}
+.ta-imob-doc-table tr.is-pending-row {
+  background-color: #fffbeb;
+}
+.ta-imob-orange-badge {
+  color: #d97706;
+  font-weight: 700;
+}
+.ta-imob-doc-footer {
+  margin-top: 12px;
+  font-size: 11px;
+  color: #57606a;
+  border-top: 1px dashed #d0d7de;
+  padding-top: 8px;
 }
 .ta-imob-glossary-abbr {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;

@@ -7373,7 +7373,8 @@
 
 - 修改 [InternalModelObservabilityPanel.vue](file:///Users/kaka/Desktop/intelligent-test-agent/frontend/apps/agent-web/src/components/system/InternalModelObservabilityPanel.vue) 中 ECharts 趋势图配置：将图例改为顶部居中对齐（`top: 0, left: "center"`）并增加 `itemGap: 16`，将 `grid.right` 边距由 `16` 调整为 `44`，确保右侧 Y 轴刻度标签和名称有足够展示空间。
 - 将聚合指标图表的卡片表头统一改为中文：`请求数与成功率趋势`（或 `请求数趋势`）、`调用结果分布`、`失败原因分类`、`供应商请求量对比`。
-- 参考 NVIDIA GenAI Perf / AI Perf Metrics Reference 标准，在前端面板页首内置默认展开的“AIPerf & 业界指标英文缩写指南 (Glossary)”卡片，并新建离线标准文档 [docs/standards/metrics-glossary.md](file:///Users/kaka/Desktop/intelligent-test-agent/docs/standards/metrics-glossary.md)，详细列出 TTFT、ITL/TPOT、SCT、E2E、RPS、REQ、SR、FR 的完整全称、定义与计算逻辑。
+- 参考 NVIDIA GenAI Perf / AI Perf Metrics Reference 标准，在前端面板页首内置“AIPerf & 业界指标英文缩写指南 (Glossary)”卡片，点击“参照 NVIDIA AIPerf 性能指标规范定义 ↗”可直接唤起离线规范弹窗。
+- 在缩写指南与离线标准文档 [docs/standards/metrics-glossary.md](file:///Users/kaka/Desktop/intelligent-test-agent/docs/standards/metrics-glossary.md) 中添加 [NVIDIA GenAI Perf / AI Perf Metrics Reference](https://docs.nvidia.com/aiperf/dev/reference/ai-perf-metrics-reference) 官方链接，并将尚未提取 Token 粒度时间戳计算的 `ITL / TPOT` 用醒目的橙色徽章 `<span class="ta-imob-orange-badge">（暂未计算）</span>` 显式标注。
 
 ### How
 
@@ -7383,5 +7384,5 @@
 ### Result
 
 - 趋势图图例居中展示，所有聚合图表表头均采用清晰中文展示。
-- 在网络隔离的离线部署环境下，用户既可在页面直观展开阅读指标缩写对照，开发者亦可在工程源码中离线查阅标准文档。
+- 点击“参照 NVIDIA AIPerf 性能指标规范定义 ↗”可直接在页面弹出离线对照指南，Markdown 源码中保留完整官方链接；`ITL / TPOT` 带有明显的橙色“暂未计算”状态标识。
 
