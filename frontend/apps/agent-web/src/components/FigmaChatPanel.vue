@@ -8433,10 +8433,13 @@ function onCompositionEnd() {
 .figma-chat-question-scroll::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: transparent;
+  transition: background-color 0.15s ease;
 }
 
-.figma-chat-question-scroll:hover::-webkit-scrollbar-thumb {
-  background: var(--ta-chat-border-strong, #cfcfcf);
+:hover > .figma-chat-question-scroll::-webkit-scrollbar-thumb,
+.figma-chat-question-scroll:hover::-webkit-scrollbar-thumb,
+.figma-chat-panel:hover .figma-chat-question-scroll::-webkit-scrollbar-thumb {
+  background: var(--ta-chat-border-strong, #b5b5b5);
 }
 
 .figma-chat-question-page-head {

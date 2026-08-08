@@ -959,37 +959,39 @@ h3 {
   font-weight: 600;
 }
 
-/* ===== 自定义滚动条（仅鼠标选入/悬停对应区域时显示） ===== */
-* {
-  scrollbar-color: transparent transparent;
-}
-*:hover {
-  scrollbar-color: #c7c7c7 transparent;
-}
-
+/* ===== 自定义滚动条（鼠标选入/悬浮工作空间、对话框、编辑器或任意区域即显示滚动条） ===== */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: transparent;
+  background-color: transparent;
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: padding-box;
   transition: background-color 0.15s ease;
 }
-*:hover::-webkit-scrollbar-thumb {
-  background: #c7c7c7;
-  background-clip: padding-box;
-  border: 2px solid transparent;
+
+/* 当鼠标选入/悬浮到工作空间、对话面板、编辑器或任意包含滚动条的容器区域时，立即显现滑块 */
+:hover::-webkit-scrollbar-thumb,
+*:hover > ::-webkit-scrollbar-thumb,
+[class*="sidebar"]:hover ::-webkit-scrollbar-thumb,
+[class*="chat"]:hover ::-webkit-scrollbar-thumb,
+[class*="editor"]:hover ::-webkit-scrollbar-thumb,
+[class*="workspace"]:hover ::-webkit-scrollbar-thumb,
+[class*="panel"]:hover ::-webkit-scrollbar-thumb,
+.dv-dockview:hover ::-webkit-scrollbar-thumb,
+.markdown-body:hover ::-webkit-scrollbar-thumb {
+  background-color: rgba(140, 140, 140, 0.48) !important;
+  border: 2px solid transparent !important;
+  background-clip: padding-box !important;
 }
+
 *:hover::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
-  background-clip: padding-box;
-  border: 2px solid transparent;
+  background-color: rgba(90, 90, 90, 0.75) !important;
 }
 
 /* ===== dockview 纸面 editor-tabs ===== */

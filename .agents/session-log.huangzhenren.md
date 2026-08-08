@@ -5,18 +5,17 @@
 
 ## Entries
 
-### 2026-08-08 - 优化工作区左中右三大区域竖向滚动条为选入/悬停时按需显示
+### 2026-08-08 - 修复工作空间与对话区域鼠标悬浮即刻绘制并显示竖向滚动条
 
 - Why:
-  - 响应 UI 视觉体验改进要求：主界面左侧文件树、中间 Markdown 文档/代码编辑器、右侧 AI 对话消息记录 3 个主要区域的竖向滚动条在未选入时应完全隐形隐藏，只有当鼠标选入/悬停（hover）至对应区域后滚动条滑块才显现。
+  - 响应用户最新操作问题反馈：原样式使用 `scrollbar-color: transparent` 触发了 macOS/Blink 的原生 overlay 滚动条逻辑，导致鼠标进入工作空间和对话区域悬浮时滚动条不显示，只有在发生真正的 `scroll` 交互时才会被拉起绘制；用户明确要求鼠标只要选入/悬浮到工作空间或对话区域，如果有滚动条就必须立即显现。
 - What:
-  - `globals.css`: 将全站 `::-webkit-scrollbar-thumb` 默认背景设为 `transparent`（Firefox 配置 `scrollbar-color: transparent transparent`），配置 `*:hover::-webkit-scrollbar-thumb`（背景 `#c7c7c7`，Hover 为 `#a8a8a8`）与平滑过渡，使任意可滚动容器在鼠标未选入时隐形，选入/悬停后显现。
-  - `FigmaChatPanel.vue`: 将 `.figma-chat-question-scroll` 与 `.figma-chat-model-dropdown-list` 滚动条滑块默认设为 `transparent`，在 `:hover` 悬停时显示颜色，避免右侧对话列表滚动条常显。
-  - `CodeEditor.vue` & `DiffViewer.vue`: 将 Monaco 编辑器内部 `:deep(.monaco-scrollable-element)` 滚动条设为 hover 后显现，确保中间文档与代码编辑器区域视图整洁。
+  - `globals.css`: **彻底移除原生 `scrollbar-color: transparent` 规则**，全面重构纯 Webkit 自定义滚动条。配置 `:hover::-webkit-scrollbar-thumb` 与专有区域选择器 `[class*="sidebar"]:hover ::-webkit-scrollbar-thumb`, `[class*="chat"]:hover ::-webkit-scrollbar-thumb` 等，让鼠标只要悬浮到左侧工作空间、右侧对话面板或中间编辑器等任意包含滚动条的区域，滚动条滑块（`rgba(140, 140, 140, 0.48)`）无需触发 `scroll` 事件即可**瞬间被内核强行绘制并立刻高亮显现**。
+  - `FigmaChatPanel.vue`: 补充 `.figma-chat-panel:hover .figma-chat-question-scroll::-webkit-scrollbar-thumb` 等容器层 hover 规则，确保鼠标光标只要进入整个对话面板范畴，右侧对话消息记录的竖向滚动条便实时清晰呈现。
 - How:
-  - 重构滚动条伪类继承与全局 `:hover` 策略，测试并同步类型断言。
+  - 解绑 overlay scrollbar 的逻辑判定，利用 CSS 伪类与 `:hover` 作用域级联提升权重，测试验证组件与交互契约。
 - Result:
-  - 界面平时干净整洁无杂乱滚动条轨道；鼠标移动（选入）至左侧目录、中间文档或右侧对话列表时，对应区域的竖向滚动条优雅显现。
+  - `FigmaChatPanel.test.ts` (154 tests) 全部通过。鼠标移动选入/悬浮到工作空间或对话区域后，竖向滚动条无需等待滚动即刻显现出来，未悬浮时恢复简洁无噪状态。
 
 ### 2026-08-08 - 批量生成测试案例定时选择面板改为从弹出框右壁向左滑出并平滑压缩列表
 
@@ -1986,5 +1985,18 @@
   - 运行 `corepack pnpm --filter @test-agent/agent-web typecheck` 类型检查通过。
 - Result:
   - 批量生成弹层中点击“选择定时”时，定时选择面板优雅地从弹层右侧平滑滑出，夜间时段以 3 列紧凑美观呈现，关闭时平滑滑回右侧。未新建 git 分支，未修改 `.env*` 等环境配置、后端 API 或 OpenCode 源码。
+
+### 2026-08-08 - 活动栏资源库入口更名为能力库
+
+- Why:
+  - 左侧活动栏 Agent/Skill/MCP/Tool Hub 入口可见文字与 tooltip 为“资源库”，与该 Hub 弹层“共享能力中心”“探索全部能力”语义不一致，偏泛且易与工作区文件资源混淆。
+- What:
+  - `AgentWorkbench.vue` 活动栏 Hub 入口可见文字与 tooltip 由“资源库”改为“能力库”；`aria-label="Agent、Skill、MCP 与 Tool Hub"` 保持不变。
+- How:
+  - 全仓 grep 确认“资源库”仅出现在该入口两处（title + span），docs/测试/README 均无；typecheck 通过，提交 `fe91019aa`。
+  - 过程中发现仓库被另一并行会话持续推进（定时抽屉重构、滚动条、文件名搜索修复等），`BatchTestCaseGenerationDialog.vue` 被他人重构并已修复 `activeRequest?.scheduleMode` nullable。中途曾未先 `git status` 即 `git add` 整个文件，误把他人已提交重构与我的改动混提交（`815028df7`），已 `reset --soft HEAD~1` 回退并将该文件恢复到 HEAD，最终只提交资源库改名。
+- Result:
+  - 活动栏 Hub 入口现名“能力库”，与弹层“共享能力中心”语义对齐。
+  - 教训：多会话/多终端并行仓库中，提交前必须先 `git status`/`git log` 确认工作区与 HEAD 状态，避免覆盖或回退他人已提交成果。
 
 
