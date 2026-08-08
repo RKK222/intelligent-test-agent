@@ -25,7 +25,7 @@ describe("BatchTestCaseGenerationDialog", () => {
     expect(wrapper.emitted("reload-candidates")).toBeTruthy();
   });
 
-  it("uses one primary action slot and can close scheduling without retaining old times", async () => {
+  it("auto-recommends a covering night slot on open and clears it on close", async () => {
     const nightSlots = {
       timeZone: "Asia/Shanghai",
       windowStart: "2026-08-08T13:00:00Z",
@@ -50,20 +50,82 @@ describe("BatchTestCaseGenerationDialog", () => {
     await wrapper.get('[data-testid="batch-open-schedule"]').trigger("click");
     expect(wrapper.find('[data-testid="batch-open-schedule"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="batch-execute-now"]').exists()).toBe(false);
-    expect(wrapper.find('[data-testid="batch-execute-scheduled"]').exists()).toBe(false);
-    expect(wrapper.get('[data-testid="batch-close-schedule"]')).toBeTruthy();
-
-    await wrapper.get('[data-testid="batch-night-slot"]').trigger("click");
-    expect(wrapper.find('[data-testid="batch-execute-scheduled"]').exists()).toBe(true);
+    expect(wrapper.get('[data-testid="batch-execute-scheduled"]')).toBeTruthy();
+    expect(wrapper.get('[data-testid="batch-schedule-recommend-hint"]').text())
+      .toBe("已根据选择的子条目数量智能推荐定时执行时间段");
+    expect(wrapper.get('[data-testid="batch-night-slot"]').classes()).toContain("is-selected");
 
     await wrapper.get('[data-testid="batch-close-schedule"]').trigger("click");
     expect(wrapper.find('[data-testid="batch-schedule-panel"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="batch-execute-now"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="batch-open-schedule"]').exists()).toBe(true);
 
+    // 重新打开按当前子条目数重新智能推荐，不留旧手动选择。
+    await wrapper.get('[data-testid="batch-open-schedule"]').trigger("click");
+    expect(wrapper.get('[data-testid="batch-execute-scheduled"]')).toBeTruthy();
+    expect(wrapper.get('[data-testid="batch-night-slot"]').classes()).toContain("is-selected");
+  });
+
+  it("drops the auto-recommend hint once the user manually changes a night slot", async () => {
+    const nightSlots = {
+      timeZone: "Asia/Shanghai",
+      windowStart: "2026-08-08T13:00:00Z",
+      windowEnd: "2026-08-08T23:00:00Z",
+      capacity: 2,
+      slots: [{
+        slotStart: "2026-08-08T13:00:00Z",
+        slotEnd: "2026-08-08T13:15:00Z",
+        reservedCount: 0,
+        capacity: 2,
+        available: true,
+        recommended: false
+      }]
+    };
+    const wrapper = mount(BatchTestCaseGenerationDialog, {
+      props: { open: true, references: references.slice(0, 2), loading: false, nightSlots }
+    });
+    for (const checkbox of wrapper.findAll('input[data-testid="batch-item-checkbox"]')) {
+      await checkbox.setValue(true);
+    }
+    await wrapper.get('[data-testid="batch-open-schedule"]').trigger("click");
+    expect(wrapper.find('[data-testid="batch-schedule-recommend-hint"]').exists()).toBe(true);
+
+    // 手动取消自动推荐的时段后，提示与定时执行按钮一并消失。
+    await wrapper.get('[data-testid="batch-night-slot"]').trigger("click");
+    expect(wrapper.find('[data-testid="batch-schedule-recommend-hint"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="batch-execute-scheduled"]').exists()).toBe(false);
+
+    // 手动重新选择后定时执行恢复，但不再视为系统自动推荐。
+    await wrapper.get('[data-testid="batch-night-slot"]').trigger("click");
+    expect(wrapper.find('[data-testid="batch-execute-scheduled"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="batch-schedule-recommend-hint"]').exists()).toBe(false);
+  });
+
+  it("hides the scheduled submit and reports capacity when the recommendation cannot cover items", async () => {
+    const nightSlots = {
+      timeZone: "Asia/Shanghai",
+      windowStart: "2026-08-08T13:00:00Z",
+      windowEnd: "2026-08-08T23:00:00Z",
+      capacity: 2,
+      slots: [{
+        slotStart: "2026-08-08T13:00:00Z",
+        slotEnd: "2026-08-08T13:15:00Z",
+        reservedCount: 1,
+        capacity: 2,
+        available: true,
+        recommended: false
+      }]
+    };
+    const wrapper = mount(BatchTestCaseGenerationDialog, {
+      props: { open: true, references: references.slice(0, 2), loading: false, nightSlots }
+    });
+    for (const checkbox of wrapper.findAll('input[data-testid="batch-item-checkbox"]')) {
+      await checkbox.setValue(true);
+    }
     await wrapper.get('[data-testid="batch-open-schedule"]').trigger("click");
     expect(wrapper.find('[data-testid="batch-execute-scheduled"]').exists()).toBe(false);
-    expect(wrapper.get('[data-testid="batch-night-slot"]').classes()).not.toContain("is-selected");
+    expect(wrapper.find('[data-testid="batch-schedule-recommend-hint"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain("不足以安排 2 个子条目");
   });
 
   it("limits selection to 50 and emits an immediate batch without editing the composer", async () => {
@@ -197,7 +259,6 @@ describe("BatchTestCaseGenerationDialog", () => {
       await checkbox.setValue(true);
     }
     await wrapper.get('[data-testid="batch-open-schedule"]').trigger("click");
-    await wrapper.get('[data-testid="batch-night-slot"]').trigger("click");
     await wrapper.get('[data-testid="batch-execute-scheduled"]').trigger("click");
     await wrapper.setProps({ running: true });
     await wrapper.setProps({
@@ -221,7 +282,7 @@ describe("BatchTestCaseGenerationDialog", () => {
     }));
   });
 
-  it("supports multiple night slots and disables closing while running", async () => {
+  it("auto-recommends multiple night slots and disables closing while running", async () => {
     const wrapper = mount(BatchTestCaseGenerationDialog, {
       props: {
         open: true,
@@ -246,9 +307,8 @@ describe("BatchTestCaseGenerationDialog", () => {
     await wrapper.findAll('input[data-testid="batch-item-checkbox"]')[0]!.setValue(true);
     await wrapper.findAll('input[data-testid="batch-item-checkbox"]')[1]!.setValue(true);
     await wrapper.get('[data-testid="batch-open-schedule"]').trigger("click");
-    const slots = wrapper.findAll('[data-testid="batch-night-slot"]');
-    await slots[0]!.trigger("click");
-    await slots[1]!.trigger("click");
+    // 单时段余量不足以覆盖 2 项时，自动推荐两个时段。
+    expect(wrapper.findAll('[data-testid="batch-night-slot"].is-selected')).toHaveLength(2);
     await wrapper.get('[data-testid="batch-execute-scheduled"]').trigger("click");
 
     expect(wrapper.emitted("execute")?.at(-1)?.[0]).toEqual(expect.objectContaining({

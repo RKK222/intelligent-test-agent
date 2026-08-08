@@ -13,6 +13,7 @@ import ExecutionTimePicker from "./ExecutionTimePicker.vue";
 import {
   allocateBatchSchedule,
   batchReferenceTestId,
+  recommendBatchScheduleTimes,
   type BatchExecutionControls,
   type BatchGenerationRequest,
   type BatchItemExecutionState
@@ -55,6 +56,8 @@ const requirement = ref(DEFAULT_REQUIREMENT);
 const scheduleOpen = ref(false);
 const scheduleMode = ref<NightExecutionScheduleMode>("NIGHT_WINDOW");
 const selectedNightTimes = ref<string[]>([]);
+// 标记当前夜间时段选择是否由系统自动推荐；用户手动改选后置 false，避免覆盖手动选择。
+const scheduleAutoRecommended = ref(false);
 const customScheduleInput = ref("");
 const customScheduleError = ref("");
 const customTimes = ref<string[]>([]);
@@ -87,6 +90,11 @@ const scheduleAllocation = computed(() => allocateBatchSchedule({
   itemCount: selectedIds.value.length,
   scheduleMode: scheduleMode.value,
   selectedTimes: selectedScheduleTimes.value,
+  slots: props.nightSlots?.slots
+}));
+// 依据所选子条目数与各时段排队任务数自动推荐的夜间时间段。
+const recommendedNightTimes = computed(() => recommendBatchScheduleTimes({
+  itemCount: selectedIds.value.length,
   slots: props.nightSlots?.slots
 }));
 const failedIds = computed(() => activeReferences.value
@@ -145,6 +153,17 @@ watch(() => props.references, (references) => {
   selectedIds.value = selectedIds.value.filter((id) => valid.has(id));
 });
 
+// 选择的子条目数或夜间时段数据变化时，若仍处于自动推荐状态则重新推荐；
+// 用户已手动改选（scheduleAutoRecommended=false）时保留其选择不覆盖。
+watch(
+  [() => selectedIds.value.length, () => props.nightSlots],
+  () => {
+    if (dialogStage.value !== "selection" || !scheduleOpen.value) return;
+    if (scheduleMode.value !== "NIGHT_WINDOW" || !scheduleAutoRecommended.value) return;
+    applyRecommendedSchedule();
+  }
+);
+
 function requestClose() {
   if (executionLocked.value) return;
   emit("close", { incompleteCount: incompleteCount.value });
@@ -190,6 +209,14 @@ function executeImmediate() {
 function openSchedule() {
   scheduleOpen.value = true;
   emit("request-night-slots");
+  applyRecommendedSchedule();
+}
+
+/** 按当前所选子条目数与各时段排队任务数智能推荐夜间时间段并自动选中。 */
+function applyRecommendedSchedule() {
+  if (scheduleMode.value !== "NIGHT_WINDOW") return;
+  selectedNightTimes.value = recommendedNightTimes.value;
+  scheduleAutoRecommended.value = true;
 }
 
 /** 返回立即执行模式时丢弃未提交的定时时间，避免再次打开误用旧选择。 */
@@ -198,6 +225,7 @@ function closeSchedule() {
   scheduleOpen.value = false;
   scheduleMode.value = "NIGHT_WINDOW";
   selectedNightTimes.value = [];
+  scheduleAutoRecommended.value = false;
   customScheduleInput.value = "";
   customScheduleError.value = "";
   customTimes.value = [];
@@ -205,6 +233,8 @@ function closeSchedule() {
 
 function toggleNightTime(slotStart: string, available: boolean) {
   if (!available || executionLocked.value) return;
+  // 用户手动改选后不再视为系统自动推荐，避免后续数量/时段变化覆盖手动选择。
+  scheduleAutoRecommended.value = false;
   selectedNightTimes.value = selectedNightTimes.value.includes(slotStart)
     ? selectedNightTimes.value.filter((item) => item !== slotStart)
     : [...selectedNightTimes.value, slotStart].sort();
@@ -215,6 +245,12 @@ function setScheduleMode(mode: NightExecutionScheduleMode) {
   customScheduleError.value = "";
   if (mode === "ADMIN_CUSTOM" && !customScheduleInput.value) {
     customScheduleInput.value = formatBeijingDateTimeInput(customScheduleAtOffset(new Date(), 1));
+  }
+  if (mode === "NIGHT_WINDOW") {
+    // 切回夜间时段时按当前子条目数重新智能推荐。
+    applyRecommendedSchedule();
+  } else {
+    scheduleAutoRecommended.value = false;
   }
 }
 
@@ -306,6 +342,7 @@ function resetDialogState() {
   scheduleOpen.value = false;
   scheduleMode.value = "NIGHT_WINDOW";
   selectedNightTimes.value = [];
+  scheduleAutoRecommended.value = false;
   customScheduleInput.value = "";
   customScheduleError.value = "";
   customTimes.value = [];
@@ -543,14 +580,23 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
           <button v-if="!scheduleOpen" type="button" class="batch-primary" data-testid="batch-execute-now" :disabled="running || selectedIds.length === 0 || !requirement.trim()" @click="executeImmediate()">
             <Play :size="15" /> 立刻执行
           </button>
-          <button
+          <div
             v-else-if="selectedScheduleTimes.length > 0 && scheduleAllocation.ok"
-            type="button"
-            class="batch-primary"
-            data-testid="batch-execute-scheduled"
-            :disabled="running || selectedIds.length === 0 || !requirement.trim()"
-            @click="executeScheduled()"
-          ><Clock3 :size="15" /> 定时执行</button>
+            class="batch-schedule-submit"
+          >
+            <span
+              v-if="scheduleAutoRecommended && scheduleMode === 'NIGHT_WINDOW'"
+              class="batch-recommend-hint"
+              data-testid="batch-schedule-recommend-hint"
+            >已根据选择的子条目数量智能推荐定时执行时间段</span>
+            <button
+              type="button"
+              class="batch-primary"
+              data-testid="batch-execute-scheduled"
+              :disabled="running || selectedIds.length === 0 || !requirement.trim()"
+              @click="executeScheduled()"
+            ><Clock3 :size="15" /> 定时执行</button>
+          </div>
         </div>
       </footer>
       <footer v-else class="batch-dialog-foot batch-progress-foot">
@@ -677,6 +723,8 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
 .batch-requirement textarea { min-height: 58px; max-height: 100px; resize: vertical; padding: 9px 10px; border: 1px solid #cbd6e1; border-radius: 9px; color: #27384b; font: inherit; font-size: 12px; line-height: 18px; }
 .batch-requirement textarea:focus { border-color: #8f2731; box-shadow: 0 0 0 2px rgba(143, 39, 49, .08); outline: 0; }
 .batch-foot-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
+.batch-schedule-submit { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+.batch-recommend-hint { color: #8a6a2f; font-size: 11px; font-weight: 600; max-width: 260px; text-align: right; }
 .batch-limit-hint { color: #9f2e38; font-size: 10px; }
 .batch-progress-foot { align-items: center; color: #657589; font-size: 11px; }
 .is-spinning { animation: batch-spin .8s linear infinite; }

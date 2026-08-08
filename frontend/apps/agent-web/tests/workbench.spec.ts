@@ -3525,8 +3525,8 @@ test("batch test cases start isolated runs, retry failures, and create isolated 
   await scheduledDialog.getByTestId("batch-open-schedule").click();
   await expect(scheduledDialog.getByTestId("batch-close-schedule")).toBeVisible();
   await expect(scheduledDialog.getByTestId("batch-execute-now")).toHaveCount(0);
-  await expect(scheduledDialog.getByTestId("batch-execute-scheduled")).toHaveCount(0);
-  await scheduledDialog.getByTestId("batch-night-slot").click();
+  // 2 个子条目、单时段余量充足时自动推荐并选中该时段，直接展示定时执行与智能推荐提示。
+  await expect(scheduledDialog.getByTestId("batch-schedule-recommend-hint")).toBeVisible();
   await expect(scheduledDialog.getByTestId("batch-execute-scheduled")).toBeVisible();
   await scheduledDialog.getByTestId("batch-execute-scheduled").click();
   await expect(scheduledDialog.getByTestId("batch-creation-progress")).toBeVisible();

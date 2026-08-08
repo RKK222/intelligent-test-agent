@@ -4,7 +4,8 @@ import {
   BatchItemPreparationError,
   allocateBatchSchedule,
   buildBatchItemRunInput,
-  mapWithConcurrency
+  mapWithConcurrency,
+  recommendBatchScheduleTimes
 } from "../src/components/batch-test-case-generation";
 
 const reference: WorkspaceRequirementReference = {
@@ -98,5 +99,51 @@ describe("batch test case generation", () => {
     });
     expect(peak).toBe(4);
     expect(values).toEqual([2, 4, 6, 8, 10, 12]);
+  });
+
+  it("recommends the least-queued slot that covers the selected item count", () => {
+    // 统一容量下“已排队最少”即“余量最多”，单个时段足以覆盖时只推荐该时段。
+    expect(recommendBatchScheduleTimes({
+      itemCount: 1,
+      slots: [
+        { slotStart: "2026-08-07T14:00:00Z", slotEnd: "2026-08-07T14:15:00Z", reservedCount: 2, capacity: 2, available: true, recommended: false },
+        { slotStart: "2026-08-07T14:15:00Z", slotEnd: "2026-08-07T14:30:00Z", reservedCount: 0, capacity: 2, available: true, recommended: true }
+      ]
+    })).toEqual(["2026-08-07T14:15:00Z"]);
+  });
+
+  it("accumulates multiple least-queued slots until capacity covers the item count", () => {
+    // 单时段余量不足时按已排队数升序补齐，并按时间升序返回。
+    expect(recommendBatchScheduleTimes({
+      itemCount: 5,
+      slots: [
+        { slotStart: "2026-08-07T14:15:00Z", slotEnd: "2026-08-07T14:30:00Z", reservedCount: 1, capacity: 2, available: true, recommended: false },
+        { slotStart: "2026-08-07T14:00:00Z", slotEnd: "2026-08-07T14:15:00Z", reservedCount: 0, capacity: 2, available: true, recommended: true },
+        { slotStart: "2026-08-07T14:30:00Z", slotEnd: "2026-08-07T14:45:00Z", reservedCount: 3, capacity: 2, available: true, recommended: false }
+      ]
+    })).toEqual(["2026-08-07T14:00:00Z", "2026-08-07T14:15:00Z"]);
+  });
+
+  it("returns all available slots when total capacity cannot cover the item count", () => {
+    expect(recommendBatchScheduleTimes({
+      itemCount: 10,
+      slots: [
+        { slotStart: "2026-08-07T14:00:00Z", slotEnd: "2026-08-07T14:15:00Z", reservedCount: 1, capacity: 2, available: true, recommended: false },
+        { slotStart: "2026-08-07T14:15:00Z", slotEnd: "2026-08-07T14:30:00Z", reservedCount: 0, capacity: 2, available: true, recommended: true }
+      ]
+    })).toEqual(["2026-08-07T14:00:00Z", "2026-08-07T14:15:00Z"]);
+  });
+
+  it("ignores full or unavailable slots and returns nothing without slots or items", () => {
+    expect(recommendBatchScheduleTimes({
+      itemCount: 1,
+      slots: [
+        { slotStart: "2026-08-07T14:00:00Z", slotEnd: "2026-08-07T14:15:00Z", reservedCount: 2, capacity: 2, available: false, recommended: false }
+      ]
+    })).toEqual([]);
+    expect(recommendBatchScheduleTimes({ itemCount: 3, slots: [] })).toEqual([]);
+    expect(recommendBatchScheduleTimes({ itemCount: 0, slots: [
+      { slotStart: "2026-08-07T14:00:00Z", slotEnd: "2026-08-07T14:15:00Z", reservedCount: 0, capacity: 2, available: true, recommended: true }
+    ] })).toEqual([]);
   });
 });

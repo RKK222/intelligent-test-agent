@@ -1818,3 +1818,19 @@
 - Result:
   - 从会话列表恢复待答问题时，同一请求只保留一张可交互卡片，子 Agent 请求与失败降级保持不变。
   - 本次不新增或变更 HTTP API、RunEvent wire name、DTO、数据库/Flyway、后端、性能、安全或兼容性契约，未修改 `.env*`、generated SDK 或 OpenCode 源码。
+
+### 2026-08-08 - 批量定时执行智能推荐时间段
+
+- Why:
+  - 批量弹层打开定时选择后夜间时段默认全未选，用户需自行判断选几个时段、哪些排队最少；一批选较多子条目时单时段容量常不足以覆盖，易反复试错或触发容量不足提示。夜间时段接口已返回每个时段的 `reservedCount`（排队任务数）与 `capacity`，单任务已有“未满且待执行任务最少”推荐，批量场景缺少据此自动推荐并选中的能力。
+- What:
+  - 新增纯函数 `recommendBatchScheduleTimes`：按 `reservedCount` 升序、`slotStart` 升序贪心累加余量直到覆盖 `itemCount`，统一容量下“已排队最少”即“余量最多”，自然用最少时段覆盖全部子条目；总余量不足时返回全部可用时段交由既有容量提示兜底。
+  - `BatchTestCaseGenerationDialog.vue` 新增 `scheduleAutoRecommended` 标记与 `recommendedNightTimes` 计算属性；打开定时选择、切回夜间模式、所选子条目数或时段数据变化（仍为自动推荐时）自动推荐并选中；手动改选、关闭、重置、切到测试时间模式后清空标记，保留用户手动选择不覆盖。
+  - “定时执行”按钮上方在夜间自动推荐时显示“已根据选择的子条目数量智能推荐定时执行时间段”；总余量不足时按钮不出现并展示既有容量提示。进度页容量冲突重选区域与测试时间模式不参与自动推荐。
+- How:
+  - TDD 先补 `recommendBatchScheduleTimes` 单测（单时段可覆盖、多时段补齐、总余量不足返回全部、忽略已满/无时段/无子条目），再改组件并修正被自动推荐改变的两条组件测试与一条 workbench 批量定时 E2E。
+  - `batch-test-case-generation.test.ts` 与 `BatchTestCaseGenerationDialog.test.ts` 共 19 项通过；前端全量 118 个 Vitest 文件 1870 passed / 1 skipped，15 个 workspace typecheck、lint、production build 与目标 Chromium 批量定时 E2E 均通过。
+  - 全量 workbench E2E 首轮有 5 项失败（release-disabled/超管入口、聊天重试 3 项、历史切换只读），用 `git stash` 在干净 HEAD 复跑同样 5 项失败，确认与本改动无关的预存在失败。
+- Result:
+  - 批量定时打开即按所选子条目数与排队任务数自动选中可覆盖时段并在按钮上方提示推荐来源；用户手动改选后保留其选择，关闭重开按最新数量重新推荐。
+  - 仅修改前端交互、测试与稳定文档（frontend README、新增设计文档），不变更 HTTP API、RunEvent、数据库/Flyway、后端、权限、安全、性能路径、`.env*`、generated SDK 或 OpenCode 源码。

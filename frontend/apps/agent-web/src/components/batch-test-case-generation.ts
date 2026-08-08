@@ -165,6 +165,41 @@ export function allocateBatchSchedule(options: {
   return { ok: true, times: assignments };
 }
 
+/**
+ * 根据所选子条目数量与各夜间时段已排队任务数，贪心推荐能够覆盖总量的时间段。
+ *
+ * 排序优先级与单任务系统推荐保持一致：先按已排队数（reservedCount，即排队任务数）
+ * 升序，再按时段起始时间升序；依次累加可用余量，直到覆盖 itemCount。
+ * 统一容量下“已排队最少”即“剩余余量最多”，因此自然用最少时段覆盖全部子条目。
+ * 全部时段总余量仍不足以覆盖时返回全部可用时段，交由 allocateBatchSchedule 兜底提示容量不足。
+ */
+export function recommendBatchScheduleTimes(options: {
+  itemCount: number;
+  slots?: NightExecutionSlot[];
+}): string[] {
+  if (options.itemCount <= 0 || !options.slots?.length) return [];
+  const candidates = options.slots
+    .filter((slot) => slot.available && slot.capacity > slot.reservedCount)
+    .map((slot) => ({
+      slotStart: slot.slotStart,
+      remaining: slot.capacity - slot.reservedCount,
+      reservedCount: slot.reservedCount
+    }))
+    .sort((a, b) =>
+      a.reservedCount !== b.reservedCount
+        ? a.reservedCount - b.reservedCount
+        : a.slotStart.localeCompare(b.slotStart)
+    );
+  const picked: string[] = [];
+  let covered = 0;
+  for (const candidate of candidates) {
+    if (covered >= options.itemCount) break;
+    picked.push(candidate.slotStart);
+    covered += candidate.remaining;
+  }
+  return picked.sort();
+}
+
 /** 固定并发 worker 池；结果顺序始终与输入顺序一致。 */
 export async function mapWithConcurrency<T, R>(
   items: readonly T[],
