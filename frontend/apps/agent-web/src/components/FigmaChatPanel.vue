@@ -12,15 +12,18 @@ import {
   ChevronDown,
   ChevronUp,
   ChevronRight,
+  Bot,
   Circle,
   Eye,
   EyeOff,
   FileText,
   Folder,
+  Logs,
   MessageSquare,
   Loader2,
   ListChecks,
   MinusCircle,
+  Paperclip,
   PanelRightClose,
   SquarePen,
   Send,
@@ -4403,17 +4406,17 @@ function onCompositionEnd() {
         </span>
         <button
           type="button"
-          class="figma-chat-header-btn"
+          class="figma-chat-header-btn figma-chat-header-btn--raw"
           title="查看前端与平台后端原始报文"
           @click="openRawOutput"
         >
-          <FileText :size="15" />
+          <Logs :size="15" class="figma-chat-header-icon--raw" />
           <span>原始输出</span>
         </button>
         <button
           ref="historyDrawerTriggerEl"
           type="button"
-          class="figma-chat-header-btn"
+          class="figma-chat-header-btn figma-chat-header-btn--history"
           title="查看会话列表"
           :aria-expanded="historyDrawerOpen"
           aria-haspopup="dialog"
@@ -4425,7 +4428,7 @@ function onCompositionEnd() {
               class="figma-chat-history-header-spinner"
               style="width: 15px; height: 15px;"
             />
-            <MessageSquare v-else :size="15" />
+            <MessageSquare v-else :size="15" class="figma-chat-header-icon--history" />
             <span v-if="historyRunningCount > 0" class="figma-chat-history-running-badge">
               {{ historyRunningCount }}
             </span>
@@ -5737,7 +5740,7 @@ function onCompositionEnd() {
               :disabled="composerInteractionBlocked || chatAttachmentsUploading"
               @click="openAttachmentDialog"
             >
-              <Upload class="figma-chat-btn-icon" />
+              <Paperclip class="figma-chat-btn-icon figma-chat-icon--attachment" />
             </button>
           </el-tooltip>
           <!-- 主 Agent 选择：遵循 opencode local.agent.list()，只展示 primary/all 且非 hidden 的 Agent。 -->
@@ -5755,7 +5758,7 @@ function onCompositionEnd() {
                 aria-label="切换 Agent"
                 @click.stop="toggleAgentDropdown"
               >
-                <User class="figma-chat-btn-icon" />
+                <Bot class="figma-chat-btn-icon figma-chat-icon--agent" />
                 <span class="figma-chat-agent-label">{{ selectedAgentLabel }}</span>
                 <ChevronDown class="figma-chat-btn-icon" />
               </button>
@@ -5912,7 +5915,7 @@ function onCompositionEnd() {
               :disabled="newConversationBlocked"
               @click="emit('new-conversation')"
             >
-              <SquarePen class="figma-chat-btn-icon" />
+              <SquarePen class="figma-chat-btn-icon figma-chat-icon--new" />
             </button>
           </el-tooltip>
           <el-tooltip
@@ -5928,7 +5931,7 @@ function onCompositionEnd() {
               :aria-expanded="nightPickerOpen"
               @click="openNightPicker"
             >
-              <Clock3 class="figma-chat-btn-icon" />
+              <Clock3 class="figma-chat-btn-icon figma-chat-icon--night" />
             </button>
           </el-tooltip>
           <button
@@ -6691,6 +6694,18 @@ function onCompositionEnd() {
   color: var(--ta-text);
   background: var(--ta-hover);
   border-color: transparent;
+}
+.figma-chat-header-icon--raw {
+  color: #6366f1 !important;
+}
+.figma-chat-header-btn--raw:hover .figma-chat-header-icon--raw {
+  color: #4f46e5 !important;
+}
+.figma-chat-header-icon--history {
+  color: #0284c7 !important;
+}
+.figma-chat-header-btn--history:hover .figma-chat-header-icon--history {
+  color: #0369a1 !important;
 }
 .figma-chat-history-tabs {
   display: flex;
@@ -9743,6 +9758,57 @@ function onCompositionEnd() {
   width: 12px;
   height: 12px;
   flex-shrink: 0;
+}
+
+/* ---- Colorful Composer Tool Icons ---- */
+.figma-chat-attachment-btn .figma-chat-icon--attachment {
+  color: #9333ea !important;
+  stroke-width: 2.2px;
+}
+.figma-chat-attachment-btn:hover:not(:disabled) {
+  background: #f3e8ff !important;
+  border-color: #e9d5ff !important;
+}
+
+.figma-chat-agent-btn .figma-chat-icon--agent {
+  color: #e11d48 !important;
+  stroke-width: 2.2px;
+}
+.figma-chat-agent-btn:hover:not(:disabled) {
+  background: #ffe4e6 !important;
+  border-color: #fecdd3 !important;
+}
+
+.figma-chat-new-btn .figma-chat-icon--new {
+  color: #d97706 !important;
+  stroke-width: 2.2px;
+}
+.figma-chat-new-btn:hover:not(:disabled) {
+  background: #fef3c7 !important;
+  border-color: #fde68a !important;
+}
+
+.figma-chat-night-btn .figma-chat-icon--night {
+  color: #059669 !important;
+  stroke-width: 2.2px;
+}
+.figma-chat-night-btn:hover:not(:disabled) {
+  background: #d1fae5 !important;
+  border-color: #a7f3d0 !important;
+}
+
+/* Send Card Gradient Button */
+.figma-chat-send-card {
+  background: linear-gradient(135deg, #c8161d, #991b1b) !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(200, 22, 29, 0.25);
+}
+.figma-chat-send-card:hover:not(:disabled) {
+  background: linear-gradient(135deg, #ef4444, #b91c1c) !important;
+  box-shadow: 0 4px 12px rgba(200, 22, 29, 0.35);
+}
+.figma-chat-send-icon {
+  color: #ffffff !important;
 }
 
 /* 卡片内发送 / 停止按钮 */

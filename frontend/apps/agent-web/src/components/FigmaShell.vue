@@ -2147,10 +2147,10 @@ function submitJoinApp() {
             <span class="figma-context-menu-key">工作空间</span>
             <CodeXml
               v-if="workspaceKind === 'APP_SOURCE'"
-              class="figma-context-trigger-type-icon"
+              class="figma-context-trigger-type-icon figma-context-icon--app-source"
               aria-hidden="true"
             />
-            <FlaskConical v-else class="figma-context-trigger-type-icon" aria-hidden="true" />
+            <FlaskConical v-else class="figma-context-trigger-type-icon figma-context-icon--workspace" aria-hidden="true" />
             <span class="figma-context-menu-value">{{ headerWorkspaceLabel }}</span>
             <ChevronDown class="figma-app-menu-chevron" :class="{ 'is-open': workspaceMenuOpen }" />
           </button>
@@ -4644,7 +4644,7 @@ function submitJoinApp() {
 
 .figma-activity-bar {
   position: relative;
-  width: 48px;
+  width: 52px;
   flex-shrink: 0;
   background: transparent;
   border-right: 0;
@@ -4890,16 +4890,26 @@ function submitJoinApp() {
 :deep(.figma-activity-btn) {
   position: relative;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
+  width: 46px;
+  padding: 5px 2px 4px 2px;
   border: none;
-  border-radius: 12px;
+  border-radius: 10px;
   background: transparent;
   color: var(--ta-shell-muted, #6b7280);
   cursor: pointer;
   transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+:deep(.figma-activity-text) {
+  font-size: 10px;
+  line-height: 1.1;
+  margin-top: 3px;
+  font-weight: 500;
+  white-space: nowrap;
+  letter-spacing: -0.2px;
 }
 
 :deep(.figma-activity-btn:hover) {
@@ -4916,16 +4926,74 @@ function submitJoinApp() {
   content: "";
   position: absolute;
   left: 0;
-  top: 7px;
+  top: 6px;
+  bottom: 6px;
   width: 3px;
-  height: 24px;
   border-radius: 0 999px 999px 0;
   background: var(--ta-shell-accent, #c8161d);
 }
 
+/* Custom colorful theme styling per feature icon */
+:deep(.figma-activity-btn--editor .figma-activity-icon) { color: #e53935; }
+:deep(.figma-activity-btn--toolbox .figma-activity-icon) { color: #fb8c00; }
+:deep(.figma-activity-btn--qa .figma-activity-icon) { color: #1e88e5; }
+:deep(.figma-activity-btn--workflow .figma-activity-icon) { color: #8e24aa; }
+:deep(.figma-activity-btn--system .figma-activity-icon) { color: #43a047; }
+:deep(.figma-activity-btn--hub .figma-activity-icon) { color: #00acc1; }
+:deep(.figma-activity-btn--settings .figma-activity-icon) { color: #546e7a; }
+
+:deep(.figma-activity-btn--editor:hover),
+:deep(.figma-activity-btn--editor.figma-activity-btn--active) {
+  background: #ffebee;
+  color: #c62828;
+}
+:deep(.figma-activity-btn--editor.figma-activity-btn--active::before) { background: #e53935; }
+
+:deep(.figma-activity-btn--toolbox:hover),
+:deep(.figma-activity-btn--toolbox.figma-activity-btn--active) {
+  background: #fff3e0;
+  color: #ef6c00;
+}
+:deep(.figma-activity-btn--toolbox.figma-activity-btn--active::before) { background: #fb8c00; }
+
+:deep(.figma-activity-btn--qa:hover),
+:deep(.figma-activity-btn--qa.figma-activity-btn--active) {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+:deep(.figma-activity-btn--qa.figma-activity-btn--active::before) { background: #1e88e5; }
+
+:deep(.figma-activity-btn--workflow:hover),
+:deep(.figma-activity-btn--workflow.figma-activity-btn--active) {
+  background: #f3e5f5;
+  color: #6a1b9a;
+}
+:deep(.figma-activity-btn--workflow.figma-activity-btn--active::before) { background: #8e24aa; }
+
+:deep(.figma-activity-btn--system:hover),
+:deep(.figma-activity-btn--system.figma-activity-btn--active) {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+:deep(.figma-activity-btn--system.figma-activity-btn--active::before) { background: #43a047; }
+
+:deep(.figma-activity-btn--hub:hover),
+:deep(.figma-activity-btn--hub.figma-activity-btn--active) {
+  background: #e0f7fa;
+  color: #00838f;
+}
+:deep(.figma-activity-btn--hub.figma-activity-btn--active::before) { background: #00acc1; }
+
+:deep(.figma-activity-btn--settings:hover),
+:deep(.figma-activity-btn--settings.figma-activity-btn--active) {
+  background: #eceff1;
+  color: #37474f;
+}
+:deep(.figma-activity-btn--settings.figma-activity-btn--active::before) { background: #546e7a; }
+
 :deep(.figma-activity-icon) {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
 }
 .figma-sidebar-toggle-floating {
   position: absolute;

@@ -1186,7 +1186,7 @@ function submitRename() {
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--ta-tree-muted, #8b949e);
+  color: #2563eb;
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -1198,8 +1198,8 @@ function submitRename() {
 }
 
 .ta-file-tree-download-btn:hover:not(:disabled) {
-  background: var(--ta-hover, #f1f5f9);
-  color: var(--ta-accent, #3366ff);
+  background: #dbeafe;
+  color: #1d4ed8;
 }
 
 .ta-file-tree-download-btn:disabled {
@@ -1217,7 +1217,7 @@ function submitRename() {
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--ta-tree-muted, #8b949e);
+  color: #9333ea;
   cursor: pointer;
   transition: all 0.15s ease;
   margin-left: 4px;
@@ -1229,8 +1229,8 @@ function submitRename() {
 }
 
 .ta-file-tree-add-btn:hover {
-  background: var(--ta-hover, #f1f5f9);
-  color: var(--ta-tree-text, #3b3b3b);
+  background: #f3e8ff;
+  color: #7e22ce;
 }
 
 .ta-file-tree-delete-btn {
@@ -1243,7 +1243,7 @@ function submitRename() {
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--ta-tree-muted, #8b949e);
+  color: #e11d48;
   cursor: pointer;
   transition: all 0.15s ease;
   margin-left: 4px;
@@ -1256,8 +1256,8 @@ function submitRename() {
 }
 
 .ta-file-tree-delete-btn:hover {
-  background: rgba(239, 68, 68, 0.1);
-  color: var(--ta-danger, #dc2626);
+  background: #ffe4e6;
+  color: #be123c;
 }
 
 .ta-file-tree-plane-btn {
@@ -1270,7 +1270,7 @@ function submitRename() {
   border: 0;
   border-radius: 3px;
   background: transparent;
-  color: var(--ta-tree-muted, #8b949e);
+  color: #d97706;
   cursor: pointer;
   transition: background-color 0.12s ease, color 0.12s ease;
   margin-left: 4px;
@@ -1282,8 +1282,8 @@ function submitRename() {
 }
 
 .ta-file-tree-plane-btn:hover {
-  background: var(--ta-hover, #f1f5f9);
-  color: var(--ta-accent, #3366ff);
+  background: #fef3c7;
+  color: #b45309;
 }
 
 .ta-file-tree-rename-input {

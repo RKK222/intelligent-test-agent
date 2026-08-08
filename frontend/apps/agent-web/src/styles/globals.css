@@ -487,14 +487,32 @@ h3 {
   box-shadow: 0 2px 8px rgba(22, 119, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
-/* 文件夹图标颜色适配 */
+/* ---- 工作空间色彩主题配置 ---- */
+.figma-context-icon--app-source { color: #d97706 !important; }
+.figma-context-icon--workspace { color: #e11d48 !important; }
+
+.figma-fe-tab-icon--explorer { color: #e11d48 !important; }
+.figma-fe-tab-icon--search { color: #0284c7 !important; }
+.figma-fe-tab-icon--changes { color: #059669 !important; }
+
+.ta-icon-tab.is-active .figma-fe-tab-icon--explorer { color: #e11d48 !important; }
+.ta-icon-tab.is-active .figma-fe-tab-icon--search { color: #0284c7 !important; }
+.ta-icon-tab.is-active .figma-fe-tab-icon--changes { color: #059669 !important; }
+
+.figma-fe-action-icon--plus { color: #9333ea !important; }
+.figma-fe-action-icon--globe { color: #6366f1 !important; }
+.figma-fe-action-icon--more { color: #d97706 !important; }
+.figma-fe-action-icon--refresh { color: #00acc1 !important; }
+.figma-fe-action-icon--pull { color: #2563eb !important; }
+
+/* 文件夹图标颜色适配：亮金琥珀色 */
 .tree-node .folder-icon,
 .tree-node .ta-file-tree-icon,
 .tree-node .ta-file-tree-source-icon,
 .ta-file-tree-row .folder-icon,
 .ta-file-tree-row .ta-file-tree-icon,
 .ta-file-tree-row .ta-file-tree-source-icon {
-  color: #2f54eb; /* 科技深蓝图标 */
+  color: #f59e0b !important; /* 经典金黄琥珀文件夹 */
 }
 
 .tree-node.is-active .folder-icon,
@@ -506,7 +524,40 @@ h3 {
 .ta-file-tree-row.active .folder-icon,
 .ta-file-tree-row.active .ta-file-tree-icon,
 .ta-file-tree-row.active .ta-file-tree-source-icon {
-  color: #1677ff;
+  color: #d97706 !important;
+}
+
+/* ---- 文件与目录整行操作按钮全彩配置 ---- */
+.ta-file-tree-download-btn {
+  color: #2563eb !important;
+}
+.ta-file-tree-download-btn:hover:not(:disabled) {
+  background: #dbeafe !important;
+  color: #1d4ed8 !important;
+}
+
+.ta-file-tree-add-btn {
+  color: #9333ea !important;
+}
+.ta-file-tree-add-btn:hover:not(:disabled) {
+  background: #f3e8ff !important;
+  color: #7e22ce !important;
+}
+
+.ta-file-tree-delete-btn {
+  color: #e11d48 !important;
+}
+.ta-file-tree-delete-btn:hover:not(:disabled) {
+  background: #ffe4e6 !important;
+  color: #be123c !important;
+}
+
+.ta-file-tree-plane-btn {
+  color: #d97706 !important;
+}
+.ta-file-tree-plane-btn:hover:not(:disabled) {
+  background: #fef3c7 !important;
+  color: #b45309 !important;
 }
 
 .tree-node:focus-visible,

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowLeftRight, CodeXml, Eye, EyeOff, FlaskConical, LibraryBig, Plus, Save, ServerCog, Target } from "lucide-vue-next";
+import { ArrowLeftRight, BookOpen, BookOpenCheck, CodeXml, FlaskConical, LibraryBig, LocateFixed, Plus, Save, ServerCog } from "lucide-vue-next";
 import { ElDatePicker, ElDialog, ElTooltip, ElMessage } from "element-plus";
 import type {
   ApplicationWorkspaceTemplate,
@@ -793,7 +793,7 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
           @click.stop="handlePreviewClick"
           @dblclick.stop="handlePreviewDblClick"
         >
-          <component :is="markdownPreviewMode !== 'off' ? EyeOff : Eye" class="ta-workbench-footer-icon" />
+          <component :is="markdownPreviewMode !== 'off' ? BookOpenCheck : BookOpen" class="ta-workbench-footer-icon" />
         </button>
       </ElTooltip>
       <ElTooltip
@@ -807,7 +807,7 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
           class="ta-workbench-footer-locate"
           @click="emit('locate', writePath)"
         >
-          <Target class="ta-workbench-footer-locate-icon" />
+          <LocateFixed class="ta-workbench-footer-locate-icon" />
         </button>
       </ElTooltip>
       <ElTooltip
@@ -1055,9 +1055,7 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
   color: #888;
 }
 
-.ta-workbench-footer-preview,
-.ta-workbench-footer-save,
-.ta-workbench-footer-locate {
+.ta-workbench-footer-save {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1072,22 +1070,58 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
   transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 
-.ta-workbench-footer-preview:hover:not(:disabled),
-.ta-workbench-footer-save:hover:not(:disabled),
-.ta-workbench-footer-locate:hover:not(:disabled) {
-  background: #f5f5f5;
-  border-color: #b5b5b5;
-  color: #111;
+/* 预览按钮彩色化：海洋蓝/天空蓝 */
+.ta-workbench-footer-preview {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0.8px solid #bae6fd;
+  border-radius: 6px;
+  background: #fff;
+  color: #0284c7;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.ta-workbench-footer-preview:hover:not(:disabled) {
+  background: #e0f2fe;
+  border-color: #38bdf8;
+  color: #0369a1;
 }
 
 .ta-workbench-footer-preview.is-active {
-  background: #eaf0ff;
-  border-color: #b9c8ff;
-  color: #1d3fb0;
+  background: #e0f2fe;
+  border-color: #0284c7;
+  color: #0284c7;
 }
 
 .ta-workbench-footer-preview.is-active:hover {
-  background: #dde7ff;
+  background: #bae6fd;
+}
+
+/* 定位文件按钮彩色化：琥珀金/橙色 */
+.ta-workbench-footer-locate {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0.8px solid #fde68a;
+  border-radius: 6px;
+  background: #fff;
+  color: #d97706;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.ta-workbench-footer-locate:hover:not(:disabled) {
+  background: #fef3c7;
+  border-color: #f59e0b;
+  color: #b45309;
 }
 
 .ta-workbench-footer-save:disabled,

@@ -23,7 +23,7 @@ import {
 import { DiffViewer, parseUnifiedPatch } from "@test-agent/diff-viewer";
 import { CodeEditor, languageFromPath, type EditorSelectionContext } from "@test-agent/editor";
 import { subscribeRunEvents, subscribeSessionRuntimeState, type RunEventRawMessage } from "@test-agent/event-stream-client";
-import { BookOpenText, Boxes, Code2, FileWarning, GitCompareArrows, MessageSquare, Monitor, Wrench } from "lucide-vue-next";
+import { BookOpenText, Boxes, FileWarning, GitCompareArrows, LayoutDashboard, MessageSquare, Monitor, Wrench } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
@@ -9659,28 +9659,30 @@ async function handleLogout() {
         <div class="figma-activity-top">
           <button
             type="button"
-            :class="['figma-activity-btn', centerMode === 'editor' && 'figma-activity-btn--active']"
+            :class="['figma-activity-btn figma-activity-btn--editor', centerMode === 'editor' && 'figma-activity-btn--active']"
             data-onboarding="editor-button"
-            aria-label="打开编辑器"
-            title="打开编辑器"
+            aria-label="打开工作台"
+            title="工作台"
             @click="selectActivityCenterMode('editor')"
           >
-            <Code2 class="figma-activity-icon" :stroke-width="1.5" />
+            <LayoutDashboard class="figma-activity-icon" :stroke-width="1.5" />
+            <span class="figma-activity-text">工作台</span>
           </button>
           <button
             type="button"
-            :class="['figma-activity-btn', centerMode === 'toolbox' && 'figma-activity-btn--active']"
+            :class="['figma-activity-btn figma-activity-btn--toolbox', centerMode === 'toolbox' && 'figma-activity-btn--active']"
             aria-label="工具盒子"
-            title="工具盒子"
+            title="工具箱"
             data-testid="toolbox-activity-button"
             @click="toggleToolbox"
           >
             <Wrench class="figma-activity-icon" :stroke-width="1.5" />
+            <span class="figma-activity-text">工具箱</span>
           </button>
           <button
             v-if="canUseLobehub"
             type="button"
-            class="figma-activity-btn"
+            class="figma-activity-btn figma-activity-btn--qa"
             aria-label="通用问答"
             :title="lobehubLaunching ? '正在进入通用问答' : '通用问答'"
             data-testid="lobehub-activity-button"
@@ -9688,37 +9690,41 @@ async function handleLogout() {
             @click="openLobehub"
           >
             <MessageSquare class="figma-activity-icon" :stroke-width="1.5" />
+            <span class="figma-activity-text">问答</span>
           </button>
           <button
             v-if="canUseWorkflow"
             type="button"
-            class="figma-activity-btn"
+            class="figma-activity-btn figma-activity-btn--workflow"
             aria-label="长程任务工作台"
-            title="长程任务工作台"
+            title="长任务"
             data-testid="workflow-chat-activity-button"
             @click="openWorkflowChat"
           >
             <GitCompareArrows class="figma-activity-icon" :stroke-width="1.5" />
+            <span class="figma-activity-text">长任务</span>
           </button>
           <button
             v-if="isSuperAdmin"
             type="button"
-            :class="['figma-activity-btn', centerMode === 'system' && 'figma-activity-btn--active']"
+            :class="['figma-activity-btn figma-activity-btn--system', centerMode === 'system' && 'figma-activity-btn--active']"
             aria-label="系统管理"
-            title="系统管理"
+            title="控制台"
             @click="selectActivityCenterMode('system')"
           >
             <Monitor class="figma-activity-icon" :stroke-width="1.5" />
+            <span class="figma-activity-text">控制台</span>
           </button>
           <button
             type="button"
-            :class="['figma-activity-btn hub-activity-button', centerMode === 'hub' && 'figma-activity-btn--active']"
+            :class="['figma-activity-btn figma-activity-btn--hub hub-activity-button', centerMode === 'hub' && 'figma-activity-btn--active']"
             aria-label="Agent、Skill、MCP 与 Tool Hub"
-            title="Agent、Skill、MCP 与 Tool Hub"
+            title="资源库"
             data-testid="agent-skill-hub-button"
             @click="toggleAgentSkillHub"
           >
             <Boxes class="figma-activity-icon" :stroke-width="1.5" />
+            <span class="figma-activity-text">资源库</span>
             <span v-if="hubUpdateCount > 0" class="hub-activity-badge" aria-label="有可用更新">
               {{ hubUpdateCount > 99 ? '99+' : hubUpdateCount }}
             </span>
@@ -9727,13 +9733,14 @@ async function handleLogout() {
         <div class="figma-activity-bottom">
           <button
             type="button"
-            :class="['figma-activity-btn', settingsOpen && 'figma-activity-btn--active']"
+            :class="['figma-activity-btn figma-activity-btn--settings', settingsOpen && 'figma-activity-btn--active']"
             data-onboarding="settings"
             aria-label="系统设置"
-            title="系统设置"
+            title="设置"
             @click="settingsOpen = true"
           >
             <ElSetting class="figma-activity-icon" />
+            <span class="figma-activity-text">设置</span>
           </button>
         </div>
       </nav>

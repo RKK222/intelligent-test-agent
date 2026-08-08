@@ -394,7 +394,7 @@ defineExpose({
         aria-label="文件树"
         @click="tab = 'explorer'"
       >
-        <FolderTree class="h-4 w-4" :stroke-width="1.5" />
+        <FolderTree class="h-4 w-4 figma-fe-tab-icon--explorer" :stroke-width="1.5" />
       </button>
       <button
         type="button"
@@ -403,7 +403,7 @@ defineExpose({
         aria-label="搜索"
         @click="tab = 'search'"
       >
-        <Search class="h-4 w-4" :stroke-width="1.5" />
+        <Search class="h-4 w-4 figma-fe-tab-icon--search" :stroke-width="1.5" />
       </button>
       <button
         v-if="workspaceKind !== 'APP_SOURCE'"
@@ -413,7 +413,7 @@ defineExpose({
         aria-label="变更"
         @click="tab = 'changes'"
       >
-        <GitBranch class="h-4 w-4" :stroke-width="1.5" />
+        <GitBranch class="h-4 w-4 figma-fe-tab-icon--changes" :stroke-width="1.5" />
         <span v-if="displayedChangedFileCount" class="ml-1 text-[10px]">{{ displayedChangedFileCount }}</span>
       </button>
     </div>
@@ -487,7 +487,7 @@ defineExpose({
                 :disabled="!workspaceId"
                 @click="openRootActions"
               >
-                <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
+                <Plus class="h-3.5 w-3.5 figma-fe-action-icon--plus" :stroke-width="1.5" />
               </button>
               <button
                 v-if="tab === 'explorer'"
@@ -499,7 +499,7 @@ defineExpose({
                 :disabled="!workspaceId || !iframeUrl"
                 @click="openIframeDialog"
               >
-                <Globe class="h-3.5 w-3.5" :stroke-width="1.5" />
+                <Globe class="h-3.5 w-3.5 figma-fe-action-icon--globe" :stroke-width="1.5" />
               </button>
               <details v-if="tab === 'explorer'" ref="workspaceMoreMenuRef" class="figma-fe-more-menu">
                 <summary
@@ -507,7 +507,7 @@ defineExpose({
                   title="更多工作空间操作"
                   aria-label="更多工作空间操作"
                 >
-                  <MoreHorizontal class="h-3.5 w-3.5" :stroke-width="1.5" />
+                  <MoreHorizontal class="h-3.5 w-3.5 figma-fe-action-icon--more" :stroke-width="1.5" />
                 </summary>
                 <div class="figma-fe-more-menu-dropdown">
                   <button
@@ -518,7 +518,7 @@ defineExpose({
                     @click="refreshWorkspaceFileTree"
                   >
                     <RefreshCw
-                      class="h-3.5 w-3.5"
+                      class="h-3.5 w-3.5 figma-fe-action-icon--refresh"
                       :class="{ 'animate-spin': loadingPath?.has('') }"
                       :stroke-width="1.5"
                     />
@@ -533,7 +533,7 @@ defineExpose({
                     @click="pullCurrentPersonalWorkspace"
                   >
                     <CloudDownload
-                      class="h-3.5 w-3.5"
+                      class="h-3.5 w-3.5 figma-fe-action-icon--pull"
                       :class="{ 'animate-pulse': pullingPersonalWorkspace }"
                       :stroke-width="1.5"
                     />
