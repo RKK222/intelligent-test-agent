@@ -5,6 +5,17 @@
 
 ## Entries
 
+### 2026-08-08 - 缩小对话框到任务栏的距离至 3px
+
+- Why:
+  - 响应用户界面布局优化需求：将输入对话框到底部任务栏/footer 的间距缩小为 3px。
+- What:
+  - `FigmaChatPanel.vue`: 将 `.figma-chat-composer` 容器的 bottom padding 由 `10px` 调整为 `3px` (`padding: 8px 10px 3px;`)。
+- How:
+  - 调整 `.figma-chat-composer` 内边距，使其下边界与常驻 footer（任务栏）的视觉距离精确保持在 3px。
+- Result:
+  - 输入对话框到底部任务栏/footer 的间距缩窄至 3px，布局更紧凑。
+
 ### 2026-08-08 - 修复左中右三大区域竖向滚动条独立的 hover 悬浮隔离（消除跨区域联动）
 
 - Why:

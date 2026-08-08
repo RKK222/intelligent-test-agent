@@ -36,7 +36,7 @@ export type ExplorerTab = "explorer" | "search" | "changes";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { FolderTree, GitBranch, Plus, RefreshCw, Search } from "lucide-vue-next";
 import { Input, cn } from "@test-agent/ui-kit";
-import { filterLoadedFiles } from "./filterLoadedFiles";
+import { fileNameIncludesKeyword, filterLoadedFiles } from "./filterLoadedFiles";
 import { getVsCodeFileIconClass } from "./fileIcons";
 import { highlightKeyword } from "./highlightKeyword";
 import DirectoryRows from "./DirectoryRows.vue";
@@ -97,8 +97,11 @@ const localSearchResults = computed<FileSearchResult[]>(() =>
 // 显示用的搜索关键字：优先使用 prop，否则使用本地 keyword
 const displayKeyword = computed(() => props.searchKeyword ?? keyword.value);
 
-// 显示用的搜索结果：优先使用 prop，否则使用本地过滤结果
-const displaySearchResults = computed(() => props.searchResults ?? localSearchResults.value);
+// 服务端路径搜索仍供其它业务复用；文件搜索面板在展示前最终收口为文件名匹配。
+const displaySearchResults = computed(() =>
+  (props.searchResults ?? localSearchResults.value)
+    .filter((entry) => fileNameIncludesKeyword(entry.name, displayKeyword.value))
+);
 
 // 处理搜索输入：同时更新本地 keyword 并 emit 事件
 function handleSearchInput(value: string) {

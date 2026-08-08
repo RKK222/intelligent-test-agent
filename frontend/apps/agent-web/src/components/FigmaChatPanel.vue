@@ -9273,7 +9273,7 @@ function onCompositionEnd() {
 .figma-chat-composer {
   position: relative;
   flex-shrink: 0;
-  padding: 8px 10px 10px;
+  padding: 8px 10px 3px;
   background: transparent;
 }
 

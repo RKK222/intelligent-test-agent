@@ -3,19 +3,21 @@ import { filterLoadedFiles } from "../src";
 import type { WorkspaceViewEntry } from "@test-agent/shared-types";
 
 describe("filterLoadedFiles", () => {
-  it("filters only loaded file entries by file name or path", () => {
+  it("filters loaded files by file name instead of parent directory path", () => {
     const result = filterLoadedFiles(
       {
-        "": [
-          { type: "directory", path: "tests", name: "tests" },
-          { type: "file", path: "package.json", name: "package.json" }
-        ],
-        tests: [{ type: "file", path: "tests/checkout.spec.ts", name: "checkout.spec.ts" }]
+        "": [{ type: "directory", path: "需求资料", name: "需求资料" }],
+        需求资料: [
+          { type: "file", path: "需求资料/贷款申请.md", name: "贷款申请.md" },
+          { type: "file", path: "需求资料/需求说明.md", name: "需求说明.md" }
+        ]
       },
-      "checkout"
+      "  需求  "
     );
 
-    expect(result).toEqual([{ type: "file", path: "tests/checkout.spec.ts", name: "checkout.spec.ts" }]);
+    expect(result).toEqual([
+      { type: "file", path: "需求资料/需求说明.md", name: "需求说明.md" }
+    ]);
   });
 
   it("keeps local fallback search physical-workspace-only", () => {

@@ -3,6 +3,35 @@ import { describe, expect, it } from "vitest";
 import FileExplorer from "../src/FileExplorer.vue";
 
 describe("FileExplorer", () => {
+  it("only renders server search results whose file name contains the keyword", () => {
+    const view = render(FileExplorer, {
+      props: {
+        entriesByDirectory: {},
+        expandedDirectories: new Set<string>(),
+        changedFiles: [],
+        activeTab: "search",
+        searchKeyword: "需求",
+        searchResults: [
+          {
+            path: "需求资料/贷款申请.md",
+            name: "贷款申请.md",
+            directory: "需求资料",
+            size: 10
+          },
+          {
+            path: "docs/需求说明.md",
+            name: "需求说明.md",
+            directory: "docs",
+            size: 20
+          }
+        ]
+      }
+    });
+
+    expect(view.queryByText("贷款申请.md")).toBeNull();
+    expect(view.getByText("需求").closest("button")?.textContent).toContain("需求说明.md");
+  });
+
   it("emits download events for files and directories", async () => {
     const entries = [
       { type: "directory" as const, path: "docs", name: "docs" },
