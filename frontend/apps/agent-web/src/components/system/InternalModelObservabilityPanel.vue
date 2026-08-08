@@ -769,12 +769,12 @@ function onPageChange(next: number) {
       </div>
 
       <div class="ta-imob-combined">
-        <div class="ta-imob-filter-bar">
+        <div class="ta-imob-sticky-bar">
           <span class="ta-imob-filter-title">筛选条件</span>
           <el-select
             v-model="selectedWindowHours"
             placeholder="时间范围"
-            class="ta-imob-filter"
+            class="ta-imob-filter ta-imob-filter-select-window"
             @change="onWindowHoursChange"
           >
             <el-option
@@ -801,7 +801,7 @@ function onPageChange(next: number) {
             filterable
             allow-create
             default-first-option
-            class="ta-imob-filter"
+            class="ta-imob-filter ta-imob-filter-select-user"
             @change="applyFilters"
           >
             <el-option
@@ -815,7 +815,7 @@ function onPageChange(next: number) {
             v-model="filterProviderId"
             placeholder="供应商"
             clearable
-            class="ta-imob-filter"
+            class="ta-imob-filter ta-imob-filter-select-provider"
             @change="applyFilters"
           >
             <el-option
@@ -829,7 +829,7 @@ function onPageChange(next: number) {
             v-model="filterOutcomeGroup"
             placeholder="结果分类"
             clearable
-            class="ta-imob-filter"
+            class="ta-imob-filter ta-imob-filter-select-outcome"
             @change="applyFilters"
           >
             <el-option
@@ -843,7 +843,7 @@ function onPageChange(next: number) {
             v-model="filterSource"
             placeholder="来源"
             clearable
-            class="ta-imob-filter"
+            class="ta-imob-filter ta-imob-filter-select-source"
             @change="applyFilters"
           >
             <el-option label="用户调用" value="USER_CALL" />
@@ -859,7 +859,7 @@ function onPageChange(next: number) {
               :size="12"
               :class="{ 'ta-imob-spin': recordsQuery.isFetching.value || statsQuery.isFetching.value }"
             />
-            刷新数据
+            刷新
           </button>
           <button
             type="button"
@@ -868,7 +868,7 @@ function onPageChange(next: number) {
             @click="probeAll()"
           >
             <Activity class="ta-imob-probe-icon" :size="12" />
-            全部探活
+            探活
           </button>
         </div>
 
@@ -1563,42 +1563,75 @@ function onPageChange(next: number) {
   font-size: 11px;
   line-height: 1.25;
 }
-.ta-imob-filter-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #f8fafc;
-  flex-wrap: wrap;
+.ta-imob-sticky-bar {
+  position: sticky !important;
+  top: -16px !important;
+  z-index: 100 !important;
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 10px 16px !important;
+  margin: -16px -16px 16px -16px !important;
+  background: #ffffff !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05) !important;
+  overflow-x: auto !important;
+  scrollbar-width: thin !important;
+  flex-shrink: 0 !important;
+}
+.ta-imob-sticky-bar > * {
+  flex-shrink: 0 !important;
 }
 .ta-imob-filter-title {
   margin-right: 4px;
-  color: #374151;
+  color: #334155;
   font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .ta-imob-filter {
-  width: 160px;
+  flex-shrink: 0;
 }
-.ta-imob-filter-date {
-  max-width: 340px;
+:deep(.ta-imob-filter-select-window) {
+  width: 135px !important;
+}
+:deep(.ta-imob-filter-date) {
+  width: 320px !important;
+}
+:deep(.ta-imob-filter-select-user) {
+  width: 135px !important;
+}
+:deep(.ta-imob-filter-select-provider) {
+  width: 125px !important;
+}
+:deep(.ta-imob-filter-select-outcome) {
+  width: 125px !important;
+}
+:deep(.ta-imob-filter-select-source) {
+  width: 115px !important;
 }
 .ta-imob-probe-all-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 10px;
-  border: 1px solid #d1d5db;
-  border-radius: 4px;
-  background: #fff;
+  padding: 5px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
   color: #2563eb;
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
 }
 .ta-imob-probe-all-btn:hover:not(:disabled) {
   background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
 }
 .ta-imob-probe-all-btn:disabled {
   opacity: 0.6;
