@@ -7505,3 +7505,33 @@
   被明确阻断，避免静默污染数据库历史。
 - 本次不新增或改写 migration SQL，不变更 HTTP API、RunEvent、数据库结构、MyBatis SQL、安全边界、`.env*`、
   generated SDK 或 OpenCode 源码；未跟踪 `demo/` 保持不变且不纳入提交。Workflow 仍因缺少本机密钥而显式跳过。
+
+## 2026-08-09 - 校正个人本地数据库下的 Flyway 合并规则
+
+### Why
+
+- 前一条记录和数据库文档曾建议“每个 worktree 临时库、合并期自动编号、CI 清单和 merge queue”，但当前项目并未实现
+  这些能力；实际没有共享开发数据库或中央协调系统，每个开发者在需要保留的个人本地数据库上执行 migration。
+- 两个尚未推送的本地分支无法感知对方版本，合并期重新编号会使已经执行旧编号的个人库与源码不一致，因此该建议不能
+  作为当前协作规则。
+
+### What
+
+- `AGENTS.md`、persistence README 和数据库部署文档统一改为当前真实流程：开发时间戳只能区分候选，并行分支在合并时由
+  集成人收集全部 migration 与相关个人本地库/目标库 history，统一设计主链和兼容路径。
+- migration 只要在任何需要保留的个人本地库或目标库执行，就冻结版本、文件名和原始字节；只有从未执行的候选，或数据库
+  所有者明确同意废弃并重建个人库的历史，才能在合并时重命名或重排。
+- 已执行历史无法直接汇成严格递增主链时，继续复用现有 `DatabaseMigrationCompatibilityCustomizer`、隔离 compatibility
+  location 和更高版本前向 migration，并用真实 PostgreSQL 覆盖每套需保留历史；不引入不存在的中央编号、CI 或 merge queue。
+
+### How
+
+- 对照当前自检、命名测试、兼容装配和上一轮真实本地分叉，删除文档中四条未实现能力，并统一替换“未进共享库即可改号”
+  的表述；`git diff --check` 校验通过。
+
+### Result
+
+- 后续合并不会再假设个人本地数据库可随意重建，也不会把自动编号描述成现有能力；版本冲突只能在合并期按已知真实 history
+  显式兼容，数据库所有者明确选择重建是唯一可跳过该历史的例外。
+- 本次仅修改规范、模块 README、数据库部署文档和本机会话记录，不修改代码、migration SQL、API、事件、数据库结构、
+  `.env*`、generated SDK 或 OpenCode 源码。
