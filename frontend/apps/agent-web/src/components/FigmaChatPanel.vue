@@ -5616,7 +5616,7 @@ function onCompositionEnd() {
         @click="openBatchTestCaseDialog"
       >
         <ListChecks :size="15" />
-        <span>批量案例</span>
+        <span>批量案例设计</span>
       </button>
       <section
         v-if="nightPickerOpen"

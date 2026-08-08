@@ -5,6 +5,17 @@
 
 ## Entries
 
+### 2026-08-08 - 修改对话框输入卡片快捷入口文本为批量案例设计
+
+- Why:
+  - 用户要求将对话框右上角的批量生成入口按钮文本由“批量案例”修改为“批量案例设计”。
+- What:
+  - `FigmaChatPanel.vue`: 将按钮内的 `<span>批量案例</span>` 修改为 `<span>批量案例设计</span>`。
+- How:
+  - 检索确认现有测试依赖 `data-testid="batch-test-case-entry"` 定位，修改 span 文本不会破坏既有自动化测试。
+- Result:
+  - `npm run typecheck` (`vue-tsc --noEmit`) 校验通过。
+
 ### 2026-08-07 - 居中面板 drag handle / resize handle 垂直与水平分割线
 
 - Why:
