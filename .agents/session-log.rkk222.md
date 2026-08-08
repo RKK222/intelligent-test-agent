@@ -7410,4 +7410,25 @@
 
 - 筛选吸顶条宽度与上下卡片及表格完全齐平，双端分布布局与加宽后的选择框清晰舒展，筛选条下方的边距过渡自然平滑。
 
+## 2026-08-08 - 排查本地 OpenCode 无法启动
+
+### Why
+
+- 当前仓库按 `test` / `.env.test` 启动后，前端访问用户 OpenCode 失败，需要确认是 OpenCode、manager 还是后端启动链路故障。
+
+### What
+
+- 发现当前仓库本次后端启动失败，根因是 `8080` 被另一个 `.claude/worktrees/model-observability` worktree 的旧后端进程占用。
+- 当前根目录的 `opencode-manager` 虽然已启动并连接了 `127.0.0.1:8080`，但没有托管的 OpenCode 子进程；对 `4104` 的健康检查持续返回 `PROCESS_NOT_MANAGED`。
+
+### How
+
+- 只读检查进程、端口、screen 会话、manager 状态目录和服务日志；确认当前后端日志明确报 `Port 8080 was already in use`。
+- 核对 `restart-dev-services.sh` 的 `backend_pids` 只匹配当前根目录的 `.tmp/dev-services/backend-runtime`，不会自动回收其他 worktree 的后端进程。
+- 未停止 PID 78329 所属的其他 worktree 服务，避免误杀用户正在使用的并行工作树。
+
+### Result
+
+- 本地 OpenCode 起不来的直接原因不是 OpenCode 二进制或配置，而是当前仓库后端未真正启动，manager 误连到了旧 worktree 后端；`/actuator/health` 的 200 也来自该旧进程，不能作为当前根目录后端已启动的依据。
+- 后续清理或停止旧 worktree 的 8080 服务后，再按项目标准 `test` 启动链重启并复核 manager 与 OpenCode 端口。
 
