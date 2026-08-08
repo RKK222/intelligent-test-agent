@@ -5,6 +5,21 @@
 
 ## Entries
 
+### 2026-08-08 - 修复左中右三大区域竖向滚动条独立的 hover 悬浮隔离（消除跨区域联动）
+
+- Why:
+  - 响应用户精确隔离要求：之前由于存在宽泛的选择器（如 `[class*="panel"]:hover` 或无前缀的 `:hover`），会导致悬浮到左侧工作空间时，右侧对话区的滚动条也被联动唤醒展示；用户明确要求只有鼠标直接悬浮到具体的某个区域（如工作空间），才展示对应区域的滚动条，其他区域保持隐形隔离。
+- What:
+  - `globals.css`: 彻底清理宽泛的 `[class*="panel"]` 及全级联 `:hover` 选择器。精准拆分为独立的区域限定规则：
+    1. 左侧工作区 `.figma-panel-left:hover` 专有规则（**只亮左侧**）；
+    2. 中间编辑器 `.figma-panel-center:hover` / `.dv-dockview:hover` 专有规则（**只亮中间**）；
+    3. 右侧对话区 `.figma-chat-panel-wrapper:hover` / `.figma-panel-right:hover` 专有规则（**只亮右侧**）。
+  - `FigmaChatPanel.vue`: 清除带有冒泡隐患的通用 `:hover >` 选择器，仅保留 `.figma-chat-panel:hover` 及 `.figma-chat-question-scroll:hover` 自身局部 hover。
+- How:
+  - 重写 CSS 作用域级联规则，消除共享父节点的属性模糊匹配，保证独立区域 Hover 互不影响。
+- Result:
+  - 鼠标悬浮至左侧工作空间时，仅工作空间显示滚动条；悬浮至右侧对话区时，仅对话区显示滚动条；三大区域互相隔离，绝无联动。
+
 ### 2026-08-08 - 修复工作空间与对话区域鼠标悬浮即刻绘制并显示竖向滚动条
 
 - Why:

@@ -8436,7 +8436,6 @@ function onCompositionEnd() {
   transition: background-color 0.15s ease;
 }
 
-:hover > .figma-chat-question-scroll::-webkit-scrollbar-thumb,
 .figma-chat-question-scroll:hover::-webkit-scrollbar-thumb,
 .figma-chat-panel:hover .figma-chat-question-scroll::-webkit-scrollbar-thumb {
   background: var(--ta-chat-border-strong, #b5b5b5);
