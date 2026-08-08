@@ -3,8 +3,8 @@
   line-height: var(--oc-line-height);
   color: #000000;
   font-size: var(--oc-text-md);
-  background: var(--oc-surface);
-  border: 1px solid #e3e8f7;
+  background: var(--ta-chat-answer-bg, #FFFDF7);
+  border: none;
   padding: 6px 36px 6px 12px;
   border-radius: var(--oc-radius-md);
   border-top-left-radius: 2px;

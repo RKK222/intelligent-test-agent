@@ -255,7 +255,7 @@
   padding: 6px 10px;
   column-gap: 12px;
   row-gap: 2px;
-  border: 1px solid var(--oc-border);
+  border: 1px solid #EEECE6;
   border-radius: var(--oc-radius-sm);
   background: var(--oc-surface);
   color: var(--oc-fg);

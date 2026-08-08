@@ -7541,8 +7541,8 @@ function onCompositionEnd() {
 }
 
 .figma-chat-text-bubble {
-  background: #fafafc;
-  border: 1px solid #eef0f3;
+  background: #FFFDF7;
+  border: none;
   padding: 14px 16px;
   border-radius: 12px;
   border-top-left-radius: 2px;
@@ -8175,7 +8175,7 @@ function onCompositionEnd() {
   margin: 0 10px -8px 10px;
   background: var(--ta-chat-process-bg, rgba(0, 0, 0, 0.03));
   border-radius: 8px;
-  border: 1px solid var(--ta-chat-border, rgba(0, 0, 0, 0.06));
+  border: 1px solid #EEECE6;
   max-height: 100px;
   overflow-y: auto;
 }

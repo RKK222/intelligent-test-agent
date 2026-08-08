@@ -1876,3 +1876,20 @@
 - Result:
   - 当前本地数据库历史可在不启用 `outOfOrder`、不执行 `repair`、不改写已执行 migration 的前提下顺序升级；内部模型可观测的 HTTP API、数据库表/字段及前端类型均为 additive，转发前失败、分块超限与探活耗时也能完整入库，并已同步 API、数据库、架构、测试及模块 README/PACKAGE 文档。
   - 未修改 `.env*`、generated SDK 或 OpenCode 源码，也未新建分支。企业发布前仍须逐一核对每个目标环境的 `flyway_schema_history`、checksum 和已知历史升级路径；本次确认与真实 PostgreSQL 测试不能替代目标企业库验收。
+
+### 2026-08-08 - 调整对话消息底色、卡片边框与Markdown md文件字体颜色
+
+- Why:
+  - 响应用户需求，将对话中用户消息底色设为 `#B2EDDF`，智能体回复底色设为 `#FFFDF7` 并取消边框，子智能体调用卡片边框设为 `border: 1px solid #EEECE6`，智能体输出中的 `.md` 文件字体颜色修改为 `#05B1A9`。
+- What:
+  - 用户消息：在 `frontend/apps/agent-web/src/styles/globals.css` 中将 `--ta-chat-user-bg` 修改为 `#B2EDDF`，在 `tokens.css` 中将 `--oc-user-bg` 的回退值修改为 `#B2EDDF`。
+  - 智能体回复：在 `globals.css` 中将 `--ta-chat-answer-bg` 修改为 `#FFFDF7`，`--ta-chat-answer-border` 修改为 `transparent`；在 `FigmaChatPanel.vue` 的 `.figma-chat-text-bubble` 中设置 `background: #FFFDF7; border: none;`；在 `parts.css` 的 `.oc-text-part` 中设置 `background: var(--ta-chat-answer-bg, #FFFDF7); border: none;`。
+  - 子智能体卡片：在 `frontend/packages/agent-chat/src/opencode-like/styles/tools.css` 的 `.oc-subagent-card` 和 `FigmaChatPanel.vue` 的 `.figma-chat-task-panel` 中将边框修改为 `border: 1px solid #EEECE6`。
+  - Markdown md文件颜色：在 `frontend/packages/agent-chat/src/MarkdownView.vue` 的 `.markdown-body :deep(code.ta-md-file)` 中将 `color` 从 `#00ceb9` 修改为 `#05B1A9`。
+  - 同步更新 `frontend/apps/agent-web/tests/FigmaShell.test.ts` 中的断言以匹配 `#B2EDDF`。
+- How:
+  - 修改后运行 `FigmaShell.test.ts`（57 项）、`opencode-timeline.test.ts`（41 项）及 `MarkdownView.test.ts`（9 项），全部测试通过。
+  - 运行 `corepack pnpm typecheck` 校验前端全部 workspace 类型检查通过。
+- Result:
+  - 对话中用户消息底色为 `#B2EDDF`，智能体回复底色为 `#FFFDF7` 且无边框，子智能体卡片边框为 `1px solid #EEECE6`，`.md` 文件高亮文本颜色为 `#05B1A9`。未新建 git 分支，未修改 `.env*` 等环境配置、后端 API 或 OpenCode 源码。
+

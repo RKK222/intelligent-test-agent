@@ -402,7 +402,7 @@ onBeforeUnmount(() => {
 }
 
 .markdown-body :deep(code.ta-md-file) {
-  color: #00ceb9 !important;
+  color: #05B1A9 !important;
 }
 
 .markdown-body :deep(pre) {
