@@ -1623,3 +1623,24 @@ checksum 和并行 migration 冲突，并用每套已知真实 PostgreSQL 基线
 该 migration 不写测试、演示或个人数据，尚未声明为任何共享环境已执行的冻结版本。合并交付或企业打包前，集成人必须对照所有目标
 环境 `flyway_schema_history` 的版本/checksum 和并行 migration，必要时只在尚未执行前重排候选版本；随后用每套已知真实
 PostgreSQL 基线验证升级，并校验最终 JAR 中 migration 字节。禁止 `outOfOrder`、`repair` 或改写任何已经执行的 migration。
+
+### 并行 worktree 已执行旧历史的兼容路径
+
+部分本地并行 worktree 曾以旧版本号执行过内部模型可观测性 migration，随后主分支将其版本顺延为
+`V20260808143300`、`V20260808143301` 和 `V20260808143302`。启动时
+`DatabaseMigrationCompatibilityCustomizer` 会按 `flyway_schema_history` 选择隔离兼容路径：只有旧版本
+`20260807130134`、`20260807203000`、`20260807222227` 三者全部存在时，才加载原始字节兼容目录并过滤三个重编号的主目录资源；部分旧历史、新旧版本混用或部分新历史均拒绝启动。
+
+旧内部模型 SQL 的 SHA-256 分别固定为
+`f214dfd0d4f26de830452d9f4121bc938cf031e4867555d5248e159d99377084`、
+`de7188e3ba5d01148a655dbc238783cf7881abf168bd7b6e422c9f2fa118a5c3` 和
+`46f0a8e687f59c037a7e02cb1f9ba3db4893633ba20edd67d4ae75f0b6fd0d9e`，兼容目录中的文件必须与旧 worktree
+字节一致。若 `20260807190000` 撤销重发 migration 缺失但后续内部模型或批量归因版本已执行，则按已执行基线选择
+`20260807229999`（批量归因之前）或 `20260808143303`（批量归因/当前内部模型之后）的隔离补偿版本；两者 SQL
+均与 `V20260807190000__create_run_resends.sql` 字节一致，SHA-256 固定为
+`ca044d9819c7259b62e29243e9d72a06a2f01a532f1803f37e117de1d2f5d83d`。
+一旦某个补偿版本已执行，后续启动必须继续加载同一隔离路径，不能因批量归因或其他更高版本后来落库而切换到另一补偿版本。
+
+上述兼容逻辑只新增 Flyway 可验证的隔离资源，不执行 `repair`、不打开 `outOfOrder`，也不更新或删除
+`flyway_schema_history` 中已有记录；正式交付前仍须针对每套真实 PostgreSQL 已部署基线核对版本、checksum 和
+最终 JAR 内 migration 字节。

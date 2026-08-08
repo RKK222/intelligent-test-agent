@@ -20,9 +20,9 @@ import org.springframework.stereotype.Component;
 /**
  * 在 Spring Boot 创建唯一 Flyway Bean 时解析历史迁移分叉。
  *
- * <p>工具盒子迁移形成过三个已部署历史：早期测试库执行了旧版本，企业库执行了当前版本的
- * 原始字节，少量环境执行了被误改成幂等 SQL 的当前版本。兼容脚本只能按已应用历史选择，
- * 未知 checksum 必须继续由 Flyway 拒绝启动。
+ * <p>工具盒子、LobeHub、内部模型可观测和撤销重发迁移均形成过已知历史分叉。兼容程序只按
+ * 已应用版本与 checksum 选择原始字节或更高版本补偿资源；未知 checksum、不完整历史和混合路径
+ * 必须继续拒绝启动。
  */
 @Component
 public final class DatabaseMigrationCompatibilityCustomizer implements FlywayConfigurationCustomizer {
@@ -44,6 +44,22 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
     static final String LOBEHUB_RELEASE_FORWARD_COMPATIBILITY_VERSION = "20260803141754";
     static final String LOBEHUB_RELEASE_FORWARD_COMPATIBILITY_LOCATION =
             "classpath:db/migration-compat/lobehub-missing-after-rollout";
+    static final String INTERNAL_MODEL_OBSERVABILITY_LEGACY_VERSION = "20260807130134";
+    static final String INTERNAL_MODEL_FIRST_TOKEN_LEGACY_VERSION = "20260807203000";
+    static final String INTERNAL_MODEL_STREAM_COMPLETE_LEGACY_VERSION = "20260807222227";
+    static final String INTERNAL_MODEL_OBSERVABILITY_VERSION = "20260808143300";
+    static final String INTERNAL_MODEL_FIRST_TOKEN_VERSION = "20260808143301";
+    static final String INTERNAL_MODEL_STREAM_COMPLETE_VERSION = "20260808143302";
+    static final String INTERNAL_MODEL_LEGACY_COMPATIBILITY_LOCATION =
+            "classpath:db/migration-compat/internal-model-observability-legacy";
+    static final String RUN_RESEND_MIGRATION_VERSION = "20260807190000";
+    static final String RUN_RESEND_FORWARD_BEFORE_BATCH_VERSION = "20260807229999";
+    static final String RUN_RESEND_FORWARD_AFTER_BATCH_VERSION = "20260808143303";
+    static final String BATCH_SESSION_ATTRIBUTION_MIGRATION_VERSION = "20260807230000";
+    static final String RUN_RESEND_FORWARD_BEFORE_BATCH_LOCATION =
+            "classpath:db/migration-compat/run-resend-after-internal-model-before-batch";
+    static final String RUN_RESEND_FORWARD_AFTER_BATCH_LOCATION =
+            "classpath:db/migration-compat/run-resend-after-internal-model-after-batch";
 
     private static final String CURRENT_TOOLBOX_MIGRATION_FILE =
             "V20260728160800__create_toolbox_click_tracking.sql";
@@ -51,6 +67,14 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
             "db/migration/" + CURRENT_TOOLBOX_MIGRATION_FILE;
     private static final String LOBEHUB_MODEL_GATEWAY_MAIN_RESOURCE =
             "db/migration/V20260730090000__add_lobehub_model_gateway.sql";
+    private static final String INTERNAL_MODEL_OBSERVABILITY_MAIN_RESOURCE =
+            "db/migration/V20260808143300__create_internal_model_observability.sql";
+    private static final String INTERNAL_MODEL_FIRST_TOKEN_MAIN_RESOURCE =
+            "db/migration/V20260808143301__add_internal_model_first_token_metrics.sql";
+    private static final String INTERNAL_MODEL_STREAM_COMPLETE_MAIN_RESOURCE =
+            "db/migration/V20260808143302__add_internal_model_stream_complete_metrics.sql";
+    private static final String RUN_RESEND_MAIN_RESOURCE =
+            "db/migration/V20260807190000__create_run_resends.sql";
 
     private static final Logger LOGGER =
             LoggerFactory.getLogger(DatabaseMigrationCompatibilityCustomizer.class);
@@ -78,6 +102,84 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
         boolean needsReleaseForwardCompatibility = missingLobehubMigrationHistory
                 && !lobehubForwardCompatibilityApplied
                 && releaseRolloutMigrationApplied;
+        boolean legacyInternalModelObservabilityApplied = isMigrationApplied(
+                appliedMigrations, INTERNAL_MODEL_OBSERVABILITY_LEGACY_VERSION);
+        boolean legacyInternalModelFirstTokenApplied = isMigrationApplied(
+                appliedMigrations, INTERNAL_MODEL_FIRST_TOKEN_LEGACY_VERSION);
+        boolean legacyInternalModelStreamCompleteApplied = isMigrationApplied(
+                appliedMigrations, INTERNAL_MODEL_STREAM_COMPLETE_LEGACY_VERSION);
+        boolean anyLegacyInternalModelMigrationApplied = legacyInternalModelObservabilityApplied
+                || legacyInternalModelFirstTokenApplied
+                || legacyInternalModelStreamCompleteApplied;
+        boolean allLegacyInternalModelMigrationsApplied = legacyInternalModelObservabilityApplied
+                && legacyInternalModelFirstTokenApplied
+                && legacyInternalModelStreamCompleteApplied;
+        if (anyLegacyInternalModelMigrationApplied && !allLegacyInternalModelMigrationsApplied) {
+            throw new IllegalStateException(
+                    "检测到不完整的内部模型可观测旧 migration history，拒绝自动兼容；请核对 flyway_schema_history");
+        }
+
+        boolean currentInternalModelObservabilityApplied = isMigrationApplied(
+                appliedMigrations, INTERNAL_MODEL_OBSERVABILITY_VERSION);
+        boolean currentInternalModelFirstTokenApplied = isMigrationApplied(
+                appliedMigrations, INTERNAL_MODEL_FIRST_TOKEN_VERSION);
+        boolean currentInternalModelStreamCompleteApplied = isMigrationApplied(
+                appliedMigrations, INTERNAL_MODEL_STREAM_COMPLETE_VERSION);
+        boolean anyCurrentInternalModelMigrationApplied = currentInternalModelObservabilityApplied
+                || currentInternalModelFirstTokenApplied
+                || currentInternalModelStreamCompleteApplied;
+        boolean allCurrentInternalModelMigrationsApplied = currentInternalModelObservabilityApplied
+                && currentInternalModelFirstTokenApplied
+                && currentInternalModelStreamCompleteApplied;
+        if (anyCurrentInternalModelMigrationApplied && !allCurrentInternalModelMigrationsApplied) {
+            throw new IllegalStateException(
+                    "检测到不完整的内部模型可观测新 migration history，拒绝自动兼容；请核对 flyway_schema_history");
+        }
+        if (allLegacyInternalModelMigrationsApplied && anyCurrentInternalModelMigrationApplied) {
+            throw new IllegalStateException(
+                    "检测到内部模型可观测新旧 migration 同时执行，拒绝自动兼容；请核对 flyway_schema_history");
+        }
+
+        boolean runResendMigrationApplied = isMigrationApplied(
+                appliedMigrations, RUN_RESEND_MIGRATION_VERSION);
+        boolean runResendForwardBeforeBatchApplied = isMigrationApplied(
+                appliedMigrations, RUN_RESEND_FORWARD_BEFORE_BATCH_VERSION);
+        boolean runResendForwardAfterBatchApplied = isMigrationApplied(
+                appliedMigrations, RUN_RESEND_FORWARD_AFTER_BATCH_VERSION);
+        if (runResendForwardBeforeBatchApplied && runResendForwardAfterBatchApplied) {
+            throw new IllegalStateException(
+                    "检测到撤销重发顺序补偿 migration 新旧路径同时执行，拒绝自动兼容；请核对 flyway_schema_history");
+        }
+        boolean batchSessionAttributionMigrationApplied = isMigrationApplied(
+                appliedMigrations, BATCH_SESSION_ATTRIBUTION_MIGRATION_VERSION);
+        boolean laterMigrationApplied = isMigrationApplied(
+                appliedMigrations, INTERNAL_MODEL_STREAM_COMPLETE_LEGACY_VERSION)
+                || batchSessionAttributionMigrationApplied
+                || anyCurrentInternalModelMigrationApplied;
+        boolean needsRunResendForwardCompatibility = !runResendMigrationApplied && laterMigrationApplied;
+        if (runResendMigrationApplied
+                && (runResendForwardBeforeBatchApplied || runResendForwardAfterBatchApplied)) {
+            throw new IllegalStateException(
+                    "检测到撤销重发主 migration 与顺序补偿 migration 同时执行，拒绝自动兼容；请核对 flyway_schema_history");
+        }
+        String runResendForwardLocation = null;
+        String runResendForwardVersion = null;
+        if (runResendForwardBeforeBatchApplied) {
+            runResendForwardLocation = RUN_RESEND_FORWARD_BEFORE_BATCH_LOCATION;
+            runResendForwardVersion = RUN_RESEND_FORWARD_BEFORE_BATCH_VERSION;
+        } else if (runResendForwardAfterBatchApplied) {
+            runResendForwardLocation = RUN_RESEND_FORWARD_AFTER_BATCH_LOCATION;
+            runResendForwardVersion = RUN_RESEND_FORWARD_AFTER_BATCH_VERSION;
+        } else if (needsRunResendForwardCompatibility) {
+            boolean forwardAfterBatch = batchSessionAttributionMigrationApplied
+                    || anyCurrentInternalModelMigrationApplied;
+            runResendForwardLocation = forwardAfterBatch
+                    ? RUN_RESEND_FORWARD_AFTER_BATCH_LOCATION
+                    : RUN_RESEND_FORWARD_BEFORE_BATCH_LOCATION;
+            runResendForwardVersion = forwardAfterBatch
+                    ? RUN_RESEND_FORWARD_AFTER_BATCH_VERSION
+                    : RUN_RESEND_FORWARD_BEFORE_BATCH_VERSION;
+        }
 
         List<String> locations = new ArrayList<>(Arrays.stream(configuration.getLocations())
                 .map(location -> location.getDescriptor())
@@ -97,6 +199,12 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
                             ? LOBEHUB_RELEASE_FORWARD_COMPATIBILITY_LOCATION
                             : LOBEHUB_FORWARD_COMPATIBILITY_LOCATION);
         }
+        if (allLegacyInternalModelMigrationsApplied) {
+            addLocationIfAbsent(locations, INTERNAL_MODEL_LEGACY_COMPATIBILITY_LOCATION);
+        }
+        if (runResendForwardLocation != null) {
+            addLocationIfAbsent(locations, runResendForwardLocation);
+        }
         configuration.locations(locations.toArray(String[]::new));
 
         boolean legacyWithoutCurrentMigration = legacyMigrationApplied
@@ -107,6 +215,14 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
         }
         if (missingLobehubMigrationHistory) {
             filteredMainResources.add(LOBEHUB_MODEL_GATEWAY_MAIN_RESOURCE);
+        }
+        if (allLegacyInternalModelMigrationsApplied) {
+            filteredMainResources.add(INTERNAL_MODEL_OBSERVABILITY_MAIN_RESOURCE);
+            filteredMainResources.add(INTERNAL_MODEL_FIRST_TOKEN_MAIN_RESOURCE);
+            filteredMainResources.add(INTERNAL_MODEL_STREAM_COMPLETE_MAIN_RESOURCE);
+        }
+        if (needsRunResendForwardCompatibility) {
+            filteredMainResources.add(RUN_RESEND_MAIN_RESOURCE);
         }
         if (!filteredMainResources.isEmpty()) {
             // Flyway 没有公开“排除单个 classpath migration”的配置入口；这里包装唯一默认扫描器，
@@ -133,6 +249,17 @@ public final class DatabaseMigrationCompatibilityCustomizer implements FlywayCon
                     LOBEHUB_MODEL_GATEWAY_MIGRATION_VERSION,
                     LOBEHUB_SPLIT_MARKER_VERSION,
                     forwardVersion);
+        }
+        if (allLegacyInternalModelMigrationsApplied) {
+            LOGGER.warn("检测到已执行的内部模型可观测旧 migration，启用原始字节兼容解析并过滤重编号版本: versions={},{},{}",
+                    INTERNAL_MODEL_OBSERVABILITY_LEGACY_VERSION,
+                    INTERNAL_MODEL_FIRST_TOKEN_LEGACY_VERSION,
+                    INTERNAL_MODEL_STREAM_COMPLETE_LEGACY_VERSION);
+        }
+        if (needsRunResendForwardCompatibility) {
+            LOGGER.warn("检测到撤销重发 migration 未执行但后续版本已执行，启用顺序补偿路径: missingVersion={}, forwardVersion={}",
+                    RUN_RESEND_MIGRATION_VERSION,
+                    runResendForwardVersion);
         }
     }
 
