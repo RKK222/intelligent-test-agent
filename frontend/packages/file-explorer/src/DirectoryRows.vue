@@ -600,47 +600,49 @@ function submitRename() {
       <div v-if="renamingPath === workspaceEntryPath(entry) && renameError" class="ta-file-tree-rename-error">
         {{ renameError }}
       </div>
-      <DirectoryRows
-        v-if="entry.type === 'directory' && expandedDirectories.has(nodeId(entry))"
-        :directory="nodeId(entry)"
-        :entries-by-directory="entriesByDirectory"
-        :expanded-directories="expandedDirectories"
-        :active-path="activePath"
-        :loading-path="loadingPath"
-        :change-stats="changeStats"
-        :can-write="canWrite"
-        :can-attach="canAttach"
-        :can-download="canDownload"
-        :can-undo="canUndo"
-        :drag-reset-token="dragResetToken"
-        :drag-source-paths="dragSourcePaths"
-        :selected-entries="selectedEntries"
-        :downloading-entry-id="downloadingEntryId"
-        :clipboard-entry="clipboardEntry"
-        :depth="depth + 1"
-        @toggle-directory="emit('toggleDirectory', $event)"
-        @toggle-view-directory="emit('toggleViewDirectory', $event)"
-        @open-file="emit('openFile', $event)"
-        @open-view-file="emit('openViewFile', $event)"
-        @add-file-context="emit('addFileContext', $event)"
-        @add-view-file-context="emit('addViewFileContext', $event)"
-        @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
-        @delete-entry="(path, type) => emit('deleteEntry', path, type)"
-        @delete-entries="emit('deleteEntries', $event)"
-        @rename-entry="(path, name) => emit('renameEntry', path, name)"
-        @set-clipboard="(path, mode) => emit('setClipboard', path, mode)"
-        @set-clipboard-entries="(entries, mode) => emit('setClipboardEntries', entries, mode)"
-        @paste-entry="emit('pasteEntry', $event)"
-        @undo-entry="emit('undoEntry')"
-        @move-entry="(sourcePath, targetDirectory) => emit('moveEntry', sourcePath, targetDirectory)"
-        @move-entries="(sourcePaths, targetDirectory) => emit('moveEntries', sourcePaths, targetDirectory)"
-        @upload-files="(directory, files) => emit('uploadFiles', directory, files)"
-        @request-upload="emit('requestUpload', $event)"
-        @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
-        @download-entry="emit('downloadEntry', $event)"
-        @drag-source-change="emit('dragSourceChange', $event)"
-        @selection-change="emit('selectionChange', $event)"
-      />
+      <Transition name="ta-tree-expand">
+        <DirectoryRows
+          v-if="entry.type === 'directory' && expandedDirectories.has(nodeId(entry))"
+          :directory="nodeId(entry)"
+          :entries-by-directory="entriesByDirectory"
+          :expanded-directories="expandedDirectories"
+          :active-path="activePath"
+          :loading-path="loadingPath"
+          :change-stats="changeStats"
+          :can-write="canWrite"
+          :can-attach="canAttach"
+          :can-download="canDownload"
+          :can-undo="canUndo"
+          :drag-reset-token="dragResetToken"
+          :drag-source-paths="dragSourcePaths"
+          :selected-entries="selectedEntries"
+          :downloading-entry-id="downloadingEntryId"
+          :clipboard-entry="clipboardEntry"
+          :depth="depth + 1"
+          @toggle-directory="emit('toggleDirectory', $event)"
+          @toggle-view-directory="emit('toggleViewDirectory', $event)"
+          @open-file="emit('openFile', $event)"
+          @open-view-file="emit('openViewFile', $event)"
+          @add-file-context="emit('addFileContext', $event)"
+          @add-view-file-context="emit('addViewFileContext', $event)"
+          @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
+          @delete-entry="(path, type) => emit('deleteEntry', path, type)"
+          @delete-entries="emit('deleteEntries', $event)"
+          @rename-entry="(path, name) => emit('renameEntry', path, name)"
+          @set-clipboard="(path, mode) => emit('setClipboard', path, mode)"
+          @set-clipboard-entries="(entries, mode) => emit('setClipboardEntries', entries, mode)"
+          @paste-entry="emit('pasteEntry', $event)"
+          @undo-entry="emit('undoEntry')"
+          @move-entry="(sourcePath, targetDirectory) => emit('moveEntry', sourcePath, targetDirectory)"
+          @move-entries="(sourcePaths, targetDirectory) => emit('moveEntries', sourcePaths, targetDirectory)"
+          @upload-files="(directory, files) => emit('uploadFiles', directory, files)"
+          @request-upload="emit('requestUpload', $event)"
+          @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
+          @download-entry="emit('downloadEntry', $event)"
+          @drag-source-change="emit('dragSourceChange', $event)"
+          @selection-change="emit('selectionChange', $event)"
+        />
+      </Transition>
     </div>
     <FileEntryContextMenu
       v-if="entryContextMenu"
@@ -1302,5 +1304,40 @@ function submitRename() {
   padding: 2px 8px 3px;
   color: var(--ta-danger, #b91c1c);
   font-size: 11px;
+}
+
+/* ---- 文件夹展开/折叠动画 ---- */
+/* 使用 grid-template-rows 从 0fr → 1fr 实现真实高度动画 */
+.ta-tree-expand-enter-active,
+.ta-tree-expand-leave-active {
+  display: grid;
+  grid-template-rows: 1fr;
+  overflow: hidden;
+  transition: grid-template-rows 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.ta-tree-expand-enter-from,
+.ta-tree-expand-leave-to {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+.ta-tree-expand-enter-to,
+.ta-tree-expand-leave-from {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+/* 被动画包裹的根节点需要 min-height:0 才能收缩 */
+.ta-tree-expand-enter-active > *,
+.ta-tree-expand-leave-active > * {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 折叠箭头旋转动画 */
+.ta-file-tree-twistie {
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.ta-file-tree-twistie.is-open {
+  transform: rotate(90deg);
 }
 </style>
