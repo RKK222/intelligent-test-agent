@@ -492,81 +492,6 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
         </div>
       </main>
 
-      <section
-        v-if="dialogStage === 'selection' && scheduleOpen"
-        class="batch-schedule-panel"
-        data-testid="batch-schedule-panel"
-      >
-        <div class="batch-schedule-head">
-          <strong>选择定时执行时间</strong>
-          <button
-            type="button"
-            class="batch-schedule-close"
-            aria-label="关闭定时选择"
-            data-testid="batch-close-schedule"
-            :disabled="executionLocked"
-            @click="closeSchedule"
-          ><X :size="14" /></button>
-        </div>
-        <ExecutionTimePicker
-          multiple
-          :schedule-mode="scheduleMode"
-          :allow-mode-switch="canScheduleCustomTime"
-          :slots="nightSlots"
-          :loading="nightSlotsLoading"
-          :disabled="running"
-          :selected-times="selectedNightTimes"
-          :custom-input="customScheduleInput"
-          :custom-error="customScheduleError"
-          :custom-min="customBounds.min"
-          :custom-max="customBounds.max"
-          :custom-times="customTimes"
-          @select-mode="setScheduleMode"
-          @toggle-time="toggleNightTime"
-          @quick-offset="setCustomOffset"
-          @update:custom-input="updateCustomScheduleInput"
-          @add-custom-time="addCustomTime"
-          @remove-custom-time="(time) => customTimes = customTimes.filter((item) => item !== time)"
-        />
-        <div class="batch-schedule-foot">
-          <span v-if="selectedScheduleTimes.length === 0">请选择至少一个执行时间。</span>
-          <span v-else-if="!scheduleAllocation.ok" class="batch-error">所选时段总余量 {{ scheduleAllocation.remainingCapacity }}，不足以安排 {{ selectedIds.length }} 个子条目。</span>
-          <span v-else>将按时间升序轮询分配 {{ selectedScheduleTimes.length }} 个时间段。</span>
-        </div>
-      </section>
-
-      <section
-        v-if="dialogStage === 'progress' && activeRequest?.executionMode === 'scheduled' && capacityConflictIds.length > 0"
-        class="batch-schedule-panel"
-        data-testid="batch-retry-schedule"
-      >
-        <div class="batch-schedule-head">
-          <strong>为 {{ capacityConflictIds.length }} 个容量冲突项重新选择时间</strong>
-        </div>
-        <ExecutionTimePicker
-          multiple
-          :schedule-mode="activeRequest.scheduleMode ?? scheduleMode"
-          :allow-mode-switch="false"
-          :slots="nightSlots"
-          :loading="nightSlotsLoading"
-          :disabled="executionLocked"
-          :selected-times="selectedNightTimes"
-          :custom-input="customScheduleInput"
-          :custom-error="customScheduleError"
-          :custom-min="customBounds.min"
-          :custom-max="customBounds.max"
-          :custom-times="customTimes"
-          @toggle-time="toggleNightTime"
-          @quick-offset="setCustomOffset"
-          @update:custom-input="updateCustomScheduleInput"
-          @add-custom-time="addCustomTime"
-          @remove-custom-time="(time) => customTimes = customTimes.filter((item) => item !== time)"
-        />
-        <span v-if="!retryScheduleAllocation.ok" class="batch-error">
-          所选时段总余量 {{ retryScheduleAllocation.remainingCapacity }}，不足以重试 {{ capacityConflictIds.length }} 个子条目。
-        </span>
-      </section>
-
       <footer v-if="dialogStage === 'selection'" class="batch-dialog-foot">
         <label class="batch-requirement">
           <span>批量案例生成要求</span>
@@ -613,6 +538,97 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
           <button type="button" class="batch-primary" :disabled="executionLocked" @click="requestClose">关闭</button>
         </div>
       </footer>
+
+      <!-- 右侧弹出定时执行时间选择抽屉 -->
+      <transition name="batch-drawer-slide">
+        <aside
+          v-if="dialogStage === 'selection' && scheduleOpen"
+          class="batch-schedule-drawer batch-schedule-panel"
+          data-testid="batch-schedule-panel"
+        >
+          <div class="batch-schedule-drawer-head">
+            <div class="batch-schedule-drawer-title">
+              <strong>选择定时执行时间</strong>
+              <small>已根据选中的 {{ selectedIds.length }} 个子条目推荐/分配</small>
+            </div>
+            <button
+              type="button"
+              class="batch-schedule-close"
+              aria-label="关闭定时选择"
+              data-testid="batch-close-schedule"
+              :disabled="executionLocked"
+              @click="closeSchedule"
+            ><X :size="14" /></button>
+          </div>
+          <div class="batch-schedule-drawer-body">
+            <ExecutionTimePicker
+              multiple
+              :schedule-mode="scheduleMode"
+              :allow-mode-switch="canScheduleCustomTime"
+              :slots="nightSlots"
+              :loading="nightSlotsLoading"
+              :disabled="running"
+              :selected-times="selectedNightTimes"
+              :custom-input="customScheduleInput"
+              :custom-error="customScheduleError"
+              :custom-min="customBounds.min"
+              :custom-max="customBounds.max"
+              :custom-times="customTimes"
+              @select-mode="setScheduleMode"
+              @toggle-time="toggleNightTime"
+              @quick-offset="setCustomOffset"
+              @update:custom-input="updateCustomScheduleInput"
+              @add-custom-time="addCustomTime"
+              @remove-custom-time="(time) => customTimes = customTimes.filter((item) => item !== time)"
+            />
+          </div>
+          <div class="batch-schedule-drawer-foot">
+            <span v-if="selectedScheduleTimes.length === 0">请选择至少一个执行时间。</span>
+            <span v-else-if="!scheduleAllocation.ok" class="batch-error">所选时段总余量 {{ scheduleAllocation.remainingCapacity }}，不足以安排 {{ selectedIds.length }} 个子条目。</span>
+            <span v-else>将按时间升序轮询分配 {{ selectedScheduleTimes.length }} 个时间段。</span>
+          </div>
+        </aside>
+
+        <aside
+          v-else-if="dialogStage === 'progress' && activeRequest?.executionMode === 'scheduled' && capacityConflictIds.length > 0"
+          class="batch-schedule-drawer batch-schedule-panel"
+          data-testid="batch-retry-schedule"
+        >
+          <div class="batch-schedule-drawer-head">
+            <div class="batch-schedule-drawer-title">
+              <strong>容量冲突项重新选择时间</strong>
+              <small>为 {{ capacityConflictIds.length }} 个冲突项安排新时段</small>
+            </div>
+          </div>
+          <div class="batch-schedule-drawer-body">
+            <ExecutionTimePicker
+              multiple
+              :schedule-mode="activeRequest.scheduleMode ?? scheduleMode"
+              :allow-mode-switch="false"
+              :slots="nightSlots"
+              :loading="nightSlotsLoading"
+              :disabled="executionLocked"
+              :selected-times="selectedNightTimes"
+              :custom-input="customScheduleInput"
+              :custom-error="customScheduleError"
+              :custom-min="customBounds.min"
+              :custom-max="customBounds.max"
+              :custom-times="customTimes"
+              @toggle-time="toggleNightTime"
+              @quick-offset="setCustomOffset"
+              @update:custom-input="updateCustomScheduleInput"
+              @add-custom-time="addCustomTime"
+              @remove-custom-time="(time) => customTimes = customTimes.filter((item) => item !== time)"
+            />
+          </div>
+          <div class="batch-schedule-drawer-foot">
+            <span v-if="!retryScheduleAllocation.ok" class="batch-error">
+              所选时段总余量 {{ retryScheduleAllocation.remainingCapacity }}，不足以重试 {{ capacityConflictIds.length }} 个子条目。
+            </span>
+            <span v-else>重试时段余量充足。</span>
+          </div>
+        </aside>
+      </transition>
     </div>
   </div>
 </template>
@@ -628,8 +644,9 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
   backdrop-filter: blur(5px);
 }
 .batch-dialog {
+  position: relative;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   max-width: 1180px;
   min-width: 720px;
   overflow: hidden;
@@ -640,7 +657,7 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
   box-shadow: 0 26px 80px rgba(20, 31, 51, 0.28);
 }
 .batch-dialog.is-progress { grid-template-rows: auto minmax(0, 1fr) auto; }
-.batch-dialog.is-progress.has-retry-schedule { grid-template-rows: auto minmax(0, 1fr) auto auto; }
+.batch-dialog.is-progress.has-retry-schedule { grid-template-rows: auto minmax(0, 1fr) auto; }
 .batch-dialog-head {
   display: flex;
   align-items: flex-start;
@@ -691,19 +708,81 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
 .batch-progress-summary .is-error strong { color: #a0343d; }
 .batch-progress-running { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; color: #8f2731; font-weight: 700; }
 .batch-row-retry { min-height: 28px; padding: 0 8px; }
-.batch-schedule-panel { display: grid; gap: 10px; max-height: 220px; overflow: auto; padding: 12px 16px; border-top: 1px solid #dce4ec; background: #eef4f9; }
-.batch-schedule-head, .batch-schedule-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.batch-schedule-head strong { font-size: 13px; }
+
+/* 右侧侧边抽屉面板样式 */
+.batch-schedule-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 440px;
+  max-width: 100%;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border-left: 1px solid #dce4ec;
+  box-shadow: -8px 0 32px rgba(18, 25, 42, 0.16);
+}
+.batch-schedule-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid #dde4ec;
+  background: linear-gradient(135deg, #ffffff 0%, #f1f6fb 72%, #f8eef0 100%);
+}
+.batch-schedule-drawer-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.batch-schedule-drawer-title strong {
+  font-size: 14px;
+  color: #263548;
+}
+.batch-schedule-drawer-title small {
+  font-size: 11px;
+  color: #68778a;
+}
+.batch-schedule-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+.batch-schedule-drawer-body :deep(.execution-time-slots) {
+  grid-template-columns: repeat(3, 1fr);
+  max-height: none;
+}
+.batch-schedule-drawer-foot {
+  padding: 14px 20px;
+  border-top: 1px solid #dde4ec;
+  background: #f8fafc;
+  font-size: 11px;
+  color: #617186;
+}
 .batch-schedule-close {
-  display: grid; width: 26px; height: 26px; place-items: center; border: 0; border-radius: 7px;
+  display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 7px;
   background: transparent; color: #66778a; cursor: pointer;
 }
 .batch-schedule-close:hover:not(:disabled) { background: #dfe7ef; color: #8f2731; }
 .batch-schedule-close:disabled { cursor: not-allowed; opacity: .45; }
+
+/* Slide-in transition from right */
+.batch-drawer-slide-enter-active,
+.batch-drawer-slide-leave-active {
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+}
+.batch-drawer-slide-enter-from,
+.batch-drawer-slide-leave-to {
+  transform: translateX(100%);
+  opacity: 0;
+}
+
 .batch-mode-switch { display: flex; gap: 3px; padding: 3px; border-radius: 8px; background: #dfe7ef; }
 .batch-mode-switch button { min-height: 28px; border: 0; border-radius: 6px; background: transparent; color: #657589; font: inherit; font-size: 11px; cursor: pointer; }
 .batch-mode-switch button.active { background: #fff; color: #8f2731; box-shadow: 0 1px 3px rgba(31, 47, 67, .13); }
-.batch-night-slots { display: grid; grid-template-columns: repeat(6, minmax(84px, 1fr)); gap: 6px; }
+.batch-night-slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .batch-night-slots button { display: grid; min-height: 43px; place-content: center; gap: 2px; border: 1px solid #ccd7e2; border-radius: 8px; background: #fff; color: #43556b; font: inherit; cursor: pointer; }
 .batch-night-slots button.selected { border-color: #9f2e38; background: #9f2e38; color: #fff; }
 .batch-night-slots button:disabled { cursor: not-allowed; opacity: .45; }
@@ -716,7 +795,6 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
 .batch-custom-entry .batch-add-time { border-color: #8f2731; color: #8f2731; font-weight: 700; }
 .batch-time-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .batch-time-chips button { display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; cursor: pointer; }
-.batch-schedule-foot { color: #617186; font-size: 11px; }
 .batch-error { color: #a0343d; font-size: 11px; }
 .batch-dialog-foot { display: grid; grid-template-columns: minmax(300px, 1fr) auto; align-items: end; gap: 14px; padding: 12px 16px 14px; border-top: 1px solid #dce4ec; background: #fff; }
 .batch-requirement { display: grid; gap: 5px; color: #53657a; font-size: 11px; font-weight: 700; }
@@ -732,6 +810,6 @@ const customBounds = computed(() => adminCustomScheduleBounds(new Date()));
 @media (max-width: 980px) {
   .batch-dialog { width: calc(100vw - 24px) !important; min-width: 0; }
   .batch-dialog-foot { grid-template-columns: 1fr; }
-  .batch-night-slots { grid-template-columns: repeat(3, 1fr); }
+  .batch-schedule-drawer { width: 100%; border-left: 0; }
 }
 </style>

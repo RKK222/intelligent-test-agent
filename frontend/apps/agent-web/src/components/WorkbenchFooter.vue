@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowLeftRight, BookOpen, BookOpenCheck, CodeXml, FlaskConical, LibraryBig, LocateFixed, Plus, Save, ServerCog } from "lucide-vue-next";
+import { ArrowLeftRight, CodeXml, FileSearch, FlaskConical, LibraryBig, LocateFixed, Plus, Save, ServerCog } from "lucide-vue-next";
 import { ElDatePicker, ElDialog, ElTooltip, ElMessage } from "element-plus";
 import type {
   ApplicationWorkspaceTemplate,
@@ -793,7 +793,7 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
           @click.stop="handlePreviewClick"
           @dblclick.stop="handlePreviewDblClick"
         >
-          <component :is="markdownPreviewMode !== 'off' ? BookOpenCheck : BookOpen" class="ta-workbench-footer-icon" />
+          <FileSearch class="ta-workbench-footer-icon" />
         </button>
       </ElTooltip>
       <ElTooltip

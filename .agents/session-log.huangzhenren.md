@@ -5,18 +5,18 @@
 
 ## Entries
 
-### 2026-08-08 - 中间文件编辑器“预览”与“定位文件”图标替换及全彩主题升级（BookOpen预览/LocateFixed定位）
+### 2026-08-08 - 中间文件编辑器“预览”与“定位文件”图标替换及全彩主题升级（FileSearch文件预览/LocateFixed定位）
 
 - Why:
-  - 用户要求将中间文件编辑器底栏/控制行中的“预览”与“定位文件”图标替换为更具操作代表语义的专用图标，并全面升级为鲜艳色彩与系统主题相配。
+  - 用户反馈原“预览”图标使用 `BookOpen` 会与系统左侧工具栏的“用户手册”图标重合，要求更换为更具独立操作代表语义的专有文件预览图标，并保留全彩主题。
 - What:
   - `WorkbenchFooter.vue`: 
-    1. **“预览”图标替换**：将原先抽象的眼睛图标（`Eye` / `EyeOff`）替换为**书籍开卷阅读图标 `<BookOpen />` / `<BookOpenCheck />`**（📖 语义直观表达 Markdown/文档渲染与预览切回）；赋予海洋蓝/天空蓝主题色 (`#0284C7`) 及浅蓝 Hover/Active 状态 (`#E0F2FE`)。
-    2. **“定位文件”图标替换**：将原先圆环图标（`Target`）替换为**精确准心定位图标 `<LocateFixed />`**（🎯 语义直观表达在左侧文件树中精准定位高亮当前激活文件）；赋予琥珀金/橙色主题色 (`#D97706`) 及暖黄 Hover 状态 (`#FEF3C7`)。
+    1. **“预览”图标无冲突替换**：将“预览”图标更替换为**文档视图/检索预览图标 `<FileSearch />`**（📄🔍 专有代表文件视图与 Markdown 渲染预览，避开“用户手册”`<BookOpen />` 图标）；赋予海洋蓝/天空蓝主题色 (`#0284C7`) 及浅蓝 Hover/Active 状态 (`#E0F2FE`)。
+    2. **“定位文件”图标替换**：使用**精确准心定位图标 `<LocateFixed />`**（🎯 语义直观表达在左侧文件树中精准定位高亮当前激活文件）；赋予琥珀金/橙色主题色 (`#D97706`) 及暖黄 Hover 状态 (`#FEF3C7`)。
 - How:
-  - 替换语义更清晰的标准 Lucide 图标，配置匹配全站调色板的视觉配色与交互高亮底色，保留全部原有 data-testid、事件与单元测试契约。
+  - 精确替换 semantic 图标，配置特定 icon class 与柔和 hover/active 底色，保留全部点击、状态与无障碍契约。
 - Result:
-  - `vue-tsc --noEmit` 零报错通过；编辑器底部“预览”与“定位文件”图标直观生动、色彩亮丽。
+  - `vue-tsc --noEmit` 零报错通过；“用户手册”与“文件预览”图标无重合冲突，全彩视觉清晰直观。
 
 
 ### 2026-08-08 - 优化顶栏全局切换轨道底色与应用/工作空间/版本下拉箭头消除留白
@@ -1946,4 +1946,19 @@
   - 运行 `corepack pnpm typecheck` 校验前端全部 workspace 类型检查通过。
 - Result:
   - 对话中用户消息底色为 `#B2EDDF`，智能体回复底色为 `#FFFDF7` 且无边框，子智能体卡片边框为 `1px solid #EEECE6`，`.md` 文件高亮文本颜色为 `#05B1A9`。未新建 git 分支，未修改 `.env*` 等环境配置、后端 API 或 OpenCode 源码。
+
+### 2026-08-08 - 批量生成测试案例定时选择面板改为右侧弹出抽屉
+
+- Why:
+  - 响应 UI 交互变更要求：将“批量生成子条目测试案例”弹层（`BatchTestCaseGenerationDialog.vue`）中底部的“选择定时执行时间”面板从底部内联折叠弹出修改为从弹层右侧平滑滑出（右侧侧边抽屉）。
+- What:
+  - 在 `BatchTestCaseGenerationDialog.vue` 中，将原本内联在底部表格与页脚之间的 `.batch-schedule-panel`（选择定时与容量冲突重试两处）重构成右侧定位的抽屉组件 `.batch-schedule-drawer`。
+  - 为右侧抽屉设计了 Header（含标题、说明及关闭按钮 `X`）、Body（包裹 `ExecutionTimePicker`，并将夜间时段 grid 布局优化为 3 列适配抽屉宽度）与 Drawer Foot（展示分配说明与容量警告）。
+  - 添加 `.batch-drawer-slide` 右侧平滑滑入滑出过渡动画 (`translateX(100%)` -> `translateX(0)`），并保留 `data-testid="batch-schedule-panel"` 与 `data-testid="batch-retry-schedule"` 以保证既有单测与 E2E 校验契约。
+- How:
+  - 修改后运行 `BatchTestCaseGenerationDialog.test.ts`（11 项全通过）。
+  - 运行 `corepack pnpm --filter @test-agent/agent-web typecheck` 类型检查通过。
+- Result:
+  - 批量生成弹层中点击“选择定时”时，定时选择面板优雅地从弹层右侧平滑滑出，夜间时段以 3 列紧凑美观呈现，关闭时平滑滑回右侧。未新建 git 分支，未修改 `.env*` 等环境配置、后端 API 或 OpenCode 源码。
+
 
