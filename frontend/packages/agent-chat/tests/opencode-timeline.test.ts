@@ -25,6 +25,20 @@ describe("OpencodeTimeline", () => {
     expect(badge?.textContent).toContain("08:00");
   });
 
+  it("renders new empty state title, subtitle, and custom empty-icon slot when rows are empty", () => {
+    const state = createOpencodeLikeState({ messages: [] });
+    const { container, getByText } = render(OpencodeTimeline, {
+      props: { state },
+      slots: {
+        "empty-icon": '<span class="test-pet-icon">🐾</span>'
+      }
+    });
+
+    expect(getByText("有什么可以帮你？")).toBeTruthy();
+    expect(getByText("描述你的目标或任务，智能体将理解你的需求并协助完成。")).toBeTruthy();
+    expect(container.querySelector(".test-pet-icon")).toBeTruthy();
+  });
+
   it("does not render a synthetic assistant row before the first real event", () => {
     const state = createOpencodeLikeState({
       messages: [],

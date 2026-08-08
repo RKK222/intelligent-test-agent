@@ -7,6 +7,8 @@ export type OpencodeTimelineProps = {
   forceToolDetailsOpen?: boolean;
   showReasoning?: boolean;
   resendableMessageId?: string;
+  emptyTitle?: string;
+  emptySubtitle?: string;
 };
 </script>
 
@@ -23,6 +25,7 @@ const props = withDefaults(defineProps<OpencodeTimelineProps>(), {
 const emit = defineEmits<{ openDiff: []; openFile: [path: string]; selectSubagent: [sessionId: string]; resend: [] }>();
 defineSlots<{
   "completed-status-actions"?: (props: { row: Extract<TimelineRowType, { type: "work-status" }> }) => unknown;
+  "empty-icon"?: () => unknown;
 }>();
 const rows = computed(() => createTimelineRows(props.state));
 const resolvedDockTarget = computed(() => {
@@ -97,7 +100,15 @@ watch(latestUserMessageKey, () => {
     <ConversationLocator :state="state" />
     <div class="oc-timeline">
       <div v-if="rows.length === 0" class="oc-empty-state">
-        <div class="oc-empty-state__title">等待任务输入</div>
+        <div class="oc-empty-state__container">
+          <div class="oc-empty-state__header">
+            <slot name="empty-icon" />
+            <div class="oc-empty-state__title">{{ emptyTitle || '有什么可以帮你？' }}</div>
+          </div>
+          <div class="oc-empty-state__subtitle">
+            {{ emptySubtitle || '描述你的目标或任务，智能体将理解你的需求并协助完成。' }}
+          </div>
+        </div>
       </div>
       <TimelineRow
         v-for="row in inlineRows"

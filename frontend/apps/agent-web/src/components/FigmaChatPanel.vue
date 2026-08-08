@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch, type CSSProperties } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, useId, watch, type CSSProperties, type Ref } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import {
   AlertTriangle,
@@ -69,6 +69,12 @@ import ChatContextAttachmentList from './ChatContextAttachmentList.vue'
 import BatchTestCaseGenerationDialog from './BatchTestCaseGenerationDialog.vue'
 import ExecutionTimePicker from './ExecutionTimePicker.vue'
 import SessionContextUsage from './SessionContextUsage.vue'
+import PetCompanionAvatar from './PetCompanionAvatar.vue'
+import {
+  loadPetPreference,
+  resolvePetPreference,
+  type PetCompanionId,
+} from './pet-companions'
 import { copyTextToClipboard, Spinner } from '@test-agent/ui-kit'
 import type { ChatContextItem } from '../stores/chatContextStore'
 import { validateChatSend } from '../stores/chatContextStore'
@@ -3577,6 +3583,15 @@ const timelineDiffFiles = computed<RunDiffFile[]>(() =>
   }))
 )
 
+const injectedPetId = inject<Ref<PetCompanionId> | undefined>('activePetId', undefined)
+const fallbackPetId = ref<PetCompanionId>(
+  resolvePetPreference(
+    loadPetPreference(typeof window === 'undefined' ? undefined : window.localStorage),
+    new Date()
+  ).petId
+)
+const activePetId = computed(() => injectedPetId?.value ?? fallbackPetId.value)
+
 const opencodeTimelineState = computed(() =>
   createOpencodeLikeState({
     messages: timelineMessages.value,
@@ -4443,6 +4458,11 @@ function onCompositionEnd() {
         @select-subagent="selectSubagent"
         @resend="emit('retry')"
       >
+        <template #empty-icon>
+          <div class="oc-empty-state__pet-avatar">
+            <PetCompanionAvatar :pet-id="activePetId" />
+          </div>
+        </template>
         <template #completed-status-actions="{ row }">
           <div
             v-if="canFeedbackRun(row)"

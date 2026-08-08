@@ -5,6 +5,21 @@
 
 ## Entries
 
+### 2026-08-08 - 优化新建对话空白状态文案与当前宠物图标展示
+
+- Why:
+  - 用户需求要求将新建对话中的“等待任务输入”文案优化为“有什么可以帮你？”，添加辅助文案“描述你的目标或任务，智能体将理解你的需求并协助完成。”，并按照设计规范样式并在标题左侧对齐展示当前选中的宠物图标。
+- What:
+  - `OpencodeTimeline.vue`: 重构 `oc-empty-state` 结构，包含 `oc-empty-state__container`、`oc-empty-state__header`（包含 `#empty-icon` 插槽与主标题）、`oc-empty-state__subtitle`（辅助文案），并新增 `emptyTitle`、`emptySubtitle` 可选属性与 `empty-icon` 插槽声明。
+  - `timeline.css`: 精确落盘文案与布局规范：主标题 `PingFang SC` 16px/600(Semibold)/行高24px/颜色 `#1F2329`，辅助说明 `PingFang SC` 14px/400(Regular)/行高22px/颜色 `#8A8F99`，标题与说明间距 8px，文案最大宽度 340px (居于 320–360px 范围)，整体水平居中，图标在标题左侧垂直居中对齐。
+  - `FigmaShell.vue`: 增加 `provide("activePetId", activePetId)`，使子组件能响应式获取当前选中的宠物。
+  - `FigmaChatPanel.vue`: 注入 `activePetId`，并向 `OpencodeTimeline` 传递 `#empty-icon` 插槽（渲染 `<PetCompanionAvatar :pet-id="activePetId" />`）。
+  - 测试套件: 在 `opencode-timeline.test.ts` 和 `FigmaChatPanel.test.ts` 中补齐空白状态主副标题及宠物图标渲染断言。
+- How:
+  - 采用 Vue `provide` / `inject` + Slot 模式，既保持 `agent-chat` 包与宠物资源的解耦，又能实时响应 `FigmaShell` 中宠物名册与每日轮换策略的切换。
+- Result:
+  - 自动化单元测试 `opencode-timeline.test.ts` (42 passed) 和 `FigmaChatPanel.test.ts` (153 passed) 全过，`npm run typecheck` 校验通过。
+
 ### 2026-08-08 - 优化用户消息操作栏（撤销重发、复制）悬浮于气泡下方且仅展示图标
 
 - Why:

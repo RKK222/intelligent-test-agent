@@ -62,6 +62,19 @@ describe("FigmaChatPanel", () => {
     vi.unstubAllGlobals();
   });
 
+  it("renders pet companion avatar in empty chat state", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+      } as any,
+    });
+
+    expect(wrapper.text()).toContain("有什么可以帮你？");
+    expect(wrapper.text()).toContain("描述你的目标或任务，智能体将理解你的需求并协助完成。");
+    expect(wrapper.find(".oc-empty-state__pet-avatar").exists()).toBe(true);
+    expect(wrapper.find("svg.pet-companion-svg").exists()).toBe(true);
+  });
+
   it("opens batch test case generation from the hover/focus composer entry and reuses # candidates", async () => {
     const reference = {
       id: "spec/需求一/01-需求/登录",

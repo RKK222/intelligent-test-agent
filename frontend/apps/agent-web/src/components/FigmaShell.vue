@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch, type CSSProperties } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch, type CSSProperties } from "vue";
 import { BookOpen, CalendarDays, ChevronDown, Dices, Gamepad2, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, RefreshCw, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
 import { CodeXml, FlaskConical } from "lucide-vue-next";
 import type { AppSourceRepositorySummary } from "@test-agent/shared-types";
@@ -769,6 +769,7 @@ const ROBOT_FIXED_STORAGE_KEY = "figma-shell-robot-fixed";
 
 const petPreference = ref(loadPetPreference(typeof window === "undefined" ? undefined : window.localStorage));
 const activePetId = ref<PetCompanionId>("deer");
+provide("activePetId", activePetId);
 const activePet = computed(() => getPetCompanion(activePetId.value));
 const robotScale = computed(() => normalizePetScale(petPreference.value.scale ?? PET_SCALE_DEFAULT));
 const robotWidth = computed(() => ROBOT_BASE_WIDTH * robotScale.value);
