@@ -91,10 +91,11 @@ function outcomeGroupOf(outcome: InternalModelCallOutcome): InternalModelCallOut
 
 // AIPerf (NVIDIA) 指标规范与业界标准英文缩写说明
 const glossaryItems = [
-  { abbr: "TTFT", name: "Time to First Token", desc: "首 Token 延迟：发起请求到接收到模型首个 Token 的时间。" },
+  { abbr: "TTFT", name: "Time to First Token", desc: "首 Token 延迟：发起请求到接收到模型首个 Token 的时间（NVIDIA GenAI Perf 核心延迟指标）。" },
+  { abbr: "ITL / TPOT", name: "Inter-Token Latency / Time Per Output Token", desc: "Token 输出间隔耗时：生成过程中连续两个 Output Token 之间的平均生成间隔。" },
   { abbr: "SCT", name: "Stream Completion Time", desc: "流式完成时间：发起请求到流式响应正常结束的总耗时。" },
   { abbr: "E2E", name: "End-to-End Latency", desc: "端到端延迟：发起请求到接收到完整响应或异常终止的总端到端时长。" },
-  { abbr: "RPS", name: "Requests Per Second", desc: "每秒请求数：在统计时间窗口内的平均每秒请求处理量。" },
+  { abbr: "RPS", name: "Requests Per Second", desc: "每秒请求数：在统计时间窗口内的平均每秒请求处理量（Throughput 吞吐量指标）。" },
   { abbr: "REQ", name: "Requests", desc: "请求总数：包含成功与失败在内的总调用次数。" },
   { abbr: "SR", name: "Success Rate", desc: "请求成功率：成功完成的请求占总请求数的百分比。" },
   { abbr: "FR", name: "Failure Rate", desc: "请求错误率：失败或中途中断的请求占总请求数的百分比。" }
@@ -906,7 +907,7 @@ function onPageChange(next: number) {
               <div class="ta-imob-chart-card ta-imob-chart-card-full">
                 <h4 class="ta-imob-overview-title">
                   <MetricHelpLabel
-                    :label="showRateMetrics ? 'REQ & SR Trend' : 'REQ Trend'"
+                    :label="showRateMetrics ? '请求数与成功率趋势' : '请求数趋势'"
                     :description="chartHelp.hourlyTrend"
                   />
                 </h4>
@@ -914,19 +915,19 @@ function onPageChange(next: number) {
               </div>
               <div v-if="showRateMetrics" class="ta-imob-chart-card">
                 <h4 class="ta-imob-overview-title">
-                  <MetricHelpLabel label="Outcome Distribution" :description="chartHelp.successComposition" />
+                  <MetricHelpLabel label="调用结果分布" :description="chartHelp.successComposition" />
                 </h4>
                 <div ref="pieChartEl" class="ta-imob-chart" />
               </div>
               <div v-if="failureBarData.length" class="ta-imob-chart-card">
                 <h4 class="ta-imob-overview-title">
-                  <MetricHelpLabel label="Failure Breakdown" :description="chartHelp.failureBreakdown" />
+                  <MetricHelpLabel label="失败原因分类" :description="chartHelp.failureBreakdown" />
                 </h4>
                 <div ref="failureChartEl" class="ta-imob-chart" />
               </div>
               <div v-if="providerBarData.length" class="ta-imob-chart-card">
                 <h4 class="ta-imob-overview-title">
-                  <MetricHelpLabel label="Provider REQ Volume" :description="chartHelp.providerVolume" />
+                  <MetricHelpLabel label="供应商请求量对比" :description="chartHelp.providerVolume" />
                 </h4>
                 <div ref="providerChartEl" class="ta-imob-chart" />
               </div>

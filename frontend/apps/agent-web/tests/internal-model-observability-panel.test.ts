@@ -130,7 +130,7 @@ describe("InternalModelObservabilityPanel", () => {
       "Avg E2E", "Max E2E", "Total Duration", "RPS",
       "Avg TTFT", "Max TTFT",
       "Avg SCT", "Max SCT",
-      "REQ & SR Trend", "Outcome Distribution", "Failure Breakdown", "Provider REQ Volume",
+      "请求数与成功率趋势", "调用结果分布", "失败原因分类", "供应商请求量对比",
       "E2E Latency", "TTFT", "SCT"
     ];
     for (const label of explainedLabels) {

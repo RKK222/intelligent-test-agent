@@ -7372,12 +7372,16 @@
 ### What
 
 - 修改 [InternalModelObservabilityPanel.vue](file:///Users/kaka/Desktop/intelligent-test-agent/frontend/apps/agent-web/src/components/system/InternalModelObservabilityPanel.vue) 中 ECharts 趋势图配置：将图例改为顶部居中对齐（`top: 0, left: "center"`）并增加 `itemGap: 16`，将 `grid.right` 边距由 `16` 调整为 `44`，确保右侧 Y 轴刻度标签和名称有足够展示空间。
+- 将聚合指标图表的卡片表头统一改为中文：`请求数与成功率趋势`（或 `请求数趋势`）、`调用结果分布`、`失败原因分类`、`供应商请求量对比`。
+- 参考 NVIDIA GenAI Perf / AI Perf Metrics Reference 标准，在前端面板页首内置默认展开的“AIPerf & 业界指标英文缩写指南 (Glossary)”卡片，并新建离线标准文档 [docs/standards/metrics-glossary.md](file:///Users/kaka/Desktop/intelligent-test-agent/docs/standards/metrics-glossary.md)，详细列出 TTFT、ITL/TPOT、SCT、E2E、RPS、REQ、SR、FR 的完整全称、定义与计算逻辑。
 
 ### How
 
 - 执行 `npx vitest run --environment jsdom tests/internal-model-observability-panel.test.ts`，测试 100% 通过。
+- 更新 [docs/README.md](file:///Users/kaka/Desktop/intelligent-test-agent/docs/README.md) 同步索引 `docs/standards/metrics-glossary.md`。
 
 ### Result
 
-- 趋势图图例居中展示，REQ 轴名称位于左上方，SR % 轴名称位于右上方，图例与 Y 轴名称不再发生堆叠或遮挡。
+- 趋势图图例居中展示，所有聚合图表表头均采用清晰中文展示。
+- 在网络隔离的离线部署环境下，用户既可在页面直观展开阅读指标缩写对照，开发者亦可在工程源码中离线查阅标准文档。
 
