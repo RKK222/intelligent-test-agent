@@ -913,6 +913,8 @@ function onPageChange(next: number) {
             <el-option label="探活" value="PROBE" />
           </el-select>
 
+          <div class="ta-imob-filter-vdivider" />
+
           <div class="ta-imob-filter-actions">
             <button
               type="button"
@@ -1699,11 +1701,17 @@ function onPageChange(next: number) {
 :deep(.ta-imob-filter-select-source) {
   width: 95px !important;
 }
+.ta-imob-filter-vdivider {
+  width: 1px;
+  height: 14px;
+  background: #cbd5e1;
+  margin: 0 2px;
+  flex-shrink: 0;
+}
 .ta-imob-filter-actions {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
   flex-shrink: 0;
 }
 .ta-imob-btn-small {
