@@ -5,6 +5,19 @@
 
 ## Entries
 
+### 2026-08-08 - 优化工作区左中右三大区域竖向滚动条为选入/悬停时按需显示
+
+- Why:
+  - 响应 UI 视觉体验改进要求：主界面左侧文件树、中间 Markdown 文档/代码编辑器、右侧 AI 对话消息记录 3 个主要区域的竖向滚动条在未选入时应完全隐形隐藏，只有当鼠标选入/悬停（hover）至对应区域后滚动条滑块才显现。
+- What:
+  - `globals.css`: 将全站 `::-webkit-scrollbar-thumb` 默认背景设为 `transparent`（Firefox 配置 `scrollbar-color: transparent transparent`），配置 `*:hover::-webkit-scrollbar-thumb`（背景 `#c7c7c7`，Hover 为 `#a8a8a8`）与平滑过渡，使任意可滚动容器在鼠标未选入时隐形，选入/悬停后显现。
+  - `FigmaChatPanel.vue`: 将 `.figma-chat-question-scroll` 与 `.figma-chat-model-dropdown-list` 滚动条滑块默认设为 `transparent`，在 `:hover` 悬停时显示颜色，避免右侧对话列表滚动条常显。
+  - `CodeEditor.vue` & `DiffViewer.vue`: 将 Monaco 编辑器内部 `:deep(.monaco-scrollable-element)` 滚动条设为 hover 后显现，确保中间文档与代码编辑器区域视图整洁。
+- How:
+  - 重构滚动条伪类继承与全局 `:hover` 策略，测试并同步类型断言。
+- Result:
+  - 界面平时干净整洁无杂乱滚动条轨道；鼠标移动（选入）至左侧目录、中间文档或右侧对话列表时，对应区域的竖向滚动条优雅显现。
+
 ### 2026-08-08 - 批量生成测试案例定时选择面板改为从弹出框右壁向左滑出并平滑压缩列表
 
 - Why:

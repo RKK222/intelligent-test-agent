@@ -959,7 +959,14 @@ h3 {
   font-weight: 600;
 }
 
-/* ===== 自定义滚动条（纸面） ===== */
+/* ===== 自定义滚动条（仅鼠标选入/悬停对应区域时显示） ===== */
+* {
+  scrollbar-color: transparent transparent;
+}
+*:hover {
+  scrollbar-color: #c7c7c7 transparent;
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -968,12 +975,18 @@ h3 {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #c7c7c7;
+  background: transparent;
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: padding-box;
+  transition: background-color 0.15s ease;
 }
-::-webkit-scrollbar-thumb:hover {
+*:hover::-webkit-scrollbar-thumb {
+  background: #c7c7c7;
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+*:hover::-webkit-scrollbar-thumb:hover {
   background: #a8a8a8;
   background-clip: padding-box;
   border: 2px solid transparent;

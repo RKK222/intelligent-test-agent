@@ -8432,6 +8432,10 @@ function onCompositionEnd() {
 
 .figma-chat-question-scroll::-webkit-scrollbar-thumb {
   border-radius: 999px;
+  background: transparent;
+}
+
+.figma-chat-question-scroll:hover::-webkit-scrollbar-thumb {
   background: var(--ta-chat-border-strong, #cfcfcf);
 }
 
@@ -10741,8 +10745,11 @@ function onCompositionEnd() {
 }
 
 .figma-chat-model-dropdown-list::-webkit-scrollbar-thumb {
-  background: var(--ta-border, #e4e4e7);
+  background: transparent;
   border-radius: 2px;
+}
+.figma-chat-model-dropdown-list:hover::-webkit-scrollbar-thumb {
+  background: var(--ta-border, #e4e4e7);
 }
 
 .figma-chat-model-section {

@@ -577,10 +577,13 @@ defineExpose({
   height: 6px;
 }
 :deep(.monaco-scrollable-element)::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.25);
+  background: transparent;
   border-radius: 3px;
 }
-:deep(.monaco-scrollable-element)::-webkit-scrollbar-thumb:hover {
+:deep(.monaco-scrollable-element:hover)::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.25);
+}
+:deep(.monaco-scrollable-element:hover)::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.4);
 }
 :deep(.monaco-scrollable-element)::-webkit-scrollbar-track {
