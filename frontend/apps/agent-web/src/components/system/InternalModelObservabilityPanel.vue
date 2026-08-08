@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
-import { Activity, BookOpen, RefreshCw } from "lucide-vue-next";
+import { Activity, BookOpen, ChevronDown, ChevronUp, ExternalLink, FileText, RefreshCw } from "lucide-vue-next";
 import { ElMessage } from "element-plus";
 import * as echarts from "echarts";
 import { type BackendApiClient } from "@test-agent/backend-api";
@@ -711,12 +711,14 @@ function onPageChange(next: number) {
         <div class="ta-imob-title-row">
           <h3 class="ta-imob-title">内部模型调用可观测</h3>
           <button
+            v-if="!showGlossary"
             type="button"
-            class="ta-imob-glossary-toggle"
-            @click="showGlossary = !showGlossary"
+            class="ta-imob-expand-glossary-btn"
+            @click="showGlossary = true"
           >
             <BookOpen :size="13" />
-            <span>{{ showGlossary ? "收起缩写指南" : "指标英文缩写指南 (Glossary)" }}</span>
+            <span>展开指标英文缩写指南 (Glossary)</span>
+            <ChevronDown :size="13" />
           </button>
         </div>
         <span class="ta-imob-sub">默认查看当前 {{ selectedWindowHours }} 小时时间段的用户调用，统计截至本次加载或刷新时刻。所有的英文缩写见页首对照指南。</span>
@@ -724,14 +726,29 @@ function onPageChange(next: number) {
         <!-- 页首 AIPerf / 业界指标英文缩写对照指南 (Glossary) -->
         <div v-if="showGlossary" class="ta-imob-glossary-card">
           <div class="ta-imob-glossary-header">
-            <strong>AIPerf & 业界指标英文缩写指南 (Metrics Glossary)</strong>
-            <button
-              type="button"
-              class="ta-imob-glossary-link"
-              @click="showDocDialog = true"
-            >
-              参照 NVIDIA AIPerf 性能指标规范定义 ↗
-            </button>
+            <div class="ta-imob-glossary-header-title">
+              <BookOpen :size="14" class="ta-imob-glossary-icon" />
+              <strong>AIPerf & 业界指标英文缩写指南</strong>
+            </div>
+            <div class="ta-imob-glossary-actions">
+              <button
+                type="button"
+                class="ta-imob-spec-link"
+                @click="showDocDialog = true"
+              >
+                <FileText :size="12" />
+                <span>NVIDIA AIPerf 规范</span>
+                <ExternalLink :size="11" />
+              </button>
+              <button
+                type="button"
+                class="ta-imob-collapse-btn"
+                @click="showGlossary = false"
+              >
+                <ChevronUp :size="13" />
+                <span>收起指南</span>
+              </button>
+            </div>
           </div>
           <div class="ta-imob-glossary-grid">
             <div
@@ -1183,23 +1200,24 @@ function onPageChange(next: number) {
   font-weight: 600;
   color: #111827;
 }
-.ta-imob-glossary-toggle {
+.ta-imob-expand-glossary-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   padding: 4px 10px;
-  border: 1px solid #d0d7de;
   border-radius: 6px;
-  background: #f6f8fa;
-  color: #0969da;
+  background: #f0f9ff;
+  color: #0284c7;
+  border: 1px solid #bae6fd;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
 }
-.ta-imob-glossary-toggle:hover {
-  background: #ddf4ff;
-  border-color: #54aeff;
+.ta-imob-expand-glossary-btn:hover {
+  background: #e0f2fe;
+  color: #0369a1;
+  border-color: #7dd3fc;
 }
 .ta-imob-sub {
   font-size: 12px;
@@ -1209,41 +1227,77 @@ function onPageChange(next: number) {
 .ta-imob-glossary-card {
   margin-top: 6px;
   padding: 12px 14px;
-  border: 1px solid #c8e1ff;
+  border: 1px solid #dbeafe;
   border-radius: 8px;
-  background: #f0f7ff;
-  color: #1f2328;
+  background: #f0f9ff;
+  color: #1e293b;
 }
 .ta-imob-glossary-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
   margin-bottom: 10px;
   padding-bottom: 8px;
-  border-bottom: 1px solid #d0e5ff;
+  border-bottom: 1px solid #e0f2fe;
 }
-.ta-imob-glossary-header strong {
+.ta-imob-glossary-header-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #0284c7;
+}
+.ta-imob-glossary-header-title strong {
   font-size: 13px;
-  color: #0969da;
+  font-weight: 600;
+  color: #0369a1;
 }
-.ta-imob-glossary-header span {
-  font-size: 11px;
-  color: #57606a;
+.ta-imob-glossary-icon {
+  color: #0284c7;
+  flex-shrink: 0;
 }
-.ta-imob-glossary-link {
+.ta-imob-glossary-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ta-imob-spec-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
   font-size: 11px;
-  color: #0969da;
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  text-decoration: underline;
   font-weight: 500;
-  transition: color 0.15s ease;
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
-.ta-imob-glossary-link:hover {
-  color: #0550ae;
+.ta-imob-spec-link:hover {
+  background: #bae6fd;
+  color: #0284c7;
+  border-color: #7dd3fc;
+}
+.ta-imob-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.ta-imob-collapse-btn:hover {
+  background: #f8fafc;
+  color: #1e293b;
+  border-color: #94a3b8;
 }
 .ta-imob-glossary-grid {
   display: grid;
