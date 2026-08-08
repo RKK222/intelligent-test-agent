@@ -122,7 +122,7 @@ watch(latestUserMessageKey, () => {
               </div>
               <div class="oc-empty-state__shortcut-item">
                 <span class="oc-empty-state__shortcut-key">/</span>
-                <span class="oc-empty-state__shortcut-desc">快捷指令与控制选项</span>
+                <span class="oc-empty-state__shortcut-desc">技能与命令</span>
               </div>
             </div>
           </slot>

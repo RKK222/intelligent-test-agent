@@ -39,7 +39,7 @@ describe("OpencodeTimeline", () => {
     expect(getByText("快捷命令：")).toBeTruthy();
     expect(getByText("选择 Agent 或 上下文文件")).toBeTruthy();
     expect(getByText("选择需求与测试资源")).toBeTruthy();
-    expect(getByText("快捷指令与控制选项")).toBeTruthy();
+    expect(getByText("技能与命令")).toBeTruthy();
     expect(container.querySelector(".test-pet-icon")).toBeTruthy();
   });
 

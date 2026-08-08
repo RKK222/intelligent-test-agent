@@ -74,7 +74,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("快捷命令：");
     expect(wrapper.text()).toContain("选择 Agent 或 上下文文件");
     expect(wrapper.text()).toContain("选择需求与测试资源");
-    expect(wrapper.text()).toContain("快捷指令与控制选项");
+    expect(wrapper.text()).toContain("技能与命令");
     expect(wrapper.find(".oc-empty-state__pet-avatar").exists()).toBe(true);
     expect(wrapper.find("svg.pet-companion-svg").exists()).toBe(true);
   });
