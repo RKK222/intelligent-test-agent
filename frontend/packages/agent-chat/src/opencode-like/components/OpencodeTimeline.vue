@@ -26,6 +26,7 @@ const emit = defineEmits<{ openDiff: []; openFile: [path: string]; selectSubagen
 defineSlots<{
   "completed-status-actions"?: (props: { row: Extract<TimelineRowType, { type: "work-status" }> }) => unknown;
   "empty-icon"?: () => unknown;
+  "empty-shortcuts"?: () => unknown;
 }>();
 const rows = computed(() => createTimelineRows(props.state));
 const resolvedDockTarget = computed(() => {
@@ -108,6 +109,22 @@ watch(latestUserMessageKey, () => {
           <div class="oc-empty-state__subtitle">
             {{ emptySubtitle || '描述你的目标或任务，智能体将协助完成。' }}
           </div>
+          <slot name="empty-shortcuts">
+            <div class="oc-empty-state__shortcuts">
+              <div class="oc-empty-state__shortcut-item">
+                <span class="oc-empty-state__shortcut-key">@</span>
+                <span class="oc-empty-state__shortcut-desc">选择 Agent / 上下文文件</span>
+              </div>
+              <div class="oc-empty-state__shortcut-item">
+                <span class="oc-empty-state__shortcut-key">#</span>
+                <span class="oc-empty-state__shortcut-desc">选择需求与测试资源</span>
+              </div>
+              <div class="oc-empty-state__shortcut-item">
+                <span class="oc-empty-state__shortcut-key">/</span>
+                <span class="oc-empty-state__shortcut-desc">快捷指令与控制选项</span>
+              </div>
+            </div>
+          </slot>
         </div>
       </div>
       <TimelineRow
