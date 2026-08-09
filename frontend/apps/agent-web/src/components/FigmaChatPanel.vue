@@ -4449,7 +4449,6 @@ function onCompositionEnd() {
   <div ref="chatRootEl" class="figma-chat-root">
     <header class="figma-chat-header">
       <div class="figma-chat-header-left">
-        <h2 class="figma-chat-title" :title="title">{{ title }}</h2>
         <span
           v-if="currentSessionSourceType === 'SCHEDULED_TASK'"
           class="figma-chat-night-source-badge"
@@ -4457,17 +4456,7 @@ function onCompositionEnd() {
         >
           <FullColorAlarmClockIcon :size="15" title="夜间执行" />
         </span>
-        <button
-          v-if="canManageShare"
-          type="button"
-          class="figma-chat-header-btn figma-chat-header-btn--share"
-          title="管理会话分享"
-          data-testid="manage-session-share"
-          @click="emit('manage-share')"
-        >
-          <Share2 :size="15" />
-          <span>分享</span>
-        </button>
+        <h2 class="figma-chat-title" :title="title">{{ title }}</h2>
         <button
           v-if="!fixedSession"
           ref="historyDrawerTriggerEl"
@@ -4495,6 +4484,17 @@ function onCompositionEnd() {
             :size="13"
             class="figma-chat-history-alert-bell"
           />
+        </button>
+        <button
+          v-if="canManageShare"
+          type="button"
+          class="figma-chat-header-btn figma-chat-header-btn--share"
+          title="管理会话分享"
+          data-testid="manage-session-share"
+          @click="emit('manage-share')"
+        >
+          <Share2 :size="15" />
+          <span>分享</span>
         </button>
       </div>
     </header>
