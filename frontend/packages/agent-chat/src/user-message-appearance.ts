@@ -16,7 +16,7 @@ const OWN_MESSAGE_STYLE = {
 };
 
 const OTHER_MESSAGE_STYLE = {
-  backgroundColor: "#9A8EDE",
+  backgroundColor: "#C1B9F2",
   border: "none"
 };
 

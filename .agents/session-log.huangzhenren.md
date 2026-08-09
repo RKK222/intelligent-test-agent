@@ -5,6 +5,19 @@
 
 ## Entries
 
+### 2026-08-09 - 修改分享会话页面他人消息背景色为 #C1B9F2
+
+- Why:
+  - 响应用户需求，把 `OTHER_MESSAGE_STYLE` 以及分享会话页面他人消息颜色修改为 `#C1B9F2`。
+- What:
+  - `frontend/packages/agent-chat/src/user-message-appearance.ts`: `OTHER_MESSAGE_STYLE` 中的 `backgroundColor` 从 `#9A8EDE` 改为 `#C1B9F2`。
+  - `frontend/packages/agent-chat/tests/user-message-appearance.test.ts`: 更新单测断言中的颜色预期为 `#C1B9F2`。
+  - `frontend/apps/agent-web/README.md` & `frontend/packages/agent-chat/README.md`: 同步更新相关模块 README 中关于他人消息背景色的文档说明。
+- How:
+  - 修改对应代码及测试、文档，并执行 `npx vitest run packages/agent-chat/tests/user-message-appearance.test.ts` 验证测试通过。
+- Result:
+  - 测试 100% 通过，相关代码与稳定文档同步更新完毕。
+
 ### 2026-08-08 - 落地多中心不规则蓝紫弥散雾环境光背景（无方向感、冷白清透低干扰）
 
 - Why:

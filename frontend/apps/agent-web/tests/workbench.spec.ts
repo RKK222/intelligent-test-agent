@@ -4,6 +4,14 @@ import { applicationWorkspaceRestrictionsFixture as permissionFixture } from "..
 test("session share management and received list preserve one link and inactive history", async ({ page }) => {
   const sharePutRequests: Array<Record<string, unknown>> = [];
   const shareRevokeRequests: Array<{ sessionId: string; expectedVersion: string | null }> = [];
+  await page.addInitScript(() => {
+    window.open = ((url?: string | URL, target?: string, features?: string) => {
+      Object.assign(window, {
+        __testOpenedSessionShare: [String(url), target, features]
+      });
+      return window;
+    }) as typeof window.open;
+  });
   const sessionUnderShare = { ...session(), title: "支付回归协作会话" };
   await mockBackendApi(page, {
     sessions: [sessionUnderShare],
@@ -45,6 +53,16 @@ test("session share management and received list preserve one link and inactive 
   await expect(page.getByRole("button", { name: /接口联调协作/ })).toBeEnabled();
   await expect(page.getByRole("button", { name: /已过期协作/ })).toBeDisabled();
   await expect(page.getByText("已过期", { exact: true })).toBeVisible();
+  const ordinaryWorkbenchUrl = page.url();
+  await page.getByRole("button", { name: /接口联调协作/ }).click();
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __testOpenedSessionShare?: string[] }
+  ).__testOpenedSessionShare)).toEqual([
+    "/s/shr_active",
+    "_blank",
+    "noopener,noreferrer"
+  ]);
+  expect(page.url()).toBe(ordinaryWorkbenchUrl);
 
   await page.getByRole("tab", { name: /我的会话/ }).click();
   await page.getByRole("button", { name: /支付回归协作会话/ }).click();

@@ -1436,8 +1436,10 @@ watch(
   { immediate: true }
 );
 
-async function openSharedSession(shareId: string) {
-  await router.push(`/s/${encodeURIComponent(shareId)}`);
+/** 分享会话使用独立标签页，避免普通工作台与分享工作台复用页面初始化状态。 */
+function openSharedSession(shareId: string) {
+  const targetUrl = router.resolve(`/s/${encodeURIComponent(shareId)}`).href;
+  window.open(targetUrl, "_blank", "noopener,noreferrer");
 }
 
 watch(sessionSearchTrim, () => {
