@@ -5,6 +5,18 @@
 
 ## Entries
 
+### 2026-08-09 - 将协作分享弹窗被分享人权限选择改造为开关切换（双侧标注“只读”与“可对话”）
+
+- Why:
+  - 响应用户交互需求，将“协作分享”弹窗（`SessionShareDialog.vue`）中被分享人的权限选择控件由复选框 `[ ] 只读` 改为开关切换（`el-switch`），开关左侧显示“只读”，右侧显示“可对话”。
+- What:
+  - `frontend/apps/agent-web/src/components/SessionShareDialog.vue`: 将被分享人列表项中的 checkbox `<input>` 替换为 `<el-switch>`，设置 `inactive-text="只读"`、`active-text="可对话"`，并添加对应的 Vue/Element-Plus deep 样式以保证切换文本与选定高亮效果。
+  - `frontend/apps/agent-web/README.md`: 同步更新“协作分享弹窗”逐人 `canChat` 权限开关说明。
+- How:
+  - 修改模板与样式，并通过 `npx vitest run apps/agent-web/tests/session-share-management.test.ts apps/agent-web/tests/session-share-route.test.ts` 验证测试全部通过。
+- Result:
+  - 界面成功转换为符合要求的开关交互，两侧清晰展示“只读”与“可对话”，单测 100% 通过。
+
 ### 2026-08-09 - 修改分享会话页面他人消息背景色为 #C1B9F2
 
 - Why:

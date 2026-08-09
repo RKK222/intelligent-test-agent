@@ -1998,12 +1998,17 @@ async function confirmProcessInitializationBeforeWorkspaceAction(actionLabel: st
 // 拆分就绪条件：不同能力依赖不同条件
 // 1. 模型和 Provider：依赖用户 opencode 进程，不依赖 workspace
 const authReady = computed(() => authStore.isAuthenticated());
+// 分享目录必须显式携带授权中的固定 Workspace，既满足后端精确范围校验，也隔离普通目录缓存。
+const runtimeCatalogWorkspaceId = computed(() => shareMode.value
+  ? shareAccess.value?.workspaceId?.trim() || undefined
+  : undefined
+);
 const runtimeCatalogRecoveryReady = computed(() =>
   runtimeCatalogRecoveryAllowed(
     authReady.value,
     opencodeProcessReady.value,
     processStartupOperation.value
-  )
+  ) && (!shareMode.value || Boolean(runtimeCatalogWorkspaceId.value))
 );
 // 2. 文件路由：只需要 workspace 存在，不依赖 opencode 状态
 const fileRouteReady = computed(() => Boolean(selectedWorkspaceIdRef.value));
@@ -2020,18 +2025,18 @@ const robotQuestionAvailable = computed(() => opencodeProcessReady.value
 
 // 模型和 Provider 在进程 READY 后加载；未初始化页面不发起无效 503 轮询。
 const modelsQuery = useQuery({
-  queryKey: ["runtime", "models"],
+  queryKey: computed(() => ["runtime", "models", runtimeCatalogWorkspaceId.value ?? ""] as const),
   enabled: runtimeCatalogRecoveryReady,
-  queryFn: () => api.listModels(),
+  queryFn: ({ queryKey }) => api.listModels(queryKey[2] || undefined),
   retry: false,
   refetchOnWindowFocus: "always",
   // 服务重启窗口可能先返回空目录或请求失败；仅在目录为空时短轮询，恢复后立即停止。
   refetchInterval: (query) => runtimeCatalogRecoveryRefetchInterval(query.state.data)
 });
 const providersQuery = useQuery({
-  queryKey: ["runtime", "providers"],
+  queryKey: computed(() => ["runtime", "providers", runtimeCatalogWorkspaceId.value ?? ""] as const),
   enabled: runtimeCatalogRecoveryReady,
-  queryFn: () => api.listProviders(),
+  queryFn: ({ queryKey }) => api.listProviders(queryKey[2] || undefined),
   retry: false,
   refetchOnWindowFocus: "always",
   refetchInterval: (query) => runtimeCatalogRecoveryRefetchInterval(query.state.data)

@@ -213,6 +213,51 @@ test("session share read-only workbench shows sender identity colors and fixed s
   expect(shareHeaderRequests.every((request) => request.shareId === "shr_readonly")).toBe(true);
 });
 
+test("session share model picker selects from the fixed owner workspace catalog", async ({ page }) => {
+  const runtimeCatalogRequests: Array<{ path: string; workspaceId: string | null; shareId: string | null }> = [];
+  const sharedSession = {
+    ...session(),
+    sessionId: "ses_shared_model",
+    workspaceId: "wrk_shared_model",
+    title: "共享模型会话"
+  };
+  await mockBackendApi(page, {
+    authUser: { userId: "usr_writer", username: "协作者", unifiedAuthId: "ucid_writer", roles: ["USER"] },
+    workspaces: [{ ...workspace(), workspaceId: "wrk_shared_model", name: "所属人固定工作区" }],
+    sessions: [sharedSession],
+    sessionShareAccess: sessionShareAccess({
+      actorUserId: "usr_writer",
+      actorUnifiedAuthId: "ucid_writer",
+      actorUsername: "协作者",
+      sessionId: "ses_shared_model",
+      workspaceId: "wrk_shared_model",
+      canChat: true
+    }),
+    sessionShareRuntimeStates: [sessionShareRuntimeState({
+      sessionId: "ses_shared_model",
+      workspaceId: "wrk_shared_model",
+      canChat: true
+    })],
+    sessionMessagesBySessionId: { ses_shared_model: [] },
+    models: [{ id: "shared-model", providerId: "owner-provider", name: "所属人模型" }],
+    providers: [{ id: "owner-provider", name: "所属人 Provider", status: "ready" }],
+    runtimeCatalogRequests
+  });
+
+  await page.goto("/s/shr_model", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("header-fixed-share-context")).toContainText("所属人固定工作区");
+  await page.getByRole("button", { name: "切换模型" }).click();
+  await expect(page.locator(".figma-chat-model-group-title", { hasText: "所属人 Provider" })).toBeVisible();
+  const ownerModel = page.locator(".figma-chat-model-option-item", { hasText: "所属人模型" });
+  await expect(ownerModel).toBeVisible();
+  await ownerModel.click();
+  await expect(page.getByRole("button", { name: "切换模型" })).toContainText("所属人模型");
+  await expect.poll(() => runtimeCatalogRequests).toEqual(expect.arrayContaining([
+    { path: "/api/internal/platform/opencode-runtime/models", workspaceId: "wrk_shared_model", shareId: "shr_model" },
+    { path: "/api/internal/platform/opencode-runtime/providers", workspaceId: "wrk_shared_model", shareId: "shr_model" }
+  ]));
+});
+
 test("session share busy run blocks every participant and only sender can stop", async ({ page }) => {
   const activeRun = {
     runId: "run_shared_busy",
@@ -8122,6 +8167,7 @@ async function mockBackendApi(
     models?: Array<Record<string, unknown>>;
     modelResponses?: Array<Array<Record<string, unknown>>>;
     providers?: Array<Record<string, unknown>>;
+    runtimeCatalogRequests?: Array<{ path: string; workspaceId: string | null; shareId: string | null }>;
     applications?: Array<{ appId: string; appName: string; enabled: boolean }>;
     managedApplications?: Array<{ appId: string; appName: string; enabled: boolean }>;
     recentWorkspaces?: Record<string, (ReturnType<typeof workspace> & Record<string, unknown>) | null>;
@@ -9739,6 +9785,15 @@ async function mockBackendApi(
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/models") {
+      const workspaceId = url.searchParams.get("workspaceId");
+      capture.runtimeCatalogRequests?.push({ path: url.pathname, workspaceId, shareId: sessionShareHeader ?? null });
+      const expectedSharedWorkspaceId = typeof capture.sessionShareAccess?.workspaceId === "string"
+        ? capture.sessionShareAccess.workspaceId
+        : null;
+      if (sessionShareHeader && expectedSharedWorkspaceId && workspaceId !== expectedSharedWorkspaceId) {
+        await route.fulfill({ status: 403, ...jsonFailure("FORBIDDEN", "分享请求必须绑定精确会话或工作区") });
+        return;
+      }
       await route.fulfill(json(capture.modelResponses?.shift() ?? capture.models ?? [
         { id: "sonnet", providerId: "anthropic", name: "Sonnet" },
         { id: "opus", providerId: "anthropic", name: "Opus" },
@@ -9748,6 +9803,15 @@ async function mockBackendApi(
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/providers") {
+      const workspaceId = url.searchParams.get("workspaceId");
+      capture.runtimeCatalogRequests?.push({ path: url.pathname, workspaceId, shareId: sessionShareHeader ?? null });
+      const expectedSharedWorkspaceId = typeof capture.sessionShareAccess?.workspaceId === "string"
+        ? capture.sessionShareAccess.workspaceId
+        : null;
+      if (sessionShareHeader && expectedSharedWorkspaceId && workspaceId !== expectedSharedWorkspaceId) {
+        await route.fulfill({ status: 403, ...jsonFailure("FORBIDDEN", "分享请求必须绑定精确会话或工作区") });
+        return;
+      }
       await route.fulfill(json(capture.providers ?? [
         { id: "anthropic", name: "Anthropic", status: "ready" },
         { id: "volcengine", name: "Volcengine Ark", status: "ready" },

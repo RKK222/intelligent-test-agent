@@ -273,10 +273,13 @@ function errorMessage(error: unknown, fallback: string) {
               <span>{{ member.username.slice(0, 1).toUpperCase() }}</span>
               <div><strong>{{ member.username }}</strong><small>{{ member.unifiedAuthId }}</small></div>
             </div>
-            <label>
-              <input v-model="member.canChat" type="checkbox" />
-              <span>{{ member.canChat ? '可对话与代操作' : '只读' }}</span>
-            </label>
+            <el-switch
+              v-model="member.canChat"
+              inactive-text="只读"
+              active-text="可对话"
+              class="session-share-dialog__permission-switch"
+              :aria-label="`设置 ${member.username} 权限`"
+            />
             <button type="button" class="session-share-dialog__remove" :aria-label="`移除 ${member.username}`" @click="removeMember(member.userId)">
               <X :size="15" />
             </button>
@@ -347,7 +350,9 @@ function errorMessage(error: unknown, fallback: string) {
 .session-share-dialog__member-name div { display: grid; min-width: 0; }
 .session-share-dialog__member-name strong { overflow: hidden; color: #344054; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .session-share-dialog__member-name small { color: #667085; }
-.session-share-dialog__members label { display: flex; align-items: center; gap: 5px; color: #475467; font-size: 11px; }
+.session-share-dialog__permission-switch :deep(.el-switch__label) { font-size: 12px; color: #667085; font-weight: 500; user-select: none; }
+.session-share-dialog__permission-switch :deep(.el-switch__label.is-active) { color: #315ed8; font-weight: 600; }
+.session-share-dialog__permission-switch :deep(.el-switch__core) { border-color: #cbd7f2; }
 .session-share-dialog__remove { display: grid; border: 0; background: transparent; color: #98a2b3; cursor: pointer; place-content: center; }
 .session-share-dialog__empty { margin: 0; border: 1px dashed #d0d5dd; border-radius: 9px; padding: 15px; color: #98a2b3; text-align: center; }
 .session-share-dialog__footer { display: flex; width: 100%; align-items: center; gap: 8px; }
