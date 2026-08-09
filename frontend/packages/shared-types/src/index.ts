@@ -587,6 +587,12 @@ export type Session = {
   sourceType?: ConversationSourceType | null;
   /** 来源业务主键，例如夜间执行任务 id。 */
   sourceRefId?: string | null;
+  /** 会话分享状态："ACTIVE" | "EXPIRED" | "REVOKED" 等；未分享时为 null/undefined。 */
+  shareStatus?: SessionShareStatus | null;
+  /** 会话分享是否已过期 */
+  shareExpired?: boolean | null;
+  /** 是否已被分享 */
+  isShared?: boolean | null;
 };
 
 /** 协作分享候选用户只暴露平台最小身份资料。 */

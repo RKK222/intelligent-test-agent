@@ -707,6 +707,9 @@ const props =
       attentionEventId?: string
       attentionAt?: string
       sourceType?: string
+      isShared?: boolean | null
+      shareStatus?: string | null
+      shareExpired?: boolean | null
     }>
     /** 当前用户收到的协作分享；保留失效记录供审计与识别。 */
     sharedSessions?: SharedSessionListItem[]
@@ -3139,6 +3142,26 @@ function sharedSessionStatusLabel(status: string) {
   if (status === 'REMOVED') return '已移除'
   if (status === 'SESSION_ARCHIVED') return '会话已归档'
   return status
+}
+
+function isHistoryItemShared(item: {
+  isShared?: boolean | null
+  shareStatus?: string | null
+  shareExpired?: boolean | null
+}): boolean {
+  if (item.isShared === true) return true
+  if (item.shareStatus && item.shareStatus !== 'NONE' && item.shareStatus !== 'UNSHARED') return true
+  if (item.shareExpired !== undefined && item.shareExpired !== null) return true
+  return false
+}
+
+function isHistoryItemShareExpired(item: {
+  shareStatus?: string | null
+  shareExpired?: boolean | null
+}): boolean {
+  if (item.shareExpired === true) return true
+  if (item.shareStatus === 'EXPIRED' || item.shareStatus === 'REVOKED') return true
+  return false
 }
 
 function historyContextText(item: { appName?: string; workspaceName?: string; version?: string }) {
@@ -6493,6 +6516,18 @@ function onCompositionEnd() {
                       <FullColorAlarmClockIcon :size="13" title="夜间执行" />
                     </span>
                     <span
+                      v-if="isHistoryItemShared(item)"
+                      :class="[
+                        'figma-chat-history-card-share-badge',
+                        isHistoryItemShareExpired(item)
+                          ? 'figma-chat-history-card-share-badge--expired'
+                          : 'figma-chat-history-card-share-badge--active'
+                      ]"
+                      :title="isHistoryItemShareExpired(item) ? '该会话已分享（已过期）' : '该会话已分享（未过期）'"
+                    >
+                      已分享
+                    </span>
+                    <span
                       :class="[
                         'figma-chat-history-card-status',
                         item.runtimeState === 'running'
@@ -6824,6 +6859,28 @@ function onCompositionEnd() {
 }
 .figma-chat-history-source-badge {
   margin-left: auto;
+}
+.figma-chat-history-card-share-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 14px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.figma-chat-history-card-share-badge--active {
+  background: #e8f0fe;
+  color: #1a73e8;
+  border: 1px solid #c2e7ff;
+}
+.figma-chat-history-card-share-badge--expired {
+  background: #f1f3f4;
+  color: #5f6368;
+  border: 1px solid #dadce0;
 }
 .figma-chat-header-btn {
   display: flex;

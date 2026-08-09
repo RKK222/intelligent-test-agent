@@ -795,7 +795,10 @@ export function historyItems(run: Run | null, sessions: Session[], runtimeStates
       pendingAttention: Boolean(runtimeState?.attention),
       attentionEventId: runtimeState?.attentionEventId ?? undefined,
       attentionAt: runtimeState?.attentionAt ?? undefined,
-      ...(item.sourceType ? { sourceType: item.sourceType } : {})
+      ...(item.sourceType ? { sourceType: item.sourceType } : {}),
+      ...(item.shareStatus !== undefined ? { shareStatus: item.shareStatus } : {}),
+      ...(item.shareExpired !== undefined ? { shareExpired: item.shareExpired } : {}),
+      ...(item.isShared !== undefined ? { isShared: item.isShared } : {})
     };
   });
 }

@@ -2310,7 +2310,24 @@ function refreshAgentsCatalog() {
   if (!opencodeCatalogReady.value || agentsQuery.isFetching.value) return;
   void agentsQuery.refetch();
 }
-const historyList = computed(() => historyItems(run.value, sessionsItems.value, runtimeStatesBySessionId.value));
+
+const historyList = computed(() => {
+  const items = historyItems(run.value, sessionsItems.value, runtimeStatesBySessionId.value);
+  const currentShare = ordinarySessionShare.value;
+  if (!currentShare) return items;
+  const isExpired = !sessionCollaborationShareIsActive(currentShare, new Date(nowTick.value));
+  return items.map((item) => {
+    if (item.id === currentShare.sessionId) {
+      return {
+        ...item,
+        isShared: true,
+        shareStatus: currentShare.status,
+        shareExpired: isExpired,
+      };
+    }
+    return item;
+  });
+});
 
 function handleHistorySearchChange(query: string) {
   if (sessionSearch.value === query) return;

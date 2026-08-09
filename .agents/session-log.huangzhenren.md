@@ -2227,20 +2227,21 @@
   - 被分享人进入分享会话后可加载会话所属人固定工作区的可用模型并完成选择，同时继续由后端执行精确 Workspace 校验。
   - 本次仅修复前端请求范围与缓存隔离，不放宽权限，不涉及数据库、性能或兼容性协议变更。
 
-### 2026-08-09 - 夜间执行来源标识调整为全彩闹钟图标并微调 Header 布局与右侧间距
+### 2026-08-09 - 夜间执行来源标识调整为全彩闹钟图标、微调 Header 布局与新增已分享状态勋章
 
 - Why:
-  - 响应 UI 需求，将顶栏对话 Header 与左侧会话历史列表中“夜间执行”来源标识由纯文字/单色图标徽章替换为无文字的全彩闹钟图标；按图示将 Header 全彩闹钟图标调整至对话标题前，“分享”按钮调整至最右侧，并缩小“分享”与右侧栏折叠按钮之间的空隙间距。
+  - 响应 UI 需求，将顶栏对话 Header 与左侧会话历史列表中“夜间执行”来源标识由纯文字/单色图标徽章替换为无文字的全彩闹钟图标；按图示将 Header 全彩闹钟图标调整至对话标题前，“分享”按钮调整至最右侧，并缩小“分享”与右侧栏折叠按钮之间的空暇间距；为“我的会话”列表中已分享的会话增加“已分享”状态显示，并用底色区分是否已过期（蓝底未过期，灰底已过期）。
 - What:
   - 新增 `FullColorAlarmClockIcon.vue` SVG 矢量全彩闹钟组件（采用蓝靛色表盘、金色铃铛与渐变高光）。
   - 在 `FigmaChatPanel.vue` 中将 Header 与历史卡片中的“夜间执行”文字与旧图标替换为 `<FullColorAlarmClockIcon>`，保留 hover title 提示。
-  - 调整 Header DOM 布局：全彩闹钟图标移至标题 `<h2 class="figma-chat-title">` 前面，`分享` 按钮移至 `会话列表` 按钮右侧。
-  - 修改 `.figma-chat-header` 右侧 `padding`（由 `56px` 缩减为 `36px`），使最右侧“分享”按钮与浮动展开/收起按钮 `[|]` 的间隔紧凑统一（保持约 8px 间距）。
+  - 调整 Header DOM 布局：全彩闹钟图标移至标题 `<h2 class="figma-chat-title">` 前面，`分享` 按钮移至 `会话列表` 按钮右侧；修改 `.figma-chat-header` 右侧 padding（由 `56px` 缩减为 `36px`），保持紧凑统一的 8px 间距。
+  - 在 `FigmaChatPanel.vue` 与 `AgentWorkbench.vue` 历史列表中为已分享的会话新增 `.figma-chat-history-card-share-badge`：“已分享”未过期渲染为蓝底蓝字（`.figma-chat-history-card-share-badge--active`），已过期渲染为灰底灰字（`.figma-chat-history-card-share-badge--expired`）。
 - How:
-  - 执行 `vue-tsc` 类型检查与 `vitest` 定向测试 (154 passed)，确认无类型错误和测试断言问题。
+  - 在 `FigmaChatPanel.test.ts` 中新增对已分享（蓝底未过期/灰底已过期）勋章的单元测试；执行 `vue-tsc` 类型检查与 `vitest` 定向测试 (155 passed)，确认无类型错误和测试断言问题。
   - 提交前回顾全部 `.agents/session-log*.md`；未修改 `.env*`、HTTP API、RunEvent、数据库、generated SDK 或 OpenCode 源码，也未新建分支。
 - Result:
-  - 顶栏 Header 标识已移至标题前方，分享按钮位于最右侧，右侧间隔已显著缩减至标准间距，历史列表标识同步更替为全彩闹钟图标。
+  - 顶栏 Header 标识已移至标题前方，分享按钮位于最右侧且间距缩窄；历史列表中对已分享会话清晰展示“已分享”状态，并以蓝底（未过期）/灰底（已过期）正确区分。
+
 
 
 

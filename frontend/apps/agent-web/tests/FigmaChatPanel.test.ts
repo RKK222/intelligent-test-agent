@@ -1759,6 +1759,47 @@ describe("FigmaChatPanel", () => {
     wrapper.unmount();
   });
 
+  it("renders shared session status badges with blue background for active and gray background for expired shares", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        history: [
+          {
+            id: "ses_shared_active",
+            title: "未过期分享会话",
+            isShared: true,
+            shareStatus: "ACTIVE",
+            shareExpired: false,
+            createdAt: "2026-07-08T09:00:00Z",
+            updatedAt: "2026-07-08T10:00:00Z"
+          },
+          {
+            id: "ses_shared_expired",
+            title: "已过期分享会话",
+            isShared: true,
+            shareStatus: "EXPIRED",
+            shareExpired: true,
+            createdAt: "2026-07-07T09:00:00Z",
+            updatedAt: "2026-07-07T10:00:00Z"
+          }
+        ]
+      } as any
+    });
+
+    const drawer = await openSessionListDrawer(wrapper);
+
+    const activeBadge = drawer.find(".figma-chat-history-card-share-badge--active");
+    expect(activeBadge.exists()).toBe(true);
+    expect(activeBadge.text()).toBe("已分享");
+
+    const expiredBadge = drawer.find(".figma-chat-history-card-share-badge--expired");
+    expect(expiredBadge.exists()).toBe(true);
+    expect(expiredBadge.text()).toBe("已分享");
+
+    wrapper.unmount();
+  });
+
   it("keeps new conversation enabled while a run is active and the process is ready", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
