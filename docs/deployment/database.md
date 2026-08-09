@@ -1269,6 +1269,19 @@ PostgreSQL migration 与 XXL V9 则应全部成功且 checksum 不变；当前�
 内部模型调用观测只记录 traceId、耗时、状态与稳定错误信息，与现有企业模型代理日志脱敏边界一致，不记录代码、
 提示词、Token 或密钥。
 
+## V20260809120000 外部 API 凭据
+
+候选 migration `V20260809120000__create_external_api_credentials.sql` 创建：
+
+| 表 | 用途与约束 |
+|---|---|
+| `external_api_credentials` | `credential_id` 主键、唯一 `tool_code`、展示名、RSA-OAEP/SHA-256 API Key 密文、SHA-256 指纹、掩码提示、启用状态和创建/更新时间；不保存明文。`(enabled, tool_code)` 索引服务管理查询与启动整表加载。 |
+| `external_api_credential_scopes` | `(credential_id, scope_code)` 复合主键，外键级联删除；首版业务校验只接受 `USER_SSH_KEY_READ`。 |
+
+migration 不写默认、测试或演示工具数据。全部运行期分页、整表加载、CRUD 与 scope 原子替换 SQL 位于 `ExternalApiCredentialMapper.xml`，事务边界由 `MyBatisExternalApiCredentialRepository` 和管理服务负责；Flyway 只创建结构。
+
+合并到交付分支前必须查询每个目标环境 `flyway_schema_history`，确认该候选版本未执行、严格高于所有已执行版本且没有 checksum/分叉冲突。共享或稳定库一旦执行后禁止改名、改注释或改 SQL；后续变更只能新增更高版本 migration。正式发布同时验证空库与每套已部署基线升级，并核对源码、persistence JAR 与最终应用 JAR 内该 migration 的 SHA-256 一致。
+
 同一 migration 只写入四个生产必需且默认禁用/不可用的公共参数：
 
 - `LOBEHUB_ENABLED=false`

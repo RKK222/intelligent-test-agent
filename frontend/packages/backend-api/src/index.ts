@@ -81,6 +81,13 @@ import type {
   FileSearchResult,
   FileStatus,
   FileTreeEntry,
+  ExternalApiCredential,
+  ExternalApiCredentialCreatePayload,
+  ExternalApiCredentialCreated,
+  ExternalApiCredentialListParams,
+  ExternalApiCredentialRevealed,
+  ExternalApiCredentialUpdatePayload,
+  ExternalApiScopeOption,
   GeneralParameter,
   GeneralParameterListParams,
   GeneralParameterUpdatePayload,
@@ -408,6 +415,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const xxlJobBase = "/api/internal/platform/xxl-job";
   const lobehubSsoBase = "/api/internal/platform/lobehub-sso";
   const systemManagementBase = "/api/internal/platform/system-management";
+  const externalApiCredentialBase = `${systemManagementBase}/api-keys`;
   const toolboxBase = "/api/internal/platform/toolbox";
   const analyticsBase = "/api/internal/platform/analytics";
   const commonParameterBase = `${configurationBase}/common-parameters`;
@@ -2083,6 +2091,39 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         `${opencodeRuntimeManagementBase}/containers/${encodeURIComponent(containerId)}/processes/${encodeURIComponent(String(port))}/stop`,
         { method: "POST" }
       ),
+    listExternalApiScopes: () =>
+      request<ExternalApiScopeOption[]>(`${externalApiCredentialBase}/scopes`),
+    listExternalApiCredentials: (params: ExternalApiCredentialListParams = {}) =>
+      request<PageResponse<ExternalApiCredential>>(
+        `${externalApiCredentialBase}${query({
+          keyword: params.keyword,
+          enabled: params.enabled,
+          page: params.page,
+          size: params.size
+        })}`
+      ),
+    createExternalApiCredential: (payload: ExternalApiCredentialCreatePayload) =>
+      request<ExternalApiCredentialCreated>(externalApiCredentialBase, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
+    updateExternalApiCredential: (credentialId: string, payload: ExternalApiCredentialUpdatePayload) =>
+      request<ExternalApiCredential>(
+        `${externalApiCredentialBase}/${encodeURIComponent(credentialId)}`,
+        { method: "PATCH", body: JSON.stringify(payload) }
+      ),
+    revealExternalApiCredential: (credentialId: string) =>
+      request<ExternalApiCredentialRevealed>(
+        `${externalApiCredentialBase}/${encodeURIComponent(credentialId)}/reveal`,
+        { method: "POST" }
+      ),
+    rotateExternalApiCredential: (credentialId: string) =>
+      request<ExternalApiCredentialRevealed>(
+        `${externalApiCredentialBase}/${encodeURIComponent(credentialId)}/rotate`,
+        { method: "POST" }
+      ),
+    deleteExternalApiCredential: (credentialId: string) =>
+      request<null>(`${externalApiCredentialBase}/${encodeURIComponent(credentialId)}`, { method: "DELETE" }),
     getAnalyticsOverview: (params: AnalyticsQueryParams = {}) =>
       request<AnalyticsOverview>(`${analyticsBase}/overview${query({ ...params })}`),
     getAnalyticsTimeseries: (params: AnalyticsQueryParams = {}) =>
@@ -3446,11 +3487,14 @@ function redactObservedJsonText(raw: string): string {
 }
 
 const OBSERVED_SENSITIVE_KEYS = new Set([
+  "apikey",
   "authorization",
   "accesstoken",
   "authtoken",
   "cookie",
   "contexttoken",
+  "ciphertext",
+  "encryptedapikey",
   "granttoken",
   "password",
   "refreshtoken",
@@ -3464,7 +3508,7 @@ const OBSERVED_SENSITIVE_KEYS = new Set([
 ]);
 
 function redactObservedSensitiveText(raw: string): string {
-  const keyPattern = /(["']?)\b(?:authorization|access[-_]?token|auth[-_]?token|cookie|context[-_]?token|grant[-_]?token|password|refresh[-_]?token|secret|session[-_]?digest|set-cookie|support[-_]?access[-_]?grant|ticket|token[-_]?value|token)\b\1\s*[:=]\s*/gi;
+  const keyPattern = /(["']?)\b(?:api[-_]?key|authorization|access[-_]?token|auth[-_]?token|ciphertext|cookie|context[-_]?token|encrypted[-_]?api[-_]?key|grant[-_]?token|password|refresh[-_]?token|secret|session[-_]?digest|set-cookie|support[-_]?access[-_]?grant|ticket|token[-_]?value|token)\b\1\s*[:=]\s*/gi;
   let redacted = "";
   let cursor = 0;
   let match: RegExpExecArray | null;

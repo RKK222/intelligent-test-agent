@@ -16,6 +16,7 @@ declare module 'vue' {
     AgentSkillHub: typeof import('./src/components/AgentSkillHub.vue')['default']
     AgentWorkbench: typeof import('./src/components/AgentWorkbench.vue')['default']
     AnalyticsManagementPanel: typeof import('./src/components/system/AnalyticsManagementPanel.vue')['default']
+    ApiKeyManagementPanel: typeof import('./src/components/system/ApiKeyManagementPanel.vue')['default']
     ApplicationGitRefreshManagementPanel: typeof import('./src/components/system/ApplicationGitRefreshManagementPanel.vue')['default']
     AppSourceDialog: typeof import('./src/components/AppSourceDialog.vue')['default']
     AppSourcePicker: typeof import('./src/components/AppSourcePicker.vue')['default']

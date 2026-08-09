@@ -9,6 +9,79 @@ import {
 } from "../src";
 
 describe("backend-api", () => {
+  it("uses the fixed API Key management routes and redacts revealed keys from raw exchanges", async () => {
+    const exchanges: Array<Record<string, unknown>> = [];
+    const apiKey = "taak_v1_must-not-enter-observer";
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: { items: [], page: 1, size: 20, total: 0 }
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: {
+          credential: {
+            credentialId: "eac_one",
+            toolCode: "deploy.bot",
+            toolName: "部署工具",
+            scopes: ["USER_SSH_KEY_READ"],
+            keyHint: "taak_v1_...ABCD",
+            enabled: true,
+            createdAt: "2026-08-09T04:00:00Z",
+            updatedAt: "2026-08-09T04:00:00Z"
+          },
+          apiKey
+        }
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: { credentialId: "eac_one", toolCode: "deploy.bot", apiKey }
+      }), { status: 200 }));
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      rawExchangeObserver: (exchange) => exchanges.push(exchange)
+    });
+
+    await client.listExternalApiCredentials({ keyword: "deploy", enabled: true, page: 1, size: 20 });
+    await client.createExternalApiCredential({
+      toolCode: "deploy.bot",
+      toolName: "部署工具",
+      scopes: ["USER_SSH_KEY_READ"],
+      enabled: true
+    });
+    await client.revealExternalApiCredential("eac_one");
+
+    expect(fetcher.mock.calls.map((call) => [call[0], call[1]?.method, call[1]?.body])).toEqual([
+      [
+        "http://api/api/internal/platform/system-management/api-keys?keyword=deploy&enabled=true&page=1&size=20",
+        undefined,
+        undefined
+      ],
+      [
+        "http://api/api/internal/platform/system-management/api-keys",
+        "POST",
+        JSON.stringify({
+          toolCode: "deploy.bot",
+          toolName: "部署工具",
+          scopes: ["USER_SSH_KEY_READ"],
+          enabled: true
+        })
+      ],
+      [
+        "http://api/api/internal/platform/system-management/api-keys/eac_one/reveal",
+        "POST",
+        undefined
+      ]
+    ]);
+    expect(JSON.stringify(exchanges)).not.toContain(apiKey);
+    expect(JSON.stringify(exchanges)).toContain("[REDACTED]");
+  });
+
   it("passes the grouped internal-model outcome filter to the observability API", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       success: true,

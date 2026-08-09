@@ -18,6 +18,7 @@
 - 认证领域端口 `TokenSessionMarkerStore` 只定义平台 Token 的 SHA-256 session marker 写入、删除、校验与摘要规则，供平台 Token 生命周期和 XXL 会话联动复用；不暴露 Redis key。
 - `WorkflowCapabilityStore` 只定义一次性 checkout ticket、HMAC nonce、短期模型 grant、run撤销墓碑的原子端口；payload绑定用户/session/task/run/runner/分支或analyzer，不包含Python工作流会话、任务、报告和事件。
 - `supportaccess` 定义限时排查授权、内存态授权摘要、审计事件/查询与 Repository/Redis store 端口；领域对象禁止包含平台 Token、授权 Token、消息/文件正文和文件路径明文。`UserWorkspaceQueryRepository` 与 `SessionHistoryRepository` 提供按目标用户归因的工作区/会话只读端口，供普通归属校验和受审排查入口共同复用；会话端口保留默认 ACTIVE 方法，并提供排查显式包含 ARCHIVED 的兼容重载。
+- `externalapi` 定义外部工具凭据聚合、`USER_SSH_KEY_READ` scope、Repository 端口、认证主体与刷新事件；聚合只保存 RSA 密文、SHA-256 指纹和 Key 提示，不保存明文。
 
 ## 已有模型
 

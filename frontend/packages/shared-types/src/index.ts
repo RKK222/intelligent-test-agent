@@ -1689,6 +1689,55 @@ export type GeneralParameterUpdatePayload = {
   value: string;
 };
 
+export type ExternalApiScope = "USER_SSH_KEY_READ";
+
+export type ExternalApiScopeOption = {
+  code: ExternalApiScope;
+  name: string;
+};
+
+export type ExternalApiCredential = {
+  credentialId: string;
+  toolCode: string;
+  toolName: string;
+  scopes: ExternalApiScope[];
+  keyHint: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ExternalApiCredentialListParams = {
+  keyword?: string;
+  enabled?: boolean;
+  page?: number;
+  size?: number;
+};
+
+export type ExternalApiCredentialCreatePayload = {
+  toolCode: string;
+  toolName: string;
+  scopes: ExternalApiScope[];
+  enabled: boolean;
+};
+
+export type ExternalApiCredentialUpdatePayload = {
+  toolName: string;
+  scopes: ExternalApiScope[];
+  enabled: boolean;
+};
+
+export type ExternalApiCredentialCreated = {
+  credential: ExternalApiCredential;
+  apiKey: string;
+};
+
+export type ExternalApiCredentialRevealed = {
+  credentialId: string;
+  toolCode: string;
+  apiKey: string;
+};
+
 export type CommonParameterChangeLog = {
   logId: string;
   parameterId: string;

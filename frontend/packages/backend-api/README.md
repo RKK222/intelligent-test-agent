@@ -1,5 +1,7 @@
 # @test-agent/backend-api
 
+新增外部 API 凭据管理 client：scope、分页、新建、编辑、reveal、rotate、delete 全部调用 `/api/internal/platform/system-management/api-keys`。原始交换观察器把 `apiKey/ciphertext/encryptedApiKey` 视为敏感字段递归脱敏；一次性明文响应由组件直接消费，不应写入共享缓存。
+
 ## 工程定位
 
 前端访问 `test-agent-app` HTTP API 的唯一 client。

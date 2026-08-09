@@ -76,6 +76,7 @@ public class ApiTokenWebFilter implements WebFilter {
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         String path = exchange.getRequest().getPath().pathWithinApplication().value();
         if (!path.startsWith("/api/")
+                || ExternalApiWebSupport.isExternalPath(path)
                 || path.equals(INTERNAL_MODEL_PROXY_ROOT_PATH)
                 || path.startsWith(INTERNAL_MODEL_PROXY_PATH)
                 || path.equals(NIGHT_EXECUTION_INTERNAL_DISPATCH_PATH)

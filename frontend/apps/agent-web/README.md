@@ -1,5 +1,7 @@
 # @test-agent/agent-web
 
+系统管理新增仅 `SUPER_ADMIN` 可见的“API Key 管理”：支持工具凭据分页搜索、新建、scope 编辑、启停、掩码展示、按需查看、复制、立即轮换和永久删除。完整 API Key 只保存在 `ApiKeyManagementPanel` 弹窗的组件内存，关闭/卸载和 mutation 请求结束后立即清空，不写 TanStack Query cache 或浏览器存储。
+
 ## 工程定位
 
 首次登录引导按普通用户的真实路径说明应用下拉、workspace/version 选择、小地球引入需求子条目和首条消息自动建对话；引导完成后可从用户手册重新播放。

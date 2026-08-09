@@ -451,7 +451,7 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 
 ## Internal Server Broadcast
 
-内部服务器广播不是浏览器事件流。它用于一台后端把跨服务器业务事件 fan-out 到其他后端实例，当前稳定事件包括应用版本工作区副本同步、公共 Agent 配置同步、通用参数刷新和引用资产库副本同步。
+内部服务器广播不是浏览器事件流。它用于一台后端把跨服务器业务事件 fan-out 到其他后端实例，当前稳定事件包括应用版本工作区副本同步、公共 Agent 配置同步、通用参数刷新、外部 API 凭据刷新和引用资产库副本同步。
 
 传输：
 
@@ -495,6 +495,8 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
   "traceId": "trace_..."
 }
 ```
+
+`external-api-credential.refresh-requested` 用于 API Key 新增、编辑、启停、轮换或删除事务提交后的跨 Java 重载。发布端先在本机整表构建不可变凭据快照，再发送空业务 payload 的广播；其它 Java 收到后从 PostgreSQL 整表读取并解密，完整校验成功后才原子替换本机快照。广播不得携带工具编码、API Key、密文、指纹、scope 或 SSH 内容，远端消费也不得二次发布。Redis pub/sub 丢失时由每 60 秒补偿整表刷新收敛；该事件不进入 RunEvent/SSE。
 
 `reference-repository.sync-requested` 用于应用资产库首次初始化、同分支同步、受控分支切换或只读指针核验 generation 的低延迟唤醒。事件名称保持不变，具体操作由消费者读取数据库 `operation_type` 判断；payload 固定只包含：
 
@@ -830,6 +832,10 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 超级管理员问题排查授权、目标切换、会话/工作区列表、审计查询均为普通 HTTP API，文件内容继续使用平台文件 WebSocket 的独立 RPC 协议。本功能不创建 Session、Run、RunEvent 或用户级 runtime-state 事件，也不新增 SSE。
 
 会话正文读取复用既有 `RunMessageRecoveryService` 和 durable session-tree 快照，只把当前保留链路已有的事件投影为一次 HTTP 响应，并携带 `FULL/SUMMARY`、回放可用性和详情保留时间；不得把排查读取重新发布到 RunEvent/SSE，亦不得因此延长消息保留。文件 WebSocket 每条排查 RPC 都重新校验短期授权和目标归属，授权失效后直接返回错误并清理连接，不通过事件通知目标用户。
+
+## 外部 API Key 与 SSH Key 查询不新增事件
+
+API Key 管理只使用管理 HTTP API，外部 SSH Key 查询只使用 `/api/external/v1/**` HTTP。凭据重载仅产生内部 `external-api-credential.refresh-requested` 广播，不新增 RunEvent/SSE、用户级 runtime-state 事件或浏览器 WebSocket 消息；API Key、SSH Key 和 TAEK1 密文都不得进入事件流。
 
 ## LobeHub 不新增平台事件
 

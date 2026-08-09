@@ -1,5 +1,7 @@
 # @test-agent/shared-types
 
+新增 `ExternalApiScope`、scope option、凭据安全列表/分页、新建/编辑 payload 和一次性明文响应类型。列表模型只有 `keyHint`，不定义数据库密文；`apiKey` 只存在于新建、查看和轮换的瞬时响应类型。
+
 ## 工程定位
 
 跨前端包共享的轻量 TypeScript 类型集合。

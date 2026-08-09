@@ -146,4 +146,25 @@ class ApiTokenWebFilterTest {
             assertThat(called[0]).as(path).isTrue();
         }
     }
+
+    @Test
+    void filterLeavesOnlyExactExternalNamespaceToDedicatedAuthentication() {
+        ApiTokenWebFilter filter = new ApiTokenWebFilter("secret-token");
+        for (String path : java.util.List.of(
+                "/api/external/v1",
+                "/api/external/v1/users/u001/ssh-key")) {
+            MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get(path));
+            final boolean[] called = {false};
+            filter.filter(exchange, currentExchange -> {
+                called[0] = true;
+                return Mono.empty();
+            }).block();
+            assertThat(called[0]).as(path).isTrue();
+        }
+
+        MockServerWebExchange adjacent = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/external/v10/users/u001/ssh-key"));
+        filter.filter(adjacent, currentExchange -> Mono.empty()).block();
+        assertThat(adjacent.getResponse().getStatusCode().value()).isEqualTo(401);
+    }
 }

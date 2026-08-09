@@ -32,6 +32,7 @@
 - `TestAgentApplication`：Spring Boot 启动类，强制 Reactive 并把 JVM 默认时区统一为 `Asia/Shanghai`。
 - XXL Admin lifecycle/health、Servlet 子上下文和 executor 由 `test-agent-xxl-job-integration` 装配；app 只提供配置与最终包依赖。
 - `config.TestAgentRuntimeProperties`：运行时配置绑定。
+- `config.ExternalApiCredentialStartupRunner`：在 Flyway 完成后严格整表加载外部 API 凭据；任何解密或数据校验失败都会阻止实例就绪，不使用未初始化或部分快照启动。
 - `config.DatabaseMigrationCompatibilityCustomizer`：在 Spring Boot 唯一 Flyway Bean 校验前读取已应用版本与 checksum；按 history 隔离解析旧工具盒子 `V20260727203500`、当前版本的幂等误发变体，以及已执行 `V20260801093854` 却漏掉 `V20260730090000` 的 LobeHub 模型网关分叉。后者根据 `V20260802173416` 是否已执行及 release 的 `V20260803133000` 是否落库，精确选择原补偿或更高版本补偿；正常顺序历史与空库继续使用原始主 migration，未知 checksum/历史失败关闭，始终保持默认顺序模式。`CommonParameterMemoryStartupRunner` 在 Boot Flyway initializer 完成后以最高 Runner 优先级加载显式 JVM 内存通用参数。
 - `config.LobehubDevelopmentBootstrapRunner`：仅在 `test/local` profile 且
   `TEST_AGENT_LOBEHUB_DEV_BOOTSTRAP_ENABLED=true` 时装配；拒绝非回环平台 PostgreSQL，通过既有通用参数管理服务

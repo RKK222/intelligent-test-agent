@@ -2,7 +2,7 @@
 
 ## 职责
 
-非 opencode 外部系统联动业务边界。
+非 opencode 外部系统联动业务边界，包含外部用户 SSH Key 查询和 TAEK1 加密响应；私钥明文只允许停留在方法局部，不进入 Controller DTO、日志或事件。
 
 ## 不负责
 

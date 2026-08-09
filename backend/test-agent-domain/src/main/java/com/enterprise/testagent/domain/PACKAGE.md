@@ -2,7 +2,7 @@
 
 ## 职责
 
-纯领域模型包，表达 Workspace、Session、AgentSessionBinding、Run、Run 运行数据面、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、夜间执行任务、超级管理员只读排查授权与审计、应用配置、通用参数、工作空间创建进度、定时任务框架等核心业务概念和状态规则。
+纯领域模型包，表达 Workspace、Session、AgentSessionBinding、Run、Run 运行数据面、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、外部 API 凭据/scope/认证主体、夜间执行任务、超级管理员只读排查授权与审计、应用配置、通用参数、工作空间创建进度、定时任务框架等核心业务概念和状态规则。
 
 ## 不负责
 
@@ -18,6 +18,7 @@
 - `agent.AgentSessionBinding`、`agent.AgentSessionBindingRepository`：平台 session 到远端 agent session/node 的通用绑定模型和持久化端口。
 - `session.SessionMessage`、`session.SessionMessageId`、`session.SessionMessageRole`、`session.SessionMessageRepository`：会话消息领域对象、角色和值对象、持久化端口；消息可携带 runId、远端 messageId、parts_json、token/cost 快照。
 - `supportaccess.*`：超级管理员短期只读排查授权、登录会话内令牌轮换、目标切换与逐次访问审计模型及持久化端口；领域对象只保存令牌摘要，不承载明文令牌。
+- `externalapi.*`：外部工具凭据聚合、稳定 ID、`USER_SSH_KEY_READ` scope、认证主体、Repository 端口与配置刷新事件；聚合只承载 RSA 密文、SHA-256 指纹和掩码提示。
 - `workspace.UserWorkspaceQueryRepository`、`session.SessionHistoryRepository`：按目标用户查询其个人工作区、历史会话及会话引用工作区的只读端口，供受控排查访问复用；会话默认仅 ACTIVE，显式重载可包含 ARCHIVED。
 - `run.Run`、`run.RunId`、`run.RunStatus`、`run.TokenUsage`、`run.RunRepository`：运行聚合和值对象、状态机、单次 token 消耗和值对象、持久化端口；`RunRepository.saveIfStatus` 用于按当前状态条件保存，防止终态事件与异步 transport error 竞态时旧状态覆盖新终态；`Run.applyTerminalFact` 只记录 root 终态事实，允许后到 root 终态纠正先到 transport error 临时失败。
 - `run.RunStorageMode`、`run.RunRuntimeManifest`、`run.RunRuntimeInput`、`run.RunRuntimeSnapshot`、`run.RunRuntimeReplay`、`run.RunRuntimeStreamEvent`、`run.RunRuntimeTail`、`run.RunOwnerLease`、`run.RunTerminalProjectionPending`、`run.RunRuntimeStore`：Run 运行数据面的模式、manifest、可信恢复快照、物化快照、durable seq 回放、全事件尾部、owner lease/fencing 和带 version 的终态投影 outbox 领域端口；条件接管原子校验活跃 manifest 快照并提升 token，事件、远端 Session 绑定及 scope/dedup/pending 写入都提供 fenced 入口，终态 outbox 支持服务器候选查询与 version CAS ack。Redis key、Lua、TTL 实现留在 persistence，`REDIS_SUMMARY` 不允许回退 PostgreSQL 或 JVM 内存。

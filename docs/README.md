@@ -34,6 +34,7 @@
 ## 前后端 API 约定
 
 - `docs/api/http-api.md`：HTTP API 路径、方法、请求/响应、错误码、traceId。
+- `docs/api/external-api.md`：外部 API Key 管理、用户 SSH Key 查询及 TAEK1 跨语言解密契约。
 - `docs/api/event-stream.md`：RunEvent SSE 事件类型、字段、续传规则（单一事实源）。
 - `docs/api/workflow-api.md`：浏览器直连 Python 的 `/workflow-api/v1/**` 与 Java 窄能力接口。
 - `docs/api/workflow-ag-ui.md`：独立工作流原生 AG-UI SSE、快照和断点续传协议。

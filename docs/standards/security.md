@@ -85,11 +85,21 @@ Token 校验流程：
 15. 企业离线完整包中的 MySQL root/应用密码和 XXL access token 必须在打包阶段使用安全随机值生成，只能写入权限为 `0600` 的 `.147` MySQL 节点配置和对应后台节点敏感配置；部署脚本只能按文本解析 dotenv，禁止 `source`、回显或写入普通日志。外层 ZIP 因同时包含这些配置和 JAR 内置 RSA 私钥，必须整体按密钥交付物通过受控 U 盘和企业中转机传递。
 15. 内部模型 Token 由外部系统提供，平台不得生成或猜测。仅 `SUPER_ADMIN` 可新增、改名、轮换和删除；API 响应只能返回 `tokenId/name/referencedProviderCount/createdAt/updatedAt`，不得返回明文或密文。`internal_model_tokens.token_value` 继续遵循本系统已确认的明文存储约定，数据库权限、备份和导出必须按密钥数据保护；被 Provider 引用时必须拒绝删除。前端密钥草稿只保存在组件内存，请求完成后立即清空，不得进入浏览器持久化、原始报文或错误提示。刷新广播只携带 traceId 等安全元数据，不携带 Token；Java 仅在一次联表重载时读取明文，并按 Provider ID 保存于不可变内存快照。启用不同 Provider Token 前必须确保全部 Java 节点已经升级。
 
+## 外部 API Key 与 SSH Key 安全边界
+
+1. `/api/external/v1/**` 必须由独立外部认证过滤器强制认证；只有精确 `/api/external/v1` 根及其 `/` 子路径可以绕过旧用户 JWT 和静态 `TEST_AGENT_API_TOKEN` 过滤器，相邻路径不得继承。用户 Bearer Token、Cookie、静态 Token 或前端菜单都不能替代 `X-Test-Agent-Tool-Code` 与 `X-Test-Agent-Api-Key`。
+2. API Key 只能由平台使用 32 字节安全随机数生成，格式固定为 `taak_v1_` 加无填充 Base64URL。数据库只保存 RSA-OAEP/SHA-256 密文、SHA-256 指纹和掩码提示；认证在 JVM 不可变快照中按 `toolCode` O(1) 查询，并用 `MessageDigest.isEqual` 常量时间比较。未知、停用和错误 Key 必须统一为 `UNAUTHENTICATED`，禁止泄露工具存在性或启用状态。
+3. 新建、查看和轮换只允许实时 `SUPER_ADMIN`，响应必须 `no-store/no-cache`；列表不得返回明文或数据库密文。前端明文只允许存在于当前弹窗组件内存，请求结束后清除 mutation 数据，关闭或卸载立即清空，禁止写 localStorage/sessionStorage、TanStack Query cache、URL、原始交换观察器或错误提示。
+4. 外部 SSH 私钥成功响应必须按 `docs/api/external-api.md` 的 TAEK1 协议使用 API Key 派生的 AES-256-GCM 密钥加密，并把工具编码、统一认证号和 traceId 全部纳入 AAD。私钥明文只允许存在于后端方法局部变量和调用方受控处理过程；HTTP 正文、错误、日志、广播、数据库新表和监控均不得出现明文。用户不存在、停用或未配置 Key 使用同一 404，旧加密格式使用安全 409。
+5. 管理事务提交后只能广播空 payload 的 `external-api-credential.refresh-requested`；各 Java 必须自行整表读取、完整解密校验并原子替换快照。启动加载失败必须阻止实例就绪，运行期刷新失败保留上一份有效快照；60 秒补偿刷新只用于收敛漏广播。
+6. Header 按已确认契约以明文传输，不做应用层二次加密；该例外只允许受信内网服务端调用。截获 API Key 的攻击者同时能冒用请求和解密响应，因此生产必须依赖网络隔离和链路保护，不开放浏览器 CORS Header，网关按工具/来源限流并屏蔽公网路由。应用层不新增单机限流。
+7. 共享同一数据库的全部 Java 必须使用同一交付 JAR 内的 `classpath:rsa-private.key`，并共享 Redis、开启服务器广播。滚动升级必须先完成数据库 migration 和全部 Java 升级，确认所有注册表已加载后才开放外部路由；仍有旧 Java 时不得启用外部调用。
+
 ## 日志脱敏
 
 必须脱敏或禁止记录：
 
-- Authorization、Cookie、API key、用户 Token、内部模型 `token/authToken/tokenValue`、`contextToken`、`grantToken`、`X-Support-Access-Grant`、XXL SSO ticket、Workflow checkout ticket/model grant/加密私钥信封和 platform session digest；一次性凭据作为 URL path 参数时只记录固定路由形状。
+- Authorization、Cookie、API key、`X-Test-Agent-Api-Key`、用户 Token、内部模型 `token/authToken/tokenValue`、`contextToken`、`grantToken`、`ciphertext/encryptedApiKey/privateKey`、`X-Support-Access-Grant`、XXL SSO ticket、Workflow checkout ticket/model grant/加密私钥信封和 platform session digest；一次性凭据作为 URL path 参数时只记录固定路由形状。
 - 用户输入中的敏感内容。
 - 文件路径中的隐私片段。
 - 过大的请求体和响应体。

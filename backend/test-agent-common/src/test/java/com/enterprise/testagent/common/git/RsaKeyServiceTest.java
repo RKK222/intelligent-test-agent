@@ -34,4 +34,15 @@ class RsaKeyServiceTest {
         assertThat(service.decrypt(encrypted)).isEqualTo(aesKeyBytes);
     }
 
+    @Test
+    void encryptsWithOaepSha256ForAtRestSecrets() {
+        RsaKeyService service = new RsaKeyService();
+        byte[] plaintext = "taak_v1_test-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+        byte[] encrypted = service.encrypt(plaintext);
+
+        assertThat(encrypted).isNotEqualTo(plaintext);
+        assertThat(service.decrypt(encrypted)).isEqualTo(plaintext);
+    }
+
 }

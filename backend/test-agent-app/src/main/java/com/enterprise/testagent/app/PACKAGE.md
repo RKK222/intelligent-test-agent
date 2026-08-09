@@ -18,6 +18,7 @@
 - `config.TestAgentRuntimeProperties`：运行时配置绑定。
 - `config.DatabaseMigrationCompatibilityCustomizer`：Spring Boot Flyway 初始化期的历史分叉兼容装配；按已执行版本与 checksum 选择工具盒子变体及 LobeHub 缺失历史的早期/rollout 后隔离补偿，保留已执行 migration 原始字节，未知 checksum 失败关闭。
 - `config.CommonParameterMemoryStartupRunner`：Boot Flyway initializer 完成后严格加载显式 JVM 内存通用参数，早于 scheduler 等业务 Runner。
+- `config.ExternalApiCredentialStartupRunner`：Boot Flyway initializer 完成后严格加载全部外部工具凭据并构建首份不可变认证快照，解密或数据校验失败时阻止应用启动。
 - `config.LobehubDevelopmentBootstrapRunner`：仅为显式 `test/local --with-lobehub` 装配的本地 seed；拒绝非回环
   平台 PostgreSQL，通过既有审计服务替换安全占位值并最后启用入口，不参与企业部署。
 - `config.RuntimeJsonConfig`：应用运行态共享 Jackson ObjectMapper 配置。

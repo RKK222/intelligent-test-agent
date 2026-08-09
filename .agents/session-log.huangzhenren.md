@@ -2052,3 +2052,20 @@
 - Result:
   - 文件搜索面板不再展示仅因父目录路径命中而误报的文件；API、事件、数据库和安全边界均未变更。
   - 最终审查同时锁定大小写不敏感、首尾空白归一化和纯空白短路这三个公开搜索边界。
+
+### 2026-08-09 - 新增外部 API Key 认证与 SSH Key 查询
+
+- Why:
+  - 平台需要向受信外部系统提供独立认证的 API，首版按统一认证号查询状态正常用户的 SSH 私钥；同时需要仅超级管理员可用的工具凭据管理、多 Java 内存快照与跨节点刷新能力。
+- What:
+  - 新增 `/api/external/v1/users/{unifiedAuthId}/ssh-key` 和 `/api/internal/platform/system-management/api-keys` 管理接口；实现工具编码、scope、启停、分页、新建、按需查看、轮换和删除，并增加系统管理“API Key 管理”面板。
+  - API Key 使用安全随机格式生成，以 RSA-OAEP/SHA-256 密文持久化；认证注册表启动时严格整表加载、原子替换不可变快照、常量时间比较，并复用 `external-api-credential.refresh-requested` Redis 广播和 60 秒补偿刷新。SSH 私钥使用 HKDF-SHA256 与 AES-256-GCM 封装为 TAEK1 响应，旧 Bearer Token 和静态 Token 均不能旁路外部认证。
+  - 新增候选 Flyway `V20260809120000__create_external_api_credentials.sql` 与 MyBatis XML 持久化；迁移高于当前最高 `V20260808143302`，源码、persistence JAR、最终应用 JAR 的 SHA-256 均为 `356f2cf9127fb514c614ccb8fc77473e6269f6e1e5cd373b0750d2f207009d53`。
+  - 同步外部 API/HTTP API/事件流、安全、数据库、后端部署、架构模块、各后端模块与前端包说明及用户手册；刷新广播明确为内部事件，不新增 RunEvent/SSE。
+- How:
+  - 后端 21 个 Maven 模块 `mvn test` 全部成功，外部凭据、认证过滤器、TAEK1 固定向量/篡改、MyBatis H2 PostgreSQL 模式等专项测试通过；`mvn clean package -DskipTests` 成功。
+  - 前端 15 个 workspace typecheck、120 个 Vitest 文件（1882 passed / 1 skipped）与 production build 通过；仅有既有 jsdom Canvas 提示和大分块警告。独立只读安全复核确认明文 Key 不进入 TanStack Query/Mutation 缓存，组件卸载后的晚到响应不会读取或回写 Key。
+  - 提交前回顾全部 `.agents/session-log*.md`，确认既有已执行迁移未被改写；未修改 `.env*`、generated SDK 或 OpenCode 源码，也未新建分支。
+- Result:
+  - 外部调用方可使用工具编码与 API Key 经 O(1) 内存认证后获取加密 SSH 私钥，超级管理员可完整管理凭据；API、数据库和安全契约均为新增，旧内部 API 与认证路径保持兼容。
+  - 本机没有可用 Docker/Podman、PostgreSQL、共享 Redis，未能执行真实 PostgreSQL 的空库及各目标历史升级，也未能启动双 Java 实例验证跨节点收敛；这两项及目标环境 `flyway_schema_history`/checksum 核对仍是发布前阻断验收，禁止用当前 H2 与单 JVM 测试替代。

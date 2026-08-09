@@ -7,6 +7,7 @@
 ## 主要程序清单
 
 - `createRunResend(agentId, sessionId, payload)`：调用统一撤销重发 API，传递最后远端消息边界、可选源 Run、上下文令牌和客户端幂等键，返回预留替代 Run 及 additive `resend` 元数据。
+- `listExternalApiScopes/listExternalApiCredentials/create/update/reveal/rotate/deleteExternalApiCredential`：超级管理员 API Key 管理 client；`rawExchangeObserver` 对 `apiKey/ciphertext/encryptedApiKey` 强制脱敏，调用方不得缓存一次性明文响应。
 
 - `index.ts` 的 `createBatchItemSession` 为每个批量条目幂等创建独立 Session；`CreateNightExecutionTaskPayload.batchContext` 为可选兼容字段，携带时调用方必须省略 `sessionId`。两条链路都复用现有用户 OpenCode 路由提示，不新增工作区文件 HTTP 代理。
 - Model/Provider 原生目录在运行配置声明非空 `enabled_providers` 时共用同一轮 config 请求，只按 Provider ID 过滤且不改变原生顺序；未配置或 config 读取失败时保留原生结果，请求完成后不长期缓存白名单。

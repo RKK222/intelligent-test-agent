@@ -1,5 +1,7 @@
 # test-agent-api
 
+外部调用使用独立 `/api/external/v1/**` 命名空间：`ExternalApiKeyWebFilter` 强制校验工具编码/API Key 并建立外部主体，`ExternalUserSshKeyController` 只返回 TAEK1 信封；管理端 `ExternalApiCredentialController` 仅允许 `SUPER_ADMIN`。旧用户 JWT 与静态 API Token 都不能旁路外部认证，API 日志把 actor 记为 `external:{toolCode}` 并脱敏 API Key、私钥和密文。
+
 ## 工程定位
 
 后端 HTTP/SSE/WebSocket API 定义模块，只做协议入口、请求响应 DTO、统一响应、错误、traceId、鉴权、限流和受控 WebSocket 适配。

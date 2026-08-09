@@ -14,6 +14,7 @@
 
 - `package-info.java`：说明 persistence 包是持久化适配边界。
 - `mybatis.MyBatisPersistenceConfig`：扫描 persistence 内部 MyBatis mapper。
+- `mybatis.ExternalApiCredentialMapper` / `mybatis/ExternalApiCredentialMapper.xml` / `mybatis.MyBatisExternalApiCredentialRepository`：外部 API 凭据分页、整表加载、CRUD 和 scope 原子替换；只映射 RSA 密文、SHA-256 指纹、掩码提示与安全元数据。
 - `mybatis.CommonParameterMapper` / `mybatis/CommonParameterMapper.xml`：通用参数 MyBatis 试点 SQL。
 - `mybatis.MyBatisCommonParameterRepository`：通用参数领域端口的生产 Bean。
 - `mybatis.InternalModelProviderMapper` / `mybatis/InternalModelProviderMapper.xml`：内部模型供应商、可复用 Token 定义、Provider 关联和一次联表运行快照的全部关系型 SQL。

@@ -61,6 +61,7 @@
 | `/workflow-api/v1/**` | 独立 Python 浏览器 API；Nginx 直达，不属于 Java Controller URL。 |
 | `/api/internal/platform/scheduler-management/**` | 已作废，统一返回 `410 API_GONE`；周期任务在 XXL iframe 管理。 |
 | `/api/internal/platform/system-management` | 超级管理员用户管理入口，使用用户 JWT 且要求 `SUPER_ADMIN`。 |
+| `/api/external/v1/**` | 受信内网服务端工具调用入口，强制使用工具编码和平台生成的 API Key Header，不接受用户 JWT 或静态 Token 替代。 |
 | `/api/public/...` | 其他系统调用平台的公开 API，当前预留；新增前必须完成鉴权、限流、安全和兼容性设计。 |
 
 当前已落地的新平台入口：
@@ -109,6 +110,8 @@
 | `system-management` | `/api/internal/platform/system-management/users` | 无旧 URL |
 | `system-management` | `/api/internal/platform/system-management/users/{userId}/roles` | 无旧 URL |
 | `system-management` | `/api/internal/platform/system-management/roles` | 无旧 URL |
+| `system-management` | `/api/internal/platform/system-management/api-keys` | 无旧 URL；仅 `SUPER_ADMIN` 管理外部工具凭据。 |
+| `integration/external-api` | `/api/external/v1/users/{unifiedAuthId}/ssh-key` | 无旧 URL；返回 TAEK1 加密 SSH 私钥信封。 |
 | `integration/toolbox` | `/api/internal/platform/toolbox/tools`、`/api/internal/platform/toolbox/tools/{toolId}/clicks` | 无旧 URL |
 | `configuration-management` | `/api/internal/platform/configuration-management/applications` | 无旧 URL |
 | `configuration-management` | `/api/internal/platform/configuration-management/personal/ssh-keys` | 无旧 URL |
@@ -307,6 +310,7 @@ Base URL：`/api/internal/platform/analytics`。所有接口要求 `SUPER_ADMIN`
 | `OPENCODE_TIMEOUT` | 504 | opencode 服务超时 |
 | `RUNTIME_STATE_UNAVAILABLE` | 503 | 运行态存储不可用 |
 | `NIGHT_EXECUTION_UNAVAILABLE` | 503 | 夜间执行功能不可用 |
+| `EXTERNAL_API_UNAVAILABLE` | 503 | 外部 API 认证服务不可用 |
 | `GIT_UNAVAILABLE` | 503 | Git 服务不可用 |
 | `GIT_TIMEOUT` | 504 | Git 操作超时 |
 
@@ -2837,6 +2841,14 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 Run 进入成功、失败或取消终态后，后端会从 agent 标准 session messages 的最新页沿 `before` cursor 向前查找本轮稳定 USER 锚点，单页 100、最多 20 页，只把该 user 以及 `parentID/parentId` 直接指向它的 assistant 纳入当前 Run。锚点未到达、来源冲突、重复 cursor、页数超限或旧 Run 时间窗内不唯一时不写任何消息；不得边分页边把当前 `runId` 赋给全会话。选择成功后只 upsert 本轮 assistant 可见 text、完整 parts，并把本轮最后一条 assistant 的 token/cost 写入 `runs`；reasoning 和 tool output 不拼入可见正文，拉取失败时保留数据库已有快照。已经错误归属的历史消息不在读取或刷新时修复。
 
 `test-agent.redis-summary.enabled=false`、rollout `0` 是稳定默认。部署方完成 Redis 持久化、安全、容量与故障恢复验收后，可按 userId 稳定哈希逐步提高比例；只有携带有效 `contextToken + clientRequestId` 的新 Run 可进入 `REDIS_SUMMARY`，活动 Run 固定创建时模式，回滚只影响后续新 Run。旧客户端兼容调用会递增 `legacy_run_without_context_total`；该指标连续 7 天为 0 后再关闭 `legacy-run-without-context-enabled`，关闭后缺 token 返回 `409 CONVERSATION_CONTEXT_REQUIRED`，不会自动查询数据库。
+
+### system-management API Key 管理与外部 SSH Key API
+
+API Key 管理基础路径为 `/api/internal/platform/system-management/api-keys`，要求用户 JWT 和实时 `SUPER_ADMIN`；支持 scope 查询、分页、新建、编辑、按需查看、立即轮换和永久删除。列表只返回 `keyHint`，新建、查看和轮换响应携带 `Cache-Control: no-store` 与 `Pragma: no-cache`。`toolCode` 创建后不可修改，scope 首版只有 `USER_SSH_KEY_READ`。
+
+外部调用固定为 `GET /api/external/v1/users/{unifiedAuthId}/ssh-key`，请求 Header 为 `X-Test-Agent-Tool-Code` 和 `X-Test-Agent-Api-Key`。成功 `data` 只包含 `version/keyDerivation/cipher/salt/nonce/ciphertext`，私钥载荷使用 API Key 经 HKDF-SHA256 派生的 AES-256-GCM 密钥加密，AAD 同时绑定工具、统一认证号和外层 `traceId`。缺失、未知、停用或错误 Key 统一 `401`，scope 不足 `403`，用户/Key 不存在 `404`，旧 SSH 加密格式 `409`，注册表不可用 `503 EXTERNAL_API_UNAVAILABLE`。
+
+完整 DTO、校验、TAEK1 字节级协议、Python 解密示例、多 Java 刷新与发布顺序见 `docs/api/external-api.md`。对应后端测试：`ExternalApiCredentialControllerTest`、`ExternalApiKeyWebFilterTest`、`ExternalUserSshKeyControllerTest`、`ExternalUserSshKeyApplicationServiceTest`、`ExternalSshKeyEnvelopeServiceTest`；前端测试：`api-key-management-panel.test.ts`、`backend-api.test.ts`。
 
 ### system-management 用户管理 API
 
