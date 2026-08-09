@@ -47,10 +47,15 @@ Run 开始前分别搜索个人全局、个人 Application 和团队 Application
 
 `deploy/dev/memory-compose.yml` 是个人开发专用 Compose，固定工程名 `test-agent-memory-dev`，只管理 `memory-postgres` 和 `memory-service`。默认不启动，也不探测、停止已存在的记忆容器。
 
-在独立 worktree 中使用现有绝对路径 `.env.test`，不复制或修改环境文件：
+在独立 worktree 中使用现有绝对路径 `.env.test`，不复制或修改环境文件。源码和 Git 状态仍在记忆
+worktree；`TEST_AGENT_ROOT`、`TESTAGENT` 与 `SYS_DATA_ROOT_DIR` 必须显式复用主工作区已有的本地运行数据，
+否则启动脚本会默认查找记忆 worktree 下的空 `.testagent`，用户 OpenCode 初始化将因公共 Agent 配置源目录不可用而失败：
 
 ```bash
 cd /Users/kaka/Desktop/intelligent-test-agent-memory-v1
+export TEST_AGENT_ROOT=/Users/kaka/Desktop/intelligent-test-agent
+export TESTAGENT="$TEST_AGENT_ROOT"
+export SYS_DATA_ROOT_DIR="$TEST_AGENT_ROOT/.testagent"
 JAVA_VERSION=25 ./restart-dev-services.sh \
   --profile test \
   --env-file /Users/kaka/Desktop/intelligent-test-agent/.env.test \
@@ -58,6 +63,9 @@ JAVA_VERSION=25 ./restart-dev-services.sh \
   --without-workflow \
   --with-memory
 ```
+
+启动输出必须同时确认上述 `TEST_AGENT_ROOT` 与 `SYS_DATA_ROOT_DIR`；该覆盖只改变本地运行数据位置，不会让
+backend/frontend 构建物脱离记忆 worktree，也不会复制、清理或回退主工作区中的 Agent 配置。
 
 首次 `--with-memory` 会拉取固定 pgvector 镜像，构建 memory-service 并在构建期下载固定 revision 的 BGE 权重，因此构建机需要一次网络访问；完成后容器运行不访问 HuggingFace。默认主机端口为：
 

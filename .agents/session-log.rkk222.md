@@ -7587,3 +7587,27 @@
 - 实现与记忆链路已按定向、真实数据面、真实 PostgreSQL 和页面完成验证，但后端全量仍受 Docker/MySQL Testcontainers
   冷启动超时阻断；此外未使用真实登录凭据执行“两用户、两 Application”的跨会话端到端验收，仍需用户在灰度白名单中验收。
 - 最终保持六个约定的中文提交，不推送、不创建 PR、不合并回发布分支。
+
+## 2026-08-09 - 修正记忆 worktree 的 OpenCode 本地运行数据路径
+
+### Why
+
+- 按记忆部署文档从独立 worktree 启动后，后端与 manager 默认把 `TEST_AGENT_ROOT`/`SYS_DATA_ROOT_DIR` 指向
+  `intelligent-test-agent-memory-v1/.testagent`；该目录为空，而用户公共配置与 session 仍保存在主工作区，正式初始化报
+  `公共 Agent 配置源目录不可用`，4104 未被 manager 管理。
+
+### What
+
+- 不修改启动脚本、`.env.test`、OpenCode 源码或用户 Agent 配置；部署文档改为在独立 worktree 启动前显式复用主工作区的
+  `TEST_AGENT_ROOT`、兼容别名 `TESTAGENT` 和 `SYS_DATA_ROOT_DIR`，继续使用启动脚本现有可覆盖能力。
+
+### How
+
+- 使用 JDK 25、主工作区绝对路径 `.env.test` 和 `--with-memory --without-workflow` 从记忆 worktree 重启；脚本确认运行数据根为
+  `/Users/kaka/Desktop/intelligent-test-agent/.testagent`，backend、manager、frontend、memory-service 与 pgvector 均正常启动。
+- 后端日志确认公共配置 Git 根已解析回主工作区，原有用户公共 worktree 的未提交/未跟踪改动保持原状，未执行清理、回退或合并。
+
+### Result
+
+- 原“公共 Agent 配置源目录不可用”启动阻断已消除；当前用户进程仍为 `STOPPED`，因页面登录态失效尚未执行新的已认证
+  `/processes/me/initialize`，所以 4104 的最终 `RUNNING` 与 `/global/config` 200 闭环仍待用户重新登录后复测。
