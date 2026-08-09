@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resolveUserMessageAppearance } from "../src/user-message-appearance";
 
 describe("resolveUserMessageAppearance", () => {
-  it("uses a stable sender color and hides the current user's name", () => {
+  it("uses fixed borderless colors for the current user and everyone else", () => {
     const mine = resolveUserMessageAppearance({
       senderUserId: "usr_me",
       senderUsername: "我自己"
@@ -16,16 +16,31 @@ describe("resolveUserMessageAppearance", () => {
       senderUsername: "协作者"
     }, "usr_someone_else");
 
-    expect(mine.displayName).toBeUndefined();
-    expect(otherFirst.displayName).toBe("协作者");
+    expect(mine).toEqual({
+      own: true,
+      style: {
+        backgroundColor: "#B2EDDF",
+        border: "none"
+      }
+    });
+    expect(otherFirst).toEqual({
+      own: false,
+      displayName: "协作者",
+      style: {
+        backgroundColor: "#9A8EDE",
+        border: "none"
+      }
+    });
     expect(otherFirst.style).toEqual(otherSecond.style);
-    expect(otherFirst.style.backgroundColor).not.toBe(mine.style.backgroundColor);
   });
 
-  it("keeps legacy messages on the established default bubble style", () => {
+  it("uses the current user's borderless color for legacy messages", () => {
     expect(resolveUserMessageAppearance({}, "usr_me")).toEqual({
       own: true,
-      style: {}
+      style: {
+        backgroundColor: "#B2EDDF",
+        border: "none"
+      }
     });
   });
 });

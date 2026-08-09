@@ -174,9 +174,16 @@ test("session share read-only workbench shows sender identity colors and fixed s
   const ownTurn = page.locator('[data-oc-turn-id="msg_reader_shared"]');
   await expect(ownerTurn.locator(".oc-user-message__sender")).toHaveText("会话所属人");
   await expect(ownTurn.locator(".oc-user-message__sender")).toHaveCount(0);
-  const ownerColor = await ownerTurn.locator(".oc-user-message__bubble").evaluate((element) => getComputedStyle(element).backgroundColor);
-  const ownColor = await ownTurn.locator(".oc-user-message__bubble").evaluate((element) => getComputedStyle(element).backgroundColor);
-  expect(ownerColor).not.toBe(ownColor);
+  const ownerAppearance = await ownerTurn.locator(".oc-user-message__bubble").evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { backgroundColor: style.backgroundColor, borderStyle: style.borderStyle };
+  });
+  const ownAppearance = await ownTurn.locator(".oc-user-message__bubble").evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { backgroundColor: style.backgroundColor, borderStyle: style.borderStyle };
+  });
+  expect(ownerAppearance).toEqual({ backgroundColor: "rgb(154, 142, 222)", borderStyle: "none" });
+  expect(ownAppearance).toEqual({ backgroundColor: "rgb(178, 237, 223)", borderStyle: "none" });
   await expect(page.getByRole("button", { name: "发送" })).toBeDisabled();
   await expect(page.locator(".figma-chat-textarea")).toHaveAttribute("title", "当前分享权限为只读，不能修改工作区或发送消息。");
   await expect(page.getByTestId("manage-session-share")).toHaveCount(0);

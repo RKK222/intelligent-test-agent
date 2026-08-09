@@ -2126,3 +2126,17 @@
   - `mvn -pl test-agent-system-management test` 跑 `ExternalApiCredentialApplicationServiceTest`(4)、`ExternalApiCredentialUpdateBroadcasterTest`(2)、`ExternalApiKeyGeneratorTest`(1)、`ExternalApiCredentialRegistryTest`(6) 共 13 项全绿，编译通过。
 - Result:
   - 仅改 `ExternalApiCredentialApplicationService.java`、`ExternalApiCredentialUpdateBroadcaster.java` 两处；不涉及 HTTP API、RunEvent、数据库结构、generated SDK、OpenCode 源码或环境配置；Pattern B 启动失败链已全部消除。
+
+### 2026-08-09 - 固定分享消息气泡为两色且移除边框
+
+- Why:
+  - 会话分享初版按实际发送人哈希生成多种气泡颜色，范围也会覆盖普通会话中带归因的消息；产品要求只保留两种颜色，并始终以当前查看者区分自己与其他人。
+- What:
+  - `resolveUserMessageAppearance` 删除哈希色相逻辑：自己的消息固定使用 `#B2EDDF`，所有其他人的消息统一使用 `#9A8EDE`，两者均返回 `border: none`。
+  - 姓名规则保持不变：自己的消息不显示姓名，其他人显示姓名；缺少发送人归因的历史消息按自己发送处理，使用绿色且无边框。
+  - 分享工作台 E2E 从“颜色不同”收紧为精确断言两个浏览器计算色值和 `border-style: none`；同步 agent-web、agent-chat README 以及设计/实施计划文档。
+- How:
+  - TDD 先将两个单元测试改为固定色值与无边框断言，确认旧实现 2/2 按预期失败；最小修改解析函数后定向测试 2/2 通过。
+  - 前端全量 123 个 Vitest 文件为 1896 passed / 1 skipped，15 个 workspace 类型检查与 production build 通过；Chromium、Firefox、WebKit 分享回归 15/15 通过，仅保留既有 jsdom Canvas 提示和大 chunk 警告。
+- Result:
+  - 用户看到的消息气泡现只有两种：自己绿色、其他人统一紫色，且都没有边框；不涉及 HTTP API、RunEvent、数据库、性能、安全、环境配置、generated SDK 或 OpenCode 源码，也未新建分支。
