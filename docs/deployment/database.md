@@ -15,6 +15,8 @@
 
 默认白名单为空，单独执行该 migration 不会开启学习或检索。文件首次在任何需要保留的 PostgreSQL 执行后，版本、文件名和字节必须永久锁定；后续只能新增更高版本 migration。合入与发布前仍须收集全部目标库 `flyway_schema_history`，在每套已知基线上验证升级并核对最终 JAR 内 SHA-256，禁止 `outOfOrder`、`repair` 或手工修改历史表。
 
+当前锁定 SHA-256 为 `b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a`。独立 pgvector 库不扫描 Java Flyway，Mem0 history 使用独立 `/data/mem0-history.db`；两者必须与平台库恢复点一起纳入变更单。详细部署、备份与回滚见 `docs/deployment/qa-memory.md`。
+
 ## V20260807230000 批量会话归因
 
 `V20260807230000__add_batch_session_attribution.sql` 为 `sessions` 增加 `batch_mode boolean not null default false`、`batch_id varchar(128)` 和 `batch_item_request_id varchar(128)`。普通会话继续使用默认值且两个 ID 必须为空；批量会话必须存在 `created_by_user_id` 和两个非空白 ID。部分唯一索引 `uk_sessions_batch_item_request(created_by_user_id, batch_item_request_id)` 保证同一用户的单项创建幂等，不同用户互不冲突；`idx_sessions_batch_created(batch_id, created_at)` 只服务后续运营统计查询。本期不新增报表，也不改变 `source_type`：立即批量保持 `MANUAL`，定时批量保持 `SCHEDULED_TASK`。

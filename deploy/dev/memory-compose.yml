@@ -1,0 +1,62 @@
+name: test-agent-memory-dev
+
+services:
+  memory-postgres:
+    image: ${TEST_AGENT_MEMORY_PGVECTOR_IMAGE:-pgvector/pgvector:0.8.1-pg16}
+    container_name: test-agent-memory-postgres
+    environment:
+      POSTGRES_DB: qa_memory
+      POSTGRES_USER: qa_memory
+      POSTGRES_PASSWORD: ${TEST_AGENT_MEMORY_DEV_POSTGRES_PASSWORD:?memory postgres password is required}
+    ports:
+      - "127.0.0.1:${TEST_AGENT_MEMORY_POSTGRES_PORT:-15433}:5432"
+    volumes:
+      - test-agent-memory-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qa_memory -d qa_memory"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    security_opt:
+      - no-new-privileges:true
+
+  memory-service:
+    image: ${TEST_AGENT_MEMORY_SERVICE_IMAGE:-test-agent-memory-service:dev}
+    container_name: test-agent-memory-service
+    build:
+      context: ../../memory-service
+      dockerfile: Dockerfile
+    depends_on:
+      memory-postgres:
+        condition: service_healthy
+    environment:
+      TEST_AGENT_MEMORY_SERVICE_API_KEY: ${TEST_AGENT_MEMORY_SERVICE_API_KEY:?memory service api key is required}
+      TEST_AGENT_MEMORY_SERVICE_DATABASE_URL: postgresql://qa_memory:${TEST_AGENT_MEMORY_DEV_POSTGRES_PASSWORD}@memory-postgres:5432/qa_memory
+      TEST_AGENT_MEMORY_SERVICE_HISTORY_DB_PATH: /data/mem0-history.db
+      TEST_AGENT_MEMORY_SERVICE_MODEL_ROOT: /models
+      TEST_AGENT_MEMORY_SERVICE_MODEL_PATH: /models/BAAI__bge-small-zh-v1.5
+      TEST_AGENT_MEMORY_SERVICE_EXTRACTION_GATEWAY_URL: ${TEST_AGENT_MEMORY_SERVICE_EXTRACTION_GATEWAY_URL:?memory extraction gateway is required}
+      MEM0_TELEMETRY: "False"
+      MEM0_TELEMETRY_SAMPLE_RATE: "0"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
+      DO_NOT_TRACK: "1"
+    ports:
+      - "127.0.0.1:${TEST_AGENT_MEMORY_SERVICE_PORT:-18888}:18888"
+    volumes:
+      - test-agent-memory-history-data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  test-agent-memory-postgres-data:
+  test-agent-memory-history-data:

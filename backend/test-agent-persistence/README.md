@@ -230,6 +230,7 @@ RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线�
 ## QA 长期记忆治理持久化
 
 - `V20260809120000__create_qa_memory_governance.sql` 一次建立个人/团队治理、最多 200 字证据摘要、Application 审核、学习 Outbox、Run 使用记录、灰度白名单、Skill 草稿和固定 CHAT 设置。
+- 该 migration 锁定 SHA-256 为 `b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a`；首次执行后不得改名或改变字节。平台库与独立 pgvector/history 的备份、升级和回滚见 `docs/deployment/qa-memory.md`。
 - `QaMemoryMapper.xml` 是全部关系型 SQL 的唯一实现，包含乐观版本、团队成员实时过滤、无原文 Outbox 幂等、租约认领和 PostgreSQL/H2 双分支。
 - `MemoryLearningEvidenceMapper.xml` 只按 `run_id` 从既有 `session_messages` 读取 USER/ASSISTANT 文本，限制 20 条且不读取 parts、工具输出或凭据；它不是聊天镜像。
 - `RedisMemoryModelGrantStore` 在 `test-agent:qa-memory:model-grant:*` 保存一次性授权的结构化可信摘要，key 只含 grant SHA-256；Lua get-and-delete 保证并发消费单胜者并保留短 TTL。

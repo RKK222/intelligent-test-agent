@@ -30,8 +30,21 @@ PYTHONPATH=src uv run pytest tests
 
 真实 pgvector/BGE smoke 使用 `TEST_AGENT_MEMORY_RUN_INTEGRATION=true` 显式开启；需要固定 revision 模型目录以及 Docker。
 
+完整本地数据面通过仓库根目录脚本显式启动：
+
+```bash
+tools/memory-dev-services.sh prepare
+tools/memory-dev-services.sh build
+tools/memory-dev-services.sh start
+tools/memory-dev-services.sh status
+```
+
+`restart-dev-services.sh --with-memory` 会调用同一辅助脚本；不带开关时不启动、探测或停止记忆容器。本地密钥只写入 `.tmp/dev-services/memory` 下的 `0600` 文件，不修改 `.env.local/.env.test`。
+
 ## 运行配置
 
 所有配置使用 `TEST_AGENT_MEMORY_SERVICE_` 前缀。`API_KEY` 至少 32 字节；`DATABASE_URL`、`API_KEY` 不得输出日志。抽取模型通过 `EXTRACTION_GATEWAY_URL=/api/internal/platform/model-gateway/v1` 固定路径和短期 `mfg_` grant 调用，不接受供应商 URL 或长期密钥。
 
 生产容器默认以 UID/GID `10004` 运行，`/models` 只读，只有 `/data` 需要持久化写权限。Mem0 telemetry、PostHog 和 HuggingFace 运行期网络访问均关闭。
+
+本地、企业离线拓扑、备份、灰度、运行态验收和回滚见 `docs/deployment/qa-memory.md`。V1 的 Provider 注册表仅开启 `LOCAL_BGE`；后续企业 Embedding 接入时必须新增 Provider 和集合，不得覆盖现有向量。

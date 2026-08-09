@@ -61,6 +61,10 @@ if [[ "${restart_help}" != *"--without-workflow"* ]]; then
   echo "${restart_help}" >&2
   fail "restart script help should document the workflow opt-out"
 fi
+if [[ "${restart_help}" != *"--with-memory"* ]]; then
+  echo "${restart_help}" >&2
+  fail "restart script help should document the opt-in QA memory data plane"
+fi
 if ! grep -Fq 'with_workflow=true' "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script must start the workflow control plane by default"
 fi
@@ -69,6 +73,37 @@ if ! grep -Fq '"${WORKFLOW_DEV_SCRIPT}" prepare' "${ROOT_DIR}/restart-dev-servic
 fi
 if ! grep -Fq 'with_lobehub=false' "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script must keep LobeHub disabled by default"
+fi
+if ! grep -Fq 'with_memory=false' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script must keep QA memory disabled by default"
+fi
+MEMORY_DEV_SCRIPT="${ROOT_DIR}/tools/memory-dev-services.sh"
+MEMORY_DEV_COMPOSE="${ROOT_DIR}/deploy/dev/memory-compose.yml"
+[[ -x "${MEMORY_DEV_SCRIPT}" ]] || fail "QA memory development helper missing or not executable: ${MEMORY_DEV_SCRIPT}"
+[[ -f "${MEMORY_DEV_COMPOSE}" ]] || fail "QA memory development Compose file missing: ${MEMORY_DEV_COMPOSE}"
+run_check "QA memory dev service script bash syntax" bash -n "${MEMORY_DEV_SCRIPT}"
+run_check "QA memory dev service script help" bash "${MEMORY_DEV_SCRIPT}" --help
+run_check "QA memory dev service behavior" bash "${ROOT_DIR}/tools/memory-dev-services-test.sh"
+if grep -Eq 'image:.*:latest([^-]|$)' "${MEMORY_DEV_COMPOSE}"; then
+  fail "QA memory development dependencies must not use latest tags"
+fi
+if ! grep -Fq 'read_only: true' "${MEMORY_DEV_COMPOSE}" || ! grep -Fq 'cap_drop:' "${MEMORY_DEV_COMPOSE}"; then
+  fail "QA memory service container must keep the read-only and dropped-capability boundary"
+fi
+if grep -Fq 'source "${ENV_FILE}"' "${MEMORY_DEV_SCRIPT}"; then
+  fail "QA memory helper must parse generated dotenv as data instead of executing it"
+fi
+if ! grep -Fq 'load_env_file "${TEST_AGENT_MEMORY_BACKEND_ENV_FILE}"' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script must load only the Java-safe memory dotenv"
+fi
+if ! grep -Fq 'screen -S "${screen_id}" -X quit' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script must close cross-worktree screen sessions by their full identifier"
+fi
+if ! grep -Fq '/.tmp/dev-services/backend-runtime/test-agent-app.' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script must recognize stale backend runtime jars from another worktree"
+fi
+if ! grep -Fq 'current_backend_pids >"${LOG_DIR}/backend.pid"' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script must verify readiness ownership against the current worktree"
 fi
 if ! grep -Fq 'TEST_AGENT_LOBEHUB_DEV_TARGET_ENABLED=false' "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script must compensate a failed LobeHub start by disabling the local entry"
@@ -166,7 +201,10 @@ jar tf "${staged_runtime_jar}" >/dev/null || fail "staged backend runtime jar ch
 
 screen_calls="${tmp_dir}/screen.calls"
 cors_calls="${tmp_dir}/cors.calls"
-printf '#!/usr/bin/env bash\nexit 0\n' >"${tmp_dir}/bin/ps"
+# backend 启动的 screen 调用出现后，模拟 ps 返回本 worktree 的不可变运行 JAR；
+# 这样测试既覆盖启动归属门禁，也不会在首次停止阶段伪造旧进程。
+printf '#!/usr/bin/env bash\nif [[ -s %q ]] && grep -Fq "/backend-runtime/test-agent-app." %q; then\n  printf "54321 /usr/bin/java /usr/bin/java -jar %s/logs/backend-runtime/test-agent-app.mock.jar --spring.profiles.active=test\\n"\nfi\nexit 0\n' \
+  "${screen_calls}" "${screen_calls}" "${tmp_dir}" >"${tmp_dir}/bin/ps"
 printf '#!/usr/bin/env bash\nif [[ "${1:-}" == "-list" ]]; then exit 1; fi\nprintf "%%s\\n" "$*" >>%q\nprintf "%%s\\n" "${TEST_AGENT_CORS_ALLOWED_ORIGINS:-}" >>%q\nexit 0\n' "${screen_calls}" "${cors_calls}" >"${tmp_dir}/bin/screen"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${tmp_dir}/bin/curl"
 printf '#!/usr/bin/env bash\necho "   interface: en0"\n' >"${tmp_dir}/bin/route"

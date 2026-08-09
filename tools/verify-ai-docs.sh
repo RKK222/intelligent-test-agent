@@ -16,7 +16,7 @@ require_file() {
 require_text() {
   local file="$1"
   local text="$2"
-  grep -Fq "${text}" "${ROOT_DIR}/${file}" || fail "${file} does not contain: ${text}"
+  grep -Fq -- "${text}" "${ROOT_DIR}/${file}" || fail "${file} does not contain: ${text}"
 }
 
 required_files=(
@@ -38,6 +38,7 @@ required_files=(
   "docs/deployment/backend.md"
   "docs/deployment/database.md"
   "docs/deployment/frontend.md"
+  "docs/deployment/qa-memory.md"
   "deploy/internal/FULL-UPGRADE-RUNBOOK.md"
   "deploy/internal/collect-recent-process-logs.sh"
   "tools/verify-internal-process-log-collector.sh"
@@ -67,6 +68,8 @@ required_files=(
   "frontend/packages/ui-kit/src/PACKAGE.md"
   "frontend/packages/shared-types/README.md"
   "frontend/packages/shared-types/src/PACKAGE.md"
+  "backend/test-agent-memory/README.md"
+  "memory-service/README.md"
 )
 
 for file in "${required_files[@]}"; do
@@ -113,6 +116,12 @@ require_text "docs/deployment/backend.md" "PostgreSQL、XXL MySQL、Redis 和 op
 require_text "docs/deployment/backend.md" "tools/dev-backend-run.sh"
 require_text "docs/deployment/backend.md" "tools/verify-opencode-process-deployment.sh"
 require_text "docs/deployment/backend.md" "多服务器用户进程拓扑规划"
+require_text "docs/deployment/qa-memory.md" "rawMessageCount=0"
+require_text "docs/deployment/qa-memory.md" "b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a"
+require_text "docs/deployment/qa-memory.md" "--with-memory"
+require_text "docs/deployment/qa-memory.md" "未来企业 Embedding"
+require_text "memory-service/README.md" "mem0ai==2.0.3"
+require_text "backend/test-agent-memory/README.md" "不保存聊天记录"
 require_text "docs/deployment/database.md" "V10 opencode 用户进程管理表"
 require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" '中转机不创建、不使用 `/data/0709`'
 require_text "deploy/internal/FULL-UPGRADE-RUNBOOK.md" 'cd ~/Desktop/mimoagent/0709'

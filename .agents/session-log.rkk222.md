@@ -7535,3 +7535,55 @@
   显式兼容，数据库所有者明确选择重建是唯一可跳过该历史的例外。
 - 本次仅修改规范、模块 README、数据库部署文档和本机会话记录，不修改代码、migration SQL、API、事件、数据库结构、
   `.env*`、generated SDK 或 OpenCode 源码。
+
+## 2026-08-09 - 在独立 worktree 建设 QA Agent 长期记忆 V1
+
+### Why
+
+- 需要让 QA Agent 跨会话复用测试人员稳定的工作习惯，同时把个人记忆、Application 团队记忆、项目业务知识、原始聊天、
+  静态画像和可发布 Skill 明确分层，避免把聊天镜像或项目事实误当成用户画像。
+- V1 明确使用自托管 Mem0 与本地 CPU Embedding，并为未来企业 Embedding 保留 Provider/新集合迁移边界；既有对话必须在
+  默认空白名单、记忆依赖超时或故障时继续运行。
+
+### What
+
+- 从 `93d1a8610` 创建独立 worktree `/Users/kaka/Desktop/intelligent-test-agent-memory-v1` 和分支
+  `codex/qa-agent-memory-v1`；按六个批次增加 `test-agent-memory` 领域模块、MyBatis/Flyway 治理表、Mem0 2.0.3 服务、
+  固定 BGE 512 维离线模型、学习 Outbox、mfg 授权、检索注入、团队审核、Skill 提案、用户/管理 API 和记忆中心页面。
+- 原始聊天仍由现有 OpenCode Session/恢复链路保存；学习 worker 只瞬时读取当前根 Run，Mem0 自定义 history manager 不保存
+  messages。项目知识不进入记忆系统，画像仅为有效记忆汇总视图，Skill 仍走既有文件 WebSocket、Git 和发布流程。
+- 新增 opt-in `deploy/dev/memory-compose.yml` 与 `tools/memory-dev-services.sh`：生成两个 `0600` 运行文件、隔离 pgvector
+  密码、关闭运行期模型联网/telemetry、保留数据卷，并以带鉴权 readiness 的 `UP + rawMessageCount=0` 作为启动门禁。
+  实跑发现繁忙 Docker Desktop 的 CPU 模型加载会晚于普通 health 窗口，已移除 `compose --wait`，改由鉴权 readiness 最多
+  等待 7 分钟，并补充行为回归。
+- `restart-dev-services.sh --with-memory` 在构建成功后才替换标准端口服务；修复跨 worktree 的完整 screen 会话关闭、Java
+  后端进程发现和本 worktree 不可变运行 JAR 归属校验，避免把旧 worktree 的 8080 readiness 误报成当前启动成功。
+- 平台 migration `V20260809120000__create_qa_memory_governance.sql` 已执行并锁定，SHA-256 为
+  `b2ae5639284208be8bc09952d9143c3dd0d8a2bf649b6601aed4225e586af18a`；源码、persistence 嵌套 JAR 与运行应用 JAR
+  字节一致。未修改 `.env*`、generated SDK、OpenCode 源码或 RunEvent SSE。
+
+### How
+
+- Python 合同/单元测试为 14 passed / 1 skipped；真实 memory-service + pgvector + BGE 完成中文 add/search/update/history/
+  delete、进程重启恢复、512 维集合和 `rawMessageCount=0` smoke，合成数据已清理。容器最终为 UID/GID 10004、只读根、
+  `cap_drop=ALL`、`no-new-privileges`，pgvector 为 0.8.1。
+- JDK 25 下记忆相关定向反应堆通过：memory 24、model gateway 17、integration 38、MyBatis 真实 PostgreSQL 空库 migration
+  1 项等均通过；显式临时库完成后已删除，保留的 `.env.test` 数据库由 Flyway 正常升级至 `20260809120000`，白名单为 0。
+- 前端全量为 1886 passed / 1 skipped，agent-web typecheck 与生产 build 通过；真实 Chromium 验证个人/团队/Skill 三个 Tab、
+  evidence drawer、历史 Run 记忆徽标、系统管理、暗色、键盘与窄屏页面。
+- 精确全量 Maven 命令未通过：第三次运行在前 17 个模块成功（其中 memory 24/24）后，既有
+  `DefaultXxlJobAdminContextLauncherTest` 的 `mysql:8.4` Testcontainers 三次都未在 120 秒内完成冷启动，业务断言前报
+  `ContainerLaunchException`，因此 API/persistence/app 被 Maven 跳过；该类独立复核也在同一容器启动阶段失败。此前
+  `XxlJobMysqlMigrationTest` 4/4、readiness 2/2 及受影响定向测试已通过，不能据此把全量结果记为成功。
+- `tools/memory-dev-services-test.sh`、`tools/verify-dev-scripts.sh`、`tools/verify-ai-docs.sh`、Compose config、migration/JAR
+  哈希及 `git diff --check` 通过；使用未修改的绝对路径 `.env.test` 执行计划中的 JDK 25 完整重启命令成功。
+
+### Result
+
+- 当前独立 worktree 的 backend `8080`、frontend `3000`、manager、memory-service `18888` 和 pgvector `15433` 均在运行；
+  backend readiness、前端 HTTP、manager WebSocket、Docker health 和记忆鉴权 readiness 正常，原始 messages 数为 0。
+- 既有用户仍可立即测试普通对话；记忆白名单默认空，不会自动学习或注入。测试记忆能力前需由超级管理员加入用户白名单，
+  并设置固定内部 CHAT 模型或使用已通过 CHAT 探测的内部 Run 模型。
+- 实现与记忆链路已按定向、真实数据面、真实 PostgreSQL 和页面完成验证，但后端全量仍受 Docker/MySQL Testcontainers
+  冷启动超时阻断；此外未使用真实登录凭据执行“两用户、两 Application”的跨会话端到端验收，仍需用户在灰度白名单中验收。
+- 最终保持六个约定的中文提交，不推送、不创建 PR、不合并回发布分支。
