@@ -39,7 +39,7 @@ class MemoryServiceSettings(BaseSettings):
     embedding_revision: str = LOCAL_BGE_REVISION
     embedding_dimension: int = LOCAL_BGE_DIMENSION
     collection_version: str = "v1"
-    request_timeout_seconds: float = Field(default=30.0, gt=0.0, le=180.0)
+    request_timeout_seconds: float = Field(default=120.0, gt=0.0, le=180.0)
     extraction_gateway_url: str | None = None
     max_document_chars: int = Field(default=8_000, ge=1, le=20_000)
     max_extraction_chars: int = Field(default=120_000, ge=1, le=200_000)

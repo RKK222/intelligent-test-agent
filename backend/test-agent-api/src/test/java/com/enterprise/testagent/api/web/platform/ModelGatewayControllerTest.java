@@ -25,6 +25,7 @@ import com.enterprise.testagent.model.gateway.ModelGatewayCaller;
 import com.enterprise.testagent.model.gateway.ModelGatewayForwarder;
 import com.enterprise.testagent.model.gateway.PreparedModelGatewayRequest;
 import com.enterprise.testagent.model.gateway.PreparedModelGatewayMultipartRequest;
+import com.enterprise.testagent.memory.MemoryModelGrantService;
 import org.springframework.http.client.MultipartBodyBuilder;
 import java.time.Instant;
 import java.util.List;
@@ -132,6 +133,47 @@ class ModelGatewayControllerTest {
         assertThat(forwarder.forwardedCaller.userId()).isEqualTo("usr_workflow");
         assertThat(forwarder.forwardedCaller.unifiedAuthId()).isEqualTo("AUTH_WORKFLOW");
         assertThat(forwarder.forwardedCaller.sourceClient()).isEqualTo("workflow");
+    }
+
+    @Test
+    void memoryGrantIsBoundToHeadersModelAndChatCompletionsOnly() {
+        FakeSsoService sso = new FakeSsoService();
+        CapturingForwarder forwarder = new CapturingForwarder();
+        MemoryModelGrantService grants = mock(MemoryModelGrantService.class);
+        MemoryModelGrantService.GrantIdentity identity = new MemoryModelGrantService.GrantIdentity(
+                "usr_memory", "AUTH_MEMORY", "run_memory", "enterprise-chat");
+        when(grants.authenticate("mfg_short_lived_12345678901234567890", "usr_memory", "run_memory"))
+                .thenReturn(identity);
+        ModelGatewayController controller = new ModelGatewayController(
+                sso, new ModelGatewayCatalogService(new Providers(), new Models()), forwarder);
+        controller.setMemoryModelGrants(grants);
+        WebTestClient client = WebTestClient.bindToController(controller)
+                .webFilter(new TraceIdWebFilter())
+                .controllerAdvice(new GlobalExceptionHandler())
+                .build();
+
+        client.post()
+                .uri(ModelGatewayController.BASE_PATH + "/chat/completions")
+                .header("Authorization", "Bearer mfg_short_lived_12345678901234567890")
+                .header("X-Memory-User-Id", "usr_memory")
+                .header("X-Memory-Run-Id", "run_memory")
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .bodyValue("{\"model\":\"enterprise-chat\",\"messages\":[]}")
+                .exchange()
+                .expectStatus().isOk();
+
+        verify(grants).requireModel(identity, "enterprise-chat");
+        assertThat(forwarder.forwardedCaller.userId()).isEqualTo("usr_memory");
+        assertThat(forwarder.forwardedCaller.unifiedAuthId()).isEqualTo("AUTH_MEMORY");
+        assertThat(forwarder.forwardedCaller.sourceClient()).isEqualTo("memory");
+
+        client.get()
+                .uri(ModelGatewayController.MODELS_PATH)
+                .header("Authorization", "Bearer mfg_short_lived_12345678901234567890")
+                .header("X-Memory-User-Id", "usr_memory")
+                .header("X-Memory-Run-Id", "run_memory")
+                .exchange()
+                .expectStatus().isUnauthorized();
     }
 
     private static final class CapturingForwarder implements ModelGatewayForwarder {

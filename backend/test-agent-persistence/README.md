@@ -231,8 +231,10 @@ RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线�
 
 - `V20260809120000__create_qa_memory_governance.sql` 一次建立个人/团队治理、最多 200 字证据摘要、Application 审核、学习 Outbox、Run 使用记录、灰度白名单、Skill 草稿和固定 CHAT 设置。
 - `QaMemoryMapper.xml` 是全部关系型 SQL 的唯一实现，包含乐观版本、团队成员实时过滤、无原文 Outbox 幂等、租约认领和 PostgreSQL/H2 双分支。
+- `MemoryLearningEvidenceMapper.xml` 只按 `run_id` 从既有 `session_messages` 读取 USER/ASSISTANT 文本，限制 20 条且不读取 parts、工具输出或凭据；它不是聊天镜像。
+- `RedisMemoryModelGrantStore` 在 `test-agent:qa-memory:model-grant:*` 保存一次性授权的结构化可信摘要，key 只含 grant SHA-256；Lua get-and-delete 保证并发消费单胜者并保留短 TTL。
 - 完整记忆正文、向量与历史不进入平台 PostgreSQL；`display_summary` 仅用于 Mem0 不可用时的列表降级，不得注入 Agent。
-- `MyBatisQaMemoryRepositoryIntegrationTest` 覆盖 migration、治理读写、乐观冲突、Outbox 幂等/认领和无 Prompt/回答列边界。
+- `MyBatisQaMemoryRepositoryIntegrationTest` 覆盖 migration、治理读写、乐观冲突、Outbox 幂等/认领、受限学习证据读取和无 Prompt/回答列边界。
 
 - `RedisLobehubSsoStore` 把 ticket、nonce 和 grant 摘要限制在 `test-agent:lobehub-sso:*`，使用 Lua 原子消费、
   nonce 占用、单用户 grant 轮换和撤销；Redis value 不保存原始 ticket/grant。

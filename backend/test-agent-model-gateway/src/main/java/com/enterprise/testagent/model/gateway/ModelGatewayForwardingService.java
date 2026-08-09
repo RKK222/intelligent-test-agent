@@ -260,7 +260,7 @@ public class ModelGatewayForwardingService implements ModelGatewayForwarder {
 
     /** workflow长上下文模型允许更长冷启动；交互式LobeHub仍保持30秒快速失败。 */
     static Duration firstResponseTimeout(ModelGatewayCaller caller) {
-        return "workflow".equals(caller.sourceClient())
+        return "workflow".equals(caller.sourceClient()) || "memory".equals(caller.sourceClient())
                 ? WORKFLOW_FIRST_RESPONSE_TIMEOUT
                 : FIRST_RESPONSE_TIMEOUT;
     }

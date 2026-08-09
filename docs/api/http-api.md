@@ -3875,6 +3875,10 @@ Base URL：`/api/internal/platform/toolbox`。两个接口都要求平台登录�
 - `GET/PATCH /settings`：固定抽取模型与“当前内部 Run 模型回退”开关，修改携带 `expectedVersion`。
 - `GET/POST/DELETE /whitelist...`：分页查询、启用和移除用户白名单；移除不会删除记忆，但页面、学习和检索立即停止。
 
+运行时行为不新增 HTTP 或 RunEvent 协议：成功人工根 Run 只写无原文学习 Outbox，异步任务通过现有 Session 恢复表读取本轮 USER/ASSISTANT 内容。固定 CHAT 模型优先；只有当前 Run 模型仍属于内部模型目录且 CHAT 探测有效时才可回退。模型网关的 `mfg_` grant 绑定用户、Run、公开模型和短 TTL，只允许调用 `/chat/completions`，且消费一次后立即失效。
+
+隐式个人偏好在 90 天内累计 3 个不同 Session 后生效；明确要求一次生效，临时要求不沉淀。Run 启动前在 600ms 总预算内检索并重新校验治理状态，最多注入 6 条、约 800 tokens；失败时不带记忆继续执行。只有实际进入 system 上下文的条目会写 Run 使用记录，当前输入和 Application 规则始终高于历史记忆。
+
 新增稳定错误码为 `MEMORY_UNAVAILABLE(503)` 与 `MEMORY_TIMEOUT(504)`。所有成功/失败响应继续使用统一 envelope 与 traceId，日志不得记录记忆正文、证据原文、模型 grant 或 service API key。
 
 ### 健康检查

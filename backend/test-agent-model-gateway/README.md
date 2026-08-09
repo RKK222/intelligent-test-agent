@@ -13,7 +13,7 @@
   与 trace header；网络和非 2xx 只返回安全失败结果。
 - `ModelGatewayForwardingService` 支持 JSON、SSE 与 transcription multipart，执行能力门禁、流式取消、分阶段
   timeout、固定上游错误、usage 有界提取和每日增量。连接超时为10秒；交互式LobeHub响应头等待30秒，
-  Workflow长上下文请求允许120秒冷启动；首个响应块与后续空闲仍分别限制为30秒和120秒。
+  Workflow 与 Memory 抽取请求允许120秒冷启动；首个响应块与后续空闲仍分别限制为30秒和120秒。
 - `OpenAiUpstreamSupport` 统一安全拼接 base URL、清除客户端同名可信 Header、注入供应商 Token/UCID/trace，
   以及过滤响应 hop-by-hop/sensitive header；既有 OpenCode proxy 复用它，但 Responses 转换仍留在原入口。
 
@@ -40,3 +40,5 @@ mvn -q -DappLogDir=target/log -pl test-agent-model-gateway -am test
 `ModelGatewayForwardingServiceTest` 覆盖九项能力门禁、JSON/SSE/multipart、错误脱敏和 usage；
 上游错误正文被丢弃时还用 Netty 引用计数锁定 `DataBuffer` 已释放；`ModelCapabilityProbeServiceTest` 覆盖全部
 探测端点；`OpenAiUpstreamSupportTest` 锁定 OpenCode 复用契约。
+
+Memory 调用只接受 `/chat/completions` 上的短期 `mfg_` grant。API 层必须同时校验 `X-Memory-User-Id`、`X-Memory-Run-Id` 与请求公开模型 ID，调用身份固定标记为 `memory`；不得把该 grant 用于模型目录、Embedding、音频或其它端点。

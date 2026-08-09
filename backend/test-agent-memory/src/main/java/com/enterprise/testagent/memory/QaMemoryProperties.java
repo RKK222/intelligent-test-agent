@@ -12,6 +12,7 @@ public class QaMemoryProperties {
     private String serviceUrl = "http://127.0.0.1:18888";
     private String serviceApiKey = "";
     private Duration requestTimeout = Duration.ofSeconds(5);
+    private Duration extractionTimeout = Duration.ofSeconds(130);
     private Duration retrievalTimeout = Duration.ofMillis(600);
     private Duration grantTtl = Duration.ofMinutes(2);
     private Duration implicitWindow = Duration.ofDays(90);
@@ -20,9 +21,13 @@ public class QaMemoryProperties {
     private int teamUserThreshold = 2;
     private int maxInjectedMemories = 6;
     private int maxContextTokens = 800;
+    private int retrievalTopKPerScope = 12;
+    private double retrievalThreshold = 0.20d;
+    private double candidateMatchThreshold = 0.86d;
+    private int learningBatchSize = 8;
     private int learningMaxAttempts = 8;
     private Duration learningPollInterval = Duration.ofSeconds(5);
-    private Duration learningLease = Duration.ofMinutes(2);
+    private Duration learningLease = Duration.ofMinutes(5);
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
@@ -32,6 +37,8 @@ public class QaMemoryProperties {
     public void setServiceApiKey(String serviceApiKey) { this.serviceApiKey = serviceApiKey; }
     public Duration getRequestTimeout() { return requestTimeout; }
     public void setRequestTimeout(Duration requestTimeout) { this.requestTimeout = positive(requestTimeout, "requestTimeout"); }
+    public Duration getExtractionTimeout() { return extractionTimeout; }
+    public void setExtractionTimeout(Duration extractionTimeout) { this.extractionTimeout = positive(extractionTimeout, "extractionTimeout"); }
     public Duration getRetrievalTimeout() { return retrievalTimeout; }
     public void setRetrievalTimeout(Duration retrievalTimeout) { this.retrievalTimeout = positive(retrievalTimeout, "retrievalTimeout"); }
     public Duration getGrantTtl() { return grantTtl; }
@@ -48,6 +55,14 @@ public class QaMemoryProperties {
     public void setMaxInjectedMemories(int value) { maxInjectedMemories = positive(value, "maxInjectedMemories"); }
     public int getMaxContextTokens() { return maxContextTokens; }
     public void setMaxContextTokens(int value) { maxContextTokens = positive(value, "maxContextTokens"); }
+    public int getRetrievalTopKPerScope() { return retrievalTopKPerScope; }
+    public void setRetrievalTopKPerScope(int value) { retrievalTopKPerScope = positive(value, "retrievalTopKPerScope"); }
+    public double getRetrievalThreshold() { return retrievalThreshold; }
+    public void setRetrievalThreshold(double value) { retrievalThreshold = probability(value, "retrievalThreshold"); }
+    public double getCandidateMatchThreshold() { return candidateMatchThreshold; }
+    public void setCandidateMatchThreshold(double value) { candidateMatchThreshold = probability(value, "candidateMatchThreshold"); }
+    public int getLearningBatchSize() { return learningBatchSize; }
+    public void setLearningBatchSize(int value) { learningBatchSize = positive(value, "learningBatchSize"); }
     public int getLearningMaxAttempts() { return learningMaxAttempts; }
     public void setLearningMaxAttempts(int value) { learningMaxAttempts = positive(value, "learningMaxAttempts"); }
     public Duration getLearningPollInterval() { return learningPollInterval; }
@@ -65,6 +80,13 @@ public class QaMemoryProperties {
     private static int positive(int value, String field) {
         if (value < 1) {
             throw new IllegalArgumentException(field + " must be positive");
+        }
+        return value;
+    }
+
+    private static double probability(double value, String field) {
+        if (Double.isNaN(value) || value < 0.0d || value > 1.0d) {
+            throw new IllegalArgumentException(field + " must be between 0 and 1");
         }
         return value;
     }

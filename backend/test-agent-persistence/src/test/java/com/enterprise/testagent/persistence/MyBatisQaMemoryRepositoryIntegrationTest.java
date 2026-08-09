@@ -4,12 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.enterprise.testagent.domain.memory.MemoryId;
 import com.enterprise.testagent.domain.memory.MemoryLearningJob;
+import com.enterprise.testagent.domain.memory.MemoryLearningEvidenceRepository;
 import com.enterprise.testagent.domain.memory.MemoryScope;
 import com.enterprise.testagent.domain.memory.MemorySource;
 import com.enterprise.testagent.domain.memory.MemoryStatus;
 import com.enterprise.testagent.domain.memory.QaMemory;
 import com.enterprise.testagent.domain.memory.QaMemoryRepository;
 import com.enterprise.testagent.domain.memory.QaTaskType;
+import com.enterprise.testagent.persistence.mybatis.MemoryLearningEvidenceMapper;
+import com.enterprise.testagent.persistence.mybatis.MyBatisMemoryLearningEvidenceRepository;
 import com.enterprise.testagent.persistence.mybatis.MyBatisQaMemoryRepository;
 import com.enterprise.testagent.persistence.mybatis.QaMemoryMapper;
 import java.time.Instant;
@@ -33,6 +36,7 @@ class MyBatisQaMemoryRepositoryIntegrationTest {
     private static final Instant NOW = Instant.parse("2026-08-09T12:00:00Z");
     private SingleConnectionDataSource dataSource;
     private QaMemoryRepository repository;
+    private MemoryLearningEvidenceRepository evidenceRepository;
     private JdbcClient jdbc;
 
     @BeforeEach
@@ -44,6 +48,8 @@ class MyBatisQaMemoryRepositoryIntegrationTest {
                 "sa", "", true);
         Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").target("9").load().migrate();
         new ResourceDatabasePopulator(new ClassPathResource(
+                "db/migration/V16__add_message_and_run_usage_fields.sql")).execute(dataSource);
+        new ResourceDatabasePopulator(new ClassPathResource(
                 "db/migration/V20260809120000__create_qa_memory_governance.sql")).execute(dataSource);
         jdbc = JdbcClient.create(dataSource);
         seedParents();
@@ -54,6 +60,9 @@ class MyBatisQaMemoryRepositoryIntegrationTest {
         SqlSessionFactory sessionFactory = factory.getObject();
         QaMemoryMapper mapper = new SqlSessionTemplate(sessionFactory).getMapper(QaMemoryMapper.class);
         repository = new MyBatisQaMemoryRepository(mapper);
+        MemoryLearningEvidenceMapper evidenceMapper = new SqlSessionTemplate(sessionFactory)
+                .getMapper(MemoryLearningEvidenceMapper.class);
+        evidenceRepository = new MyBatisMemoryLearningEvidenceRepository(evidenceMapper);
     }
 
     @AfterEach
@@ -97,6 +106,25 @@ class MyBatisQaMemoryRepositoryIntegrationTest {
             return lower.contains("prompt") || lower.contains("message_content") || lower.contains("answer");
         });
         assertThat(jdbc.sql("select count(*) from qa_memory_whitelist").query(Long.class).single()).isZero();
+    }
+
+    @Test
+    void learningEvidenceReadsOnlyExistingUserAndAssistantMessagesForTheRun() {
+        jdbc.sql("""
+                insert into session_messages(message_id, session_id, role, content, trace_id, created_at, run_id)
+                values
+                  ('msg_user', 'ses_memory', 'USER', '必须覆盖异常场景', 'trace_memory', :now, 'run_memory'),
+                  ('msg_assistant', 'ses_memory', 'ASSISTANT', '已覆盖异常场景', 'trace_memory', :later, 'run_memory'),
+                  ('msg_tool', 'ses_memory', 'TOOL', 'secret tool output', 'trace_memory', :later, 'run_memory')
+                """).param("now", NOW).param("later", NOW.plusSeconds(1)).update();
+
+        assertThat(evidenceRepository.findByRunId("run_memory")).hasValueSatisfying(evidence -> {
+            assertThat(evidence.messages()).extracting(item -> item.role())
+                    .containsExactly("user", "assistant");
+            assertThat(evidence.messages()).extracting(item -> item.content())
+                    .containsExactly("必须覆盖异常场景", "已覆盖异常场景")
+                    .doesNotContain("secret tool output");
+        });
     }
 
     private QaMemory personalMemory(long version, MemoryStatus status, Instant updatedAt) {

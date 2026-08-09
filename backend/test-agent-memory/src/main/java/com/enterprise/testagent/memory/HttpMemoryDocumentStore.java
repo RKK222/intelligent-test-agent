@@ -30,6 +30,7 @@ public final class HttpMemoryDocumentStore implements MemoryDocumentStore {
     private final URI serviceBase;
     private final String serviceApiKey;
     private final Duration timeout;
+    private final Duration extractionTimeout;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
 
@@ -46,6 +47,7 @@ public final class HttpMemoryDocumentStore implements MemoryDocumentStore {
         this.serviceBase = validateBaseUri(properties.getServiceUrl());
         this.serviceApiKey = requireApiKey(properties.getServiceApiKey());
         this.timeout = properties.getRequestTimeout();
+        this.extractionTimeout = properties.getExtractionTimeout();
         this.objectMapper = Objects.requireNonNull(objectMapper);
         this.httpClient = Objects.requireNonNull(httpClient);
     }
@@ -122,7 +124,8 @@ public final class HttpMemoryDocumentStore implements MemoryDocumentStore {
         body.put("taskType", command.taskType().name());
         body.put("messages", command.messages().stream()
                 .map(message -> Map.of("role", message.role(), "content", message.content())).toList());
-        JsonNode rows = request("POST", "/extract", body, false).path("data").path("candidates");
+        JsonNode rows = request("POST", "/extract", body, false, true, extractionTimeout)
+                .path("data").path("candidates");
         List<ExtractedCandidate> result = new ArrayList<>();
         rows.forEach(row -> result.add(new ExtractedCandidate(
                 text(row, "content"), text(row, "scopeSuggestion"), taskTypes(row.path("taskTypes")),
@@ -150,9 +153,19 @@ public final class HttpMemoryDocumentStore implements MemoryDocumentStore {
 
     private JsonNode request(
             String method, String path, Map<String, ?> body, boolean allowNotFound, boolean authenticate) {
+        return request(method, path, body, allowNotFound, authenticate, timeout);
+    }
+
+    private JsonNode request(
+            String method,
+            String path,
+            Map<String, ?> body,
+            boolean allowNotFound,
+            boolean authenticate,
+            Duration requestTimeout) {
         try {
             HttpRequest.Builder builder = HttpRequest.newBuilder(serviceBase.resolve(API_PREFIX + path))
-                    .timeout(timeout)
+                    .timeout(requestTimeout)
                     .header("Accept", "application/json");
             if (authenticate) {
                 builder.header("X-Memory-Service-Key", serviceApiKey);
@@ -198,7 +211,8 @@ public final class HttpMemoryDocumentStore implements MemoryDocumentStore {
                 node.path("metadata"), objectMapper.getTypeFactory()
                         .constructMapType(Map.class, String.class, Object.class));
         return new StoredDocument(text(node, "id"), text(node, "content"),
-                metadata == null ? Map.of() : Map.copyOf(metadata), instant(node, "updatedAt"));
+                metadata == null ? Map.of() : Map.copyOf(metadata), instant(node, "updatedAt"),
+                node.hasNonNull("score") ? node.path("score").asDouble() : null);
     }
 
     private static URI validateBaseUri(String value) {

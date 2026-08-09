@@ -18,6 +18,14 @@ QA Agent 长期记忆的业务编排模块。它负责个人记忆、Application
 - 原始聊天只允许作为抽取请求的瞬时输入，不得调用派生记忆写入接口保存整段消息；正文、模型短期授权和服务密钥不得进入日志或 `toString()`。
 - Python 服务的固定版本、离线模型和运行说明见仓库根目录 `memory-service/README.md`。
 
+## 自动学习与运行时复用
+
+- 只有灰度白名单用户的成功人工根 Run 会写学习 Outbox；Outbox 仅保存 Run、Session、Workspace、用户、Application 和模型定位字段。worker 随后从既有 `session_messages` 恢复链瞬时读取 USER/ASSISTANT 内容，忽略工具输出，并把抽取失败限制在异步重试链路。
+- 抽取模型按“系统管理固定 CHAT 模型 → 当前 Run 内部 CHAT 模型”选择；回退前必须再次通过内部目录与 CHAT 探测。每次调用签发绑定用户、Run、模型且只能消费一次的 `mfg_` grant，Redis 只以 SHA-256 摘要寻址。
+- 明确要求或手工记忆一次生效；隐式偏好必须在 90 天内由 3 个不同 Session 支撑。临时要求丢弃；明确替代会封存旧版本，隐式冲突进入待确认状态。
+- Run 启动前并行搜索个人全局、个人 Application 和团队 Application 范围，重新校验白名单、成员关系、状态、任务类型和正文安全。整个检索预算默认 600ms，最多注入 6 条、约 800 tokens；超时或任一依赖失败都返回空上下文继续原 Run。
+- 只有已选中、已写入批量使用记录的条目才进入 `AgentStartRunCommand.system`。当前输入与 Application 规则始终优先，注入内容不得被解释为项目业务事实。
+
 ## 允许依赖
 
 - `test-agent-common`、`test-agent-domain`、`test-agent-agent-runtime`、`test-agent-model-gateway`。

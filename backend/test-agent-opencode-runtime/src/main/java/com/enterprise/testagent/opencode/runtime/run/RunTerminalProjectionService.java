@@ -1,5 +1,6 @@
 package com.enterprise.testagent.opencode.runtime.run;
 
+import com.enterprise.testagent.agent.runtime.AgentRootRunTerminalObserver;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.event.RunEventDraft;
@@ -55,6 +56,7 @@ public class RunTerminalProjectionService {
     private final RunConversationSummarizer summarizer;
     private final RunTerminalRetryStore retryStore;
     private final Clock clock;
+    private List<AgentRootRunTerminalObserver> terminalObservers = List.of();
 
     /** 保留给既有单元测试的兼容构造；生产装配始终注入 Redis 重试端口。 */
     public RunTerminalProjectionService(
@@ -168,6 +170,10 @@ public class RunTerminalProjectionService {
                     && terminalProjectionVersion > 0) {
                 runtimeStore.ackTerminalProjection(runId, terminalProjectionVersion);
             }
+            if (result == RunTerminalProjectionResult.APPLIED
+                    || result == RunTerminalProjectionResult.VERSION_CONFLICT) {
+                notifyTerminalObservers(runId, terminalStatus, traceId);
+            }
             return result;
         } catch (RuntimeException databaseFailure) {
             if (retryStore == null) {
@@ -181,6 +187,25 @@ public class RunTerminalProjectionService {
                     runId.value(),
                     databaseFailure.getClass().getSimpleName());
             return RunTerminalProjectionResult.TERMINAL_PENDING_DB;
+        }
+    }
+
+    /** 可选观察者保持投影事务边界稳定；后处理失败由唯一 Outbox 键和下一次终态纠正收敛。 */
+    @Autowired(required = false)
+    void setTerminalObservers(List<AgentRootRunTerminalObserver> observers) {
+        this.terminalObservers = observers == null ? List.of() : List.copyOf(observers);
+    }
+
+    private void notifyTerminalObservers(RunId runId, RunStatus status, String traceId) {
+        for (AgentRootRunTerminalObserver observer : terminalObservers) {
+            try {
+                observer.onTerminal(runId, status, traceId);
+            } catch (RuntimeException failure) {
+                LOGGER.warn(
+                        "Run terminal projection observer failed open, runId={}, traceId={}, observerType={}, exceptionType={}",
+                        runId.value(), traceId, observer.getClass().getSimpleName(),
+                        failure.getClass().getSimpleName());
+            }
         }
     }
 

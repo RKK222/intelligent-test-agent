@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.enterprise.testagent.agent.runtime.AgentRootRunTerminalObserver;
 import com.enterprise.testagent.domain.event.RunEventDraft;
 import com.enterprise.testagent.domain.event.RunEventScopeContext;
 import com.enterprise.testagent.domain.event.RunEventType;
@@ -76,6 +77,8 @@ class RunTerminalProjectionServiceTest {
         when(persistence.persistTerminal(any())).thenReturn(RunTerminalProjectionResult.APPLIED);
         RunTerminalProjectionService service = new RunTerminalProjectionService(
                 runtimeStore, persistence, new RunConversationSummarizer());
+        AgentRootRunTerminalObserver terminalObserver = mock(AgentRootRunTerminalObserver.class);
+        service.setTerminalObservers(List.of(terminalObserver));
 
         assertThat(service.project(
                 RUN_ID,
@@ -111,6 +114,7 @@ class RunTerminalProjectionServiceTest {
                 .isEqualTo(RunSummaryIdentifiers.assistant(RUN_ID));
         assertThat(projection.lastRemoteMessageId()).isEqualTo("msg_root");
         assertThat(projection.lastRemotePartId()).isEqualTo("part_root");
+        verify(terminalObserver).onTerminal(RUN_ID, RunStatus.SUCCEEDED, "trace_terminal");
     }
 
     @Test

@@ -222,6 +222,8 @@ def create_app(dependencies: AppDependencies) -> FastAPI:
             raw = await dependencies.extractor.extract(
                 model=command.model,
                 grant=command.model_grant.get_secret_value(),
+                user_id=command.user_id,
+                run_id=command.run_id,
                 messages=[message.model_dump() for message in command.messages],
                 task_type=command.task_type,
                 application_id=command.application_id,

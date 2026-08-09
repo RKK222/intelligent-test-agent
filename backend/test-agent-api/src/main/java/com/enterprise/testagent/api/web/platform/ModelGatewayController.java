@@ -12,6 +12,7 @@ import com.enterprise.testagent.model.gateway.ModelGatewayCaller;
 import com.enterprise.testagent.model.gateway.ModelGatewayCatalogService;
 import com.enterprise.testagent.model.gateway.ModelGatewayForwarder;
 import com.enterprise.testagent.model.gateway.ModelGatewayModelView;
+import com.enterprise.testagent.memory.MemoryModelGrantService;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +40,7 @@ public class ModelGatewayController {
     private final WorkflowCapabilityApplicationService workflowCapabilities;
     private final ModelGatewayCatalogService catalogService;
     private final ModelGatewayForwarder forwardingService;
+    private MemoryModelGrantService memoryModelGrants;
 
     @Autowired
     public ModelGatewayController(
@@ -97,11 +99,17 @@ public class ModelGatewayController {
                     return readBody(exchange)
                             .flatMap(body -> Mono.fromCallable(() -> forwardingService.prepare(exchange, body))
                                     .subscribeOn(Schedulers.boundedElastic()))
-                            .flatMap(prepared -> forwardingService.forward(
-                                    exchange,
-                                    prepared,
-                                    new ModelGatewayCaller(identity.userId(), identity.unifiedAuthId(), identity.source()),
-                                    traceId));
+                            .flatMap(prepared -> {
+                                if (identity.memoryGrant() != null) {
+                                    memoryModelGrants.requireModel(identity.memoryGrant(), prepared.publicModelId());
+                                }
+                                return forwardingService.forward(
+                                        exchange,
+                                        prepared,
+                                        new ModelGatewayCaller(
+                                                identity.userId(), identity.unifiedAuthId(), identity.source()),
+                                        traceId);
+                            });
                 });
     }
 
@@ -123,15 +131,32 @@ public class ModelGatewayController {
 
     private GatewayIdentity authenticate(ServerWebExchange exchange) {
         String grant = AuthWebSupport.extractBearerToken(exchange);
+        if (grant != null && grant.startsWith("mfg_")) {
+            if (memoryModelGrants == null
+                    || !exchange.getRequest().getURI().getRawPath().endsWith("/chat/completions")) {
+                throw new PlatformException(ErrorCode.UNAUTHENTICATED, "记忆抽取模型委托不可用");
+            }
+            String userId = exchange.getRequest().getHeaders().getFirst("X-Memory-User-Id");
+            String runId = exchange.getRequest().getHeaders().getFirst("X-Memory-Run-Id");
+            MemoryModelGrantService.GrantIdentity identity = memoryModelGrants.authenticate(grant, userId, runId);
+            return new GatewayIdentity(
+                    identity.userId(), identity.unifiedAuthId(), "memory", identity);
+        }
         if (grant != null && grant.startsWith("wfg_")) {
             if (workflowCapabilities == null) {
                 throw new PlatformException(ErrorCode.UNAUTHENTICATED, "workflow模型委托不可用");
             }
             WorkflowModelIdentity identity = workflowCapabilities.authenticateModelGrant(grant);
-            return new GatewayIdentity(identity.userId(), identity.unifiedAuthId(), "workflow");
+            return new GatewayIdentity(identity.userId(), identity.unifiedAuthId(), "workflow", null);
         }
         LobehubModelIdentity identity = ssoService.authenticateModelGrant(grant);
-        return new GatewayIdentity(identity.userId(), identity.unifiedAuthId(), "lobehub");
+        return new GatewayIdentity(identity.userId(), identity.unifiedAuthId(), "lobehub", null);
+    }
+
+    /** 可选方法注入保持既有 Controller 单元测试构造器稳定；生产环境由 memory 模块提供。 */
+    @Autowired(required = false)
+    void setMemoryModelGrants(MemoryModelGrantService memoryModelGrants) {
+        this.memoryModelGrants = memoryModelGrants;
     }
 
     private Mono<byte[]> readBody(ServerWebExchange exchange) {
@@ -167,7 +192,11 @@ public class ModelGatewayController {
                 model.capabilities().stream().map(capability -> capability.name().toLowerCase()).sorted().toList());
     }
 
-    private record GatewayIdentity(String userId, String unifiedAuthId, String source) {
+    private record GatewayIdentity(
+            String userId,
+            String unifiedAuthId,
+            String source,
+            MemoryModelGrantService.GrantIdentity memoryGrant) {
     }
 
     /** OpenAI 模型目录外壳，保持企业适配器可直接消费。 */

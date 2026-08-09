@@ -17,6 +17,7 @@ import org.apache.ibatis.annotations.Param;
 @Mapper
 public interface QaMemoryMapper {
     MemoryRow findMemory(@Param("memoryId") String memoryId);
+    MemoryRow findMemoryByMem0Id(@Param("mem0MemoryId") String mem0MemoryId);
     List<MemoryRow> listPersonal(@Param("userId") String userId,
                                  @Param("applicationId") String applicationId,
                                  @Param("status") String status,

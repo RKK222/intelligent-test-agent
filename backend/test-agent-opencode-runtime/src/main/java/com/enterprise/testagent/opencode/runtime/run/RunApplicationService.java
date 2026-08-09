@@ -11,6 +11,9 @@ import com.enterprise.testagent.agent.runtime.AgentPromptPart;
 import com.enterprise.testagent.agent.runtime.AgentRuntime;
 import com.enterprise.testagent.agent.runtime.AgentRuntimeCommand;
 import com.enterprise.testagent.agent.runtime.AgentRuntimeRegistry;
+import com.enterprise.testagent.agent.runtime.AgentRootRunTerminalObserver;
+import com.enterprise.testagent.agent.runtime.AgentRunPromptContext;
+import com.enterprise.testagent.agent.runtime.AgentRunSystemPromptContributor;
 import com.enterprise.testagent.agent.runtime.AgentSessionMessage;
 import com.enterprise.testagent.agent.runtime.AgentStartRunCommand;
 import com.enterprise.testagent.agent.runtime.AgentStreamEventsCommand;
@@ -184,6 +187,8 @@ public class RunApplicationService {
     private RunDispatchAcceptanceProbe runDispatchAcceptanceProbe;
     private List<RunRootSessionErrorObserver> rootSessionErrorObservers = List.of();
     private RunResendCancellationService resendCancellationService;
+    private List<AgentRunSystemPromptContributor> runSystemPromptContributors = List.of();
+    private List<AgentRootRunTerminalObserver> rootRunTerminalObservers = List.of();
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
     /**
@@ -1130,7 +1135,7 @@ public class RunApplicationService {
                     promptParts,
                     dispatchMessageId,
                     opencodeAgent,
-                    null,
+                    systemPrompt(running, prompt, input.command() != null, traceId),
                     modelSelection.providerId(),
                     modelSelection.modelId(),
                     input.variant(),
@@ -1389,7 +1394,7 @@ public class RunApplicationService {
                         promptParts,
                         dispatchMessageId,
                         opencodeAgent,
-                        null,
+                        systemPrompt(running, prompt, input.command() != null, traceId),
                         modelSelection.providerId(),
                         modelSelection.modelId(),
                         input.variant(),
@@ -2783,6 +2788,7 @@ public class RunApplicationService {
                                         "sessionID", remoteSessionId),
                                 storageMode);
                         snapshotService.persistRunSnapshot(agentId, saved, traceId);
+                        notifyRootRunTerminalObservers(saved.runId(), saved.status(), traceId);
                     });
         });
     }
@@ -3270,6 +3276,53 @@ public class RunApplicationService {
         this.resendCancellationService = cancellationService;
     }
 
+    /** 启动前扩展只贡献受控 system 上下文；任一扩展失败时保持原 Run 无上下文继续。 */
+    @Autowired(required = false)
+    void setRunSystemPromptContributors(List<AgentRunSystemPromptContributor> contributors) {
+        this.runSystemPromptContributors = contributors == null ? List.of() : List.copyOf(contributors);
+    }
+
+    /** 根 Run 终态观察者只能执行后处理，失败不能改变已提交的终态。 */
+    @Autowired(required = false)
+    void setRootRunTerminalObservers(List<AgentRootRunTerminalObserver> observers) {
+        this.rootRunTerminalObservers = observers == null ? List.of() : List.copyOf(observers);
+    }
+
+    private String systemPrompt(Run run, String prompt, boolean command, String traceId) {
+        if (command || runSystemPromptContributors.isEmpty()) {
+            return null;
+        }
+        AgentRunPromptContext context = new AgentRunPromptContext(run, prompt, false, traceId);
+        List<String> additions = new ArrayList<>();
+        for (AgentRunSystemPromptContributor contributor : runSystemPromptContributors) {
+            try {
+                contributor.contribute(context)
+                        .map(String::trim)
+                        .filter(value -> !value.isEmpty())
+                        .ifPresent(additions::add);
+            } catch (RuntimeException failure) {
+                LOGGER.warn(
+                        "Run system prompt contributor failed open, runId={}, traceId={}, contributorType={}, exceptionType={}",
+                        run.runId().value(), traceId, contributor.getClass().getSimpleName(),
+                        failure.getClass().getSimpleName());
+            }
+        }
+        return additions.isEmpty() ? null : String.join("\n\n", additions);
+    }
+
+    private void notifyRootRunTerminalObservers(RunId runId, RunStatus status, String traceId) {
+        for (AgentRootRunTerminalObserver observer : rootRunTerminalObservers) {
+            try {
+                observer.onTerminal(runId, status, traceId);
+            } catch (RuntimeException failure) {
+                LOGGER.warn(
+                        "Root Run terminal observer failed open, runId={}, traceId={}, observerType={}, exceptionType={}",
+                        runId.value(), traceId, observer.getClass().getSimpleName(),
+                        failure.getClass().getSimpleName());
+            }
+        }
+    }
+
     private record LegacyScheduledAnchorClaim(
             Run run,
             String dispatchMessageId,
@@ -3740,6 +3793,7 @@ public class RunApplicationService {
             Run saved = runRepository.save(terminal);
             runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(eventDraft), storageMode);
             snapshotService.persistRunSnapshot(agentId, saved, eventDraft.traceId());
+            notifyRootRunTerminalObservers(saved.runId(), saved.status(), eventDraft.traceId());
             notifyRootSessionErrorObservers(saved, eventDraft);
             return;
         }

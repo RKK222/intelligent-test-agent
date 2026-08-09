@@ -31,11 +31,17 @@ public interface MemoryDocumentStore {
         }
     }
 
-    record StoredDocument(String id, String content, Map<String, Object> metadata, Instant updatedAt) {
+    record StoredDocument(
+            String id, String content, Map<String, Object> metadata, Instant updatedAt, Double score) {
+        public StoredDocument(String id, String content, Map<String, Object> metadata, Instant updatedAt) {
+            this(id, content, metadata, updatedAt, null);
+        }
+
         @Override
         public String toString() {
             return "StoredDocument[id=" + id + ", metadataKeys="
-                    + (metadata == null ? List.of() : metadata.keySet()) + ", updatedAt=" + updatedAt + "]";
+                    + (metadata == null ? List.of() : metadata.keySet()) + ", updatedAt=" + updatedAt
+                    + ", score=" + score + "]";
         }
     }
 

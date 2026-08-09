@@ -14,6 +14,7 @@
 - `AgentRuntime.sessionExists` 用于在复用历史 binding 前校验远端会话是否仍存在；opencode 实现会把远端 404 转成 `false`，由上层 resolver 决定是否重建。
 - `AgentSessionMessagesResult` 保留远端 projected messages 的 `previousCursor/nextCursor`，供 runtime 快照恢复按页拉取，不把具体 opencode SDK DTO 暴露给业务层。
 - 提供 `OtherAgentRuntime` 抽象占位类，供后续其他 agent 实现继承；本次不注册为可调用 Spring Bean。
+- `AgentRunSystemPromptContributor` 与 `AgentRootRunTerminalObserver` 是不感知具体记忆实现的窄扩展点：前者只在普通根 Run 启动前贡献受控 system 片段，后者只观察已提交终态；扩展异常必须由编排层 fail-open，不能改变 Run 结果。
 
 ## 测试覆盖
 

@@ -27,6 +27,8 @@ class Extractor(Protocol):
         *,
         model: str,
         grant: str,
+        user_id: str,
+        run_id: str,
         messages: list[dict[str, str]],
         task_type: str,
         application_id: str | None,
@@ -59,6 +61,8 @@ class ModelGatewayExtractor:
         *,
         model: str,
         grant: str,
+        user_id: str,
+        run_id: str,
         messages: list[dict[str, str]],
         task_type: str,
         application_id: str | None,
@@ -70,6 +74,8 @@ class ModelGatewayExtractor:
         if not re.fullmatch(r"mfg_[A-Za-z0-9_-]{20,256}", grant):
             raise PermissionError("记忆模型授权格式无效")
         context = {
+            "userId": user_id,
+            "runId": run_id,
             "taskType": task_type,
             "applicationId": application_id,
             "messages": messages,
@@ -91,7 +97,12 @@ class ModelGatewayExtractor:
         try:
             response = await self.client.post(
                 f"{base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {grant}", "X-Trace-Id": trace_id},
+                headers={
+                    "Authorization": f"Bearer {grant}",
+                    "X-Trace-Id": trace_id,
+                    "X-Memory-User-Id": str(context.get("userId", "")),
+                    "X-Memory-Run-Id": str(context.get("runId", "")),
+                },
                 json=body,
             )
         except httpx.HTTPError as exception:

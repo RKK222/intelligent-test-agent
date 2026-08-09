@@ -38,6 +38,9 @@
     <select id="findMemory" resultMap="MemoryMap">
         select <include refid="MemoryColumns"/> from qa_memories where memory_id = #{memoryId}
     </select>
+    <select id="findMemoryByMem0Id" resultMap="MemoryMap">
+        select <include refid="MemoryColumns"/> from qa_memories where mem0_memory_id = #{mem0MemoryId}
+    </select>
 
     <sql id="PersonalWhere">
         owner_user_id = #{userId} and scope in ('PERSONAL_GLOBAL', 'PERSONAL_APPLICATION')

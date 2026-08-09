@@ -10,6 +10,8 @@ public interface QaMemoryRepository {
 
     Optional<QaMemory> findById(MemoryId memoryId);
 
+    Optional<QaMemory> findByMem0MemoryId(String mem0MemoryId);
+
     List<QaMemory> listPersonal(String userId, String applicationId, MemoryStatus status, int offset, int limit);
 
     long countPersonal(String userId, String applicationId, MemoryStatus status);
@@ -44,6 +46,10 @@ public interface QaMemoryRepository {
     long countLearningJobs(String status);
 
     void insertUsage(MemoryUsage usage);
+
+    default void insertUsages(List<MemoryUsage> usages) {
+        usages.forEach(this::insertUsage);
+    }
 
     List<MemoryUsage> listUsage(String userId, List<String> runIds);
 

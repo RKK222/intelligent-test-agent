@@ -48,6 +48,14 @@ public class MyBatisQaMemoryRepository implements QaMemoryRepository {
     }
 
     @Override
+    public Optional<QaMemory> findByMem0MemoryId(String mem0MemoryId) {
+        if (mem0MemoryId == null || mem0MemoryId.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(mapper.findMemoryByMem0Id(mem0MemoryId.trim())).map(this::toDomain);
+    }
+
+    @Override
     public List<QaMemory> listPersonal(
             String userId, String applicationId, MemoryStatus status, int offset, int limit) {
         return mapper.listPersonal(userId, applicationId, enumName(status), offset, limit)
@@ -156,6 +164,12 @@ public class MyBatisQaMemoryRepository implements QaMemoryRepository {
         mapper.insertUsage(new UsageRow(
                 usage.runId(), usage.memoryId().value(), usage.userId(), usage.applicationId(),
                 usage.scope().name(), usage.rank(), usage.tokenCount(), usage.injectedAt()));
+    }
+
+    @Override
+    @Transactional
+    public void insertUsages(List<MemoryUsage> usages) {
+        usages.forEach(this::insertUsage);
     }
 
     @Override
