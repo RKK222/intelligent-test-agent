@@ -7597,3 +7597,34 @@
   重新对齐服务端权威结果。
 - release 前端已用 `corepack pnpm --filter @test-agent/agent-web dev --host 127.0.0.1 --port 3011` 启动在
   `http://127.0.0.1:3011/` 并返回 200。未修改 `.env*`、OpenCode 源码、generated SDK、RunEvent、鉴权或安全契约。
+
+## 2026-08-10 - 补齐置顶之外的普通对话端到端回归
+
+### Why
+
+- 置顶功能首轮 E2E 只把普通会话作为排序参照，没有验证置顶操作期间其它会话能否继续切换、当前态和正文是否串线。
+- 新增图钉按钮后，旧用例按会话标题模糊查找按钮会同时命中卡片主按钮和图钉；扩大回归还发现三条重试用例仍等待 8 月 7 日前
+  的“取消旧 Run + 新建 Run”接口，以及只读会话用例仍要求禁用输入框，均已落后于当前稳定契约。
+
+### What
+
+- `workbench.spec.ts` 新增统一 `historySessionButton`，历史切换限定 `.figma-chat-history-card-main`；置顶按钮继续按独立可访问名称定位。
+- 扩展置顶往返用例：置顶目标后切到普通会话，验证 `aria-current` 和正文隔离；普通会话保持选中时取消目标置顶，再切回目标确认内容不丢失。
+- 三条失败重试用例改为验证当前 `/resends` 契约：终态远端用户轮次可撤销重发，仍运行的轮次不取消、不替换，重新打开的失败历史按
+  `remoteMessageId + sourceRunId` 重发。只读历史改为验证普通消息发送禁用、输入框保留原生命令能力。
+- `docs/testing/conversation-scenes.md` 同步普通会话隔离、撤销重发和稳定选择器约定。
+
+### How
+
+- production preview 的置顶、普通会话隔离、标题、历史恢复、竞态、工作区切换和只读核心集合 9/9 通过；更新后的三条重试用例 3/3 通过。
+- 项目官方 localhost Playwright 模式下，普通对话生命周期、历史恢复、跨会话竞态、认证变化、失败重试/撤销重发、只读降级、夜间任务
+  会话隔离和原生命令共 39/39 通过。
+- 原生 Python Playwright 在 1440×900 视口独立复核键盘 Enter 置顶、唯一 PATCH、主按钮/图钉可访问名称、普通会话
+  `aria-current=true` 与正文隔离；所有脚本声明的 API route 均命中，无未处理请求，helper 自动停止隔离服务。
+- `FigmaChatPanel.test.ts` 与 `workbench-utils.test.ts` 共 256 passed / 1 skipped；agent-web production build 通过，`git diff --check` 通过。
+
+### Result
+
+- 置顶/取消置顶不会隐式切换其它会话，也不会污染其它会话的选中态、正文或发送目标；普通对话的主要恢复、重试和竞态链路已有可重复回归证据。
+- 本次只修改 E2E、测试说明和本机会话记录，不修改产品代码、API、RunEvent、数据库、migration、安全、`.env*`、generated SDK 或
+  OpenCode 源码。production build 仍有既有大 chunk 警告，本次未扩大到性能拆包。
