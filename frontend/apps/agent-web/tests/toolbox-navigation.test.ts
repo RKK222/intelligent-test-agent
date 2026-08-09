@@ -7,18 +7,26 @@ import {
 
 describe("toolbox navigation", () => {
   it("opens a deep link and restores the previous center mode on browser back", () => {
-    const entered = routeCenterTransition(true, "system", "editor");
-    expect(entered).toEqual({ mode: "toolbox", beforeToolbox: "system" });
+    const entered = routeCenterTransition("toolbox", "system", "editor");
+    expect(entered).toEqual({ mode: "toolbox", beforeRoute: "system" });
 
-    const left = routeCenterTransition(false, entered.mode, entered.beforeToolbox);
-    expect(left).toEqual({ mode: "system", beforeToolbox: "system" });
+    const left = routeCenterTransition(null, entered.mode, entered.beforeRoute);
+    expect(left).toEqual({ mode: "system", beforeRoute: "system" });
 
-    const forwarded = routeCenterTransition(true, left.mode, left.beforeToolbox);
+    const forwarded = routeCenterTransition("toolbox", left.mode, left.beforeRoute);
     expect(forwarded.mode).toBe("toolbox");
   });
 
   it("uses the named toolbox route so a trailing slash still opens immersively", () => {
-    expect(routeCenterTransition(true, "editor", "editor").mode).toBe("toolbox");
+    expect(routeCenterTransition("toolbox", "editor", "editor").mode).toBe("toolbox");
+  });
+
+  it("keeps toolbox and memories as independent routed immersive views", () => {
+    const memories = routeCenterTransition("memories", "hub", "editor");
+    expect(memories).toEqual({ mode: "memories", beforeRoute: "hub" });
+    const toolbox = routeCenterTransition("toolbox", memories.mode, memories.beforeRoute);
+    expect(toolbox).toEqual({ mode: "toolbox", beforeRoute: "hub" });
+    expect(routeCenterTransition(null, toolbox.mode, toolbox.beforeRoute).mode).toBe("hub");
   });
 
   it("closes every panel in immersive modes and restores the exact snapshot on exit", () => {
@@ -40,7 +48,7 @@ describe("toolbox navigation", () => {
       savedBottomOpen: true
     });
 
-    const switched = transitionImmersivePanels(entered, "hub", "toolbox");
+    const switched = transitionImmersivePanels(entered, "memories", "toolbox");
     expect(switched).toEqual(entered);
 
     const exited = transitionImmersivePanels(switched, "editor", "hub");

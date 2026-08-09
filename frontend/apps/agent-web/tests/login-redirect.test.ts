@@ -12,6 +12,7 @@ describe("login redirect", () => {
     expect(resolveLoginRedirect("/s/ses_123?mode=readonly")).toBe("/s/ses_123?mode=readonly");
     expect(resolveLoginRedirect("/toolbox?source=omni-tools")).toBe("/toolbox?source=omni-tools");
     expect(resolveLoginRedirect("/toolbox/?source=it-tools")).toBe("/toolbox/?source=it-tools");
+    expect(resolveLoginRedirect("/memories?tab=team")).toBe("/memories?tab=team");
   });
 
   it("rejects disabled release feature routes by default", () => {

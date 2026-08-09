@@ -138,7 +138,9 @@ public final class HttpMemoryDocumentStore implements MemoryDocumentStore {
     @Override
     public Health health() {
         try {
-            JsonNode data = request("GET", "/health", null, false, false).path("data");
+            // 管理页展示的是可用于真实检索的就绪状态，必须同时验证鉴权、pgvector、
+            // Embedding 与“原始消息零持久化”合同，不能只读取无鉴权的进程存活探针。
+            JsonNode data = request("GET", "/ready", null, false, true).path("data");
             return new Health("UP".equals(data.path("status").asText()),
                     data.path("status").asText("DOWN"), nullableText(data, "version"));
         } catch (RuntimeException exception) {

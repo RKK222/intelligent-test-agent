@@ -75,6 +75,12 @@ packages/shared-types
 
 `apps/agent-web` 的 activity rail 在代码/监控入口下方提供统一 Agent / Skill / MCP / Tool Hub。Agent 与 Skill 延续能力市场结构，包含远端能力概览、发现/分类目录、当前应用引用库、待更新收件箱、能力卡片和引用应用清单；Skill 目录额外按日常工作（Worker）、测试（Test）、代码（Code）和其他筛选，测试细分测试设计、测试数据构造、测试执行、测试分析，代码细分白盒分析。用户推送默认进入“其他”，只有超级管理员可在详情页调整分类。MCP 与 Tool 复用顶部已加载的运行态目录，只读展示连接状态、工具标识和说明，不引入发布或引用语义。Hub 详情从左边缘拖拽调宽，支持页面内全屏。所有用户可读取远端精确快照，应用管理员可发布、引用、取消并重新引用，以及确认三方合并冲突；取消关系会立即退出应用引用库。`packages/backend-api` 统一承载 Hub HTTP 与平台文件 WebSocket 调用，`packages/shared-types` 保存兼容 DTO。
 
+### QA 长期记忆中心
+
+`/memories` 是受登录保护的沉浸式路由，活动栏 `BrainCircuit` 入口与 `/toolbox` 共用布局快照和浏览器前进/后退恢复。页面固定分为“我的记忆、团队记忆、Skill 提案”：个人记忆可选择全局或当前 Application 范围；团队候选始终以 Application 为边界并由 `APP_ADMIN` 审核；Skill 提案审核通过后才生成可编辑 `SKILL.md`，实际文件、Git 和发布仍进入既有 Hub 流程。详情抽屉只展示派生摘要与安全证据定位，使用纵向 evidence rail 区分观察、确认、真实注入说明和变更，不复制聊天正文。白名单未开放时页面显示无侵入空态，既有对话保持原行为。
+
+成功 Run 的完成摘要通过批量 HTTP 恢复实际注入记录，仅在记录非空时显示“参考了 N 条记忆”；不修改 RunEvent SSE，也不根据检索候选猜测使用情况。系统管理新增“记忆能力”，集中显示经过鉴权的 Mem0/pgvector/BGE 就绪状态、固定 CHAT 模型、学习 Outbox 和灰度白名单。页面复用 `--ta-shell-*` 主题变量，个人蓝、团队青、候选琥珀和冲突红只承担记忆治理语义，并支持暗色、键盘焦点、Reduced Motion 与窄屏全屏抽屉。
+
 应用源码快照的仓库、分支、目录树、物化、保留期调整、重试、打开、最近选择和持久化操作查询统一由 `packages/backend-api` 调用平台 workspace-management API；`listAppSourceTree` 保持节点数组语义，新的 `getAppSourceTreeSnapshot` 在同一 URL 上请求 `includeCommit=true` 并返回 `{targetCommit,nodes}`，调用方把该固定提交直接作为物化 `expectedTreeCommit`。选择项使用 `{path,type}`，下载状态固定为 `NOT_DOWNLOADED/DOWNLOADED_ACTIVE/DOWNLOADED_EXPIRED/PERSONAL_OCCUPIED`。物化进度使用独立的一次性 ticket WebSocket；client 单次连接不自行重连，意外 `error/close` 会向调用方报告安全失败，工作台按有界退避串行执行“数据库 snapshot → 新 ticket → 新 WebSocket”。主动关闭只停止观察，不取消后台任务。保留期调整是同步 PATCH，不创建进度连接。`packages/shared-types` 保存严格判别的安全 DTO/envelope：成功帧必须完整包含 operation/operationId/traceId，失败帧必须包含 `FAILED` 与安全错误；runtime validator 拒绝畸形消息，业务回调异常不会被二次包装为消息格式错误。RunEvent union 不增加应用源码事件。
 
 `apps/agent-web` 在工作空间切换入口右侧提供应用源码列表：紧凑入口只显示可打开或曾下载的副本，`NOT_DOWNLOADED` 只在四步管理弹窗第 1 步出现；用户必须从当前应用全部关联版本库中显式选择后，才加载其分支、固定提交目录树和运行中 operation。第 1 步允许 owner/应用管理员直接调整当前未过期 generation 自首次受理起的总保留小时数；第 2–4 步完成 exact set、TEAM/PERSONAL、默认 48 小时且按后端返回值限制为最长 168 小时（7 天）的保留期，以及逐服务器安全步骤展示；已有 TEAM generation 不能降级为 PERSONAL。源码打开后使用显式 `APP_SOURCE` 工作区语义和后端返回的逻辑 `workspaceId/generation`，续期成功会同步当前上下文的 `expiresAt`。文件读取、保存、创建、复制、移动、上传、改名、删除及撤销继续走平台 Workspace 文件 WebSocket；前端不保存或推导物理路径。源码工作区保留 Session/Run、OpenCode、终端和普通文件写入，但编辑器/Run Diff 页脚、宠物应用配置重载、Hub mutation、应用 Agent 保存发布与版本选择统一隐藏并在 handler 再次拒绝。recent 源码选择在刷新或窗口聚焦时重新 `open` 校验；只有结构化 `FORBIDDEN/NOT_FOUND/CONFLICT` 或 current source 的空 recent 会清理并回退，网络、超时及 5xx 保留当前源码与 recent，并展示可重试提示。

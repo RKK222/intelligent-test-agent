@@ -6,6 +6,7 @@ import {
   ArrowUpRight,
   Bell,
   BookOpen,
+  BrainCircuit,
   CircleHelp,
   CheckCircle,
   Clock3,
@@ -43,6 +44,7 @@ import type {
   AiFeedbackReasonCode,
   AiFeedbackRating,
   AiRunFeedback,
+  MemoryUsageView,
   FileSearchResult,
   MessageScope,
   MessagePart,
@@ -773,6 +775,8 @@ const props =
     selectedModel?: string
     /** 当前用户按 Run 保存的整轮评价。 */
     runFeedbacks?: Record<string, AiRunFeedback | null>
+    /** 只有真正注入当前 Run 的记忆使用记录；历史会话通过批量 HTTP 恢复。 */
+    memoryUsageByRunId?: Record<string, MemoryUsageView[]>
     /** 正在提交反馈的消息 */
     feedbackSubmitting?: Record<string, boolean>
     runStatusesByRunId?: Record<string, string>
@@ -852,6 +856,7 @@ const props =
     nightTaskActionPending: () => ({}),
     canScheduleCustomTime: false,
     panelVisible: true,
+    memoryUsageByRunId: () => ({}),
   })
 
 const emit =
@@ -4472,36 +4477,47 @@ function onCompositionEnd() {
         </template>
         <template #completed-status-actions="{ row }">
           <div
-            v-if="canFeedbackRun(row)"
+            v-if="canFeedbackRun(row) || (memoryUsageByRunId[row.runId ?? '']?.length ?? 0) > 0"
             class="figma-chat-feedback figma-chat-completed-feedback"
           >
-            <button
-              type="button"
-              :class="[
-                'figma-chat-feedback-btn',
-                runFeedbackFor(row.runId)?.rating === 'POSITIVE' && 'is-selected',
-              ]"
-              :disabled="isRunFeedbackSubmitting(row.runId)"
-              title="满意"
-              aria-label="满意"
-              @click="submitPositiveRunFeedback(row.runId)"
+            <span
+              v-if="(memoryUsageByRunId[row.runId ?? '']?.length ?? 0) > 0"
+              class="figma-chat-memory-usage"
+              :title="`本轮实际注入 ${memoryUsageByRunId[row.runId ?? '']?.length ?? 0} 条长期记忆`"
+              :data-testid="`run-memory-usage-${row.runId}`"
             >
-              <ThumbsUp :size="12" />
-            </button>
-            <button
-              type="button"
-              :class="[
-                'figma-chat-feedback-btn',
-                'figma-chat-feedback-btn--negative',
-                runFeedbackFor(row.runId)?.rating === 'NEGATIVE' && 'is-selected',
-              ]"
-              :disabled="isRunFeedbackSubmitting(row.runId)"
-              title="不满意"
-              aria-label="不满意"
-              @click="openNegativeRunFeedback(row.runId)"
-            >
-              <ThumbsDown :size="12" />
-            </button>
+              <BrainCircuit :size="12" />
+              参考了 {{ memoryUsageByRunId[row.runId ?? '']?.length ?? 0 }} 条记忆
+            </span>
+            <template v-if="canFeedbackRun(row)">
+              <button
+                type="button"
+                :class="[
+                  'figma-chat-feedback-btn',
+                  runFeedbackFor(row.runId)?.rating === 'POSITIVE' && 'is-selected',
+                ]"
+                :disabled="isRunFeedbackSubmitting(row.runId)"
+                title="满意"
+                aria-label="满意"
+                @click="submitPositiveRunFeedback(row.runId)"
+              >
+                <ThumbsUp :size="12" />
+              </button>
+              <button
+                type="button"
+                :class="[
+                  'figma-chat-feedback-btn',
+                  'figma-chat-feedback-btn--negative',
+                  runFeedbackFor(row.runId)?.rating === 'NEGATIVE' && 'is-selected',
+                ]"
+                :disabled="isRunFeedbackSubmitting(row.runId)"
+                title="不满意"
+                aria-label="不满意"
+                @click="openNegativeRunFeedback(row.runId)"
+              >
+                <ThumbsDown :size="12" />
+              </button>
+            </template>
           </div>
         </template>
       </OpencodeTimeline>
@@ -7736,6 +7752,25 @@ function onCompositionEnd() {
 
 .figma-chat-completed-feedback {
   margin-top: 0;
+}
+
+.figma-chat-memory-usage {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 20px;
+  margin-right: 2px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #4f6bed 10%, transparent);
+  color: #4057c7;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+:global(.dark) .figma-chat-memory-usage {
+  color: #aebcff;
 }
 
 .figma-chat-completed-feedback .figma-chat-feedback-btn {

@@ -3874,7 +3874,7 @@ Base URL：`/api/internal/platform/toolbox`。两个接口都要求平台登录�
 
 系统管理 Base URL：`/api/internal/platform/system-management/memory`，仅 `SUPER_ADMIN`：
 
-- `GET /health`：Mem0、Embedding profile、固定 CHAT 模型和 Outbox 队列状态。
+- `GET /health`：Mem0、Embedding profile、固定 CHAT 模型和 Outbox 队列状态；其中 Mem0 状态来自后端携带 service key 调用 memory-service `/ready`，同时验证 pgvector/Embedding 可用和原始 messages 零持久化合同，不等同于无鉴权的进程存活探针。
 - `GET/PATCH /settings`：固定抽取模型与“当前内部 Run 模型回退”开关，修改携带 `expectedVersion`。
 - `GET/POST/DELETE /whitelist...`：分页查询、启用和移除用户白名单；移除不会删除记忆，但页面、学习和检索立即停止。
 

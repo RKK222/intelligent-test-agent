@@ -3059,6 +3059,182 @@ test("ordinary user opens toolbox immersively and browser history restores panel
   await expect.poll(() => rightPanel.evaluate((node) => Number.parseFloat(getComputedStyle(node).width))).toBeLessThanOrEqual(2);
 });
 
+test("ordinary user opens QA memories, inspects evidence and restores the workbench layout", async ({ page }, testInfo) => {
+  testInfo.setTimeout(90_000);
+  await mockBackendApi(page, {
+    authRoles: ["USER"],
+    personalMemories: [{
+      memoryId: "mem_e2e_1",
+      scope: "PERSONAL_GLOBAL",
+      ownerUserId: "usr_admin",
+      applicationId: null,
+      status: "PENDING_CONFIRMATION",
+      source: "IMPLICIT",
+      taskTypes: ["TEST_CASE_GENERATION", "RISK_ANALYSIS"],
+      content: "测试案例必须覆盖异常场景和边界条件",
+      contentAvailable: true,
+      displaySummary: "测试案例必须覆盖异常场景和边界条件",
+      confidence: 0.91,
+      distinctSessionCount: 3,
+      distinctUserCount: 1,
+      version: 2,
+      confirmedAt: null,
+      createdAt: "2026-08-01T00:00:00Z",
+      updatedAt: "2026-08-09T00:00:00Z"
+    }],
+    teamMemories: [{
+      memoryId: "mem_e2e_team_1",
+      scope: "TEAM_APPLICATION",
+      ownerUserId: null,
+      applicationId: "app_gcms",
+      status: "PENDING_CONFIRMATION",
+      source: "TEAM_PROPOSAL",
+      taskTypes: ["DEFECT_ANALYSIS", "ROOT_CAUSE_ANALYSIS"],
+      content: "缺陷分析结论必须附带可复核证据",
+      contentAvailable: true,
+      displaySummary: "缺陷分析结论必须附带可复核证据",
+      confidence: 0.88,
+      distinctSessionCount: 3,
+      distinctUserCount: 2,
+      version: 1,
+      confirmedAt: null,
+      createdAt: "2026-08-02T00:00:00Z",
+      updatedAt: "2026-08-09T00:00:00Z"
+    }],
+    memorySkillProposals: [{
+      proposalId: "msp_e2e_1",
+      memoryId: "mem_e2e_team_1",
+      applicationId: "app_gcms",
+      title: "证据驱动缺陷分析",
+      skillMdDraft: "# 证据驱动缺陷分析\n",
+      status: "PENDING_REVIEW",
+      createdByUserId: "usr_tester",
+      reviewedByUserId: null,
+      publishedAssetId: null,
+      version: 1,
+      createdAt: "2026-08-09T00:00:00Z",
+      updatedAt: "2026-08-09T00:00:00Z"
+    }],
+    memoryEvidence: [{
+      evidenceId: "mge_e2e_1",
+      memoryId: "mem_e2e_1",
+      runId: "run_e2e_1",
+      sessionId: "ses_e2e_1",
+      source: "IMPLICIT",
+      summary: "用户连续三个会话要求覆盖边界条件",
+      observedAt: "2026-08-08T00:00:00Z"
+    }]
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  const leftPanel = page.locator(".figma-panel-left");
+  const rightPanel = page.locator(".figma-chat-panel-wrapper");
+  const initialLeftWidth = await leftPanel.evaluate((node) => getComputedStyle(node).width);
+  const initialRightWidth = await rightPanel.evaluate((node) => getComputedStyle(node).width);
+
+  await page.getByRole("button", { name: "长期记忆" }).click();
+  await expect(page).toHaveURL(/\/memories$/);
+  await expect(page.getByRole("heading", { name: "测试习惯记忆" })).toBeVisible();
+  await expect(page.getByTestId("memory-tab-personal")).toContainText("我的记忆");
+  await expect(page.getByTestId("memory-tab-team")).toContainText("团队记忆");
+  await expect(page.getByTestId("memory-tab-skills")).toContainText("Skill 提案");
+  await expect(page.getByTestId("memory-card-mem_e2e_1")).toBeVisible();
+  await expect.poll(() => leftPanel.evaluate((node) => Number.parseFloat(getComputedStyle(node).width))).toBeLessThanOrEqual(2);
+  await expect.poll(() => rightPanel.evaluate((node) => Number.parseFloat(getComputedStyle(node).width))).toBeLessThanOrEqual(2);
+
+  await page.getByTestId("memory-card-mem_e2e_1").getByText("查看证据").click();
+  await expect(page.getByTestId("memory-evidence-rail")).toBeVisible();
+  await expect(page.getByText("用户连续三个会话要求覆盖边界条件")).toBeVisible();
+  await expect(page.getByTestId("memory-evidence-rail").getByText("使用", { exact: true })).toBeVisible();
+  await expect.poll(async () => Math.round((await page.locator(".memory-detail-drawer").boundingBox())?.x ?? -1)).toBe(760);
+  await page.screenshot({ path: testInfo.outputPath("memory-center-desktop.png"), fullPage: true });
+
+  await page.evaluate(() => document.documentElement.classList.add("dark"));
+  await expect(page.locator(".memory-center")).toHaveCSS("background-color", "rgb(17, 19, 24)");
+  await expect(page.locator(".memory-detail-drawer")).toHaveCSS("background-color", "rgb(23, 25, 31)");
+  await page.screenshot({ path: testInfo.outputPath("memory-center-dark.png"), fullPage: true });
+  await page.evaluate(() => document.documentElement.classList.remove("dark"));
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".memory-detail-drawer")).toBeHidden();
+  await expect.poll(async () => Math.round((await page.locator(".memory-center").boundingBox())?.width ?? 0)).toBeGreaterThan(1200);
+  await page.getByTestId("memory-tab-team").click();
+  await expect(page.getByTestId("memory-card-mem_e2e_team_1")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("memory-center-team.png"), fullPage: true });
+  await page.getByTestId("memory-tab-skills").click();
+  await expect(page.getByText("证据驱动缺陷分析")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("memory-center-skills.png"), fullPage: true });
+  await page.getByTestId("memory-tab-personal").click();
+  await page.getByTestId("memory-card-mem_e2e_1").getByText("查看证据").click();
+  await expect(page.getByTestId("memory-evidence-rail")).toBeVisible();
+  await expect.poll(async () => Math.round((await page.locator(".memory-detail-drawer").boundingBox())?.x ?? -1)).toBe(760);
+
+  await page.setViewportSize({ width: 560, height: 820 });
+  await expect.poll(() => page.locator(".memory-detail-drawer").evaluate((node) => Math.round(node.getBoundingClientRect().width))).toBe(560);
+  await expect.poll(async () => Math.round((await page.locator(".memory-detail-drawer").boundingBox())?.x ?? -1)).toBe(0);
+  await page.screenshot({ path: testInfo.outputPath("memory-center-narrow.png"), fullPage: true });
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".memory-detail-drawer")).toBeHidden();
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(leftPanel).toHaveCSS("width", initialLeftWidth);
+  await expect(rightPanel).toHaveCSS("width", initialRightWidth);
+});
+
+test("super admin inspects QA memory health, model policy and rollout", async ({ page }, testInfo) => {
+  await mockBackendApi(page, {
+    authRoles: ["SUPER_ADMIN"],
+    memoryAdminHealth: {
+      enabled: true,
+      memoryService: { available: true, status: "UP", version: "0.1.0" },
+      embedding: {
+        provider: "LOCAL_BGE",
+        model: "BAAI/bge-small-zh-v1.5",
+        revision: "fixed-revision",
+        dimension: 512,
+        device: "cpu",
+        normalized: true,
+        collectionVersion: "v1"
+      },
+      primaryChatModelId: "enterprise/chat-model",
+      currentRunModelFallbackEnabled: false,
+      queuePending: 2,
+      queueProcessing: 1,
+      queueDead: 0
+    },
+    memorySettings: {
+      primaryChatModelId: "enterprise/chat-model",
+      currentRunModelFallbackEnabled: false,
+      version: 3,
+      updatedByUserId: "usr_admin",
+      updatedAt: "2026-08-09T00:00:00Z"
+    },
+    memoryWhitelist: [{
+      userId: "usr_tester",
+      enabled: true,
+      updatedByUserId: "usr_admin",
+      createdAt: "2026-08-09T00:00:00Z",
+      updatedAt: "2026-08-09T00:00:00Z"
+    }]
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await page.getByRole("button", { name: "系统管理" }).click();
+  await page.getByRole("button", { name: "记忆能力", exact: true }).click();
+  await expect(page.getByTestId("memory-health-mem0")).toContainText("就绪");
+  await expect(page.getByTestId("memory-health-embedding")).toContainText("512 维");
+  await expect(page.getByTestId("memory-health-chat")).toContainText("enterprise/chat-model");
+  await expect(page.getByTestId("memory-health-queue")).toContainText("2 待处理");
+  await expect(page.getByText("usr_tester")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("memory-admin.png"), fullPage: true });
+
+  await page.evaluate(() => document.documentElement.classList.add("dark"));
+  await expect(page.getByTestId("memory-admin-panel")).toHaveCSS("background-color", "rgb(17, 19, 24)");
+  await page.screenshot({ path: testInfo.outputPath("memory-admin-dark.png"), fullPage: true });
+});
+
 test("toolbox keeps search source and clear filters on one row at tablet width", async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 900 });
   await mockBackendApi(page, { authRoles: ["USER"] });
@@ -7852,6 +8028,15 @@ async function mockBackendApi(
     workspaceVersions?: Record<string, Array<Record<string, unknown>>>;
     /** 工具盒子目录；滚动布局用例注入足量工具，普通用例保留最小目录。 */
     toolboxTools?: Array<Record<string, unknown>>;
+    /** QA 记忆中心 mock；默认能力开放但列表为空。 */
+    memoryAvailable?: boolean;
+    personalMemories?: Array<Record<string, unknown>>;
+    teamMemories?: Array<Record<string, unknown>>;
+    memorySkillProposals?: Array<Record<string, unknown>>;
+    memoryEvidence?: Array<Record<string, unknown>>;
+    memoryAdminHealth?: Record<string, unknown>;
+    memorySettings?: Record<string, unknown>;
+    memoryWhitelist?: Array<Record<string, unknown>>;
     /** 版本选择前的 Git 只读访问预检响应，以 versionId 为键。 */
     gitAccessResults?: Record<string, Record<string, unknown>>;
     gitAccessRequests?: string[];
@@ -8519,6 +8704,42 @@ async function mockBackendApi(
         recorded: true,
         incremented: true
       }));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/qa-memory/v1/availability") {
+      await route.fulfill(json({ enabled: capture.memoryAvailable ?? true }));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/qa-memory/v1/personal") {
+      const items = capture.personalMemories ?? [];
+      await route.fulfill(json({ items, page: 1, size: 100, total: items.length }));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/qa-memory/v1/team") {
+      const items = capture.teamMemories ?? [];
+      await route.fulfill(json({ items, page: 1, size: 100, total: items.length }));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/qa-memory/v1/skill-proposals") {
+      const items = capture.memorySkillProposals ?? [];
+      await route.fulfill(json({ items, page: 1, size: 100, total: items.length }));
+      return;
+    }
+    if (method === "GET" && /^\/api\/internal\/platform\/qa-memory\/v1\/memories\/[^/]+\/evidence$/.test(url.pathname)) {
+      await route.fulfill(json(capture.memoryEvidence ?? []));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/system-management/memory/health") {
+      await route.fulfill(json(capture.memoryAdminHealth ?? {}));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/system-management/memory/settings") {
+      await route.fulfill(json(capture.memorySettings ?? {}));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/system-management/memory/whitelist") {
+      const items = capture.memoryWhitelist ?? [];
+      await route.fulfill(json({ items, page: 1, size: 100, total: items.length }));
       return;
     }
     if (url.pathname.startsWith("/api/internal/platform/configuration-management")) {

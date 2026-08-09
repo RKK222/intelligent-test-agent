@@ -89,9 +89,7 @@ class HttpMemoryDocumentStoreTest {
     private void handle(HttpExchange exchange) throws IOException {
         try (exchange) {
             String path = exchange.getRequestURI().getPath();
-            if (!path.endsWith("/health")) {
-                assertThat(exchange.getRequestHeaders().getFirst("X-Memory-Service-Key")).isEqualTo(KEY);
-            }
+            assertThat(exchange.getRequestHeaders().getFirst("X-Memory-Service-Key")).isEqualTo(KEY);
             byte[] request = exchange.getRequestBody().readAllBytes();
             if (request.length > 0) {
                 requestBodies.add(objectMapper.readTree(request));
@@ -101,7 +99,7 @@ class HttpMemoryDocumentStoreTest {
                 return;
             }
             String response;
-            if (path.endsWith("/health")) {
+            if (path.endsWith("/ready")) {
                 response = "{\"data\":{\"status\":\"UP\",\"version\":\"0.1.0\"}}";
             } else if (path.endsWith("/history")) {
                 response = "{\"data\":[{\"id\":\"h1\",\"memory_id\":\"m1\","

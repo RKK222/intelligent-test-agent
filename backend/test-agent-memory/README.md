@@ -14,7 +14,7 @@ QA Agent 长期记忆的业务编排模块。它负责个人记忆、Application
 ## Mem0 适配边界
 
 - `MemoryDocumentStore` 是本模块访问独立 `memory-service` 的唯一端口；启用开关关闭时装配安全降级实现，不能影响既有 Run。
-- `HttpMemoryDocumentStore` 只调用受控的 health、派生记忆 CRUD/search/history 和候选抽取窄接口，请求超时、响应大小和 ID 格式都在适配层收口。
+- `HttpMemoryDocumentStore` 只调用受控的 ready、派生记忆 CRUD/search/history 和候选抽取窄接口，请求超时、响应大小和 ID 格式都在适配层收口；管理健康使用带 service key 的 `/ready`，同时核验 pgvector/Embedding 和原始消息零持久化合同，不把无鉴权 `/health` 当作业务就绪。
 - 原始聊天只允许作为抽取请求的瞬时输入，不得调用派生记忆写入接口保存整段消息；正文、模型短期授权和服务密钥不得进入日志或 `toString()`。
 - Python 服务的固定版本、离线模型和运行说明见仓库根目录 `memory-service/README.md`。
 

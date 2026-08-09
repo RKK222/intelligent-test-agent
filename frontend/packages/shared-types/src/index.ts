@@ -70,6 +70,124 @@ export type ToolboxClickResult = {
   incremented: boolean;
 };
 
+export type MemoryScope = "PERSONAL_GLOBAL" | "PERSONAL_APPLICATION" | "TEAM_APPLICATION";
+export type MemoryStatus =
+  | "CANDIDATE"
+  | "PENDING_CONFIRMATION"
+  | "ACTIVE"
+  | "PAUSED"
+  | "CONFLICTED"
+  | "REJECTED"
+  | "ARCHIVED"
+  | "SUPERSEDED";
+export type MemorySource = "MANUAL" | "EXPLICIT" | "IMPLICIT" | "TEAM_PROPOSAL" | "ADMIN_CREATED";
+export type QaTaskType =
+  | "GENERAL"
+  | "TEST_CASE_GENERATION"
+  | "TEST_DATA_PREPARATION"
+  | "REQUIREMENT_ANALYSIS"
+  | "TEST_PLAN_DESIGN"
+  | "DEFECT_ANALYSIS"
+  | "ROOT_CAUSE_ANALYSIS"
+  | "AUTOMATION_TESTING"
+  | "RISK_ANALYSIS"
+  | "TEST_REPORTING"
+  | "RESULT_ACCEPTANCE";
+
+/** Mem0 正文不可用时 content 只承载治理摘要，contentAvailable 明确标识降级。 */
+export type MemoryView = {
+  memoryId: string;
+  scope: MemoryScope;
+  ownerUserId?: string | null;
+  applicationId?: string | null;
+  status: MemoryStatus;
+  source: MemorySource;
+  taskTypes: QaTaskType[];
+  content: string;
+  contentAvailable: boolean;
+  displaySummary: string;
+  confidence: number;
+  distinctSessionCount: number;
+  distinctUserCount: number;
+  version: number;
+  confirmedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MemoryEvidenceView = {
+  evidenceId: string;
+  memoryId: string;
+  runId: string;
+  sessionId: string;
+  source: MemorySource;
+  summary: string;
+  observedAt: string;
+};
+
+export type MemoryUsageView = {
+  runId: string;
+  memoryId: string;
+  scope: MemoryScope;
+  rank: number;
+  tokenCount: number;
+  injectedAt: string;
+};
+
+export type MemorySkillProposalStatus = "PENDING_REVIEW" | "DRAFT" | "REJECTED" | "PUBLISHED" | "ARCHIVED";
+export type MemorySkillProposalView = {
+  proposalId: string;
+  memoryId: string;
+  applicationId: string;
+  title: string;
+  skillMdDraft: string;
+  status: MemorySkillProposalStatus;
+  createdByUserId: string;
+  reviewedByUserId?: string | null;
+  publishedAssetId?: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type EmbeddingProfile = {
+  provider: string;
+  model: string;
+  revision: string;
+  dimension: number;
+  device: string;
+  normalized: boolean;
+  collectionVersion: string;
+};
+
+export type MemoryServiceHealth = { available: boolean; status: string; version?: string | null };
+export type MemoryAdminHealth = {
+  enabled: boolean;
+  memoryService: MemoryServiceHealth;
+  embedding: EmbeddingProfile;
+  primaryChatModelId?: string | null;
+  currentRunModelFallbackEnabled: boolean;
+  queuePending: number;
+  queueProcessing: number;
+  queueDead: number;
+};
+
+export type MemorySettingsView = {
+  primaryChatModelId?: string | null;
+  currentRunModelFallbackEnabled: boolean;
+  version: number;
+  updatedByUserId: string;
+  updatedAt: string;
+};
+
+export type MemoryWhitelistView = {
+  userId: string;
+  enabled: boolean;
+  updatedByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Workspace = {
   workspaceId: string;
   name: string;

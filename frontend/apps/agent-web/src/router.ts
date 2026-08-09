@@ -39,6 +39,11 @@ export const router = createRouter({
       component: () => import("./views/WorkbenchView.vue"),
     },
     {
+      path: "/memories",
+      name: "memories",
+      component: () => import("./views/WorkbenchView.vue"),
+    },
+    {
       path: "/lobehub/launch",
       name: "lobehub-launch",
       component: () => import("./views/LobehubLaunchView.vue"),
@@ -103,6 +108,7 @@ export function resolveLoginRedirect(
 function isKnownLoginRedirectPath(pathname: string, features: ReleaseFeatureFlags): boolean {
   return pathname === "/"
     || /^\/toolbox\/?$/.test(pathname)
+    || /^\/memories\/?$/.test(pathname)
     || (pathname === "/lobehub/launch" && features.lobehub)
     || (pathname === "/workflow-chat" && features.workflow)
     || /^\/s\/[^/]+$/.test(pathname);
