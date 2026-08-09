@@ -5,6 +5,22 @@
 
 ## Entries
 
+### 2026-08-09 - 将“原始输出”入口从对话框顶栏移动至底部状态栏（改为下载图标）
+
+- Why:
+  - 响应用户 UI 规范调整需求，将 Chat 面板顶栏文字按钮“原始输出”移除，并以“下载图标”形式下沉移动至底部状态栏（任务消耗/终态文字右侧）。
+- What:
+  - `frontend/apps/agent-web/src/components/FigmaChatPanel.vue`:
+    - 从 `figma-chat-header-left` 顶栏元素中移除 `figma-chat-header-btn--raw` 按钮。
+    - 在底部 `figma-chat-usage` 容器末尾添加 `.figma-chat-status-raw-btn` 图标按钮，使用 `<Download :size="13" />`，保留 `aria-label="原始输出"` 与 `title`，绑定 `openRawOutput`。
+    - 添加对应的 hover 交互与布局 CSS 样式。
+  - `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`: 更新测试查找原始输出按钮的选择逻辑。
+  - `frontend/apps/agent-web/README.md`: 同步更新文档中对“原始输出”入口位置与展现形式的说明。
+- How:
+  - 调整组件模板与样式，并重跑 `npx vitest run apps/agent-web/tests/FigmaChatPanel.test.ts` 进行测试校验。
+- Result:
+  - 原始输出按钮成功从顶栏移至底部状态栏，改为简洁精致的下载图标，无遗留视觉冗余。
+
 ### 2026-08-09 - 将协作分享弹窗被分享人权限选择改造为开关切换（双侧标注“只读”与“可对话”）
 
 - Why:

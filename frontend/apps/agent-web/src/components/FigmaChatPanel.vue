@@ -4457,15 +4457,6 @@ function onCompositionEnd() {
           <Clock3 :size="11" /> 夜间执行
         </span>
         <button
-          type="button"
-          class="figma-chat-header-btn figma-chat-header-btn--raw"
-          title="查看前端与平台后端原始报文"
-          @click="openRawOutput"
-        >
-          <Logs :size="15" class="figma-chat-header-icon--raw" />
-          <span>原始输出</span>
-        </button>
-        <button
           v-if="canManageShare"
           type="button"
           class="figma-chat-header-btn figma-chat-header-btn--share"
@@ -6120,6 +6111,15 @@ function onCompositionEnd() {
             </template>
           </span>
         </template>
+        <button
+          type="button"
+          class="figma-chat-status-raw-btn"
+          title="查看前端与平台后端原始报文"
+          aria-label="原始输出"
+          @click="openRawOutput"
+        >
+          <Download :size="13" />
+        </button>
       </div>
     </div>
 
@@ -9223,6 +9223,27 @@ function onCompositionEnd() {
   display: inline-flex;
   gap: 4px;
   font-weight: 500;
+}
+
+.figma-chat-status-raw-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 4px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #6b6b73;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.figma-chat-status-raw-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #1d2939;
 }
 
 .figma-chat-status-item {

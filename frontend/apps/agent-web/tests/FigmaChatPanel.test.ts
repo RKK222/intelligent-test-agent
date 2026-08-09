@@ -3496,7 +3496,7 @@ describe("FigmaChatPanel", () => {
       } as any
     });
 
-    const rawButton = wrapper.findAll("button").find((button) => button.text().includes("原始输出"));
+    const rawButton = wrapper.findAll("button").find((button) => button.attributes("aria-label")?.includes("原始输出") || button.text().includes("原始输出"));
     expect(rawButton).toBeTruthy();
     await rawButton!.trigger("click");
 
@@ -3593,7 +3593,7 @@ describe("FigmaChatPanel", () => {
         } as any
       });
 
-      const rawButton = wrapper.findAll("button").find((button) => button.text().includes("原始输出"));
+      const rawButton = wrapper.findAll("button").find((button) => button.attributes("aria-label")?.includes("原始输出") || button.text().includes("原始输出"));
       expect(rawButton).toBeTruthy();
       await rawButton!.trigger("click");
 
@@ -3648,7 +3648,7 @@ describe("FigmaChatPanel", () => {
       } as any
     });
 
-    const rawButton = wrapper.findAll("button").find((button) => button.text().includes("原始输出"));
+    const rawButton = wrapper.findAll("button").find((button) => button.attributes("aria-label")?.includes("原始输出") || button.text().includes("原始输出"));
     expect(rawButton).toBeTruthy();
     await rawButton!.trigger("click");
 
