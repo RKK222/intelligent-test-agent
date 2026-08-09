@@ -7753,3 +7753,39 @@
 - 企业真实 `.2 → .4/.114 → Mem0 VIP → 记忆库 → Java 模型网关 → 企业模型/CPU BGE` 七场景及批准容量 p99 仍未运行；当前缺少
   目标 URL、测试账号和节点/模型控制 hook，不能据本地验证开启企业记忆白名单。
 - 未修改 `.env*`、generated SDK 或 OpenCode 源码；工作区中同期的 Figma/Git 面板和聊天回归改动继续保持未暂存。
+
+## 2026-08-10 - 补齐通用记忆功能、非功能与易用性测试
+
+### Why
+
+- 既有发布门禁已经覆盖原生学习、团队批准、故障降级和单轮并发，但仍缺少跨 Application 隔离、个人范围变化后的实际召回、
+  团队拒绝、浏览器登录态越权、真实管理写链和基础易用性；单轮 p99 样本也不足以支撑批准容量，重启既有副本不能证明扩容。
+
+### What
+
+- 扩展真实 Playwright `full`：创建主/隔离两个 Application，验证个人/团队 Application 记忆不越界，同一个人记忆在编辑后应用内
+  命中、提升全局后跨应用命中、暂停/归档后不再注入；增加团队带原因拒绝及拒绝后不召回。
+- 普通成员除页面无审核/原文入口外，还在真实浏览器登录态直接请求他人个人记忆 GET/PATCH、团队 review 和管理 health，锁定
+  `403/404` 权限边界；超级管理员从真实页面检查全部 profile/死信/白名单并用当前值完成一次版本化策略保存。
+- 增加 640 CSS px（等效 1280px 屏幕 200% 放大）、Reduced Motion、Tab/Enter 页签与 Escape 详情回归；组件测试补齐团队拒绝原因、
+  列表/管理加载失败重试、HTML-like 文本不执行和 2000 字输入上限。
+- 并发场景增加 `--rounds`（1–20），首轮并行学习、后续纯召回，聚合全部样本 p50/p95/p99/max、每轮请求发散和 Run/Session 唯一性；
+  企业故障门禁新增 `TEST_AGENT_MEM0_SCALE_OUT_CMD/TEST_AGENT_MEM0_SCALE_IN_CMD`，要求真正增加并移除无状态副本。
+- 同步 agent-web README、部署准入和对话场景文档，并明确在途精确故障、记忆库/VIP 切换、24 小时耐久、浏览器矩阵和读屏仍需专项证据。
+
+### How
+
+- `corepack pnpm exec vitest run apps/agent-web/tests/memory-center.test.ts apps/agent-web/tests/memory-admin-panel.test.ts packages/backend-api/tests/qa-memory.test.ts`：
+  3 files / 14 tests 通过；`corepack pnpm --filter @test-agent/agent-web typecheck` 通过。
+- `TEST_AGENT_RUN_MEMORY_E2E=0 corepack pnpm exec playwright test --config playwright.real.config.ts apps/agent-web/tests/memory.real-spec.ts
+  --project chromium --workers 1` 成功编译并发现 9 个真实场景，因未提供真实环境开关而按设计 9 skipped；`bash -n`、
+  `tools/memory-cluster-e2e-test.sh` 和 `git diff --check` 通过。
+- 当前 worktree 前端以 `corepack pnpm --filter @test-agent/agent-web dev --host 127.0.0.1 --port 4317` 启动，`/memories` 返回
+  HTTP 200 和 `TestAgent IDE` 页面骨架。
+
+### Result
+
+- 当前方案声明的功能主链、权限、短时容量/扩缩容和基础易用性门禁已显著补齐；没有变更生产 API、RunEvent、DTO、数据库/Flyway、
+  运行时、安全实现或兼容接口，只修改测试、编排和稳定文档。
+- 企业真实链路、批准容量和新增专项非功能项仍未运行，缺少目标 URL、账号、模型与停启/扩缩容 hook，不能据本地结果声称完全覆盖或
+  开启白名单；未修改 `.env*`、generated SDK、OpenCode 源码及同期 Figma/Git/聊天未暂存改动。

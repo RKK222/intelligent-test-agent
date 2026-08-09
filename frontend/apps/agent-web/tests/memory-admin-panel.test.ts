@@ -205,4 +205,34 @@ describe("MemoryAdminPanel", () => {
 
     await waitFor(() => expect(backendApi.enableQaMemoryUser).toHaveBeenCalledWith("usr_88"));
   });
+
+  it("shows a stable management error and reloads health, settings and whitelist on retry", async () => {
+    const backendApi = api();
+    vi.mocked(backendApi.getQaMemoryAdminHealth)
+      .mockRejectedValueOnce(new Error("memory vip timeout"))
+      .mockResolvedValue({
+        enabled: true,
+        memoryService: {
+          available: true,
+          status: "UP",
+          version: "2.0.17",
+          profiles: [],
+          projectionBacklog: { pending: 0, processing: 0, dead: 0 }
+        },
+        primaryChatModelId: "enterprise/chat-model",
+        primaryEmbeddingModelId: null,
+        cpuEmbeddingModelId: "memory-bge-small-zh-v1.5",
+        queuePending: 0,
+        queueProcessing: 0,
+        queueDead: 0
+      });
+    const view = render(MemoryAdminPanel, { global: { provide: { api: backendApi } } });
+
+    expect(await view.findByText("记忆管理数据加载失败")).toBeTruthy();
+    await fireEvent.click(view.getByRole("button", { name: "重试" }));
+    expect((await view.findByTestId("memory-health-mem0")).textContent).toContain("就绪");
+    expect(backendApi.getQaMemoryAdminHealth).toHaveBeenCalledTimes(2);
+    expect(backendApi.getQaMemorySettings).toHaveBeenCalledTimes(2);
+    expect(backendApi.listQaMemoryWhitelist).toHaveBeenCalledTimes(2);
+  });
 });

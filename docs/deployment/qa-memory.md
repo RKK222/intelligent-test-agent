@@ -258,11 +258,12 @@ corepack pnpm exec playwright test \
 集群、热备、并发和审计由统一入口编排：
 
 ```bash
-# 本地三副本数据面
-tools/memory-cluster-e2e.sh --full --faults --concurrency 8 --partition same --audit
+# 本地三副本数据面：至少两轮，兼顾并行学习和后续纯召回
+tools/memory-cluster-e2e.sh --full --faults --concurrency 8 --rounds 2 --partition same --audit
 
-# 企业 .2 -> .4/.114 -> Mem0 VIP -> 记忆库 -> 模型网关 -> 企业模型/CPU
-tools/memory-cluster-e2e.sh --enterprise --all --concurrency 32 --partition both
+# 企业 .2 -> .4/.114 -> Mem0 VIP -> 记忆库 -> 模型网关 -> 企业模型/CPU；
+# 32 并发 × 4 轮提供 128 个浏览器侧 Run 启动时延样本
+tools/memory-cluster-e2e.sh --enterprise --all --concurrency 32 --rounds 4 --partition both
 ```
 
 修改编排脚本后先运行不接触真实环境的顺序回归；它用假 Playwright/hook 只验证场景次序、状态文件和故障恢复命令，不能作为发布证据：
@@ -278,22 +279,31 @@ Java 日志；企业停启 hook 同样由发布人员注入 SSH/编排命令，�
 传给审计 hook；企业审计必须据此确认故障 Session 只产生一次 `native_started` 操作、两个 collection
 投影到同一逻辑版本且治理记忆的 update/promote/delete 均已同步。准入条件：
 
+- `full` 通过页面创建主 Application 和隔离 Application；也可同时配置
+  `TEST_AGENT_MEMORY_E2E_ISOLATION_APPLICATION_NAME/WORKSPACE_ALIAS` 复用预置隔离环境。Application 个人记忆和团队记忆在隔离 Application 的卡片与 run-usage 中都不得出现；提升为个人全局后同一 ID 必须可跨 Application 召回，暂停、归档后必须再次停止注入。
+- 团队候选覆盖批准和填写原因后拒绝两条状态路径；普通成员除了看不到审核按钮，还要在其真实浏览器登录态直接请求他人个人记忆 GET/PATCH、团队 review 和超级管理 health，分别得到 `403/404`、`403/404`、`403`、`403`，防止只靠隐藏按钮形成伪权限。
+- 超级管理员从真实页面读取 Mem0、CHAT、全部 Embedding profile、队列、投影和白名单，所有配置 profile 在完整业务验收开始时必须可用，学习/投影无死信；页面用当前选择执行一次无语义变更的版本化“保存策略”，确认管理写链可用。
+
 - 三个 Mem0 副本逐个摘除、只剩一个时仍从浏览器完成新偏好学习和跨会话召回；副本恢复后召回同一平台记忆 ID，无本地 history 丢失。
 - 两个 Java 节点逐台摘除；第一台停止窗口继续学习，第二台停止窗口召回同一记忆，浏览器始终经过 Nginx。
 - 企业 embedding 断开时在 CPU profile 上只执行一次原生抽取，再通过浏览器编辑制造确定的新版本；页面必须先看到投影 outbox 非零，CPU 集合召回同一记忆，恢复后 outbox 归零且审计确认没有第二次抽取。
 - CPU 断开时企业集合可召回；两个 profile 全断时 Run 在 2 秒检索预算内无记忆继续。
 - 手工记忆必须从页面走完新增、编辑、Application→全局、暂停、归档；平台版本逐次递增，归档后 usage 不得包含该 ID，独立记忆库最终为删除版本且所有 profile 为 `DELETED`。
-- 同分区版本单调且无重复逻辑 ID；多用户/Application 分区可并行。不同分区目标并发为 N 时，`TEST_AGENT_MEMORY_E2E_USERS_JSON` 必须提供至少 N 个唯一 `username/Application` actor，禁止循环复用少量账号伪装不同分区；未指定 `applicationName` 的 actor 会在 `full` 场景通过 UI 加入新建 Application（搜索值可用 `directoryQuery` 指定），指向其他 Application 时必须为该 actor 提供 `expectedMemoryId`。每个 actor 都必须真实召回基线记忆，不能用无记忆请求冒充检索性能。并发用例先把全部上下文准备到可发送状态，再在同一 2 秒窗口发起请求；最多抽样 4 个（可配 1–8）Session 核对真实学习证据，全部 Run/Session 和数据库版本由审计覆盖。
-- 浏览器 Run 启动 p99 不超过 2 秒。该值同时包含 Nginx/Java 路由和记忆检索，是对“检索 p99≤2秒”的更严格浏览器侧门禁；不能把登录/工作区初始化混入计时掩盖请求未同时发起。
+- 同分区版本单调且无重复逻辑 ID；多用户/Application 分区可并行。不同分区目标并发为 N 时，`TEST_AGENT_MEMORY_E2E_USERS_JSON` 必须提供至少 N 个唯一 `username/Application` actor，禁止循环复用少量账号伪装不同分区；未指定 `applicationName` 的 actor 会在 `full` 场景通过 UI 加入新建 Application（搜索值可用 `directoryQuery` 指定），指向其他 Application 时必须为该 actor 提供 `expectedMemoryId`。每个 actor 都必须真实召回基线记忆，不能用无记忆请求冒充检索性能。并发用例先把全部上下文准备到可发送状态，再在同一 2 秒窗口发起请求；`--rounds N` 会复用同一批真实浏览器，首轮并行学习、后续轮纯召回，并要求每轮全部 actor 命中基线。最多抽样 4 个（可配 1–8）首轮 Session 核对真实学习证据，全部 Run/Session 和数据库版本由审计覆盖。
+- 浏览器 Run 启动 p99 不超过 2 秒且零 Run 失败。状态文件同时记录全部样本的 p50/p95/p99/max 和最大单轮请求发散；该值包含 Nginx/Java 路由和记忆检索，是对“检索 p99≤2秒”的更严格浏览器侧门禁。容量批准时应让 `并发数 × 轮数 >= 100`，不能把登录/工作区初始化混入计时或只用一个小批次给出失真的 p99。
+- 企业 `--faults` 必须提供 `TEST_AGENT_MEM0_SCALE_OUT_CMD/TEST_AGENT_MEM0_SCALE_IN_CMD`，实际增加一个未携带本地数据的新 Mem0 副本，在扩容状态从浏览器召回同一 ID 后再缩容；仅停止并重启既有容器不算扩容验收。本地固定 Compose 仍只验证第三副本可无数据迁移重建。
 - 浏览器把明确标注为“一次性、非偏好”的随机原始对话 marker 写入 Session；记忆控制/history、每个向量
   collection、Mem0/CPU/VIP 运行时文件系统和日志中均不得出现该 marker。投影还必须无缺行、越版本、积压或死信；
   collection 内同一 `logicalMemoryId` 只能有一个向量且实际维度匹配名称。Mem0 与 CPU Embedding 容器必须以非 root、
   只读根文件系统、无本地数据 mount、`no-new-privileges` 和 `cap_drop=ALL` 运行；VIP 固定 `101:101`，只挂载只读 Nginx 配置。
 - 数据面日志不得出现 memory service key、HMAC secret、Embedding API key 或记忆 PostgreSQL 密码；Alembic 必须保持单一预期 head。
 - 平台审计确认原始聊天只存在既有 Session 事实表，没有第二份消息镜像。
+- 易用性门禁在真实后端页面以 640 CSS px 验证等效 1280px 屏幕 200% 缩放，无记忆中心横向溢出；三个页签必须可按 Tab/Enter 操作，详情可用 Escape 关闭，并启用 Reduced Motion。组件回归另行覆盖加载失败后的显式重试、拒绝原因、2000 字输入边界和 HTML-like 内容只按文本渲染。
+
+以上用例覆盖当前方案声明的功能主链、权限边界、多节点/双 profile 可用性、容量指标和基础易用性，但不等于所有非功能风险已经自动化。中途故障精确发生在某一个已选中的在途 Mem0 请求、记忆 PostgreSQL 主备切换、Mem0 VIP 自身切换、Java 模型网关/CHAT 超时、24 小时耐久与资源泄漏趋势、Firefox/WebKit/读屏器仍需要专项环境或测试工具；未取得相应运行证据时不得标记为“完全覆盖”。
 
 `full` 场景会把浏览器记忆卡片观察到的平台记忆 ID、来源 Session/Run、随机审计 marker、随机创建的
-Application/workspace、团队记忆 ID 和治理记忆 ID 写入默认
+主/隔离 Application 与 workspace、已批准/已拒绝团队记忆 ID 和治理记忆 ID 写入默认
 `.tmp/memory-e2e-state.json`（可用 `TEST_AGENT_MEMORY_E2E_STATE_FILE` 改路径，文件权限为 `0600`，
 不含凭据或对话正文）。同一次 `--full --faults --concurrency` 自动复用该随机 Application，不再要求操作者
 预先猜测随机名称。后续每一次 Mem0/Java/企业 Embedding/CPU 故障召回都从浏览器实际收到的 run-usage

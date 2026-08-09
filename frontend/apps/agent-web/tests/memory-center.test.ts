@@ -155,6 +155,59 @@ describe("MemoryCenter", () => {
     }));
   });
 
+  it("requires a rejection reason before an APP_ADMIN can reject a team candidate", async () => {
+    const api = createApi();
+    vi.spyOn(ElMessageBox, "prompt").mockResolvedValue({ value: "缺少可复核证据" } as never);
+    const view = renderCenter(api, true);
+
+    await view.findByTestId("memory-card-mem_personal_1");
+    await fireEvent.click(view.getByTestId("memory-tab-team"));
+    await fireEvent.click((await view.findByTestId("memory-card-mem_team_1")).querySelector("button")!);
+    await fireEvent.click(await view.findByRole("button", { name: "拒绝" }));
+
+    await waitFor(() => expect(api.reviewTeamMemory).toHaveBeenCalledWith(
+      "mem_team_1",
+      { decision: "REJECT", comment: "缺少可复核证据", expectedVersion: 2 }
+    ));
+  });
+
+  it("recovers from a list failure through the visible retry action", async () => {
+    const api = createApi();
+    vi.mocked(api.listPersonalMemories)
+      .mockRejectedValueOnce(new Error("temporary outage"))
+      .mockResolvedValue({ items: [personalMemory], page: 1, size: 100, total: 1 });
+    const view = renderCenter(api);
+
+    expect(await view.findByText("记忆数据暂时不可用，请稍后重试")).toBeTruthy();
+    await fireEvent.click(view.getByRole("button", { name: "重试" }));
+    expect(await view.findByTestId("memory-card-mem_personal_1")).toBeTruthy();
+    expect(api.listPersonalMemories).toHaveBeenCalledTimes(2);
+  });
+
+  it("renders HTML-like memory content as text and keeps the 2000-character input boundary", async () => {
+    const api = createApi();
+    const unsafeText = '<img src=x data-memory-xss="true" onerror="alert(1)"> 用户偏好 😀';
+    vi.mocked(api.listPersonalMemories).mockResolvedValue({
+      items: [{ ...personalMemory, content: unsafeText, displaySummary: unsafeText }],
+      page: 1,
+      size: 100,
+      total: 1
+    });
+    const view = renderCenter(api);
+
+    const card = await view.findByTestId("memory-card-mem_personal_1");
+    expect(card.textContent).toContain(unsafeText);
+    expect(view.container.querySelector("[data-memory-xss]")).toBeNull();
+    await fireEvent.click(card.querySelector(".memory-card__main")!);
+    expect(view.getAllByText(unsafeText).length).toBeGreaterThanOrEqual(2);
+    expect(view.container.querySelector("[data-memory-xss]")).toBeNull();
+
+    await fireEvent.click(view.getByTestId("add-personal-memory"));
+    await waitFor(() => expect(view.container.querySelector(".memory-editor textarea")).not.toBeNull());
+    const editor = view.container.querySelector<HTMLTextAreaElement>(".memory-editor textarea")!;
+    expect(editor.maxLength).toBe(2000);
+  });
+
   it("renders a non-invasive unavailable state for users outside the whitelist", async () => {
     const api = createApi();
     vi.mocked(api.getQaMemoryAvailability).mockResolvedValue({ enabled: false });

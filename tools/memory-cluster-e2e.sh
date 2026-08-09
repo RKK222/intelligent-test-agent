@@ -13,9 +13,11 @@ RUN_FAULTS=false
 RUN_AUDIT=false
 ENTERPRISE=false
 CONCURRENCY=0
+CONCURRENCY_ROUNDS=1
 PARTITION_MODE=both
 PASSED_GATES=()
 RESTORE_REQUIRED=false
+SCALE_OUT_ACTIVE=false
 
 usage() {
   cat <<'USAGE'
@@ -33,6 +35,8 @@ Options:
                          as well as recall in the degraded windows.
   --concurrency N        Run N browser sessions and enforce run-start p99 <=2s;
                          the measurement includes routing and retrieval.
+  --rounds N             Repeat the synchronized concurrency batch N times;
+                         default 1, maximum 20.
   --partition MODE       same, distinct or both; default both.
   --audit                Check shared DB version/outbox integrity and absence of
                          raw transcript storage outside the platform Session.
@@ -57,6 +61,9 @@ Full-flow additions:
   TEST_AGENT_MEMORY_E2E_REPOSITORY_NAME
   TEST_AGENT_MEMORY_E2E_BRANCH
   TEST_AGENT_MEMORY_E2E_DIRECTORY
+  TEST_AGENT_MEMORY_E2E_ISOLATION_APPLICATION_NAME/WORKSPACE_ALIAS
+                                               Optional pre-created isolation target;
+                                               otherwise full creates a second Application in the UI.
 
 Distinct-partition concurrency:
   TEST_AGENT_MEMORY_E2E_USERS_JSON='[{"username":"...","password":"...","directoryQuery":"...","applicationName":"...","workspaceAlias":"...","expectedMemoryId":"..."},...]'
@@ -64,11 +71,13 @@ Distinct-partition concurrency:
                                                Actors without applicationName join the full-flow Application;
                                                actors using another Application require expectedMemoryId.
   TEST_AGENT_MEMORY_E2E_CONCURRENCY_LEARNING_SAMPLES  Browser evidence samples; default 4, max 8.
+  TEST_AGENT_MEMORY_E2E_CONCURRENCY_ROUNDS     Exported from --rounds.
 
 Operator-supplied hooks (commands are intentionally supplied by the release
 operator and are not stored in the repository; stop/start hooks only apply to
 enterprise mode, while the platform audit hook is required in both modes):
-  TEST_AGENT_MEM0_NODE_{1,2,3}_{STOP,START}_CMD
+  TEST_AGENT_MEM0_NODE_{1,2}_{STOP,START}_CMD
+  TEST_AGENT_MEM0_SCALE_{OUT,IN}_CMD            Add/remove a genuinely new stateless replica.
   TEST_AGENT_JAVA_NODE_{1,2}_{STOP,START}_CMD
   TEST_AGENT_ENTERPRISE_EMBEDDING_{STOP,START}_CMD
   TEST_AGENT_CPU_EMBEDDING_{STOP,START}_CMD
@@ -94,9 +103,9 @@ require_env() {
 }
 
 require_positive_integer() {
-  local name="$1" value="$2"
-  [[ "${value}" =~ ^[1-9][0-9]*$ && "${value}" -le 64 ]] \
-    || die "${name} must be an integer between 1 and 64"
+  local name="$1" value="$2" max="$3"
+  [[ "${value}" =~ ^[1-9][0-9]*$ && "${value}" -le "${max}" ]] \
+    || die "${name} must be an integer between 1 and ${max}"
 }
 
 compose() {
@@ -149,6 +158,10 @@ restore_services() {
   set +e
   echo "Restoring all services touched by the fault gate."
   if [[ "${ENTERPRISE}" == true ]]; then
+    if [[ "${SCALE_OUT_ACTIVE}" == true ]]; then
+      optional_hook "Mem0 scale in" TEST_AGENT_MEM0_SCALE_IN_CMD
+      SCALE_OUT_ACTIVE=false
+    fi
     optional_hook "Mem0 node 1 start" TEST_AGENT_MEM0_NODE_1_START_CMD
     optional_hook "Mem0 node 2 start" TEST_AGENT_MEM0_NODE_2_START_CMD
     optional_hook "Mem0 node 3 start" TEST_AGENT_MEM0_NODE_3_START_CMD
@@ -273,12 +286,25 @@ run_fault_gate() {
     ready
   fi
 
-  # 无数据迁移重建一个无状态副本，确认扩缩容不要求停其余节点。
-  stop_mem0_node 3
-  start_mem0_node 3
-  ready
-  TEST_AGENT_MEMORY_E2E_EXPECTED_MEMORY_STATE_KEY=replicaFaultMemoryId \
-    run_browser_scenario recall
+  if [[ "${ENTERPRISE}" == true ]]; then
+    # 通过现场编排真正增加一个新副本，再删除该副本；其余节点全程服务且不迁移本地数据。
+    RESTORE_REQUIRED=true
+    run_hook "Mem0 scale out" TEST_AGENT_MEM0_SCALE_OUT_CMD
+    SCALE_OUT_ACTIVE=true
+    ready
+    TEST_AGENT_MEMORY_E2E_EXPECTED_MEMORY_STATE_KEY=replicaFaultMemoryId \
+      run_browser_scenario recall
+    run_hook "Mem0 scale in" TEST_AGENT_MEM0_SCALE_IN_CMD
+    SCALE_OUT_ACTIVE=false
+    ready
+  else
+    # 本地固定三副本编排只能证明无状态重建；真实扩容由企业 scale hook 验收。
+    stop_mem0_node 3
+    start_mem0_node 3
+    ready
+    TEST_AGENT_MEMORY_E2E_EXPECTED_MEMORY_STATE_KEY=replicaFaultMemoryId \
+      run_browser_scenario recall
+  fi
 }
 
 query_local_memory_db() {
@@ -514,7 +540,7 @@ preflight() {
     for key in \
       TEST_AGENT_MEM0_NODE_1_STOP_CMD TEST_AGENT_MEM0_NODE_1_START_CMD \
       TEST_AGENT_MEM0_NODE_2_STOP_CMD TEST_AGENT_MEM0_NODE_2_START_CMD \
-      TEST_AGENT_MEM0_NODE_3_STOP_CMD TEST_AGENT_MEM0_NODE_3_START_CMD \
+      TEST_AGENT_MEM0_SCALE_OUT_CMD TEST_AGENT_MEM0_SCALE_IN_CMD \
       TEST_AGENT_JAVA_NODE_1_STOP_CMD TEST_AGENT_JAVA_NODE_1_START_CMD \
       TEST_AGENT_JAVA_NODE_2_STOP_CMD TEST_AGENT_JAVA_NODE_2_START_CMD \
       TEST_AGENT_ENTERPRISE_EMBEDDING_STOP_CMD TEST_AGENT_ENTERPRISE_EMBEDDING_START_CMD \
@@ -547,8 +573,14 @@ while [[ $# -gt 0 ]]; do
     --all) RUN_FULL=true; RUN_FAULTS=true; RUN_AUDIT=true; shift ;;
     --concurrency)
       [[ $# -ge 2 ]] || die "--concurrency requires a value"
-      require_positive_integer --concurrency "$2"
+      require_positive_integer --concurrency "$2" 64
       CONCURRENCY="$2"
+      shift 2
+      ;;
+    --rounds)
+      [[ $# -ge 2 ]] || die "--rounds requires a value"
+      require_positive_integer --rounds "$2" 20
+      CONCURRENCY_ROUNDS="$2"
       shift 2
       ;;
     --partition)
@@ -563,6 +595,9 @@ done
 
 if [[ "${RUN_FULL}" == false && "${RUN_FAULTS}" == false && "${RUN_AUDIT}" == false && "${CONCURRENCY}" -eq 0 ]]; then
   die "Select at least one of --full, --faults, --concurrency or --audit"
+fi
+if [[ "${CONCURRENCY}" -eq 0 && "${CONCURRENCY_ROUNDS}" -ne 1 ]]; then
+  die "--rounds requires --concurrency"
 fi
 
 preflight
@@ -579,6 +614,7 @@ if [[ "${RUN_FAULTS}" == true ]]; then
 fi
 if [[ "${CONCURRENCY}" -gt 0 ]]; then
   export TEST_AGENT_MEMORY_E2E_CONCURRENCY="${CONCURRENCY}"
+  export TEST_AGENT_MEMORY_E2E_CONCURRENCY_ROUNDS="${CONCURRENCY_ROUNDS}"
   if [[ "${PARTITION_MODE}" == same || "${PARTITION_MODE}" == both ]]; then
     export TEST_AGENT_MEMORY_E2E_PARTITION_MODE=same
     run_browser_scenario concurrency
