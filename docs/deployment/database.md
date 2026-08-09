@@ -9,6 +9,12 @@
 - 存量 `Jdbc*Repository` 仅保留迁移窗口，后续触及其 SQL 时迁移到 MyBatis XML。当前通用参数 `CommonParameterRepository`、Agent 配置 `AgentConfigRepository`、`RunEventRepository` 与 scheduler `ScheduledTaskRepository` 已迁移到 MyBatis XML；夜间任务从首版即只使用 MyBatis XML。
 - Flyway migration 只能承载表结构变更、历史数据兼容迁移和生产必需的基础字典/系统参数；禁止通过 Flyway 写入测试、演示、个人开发或环境专属数据（例如样例应用/工作区、默认开发账号、默认本地进程绑定）。此类数据必须放在测试 fixture、`test-agent-test-support`、mock 数据、显式本地开发脚本或人工初始化流程中。历史已存在的开发种子迁移仅为兼容已落库环境保留，后续不得新增同类迁移。
 
+## V20260809120000 QA 长期记忆治理
+
+`V20260809120000__create_qa_memory_governance.sql` 创建个人/团队治理、证据、审核、学习 Outbox、Run 使用、白名单、Skill 提案和设置表。完整记忆正文、向量和历史属于独立 Mem0 PostgreSQL + pgvector 数据库；平台表只保存范围/状态、最多 200 字证据摘要和可恢复定位信息，不保存 Prompt、回答或聊天消息。
+
+默认白名单为空，单独执行该 migration 不会开启学习或检索。文件首次在任何需要保留的 PostgreSQL 执行后，版本、文件名和字节必须永久锁定；后续只能新增更高版本 migration。合入与发布前仍须收集全部目标库 `flyway_schema_history`，在每套已知基线上验证升级并核对最终 JAR 内 SHA-256，禁止 `outOfOrder`、`repair` 或手工修改历史表。
+
 ## V20260807230000 批量会话归因
 
 `V20260807230000__add_batch_session_attribution.sql` 为 `sessions` 增加 `batch_mode boolean not null default false`、`batch_id varchar(128)` 和 `batch_item_request_id varchar(128)`。普通会话继续使用默认值且两个 ID 必须为空；批量会话必须存在 `created_by_user_id` 和两个非空白 ID。部分唯一索引 `uk_sessions_batch_item_request(created_by_user_id, batch_item_request_id)` 保证同一用户的单项创建幂等，不同用户互不冲突；`idx_sessions_batch_created(batch_id, created_at)` 只服务后续运营统计查询。本期不新增报表，也不改变 `source_type`：立即批量保持 `MANUAL`，定时批量保持 `SCHEDULED_TASK`。

@@ -71,6 +71,22 @@ management:
       enabled: true
 
 test-agent:
+  memory:
+    enabled: ${TEST_AGENT_MEMORY_ENABLED:false}
+    service-url: ${TEST_AGENT_MEMORY_SERVICE_URL:http://127.0.0.1:18888}
+    service-api-key: ${TEST_AGENT_MEMORY_SERVICE_API_KEY:}
+    request-timeout: ${TEST_AGENT_MEMORY_REQUEST_TIMEOUT:5s}
+    retrieval-timeout: ${TEST_AGENT_MEMORY_RETRIEVAL_TIMEOUT:600ms}
+    grant-ttl: ${TEST_AGENT_MEMORY_MODEL_GRANT_TTL:2m}
+    implicit-window: ${TEST_AGENT_MEMORY_IMPLICIT_WINDOW:90d}
+    implicit-session-threshold: ${TEST_AGENT_MEMORY_IMPLICIT_SESSION_THRESHOLD:3}
+    team-session-threshold: ${TEST_AGENT_MEMORY_TEAM_SESSION_THRESHOLD:3}
+    team-user-threshold: ${TEST_AGENT_MEMORY_TEAM_USER_THRESHOLD:2}
+    max-injected-memories: ${TEST_AGENT_MEMORY_MAX_INJECTED:6}
+    max-context-tokens: ${TEST_AGENT_MEMORY_MAX_CONTEXT_TOKENS:800}
+    learning-max-attempts: ${TEST_AGENT_MEMORY_LEARNING_MAX_ATTEMPTS:8}
+    learning-poll-interval: ${TEST_AGENT_MEMORY_LEARNING_POLL_INTERVAL:5s}
+    learning-lease: ${TEST_AGENT_MEMORY_LEARNING_LEASE:2m}
   workflow-capability:
     hmac-secret: ${TEST_AGENT_WORKFLOW_CAPABILITY_HMAC_SECRET:}
     runner-hmac-secret: ${TEST_AGENT_WORKFLOW_RUNNER_PLATFORM_HMAC_SECRET:}

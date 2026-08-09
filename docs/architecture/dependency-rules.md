@@ -14,6 +14,7 @@ test-agent-app
   -> test-agent-configuration-management
   -> test-agent-scheduler
   -> test-agent-integration
+  -> test-agent-memory
   -> test-agent-common / test-agent-domain / test-agent-observability
   -> test-agent-persistence / test-agent-event / test-agent-opencode-client
 
@@ -29,6 +30,13 @@ test-agent-api
   -> test-agent-scheduler
   -> test-agent-xxl-job-integration
   -> test-agent-integration
+  -> test-agent-model-gateway
+  -> test-agent-memory
+
+test-agent-memory
+  -> test-agent-common
+  -> test-agent-domain
+  -> test-agent-agent-runtime
   -> test-agent-model-gateway
 
 test-agent-xxl-job-integration
@@ -142,6 +150,9 @@ test-agent-event
 - 跨 LobeHub/OpenCode 可复用的模型解析、供应商密钥/可信 Header 注入、能力探测和 OpenAI-compatible 流式
   代理：`test-agent-model-gateway`；管理员目录用例在 `test-agent-configuration-management`，HTTP 在
   `test-agent-api`，SQL/Redis 在 `test-agent-persistence`。
+- QA 测试人员长期工作习惯、个人/团队记忆治理、Mem0 窄接口、学习与检索合并、短期模型授权和 Skill
+  提案：`test-agent-memory`；治理领域端口在 `test-agent-domain`，SQL/Redis 在 `test-agent-persistence`，HTTP
+  在 `test-agent-api`。原始聊天仍归现有 OpenCode Session/恢复链路，项目业务知识不得进入该模块。
 - Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、trace Web 入口：`test-agent-api`。
 - 启动、profile、migration、health、日志和运行装配：`test-agent-app`。
 - 平台 PostgreSQL 关系型 SQL：`test-agent-persistence` 的 MyBatis XML mapper；XXL 独立 MySQL 的平台扩展 SQL：`test-agent-xxl-job-integration` 的 MyBatis XML 与独立 Flyway location。存量 `Jdbc*Repository` 只保留迁移窗口，不承接新 SQL。

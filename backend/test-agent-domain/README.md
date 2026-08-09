@@ -48,6 +48,7 @@
 - NightExecution：`NightExecutionTask`、`NightExecutionScheduleMode`、`NightExecutionTaskStatus`、`NightExecutionTaskRepository` 表达任务状态机、完整输入短期持有、固定目标服务器、会话锁、15 分钟时段容量以及 attempt/owner/租约 fencing；`NIGHT_WINDOW` 预留夜间容量，`ADMIN_CUSTOM` 使用精确分钟且不产生容量释放标记。`SCHEDULED/DISPATCHING` 为待执行，普通 Run 锚点受理后进入 `DISPATCHED`，Run 后续终态不反向修改调度状态。
 - Analytics：`AiRunFeedback` 是新反馈事实，按 `(userId, runId)` 定位整轮回复；`AiMessageFeedback` 仅保留旧消息兼容。反馈评分/原因枚举、`AnalyticsModels` 和 `AnalyticsRepository` 不暴露 prompt/assistant 原文或 cost 字段。
 - Repository 端口：Workspace、Session、BatchSessionAttribution、SessionTitleUpdate、AgentSessionBinding、SessionMessage、Run、RunEvent、RunSessionScope、ExecutionNode、RoutingDecision、UserManagementQuery、UserDeletion、OpencodeProcessManagement、ConfigurationManagement、CommonParameter、InternalModelProvider、InternalModelToken、WorkspaceCreateOperation、ManagedWorkspace、ScheduledTask、ScheduledTaskRunRetention、NightExecutionTask、AiMessageFeedback、Analytics 持久化端口。`InternalModelProviderRepository.findEnabledRuntimeConfigs()` 定义一次联表运行快照读取，Token 明文不得进入普通 Provider 或 Token 元数据响应。`SessionTitleUpdateRepository` 仅在当前标题与预期临时标题一致时更新，用于避免异步标题覆盖原生或人工标题；RunRepository 的条件保存端口要求成功时返回本次快照，条件不匹配时返回数据库当前 Run。
+- QA Memory：`MemoryScope`、`MemoryStatus`、`MemorySource`、`QaTaskType`、`QaMemory`、证据/审核/使用/学习 Outbox/Skill 提案模型与 `QaMemoryRepository`；对象只含治理元数据、证据摘要和外部事实标识，禁止包含完整记忆正文或聊天原文。
 - `RunRepository.findStaleActiveSideQuestionRuns` 只查询有上限的 stale active `SIDE_QUESTION` Run，供旁路临时会话孤儿回收，不影响普通 stale Run 收敛查询。
 
 ## Run 状态机

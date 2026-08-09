@@ -3848,6 +3848,35 @@ Base URL：`/api/internal/platform/toolbox`。两个接口都要求平台登录�
 
 对应测试：`ToolboxControllerTest`、`ToolboxCatalogServiceTest`、`ToolboxCatalogContractTest`、`MyBatisToolboxClickRepositoryIntegrationTest` 和 PostgreSQL Testcontainers 并发/用户删除测试。
 
+### QA 长期记忆 V1
+
+用户入口 Base URL：`/api/internal/platform/qa-memory/v1`。所有接口要求平台登录，并且当前用户必须在记忆灰度白名单中；默认空白名单，因此 migration 上线后不会改变既有对话。完整记忆正文从 Mem0 读取，平台数据库中的 `displaySummary` 只用于服务不可用时的降级展示。
+
+| Method | Path | 说明 |
+|---|---|---|
+| `GET` | `/availability` | 查询当前用户是否已开通 |
+| `GET/POST` | `/personal` | 分页查询或手工新增个人记忆；范围仅 `PERSONAL_GLOBAL/PERSONAL_APPLICATION` |
+| `GET` | `/team` | 按当前有效 Application 成员关系查询团队记忆 |
+| `POST` | `/team/proposals` | 普通成员提交团队候选 |
+| `POST` | `/team` | `APP_ADMIN` 在所属 Application 直接创建团队记忆 |
+| `POST` | `/team/{memoryId}/reviews` | `APP_ADMIN` 审核候选，决定为 `APPROVE/REJECT` |
+| `GET/PATCH/DELETE` | `/memories/{memoryId}` | 详情、编辑和归档；修改必须携带 `expectedVersion` |
+| `POST` | `/personal/{memoryId}/confirm` | 确认候选、冲突或已暂停个人记忆 |
+| `POST` | `/personal/{memoryId}/pause` | 暂停已生效个人记忆 |
+| `GET` | `/memories/{memoryId}/evidence` | 返回不超过 200 字的证据摘要及 Run/Session 定位标识 |
+| `POST` | `/run-usage/query` | 按最多 200 个 Run ID 批量恢复真正注入的记忆 |
+| `GET/POST/PATCH` | `/skill-proposals...` | 查询、创建和编辑 Skill 草稿；不自动提交或发布 |
+
+团队数据的唯一边界是 `application_members` 中未删除的成员关系。修改时版本不匹配返回 `409 CONFLICT`。Mem0 不可用时，列表仍可返回 `contentAvailable=false` 的安全摘要；需要正文的创建/编辑返回 `503 MEMORY_UNAVAILABLE`。
+
+系统管理 Base URL：`/api/internal/platform/system-management/memory`，仅 `SUPER_ADMIN`：
+
+- `GET /health`：Mem0、Embedding profile、固定 CHAT 模型和 Outbox 队列状态。
+- `GET/PATCH /settings`：固定抽取模型与“当前内部 Run 模型回退”开关，修改携带 `expectedVersion`。
+- `GET/POST/DELETE /whitelist...`：分页查询、启用和移除用户白名单；移除不会删除记忆，但页面、学习和检索立即停止。
+
+新增稳定错误码为 `MEMORY_UNAVAILABLE(503)` 与 `MEMORY_TIMEOUT(504)`。所有成功/失败响应继续使用统一 envelope 与 traceId，日志不得记录记忆正文、证据原文、模型 grant 或 service API key。
+
 ### 健康检查
 
 Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring Boot/Druid 数据源；固定 opencode node yml 配置已作废，不再作为 Actuator health 来源；Redis 是系统必需依赖，健康检查会做 TCP 连通探测。

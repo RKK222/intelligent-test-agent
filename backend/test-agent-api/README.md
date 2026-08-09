@@ -141,6 +141,11 @@
 
 ## 后续 AI 编码指引
 
+QA 长期记忆 HTTP 入口固定在 `/api/internal/platform/qa-memory/v1/**`，系统管理入口固定在
+`/api/internal/platform/system-management/memory/**`。Controller 只做当前用户/角色鉴权、DTO、traceId 和统一响应；
+个人/团队范围、Application 成员和 `expectedVersion` 规则由 `test-agent-memory` 执行。Run 使用记录通过批量 HTTP
+恢复，不新增或修改 RunEvent SSE。
+
 新增 API 时先确认业务实现应落在哪个业务模块；本模块只新增 Controller/DTO/协议转换。平台自身接口放 `web.platform`，agent 代理入口放 `web.agent`，横切入口支撑放 `web.common`。不得新增旧 `/api/...` runtime/workspace 入口；新 URL 必须同步记录到 `docs/api/http-api.md`。
 
 `RunResendController` 暴露 agent-scoped 最后一条消息撤销重发；`RunResendInternalDispatchController` 仅接收带既有 XXL token 的
