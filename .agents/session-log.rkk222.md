@@ -7638,3 +7638,42 @@
 - 左侧页面级入口现在都可复制、刷新和通过浏览器历史恢复；旧 `/` 入口保持兼容，不新增页面组件或第二套路由状态。
 - 本次不变更 HTTP API、RunEvent、DTO、数据库/Flyway、后端、性能或安全策略，未修改 `.env*`、generated SDK 或 OpenCode
   源码；工作树中同期存在的 `MemoryAdminPanel.vue` 及其测试修改保持未暂存，不纳入本次提交。
+
+## 2026-08-09 - 将记忆管理员用户与模型配置改为可搜索选择
+
+### Why
+
+- 记忆白名单要求管理员手填平台 `userId`，固定抽取模型也要求手填模型 ID，容易输错且无法判断对象是否真实存在、是否可用。
+- “当前 Run 内部模型回退”和常驻展示的 revision、collection version、归一化属于实现术语，管理员难以理解开启条件、失败影响
+  以及这些技术字段的用途。
+
+### What
+
+- `MemoryAdminPanel.vue` 复用现有平台用户目录，添加白名单改为按姓名、用户 ID 或统一认证号远程搜索，只提交选中用户的真实
+  `userId`，并过滤停用用户和已在白名单中的用户。
+- 固定抽取模型复用现有内部模型供应商目录，只展示供应商启用、凭据可用、模型启用且实际探测到 `CHAT` 能力的模型；目录临时
+  不可用时保留既有配置，避免读取失败把当前策略清空。
+- 将回退开关解释为“固定模型不可用时，使用当前任务的内部模型”，明确外部模型不会参与、条件不满足只影响异步记忆提取而不
+  影响当前测试任务；Embedding 版本、集合与归一化默认折叠，并逐项补充升级/排障用途说明。
+- 同步 agent-web README/PACKAGE 与前端总 README；工作期间并行的稳定路由提交 `9d6e469cd` 推进了 HEAD，并已包含两处
+  README 说明，本提交保留其成果，只纳入剩余组件、测试、PACKAGE 与本日志。
+
+### How
+
+- `memory-admin-panel.test.ts` 新增内部模型选择、平台用户远程搜索/真实 ID 提交和技术信息按需展开回归，定向 3/3 通过；
+  agent-web typecheck、production build 通过。
+- 前端全量首轮与生产构建并行时，既有 Markdown/Mermaid 懒加载 4 项超时；该文件独立 12/12 通过，取消并行后全量稳定为
+  122 个文件、1888 passed / 1 skipped。
+- 使用 JDK 25、未修改的主工作区绝对路径 `.env.test`、共享 `TEST_AGENT_ROOT/TESTAGENT/SYS_DATA_ROOT_DIR` 和
+  `--with-memory --without-workflow` 从独立 worktree 完整重启；backend health/readiness、frontend 3000、CORS、memory-service、
+  pgvector 均正常，鉴权 readiness 保持 `rawMessageCount=0`。
+- 真实登录页验证模型下拉加载 4 个 CHAT 探测成功模型，用户搜索“88”返回姓名、统一认证号与真实 ID；未确认保存或添加，生产
+  配置和白名单未发生变化。技术信息展开内容和页面视觉已检查。
+
+### Result
+
+- 管理员不再记忆或手填用户/模型 ID，页面直接约束到系统当前可选对象；备用模型失败边界与向量技术字段用途可在页面内读懂。
+- 重新登录触发受管初始化后，先前待验证的用户 OpenCode 进程已由 manager 在 4104 启动，后续健康检查均为 `HEALTHY`，
+  `/global/config` 返回 200；manager 曾因后端连接切换断开一次，10 秒后自动恢复且没有重连循环。
+- 本次不变更 HTTP API、RunEvent、共享 DTO、数据库/Flyway、后端服务、权限模型或安全边界，未修改 `.env*`、generated SDK、
+  OpenCode 源码，也未推送、创建 PR 或合并分支。

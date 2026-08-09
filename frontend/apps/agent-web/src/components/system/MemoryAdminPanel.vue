@@ -1,11 +1,18 @@
 <script setup lang="ts">
-import { inject, onMounted, ref } from "vue";
+import { computed, inject, onMounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import type { BackendApiClient } from "@test-agent/backend-api";
-import type { MemoryAdminHealth, MemorySettingsView, MemoryWhitelistView } from "@test-agent/shared-types";
+import type {
+  InternalModelProviderModel,
+  MemoryAdminHealth,
+  MemorySettingsView,
+  MemoryWhitelistView,
+  UserManagementUser
+} from "@test-agent/shared-types";
 import {
   BrainCircuit,
   CheckCircle2,
+  ChevronDown,
   CircleAlert,
   Cpu,
   Database,
@@ -29,8 +36,32 @@ const settings = ref<MemorySettingsView | null>(null);
 const whitelist = ref<MemoryWhitelistView[]>([]);
 const chatModelId = ref("");
 const allowRunModelFallback = ref(false);
+const chatModels = ref<ChatModelOption[]>([]);
+const chatModelsLoading = ref(false);
+const chatModelsError = ref("");
+const technicalDetailsOpen = ref(false);
+const whitelistDialogOpen = ref(false);
+const whitelistUsers = ref<UserManagementUser[]>([]);
+const whitelistUsersLoading = ref(false);
+const whitelistUserError = ref("");
+const selectedWhitelistUserId = ref("");
+const addingWhitelistUser = ref(false);
+let chatModelRequest = 0;
+let whitelistUserSearchRequest = 0;
 
-onMounted(() => void load());
+type ChatModelOption = InternalModelProviderModel & {
+  providerName: string;
+  providerSortOrder: number;
+};
+
+const selectedChatModelUnavailable = computed(() => Boolean(chatModelId.value)
+  && !chatModels.value.some((model) => model.modelId === chatModelId.value));
+
+onMounted(() => void refreshAll());
+
+async function refreshAll() {
+  await Promise.all([load(), loadChatModels()]);
+}
 
 async function load() {
   loading.value = true;
@@ -53,6 +84,56 @@ async function load() {
   }
 }
 
+/**
+ * 固定抽取模型只能从已启用、已配置凭据且 CHAT 探测成功的内部模型中选择。
+ * 后端仍会在保存与使用时再次校验，前端筛选仅用于避免管理员误填不可路由的模型 ID。
+ */
+async function loadChatModels() {
+  const requestId = ++chatModelRequest;
+  chatModelsLoading.value = true;
+  chatModelsError.value = "";
+  try {
+    const response = await api.getInternalModelProviders();
+    const providers = response.providers
+      .filter((provider) => provider.enabled && provider.tokenConfigured !== false)
+      .sort((left, right) => left.sortOrder - right.sortOrder);
+    const results = await Promise.allSettled(providers.map(async (provider) => ({
+      provider,
+      models: await api.getInternalModelProviderModels(provider.providerId)
+    })));
+    if (requestId !== chatModelRequest) return;
+
+    const options = new Map<string, ChatModelOption>();
+    for (const result of results) {
+      if (result.status !== "fulfilled") continue;
+      const { provider, models } = result.value;
+      for (const model of models) {
+        if (!model.enabled || !model.probedCapabilities.includes("CHAT") || options.has(model.modelId)) continue;
+        options.set(model.modelId, {
+          ...model,
+          providerName: provider.name,
+          providerSortOrder: provider.sortOrder
+        });
+      }
+    }
+    chatModels.value = [...options.values()].sort((left, right) =>
+      left.providerSortOrder - right.providerSortOrder
+      || left.displayName.localeCompare(right.displayName, "zh-CN"));
+    if (results.some((result) => result.status === "rejected")) {
+      chatModelsError.value = chatModels.value.length
+        ? "部分内部模型目录暂不可用，已显示其余可选模型。"
+        : "内部模型目录暂不可用，可保留当前配置后重试。";
+    }
+  } catch {
+    if (requestId === chatModelRequest) {
+      chatModels.value = [];
+      chatModelsError.value = "内部模型目录暂不可用，可保留当前配置后重试。";
+    }
+  } finally {
+    if (requestId === chatModelRequest) chatModelsLoading.value = false;
+  }
+}
+
 async function saveSettings() {
   if (!settings.value) return;
   saving.value = true;
@@ -71,18 +152,50 @@ async function saveSettings() {
   }
 }
 
-async function addWhitelistUser() {
+function openWhitelistDialog() {
+  selectedWhitelistUserId.value = "";
+  whitelistUserError.value = "";
+  whitelistDialogOpen.value = true;
+  void loadWhitelistUsers();
+}
+
+/** 搜索平台用户时只保留可登录且尚未加入白名单的用户，并丢弃过期请求结果。 */
+async function loadWhitelistUsers(keyword = "") {
+  const requestId = ++whitelistUserSearchRequest;
+  whitelistUsersLoading.value = true;
+  whitelistUserError.value = "";
   try {
-    const result = await ElMessageBox.prompt("记忆能力默认不开放；请输入需要灰度启用的平台用户 ID。", "添加白名单用户", {
-      inputPlaceholder: "userId",
-      inputValidator: (value) => Boolean(value?.trim()) || "请输入用户 ID"
-    });
-    await api.enableQaMemoryUser(result.value.trim());
+    const page = await api.listUsers({ keyword: keyword.trim(), page: 1, size: 30 });
+    if (requestId !== whitelistUserSearchRequest) return;
+    const enabledUserIds = new Set(whitelist.value.map((user) => user.userId));
+    whitelistUsers.value = page.items.filter((user) =>
+      user.status === "ACTIVE" && !enabledUserIds.has(user.userId));
+  } catch (caught) {
+    if (requestId === whitelistUserSearchRequest) {
+      whitelistUsers.value = [];
+      whitelistUserError.value = caught instanceof Error ? caught.message : "用户目录加载失败";
+    }
+  } finally {
+    if (requestId === whitelistUserSearchRequest) whitelistUsersLoading.value = false;
+  }
+}
+
+function whitelistUserOptionLabel(user: UserManagementUser) {
+  return `${user.username} · ${user.unifiedAuthId || "无统一认证号"} · ${user.userId}`;
+}
+
+async function addWhitelistUser() {
+  if (!selectedWhitelistUserId.value) return;
+  addingWhitelistUser.value = true;
+  try {
+    await api.enableQaMemoryUser(selectedWhitelistUserId.value);
     ElMessage.success("用户已加入记忆白名单");
+    whitelistDialogOpen.value = false;
     await load();
   } catch (caught) {
-    if (caught === "cancel" || caught === "close") return;
-    ElMessage.error(caught instanceof Error ? caught.message : "添加失败");
+    whitelistUserError.value = caught instanceof Error ? caught.message : "添加失败";
+  } finally {
+    addingWhitelistUser.value = false;
   }
 }
 
@@ -118,7 +231,7 @@ function formatTime(value: string) {
         <h2 id="memory-admin-title">记忆能力</h2>
         <p>检查 Mem0、向量模型、抽取 CHAT 模型和异步学习队列，并按用户灰度开放。</p>
       </div>
-      <button type="button" :disabled="loading" @click="load"><RefreshCw :size="15" :class="{ spinning: loading }" />刷新</button>
+      <button type="button" :disabled="loading" @click="refreshAll"><RefreshCw :size="15" :class="{ spinning: loading }" />刷新</button>
     </header>
 
     <div v-if="loading" class="memory-admin__state"><LoaderCircle class="spinning" :size="22" />正在检查服务</div>
@@ -138,7 +251,7 @@ function formatTime(value: string) {
         </article>
         <article :class="{ healthy: Boolean(health.primaryChatModelId) }" data-testid="memory-health-chat">
           <span class="memory-health-icon"><MessageSquareText :size="20" /></span>
-          <div><small>FIXED CHAT MODEL</small><strong>{{ health.primaryChatModelId || "未配置" }}</strong><p>当前 Run 内部模型回退：{{ health.currentRunModelFallbackEnabled ? "允许" : "关闭" }}</p></div>
+          <div><small>FIXED CHAT MODEL</small><strong>{{ health.primaryChatModelId || "未配置" }}</strong><p>备用模型：{{ health.currentRunModelFallbackEnabled ? "仅限当前任务的可用内部模型" : "关闭" }}</p></div>
           <CheckCircle2 v-if="health.primaryChatModelId" class="health-check" :size="18" />
           <CircleAlert v-else class="health-alert" :size="18" />
         </article>
@@ -153,19 +266,68 @@ function formatTime(value: string) {
       <div class="memory-admin__columns">
         <section class="memory-admin-card">
           <div class="memory-admin-card__title"><div><small>EXTRACTION POLICY</small><h3>抽取模型策略</h3></div><Save :size="18" /></div>
-          <label class="memory-admin-field">
+          <div class="memory-admin-field">
             <span>固定内部 CHAT 模型</span>
-            <input v-model="chatModelId" type="text" placeholder="例如：internal-provider/model-id" />
-            <small>固定模型优先；留空时只有满足内部目录和健康探测条件才可使用当前 Run 模型。</small>
-          </label>
+            <el-select
+              v-model="chatModelId"
+              aria-label="选择固定内部 CHAT 模型"
+              class="memory-model-select"
+              filterable
+              clearable
+              :loading="chatModelsLoading"
+              placeholder="选择已通过 CHAT 探测的内部模型"
+              no-data-text="没有可用的内部 CHAT 模型"
+            >
+              <el-option
+                v-if="selectedChatModelUnavailable"
+                :label="`${chatModelId}（当前配置，目录中不可用）`"
+                :value="chatModelId"
+                disabled
+              />
+              <el-option
+                v-for="model in chatModels"
+                :key="`${model.providerId}:${model.modelId}`"
+                :label="`${model.displayName} · ${model.modelId}`"
+                :value="model.modelId"
+              >
+                <div class="memory-model-option">
+                  <strong>{{ model.displayName }}</strong>
+                  <span>{{ model.providerName }}</span>
+                  <code>{{ model.modelId }}</code>
+                </div>
+              </el-option>
+            </el-select>
+            <small>记忆提取优先使用该模型；这里只显示已启用且通过 CHAT 能力探测的内部模型。</small>
+            <small v-if="chatModelsError" class="memory-inline-error">{{ chatModelsError }}</small>
+          </div>
           <label class="memory-admin-switch">
             <input v-model="allowRunModelFallback" type="checkbox" />
-            <span><strong>允许当前 Run 内部模型回退</strong><small>外部模型永远不会获得短期 mfg_ 授权。</small></span>
+            <span>
+              <strong>固定模型不可用时，使用当前任务的内部模型</strong>
+              <small>只有当前任务模型也在企业内部目录且通过 CHAT 探测时才会使用；外部模型不会参与记忆提取。</small>
+              <small>关闭或条件不满足时，记忆提取会降级或等待重试，当前测试任务不受影响。</small>
+            </span>
           </label>
-          <dl class="embedding-details">
-            <div><dt>模型 revision</dt><dd>{{ health.embedding.revision }}</dd></div>
-            <div><dt>Collection version</dt><dd>{{ health.embedding.collectionVersion }}</dd></div>
-            <div><dt>归一化</dt><dd>{{ health.embedding.normalized ? "是" : "否" }}</dd></div>
+          <section class="embedding-technical" aria-labelledby="embedding-technical-title">
+            <div>
+              <strong id="embedding-technical-title">向量模型技术信息</strong>
+              <span>向量模型负责按语义寻找相关记忆；这些字段只在升级或排障时使用。</span>
+            </div>
+            <button
+              type="button"
+              class="embedding-technical__toggle"
+              :aria-expanded="technicalDetailsOpen"
+              aria-controls="embedding-technical-details"
+              @click="technicalDetailsOpen = !technicalDetailsOpen"
+            >
+              {{ technicalDetailsOpen ? "收起技术信息" : "查看技术信息" }}
+              <ChevronDown :size="14" :class="{ open: technicalDetailsOpen }" />
+            </button>
+          </section>
+          <dl v-if="technicalDetailsOpen" id="embedding-technical-details" class="embedding-details">
+            <div><dt>模型版本</dt><dd>{{ health.embedding.revision }}</dd><small>锁定同一套模型权重，避免检索结果无意变化。</small></div>
+            <div><dt>向量集合版本</dt><dd>{{ health.embedding.collectionVersion }}</dd><small>升级模型时使用新集合，不直接覆盖旧记忆向量。</small></div>
+            <div><dt>向量归一化</dt><dd>{{ health.embedding.normalized ? "已开启" : "未开启" }}</dd><small>让不同记忆之间的语义相似度可以稳定比较。</small></div>
           </dl>
           <button class="memory-admin-primary" type="button" :disabled="saving" @click="saveSettings"><Save :size="15" />{{ saving ? "保存中" : "保存策略" }}</button>
         </section>
@@ -173,7 +335,7 @@ function formatTime(value: string) {
         <section class="memory-admin-card">
           <div class="memory-admin-card__title">
             <div><small>ROLLOUT</small><h3>用户白名单</h3></div>
-            <button type="button" data-testid="add-memory-whitelist-user" @click="addWhitelistUser"><Plus :size="15" />添加用户</button>
+            <button type="button" data-testid="add-memory-whitelist-user" @click="openWhitelistDialog"><Plus :size="15" />添加用户</button>
           </div>
           <p class="memory-admin-card__description">白名单为空时，不学习、不检索，也不会改变任何现有 QA 对话。</p>
           <div v-if="whitelist.length" class="memory-whitelist">
@@ -188,6 +350,49 @@ function formatTime(value: string) {
         </section>
       </div>
     </template>
+
+    <el-dialog
+      v-model="whitelistDialogOpen"
+      class="memory-user-dialog"
+      title="添加白名单用户"
+      width="min(520px, calc(100vw - 32px))"
+      append-to-body
+      :close-on-click-modal="!addingWhitelistUser"
+      :close-on-press-escape="!addingWhitelistUser"
+    >
+      <p class="memory-user-dialog__description">记忆能力默认不开放。请选择需要灰度启用的平台用户，系统会提交该用户的真实 ID。</p>
+      <el-select
+        v-model="selectedWhitelistUserId"
+        aria-label="选择白名单用户"
+        class="memory-user-select"
+        filterable
+        remote
+        reserve-keyword
+        :remote-method="loadWhitelistUsers"
+        :loading="whitelistUsersLoading"
+        :disabled="addingWhitelistUser"
+        placeholder="输入姓名、用户 ID 或统一认证号"
+        no-data-text="没有可添加的用户"
+      >
+        <el-option
+          v-for="user in whitelistUsers"
+          :key="user.userId"
+          :label="whitelistUserOptionLabel(user)"
+          :value="user.userId"
+        >
+          <div class="memory-user-option">
+            <strong>{{ user.username }}</strong>
+            <span>{{ user.unifiedAuthId || '无统一认证号' }}</span>
+            <code>{{ user.userId }}</code>
+          </div>
+        </el-option>
+      </el-select>
+      <p v-if="whitelistUserError" class="memory-dialog-error" role="alert">{{ whitelistUserError }}</p>
+      <template #footer>
+        <el-button :disabled="addingWhitelistUser" @click="whitelistDialogOpen = false">取消</el-button>
+        <el-button type="primary" :loading="addingWhitelistUser" :disabled="!selectedWhitelistUserId" @click="addWhitelistUser">确认添加</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -236,16 +441,32 @@ function formatTime(value: string) {
 .memory-admin-card__title h3 { margin: 2px 0 0; font-size: 15px; }
 .memory-admin-card__description { margin: -7px 0 13px; color: var(--memory-muted); font-size: 11px; line-height: 1.6; }
 .memory-admin-field { display: grid; gap: 6px; font-size: 12px; font-weight: 650; }
-.memory-admin-field input { height: 36px; border: 1px solid var(--memory-border-strong); border-radius: 6px; padding: 0 10px; background: var(--memory-surface); color: var(--memory-text); }
+.memory-model-select { width: 100%; }
+.memory-admin-field :deep(.el-select__wrapper) { min-height: 36px; border-radius: 6px; background: var(--memory-surface); box-shadow: 0 0 0 1px var(--memory-border-strong) inset; }
+.memory-admin-field :deep(.el-select__wrapper.is-focused) { box-shadow: 0 0 0 1px var(--memory-blue) inset, 0 0 0 3px color-mix(in srgb, var(--memory-blue) 14%, transparent); }
+.memory-admin-field :deep(.el-select__selected-item) { color: var(--memory-text); font-size: 12px; font-weight: 500; }
 .memory-admin-field small, .memory-admin-switch small { color: var(--memory-muted); font-size: 10px; font-weight: 400; line-height: 1.5; }
+.memory-admin-field .memory-inline-error { color: #c2414b; }
+.memory-model-option, .memory-user-option { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(90px, .7fr) minmax(150px, 1.2fr); align-items: center; gap: 10px; width: 100%; }
+.memory-model-option strong, .memory-user-option strong { overflow: hidden; color: var(--el-text-color-primary, #1f2937); text-overflow: ellipsis; white-space: nowrap; }
+.memory-model-option span, .memory-user-option span { overflow: hidden; color: var(--el-text-color-regular, #6b7280); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.memory-model-option code, .memory-user-option code { overflow: hidden; color: var(--el-text-color-secondary, #9ca3af); font: 10px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .memory-admin-switch { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 9px; margin: 17px 0; }
 .memory-admin-switch input { margin-top: 3px; }
 .memory-admin-switch span { display: grid; gap: 3px; font-size: 12px; }
+.embedding-technical { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; padding-top: 13px; border-top: 1px solid var(--memory-border); }
+.embedding-technical > div { display: grid; gap: 2px; }
+.embedding-technical strong { font-size: 11px; }
+.embedding-technical span { color: var(--memory-muted); font-size: 9px; line-height: 1.5; }
+.memory-admin .embedding-technical__toggle { min-width: max-content; border: 0; color: var(--memory-blue); }
+.embedding-technical__toggle svg { transition: transform .18s ease; }
+.embedding-technical__toggle svg.open { transform: rotate(180deg); }
 .embedding-details { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0 0 16px; border: 1px solid var(--memory-border); border-radius: 6px; }
 .embedding-details div { min-width: 0; padding: 9px; border-right: 1px solid var(--memory-border); }
 .embedding-details div:last-child { border-right: 0; }
-.embedding-details dt { color: var(--memory-muted); font-size: 9px; }
+.embedding-details dt { color: var(--memory-text); font-size: 9px; font-weight: 700; }
 .embedding-details dd { overflow: hidden; margin: 3px 0 0; font: 600 10px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.embedding-details small { display: block; margin-top: 5px; color: var(--memory-muted); font-size: 8px; line-height: 1.45; }
 .memory-admin .memory-admin-primary { border-color: var(--memory-blue); background: var(--memory-blue); color: #fff; }
 .memory-whitelist { display: grid; gap: 6px; max-height: 310px; overflow: auto; }
 .memory-whitelist article { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto 32px; align-items: center; gap: 9px; padding: 8px; border: 1px solid var(--memory-border); border-radius: 6px; }
@@ -259,6 +480,9 @@ function formatTime(value: string) {
 .memory-whitelist-empty { display: flex; min-height: 190px; flex-direction: column; align-items: center; justify-content: center; gap: 6px; border: 1px dashed var(--memory-border-strong); border-radius: 7px; color: var(--memory-soft); }
 .memory-whitelist-empty strong { color: var(--memory-text); font-size: 12px; }
 .memory-whitelist-empty span { font-size: 10px; }
+.memory-user-dialog__description { margin: -4px 0 14px; color: var(--el-text-color-regular, #6b7280); font-size: 12px; line-height: 1.65; }
+.memory-user-select { width: 100%; }
+.memory-dialog-error { margin: 9px 0 0; color: #c2414b; font-size: 11px; }
 .spinning { animation: memory-admin-spin .9s linear infinite; }
 @keyframes memory-admin-spin { to { transform: rotate(360deg); } }
 :global(.dark .memory-admin) {
@@ -272,6 +496,6 @@ function formatTime(value: string) {
   --memory-hover: rgba(255, 255, 255, .06);
 }
 @media (max-width: 980px) { .memory-health-grid { grid-template-columns: repeat(2, 1fr); } .memory-admin__columns { grid-template-columns: 1fr; } }
-@media (max-width: 560px) { .memory-admin { padding: 16px 10px; } .memory-health-grid { grid-template-columns: 1fr; } .memory-admin__header p { display: none; } .embedding-details { grid-template-columns: 1fr; } .embedding-details div { border-right: 0; border-bottom: 1px solid var(--memory-border); } }
-@media (prefers-reduced-motion: reduce) { .spinning { animation: none; } }
+@media (max-width: 560px) { .memory-admin { padding: 16px 10px; } .memory-health-grid { grid-template-columns: 1fr; } .memory-admin__header p { display: none; } .embedding-technical { align-items: flex-start; flex-direction: column; } .embedding-details { grid-template-columns: 1fr; } .embedding-details div { border-right: 0; border-bottom: 1px solid var(--memory-border); } }
+@media (prefers-reduced-motion: reduce) { .spinning { animation: none; } .embedding-technical__toggle svg { transition: none; } }
 </style>
