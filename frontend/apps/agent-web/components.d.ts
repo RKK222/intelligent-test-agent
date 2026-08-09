@@ -58,7 +58,6 @@ declare module 'vue' {
     FileUploadOverlay: typeof import('./src/components/FileUploadOverlay.vue')['default']
     FirstLoginGuide: typeof import('./src/components/FirstLoginGuide.vue')['default']
     FullColorAlarmClockIcon: typeof import('./src/components/FullColorAlarmClockIcon.vue')['default']
-    FullColorMoonIcon: typeof import('./src/components/FullColorMoonIcon.vue')['default']
     GeneralParamManagementPanel: typeof import('./src/components/system/GeneralParamManagementPanel.vue')['default']
     GitChangesPanel: typeof import('./src/components/GitChangesPanel.vue')['default']
     HelpCenterDialog: typeof import('./src/components/HelpCenterDialog.vue')['default']

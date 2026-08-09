@@ -6795,7 +6795,7 @@ function onCompositionEnd() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 56px 0 16px;
+  padding: 0 36px 0 16px;
   height: 30px;
   border-bottom: 1px solid var(--ta-border);
   background: var(--ta-surface);
