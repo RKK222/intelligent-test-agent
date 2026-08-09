@@ -2102,3 +2102,14 @@
 - Result:
   - 会话分享、多人实时协作和“被分享人替所属人操作、平台记录真实 actor”的完整链路已经落地；HTTP API、RunEvent/runtime SSE、数据库、审计安全与兼容文档同步更新，旧客户端通过可选字段保持兼容。
   - 发布必须先核对目标环境 `flyway_schema_history`、checksum 和存量重复活动 Run，完成数据库迁移并升级全部后端节点后再发布前端；已启动 Run 在分享失效时不自动取消，分享失效后的授权快照定时任务仍会继续执行，这是确认后的业务语义。
+
+### 2026-08-09 - 修复 ExternalSshKeyEnvelopeService 多构造器导致 Spring 启动失败
+
+- Why:
+  - `ExternalSshKeyEnvelopeService` 同时声明生产单参构造器与测试用包级三参构造器，二者均未标注 `@Autowired`。Spring 在“多构造器且无注入提示”时会回退查找无参构造器，该类无无参构造器，应用启动抛 `NoSuchMethodException: <init>()` / “No default constructor found”，连带 `ExternalUserSshKeyApplicationService`、`ExternalUserSshKeyController` 装配失败。
+- What:
+  - 在生产单参构造器上补 `@Autowired` 并加一行中文注释说明多构造器场景必须显式标注；保留包级三参构造器供测试注入确定性 `SecureRandom`/`Clock`。
+- How:
+  - 复用 `RunInactiveExpiryCoordinator` 既有写法；`mvn -pl test-agent-integration test` 跑 `ExternalSshKeyEnvelopeServiceTest`(2)、`ExternalUserSshKeyApplicationServiceTest`(3) 全绿；扫描后端 stereotype bean 确认同问题仅此一例，其余“多构造器”命中均为方法名误匹配的假阳性。
+- Result:
+  - 仅改 `ExternalSshKeyEnvelopeService.java` 一处；不涉及 HTTP API、RunEvent、数据库结构、generated SDK、OpenCode 源码或环境配置；启动期 `ExternalSshKeyEnvelopeService` -> `ExternalUserSshKeyApplicationService` -> `ExternalUserSshKeyController` 装配链路恢复。
