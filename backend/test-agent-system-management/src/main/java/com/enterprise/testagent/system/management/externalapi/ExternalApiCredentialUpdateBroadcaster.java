@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -27,6 +28,8 @@ public class ExternalApiCredentialUpdateBroadcaster implements ServerBroadcastHa
     private final ExternalApiCredentialRegistry registry;
     private final Clock clock;
 
+    // 存在多个构造器时必须显式标注生产构造器，否则 Spring 会回退查找无参构造器并启动失败。
+    @Autowired
     public ExternalApiCredentialUpdateBroadcaster(
             ServerBroadcastPublisher broadcastPublisher,
             BackendInstanceIdentity identity,

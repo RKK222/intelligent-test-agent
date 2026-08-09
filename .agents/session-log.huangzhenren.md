@@ -2113,3 +2113,16 @@
   - 复用 `RunInactiveExpiryCoordinator` 既有写法；`mvn -pl test-agent-integration test` 跑 `ExternalSshKeyEnvelopeServiceTest`(2)、`ExternalUserSshKeyApplicationServiceTest`(3) 全绿；扫描后端 stereotype bean 确认同问题仅此一例，其余“多构造器”命中均为方法名误匹配的假阳性。
 - Result:
   - 仅改 `ExternalSshKeyEnvelopeService.java` 一处；不涉及 HTTP API、RunEvent、数据库结构、generated SDK、OpenCode 源码或环境配置；启动期 `ExternalSshKeyEnvelopeService` -> `ExternalUserSshKeyApplicationService` -> `ExternalUserSshKeyController` 装配链路恢复。
+
+### 2026-08-09 - 修复 ExternalApiCredential 两服务同类多构造器启动失败（修正前次扫描结论）
+
+- Why:
+  - 前一条记录称“同问题仅此一例”结论有误：当时校验用的 `grep '^\s*(public|protected|private)\s+[A-Z]'` 要求显式访问修饰符，漏掉包级私有测试构造器，把 `ExternalApiCredentialApplicationService` 等真实命中误判为假阳性。重启后应用在 `externalApiCredentialController` -> `externalApiCredentialApplicationService` 再次抛 “No default constructor found”。
+  - 同一根因：`ExternalApiCredentialApplicationService`（public 4 参 -> 包级 6 参，无无参构造器）、`ExternalApiCredentialUpdateBroadcaster`（public 3 参 -> 包级 4 参，无无参构造器）均为“生产多参构造器 + 包级测试构造器、无无参构造器、无 @Autowired”的 Pattern B，启动必失败。
+- What:
+  - 在两者的 public 生产构造器上补 `@Autowired` + 中文注释（与 `ExternalSshKeyEnvelopeService` 一致）。
+  - 用 Java 感知脚本重扫全后端 stereotype bean：Pattern B（多构造器、无 @Autowired、无无参构造器、启动必失败）目前为 0；Pattern A（多构造器但有无参构造器，且无参构造器委托真实生产依赖，如 `this(new SecureRandom())`、`this(Clock.systemUTC(), ...)`）共 9 个：`ExternalApiKeyGenerator`、`TerminalTicketStore`、`RunConversationSummarizer`、`AppSourceIndexManager`、`AppSourceGitMaterializer`、`WorkspaceFileSocketTicketStore`、`BackendSseForwarder`、`AppSourceOperationTicketStore`、`AgentConfigOperationTicketStore`，Spring 经无参回退落到正确构造器，按最小改动原则不动。
+- How:
+  - `mvn -pl test-agent-system-management test` 跑 `ExternalApiCredentialApplicationServiceTest`(4)、`ExternalApiCredentialUpdateBroadcasterTest`(2)、`ExternalApiKeyGeneratorTest`(1)、`ExternalApiCredentialRegistryTest`(6) 共 13 项全绿，编译通过。
+- Result:
+  - 仅改 `ExternalApiCredentialApplicationService.java`、`ExternalApiCredentialUpdateBroadcaster.java` 两处；不涉及 HTTP API、RunEvent、数据库结构、generated SDK、OpenCode 源码或环境配置；Pattern B 启动失败链已全部消除。
